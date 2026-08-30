@@ -18,6 +18,7 @@
  *  13. Weather effects — camera-local Open-Meteo observations without news/geocoding overhead
  *  14. Rocket launches — recent Launch Library 2 mission metadata
  *  15. Radio Browser — public-domain station directory and click counting
+ *  16. SHMÚ radar — Slovak 5-min precipitation composite (CC BY 4.0, keyless; OKO fork)
  *
  * Also exposes Cesium and Google 3D Tiles API keys to the
  * client via `import.meta.env.*` defines.
@@ -40,6 +41,12 @@ import {
   isOverBudget as isTomTomOverBudget,
 } from './src/data/tomtomTiles.js';
 import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
+import zlib from 'node:zlib';
+import {
+  normalizeOdimComposite,
+  odimTimestampIso,
+  rasterizeZmax,
+} from './src/data/shmuRadarGrid.js';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { defineConfig, loadEnv } from 'vite';
@@ -1972,6 +1979,224 @@ function tomtomProxy() {
  *
  * @returns {import('vite').Plugin}
  */
+/**
+ * SHMÚ precipitation radar proxy — Slovak national composite (OKO fork).
+ *
+ * Upstream: opendata.shmu.sk (CC BY 4.0, keyless, no registration —
+ * DATA_SOURCES.md). Product `zmax`: column-maximum reflectivity composite,
+ * ODIM_H5, one ~40 KB file every 5 minutes at a deterministic path
+ *   …/skcomp/zmax/YYYYMMDD/T_PABV22_C_LZIB_YYYYMMDDHHMM00.hdf
+ * so refresh probes recent 5-minute slots directly (publication lags about
+ * a minute) instead of scraping directory listings.
+ *
+ * Decode: jsfive (pure-JS HDF5) reads the grid; shmuRadarGrid.js resamples
+ * Mercator rows to linear latitude and colorizes dBZ; a minimal PNG encoder
+ * (node:zlib, filter 0) emits the overlay image. TTL matches the 5-minute
+ * product cadence; single-flight refresh; disk cache under .gev-cache/
+ * survives restarts; serve-stale keeps the last good frame (flagged `stale`)
+ * through upstream hiccups. Pattern mirrors firmsProxy.
+ *
+ * Routes:
+ *   GET /api/shmu/radar            → {ok, product, iso, bounds, echoPixels,
+ *                                     stale, ttlMs, png}
+ *   GET /api/shmu/radar/latest.png → image/png (transparent between echoes)
+ */
+function shmuRadarProxy() {
+  const TTL_MS = 5 * 60_000;
+  const SLOT_MS = 5 * 60_000;
+  /** Slots probed per refresh: the latest + 5 back (~30 min of lag/gap cover). */
+  const MAX_SLOT_LOOKBACK = 6;
+  const FETCH_TIMEOUT_MS = 15_000;
+  /** Sanity cap — zmax files run ~40 KB; anything huge is not this product. */
+  const MAX_HDF_BYTES = 8 * 1024 * 1024;
+  /** Product older than this (vs now) is flagged stale for the layer UI. */
+  const STALE_AFTER_MS = 20 * 60_000;
+  const BASE_URL = 'https://opendata.shmu.sk/meteorology/weather/radar/composite/skcomp/zmax';
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
+  const META_PATH = path.join(CACHE_DIR, 'shmu-radar.json');
+  const PNG_PATH = path.join(CACHE_DIR, 'shmu-radar.png');
+
+  /** @type {?{at: number, iso: string, bounds: object, echoPixels: number,
+   *   width: number, height: number, png: Buffer}} */
+  let mem = null;
+  let diskChecked = false;
+  /** @type {?Promise<void>} single-flight refresh */
+  let inflight = null;
+  /** jsfive is CJS — loaded lazily so config evaluation stays light. */
+  let _jsfive = null;
+  const getJsfive = () => {
+    if (!_jsfive) _jsfive = createRequire(import.meta.url)('jsfive');
+    return _jsfive;
+  };
+
+  function pngChunk(type, data) {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length, 0);
+    const typeBuf = Buffer.from(type, 'ascii');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(Buffer.concat([typeBuf, data])) >>> 0, 0);
+    return Buffer.concat([len, typeBuf, data, crc]);
+  }
+
+  /** Minimal RGBA→PNG (8-bit, filter 0). Sparse radar frames deflate well. */
+  function encodePng(rgba, width, height) {
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(width, 0);
+    ihdr.writeUInt32BE(height, 4);
+    ihdr[8] = 8; // bit depth
+    ihdr[9] = 6; // color type RGBA
+    const stride = width * 4;
+    const filtered = Buffer.alloc((stride + 1) * height);
+    const src = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+    for (let row = 0; row < height; row++) {
+      src.copy(filtered, row * (stride + 1) + 1, row * stride, (row + 1) * stride);
+    }
+    return Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      pngChunk('IHDR', ihdr),
+      pngChunk('IDAT', zlib.deflateSync(filtered, { level: 6 })),
+      pngChunk('IEND', Buffer.alloc(0)),
+    ]);
+  }
+
+  /** Candidate product URLs, newest first (UTC slots, floor to 5 min). */
+  function candidateUrls(nowMs) {
+    const urls = [];
+    const floored = Math.floor(nowMs / SLOT_MS) * SLOT_MS;
+    for (let k = 0; k < MAX_SLOT_LOOKBACK; k++) {
+      const d = new Date(floored - k * SLOT_MS);
+      const p = (n) => String(n).padStart(2, '0');
+      const ymd = `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
+      const hm = `${p(d.getUTCHours())}${p(d.getUTCMinutes())}`;
+      urls.push(`${BASE_URL}/${ymd}/T_PABV22_C_LZIB_${ymd}${hm}00.hdf`);
+    }
+    return urls;
+  }
+
+  /** HDF5 bytes → cache entry (decode + colorize + PNG). Throws on bad input. */
+  function decodeEntry(arrayBuffer) {
+    const hdf5 = getJsfive();
+    const file = new hdf5.File(arrayBuffer, 'shmu-zmax.hdf');
+    const meta = normalizeOdimComposite({
+      where: file.get('where')?.attrs || {},
+      datasetWhat: file.get('dataset1/what')?.attrs || {},
+    });
+    const what = file.get('what')?.attrs || {};
+    const iso = odimTimestampIso(what.date, what.time);
+    if (!iso) throw new Error('ODIM composite: missing what/date+time');
+    const value = file.get('dataset1/data1/data')?.value;
+    const raw = value instanceof Uint8Array ? value : Uint8Array.from(value || []);
+    const { rgba, echoPixels } = rasterizeZmax(raw, meta);
+    return {
+      at: Date.now(),
+      iso,
+      bounds: meta.bounds,
+      echoPixels,
+      width: meta.width,
+      height: meta.height,
+      png: encodePng(rgba, meta.width, meta.height),
+    };
+  }
+
+  async function readDiskOnce() {
+    if (diskChecked) return;
+    diskChecked = true;
+    try {
+      const parsed = JSON.parse(await fsp.readFile(META_PATH, 'utf8'));
+      const png = await fsp.readFile(PNG_PATH);
+      if (parsed?.iso && parsed?.bounds && png?.length) {
+        mem = { ...parsed, png };
+      }
+    } catch { /* no disk cache yet */ }
+  }
+
+  async function writeDisk(entry) {
+    try {
+      await fsp.mkdir(CACHE_DIR, { recursive: true });
+      const { png, ...meta } = entry;
+      await fsp.writeFile(META_PATH, JSON.stringify(meta), 'utf8');
+      await fsp.writeFile(PNG_PATH, png);
+    } catch (err) {
+      console.warn('[shmu-radar] cache write failed:', err?.message || err);
+    }
+  }
+
+  /** Try slots newest-first; keep the previous frame on total failure. */
+  async function refreshUpstream() {
+    for (const url of candidateUrls(Date.now())) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        if (res.status === 404) continue; // slot not published (yet)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = await res.arrayBuffer();
+        if (buf.byteLength > MAX_HDF_BYTES) throw new Error(`oversized product (${buf.byteLength} B)`);
+        const entry = decodeEntry(buf);
+        mem = entry;
+        await writeDisk(entry);
+        return;
+      } catch (err) {
+        // undici wraps network errors: the actionable code lives in `cause`.
+        const cause = err?.cause ? ` (${err.cause.code || err.cause.message})` : '';
+        console.warn(`[shmu-radar] ${url.slice(-27)} failed:`, `${err?.message || err}${cause}`);
+      }
+    }
+    console.warn('[shmu-radar] no slot within lookback — serving cache if any');
+  }
+
+  async function ensureFresh() {
+    await readDiskOnce();
+    if (mem && Date.now() - mem.at < TTL_MS) return;
+    if (!inflight) {
+      inflight = refreshUpstream().finally(() => { inflight = null; });
+    }
+    await inflight;
+  }
+
+  function buildMeta(entry) {
+    const stale = Date.now() - Date.parse(entry.iso) > STALE_AFTER_MS;
+    return {
+      ok: true,
+      product: 'zmax',
+      iso: entry.iso,
+      bounds: entry.bounds,
+      echoPixels: entry.echoPixels,
+      stale,
+      ttlMs: TTL_MS,
+      png: `/api/shmu/radar/latest.png?v=${encodeURIComponent(entry.iso)}`,
+    };
+  }
+
+  return {
+    name: 'shmu-radar-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/shmu/radar', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const subPath = String(req.url || '').split('?')[0];
+          await ensureFresh();
+          if (!mem) {
+            sendJson(503, { ok: false, error: 'radar_unavailable' });
+            return;
+          }
+          if (subPath === '/latest.png') {
+            res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+            res.end(mem.png);
+            return;
+          }
+          sendJson(200, buildMeta(mem));
+        } catch (err) {
+          console.warn('[shmu-radar] request failed:', err?.message || err);
+          sendJson(500, { ok: false, error: 'radar_proxy_error' });
+        }
+      });
+    },
+  };
+}
+
 function firmsProxy() {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
@@ -7345,6 +7570,7 @@ export default defineConfig(({ mode }) => {
       celestrakProxy(),
       tomtomProxy(),
       firmsProxy(),
+      shmuRadarProxy(),
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),

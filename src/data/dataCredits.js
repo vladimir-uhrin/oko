@@ -145,6 +145,20 @@ export const DATA_CREDITS = [
       '<a href="https://terrain.reearth.land" target="_blank" rel="noopener">Re:Earth Terrain</a> / ' +
       'Mapterhorn (CC BY 4.0) / EGM2008 (NGA)',
   },
+  {
+    key: 'ugkk-ortofoto',
+    html:
+      'SK Orto map stack: Ortofotomozaika SR © ' +
+      '<a href="https://www.gku.sk" target="_blank" rel="noopener">GKÚ Bratislava</a>, NLC ' +
+      '(CC BY 4.0)',
+  },
+  {
+    key: 'shmu-radar',
+    html:
+      'Zrážkový radar: ' +
+      '<a href="https://opendata.shmu.sk" target="_blank" rel="noopener">SHMÚ — opendata.shmu.sk</a> ' +
+      '(CC BY 4.0)',
+  },
   // ── Bundled snapshots ───────────────────────────────────────────
   {
     key: 'datacenters',

@@ -32,6 +32,27 @@ export const MAP_STACKS = [
     kind: 'osm',
     requiresIon: false,
   },
+  {
+    id: 'ugkk-ortofoto',
+    label: 'ÚGKK Ortofoto SR',
+    shortLabel: 'SK Orto',
+    kind: 'wms',
+    requiresIon: false,
+    // Ortofotomozaika SR — keyless WMS od GKÚ Bratislava, CC BY 4.0 (licencia
+    // deklarovaná v GetCapabilities AccessConstraints; DATA_SOURCES.md).
+    // Vrstva '1' je čistá mozaika; '2'/'3' sú footprint/klad — nepridávať.
+    // 512 px dlaždice a rectangle orezaný na SR šetria verejnú službu GKÚ —
+    // mimo pokrytia mozaiky sa nesmie generovať žiadny request. QA/screenshot
+    // slučky nad týmto stackom nepúšťať (docs/SK-NOTES.md).
+    wms: {
+      url: 'https://zbgisws.skgeodesy.sk/zbgis_ortofoto_wms/service.svc/get',
+      layers: '1',
+      rectangleDegrees: [16.83, 47.72, 22.58, 49.62],
+      tileSize: 512,
+      maximumLevel: 19,
+      credit: 'Ortofotomozaika SR © GKÚ Bratislava, NLC (CC BY 4.0)',
+    },
+  },
 ];
 
 const DEFAULT_OSM_CREDIT = '© OpenStreetMap contributors';
@@ -260,6 +281,18 @@ export class MapStackController {
       provider = new Cesium.OpenStreetMapImageryProvider({
         url: 'https://tile.openstreetmap.org/',
         credit: DEFAULT_OSM_CREDIT,
+      });
+    } else if (stack.kind === 'wms') {
+      const cfg = stack.wms;
+      provider = new Cesium.WebMapServiceImageryProvider({
+        url: cfg.url,
+        layers: cfg.layers,
+        parameters: { format: 'image/jpeg' },
+        tileWidth: cfg.tileSize,
+        tileHeight: cfg.tileSize,
+        maximumLevel: cfg.maximumLevel,
+        rectangle: Cesium.Rectangle.fromDegrees(...cfg.rectangleDegrees),
+        credit: cfg.credit,
       });
     } else {
       throw new Error(`Unsupported map stack: ${stack.id}`);

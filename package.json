@@ -50,6 +50,7 @@
     "satellite.js": "^6.0.2"
   },
   "devDependencies": {
+    "jsfive": "^0.4.0",
     "puppeteer": "^24.37.5",
     "sharp": "^0.34.5",
     "vite": "^6.0.0",

@@ -56,11 +56,14 @@ Priebežne dopĺňaj, ako sa veci preveria:
 
 | Zdroj | Čo | Stav preverenia |
 |---|---|---|
-| zjazdnost.sk (SSC) | kamery na cestách I. triedy | nepreverené |
-| NDS | diaľničné kamery | nepreverené |
+| zjazdnost.sk (SSC) | kamery na cestách I. triedy | ⚠️ podmienky OK (šírenie povolené s atribúciou, citácia v SK-NOTES Fáza 2), ale zdroj je SEZÓNNY (len zimná údržba) — katalógový scaffold pripravený, vzorka a naplnenie čakajú na zimu |
+| NDS | diaľničné kamery | ❌ preverené 2026-08-30 — verejný feed neexistuje; mýtne/ANPR kamery mimo etickej čiary |
+| Bratislava (mesto) | mestské kamery | ❌ preverené 2026-08-30 — kamery.bratislava.sk mŕtve, systém je policajný/uzavretý |
 | zjazdnostbbrsc.sk | kamery BB kraj | nepreverené |
-| SHMÚ | zrážkový radar, hydrológia | nepreverené |
-| ÚGKK geoportál | ortofoto SR, LiDAR DMR 5.0 | nepreverené |
+| SHMÚ opendata.shmu.sk | zrážkový radar (kompozit) | ✅ implementované 2026-08-30 — CC BY 4.0 bez registrácie, ODIM HDF5 á 5 min → vrstva `shmu-radar` (SK-NOTES Fáza 3) |
+| SHMÚ portál / Modrá platforma | hydrológia (vodné stavy) | ⚠️ preverené 2026-08-30 — opendata NIE; Modrá platforma: Keycloak login, „Dátové služby" v príprave, bez deklarovanej licencie → neimplementovať, sledovať spustenie |
+| ÚGKK geoportál | ortofoto SR | ✅ preverené 2026-08-30 — WMS, CC BY 4.0, implementované ako stack `ugkk-ortofoto` (docs/SK-NOTES.md, Fáza 1) |
+| ÚGKK geoportál | LiDAR DMR 5.0 | čiastočne — CC BY 4.0 download existuje, terrain vyžaduje self-host (SK-NOTES, Fáza 1b); znenie licencie preveriť pri realizácii |
 | data.slovensko.sk | register datasetov | nepreverené |
 
 ## Čo nikdy
