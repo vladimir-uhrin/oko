@@ -116,11 +116,20 @@ livestreamy z 2020 boli dočasné, mestský kamerový systém je policajný
   K dispozícii aj `cappi2km`, `etop`, `pac01` (1h úhrn) — do budúcna.
 - Vzorka: 200 OK, `application/x-hdf`, ETag + Last-Modified, žiadne rate-limit
   hlavičky. Proxy robí ≤12 fetchov/h (TTL = kadencia produktu).
-- Implementácia: `shmuRadarProxy` vo vite.config.js (dekód jsfive → prevzorkovanie
-  Mercator→lineárna šírka → dBZ paleta → PNG; disk cache, serve-stale s flagom),
-  vrstva `src/data/shmuRadar.js` — obdĺžniková entita vo 4 km (viditeľná aj na
-  photoreal stacku, kde je glóbus skrytý), stav staleness v paneli. Testy:
-  `src/data/shmuRadar.test.mjs` + fixture.
+- Implementácia: `shmuRadarProxy` vo vite.config.js (dekód jsfive → despeckle →
+  prevzorkovanie Mercator→lineárna šírka → dBZ paleta → soften → PNG; disk
+  cache, serve-stale s flagom), vrstva `src/data/shmuRadar.js` — obdĺžniková
+  entita vo 4 km (viditeľná aj na photoreal stacku, kde je glóbus skrytý),
+  stav staleness v paneli. Testy: `src/data/shmuRadar.test.mjs` + fixture.
+- **Grafika (lekcia z 2026-08-30, ~21:30):** surový `zmax` je v lete v noci
+  nepoužiteľný — kompozit maxíma stĺpca zosilňuje **nočnú migráciu
+  vtákov/hmyzu** (súvislé koherentné polia, filter susedov ich nezoberie)
+  a **clutter tatranského hrebeňa**. Meranie na rovnakom slote:
+  zmax 6 966 despecklovaných echo px vs. **cappi2km 1 769** → default
+  je `cappi2km` (odrazivosť v 2 km), prah 8 dBZ, despeckle 5×5 (≥6 susedov,
+  prežije ≥3×3 zhluk ≈ 1 km jadro prehánky) + premultiplied dilate/blur do
+  mäkkých blobov. Daňou je plytké mrholenie pod 2 km; `SHMU_RADAR_PRODUCT=zmax`
+  prepne späť na maximum stĺpca.
 
 **Hydrológia (Dunaj/Váh) — zatiaľ NIE.** V opendata strome nie je; operatívne
 vodné stavy sú len na portáli shmu.sk (HTML) a v Modrej platforme

@@ -17,8 +17,13 @@
  * draping the raw grid would cause.
  */
 
-/** Display threshold: echoes below this dBZ stay fully transparent. */
-export const ZMAX_MIN_DISPLAY_DBZ = 4;
+/**
+ * Display threshold: echoes below this dBZ stay fully transparent. 8 dBZ
+ * deliberately sits above the bulk of nocturnal clear-air/biological returns
+ * (typically < ~10 dBZ) while keeping drizzle bands — below this the dry-day
+ * composite reads as dirt sprayed across the country, not weather.
+ */
+export const ZMAX_MIN_DISPLAY_DBZ = 8;
 
 /**
  * dBZ → RGBA stops, ascending. Conventional radar ramp: greens (light rain)
@@ -27,10 +32,10 @@ export const ZMAX_MIN_DISPLAY_DBZ = 4;
  * @type {Array<{min: number, rgba: [number, number, number, number]}>}
  */
 export const ZMAX_DBZ_PALETTE = [
-  { min: 4, rgba: [110, 210, 110, 185] },
-  { min: 12, rgba: [40, 160, 70, 200] },
-  { min: 20, rgba: [250, 220, 70, 210] },
-  { min: 28, rgba: [250, 160, 40, 220] },
+  { min: 8, rgba: [96, 208, 130, 150] },
+  { min: 15, rgba: [46, 172, 84, 175] },
+  { min: 20, rgba: [250, 220, 70, 200] },
+  { min: 28, rgba: [250, 160, 40, 215] },
   { min: 35, rgba: [235, 75, 45, 230] },
   { min: 44, rgba: [175, 25, 90, 240] },
   { min: 52, rgba: [230, 65, 230, 250] },
@@ -42,8 +47,8 @@ export const ZMAX_DBZ_PALETTE = [
  * @param {number} dbz
  * @returns {[number, number, number, number]|null}
  */
-export function dbzColor(dbz) {
-  if (!Number.isFinite(dbz) || dbz < ZMAX_MIN_DISPLAY_DBZ) return null;
+export function dbzColor(dbz, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ) {
+  if (!Number.isFinite(dbz) || dbz < minDisplayDbz) return null;
   let hit = null;
   for (const stop of ZMAX_DBZ_PALETTE) {
     if (dbz >= stop.min) hit = stop.rgba;
@@ -133,7 +138,7 @@ export function mercatorRowLut(height, south, north) {
  * @returns {{rgba: Uint8ClampedArray, echoPixels: number}} `echoPixels` counts
  *   cells at/above the display threshold — the layer's honest "how much echo".
  */
-export function rasterizeZmax(raw, meta) {
+export function rasterizeZmax(raw, meta, { minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ } = {}) {
   const { width, height, gain, offset, undetectRaw, nodataRaw, bounds } = meta;
   if (!raw || raw.length !== width * height) {
     throw new Error(`ODIM composite: data length ${raw?.length} != ${width * height}`);
@@ -147,7 +152,7 @@ export function rasterizeZmax(raw, meta) {
     for (let col = 0; col < width; col++) {
       const value = raw[srcBase + col];
       if (value === undetectRaw || value === nodataRaw) continue;
-      const color = dbzColor(gain * value + offset);
+      const color = dbzColor(gain * value + offset, minDisplayDbz);
       if (!color) continue;
       const at = outBase + col * 4;
       rgba[at] = color[0];
@@ -158,6 +163,162 @@ export function rasterizeZmax(raw, meta) {
     }
   }
   return { rgba, echoPixels };
+}
+
+/**
+ * Drop incoherent echo cells (clear-air returns, insects, clutter) from the
+ * raw grid. A cell survives only when at least `minNeighbors` other
+ * displayable echoes sit within its `radius`-cell window — real precipitation
+ * is spatially coherent, speckle is not. The defaults (5×5 window, ≥6
+ * neighbors) let a ≥3×3 cluster — a real shower core at this grid's
+ * ~330×480 m cells — through, while 1–4-cell biological clumps die. On a dry
+ * summer day this is the difference between a readable overlay and dirt
+ * sprayed across the country.
+ *
+ * @param {Uint8Array|Uint8ClampedArray} raw - width×height bytes (row 0 = north).
+ * @param {ReturnType<typeof normalizeOdimComposite>} meta
+ * @param {{minNeighbors?: number, radius?: number}} [opts]
+ * @returns {Uint8Array} New grid with speckle cells reset to `undetectRaw`.
+ */
+export function despeckleZmax(raw, meta, { minNeighbors = 6, radius = 2, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ } = {}) {
+  const { width, height, gain, offset, undetectRaw, nodataRaw } = meta;
+  // Raw value at/above which a cell is a displayable echo.
+  const thresholdRaw = Math.ceil((minDisplayDbz - offset) / gain);
+  const isEcho = (v) => v !== undetectRaw && v !== nodataRaw && v >= thresholdRaw;
+  const out = Uint8Array.from(raw);
+  for (let row = 0; row < height; row++) {
+    const base = row * width;
+    for (let col = 0; col < width; col++) {
+      const v = raw[base + col];
+      if (!isEcho(v)) continue;
+      let neighbors = 0;
+      for (let dr = -radius; dr <= radius && neighbors < minNeighbors; dr++) {
+        const r = row + dr;
+        if (r < 0 || r >= height) continue;
+        const nBase = r * width;
+        for (let dc = -radius; dc <= radius; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const c = col + dc;
+          if (c < 0 || c >= width) continue;
+          if (isEcho(raw[nBase + c])) neighbors++;
+        }
+      }
+      if (neighbors < minNeighbors) out[base + col] = undetectRaw;
+    }
+  }
+  return out;
+}
+
+/**
+ * Soften a sparse RGBA raster into smooth blobs: one max-dilation pass grows
+ * single cells to visible size, then a separable box blur (run `passes`
+ * times ≈ gaussian) feathers the edges. Blur runs on PREMULTIPLIED channels —
+ * blurring straight RGBA against transparent black smears dark fringes
+ * around every echo, which reads as mold rather than rain.
+ *
+ * @param {Uint8ClampedArray} rgba - width×height×4, transparent background.
+ * @param {number} width
+ * @param {number} height
+ * @param {{dilate?: number, blurRadius?: number, passes?: number}} [opts]
+ * @returns {Uint8ClampedArray} New softened raster (input untouched).
+ */
+export function softenRgba(rgba, width, height, { dilate = 1, blurRadius = 2, passes = 2 } = {}) {
+  const px = width * height;
+  // Premultiply into float buffers (alpha-weighted color).
+  let cr = new Float32Array(px);
+  let cg = new Float32Array(px);
+  let cb = new Float32Array(px);
+  let ca = new Float32Array(px);
+  for (let i = 0; i < px; i++) {
+    const a = rgba[i * 4 + 3] / 255;
+    if (a === 0) continue;
+    cr[i] = rgba[i * 4] * a;
+    cg[i] = rgba[i * 4 + 1] * a;
+    cb[i] = rgba[i * 4 + 2] * a;
+    ca[i] = a;
+  }
+
+  if (dilate > 0) {
+    const dr2 = new Float32Array(px);
+    const dg2 = new Float32Array(px);
+    const db2 = new Float32Array(px);
+    const da2 = new Float32Array(px);
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        let br = 0; let bg = 0; let bb = 0; let ba = -1;
+        for (let dr = -dilate; dr <= dilate; dr++) {
+          const r = row + dr;
+          if (r < 0 || r >= height) continue;
+          for (let dc = -dilate; dc <= dilate; dc++) {
+            const c = col + dc;
+            if (c < 0 || c >= width) continue;
+            const i = r * width + c;
+            if (ca[i] > ba) { ba = ca[i]; br = cr[i]; bg = cg[i]; bb = cb[i]; }
+          }
+        }
+        const o = row * width + col;
+        dr2[o] = br; dg2[o] = bg; db2[o] = bb; da2[o] = Math.max(ba, 0);
+      }
+    }
+    cr = dr2; cg = dg2; cb = db2; ca = da2;
+  }
+
+  // Separable box blur, horizontal then vertical, repeated `passes` times.
+  const blurAxis = (src, horizontal) => {
+    const out = new Float32Array(px);
+    const window = 2 * blurRadius + 1;
+    const lineLen = horizontal ? width : height;
+    const lines = horizontal ? height : width;
+    for (let line = 0; line < lines; line++) {
+      const at = (i) => (horizontal ? line * width + i : i * width + line);
+      let sum = 0;
+      for (let i = -blurRadius; i <= blurRadius; i++) {
+        sum += src[at(Math.min(lineLen - 1, Math.max(0, i)))];
+      }
+      for (let i = 0; i < lineLen; i++) {
+        out[at(i)] = sum / window;
+        const drop = Math.max(0, i - blurRadius);
+        const add = Math.min(lineLen - 1, i + blurRadius + 1);
+        sum += src[at(add)] - src[at(drop)];
+      }
+    }
+    return out;
+  };
+  for (let pass = 0; pass < passes; pass++) {
+    cr = blurAxis(cr, true); cr = blurAxis(cr, false);
+    cg = blurAxis(cg, true); cg = blurAxis(cg, false);
+    cb = blurAxis(cb, true); cb = blurAxis(cb, false);
+    ca = blurAxis(ca, true); ca = blurAxis(ca, false);
+  }
+
+  // Unpremultiply back into bytes.
+  const out = new Uint8ClampedArray(px * 4);
+  for (let i = 0; i < px; i++) {
+    const a = ca[i];
+    if (a <= 1 / 255) continue;
+    out[i * 4] = cr[i] / a;
+    out[i * 4 + 1] = cg[i] / a;
+    out[i * 4 + 2] = cb[i] / a;
+    out[i * 4 + 3] = a * 255;
+  }
+  return out;
+}
+
+/**
+ * Full presentation pipeline for one zmax composite: despeckle the raw grid,
+ * rasterize (Mercator→linear latitude + dBZ palette), then soften into
+ * readable blobs. The one entry point the proxy uses; the primitives stay
+ * exported for focused tests.
+ *
+ * @param {Uint8Array|Uint8ClampedArray} raw
+ * @param {ReturnType<typeof normalizeOdimComposite>} meta
+ * @returns {{rgba: Uint8ClampedArray, echoPixels: number}} `echoPixels` counts
+ *   displayable cells AFTER despeckle (before softening spreads them).
+ */
+export function renderZmax(raw, meta, opts = {}) {
+  const cleaned = despeckleZmax(raw, meta, opts);
+  const { rgba, echoPixels } = rasterizeZmax(cleaned, meta, opts);
+  return { rgba: softenRgba(rgba, meta.width, meta.height), echoPixels };
 }
 
 /**

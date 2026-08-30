@@ -45,7 +45,7 @@ import zlib from 'node:zlib';
 import {
   normalizeOdimComposite,
   odimTimestampIso,
-  rasterizeZmax,
+  renderZmax,
 } from './src/data/shmuRadarGrid.js';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -1983,15 +1983,17 @@ function tomtomProxy() {
  * SHMÚ precipitation radar proxy — Slovak national composite (OKO fork).
  *
  * Upstream: opendata.shmu.sk (CC BY 4.0, keyless, no registration —
- * DATA_SOURCES.md). Product `zmax`: column-maximum reflectivity composite,
- * ODIM_H5, one ~40 KB file every 5 minutes at a deterministic path
- *   …/skcomp/zmax/YYYYMMDD/T_PABV22_C_LZIB_YYYYMMDDHHMM00.hdf
+ * DATA_SOURCES.md). Reflectivity composites (quantity DBZH), ODIM_H5, one
+ * ~30–40 KB file every 5 minutes at a deterministic path
+ *   …/skcomp/<product>/YYYYMMDD/<prefix>_C_LZIB_YYYYMMDDHHMM00.hdf
  * so refresh probes recent 5-minute slots directly (publication lags about
- * a minute) instead of scraping directory listings.
+ * a minute) instead of scraping directory listings. Default product is
+ * cappi2km (see PRODUCTS below for why zmax is not the default).
  *
- * Decode: jsfive (pure-JS HDF5) reads the grid; shmuRadarGrid.js resamples
- * Mercator rows to linear latitude and colorizes dBZ; a minimal PNG encoder
- * (node:zlib, filter 0) emits the overlay image. TTL matches the 5-minute
+ * Decode: jsfive (pure-JS HDF5) reads the grid; shmuRadarGrid.js despeckles
+ * isolated clear-air cells, resamples Mercator rows to linear latitude,
+ * colorizes dBZ, and softens echoes into readable blobs; a minimal PNG
+ * encoder (node:zlib, filter 0) emits the overlay image. TTL matches the 5-minute
  * product cadence; single-flight refresh; disk cache under .gev-cache/
  * survives restarts; serve-stale keeps the last good frame (flagged `stale`)
  * through upstream hiccups. Pattern mirrors firmsProxy.
@@ -2011,7 +2013,22 @@ function shmuRadarProxy() {
   const MAX_HDF_BYTES = 8 * 1024 * 1024;
   /** Product older than this (vs now) is flagged stale for the layer UI. */
   const STALE_AFTER_MS = 20 * 60_000;
-  const BASE_URL = 'https://opendata.shmu.sk/meteorology/weather/radar/composite/skcomp/zmax';
+  /**
+   * Composite products by filename prefix. Default is cappi2km (reflectivity
+   * at 2 km altitude): the column-max zmax product amplifies nocturnal
+   * bird/insect migration and mountain-ridge clutter into country-wide
+   * speckle that no neighbor filter can remove (measured 2026-08-30 21:30
+   * local: 6 966 despeckled echo px on zmax vs 1 769 on cappi2km for the
+   * same dry-evening slot — docs/SK-NOTES.md). The trade-off — shallow
+   * drizzle below 2 km can be missed — is the right one for a situational
+   * overlay; set SHMU_RADAR_PRODUCT=zmax to get the column max back.
+   */
+  const PRODUCTS = { cappi2km: 'T_PANV22', zmax: 'T_PABV22' };
+  const PRODUCT = Object.hasOwn(PRODUCTS, process.env.SHMU_RADAR_PRODUCT)
+    ? process.env.SHMU_RADAR_PRODUCT
+    : 'cappi2km';
+  const FILE_PREFIX = PRODUCTS[PRODUCT];
+  const BASE_URL = `https://opendata.shmu.sk/meteorology/weather/radar/composite/skcomp/${PRODUCT}`;
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
   const META_PATH = path.join(CACHE_DIR, 'shmu-radar.json');
   const PNG_PATH = path.join(CACHE_DIR, 'shmu-radar.png');
@@ -2068,7 +2085,7 @@ function shmuRadarProxy() {
       const p = (n) => String(n).padStart(2, '0');
       const ymd = `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
       const hm = `${p(d.getUTCHours())}${p(d.getUTCMinutes())}`;
-      urls.push(`${BASE_URL}/${ymd}/T_PABV22_C_LZIB_${ymd}${hm}00.hdf`);
+      urls.push(`${BASE_URL}/${ymd}/${FILE_PREFIX}_C_LZIB_${ymd}${hm}00.hdf`);
     }
     return urls;
   }
@@ -2086,7 +2103,7 @@ function shmuRadarProxy() {
     if (!iso) throw new Error('ODIM composite: missing what/date+time');
     const value = file.get('dataset1/data1/data')?.value;
     const raw = value instanceof Uint8Array ? value : Uint8Array.from(value || []);
-    const { rgba, echoPixels } = rasterizeZmax(raw, meta);
+    const { rgba, echoPixels } = renderZmax(raw, meta);
     return {
       at: Date.now(),
       iso,
@@ -2156,7 +2173,7 @@ function shmuRadarProxy() {
     const stale = Date.now() - Date.parse(entry.iso) > STALE_AFTER_MS;
     return {
       ok: true,
-      product: 'zmax',
+      product: PRODUCT,
       iso: entry.iso,
       bounds: entry.bounds,
       echoPixels: entry.echoPixels,

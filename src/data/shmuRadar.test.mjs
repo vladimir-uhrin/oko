@@ -7,10 +7,13 @@ import {
   ZMAX_DBZ_PALETTE,
   ZMAX_MIN_DISPLAY_DBZ,
   dbzColor,
+  despeckleZmax,
   mercatorRowLut,
   normalizeOdimComposite,
   odimTimestampIso,
   rasterizeZmax,
+  renderZmax,
+  softenRgba,
 } from './shmuRadarGrid.js';
 import { SHMU_RADAR_DRAPE_HEIGHT_M, createShmuRadarLayer } from './shmuRadar.js';
 
@@ -67,6 +70,54 @@ test('dbzColor thresholds: transparent below display floor, ramp is ordered', ()
   }
 });
 
+test('despeckle drops isolated cells and keeps coherent echo clusters', () => {
+  const meta = normalizeOdimComposite({
+    where: { ...FIXTURE_WHERE, xsize: 8, ysize: 8 },
+    datasetWhat: FIXTURE_DATASET_WHAT,
+  });
+  const echo = Math.ceil((ZMAX_MIN_DISPLAY_DBZ - meta.offset) / meta.gain) + 10;
+  const raw = new Uint8Array(64); // all undetect
+  raw[1 * 8 + 1] = echo; // izolovaná bodka — musí zmiznúť
+  // 2×2 chuchvalec (typický biologický clutter), mimo 5×5 okna zhluku nižšie
+  raw[0 * 8 + 5] = echo;
+  raw[0 * 8 + 6] = echo;
+  raw[1 * 8 + 5] = echo;
+  raw[1 * 8 + 6] = echo;
+  // súvislý 3×3 zhluk (~1 km jadro prehánky) — musí prežiť celý
+  const cluster = [];
+  for (let r = 4; r <= 6; r++) for (let c = 4; c <= 6; c++) cluster.push(r * 8 + c);
+  for (const at of cluster) raw[at] = echo;
+  const cleaned = despeckleZmax(raw, meta);
+  assert.equal(cleaned[1 * 8 + 1], meta.undetectRaw, 'isolated speckle must be removed');
+  for (const at of [0 * 8 + 5, 0 * 8 + 6, 1 * 8 + 5, 1 * 8 + 6]) {
+    assert.equal(cleaned[at], meta.undetectRaw, '2×2 clutter clump must be removed');
+  }
+  for (const at of cluster) {
+    assert.equal(cleaned[at], echo, '3×3 shower core must survive intact');
+  }
+  assert.notEqual(raw[1 * 8 + 1], meta.undetectRaw, 'input must stay untouched');
+});
+
+test('softenRgba spreads echoes without dark fringes (premultiplied blur)', () => {
+  const w = 21; const h = 21;
+  const rgba = new Uint8ClampedArray(w * h * 4);
+  const center = (10 * w + 10) * 4;
+  rgba[center] = 250; rgba[center + 1] = 220; rgba[center + 2] = 70; rgba[center + 3] = 200;
+  const soft = softenRgba(rgba, w, h);
+  let covered = 0;
+  for (let i = 0; i < w * h; i++) {
+    const a = soft[i * 4 + 3];
+    if (a === 0) continue;
+    covered++;
+    // Unpremultiplied naive blur would drag RGB toward transparent BLACK —
+    // every visible pixel must keep the source hue (yellow: R>B, G>B).
+    assert.ok(soft[i * 4] > soft[i * 4 + 2], `hue lost at px ${i} (R ${soft[i * 4]} vs B ${soft[i * 4 + 2]})`);
+    assert.ok(soft[i * 4 + 1] > soft[i * 4 + 2], `hue lost at px ${i}`);
+  }
+  assert.ok(covered > 20, `single cell must spread into a visible blob (got ${covered}px)`);
+  assert.ok(soft[center + 3] > 0, 'centre must stay visible');
+});
+
 test('fixture decodes end-to-end: real echoes, sentinels transparent', () => {
   const hdf5 = require('jsfive');
   const buf = readFileSync(new URL('./fixtures/shmu-zmax-20260830T181000Z.hdf', import.meta.url));
@@ -84,14 +135,25 @@ test('fixture decodes end-to-end: real echoes, sentinels transparent', () => {
 
   const value = file.get('dataset1/data1/data').value;
   const raw = value instanceof Uint8Array ? value : Uint8Array.from(value);
-  const { rgba, echoPixels } = rasterizeZmax(raw, meta);
-  assert.equal(rgba.length, meta.width * meta.height * 4);
-  assert.ok(echoPixels > 0, 'fixture day had real precipitation echoes');
+  const rawPass = rasterizeZmax(raw, meta);
+  assert.equal(rawPass.rgba.length, meta.width * meta.height * 4);
+  assert.ok(rawPass.echoPixels > 0, 'fixture day had real precipitation echoes');
   // Sentinel cells (undetect fill + out-of-domain corners) must be transparent:
   // echo pixels are a small minority of the 3.54M-cell grid.
-  assert.ok(echoPixels < raw.length * 0.25, `echoPixels ${echoPixels} suspiciously high`);
+  assert.ok(rawPass.echoPixels < raw.length * 0.25, `echoPixels ${rawPass.echoPixels} suspiciously high`);
   // Top-left corner of the composite is outside the radar domain (nodata).
-  assert.equal(rgba[3], 0, 'nodata corner must stay transparent');
+  assert.equal(rawPass.rgba[3], 0, 'nodata corner must stay transparent');
+
+  // The presentation pipeline (what the proxy actually serves): despeckle
+  // removes part of the dry-day clutter but real cells survive, and softening
+  // must not leak color into the out-of-domain corner.
+  const presented = renderZmax(raw, meta);
+  assert.ok(presented.echoPixels > 0, 'coherent echoes must survive despeckle');
+  assert.ok(
+    presented.echoPixels < rawPass.echoPixels,
+    `despeckle should remove some clutter (${presented.echoPixels} vs ${rawPass.echoPixels})`,
+  );
+  assert.equal(presented.rgba[3], 0, 'softened corner must stay transparent');
 });
 
 test('layer contract: entity drape, stats, stale surfaced, id/cadence pinned', async () => {
