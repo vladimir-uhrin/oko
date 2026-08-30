@@ -1,0 +1,4 @@
+# LF vo working tree na všetkých platformách — shape testy čítajú zdrojáky
+# regexmi pinnutými na \n a checkout s CRLF (napr. systémový autocrlf=true
+# na Windows) ich rozbíja.
+* text=auto eol=lf
