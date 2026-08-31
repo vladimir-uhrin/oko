@@ -175,6 +175,14 @@ takže prvý klik nového návštevníka vždy doručí. Hlasové aliasy: „rad
   (nie čas fetchu), `stale` je prvotriedny feed-stav (STALE chip cez
   layerFeedState) a source label žije: „SHMÚ cappi2km · HH:MM UTC".
   Ostáva TODO: plnohodnotná dBZ legenda v UI.
+- **Radarová animácia** (2026-08-31): proxy drží ring posledných 7 snímok
+  (~30 min) ako nemenné `/frame/<iso>.png` (immutable cache) a vrstva ich
+  prehráva — jeden skrytý Primitive na snímku, slučka len prepína `show`
+  (textúry ostávajú rezidentné). LEKCIA: výmena materiálu na entite
+  reuploaduje 3,5-Mpx textúru pri každom kroku a materiál medzitým renderuje
+  bielu; a Material s obrázkom, ktorý sa nenačítal (transientný 504), hodí
+  „Expected width > 0" a **navždy zastaví render** — preto sa každá snímka
+  najprv preload+decode-ne a až potom dostane primitív.
 - **Energetika je klikateľná**: 688 línií registrovaných v context store,
   label karty = legenda („Vedenie 400 kV" / „Vedenie 220 kV" /
   „Plynovod (tranzit)", meno V-čka keď existuje).

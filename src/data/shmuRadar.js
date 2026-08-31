@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { governorRequestRender } from '../renderGovernor.js';
 
 /**
  * SHMÚ precipitation radar overlay — Slovak 5-minute zmax composite (OKO).
@@ -14,20 +15,134 @@ import * as Cesium from 'cesium';
  * reflectivity product.
  *
  * Freshness: the proxy flags frames older than 20 min as `stale`; that state
- * is surfaced via getStats().error so the panel never presents an old frame
- * as current (CLAUDE.md rule 2 — data state must be visible).
+ * is surfaced via getStats() so the panel never presents an old frame as
+ * current (CLAUDE.md rule 2 — data state must be visible).
+ *
+ * Animation: the proxy serves the last ~30 min as immutable per-ISO frames;
+ * while the layer is enabled, `createRadarFrameAnimator` loops them (hold on
+ * the newest), each swap requesting exactly one governor frame.
+ *
+ * WHY PRIMITIVES, NOT A SWAPPED ENTITY MATERIAL: assigning a new material to
+ * an entity rebuilds its appearance and re-uploads the 2270×1560 texture on
+ * EVERY swap — the material renders its default WHITE until the texture
+ * lands, which at a 750 ms cadence turns the drape into a solid white sheet
+ * on slower GL stacks. One hidden Primitive per frame keeps every texture
+ * resident; the loop just flips `show`, which costs nothing and can never
+ * flash white. The 5-minute refresh reuses 6 of 7 primitives (only the new
+ * slot uploads), and a removed slot's primitive is destroyed with its texture.
  */
 
 const META_URL = '/api/shmu/radar';
 /** Drape altitude above the ellipsoid; clears terrain and city meshes. */
 export const SHMU_RADAR_DRAPE_HEIGHT_M = 4000;
 export const SHMU_RADAR_LAYER_ID = 'shmu-radar';
-const ENTITY_ID = 'shmu-radar:overlay';
+/** Animation cadence: per-frame step, and how long the newest frame holds. */
+export const SHMU_RADAR_FRAME_STEP_MS = 750;
+export const SHMU_RADAR_LATEST_HOLD_MS = 2500;
 
-export function createShmuRadarLayer({ fetchImpl = null } = {}) {
+/**
+ * Frame-loop driver, timers injected so tests run it synchronously. Plays
+ * 0…N-1 with `stepMs` between frames and `holdMs` on the newest one, calling
+ * `onShowFrame(index)` for each. With ≤1 frame it does nothing — a single
+ * image must not flicker or hold a timer.
+ * @param {object} input
+ * @param {() => number} input.getFrameCount
+ * @param {(index: number) => void} input.onShowFrame
+ * @param {number} [input.stepMs]
+ * @param {number} [input.holdMs]
+ * @param {Function} [input.schedule] setTimeout-compatible.
+ * @param {Function} [input.cancel] clearTimeout-compatible.
+ * @returns {{start: Function, stop: Function, running: () => boolean}}
+ */
+export function createRadarFrameAnimator({
+  getFrameCount,
+  onShowFrame,
+  stepMs = SHMU_RADAR_FRAME_STEP_MS,
+  holdMs = SHMU_RADAR_LATEST_HOLD_MS,
+  schedule = (fn, ms) => setTimeout(fn, ms),
+  cancel = (handle) => clearTimeout(handle),
+} = {}) {
+  let timer = null;
+  let index = 0;
+
+  const tick = () => {
+    timer = null;
+    const count = getFrameCount();
+    if (count <= 1) {
+      if (count === 1) onShowFrame(0);
+      // Re-arm lazily: a later meta refresh may grow the ring.
+      timer = schedule(tick, holdMs);
+      return;
+    }
+    if (index >= count) index = 0;
+    onShowFrame(index);
+    const atLatest = index === count - 1;
+    index = atLatest ? 0 : index + 1;
+    timer = schedule(tick, atLatest ? holdMs : stepMs);
+  };
+
+  return {
+    start() {
+      if (timer !== null) return;
+      index = 0;
+      tick();
+    },
+    stop() {
+      if (timer !== null) cancel(timer);
+      timer = null;
+    },
+    running: () => timer !== null,
+  };
+}
+
+/**
+ * One frame's drape primitive: a surface-parallel rectangle at the drape
+ * altitude with the frame PNG as its (translucent) material. Injectable so
+ * DOM-less tests substitute a stub instead of touching GL-adjacent paths.
+ * @param {{rectangle: Cesium.Rectangle, imageUrl: string}} input
+ * @returns {Cesium.Primitive}
+ */
+export function createRadarFramePrimitive({ rectangle, imageUrl }) {
+  return new Cesium.Primitive({
+    geometryInstances: new Cesium.GeometryInstance({
+      geometry: new Cesium.RectangleGeometry({
+        rectangle,
+        height: SHMU_RADAR_DRAPE_HEIGHT_M,
+        vertexFormat: Cesium.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
+      }),
+    }),
+    appearance: new Cesium.EllipsoidSurfaceAppearance({
+      material: Cesium.Material.fromType('Image', { image: imageUrl }),
+    }),
+    asynchronous: false,
+    show: false,
+  });
+}
+
+/**
+ * Resolve once the frame image is truly usable (loaded AND decoded, width>0).
+ * A Material handed a failed/zero-size image throws inside the render loop —
+ * and one such throw stops Cesium's rendering permanently. A frame that fails
+ * to preload is skipped this round and retried on the next poll.
+ * @param {string} url
+ * @returns {Promise<boolean>}
+ */
+function preloadFrameImage(url) {
+  return new Promise((resolve) => {
+    if (typeof Image === 'undefined') { resolve(true); return; } // DOM-less tests
+    const img = new Image();
+    img.onload = () => {
+      const decoded = typeof img.decode === 'function' ? img.decode().catch(() => {}) : Promise.resolve();
+      decoded.then(() => resolve(img.naturalWidth > 0));
+    };
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+
+export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = createRadarFramePrimitive } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
-  let _dataSource = null;
-  let _entity = null;
+  let _viewer = null;
   let _enabled = false;
   let _iso = null;
   let _product = null;
@@ -35,6 +150,31 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
   let _echoPixels = 0;
   let _lastUpdate = null;
   let _lastError = null;
+  /** Animation ring mirrors the proxy's `frames` (oldest→newest). */
+  let _frameIsos = [];
+  /** @type {Map<string, object>} iso → primitive (texture stays resident). */
+  let _primitives = new Map();
+  let _currentIso = null;
+
+  const setFrameVisible = (iso, visible) => {
+    const primitive = iso ? _primitives.get(iso) : null;
+    if (primitive) primitive.show = visible;
+  };
+
+  const showFrame = (index) => {
+    const iso = _frameIsos[index];
+    if (!iso || iso === _currentIso) return;
+    setFrameVisible(_currentIso, false);
+    setFrameVisible(iso, _enabled);
+    _currentIso = iso;
+    // Discrete scene mutation under the render governor contract — one frame.
+    governorRequestRender('shmu-radar');
+  };
+
+  const animator = createRadarFrameAnimator({
+    getFrameCount: () => _frameIsos.length,
+    onShowFrame: showFrame,
+  });
 
   const layer = {
     id: SHMU_RADAR_LAYER_ID,
@@ -52,10 +192,7 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
     updateInterval: 5 * 60 * 1000, // matches the upstream product cadence
 
     init(viewer) {
-      _dataSource = new Cesium.CustomDataSource(SHMU_RADAR_LAYER_ID);
-      _dataSource.show = false;
-      viewer.dataSources.add(_dataSource);
-      _entity = null;
+      _viewer = viewer;
       _enabled = false;
       _iso = null;
       _product = null;
@@ -63,17 +200,25 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
       _echoPixels = 0;
       _lastUpdate = null;
       _lastError = null;
+      _frameIsos = [];
+      _primitives = new Map();
+      _currentIso = null;
       console.log('[Data:ShmuRadar] Initialized');
     },
 
     enable() {
       _enabled = true;
-      if (_dataSource) _dataSource.show = true;
+      // The loop starts at the oldest frame right away — the last ~30 min
+      // replay is the whole point of enabling a radar.
+      _currentIso = null;
+      animator.start();
     },
 
     disable() {
       _enabled = false;
-      if (_dataSource) _dataSource.show = false;
+      animator.stop();
+      setFrameVisible(_currentIso, false);
+      governorRequestRender('shmu-radar');
     },
 
     async update() {
@@ -95,28 +240,46 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
           return false;
         }
 
-        if (meta.iso !== _iso) {
-          const coordinates = Cesium.Rectangle.fromDegrees(west, south, east, north);
-          const material = new Cesium.ImageMaterialProperty({
-            image: meta.png,
-            transparent: true,
-          });
-          if (!_entity) {
-            _entity = _dataSource.entities.add({
-              id: ENTITY_ID,
-              rectangle: {
-                coordinates,
-                material,
-                height: SHMU_RADAR_DRAPE_HEIGHT_M,
-                heightReference: Cesium.HeightReference.NONE,
-              },
-            });
-          } else {
-            _entity.rectangle.coordinates = coordinates;
-            _entity.rectangle.material = material;
+        // Animation ring from the proxy; a ring-less meta (older server)
+        // degrades to a single-frame "loop".
+        const metaFrames = Array.isArray(meta.frames) && meta.frames.length
+          ? meta.frames.filter((f) => f?.iso && f?.png)
+          : [{ iso: meta.iso, png: meta.png }];
+        const nextIsos = metaFrames.map((f) => f.iso);
+        if (nextIsos.join('|') !== _frameIsos.join('|')) {
+          const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north);
+          const next = new Set(nextIsos);
+          // Slots that fell out of the ring: destroy primitive + texture.
+          for (const [iso, primitive] of _primitives) {
+            if (next.has(iso)) continue;
+            if (iso === _currentIso) _currentIso = null;
+            primitive.show = false;
+            _viewer?.scene?.primitives?.remove?.(primitive);
+            _primitives.delete(iso);
           }
-          _iso = meta.iso;
+          // New slots: preload+decode FIRST, then a hidden primitive. The ring
+          // (and the animator's world) only ever contains proven-good frames.
+          const ready = [];
+          for (const frame of metaFrames) {
+            if (_primitives.has(frame.iso)) {
+              ready.push(frame.iso);
+              continue;
+            }
+            if (await preloadFrameImage(frame.png)) {
+              const primitive = primitiveFactory({ rectangle, imageUrl: frame.png });
+              _primitives.set(frame.iso, primitive);
+              _viewer?.scene?.primitives?.add?.(primitive);
+              ready.push(frame.iso);
+            } else {
+              console.warn(`[Data:ShmuRadar] frame ${frame.iso} failed to preload — skipped this round`);
+            }
+          }
+          _frameIsos = ready;
+          // …and the visible frame stays valid even after pruning.
+          if (_enabled && !_currentIso) showFrame(_frameIsos.length - 1);
+          governorRequestRender('shmu-radar');
         }
+        _iso = meta.iso;
 
         _echoPixels = Number.isFinite(meta.echoPixels) ? meta.echoPixels : 0;
         _product = typeof meta.product === 'string' ? meta.product : null;
@@ -141,11 +304,14 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
 
     destroy(viewer) {
       _enabled = false;
-      if (_dataSource) {
-        viewer.dataSources.remove(_dataSource, true);
-        _dataSource = null;
+      animator.stop();
+      for (const primitive of _primitives.values()) {
+        (viewer || _viewer)?.scene?.primitives?.remove?.(primitive);
       }
-      _entity = null;
+      _primitives = new Map();
+      _frameIsos = [];
+      _currentIso = null;
+      _viewer = null;
       _iso = null;
       _product = null;
       _stale = false;

@@ -15,7 +15,11 @@ import {
   renderZmax,
   softenRgba,
 } from './shmuRadarGrid.js';
-import { SHMU_RADAR_DRAPE_HEIGHT_M, createShmuRadarLayer } from './shmuRadar.js';
+import {
+  SHMU_RADAR_DRAPE_HEIGHT_M,
+  createRadarFrameAnimator,
+  createShmuRadarLayer,
+} from './shmuRadar.js';
 
 const require = createRequire(import.meta.url);
 
@@ -156,6 +160,47 @@ test('fixture decodes end-to-end: real echoes, sentinels transparent', () => {
   assert.equal(presented.rgba[3], 0, 'softened corner must stay transparent');
 });
 
+test('frame animator: steps through frames, holds on newest, inert for ≤1 frame', () => {
+  const shown = [];
+  const pending = [];
+  const animator = createRadarFrameAnimator({
+    getFrameCount: () => 3,
+    onShowFrame: (i) => shown.push(i),
+    stepMs: 10,
+    holdMs: 99,
+    schedule: (fn, ms) => { pending.push({ fn, ms }); return pending.length; },
+    cancel: () => { pending.length = 0; },
+  });
+  animator.start();
+  // start → frame 0 hneď, potom krokuj cez pending timery
+  const runNext = () => { const t = pending.shift(); t.fn(); return t.ms; };
+  assert.deepEqual(shown, [0]);
+  assert.equal(runNext(), 10); // 0 → 1
+  assert.deepEqual(shown, [0, 1]);
+  assert.equal(runNext(), 10); // 1 → 2 (najnovší)
+  assert.deepEqual(shown, [0, 1, 2]);
+  assert.equal(pending[0].ms, 99, 'newest frame must hold longer');
+  runNext(); // wrap → 0
+  assert.deepEqual(shown, [0, 1, 2, 0]);
+  assert.ok(animator.running());
+  animator.stop();
+  assert.equal(animator.running(), false);
+
+  // ≤1 frame: nič nebliká, ale slučka sa lenivo re-armuje pre neskorší ring.
+  const single = [];
+  const singlePending = [];
+  const one = createRadarFrameAnimator({
+    getFrameCount: () => 1,
+    onShowFrame: (i) => single.push(i),
+    schedule: (fn, ms) => { singlePending.push({ fn, ms }); return 1; },
+    cancel: () => {},
+  });
+  one.start();
+  assert.deepEqual(single, [0]);
+  assert.equal(singlePending.length, 1, 'single frame keeps one lazy re-arm timer');
+  one.stop();
+});
+
 test('layer contract: entity drape, stats, stale surfaced, id/cadence pinned', async () => {
   const meta = {
     ok: true,
@@ -165,34 +210,61 @@ test('layer contract: entity drape, stats, stale surfaced, id/cadence pinned', a
     echoPixels: 1234,
     stale: false,
     ttlMs: 300000,
-    png: '/api/shmu/radar/latest.png?v=2026-08-30T18%3A10%3A00Z',
+    png: '/api/shmu/radar/frame/f3.png',
+    frames: [
+      { iso: '2026-08-30T18:00:00Z', echoPixels: 1100, png: '/api/shmu/radar/frame/f1.png' },
+      { iso: '2026-08-30T18:05:00Z', echoPixels: 1180, png: '/api/shmu/radar/frame/f2.png' },
+      { iso: '2026-08-30T18:10:00Z', echoPixels: 1234, png: '/api/shmu/radar/frame/f3.png' },
+    ],
   };
   let served = meta;
+  const built = [];
+  const scenePrimitives = new Set();
+  const stubFactory = ({ rectangle, imageUrl }) => {
+    const primitive = { show: false, rectangle, imageUrl };
+    built.push(primitive);
+    return primitive;
+  };
+  const viewer = {
+    scene: {
+      primitives: {
+        add: (p) => { scenePrimitives.add(p); return p; },
+        remove: (p) => scenePrimitives.delete(p),
+      },
+    },
+  };
   const layer = createShmuRadarLayer({
     fetchImpl: async () => ({ ok: true, json: async () => served }),
+    primitiveFactory: stubFactory,
   });
 
   assert.equal(layer.id, 'shmu-radar');
   assert.equal(layer.updateInterval, 5 * 60 * 1000);
   assert.match(layer.source, /SHMÚ/);
 
-  const added = [];
-  const viewer = { dataSources: { add: (ds) => added.push(ds), remove: () => true } };
+  // Vždy uprac timery animátora — visiaci timer po páde assertu inak drží
+  // celý node --test proces pri živote.
+  try {
   layer.init(viewer);
-  assert.equal(added.length, 1);
-  assert.equal(added[0].show, false);
-
-  layer.enable(viewer);
-  assert.equal(added[0].show, true);
-
   assert.equal(await layer.update(viewer), true);
-  const entity = added[0].entities.getById('shmu-radar:overlay');
-  assert.ok(entity, 'update must create the drape entity');
-  const now = Cesium.JulianDate.now();
-  const rect = entity.rectangle.coordinates.getValue(now);
-  assert.ok(Math.abs(Cesium.Math.toDegrees(rect.west) - 13.6) < 1e-6);
-  assert.ok(Math.abs(Cesium.Math.toDegrees(rect.north) - 50.7) < 1e-6);
-  assert.equal(entity.rectangle.height.getValue(now), SHMU_RADAR_DRAPE_HEIGHT_M);
+
+  // Jeden skrytý primitív na frame; textúry ostávajú rezidentné.
+  assert.equal(built.length, 3);
+  assert.equal(scenePrimitives.size, 3);
+  assert.deepEqual(built.map((p) => p.imageUrl), [
+    '/api/shmu/radar/frame/f1.png',
+    '/api/shmu/radar/frame/f2.png',
+    '/api/shmu/radar/frame/f3.png',
+  ]);
+  assert.ok(built.every((p) => p.show === false), 'disabled layer keeps every frame hidden');
+  assert.ok(Math.abs(Cesium.Math.toDegrees(built[0].rectangle.west) - 13.6) < 1e-6);
+  assert.ok(Math.abs(Cesium.Math.toDegrees(built[0].rectangle.north) - 50.7) < 1e-6);
+
+  // Enable spustí slučku okamžite od najstaršieho frame-u.
+  layer.enable(viewer);
+  assert.equal(built[0].show, true, 'enable must start the loop at the oldest frame');
+  assert.equal(built[2].show, false);
+
   assert.deepEqual(layer.getStats().error, null);
   assert.equal(layer.getStats().stale, false);
   assert.equal(layer.getStats().count, 1234);
@@ -200,23 +272,46 @@ test('layer contract: entity drape, stats, stale surfaced, id/cadence pinned', a
   assert.equal(layer.getStats().lastUpdate, Date.parse(meta.iso));
   assert.match(layer.source, /18:10 UTC/);
 
+  // Nový slot v ringu: pribudne len JEDEN primitív, staré sa zrecyklujú,
+  // vypadnutý slot sa odstráni zo scény.
+  served = {
+    ...meta,
+    iso: '2026-08-30T18:15:00Z',
+    frames: [
+      meta.frames[1],
+      meta.frames[2],
+      { iso: '2026-08-30T18:15:00Z', echoPixels: 1300, png: '/api/shmu/radar/frame/f4.png' },
+    ],
+  };
+  assert.equal(await layer.update(viewer), true);
+  assert.equal(built.length, 4, 'only the genuinely new slot builds a primitive');
+  assert.equal(scenePrimitives.size, 3, 'pruned slot must leave the scene');
+  assert.ok(!scenePrimitives.has(built[0]), 'oldest frame primitive removed');
+
   // A stale frame is a first-class feed state — never silently current,
   // never disguised as a transport error.
-  served = { ...meta, iso: '2026-08-30T17:00:00Z', stale: true, echoPixels: 99 };
+  served = { ...served, stale: true, echoPixels: 99 };
   assert.equal(await layer.update(viewer), true);
   assert.equal(layer.getStats().stale, true);
   assert.equal(layer.getStats().error, null);
   assert.equal(layer.getStats().count, 99);
 
   // Transport failure keeps the layer honest too.
-  served = null;
-  const failing = createShmuRadarLayer({ fetchImpl: async () => ({ ok: false, status: 503 }) });
+  const failing = createShmuRadarLayer({
+    fetchImpl: async () => ({ ok: false, status: 503 }),
+    primitiveFactory: stubFactory,
+  });
   failing.init(viewer);
   assert.equal(await failing.update(viewer), false);
   assert.match(failing.getStats().error, /503/);
 
   layer.disable(viewer);
-  assert.equal(added[0].show, false);
+  assert.ok(built.every((p) => p.show === false), 'disable hides the visible frame');
   layer.destroy(viewer);
+  assert.equal(scenePrimitives.size, 0, 'destroy removes every frame primitive');
   assert.equal(layer.getStats().count, 0);
+  } finally {
+    layer.disable(viewer);
+    layer.destroy(viewer);
+  }
 });

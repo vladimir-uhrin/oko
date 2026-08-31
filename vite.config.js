@@ -1999,15 +1999,18 @@ function tomtomProxy() {
  * through upstream hiccups. Pattern mirrors firmsProxy.
  *
  * Routes:
- *   GET /api/shmu/radar            → {ok, product, iso, bounds, echoPixels,
- *                                     stale, ttlMs, png}
- *   GET /api/shmu/radar/latest.png → image/png (transparent between echoes)
+ *   GET /api/shmu/radar                → {ok, product, iso, bounds, echoPixels,
+ *                                         stale, ttlMs, png, frames[]}
+ *   GET /api/shmu/radar/latest.png     → image/png, no-store
+ *   GET /api/shmu/radar/frame/<iso>.png→ image/png, immutable (animation ring)
  */
 function shmuRadarProxy() {
   const TTL_MS = 5 * 60_000;
   const SLOT_MS = 5 * 60_000;
-  /** Slots probed per refresh: the latest + 5 back (~30 min of lag/gap cover). */
-  const MAX_SLOT_LOOKBACK = 6;
+  /** Slots probed per refresh: the latest + 6 back (~35 min of lag/gap cover). */
+  const MAX_SLOT_LOOKBACK = 7;
+  /** Animation ring: last N frames (~30 min) served as immutable per-ISO PNGs. */
+  const FRAME_KEEP = 7;
   const FETCH_TIMEOUT_MS = 15_000;
   /** Sanity cap — zmax files run ~40 KB; anything huge is not this product. */
   const MAX_HDF_BYTES = 8 * 1024 * 1024;
@@ -2031,11 +2034,12 @@ function shmuRadarProxy() {
   const BASE_URL = `https://opendata.shmu.sk/meteorology/weather/radar/composite/skcomp/${PRODUCT}`;
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
   const META_PATH = path.join(CACHE_DIR, 'shmu-radar.json');
-  const PNG_PATH = path.join(CACHE_DIR, 'shmu-radar.png');
+  const framePngPath = (iso) => path.join(CACHE_DIR, `shmu-radar-${String(iso).replace(/[:]/g, '')}.png`);
 
-  /** @type {?{at: number, iso: string, bounds: object, echoPixels: number,
-   *   width: number, height: number, png: Buffer}} */
-  let mem = null;
+  /** Animation ring, ASC by iso. Each: {iso, at, bounds, echoPixels, width, height, png: Buffer}.
+   * @type {Array<object>} */
+  let frames = [];
+  const latestFrame = () => (frames.length ? frames[frames.length - 1] : null);
   let diskChecked = false;
   /** @type {?Promise<void>} single-flight refresh */
   let inflight = null;
@@ -2076,18 +2080,21 @@ function shmuRadarProxy() {
     ]);
   }
 
-  /** Candidate product URLs, newest first (UTC slots, floor to 5 min). */
-  function candidateUrls(nowMs) {
-    const urls = [];
+  /** Candidate product slots, newest first (UTC, floor to 5 min). */
+  function candidateSlots(nowMs) {
+    const slots = [];
     const floored = Math.floor(nowMs / SLOT_MS) * SLOT_MS;
     for (let k = 0; k < MAX_SLOT_LOOKBACK; k++) {
       const d = new Date(floored - k * SLOT_MS);
       const p = (n) => String(n).padStart(2, '0');
       const ymd = `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
       const hm = `${p(d.getUTCHours())}${p(d.getUTCMinutes())}`;
-      urls.push(`${BASE_URL}/${ymd}/${FILE_PREFIX}_C_LZIB_${ymd}${hm}00.hdf`);
+      slots.push({
+        iso: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:00Z`,
+        url: `${BASE_URL}/${ymd}/${FILE_PREFIX}_C_LZIB_${ymd}${hm}00.hdf`,
+      });
     }
-    return urls;
+    return slots;
   }
 
   /** HDF5 bytes → cache entry (decode + colorize + PNG). Throws on bad input. */
@@ -2120,66 +2127,96 @@ function shmuRadarProxy() {
     diskChecked = true;
     try {
       const parsed = JSON.parse(await fsp.readFile(META_PATH, 'utf8'));
-      const png = await fsp.readFile(PNG_PATH);
-      if (parsed?.iso && parsed?.bounds && png?.length) {
-        mem = { ...parsed, png };
+      const restored = [];
+      for (const entry of parsed?.frames || []) {
+        if (!entry?.iso || !entry?.bounds) continue;
+        try {
+          restored.push({ ...entry, png: await fsp.readFile(framePngPath(entry.iso)) });
+        } catch { /* frame png pruned/missing — skip */ }
       }
+      restored.sort((a, b) => a.iso.localeCompare(b.iso));
+      if (restored.length) frames = restored.slice(-FRAME_KEEP);
     } catch { /* no disk cache yet */ }
   }
 
-  async function writeDisk(entry) {
+  async function writeDisk(prunedIsos) {
     try {
       await fsp.mkdir(CACHE_DIR, { recursive: true });
-      const { png, ...meta } = entry;
-      await fsp.writeFile(META_PATH, JSON.stringify(meta), 'utf8');
-      await fsp.writeFile(PNG_PATH, png);
+      for (const frame of frames) {
+        await fsp.writeFile(framePngPath(frame.iso), frame.png);
+      }
+      const index = frames.map(({ png, ...meta }) => meta);
+      await fsp.writeFile(META_PATH, JSON.stringify({ frames: index }), 'utf8');
+      for (const iso of prunedIsos) {
+        await fsp.rm(framePngPath(iso), { force: true }).catch(() => {});
+      }
     } catch (err) {
       console.warn('[shmu-radar] cache write failed:', err?.message || err);
     }
   }
 
-  /** Try slots newest-first; keep the previous frame on total failure. */
+  /**
+   * Fill the animation ring: fetch every candidate slot the ring is missing
+   * (newest-first). Cold start pulls up to FRAME_KEEP ~40 KB files once;
+   * steady state fetches exactly the one new slot per 5 minutes. A slot that
+   * 404s (not published yet / gap) is simply absent from the loop.
+   */
   async function refreshUpstream() {
-    for (const url of candidateUrls(Date.now())) {
+    const have = new Set(frames.map((f) => f.iso));
+    let added = false;
+    for (const slot of candidateSlots(Date.now())) {
+      if (have.has(slot.iso)) continue;
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        const res = await fetch(slot.url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
         if (res.status === 404) continue; // slot not published (yet)
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();
         if (buf.byteLength > MAX_HDF_BYTES) throw new Error(`oversized product (${buf.byteLength} B)`);
         const entry = decodeEntry(buf);
-        mem = entry;
-        await writeDisk(entry);
-        return;
+        frames.push(entry);
+        added = true;
       } catch (err) {
         // undici wraps network errors: the actionable code lives in `cause`.
         const cause = err?.cause ? ` (${err.cause.code || err.cause.message})` : '';
-        console.warn(`[shmu-radar] ${url.slice(-27)} failed:`, `${err?.message || err}${cause}`);
+        console.warn(`[shmu-radar] ${slot.url.slice(-27)} failed:`, `${err?.message || err}${cause}`);
       }
     }
-    console.warn('[shmu-radar] no slot within lookback — serving cache if any');
+    if (!added && !frames.length) {
+      console.warn('[shmu-radar] no slot within lookback — serving cache if any');
+      return;
+    }
+    frames.sort((a, b) => a.iso.localeCompare(b.iso));
+    const pruned = frames.slice(0, Math.max(0, frames.length - FRAME_KEEP)).map((f) => f.iso);
+    frames = frames.slice(-FRAME_KEEP);
+    if (added) await writeDisk(pruned);
   }
 
   async function ensureFresh() {
     await readDiskOnce();
-    if (mem && Date.now() - mem.at < TTL_MS) return;
+    const latest = latestFrame();
+    if (latest && Date.now() - latest.at < TTL_MS) return;
     if (!inflight) {
       inflight = refreshUpstream().finally(() => { inflight = null; });
     }
     await inflight;
   }
 
-  function buildMeta(entry) {
-    const stale = Date.now() - Date.parse(entry.iso) > STALE_AFTER_MS;
+  const frameUrl = (iso) => `/api/shmu/radar/frame/${encodeURIComponent(iso)}.png`;
+
+  function buildMeta() {
+    const latest = latestFrame();
+    const stale = Date.now() - Date.parse(latest.iso) > STALE_AFTER_MS;
     return {
       ok: true,
       product: PRODUCT,
-      iso: entry.iso,
-      bounds: entry.bounds,
-      echoPixels: entry.echoPixels,
+      iso: latest.iso,
+      bounds: latest.bounds,
+      echoPixels: latest.echoPixels,
       stale,
       ttlMs: TTL_MS,
-      png: `/api/shmu/radar/latest.png?v=${encodeURIComponent(entry.iso)}`,
+      png: frameUrl(latest.iso),
+      // Oldest→newest — the client plays this as the last ~30 min loop.
+      frames: frames.map((f) => ({ iso: f.iso, echoPixels: f.echoPixels, png: frameUrl(f.iso) })),
     };
   }
 
@@ -2195,16 +2232,30 @@ function shmuRadarProxy() {
         try {
           const subPath = String(req.url || '').split('?')[0];
           await ensureFresh();
-          if (!mem) {
+          const latest = latestFrame();
+          if (!latest) {
             sendJson(503, { ok: false, error: 'radar_unavailable' });
             return;
           }
           if (subPath === '/latest.png') {
             res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
-            res.end(mem.png);
+            res.end(latest.png);
             return;
           }
-          sendJson(200, buildMeta(mem));
+          if (subPath.startsWith('/frame/') && subPath.endsWith('.png')) {
+            const iso = decodeURIComponent(subPath.slice('/frame/'.length, -'.png'.length));
+            const frame = frames.find((f) => f.iso === iso);
+            if (!frame) {
+              sendJson(404, { ok: false, error: 'frame_gone' });
+              return;
+            }
+            // A frame for a given product time never changes — let the browser
+            // cache it hard so the animation loop costs zero repeat fetches.
+            res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400, immutable' });
+            res.end(frame.png);
+            return;
+          }
+          sendJson(200, buildMeta());
         } catch (err) {
           console.warn('[shmu-radar] request failed:', err?.message || err);
           sendJson(500, { ok: false, error: 'radar_proxy_error' });
