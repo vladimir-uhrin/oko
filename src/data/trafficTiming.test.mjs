@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import { getTrafficTimingDiagnostics } from './traffic.js';
 
@@ -123,7 +123,21 @@ test('traffic timing stays inert when the DEV flag is off under bare Node', () =
 });
 
 test('traffic timing pairs real ordering to the scheduling change and guards re-arms', async () => {
-  const { createServer } = await import('vite');
+  // Historicky tento test spúšťal celý Vite dev server (createServer +
+  // ssrLoadModule) len kvôli dvom veciam: import.meta.env.DEV existuje iba
+  // cez Vite transform, a test hook potreboval čítať modulom-privátny
+  // _trafficTimingCurrentAnchor. Vite module-runner má ale TVRDÝ 60 s
+  // transport timeout per fetchModule — pri paralelnom behu celej suity
+  // (CPU vyhladovanie) opakovane pretiekol ("transport invoke timed out
+  // after 60000ms", 3× dňa 2026-08-31), hoci izolovane test prechádzal.
+  // Preto sa inštrumentovaná kópia traffic.js vyrába ~10-riadkovým
+  // transformom priamo tu (DEV flag → true, relatívne importy → absolútne
+  // file:// URL, doplnený hook export) a importuje sa čistým Node — žiadny
+  // server, žiadny transport, žiadny timeout. Zdieľané závislosti sa
+  // rozriešia na tie isté URL ako statický import hore, takže sa
+  // NEEVALUUJÚ druhýkrát; čerstvá je len samotná kópia traffic.js, čo je
+  // presne stav, ktorý test potrebuje (nulové countery, window prítomné
+  // pri evaluácii).
   const originalWindow = globalThis.window;
   const originalDocument = globalThis.document;
   const originalFetch = globalThis.fetch;
@@ -135,9 +149,14 @@ test('traffic timing pairs real ordering to the scheduling change and guards re-
   const originalWarn = console.warn;
   const timeouts = new Map();
   let timerId = 0;
-  let server;
   let trafficLayer;
   let viewer;
+  // Kópia žije v .gev-cache (gitignored, watcher-ignored) a NIE v OS tempe:
+  // bare import 'cesium' sa rieši prechodom nahor k node_modules repa.
+  const instanceUrl = new URL(
+    `../../.gev-cache/traffic-timing-under-test-${process.pid}.mjs`,
+    import.meta.url,
+  );
 
   const pendingDebounce = () => {
     const matches = [...timeouts].filter(([, timer]) => timer.delay === 320);
@@ -157,22 +176,27 @@ test('traffic timing pairs real ordering to the scheduling change and guards re-
       location: { search: '?trafficDebug=1' },
       addEventListener() {},
     };
-    server = await createServer({
-      root: fileURLToPath(new URL('../..', import.meta.url)),
-      configFile: false,
-      appType: 'custom',
-      logLevel: 'silent',
-      server: { middlewareMode: true },
-      plugins: [{
-        name: 'traffic-timing-test-hooks',
-        transform(code, id) {
-          if (!id.endsWith('/src/data/traffic.js')) return null;
-          return `${code}\nexport const __trafficTimingTestHooks = {\n` +
-            `  currentAnchor: () => _trafficTimingCurrentAnchor,\n};\n`;
-        },
-      }],
-    });
-    const traffic = await server.ssrLoadModule('/src/data/traffic.js');
+    // Tripwire: transform stojí na jedinom výskyte DEV flagu — keby traffic.js
+    // pribral ďalší, tento assert to ohlási skôr, než by test ticho minul vetvu.
+    assert.equal(
+      (SOURCE.match(/import\.meta\.env\?\.DEV/g) || []).length,
+      1,
+      'traffic.js má mať presne jeden import.meta.env?.DEV — uprav transform nižšie',
+    );
+    const dataDirUrl = new URL('./', import.meta.url);
+    let instrumented = SOURCE
+      .replace('import.meta.env?.DEV', 'true')
+      .replace(/from '(\.{1,2}\/[^']+)'/g, (full, spec) => `from '${new URL(spec, dataDirUrl).href}'`);
+    assert.doesNotMatch(
+      instrumented,
+      /from '\.{1,2}\//,
+      'po prepise nesmie ostať žiadny relatívny import (kópia žije mimo src/data)',
+    );
+    instrumented += '\nexport const __trafficTimingTestHooks = {\n'
+      + '  currentAnchor: () => _trafficTimingCurrentAnchor,\n};\n';
+    await mkdir(new URL('./', instanceUrl), { recursive: true });
+    await writeFile(instanceUrl, instrumented, 'utf8');
+    const traffic = await import(`${instanceUrl.href}?t=${Date.now()}`);
     trafficLayer = traffic.default;
 
     globalThis.document = { documentElement: { dataset: {} } };
@@ -317,7 +341,7 @@ test('traffic timing pairs real ordering to the scheduling change and guards re-
     )), 'the canceled/stale B load must never emit a correlated trace');
   } finally {
     trafficLayer?.disable(viewer);
-    await server?.close();
+    await rm(instanceUrl, { force: true }).catch(() => {});
     globalThis.window = originalWindow;
     globalThis.document = originalDocument;
     globalThis.fetch = originalFetch;
