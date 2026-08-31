@@ -1,5 +1,6 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from './renderGovernor.js';
+import { resolveKeylessTerrainUrl, SK_TERRAIN_CREDIT } from './data/skTerrain.js';
 
 export const MAP_STACKS = [
   {
@@ -365,17 +366,24 @@ export class MapStackController {
 
   /**
    * Resolves (and caches) the keyless terrain provider for globe stacks
-   * without an ion token: Re:Earth ellipsoidal quantized-mesh terrain, or
-   * `EllipsoidTerrainProvider` (flat — current/prior behavior) if the
-   * Re:Earth endpoint can't be constructed. Never throws.
+   * without an ion token. Preferuje lokálny merge endpoint `/api/sk-terrain`
+   * (dev proxy: DMR 3.5 dlaždice nad SR, Re:Earth passthrough všade inde —
+   * Fáza 1b, výšky ostávajú elipsoidné, takže výškový kontrakt §1a platí
+   * nezmenene); bez proxy (produkčný build) padá na priamy Re:Earth a pri
+   * úplnom zlyhaní na `EllipsoidTerrainProvider` (flat — pôvodné správanie).
+   * Never throws.
    * @returns {Promise<Cesium.TerrainProvider>}
    */
   async _getKeylessTerrainProvider() {
     if (this._reearthTerrainProvider) return this._reearthTerrainProvider;
+    const { url, merged } = await resolveKeylessTerrainUrl({ upstreamUrl: REEARTH_TERRAIN_URL });
     try {
-      this._reearthTerrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(REEARTH_TERRAIN_URL);
+      this._reearthTerrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(
+        url,
+        merged ? { credit: SK_TERRAIN_CREDIT } : {},
+      );
     } catch (error) {
-      console.warn('[mapStackController] Re:Earth terrain unavailable, falling back to flat ellipsoid terrain:', error);
+      console.warn('[mapStackController] keyless terrain unavailable, falling back to flat ellipsoid terrain:', error);
       this._reearthTerrainProvider = new Cesium.EllipsoidTerrainProvider();
     }
     return this._reearthTerrainProvider;

@@ -60,6 +60,7 @@ import {
 import { normalizeAdsbLolPointResponse } from './src/data/adsbLolFallback.js';
 import { createAisStreamAdapter, isRecognizedAisEnvelope } from './src/data/aisStreamAdapter.js';
 import { parseSilenceTimeoutEnv } from './src/data/aisWatchdog.js';
+import { parseTerrainTilePath, SK_TERRAIN_UPSTREAM_URL } from './src/data/skTerrain.js';
 import {
   fetchTerrainChunkWithRetry,
   parseTerrainPoints,
@@ -7635,6 +7636,154 @@ function normalizeAisTimestamp(value) {
 }
 
 /**
+ * SK terén — merge proxy (OKO Fáza 1b, `/api/sk-terrain`).
+ *
+ * Cesium má jeden terrainProvider a keyless globe stacky už majú celosvetový
+ * Re:Earth terén (ELIPSOIDNÉ výšky). SK terén preto svet NENAHRÁDZA
+ * (CLAUDE.md: OKO nie je SK-only) — tento endpoint MERGUJE:
+ *
+ *   layer.json            → Re:Earth (plná globálna availability do z14),
+ *                           disk cache s TTL + serve-stale; fallback na
+ *                           lokálny CTB layer.json (SK-only degradácia),
+ *                           ak upstream nikdy neodpovedal.
+ *   {z}/{x}/{y}.terrain   → lokálna DMR dlaždica (.gev-cache/sk-terrain,
+ *                           výstup scripts/build-sk-terrain.mjs — gzip na
+ *                           disku, preto Content-Encoding: gzip), inak
+ *                           passthrough na Re:Earth s write-through disk
+ *                           cache (dlaždice sú malé a nemenné).
+ *
+ * Build orezáva lokálne dlaždice na VNÚTRO dátového footprintu SR, takže
+ * hraničné dlaždice vždy servíruje Re:Earth a na hraniciach nevzniká útes
+ * z nodata výplne. Bez spusteného buildu je endpoint čistý mirror — klient
+ * (mapStackController) si ho vyberá probe-om, produkčný build bez middleware
+ * padá na priamy Re:Earth.
+ */
+function skTerrainProxy() {
+  const TILE_DIR = path.join(process.cwd(), '.gev-cache', 'sk-terrain');
+  const UPSTREAM_CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'sk-terrain-upstream');
+  const LAYER_TTL_MS = 24 * 3_600_000;
+  const FETCH_TIMEOUT_MS = 20_000;
+  const QUANTIZED_MESH_TYPE = 'application/vnd.quantized-mesh';
+  /** @type {?{at: number, body: Buffer}} */
+  let layerCache = null;
+  /** @type {?Promise<Buffer>} single-flight upstream layer.json fetch */
+  let layerInflight = null;
+
+  const upstreamTileUrl = ({ z, x, y }) => `${SK_TERRAIN_UPSTREAM_URL}/${z}/${x}/${y}.terrain`;
+  const localTilePath = ({ z, x, y }) => path.join(TILE_DIR, String(z), String(x), `${y}.terrain`);
+  const upstreamCachePath = ({ z, x, y }) => path.join(UPSTREAM_CACHE_DIR, `${z}-${x}-${y}.terrain`);
+
+  async function fetchUpstreamLayerJson() {
+    const response = await fetch(`${SK_TERRAIN_UPSTREAM_URL}/layer.json`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`upstream layer.json HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  /** Merged layer.json: čerstvý upstream, inak stale, inak lokálny CTB. */
+  async function resolveLayerJson() {
+    const now = Date.now();
+    if (layerCache && now - layerCache.at < LAYER_TTL_MS) return layerCache.body;
+    if (!layerInflight) {
+      layerInflight = fetchUpstreamLayerJson()
+        .then((body) => { layerCache = { at: Date.now(), body }; return body; })
+        .finally(() => { layerInflight = null; });
+    }
+    try {
+      return await layerInflight;
+    } catch (error) {
+      if (layerCache) return layerCache.body; // serve-stale
+      // Upstream nikdy neodpovedal: SK-only fallback z buildu (svet bude
+      // dočasne plochý — horšie než merge, lepšie než žiadny terén).
+      const local = await fsp.readFile(path.join(TILE_DIR, 'layer.json')).catch(() => null);
+      if (local) {
+        console.warn('[skTerrain] Re:Earth layer.json nedostupný — servírujem SK-only fallback:', error?.message || error);
+        return local;
+      }
+      throw error;
+    }
+  }
+
+  function install(server) {
+    server.middlewares.use('/api/sk-terrain', async (req, res) => {
+      const send = (status, headers, body) => {
+        if (res.headersSent) return;
+        res.writeHead(status, headers);
+        res.end(body);
+      };
+      const pathname = String(req.url || '').split('?')[0];
+      try {
+        if (pathname === '/layer.json') {
+          const body = await resolveLayerJson();
+          send(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body);
+          return;
+        }
+        if (pathname === '/status') {
+          const hasLocalBuild = fs.existsSync(path.join(TILE_DIR, 'layer.json'));
+          send(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+            JSON.stringify({ ok: true, hasLocalBuild }));
+          return;
+        }
+        const tile = parseTerrainTilePath(pathname);
+        if (!tile) {
+          send(404, { 'Content-Type': 'text/plain' }, 'not found');
+          return;
+        }
+        // 1) Lokálna DMR dlaždica — CTB ju ukladá gzipnutú, hlavička to prizná.
+        const local = await fsp.readFile(localTilePath(tile)).catch(() => null);
+        if (local) {
+          send(200, {
+            'Content-Type': QUANTIZED_MESH_TYPE,
+            'Content-Encoding': 'gzip',
+            'Cache-Control': 'public, max-age=86400',
+            'x-sk-terrain': 'local',
+          }, local);
+          return;
+        }
+        // 2) Passthrough na Re:Earth s write-through cache (fetch dekóduje
+        //    gzip sám, takže cache aj odpoveď sú surový quantized-mesh).
+        const cached = await fsp.readFile(upstreamCachePath(tile)).catch(() => null);
+        if (cached) {
+          send(200, {
+            'Content-Type': QUANTIZED_MESH_TYPE,
+            'Cache-Control': 'public, max-age=86400',
+            'x-sk-terrain': 'upstream-cache',
+          }, cached);
+          return;
+        }
+        const upstream = await fetch(upstreamTileUrl(tile), {
+          headers: req.headers.accept ? { Accept: req.headers.accept } : undefined,
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
+        if (!upstream.ok) {
+          send(upstream.status === 404 ? 404 : 502, { 'Content-Type': 'text/plain' }, 'upstream tile unavailable');
+          return;
+        }
+        const body = Buffer.from(await upstream.arrayBuffer());
+        await fsp.mkdir(UPSTREAM_CACHE_DIR, { recursive: true }).catch(() => {});
+        await fsp.writeFile(upstreamCachePath(tile), body).catch(() => {});
+        send(200, {
+          'Content-Type': upstream.headers.get('content-type') || QUANTIZED_MESH_TYPE,
+          'Cache-Control': 'public, max-age=86400',
+          'x-sk-terrain': 'upstream',
+        }, body);
+      } catch (error) {
+        // Sanitizovaná chyba (proxy baseline) — detail ostáva v server logu.
+        console.warn('[skTerrain] request zlyhal:', error?.message || error);
+        send(502, { 'Content-Type': 'text/plain' }, 'terrain proxy error');
+      }
+    });
+  }
+
+  return {
+    name: 'sk-terrain-proxy',
+    configureServer: install,
+    configurePreviewServer: install,
+  };
+}
+
+/**
  * Main Vite configuration factory.
  *
  * Loads .env files via Vite's loadEnv, registers Cesium + local proxy
@@ -7657,6 +7806,7 @@ export default defineConfig(({ mode }) => {
       tomtomProxy(),
       firmsProxy(),
       shmuRadarProxy(),
+      skTerrainProxy(),
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),
@@ -7680,6 +7830,13 @@ export default defineConfig(({ mode }) => {
       allowedHosts: (env.HOST === '0.0.0.0' || env.HOST === '::')
         ? true
         : ['localhost', '127.0.0.1', '.local'],
+      watch: {
+        // Runtime caches and QA output live inside the repo but are not
+        // source: heavy or mid-write files there (radar PNGs, terrain
+        // builds, screenshots) must never feed HMR — a file locked by a
+        // downloader makes chokidar throw EBUSY, which KILLS the dev server.
+        ignored: ['**/.gev-cache/**', '**/qa-shots/**'],
+      },
     },
     // Expose selected API keys to the browser via import.meta.env.*
     define: {

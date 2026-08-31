@@ -197,15 +197,40 @@ takže prvý klik nového návštevníka vždy doručí. Hlasové aliasy: „rad
   POHĽAD NA SLOVENSKO"), podľa pravidla z CLAUDE.md.
 - **SK misia rámuje Slovensko** (`cameraRectangleDegrees`), nie celý glóbus.
 
-### Fáza 1b — DMR 5.0 terrain (úloha, zatiaľ nerealizované)
+### Fáza 1b — SK terén (2026-08-31, HOTOVÉ — DMR 3.5 celoštátne)
 
-Oficiálny Cesium terrain (quantized-mesh) pre DMR 5.0 neexistuje — GKÚ poskytuje
-len WMS vizualizáciu terénu a download GeoTIFFov (LOT-y, CC BY 4.0 podľa
-registra otvorených dát; presné znenie preveriť pri realizácii). Plán:
-stiahnuť DMR 5.0 pre Žitný ostrov, zbuildovať quantized-mesh
-(cesium-terrain-builder) a servovať lokálne/z vlastného hostingu ako terrain
-provider pre keyless stacky. ZBGIS 3D klient má interný terrain endpoint, ale
-je nedokumentovaný — nepoužívať.
+Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
+
+- **Zdroj: DMR 3.5, 10 m, celá SR** — `opendata.skgeodesy.sk/static/DMR3_5/dmr3_5-10.zip`
+  (~2,3 GB; stránka GKÚ tvrdí 12 MB, neveriť). CC BY 4.0, autor ÚGKK SR
+  (deklarované na GKÚ „Na stiahnutie"; DATA_SOURCES.md). DMR 5.0/6.0 v 1 m sú
+  na neskoršie lokálne upgrady: 5.0 je JEDEN 190 GB deflatovaný TIFF (server
+  podporuje Range, ale deflate nemá random access — nepoužiteľné po častiach),
+  6.0 je po LOT-och 8,7–14,8 GB — použiteľný per-región vstup do tej istej
+  pipeline. MAPKA export (výrezy do 400 km²) vyžaduje e-mail + súhlas per
+  žiadosť — nie je to programová cesta.
+- **Pipeline: `scripts/build-sk-terrain.mjs`** (Docker: osgeo/gdal +
+  tumgis/ctb-quantized-mesh): download → warp `EPSG:5514+8357 → EPSG:4979`
+  s `PROJ_NETWORK=ON` (Bpv→ELIPSOIDNÉ výšky; overené: Tatry +42,9 m
+  undulácia, PROJ si stiahol transformačné gridy, presnosť ~1 m) → relabel
+  4326 → maska platnosti → `ctb-tile -f Mesh -C -N` z14→z0 → **prune na
+  vnútro dátového footprintu** (maskCoversTile s eróziou okraja).
+- **Merge, nie náhrada** (OKO nie je SK-only): Cesium má jeden
+  terrainProvider a keyless stacky už majú celosvetový Re:Earth (elipsoidný).
+  `/api/sk-terrain` (vite proxy) servíruje Re:Earth layer.json (plná
+  availability do z14), lokálnu DMR dlaždicu keď existuje, inak passthrough
+  s write-through cache. Prune garantuje, že hraničné dlaždice ostávajú
+  Re:Earth — nodata útes na 0 m nemôže vzniknúť. Klient
+  (`_getKeylessTerrainProvider`) si merge endpoint vyberá probe-om;
+  produkčný build bez middleware padá na priamy Re:Earth. Ion „world"
+  režim (Cesium World Terrain) sa nemení.
+- **Výškový kontrakt §1a platí**: mergované dlaždice sú elipsoidné ako
+  Re:Earth, `groundPriorM`/geoid logika sa nemení.
+- LEKCIA: vite watcher sledoval `.gev-cache/` — download so zamknutým súborom
+  (EBUSY z chokidar) ZABIL dev server. `server.watch.ignored` teraz kryje
+  `.gev-cache/**` aj `qa-shots/**` (pin v skTerrain.test.mjs).
+- ZBGIS 3D klient má interný terrain endpoint, ale je nedokumentovaný —
+  nepoužívať.
 
 ### Prevádzkové poznámky
 
