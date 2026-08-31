@@ -46,4 +46,8 @@ test('hover kontrakty: throttle, inštalácia v ui.js a bypass v paint slučke',
   assert.match(detectionJs, /hovered\s*\?\s*1\s*:\s*detectionBracketAlpha\(/);
   assert.match(detectionJs, /keyholeAlpha > 0 \|\| hovered/);
   assert.match(detectionJs, /_semanticPriority\(obj\) \+ \(hovered \? 1e6 : 0\)/);
+  // Callout hovered kontaktu obchádza keyhole dim aj v materializácii —
+  // inak mal hover pri okraji obrazovky rámik, ale text s 1 % opacity.
+  assert.match(detectionJs, /obj\._candidateHovered = hovered;/);
+  assert.match(detectionJs, /if \(obj\._candidateHovered\) keyholeAlpha = 1;/);
 });

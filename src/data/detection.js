@@ -1090,6 +1090,10 @@ function _materializeCandidate(obj, width, height, keyhole, occlusionRects, came
     );
     keyholeAlpha = Math.max(keyholeAlpha, placement.keyholeAlpha);
   }
+  // Hovered kontakt: callout na plnej alfe aj mimo keyhole — kurzor je
+  // pozornosť operátora (rovnaké pravidlo ako bracket v paint slučke).
+  // Bez tohto mal hover pri okraji obrazovky rámik, ale text 1 % opacity.
+  if (obj._candidateHovered) keyholeAlpha = 1;
   const layerId = obj._layerId || 'unknown';
   const sourceId = obj._cohortSourceId;
   return {
@@ -1344,6 +1348,7 @@ function _drawOverlay(frame) {
     obj._candidateColor = color;
     obj._candidatePrimary = primary;
     obj._candidateMicro = micro;
+    obj._candidateHovered = hovered;
 
     // Hovered contacts enter the cohort even outside the keyhole — the
     // pointer, not the keyhole center, is where the operator is looking.
