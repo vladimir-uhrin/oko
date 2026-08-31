@@ -62,6 +62,14 @@ import {
 import { routePlausible } from './routePlausible.js';
 import { isMilitaryIcao, isMilitaryLayerActive, refreshMilitaryRegistryIfStale, onMilitaryLayerActiveChange } from './militaryRegistry.js';
 import { formatFlightLevel } from './detectionDraw.js';
+import {
+  formatRouteLine,
+  parseSquawk,
+  progressLine,
+  routeProgress,
+  squawkAlert,
+  verticalTrendGlyph,
+} from './flightProgress.js';
 import { createGroundSnap } from './groundSnap.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { geoidSurfaceLastResortM, pickRenderAltitudeM } from './renderAltitude.js';
@@ -2916,6 +2924,9 @@ function _describeFlight(icao24) {
     // narration, getTrackedSubject) can use it as a label link without
     // re-guarding a whitespace-only enrichment value.
     registration: _toCleanText(info?.registration) || null,
+    // Transpondér — normalizovaný oktal; núdzové kódy (7500/7600/7700) si
+    // konzument vyhodnotí cez squawkAlert.
+    squawk: info?.squawk ?? null,
     origin: info?.route && _routeIsPlausible(icao24, info.route) ? info.route.origin.code : null,
     destination: info?.route && _routeIsPlausible(icao24, info.route) ? info.route.destination.code : null,
     route: info?.route && _routeIsPlausible(icao24, info.route) ? {
@@ -3283,7 +3294,10 @@ function _trackedLabelText(icao24) {
   // the tail number rather than raw hex.
   const cs = _contactLabel(icao24, info);
   const altFt = Math.round((info.altitude || 0) * 3.28084);
-  const fl = altFt >= 18000 ? `FL${Math.round(altFt / 100)}` : `${altFt} ft`;
+  // Trend stúpania/klesania sa lepí priamo na výšku (FL340↑) — glyfy ↑/↓
+  // z existujúcej rodiny, prah v flightProgress (±2,5 m/s ≈ 500 ft/min).
+  const trend = info.onGround ? '' : verticalTrendGlyph(info.verticalRate);
+  const fl = (altFt >= 18000 ? `FL${Math.round(altFt / 100)}` : `${altFt} ft`) + trend;
   const spd = info.velocity ? `${Math.round(info.velocity * 1.944)} kts` : '';
   const stale = (_missingPolls.get(icao24) || _backoff) ? 'STALE' : '';
   const lines = [[cs, fl, spd, stale].filter(Boolean).join(' · ')];
@@ -3294,8 +3308,23 @@ function _trackedLabelText(icao24) {
     : [info.airline, info.typeName || info.typeCode].filter(Boolean).join(' · ');
   if (ident) lines.push(ident);
   if (info.route && _routeIsPlausible(icao24, info.route)) {
-    lines.push(`${info.route.origin.code} → ${info.route.destination.code}`);
+    // Trasa s mestami (adsbdb municipality) + textový progress bar s ETA.
+    // Všetko odvodené z dát, ktoré už tečú; keď chýba súradnica alebo
+    // letová rýchlosť, riadok/segment sa jednoducho nevykreslí.
+    lines.push(formatRouteLine(info.route) || `${info.route.origin.code} → ${info.route.destination.code}`);
+    const progress = progressLine(routeProgress({
+      origin: info.route.origin,
+      destination: info.route.destination,
+      lat: info.rawLat,
+      lon: info.rawLon,
+      speedMps: info.velocity,
+    }));
+    if (progress) lines.push(progress);
   }
+  // Núdzový transpondérový kód je prvotriedna intel informácia — bežný
+  // squawk je šum a riadok nedostane.
+  const alert = squawkAlert(info.squawk);
+  if (alert) lines.push(`SQUAWK ${alert.code} · ${alert.label}`);
   return lines.join('\n');
 }
 
@@ -4191,6 +4220,9 @@ const flightsLayer = {
         const icao24 = _normalizeTrackedIcao(rawIcao24);
         const category = Number.isFinite(state[17]) ? state[17] : null; // extended=1 emitter category
         const vertical_rate = Number.isFinite(state[11]) ? state[11] : null; // m/s, + = climbing
+        // [14] squawk — normalizovaný na 4-miestny oktal alebo null; adsb.lol
+        // fallback ho mapuje na rovnaký index (adsbLolFallback.js).
+        const squawk = parseSquawk(state[14]);
         acceptedSnapshotIcaos.add(icao24);
         const onGround = on_ground === true;
 
@@ -4376,6 +4408,9 @@ const flightsLayer = {
           klass: classifyAircraft({ typeCode: prevMeta?.typeCode ?? null, category: cat }),
           turnRateDps: prevMeta?.turnRateDps || 0,
           verticalRate: stickyNumber(vertical_rate, prevMeta?.verticalRate, null),
+          // Sticky ako callsign: prázdny riadok v jednom polle nezhodí kód,
+          // reálna zmena squawku (pilot pretočí) sa prepíše ďalším fixom.
+          squawk: squawk ?? prevMeta?.squawk ?? null,
           // Analyst seam: OpenSky origin_country (state[2]) — additive, sticky
           // like callsign so a transient blank row doesn't blank the field.
           originCountry: stickyText(origin_country, prevMeta?.originCountry) || null,
@@ -4861,9 +4896,13 @@ const flightsLayer = {
       const id = _contactLabel(icao24, info);
       if (object.id !== id) object.id = id;
       const altitude = info?.altitude;
-      if (object._altitude !== altitude) {
+      // Trend je súčasť cache kľúča: pri vyrovnaní do hladiny sa výška
+      // nemení, ale šípka musí zmiznúť.
+      const trend = info?.onGround ? '' : verticalTrendGlyph(info?.verticalRate);
+      if (object._altitude !== altitude || object._trend !== trend) {
         object._altitude = altitude;
-        object.metric = formatFlightLevel(altitude); // altitude is metres
+        object._trend = trend;
+        object.metric = formatFlightLevel(altitude) + trend; // altitude is metres
       }
       result.push(object);
       if (result.length >= maxCount) break;

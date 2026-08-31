@@ -347,7 +347,10 @@ test('real civil track path creates no native label and publishes every cached h
     assert.ok(entities.values.every((candidate) => candidate.label === undefined));
     assert.deepEqual(entity.gevLabelModel, {
       title: 'N12345 · FL350 · 486 kts',
-      details: ['TEST AIR · A320', 'AUS → LAX'],
+      // FR24 blok (2026-08-31): trasa + textový progress bar s ETA — fixtúra
+      // sedí ~400 m od AUS, takže 0 % a ETA ~2:13 pri 250 m/s je korektný
+      // výstup routeProgress, nie regresia.
+      details: ['TEST AIR · A320', 'AUS → LAX', '▱▱▱▱▱▱▱▱ 0% · ETA 2:13'],
       accent: '#39d0ff',
     });
     viewer.scene.preUpdate.raiseEvent();

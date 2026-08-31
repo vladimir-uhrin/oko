@@ -35,6 +35,7 @@ import {
 } from './motionModel.js';
 import { setMilitaryLayerActive, registerMilitaryIcaos } from './militaryRegistry.js';
 import { formatFlightLevel } from './detectionDraw.js';
+import { verticalTrendGlyph } from './flightProgress.js';
 import { createGroundSnap } from './groundSnap.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { pickRenderAltitudeM } from './renderAltitude.js';
@@ -3515,10 +3516,14 @@ const militaryFlightsLayer = {
       const klass = tr3bTypeLabel(icao24, info?.type || 'MIL');
       if (object.klass !== klass) object.klass = klass;
       const altitudeFt = info?.altitudeFt ?? 0;
-      if (object._altitudeFt !== altitudeFt) {
+      // Trend je súčasť cache kľúča — pri vyrovnaní do hladiny sa výška
+      // nemení, ale šípka musí zmiznúť (zrkadlo flights.js).
+      const trend = info?.onGround ? '' : verticalTrendGlyph(info?.verticalRateMps);
+      if (object._altitudeFt !== altitudeFt || object._trend !== trend) {
         object._altitudeFt = altitudeFt;
+        object._trend = trend;
         // military metadata stores altitudeFt (feet); the helper takes metres
-        object.metric = formatFlightLevel(altitudeFt * 0.3048);
+        object.metric = formatFlightLevel(altitudeFt * 0.3048) + trend;
       }
       result.push(object);
       if (result.length >= maxCount) break;
