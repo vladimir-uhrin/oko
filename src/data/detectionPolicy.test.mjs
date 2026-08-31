@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import {
   AIRCRAFT_BRACKET_ALPHA_FLOOR,
   AIRCRAFT_BRACKET_FLOOR_ANCHOR,
-  AIR_DETECTION_RANGE_FULL_M,
-  AIR_DETECTION_RANGE_OFF_M,
+  DETECTION_RANGE_FULL_M,
+  DETECTION_RANGE_OFF_M,
   aircraftBracketAlphaFloor,
-  airDetectionRangeAlpha,
   canonicalizeDensity,
+  detectionRangeAlpha,
+  isRangeGatedDetectionType,
   defaultDensityForProfile,
   detectionBracketAlpha,
   detectionHorizontalSector,
@@ -30,34 +31,50 @@ test('side aircraft brackets stay readable without changing zero-opacity intent'
   assert.equal(detectionBracketAlpha('SAT', 0.05), 0.05);
 });
 
-test('ambientné AIR assemblies sú range-gatované: retikle len pri priblížení (OKO)', () => {
-  // Kontinentálny pohľad s retiklom na každom letiacom lietadle je šum —
+test('ambientné AIR/SEA assemblies sú range-gatované: retikle len pri priblížení (OKO)', () => {
+  // Kontinentálny pohľad s retiklom na každom lietadle a lodi je šum —
   // brána: plná viditeľnosť po FULL, nič za OFF, lineárny fade medzi tým.
-  assert.ok(AIR_DETECTION_RANGE_FULL_M < AIR_DETECTION_RANGE_OFF_M);
-  assert.equal(airDetectionRangeAlpha(0), 1);
-  assert.equal(airDetectionRangeAlpha(AIR_DETECTION_RANGE_FULL_M), 1);
-  assert.equal(airDetectionRangeAlpha(AIR_DETECTION_RANGE_OFF_M), 0);
-  assert.equal(airDetectionRangeAlpha(5_000_000), 0, 'kontinentálny pohľad → čisté ikony');
-  const mid = (AIR_DETECTION_RANGE_FULL_M + AIR_DETECTION_RANGE_OFF_M) / 2;
-  assert.ok(Math.abs(airDetectionRangeAlpha(mid) - 0.5) < 1e-9, 'stred pásma = 0.5');
+  assert.ok(DETECTION_RANGE_FULL_M < DETECTION_RANGE_OFF_M);
+  assert.equal(detectionRangeAlpha(0), 1);
+  assert.equal(detectionRangeAlpha(DETECTION_RANGE_FULL_M), 1);
+  assert.equal(detectionRangeAlpha(DETECTION_RANGE_OFF_M), 0);
+  assert.equal(detectionRangeAlpha(5_000_000), 0, 'kontinentálny pohľad → čisté ikony');
+  const mid = (DETECTION_RANGE_FULL_M + DETECTION_RANGE_OFF_M) / 2;
+  assert.ok(Math.abs(detectionRangeAlpha(mid) - 0.5) < 1e-9, 'stred pásma = 0.5');
   // Monotónne klesajúca — žiadne preblikávanie pri plynulom zoome.
   let prev = 1;
-  for (let d = 0; d <= AIR_DETECTION_RANGE_OFF_M + 10_000; d += 1_000) {
-    const a = airDetectionRangeAlpha(d);
+  for (let d = 0; d <= DETECTION_RANGE_OFF_M + 10_000; d += 1_000) {
+    const a = detectionRangeAlpha(d);
     assert.ok(a <= prev + 1e-12, `alpha musí neklesať pri ${d} m`);
     prev = a;
   }
   // Nečitateľná vzdialenosť failuje OTVORENE — reprodukuje pred-gate vzhľad.
-  assert.equal(airDetectionRangeAlpha(NaN), 1);
-  assert.equal(airDetectionRangeAlpha(undefined), 1);
+  assert.equal(detectionRangeAlpha(NaN), 1);
+  assert.equal(detectionRangeAlpha(undefined), 1);
+
+  // Brána platí pre lietadlá A lode; satelity zámerne nie (kamera je od LEO
+  // vždy megametre — orbitálne pole pri globálnom pohľade je pointa vrstvy).
+  assert.equal(isRangeGatedDetectionType('AIR'), true);
+  assert.equal(isRangeGatedDetectionType('SEA'), true);
+  assert.equal(isRangeGatedDetectionType('sea'), true);
+  assert.equal(isRangeGatedDetectionType('SAT'), false);
+  assert.equal(isRangeGatedDetectionType('SPACE'), false);
+  assert.equal(isRangeGatedDetectionType(''), false);
+  assert.equal(isRangeGatedDetectionType(null), false);
 
   // Kontraktové piny v paint slučke (detection.js): brána násobí AŽ PO
-  // aircraft floor-e, netrackované AIR ju dostáva, tracked ju obchádza,
-  // a mimo dosahu nevzniká ani callout kandidát.
+  // aircraft floor-e, netrackované gatované typy ju dostávajú, tracked ju
+  // obchádza, a mimo dosahu nevzniká ani callout kandidát.
   const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
-  assert.match(detectionJs, /if \(!isTracked && !_airRangeGateDisabledForTest\) \{\n\s*rangeAlpha = airDetectionRangeAlpha\(airDistance\);/);
+  assert.match(detectionJs, /!isTracked && !_rangeGateDisabledForTest && isRangeGatedDetectionType\(obj\.type\)/);
+  assert.match(detectionJs, /detectionRangeAlpha\(camDistance\)/);
   assert.match(detectionJs, /detectionBracketAlpha\(obj\.type, keyholeAlpha, keyholeOutsideOpacity\) \* rangeAlpha/);
   assert.match(detectionJs, /if \(rangeAlpha <= 0\) continue;/);
+
+  // Karty lodí (vesselLabels, mimo detection overlay) zrkadlia OFF prah —
+  // obe vrstvy dekorácií miznú v rovnakej vzdialenosti.
+  const vesselLabelsJs = fs.readFileSync(new URL('./vesselLabels.js', import.meta.url), 'utf8');
+  assert.match(vesselLabelsJs, /VESSEL_CARD_FADE_DISTANCE_M = 50_000;/);
 });
 
 test('the bracket floor anchor mirrors the real keyhole default it is calibrated to', () => {

@@ -11,8 +11,16 @@ export const VESSEL_LABEL_GRID_PX = 118;
 export const VESSEL_DEFAULT_LABEL_LIMIT = 900;
 /** Existing configured absolute ceiling; viewport grid demand is usually lower. */
 export const VESSEL_OVERLAY_MAX_COHORT = VESSEL_DEFAULT_LABEL_LIMIT;
-/** Existing ambient vessel-card distance fade reaches zero at 5000 km. */
-export const VESSEL_CARD_FADE_DISTANCE_M = 5_000_000;
+/**
+ * Ambient vessel-card distance fade endpoint (OKO). The upstream 5000 km
+ * endpoint meant a view over Slovakia still wore a wall of Baltic-fleet
+ * cards on the horizon — the operator asked for clean icons at distance
+ * (same directive as the aircraft reticle range gate in detectionPolicy).
+ * 50 km mirrors that gate's OFF threshold; with the host's 0.7 fade-start
+ * ratio, cards begin fading at 35 km. The SELECTED vessel keeps its card
+ * at any distance (applyVesselOverlayPolicy → Infinity).
+ */
+export const VESSEL_CARD_FADE_DISTANCE_M = 50_000;
 
 /**
  * AIS type family → chevron hue + card accent. Single source of truth for
@@ -90,7 +98,7 @@ export function vesselOverlayCohortLimit(width, height, rowLimit = VESSEL_DEFAUL
  * vessel card. Ambient and selected cards share `ambient-card`, so the host's
  * protected selected rectangle excludes ambient cards while bypassing quotas.
  * @param {Object} card Source-formatted vessel card.
- * @param {number} [fadeDistance=5000000] Ambient distance-fade endpoint.
+ * @param {number} [fadeDistance=VESSEL_CARD_FADE_DISTANCE_M] Ambient distance-fade endpoint.
  * @returns {Object}
  */
 export function applyVesselOverlayPolicy(card, fadeDistance = VESSEL_CARD_FADE_DISTANCE_M) {

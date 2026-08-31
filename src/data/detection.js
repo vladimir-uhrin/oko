@@ -35,11 +35,12 @@ import {
 } from './detectionCohort.js';
 import {
   ALLOCATION_ELASTIC,
-  airDetectionRangeAlpha,
   canonicalizeDensity,
   defaultDensityForProfile,
   detectionBracketAlpha,
   detectionHorizontalSector,
+  detectionRangeAlpha,
+  isRangeGatedDetectionType,
   labelBudgetFor,
   normalizeAllocationStrategy,
   normalizeProfile,
@@ -120,14 +121,14 @@ const BILL_FAR = 8000000;
 const BILL_FAR_SCALE = 0.5;
 
 /**
- * TEST ONLY — bypasses the ambient-AIR range gate. Host-lane fixtures place
- * their mock camera megametres from mock objects (identity projection makes
- * x/y the NDC); without this the gate would blank every AIR assembly those
+ * TEST ONLY — bypasses the ambient AIR/SEA range gate. Host-lane fixtures
+ * place their mock camera megametres from mock objects (identity projection
+ * makes x/y the NDC); without this the gate would blank every assembly those
  * tests exist to exercise. Mirrors the `_set*ForTest` convention (flights.js).
  */
-let _airRangeGateDisabledForTest = false;
-export function _setAirRangeGateDisabledForTest(disabled) {
-  _airRangeGateDisabledForTest = disabled === true;
+let _rangeGateDisabledForTest = false;
+export function _setDetectionRangeGateDisabledForTest(disabled) {
+  _rangeGateDisabledForTest = disabled === true;
 }
 /**
  * Query-string gate for the detection mode banner, mirroring `trafficDebug` in
@@ -1222,17 +1223,16 @@ function _drawOverlay(frame) {
     const isTracked = obj.skipLabel;
     let halfW;
     let halfH;
-    // Ambient AIR assemblies are range-gated (see detectionPolicy): reticles
-    // and callouts only near full zoom, clean icons at altitude. Tracked
-    // subjects bypass the gate.
-    let rangeAlpha = 1;
+    // Ambient AIR/SEA assemblies are range-gated (see detectionPolicy):
+    // reticles and callouts only near full zoom, clean icons at altitude.
+    // Tracked subjects bypass the gate; satellites are never gated.
+    const camDistance = Cesium.Cartesian3.distance(camPos, obj.position);
+    const rangeAlpha = (!isTracked && !_rangeGateDisabledForTest && isRangeGatedDetectionType(obj.type))
+      ? detectionRangeAlpha(camDistance)
+      : 1;
     if (obj.type === 'AIR') {
-      const airDistance = Cesium.Cartesian3.distance(camPos, obj.position);
-      if (!isTracked && !_airRangeGateDisabledForTest) {
-        rangeAlpha = airDetectionRangeAlpha(airDistance);
-      }
       const bscale = nearFarScale(
-        airDistance,
+        camDistance,
         BILL_NEAR, BILL_NEAR_SCALE, BILL_FAR, BILL_FAR_SCALE,
       );
       halfW = _clamp((isTracked ? 14 : 9) * bscale, 7, 48);

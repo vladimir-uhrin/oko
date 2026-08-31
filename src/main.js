@@ -134,6 +134,17 @@ async function init() {
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
     viewer.targetFrameRate = 60;
 
+    // Bez Cesium ion tokenu odstráň default „Cesium ion" logo z kreditov:
+    // CesiumJS je Apache-2.0 a logo je len zdvorilostný default — POVINNÉ je
+    // až pri používaní ion služieb (Bing stacky / ion terén), ktoré bez
+    // tokenu nikdy nebežia. S tokenom logo ostáva (ion ToS vyžaduje
+    // atribúciu). Google logo sa NIKDY neodstraňuje — Maps Platform ToS ho
+    // vyžaduje viditeľné, kým sa renderuje Google obsah (viď komentár pri
+    // creditContainer vyššie).
+    if (!cesiumToken) {
+      Cesium.CreditDisplay.cesiumCredit = undefined;
+    }
+
     // Register per-layer data attribution into the "Data attribution" popover.
     // Required by each source's license (ODbL, CC BY-NC-SA, NASA FIRMS, etc.);
     // strings are verbatim from DATA_SOURCES.md. Static + always-present in the
