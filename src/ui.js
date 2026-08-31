@@ -48,6 +48,7 @@ import {
   setDetectionStyle,
   setDetectionTuning,
 } from './data/detection.js';
+import { installDetectionHover } from './data/detectionHover.js';
 import {
   ALLOCATION_STRATEGIES,
   canonicalizeDensity,
@@ -2610,6 +2611,9 @@ export class StyleManager {
     initDetection(viewer, [trafficLayer, flightsLayer, militaryFlightsLayer, satellitesLayer, cctvLayer, bikeshareLayer, aisLiveVesselsLayer], (modeLabel) => {
       this._updateDetectionButton(modeLabel);
     });
+    // Hover-inspect: pointer over a plane/ship icon lights its assembly at
+    // any distance (on-demand doplnok k range gate v detectionPolicy).
+    installDetectionHover(viewer);
     initTrackedReadout(viewer);
     setDetectionStyle(this.activeStyle);
     this._applyDetectionDensityFromUi();

@@ -130,6 +130,52 @@ let _rangeGateDisabledForTest = false;
 export function _setDetectionRangeGateDisabledForTest(disabled) {
   _rangeGateDisabledForTest = disabled === true;
 }
+
+/**
+ * Hovered contact candidates (detectionHover.js): pointer over an icon is an
+ * explicit "show me this one" gesture, so the matching object's assembly
+ * bypasses the range gate AND the keyhole dim — bracket at full alpha
+ * immediately, callout on the next label solve. A pick can't tell which
+ * layer owns a bare string id, so the caller passes every plausible
+ * (layerId, sourceId) pair; a wrong guess simply matches nothing.
+ * @type {?Array<{layerId: string, sourceId: string}>}
+ */
+let _hoverCandidates = null;
+
+/**
+ * Sets (or clears, with null/[]) the hovered-contact candidates.
+ * @param {?Array<{layerId: string, sourceId: *}>} candidates
+ */
+export function setDetectionHoverSubjects(candidates) {
+  const next = Array.isArray(candidates) && candidates.length
+    ? candidates
+      .filter((c) => c && c.layerId != null && c.sourceId != null)
+      .map((c) => ({ layerId: String(c.layerId), sourceId: String(c.sourceId) }))
+    : null;
+  const prev = _hoverCandidates;
+  const same = (prev === null && next === null) || (
+    prev !== null && next !== null && prev.length === next.length
+    && prev.every((c, i) => c.layerId === next[i].layerId && c.sourceId === next[i].sourceId)
+  );
+  if (same) return;
+  _hoverCandidates = next;
+  // The hovered callout needs a fresh label solve to win its slot; the
+  // bracket change alone also deserves a frame.
+  _labelSolveDirty = true;
+  governorRequestRender('detection-hover');
+}
+
+/** Whether this paint-loop object is the hovered contact. */
+function _isHoveredObject(obj) {
+  if (_hoverCandidates === null) return false;
+  const layerId = String(obj._layerId || '');
+  const sourceId = String(obj.sourceId ?? obj.id ?? '');
+  for (let i = 0; i < _hoverCandidates.length; i++) {
+    const c = _hoverCandidates[i];
+    if (c.layerId === layerId && c.sourceId === sourceId) return true;
+  }
+  return false;
+}
 /**
  * Query-string gate for the detection mode banner, mirroring `trafficDebug` in
  * `traffic.js` — the app's existing convention for a developer-only affordance.
@@ -1225,9 +1271,11 @@ function _drawOverlay(frame) {
     let halfH;
     // Ambient AIR/SEA assemblies are range-gated (see detectionPolicy):
     // reticles and callouts only near full zoom, clean icons at altitude.
-    // Tracked subjects bypass the gate; satellites are never gated.
+    // Tracked and HOVERED subjects bypass the gate; satellites are never
+    // gated.
+    const hovered = _isHoveredObject(obj);
     const camDistance = Cesium.Cartesian3.distance(camPos, obj.position);
-    const rangeAlpha = (!isTracked && !_rangeGateDisabledForTest && isRangeGatedDetectionType(obj.type))
+    const rangeAlpha = (!isTracked && !hovered && !_rangeGateDisabledForTest && isRangeGatedDetectionType(obj.type))
       ? detectionRangeAlpha(camDistance)
       : 1;
     if (obj.type === 'AIR') {
@@ -1250,8 +1298,11 @@ function _drawOverlay(frame) {
     const keyholeAlpha = keyholeLabelAlphaFromGeometry(sx, sy, keyhole);
     // Range gate multiplies AFTER the aircraft alpha floor — the floor exists
     // to keep in-range side aircraft readable, not to resurrect out-of-range
-    // ones the gate just removed.
-    const bracketAlpha = detectionBracketAlpha(obj.type, keyholeAlpha, keyholeOutsideOpacity) * rangeAlpha;
+    // ones the gate just removed. The hovered contact paints at full alpha:
+    // the pointer IS the operator's attention, keyhole dim included.
+    const bracketAlpha = hovered
+      ? 1
+      : detectionBracketAlpha(obj.type, keyholeAlpha, keyholeOutsideOpacity) * rangeAlpha;
     if (bracketAlpha > 0) {
       appendCornerBracket(pathFor(bracketPaths, color, bracketAlpha), sx, sy, halfW, halfH);
       visibleCount++;
@@ -1281,7 +1332,9 @@ function _drawOverlay(frame) {
     if (!shouldSolve && !liveForRender) continue;
 
     obj._cohortSourceId = sourceId;
-    obj._cohortPriority = _semanticPriority(obj);
+    // The hovered contact outranks every ambient candidate — the pointer is a
+    // direct request for THIS callout, so it must win a slot on the next solve.
+    obj._cohortPriority = _semanticPriority(obj) + (hovered ? 1e6 : 0);
     obj._cohortBand = bracketAlpha >= 0.999 ? 8 : Math.floor(bracketAlpha * 8);
     obj._cohortHash = stableIdentityHash(layerId, sourceId);
     obj._candidateScreenX = sx;
@@ -1292,7 +1345,9 @@ function _drawOverlay(frame) {
     obj._candidatePrimary = primary;
     obj._candidateMicro = micro;
 
-    if (shouldSolve && keyholeAlpha > 0) {
+    // Hovered contacts enter the cohort even outside the keyhole — the
+    // pointer, not the keyhole center, is where the operator is looking.
+    if (shouldSolve && (keyholeAlpha > 0 || hovered)) {
       demandByLayer.set(layerId, (demandByLayer.get(layerId) || 0) + 1);
       if (!cohortBuilders.has(layerId)) cohortBuilders.set(layerId, new BoundedCohort(256));
       const incumbent = selectedIdentities?.get(layerId)?.has(sourceId) || false;

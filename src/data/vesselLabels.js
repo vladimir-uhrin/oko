@@ -15,12 +15,13 @@ export const VESSEL_OVERLAY_MAX_COHORT = VESSEL_DEFAULT_LABEL_LIMIT;
  * Ambient vessel-card distance fade endpoint (OKO). The upstream 5000 km
  * endpoint meant a view over Slovakia still wore a wall of Baltic-fleet
  * cards on the horizon — the operator asked for clean icons at distance
- * (same directive as the aircraft reticle range gate in detectionPolicy).
- * 50 km mirrors that gate's OFF threshold; with the host's 0.7 fade-start
- * ratio, cards begin fading at 35 km. The SELECTED vessel keeps its card
- * at any distance (applyVesselOverlayPolicy → Infinity).
+ * (same directive as the reticle range gate in detectionPolicy). The value
+ * mirrors that gate's OFF threshold (300 km — recalibrated together with it:
+ * the first 50 km cut hid cards even at regional zoom); with the host's 0.7
+ * fade-start ratio, cards begin fading at 210 km. The SELECTED vessel keeps
+ * its card at any distance (applyVesselOverlayPolicy → Infinity).
  */
-export const VESSEL_CARD_FADE_DISTANCE_M = 50_000;
+export const VESSEL_CARD_FADE_DISTANCE_M = 300_000;
 
 /**
  * AIS type family → chevron hue + card accent. Single source of truth for

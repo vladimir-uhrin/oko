@@ -66,10 +66,12 @@ test('vessel host policy uses always-on shared fade and protected selected lane'
   assert.equal(ambient.protected, false);
   assert.equal(ambient.collisionGroup, 'ambient-card');
   assert.equal(ambient.edgeFade, 'keyhole');
-  // 50 km (bolo 5000 km): karty lodí len pri priblížení — zrkadlí OFF prah
-  // leteckej range brány; fade štartuje na 35 km (0.7 ratio). Zámerná zmena
-  // 2026-08-31 na pokyn používateľa (čisté ikony pri diaľkovom pohľade).
-  assert.equal(ambient.maxDistance, 50_000);
+  // 300 km (bolo 5000 km): karty lodí len pri priblížení — zrkadlí OFF prah
+  // detection range brány; fade štartuje na 210 km (0.7 ratio). Zámerná zmena
+  // 2026-08-31 na pokyn používateľa (čisté ikony pri diaľkovom pohľade;
+  // prvé nastavenie 50 km bolo priveľmi prísne — dekorácie sa majú vrátiť
+  // už pri regionálnom zoome).
+  assert.equal(ambient.maxDistance, 300_000);
   assert.equal(ambient.distanceFadeStartRatio, 0.7);
   assert.equal(ambient.cardStyle, 'tactical');
   assert.equal(ambient.verticalOnly, true);

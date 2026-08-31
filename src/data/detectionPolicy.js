@@ -99,13 +99,21 @@ export function detectionBracketAlpha(type, keyholeAlpha, outsideOpacity = AIRCR
 // distance (not camera altitude), so a ground-level horizon view keeps
 // reticles on overhead traffic while 200 km cruisers stay clean.
 // Tracked/protected subjects (skipLabel) bypass the gate — an explicitly
-// targeted contact never loses its reticle. Satellites are deliberately
-// UNGATED: the camera is always megametres from LEO, and the dense orbital
-// field at global view is that layer's entire point.
+// targeted contact never loses its reticle, and so does the HOVERED contact
+// (pointer over an icon is an explicit "show me this one" gesture —
+// detectionHover.js). Satellites are deliberately UNGATED: the camera is
+// always megametres from LEO, and the dense orbital field at global view is
+// that layer's entire point.
+//
+// Thresholds were calibrated twice: the first cut (25/50 km) kept even
+// regional views bare, and the operator asked for the old look back "keď je
+// zazoomované" — decorations at regional zoom, clean only at continental
+// distances. 120/300 km restores assemblies for a ~city-to-region window
+// while a 600+ km overview stays clean icons.
 /** Camera-to-object distance at which the assembly is fully visible. */
-export const DETECTION_RANGE_FULL_M = 25_000;
+export const DETECTION_RANGE_FULL_M = 120_000;
 /** Distance at which the assembly is fully hidden; linear fade between. */
-export const DETECTION_RANGE_OFF_M = 50_000;
+export const DETECTION_RANGE_OFF_M = 300_000;
 /** Ambient object types the range gate applies to. */
 export const RANGE_GATED_DETECTION_TYPES = Object.freeze(['AIR', 'SEA']);
 

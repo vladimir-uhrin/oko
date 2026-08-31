@@ -66,7 +66,7 @@ test('ambientné AIR/SEA assemblies sú range-gatované: retikle len pri priblí
   // aircraft floor-e, netrackované gatované typy ju dostávajú, tracked ju
   // obchádza, a mimo dosahu nevzniká ani callout kandidát.
   const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
-  assert.match(detectionJs, /!isTracked && !_rangeGateDisabledForTest && isRangeGatedDetectionType\(obj\.type\)/);
+  assert.match(detectionJs, /!isTracked && !hovered && !_rangeGateDisabledForTest && isRangeGatedDetectionType\(obj\.type\)/);
   assert.match(detectionJs, /detectionRangeAlpha\(camDistance\)/);
   assert.match(detectionJs, /detectionBracketAlpha\(obj\.type, keyholeAlpha, keyholeOutsideOpacity\) \* rangeAlpha/);
   assert.match(detectionJs, /if \(rangeAlpha <= 0\) continue;/);
@@ -74,7 +74,7 @@ test('ambientné AIR/SEA assemblies sú range-gatované: retikle len pri priblí
   // Karty lodí (vesselLabels, mimo detection overlay) zrkadlia OFF prah —
   // obe vrstvy dekorácií miznú v rovnakej vzdialenosti.
   const vesselLabelsJs = fs.readFileSync(new URL('./vesselLabels.js', import.meta.url), 'utf8');
-  assert.match(vesselLabelsJs, /VESSEL_CARD_FADE_DISTANCE_M = 50_000;/);
+  assert.match(vesselLabelsJs, /VESSEL_CARD_FADE_DISTANCE_M = 300_000;/);
 });
 
 test('the bracket floor anchor mirrors the real keyhole default it is calibrated to', () => {
