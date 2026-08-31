@@ -91,6 +91,37 @@ export function detectionBracketAlpha(type, keyholeAlpha, outsideOpacity = AIRCR
   return Math.max(aircraftBracketAlphaFloor(outsideOpacity), alpha);
 }
 
+// Ambient AIR detection assemblies (bracket + callout) are RANGE-GATED (OKO):
+// a continental view with every airliner wearing a reticle and callsign chip
+// reads as noise, not intelligence — the operator asked for clean icons at
+// altitude and reticles only when nearly fully zoomed onto the traffic. The
+// gate is per-object camera distance (not camera altitude), so a ground-level
+// horizon view keeps reticles on overhead traffic while 200 km cruisers stay
+// clean. Tracked/protected subjects (skipLabel) bypass the gate — an
+// explicitly targeted contact never loses its reticle.
+/** Camera-to-aircraft distance at which the assembly is fully visible. */
+export const AIR_DETECTION_RANGE_FULL_M = 25_000;
+/** Distance at which the assembly is fully hidden; linear fade between. */
+export const AIR_DETECTION_RANGE_OFF_M = 50_000;
+
+/**
+ * Range-gate alpha for an ambient AIR detection assembly.
+ *
+ * 1 inside `AIR_DETECTION_RANGE_FULL_M`, 0 beyond `AIR_DETECTION_RANGE_OFF_M`,
+ * linear in between. A non-finite distance fails OPEN (returns 1): an
+ * unreadable distance should reproduce the pre-gate look, never silently
+ * blank the overlay (same philosophy as `aircraftBracketAlphaFloor`).
+ * @param {number} distanceM - Camera-to-object distance in metres.
+ * @returns {number} Alpha in [0, 1].
+ */
+export function airDetectionRangeAlpha(distanceM) {
+  const d = Number(distanceM);
+  if (!Number.isFinite(d)) return 1;
+  if (d <= AIR_DETECTION_RANGE_FULL_M) return 1;
+  if (d >= AIR_DETECTION_RANGE_OFF_M) return 0;
+  return 1 - (d - AIR_DETECTION_RANGE_FULL_M) / (AIR_DETECTION_RANGE_OFF_M - AIR_DETECTION_RANGE_FULL_M);
+}
+
 /** Stable left/front/right bucket for bracket coverage diagnostics and QA. */
 export function detectionHorizontalSector(screenX, viewportWidth) {
   const width = Number(viewportWidth);

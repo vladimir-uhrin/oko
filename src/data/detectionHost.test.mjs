@@ -16,6 +16,7 @@ import {
   setDetectionTuning,
   setMode,
   suspendDetection,
+  _setAirRangeGateDisabledForTest,
 } from './detection.js';
 import {
   destroyWorldOverlay,
@@ -231,6 +232,11 @@ function installEnvironment({ width = 800, height = 600, dpr = 2, search = '' } 
   canvas.id = 'world-overlay-canvas';
   root.appendChild(canvas);
 
+  // Fixture geometria kladie kameru megametre od objektov (identity projekcia
+  // robí z x/y priamo NDC) — ambientná AIR range-brána by tu skryla všetko,
+  // čo tieto testy overujú. Plumbing testujeme bez brány; brána samotná má
+  // vlastné testy v detectionPolicy.test.mjs.
+  _setAirRangeGateDisabledForTest(true);
   const postRender = new MockEvent();
   const viewer = {
     container,
@@ -255,6 +261,7 @@ function installEnvironment({ width = 800, height = 600, dpr = 2, search = '' } 
     advance(ms) { currentTime += ms; },
     setPerformanceStep(ms) { performanceStep = ms; },
     cleanup() {
+      _setAirRangeGateDisabledForTest(false);
       destroyDetection();
       destroyWorldOverlay();
       Date.now = originalDateNow;

@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import {
   AIRCRAFT_BRACKET_ALPHA_FLOOR,
   AIRCRAFT_BRACKET_FLOOR_ANCHOR,
+  AIR_DETECTION_RANGE_FULL_M,
+  AIR_DETECTION_RANGE_OFF_M,
   aircraftBracketAlphaFloor,
+  airDetectionRangeAlpha,
   canonicalizeDensity,
   defaultDensityForProfile,
   detectionBracketAlpha,
@@ -25,6 +28,36 @@ test('side aircraft brackets stay readable without changing zero-opacity intent'
   assert.equal(detectionBracketAlpha('AIR', 0.05), AIRCRAFT_BRACKET_ALPHA_FLOOR);
   assert.equal(detectionBracketAlpha('AIR', 1), 1);
   assert.equal(detectionBracketAlpha('SAT', 0.05), 0.05);
+});
+
+test('ambientné AIR assemblies sú range-gatované: retikle len pri priblížení (OKO)', () => {
+  // Kontinentálny pohľad s retiklom na každom letiacom lietadle je šum —
+  // brána: plná viditeľnosť po FULL, nič za OFF, lineárny fade medzi tým.
+  assert.ok(AIR_DETECTION_RANGE_FULL_M < AIR_DETECTION_RANGE_OFF_M);
+  assert.equal(airDetectionRangeAlpha(0), 1);
+  assert.equal(airDetectionRangeAlpha(AIR_DETECTION_RANGE_FULL_M), 1);
+  assert.equal(airDetectionRangeAlpha(AIR_DETECTION_RANGE_OFF_M), 0);
+  assert.equal(airDetectionRangeAlpha(5_000_000), 0, 'kontinentálny pohľad → čisté ikony');
+  const mid = (AIR_DETECTION_RANGE_FULL_M + AIR_DETECTION_RANGE_OFF_M) / 2;
+  assert.ok(Math.abs(airDetectionRangeAlpha(mid) - 0.5) < 1e-9, 'stred pásma = 0.5');
+  // Monotónne klesajúca — žiadne preblikávanie pri plynulom zoome.
+  let prev = 1;
+  for (let d = 0; d <= AIR_DETECTION_RANGE_OFF_M + 10_000; d += 1_000) {
+    const a = airDetectionRangeAlpha(d);
+    assert.ok(a <= prev + 1e-12, `alpha musí neklesať pri ${d} m`);
+    prev = a;
+  }
+  // Nečitateľná vzdialenosť failuje OTVORENE — reprodukuje pred-gate vzhľad.
+  assert.equal(airDetectionRangeAlpha(NaN), 1);
+  assert.equal(airDetectionRangeAlpha(undefined), 1);
+
+  // Kontraktové piny v paint slučke (detection.js): brána násobí AŽ PO
+  // aircraft floor-e, netrackované AIR ju dostáva, tracked ju obchádza,
+  // a mimo dosahu nevzniká ani callout kandidát.
+  const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
+  assert.match(detectionJs, /if \(!isTracked && !_airRangeGateDisabledForTest\) \{\n\s*rangeAlpha = airDetectionRangeAlpha\(airDistance\);/);
+  assert.match(detectionJs, /detectionBracketAlpha\(obj\.type, keyholeAlpha, keyholeOutsideOpacity\) \* rangeAlpha/);
+  assert.match(detectionJs, /if \(rangeAlpha <= 0\) continue;/);
 });
 
 test('the bracket floor anchor mirrors the real keyhole default it is calibrated to', () => {

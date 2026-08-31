@@ -35,6 +35,7 @@ import {
 } from './detectionCohort.js';
 import {
   ALLOCATION_ELASTIC,
+  airDetectionRangeAlpha,
   canonicalizeDensity,
   defaultDensityForProfile,
   detectionBracketAlpha,
@@ -117,6 +118,17 @@ const BILL_NEAR = 1000;
 const BILL_NEAR_SCALE = 3.0;
 const BILL_FAR = 8000000;
 const BILL_FAR_SCALE = 0.5;
+
+/**
+ * TEST ONLY — bypasses the ambient-AIR range gate. Host-lane fixtures place
+ * their mock camera megametres from mock objects (identity projection makes
+ * x/y the NDC); without this the gate would blank every AIR assembly those
+ * tests exist to exercise. Mirrors the `_set*ForTest` convention (flights.js).
+ */
+let _airRangeGateDisabledForTest = false;
+export function _setAirRangeGateDisabledForTest(disabled) {
+  _airRangeGateDisabledForTest = disabled === true;
+}
 /**
  * Query-string gate for the detection mode banner, mirroring `trafficDebug` in
  * `traffic.js` — the app's existing convention for a developer-only affordance.
@@ -1210,9 +1222,17 @@ function _drawOverlay(frame) {
     const isTracked = obj.skipLabel;
     let halfW;
     let halfH;
+    // Ambient AIR assemblies are range-gated (see detectionPolicy): reticles
+    // and callouts only near full zoom, clean icons at altitude. Tracked
+    // subjects bypass the gate.
+    let rangeAlpha = 1;
     if (obj.type === 'AIR') {
+      const airDistance = Cesium.Cartesian3.distance(camPos, obj.position);
+      if (!isTracked && !_airRangeGateDisabledForTest) {
+        rangeAlpha = airDetectionRangeAlpha(airDistance);
+      }
       const bscale = nearFarScale(
-        Cesium.Cartesian3.distance(camPos, obj.position),
+        airDistance,
         BILL_NEAR, BILL_NEAR_SCALE, BILL_FAR, BILL_FAR_SCALE,
       );
       halfW = _clamp((isTracked ? 14 : 9) * bscale, 7, 48);
@@ -1228,7 +1248,10 @@ function _drawOverlay(frame) {
     // The bracket follows the same linear radial keyhole fade as its callout.
     const color = colorFor(resolveTier(obj));
     const keyholeAlpha = keyholeLabelAlphaFromGeometry(sx, sy, keyhole);
-    const bracketAlpha = detectionBracketAlpha(obj.type, keyholeAlpha, keyholeOutsideOpacity);
+    // Range gate multiplies AFTER the aircraft alpha floor — the floor exists
+    // to keep in-range side aircraft readable, not to resurrect out-of-range
+    // ones the gate just removed.
+    const bracketAlpha = detectionBracketAlpha(obj.type, keyholeAlpha, keyholeOutsideOpacity) * rangeAlpha;
     if (bracketAlpha > 0) {
       appendCornerBracket(pathFor(bracketPaths, color, bracketAlpha), sx, sy, halfW, halfH);
       visibleCount++;
@@ -1243,6 +1266,11 @@ function _drawOverlay(frame) {
       if (bracketAlpha > 0) protectedVisibleCount++;
       continue;
     }
+
+    // Out of reticle range → no callout candidacy either: the assembly is one
+    // unit, and a callsign chip on a bare far-away icon is the clutter the
+    // gate exists to remove.
+    if (rangeAlpha <= 0) continue;
 
     const primary = String(obj.id || '');
     const micro = String(obj.metric || '');
