@@ -174,15 +174,22 @@ takže prvý klik nového návštevníka vždy doručí. Hlasové aliasy: „rad
 - **Radar poctivo hlási čas**: freshness vrstvy = čas platnosti produktu
   (nie čas fetchu), `stale` je prvotriedny feed-stav (STALE chip cez
   layerFeedState) a source label žije: „SHMÚ cappi2km · HH:MM UTC".
-  Ostáva TODO: plnohodnotná dBZ legenda v UI.
+- **dBZ legenda v UI** (2026-08-31): `#radar-legend` chip vľavo dole —
+  farebný pás priamo z `ZMAX_DBZ_PALETTE` (`radarLegendStops()`, jeden zdroj
+  pravdy pre render aj legendu), ticky 8–60 dBZ, titulok s časom platnosti
+  produktu + `data-stale`. Zobrazí sa len so zapnutou vrstvou; skrytá
+  v clean-view/recording/cockpit/scene režimoch.
 - **Radarová animácia** (2026-08-31): proxy drží ring posledných 7 snímok
   (~30 min) ako nemenné `/frame/<iso>.png` (immutable cache) a vrstva ich
   prehráva — jeden skrytý Primitive na snímku, slučka len prepína `show`
-  (textúry ostávajú rezidentné). LEKCIA: výmena materiálu na entite
-  reuploaduje 3,5-Mpx textúru pri každom kroku a materiál medzitým renderuje
-  bielu; a Material s obrázkom, ktorý sa nenačítal (transientný 504), hodí
-  „Expected width > 0" a **navždy zastaví render** — preto sa každá snímka
-  najprv preload+decode-ne a až potom dostane primitív.
+  (textúry ostávajú rezidentné). Ring je súvislé okno: frames staršie než
+  7×5 min od najnovšej sa zahadzujú (aj pri obnove z disk cache), inak by
+  po nočnej pauze slučka skákala o hodiny. LEKCIA: výmena materiálu na
+  entite reuploaduje 3,5-Mpx textúru pri každom kroku a materiál medzitým
+  renderuje bielu; a Material, ktorému dáš URL, si PNG fetchne sám ešte raz —
+  transientný fail (504) znamená textúru 0×0, „Expected width > 0"
+  a **navždy zastavený render**. Preto sa snímka preload+decode-ne
+  a do Materialu ide hotový HTMLImageElement, nie URL.
 - **Energetika je klikateľná**: 688 línií registrovaných v context store,
   label karty = legenda („Vedenie 400 kV" / „Vedenie 220 kV" /
   „Plynovod (tranzit)", meno V-čka keď existuje).

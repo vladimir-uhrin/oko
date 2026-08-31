@@ -11,6 +11,7 @@ import {
   mercatorRowLut,
   normalizeOdimComposite,
   odimTimestampIso,
+  radarLegendStops,
   rasterizeZmax,
   renderZmax,
   softenRgba,
@@ -160,6 +161,26 @@ test('fixture decodes end-to-end: real echoes, sentinels transparent', () => {
   assert.equal(presented.rgba[3], 0, 'softened corner must stay transparent');
 });
 
+test('radar legend: model tracks the palette, markup and clean-view hooks pinned', () => {
+  const stops = radarLegendStops();
+  assert.equal(stops.length, ZMAX_DBZ_PALETTE.length);
+  assert.equal(stops[0].min, ZMAX_MIN_DISPLAY_DBZ, 'legend must start at the display floor');
+  for (const [i, stop] of stops.entries()) {
+    const [r, g, b] = ZMAX_DBZ_PALETTE[i].rgba;
+    assert.ok(stop.css.startsWith(`rgba(${r}, ${g}, ${b},`), `stop ${i} color drifted from the palette`);
+  }
+
+  // Legenda žije v markup/ui/css — pinni háčiky, nech ju refactor nezhodí.
+  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="radar-legend"[^>]*hidden/);
+  const ui = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
+  assert.ok(ui.includes("import { radarLegendStops } from './data/shmuRadarGrid.js'"), 'legend must be built from the palette, not hand-copied colors');
+  assert.ok(ui.includes('this._syncRadarLegend(change);'), 'legend must ride the data-manager subscription');
+  const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.ui-clean-view #radar-legend/);
+  assert.match(css, /body\.recording-mode #radar-legend/);
+});
+
 test('frame animator: steps through frames, holds on newest, inert for ≤1 frame', () => {
   const shown = [];
   const pending = [];
@@ -220,8 +241,10 @@ test('layer contract: entity drape, stats, stale surfaced, id/cadence pinned', a
   let served = meta;
   const built = [];
   const scenePrimitives = new Set();
-  const stubFactory = ({ rectangle, imageUrl }) => {
-    const primitive = { show: false, rectangle, imageUrl };
+  // update() hands the factory a PRELOADED image (DOM-less sentinel carries
+  // the source URL) — never a URL string, so Cesium can't re-fetch and crash.
+  const stubFactory = ({ rectangle, image }) => {
+    const primitive = { show: false, rectangle, imageUrl: image?.testImage };
     built.push(primitive);
     return primitive;
   };

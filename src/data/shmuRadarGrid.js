@@ -43,6 +43,18 @@ export const ZMAX_DBZ_PALETTE = [
 ];
 
 /**
+ * Legend model derived from the SAME palette the rasterizer paints with —
+ * the on-screen legend can therefore never drift from the actual colors.
+ * @returns {Array<{min: number, css: string}>} Ascending dBZ stops with CSS colors.
+ */
+export function radarLegendStops() {
+  return ZMAX_DBZ_PALETTE.map(({ min, rgba: [r, g, b, a] }) => ({
+    min,
+    css: `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`,
+  }));
+}
+
+/**
  * Color for one dBZ value, or null when below the display threshold.
  * @param {number} dbz
  * @returns {[number, number, number, number]|null}

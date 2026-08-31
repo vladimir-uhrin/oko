@@ -2135,7 +2135,15 @@ function shmuRadarProxy() {
         } catch { /* frame png pruned/missing — skip */ }
       }
       restored.sort((a, b) => a.iso.localeCompare(b.iso));
-      if (restored.length) frames = restored.slice(-FRAME_KEEP);
+      if (restored.length) {
+        // Same contiguous-window rule as refreshUpstream — a disk cache from
+        // hours ago must not smuggle stale frames into a fresh ring.
+        const latestMs = Date.parse(restored[restored.length - 1].iso);
+        const windowMs = (FRAME_KEEP - 1) * SLOT_MS;
+        frames = restored
+          .filter((f) => latestMs - Date.parse(f.iso) <= windowMs)
+          .slice(-FRAME_KEEP);
+      }
     } catch { /* no disk cache yet */ }
   }
 
@@ -2186,9 +2194,15 @@ function shmuRadarProxy() {
       return;
     }
     frames.sort((a, b) => a.iso.localeCompare(b.iso));
-    const pruned = frames.slice(0, Math.max(0, frames.length - FRAME_KEEP)).map((f) => f.iso);
-    frames = frames.slice(-FRAME_KEEP);
-    if (added) await writeDisk(pruned);
+    // The ring is a CONTIGUOUS recent window, not "newest 7 ever seen": after
+    // an idle stretch (dev server left running overnight) old frames would
+    // otherwise survive next to fresh ones and the loop would jump hours.
+    const latestMs = Date.parse(frames[frames.length - 1].iso);
+    const windowMs = (FRAME_KEEP - 1) * SLOT_MS;
+    const keep = frames.filter((f) => latestMs - Date.parse(f.iso) <= windowMs);
+    const pruned = frames.filter((f) => !keep.includes(f)).map((f) => f.iso);
+    frames = keep.slice(-FRAME_KEEP);
+    if (added || pruned.length) await writeDisk(pruned);
   }
 
   async function ensureFresh() {

@@ -97,12 +97,17 @@ export function createRadarFrameAnimator({
 
 /**
  * One frame's drape primitive: a surface-parallel rectangle at the drape
- * altitude with the frame PNG as its (translucent) material. Injectable so
+ * altitude with the frame's DECODED image element as its (translucent)
+ * material. The element — never the URL — goes into the Material: a URL makes
+ * Cesium re-fetch the PNG on its own, and any transient failure of that second
+ * fetch (dev-server 504, network blip) yields a 0×0 texture whose creation
+ * throws inside the render loop and stops rendering permanently. An
+ * HTMLImageElement is uploaded as-is; no fetch can fail. Injectable so
  * DOM-less tests substitute a stub instead of touching GL-adjacent paths.
- * @param {{rectangle: Cesium.Rectangle, imageUrl: string}} input
+ * @param {{rectangle: Cesium.Rectangle, image: HTMLImageElement}} input
  * @returns {Cesium.Primitive}
  */
-export function createRadarFramePrimitive({ rectangle, imageUrl }) {
+export function createRadarFramePrimitive({ rectangle, image }) {
   return new Cesium.Primitive({
     geometryInstances: new Cesium.GeometryInstance({
       geometry: new Cesium.RectangleGeometry({
@@ -112,7 +117,7 @@ export function createRadarFramePrimitive({ rectangle, imageUrl }) {
       }),
     }),
     appearance: new Cesium.EllipsoidSurfaceAppearance({
-      material: Cesium.Material.fromType('Image', { image: imageUrl }),
+      material: Cesium.Material.fromType('Image', { image }),
     }),
     asynchronous: false,
     show: false,
@@ -120,22 +125,24 @@ export function createRadarFramePrimitive({ rectangle, imageUrl }) {
 }
 
 /**
- * Resolve once the frame image is truly usable (loaded AND decoded, width>0).
- * A Material handed a failed/zero-size image throws inside the render loop —
- * and one such throw stops Cesium's rendering permanently. A frame that fails
- * to preload is skipped this round and retried on the next poll.
+ * Resolve with the frame's image element once it is truly usable (loaded AND
+ * decoded, width>0), or null if it cannot load. The element is what the
+ * primitive's Material consumes — see createRadarFramePrimitive for why a URL
+ * must never reach the Material. A frame that fails to preload is skipped
+ * this round and retried on the next poll.
  * @param {string} url
- * @returns {Promise<boolean>}
+ * @returns {Promise<HTMLImageElement|null>}
  */
 function preloadFrameImage(url) {
   return new Promise((resolve) => {
-    if (typeof Image === 'undefined') { resolve(true); return; } // DOM-less tests
+    // DOM-less tests: a truthy sentinel stands in for the element.
+    if (typeof Image === 'undefined') { resolve({ testImage: url }); return; }
     const img = new Image();
     img.onload = () => {
       const decoded = typeof img.decode === 'function' ? img.decode().catch(() => {}) : Promise.resolve();
-      decoded.then(() => resolve(img.naturalWidth > 0));
+      decoded.then(() => resolve(img.naturalWidth > 0 ? img : null));
     };
-    img.onerror = () => resolve(false);
+    img.onerror = () => resolve(null);
     img.src = url;
   });
 }
@@ -265,8 +272,9 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
               ready.push(frame.iso);
               continue;
             }
-            if (await preloadFrameImage(frame.png)) {
-              const primitive = primitiveFactory({ rectangle, imageUrl: frame.png });
+            const image = await preloadFrameImage(frame.png);
+            if (image) {
+              const primitive = primitiveFactory({ rectangle, image });
               _primitives.set(frame.iso, primitive);
               _viewer?.scene?.primitives?.add?.(primitive);
               ready.push(frame.iso);

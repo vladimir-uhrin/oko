@@ -9161,3 +9161,66 @@ body.scene-playback-mode #first-run-launcher {
   /* Scrolling a tile into view must not animate either. */
   .first-run-choices { scroll-behavior: auto; }
 }
+
+/* ── SHMÚ radar legend (OKO) ─────────────────────────────────────────────
+   Visible only while the shmu-radar layer is enabled; content is built by
+   ui.js from shmuRadarGrid's palette so it can never drift from the ramp. */
+#radar-legend {
+  position: fixed;
+  left: 56px;
+  bottom: 208px;
+  z-index: 40;
+  pointer-events: none;
+  padding: 8px 10px;
+  background: rgba(8, 16, 22, 0.78);
+  border: 1px solid rgba(64, 200, 230, 0.28);
+  border-radius: 4px;
+  font-family: inherit;
+  color: #9fd8e6;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+#radar-legend .radar-legend-title {
+  display: block;
+  margin-bottom: 6px;
+  color: #d6f3fa;
+}
+#radar-legend .radar-legend-title[data-stale="true"]::after {
+  content: " · STALE";
+  color: #ffb14d;
+}
+#radar-legend .radar-legend-bar {
+  display: flex;
+  height: 8px;
+  width: 176px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+#radar-legend .radar-legend-bar span {
+  flex: 1 1 auto;
+  height: 100%;
+}
+#radar-legend .radar-legend-ticks {
+  display: flex;
+  width: 176px;
+  margin-top: 3px;
+  font-size: 9px;
+  color: #7fb9c8;
+}
+#radar-legend .radar-legend-ticks span {
+  flex: 1 1 auto;
+  text-align: left;
+}
+#radar-legend .radar-legend-unit {
+  margin-left: 6px;
+  color: #7fb9c8;
+  /* dBZ je symbol jednotky — HUD uppercase by z neho spravil nesprávne "DBZ". */
+  text-transform: none;
+}
+body.ui-clean-view #radar-legend,
+body.recording-mode #radar-legend,
+body.cockpit-mode #radar-legend,
+body.scene-playback-mode #radar-legend {
+  display: none;
+}
