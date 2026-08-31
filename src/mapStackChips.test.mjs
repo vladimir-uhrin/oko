@@ -330,9 +330,11 @@ test('the Visual Presets tray owns Map Source and the retired left panel is abse
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
 
   assert.doesNotMatch(html, /map-stack-select/, 'the SOURCE dropdown is replaced by the chip row');
+  // i18n sweep 2026-08-31: the chip row carries data-i18n-aria for the SK build;
+  // the id/class/role/aria contract of the empty runtime-filled host is unchanged.
   assert.match(
     html,
-    /<section class="map-source-section"[\s\S]*?<div id="map-stack-chips" class="map-stack-chip-row" role="group" aria-label="Map source"><\/div>/,
+    /<section class="map-source-section"[\s\S]*?<div id="map-stack-chips" class="map-stack-chip-row" role="group" aria-label="Map source"[^>]*><\/div>/,
   );
   assert.doesNotMatch(html, /id="stack-panel"/, 'the duplicate left MAP STACK panel is retired');
   assert.match(html, /id="map-source-label">MAP SOURCE<[\s\S]*?id="map-stack-status"/);

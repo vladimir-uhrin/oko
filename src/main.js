@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { StyleManager } from './ui.js';
 import { flyToBratislava } from './camera.js';
 import { DataLayerManager } from './data/manager.js';
@@ -71,8 +72,20 @@ async function init() {
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
 
+  // Jazyk UI čo najskôr: statické data-i18n uzly sa preložia PRED prvým
+  // vykreslením panelov a prepínač SK/EN sa aktivuje (persist + reload —
+  // stav pohľadu prežije v share-hashi, viď src/i18n.js).
+  applyDomTranslations();
+  for (const button of document.querySelectorAll('#lang-switch button[data-lang]')) {
+    const lang = button.getAttribute('data-lang');
+    button.dataset.active = String(lang === currentLanguage());
+    button.addEventListener('click', () => {
+      if (lang !== currentLanguage()) setLanguage(lang);
+    });
+  }
+
   try {
-    loaderStatus.textContent = 'Configuring viewer...';
+    loaderStatus.textContent = t('loader.configuring');
 
     // Set Cesium Ion token for World Terrain
     const cesiumToken = import.meta.env.CESIUM_ION_TOKEN;
@@ -165,7 +178,7 @@ async function init() {
     viewer.scene.skyAtmosphere.saturationShift = -0.12;
     viewer.scene.skyAtmosphere.brightnessShift = -0.08;
 
-    loaderStatus.textContent = 'Loading Google 3D Tiles...';
+    loaderStatus.textContent = t('loader.google-tiles');
     let tileset = null;
     try {
       // Load Google Photorealistic 3D Tiles
@@ -179,12 +192,12 @@ async function init() {
     } catch (tileError) {
       console.warn('[Init] Google 3D Tiles unavailable, falling back to Cesium globe:', tileError);
       const tileErrorDetail = describeError(tileError);
-      loaderStatus.textContent = `Google 3D Tiles unavailable (${tileErrorDetail}). Continuing in fallback mode...`;
+      loaderStatus.textContent = t('loader.google-tiles-fallback', { detail: tileErrorDetail });
       // Keep Cesium globe visible as fallback instead of aborting the app.
       viewer.scene.globe.show = true;
     }
 
-    loaderStatus.textContent = 'Initializing systems...';
+    loaderStatus.textContent = t('loader.init-systems');
 
     const mapStackController = new MapStackController(viewer, {
       googleTileset: tileset,
@@ -212,10 +225,10 @@ async function init() {
 
     // If no share link state, do default fly-to Austin
     if (!styleManager.hasShareState) {
-      loaderStatus.textContent = 'Letím nad Bratislavu…';
+      loaderStatus.textContent = t('loader.fly-bratislava');
       flyToBratislava(viewer);
     } else {
-      loaderStatus.textContent = 'Restoring shared view...';
+      loaderStatus.textContent = t('loader.restore-shared');
     }
 
     // Initialize data layer manager
@@ -341,7 +354,7 @@ async function init() {
 
   } catch (error) {
     console.error("God's Eye View initialization failed:", error);
-    loaderStatus.textContent = `Error: ${describeError(error)}`;
+    loaderStatus.textContent = t('loader.error', { detail: describeError(error) });
     loaderStatus.style.color = '#ff4444';
   }
 }

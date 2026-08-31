@@ -15,6 +15,7 @@
 
 import * as Cesium from 'cesium';
 import { forward as toMGRS } from 'mgrs';
+import { t } from './i18n.js';
 import { CITY_POIS } from './locations.js';
 import { composeLocalityTag } from './hudLocality.js';
 import { ellipsoidalToMslDisplayM, ensureGeoidReady, geoidHeight } from './data/geoid.js';
@@ -157,8 +158,8 @@ export class IntelHUD {
           <div class="hud-system">${this._missionId}  ${this._sensorId}</div>
           <div class="hud-mode" id="hud-mode">NORMAL</div>
           <div class="hud-summary-wrap">
-            <div class="hud-summary-label">SUMMARY</div>
-            <div class="hud-summary" id="hud-summary">Awaiting telemetry...</div>
+            <div class="hud-summary-label">${t('hud.summary-label')}</div>
+            <div class="hud-summary" id="hud-summary">${t('hud.awaiting-telemetry')}</div>
           </div>
         </div>
       </div>
@@ -563,7 +564,7 @@ export class IntelHUD {
    */
   _composeSummary() {
     const m = this._latestMetrics;
-    if (!m) return 'Awaiting telemetry...';
+    if (!m) return t('hud.awaiting-telemetry');
 
     const modeEl = document.getElementById('hud-mode');
     const modeLabel = modeEl?.textContent || 'NORMAL';

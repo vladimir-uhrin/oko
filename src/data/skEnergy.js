@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { t } from '../i18n.js';
 import { registerEntityContext, removeEntityContextsForLayer } from './contextStore.js';
 
 /**
@@ -52,10 +53,11 @@ export function skEnergyStyle(properties = {}) {
  */
 export function skEnergyLabel(properties = {}) {
   if (properties.name) return String(properties.name);
-  if (properties.kind === 'gas') return 'Plynovod (tranzit)';
+  // i18n sweep 2026-08-31: legenda cez t() — EN pár pre EN UI, SK pôvodné.
+  if (properties.kind === 'gas') return t('energy.gas-transit');
   return String(properties.voltage || '').includes('400000')
-    ? 'Vedenie 400 kV'
-    : 'Vedenie 220 kV';
+    ? t('energy.line-400')
+    : t('energy.line-220');
 }
 
 /**

@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 /** Normalize a heading into the [0, 360) range. */
 export function normalizeHeading(value) {
   if (!Number.isFinite(value)) return 0;
@@ -76,9 +78,10 @@ export function formatCockpitContextScope(subjectLabel, radiusM, installationCov
   const coverage = typeof installationCoverage === 'string'
     ? installationCoverage.trim()
     : '';
-  const base = `${normalizedLabel} · ${radiusKm} KM AIR/SEA WINDOW`;
+  // i18n sweep 2026-08-31: zobrazovaný scope ide cez t(); v Node testoch EN.
+  const base = `${normalizedLabel} · ${t('context.scope.air-sea-window', { radius: `${radiusKm} KM` })}`;
   return coverage
-    ? `${base} · INSTALLATIONS ${coverage}`
+    ? `${base} · ${t('context.scope.installations', { coverage })}`
     : base;
 }
 

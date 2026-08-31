@@ -576,6 +576,67 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   transition: var(--transition-smooth);
 }
 
+/* ── Language switch (SK/EN) — sits under the style indicator ── */
+#lang-switch {
+  position: fixed;
+  top: 84px;
+  right: 36px;
+  z-index: 100;
+  user-select: none;
+  text-align: right;
+}
+
+#lang-switch .indicator-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+#lang-switch .lang-switch-options {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 3px;
+}
+
+#lang-switch button {
+  background: none;
+  border: none;
+  padding: 2px 2px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  transition: var(--transition-smooth);
+}
+
+#lang-switch button:hover {
+  color: var(--text-bright);
+}
+
+#lang-switch button[data-active="true"] {
+  color: var(--accent);
+  text-shadow: 0 0 14px var(--accent-glow);
+  cursor: default;
+}
+
+#lang-switch .lang-switch-sep {
+  color: var(--text-dim);
+}
+
+body.ui-clean-view #lang-switch,
+body.recording-mode #lang-switch,
+body.cockpit-mode #lang-switch,
+body.scene-playback-mode #lang-switch {
+  display: none;
+}
+
 /* ── Control Panel ────────────────────────────── */
 #control-panel {
   position: fixed;

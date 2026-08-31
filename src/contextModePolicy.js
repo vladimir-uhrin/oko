@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 const CONTEXT_DEPENDENCIES = Object.freeze({
   flights: new Set(['military-awareness', 'flights', 'military', 'ais-live-vessels', 'military-installations']),
   'space-missions': new Set(['rocket-launches', 'satellites']),
@@ -285,7 +287,8 @@ export function contextLayerEnableBlockReason({ contextMode, change, layerName =
     return null;
   }
   const label = String(layerName || change.layerId || 'that layer');
-  return `Space Missions isolates replay data. Exit the mode to enable ${label}.`;
+  // i18n sweep 2026-08-31: refusal is user-visible (toast); v Node testoch EN.
+  return t('context.missions-isolate', { layer: label });
 }
 
 /**

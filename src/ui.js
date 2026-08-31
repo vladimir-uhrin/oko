@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { t } from './i18n.js';
 import { retroShader } from './styles/retro.js';
 import { animeShader } from './styles/anime.js';
 import { noirShader } from './styles/noir.js';
@@ -252,28 +253,30 @@ const COCKPIT_UTILITY_LAUNCHER_MIN_HEIGHT_PX = 50;
 const COCKPIT_GROUND_PROBE_MS = 500;
 const COCKPIT_GROUND_WAIT_TIMEOUT_MS = 5000;
 const COCKPIT_BRIEF_ROTATE_MS = 9000;
-const COCKPIT_BRIEF_CYCLE_OFF_HELP = 'Cycle briefing pages automatically every 9 seconds (Signals → News → Local). Pauses while you hover or focus the panel. Live signal data refreshes continuously either way.';
-const COCKPIT_BRIEF_CYCLE_ON_HELP = 'Stop automatic page cycling. Previous, Next, and the SIG/NEWS/LOCAL tabs stay available.';
+// i18n sweep 2026-08-31: hodnoty idú cez t() pri module load — jazyk je na
+// stránku fixný (prepnutie = reload), v Node testoch vždy EN.
+const COCKPIT_BRIEF_CYCLE_OFF_HELP = t('cockpit.brief.cycle-off-help');
+const COCKPIT_BRIEF_CYCLE_ON_HELP = t('cockpit.brief.cycle-on-help');
 const COCKPIT_REGIONAL_REFRESH_MS = 5 * 60_000;
 const COCKPIT_REGIONAL_REFRESH_DISTANCE_M = 25_000;
 const COCKPIT_BRIEF_PAGES = [
   {
     id: 'signals',
-    kicker: 'LIVE SIGNALS',
-    subtitle: 'OBSERVED / MAPPED PINGS',
-    source: 'SOURCE-BACKED EVENTS · NO SYNTHETIC NEWS',
+    kicker: t('cockpit.brief.live-signals'),
+    subtitle: t('cockpit.brief.observed-pings'),
+    source: t('cockpit.brief.signals-source'),
   },
   {
     id: 'news',
-    kicker: 'REGIONAL NEWS',
-    subtitle: 'LATEST LOCATION-MATCHED REPORTING',
-    source: 'GOOGLE NEWS RSS · LOCATION QUERY · RECENT',
+    kicker: t('cockpit.brief.news-kicker'),
+    subtitle: t('cockpit.brief.news-subtitle'),
+    source: t('cockpit.brief.news-source'),
   },
   {
     id: 'local',
-    kicker: 'LOCAL INFO',
-    subtitle: 'PLACE / CONDITIONS / POSITION',
-    source: 'OPENSTREETMAP · OPEN-METEO · UTC',
+    kicker: t('cockpit.brief.local-kicker'),
+    subtitle: t('cockpit.brief.local-subtitle'),
+    source: t('cockpit.brief.local-source'),
   },
 ];
 /**
@@ -561,15 +564,17 @@ const CCTV_CAL_FIELDS = {
 
 function formatCockpitBriefAge(value) {
   const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return 'TIME UNKNOWN';
+  if (!Number.isFinite(timestamp)) return t('cockpit.brief.time-unknown');
   const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
-  if (minutes < 60) return `${minutes}M AGO`;
+  if (minutes < 60) return t('cockpit.brief.min-ago', { n: minutes });
   const hours = Math.round(minutes / 60);
-  return hours < 48 ? `${hours}H AGO` : `${Math.round(hours / 24)}D AGO`;
+  return hours < 48
+    ? t('cockpit.brief.hour-ago', { n: hours })
+    : t('cockpit.brief.day-ago', { n: Math.round(hours / 24) });
 }
 
 function formatCockpitWindDirection(value) {
-  if (!Number.isFinite(value)) return 'DIR UNKNOWN';
+  if (!Number.isFinite(value)) return t('cockpit.brief.dir-unknown');
   const labels = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   const normalized = ((value % 360) + 360) % 360;
   return `${labels[Math.round(normalized / 45) % labels.length]} · ${Math.round(normalized)}°`;
@@ -850,6 +855,9 @@ class CockpitViewController {
     });
     this._listen(window, 'resize', () => this.scheduleContextLayout());
     this._listen(document, 'keydown', (event) => this.onKeyDown(event), true);
+    // i18n sweep 2026-08-31: syncne CYCLE OFF label/title/aria z prekladov už
+    // pri boote (statický markup nesie EN; JS je jediný ďalší writer).
+    this.setBriefAutoRotate(this.briefAutoRotateEnabled);
   }
 
   _listen(target, type, handler, options) {
@@ -862,12 +870,12 @@ class CockpitViewController {
     if (!this.weatherToggle) return;
     const active = !!enabled;
     this.weatherToggle.setAttribute('aria-pressed', String(active));
-    this.weatherToggle.setAttribute(
-      'aria-label',
-      `${active ? 'Disable' : 'Enable'} cockpit weather effects`,
-    );
-    this.weatherToggle.title = `${active ? 'Disable' : 'Enable'} cockpit weather effects`;
-    if (this.weatherState) this.weatherState.textContent = active ? 'ON' : 'OFF';
+    const weatherLabel = active ? t('cockpit.weather-disable') : t('cockpit.weather-enable');
+    this.weatherToggle.setAttribute('aria-label', weatherLabel);
+    this.weatherToggle.title = weatherLabel;
+    if (this.weatherState) {
+      this.weatherState.textContent = active ? t('cockpit.weather-on') : t('cockpit.weather-off');
+    }
   }
 
   readAircraftInfo() {
@@ -926,7 +934,7 @@ class CockpitViewController {
     this._tr3bSignature = signature;
     this.tr3bToggle.hidden = !icao24;
     this.tr3bToggle.setAttribute('aria-pressed', converted ? 'true' : 'false');
-    this.tr3bToggle.title = converted ? 'Restore real aircraft' : 'Reclassify as TR-3B';
+    this.tr3bToggle.title = converted ? t('cockpit.tr3b.restore') : t('cockpit.tr3b.convert');
   }
 
   syncEntry() {
@@ -994,11 +1002,17 @@ class CockpitViewController {
     this.visionMode = next;
     const inherited = String(this.getInheritedVisionLabel?.() || 'NORMAL').toUpperCase();
     const labels = { optical: inherited, crt: 'CRT', nvg: 'NVG', thermal: 'FLIR', noir: 'NOIR' };
-    const names = { optical: inherited, crt: 'CRT', nvg: 'Night vision', thermal: 'Thermal', noir: 'Noir' };
+    const names = {
+      optical: inherited,
+      crt: 'CRT',
+      nvg: t('cockpit.vision-name-nvg'),
+      thermal: t('cockpit.vision-name-thermal'),
+      noir: 'Noir',
+    };
     if (this.visionCurrent) {
       this.visionCurrent.dataset.cockpitVision = next;
-      this.visionCurrent.setAttribute('aria-label', `Current cockpit vision style: ${names[next]}. Activate for next style.`);
-      this.visionCurrent.title = `Current style: ${names[next]} — click for next`;
+      this.visionCurrent.setAttribute('aria-label', t('cockpit.vision-current-aria', { name: names[next] }));
+      this.visionCurrent.title = t('cockpit.vision-current-title', { name: names[next] });
     }
     if (this.visionCurrentLabel) this.visionCurrentLabel.textContent = labels[next];
     this.onVisionChange?.(next, this.active, { revealParameters });
@@ -1095,13 +1109,13 @@ class CockpitViewController {
     this.signalSignatures.clear();
     this.showBriefPage(0);
     this.startBriefRotation();
-    const trackLabel = info.callsign || info.registration || info.icao24 || 'AIRCRAFT';
+    const trackLabel = info.callsign || info.registration || info.icao24 || t('cockpit.aircraft');
     const trackHeading = String(Math.round(normalizeHeading(info.track ?? 0))).padStart(3, '0');
     this.pushCockpitSignal(
       'track',
       'track',
-      'TRACK ACQUIRED',
-      `${trackLabel} · COURSE ${trackHeading}°`,
+      t('cockpit.track-acquired'),
+      t('cockpit.track-course', { label: trackLabel, heading: trackHeading }),
     );
     this.updateHud(info, performance.now(), true);
     this.setVisionMode(this.visionMode);
@@ -1385,7 +1399,7 @@ class CockpitViewController {
     this.lastAircraftInfo = info;
     const heading = normalizeHeading(this.heading ?? info.track ?? 0);
     if (this.callsign) {
-      this.callsign.textContent = info.callsign || info.registration || info.icao24 || 'AIRCRAFT';
+      this.callsign.textContent = info.callsign || info.registration || info.icao24 || t('cockpit.aircraft');
     }
     const speedKt = Number.isFinite(info.velocityMps) ? info.velocityMps * 1.94384 : null;
     setCockpitRollingValue(
@@ -1467,9 +1481,12 @@ class CockpitViewController {
     }
     if (this.aircraftMeta) {
       const feedState = this.surfaceAcquiring
-        ? 'ACQUIRING SURFACE'
-        : (this.surfaceFallback ? 'SURFACE FALLBACK' : (info.stale ? 'STALE FEED' : 'LIVE TRACK'));
-      this.aircraftMeta.textContent = `${info.layerId === 'military' ? 'MILITARY' : 'COMMERCIAL'} · ${feedState} · COURSE ALIGNED`;
+        ? t('cockpit.meta.acquiring-surface')
+        : (this.surfaceFallback
+          ? t('cockpit.meta.surface-fallback')
+          : (info.stale ? t('cockpit.meta.stale-feed') : t('cockpit.meta.live-track')));
+      const kind = info.layerId === 'military' ? t('cockpit.meta.military') : t('cockpit.meta.commercial');
+      this.aircraftMeta.textContent = `${kind} · ${feedState} · ${t('cockpit.meta.course-aligned')}`;
     }
     this.updateRoute(info);
     if (forceContext
@@ -1486,13 +1503,13 @@ class CockpitViewController {
     const origin = info?.route?.origin;
     const destination = info?.route?.destination;
     const validDestination = Number.isFinite(destination?.lat) && Number.isFinite(destination?.lon);
-    const routeLabel = (airport) => [airport?.code, airport?.name].filter(Boolean).join(' · ') || 'UNKNOWN';
+    const routeLabel = (airport) => [airport?.code, airport?.name].filter(Boolean).join(' · ') || t('cockpit.route-unknown');
     if (this.routeFrom) this.routeFrom.textContent = routeLabel(origin);
     if (this.routeTo) this.routeTo.textContent = routeLabel(destination);
     if (this.routeStatus) {
       this.routeStatus.textContent = validDestination
-        ? 'ARROW · ESTIMATED DIRECTION'
-        : 'ROUTE DATA UNAVAILABLE';
+        ? t('cockpit.route-estimated')
+        : t('cockpit.route-unavailable');
     }
     if (this.route) this.route.hidden = !origin && !destination;
     if (!validDestination || !Number.isFinite(info?.longitude) || !Number.isFinite(info?.latitude)) {
@@ -1532,8 +1549,8 @@ class CockpitViewController {
       this.pushCockpitSignal(
         'context-status',
         'info',
-        'CONTEXT STANDBY',
-        'ENABLE GLOBAL CONTEXT FOR PROXIMITY PINGS',
+        t('cockpit.context.standby-title'),
+        t('cockpit.context.standby-detail'),
       );
       return;
     }
@@ -1561,7 +1578,7 @@ class CockpitViewController {
       const enteringLost = this.context.dataset.state !== 'lost';
       this.context.dataset.state = 'lost';
       if (this.contextUncertainty) {
-        this.contextUncertainty.textContent = 'CONTACT LOST · LAST KNOWN READOUT · NOT AN ALL-CLEAR';
+        this.contextUncertainty.textContent = t('cockpit.context.contact-lost');
       }
       // The cue changes the footer's height; re-run layout once on the way in
       // rather than every frame the contact stays lost.
@@ -1569,8 +1586,10 @@ class CockpitViewController {
       this.pushCockpitSignal(
         'context-status',
         'warning',
-        `CONTACT LOST · ${snapshot.subject.label || snapshot.subject.id || 'SUBJECT'}`,
-        'SUBJECT LEFT ITS FEED · READOUT HOLDING LAST KNOWN',
+        t('cockpit.context.contact-lost-title', {
+          label: snapshot.subject.label || snapshot.subject.id || t('cockpit.context.subject-fallback'),
+        }),
+        t('cockpit.context.contact-lost-detail'),
       );
       return;
     }
@@ -1590,11 +1609,11 @@ class CockpitViewController {
     const closestLabel = formatAwarenessLabel(closest);
     if (this.contextNearestLabel) {
       this.contextNearestLabel.textContent = closest
-        ? `${closest.cohort.label.toUpperCase()} · ${closestLabel}` : 'NO AVAILABLE EXAMPLE';
+        ? `${closest.cohort.label.toUpperCase()} · ${closestLabel}` : t('cockpit.no-available-example');
       this.contextNearestLabel.setAttribute(
         'aria-label',
         closest && closestLabel === '—'
-          ? `${closest.cohort.label}, Unavailable`
+          ? `${closest.cohort.label}, ${t('context.unavailable')}`
           : this.contextNearestLabel.textContent,
       );
     }
@@ -1604,7 +1623,7 @@ class CockpitViewController {
         ? `${distanceM < 10000 ? (distanceM / 1000).toFixed(1) : Math.round(distanceM / 1000)} KM` : '—';
       this.contextDistance.setAttribute(
         'aria-label',
-        Number.isFinite(distanceM) ? this.contextDistance.textContent : 'Unavailable',
+        Number.isFinite(distanceM) ? this.contextDistance.textContent : t('context.unavailable'),
       );
     }
 
@@ -1631,13 +1650,15 @@ class CockpitViewController {
     }
     if (this.contextBearing) {
       if (relative === null) this.contextBearing.textContent = 'BRG —';
-      else if (Math.abs(relative) < 8) this.contextBearing.textContent = 'AHEAD';
+      else if (Math.abs(relative) < 8) this.contextBearing.textContent = t('cockpit.context.ahead');
       else this.contextBearing.textContent = `${relative < 0 ? 'L' : 'R'} ${String(Math.round(Math.abs(relative))).padStart(3, '0')}°`;
     }
     if (this.contextUncertainty) {
       this.contextUncertainty.textContent = unknownCount
-        ? `${unknownCount} INPUT${unknownCount === 1 ? '' : 'S'} UNKNOWN · NOT AN ALL-CLEAR`
-        : 'AVAILABLE INPUTS CURRENT · NOT AN ALL-CLEAR';
+        ? (unknownCount === 1
+          ? t('cockpit.context.input-unknown-one')
+          : t('cockpit.context.inputs-unknown-many', { n: unknownCount }))
+        : t('cockpit.context.inputs-current');
     }
     if (this.contextUpdated) {
       this.contextUpdated.textContent = Number.isFinite(snapshot.evaluatedAt)
@@ -1689,7 +1710,7 @@ class CockpitViewController {
     this.briefAutoRotateEnabled = Boolean(enabled);
     if (this.briefAutoToggle) {
       this.briefAutoToggle.setAttribute('aria-pressed', String(this.briefAutoRotateEnabled));
-      const label = this.briefAutoRotateEnabled ? 'CYCLE ON' : 'CYCLE OFF';
+      const label = this.briefAutoRotateEnabled ? t('cockpit.brief.cycle-on') : t('cockpit.brief.cycle-off');
       this.briefAutoToggle.textContent = label;
       const help = this.briefAutoRotateEnabled
         ? COCKPIT_BRIEF_CYCLE_ON_HELP
@@ -1728,7 +1749,7 @@ class CockpitViewController {
   updateLocalPosition(info) {
     if (!this.localCoordinates) return;
     if (!Number.isFinite(info.latitude) || !Number.isFinite(info.longitude)) {
-      this.localCoordinates.textContent = 'POSITION UNAVAILABLE';
+      this.localCoordinates.textContent = t('cockpit.brief.position-unavailable');
       return;
     }
     const lat = `${Math.abs(info.latitude).toFixed(3)}°${info.latitude >= 0 ? 'N' : 'S'}`;
@@ -1786,12 +1807,12 @@ class CockpitViewController {
       this.newsStatus.hidden = false;
       this.newsStatus.dataset.state = status;
       this.newsStatus.textContent = status === 'loading'
-        ? 'ACQUIRING REGIONAL NEWS'
-        : 'REGIONAL NEWS UNAVAILABLE';
+        ? t('cockpit.brief.acquiring-news')
+        : t('cockpit.brief.news-unavailable');
     }
     if (status === 'unavailable') this.newsList?.replaceChildren();
-    if (this.localPlace && status === 'loading') this.localPlace.textContent = 'RESOLVING REGION';
-    if (this.localPlace && status === 'unavailable') this.localPlace.textContent = 'REGION UNAVAILABLE';
+    if (this.localPlace && status === 'loading') this.localPlace.textContent = t('cockpit.brief.resolving-region');
+    if (this.localPlace && status === 'unavailable') this.localPlace.textContent = t('cockpit.brief.region-unavailable');
     this.updateLocalPosition(info);
   }
 
@@ -1801,8 +1822,8 @@ class CockpitViewController {
       this.newsStatus.hidden = articles.length > 0;
       this.newsStatus.dataset.state = payload?.newsStatus || 'unavailable';
       this.newsStatus.textContent = payload?.newsStatus === 'empty'
-        ? 'NO RECENT LOCATION MATCHES'
-        : 'REGIONAL NEWS UNAVAILABLE';
+        ? t('cockpit.brief.no-recent-matches')
+        : t('cockpit.brief.news-unavailable');
     }
     if (this.newsList) {
       this.newsList.replaceChildren(...articles.slice(0, 4).map((article) => {
@@ -1814,14 +1835,14 @@ class CockpitViewController {
         const title = document.createElement('strong');
         title.textContent = article.title;
         const metadata = document.createElement('span');
-        metadata.textContent = `${article.domain || 'SOURCE'} · ${formatCockpitBriefAge(article.publishedAt)}`;
+        metadata.textContent = `${article.domain || t('cockpit.brief.source-fallback')} · ${formatCockpitBriefAge(article.publishedAt)}`;
         link.append(title, metadata);
         entry.append(link);
         return entry;
       }));
     }
 
-    const placeLabel = payload?.place?.label || payload?.place?.country || 'REGION UNAVAILABLE';
+    const placeLabel = payload?.place?.label || payload?.place?.country || t('cockpit.brief.region-unavailable');
     if (this.localPlace) this.localPlace.textContent = placeLabel.toUpperCase();
     this.updateLocalPosition(info);
     const weather = payload?.weather;
@@ -1839,7 +1860,8 @@ class CockpitViewController {
     if (this.localCondition) this.localCondition.textContent = weatherCodeLabel(weather?.weatherCode);
     if (this.localCloud) {
       this.localCloud.textContent = Number.isFinite(weather?.cloudCoverPct)
-        ? `CLOUD ${Math.round(weather.cloudCoverPct)}%` : 'CLOUD UNKNOWN';
+        ? t('cockpit.brief.cloud', { pct: Math.round(weather.cloudCoverPct) })
+        : t('cockpit.brief.cloud-unknown');
     }
     if (this.localPrecipitation) {
       this.localPrecipitation.textContent = Number.isFinite(weather?.precipitationMm)
@@ -1847,7 +1869,7 @@ class CockpitViewController {
     }
     if (this.signalStream) this.signalStream.dataset.regionalStatus = payload?.status || 'partial';
     if (this.briefPageIndex === 1 && this.briefSource) {
-      this.briefSource.textContent = `${String(payload?.newsSource || 'REGIONAL NEWS').toUpperCase()} · LOCATION QUERY`;
+      this.briefSource.textContent = `${String(payload?.newsSource || t('cockpit.brief.news-kicker')).toUpperCase()} · LOCATION QUERY`;
     }
     this.scheduleContextLayout();
   }
@@ -1866,7 +1888,7 @@ class CockpitViewController {
         heading.className = 'cockpit-signal-target';
         heading.dataset.signalLayer = item.target.layerId;
         heading.dataset.signalId = item.target.id;
-        heading.setAttribute('aria-label', `Select flight ${item.title}`);
+        heading.setAttribute('aria-label', t('cockpit.brief.select-flight', { label: item.title }));
         const label = document.createElement('span');
         label.className = 'cockpit-signal-target-label';
         label.textContent = item.title;
@@ -1910,7 +1932,7 @@ class CockpitViewController {
         key: `flight:${subject.layerId}:${subject.id}`,
         tone: 'track',
         title: subject.label || subject.id,
-        detail: `${subject.layerId === 'military' ? 'MILITARY FLIGHT' : 'COMMERCIAL FLIGHT'} · CURRENT`,
+        detail: `${subject.layerId === 'military' ? t('cockpit.signal.military-flight') : t('cockpit.signal.commercial-flight')} · ${t('cockpit.signal.current')}`,
         target: { layerId: subject.layerId, id: String(subject.id) },
         distanceM: -1,
       });
@@ -1929,10 +1951,10 @@ class CockpitViewController {
           // contact reads as its registration here too. Same helper the
           // Context panel's nearest list uses.
           title: formatAwarenessLabel(item),
-          detail: `${cohort.id === 'military' ? 'MILITARY FLIGHT' : 'COMMERCIAL FLIGHT'} · ${
+          detail: `${cohort.id === 'military' ? t('cockpit.signal.military-flight') : t('cockpit.signal.commercial-flight')} · ${
             Number.isFinite(item.distanceM)
               ? `${item.distanceM < 10000 ? (item.distanceM / 1000).toFixed(1) : Math.round(item.distanceM / 1000)} KM`
-              : 'DISTANCE UNKNOWN'
+              : t('cockpit.signal.distance-unknown')
           }`,
           target: { layerId: cohort.id, id: String(id) },
           distanceM: item.distanceM ?? Infinity,
@@ -1952,8 +1974,10 @@ class CockpitViewController {
       nextItems.splice(4, Math.max(0, nextItems.length - 4), {
         key: 'input-status',
         tone: 'warning',
-        title: `${unknownCount} INPUT${unknownCount === 1 ? '' : 'S'} UNKNOWN`,
-        detail: sources || 'SOURCE STATUS UNAVAILABLE',
+        title: unknownCount === 1
+          ? t('cockpit.signal.input-unknown-one')
+          : t('cockpit.signal.inputs-unknown-many', { n: unknownCount }),
+        detail: sources || t('cockpit.signal.source-unavailable'),
         target: null,
         timestamp: previous.get('input-status')?.timestamp || snapshot.evaluatedAt || Date.now(),
       });
@@ -1970,8 +1994,12 @@ class CockpitViewController {
     if (this.contextToggle) {
       const expanded = !this.contextCollapsed;
       this.contextToggle.setAttribute('aria-expanded', String(expanded));
-      this.contextToggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} Contact panel`);
-      this.contextToggle.title = `${expanded ? 'Collapse' : 'Expand'} contact panel`;
+      this.contextToggle.setAttribute('aria-label', expanded
+        ? t('cockpit.contact-panel-collapse')
+        : t('cockpit.contact-panel-expand'));
+      this.contextToggle.title = expanded
+        ? t('cockpit.contact-panel-collapse-title')
+        : t('cockpit.contact-panel-expand-title');
       const icon = this.contextToggle.querySelector('.material-symbols-outlined');
       if (icon) icon.textContent = expanded ? 'chevron_left' : 'chevron_right';
     }
@@ -1989,8 +2017,12 @@ class CockpitViewController {
     if (this.signalToggle) {
       const expanded = !this.signalCollapsed;
       this.signalToggle.setAttribute('aria-expanded', String(expanded));
-      this.signalToggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} cockpit briefing panel`);
-      this.signalToggle.title = `${expanded ? 'Collapse' : 'Expand'} briefing panel`;
+      this.signalToggle.setAttribute('aria-label', expanded
+        ? t('cockpit.brief.panel-collapse')
+        : t('cockpit.brief.panel-expand'));
+      this.signalToggle.title = expanded
+        ? t('cockpit.brief.panel-collapse-title')
+        : t('cockpit.brief.panel-expand-title');
       const icon = this.signalToggle.querySelector('.material-symbols-outlined');
       if (icon) icon.textContent = expanded ? 'right_panel_close' : 'right_panel_open';
     }
@@ -3536,6 +3568,7 @@ export class StyleManager {
       const label = state.status === 'switching'
         ? '...'
         : (stack?.shortLabel || stack?.label || 'MAP');
+      // Stack labels sú vlastné mená (Google 3D, Bing, OSM) — nelokalizujú sa.
       this._mapStackStatus.textContent = label;
       this._mapStackStatus.classList.toggle('warn', !!state.lastError);
     }
@@ -3891,7 +3924,7 @@ export class StyleManager {
       clearTimeout(this._cctvChipHideTimer);
       this._cctvChipHideTimer = null;
       this._cctvChipWasBusy = true;
-      setSplitFlapText(this._cctvSyncLabel, 'loading frames');
+      setSplitFlapText(this._cctvSyncLabel, t('loading.cctv-sync'));
       // The counter is left plain on purpose: it ticks every few frames
       // during a grid load, and flapping it would read as a slot machine.
       this._cctvSyncProgress.textContent = `${loaded}/${total}`;
@@ -3902,7 +3935,7 @@ export class StyleManager {
     if (this._cctvChipWasBusy && enabled && total > 0) {
       // Load just completed — flash the final count, then auto-hide.
       this._cctvChipWasBusy = false;
-      setSplitFlapText(this._cctvSyncLabel, 'camera grid ready');
+      setSplitFlapText(this._cctvSyncLabel, t('loading.cctv-ready'));
       this._cctvSyncProgress.textContent = `${total}/${total}`;
       this._cctvSyncChip.classList.add('visible');
       clearTimeout(this._cctvChipHideTimer);
@@ -4073,7 +4106,7 @@ export class StyleManager {
       const hadOldPositions = Object.keys(localStorage)
         .some((key) => key.startsWith('godsEyeView.v6.panelPos.'));
       if (hadOldPositions) {
-        this._showToast('Panel layout updated — positions reset to new defaults');
+        this._showToast(t('toast.layout-reset'));
       }
     } catch {
       // storage unavailable
@@ -4337,7 +4370,7 @@ export class StyleManager {
     const title = document.createElement('span');
     title.className = 'radar-legend-title';
     title.setAttribute('data-radar-legend-title', '');
-    title.textContent = 'SHMÚ RADAR';
+    title.textContent = 'SHMÚ RADAR'; // vlastné meno produktu — nelokalizuje sa
     const bar = document.createElement('div');
     bar.className = 'radar-legend-bar';
     for (const stop of stops) {
@@ -4383,7 +4416,7 @@ export class StyleManager {
     if (!title) return;
     const time = Number.isFinite(stats.lastUpdate)
       ? new Date(stats.lastUpdate).toISOString().slice(11, 16) + ' UTC'
-      : 'ČAKÁM NA DÁTA';
+      : t('radar.awaiting-data').toUpperCase();
     title.textContent = `SHMÚ RADAR · ${time}`;
     title.dataset.stale = String(stats.stale === true);
   }
@@ -4510,7 +4543,9 @@ export class StyleManager {
             } catch (restoreError) {
               console.warn(`[Context] ${change.layerId} rollback failed`, restoreError);
             }
-            return `${entryMode === 'space-missions' ? 'Space Missions' : 'Context'} could not start because another layer did not stop cleanly`;
+            return t('context.isolation-failed', {
+              mode: entryMode === 'space-missions' ? t('context.word.missions') : t('context.word.context'),
+            });
           } finally {
             if (ownsNotificationToken) {
               this._userFacingContextNotificationTokens.delete(notificationToken);
@@ -4597,9 +4632,11 @@ export class StyleManager {
     if (result.classification === 'pending') {
       this._shareTrackingNoticeGeneration += 1;
       this._shareTrackingAcquiringKey = trackingKey;
-      this._showGlobalStatusNotice('ACQUIRING', {
+      this._showGlobalStatusNotice(t('loading.acquiring'), {
         state: 'acquiring',
-        detail: `SHARED ${String(result.label || 'SUBJECT').toUpperCase()}`,
+        detail: t('loading.shared-subject', {
+          label: String(result.label || t('cockpit.context.subject-fallback')).toUpperCase(),
+        }),
         persistent: true,
       });
       return;
@@ -4619,12 +4656,12 @@ export class StyleManager {
     const noticeGeneration = ownsAcquiringNotice
       ? this._shareTrackingNoticeGeneration
       : ++this._shareTrackingNoticeGeneration;
-    const subject = result.label || 'entity';
+    const subject = result.label || t('toast.shared-entity');
     const message = result.classification === 'expired'
-      ? `Shared ${subject} follow expired`
+      ? t('toast.shared-follow-expired', { subject })
       : result.classification === 'source-unavailable'
-        ? `Shared ${subject} could not be restored — feed unavailable`
-        : `Shared ${subject} is unavailable`;
+        ? t('toast.shared-feed-unavailable', { subject })
+        : t('toast.shared-unavailable', { subject });
     const showAfterStartupCover = () => {
       requestAnimationFrame(() => {
         if (!canPresentDeferredStatusNotice(
@@ -4679,7 +4716,7 @@ export class StyleManager {
           nextMode,
           { notificationToken },
         ),
-        'Contacts could not complete the requested transition; try again',
+        t('toast.contacts-transition-failed'),
       ).then((succeeded) => {
         if (nextMode && shouldExpandGlobalContextPanel({
           action: 'contacts',
@@ -4696,7 +4733,7 @@ export class StyleManager {
           nextMode,
           { notificationToken },
         ),
-        'Space Missions could not complete the requested transition; try again',
+        t('toast.missions-transition-failed'),
       ).then((succeeded) => {
         if (nextMode && shouldExpandGlobalContextPanel({
           action: 'space-missions',
@@ -4719,10 +4756,10 @@ export class StyleManager {
         if (searched === false) return false;
         const stats = militaryInstallationsLayer.getStats?.();
         this._showToast(stats?.status === 'zoom-in'
-          ? 'Zoom in to search mapped installations'
-          : 'Nearby installations refreshed');
+          ? t('toast.zoom-in-installations')
+          : t('toast.installations-refreshed'));
         return true;
-      }, 'Nearby installations could not be refreshed; try again').finally(() => {
+      }, t('toast.installations-refresh-failed')).finally(() => {
         button.disabled = false;
       });
     });
@@ -4730,7 +4767,7 @@ export class StyleManager {
 
   async _runUserFacingContextAction(
     operation,
-    message = 'Context could not restore every layer; try again',
+    message = t('toast.context-restore-failed'),
     { falseIsFailure = true } = {},
   ) {
     const notificationToken = Symbol('user-facing-context-action');
@@ -5200,7 +5237,7 @@ export class StyleManager {
               );
               return true;
             },
-            'Space Missions cancellation could not restore the previous layer state',
+            t('toast.missions-cancel-restore-failed'),
           ));
         }
       }
@@ -5215,13 +5252,15 @@ export class StyleManager {
     }
     if (change?.type === 'visibility-blocked') {
       if (!this._userFacingContextNotificationTokens.has(change.notificationToken)) {
-        this._showToast(change.reason || 'That layer is unavailable in the current Context mode');
+        this._showToast(change.reason || t('toast.layer-unavailable-in-context'));
       }
       this._syncContextModeButtons();
       return;
     }
     if (change?.type === 'visibility-failed') {
-      const failureMessage = `${change.layerId} could not ${change.enabled ? 'start' : 'stop'} cleanly`;
+      const failureMessage = change.enabled
+        ? t('toast.layer-could-not-start', { layer: change.layerId })
+        : t('toast.layer-could-not-stop', { layer: change.layerId });
       // A failed direct Context-shell START has already had its siblings
       // cleared by the visibility guard. Wait outside the synchronous manager
       // notification for this queue to settle, then reconcile the complete
@@ -5381,16 +5420,16 @@ export class StyleManager {
       this._cockpitRadioToggleBtn?.setAttribute('aria-expanded', String(radioOpen));
       if (displayOpen) this._revealCockpitStyleParameters();
       if (this._cockpitDisplayToggleBtn) {
-        const action = displayOpen ? 'Collapse' : 'Expand';
+        const label = displayOpen ? t('cockpit.display-collapse') : t('cockpit.display-expand');
         this._cockpitDisplayToggleBtn.textContent = displayOpen ? '▶' : '◀';
-        this._cockpitDisplayToggleBtn.setAttribute('aria-label', `${action} Cockpit display options`);
-        this._cockpitDisplayToggleBtn.title = `${action} Cockpit display options`;
+        this._cockpitDisplayToggleBtn.setAttribute('aria-label', label);
+        this._cockpitDisplayToggleBtn.title = label;
       }
       if (this._cockpitRadioToggleBtn) {
-        const action = radioOpen ? 'Collapse' : 'Expand';
+        const label = radioOpen ? t('cockpit.radio-collapse') : t('cockpit.radio-expand');
         this._cockpitRadioToggleBtn.textContent = radioOpen ? '▶' : '◀';
-        this._cockpitRadioToggleBtn.setAttribute('aria-label', `${action} Cockpit Radio controls`);
-        this._cockpitRadioToggleBtn.title = `${action} Cockpit Radio controls`;
+        this._cockpitRadioToggleBtn.setAttribute('aria-label', label);
+        this._cockpitRadioToggleBtn.title = label;
       }
       if (!expanded && returnFocus) {
         (kind === 'display' ? this._cockpitDisplayToggleBtn : this._cockpitRadioToggleBtn)
@@ -5445,13 +5484,17 @@ export class StyleManager {
       if (this._radioTunerValue) {
         this._radioTunerValue.textContent = station
           ? `CH ${String(slot.stationIndex + 1).padStart(2, '0')} / ${String(this._radioTunerStations.length).padStart(2, '0')}`
-          : 'NO STATIONS';
+          : t('radio.no-stations');
       }
-      if (this._radioTunerStation) this._radioTunerStation.textContent = station?.name || 'NO STATION AVAILABLE';
+      if (this._radioTunerStation) this._radioTunerStation.textContent = station?.name || t('radio.no-station-available-caps');
       if (this._radioTunerSlider) {
         this._radioTunerSlider.setAttribute('aria-valuetext', station
-          ? `${station.name}, station ${slot.stationIndex + 1} of ${this._radioTunerStations.length}`
-          : 'No station available');
+          ? t('radio.tuner-station-of', {
+            name: station.name,
+            index: slot.stationIndex + 1,
+            count: this._radioTunerStations.length,
+          })
+          : t('radio.no-station-available'));
       }
       if (syncStatic) radioLayer.previewTuningStation(station?.id || null, { rotate });
       return station;
@@ -5565,11 +5608,11 @@ export class StyleManager {
       if (result && !result.ok) {
         this._radioTunerBandPinnedForNavigation = false;
         if (result.reason === 'station-unavailable') {
-          if (this._radioTunerValue) this._radioTunerValue.textContent = 'OFF AIR';
-          if (this._radioTunerStation) this._radioTunerStation.textContent = 'STATION UNAVAILABLE';
+          if (this._radioTunerValue) this._radioTunerValue.textContent = t('radio.off-air');
+          if (this._radioTunerStation) this._radioTunerStation.textContent = t('radio.station-unavailable');
           this._radioTunerSlider?.setAttribute(
             'aria-valuetext',
-            'Station unavailable after directory refresh',
+            t('radio.station-unavailable-refresh-aria'),
           );
         }
       }
@@ -5598,7 +5641,7 @@ export class StyleManager {
             origin: 'user',
             notificationToken,
           }),
-          `Radio could not ${enabling ? 'start' : 'stop'} cleanly`,
+          enabling ? t('toast.radio-could-not-start') : t('toast.radio-could-not-stop'),
         );
         if (toggled === false) return;
         if (enabling && trigger === this._radioEnableBtn
@@ -5906,7 +5949,9 @@ export class StyleManager {
       const radioExpanded = Boolean(this._radioPanel && !this._radioPanel.classList.contains('collapsed'));
       this._contextRadioToggleBtn.setAttribute('aria-controls', 'radio-panel');
       this._contextRadioToggleBtn.setAttribute('aria-expanded', String(radioExpanded));
-      const label = radioExpanded ? 'Go to expanded Radio section' : 'Expand Radio section in Context';
+      const label = radioExpanded
+        ? t('radio.disclosure.goto-expanded')
+        : t('radio.disclosure.expand-in-context');
       this._contextRadioToggleBtn.setAttribute('aria-label', label);
       this._contextRadioToggleBtn.title = label;
       return;
@@ -5914,9 +5959,11 @@ export class StyleManager {
     const compactOpen = Boolean(this._contextRadioDock?.classList.contains('disclosure-open'));
     this._contextRadioToggleBtn.setAttribute('aria-controls', 'context-radio-mini');
     this._contextRadioToggleBtn.setAttribute('aria-expanded', String(compactOpen));
-    const action = compactOpen ? 'Close' : 'Open';
-    this._contextRadioToggleBtn.setAttribute('aria-label', `${action} compact Radio controls`);
-    this._contextRadioToggleBtn.title = `${action} compact Radio controls`;
+    const compactLabel = compactOpen
+      ? t('radio.disclosure.close-compact')
+      : t('radio.disclosure.open-compact');
+    this._contextRadioToggleBtn.setAttribute('aria-label', compactLabel);
+    this._contextRadioToggleBtn.title = compactLabel;
   }
 
   /** Render Radio state without making playback or Context decisions. */
@@ -5947,45 +5994,39 @@ export class StyleManager {
     }
     this._syncContextRadioLauncherState();
     this._radioLayerState?.classList.toggle('active', enabled);
+    const lifecycleLabel = lifecycleState === 'enabling'
+      ? t('manager.state.enabling')
+      : t('manager.state.disabling');
     if (this._radioLayerState) {
       this._radioLayerState.textContent = transitioning
-        ? lifecycleState.toUpperCase()
-        : (uncertain ? 'UNCERTAIN' : (state.loading ? 'SYNC' : (enabled ? `${state.filteredCount}/${state.stationCount}` : 'OFF')));
+        ? lifecycleLabel
+        : (uncertain ? t('radio.state-uncertain') : (state.loading ? t('radio.state-sync') : (enabled ? `${state.filteredCount}/${state.stationCount}` : t('radio.state-off'))));
     }
+    const enableText = transitioning
+      ? lifecycleLabel
+      : (uncertain ? t('radio.reconcile') : (enabled ? t('radio.disable') : t('radio.enable')));
+    const enableAria = uncertain
+      ? t('radio.reconcile-aria')
+      : (enabled ? t('radio.disable-aria') : t('radio.enable-aria'));
     if (this._radioEnableBtn) {
       this._radioEnableBtn.classList.toggle('active', enabled);
       this._radioEnableBtn.setAttribute('aria-pressed', String(enabled));
-      this._radioEnableBtn.textContent = transitioning
-        ? lifecycleState.toUpperCase()
-        : (uncertain ? 'RECONCILE' : (enabled ? 'DISABLE' : 'ENABLE'));
-      this._radioEnableBtn.setAttribute(
-        'aria-label',
-        uncertain ? 'Reconcile Radio — lifecycle uncertain' : `${enabled ? 'Disable' : 'Enable'} Radio`,
-      );
+      this._radioEnableBtn.textContent = enableText;
+      this._radioEnableBtn.setAttribute('aria-label', enableAria);
       this._radioEnableBtn.disabled = transitioning;
     }
     if (this._contextRadioMiniEnableBtn) {
       this._contextRadioMiniEnableBtn.classList.toggle('active', enabled);
       this._contextRadioMiniEnableBtn.setAttribute('aria-pressed', String(enabled));
-      this._contextRadioMiniEnableBtn.textContent = transitioning
-        ? lifecycleState.toUpperCase()
-        : (uncertain ? 'RECONCILE' : (enabled ? 'DISABLE' : 'ENABLE'));
-      this._contextRadioMiniEnableBtn.setAttribute(
-        'aria-label',
-        uncertain ? 'Reconcile Radio — lifecycle uncertain' : `${enabled ? 'Disable' : 'Enable'} Radio`,
-      );
+      this._contextRadioMiniEnableBtn.textContent = enableText;
+      this._contextRadioMiniEnableBtn.setAttribute('aria-label', enableAria);
       this._contextRadioMiniEnableBtn.disabled = transitioning;
     }
     if (this._cockpitRadioEnableBtn) {
       this._cockpitRadioEnableBtn.classList.toggle('active', enabled);
       this._cockpitRadioEnableBtn.setAttribute('aria-pressed', String(enabled));
-      this._cockpitRadioEnableBtn.textContent = transitioning
-        ? lifecycleState.toUpperCase()
-        : (uncertain ? 'RECONCILE' : (enabled ? 'DISABLE' : 'ENABLE'));
-      this._cockpitRadioEnableBtn.setAttribute(
-        'aria-label',
-        uncertain ? 'Reconcile Radio — lifecycle uncertain' : `${enabled ? 'Disable' : 'Enable'} Radio`,
-      );
+      this._cockpitRadioEnableBtn.textContent = enableText;
+      this._cockpitRadioEnableBtn.setAttribute('aria-label', enableAria);
       this._cockpitRadioEnableBtn.disabled = transitioning;
     }
 
@@ -6018,8 +6059,8 @@ export class StyleManager {
     if (this._radioTunerBandLabel) {
       const activeCategory = state.categories.find((category) => category.id === state.filter);
       this._radioTunerBandLabel.textContent = state.filter === 'all'
-        ? 'DIRECTORY BAND'
-        : `${String(activeCategory?.label || state.filter).toUpperCase()} BAND`;
+        ? t('radio.band-directory')
+        : t('radio.band-suffix', { name: String(activeCategory?.label || state.filter).toUpperCase() });
     }
     this._radioTuner?.classList.toggle('is-static', Boolean(state.tuningStatic));
     if (tunerAvailable) this._refreshRadioTunerBand?.();
@@ -6036,17 +6077,17 @@ export class StyleManager {
       this._radioTunerSelectedId = null;
     }
 
-    if (this._radioStationName) this._radioStationName.textContent = selected?.name || 'NO STATION SELECTED';
+    if (this._radioStationName) this._radioStationName.textContent = selected?.name || t('radio.no-station');
     if (this._radioStationMeta) {
       const place = selected ? [selected.state, selected.countryCode].filter(Boolean).join(' · ') : '';
       const signal = selected ? [selected.codec, selected.bitrate ? `${selected.bitrate} kbps` : ''].filter(Boolean).join(' · ') : '';
       this._radioStationMeta.textContent = selected
-        ? [place, signal].filter(Boolean).join('  /  ') || 'Directory metadata only'
-        : (state.loading ? 'Loading station directory…' : 'Choose a globe marker or use next.');
+        ? [place, signal].filter(Boolean).join('  /  ') || t('radio.directory-metadata')
+        : (state.loading ? t('radio.loading-directory') : t('radio.station-hint-short'));
     }
     if (this._radioStationTags) {
       const tags = Array.isArray(selected?.tags) ? selected.tags.slice(0, 8) : [];
-      this._radioStationTags.textContent = tags.length ? `TAGS · ${tags.join(' · ')}` : '';
+      this._radioStationTags.textContent = tags.length ? `${t('radio.tags-prefix')} · ${tags.join(' · ')}` : '';
     }
     if (this._radioStationHomepage) {
       const homepage = selected?.homepage || '';
@@ -6061,28 +6102,32 @@ export class StyleManager {
     if (this._contextRadioMiniNextBtn) this._contextRadioMiniNextBtn.disabled = !interactive || !hasStations;
     if (this._cockpitRadioPrevBtn) this._cockpitRadioPrevBtn.disabled = !interactive || !hasStations;
     if (this._cockpitRadioNextBtn) this._cockpitRadioNextBtn.disabled = !interactive || !hasStations;
+    const playAction = activePlayback
+      ? t('radio.action.pause')
+      : (state.audioState === 'paused' ? t('radio.action.resume') : t('radio.action.play'));
+    const playAria = t('radio.action.station-aria', {
+      action: playAction,
+      which: selected ? t('radio.which.selected') : t('radio.which.nearest'),
+    });
     if (this._radioPlayBtn) {
-      const action = activePlayback ? 'Pause' : (state.audioState === 'paused' ? 'Resume' : 'Play');
       this._radioPlayBtn.disabled = !interactive || !hasStations;
       this._radioPlayBtn.classList.toggle('active', activePlayback);
-      this._radioPlayBtn.textContent = action.toUpperCase();
-      this._radioPlayBtn.setAttribute('aria-label', `${action} ${selected ? 'selected' : 'nearest'} radio station`);
+      this._radioPlayBtn.textContent = playAction.toUpperCase();
+      this._radioPlayBtn.setAttribute('aria-label', playAria);
     }
     if (this._contextRadioMiniPlayBtn) {
-      const action = activePlayback ? 'Pause' : (state.audioState === 'paused' ? 'Resume' : 'Play');
       this._contextRadioMiniPlayBtn.disabled = !interactive || !hasStations;
       this._contextRadioMiniPlayBtn.classList.toggle('active', activePlayback);
       this._contextRadioMiniPlayBtn.textContent = activePlayback ? 'Ⅱ' : '▶';
-      this._contextRadioMiniPlayBtn.setAttribute('aria-label', `${action} ${selected ? 'selected' : 'nearest'} radio station`);
-      this._contextRadioMiniPlayBtn.title = action;
+      this._contextRadioMiniPlayBtn.setAttribute('aria-label', playAria);
+      this._contextRadioMiniPlayBtn.title = playAction;
     }
     if (this._cockpitRadioPlayBtn) {
-      const action = activePlayback ? 'Pause' : (state.audioState === 'paused' ? 'Resume' : 'Play');
       this._cockpitRadioPlayBtn.disabled = !interactive || !hasStations;
       this._cockpitRadioPlayBtn.classList.toggle('active', activePlayback);
       this._cockpitRadioPlayBtn.textContent = activePlayback ? 'Ⅱ' : '▶';
-      this._cockpitRadioPlayBtn.setAttribute('aria-label', `${action} ${selected ? 'selected' : 'nearest'} radio station`);
-      this._cockpitRadioPlayBtn.title = action;
+      this._cockpitRadioPlayBtn.setAttribute('aria-label', playAria);
+      this._cockpitRadioPlayBtn.title = playAction;
     }
     if (this._radioStopBtn) this._radioStopBtn.disabled = !interactive || state.audioState === 'stopped';
     if (this._radioVolume) this._radioVolume.disabled = !interactive;
@@ -6106,45 +6151,45 @@ export class StyleManager {
     }
     if (this._contextRadioMiniStation) {
       this._contextRadioMiniStation.textContent = uncertain
-        ? 'RADIO STATE UNCERTAIN'
-        : (selected?.name || (state.loading ? 'SYNCING DIRECTORY' : 'RADIO READY'));
+        ? t('radio.state-uncertain-long')
+        : (selected?.name || (state.loading ? t('radio.syncing-directory') : t('radio.radio-ready')));
     }
     if (this._cockpitRadioStation) {
       this._cockpitRadioStation.textContent = uncertain
-        ? 'UNCERTAIN'
-        : (selected?.name || (state.loading ? 'SYNCING' : 'READY'));
+        ? t('radio.state-uncertain')
+        : (selected?.name || (state.loading ? t('radio.syncing') : t('radio.ready-caps')));
     }
     if (this._radioPlaybackState) {
       const catalogSuffix = state.degraded
-        ? (state.stale ? ' · stale/degraded directory' : ' · degraded directory')
-        : (state.stale ? ' · stale directory' : '');
-      const outsideFilter = selected && state.selectedIndex < 0 ? ' · outside current filter' : '';
+        ? (state.stale ? t('radio.suffix.stale-degraded') : t('radio.suffix.degraded'))
+        : (state.stale ? t('radio.suffix.stale') : '');
+      const outsideFilter = selected && state.selectedIndex < 0 ? t('radio.suffix.outside-filter') : '';
       const messages = {
-        stopped: enabled ? 'Ready — playback starts only from your action' : 'Radio off',
-        loading: 'Connecting directly to broadcaster…',
-        buffering: 'Buffering broadcaster stream…',
-        playing: `Playing ${selected?.name || 'station'}`,
-        paused: `Paused ${selected?.name || 'station'}`,
-        error: state.audioError || 'Broadcaster stream unavailable',
+        stopped: enabled ? t('radio.ready-explicit') : t('radio.off'),
+        loading: t('radio.connecting'),
+        buffering: t('radio.buffering'),
+        playing: t('radio.playing', { name: selected?.name || t('radio.station-fallback') }),
+        paused: t('radio.paused', { name: selected?.name || t('radio.station-fallback') }),
+        error: state.audioError || t('radio.stream-unavailable'),
       };
       const voiceSuffix = state.voiceDucked
-        ? ' · muted during voice interaction'
-        : (state.voiceRestoring ? ' · restoring volume after voice' : '');
+        ? t('radio.suffix.voice-muted')
+        : (state.voiceRestoring ? t('radio.suffix.voice-restoring') : '');
       const tuningSuffix = state.tuningAwaitingStationId
         ? (state.audioState === 'error'
-          ? ' · static indicates no broadcaster audio'
-          : ' · tuning static until broadcaster starts')
+          ? t('radio.suffix.static-no-audio')
+          : t('radio.suffix.tuning-static'))
         : '';
       const unavailable = state.tuningUnavailableStationId
-        ? 'Station unavailable after directory refresh — choose another channel'
+        ? t('radio.station-unavailable-refresh')
         : null;
       const lifecycleMessage = transitioning
-        ? (lifecycleState === 'enabling' ? 'Radio is enabling…' : 'Radio is disabling…')
+        ? (lifecycleState === 'enabling' ? t('radio.enabling') : t('radio.disabling'))
         : null;
       const uncertainMessage = uncertain
-        ? 'Radio lifecycle is uncertain — use Enable or Disable to reconcile'
+        ? t('radio.lifecycle-uncertain')
         : null;
-      this._radioPlaybackState.textContent = `${uncertainMessage || unavailable || lifecycleMessage || state.error || messages[state.audioState] || 'Ready'}${tuningSuffix}${voiceSuffix}${catalogSuffix}${outsideFilter}`;
+      this._radioPlaybackState.textContent = `${uncertainMessage || unavailable || lifecycleMessage || state.error || messages[state.audioState] || t('radio.ready')}${tuningSuffix}${voiceSuffix}${catalogSuffix}${outsideFilter}`;
       this._radioPlaybackState.classList.toggle('error', Boolean(uncertainMessage || unavailable || state.error || state.audioState === 'error'));
     }
     if (
@@ -6272,7 +6317,7 @@ export class StyleManager {
         selectedCameraId: cameraId,
         calibration: { cameraId, save: true },
       }, { origin: 'user' });
-      this._showToast('CCTV calibration saved');
+      this._showToast(t('toast.cctv-cal-saved'));
     });
 
     this._cctvCalibResetBtn?.addEventListener('click', () => {
@@ -6399,18 +6444,18 @@ export class StyleManager {
   _syncCctvSourceBadge(activeCamera, enabled) {
     if (!this._cctvSourceBadge) return;
     if (!enabled || !activeCamera) {
-      this._cctvSourceBadge.textContent = 'SOURCE · UNKNOWN';
+      this._cctvSourceBadge.textContent = t('cctv.source-unknown');
       this._cctvSourceBadge.dataset.frameState = 'idle';
       return;
     }
     const hasDisplayedFrame = this._cctvFrameWrap?.classList.contains('has-frame');
     if (this._cctvFrame?.dataset.loading === 'true' && !hasDisplayedFrame) {
-      this._cctvSourceBadge.textContent = 'FRAME · LOADING';
+      this._cctvSourceBadge.textContent = t('cctv.frame-loading');
       this._cctvSourceBadge.dataset.frameState = 'loading';
       return;
     }
     if (this._cctvFrame?.dataset.error === 'true' && !hasDisplayedFrame) {
-      this._cctvSourceBadge.textContent = 'FRAME · UNAVAILABLE';
+      this._cctvSourceBadge.textContent = t('cctv.frame-unavailable');
       this._cctvSourceBadge.dataset.frameState = 'error';
       return;
     }
@@ -6434,7 +6479,7 @@ export class StyleManager {
         reset: true,
       },
     }, { origin: 'user' });
-    this._showToast('CCTV calibration reset');
+    this._showToast(t('toast.cctv-cal-reset'));
   }
 
   /**
@@ -6498,7 +6543,7 @@ export class StyleManager {
     if (this._cctvAdjustBtn) {
       const adjustOn = !!this._cctvState?.calibrationMode;
       this._cctvAdjustBtn.classList.toggle('active', adjustOn && canCalibrate);
-      this._cctvAdjustBtn.textContent = adjustOn ? 'ADJUST ON' : 'ADJUST';
+      this._cctvAdjustBtn.textContent = adjustOn ? t('cctv.adjust-on') : t('cctv.adjust');
       this._cctvAdjustBtn.disabled = !canCalibrate;
     }
     if (this._cctvCalReadout) {
@@ -6526,7 +6571,7 @@ export class StyleManager {
    */
   async _toggleCctvEnabled(forceState) {
     if (!this._dataManager || !this._dataManager.layers?.has('cctv')) {
-      this._showToast('CCTV layer unavailable');
+      this._showToast(t('toast.cctv-unavailable'));
       return false;
     }
     const enabled = this._dataManager.isEnabled('cctv');
@@ -6558,9 +6603,9 @@ export class StyleManager {
    */
   _calBadgeLabel(badge) {
     switch (badge) {
-      case 'calibrated': return 'CALIBRATED';
-      case 'curated': return 'CURATED';
-      case 'raw-prior': return 'RAW PRIOR';
+      case 'calibrated': return t('cctv.cal.calibrated');
+      case 'curated': return t('cctv.cal.curated');
+      case 'raw-prior': return t('cctv.cal.raw-prior');
       default: return '--';
     }
   }
@@ -6600,7 +6645,7 @@ export class StyleManager {
 
     if (this._cctvEnableBtn) {
       this._cctvEnableBtn.classList.toggle('active', enabled);
-      this._cctvEnableBtn.textContent = enabled ? 'CCTV ON' : 'CCTV OFF';
+      this._cctvEnableBtn.textContent = enabled ? t('cctv.on') : t('cctv.off');
     }
 
     if (this._cctvSelect) {
@@ -6637,22 +6682,22 @@ export class StyleManager {
       const mode = state?.coverageMode || (state?.showCoverage ? 'on' : 'off');
       this._cctvCoverageBtn.classList.toggle('active', mode !== 'off');
       this._cctvCoverageBtn.textContent = mode === 'viewshed'
-        ? 'VIEWSHED ON'
-        : mode === 'on' ? 'COVERAGE ON' : 'COVERAGE OFF';
+        ? t('cctv.viewshed-on')
+        : mode === 'on' ? t('cctv.coverage-on') : t('cctv.coverage-off');
       this._cctvCoverageBtn.disabled = !enabled;
     }
 
     if (this._cctvAutoHopBtn) {
       const autoHop = !!state?.autoHop;
       this._cctvAutoHopBtn.classList.toggle('active', autoHop);
-      this._cctvAutoHopBtn.textContent = autoHop ? 'AUTO HOP ON' : 'AUTO HOP OFF';
+      this._cctvAutoHopBtn.textContent = autoHop ? t('cctv.auto-hop-on') : t('cctv.auto-hop-off');
       this._cctvAutoHopBtn.disabled = !enabled;
     }
 
     if (this._cctvProjectionBtn) {
       const showProjection = state?.showProjection !== false;
       this._cctvProjectionBtn.classList.toggle('active', showProjection);
-      this._cctvProjectionBtn.textContent = showProjection ? 'PROJECTION ON' : 'PROJECTION OFF';
+      this._cctvProjectionBtn.textContent = showProjection ? t('cctv.projection-on') : t('cctv.projection-off');
       this._cctvProjectionBtn.disabled = !enabled;
     }
 
@@ -6667,7 +6712,7 @@ export class StyleManager {
       const badge = activeCamera?.calBadge || null;
       const dirty = !!activeCamera?.calDirty;
       this._cctvQualityChip.textContent = dirty
-        ? 'CAL · EDITED (UNSAVED)'
+        ? t('cctv.cal.edited')
         : `CAL · ${this._calBadgeLabel(badge)}`;
       this._cctvQualityChip.dataset.calBadge = dirty ? 'edited' : (badge || '');
     }
@@ -6676,17 +6721,17 @@ export class StyleManager {
 
     if (this._cctvMeta) {
       if (activeCamera) {
-        const provider = activeCamera.sourceLabel || activeCamera.provider || 'Configured Source';
+        const provider = activeCamera.sourceLabel || activeCamera.provider || t('cctv.meta.source-fallback');
         const statusMsg = activeCamera.sourceMessage ? ` · ${activeCamera.sourceMessage}` : '';
         const calBadge = activeCamera.calBadge ? this._calBadgeLabel(activeCamera.calBadge) : '';
         const projLabel = state?.showProjection !== false ? 'MONITOR' : 'OFF';
         this._cctvMeta.textContent = `${activeCamera.city} · HDG ${Math.round(activeCamera.headingDeg)}° · FOV ${Math.round(activeCamera.fovDeg)}° · RANGE ${Math.round(activeCamera.rangeM)}m · ${projLabel}${calBadge ? ` · ${calBadge}` : ''} · ${provider}${statusMsg}`;
       } else if (cameras.length > 0) {
         this._cctvMeta.textContent = enabled
-          ? `${cameras.length} cameras loaded · click a camera to activate`
-          : `${cameras.length} cameras loaded · enable CCTV to activate`;
+          ? t('cctv.meta.cameras-click', { n: cameras.length })
+          : t('cctv.meta.cameras-enable', { n: cameras.length });
       } else {
-        this._cctvMeta.textContent = 'Enable CCTV to load camera intersections';
+        this._cctvMeta.textContent = t('cctv.enable-hint');
       }
     }
 
@@ -6708,7 +6753,7 @@ export class StyleManager {
     }
 
     this._syncCctvSourceBadge(activeCamera, enabled);
-    this._typeCctvSummary(state?.summary || 'Enable CCTV to start camera-linked intelligence summaries.');
+    this._typeCctvSummary(state?.summary || t('cctv.summary-hint'));
   }
 
   /**
@@ -6720,7 +6765,7 @@ export class StyleManager {
    */
   _typeCctvSummary(text) {
     if (!this._cctvSummary) return;
-    const nextText = String(text || '').trim() || 'No summary available.';
+    const nextText = String(text || '').trim() || t('cctv.no-summary');
     if (nextText === this._lastCctvSummaryText) return;
     this._lastCctvSummaryText = nextText;
 
@@ -7479,19 +7524,20 @@ export class StyleManager {
       }
       btn.setAttribute('aria-expanded', String(!collapsed));
       const panelName = panelEl.querySelector('.panel-title, .pp-header-label')?.textContent?.trim() || 'panel';
-      const action = collapsed ? 'Expand' : 'Collapse';
+      const action = collapsed ? t('panel.expand-action') : t('panel.collapse-action');
       btn.title = `${action} ${panelName}`;
       btn.setAttribute('aria-label', `${action} ${panelName}`);
       if (panelEl.id === 'radio-panel') {
-        const action = collapsed ? 'Expand' : 'Collapse';
-        btn.title = `${action} Radio`;
-        btn.setAttribute('aria-label', `${action} Radio section`);
+        btn.title = collapsed ? t('radio.section-expand') : t('radio.section-collapse');
+        btn.setAttribute('aria-label', collapsed
+          ? t('radio.section-expand-aria')
+          : t('radio.section-collapse-aria'));
       }
     });
     const dockToggle = panelEl.querySelector(`[data-dock-toggle-target="${panelEl.id}"]`);
     if (dockToggle) {
       const panelName = panelEl.querySelector('.panel-title')?.textContent?.trim() || 'panel';
-      const action = collapsed ? 'Expand' : 'Collapse';
+      const action = collapsed ? t('panel.expand-action') : t('panel.collapse-action');
       dockToggle.setAttribute('aria-expanded', String(!collapsed));
       dockToggle.setAttribute('aria-label', `${action} ${panelName}`);
       dockToggle.title = `${action} ${panelName}`;
@@ -8144,8 +8190,8 @@ export class StyleManager {
       this._celestialBtn.disabled = !styleSupported;
       this._celestialBtn.setAttribute('aria-disabled', String(!styleSupported));
       this._celestialBtn.title = styleSupported
-        ? 'Celestial ring — reveal the full globe'
-        : 'Celestial ring — available in Normal style';
+        ? t('pp.celestial-title')
+        : t('pp.celestial-unavailable-title');
     }
     let cameraFocused = false;
     if (nextEnabled && focus) {
@@ -9388,12 +9434,12 @@ export class StyleManager {
             this._collapsePOIRow();
             this._updateLocationMiniStatus();
           } else {
-            this._showToast('Location not found');
+            this._showToast(t('toast.location-not-found'));
           }
         } catch (err) {
           console.error('[Search] Geocoding failed:', err);
           if (this._disposed || generation !== this._navigationGeneration) return;
-          this._showToast('Search failed');
+          this._showToast(t('toast.search-failed'));
         } finally {
           this._settleLocationSearchUi(generation);
         }
@@ -9634,7 +9680,7 @@ export class StyleManager {
     // Create orbit indicator element
     this._orbitIndicator = document.createElement('div');
     this._orbitIndicator.id = 'orbit-indicator';
-    this._orbitIndicator.innerHTML = '<span class="orbit-icon">&#x21BB;</span> ORBIT';
+    this._orbitIndicator.innerHTML = `<span class="orbit-icon">&#x21BB;</span> ${t('orbit.label')}`;
     document.body.appendChild(this._orbitIndicator);
   }
 
@@ -9645,7 +9691,7 @@ export class StyleManager {
    */
   _toggleOrbit() {
     if (!this._currentTarget) {
-      this._showToast('Fly to a POI first');
+      this._showToast(t('toast.fly-to-poi-first'));
       return;
     }
 
@@ -9710,7 +9756,7 @@ export class StyleManager {
     this._globalContextFlightsBtn && (this._globalContextFlightsBtn.disabled = true);
     this._globalContextMissionsBtn && (this._globalContextMissionsBtn.disabled = true);
     this._clearSelectedLayersBtn.disabled = true;
-    this._clearSelectedLayersBtn.setAttribute('aria-label', 'Clearing selected data layers');
+    this._clearSelectedLayersBtn.setAttribute('aria-label', t('actions.clearing-layers-aria'));
 
     const managerOperation = this._dataManager.clearSelectedLayers({
       origin: 'user',
@@ -9719,16 +9765,20 @@ export class StyleManager {
     this._clearSelectedLayersManagerPromise = managerOperation;
     const operation = managerOperation.then((result) => {
       if (result.targetIds.length === 0) {
-        this._showToast('No selected data layers');
+        this._showToast(t('toast.no-selected-layers'));
       } else if (result.notClearedIds.length > 0) {
-        this._showToast(`${result.notClearedIds.length} data layer${result.notClearedIds.length === 1 ? '' : 's'} could not be cleared`);
+        this._showToast(result.notClearedIds.length === 1
+          ? t('toast.layers-not-cleared-one')
+          : t('toast.layers-not-cleared-many', { n: result.notClearedIds.length }));
       } else {
-        this._showToast(`Cleared ${result.clearedIds.length} data layer${result.clearedIds.length === 1 ? '' : 's'}`);
+        this._showToast(result.clearedIds.length === 1
+          ? t('toast.layers-cleared-one')
+          : t('toast.layers-cleared-many', { n: result.clearedIds.length }));
       }
       return result;
     }).catch((error) => {
       console.warn('[Data] clear selected layers failed', error);
-      this._showToast('Selected data layers could not be cleared');
+      this._showToast(t('toast.layers-clear-failed'));
       return {
         targetIds: [],
         items: [],
@@ -9745,7 +9795,7 @@ export class StyleManager {
         this._globalContextMissionsBtn && (this._globalContextMissionsBtn.disabled = false);
       }
       this._clearSelectedLayersBtn.disabled = false;
-      this._clearSelectedLayersBtn.setAttribute('aria-label', 'Clear selected data layers');
+      this._clearSelectedLayersBtn.setAttribute('aria-label', t('actions.clear-layers-aria'));
       this._preservePanelStateDuringLayerClear = false;
       this._clearSelectedLayersManagerPromise = null;
       this._clearSelectedLayersPromise = null;
@@ -9801,8 +9851,8 @@ export class StyleManager {
           longitude: Number(Cesium.Math.toDegrees(carto.longitude).toFixed(2)),
         },
       };
-      this._resetGlobeBtn?.setAttribute('aria-label', 'Reset to full globe view');
-      this._cockpitResetGlobeBtn?.setAttribute('aria-label', 'Reset cockpit to full globe view');
+      this._resetGlobeBtn?.setAttribute('aria-label', t('actions.reset-view-aria'));
+      this._cockpitResetGlobeBtn?.setAttribute('aria-label', t('actions.reset-cockpit-aria'));
       this._globeResetPromise = null;
       resolveReset(result);
     };
@@ -9810,8 +9860,8 @@ export class StyleManager {
       const height = this.viewer.camera.positionCartographic?.height;
       finish(!Number.isFinite(height) || Math.abs(height - GLOBE_VIEW.heightM) > 1000);
     }, 4200);
-    this._resetGlobeBtn?.setAttribute('aria-label', 'Resetting to full globe view');
-    this._cockpitResetGlobeBtn?.setAttribute('aria-label', 'Resetting cockpit to full globe view');
+    this._resetGlobeBtn?.setAttribute('aria-label', t('actions.resetting-view-aria'));
+    this._cockpitResetGlobeBtn?.setAttribute('aria-label', t('actions.resetting-cockpit-aria'));
     const target = flyToGlobeView(this.viewer, {
       onComplete: () => finish(false),
       onCancel: () => finish(true),
@@ -9829,7 +9879,7 @@ export class StyleManager {
   _initShareButton() {
     this._shareBtn.addEventListener('click', async () => {
       const success = await this.shareLinkManager.copyLink();
-      this._showToast(success ? 'Link copied!' : 'Copy failed');
+      this._showToast(success ? t('toast.link-copied') : t('toast.copy-failed'));
     });
   }
 
@@ -10082,22 +10132,29 @@ export class StyleManager {
   _updateDetectionButton(modeLabel) {
     const btn = this._detectionBtn;
     const enabled = modeLabel !== 'OFF';
+    // Stavové identifikátory ('SPARSE'/'BALANCED'/'DENSE') sú interné a
+    // persistujú sa; lokalizuje sa IBA zobrazenie na tlačidle.
+    const modeDisplay = {
+      SPARSE: t('detection.mode.sparse'),
+      BALANCED: t('detection.mode.balanced'),
+      DENSE: t('detection.mode.dense'),
+    };
     btn.setAttribute('aria-pressed', String(enabled));
     btn.setAttribute('aria-label', enabled
-      ? `Detection overlay: ${String(modeLabel).toLowerCase()}`
-      : 'Detection overlay: off');
+      ? t('pp.detection-on-aria', { mode: String(modeDisplay[modeLabel] || modeLabel).toLowerCase() })
+      : t('pp.detection-off-aria'));
     btn.classList.remove('active', 'god', 'panoptic');
     if (modeLabel === 'SPARSE') {
-      btn.querySelector('.pp-label').textContent = 'SPARSE';
+      btn.querySelector('.pp-label').textContent = modeDisplay.SPARSE;
       btn.classList.add('active');
     } else if (modeLabel === 'BALANCED') {
-      btn.querySelector('.pp-label').textContent = 'BALANCED';
+      btn.querySelector('.pp-label').textContent = modeDisplay.BALANCED;
       btn.classList.add('active');
     } else if (modeLabel === 'DENSE') {
-      btn.querySelector('.pp-label').textContent = 'DENSE';
+      btn.querySelector('.pp-label').textContent = modeDisplay.DENSE;
       btn.classList.add('active', 'panoptic');
     } else {
-      btn.querySelector('.pp-label').textContent = 'DETECT';
+      btn.querySelector('.pp-label').textContent = t('pp.detect-label');
     }
 
     if (this._detectionSliderRow) {

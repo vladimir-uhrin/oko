@@ -10,6 +10,8 @@
 // state is re-synced from controller state (never optimistically), so a failed
 // or superseded switch still leaves the truly-active stack lit.
 
+import { t } from './i18n.js';
+
 export const MAP_STACK_CHIP_CLASS = 'map-stack-chip';
 export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'photoreal',
@@ -35,8 +37,8 @@ export function mapStackChipModel(stack, activeId) {
   const label = String(stack?.label ?? stack?.id ?? '');
   const requiresIon = stack?.requiresIon === true;
   const fallbackReason = requiresIon
-    ? 'Cesium ion token required'
-    : `${label || 'This map stack'} is unavailable`;
+    ? t('mapstack.ion-required')
+    : t('mapstack.unavailable', { label: label || t('mapstack.this-stack') });
   const unavailableHint = available ? '' : String(stack?.unavailableReason || fallbackReason);
   return {
     id: String(stack?.id ?? ''),
@@ -99,7 +101,10 @@ export function renderMapStackChips(container, stacks, { activeId = null, onSele
     chip.setAttribute('aria-pressed', String(model.active));
     chip.setAttribute('aria-disabled', String(!model.available));
     if (!model.available) {
-      chip.setAttribute('aria-label', `${model.label} unavailable: ${model.unavailableHint}`);
+      chip.setAttribute('aria-label', t('mapstack.unavailable-aria', {
+        label: model.label,
+        hint: model.unavailableHint,
+      }));
     }
 
     const label = ownerDoc.createElement('span');

@@ -1556,7 +1556,9 @@ test('expanded Context results omit the redundant status heading', () => {
   assert.doesNotMatch(militaryAwarenessSource, /military-awareness-heading/);
   assert.doesNotMatch(militaryAwarenessSource, /GLOBAL CONTEXT <span>CONTEXT ONLY<\/span>/);
   assert.match(militaryAwarenessSource, /military-awareness-subject/);
-  assert.match(militaryAwarenessSource, /FLIGHT \/ VESSEL WINDOW/);
+  // i18n sweep 2026-08-31: the window suffix copy moved into the dictionaries;
+  // the subject line must still carry it via its key.
+  assert.match(militaryAwarenessSource, /t\('context\.window-suffix'\)/);
   assert.match(militaryAwarenessSource, /military-awareness-controls/);
 });
 

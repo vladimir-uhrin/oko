@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { t } from '../i18n.js';
 import flightsLayer from './flights.js';
 import militaryFlightsLayer from './militaryFlights.js';
 import aisLiveVesselsLayer from './aisLiveVessels.js';
@@ -258,8 +259,8 @@ function ensurePanel() {
 function hidePanel() {
   if (state.panel) {
     const markup = `<div class="military-awareness-standby">
-      <strong>${state.enabled ? 'CONTEXT READY' : 'GLOBAL CONTEXT OFF'}</strong>
-      <span>${state.enabled ? 'SELECT A FLIGHT, VESSEL, OR MAPPED INSTALLATION' : 'ENABLE TO LOAD OBSERVED / MAPPED PROXIMITY'}</span>
+      <strong>${state.enabled ? t('context.ready') : t('context.off')}</strong>
+      <span>${state.enabled ? t('context.ready-detail') : t('context.off-detail')}</span>
     </div>`;
     state.panel.hidden = false;
     if (state.panelMarkup !== markup) {
@@ -352,8 +353,8 @@ export function summarizeInstallationViewport(items, source) {
   return {
     ...summary,
     reason: summary.count
-      ? 'mapped matches from the loaded viewport'
-      : 'viewport feed is not a complete 250 km survey',
+      ? t('context.reason.viewport-matches')
+      : t('context.reason.viewport-note'),
   };
 }
 
@@ -490,14 +491,14 @@ function evaluateSubject(subject, sourceStates = collectSourceStates()) {
     evaluatedAt: Date.now(),
     radiusM: AWARENESS_RADIUS_M,
     cohorts: [
-      { id: 'flights', label: 'Flights', source: flightsState.stats.source || SOURCE_LABEL.flights, summary: summarizeAwarenessCohortForNavigation(flights, flightsState) },
-      { id: 'military', label: 'Military flights', source: militaryState.stats.source || SOURCE_LABEL.military, summary: summarizeAwarenessCohortForNavigation(military, militaryState) },
-      { id: 'ais-live-vessels', label: 'AIS vessels', source: vesselsState.stats.source || SOURCE_LABEL['ais-live-vessels'], summary: summarizeAwarenessCohortForNavigation(vessels, vesselsState) },
+      { id: 'flights', label: t('context.cohort.flights'), source: flightsState.stats.source || SOURCE_LABEL.flights, summary: summarizeAwarenessCohortForNavigation(flights, flightsState) },
+      { id: 'military', label: t('context.cohort.military'), source: militaryState.stats.source || SOURCE_LABEL.military, summary: summarizeAwarenessCohortForNavigation(military, militaryState) },
+      { id: 'ais-live-vessels', label: t('context.cohort.vessels'), source: vesselsState.stats.source || SOURCE_LABEL['ais-live-vessels'], summary: summarizeAwarenessCohortForNavigation(vessels, vesselsState) },
       {
         id: 'military-installations',
-        label: 'Mapped installations',
+        label: t('context.cohort.installations'),
         source: installationsState.stats.source || SOURCE_LABEL['military-installations'],
-        coverage: 'CURRENT VIEWPORT ONLY',
+        coverage: t('context.viewport-only'),
         summary: summarizeInstallationViewport(installations, installationsState),
       },
     ],
@@ -512,10 +513,10 @@ function rowHtml(cohort) {
     const label = formatAwarenessLabel(item);
     const targetId = item.icao24 || item.mmsi || item.id;
     if (!targetId) {
-      return `<li><span class="military-awareness-target unavailable" aria-label="Unavailable">${escapeHtml(label)} <span>${formatAwarenessDistance(item.distanceM)}</span></span></li>`;
+      return `<li><span class="military-awareness-target unavailable" aria-label="${escapeHtml(t('context.unavailable'))}">${escapeHtml(label)} <span>${formatAwarenessDistance(item.distanceM)}</span></span></li>`;
     }
-    const accessibleLabel = label === '—' ? 'Unavailable' : label;
-    return `<li><button type="button" class="military-awareness-target" data-awareness-layer="${escapeHtml(cohort.id)}" data-awareness-id="${escapeHtml(targetId)}" aria-label="Focus ${escapeHtml(accessibleLabel)}">${escapeHtml(label)} <span>${formatAwarenessDistance(item.distanceM)}</span></button></li>`;
+    const accessibleLabel = label === '—' ? t('context.unavailable') : label;
+    return `<li><button type="button" class="military-awareness-target" data-awareness-layer="${escapeHtml(cohort.id)}" data-awareness-id="${escapeHtml(targetId)}" aria-label="${escapeHtml(t('context.focus-target', { label: accessibleLabel }))}">${escapeHtml(label)} <span>${formatAwarenessDistance(item.distanceM)}</span></button></li>`;
   }).join('');
   const pageCount = Math.max(1, Math.ceil(summary.nearest.length / AWARENESS_PAGE_SIZE));
   const pageLabel = pageCount > 1 ? ` · ${Math.floor(page / AWARENESS_PAGE_SIZE) + 1}/${pageCount}` : '';
@@ -965,10 +966,10 @@ export function findCompatibleHistoryIndex(history, startIndex, direction, {
 
 function navigationControlsHtml() {
   const canPrevious = state.navigationIndex > 0;
-  return `<div class="military-awareness-controls" role="group" aria-label="Global Context navigation">
-    <button type="button" data-awareness-action="previous" title="Previous — prior visited contact in the 250 km window"${canPrevious ? '' : ' disabled'}>PREVIOUS</button>
-    <button type="button" data-awareness-action="focus">FOCUS</button>
-    <button type="button" data-awareness-action="next" title="Next — nearest unvisited contact in the 250 km window"${canNavigateNext() ? '' : ' disabled'}>NEXT</button>
+  return `<div class="military-awareness-controls" role="group" aria-label="${escapeHtml(t('context.nav-aria'))}">
+    <button type="button" data-awareness-action="previous" title="${escapeHtml(t('cockpit.contact-previous'))}"${canPrevious ? '' : ' disabled'}>${escapeHtml(t('context.previous'))}</button>
+    <button type="button" data-awareness-action="focus">${escapeHtml(t('context.focus'))}</button>
+    <button type="button" data-awareness-action="next" title="${escapeHtml(t('cockpit.contact-next'))}"${canNavigateNext() ? '' : ' disabled'}>${escapeHtml(t('context.next'))}</button>
   </div>`;
 }
 
@@ -988,10 +989,10 @@ function renderResults() {
   if (!state.enabled || !state.results) return hidePanel();
   const panel = ensurePanel();
   const { subject, cohorts } = state.results;
-  const markup = `<div class="military-awareness-subject">${escapeHtml(subject.label)} · ${formatAwarenessDistance(AWARENESS_RADIUS_M)} FLIGHT / VESSEL WINDOW</div>
+  const markup = `<div class="military-awareness-subject">${escapeHtml(subject.label)} · ${formatAwarenessDistance(AWARENESS_RADIUS_M)} ${escapeHtml(t('context.window-suffix'))}</div>
     ${navigationControlsHtml()}
     ${cohorts.map(rowHtml).join('')}
-    <p class="military-awareness-note">Open-source mapped/observed context. Missing broadcasts, unloaded map areas, or unmapped sites are not evidence of absence.</p>`;
+    <p class="military-awareness-note">${escapeHtml(t('context.note'))}</p>`;
   panel.hidden = false;
   if (state.panelMarkup !== markup) {
     panel.innerHTML = markup;

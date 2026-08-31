@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { t } from './i18n.js';
 
 // First-run mission launcher.
 //
@@ -101,17 +102,19 @@ export const FIRST_RUN_MISSIONS = Object.freeze({
     // generic globe-mission flight) would shrink the payoff to a few pixels.
     // The tile frames the country instead.
     cameraRectangleDegrees: Object.freeze([16.5, 47.35, 22.95, 49.90]),
-    busyText: 'Otváram slovenský prehľad…',
+    // i18n sweep 2026-08-31: busyText cez t() pri module load — jazyk je na
+    // stránku fixný (prepnutie = reload) a v Node testoch vždy EN.
+    busyText: t('first-run.busy.sk-overview'),
   }),
   contacts: Object.freeze({
     kind: 'context',
     contextMode: 'contacts',
-    busyText: 'Starting live contacts…',
+    busyText: t('first-run.busy.contacts'),
   }),
   'space-missions': Object.freeze({
     kind: 'context',
     contextMode: 'space-missions',
-    busyText: 'Opening space missions…',
+    busyText: t('first-run.busy.space-missions'),
   }),
   environmental: Object.freeze({
     kind: 'globe',
@@ -129,7 +132,7 @@ export const FIRST_RUN_MISSIONS = Object.freeze({
     // before a launch. LEDGERED post-launch. Until it lands, keyless visitors
     // are judged on the layer row, which tells them the truth.
     layerIds: Object.freeze(['earthquakes', 'local-firms']),
-    busyText: 'Scanning active events…',
+    busyText: t('first-run.busy.environmental'),
   }),
   explore: Object.freeze({ kind: 'none' }),
 });
@@ -359,8 +362,18 @@ export function initFirstRunExperience({
 
   // The tile name is configurable from one constant, so paint it from the
   // module rather than trusting the markup to have been edited to match.
+  // (i18n sweep 2026-08-31: zobrazenie ide cez preklad podľa zvolenej
+  // konštanty; environmentalLabel() ostáva EN identita pre testy/voľbu.)
   const environmentalTitle = root.querySelector('[data-first-run-environmental-title]');
-  if (environmentalTitle) environmentalTitle.textContent = environmentalLabel().title;
+  if (environmentalTitle) {
+    const envTitleKeys = {
+      ENVIRONMENTAL: 'first-run.env-label.environmental',
+      EARTH_WATCH: 'first-run.env-label.earth-watch',
+      ACTIVE_EVENTS: 'first-run.env-label.active-events',
+    };
+    const envKey = envTitleKeys[ENVIRONMENTAL_LABEL_CHOICE] || envTitleKeys.ENVIRONMENTAL;
+    environmentalTitle.textContent = t(envKey);
+  }
 
   const status = root.querySelector('[data-first-run-status]');
   const suppressBox = root.querySelector('[data-first-run-suppress]');
@@ -451,7 +464,7 @@ export function initFirstRunExperience({
     // <body> mid-flight and strands a keyboard visitor outside the launcher.
     for (const button of buttons) button.setAttribute('aria-disabled', String(next));
     if (!status) return;
-    if (next) status.textContent = FIRST_RUN_MISSIONS[choice]?.busyText || 'Working…';
+    if (next) status.textContent = FIRST_RUN_MISSIONS[choice]?.busyText || t('first-run.busy.default');
     else if (status.dataset.sticky !== 'true') status.textContent = defaultStatus;
   };
 
@@ -506,7 +519,7 @@ export function initFirstRunExperience({
     const detail = Array.isArray(failed) && failed.length ? ` (${failed.join(', ')})` : '';
     if (status) {
       status.dataset.sticky = 'true';
-      status.textContent = `Could not open that mission${detail}. Retry or explore manually.`;
+      status.textContent = t('first-run.failed', { detail });
     }
     setBusy(false);
   };
@@ -522,7 +535,7 @@ export function initFirstRunExperience({
     if (box) box.checked = !wanted;
     if (!status) return;
     status.dataset.sticky = 'true';
-    status.textContent = 'This browser is blocking storage, so that could not be saved.';
+    status.textContent = t('first-run.storage-blocked');
   };
 
   function onKeyDown(event) {

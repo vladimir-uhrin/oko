@@ -1,4 +1,5 @@
 import { governorRequestRender } from '../renderGovernor.js';
+import { t } from '../i18n.js';
 import { markDetectionSourcesChanged } from './detection.js';
 function cloneLayerParams(value) {
   if (Array.isArray(value)) return value.map(cloneLayerParams);
@@ -10,14 +11,28 @@ function cloneLayerParams(value) {
   return value;
 }
 
+// i18n sweep 2026-08-31: stavové KĽÚČE ostávajú identifikátory (CSS triedy,
+// dataset.feedState); lokalizuje sa len zobrazený text. V Node vždy EN.
 const FEED_STATE_LABELS = Object.freeze({
-  nominal: 'ON',
-  loading: 'LOADING',
-  degraded: 'DEGRADED',
-  stale: 'STALE',
-  fallback: 'FALLBACK',
-  unavailable: 'UNAVAILABLE',
+  nominal: t('manager.state.on'),
+  loading: t('manager.state.loading'),
+  degraded: t('manager.state.degraded'),
+  stale: t('manager.state.stale'),
+  fallback: t('manager.state.fallback'),
+  unavailable: t('manager.state.unavailable'),
 });
+
+/**
+ * Zobrazované meno vrstvy: preklad podľa `layer.<id>.name`, s fallbackom na
+ * modulové `layer.name` (identita modulu sa NEmení — viď i18n sweep).
+ * @param {{id?: string, name?: string}} layer Registrovaná vrstva.
+ * @returns {string} Lokalizované meno pre panel/aria.
+ */
+export function layerDisplayName(layer) {
+  const key = `layer.${layer?.id}.name`;
+  const localized = t(key);
+  return localized === key ? String(layer?.name || layer?.id || 'Layer') : localized;
+}
 
 const SUPERSEDED_VISIBILITY_INTENT = Symbol('superseded-visibility-intent');
 const VALID_LAYER_SERIALIZATION_DISPOSITIONS = new Set([
@@ -2033,7 +2048,7 @@ export class DataLayerManager {
 
       const left = document.createElement('div');
       left.className = 'data-toggle-left';
-      left.innerHTML = `<span class="data-icon">${layer.icon}</span><span class="data-name">${layer.name}</span>`;
+      left.innerHTML = `<span class="data-icon">${layer.icon}</span><span class="data-name">${layerDisplayName(layer)}</span>`;
 
       const right = document.createElement('div');
       right.className = 'data-toggle-right';
@@ -2214,23 +2229,26 @@ export class DataLayerManager {
     const source = stats.source || layer.source;
     const lifecycleState = layer.lifecycleState || (layer.enabled ? 'enabled' : 'disabled');
     if (lifecycleState === 'enabling' || lifecycleState === 'disabling') {
-      return `${lifecycleState.toUpperCase()} · ${source}`;
+      const lifecycleLabel = lifecycleState === 'enabling'
+        ? t('manager.state.enabling')
+        : t('manager.state.disabling');
+      return `${lifecycleLabel} · ${source}`;
     }
     if (layer.lifecycleUncertain) {
-      return `UNCERTAIN · ${source} · lifecycle state requires reconciliation`;
+      return `${t('manager.state.uncertain')} · ${source} · ${t('manager.meta.reconcile')}`;
     }
     const presentedError = stats.error || stats.lastError || stats.managerRefreshError;
     if (presentedError) {
       if (typeof stats.retryInSec === 'number' && stats.retryInSec > 0) {
-        return `${stateLabel} · ${source} · ${presentedError} · retry ${stats.retryInSec}s`;
+        return `${stateLabel} · ${source} · ${presentedError} · ${t('manager.meta.retry-in', { s: stats.retryInSec })}`;
       }
       return `${stateLabel} · ${source} · ${presentedError}`;
     }
-    const ago = stats.lastUpdate ? this._timeAgo(stats.lastUpdate) : 'never';
+    const ago = stats.lastUpdate ? this._timeAgo(stats.lastUpdate) : t('manager.meta.never');
     if (stats.loading) {
       const loadingLabel = typeof stats.loadingLabel === 'string' && stats.loadingLabel.trim()
         ? stats.loadingLabel.trim()
-        : 'loading...';
+        : t('manager.meta.loading');
       return `${source} · ${loadingLabel}`;
     }
     if (feedState === 'fallback') {
@@ -2241,7 +2259,7 @@ export class DataLayerManager {
     }
     if (feedState === 'stale') {
       const retry = typeof stats.retryInSec === 'number' && stats.retryInSec > 0
-        ? ` · retrying in ${stats.retryInSec}s`
+        ? ` · ${t('manager.meta.retrying-in', { s: stats.retryInSec })}`
         : '';
       return `${stateLabel} · ${source} · ${ago}${retry}`;
     }
@@ -2268,9 +2286,9 @@ export class DataLayerManager {
       : (uncertain ? 'uncertain' : feedState);
     button.disabled = transitioning;
     button.textContent = transitioning
-      ? layer.lifecycleState.toUpperCase()
-      : (uncertain ? 'UNCERTAIN' : (layer.enabled ? FEED_STATE_LABELS[feedState] : 'OFF'));
-    button.setAttribute('aria-label', `${layer.name}: ${button.textContent}`);
+      ? (layer.lifecycleState === 'enabling' ? t('manager.state.enabling') : t('manager.state.disabling'))
+      : (uncertain ? t('manager.state.uncertain') : (layer.enabled ? FEED_STATE_LABELS[feedState] : t('manager.state.off')));
+    button.setAttribute('aria-label', `${layerDisplayName(layer)}: ${button.textContent}`);
   }
 
   _formatCount(n) {
@@ -2280,9 +2298,9 @@ export class DataLayerManager {
 
   _timeAgo(timestamp) {
     const diff = Math.floor((Date.now() - timestamp) / 1000);
-    if (diff < 5) return 'just now';
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 5) return t('manager.meta.just-now');
+    if (diff < 60) return t('manager.meta.sec-ago', { n: diff });
+    if (diff < 3600) return t('manager.meta.min-ago', { n: Math.floor(diff / 60) });
+    return t('manager.meta.hour-ago', { n: Math.floor(diff / 3600) });
   }
 }

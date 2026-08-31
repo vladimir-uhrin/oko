@@ -24,10 +24,12 @@ test('legend encoding: 400 kV widest, 220 kV lighter, gas amber and distinct', (
 });
 
 test('card labels double as the legend: kind and voltage are spelled out', () => {
+  // i18n sweep 2026-08-31: v Node je jazyk EN, takže legenda vracia EN páry;
+  // slovenské znenie drží SK slovník (parita vynútená v i18n.test.mjs).
   assert.equal(skEnergyLabel({ name: 'V499' }), 'V499');
-  assert.equal(skEnergyLabel({ kind: 'gas' }), 'Plynovod (tranzit)');
-  assert.equal(skEnergyLabel({ kind: 'power', voltage: '400000' }), 'Vedenie 400 kV');
-  assert.equal(skEnergyLabel({ kind: 'power', voltage: '220000' }), 'Vedenie 220 kV');
+  assert.equal(skEnergyLabel({ kind: 'gas' }), 'Gas pipeline (transit)');
+  assert.equal(skEnergyLabel({ kind: 'power', voltage: '400000' }), '400 kV line');
+  assert.equal(skEnergyLabel({ kind: 'power', voltage: '220000' }), '220 kV line');
 });
 
 test('geojsonl parser drops malformed lines and non-lines without failing', () => {

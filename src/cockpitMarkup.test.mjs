@@ -148,8 +148,11 @@ test('the Contact panel never hides itself out from under its own NEXT button', 
   assert.match(body, /readout\.aircraftRelative/);
   assert.match(body, /'BRG —'/);
   // A culled subject holds last-known content behind the CONTACT LOST cue.
+  // (i18n sweep 2026-08-31: the copy moved into the dictionaries; the pin now
+  // anchors the localized keys so the branch itself cannot be deleted.)
   assert.match(body, /readout\.contactLost/);
-  assert.match(body, /CONTACT LOST/);
+  assert.match(body, /t\('cockpit\.context\.contact-lost'\)/);
+  assert.match(body, /t\('cockpit\.context\.contact-lost-title'/);
   assert.match(body, /this\.context\.dataset\.state = 'lost'/);
   assert.match(body, /if \(readout\.contactLost\) \{/, 'the CONTACT LOST branch is missing');
   // PREVIOUS/NEXT must be written before any early return, so the operator can
@@ -727,7 +730,10 @@ test('cockpit summary presents the focused item as Contact', () => {
   assert.match(match[0], /aria-label="Next — nearest unvisited contact in the 250 km window"/);
   assert.match(match[0], /aria-label="Collapse Contact panel"/);
   assert.doesNotMatch(match[0], />GLOBAL CONTEXT</);
-  assert.match(ui, /`\$\{expanded \? 'Collapse' : 'Expand'\} Contact panel`/);
+  // i18n sweep 2026-08-31: the Collapse/Expand Contact aria-label now comes
+  // from the dictionaries; pin the keyed pair instead of the EN template.
+  assert.match(ui, /t\('cockpit\.contact-panel-collapse'\)/);
+  assert.match(ui, /t\('cockpit\.contact-panel-expand'\)/);
 });
 
 test('Cockpit Contact navigation omits the redundant Focus camera action', () => {
@@ -779,7 +785,8 @@ test('cockpit briefing cycle control keeps its state as the accessible name', ()
     /setBriefAutoRotate\(enabled\) \{([\s\S]*?)\n  \}\n\n  startBriefRotation/,
   );
   assert.ok(update, 'cockpit briefing cycle state updater is missing');
-  assert.match(update[1], /const label = this\.briefAutoRotateEnabled \? 'CYCLE ON' : 'CYCLE OFF';/);
+  // i18n sweep 2026-08-31: the CYCLE ON/OFF pair moved into the dictionaries.
+  assert.match(update[1], /const label = this\.briefAutoRotateEnabled \? t\('cockpit\.brief\.cycle-on'\) : t\('cockpit\.brief\.cycle-off'\);/);
   assert.match(update[1], /setAttribute\('aria-label', label\)/);
   assert.match(update[1], /\.title = help;/);
   assert.doesNotMatch(update[1], /setAttribute\('aria-label', help\)/);

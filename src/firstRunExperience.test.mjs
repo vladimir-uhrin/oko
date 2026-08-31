@@ -561,16 +561,21 @@ test('markup, startup ordering and accessibility remain pinned', () => {
   // Subcopy must name BOTH feeds the tile turns on — a tile that promised only
   // half of what it does is the defect this replaced. Only the VISIBLE <small>
   // text counts; the comment beside it naturally says the words too.
+  // i18n sweep 2026-08-31: the <small> now carries data-i18n, so anchor on the
+  // tag name rather than the bare literal — the visible-copy assert is unchanged.
   const envTile = html.slice(html.indexOf('data-first-run-choice="environmental"'));
-  const visible = envTile.slice(envTile.indexOf('<small>'), envTile.indexOf('</small>'));
+  const visible = envTile.slice(envTile.indexOf('<small'), envTile.indexOf('</small>'));
   assert.match(visible, /earthquakes/i);
   assert.match(visible, /fires?/i, 'the tile must promise the fires it enables');
 
   // The card's one persuasive line is OWNER-AUTHORED and pinned verbatim,
   // unspaced em dash included. This is copy, not prose to be improved in a
   // passing edit — changing it needs the owner, not a nicer-sounding rewrite.
+  // (i18n sweep 2026-08-31: the tag carries data-i18n so the SK build can swap
+  // the line at boot; the ENGLISH copy itself stays pinned verbatim.)
   assert.ok(
-    html.includes('<p id="first-run-description">It feels like a forbidden cockpit'
+    html.includes('<p id="first-run-description" data-i18n="first-run.description">'
+      + 'It feels like a forbidden cockpit'
       + '—then you realize the sources are public and the data is real.</p>'),
     'the final first-run line must ship exactly as written',
   );

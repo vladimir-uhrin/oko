@@ -46,6 +46,7 @@
  * plus CCTV-specific methods (selectCamera, cycleCamera, focusNearest, etc.).
  */
 import * as Cesium from 'cesium';
+import { t } from '../i18n.js';
 import { registerSpriteCollection, restoreSpriteOrder } from './spriteOrder.js';
 import {
   CCTV_ACTIVATION_RESULT,
@@ -3348,9 +3349,11 @@ function coverageNeighborCount(targetRecord) {
 function buildSummaryText() {
   const active = getActiveRecord();
   if (!active) {
+    // i18n sweep 2026-08-31: prázdne stavy sú ľudské vety → t(); zvyšok
+    // súhrnu je štylizovaný intel prop (HDG/FOV/CAL…) a ostáva EN.
     return _records.length
-      ? `${_records.length} CAMERAS STANDING BY · NO CAMERA SELECTED · CLICK A CAMERA TO ACTIVATE`
-      : 'No cameras available in catalog.';
+      ? t('cctv.summary-standby', { n: _records.length })
+      : t('cctv.summary-no-catalog');
   }
 
   const area = sectorAreaKm2(active.camera.rangeM, active.camera.fovDeg);

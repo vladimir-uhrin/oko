@@ -178,7 +178,9 @@ test('the Radio chip catches lifecycle rejection and semantic false through the 
     src.indexOf("this._radioFilter?.addEventListener('change'"),
   );
   assert.match(radioControls, /await this\._runUserFacingContextAction\(/);
-  assert.match(radioControls, /Radio could not \$\{enabling \? 'start' : 'stop'\} cleanly/);
+  // i18n sweep 2026-08-31: the failure copy moved into the dictionaries; the
+  // wrapper must still receive the direction-specific message.
+  assert.match(radioControls, /enabling \? t\('toast\.radio-could-not-start'\) : t\('toast\.radio-could-not-stop'\)/);
   assert.match(radioControls, /if \(toggled === false\) return/);
 });
 

@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { t } from './i18n.js';
 import { governorRequestRender } from './renderGovernor.js';
 import { resolveKeylessTerrainUrl, SK_TERRAIN_CREDIT } from './data/skTerrain.js';
 
@@ -144,8 +145,8 @@ export class MapStackController {
    */
   _unavailableReason(stack) {
     return stack?.requiresIon
-      ? 'Cesium ion token required for Bing stacks'
-      : `${stack?.label || 'This map stack'} is unavailable`;
+      ? t('mapstack.ion-required-bing')
+      : t('mapstack.unavailable', { label: stack?.label || t('mapstack.this-stack') });
   }
 
   getStack(id) {
