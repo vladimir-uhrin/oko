@@ -38,6 +38,10 @@ export const MAP_STACKS = [
     shortLabel: 'SK Orto',
     kind: 'wms',
     requiresIon: false,
+    // Mozaika pokrýva len SR (rectangle nižšie) — bez podkladu by zvyšok
+    // glóbusu bol prázdna čierna guľa. OSM pod ňou drží svet čitateľný
+    // a provider sa zdieľa s OSM stackom (rovnaká cache).
+    underlayStackId: 'osm',
     // Ortofotomozaika SR — keyless WMS od GKÚ Bratislava, CC BY 4.0 (licencia
     // deklarovaná v GetCapabilities AccessConstraints; DATA_SOURCES.md).
     // Vrstva '1' je čistá mozaika; '2'/'3' sú footprint/klad — nepridávať.
@@ -85,6 +89,8 @@ export class MapStackController {
     this._onError = onError;
     this._activeId = googleTileset ? initialStack : 'osm';
     this._imageryLayer = null;
+    /** Optional base under a coverage-limited stack (see `underlayStackId`). */
+    this._underlayLayer = null;
     this._imageryProviders = new Map();
     this._isSwitching = false;
     this._lastError = null;
@@ -256,13 +262,19 @@ export class MapStackController {
 
   async _activateGlobeStack(stack, gen) {
     const provider = await this._getImageryProvider(stack);
+    const underlayStack = stack.underlayStackId ? this.getStack(stack.underlayStackId) : null;
+    const underlayProvider = underlayStack ? await this._getImageryProvider(underlayStack) : null;
     // A newer switch started while the provider was resolving — don't touch the
     // scene's imagery layers, the winning switch already owns them (M7).
     if (gen != null && gen !== this._switchGen) return;
     this._removeImageryLayer();
 
+    if (underlayProvider) {
+      this._underlayLayer = new Cesium.ImageryLayer(underlayProvider);
+      this.viewer.imageryLayers.add(this._underlayLayer, 0);
+    }
     this._imageryLayer = new Cesium.ImageryLayer(provider);
-    this.viewer.imageryLayers.add(this._imageryLayer, 0);
+    this.viewer.imageryLayers.add(this._imageryLayer, underlayProvider ? 1 : 0);
 
     if (this.googleTileset) this.googleTileset.show = false;
     this.viewer.scene.globe.show = true;
@@ -287,7 +299,10 @@ export class MapStackController {
       provider = new Cesium.WebMapServiceImageryProvider({
         url: cfg.url,
         layers: cfg.layers,
-        parameters: { format: 'image/jpeg' },
+        // Transparent PNG, not JPEG: outside the mosaic's actual coverage the
+        // service paints "no data" — with transparency the OSM underlay shows
+        // through instead of a white halo around the country.
+        parameters: { format: 'image/png', transparent: true },
         tileWidth: cfg.tileSize,
         tileHeight: cfg.tileSize,
         maximumLevel: cfg.maximumLevel,
@@ -303,6 +318,10 @@ export class MapStackController {
   }
 
   _removeImageryLayer() {
+    if (this._underlayLayer) {
+      this.viewer.imageryLayers.remove(this._underlayLayer, false);
+      this._underlayLayer = null;
+    }
     if (!this._imageryLayer) return;
     this.viewer.imageryLayers.remove(this._imageryLayer, false);
     this._imageryLayer = null;

@@ -1,3 +1,5 @@
+import * as Cesium from 'cesium';
+
 // First-run mission launcher.
 //
 // The map deliberately does not auto-enable live feeds on every visit: doing so
@@ -87,6 +89,20 @@ export function environmentalLabel(choice = ENVIRONMENTAL_LABEL_CHOICE) {
 
 /** @type {Readonly<Record<string, object>>} */
 export const FIRST_RUN_MISSIONS = Object.freeze({
+  // OKO (Fáza 4): the fork's flagship tile — fully keyless on purpose, so the
+  // very first click always delivers: SHMÚ precipitation radar (CC BY 4.0,
+  // no key) + the bundled SK energy grid (ODbL snapshot). Both layers are
+  // registered in the shipped set_layer_visibility enum like every other
+  // mission layer.
+  'sk-overview': Object.freeze({
+    kind: 'globe',
+    layerIds: Object.freeze(['shmu-radar', 'local-energy']),
+    // Both layers live over Slovakia — pulling out to the whole globe (the
+    // generic globe-mission flight) would shrink the payoff to a few pixels.
+    // The tile frames the country instead.
+    cameraRectangleDegrees: Object.freeze([16.5, 47.35, 22.95, 49.90]),
+    busyText: 'Otváram slovenský prehľad…',
+  }),
   contacts: Object.freeze({
     kind: 'context',
     contextMode: 'contacts',
@@ -249,9 +265,11 @@ export function rememberFirstRunSessionDismissed(sessionStorageRef) {
  * @param {(mode: string) => Promise<object>} deps.setContextMode
  * @param {(layerId: string) => Promise<boolean>} deps.setLayerEnabled
  * @param {() => Promise<any>} deps.flyToGlobe
+ * @param {(rectDegrees: number[]) => Promise<any>} [deps.flyToRegion] Optional
+ *   region framing for missions that declare `cameraRectangleDegrees`.
  * @returns {Promise<{ok: boolean, choice: string, result?: object, failedLayerIds?: string[]}>}
  */
-export async function runFirstRunChoice(choice, { setContextMode, setLayerEnabled, flyToGlobe }) {
+export async function runFirstRunChoice(choice, { setContextMode, setLayerEnabled, flyToGlobe, flyToRegion }) {
   const mission = FIRST_RUN_MISSIONS[choice];
   if (!mission) return { ok: false, choice };
   if (mission.kind === 'none') return { ok: true, choice };
@@ -262,8 +280,14 @@ export async function runFirstRunChoice(choice, { setContextMode, setLayerEnable
   // Globe missions: start the pull-out and the layer work together so the
   // camera is already moving while the feeds spin up. The flight is framing,
   // not the mission — a stalled or superseded flight never fails the tile.
+  // A mission with its own region frames that instead of the whole globe
+  // (sk-overview); callers without the optional seam keep the globe flight.
   const flight = Promise.resolve()
-    .then(() => flyToGlobe())
+    .then(() => (
+      mission.cameraRectangleDegrees && typeof flyToRegion === 'function'
+        ? flyToRegion(mission.cameraRectangleDegrees)
+        : flyToGlobe()
+    ))
     .catch(() => null);
   const outcomes = await Promise.all(mission.layerIds.map(async (layerId) => {
     try {
@@ -455,6 +479,16 @@ export function initFirstRunExperience({
         // these layers, so it persists exactly as clicking those rows would.
         setLayerEnabled: (layerId) => dataManager.setEnabled(layerId, true, { origin: 'user' }),
         flyToGlobe: () => styleManager.resetToGlobeView(),
+        flyToRegion: (rectDegrees) => {
+          const viewer = styleManager?.viewer;
+          if (!viewer?.camera?.flyTo) return null;
+          viewer.trackedEntity = undefined;
+          viewer.camera.flyTo({
+            destination: Cesium.Rectangle.fromDegrees(...rectDegrees),
+            duration: 3.2,
+          });
+          return null;
+        },
       });
     } catch (error) {
       // A thrown mission is a real defect worth seeing in a bug report; the

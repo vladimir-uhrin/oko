@@ -15,6 +15,8 @@ test('ÚGKK stack descriptor je keyless WMS s čistou mozaikovou vrstvou', () =>
   assert.ok(stack, 'stack ugkk-ortofoto chýba v MAP_STACKS');
   assert.equal(stack.kind, 'wms');
   assert.equal(stack.requiresIon, false);
+  // Mozaika pokrýva len SR — bez OSM podkladu je zvyšok glóbusu čierny.
+  assert.equal(stack.underlayStackId, 'osm');
   assert.equal(new URL(stack.wms.url).host, 'zbgisws.skgeodesy.sk');
   assert.ok(stack.wms.url.startsWith('https://'));
   // Vrstva '1' = Ortofoto; '2'/'3' (Footprint/Boundary) kreslia zelený klad

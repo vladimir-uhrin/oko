@@ -42,11 +42,17 @@ Buď sa politika/vymáhanie medzičasom zmenili, alebo je enforcement per-účet
 **Považovať za krehké** — pred väčšou prácou nad 3D vrstvou vždy pretestovať
 (`scripts/qa-sk-coverage.mjs`), fallback podklady z Fázy 1 ostávajú strategické.
 
-### AIS na Dunaji
+### AIS na Dunaji — ✅ POKRYTÉ (doplnené 2026-08-30 ~22:40)
 
-Netestované — vyžaduje `AISSTREAM_API_KEY` (bezplatná registrácia na
-aisstream.io), ktorý podľa bootstrapu odkladáme. HUD ukazuje `AIS: --`.
-Úloha: po registrácii kľúča overiť terestriálne pokrytie úseku BA–Komárno.
+Po registrácii `AISSTREAM_API_KEY` (bezplatný, aisstream.io, server-side):
+websocket nabehol na prvý pokus a už po ~2 minútach akumulácie bolo
+v úseku Bratislava–Komárno (bbox 47.72–48.17 N, 16.95–18.25 E) **5 plavidiel
+s pozíciami čerstvými na sekundy**: TURIEC, PREŠOV, MUFLON8 (MMSI prefix 267
+= SK) a ARIANA (BG) v bratislavskom prístave, **BD TEKOV pri Hrušovskej
+zdrži** — terestriálne pokrytie teda siaha aj pod Bratislavu smerom na
+Gabčíkovo. Nedeľná noc, všetko na kotve (spd 0) — očakávané; cez deň bude
+tranzit bohatší. Globálny feed v tom čase ~4 800–9 000 lodí. Vizuálne overené
+v appke (chevrony + label MUFLON8 v prístave). Fáza 0 je týmto kompletná.
 
 ## Fáza 1 — ÚGKK ortofotomozaika ako mapový stack (2026-08-30)
 
@@ -138,6 +144,43 @@ Keycloak, sekcia „Dátové služby" je **v príprave**, žiadna deklarovaná
 otvorená licencia (len „za podmienok stanovených príslušnými právnymi
 predpismi") → neimplementovať. Sledovať spustenie „Dátových služieb";
 alternatívne vyžiadať podmienky od SHMÚ priamo.
+
+## Fáza 4 — kozmetika (2026-08-30)
+
+**4a — Energetika SR namiesto podmorských káblov.** Nová bundlovaná vrstva
+`local-energy` („Energetika SR", ⚡): 400/220 kV prenosová sústava (584 línií)
++ tranzitné plynovody (102 línií) z OSM — ODbL, snapshot 2026-08-30,
+provenance a deterministický transform v
+`src/data/local_data/sk_energy/SOURCE.md` + `scripts/build-sk-energy.mjs`
+(build je manuálny, nikdy nie CI — Overpass etiketa; kanonický endpoint bol
+v deň buildu nedostupný, použitý mirror maps.mail.ru). Clampované ground
+polylines (400 kV hrubšie, 220 kV tenšie, plyn jantárový) — funguje na
+photoreal aj glóbusových stackoch. Káblová vrstva ostáva v kóde (rebase),
+len už nie je jediná „infra" voľba.
+
+**4b — SK first-run.** Prvý let už nejde do Austinu: `flyToBratislava`
+(kamera JZ od centra, pohľad cez Dunaj na Staré mesto — plný 3D mesh podľa
+Fázy 0). Mission karta má novú prvú dlaždicu **SLOVENSKÝ PREHĽAD** —
+zámerne úplne keyless (SHMÚ radar CC BY + bundlovaná energetika ODbL),
+takže prvý klik nového návštevníka vždy doručí. Hlasové aliasy: „radar",
+„precipitation" → shmu-radar; „energy", „energetika", „power grid",
+„pipelines" → local-energy.
+
+## Polish blok (2026-08-30 večer)
+
+- **SK Orto má OSM podklad** (`underlayStackId` v mapStackController) a WMS
+  beží na transparentnom PNG — mozaika kopíruje hranice SR nad čitateľným
+  svetom namiesto čiernej gule s bielou svätožiarou.
+- **Radar poctivo hlási čas**: freshness vrstvy = čas platnosti produktu
+  (nie čas fetchu), `stale` je prvotriedny feed-stav (STALE chip cez
+  layerFeedState) a source label žije: „SHMÚ cappi2km · HH:MM UTC".
+  Ostáva TODO: plnohodnotná dBZ legenda v UI.
+- **Energetika je klikateľná**: 688 línií registrovaných v context store,
+  label karty = legenda („Vedenie 400 kV" / „Vedenie 220 kV" /
+  „Plynovod (tranzit)", meno V-čka keď existuje).
+- **Branding OKO**: titulok, HUD hlavička aj loading screen („OKO — ŽIVÝ
+  POHĽAD NA SLOVENSKO"), podľa pravidla z CLAUDE.md.
+- **SK misia rámuje Slovensko** (`cameraRectangleDegrees`), nie celý glóbus.
 
 ### Fáza 1b — DMR 5.0 terrain (úloha, zatiaľ nerealizované)
 

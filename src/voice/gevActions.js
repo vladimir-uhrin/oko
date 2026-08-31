@@ -176,6 +176,13 @@ const LAYER_ALIASES = new Map([
   ['firms', 'local-firms'],
   ['fires', 'local-firms'],
   ['active fires', 'local-firms'],
+  ['radar', 'shmu-radar'],
+  ['rain radar', 'shmu-radar'],
+  ['precipitation', 'shmu-radar'],
+  ['energy', 'local-energy'],
+  ['energetika', 'local-energy'],
+  ['power grid', 'local-energy'],
+  ['pipelines', 'local-energy'],
 ]);
 
 const CITY_ALIASES = new Map([

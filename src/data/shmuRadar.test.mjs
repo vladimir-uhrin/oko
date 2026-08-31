@@ -194,12 +194,18 @@ test('layer contract: entity drape, stats, stale surfaced, id/cadence pinned', a
   assert.ok(Math.abs(Cesium.Math.toDegrees(rect.north) - 50.7) < 1e-6);
   assert.equal(entity.rectangle.height.getValue(now), SHMU_RADAR_DRAPE_HEIGHT_M);
   assert.deepEqual(layer.getStats().error, null);
+  assert.equal(layer.getStats().stale, false);
   assert.equal(layer.getStats().count, 1234);
+  // Freshness is the PRODUCT's valid time, and the row label carries it too.
+  assert.equal(layer.getStats().lastUpdate, Date.parse(meta.iso));
+  assert.match(layer.source, /18:10 UTC/);
 
-  // A stale frame must surface in stats — never presented silently as current.
+  // A stale frame is a first-class feed state — never silently current,
+  // never disguised as a transport error.
   served = { ...meta, iso: '2026-08-30T17:00:00Z', stale: true, echoPixels: 99 };
   assert.equal(await layer.update(viewer), true);
-  assert.match(layer.getStats().error, /stale/);
+  assert.equal(layer.getStats().stale, true);
+  assert.equal(layer.getStats().error, null);
   assert.equal(layer.getStats().count, 99);
 
   // Transport failure keeps the layer honest too.

@@ -30,6 +30,8 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
   let _entity = null;
   let _enabled = false;
   let _iso = null;
+  let _product = null;
+  let _stale = false;
   let _echoPixels = 0;
   let _lastUpdate = null;
   let _lastError = null;
@@ -37,8 +39,16 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
   const layer = {
     id: SHMU_RADAR_LAYER_ID,
     name: 'Zrážkový radar (SHMÚ)',
-    icon: '🌧️',
-    source: 'SHMÚ — opendata.shmu.sk (CC BY 4.0)',
+    // Monochromatický glyf v štýle ostatných vrstiev (▣/▰/▲) — žiadne emoji,
+    // nech panel drží jednotný HUD vzhľad.
+    icon: '▧',
+    // Live label: once a frame lands, the row says WHICH product and WHEN —
+    // a radar image without its valid time is not an observation.
+    get source() {
+      return _iso
+        ? `SHMÚ ${_product || 'radar'} · ${_iso.slice(11, 16)} UTC (CC BY 4.0)`
+        : 'SHMÚ — opendata.shmu.sk (CC BY 4.0)';
+    },
     updateInterval: 5 * 60 * 1000, // matches the upstream product cadence
 
     init(viewer) {
@@ -48,6 +58,8 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
       _entity = null;
       _enabled = false;
       _iso = null;
+      _product = null;
+      _stale = false;
       _echoPixels = 0;
       _lastUpdate = null;
       _lastError = null;
@@ -107,12 +119,18 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
         }
 
         _echoPixels = Number.isFinite(meta.echoPixels) ? meta.echoPixels : 0;
-        _lastUpdate = Date.now();
-        // A served-but-old frame is DATA IN A DEGRADED STATE, not an error in
-        // the transport sense — but the panel's error slot is the layer's one
-        // honest "not current" channel, so stale rides there.
-        _lastError = meta.stale ? `stale frame (${meta.iso})` : null;
-        console.log(`[Data:ShmuRadar] Updated: ${meta.iso}, ${_echoPixels} echo px${meta.stale ? ' (STALE)' : ''}`);
+        _product = typeof meta.product === 'string' ? meta.product : null;
+        // Freshness = the PRODUCT's valid time, not our fetch time — the
+        // panel's age readout then reports how old the weather is, which is
+        // the only age an operator cares about.
+        const productMs = Date.parse(meta.iso);
+        _lastUpdate = Number.isFinite(productMs) ? productMs : Date.now();
+        // Served-but-old is a first-class feed state (`stale`), not an error:
+        // layerFeedState() maps it to the STALE chip while transport errors
+        // keep their own channel.
+        _stale = meta.stale === true;
+        _lastError = null;
+        console.log(`[Data:ShmuRadar] Updated: ${meta.iso}, ${_echoPixels} echo px${_stale ? ' (STALE)' : ''}`);
         return true;
       } catch (e) {
         console.warn('[Data:ShmuRadar] Fetch error:', e);
@@ -129,6 +147,8 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
       }
       _entity = null;
       _iso = null;
+      _product = null;
+      _stale = false;
       _echoPixels = 0;
       _lastUpdate = null;
       _lastError = null;
@@ -139,6 +159,7 @@ export function createShmuRadarLayer({ fetchImpl = null } = {}) {
         count: _echoPixels,
         lastUpdate: _lastUpdate,
         error: _lastError,
+        stale: _stale,
       };
     },
   };

@@ -1,6 +1,7 @@
 import { createLocalGeoJsonLayer } from './localGeojson.js';
 import { createFirmsHeatmapLayer } from './firmsHeatmap.js';
 import submarineCablesLayer from './telegeographySubmarineCables.js';
+import skEnergyLayer from './skEnergy.js';
 
 // Use Vite's ?url import to properly resolve these assets in dev and build
 import datacentersUrl from './local_data/datacenters/datacenters.geojsonl?url';
@@ -47,6 +48,10 @@ const fires = createFirmsHeatmapLayer({
 export default [
   datacenters,
   dams,
+  // OKO (Fáza 4): the SK energy grid sits where the submarine cables tile
+  // used to matter — cables stay available, but a landlocked fork leads with
+  // infrastructure that exists here.
+  skEnergyLayer,
   submarineCablesLayer,
   fires,
 ];

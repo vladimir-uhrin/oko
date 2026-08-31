@@ -18,6 +18,11 @@ zemetrasenia, kamery, doprava) a hlasovým ovládaním cez OpenAI Realtime API.
 **Cieľ forku:** doplnenie SK/CE dátových zdrojov a riešenie obmedzení
 Google 3D Tiles v EHP.
 
+**OKO nie je SK-only.** Globálne vrstvy upstreamu (lode, lietadlá, satelity,
+zemetrasenia…) sú prvotriedna funkcionalita — SK/CE zdroje pridávame NAVYŠE,
+nie namiesto sveta. Nezužuj globálne feedy, kvóty ani UI na Slovensko bez
+výslovného pokynu; SK je default štart a fokus dát, svet zostáva plne živý.
+
 Upstream ostáva ako remote `upstream`. Zmeny držíme v tematických vetvách, aby sa
 dal rebase na upstream bez konfliktného pekla.
 

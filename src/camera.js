@@ -47,6 +47,37 @@ export function flyToPreset(viewer, presetName, duration = 3.0) {
 }
 
 /**
+ * OKO first-load view: Bratislava with the Danube leading toward Žitný
+ * ostrov. Same two-step shape as flyToAustin — start high, then a cinematic
+ * settle onto the old town at an oblique angle (the city has full
+ * photorealistic mesh; docs/SK-NOTES.md Fáza 0).
+ */
+export function flyToBratislava(viewer) {
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(17.1077, 48.1486, 25000),
+    orientation: {
+      heading: Cesium.Math.toRadians(0),
+      pitch: Cesium.Math.toRadians(-90),
+      roll: 0.0,
+    },
+  });
+
+  setTimeout(() => {
+    viewer.camera.flyTo({
+      // Camera SW of the centre looking NE across the Danube and the old town.
+      destination: Cesium.Cartesian3.fromDegrees(17.0870, 48.1330, 700),
+      orientation: {
+        heading: Cesium.Math.toRadians(38),
+        pitch: Cesium.Math.toRadians(-28),
+        roll: 0.0,
+      },
+      duration: 4.0,
+      easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+    });
+  }, 500);
+}
+
+/**
  * Set camera to Austin on load with a cinematic fly-in.
  */
 export function flyToAustin(viewer) {
