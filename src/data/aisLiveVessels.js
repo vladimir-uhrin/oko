@@ -22,7 +22,9 @@ import {
   vesselTypeCss,
   vesselOverlayCohortLimit,
   normalizeVesselType,
+  vesselPositionAge,
 } from './vesselLabels.js';
+import { aisPositionUsable } from './aisIngest.js';
 import {
   clearOverlaySource,
   hitTestWorldOverlay,
@@ -199,9 +201,11 @@ export function deriveAisFeedError(payload, acceptedRowCount) {
   return detail && !AIS_STATUS_REASON[status] ? `${reason} (${detail})` : reason;
 }
 
-/** True when a raw AIS row can enter the production vessel normalizer. */
+/** True when a raw AIS row can enter the production vessel normalizer.
+ *  Range-checked, not just finite: AIS "position not available" is lat 91 /
+ *  lon 181 — finite numbers that used to reach Cartesian3.fromDegrees. */
 function hasUsableVesselCoordinates(row) {
-  return Number.isFinite(Number(row?.lat)) && Number.isFinite(Number(row?.lon));
+  return aisPositionUsable(row?.lat, row?.lon);
 }
 
 /**
@@ -1131,7 +1135,9 @@ function removeRecordPrimitives(record) {
 function normalizeVessel(row) {
   const lat = Number(row.lat);
   const lon = Number(row.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  // Range check, not finiteness: the 91/181 "no position" sentinels are
+  // finite and must never mint a Cartesian.
+  if (!aisPositionUsable(lat, lon)) return null;
   // Vertical datum: anchor at the SEA SURFACE (geoid, h = N + lift), not the
   // ellipsoid — at height 0 everything that projects record.position (clicks,
   // detection brackets, cards, getNearby) points up to ~45 m under the water.
@@ -1785,13 +1791,19 @@ function updateSelectedVesselHud(record) {
   const el = document.getElementById('hud-ais-vessel');
   if (!el) return;
 
-  // Pinned vessels missing from recent refreshes get a stale marker
-  const stale = (record.missedRefreshes || 0) > 0;
+  // Pinned vessels missing from recent refreshes get a stale marker — and so
+  // does a vessel whose own fix went silent while the feed stays live
+  // (per-vessel age, mirror of the selected card).
+  const age = vesselPositionAge(record.lastPositionEpoch, Date.now());
+  const stale = (record.missedRefreshes || 0) > 0 || age.stale;
+  const ageSuffix = age.label ? ` (${age.label})` : '';
   el.classList.add('active');
   el.textContent = [
     `AIS: ${trimHudValue(record.name, 32)}`,
-    `${trimHudValue(record.type || 'VESSEL', 24)}  SPD: ${formatSpeed(record.speed)}  HDG: ${formatHeading(record.heading ?? record.course)}`,
-    `MMSI: ${record.mmsi || '--'}  ${formatPositionTime(record)}${stale ? '  · STALE' : ''}`,
+    // HDG len keď máme skutočný TrueHeading; kurz nad zemou (COG) je CRS —
+    // pri triede B a msg-5-only kontaktoch sa doteraz COG vydával za heading.
+    `${trimHudValue(record.type || 'VESSEL', 24)}  SPD: ${formatSpeed(record.speed)}  ${Number.isFinite(record.heading) ? 'HDG' : 'CRS'}: ${formatHeading(record.heading ?? record.course)}`,
+    `MMSI: ${record.mmsi || '--'}  ${formatPositionTime(record)}${ageSuffix}${stale ? '  · STALE' : ''}`,
   ].join('\n');
 }
 
@@ -1843,7 +1855,7 @@ export function buildVesselCard(record) {
  * @param {Object} record - Selected vessel record.
  * @returns {Object} vesselLabels entry.
  */
-export function buildSelectedVesselCard(record) {
+export function buildSelectedVesselCard(record, nowMs = Date.now()) {
   const direction = record.heading ?? record.course;
   const details = [[
     vesselTypeShort(record) || 'VESSEL',
@@ -1852,8 +1864,13 @@ export function buildSelectedVesselCard(record) {
   ].join(' · ')];
   const destination = String(record.destination || '').trim();
   if (destination) details.push(`→ ${trimHudValue(destination, 24)}`);
-  const stale = (record.missedRefreshes || 0) > 0;
-  details.push(`MMSI ${record.mmsi || '--'} · ${formatPositionTime(record)}${stale ? ' · STALE' : ''}`);
+  // Per-vessel honesty: the feed can be perfectly live while THIS vessel went
+  // silent — the server retains rows for 30 min, so without the fix-age check
+  // an unreporting vessel looked fresh the whole time (pravidlo 2).
+  const age = vesselPositionAge(record.lastPositionEpoch, nowMs);
+  const stale = (record.missedRefreshes || 0) > 0 || age.stale;
+  const ageSuffix = age.label ? ` (${age.label})` : '';
+  details.push(`MMSI ${record.mmsi || '--'} · ${formatPositionTime(record)}${ageSuffix}${stale ? ' · STALE' : ''}`);
   return {
     id: vesselOverlayEntryId(record),
     actionable: Boolean(record?.mmsi),

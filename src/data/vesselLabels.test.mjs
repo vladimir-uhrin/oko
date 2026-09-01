@@ -98,3 +98,36 @@ test('vesselLabels cannot resurrect a dedicated renderer', async () => {
     assert.equal(source.includes(forbidden), false, `dedicated renderer token returned: ${forbidden}`);
   }
 });
+
+// --- Poctivý vek polohy (pravidlo 2: stav dát musí byť viditeľný) -----------
+// Server drží riadky 30 minút a klient ich kreslil ako živé — loď, ktorá
+// prestala vysielať, vyzerala celý ten čas čerstvá. lastPositionEpoch pritom
+// celý čas tiekol až do record-u a nečítal ho nikto.
+
+test('vesselPositionAge: čerstvý fix nemá štítok, starý má vek a STALE', async () => {
+  const { vesselPositionAge, VESSEL_POSITION_STALE_SEC } = await import('./vesselLabels.js');
+  const nowMs = 1_790_000_000_000;
+  const at = (ageSec) => vesselPositionAge(nowMs / 1000 - ageSec, nowMs);
+
+  assert.deepEqual(at(30), { ageSec: 30, label: null, stale: false });
+  assert.deepEqual(at(90), { ageSec: 90, label: null, stale: false });
+  // Od 2 min sa vek priznáva na karte…
+  assert.deepEqual(at(3 * 60), { ageSec: 180, label: '3 min', stale: false });
+  // …od 10 min je kontakt STALE (kotviaca loď hlási každé 3 min; 10 min ticha
+  // už nie je normálna prevádzka).
+  assert.equal(VESSEL_POSITION_STALE_SEC, 600);
+  assert.deepEqual(at(12 * 60), { ageSec: 720, label: '12 min', stale: true });
+  assert.deepEqual(at(2 * 3600), { ageSec: 7200, label: '2 h', stale: true });
+});
+
+test('vesselPositionAge: chýbajúci alebo budúci epoch nevyrába falošný vek', async () => {
+  const { vesselPositionAge } = await import('./vesselLabels.js');
+  const nowMs = 1_790_000_000_000;
+  assert.deepEqual(vesselPositionAge(null, nowMs), { ageSec: null, label: null, stale: false });
+  assert.deepEqual(vesselPositionAge(undefined, nowMs), { ageSec: null, label: null, stale: false });
+  assert.deepEqual(vesselPositionAge(0, nowMs), { ageSec: null, label: null, stale: false });
+  assert.deepEqual(vesselPositionAge('junk', nowMs), { ageSec: null, label: null, stale: false });
+  // Fix "z budúcnosti" (zle nastavené hodiny na prijímači) sa oreže na 0,
+  // nikdy nie záporný vek.
+  assert.deepEqual(vesselPositionAge(nowMs / 1000 + 300, nowMs), { ageSec: 0, label: null, stale: false });
+});

@@ -24,6 +24,37 @@ export const VESSEL_OVERLAY_MAX_COHORT = VESSEL_DEFAULT_LABEL_LIMIT;
 export const VESSEL_CARD_FADE_DISTANCE_M = 300_000;
 
 /**
+ * Vek fixu, od ktorého ho karta priznáva textom ("(3 min)"). Pod ním je fix
+ * považovaný za čerstvý a formát karty sa nemení.
+ */
+export const VESSEL_POSITION_AGE_LABEL_SEC = 120;
+/**
+ * Vek fixu, od ktorého je kontakt STALE. Kotviaca loď triedy A hlási každé
+ * 3 minúty, trieda B do 3 minút — 10 minút ticha už nie je normálna
+ * prevádzka. Server pritom drží riadky 30 minút (AISSTREAM_STALE_MS), takže
+ * bez tohto prahu vyzerala odmlčaná loď celý ten čas ako živá — porušenie
+ * pravidla "stav dát musí byť viditeľný".
+ */
+export const VESSEL_POSITION_STALE_SEC = 600;
+
+/**
+ * Poctivý vek poslednej polohy plavidla. Číta fix epoch, ktorý server od
+ * začiatku posiela (last_position_epoch) a klient ukladal nečítaný.
+ * @param {*} lastPositionEpoch Epoch fixu v sekundách.
+ * @param {number} nowMs Aktuálny čas v ms (parameter kvôli determinizmu testov).
+ * @returns {{ageSec: number|null, label: string|null, stale: boolean}}
+ */
+export function vesselPositionAge(lastPositionEpoch, nowMs) {
+  const epoch = Number(lastPositionEpoch);
+  if (!Number.isFinite(epoch) || epoch <= 0) return { ageSec: null, label: null, stale: false };
+  const ageSec = Math.max(0, Math.floor(nowMs / 1000 - epoch));
+  let label = null;
+  if (ageSec >= 3600) label = `${Math.floor(ageSec / 3600)} h`;
+  else if (ageSec >= VESSEL_POSITION_AGE_LABEL_SEC) label = `${Math.round(ageSec / 60)} min`;
+  return { ageSec, label, stale: ageSec >= VESSEL_POSITION_STALE_SEC };
+}
+
+/**
  * AIS type family → chevron hue + card accent. Single source of truth for
  * vessel type colors so billboard chevrons and host cards cannot drift apart.
  */

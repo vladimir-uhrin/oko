@@ -1641,3 +1641,34 @@ test('a vessel analyst record carries the MMSI the tracker keys on', () => {
   assert.equal(nameless.id, '366999124');
   assert.equal(nameless.mmsi, '366999124');
 });
+
+// --- Poctivý vek polohy na vybranej karte -----------------------------------
+
+test('buildSelectedVesselCard: starý fix priznáva vek a od 10 min nesie STALE', () => {
+  const nowMs = Date.parse('2026-07-27T11:34:33Z');
+  // 12 minút po fixe → vek na karte + STALE, aj keď feed beží a
+  // missedRefreshes je 0 (presne tento prípad bol doteraz neviditeľný).
+  const old = buildSelectedVesselCard(makeRecord({
+    lastPositionUtc: '2026-07-27T11:22:33Z',
+    lastPositionEpoch: Date.parse('2026-07-27T11:22:33Z') / 1000,
+  }), nowMs);
+  assert.deepEqual(old.details, [
+    'CONTAINER SHIP · 14.5KT · 231°',
+    'MMSI 353136000 · POS: 11:22:33Z (12 min) · STALE',
+  ]);
+
+  // 3 minúty: vek sa prizná, ale STALE ešte nie (kotviace lode hlásia
+  // každé 3 min — to je normálna prevádzka, nie výpadok).
+  const aging = buildSelectedVesselCard(makeRecord({
+    lastPositionUtc: '2026-07-27T11:31:33Z',
+    lastPositionEpoch: Date.parse('2026-07-27T11:31:33Z') / 1000,
+  }), nowMs);
+  assert.equal(aging.details.at(-1), 'MMSI 353136000 · POS: 11:31:33Z (3 min)');
+
+  // Čerstvý fix: nezmenený formát (pin vyššie v súbore zostáva v platnosti).
+  const fresh = buildSelectedVesselCard(makeRecord({
+    lastPositionUtc: '2026-07-27T11:34:03Z',
+    lastPositionEpoch: Date.parse('2026-07-27T11:34:03Z') / 1000,
+  }), nowMs);
+  assert.equal(fresh.details.at(-1), 'MMSI 353136000 · POS: 11:34:03Z');
+});

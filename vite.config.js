@@ -59,6 +59,12 @@ import {
 } from './src/data/regionalBrief.js';
 import { normalizeAdsbLolPointResponse } from './src/data/adsbLolFallback.js';
 import { createAisStreamAdapter, isRecognizedAisEnvelope } from './src/data/aisStreamAdapter.js';
+import {
+  aisPositionUsable,
+  mergeAisKinematics,
+  mergeAisStaticFields,
+  shouldPruneAisCache,
+} from './src/data/aisIngest.js';
 import { parseSilenceTimeoutEnv } from './src/data/aisWatchdog.js';
 import { mergeTerrainAvailability, parseTerrainTilePath, SK_TERRAIN_UPSTREAM_URL } from './src/data/skTerrain.js';
 import {
@@ -1298,6 +1304,14 @@ const AISSTREAM_DEFAULT_MESSAGE_TYPES = [
 ];
 const AISSTREAM_CACHE_MAX = 50000;
 const AISSTREAM_STALE_MS = 30 * 60 * 1000;
+/** Minimum gap between full retention sweeps (see shouldPruneAisCache). The
+ *  sweep is O(cache); running it per message under the worldwide bounding box
+ *  was millions of map iterations per second inside the ws message handler.
+ *  5 s is far below the 30 min retention window, so nothing is served stale
+ *  because of the throttle — `aisStreamRows` filters by age on read anyway. */
+const AISSTREAM_PRUNE_INTERVAL_MS = 5_000;
+/** Epoch ms of the last retention sweep (0 = never swept). */
+let _aisStreamLastPruneAt = 0;
 // Per-MMSI recent-path ring buffers (PRD WS-F F3). Float32 lat/lon (~1m
 // precision, fine for 25m thinning) + Uint32 epoch seconds ≈ 12B/sample;
 // 64 samples × 50k MMSIs worst case ≈ 38MB. Tracks exist only while the dev
@@ -6717,12 +6731,15 @@ function ingestAisStreamEnvelope(envelope) {
   if (!mmsi) return false;
 
   if (messageType === 'ShipStaticData' || messageType === 'StaticDataReport') {
-    const staticData = {
+    // Every field is sticky (mergeAisStaticFields): msg 24 carries no
+    // Destination and no IMO, so a Class B static report used to WIPE both
+    // after a msg 5 had supplied them.
+    const staticData = mergeAisStaticFields({
       name: vesselNameFromAis(metadata, message, _aisStreamStatic.get(mmsi)),
       type: vesselTypeFromAis(message, _aisStreamStatic.get(mmsi)),
       destination: stringValue(message.Destination),
       imo: stringValue(message.ImoNumber ?? message.IMO),
-    };
+    }, _aisStreamStatic.get(mmsi));
     _aisStreamStatic.set(mmsi, staticData);
     mergeAisStaticIntoLiveVessel(mmsi, staticData);
   }
@@ -6730,10 +6747,24 @@ function ingestAisStreamEnvelope(envelope) {
   const lat = numberValue(metadata.latitude ?? metadata.Latitude ?? message.Latitude);
   const lon = numberValue(metadata.longitude ?? metadata.Longitude ?? message.Longitude);
   // A positionless but well-formed record (static data) is still the feed
-  // delivering AIS traffic, so it counts as liveness.
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return true;
+  // delivering AIS traffic, so it counts as liveness. `aisPositionUsable`
+  // range-checks rather than finiteness-checks: AIS encodes "position not
+  // available" as latitude 91 / longitude 181, both perfectly finite numbers
+  // that used to sail straight through into Cartesian3.fromDegrees.
+  if (!aisPositionUsable(lat, lon)) return true;
 
   const staticData = _aisStreamStatic.get(mmsi) || {};
+  const previous = _aisStreamVessels.get(mmsi);
+  // Sticky kinematics. Static messages carry no Sog/Cog/TrueHeading, yet
+  // AISStream attaches lat/lon metadata to EVERY envelope — so this row write
+  // is reached by static reports too, and a plain read blanked a moving
+  // vessel's speed and course. Sentinels (102.3 kn / 360° / 511) are treated
+  // as absent instead of being published as measurements.
+  const { speed, course, heading } = mergeAisKinematics({
+    sog: message.Sog ?? message.SOG,
+    cog: message.Cog ?? message.COG,
+    trueHeading: message.TrueHeading ?? message.Heading,
+  }, previous);
   _aisStreamVessels.set(mmsi, {
     lat,
     lon,
@@ -6742,9 +6773,9 @@ function ingestAisStreamEnvelope(envelope) {
     imo: stringValue(message.ImoNumber ?? message.IMO ?? staticData.imo),
     type: vesselTypeFromAis(message, staticData),
     destination: stringValue(message.Destination ?? staticData.destination),
-    speed: numberValue(message.Sog ?? message.SOG),
-    course: numberValue(message.Cog ?? message.COG),
-    heading: normalizedHeading(message.TrueHeading ?? message.Heading),
+    speed,
+    course,
+    heading,
     last_position_UTC: normalizeAisTimestamp(metadata.time_utc ?? metadata.TimeUtc),
     // Use the AIS message's own report time, not server ingest wall-clock —
     // trail spacing and dead reckoning depend on true fix epochs.
@@ -6754,7 +6785,11 @@ function ingestAisStreamEnvelope(envelope) {
 
   appendAisTrackSample(mmsi, lat, lon, aisEpochSeconds(metadata.time_utc ?? metadata.TimeUtc));
 
-  pruneAisStreamCache();
+  // Throttled: the sweep walks the entire cache, and this handler runs tens to
+  // hundreds of times per second under the worldwide bounding box.
+  if (shouldPruneAisCache(_aisStreamLastPruneAt, Date.now(), AISSTREAM_PRUNE_INTERVAL_MS)) {
+    pruneAisStreamCache();
+  }
   return true;
 }
 
@@ -6874,12 +6909,18 @@ function aisStreamRows(maxRows) {
 }
 
 function pruneAisStreamCache() {
+  _aisStreamLastPruneAt = Date.now();
   const cutoff = Date.now() - AISSTREAM_STALE_MS;
   for (const [mmsi, row] of _aisStreamVessels) {
     if (row._updatedAt < cutoff) {
       _aisStreamVessels.delete(mmsi);
       _aisStreamTracks.delete(mmsi);
       _aisStreamTrackPending.delete(mmsi);
+      // Static identity outlives the position row by design (a vessel that
+      // reappears keeps its name), but only while something references it —
+      // otherwise this map was the one cache that grew forever, one entry per
+      // distinct MMSI ever seen, across a multi-day worldwide session.
+      _aisStreamStatic.delete(mmsi);
     }
   }
   // Pending single-fix entries for vessels never seen again must not leak
@@ -6893,6 +6934,7 @@ function pruneAisStreamCache() {
     _aisStreamVessels.delete(mmsi);
     _aisStreamTracks.delete(mmsi);
     _aisStreamTrackPending.delete(mmsi);
+    _aisStreamStatic.delete(mmsi);
   }
 }
 
