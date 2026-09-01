@@ -31,7 +31,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { geodeticTileBbox, maskCoversTile } from '../src/data/skTerrain.js';
+import { geodeticTileBbox, maskCoversTile, tileRangesForLevel } from '../src/data/skTerrain.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, '.gev-cache');
@@ -102,8 +102,12 @@ step('relabel na EPSG:4326', RELABELED, () => {
 });
 
 step('maska platnosti dát', MASK_META, () => {
+  // 18000 px na ~445 km šírky SR ≈ 25 m/px. Pôvodných 4096 px (~110 m/px)
+  // stačilo na prune do z14; z16–z18 dlaždice (76–19 m) by boli menšie než
+  // pixel masky a interiérový test by bol slepý. 18000×~6300 Byte ≈ 113 MB —
+  // Node ju číta celú, v pohode.
   docker([GDAL_IMAGE, 'gdal_translate', '-of', 'ENVI', '-ot', 'Byte',
-    '-b', 'mask', '-outsize', '4096', '0',
+    '-b', 'mask', '-outsize', '18000', '0',
     inCache(WARPED), inCache(MASK_BIL)], 'gdal_translate maska → ENVI');
   // Rozmery z ENVI .hdr; bbox z gdalinfo -json warpnutého rastra.
   const hdr = fs.readFileSync(MASK_BIL.replace(/\.bil$/, '.hdr'), 'utf8');
@@ -168,6 +172,45 @@ step('prune na vnútro footprintu', PRUNE_REPORT, () => {
   fs.writeFileSync(PRUNE_REPORT, JSON.stringify({ kept, dropped, at: new Date().toISOString() }, null, 2));
   console.log(`  prune: ${kept} dlaždíc ostáva, ${dropped} zmazaných (hranice → Re:Earth)`);
 });
+
+// Availability overlay — vždy po prune (lacné, deterministicky z disku).
+// Re:Earth layer.json hlási maxzoom 14; bez tohto by si Cesium úrovne 15+
+// NIKDY nevypýtal a jemnejší build by bol neviditeľný. Proxy overlay zlúči
+// do layer.json (mergeTerrainAvailability); rozsahy sú PRESNÉ — availability
+// je prísľub existencie dlaždice a 404 na sľúbenej je render chyba.
+{
+  const UPSTREAM_MAX = 14;
+  const available = {};
+  let maxLevel = UPSTREAM_MAX;
+  for (const zName of fs.readdirSync(OUT_DIR)) {
+    const z = Number(zName);
+    if (!Number.isInteger(z) || z <= UPSTREAM_MAX) continue;
+    const zDir = path.join(OUT_DIR, zName);
+    if (!fs.statSync(zDir).isDirectory()) continue;
+    const tiles = [];
+    for (const xName of fs.readdirSync(zDir)) {
+      if (!/^\d+$/.test(xName)) continue;
+      const x = Number(xName);
+      for (const yFile of fs.readdirSync(path.join(zDir, xName))) {
+        const m = /^(\d+)\.terrain$/.exec(yFile);
+        if (m) tiles.push({ x, y: Number(m[1]) });
+      }
+    }
+    if (tiles.length) {
+      available[z] = tileRangesForLevel(tiles);
+      maxLevel = Math.max(maxLevel, z);
+      console.log(`  availability z${z}: ${tiles.length} dlaždíc → ${available[z].length} rozsahov`);
+    }
+  }
+  const overlayPath = path.join(OUT_DIR, 'sk-availability.json');
+  if (Object.keys(available).length) {
+    fs.writeFileSync(overlayPath, JSON.stringify({ maxzoom: maxLevel, available }, null, 1));
+    console.log(`  → ${overlayPath}`);
+  } else {
+    fs.rmSync(overlayPath, { force: true });
+    console.log('  žiadne úrovne nad z14 — overlay sa nezapisuje');
+  }
+}
 
 // verify — vždy (lacné): gzip magic náhodnej dlaždice + súhrn.
 {

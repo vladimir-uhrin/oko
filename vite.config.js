@@ -60,7 +60,7 @@ import {
 import { normalizeAdsbLolPointResponse } from './src/data/adsbLolFallback.js';
 import { createAisStreamAdapter, isRecognizedAisEnvelope } from './src/data/aisStreamAdapter.js';
 import { parseSilenceTimeoutEnv } from './src/data/aisWatchdog.js';
-import { parseTerrainTilePath, SK_TERRAIN_UPSTREAM_URL } from './src/data/skTerrain.js';
+import { mergeTerrainAvailability, parseTerrainTilePath, SK_TERRAIN_UPSTREAM_URL } from './src/data/skTerrain.js';
 import {
   fetchTerrainChunkWithRetry,
   parseTerrainPoints,
@@ -7716,7 +7716,22 @@ function skTerrainProxy() {
       try {
         if (pathname === '/layer.json') {
           const body = await resolveLayerJson();
-          send(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body);
+          // Availability overlay lokálneho buildu (úrovne 15+): bez neho
+          // Cesium pri upstream maxzoom 14 jemnejšie dlaždice NIKDY nepýta.
+          // Overlay sa číta per request — je malý, mení sa len po buildoch
+          // a layer.json sa pýta ~raz za session; merge failuje otvorene
+          // na upstream telo.
+          let out = body;
+          try {
+            const overlayRaw = await fsp.readFile(path.join(TILE_DIR, 'sk-availability.json'), 'utf8').catch(() => null);
+            if (overlayRaw) {
+              const mergedLayer = mergeTerrainAvailability(JSON.parse(body.toString('utf8')), JSON.parse(overlayRaw));
+              out = Buffer.from(JSON.stringify(mergedLayer));
+            }
+          } catch (error) {
+            console.warn('[skTerrain] availability merge zlyhal — servírujem upstream layer.json:', error?.message || error);
+          }
+          send(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, out);
           return;
         }
         if (pathname === '/status') {

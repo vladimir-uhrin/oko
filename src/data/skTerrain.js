@@ -94,6 +94,114 @@ export function maskCoversTile({ mask, width, height, maskBbox, tileBbox, margin
 }
 
 /**
+ * Zlúči zoznam dlaždíc jednej úrovne do TMS availability obdĺžnikov
+ * ({startX, startY, endX, endY}) — najprv behy po riadkoch (súvislé X),
+ * potom zvislé zlúčenie riadkov s identickými behmi. PRESNÉ pokrytie je
+ * povinné: availability je pre Cesium prísľub „dlaždica existuje" a 404 na
+ * sľúbenej dlaždici je chyba renderovania, nie mäkký fallback — preto sa
+ * nesmie použiť bounding box cez odrezané (prune) okraje.
+ * @param {Array<{x: number, y: number}>} tiles
+ * @returns {Array<{startX: number, startY: number, endX: number, endY: number}>}
+ */
+export function tileRangesForLevel(tiles) {
+  if (!Array.isArray(tiles) || tiles.length === 0) return [];
+  const rows = new Map();
+  for (const t of tiles) {
+    const x = Number(t?.x);
+    const y = Number(t?.y);
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0) continue;
+    if (!rows.has(y)) rows.set(y, []);
+    rows.get(y).push(x);
+  }
+  /** riadok → zoradené behy [startX, endX] */
+  const runsByRow = new Map();
+  for (const [y, xs] of rows) {
+    xs.sort((a, b) => a - b);
+    const runs = [];
+    let start = xs[0];
+    let prev = xs[0];
+    for (let i = 1; i < xs.length; i++) {
+      if (xs[i] === prev) continue; // duplicit
+      if (xs[i] === prev + 1) { prev = xs[i]; continue; }
+      runs.push([start, prev]);
+      start = xs[i];
+      prev = xs[i];
+    }
+    runs.push([start, prev]);
+    runsByRow.set(y, runs);
+  }
+  // Zvislé zlúčenie: susedné riadky s identickou sadou behov → jeden obdĺžnik.
+  const ys = [...runsByRow.keys()].sort((a, b) => a - b);
+  const ranges = [];
+  let bandStart = ys[0];
+  let bandRuns = runsByRow.get(ys[0]);
+  const sameRuns = (a, b) => a.length === b.length && a.every((r, i) => r[0] === b[i][0] && r[1] === b[i][1]);
+  const flushBand = (endY) => {
+    for (const [x0, x1] of bandRuns) {
+      ranges.push({ startX: x0, startY: bandStart, endX: x1, endY: endY });
+    }
+  };
+  for (let i = 1; i < ys.length; i++) {
+    const y = ys[i];
+    const runs = runsByRow.get(y);
+    if (y === ys[i - 1] + 1 && sameRuns(runs, bandRuns)) continue;
+    flushBand(ys[i - 1]);
+    bandStart = y;
+    bandRuns = runs;
+  }
+  flushBand(ys[ys.length - 1]);
+  return ranges;
+}
+
+/**
+ * Zlúči availability overlay lokálneho buildu do upstream layer.json.
+ *
+ * PREČO: Re:Earth hlási maxzoom 14 — bez rozšírenia by si Cesium dlaždice
+ * z15+ NIKDY nevypýtal a jemnejší lokálny build by bol neviditeľný. Úrovne
+ * ≤ upstream maxzoom sa NEDOTÝKAJÚ (tam platí plná globálna availability
+ * a lokálna dlaždica vyhráva na proxy); úrovne nad ňou nesú PRESNÉ rozsahy
+ * lokálnych dlaždíc — mimo nich Cesium ostáva na hrubšej úrovni, čo je
+ * správne (svet nemá z15+ zdroj).
+ *
+ * Fail-open: nevalidný overlay vráti upstream nezmenený — degradácia na
+ * dnešné správanie, nikdy pokazený layer.json.
+ * @param {object} upstreamLayerJson - Parsovaný upstream layer.json.
+ * @param {?{available: Object<string, Array>, maxzoom?: number}} overlay
+ * @returns {object} Nový objekt layer.json (vstup sa nemení).
+ */
+export function mergeTerrainAvailability(upstreamLayerJson, overlay) {
+  if (!upstreamLayerJson || typeof upstreamLayerJson !== 'object') return upstreamLayerJson;
+  const upstreamAvailable = Array.isArray(upstreamLayerJson.available)
+    ? upstreamLayerJson.available
+    : null;
+  if (!upstreamAvailable) return upstreamLayerJson;
+  const upstreamMax = upstreamAvailable.length - 1;
+  // Len úrovne NAD upstream maxom — nižšie sú už plne pokryté a nedotýkame
+  // sa ich. Keď po filtri nič neostane, vraciame upstream referenčne
+  // nezmenený (žiadny falošný „merge").
+  const overlayLevels = overlay && typeof overlay.available === 'object' && overlay.available !== null
+    ? Object.keys(overlay.available)
+      .map((k) => Number(k))
+      .filter((z) => Number.isInteger(z) && z > upstreamMax
+        && Array.isArray(overlay.available[z]) && overlay.available[z].length > 0)
+    : [];
+  if (overlayLevels.length === 0) return upstreamLayerJson;
+
+  const merged = upstreamAvailable.map((ranges) => ranges);
+  let maxLevel = upstreamMax;
+  for (const z of overlayLevels.sort((a, b) => a - b)) {
+    while (merged.length < z) merged.push([]); // medziúroveň bez dlaždíc = prázdna
+    merged[z] = overlay.available[z];
+    maxLevel = Math.max(maxLevel, z);
+  }
+  return {
+    ...upstreamLayerJson,
+    available: merged,
+    maxzoom: Math.max(Number(upstreamLayerJson.maxzoom) || upstreamMax, maxLevel),
+  };
+}
+
+/**
  * Rozhodne URL keyless terénu pre klienta: lokálny merge endpoint, ak jeho
  * layer.json odpovedá (dev server s proxy), inak priamy Re:Earth (produkčný
  * build bez middleware — správanie ako doteraz). Nikdy nehádže.
