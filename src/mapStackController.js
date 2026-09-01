@@ -83,10 +83,23 @@ export class MapStackController {
     initialStack = 'photoreal',
     onChange = null,
     onError = null,
+    terrainPreference = 'auto',
   } = {}) {
     this.viewer = viewer;
     this.googleTileset = googleTileset;
     this.cesiumToken = String(cesiumToken || '').trim();
+    // Ktorý terén dostane globe stack (OKO):
+    //   'auto'  — s ion tokenom Cesium World Terrain, bez neho merge/keyless
+    //             (pôvodné správanie, default),
+    //   'sk'    — VŽDY merge endpoint /api/sk-terrain (DMR 3.5 10 m nad SR,
+    //             Re:Earth passthrough vo svete) aj keď ion token existuje,
+    //   'world' — vždy Cesium World Terrain (no-op bez tokenu).
+    // Preferencia je vstup, nie stav: main.js ju číta z `?terrain=` a controller
+    // ostáva testovateľný bez URL. Výškový datum sa nemení — obe vetvy sú
+    // elipsoidné (docs/CURRENT-STATE.md §1a).
+    this.terrainPreference = ['auto', 'sk', 'world'].includes(terrainPreference)
+      ? terrainPreference
+      : 'auto';
     this._onChange = onChange;
     this._onError = onError;
     this._activeId = googleTileset ? initialStack : 'osm';
@@ -106,6 +119,14 @@ export class MapStackController {
     // a no-op against the initial `false` default and leave Cesium's built-in
     // provider in place instead of installing Re:Earth terrain.
     this._terrainMode = null;
+    /**
+     * Ktorý terénny zdroj je NAOZAJ nainštalovaný:
+     * 'cesium-world' | 'sk-merged' | 'reearth' | 'flat' | null (zatiaľ žiadny).
+     * `_terrainMode` hovorí len o zvolenej VETVE — merge s DMR, holý Re:Earth
+     * aj plochý fallback sú všetko 'keyless', takže sám o sebe nie je dôkazom,
+     * že SK terén beží.
+     */
+    this._terrainSource = null;
     // Cache of the constructed keyless Re:Earth CesiumTerrainProvider, so
     // repeat switches into a keyless globe stack don't refetch `layer.json`.
     // Lives independently of `_switchGen` — construction is async and racy
@@ -241,6 +262,12 @@ export class MapStackController {
       status,
       lastError: this._lastError,
       hasCesiumIonToken: !!this.cesiumToken,
+      // Ktorý terén je NAOZAJ nainštalovaný ('world' | 'keyless' | null) a
+      // aká preferencia o tom rozhodla — QA/diagnostika (názov triedy
+      // providera obe vetvy nerozlíši, obe sú CesiumTerrainProvider).
+      terrainMode: this._terrainMode,
+      terrainPreference: this.terrainPreference,
+      terrainSource: this._terrainSource,
     };
   }
 
@@ -280,7 +307,17 @@ export class MapStackController {
 
     if (this.googleTileset) this.googleTileset.show = false;
     this.viewer.scene.globe.show = true;
-    await this._setWorldTerrainEnabled(!!this.cesiumToken, gen);
+    await this._setWorldTerrainEnabled(this._prefersWorldTerrain(), gen);
+  }
+
+  /**
+   * Má tento globe stack dostať Cesium World Terrain (ion), alebo keyless
+   * merge (/api/sk-terrain → DMR 3.5 nad SR + Re:Earth vo svete)?
+   * @returns {boolean}
+   */
+  _prefersWorldTerrain() {
+    if (this.terrainPreference === 'sk') return false;
+    return !!this.cesiumToken;
   }
 
   async _getImageryProvider(stack) {
@@ -355,6 +392,7 @@ export class MapStackController {
       this.viewer.scene.setTerrain(Cesium.Terrain.fromWorldTerrain({
         requestVertexNormals: true,
       }));
+      this._terrainSource = 'cesium-world';
     } else {
       const provider = await this._getKeylessTerrainProvider();
       // A newer switch started while the Re:Earth layer.json fetch was in
@@ -383,9 +421,15 @@ export class MapStackController {
         url,
         merged ? { credit: SK_TERRAIN_CREDIT } : {},
       );
+      // Ktorý zdroj to NAOZAJ je — 'keyless' ako režim nestačí: rovnakú
+      // hodnotu vráti merge s DMR, holý Re:Earth aj plochý fallback, takže
+      // QA (a moje vlastné overovanie) by ju mohlo prijať ako falošný dôkaz,
+      // že SK terén beží. CLAUDE.md pravidlo 2 — stav dát musí byť viditeľný.
+      this._terrainSource = merged ? 'sk-merged' : 'reearth';
     } catch (error) {
       console.warn('[mapStackController] keyless terrain unavailable, falling back to flat ellipsoid terrain:', error);
       this._reearthTerrainProvider = new Cesium.EllipsoidTerrainProvider();
+      this._terrainSource = 'flat';
     }
     return this._reearthTerrainProvider;
   }

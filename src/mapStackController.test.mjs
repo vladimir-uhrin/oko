@@ -58,3 +58,89 @@ test('provider je WMS s 512 px dlaždicami, orezaný na SR a cachovaný', async 
   const again = await controller._getImageryProvider(stack);
   assert.equal(again, provider, 'provider sa má cachovať per stack');
 });
+
+// ── Voľba terénu (OKO 2026-09-01) ────────────────────────────────────────────
+// Bez tokenu bol merge terén (/api/sk-terrain — DMR 3.5 nad SR + Re:Earth vo
+// svete) jediná možnosť; s ion tokenom ho Cesium World Terrain vždy prebil,
+// takže SK terén nebolo ako vidieť. `terrainPreference` je ten prepínač.
+
+test('terrainPreference: auto rešpektuje token, sk ho prebije, world ostáva ion', () => {
+  const withToken = (pref) => new MapStackController({}, { cesiumToken: 'ion-token', terrainPreference: pref });
+  const noToken = (pref) => new MapStackController({}, { terrainPreference: pref });
+
+  // auto = pôvodné správanie: rozhoduje prítomnosť tokenu.
+  assert.equal(withToken('auto')._prefersWorldTerrain(), true);
+  assert.equal(noToken('auto')._prefersWorldTerrain(), false);
+
+  // sk = merge terén VŽDY, aj s tokenom (to je celý zmysel prepínača).
+  assert.equal(withToken('sk')._prefersWorldTerrain(), false);
+  assert.equal(noToken('sk')._prefersWorldTerrain(), false);
+
+  // world = ion terén, ale bez tokenu sa nemá čím zapnúť → keyless.
+  assert.equal(withToken('world')._prefersWorldTerrain(), true);
+  assert.equal(noToken('world')._prefersWorldTerrain(), false);
+
+  // Neznáma hodnota nesmie appku prepnúť do nedefinovaného stavu.
+  for (const junk of ['SK', 'ion', '', null, undefined, 42, {}]) {
+    const c = new MapStackController({}, { cesiumToken: 'ion-token', terrainPreference: junk });
+    assert.equal(c.terrainPreference, 'auto', `'${String(junk)}' má spadnúť na auto`);
+    assert.equal(c._prefersWorldTerrain(), true);
+  }
+});
+
+test('getState hlási režim aj preferenciu terénu — názov triedy ich nerozlíši', () => {
+  const controller = new MapStackController({}, { cesiumToken: 'ion-token', terrainPreference: 'sk' });
+  const state = controller.getState();
+  assert.equal(state.terrainPreference, 'sk');
+  assert.equal(state.terrainMode, null, 'pred prvým globe stackom nie je terén nainštalovaný');
+  assert.equal(state.terrainSource, null);
+  assert.equal(state.hasCesiumIonToken, true);
+});
+
+test('terrainSource rozlíši merge s DMR od holého Re:Earth a od plochého fallbacku', async () => {
+  // 'keyless' ako režim je nejednoznačné — všetky tri vetvy ho zdieľajú.
+  // Tento test je poistka proti falošnému dôkazu „SK terén beží".
+  // Sieť ani skutočný provider netreba: stubneme probe (fetch) aj konštrukciu
+  // providera, testuje sa MAPOVANIE výsledku na zdroj.
+  const originalFetch = globalThis.fetch;
+  const originalFromUrl = Cesium.CesiumTerrainProvider.fromUrl;
+  try {
+    Cesium.CesiumTerrainProvider.fromUrl = async (url) => ({ _stubUrl: url });
+
+    // Merge endpoint odpovedá → sk-merged (+ atribúcia ÚGKK).
+    globalThis.fetch = async () => ({ ok: true });
+    const merged = new MapStackController({}, {});
+    const mergedProvider = await merged._getKeylessTerrainProvider();
+    assert.equal(merged.getState().terrainSource, 'sk-merged');
+    assert.match(mergedProvider._stubUrl, /\/api\/sk-terrain$/);
+
+    // Bez proxy (produkčný build) → priamy Re:Earth.
+    globalThis.fetch = async () => ({ ok: false });
+    const direct = new MapStackController({}, {});
+    const directProvider = await direct._getKeylessTerrainProvider();
+    assert.equal(direct.getState().terrainSource, 'reearth');
+    assert.match(directProvider._stubUrl, /^https:\/\//);
+
+    // Konštrukcia zlyhá → plochý ellipsoid, a MUSÍ sa to priznať.
+    Cesium.CesiumTerrainProvider.fromUrl = async () => { throw new Error('layer.json 500'); };
+    const broken = new MapStackController({}, {});
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const flatProvider = await broken._getKeylessTerrainProvider();
+      assert.ok(flatProvider instanceof Cesium.EllipsoidTerrainProvider);
+    } finally {
+      console.warn = warn;
+    }
+    assert.equal(broken.getState().terrainSource, 'flat', 'plochý fallback sa nesmie tváriť ako SK terén');
+  } finally {
+    globalThis.fetch = originalFetch;
+    Cesium.CesiumTerrainProvider.fromUrl = originalFromUrl;
+  }
+});
+
+test('main.js číta preferenciu z ?terrain= a podáva ju controlleru', async () => {
+  const source = await import('node:fs').then((fs) => fs.readFileSync(new URL('./main.js', import.meta.url), 'utf8'));
+  assert.match(source, /new URLSearchParams\(window\.location\.search\)\.get\('terrain'\) \|\| 'auto'/);
+  assert.match(source, /terrainPreference,/);
+});

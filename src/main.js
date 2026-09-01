@@ -215,9 +215,15 @@ async function init() {
 
     loaderStatus.textContent = t('loader.init-systems');
 
+    // `?terrain=sk` vynúti merge terén (DMR 3.5 nad SR + Re:Earth vo svete)
+    // aj keď je ion token prítomný — bez toho ho s tokenom nie je ako vidieť,
+    // lebo Cesium World Terrain má prednosť. `?terrain=world` je opak.
+    const terrainPreference = new URLSearchParams(window.location.search).get('terrain') || 'auto';
+
     const mapStackController = new MapStackController(viewer, {
       googleTileset: tileset,
       cesiumToken,
+      terrainPreference,
       initialStack: tileset ? 'photoreal' : 'osm',
       // Task 5 (height-datum fix): rebroadcast stack changes as a window
       // CustomEvent so data layers (CCTV per-regime ground resolution) can

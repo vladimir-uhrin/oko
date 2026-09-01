@@ -233,6 +233,16 @@ Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
   režim (Cesium World Terrain) sa nemení.
 - **Výškový kontrakt §1a platí**: mergované dlaždice sú elipsoidné ako
   Re:Earth, `groundPriorM`/geoid logika sa nemení.
+- **Ako SK terén VIDIEŤ** (2026-09-01): terén je viditeľný len na globe stacku
+  (OSM / SK Orto / Bing) — photoreal glóbus prekrýva Google mesh. A odkedy je
+  v `.env` Cesium ion token, má prednosť Cesium World Terrain, takže merge
+  terén by sa nezobrazil nikdy. Preto `terrainPreference` v
+  `MapStackController` a URL parameter:
+  `http://localhost:4173/?terrain=sk` — vynúti merge (DMR 3.5 10 m nad SR,
+  Re:Earth vo svete), `?terrain=world` vynúti ion CWT, bez parametra platí
+  `auto` (= pôvodné správanie: rozhoduje prítomnosť tokenu).
+  `getState().terrainMode` hlási, čo je NAOZAJ nainštalované ('keyless' =
+  merge, 'world' = CWT) — názov triedy providera obe vetvy nerozlíši.
 - LEKCIA: vite watcher sledoval `.gev-cache/` — download so zamknutým súborom
   (EBUSY z chokidar) ZABIL dev server. `server.watch.ignored` teraz kryje
   `.gev-cache/**` aj `qa-shots/**` (pin v skTerrain.test.mjs).
