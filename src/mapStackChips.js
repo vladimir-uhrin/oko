@@ -1,9 +1,15 @@
 // MAP STACK source chips — the always-visible replacement for the `<select>`
 // that used to sit in the Map Stack panel. One button per stack, rendered from
-// `MapStackController.getStacks()`. The four accepted sources below are
-// the whole shipped set; keeping the allowlist explicit means a stack added to
+// `MapStackController.getStacks()`. The accepted sources below are the whole
+// shipped set; keeping the allowlist explicit means a stack added to
 // `MAP_STACKS` for internal use cannot reach the tray until someone names it
 // here.
+//
+// OKO 2026-09-01: `ugkk-ortofoto` (SK Orto) sem PATRÍ — vrstva bola pridaná
+// do MAP_STACKS vo Fáze 1, ale doplniť ju do tohto allowlistu sa zabudlo,
+// takže podklad síce fungoval (WMS 200), ale používateľ sa k nemu nevedel
+// preklikať. Presne to je cena explicitného allowlistu: nová položka nie je
+// hotová, kým nie je aj tu.
 //
 // The chips are a control SURFACE only: selecting one calls back into the same
 // `_setMapStack()` path the dropdown's `change` handler used, and the active
@@ -18,6 +24,7 @@ export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'bing-aerial',
   'bing-labels',
   'osm',
+  'ugkk-ortofoto',
 ]);
 
 /**

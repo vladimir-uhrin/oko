@@ -67,21 +67,36 @@ const CONTROLLER_STACKS = [
   { id: 'bing-aerial', label: 'Bing Aerial', requiresIon: true, available: true, unavailableReason: null },
   { id: 'bing-labels', label: 'Bing Labels', requiresIon: true, available: true, unavailableReason: null },
   { id: 'osm', label: 'OSM', requiresIon: false, available: true, unavailableReason: null },
+  // OKO: SK Orto (ÚGKK WMS) je piaty prezentovaný podklad — keyless, funkčný.
+  { id: 'ugkk-ortofoto', label: 'ÚGKK Ortofoto SR', requiresIon: false, available: true, unavailableReason: null },
 ];
 
-test('the row renders exactly the four accepted sources', () => {
+test('the row renders exactly the accepted sources', () => {
   const container = makeElement();
   renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'photoreal', doc });
 
+  // 2026-09-01: pribudol 'ugkk-ortofoto' — vrstva existovala od Fázy 1, ale
+  // chýbala v allowliste, takže sa k nej používateľ nevedel preklikať.
   assert.deepEqual(container.children.map((chip) => chip.dataset.stackId), [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'ugkk-ortofoto',
   ]);
   assert.deepEqual(container.children.map(chipText), [
-    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM',
+    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'ÚGKK Ortofoto SR',
   ]);
-  assert.deepEqual(PRESENTED_MAP_STACK_IDS, ['photoreal', 'bing-aerial', 'bing-labels', 'osm']);
+  assert.deepEqual(PRESENTED_MAP_STACK_IDS, ['photoreal', 'bing-aerial', 'bing-labels', 'osm', 'ugkk-ortofoto']);
   assert.ok(container.children.every((chip) => chip.tagName === 'button' && chip.type === 'button'));
   assert.ok(container.children.every((chip) => chip.classList.contains(MAP_STACK_CHIP_CLASS)));
+});
+
+test('každý MAP_STACKS podklad je buď prezentovaný, alebo vedome vynechaný', () => {
+  // Tripwire pre presne tú chybu, ktorá skryla SK Orto: nová položka
+  // v MAP_STACKS musí byť buď v allowliste, alebo tu menovite vynechaná.
+  const controllerSource = readFileSync(new URL('./mapStackController.js', import.meta.url), 'utf8');
+  const declaredIds = [...controllerSource.matchAll(/^\s{4}id: '([a-z0-9-]+)',$/gm)].map((m) => m[1]);
+  const DELIBERATELY_HIDDEN = [];
+  assert.ok(declaredIds.length >= 5, 'parser musí nájsť stack id v MAP_STACKS');
+  const missing = declaredIds.filter((id) => !PRESENTED_MAP_STACK_IDS.includes(id) && !DELIBERATELY_HIDDEN.includes(id));
+  assert.deepEqual(missing, [], 'stack v MAP_STACKS chýba v chip allowliste — doplň ho, alebo ho pridaj do DELIBERATELY_HIDDEN');
 });
 
 test('internal and future stacks stay outside the approved presentation set', () => {
@@ -91,7 +106,7 @@ test('internal and future stacks stay outside the approved presentation set', ()
   const withHybrid = [...CONTROLLER_STACKS, { id: 'hybrid', label: 'Hybrid', available: true }];
   renderMapStackChips(container, withHybrid, { activeId: 'photoreal', doc });
 
-  assert.equal(container.children.length, 4);
+  assert.equal(container.children.length, PRESENTED_MAP_STACK_IDS.length);
   assert.doesNotMatch(container.children.map(chipText).join(' '), /Hybrid/);
 });
 

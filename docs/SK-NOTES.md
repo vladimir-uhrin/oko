@@ -78,6 +78,13 @@ zámerne prázdny). Unit testy: `src/mapStackController.test.mjs`.
 **QA/screenshot slučky nad týmto stackom nepúšťať** — je to verejne financovaná
 infraštruktúra; na QA používať OSM.
 
+**Chip v UI doplnený až 2026-09-01** — `mapStackChips.js` má EXPLICITNÝ
+allowlist `PRESENTED_MAP_STACK_IDS` (upstream ho zaviedol, aby sa interný
+stack nedostal do lišty omylom) a pri Fáze 1 sa naň zabudlo: podklad fungoval
+(WMS 200), ale používateľ sa k nemu nevedel preklikať — dostupný bol len cez
+API/voice/share link. Nový tripwire test páruje `MAP_STACKS` s allowlistom,
+takže ďalší podklad už takto nezmizne.
+
 ## Fáza 2 — SK kamery (2026-08-30, preverenie + scaffold)
 
 **zjazdnost.sk (SSC)** — jediný životaschopný zdroj, a je **sezónny**:
