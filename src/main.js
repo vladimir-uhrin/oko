@@ -180,7 +180,15 @@ async function init() {
 
     loaderStatus.textContent = t('loader.google-tiles');
     let tileset = null;
+    // QA/headless ochrana kvóty (2026-09-01): každý boot appky stojí Google
+    // root tile request a denná kvóta je zámerne tesná (CLAUDE.md — billing
+    // ochrana). Testovacie skripty bootujú s ?qaBasemap=osm a Google tileset
+    // sa vtedy VÔBEC nevytvorí — appka ide rovno na OSM stack (konštruktor
+    // MapStackController null tileset už rieši). Deň s desiatkami headless
+    // overení tak nevyčerpá kvótu reálnym pozeraniam (429 na root.json).
+    const qaBasemapOsm = new URLSearchParams(window.location.search).get('qaBasemap') === 'osm';
     try {
+      if (qaBasemapOsm) throw new Error('qaBasemap=osm — Google tileset skipped to protect the daily root-request quota');
       // Load Google Photorealistic 3D Tiles
       tileset = await Cesium.createGooglePhotorealistic3DTileset({
         onlyUsingWithGoogleGeocoder: true,

@@ -234,6 +234,13 @@ Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
 
 ### Prevádzkové poznámky
 
+- **Kvóta Google root requestov sa dá minúť testovaním** (2026-09-01: 429 na
+  `root.json` po dni s desiatkami headless bootov — appka korektne padla na
+  OSM; reset kvóty je o polnoci PT = 09:00 SELČ). Odvtedy: KAŽDÝ headless/QA
+  boot appky, ktorý nepotrebuje photoreal, ide na `?qaBasemap=osm` — Google
+  tileset sa vôbec nevytvorí a kvótu šetríme reálnym pozeraniam. Výnimka:
+  `qa-sk-coverage.mjs` (jeho účel JE Google mesh; 1× týždenne cez watchdog).
+
 - Optional endpointy bez kľúčov: `/api/google/nearby-places` → 403 (kľúč nemá
   Places API — zámer), `/api/openai/hud-summary` → 503 (bez OpenAI kľúča).
   Appka beží normálne.
