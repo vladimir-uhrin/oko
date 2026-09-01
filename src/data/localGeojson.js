@@ -282,7 +282,7 @@ export function createLocalGeoJsonLayer({
   url,
   name,
   color,
-  icon = '📍',
+  icon = '◈', // monochromatický default — žiadne emoji (štýl panelu)
   source = 'Local JSONL',
   labels = true,
   labelMax = DEFAULT_LABEL_MAX,

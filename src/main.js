@@ -147,6 +147,14 @@ async function init() {
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
     viewer.targetFrameRate = 60;
 
+    // Diagnostika render pádov (2026-09-01): renderError Cesium render loop
+    // NAVŽDY zastaví — dialóg ale ukazuje len message. Stack ide do konzoly,
+    // aby transientné pády (trieda „Expected width to be greater than 0",
+    // 0×0 textúra) boli dohľadateľné z reportu používateľa aj z QA logov.
+    viewer.scene.renderError.addEventListener((scene, error) => {
+      console.error('[RenderError] rendering stopped:', error?.stack || error);
+    });
+
     // Bez Cesium ion tokenu odstráň default „Cesium ion" logo z kreditov:
     // CesiumJS je Apache-2.0 a logo je len zdvorilostný default — POVINNÉ je
     // až pri používaní ion služieb (Bing stacky / ion terén), ktoré bez

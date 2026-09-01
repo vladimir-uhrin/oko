@@ -3406,7 +3406,7 @@ function requestMissionUpdate() {
 const rocketLaunchesLayer = {
   id: 'rocket-launches',
   name: 'Space Missions (30d)',
-  icon: '🚀',
+  icon: '↥', // štart z rampy — monochromatický glyf, žiadne emoji
   source: 'Launch Library 2',
   updateInterval: 300000,
 

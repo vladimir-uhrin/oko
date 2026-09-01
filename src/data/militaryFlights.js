@@ -2603,7 +2603,7 @@ export function mapAnalystRecord(icao24, info) {
 const militaryFlightsLayer = {
   id: 'military',
   name: 'Military Flights',
-  icon: '🎖️',
+  icon: '◆', // MIL-STD diamant (hostile/military) — monochromatický, žiadne emoji
   source: 'adsb.lol',
   /** @type {number} Polling interval in ms between API fetches */
   updateInterval: 15000,

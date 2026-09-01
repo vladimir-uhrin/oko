@@ -4168,7 +4168,7 @@ async function syncHealthState(force = false) {
 const cctvLayer = {
   id: 'cctv',
   name: 'CCTV',
-  icon: '📹',
+  icon: '⊡', // objektív v kryte — monochromatický glyf, žiadne emoji (◉ má rádio)
   source: 'CCTV + Street View fallback',
   updateInterval: DEFAULT_UPDATE_INTERVAL_MS,
 

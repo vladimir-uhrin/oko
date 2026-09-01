@@ -1518,7 +1518,7 @@ export function applySatellitePointFocusDeemphasis({
 const satellitesLayer = {
   id: 'satellites',
   name: 'Satellites',
-  icon: '🛰️',
+  icon: '⊚', // orbita — monochromatický glyf, žiadne emoji
   source: 'CelesTrak',
   updateInterval: 0, // We use preRender for real-time updates, not interval polling
   refreshInterval: 5 * 60 * 1000, // Catalog data refresh; propagation remains preRender-owned.

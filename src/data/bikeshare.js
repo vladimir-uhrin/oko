@@ -968,14 +968,14 @@ function buildSelectionLabel(record) {
 
   const lines = [
     stationLabel,
-    `🚲 ${bikes} avail · ${docks} docks · ${capacity} cap`,
+    `⊛ ${bikes} avail · ${docks} docks · ${capacity} cap`,
   ];
 
   // Append warnings for stations that are offline or partially non-operational
   const abnormal = [];
-  if (record?.isInstalled === false) abnormal.push('⚠️ Not installed');
-  if (record?.isRenting === false) abnormal.push('⚠️ Not renting');
-  if (record?.isReturning === false) abnormal.push('⚠️ Not returning');
+  if (record?.isInstalled === false) abnormal.push('⚠︎ Not installed');
+  if (record?.isRenting === false) abnormal.push('⚠︎ Not renting');
+  if (record?.isReturning === false) abnormal.push('⚠︎ Not returning');
   if (abnormal.length > 0) {
     lines.push(abnormal.join(' · '));
   }
@@ -1280,7 +1280,7 @@ function buildDetectionId(record) {
   const label = record.stationName || `Dock ${record.stationId}`;
   // Truncate long station names to keep HUD readable
   const short = label.length > 24 ? label.slice(0, 22) + '…' : label;
-  return `🚲 ${short} [${bikes}/${capacity}]`;
+  return `⊛ ${short} [${bikes}/${capacity}]`;
 }
 
 /**
@@ -1452,7 +1452,7 @@ function onCameraChanged() {
 const bikeshareLayer = {
   id: 'bikeshare',
   name: 'Bikeshare',
-  icon: '🚲',
+  icon: '⊛', // lúčové koleso — monochromatický glyf, žiadne emoji
   source: 'GBFS',
   updateInterval: STATUS_POLL_MS,
 

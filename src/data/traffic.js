@@ -2174,7 +2174,7 @@ function clearDots() {
 const trafficLayer = {
   id: 'traffic',
   name: 'Street Traffic',
-  icon: '🚗',
+  icon: '≡', // jazdné pruhy — monochromatický glyf, žiadne emoji
   source: 'OpenStreetMap',
   /** @type {number} Zero — layer is self-managed via camera listener + preRender */
   updateInterval: 0,

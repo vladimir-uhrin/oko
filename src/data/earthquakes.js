@@ -131,7 +131,7 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = 
   const layer = {
   id: 'earthquakes',
   name: 'Earthquakes (24h)',
-  icon: '🌋',
+  icon: '∿', // seizmická vlna — monochromatický glyf, žiadne emoji
   source: 'USGS',
   updateInterval: 60000,
 

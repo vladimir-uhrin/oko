@@ -3915,7 +3915,7 @@ function _focusEvidenceSnapshot() {
 const flightsLayer = {
   id: 'flights',
   name: 'Live Flights',
-  icon: '✈️',
+  icon: '✈︎', // U+2708+FE0E — monochromatický textový glyf, žiadne emoji (štýl panelu)
   source: 'OpenSky Network',
   // Browser-harness seam: isolates synthetic display-floor scenarios without
   // changing any production lifecycle or cache policy.
