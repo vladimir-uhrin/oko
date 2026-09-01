@@ -940,7 +940,12 @@ function _sweepAmbientEnrichment() {
     for (const [icao24, bb] of _billboards) {
       if (_enrichSeen.has(`t:${icao24}`)) continue; // answered / queued / negative this session
       if (!/^[0-9a-f]{6}$/i.test(icao24)) continue; // adsbdb keys are 6-char hex only
-      if (_flightData.get(icao24)?.onGround) continue; // ground traffic never spends ambient budget (click-to-enrich still works)
+      const sweepMeta = _flightData.get(icao24);
+      if (sweepMeta?.onGround) continue; // ground traffic never spends ambient budget (click-to-enrich still works)
+      // Feed identity (fallback slots [18..21]) already classified this plane —
+      // ambient's whole job is the silhouette, so don't spend adsbdb budget on
+      // it (click-to-track still runs the full priority enrichment).
+      if (sweepMeta?.typeCode) continue;
       if (!bb.position || !occluder.isPointVisible(bb.position)) continue; // beyond the limb
       Cesium.Cartesian3.clone(bb.position, _scratchModelBS.center);
       if (cull.computeVisibility(_scratchModelBS) === Cesium.Intersect.OUTSIDE) continue; // off-screen
@@ -3303,9 +3308,13 @@ function _trackedLabelText(icao24) {
   const lines = [[cs, fl, spd, stale].filter(Boolean).join(' · ')];
   // Converted contacts report their class as TR-3B and nothing else — the
   // operator/type identity is exactly what the Easter egg is replacing.
+  // Registrácia sa zobrazí len keď NIE JE už titulkom karty (bez callsignu
+  // vedie kartu práve ona — duplicitný riadok by bol šum). Operátor z feedu
+  // supluje airline, kým adsbdb route lookup nedodá značku letu.
+  const reg = info.registration && info.registration !== cs ? info.registration : null;
   const ident = isTr3b(icao24)
     ? tr3bTypeLabel(icao24)
-    : [info.airline, info.typeName || info.typeCode].filter(Boolean).join(' · ');
+    : [info.airline || info.operator, info.typeName || info.typeCode, reg].filter(Boolean).join(' · ');
   if (ident) lines.push(ident);
   if (info.route && _routeIsPlausible(icao24, info.route)) {
     // Trasa s mestami (adsbdb municipality) + textový progress bar s ETA.
@@ -4384,6 +4393,17 @@ const flightsLayer = {
 
         // Store flight metadata for click-to-track labels
         const cat = stickyNumber(category, prevMeta?.category, null);
+        // Feed-level identity ride-along (adsbLolFallback.js slots [18..21]):
+        // the regional fallback carries type/registration/operator/full-name
+        // for most airframes; OpenSky primary rows never populate these slots.
+        // Merge is prevMeta-first — adsbdb enrichment stays the richer source
+        // (its callback OVERWRITES the stored meta when it lands), the feed
+        // only fills gaps, so an enriched card never regresses to feed text.
+        const feedTypeCode = state[18] ?? null;
+        const feedRegistration = state[19] ?? null;
+        const feedOperator = state[20] ?? null;
+        const feedTypeName = state[21] ?? null;
+        const mergedTypeCode = prevMeta?.typeCode ?? feedTypeCode;
         const meta = {
           callsign: stickyText(callsign, prevMeta?.callsign),
           altitude: alt,
@@ -4404,8 +4424,10 @@ const flightsLayer = {
           velocity: stickyNumber(velocity, prevMeta?.velocity, 0),
           true_track: stickyNumber(true_track, prevMeta?.true_track, 0),
           category: cat,
-          // An adsbdb-enriched type code outranks the coarse OpenSky category.
-          klass: classifyAircraft({ typeCode: prevMeta?.typeCode ?? null, category: cat }),
+          // An adsbdb-enriched (or feed-carried) type code outranks the
+          // coarse OpenSky category — fallback-fed planes now classify their
+          // silhouette straight from the feed, without waiting on adsbdb.
+          klass: classifyAircraft({ typeCode: mergedTypeCode, category: cat }),
           turnRateDps: prevMeta?.turnRateDps || 0,
           verticalRate: stickyNumber(vertical_rate, prevMeta?.verticalRate, null),
           // Sticky ako callsign: prázdny riadok v jednom polle nezhodí kód,
@@ -4423,10 +4445,14 @@ const flightsLayer = {
             prevMeta?.lastContactEpochMs,
             null,
           ),
-          // adsbdb enrichment — written by the enrichment callbacks, carried across polls:
-          typeCode: prevMeta?.typeCode ?? null,
-          typeName: prevMeta?.typeName ?? null,
-          registration: prevMeta?.registration ?? null,
+          // adsbdb enrichment — written by the enrichment callbacks, carried
+          // across polls; feed identity (slots [18..21]) fills the gaps:
+          typeCode: mergedTypeCode,
+          typeName: prevMeta?.typeName ?? feedTypeName,
+          registration: prevMeta?.registration ?? feedRegistration,
+          // Operator is feed-only (adsbdb's airline arrives via the route
+          // lookup as `airline`) — sticky like callsign.
+          operator: feedOperator ?? prevMeta?.operator ?? null,
           airline: prevMeta?.airline ?? null,
           route: prevMeta?.route ?? null,
           // The RAW poll fix lat/lon (this tick's OpenSky state-vector

@@ -35,7 +35,7 @@ import {
 } from './motionModel.js';
 import { setMilitaryLayerActive, registerMilitaryIcaos } from './militaryRegistry.js';
 import { formatFlightLevel } from './detectionDraw.js';
-import { verticalTrendGlyph } from './flightProgress.js';
+import { parseSquawk, squawkAlert, verticalTrendGlyph } from './flightProgress.js';
 import { createGroundSnap } from './groundSnap.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { pickRenderAltitudeM } from './renderAltitude.js';
@@ -713,11 +713,17 @@ function _buildTrackedLabel(info, icao24) {
   const altitude = _formatAltitude(info?.altitudeFt);
   const speedKt = info?.speedMps ? Math.round(info.speedMps * 1.944) : null;
   const tail = speedKt ? `${altitude} · ${speedKt} kt` : altitude;
-  return [
+  const lines = [
     callsign,
     `${type} · ${registration}`,
     `${operator} · ${tail}`,
-  ].join('\n');
+  ];
+  // Núdzový transpondérový kód — rovnaká konvencia ako civilná karta
+  // (SQUAWK CODE · LABEL); 7700 na vojenskom stroji je prvotriedna intel
+  // informácia, bežný squawk riadok nedostane.
+  const alert = squawkAlert(info?.squawk);
+  if (alert) lines.push(`SQUAWK ${alert.code} · ${alert.label}`);
+  return lines.join('\n');
 }
 
 /** Write the explicit tracked presentation model and refresh its host entry. */
@@ -2880,6 +2886,10 @@ const militaryFlightsLayer = {
         const type = _toCleanText(aircraft?.t);
         const registration = _toCleanText(aircraft?.r);
         const operator = _toCleanText(aircraft?.ownOp);
+        // Núdzový transpondérový kód (zrkadlo flights.js): normalizovaný na
+        // 4-miestny oktal alebo null — karta z neho renderuje len 7500/7600/
+        // 7700 alarm, bežný squawk je šum a riadok nedostane.
+        const squawk = parseSquawk(aircraft?.squawk);
         const seenSec = _toFiniteNumber(aircraft?.seen);
 
         // Height-datum fix (Task 7, mirror of flights.js Task 6): `altitudeM`
@@ -2984,6 +2994,9 @@ const militaryFlightsLayer = {
           klass: classifyAircraft({ typeCode: stickyType, category: aircraft?.category }),
           registration: stickyText(registration, prevMeta?.registration),
           operator: stickyText(operator, prevMeta?.operator),
+          // Sticky ako callsign: prázdny riadok v jednom polle nezhodí kód,
+          // reálna zmena squawku sa prepíše ďalším fixom.
+          squawk: squawk ?? prevMeta?.squawk ?? null,
           altitudeFt: stickyNumber(altitudeFt, prevMeta?.altitudeFt, null),
           // geoAltitudeM/renderAltitudeM are ADDITIVE fields alongside the
           // untouched aviation `altitudeFt` — never rename/replace it (labels,

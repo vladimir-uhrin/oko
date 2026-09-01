@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import createViteConfig, {
   adsbLolFallbackAnchor,
   coalesceProxyRequest,
@@ -7,6 +9,7 @@ import createViteConfig, {
   LL2_CACHE_TTL_MS,
   readResponseJsonCapped,
   regionalBriefHasAnySource,
+  REGIONAL_FALLBACK_PROVIDERS,
   validMilitaryInstallationBox,
   validRegionalPoint,
 } from '../../vite.config.js';
@@ -82,6 +85,38 @@ test('bounded JSON reader rejects oversized upstream bodies', async () => {
     readResponseJsonCapped(new Response(JSON.stringify({ value: 'x'.repeat(64) })), 32),
     (error) => error?.code === 'RESPONSE_TOO_LARGE',
   );
+});
+
+test('regional flight fallback chain: adsb.lol primary, adsb.fi second, both pinned', () => {
+  // Poradie je zámerné: adsb.lol je zabehnutý primárny fallback (ODbL);
+  // adsb.fi je záloha zálohy (fair-use, nekomerčné, 1 req/s — a chybové
+  // odpovede sa im počítajú do limitu, takže reťaz musí ostať
+  // single-attempt-per-provider, žiadne retry slučky).
+  assert.deepEqual(
+    REGIONAL_FALLBACK_PROVIDERS.map((provider) => provider.name),
+    ['adsb.lol', 'adsb.fi'],
+  );
+  assert.equal(
+    REGIONAL_FALLBACK_PROVIDERS[0].url(48.25, 17, 250),
+    'https://api.adsb.lol/v2/lat/48.25/lon/17/dist/250',
+  );
+  // adsb.fi: výhradne /api/v3 — ich v2 lat/lon variant je deprecated a vracia
+  // iný tvar než ostatné v2 endpointy (README adsbfi/opendata).
+  assert.equal(
+    REGIONAL_FALLBACK_PROVIDERS[1].url(48.25, 17, 250),
+    'https://opendata.adsb.fi/api/v3/lat/48.25/lon/17/dist/250',
+  );
+});
+
+test('regional fallback serves an honest per-provider X-Flight-Source header', () => {
+  // Zdrojová poctivosť (CLAUDE.md pravidlo 2): keď dáta reálne prišli z
+  // adsb.fi, chip v UI nesmie tvrdiť adsb.lol. Pin drží hlavičku dynamickú —
+  // čítanú zo záznamu, nie hardcodovanú.
+  const viteSource = readFileSync(
+    fileURLToPath(new URL('../../vite.config.js', import.meta.url)),
+    'utf8',
+  );
+  assert.match(viteSource, /'X-Flight-Source':\s*fallback\.source/);
 });
 
 test('regional brief treats an all-source outage as total failure', () => {

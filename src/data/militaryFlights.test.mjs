@@ -202,6 +202,10 @@ test('military poll refreshes tracked callsign/altitude/kts and marks a missed p
         t: 'C17',
         r: '05-8152',
         ownOp: 'United States Air Force',
+        // Núdzový transpondérový kód (2026-09-01): mil vetva doteraz squawk
+        // ZAHADZOVALA, hoci civilná karta ho nesie a squawkAlert existuje —
+        // 7700 na vojenskom stroji je prvotriedna intel informácia.
+        squawk: '7700',
       }] : [],
     }),
   });
@@ -211,9 +215,13 @@ test('military poll refreshes tracked callsign/altitude/kts and marks a missed p
     assert.equal(entity.gevLabelModel.title, 'RCH451');
     assert.match(entity.gevLabelModel.details.join(' · '), /28000 ft/);
     assert.match(entity.gevLabelModel.details.join(' · '), /400 kt/);
+    // Rovnaký formát riadku ako civilná karta — konvencia SQUAWK CODE · LABEL.
+    assert.match(entity.gevLabelModel.details.join('\n'), /SQUAWK 7700 · EMERGENCY/);
 
     await militaryFlightsLayer.update(viewer);
     assert.match(entity.gevLabelModel.title, /STALE/);
+    // Sticky ako callsign: vynechaný poll nezhodí núdzový kód z karty.
+    assert.match(entity.gevLabelModel.details.join('\n'), /SQUAWK 7700 · EMERGENCY/);
   } finally {
     globalThis.fetch = realFetch;
   }

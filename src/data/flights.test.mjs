@@ -3,6 +3,8 @@
 // Pure function — no viewer/DOM needed; imported directly.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as Cesium from 'cesium';
 import flightsLayer, {
   _addFlightTrackingCandidateForTest,
@@ -235,6 +237,136 @@ test('flights poll refreshes tracked callsign/FL/kts and marks a missed poll STA
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+// Feed-level identity (2026-09-01): the adsb.lol/adsb.fi regional fallback
+// rides type/registration/operator/full-name along at state[18..21]
+// (adsbLolFallback.js). Before this, a fallback-fed fleet was identity-blind
+// until the budget-limited adsbdb sweep got to each plane — the feed already
+// told us and we threw it away.
+function _identityPollHarness(meta) {
+  const icao24 = 'a49e9a';
+  const entity = { gevLabelModel: { title: 'OLD', details: [] } };
+  const viewer = { camera: { positionCartographic: null }, scene: {} };
+  _setTrackedFlightRefreshStateForTest({
+    icao24,
+    entity,
+    billboard: {
+      position: Cesium.Cartesian3.fromDegrees(16.54, 48.12, 9_000),
+      color: Cesium.Color.WHITE,
+      show: false,
+    },
+    billboardCollection: { show: false, remove() {} },
+    viewer,
+    meta: {
+      callsign: 'OLD1',
+      altitude: 9_000,
+      renderAltitudeM: 9_050,
+      velocity: 180,
+      true_track: 80,
+      klass: 'airliner',
+      onGround: false,
+      wasAirborne: true,
+      turnRateDps: 0,
+      rawLat: 48.12,
+      rawLon: 16.54,
+      ...meta,
+    },
+  });
+  return { icao24, entity, viewer };
+}
+
+function _identityState(icao24, nowSec, { callsign = 'UPS275 ' } = {}) {
+  return [
+    icao24, callsign, null, nowSec, nowSec,
+    16.54, 48.12, 10_668, false, 250, 95, 0, null, 10_700,
+    null, null, null, 5,
+    'B763', 'N397UP', 'UNITED PARCEL SERVICE CO', 'BOEING 767-300',
+  ];
+}
+
+test('fallback identity fields reach the tracked card: operator · type · registration', async () => {
+  const { icao24, entity, viewer } = _identityPollHarness({});
+  const realFetch = globalThis.fetch;
+  const nowSec = Math.floor(Date.now() / 1000);
+  globalThis.fetch = async (url) => {
+    if (!String(url).startsWith('/api/opensky')) {
+      return { ok: true, status: 200, json: async () => ({ ac: [] }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({ time: nowSec, states: [_identityState(icao24, nowSec)] }),
+    };
+  };
+  try {
+    await flightsLayer.update(viewer);
+    // Viacriadkový label: title nesie celý prvý riadok (viď pin 'N12345 ·
+    // FL350 · 486 kts' nižšie) — hlavička karty je callsign + kinematika.
+    assert.match(entity.gevLabelModel.title, /^UPS275 · FL350/);
+    // No airline (no adsbdb route yet) → the feed operator substitutes; the
+    // full desc outranks the raw type code; the registration differs from the
+    // headline callsign, so it earns its slot.
+    assert.equal(
+      entity.gevLabelModel.details[0],
+      'UNITED PARCEL SERVICE CO · BOEING 767-300 · N397UP',
+    );
+    assert.equal(flightsLayer.getTrackedInfo()?.registration, 'N397UP');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('adsbdb enrichment outranks feed identity, and a registration headline is not repeated', async () => {
+  // Seeded meta simulates an already-landed adsbdb answer: the poll's feed
+  // desc/r must NOT overwrite it (enrichment is the richer source; the feed
+  // only fills gaps). Callsign je null → hlavičku karty vedie registrácia,
+  // takže ident riadok ju NESMIE zopakovať.
+  const seeded = _identityPollHarness({
+    callsign: null,
+    typeName: 'Boeing 767-300F',
+    registration: 'OM-XYZ',
+  });
+  const realFetch = globalThis.fetch;
+  const nowSec = Math.floor(Date.now() / 1000);
+  globalThis.fetch = async (url) => {
+    if (!String(url).startsWith('/api/opensky')) {
+      return { ok: true, status: 200, json: async () => ({ ac: [] }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      json: async () => ({
+        time: nowSec,
+        states: [_identityState(seeded.icao24, nowSec, { callsign: null })],
+      }),
+    };
+  };
+  try {
+    await flightsLayer.update(seeded.viewer);
+    // Enrichment wins over feed desc; the headline IS the registration
+    // (callsign-less chain: callsign → registration → hex), so the ident
+    // line must not repeat it.
+    assert.match(seeded.entity.gevLabelModel.title, /^OM-XYZ · FL350/);
+    assert.equal(seeded.entity.gevLabelModel.details[0], 'UNITED PARCEL SERVICE CO · Boeing 767-300F');
+    assert.equal(flightsLayer.getTrackedInfo()?.registration, 'OM-XYZ');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('ambient adsbdb sweep never spends budget on a feed-classified plane', () => {
+  // Kvótová poistka: ambient sweep existuje kvôli siluete (typeCode). Keď ju
+  // dodal už samotný feed (sloty [18..21]), adsbdb request by bol čistá strata
+  // rozpočtu — pin drží skip v _sweepAmbientEnrichment. Click-to-track ďalej
+  // beží plnou prioritnou cestou (typeName/registrácia z adsbdb).
+  const flightsSource = readFileSync(
+    fileURLToPath(new URL('./flights.js', import.meta.url)),
+    'utf8',
+  );
+  assert.match(flightsSource, /if \(sweepMeta\?\.typeCode\) continue;/);
 });
 
 test('real civil track path creates no native label and publishes every cached host line', async () => {

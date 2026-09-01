@@ -8,6 +8,12 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+/** Trimmed non-empty string, else null — identity fields must stay JSON-safe. */
+function cleanText(value) {
+  const text = String(value ?? '').trim();
+  return text || null;
+}
+
 function emitterCategory(value) {
   const category = String(value || '').trim().toUpperCase();
   const categories = {
@@ -31,6 +37,13 @@ function emitterCategory(value) {
 /**
  * Convert one adsb.lol v2 aircraft record into the OpenSky state-vector shape
  * consumed by the existing Flights renderer.
+ *
+ * Indices [0..17] mirror the OpenSky /states/all spec exactly. Indices
+ * [18..21] are an ADDITIVE identity ride-along (type code, registration,
+ * operator, full type name) — the readsb family (adsb.lol, adsb.fi) sends
+ * them for most airframes and dropping them left the fallback fleet
+ * identity-blind until adsbdb enrichment landed. OpenSky primary responses
+ * simply never populate these slots, so that path is unchanged.
  * @param {object} aircraft adsb.lol aircraft record.
  * @param {number} nowSeconds Feed response time in epoch seconds.
  * @returns {Array|null} OpenSky-compatible state vector, or null when invalid.
@@ -69,6 +82,10 @@ export function normalizeAdsbLolAircraftState(aircraft, nowSeconds) {
     aircraft?.spi === 1,
     0,
     emitterCategory(aircraft?.category),
+    cleanText(aircraft?.t),
+    cleanText(aircraft?.r),
+    cleanText(aircraft?.ownOp),
+    cleanText(aircraft?.desc),
   ];
 }
 

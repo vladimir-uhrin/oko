@@ -43,6 +43,15 @@ export const DATA_CREDITS = [
       '(ODbL 1.0)',
   },
   {
+    // adsb.fi terms: "cite adsb.fi and include a link" — the link is the
+    // required form of the attribution, keep it an anchor.
+    key: 'adsbfi',
+    html:
+      'Regional flight fallback (secondary): ' +
+      '<a href="https://adsb.fi" target="_blank" rel="noopener">adsb.fi</a> ' +
+      '(non-commercial fair use)',
+  },
+  {
     key: 'aisstream',
     html:
       'Live vessels (AIS): ' +
