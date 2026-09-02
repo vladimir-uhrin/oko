@@ -16,6 +16,7 @@ import {
   aisNavStatusCode,
   aisPositionUsable,
   aisSpeedKnots,
+  aisTrackSampleDecision,
   mergeAisKinematics,
   mergeAisStaticFields,
   shouldPruneAisCache,
@@ -184,4 +185,20 @@ test('prune sa nespúšťa na každej správe — má vlastné časové okno', (
   assert.equal(shouldPruneAisCache(1_000, 6_001, 5_000), true);
   // Skok hodín dozadu nesmie prune zablokovať navždy.
   assert.equal(shouldPruneAisCache(9_000, 1_000, 5_000), true);
+});
+
+test('track ring: regresný čas vzorku nezasekne stopu navždy', () => {
+  // Chyba č. 15 auditu: `epochSec - lastEpoch < MIN_GAP` pri zápornej
+  // diferencii (out-of-order report, oprava hodín prijímača, fallback na
+  // Date.now) potichu zahadzoval vzorky, kým wall-clock nedobehol.
+  const GAP = 30;
+  assert.equal(aisTrackSampleDecision(1000, 900, GAP), 'append');
+  assert.equal(aisTrackSampleDecision(929, 900, GAP), 'skip', 'do min. medzery sa preskakuje');
+  assert.equal(aisTrackSampleDecision(930, 900, GAP), 'append', 'presne na medzere sa berie');
+  // Malá regresia = jitter multiplexovaného feedu — preskoč, drž poradie.
+  assert.equal(aisTrackSampleDecision(895, 900, GAP), 'skip');
+  // Veľká regresia (>= medzera dozadu) = hodiny skočili — poctivý reštart
+  // stopy namiesto večného čakania.
+  assert.equal(aisTrackSampleDecision(870, 900, GAP), 'reset');
+  assert.equal(aisTrackSampleDecision(100, 900, GAP), 'reset');
 });

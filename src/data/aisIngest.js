@@ -205,6 +205,29 @@ export function aisEtaLabel(eta) {
 }
 
 /**
+ * Track-ring sample decision for one incoming fix versus the last stored one.
+ * A NEGATIVE time delta used to silently drop samples until wall-clock caught
+ * up (`epoch - last < minGap` is true for every regressed timestamp): common
+ * on multiplexed feeds with out-of-order reports, after a receiver clock fix,
+ * and when the report-time parser falls back to Date.now().
+ *  - delta >= minGap        → 'append' (normálny postup stopy)
+ *  - 0 <= delta < minGap    → 'skip'   (hustejšie než mriežka)
+ *  - -minGap < delta < 0    → 'skip'   (jitter poradia — drž poradie ringu)
+ *  - delta <= -minGap       → 'reset'  (hodiny skočili — poctivý reštart
+ *                                       stopy namiesto večného čakania)
+ * @param {number} epochSec Incoming fix epoch (s).
+ * @param {number} lastEpochSec Last stored fix epoch (s).
+ * @param {number} minGapSec Ring thinning gap (s).
+ * @returns {'append'|'skip'|'reset'}
+ */
+export function aisTrackSampleDecision(epochSec, lastEpochSec, minGapSec) {
+  const delta = epochSec - lastEpochSec;
+  if (delta >= minGapSec) return 'append';
+  if (delta <= -minGapSec) return 'reset';
+  return 'skip';
+}
+
+/**
  * Whether the retention sweep is due. The sweep walks the whole vessel cache
  * (up to 50 000 rows) and used to run on EVERY accepted positional message —
  * with the worldwide bounding box that is tens to hundreds of full-cache scans

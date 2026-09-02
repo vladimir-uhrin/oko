@@ -38,6 +38,7 @@ import {
   registerSpriteCollection,
   restoreSpriteOrder,
   restoreSpriteOrderOnEnable,
+  unregisterSpriteCollection,
 } from './spriteOrder.js';
 import {
   advanceSpriteFocus,
@@ -55,6 +56,8 @@ const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
 /** Camera pose signature at the last vessel rotation pass. */
 let _lastCamPoseSig = '';
 const _scratchFocusScreen = new Cesium.Cartesian2();
+/** Scratch pre projekcie kariet (audit #10) — x/y sa vždy kopírujú hneď. */
+const _scratchCardScreen = new Cesium.Cartesian2();
 
 const DEFAULT_API_URL = '/api/ais-live';
 const DEFAULT_RENDER_ROWS = 12000;
@@ -425,6 +428,10 @@ const aisLiveVesselsLayer = {
     clearVesselInspection();
     destroySelectedVesselTrail();
     if (state.billboardCollection && viewer) {
+      // Audit #13: registrácia v spriteOrder bez odregistrovania držala
+      // referenciu na zničenú kolekciu po celý život session — obrana
+      // v spriteOrder to prežila, ale leak je leak.
+      unregisterSpriteCollection('ais', state.billboardCollection);
       viewer.scene.primitives.remove(state.billboardCollection);
     }
     _vesselOverlayHost.clearSource(VESSEL_OVERLAY_SOURCE_ID);
@@ -641,7 +648,12 @@ const aisLiveVesselsLayer = {
         id: record.name || record.mmsi || 'VESSEL',
         type: 'SEA',
         skipLabel: record === selected,
-        klass: record.type ? String(record.type).toUpperCase().slice(0, 14) : undefined,
+        // Normalizovaný typ (audit #9): karta ukazuje 'CARGO', callout tej
+        // istej lode nesmie ukazovať surové '70' — jedna normalizácia pre
+        // obe cesty (normalizeVesselType).
+        klass: record.type
+          ? normalizeVesselType(record.type).toUpperCase().slice(0, 14) || undefined
+          : undefined,
         metric: formatKnots(record.speed), // record.speed is knots
       });
       if (result.length >= maxCount) break;
@@ -860,9 +872,22 @@ async function loadLivePositions(viewer) {
     const url = liveApiUrl();
     // Combine the layer's teardown-abort with a hard timeout so a hung upstream
     // can't wedge the poll indefinitely (parity with the track fetch + flights).
-    const signal = typeof AbortSignal.any === 'function'
-      ? AbortSignal.any([requestController.signal, AbortSignal.timeout(10000)])
-      : requestController.signal;
+    // Audit #12: bez AbortSignal.any pôvodne NEBOL žiadny timeout — visiaci
+    // upstream na staršom prehliadači nechal `state.loading` zaseknuté navždy
+    // (loadLivePositions sa pri loading=true vracia hneď). Ručná kompozícia
+    // drží hard timeout na každom runtime.
+    let signal;
+    if (typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function') {
+      signal = AbortSignal.any([requestController.signal, AbortSignal.timeout(10000)]);
+    } else {
+      const composed = new AbortController();
+      const abortComposed = () => composed.abort();
+      if (requestController.signal.aborted) abortComposed();
+      else requestController.signal.addEventListener('abort', abortComposed, { once: true });
+      const timer = setTimeout(abortComposed, 10000);
+      composed.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
+      signal = composed.signal;
+    }
     const response = await fetch(url, {
       signal,
       cache: 'no-store',
@@ -1031,6 +1056,11 @@ function reconcileVessels(viewer, rows) {
   }
 
   // Remove vanished vessels, pinning the selected one for a few refreshes.
+  // Audit #11: clearVesselInspection spúšťa updateVisibility → prechod cez
+  // KOMPLETNÝ zoznam záznamov — volať ho UPROSTRED evikčnej slučky znamenalo
+  // rebuild kariet nad napoly rozobratým zoznamom (billboardy už preč,
+  // záznamy ešte v mape). Odloží sa až ZA slučku, keď je stav konzistentný.
+  let selectedEvicted = false;
   for (const [mmsi, record] of state.vesselMap) {
     if (seen.has(mmsi)) continue;
     if (record === state.selectedRecord) {
@@ -1040,7 +1070,7 @@ function reconcileVessels(viewer, rows) {
         continue;
       }
       // Aged out of the feed after exhausting its pin — not a deselect.
-      clearVesselInspection({ evicted: true });
+      selectedEvicted = true;
     }
     removeRecordPrimitives(record);
     state.vesselMap.delete(mmsi);
@@ -1050,6 +1080,9 @@ function reconcileVessels(viewer, rows) {
   }
 
   state.vesselRecords = [...state.vesselMap.values(), ...state.unkeyedRecords];
+  // Odložené z evikčnej slučky (audit #11): teraz je zoznam konzistentný
+  // a clearSelection/updateVisibility už nechodí po odstránených billboardoch.
+  if (selectedEvicted) clearVesselInspection({ evicted: true });
   state.lastVisibilityUpdate = 0;
   updateVisibility(true);
 }
@@ -1402,7 +1435,14 @@ function updateClusteredLabels(records) {
   const cells = new Map();
   for (const record of records) {
     if (record === selected) continue;
-    const screen = Cesium.SceneTransforms.worldToWindowCoordinates(scene, record.position);
+    // Scratch výsledok (audit #10): bez neho tento prechod alokoval čerstvý
+    // Cartesian2 na KAŽDÝ viditeľný záznam — až 12k záznamov / 800 ms ≈
+    // 15 000 alokácií za sekundu čistého GC odpadu. Primitívne x/y sa hneď
+    // kopírujú do candidate, takže zdieľaný scratch je bezpečný (idiom
+    // _scratchFocusScreen o pár riadkov vyššie).
+    const screen = Cesium.SceneTransforms.worldToWindowCoordinates(
+      scene, record.position, _scratchCardScreen,
+    );
     if (!screen) continue;
     const key = `${Math.floor(screen.x / LABEL_GRID_PX)}:${Math.floor(screen.y / LABEL_GRID_PX)}`;
     const candidate = { record, score: labelPriority(record, selected), x: screen.x, y: screen.y };
@@ -1417,7 +1457,7 @@ function updateClusteredLabels(records) {
   const accepted = [];
   if (selected) {
     const screen = Cesium.SceneTransforms.worldToWindowCoordinates(
-      scene, selected.billboard?.position || selected.position
+      scene, selected.billboard?.position || selected.position, _scratchCardScreen,
     );
     if (screen) accepted.push({ x: screen.x, y: screen.y });
   }

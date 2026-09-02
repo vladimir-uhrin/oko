@@ -1704,3 +1704,37 @@ test('buildSelectedVesselCard: starý fix priznáva vek a od 10 min nesie STALE'
   }), nowMs);
   assert.equal(fresh.details.at(-1), 'MMSI 353136000 · POS: 11:34:03Z');
 });
+
+test('detection callout číta normalizovaný typ lode — nie surový AIS kód', () => {
+  // Chyba č. 9 auditu: karta ukazovala 'CARGO' (normalizeVesselType), ale
+  // detekčný callout tej istej lode surové '70' — dve rôzne triedy na
+  // obrazovke naraz. Obe cesty teraz zdieľajú normalizáciu.
+  _setVesselStateForTest({
+    enabled: true,
+    billboardCollection: { show: true, remove() {} },
+    records: [makeRecord({ type: '70', billboard: null })],
+  });
+  try {
+    const detectable = aisLiveVesselsLayer.getDetectableObjects({ maxCount: 5 });
+    assert.equal(detectable.length, 1);
+    assert.equal(detectable[0].klass, 'CARGO');
+    // Textový typ prechádza nezmenený, neznámy typ nevyrába prázdny reťazec.
+    _setVesselStateForTest({
+      enabled: true,
+      billboardCollection: { show: true, remove() {} },
+      records: [makeRecord({ type: 'Crude Oil Tanker', billboard: null })],
+    });
+    assert.equal(
+      aisLiveVesselsLayer.getDetectableObjects({ maxCount: 5 })[0].klass,
+      'CRUDE OIL TANK',
+    );
+    _setVesselStateForTest({
+      enabled: true,
+      billboardCollection: { show: true, remove() {} },
+      records: [makeRecord({ type: '', billboard: null })],
+    });
+    assert.equal(aisLiveVesselsLayer.getDetectableObjects({ maxCount: 5 })[0].klass, undefined);
+  } finally {
+    _setVesselStateForTest({ enabled: false });
+  }
+});

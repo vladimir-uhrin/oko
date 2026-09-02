@@ -65,6 +65,7 @@ import {
   aisEtaLabel,
   aisNavStatusCode,
   aisPositionUsable,
+  aisTrackSampleDecision,
   mergeAisKinematics,
   mergeAisStaticFields,
   shouldPruneAisCache,
@@ -1316,6 +1317,8 @@ const AISSTREAM_STALE_MS = 30 * 60 * 1000;
 const AISSTREAM_PRUNE_INTERVAL_MS = 5_000;
 /** Epoch ms of the last retention sweep (0 = never swept). */
 let _aisStreamLastPruneAt = 0;
+/** Jednorazové varovanie o nekomprimovanom AISStream toku. */
+let _aisCompressionWarned = false;
 // Per-MMSI recent-path ring buffers (PRD WS-F F3). Float32 lat/lon (~1m
 // precision, fine for 25m thinning) + Uint32 epoch seconds ≈ 12B/sample;
 // 64 samples × 50k MMSIs worst case ≈ 38MB. Tracks exist only while the dev
@@ -6817,6 +6820,21 @@ function aisStreamSubscription() {
  * @returns {boolean} True when an AIS record was recognised.
  */
 function ingestAisStreamEnvelope(envelope) {
+  // Diagnostika kompresie (audit 2026-09-02): `ws` klient MÁ permessage-
+  // deflate defaultne a AISStream ju potvrdzuje v SubscriptionConfirmation —
+  // ale potvrdenie doteraz nikto nečítal. Keby vyjednanie niekedy zlyhalo
+  // (zmena knižnice, proxy v ceste), celoplanetárny bbox by tiekol
+  // nekomprimovaný — to sa musí dozvedieť konzola, nie až účet za pásmo.
+  if (envelope?.MessageType === 'SubscriptionConfirmation') {
+    const confirmed = envelope?.Message?.CompressionEnabled
+      ?? envelope?.Message?.SubscriptionConfirmation?.CompressionEnabled;
+    if (confirmed !== true && !_aisCompressionWarned) {
+      _aisCompressionWarned = true;
+      console.warn('[AISStream] SubscriptionConfirmation bez CompressionEnabled=true — stream tečie nekomprimovaný');
+    }
+    // Handshake nie je dôkaz AIS dát (liveness pravidlo ostáva nedotknuté).
+    return false;
+  }
   // Single shared recognition rule (also used by the adapter's tests), so the
   // liveness predicate that ships is the one under test. An envelope carrying
   // only an MMSI is not proof the feed works.
@@ -6951,7 +6969,14 @@ function appendAisTrackSample(mmsi, lat, lon, epochSec) {
       _aisStreamTrackPending.set(mmsi, { lat, lon, epochSec });
       return;
     }
-    if (epochSec - pending.epochSec < AIS_TRACK_MIN_GAP_SEC) return;
+    // Regresný čas (audit #15): hodiny skočili dozadu — pending sa nahradí
+    // novším pozorovaním namiesto večného čakania na wall-clock.
+    const pendingDecision = aisTrackSampleDecision(epochSec, pending.epochSec, AIS_TRACK_MIN_GAP_SEC);
+    if (pendingDecision === 'reset') {
+      _aisStreamTrackPending.set(mmsi, { lat, lon, epochSec });
+      return;
+    }
+    if (pendingDecision === 'skip') return;
     if (approxMetersBetween(pending.lat, pending.lon, lat, lon) < AIS_TRACK_MIN_MOVE_M) return;
     track = {
       lats: new Float32Array(AIS_TRACK_SAMPLES),
@@ -6969,7 +6994,16 @@ function appendAisTrackSample(mmsi, lat, lon, epochSec) {
 
   const lastIdx = (track.head - 1 + AIS_TRACK_SAMPLES) % AIS_TRACK_SAMPLES;
   const lastEpoch = track.times[lastIdx];
-  if (epochSec - lastEpoch < AIS_TRACK_MIN_GAP_SEC) return;
+  const decision = aisTrackSampleDecision(epochSec, lastEpoch, AIS_TRACK_MIN_GAP_SEC);
+  if (decision === 'skip') return;
+  if (decision === 'reset') {
+    // Veľká časová regresia (audit #15): stopa by inak mlčala, kým wall-clock
+    // nedobehne starý epoch — poctivý reštart ringu od nového pozorovania.
+    track.head = 0;
+    track.len = 0;
+    writeAisTrackSample(track, lat, lon, epochSec);
+    return;
+  }
   if (approxMetersBetween(track.lats[lastIdx], track.lons[lastIdx], lat, lon) < AIS_TRACK_MIN_MOVE_M) return;
   writeAisTrackSample(track, lat, lon, epochSec);
 }
