@@ -1336,7 +1336,35 @@ test('buildSelectedVesselCard: full detail card with MMSI + position time', () =
   assert.equal(card.title, 'EVER GIVEN');
   assert.deepEqual(card.details, [
     'CONTAINER SHIP · 14.5KT · 231°',
+    // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI
+    // (353 = Panama) — identitný riadok sa objaví, aj keď loď zatiaľ
+    // neposlala statickú správu s rozmermi/stavom.
+    'PA',
     'MMSI 353136000 · POS: 11:22:33Z',
+  ]);
+});
+
+test('buildSelectedVesselCard: identitný riadok, ETA pri destinácii a POS≈ pre odhadovaný fix', () => {
+  // Balík 2: navStatus/dĺžka/ponor/ETA feed vždy posielal a karta ich
+  // zahadzovala. POS≈ = AIS Timestamp 62/63 (poloha dead-reckoned alebo
+  // pokazený EPFS) — odhad sa nesmie tváriť ako meranie (pravidlo 2).
+  const card = buildSelectedVesselCard(makeRecord({
+    mmsi: '267940000',
+    name: 'PREŠOV',
+    type: '70',
+    destination: 'KOMARNO',
+    eta: '09-02 14:30',
+    navStatus: 0,
+    lengthM: 110,
+    draughtM: 2.7,
+    posEstimated: true,
+    lastPositionUtc: '2026-09-02T11:22:33Z',
+  }));
+  assert.deepEqual(card.details, [
+    'CARGO · 14.5KT · 231°',
+    'SK · UNDER WAY · L110M · T2.7M',
+    '→ KOMARNO · ETA 09-02 14:30',
+    'MMSI 267940000 · POS≈ 11:22:33Z',
   ]);
 });
 
@@ -1449,6 +1477,8 @@ test('buildSelectedVesselCard: destination line + STALE marker; placeholders for
   }));
   assert.deepEqual(card.details, [
     'TANKER · --KT · --°',
+    // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI.
+    'PA',
     '→ ROTTERDAM',
     'MMSI 353136000 · POS: LIVE · STALE',
   ]);
@@ -1654,6 +1684,8 @@ test('buildSelectedVesselCard: starý fix priznáva vek a od 10 min nesie STALE'
   }), nowMs);
   assert.deepEqual(old.details, [
     'CONTAINER SHIP · 14.5KT · 231°',
+    // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI.
+    'PA',
     'MMSI 353136000 · POS: 11:22:33Z (12 min) · STALE',
   ]);
 

@@ -114,10 +114,14 @@ export function mergeAisKinematics(incoming, previous) {
 /**
  * Merge static identity fields over the cached ones. Every field is sticky:
  * msg 24 carries no Destination and no IMO, so a Class B static report used to
- * wipe both after a msg 5 had supplied them.
- * @param {{name?:*, type?:*, destination?:*, imo?:*}} incoming Fields from this message.
- * @param {{name?:*, type?:*, destination?:*, imo?:*}|null} previous Cached static data.
- * @returns {{name:string|null, type:string|null, destination:string|null, imo:string|null}}
+ * wipe both after a msg 5 had supplied them. The same asymmetry applies to the
+ * physicals — msg 19 brings Dimension but no callsign, msg 24 ReportB brings
+ * CallSign+Dimension but no draught/ETA — so the fields alternate sources and
+ * none may erase what another supplied.
+ * @param {{name?:*, type?:*, destination?:*, imo?:*, callSign?:*, lengthM?:*, beamM?:*, draughtM?:*, eta?:*}} incoming Fields from this message.
+ * @param {object|null} previous Cached static data.
+ * @returns {{name:string|null, type:string|null, destination:string|null, imo:string|null,
+ *   callSign:string|null, lengthM:number|null, beamM:number|null, draughtM:number|null, eta:string|null}}
  */
 export function mergeAisStaticFields(incoming, previous) {
   return {
@@ -125,7 +129,79 @@ export function mergeAisStaticFields(incoming, previous) {
     type: trimmed(incoming?.type) ?? trimmed(previous?.type),
     destination: trimmed(incoming?.destination) ?? trimmed(previous?.destination),
     imo: trimmed(incoming?.imo) ?? trimmed(previous?.imo),
+    callSign: trimmed(incoming?.callSign) ?? trimmed(previous?.callSign),
+    lengthM: finite(incoming?.lengthM) ?? finite(previous?.lengthM),
+    beamM: finite(incoming?.beamM) ?? finite(previous?.beamM),
+    draughtM: finite(incoming?.draughtM) ?? finite(previous?.draughtM),
+    eta: trimmed(incoming?.eta) ?? trimmed(previous?.eta),
   };
+}
+
+/**
+ * Navigational status code 0..14, or null. 15 means "not defined" (the
+ * transponder default) and must never render as a state; reserved codes
+ * (9/10/13) pass through as numbers — the LABEL table decides they have no
+ * display text, but the raw code stays available to analysts.
+ * @param {*} value Raw NavigationalStatus from a Class A position report.
+ * @returns {number|null}
+ */
+export function aisNavStatusCode(value) {
+  const code = finite(value);
+  if (code === null || !Number.isInteger(code)) return null;
+  if (code < 0 || code > 14) return null;
+  return code;
+}
+
+/**
+ * Hull dimensions from the AIS Dimension block: A+B = length, C+D = beam
+ * (distances from the GPS antenna to bow/stern/port/starboard). A zero pair
+ * means "not available", not a zero-length vessel.
+ * @param {{A?:*, B?:*, C?:*, D?:*}|null} dimension Raw Dimension block.
+ * @returns {{lengthM:number|null, beamM:number|null}}
+ */
+export function aisDimensionsMeters(dimension) {
+  const a = finite(dimension?.A);
+  const b = finite(dimension?.B);
+  const c = finite(dimension?.C);
+  const d = finite(dimension?.D);
+  const length = a !== null && b !== null && a >= 0 && b >= 0 ? a + b : null;
+  const beam = c !== null && d !== null && c >= 0 && d >= 0 ? c + d : null;
+  return {
+    lengthM: length > 0 ? length : null,
+    beamM: beam > 0 ? beam : null,
+  };
+}
+
+/**
+ * Maximum static draught in metres; 0 means "not available".
+ * @param {*} value Raw MaximumStaticDraught.
+ * @returns {number|null}
+ */
+export function aisDraughtMeters(value) {
+  const draught = finite(value);
+  return draught !== null && draught > 0 ? draught : null;
+}
+
+/**
+ * ETA from the msg 5 Eta block as a compact "MM-DD HH:MM" label (UTC).
+ * Month 0 / day 0 mean "not available"; hour 24 / minute 60 mean "date only".
+ * No year field exists in AIS, so the label stays month-day.
+ * @param {{Month?:*, Day?:*, Hour?:*, Minute?:*}|null} eta Raw Eta block.
+ * @returns {string|null}
+ */
+export function aisEtaLabel(eta) {
+  const month = finite(eta?.Month);
+  const day = finite(eta?.Day);
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  const hour = finite(eta?.Hour);
+  const minute = finite(eta?.Minute);
+  const hasTime = Number.isInteger(hour) && hour >= 0 && hour <= 23
+    && Number.isInteger(minute) && minute >= 0 && minute <= 59;
+  return hasTime
+    ? `${pad(month)}-${pad(day)} ${pad(hour)}:${pad(minute)}`
+    : `${pad(month)}-${pad(day)}`;
 }
 
 /**

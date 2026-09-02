@@ -58,6 +58,13 @@ export const DATA_CREDITS = [
       '<a href="https://aisstream.io" target="_blank" rel="noopener">AISStream.io</a>',
   },
   {
+    key: 'mids',
+    html:
+      'Vessel flag decoding (MID table): ' +
+      '<a href="https://github.com/michaeljfazio/MIDs" target="_blank" rel="noopener">michaeljfazio/MIDs</a> ' +
+      '(Apache-2.0)',
+  },
+  {
     key: 'celestrak',
     html:
       'Satellites (TLEs): CelesTrak ' +

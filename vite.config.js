@@ -60,6 +60,10 @@ import {
 import { normalizeAdsbLolPointResponse } from './src/data/adsbLolFallback.js';
 import { createAisStreamAdapter, isRecognizedAisEnvelope } from './src/data/aisStreamAdapter.js';
 import {
+  aisDimensionsMeters,
+  aisDraughtMeters,
+  aisEtaLabel,
+  aisNavStatusCode,
   aisPositionUsable,
   mergeAisKinematics,
   mergeAisStaticFields,
@@ -6730,15 +6734,27 @@ function ingestAisStreamEnvelope(envelope) {
   const mmsi = stringValue(metadata.MMSI ?? message.UserID ?? message.UserId ?? message.Mmsi);
   if (!mmsi) return false;
 
-  if (messageType === 'ShipStaticData' || messageType === 'StaticDataReport') {
+  // ExtendedClassBPositionReport is a POSITION message that also carries
+  // static identity (Name/ShipType/Dimension) — persist that side here too,
+  // so a Class B vessel's hull size does not depend on a msg 24 arriving.
+  const carriesStatic = messageType === 'ShipStaticData'
+    || messageType === 'StaticDataReport'
+    || messageType === 'ExtendedClassBPositionReport';
+  if (carriesStatic) {
     // Every field is sticky (mergeAisStaticFields): msg 24 carries no
-    // Destination and no IMO, so a Class B static report used to WIPE both
-    // after a msg 5 had supplied them.
+    // Destination and no IMO, msg 19 no callsign, msg 24 no draught/ETA —
+    // the fields alternate sources and none may wipe another's contribution.
+    const dimensions = aisDimensionsMeters(message.Dimension ?? message.ReportB?.Dimension);
     const staticData = mergeAisStaticFields({
       name: vesselNameFromAis(metadata, message, _aisStreamStatic.get(mmsi)),
       type: vesselTypeFromAis(message, _aisStreamStatic.get(mmsi)),
       destination: stringValue(message.Destination),
       imo: stringValue(message.ImoNumber ?? message.IMO),
+      callSign: stringValue(message.CallSign ?? message.ReportB?.CallSign),
+      lengthM: dimensions.lengthM,
+      beamM: dimensions.beamM,
+      draughtM: aisDraughtMeters(message.MaximumStaticDraught),
+      eta: aisEtaLabel(message.Eta),
     }, _aisStreamStatic.get(mmsi));
     _aisStreamStatic.set(mmsi, staticData);
     mergeAisStaticIntoLiveVessel(mmsi, staticData);
@@ -6765,6 +6781,23 @@ function ingestAisStreamEnvelope(envelope) {
     cog: message.Cog ?? message.COG,
     trueHeading: message.TrueHeading ?? message.Heading,
   }, previous);
+  // Nav status lives only on Class A position reports; Class B units have no
+  // such field, so their rows keep whatever a previous report established
+  // (usually nothing). A real transition to 15 ("not defined") honestly
+  // clears the state rather than freezing the old one.
+  const isClassAPosition = messageType === 'PositionReport';
+  const isClassBPosition = messageType === 'StandardClassBPositionReport'
+    || messageType === 'ExtendedClassBPositionReport';
+  const navStatus = isClassAPosition
+    ? aisNavStatusCode(message.NavigationalStatus)
+    : (previous?.nav_status ?? null);
+  // Fix-quality honesty (pravidlo 2): Timestamp 62/63 mean the position is
+  // dead-reckoned or the EPFS is inoperative — the fix is an ESTIMATE and
+  // the card must not present it as a measured one.
+  const tsSecond = numberValue(message.Timestamp);
+  const posEstimated = isClassAPosition || isClassBPosition
+    ? tsSecond === 62 || tsSecond === 63
+    : (previous?.pos_estimated ?? false);
   _aisStreamVessels.set(mmsi, {
     lat,
     lon,
@@ -6773,6 +6806,14 @@ function ingestAisStreamEnvelope(envelope) {
     imo: stringValue(message.ImoNumber ?? message.IMO ?? staticData.imo),
     type: vesselTypeFromAis(message, staticData),
     destination: stringValue(message.Destination ?? staticData.destination),
+    call_sign: stringValue(staticData.callSign),
+    length_m: staticData.lengthM ?? null,
+    beam_m: staticData.beamM ?? null,
+    draught_m: staticData.draughtM ?? null,
+    eta: stringValue(staticData.eta),
+    nav_status: navStatus,
+    ais_class: isClassAPosition ? 'A' : (isClassBPosition ? 'B' : (previous?.ais_class ?? null)),
+    pos_estimated: posEstimated,
     speed,
     course,
     heading,
@@ -6877,6 +6918,11 @@ function mergeAisStaticIntoLiveVessel(mmsi, staticData) {
   if (staticData.type && !existing.type) existing.type = staticData.type;
   if (staticData.destination && !existing.destination) existing.destination = staticData.destination;
   if (staticData.imo && !existing.imo) existing.imo = staticData.imo;
+  if (staticData.callSign && !existing.call_sign) existing.call_sign = staticData.callSign;
+  if (staticData.lengthM != null && existing.length_m == null) existing.length_m = staticData.lengthM;
+  if (staticData.beamM != null && existing.beam_m == null) existing.beam_m = staticData.beamM;
+  if (staticData.draughtM != null && existing.draught_m == null) existing.draught_m = staticData.draughtM;
+  if (staticData.eta && !existing.eta) existing.eta = staticData.eta;
 }
 
 function vesselNameFromAis(metadata, message, staticData = {}) {

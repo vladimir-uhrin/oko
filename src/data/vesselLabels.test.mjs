@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import {
   accentForVesselType,
   applyVesselOverlayPolicy,
+  mmsiFlag,
+  navStatusLabel,
   normalizeVesselType,
   vesselOverlayCohortLimit,
   vesselTypeCss,
@@ -130,4 +132,49 @@ test('vesselPositionAge: chýbajúci alebo budúci epoch nevyrába falošný vek
   // Fix "z budúcnosti" (zle nastavené hodiny na prijímači) sa oreže na 0,
   // nikdy nie záporný vek.
   assert.deepEqual(vesselPositionAge(nowMs / 1000 + 300, nowMs), { ageSec: 0, label: null, stale: false });
+});
+
+test('navStatusLabel: prevádzkové stavy AIS dostávajú taktické štítky, rezervy nič', () => {
+  assert.equal(navStatusLabel(0), 'UNDER WAY');
+  assert.equal(navStatusLabel(1), 'AT ANCHOR');
+  assert.equal(navStatusLabel(2), 'NOT UNDER CMD');
+  assert.equal(navStatusLabel(3), 'RESTR MANVR');
+  assert.equal(navStatusLabel(4), 'CONSTR DRAUGHT');
+  assert.equal(navStatusLabel(5), 'MOORED');
+  assert.equal(navStatusLabel(6), 'AGROUND');
+  assert.equal(navStatusLabel(7), 'FISHING');
+  assert.equal(navStatusLabel(8), 'UNDER SAIL');
+  assert.equal(navStatusLabel(11), 'TOWING ASTERN');
+  assert.equal(navStatusLabel(12), 'PUSHING AHEAD');
+  // 14 = aktívny SART/MOB/EPIRB — tiesňový vysielač, prvotriedna intel
+  // informácia (lodná obdoba squawk 7700).
+  assert.equal(navStatusLabel(14), 'SART ACTIVE');
+  // Rezervované kódy a "not defined" nedostanú riadok — šum nie je stav.
+  assert.equal(navStatusLabel(9), '');
+  assert.equal(navStatusLabel(10), '');
+  assert.equal(navStatusLabel(13), '');
+  assert.equal(navStatusLabel(15), '');
+  assert.equal(navStatusLabel(null), '');
+  assert.equal(navStatusLabel(undefined), '');
+});
+
+test('mmsiFlag: MID prefix bežného lodného MMSI určuje vlajkový štát', () => {
+  // 267 = Slovensko — PREŠOV aj SITNO z overenia Dunaja nesú tento prefix.
+  assert.deepEqual(mmsiFlag('267940000'), { iso2: 'SK', name: 'Slovak Republic' });
+  assert.equal(mmsiFlag('203999999').iso2, 'AT');
+  assert.equal(mmsiFlag('269057000').iso2, 'CH');
+  // Nie-lodné MMSI vlajku zámerne nedostávajú: pobrežné stanice (00…),
+  // SAR letectvo (111…), AtoN (99…), pomocné plavidlá (98…).
+  assert.equal(mmsiFlag('002670001'), null);
+  assert.equal(mmsiFlag('111267001'), null);
+  assert.equal(mmsiFlag('992670001'), null);
+  assert.equal(mmsiFlag('982670001'), null);
+  // Nepridelený MID, zlá dĺžka, smeti.
+  assert.equal(mmsiFlag('199000000'), null);
+  assert.equal(mmsiFlag('12345'), null);
+  assert.equal(mmsiFlag(''), null);
+  assert.equal(mmsiFlag(null), null);
+  assert.equal(mmsiFlag('26794000A'), null);
+  // Číslo namiesto reťazca sa toleruje (MMSI chodí z JSON aj ako number).
+  assert.equal(mmsiFlag(267940000).iso2, 'SK');
 });

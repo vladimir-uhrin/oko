@@ -4,6 +4,8 @@
  * after the vessel cards moved out of their dedicated canvas renderer.
  */
 
+import { MID_TO_FLAG } from './local_data/mids/mids.js';
+
 export const VESSEL_OVERLAY_SOURCE_ID = 'ais-live-vessels';
 /** Existing selector grid size; one ambient winner is retained per cell. */
 export const VESSEL_LABEL_GRID_PX = 118;
@@ -90,6 +92,55 @@ export function normalizeVesselType(type) {
   if (code <= 0) return '';
   if (NUMERIC_TYPE_SPECIALS[code]) return NUMERIC_TYPE_SPECIALS[code];
   return NUMERIC_TYPE_FAMILIES[Math.floor(code / 10)] || 'OTHER';
+}
+
+/**
+ * ITU-R M.1371 navigational status → tactical card label. Reserved codes
+ * (9/10/13) and anything out of range render nothing — noise is not a state.
+ * Code 14 is an ACTIVE SART/MOB/EPIRB distress transmitter — the maritime
+ * sibling of squawk 7700, always worth a line.
+ */
+const NAV_STATUS_LABELS = {
+  0: 'UNDER WAY',
+  1: 'AT ANCHOR',
+  2: 'NOT UNDER CMD',
+  3: 'RESTR MANVR',
+  4: 'CONSTR DRAUGHT',
+  5: 'MOORED',
+  6: 'AGROUND',
+  7: 'FISHING',
+  8: 'UNDER SAIL',
+  11: 'TOWING ASTERN',
+  12: 'PUSHING AHEAD',
+  14: 'SART ACTIVE',
+};
+
+/**
+ * Navigational status code → display label ('' when the code carries no
+ * displayable state).
+ * @param {number|null|undefined} code Sanitized code (aisNavStatusCode).
+ * @returns {string}
+ */
+export function navStatusLabel(code) {
+  return NAV_STATUS_LABELS[code] || '';
+}
+
+/**
+ * Flag state from a regular ship MMSI's MID prefix (first three digits,
+ * 201–775). Non-ship MMSI shapes deliberately return null: coast stations
+ * (00…), SAR aircraft (111…), aids to navigation (99…) and craft associated
+ * with a parent ship (98…) carry their MID elsewhere in the string and are
+ * not vessels flying a flag. Table provenance: src/data/local_data/mids/.
+ * @param {string|number|null|undefined} mmsi MMSI as sent by the feed.
+ * @returns {{iso2:string|null, name:string|null}|null}
+ */
+export function mmsiFlag(mmsi) {
+  const text = String(mmsi ?? '').trim();
+  if (!/^[1-9]\d{8}$/.test(text)) return null;
+  if (text.startsWith('111') || text.startsWith('98') || text.startsWith('99')) return null;
+  const entry = MID_TO_FLAG[Number(text.slice(0, 3))];
+  if (!entry) return null;
+  return { iso2: entry[0], name: entry[1] };
 }
 
 /** AIS ship type → CSS hex hue for the billboard chevron. */

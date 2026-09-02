@@ -14,6 +14,11 @@ const FULL_RECORD = {
   course: 214.0,
   type: 'Cargo',
   destination: 'OAKLAND',
+  navStatus: 1,
+  callSign: 'H3RC',
+  lengthM: 400,
+  draughtM: 14.5,
+  aisClass: 'A',
 };
 
 test('ais analyst record: full record maps every contract field', () => {
@@ -28,8 +33,22 @@ test('ais analyst record: full record maps every contract field', () => {
     courseDeg: 214.0,
     shipType: 'Cargo',
     destination: 'OAKLAND',
-    navStatus: null, // /api/ais-live does not surface NavigationalStatus
+    // Zámerná zmena pinu (balík 2, 2026-09-02): ingest už NavigationalStatus
+    // surfacuje — analytik dostáva hotový štítok, nie surový kód. Vlajka sa
+    // odvodzuje z MID prefixu MMSI (353 = Panama).
+    navStatus: 'AT ANCHOR',
+    flag: 'PA',
+    callSign: 'H3RC',
+    lengthM: 400,
+    draughtM: 14.5,
+    aisClass: 'A',
   });
+});
+
+test('ais analyst record: reserved nav status and non-ship mmsi degrade to null', () => {
+  const r = mapAnalystRecord({ ...FULL_RECORD, mmsi: '002670001', navStatus: 13 });
+  assert.equal(r.navStatus, null, 'rezervovaný kód nemá štítok');
+  assert.equal(r.flag, null, 'pobrežná stanica nie je loď s vlajkou');
 });
 
 test('ais analyst record: nameless vessel falls back to mmsi id', () => {

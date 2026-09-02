@@ -9,7 +9,11 @@ import {
   AIS_HEADING_UNAVAILABLE,
   AIS_SOG_UNAVAILABLE_KN,
   aisCourseDeg,
+  aisDimensionsMeters,
+  aisDraughtMeters,
+  aisEtaLabel,
   aisHeadingDeg,
+  aisNavStatusCode,
   aisPositionUsable,
   aisSpeedKnots,
   mergeAisKinematics,
@@ -103,21 +107,72 @@ test('sticky statické polia: správa bez destinácie/IMO nezmaže uložené', (
   // Chyba č. 7: meno a typ fallback mali, destinácia a IMO nie — a msg 24
   // (StaticDataReport) destináciu nenesie vôbec, takže ju po msg 5 zmazala.
   const previous = { name: 'PREŠOV', type: '70', destination: 'KOMARNO', imo: '9123456' };
-  assert.deepEqual(mergeAisStaticFields({ name: 'PREŠOV', type: '70' }, previous), {
-    name: 'PREŠOV',
-    type: '70',
-    destination: 'KOMARNO',
-    imo: '9123456',
-  });
+  const merged = mergeAisStaticFields({ name: 'PREŠOV', type: '70' }, previous);
+  assert.equal(merged.name, 'PREŠOV');
+  assert.equal(merged.type, '70');
+  assert.equal(merged.destination, 'KOMARNO');
+  assert.equal(merged.imo, '9123456');
 
   // Nová hodnota vyhráva.
   assert.equal(mergeAisStaticFields({ destination: 'BUDAPEST' }, previous).destination, 'BUDAPEST');
 
   // Prázdny reťazec je "neuvedené", nie zmazanie.
   assert.equal(mergeAisStaticFields({ destination: '   ' }, previous).destination, 'KOMARNO');
-  assert.deepEqual(mergeAisStaticFields({}, null), {
+  const empty = mergeAisStaticFields({}, null);
+  assert.deepEqual(empty, {
     name: null, type: null, destination: null, imo: null,
+    callSign: null, lengthM: null, beamM: null, draughtM: null, eta: null,
   });
+});
+
+test('statická identita: callsign, rozmery, ponor a ETA sú rovnako sticky', () => {
+  // Balík 2: msg 24 ReportB nesie CallSign+Dimension ale nie draught/ETA;
+  // msg 19 nesie Dimension ale nie callsign — polia sa striedavo dopĺňajú
+  // a žiadna správa nesmie zmazať to, čo priniesla iná.
+  const previous = { callSign: 'OMLR', lengthM: 110, beamM: 11, draughtM: 2.7, eta: '09-02 14:30' };
+  const afterPartial = mergeAisStaticFields({ lengthM: 110, beamM: 11 }, previous);
+  assert.equal(afterPartial.callSign, 'OMLR');
+  assert.equal(afterPartial.draughtM, 2.7);
+  assert.equal(afterPartial.eta, '09-02 14:30');
+  assert.equal(mergeAisStaticFields({ draughtM: 3.1 }, previous).draughtM, 3.1);
+});
+
+test('navStatus: 15 je "nedefinované", rezervované kódy prechádzajú ako čísla', () => {
+  assert.equal(aisNavStatusCode(0), 0, 'under way je platný stav');
+  assert.equal(aisNavStatusCode(5), 5);
+  assert.equal(aisNavStatusCode(14), 14, 'SART/MOB/EPIRB aktívny — tieseň');
+  assert.equal(aisNavStatusCode(15), null, '15 = not defined (default)');
+  assert.equal(aisNavStatusCode(16), null);
+  assert.equal(aisNavStatusCode(-1), null);
+  assert.equal(aisNavStatusCode(null), null);
+  assert.equal(aisNavStatusCode('3'), 3);
+  assert.equal(aisNavStatusCode(3.7), null, 'stavový kód je celé číslo');
+});
+
+test('rozmery: A+B = dĺžka, C+D = šírka, nuly znamenajú "neuvedené"', () => {
+  assert.deepEqual(aisDimensionsMeters({ A: 80, B: 30, C: 5, D: 6 }), { lengthM: 110, beamM: 11 });
+  // Nulové páry = nedostupné, nie nulová loď.
+  assert.deepEqual(aisDimensionsMeters({ A: 0, B: 0, C: 5, D: 6 }), { lengthM: null, beamM: 11 });
+  assert.deepEqual(aisDimensionsMeters({ A: 0, B: 0, C: 0, D: 0 }), { lengthM: null, beamM: null });
+  assert.deepEqual(aisDimensionsMeters(null), { lengthM: null, beamM: null });
+  assert.deepEqual(aisDimensionsMeters({ A: -1, B: 5, C: 0, D: 0 }), { lengthM: null, beamM: null });
+});
+
+test('ponor: 0 je "neuvedené", reálne hodnoty prechádzajú', () => {
+  assert.equal(aisDraughtMeters(2.7), 2.7);
+  assert.equal(aisDraughtMeters(0), null);
+  assert.equal(aisDraughtMeters(-1), null);
+  assert.equal(aisDraughtMeters(null), null);
+});
+
+test('ETA: mesiac 0 / deň 0 = neuvedené, hodina 24 / minúta 60 = len dátum', () => {
+  assert.equal(aisEtaLabel({ Month: 9, Day: 2, Hour: 14, Minute: 30 }), '09-02 14:30');
+  assert.equal(aisEtaLabel({ Month: 9, Day: 2, Hour: 24, Minute: 60 }), '09-02');
+  assert.equal(aisEtaLabel({ Month: 0, Day: 0, Hour: 24, Minute: 60 }), null);
+  assert.equal(aisEtaLabel({ Month: 13, Day: 2, Hour: 0, Minute: 0 }), null, 'mesiac 13 je nezmysel');
+  assert.equal(aisEtaLabel({ Month: 9, Day: 32, Hour: 0, Minute: 0 }), null);
+  assert.equal(aisEtaLabel(null), null);
+  assert.equal(aisEtaLabel({ Month: 12, Day: 31, Hour: 0, Minute: 0 }), '12-31 00:00', 'polnoc je platný čas');
 });
 
 test('prune sa nespúšťa na každej správe — má vlastné časové okno', () => {

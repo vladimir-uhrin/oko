@@ -16,6 +16,8 @@ import {
 import {
   applyVesselOverlayPolicy,
   accentForVesselType,
+  mmsiFlag,
+  navStatusLabel,
   VESSEL_CARD_FADE_DISTANCE_M,
   VESSEL_LABEL_GRID_PX,
   VESSEL_OVERLAY_SOURCE_ID,
@@ -260,7 +262,14 @@ export function mapAnalystRecord(record) {
     courseDeg: num(record?.course),
     shipType: text(record?.type),
     destination: text(record?.destination),
-    navStatus: null,
+    // Balík 2 (2026-09-02): /api/ais-live už NavigationalStatus surfacuje —
+    // analytik dostáva hotový štítok ('AT ANCHOR'…), nie surový kód.
+    navStatus: text(navStatusLabel(record?.navStatus)),
+    flag: mmsiFlag(record?.mmsi)?.iso2 ?? null,
+    callSign: text(record?.callSign),
+    lengthM: num(record?.lengthM),
+    draughtM: num(record?.draughtM),
+    aisClass: text(record?.aisClass),
   };
 }
 
@@ -1094,6 +1103,14 @@ function updateRecordInPlace(record, next) {
   record.speed = next.speed;
   record.course = next.course;
   record.heading = next.heading;
+  record.callSign = next.callSign;
+  record.lengthM = next.lengthM;
+  record.beamM = next.beamM;
+  record.draughtM = next.draughtM;
+  record.eta = next.eta;
+  record.navStatus = next.navStatus;
+  record.aisClass = next.aisClass;
+  record.posEstimated = next.posEstimated;
   record.lastPositionUtc = next.lastPositionUtc;
   record.lastPositionEpoch = next.lastPositionEpoch;
   record.position = next.position;
@@ -1157,6 +1174,17 @@ function normalizeVessel(row) {
     speed: finiteNumber(row.speed),
     course: finiteNumber(row.course),
     heading: finiteNumber(row.heading),
+    // Balík 2 (dekódované polia, ktoré feed vždy posielal): identita trupu,
+    // prevádzkový stav a kvalita fixu. Všetko additívne — staršie polia
+    // ostávajú nedotknuté.
+    callSign: String(row.call_sign || ''),
+    lengthM: finiteNumber(row.length_m),
+    beamM: finiteNumber(row.beam_m),
+    draughtM: finiteNumber(row.draught_m),
+    eta: String(row.eta || ''),
+    navStatus: finiteNumber(row.nav_status),
+    aisClass: String(row.ais_class || ''),
+    posEstimated: row.pos_estimated === true,
     lastPositionUtc: String(row.last_position_UTC || ''),
     lastPositionEpoch: finiteNumber(row.last_position_epoch),
     position,
@@ -1798,12 +1826,14 @@ function updateSelectedVesselHud(record) {
   const stale = (record.missedRefreshes || 0) > 0 || age.stale;
   const ageSuffix = age.label ? ` (${age.label})` : '';
   el.classList.add('active');
+  const flag = mmsiFlag(record.mmsi);
+  const callSign = String(record.callSign || '').trim();
   el.textContent = [
-    `AIS: ${trimHudValue(record.name, 32)}`,
+    `AIS: ${trimHudValue(record.name, 32)}${flag?.iso2 ? ` (${flag.iso2})` : ''}`,
     // HDG len keď máme skutočný TrueHeading; kurz nad zemou (COG) je CRS —
     // pri triede B a msg-5-only kontaktoch sa doteraz COG vydával za heading.
     `${trimHudValue(record.type || 'VESSEL', 24)}  SPD: ${formatSpeed(record.speed)}  ${Number.isFinite(record.heading) ? 'HDG' : 'CRS'}: ${formatHeading(record.heading ?? record.course)}`,
-    `MMSI: ${record.mmsi || '--'}  ${formatPositionTime(record)}${ageSuffix}${stale ? '  · STALE' : ''}`,
+    `MMSI: ${record.mmsi || '--'}${callSign ? `  C/S ${trimHudValue(callSign, 10)}` : ''}  ${formatPositionTime(record)}${ageSuffix}${stale ? '  · STALE' : ''}`,
   ].join('\n');
 }
 
@@ -1862,8 +1892,20 @@ export function buildSelectedVesselCard(record, nowMs = Date.now()) {
     formatSpeed(record.speed),
     Number.isFinite(direction) ? `${Math.round(direction)}°` : '--°',
   ].join(' · ')];
+  // Identity line (balík 2): flag state from the MMSI MID, navigational
+  // status, hull length, draught — every part optional, the line renders
+  // only when at least one is known. All of it was already on the wire.
+  const identity = [
+    mmsiFlag(record.mmsi)?.iso2,
+    navStatusLabel(record.navStatus),
+    Number.isFinite(record.lengthM) ? `L${Math.round(record.lengthM)}M` : null,
+    Number.isFinite(record.draughtM) ? `T${record.draughtM.toFixed(1)}M` : null,
+  ].filter(Boolean);
+  if (identity.length) details.push(identity.join(' · '));
   const destination = String(record.destination || '').trim();
-  if (destination) details.push(`→ ${trimHudValue(destination, 24)}`);
+  // ETA belongs to the voyage line — without a destination it is noise.
+  const eta = String(record.eta || '').trim();
+  if (destination) details.push(`→ ${trimHudValue(destination, 24)}${eta ? ` · ETA ${eta}` : ''}`);
   // Per-vessel honesty: the feed can be perfectly live while THIS vessel went
   // silent — the server retains rows for 30 min, so without the fix-age check
   // an unreporting vessel looked fresh the whole time (pravidlo 2).
@@ -1933,10 +1975,13 @@ function formatHeading(heading) {
 }
 
 function formatPositionTime(record) {
-  if (!record.lastPositionUtc) return 'POS: LIVE';
+  // Fix-quality honesty: AIS Timestamp 62/63 = dead-reckoned position or
+  // inoperative EPFS — the fix is an ESTIMATE, marked by ≈ (pravidlo 2).
+  const label = record.posEstimated ? 'POS≈' : 'POS:';
+  if (!record.lastPositionUtc) return `${label} LIVE`;
   const date = new Date(record.lastPositionUtc);
-  if (Number.isNaN(date.getTime())) return 'POS: LIVE';
-  return `POS: ${date.toISOString().slice(11, 19)}Z`;
+  if (Number.isNaN(date.getTime())) return `${label} LIVE`;
+  return `${label} ${date.toISOString().slice(11, 19)}Z`;
 }
 
 function setVisible(show) {

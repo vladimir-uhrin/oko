@@ -73,6 +73,7 @@ Static datasets shipped in the repo for an out-of-the-box experience. **None are
 | **TeleGeography Submarine Cable Map** (712 cables + 1,917 landing points) | `telegeography_submarine_cables/` | **CC BY-NC-SA 3.0** | ❌ **NonCommercial — remove for commercial use** | "© TeleGeography — submarinecablemap.com" |
 | **Natural Earth physical regions** (1,046 land + 292 marine named polygons) | `natural_earth/` | **Public domain** | ✅ (no restrictions) | "Made with Natural Earth" (courtesy credit — not legally required) |
 | **DataSF Analysis Neighborhoods** (41 SF neighborhood polygons) | `neighborhoods/` | **PDDL 1.0** (public domain) | ✅ (no restrictions) | "City & County of San Francisco — DataSF" (courtesy — not legally required) |
+| **MIDs — Maritime Identification Digits** (292 MID → flag-state rows; decodes vessel MMSI prefixes to flags, OKO fork) | `mids/` | **Apache-2.0** (github.com/michaeljfazio/MIDs transcription; copy of the license in the folder — the underlying facts are the ITU MID assignment table, which is why an Apache-2.0 transcription is bundled rather than an extract of the copyrighted ITU publication) | ✅ (license + notice retention) | "MID table: michaeljfazio/MIDs (Apache-2.0)" (courtesy — the LICENSE copy in the folder satisfies the legal requirement) |
 
 ### ⚠️ TeleGeography is bundled but NonCommercial
 
