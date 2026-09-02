@@ -1436,6 +1436,22 @@ function _drawOverlay(frame) {
   const bracketWidth = _mode === MODE_DENSE ? 1 : 1.25;
 
   // Brackets — batched by tier color and linear radial-opacity band.
+  // Halo pre-pass (2026-09-02, „nie je dobre vidno štvorček"): normal-blend
+  // témy definujú tmavý under-stroke, ktorý dá zátvorkám kontrast aj na
+  // svetlom podklade (OSM). Celý halo pass beží PRED farebným, aby halo
+  // nikdy neprekreslilo susedovu farebnú zátvorku. Screen-blend témy `halo`
+  // nedefinujú (tmavý ťah je pod screenom no-op) a pass sa celý preskočí.
+  if (_theme.halo) {
+    _ctx.lineWidth = bracketWidth + 2;
+    _ctx.strokeStyle = _theme.halo;
+    for (const bands of bracketPaths.values()) {
+      for (const entry of bands) {
+        if (!entry) continue;
+        _ctx.globalAlpha = fade * entry.alpha * bracketPresentationOpacity;
+        _ctx.stroke(entry.path);
+      }
+    }
+  }
   _ctx.lineWidth = bracketWidth;
   for (const bands of bracketPaths.values()) {
     for (const entry of bands) {

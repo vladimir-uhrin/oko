@@ -161,9 +161,21 @@ export const DETECTION_THEME_MAP = Object.freeze({
     glow: 'rgba(0, 244, 255, 0.4)',
     dim: 'rgba(150, 200, 215, 0.66)',
     cardBorder: 'rgba(255, 255, 255, 0.12)',
-    blend: 'screen',
+    // NORMAL štýl kreslí zátvorky v 'normal' blende s tmavým halo podkladom
+    // (pozri `halo`): pôvodný 'screen' vedel len ZOSVETLIŤ, takže svetlý cyan
+    // na svetlej OSM mape prakticky zmizol — presne dôvod, pre ktorý callouty
+    // už dávno bývajú na normal-blend plátne (viď detection.js _calloutLane).
+    // Zmena na požiadavku používateľa 2026-09-02 („nie je dobre vidno
+    // štvorček"). Tmavé témy (retro/surveillance/thermal) si aditívny screen
+    // nechávajú — tam je celý ich vizuálny zmysel.
+    blend: 'normal',
+    // Tmavý under-stroke pod zátvorkami — kartografické halo; pod screen
+    // blendom by bol no-op, preto ho definuje len normal-blend téma.
+    halo: 'rgba(3, 20, 28, 0.65)',
     filter: 'contrast(1.05) saturate(1.05)',
-    scanline: 0.05,
+    // CRT scanline je aditívna dekorácia — pod normal blendom by pruhovala
+    // svetlú mapu tmavými linkami; NORMAL štýl beží čisto.
+    scanline: 0,
     tiers: {
       civil: '#22e0ff', military: '#ffb347', sea: '#3fe0c8', space: '#bda4ff', vehicle: '#8fa6b4',
       veh_jam: '#e05252', veh_slow: '#f0b23e', veh_free: '#2ecc71', veh_nodata: '#c9c9c9',

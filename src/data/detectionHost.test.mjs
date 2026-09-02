@@ -368,11 +368,15 @@ test('detection lifecycle re-hosts unchanged painters behind the sole host liste
     const mainCanvas = env.document.getElementById('world-overlay-canvas');
     assert.ok(surface);
     // The surface must sit in the Cesium container (no stacking context
-    // between it and the WebGL canvas) or its `screen` blend is discarded;
+    // between it and the WebGL canvas) or its blend mode is discarded;
     // ordering under the card canvas is carried by z-index, not siblinghood.
     assert.equal(surface.parentElement, env.viewer.container);
     assert.deepEqual(root.children, [mainCanvas]);
-    assert.equal(surface.style.mixBlendMode, 'screen');
+    // Zámerná zmena pinu (2026-09-02, „nie je dobre vidno štvorček"): NORMAL
+    // štýl kreslí v 'normal' blende s tmavým halo — 'screen' vedel len
+    // zosvetliť a zátvorky na svetlej OSM mape mizli. Tmavé témy si screen
+    // nechávajú (pin nižšie).
+    assert.equal(surface.style.mixBlendMode, 'normal');
     assert.equal(
       surface.style.filter,
       'contrast(1.05) saturate(1.05) drop-shadow(0 0 3px rgba(0, 244, 255, 0.4))',
@@ -466,7 +470,9 @@ test('detection lifecycle re-hosts unchanged painters behind the sole host liste
 
     setMode('OFF');
     setDetectionStyle('normal');
-    assert.equal(surface.style.mixBlendMode, 'screen');
+    // Zámerná zmena pinu (2026-09-02): návrat k NORMAL štýlu = normal blend
+    // (halo kontrast na svetlom podklade), nie screen.
+    assert.equal(surface.style.mixBlendMode, 'normal');
     assert.equal(
       surface.style.filter,
       'contrast(1.05) saturate(1.05) drop-shadow(0 0 3px rgba(0, 244, 255, 0.4))',
