@@ -271,7 +271,11 @@ let _lastModelCapWarnMs = 0; // throttle the "more planes in view than the cap" 
 let _planeModelLoaded = false;
 /** @type {Cesium.Model|null} retained preload that keeps the glTF cache warm */
 let _preloadModel = null;
-const CYAN_TRANSPARENT = Cesium.Color.CYAN.withAlpha(0);
+// Sledovany stroj je BIELY (poziadavka 2026-09-02: "nema byt azurovy") —
+// silueta s obrysom nesie kontrast sama, sledovanost ukazuje cerveny ram
+// + karta. Transparentny variant plati, kym vizual vlastni 3D model.
+const TRACKED_TINT = Cesium.Color.WHITE;
+const TRACKED_TINT_TRANSPARENT = Cesium.Color.WHITE.withAlpha(0);
 const _scratchModelHpr = new Cesium.HeadingPitchRoll(0, 0, 0);
 const _scratchModelMtx = new Cesium.Matrix4();
 const _scratchModelBS = new Cesium.BoundingSphere(new Cesium.Cartesian3(), 1.0); // frustum-visibility test
@@ -579,7 +583,8 @@ function _applyCockpitState(detail = {}) {
 // ---------------------------------------------------------------------------
 
 /** @constant {string} Civilian trail hue (PRD F4, pinned). */
-const TRAIL_COLOR = '#00d4ff';
+// Jemná tlmená stopa (2026-09-02): oceľovomodrá a tenká — nie azúrová.
+const TRAIL_COLOR = '#7c99a6';
 /** @constant {number} Combined cap on trail vertices (backfill + live accumulation). */
 const TRAIL_MAX_POINTS = 400;
 /** @type {{setPositions: Function, clear: Function, destroy: Function}|null} Shared fading-trail renderer */
@@ -1510,7 +1515,7 @@ function _resetTrackedDisplay() {
 
 /** Model tint, mirroring the billboard color rules. */
 function _modelColor(icao24) {
-  if (icao24 === _trackedIcao) return Cesium.Color.CYAN;
+  if (icao24 === _trackedIcao) return TRACKED_TINT;
   return isMilitaryIcao(icao24) ? MIL_TINT : Cesium.Color.WHITE;
 }
 
@@ -2556,7 +2561,7 @@ function _updateTrackedModel() {
       asynchronous: false,
       minimumPixelSize: TRACKED_MODEL_MIN_PX,
       scale: trackedSpec.scale,
-      color: _irBoost ? Cesium.Color.WHITE : Cesium.Color.CYAN,
+      color: Cesium.Color.WHITE, // tracked = biely v oboch rezimoch (2026-09-02)
       colorBlendMode: Cesium.ColorBlendMode.MIX,
       // The tracked aircraft uses the same dominant light tint as the fleet;
       // IR boost removes the remaining diffuse hint with flat UNLIT white.
@@ -2994,7 +2999,7 @@ function _startTrail(icao24) {
     }
   }
   if (!_trail && _viewer) {
-    _trail = createTrail(_viewer, { color: TRAIL_COLOR, width: 2.5 });
+    _trail = createTrail(_viewer, { color: TRAIL_COLOR, width: 1.3 });
   }
   _trail?.setVisible(!_cockpitContactMode);
   // Live head segment: last fix → current dead-reckoned icon, updated every frame via
@@ -3033,11 +3038,11 @@ function _startTrail(icao24) {
           if (!from) return [];
           return [from, Cesium.Cartesian3.clone(head)];
         }, false),
-        width: 2.5,
-        material: Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.9),
+        width: 1.3,
+        material: Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.7),
         // Round 4: the head must never vanish into the mesh either (dimmed
         // when occluded so depth still reads).
-        depthFailMaterial: Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.45),
+        depthFailMaterial: Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.3),
         arcType: Cesium.ArcType.GEODESIC, // round 8: consistent with the trail body (no chords)
       },
     });
@@ -3555,7 +3560,7 @@ export function _updateTrackedModelForTest() {
 
 /** Evaluate the production tracked-billboard handoff colour for focused tests. */
 export function _trackedBillboardColorForTest() {
-  return _modelOwnsVisual(_trackedIcao) ? CYAN_TRANSPARENT : Cesium.Color.CYAN;
+  return _modelOwnsVisual(_trackedIcao) ? TRACKED_TINT_TRANSPARENT : TRACKED_TINT;
 }
 
 /** Drive the exact fleet billboard-to-model handoff used by `_fleetTick`. */
@@ -3672,7 +3677,7 @@ function _trackFlight(icao24, { origin = 'programmatic' } = {}) {
       // Solid cyan when the billboard is the visual (zoomed out, 3D off, or model still loading);
       // transparent once the STANDALONE tracked model is actually up (ready + shown).
       color: new Cesium.CallbackProperty(() => (
-        _modelOwnsVisual(_trackedIcao) ? CYAN_TRANSPARENT : Cesium.Color.CYAN
+        _modelOwnsVisual(_trackedIcao) ? TRACKED_TINT_TRANSPARENT : TRACKED_TINT
       ), false),
       sizeInMeters: false,
       scaleByDistance: new Cesium.NearFarScalar(1000, 3.0, 8000000, 0.5),
@@ -4602,7 +4607,7 @@ const flightsLayer = {
             // Screen-projected rotation lands on the next fleet tick.
             rotation: 0,
             alignedAxis: Cesium.Cartesian3.ZERO,
-            color: isTracked ? Cesium.Color.CYAN : _fleetBillboardColor(icao24),
+            color: isTracked ? TRACKED_TINT : _fleetBillboardColor(icao24),
             sizeInMeters: false,
             scaleByDistance: _normalBillboardScaleByDistance(),
             // Grounded/near-surface planes sit at/below the photoreal tile
