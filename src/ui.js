@@ -2667,6 +2667,9 @@ export class StyleManager {
     this._initHUDToggle();
     this._initModels3dToggle();
     this._applyGlobalPostDefaults();
+    // Až PO factory defaults: explicitná uložená voľba detekcie ich má
+    // na čistom boote prebiť, nie nimi byť prepísaná.
+    this._applyPersistedDetectionDefault();
     this._initOrbit();
     this._initRecordingOverlay();
     this._startAnimationLoop();
@@ -3649,6 +3652,24 @@ export class StyleManager {
     setDetectionModeByLabel(modeLabel);
     this._syncDetectionUiFromEngine();
     this._syncShareState();
+  }
+
+  /**
+   * Perzistovaná voľba detekcie na ČISTOM boote (2026-09-03, „nevidno zas
+   * zameriavač"). Factory default je ON (GLOBAL_POST_DEFAULTS aplikuje
+   * DENSE@75), takže bez uloženej voľby sa tu nerobí nič — routine LEN
+   * obnoví poslednú EXPLICITNÚ voľbu z klik-handlera DETEKCIA tlačidla,
+   * preto musí bežať AŽ PO _applyGlobalPostDefaults (skorší beh factory
+   * default prepísal). Boot cez share-hash sa nedotýka — dm= token má
+   * ostať deterministický pre príjemcu odkazu.
+   * @returns {void}
+   */
+  _applyPersistedDetectionDefault() {
+    if (this._initialShareState) return;
+    let stored = null;
+    try { stored = localStorage.getItem('oko-detection-mode'); } catch { /* súkromný režim */ }
+    if (!/^[A-Z]{2,12}$/.test(stored || '')) return;
+    this._setDetectionMode(stored);
   }
 
   /**
@@ -10007,6 +10028,9 @@ export class StyleManager {
       this.shareLinkManager?.claimRestoreLane?.('visual');
       this._detectionUserOverridden = true;
       cycleDetectionMode();
+      // Explicitná voľba prežíva sessiony — ďalší čistý boot ju obnoví
+      // (_applyPersistedDetectionDefault), nech zameriavače nemiznú.
+      try { localStorage.setItem('oko-detection-mode', getDetectionMode()); } catch { /* súkromný režim */ }
       this._syncShareState();
     });
     this._cockpitDisplayToggleBtn?.addEventListener('click', () => {

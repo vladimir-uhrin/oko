@@ -885,3 +885,24 @@ test('the backdrop feather reaches the canvas as a lighter plate against sky', (
     env.cleanup();
   }
 });
+
+test('čistý boot má detekciu ZAPNUTÚ a voľba používateľa prežíva sessiony (ui.js pin)', async () => {
+  // 2026-09-03: „nevidno zas zameriavač" — dvakrát nahlásené. Factory default
+  // ON žije v GLOBAL_POST_DEFAULTS (DENSE@75, direktíva 2026-08-22); pin drží
+  // štyri nosné časti perzistencie voľby v ui.js:
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
+  // (1) factory default detekcie je zapnutý (nie OFF)…
+  assert.match(source, /detectionMode: MILITARY_DETECTION_PRESET\.mode\.toUpperCase\(\)/);
+  // (2) …čistý boot obnoví uloženú explicitnú voľbu AŽ PO factory defaults
+  // (skorší beh ju nechal factory defaultom prepísať)…
+  assert.match(
+    source,
+    /_applyGlobalPostDefaults\(\);[\s\S]{0,240}?_applyPersistedDetectionDefault\(\)/,
+  );
+  assert.match(source, /oko-detection-mode/);
+  // (3) …share-hash boot sa nemení (deterministické dm= pre príjemcu)…
+  assert.match(source, /if \(this\._initialShareState\) return;/);
+  // (4) …a klik na prepínač voľbu perzistuje.
+  assert.match(source, /setItem\('oko-detection-mode', getDetectionMode\(\)\)/);
+});
