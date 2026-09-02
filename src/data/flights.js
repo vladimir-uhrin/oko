@@ -33,6 +33,7 @@ import {
   isTrackingSelectionGesture,
 } from './trackingClickGesture.js';
 import { createTrail } from './trailRenderer.js';
+import { createTrackedRouteLine, routeLinePositionsDeg } from './routeLine.js';
 import { isExplicitLayerStateOrigin } from './layerState.js';
 import {
   screenProjectedRotation,
@@ -3212,6 +3213,9 @@ function _clearTracking(skipViewerUntrack = false, {
     _viewer.entities.remove(_trackedEntity);
     _trackedEntity = null;
   }
+  // Čiara plánu patrí k práve pustenému sledovaniu — vyprázdniť (entity
+  // ostávajú na ďalší track, destroy až s vrstvou).
+  _trackedRouteLine?.clear();
   _releaseTrackedModel();
   _resetTrackedSelectionState(); // the zoom band + load-failure budget belong to the selection we just dropped
   _trackedIcao = null;
@@ -3348,6 +3352,41 @@ function _updateTrackedLabelModel(icao24) {
   // The readout and the context slot describe the same contact — refresh them
   // together so voice never narrates a fix the card has already replaced.
   refreshTrackedSubjectContext(_contextSubjectMetadata(icao24));
+  // Trasová čiara žije z tých istých obnov ako karta (poll + enrichment),
+  // takže sa objaví presne vo chvíli, keď karta získa riadok trasy.
+  _syncTrackedRouteLine(icao24);
+}
+
+/** @type {ReturnType<typeof createTrackedRouteLine>|null} Čiara plánu sledovaného letu. */
+let _trackedRouteLine = null;
+
+/**
+ * Prekresli (alebo zruš) trasovú čiaru sledovaného letu. Gate je ZDIEĽANÝ
+ * s kartou (_routeIsPlausible): implauzibilná adsbdb trasa sa nekreslí —
+ * čiara a karta si nikdy neprotirečia. Celá čiara letí v render výške
+ * lietadla (plán, nie výškový profil — pozri routeLine.js).
+ * @param {string} icao24 Sledovaný kontakt.
+ */
+function _syncTrackedRouteLine(icao24) {
+  const info = _flightData.get(icao24);
+  const plausible = info?.route && _routeIsPlausible(icao24, info.route);
+  const geometry = plausible
+    ? routeLinePositionsDeg({
+      origin: info.route.origin,
+      destination: info.route.destination,
+      lat: info.rawLat,
+      lon: info.rawLon,
+      altitudeM: info.renderAltitudeM,
+    })
+    : null;
+  if (!geometry) {
+    _trackedRouteLine?.clear();
+    return;
+  }
+  if (!_trackedRouteLine && _viewer) {
+    _trackedRouteLine = createTrackedRouteLine(_viewer);
+  }
+  _trackedRouteLine?.setSegments(geometry);
 }
 
 /** Re-image the tracked entity's billboard from the current class/conversion. */
@@ -3977,6 +4016,9 @@ const flightsLayer = {
     _trackedIcao = null;
     _resetTrackedSelectionState();
     _trackedEntity = null;
+    // Nová session môže niesť iný viewer — starý handle čiary zahodiť celý.
+    _trackedRouteLine?.destroy();
+    _trackedRouteLine = null;
     _cockpitSubjectId = null;
     _cockpitContactMode = document.body.classList.contains('cockpit-mode');
     _cockpitNearContacts = new Set();
