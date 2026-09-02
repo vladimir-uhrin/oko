@@ -271,7 +271,11 @@ export function strobeOn(nowMs) {
 // 20px fleet billboarde. Biele — tint pipeline ho zafarbí spolu s trupom
 // (cyan pri sledovanom, amber pri vojenskom), čo pôsobí prirodzene.
 // data-strobe značka drží testovateľnosť (base64 sa dá dekódovať).
-const STROBE_LIGHT = '<g data-strobe="1"><circle cx="0" cy="-4" r="8" fill="white" fill-opacity="0.35"/><circle cx="0" cy="-4" r="4" fill="white"/></g>';
+// QA nález (2026-09-03, porovnávacia tabuľa): svetlo LEŽIACE na bielom trupe
+// je neviditeľné — halo musí presahovať cez obrys siluety, inak niet čo
+// bliknúť. 12u halo / 6u jadro ≈ 2,5/1,2 px na 20px fleet billboarde:
+// stále jemné, ale záblesk vidno ako krátke rozžiarenie okolo trupu.
+const STROBE_LIGHT = '<g data-strobe="1"><circle cx="0" cy="-4" r="12" fill="white" fill-opacity="0.4"/><circle cx="0" cy="-4" r="6" fill="white" fill-opacity="0.95"/></g>';
 
 /** Data URI for a class silhouette (lazily built, cached per kind+size+strobe).
  *  Default size serves the fleet; pass `aircraftIcon(kind, TRACKED_ICON_PX)`
