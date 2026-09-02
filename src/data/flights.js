@@ -44,7 +44,7 @@ import {
 import { stickyText, stickyNumber } from './aircraftMeta.js';
 import { classifyAircraft, CLASS_SCALE_2D, CLASS_SCALE_3D, CLASS_MODEL_URL, CLASS_MODEL_REAL } from './aircraftClass.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
-import { aircraftIcon, TRACKED_ICON_PX } from './aircraftIcons.js';
+import { aircraftIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
 import {
   isTr3b, tr3bAircraftClass, tr3bConvertedIds, tr3bIconKind, tr3bTypeLabel,
 } from './tr3bRegistry.js';
@@ -481,6 +481,8 @@ function _cockpitBillboardScaleByDistance() {
  *  the scene. Routing EVERY `aircraftIcon()` call through this is what makes a
  *  conversion survive the poll reconciler and the two-tier raster swap. */
 const _iconKind = (icao24, klass) => tr3bIconKind(icao24, klass, { hot: _irBoost });
+/** Posledna zapisana strobo faza flotily (prechodova detekcia v _fleetTick). */
+let _lastStrobeOn = false;
 
 /** Apply the current normal/cockpit visual contract to one owned fleet billboard. */
 function _applyFleetBillboardPresentation(icao24, bb) {
@@ -2647,6 +2649,19 @@ function _fleetTick() {
 
   _drainIrReloadQueue(); // bounded per-tick slice of any pending boost-flip reload
   if (_cockpitContactMode) _refreshCockpitNearContacts();
+
+  // Antikolízne strobo (2026-09-03): na prechode fázy prehoď textúru celej
+  // flotily (obe URI sú v atlas cache — swap je lacný, 2 prechody za periódu).
+  // V cockpit pip režime sa nepreblikáva (kontakty sú bodky, nie siluety);
+  // IR boost má vlastnú tepelnú reč — strobo by v nej pôsobilo ako artefakt.
+  const strobo = !_cockpitContactMode && !_irBoost && strobeOn(Date.now());
+  if (strobo !== _lastStrobeOn) {
+    _lastStrobeOn = strobo;
+    for (const [icao24, bb] of _billboards) {
+      bb.image = aircraftIcon(_iconKind(icao24, _flightData.get(icao24)?.klass), undefined, strobo);
+    }
+    _syncTrackedBillboardImage();
+  }
   const poseSig = cameraPoseSignature(camera);
   // Only the nearby Cockpit silhouettes need projected course; far dots are
   // rotation-free. The per-contact gate below keeps the pip path cheap.
@@ -3395,6 +3410,7 @@ function _syncTrackedBillboardImage() {
   _trackedEntity.billboard.image = aircraftIcon(
     _iconKind(_trackedIcao, _flightData.get(_trackedIcao)?.klass),
     TRACKED_ICON_PX,
+    _lastStrobeOn, // strobo fáza flotily platí aj pre sledovaný glyf
   );
 }
 

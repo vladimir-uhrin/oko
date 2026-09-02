@@ -253,16 +253,38 @@ const FLEET_RASTER_PX = 64;
  *  it stays crisp at its biggest on-screen sizes. */
 const TRACKED_RASTER_PX = 192;
 
-/** Data URI for a class silhouette (lazily built, cached per kind+size).
+// ── Antikolízne strobo (2026-09-03, požiadavka používateľa: „blikajúce
+//    svetlo ako majú lietadlá normálne, ale veľmi jemné, 1–2 px").
+//    Fáza je z WALL-CLOCKU, nie z frame countera (lekcia zo scanlines:
+//    dekorácia nesmie držať scénu v continuous režime — flights ho drží
+//    tak či tak, kým je vrstva zapnutá, takže záblesk nič navyše nestojí).
+//    Krátky flash / dlhá tma ≈ reálny strobe duty cycle.
+export const STROBE_PERIOD_MS = 1200;
+export const STROBE_FLASH_MS = 130;
+/** Je strobo v zapnutej fáze? Čistá funkcia — jedna fáza pre celú flotilu
+ *  (reálne stroby nie sú synchrónne, ale per-plane fáza by znamenala
+ *  per-plane textúry; jemný jednotný tep číta lepšie než chaos). */
+export function strobeOn(nowMs) {
+  return (nowMs % STROBE_PERIOD_MS) < STROBE_FLASH_MS;
+}
+// Svetlo na chrbte trupu: v 96-boxe 8u halo + 4u jadro ≈ 1–2 px na
+// 20px fleet billboarde. Biele — tint pipeline ho zafarbí spolu s trupom
+// (cyan pri sledovanom, amber pri vojenskom), čo pôsobí prirodzene.
+// data-strobe značka drží testovateľnosť (base64 sa dá dekódovať).
+const STROBE_LIGHT = '<g data-strobe="1"><circle cx="0" cy="-4" r="8" fill="white" fill-opacity="0.35"/><circle cx="0" cy="-4" r="4" fill="white"/></g>';
+
+/** Data URI for a class silhouette (lazily built, cached per kind+size+strobe).
  *  Default size serves the fleet; pass `aircraftIcon(kind, TRACKED_ICON_PX)`
- *  (re-exported below) for the tracked billboard. */
+ *  (re-exported below) for the tracked billboard. The third argument selects
+ *  the strobe-lit frame; TR-3B keeps its own corner lights (no strobe). */
 export const TRACKED_ICON_PX = TRACKED_RASTER_PX;
-export function aircraftIcon(kind, px = FLEET_RASTER_PX) {
+export function aircraftIcon(kind, px = FLEET_RASTER_PX, strobe = false) {
   const k = BODIES[kind] ? kind : 'airliner';
-  const key = `${k}@${px}`;
+  const lit = strobe === true && !k.startsWith('tr3b');
+  const key = `${k}@${px}${lit ? '!s' : ''}`;
   let uri = _iconCache.get(key);
   if (!uri) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g transform="translate(${C},${C})">${BODIES[k]}</g></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g transform="translate(${C},${C})">${BODIES[k]}${lit ? STROBE_LIGHT : ''}</g></svg>`;
     uri = 'data:image/svg+xml;base64,' + _b64(svg);
     _iconCache.set(key, uri);
   }

@@ -18,7 +18,7 @@ import {
 import { stickyText, stickyNumber } from './aircraftMeta.js';
 import { classifyAircraft, CLASS_SCALE_2D, CLASS_SCALE_3D, CLASS_MODEL_REAL } from './aircraftClass.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
-import { aircraftIcon, TRACKED_ICON_PX } from './aircraftIcons.js';
+import { aircraftIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
 import {
   isTr3b, tr3bAircraftClass, tr3bConvertedIds, tr3bIconKind, tr3bTypeLabel,
 } from './tr3bRegistry.js';
@@ -745,6 +745,8 @@ function _updateTrackedLabelModel(icao24) {
  *  the scene. Routing EVERY `aircraftIcon()` call through this is what makes a
  *  conversion survive the poll reconciler and the two-tier raster swap. */
 const _iconKind = (icao24, klass) => tr3bIconKind(icao24, klass, { hot: _irBoost });
+/** Posledna zapisana strobo faza flotily (prechodova detekcia v _fleetTick). */
+let _lastStrobeOn = false;
 
 /** Re-image the tracked entity's billboard from the current class/conversion. */
 function _syncTrackedBillboardImage() {
@@ -752,6 +754,7 @@ function _syncTrackedBillboardImage() {
   _trackedEntity.billboard.image = aircraftIcon(
     _iconKind(_trackedIcao, _flightData.get(_trackedIcao)?.klass),
     TRACKED_ICON_PX,
+    _lastStrobeOn, // strobo faza flotily plati aj pre sledovany glyf
   );
 }
 
@@ -1824,6 +1827,17 @@ function _fleetTick() {
 
   _drainIrReloadQueue(); // bounded per-tick slice of any pending boost-flip reload
   if (_cockpitContactMode) _refreshCockpitNearContacts();
+
+  // Antikolizne strobo — zrkadlo flights.js (2026-09-03): prechod fazy
+  // prehodi texturu flotily; cockpit pip rezim a IR boost sa nepreblikavaju.
+  const strobo = !_cockpitContactMode && !_irBoost && strobeOn(Date.now());
+  if (strobo !== _lastStrobeOn) {
+    _lastStrobeOn = strobo;
+    for (const [icao24, bb] of _billboards) {
+      bb.image = aircraftIcon(_iconKind(icao24, _flightData.get(icao24)?.klass), bb._gevIconLarge ? TRACKED_ICON_PX : undefined, strobo);
+    }
+    _syncTrackedBillboardImage();
+  }
   const poseSig = cameraPoseSignature(camera);
   // Only nearby Cockpit silhouettes need projected course; far dots remain
   // rotation-free through the per-contact gate below.
