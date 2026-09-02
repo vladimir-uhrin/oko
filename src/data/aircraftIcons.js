@@ -47,6 +47,12 @@ const STROKE_BOLD = 'stroke="rgba(8,15,20,0.85)" stroke-width="7" paint-order="s
 // Softer white for translucent detail (prop discs, rotor disc) — still white so
 // the tint multiplies cleanly; only the alpha differs.
 const DISC = 'fill="white" fill-opacity="0.5"';
+// Detailné siluety (2026-09-02, výber používateľa): tmavé AKCENTY — kokpitové
+// zasklenie, sacie otvory motorov, dýzy. Fixná tmavá ako obrys (nefarbí sa
+// tintom), pri 20px sa gracefully stratia, pri near-zoome (~60px cez
+// NearFarScalar) dodajú kresbe hĺbku.
+const GLASS = 'fill="rgba(8,15,20,0.58)"';
+const INTAKE = 'fill="rgba(8,15,20,0.5)"';
 
 // Each body is drawn in a centred coordinate frame (origin 0,0 = glyph centre),
 // nose toward -Y. Numbers are in the 96-unit space (half-extent up to ~45).
@@ -62,7 +68,12 @@ const BODIES = {
              L -4.6,-26 C -4.6,-34 -3.8,-40 0,-42 Z" fill="white" ${STROKE}/>
     <path d="M-15.5,-1.5 l3,7.6 4,-1.4 -1.5,-8.4 Z" fill="white"/>
     <path d="M15.5,-1.5 l-3,7.6 -4,-1.4 1.5,-8.4 Z" fill="white"/>
-    <path d="M-1.6,33.5 L 1.6,33.5 L 1.6,40 L -1.6,40 Z" fill="white"/>`,
+    <path d="M-1.6,33.5 L 1.6,33.5 L 1.6,40 L -1.6,40 Z" fill="white"/>
+    <path d="M0,-39.5 C 2.2,-38.6 3.2,-37 3.6,-34.4 L -3.6,-34.4 C -3.2,-37 -2.2,-38.6 0,-39.5 Z" ${GLASS}/>
+    <path d="M-16.4,-2.6 l 4.6,-1.2 0.5,2.4 -4.6,1.1 Z" ${INTAKE}/>
+    <path d="M16.4,-2.6 l -4.6,-1.2 -0.5,2.4 4.6,1.1 Z" ${INTAKE}/>
+    <path d="M32.2,4.4 L 34.8,-1.6 L 36.2,-0.8 L 34.2,5 Z" fill="white"/>
+    <path d="M-32.2,4.4 L -34.8,-1.6 L -36.2,-0.8 L -34.2,5 Z" fill="white"/>`,
 
   // ── Widebody: same swept jet but noticeably BIGGER span + fatter fuselage,
   //    twin engines set further out. Reads as a heavier airliner.
@@ -75,7 +86,13 @@ const BODIES = {
              L -6.8,-27 C -6.8,-36 -5.6,-43 0,-45 Z" fill="white" ${STROKE}/>
     <path d="M-19,2 l3.6,9 4.8,-1.7 -1.8,-10 Z" fill="white"/>
     <path d="M19,2 l-3.6,9 -4.8,-1.7 1.8,-10 Z" fill="white"/>
-    <path d="M-2,35.5 L 2,35.5 L 2,42.5 L -2,42.5 Z" fill="white"/>`,
+    <path d="M-2,35.5 L 2,35.5 L 2,42.5 L -2,42.5 Z" fill="white"/>
+    <path d="M0,-42.2 C 3,-41 4.4,-39 4.9,-36 L -4.9,-36 C -4.4,-39 -3,-41 0,-42.2 Z" ${GLASS}/>
+    <path d="M-20.2,1.4 l 5.6,-1.5 0.6,2.8 -5.6,1.4 Z" ${INTAKE}/>
+    <path d="M20.2,1.4 l -5.6,-1.5 -0.6,2.8 5.6,1.4 Z" ${INTAKE}/>
+    <ellipse cx="0" cy="6" rx="4.4" ry="10" fill="white" fill-opacity="0.4"/>
+    <path d="M39.4,13.6 L 42.6,7.2 L 44,8.2 L 41.6,14.4 Z" fill="white"/>
+    <path d="M-39.4,13.6 L -42.6,7.2 L -44,8.2 L -41.6,14.4 Z" fill="white"/>`,
 
   // ── Quadjet: the widest swept jet, with FOUR bold underwing engine pods (two
   //    per wing) that hang well below the trailing edge — the wing reads as a
@@ -89,7 +106,12 @@ const BODIES = {
     <rect x="-31" y="9" width="7" height="12" rx="2" fill="white"/>
     <rect x="-17" y="4.5" width="7" height="12" rx="2" fill="white"/>
     <rect x="10" y="4.5" width="7" height="12" rx="2" fill="white"/>
-    <rect x="24" y="9" width="7" height="12" rx="2" fill="white"/>`,
+    <rect x="24" y="9" width="7" height="12" rx="2" fill="white"/>
+    <path d="M0,-42 C 3.4,-40.6 5,-38.4 5.6,-35 L -5.6,-35 C -5,-38.4 -3.4,-40.6 0,-42 Z" ${GLASS}/>
+    <rect x="-30.4" y="9.6" width="5.8" height="2.2" rx="1" ${INTAKE}/>
+    <rect x="-16.4" y="5.1" width="5.8" height="2.2" rx="1" ${INTAKE}/>
+    <rect x="10.6" y="5.1" width="5.8" height="2.2" rx="1" ${INTAKE}/>
+    <rect x="24.6" y="9.6" width="5.8" height="2.2" rx="1" ${INTAKE}/>`,
 
   // ── Turboprop: bold STRAIGHT (unswept) wings — thicker chord than a jet — two
   //    fat nacelles that jut ahead of the leading edge, each capped by a solid
@@ -105,7 +127,10 @@ const BODIES = {
     <circle cx="17.5" cy="-16.5" r="7.5" fill="white" fill-opacity="0.5"/>
     <path d="M-19.5,-19 h4 v5 h-4 Z" fill="white"/>
     <path d="M15.5,-19 h4 v5 h-4 Z" fill="white"/>
-    <path d="M-1.7,31.5 L 1.7,31.5 L 1.7,38.5 L -1.7,38.5 Z" fill="white"/>`,
+    <path d="M-1.7,31.5 L 1.7,31.5 L 1.7,38.5 L -1.7,38.5 Z" fill="white"/>
+    <path d="M0,-37.6 C 2,-36.8 2.9,-35.4 3.2,-33 L -3.2,-33 C -2.9,-35.4 -2,-36.8 0,-37.6 Z" ${GLASS}/>
+    <circle cx="-17.5" cy="-21.4" r="1.8" ${INTAKE}/>
+    <circle cx="17.5" cy="-21.4" r="1.8" ${INTAKE}/>`,
 
   // ── Light GA: small and CHUNKY — short, DEEP-chord straight wings and a fat
   //    stubby fuselage make it read as a solid little block (not a thin cross),
@@ -121,7 +146,9 @@ const BODIES = {
              L -27,6 L -27,-9 L -5.2,-9
              L -5.2,-13
              C -5.2,-20 -4,-25 0,-27 Z" fill="white" ${STROKE}/>
-    <ellipse cx="0" cy="-29" rx="12" ry="3.8" ${DISC}/>`,
+    <ellipse cx="0" cy="-29" rx="12" ry="3.8" ${DISC}/>
+    <path d="M0,-22.5 C 2.6,-21.7 3.6,-20 3.9,-17 L -3.9,-17 C -3.6,-20 -2.6,-21.7 0,-22.5 Z" ${GLASS}/>
+    <rect x="-1.4" y="-31.5" width="2.8" height="4.2" rx="1.2" ${INTAKE}/>`,
 
   // ── Glider: VERY long, high-aspect TAPERED wings (fat root → thin tips) on a
   //    slim fuselage with a T-tail. The extreme span is the whole identity — it
@@ -132,7 +159,8 @@ const BODIES = {
              L 2.2,32 L -2.2,32 L -2.9,-6
              L -45,-3.5 L -45,-10.5 L -3,-14
              L -3,-25 C -3,-29 -2.4,-33 0,-35 Z" fill="white" ${STROKE_BOLD}/>
-    <rect x="-10.5" y="32.5" width="21" height="5" rx="1.5" fill="white" ${STROKE_BOLD}/>`,
+    <rect x="-10.5" y="32.5" width="21" height="5" rx="1.5" fill="white" ${STROKE_BOLD}/>
+    <ellipse cx="0" cy="-24.5" rx="2.1" ry="5" ${GLASS}/>`,
 
   // ── Helicopter: a SOLID translucent main-rotor disc (survives downscale as an
   //    obvious circle, unlike a thin ring) with a bold two-blade cross, a
@@ -149,7 +177,9 @@ const BODIES = {
     <path d="M-2.6,8 L 2.6,8 L 1.8,32 L -1.8,32 Z" fill="white" ${STROKE}/>
     <path d="M-8,27 L 8,27 L 8,30.6 L -8,30.6 Z" fill="white"/>
     <circle cx="5.6" cy="35" r="6" fill="white" fill-opacity="0.6"/>
-    <circle cx="5.6" cy="35" r="2.1" fill="white"/>`,
+    <circle cx="5.6" cy="35" r="2.1" fill="white"/>
+    <path d="M0,-20.5 C 5.4,-19.2 7.6,-15.6 8,-11.5 L -8,-11.5 C -7.6,-15.6 -5.4,-19.2 0,-20.5 Z" ${GLASS}/>
+    <circle cx="0" cy="-6" r="2.4" ${INTAKE}/>`,
 
   // ── Fast jet: sharp delta/cropped-delta with a pointed nose, LERX root
   //    blend, and twin tail fins. Aggressive, all-wing.
@@ -163,7 +193,10 @@ const BODIES = {
              L -6.5,44 L -6.5,42 L -3,38
              L -3,31 L -8,34 L -8,30 L -6,16
              L -27,26 L -27,20 L -5,-8
-             C -4.6,-16 -4,-24 -3.5,-30 Z" fill="white" ${STROKE}/>`,
+             C -4.6,-16 -4,-24 -3.5,-30 Z" fill="white" ${STROKE}/>
+    <path d="M0,-33 C 1.9,-31.6 2.6,-28.6 2.7,-24.6 L -2.7,-24.6 C -2.6,-28.6 -1.9,-31.6 0,-33 Z" ${GLASS}/>
+    <rect x="-4.6" y="37.4" width="3.4" height="4.4" rx="1" ${INTAKE}/>
+    <rect x="1.2" y="37.4" width="3.4" height="4.4" rx="1" ${INTAKE}/>`,
   // 2026-08-15 Hangar additions: two NEW classes shipped with the real-model
   // fleet (CLASS_MODEL_REAL). Same contract as the set above: 96×96 nose-up,
   // white fill, hairline stroke, tint-safe.
@@ -179,7 +212,12 @@ const BODIES = {
              L -2.4,36 L -15,38 L -15,34 L -3.2,30
              L -3.8,25 L -8,26 L -8,18 L -3.6,16
              L -3.6,6 L -27,13 L -27,8 L -3.4,-8
-             L -3.4,-26 L -2.6,-36 Z" fill="white" ${STROKE}/>`,
+             L -3.4,-26 L -2.6,-36 Z" fill="white" ${STROKE}/>
+    <path d="M0,-39 C 1.8,-37.8 2.4,-35.4 2.6,-32 L -2.6,-32 C -2.4,-35.4 -1.8,-37.8 0,-39 Z" ${GLASS}/>
+    <rect x="4.4" y="17" width="4.6" height="8.4" rx="2" fill="white"/>
+    <rect x="-9" y="17" width="4.6" height="8.4" rx="2" fill="white"/>
+    <rect x="4.9" y="17.4" width="3.6" height="1.8" rx="0.9" ${INTAKE}/>
+    <rect x="-8.5" y="17.4" width="3.6" height="1.8" rx="0.9" ${INTAKE}/>`,
   // ── TR-3B (hidden 9th kind, Easter egg — NOT a classifyAircraft() output).
   //    The canonical black-triangle silhouette: a dark isosceles delta with a
   //    light at each corner and a dimmer one at the centre. Reached only by
@@ -239,7 +277,8 @@ const BODIES = {
              L 0,38
              L -1.6,30 L -13,36 L -13,32 L -2.1,24
              L -2.3,0 L -43,-2.5 L -43,-7 L -2.4,-12
-             L -4.4,-30 C -4.6,-35 -3.6,-40 0,-40 Z" fill="white" ${STROKE}/>`,
+             L -4.4,-30 C -4.6,-35 -3.6,-40 0,-40 Z" fill="white" ${STROKE}/>
+    <circle cx="0" cy="-33.6" r="2.6" ${GLASS}/>`,
 };
 
 const _iconCache = new Map();
