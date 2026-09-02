@@ -177,7 +177,9 @@ export const DETECTION_THEME_MAP = Object.freeze({
     // svetlú mapu tmavými linkami; NORMAL štýl beží čisto.
     scanline: 0,
     tiers: {
-      civil: '#22e0ff', military: '#ffb347', sea: '#3fe0c8', space: '#bda4ff', vehicle: '#8fa6b4',
+      // Civil AIR na požiadavku používateľa (2026-09-02) ČERVENÁ — na svetlej
+      // mape nesie najviac kontrastu; vojenská ostáva amber, more teal.
+      civil: '#ff4d4f', military: '#ffb347', sea: '#3fe0c8', space: '#bda4ff', vehicle: '#8fa6b4',
       veh_jam: '#e05252', veh_slow: '#f0b23e', veh_free: '#2ecc71', veh_nodata: '#c9c9c9',
     },
   },

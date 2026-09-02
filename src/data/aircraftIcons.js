@@ -34,10 +34,16 @@
 const VIEW = 96;
 const C = VIEW / 2; // 48 — glyph centre
 
-// Hairline dark edge (scaled for the 96 box: ~1.5u ≈ the old 0.5u at 32).
-const STROKE = 'stroke="rgba(0,0,0,0.32)" stroke-width="1.4" stroke-linejoin="round"';
+// Tmavý OBRYS pod výplňou (2026-09-02, „lietadlá na bielej mape nevidno"):
+// pôvodná vlásočnica (1.4u @ 0.32) je pri 20px billboarde ~0,3 px — na
+// svetlej OSM mape biely glyf splýval s podkladom. Teraz: výrazný stroke
+// kreslený POD výplňou (`paint-order="stroke"` — rozšíri sa len SMEROM VON,
+// biele telo nezožerie), takže silueta nesie vlastný kontrast na svetlom aj
+// tmavom podklade. Tint pipeline nedotknutý: farbí sa len biela výplň,
+// obrys ostáva tmavý.
+const STROKE = 'stroke="rgba(8,15,20,0.85)" stroke-width="6" paint-order="stroke" stroke-linejoin="round"';
 // Heavier edge for the chart-symbol ("bold") glyphs adopted 2026-08-15.
-const STROKE_BOLD = 'stroke="rgba(0,0,0,0.38)" stroke-width="2" stroke-linejoin="round"';
+const STROKE_BOLD = 'stroke="rgba(8,15,20,0.85)" stroke-width="7" paint-order="stroke" stroke-linejoin="round"';
 // Softer white for translucent detail (prop discs, rotor disc) — still white so
 // the tint multiplies cleanly; only the alpha differs.
 const DISC = 'fill="white" fill-opacity="0.5"';

@@ -1433,7 +1433,9 @@ function _drawOverlay(frame) {
   }
 
   const fade = acquireAlpha(_enableTime, now, FADE_MS);
-  const bracketWidth = _mode === MODE_DENSE ? 1 : 1.25;
+  // Jemnejšie čiary (požiadavka 2026-09-02) — kontrast nesie farba + halo,
+  // nie hrúbka.
+  const bracketWidth = _mode === MODE_DENSE ? 0.85 : 1;
 
   // Brackets — batched by tier color and linear radial-opacity band.
   // Halo pre-pass (2026-09-02, „nie je dobre vidno štvorček"): normal-blend
@@ -1442,7 +1444,7 @@ function _drawOverlay(frame) {
   // nikdy neprekreslilo susedovu farebnú zátvorku. Screen-blend témy `halo`
   // nedefinujú (tmavý ťah je pod screenom no-op) a pass sa celý preskočí.
   if (_theme.halo) {
-    _ctx.lineWidth = bracketWidth + 2;
+    _ctx.lineWidth = bracketWidth + 1.8;
     _ctx.strokeStyle = _theme.halo;
     for (const bands of bracketPaths.values()) {
       for (const entry of bands) {
