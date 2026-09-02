@@ -8,6 +8,7 @@ import createViteConfig, {
   launchLibraryRequestHeaders,
   LL2_CACHE_TTL_MS,
   METAR_PROXY_CACHE_TTL_MS,
+  OPENSKY_CONSTRAINED_REGIME_MS,
   readResponseJsonCapped,
   regionalBriefHasAnySource,
   REGIONAL_FALLBACK_PROVIDERS,
@@ -109,6 +110,25 @@ test('regional flight fallback chain: adsb.lol primary, adsb.fi second, both pin
     REGIONAL_FALLBACK_PROVIDERS[1].url(48.25, 17, 250),
     'https://opendata.adsb.fi/api/v3/lat/48.25/lon/17/dist/250',
   );
+});
+
+test('opensky flap damper: 429 pripne vrstvu na regionálnu náhradu na celé okno', () => {
+  // Terénna chyba 2026-09-02: na vyčerpaných kreditoch zdroj osciloval
+  // celosvet ⇄ náhrada v minútových cykloch a klientská flotila pri každom
+  // prepnutí prežula ~11k evikcií — z obrazovky mizli aj lietadlá priamo
+  // vo výreze. Piny držia tri nosné časti dampera:
+  assert.equal(OPENSKY_CONSTRAINED_REGIME_MS, 15 * 60_000);
+  const viteSource = readFileSync(
+    fileURLToPath(new URL('../../vite.config.js', import.meta.url)),
+    'utf8',
+  );
+  // (1) každý 429 otvára okno…
+  assert.match(viteSource, /_openskyConstrainedUntil = now \+ OPENSKY_CONSTRAINED_REGIME_MS/);
+  // (2) …počas ktorého serve cesta ide na náhradu PRED cache vetvou…
+  assert.match(viteSource, /now < _openskyConstrainedUntil\) \{\n\s*if \(await serveAdsbLolPointFallback\(req, res, requestedMode, 'opensky_constrained_regional_fallback'\)\) return;/);
+  // (3) …a pri nedostupnej náhrade sa prepadne na normálnu cestu (žiadny
+  // return mimo úspešného fallbacku — stale cache je lepšia než mŕtva vrstva).
+  assert.doesNotMatch(viteSource, /opensky_constrained_regional_fallback'\)\) return;\n\s*return/);
 });
 
 test('regional fallback serves an honest per-provider X-Flight-Source header', () => {

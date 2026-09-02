@@ -122,6 +122,20 @@ let _openskyTtlMs = OPENSKY_CACHE_MS;
 /** @type {number} Epoch-ms before which no upstream fetch is attempted. */
 let _openskyCooldownUntil = 0;
 /**
+ * Pripnutý regionálny režim po 429 (flap damper, 2026-09-02). Bez neho na
+ * vyčerpaných kreditoch systém osciloval: globálny snapshot (11k+ strojov) →
+ * 429 → cooldown → cache zostarne → regionálna náhrada → cooldown vyprší →
+ * jeden globálny úspech → ďalší 429 — a klientská flotila pri KAŽDOM
+ * prepnutí prežula ~11k pridaní/evikcií, počas ktorých z obrazovky mizli aj
+ * lietadlá priamo vo výreze (nahlásené používateľom ako zmiznuté
+ * zameriavače). Počas celého okna sa globál NEskúša a vrstva sedí stabilne
+ * na poctivo označenej náhrade (NÁHRADA chip); po vypršaní jeden globálny
+ * pokus buď drží (kredity sa zotavili), alebo 429 okno obnoví.
+ */
+export const OPENSKY_CONSTRAINED_REGIME_MS = 15 * 60_000;
+/** @type {number} Epoch-ms konca pripnutého regionálneho režimu. */
+let _openskyConstrainedUntil = 0;
+/**
  * Picks the cache TTL from the remaining daily credit budget.
  * Client polls every 30 s, so tiers ≤30 s cost the same 480 credits/h; the
  * later tiers stretch the day: >2400 → ~3 h of full freshness, then 30 s
@@ -3279,6 +3293,14 @@ function openSkyProxy() {
           const requestedMode = normalizeOpenSkyAuthMode(process.env.OPENSKY_AUTH_MODE);
           const now = Date.now();
           const inCooldown = now < _openskyCooldownUntil;
+          // Pripnutý regionálny režim (pozri OPENSKY_CONSTRAINED_REGIME_MS):
+          // MUSÍ bežať pred cache vetvou — práve servírovanie starnúcej
+          // celosvetovej cache striedané s náhradou je zdroj flapu. Keď
+          // náhrada zlyhá (adsb.lol aj adsb.fi mimo), prepadne sa na normálnu
+          // cestu — stale cache je stále lepšia než mŕtva vrstva.
+          if (now < _openskyConstrainedUntil) {
+            if (await serveAdsbLolPointFallback(req, res, requestedMode, 'opensky_constrained_regional_fallback')) return;
+          }
           // Fresh-enough cache (adaptive TTL) OR any cache during a 429
           // cooldown: serve it without touching upstream. Stale-during-cooldown
           // is deliberate (credit governor): last-good planes beat a dead layer.
@@ -3417,6 +3439,9 @@ function openSkyProxy() {
               30 * 60_000
             );
             _openskyCooldownUntil = now + cooldownMs;
+            // Flap damper: každý 429 pripne vrstvu na regionálnu náhradu na
+            // celé okno — stabilná 250nm flotila bez evikčného thrashu.
+            _openskyConstrainedUntil = now + OPENSKY_CONSTRAINED_REGIME_MS;
             // Serve the last-good body instead of the 429 when we have one —
             // the layer keeps rendering (STALE-cued) instead of dying.
             if (_openskyCacheBody && _openskyCacheStatus === 200) {
