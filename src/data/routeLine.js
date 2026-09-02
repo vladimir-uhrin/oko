@@ -22,12 +22,12 @@ registerPickOwner('route-lines', (pickedId) => String(pickedId).startsWith('gev-
 
 /** Fallback letová hladina, keď render výška ešte nie je známa (m). */
 export const ROUTE_LINE_DEFAULT_ALTITUDE_M = 10_000;
-/** Farba čiary — mäkší cyan (2026-09-02: „jemná grafika" — nie sýty azúr). */
-const ROUTE_LINE_COLOR = '#5fb6d9';
+/** Farba čiary — akcent sledovaného letu (tracked cyan). */
+const ROUTE_LINE_COLOR = '#39d0ff';
 /** Alfa nad terénom / za terénom (trail idiom: stlmiť, nie schovať). */
-const ROUTE_LINE_ALPHA = 0.6;
-const ROUTE_LINE_OCCLUDED_ALPHA = 0.22;
-const ROUTE_LINE_WIDTH = 1.3;
+const ROUTE_LINE_ALPHA = 0.7;
+const ROUTE_LINE_OCCLUDED_ALPHA = 0.28;
+const ROUTE_LINE_WIDTH = 2;
 
 /** @type {number} Uniquifier entity id (Cesium vyžaduje unikátne). */
 let _routeSeq = 0;

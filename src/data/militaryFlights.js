@@ -158,10 +158,6 @@ const MODEL_HEADING_OFFSET_DEG = 180; // every aircraft GLB is exported nose -X 
 // Preserve the layer's amber identity while reducing approved texture/livery
 // contribution to a weak diffuse hint, matching civilian launch presentation.
 const MODEL_COLOR_BLEND_AMOUNT = 0.94;
-// Tmava siluetova obrysovka modelov — zrkadlo flights.js (2026-09-02):
-// svetly model nad svetlou mapou bez obrysu miznul; IR boost ju vypina.
-const MODEL_SILHOUETTE_COLOR = Cesium.Color.fromCssColorString('#08141c').withAlpha(0.9);
-const MODEL_SILHOUETTE_SIZE_PX = 1.6;
 // airplane.glb (the shared 747) constants for this layer's heavy classes. The
 // asset has its former 24× runtime calibration baked into transform-applied
 // meter-scale geometry; these values mirror flights.js and are regression-pinned.
@@ -1613,8 +1609,6 @@ async function _ensureModel(icao24) {
       // near self-illuminated tint so planes read uniform near AND far; IR boost → flat UNLIT white (hot)
       colorBlendAmount: _irBoost ? 1.0 : MODEL_COLOR_BLEND_AMOUNT,
       customShader: _irBoost ? _IR_UNLIT_SHADER : undefined,
-      silhouetteColor: MODEL_SILHOUETTE_COLOR,
-      silhouetteSize: _irBoost ? 0 : MODEL_SILHOUETTE_SIZE_PX,
       id: icao24, // so scene.pick returns the icao for click-to-track
     });
   } catch {
@@ -1735,8 +1729,6 @@ function _updateTrackedModel() {
       // near self-illuminated tint so planes read uniform near AND far; IR boost → flat UNLIT white (hot)
       colorBlendAmount: _irBoost ? 1.0 : MODEL_COLOR_BLEND_AMOUNT,
       customShader: _irBoost ? _IR_UNLIT_SHADER : undefined,
-      silhouetteColor: MODEL_SILHOUETTE_COLOR,
-      silhouetteSize: _irBoost ? 0 : MODEL_SILHOUETTE_SIZE_PX,
       // Pick id (H1): without it, clicking the very plane being tracked read as
       // EMPTY SPACE (scene.pick → primitive with no id) → an unintended
       // deselect. With the icao, the click handler recognizes it as ours.
