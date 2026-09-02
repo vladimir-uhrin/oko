@@ -165,7 +165,10 @@ const MODEL_ALT_CEIL_M = 800000; // m: below this camera altitude, draw 3D model
 const MODEL_MIN_PX = 24;        // floor so distant models stay visible WITHOUT ballooning into a giant
                                 // min-pixel blob (was 54 — far planes at the All radius became white
                                 // star-bursts); ~matches the 2D icon size so the model↔billboard read is consistent
-const TRACKED_MODEL_MIN_PX = 40; // keep the glTF silhouette comparable to the selected 2D glyph at handoff
+// 2026-09-02: 40 px sledovaný stroj bol pri bežnej follow vzdialenosti drobná
+// bodka („je ho dobre vidno? nie") — sledovaný objekt je hlavný subjekt scény
+// a má byť čitateľný vždy.
+const TRACKED_MODEL_MIN_PX = 64;
 export const TRACKED_MODEL_MAX_PX = 200; // selected close-range tracked-target feel
 const MODEL_NATIVE_RADIUS_M = 34.41;
 const MODEL_SCALE = 1;          // airplane.glb is transform-applied and baked to real-world meters
@@ -189,6 +192,13 @@ const MODEL_HEADING_OFFSET_DEG = 180; // airplane.glb nose is opposite Cesium he
 // Owner launch-polish direction: models should read as clean light silhouettes,
 // with only a weak diffuse contribution from the existing approved textures.
 const MODEL_COLOR_BLEND_AMOUNT = 0.94;
+// Tmavá siluetová obrysovka modelov (2026-09-02): biely glb nad svetlou OSM
+// mapou bol prakticky neviditeľný (živý nález používateľa na tracked DLH780
+// — pôvodne to riešil azúrový tint, ktorý si používateľ neželá). Rovnaký
+// vizuálny jazyk ako tmavý obrys SVG ikon; v IR boost režime sa vypína
+// (čistý termálny look), bake-uje sa pri vytvorení ako ostatné options.
+const MODEL_SILHOUETTE_COLOR = Cesium.Color.fromCssColorString('#08141c').withAlpha(0.9);
+const MODEL_SILHOUETTE_SIZE_PX = 1.6;
 // Grounded-model belly offset: airplane.glb's centred origin sits 6.719 m ABOVE its
 // lowest vertex (glTF Y-up scene AABB with node transforms applied — same reader as
 // modelScale.test.mjs, measured after its 24× transform bake). × class multiplier ≈ 5.0–9.7 m
@@ -274,7 +284,10 @@ let _preloadModel = null;
 // Sledovany stroj je BIELY (poziadavka 2026-09-02: "nema byt azurovy") —
 // silueta s obrysom nesie kontrast sama, sledovanost ukazuje cerveny ram
 // + karta. Transparentny variant plati, kym vizual vlastni 3D model.
-const TRACKED_TINT = Cesium.Color.WHITE;
+// 2026-09-02 v2: biela sa na svetlej mape stratila aj s obrysom (zivy nalez).
+// Grafit — jazyk klasickeho leteckeho symbolu; svetla obruba modelu ho drzi
+// na tmavom podklade.
+const TRACKED_TINT = Cesium.Color.fromCssColorString('#232b33');
 const TRACKED_TINT_TRANSPARENT = Cesium.Color.WHITE.withAlpha(0);
 const _scratchModelHpr = new Cesium.HeadingPitchRoll(0, 0, 0);
 const _scratchModelMtx = new Cesium.Matrix4();
@@ -2444,6 +2457,8 @@ async function _ensureModel(icao24) {
       // model; IR boost removes the remaining diffuse hint with flat UNLIT white.
       colorBlendAmount: _irBoost ? 1.0 : spec.blendAmount,
       customShader: _irBoost ? _IR_UNLIT_SHADER : undefined,
+      silhouetteColor: MODEL_SILHOUETTE_COLOR,
+      silhouetteSize: _irBoost ? 0 : MODEL_SILHOUETTE_SIZE_PX,
       id: icao24, // so scene.pick returns the icao for click-to-track
     });
   } catch {
@@ -2561,12 +2576,14 @@ function _updateTrackedModel() {
       asynchronous: false,
       minimumPixelSize: TRACKED_MODEL_MIN_PX,
       scale: trackedSpec.scale,
-      color: Cesium.Color.WHITE, // tracked = biely v oboch rezimoch (2026-09-02)
+      color: _irBoost ? Cesium.Color.WHITE : TRACKED_TINT, // tracked = grafit (IR ostava biely)
       colorBlendMode: Cesium.ColorBlendMode.MIX,
-      // The tracked aircraft uses the same dominant light tint as the fleet;
-      // IR boost removes the remaining diffuse hint with flat UNLIT white.
       colorBlendAmount: _irBoost ? 1.0 : trackedSpec.blendAmount,
       customShader: _irBoost ? _IR_UNLIT_SHADER : undefined,
+      // Grafitový trup nesie kontrast na svetlej mape sám; SVETLÁ obruba ho
+      // drží na tmavom podklade (inverz fleet modelov: biely trup + tmavá).
+      silhouetteColor: Cesium.Color.fromCssColorString('#f2f7fa').withAlpha(0.85),
+      silhouetteSize: _irBoost ? 0 : MODEL_SILHOUETTE_SIZE_PX,
       // Pick id (H1): without it, clicking the very plane being tracked read as
       // EMPTY SPACE (scene.pick → primitive with no id) → an unintended
       // deselect. With the icao, the click handler recognizes it as ours.
@@ -3680,7 +3697,9 @@ function _trackFlight(icao24, { origin = 'programmatic' } = {}) {
         _modelOwnsVisual(_trackedIcao) ? TRACKED_TINT_TRANSPARENT : TRACKED_TINT
       ), false),
       sizeInMeters: false,
-      scaleByDistance: new Cesium.NearFarScalar(1000, 3.0, 8000000, 0.5),
+      // Sledovaný billboard nikdy pod plnú veľkosť (far 0.5 → 1.0): hlavný
+      // subjekt scény nesmie byť 14 px bodka (2026-09-02).
+      scaleByDistance: new Cesium.NearFarScalar(1000, 3.0, 8000000, 1.0),
       alignedAxis: Cesium.Cartesian3.ZERO,
       // The tracked target must never vanish into tile geometry — tracking a
       // taxiing plane at street level would otherwise bury the cyan icon inside
