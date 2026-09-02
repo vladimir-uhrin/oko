@@ -263,3 +263,26 @@ Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
   Appka beží normálne.
 - Jeden headless beh cez 6 lokalít spotrebuje ~1–2 root requesty (jedna
   session, jeden tileset) — kvóta 500/deň je pohodlná.
+
+### Fáza 1b+ — hi-res inserty DMR 6.0 (2026-09-02, HOTOVÉ — LOT08 + LOT10)
+
+- **0,5 m LiDAR nad Bratislavou (LOT08) a Žitným ostrovom (LOT10)** vložený do
+  toho istého `/api/sk-terrain` tilesetu: z15–z18 (prevzorkované na ~1,2 m —
+  strop z18 by z plných 0,5 m nič navyše neukázal), celoštátny 10 m základ
+  zostáva do z15. Availability overlay inzeruje PRESNÉ rozsahy (z18: 416 941
+  dlaždíc → 837 obdĺžnikov) — Cesium si nad insertmi pýta z16–18, inde nie.
+- **Overené živo:** `?terrain=sk` → z17/z18 dlaždice nad Devínskou Kobylou aj
+  Dunajom vracajú `x-sk-terrain: local`; merged layer.json má maxzoom 18.
+- **Build:** `scripts/run-terrain-builds.cmd` cez Plánovač úloh Windows
+  (`oko-terrain-build`) — základ z15 POTOM hires (poradie záväzné: merge by
+  inak prepísal jemné z15 dlaždice hrubými). Shellové background úlohy
+  neprežívali reštarty Claude procesu; plánovaná úloha áno. POZOR na siroty:
+  každý zabitý build nechal bežať svoj CTB kontajner — 4 naraz písali do
+  jedného výstupu (`docker ps` pred spustením nového buildu!).
+- **Zdroje po builde upratané** (~49 GB): ZIPy a rozbalené TIFFy zmazané,
+  ostali warpnuté `*_wgs84_4326.tif` + masky (5,9 GB) — prestavba dlaždíc
+  z nich beží bez opätovného sťahovania.
+- **Zvyšok SR v 0,5 m:** len 16 zo 73 LOT-ov zverejnených (2. cyklus LLS
+  priebežne pridáva); východ vrátane Tatier a Košíc vracia 404. Keď ÚGKK
+  zverejní ďalšie LOT-y, stačí ich pridať do `LOTS` v build-sk-terrain-hires
+  a spustiť plánovanú úlohu.
