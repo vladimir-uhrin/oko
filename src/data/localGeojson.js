@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
 import { AIRPORTS_LAYER_ID, airportImportance, airportOverlayCopy } from './airportsData.js';
+import { PORTS_LAYER_ID, portImportance, portOverlayCopy } from './portsData.js';
 import { cachedMetarCardLines, metarStationId } from './airportWeather.js';
 import {
   clearSelectedEntityContextForLayer,
@@ -102,6 +103,8 @@ export function localInfrastructureOverlayCopy(properties, layerId) {
     for (const line of cachedMetarCardLines(metarStationId(props))) {
       details.push(clampCardLine(line));
     }
+  } else if (layerId === PORTS_LAYER_ID) {
+    for (const line of portOverlayCopy(props)) details.push(clampCardLine(line));
   }
 
   return { title, details };
@@ -883,6 +886,7 @@ function labelPriorityFromProperties(props, layerId) {
   // Letiská: huby pred letiskami, letiská pred vzletovkami — pri oddialenom
   // pohľade sa pomenuje Viedeň a Bratislava, nie poľné pásy.
   if (layerId === AIRPORTS_LAYER_ID) score += airportImportance(props);
+  if (layerId === PORTS_LAYER_ID) score += portImportance(props);
   return score;
 }
 
@@ -930,5 +934,6 @@ function layerTitle(layerId) {
   if (layerId === 'local-datacenters') return 'Datacenter';
   if (layerId === 'local-dams') return 'Dam';
   if (layerId === AIRPORTS_LAYER_ID) return 'Airport';
+  if (layerId === PORTS_LAYER_ID) return 'Port';
   return 'Feature';
 }

@@ -7,7 +7,9 @@ import skEnergyLayer from './skEnergy.js';
 import datacentersUrl from './local_data/datacenters/datacenters.geojsonl?url';
 import damsUrl from './local_data/dams/dams.geojsonl?url';
 import airportsUrl from './local_data/airports/airports.geojsonl?url';
+import portsUrl from './local_data/ports/ports.geojsonl?url';
 import { AIRPORTS_LAYER_ID } from './airportsData.js';
+import { PORTS_LAYER_ID } from './portsData.js';
 import { metarStationId, requestAirportMetar } from './airportWeather.js';
 
 /**
@@ -54,6 +56,23 @@ const airports = createLocalGeoJsonLayer({
   },
 });
 
+// Lodný balík (2026-09-02): globálne prístavy z World Port Index (NGA,
+// public domain; provenance v local_data/ports/README.md) — statický
+// náprotivok AIS vrstvy, ako letiská pre lietadlá. POZOR: oceánsky
+// register, Dunaj v ňom nie je (riečne prístavy = EuRIS, čaká na licenčné
+// rozhodnutie).
+const ports = createLocalGeoJsonLayer({
+  id: PORTS_LAYER_ID,
+  url: portsUrl,
+  name: 'Ports',
+  color: '#7fd1c0', // Prístavná teal — drží odstup od AIS cyan aj letiskovej modrej.
+  icon: '⊔',
+  source: 'NGA WPI',
+  labels: true,
+  labelMax: 700,
+  labelGridPx: 140,
+});
+
 const dams = createLocalGeoJsonLayer({
   id: 'local-dams',
   url: damsUrl,
@@ -78,6 +97,7 @@ const fires = createFirmsHeatmapLayer({
 
 export default [
   airports,
+  ports,
   datacenters,
   dams,
   // OKO (Fáza 4): the SK energy grid sits where the submarine cables tile

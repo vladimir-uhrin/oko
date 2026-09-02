@@ -50,6 +50,13 @@ export const DATA_CREDITS = [
       '(public domain)',
   },
   {
+    key: 'wpi',
+    html:
+      'Ports: ' +
+      '<a href="https://msi.nga.mil" target="_blank" rel="noopener">NGA World Port Index</a> ' +
+      '(US gov, public domain)',
+  },
+  {
     key: 'metar',
     html:
       'METAR: ' +
