@@ -7,9 +7,11 @@ import createViteConfig, {
   coalesceProxyRequest,
   launchLibraryRequestHeaders,
   LL2_CACHE_TTL_MS,
+  METAR_PROXY_CACHE_TTL_MS,
   readResponseJsonCapped,
   regionalBriefHasAnySource,
   REGIONAL_FALLBACK_PROVIDERS,
+  validMetarStation,
   validMilitaryInstallationBox,
   validRegionalPoint,
 } from '../../vite.config.js';
@@ -41,6 +43,7 @@ test('new data proxies install the same routes in dev and preview servers', () =
     'military-installations-proxy',
     'regional-brief-proxy',
     'weather-effects-proxy',
+    'metar-proxy',
   ]) {
     assert.equal(typeof byName.get(name)?.configureServer, 'function', `${name} dev hook`);
     assert.equal(typeof byName.get(name)?.configurePreviewServer, 'function', `${name} preview hook`);
@@ -117,6 +120,20 @@ test('regional fallback serves an honest per-provider X-Flight-Source header', (
     'utf8',
   );
   assert.match(viteSource, /'X-Flight-Source':\s*fallback\.source/);
+});
+
+test('metar proxy: prísny jednostaničný validátor a 5 min server cache', () => {
+  // aviationweather.gov má SPOLOČNÝ limit 100 req/min pre celú službu —
+  // proxy je zámerne úzka: jedna stanica na request, cache, koalescencia.
+  assert.equal(validMetarStation('LZIB'), 'LZIB');
+  assert.equal(validMetarStation(' lzib '), 'LZIB', 'trim + uppercase');
+  assert.equal(validMetarStation('LZIB,LZKZ'), null, 'zoznamy nie — jedna stanica');
+  assert.equal(validMetarStation('LZ'), null);
+  assert.equal(validMetarStation('LZIB5'), null);
+  assert.equal(validMetarStation('../x'), null);
+  assert.equal(validMetarStation(''), null);
+  assert.equal(validMetarStation(null), null);
+  assert.equal(METAR_PROXY_CACHE_TTL_MS, 5 * 60_000);
 });
 
 test('regional brief treats an all-source outage as total failure', () => {

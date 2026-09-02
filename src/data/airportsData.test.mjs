@@ -50,6 +50,7 @@ test('feature: LZIB sa premapuje so súradnicami, kódmi a výškou', () => {
   assert.deepEqual(feature.geometry, { type: 'Point', coordinates: [17.21267, 48.17022] });
   assert.deepEqual(feature.properties, {
     name: 'M. R. Štefánik Airport',
+    ident: 'LZIB',
     icao: 'LZIB',
     iata: 'BTS',
     type: 'large',

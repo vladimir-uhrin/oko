@@ -58,6 +58,9 @@ export function airportFeatureFromRow(row) {
     geometry: { type: 'Point', coordinates: [lon, lat] },
     properties: {
       name: cleanText(row?.name) || ident,
+      // ident je jediné vždy prítomné ID (často = ICAO) — nesie sa aj vo
+      // properties, lebo karta/METAR vidí len properties, nie feature.id.
+      ident,
       icao: cleanText(row?.icao_code),
       iata: cleanText(row?.iata_code),
       // 'large_airport' → 'large' — the bundle spells the tier once.

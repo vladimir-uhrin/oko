@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
 import { AIRPORTS_LAYER_ID, airportImportance, airportOverlayCopy } from './airportsData.js';
+import { cachedMetarCardLines, metarStationId } from './airportWeather.js';
 import {
   clearSelectedEntityContextForLayer,
   registerEntityContext,
@@ -95,6 +96,12 @@ export function localInfrastructureOverlayCopy(properties, layerId) {
     // Kódy + tier, potom mesto/krajina/výška — formát drží airportsData.js
     // (jeden kontrakt pre build aj kartu).
     for (const line of airportOverlayCopy(props)) details.push(clampCardLine(line));
+    // METAR sekcia zo synchrónnej cache — plní ju klik (onFeatureSelected →
+    // requestAirportMetar → refreshEntry). Ambient karty bez kliku nemajú
+    // v cache nič a sekciu jednoducho nemajú; žiadny fetch odtiaľto.
+    for (const line of cachedMetarCardLines(metarStationId(props))) {
+      details.push(clampCardLine(line));
+    }
   }
 
   return { title, details };
@@ -295,6 +302,11 @@ export function createLocalGeoJsonLayer({
   overlayHost = DEFAULT_OVERLAY_HOST,
   screenSpaceEventHandlerFactory = (canvas) => new Cesium.ScreenSpaceEventHandler(canvas),
   projectToWindow = (scene, position) => Cesium.SceneTransforms.worldToWindowCoordinates(scene, position),
+  // Voliteľný hook po kliknutí na feature vrstvy: (properties, {refreshEntry}).
+  // refreshEntry prebuduje overlay entry daného záznamu z AKTUÁLNEHO
+  // localInfrastructureOverlayCopy — vrstva tak vie do karty doplniť
+  // asynchrónne dáta (letiská: METAR), bez per-frame prepočtov pre všetkých.
+  onFeatureSelected = null,
 }) {
   let _dataSource = null;
   let _enabled = false;
@@ -591,7 +603,28 @@ export function createLocalGeoJsonLayer({
               const entity = picked.id;
               viewer.selectedEntity = entity;
               selectEntityContext(entity);
-              
+
+              if (typeof onFeatureSelected === 'function') {
+                const record = _stemRecords.find((candidate) => candidate.entity === entity);
+                const refreshEntry = () => {
+                  if (!record || !labels) return;
+                  record.entry = createLocalInfrastructureOverlayEntry({
+                    id: record.id,
+                    layerId: id,
+                    position: record.tip,
+                    properties: propertyObject(entity),
+                    priority: record.priority,
+                    accent: color,
+                  });
+                  // Vynúť republish kohorty aj na zaparkovanej kamere.
+                  _lastVisibilityUpdate = Number.NEGATIVE_INFINITY;
+                  governorRequestRender(viewer);
+                };
+                try {
+                  onFeatureSelected(propertyObject(entity), { refreshEntry });
+                } catch { /* hook je best-effort — klik nikdy nesmie spadnúť */ }
+              }
+
               // We zoom to the surface base of the stem or the center of the polygon
               let targetPos = null;
               

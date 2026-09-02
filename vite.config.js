@@ -5115,6 +5115,100 @@ function adsbLolProxy() {
  * the Vite server keeps one backend websocket open and exposes a same-origin
  * JSON snapshot to the Cesium layer.
  */
+/** Server TTL jednej METAR stanice; report sa mení ~hodinovo. */
+export const METAR_PROXY_CACHE_TTL_MS = 5 * 60_000;
+
+/**
+ * METAR station validator: exactly one 4-char A-Z0-9 code (uppercased).
+ * Anything else — lists, paths, injection attempts — resolves to null.
+ * @param {*} value Raw ?ids= query value.
+ * @returns {string|null}
+ */
+export function validMetarStation(value) {
+  const text = String(value ?? '').trim().toUpperCase();
+  return /^[A-Z0-9]{4}$/.test(text) ? text : null;
+}
+
+/**
+ * Vite plugin: aviationweather.gov METAR proxy (`/api/metar?ids=LZIB`).
+ *
+ * US-government public-domain data, no key. Their stated limit is a SHARED
+ * 100 requests/min for the whole service, so the proxy is deliberately
+ * narrow: one station per request, 5 min cache, coalesced misses,
+ * serve-stale on upstream failure. The client only ever asks on airport
+ * SELECTION — never for the ambient label cohort.
+ * @returns {import('vite').Plugin}
+ */
+function metarProxy() {
+  /** @type {Map<string, {body:string, at:number}>} */
+  const cache = new Map();
+  const inFlight = new Map();
+  function install(middlewares) {
+    middlewares.use('/api/metar', async (req, res) => {
+      const send = (status, body, cacheStatus) => {
+        res.writeHead(status, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Metar-Cache': cacheStatus,
+        });
+        res.end(body);
+      };
+      try {
+        const incoming = new URL(req.url || '', 'http://localhost');
+        const station = validMetarStation(incoming.searchParams.get('ids'));
+        if (!station) {
+          send(400, JSON.stringify({ error: 'ids must be one 4-char station code' }), 'INVALID');
+          return;
+        }
+        const now = Date.now();
+        const entry = cache.get(station);
+        if (entry && now - entry.at < METAR_PROXY_CACHE_TTL_MS) {
+          send(200, entry.body, 'HIT');
+          return;
+        }
+        const request = coalesceProxyRequest(inFlight, station, async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10_000);
+          try {
+            const upstream = await fetch(
+              `https://aviationweather.gov/api/data/metar?ids=${station}&format=json`,
+              {
+                headers: { Accept: 'application/json', 'User-Agent': 'oko-metar-proxy/1.0' },
+                signal: controller.signal,
+              },
+            );
+            if (!upstream.ok) throw new Error(`upstream HTTP ${upstream.status}`);
+            const payload = await readResponseJsonCapped(upstream, 512 * 1024);
+            const record = { body: JSON.stringify(payload), at: Date.now() };
+            cache.set(station, record);
+            while (cache.size > 500) cache.delete(cache.keys().next().value);
+            return record;
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        });
+        try {
+          const record = await request.promise;
+          send(200, record.body, request.shared ? 'INFLIGHT' : 'MISS');
+        } catch (error) {
+          if (!request.shared && error?.name !== 'AbortError') {
+            console.warn('[METAR Proxy]', error?.message || error);
+          }
+          if (entry) send(200, entry.body, 'STALE');
+          else send(502, JSON.stringify({ error: 'metar upstream failed' }), 'NONE');
+        }
+      } catch (error) {
+        send(500, JSON.stringify({ error: 'metar proxy error' }), 'ERROR');
+      }
+    });
+  }
+  return {
+    name: 'metar-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function aisLiveProxy() {
   function install(middlewares) {
     middlewares.use('/api/ais-live', async (req, res) => {
@@ -7947,6 +8041,7 @@ export default defineConfig(({ mode }) => {
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),
+      metarProxy(),
       overpassProxy(),
       militaryInstallationsProxy(),
       regionalBriefProxy(),

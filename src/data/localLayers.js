@@ -8,6 +8,7 @@ import datacentersUrl from './local_data/datacenters/datacenters.geojsonl?url';
 import damsUrl from './local_data/dams/dams.geojsonl?url';
 import airportsUrl from './local_data/airports/airports.geojsonl?url';
 import { AIRPORTS_LAYER_ID } from './airportsData.js';
+import { metarStationId, requestAirportMetar } from './airportWeather.js';
 
 /**
  * Registry of local GeoJSON datasets.
@@ -39,6 +40,18 @@ const airports = createLocalGeoJsonLayer({
   labels: true,
   labelMax: 700,
   labelGridPx: 140,
+  // Klik na letisko → METAR cez /api/metar (aviationweather.gov, public
+  // domain) a prebuild karty, keď odpoveď dorazí. Len pri výbere — nikdy
+  // pre ambient kohortu (100 req/min je spoločný limit celej služby).
+  onFeatureSelected: (props, { refreshEntry }) => {
+    const station = metarStationId(props);
+    if (!station) return;
+    // requestAirportMetar nastaví pending zápis synchrónne (pred prvým
+    // await), takže refreshEntry hneď ZA ním ukáže 'METAR…' placeholder;
+    // onDone potom prebuduje kartu s reálnymi riadkami.
+    requestAirportMetar(station, { onDone: refreshEntry });
+    refreshEntry();
+  },
 });
 
 const dams = createLocalGeoJsonLayer({
