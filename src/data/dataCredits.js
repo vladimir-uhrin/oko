@@ -43,6 +43,13 @@ export const DATA_CREDITS = [
       '(ODbL 1.0)',
   },
   {
+    key: 'ourairports',
+    html:
+      'Airports: ' +
+      '<a href="https://ourairports.com" target="_blank" rel="noopener">OurAirports</a> ' +
+      '(public domain)',
+  },
+  {
     // adsb.fi terms: "cite adsb.fi and include a link" — the link is the
     // required form of the attribution, keep it an anchor.
     key: 'adsbfi',

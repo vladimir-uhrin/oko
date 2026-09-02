@@ -1,5 +1,6 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
+import { AIRPORTS_LAYER_ID, airportImportance, airportOverlayCopy } from './airportsData.js';
 import {
   clearSelectedEntityContextForLayer,
   registerEntityContext,
@@ -90,6 +91,10 @@ export function localInfrastructureOverlayCopy(properties, layerId) {
     if (river && river.toLocaleLowerCase() !== title.toLocaleLowerCase()) {
       details.push(clampCardLine(river));
     }
+  } else if (layerId === AIRPORTS_LAYER_ID) {
+    // Kódy + tier, potom mesto/krajina/výška — formát drží airportsData.js
+    // (jeden kontrakt pre build aj kartu).
+    for (const line of airportOverlayCopy(props)) details.push(clampCardLine(line));
   }
 
   return { title, details };
@@ -842,6 +847,9 @@ function labelPriorityFromProperties(props, layerId) {
   if (props.output || tags['plant:output:electricity']) score += 120;
   if (layerId === 'local-dams') score += 80;
   if (layerId === 'local-datacenters') score += 60;
+  // Letiská: huby pred letiskami, letiská pred vzletovkami — pri oddialenom
+  // pohľade sa pomenuje Viedeň a Bratislava, nie poľné pásy.
+  if (layerId === AIRPORTS_LAYER_ID) score += airportImportance(props);
   return score;
 }
 
@@ -888,5 +896,6 @@ function clampCardLine(value) {
 function layerTitle(layerId) {
   if (layerId === 'local-datacenters') return 'Datacenter';
   if (layerId === 'local-dams') return 'Dam';
+  if (layerId === AIRPORTS_LAYER_ID) return 'Airport';
   return 'Feature';
 }

@@ -6,6 +6,8 @@ import skEnergyLayer from './skEnergy.js';
 // Use Vite's ?url import to properly resolve these assets in dev and build
 import datacentersUrl from './local_data/datacenters/datacenters.geojsonl?url';
 import damsUrl from './local_data/dams/dams.geojsonl?url';
+import airportsUrl from './local_data/airports/airports.geojsonl?url';
+import { AIRPORTS_LAYER_ID } from './airportsData.js';
 
 /**
  * Registry of local GeoJSON datasets.
@@ -21,6 +23,22 @@ const datacenters = createLocalGeoJsonLayer({
   labels: true,
   labelMax: 700,
   labelGridPx: 138,
+});
+
+// Letecký balík 2 (2026-09-02): globálne letiská z OurAirports (public
+// domain; provenance v local_data/airports/README.md). Statický náprotivok
+// živej leteckej vrstvy — trať lietadla niekam VEDIE a glóbus to miesto
+// teraz pozná. 6 146 bodov (large/medium + small so scheduled service).
+const airports = createLocalGeoJsonLayer({
+  id: AIRPORTS_LAYER_ID,
+  url: airportsUrl,
+  name: 'Airports',
+  color: '#8ab4f8', // Chladná letecká modrá — drží sa od cyan datacentier.
+  icon: '⊞',
+  source: 'OurAirports',
+  labels: true,
+  labelMax: 700,
+  labelGridPx: 140,
 });
 
 const dams = createLocalGeoJsonLayer({
@@ -46,6 +64,7 @@ const fires = createFirmsHeatmapLayer({
 });
 
 export default [
+  airports,
   datacenters,
   dams,
   // OKO (Fáza 4): the SK energy grid sits where the submarine cables tile
