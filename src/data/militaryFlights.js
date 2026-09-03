@@ -17,6 +17,10 @@ import {
 } from './iconOrientation.js';
 import { stickyText, stickyNumber } from './aircraftMeta.js';
 import { classifyAircraft, CLASS_SCALE_2D, CLASS_SCALE_3D, CLASS_MODEL_REAL } from './aircraftClass.js';
+import {
+  AIRCRAFT_CATEGORY_IDS, categoryForClass, normalizeHiddenCategories, tallyByCategory,
+} from './aircraftCategories.js';
+import { t } from '../i18n.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
 import { aircraftIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
 import {
@@ -750,6 +754,46 @@ function _updateTrackedLabelModel(icao24) {
 const _iconKind = (icao24, klass) => tr3bIconKind(icao24, klass, { hot: _irBoost });
 /** Posledna zapisana strobo faza flotily (prechodova detekcia v _fleetTick). */
 let _lastStrobeOn = false;
+
+/** @type {Set<string>} Kategórie skryté operátorom — zrkadlo flights.js
+ *  (filtruje sa `bb.show`, nie dáta; getNearby/getDetectableObjects ho tak
+ *  rešpektujú samy). Vrstvy majú vlastný filter zámerne: vypnúť dopravné
+ *  lietadlá nemá zhasnúť vojenský transport. */
+let _hiddenCategories = new Set();
+
+/** Je kontakt tejto triedy práve viditeľný? */
+function _categoryVisible(klass) {
+  return _hiddenCategories.size === 0 || !_hiddenCategories.has(categoryForClass(klass));
+}
+
+/** Rozpis kontaktov podľa kategórie (vrátane skrytých — panel ukazuje oblohu). */
+function _categoryBreakdown() {
+  const classes = [];
+  for (const meta of _flightData.values()) classes.push(meta?.klass);
+  return { tally: tallyByCategory(classes), hidden: [..._hiddenCategories] };
+}
+
+/** Čipy filtra kategórií pre riadok vrstvy — viď flights.js `_categoryChips`. */
+function _categoryChips() {
+  const { tally } = _categoryBreakdown();
+  const chips = [];
+  for (const id of AIRCRAFT_CATEGORY_IDS) {
+    const count = tally[id] || 0;
+    const hidden = _hiddenCategories.has(id);
+    if (count === 0 && !hidden) continue;
+    const name = t(`aircraft.category.${id}`);
+    const next = new Set(_hiddenCategories);
+    if (hidden) next.delete(id); else next.add(id);
+    chips.push({
+      id: `cat-${id}`,
+      label: `${name} ${count}`,
+      active: !hidden,
+      title: t(hidden ? 'aircraft.category.show' : 'aircraft.category.hide', { name, n: count }),
+      params: { hiddenAircraftCategories: [...next] },
+    });
+  }
+  return { chips };
+}
 
 /** Re-image the tracked entity's billboard from the current class/conversion. */
 function _syncTrackedBillboardImage() {
@@ -1918,7 +1962,11 @@ function _fleetTick() {
     // Round 6: occlusion-test a LIFTED point for contacts at/below the
     // ellipsoid (mirror of flights.js — sub-ellipsoid points near the limb
     // read "beyond the horizon" and would hide low contacts awaiting floors).
-    const beyondHorizon = !occluder.isPointVisible(_flightData.get(icao24)?.cullPosition || bb.position);
+    // Kategóriový filter sa skladá do TEJ ISTEJ brány ako horizont (zrkadlo
+    // flights.js): skrytá kategória sa správa ako kontakt za obzorom, takže
+    // nepribúda druhé, konkurenčné pravidlo o `show`.
+    const beyondHorizon = !_categoryVisible(_flightData.get(icao24)?.klass)
+      || !occluder.isPointVisible(_flightData.get(icao24)?.cullPosition || bb.position);
     // A billboard flipping INTO view (horizon reveal while the camera idles)
     // gets its rotation refreshed THIS tick even without a pose change —
     // otherwise it reappears wearing its stale (often creation-north) nose for
@@ -3382,6 +3430,16 @@ const militaryFlightsLayer = {
       // cold and thermal-reactive variants directly (mirror of flights.js).
       _refreshTr3bForStyle();
     }
+    if (Object.hasOwn(params, 'hiddenAircraftCategories')) {
+      const next = normalizeHiddenCategories(params.hiddenAircraftCategories);
+      const changed = next.size !== _hiddenCategories.size
+        || [...next].some((id) => !_hiddenCategories.has(id));
+      if (changed) {
+        _hiddenCategories = next;
+        _lastFleetTickMs = 0; // odkrytý kontakt nemá čakať na ďalší tik
+        _viewer?.scene?.requestRender?.();
+      }
+    }
     if (Object.hasOwn(params, 'selectedMilitaryTrackingId')) {
       const requested = _normalizeTrackedIcao(params.selectedMilitaryTrackingId);
       if (requested === _trackedIcao) {
@@ -3398,12 +3456,19 @@ const militaryFlightsLayer = {
     }
     return true;
   },
+  /** Rozpis kontaktov podľa kategórie pre panel (vrátane skrytých). */
+  getCategoryBreakdown() { return _categoryBreakdown(); },
+
+  /** Filter kategórií ako čipy pod riadkom vrstvy. */
+  getRowControls() { return _categoryChips(); },
+
   getParams() {
     return {
       models3d: _models3dEnabled,
       models3dMode: _models3dMode,
       irBoost: _irBoost,
       selectedMilitaryTrackingId: _trackedIcao,
+      hiddenAircraftCategories: [..._hiddenCategories],
     };
   },
 

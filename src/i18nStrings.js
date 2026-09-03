@@ -329,6 +329,18 @@ export const EN_STRINGS = Object.freeze({
   'layer.telegeography-submarine-cables.name': 'Submarine Cables',
   'layer.local-firms.name': 'FIRMS Active Fires',
 
+  // Aircraft category filter chips under the flight layers (2026-09-03).
+  'aircraft.category.commercial': 'AIRLINERS',
+  'aircraft.category.bizjet': 'BIZJETS',
+  'aircraft.category.turboprop': 'TURBOPROPS',
+  'aircraft.category.light': 'LIGHT',
+  'aircraft.category.helicopter': 'HELICOPTERS',
+  'aircraft.category.glider': 'GLIDERS',
+  'aircraft.category.fastjet': 'FAST JETS',
+  'aircraft.category.uav': 'DRONES',
+  'aircraft.category.hide': 'Hide {name} ({n} in view)',
+  'aircraft.category.show': 'Show {name} ({n} hidden)',
+
   'manager.state.on': 'ON',
   'manager.state.off': 'OFF',
   'manager.state.loading': 'LOADING',
@@ -979,6 +991,18 @@ export const SK_STRINGS = Object.freeze({
   'layer.local-energy.name': 'Energetika SR',
   'layer.telegeography-submarine-cables.name': 'Podmorské káble',
   'layer.local-firms.name': 'Aktívne požiare FIRMS',
+
+  // Čipy filtra kategórií pod leteckými vrstvami (2026-09-03).
+  'aircraft.category.commercial': 'DOPRAVNÉ',
+  'aircraft.category.bizjet': 'BIZNIS',
+  'aircraft.category.turboprop': 'TURBOVRTUĽOVÉ',
+  'aircraft.category.light': 'MALÉ',
+  'aircraft.category.helicopter': 'VRTUĽNÍKY',
+  'aircraft.category.glider': 'VETRONE',
+  'aircraft.category.fastjet': 'STÍHAČKY',
+  'aircraft.category.uav': 'DRONY',
+  'aircraft.category.hide': 'Skryť {name} ({n} v scéne)',
+  'aircraft.category.show': 'Zobraziť {name} ({n} skrytých)',
 
   'manager.state.on': 'ZAP',
   'manager.state.off': 'VYP',

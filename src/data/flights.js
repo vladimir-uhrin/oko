@@ -43,6 +43,10 @@ import {
 } from './iconOrientation.js';
 import { stickyText, stickyNumber } from './aircraftMeta.js';
 import { classifyAircraft, CLASS_SCALE_2D, CLASS_SCALE_3D, CLASS_MODEL_URL, CLASS_MODEL_REAL } from './aircraftClass.js';
+import {
+  AIRCRAFT_CATEGORY_IDS, categoryForClass, normalizeHiddenCategories, tallyByCategory,
+} from './aircraftCategories.js';
+import { t } from '../i18n.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
 import { aircraftIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
 import {
@@ -483,6 +487,62 @@ function _cockpitBillboardScaleByDistance() {
 const _iconKind = (icao24, klass) => tr3bIconKind(icao24, klass, { hot: _irBoost });
 /** Posledna zapisana strobo faza flotily (prechodova detekcia v _fleetTick). */
 let _lastStrobeOn = false;
+
+/** @type {Set<string>} Kategórie skryté operátorom (viď aircraftCategories.js).
+ *  Filtrovanie sa NEROBÍ zahadzovaním kontaktov: dáta tečú ďalej (počty v
+ *  paneli musia ukazovať pravdu o oblohe, nie o filtri), skrýva sa až
+ *  billboard — a keďže getNearby/getDetectableObjects strážia `bb.show`,
+ *  zameriavače aj Kontakty filter automaticky rešpektujú.
+ *
+ *  ZÁMERNE BEZ PERZISTENCIE a mimo layerState kodéru: filter je pracovný
+ *  nástroj na tu a teraz („chcem vidieť len vrtuľníky"), nie nastavenie.
+ *  Skrytá kategória, ktorá prežije reštart alebo pricestuje v zdieľanom
+ *  odkaze, je presne tá pasca, ktorú stálo dva reporty vyriešiť pri detekcii
+ *  (2026-09-03, „nevidno zas zameriavač") — otvorím appku a chýbajú
+ *  lietadlá bez stopy po tom, prečo. F5 vracia plnú oblohu. */
+let _hiddenCategories = new Set();
+
+/** Je kontakt tejto triedy práve viditeľný? */
+function _categoryVisible(klass) {
+  return _hiddenCategories.size === 0 || !_hiddenCategories.has(categoryForClass(klass));
+}
+
+/** Rozpis kontaktov podľa kategórie — počíta VŠETKY vrátane skrytých, aby
+ *  panel ukazoval zloženie oblohy, nie zloženie filtra. */
+function _categoryBreakdown() {
+  const classes = [];
+  for (const meta of _flightData.values()) classes.push(meta?.klass);
+  return { tally: tallyByCategory(classes), hidden: [..._hiddenCategories] };
+}
+
+/**
+ * Čipy filtra kategórií pre riadok vrstvy (kontrakt `getRowControls`).
+ *
+ * Zobrazí sa kategória, ktorá má kontakty ALEBO je skrytá — inak by sa
+ * vypnutá kategória po odlete posledného stroja stratila z panela a operátor
+ * by ju nemal ako zapnúť späť.
+ * @returns {{chips: Array<object>}}
+ */
+function _categoryChips() {
+  const { tally } = _categoryBreakdown();
+  const chips = [];
+  for (const id of AIRCRAFT_CATEGORY_IDS) {
+    const count = tally[id] || 0;
+    const hidden = _hiddenCategories.has(id);
+    if (count === 0 && !hidden) continue;
+    const name = t(`aircraft.category.${id}`);
+    const next = new Set(_hiddenCategories);
+    if (hidden) next.delete(id); else next.add(id);
+    chips.push({
+      id: `cat-${id}`,
+      label: `${name} ${count}`,
+      active: !hidden,
+      title: t(hidden ? 'aircraft.category.show' : 'aircraft.category.hide', { name, n: count }),
+      params: { hiddenAircraftCategories: [...next] },
+    });
+  }
+  return { chips };
+}
 
 /** Apply the current normal/cockpit visual contract to one owned fleet billboard. */
 function _applyFleetBillboardPresentation(icao24, bb) {
@@ -2767,7 +2827,11 @@ function _fleetTick() {
     // sub-ellipsoid point near the limb "beyond the horizon" and the fleet
     // pass would hide a plane that is really just low over high-N terrain
     // waiting for its floor to warm (ATL grounded contacts at geoid −31 m).
-    const beyondHorizon = !occluder.isPointVisible(info?.cullPosition || bb.position);
+    // Kategóriový filter sa skladá do TEJ ISTEJ brány ako horizont: skrytá
+    // kategória sa správa presne ako kontakt za obzorom (zhasne aj jeho 3D
+    // model nižšie), takže nepribúda druhé, konkurenčné pravidlo o `show`.
+    const beyondHorizon = !_categoryVisible(info?.klass)
+      || !occluder.isPointVisible(info?.cullPosition || bb.position);
     // A billboard flipping INTO view (horizon reveal while the camera idles)
     // gets its rotation refreshed THIS tick even without a pose change —
     // otherwise it reappears wearing its stale (often creation-north) nose for
@@ -4889,6 +4953,18 @@ const flightsLayer = {
       // own conversions, so this never touches the ordinary fleet.
       _refreshTr3bForStyle();
     }
+    if (Object.hasOwn(params, 'hiddenAircraftCategories')) {
+      const next = normalizeHiddenCategories(params.hiddenAircraftCategories);
+      const changed = next.size !== _hiddenCategories.size
+        || [...next].some((id) => !_hiddenCategories.has(id));
+      if (changed) {
+        _hiddenCategories = next;
+        // Kontakt, ktorý sa práve odkryl, čaká na `show` až do najbližšieho
+        // tiku — vynúť ho hneď, nech je klik v paneli okamžitý.
+        _lastFleetTickMs = 0;
+        _viewer?.scene?.requestRender?.();
+      }
+    }
     if (Object.hasOwn(params, 'selectedFlightsTrackingId')) {
       const requested = _normalizeTrackedIcao(params.selectedFlightsTrackingId);
       if (requested === _trackedIcao) {
@@ -4911,8 +4987,22 @@ const flightsLayer = {
       models3dMode: _models3dMode,
       irBoost: _irBoost,
       selectedFlightsTrackingId: _trackedIcao,
+      hiddenAircraftCategories: [..._hiddenCategories],
     };
   },
+
+  /**
+   * Rozpis živých kontaktov podľa kategórie pre panel vrstiev.
+   *
+   * Počíta VŠETKY kontakty vrstvy vrátane skrytých — panel ukazuje zloženie
+   * oblohy, nie zloženie filtra; inak by vypnutá kategória zmizla na nulu a
+   * operátor by nemal podľa čoho ju zapnúť späť.
+   * @returns {{tally: Record<string, number>, hidden: string[]}}
+   */
+  getCategoryBreakdown() { return _categoryBreakdown(); },
+
+  /** Filter kategórií ako čipy pod riadkom vrstvy (viď `_categoryChips`). */
+  getRowControls() { return _categoryChips(); },
 
   /**
    * Re-render a contact whose TR-3B conversion just flipped (Easter egg).
