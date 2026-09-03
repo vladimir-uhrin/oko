@@ -267,15 +267,16 @@ export const STROBE_FLASH_MS = 130;
 export function strobeOn(nowMs) {
   return (nowMs % STROBE_PERIOD_MS) < STROBE_FLASH_MS;
 }
-// Svetlo na chrbte trupu: v 96-boxe 8u halo + 4u jadro ≈ 1–2 px na
-// 20px fleet billboarde. Biele — tint pipeline ho zafarbí spolu s trupom
-// (cyan pri sledovanom, amber pri vojenskom), čo pôsobí prirodzene.
+// Svetlo na chrbte trupu, ČERVENÝ maják (požiadavka 2026-09-03: „1-pixelové
+// červené svetlo blikajúce"). Prečo červená smie byť menšia než biela bola:
+// biele svetlo LEŽIACE na bielom trupe bolo neviditeľné a potrebovalo halo
+// presahujúce obrys; červená má kontrast priamo na trupe aj na svetlej mape,
+// takže stačí bodka. 5u jadro ≈ 1 px na 20px fleet billboarde + slabučké
+// 11u halo (~2 px) nech záblesk „dýchne". Tint pipeline: civil aj tracked
+// billboard = WHITE (červená ostane), vojenský amber ju posunie do
+// oranžovočervenej — pri skutočných majákoch prirodzené.
 // data-strobe značka drží testovateľnosť (base64 sa dá dekódovať).
-// QA nález (2026-09-03, porovnávacia tabuľa): svetlo LEŽIACE na bielom trupe
-// je neviditeľné — halo musí presahovať cez obrys siluety, inak niet čo
-// bliknúť. 12u halo / 6u jadro ≈ 2,5/1,2 px na 20px fleet billboarde:
-// stále jemné, ale záblesk vidno ako krátke rozžiarenie okolo trupu.
-const STROBE_LIGHT = '<g data-strobe="1"><circle cx="0" cy="-4" r="12" fill="white" fill-opacity="0.4"/><circle cx="0" cy="-4" r="6" fill="white" fill-opacity="0.95"/></g>';
+const STROBE_LIGHT = '<g data-strobe="1"><circle cx="0" cy="-4" r="5.5" fill="#ff2626" fill-opacity="0.35"/><circle cx="0" cy="-4" r="2.5" fill="#ff2626" fill-opacity="1"/></g>';
 
 /** Data URI for a class silhouette (lazily built, cached per kind+size+strobe).
  *  Default size serves the fleet; pass `aircraftIcon(kind, TRACKED_ICON_PX)`
