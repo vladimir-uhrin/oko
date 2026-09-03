@@ -2143,7 +2143,7 @@ function _startTrail(icao24) {
     }
   }
   if (!_trail && _viewer) {
-    _trail = createTrail(_viewer, { color: TRAIL_COLOR, width: 2.5 });
+    _trail = createTrail(_viewer, { color: TRAIL_COLOR, width: 1.3 });
   }
   _trail?.setVisible(!_cockpitContactMode);
   // Live head segment: last DISPLAYED body point → current dead-reckoned icon, updated
@@ -2186,7 +2186,7 @@ function _startTrail(icao24) {
           if (!from) return [];
           return [from, end];
         }, false),
-        width: 2.5,
+        width: 1.3,
         material: Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.9),
         // Round 4: the head must never vanish into the mesh either (dimmed
         // when occluded so depth still reads).

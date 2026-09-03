@@ -27,7 +27,7 @@ const ROUTE_LINE_COLOR = '#39d0ff';
 /** Alfa nad terénom / za terénom (trail idiom: stlmiť, nie schovať). */
 const ROUTE_LINE_ALPHA = 0.7;
 const ROUTE_LINE_OCCLUDED_ALPHA = 0.28;
-const ROUTE_LINE_WIDTH = 2;
+const ROUTE_LINE_WIDTH = 1.3;
 
 /** @type {number} Uniquifier entity id (Cesium vyžaduje unikátne). */
 let _routeSeq = 0;

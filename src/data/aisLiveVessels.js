@@ -1709,7 +1709,7 @@ function startSelectedVesselTrail(record) {
   const current = vesselTrailPosition(record);
   if (current) state.trailPositions.push(current);
   if (!state.trail && state.viewer) {
-    state.trail = createTrail(state.viewer, { color: TRAIL_COLOR, width: 2.5 });
+    state.trail = createTrail(state.viewer, { color: TRAIL_COLOR, width: 1.3 });
   }
   if (state.trail) state.trail.setPositions(state.trailPositions);
   backfillVesselTrail(record.mmsi, state.trailBackfillToken);

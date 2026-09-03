@@ -46,13 +46,13 @@ const MIN_SEGMENT_DISTANCE_SQ = 0.01;
  * @param {Cesium.Viewer} viewer - Viewer whose entity collection owns the trail.
  * @param {object} options - Trail options.
  * @param {string} options.color - CSS color string for the trail hue.
- * @param {number} [options.width=2.5] - Polyline width in pixels.
+ * @param {number} [options.width=1.3] - Polyline width in pixels.
  * @returns {{setPositions: function(Cesium.Cartesian3[]): void, setVisible: function(boolean): void, clear: function(): void, destroy: function(): void}}
  *   Trail handle: setPositions replaces the geometry, setVisible temporarily
  *   hides it without discarding history, clear empties it, and destroy removes
  *   the entity permanently.
  */
-export function createTrail(viewer, { color, width = 2.5 }) {
+export function createTrail(viewer, { color, width = 1.3 }) {
   const baseColor = Cesium.Color.fromCssColorString(color);
   /** @type {Cesium.Cartesian3[]} Current deduped positions (owned copy). */
   let current = [];
