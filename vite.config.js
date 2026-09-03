@@ -5198,8 +5198,12 @@ function metarProxy() {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 10_000);
           try {
+            // `taf=true` pridá k TOMU ISTÉMU záznamu pole `rawTaf` — žiadny
+            // druhý request, žiadny druhý cache kľúč, žiadna zmena záťaže na
+            // zdieľaný 100 req/min limit. Letisko bez TAF kľúč jednoducho
+            // nemá (nie null, nie chyba).
             const upstream = await fetch(
-              `https://aviationweather.gov/api/data/metar?ids=${station}&format=json`,
+              `https://aviationweather.gov/api/data/metar?ids=${station}&format=json&taf=true`,
               {
                 headers: { Accept: 'application/json', 'User-Agent': 'oko-metar-proxy/1.0' },
                 signal: controller.signal,
