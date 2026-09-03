@@ -144,3 +144,57 @@ test('main.js číta preferenciu z ?terrain= a podáva ju controlleru', async ()
   assert.match(source, /new URLSearchParams\(window\.location\.search\)\.get\('terrain'\) \|\| 'auto'/);
   assert.match(source, /terrainPreference,/);
 });
+
+// ── Tmavý podklad (2026-09-03) ───────────────────────────────────────────────
+// Pridaný pre kontrast vzdušných kontaktov: pri oddialení sa flotila kreslí
+// bodkami (airIconLod.js) a biely bod na svetlej OSM mape sa stráca.
+
+const stadia = () => MAP_STACKS.find((stack) => stack.id === 'stadia-dark');
+
+test('tmavý podklad je keyless XYZ raster s globálnym pokrytím', () => {
+  const stack = stadia();
+  assert.ok(stack, 'stack stadia-dark chýba v MAP_STACKS');
+  assert.equal(stack.kind, 'xyz');
+  assert.equal(stack.requiresIon, false);
+  // Na rozdiel od SK Orto pokrýva celý svet — podklad pod ním by bol plytvanie.
+  assert.equal(stack.underlayStackId, undefined);
+  assert.equal(new URL(stack.xyz.url.replace(/\{[zxy]\}/g, '0')).host, 'tiles.stadiamaps.com');
+  assert.ok(stack.xyz.url.startsWith('https://'));
+  // @2x dlaždice sú 512 px — musí sedieť s deklarovanou veľkosťou, inak sa
+  // mapa rozmaže alebo sa sťahuje dvojnásobok dát.
+  assert.match(stack.xyz.url, /@2x\.png$/);
+  assert.equal(stack.xyz.tileSize, 512);
+  assert.ok(Number.isInteger(stack.xyz.maximumLevel) && stack.xyz.maximumLevel <= 20);
+});
+
+test('atribúcia tmavého podkladu menuje všetky tri povinné zdroje', () => {
+  // Stadia vyžaduje kredit za DÁTA, ŠTÝL aj SOFTVÉR za nimi — nie je to
+  // zdvorilosť, je to podmienka použitia.
+  const stack = stadia();
+  for (const required of [/Stadia/, /OpenMapTiles/, /OpenStreetMap/]) {
+    assert.match(stack.xyz.credit, required);
+  }
+});
+
+test('kľúč nikdy nejde do URL dlaždíc (pravidlo 3 CLAUDE.md)', () => {
+  // Stadia autorizuje cez Origin/Referer; na localhoste kľúč netreba vôbec.
+  // Keby ho sem niekto vložil, uniká do prehliadača každým requestom.
+  const stack = stadia();
+  assert.doesNotMatch(stack.xyz.url, /api_key|apikey|access_token|key=/i);
+});
+
+test('tmavý podklad je dostupný bez ion tokenu aj bez Google tilesetu', () => {
+  const controller = new MapStackController({}, {});
+  assert.equal(controller.isStackAvailable('stadia-dark'), true);
+});
+
+test('provider je XYZ s 512 px dlaždicami a je cachovaný', async () => {
+  const controller = new MapStackController({}, {});
+  const stack = stadia();
+  const provider = await controller._getImageryProvider(stack);
+  assert.ok(provider);
+  assert.equal(provider.tileWidth, 512);
+  assert.equal(provider.tileHeight, 512);
+  const again = await controller._getImageryProvider(stack);
+  assert.equal(again, provider, 'provider sa nesmie stavať dvakrát');
+});

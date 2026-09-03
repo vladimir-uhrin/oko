@@ -67,7 +67,10 @@ const CONTROLLER_STACKS = [
   { id: 'bing-aerial', label: 'Bing Aerial', requiresIon: true, available: true, unavailableReason: null },
   { id: 'bing-labels', label: 'Bing Labels', requiresIon: true, available: true, unavailableReason: null },
   { id: 'osm', label: 'OSM', requiresIon: false, available: true, unavailableReason: null },
-  // OKO: SK Orto (ÚGKK WMS) je piaty prezentovaný podklad — keyless, funkčný.
+  // OKO 2026-09-03: tmavý podklad pre kontrast vzdušných kontaktov (keyless
+  // na localhoste). Stojí ZA osm, aby indexy detí v testoch nižšie sedeli.
+  { id: 'stadia-dark', label: 'Stadia Dark', requiresIon: false, available: true, unavailableReason: null },
+  // OKO: SK Orto (ÚGKK WMS) je prezentovaný podklad — keyless, funkčný.
   { id: 'ugkk-ortofoto', label: 'ÚGKK Ortofoto SR', requiresIon: false, available: true, unavailableReason: null },
 ];
 
@@ -78,12 +81,14 @@ test('the row renders exactly the accepted sources', () => {
   // 2026-09-01: pribudol 'ugkk-ortofoto' — vrstva existovala od Fázy 1, ale
   // chýbala v allowliste, takže sa k nej používateľ nevedel preklikať.
   assert.deepEqual(container.children.map((chip) => chip.dataset.stackId), [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'ugkk-ortofoto',
   ]);
   assert.deepEqual(container.children.map(chipText), [
-    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'ÚGKK Ortofoto SR',
+    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'Stadia Dark', 'ÚGKK Ortofoto SR',
   ]);
-  assert.deepEqual(PRESENTED_MAP_STACK_IDS, ['photoreal', 'bing-aerial', 'bing-labels', 'osm', 'ugkk-ortofoto']);
+  assert.deepEqual(PRESENTED_MAP_STACK_IDS, [
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'ugkk-ortofoto',
+  ]);
   assert.ok(container.children.every((chip) => chip.tagName === 'button' && chip.type === 'button'));
   assert.ok(container.children.every((chip) => chip.classList.contains(MAP_STACK_CHIP_CLASS)));
 });

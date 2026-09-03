@@ -221,6 +221,11 @@ const STACK_ALIASES = new Map([
   ['road', 'osm'],
   ['roads', 'osm'],
   ['road map', 'osm'],
+  ['stadia-dark', 'stadia-dark'],
+  ['dark', 'stadia-dark'],
+  ['dark map', 'stadia-dark'],
+  ['night', 'stadia-dark'],
+  ['night mode', 'stadia-dark'],
 ]);
 
 /** Search order for track_entity across entity layer families. */

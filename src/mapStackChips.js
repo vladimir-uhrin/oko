@@ -11,6 +11,11 @@
 // preklikať. Presne to je cena explicitného allowlistu: nová položka nie je
 // hotová, kým nie je aj tu.
 //
+// OKO 2026-09-03: `stadia-dark` je tu z toho istého dôvodu — tmavý podklad
+// pridaný pre kontrast vzdušných kontaktov by bez zápisu nižšie ostal
+// nedosiahnuteľný. Vložený ZA `osm` zámerne: testy tejto lišty indexujú
+// deti kontajnera a vloženie pred OSM by ich posunulo bez úžitku.
+//
 // The chips are a control SURFACE only: selecting one calls back into the same
 // `_setMapStack()` path the dropdown's `change` handler used, and the active
 // state is re-synced from controller state (never optimistically), so a failed
@@ -24,6 +29,7 @@ export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'bing-aerial',
   'bing-labels',
   'osm',
+  'stadia-dark',
   'ugkk-ortofoto',
 ]);
 

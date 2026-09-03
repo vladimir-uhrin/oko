@@ -190,6 +190,16 @@ export const DATA_CREDITS = [
       '(CC BY 4.0)',
   },
   {
+    // Stadia vyžaduje atribúciu dát, štýlu aj softvéru za nimi — všetky tri
+    // sú tu menovite. Nie je to voliteľná zdvorilosť, je to podmienka použitia.
+    key: 'stadia-dark',
+    html:
+      'Stadia Dark map stack: © ' +
+      '<a href="https://stadiamaps.com/" target="_blank" rel="noopener">Stadia Maps</a> © ' +
+      '<a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> © ' +
+      '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  },
+  {
     key: 'shmu-radar',
     html:
       'Zrážkový radar: ' +

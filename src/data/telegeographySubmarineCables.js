@@ -207,7 +207,9 @@ export function createCableOverlayPublisher({
  * real `MAP_STACKS` so the omission is caught loudly.
  */
 const CABLE_GLOBE_STACK_IDS = Object.freeze(
-  new Set(['bing-aerial', 'bing-labels', 'osm', 'ugkk-ortofoto']),
+  // 'stadia-dark' (2026-09-03) je bežný glóbusový raster podklad ako OSM —
+  // Cesium globe je viditeľný, takže pozemné úseky káblov sa naň kreslia.
+  new Set(['bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'ugkk-ortofoto']),
 );
 
 /**

@@ -35,6 +35,34 @@ export const MAP_STACKS = [
     requiresIon: false,
   },
   {
+    id: 'stadia-dark',
+    label: 'Stadia Dark',
+    shortLabel: 'DARK',
+    kind: 'xyz',
+    requiresIon: false,
+    // Tmavý podklad pre kontrast vzdušných kontaktov (2026-09-03). Pri
+    // oddialenom pohľade sa flotila kreslí bodkami (airIconLod.js) a na
+    // svetlej OSM mape sa biely bod stráca — presne to, čo FlightRadar24
+    // rieši tmavou mapou. Alidade Smooth Dark má tlmenú paletu (nie čiernu),
+    // takže mesta a pobrežia ostávajú čitateľné pod kontaktmi.
+    //
+    // KEYLESS LEN NA LOCALHOSTE: Stadia autorizuje cez Origin/Referer a ich
+    // dokumentácia to hovorí doslova — „As long as you're running via a
+    // development server accessed via localhost or 127.0.0.1, you don't need
+    // an API key!" Náš dev server je na localhost viazaný (CLAUDE.md), takže
+    // do prehliadača nejde žiadny kľúč a pravidlo 3 platí konštrukciou.
+    // Bez Origin hlavičky vracia služba 401. Limity sú prísne; pri opakovanom
+    // HTTP 429 treba bezplatný účet. PRI NASADENÍ MIMO LOCALHOST je nutná
+    // doménová autorizácia na účte — NIE api_key v URL. Free tier pokrýva
+    // vývoj, evaluáciu a nekomerčné použitie. Podmienky: DATA_SOURCES.md.
+    xyz: {
+      url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}@2x.png',
+      tileSize: 512,
+      maximumLevel: 20,
+      credit: '© Stadia Maps © OpenMapTiles © OpenStreetMap contributors',
+    },
+  },
+  {
     id: 'ugkk-ortofoto',
     label: 'ÚGKK Ortofoto SR',
     shortLabel: 'SK Orto',
@@ -346,6 +374,17 @@ export class MapStackController {
         tileHeight: cfg.tileSize,
         maximumLevel: cfg.maximumLevel,
         rectangle: Cesium.Rectangle.fromDegrees(...cfg.rectangleDegrees),
+        credit: cfg.credit,
+      });
+    } else if (stack.kind === 'xyz') {
+      // Obyčajné XYZ raster dlaždice. Konfigurácia žije v descriptore (ako pri
+      // 'wms'), nie tu — provider factory nesmie poznať konkrétny zdroj.
+      const cfg = stack.xyz;
+      provider = new Cesium.UrlTemplateImageryProvider({
+        url: cfg.url,
+        tileWidth: cfg.tileSize,
+        tileHeight: cfg.tileSize,
+        maximumLevel: cfg.maximumLevel,
         credit: cfg.credit,
       });
     } else {
