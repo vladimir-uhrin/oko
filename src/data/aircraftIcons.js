@@ -267,29 +267,55 @@ export const STROBE_FLASH_MS = 130;
 export function strobeOn(nowMs) {
   return (nowMs % STROBE_PERIOD_MS) < STROBE_FLASH_MS;
 }
-// Svetlo na chrbte trupu, ČERVENÝ maják (požiadavka 2026-09-03: „1-pixelové
-// červené svetlo blikajúce"). Prečo červená smie byť menšia než biela bola:
-// biele svetlo LEŽIACE na bielom trupe bolo neviditeľné a potrebovalo halo
-// presahujúce obrys; červená má kontrast priamo na trupe aj na svetlej mape,
-// takže stačí bodka. 5u jadro ≈ 1 px na 20px fleet billboarde + slabučké
-// 11u halo (~2 px) nech záblesk „dýchne". Tint pipeline: civil aj tracked
-// billboard = WHITE (červená ostane), vojenský amber ju posunie do
-// oranžovočervenej — pri skutočných majákoch prirodzené.
+// ČERVENÉ polohové svetlo na ĽAVOM krídle (spresnenie 2026-09-03: „na
+// krídlo, ako mávajú lietadlá" — reálna konvencia: červená = port/ľavé
+// krídlo, preto negatívne X). Každá silueta má iné rozpätie, takže poloha
+// je per-kind — bod sedí na konci krídla tak, aby halo mierne presiahlo
+// obrys (lekcia z bieleho svetla: záblesk celý VO výplni nevidno).
+// 5u jadro ≈ 1 px na 20px fleet billboarde + slabučké 11u halo. Tint
+// pipeline: civil aj tracked billboard = WHITE (červená ostane), vojenský
+// amber ju posunie do oranžovočervenej — pri skutočných majákoch prirodzené.
 // data-strobe značka drží testovateľnosť (base64 sa dá dekódovať).
-const STROBE_LIGHT = '<g data-strobe="1"><circle cx="0" cy="-4" r="5.5" fill="#ff2626" fill-opacity="0.35"/><circle cx="0" cy="-4" r="2.5" fill="#ff2626" fill-opacity="1"/></g>';
+const WING_LIGHT_POS = {
+  airliner: [-33, 8],
+  widebody: [-40, 14.5],
+  quadjet: [-44.5, 16.5],
+  turboprop: [-35, -11.5],
+  light: [-26, -1.5],
+  glider: [-44, -7],
+  helicopter: [-11, -6], // vrtuľník krídlo nemá — bok kabíny
+  fastjet: [-26.5, 22.5],
+  bizjet: [-26.5, 10.5],
+  uav: [-42, -4.5],
+};
+function strobeLight(kind) {
+  const [x, y] = WING_LIGHT_POS[kind] || WING_LIGHT_POS.airliner;
+  return `<g data-strobe="1"><circle cx="${x}" cy="${y}" r="5.5" fill="#ff2626" fill-opacity="0.35"/><circle cx="${x}" cy="${y}" r="2.5" fill="#ff2626" fill-opacity="1"/></g>`;
+}
 
-/** Data URI for a class silhouette (lazily built, cached per kind+size+strobe).
- *  Default size serves the fleet; pass `aircraftIcon(kind, TRACKED_ICON_PX)`
- *  (re-exported below) for the tracked billboard. The third argument selects
- *  the strobe-lit frame; TR-3B keeps its own corner lights (no strobe). */
+/** Data URI for a class silhouette (lazily built, cached per
+ *  kind+size+strobe+tint). Default size serves the fleet; pass
+ *  `aircraftIcon(kind, TRACKED_ICON_PX)` (re-exported below) for the tracked
+ *  billboard. The third argument selects the strobe-lit frame; TR-3B keeps
+ *  its own corner lights (no strobe).
+ *
+ *  tint 'cyan' (2026-09-03): ZAPEČENÁ azúrová výplň pre sledovaný billboard.
+ *  Billboard.color je multiplikatívny — CYAN tint zabíjal červené krídlové
+ *  svetlo (červená × cyan ≈ čierna, „ale aj sem"). Sledovaný glyf preto
+ *  nesie cyan priamo v SVG a billboard ostáva WHITE: stroj vyzerá rovnako,
+ *  svetlo ostáva červené. TR-3B tint ignoruje (tmavá silueta s vlastnými
+ *  svetlami žije z multiplikatívneho stmavenia — pôvodná cesta). */
 export const TRACKED_ICON_PX = TRACKED_RASTER_PX;
-export function aircraftIcon(kind, px = FLEET_RASTER_PX, strobe = false) {
+export function aircraftIcon(kind, px = FLEET_RASTER_PX, strobe = false, tint = null) {
   const k = BODIES[kind] ? kind : 'airliner';
-  const lit = strobe === true && !k.startsWith('tr3b');
-  const key = `${k}@${px}${lit ? '!s' : ''}`;
+  const tr3b = k.startsWith('tr3b');
+  const lit = strobe === true && !tr3b;
+  const cyan = tint === 'cyan' && !tr3b;
+  const key = `${k}@${px}${lit ? '!s' : ''}${cyan ? '!c' : ''}`;
   let uri = _iconCache.get(key);
   if (!uri) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g transform="translate(${C},${C})">${BODIES[k]}${lit ? STROBE_LIGHT : ''}</g></svg>`;
+    const body = cyan ? BODIES[k].replaceAll('fill="white"', 'fill="#00ffff"') : BODIES[k];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g transform="translate(${C},${C})">${body}${lit ? strobeLight(k) : ''}</g></svg>`;
     uri = 'data:image/svg+xml;base64,' + _b64(svg);
     _iconCache.set(key, uri);
   }

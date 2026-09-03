@@ -489,8 +489,11 @@ function _applyCockpitState(detail = {}) {
 // so the visible trail can grow to TRAIL_MAX_POINTS fixes.
 // ---------------------------------------------------------------------------
 
-/** @constant {string} Military trail hue (PRD F4, pinned). */
-const TRAIL_COLOR = '#FFB800';
+/** @constant {string} Military trail hue. 2026-09-03: tlmená fialová —
+ *  jednotná trajektóriová farba pre všetky letecké stopy (viď flights.js);
+ *  amber ostáva identitou STROJA (MIL_TINT), stopa sa od neho má líšiť.
+ *  Pôvodný PRD F4 amber: '#FFB800'. */
+const TRAIL_COLOR = '#a78bde';
 /** @constant {number} Combined cap on trail vertices (backfill + live accumulation). */
 const TRAIL_MAX_POINTS = 400;
 /** @type {{setPositions: Function, clear: Function, destroy: Function}|null} Shared fading-trail renderer */

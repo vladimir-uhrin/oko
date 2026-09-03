@@ -580,8 +580,12 @@ function _applyCockpitState(detail = {}) {
 // so the visible trail can grow to TRAIL_MAX_POINTS fixes.
 // ---------------------------------------------------------------------------
 
-/** @constant {string} Civilian trail hue (PRD F4, pinned). */
-const TRAIL_COLOR = '#00d4ff';
+/** @constant {string} Civilian trail hue. 2026-09-03: tlmená fialová na
+ *  želanie („trajektórie inej farby ako je lietadlo") — cyan splývala so
+ *  sledovaným strojom; fialová sa líši od cyan/white/amber strojov,
+ *  červených zameriavačov aj mapy. Jednotná pre všetky letecké trajektórie
+ *  (aj militaryFlights + routeLine). Pôvodný PRD F4 cyan: '#00d4ff'. */
+const TRAIL_COLOR = '#a78bde';
 /** @constant {number} Combined cap on trail vertices (backfill + live accumulation). */
 const TRAIL_MAX_POINTS = 400;
 /** @type {{setPositions: Function, clear: Function, destroy: Function}|null} Shared fading-trail renderer */
@@ -3411,6 +3415,7 @@ function _syncTrackedBillboardImage() {
     _iconKind(_trackedIcao, _flightData.get(_trackedIcao)?.klass),
     TRACKED_ICON_PX,
     _lastStrobeOn, // strobo fáza flotily platí aj pre sledovaný glyf
+    'cyan', // zapečený tint — billboard.color je WHITE, nech svetlo ostane červené
   );
 }
 
@@ -3681,15 +3686,20 @@ function _trackFlight(icao24, { origin = 'programmatic' } = {}) {
     // frames makes the target oscillate forward/back on screen.
     trackingReferenceFrame: Cesium.TrackingReferenceFrame.ENU,
     billboard: {
-      image: aircraftIcon(_iconKind(_trackedIcao, _flightData.get(_trackedIcao)?.klass), TRACKED_ICON_PX),
+      image: aircraftIcon(_iconKind(_trackedIcao, _flightData.get(_trackedIcao)?.klass), TRACKED_ICON_PX, _lastStrobeOn, 'cyan'),
       width: 28,
       height: 28,
       scale: CLASS_SCALE_2D[_flightData.get(_trackedIcao)?.klass] || 1,
-      // Solid cyan when the billboard is the visual (zoomed out, 3D off, or model still loading);
+      // Solid when the billboard is the visual (zoomed out, 3D off, or model still loading);
       // transparent once the STANDALONE tracked model is actually up (ready + shown).
-      color: new Cesium.CallbackProperty(() => (
-        _modelOwnsVisual(_trackedIcao) ? CYAN_TRANSPARENT : Cesium.Color.CYAN
-      ), false),
+      // Cyan sa od 2026-09-03 pečie do SVG (tint 'cyan' v aircraftIcon) a farba
+      // je WHITE — multiplikatívny CYAN tint zabíjal červené krídlové svetlo.
+      // TR-3B je výnimka: jeho tmavá silueta žije z multiplikatívneho stmavenia.
+      color: new Cesium.CallbackProperty(() => {
+        if (_modelOwnsVisual(_trackedIcao)) return CYAN_TRANSPARENT;
+        const kindNow = _iconKind(_trackedIcao, _flightData.get(_trackedIcao)?.klass);
+        return kindNow.startsWith('tr3b') ? Cesium.Color.CYAN : Cesium.Color.WHITE;
+      }, false),
       sizeInMeters: false,
       scaleByDistance: new Cesium.NearFarScalar(1000, 3.0, 8000000, 0.5),
       alignedAxis: Cesium.Cartesian3.ZERO,

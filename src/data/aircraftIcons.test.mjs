@@ -38,6 +38,41 @@ test('strobo variant ikony: vlastný cache kľúč, svetlo len v zapnutej fáze'
   assert.ok(decoded(lit).includes('strobe'), 'zapnutá fáza nesie strobo svetlo');
 });
 
+test('polohové svetlo sedí na ĽAVOM krídle, per-kind (nie na osi trupu)', () => {
+  // Spresnenie 2026-09-03: „na krídlo, ako mávajú lietadlá" — červená patrí
+  // na port (ľavé) krídlo, teda záporné cx; a keďže každá silueta má iné
+  // rozpätie, poloha sa musí líšiť medzi typmi.
+  const strobeGroup = (kind) => {
+    const m = decoded(aircraftIcon(kind, 64, true)).match(/<g data-strobe="1">.*?<\/g>/);
+    assert.ok(m, `${kind}: strobo skupina existuje`);
+    return m[0];
+  };
+  const cxOf = (svg) => Number(svg.match(/cx="(-?[\d.]+)"/)[1]);
+  const airliner = cxOf(strobeGroup('airliner'));
+  const widebody = cxOf(strobeGroup('widebody'));
+  assert.ok(airliner < 0, 'airliner: svetlo na ľavej strane (port)');
+  assert.ok(widebody < 0, 'widebody: svetlo na ľavej strane (port)');
+  assert.notEqual(airliner, widebody, 'poloha je per-kind, nie jedna pre všetkých');
+});
+
+test('zapečený cyan tint: stroj azúrový, krídlové svetlo ostáva ČERVENÉ', () => {
+  // „Ale aj sem" (2026-09-03): billboard.color je multiplikatívny, takže CYAN
+  // tint sledovaného stroja robil z červeného svetla čiernu bodku. Sledovaný
+  // glyf preto nesie cyan v SVG a billboard je WHITE.
+  const plain = aircraftIcon('airliner', 192, true);
+  const baked = aircraftIcon('airliner', 192, true, 'cyan');
+  assert.notEqual(plain, baked, 'tintovaný variant je iná textúra');
+  const svg = decoded(baked);
+  assert.ok(svg.includes('#00ffff'), 'trup je azúrový priamo v SVG');
+  assert.ok(!svg.includes('fill="white"'), 'biela výplň je celá nahradená');
+  assert.ok(svg.includes('#ff2626'), 'krídlové svetlo ostáva červené');
+  // TR-3B tint ignoruje — tmavá silueta žije z multiplikatívneho stmavenia.
+  assert.equal(aircraftIcon('tr3b', 192, false, 'cyan'), aircraftIcon('tr3b', 192, false));
+  // Tripwire: sledovaný billboard vo flights.js NAOZAJ žiada zapečený tint.
+  const flightsSrc = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
+  assert.match(flightsSrc, /_lastStrobeOn,[^)]*\n\s*'cyan',/, 'sync sledovaného glyfu pečie cyan');
+});
+
 test('TR-3B si nechá vlastné svetlá — strobo sa naň nelepí', () => {
   // Easter egg má trojicu rohových svetiel s vlastným rytmom scény; biele
   // strobo na čiernom trojuholníku by kazilo siluetu.

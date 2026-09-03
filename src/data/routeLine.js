@@ -22,8 +22,9 @@ registerPickOwner('route-lines', (pickedId) => String(pickedId).startsWith('gev-
 
 /** Fallback letová hladina, keď render výška ešte nie je známa (m). */
 export const ROUTE_LINE_DEFAULT_ALTITUDE_M = 10_000;
-/** Farba čiary — akcent sledovaného letu (tracked cyan). */
-const ROUTE_LINE_COLOR = '#39d0ff';
+/** Farba čiary — jednotná trajektóriová fialová (2026-09-03, viď
+ *  flights.js TRAIL_COLOR; predtým tracked-cyan '#39d0ff'). */
+const ROUTE_LINE_COLOR = '#a78bde';
 /** Alfa nad terénom / za terénom (trail idiom: stlmiť, nie schovať). */
 const ROUTE_LINE_ALPHA = 0.7;
 const ROUTE_LINE_OCCLUDED_ALPHA = 0.28;
