@@ -83,8 +83,17 @@ for (const layer of LAYERS) {
   test(`${layer.name}: near AIR state is independent from model admission`, () => {
     assert.match(source, /nextCockpitNearContacts\(/,
       'Cockpit derives a separate near-contact hysteresis set');
-    assert.match(source, /isCockpitContact && !isCockpitNear[\s\S]*cockpitContactDotImage\(\)/,
+    // 2026-09-03: rozhodnutie „bodka vs. silueta" sa presunulo do jediného
+    // predikátu `_isDotContact`, lebo k pôvodnému kokpitovému pásmu pribudol
+    // mapový LOD (airIconLod.js) a `bb.scale` píšu dve cesty — rozdielny
+    // úsudok by ikonu naťahoval každý tik. Invariant kokpitu je zachovaný a
+    // pinuje sa tu na samotnom predikáte: mimo pásma bodka, v pásme silueta.
+    assert.match(source, /function _isDotContact\(icao24\)[\s\S]*?if \(_cockpitContactMode\) return !_cockpitNearContacts\.has\(icao24\);/,
       'only out-of-range Cockpit contacts become dots');
+    assert.match(source, /_isDotContact\(icao24\)\) \{[\s\S]*?bb\._gevDot = true;/,
+      'the dot branch is selected by that one predicate');
+    assert.match(source, /_gevDot === true\s*\n?\s*\? cockpitContactDotImage\(\)/,
+      'the dot texture is composed by the single icon writer');
     // `_iconKind` is identity for every unconverted contact (see
     // tr3bRegistry.test.mjs) — it only swaps the glyph for a contact the
     // operator explicitly converted into a TR-3B.
@@ -98,8 +107,12 @@ for (const layer of LAYERS) {
       'the composer derives the glyph from the class it was handed');
     assert.match(source, /bb\.rotation = 0;/,
       'far dots are reset to a rotation-free presentation');
-    assert.match(source, /\(!_cockpitContactMode \|\| isCockpitNear\) && \(doRotations \|\| revealed\)/,
+    // Rotačná brána prešla na ten istý predikát: otáčať kruh nemá zmysel,
+    // siluety (vrátane kokpitových near) kurz naďalej dostávajú.
+    assert.match(source, /if \(!isDot && \(doRotations \|\| revealed\)\)/,
       'near 2D silhouettes continue to receive projected course');
+    assert.match(source, /const isDot = _isDotContact\(icao24\);/,
+      'the tick derives the dot state from the same predicate as presentation');
     assert.match(source, /if \(bb\.show\) bb\.show = false; \/\/ hand off ONLY once the model renders/,
       'the gap-proof billboard-to-model handoff remains intact');
   });

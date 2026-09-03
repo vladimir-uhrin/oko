@@ -28,6 +28,7 @@ import {
 } from './tr3bRegistry.js';
 import { cockpitContactDotImage } from './cockpitContactDot.js';
 import { nextCockpitNearContacts } from './cockpitAirLod.js';
+import { airDotLodActive } from './airIconLod.js';
 import {
   applyTrackedCameraFrame,
   trackedModelScaleForPixelCap,
@@ -383,6 +384,10 @@ function _isExplicitTrackingOrigin(origin) {
 }
 
 const COCKPIT_CONTACT_SIZE_PX = 6;
+/** Veľkosť bodky na MAPE pri oddialenom pohľade — zrkadlo flights.js. */
+const FAR_DOT_SIZE_PX = 7;
+/** @type {boolean} Je flotila práve v bodkovom režime? (viď airIconLod.js) */
+let _farIconDots = false;
 const TRACKED_BILLBOARD_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1000, 3.0, 8000000, 0.5,
 );
@@ -402,17 +407,32 @@ function _militaryBillboardScale(icao24) {
   return BILLBOARD_SCALE * (CLASS_SCALE_2D[meta?.klass] || 1) * (meta?.onGround ? GROUND_SCALE : 1);
 }
 
+/** Kreslí sa kontakt ako BODKA namiesto siluety? JEDINÝ predikát pre všetkých
+ *  konzumentov — zrkadlo flights.js (`bb.scale` píšu dve cesty, rozdielny
+ *  úsudok by ikonu naťahoval každý tik). */
+function _isDotContact(icao24) {
+  if (icao24 === _trackedIcao) return false;
+  if (_cockpitContactMode) return !_cockpitNearContacts.has(icao24);
+  return _farIconDots;
+}
+
 /** Apply the current normal/cockpit visual contract to one owned fleet billboard. */
 function _applyFleetBillboardPresentation(icao24, bb) {
   if (!bb) return;
   const limbScale = _billboardLimbScale.get(bb) ?? 1;
   const isCockpitContact = _cockpitContactMode && icao24 !== _trackedIcao;
   const isCockpitNear = isCockpitContact && _cockpitNearContacts.has(icao24);
-  if (isCockpitContact && !isCockpitNear) {
+  if (_isDotContact(icao24)) {
     const freshnessAlpha = bb.color?.alpha ?? 1;
-    bb.image = cockpitContactDotImage();
-    bb.width = COCKPIT_CONTACT_SIZE_PX;
-    bb.height = COCKPIT_CONTACT_SIZE_PX;
+    // Textúru skladá composer aj tu — v celom module ostáva JEDINÝ zápis
+    // `bb.image` (zrkadlo flights.js).
+    bb._gevDot = true;
+    bb._gevIconLarge = false;
+    bb._gevStrobeOn = false;
+    _syncFleetBillboardIcon(icao24, bb, undefined);
+    const dotPx = isCockpitContact && !isCockpitNear ? COCKPIT_CONTACT_SIZE_PX : FAR_DOT_SIZE_PX;
+    bb.width = dotPx;
+    bb.height = dotPx;
     bb.scale = limbScale;
     bb.scaleByDistance = _cockpitBillboardScaleByDistance();
     bb.color = MIL_ICON_COLOR.withAlpha(freshnessAlpha);
@@ -420,6 +440,7 @@ function _applyFleetBillboardPresentation(icao24, bb) {
     return;
   }
 
+  bb._gevDot = false;
   const meta = _flightData.get(icao24);
   _syncFleetBillboardIcon(icao24, bb, meta?.klass);
   bb.width = icao24 === _trackedIcao ? 24 : 20;
@@ -427,6 +448,17 @@ function _applyFleetBillboardPresentation(icao24, bb) {
   bb.scale = _militaryBillboardScale(icao24) * limbScale;
   bb.scaleByDistance = _normalBillboardScaleByDistance();
   bb.color = MIL_ICON_COLOR.withAlpha(bb.color?.alpha ?? 1);
+}
+
+/** Prepni flotilu medzi siluetami a bodkami podľa výšky kamery — zrkadlo
+ *  flights.js. Vyhodnotenie raz za tik, prekreslenie len na prechode. */
+function _refreshFarIconLod() {
+  const height = _viewer?.camera?.positionCartographic?.height;
+  const next = _cockpitContactMode ? false : airDotLodActive(height, _farIconDots);
+  if (next === _farIconDots) return;
+  _farIconDots = next;
+  for (const [icao24, bb] of _billboards) _applyFleetBillboardPresentation(icao24, bb);
+  _lastCamPoseSig = ''; // vynúť rotačný pass, nech sa nosy narovnajú hneď
 }
 
 /** Refresh the AIR-only Cockpit near band independently from model admission. */
@@ -775,11 +807,13 @@ const STROBE_MAX_DIST_M = 60000;
  *  prepisovali osi, odtiaľ „raz bliká, raz nie". */
 function _syncFleetBillboardIcon(icao24, bb, klass) {
   if (!bb) return;
-  const uri = aircraftIcon(
-    _iconKind(icao24, klass),
-    bb._gevIconLarge ? TRACKED_ICON_PX : undefined,
-    bb._gevStrobeOn === true,
-  );
+  const uri = bb._gevDot === true
+    ? cockpitContactDotImage()
+    : aircraftIcon(
+      _iconKind(icao24, klass),
+      bb._gevIconLarge ? TRACKED_ICON_PX : undefined,
+      bb._gevStrobeOn === true,
+    );
   if (bb.image !== uri) bb.image = uri;
 }
 
@@ -1933,6 +1967,8 @@ function _fleetTick() {
 
   _drainIrReloadQueue(); // bounded per-tick slice of any pending boost-flip reload
   if (_cockpitContactMode) _refreshCockpitNearContacts();
+  // Musí bežať PRED hlavnou slučkou, nech je tier v celom tiku konzistentný.
+  _refreshFarIconLod();
 
   // Antikolizne strobo — zrkadlo flights.js (2026-09-03): faza je globalna,
   // ale APLIKUJE sa per-kontakt podla vzdialenosti od kamery (v hlavnom cykle,
@@ -2069,9 +2105,11 @@ function _fleetTick() {
       (bb.height || 20) * (bb.scale || 1) * distanceScale * 0.5,
     );
     const isCockpitNear = _cockpitContactMode && _cockpitNearContacts.has(icao24);
+    // Ten istý predikát ako prezentácia — `bb.scale` píšu obe cesty.
+    const isDot = _isDotContact(icao24);
     const treatment = applyAircraftBillboardTreatment({
       billboard: bb,
-      baseScale: _cockpitContactMode && !isCockpitNear ? 1 : _militaryBillboardScale(icao24),
+      baseScale: isDot ? 1 : _militaryBillboardScale(icao24),
       baseAlpha: _missingPolls.get(icao24) ? 0.45 : 1,
       baseColor: MIL_ICON_COLOR,
       focusFactor: focus.factor,
@@ -2082,7 +2120,8 @@ function _fleetTick() {
     // Two-tier glyph raster — mirror of flights.js: swap 64/192 px rasters on
     // the billboard's ACTUAL on-screen size (post-treatment bb.scale, so
     // focus/limb recession counts) with hysteresis (atlas has no mips).
-    if (!_cockpitContactMode || isCockpitNear) {
+    // Bodka nema raster ani strobo — nema co prepinat.
+    if (!isDot) {
       const glyphDevPx = (bb.width || 20) * (bb.scale || 1)
         * distanceScale * (globalThis.devicePixelRatio || 1);
       const wantLarge = bb._gevIconLarge ? glyphDevPx > 56 : glyphDevPx > 76;
@@ -2142,7 +2181,8 @@ function _fleetTick() {
       if (ownsVisual) continue; // skip billboard rotation
     }
 
-    if ((!_cockpitContactMode || isCockpitNear) && (doRotations || revealed)) {
+    // Bodka je kruh — otacat ju je cista strata vykonu.
+    if (!isDot && (doRotations || revealed)) {
       const rot = screenProjectedRotation(scene, bb.position, course, bb.rotation);
       if (rot !== null && Math.abs(rot - bb.rotation) > 0.002) {
         bb.rotation = rot;
@@ -4017,7 +4057,9 @@ function _installClickHandler(viewer) {
     // first-person reference. Empty globe clicks are inert until the user
     // exits with C, Escape, or the dedicated button.
     if (document.body.classList.contains('cockpit-mode')) return;
-    const picked = viewer.scene.pick(click.position);
+    // Pick s toleranciou: v bodkovom LOD je terč 7 px a presný klik naň je
+    // takmer nemožný (precedens: cctvGizmo.js pickuje 14×14).
+    const picked = viewer.scene.pick(click.position, 6, 6);
 
     if (picked) {
       // Clicking the tracked entity itself -- ignore (don't deselect)
