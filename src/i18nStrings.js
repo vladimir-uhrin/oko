@@ -341,6 +341,11 @@ export const EN_STRINGS = Object.freeze({
   'aircraft.category.hide': 'Hide {name} ({n} in view)',
   'aircraft.category.show': 'Show {name} ({n} hidden)',
 
+  // Emergency squawk alerts (2026-09-03).
+  'alert.squawk.one': 'SQUAWK {code} · {meaning} · {label} — click to track',
+  'alert.squawk.many': 'SQUAWK {code} · {meaning} · {label} +{n} more — click to track',
+  'alert.squawk.filtered': 'hidden by filter',
+
   // Hover card under the cursor (2026-09-03).
   'hover.on-ground': 'on ground',
   'hover.stale': 'no fix — coasting',
@@ -1007,6 +1012,11 @@ export const SK_STRINGS = Object.freeze({
   'aircraft.category.uav': 'DRONY',
   'aircraft.category.hide': 'Skryť {name} ({n} v scéne)',
   'aircraft.category.show': 'Zobraziť {name} ({n} skrytých)',
+
+  // Upozornenia na núdzový squawk (2026-09-03).
+  'alert.squawk.one': 'SQUAWK {code} · {meaning} · {label} — klik sleduje',
+  'alert.squawk.many': 'SQUAWK {code} · {meaning} · {label} +{n} ďalšie — klik sleduje',
+  'alert.squawk.filtered': 'skryté filtrom',
 
   // Kartička pod kurzorom (2026-09-03).
   'hover.on-ground': 'na zemi',

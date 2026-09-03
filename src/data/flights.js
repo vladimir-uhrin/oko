@@ -55,6 +55,7 @@ import {
 import { cockpitContactDotImage } from './cockpitContactDot.js';
 import { nextCockpitNearContacts } from './cockpitAirLod.js';
 import { airDotLodActive } from './airIconLod.js';
+import { createSquawkWatch } from './squawkWatch.js';
 import {
   applyTrackedCameraFrame,
   trackedModelScaleForPixelCap,
@@ -394,6 +395,33 @@ let _cockpitModeListener = null;
 function _emitAwarenessEvent(type, detail) {
   if (typeof window === 'undefined' || !window.dispatchEvent || typeof CustomEvent === 'undefined') return;
   window.dispatchEvent(new CustomEvent(type, { detail }));
+}
+
+/** @type {ReturnType<typeof createSquawkWatch>} Sledovač núdzových kódov. */
+const _squawkWatch = createSquawkWatch();
+
+/**
+ * Po každom polle ohlás NOVÉ núdzové squawky.
+ *
+ * Squawk už aj tak tečie v každom snapshote — toto z neho len robí udalosť.
+ * Kontakt skrytý kategóriovým filtrom sa hlási tiež (núdza nie je vec vkusu),
+ * ale nesie príznak `filtered`, aby hlásenie vedelo povedať, že stroj práve
+ * nie je v scéne vidieť.
+ * @returns {void}
+ */
+function _publishSquawkAlerts() {
+  const rows = [];
+  for (const [icao24, info] of _flightData) {
+    if (!info?.squawk) continue;
+    rows.push({
+      id: icao24,
+      squawk: info.squawk,
+      label: _contactLabel(icao24, info),
+      filtered: !_categoryVisible(info.klass),
+    });
+  }
+  const alerts = _squawkWatch.observe(rows, { nowMs: Date.now() });
+  if (alerts.length) _emitAwarenessEvent('gev:squawk-alert', { layerId: 'flights', alerts });
 }
 
 function _publishTrackedSelection(icao24, origin = 'programmatic') {
@@ -4262,6 +4290,7 @@ const flightsLayer = {
     _groundSnap.clear();
     _count = 0;
     _lastUpdate = null;
+    _squawkWatch.reset(); // vrstva sa vypla — dalsi beh opat mlci
     _backoff = false;
     _retryAt = 0;
     _lastError = null;
@@ -4970,6 +4999,7 @@ const flightsLayer = {
       // Freshness belongs to the source snapshot, not the moment this browser
       // received a cached 200 response.
       _lastUpdate = sourceEpochMs ?? Date.now();
+      _publishSquawkAlerts();
       _lastTrackingRefreshOutcome = {
         epoch: trackingRefreshEpoch,
         status: 'accepted',
@@ -5063,6 +5093,7 @@ const flightsLayer = {
     _focusEvidenceIds.clear();
     _count = 0;
     _lastUpdate = null;
+    _squawkWatch.reset();
     _cockpitContactMode = false;
     _cockpitNearContacts = new Set();
     _cockpitSubjectId = null;

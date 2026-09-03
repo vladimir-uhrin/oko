@@ -9324,3 +9324,15 @@ body.scene-playback-mode #radar-legend {
   letter-spacing: 0.5px;
   color: var(--text-secondary);
 }
+
+/* Toast s akciou (2026-09-03): núdzový squawk sa dá kliknúť a skočiť na
+   stroj. Kurzor a jemný okraj sú jediný náznak, že sa dá kliknúť — bežné
+   stavové hlásenia ostávajú nezmenené. */
+#toast.actionable {
+  cursor: pointer;
+  border-color: rgba(255, 77, 79, 0.55);
+}
+
+#toast.actionable:hover {
+  border-color: rgba(255, 77, 79, 0.9);
+}

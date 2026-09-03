@@ -51,6 +51,7 @@ import {
 } from './data/detection.js';
 import { installDetectionHover } from './data/detectionHover.js';
 import { installContactHoverCard, updateContactHoverCard } from './data/contactHoverCard.js';
+import { presentSquawkAlerts } from './data/squawkWatch.js';
 import {
   ALLOCATION_STRATEGIES,
   canonicalizeDensity,
@@ -4632,6 +4633,10 @@ export class StyleManager {
       this._awarenessClearedHandler = (event) => this._persistAwarenessSelection(event, true);
       window.addEventListener('gev:awareness-subject-selected', this._awarenessSelectedHandler);
       window.addEventListener('gev:awareness-subject-cleared', this._awarenessClearedHandler);
+    }
+    if (!this._squawkAlertHandler) {
+      this._squawkAlertHandler = (event) => this._announceSquawkAlert(event?.detail);
+      window.addEventListener('gev:squawk-alert', this._squawkAlertHandler);
     }
     this._layerStateCoordinator?.destroy();
     this._layerStateCoordinator = null;
@@ -9926,13 +9931,58 @@ export class StyleManager {
    * @param {string} message - Text to show in the toast.
    * @returns {void}
    */
-  _showToast(message) {
+  /**
+   * Ohlás núdzový squawk zachytený vrstvou.
+   *
+   * Jedno hlásenie na udalosť, aj keď je núdzových stavov viac — toast je
+   * jediný element s jediným časovačom, takže druhé by prvé okamžite
+   * prepísalo (viď `presentSquawkAlerts`). Klik skočí na stroj; hlásenie
+   * preto žije dlhšie než bežný toast, nech sa dá stihnúť.
+   * @param {{layerId: string, alerts: Array<object>}|null} detail
+   * @returns {void}
+   */
+  _announceSquawkAlert(detail) {
+    const presented = presentSquawkAlerts(detail?.alerts);
+    if (!presented) return;
+    const suffix = presented.target.filtered ? ` · ${t('alert.squawk.filtered')}` : '';
+    const message = t(presented.key, presented.vars) + suffix;
+    const layerId = detail?.layerId === 'military' ? 'military' : 'flights';
+    const module = this._dataManager?.layers?.get(layerId)?.module;
+    const jump = typeof module?.trackById === 'function'
+      ? () => { try { module.trackById(presented.target.id); } catch { /* kontakt medzitým odletel */ } }
+      : null;
+    this._showToast(message, { durationMs: 9000, onClick: jump });
+  }
+
+  /**
+   * @param {string} message Text hlásenia.
+   * @param {object} [options]
+   * @param {number} [options.durationMs] Ako dlho ostane viditeľné.
+   * @param {Function|null} [options.onClick] Akcia po kliknutí (napr. skok na
+   *   kontakt). Defaulty držia ~20 existujúcich volaní nedotknutých.
+   * @returns {void}
+   */
+  _showToast(message, { durationMs = 2000, onClick = null } = {}) {
     this._toast.textContent = message;
     this._toast.classList.add('visible');
+    this._toast.classList.toggle('actionable', typeof onClick === 'function');
+    // Predchádzajúca akcia sa musí odviazať, inak by klik na nové hlásenie
+    // skočil na kontakt zo starého.
+    if (this._toastClickHandler) {
+      this._toast.removeEventListener('click', this._toastClickHandler);
+      this._toastClickHandler = null;
+    }
+    if (typeof onClick === 'function') {
+      this._toastClickHandler = () => {
+        this._toast.classList.remove('visible');
+        onClick();
+      };
+      this._toast.addEventListener('click', this._toastClickHandler);
+    }
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => {
-      this._toast.classList.remove('visible');
-    }, 2000);
+      this._toast.classList.remove('visible', 'actionable');
+    }, durationMs);
   }
 
   // ── HUD Toggle ───────────────────────────────
