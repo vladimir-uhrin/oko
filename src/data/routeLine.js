@@ -26,8 +26,13 @@ export const ROUTE_LINE_DEFAULT_ALTITUDE_M = 10_000;
  *  flights.js TRAIL_COLOR; predtým tracked-cyan '#39d0ff'). */
 const ROUTE_LINE_COLOR = '#a78bde';
 /** Alfa nad terénom / za terénom (trail idiom: stlmiť, nie schovať). */
-const ROUTE_LINE_ALPHA = 0.7;
-const ROUTE_LINE_OCCLUDED_ALPHA = 0.28;
+const ROUTE_LINE_ALPHA = 0.55;
+const ROUTE_LINE_OCCLUDED_ALPHA = 0.22;
+/** Preletená časť PLÁNU je len kontext („odkiaľ prišiel"), a beží súbežne so
+ *  skutočnou stopou — drží sa preto výrazne vzadu, nech sa tie dve čiary
+ *  neprekrikujú (2026-09-03: „neviem, čo znamená tá druhá čiara"). */
+const ROUTE_LINE_FLOWN_ALPHA = 0.3;
+const ROUTE_LINE_FLOWN_OCCLUDED_ALPHA = 0.12;
 const ROUTE_LINE_WIDTH = 1.3;
 
 /** @type {number} Uniquifier entity id (Cesium vyžaduje unikátne). */
@@ -89,8 +94,18 @@ export function createTrackedRouteLine(viewer) {
         polyline: {
           ...shared,
           positions: new Cesium.CallbackProperty(() => flown, false),
-          material: baseColor.withAlpha(ROUTE_LINE_ALPHA),
-          depthFailMaterial: baseColor.withAlpha(ROUTE_LINE_OCCLUDED_ALPHA),
+          // ČIARKOVANÁ rovnako ako zvyšok trasy: celý plán má jednu reč a plné
+          // čiary ostávajú vyhradené SKUTOČNEJ dráhe (stopa). Kým bola preletená
+          // časť plná, bežala za lietadlom súbežne so stopou v tej istej farbe
+          // aj hrúbke a nedalo sa rozoznať, čo je plán a čo realita.
+          material: new Cesium.PolylineDashMaterialProperty({
+            color: baseColor.withAlpha(ROUTE_LINE_FLOWN_ALPHA),
+            dashLength: 16,
+          }),
+          depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
+            color: baseColor.withAlpha(ROUTE_LINE_FLOWN_OCCLUDED_ALPHA),
+            dashLength: 16,
+          }),
         },
       }),
       viewer.entities.add({

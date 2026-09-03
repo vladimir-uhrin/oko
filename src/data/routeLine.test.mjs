@@ -82,6 +82,39 @@ test('handle: dve polyline entity v gev-route: pick priestore, clear/destroy upr
   assert.equal(added.length, 2);
 });
 
+test('celý PLÁN je čiarkovaný a tlmenejší než skutočná stopa', async () => {
+  // 2026-09-03 („neviem, čo znamená tá druhá čiara"): preletená časť plánu
+  // bežala za lietadlom PLNOU čiarou súbežne so stopou, v tej istej farbe aj
+  // hrúbke — plán sa nedal odlíšiť od skutočnej dráhy. Odteraz platí: plné
+  // čiary = kade stroj naozaj letel, čiarkované = kade má letieť.
+  const added = [];
+  const viewer = {
+    isDestroyed: () => false,
+    entities: { add: (e) => { added.push(e); return e; }, remove: () => true },
+  };
+  const line = createTrackedRouteLine(viewer);
+  line.setSegments(routeLinePositionsDeg(ROUTE_INFO));
+  const alpha = (mat) => mat.color.getValue().alpha;
+  for (const entity of added) {
+    assert.ok(
+      entity.polyline.material instanceof Cesium.PolylineDashMaterialProperty,
+      `${entity.id}: každý segment plánu je čiarkovaný`,
+    );
+  }
+  const flown = added.find((e) => String(e.id).endsWith(':flown'));
+  const remaining = added.find((e) => String(e.id).endsWith(':remaining'));
+  // Preletená časť je len kontext „odkiaľ prišiel" — beží súbežne so stopou,
+  // tak sa drží najviac vzadu.
+  assert.ok(
+    alpha(flown.polyline.material) < alpha(remaining.polyline.material),
+    'preletený plán je tlmenejší než zostávajúci',
+  );
+  // A oboje musí ostať pod alfou stopy (trailRenderer TRAIL_ALPHA), inak plán
+  // prekričí skutočnú dráhu.
+  assert.ok(alpha(remaining.polyline.material) <= 0.6, 'plán nekričí viac než stopa');
+  line.destroy();
+});
+
 test('tripwire: flights.js čiaru synchronizuje pri obnove sledovaného labelu a uprace pri untracku', async () => {
   const { readFileSync } = await import('node:fs');
   const source = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
