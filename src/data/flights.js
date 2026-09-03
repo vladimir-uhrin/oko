@@ -5098,6 +5098,45 @@ const flightsLayer = {
    */
   getCategoryBreakdown() { return _categoryBreakdown(); },
 
+  /**
+   * Krátke zhrnutie kontaktu pre kartičku pod kurzorom (2026-09-03: „keď som
+   * ďaleko zazoomovaný, mohli by sa po prejdení myšou objaviť základné
+   * informácie").
+   *
+   * Vracia LEN to, čo už o kontakte vieme — nespúšťa žiadne doťahovanie.
+   * Pri oddialenom pohľade tečie z feedu volací znak, trieda, výška, rýchlosť
+   * a vertikálna rýchlosť; typ, dopravca a trasa prídu až s enrichmentom
+   * (rozpočtovaný, prednostne pre stroje na obrazovke a po kliku), takže sú
+   * často null — kartička ich vtedy jednoducho nevykreslí, namiesto toho aby
+   * čakala alebo si vypýtala sieť pri každom prejdení myšou.
+   * @param {string} id ICAO24 kontaktu.
+   * @returns {object|null} Zhrnutie, alebo null keď kontakt nie je náš.
+   */
+  getContactSummary(id) {
+    const icao24 = String(id || '').trim().toLowerCase();
+    const info = _flightData.get(icao24);
+    if (!info) return null;
+    const route = info.route && _routeIsPlausible(icao24, info.route)
+      ? `${info.route.origin?.code || ''} → ${info.route.destination?.code || ''}`.trim()
+      : null;
+    return {
+      layerId: 'flights',
+      id: icao24,
+      callsign: String(info.callsign || '').trim() || null,
+      registration: String(info.registration || '').trim() || null,
+      type: String(info.typeName || info.typeCode || '').trim() || null,
+      operator: String(info.airline || '').trim() || null,
+      category: categoryForClass(info.klass),
+      military: isMilitaryIcao(icao24),
+      onGround: info.onGround === true,
+      altitudeM: Number.isFinite(info.altitude) ? info.altitude : null,
+      speedMps: Number.isFinite(info.velocity) ? info.velocity : null,
+      verticalRateMps: Number.isFinite(info.verticalRate) ? info.verticalRate : null,
+      route: route && route !== '→' ? route : null,
+      stale: _missingPolls.get(icao24) > 0,
+    };
+  },
+
   /** Filter kategórií ako čipy pod riadkom vrstvy (viď `_categoryChips`). */
   getRowControls() { return _categoryChips(); },
 

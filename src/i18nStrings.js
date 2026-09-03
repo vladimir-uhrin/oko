@@ -341,6 +341,10 @@ export const EN_STRINGS = Object.freeze({
   'aircraft.category.hide': 'Hide {name} ({n} in view)',
   'aircraft.category.show': 'Show {name} ({n} hidden)',
 
+  // Hover card under the cursor (2026-09-03).
+  'hover.on-ground': 'on ground',
+  'hover.stale': 'no fix — coasting',
+
   'manager.state.on': 'ON',
   'manager.state.off': 'OFF',
   'manager.state.loading': 'LOADING',
@@ -1003,6 +1007,10 @@ export const SK_STRINGS = Object.freeze({
   'aircraft.category.uav': 'DRONY',
   'aircraft.category.hide': 'Skryť {name} ({n} v scéne)',
   'aircraft.category.show': 'Zobraziť {name} ({n} skrytých)',
+
+  // Kartička pod kurzorom (2026-09-03).
+  'hover.on-ground': 'na zemi',
+  'hover.stale': 'bez fixu — odhad',
 
   'manager.state.on': 'ZAP',
   'manager.state.off': 'VYP',

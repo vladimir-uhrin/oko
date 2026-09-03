@@ -36,7 +36,9 @@ test('hover kontrakty: throttle, inštalácia v ui.js a bypass v paint slučke',
   assert.equal(DETECTION_HOVER_THROTTLE_MS, 120);
 
   const uiJs = fs.readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
-  assert.match(uiJs, /installDetectionHover\(viewer\);/);
+  // 2026-09-03: ten istý pick kŕmi aj kartičku pod kurzorom (onHover), takže
+  // volanie už nie je holé — inštalácia z ui.js ale ostáva invariantom.
+  assert.match(uiJs, /installDetectionHover\(viewer, \{/);
 
   const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
   // Hovered kontakt obchádza range gate aj keyhole dim a vstupuje do kohorty

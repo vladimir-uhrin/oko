@@ -57,7 +57,11 @@ let _onCanvasLeave = null;
  * @param {*} [options.handler] - Injected ScreenSpaceEventHandler-like (tests).
  * @param {Function} [options.now] - Clock override (tests).
  */
-export function installDetectionHover(viewer, { handler = null, now = () => performance.now() } = {}) {
+export function installDetectionHover(viewer, {
+  handler = null,
+  now = () => performance.now(),
+  onHover = null,
+} = {}) {
   if (_handler || !viewer?.scene?.canvas) return;
   _handler = handler || new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
   let lastPickAt = 0;
@@ -71,13 +75,21 @@ export function installDetectionHover(viewer, { handler = null, now = () => perf
     try {
       picked = viewer.scene.pick(position, DETECTION_HOVER_PICK_PX, DETECTION_HOVER_PICK_PX);
     } catch { /* pick can throw during scene teardown — treat as empty space */ }
-    setDetectionHoverSubjects(hoverCandidatesFromPick(picked));
+    const candidates = hoverCandidatesFromPick(picked);
+    setDetectionHoverSubjects(candidates);
+    // Druhý konzument toho istého picku: kartička pod kurzorom. Zámerne tu a
+    // nie vlastným handlerom — dva nezávislé MOUSE_MOVE picky by zdvojili
+    // najdrahšiu operáciu hoveru (scene.pick) a mohli sa rozísť vo fáze.
+    onHover?.(candidates, position);
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
   // Pointer leaving the canvas stops MOUSE_MOVE events — without this the
   // last hovered contact would keep its lit assembly forever.
   _canvasLeaveTarget = viewer.scene.canvas;
-  _onCanvasLeave = () => setDetectionHoverSubjects(null);
+  _onCanvasLeave = () => {
+    setDetectionHoverSubjects(null);
+    onHover?.([], null);
+  };
   _canvasLeaveTarget.addEventListener?.('mouseleave', _onCanvasLeave);
 }
 

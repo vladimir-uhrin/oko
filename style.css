@@ -9285,3 +9285,42 @@ body.cockpit-mode #radar-legend,
 body.scene-playback-mode #radar-legend {
   display: none;
 }
+
+/* ── Kartička kontaktu pod kurzorom (2026-09-03) ─────────────────────────────
+   Pri oddialenom pohľade nemá kontakt menovku (range gate v detectionPolicy),
+   tak identitu povie hover. Presne ten istý tmavý panel ako karta sledovaného
+   letu, len menší — nová plocha v scéne nemá zavádzať nový vizuálny jazyk.
+   pointer-events: none je nosné: kartička sedí pod kurzorom a bez toho by
+   pohltila práve ten MOUSE_MOVE, ktorý ju drží nažive (blikala by). */
+.contact-hover-card {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  max-width: 260px;
+  padding: 6px 9px;
+  background: rgba(10, 14, 18, 0.88);
+  border: 1px solid var(--glass-border);
+  border-left: 2px solid var(--accent);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+.contact-hover-card.is-military {
+  border-left-color: #ffb800;
+}
+
+.contact-hover-card-title {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+}
+
+.contact-hover-card-line {
+  margin-top: 2px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}

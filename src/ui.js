@@ -50,6 +50,7 @@ import {
   setDetectionTuning,
 } from './data/detection.js';
 import { installDetectionHover } from './data/detectionHover.js';
+import { installContactHoverCard, updateContactHoverCard } from './data/contactHoverCard.js';
 import {
   ALLOCATION_STRATEGIES,
   canonicalizeDensity,
@@ -2645,7 +2646,23 @@ export class StyleManager {
     });
     // Hover-inspect: pointer over a plane/ship icon lights its assembly at
     // any distance (on-demand doplnok k range gate v detectionPolicy).
-    installDetectionHover(viewer);
+    // Ten istý pick kŕmi aj kartičku pod kurzorom — tá ale žije NEZÁVISLE od
+    // prepínača DETEKCIA: pri oddialenom pohľade je „čo je to za stroj?"
+    // legitímna otázka aj so zhasnutými zameriavačmi (2026-09-03).
+    installContactHoverCard({
+      container: document.body,
+      resolveSummary: (candidates) => {
+        for (const candidate of candidates) {
+          const module = this._dataManager?.layers?.get(candidate.layerId)?.module;
+          const summary = module?.getContactSummary?.(candidate.sourceId);
+          if (summary) return summary;
+        }
+        return null;
+      },
+    });
+    installDetectionHover(viewer, {
+      onHover: (candidates, position) => updateContactHoverCard(candidates, position, t),
+    });
     initTrackedReadout(viewer);
     setDetectionStyle(this.activeStyle);
     this._applyDetectionDensityFromUi();

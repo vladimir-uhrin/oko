@@ -3532,6 +3532,30 @@ const militaryFlightsLayer = {
   /** Rozpis kontaktov podľa kategórie pre panel (vrátane skrytých). */
   getCategoryBreakdown() { return _categoryBreakdown(); },
 
+  /** Krátke zhrnutie kontaktu pre kartičku pod kurzorom — zrkadlo flights.js
+   *  (len to, čo už vieme; žiadne doťahovanie pri prejdení myšou). */
+  getContactSummary(id) {
+    const icao24 = String(id || '').trim().toLowerCase();
+    const info = _flightData.get(icao24);
+    if (!info) return null;
+    return {
+      layerId: 'military',
+      id: icao24,
+      callsign: String(info.callsign || '').trim() || null,
+      registration: String(info.registration || '').trim() || null,
+      type: String(info.typeName || info.typeCode || '').trim() || null,
+      operator: String(info.operator || '').trim() || null,
+      category: categoryForClass(info.klass),
+      military: true,
+      onGround: info.onGround === true,
+      altitudeM: Number.isFinite(info.altitude) ? info.altitude : null,
+      speedMps: Number.isFinite(info.velocity) ? info.velocity : null,
+      verticalRateMps: Number.isFinite(info.verticalRate) ? info.verticalRate : null,
+      route: null, // vojenský feed trasy nenesie
+      stale: _missingPolls.get(icao24) > 0,
+    };
+  },
+
   /** Filter kategórií ako čipy pod riadkom vrstvy. */
   getRowControls() { return _categoryChips(); },
 
