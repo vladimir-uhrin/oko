@@ -2710,6 +2710,26 @@ function adsbdbProxy() {
     return { airline: fr.airline?.name || null, origin: airport(fr.origin), destination: airport(fr.destination) };
   }
 
+  // `url_photo` / `url_photo_thumbnail` sa ZÁMERNE NEČÍTAJÚ (preverené
+  // 2026-09-03). Nie je to opomenutie — je to licenčné rozhodnutie:
+  //
+  //  1. Tie fotky nie sú z planespotters, ale z airport-data.com (README
+  //     adsbdb: „airport-data.com for aircraft photographs"). Ich podmienky
+  //     o fotkách, hotlinkovaní ani atribúcii nehovoria NIC, pritom snímky sú
+  //     komunitné — autorské právo drží každý fotograf zvlášť a my nemáme
+  //     žiadne výslovné povolenie.
+  //  2. Odpoveď adsbdb NENESIE meno fotografa (objekt `aircraft` má 10 polí,
+  //     žiadne z nich autorstvo). Kredit sa teda nedá splniť.
+  //  3. Dohľadať ho inde NEJDE: airport-data ac_thumb.json meno vracia, ale
+  //     pre ten istý hex vracia INÚ fotku (namerané, nezhoda 2 zo 4). Zlepiť
+  //     tie dva zdroje by pripísalo zhruba polovicu snímok cudziemu človeku.
+  //
+  // Zobraziť fotku odtiaľto = necitované použitie autorského diela. Ak sa
+  // fotky niekedy budú robiť, musia ísť cez planespotters Photo API, ktoré
+  // meno fotografa vracia a má jasné podmienky (viditeľný textový kredit +
+  // odkaz na stránku snímky bez rel="nofollow", obrázok fetchuje priamo
+  // prehliadač, nikdy server). Je to NOVÝ zdroj a patrí doň vlastné
+  // rozhodnutie, nie tichý field navyše tu.
   function parseAircraft(json) {
     const a = json?.response?.aircraft;
     if (!a) return null;
