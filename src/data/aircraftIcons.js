@@ -293,6 +293,28 @@ function strobeLight(kind) {
   return `<g data-strobe="1"><circle cx="${x}" cy="${y}" r="5.5" fill="#ff2626" fill-opacity="0.35"/><circle cx="${x}" cy="${y}" r="2.5" fill="#ff2626" fill-opacity="1"/></g>`;
 }
 
+/**
+ * Samostatné svetlo bez siluety — pre kontakt, ktorý kreslí 3D MODEL.
+ *
+ * Pri sledovaní zblízka nekreslí SVG ikonu, ale glTF model, a ten svetlo
+ * nemá: strobo tak zhaslo presne tam, kde je stroj najväčší („nebliká",
+ * 2026-09-03). Model sa nedá ľahko rozsvietiť, tak dostane vlastný drobný
+ * billboard s tým istým bodom, aký nesie ikona na krídle. Rovnaký odtieň aj
+ * pomer jadro/halo, len bez trupu okolo.
+ * @param {number} px Raster veľkosť.
+ * @returns {string} data URI.
+ */
+export function strobeLightIcon(px = 32) {
+  const key = `!light@${px}`;
+  let uri = _iconCache.get(key);
+  if (!uri) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g data-strobe="1" transform="translate(${C},${C})"><circle cx="0" cy="0" r="22" fill="#ff2626" fill-opacity="0.35"/><circle cx="0" cy="0" r="10" fill="#ff2626" fill-opacity="1"/></g></svg>`;
+    uri = 'data:image/svg+xml;base64,' + _b64(svg);
+    _iconCache.set(key, uri);
+  }
+  return uri;
+}
+
 /** Data URI for a class silhouette (lazily built, cached per
  *  kind+size+strobe+tint). Default size serves the fleet; pass
  *  `aircraftIcon(kind, TRACKED_ICON_PX)` (re-exported below) for the tracked

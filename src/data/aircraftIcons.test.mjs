@@ -70,7 +70,7 @@ test('zapečený cyan tint: stroj azúrový, krídlové svetlo ostáva ČERVENÉ
   assert.equal(aircraftIcon('tr3b', 192, false, 'cyan'), aircraftIcon('tr3b', 192, false));
   // Tripwire: sledovaný billboard vo flights.js NAOZAJ žiada zapečený tint.
   const flightsSrc = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
-  assert.match(flightsSrc, /_lastStrobeOn,[^)]*\n\s*'cyan',/, 'sync sledovaného glyfu pečie cyan');
+  assert.match(flightsSrc, /_lastStrobeOn[^\n]*\n\s*'cyan',/, 'sync sledovaného glyfu pečie cyan');
 });
 
 test('TR-3B si nechá vlastné svetlá — strobo sa naň nelepí', () => {
@@ -86,5 +86,42 @@ test('tripwire: fleet tick prepína strobo fázu pre civilnú aj vojenskú floti
   for (const [name, source] of [['flights', flights], ['military', military]]) {
     assert.match(source, /_lastStrobeOn/, `${name}: drží poslednú fázu`);
     assert.match(source, /strobeOn\(/, `${name}: číta wall-clock fázu`);
+  }
+});
+
+test('strobo má JEDINÝ zapisovač textúry a vzdialenostnú bránu', () => {
+  // 2026-09-03 („celá Európa bliká", „raz bliká, raz nie"): kind, raster a
+  // strobo fáza sú tri osi, ktoré pred opravou zapisovali tri nezávislé
+  // miesta — každé prepísalo, čo riešili ostatné. A fáza sa aplikovala na
+  // CELÚ flotilu naraz, takže oddialený pohľad prebleskol.
+  for (const file of ['./flights.js', './militaryFlights.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const name = file.includes('military') ? 'military' : 'flights';
+    assert.match(source, /const STROBE_MAX_DIST_M = \d+/, `${name}: má vzdialenostnú bránu`);
+    assert.match(
+      source,
+      /wantStrobe = strobePhase && cameraDistanceM <= STROBE_MAX_DIST_M/,
+      `${name}: brána sa vyhodnocuje per kontakt, nie globálne`,
+    );
+    assert.match(source, /function _syncFleetBillboardIcon\(/, `${name}: jediný zapisovač`);
+    // Mimo toho zapisovača (a cockpit bodky) už nikto textúru fleet
+    // billboardu neprepisuje — inak sa osi zase rozídu.
+    const strayWrites = source.match(/bb\.image = aircraftIcon\(/g) || [];
+    assert.equal(strayWrites.length, 0, `${name}: žiadny obchádzajúci zápis bb.image`);
+  }
+});
+
+test('sledovaný 3D model dostáva farbu identity, nie holý biely GLB', () => {
+  // Zdroj hlásenia „je biele, potom zas azúrové": billboard sledovaného je
+  // azúrový (amber vo vojenskej), ale model sa kreslil bez tintu, takže
+  // prechod model↔billboard menil farbu stroja.
+  for (const file of ['./flights.js', './militaryFlights.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const name = file.includes('military') ? 'military' : 'flights';
+    assert.match(
+      source,
+      /applyAircraftModelTreatment\(\{\s*\n\s*model: _trackedModel,\s*\n\s*baseColor: _irBoost \? Cesium\.Color\.WHITE : _modelColor\(_trackedIcao\)/,
+      `${name}: tracked model je tintovaný identitou`,
+    );
   }
 });

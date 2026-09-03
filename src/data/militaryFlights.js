@@ -22,7 +22,7 @@ import {
 } from './aircraftCategories.js';
 import { t } from '../i18n.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
-import { aircraftIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
+import { aircraftIcon, strobeLightIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
 import {
   isTr3b, tr3bAircraftClass, tr3bConvertedIds, tr3bIconKind, tr3bTypeLabel,
 } from './tr3bRegistry.js';
@@ -421,7 +421,7 @@ function _applyFleetBillboardPresentation(icao24, bb) {
   }
 
   const meta = _flightData.get(icao24);
-  bb.image = aircraftIcon(_iconKind(icao24, meta?.klass), bb._gevIconLarge ? TRACKED_ICON_PX : undefined);
+  _syncFleetBillboardIcon(icao24, bb, meta?.klass);
   bb.width = icao24 === _trackedIcao ? 24 : 20;
   bb.height = icao24 === _trackedIcao ? 24 : 20;
   bb.scale = _militaryBillboardScale(icao24) * limbScale;
@@ -766,6 +766,23 @@ function _categoryVisible(klass) {
   return _hiddenCategories.size === 0 || !_hiddenCategories.has(categoryForClass(klass));
 }
 
+/** Za touto vzdialenosťou kontakt strobo nedostane — zrkadlo flights.js
+ *  („celá Európa bliká"): zblízka detail, zďaleka šum. */
+const STROBE_MAX_DIST_M = 60000;
+
+/** JEDINÉ miesto, kde sa skladá textúra fleet billboardu — kind, raster a
+ *  strobo naraz (zrkadlo flights.js). Tri nezávislé zapisovače si navzájom
+ *  prepisovali osi, odtiaľ „raz bliká, raz nie". */
+function _syncFleetBillboardIcon(icao24, bb, klass) {
+  if (!bb) return;
+  const uri = aircraftIcon(
+    _iconKind(icao24, klass),
+    bb._gevIconLarge ? TRACKED_ICON_PX : undefined,
+    bb._gevStrobeOn === true,
+  );
+  if (bb.image !== uri) bb.image = uri;
+}
+
 /** Rozpis kontaktov podľa kategórie (vrátane skrytých — panel ukazuje oblohu). */
 function _categoryBreakdown() {
   const classes = [];
@@ -795,13 +812,46 @@ function _categoryChips() {
   return { chips };
 }
 
+/** @type {object|null} Drobny billboard so strobo svetlom pre sledovany stroj,
+ *  kym jeho vizual vlastni 3D MODEL (ten svetlo nema) — zrkadlo flights.js. */
+let _trackedStrobeBb = null;
+
+/** Ukaz/skry strobo svetlo sledovaneho modelu na jeho vizualnej pozicii. */
+function _syncTrackedModelStrobe(lit) {
+  if (!_billboardCollection) return;
+  const pos = lit ? _trackedVisualCached() : null;
+  if (!pos) {
+    if (_trackedStrobeBb) _trackedStrobeBb.show = false;
+    return;
+  }
+  if (!_trackedStrobeBb) {
+    _trackedStrobeBb = _billboardCollection.add({
+      position: pos,
+      image: strobeLightIcon(),
+      width: 7,
+      height: 7,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      alignedAxis: Cesium.Cartesian3.ZERO,
+    });
+  } else {
+    _trackedStrobeBb.position = pos;
+  }
+  _trackedStrobeBb.show = true;
+}
+
 /** Re-image the tracked entity's billboard from the current class/conversion. */
 function _syncTrackedBillboardImage() {
   if (!_trackedIcao || !_trackedEntity?.billboard) return;
+  // Rovnaka vzdialenostna brana ako flotila (zrkadlo flights.js).
+  const pos = _trackedDisplayCached() || _billboards.get(_trackedIcao)?.position;
+  const camPos = _viewer?.camera?.positionWC;
+  const near = pos && camPos
+    ? Cesium.Cartesian3.distance(camPos, pos) <= STROBE_MAX_DIST_M
+    : false;
   _trackedEntity.billboard.image = aircraftIcon(
     _iconKind(_trackedIcao, _flightData.get(_trackedIcao)?.klass),
     TRACKED_ICON_PX,
-    _lastStrobeOn, // strobo faza flotily plati aj pre sledovany glyf
+    _lastStrobeOn && near, // strobo faza flotily plati aj pre sledovany glyf
   );
 }
 
@@ -1836,6 +1886,15 @@ function _updateTrackedModel() {
     const spec = _modelSpec(_flightData.get(_trackedIcao)?.klass);
     _modelMatrix(displayPos, _trackedDisplayCourse(), _trackedModel.modelMatrix, spec.headingOffsetDeg);
     if (!_trackedModel.ready) return;
+    // Identita sledovaneho stroja (`_modelColor`) sa sem nikdy nedostala, takze
+    // model kreslil holy biely GLB — zblizka teda stroj vyzeral inak nez
+    // zdaleka a pri prechode „blikol" z bielej. Zrkadlo flights.js; IR boost si
+    // ponechava svoju bielu.
+    applyAircraftModelTreatment({
+      model: _trackedModel,
+      baseColor: _irBoost ? Cesium.Color.WHITE : _modelColor(_trackedIcao),
+      alpha: 1,
+    });
     _trackedModel.scale = trackedModelScaleForPixelCap({
       baseScale: spec.scale,
       nativeRadiusM: spec.nativeRadiusM,
@@ -1875,16 +1934,25 @@ function _fleetTick() {
   _drainIrReloadQueue(); // bounded per-tick slice of any pending boost-flip reload
   if (_cockpitContactMode) _refreshCockpitNearContacts();
 
-  // Antikolizne strobo — zrkadlo flights.js (2026-09-03): prechod fazy
-  // prehodi texturu flotily; cockpit pip rezim a IR boost sa nepreblikavaju.
-  const strobo = !_cockpitContactMode && !_irBoost && strobeOn(Date.now());
-  if (strobo !== _lastStrobeOn) {
-    _lastStrobeOn = strobo;
-    for (const [icao24, bb] of _billboards) {
-      bb.image = aircraftIcon(_iconKind(icao24, _flightData.get(icao24)?.klass), bb._gevIconLarge ? TRACKED_ICON_PX : undefined, strobo);
-    }
+  // Antikolizne strobo — zrkadlo flights.js (2026-09-03): faza je globalna,
+  // ale APLIKUJE sa per-kontakt podla vzdialenosti od kamery (v hlavnom cykle,
+  // spolu s raster swapom). Povodna verzia prehadzovala celu flotilu naraz a
+  // pri oddialenom pohlade tak preblesla cela scena. Cockpit pip rezim a IR
+  // boost sa nepreblikavaju.
+  const strobePhase = !_cockpitContactMode && !_irBoost && strobeOn(nowMs);
+  if (strobePhase !== _lastStrobeOn) {
+    _lastStrobeOn = strobePhase;
     _syncTrackedBillboardImage();
   }
+  // Sledovany stroj kresli pri priblizeni MODEL, ktory svetlo nema — dostane
+  // ho ako samostatny bod (poziciu treba obnovovat kazdy tik, nie len na
+  // prechode fazy, inak by svetlo zaostavalo za letiacim modelom).
+  _syncTrackedModelStrobe(
+    strobePhase
+    && _trackedIcao != null
+    && _modelOwnsVisual(_trackedIcao)
+    && Cesium.Cartesian3.distance(camera.positionWC, _trackedVisualCached() || camera.positionWC) <= STROBE_MAX_DIST_M,
+  );
   const poseSig = cameraPoseSignature(camera);
   // Only nearby Cockpit silhouettes need projected course; far dots remain
   // rotation-free through the per-contact gate below.
@@ -2018,9 +2086,12 @@ function _fleetTick() {
       const glyphDevPx = (bb.width || 20) * (bb.scale || 1)
         * distanceScale * (globalThis.devicePixelRatio || 1);
       const wantLarge = bb._gevIconLarge ? glyphDevPx > 56 : glyphDevPx > 76;
-      if (wantLarge !== !!bb._gevIconLarge) {
+      // Strobo je detail na blizko — daleke kontakty ho nedostanu vobec.
+      const wantStrobe = strobePhase && cameraDistanceM <= STROBE_MAX_DIST_M;
+      if (wantLarge !== !!bb._gevIconLarge || wantStrobe !== (bb._gevStrobeOn === true)) {
         bb._gevIconLarge = wantLarge;
-        bb.image = aircraftIcon(_iconKind(icao24, _flightData.get(icao24)?.klass), wantLarge ? TRACKED_ICON_PX : undefined);
+        bb._gevStrobeOn = wantStrobe;
+        _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
       }
     }
 
@@ -2437,6 +2508,7 @@ function _clearTracking(skipViewerUntrack = false, {
     _trackedEntity = null;
   }
   _releaseTrackedModel();
+  _syncTrackedModelStrobe(false); // svetlo patri k prave pustenemu sledovaniu
   _resetTrackedSelectionState(); // the zoom band + load-failure budget belong to the selection we just dropped
   _trackedIcao = null;
   _applyFleetBillboardPresentation(clearedIcao, _billboards.get(clearedIcao));
@@ -3358,6 +3430,7 @@ const militaryFlightsLayer = {
     if (_billboardCollection) {
       viewer.scene.primitives.remove(_billboardCollection);
       _billboardCollection = null;
+      _trackedStrobeBb = null; // billboard zanikol s kolekciou
     }
     if (_modelCollection) {
       viewer.scene.primitives.remove(_modelCollection); // removing destroys it + its models

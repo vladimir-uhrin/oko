@@ -88,8 +88,14 @@ for (const layer of LAYERS) {
     // `_iconKind` is identity for every unconverted contact (see
     // tr3bRegistry.test.mjs) — it only swaps the glyph for a contact the
     // operator explicitly converted into a TR-3B.
-    assert.match(source, /bb\.image = aircraftIcon\(_iconKind\(icao24, meta\?\.klass\)(, bb\._gevIconLarge \? TRACKED_ICON_PX : undefined)?\)/,
+    // 2026-09-03: the write moved into `_syncFleetBillboardIcon`, the single
+    // owner of kind × raster × strobe. The invariant is unchanged — the glyph
+    // still comes from the contact's CLASS — so this pins the composer plus
+    // the presentation call that feeds it the class.
+    assert.match(source, /_syncFleetBillboardIcon\(icao24, bb, meta\?\.klass\)/,
       'near contacts and model fallbacks retain the class-derived aircraft silhouette');
+    assert.match(source, /function _syncFleetBillboardIcon[\s\S]*?aircraftIcon\(\s*\n?\s*_iconKind\(icao24, klass\)/,
+      'the composer derives the glyph from the class it was handed');
     assert.match(source, /bb\.rotation = 0;/,
       'far dots are reset to a rotation-free presentation');
     assert.match(source, /\(!_cockpitContactMode \|\| isCockpitNear\) && \(doRotations \|\| revealed\)/,
