@@ -9336,3 +9336,110 @@ body.scene-playback-mode #radar-legend {
 #toast.actionable:hover {
   border-color: rgba(255, 77, 79, 0.9);
 }
+
+/* ── Záložky v paneli Poloha (2026-09-03) ────────────────────────────────────
+   „Kde som" a „kam sa vraciam" patria k sebe, tak sekcia žije tu a nie
+   v samostatnom paneli. Vzhľad si požičiava od čipov dátových vrstiev, aby
+   scéna nedostala ďalší vizuálny jazyk. */
+.bookmark-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bookmark-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  color: var(--text-dim);
+}
+
+.bookmark-save-btn {
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 1.2px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.bookmark-save-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.bookmark-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 140px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.bookmark-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bookmark-go {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 7px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-align: left;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.bookmark-go:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.bookmark-kind {
+  color: var(--text-dim);
+  padding-right: 5px;
+}
+
+.bookmark-del {
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.bookmark-del:hover {
+  color: #ff4d4f;
+  border-color: rgba(255, 77, 79, 0.5);
+}
+
+.bookmark-empty {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+}

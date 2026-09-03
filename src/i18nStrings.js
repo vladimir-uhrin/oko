@@ -341,6 +341,16 @@ export const EN_STRINGS = Object.freeze({
   'aircraft.category.hide': 'Hide {name} ({n} in view)',
   'aircraft.category.show': 'Show {name} ({n} hidden)',
 
+  // Bookmarks (2026-09-03).
+  'bookmarks.title': 'BOOKMARKS',
+  'bookmarks.save': 'SAVE',
+  'bookmarks.save-title': 'Save the tracked flight, or the current view',
+  'bookmarks.empty': 'nothing saved yet',
+  'bookmarks.saved': 'Bookmark saved: {name}',
+  'bookmarks.full': 'Bookmark saved — oldest one dropped',
+  'bookmarks.gone': 'Contact {name} is no longer flying',
+  'bookmarks.remove': 'Remove bookmark',
+
   // Emergency squawk alerts (2026-09-03).
   'alert.squawk.one': 'SQUAWK {code} · {meaning} · {label} — click to track',
   'alert.squawk.many': 'SQUAWK {code} · {meaning} · {label} +{n} more — click to track',
@@ -1012,6 +1022,16 @@ export const SK_STRINGS = Object.freeze({
   'aircraft.category.uav': 'DRONY',
   'aircraft.category.hide': 'Skryť {name} ({n} v scéne)',
   'aircraft.category.show': 'Zobraziť {name} ({n} skrytých)',
+
+  // Záložky (2026-09-03).
+  'bookmarks.title': 'ZÁLOŽKY',
+  'bookmarks.save': 'ULOŽIŤ',
+  'bookmarks.save-title': 'Ulož sledovaný let, inak aktuálny pohľad',
+  'bookmarks.empty': 'zatiaľ nič uložené',
+  'bookmarks.saved': 'Záložka uložená: {name}',
+  'bookmarks.full': 'Záložka uložená — najstaršia vypadla',
+  'bookmarks.gone': 'Kontakt {name} už nelieta',
+  'bookmarks.remove': 'Zmazať záložku',
 
   // Upozornenia na núdzový squawk (2026-09-03).
   'alert.squawk.one': 'SQUAWK {code} · {meaning} · {label} — klik sleduje',

@@ -52,6 +52,7 @@ import {
 import { installDetectionHover } from './data/detectionHover.js';
 import { installContactHoverCard, updateContactHoverCard } from './data/contactHoverCard.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
+import { addBookmark, loadBookmarks, removeBookmark, saveBookmarks } from './data/bookmarkStore.js';
 import {
   ALLOCATION_STRATEGIES,
   canonicalizeDensity,
@@ -2679,6 +2680,7 @@ export class StyleManager {
     this._initCctvPanel();
     this._initGlobalContextPanel();
     this._initLocationBar();
+    this._initBookmarks();
     this._initShareButton();
     this._initClearSelectedLayersButton();
     this._initResetGlobeButton();
@@ -9402,6 +9404,154 @@ export class StyleManager {
    * and geocoding search input.
    * @returns {void}
    */
+  /**
+   * Záložky: uložiť sledovaný let, inak aktuálny pohľad, a vrátiť sa k nim.
+   *
+   * Žijú v paneli Poloha zámerne — „kde som" a „kam sa vraciam" je tá istá
+   * otázka a nový panel by pridal len ďalšiu vec na zatváranie.
+   * @returns {void}
+   */
+  _initBookmarks() {
+    this._bookmarkList = document.getElementById('bookmark-list');
+    const saveBtn = document.getElementById('bookmark-save');
+    if (!this._bookmarkList || !saveBtn) return;
+    this._bookmarks = loadBookmarks();
+    saveBtn.addEventListener('click', () => this._saveCurrentBookmark());
+    this._renderBookmarks();
+  }
+
+  /** Uloží sledovaný let, ak nejaký je; inak aktuálny pohľad. */
+  _saveCurrentBookmark() {
+    // Vrstvu určuje to, ktorá kontakt vrátila — nie pole v popise, ktoré
+    // nemusí existovať. Pri obnovení sa musí pýtať tá istá vrstva.
+    let trackedLayerId = 'flights';
+    let tracked = this._dataManager?.layers?.get('flights')?.module?.getTrackedInfo?.();
+    if (!tracked) {
+      tracked = this._dataManager?.layers?.get('military')?.module?.getTrackedInfo?.();
+      if (tracked) trackedLayerId = 'military';
+    }
+    const carto = this.viewer?.camera?.positionCartographic;
+    const camera = carto
+      ? {
+        lat: Cesium.Math.toDegrees(carto.latitude),
+        lon: Cesium.Math.toDegrees(carto.longitude),
+        alt: carto.height,
+        heading: Cesium.Math.toDegrees(this.viewer.camera.heading),
+        pitch: Cesium.Math.toDegrees(this.viewer.camera.pitch),
+      }
+      : null;
+
+    const draft = tracked?.icao24
+      ? {
+        type: 'flight',
+        ref: tracked.icao24,
+        name: String(tracked.callsign || tracked.registration || tracked.icao24).trim(),
+        layerId: trackedLayerId,
+        camera,
+      }
+      : { type: 'view', name: this._viewBookmarkName(camera), camera };
+
+    const before = this._bookmarks?.length ?? 0;
+    this._bookmarks = addBookmark(this._bookmarks, { ...draft, createdAt: new Date().toISOString() });
+    saveBookmarks(this._bookmarks);
+    this._renderBookmarks();
+    const dropped = before >= this._bookmarks.length && before > 0;
+    this._showToast(dropped
+      ? t('bookmarks.full')
+      : t('bookmarks.saved', { name: this._bookmarks[0]?.name ?? '' }));
+  }
+
+  /**
+   * Meno pre záložku pohľadu.
+   *
+   * Mesto z lišty Poloha, ak je známe — inak súradnice. Prázdny stav lišty je
+   * doslova „Poloha: --", čo by v zozname vyzeralo ako pokazená položka.
+   * @param {{lat: number, lon: number}|null} camera
+   * @returns {string}
+   */
+  _viewBookmarkName(camera) {
+    const raw = String(this._locationMiniCity?.textContent ?? '').replace(/^⌖\s*/, '').trim();
+    const city = raw.replace(/^[^:]*:\s*/, '').trim();
+    if (city && city !== '--') return city;
+    if (!camera) return 'VIEW';
+    const ns = camera.lat >= 0 ? 'N' : 'S';
+    const ew = camera.lon >= 0 ? 'E' : 'W';
+    return `${Math.abs(camera.lat).toFixed(1)}°${ns} ${Math.abs(camera.lon).toFixed(1)}°${ew}`;
+  }
+
+  /** Prekreslí zoznam záložiek. */
+  _renderBookmarks() {
+    const host = this._bookmarkList;
+    if (!host) return;
+    host.textContent = '';
+    if (!this._bookmarks?.length) {
+      const empty = document.createElement('div');
+      empty.className = 'bookmark-empty';
+      empty.textContent = t('bookmarks.empty');
+      host.appendChild(empty);
+      return;
+    }
+    for (const bookmark of this._bookmarks) {
+      const row = document.createElement('div');
+      row.className = 'bookmark-row';
+
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'bookmark-go';
+      const kind = document.createElement('span');
+      kind.className = 'bookmark-kind';
+      // Monochromatické glyfy, žiadne emoji (pravidlo projektu).
+      kind.textContent = bookmark.type === 'flight' ? '✈︎' : (bookmark.type === 'airport' ? '⊞' : '⌖');
+      go.append(kind, document.createTextNode(bookmark.name));
+      go.addEventListener('click', () => this._openBookmark(bookmark));
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'bookmark-del';
+      del.textContent = '×';
+      del.title = t('bookmarks.remove');
+      del.addEventListener('click', () => {
+        this._bookmarks = removeBookmark(this._bookmarks, bookmark.id);
+        saveBookmarks(this._bookmarks);
+        this._renderBookmarks();
+      });
+
+      row.append(go, del);
+      host.appendChild(row);
+    }
+  }
+
+  /**
+   * Otvorí záložku: skúsi sledovať kontakt, a keď už nelieta, aspoň zaletí
+   * na uloženú kameru. Poctivo povie, že kontakt zmizol — tichý skok „nikam"
+   * by vyzeral ako pokazené tlačidlo.
+   * @param {object} bookmark
+   * @returns {void}
+   */
+  _openBookmark(bookmark) {
+    if (bookmark.type === 'flight' && bookmark.ref) {
+      const module = this._dataManager?.layers?.get(bookmark.layerId || 'flights')?.module;
+      let tracked = false;
+      try { tracked = module?.trackById?.(bookmark.ref) === true; } catch { tracked = false; }
+      if (tracked) return;
+      this._showToast(t('bookmarks.gone', { name: bookmark.name }));
+    }
+    if (!bookmark.camera || !this.viewer) return;
+    this.viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(
+        bookmark.camera.lon,
+        bookmark.camera.lat,
+        bookmark.camera.alt,
+      ),
+      orientation: {
+        heading: Cesium.Math.toRadians(bookmark.camera.heading),
+        pitch: Cesium.Math.toRadians(bookmark.camera.pitch),
+        roll: 0,
+      },
+      duration: 1.5,
+    });
+  }
+
   _initLocationBar() {
     const QWERTY_KEYS = ['Q', 'W', 'E', 'R', 'T'];
 

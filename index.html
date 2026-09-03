@@ -578,6 +578,16 @@
             <input type="text" id="location-search" data-i18n-placeholder="location.search-placeholder" placeholder="Search any location..." autocomplete="off" spellcheck="false" />
           </div>
         </div>
+        <div class="location-bar-divider"></div>
+        <div class="bookmark-section">
+          <div class="bookmark-head">
+            <span data-i18n="bookmarks.title">BOOKMARKS</span>
+            <button id="bookmark-save" class="bookmark-save-btn" type="button"
+                    data-i18n="bookmarks.save" data-i18n-title="bookmarks.save-title"
+                    title="Save the tracked flight, or this view">SAVE</button>
+          </div>
+          <div id="bookmark-list" class="bookmark-list" aria-live="polite"></div>
+        </div>
       </div>
     </div>
   </div>
