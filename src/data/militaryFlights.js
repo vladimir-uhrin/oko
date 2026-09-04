@@ -29,6 +29,7 @@ import {
 import { cockpitContactDotImage } from './cockpitContactDot.js';
 import { nextCockpitNearContacts } from './cockpitAirLod.js';
 import { airIconTier } from './airIconLod.js';
+import { contactIconTint, onContactPaletteChange } from './contactPalette.js';
 import {
   applyTrackedCameraFrame,
   trackedModelScaleForPixelCap,
@@ -624,6 +625,8 @@ let _lastRotPassMs = 0;
 let _lastTrackedRotation = 0;
 /** @type {Cesium.Event.RemoveCallback|null} preRender listener disposer */
 let _preRenderRemove = null;
+/** Odhlásenie z palety kontaktov (contactPalette.js). */
+let _paletteUnsub = null;
 let _trackedModelPreUpdateRemove = null;
 /** @type {Cesium.Event.RemoveCallback|null} camera.moveEnd listener disposer (arrival rotation pass) */
 let _moveEndRemove = null;
@@ -834,9 +837,18 @@ function _syncFleetBillboardIcon(icao24, bb, klass) {
     const raster = bb._gevTier && TIER_RASTER_PX[bb._gevTier]
       ? TIER_RASTER_PX[bb._gevTier]
       : (bb._gevIconLarge ? TRACKED_ICON_PX : undefined);
-    uri = aircraftIcon(_iconKind(icao24, klass), raster, bb._gevStrobeOn === true);
+    // Tint podla kontrastu podkladu ide do SVG (contactPalette.js), nie cez billboard.color.
+    uri = aircraftIcon(_iconKind(icao24, klass), raster, bb._gevStrobeOn === true, contactIconTint('military'));
   }
   if (bb.image !== uri) bb.image = uri;
+}
+
+/** Prerastruj celu flotilu po zmene palety (svetly <-> tmavy podklad). */
+function _resyncFleetIconsForPalette() {
+  for (const [icao24, bb] of _billboards) {
+    _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
+  }
+  _viewer?.scene?.requestRender?.();
 }
 
 /** Rozpis kontaktov podľa kategórie (vrátane skrytých — panel ukazuje oblohu). */
@@ -2903,6 +2915,7 @@ const militaryFlightsLayer = {
     if (!_preRenderRemove && viewer?.scene) {
       _preRenderRemove = viewer.scene.preRender.addEventListener(_fleetTick);
     }
+    if (!_paletteUnsub) _paletteUnsub = onContactPaletteChange(_resyncFleetIconsForPalette);
     if (!_trackedModelPreUpdateRemove && viewer?.scene) {
       _trackedModelPreUpdateRemove = viewer.scene.preUpdate.addEventListener(_updateTrackedModel);
     }
@@ -3485,6 +3498,10 @@ const militaryFlightsLayer = {
       _cockpitModeListener = null;
     }
     unregisterPickOwner('military');
+    if (_paletteUnsub) {
+      _paletteUnsub();
+      _paletteUnsub = null;
+    }
     if (_preRenderRemove) {
       _preRenderRemove();
       _preRenderRemove = null;

@@ -22,6 +22,7 @@ import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
+import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
@@ -236,6 +237,9 @@ async function init() {
       onError: (message) => console.warn('[MapStack]', message),
     });
     await mapStackController.setStack(tileset ? 'photoreal' : 'osm', { silent: true });
+    // Paleta ikon kontaktov podľa kontrastu podkladu (contactPalette.js):
+    // prvý setStack je tichý, tak sa počiatočný stav berie priamo z podkladu.
+    bindContactPaletteToMapStack(window, mapStackController.getActiveStack());
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });

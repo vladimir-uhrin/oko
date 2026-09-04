@@ -328,15 +328,25 @@ export function strobeLightIcon(px = 32) {
  *  svetlo ostáva červené. TR-3B tint ignoruje (tmavá silueta s vlastnými
  *  svetlami žije z multiplikatívneho stmavenia — pôvodná cesta). */
 export const TRACKED_ICON_PX = TRACKED_RASTER_PX;
+/** Zapečené výplne podľa mena tintu. 'cyan' = sledovaný stroj; 'ink' a
+ *  'ember' = civilný/vojenský stroj na SVETLOM podklade (contactPalette.js,
+ *  2026-09-05): biela silueta s 1px obrysom je na OSM pri 8 px neviditeľná.
+ *  Ember sa ešte násobí amber tintom billboardu → pálená oranžová; červený
+ *  maják ostáva červený, lebo je v textúre, nie v tinte. */
+export const TINT_FILLS = Object.freeze({
+  cyan: '#00ffff',
+  ink: '#1e3a5f',
+  ember: '#c2410c',
+});
 export function aircraftIcon(kind, px = FLEET_RASTER_PX, strobe = false, tint = null) {
   const k = BODIES[kind] ? kind : 'airliner';
   const tr3b = k.startsWith('tr3b');
   const lit = strobe === true && !tr3b;
-  const cyan = tint === 'cyan' && !tr3b;
-  const key = `${k}@${px}${lit ? '!s' : ''}${cyan ? '!c' : ''}`;
+  const fill = !tr3b && tint && TINT_FILLS[tint] ? TINT_FILLS[tint] : null;
+  const key = `${k}@${px}${lit ? '!s' : ''}${fill ? `!${tint}` : ''}`;
   let uri = _iconCache.get(key);
   if (!uri) {
-    const body = cyan ? BODIES[k].replaceAll('fill="white"', 'fill="#00ffff"') : BODIES[k];
+    const body = fill ? BODIES[k].replaceAll('fill="white"', `fill="${fill}"`) : BODIES[k];
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${VIEW} ${VIEW}"><g transform="translate(${C},${C})">${body}${lit ? strobeLight(k) : ''}</g></svg>`;
     uri = 'data:image/svg+xml;base64,' + _b64(svg);
     _iconCache.set(key, uri);

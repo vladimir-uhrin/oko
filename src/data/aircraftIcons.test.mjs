@@ -125,3 +125,20 @@ test('sledovaný 3D model dostáva farbu identity, nie holý biely GLB', () => {
     );
   }
 });
+
+test('zapečené tinty pre svetlý podklad: ink/ember sú iné textúry, maják ostáva červený', async () => {
+  const { aircraftIcon, TINT_FILLS } = await import('./aircraftIcons.js');
+  const plain = aircraftIcon('airliner', 64, true);
+  const ink = aircraftIcon('airliner', 64, true, 'ink');
+  const ember = aircraftIcon('airliner', 64, true, 'ember');
+  assert.notEqual(plain, ink);
+  assert.notEqual(ink, ember);
+  const decode = (uri) => Buffer.from(uri.split(',')[1], 'base64').toString('utf8');
+  const inkSvg = decode(ink);
+  assert.ok(inkSvg.includes(`fill="${TINT_FILLS.ink}"`), 'výplň je zapečená v SVG');
+  assert.ok(!inkSvg.includes('fill="white"'), 'žiadna biela výplň neostala');
+  assert.ok(/#ff2626/i.test(inkSvg), 'krídlový maják je v textúre červený — tint ho nezabije');
+  // Neznámy tint = bez tintu; TR-3B tint ignoruje.
+  assert.equal(aircraftIcon('airliner', 64, false, 'nezmysel'), aircraftIcon('airliner', 64, false));
+  assert.equal(aircraftIcon('tr3b', 64, false, 'ink'), aircraftIcon('tr3b', 64, false));
+});

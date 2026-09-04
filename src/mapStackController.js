@@ -33,6 +33,9 @@ export const MAP_STACKS = [
     shortLabel: 'OSM',
     kind: 'osm',
     requiresIon: false,
+    // Svetlý podklad: ikony kontaktov dostanú tmavú zapečenú výplň
+    // (contactPalette.js). Satelit, fotoreál a tmavé mapy ostávajú 'dark'.
+    contactContrast: 'light',
   },
   {
     id: 'stadia-dark',
