@@ -11,6 +11,7 @@ import {
   aggregateTraffic, cullDensityCells, densityGridDegrees, densityMarkerAlpha, densityMarkerPx,
   densityModeActive,
 } from './trafficDensity.js';
+import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { formatKnots } from './detectionDraw.js';
 import {
   isOwnedByOtherLayer,
@@ -1045,7 +1046,7 @@ function ensureCollections(viewer) {
   // Hustota lodí pri pohľade na svet — vlastná kolekcia, rovnako ako pri
   // lietadlách: body sedia na ťažiskách buniek, nie na lodiach, a zhasínajú
   // jedným `show` bez dotyku flotily.
-  state.densityPoints = new Cesium.PointPrimitiveCollection();
+  state.densityPoints = new Cesium.BillboardCollection(); // mäkký žiar, nie disky
   state.densityPoints.show = false;
   viewer.scene.primitives.add(state.densityPoints);
 }
@@ -1411,7 +1412,9 @@ const _scratchDensityColor = new Cesium.Color();
 function paintVesselDensityLimb(point, factor) {
   const cell = point.id;
   point.color = Cesium.Color.fromAlpha(cell.color, cell.alpha * factor, _scratchDensityColor);
-  point.pixelSize = cell.px * (0.55 + 0.45 * factor);
+  const size = cell.px * (0.55 + 0.45 * factor);
+  point.width = size;
+  point.height = size;
 }
 
 /**
@@ -1426,11 +1429,16 @@ function rebuildVesselDensityCells(height) {
   state.densityPoints.removeAll();
   for (const cell of cells) {
     const alpha = densityMarkerAlpha(cell.count, maxCount);
-    const px = densityMarkerPx(cell.count, maxCount);
+    const px = densityGlowDiameterPx(densityMarkerPx(cell.count, maxCount));
+    const sprite = densityGlowSprite();
     state.densityPoints.add({
       position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat, 0),
-      pixelSize: px,
+      ...(sprite ? { image: sprite } : {}),
+      width: px,
+      height: px,
       color: base.withAlpha(alpha),
+      horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+      verticalOrigin: Cesium.VerticalOrigin.CENTER,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
       // Základ pre limbový taper (cullDensityCells).
       id: { lat: cell.lat, lon: cell.lon, color: base, alpha, px },

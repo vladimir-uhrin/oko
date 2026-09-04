@@ -140,7 +140,9 @@ test('tripwire: hustota sa skladá do TEJ ISTEJ brány viditeľnosti', async () 
   assert.match(source, /id: \{ lat: cell\.lat, lon: cell\.lon, color, alpha, px \}/, 'základ pre taper');
   assert.match(source, /\} : null, _paintDensityLimb\);/, 'taper je zapojený');
   // Vlastná kolekcia, nie ďalšie billboardy vo flotile.
-  assert.match(source, /_densityPoints = new Cesium\.PointPrimitiveCollection\(\)/, 'vlastná kolekcia');
+  // Mäkký žiar (billboard), nie PointPrimitive: tvrdé disky čítali ako „bubliny".
+  assert.match(source, /_densityPoints = new Cesium\.BillboardCollection\(\)/, 'vlastná kolekcia');
+  assert.match(source, /densityGlowDiameterPx\(densityMarkerPx\(cell\.count, maxCount\)\)/, 'žiar');
   assert.match(source, /_densityPoints = null;\n\s*_densityMode = false;/, 'teardown čistí stav');
   // Skryté kategórie sa do hustoty nesmú počítať — inak by filter „nič
   // nerobil", hoci by bunky ostali rovnaké.

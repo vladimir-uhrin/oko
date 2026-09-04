@@ -59,6 +59,7 @@ import {
   aggregateTraffic, cullDensityCells, densityGridDegrees, densityMarkerAlpha, densityMarkerPx,
   densityModeActive,
 } from './trafficDensity.js';
+import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import {
   applyTrackedCameraFrame,
@@ -118,6 +119,10 @@ const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
 
 /** Amber tint for known-military aircraft rendered by this layer (matches the military layer's icon color). */
 const MIL_TINT = Cesium.Color.fromCssColorString('#FFB800');
+/** Farba civilných buniek hustoty: tá istá tlmená fialová ako letecké
+ *  trajektórie (TRAIL_COLOR). Biela sa na svetlom podklade strácala a na
+ *  tmavom čítala ako bubliny; fialová je „reč lietadiel" na oboch. */
+const DENSITY_CIVIL_TINT = Cesium.Color.fromCssColorString('#a78bde');
 
 // --- Ground traffic (product change 2026-07-03: "absolutely we should see planes
 // taxiing and landing") -----------------------------------------------------------
@@ -782,7 +787,9 @@ const _scratchDensityColor = new Cesium.Color();
 function _paintDensityLimb(point, factor) {
   const cell = point.id;
   point.color = Cesium.Color.fromAlpha(cell.color, cell.alpha * factor, _scratchDensityColor);
-  point.pixelSize = cell.px * (0.55 + 0.45 * factor);
+  const size = cell.px * (0.55 + 0.45 * factor);
+  point.width = size;
+  point.height = size;
 }
 
 /**
@@ -811,13 +818,18 @@ function _rebuildTrafficDensityCells(height) {
   for (const cell of cells) {
     // Monochromatická škvrna; amber len tam, kde bunka nesie vojenský
     // kontakt — tá istá farebná reč ako pri jednotlivých ikonách.
-    const color = cell.military > 0 ? MIL_TINT : Cesium.Color.WHITE;
+    const color = cell.military > 0 ? MIL_TINT : DENSITY_CIVIL_TINT;
     const alpha = densityMarkerAlpha(cell.count, maxCount);
-    const px = densityMarkerPx(cell.count, maxCount);
+    const px = densityGlowDiameterPx(densityMarkerPx(cell.count, maxCount));
+    const sprite = densityGlowSprite();
     _densityPoints.add({
       position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat, 0),
-      pixelSize: px,
+      ...(sprite ? { image: sprite } : {}),
+      width: px,
+      height: px,
       color: color.withAlpha(alpha),
+      horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+      verticalOrigin: Cesium.VerticalOrigin.CENTER,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
       // Základ pre limbový taper (cullDensityCells): poloha, farba, alfa
       // a veľkosť pred taperom.
@@ -4443,7 +4455,9 @@ const flightsLayer = {
     // billboardy vo flotile: body sa nekreslia na kontakty, ale na ŤAŽISKÁ
     // buniek, a musia sa dať zhasnúť jedným `show` bez toho, aby sa čokoľvek
     // dialo s flotilou.
-    _densityPoints = new Cesium.PointPrimitiveCollection();
+    // Billboardy s mäkkým žiarom, nie PointPrimitive: tvrdé disky čítali ako
+    // „bubliny" (2026-09-04), hustota sa má čítať ako teplo.
+    _densityPoints = new Cesium.BillboardCollection();
     _densityPoints.show = false;
     viewer.scene.primitives.add(_densityPoints);
     _modelCollection = new Cesium.PrimitiveCollection();

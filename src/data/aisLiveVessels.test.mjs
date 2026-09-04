@@ -1826,7 +1826,7 @@ test('lode: pri pohľade na svet hustota namiesto šípok, bunky za obzorom zhas
   const near = makeLodRecord('N1', 4.0, 51.9);
   const near2 = makeLodRecord('N2', 4.3, 52.1);
   const far = makeLodRecord('FAR', 151.2, -33.9); // Sydney — odvrátená strana
-  const densityPoints = new Cesium.PointPrimitiveCollection();
+  const densityPoints = new Cesium.BillboardCollection();
   _setVesselOverlayHostForTest(NOOP_HOST);
   _setVesselStateForTest({ viewer: { camera }, records: [near, near2, far], densityPoints });
   try {
@@ -1862,7 +1862,7 @@ test('lode: vybraná loď ostáva viditeľná aj v režime hustoty', () => {
   const camera = makeLodCamera(4.05, 51.93, 9_000_000);
   const picked = makeLodRecord('P', 4.0, 51.9);
   const other = makeLodRecord('O', 4.3, 52.1);
-  const densityPoints = new Cesium.PointPrimitiveCollection();
+  const densityPoints = new Cesium.BillboardCollection();
   _setVesselOverlayHostForTest(NOOP_HOST);
   _setVesselStateForTest({
     viewer: { camera }, records: [picked, other], densityPoints, selectedRecord: picked,
