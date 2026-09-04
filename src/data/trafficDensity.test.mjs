@@ -8,6 +8,11 @@ import {
   DENSITY_MAX_CELLS,
   aggregateTraffic,
   cullDensityCells,
+  centralAngleRad,
+  horizonAngleRad,
+  limbFactor,
+  DENSITY_LIMB_FADE_START,
+  DENSITY_LIMB_FADE_END,
   densityGridDegrees,
   densityMarkerAlpha,
   densityMarkerPx,
@@ -128,9 +133,12 @@ test('tripwire: hustota sa skladá do TEJ ISTEJ brány viditeľnosti', async () 
   // prepočtu (nález 2026-09-04: 163 z 284 buniek svietilo na limbe).
   assert.match(
     source,
-    /cullDensityCells\(_densityPoints, horizonOccluder\(_viewer\.camera\)\)/,
+    /cullDensityCells\(_densityPoints, horizonOccluder\(_viewer\.camera\), hasCarto \? \{/,
     'bunky sa cullujú tým istým occluderom ako flotila',
   );
+  // Limbový taper: bunky nesú základ v `id` a taper ich maľuje cez callback.
+  assert.match(source, /id: \{ lat: cell\.lat, lon: cell\.lon, color, alpha, px \}/, 'základ pre taper');
+  assert.match(source, /\} : null, _paintDensityLimb\);/, 'taper je zapojený');
   // Vlastná kolekcia, nie ďalšie billboardy vo flotile.
   assert.match(source, /_densityPoints = new Cesium\.PointPrimitiveCollection\(\)/, 'vlastná kolekcia');
   assert.match(source, /_densityPoints = null;\n\s*_densityMode = false;/, 'teardown čistí stav');
@@ -152,4 +160,60 @@ test('bunky za obzorom zhasnú — nepresvitajú cez glóbus', () => {
   assert.equal(cullDensityCells(collection, null), 5);
   assert.ok(points.every((p) => p.show === true));
   assert.equal(cullDensityCells(null, occluder), 0);
+});
+
+test('limbový taper: bunka tesne pred obzorom zhasne skôr, než ju projekcia stlačí do pásu', () => {
+  // Nález 2026-09-04: pohľad z 7 900 km nad Fínskom (59,67N 24,61E) má
+  // obzor na ~63,5°; východné pobrežie USA (40N 75W) leží na ~60,6° — PRED
+  // obzorom, occluder ho prepustí, ale na obrazovke je to oblúk krúžkov
+  // nalepený na okraji glóbusu.
+  const horizon = horizonAngleRad(7_900_000);
+  assert.ok(Math.abs(horizon * 180 / Math.PI - 63.5) < 1, `obzor ${horizon * 180 / Math.PI}°`);
+  const usEast = centralAngleRad(59.67, 24.61, 40, -75);
+  assert.ok(Math.abs(usEast * 180 / Math.PI - 60.6) < 1, `USA ${usEast * 180 / Math.PI}°`);
+  assert.ok(usEast < horizon, 'viditeľná strana — occluder by to prepustil');
+  assert.equal(limbFactor(usEast, horizon), 0, 'taper ju napriek tomu zhasne');
+  // V strede záberu plná sila, v prechodovom pásme medzi 0 a 1.
+  assert.equal(limbFactor(0, horizon), 1);
+  assert.equal(limbFactor(horizon * DENSITY_LIMB_FADE_START, horizon), 1);
+  const mid = limbFactor(horizon * (DENSITY_LIMB_FADE_START + DENSITY_LIMB_FADE_END) / 2, horizon);
+  assert.ok(mid > 0.45 && mid < 0.55, `stred pásma ${mid}`);
+  assert.equal(limbFactor(horizon * DENSITY_LIMB_FADE_END, horizon), 0);
+  assert.ok(DENSITY_LIMB_FADE_END < 1, 'zhasína ešte PRED obzorom');
+  // Bez obzoru (niet výšky) sa nič netlmí.
+  assert.equal(limbFactor(1, 0), 1);
+  assert.equal(horizonAngleRad(Number.NaN), 0);
+});
+
+test('cull s kamerou: taper maľuje len pri zmene faktora a je jediným zapisovačom show', () => {
+  const camera = { latDeg: 50, lonDeg: 10, heightM: 9_000_000 };
+  const horizonDeg = horizonAngleRad(camera.heightM) * 180 / Math.PI;
+  const mk = (lat, lon) => ({
+    position: { lat, lon }, show: true, id: { lat, lon, color: 'c', alpha: 0.8, px: 10 },
+  });
+  const centre = mk(50, 10);
+  const edge = mk(50 - horizonDeg * 0.95, 10); // pred obzorom, ale v zhasnutom pásme
+  const behind = mk(-50, 10);
+  const points = [centre, edge, behind];
+  const collection = { length: points.length, get: (i) => points[i] };
+  const occluder = { isPointVisible: (p) => p.lat > 50 - horizonDeg };
+  const painted = [];
+  const paint = (point, factor) => painted.push([point, factor]);
+
+  assert.equal(cullDensityCells(collection, occluder, camera, paint), 1);
+  assert.deepEqual(points.map((p) => p.show), [true, false, false]);
+  assert.equal(painted.length, 3, 'prvý prechod maľuje všetko');
+  assert.equal(painted[0][1], 1);
+  assert.equal(painted[1][1], 0);
+
+  // Ten istý pohľad znovu: nič sa nezmenilo, nič sa nemaľuje.
+  painted.length = 0;
+  cullDensityCells(collection, occluder, camera, paint);
+  assert.equal(painted.length, 0, 'bez zmeny faktora žiadny zápis');
+
+  // Kamera sa posunie k okraju — bunka na okraji ožije a premaľuje sa.
+  const moved = { latDeg: 50 - horizonDeg * 0.6, lonDeg: 10, heightM: camera.heightM };
+  cullDensityCells(collection, occluder, moved, paint);
+  assert.equal(edge.show, true);
+  assert.ok(painted.some(([p, f]) => p === edge && f === 1));
 });

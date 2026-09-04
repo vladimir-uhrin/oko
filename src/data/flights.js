@@ -762,7 +762,27 @@ function _refreshTrafficDensity(nowMs) {
   // Horizontový cull KAŽDÝ tik, nie raz za 2 s: bunky nemajú hĺbkový test a
   // pri otáčaní glóbusu by odvrátená strana presvitala až do ďalšieho
   // prepočtu. ≤900 bodov je lacnejších než jeden prepočet flotily.
-  cullDensityCells(_densityPoints, horizonOccluder(_viewer.camera));
+  const carto = _viewer.camera.positionCartographic;
+  const hasCarto = Number.isFinite(carto?.latitude) && Number.isFinite(carto?.longitude);
+  cullDensityCells(_densityPoints, horizonOccluder(_viewer.camera), hasCarto ? {
+    latDeg: Cesium.Math.toDegrees(carto.latitude),
+    lonDeg: Cesium.Math.toDegrees(carto.longitude),
+    heightM: carto.height,
+  } : null, _paintDensityLimb);
+}
+
+const _scratchDensityColor = new Cesium.Color();
+
+/**
+ * Limbový taper bunky: alfa aj veľkosť klesajú s faktorom (0..1), základ
+ * nesie `point.id` z prepočtu. Volá sa len pri zmene faktora.
+ * @param {Cesium.PointPrimitive} point
+ * @param {number} factor
+ */
+function _paintDensityLimb(point, factor) {
+  const cell = point.id;
+  point.color = Cesium.Color.fromAlpha(cell.color, cell.alpha * factor, _scratchDensityColor);
+  point.pixelSize = cell.px * (0.55 + 0.45 * factor);
 }
 
 /**
@@ -789,14 +809,19 @@ function _rebuildTrafficDensityCells(height) {
   const maxCount = cells.length ? cells[0].count : 1;
   _densityPoints.removeAll();
   for (const cell of cells) {
+    // Monochromatická škvrna; amber len tam, kde bunka nesie vojenský
+    // kontakt — tá istá farebná reč ako pri jednotlivých ikonách.
+    const color = cell.military > 0 ? MIL_TINT : Cesium.Color.WHITE;
+    const alpha = densityMarkerAlpha(cell.count, maxCount);
+    const px = densityMarkerPx(cell.count, maxCount);
     _densityPoints.add({
       position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat, 0),
-      pixelSize: densityMarkerPx(cell.count, maxCount),
-      // Monochromatická škvrna; amber len tam, kde bunka nesie vojenský
-      // kontakt — tá istá farebná reč ako pri jednotlivých ikonách.
-      color: (cell.military > 0 ? MIL_TINT : Cesium.Color.WHITE)
-        .withAlpha(densityMarkerAlpha(cell.count, maxCount)),
+      pixelSize: px,
+      color: color.withAlpha(alpha),
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      // Základ pre limbový taper (cullDensityCells): poloha, farba, alfa
+      // a veľkosť pred taperom.
+      id: { lat: cell.lat, lon: cell.lon, color, alpha, px },
     });
   }
   _viewer.scene.requestRender?.();

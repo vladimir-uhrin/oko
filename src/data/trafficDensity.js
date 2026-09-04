@@ -164,15 +164,81 @@ export function densityMarkerAlpha(count, maxCount = 100) {
  * @param {?{isPointVisible: function(object): boolean}} occluder
  * @returns {number} Počet viditeľných buniek.
  */
-export function cullDensityCells(points, occluder) {
+export function cullDensityCells(points, occluder, camera = null, paint = null) {
   if (!points || !Number.isFinite(points.length) || typeof points.get !== 'function') return 0;
+  const limb = camera && Number.isFinite(camera.heightM) && Number.isFinite(camera.latDeg)
+    && Number.isFinite(camera.lonDeg);
+  const horizon = limb ? horizonAngleRad(camera.heightM) : 0;
   let visible = 0;
   for (let i = 0; i < points.length; i += 1) {
     const point = points.get(i);
     if (!point) continue;
-    const show = !occluder || !point.position || occluder.isPointVisible(point.position) === true;
+    let show = !occluder || !point.position || occluder.isPointVisible(point.position) === true;
+    // Limbový taper: bunka tesne PRED obzorom je síce viditeľná, ale
+    // projekcia ju stlačí do pásu na okraji glóbusu (nález 2026-09-04:
+    // východné pobrežie USA na 60,6° pri obzore 63,5° = oblúk krúžkov na
+    // limbe). Faktor klesá k nule ešte pred obzorom, rovnako ako limbový
+    // taper flotily.
+    const cell = point.id;
+    if (limb && cell && Number.isFinite(cell.lat) && Number.isFinite(cell.lon)) {
+      const factor = limbFactor(
+        centralAngleRad(camera.latDeg, camera.lonDeg, cell.lat, cell.lon), horizon,
+      );
+      if (factor <= 0) show = false;
+      if (typeof paint === 'function' && Math.abs((cell.limbFactor ?? -1) - factor) > 0.02) {
+        cell.limbFactor = factor;
+        paint(point, factor);
+      }
+    }
     if (point.show !== show) point.show = show;
     if (show) visible += 1;
   }
   return visible;
+}
+
+/** Stredný polomer Zeme (m) — na uhlové výpočty pri obzore stačí guľa. */
+const EARTH_RADIUS_M = 6_371_000;
+
+/** Podiel obzorového uhla, od ktorého bunka začína slabnúť. */
+export const DENSITY_LIMB_FADE_START = 0.72;
+/** Podiel obzorového uhla, pri ktorom bunka zhasne — ešte PRED obzorom. */
+export const DENSITY_LIMB_FADE_END = 0.92;
+
+/**
+ * Uhol (rad) od nadiru po obzor pre kameru v danej výške nad guľou.
+ * @param {number} cameraHeightM
+ * @returns {number} 0 pri nefinitnej alebo nulovej výške.
+ */
+export function horizonAngleRad(cameraHeightM) {
+  const h = Number(cameraHeightM);
+  if (!(h > 0)) return 0;
+  return Math.acos(EARTH_RADIUS_M / (EARTH_RADIUS_M + h));
+}
+
+/**
+ * Stredový uhol (rad) medzi dvoma bodmi na guli (haversine).
+ * @returns {number}
+ */
+export function centralAngleRad(lat1Deg, lon1Deg, lat2Deg, lon2Deg) {
+  const toRad = Math.PI / 180;
+  const dLat = (lat2Deg - lat1Deg) * toRad;
+  const dLon = (lon2Deg - lon1Deg) * toRad;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1Deg * toRad) * Math.cos(lat2Deg * toRad) * Math.sin(dLon / 2) ** 2;
+  return 2 * Math.asin(Math.min(1, Math.sqrt(Math.max(0, a))));
+}
+
+/**
+ * Limbový faktor 0..1: 1 v strede záberu, lineárne k 0 medzi
+ * DENSITY_LIMB_FADE_START a DENSITY_LIMB_FADE_END obzorového uhla.
+ * @param {number} centralAngle Uhol bunky od nadiru (rad).
+ * @param {number} horizonAngle Uhol obzoru (rad); 0 = bez taperu.
+ * @returns {number}
+ */
+export function limbFactor(centralAngle, horizonAngle) {
+  if (!(horizonAngle > 0) || !Number.isFinite(centralAngle)) return 1;
+  const ratio = centralAngle / horizonAngle;
+  if (ratio <= DENSITY_LIMB_FADE_START) return 1;
+  if (ratio >= DENSITY_LIMB_FADE_END) return 0;
+  return 1 - (ratio - DENSITY_LIMB_FADE_START) / (DENSITY_LIMB_FADE_END - DENSITY_LIMB_FADE_START);
 }

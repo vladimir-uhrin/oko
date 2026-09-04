@@ -1754,7 +1754,9 @@ const NOOP_HOST = { setEntries() {}, setVisible() {}, clearSource() {}, hitTest(
 
 function makeLodCamera(lon, lat, heightM) {
   return {
-    positionCartographic: { height: heightM },
+    positionCartographic: {
+      height: heightM, latitude: lat * Math.PI / 180, longitude: lon * Math.PI / 180,
+    },
     positionWC: Cesium.Cartesian3.fromDegrees(lon, lat, heightM),
     heading: 0,
     pitch: -Math.PI / 2,

@@ -1394,7 +1394,24 @@ function refreshVesselDensity(nowMs) {
   // Horizontový cull každý tik: bunky nemajú hĺbkový test a odvrátená strana
   // by inak presvitala cez glóbus.
   const camera = state.viewer?.camera;
-  if (camera?.positionWC) cullDensityCells(state.densityPoints, horizonOccluder(camera));
+  if (camera?.positionWC) {
+    const carto = camera.positionCartographic;
+    const hasCarto = Number.isFinite(carto?.latitude) && Number.isFinite(carto?.longitude);
+    cullDensityCells(state.densityPoints, horizonOccluder(camera), hasCarto ? {
+      latDeg: Cesium.Math.toDegrees(carto.latitude),
+      lonDeg: Cesium.Math.toDegrees(carto.longitude),
+      heightM: carto.height,
+    } : null, paintVesselDensityLimb);
+  }
+}
+
+const _scratchDensityColor = new Cesium.Color();
+
+/** Limbový taper bunky (alfa aj veľkosť), základ nesie `point.id`. */
+function paintVesselDensityLimb(point, factor) {
+  const cell = point.id;
+  point.color = Cesium.Color.fromAlpha(cell.color, cell.alpha * factor, _scratchDensityColor);
+  point.pixelSize = cell.px * (0.55 + 0.45 * factor);
 }
 
 /**
@@ -1408,11 +1425,15 @@ function rebuildVesselDensityCells(height) {
   const base = Cesium.Color.fromCssColorString(VESSEL_DENSITY_CSS);
   state.densityPoints.removeAll();
   for (const cell of cells) {
+    const alpha = densityMarkerAlpha(cell.count, maxCount);
+    const px = densityMarkerPx(cell.count, maxCount);
     state.densityPoints.add({
       position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat, 0),
-      pixelSize: densityMarkerPx(cell.count, maxCount),
-      color: base.withAlpha(densityMarkerAlpha(cell.count, maxCount)),
+      pixelSize: px,
+      color: base.withAlpha(alpha),
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      // Základ pre limbový taper (cullDensityCells).
+      id: { lat: cell.lat, lon: cell.lon, color: base, alpha, px },
     });
   }
   state.viewer?.scene?.requestRender?.();
