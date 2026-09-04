@@ -146,3 +146,33 @@ export function densityMarkerAlpha(count, maxCount = 100) {
   const ratio = Math.log(n + 1) / Math.log(top + 1);
   return 0.28 + Math.min(1, Math.max(0, ratio)) * 0.55;
 }
+
+/**
+ * Horizontový cull buniek.
+ *
+ * Bunky sa kreslia bez hĺbkového testu — rovnako ako kontakty, lebo glóbus
+ * môže byť skrytý (Google 3D) a odvrátená strana potom nemá hĺbku. Bez cullu
+ * by bunka z odvrátenej strany Zeme presvitala cez glóbus ako krúžok nalepený
+ * na jeho okraji (nález 2026-09-04: 163 z 284 buniek severoamerickej
+ * premávky svietilo na limbe pri pohľade na Európu). Rozhoduje TEN ISTÝ
+ * occluder, ktorým flotila skrýva stroje za obzorom.
+ *
+ * Čisté: kolekcia je čokoľvek s `length`/`get(i)`, bod má `position`/`show`.
+ * Bez occludera (ešte niet kamery) sa nič neskrýva.
+ *
+ * @param {{length: number, get: function(number): ({position: object, show: boolean}|undefined)}|null} points
+ * @param {?{isPointVisible: function(object): boolean}} occluder
+ * @returns {number} Počet viditeľných buniek.
+ */
+export function cullDensityCells(points, occluder) {
+  if (!points || !Number.isFinite(points.length) || typeof points.get !== 'function') return 0;
+  let visible = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const point = points.get(i);
+    if (!point) continue;
+    const show = !occluder || !point.position || occluder.isPointVisible(point.position) === true;
+    if (point.show !== show) point.show = show;
+    if (show) visible += 1;
+  }
+  return visible;
+}

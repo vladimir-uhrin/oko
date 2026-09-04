@@ -27,6 +27,10 @@ import {
   _updateVesselCardsForTest,
   applyVesselFocusDeemphasis,
   mapAnalystRecord,
+  VESSEL_TIER_SCALE,
+  vesselTierScale,
+  _tickVesselRuntimeForTest,
+  _getVesselLodStateForTest,
 } from './aisLiveVessels.js';
 import aisLiveVesselsLayer from './aisLiveVessels.js';
 import { registerEntityContext, selectEntityContext } from './contextStore.js';
@@ -1735,6 +1739,139 @@ test('detection callout číta normalizovaný typ lode — nie surový AIS kód'
     });
     assert.equal(aisLiveVesselsLayer.getDetectableObjects({ maxCount: 5 })[0].klass, undefined);
   } finally {
+    _setVesselStateForTest({ enabled: false });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Stupne veľkosti a hustota lodí pri oddialení (2026-09-04). Pred touto zmenou
+// nemala vrstva žiadne zmenšovanie: pri pohľade na svet kreslila 27 000 šípok
+// v plnej veľkosti — stenu pozdĺž pobreží, cez ktorú nebolo vidieť ani mapu,
+// ani hustotu lietadiel.
+// ---------------------------------------------------------------------------
+
+const NOOP_HOST = { setEntries() {}, setVisible() {}, clearSource() {}, hitTest() { return null; } };
+
+function makeLodCamera(lon, lat, heightM) {
+  return {
+    positionCartographic: { height: heightM },
+    positionWC: Cesium.Cartesian3.fromDegrees(lon, lat, heightM),
+    heading: 0,
+    pitch: -Math.PI / 2,
+    roll: 0,
+    setHeight(next) {
+      this.positionCartographic.height = next;
+      this.positionWC = Cesium.Cartesian3.fromDegrees(lon, lat, next);
+    },
+  };
+}
+
+function makeLodRecord(mmsi, lon, lat, extra = {}) {
+  return makeRecord({
+    mmsi,
+    lat,
+    lon,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 3),
+    surfacePosition: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+    billboard: { show: true, scale: 0, rotation: 0, position: Cesium.Cartesian3.fromDegrees(lon, lat, 3) },
+    ...extra,
+  });
+}
+
+test('lode: tri stupne veľkosti podľa výšky kamery, rovnaké prahy ako lietadlá', () => {
+  assert.ok(
+    VESSEL_TIER_SCALE.full > VESSEL_TIER_SCALE.medium && VESSEL_TIER_SCALE.medium > VESSEL_TIER_SCALE.micro,
+  );
+  // 32 px šípka × najrýchlejšia loď × drobný stupeň ≤ 12 px — rovnaká reč ako
+  // 9 px siluety lietadiel, nie stena šípok.
+  assert.ok(32 * 0.78 * vesselTierScale('micro') <= 12);
+  assert.equal(vesselTierScale('nezmysel'), 1, 'neznámy stupeň = plná veľkosť');
+
+  const camera = makeLodCamera(4.05, 51.93, 120_000);
+  const fast = makeLodRecord('F', 4.0, 51.9, { speed: 20 });
+  const slow = makeLodRecord('S', 4.1, 51.95, { speed: 2 });
+  _setVesselOverlayHostForTest(NOOP_HOST);
+  _setVesselStateForTest({ viewer: { camera }, records: [fast, slow] });
+  try {
+    _tickVesselRuntimeForTest(0);
+    assert.equal(_getVesselLodStateForTest().iconTier, 'full');
+
+    camera.setHeight(2_500_000);
+    _tickVesselRuntimeForTest(100);
+    assert.equal(_getVesselLodStateForTest().iconTier, 'micro');
+    assert.ok(Math.abs(fast.billboard.scale - 0.78 * VESSEL_TIER_SCALE.micro) < 1e-9);
+    assert.ok(Math.abs(slow.billboard.scale - 0.6 * VESSEL_TIER_SCALE.micro) < 1e-9);
+
+    // Zostup ide CEZ stredný stupeň — preskočiť rovno na plnú by vrátilo skok,
+    // kvôli ktorému stredný stupeň vznikol.
+    camera.setHeight(600_000);
+    _tickVesselRuntimeForTest(200);
+    assert.equal(_getVesselLodStateForTest().iconTier, 'medium');
+    assert.ok(Math.abs(fast.billboard.scale - 0.78 * VESSEL_TIER_SCALE.medium) < 1e-9);
+
+    camera.setHeight(120_000);
+    _tickVesselRuntimeForTest(300);
+    assert.equal(_getVesselLodStateForTest().iconTier, 'full');
+    assert.ok(Math.abs(fast.billboard.scale - 0.78) < 1e-9, 'plná = čistá rýchlostná mierka');
+  } finally {
+    _setVesselOverlayHostForTest(null);
+    _setVesselStateForTest({ enabled: false });
+  }
+});
+
+test('lode: pri pohľade na svet hustota namiesto šípok, bunky za obzorom zhasnú', () => {
+  const camera = makeLodCamera(4.05, 51.93, 9_000_000);
+  const near = makeLodRecord('N1', 4.0, 51.9);
+  const near2 = makeLodRecord('N2', 4.3, 52.1);
+  const far = makeLodRecord('FAR', 151.2, -33.9); // Sydney — odvrátená strana
+  const densityPoints = new Cesium.PointPrimitiveCollection();
+  _setVesselOverlayHostForTest(NOOP_HOST);
+  _setVesselStateForTest({ viewer: { camera }, records: [near, near2, far], densityPoints });
+  try {
+    _tickVesselRuntimeForTest(0);
+    assert.equal(_getVesselLodStateForTest().densityMode, true, '9 000 km = hustota');
+    assert.equal(densityPoints.show, true);
+    assert.equal(near.billboard.show, false, 'šípky zhasli — jediná brána viditeľnosti');
+    assert.equal(near2.billboard.show, false);
+    assert.equal(far.billboard.show, false);
+    assert.equal(densityPoints.length, 2, 'dve lode v jednej bunke + Sydney');
+    let shown = 0;
+    for (let i = 0; i < densityPoints.length; i += 1) if (densityPoints.get(i).show) shown += 1;
+    assert.equal(shown, 1, 'bunka na odvrátenej strane nepresvitá cez glóbus');
+
+    // Prepočet je throttlovaný: nový záznam sa v bunkách objaví až po 2 s.
+    _tickVesselRuntimeForTest(500);
+    assert.equal(densityPoints.length, 2);
+
+    camera.setHeight(1_500_000);
+    _tickVesselRuntimeForTest(3000);
+    assert.equal(_getVesselLodStateForTest().densityMode, false, '1 500 km = jednotlivé lode');
+    assert.equal(densityPoints.show, false);
+    assert.equal(densityPoints.length, 0, 'bunky sa po návrate zahodia');
+    assert.equal(near.billboard.show, true, 'horizontový cull flotilu zase rozsvieti');
+    assert.equal(far.billboard.show, false, 'Sydney ostáva za obzorom');
+  } finally {
+    _setVesselOverlayHostForTest(null);
+    _setVesselStateForTest({ enabled: false });
+  }
+});
+
+test('lode: vybraná loď ostáva viditeľná aj v režime hustoty', () => {
+  const camera = makeLodCamera(4.05, 51.93, 9_000_000);
+  const picked = makeLodRecord('P', 4.0, 51.9);
+  const other = makeLodRecord('O', 4.3, 52.1);
+  const densityPoints = new Cesium.PointPrimitiveCollection();
+  _setVesselOverlayHostForTest(NOOP_HOST);
+  _setVesselStateForTest({
+    viewer: { camera }, records: [picked, other], densityPoints, selectedRecord: picked,
+  });
+  try {
+    _tickVesselRuntimeForTest(0);
+    assert.equal(_getVesselLodStateForTest().densityMode, true);
+    assert.equal(picked.billboard.show, true, 'ako sledovaný stroj pri lietadlách');
+    assert.equal(other.billboard.show, false);
+  } finally {
+    _setVesselOverlayHostForTest(null);
     _setVesselStateForTest({ enabled: false });
   }
 });

@@ -56,7 +56,8 @@ import { cockpitContactDotImage } from './cockpitContactDot.js';
 import { nextCockpitNearContacts } from './cockpitAirLod.js';
 import { airIconTier } from './airIconLod.js';
 import {
-  aggregateTraffic, densityGridDegrees, densityMarkerAlpha, densityMarkerPx, densityModeActive,
+  aggregateTraffic, cullDensityCells, densityGridDegrees, densityMarkerAlpha, densityMarkerPx,
+  densityModeActive,
 } from './trafficDensity.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import {
@@ -748,15 +749,28 @@ function _refreshTrafficDensity(nowMs) {
         if (icao24 !== _trackedIcao) bb.show = !next;
       }
     }
-    _densityRebuiltAtMs = 0; // vynúť prepočet hneď po prepnutí
+    _densityRebuiltAtMs = -Infinity; // vynúť prepočet hneď po prepnutí
   }
   if (!_densityMode) {
     if (_densityPoints.length) _densityPoints.removeAll();
     return;
   }
-  if (nowMs - _densityRebuiltAtMs < DENSITY_REBUILD_MS) return;
-  _densityRebuiltAtMs = nowMs;
+  if (nowMs - _densityRebuiltAtMs >= DENSITY_REBUILD_MS) {
+    _densityRebuiltAtMs = nowMs;
+    _rebuildTrafficDensityCells(height);
+  }
+  // Horizontový cull KAŽDÝ tik, nie raz za 2 s: bunky nemajú hĺbkový test a
+  // pri otáčaní glóbusu by odvrátená strana presvitala až do ďalšieho
+  // prepočtu. ≤900 bodov je lacnejších než jeden prepočet flotily.
+  cullDensityCells(_densityPoints, horizonOccluder(_viewer.camera));
+}
 
+/**
+ * Prepočítaj bunky hustoty z aktuálnych polôh flotily.
+ * @param {number} height Výška kamery (m) — určuje hrúbku mriežky.
+ * @returns {void}
+ */
+function _rebuildTrafficDensityCells(height) {
   const records = [];
   for (const [icao24, info] of _flightData) {
     if (!_categoryVisible(info?.klass)) continue;

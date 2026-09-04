@@ -7,6 +7,7 @@ import {
   DENSITY_EXIT_ALT_M,
   DENSITY_MAX_CELLS,
   aggregateTraffic,
+  cullDensityCells,
   densityGridDegrees,
   densityMarkerAlpha,
   densityMarkerPx,
@@ -121,11 +122,34 @@ test('tripwire: hustota sa skladá do TEJ ISTEJ brány viditeľnosti', async () 
   );
   // Prepočet nesmie bežať každý tik: 12 000 kontaktov pri pohľade, kde jeden
   // stroj urobí zlomok pixela, je zbytočná práca.
-  assert.match(source, /nowMs - _densityRebuiltAtMs < DENSITY_REBUILD_MS/, 'prepočet je throttlovaný');
+  assert.match(source, /nowMs - _densityRebuiltAtMs >= DENSITY_REBUILD_MS/, 'prepočet je throttlovaný');
+  // Cull naopak MUSÍ bežať každý tik (mimo throttlu): bunky nemajú hĺbkový
+  // test a pri otáčaní glóbusu by odvrátená strana presvitala až do ďalšieho
+  // prepočtu (nález 2026-09-04: 163 z 284 buniek svietilo na limbe).
+  assert.match(
+    source,
+    /cullDensityCells\(_densityPoints, horizonOccluder\(_viewer\.camera\)\)/,
+    'bunky sa cullujú tým istým occluderom ako flotila',
+  );
   // Vlastná kolekcia, nie ďalšie billboardy vo flotile.
   assert.match(source, /_densityPoints = new Cesium\.PointPrimitiveCollection\(\)/, 'vlastná kolekcia');
   assert.match(source, /_densityPoints = null;\n\s*_densityMode = false;/, 'teardown čistí stav');
   // Skryté kategórie sa do hustoty nesmú počítať — inak by filter „nič
   // nerobil", hoci by bunky ostali rovnaké.
   assert.match(source, /if \(!_categoryVisible\(info\?\.klass\)\) continue;/, 'filter platí aj pre hustotu');
+});
+
+test('bunky za obzorom zhasnú — nepresvitajú cez glóbus', () => {
+  const mk = (x, show = true) => ({ position: { x }, show });
+  const points = [mk(1), mk(-1), mk(2), mk(-2, false), { position: null, show: false }];
+  const collection = { length: points.length, get: (i) => points[i] };
+  // Occluder ako v Cesiu: viditeľné je to, čo je „pred" Zemou (tu x > 0).
+  const occluder = { isPointVisible: (p) => p.x > 0 };
+  const visible = cullDensityCells(collection, occluder);
+  assert.equal(visible, 3, 'dve bunky vpredu + bod bez polohy (nie je čo skryť)');
+  assert.deepEqual(points.map((p) => p.show), [true, false, true, false, true]);
+  // Bez occludera (ešte niet kamery) sa nič neskrýva.
+  assert.equal(cullDensityCells(collection, null), 5);
+  assert.ok(points.every((p) => p.show === true));
+  assert.equal(cullDensityCells(null, occluder), 0);
 });

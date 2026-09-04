@@ -5,7 +5,12 @@ import {
   clearSelectedEntityContextForLayer,
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
-import { screenProjectedRotation, cameraPoseSignature } from './iconOrientation.js';
+import { screenProjectedRotation, cameraPoseSignature, horizonOccluder } from './iconOrientation.js';
+import { airIconTier } from './airIconLod.js';
+import {
+  aggregateTraffic, cullDensityCells, densityGridDegrees, densityMarkerAlpha, densityMarkerPx,
+  densityModeActive,
+} from './trafficDensity.js';
 import { formatKnots } from './detectionDraw.js';
 import {
   isOwnedByOtherLayer,
@@ -67,6 +72,21 @@ const REFRESH_MS = 60000;
 export const AIS_FIRST_CONNECT_GRACE_MS = 30000;
 const AIS_FIRST_CONNECT_LABEL = 'awaiting first AIS position…';
 const VISIBILITY_UPDATE_MS = 800;
+/**
+ * Mierka lodnej ikony podľa stupňa priblíženia (2026-09-04). Prahy sú TIE
+ * ISTÉ ako pri lietadlách (airIconLod.js), takže obe vrstvy menia veľkosť
+ * v tom istom okamihu. 32 px šípka × rýchlostná mierka 0,6–0,78 dáva plnú
+ * 19–25 px, strednú 13–17 px, drobnú 9–11 px — rovnaká reč ako 9 px siluety
+ * lietadiel. Pred touto zmenou nemala vrstva žiadne zmenšovanie a pri pohľade
+ * na svet kreslila 27 000 šípok v plnej veľkosti — stenu, cez ktorú nebolo
+ * vidieť ani mapu, ani hustotu lietadiel.
+ */
+export const VESSEL_TIER_SCALE = Object.freeze({ full: 1, medium: 0.7, micro: 0.45 });
+/** Bunky hustoty lodí sa prepočítavajú raz za 2 s (rovnako ako lietadlá). */
+const VESSEL_DENSITY_REBUILD_MS = 2000;
+/** Farba buniek hustoty lodí — tlmená lodná azúrová, aby sa od bielych
+ *  leteckých buniek dala rozoznať aj bez legendy. */
+const VESSEL_DENSITY_CSS = '#7fd3f0';
 /** Focus alpha alone samples faster inside the existing preRender pass. */
 const FOCUS_UPDATE_MS = 80;
 const LABEL_GRID_PX = VESSEL_LABEL_GRID_PX;
@@ -434,6 +454,9 @@ const aisLiveVesselsLayer = {
       unregisterSpriteCollection('ais', state.billboardCollection);
       viewer.scene.primitives.remove(state.billboardCollection);
     }
+    if (state.densityPoints && viewer) {
+      viewer.scene.primitives.remove(state.densityPoints);
+    }
     _vesselOverlayHost.clearSource(VESSEL_OVERLAY_SOURCE_ID);
     _vesselOverlayHost.setVisible(VESSEL_OVERLAY_SOURCE_ID, false);
     removeVesselInteraction();
@@ -738,6 +761,14 @@ const state = {
   preRenderRemover: null,
   lastVisibilityUpdate: 0,
   lastFocusUpdate: 0,
+  /** @type {'full'|'medium'|'micro'} Stupeň veľkosti lodných ikon (airIconLod.js). */
+  iconTier: 'full',
+  /** @type {object|null} Kolekcia bodov hustoty lodí (trafficDensity.js). */
+  densityPoints: null,
+  /** Kreslí sa hustota namiesto jednotlivých lodí? */
+  densityMode: false,
+  /** Kedy sa naposledy prepočítali bunky hustoty. */
+  densityRebuiltAt: 0,
   /** Sprites whose animated emphasis remains outside the 1.0 deadband. */
   activeFocusCount: 0,
   activeLabelCount: 0,
@@ -1011,6 +1042,12 @@ function ensureCollections(viewer) {
   state.billboardCollection.show = state.enabled;
   viewer.scene.primitives.add(state.billboardCollection);
   registerSpriteCollection('ais', state.billboardCollection);
+  // Hustota lodí pri pohľade na svet — vlastná kolekcia, rovnako ako pri
+  // lietadlách: body sedia na ťažiskách buniek, nie na lodiach, a zhasínajú
+  // jedným `show` bez dotyku flotily.
+  state.densityPoints = new Cesium.PointPrimitiveCollection();
+  state.densityPoints.show = false;
+  viewer.scene.primitives.add(state.densityPoints);
 }
 
 /**
@@ -1237,10 +1274,24 @@ function finiteNumber(value) {
 }
 
 function shipScale(record) {
+  return shipSpeedScale(record) * vesselTierScale(state.iconTier);
+}
+
+/** Rýchlostná mierka šípky (rýchlejšia loď = väčšia šípka), bez stupňa. */
+function shipSpeedScale(record) {
   const speed = Number(record.speed || 0);
   if (speed >= 18) return 0.78;
   if (speed >= 8) return 0.68;
   return 0.6;
+}
+
+/**
+ * Násobok mierky lodnej ikony pre stupeň priblíženia.
+ * @param {'full'|'medium'|'micro'} tier Stupeň z airIconLod.js.
+ * @returns {number} 1 pre plný stupeň, menej pri oddialení; neznámy stupeň = 1.
+ */
+export function vesselTierScale(tier) {
+  return VESSEL_TIER_SCALE[tier] ?? 1;
 }
 
 /**
@@ -1283,7 +1334,88 @@ function shipIcon(record, selected) {
 
 function installRuntime(viewer) {
   if (state.preRenderRemover || !viewer) return;
-  state.preRenderRemover = viewer.scene.preRender.addEventListener(() => updateVisibility());
+  state.preRenderRemover = viewer.scene.preRender.addEventListener(() => {
+    // Stupeň a hustota PRED viditeľnosťou, nech je pass v celom tiku
+    // konzistentný (rovnaké poradie ako vo fleet ticku lietadiel).
+    refreshVesselLod();
+    refreshVesselDensity(performance.now());
+    updateVisibility();
+  });
+}
+
+/**
+ * Prepni celú flotilu lodí medzi stupňami veľkosti podľa výšky kamery.
+ * Vyhodnocuje sa raz za tik a prepisuje len na prechode — bežný tik nestojí
+ * nič. Mierka sa píše cez `shipScale`, ktorý stupeň už nesie, takže výber,
+ * obnova záznamu aj zrušenie výberu ostávajú jediným zapisovačom.
+ * @returns {void}
+ */
+function refreshVesselLod() {
+  if (!state.enabled) return;
+  const height = state.viewer?.camera?.positionCartographic?.height;
+  const next = airIconTier(height, state.iconTier);
+  if (next === state.iconTier) return;
+  state.iconTier = next;
+  for (const record of state.vesselRecords) {
+    if (!record.billboard) continue;
+    record.billboard.scale = shipScale(record) * (record === state.selectedRecord ? 1.2 : 1);
+  }
+  state.viewer?.scene?.requestRender?.();
+}
+
+/**
+ * Prepni medzi jednotlivými loďami a agregovanou hustotou (trafficDensity.js).
+ *
+ * Pri pohľade na svet je 27 000 lodných šípok stena pozdĺž pobreží; zaujímavá
+ * je vtedy hustota — Lamanšský prieliv, Malacký prieliv, Rýn, prázdno na
+ * otvorenom oceáne. Flotila sa skrýva cez TÚ ISTÚ bránu ako horizont
+ * (`updateVisibility`), nie druhým pravidlom o `show`.
+ * @param {number} nowMs Monotónny čas (performance.now()).
+ * @returns {void}
+ */
+function refreshVesselDensity(nowMs) {
+  if (!state.enabled || !state.densityPoints) return;
+  const height = state.viewer?.camera?.positionCartographic?.height;
+  const next = densityModeActive(height, state.densityMode);
+  if (next !== state.densityMode) {
+    state.densityMode = next;
+    state.densityPoints.show = next;
+    state.densityRebuiltAt = -Infinity; // vynúť prepočet hneď po prepnutí
+    updateVisibility(true); // flotila zhasne / rozsvieti sa v jedinej bráne
+  }
+  if (!state.densityMode) {
+    if (state.densityPoints.length) state.densityPoints.removeAll();
+    return;
+  }
+  if (nowMs - state.densityRebuiltAt >= VESSEL_DENSITY_REBUILD_MS) {
+    state.densityRebuiltAt = nowMs;
+    rebuildVesselDensityCells(height);
+  }
+  // Horizontový cull každý tik: bunky nemajú hĺbkový test a odvrátená strana
+  // by inak presvitala cez glóbus.
+  const camera = state.viewer?.camera;
+  if (camera?.positionWC) cullDensityCells(state.densityPoints, horizonOccluder(camera));
+}
+
+/**
+ * Prepočítaj bunky hustoty z aktuálnych polôh lodí.
+ * @param {number} height Výška kamery (m) — určuje hrúbku mriežky.
+ * @returns {void}
+ */
+function rebuildVesselDensityCells(height) {
+  const cells = aggregateTraffic(state.vesselRecords, densityGridDegrees(height));
+  const maxCount = cells.length ? cells[0].count : 1;
+  const base = Cesium.Color.fromCssColorString(VESSEL_DENSITY_CSS);
+  state.densityPoints.removeAll();
+  for (const cell of cells) {
+    state.densityPoints.add({
+      position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat, 0),
+      pixelSize: densityMarkerPx(cell.count, maxCount),
+      color: base.withAlpha(densityMarkerAlpha(cell.count, maxCount)),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    });
+  }
+  state.viewer?.scene?.requestRender?.();
 }
 
 function updateVisibility(force = false) {
@@ -1314,7 +1446,11 @@ function updateVisibility(force = false) {
     const occluder = makeOccluder();
     const labelCandidates = [];
     for (const record of state.vesselRecords) {
-      const visible = isVisible(record.surfacePosition, occluder);
+      // Režim hustoty sa skladá do TEJ ISTEJ brány ako horizont: v hustote
+      // ostáva viditeľná len vybraná loď (ako sledovaný stroj pri lietadlách),
+      // inak by tento pass rozsvietil flotilu hneď po tom, čo ju hustota zhasla.
+      const visible = (!state.densityMode || record === state.selectedRecord)
+        && isVisible(record.surfacePosition, occluder);
       if (record.billboard) {
         record.billboard.show = visible;
         if (visible && doRotations && scene) {
@@ -2028,6 +2164,9 @@ function setVisible(show) {
   if (state.billboardCollection) {
     state.billboardCollection.show = show;
   }
+  if (state.densityPoints) {
+    state.densityPoints.show = show && state.densityMode;
+  }
   _vesselOverlayHost.setVisible(VESSEL_OVERLAY_SOURCE_ID, show);
 }
 
@@ -2065,6 +2204,10 @@ function resetState() {
   state.interactionHandlerFactory = null;
   state.interactionKeyTarget = null;
   state.preRenderRemover = null;
+  state.iconTier = 'full';
+  state.densityPoints = null;
+  state.densityMode = false;
+  state.densityRebuiltAt = 0;
   state.lastVisibilityUpdate = 0;
   state.lastFocusUpdate = 0;
   state.activeFocusCount = 0;
@@ -2110,6 +2253,7 @@ export function _setVesselStateForTest(options = {}) {
   );
   state.selectedRecord = options.selectedRecord || null;
   state.billboardCollection = options.billboardCollection || { remove() {} };
+  state.densityPoints = options.densityPoints || null;
   state.trail = options.trail || null;
   state.trailMmsi = options.trailMmsi || null;
   state.trailPositions = Array.isArray(options.trailPositions) ? [...options.trailPositions] : [];
@@ -2132,6 +2276,13 @@ export function _setVesselOverlayHostForTest(host = null) {
 /** Exercise the production selector/publisher through a test-owned state. */
 export function _updateVesselCardsForTest(records = []) {
   updateClusteredLabels(records);
+}
+
+/** Jeden tik preRender slučky (stupeň → hustota → viditeľnosť). Test-only. */
+export function _tickVesselRuntimeForTest(nowMs = performance.now()) {
+  refreshVesselLod();
+  refreshVesselDensity(nowMs);
+  updateVisibility(true);
 }
 
 /**
@@ -2208,4 +2359,9 @@ export function _getVesselStateForTest() {
     trailPositionCount: state.trailPositions.length,
     vesselCount: state.vesselMap.size,
   };
+}
+
+/** Stupeň ikon a režim hustoty lodí (2026-09-04). Test-only. */
+export function _getVesselLodStateForTest() {
+  return { iconTier: state.iconTier, densityMode: state.densityMode };
 }
