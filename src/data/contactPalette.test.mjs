@@ -83,6 +83,13 @@ test('tripwire: obe letecké vrstvy pečú tint do SVG a prerastrujú na zmenu',
     assert.match(source, /onContactPaletteChange\(/, `${name}: prihlásený na zmenu palety`);
     assert.match(source, /_paletteUnsub\(\);/, `${name}: odhlási sa pri destroy`);
   }
+  // 3D modely flotily (režim „Modely blízke" pod 800 km) sledujú tú istú
+  // paletu — inak by ikona bola atramentová a model biely, a pri 129 km na
+  // OSM by stroj ostal sivou škvrnou (nález zo screenshotu 2026-09-05).
+  const flights = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
+  assert.match(flights, /return contactIconTint\('civil'\) === 'ink' \? MODEL_INK_TINT : Cesium\.Color\.WHITE;/, 'model civil sleduje paletu');
+  assert.match(flights, /MODEL_INK_TINT = Cesium\.Color\.fromCssColorString\(TINT_FILLS\.ink\)/, 'rovnaká atramentová ako ikona');
+  assert.match(flights, /m\.color = _modelColor\(icao24\)\.withAlpha\(m\.color\.alpha\);/, 'modely sa premaľujú pri zmene palety');
   // OSM je jediný svetlý podklad; main.js viaže paletu na udalosť podkladu.
   const stacks = readFileSync(new URL('../mapStackController.js', import.meta.url), 'utf8');
   assert.match(stacks, /id: 'osm',[\s\S]{0,500}contactContrast: 'light'/, 'OSM je označený ako svetlý');

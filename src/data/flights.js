@@ -48,7 +48,7 @@ import {
 } from './aircraftCategories.js';
 import { t } from '../i18n.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
-import { aircraftIcon, strobeLightIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
+import { aircraftIcon, strobeLightIcon, strobeOn, TRACKED_ICON_PX, TINT_FILLS } from './aircraftIcons.js';
 import {
   isTr3b, tr3bAircraftClass, tr3bConvertedIds, tr3bIconKind, tr3bTypeLabel,
 } from './tr3bRegistry.js';
@@ -178,7 +178,7 @@ function _groundDepthDistance() {
 // backed by a hard cap so a draw-call explosion can't tank the frame (no instancing yet).
 const PLANE_MODEL_URL = '/models/airplane.glb';
 const MODEL_ALT_CEIL_M = 800000; // m: below this camera altitude, draw 3D models (raised so it's easy to trigger)
-const MODEL_MIN_PX = 24;        // floor so distant models stay visible WITHOUT ballooning into a giant
+const MODEL_MIN_PX = 32;        // floor so distant models stay visible WITHOUT ballooning into a giant (24 → 32, 2026-09-05: pri 129 km bol model ~6 px škvrna)
                                 // min-pixel blob (was 54 — far planes at the All radius became white
                                 // star-bursts); ~matches the 2D icon size so the model↔billboard read is consistent
 const TRACKED_MODEL_MIN_PX = 40; // keep the glTF silhouette comparable to the selected 2D glyph at handoff
@@ -623,6 +623,13 @@ function _syncFleetBillboardIcon(icao24, bb, klass) {
 function _resyncFleetIconsForPalette() {
   for (const [icao24, bb] of _billboards) {
     _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
+  }
+  // Modely tiež: per-tick treatment píše farbu LEN pri zmene alfy, takže by
+  // starý tint prežil až do ďalšieho fade-u.
+  if (!_irBoost) {
+    for (const [icao24, m] of _models) {
+      if (m?.color) m.color = _modelColor(icao24).withAlpha(m.color.alpha);
+    }
   }
   _viewer?.scene?.requestRender?.();
 }
@@ -1887,8 +1894,12 @@ function _resetTrackedDisplay() {
 /** Model tint, mirroring the billboard color rules. */
 function _modelColor(icao24) {
   if (icao24 === _trackedIcao) return Cesium.Color.CYAN;
-  return isMilitaryIcao(icao24) ? MIL_TINT : Cesium.Color.WHITE;
+  if (isMilitaryIcao(icao24)) return MIL_TINT;
+  // Rovnaká paleta ako ikony (contactPalette.js): na svetlom podklade je biely
+  // GLB pri 129 km len sivá škvrna, atramentový sa číta ako silueta.
+  return contactIconTint('civil') === 'ink' ? MODEL_INK_TINT : Cesium.Color.WHITE;
 }
+const MODEL_INK_TINT = Cesium.Color.fromCssColorString(TINT_FILLS.ink);
 
 /** The FLEET's 3D-model regime: models3d enabled AND the camera zoomed in past the altitude
  *  ceiling. Since 2026-08-22 the toggle DEFAULTS ON in `proximity`, which is itself the
