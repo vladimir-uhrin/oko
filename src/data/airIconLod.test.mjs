@@ -7,8 +7,11 @@ import { readFileSync } from 'node:fs';
 import {
   AIR_DOT_ENTER_ALT_M,
   AIR_DOT_EXIT_ALT_M,
+  AIR_ICON_THRESHOLDS,
+  AIR_ICON_TIERS,
   FLEET_MODEL_ALT_CEIL_M,
   airDotLodActive,
+  airIconTier,
 } from './airIconLod.js';
 
 test('hysterézia: pásmo medzi prahmi drží predchádzajúcu odpoveď', () => {
@@ -126,8 +129,8 @@ test('kokpitový pip ostáva bodkou, mapa dostáva siluetu', () => {
       `${name}: mikro je mapový LOD bez kokpitu`,
     );
     assert.match(source, /bb\._gevDot = !isMicro;/, `${name}: tvary sa vylučujú`);
-    // Malý raster: 64 px zmenšených na 8 je šmuha, atlas nemá mipmapy.
-    assert.match(source, /const MICRO_RASTER_PX = 32;/, `${name}: vlastný malý raster`);
+    // Menší raster: 64 px stiahnutých na 9 je šmuha, atlas nemá mipmapy.
+    assert.match(source, /TIER_RASTER_PX = Object\.freeze/, `${name}: raster podľa stupňa`);
   }
 });
 
@@ -138,4 +141,82 @@ test('pokojná bodka ostala nedotknutá — kokpit sa nesmie zmeniť', async () 
   assert.match(source, /arc\(8, 8, pulse \? 2\.45 : 1\.55, 0, Math\.PI \* 2\)/, 'mení sa len polomer jadra');
   assert.match(source, /arc\(8, 8, 4\.25, 0, Math\.PI \* 2\)/, 'prstenec je v oboch fázach rovnaký');
   assert.match(source, /pulse === true \? '_pulseUrl' : '_dataUrl'/, 'každá fáza má vlastnú stabilnú URL');
+});
+
+// ── Tri stupne veľkosti (2026-09-04) ─────────────────────────────────────────
+// Jeden skok z 20 px na 9 px bol na hranici priveľmi cítiť; stredný stupeň ho
+// rozkladá.
+
+test('tri stupne: zblízka plná, v strede stredná, zďaleka drobná', () => {
+  assert.deepEqual([...AIR_ICON_TIERS], ['full', 'medium', 'micro']);
+  assert.equal(airIconTier(50_000), 'full', 'nízko nad zemou plná ikona');
+  assert.equal(airIconTier(500_000), 'medium', 'stredné výšky stredná');
+  assert.equal(airIconTier(2_000_000), 'micro', 'pohľad na kontinent drobná');
+});
+
+test('hysterézia na OBOCH hraniciach, nie len na hornej', () => {
+  const { micro, medium } = AIR_ICON_THRESHOLDS;
+  // Horná hranica (medium ↔ micro).
+  assert.equal(airIconTier(850_000, 'medium'), 'medium', 'stúpam: ešte stredná');
+  assert.equal(airIconTier(850_000, 'micro'), 'micro', 'klesám: ešte drobná');
+  assert.equal(airIconTier(micro.enter, 'medium'), 'micro');
+  assert.equal(airIconTier(micro.exit - 1, 'micro'), 'medium');
+  // Dolná hranica (full ↔ medium).
+  assert.equal(airIconTier(270_000, 'full'), 'full', 'stúpam: ešte plná');
+  assert.equal(airIconTier(270_000, 'medium'), 'medium', 'klesám: ešte stredná');
+  assert.equal(airIconTier(medium.enter, 'full'), 'medium');
+  assert.equal(airIconTier(medium.exit - 1, 'medium'), 'full');
+});
+
+test('zostup z drobnej ide CEZ strednú, nepreskočí rovno na plnú', () => {
+  // Preskočenie by vrátilo presne ten skok, kvôli ktorému stredný stupeň
+  // vznikol.
+  let tier = 'micro';
+  const cesta = [];
+  for (const h of [900_000, 600_000, 400_000, 280_000, 100_000]) {
+    tier = airIconTier(h, tier);
+    cesta.push(tier);
+  }
+  assert.deepEqual(cesta, ['micro', 'medium', 'medium', 'medium', 'full']);
+});
+
+test('neznáma výška aj neznámy predchádzajúci stupeň končia na plnej ikone', () => {
+  for (const bad of [Number.NaN, undefined, null, Infinity, 'vysoko']) {
+    assert.equal(airIconTier(bad, 'micro'), 'full', `${String(bad)} → plná`);
+  }
+  assert.equal(airIconTier(500_000, 'nezmysel'), 'medium', 'neznámy stupeň sa číta ako full');
+});
+
+test('starý boolean pohľad ostáva funkčný pre volajúcich, čo ho používajú', () => {
+  assert.equal(airDotLodActive(2_000_000, false), true);
+  assert.equal(airDotLodActive(500_000, false), false, 'stredná nie je „drobná"');
+  assert.equal(airDotLodActive(AIR_DOT_ENTER_ALT_M, false), true);
+  assert.equal(airDotLodActive(AIR_DOT_EXIT_ALT_M - 1, true), false);
+});
+
+test('veľkosti stupňov klesajú a stredná naozaj leží medzi nimi', () => {
+  for (const file of ['./flights.js', './militaryFlights.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const name = file.includes('military') ? 'military' : 'flights';
+    const m = /TIER_ICON_PX = Object\.freeze\(\{ full: (\d+), medium: (\d+), micro: FAR_DOT_SIZE_PX \}\)/.exec(source);
+    assert.ok(m, `${name}: veľkosti stupňov sa nenašli`);
+    const [full, medium] = [Number(m[1]), Number(m[2])];
+    const micro = Number(/const FAR_DOT_SIZE_PX = (\d+);/.exec(source)[1]);
+    assert.ok(full > medium && medium > micro, `${name}: ${full} > ${medium} > ${micro}`);
+  }
+});
+
+test('návrat na plnú veľkosť vyčistí stupeň — inak zamrzne raster swap', () => {
+  // Nájdené živým meraním: pri 120 km bola šírka správnych 20 px, ale
+  // `_gevTier` ostal 'medium'. Composer by potom navždy bral raster stupňa a
+  // dvojúrovňový swap 64/192 px by sa pri priblížení už nikdy nespustil.
+  for (const file of ['./flights.js', './militaryFlights.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const name = file.includes('military') ? 'military' : 'flights';
+    assert.match(
+      source,
+      /bb\._gevDot = false;\s*\n\s*bb\._gevMicro = false;[\s\S]{0,220}?bb\._gevTier = null;/,
+      `${name}: plná vetva čistí príznaky zmenšenia`,
+    );
+  }
 });

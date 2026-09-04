@@ -1,14 +1,15 @@
 // src/data/airIconLod.js
 /**
  * @module airIconLod
- * @description Kedy sa vzdušné kontakty kreslia ako BODKA namiesto siluety.
+ * @description Ako veľká je ikona vzdušného kontaktu podľa priblíženia.
  *
  * Namerané 2026-09-03 pri pohľade na Európu z 2 600 km: 2 437 kontaktov na
- * obrazovke, každý ako 22 px silueta → ikony zaberajú 158 % plochy obrazovky,
- * prekrývajú sa navzájom aj mapu pod sebou. Vzniká kŕdeľ, v ktorom sa nedá
- * nič prečítať. FlightRadar24 pri rovnakom priblížení kreslí ~5 px body (8 %
- * plochy), a práve preto tam vidno VZOR prevádzky — koridory, hustotu,
- * prázdno nad oceánmi. Máme tie isté dáta, len ich prekresľujeme.
+ * obrazovke, každý ako 22 px silueta → ikony zaberali 158 % plochy obrazovky
+ * a prekrývali sa navzájom aj mapu. FlightRadar24 pri rovnakom priblížení
+ * kreslí drobné značky (~8 % plochy), a práve preto tam vidno VZOR prevádzky.
+ *
+ * Od 2026-09-04 sú stupne TRI, nie dva — jeden skok z 20 px na 9 px bol na
+ * hranici priveľmi cítiť. Stredný stupeň ten prechod rozloží.
  *
  * PREČO VÝŠKA KAMERY a nie veľkosť ikony na obrazovke: `scaleByDistance` je
  * takmer plochá krivka (NearFarScalar(1000, 3.0, 8e6, 0.5)) — ikona má ~29 px
@@ -16,60 +17,80 @@
  * že sú ikony malé, ale že sú veľké a je ich 2 437.
  *
  * PREČO NIE vzdialenosť kontaktu (ako `STROBE_MAX_DIST_M`): pri pohľade zhora
- * by vznikol kruh siluet okolo nadiru a bodky za ním — a ten kruh by pri
+ * by vznikol kruh veľkých ikon okolo nadiru a malé za ním — a ten kruh by pri
  * posune kamery plával po scéne. Pri strobe je taká hranica neviditeľná, pri
- * TVARE ikony by vyzerala ako chyba.
+ * VEĽKOSTI ikony by vyzerala ako chyba.
  *
  * PREČO NIE počet kontaktov na obrazovke: bol by dátovo závislý (nad
- * Atlantikom siluety, nad Európou bodky pri tom istom priblížení) a jediný
+ * Atlantikom veľké, nad Európou malé pri tom istom priblížení) a jediný
  * prilietavajúci stroj by preklopil celú flotilu.
- *
- * Výška kamery je to, čo robí aj FR24 (zoom level), je globálna (jedno
- * vyhodnotenie za tik, nula per-kontakt pamäte) a projekt ju už takto používa
- * (`MODEL_ALT_CEIL_M`, `trackedModelZoomActive`).
  */
 
 /** Strop 3D modelov flotily (`MODEL_ALT_CEIL_M` v oboch leteckých vrstvách),
- *  duplikovaný sem LEN preto, aby sa vzťah nižšie dal odtestovať. Vlastná
- *  konštanta vrstiev sa nemení a ostáva jediným zdrojom pre ich správanie. */
+ *  duplikovaný sem LEN preto, aby sa vzťah nižšie dal odtestovať. */
 export const FLEET_MODEL_ALT_CEIL_M = 800_000;
 
-/**
- * Výška kamery (m), nad ktorou sa flotila kreslí ako bodky.
- *
- * Nad ~950 km je v zábere celý kontinent — vtedy už silueta nenesie žiadnu
- * informáciu navyše (typ stroja sa pri 22 px aj tak nedá rozoznať), zaberá
- * len miesto a prekrýva susedov.
- */
-export const AIR_DOT_ENTER_ALT_M = 950_000;
+/** Stupne od najbližšieho po najvzdialenejší. */
+export const AIR_ICON_TIERS = Object.freeze(['full', 'medium', 'micro']);
 
 /**
- * Výška, pod ktorú musí kamera klesnúť, aby sa bodky vrátili na siluety.
+ * Prahy výšky kamery (m). Každý stupeň má vlastné pásmo hysterézy: `enter` je
+ * hranica pri stúpaní, `exit` pri klesaní. Vnútri pásma platí predchádzajúca
+ * odpoveď, takže kamera postávajúca na hranici neprepína veľkosť tam a späť.
  *
- * ZÁMERNE presne `FLEET_MODEL_ALT_CEIL_M`: 3D modely žijú len POD 800 km,
- * bodky len NAD 800 km, takže nikdy nemôže nastať stav „model vlastní vizuál,
- * ale jeho záložný billboard je bodka". Vzniká jednoznačný rebrík
- * model → silueta → bodka, ktorý sa dá overiť jedným assertom.
+ * `micro.exit` je ZÁMERNE presne `FLEET_MODEL_ALT_CEIL_M`: 3D modely žijú len
+ * POD 800 km, najmenšie ikony len NAD ním, takže nikdy nenastane stav „model
+ * vlastní vizuál, ale jeho záložný billboard je bod bez identity".
  */
-export const AIR_DOT_EXIT_ALT_M = FLEET_MODEL_ALT_CEIL_M;
+export const AIR_ICON_THRESHOLDS = Object.freeze({
+  micro: Object.freeze({ enter: 950_000, exit: FLEET_MODEL_ALT_CEIL_M }),
+  medium: Object.freeze({ enter: 300_000, exit: 250_000 }),
+});
 
 /**
- * Kreslí sa flotila pri tejto výške kamery ako bodky?
+ * Stupeň ikony pre danú výšku kamery.
  *
- * Hysterézne: volajúci vracia predchádzajúcu odpoveď a tá vyberá, ktorý prah
- * platí. Vnútri pásma [exit, enter) je odpoveď „to, čo už bolo", takže kamera
- * postávajúca na hranici neprepína tam a späť (rovnaký idióm ako
- * `trackedModelZoomActive`).
- *
- * Nefinitná výška (ešte niet viewera, kamera nie je umiestnená) číta ako
- * „nevieme" → siluety, čo je bezpečnejší default: radšej pár veľkých ikon než
- * scéna plná bodiek bez identity.
+ * Hysterézne: volajúci vracia predchádzajúci stupeň a ten vyberá, ktorý prah
+ * platí. Nefinitná výška (ešte niet viewera) číta ako 'full' — bezpečnejší
+ * default: pár veľkých ikon je lepších než scéna plná drobcov bez identity.
  *
  * @param {number} cameraHeightM Výška kamery nad elipsoidom v metroch.
- * @param {boolean} [wasActive=false] Odpoveď z predchádzajúceho vyhodnotenia.
- * @returns {boolean} True, keď má flotila kresliť bodky.
+ * @param {string} [previousTier='full'] Stupeň z predchádzajúceho vyhodnotenia.
+ * @returns {'full'|'medium'|'micro'}
+ */
+export function airIconTier(cameraHeightM, previousTier = 'full') {
+  if (!Number.isFinite(cameraHeightM)) return 'full';
+  const previous = AIR_ICON_TIERS.includes(previousTier) ? previousTier : 'full';
+
+  const microLimit = previous === 'micro'
+    ? AIR_ICON_THRESHOLDS.micro.exit
+    : AIR_ICON_THRESHOLDS.micro.enter;
+  if (cameraHeightM >= microLimit) return 'micro';
+
+  // Zostup z 'micro' pokračuje cez 'medium' — preskočiť rovno na 'full' by
+  // vrátilo ten istý skok, kvôli ktorému stredný stupeň vznikol.
+  const mediumLimit = previous === 'full'
+    ? AIR_ICON_THRESHOLDS.medium.enter
+    : AIR_ICON_THRESHOLDS.medium.exit;
+  if (cameraHeightM >= mediumLimit) return 'medium';
+
+  return 'full';
+}
+
+/**
+ * Kreslí sa flotila pri tejto výške ako zmenšená ikona?
+ *
+ * Ponechané pre volajúcich, ktorých zaujíma len „menšia než bežná" —
+ * `airIconTier` je autoritatívny.
+ * @param {number} cameraHeightM
+ * @param {boolean} [wasActive=false]
+ * @returns {boolean}
  */
 export function airDotLodActive(cameraHeightM, wasActive = false) {
-  if (!Number.isFinite(cameraHeightM)) return false;
-  return cameraHeightM >= (wasActive ? AIR_DOT_EXIT_ALT_M : AIR_DOT_ENTER_ALT_M);
+  return airIconTier(cameraHeightM, wasActive ? 'micro' : 'full') === 'micro';
 }
+
+/** Prah, nad ktorým sa kreslí najmenšia ikona (spätná kompatibilita). */
+export const AIR_DOT_ENTER_ALT_M = AIR_ICON_THRESHOLDS.micro.enter;
+/** Prah, pod ktorý musí kamera klesnúť, aby najmenšia ikona ustúpila. */
+export const AIR_DOT_EXIT_ALT_M = AIR_ICON_THRESHOLDS.micro.exit;

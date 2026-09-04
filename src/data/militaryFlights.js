@@ -28,7 +28,7 @@ import {
 } from './tr3bRegistry.js';
 import { cockpitContactDotImage } from './cockpitContactDot.js';
 import { nextCockpitNearContacts } from './cockpitAirLod.js';
-import { airDotLodActive } from './airIconLod.js';
+import { airIconTier } from './airIconLod.js';
 import {
   applyTrackedCameraFrame,
   trackedModelScaleForPixelCap,
@@ -386,10 +386,12 @@ function _isExplicitTrackingOrigin(origin) {
 const COCKPIT_CONTACT_SIZE_PX = 6;
 /** Veľkosť bodky na MAPE pri oddialenom pohľade — zrkadlo flights.js. */
 const FAR_DOT_SIZE_PX = 9;
-/** Raster drobnej siluety — zrkadlo flights.js (64 px na 8 je smuha). */
-const MICRO_RASTER_PX = 32;
-/** @type {boolean} Je flotila práve v bodkovom režime? (viď airIconLod.js) */
-let _farIconDots = false;
+/** Velkost ikony pre kazdy stupen priblizenia — zrkadlo flights.js. */
+const TIER_ICON_PX = Object.freeze({ full: 20, medium: 14, micro: FAR_DOT_SIZE_PX });
+/** Raster zmensenej siluety podla stupna (64 px na 9 je smuha). */
+const TIER_RASTER_PX = Object.freeze({ medium: 64, micro: 32 });
+/** @type {'full'|'medium'|'micro'} Stupeň veľkosti ikon flotily (airIconLod.js). */
+let _iconTier = 'full';
 const TRACKED_BILLBOARD_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1000, 3.0, 8000000, 0.5,
 );
@@ -420,7 +422,7 @@ function _isMicroContact(icao24) {
 function _isDotContact(icao24) {
   if (icao24 === _trackedIcao) return false;
   if (_cockpitContactMode) return !_cockpitNearContacts.has(icao24);
-  return _farIconDots;
+  return _iconTier !== 'full';
 }
 
 /** Apply the current normal/cockpit visual contract to one owned fleet billboard. */
@@ -436,11 +438,12 @@ function _applyFleetBillboardPresentation(icao24, bb) {
     const isMicro = _isMicroContact(icao24);
     bb._gevDot = !isMicro;
     bb._gevMicro = isMicro;
+    bb._gevTier = isMicro ? _iconTier : null;
     bb._gevIconLarge = false;
     bb._gevStrobeOn = false;
     if (!isMicro) bb._gevDotPulse = false;
     _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
-    const dotPx = isMicro ? FAR_DOT_SIZE_PX : COCKPIT_CONTACT_SIZE_PX;
+    const dotPx = isMicro ? (TIER_ICON_PX[_iconTier] || FAR_DOT_SIZE_PX) : COCKPIT_CONTACT_SIZE_PX;
     bb.width = dotPx;
     bb.height = dotPx;
     bb.scale = limbScale;
@@ -452,6 +455,10 @@ function _applyFleetBillboardPresentation(icao24, bb) {
   }
 
   bb._gevDot = false;
+  bb._gevMicro = false;
+  // Stupen sa MUSI vycistit, inak by stary raster prezil navrat na plnu
+  // velkost a dvojurovnovy raster swap (64/192 px) by sa uz nikdy nespustil.
+  bb._gevTier = null;
   const meta = _flightData.get(icao24);
   _syncFleetBillboardIcon(icao24, bb, meta?.klass);
   bb.width = icao24 === _trackedIcao ? 24 : 20;
@@ -465,9 +472,9 @@ function _applyFleetBillboardPresentation(icao24, bb) {
  *  flights.js. Vyhodnotenie raz za tik, prekreslenie len na prechode. */
 function _refreshFarIconLod() {
   const height = _viewer?.camera?.positionCartographic?.height;
-  const next = _cockpitContactMode ? false : airDotLodActive(height, _farIconDots);
-  if (next === _farIconDots) return;
-  _farIconDots = next;
+  const next = _cockpitContactMode ? 'full' : airIconTier(height, _iconTier);
+  if (next === _iconTier) return;
+  _iconTier = next;
   for (const [icao24, bb] of _billboards) _applyFleetBillboardPresentation(icao24, bb);
   _lastCamPoseSig = ''; // vynúť rotačný pass, nech sa nosy narovnajú hneď
 }
@@ -824,8 +831,8 @@ function _syncFleetBillboardIcon(icao24, bb, klass) {
   if (bb._gevDot === true) {
     uri = cockpitContactDotImage(bb._gevDotPulse === true);
   } else {
-    const raster = bb._gevMicro === true
-      ? MICRO_RASTER_PX
+    const raster = bb._gevTier && TIER_RASTER_PX[bb._gevTier]
+      ? TIER_RASTER_PX[bb._gevTier]
       : (bb._gevIconLarge ? TRACKED_ICON_PX : undefined);
     uri = aircraftIcon(_iconKind(icao24, klass), raster, bb._gevStrobeOn === true);
   }

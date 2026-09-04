@@ -54,7 +54,7 @@ import {
 } from './tr3bRegistry.js';
 import { cockpitContactDotImage } from './cockpitContactDot.js';
 import { nextCockpitNearContacts } from './cockpitAirLod.js';
-import { airDotLodActive } from './airIconLod.js';
+import { airIconTier } from './airIconLod.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import {
   applyTrackedCameraFrame,
@@ -500,12 +500,15 @@ const COCKPIT_CONTACT_SIZE_PX = 6;
  *  dosť na tvar aj na klik, a dosť málo na to, aby 2 400 kontaktov
  *  nezakrylo mapu. */
 const FAR_DOT_SIZE_PX = 9;
-/** Raster drobnej siluety. 64 px zmenšených na 8 je 8× downsample, z ktorého
- *  ostane šmuha; atlas nemá mipmapy. 32 px drží pomer 4× a tvar krídel
- *  prežije. */
-const MICRO_RASTER_PX = 32;
-/** @type {boolean} Je flotila práve v bodkovom režime? (viď airIconLod.js) */
-let _farIconDots = false;
+/** Veľkosť ikony pre každý stupeň priblíženia (2026-09-04). Stredný stupeň
+ *  rozkladá skok z 20 na 9 px, ktorý bol na hranici priveľmi cítiť. */
+const TIER_ICON_PX = Object.freeze({ full: 20, medium: 14, micro: FAR_DOT_SIZE_PX });
+/** Raster zmenšenej siluety. 64 px stiahnutých na 9 je 7× downsample, z
+ *  ktorého ostane šmuha (atlas nemá mipmapy); 32 px drží pomer ~3,5× a krídla
+ *  prežijú. Stredný stupeň má bližšie k 64, tam sa vypláca väčší zdroj. */
+const TIER_RASTER_PX = Object.freeze({ medium: 64, micro: 32 });
+/** @type {'full'|'medium'|'micro'} Stupeň veľkosti ikon flotily (airIconLod.js). */
+let _iconTier = 'full';
 const COCKPIT_CIVILIAN_COLOR = Cesium.Color.fromCssColorString('#DCEEFF');
 const TRACKED_BILLBOARD_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1000, 3.0, 8000000, 0.5,
@@ -579,8 +582,8 @@ function _syncFleetBillboardIcon(icao24, bb, klass) {
   if (bb._gevDot === true) {
     uri = cockpitContactDotImage(bb._gevDotPulse === true);
   } else {
-    const raster = bb._gevMicro === true
-      ? MICRO_RASTER_PX
+    const raster = bb._gevTier && TIER_RASTER_PX[bb._gevTier]
+      ? TIER_RASTER_PX[bb._gevTier]
       : (bb._gevIconLarge ? TRACKED_ICON_PX : undefined);
     uri = aircraftIcon(_iconKind(icao24, klass), raster, bb._gevStrobeOn === true);
   }
@@ -639,7 +642,7 @@ function _categoryChips() {
 function _isDotContact(icao24) {
   if (icao24 === _trackedIcao) return false; // sledovaný stroj si drží identitu vždy
   if (_cockpitContactMode) return !_cockpitNearContacts.has(icao24);
-  return _farIconDots;
+  return _iconTier !== 'full';
 }
 
 /**
@@ -675,13 +678,14 @@ function _applyFleetBillboardPresentation(icao24, bb) {
     // Textúru skladá composer aj tu — v celom module ostáva JEDINÝ zápis
     // `bb.image`, takže sa osi (kind × raster × strobo × tvar) nemôžu rozísť.
     bb._gevDot = !isMicro; // kokpit: bodka; mapa: drobná silueta
-    bb._gevMicro = isMicro;
+    bb._gevMicro = isMicro; // spatna kompatibilita pinov
+    bb._gevTier = isMicro ? _iconTier : null;
     bb._gevIconLarge = false;
     bb._gevStrobeOn = false;
     // Kokpitový pip nepulzuje — kokpit má vlastnú vizuálnu reč.
     if (!isMicro) bb._gevDotPulse = false;
     _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
-    const dotPx = isMicro ? FAR_DOT_SIZE_PX : COCKPIT_CONTACT_SIZE_PX;
+    const dotPx = isMicro ? (TIER_ICON_PX[_iconTier] || FAR_DOT_SIZE_PX) : COCKPIT_CONTACT_SIZE_PX;
     bb.width = dotPx;
     bb.height = dotPx;
     bb.scale = limbScale;
@@ -694,6 +698,10 @@ function _applyFleetBillboardPresentation(icao24, bb) {
   }
 
   bb._gevDot = false;
+  bb._gevMicro = false;
+  // Stupen sa MUSI vycistit, inak by stary raster prezil navrat na plnu
+  // velkost a dvojurovnovy raster swap (64/192 px) by sa uz nikdy nespustil.
+  bb._gevTier = null;
   const meta = _flightData.get(icao24);
   _syncFleetBillboardIcon(icao24, bb, meta?.klass);
   bb.width = icao24 === _trackedIcao ? 24 : 20;
@@ -714,9 +722,9 @@ function _applyFleetBillboardPresentation(icao24, bb) {
  */
 function _refreshFarIconLod() {
   const height = _viewer?.camera?.positionCartographic?.height;
-  const next = _cockpitContactMode ? false : airDotLodActive(height, _farIconDots);
-  if (next === _farIconDots) return;
-  _farIconDots = next;
+  const next = _cockpitContactMode ? 'full' : airIconTier(height, _iconTier);
+  if (next === _iconTier) return;
+  _iconTier = next;
   for (const [icao24, bb] of _billboards) _applyFleetBillboardPresentation(icao24, bb);
   // Po návrate k siluetám nesú ikony ešte starú rotáciu — vynúť rotačný pass,
   // nech sa nosy narovnajú v tom istom tiku namiesto až o sekundu.
