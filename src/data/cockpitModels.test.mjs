@@ -92,8 +92,13 @@ for (const layer of LAYERS) {
       'only out-of-range Cockpit contacts become dots');
     assert.match(source, /_isDotContact\(icao24\)\) \{[\s\S]*?bb\._gevDot = true;/,
       'the dot branch is selected by that one predicate');
-    assert.match(source, /_gevDot === true\s*\n?\s*\? cockpitContactDotImage\(\)/,
+    // 2026-09-04: composer dostal argument fázy pulzu; kokpit ho nikdy
+    // nezapne (`if (isCockpitContact) bb._gevDotPulse = false`), takže tam
+    // ostáva pokojná bodka.
+    assert.match(source, /_gevDot === true\s*\n?\s*\? cockpitContactDotImage\(/,
       'the dot texture is composed by the single icon writer');
+    assert.match(source, /if \(isCockpitContact\) bb\._gevDotPulse = false;/,
+      'the cockpit pip never pulses');
     // `_iconKind` is identity for every unconverted contact (see
     // tr3bRegistry.test.mjs) — it only swaps the glyph for a contact the
     // operator explicitly converted into a TR-3B.

@@ -429,6 +429,8 @@ function _applyFleetBillboardPresentation(icao24, bb) {
     bb._gevDot = true;
     bb._gevIconLarge = false;
     bb._gevStrobeOn = false;
+    // Kokpitova bodka nepulzuje — kokpit ma vlastnu vizualnu rec.
+    if (isCockpitContact) bb._gevDotPulse = false;
     _syncFleetBillboardIcon(icao24, bb, undefined);
     const dotPx = isCockpitContact && !isCockpitNear ? COCKPIT_CONTACT_SIZE_PX : FAR_DOT_SIZE_PX;
     bb.width = dotPx;
@@ -808,7 +810,7 @@ const STROBE_MAX_DIST_M = 60000;
 function _syncFleetBillboardIcon(icao24, bb, klass) {
   if (!bb) return;
   const uri = bb._gevDot === true
-    ? cockpitContactDotImage()
+    ? cockpitContactDotImage(bb._gevDotPulse === true)
     : aircraftIcon(
       _iconKind(icao24, klass),
       bb._gevIconLarge ? TRACKED_ICON_PX : undefined,
@@ -2120,6 +2122,15 @@ function _fleetTick() {
     // Two-tier glyph raster — mirror of flights.js: swap 64/192 px rasters on
     // the billboard's ACTUAL on-screen size (post-treatment bb.scale, so
     // focus/limb recession counts) with hysteresis (atlas has no mips).
+    // Bodka ma vlastny PULZ na tej istej wall-clock faze ako strobo siluet:
+    // jadro na okamih pritvrdne, prstenec ostava staly (zrkadlo flights.js).
+    if (isDot && !_cockpitContactMode) {
+      const wantPulse = strobePhase;
+      if (wantPulse !== (bb._gevDotPulse === true)) {
+        bb._gevDotPulse = wantPulse;
+        _syncFleetBillboardIcon(icao24, bb, undefined);
+      }
+    }
     // Bodka nema raster ani strobo — nema co prepinat.
     if (!isDot) {
       const glyphDevPx = (bb.width || 20) * (bb.scale || 1)

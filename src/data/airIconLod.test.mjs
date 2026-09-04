@@ -55,7 +55,7 @@ test('LOD je zapojený do JEDINÉHO zapisovača textúry, nie ako štvrtý nezá
     const name = file.includes('military') ? 'military' : 'flights';
     assert.match(
       source,
-      /function _syncFleetBillboardIcon[\s\S]*?bb\._gevDot === true\s*\n?\s*\? cockpitContactDotImage\(\)/,
+      /function _syncFleetBillboardIcon[\s\S]*?bb\._gevDot === true\s*\n?\s*\? cockpitContactDotImage\(/,
       `${name}: bodka je vetva composera`,
     );
     // Mimo composera nesmie `bb.image` písať nikto — ani bodkou, ani siluetou.
@@ -84,4 +84,40 @@ test('strop flotily v oboch vrstvách sa zhoduje s duplikátom v tomto module', 
     assert.ok(m, `${file}: MODEL_ALT_CEIL_M sa nenašiel`);
     assert.equal(Number(m[1].replaceAll('_', '')), FLEET_MODEL_ALT_CEIL_M, `${file}: strop sa rozišiel`);
   }
+});
+
+test('bodka pulzuje na tom istom tepe ako strobo siluet, kokpit nie', () => {
+  // 2026-09-04 („keby ešte blikal jednopixelový pulzar"): pulz sa vezie na
+  // existujúcej wall-clock fáze, takže scéna má JEDEN tep namiesto dvoch
+  // rozchádzajúcich sa rytmov. Mení sa len jadro bodky — prstenec ostáva
+  // stály, aby pri 2 400 kontaktoch nevznikol dojem, že bliká celá scéna.
+  for (const file of ['./flights.js', './militaryFlights.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const name = file.includes('military') ? 'military' : 'flights';
+    assert.match(
+      source,
+      /if \(isDot && !_cockpitContactMode\) \{[\s\S]*?const wantPulse = strobePhase;/,
+      `${name}: pulz beží na strobo fáze a mimo kokpitu`,
+    );
+    assert.match(
+      source,
+      /cockpitContactDotImage\(bb\._gevDotPulse === true\)/,
+      `${name}: pulz ide cez jediný zapisovač textúry`,
+    );
+    // Vzdialenostná brána tu nedáva zmysel — v bodkovom režime sú ďaleko všetky.
+    assert.doesNotMatch(
+      source,
+      /wantPulse = strobePhase && cameraDistanceM/,
+      `${name}: pulz nemá vzdialenostnú bránu`,
+    );
+  }
+});
+
+test('pokojná bodka ostala nedotknutá — kokpit sa nesmie zmeniť', async () => {
+  // Kokpit číta ten istý modul. Default variant musí byť presne to, čo bolo
+  // pred pulzom, inak by sa zmenil aj režim, ktorý o pulz nikdy nežiadal.
+  const source = readFileSync(new URL('./cockpitContactDot.js', import.meta.url), 'utf8');
+  assert.match(source, /arc\(8, 8, pulse \? 2\.45 : 1\.55, 0, Math\.PI \* 2\)/, 'mení sa len polomer jadra');
+  assert.match(source, /arc\(8, 8, 4\.25, 0, Math\.PI \* 2\)/, 'prstenec je v oboch fázach rovnaký');
+  assert.match(source, /pulse === true \? '_pulseUrl' : '_dataUrl'/, 'každá fáza má vlastnú stabilnú URL');
 });

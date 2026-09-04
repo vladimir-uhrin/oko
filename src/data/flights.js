@@ -567,7 +567,7 @@ const STROBE_MAX_DIST_M = 60000;
 function _syncFleetBillboardIcon(icao24, bb, klass) {
   if (!bb) return;
   const uri = bb._gevDot === true
-    ? cockpitContactDotImage()
+    ? cockpitContactDotImage(bb._gevDotPulse === true)
     : aircraftIcon(
       _iconKind(icao24, klass),
       bb._gevIconLarge ? TRACKED_ICON_PX : undefined,
@@ -652,6 +652,9 @@ function _applyFleetBillboardPresentation(icao24, bb) {
     bb._gevDot = true;
     bb._gevIconLarge = false;
     bb._gevStrobeOn = false;
+    // Kokpitová bodka nepulzuje — kokpit má vlastnú vizuálnu reč a tento pulz
+    // patrí mapovému pohľadu.
+    if (isCockpitContact) bb._gevDotPulse = false;
     _syncFleetBillboardIcon(icao24, bb, undefined);
     const dotPx = isCockpitContact && !isCockpitNear ? COCKPIT_CONTACT_SIZE_PX : FAR_DOT_SIZE_PX;
     bb.width = dotPx;
@@ -3028,8 +3031,18 @@ function _fleetTick() {
     // raster and the 192 px close raster on the billboard's ACTUAL on-screen
     // size — post-treatment bb.scale, so focus/limb recession counts — with
     // hysteresis so zoom oscillation never thrashes the atlas.
-    // Bodka nemá raster ani strobo — nemá čo prepínať a jej `_gev*` príznaky
-    // už zrovnala prezentácia.
+    // Bodka nemá raster ani strobo, ale má vlastný PULZ: jadro na okamih
+    // pritvrdne, prstenec ostáva stály. Beží na tej istej wall-clock fáze ako
+    // strobo siluet, takže scéna má jeden tep namiesto dvoch rozchádzajúcich
+    // sa rytmov. Vzdialenostná brána tu nedáva zmysel — v bodkovom režime sú
+    // ďaleko úplne všetky.
+    if (isDot && !_cockpitContactMode) {
+      const wantPulse = strobePhase;
+      if (wantPulse !== (bb._gevDotPulse === true)) {
+        bb._gevDotPulse = wantPulse;
+        _syncFleetBillboardIcon(icao24, bb, undefined);
+      }
+    }
     if (!isDot) {
       const glyphDevPx = (bb.width || 20) * (bb.scale || 1)
         * distanceScale * (globalThis.devicePixelRatio || 1);
