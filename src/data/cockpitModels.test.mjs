@@ -90,14 +90,19 @@ for (const layer of LAYERS) {
     // pinuje sa tu na samotnom predikáte: mimo pásma bodka, v pásme silueta.
     assert.match(source, /function _isDotContact\(icao24\)[\s\S]*?if \(_cockpitContactMode\) return !_cockpitNearContacts\.has\(icao24\);/,
       'only out-of-range Cockpit contacts become dots');
-    assert.match(source, /_isDotContact\(icao24\)\) \{[\s\S]*?bb\._gevDot = true;/,
+    // 2026-09-04: mapový LOD prešiel z bodky na drobnú siluetu, takže vetva
+    // nastavuje `_gevDot` podľa toho, či ide o kokpit. Kokpitový invariant
+    // (mimo pásma = bezrozmerný pip) drží ďalej.
+    assert.match(source, /_isDotContact\(icao24\)\) \{[\s\S]*?bb\._gevDot = !isMicro;/,
       'the dot branch is selected by that one predicate');
+    assert.match(source, /function _isMicroContact\(icao24\)[\s\S]*?&& !_cockpitContactMode;/,
+      'the cockpit never takes the map-range silhouette');
     // 2026-09-04: composer dostal argument fázy pulzu; kokpit ho nikdy
     // nezapne (`if (isCockpitContact) bb._gevDotPulse = false`), takže tam
     // ostáva pokojná bodka.
-    assert.match(source, /_gevDot === true\s*\n?\s*\? cockpitContactDotImage\(/,
+    assert.match(source, /if \(bb\._gevDot === true\) \{[\s\S]{0,120}?cockpitContactDotImage\(/,
       'the dot texture is composed by the single icon writer');
-    assert.match(source, /if \(isCockpitContact\) bb\._gevDotPulse = false;/,
+    assert.match(source, /if \(!isMicro\) bb\._gevDotPulse = false;/,
       'the cockpit pip never pulses');
     // `_iconKind` is identity for every unconverted contact (see
     // tr3bRegistry.test.mjs) — it only swaps the glyph for a contact the
@@ -112,9 +117,9 @@ for (const layer of LAYERS) {
       'the composer derives the glyph from the class it was handed');
     assert.match(source, /bb\.rotation = 0;/,
       'far dots are reset to a rotation-free presentation');
-    // Rotačná brána prešla na ten istý predikát: otáčať kruh nemá zmysel,
-    // siluety (vrátane kokpitových near) kurz naďalej dostávajú.
-    assert.match(source, /if \(!isDot && \(doRotations \|\| revealed\)\)/,
+    // Rotačná brána sa viaže na TVAR, nie na LOD: otáčať kokpitový kruh nemá
+    // zmysel, ale každá silueta — vrátane drobnej mapovej — kurz dostáva.
+    assert.match(source, /if \(!bb\._gevDot && \(doRotations \|\| revealed\)\)/,
       'near 2D silhouettes continue to receive projected course');
     assert.match(source, /const isDot = _isDotContact\(icao24\);/,
       'the tick derives the dot state from the same predicate as presentation');

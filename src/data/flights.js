@@ -493,11 +493,17 @@ function _isExplicitTrackingOrigin(origin) {
 }
 
 const COCKPIT_CONTACT_SIZE_PX = 6;
-/** Veľkosť bodky na MAPE pri oddialenom pohľade (2026-09-03). FR24 kreslí
- *  ~5 px; 7 px cez `_cockpitBillboardScaleByDistance` (0,65–1,15) vyjde
- *  reálne na ~6 px — dosť na to, aby bol kontakt klikateľný, a dosť málo na
- *  to, aby 2 400 kontaktov nezakrylo mapu. */
-const FAR_DOT_SIZE_PX = 7;
+/** Veľkosť DROBNEJ SILUETY na mape pri oddialenom pohľade (2026-09-04).
+ *  Pôvodne to bola bodka; používateľ chcel „malilinké lietadlá", a majú aj
+ *  navrch: silueta nesie kurz, takže z tvaru vidno, kam stroj letí. Cez
+ *  `_cockpitBillboardScaleByDistance` (0,65–1,15) vyjde reálne na ~8 px —
+ *  dosť na tvar aj na klik, a dosť málo na to, aby 2 400 kontaktov
+ *  nezakrylo mapu. */
+const FAR_DOT_SIZE_PX = 9;
+/** Raster drobnej siluety. 64 px zmenšených na 8 je 8× downsample, z ktorého
+ *  ostane šmuha; atlas nemá mipmapy. 32 px drží pomer 4× a tvar krídel
+ *  prežije. */
+const MICRO_RASTER_PX = 32;
 /** @type {boolean} Je flotila práve v bodkovom režime? (viď airIconLod.js) */
 let _farIconDots = false;
 const COCKPIT_CIVILIAN_COLOR = Cesium.Color.fromCssColorString('#DCEEFF');
@@ -566,13 +572,18 @@ const STROBE_MAX_DIST_M = 60000;
  */
 function _syncFleetBillboardIcon(icao24, bb, klass) {
   if (!bb) return;
-  const uri = bb._gevDot === true
-    ? cockpitContactDotImage(bb._gevDotPulse === true)
-    : aircraftIcon(
-      _iconKind(icao24, klass),
-      bb._gevIconLarge ? TRACKED_ICON_PX : undefined,
-      bb._gevStrobeOn === true,
-    );
+  // Tri vzájomne výlučné tvary: kokpitový pip (bodka), mapová drobná silueta
+  // a bežná silueta. Všetky prechádzajú TOUTO funkciou — je to jediný
+  // zapisovač `bb.image` v module.
+  let uri;
+  if (bb._gevDot === true) {
+    uri = cockpitContactDotImage(bb._gevDotPulse === true);
+  } else {
+    const raster = bb._gevMicro === true
+      ? MICRO_RASTER_PX
+      : (bb._gevIconLarge ? TRACKED_ICON_PX : undefined);
+    uri = aircraftIcon(_iconKind(icao24, klass), raster, bb._gevStrobeOn === true);
+  }
   if (bb.image !== uri) bb.image = uri;
 }
 
@@ -631,6 +642,19 @@ function _isDotContact(icao24) {
   return _farIconDots;
 }
 
+/**
+ * Kreslí sa kontakt ako DROBNÁ SILUETA (mapový LOD)?
+ *
+ * Rozdiel oproti `_isDotContact`: kokpit má vlastný pip (bodka bez tvaru aj
+ * kurzu), mapa dostáva zmenšené lietadlo, ktoré nesie smer letu. Preto sú to
+ * dva predikáty a nie jeden s výnimkou.
+ * @param {string} icao24
+ * @returns {boolean}
+ */
+function _isMicroContact(icao24) {
+  return _isDotContact(icao24) && !_cockpitContactMode;
+}
+
 /** Farba bodky: v kokpite vlastná paleta pipov, na mape identita flotily. */
 function _dotBaseColor(icao24) {
   if (_cockpitContactMode) {
@@ -647,22 +671,25 @@ function _applyFleetBillboardPresentation(icao24, bb) {
   const isCockpitNear = isCockpitContact && _cockpitNearContacts.has(icao24);
   if (_isDotContact(icao24)) {
     const freshnessAlpha = bb.color?.alpha ?? 1;
+    const isMicro = _isMicroContact(icao24);
     // Textúru skladá composer aj tu — v celom module ostáva JEDINÝ zápis
-    // `bb.image`, takže sa osi (kind × raster × strobo × dot) nemôžu rozísť.
-    bb._gevDot = true;
+    // `bb.image`, takže sa osi (kind × raster × strobo × tvar) nemôžu rozísť.
+    bb._gevDot = !isMicro; // kokpit: bodka; mapa: drobná silueta
+    bb._gevMicro = isMicro;
     bb._gevIconLarge = false;
     bb._gevStrobeOn = false;
-    // Kokpitová bodka nepulzuje — kokpit má vlastnú vizuálnu reč a tento pulz
-    // patrí mapovému pohľadu.
-    if (isCockpitContact) bb._gevDotPulse = false;
-    _syncFleetBillboardIcon(icao24, bb, undefined);
-    const dotPx = isCockpitContact && !isCockpitNear ? COCKPIT_CONTACT_SIZE_PX : FAR_DOT_SIZE_PX;
+    // Kokpitový pip nepulzuje — kokpit má vlastnú vizuálnu reč.
+    if (!isMicro) bb._gevDotPulse = false;
+    _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
+    const dotPx = isMicro ? FAR_DOT_SIZE_PX : COCKPIT_CONTACT_SIZE_PX;
     bb.width = dotPx;
     bb.height = dotPx;
     bb.scale = limbScale;
     bb.scaleByDistance = _cockpitBillboardScaleByDistance();
     bb.color = _dotBaseColor(icao24).withAlpha(freshnessAlpha);
-    bb.rotation = 0;
+    // Drobná silueta si kurz PONECHÁVA — je to jej pridaná hodnota oproti
+    // bodke; rotáciu jej dopĺňa rotačný pass nižšie.
+    if (!isMicro) bb.rotation = 0;
     return;
   }
 
@@ -3031,16 +3058,16 @@ function _fleetTick() {
     // raster and the 192 px close raster on the billboard's ACTUAL on-screen
     // size — post-treatment bb.scale, so focus/limb recession counts — with
     // hysteresis so zoom oscillation never thrashes the atlas.
-    // Bodka nemá raster ani strobo, ale má vlastný PULZ: jadro na okamih
-    // pritvrdne, prstenec ostáva stály. Beží na tej istej wall-clock fáze ako
-    // strobo siluet, takže scéna má jeden tep namiesto dvoch rozchádzajúcich
-    // sa rytmov. Vzdialenostná brána tu nedáva zmysel — v bodkovom režime sú
-    // ďaleko úplne všetky.
-    if (isDot && !_cockpitContactMode) {
-      const wantPulse = strobePhase;
-      if (wantPulse !== (bb._gevDotPulse === true)) {
-        bb._gevDotPulse = wantPulse;
-        _syncFleetBillboardIcon(icao24, bb, undefined);
+    // Drobná silueta raster neprepína (má vlastný pevný), ale STROBO áno:
+    // pri ~8 px vyjde krídelné svetlo zhruba na jeden pixel — presne ten
+    // „jednopixelový pulzar". Vzdialenostná brána tu nedáva zmysel, v tomto
+    // režime sú ďaleko všetky; a keďže bliká len bod na krídle a nie celá
+    // ikona, scéna nepôsobí, že bliká ako celok.
+    if (bb._gevMicro === true) {
+      const wantStrobe = strobePhase;
+      if (wantStrobe !== (bb._gevStrobeOn === true)) {
+        bb._gevStrobeOn = wantStrobe;
+        _syncFleetBillboardIcon(icao24, bb, info?.klass);
       }
     }
     if (!isDot) {
@@ -3108,7 +3135,9 @@ function _fleetTick() {
     }
 
     // Bodka je kruh — otáčať ju je čistá strata výkonu pri 2 400 kontaktoch.
-    if (!isDot && (doRotations || revealed)) {
+    // Kokpitovy pip je kruh a kurz nenesie; drobna silueta ANO — je to jej
+    // pridana hodnota oproti bodke, tak rotaciu dostava ako kazda ina ikona.
+    if (!bb._gevDot && (doRotations || revealed)) {
       const rot = screenProjectedRotation(scene, bb.position, course, bb.rotation);
       if (rot !== null && Math.abs(rot - bb.rotation) > 0.002) {
         bb.rotation = rot;

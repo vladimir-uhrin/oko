@@ -385,7 +385,9 @@ function _isExplicitTrackingOrigin(origin) {
 
 const COCKPIT_CONTACT_SIZE_PX = 6;
 /** Veľkosť bodky na MAPE pri oddialenom pohľade — zrkadlo flights.js. */
-const FAR_DOT_SIZE_PX = 7;
+const FAR_DOT_SIZE_PX = 9;
+/** Raster drobnej siluety — zrkadlo flights.js (64 px na 8 je smuha). */
+const MICRO_RASTER_PX = 32;
 /** @type {boolean} Je flotila práve v bodkovom režime? (viď airIconLod.js) */
 let _farIconDots = false;
 const TRACKED_BILLBOARD_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
@@ -410,6 +412,11 @@ function _militaryBillboardScale(icao24) {
 /** Kreslí sa kontakt ako BODKA namiesto siluety? JEDINÝ predikát pre všetkých
  *  konzumentov — zrkadlo flights.js (`bb.scale` píšu dve cesty, rozdielny
  *  úsudok by ikonu naťahoval každý tik). */
+/** Kresli sa kontakt ako DROBNA SILUETA (mapovy LOD)? Kokpit ma vlastny pip. */
+function _isMicroContact(icao24) {
+  return _isDotContact(icao24) && !_cockpitContactMode;
+}
+
 function _isDotContact(icao24) {
   if (icao24 === _trackedIcao) return false;
   if (_cockpitContactMode) return !_cockpitNearContacts.has(icao24);
@@ -426,19 +433,21 @@ function _applyFleetBillboardPresentation(icao24, bb) {
     const freshnessAlpha = bb.color?.alpha ?? 1;
     // Textúru skladá composer aj tu — v celom module ostáva JEDINÝ zápis
     // `bb.image` (zrkadlo flights.js).
-    bb._gevDot = true;
+    const isMicro = _isMicroContact(icao24);
+    bb._gevDot = !isMicro;
+    bb._gevMicro = isMicro;
     bb._gevIconLarge = false;
     bb._gevStrobeOn = false;
-    // Kokpitova bodka nepulzuje — kokpit ma vlastnu vizualnu rec.
-    if (isCockpitContact) bb._gevDotPulse = false;
-    _syncFleetBillboardIcon(icao24, bb, undefined);
-    const dotPx = isCockpitContact && !isCockpitNear ? COCKPIT_CONTACT_SIZE_PX : FAR_DOT_SIZE_PX;
+    if (!isMicro) bb._gevDotPulse = false;
+    _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
+    const dotPx = isMicro ? FAR_DOT_SIZE_PX : COCKPIT_CONTACT_SIZE_PX;
     bb.width = dotPx;
     bb.height = dotPx;
     bb.scale = limbScale;
     bb.scaleByDistance = _cockpitBillboardScaleByDistance();
     bb.color = MIL_ICON_COLOR.withAlpha(freshnessAlpha);
-    bb.rotation = 0;
+    // Drobna silueta si kurz PONECHAVA — je to jej pridana hodnota.
+    if (!isMicro) bb.rotation = 0;
     return;
   }
 
@@ -809,13 +818,17 @@ const STROBE_MAX_DIST_M = 60000;
  *  prepisovali osi, odtiaľ „raz bliká, raz nie". */
 function _syncFleetBillboardIcon(icao24, bb, klass) {
   if (!bb) return;
-  const uri = bb._gevDot === true
-    ? cockpitContactDotImage(bb._gevDotPulse === true)
-    : aircraftIcon(
-      _iconKind(icao24, klass),
-      bb._gevIconLarge ? TRACKED_ICON_PX : undefined,
-      bb._gevStrobeOn === true,
-    );
+  // Tri vzajomne vylucne tvary: kokpitovy pip, mapova drobna silueta a bezna
+  // silueta — vsetky cez tento jediny zapisovac bb.image.
+  let uri;
+  if (bb._gevDot === true) {
+    uri = cockpitContactDotImage(bb._gevDotPulse === true);
+  } else {
+    const raster = bb._gevMicro === true
+      ? MICRO_RASTER_PX
+      : (bb._gevIconLarge ? TRACKED_ICON_PX : undefined);
+    uri = aircraftIcon(_iconKind(icao24, klass), raster, bb._gevStrobeOn === true);
+  }
   if (bb.image !== uri) bb.image = uri;
 }
 
@@ -2122,16 +2135,15 @@ function _fleetTick() {
     // Two-tier glyph raster — mirror of flights.js: swap 64/192 px rasters on
     // the billboard's ACTUAL on-screen size (post-treatment bb.scale, so
     // focus/limb recession counts) with hysteresis (atlas has no mips).
-    // Bodka ma vlastny PULZ na tej istej wall-clock faze ako strobo siluet:
-    // jadro na okamih pritvrdne, prstenec ostava staly (zrkadlo flights.js).
-    if (isDot && !_cockpitContactMode) {
-      const wantPulse = strobePhase;
-      if (wantPulse !== (bb._gevDotPulse === true)) {
-        bb._gevDotPulse = wantPulse;
-        _syncFleetBillboardIcon(icao24, bb, undefined);
+    // Drobna silueta raster neprepina, ale STROBO ano: pri ~8 px vyjde
+    // kridelne svetlo zhruba na jeden pixel ("jednopixelovy pulzar").
+    if (bb._gevMicro === true) {
+      const wantStrobe = strobePhase;
+      if (wantStrobe !== (bb._gevStrobeOn === true)) {
+        bb._gevStrobeOn = wantStrobe;
+        _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
       }
     }
-    // Bodka nema raster ani strobo — nema co prepinat.
     if (!isDot) {
       const glyphDevPx = (bb.width || 20) * (bb.scale || 1)
         * distanceScale * (globalThis.devicePixelRatio || 1);
@@ -2193,7 +2205,8 @@ function _fleetTick() {
     }
 
     // Bodka je kruh — otacat ju je cista strata vykonu.
-    if (!isDot && (doRotations || revealed)) {
+    // Kokpitovy pip je kruh; drobna silueta kurz nesie a rotaciu dostava.
+    if (!bb._gevDot && (doRotations || revealed)) {
       const rot = screenProjectedRotation(scene, bb.position, course, bb.rotation);
       if (rot !== null && Math.abs(rot - bb.rotation) > 0.002) {
         bb.rotation = rot;

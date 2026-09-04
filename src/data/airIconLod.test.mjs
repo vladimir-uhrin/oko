@@ -55,8 +55,8 @@ test('LOD je zapojený do JEDINÉHO zapisovača textúry, nie ako štvrtý nezá
     const name = file.includes('military') ? 'military' : 'flights';
     assert.match(
       source,
-      /function _syncFleetBillboardIcon[\s\S]*?bb\._gevDot === true\s*\n?\s*\? cockpitContactDotImage\(/,
-      `${name}: bodka je vetva composera`,
+      /function _syncFleetBillboardIcon[\s\S]*?bb\._gevDot === true[\s\S]{0,80}?cockpitContactDotImage\(/,
+      `${name}: kokpitový pip je vetva composera`,
     );
     // Mimo composera nesmie `bb.image` písať nikto — ani bodkou, ani siluetou.
     const strayImage = (source.match(/\bbb\.image = (?!uri)/g) || []).length;
@@ -86,30 +86,48 @@ test('strop flotily v oboch vrstvách sa zhoduje s duplikátom v tomto module', 
   }
 });
 
-test('bodka pulzuje na tom istom tepe ako strobo siluet, kokpit nie', () => {
-  // 2026-09-04 („keby ešte blikal jednopixelový pulzar"): pulz sa vezie na
-  // existujúcej wall-clock fáze, takže scéna má JEDEN tep namiesto dvoch
-  // rozchádzajúcich sa rytmov. Mení sa len jadro bodky — prstenec ostáva
-  // stály, aby pri 2 400 kontaktoch nevznikol dojem, že bliká celá scéna.
+test('drobná silueta bliká krídelným svetlom, kokpitový pip nie', () => {
+  // 2026-09-04: pôvodne bodka s pulzujúcim jadrom, na želanie nahradená
+  // drobným LIETADLOM („nechcem bodky ale malilinké lietadlá"). Blikanie sa
+  // tým zjednodušilo: pri ~8 px vyjde existujúce krídelné svetlo zhruba na
+  // jeden pixel, takže netreba druhý mechanizmus — bliká bod na krídle, nie
+  // celá ikona, a scéna preto nepôsobí, že bliká ako celok.
   for (const file of ['./flights.js', './militaryFlights.js']) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');
     const name = file.includes('military') ? 'military' : 'flights';
     assert.match(
       source,
-      /if \(isDot && !_cockpitContactMode\) \{[\s\S]*?const wantPulse = strobePhase;/,
-      `${name}: pulz beží na strobo fáze a mimo kokpitu`,
+      /if \(bb\._gevMicro === true\) \{[\s\S]{0,200}?const wantStrobe = strobePhase;/,
+      `${name}: mikro-silueta blikne na strobo fáze`,
     );
-    assert.match(
-      source,
-      /cockpitContactDotImage\(bb\._gevDotPulse === true\)/,
-      `${name}: pulz ide cez jediný zapisovač textúry`,
-    );
-    // Vzdialenostná brána tu nedáva zmysel — v bodkovom režime sú ďaleko všetky.
+    // Vzdialenostná brána tu nedáva zmysel — v tomto režime sú ďaleko všetky.
     assert.doesNotMatch(
       source,
-      /wantPulse = strobePhase && cameraDistanceM/,
-      `${name}: pulz nemá vzdialenostnú bránu`,
+      /if \(bb\._gevMicro === true\) \{[\s\S]{0,200}?strobePhase && cameraDistanceM/,
+      `${name}: mikro strobo nemá vzdialenostnú bránu`,
     );
+    // Kurz je pridaná hodnota siluety oproti bodke — rotáciu musí dostať.
+    assert.match(
+      source,
+      /if \(!bb\._gevDot && \(doRotations \|\| revealed\)\)/,
+      `${name}: drobná silueta dostáva kurz`,
+    );
+  }
+});
+
+test('kokpitový pip ostáva bodkou, mapa dostáva siluetu', () => {
+  for (const file of ['./flights.js', './militaryFlights.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const name = file.includes('military') ? 'military' : 'flights';
+    assert.match(source, /function _isMicroContact\(icao24\)/, `${name}: má vlastný predikát`);
+    assert.match(
+      source,
+      /return _isDotContact\(icao24\) && !_cockpitContactMode;/,
+      `${name}: mikro je mapový LOD bez kokpitu`,
+    );
+    assert.match(source, /bb\._gevDot = !isMicro;/, `${name}: tvary sa vylučujú`);
+    // Malý raster: 64 px zmenšených na 8 je šmuha, atlas nemá mipmapy.
+    assert.match(source, /const MICRO_RASTER_PX = 32;/, `${name}: vlastný malý raster`);
   }
 });
 
