@@ -18,9 +18,11 @@ test('obe letecké vrstvy filtrujú cez TÚ ISTÚ bránu ako horizont', () => {
   // Jedno pravidlo o `bb.show`, nie dve konkurenčné: druhý zapisovač by sa
   // s horizontovým cullingom pretekal tick po ticku (kontakt by blikal).
   for (const [name, source] of SOURCES) {
+    // 2026-09-04: do tej istej brány pribudol režim hustoty (flights.js) —
+    // pin preto overuje, že filter je JEDNÝM z jej členov, nie že je prvý.
     assert.match(
       source,
-      /const beyondHorizon = !_categoryVisible\(.*\)\s*\n\s*\|\| !occluder\.isPointVisible/,
+      /const beyondHorizon = [\s\S]{0,160}?!_categoryVisible\(.*\)\s*\n\s*\|\| !occluder\.isPointVisible/,
       `${name}: skrytá kategória sa skladá do beyondHorizon`,
     );
     assert.match(source, /function _categoryVisible\(klass\)/, `${name}: má bránu kategórie`);

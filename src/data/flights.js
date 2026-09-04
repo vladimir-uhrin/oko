@@ -55,6 +55,9 @@ import {
 import { cockpitContactDotImage } from './cockpitContactDot.js';
 import { nextCockpitNearContacts } from './cockpitAirLod.js';
 import { airIconTier } from './airIconLod.js';
+import {
+  aggregateTraffic, densityGridDegrees, densityMarkerAlpha, densityMarkerPx, densityModeActive,
+} from './trafficDensity.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import {
   applyTrackedCameraFrame,
@@ -509,6 +512,16 @@ const TIER_ICON_PX = Object.freeze({ full: 20, medium: 14, micro: FAR_DOT_SIZE_P
 const TIER_RASTER_PX = Object.freeze({ medium: 64, micro: 32 });
 /** @type {'full'|'medium'|'micro'} Stupeň veľkosti ikon flotily (airIconLod.js). */
 let _iconTier = 'full';
+
+/** @type {object|null} Kolekcia bodov hustoty (trafficDensity.js). */
+let _densityPoints = null;
+/** @type {boolean} Kreslí sa hustota namiesto jednotlivých strojov? */
+let _densityMode = false;
+/** Kedy sa naposledy prepočítali bunky — flotila sa hýbe, ale prepočítavať
+ *  12 000 kontaktov každý tik je zbytočné; raz za 2 s je viac než dosť na
+ *  pohľad, v ktorom jeden stroj urobí zlomok pixela. */
+let _densityRebuiltAtMs = 0;
+const DENSITY_REBUILD_MS = 2000;
 const COCKPIT_CIVILIAN_COLOR = Cesium.Color.fromCssColorString('#DCEEFF');
 const TRACKED_BILLBOARD_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1000, 3.0, 8000000, 0.5,
@@ -709,6 +722,70 @@ function _applyFleetBillboardPresentation(icao24, bb) {
   bb.scale = _fleetBillboardScale(icao24, meta?.klass) * limbScale;
   bb.scaleByDistance = _normalBillboardScaleByDistance();
   bb.color = _fleetBillboardColor(icao24).withAlpha(bb.color?.alpha ?? 1);
+}
+
+/**
+ * Prepni medzi jednotlivými strojmi a agregovanou hustotou.
+ *
+ * Pri pohľade na glóbus je 12 000 jednotlivých kontaktov informačne prázdnych
+ * — nikto ich nečíta po jednom a aj zmenšené zaberajú pätinu obrazovky.
+ * Zaujímavá je vtedy hustota: kde sa lieta a kde nie. Rovnaký nápad, aký už
+ * v projekte používa vrstva požiarov (agregované bunky vs. jednotlivé body).
+ * @returns {void}
+ */
+function _refreshTrafficDensity(nowMs) {
+  if (!_densityPoints || !_viewer) return;
+  const height = _viewer.camera?.positionCartographic?.height;
+  const next = _cockpitContactMode ? false : densityModeActive(height, _densityMode);
+
+  if (next !== _densityMode) {
+    _densityMode = next;
+    _densityPoints.show = next;
+    // Flotila sa v režime hustoty schová celá; horizontový cull ju po návrate
+    // zase rozsvieti sám.
+    if (_billboardCollection) {
+      for (const [icao24, bb] of _billboards) {
+        if (icao24 !== _trackedIcao) bb.show = !next;
+      }
+    }
+    _densityRebuiltAtMs = 0; // vynúť prepočet hneď po prepnutí
+  }
+  if (!_densityMode) {
+    if (_densityPoints.length) _densityPoints.removeAll();
+    return;
+  }
+  if (nowMs - _densityRebuiltAtMs < DENSITY_REBUILD_MS) return;
+  _densityRebuiltAtMs = nowMs;
+
+  const records = [];
+  for (const [icao24, info] of _flightData) {
+    if (!_categoryVisible(info?.klass)) continue;
+    const bb = _billboards.get(icao24);
+    if (!bb?.position) continue;
+    const carto = Cesium.Cartographic.fromCartesian(bb.position, Cesium.Ellipsoid.WGS84, _scratchCarto);
+    if (!carto) continue;
+    records.push({
+      lat: Cesium.Math.toDegrees(carto.latitude),
+      lon: Cesium.Math.toDegrees(carto.longitude),
+      military: isMilitaryIcao(icao24),
+    });
+  }
+
+  const cells = aggregateTraffic(records, densityGridDegrees(height));
+  const maxCount = cells.length ? cells[0].count : 1;
+  _densityPoints.removeAll();
+  for (const cell of cells) {
+    _densityPoints.add({
+      position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat, 0),
+      pixelSize: densityMarkerPx(cell.count, maxCount),
+      // Monochromatická škvrna; amber len tam, kde bunka nesie vojenský
+      // kontakt — tá istá farebná reč ako pri jednotlivých ikonách.
+      color: (cell.military > 0 ? MIL_TINT : Cesium.Color.WHITE)
+        .withAlpha(densityMarkerAlpha(cell.count, maxCount)),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    });
+  }
+  _viewer.scene.requestRender?.();
 }
 
 /**
@@ -2885,6 +2962,7 @@ function _fleetTick() {
   if (_cockpitContactMode) _refreshCockpitNearContacts();
   // Musí bežať PRED hlavnou slučkou, nech je tier v celom tiku konzistentný.
   _refreshFarIconLod();
+  _refreshTrafficDensity(nowMs);
 
   // Antikolízne strobo (2026-09-03): fáza je globálna, ale APLIKUJE sa
   // per-kontakt podľa vzdialenosti od kamery — v hlavnom cykle nižšie, spolu
@@ -3010,7 +3088,11 @@ function _fleetTick() {
     // Kategóriový filter sa skladá do TEJ ISTEJ brány ako horizont: skrytá
     // kategória sa správa presne ako kontakt za obzorom (zhasne aj jeho 3D
     // model nižšie), takže nepribúda druhé, konkurenčné pravidlo o `show`.
-    const beyondHorizon = !_categoryVisible(info?.klass)
+    // Režim hustoty sa skladá do TEJ ISTEJ brány ako filter a horizont —
+    // inak by hlavná slučka rozsvietila flotilu hneď po tom, čo ju prepínač
+    // hustoty zhasol, a scéna by mala body aj stroje naraz.
+    const beyondHorizon = _densityMode
+      || !_categoryVisible(info?.klass)
       || !occluder.isPointVisible(info?.cullPosition || bb.position);
     // A billboard flipping INTO view (horizon reveal while the camera idles)
     // gets its rotation refreshed THIS tick even without a pose change —
@@ -4318,6 +4400,13 @@ const flightsLayer = {
     _billboardCollection = new Cesium.BillboardCollection();
     viewer.scene.primitives.add(_billboardCollection);
     registerSpriteCollection('flights', _billboardCollection);
+    // Hustota prevádzky pri pohľade na svet. Vlastná kolekcia, nie ďalšie
+    // billboardy vo flotile: body sa nekreslia na kontakty, ale na ŤAŽISKÁ
+    // buniek, a musia sa dať zhasnúť jedným `show` bez toho, aby sa čokoľvek
+    // dialo s flotilou.
+    _densityPoints = new Cesium.PointPrimitiveCollection();
+    _densityPoints.show = false;
+    viewer.scene.primitives.add(_densityPoints);
     _modelCollection = new Cesium.PrimitiveCollection();
     viewer.scene.primitives.add(_modelCollection);
     // Warm the glTF cache so the tracked plane's model instantiates instantly when first needed
@@ -5119,6 +5208,12 @@ const flightsLayer = {
       viewer.scene.primitives.remove(_billboardCollection);
       _billboardCollection = null;
       _trackedStrobeBb = null; // billboard zanikol s kolekciou
+    }
+    if (_densityPoints) {
+      viewer.scene.primitives.remove(_densityPoints);
+      _densityPoints = null;
+      _densityMode = false;
+      _densityRebuiltAtMs = 0;
     }
     if (_modelCollection) {
       viewer.scene.primitives.remove(_modelCollection); // removing destroys it + its models
