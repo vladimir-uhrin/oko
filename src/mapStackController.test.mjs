@@ -163,7 +163,10 @@ test('tmavý podklad je keyless XYZ raster s globálnym pokrytím', () => {
   // @2x dlaždice sú 512 px — musí sedieť s deklarovanou veľkosťou, inak sa
   // mapa rozmaže alebo sa sťahuje dvojnásobok dát.
   assert.match(stack.xyz.url, /@2x\.png$/);
-  assert.equal(stack.xyz.tileSize, 512);
+  // @2x je RETINA rozlisenie, nie vacsi vyrez — logicka velkost ostava 256.
+  // Deklarovat 512 znamenalo, ze Cesium kreslilo obsah 2x vacsi a nazvy statov
+  // zaberali pol kontinentu (2026-09-04).
+  assert.equal(stack.xyz.tileSize, 256);
   assert.ok(Number.isInteger(stack.xyz.maximumLevel) && stack.xyz.maximumLevel <= 20);
 });
 
@@ -188,13 +191,40 @@ test('tmavý podklad je dostupný bez ion tokenu aj bez Google tilesetu', () => 
   assert.equal(controller.isStackAvailable('stadia-dark'), true);
 });
 
-test('provider je XYZ s 512 px dlaždicami a je cachovaný', async () => {
+test('provider XYZ deklaruje LOGICKÚ veľkosť dlaždice a je cachovaný', async () => {
   const controller = new MapStackController({}, {});
   const stack = stadia();
   const provider = await controller._getImageryProvider(stack);
   assert.ok(provider);
-  assert.equal(provider.tileWidth, 512);
-  assert.equal(provider.tileHeight, 512);
+  // 256, hoci obrázok má 512 px: @2x je retina rozlíšenie tej istej plochy.
+  assert.equal(provider.tileWidth, 256);
+  assert.equal(provider.tileHeight, 256);
   const again = await controller._getImageryProvider(stack);
   assert.equal(again, provider, 'provider sa nesmie stavať dvakrát');
+});
+
+test('tmavý podklad je stlmený, aby popisy neprekrikovali kontakty', () => {
+  // Popisy sú v raster dlaždici zapečené — vypnúť sa nedajú a tmavý variant
+  // bez nich Stadia nemá (`_no_labels` = 404). CARTO ho má, ale jeho keyless
+  // dlaždica nesie vypálený nápis „API KEY REQUIRED". Stlmenie je jediná
+  // čistá páka: mapa ostane čitateľná ako tvar, prestane súťažiť s bodkami.
+  const adjust = stadia().xyz.adjust;
+  assert.ok(adjust, 'descriptor nesie stlmenie');
+  assert.ok(adjust.brightness > 0 && adjust.brightness < 1, 'stlmené, nie zhasnuté');
+  assert.ok(adjust.contrast > 0 && adjust.contrast <= 1);
+});
+
+test('stlmenie sa naozaj prenesie na imagery vrstvu', async () => {
+  const layers = [];
+  const viewer = {
+    imageryLayers: { add: (l) => layers.push(l), remove: () => {}, removeAll: () => {} },
+    scene: { globe: {}, requestRender: () => {} },
+    terrainProvider: null,
+  };
+  const controller = new MapStackController(viewer, {});
+  await controller._activateGlobeStack(stadia(), null);
+  const added = layers.at(-1);
+  assert.ok(added, 'vrstva pribudla');
+  assert.equal(added.brightness, stadia().xyz.adjust.brightness);
+  assert.equal(added.contrast, stadia().xyz.adjust.contrast);
 });

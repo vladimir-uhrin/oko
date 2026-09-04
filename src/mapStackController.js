@@ -57,8 +57,20 @@ export const MAP_STACKS = [
     // vývoj, evaluáciu a nekomerčné použitie. Podmienky: DATA_SOURCES.md.
     xyz: {
       url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}@2x.png',
-      tileSize: 512,
+      // @2x dlaždica má 512 px, ale pokrýva PRESNE tú istú plochu Zeme ako
+      // 256px verzia — je to retina rozlíšenie, nie väčší výrez. Deklarovať
+      // ju ako 512 znamenalo, že Cesium celý obsah nakreslilo dvojnásobne
+      // veľký: odtiaľ obrie názvy štátov cez pol kontinentu (2026-09-04).
+      // Logická veľkosť je 256; obrázok má dvojnásobok pixelov, čo sa prejaví
+      // ostrosťou, nie mierkou.
+      tileSize: 256,
       maximumLevel: 20,
+      // Popisy sú v raster dlaždici zapečené a vypnúť sa nedajú; Stadia nemá
+      // tmavý variant bez nich (`_no_labels` vracia 404), CARTO ho má, ale
+      // keyless dlaždica nesie vypálený nápis „API KEY REQUIRED". Stlmenie je
+      // teda jediná čistá páka: názvy štátov ustúpia do pozadia, hranice a
+      // pobrežia ostanú tušené a kontakty nad mapou vyniknú.
+      adjust: { brightness: 0.45, contrast: 0.85 },
       credit: '© Stadia Maps © OpenMapTiles © OpenStreetMap contributors',
     },
   },
@@ -331,6 +343,17 @@ export class MapStackController {
       this.viewer.imageryLayers.add(this._underlayLayer, 0);
     }
     this._imageryLayer = new Cesium.ImageryLayer(provider);
+    // Voliteľné stlmenie podkladu (2026-09-04). Raster dlaždice majú popisy
+    // zapečené v obrázku — text sa z nich vypnúť nedá. Stlmenie je jediná
+    // páka, ktorá ich pošle do pozadia bez toho, aby sa menil zdroj: mapa
+    // ostane čitateľná ako tvar, ale prestane súťažiť s kontaktmi, ktoré sa
+    // nad ňou kreslia (tie sú billboardy a stlmenie sa ich netýka).
+    const adjust = stack.xyz?.adjust || stack.wms?.adjust || null;
+    if (adjust) {
+      if (Number.isFinite(adjust.brightness)) this._imageryLayer.brightness = adjust.brightness;
+      if (Number.isFinite(adjust.contrast)) this._imageryLayer.contrast = adjust.contrast;
+      if (Number.isFinite(adjust.saturation)) this._imageryLayer.saturation = adjust.saturation;
+    }
     this.viewer.imageryLayers.add(this._imageryLayer, underlayProvider ? 1 : 0);
 
     if (this.googleTileset) this.googleTileset.show = false;
