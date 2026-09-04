@@ -508,10 +508,10 @@ const COCKPIT_CONTACT_SIZE_PX = 6;
  *  `_cockpitBillboardScaleByDistance` (0,65–1,15) vyjde reálne na ~8 px —
  *  dosť na tvar aj na klik, a dosť málo na to, aby 2 400 kontaktov
  *  nezakrylo mapu. */
-const FAR_DOT_SIZE_PX = 9;
+const FAR_DOT_SIZE_PX = 12;
 /** Veľkosť ikony pre každý stupeň priblíženia (2026-09-04). Stredný stupeň
  *  rozkladá skok z 20 na 9 px, ktorý bol na hranici priveľmi cítiť. */
-const TIER_ICON_PX = Object.freeze({ full: 20, medium: 14, micro: FAR_DOT_SIZE_PX });
+const TIER_ICON_PX = Object.freeze({ full: 20, medium: 16, micro: FAR_DOT_SIZE_PX });
 /** Raster zmenšenej siluety. 64 px stiahnutých na 9 je 7× downsample, z
  *  ktorého ostane šmuha (atlas nemá mipmapy); 32 px drží pomer ~3,5× a krídla
  *  prežijú. Stredný stupeň má bližšie k 64, tam sa vypláca väčší zdroj. */
@@ -528,6 +528,11 @@ let _densityMode = false;
  *  pohľad, v ktorom jeden stroj urobí zlomok pixela. */
 let _densityRebuiltAtMs = 0;
 const DENSITY_REBUILD_MS = 2000;
+/** Hustota LIETADIEL je VYPNUTÁ (rozhodnutie používateľa 2026-09-05): pri
+ *  pohľade na svet chce vidieť jednotlivé stroje ako drobné ikony, aj keď ich
+ *  je 12 000 — ako FR24. Agregácia ostáva zapojená (lode ju používajú, tu je
+ *  na jedno prepnutie), ale nikdy sa nezapne. */
+const FLIGHT_DENSITY_ENABLED = false;
 const COCKPIT_CIVILIAN_COLOR = Cesium.Color.fromCssColorString('#DCEEFF');
 const TRACKED_BILLBOARD_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(
   1000, 3.0, 8000000, 0.5,
@@ -742,7 +747,9 @@ function _applyFleetBillboardPresentation(icao24, bb) {
 function _refreshTrafficDensity(nowMs) {
   if (!_densityPoints || !_viewer) return;
   const height = _viewer.camera?.positionCartographic?.height;
-  const next = _cockpitContactMode ? false : densityModeActive(height, _densityMode);
+  const next = (!FLIGHT_DENSITY_ENABLED || _cockpitContactMode)
+    ? false
+    : densityModeActive(height, _densityMode);
 
   if (next !== _densityMode) {
     _densityMode = next;

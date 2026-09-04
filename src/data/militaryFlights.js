@@ -385,9 +385,9 @@ function _isExplicitTrackingOrigin(origin) {
 
 const COCKPIT_CONTACT_SIZE_PX = 6;
 /** Veľkosť bodky na MAPE pri oddialenom pohľade — zrkadlo flights.js. */
-const FAR_DOT_SIZE_PX = 9;
+const FAR_DOT_SIZE_PX = 12;
 /** Velkost ikony pre kazdy stupen priblizenia — zrkadlo flights.js. */
-const TIER_ICON_PX = Object.freeze({ full: 20, medium: 14, micro: FAR_DOT_SIZE_PX });
+const TIER_ICON_PX = Object.freeze({ full: 20, medium: 16, micro: FAR_DOT_SIZE_PX });
 /** Raster zmensenej siluety podla stupna (64 px na 9 je smuha). */
 const TIER_RASTER_PX = Object.freeze({ medium: 64, micro: 32 });
 /** @type {'full'|'medium'|'micro'} Stupeň veľkosti ikon flotily (airIconLod.js). */

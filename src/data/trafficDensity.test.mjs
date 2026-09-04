@@ -147,6 +147,11 @@ test('tripwire: hustota sa skladá do TEJ ISTEJ brány viditeľnosti', async () 
   // Skryté kategórie sa do hustoty nesmú počítať — inak by filter „nič
   // nerobil", hoci by bunky ostali rovnaké.
   assert.match(source, /if \(!_categoryVisible\(info\?\.klass\)\) continue;/, 'filter platí aj pre hustotu');
+  // Rozhodnutie používateľa (2026-09-05): lietadlá ostávajú jednotlivé aj pri
+  // pohľade na svet (ako FR24). Hustota je pre lietadlá VYPNUTÁ jedným
+  // prepínačom; zapojenie ostáva, lode ju používajú ďalej.
+  assert.match(source, /const FLIGHT_DENSITY_ENABLED = false;/, 'hustota lietadiel je vypnutá');
+  assert.match(source, /\(!FLIGHT_DENSITY_ENABLED \|\| _cockpitContactMode\)/, 'prepínač je v bráne');
 });
 
 test('bunky za obzorom zhasnú — nepresvitajú cez glóbus', () => {
