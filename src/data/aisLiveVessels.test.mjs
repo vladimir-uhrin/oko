@@ -31,7 +31,15 @@ import {
   vesselTierScale,
   _tickVesselRuntimeForTest,
   _getVesselLodStateForTest,
+  shipModels3dRegimeActive,
+  _setShipModels3dForTest,
+  _getShipModelStateForTest,
+  SHIP_MODEL_HEADING_OFFSET_DEG,
+  SHIP_MODEL_ALT_CEIL_M,
+  SHIP_MODEL_MAX,
+  SHIP_MODEL_SCALE,
 } from './aisLiveVessels.js';
+import { readFileSync } from 'node:fs';
 import aisLiveVesselsLayer from './aisLiveVessels.js';
 import { registerEntityContext, selectEntityContext } from './contextStore.js';
 import { WORLD_FOCUS_REQUEST_EVENT } from '../worldFocus.js';
@@ -1876,4 +1884,72 @@ test('lode: vybraná loď ostáva viditeľná aj v režime hustoty', () => {
     _setVesselOverlayHostForTest(null);
     _setVesselStateForTest({ enabled: false });
   }
+});
+
+// ---------------------------------------------------------------------------
+// 3D modely lodí zblízka (2026-09-05). Pod stropom výšky sa najbližšie lode
+// prekreslia z 2D siluety trupu na skutočný glTF trup (ship.glb). Handoff je
+// atomický cez množinu vlastníkov — inak by ikona presvitala pod modelom.
+// ---------------------------------------------------------------------------
+
+test('lode: 3D modely sa zapnú len pod stropom výšky a keď je prepínač zapnutý', () => {
+  const camera = makeLodCamera(17.12, 48.13, 40_000); // nad stropom 15 km
+  const rec = makeLodRecord('M1', 17.12, 48.13);
+  _setVesselOverlayHostForTest(NOOP_HOST);
+  _setShipModels3dForTest(true);
+  _setVesselStateForTest({ viewer: { camera }, records: [rec] });
+  try {
+    _tickVesselRuntimeForTest(0);
+    assert.equal(shipModels3dRegimeActive(), false, '40 km = nad stropom, žiadne modely');
+    assert.equal(_getShipModelStateForTest().regime, false);
+
+    camera.setHeight(3_000); // pod 15 km stropom
+    _tickVesselRuntimeForTest(100);
+    assert.equal(shipModels3dRegimeActive(), true, '3 km = pod stropom');
+    assert.equal(_getShipModelStateForTest().regime, true);
+
+    _setShipModels3dForTest(false);
+    assert.equal(
+      shipModels3dRegimeActive(), false,
+      'vypnutý prepínač = žiadne modely bez ohľadu na výšku',
+    );
+  } finally {
+    _setShipModels3dForTest(true);
+    _setVesselOverlayHostForTest(null);
+    _setVesselStateForTest({ enabled: false });
+  }
+});
+
+test('lode: parametre 3D modelu sú rozumné', () => {
+  assert.equal(SHIP_MODEL_HEADING_OFFSET_DEG, -90, 'prova modelu mieri na +X → offset −90°');
+  assert.ok(SHIP_MODEL_ALT_CEIL_M > 0 && SHIP_MODEL_ALT_CEIL_M < 100_000, 'strop v desiatkach km');
+  assert.ok(SHIP_MODEL_MAX >= 10 && SHIP_MODEL_MAX <= 100, 'rozumný strop počtu modelov');
+  assert.ok(SHIP_MODEL_SCALE > 0 && SHIP_MODEL_SCALE < 1, 'zmenšenie z vlastných jednotiek na metre');
+});
+
+test('lode: tripwire — silueta trupu, 3D model zo ship.glb, handoff a upratovanie', () => {
+  const src = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  // 2D ikona je silueta trupu, nie pôvodná šípka/delta-krídlo.
+  assert.match(src, /d="M0,-14 C2\.4,-11/, 'ikona lode je trup, nie šíp');
+  assert.doesNotMatch(src, /M0,-14 L11,10/, 'starý chevron je preč');
+  // 3D model: zdroj, načítanie, orientácia podľa kurzu.
+  assert.match(src, /SHIP_MODEL_URL = '\/models\/ship\.glb'/, 'model zo ship.glb');
+  assert.match(src, /Cesium\.Model\.fromGltfAsync\(/, 'model sa načítava cez fromGltfAsync');
+  assert.match(src, /headingPitchRollToFixedFrame/, 'orientácia trupu podľa kurzu');
+  assert.match(src, /\+ SHIP_MODEL_HEADING_OFFSET_DEG/, 'offset trupu sa pripočíta ku kurzu');
+  // Handoff: ikona vlastníka modelu ostáva skrytá (jediná brána, nie druhé pravidlo).
+  assert.match(
+    src, /record\.billboard\.show = visible && !shipModelOwnsVisual\(record\)/,
+    'handoff cez množinu vlastníkov',
+  );
+  // Modely bežia AŽ po updateVisibility (preberajú čerstvý stav ikony).
+  assert.match(
+    src, /updateVisibility\(\);[\s\S]{0,500}refreshVesselModels\(performance\.now\(\)\)/,
+    'refreshVesselModels po updateVisibility',
+  );
+  // Kolekcia modelov sa pri disable odstráni (remove() ju aj zničí).
+  assert.match(
+    src, /viewer\.scene\.primitives\.remove\(state\.modelCollection\)/,
+    'kolekcia modelov sa pri disable upráta',
+  );
 });

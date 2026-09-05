@@ -323,11 +323,17 @@ export const EN_STRINGS = Object.freeze({
   'layer.military-awareness.name': 'Global Context',
   'layer.local-airports.name': 'Airports',
   'layer.local-ports.name': 'Ports',
+  'layer.local-shipping-lanes.name': 'Shipping Lanes',
   'layer.local-datacenters.name': 'Datacenters',
   'layer.local-dams.name': 'Dams',
   'layer.local-energy.name': 'Slovak Power Grid',
   'layer.telegeography-submarine-cables.name': 'Submarine Cables',
   'layer.local-firms.name': 'FIRMS Active Fires',
+
+  // Shipping lanes legend / cards
+  'shipping.lane-major': 'Major Shipping Route',
+  'shipping.lane-middle': 'Secondary Shipping Route',
+  'shipping.lane-minor': 'Minor Shipping Route',
 
   // Aircraft category filter chips under the flight layers (2026-09-03).
   'aircraft.category.commercial': 'AIRLINERS',
@@ -1005,11 +1011,17 @@ export const SK_STRINGS = Object.freeze({
   'layer.military-awareness.name': 'Globálny kontext',
   'layer.local-airports.name': 'Letiská',
   'layer.local-ports.name': 'Prístavy',
+  'layer.local-shipping-lanes.name': 'Námorné koridory',
   'layer.local-datacenters.name': 'Dátové centrá',
   'layer.local-dams.name': 'Priehrady',
   'layer.local-energy.name': 'Energetika SR',
   'layer.telegeography-submarine-cables.name': 'Podmorské káble',
   'layer.local-firms.name': 'Aktívne požiare FIRMS',
+
+  // Námorné koridory legenda / karty
+  'shipping.lane-major': 'Hlavná námorná trasa',
+  'shipping.lane-middle': 'Sekundárna námorná trasa',
+  'shipping.lane-minor': 'Vedľajšia námorná trasa',
 
   // Čipy filtra kategórií pod leteckými vrstvami (2026-09-03).
   'aircraft.category.commercial': 'DOPRAVNÉ',

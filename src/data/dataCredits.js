@@ -243,6 +243,14 @@ export const DATA_CREDITS = [
       '<a href="https://www.submarinecablemap.com" target="_blank" rel="noopener">submarinecablemap.com</a> ' +
       '(CC BY-NC-SA 3.0 — NonCommercial)',
   },
+  {
+    key: 'shipping-lanes',
+    html:
+      'Shipping lanes: ' +
+      '<a href="https://github.com/newzealandpaul/Shipping-Lanes" target="_blank" rel="noopener">Global Shipping Lanes</a> ' +
+      '— P. Benden, derived from the CIA World Oceans map ' +
+      '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, modified)',
+  },
 ];
 
 /**

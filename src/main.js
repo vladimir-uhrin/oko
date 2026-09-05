@@ -282,6 +282,7 @@ async function init() {
     // Restoration starts only after the complete production registry is sealed.
     dataManager.finalizeRegistrations(LAYER_STATE_REGISTRY);
     if (import.meta.env.DEV) {
+      window.Cesium = Cesium; // dev-only debug aid (namespace, not a secret)
       window.__gevQaRegisterLayer = (targetManager, layerModule) => {
         if (targetManager !== dataManager) throw new Error('QA layer manager mismatch');
         return dataManager.registerForQa(layerModule);

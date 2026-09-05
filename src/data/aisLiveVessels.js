@@ -88,6 +88,27 @@ const VESSEL_DENSITY_REBUILD_MS = 2000;
 /** Farba buniek hustoty lodí — tlmená lodná azúrová, aby sa od bielych
  *  leteckých buniek dala rozoznať aj bez legendy. */
 const VESSEL_DENSITY_CSS = '#7fd3f0';
+
+// ── 3D modely lodí zblízka (režim „modely nablízko") ──────────────────────
+// Pod stropom výšky sa najbližšie lode prekreslia z 2D ikony na skutočný glTF
+// trup (public/models/ship.glb, Low Poly Cargo Ship, CC BY 4.0). Zámerne
+// štíhlejšie ako letecký systém: jeden model pre všetky triedy, bez IR/tried,
+// bez ground-snapu (lode sú na hladine). Handoff je atomický cez množinu
+// „vlastníkov" — model preberie vizuál až keď je `ready`, dovtedy drží ikona.
+/** URL modelu trupu. Jeden zdielaný asset pre celú flotilu. */
+const SHIP_MODEL_URL = '/models/ship.glb';
+/** Pod touto výškou kamery (m) sa najbližšie lode kreslia ako 3D modely. */
+export const SHIP_MODEL_ALT_CEIL_M = 15000;
+/** Strop súčasných modelov (najbližších N v zábere). 40 × 230 kB ≈ 9 MB. */
+export const SHIP_MODEL_MAX = 40;
+/** Uniformná mierka: ship.glb má ~4200 vlastných jednotiek dĺžky → ~125 m. */
+export const SHIP_MODEL_SCALE = 0.03;
+/** Podlaha veľkosti v px, nech vzdialené trupy ostanú čitateľnou siluetou. */
+const SHIP_MODEL_MIN_PX = 40;
+/** Prova modelu mieri na +X (východ) pri heading 0 → offset kurz − 90°. */
+export const SHIP_MODEL_HEADING_OFFSET_DEG = -90;
+/** Nadvihnutie nad elipsoid (m), aby trup plával, nie sa polovične potopil. */
+const SHIP_MODEL_LIFT_M = 2.5;
 /** Focus alpha alone samples faster inside the existing preRender pass. */
 const FOCUS_UPDATE_MS = 80;
 const LABEL_GRID_PX = VESSEL_LABEL_GRID_PX;
@@ -369,7 +390,7 @@ function currentGeoidN(lat, lon) {
   return _geoidReady ? geoidHeight(lat, lon) : null;
 }
 
-/** @type {Map<string, string>} `${cssColor}:${variant}` -> chevron SVG data URL */
+/** @type {Map<string, string>} `${cssColor}:${variant}` -> hull-silhouette SVG data URL */
 const shipIconCache = new Map();
 
 const aisLiveVesselsLayer = {
@@ -457,6 +478,10 @@ const aisLiveVesselsLayer = {
     }
     if (state.densityPoints && viewer) {
       viewer.scene.primitives.remove(state.densityPoints);
+    }
+    if (state.modelCollection && viewer) {
+      // remove() kolekcie ju aj zničí, spolu so všetkými glTF trupmi v nej.
+      viewer.scene.primitives.remove(state.modelCollection);
     }
     _vesselOverlayHost.clearSource(VESSEL_OVERLAY_SOURCE_ID);
     _vesselOverlayHost.setVisible(VESSEL_OVERLAY_SOURCE_ID, false);
@@ -768,6 +793,18 @@ const state = {
   densityPoints: null,
   /** Kreslí sa hustota namiesto jednotlivých lodí? */
   densityMode: false,
+  /** Zapnuté 3D modely lodí zblízka (default áno, ako „proximity" pri lietadlách). */
+  shipModels3d: true,
+  /** @type {object|null} PrimitiveCollection s glTF trupmi. */
+  modelCollection: null,
+  /** @type {Map<string|object, object>} kľúč (MMSI alebo record) -> Cesium.Model. */
+  shipModels: new Map(),
+  /** @type {Set<string|object>} rozpracované načítania modelov (cap concurrency). */
+  shipModelPending: new Set(),
+  /** @type {Set<string|object>} kľúče, ktorých model práve drží vizuál (ikona skrytá). */
+  shipModelOwners: new Set(),
+  /** Bol minulý tik režim modelov aktívny? (detekcia prechodu na vynútené prekreslenie ikon). */
+  shipModelRegime: false,
   /** Kedy sa naposledy prepočítali bunky hustoty. */
   densityRebuiltAt: 0,
   /** Sprites whose animated emphasis remains outside the 1.0 deadband. */
@@ -1049,6 +1086,11 @@ function ensureCollections(viewer) {
   state.densityPoints = new Cesium.BillboardCollection(); // mäkký žiar, nie disky
   state.densityPoints.show = false;
   viewer.scene.primitives.add(state.densityPoints);
+  // 3D trupy zblízka — vlastná kolekcia, aby sa dala naraz skryť/zničiť
+  // nezávisle od billboardov (rovnaká disciplína ako hustota).
+  state.modelCollection = new Cesium.PrimitiveCollection();
+  state.modelCollection.show = state.enabled;
+  viewer.scene.primitives.add(state.modelCollection);
 }
 
 /**
@@ -1278,7 +1320,7 @@ function shipScale(record) {
   return shipSpeedScale(record) * vesselTierScale(state.iconTier);
 }
 
-/** Rýchlostná mierka šípky (rýchlejšia loď = väčšia šípka), bez stupňa. */
+/** Rýchlostná mierka trupu (rýchlejšia loď = väčší trup), bez stupňa. */
 function shipSpeedScale(record) {
   const speed = Number(record.speed || 0);
   if (speed >= 18) return 0.78;
@@ -1309,7 +1351,7 @@ function vesselCourseDeg(record) {
 }
 
 /**
- * Build (and cache) a chevron/delta-wing SVG data URL tinted for the vessel.
+ * Build (and cache) a top-down hull-silhouette SVG data URL tinted for the vessel.
  * The shape points north (up) so billboard rotation maps directly to heading.
  * One icon is generated per color+variant and reused across all billboards.
  * @param {Object} record - Vessel record (drives per-type tint).
@@ -1323,14 +1365,180 @@ function shipIcon(record, selected) {
 
   const stroke = selected ? 'rgba(6,26,32,0.95)' : 'rgba(4,18,24,0.9)';
   const strokeWidth = selected ? 1.1 : 0.7;
+  // Silueta trupu zhora: ostrá prova hore (sever = kurz), rovné boky, plochá
+  // zádia, jemný domček mostíka pri korme. Prova nahor drží mapovanie rotácie
+  // billboardu na heading — presne ako mala pôvodná šípka.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
     <g transform="translate(16,16)">
-      <path d="M0,-14 L11,10 L4,7 L0,14 L-4,7 L-11,10 Z" fill="${cssColor}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round"/>
+      <path d="M0,-14 C2.4,-11 3.8,-6.5 3.8,-2 L3.8,10 Q3.8,12 1.8,12 L-1.8,12 Q-3.8,12 -3.8,10 L-3.8,-2 C-3.8,-6.5 -2.4,-11 0,-14 Z" fill="${cssColor}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linejoin="round"/>
+      <rect x="-2.6" y="-9" width="5.2" height="13" rx="0.6" fill="none" stroke="${stroke}" stroke-width="0.5" opacity="0.45"/>
+      <rect x="-2.7" y="5.4" width="5.4" height="4.4" rx="0.7" fill="${stroke}" opacity="0.62"/>
     </g>
   </svg>`;
   const icon = 'data:image/svg+xml;base64,' + btoa(svg);
   shipIconCache.set(key, icon);
   return icon;
+}
+
+// ── 3D modely lodí ─────────────────────────────────────────────────────────
+const _scratchShipHpr = new Cesium.HeadingPitchRoll();
+const _scratchShipPos = new Cesium.Cartesian3();
+
+/** Kľúč modelu pre záznam: MMSI ak je, inak samotný objekt (unkeyed lode). */
+function shipModelKey(record) {
+  return record.mmsi || record;
+}
+
+/** Drží 3D model vizuál tejto lode? (číta množina vlastníkov). */
+function shipModelOwnsVisual(record) {
+  if (!state.shipModelOwners.size) return false;
+  return state.shipModelOwners.has(shipModelKey(record));
+}
+
+/** Režim modelov: zapnuté A kamera pod stropom výšky. Bez hysterézie —
+ *  handoff je atomický, takže preblik na hranici len vymení reprezentáciu. */
+export function shipModels3dRegimeActive() {
+  if (!state.shipModels3d) return false;
+  const h = state.viewer?.camera?.positionCartographic?.height ?? Infinity;
+  return h < SHIP_MODEL_ALT_CEIL_M;
+}
+
+/** Matica umiestnenia modelu: kurz → heading (+ offset trupu), pitch/roll 0. */
+function shipModelMatrix(pos, courseDeg, result) {
+  _scratchShipHpr.heading = Cesium.Math.toRadians((courseDeg || 0) + SHIP_MODEL_HEADING_OFFSET_DEG);
+  _scratchShipHpr.pitch = 0;
+  _scratchShipHpr.roll = 0;
+  return Cesium.Transforms.headingPitchRollToFixedFrame(
+    pos, _scratchShipHpr, Cesium.Ellipsoid.WGS84, undefined, result,
+  );
+}
+
+/** Lenivo načítaj glTF trup (fire-and-forget; ikona drží vizuál kým nie je ready). */
+function ensureShipModel(key, record) {
+  if (state.shipModels.has(key) || state.shipModelPending.has(key)) return;
+  if ((state.shipModels.size + state.shipModelPending.size) >= SHIP_MODEL_MAX) return;
+  state.shipModelPending.add(key);
+  Cesium.Model.fromGltfAsync({
+    url: SHIP_MODEL_URL,
+    asynchronous: true,
+    minimumPixelSize: SHIP_MODEL_MIN_PX,
+    scale: SHIP_MODEL_SCALE,
+    id: record.mmsi || undefined, // scene.pick vráti MMSI pre klik na loď
+  }).then((model) => {
+    state.shipModelPending.delete(key);
+    // Načítanie mohlo prežiť disable/reset — ak kolekcia zmizla, model zahoď.
+    if (!state.enabled || !state.modelCollection || state.modelCollection.isDestroyed?.()) {
+      try { model.destroy(); } catch { /* už preč */ }
+      return;
+    }
+    model.show = false; // handoff ho zapne až keď má maticu a je ready
+    state.modelCollection.add(model);
+    state.shipModels.set(key, model);
+    state.viewer?.scene?.requestRender?.();
+  }).catch(() => {
+    // Zlyhané dekódovanie/asset — ostáva ikona.
+    state.shipModelPending.delete(key);
+  });
+}
+
+/** Uvoľni jeden model a vráť vizuál ikone (updateVisibility ju do 800 ms doladí). */
+function releaseShipModel(key) {
+  const model = state.shipModels.get(key);
+  if (model) {
+    try { state.modelCollection?.remove(model); } catch { /* už preč */ } // remove() aj zničí
+    state.shipModels.delete(key);
+  }
+  state.shipModelOwners.delete(key);
+  const rec = typeof key === 'string' ? state.vesselMap.get(key) : key;
+  if (rec?.billboard) rec.billboard.show = true; // bez čakania na regulárny pass
+}
+
+/** Zhoď všetky modely (odchod z režimu, disable). */
+function releaseAllShipModels() {
+  if (state.modelCollection && !state.modelCollection.isDestroyed?.()) {
+    state.modelCollection.removeAll();
+  }
+  state.shipModels.clear();
+  state.shipModelPending.clear();
+  state.shipModelOwners.clear();
+}
+
+/**
+ * Prekresli najbližšie lode z ikony na 3D trup. Kandidáti = už modelované
+ * (drž) + práve viditeľné ikony (pridaj), zoradené podľa vzdialenosti, strop
+ * SHIP_MODEL_MAX. Beží každý frame — umiestnenie modelu sleduje pozíciu a kurz.
+ * @param {number} nowMs Monotónny čas (performance.now()).
+ * @returns {void}
+ */
+function refreshVesselModels(nowMs) {
+  if (!state.enabled) return;
+  const camera = state.viewer?.camera;
+  const scene = state.viewer?.scene;
+  const active = shipModels3dRegimeActive();
+  if (!active) {
+    if (state.shipModels.size || state.shipModelPending.size || state.shipModelOwners.size) {
+      releaseAllShipModels();
+    }
+    if (state.shipModelRegime) {
+      state.shipModelRegime = false;
+      updateVisibility(true); // ikony sa hneď rozsvietia, bez 800 ms diery
+    }
+    return;
+  }
+  state.shipModelRegime = true;
+  if (!camera || !state.modelCollection) return;
+  const camPos = camera.positionWC;
+
+  // Kandidáti: modelované (drž pre hysterézu) + viditeľné ikony (nový prírastok).
+  const cand = [];
+  for (const record of state.vesselRecords) {
+    if (!record || !Number.isFinite(record.lat) || !Number.isFinite(record.lon)) continue;
+    if (state.densityMode && record !== state.selectedRecord) continue;
+    const key = shipModelKey(record);
+    const modeled = state.shipModels.has(key);
+    const iconVisible = record.billboard && record.billboard.show;
+    if (!modeled && !iconVisible) continue;
+    const pos = record.position;
+    if (!pos) continue;
+    cand.push([record, key, Cesium.Cartesian3.distanceSquared(camPos, pos)]);
+  }
+  cand.sort((a, b) => a[2] - b[2]); // najbližšie prvé — to, na čo sa pozeráš
+
+  const chosen = new Set();
+  for (let i = 0; i < cand.length && chosen.size < SHIP_MODEL_MAX; i++) {
+    chosen.add(cand[i][1]);
+  }
+
+  // Uvoľni modely, ktoré vypadli z výberu.
+  const toRelease = [];
+  for (const key of state.shipModels.keys()) {
+    if (!chosen.has(key)) toRelease.push(key);
+  }
+  for (const key of toRelease) releaseShipModel(key);
+
+  // Zabezpeč + umiestni vybrané; vlastníkov prepočítaj načisto.
+  state.shipModelOwners.clear();
+  for (let i = 0; i < cand.length; i++) {
+    const [record, key] = cand[i];
+    if (!chosen.has(key)) continue;
+    let model = state.shipModels.get(key);
+    if (!model) {
+      ensureShipModel(key, record);
+      continue; // ešte sa načítava — ikona drží vizuál
+    }
+    const pos = Cesium.Cartesian3.fromDegrees(
+      record.lon, record.lat, SHIP_MODEL_LIFT_M, Cesium.Ellipsoid.WGS84, _scratchShipPos,
+    );
+    shipModelMatrix(pos, vesselCourseDeg(record), model.modelMatrix);
+    if (!model.ready) {
+      model.show = false; // ešte nie je vykreslený → drž ikonu, žiadny poltvar
+      continue;
+    }
+    model.show = true;
+    state.shipModelOwners.add(key);
+    if (record.billboard) record.billboard.show = false; // handoff až keď model kreslí
+  }
+  scene?.requestRender?.();
 }
 
 function installRuntime(viewer) {
@@ -1341,6 +1549,11 @@ function installRuntime(viewer) {
     refreshVesselLod();
     refreshVesselDensity(performance.now());
     updateVisibility();
+    // Modely BERÚ vizuál až po tom, čo updateVisibility rozhodol o `show`
+    // ikony — vlastníkom nastaví billboard.show=false a to je stav, ktorý sa
+    // v tomto tiku vykreslí (updateVisibility beží raz za 800 ms, tento pass
+    // každý frame drží model na aktuálnej pozícii a kurze).
+    refreshVesselModels(performance.now());
   });
 }
 
@@ -1481,7 +1694,11 @@ function updateVisibility(force = false) {
       const visible = (!state.densityMode || record === state.selectedRecord)
         && isVisible(record.surfacePosition, occluder);
       if (record.billboard) {
-        record.billboard.show = visible;
+        // Ak vizuál drží 3D model, ikona ostáva skrytá aj keď je „visible" —
+        // inak by ju tento pass rozsvietil pod modelom (rovnaká brána, nie
+        // druhé pravidlo). Labely aj tak berú `visible`, takže modelovaná loď
+        // má stále štítok.
+        record.billboard.show = visible && !shipModelOwnsVisual(record);
         if (visible && doRotations && scene) {
           const rot = screenProjectedRotation(
             scene, record.position, vesselCourseDeg(record), record.billboard.rotation
@@ -2196,6 +2413,9 @@ function setVisible(show) {
   if (state.densityPoints) {
     state.densityPoints.show = show && state.densityMode;
   }
+  if (state.modelCollection) {
+    state.modelCollection.show = show;
+  }
   _vesselOverlayHost.setVisible(VESSEL_OVERLAY_SOURCE_ID, show);
 }
 
@@ -2237,6 +2457,11 @@ function resetState() {
   state.densityPoints = null;
   state.densityMode = false;
   state.densityRebuiltAt = 0;
+  state.modelCollection = null;
+  state.shipModels = new Map();
+  state.shipModelPending = new Set();
+  state.shipModelOwners = new Set();
+  state.shipModelRegime = false;
   state.lastVisibilityUpdate = 0;
   state.lastFocusUpdate = 0;
   state.activeFocusCount = 0;
@@ -2312,6 +2537,7 @@ export function _tickVesselRuntimeForTest(nowMs = performance.now()) {
   refreshVesselLod();
   refreshVesselDensity(nowMs);
   updateVisibility(true);
+  refreshVesselModels(nowMs);
 }
 
 /**
@@ -2393,4 +2619,20 @@ export function _getVesselStateForTest() {
 /** Stupeň ikon a režim hustoty lodí (2026-09-04). Test-only. */
 export function _getVesselLodStateForTest() {
   return { iconTier: state.iconTier, densityMode: state.densityMode };
+}
+
+/** Test-only: prepni globálny prepínač 3D modelov lodí. */
+export function _setShipModels3dForTest(on) {
+  state.shipModels3d = on !== false;
+}
+
+/** Test-only: snímka stavu modelov lodí. */
+export function _getShipModelStateForTest() {
+  return {
+    enabled: state.shipModels3d,
+    models: state.shipModels.size,
+    pending: state.shipModelPending.size,
+    owners: state.shipModelOwners.size,
+    regime: state.shipModelRegime,
+  };
 }

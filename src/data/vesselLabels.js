@@ -57,8 +57,8 @@ export function vesselPositionAge(lastPositionEpoch, nowMs) {
 }
 
 /**
- * AIS type family → chevron hue + card accent. Single source of truth for
- * vessel type colors so billboard chevrons and host cards cannot drift apart.
+ * AIS type family → hull hue + card accent. Single source of truth for
+ * vessel type colors so billboard hulls and host cards cannot drift apart.
  */
 const TYPE_STYLES = [
   { pattern: /tanker/i, css: '#ffb347', accent: '255, 179, 71' },
@@ -143,7 +143,7 @@ export function mmsiFlag(mmsi) {
   return { iso2: entry[0], name: entry[1] };
 }
 
-/** AIS ship type → CSS hex hue for the billboard chevron. */
+/** AIS ship type → CSS hex hue for the billboard hull silhouette. */
 export function vesselTypeCss(type) {
   return styleForType(type).css;
 }
