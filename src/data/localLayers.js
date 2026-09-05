@@ -3,6 +3,8 @@ import { createFirmsHeatmapLayer } from './firmsHeatmap.js';
 import submarineCablesLayer from './telegeographySubmarineCables.js';
 import skEnergyLayer from './skEnergy.js';
 import shippingLanesLayer from './shippingLanes.js';
+import shipDensityLayer from './shipDensity.js';
+import airDensityLayer from './airDensity.js';
 
 // Use Vite's ?url import to properly resolve these assets in dev and build
 import datacentersUrl from './local_data/datacenters/datacenters.geojsonl?url';
@@ -100,6 +102,12 @@ export default [
   airports,
   ports,
   shippingLanesLayer,
+  // Historical ship density (World Bank / IMF 2015–2021): the "where do ships
+  // go" answer for the regions terrestrial AIS cannot hear. MODELLED, not live.
+  shipDensityLayer,
+  // Historical air-traffic density (adsb.lol, one day): where aircraft fly,
+  // including ocean routes the live feed only hears at the edges. MODELLED.
+  airDensityLayer,
   datacenters,
   dams,
   // OKO (Fáza 4): the SK energy grid sits where the submarine cables tile

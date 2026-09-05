@@ -456,3 +456,42 @@ test('the feather band is a named constant in a sane screen-space range', () => 
   // band of arc-seconds would pop.
   assert.ok(HORIZON_FEATHER_RAD > 0.002 && HORIZON_FEATHER_RAD < 0.09);
 });
+
+// ── Plátno (SceneMode.SCENE2D) — guardy troch 3D predpokladov (2026-09-05) ──
+import {
+  cameraPoseSignature,
+  isFlatCamera,
+  isFlatScene,
+} from './iconOrientation.js';
+
+test('plátno: podpis pózy kamery prežije undefined heading/pitch/roll (Cesium 2D) — toto zhodilo renderer', () => {
+  const camera = { positionWC: new Cesium.Cartesian3(1000, 2000, 3000), heading: undefined, pitch: undefined, roll: undefined };
+  assert.doesNotThrow(() => cameraPoseSignature(camera));
+  assert.equal(cameraPoseSignature(camera), '100:200:300:-:-:-');
+  const camera3d = { positionWC: new Cesium.Cartesian3(1000, 2000, 3000), heading: 0.5, pitch: -1.25, roll: 0 };
+  assert.equal(cameraPoseSignature(camera3d), '100:200:300:0.500:-1.250:0.000', '3D cesta nezmenená');
+});
+
+test('plátno: horizontový cull je vypnutý pri ortografickej (2D) kamere — niet odvrátenej strany', () => {
+  const flatCam = { positionWC: new Cesium.Cartesian3(0, 0, 0), frustum: new Cesium.OrthographicOffCenterFrustum() };
+  assert.equal(isFlatCamera(flatCam), true);
+  const occ = horizonOccluder(flatCam);
+  assert.equal(occ.isPointVisible(Cesium.Cartesian3.fromDegrees(180, 0, 0)), true, 'aj „odvrátená" strana je viditeľná');
+  assert.equal(occ.isPointVisible(Cesium.Cartesian3.fromDegrees(0, -80, 0)), true);
+  // 3D kamera nad Európou: Sydney je za obzorom — pôvodné správanie ostáva.
+  const cam3d = { positionWC: Cesium.Cartesian3.fromDegrees(17, 48, 9_000_000), frustum: new Cesium.PerspectiveFrustum() };
+  assert.equal(isFlatCamera(cam3d), false);
+  assert.equal(horizonOccluder(cam3d).isPointVisible(Cesium.Cartesian3.fromDegrees(151.2, -33.9, 0)), false);
+  assert.equal(horizonOccluder(cam3d).isPointVisible(Cesium.Cartesian3.fromDegrees(17, 48, 0)), true);
+});
+
+test('plátno: rotácia ikony = kurz (sever hore), bez projekcie cez rightWC/upWC', () => {
+  const flatScene = { mode: Cesium.SceneMode.SCENE2D, camera: {} };
+  assert.equal(isFlatScene(flatScene), true);
+  for (const course of [0, 45, 90, 180, 270, 359]) {
+    const r = screenProjectedRotation(flatScene, equatorPosition, course, null);
+    assert.ok(Math.abs(wrappedDelta(r, -Cesium.Math.toRadians(course))) < 1e-9, `kurz ${course}° → rotácia -${course}°`);
+  }
+  assert.equal(isFlatScene({ mode: Cesium.SceneMode.SCENE3D }), false);
+  assert.equal(isFlatScene(null), false);
+});

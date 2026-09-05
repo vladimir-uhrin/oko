@@ -6,6 +6,7 @@ import {
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
 import { screenProjectedRotation, cameraPoseSignature, horizonOccluder } from './iconOrientation.js';
+import { AIS_FRESH_MS, AIS_RETAIN_MS, aisRegionKey } from './aisCoverage.js';
 import { airIconTier } from './airIconLod.js';
 import {
   aggregateTraffic, cullDensityCells, densityGridDegrees, densityMarkerAlpha, densityMarkerPx,
@@ -85,6 +86,18 @@ const VISIBILITY_UPDATE_MS = 800;
 export const VESSEL_TIER_SCALE = Object.freeze({ full: 1, medium: 0.7, micro: 0.45 });
 /** Bunky hustoty lodí sa prepočítavajú raz za 2 s (rovnako ako lietadlá). */
 const VESSEL_DENSITY_REBUILD_MS = 2000;
+/**
+ * Hustota lodí pri pohľade na svet je VYPNUTÁ rozhodnutím používateľa
+ * (2026-09-05, rovnako ako FLIGHT_DENSITY_ENABLED pri lietadlách): pri
+ * 12 000 km sa 30 000 lodí zlialo do 147 buniek, z toho 48 viditeľných s
+ * mediánom alfy 0,29 — „pár bodiek za celú hemisféru". Operátor chce vidieť
+ * jednotlivé lode aj pri pohľade na svet (drobný stupeň ~6 px, ako pri
+ * lietadlách). Agregácia ostáva zapojená za týmto jediným prepínačom.
+ */
+export const VESSEL_DENSITY_ENABLED = false;
+/** Runtime kópia prepínača — testy ju môžu dočasne zapnúť, aby agregácia
+ *  ostala otestovaná aj keď je produkčne vypnutá. */
+let _vesselDensityEnabled = VESSEL_DENSITY_ENABLED;
 /** Farba buniek hustoty lodí — tlmená lodná azúrová, aby sa od bielych
  *  leteckých buniek dala rozoznať aj bez legendy. */
 const VESSEL_DENSITY_CSS = '#7fd3f0';
@@ -315,6 +328,7 @@ export function mapAnalystRecord(record) {
     lengthM: num(record?.lengthM),
     draughtM: num(record?.draughtM),
     aisClass: text(record?.aisClass),
+    ...(record?.positionState ? { positionState: isLastKnownVessel(record) ? 'last-known' : 'fresh', lastPositionEpoch: num(record.lastPositionEpoch), source: 'AISStream' } : {}),
   };
 }
 
@@ -544,6 +558,7 @@ const aisLiveVesselsLayer = {
     const entries = [];
     for (const record of records) {
       if (!Number.isFinite(record.lat) || !Number.isFinite(record.lon)) continue;
+      if (isLastKnownVessel(record)) continue;
       const position = record.billboard?.position || record.position;
       if (!position) continue;
       const distanceM = Cesium.Cartesian3.distance(centerCartesian, position);
@@ -573,7 +588,8 @@ const aisLiveVesselsLayer = {
   hasContact(mmsi) {
     if (!state.enabled || !state.vesselMap || state.vesselMap.size === 0) return null;
     if (!mmsi) return false;
-    return state.vesselMap.has(String(mmsi).trim());
+    const record = state.vesselMap.get(String(mmsi).trim());
+    return Boolean(record && !isLastKnownVessel(record));
   },
 
   getAllPositions(maxCount = 800) {
@@ -583,6 +599,7 @@ const aisLiveVesselsLayer = {
     const cap = Number.isFinite(maxCount) && maxCount > 0 ? Math.floor(maxCount) : 800;
 
     for (const record of records) {
+      if (isLastKnownVessel(record)) continue;
       if (result.length >= cap) break;
       const position = record.billboard?.position || record.position;
       if (!position) continue;
@@ -703,7 +720,7 @@ const aisLiveVesselsLayer = {
         klass: record.type
           ? normalizeVesselType(record.type).toUpperCase().slice(0, 14) || undefined
           : undefined,
-        metric: formatKnots(record.speed), // record.speed is knots
+        metric: isLastKnownVessel(record) ? 'LAST KNOWN' : formatKnots(record.speed),
       });
       if (result.length >= maxCount) break;
     }
@@ -719,15 +736,24 @@ const aisLiveVesselsLayer = {
 
   getStats() {
     const waitingForFirstPosition = state.firstConnectPhase === 'loading';
+    const fresh = state.vesselRecords.filter(record => !isLastKnownVessel(record)).length;
+    const lastKnown = state.vesselRecords.length - fresh;
     return {
-      count: state.count,
+      count: state.coverage ? fresh : state.count,
+      freshCount: fresh,
+      lastKnownCount: lastKnown,
+      coverage: state.coverage,
+      visibleCount: state.visibleCount,
+      visibilityMeaning: 'Contacts admitted by horizon/LOD policy; not a GPU pixel count.',
+      activeLabelCount: state.activeLabelCount,
+      source: state.coverage ? `AISStream · ${fresh} recent · ${lastKnown} last known · ${state.coverage.omittedByLimit} omitted · partial coverage` : 'AISStream',
       lastUpdate: state.lastUpdate,
       loading: state.loading || waitingForFirstPosition,
       loadingLabel: waitingForFirstPosition
         ? AIS_FIRST_CONNECT_LABEL
         : state.loadingLabel,
       error: state.error,
-      stale: state.stale,
+      stale: state.stale || (lastKnown > 0 && fresh === 0),
       status: state.firstConnectPhase === 'unavailable' ? 'unavailable' : undefined,
       transportStatus: state.transportStatus,
       lastMessageAt: state.lastMessageAt,
@@ -742,6 +768,12 @@ const aisLiveVesselsLayer = {
 };
 
 const state = {
+  coverage: null,
+  visibleCount: 0,
+  viewKey: '',
+  viewChangedAt: 0,
+  viewRequestedAt: 0,
+  viewCheckedAt: 0,
   viewer: null,
   enabled: false,
   loading: false,
@@ -1012,6 +1044,21 @@ function applyAisFeedSnapshot(viewer, payload) {
   state.lastMessageAt = snapshot.lastMessageAt;
   state.rawRowCount = snapshot.rawRowCount;
   state.acceptedRowCount = snapshot.acceptedRowCount;
+  state.coverage = payload?.coverage || null;
+
+  // A bounded viewport may legitimately become empty. Old viewport contacts
+  // must not survive it as if they were still returned by this snapshot.
+  if (state.coverage && Array.isArray(payload?.rows) && payload.rows.length === 0
+    && ['live', 'open'].includes(snapshot.transportStatus)) {
+    reconcileVessels(viewer, []);
+    state.count = state.vesselRecords.length;
+    if (state.firstConnectPhase !== 'loading' && !isDefinitiveTransportFailure(snapshot.transportStatus)) {
+      state.stale = state.count > 0;
+      state.error = payload?.error || null;
+      state.lastUpdate = _aisRuntime.now();
+      return { reconciled: true, ...snapshot };
+    }
+  }
 
   if (snapshot.acceptedRowCount === 0) {
     state.count = state.vesselRecords.length;
@@ -1039,7 +1086,7 @@ function applyAisFeedSnapshot(viewer, payload) {
   settleFirstConnectPhase('ready');
   reconcileVessels(viewer, snapshot.acceptedRows);
   state.count = state.vesselRecords.length;
-  state.stale = Boolean(payload?.refreshing);
+  state.stale = Boolean(payload?.refreshing) || state.vesselRecords.every(record => isLastKnownVessel(record));
   state.newestPositionAt = payload?.newestPositionAt || null;
   // Not unconditionally null: a degraded feed keeps its reason even though the
   // cached vessels are still drawable, so the chip cannot go quiet on an
@@ -1053,7 +1100,26 @@ function liveApiUrl() {
   const base = import.meta.env?.VITE_AIS_LIVE_API_URL || DEFAULT_API_URL;
   const url = new URL(base, window.location.origin);
   url.searchParams.set('maxRows', String(renderRowLimit()));
+  const bbox = vesselViewBounds();
+  if (bbox) url.searchParams.set('bbox', bbox);
+  if (state.selectedRecord?.mmsi) url.searchParams.set('selected', state.selectedRecord.mmsi);
   return url.toString();
+}
+
+function vesselViewBounds() {
+  const camera = state.viewer?.camera;
+  if (!camera || camera.positionCartographic?.height > 4_000_000) return '';
+  try {
+    const rect = camera.computeViewRectangle?.(Cesium.Ellipsoid.WGS84);
+    if (!rect) return '';
+    return [rect.west, rect.south, rect.east, rect.north]
+      .map(v => Cesium.Math.toDegrees(v).toFixed(4)).join(',');
+  } catch { return ''; }
+}
+
+export function isLastKnownVessel(record, now = Date.now()) {
+  return record.positionState === 'last-known'
+    || (Number.isFinite(record.lastPositionEpoch) && now - record.lastPositionEpoch * 1000 >= AIS_FRESH_MS);
 }
 
 function renderRowLimit() {
@@ -1226,6 +1292,7 @@ function updateRecordInPlace(record, next) {
   record.posEstimated = next.posEstimated;
   record.lastPositionUtc = next.lastPositionUtc;
   record.lastPositionEpoch = next.lastPositionEpoch;
+  record.positionState = next.positionState;
   record.position = next.position;
   record.surfacePosition = next.surfacePosition;
   record.normal = next.normal;
@@ -1300,6 +1367,7 @@ function normalizeVessel(row) {
     posEstimated: row.pos_estimated === true,
     lastPositionUtc: String(row.last_position_UTC || ''),
     lastPositionEpoch: finiteNumber(row.last_position_epoch),
+    positionState: row.position_state || null,
     position,
     // Ellipsoid-surface point (height 0) — feeds ONLY the horizon occluder,
     // which tests against the WGS84 ellipsoid; keep it off the sea datum.
@@ -1359,7 +1427,7 @@ function vesselCourseDeg(record) {
  * @returns {string} SVG data URL.
  */
 function shipIcon(record, selected) {
-  const cssColor = selected ? '#ffffff' : vesselTypeCss(record.type);
+  const cssColor = isLastKnownVessel(record) ? '#929ca5' : selected ? '#ffffff' : vesselTypeCss(record.type);
   const key = `${cssColor}:${selected ? 'selected' : 'normal'}`;
   if (shipIconCache.has(key)) return shipIconCache.get(key);
 
@@ -1493,6 +1561,7 @@ function refreshVesselModels(nowMs) {
   const cand = [];
   for (const record of state.vesselRecords) {
     if (!record || !Number.isFinite(record.lat) || !Number.isFinite(record.lon)) continue;
+    if (isLastKnownVessel(record)) continue;
     if (state.densityMode && record !== state.selectedRecord) continue;
     const key = shipModelKey(record);
     const modeled = state.shipModels.has(key);
@@ -1544,6 +1613,19 @@ function refreshVesselModels(nowMs) {
 function installRuntime(viewer) {
   if (state.preRenderRemover || !viewer) return;
   state.preRenderRemover = viewer.scene.preRender.addEventListener(() => {
+    // Requery the local cache after view settlement, at most once per 5 s.
+    // This never changes the upstream worldwide subscription.
+    const now = performance.now();
+    if (state.enabled && now - state.viewCheckedAt >= 800) {
+      state.viewCheckedAt = now;
+      const viewKey = vesselViewBounds();
+      if (viewKey !== state.viewKey) { state.viewKey = viewKey; state.viewChangedAt = now; }
+    }
+    if (state.viewChangedAt > state.viewRequestedAt && now - state.viewChangedAt > 500
+      && now - state.viewRequestedAt > 5000 && !state.loading && state.enabled) {
+      state.viewRequestedAt = now;
+      void loadLivePositions(viewer);
+    }
     // Stupeň a hustota PRED viditeľnosťou, nech je pass v celom tiku
     // konzistentný (rovnaké poradie ako vo fleet ticku lietadiel).
     refreshVesselLod();
@@ -1590,7 +1672,9 @@ function refreshVesselLod() {
 function refreshVesselDensity(nowMs) {
   if (!state.enabled || !state.densityPoints) return;
   const height = state.viewer?.camera?.positionCartographic?.height;
-  const next = densityModeActive(height, state.densityMode);
+  // Rovnaká brána ako FLIGHT_DENSITY_ENABLED: vypnutý prepínač = nikdy
+  // hustota, flotila ostáva jednotlivá aj pri pohľade na svet.
+  const next = _vesselDensityEnabled ? densityModeActive(height, state.densityMode) : false;
   if (next !== state.densityMode) {
     state.densityMode = next;
     state.densityPoints.show = next;
@@ -1687,13 +1771,18 @@ function updateVisibility(force = false) {
     if (doRotations) _lastCamPoseSig = poseSig;
     const occluder = makeOccluder();
     const labelCandidates = [];
+    state.visibleCount = 0;
+    const regions = state.coverage?.regions;
+    if (regions) for (const region of Object.values(regions)) region.horizonEligible = 0;
     for (const record of state.vesselRecords) {
       // Režim hustoty sa skladá do TEJ ISTEJ brány ako horizont: v hustote
       // ostáva viditeľná len vybraná loď (ako sledovaný stroj pri lietadlách),
       // inak by tento pass rozsvietil flotilu hneď po tom, čo ju hustota zhasla.
-      const visible = (!state.densityMode || record === state.selectedRecord)
+      const expired = Number.isFinite(record.lastPositionEpoch) && Date.now() - record.lastPositionEpoch * 1000 >= AIS_RETAIN_MS;
+      const visible = !expired && (!state.densityMode || record === state.selectedRecord)
         && isVisible(record.surfacePosition, occluder);
       if (record.billboard) {
+        record.billboard.image = shipIcon(record, record === state.selectedRecord);
         // Ak vizuál drží 3D model, ikona ostáva skrytá aj keď je „visible" —
         // inak by ju tento pass rozsvietil pod modelom (rovnaká brána, nie
         // druhé pravidlo). Labely aj tak berú `visible`, takže modelovaná loď
@@ -1708,7 +1797,12 @@ function updateVisibility(force = false) {
           }
         }
       }
-      if (visible) labelCandidates.push(record);
+      if (visible) {
+        labelCandidates.push(record);
+        state.visibleCount++;
+        const region = regions?.[aisRegionKey(record)];
+        if (region) region.horizonEligible++;
+      }
     }
     updateClusteredLabels(labelCandidates);
   }
@@ -1804,7 +1898,9 @@ function isVisible(surfacePosition, occluder) {
 function updateClusteredLabels(records) {
   const viewer = state.viewer;
   const scene = viewer?.scene;
-  const selected = state.selectedRecord;
+  const retainedSelected = state.selectedRecord;
+  const selected = retainedSelected && !(Number.isFinite(retainedSelected.lastPositionEpoch)
+    && Date.now() - retainedSelected.lastPositionEpoch * 1000 >= AIS_RETAIN_MS) ? retainedSelected : null;
   const entries = selected ? [buildSelectedVesselCard(selected)] : [];
   const maxLabels = labelRowLimit();
 
@@ -2196,6 +2292,8 @@ function registerSelectedContext(record) {
       latitude: record.lat,
       longitude: record.lon,
       properties: {
+        positionState: isLastKnownVessel(record) ? 'last-known' : 'fresh',
+        lastPositionEpoch: record.lastPositionEpoch,
         mmsi: record.mmsi,
         type: record.type,
         speedKt: record.speed,
@@ -2255,7 +2353,7 @@ function updateSelectedVesselHud(record) {
     // HDG len keď máme skutočný TrueHeading; kurz nad zemou (COG) je CRS —
     // pri triede B a msg-5-only kontaktoch sa doteraz COG vydával za heading.
     `${trimHudValue(record.type || 'VESSEL', 24)}  SPD: ${formatSpeed(record.speed)}  ${Number.isFinite(record.heading) ? 'HDG' : 'CRS'}: ${formatHeading(record.heading ?? record.course)}`,
-    `MMSI: ${record.mmsi || '--'}${callSign ? `  C/S ${trimHudValue(callSign, 10)}` : ''}  ${formatPositionTime(record)}${ageSuffix}${stale ? '  · STALE' : ''}`,
+    `MMSI: ${record.mmsi || '--'}${callSign ? `  C/S ${trimHudValue(callSign, 10)}` : ''}  ${formatPositionTime(record)}${ageSuffix}${isLastKnownVessel(record) ? ' · LAST KNOWN' : stale ? '  · STALE' : ''}`,
   ].join('\n');
 }
 
@@ -2286,12 +2384,13 @@ export function buildVesselCard(record) {
   if (record.speed !== null && record.speed !== undefined) parts.push(formatSpeed(record.speed));
   const direction = record.heading ?? record.course;
   if (Number.isFinite(direction)) parts.push(`${Math.round(direction)}°`);
+  if (isLastKnownVessel(record)) parts.push(`LAST KNOWN · ${vesselPositionAge(record.lastPositionEpoch, Date.now()).label || 'age unknown'}`);
   return {
     id: vesselOverlayEntryId(record),
     actionable: Boolean(record?.mmsi),
     position: record.billboard?.position || record.position,
     gapPx: 10,
-    accent: accentForVesselType(record.type),
+    accent: isLastKnownVessel(record) ? '146, 156, 165' : accentForVesselType(record.type),
     title: trimHudValue(displayVesselName(record), 26),
     details: parts.length ? [parts.join(' · ')] : [],
     selected: false,
@@ -2314,6 +2413,7 @@ export function buildSelectedVesselCard(record, nowMs = Date.now()) {
     formatSpeed(record.speed),
     Number.isFinite(direction) ? `${Math.round(direction)}°` : '--°',
   ].join(' · ')];
+  if (isLastKnownVessel(record, nowMs)) details.push('AISStream · LAST KNOWN POSITION');
   // Identity line (balík 2): flag state from the MMSI MID, navigational
   // status, hull length, draught — every part optional, the line renders
   // only when at least one is known. All of it was already on the wire.
@@ -2420,6 +2520,12 @@ function setVisible(show) {
 }
 
 function resetState() {
+  state.coverage = null;
+  state.visibleCount = 0;
+  state.viewKey = '';
+  state.viewChangedAt = 0;
+  state.viewRequestedAt = 0;
+  state.viewCheckedAt = 0;
   clearFirstConnectTimer();
   state.viewer = null;
   state.enabled = false;
@@ -2624,6 +2730,11 @@ export function _getVesselLodStateForTest() {
 /** Test-only: prepni globálny prepínač 3D modelov lodí. */
 export function _setShipModels3dForTest(on) {
   state.shipModels3d = on !== false;
+}
+
+/** Test-only: dočasne zapni/vypni agregáciu hustoty (produkčne vypnutá). */
+export function _setVesselDensityEnabledForTest(on) {
+  _vesselDensityEnabled = on === true;
 }
 
 /** Test-only: snímka stavu modelov lodí. */

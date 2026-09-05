@@ -1,0 +1,65 @@
+{
+  "id": "air-density",
+  "title": "Historical air-traffic density (adsb.lol, 2026-09-04)",
+  "source": "adsb.lol globe_history_2026 · release v2026.09.04-planes-readsb-prod-0",
+  "license": "ODbL 1.0 + CC0 1.0",
+  "period": "2026-09-04",
+  "day": "2026-09-04",
+  "release": "v2026.09.04-planes-readsb-prod-0",
+  "valueMeaning": "count of 10-second ADS-B position samples inside the cell (all aircraft heard by adsb.lol that day) + INTERPOLATED 10-second samples along the great circle wherever one airframe left coverage at cruise and re-appeared ≥ 500 km away at a plausible speed (ocean bridging — see stats.bridged)",
+  "grid": {
+    "cols": 1440,
+    "rows": 720,
+    "cellDeg": 0.25,
+    "sampleIntervalS": 10
+  },
+  "bounds": {
+    "west": -180,
+    "east": 180,
+    "north": 90,
+    "south": -90
+  },
+  "stats": {
+    "slices": 48,
+    "records": 67268223,
+    "positions": 56765358,
+    "separators": 8640,
+    "infoEntries": 10485585,
+    "placeholders": 8640,
+    "badRecords": 0,
+    "uniqueAircraft": 80761,
+    "cellsNonzero": 326508,
+    "total": 70547026,
+    "max": 199396,
+    "ceilingPercentile": 0.995,
+    "ceiling": 5073,
+    "floorPercentile": 0.6,
+    "floor": 42,
+    "alphaGamma": 1.4,
+    "bridged": {
+      "gaps": 19169,
+      "samples": 13781668,
+      "shareOfSamples": 0.1954,
+      "maxGapKm": 12601,
+      "cellsOnlyBridged": 237657,
+      "cellsObserved": 88851,
+      "rejectedGaps": {
+        "notime": 0,
+        "slow": 3198,
+        "fast": 409,
+        "low": 1234
+      },
+      "rules": {
+        "minGapKm": 500,
+        "speedKmh": [
+          500,
+          1050
+        ],
+        "minAltFt": 10000,
+        "sampleIntervalS": 10,
+        "path": "great circle between last and first heard position"
+      }
+    }
+  },
+  "built": "2026-09-05"
+}

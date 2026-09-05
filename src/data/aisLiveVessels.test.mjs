@@ -38,6 +38,8 @@ import {
   SHIP_MODEL_ALT_CEIL_M,
   SHIP_MODEL_MAX,
   SHIP_MODEL_SCALE,
+  VESSEL_DENSITY_ENABLED,
+  _setVesselDensityEnabledForTest,
 } from './aisLiveVessels.js';
 import { readFileSync } from 'node:fs';
 import aisLiveVesselsLayer from './aisLiveVessels.js';
@@ -1686,6 +1688,40 @@ test('a vessel analyst record carries the MMSI the tracker keys on', () => {
 
 // --- Poctivý vek polohy na vybranej karte -----------------------------------
 
+test('coverage snapshots keep last-known selection but exclude it from live counts and empty viewport clears contacts', () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { getElementById: () => null };
+  const record = makeRecord();
+  _setVesselOverlayHostForTest({ setEntries() {}, setVisible() {}, clearSource() {} });
+  _setVesselStateForTest({ viewer: {}, records: [record], selectedRecord: record });
+  try {
+    const snapshot = {
+      status: 'live', lastMessageAt: Date.now(), coverage: { omittedByLimit: 0 },
+      rows: [{ mmsi: record.mmsi, name: record.name, lat: 51.93, lon: 4.05,
+        last_position_epoch: Date.now() / 1000 - 3600, position_state: 'last-known' }],
+    };
+    _applyAisFeedSnapshotForTest({}, snapshot);
+    const stats = aisLiveVesselsLayer.getStats();
+    assert.equal(stats.count, 0);
+    assert.equal(stats.lastKnownCount, 1);
+    assert.equal(stats.stale, true);
+    assert.equal(aisLiveVesselsLayer.getSelectedInfo().mmsi, record.mmsi);
+    assert.deepEqual(aisLiveVesselsLayer.getAllPositions(), []);
+    assert.equal(aisLiveVesselsLayer.hasContact(record.mmsi), false);
+    _applyAisFeedSnapshotForTest({}, { ...snapshot, status: 'down', error: 'feed down', rows: [] });
+    assert.equal(_getVesselStateForTest().vesselCount, 1, 'an outage is not an authoritative empty viewport');
+    assert.equal(aisLiveVesselsLayer.getSelectedInfo().mmsi, record.mmsi);
+    // Pin misses remain bounded even for authoritative empty viewport snapshots.
+    for (let i = 0; i < 4; i++) _applyAisFeedSnapshotForTest({}, { ...snapshot, rows: [] });
+    assert.equal(_getVesselStateForTest().vesselCount, 0);
+    assert.equal(aisLiveVesselsLayer.getStats().error, null);
+  } finally {
+    _setVesselStateForTest({ enabled: false });
+    _setVesselOverlayHostForTest();
+    globalThis.document = originalDocument;
+  }
+});
+
 test('buildSelectedVesselCard: starý fix priznáva vek a od 10 min nesie STALE', () => {
   const nowMs = Date.parse('2026-07-27T11:34:33Z');
   // 12 minút po fixe → vek na karte + STALE, aj keď feed beží a
@@ -1696,6 +1732,7 @@ test('buildSelectedVesselCard: starý fix priznáva vek a od 10 min nesie STALE'
   }), nowMs);
   assert.deepEqual(old.details, [
     'CONTAINER SHIP · 14.5KT · 231°',
+    'AISStream · LAST KNOWN POSITION',
     // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI.
     'PA',
     'MMSI 353136000 · POS: 11:22:33Z (12 min) · STALE',
@@ -1837,6 +1874,7 @@ test('lode: pri pohľade na svet hustota namiesto šípok, bunky za obzorom zhas
   const densityPoints = new Cesium.BillboardCollection();
   _setVesselOverlayHostForTest(NOOP_HOST);
   _setVesselStateForTest({ viewer: { camera }, records: [near, near2, far], densityPoints });
+  _setVesselDensityEnabledForTest(true); // produkčne vypnutá — test agregáciu zapne
   try {
     _tickVesselRuntimeForTest(0);
     assert.equal(_getVesselLodStateForTest().densityMode, true, '9 000 km = hustota');
@@ -1861,6 +1899,7 @@ test('lode: pri pohľade na svet hustota namiesto šípok, bunky za obzorom zhas
     assert.equal(near.billboard.show, true, 'horizontový cull flotilu zase rozsvieti');
     assert.equal(far.billboard.show, false, 'Sydney ostáva za obzorom');
   } finally {
+    _setVesselDensityEnabledForTest(false);
     _setVesselOverlayHostForTest(null);
     _setVesselStateForTest({ enabled: false });
   }
@@ -1875,12 +1914,14 @@ test('lode: vybraná loď ostáva viditeľná aj v režime hustoty', () => {
   _setVesselStateForTest({
     viewer: { camera }, records: [picked, other], densityPoints, selectedRecord: picked,
   });
+  _setVesselDensityEnabledForTest(true); // produkčne vypnutá — test agregáciu zapne
   try {
     _tickVesselRuntimeForTest(0);
     assert.equal(_getVesselLodStateForTest().densityMode, true);
     assert.equal(picked.billboard.show, true, 'ako sledovaný stroj pri lietadlách');
     assert.equal(other.billboard.show, false);
   } finally {
+    _setVesselDensityEnabledForTest(false);
     _setVesselOverlayHostForTest(null);
     _setVesselStateForTest({ enabled: false });
   }
@@ -1952,4 +1993,31 @@ test('lode: tripwire — silueta trupu, 3D model zo ship.glb, handoff a upratova
     src, /viewer\.scene\.primitives\.remove\(state\.modelCollection\)/,
     'kolekcia modelov sa pri disable upráta',
   );
+});
+
+test('lode: hustota pri pohľade na svet je VYPNUTÁ (rozhodnutie používateľa, ako pri lietadlách)', () => {
+  // Pri 12 000 km sa 30 000 lodí zlialo do 147 buniek, 48 viditeľných, medián
+  // alfy 0,29 — „pár bodiek za celú hemisféru". Operátor chce jednotlivé lode.
+  assert.equal(VESSEL_DENSITY_ENABLED, false, 'hustota lodí je vypnutá');
+  const src = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  assert.match(src, /export const VESSEL_DENSITY_ENABLED = false;/, 'prepínač je produkčne vypnutý');
+  assert.match(src, /_vesselDensityEnabled \? densityModeActive\(/, 'prepínač je v bráne refreshVesselDensity');
+  // S vypnutým prepínačom ostáva flotila jednotlivá aj pri 9 000 km.
+  const camera = makeLodCamera(4.05, 51.93, 9_000_000);
+  const near = makeLodRecord('N1', 4.0, 51.9);
+  const densityPoints = new Cesium.BillboardCollection();
+  densityPoints.show = false; // ako ensureCollections — hustota štartuje zhasnutá
+  _setVesselOverlayHostForTest(NOOP_HOST);
+  _setVesselStateForTest({ viewer: { camera }, records: [near], densityPoints });
+  try {
+    _tickVesselRuntimeForTest(0);
+    assert.equal(_getVesselLodStateForTest().densityMode, false, 'žiadna hustota');
+    assert.equal(densityPoints.show, false);
+    assert.equal(densityPoints.length, 0, 'žiadne bunky');
+    assert.equal(near.billboard.show, true, 'loď ostáva jednotlivou ikonou');
+    assert.equal(_getVesselLodStateForTest().iconTier, 'micro', 'drobný stupeň, nie stena');
+  } finally {
+    _setVesselOverlayHostForTest(null);
+    _setVesselStateForTest({ enabled: false });
+  }
 });

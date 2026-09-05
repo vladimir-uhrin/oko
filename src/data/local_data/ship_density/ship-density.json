@@ -1,0 +1,36 @@
+{
+  "id": "ship-density",
+  "title": "Global Shipping Traffic Density (historical, 2015–2021)",
+  "source": "World Bank Data Catalog 0037580 · IMF World Seaborne Trade Monitoring System",
+  "license": "CC BY 4.0",
+  "period": "2015-01 to 2021-02",
+  "valueMeaning": "sum of AIS positions reported inside the cell (moving + stationary ships)",
+  "grid": {
+    "cols": 1440,
+    "rows": 680,
+    "cellDeg": 0.25,
+    "sourcePixelDeg": 0.005,
+    "blockPx": 50
+  },
+  "bounds": {
+    "west": -180.015311275,
+    "east": 179.984688725,
+    "north": 85.002647937,
+    "south": -84.997352063
+  },
+  "stats": {
+    "cellsNonzero": 595623,
+    "total": 656031894272591,
+    "max": 98712509773,
+    "ceilingPercentile": 0.995,
+    "ceiling": 39242280290,
+    "floorPercentile": 0.6,
+    "floor": 126365688,
+    "alphaGamma": 1.4
+  },
+  "built": "2026-09-05",
+  "zenodo": {
+    "url": "https://zenodo.org/records/16894236/files/shipdensity_global.zip?download=1",
+    "md5": "e8f98c56fa1306225b81558c0a23da21"
+  }
+}

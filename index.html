@@ -439,6 +439,28 @@
       </div>
     </div>
     <div class="pp-toggle-group">
+      <!-- Day/night terminator (2026-09-05): real sun lighting on the globe,
+           Flightradar-style. DEFAULT-ON, so the button ships lit (same
+           markup-carries-the-default convention as #models3d-toggle). Session
+           only — no share-link key, like the scope feather. Globe stacks only;
+           Google 3D photoreal has its shading baked in and hides the globe. -->
+      <button class="pp-toggle-btn active" id="daynight-toggle" aria-pressed="true" data-i18n-title="pp.daynight-title" title="Day/night — real sun lighting on the globe (terminator)">
+        <span class="pp-icon material-symbols-outlined" aria-hidden="true">wb_twilight</span>
+        <span class="pp-label" data-i18n="pp.daynight-label">Day/Night</span>
+      </button>
+    </div>
+    <div class="pp-toggle-group">
+      <!-- Flat map (2026-09-05): morphs the scene to Cesium's 2D Web Mercator
+           canvas. DEFAULT-OFF (the globe is the product), session only. In the
+           flat map 3D models flatten, tilt/cinematic camera are 3D-only and
+           photoreal tiles do not render; horizon cull / icon rotation / camera
+           pose signature carry 2D guards in iconOrientation.js. -->
+      <button class="pp-toggle-btn" id="flatmap-toggle" aria-pressed="false" data-i18n-title="pp.flatmap-title" title="Flat map — 2D Mercator canvas instead of the globe">
+        <span class="pp-icon material-symbols-outlined" aria-hidden="true">map</span>
+        <span class="pp-label" data-i18n="pp.flatmap-label">Flat map</span>
+      </button>
+    </div>
+    <div class="pp-toggle-group">
       <button class="pp-toggle-btn active" id="scope-toggle" data-i18n-title="pp.scope-title" title="Scope — the circular viewport mask" aria-pressed="true">
         <span class="pp-icon material-symbols-outlined" aria-hidden="true">adjust</span>
         <span class="pp-label" data-i18n="pp.scope-label">Scope</span>

@@ -264,6 +264,10 @@ export const EN_STRINGS = Object.freeze({
   'pp.outside-aria': 'Detection opacity outside the keyhole',
   'pp.outside-title': 'World-overlay label and card opacity beyond the fade distance',
   'pp.models3d-title': '3D aircraft — flat icons zoomed out, 3D models up close',
+  'pp.daynight-title': 'Day/night — real sun lighting on the globe (terminator); globe basemaps only',
+  'pp.daynight-label': 'Day/Night',
+  'pp.flatmap-title': 'Flat map — 2D Mercator canvas instead of the globe (3D models flatten, no tilt)',
+  'pp.flatmap-label': 'Flat map',
   'pp.models': 'Models',
   'pp.models-aria': '3D model coverage',
   'pp.models-proximity': 'Proximity',
@@ -334,6 +338,13 @@ export const EN_STRINGS = Object.freeze({
   'shipping.lane-major': 'Major Shipping Route',
   'shipping.lane-middle': 'Secondary Shipping Route',
   'shipping.lane-minor': 'Minor Shipping Route',
+  // Historical ship density (World Bank / IMF, 2015–2021) — MODELLED, never live
+  'layer.local-ship-density.name': 'Historical Ship Density',
+  'shipdensity.historical': 'HISTORICAL, not live',
+  // Historical air-traffic density (adsb.lol, one day) — MODELLED, never live
+  'layer.local-air-density.name': 'Historical Air Traffic Density',
+  'airdensity.historical': 'HISTORICAL, not live',
+  'airdensity.bridged': 'ocean gaps interpolated',
 
   // Aircraft category filter chips under the flight layers (2026-09-03).
   'aircraft.category.commercial': 'AIRLINERS',
@@ -952,6 +963,10 @@ export const SK_STRINGS = Object.freeze({
   'pp.outside-aria': 'Priehľadnosť detekcie mimo priezoru',
   'pp.outside-title': 'Priehľadnosť štítkov a kariet za hranicou tlmenia',
   'pp.models3d-title': '3D lietadlá — z diaľky ploché ikony, zblízka 3D modely',
+  'pp.daynight-title': 'Deň/noc — skutočné osvetlenie glóbusu Slnkom (terminátor); len mapové podklady glóbusu',
+  'pp.daynight-label': 'Deň/noc',
+  'pp.flatmap-title': 'Plátno — plochá 2D mapa (Mercator) namiesto gule (3D modely sa sploštia, bez náklonu)',
+  'pp.flatmap-label': 'Plátno',
   'pp.models': 'Modely',
   'pp.models-aria': 'Pokrytie 3D modelmi',
   'pp.models-proximity': 'Blízke',
@@ -1022,6 +1037,13 @@ export const SK_STRINGS = Object.freeze({
   'shipping.lane-major': 'Hlavná námorná trasa',
   'shipping.lane-middle': 'Sekundárna námorná trasa',
   'shipping.lane-minor': 'Vedľajšia námorná trasa',
+  // Historická hustota lodí (World Bank / IMF, 2015–2021) — MODELOVANÉ, nikdy živé
+  'layer.local-ship-density.name': 'Historická hustota lodí',
+  'shipdensity.historical': 'HISTORICKÉ, nie živé',
+  // Historická hustota letov (adsb.lol, jeden deň) — MODELOVANÉ, nikdy živé
+  'layer.local-air-density.name': 'Historická hustota letov',
+  'airdensity.historical': 'HISTORICKÉ, nie živé',
+  'airdensity.bridged': 'medzery nad oceánom interpolované',
 
   // Čipy filtra kategórií pod leteckými vrstvami (2026-09-03).
   'aircraft.category.commercial': 'DOPRAVNÉ',

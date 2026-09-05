@@ -157,9 +157,13 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   assert.equal(validateLayerStateRegistry(), true);
   // Zámerné zmeny pinu (2026-09-02): 18 → 19 + 'local-airports' (token 'p',
   // letecký balík 2); 19 → 20 + 'local-ports' (token 'o', World Port Index);
-  // 20 → 21 + 'local-shipping-lanes' (token 'k', Global Shipping Lanes).
-  assert.equal(REGISTERED_LAYER_IDS.length, 21);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 21);
+  // 20 → 21 + 'local-shipping-lanes' (token 'k', Global Shipping Lanes);
+  // 21 → 22 + 'local-ship-density' (token 'n', World Bank/IMF historická
+  // hustota lodí 2015–2021 — modelovaná, nie živá);
+  // 22 → 23 + 'local-air-density' (token 'j', adsb.lol historická hustota
+  // letov, jeden deň — modelovaná, nie živá).
+  assert.equal(REGISTERED_LAYER_IDS.length, 23);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 23);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),

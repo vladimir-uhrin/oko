@@ -117,7 +117,7 @@ export function createShippingLanesLayer({ url = dataUrl, fetchImpl = null } = {
           id: `${SHIPPING_LANES_LAYER_ID}:${feature.id}`,
           layerId: SHIPPING_LANES_LAYER_ID,
           layerName: t('layer.local-shipping-lanes.name'),
-          source: 'CIA World Oceans · Public Domain',
+          source: 'P. Benden — z CIA World Oceans · CC BY 4.0',
           dataSource: _dataSource,
           label: shippingLanesLabel(properties),
           properties,
@@ -142,7 +142,7 @@ export function createShippingLanesLayer({ url = dataUrl, fetchImpl = null } = {
     id: SHIPPING_LANES_LAYER_ID,
     name: 'Námorné koridory',
     icon: '∿',
-    source: 'CIA World Oceans · Public Domain',
+    source: 'P. Benden — z CIA World Oceans · CC BY 4.0',
     updateInterval: 60 * 60 * 1000,
 
     init(viewer) {

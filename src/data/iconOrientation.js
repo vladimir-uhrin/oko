@@ -50,6 +50,10 @@ const _scratchWorldForward = new Cesium.Cartesian3();
  * @returns {number|null} Rotation in radians, or `previous` when unknown.
  */
 export function screenProjectedRotation(scene, position, courseDeg, previous = null) {
+  // Plátno: sever je vždy hore (Cesium 2D nedovolí otočiť kameru), takže
+  // rotácia = kurz. Konvencia nižšie: r = atan2(-dx, -dy) pri (dx,dy) =
+  // (sin c, -cos c) dáva r = -c.
+  if (isFlatScene(scene)) return -Cesium.Math.toRadians(courseDeg || 0);
   const camera = scene?.camera;
   if (!camera?.rightWC || !camera?.upWC || !position) return previous;
 
@@ -101,6 +105,30 @@ export function stabilizeScreenRotation(
 }
 
 const _occluder = new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, new Cesium.Cartesian3());
+
+// ── Plátno (SceneMode.SCENE2D, 2026-09-05) ────────────────────────────────
+// V plochom režime niet odvrátenej strany, kamera nemá heading/pitch/roll
+// (Cesium vracia undefined → `.toFixed` zhodil renderer z každého per-frame
+// ticku) a rightWC/upWC sú projekčné osi. Všetky tri helpery nižšie majú
+// preto guard; jediný zdroj pravdy o režime je scéna (alebo ortografický
+// frustum kamery tam, kde helper scénu nedostáva).
+
+/** Je scéna v plochom režime (2D plátno)? */
+export function isFlatScene(scene) {
+  return scene?.mode === Cesium.SceneMode.SCENE2D;
+}
+
+/** Je kamera 2D (ortografický frustum) — pre helpery bez prístupu k scéne. */
+export function isFlatCamera(camera) {
+  return camera?.frustum instanceof Cesium.OrthographicOffCenterFrustum;
+}
+
+/** Occluder pre plátno: všetko je viditeľné, rovnaké rozhranie ako EllipsoidalOccluder. */
+const _flatOccluder = Object.freeze({
+  cameraPosition: null,
+  isPointVisible: () => true,
+  isScaledSpacePointVisible: () => true,
+});
 
 /**
  * Half-width of the crossfade band centred on the ellipsoid silhouette, in
@@ -224,6 +252,9 @@ export function skyBackdropFactor(cameraPosition, position, featherRad = HORIZON
  * @returns {Cesium.EllipsoidalOccluder}
  */
 export function horizonOccluder(camera) {
+  // Plátno: positionWC je projekčná súradnica, elipsoidný test by bol nezmysel
+  // — a odvrátená strana neexistuje, všetko je legitímne viditeľné.
+  if (isFlatCamera(camera)) return _flatOccluder;
   _occluder.cameraPosition = camera.positionWC;
   return _occluder;
 }
@@ -236,6 +267,9 @@ export function horizonOccluder(camera) {
  */
 export function cameraPoseSignature(camera) {
   const p = camera.positionWC;
+  // V plátne Cesium vracia heading/pitch/roll ako undefined — `.toFixed` na
+  // nich zhodil renderer (nález 2026-09-05). Nefinitný uhol = pomlčka.
+  const ang = (v) => (Number.isFinite(v) ? v.toFixed(3) : '-');
   return `${Math.round(p.x / 10)}:${Math.round(p.y / 10)}:${Math.round(p.z / 10)}:` +
-    `${camera.heading.toFixed(3)}:${camera.pitch.toFixed(3)}:${camera.roll.toFixed(3)}`;
+    `${ang(camera.heading)}:${ang(camera.pitch)}:${ang(camera.roll)}`;
 }

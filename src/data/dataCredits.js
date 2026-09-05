@@ -251,6 +251,20 @@ export const DATA_CREDITS = [
       '— P. Benden, derived from the CIA World Oceans map ' +
       '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, modified)',
   },
+  {
+    key: 'ship-density',
+    html:
+      'Historical ship density 2015–2021: ' +
+      '<a href="https://datacatalog.worldbank.org/search/dataset/0037580/Global-Shipping-Traffic-Density" target="_blank" rel="noopener">World Bank / IMF Global Shipping Traffic Density</a> ' +
+      '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, downsampled to 0.25° — modelled, not live)',
+  },
+  {
+    key: 'air-density',
+    html:
+      'Historical air-traffic density (one day): ' +
+      '<a href="https://github.com/adsblol/globe_history_2026" target="_blank" rel="noopener">adsb.lol globe_history</a> — adsb.lol feeders ' +
+      '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> / CC0, 10-s samples counted into 0.25°, ocean coverage gaps bridged along great circles — modelled, not live)',
+  },
 ];
 
 /**

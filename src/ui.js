@@ -1,5 +1,7 @@
 import * as Cesium from 'cesium';
 import { t } from './i18n.js';
+import { applyGlobeLighting } from './globeLighting.js';
+import { applySceneMode } from './sceneMode.js';
 import { retroShader } from './styles/retro.js';
 import { animeShader } from './styles/anime.js';
 import { noirShader } from './styles/noir.js';
@@ -2635,6 +2637,14 @@ export class StyleManager {
     // button and the armed layer in agreement.
     this._models3dEnabled = true;
     this._models3dMode = 'proximity'; // 'proximity' (nearest in view) | 'all' (every in-view plane)
+    // Deň/noc (terminátor) — DEFAULT-ON, session-only (bez share-link kľúča,
+    // ako priezor). Tlačidlo v index.html nesie `active`; _initDayNightToggle
+    // ho zosúladí so scénou hneď pri štarte.
+    this._dayNightBtn = document.getElementById('daynight-toggle');
+    this._dayNightEnabled = true;
+    // Plátno (2D Mercator) — DEFAULT-OFF, guľa je produkt. Session-only.
+    this._flatMapBtn = document.getElementById('flatmap-toggle');
+    this._flatMapEnabled = false;
 
     // The shared world-overlay host must own its one postRender lane before
     // detection and tracked-readout initialize. It stays transparent until a
@@ -2686,6 +2696,8 @@ export class StyleManager {
     this._initResetGlobeButton();
     this._initHUDToggle();
     this._initModels3dToggle();
+    this._initDayNightToggle();
+    this._initFlatMapToggle();
     this._applyGlobalPostDefaults();
     // Až PO factory defaults: explicitná uložená voľba detekcie ich má
     // na čistom boote prebiť, nie nimi byť prepísaná.
@@ -10223,6 +10235,60 @@ export class StyleManager {
     // tech reported was an unpressed-looking control over an armed layer.
     // Mirrors #scope-toggle, which has always carried aria-pressed.
     this._models3dBtn?.setAttribute('aria-pressed', String(this._models3dEnabled));
+  }
+
+  /**
+   * Deň/noc — skutočné osvetlenie glóbusu Slnkom (terminátor ako na
+   * Flightradare). Jediný zapisovač je applyGlobeLighting (globeLighting.js):
+   * príznak + ladenie vzdialeností (pod 1 500 km vypnuté, nech mesto ostane
+   * čitateľné vo dne; od 4 000 km naplno). Platí len pre glóbus — Google 3D
+   * fotoreál má tiene zapečené a glóbus skrytý, tam je prepínač neškodný.
+   */
+  _initDayNightToggle() {
+    if (!this._dayNightBtn) return;
+    this._dayNightBtn.addEventListener('click', () => {
+      this._setDayNightEnabled(!this._dayNightEnabled);
+    });
+    // Markup nesie default (active) — scéna ho musí dostať hneď pri štarte,
+    // inak by svietilo tlačidlo nad neosvetleným glóbusom.
+    this._setDayNightEnabled(this._dayNightEnabled);
+  }
+
+  _setDayNightEnabled(enabled) {
+    this._dayNightEnabled = !!enabled;
+    applyGlobeLighting(this.viewer?.scene, this._dayNightEnabled);
+    this._syncDayNightButtonState();
+  }
+
+  _syncDayNightButtonState() {
+    this._dayNightBtn?.classList.toggle('active', this._dayNightEnabled);
+    // Rovnako ako #models3d-toggle / #scope-toggle: farba pre vidiaceho,
+    // aria-pressed pre čítačku obrazovky.
+    this._dayNightBtn?.setAttribute('aria-pressed', String(this._dayNightEnabled));
+  }
+
+  /**
+   * Plátno — morph scény na 2D Mercator a späť (sceneMode.js drží hold
+   * render governora počas morfu, inak by scéna ostala v MORPHING).
+   * Default OFF: guľa je produkt. Session-only, bez share-link kľúča.
+   */
+  _initFlatMapToggle() {
+    if (!this._flatMapBtn) return;
+    this._flatMapBtn.addEventListener('click', () => {
+      this._setFlatMapEnabled(!this._flatMapEnabled);
+    });
+    this._syncFlatMapButtonState();
+  }
+
+  _setFlatMapEnabled(enabled) {
+    this._flatMapEnabled = !!enabled;
+    applySceneMode(this.viewer?.scene, this._flatMapEnabled);
+    this._syncFlatMapButtonState();
+  }
+
+  _syncFlatMapButtonState() {
+    this._flatMapBtn?.classList.toggle('active', this._flatMapEnabled);
+    this._flatMapBtn?.setAttribute('aria-pressed', String(this._flatMapEnabled));
   }
 
   _initHUDToggle() {
