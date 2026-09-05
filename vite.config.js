@@ -27,6 +27,7 @@
  */
 
 import fs from 'node:fs';
+import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -1322,12 +1323,12 @@ const AISSTREAM_DEFAULT_MESSAGE_TYPES = [
   'StaticDataReport',
 ];
 const AISSTREAM_CACHE_MAX = 50000;
-const AISSTREAM_STALE_MS = 30 * 60 * 1000;
+const AISSTREAM_STALE_MS = AIS_RETAIN_MS;
 /** Minimum gap between full retention sweeps (see shouldPruneAisCache). The
  *  sweep is O(cache); running it per message under the worldwide bounding box
  *  was millions of map iterations per second inside the ws message handler.
- *  5 s is far below the 30 min retention window, so nothing is served stale
- *  because of the throttle — `aisStreamRows` filters by age on read anyway. */
+ *  5 s is far below the retention window; coverage selection filters by
+ *  measurement age on every read independently of the sweep. */
 const AISSTREAM_PRUNE_INTERVAL_MS = 5_000;
 /** Epoch ms of the last retention sweep (0 = never swept). */
 let _aisStreamLastPruneAt = 0;
@@ -5290,7 +5291,11 @@ function aisLiveProxy() {
         }
 
         const maxRows = clampInt(incoming.searchParams.get('maxRows'), 1, AISSTREAM_CACHE_MAX, AISSTREAM_CACHE_MAX);
-        const rows = aisStreamRows(maxRows);
+        const { rows, coverage } = selectAisCoverage(_aisStreamVessels.values(), {
+          limit: maxRows,
+          bounds: parseAisBounds(incoming.searchParams.get('bbox')),
+          selected: incoming.searchParams.get('selected'),
+        });
 
         const feed = aisStreamStatusSnapshot();
 
@@ -5299,6 +5304,8 @@ function aisLiveProxy() {
         res.setHeader('Cache-Control', 'no-store');
         res.end(JSON.stringify({
           rows,
+          coverage: { ...coverage, cacheCapacity: AISSTREAM_CACHE_MAX, cacheAtCapacity: _aisStreamVessels.size >= AISSTREAM_CACHE_MAX,
+            subscriptionBounds: parseJsonEnv('AISSTREAM_BOUNDING_BOXES', AISSTREAM_DEFAULT_BBOXES) },
           source: 'AISStream',
           status: feed.status,
           error: feed.error,
@@ -6918,11 +6925,16 @@ function ingestAisStreamEnvelope(envelope) {
       eta: aisEtaLabel(message.Eta),
     }, _aisStreamStatic.get(mmsi));
     _aisStreamStatic.set(mmsi, staticData);
+    if (_aisStreamStatic.size > AISSTREAM_CACHE_MAX) {
+      _aisStreamStatic.delete(_aisStreamStatic.keys().next().value);
+    }
     mergeAisStaticIntoLiveVessel(mmsi, staticData);
   }
 
-  const lat = numberValue(metadata.latitude ?? metadata.Latitude ?? message.Latitude);
-  const lon = numberValue(metadata.longitude ?? metadata.Longitude ?? message.Longitude);
+  // Static envelope metadata repeats an older fix; it must never refresh it.
+  if (!isAisPositionMessage(messageType)) return true;
+  const lat = numberValue(message.Latitude ?? metadata.latitude ?? metadata.Latitude);
+  const lon = numberValue(message.Longitude ?? metadata.longitude ?? metadata.Longitude);
   // A positionless but well-formed record (static data) is still the feed
   // delivering AIS traffic, so it counts as liveness. `aisPositionUsable`
   // range-checks rather than finiteness-checks: AIS encodes "position not
@@ -6932,11 +6944,11 @@ function ingestAisStreamEnvelope(envelope) {
 
   const staticData = _aisStreamStatic.get(mmsi) || {};
   const previous = _aisStreamVessels.get(mmsi);
-  // Sticky kinematics. Static messages carry no Sog/Cog/TrueHeading, yet
-  // AISStream attaches lat/lon metadata to EVERY envelope — so this row write
-  // is reached by static reports too, and a plain read blanked a moving
-  // vessel's speed and course. Sentinels (102.3 kn / 360° / 511) are treated
-  // as absent instead of being published as measurements.
+  const rawFixTime = metadata.time_utc ?? metadata.TimeUtc;
+  if (!acceptsAisFix(messageType, rawFixTime, previous)) return true;
+  const fixTime = aisMeasuredTime(rawFixTime);
+  // Position-message kinematics remain sticky when a report uses an AIS
+  // unavailable sentinel (102.3 kn / 360° / 511).
   const { speed, course, heading } = mergeAisKinematics({
     sog: message.Sog ?? message.SOG,
     cog: message.Cog ?? message.COG,
@@ -6982,7 +6994,7 @@ function ingestAisStreamEnvelope(envelope) {
     // Use the AIS message's own report time, not server ingest wall-clock —
     // trail spacing and dead reckoning depend on true fix epochs.
     last_position_epoch: aisEpochSeconds(metadata.time_utc ?? metadata.TimeUtc),
-    _updatedAt: Date.now(),
+    _updatedAt: fixTime,
   });
 
   appendAisTrackSample(mmsi, lat, lon, aisEpochSeconds(metadata.time_utc ?? metadata.TimeUtc));
@@ -7121,16 +7133,6 @@ function vesselTypeFromAis(message, staticData = {}) {
   );
 }
 
-function aisStreamRows(maxRows) {
-  const cutoff = Date.now() - AISSTREAM_STALE_MS;
-  const rows = [];
-  for (const row of _aisStreamVessels.values()) {
-    if (row._updatedAt >= cutoff) rows.push(row);
-  }
-  rows.sort((a, b) => b._updatedAt - a._updatedAt);
-  return rows.slice(0, maxRows).map(({ _updatedAt, ...row }) => row);
-}
-
 function pruneAisStreamCache() {
   _aisStreamLastPruneAt = Date.now();
   const cutoff = Date.now() - AISSTREAM_STALE_MS;
@@ -7152,8 +7154,9 @@ function pruneAisStreamCache() {
     if (pending.epochSec < pendingCutoffSec) _aisStreamTrackPending.delete(mmsi);
   }
   if (_aisStreamVessels.size <= AISSTREAM_CACHE_MAX) return;
-  const ordered = [..._aisStreamVessels.entries()].sort((a, b) => a[1]._updatedAt - b[1]._updatedAt);
-  for (const [mmsi] of ordered.slice(0, _aisStreamVessels.size - AISSTREAM_CACHE_MAX)) {
+  const keep = new Set(selectAisCoverage(_aisStreamVessels.values(), { limit: AISSTREAM_CACHE_MAX }).rows.map(row => row.mmsi));
+  for (const [mmsi] of _aisStreamVessels) {
+    if (keep.has(mmsi)) continue;
     _aisStreamVessels.delete(mmsi);
     _aisStreamTracks.delete(mmsi);
     _aisStreamTrackPending.delete(mmsi);
@@ -7162,7 +7165,8 @@ function pruneAisStreamCache() {
 }
 
 function newestAisPositionAt(rows) {
-  return rows[0]?.last_position_UTC || null;
+  const newest = rows.reduce((best, row) => !best || aisFixTime(row) > aisFixTime(best) ? row : best, null);
+  return newest?.last_position_UTC || null;
 }
 
 // ---------------------------------------------------------------------------
