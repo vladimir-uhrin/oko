@@ -209,7 +209,11 @@ export function createCableOverlayPublisher({
 const CABLE_GLOBE_STACK_IDS = Object.freeze(
   // 'stadia-dark' (2026-09-03) je bežný glóbusový raster podklad ako OSM —
   // Cesium globe je viditeľný, takže pozemné úseky káblov sa naň kreslia.
-  new Set(['bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'ugkk-ortofoto']),
+  // 'gibs-truecolor' (2026-09-05) je rovnaký prípad: denná satelitná mozaika
+  // NASA GIBS je raster na Cesium glóbuse, takže pozemné úseky káblov naň patria.
+  // 'gibs-blue-marble' a 'aster-relief' (2026-09-06): statické NASA rastre na
+  // Cesium glóbuse — ten istý prípad ako gibs-truecolor.
+  new Set(['bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto']),
 );
 
 /**

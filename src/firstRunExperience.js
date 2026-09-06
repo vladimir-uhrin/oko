@@ -118,9 +118,10 @@ export const FIRST_RUN_MISSIONS = Object.freeze({
   }),
   environmental: Object.freeze({
     kind: 'globe',
-    // Live USGS earthquakes AND NASA FIRMS active fires. The launcher optimizes
+    // Earthquakes, NASA FIRMS active fires and NASA EONET volcanic events.
+    // The launcher optimizes
     // for the FULLY CONFIGURED experience (product decision, 2026-08-23): the tile
-    // promises both, so it turns on both, and the subcopy in index.html says so.
+    // promises all three, so it enables all three; index.html names them.
     //
     // Keyless, FIRMS is honest where it counts — its own layer row reads
     // "UNAVAILABLE · NASA FIRMS · LIVE · KEY REQUIRED", and the quakes half of
@@ -131,7 +132,7 @@ export const FIRST_RUN_MISSIONS = Object.freeze({
     // machine shared by every layer and not a thing to refactor the night
     // before a launch. LEDGERED post-launch. Until it lands, keyless visitors
     // are judged on the layer row, which tells them the truth.
-    layerIds: Object.freeze(['earthquakes', 'local-firms']),
+    layerIds: Object.freeze(['earthquakes', 'local-firms', 'volcanoes']),
     busyText: t('first-run.busy.environmental'),
   }),
   explore: Object.freeze({ kind: 'none' }),

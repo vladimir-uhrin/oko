@@ -265,6 +265,39 @@ export function tafCardLines(report, nowMs) {
  * @param {number} [nowMs] Epoch ms teraz.
  * @returns {string[]}
  */
+/**
+ * Surový záznam METAR zo synchrónnej cache (null kým nič nevieme alebo pri
+ * zlyhaní). Karta z neho stavia zhrnutie v ľudskej reči (metarSummary.js).
+ * @param {string|null} station
+ * @returns {object|null}
+ */
+export function cachedMetarReport(station) {
+  const entry = station ? _cache.get(station) : null;
+  return entry?.report && typeof entry.report === 'object' ? entry.report : null;
+}
+
+export function cachedMetarWind(station) {
+  const report = station ? _cache.get(station)?.report : null;
+  if (!report) return null;
+  const speedKt = Number(report.wspd);
+  const dirRaw = report.wdir;
+  const dirDeg = Number(dirRaw);
+  return {
+    dirDeg: Number.isFinite(dirDeg) ? dirDeg : null,
+    speedKt: Number.isFinite(speedKt) ? speedKt : null,
+    gustKt: Number.isFinite(Number(report.wgst)) ? Number(report.wgst) : null,
+    // 'VRB' (premenlivý smer) je platný stav, nie chýbajúci údaj.
+    variable: !Number.isFinite(dirDeg) && String(dirRaw ?? '').toUpperCase().includes('VRB'),
+  };
+}
+
+/**
+ * Riadky METAR sekcie karty zo synchrónnej cache ('' kým nič nevieme).
+ * Overlay copy letísk ich číta pri prebuild-e entry po výbere.
+ * @param {string|null} station 4-znakový kód stanice.
+ * @param {number} [nowMs] Epoch ms teraz.
+ * @returns {string[]}
+ */
 export function cachedMetarCardLines(station, nowMs = Date.now()) {
   const entry = station ? _cache.get(station) : null;
   if (!entry) return [];
@@ -304,7 +337,10 @@ export async function requestAirportMetar(station, {
     // TAF prišiel v TOM ISTOM zázname (`taf=true` v proxy), takže sa len
     // pripojí — žiadne druhé čakanie, žiadny druhý stav cache.
     const lines = metarCardLines(report, nowMs).concat(tafCardLines(report, nowMs));
+    // Surový záznam ostáva v cache pre kartu letiska: vietor z neho kŕmi odhad
+    // aktívnej dráhy (runwayWind.js) — žiadny druhý dopyt, žiadny druhý stav.
     _cache.set(station, {
+      report,
       // Prázdna odpoveď je poctivý stav: stanica nehlási — nie chyba.
       lines: lines.length ? lines : ['NO METAR'],
       at: nowMs,

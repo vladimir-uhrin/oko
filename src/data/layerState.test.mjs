@@ -17,6 +17,7 @@ import {
   validateLayerStateRegistry,
 } from './layerState.js';
 import radioLayer from './radio.js';
+import { createVolcanoesLayer } from './volcanoes.js';
 import { stampInitialShareGesture } from '../navigationPolicy.js';
 
 function deferred() {
@@ -162,8 +163,13 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   // hustota lodí 2015–2021 — modelovaná, nie živá);
   // 22 → 23 + 'local-air-density' (token 'j', adsb.lol historická hustota
   // letov, jeden deň — modelovaná, nie živá).
-  assert.equal(REGISTERED_LAYER_IDS.length, 23);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 23);
+  // 23 → 24: NASA EONET volcanoes (token 'v').
+  // 24 → 25: NASA EONET natural events — búrky, povodne, zosuvy, sucho, prach,
+  // sneh, teplotné extrémy, ľad, požiare na čip (token 'l', 2026-09-05).
+  // 25 → 30: NASA GIBS prekryvy nad podkladom — teplota mora '1', zrážky '2',
+  // sneh '3', aerosól '4', morský ľad '5' (číslice: písmená došli, 2026-09-06).
+  assert.equal(REGISTERED_LAYER_IDS.length, 30);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 30);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),
@@ -191,6 +197,18 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   assert.equal(qaManager.layers.has('radio'), true);
   assert.equal(await qaManager.unregisterForQa('radio'), true);
   assert.equal(qaManager.layers.has('radio'), false);
+});
+
+test('volcano runtime registration seals successfully and survives URL and stored-state round trips', () => {
+  const manager = new DataLayerManager({});
+  for (const id of REGISTERED_LAYER_IDS.filter(id => id !== 'volcanoes')) manager.register(fakeLayer(id));
+  manager.register(createVolcanoesLayer());
+  assert.equal(manager.finalizeRegistrations(LAYER_STATE_REGISTRY), true);
+  const state = normalizeLayerState({ enabledLayerIds: ['earthquakes', 'local-firms', 'volcanoes'] });
+  assert.deepEqual(state.enabledLayerIds, ['earthquakes', 'local-firms', 'volcanoes']);
+  assert.deepEqual(decodeLayerStateParams(new URLSearchParams(encode(state))), state);
+  assert.deepEqual(parseStoredLayerState(serializeStoredLayerState(state)), state);
+  assert.deepEqual(decodeLayerStateParams(new URLSearchParams('v=2&l=v')).enabledLayerIds, ['volcanoes']);
 });
 
 test('v2 codec distinguishes absent from empty and keeps canonical deterministic ordering', () => {

@@ -26,6 +26,30 @@ import * as Cesium from 'cesium';
  * @type {{ key: string, html: string }[]}
  */
 export const DATA_CREDITS = [
+  {
+    key: 'airport-cameras',
+    html: 'Airport live cameras: official <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube</a> embedded players — curated streams by <a href="https://www.youtube.com/@SlowTVLive" target="_blank" rel="noopener">SlowTV (Prague)</a> and <a href="https://www.youtube.com/@AirlineVideosLivePlus" target="_blank" rel="noopener">AirlineVideosLive+ (LAX)</a>, plus optional YouTube Data API lookup; provider terms apply',
+  },
+  {
+    key: 'nasa-gibs-overlays',
+    html: 'Satellite overlays (sea surface temperature, precipitation, snow cover, aerosol, sea ice): <a href="https://www.earthdata.nasa.gov/engage/open-data-services-software/earthdata-developer-portal/gibs-api" target="_blank" rel="noopener">NASA EOSDIS GIBS / Worldview</a> — daily science mosaics (GHRSST MUR, GPM IMERG, MODIS), open NASA data; the day of each mosaic is shown in the layer row',
+  },
+  {
+    key: 'nasa-eonet-volcanoes',
+    html: 'Reported volcanic events: <a href="https://eonet.gsfc.nasa.gov/" target="_blank" rel="noopener">NASA EONET</a> — curated event metadata with original source references; not an eruption warning service',
+  },
+  {
+    key: 'osm-volcanoes',
+    html: 'Volcano details (elevation, type, status, Wikipedia link): <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> (ODbL 1.0), bundled snapshot of named volcano nodes',
+  },
+  {
+    key: 'nasa-eonet-natural-events',
+    html: 'Natural events (storms, floods, landslides, drought, dust, snow, temperature extremes, sea ice, wildfires): <a href="https://eonet.gsfc.nasa.gov/" target="_blank" rel="noopener">NASA EONET</a> — curated event metadata with original source references; not a warning service',
+  },
+  {
+    key: 'wikimedia-earthquake-area-photos',
+    html: 'Earthquake area illustrations: <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a> via Wikipedia — individual CC BY / CC BY-SA / CC0 / public-domain licenses, with author, license and file link on each card',
+  },
   // ── Live sources ────────────────────────────────────────────────
   {
     key: 'opensky',
@@ -102,6 +126,12 @@ export const DATA_CREDITS = [
   {
     key: 'usgs',
     html: 'Earthquakes: Data courtesy of the U.S. Geological Survey',
+  },
+  {
+    key: 'emsc',
+    html: 'Earthquake catalog: <a href="https://www.emsc-csem.org" target="_blank" rel="noopener">EMSC/CSEM</a> · '
+      + '<a href="https://www.seismicportal.eu/fdsn-wsevent.html" target="_blank" rel="noopener">SeismicPortal</a> '
+      + '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>; normalized and associated by OKO)',
   },
   {
     key: 'overpass',
@@ -264,6 +294,24 @@ export const DATA_CREDITS = [
       'Historical air-traffic density (one day): ' +
       '<a href="https://github.com/adsblol/globe_history_2026" target="_blank" rel="noopener">adsb.lol globe_history</a> — adsb.lol feeders ' +
       '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a> / CC0, 10-s samples counted into 0.25°, ocean coverage gaps bridged along great circles — modelled, not live)',
+  },
+  {
+    key: 'flag-icons',
+    html:
+      'Country flags: <a href="https://github.com/lipis/flag-icons" target="_blank" rel="noopener">flag-icons</a> ' +
+      '(MIT, ISO 3166-1 set bundled)',
+  },
+  {
+    key: 'wikimedia-airport-photos',
+    html:
+      'Airport photos: <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener">Wikimedia Commons</a> via the Wikipedia API — ' +
+      'each image under its own free licence (CC BY / CC BY-SA / public domain), author and licence shown under the photo',
+  },
+  {
+    key: 'planespotters',
+    html:
+      'Aircraft photos: <a href="https://www.planespotters.net/" target="_blank" rel="noopener">Planespotters.net</a> Photo API — ' +
+      '© the credited photographers; each thumbnail links to its photo page',
   },
 ];
 

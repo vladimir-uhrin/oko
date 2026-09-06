@@ -1,6 +1,22 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
-import { AIRPORTS_LAYER_ID, airportImportance, airportOverlayCopy } from './airportsData.js';
+import {
+  AIRPORTS_LAYER_ID,
+  airportCompactLabel,
+  airportImportance,
+  airportOverlayCopy,
+  airportShortCode,
+  airportTitleFlag,
+} from './airportsData.js';
+import {
+  labelVisibleInTier,
+  localLabelTier,
+  pointStyleForTier,
+  pointVisibleInTier,
+  stemVisibleInTier,
+} from './localLabelLod.js';
+import { isAirportCardOpen } from './airportCard.js';
+import { LOCAL_MARKER_BASE_PX } from './localMarkerIcons.js';
 import { PORTS_LAYER_ID, portImportance, portOverlayCopy } from './portsData.js';
 import { cachedMetarCardLines, metarStationId } from './airportWeather.js';
 import {
@@ -59,11 +75,32 @@ const DEFAULT_OVERLAY_HOST = Object.freeze({
  * @param {string} layerId Local layer id.
  * @returns {{title:string,details:string[]}}
  */
-export function localInfrastructureOverlayCopy(properties, layerId) {
+export function localInfrastructureOverlayCopy(properties, layerId, tier = 'full') {
   const props = unwrapProperties(properties) || {};
   const tags = props.tags || {};
   const title = featureLabelFromProperties(props, layerId);
   const details = [];
+  let titleFlag = null;
+
+  // Vzdialené stupne (localLabelLod.js): text sa krátí, nie zmenšuje. Pri
+  // pohľade na kontinent stačí kód, o stupeň bližšie kód s mestom; plná karta
+  // patrí až priblíženiu, kde sa má do čoho čítať.
+  if (tier === 'code' || tier === 'compact') {
+    if (layerId === AIRPORTS_LAYER_ID) {
+      return {
+        title: tier === 'code' ? airportShortCode(props) : airportCompactLabel(props),
+        details: [],
+        // Vlajka pri holom kóde je šum; pri jednoriadkovej karte pomáha.
+        titleFlag: tier === 'compact' ? airportTitleFlag(props) : null,
+      };
+    }
+    const shortCode = layerId === PORTS_LAYER_ID ? clampLabel(cleanLabel(props.locode)) : '';
+    return {
+      title: (tier === 'code' && shortCode) ? shortCode : title,
+      details: [],
+      titleFlag: null,
+    };
+  }
 
   if (layerId === 'local-datacenters') {
     const operator = firstClean([
@@ -94,8 +131,9 @@ export function localInfrastructureOverlayCopy(properties, layerId) {
       details.push(clampCardLine(river));
     }
   } else if (layerId === AIRPORTS_LAYER_ID) {
-    // Kódy + tier, potom mesto/krajina/výška — formát drží airportsData.js
-    // (jeden kontrakt pre build aj kartu).
+    // Kódy + mesto, potom slovný typ + výška v m — formát drží airportsData.js
+    // (jeden kontrakt pre build aj kartu); vlajka štátu pred názvom.
+    titleFlag = airportTitleFlag(props);
     for (const line of airportOverlayCopy(props)) details.push(clampCardLine(line));
     // METAR sekcia zo synchrónnej cache — plní ju klik (onFeatureSelected →
     // requestAirportMetar → refreshEntry). Ambient karty bez kliku nemajú
@@ -107,7 +145,7 @@ export function localInfrastructureOverlayCopy(properties, layerId) {
     for (const line of portOverlayCopy(props)) details.push(clampCardLine(line));
   }
 
-  return { title, details };
+  return { title, details, titleFlag };
 }
 
 /**
@@ -129,14 +167,16 @@ export function createLocalInfrastructureOverlayEntry({
   properties,
   priority,
   accent,
+  tier = 'full',
 }) {
-  const copy = localInfrastructureOverlayCopy(properties, layerId);
+  const copy = localInfrastructureOverlayCopy(properties, layerId, tier);
   return {
     id: String(id),
     source: layerId,
     position,
     variant: 'card',
     title: copy.title,
+    titleFlag: copy.titleFlag ?? null,
     details: copy.details,
     accent,
     priority,
@@ -302,6 +342,13 @@ export function createLocalGeoJsonLayer({
   labels = true,
   labelMax = DEFAULT_LABEL_MAX,
   labelGridPx = DEFAULT_LABEL_GRID_PX,
+  // Stupne popisu podľa priblíženia (localLabelLod.js). Zapína sa per vrstvu:
+  // dáva zmysel tam, kde je bodov veľa a majú vlastnú dôležitosť (letiská,
+  // prístavy). Malé vrstvy (priehrady, dátové centrá) ostávajú plné.
+  labelLod = false,
+  // Piktogram značky na mape (localMarkerIcons.js): (farba) => data URI.
+  // Bez neho ostáva holá bodka — pre vrstvy bez zaužívanej značky.
+  markerImage = null,
   overlayHost = DEFAULT_OVERLAY_HOST,
   screenSpaceEventHandlerFactory = (canvas) => new Cesium.ScreenSpaceEventHandler(canvas),
   projectToWindow = (scene, position) => Cesium.SceneTransforms.worldToWindowCoordinates(scene, position),
@@ -312,6 +359,9 @@ export function createLocalGeoJsonLayer({
   onFeatureSelected = null,
 }) {
   let _dataSource = null;
+  const _markerImageUri = typeof markerImage === 'function' ? markerImage(color) : (markerImage || null);
+  /** @type {'full'|'compact'|'code'|'hidden'} Posledný stupeň popisu (hysteréza). */
+  let _labelTier = 'full';
   let _enabled = false;
   let _clickHandler = null;
   let _count = 0;
@@ -519,6 +569,9 @@ export function createLocalGeoJsonLayer({
             // Store references for bounded stem scaling and native picking.
             feature.__localBaseCarto = carto;
             feature.__localBaseCartesian = base;
+            // Stupne pre karty, ktoré počítajú z polohy (miestny čas letiska).
+            feature.__localLat = Cesium.Math.toDegrees(carto.latitude);
+            feature.__localLon = Cesium.Math.toDegrees(carto.longitude);
             registerEntityContext(feature, {
               id: `${id}:${recordId}`,
               layerId: id,
@@ -541,15 +594,28 @@ export function createLocalGeoJsonLayer({
               width: 3.5,
               material: new Cesium.ColorMaterialProperty(baseColor),
             });
-            feature.point = new Cesium.PointGraphics({
-              pixelSize: 10,
-              color: baseColor,
-              outlineColor: Cesium.Color.BLACK,
-              outlineWidth: 2,
-              // Never depth-cull the anchor against the photoreal mesh —
-              // globe-horizon culling is handled by the pre-render occluder.
-              disableDepthTestDistance: Number.POSITIVE_INFINITY,
-            });
+            if (markerImage) {
+              // Piktogram namiesto bodky (2026-09-05): lietadlo/kotva v kruhu.
+              // Stupne (localLabelLod) ho škálujú cez billboard.scale.
+              feature.billboard = new Cesium.BillboardGraphics({
+                image: _markerImageUri,
+                width: LOCAL_MARKER_BASE_PX,
+                height: LOCAL_MARKER_BASE_PX,
+                verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              });
+            } else {
+              feature.point = new Cesium.PointGraphics({
+                pixelSize: 10,
+                color: baseColor,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                // Never depth-cull the anchor against the photoreal mesh —
+                // globe-horizon culling is handled by the pre-render occluder.
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              });
+            }
 
             const priority = labelPriorityFromProperties(properties, id);
             _stemRecords.push({
@@ -565,6 +631,7 @@ export function createLocalGeoJsonLayer({
               groundSampled: false,
               lastGroundSampleMs: 0,
               priority,
+              importance: labelImportanceFromProperties(properties, id),
               entry: labels ? createLocalInfrastructureOverlayEntry({
                 id: recordId,
                 layerId: id,
@@ -690,11 +757,17 @@ export function createLocalGeoJsonLayer({
           _lastGroundSampleCapability = canSampleGround;
           let groundRetryPending = false;
           let groundSampleProgress = false;
+          // Jeden výpočet stupňa na prechod (hysterézny, drží sa v _labelTier).
+          if (labelLod) {
+            _labelTier = localLabelTier(viewer.camera.positionCartographic?.height, _labelTier);
+          }
+          // Zdvih značky nad zem má zmysel len tam, kde sa kreslí stopka.
+          const stemLift = !labelLod || stemVisibleInTier(_labelTier);
           for (let i = 0; i < _stemRecords.length; i++) {
             const record = _stemRecords[i];
             const wasGroundSampled = record.groundSampled;
             if (refreshStemGeometry) {
-              updateLocalStemGeometry(viewer, record, now);
+              updateLocalStemGeometry(viewer, record, now, null, stemLift);
             } else if (canSampleGround && !record.groundSampled
               && now - record.lastGroundSampleMs >= GROUND_SAMPLE_RETRY_MS) {
               // Capability first: without it the distance below is pure waste,
@@ -702,7 +775,7 @@ export function createLocalGeoJsonLayer({
               const distance = Cesium.Cartesian3.distance(viewer.camera.positionWC, record.base);
               if (distance < GROUND_SAMPLE_MAX_DISTANCE_M
                 && sampleLocalGroundHeight(viewer, record, now)) {
-                updateLocalStemGeometry(viewer, record, now, distance);
+                updateLocalStemGeometry(viewer, record, now, distance, stemLift);
               }
             }
             if (!wasGroundSampled && record.groundSampled) groundSampleProgress = true;
@@ -719,9 +792,54 @@ export function createLocalGeoJsonLayer({
                 < GROUND_SAMPLE_MAX_DISTANCE_M) {
               groundRetryPending = true;
             }
-            const isVisible = occluder.isPointVisible(record.base);
+            let isVisible = occluder.isPointVisible(record.base);
+            // Stupne platia aj pre GEOMETRIU, nielen pre text: pri pohľade na
+            // svet zaplnilo 6 889 bodov s 10 px krúžkom a 3,5 px stopkou celý
+            // glóbus aj bez jediného popisu (nález 2026-09-05). Vybraný objekt
+            // je výnimka — nesmie zmiznúť pod otvorenou kartou.
+            if (labelLod && isVisible && record.entity !== viewer.selectedEntity) {
+              isVisible = pointVisibleInTier(_labelTier, record.importance);
+            }
             if (record.entity.show !== isVisible) record.entity.show = isVisible;
-            if (isVisible && record.entry) visibleOverlayRecords.push(record);
+            if (labelLod && isVisible && _labelTier !== record.geometryTier) {
+              const style = pointStyleForTier(_labelTier);
+              if (record.entity.point) {
+                record.entity.point.pixelSize = style.pixelSize;
+                record.entity.point.outlineWidth = style.outlineWidth;
+              }
+              // Piktogram: rovnaká krivka ako bodka, len ako mierka (10 px = 1.0).
+              if (record.entity.billboard) record.entity.billboard.scale = style.pixelSize / 10;
+              // Stopka je nástroj na ukotvenie do terénu zblízka; vo výške je
+              // to čiara cez pol glóbusu.
+              if (record.entity.polyline) record.entity.polyline.show = stemVisibleInTier(_labelTier);
+              // Zdvih sa mení so stopkou: bez nej značka sadá na zem HNEĎ,
+              // nie až pri ďalšom pohybe kamery.
+              updateLocalStemGeometry(viewer, record, now, null, stemLift);
+              record.geometryTier = _labelTier;
+            }
+            // Stupeň popisu: ktoré objekty text vôbec dostanú a koľko ho bude.
+            // Prebudovanie entry je lenivé — len pre záznam, ktorý sa práve
+            // ide publikovať, takže cena rastie s obrazovkou, nie s datasetom.
+            if (labelLod) {
+              if (!labelVisibleInTier(_labelTier, record.importance)) continue;
+              if (record.entry && record.entryTier !== _labelTier) {
+                record.entry = createLocalInfrastructureOverlayEntry({
+                  id: record.id,
+                  layerId: id,
+                  position: record.tip,
+                  properties: propertyObject(record.entity),
+                  priority: record.priority,
+                  accent: color,
+                  tier: _labelTier,
+                });
+                record.entryTier = _labelTier;
+              }
+            }
+            // Vybrané letisko s otvorenou DOM kartou (airportCard.js) svoju
+            // ambientnú kartu nekreslí — dve karty o tom istom letisku vedľa
+            // seba boli šum (2026-09-05). Po zavretí sa vráti ďalším prechodom.
+            const hiddenBehindCard = id === AIRPORTS_LAYER_ID && record.entity === viewer.selectedEntity && isAirportCardOpen();
+            if (isVisible && record.entry && !hiddenBehindCard) visibleOverlayRecords.push(record);
           }
           _stemGeometryDirty = false;
           // Tiles ARE streaming in: real progress re-opens the give-up budget
@@ -823,7 +941,7 @@ function sampleLocalGroundHeight(viewer, record, now) {
   return true;
 }
 
-function updateLocalStemGeometry(viewer, record, now, knownDistance = null) {
+function updateLocalStemGeometry(viewer, record, now, knownDistance = null, lift = true) {
   const distance = Number.isFinite(knownDistance)
     ? knownDistance
     : Cesium.Cartesian3.distance(viewer.camera.positionWC, record.base);
@@ -833,7 +951,14 @@ function updateLocalStemGeometry(viewer, record, now, knownDistance = null) {
   const fov = viewer.camera.frustum.fov || (Math.PI / 3);
   const targetPx = 65;
   const fovFactor = 2 * Math.tan(fov / 2) * (targetPx / canvasHeight);
-  const tipHeight = record.groundHeight + effectiveDistance * fovFactor;
+  // Zdvih drží značku ~65 px nad zemou, aby bola vidieť stopka a značka
+  // nezapadla do terénu. Rastie LINEÁRNE so vzdialenosťou kamery, takže pri
+  // pohľade na svet je to vyše 2 000 km nad povrchom — a značky sa vysypali
+  // mimo gule, aj za jej okraj (nález 2026-09-05: „nesmú sa dostať body mimo
+  // gule"). Keď je stopka skrytá, zdvih nemá čo držať: značka sadá na zem.
+  const tipHeight = lift
+    ? record.groundHeight + effectiveDistance * fovFactor
+    : record.groundHeight;
   Cesium.Cartesian3.fromRadians(
     record.carto.longitude,
     record.carto.latitude,
@@ -888,6 +1013,23 @@ function labelPriorityFromProperties(props, layerId) {
   if (layerId === AIRPORTS_LAYER_ID) score += airportImportance(props);
   if (layerId === PORTS_LAYER_ID) score += portImportance(props);
   return score;
+}
+
+/**
+ * Vlastná dôležitosť objektu pre stupne popisu (localLabelLod.js) — ČISTÁ
+ * škála vrstvy (letiská a prístavy zhodne 300/150/60), nie zložené skóre
+ * z `labelPriorityFromProperties`. To pripočítava 1 000 za samotnú existenciu
+ * názvu, takže malé letisko malo 1 150 a hranicu 300 prešlo úplne rovnako ako
+ * hub (nájdené naživo 2026-09-05: pri pohľade na kontinent svietili aj poľné
+ * letiská). Vrstva bez vlastnej škály sa dôležitosťou nefiltruje.
+ * @param {object} props
+ * @param {string} layerId
+ * @returns {number}
+ */
+function labelImportanceFromProperties(props, layerId) {
+  if (layerId === AIRPORTS_LAYER_ID) return airportImportance(props);
+  if (layerId === PORTS_LAYER_ID) return portImportance(props);
+  return Number.POSITIVE_INFINITY;
 }
 
 function propertyObject(entity) {

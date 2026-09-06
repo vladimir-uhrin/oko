@@ -3098,3 +3098,21 @@ test('a layer that surrenders its row controls hides the block entirely', async 
     else globalThis.document = originalDocument;
   }
 });
+test('natural hazards share one card and preserve each independent layer row and toggle', async () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { createElement: makeControlElement };
+  const mgr = new DataLayerManager({});
+  try {
+    for (const id of ['earthquakes', 'flights', 'local-firms', 'volcanoes']) mgr.register({
+      id, name: id, icon: '', source: 'fixture', updateInterval: -1,
+      init() {}, enable() {}, disable() {}, update() {}, getStats: () => ({ count: 3 }),
+    });
+    const container = makeControlElement(); mgr.buildTogglePanel(container);
+    const group = container.children.find(node => node.className === 'natural-hazards-card');
+    assert.ok(group); assert.equal(container.children.length, 2);
+    assert.deepEqual(group.children.filter(node => node.dataset.layerId).map(node => node.dataset.layerId), ['earthquakes', 'local-firms', 'volcanoes']);
+    await mgr.setEnabled('volcanoes', true);
+    assert.equal(mgr.isEnabled('volcanoes'), true); assert.equal(mgr.isEnabled('earthquakes'), false); assert.equal(mgr.isEnabled('local-firms'), false);
+    await mgr.setEnabled('volcanoes', false);
+  } finally { if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument; }
+});

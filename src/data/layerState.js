@@ -280,6 +280,13 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'cctv', token: 'c', disposition: 'enabled+options', optionOwner: 'cctv' }),
   Object.freeze({ id: 'earthquakes', token: 'e', disposition: 'enabled-only' }),
   Object.freeze({ id: 'flights', token: 'f', disposition: 'enabled+options', optionOwner: 'flights' }),
+  // NASA GIBS prekryvy (2026-09-06): písmená a–y sú obsadené, tokeny sú
+  // číslice — regex registra ich pripúšťa. Krytie sa do odkazu neukladá.
+  Object.freeze({ id: 'gibs-aerosol', token: '4', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'gibs-precip', token: '2', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'gibs-sea-ice', token: '5', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'gibs-snow', token: '3', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'gibs-sst', token: '1', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-air-density', token: 'j', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-airports', token: 'p', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-dams', token: 'q', disposition: 'enabled-only' }),
@@ -292,12 +299,14 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'military', token: 'm', disposition: 'enabled+mirrored-options', optionOwner: 'flights' }),
   Object.freeze({ id: 'military-awareness', token: 'g', disposition: 'enabled-only' }),
   Object.freeze({ id: 'military-installations', token: 'i', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'natural-events', token: 'l', disposition: 'enabled-only' }),
   Object.freeze({ id: 'radio', token: 'r', disposition: 'enabled+options', optionOwner: 'radio' }),
   Object.freeze({ id: 'rocket-launches', token: 'x', disposition: 'enabled-only' }),
   Object.freeze({ id: 'satellites', token: 's', disposition: 'enabled+options', optionOwner: 'satellites' }),
   Object.freeze({ id: 'shmu-radar', token: 'h', disposition: 'enabled-only' }),
   Object.freeze({ id: 'telegeography-submarine-cables', token: 'u', disposition: 'enabled-only' }),
   Object.freeze({ id: 'traffic', token: 't', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'volcanoes', token: 'v', disposition: 'enabled-only' }),
 ]);
 
 export const REGISTERED_LAYER_IDS = Object.freeze(LAYER_STATE_REGISTRY.map((entry) => entry.id));

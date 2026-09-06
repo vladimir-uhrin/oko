@@ -271,3 +271,26 @@ test('civilian and military trail heads use the lower-centre model anchor and we
       `${name} keeps diffuse texture contribution weak through code-side MIX`);
   }
 });
+
+test('tracked entry factory passes card decorations through and leaves text-only models bare (2026-09-05)', () => {
+  const entity = {
+    gevTrackedId: 'flights:3c6444',
+    gevDisplayPosition: () => null,
+    gevLabelModel: {
+      title: 'DLH1',
+      details: ['FL350 · 450 kts'],
+      accent: '#39d0ff',
+      titleFlag: 'de',
+      route: { origin: { label: 'FRA Frankfurt', iso2: 'de' }, destination: { label: 'JFK New York', iso2: 'us' } },
+      progress: { fraction: 0.4, label: '40 % · ETA 4:10' },
+    },
+  };
+  const entry = createTrackedOverlayEntry(entity);
+  assert.equal(entry.titleFlag, 'de');
+  assert.deepEqual(entry.route, entity.gevLabelModel.route);
+  assert.deepEqual(entry.progress, entity.gevLabelModel.progress);
+  const bare = createTrackedOverlayEntry({ ...entity, gevLabelModel: trackedLabelModelFromText('SAT · 400 km') });
+  assert.equal(bare.titleFlag, null);
+  assert.equal(bare.route, null);
+  assert.equal(bare.progress, null);
+});

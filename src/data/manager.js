@@ -1,4 +1,6 @@
 import { governorRequestRender } from '../renderGovernor.js';
+import { createNaturalHazardsPanel, hazardsSummary, isNaturalHazardLayer } from './naturalHazardsPanel.js';
+import { createGibsOverlayPanel, gibsOverlaySummary, isGibsOverlayLayer } from './gibsOverlayPanel.js';
 import { t } from '../i18n.js';
 import { markDetectionSourcesChanged } from './detection.js';
 function cloneLayerParams(value) {
@@ -2036,6 +2038,8 @@ export class DataLayerManager {
   _renderToggles() {
     if (!this._toggleContainer) return;
     this._toggleContainer.innerHTML = '';
+    let hazardsPanel = null;
+    let gibsPanel = null;
 
     for (const layer of this.getAll()) {
       if (!layer.showInTogglePanel) continue;
@@ -2107,7 +2111,20 @@ export class DataLayerManager {
         this._syncRowControls(controls, layer);
       }
 
-      this._toggleContainer.appendChild(row);
+      if (isNaturalHazardLayer(layer.id)) {
+        if (!hazardsPanel) {
+          hazardsPanel = createNaturalHazardsPanel(document, this.getAll());
+          this._toggleContainer.appendChild(hazardsPanel);
+        }
+        hazardsPanel.appendChild(row);
+      } else if (isGibsOverlayLayer(layer.id)) {
+        // Skupina „Zem zo satelitu (NASA)" — rovnaký vzor ako hrozby.
+        if (!gibsPanel) {
+          gibsPanel = createGibsOverlayPanel(document, this.getAll());
+          this._toggleContainer.appendChild(gibsPanel);
+        }
+        gibsPanel.appendChild(row);
+      } else this._toggleContainer.appendChild(row);
     }
   }
 
@@ -2219,6 +2236,18 @@ export class DataLayerManager {
       }
 
       this._syncRowControls(row.querySelector('.data-toggle-controls'), layer);
+    }
+    // Živý súhrn skupiny „Prírodné hrozby" — táto cesta obnovuje riadky na
+    // mieste, takže prvok mimo riadkov by ostal z prvého buildu (2026-09-05).
+    const hazardsLine = this._toggleContainer.querySelector('.natural-hazards-card:not(.gibs-overlay-card) > p');
+    if (hazardsLine) {
+      const text = hazardsSummary(this.getAll());
+      if (hazardsLine.textContent !== text) hazardsLine.textContent = text;
+    }
+    const gibsLine = this._toggleContainer.querySelector('.gibs-overlay-card > p');
+    if (gibsLine) {
+      const text = gibsOverlaySummary(this.getAll());
+      if (gibsLine.textContent !== text) gibsLine.textContent = text;
     }
   }
 

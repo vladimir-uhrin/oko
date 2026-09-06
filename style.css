@@ -36,6 +36,47 @@
   box-sizing: border-box;
 }
 
+/* ── Posuvníky ────────────────────────────────────
+   2026-09-05 (používateľ: „oprav aj lišty nech to sedí k style a jemné"):
+   pri úzkom okne prepne adaptívne rozloženie panelové lišty na scrollovanie
+   a Windows dovtedy nakreslil cez tmavé UI natívnu bielu lištu — cez pol
+   obrazovky. Tu je jeden tlmený vzhľad pre celé rozhranie: tenký, priehľadná
+   dráha, tlmený akcent, ktorý zosilnie až pod kurzorom.
+
+   Zámerne najnižšia špecificita (`*` a bezselektorové ::-webkit-*): existujúce
+   pravidlá, ktoré posuvník ZÁMERNE skrývajú (.button-grid, .location-pills,
+   #param-slider-panel) alebo si ho kreslia po svojom (.data-toggle-list), majú
+   vyššiu špecificitu a ostávajú nedotknuté. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 212, 255, 0.28) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 255, 0.24);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 255, 0.45);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -1372,6 +1413,25 @@ body.scene-playback-mode #lang-switch {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);
   cursor: not-allowed;
+}
+
+/* Rad variantov rodiny podkladov (NASA): pod hlavnou lištou, len keď je
+   aktívny člen rodiny (mapStackChips.js renderMapStackVariants). */
+.map-stack-variant-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  padding-left: 6px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.map-stack-variant-row[hidden] {
+  display: none;
+}
+.map-stack-chip--variant {
+  flex: 1 1 0;
+  padding: 3px 6px;
+  font-size: 8px;
+  letter-spacing: 0.4px;
 }
 
 .map-stack-chip-req {
@@ -9297,7 +9357,7 @@ body.scene-playback-mode #radar-legend {
   top: 0;
   left: 0;
   z-index: 60;
-  max-width: 260px;
+  max-width: 320px;
   padding: 6px 9px;
   background: rgba(10, 14, 18, 0.88);
   border: 1px solid var(--glass-border);
@@ -9323,6 +9383,479 @@ body.scene-playback-mode #radar-legend {
   font-size: 9px;
   letter-spacing: 0.5px;
   color: var(--text-secondary);
+}
+
+.contact-hover-card-flag {
+  display: inline-block;
+  width: 12px;
+  height: 9px;
+  margin-right: 5px;
+  vertical-align: -1px;
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+/* Bohatá kartička (2026-09-05, „chcem to mouse over"): trasa s vlajkami,
+   kreslený progres, riadok o dátach a fotka — rovnaká reč ako karta
+   sledovaného letu. Kartička myš nechytá, iba odkaz s fotkou (viď modul). */
+.contact-hover-card-route {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.contact-hover-card-route .contact-hover-card-flag {
+  margin-right: 1px;
+}
+
+.contact-hover-card-route-arrow {
+  margin: 0 2px;
+}
+
+.contact-hover-card-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.contact-hover-card-progress-bar {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.contact-hover-card-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.contact-hover-card.is-military .contact-hover-card-progress-fill {
+  background: #ffb800;
+}
+
+.contact-hover-card-footer {
+  margin-top: 3px;
+  font-size: 8.5px;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.contact-hover-card-photo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--glass-border);
+  text-decoration: none;
+  /* Jediná časť kartičky, ktorá myš chytá — nech sa dá fotka kliknuť
+     (podmienka Planespotters: náhľad vedie na stránku fotky). */
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.contact-hover-card-photo img {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.contact-hover-card-photo-credit {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 1.35;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.contact-hover-card-photo:hover .contact-hover-card-photo-credit {
+  color: var(--text-primary);
+}
+
+/* Karta letiska po kliknutí (2026-09-05): identita s vlajkou, rádio,
+   dráhy, počasie, premávka, odkazy. Ukotvená k premietnutému bodu letiska. */
+.airport-card {
+  position: fixed;
+  top: 0;
+  left: 0;
+  /* Nad panelmi (100/110), pod command dockom (145) a toastom (200): karta je
+     popover, ktorý používateľ otvoril klikom, nesmie sa schovať za panel. */
+  z-index: 120;
+  width: 340px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 10px 12px 10px;
+  background: rgba(10, 14, 18, 0.9);
+  border: 1px solid var(--glass-border);
+  border-left: 2px solid #ff66d4;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.airport-card-figure {
+  margin: 0 0 8px;
+}
+
+.airport-card-photo {
+  display: block;
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.airport-card-photo-credit {
+  display: block;
+  margin-top: 3px;
+  font-size: 8.5px;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.airport-card-photo-credit:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.airport-card-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 15px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.airport-card-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.airport-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding-right: 22px;
+}
+
+.airport-card-flag {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.airport-card-title {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-primary);
+}
+
+.airport-card-sub {
+  margin-top: 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+}
+
+.airport-card-time.is-night {
+  color: #ff66d4;
+}
+
+.airport-card-active-runway {
+  color: var(--text-primary);
+}
+
+.airport-card-section {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.airport-card-section-title {
+  margin: 0 0 3px;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: #ff66d4;
+}
+
+.airport-card-line,
+.airport-card-muted {
+  margin-top: 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+}
+
+.airport-card-muted {
+  opacity: 0.7;
+}
+
+/* Karta prírodnej udalosti (naturalEventCard.js): farebný pásik kategórie,
+   riadok názvu s odznakom kategórie cyklónu, popis zložený z dát. */
+.nev-card-stripe {
+  height: 3px;
+  border-radius: 3px;
+  margin: 0 0 6px;
+  opacity: 0.9;
+}
+
+.nev-card-titlerow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nev-card-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  border: 1px solid currentColor;
+}
+
+.nev-card-description {
+  line-height: 1.45;
+  opacity: 0.92;
+}
+
+.nev-card-coverage {
+  margin-top: 6px;
+  font-size: 8.5px;
+  opacity: 0.6;
+}
+
+/* Počasie v ľudskej reči (metarSummary.js): glyf + titulok + odznak kategórie,
+   surový METAR/TAF pod rozbaľovacím riadkom. */
+.airport-card-wx-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+}
+
+.airport-card-wx-glyph {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  opacity: 0.92;
+}
+
+.airport-card-wx-headline {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  line-height: 1.35;
+}
+
+/* Farby ako na leteckých mapách: VFR zelená, MVFR modrá, IFR červená, LIFR magenta. */
+.airport-card-wx-badge {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  border: 1px solid currentColor;
+  color: #9fb3c4;
+  cursor: help;
+}
+
+.airport-card-wx-badge.is-vfr { color: #4ade80; }
+.airport-card-wx-badge.is-mvfr { color: #60a5fa; }
+.airport-card-wx-badge.is-ifr { color: #f87171; }
+.airport-card-wx-badge.is-lifr { color: #ff66d4; }
+
+.airport-card-wx-stale {
+  color: #ffb347;
+  opacity: 0.9;
+}
+
+.airport-card-wx-toggle {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 8.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: rgba(232, 234, 237, 0.55);
+  cursor: pointer;
+}
+
+.airport-card-wx-toggle:hover,
+.airport-card-wx-toggle:focus-visible {
+  color: #e8eaed;
+  outline: none;
+}
+
+.airport-card-wx-raw {
+  font-family: var(--font-mono, inherit);
+  opacity: 0.8;
+}
+
+.airport-card-freq {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: 8px;
+  row-gap: 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+}
+
+.airport-card-freq-type {
+  color: var(--text-primary);
+}
+
+.airport-card-freq-desc {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.airport-card-freq-mhz {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.airport-card-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.airport-card-audio {
+  display: block;
+  width: 100%;
+  height: 28px;
+  margin-top: 4px;
+  filter: invert(0.9) hue-rotate(180deg) saturate(0.6);
+}
+
+.airport-card-stream-label {
+  margin-top: 5px;
+  color: var(--text-primary);
+}
+
+.airport-card-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+  color: #ff66d4;
+  text-decoration: none;
+}
+
+.airport-card-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+/* Fotka sledovaného lietadla (2026-09-05): DOM odkaz ukotvený pod kartou
+   sledovaného letu. Podmienky Planespotters: obyčajný <a> na stránku fotky,
+   meno fotografa ako viditeľný text pri obrázku. */
+.tracked-photo {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 59;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  box-sizing: border-box;
+  padding: 7px 10px 8px;
+  /* Rovnaké pozadie ako karta (worldOverlayTokens background) — pás sadá na
+     spodok karty, prekrýva jej zaoblenie a číta ako jej ďalší riadok. */
+  background: rgba(6, 12, 18, 0.84);
+  border-radius: 0 0 5px 5px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* `display: flex` prebíja UA pravidlo pre atribút [hidden] — bez tohto
+   riadku ostal prázdny pás natrvalo v ľavom hornom rohu obrazovky
+   (nález 2026-09-05: biely rámik pri logu). Platí pre KAŽDÝ prvok, ktorý
+   sa skrýva cez `hidden` a má vlastný display. */
+.tracked-photo[hidden] {
+  display: none;
+}
+
+.tracked-photo.is-above {
+  border-radius: 5px 5px 0 0;
+}
+
+.tracked-photo-image {
+  display: block;
+  flex: 0 0 auto;
+  width: 96px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tracked-photo-credit {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.35;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  /* Meno fotografa je podmienka zdroja — radšej dva-tri riadky než výpustka. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tracked-photo:hover .tracked-photo-credit {
+  color: var(--text-primary);
 }
 
 /* Toast s akciou (2026-09-03): núdzový squawk sa dá kliknúť a skočiť na
@@ -9443,3 +9976,89 @@ body.scene-playback-mode #radar-legend {
   letter-spacing: 0.8px;
   color: var(--text-dim);
 }
+.earthquake-hover-card {
+  position: fixed; z-index: 210; width: min(370px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px); overflow: auto; overscroll-behavior: contain;
+  padding: 18px; color: #e8edf3; background: rgba(13, 20, 29, .97);
+  border: 1px solid rgba(255, 173, 86, .4); border-radius: 14px;
+  box-shadow: 0 12px 40px #0008; font: 12px/1.5 var(--font-sans);
+  pointer-events: auto; overflow-wrap: anywhere;
+}
+.earthquake-hover-card[hidden] { display: none; }
+.earthquake-hover-card h3 { margin: 4px 24px 8px 0; font-size: 16px; line-height: 1.3; }
+.earthquake-hover-card a { color: #9adfff; text-decoration: underline; text-underline-offset: 2px; }
+.earthquake-hover-mag { color: #ffb366; font: 600 22px var(--font-mono); }
+.earthquake-hover-close { position:absolute; right:10px; top:8px; width:28px; height:28px; border:0; background:transparent; color:#e8edf3; font-size:24px; cursor:pointer; }
+.earthquake-hover-note { color: #a9b5c3; font-size: 11px; margin: 8px 0; }
+.earthquake-hover-solution { border-top: 1px solid #ffffff18; padding-top: 10px; margin-top: 10px; }
+.earthquake-hover-card dl { display: grid; grid-template-columns: 105px 1fr; gap: 3px 10px; margin-top: 6px; }
+.earthquake-hover-card dt { color: #a9b5c3; }
+.earthquake-hover-card dd { margin: 0; font-variant-numeric: tabular-nums; }
+.earthquake-hover-photo { margin-top: 12px; font-size: 10px; color: #a9b5c3; }
+.earthquake-hover-photo img { display: block; width: 100%; height: 150px; object-fit: cover; border-radius: 8px; margin-bottom: 7px; }
+/* Skupina „Prírodné hrozby" v paneli vrstiev (2026-09-05): sekcia v jazyku
+   panelu — mono nadpis s rozostupom ako .panel-title, tenké deliace čiary,
+   riadky ostávajú bežné .data-toggle-row. Žiadna cudzia oranžová škatuľa. */
+.natural-hazards-card {
+  margin: 6px 0 4px;
+  padding: 8px 0 2px;
+  border: 0;
+  border-top: 1px solid rgba(0, 212, 255, 0.14);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.14);
+  background: transparent;
+}
+
+.natural-hazards-card > h3 {
+  margin: 0 10px 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.natural-hazards-card > p {
+  margin: 0 10px 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.natural-hazards-card > .data-toggle-row + .data-toggle-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0;
+}
+/* Skupina „Zem zo satelitu (NASA)" (gibsOverlayPanel.js) nesie tú istú triedu
+   .natural-hazards-card ako alias — jeden štýl sekcie, dve skupiny. Dve
+   skupiny za sebou zdieľajú deliacu čiaru, nech nie je dvojitá. */
+.natural-hazards-card + .natural-hazards-card {
+  border-top: 0;
+  margin-top: 0;
+}
+/* Živá kamera letiska (airportCameras.js): oficiálny vložený prehrávač YouTube,
+   16:9, jeden trvalý <iframe> prežíva 2-s prekreslenia karty. */
+.airport-card-camera[hidden] { display: none; }
+.airport-card-camera iframe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 6px;
+  background: #000;
+  margin: 4px 0 6px;
+}
+.airport-card-camera-credit {
+  font-size: 8.5px;
+  letter-spacing: 0.4px;
+  opacity: 0.7;
+}
+.airport-card-camera-credit a { color: inherit; }
+
+.airport-card-player { padding-bottom: 12px; }
+.airport-card-player[hidden] { display: none; }
+.airport-card-player audio { width: 100%; margin: 8px 0; }
+.airport-card-player audio[hidden] { display: none; }

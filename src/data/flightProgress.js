@@ -123,11 +123,19 @@ function truncateName(name) {
  * @param {?{origin: {code?: string, name?: string}, destination: {code?: string, name?: string}}} route
  * @returns {string}
  */
+/**
+ * Jedna strana trasy: `CDG Paris` (kód + skrátené mesto), '' keď niet čo. Pure.
+ * Zdieľané kartou (riadok s vlajkami letísk) aj textovým riadkom trasy.
+ * @param {?{code?: string, name?: string}} airport
+ * @returns {string}
+ */
+export function routeSideLabel(airport) {
+  return [String(airport?.code || '').trim(), truncateName(airport?.name)].filter(Boolean).join(' ');
+}
+
 export function formatRouteLine(route) {
-  const side = (airport) => [String(airport?.code || '').trim(), truncateName(airport?.name)]
-    .filter(Boolean).join(' ');
-  const from = side(route?.origin);
-  const to = side(route?.destination);
+  const from = routeSideLabel(route?.origin);
+  const to = routeSideLabel(route?.destination);
   if (!from && !to) return '';
   return `${from} → ${to}`;
 }

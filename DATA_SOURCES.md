@@ -1,5 +1,60 @@
 # Data Sources & Attribution
 
+## Airport audio source investigation (2026-09-06)
+
+The radio card is audio-only following the user's request. There are currently
+**zero bundled direct audio sources**; user-configured audio remains supported.
+[Broadcastify terms](https://www.broadcastify.com/terms/) sections 8–9 require
+a separate license for embedding/programmatic access. The
+[Purdue KLAF operator](https://turkeyland.net/projects/klaf/) requires permission
+for use on other websites. Neither was integrated or represented as available.
+LiveATC.net — link only remains unchanged.
+
+**Live airport cameras — ACTIVE since 2026-09-06** (`src/data/airportCameras.js`,
+card section "Live camera"). Two sources, both rendered ONLY through the official
+[YouTube embedded player](https://developers.google.com/youtube/player_parameters)
+on the privacy-enhanced `youtube-nocookie.com` domain — no download, proxy,
+rebroadcast or audio extraction; provider branding, controls and live status stay
+with the provider; the player is unloaded when the card closes or the airport changes:
+
+1. **Curated catalogue** (below) — hand-verified IDs, re-checked with
+   `node scripts/check-airport-cameras.mjs` (keyless: oEmbed + `isLiveNow` /
+   `playableInEmbed` on the public watch page). IDs die when a stream restarts;
+   the script's exit code says so.
+2. **Automatic lookup — YouTube Data API v3 `search.list` (`eventType=live`)**
+   via the server proxy `/api/youtube-live` (key `YOUTUBE_API_KEY` in `.env`,
+   server-side only; keyless → 503 `{error:'no_key'}` and the card stays silent).
+   [YouTube API Services Terms](https://developers.google.com/youtube/terms/api-services-terms-of-service)
+   + [Developer Policies](https://developers.google.com/youtube/terms/developer-policies):
+   API data is shown next to the official player (required YouTube attribution is
+   the player itself), cached ≤ 6 h (well inside the 30-day storage limit), one
+   `search.list` (100 quota units) per airport per 6 h with a proxy-side daily cap
+   of 80 searches (8 000 of the free 10 000 units/day), negative results cached
+   30 min. The result is heuristically ranked (`pickLiveCamera`) and labelled in
+   the card as "found automatically — verify it matches this airport"; wrong
+   matches are a known limitation, not hidden.
+
+Curated entries (each is a third-party live stream under YouTube/provider terms):
+
+- **Prague / LKPR:** [SlowTV](https://www.youtube.com/watch?v=kuOmmVkOGN8).
+  The provider description explicitly includes pilots' communication with the
+  control tower; camera views cover runway 06/24.
+- **Los Angeles / KLAX:** [AirlineVideosLive+](https://www.youtube.com/watch?v=KzsNnyN8D_Q),
+  camera + ATC coverage of runways 25L/25R.
+- Both public watch pages reported `playableInEmbed=true` and `isLiveNow=true`
+  when checked on 2026-09-06 (re-run `node scripts/check-airport-cameras.mjs`
+  before relying on them); availability may change and there is no global ATC
+  coverage claim.
+- **Terms:** copyrighted provider content delivered through the visible official
+  [YouTube embedded player](https://developers.google.com/youtube/player_parameters),
+  subject to YouTube/provider terms. No audio extraction, rebroadcast proxy,
+  downloading; the curated path needs no API key. Provider branding and controls
+  remain visible; the player is unloaded (`about:blank`) when the card closes.
+  Bratislava (LZIB) is deliberately NOT in the catalogue: bts.aero publishes a
+  5-minute webcam JPEG but no terms of use, and "no terms" is not consent
+  (see `.claude/skills/sk-data-source/SKILL.md`; consent request draft in
+  `docs/drafts/bts-webcam-request.md`).
+
 God's Eye View's **code** is [MIT](LICENSE)-licensed. **The MIT grant covers the source code only — it does NOT extend to third-party data or visual assets.** Every third-party source keeps its own license and terms. This file documents the live and bundled data sources; bundled 3D-model provenance is recorded in [`public/models/README.md`](public/models/README.md).
 
 How to read this:
@@ -21,10 +76,12 @@ How to read this:
 | **adsb.lol point API** | Bounded live-flight fallback when OpenSky has no usable snapshot | ODbL 1.0 | adsb.lol contributors; `api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{radius}` |
 | **adsb.fi open data** | Secondary bounded live-flight fallback when adsb.lol also fails | Proprietary fair-use terms (github.com/adsbfi/opendata): free for hobby/non-commercial use, max 1 request/s, no scraping loops; error responses count toward the limit — the proxy makes exactly one attempt per cache window | "adsb.fi" + link (their README asks to "cite adsb.fi and include a link") — Data attribution popover + honest `X-Flight-Source` chip when active |
 | **adsb.lol** | Military flights + aircraft traces | ODbL 1.0 | "adsb.lol" (ODbL) |
+| **Planespotters.net Photo API** | One photo of the TRACKED aircraft under its readout card (`src/data/trackedPhoto.js`) | Planespotters Photo API Terms of Use (read 2026-09-05, planespotters.net/photo/api): free, no key; **browser-only** — the image is fetched by the displaying browser straight from the returned thumbnail URL, never proxied, rewritten or stored; JSON response cacheable ≤ 24 h (in-memory + localStorage, empty `photos: []` cached the same way); photographer credit as visible text next to the image; thumbnail is a plain `<a>` to the returned photo link without `rel="nofollow"`; no ML/AI training, no re-export; reasonable volume (one request per tracked hex per 24 h). Photos remain © their photographers | "Photo {photographer} · Planespotters.net" under the image + Data attribution entry |
 | **AISStream.io** | Live vessels (AIS) | Free, beta, no formal ToS; AIS is a public broadcast | "AISStream.io" (courtesy) |
 | **CelesTrak** | Satellite TLEs (SGP4) | US-government-origin data, no license; citation requested | "CelesTrak (celestrak.org), Dr. T.S. Kelso" |
 | **The Space Devs — Launch Library 2 v2.3** | Recent launch, payload, stage, and recovery metadata for Space Missions (30d) | [The Space Devs terms of use](https://github.com/TheSpaceDevs/Tutorials/blob/main/faqs/faq_TSD.md#terms-of-use): data may be used and shared in any form; avoid forwarding it without added value; attribution is encouraged (not mandatory). [Official API limits](https://ll.thespacedevs.com/docs/): 15 unauthenticated calls/hour; optional token | "Launch Library 2 — The Space Devs" (courtesy attribution) |
 | **USGS** | Earthquakes | U.S. public domain | "Data courtesy of the U.S. Geological Survey" |
+| **EMSC/CSEM — SeismicPortal FDSN Event** | Last-24-hour global earthquake catalog, combined with USGS | CC BY 4.0 for this API dataset | Credit EMSC/CSEM, link to [API documentation](https://www.seismicportal.eu/fdsn-wsevent.html) and [license](https://creativecommons.org/licenses/by/4.0/). OKO normalizes fields and associates probable corresponding solutions; original IDs and measurements remain available. Dataset-specific license verified 2026-09-05; see [terms](https://www.seismicportal.eu/terms.html). No felt reports or other website content ingested. |
 | **OpenStreetMap (Overpass API)** | Road geometry for traffic | ODbL 1.0 | "© OpenStreetMap contributors" |
 | **TomTom Traffic API** (flow vector tiles) | Live congestion coloring for the traffic layer (optional, BYOK) | [TomTom for Developers terms](https://developer.tomtom.com) (proprietary, your own key; quotas depend on the current account plan) | "Traffic flow data © TomTom" — registered when live mode activates |
 | **OpenStreetMap (Overpass API)** | Viewport-bounded mapped installation context for Global Context | ODbL 1.0 | "© OpenStreetMap contributors" (incomplete mapped context) |
@@ -82,6 +139,16 @@ Static datasets shipped in the repo for an out-of-the-box experience. **None are
 | **World Port Index — Pub 150** (3,807 sea ports with UN/LOCODE, harbor size/type, channel depth, max draft; global ports layer, OKO fork) | `ports/` | US Government work (NGA), **public domain** — NGA claims no copyright on its publications. Data trap documented in the folder README: depth/dimension columns use 0.0 as the no-data sentinel. Ocean register — the Danube is NOT covered | ✅ (no restrictions) | "Ports: NGA World Port Index" (courtesy) |
 | **Global Shipping Lanes** (239 maritime corridors: 52 major, 123 secondary, 64 minor; global sea-route layer that fills the "deaf ocean" where terrestrial AIS has no reception, OKO fork) | `shipping_lanes/` | **CC BY 4.0** — per the `LICENSE` file of github.com/newzealandpaul/Shipping-Lanes (`main`, v1.4), published under the custom title "Excluding Statista" (a standard CC BY 4.0 grant for everyone except Statista). Derived by P. Benden from the CIA "Map of The World's Oceans" (Oct 2012, US Gov public domain) with route corrections — **the derivative is NOT public domain**, only the CIA base map is. ⚠️ The Zenodo deposit of the older v1.3.1 (DOI 10.5281/zenodo.6361763) is listed as **CC BY-NC 4.0**; the bundled snapshot is built from GitHub `main`, whose LICENSE is plain CC BY 4.0 — do not rebuild from the Zenodo zip without re-verifying. The bundled `.geojsonl` is a **modified** adaptation (MultiLineString → LineString, coordinates rounded to 5 dp; `scripts/build-shipping-lanes.mjs`) | ✅ (attribution + licence link + indicate modifications; n/a to Statista) | "Shipping lanes: Global Shipping Lanes — P. Benden, derived from the CIA World Oceans map (CC BY 4.0, modified)" — **required** |
 | **Global Shipping Traffic Density — historical 2015–2021** (1440×680 cells of 0.25°, 595,623 non-zero; global ship-density drape for the "deaf ocean" where terrestrial AIS has no reception, OKO fork) | `ship_density/` | **CC BY 4.0** — World Bank Data Catalog 0037580, obtained via the IMF World Seaborne Trade Monitoring System (hourly AIS positions Jan 2015 – Feb 2021; Cerdeiro, Komaromi, Liu, Saeed 2020, IMF WP/20/57). Build input is the stable Zenodo archive 16894236 (`shipdensity_global.zip`, 534.9 MB, MD5 `e8f98c56fa1306225b81558c0a23da21`) — a 9.8 GB uncompressed int32 BigTIFF at 0.005°, NOT bundled. A cell value is the **count of AIS positions** (moving + stationary) — activity intensity, **historical and modelled, never live**; the panel row and the credit say so (rule 2). The bundled PNG is a **modified** adaptation: 50×50 px blocks **summed** to 0.25° (true totals, so 1-px ocean lanes survive), log-normalised to the 99.5th percentile of non-zero cells, alpha = intensity (`scripts/build-ship-density.mjs`, provenance + artefact notes in the folder's `SOURCE.md`) | ✅ (attribution + licence link + indicate modifications) | "Historical ship density 2015–2021: World Bank / IMF Global Shipping Traffic Density (CC BY 4.0, downsampled to 0.25° — modelled, not live)" — **required** |
+| **Country flags — flag-icons** (ISO 3166-1 alpha-2 set, 4:3 SVG, one file per country, lazy-loaded; used for aircraft registration state, route airports and ship flag states on contact cards, OKO fork) | `flags/` | **MIT** (github.com/lipis/flag-icons, npm `flag-icons@7.5.0`; `LICENSE` copied; fetched by `scripts/fetch-flags.mjs` from the npm registry tarball). Sub-national and organisation flags deliberately not bundled — cards flag states only | ✅ | not required by MIT; "flag-icons (MIT)" listed in Data attribution |
+| **OurAirports — airport details sidecar** (`airport-details.json`: radio frequencies from `airport-frequencies.csv`, runways from `runways.csv`, region/GPS/local codes and home/Wikipedia links from `airports.csv`; filtered to the 6 146 bundled airports; loaded lazily on the first airport click, OKO fork 2026-09-05) | `airports/` | **Public domain** (Unlicense; same source and terms as the airports bundle, see `airports/README.md`). Volunteer-maintained, "not for navigation" — the card shows published frequencies as reference, never as an operational source | ✅ (no attribution required; courtesy credit given) | courtesy "OurAirports" in Data attribution |
+| **NASA GIBS / Worldview — daily true-colour imagery** (basemap stack `gibs-truecolor`: VIIRS NOAA-20 CorrectedReflectance, EPSG:3857 WMTS REST, `GoogleMapsCompatible_Level9`, previous UTC day) | Optional globe basemap — the day as the satellite actually saw it: clouds, smoke, sea ice | NASA Earth-science data are open and free to use; GIBS needs no key and no registration, and asks that NASA EOSDIS GIBS be cited. Level 9 (~300 m/px) is this layer's maximum, so closer views upsample; the day is **yesterday** because the daily mosaic is processed with a lag. URL is WMTS REST (`{z}/{y}/{x}`), not XYZ | "NASA EOSDIS GIBS / Worldview · VIIRS NOAA-20" on the imagery credit line |
+| **Google Photorealistic 3D Tiles via Cesium ion** (fallback path in `src/photorealTileset.js`: ion asset **2275207**, the same asset CesiumJS itself uses when no Google key is set; loaded with `Cesium3DTileset.fromIonAssetId` and the same cache/collision options as the direct path) | The photoreal globe (stack `photoreal`) when Google's direct Map Tiles API refuses the account — since 2026-09-04 `tile.googleapis.com/v1/3dtiles/root.json` answers **403 "satellite tiles and 3D tiles are not available for your account and region"** for EEA-billed accounts (developers.google.com/maps/comms/eea/map-tiles). The direct Google path is still tried FIRST on every boot, so the app returns to it by itself if Google lifts the block | Served under Cesium's own agreement with Google; the Google Maps ToS are accepted in the Cesium ion account, and Cesium ion's plan terms apply — the free (Community) plan is **non-commercial** and the ion endpoint attributions include "Upgrade for commercial use.", which CesiumJS renders in the credit line and which must not be removed. Ion has its own streaming quotas (a cut-off, not a bill); no key reaches the browser beyond the already-public ion token. The chip tooltip says "via Cesium ion" while this path is active (rule 2) | Google logo + data attributions as delivered by the ion endpoint (CesiumJS renders them automatically); "Upgrade for commercial use." stays |
+| **NASA GIBS / Worldview — Blue Marble basemap** (stack `gibs-blue-marble`: `BlueMarble_ShadedRelief_Bathymetry`, MODIS 2004 cloud-free composite with shaded relief and ocean bathymetry, EPSG:3857 WMTS REST `z/y/x`, JPEG, `GoogleMapsCompatible_Level8`, static — time literal `default`) | Optional globe basemap — a whole, cloud-free Earth for cartographic reading where the daily mosaic carries clouds and yesterday's gaps | NASA Earth-science data are open and free to use; GIBS needs no key and no registration and asks that NASA EOSDIS GIBS be cited. **Static composite (2004), not current imagery.** Level 8 (~600 m/px) is the layer's maximum; closer views upsample | "NASA EOSDIS GIBS / Worldview · Blue Marble (MODIS)" on the imagery credit line |
+| **NASA GIBS / Worldview — ASTER GDEM colour shaded relief** (stack `aster-relief`: `ASTER_GDEM_Color_Shaded_Relief`, EPSG:3857 WMTS REST `z/y/x`, JPEG, `GoogleMapsCompatible_Level12`, static — time literal `default`) | Optional globe basemap — elevation-coloured, hill-shaded terrain (~40 m/px), the closest GIBS gets to the globe | ASTER GDEM is a joint product of Japan's METI and NASA, distributed free of charge; NASA asks that the product be acknowledged as **"ASTER GDEM is a product of METI and NASA"**. Static raster, no key. Level 12 is the layer's maximum | "NASA EOSDIS GIBS / Worldview · ASTER GDEM is a product of METI and NASA" on the imagery credit line — **required wording** |
+| **NASA GIBS / Worldview — Black Marble night lights** (overlay `nightLights.js`: VIIRS Suomi NPP `VIIRS_Black_Marble`, EPSG:3857 WMTS REST, `GoogleMapsCompatible_Level8`, static composite — time literal `default`) | Second imagery layer over ANY globe basemap, blended along the terminator by Cesium `ImageryLayer.dayAlpha = 0` / `nightAlpha = 1`; city lights appear only on the night side | NASA Earth-science data are open and free to use; GIBS needs no key and no registration, and asks that NASA EOSDIS GIBS be cited. **Composite, not live** — a cloud-free annual mosaic (GetCapabilities `<Default>2016-01-01</Default>`), so it shows where lights normally are, never tonight’s blackout. Level 8 (~600 m/px) is this layer’s maximum; irrelevant in practice because globe lighting fades out below 1 500 km (`globeLighting.js`). URL is WMTS REST (`{z}/{y}/{x}`), not XYZ, and the time position takes the literal `default` — a date would be HTTP 400. The tile is opaque RGB (no alpha) carrying a faint ambient rendering of land and ocean besides the lights, so the layer sets `colorToAlpha` (threshold 64/255, sRGB — the globe shader compares raw texture values) to keep only the lights and let the basemap show through, and `brightness` 3 so the lights survive Cesium’s hard-coded 0.3 night dimming. Requires `globe.enableLighting`: the shader gates day/night alpha behind `ENABLE_DAYNIGHT_SHADING`, hence the layer is bound to the Day/night toggle | “NASA EOSDIS GIBS / Worldview · VIIRS Black Marble (Suomi NPP)” on the imagery credit line |
+| **NASA GIBS / Worldview — science overlays** (data layers `gibs-sst`, `gibs-precip`, `gibs-snow`, `gibs-aerosol`, `gibs-sea-ice` — `src/data/gibsOverlays.js`: GHRSST MUR L4 sea surface temperature (Level 7), GPM IMERG precipitation rate (Level 6), MODIS Terra NDSI snow cover (Level 8), MODIS Aqua+Terra value-added aerosol optical depth (Level 6), GHRSST MUR L4 sea ice concentration (Level 7); EPSG:3857 WMTS REST `z/y/x`, PNG with transparent no-data) | Translucent overlays over ANY globe basemap, inserted below the night-lights layer (`imageryOrder.js`); opacity chips 40/70/100 %; a colour legend transcribed from the GIBS v1.3 colormaps in the layer row | NASA Earth-science data are open and free to use; GIBS needs no key and no registration and asks that NASA EOSDIS GIBS be cited. **Daily mosaics, not live**: the layer draws **yesterday (UTC)** and, when that day is not yet processed (HTTP 400 outside the layer's time range), steps back up to 4 days and reports STALE; the day is printed in the row and in the group subtitle (rule 2). Hidden under Google 3D photoreal (globe hidden) — the row says so instead of staying silent. Legend values are approximate anchors of the GIBS colormap ramps (SST −2…32 °C, rain 0.1…53 mm/h log, NDSI 0…100 %, AOD 0…5, ice 0…100 %); consult the linked colormap XML for exact bins | "NASA EOSDIS GIBS / Worldview · {product}" on the imagery credit line + Data attribution entry |
+| **Wikimedia Commons — airport photos** (lead image of the airport's Wikipedia article, resolved through the Wikipedia API `prop=pageimages` + `prop=imageinfo`, `src/data/airportPhoto.js`) | Photo of the SELECTED airport at the top of the airport card | Per-image licence from `extmetadata` (CC BY, CC BY-SA, public domain, CC0, GFDL…); images without a recognised free licence (fair use, non-free) are **not shown**. API: CORS (`origin=*`), no key, `Api-User-Agent` set, one two-step lookup per airport, cached 7 days (also negative). Thumbnails hot-linked from upload.wikimedia.org as Wikimedia intends | "Photo: {author} · {licence} · Wikimedia Commons" linking to the file page (attribution for BY/BY-SA) + Data attribution entry |
+| **LiveATC.net — link only** (the airport card offers "Listen live on LiveATC" as a plain hyperlink to `liveatc.net/search/?icao=XXXX`) | — | LiveATC [Terms of Use](https://www.liveatc.net/legal/) re-read in full 2026-09-06 (text effective 2009-02-01). Site footer, verbatim: **"Audio streams may not be used in any third-party products."** Restrictions §3.3 forbids making the Services "available over a network (other than LiveATC.net's network) where it could be used by others"; §3.4 forbids making them "directly available via any other dedicated desktop or mobile commercial application, for profit or not"; §2.1 licenses them "for personal non-commercial purposes only"; §3.13 allows access only by "an interactive web browser (or other authorized software agents, which include general purpose media players)", not robots. §3.15 forbids linking "directly to any of the audio streams **without consulting with LiveATC.net**", and requires credit "with a prominent link to www.liveatc.net" when you do. The FAQ offers no embed or API path. → OKO embeds **no audio**, proxies nothing, and links only to the LiveATC *website* (a search page, not a stream URL), with the visible "Listen live on LiveATC" credit — which is what §3.15's credit requirement asks for. A direct stream link would need their prior consent; request draft in [`docs/drafts/liveatc-permission-request.md`](docs/drafts/liveatc-permission-request.md). | ✅ (hyperlink only) | none required; the link itself names LiveATC |
 | **adsb.lol globe_history — historical air-traffic density, one day** (1440×720 cells of 0.25°, 326,508 non-zero; 56.8 M observed 10-second ADS-B position samples from 80,761 airframes on 2026-09-04 + 13.8 M interpolated samples bridging 19,169 ocean coverage gaps along great circles; global air-traffic drape as the aviation twin of the ship density, OKO fork) | `air_density/` | **ODbL 1.0 + CC0 1.0** (dual — as published in github.com/adsblol/globe_history_2026 and shipped inside the daily archive; both licence texts and the archive's README are copied into the folder). Input is the day's release `v2026.09.04-planes-readsb-prod-0` (3.9 GB split tar), of which only the 48 gzip `heatmap/` slices (~910 MB) are read — readsb `heatEntry` records (16 B: int32 hex/lat/lon ×1e6, int16 alt/gs); separators (`hex 0x0e7f7c9d`), info entries (`lat ≥ 2³⁰` on the SIGNED value — the naive bit-30 mask erases the southern hemisphere) and zero placeholders are skipped. **Historical, one day, modelled — never live**; coverage follows the terrestrial feeder network (Europe / North America / East Asia strong, oceans and Africa weak), so this shows flights *and* receivers. **Ocean bridging (interpolation):** when one airframe leaves coverage at ≥ 10 000 ft and re-appears ≥ 500 km away at an implied 500–1050 km/h (one continuous flight, never a landing and a later departure), the bake fills the hole with 10-s samples along the great circle between its last and first heard position — 19.5 % of all samples are interpolated, reported in the sidecar `stats.bridged` and in the panel row ("medzery nad oceánom interpolované"); real ocean tracks (NAT organised tracks, weather routing) deviate from the great circle by up to a few hundred km. The bundled PNG is a **modified** adaptation: observed + bridged samples counted into 0.25°, log-normalised between the 60th and 99.5th percentile, amber ramp, alpha = intensity (`scripts/build-air-density.mjs`) | ✅ (attribution + share-alike on data; licence copies retained) | "Historical air-traffic density (one day): adsb.lol globe_history — adsb.lol feeders (ODbL 1.0 / CC0, modelled, not live)" — **required** |
 
 ### ⚠️ TeleGeography is bundled but NonCommercial
@@ -154,3 +221,50 @@ Douglas-Peucker simplification, 6-decimal rounding).
 ## In-app attribution
 
 The required Google Maps / Cesium credit renders on the on-globe credit line (`#cesium-credits`, bottom-left) and must stay visible — including in clean-view and recording modes (the whole line, logo + "Google Maps" + the "Data attribution" link, stays on screen; only the GEV panels/HUD fade). The layer-specific credits (adsb.lol, TeleGeography, OSM datacenters/dams/roads, NASA FIRMS, CelesTrak, USGS, City of Austin, GBFS, Radio Browser, OpenSky, AISStream) are registered into the expandable **"Data attribution"** popover on that credit line via `viewer.creditDisplay.addStaticCredit(new Cesium.Credit(html, /* showOnScreen */ false))` — see `src/data/dataCredits.js`. When you add a new data source, add its license and attribution to this file **and** append an entry to `DATA_CREDITS` in `src/data/dataCredits.js` so it surfaces in the app.
+### Earthquake area photographs
+
+On-demand nearby-place illustrations use the public Wikipedia MediaWiki API
+([geosearch](https://www.mediawiki.org/wiki/API:Geosearch/en)) and Wikimedia
+[image metadata](https://commons.wikimedia.org/wiki/Commons:Machine-readable_data).
+No key or paid service is used. The card shows the file author, individual license
+and file-page link. Only CC BY, CC BY-SA, CC0 or public-domain images with the
+required attribution metadata are displayed. Images are contextual nearby-place
+illustrations, with the place and distance disclosed; they are not earthquake
+damage photos or live camera feeds. Thumbnails load directly from Wikimedia.
+### Reported volcanic events — NASA EONET
+
+[NASA EONET v3](https://eonet.gsfc.nasa.gov/docs/v3) supplies curated natural-event
+metadata. The volcano layer uses the global `volcanoes` category and `status=open`.
+No API key or fee; direct browser requests support CORS. Metadata includes original
+source references (for example Smithsonian Global Volcanism Program). EONET's
+provider disclaimer applies; linked third-party reports retain their own terms.
+This integration displays event metadata, not third-party report text or imagery.
+Open status is the catalog's classification and does not establish current
+eruption intensity, completeness, hazard extent or a real-time warning.
+
+**Volcano card details (2026-09-05).** The EONET record carries only a title,
+one position, a date and source links, so the card joins it at runtime to a bundled
+OpenStreetMap snapshot of named `natural=volcano` nodes
+(`src/data/local_data/volcanoes/osm-volcanoes.json`, ODbL 1.0, "© OpenStreetMap
+contributors", see the folder README) by proximity and name — elevation, volcano
+type, status and the Wikipedia article, whose lead image is shown only under a free
+licence with author and licence credit (same pipeline as airport photos). The card
+also links to the Smithsonian GVP profile EONET cites. **GVP data itself is not
+bundled:** the Smithsonian Terms of Use permit personal, educational and other
+non-commercial use only (checked 2026-09-05), which this project does not rely on.
+The 3D cone is the project's own procedural model (`public/models/volcano.glb`, CC0).
+
+### Natural events — NASA EONET
+
+Same source and terms as the volcano layer above ([NASA EONET v3](https://eonet.gsfc.nasa.gov/docs/v3),
+US government work, no key, no fee, CORS). The `natural-events` layer requests
+`status=open` events for the categories `severeStorms, floods, landslides, drought,
+dustHaze, snow, tempExtremes, seaLakeIce` in one call (limit 500) and `wildfires`
+in a separate call (limit 500) only when the user enables that chip — measured
+2026-09-05: ~2 000 open wildfire reports versus ~20 for all other categories, so one
+combined request would push storms out of the response. Storm records carry a
+point track with `magnitudeValue`/`magnitudeUnit` (e.g. 80 kts); the layer draws the
+track and shows the latest magnitude. Displayed: event title, category, position,
+time, description and source ids — never third-party report text or imagery.
+Volcanoes and earthquakes stay in their own layers. EONET is a curated catalog of
+reports, not a warning service; the card says so.

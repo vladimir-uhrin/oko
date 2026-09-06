@@ -5,6 +5,18 @@ import {
   clearSelectedEntityContextForLayer,
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
+import { t } from '../i18n.js';
+// `new URL(...)` a NIE `?url` import: príponu `?url` pozná len Vite, takže
+// unit testy v čistom Node (a všetko, čo túto vrstvu importuje) by na nej
+// spadli už pri načítaní modulu.
+const portsUrl = new URL('./local_data/ports/ports.geojsonl', import.meta.url).href;
+import {
+  buildPortIndex,
+  destinationCardLine,
+  matchDestinationPort,
+  voyageToPort,
+} from './vesselDestination.js';
+import { createVesselVoyageLine } from './vesselVoyageLine.js';
 import { screenProjectedRotation, cameraPoseSignature, horizonOccluder } from './iconOrientation.js';
 import { AIS_FRESH_MS, AIS_RETAIN_MS, aisRegionKey } from './aisCoverage.js';
 import { airIconTier } from './airIconLod.js';
@@ -851,6 +863,14 @@ const state = {
   trailMmsi: null,
   /** @type {number} Monotonic token — invalidates in-flight backfill responses */
   trailBackfillToken: 0,
+  /** @type {object|null} Index prístavov (World Port Index) pre cieľ plavby. */
+  portIndex: null,
+  /** @type {Promise|null} Prebiehajúce načítanie indexu prístavov. */
+  portIndexPromise: null,
+  /** @type {object|null} Rozpoznaný cieľový prístav vybranej lode. */
+  destinationMatch: null,
+  /** @type {object|null} Čiara plavby do cieľového prístavu. */
+  voyageLine: null,
 };
 
 /** Replace live AIS rows through the production reconciliation path (DEV only). */
@@ -1901,7 +1921,9 @@ function updateClusteredLabels(records) {
   const retainedSelected = state.selectedRecord;
   const selected = retainedSelected && !(Number.isFinite(retainedSelected.lastPositionEpoch)
     && Date.now() - retainedSelected.lastPositionEpoch * 1000 >= AIS_RETAIN_MS) ? retainedSelected : null;
-  const entries = selected ? [buildSelectedVesselCard(selected)] : [];
+  const entries = selected ? [buildSelectedVesselCard(selected, Date.now(), state.destinationMatch)] : [];
+  // Loď sa hýbe — čiara plavby musí ísť s ňou.
+  if (selected && state.destinationMatch) syncVoyageLine();
   const maxLabels = labelRowLimit();
 
   if (!scene || !records.length || maxLabels <= 0) {
@@ -2132,6 +2154,8 @@ function selectVessel(record) {
   // click, not up to VISIBILITY_UPDATE_MS later.
   updateVisibility(true);
   updateSelectedVesselHud(record);
+  // Cieľ plavby z AIS textu → prístav z bundlu, čiara a ETA na karte.
+  resolveSelectedDestination(record);
   if (registerSelectedContext(record)) {
     selectEntityContext(record);
   }
@@ -2272,6 +2296,10 @@ function destroySelectedVesselTrail() {
     state.trail.destroy();
     state.trail = null;
   }
+  if (state.voyageLine) {
+    state.voyageLine.destroy();
+    state.voyageLine = null;
+  }
 }
 
 /**
@@ -2307,8 +2335,67 @@ function registerSelectedContext(record) {
   }
 }
 
+/**
+ * Index prístavov pre cieľ plavby — z už bundlovaného World Port Indexu, až
+ * pri prvom výbere lode s cieľom (3 807 riadkov geojsonl, ~1 MB). Vrstva
+ * prístavov ho nepotrebuje mať zapnutú: karta má povedať, kam loď ide, aj
+ * keď prístavy na glóbuse nesvietia.
+ * @returns {Promise<?object>}
+ */
+function loadPortIndex() {
+  if (state.portIndex) return Promise.resolve(state.portIndex);
+  if (!state.portIndexPromise) {
+    state.portIndexPromise = fetch(portsUrl)
+      .then((res) => (res.ok ? res.text() : ''))
+      .then((text) => {
+        const features = [];
+        for (const line of String(text).split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try { features.push(JSON.parse(trimmed)); } catch { /* poškodený riadok preskočiť */ }
+        }
+        state.portIndex = buildPortIndex(features);
+        return state.portIndex;
+      })
+      .catch(() => { state.portIndexPromise = null; return null; });
+  }
+  return state.portIndexPromise;
+}
+
+/**
+ * Nájde cieľový prístav vybranej lode a prekreslí kartu aj čiaru plavby.
+ * Bez zhody sa nekreslí nič — text cieľa ostáva na karte tak, ako ho poslala
+ * posádka (pravidlo 2: nehádať prístav).
+ * @param {Object} record Vybraná loď.
+ */
+function resolveSelectedDestination(record) {
+  state.destinationMatch = null;
+  const destination = String(record?.destination || '').trim();
+  if (!destination) { state.voyageLine?.clear(); return; }
+  loadPortIndex().then((index) => {
+    if (!index || state.selectedRecord !== record) return;
+    state.destinationMatch = matchDestinationPort(record.destination, index);
+    if (state.enabled) updateVisibility(true);
+    syncVoyageLine();
+  });
+}
+
+/** Prekreslí čiaru z vybranej lode do jej cieľového prístavu (alebo ju zhasne). */
+function syncVoyageLine() {
+  const record = state.selectedRecord;
+  const port = state.destinationMatch?.port;
+  if (!record || !port) { state.voyageLine?.clear(); return; }
+  if (!state.voyageLine && state.viewer) state.voyageLine = createVesselVoyageLine(state.viewer);
+  state.voyageLine?.setVoyage(
+    { lat: record.lat, lon: record.lon },
+    { lat: port.lat, lon: port.lon },
+  );
+}
+
 function clearSelection({ preserveTrail = false, evicted = false } = {}) {
   const record = state.selectedRecord;
+  state.destinationMatch = null;
+  state.voyageLine?.clear();
   if (record?.billboard) {
     record.billboard.image = shipIcon(record, false);
     record.billboard.scale = shipScale(record);
@@ -2392,6 +2479,7 @@ export function buildVesselCard(record) {
     gapPx: 10,
     accent: isLastKnownVessel(record) ? '146, 156, 165' : accentForVesselType(record.type),
     title: trimHudValue(displayVesselName(record), 26),
+    titleFlag: mmsiFlag(record?.mmsi)?.iso2 || null,
     details: parts.length ? [parts.join(' · ')] : [],
     selected: false,
     priority: labelPriority(record, null),
@@ -2406,7 +2494,7 @@ export function buildVesselCard(record) {
  * @param {Object} record - Selected vessel record.
  * @returns {Object} vesselLabels entry.
  */
-export function buildSelectedVesselCard(record, nowMs = Date.now()) {
+export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationMatch = null) {
   const direction = record.heading ?? record.course;
   const details = [[
     vesselTypeShort(record) || 'VESSEL',
@@ -2428,6 +2516,18 @@ export function buildSelectedVesselCard(record, nowMs = Date.now()) {
   // ETA belongs to the voyage line — without a destination it is noise.
   const eta = String(record.eta || '').trim();
   if (destination) details.push(`→ ${trimHudValue(destination, 24)}${eta ? ` · ETA ${eta}` : ''}`);
+  // Rozpoznaný prístav (World Port Index) pridá vzdialenosť po veľkokružnici
+  // a ETA z rýchlosti nad zemou. Bez zhody sa NIČ nedopĺňa — surový text
+  // posádky ostáva jediným tvrdením o cieli.
+  if (destinationMatch?.port) {
+    const voyage = voyageToPort(
+      { lat: record.lat, lon: record.lon, speedKt: record.speed },
+      destinationMatch.port,
+      nowMs,
+    );
+    const line = destinationCardLine(destinationMatch, voyage, t);
+    if (line) details.push(line);
+  }
   // Per-vessel honesty: the feed can be perfectly live while THIS vessel went
   // silent — the server retains rows for 30 min, so without the fix-age check
   // an unreporting vessel looked fresh the whole time (pravidlo 2).
@@ -2442,6 +2542,7 @@ export function buildSelectedVesselCard(record, nowMs = Date.now()) {
     gapPx: 12,
     accent: accentForVesselType(record.type),
     title: trimHudValue(displayVesselName(record), 32),
+    titleFlag: mmsiFlag(record?.mmsi)?.iso2 || null,
     details,
     selected: true,
     priority: 100000,
@@ -2577,6 +2678,8 @@ function resetState() {
   state.trailPositions = [];
   state.trailMmsi = null;
   state.trailBackfillToken = 0;
+  state.destinationMatch = null;
+  state.voyageLine = null;
 }
 
 /**

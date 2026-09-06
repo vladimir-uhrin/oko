@@ -7,11 +7,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AIRPORTS_LAYER_ID,
+  AIRPORT_DETAILS_FILE,
+  airportDetailsFromRows,
   airportFeatureFromRow,
   airportImportance,
   airportOverlayCopy,
   airportRowAccepted,
+  airportTitleFlag,
+  formatElevation,
+  formatFrequencyMhz,
+  frequencyRows,
+  liveAtcUrl,
+  runwayLabel,
+  runwaySurfaceKey,
 } from './airportsData.js';
+import { EN_STRINGS } from '../i18nStrings.js';
+
+const tEn = (key) => EN_STRINGS[key] || key;
 
 const LZIB = {
   ident: 'LZIB',
@@ -80,14 +92,66 @@ test('feature: chýbajúce polia degradujú na null, zlé súradnice na null fea
   assert.equal(airportFeatureFromRow({ ...LZIB, ident: ' ' }), null);
 });
 
-test('karta: kódy a typ na prvom riadku, mesto/krajina/výška na druhom', () => {
-  assert.deepEqual(airportOverlayCopy({
-    icao: 'LZIB', iata: 'BTS', type: 'large',
-    municipality: 'Bratislava', country: 'SK', elevFt: 436,
-  }), ['BTS · LZIB · LARGE', 'Bratislava, SK · ELEV 436 FT']);
-  // Bez kódov a výšky sa riadky zúžia, prázdne sa negenerujú.
-  assert.deepEqual(airportOverlayCopy({ type: 'medium', country: 'AQ' }), ['MEDIUM', 'AQ']);
-  assert.deepEqual(airportOverlayCopy({}), []);
+test('karta (2026-09-05): kódy + mesto na prvom riadku, slovný typ + výška v metroch na druhom, vlajka štátu', () => {
+  const props = airportFeatureFromRow(LZIB).properties;
+  assert.deepEqual(airportOverlayCopy({ ...props, iata: 'BTS', icao: 'LZIB' }, tEn), [
+    'BTS · LZIB · Bratislava',
+    'Large airport · 133 m (436 ft)',
+  ]);
+  assert.deepEqual(airportOverlayCopy({ name: 'X', type: 'small', municipality: 'Nowhere' }, tEn), ['Nowhere', 'Small airport'], 'chýbajúce polia vypadnú, riadky nie sú prázdne');
+  assert.deepEqual(airportOverlayCopy({}, tEn), []);
+  assert.equal(airportTitleFlag(props), 'sk');
+  assert.equal(airportTitleFlag({ country: 'XXX' }), null);
+  assert.equal(formatElevation(436), '133 m (436 ft)');
+  assert.equal(formatElevation(null), '');
+});
+
+test('detaily: frekvencie zoradené podľa skupín (ATIS, TWR, GND, APP…), dráhy bez zatvorených, odkazy len https', () => {
+  const details = airportDetailsFromRows(
+    { iso_region: 'SK-BL', home_link: 'https://www.bts.aero', wikipedia_link: 'https://en.wikipedia.org/wiki/Bratislava_Airport', gps_code: 'LZIB', local_code: '' },
+    [
+      { type: 'APP', description: 'Bratislava Approach', frequency_mhz: '120.3' },
+      { type: 'TWR', description: 'Bratislava Tower', frequency_mhz: '118.3' },
+      { type: 'ATIS', description: 'ATIS', frequency_mhz: '124.555' },
+      { type: 'GND', description: 'Ground', frequency_mhz: '121.9' },
+      { type: 'MISC', description: 'bad', frequency_mhz: '' },
+    ],
+    [
+      { le_ident: '04', he_ident: '22', length_ft: '9514', width_ft: '197', surface: 'ASP', lighted: '1', closed: '0' },
+      { le_ident: '13', he_ident: '31', length_ft: '10466', width_ft: '148', surface: 'CON', lighted: '1', closed: '0' },
+      { le_ident: '09', he_ident: '27', length_ft: '3000', width_ft: '100', surface: 'GRS', lighted: '0', closed: '1' },
+    ],
+  );
+  assert.deepEqual(details.freq.map((f) => f[0]), ['ATIS', 'TWR', 'GND', 'APP'], 'poradie skupín, nečíselná frekvencia vypadla');
+  assert.equal(details.freq[1][2], 118.3);
+  assert.equal(details.rwy.length, 2, 'zatvorená dráha sa nebundluje');
+  assert.equal(details.rwy[0][0], '13', 'najdlhšia dráha prvá');
+  assert.equal(details.region, 'SK-BL');
+  assert.equal(details.web, 'https://www.bts.aero');
+  assert.equal(airportDetailsFromRows({ home_link: 'javascript:alert(1)' }).web, null, 'len http(s) odkazy');
+  assert.equal(AIRPORT_DETAILS_FILE, 'airport-details.json');
+});
+
+test('detaily: formáty pre kartu — MHz na tri desatinné, orez „+N", dráha v metroch s povrchom, LiveATC len odkaz', () => {
+  assert.equal(formatFrequencyMhz(118.3), '118.300');
+  assert.equal(formatFrequencyMhz('x'), '');
+  const many = Array.from({ length: 15 }, (_, i) => ['TWR', `T${i}`, 118 + i / 100]);
+  const { rows, more } = frequencyRows(many);
+  assert.equal(rows.length, 12);
+  assert.equal(more, 3);
+  assert.deepEqual(rows[0], { type: 'TWR', description: 'T0', mhz: '118.000' });
+  assert.equal(runwayLabel(['04', '22', 9514, 197, 'ASP', 1, 0], tEn), '04/22 · 2\u202f900 × 60 m · asphalt · lighted');
+  assert.equal(runwayLabel(['13', '31', null, null, 'GRS', 0, 0], tEn), '13/31 · grass');
+  assert.equal(runwayLabel(null), '');
+  assert.equal(runwaySurfaceKey('ASPH'), 'airport.surface.asphalt');
+  assert.equal(runwaySurfaceKey('CONC'), 'airport.surface.concrete');
+  assert.equal(runwaySurfaceKey('TURF'), 'airport.surface.grass');
+  assert.equal(runwaySurfaceKey('GRVL'), 'airport.surface.gravel');
+  assert.equal(runwaySurfaceKey('WATER'), 'airport.surface.water');
+  assert.equal(runwaySurfaceKey('UNK'), '');
+  assert.equal(liveAtcUrl('lzib'), 'https://www.liveatc.net/search/?icao=LZIB');
+  assert.equal(liveAtcUrl('BTS'), null, 'IATA nie je ICAO');
+  assert.equal(liveAtcUrl(null), null);
 });
 
 test('dôležitosť: veľké > stredné > malé — kohorta štítkov uprednostní huby', () => {

@@ -428,7 +428,7 @@ test('Environmental enables BOTH its feeds and pulls out to the globe', async ()
   const spy = missionSpy();
   const outcome = await runFirstRunChoice('environmental', spy.deps);
   assert.equal(outcome.ok, true);
-  assert.deepEqual(spy.calls.layerIds, ['earthquakes', 'local-firms']);
+  assert.deepEqual(spy.calls.layerIds, ['earthquakes', 'local-firms', 'volcanoes']);
   assert.equal(spy.calls.globeFlights, 1);
 });
 
@@ -436,7 +436,7 @@ test('the tile is the FULLY CONFIGURED experience: quakes and fires together', (
   // Product decision, 2026-08-23: the launcher optimizes for the configured app, so
   // ENVIRONMENTAL means live USGS earthquakes AND NASA FIRMS active fires.
   const environmental = FIRST_RUN_MISSIONS.environmental;
-  assert.deepEqual(environmental.layerIds, ['earthquakes', 'local-firms']);
+  assert.deepEqual(environmental.layerIds, ['earthquakes', 'local-firms', 'volcanoes']);
 
   // Keyless, the honest surface is the LAYER ROW ("KEY REQUIRED"), which the
   // FIRMS layer already reports. The misleading part is the GLOBAL chip folding
@@ -458,7 +458,7 @@ test('every visitor gets the same tile — there is no degraded keyless variant'
   const outcome = await runFirstRunChoice('environmental', spy.deps);
   assert.equal(outcome.ok, true);
   assert.deepEqual(outcome.failedLayerIds, []);
-  assert.deepEqual(spy.calls.layerIds, ['earthquakes', 'local-firms']);
+  assert.deepEqual(spy.calls.layerIds, ['earthquakes', 'local-firms', 'volcanoes']);
   const module = fs.readFileSync(new URL('./firstRunExperience.js', import.meta.url), 'utf8');
   assert.doesNotMatch(
     module.slice(module.indexOf('export async function runFirstRunChoice')),
@@ -662,15 +662,12 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   const end = src.indexOf('\n];\n', start);
   const block = src.slice(start, end + 4);
 
-  // Baseline re-derived 2026-08-30 (OKO Fáza 4): the ONE deliberate schema
-  // edit is adding 'shmu-radar' and 'local-energy' to the set_layer_visibility
-  // and show_data_layers_menu enums (plus their common-name mapping line) so
-  // the sk-overview mission's layers are voice-reachable like every other
-  // mission layer. That busts the Realtime session cache once, knowingly.
-  assert.equal(block.length, 31302, 'tool schema byte length drifted from the frozen baseline');
+  // Baseline updated 2026-09-05: the requested volcano layer adds one enum
+  // value to visibility and menu tools. The rest of the schema stays pinned.
+  assert.equal(block.length, 31352, 'tool schema byte length drifted from the frozen baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '4c70f0152bcb61c0b306cb1be5f1687698e9a5c770fd0944221d0d2bf82af5d9',
+    '854502187ce9de47f000f597a17dd58c2fcf2c96c0c71ea2d77b1db7e6bfd5ed',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

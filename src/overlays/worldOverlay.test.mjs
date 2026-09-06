@@ -1465,6 +1465,11 @@ test('cockpit keeps its cards and its detection lane, and hides only the tracked
     'both ambient cards survive cockpit entry');
   assert.ok(getOverlayPaintRect('vessels', 'VESSEL-A'));
   assert.ok(getOverlayPaintRect('vessels', 'VESSEL-B'));
+  // Painted rects carry the paint alpha and scale so DOM companions (tracked
+  // photo strip) can follow a faded or shrunken card instead of floating.
+  const rectA = getOverlayPaintRect('vessels', 'VESSEL-A');
+  assert.ok(rectA.alpha > 0 && rectA.alpha <= 1, 'alpha published with the rect');
+  assert.ok(rectA.paintScale > 0, 'paint scale published with the rect');
   assert.equal(getOverlayPaintRect('trackedReadout', 'TRACKED'), null,
     'the source-level hideInCockpit rule still hides the tracked readout');
   assert.equal(detectionPaints, 1, 'Panoptic keeps painting in cockpit');
@@ -2139,4 +2144,28 @@ test('diagnostics facade preserves the complete binding shape', () => {
     'candidateIndexSize', 'entriesBySource', 'paintedBySource',
   ];
   assert.deepEqual(Object.keys(diagnostics).sort(), fields.sort());
+});
+
+test('normalizeOverlayEntry validates card decorations: lower-case flags, route needs a label, progress needs a unit fraction', () => {
+  const position = { x: 1, y: 2, z: 3 };
+  const full = normalizeOverlayEntry('tracked', {
+    id: 'a', position, variant: 'tracked', title: 'X',
+    titleFlag: 'FR',
+    route: { origin: { label: 'CDG Paris', iso2: 'FR' }, destination: { label: '', iso2: 'zz9' } },
+    progress: { fraction: 0.5, label: '50 %' },
+  });
+  assert.equal(full.titleFlag, 'fr');
+  assert.deepEqual(full.route, { origin: { label: 'CDG Paris', iso2: 'fr' }, destination: { label: '', iso2: null } });
+  assert.deepEqual(full.progress, { fraction: 0.5, label: '50 %' });
+  const bare = normalizeOverlayEntry('tracked', {
+    id: 'b', position, variant: 'tracked', title: 'Y',
+    titleFlag: 'europe', route: { origin: {}, destination: {} }, progress: { fraction: 1.5, label: 'x' },
+  });
+  assert.equal(bare.titleFlag, null);
+  assert.equal(bare.route, null);
+  assert.equal(bare.progress, null);
+  const none = normalizeOverlayEntry('tracked', { id: 'c', position, variant: 'tracked', title: 'Z' });
+  assert.equal(none.titleFlag, null);
+  assert.equal(none.route, null);
+  assert.equal(none.progress, null);
 });

@@ -111,7 +111,13 @@ export const WORLD_OVERLAY_OCCLUDER_SELECTORS = Object.freeze([
   '#cockpit-signal-stream',
 ]);
 
-/** @typedef {{x:number,y:number,w:number,h:number}} OverlayRect */
+/**
+ * @typedef {{x:number,y:number,w:number,h:number,alpha:number,paintScale:number}} OverlayRect
+ * `x/y/w/h` are the UNSCALED placement in CSS px; the card was painted at
+ * `paintScale` from (x, y) with opacity `alpha` — a DOM companion anchored to
+ * the card (tracked photo strip) must apply both or it floats beside an
+ * invisible or shrunken card (seen live at globe range, 2026-09-05).
+ */
 /**
  * @typedef {object} WorldOverlayEntry
  * @property {string} id Stable identity within the source.
@@ -397,6 +403,29 @@ function snapshotCullPosition(entry) {
   return new Cesium.Cartesian3(x, y, z);
 }
 
+/** ISO 3166-1 alpha-2, lower-case, or null. */
+function normalizeFlagCode(value) {
+  const code = String(value ?? '').trim().toLowerCase();
+  return /^[a-z]{2}$/.test(code) ? code : null;
+}
+
+/** Route row: two sides with a label and an optional flag; null unless at least one label exists. */
+function normalizeRouteRow(route) {
+  if (!route || typeof route !== 'object') return null;
+  const side = (s) => ({ label: String(s?.label ?? '').trim(), iso2: normalizeFlagCode(s?.iso2) });
+  const origin = side(route.origin);
+  const destination = side(route.destination);
+  if (!origin.label && !destination.label) return null;
+  return { origin, destination };
+}
+
+/** Progress row: fraction 0–1 + label; null when the fraction is not a unit number. */
+function normalizeProgressRow(progress) {
+  const fraction = Number(progress?.fraction);
+  if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) return null;
+  return { fraction, label: String(progress?.label ?? '').trim() };
+}
+
 export function normalizeOverlayEntry(sourceId, entry) {
   const source = assertSourceId(sourceId);
   if (!entry || typeof entry !== 'object') throw new TypeError('WorldOverlay entry must be an object');
@@ -420,6 +449,15 @@ export function normalizeOverlayEntry(sourceId, entry) {
     variant,
     title: String(entry.title ?? ''),
     details: Array.isArray(entry.details) ? entry.details.map((line) => String(line)) : [],
+    // Card decorations (2026-09-05, flags + route + progress rows). Optional and
+    // painter-owned: a painter without support ignores them and the card
+    // degrades to title + details. Shapes are validated here so painters never
+    // see a half-formed row.
+    titleFlag: normalizeFlagCode(entry.titleFlag),
+    route: normalizeRouteRow(entry.route),
+    progress: normalizeProgressRow(entry.progress),
+    // Footer rows paint AFTER the decoration rows (data provenance, alerts).
+    footer: Array.isArray(entry.footer) ? entry.footer.map((line) => String(line).trim()).filter(Boolean) : [],
     accent: entry.accent || WORLD_OVERLAY_STYLE.accent,
     paintLane: entry.paintLane,
     priority: Number.isFinite(Number(entry.priority)) ? Number(entry.priority) : 0,
@@ -1936,7 +1974,7 @@ function solveDomains(timestamp) {
   _diagnostics.solveRevision = solveRevision;
 }
 
-function publishPaintRect(item) {
+function publishPaintRect(item, alpha = 1, paintScale = 1) {
   const { record, placement } = item;
   const rect = _paintRectPool[_paintRectCount] || (_paintRectPool[_paintRectCount] = {});
   _paintRectCount++;
@@ -1944,6 +1982,8 @@ function publishPaintRect(item) {
   rect.y = placement.rect.y;
   rect.w = placement.rect.w;
   rect.h = placement.rect.h;
+  rect.alpha = alpha;
+  rect.paintScale = paintScale;
   rect.sourceId = record.entry.source;
   rect.entryId = record.entry.id;
   rect.entry = record.entry;
@@ -2064,7 +2104,7 @@ function paintEntryItem(item, keyhole) {
     paintOverlayEntry(_ctx, entry, scaled, finalAlpha);
     _ctx.restore();
   }
-  publishPaintRect(item);
+  publishPaintRect(item, finalAlpha, record.paintScale);
   if (_paintedBySource[entry.source] === undefined) {
     _paintedBySource[entry.source] = 0;
     _paintedSourceKeys.push(entry.source);

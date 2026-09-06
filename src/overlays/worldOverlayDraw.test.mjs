@@ -20,6 +20,9 @@ import {
   paintThumbnail,
   paintTrack,
   paintTracked,
+  CARD_FLAG_GAP_PX,
+  PROGRESS_BAR_W,
+  PROGRESS_BAR_H,
   placementVariants,
   roundedRectPath,
 } from './worldOverlayDraw.js';
@@ -595,4 +598,64 @@ test('the sky plate scale is a whisper, not a second plate', () => {
     ...Object.values(DETECTION_THEME_MAP).map((theme) => alphaOf(theme.calloutPlate)),
   );
   assert.ok(lightest * SKY_PLATE_SCALE < 0.12, 'the feathered plate must read as bare text');
+});
+
+test('tracked card decorations (2026-09-05): flag reserves title width, route + progress add a line each, bar is drawn', () => {
+  const ctx = mockContext();
+  const base = { variant: 'tracked', title: 'AFR702', details: ['FL340↑ · 499 kts', 'Air France · B77W'], accent: '#39d0ff' };
+  const plain = measureOverlayEntry(ctx, { ...base }, {});
+  const decorated = measureOverlayEntry(ctx, {
+    ...base,
+    titleFlag: 'fr',
+    route: { origin: { label: 'CDG Paris', iso2: 'fr' }, destination: { label: 'ABJ Abidjan', iso2: 'ci' } },
+    progress: { fraction: 0.33, label: '33 % · ETA 3:35' },
+  }, {});
+  assert.equal(decorated.extraRows, 2);
+  assert.equal(decorated.h, plain.h + 2 * plain.lineH, 'one line per decoration row');
+  assert.equal(decorated.titleFlagW, Math.round(11 * 4 / 3) + CARD_FLAG_GAP_PX, 'title flag width is reserved even before the SVG loads');
+  assert.ok(decorated.w > plain.w, 'the route row is the widest line');
+
+  const entry = {
+    ...base,
+    titleFlag: 'fr',
+    route: { origin: { label: 'CDG Paris', iso2: 'fr' }, destination: { label: 'ABJ Abidjan', iso2: 'ci' } },
+    progress: { fraction: 0.33, label: '33 % · ETA 3:35' },
+  };
+  entry._overlayLayout = measureOverlayEntry(ctx, entry, {});
+  const placement = placementVariants({
+    anchorX: 300, anchorY: 200, width: entry._overlayLayout.w, height: entry._overlayLayout.h,
+    viewportWidth: 800, viewportHeight: 600, verticalOnly: true,
+  })[0];
+  paintTracked(ctx, entry, placement, 1);
+  const texts = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+  assert.deepEqual(texts, ['AFR702', 'FL340↑ · 499 kts', 'Air France · B77W', 'CDG Paris', ' → ', 'ABJ Abidjan', '33 % · ETA 3:35']);
+  // Flags: three placeholder rectangles (title, origin, destination) — the SVGs are not loaded in Node.
+  const flagRects = ctx.calls.filter(([name, , , w, h]) => name === 'fillRect' && h === 11 && w === Math.round(11 * 4 / 3));
+  assert.equal(flagRects.length, 1, 'title flag');
+  const routeFlags = ctx.calls.filter(([name, , , w, h]) => name === 'fillRect' && h === 9 && w === 12);
+  assert.equal(routeFlags.length, 2, 'origin + destination flags');
+  // Progress bar: a track and a fill rounded rect of the bar geometry, fill ≈ 33 % of the track.
+  const bars = ctx.calls.filter(([name, , , w, h]) => name === 'roundRect' && h === PROGRESS_BAR_H && w <= PROGRESS_BAR_W);
+  assert.equal(bars.length, 2, 'track + fill');
+  assert.equal(bars[0][3], PROGRESS_BAR_W);
+  assert.ok(Math.abs(bars[1][3] - PROGRESS_BAR_W * 0.33) < 0.01);
+  // Text-only entries paint exactly as before (no decoration rows, no flags).
+  const ctx2 = mockContext();
+  const plainEntry = { ...base };
+  plainEntry._overlayLayout = measureOverlayEntry(ctx2, plainEntry, {});
+  paintTracked(ctx2, plainEntry, placement, 1);
+  assert.deepEqual(ctx2.calls.filter(([name]) => name === 'fillText').map(([, text]) => text), ['AFR702', 'FL340↑ · 499 kts', 'Air France · B77W']);
+  assert.equal(ctx2.calls.filter(([name]) => name === 'fillRect').length, 0);
+});
+
+test('tactical vessel card paints the flag state before the vessel name and shifts the title right', () => {
+  const ctx = mockContext();
+  const entry = { variant: 'card', cardStyle: 'tactical', title: 'MSC OSCAR', titleFlag: 'pa', details: ['Cargo · 14.2 kn · 271°'], accent: '80, 200, 255' };
+  entry._overlayLayout = measureOverlayEntry(ctx, entry, {});
+  assert.equal(entry._overlayLayout.titleFlagW, 12 + CARD_FLAG_GAP_PX);
+  const placement = placementVariants({ anchorX: 200, anchorY: 200, width: entry._overlayLayout.w, height: entry._overlayLayout.h, viewportWidth: 800, viewportHeight: 600, verticalOnly: true })[0];
+  paintTacticalCard(ctx, entry, placement, 1);
+  const title = ctx.calls.find(([name, text]) => name === 'fillText' && text === 'MSC OSCAR');
+  assert.equal(title[2], placement.rect.x + entry._overlayLayout.padX + entry._overlayLayout.titleFlagW, 'title starts after the flag');
+  assert.ok(ctx.calls.some(([name, , , w, h]) => name === 'fillRect' && w === 12 && h === 9), 'flag placeholder painted');
 });

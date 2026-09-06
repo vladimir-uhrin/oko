@@ -24,14 +24,119 @@
 import { t } from './i18n.js';
 
 export const MAP_STACK_CHIP_CLASS = 'map-stack-chip';
+export const MAP_STACK_VARIANT_CLASS = 'map-stack-chip--variant';
+
+/**
+ * Rodiny podkladov (2026-09-06, používateľ: „zjednotiť prepínače a dať pod
+ * jedno NASA"). Tri NASA rastre — denná mozaika, Blue Marble, ASTER reliéf —
+ * boli tri čipy v lište a lišta narástla na tri riadky. Rodina je JEDEN čip
+ * v hlavnom rade; keď je aktívny jej člen, pod lištou sa objaví rad variantov.
+ * Klik na čip rodiny zapne naposledy zvolený (alebo predvolený) variant —
+ * pamätá sa v `_familyChoice` počas relácie.
+ *
+ * Členovia ostávajú plnohodnotné stacky v `PRESENTED_MAP_STACK_IDS` (tripwire
+ * allowlistu platí ďalej); rodina mení len PREZENTÁCIU, nie controller.
+ */
+export const MAP_STACK_FAMILIES = Object.freeze([
+  Object.freeze({
+    id: 'nasa',
+    label: 'NASA',
+    memberIds: Object.freeze(['gibs-truecolor', 'gibs-blue-marble', 'aster-relief']),
+    defaultId: 'gibs-truecolor',
+  }),
+]);
+
+/** @type {Map<string, string>} rodina → naposledy zvolený člen (relácia) */
+const _familyChoice = new Map();
+
+/** Test-only. */
+export function _resetMapStackChipsForTest() { _familyChoice.clear(); }
+
+/**
+ * Rodina, do ktorej stack patrí, alebo null.
+ * @param {string|null|undefined} stackId
+ * @returns {object|null}
+ */
+export function mapStackFamilyOf(stackId) {
+  if (!stackId) return null;
+  return MAP_STACK_FAMILIES.find((family) => family.memberIds.includes(stackId)) || null;
+}
+
+/**
+ * Zapamätaj si zvolený člen rodiny (volá sa pri každom sync so stavom
+ * controllera — pamätá sa teda skutočne aktívny stack, nie klik).
+ * @param {string|null|undefined} activeId
+ */
+export function rememberMapStackChoice(activeId) {
+  const family = mapStackFamilyOf(activeId);
+  if (family) _familyChoice.set(family.id, activeId);
+}
+
+/**
+ * Ktorý člen sa zapne klikom na čip rodiny.
+ * @param {object} family
+ * @param {string|null} activeId
+ * @returns {string}
+ */
+export function mapStackFamilyTarget(family, activeId) {
+  if (family.memberIds.includes(activeId)) return activeId;
+  return _familyChoice.get(family.id) || family.defaultId;
+}
 export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'photoreal',
   'bing-aerial',
   'bing-labels',
   'osm',
   'stadia-dark',
+  'gibs-truecolor',
+  'gibs-blue-marble',
+  'aster-relief',
   'ugkk-ortofoto',
 ]);
+
+/**
+ * Poradie čipov v hlavnom rade: allowlist s rodinou zloženou do jedného
+ * záznamu na pozícii jej PRVÉHO člena. Položka je buď id stacku (string),
+ * alebo `{ family: id }`.
+ * @type {ReadonlyArray<string|{family: string}>}
+ */
+export const PRESENTED_CHIP_ENTRIES = Object.freeze((() => {
+  const entries = [];
+  const seen = new Set();
+  for (const id of PRESENTED_MAP_STACK_IDS) {
+    const family = mapStackFamilyOf(id);
+    if (!family) { entries.push(id); continue; }
+    if (seen.has(family.id)) continue;
+    seen.add(family.id);
+    entries.push(Object.freeze({ family: family.id }));
+  }
+  return entries;
+})());
+
+/**
+ * Model čipu rodiny: dostupný, ak je dostupný aspoň jeden člen; aktívny, ak
+ * je aktívny ktorýkoľvek člen; `id` = člen, ktorý klik zapne.
+ * @param {object} family
+ * @param {Map<string, object>} stacksById
+ * @param {string|null} activeId
+ */
+export function mapStackFamilyChipModel(family, stacksById, activeId) {
+  const members = family.memberIds.map((id) => stacksById.get(id)).filter(Boolean);
+  const available = members.some((stack) => stack?.available !== false);
+  const active = family.memberIds.includes(activeId);
+  const target = mapStackFamilyTarget(family, activeId);
+  return {
+    id: target,
+    familyId: family.id,
+    label: family.label,
+    available,
+    active,
+    requiresIon: false,
+    requirement: '',
+    unavailableHint: available ? '' : t('mapstack.unavailable', { label: family.label }),
+    title: available ? t('mapstack.family.nasa-title') : t('mapstack.unavailable', { label: family.label }),
+  };
+}
 
 /**
  * Presentation model for one map-stack chip.
@@ -64,7 +169,8 @@ export function mapStackChipModel(stack, activeId) {
     // unavailable chip carries the real reason in its tooltip.
     requirement: !available && requiresIon ? 'ION' : '',
     unavailableHint,
-    title: available ? label : unavailableHint,
+    // Fotoreál cez ion nesie poznámku o zdroji (controller `sourceNote`).
+    title: available ? (stack?.sourceNote ? `${label} · ${stack.sourceNote}` : label) : unavailableHint,
   };
 }
 
@@ -77,10 +183,80 @@ export function mapStackChipModel(stack, activeId) {
 export function mapStackChipModels(stacks, activeId) {
   const stacksById = new Map((Array.isArray(stacks) ? stacks : [])
     .map((stack) => [stack?.id, stack]));
-  return PRESENTED_MAP_STACK_IDS
+  return PRESENTED_CHIP_ENTRIES
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        const stack = stacksById.get(entry);
+        return stack ? mapStackChipModel(stack, activeId) : null;
+      }
+      const family = MAP_STACK_FAMILIES.find((f) => f.id === entry.family);
+      if (!family || !family.memberIds.some((id) => stacksById.has(id))) return null;
+      return mapStackFamilyChipModel(family, stacksById, activeId);
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Modely radu variantov pre aktívnu rodinu (null, keď aktívny stack do
+ * žiadnej rodiny nepatrí — rad sa vtedy skrýva).
+ * @param {Array<object>} stacks
+ * @param {string|null} activeId
+ * @returns {Array<object>|null}
+ */
+export function mapStackVariantModels(stacks, activeId) {
+  const family = mapStackFamilyOf(activeId);
+  if (!family) return null;
+  const stacksById = new Map((Array.isArray(stacks) ? stacks : []).map((stack) => [stack?.id, stack]));
+  return family.memberIds
     .map((id) => stacksById.get(id))
     .filter(Boolean)
-    .map((stack) => mapStackChipModel(stack, activeId));
+    .map((stack) => {
+      const model = mapStackChipModel(stack, activeId);
+      const key = `mapstack.variant.${stack.id}`;
+      const localized = t(key);
+      return { ...model, label: localized === key ? model.label : localized, title: model.available ? (localized === key ? model.label : localized) : model.unavailableHint };
+    });
+}
+
+/**
+ * Vykresli (alebo skry) rad variantov aktívnej rodiny. Volá sa pri každom
+ * sync stavu — rad sleduje controller, nie klik.
+ * @param {HTMLElement|null} container
+ * @param {Array<object>} stacks
+ * @param {string|null} activeId
+ * @param {object} [options]
+ * @returns {Array<object>} vykreslené modely (prázdne = skryté)
+ */
+export function renderMapStackVariants(container, stacks, activeId, { onSelect = null, doc } = {}) {
+  if (!container) return [];
+  const ownerDoc = doc || container.ownerDocument || globalThis.document;
+  const models = mapStackVariantModels(stacks, activeId);
+  container.innerHTML = '';
+  if (!models || !ownerDoc?.createElement) {
+    container.hidden = true;
+    return [];
+  }
+  for (const model of models) {
+    const chip = ownerDoc.createElement('button');
+    chip.type = 'button';
+    chip.className = [MAP_STACK_CHIP_CLASS, MAP_STACK_VARIANT_CLASS, model.active ? 'active' : '', model.available ? '' : 'unavailable']
+      .filter(Boolean).join(' ');
+    chip.dataset.stackId = model.id;
+    chip.title = model.title;
+    chip.setAttribute('aria-pressed', String(model.active));
+    chip.setAttribute('aria-disabled', String(!model.available));
+    const label = ownerDoc.createElement('span');
+    label.className = 'map-stack-chip-label';
+    label.textContent = model.label;
+    chip.appendChild(label);
+    chip.addEventListener('click', () => {
+      if (!model.available) return;
+      onSelect?.(model.id);
+    });
+    container.appendChild(chip);
+  }
+  container.hidden = false;
+  return models;
 }
 
 /**
@@ -110,6 +286,7 @@ export function renderMapStackChips(container, stacks, { activeId = null, onSele
       model.available ? '' : 'unavailable',
     ].filter(Boolean).join(' ');
     chip.dataset.stackId = model.id;
+    if (model.familyId) chip.dataset.family = model.familyId;
     chip.title = model.title;
     chip.setAttribute('aria-pressed', String(model.active));
     chip.setAttribute('aria-disabled', String(!model.available));
@@ -134,7 +311,9 @@ export function renderMapStackChips(container, stacks, { activeId = null, onSele
 
     chip.addEventListener('click', () => {
       if (!model.available) return;
-      onSelect?.(model.id);
+      // Čip rodiny: cieľ sa číta z datasetu, ktorý sync prepisuje na
+      // skutočne aktívneho člena — klik na zapnutú rodinu je no-op.
+      onSelect?.(chip.dataset.stackId || model.id);
     });
     container.appendChild(chip);
   }
@@ -150,9 +329,19 @@ export function renderMapStackChips(container, stacks, { activeId = null, onSele
  * @returns {void}
  */
 export function syncMapStackChips(container, activeId) {
+  rememberMapStackChoice(activeId);
   const chips = container?.children;
   if (!chips) return;
   for (const chip of Array.from(chips)) {
+    const familyId = chip?.dataset?.family;
+    if (familyId) {
+      const family = MAP_STACK_FAMILIES.find((f) => f.id === familyId);
+      const active = !!family && family.memberIds.includes(activeId);
+      if (family) chip.dataset.stackId = mapStackFamilyTarget(family, activeId);
+      chip.classList?.toggle('active', active);
+      chip.setAttribute?.('aria-pressed', String(active));
+      continue;
+    }
     const stackId = chip?.dataset?.stackId;
     if (!stackId) continue;
     const active = stackId === activeId;

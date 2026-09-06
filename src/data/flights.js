@@ -107,7 +107,9 @@ import {
   getAircraftRecessionParams,
   setAircraftRecessionParams,
 } from './aircraftRecession.js';
-import { refreshTrackedReadout, trackedLabelModelFromText } from './trackedReadout.js';
+import { refreshTrackedReadout } from './trackedReadout.js';
+import { buildTrackedCardModel, formatFlightLine, formatMetaLine, TRACKED_FLIGHT_ACCENT } from './trackedCardModel.js';
+import { resolveFlagIso2 } from './countryFlags.js';
 import {
   clearTrackedSubjectContext,
   refreshTrackedSubjectContext,
@@ -1217,6 +1219,9 @@ function _requestTypeEnrichment(icao24, priority = false) {
     meta.typeCode = data.typeCode || meta.typeCode;
     meta.typeName = data.typeName || meta.typeName;
     meta.registration = data.registration || meta.registration;
+    // Štát registrácie (ISO2) — vlajka pri titulku karty; OpenSky
+    // origin_country ostáva ako fallback pre stroje, ktoré adsbdb nepozná.
+    meta.countryIso = data.countryIso || meta.countryIso;
     if (meta.typeCode) {
       const klass = classifyAircraft({ typeCode: meta.typeCode, category: meta.category });
       if (klass !== meta.klass) {
@@ -1239,6 +1244,7 @@ function _requestRouteEnrichment(icao24) {
     const meta = _flightData.get(icao24);
     if (!meta) return;
     meta.airline = data.airline || meta.airline;
+    meta.flightIata = data.callsignIata || meta.flightIata; // IATA číslo letu (AF702) do titulku karty
     if (data.origin && data.destination) meta.route = { origin: data.origin, destination: data.destination };
     if (icao24 === _trackedIcao && _trackedEntity) _updateTrackedLabelModel(icao24);
   }, true); // route lookups only fire for the TRACKED plane — front of the queue
@@ -3744,22 +3750,70 @@ function _cancelPendingTrackingRestore() {
  *  owns the visual), so without this the readout would present last-known
  *  velocity/altitude as live. */
 function _trackedLabelText(icao24) {
+  const parts = _trackedLabelParts(icao24);
+  if (!parts) return icao24;
+  const lines = [[parts.callsign, parts.flightLine, parts.stale ? 'STALE' : ''].filter(Boolean).join(' · ')];
+  if (parts.identLine) lines.push(parts.identLine);
+  if (parts.route) {
+    lines.push(formatRouteLine(parts.route) || `${parts.route.origin.code} → ${parts.route.destination.code}`);
+    const progress = progressLine(parts.progress);
+    if (progress) lines.push(progress);
+  }
+  if (parts.alertLine) lines.push(parts.alertLine);
+  return lines.join('\n');
+}
+
+/**
+ * Štruktúrovaný model karty sledovaného letu (vlajky, riadok trasy s vlajkami
+ * letísk, kreslený progress bar) — viď trackedCardModel.js. Text pre hlas a
+ * kontext ďalej skladá `_trackedLabelText` z tých istých častí.
+ * @param {string} icao24
+ */
+function _trackedCardModel(icao24) {
+  const parts = _trackedLabelParts(icao24);
+  if (!parts) return { title: icao24, details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null };
+  return buildTrackedCardModel({
+    callsign: parts.callsign,
+    flightIata: parts.flightIata,
+    flightLine: parts.flightLine,
+    stale: parts.stale,
+    identLine: parts.identLine,
+    route: parts.route,
+    progress: parts.progress,
+    alertLine: parts.alertLine,
+    metaLine: parts.metaLine,
+    nowMs: parts.nowMs,
+    countryIso: parts.info.countryIso,
+    originCountry: parts.info.originCountry,
+    accent: TRACKED_FLIGHT_ACCENT,
+  });
+}
+
+/**
+ * Spoločné časti karty sledovaného letu (text aj štruktúrovaný model ich
+ * skladajú rovnako, len inak zobrazujú). Null, keď kontakt už neexistuje.
+ * @param {string} icao24
+ * @returns {?{info: object, callsign: string, flightLine: string, stale: boolean, identLine: string, route: object|null, progress: object|null, alertLine: string}}
+ */
+function _trackedLabelParts(icao24) {
   const info = _flightData.get(icao24);
-  if (!info) return icao24;
+  if (!info) return null;
   // A whitespace-only callsign ("   ") is truthy, so `(info.callsign || icao24)`
   // kept it, then .trim() emptied it → the callsign slot dropped out of the
   // readout. `_contactLabel` trims FIRST, then falls through registration to
   // the ICAO hex, so a callsign-less enriched contact heads its readout with
   // the tail number rather than raw hex.
   const cs = _contactLabel(icao24, info);
-  const altFt = Math.round((info.altitude || 0) * 3.28084);
-  // Trend stúpania/klesania sa lepí priamo na výšku (FL340↑) — glyfy ↑/↓
-  // z existujúcej rodiny, prah v flightProgress (±2,5 m/s ≈ 500 ft/min).
-  const trend = info.onGround ? '' : verticalTrendGlyph(info.verticalRate);
-  const fl = (altFt >= 18000 ? `FL${Math.round(altFt / 100)}` : `${altFt} ft`) + trend;
-  const spd = info.velocity ? `${Math.round(info.velocity * 1.944)} kts` : '';
-  const stale = (_missingPolls.get(icao24) || _backoff) ? 'STALE' : '';
-  const lines = [[cs, fl, spd, stale].filter(Boolean).join(' · ')];
+  const stale = Boolean(_missingPolls.get(icao24) || _backoff);
+  // Hladina s trendom a stúpaním v ft/min, rýchlosť, kurz — trendový glyf
+  // ↑/↓ z existujúcej rodiny, prah v flightProgress (±2,5 m/s ≈ 500 ft/min).
+  const flightLine = formatFlightLine({
+    altitudeM: info.altitude,
+    onGround: info.onGround === true,
+    verticalRateMps: info.verticalRate,
+    speedMps: info.velocity,
+    trackDeg: info.true_track,
+  });
   // Converted contacts report their class as TR-3B and nothing else — the
   // operator/type identity is exactly what the Easter egg is replacing.
   // Registrácia sa zobrazí len keď NIE JE už titulkom karty (bez callsignu
@@ -3769,35 +3823,52 @@ function _trackedLabelText(icao24) {
   const ident = isTr3b(icao24)
     ? tr3bTypeLabel(icao24)
     : [info.airline || info.operator, info.typeName || info.typeCode, reg].filter(Boolean).join(' · ');
-  if (ident) lines.push(ident);
-  if (info.route && _routeIsPlausible(icao24, info.route)) {
-    // Trasa s mestami (adsbdb municipality) + textový progress bar s ETA.
-    // Všetko odvodené z dát, ktoré už tečú; keď chýba súradnica alebo
-    // letová rýchlosť, riadok/segment sa jednoducho nevykreslí.
-    lines.push(formatRouteLine(info.route) || `${info.route.origin.code} → ${info.route.destination.code}`);
-    const progress = progressLine(routeProgress({
-      origin: info.route.origin,
-      destination: info.route.destination,
+  // Trasa s mestami (adsbdb municipality) + progres s ETA. Všetko odvodené
+  // z dát, ktoré už tečú; keď chýba súradnica alebo letová rýchlosť, riadok/
+  // segment sa jednoducho nevykreslí. Gate _routeIsPlausible je ZDIEĹANÝ
+  // s trasovou čiarou — implauzibilná adsbdb trasa sa neukáže nikde.
+  const route = info.route && _routeIsPlausible(icao24, info.route) ? info.route : null;
+  const progress = route
+    ? routeProgress({
+      origin: route.origin,
+      destination: route.destination,
       lat: info.rawLat,
       lon: info.rawLon,
       speedMps: info.velocity,
-    }));
-    if (progress) lines.push(progress);
-  }
+    })
+    : null;
   // Núdzový transpondérový kód je prvotriedna intel informácia — bežný
   // squawk je šum a riadok nedostane.
   const alert = squawkAlert(info.squawk);
-  if (alert) lines.push(`SQUAWK ${alert.code} · ${alert.label}`);
-  return lines.join('\n');
+  // Riadok o dátach: odkiaľ fix je, aký je starý, squawk a hex — poctivosť
+  // o pôvode (pravidlo 2) priamo na karte. Bežný squawk tu, núdzový nižšie.
+  const nowMs = Date.now();
+  const metaLine = formatMetaLine({
+    source: _lastSource,
+    lastContactEpochMs: info.lastContactEpochMs,
+    nowMs,
+    squawk: alert ? '' : info.squawk,
+    hex: icao24,
+  });
+  return {
+    info,
+    callsign: cs,
+    flightIata: info.flightIata || '',
+    flightLine,
+    stale,
+    identLine: ident || '',
+    route,
+    progress,
+    alertLine: alert ? `SQUAWK ${alert.code} · ${alert.label}` : '',
+    metaLine,
+    nowMs,
+  };
 }
 
 /** Write the explicit tracked presentation model and refresh its host entry. */
 function _updateTrackedLabelModel(icao24) {
   if (!_trackedEntity || icao24 !== _trackedIcao) return;
-  _trackedEntity.gevLabelModel = trackedLabelModelFromText(
-    _trackedLabelText(icao24),
-    '#39d0ff',
-  );
+  _trackedEntity.gevLabelModel = _trackedCardModel(icao24);
   refreshTrackedReadout(_trackedEntity);
   // The readout and the context slot describe the same contact — refresh them
   // together so voice never narrates a fix the card has already replaced.
@@ -4201,7 +4272,7 @@ function _trackFlight(icao24, { origin = 'programmatic' } = {}) {
   });
   _trackedEntity.gevSelectionOrigin = origin;
   _trackedEntity.gevTrackedId = `flights:${icao24}`;
-  _trackedEntity.gevLabelModel = trackedLabelModelFromText(_trackedLabelText(icao24), '#39d0ff');
+  _trackedEntity.gevLabelModel = _trackedCardModel(icao24);
 
   // A billboard has a ~zero bounding sphere, so Cesium's default follow distance is
   // far too tight (the user had to scroll out to read the plane). Give the entity a
@@ -5452,12 +5523,31 @@ const flightsLayer = {
     const icao24 = String(id || '').trim().toLowerCase();
     const info = _flightData.get(icao24);
     if (!info) return null;
-    const route = info.route && _routeIsPlausible(icao24, info.route)
-      ? `${info.route.origin?.code || ''} → ${info.route.destination?.code || ''}`.trim()
+    const plausibleRoute = info.route && _routeIsPlausible(icao24, info.route) ? info.route : null;
+    const route = plausibleRoute
+      ? `${plausibleRoute.origin?.code || ''} → ${plausibleRoute.destination?.code || ''}`.trim()
       : null;
     return {
       layerId: 'flights',
       id: icao24,
+      // Bohatá kartička pod kurzorom (2026-09-05, „chcem to mouse over"): tie
+      // isté polia, z akých sa skladá karta sledovaného letu.
+      flightIata: String(info.flightIata || '').trim() || null,
+      trackDeg: Number.isFinite(info.true_track) ? info.true_track : null,
+      routeInfo: plausibleRoute,
+      progress: plausibleRoute
+        ? routeProgress({
+          origin: plausibleRoute.origin,
+          destination: plausibleRoute.destination,
+          lat: info.rawLat,
+          lon: info.rawLon,
+          speedMps: info.velocity,
+        })
+        : null,
+      source: _lastSource,
+      lastContactEpochMs: Number.isFinite(info.lastContactEpochMs) ? info.lastContactEpochMs : null,
+      squawk: info.squawk ?? null,
+      originCountry: info.originCountry || null,
       callsign: String(info.callsign || '').trim() || null,
       registration: String(info.registration || '').trim() || null,
       type: String(info.typeName || info.typeCode || '').trim() || null,
@@ -5469,8 +5559,25 @@ const flightsLayer = {
       speedMps: Number.isFinite(info.velocity) ? info.velocity : null,
       verticalRateMps: Number.isFinite(info.verticalRate) ? info.verticalRate : null,
       route: route && route !== '→' ? route : null,
+      // Vlajka štátu registrácie pre kartičku pod kurzorom (adsbdb ISO2,
+      // fallback meno štátu z OpenSky).
+      countryIso: resolveFlagIso2(info.countryIso, info.originCountry),
       stale: _missingPolls.get(icao24) > 0,
     };
+  },
+
+  /**
+   * Zotrvanie kurzora nad strojom (kartička pod kurzorom, 2026-09-05): vypýtaj
+   * typ aj trasu, aby kartička mohla ukázať trasu, progres a IATA číslo bez
+   * kliknutia. Trasa sa inak žiada len pre SLEDOVANÝ stroj; hover ide cez ten
+   * istý front s prioritou a 24 h proxy cache, jeden dopyt na stroj a session.
+   * @param {string} id ICAO24
+   */
+  prefetchContactDetails(id) {
+    const icao24 = String(id || '').trim().toLowerCase();
+    if (!_flightData.has(icao24)) return;
+    _requestTypeEnrichment(icao24, true);
+    _requestRouteEnrichment(icao24);
   },
 
   /** Filter kategórií ako čipy pod riadkom vrstvy (viď `_categoryChips`). */

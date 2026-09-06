@@ -142,6 +142,13 @@ export function createTrackedOverlayEntry(entity) {
     title,
     details: Array.isArray(model.details) ? model.details.map((line) => String(line)) : [],
     accent: model.accent || WORLD_OVERLAY_STYLE.accent,
+    // Optional decorations from a structured model (flights.js
+    // buildTrackedCardModel): flag before the title, flagged route row,
+    // drawn progress bar. Text-only models (military, satellites) leave them null.
+    titleFlag: model.titleFlag ?? null,
+    route: model.route ?? null,
+    progress: model.progress ?? null,
+    footer: Array.isArray(model.footer) ? model.footer.map((line) => String(line)) : [],
     anchorRadiusPx: 10,
     anchorRadiusScale: TRACKED_BILLBOARD_SCALE,
     minAnchorGapPx: 16,

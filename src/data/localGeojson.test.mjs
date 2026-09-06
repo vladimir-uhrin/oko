@@ -159,6 +159,7 @@ test('local infrastructure card copy uses the validated source fields', () => {
   }, 'local-datacenters'), {
     title: 'DFW-1',
     details: ['Example Cloud · 27 MW'],
+    titleFlag: null, // vlajka len pre letiská/lode (2026-09-05)
   });
 
   assert.deepEqual(localInfrastructureOverlayCopy({
@@ -167,6 +168,7 @@ test('local infrastructure card copy uses the validated source fields', () => {
   }, 'local-dams'), {
     title: 'Barrage Bin el Ouidane',
     details: ['El Abid'],
+    titleFlag: null,
   });
 
   assert.deepEqual(localInfrastructureOverlayCopy({
@@ -174,6 +176,7 @@ test('local infrastructure card copy uses the validated source fields', () => {
   }, 'local-datacenters'), {
     title: 'Amazon Web Services',
     details: [],
+    titleFlag: null,
   });
 });
 

@@ -6,6 +6,9 @@ import { readFileSync } from 'node:fs';
 import {
   LIGHTING_FADE_OUT_M,
   LIGHTING_FADE_IN_M,
+  GLOBE_RADIUS_M,
+  lightingFadeDistancesFromCentre,
+  lightingFadeFactor,
   applyGlobeLighting,
   isGlobeLightingEnabled,
 } from './globeLighting.js';
@@ -24,8 +27,8 @@ test('deň/noc: zapnutie nastaví osvetlenie, prelínanie vzdialeností aj atmos
   const scene = makeScene();
   assert.equal(applyGlobeLighting(scene, true), true);
   assert.equal(scene.globe.enableLighting, true);
-  assert.equal(scene.globe.lightingFadeOutDistance, LIGHTING_FADE_OUT_M);
-  assert.equal(scene.globe.lightingFadeInDistance, LIGHTING_FADE_IN_M);
+  assert.equal(scene.globe.lightingFadeOutDistance, GLOBE_RADIUS_M + LIGHTING_FADE_OUT_M);
+  assert.equal(scene.globe.lightingFadeInDistance, GLOBE_RADIUS_M + LIGHTING_FADE_IN_M);
   assert.equal(scene.globe.dynamicAtmosphereLighting, true);
   assert.equal(scene.globe.dynamicAtmosphereLightingFromSun, true);
   assert.equal(scene.renders, 1, 'zmena scény si vyžiada frame (render governor)');
@@ -40,7 +43,7 @@ test('deň/noc: vypnutie zhasne osvetlenie aj atmosféru, vzdialenosti ostávaj�
   assert.equal(scene.globe.enableLighting, false);
   assert.equal(scene.globe.dynamicAtmosphereLighting, false);
   assert.equal(scene.globe.dynamicAtmosphereLightingFromSun, false);
-  assert.equal(scene.globe.lightingFadeOutDistance, LIGHTING_FADE_OUT_M, 'ladenie sa píše aj pri vypnutí');
+  assert.equal(scene.globe.lightingFadeOutDistance, GLOBE_RADIUS_M + LIGHTING_FADE_OUT_M, 'ladenie sa píše aj pri vypnutí');
   assert.equal(isGlobeLightingEnabled(scene), false);
 });
 
@@ -48,6 +51,31 @@ test('deň/noc: ladenie — pod 1 500 km vypnuté (mesto vo dne), od 4 000 km na
   assert.ok(LIGHTING_FADE_OUT_M < LIGHTING_FADE_IN_M, 'fade-out pod fade-in, inak Cesium prelína naopak');
   assert.ok(LIGHTING_FADE_OUT_M >= 1_000_000, 'mestský pohľad (stovky km) musí ostať neosvetlený');
   assert.ok(LIGHTING_FADE_IN_M <= 6_000_000, 'bežný pohľad na svet (12–13 000 km) musí byť plne osvetlený');
+});
+
+test('deň/noc: na glóbus idú vzdialenosti OD STREDU ZEME — inak fade nikdy nenastane', () => {
+  // Cesium v 3D meria lightingFade* od stredu (GlobeFS: length(czm_view[3]));
+  // holé výšky 1,5/4 Mm sú pod polomerom, takže osvetlenie bolo naplno aj pri
+  // 700 km a mesto v noci bolo tmavé (2026-09-04 „tmavá mapa", zmerané 09-06).
+  const { fadeOut, fadeIn } = lightingFadeDistancesFromCentre();
+  assert.ok(fadeOut > GLOBE_RADIUS_M, 'fade-out musí byť nad polomerom Zeme');
+  assert.ok(fadeIn > fadeOut);
+  assert.equal(fadeOut - GLOBE_RADIUS_M, LIGHTING_FADE_OUT_M, 'výšky ostávajú jazykom návrhu');
+  assert.ok(Math.abs(GLOBE_RADIUS_M - 6_378_137) < 1, 'WGS84 rovníkový polomer');
+  const scene = makeScene();
+  applyGlobeLighting(scene, true);
+  assert.ok(scene.globe.lightingFadeOutDistance > 6_000_000, 'na glóbus sa píše hodnota od stredu');
+});
+
+test('deň/noc: lightingFadeFactor kopíruje shader — 0 pod fade-out, 1 od fade-in, lineárne medzi', () => {
+  assert.equal(lightingFadeFactor(800_000), 0, 'mesto: bez osvetlenia');
+  assert.equal(lightingFadeFactor(LIGHTING_FADE_OUT_M), 0);
+  assert.equal(lightingFadeFactor(12_000_000), 1, 'pohľad na svet: naplno');
+  assert.equal(lightingFadeFactor(LIGHTING_FADE_IN_M), 1);
+  const mid = (LIGHTING_FADE_OUT_M + LIGHTING_FADE_IN_M) / 2;
+  assert.ok(Math.abs(lightingFadeFactor(mid) - 0.5) < 1e-9);
+  assert.equal(lightingFadeFactor(NaN), 1, 'neznáma výška = pohľad na svet, nie zhasnuté');
+  assert.equal(lightingFadeFactor(undefined), 1);
 });
 
 test('deň/noc: bezpečné bez glóbusu a bez atmosférových vlastností (mock/staršie scény)', () => {
@@ -82,4 +110,22 @@ test('deň/noc: tripwire — tlačidlo v lište (default ON), ui.js wiring, i18n
   assert.match(i18n, /'pp\.daynight-label': 'Deň\/noc'/);
   assert.match(i18n, /'pp\.daynight-title': 'Day\/night — real sun lighting on the globe \(terminator\); globe basemaps only'/);
   assert.match(i18n, /'pp\.daynight-title': 'Deň\/noc — skutočné osvetlenie glóbusu Slnkom \(terminátor\); len mapové podklady glóbusu'/);
+});
+
+test('deň/noc rozsvieti aj mestá — svetlá sú viazané na ten istý prepínač', () => {
+  // Väzba nie je štýlová voľba: shader glóbusu mieša dayAlpha/nightAlpha pod
+  // `#if defined(APPLY_DAY_NIGHT_ALPHA) && defined(ENABLE_DAYNIGHT_SHADING)`,
+  // a druhá podmienka je práve `globe.enableLighting`. Nočné svetlá bez
+  // terminátora by teda prekryli aj dennú stranu — preto ich smie zapínať
+  // JEDINE prepínač Deň/noc, nikdy vlastný chip.
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  assert.match(
+    ui,
+    /_setDayNightEnabled\(enabled\) \{[\s\S]{0,900}?setNightLightsEnabled\?\.\(this\._dayNightEnabled\)/,
+    'nočné svetlá musia ísť z _setDayNightEnabled',
+  );
+
+  // Vrstvu vlastní mapStackController (musí prežiť prepnutie podkladu) —
+  // ui.js si ju nesmie pridávať do scény sám.
+  assert.doesNotMatch(ui, /createNightLightsProvider/, 'ui.js nestavia imagery provider');
 });

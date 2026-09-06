@@ -6,6 +6,8 @@ import { DataLayerManager } from './data/manager.js';
 import flightsLayer from './data/flights.js';
 import militaryFlightsLayer from './data/militaryFlights.js';
 import earthquakesLayer from './data/earthquakes.js';
+import volcanoesLayer from './data/volcanoes.js';
+import naturalEventsLayer from './data/naturalEvents.js';
 import shmuRadarLayer from './data/shmuRadar.js';
 import satellitesLayer from './data/satellites.js';
 import rocketLaunchesLayer from './data/rocketLaunches.js';
@@ -17,11 +19,14 @@ import aisLiveVesselsLayer from './data/aisLiveVessels.js';
 import militaryInstallationsLayer from './data/militaryInstallations.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import localDataLayers from './data/localLayers.js';
+import gibsOverlayLayers from './data/gibsOverlays.js';
+import { bindActiveMapStackToEvents } from './data/activeMapStack.js';
 import { LAYER_STATE_REGISTRY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
+import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { initLogoGaze } from './logoGaze.js';
@@ -189,6 +194,10 @@ async function init() {
 
     loaderStatus.textContent = t('loader.google-tiles');
     let tileset = null;
+    /** 'google' | 'ion' | null — odkiaľ fotoreál naozaj tečie (chip title, QA). */
+    let photorealSource = null;
+    /** Prečo je fotoreál nedostupný — do tooltipu čipu, nech používateľ nehľadá chybu u seba. */
+    let photorealUnavailableReason = null;
     // QA/headless ochrana kvóty (2026-09-01): každý boot appky stojí Google
     // root tile request a denná kvóta je zámerne tesná (CLAUDE.md — billing
     // ochrana). Testovacie skripty bootujú s ?qaBasemap=osm a Google tileset
@@ -198,10 +207,19 @@ async function init() {
     const qaBasemapOsm = new URLSearchParams(window.location.search).get('qaBasemap') === 'osm';
     try {
       if (qaBasemapOsm) throw new Error('qaBasemap=osm — Google tileset skipped to protect the daily root-request quota');
-      // Load Google Photorealistic 3D Tiles
-      tileset = await Cesium.createGooglePhotorealistic3DTileset({
-        onlyUsingWithGoogleGeocoder: true,
+      // Google Photorealistic 3D Tiles: najprv priamo Google kľúčom, pri EHP
+      // 403 („not available for your account and region", od 2026-09-04) cez
+      // Cesium ion asset 2275207 — tie isté dlaždice pod zmluvou Cesiumu
+      // (photorealTileset.js; podmienky v DATA_SOURCES.md).
+      const photoreal = await createPhotorealTileset({
+        hasGoogleKey: !!googleApiKey,
+        hasIonToken: !!cesiumToken,
       });
+      tileset = photoreal.tileset;
+      photorealSource = photoreal.source;
+      if (photoreal.source === 'ion') {
+        console.info(`[Init] Google 3D Tiles via Cesium ion (${photoreal.regionBlocked ? 'EEA region block' : 'Google path failed'}):`, photoreal.googleError);
+      }
       viewer.scene.primitives.add(tileset);
       // NOTE: Cesium World Terrain intentionally disabled — conflicts with Google 3D Tiles at high zoom.
       // Google Photorealistic 3D Tiles provide their own terrain/elevation.
@@ -209,6 +227,11 @@ async function init() {
     } catch (tileError) {
       console.warn('[Init] Google 3D Tiles unavailable, falling back to Cesium globe:', tileError);
       const tileErrorDetail = describeError(tileError);
+      // EHP odmietnutie dostane ľudskú vetu (nie je to chyba používateľa);
+      // ostatné chyby nesú svoj text.
+      photorealUnavailableReason = (tileError?.regionBlocked || isGoogleRegionBlocked(tileError))
+        ? t('mapstack.photoreal-eea', { detail: tileErrorDetail })
+        : tileErrorDetail;
       loaderStatus.textContent = t('loader.google-tiles-fallback', { detail: tileErrorDetail });
       // Keep Cesium globe visible as fallback instead of aborting the app.
       viewer.scene.globe.show = true;
@@ -223,6 +246,8 @@ async function init() {
 
     const mapStackController = new MapStackController(viewer, {
       googleTileset: tileset,
+      photorealSource,
+      photorealUnavailableReason,
       cesiumToken,
       terrainPreference,
       initialStack: tileset ? 'photoreal' : 'osm',
@@ -240,6 +265,9 @@ async function init() {
     // Paleta ikon kontaktov podľa kontrastu podkladu (contactPalette.js):
     // prvý setStack je tichý, tak sa počiatočný stav berie priamo z podkladu.
     bindContactPaletteToMapStack(window, mapStackController.getActiveStack());
+    // Aktívny podklad pre dátové vrstvy (activeMapStack.js): prekryvy NASA GIBS
+    // na fotoreáli nemajú povrch a riadok panelu to musí povedať.
+    bindActiveMapStackToEvents(window, mapStackController.getActiveStack());
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
@@ -264,6 +292,8 @@ async function init() {
     dataManager.register(flightsLayer);
     dataManager.register(militaryFlightsLayer);
     dataManager.register(earthquakesLayer);
+    dataManager.register(volcanoesLayer);
+    dataManager.register(naturalEventsLayer);
     dataManager.register(shmuRadarLayer);
     dataManager.register(satellitesLayer);
     dataManager.register(rocketLaunchesLayer);
@@ -277,6 +307,9 @@ async function init() {
     dataManager.register(militaryAwarenessLayer);
     militaryAwarenessLayer.attachDataManager(dataManager);
     for (const layer of localDataLayers) {
+      dataManager.register(layer);
+    }
+    for (const layer of gibsOverlayLayers) {
       dataManager.register(layer);
     }
     // Restoration starts only after the complete production registry is sealed.

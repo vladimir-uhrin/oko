@@ -5,6 +5,7 @@
  * fetching, Cesium scene queries, or source selection policy belongs here.
  */
 
+import { flagWidth, paintFlag } from '../data/countryFlags.js';
 import { WORLD_OVERLAY_STYLE } from './worldOverlayTokens.js';
 
 // Two high-cardinality infrastructure sources share this cache; 1024 avoids
@@ -278,6 +279,12 @@ export function measureOverlayEntry(ctx, entry, out = {}) {
     : selected ? WORLD_OVERLAY_STYLE.fontSelected : WORLD_OVERLAY_STYLE.fontTitle;
   let titleWidth = measureWorldOverlayText(ctx, entry?.title || '',
     variant === 'label' ? WORLD_OVERLAY_STYLE.fontLabel : titleFont);
+  // Flag before the title (card / selected / tracked variants only — labels
+  // and tracks stay bare text).
+  const titleFlagW = entry?.titleFlag && variant !== 'label' && variant !== 'track'
+    ? flagWidth(flagHeightFor(variant)) + CARD_FLAG_GAP_PX
+    : 0;
+  titleWidth += titleFlagW;
   if (variant === 'track' && details[0]) {
     titleWidth = measureWorldOverlayText(
       ctx,
@@ -295,6 +302,25 @@ export function measureOverlayEntry(ctx, entry, out = {}) {
         tracked ? WORLD_OVERLAY_STYLE.fontTrackedDetail : WORLD_OVERLAY_STYLE.fontDetail,
       ),
     );
+  }
+
+  // Tracked-only decoration rows: flagged route + drawn progress bar.
+  let extraRows = 0;
+  if (tracked && entry?.route) {
+    detailWidth = Math.max(detailWidth, measureRouteRow(ctx, entry.route));
+    extraRows += 1;
+  }
+  if (tracked && entry?.progress) {
+    detailWidth = Math.max(
+      detailWidth,
+      PROGRESS_BAR_W + PROGRESS_BAR_GAP_PX + measureWorldOverlayText(ctx, entry.progress.label || '', WORLD_OVERLAY_STYLE.fontTrackedDetail),
+    );
+    extraRows += 1;
+  }
+  const footer = tracked && Array.isArray(entry?.footer) ? entry.footer : [];
+  for (let i = 0; i < footer.length; i++) {
+    detailWidth = Math.max(detailWidth, measureWorldOverlayText(ctx, footer[i], WORLD_OVERLAY_STYLE.fontTrackedDetail));
+    extraRows += 1;
   }
 
   out.padX = tracked ? 13 : selected ? 12 : variant === 'label' || variant === 'track' ? 6 : 9;
@@ -318,11 +344,109 @@ export function measureOverlayEntry(ctx, entry, out = {}) {
     out.h = out.padY + out.thumbH + out.titleGap + out.titleH + out.padBottom;
   } else {
     out.w = Math.ceil(Math.max(titleWidth, detailWidth)) + out.padX * 2;
-    out.h = out.padY * 2 + out.titleH + details.length * out.lineH;
+    out.h = out.padY * 2 + out.titleH + (details.length + extraRows) * out.lineH;
   }
+  out.titleFlagW = titleFlagW;
+  out.extraRows = extraRows;
   out.w = Math.max(8, out.w);
   out.h = Math.max(8, out.h);
   return out;
+}
+
+// ── Card decorations (2026-09-05): flags, flagged route row, progress bar ──
+/** Gap between a flag and the text it precedes (px). */
+export const CARD_FLAG_GAP_PX = 6;
+/** Flag heights per variant — sized to the title font so the flag reads as a glyph, not a picture. */
+const FLAG_H = Object.freeze({ tracked: 11, selected: 11, card: 9, route: 9 });
+/** Drawn progress bar geometry (px). */
+export const PROGRESS_BAR_W = 96;
+export const PROGRESS_BAR_H = 4;
+const PROGRESS_BAR_GAP_PX = 8;
+const ROUTE_ARROW = ' → ';
+
+function flagHeightFor(variant) {
+  return FLAG_H[variant] ?? FLAG_H.card;
+}
+
+/** Width of one route side: optional flag + label. */
+function routeSideWidth(ctx, side) {
+  const text = measureWorldOverlayText(ctx, side?.label || '', WORLD_OVERLAY_STYLE.fontTrackedDetail);
+  return (side?.iso2 ? flagWidth(FLAG_H.route) + CARD_FLAG_GAP_PX : 0) + text;
+}
+
+/** Total width of the flagged route row. */
+function measureRouteRow(ctx, route) {
+  return routeSideWidth(ctx, route.origin)
+    + measureWorldOverlayText(ctx, ROUTE_ARROW, WORLD_OVERLAY_STYLE.fontTrackedDetail)
+    + routeSideWidth(ctx, route.destination);
+}
+
+/**
+ * Paint a title with an optional flag in front. Handles both centered and
+ * left-aligned callers: `anchorX` is the centre (centered) or left edge.
+ * @returns {void}
+ */
+function paintFlaggedTitle(ctx, entry, layout, anchorX, baseline, centered) {
+  const title = String(entry.title || '');
+  const flagW = layout.titleFlagW || 0;
+  if (!flagW) {
+    ctx.textAlign = centered ? 'center' : 'left';
+    ctx.fillText(title, anchorX, baseline);
+    return;
+  }
+  const textW = measureWorldOverlayText(ctx, title, ctx.font);
+  const left = centered ? anchorX - (flagW + textW) / 2 : anchorX;
+  const flagH = flagHeightFor(entry.selected ? 'selected' : entry.variant);
+  // Alphabetic baseline: the flag sits on the baseline (1 px under it) so it reads as a glyph of the title line.
+  paintFlag(ctx, entry.titleFlag, left, baseline - flagH + 1, flagH);
+  ctx.textAlign = 'left';
+  ctx.fillText(title, left + flagW, baseline);
+}
+
+/** Paint one route side at `x`; returns the width consumed. */
+function paintRouteSide(ctx, side, x, baseline) {
+  let cursor = x;
+  if (side?.iso2) {
+    cursor += paintFlag(ctx, side.iso2, cursor, baseline - FLAG_H.route + 1, FLAG_H.route) + CARD_FLAG_GAP_PX;
+  }
+  const label = side?.label || '';
+  ctx.textAlign = 'left';
+  ctx.fillText(label, cursor, baseline);
+  return cursor - x + measureWorldOverlayText(ctx, label, ctx.font);
+}
+
+/** Paint the flagged route row centered on `centerX`. */
+function paintRouteRow(ctx, route, centerX, baseline) {
+  const total = measureRouteRow(ctx, route);
+  let x = centerX - total / 2;
+  x += paintRouteSide(ctx, route.origin, x, baseline);
+  ctx.textAlign = 'left';
+  ctx.fillText(ROUTE_ARROW, x, baseline);
+  x += measureWorldOverlayText(ctx, ROUTE_ARROW, ctx.font);
+  paintRouteSide(ctx, route.destination, x, baseline);
+}
+
+/** Paint the progress bar row (track + accent fill + label) centered on `centerX`. */
+function paintProgressRow(ctx, progress, accent, centerX, baseline) {
+  const labelW = measureWorldOverlayText(ctx, progress.label || '', ctx.font);
+  const total = PROGRESS_BAR_W + PROGRESS_BAR_GAP_PX + labelW;
+  const x = centerX - total / 2;
+  const barY = baseline - 7;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+  ctx.beginPath();
+  roundedRectPath(ctx, x, barY, PROGRESS_BAR_W, PROGRESS_BAR_H, 2);
+  ctx.fill();
+  const fillW = Math.max(0, Math.min(PROGRESS_BAR_W, PROGRESS_BAR_W * progress.fraction));
+  if (fillW > 0) {
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    roundedRectPath(ctx, x, barY, Math.max(fillW, PROGRESS_BAR_H), PROGRESS_BAR_H, 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.textAlign = 'left';
+  ctx.fillText(progress.label || '', x + PROGRESS_BAR_W + PROGRESS_BAR_GAP_PX, baseline);
 }
 
 function writePlacement(out, corner, x, y, w, h, anchorX, anchorY, signedLeaderOffset = 0) {
@@ -484,7 +608,13 @@ function drawCardText(ctx, entry, placement, selected = false, topOffset = 0) {
   ctx.fillStyle = WORLD_OVERLAY_STYLE.title;
   ctx.font = selected ? WORLD_OVERLAY_STYLE.fontSelected : WORLD_OVERLAY_STYLE.fontTitle;
   ctx.textBaseline = 'top';
-  ctx.fillText(String(entry.title || ''), x, y);
+  const flagW = entry._overlayLayout?.titleFlagW || 0;
+  if (flagW) {
+    const flagH = flagHeightFor(selected ? 'selected' : 'card');
+    paintFlag(ctx, entry.titleFlag, x, y + 1, flagH);
+    ctx.fillStyle = WORLD_OVERLAY_STYLE.title;
+  }
+  ctx.fillText(String(entry.title || ''), x + flagW, y);
   y += selected ? 15 : 13;
   ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
   ctx.font = WORLD_OVERLAY_STYLE.fontDetail;
@@ -565,7 +695,7 @@ export function paintTacticalCard(ctx, entry, placement, alpha = 1) {
   ctx.fillStyle = WORLD_OVERLAY_STYLE.title;
   ctx.font = selected ? WORLD_OVERLAY_STYLE.fontSelected : WORLD_OVERLAY_STYLE.fontTitle;
   const titleBaseline = y + layout.padY + layout.titleH - 2;
-  ctx.fillText(String(entry.title || ''), x + layout.padX, titleBaseline);
+  paintFlaggedTitle(ctx, entry, layout, x + layout.padX, titleBaseline, false);
   ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
   ctx.font = WORLD_OVERLAY_STYLE.fontDetail;
   for (let i = 0; i < details.length; i++) {
@@ -703,11 +833,34 @@ export function paintTracked(ctx, entry, placement, alpha = 1) {
   const titleBaseline = y + layout.padY + layout.titleH - 2;
   ctx.fillStyle = WORLD_OVERLAY_STYLE.title;
   ctx.font = WORLD_OVERLAY_STYLE.fontTrackedTitle;
-  ctx.fillText(String(entry.title || ''), centerX, titleBaseline);
+  paintFlaggedTitle(ctx, entry, layout, centerX, titleBaseline, true);
+  ctx.textAlign = 'center';
   ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
   ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
   for (let i = 0; i < details.length; i++) {
     ctx.fillText(String(details[i]), centerX, titleBaseline + (i + 1) * layout.lineH);
+  }
+  // Decoration rows follow the text details: flagged route, then progress bar.
+  let row = details.length;
+  if (entry.route) {
+    row += 1;
+    paintRouteRow(ctx, entry.route, centerX, titleBaseline + row * layout.lineH);
+    ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
+  }
+  if (entry.progress) {
+    row += 1;
+    paintProgressRow(ctx, entry.progress, accent, centerX, titleBaseline + row * layout.lineH);
+  }
+  // Footer rows (data provenance, alerts) close the card, dimmer than details.
+  const footer = Array.isArray(entry.footer) ? entry.footer : [];
+  if (footer.length) {
+    ctx.textAlign = 'center';
+    ctx.fillStyle = WORLD_OVERLAY_STYLE.footer || WORLD_OVERLAY_STYLE.detail;
+    ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
+    for (let i = 0; i < footer.length; i++) {
+      row += 1;
+      ctx.fillText(String(footer[i]), centerX, titleBaseline + row * layout.lineH);
+    }
   }
   ctx.restore();
   return placement.rect;

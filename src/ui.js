@@ -28,7 +28,7 @@ import {
   isExplicitLayerStateOrigin,
   LayerStateCoordinator,
 } from './data/layerState.js';
-import { renderMapStackChips, syncMapStackChips } from './mapStackChips.js';
+import { renderMapStackChips, renderMapStackVariants, syncMapStackChips } from './mapStackChips.js';
 import { OrbitController } from './orbit.js';
 import {
   CelestialRing,
@@ -37,6 +37,11 @@ import {
   setKeyholeFadeTuning,
 } from './celestialRing.js';
 import { destroyTrackedReadout, initTrackedReadout } from './data/trackedReadout.js';
+import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
+import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
+import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
+import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
+import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
   destroyDetection,
@@ -2293,6 +2298,9 @@ export class StyleManager {
     this._scopeFeatherSlider = document.getElementById('scope-feather-slider');
     this._scopeFeatherValue = document.getElementById('scope-feather-value');
     this._mapStackChips = document.getElementById('map-stack-chips');
+    // Rad variantov rodiny podkladov (NASA): mapStackChips.js ho kreslí len
+    // keď je aktívny člen rodiny, inak je skrytý.
+    this._mapStackVariants = document.getElementById('map-stack-variants');
     this._mapStackStatus = document.getElementById('map-stack-status');
     this._cleanViewBtn = document.getElementById('clean-view-toggle');
     this._cleanViewExitBtn = document.getElementById('clean-view-exit');
@@ -2671,11 +2679,38 @@ export class StyleManager {
         }
         return null;
       },
+      // Zotrvanie nad strojom → vrstva si vypýta typ a trasu (adsbdb), aby
+      // kartička ukázala trasu, progres a IATA číslo aj bez kliknutia.
+      onDwell: ({ layerId, sourceId }) => {
+        this._dataManager?.layers?.get(layerId)?.module?.prefetchContactDetails?.(sourceId);
+      },
     });
     installDetectionHover(viewer, {
       onHover: (candidates, position) => updateContactHoverCard(candidates, position, t),
     });
     initTrackedReadout(viewer);
+    // Fotka sledovaného lietadla pod kartou (Planespotters Photo API, len
+    // klientsky — podmienky zdroja, viď trackedPhoto.js).
+    installTrackedPhoto(viewer, { container: document.body });
+    // Bohatá karta letiska po kliknutí (frekvencie, dráhy, METAR, živá
+    // premávka z vrstvy letov, odkazy) — viď airportCard.js.
+    installAirportCard(viewer, {
+      container: document.body,
+      nearbyFlights: (center, rangeM) => this._dataManager?.layers?.get('flights')?.module?.getNearby?.(center, rangeM, 40) || [],
+    });
+    // Karta sopky (volcanoCard.js): rovnaké CSS ako karta letiska, otvára ju vrstva vulkánov.
+    installVolcanoCard(viewer, {
+      container: document.body,
+      onClosed: () => this._dataManager?.layers?.get('volcanoes')?.module?.clearSelection?.(),
+    });
+    // Karta prírodnej udalosti (naturalEventCard.js): búrky/povodne/… s popisom.
+    installNaturalEventCard(viewer, {
+      container: document.body,
+      onClosed: () => this._dataManager?.layers?.get('natural-events')?.module?.clearSelection?.(),
+    });
+    // Vlajky na kartách sa ťahajú lenivo — dotiahnutá vlajka si vyžiada
+    // snímok, nech sa objaví aj na nehybnej kamere (render governor).
+    setFlagReadyListener(() => governorRequestRender());
     setDetectionStyle(this.activeStyle);
     this._applyDetectionDensityFromUi();
 
@@ -3598,6 +3633,9 @@ export class StyleManager {
   _renderMapStackState(state) {
     if (!state) return;
     syncMapStackChips(this._mapStackChips, state.activeId);
+    renderMapStackVariants(this._mapStackVariants, this.mapStackController?.getStacks?.() || [], state.activeId, {
+      onSelect: (stackId) => { this._setMapStack(stackId); },
+    });
     if (this._mapStackStatus) {
       const stack = state.activeStack;
       const label = state.status === 'switching'
@@ -9513,7 +9551,7 @@ export class StyleManager {
       const kind = document.createElement('span');
       kind.className = 'bookmark-kind';
       // Monochromatické glyfy, žiadne emoji (pravidlo projektu).
-      kind.textContent = bookmark.type === 'flight' ? '✈︎' : (bookmark.type === 'airport' ? '⊞' : '⌖');
+      kind.textContent = bookmark.type === 'flight' ? '✈︎' : (bookmark.type === 'airport' ? '⊗' : '⌖');
       go.append(kind, document.createTextNode(bookmark.name));
       go.addEventListener('click', () => this._openBookmark(bookmark));
 
@@ -10257,6 +10295,11 @@ export class StyleManager {
   _setDayNightEnabled(enabled) {
     this._dayNightEnabled = !!enabled;
     applyGlobeLighting(this.viewer?.scene, this._dayNightEnabled);
+    // Nočné svetlá miest (NASA Black Marble) idú s terminátorom, nie zvlášť:
+    // shader glóbusu mieša dayAlpha/nightAlpha len pri zapnutom osvetlení, bez
+    // neho by vrstva prekryla aj dennú stranu (nightLights.js). Vrstvu vlastní
+    // mapStackController — musí prežiť prepnutie podkladu a sadnúť navrch.
+    this.mapStackController?.setNightLightsEnabled?.(this._dayNightEnabled);
     this._syncDayNightButtonState();
   }
 
@@ -10718,6 +10761,11 @@ export class StyleManager {
       document.removeEventListener('gev:radio-selected', this._radioSelectedHandler);
       this._radioSelectedHandler = null;
     }
+    setFlagReadyListener(null);
+    destroyAirportCard();
+    destroyVolcanoCard();
+    destroyNaturalEventCard();
+    destroyTrackedPhoto();
     destroyTrackedReadout();
     destroyDetection();
     destroyWorldOverlay();

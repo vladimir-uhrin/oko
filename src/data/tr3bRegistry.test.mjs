@@ -213,8 +213,10 @@ test('a conversion survives a poll refresh, in both the billboard and the tracke
     // Live telemetry keeps flowing; only the class label is the operator's fiction.
     // Fixtúra stúpa 5 m/s → FL nesie trendový glyf ↑ (flightProgress,
     // FR24 blok 2026-08-31) — súčasť živej telemetrie, nie fikcie.
-    assert.match(entity.gevLabelModel.title, /^DAL123 · FL350↑ · 486 kts$/);
-    assert.deepEqual(entity.gevLabelModel.details.slice(0, 1), ['TR-3B'],
+    // Štruktúrovaná karta (2026-09-05): titulok = callsign, kinematika je prvý riadok.
+    assert.equal(entity.gevLabelModel.title, 'DAL123');
+    assert.equal(entity.gevLabelModel.details[0], 'FL350↑ 980 ft/min · 486 kts · 095°');
+    assert.deepEqual(entity.gevLabelModel.details.slice(1, 2), ['TR-3B'],
       'the tracked card class line reports TR-3B, replacing operator/type');
     assert.equal(
       [entity.gevLabelModel.title, ...entity.gevLabelModel.details].join(' · ').includes('Southwest'),

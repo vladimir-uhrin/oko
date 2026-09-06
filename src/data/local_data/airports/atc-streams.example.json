@@ -1,0 +1,4 @@
+{
+  "_comment": "Skopíruj ako atc-streams.local.json (git-ignorovaný). Kľúč = ICAO letiska. Len http(s) URL zvukového streamu, ktorý máš právo prehrávať (vlastné SDR + Icecast, otvorený stream letiska…). LiveATC streamy sem nepatria — ich podmienky tretím stranám použitie zakazujú.",
+  "LZIB": { "url": "https://example.invalid/lzib-tower.mp3", "label": "moje SDR · veža 118.300" }
+}

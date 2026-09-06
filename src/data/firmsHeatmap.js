@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { t } from '../i18n.js';
 import { governorRequestRender } from '../renderGovernor.js';
 import {
   registerSpriteCollection,
@@ -306,7 +307,7 @@ export function createFirmsHeatmapLayer({
       if (_loading) {
         loadingLabel = _fires.length ? 'refreshing...' : 'loading...';
       } else if (_keyRequired) {
-        loadingLabel = 'KEY REQUIRED';
+        loadingLabel = t('firms.key-required');
       } else if (_stale) {
         loadingLabel = staleText;
       } else if (_error) {
@@ -321,7 +322,7 @@ export function createFirmsHeatmapLayer({
         loading: _loading,
         stale: _stale,
         keyRequired: _keyRequired,
-        error: _keyRequired ? 'KEY REQUIRED' : (_stale ? staleText : _error),
+        error: _keyRequired ? t('firms.key-required') : (_stale ? staleText : _error),
         loadingLabel,
       };
     },

@@ -16,7 +16,13 @@ import {
   mapStackChipModels,
   renderMapStackChips,
   syncMapStackChips,
+  PRESENTED_CHIP_ENTRIES,
+  MAP_STACK_FAMILIES,
+  renderMapStackVariants,
+  mapStackFamilyOf,
+  _resetMapStackChipsForTest,
 } from './mapStackChips.js';
+import * as strings from './i18nStrings.js';
 
 /** Minimal element stand-in — the row only needs create/append/attr/class. */
 function makeElement(tagName = 'div') {
@@ -70,6 +76,11 @@ const CONTROLLER_STACKS = [
   // OKO 2026-09-03: tmavý podklad pre kontrast vzdušných kontaktov (keyless
   // na localhoste). Stojí ZA osm, aby indexy detí v testoch nižšie sedeli.
   { id: 'stadia-dark', label: 'Stadia Dark', requiresIon: false, available: true, unavailableReason: null },
+  // OKO 2026-09-05: denná satelitná mozaika NASA GIBS (keyless, verejné dáta).
+  { id: 'gibs-truecolor', label: 'NASA GIBS', requiresIon: false, available: true, unavailableReason: null },
+  // OKO 2026-09-06: statické NASA podklady — Blue Marble a ASTER reliéf.
+  { id: 'gibs-blue-marble', label: 'Blue Marble', requiresIon: false, available: true, unavailableReason: null },
+  { id: 'aster-relief', label: 'ASTER GDEM', requiresIon: false, available: true, unavailableReason: null },
   // OKO: SK Orto (ÚGKK WMS) je prezentovaný podklad — keyless, funkčný.
   { id: 'ugkk-ortofoto', label: 'ÚGKK Ortofoto SR', requiresIon: false, available: true, unavailableReason: null },
 ];
@@ -80,14 +91,20 @@ test('the row renders exactly the accepted sources', () => {
 
   // 2026-09-01: pribudol 'ugkk-ortofoto' — vrstva existovala od Fázy 1, ale
   // chýbala v allowliste, takže sa k nej používateľ nevedel preklikať.
+  // 2026-09-06: tri NASA rastre sú JEDEN čip rodiny (dataset.family = 'nasa'),
+  // ktorého cieľ je predvolený člen; varianty žijú v samostatnom rade.
   assert.deepEqual(container.children.map((chip) => chip.dataset.stackId), [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'gibs-truecolor', 'ugkk-ortofoto',
   ]);
   assert.deepEqual(container.children.map(chipText), [
-    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'Stadia Dark', 'ÚGKK Ortofoto SR',
+    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'Stadia Dark', 'NASA', 'ÚGKK Ortofoto SR',
+  ]);
+  assert.equal(container.children[5].dataset.family, 'nasa');
+  assert.deepEqual(PRESENTED_CHIP_ENTRIES, [
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', { family: 'nasa' }, 'ugkk-ortofoto',
   ]);
   assert.deepEqual(PRESENTED_MAP_STACK_IDS, [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto',
   ]);
   assert.ok(container.children.every((chip) => chip.tagName === 'button' && chip.type === 'button'));
   assert.ok(container.children.every((chip) => chip.classList.contains(MAP_STACK_CHIP_CLASS)));
@@ -111,7 +128,7 @@ test('internal and future stacks stay outside the approved presentation set', ()
   const withHybrid = [...CONTROLLER_STACKS, { id: 'hybrid', label: 'Hybrid', available: true }];
   renderMapStackChips(container, withHybrid, { activeId: 'photoreal', doc });
 
-  assert.equal(container.children.length, PRESENTED_MAP_STACK_IDS.length);
+  assert.equal(container.children.length, PRESENTED_CHIP_ENTRIES.length);
   assert.doesNotMatch(container.children.map(chipText).join(' '), /Hybrid/);
 });
 
@@ -120,7 +137,7 @@ test('re-rendering replaces the previous chips instead of stacking a second row'
   renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'photoreal', doc });
   renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'osm', doc });
 
-  assert.equal(container.children.length, PRESENTED_MAP_STACK_IDS.length);
+  assert.equal(container.children.length, PRESENTED_CHIP_ENTRIES.length);
 });
 
 test('clicking a chip dispatches that stack id — the same selection the dropdown made', () => {
@@ -376,4 +393,89 @@ test('the Visual Presets tray owns Map Source and the retired left panel is abse
     /_renderMapStackState\(state\) \{[\s\S]*?syncMapStackChips\(this\._mapStackChips, state\.activeId\)/,
     'the active chip must be re-synced from controller state',
   );
+});
+
+// ── Rodina NASA (2026-09-06, „zjednotiť prepínače a dať pod jedno NASA") ──
+
+test('rodina NASA: členovia sú v allowliste, rodina je jeden čip na pozícii prvého člena', () => {
+  const nasa = MAP_STACK_FAMILIES.find((f) => f.id === 'nasa');
+  assert.deepEqual([...nasa.memberIds], ['gibs-truecolor', 'gibs-blue-marble', 'aster-relief']);
+  assert.equal(nasa.defaultId, 'gibs-truecolor');
+  for (const id of nasa.memberIds) {
+    assert.ok(PRESENTED_MAP_STACK_IDS.includes(id), `${id} musí ostať v allowliste (tripwire)`);
+    assert.equal(mapStackFamilyOf(id)?.id, 'nasa');
+  }
+  assert.equal(mapStackFamilyOf('osm'), null);
+  assert.equal(mapStackFamilyOf(null), null);
+});
+
+test('rodina NASA: klik zapne predvolený člen, potom si pamätá naposledy aktívny (podľa stavu, nie kliku)', () => {
+  _resetMapStackChipsForTest();
+  const container = makeElement();
+  const selected = [];
+  renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'osm', onSelect: (id) => selected.push(id), doc });
+  const nasa = container.children[5];
+  assert.equal(nasa.getAttribute('aria-pressed'), 'false');
+  nasa.click();
+  assert.deepEqual(selected, ['gibs-truecolor'], 'prvý klik = predvolený člen');
+
+  // Controller potvrdil ASTER (napr. cez rad variantov) — rodina svieti a cieľ je ASTER.
+  syncMapStackChips(container, 'aster-relief');
+  assert.ok(nasa.classList.contains('active'));
+  assert.equal(nasa.getAttribute('aria-pressed'), 'true');
+  assert.equal(nasa.dataset.stackId, 'aster-relief');
+  nasa.click();
+  assert.deepEqual(selected, ['gibs-truecolor', 'aster-relief'], 'klik na zapnutú rodinu opakuje aktívneho člena (no-op prepnutie)');
+
+  // Odchod na OSM a späť: rodina si pamätá ASTER.
+  syncMapStackChips(container, 'osm');
+  assert.ok(!nasa.classList.contains('active'));
+  assert.equal(nasa.dataset.stackId, 'aster-relief');
+  nasa.click();
+  assert.equal(selected.at(-1), 'aster-relief');
+  _resetMapStackChipsForTest();
+});
+
+test('rad variantov: kreslí sa len pri aktívnom členovi rodiny, inak je skrytý', () => {
+  const row = makeElement();
+  const selected = [];
+  assert.deepEqual(renderMapStackVariants(row, CONTROLLER_STACKS, 'osm', { doc }), []);
+  assert.equal(row.hidden, true);
+  assert.equal(row.children.length, 0);
+
+  const models = renderMapStackVariants(row, CONTROLLER_STACKS, 'gibs-blue-marble', { onSelect: (id) => selected.push(id), doc });
+  assert.equal(row.hidden, false);
+  assert.deepEqual(models.map((m) => m.id), ['gibs-truecolor', 'gibs-blue-marble', 'aster-relief']);
+  assert.deepEqual(row.children.map(chipText), ['Today (VIIRS)', 'Blue Marble', 'Relief (ASTER)'], 'krátke lokalizované mená (Node = EN)');
+  assert.deepEqual(row.children.map((c) => c.getAttribute('aria-pressed')), ['false', 'true', 'false']);
+  assert.ok(row.children.every((c) => c.classList.contains('map-stack-chip--variant') && c.classList.contains(MAP_STACK_CHIP_CLASS)));
+  row.children[2].click();
+  assert.deepEqual(selected, ['aster-relief']);
+
+  // Nedostupný člen ostáva v rade, ale klik nejde do prepínania.
+  const partly = CONTROLLER_STACKS.map((s) => (s.id === 'aster-relief' ? { ...s, available: false, unavailableReason: 'ASTER down' } : s));
+  renderMapStackVariants(row, partly, 'gibs-truecolor', { onSelect: (id) => selected.push(id), doc });
+  assert.equal(row.children[2].getAttribute('aria-disabled'), 'true');
+  row.children[2].click();
+  assert.deepEqual(selected, ['aster-relief']);
+});
+
+test('rodina NASA: markup, ui wiring, i18n SK+EN', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="map-stack-variants"[^>]*hidden/, 'rad variantov štartuje skrytý');
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /renderMapStackVariants\(this\._mapStackVariants, /, 'rad sa kreslí zo stavu controllera');
+  const { EN_STRINGS, SK_STRINGS } = strings;
+  for (const key of ['mapstack.variant.gibs-truecolor', 'mapstack.variant.gibs-blue-marble', 'mapstack.variant.aster-relief', 'mapstack.family.nasa-title', 'presets.nasa-variant-aria']) {
+    assert.ok(EN_STRINGS[key] && SK_STRINGS[key], `chýba ${key}`);
+  }
+});
+
+test('fotoreál cez Cesium ion: title čipu nesie zdroj, nedostupný čip nesie dôvod z controllera', () => {
+  const viaIon = mapStackChipModel({ id: 'photoreal', label: 'Google 3D', available: true, sourceNote: 'via Cesium ion' }, 'photoreal');
+  assert.equal(viaIon.title, 'Google 3D · via Cesium ion');
+  const plain = mapStackChipModel({ id: 'photoreal', label: 'Google 3D', available: true, sourceNote: '' }, 'osm');
+  assert.equal(plain.title, 'Google 3D');
+  const blocked = mapStackChipModel({ id: 'photoreal', label: 'Google 3D', available: false, unavailableReason: 'Google 3D is unavailable: EEA block' }, 'osm');
+  assert.equal(blocked.title, 'Google 3D is unavailable: EEA block');
 });

@@ -1,4 +1,5 @@
 import { createLocalGeoJsonLayer } from './localGeojson.js';
+import { airportMarkerImage, portMarkerImage } from './localMarkerIcons.js';
 import { createFirmsHeatmapLayer } from './firmsHeatmap.js';
 import submarineCablesLayer from './telegeographySubmarineCables.js';
 import skEnergyLayer from './skEnergy.js';
@@ -39,12 +40,25 @@ const airports = createLocalGeoJsonLayer({
   id: AIRPORTS_LAYER_ID,
   url: airportsUrl,
   name: 'Airports',
-  color: '#8ab4f8', // Chladná letecká modrá — drží sa od cyan datacentier.
-  icon: '⊞',
+  // Magenta (2026-09-05, „aby sa to rozlíšilo, nie cyan"): pôvodná letecká
+  // modrá #8ab4f8 v cyanovej scéne (lety, AIS, káble, HUD) splývala. Magentu
+  // nepoužíva žiadna iná vrstva a na VFR leteckých mapách sa letiská kreslia
+  // práve ňou. Rovnakú farbu nesie DOM karta letiska (style.css .airport-card).
+  color: '#ff66d4',
+  // Krížne dráhy v kruhu — značka letiska z leteckých máp (2026-09-05:
+  // predchádzajúce '⊞' bola len škatuľa s plusom a nehovorila nič). Lietadlo
+  // '✈︎' patrí živým letom, takže letiská nesú svoju vlastnú, mapovú značku.
+  icon: '⊗',
   source: 'OurAirports',
   labels: true,
   labelMax: 700,
   labelGridPx: 140,
+  // Stupne popisu podľa priblíženia (2026-09-05: pri pohľade na strednú Európu
+  // zo 700 km bolo 25 trojriadkových kariet cez pol obrazovky). Ďaleko len
+  // kód veľkých letísk, bližšie kód s mestom, plná karta až pri priblížení.
+  labelLod: true,
+  // Na mape lietadlo v kruhu, nie bodka (2026-09-05: „a ikony si nezmenil").
+  markerImage: airportMarkerImage,
   // Klik na letisko → METAR cez /api/metar (aviationweather.gov, public
   // domain) a prebuild karty, keď odpoveď dorazí. Len pri výbere — nikdy
   // pre ambient kohortu (100 req/min je spoločný limit celej služby).
@@ -74,6 +88,11 @@ const ports = createLocalGeoJsonLayer({
   labels: true,
   labelMax: 700,
   labelGridPx: 140,
+  // Rovnaký dôvod ako pri letiskách: 3 807 prístavov s rovnakou škálou
+  // dôležitosti (veľký/stredný/malý) zaplavilo pobrežia kartami.
+  labelLod: true,
+  // Na mape kotva v kruhu.
+  markerImage: portMarkerImage,
 });
 
 const dams = createLocalGeoJsonLayer({

@@ -27,6 +27,7 @@
  */
 
 import fs from 'node:fs';
+import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -2707,8 +2708,16 @@ function adsbdbProxy() {
       name: a.municipality || a.name || '',
       lat: Number.isFinite(a.latitude) ? a.latitude : null,
       lon: Number.isFinite(a.longitude) ? a.longitude : null,
+      country: typeof a.country_iso_name === 'string' ? a.country_iso_name : null, // ISO2 → vlajka letiska na karte
     });
-    return { airline: fr.airline?.name || null, origin: airport(fr.origin), destination: airport(fr.destination) };
+    return {
+      airline: fr.airline?.name || null,
+      airlineIcao: fr.airline?.icao || null,
+      airlineIata: fr.airline?.iata || null,
+      callsignIata: typeof fr.callsign_iata === 'string' ? fr.callsign_iata.trim().toUpperCase() : null, // AF702 — IATA číslo letu na kartu
+      origin: airport(fr.origin),
+      destination: airport(fr.destination),
+    };
   }
 
   // `url_photo` / `url_photo_thumbnail` sa ZÁMERNE NEČÍTAJÚ (preverené
@@ -2738,6 +2747,7 @@ function adsbdbProxy() {
       typeCode: a.icao_type || null, // ICAO designator, e.g. "B738" — feeds classifyAircraft
       typeName: a.manufacturer && a.type ? `${a.manufacturer} ${a.type}` : (a.type || null),
       registration: a.registration || null,
+      countryIso: typeof a.registered_owner_country_iso_name === 'string' ? a.registered_owner_country_iso_name : null, // štát registrácie → vlajka
     };
   }
 
@@ -5178,6 +5188,123 @@ export function validMetarStation(value) {
   return /^[A-Z0-9]{4}$/.test(text) ? text : null;
 }
 
+/** Server TTL jedného vyhľadania živej kamery letiska (6 h) — výsledok search.list sa mení zriedka. */
+export const YOUTUBE_LIVE_CACHE_TTL_MS = 6 * 3600_000;
+/** Neúspešné vyhľadanie (nič živé) sa neopakuje skôr než po 30 min. */
+export const YOUTUBE_LIVE_NEGATIVE_TTL_MS = 30 * 60_000;
+/** Denný strop search.list volaní: 80 × 100 jednotiek = 8 000 z bezplatných 10 000/deň. */
+export const YOUTUBE_LIVE_DAILY_SEARCH_CAP = 80;
+
+/**
+ * Validátor dopytu kamery: krátky text (≤ 120 znakov) z písmen, číslic a bežnej
+ * interpunkcie názvov letísk. Čokoľvek iné → null (nič sa neposiela ďalej).
+ * @param {*} value Surová hodnota ?q=.
+ * @returns {string|null}
+ */
+export function validCameraQuery(value) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text || text.length > 120) return null;
+  return /^[\p{L}\p{N} .'’\-/&()]+$/u.test(text) ? text : null;
+}
+
+/**
+ * Vite plugin: YouTube Data API v3 proxy pre živé kamery letísk
+ * (`/api/youtube-live?q=Vienna airport VIE live`).
+ *
+ * Kľúč `YOUTUBE_API_KEY` ostáva na serveri (bez neho 503 {error:'no_key'} a
+ * karta mlčí). Jedno `search.list` s `eventType=live` stojí 100 jednotiek z
+ * bezplatných 10 000/deň, preto: 6 h cache na dopyt, 30 min pre prázdny
+ * výsledok, zlúčené súbežné dopyty, denný strop 80 vyhľadaní (potom 429
+ * {error:'quota'} alebo STALE z cache) a do klienta ide len orezaný snippet —
+ * nikdy surová odpoveď ani kľúč. Klient sa pýta len po VÝBERE letiska bez
+ * kurátorovanej kamery, nikdy pre ambientné popisy.
+ * @returns {import('vite').Plugin}
+ */
+function youtubeLiveProxy() {
+  /** @type {Map<string, {body:string, at:number, negative:boolean}>} */
+  const cache = new Map();
+  const inFlight = new Map();
+  let dayKey = ''; let searchesToday = 0;
+  function install(middlewares) {
+    middlewares.use('/api/youtube-live', async (req, res) => {
+      const send = (status, body, cacheStatus) => {
+        res.writeHead(status, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-YouTube-Live-Cache': cacheStatus,
+        });
+        res.end(body);
+      };
+      try {
+        const incoming = new URL(req.url || '', 'http://localhost');
+        const q = validCameraQuery(incoming.searchParams.get('q'));
+        if (!q) { send(400, JSON.stringify({ error: 'q required (letters/digits, max 120 chars)' }), 'INVALID'); return; }
+        const apiKey = process.env.YOUTUBE_API_KEY;
+        if (!apiKey) { send(503, JSON.stringify({ error: 'no_key' }), 'NONE'); return; }
+        const now = Date.now();
+        const cacheKey = q.toLowerCase();
+        const entry = cache.get(cacheKey);
+        if (entry && now - entry.at < (entry.negative ? YOUTUBE_LIVE_NEGATIVE_TTL_MS : YOUTUBE_LIVE_CACHE_TTL_MS)) {
+          send(200, entry.body, 'HIT'); return;
+        }
+        const today = new Date().toISOString().slice(0, 10);
+        if (today !== dayKey) { dayKey = today; searchesToday = 0; }
+        if (searchesToday >= YOUTUBE_LIVE_DAILY_SEARCH_CAP) {
+          if (entry) send(200, entry.body, 'STALE');
+          else send(429, JSON.stringify({ error: 'quota', searchesToday, cap: YOUTUBE_LIVE_DAILY_SEARCH_CAP }), 'QUOTA');
+          return;
+        }
+        const request = coalesceProxyRequest(inFlight, cacheKey, async () => {
+          searchesToday++;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10_000);
+          try {
+            const url = 'https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&eventType=live&maxResults=6&safeSearch=strict'
+              + `&q=${encodeURIComponent(q)}&key=${encodeURIComponent(apiKey)}`;
+            const upstream = await fetch(url, {
+              headers: { Accept: 'application/json', 'User-Agent': 'oko-youtube-live-proxy/1.0' },
+              signal: controller.signal,
+            });
+            if (!upstream.ok) throw new Error(`upstream HTTP ${upstream.status}`);
+            const payload = await readResponseJsonCapped(upstream, 256 * 1024);
+            // Do klienta len to, čo karta potrebuje (id + orezaný snippet) — nikdy
+            // surová odpoveď, nikdy kľúč.
+            const items = (Array.isArray(payload?.items) ? payload.items : []).map((i) => ({
+              id: { videoId: i?.id?.videoId },
+              snippet: {
+                title: i?.snippet?.title, description: String(i?.snippet?.description || '').slice(0, 300),
+                channelTitle: i?.snippet?.channelTitle, channelId: i?.snippet?.channelId,
+                liveBroadcastContent: i?.snippet?.liveBroadcastContent,
+              },
+            }));
+            const record = { body: JSON.stringify({ items }), at: Date.now(), negative: items.length === 0 };
+            cache.set(cacheKey, record);
+            while (cache.size > 500) cache.delete(cache.keys().next().value);
+            return record;
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        });
+        try {
+          const record = await request.promise;
+          send(200, record.body, request.shared ? 'INFLIGHT' : 'MISS');
+        } catch (error) {
+          if (!request.shared && error?.name !== 'AbortError') console.warn('[YouTube Live Proxy]', error?.message || error);
+          if (entry) send(200, entry.body, 'STALE');
+          else send(502, JSON.stringify({ error: 'youtube upstream failed' }), 'NONE');
+        }
+      } catch {
+        send(500, JSON.stringify({ error: 'youtube live proxy error' }), 'ERROR');
+      }
+    });
+  }
+  return {
+    name: 'oko-youtube-live-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 /**
  * Vite plugin: aviationweather.gov METAR proxy (`/api/metar?ids=LZIB`).
  *
@@ -5667,7 +5794,7 @@ function openAiRealtimeProxy() {
             // Fully expressible with tools that already exist, so
             // GEV_REALTIME_TOOLS is deliberately untouched — deleting this one
             // string is the whole rollback.
-            'NAMED VIEWS are shorthand for tool calls you already have — there is no "mode" tool for them. Treat ONLY these as the shorthand: "infrastructure mode" / "the infrastructure view" / "show me global infrastructure" means three set_layer_visibility calls (local-datacenters, local-dams, telegeography-submarine-cables) plus zoom_to_globe; "environmental mode" / "earth watch" / "active events", said as the name of a view, means set_layer_visibility for local-firms and earthquakes plus zoom_to_globe. Anything vaguer is NOT this shorthand — an open-ended question about the world or the news is an ordinary question: answer it, or use analyst_query over the layers already on. Never switch a whole view on to answer a question nobody asked to see. When you do run one, make every call before speaking, then give one confirmation naming the resulting state; if the fires layer comes back unavailable because no FIRMS key is configured, say so plainly — the earthquakes still loaded. "Live contacts" and "space missions" are NOT this pattern: they stay set_context_mode{mode:"contacts"} and set_context_mode{mode:"space-missions"}.',
+            'NAMED VIEWS are shorthand for tool calls you already have — there is no "mode" tool for them. Treat ONLY these as the shorthand: "infrastructure mode" / "the infrastructure view" / "show me global infrastructure" means three set_layer_visibility calls (local-datacenters, local-dams, telegeography-submarine-cables) plus zoom_to_globe; "natural hazards" / "prírodné hrozby" / "environmental mode" / "earth watch" / "active events", said as the name of a view, means set_layer_visibility for local-firms, earthquakes and volcanoes plus zoom_to_globe. Anything vaguer is NOT this shorthand — an open-ended question about the world or the news is an ordinary question: answer it, or use analyst_query over the layers already on. Never switch a whole view on to answer a question nobody asked to see. When you do run one, make every call before speaking, then give one confirmation naming the resulting state; if the fires layer comes back unavailable because no FIRMS key is configured, say so plainly and report the other layers according to their results. "Live contacts" and "space missions" are NOT this pattern: they stay set_context_mode{mode:"contacts"} and set_context_mode{mode:"space-missions"}.',
             'For visual filter requests, call set_visual_style with one of the allowed style IDs.',
             'Disambiguation table — basemap vs layer vs style: basemap switching requires an explicit stack name — "Bing aerial" means set_map_stack bing-aerial, "aerial with labels" means bing-labels, "OSM"/"road map" means osm, "Google 3D"/"photorealistic" means photoreal. Any mention of "satellite" or "satellites" ALWAYS means the satellites DATA LAYER via set_layer_visibility, never a basemap. "surveillance"/"night vision"/"thermal" are visual STYLES via set_visual_style.',
             'HUD requests ("hud on/off", "switch to operator/minimal/tactical layout") use set_hud. Detection requests ("detection on", "dense mode", "balanced mode", "sparse mode", "set density to 25", "use weighted allocation") use set_detection. Density snaps to 0/25/50/75/100 and derives Sparse/Balanced/Dense; panoptic is a legacy alias for Dense.',
@@ -6158,6 +6285,7 @@ const GEV_REALTIME_TOOLS = [
             'flights',
             'military',
             'earthquakes',
+            'volcanoes',
             'satellites',
             'rocket-launches',
             'traffic',
@@ -6192,6 +6320,7 @@ const GEV_REALTIME_TOOLS = [
             'flights',
             'military',
             'earthquakes',
+            'volcanoes',
             'satellites',
             'traffic',
             'cctv',
@@ -8129,6 +8258,7 @@ export default defineConfig(({ mode }) => {
       terrainHeightsProxy(),
       adsbdbProxy(),
       metarProxy(),
+      youtubeLiveProxy(),
       overpassProxy(),
       militaryInstallationsProxy(),
       regionalBriefProxy(),
@@ -8138,6 +8268,7 @@ export default defineConfig(({ mode }) => {
       gbfsProxy(),
       adsbLolProxy(),
       aisLiveProxy(),
+      earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),

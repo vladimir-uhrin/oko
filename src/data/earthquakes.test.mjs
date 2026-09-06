@@ -9,7 +9,7 @@ import {
   EARTHQUAKE_OVERLAY_COHORT_LIMIT,
   EARTHQUAKE_OVERLAY_COLLISION_CAPACITY,
   createEarthquakeOverlayEntry,
-  createEarthquakesLayer,
+  createEarthquakesLayer as createProductionEarthquakesLayer,
   mapAnalystRecord,
   selectEarthquakeOverlayCohort,
 } from './earthquakes.js';
@@ -19,6 +19,8 @@ import {
   installRenderGovernor,
   _resetRenderGovernorForTest,
 } from '../renderGovernor.js';
+
+const createEarthquakesLayer = options => createProductionEarthquakesLayer({ sources: ['USGS'], now: () => 1_753_600_200_000, ...options });
 
 const FULL_RAW = {
   id: 'us7000abcd',

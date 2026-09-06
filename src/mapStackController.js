@@ -2,6 +2,15 @@ import * as Cesium from 'cesium';
 import { t } from './i18n.js';
 import { governorRequestRender } from './renderGovernor.js';
 import { resolveKeylessTerrainUrl, SK_TERRAIN_CREDIT } from './data/skTerrain.js';
+import { createNightLightsProvider, styleNightLightsLayer } from './nightLights.js';
+import { lightingFadeFactor } from './globeLighting.js';
+import { gibsImageryDay } from './gibsTime.js';
+import { IMAGERY_ROLE, tagImageryRole } from './imageryOrder.js';
+import { basemapContrastForStack } from './data/contactPalette.js';
+
+// Deň snímky žije v gibsTime.js (zdieľa ho aj data/gibsOverlays.js); tu sa
+// re-exportuje, lebo testy a staršie importy ho čítajú odtiaľto.
+export { gibsImageryDay };
 
 export const MAP_STACKS = [
   {
@@ -78,6 +87,68 @@ export const MAP_STACKS = [
     },
   },
   {
+    id: 'gibs-truecolor',
+    label: 'NASA GIBS',
+    shortLabel: 'NASA',
+    kind: 'xyz',
+    requiresIon: false,
+    // Denná globálna mozaika VIIRS (NOAA-20) v pravých farbách z NASA GIBS:
+    // oblačnosť, dym, ľad a vír počasia presne tak, ako ich satelit videl
+    // v deň snímky. Keyless, CORS, dáta NASA (DATA_SOURCES.md).
+    //
+    // POZOR NA PORADIE INDEXOV: GIBS je WMTS REST, teda
+    // TileMatrix/TileRow/TileCol = z/y/x — NIE z/x/y ako bežné XYZ služby.
+    // Prehodené indexy vrátia HTTP 200 s cudzou dlaždicou, takže sa to
+    // neprejaví ako chyba, ale ako rozhádzaná mapa.
+    //
+    // Level 9 je maximum tejto vrstvy (~300 m/px); bližšie Cesium dlaždice
+    // zväčšuje, čo je poctivejšie než ich nenájsť. Deň sa berie včerajší
+    // (viď gibsImageryDay) — mozaika sa spracúva s odstupom.
+    xyz: {
+      url: `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/${gibsImageryDay()}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
+      tileSize: 256,
+      maximumLevel: 9,
+      credit: 'NASA EOSDIS GIBS / Worldview · VIIRS NOAA-20',
+    },
+  },
+  {
+    id: 'gibs-blue-marble',
+    label: 'Blue Marble',
+    shortLabel: 'MARBLE',
+    kind: 'xyz',
+    requiresIon: false,
+    // Klasický Blue Marble (MODIS, 2004) so stieňovaným reliéfom a batymetriou
+    // (2026-09-06, „urob 3"): bezoblačná, celistvá guľa bez dier — čistý
+    // kartografický podklad tam, kde denná mozaika (gibs-truecolor) nesie
+    // oblačnosť a včerajšie diery. STATICKÁ vrstva: v pozícii času ide
+    // literál `default` (dátum vráti HTTP 400), preto tu NIE JE
+    // gibsImageryDay(). WMTS REST z/y/x, Level 8 (~600 m/px) je maximum.
+    // Kontrast: satelitná stredná tonalita → 'dark' (biele siluety), ako Bing.
+    xyz: {
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/BlueMarble_ShadedRelief_Bathymetry/default/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpeg',
+      tileSize: 256,
+      maximumLevel: 8,
+      credit: 'NASA EOSDIS GIBS / Worldview · Blue Marble (MODIS)',
+    },
+  },
+  {
+    id: 'aster-relief',
+    label: 'ASTER GDEM',
+    shortLabel: 'RELIEF',
+    kind: 'xyz',
+    requiresIon: false,
+    // Výškopis vo farbe so stieňovaným reliéfom z ASTER GDEM (METI/NASA):
+    // Level 12 (~40 m/px) — najbližšie, čo z GIBS na glóbus dostaneme, a
+    // prirodzený súlad s terénnou Fázou 1b (DMR 3.5 nad SR). Rovnako statický
+    // ako Blue Marble (čas `default`). Povinný kredit METI/NASA je v credit.
+    xyz: {
+      url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/ASTER_GDEM_Color_Shaded_Relief/default/default/GoogleMapsCompatible_Level12/{z}/{y}/{x}.jpeg',
+      tileSize: 256,
+      maximumLevel: 12,
+      credit: 'NASA EOSDIS GIBS / Worldview · ASTER GDEM is a product of METI and NASA',
+    },
+  },
+  {
     id: 'ugkk-ortofoto',
     label: 'ÚGKK Ortofoto SR',
     shortLabel: 'SK Orto',
@@ -122,6 +193,11 @@ const REEARTH_TERRAIN_URL = 'https://terrain.reearth.land/cesium-mesh/ellipsoid'
 export class MapStackController {
   constructor(viewer, {
     googleTileset = null,
+    // Odkiaľ fotoreál tečie ('google' | 'ion' | null) a prečo je nedostupný
+    // (text pre tooltip čipu). Obe sú vstupy z bootu (photorealTileset.js) —
+    // controller ich len nesie do prezentácie, nič z nich nerozhoduje.
+    photorealSource = null,
+    photorealUnavailableReason = null,
     cesiumToken = '',
     initialStack = 'photoreal',
     onChange = null,
@@ -130,6 +206,10 @@ export class MapStackController {
   } = {}) {
     this.viewer = viewer;
     this.googleTileset = googleTileset;
+    this._photorealSource = photorealSource === 'ion' || photorealSource === 'google' ? photorealSource : null;
+    this._photorealUnavailableReason = typeof photorealUnavailableReason === 'string' && photorealUnavailableReason.trim()
+      ? photorealUnavailableReason.trim()
+      : null;
     this.cesiumToken = String(cesiumToken || '').trim();
     // Ktorý terén dostane globe stack (OKO):
     //   'auto'  — s ion tokenom Cesium World Terrain, bez neho merge/keyless
@@ -149,6 +229,17 @@ export class MapStackController {
     this._imageryLayer = null;
     /** Optional base under a coverage-limited stack (see `underlayStackId`). */
     this._underlayLayer = null;
+    /**
+     * Nočné svetlá miest (NASA Black Marble) nad podkladom. Pridáva ich
+     * prepínač Deň/noc, nie výber stacku — vrstva teda musí prežiť prepnutie
+     * podkladu a zakaždým sadnúť NAVRCH. Provider sa stavia lenivo a cachuje
+     * sa mimo `_imageryProviders` (nie je to stack, nedá sa zvoliť).
+     */
+    this._nightLightsLayer = null;
+    this._nightLightsProvider = null;
+    this._nightLightsEnabled = false;
+    /** Remover preRender listenera, ktorý tlmí svetlá s výškou (viď _applyNightLightsFade). */
+    this._nightLightsFadeRemover = null;
     this._imageryProviders = new Map();
     this._isSwitching = false;
     this._lastError = null;
@@ -192,6 +283,9 @@ export class MapStackController {
       return {
         ...stack,
         available,
+        // Fotoreál cez Cesium ion: chip title to povie (pravidlo 2 — zdroj
+        // dát viditeľný), lebo kredity dole sú pre bežné oko malé.
+        sourceNote: stack.kind === 'photoreal' && this._photorealSource === 'ion' ? t('mapstack.via-ion') : '',
         // Why this stack can't be picked, from the ONE place that decides it.
         // A stack can be unavailable for reasons other than a missing ion
         // token (photoreal is unavailable when the Google tileset failed to
@@ -208,9 +302,13 @@ export class MapStackController {
    * @returns {string}
    */
   _unavailableReason(stack) {
-    return stack?.requiresIon
-      ? t('mapstack.ion-required-bing')
-      : t('mapstack.unavailable', { label: stack?.label || t('mapstack.this-stack') });
+    if (stack?.requiresIon) return t('mapstack.ion-required-bing');
+    // Fotoreál má konkrétny dôvod z bootu (EHP 403, sieť…) — bez neho by
+    // tooltip hovoril len „nedostupný" a používateľ by hľadal chybu u seba.
+    if (stack?.kind === 'photoreal' && this._photorealUnavailableReason) {
+      return t('mapstack.unavailable-because', { label: stack.label, reason: this._photorealUnavailableReason });
+    }
+    return t('mapstack.unavailable', { label: stack?.label || t('mapstack.this-stack') });
   }
 
   getStack(id) {
@@ -311,13 +409,102 @@ export class MapStackController {
       terrainMode: this._terrainMode,
       terrainPreference: this.terrainPreference,
       terrainSource: this._terrainSource,
+      photorealSource: this._photorealSource,
     };
+  }
+
+  /**
+   * Zapni/vypni nočné svetlá miest nad podkladom.
+   *
+   * Volá to prepínač Deň/noc (ui.js), pretože vrstva bez zapnutého osvetlenia
+   * glóbusu nefunguje — miešanie `dayAlpha`/`nightAlpha` je v shaderi pod
+   * `ENABLE_DAYNIGHT_SHADING`, takže bez terminátora by Black Marble prekryl
+   * aj dennú stranu (nightLights.js).
+   * @param {boolean} enabled
+   * @returns {boolean} výsledný stav
+   */
+  setNightLightsEnabled(enabled) {
+    this._nightLightsEnabled = enabled === true;
+    this._syncNightLightsLayer(this.getActiveStack());
+    governorRequestRender("night-lights");
+    return this._nightLightsEnabled;
+  }
+
+  /** Je vrstva nočných svetiel naozaj v scéne? (QA/testy, nie stav prepínača.) */
+  hasNightLightsLayer() {
+    return !!this._nightLightsLayer;
+  }
+
+  /**
+   * Jediný zapisovač vrstvy nočných svetiel. Berie CIEĽOVÝ stack, nie
+   * `getActiveStack()`: počas prepnutia je `_activeId` ešte starý (commit
+   * robí až `setStack`), takže prechod fotoreál → glóbus by sa inak vyhodnotil
+   * podľa fotoreálu a vrstva by nepribudla.
+   *
+   * Odobratie a opätovné pridanie NIE JE zbytočné: `_activateGlobeStack`
+   * vkladá podklad na index 0/1 a svetlá musia ostať navrchu. Vrstva sa
+   * odoberá s `destroy = false`, takže sa recykluje tá istá inštancia.
+   * @param {object|null} stack Cieľový stack descriptor.
+   */
+  _syncNightLightsLayer(stack) {
+    const wanted = this._nightLightsEnabled && !!stack && stack.kind !== "photoreal";
+    if (this._nightLightsLayer) {
+      this.viewer.imageryLayers.remove(this._nightLightsLayer, false);
+      if (!wanted) this._nightLightsLayer = null;
+    }
+    if (!wanted) {
+      this._detachNightLightsFade();
+      return;
+    }
+    if (!this._nightLightsLayer) {
+      this._nightLightsProvider = this._nightLightsProvider || createNightLightsProvider();
+      this._nightLightsLayer = tagImageryRole(new Cesium.ImageryLayer(this._nightLightsProvider), IMAGERY_ROLE.nightLights);
+    }
+    // Štýl sa píše pri KAŽDOM usadení: zosilnenie svetiel závisí od kontrastu
+    // cieľového podkladu (svetlá OSM 3×, tmavé 1,8×) — recyklovaná vrstva by
+    // inak niesla zosilnenie predchádzajúcej mapy.
+    styleNightLightsLayer(this._nightLightsLayer, basemapContrastForStack(stack));
+    // Bez indexu = navrch nad podklad aj prípadný underlay.
+    this.viewer.imageryLayers.add(this._nightLightsLayer);
+    this._attachNightLightsFade();
+  }
+
+  /**
+   * Svetlá musia ísť s osvetlením aj VÝŠKOVO. Cesium mieša dayAlpha/nightAlpha
+   * len podľa Slnka (nightBlend), nie podľa vzdialenosti — keď pod 1 500 km
+   * osvetlenie vyhasne a mesto v noci dostane dennú mapu (globeLighting.js),
+   * svetlá by ostali svietiť cez jasný podklad ako žlté fľaky. Preto vrstva
+   * dostáva `alpha` = ten istý fade, aký počíta shader. preRender ako
+   * scopeMask/orbit: beží len keď sa kreslí frame, jedna clamp na frame,
+   * zápis len pri zmene.
+   */
+  _attachNightLightsFade() {
+    this._applyNightLightsFade();
+    if (this._nightLightsFadeRemover) return;
+    const preRender = this.viewer?.scene?.preRender;
+    if (typeof preRender?.addEventListener !== "function") return;
+    this._nightLightsFadeRemover = preRender.addEventListener(() => this._applyNightLightsFade());
+  }
+
+  _detachNightLightsFade() {
+    if (typeof this._nightLightsFadeRemover === "function") this._nightLightsFadeRemover();
+    this._nightLightsFadeRemover = null;
+  }
+
+  _applyNightLightsFade() {
+    const layer = this._nightLightsLayer;
+    if (!layer) return;
+    const alpha = lightingFadeFactor(this.viewer?.scene?.camera?.positionCartographic?.height);
+    if (Math.abs((layer.alpha ?? 1) - alpha) > 0.005) layer.alpha = alpha;
   }
 
   async _activatePhotoreal(gen) {
     this._removeImageryLayer();
     if (this.googleTileset) this.googleTileset.show = true;
     this.viewer.scene.globe.show = false;
+    // Glóbus je skrytý — nočné svetlá nemajú čo osvetľovať a v kolekcii by
+    // len viseli. Prepínač Deň/noc si stav pamätá, návrat na glóbus ich vráti.
+    this._syncNightLightsLayer(this.getStack("photoreal"));
     // Terrain is left UNTOUCHED here. The photoreal globe is hidden
     // (`globe.show = false`), so the terrain provider is inert — it renders and
     // streams nothing. Routing this through `_setWorldTerrainEnabled(false)`
@@ -342,10 +529,12 @@ export class MapStackController {
     this._removeImageryLayer();
 
     if (underlayProvider) {
-      this._underlayLayer = new Cesium.ImageryLayer(underlayProvider);
+      this._underlayLayer = tagImageryRole(new Cesium.ImageryLayer(underlayProvider), IMAGERY_ROLE.underlay);
       this.viewer.imageryLayers.add(this._underlayLayer, 0);
     }
-    this._imageryLayer = new Cesium.ImageryLayer(provider);
+    // Rola vrstvy (imageryOrder.js): prekryvy NASA GIBS z data/gibsOverlays.js
+    // sa vkladajú podľa nej — vždy nad podklad a POD nočné svetlá.
+    this._imageryLayer = tagImageryRole(new Cesium.ImageryLayer(provider), IMAGERY_ROLE.base);
     // Voliteľné stlmenie podkladu (2026-09-04). Raster dlaždice majú popisy
     // zapečené v obrázku — text sa z nich vypnúť nedá. Stlmenie je jediná
     // páka, ktorá ich pošle do pozadia bez toho, aby sa menil zdroj: mapa
@@ -358,6 +547,9 @@ export class MapStackController {
       if (Number.isFinite(adjust.saturation)) this._imageryLayer.saturation = adjust.saturation;
     }
     this.viewer.imageryLayers.add(this._imageryLayer, underlayProvider ? 1 : 0);
+
+    // Až po podklade — svetlá patria navrch (a po každom prepnutí znova).
+    this._syncNightLightsLayer(stack);
 
     if (this.googleTileset) this.googleTileset.show = false;
     this.viewer.scene.globe.show = true;
@@ -454,8 +646,15 @@ export class MapStackController {
     const targetMode = enabled ? 'world' : 'keyless';
     if (targetMode === this._terrainMode) return;
     if (enabled) {
+      // BEZ vertex normál — a nie je to úspora. Shader glóbusu definuje
+      // ENABLE_DAYNIGHT_SHADING len keď terén normály NEMÁ (s nimi berie
+      // ENABLE_VERTEX_LIGHTING) a jedine pod tým prvým sa mieša
+      // dayAlpha/nightAlpha imagery vrstiev: s normálami by nočné svetlá
+      // (nightLights.js) potichu prekryli aj dennú stranu — presne to sa stalo
+      // 2026-09-06. Hillshade z normál by aj tak nebolo vidieť: osvetlenie je
+      // pod 1 500 km vypnuté (globeLighting.js) a nad tým je reliéf sub-pixel.
       this.viewer.scene.setTerrain(Cesium.Terrain.fromWorldTerrain({
-        requestVertexNormals: true,
+        requestVertexNormals: false,
       }));
       this._terrainSource = 'cesium-world';
     } else {

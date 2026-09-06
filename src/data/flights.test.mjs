@@ -302,14 +302,15 @@ test('fallback identity fields reach the tracked card: operator · type · regis
   };
   try {
     await flightsLayer.update(viewer);
-    // Viacriadkový label: title nesie celý prvý riadok (viď pin 'N12345 ·
-    // FL350 · 486 kts' nižšie) — hlavička karty je callsign + kinematika.
-    assert.match(entity.gevLabelModel.title, /^UPS275 · FL350/);
+    // Štruktúrovaná karta (2026-09-05): titulok je len volací znak, kinematika
+    // je prvý riadok detailov (viď pin 'N12345' nižšie).
+    assert.equal(entity.gevLabelModel.title, 'UPS275');
+    assert.match(entity.gevLabelModel.details[0], /^FL350 · 486 kts/);
     // No airline (no adsbdb route yet) → the feed operator substitutes; the
     // full desc outranks the raw type code; the registration differs from the
     // headline callsign, so it earns its slot.
     assert.equal(
-      entity.gevLabelModel.details[0],
+      entity.gevLabelModel.details[1],
       'UNITED PARCEL SERVICE CO · BOEING 767-300 · N397UP',
     );
     assert.equal(flightsLayer.getTrackedInfo()?.registration, 'N397UP');
@@ -349,8 +350,9 @@ test('adsbdb enrichment outranks feed identity, and a registration headline is n
     // Enrichment wins over feed desc; the headline IS the registration
     // (callsign-less chain: callsign → registration → hex), so the ident
     // line must not repeat it.
-    assert.match(seeded.entity.gevLabelModel.title, /^OM-XYZ · FL350/);
-    assert.equal(seeded.entity.gevLabelModel.details[0], 'UNITED PARCEL SERVICE CO · Boeing 767-300F');
+    assert.equal(seeded.entity.gevLabelModel.title, 'OM-XYZ');
+    assert.match(seeded.entity.gevLabelModel.details[0], /^FL350/);
+    assert.equal(seeded.entity.gevLabelModel.details[1], 'UNITED PARCEL SERVICE CO · Boeing 767-300F');
     assert.equal(flightsLayer.getTrackedInfo()?.registration, 'OM-XYZ');
   } finally {
     globalThis.fetch = realFetch;
@@ -477,12 +479,23 @@ test('real civil track path creates no native label and publishes every cached h
     assert.ok(entity instanceof Cesium.Entity, 'trackById must create the real Cesium entity');
     assert.equal(entity.label, undefined);
     assert.ok(entities.values.every((candidate) => candidate.label === undefined));
-    assert.deepEqual(entity.gevLabelModel, {
-      title: 'N12345 · FL350 · 486 kts',
-      // FR24 blok (2026-08-31): trasa + textový progress bar s ETA — fixtúra
-      // sedí ~400 m od AUS, takže 0 % a ETA ~2:13 pri 250 m/s je korektný
-      // výstup routeProgress, nie regresia.
-      details: ['TEST AIR · A320', 'AUS → LAX', '▱▱▱▱▱▱▱▱ 0% · ETA 2:13'],
+    // Štruktúrovaná karta (2026-09-05): titulok = callsign, kinematika je
+    // prvý riadok, trasa a progres sú vlastné riadky s vlajkami a kresleným
+    // barom (letiská fixtúry nemajú štát → vlajky null).
+    const { progress, footer, ...model } = entity.gevLabelModel;
+    // FR24 blok (2026-08-31): fixtúra sedí ~400 m od AUS, takže 0 % a ETA
+    // ~2:13 pri 250 m/s je korektný výstup routeProgress, nie regresia.
+    assert.ok(progress.fraction >= 0 && progress.fraction < 0.001);
+    // Zostatok v km a miestna hodina príletu (2026-09-05, „viac informácií o lete").
+    assert.match(progress.label, /^0 % · 1\u202f99\d km left · ETA 2:13 \(\d\d:\d\d\)$/);
+    assert.equal(footer.length, 1, 'footer = riadok o dátach');
+    // Fixtúra nemá lastContactEpochMs → bez veku fixu; hex sa hlási veľkými písmenami.
+    assert.match(footer[0], /^OpenSky Network · (fix d+ s ago · )?CIV001$/, 'zdroj (a vek fixu, keď je) + hex');
+    assert.deepEqual(model, {
+      title: 'N12345',
+      details: ['FL350 · 486 kts · 095°', 'TEST AIR · A320'],
+      titleFlag: null, // fixtúra nemá origin_country ani adsbdb ISO — bez vlajky
+      route: { origin: { label: 'AUS', iso2: null }, destination: { label: 'LAX', iso2: null } },
       accent: '#39d0ff',
     });
     viewer.scene.preUpdate.raiseEvent();

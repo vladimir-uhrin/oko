@@ -65,6 +65,7 @@ Priebežne dopĺňaj, ako sa veci preveria:
 | ÚGKK geoportál | ortofoto SR | ✅ preverené 2026-08-30 — WMS, CC BY 4.0, implementované ako stack `ugkk-ortofoto` (docs/SK-NOTES.md, Fáza 1) |
 | ÚGKK geoportál | LiDAR DMR 5.0 | čiastočne — CC BY 4.0 download existuje, terrain vyžaduje self-host (SK-NOTES, Fáza 1b); znenie licencie preveriť pri realizácii |
 | data.slovensko.sk | register datasetov | nepreverené |
+| bts.aero /web-kamera/ | letisková kamera BTS (JPEG) | ⚠️ preverené 2026-09-06 — JPEG 1920×1080 (~228 kB) cez Cloudflare, aktuálna snímka á 5 min + hodinový archív 24 h (25 súborov s hashom, cache max-age rok, ETag); robots.txt nezakazuje; data.slovensko.sk nič; sitemap (1 068 URL) NEMÁ všeobecné podmienky použitia ani copyright k obsahu (len B2B obchodné podmienky a ochrana údajov bez zmienky o kamere) → podmienky neuvedené = nie súhlas, čaká na rozhodnutie používateľa; bez súhlasu prevádzkovateľa neintegrovať |
 
 ## Čo nikdy
 

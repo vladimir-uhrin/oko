@@ -10,3 +10,6 @@ output/
 .DS_Store
 .gstack/
 3d-models/
+
+# Vlastné ATC streamy (URL si drží používateľ, viď airportCard.js)
+src/data/local_data/airports/atc-streams.local.json
