@@ -4,6 +4,7 @@ import { governorRequestRender } from '../renderGovernor.js';
 import { gibsImageryDayOffset } from '../gibsTime.js';
 import { insertOverlayLayer } from '../imageryOrder.js';
 import { densityZoomFactor } from './densityDrape.js';
+import { getGibsDayOffset, gibsDayForOffset, onGibsDayChange } from './gibsDay.js';
 import { getActiveMapStack, isGlobeHiddenForStack, onActiveMapStackChange } from './activeMapStack.js';
 
 /**
@@ -230,11 +231,16 @@ export function createGibsOverlayLayer(def, {
   /** Deň, ktorý vrstva práve kreslí (YYYY-MM-DD) — null pred prvým enable. */
   let _day = null;
   let _stale = false;
+  /** Vrstva kreslí zvolený starší deň (posuvník), nie najnovší — riadok to hovorí. */
+  let _historical = false;
+  /** Posun posuvníka, pre ktorý bol `_day` určený — enable po zmene posunu ho musí prepočítať. */
+  let _dayOffset = 0;
   let _lastError = null;
   let _lastUpdate = null;
   let _imageryLayer = null;
   let _rowControlsListener = null;
   let _unbindStack = null;
+  let _unbindDay = null;
   /** Remover preRender listenera zoom-fadu (jedna clamp na frame, zápis len pri zmene). */
   let _fadeRemover = null;
   const fade = gibsOverlayFade(def.level);
@@ -281,26 +287,41 @@ export function createGibsOverlayLayer(def, {
   };
 
   /**
-   * Nájdi najnovší dostupný deň: včera, inak späť po GIBS_OVERLAY_MAX_DAYS_BACK.
-   * @returns {Promise<{day: string|null, stale: boolean, error: string|null}>}
+   * Nájdi deň, ktorý sa má kresliť.
+   * Posuvník na 0 → najnovší dostupný: včera, inak späť po
+   * GIBS_OVERLAY_MAX_DAYS_BACK (STALE). Posuvník na n → PRESNE ten deň —
+   * žiadne ustupovanie, používateľ chcel konkrétny dátum; ak GIBS deň nemá,
+   * riadok to povie a vrstva ostane na poslednom dobrom dni.
+   * @returns {Promise<{day: string|null, stale: boolean, historical: boolean, error: string|null}>}
    */
   const resolveDay = async () => {
     const nowMs = now();
+    const offset = getGibsDayOffset();
+    if (offset > 0) {
+      const day = gibsDayForOffset(offset, nowMs);
+      try {
+        const response = await doFetch(gibsOverlayProbeUrl(def, day));
+        if (response?.ok) return { day, stale: false, historical: true, error: null };
+        return { day: null, stale: false, historical: true, error: t('gibs.day-missing', { day }) };
+      } catch (error) {
+        return { day: null, stale: false, historical: true, error: t('gibs.network-error') };
+      }
+    }
     let lastStatus = null;
     for (let back = 1; back <= GIBS_OVERLAY_MAX_DAYS_BACK; back += 1) {
       const day = gibsImageryDayOffset(back, nowMs);
       try {
         const response = await doFetch(gibsOverlayProbeUrl(def, day));
-        if (response?.ok) return { day, stale: back > 1, error: null };
+        if (response?.ok) return { day, stale: back > 1, historical: false, error: null };
         lastStatus = response?.status ?? null;
         // 400 = deň mimo rozsahu (ešte nespracovaný) → skúsiť starší; iný
         // kód (5xx, 429) je porucha služby, nie chýbajúci deň.
         if (lastStatus !== 400 && lastStatus !== 404) break;
       } catch (error) {
-        return { day: null, stale: false, error: t('gibs.network-error') };
+        return { day: null, stale: false, historical: false, error: t('gibs.network-error') };
       }
     }
-    return { day: null, stale: false, error: t('gibs.unavailable', { status: lastStatus ?? '?' }) };
+    return { day: null, stale: false, historical: false, error: t('gibs.unavailable', { status: lastStatus ?? '?' }) };
   };
 
   const layer = {
@@ -323,13 +344,21 @@ export function createGibsOverlayLayer(def, {
       // Prepnutie na fotoreál / späť mení, čo riadok hovorí — prekresliť ho.
       _unbindStack?.();
       _unbindStack = onActiveMapStackChange(() => { _rowControlsListener?.(); });
+      // Posuvník dňa: zapnutá vrstva sa prestaví hneď (update je idempotentný
+      // a manažér sa o výsledok dozvie cez rowControls listener).
+      _unbindDay?.();
+      _unbindDay = onGibsDayChange(() => { if (_enabled) layer.update(); });
     },
 
     enable() {
       _enabled = true;
       // Kresliť hneď, s najpravdepodobnejším dňom (včera); update() ho overí
       // a prípadne ustúpi. Prázdny glóbus do prvej sondy by vyzeral ako chyba.
-      if (!_day) _day = gibsImageryDayOffset(1, now());
+      const offset = getGibsDayOffset();
+      if (!_day || offset !== _dayOffset) {
+        _day = gibsDayForOffset(offset, now());
+        _dayOffset = offset;
+      }
       mountLayer();
     },
 
@@ -348,6 +377,8 @@ export function createGibsOverlayLayer(def, {
       }
       _lastError = null;
       _stale = resolved.stale;
+      _historical = resolved.historical;
+      _dayOffset = getGibsDayOffset();
       // Deň mozaiky = čas produktu (00:00 UTC), nie čas našej sondy — vek
       // v paneli má hovoriť, aké staré je počasie, nie ako dávno sme sa pýtali.
       _lastUpdate = Date.parse(`${resolved.day}T00:00:00Z`);
@@ -365,6 +396,8 @@ export function createGibsOverlayLayer(def, {
       removeLayer();
       _unbindStack?.();
       _unbindStack = null;
+      _unbindDay?.();
+      _unbindDay = null;
       _viewer = null;
       _day = null;
       _lastError = null;
@@ -417,6 +450,7 @@ export function createGibsOverlayLayer(def, {
         stale: _stale,
         error: hidden ? t('gibs.globe-only') : _lastError,
         day: _day,
+        historical: _historical,
       };
     },
   };

@@ -10028,6 +10028,28 @@ body.scene-playback-mode #radar-legend {
   color: var(--text-secondary);
 }
 
+/* Posuvník dňa mozaiky v skupine „Zem zo satelitu" (gibsOverlayPanel.js). */
+.gibs-day-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+}
+.gibs-day-row .gibs-day-label {
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-dim);
+}
+.gibs-day-row .gibs-day-value {
+  min-width: 120px;
+  text-align: right;
+  color: var(--accent);
+}
+
 .natural-hazards-card > .data-toggle-row + .data-toggle-row {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 0;

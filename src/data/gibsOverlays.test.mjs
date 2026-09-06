@@ -26,6 +26,7 @@ import {
   setActiveMapStack,
 } from './activeMapStack.js';
 import { REGISTERED_LAYER_IDS } from './layerState.js';
+import { _resetGibsDayForTest, setGibsDayOffset } from './gibsDay.js';
 import { EN_STRINGS, SK_STRINGS } from '../i18nStrings.js';
 
 const NOW = Date.UTC(2026, 8, 6, 15, 0); // 2026-09-06 15:00 UTC
@@ -297,4 +298,52 @@ test('zoom-fade: prahy z úrovne dlaždíc, alfa = krytie × faktor, pod fadeOut
   assert.equal(scene.preRender.listeners.length, 1, 'enable ho pripojí znova, nie dvakrát');
   layer.destroy();
   assert.equal(scene.preRender.listeners.length, 0);
+});
+
+test('posuvník dňa: n > 0 = presne ten deň bez ustupovania, chýbajúci deň = chyba, zmena prestaví zapnutú vrstvu', async () => {
+  _resetActiveMapStackForTest();
+  _resetGibsDayForTest();
+  const def = GIBS_OVERLAYS[0];
+  const { layer, fetchImpl, built } = makeLayer(def, { statusByDay: { '2026-08-30': 400 } });
+  let repaints = 0;
+  layer.setRowControlsListener(() => { repaints += 1; });
+  layer.enable();
+  assert.equal(built.at(-1).provider.day, '2026-09-05');
+
+  // Posun o 16 dní: vrstva sa prestaví sama (onGibsDayChange → update).
+  setGibsDayOffset(16);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(built.at(-1).provider.day, '2026-08-20', 'zvolený deň presne');
+  const stats = layer.getStats();
+  assert.equal(stats.historical, true);
+  assert.equal(stats.stale, false, 'zvolený starší deň nie je STALE — je to zámer');
+  assert.equal(stats.day, '2026-08-20');
+  assert.ok(repaints >= 1, 'riadok sa prekreslí');
+
+  // Deň, ktorý GIBS nemá (400): žiadne ustupovanie, chyba v riadku, vrstva ostáva.
+  const calls = fetchImpl.calls.length;
+  setGibsDayOffset(6); // 2026-08-30
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(fetchImpl.calls.length, calls + 1, 'jedna sonda, bez fallbacku');
+  assert.match(layer.getStats().error, /2026-08-30/);
+  assert.equal(built.at(-1).provider.day, '2026-08-20', 'ostáva posledný dobrý deň');
+
+  // Späť na najnovší: opäť včera a bez chyby.
+  setGibsDayOffset(0);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(built.at(-1).provider.day, '2026-09-05');
+  assert.equal(layer.getStats().error, null);
+  assert.equal(layer.getStats().historical, false);
+
+  // Vypnutá vrstva na posun nereaguje; po destroy už nepočúva.
+  layer.disable();
+  const before = built.length;
+  setGibsDayOffset(3);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(built.length, before);
+  // enable so zvoleným dňom kreslí rovno ten deň.
+  layer.enable();
+  assert.equal(built.at(-1).provider.day, '2026-09-02');
+  layer.destroy();
+  _resetGibsDayForTest();
 });
