@@ -15,11 +15,15 @@ import {
   _resetContactPaletteForTest,
 } from './contactPalette.js';
 
-test('default je tmavý kontrast = biela silueta bez tintu', () => {
+test('default je tmavý kontrast = FR24 žltá civilná, pálená vojenská', () => {
+  // 2026-09-06: biela silueta splývala s nočnými svetlami miest (Black Marble)
+  // — používateľ chcel štýl FR24. Tmavý podklad už nie je „bez tintu".
   _resetContactPaletteForTest();
   assert.equal(getBasemapContrast(), 'dark');
-  assert.equal(contactIconTint('civil'), null);
-  assert.equal(contactIconTint('military'), null);
+  assert.equal(contactIconTint('civil'), 'fr24');
+  assert.equal(contactIconTint('military'), 'ember');
+  assert.equal(CONTACT_ICON_TINTS.dark.civil, 'fr24');
+  assert.notEqual(CONTACT_ICON_TINTS.dark.civil, CONTACT_ICON_TINTS.dark.military, 'vojenský ostáva rozlíšený aj na tmavom');
   assert.equal(basemapContrastForStack(null), 'dark');
   assert.equal(basemapContrastForStack({ id: 'photoreal' }), 'dark', 'bez údaju = tmavý (bezpečný default)');
   assert.equal(basemapContrastForStack({ contactContrast: 'light' }), 'light');
@@ -87,8 +91,9 @@ test('tripwire: obe letecké vrstvy pečú tint do SVG a prerastrujú na zmenu',
   // paletu — inak by ikona bola atramentová a model biely, a pri 129 km na
   // OSM by stroj ostal sivou škvrnou (nález zo screenshotu 2026-09-05).
   const flights = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
-  assert.match(flights, /return contactIconTint\('civil'\) === 'ink' \? MODEL_INK_TINT : Cesium\.Color\.WHITE;/, 'model civil sleduje paletu');
-  assert.match(flights, /MODEL_INK_TINT = Cesium\.Color\.fromCssColorString\(TINT_FILLS\.ink\)/, 'rovnaká atramentová ako ikona');
+  assert.match(flights, /return MODEL_TINTS\[contactIconTint\('civil'\)\] \|\| Cesium\.Color\.WHITE;/, 'model civil sleduje paletu');
+  assert.match(flights, /ink: Cesium\.Color\.fromCssColorString\(TINT_FILLS\.ink\)/, 'rovnaká atramentová ako ikona');
+  assert.match(flights, /fr24: Cesium\.Color\.fromCssColorString\(TINT_FILLS\.fr24\)/, 'rovnaká FR24 žltá ako ikona');
   assert.match(flights, /m\.color = _modelColor\(icao24\)\.withAlpha\(m\.color\.alpha\);/, 'modely sa premaľujú pri zmene palety');
   // OSM je jediný svetlý podklad; main.js viaže paletu na udalosť podkladu.
   const stacks = readFileSync(new URL('../mapStackController.js', import.meta.url), 'utf8');

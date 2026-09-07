@@ -29,6 +29,16 @@ import {
   LayerStateCoordinator,
 } from './data/layerState.js';
 import { renderMapStackChips, renderMapStackVariants, syncMapStackChips } from './mapStackChips.js';
+import {
+  buildContactMenuItems,
+  buildGroundMenuItems,
+  buildLayerMenuItems,
+  createContextMenu,
+  formatCoords,
+  installDragGuard,
+} from './contextMenu.js';
+import { ownerOfPick, resolvePickId } from './data/pickRegistry.js';
+import { layerDisplayName } from './data/manager.js';
 import { OrbitController } from './orbit.js';
 import {
   CelestialRing,
@@ -679,9 +689,17 @@ class CockpitViewController {
     onExited = null,
     getInheritedVisionLabel = null,
     restoreTrackingFrame = null,
+    onPrepareEntry = null,
   } = {}) {
     this.viewer = viewer;
     this.active = false;
+    // Vstup do kokpitu vyžaduje Kontakty (kontext 'flights' + oba letecké
+    // feedy). Do 2026-09-06 sa tlačidlo bez nich ani neukázalo — používateľ
+    // ho „nevedel nájsť". Teraz sa ukáže pri každom sledovanom lietadle a
+    // klik si Kontakty zapne sám cez tento callback (ui: setContextMode).
+    this.onPrepareEntry = typeof onPrepareEntry === 'function' ? onPrepareEntry : null;
+    this._entryPreparing = false;
+    this._entryNeedsContext = null;
     this.trackedEntity = null;
     this.trackedEntityWasShown = true;
     this.heading = null;
@@ -818,7 +836,7 @@ class CockpitViewController {
         else this.syncEntry();
       }),
     );
-    this._listen(this.entry, 'click', () => this.enter());
+    this._listen(this.entry, 'click', () => { void this.requestEntry(); });
     this._listen(this.tr3bToggle, 'click', () => this.toggleTrackedTr3b());
     this._listen(this.mapViewButton, 'click', () => this.exit());
     this._listen(this.visionPrevious, 'click', () => this.cycleVisionMode(-1));
@@ -952,7 +970,15 @@ class CockpitViewController {
     const info = this.readAircraftInfo();
     const trackedContact = !!(info && this.viewer.trackedEntity?.position);
     this.syncTr3bToggle(trackedContact ? info : null);
-    const available = !!(this.isEntryAllowed() && trackedContact);
+    // Tlačidlo sa ukáže pri KAŽDOM sledovanom lietadle; či treba najprv
+    // zapnúť Kontakty, hovorí tooltip (a klik to spraví sám).
+    const available = trackedContact;
+    const needsContext = trackedContact && !this.isEntryAllowed();
+    if (this.entry && this._entryNeedsContext !== needsContext) {
+      this._entryNeedsContext = needsContext;
+      this.entry.dataset.needsContext = String(needsContext);
+      this.entry.title = t(needsContext ? 'cockpit.entry-needs-context-title' : 'cockpit.entry-title');
+    }
     // Change-only DOM writes: this runs on a preUpdate cadence, and
     // unconditional `hidden` assignments invalidate style/layout every frame
     // even when nothing changed. (perf item 9)
@@ -961,6 +987,33 @@ class CockpitViewController {
     if (this.entry) this.entry.hidden = !available;
     if (this.mapViewButton) this.mapViewButton.hidden = true;
     if (this.resetGlobeButton) this.resetGlobeButton.hidden = true;
+  }
+
+  /**
+   * Vstup z tlačidla alebo klávesy C: keď Kontakty nebežia, najprv ich zapne
+   * (`onPrepareEntry` → ui.setContextMode('flights'): kontext + oba letecké
+   * feedy), potom vstúpi. Počas prípravy je tlačidlo zaneprázdnené, nech
+   * dvojklik nespustí dve prechody.
+   * @returns {Promise<boolean>} vstúpil?
+   */
+  async requestEntry() {
+    if (this.active || this._entryPreparing) return false;
+    if (!this.isEntryAllowed()) {
+      if (!this.onPrepareEntry) return false;
+      this._entryPreparing = true;
+      this.entry?.setAttribute('aria-busy', 'true');
+      try {
+        const ready = await this.onPrepareEntry();
+        if (!ready || !this.isEntryAllowed()) return false;
+      } catch (error) {
+        console.warn('[Cockpit] context preparation failed:', error);
+        return false;
+      } finally {
+        this._entryPreparing = false;
+        this.entry?.setAttribute('aria-busy', 'false');
+      }
+    }
+    return this.enter();
   }
 
   /**
@@ -1059,8 +1112,8 @@ class CockpitViewController {
       }
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!this.active && !this.isEntryAllowed()) return;
-      const changed = this.active ? this.exit() : this.enter();
+      if (this.active) { this.exit(); return; }
+      void this.requestEntry();
       return;
     }
   }
@@ -2464,6 +2517,12 @@ export class StyleManager {
         flightsEnabled: !!this._dataManager?.isEnabled('flights'),
         militaryEnabled: !!this._dataManager?.isEnabled('military'),
       }),
+      // Klik na KOKPIT bez Kontaktov: zapni kontext 'flights' (a s ním oba
+      // letecké feedy) tou istou cestou ako hlas/tlačidlo Kontext.
+      onPrepareEntry: async () => {
+        const result = await this.setContextMode('flights');
+        return result?.ok === true;
+      },
       onEntered: () => {
         // A new Cockpit session owns both side rails. Clear standard map-view
         // panels once on entry; NEXT/PREVIOUS never reaches this callback, so
@@ -2732,6 +2791,7 @@ export class StyleManager {
     this._initHUDToggle();
     this._initModels3dToggle();
     this._initDayNightToggle();
+    this._initContextMenus();
     this._initFlatMapToggle();
     this._applyGlobalPostDefaults();
     // Až PO factory defaults: explicitná uložená voľba detekcie ich má
@@ -10290,6 +10350,177 @@ export class StyleManager {
     // Markup nesie default (active) — scéna ho musí dostať hneď pri štarte,
     // inak by svietilo tlačidlo nad neosvetleným glóbusom.
     this._setDayNightEnabled(this._dayNightEnabled);
+  }
+
+  /**
+   * Pravé tlačidlo myši (2026-09-06, „všade, kde sa dá"): menu pre glóbus
+   * (prázdne miesto), kontakt na glóbuse (vrstva podľa pickRegistry) a riadok
+   * vrstvy v paneli. Položky sú čisté v contextMenu.js; tu sú len akcie.
+   * Pravý ťah ostáva Cesium zoom — strážca ťahu menu po ťahu potlačí.
+   */
+  _initContextMenus() {
+    const canvas = this.viewer?.scene?.canvas;
+    if (!canvas || typeof document === 'undefined') return;
+    this._contextMenu = createContextMenu(document);
+    document.body.appendChild(this._contextMenu.element);
+    this._contextDragGuard = installDragGuard(canvas);
+    canvas.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      if (this._contextDragGuard.shouldSuppress(event)) return;
+      // Kokpit má vlastné ovládanie a kameru; menu by ho rozbilo.
+      if (document.body.classList.contains('cockpit-mode')) return;
+      this._openGlobeContextMenu(event);
+    });
+    const toggles = document.getElementById('data-toggles');
+    toggles?.addEventListener('contextmenu', (event) => {
+      const row = event.target?.closest?.('.data-toggle-row[data-layer-id]');
+      if (!row) return;
+      event.preventDefault();
+      this._openLayerContextMenu(row.dataset.layerId, event);
+    });
+  }
+
+  _openGlobeContextMenu(event) {
+    const scene = this.viewer.scene;
+    const rect = scene.canvas.getBoundingClientRect();
+    const pos = new Cesium.Cartesian2(event.clientX - rect.left, event.clientY - rect.top);
+    let picked = null;
+    try { picked = scene.pick(pos, 6, 6); } catch { picked = null; }
+    const pickedId = resolvePickId(picked);
+    const ownerId = pickedId ? ownerOfPick(pickedId) : null;
+    const module = ownerId ? this._dataManager?.layers?.get(ownerId)?.module : null;
+    if (ownerId && module) {
+      const tracked = module.getTrackedInfo?.() || null;
+      const trackedId = tracked?.icao24 ?? tracked?.noradId ?? tracked?.id ?? null;
+      const isTracked = trackedId != null && String(trackedId) === String(pickedId);
+      const items = buildContactMenuItems({
+        layerId: ownerId,
+        id: pickedId,
+        isTracked,
+        canCockpit: isTracked && (ownerId === 'flights' || ownerId === 'military'),
+      }, t);
+      this._contextMenu.open({
+        x: event.clientX,
+        y: event.clientY,
+        items,
+        onSelect: (id) => this._runContactContextAction(id, { ownerId, pickedId, module }),
+      });
+      return;
+    }
+    // Prázdne miesto: poloha na teréne (pickPosition), inak na elipsoide.
+    let cartesian = null;
+    try {
+      if (scene.pickPositionSupported) cartesian = scene.pickPosition(pos) || null;
+    } catch { cartesian = null; }
+    if (!cartesian) {
+      try { cartesian = scene.camera.pickEllipsoid(pos, scene.globe.ellipsoid) || null; } catch { cartesian = null; }
+    }
+    const carto = cartesian ? Cesium.Cartographic.fromCartesian(cartesian) : null;
+    const ground = carto
+      ? { hasPosition: true, lat: Cesium.Math.toDegrees(carto.latitude), lon: Cesium.Math.toDegrees(carto.longitude) }
+      : { hasPosition: false };
+    this._contextMenu.open({
+      x: event.clientX,
+      y: event.clientY,
+      items: buildGroundMenuItems(ground, t),
+      onSelect: (id) => this._runGroundContextAction(id, ground),
+    });
+  }
+
+  _openLayerContextMenu(layerId, event) {
+    const dm = this._dataManager;
+    if (!dm) return;
+    const all = dm.getAll();
+    const layer = all.find((l) => l.id === layerId);
+    if (!layer) return;
+    const otherEnabledCount = all.filter((l) => l.enabled && l.id !== layerId).length;
+    const items = buildLayerMenuItems({ layerId, name: layerDisplayName(layer), enabled: layer.enabled, otherEnabledCount }, t);
+    this._contextMenu.open({
+      x: event.clientX,
+      y: event.clientY,
+      title: layerDisplayName(layer),
+      items,
+      onSelect: (id) => this._runLayerContextAction(id, layerId),
+    });
+  }
+
+  async _copyTextToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(String(text));
+      this._showToast(t('ctx.copied', { text: String(text) }));
+    } catch {
+      this._showToast(t('ctx.copy-failed'));
+    }
+  }
+
+  _runContactContextAction(actionId, { ownerId, pickedId, module }) {
+    switch (actionId) {
+      case 'track':
+        module.trackById?.(ownerId === 'satellites' ? Number(pickedId) : pickedId, { origin: 'user' });
+        break;
+      case 'untrack':
+        module.stopTracking?.({ origin: 'user' });
+        break;
+      case 'select':
+        module.selectById?.(pickedId);
+        break;
+      case 'cockpit':
+        void this.cockpitView?.requestEntry?.();
+        break;
+      case 'copy-id':
+        void this._copyTextToClipboard(pickedId);
+        break;
+      default:
+        break;
+    }
+  }
+
+  _runGroundContextAction(actionId, ground) {
+    switch (actionId) {
+      case 'fly-here': {
+        if (!ground.hasPosition) return;
+        const camera = this.viewer.camera;
+        const height = Math.max(camera.positionCartographic?.height ?? 5000, 2000);
+        camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(ground.lon, ground.lat, height),
+          orientation: { heading: camera.heading, pitch: camera.pitch, roll: 0 },
+          duration: 1.2,
+        });
+        break;
+      }
+      case 'copy-coords':
+        if (ground.hasPosition) void this._copyTextToClipboard(formatCoords(ground.lat, ground.lon));
+        break;
+      case 'bookmark':
+        this._saveCurrentBookmark();
+        break;
+      case 'reset-globe':
+        this._resetGlobeBtn?.click();
+        break;
+      default:
+        break;
+    }
+  }
+
+  async _runLayerContextAction(actionId, layerId) {
+    const dm = this._dataManager;
+    if (!dm) return;
+    switch (actionId) {
+      case 'toggle':
+        await dm.setEnabled(layerId, !dm.isEnabled(layerId), { origin: 'user' });
+        break;
+      case 'solo': {
+        const others = dm.getAll().filter((l) => l.enabled && l.id !== layerId).map((l) => l.id);
+        await Promise.all(others.map((id) => dm.setEnabled(id, false, { origin: 'user' })));
+        if (!dm.isEnabled(layerId)) await dm.setEnabled(layerId, true, { origin: 'user' });
+        break;
+      }
+      case 'all-off':
+        this._clearSelectedLayersBtn?.click();
+        break;
+      default:
+        break;
+    }
   }
 
   _setDayNightEnabled(enabled) {

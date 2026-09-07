@@ -3,9 +3,13 @@
  * @module contactPalette
  * @description Paleta ikon kontaktov podľa KONTRASTU podkladu.
  *
- * Biela silueta lietadla s vlasovým tmavým obrysom je na tmavom podklade
- * (Stadia Dark, satelit, fotoreál) dokonalá a na svetlom OSM neviditeľná —
- * pri 8 px na obrazovke je obrys 1 px a splynie s mapou (nález 2026-09-05).
+ * Biela silueta lietadla s vlasovým tmavým obrysom bola na tmavom podklade
+ * (Stadia Dark, satelit, fotoreál) dobrá, kým glóbus nemal nočné svetlá miest
+ * (2026-09-06): biele svetlá + biele siluety = jedna kaša (screenshot
+ * používateľa nad nočnou Európou). Tmavý podklad má preto FR24 žltú
+ * ('fr24') a vojenský pálenú oranžovú ('ember' × amber tint billboardu).
+ * Na svetlom OSM je biela neviditeľná — pri 8 px na obrazovke je obrys 1 px
+ * a splynie s mapou (nález 2026-09-05) — tam ostáva atrament/ember.
  * Podklad sám vie, či je svetlý (`contactContrast` v descriptore
  * mapStackController), a tento modul to preloží na tint ikony.
  *
@@ -26,7 +30,7 @@
  * (biela silueta, dnešný stav). Názvy sú kľúče `TINT_FILLS` v aircraftIcons.
  */
 export const CONTACT_ICON_TINTS = Object.freeze({
-  dark: Object.freeze({ civil: null, military: null }),
+  dark: Object.freeze({ civil: 'fr24', military: 'ember' }),
   light: Object.freeze({ civil: 'ink', military: 'ember' }),
 });
 

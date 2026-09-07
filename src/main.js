@@ -27,6 +27,7 @@ import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
+import { installDayNightClock } from './globeLighting.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { initLogoGaze } from './logoGaze.js';
@@ -152,6 +153,10 @@ async function init() {
     // 2026-08-05 perf investigation as a strict halving of idle burn on
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
     viewer.targetFrameRate = 60;
+
+    // Hodiny scény v reálnom čase + minútový tik pre terminátor (globeLighting.js):
+    // Viewer inak zmrazí clock.currentTime na čase načítania a Slnko s ním.
+    installDayNightClock(viewer, { requestRender: governorRequestRender });
 
     // Diagnostika render pádov (2026-09-01): renderError Cesium render loop
     // NAVŽDY zastaví — dialóg ale ukazuje len message. Stack ide do konzoly,

@@ -4,6 +4,15 @@
    ═══════════════════════════════════════════════ */
 
 :root {
+  /* Kurzor „ako na Linuxe" (2026-09-06, používateľ): čierna šípka s bielym
+     obrysom namiesto bielej Windows. SVG data URI, hotspot v px; každé
+     pravidlo pointer/default/grab v tomto súbore ide cez tieto premenné,
+     nech je vzhľad jednotný. Stavové kurzory (wait, not-allowed, text)
+     ostávajú systémové. */
+  --cursor-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M4 2 L4 19 L8.5 15 L11.5 21.5 L14.5 20 L11.5 13.8 L17.5 13.8 Z' fill='black' stroke='white' stroke-width='1.5' stroke-linejoin='round'/></svg>") 4 2, default;
+  --cursor-pointer: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M9 2.5a1.5 1.5 0 0 1 3 0V10h1V6.5a1.5 1.5 0 0 1 3 0V10h1V8a1.5 1.5 0 0 1 3 0v6.5c0 4-2.5 7-6.5 7S7 19.5 5.6 16.4L3.4 11.6a1.4 1.4 0 0 1 2.4-1.3L9 13z' fill='black' stroke='white' stroke-width='1.2' stroke-linejoin='round'/></svg>") 10 3, pointer;
+  --cursor-grab: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M7 9V6.5a1.5 1.5 0 0 1 3 0V9h1V4.5a1.5 1.5 0 0 1 3 0V9h1V6a1.5 1.5 0 0 1 3 0v3h1V8a1.5 1.5 0 0 1 3 0v6.5c0 4-2.5 7-6.5 7S8 19.5 6.6 16.4L4.4 11.6a1.4 1.4 0 0 1 2.4-1.3z' fill='black' stroke='white' stroke-width='1.2' stroke-linejoin='round'/></svg>") 12 12, grab;
+  --cursor-grabbing: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M6 11a2 2 0 0 1 2-2h1V8a1.5 1.5 0 0 1 3 0v1h1V7.5a1.5 1.5 0 0 1 3 0V9h1a2 2 0 0 1 2 2v4a5 5 0 0 1-5 5h-3a5 5 0 0 1-5-5z' fill='black' stroke='white' stroke-width='1.2' stroke-linejoin='round'/></svg>") 12 12, grabbing;
   --bg-dark: #0a0a0f;
   --glass-bg: rgba(12, 12, 20, 0.72);
   --glass-border: rgba(255, 255, 255, 0.08);
@@ -81,6 +90,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  cursor: var(--cursor-arrow);
   background: var(--bg-dark);
   font-family: var(--font-sans);
   color: var(--text-primary);
@@ -389,7 +399,7 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 #gev-voice-button:hover {
@@ -648,7 +658,7 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   background: none;
   border: none;
   padding: 2px 2px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 3px;
@@ -664,7 +674,7 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 #lang-switch button[data-active="true"] {
   color: var(--accent);
   text-shadow: 0 0 14px var(--accent-glow);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 
 #lang-switch .lang-switch-sep {
@@ -749,12 +759,12 @@ body.scene-playback-mode #lang-switch {
 }
 
 .panel-drag-handle {
-  cursor: grab;
+  cursor: var(--cursor-grab);
   user-select: none;
 }
 
 .panel-drag-handle:active {
-  cursor: grabbing;
+  cursor: var(--cursor-grabbing);
 }
 
 .panel-drag-handle.compact {
@@ -804,7 +814,7 @@ body.scene-playback-mode #lang-switch {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
 }
 
@@ -840,7 +850,7 @@ body.scene-playback-mode #lang-switch {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--btn-radius);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   overflow: hidden;
   outline: none;
@@ -1016,7 +1026,7 @@ body.scene-playback-mode #lang-switch {
   border-radius: 8px;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   outline: none;
 }
@@ -1050,7 +1060,7 @@ body.scene-playback-mode #lang-switch {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(24px) saturate(1.4);
   -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 
 /* Expanded Display already owns the glass shell. Keep its header visually
@@ -1175,7 +1185,7 @@ body.scene-playback-mode #lang-switch {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
   outline: none;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   min-width: 60px;
 }
 
@@ -1187,7 +1197,7 @@ body.scene-playback-mode #lang-switch {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent-glow);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .pp-slider::-moz-range-thumb {
@@ -1197,7 +1207,7 @@ body.scene-playback-mode #lang-switch {
   background: var(--accent);
   border: none;
   box-shadow: 0 0 6px var(--accent-glow);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .pp-slider-value {
@@ -1221,7 +1231,7 @@ body.scene-playback-mode #lang-switch {
   appearance: none;
   background: transparent;
   outline: none;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .gev-quantitative-slider::-webkit-slider-runnable-track {
   height: 3px;
@@ -1238,7 +1248,7 @@ body.scene-playback-mode #lang-switch {
   appearance: none;
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent-glow);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .gev-quantitative-slider::-moz-range-track,
 .gev-quantitative-slider::-moz-range-progress {
@@ -1254,7 +1264,7 @@ body.scene-playback-mode #lang-switch {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent-glow);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .gev-quantitative-slider:focus-visible {
   border-radius: 4px;
@@ -1355,7 +1365,7 @@ body.scene-playback-mode #lang-switch {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   /* Explicit property list, NOT `transition: all`: `all` animates
      `outline-width` off the `outline: none` base, and Chrome leaves that
      transition parked at 0px for chips on a wrapped line — the keyboard ring
@@ -1492,7 +1502,7 @@ body.scene-playback-mode #lang-switch {
   font-size: 9px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
 }
 .pp-mode-btn + .pp-mode-btn { border-left: 1px solid rgba(255, 255, 255, 0.14); }
@@ -1517,7 +1527,7 @@ body.scene-playback-mode #lang-switch {
   font-size: 10px;
   letter-spacing: 1.8px;
   padding: 8px 14px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   display: none;
 }
 
@@ -1682,7 +1692,7 @@ body.ui-clean-view #scene-runtime.active {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
   outline: none;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .param-slider::-webkit-slider-thumb {
@@ -1693,7 +1703,7 @@ body.ui-clean-view #scene-runtime.active {
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent-glow);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: box-shadow var(--transition-fast);
 }
 
@@ -1708,7 +1718,7 @@ body.ui-clean-view #scene-runtime.active {
   background: var(--accent);
   border: none;
   box-shadow: 0 0 6px var(--accent-glow);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .param-value {
@@ -1815,7 +1825,7 @@ body.ui-clean-view #scene-runtime.active {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   outline: none;
   white-space: nowrap;
@@ -1887,7 +1897,7 @@ body.ui-clean-view #scene-runtime.active {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   outline: none;
   white-space: nowrap;
@@ -1951,7 +1961,7 @@ body.ui-clean-view #scene-runtime.active {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 50%;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   outline: none;
   font-size: 14px;
@@ -2015,7 +2025,7 @@ body.ui-clean-view #scene-runtime.active {
   color: var(--text-secondary);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   outline: none;
 }
@@ -2335,10 +2345,23 @@ body.ui-clean-view #scene-runtime.active {
   font: 600 10px/1 var(--font-mono);
   letter-spacing: 0.14em;
   box-shadow: 0 0 18px rgba(0, 220, 255, 0.14);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 #cockpit-entry[hidden], #cockpit-hud[hidden] { display: none; }
+/* Príprava Kontaktov po kliku (requestEntry) — tlačidlo nech neskáče. */
+#cockpit-entry[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+/* Pevná pozícia `50% + 270px` vedľa hlasového doku je mimo obrazovky na
+   všetkom užšom než ~1 100 px (2026-09-06: v 660 px paneli bolo tlačidlo za
+   okrajom). Pod touto šírkou ide ako plávajúce tlačidlo vpravo dole. */
+@media (max-width: 1180px) {
+  #cockpit-entry { left: auto; right: 16px; bottom: 88px; }
+}
+/* Dotyk: 44 px cieľ pre vstup aj výstup z kokpitu (Apple/Android minimum). */
+@media (pointer: coarse) {
+  #cockpit-entry { min-height: 44px; padding: 0 16px; font-size: 11px; }
+  #cockpit-entry .material-symbols-outlined { font-size: 22px; }
+}
 #cockpit-entry:hover, #cockpit-entry:focus-visible {
   border-color: #00dcff;
   color: #fff;
@@ -2963,7 +2986,7 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   color: rgba(244, 251, 255, 0.64);
   font: 700 7px/1 var(--font-mono);
   letter-spacing: 0.08em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-vision-controls button:hover,
 .cockpit-vision-controls button:focus-visible {
@@ -3081,7 +3104,7 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   color: #bceeff;
   font: 700 8px/1 var(--font-mono);
   letter-spacing: 0.12em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   box-shadow: 0 0 18px rgba(0, 0, 0, 0.24);
 }
 #view-switcher button[hidden] { display: none; }
@@ -3106,6 +3129,12 @@ body.cockpit-mode #view-switcher button {
   border-radius: 999px;
   background: rgba(0, 7, 12, 0.74);
   white-space: nowrap;
+}
+/* Dotyk: výstup z kokpitu ako 44 px cieľ. Musí stáť ZA pravidlom vyššie
+   (rovnaká špecificita, poradie rozhoduje) — v bloku pri #cockpit-entry
+   ho 28 px odtiaľto prebíjalo (namerané 375 px, 2026-09-06). */
+@media (pointer: coarse) {
+  body.cockpit-mode #view-switcher button { min-height: 44px; }
 }
 .cockpit-context-window {
   position: absolute;
@@ -3184,7 +3213,7 @@ body.cockpit-mode #view-switcher button {
   color: color-mix(in srgb, var(--cockpit-accent) 82%, white);
   font: 700 6px/1 var(--font-mono);
   letter-spacing: 0.1em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-context-weather strong {
   color: #fff;
@@ -3212,7 +3241,7 @@ body.cockpit-mode #view-switcher button {
   border-radius: 5px;
   background: rgba(0, 7, 12, 0.72);
   color: color-mix(in srgb, var(--cockpit-accent) 82%, white);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-context-actions button:hover, .cockpit-context-actions button:focus-visible {
   border-color: var(--cockpit-accent);
@@ -3222,7 +3251,7 @@ body.cockpit-mode #view-switcher button {
 .cockpit-context-actions button:disabled {
   border-color: rgba(244, 251, 255, 0.1);
   color: rgba(244, 251, 255, 0.2);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 .cockpit-context-actions .material-symbols-outlined { font-size: 15px; }
 .cockpit-context-cohorts {
@@ -3502,7 +3531,7 @@ body.cockpit-mode #view-switcher button {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-utility-glyph:focus-visible {
   border-color: var(--glass-border-hover);
@@ -3570,7 +3599,7 @@ body.cockpit-mode #view-switcher button {
   border-radius: 6px;
   background: rgba(65, 220, 231, .05);
   color: #9ceaf1;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-radio-transport button:disabled { opacity: .38; cursor: not-allowed; }
 .cockpit-radio-transport button.active { border-color: var(--cockpit-accent); color: #fff; }
@@ -3629,7 +3658,7 @@ body.cockpit-mode #view-switcher button {
   border-radius: 5px;
   background: rgba(0, 7, 12, 0.72);
   color: color-mix(in srgb, var(--cockpit-accent) 82%, white);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-brief-actions button:hover, .cockpit-brief-actions button:focus-visible {
   border-color: var(--cockpit-accent);
@@ -3718,7 +3747,7 @@ body.cockpit-mode #view-switcher button {
   font-weight: 700;
   letter-spacing: 0.11em;
   text-align: left;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-signal-list li.military .cockpit-signal-target { color: #f0c968; }
 .cockpit-signal-target-label {
@@ -3914,7 +3943,7 @@ body.cockpit-mode #view-switcher button {
   color: rgba(244, 251, 255, 0.34);
   font: inherit;
   letter-spacing: 0.08em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .cockpit-brief-tabs button[aria-current="true"] {
   border-bottom-color: var(--cockpit-accent);
@@ -4805,7 +4834,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(42, 113, 171, .045);
   font-family: 'JetBrains Mono', monospace;
   text-align: left;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: border-color .15s ease, background .15s ease, transform .15s ease;
 }
 #space-mission-panel-host .space-mission-roster-item::before {
@@ -4901,7 +4930,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   border-radius: 5px;
   color: rgba(190, 230, 230, .7);
   background: rgba(42, 113, 171, .08);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 #space-mission-panel .space-mission-view-header button:hover {
   border-color: #22e6e6;
@@ -5015,7 +5044,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: linear-gradient(90deg, rgba(255, 159, 67, .08), rgba(34, 230, 230, .08));
   font: 9px 'JetBrains Mono', monospace;
   letter-spacing: .16em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 #space-mission-panel .mission-focus-button {
@@ -5060,7 +5089,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   color: #22e6e6;
   background: rgba(34, 230, 230, .08);
   font: 15px/1 'JetBrains Mono', monospace;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease, opacity .15s ease;
 }
 #space-mission-panel .mission-replay-transport button:hover:not(:disabled),
@@ -5073,7 +5102,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 #space-mission-panel .mission-replay-transport button:disabled {
   opacity: .28;
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 #space-mission-panel .mission-replay-transport button.cancel {
   border-color: rgba(255, 159, 67, .58);
@@ -5095,14 +5124,14 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   color: #22e6e6;
   font: 11px 'JetBrains Mono', monospace;
   letter-spacing: .12em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: background .15s ease, border-color .15s ease, opacity .15s ease;
 }
 #space-mission-panel .mission-nav-button:hover:not(:disabled) { background: rgba(34, 230, 230, .18); border-color: #22e6e6; }
 #space-mission-panel .mission-nav-button:disabled { cursor: not-allowed; opacity: .28; }
 #space-mission-panel .mission-nav-button span { font-size: 18px; line-height: 0; vertical-align: -2px; }
 #space-mission-panel .mission-nav-index { min-width: 58px; text-align: center; color: #d8ffff; font: 11px 'JetBrains Mono', monospace; letter-spacing: .1em; }
-#space-mission-panel button { cursor: pointer; }
+#space-mission-panel button { cursor: var(--cursor-pointer); }
 
 .mission-replay-vehicle-overlay {
   --mission-replay-vehicle-scale: .50;
@@ -5283,7 +5312,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   border-radius: 6px;
   color: rgba(143, 207, 255, .58);
   background: rgba(42, 113, 171, .08);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 .context-radio-toggle .material-symbols-outlined { font-size: 17px; }
@@ -5340,7 +5369,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   border-radius: 5px;
   color: #8feaf2;
   background: rgba(14, 69, 78, .16);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .context-radio-mini-heading button:hover,
 .context-radio-mini-heading button:focus-visible {
@@ -5376,7 +5405,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   color: #8feaf2;
   background: rgba(14, 69, 78, .16);
   font: 8px/1 var(--font-mono);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .context-radio-mini-transport button:hover:not(:disabled),
 .context-radio-mini-transport button:focus-visible:not(:disabled),
@@ -5403,12 +5432,11 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   margin: 0 0 8px;
 }
 .global-context-actions:has(#installations-search-btn) { grid-template-columns: minmax(0, 1fr); }
-.global-context-actions:has(#cockpit-entry:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.global-context-actions:has(#cockpit-entry[hidden]) { grid-template-columns: 1fr; }
+/* #cockpit-entry už v tomto gride nie je (2026-09-06: je na úrovni body,
+   nech ho skrytá záložka Kontext → Lety neschová). */
 /* TR-3B reclassify toggle rides an `auto` trailing column so the chip never
    resizes the COCKPIT / SEARCH buttons beside it. */
-.global-context-actions:has(#tr3b-toggle:not([hidden])) { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
-.global-context-actions:has(#cockpit-entry[hidden]):has(#tr3b-toggle:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto; }
+.global-context-actions:has(#tr3b-toggle:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto; }
 .tr3b-toggle {
   width: 26px;
   min-height: 30px;
@@ -5421,7 +5449,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
      fill. 14px sits inside the 26px chip with breathing room. */
   font: 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   filter: grayscale(0.6) opacity(0.62);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: filter 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 .tr3b-toggle[hidden] { display: none; }
@@ -5459,7 +5487,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(42, 113, 171, .09);
   font: 8px/1.15 var(--font-mono);
   letter-spacing: .09em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease;
 }
 .context-mode-button .material-symbols-outlined { font-size: 16px; }
@@ -5513,7 +5541,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(42, 113, 171, 0.12);
   font: 7px/1.1 var(--font-mono);
   letter-spacing: 0.1em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .panel-layer-toggle:hover, .panel-layer-toggle:focus-visible {
   border-color: #79c2ff;
@@ -5771,7 +5799,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(14, 69, 78, .14);
   font: 8px/1 var(--font-mono);
   letter-spacing: .06em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .radio-transport button:hover:not(:disabled),
 .radio-transport button:focus-visible:not(:disabled) {
@@ -5836,9 +5864,9 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #military-awareness-panel[hidden] { display: none; }
 .military-awareness-subject { margin: 0 0 7px; color: #fff; }
 .military-awareness-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin: 0 0 8px; }
-.military-awareness-controls button { border: 1px solid rgba(98,181,255,0.34); border-radius: 4px; padding: 4px 3px; color: #a9d9ff; background: rgba(42,113,171,0.12); font: 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.07em; cursor: pointer; }
+.military-awareness-controls button { border: 1px solid rgba(98,181,255,0.34); border-radius: 4px; padding: 4px 3px; color: #a9d9ff; background: rgba(42,113,171,0.12); font: 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.07em; cursor: var(--cursor-pointer); }
 .military-awareness-controls button:hover, .military-awareness-controls button:focus-visible { color: #fff; border-color: rgba(127,200,255,0.85); background: rgba(66,148,211,0.24); outline: none; }
-.military-awareness-controls button:disabled { color: #627181; border-color: rgba(98,181,255,0.12); background: transparent; cursor: default; }
+.military-awareness-controls button:disabled { color: #627181; border-color: rgba(98,181,255,0.12); background: transparent; cursor: var(--cursor-arrow); }
 .military-awareness-row { border-top: 1px solid rgba(255,255,255,0.1); padding: 7px 0; }
 .military-awareness-row > div { display: flex; justify-content: space-between; }
 .military-awareness-row b { color: #7fc8ff; }
@@ -5846,8 +5874,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 .military-awareness-row small, .military-awareness-note { color: #a9b7c7; }
 .military-awareness-row ul { margin: 4px 0 0; padding: 0; list-style: none; }
 .military-awareness-row li { display: block; }
-.military-awareness-target { display: flex; justify-content: space-between; gap: 10px; width: 100%; border: 0; padding: 1px 0; color: #dceeff; background: transparent; font: inherit; text-align: left; cursor: pointer; }
-.military-awareness-target.unavailable { color: var(--text-dim); cursor: default; }
+.military-awareness-target { display: flex; justify-content: space-between; gap: 10px; width: 100%; border: 0; padding: 1px 0; color: #dceeff; background: transparent; font: inherit; text-align: left; cursor: var(--cursor-pointer); }
+.military-awareness-target.unavailable { color: var(--text-dim); cursor: var(--cursor-arrow); }
 .military-awareness-target:hover, .military-awareness-target:focus-visible { color: #fff; outline: none; text-shadow: 0 0 8px rgba(114, 202, 255, 0.85); }
 .military-awareness-target:focus-visible { box-shadow: inset 0 -1px 0 #7fc8ff; }
 .military-awareness-target span { color: #7fc8ff; white-space: nowrap; }
@@ -5869,7 +5897,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(42, 113, 171, 0.12);
   font: 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.08em;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 #military-awareness-direction-overlay { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
@@ -5966,7 +5994,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   outline: none;
   min-width: 38px;
@@ -6050,7 +6078,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   outline: none;
 }
@@ -6094,7 +6122,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   font-size: 8px;
   letter-spacing: 0.5px;
   color: var(--text-dim);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 
 .data-toggle-legend-swatch {
@@ -6597,7 +6625,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   font-size: 9px;
   letter-spacing: 1.2px;
   padding: 6px 9px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
   white-space: nowrap;
   flex: 1;
@@ -6691,7 +6719,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   font-size: 8px;
   letter-spacing: 0.8px;
   padding: 4px 6px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
 }
 
@@ -6713,7 +6741,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
 .scene-btn:disabled {
   opacity: 0.45;
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 
 .scene-btn-danger:hover:not(:disabled) {
@@ -7871,7 +7899,7 @@ body:not(.ui-clean-view):not(.recording-mode) #cesium-credits {
   background: transparent;
   border: 0;
   font: inherit;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   outline: none;
 }
 
@@ -8180,7 +8208,7 @@ body:not(.ui-clean-view):not(.recording-mode) #cesium-credits {
   font-family: var(--font-mono);
   font-size: 0.43rem;
   letter-spacing: 0.06rem;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 #command-dock #gev-voice-error-detail {
@@ -8384,7 +8412,7 @@ body:not(.ui-clean-view):not(.recording-mode):has(#intel-hud[data-variant='minim
   font-family: var(--font-mono);
   font-size: 0.35rem;
   letter-spacing: 0.04rem;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 #command-dock #location-bar:not(.collapsed) .dock-pin-btn,
@@ -8919,7 +8947,7 @@ body:not(.ui-clean-view):not(.recording-mode):has(#intel-hud[data-variant='minim
   font-size: 0.4rem;
   letter-spacing: 0.045rem;
   line-height: 1;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: color var(--transition-fast), border-color var(--transition-fast),
     background var(--transition-fast);
 }
@@ -9096,7 +9124,7 @@ body:not(.ui-clean-view):not(.recording-mode):has(#intel-hud[data-variant='minim
   background: rgba(29, 69, 81, 0.18);
   border: 1px solid rgba(100, 200, 220, 0.18);
   border-radius: 0.42rem;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
@@ -9171,7 +9199,7 @@ body:not(.ui-clean-view):not(.recording-mode):has(#intel-hud[data-variant='minim
   text-transform: none;
   font-size: 0.62rem;
   letter-spacing: 0.02rem;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .first-run-suppress input {
@@ -9179,7 +9207,7 @@ body:not(.ui-clean-view):not(.recording-mode):has(#intel-hud[data-variant='minim
   height: 0.82rem;
   margin: 0;
   accent-color: #36dcff;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .first-run-suppress:hover { color: rgba(225, 244, 248, 0.92); }
@@ -9466,7 +9494,7 @@ body.scene-playback-mode #radar-legend {
   /* Jediná časť kartičky, ktorá myš chytá — nech sa dá fotka kliknuť
      (podmienka Planespotters: náhľad vedie na stránku fotky). */
   pointer-events: auto;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .contact-hover-card-photo img {
@@ -9558,7 +9586,7 @@ body.scene-playback-mode #radar-legend {
   font: inherit;
   font-size: 15px;
   line-height: 22px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .airport-card-close:hover {
@@ -9722,7 +9750,7 @@ body.scene-playback-mode #radar-legend {
   letter-spacing: 0.8px;
   text-transform: uppercase;
   color: rgba(232, 234, 237, 0.55);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 .airport-card-wx-toggle:hover,
@@ -9815,7 +9843,7 @@ body.scene-playback-mode #radar-legend {
   background: rgba(6, 12, 18, 0.84);
   border-radius: 0 0 5px 5px;
   text-decoration: none;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 
 /* `display: flex` prebíja UA pravidlo pre atribút [hidden] — bez tohto
@@ -9862,7 +9890,7 @@ body.scene-playback-mode #radar-legend {
    stroj. Kurzor a jemný okraj sú jediný náznak, že sa dá kliknúť — bežné
    stavové hlásenia ostávajú nezmenené. */
 #toast.actionable {
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   border-color: rgba(255, 77, 79, 0.55);
 }
 
@@ -9899,7 +9927,7 @@ body.scene-playback-mode #radar-legend {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
 }
 
@@ -9935,7 +9963,7 @@ body.scene-playback-mode #radar-legend {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 3px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9961,7 +9989,7 @@ body.scene-playback-mode #radar-legend {
   background: none;
   border: 1px solid transparent;
   border-radius: 3px;
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
   transition: all var(--transition-fast);
 }
 
@@ -10084,3 +10112,59 @@ body.scene-playback-mode #radar-legend {
 .airport-card-player[hidden] { display: none; }
 .airport-card-player audio { width: 100%; margin: 8px 0; }
 .airport-card-player audio[hidden] { display: none; }
+
+
+/* ── Kontextové menu pravým tlačidlom (contextMenu.js) ───────────── */
+.context-menu {
+  position: fixed;
+  z-index: 400;
+  min-width: 200px;
+  max-width: 300px;
+  padding: 6px;
+  border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(8, 12, 18, 0.96);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55), 0 0 18px rgba(0, 212, 255, 0.12);
+  backdrop-filter: blur(10px);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.context-menu[hidden] { display: none; }
+.context-menu-title {
+  padding: 4px 8px 6px;
+  color: var(--text-dim);
+  font-size: 8px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.context-menu-item .material-symbols-outlined { font-size: 16px; color: var(--accent); }
+.context-menu-item:hover, .context-menu-item:focus-visible {
+  background: rgba(0, 212, 255, 0.12);
+  outline: none;
+}
+.context-menu-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.context-menu-item.danger { color: #ff8a8a; }
+@media (pointer: coarse) {
+  .context-menu-item { min-height: 44px; font-size: 12px; }
+}

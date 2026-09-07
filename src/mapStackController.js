@@ -7,6 +7,7 @@ import { lightingFadeFactor } from './globeLighting.js';
 import { gibsImageryDay } from './gibsTime.js';
 import { IMAGERY_ROLE, tagImageryRole } from './imageryOrder.js';
 import { basemapContrastForStack } from './data/contactPalette.js';
+import { applyPhotorealNight, buildPhotorealNightShader } from './photorealNight.js';
 
 // Deň snímky žije v gibsTime.js (zdieľa ho aj data/gibsOverlays.js); tu sa
 // re-exportuje, lebo testy a staršie importy ho čítajú odtiaľto.
@@ -84,6 +85,54 @@ export const MAP_STACKS = [
       // pobrežia ostanú tušené a kontakty nad mapou vyniknú.
       adjust: { brightness: 0.45, contrast: 0.85 },
       credit: '© Stadia Maps © OpenMapTiles © OpenStreetMap contributors',
+    },
+  },
+  // Ďalšie štýly Stadia (2026-09-06, „keď je platené tak nie"): rovnaký
+  // keyless-na-localhoste režim, rovnaké podmienky (DATA_SOURCES.md), len iný
+  // štýl v URL. Svetlé štýly nesú contactContrast 'light' (siluety kontaktov
+  // tmavé ako na OSM) a žiadne stlmenie — popisy im neprekrikujú kontakty.
+  // V lište sú JEDEN čip „Stadia" s radom variantov (mapStackChips.js).
+  {
+    id: 'stadia-smooth',
+    label: 'Stadia Smooth',
+    shortLabel: 'LIGHT',
+    kind: 'xyz',
+    requiresIon: false,
+    contactContrast: 'light',
+    xyz: {
+      url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}@2x.png',
+      tileSize: 256,
+      maximumLevel: 20,
+      credit: '© Stadia Maps © OpenMapTiles © OpenStreetMap contributors',
+    },
+  },
+  {
+    id: 'stadia-outdoors',
+    label: 'Stadia Outdoors',
+    shortLabel: 'OUTDOOR',
+    kind: 'xyz',
+    requiresIon: false,
+    contactContrast: 'light',
+    xyz: {
+      url: 'https://tiles.stadiamaps.com/tiles/outdoors/{z}/{x}/{y}@2x.png',
+      tileSize: 256,
+      maximumLevel: 20,
+      credit: '© Stadia Maps © OpenMapTiles © OpenStreetMap contributors',
+    },
+  },
+  {
+    id: 'stadia-terrain',
+    label: 'Stamen Terrain',
+    shortLabel: 'TERRAIN',
+    kind: 'xyz',
+    requiresIon: false,
+    contactContrast: 'light',
+    // Stamen štýly hostí Stadia; kredit musí menovať aj Stamen Design.
+    xyz: {
+      url: 'https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}@2x.png',
+      tileSize: 256,
+      maximumLevel: 18,
+      credit: '© Stadia Maps © Stamen Design © OpenMapTiles © OpenStreetMap contributors',
     },
   },
   {
@@ -198,6 +247,9 @@ export class MapStackController {
     // controller ich len nesie do prezentácie, nič z nich nerozhoduje.
     photorealSource = null,
     photorealUnavailableReason = null,
+    // Továreň shadera pre deň/noc na fotoreáli (photorealNight.js). Injektuje sa
+    // v testoch: Cesium CustomShader s textúrou sa v Node postaviť nedá.
+    nightShaderFactory = buildPhotorealNightShader,
     cesiumToken = '',
     initialStack = 'photoreal',
     onChange = null,
@@ -207,6 +259,7 @@ export class MapStackController {
     this.viewer = viewer;
     this.googleTileset = googleTileset;
     this._photorealSource = photorealSource === 'ion' || photorealSource === 'google' ? photorealSource : null;
+    this._nightShaderFactory = typeof nightShaderFactory === 'function' ? nightShaderFactory : buildPhotorealNightShader;
     this._photorealUnavailableReason = typeof photorealUnavailableReason === 'string' && photorealUnavailableReason.trim()
       ? photorealUnavailableReason.trim()
       : null;
@@ -447,6 +500,9 @@ export class MapStackController {
    * @param {object|null} stack Cieľový stack descriptor.
    */
   _syncNightLightsLayer(stack) {
+    // Fotoreál: glóbus je skrytý, tak deň/noc ide cez customShader na
+    // tilesete (photorealNight.js) — ten istý prepínač, iná cesta.
+    applyPhotorealNight(this.googleTileset, this._nightLightsEnabled && stack?.kind === "photoreal", { shaderFactory: this._nightShaderFactory });
     const wanted = this._nightLightsEnabled && !!stack && stack.kind !== "photoreal";
     if (this._nightLightsLayer) {
       this.viewer.imageryLayers.remove(this._nightLightsLayer, false);

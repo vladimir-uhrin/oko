@@ -76,6 +76,10 @@ const CONTROLLER_STACKS = [
   // OKO 2026-09-03: tmavý podklad pre kontrast vzdušných kontaktov (keyless
   // na localhoste). Stojí ZA osm, aby indexy detí v testoch nižšie sedeli.
   { id: 'stadia-dark', label: 'Stadia Dark', requiresIon: false, available: true, unavailableReason: null },
+  // OKO 2026-09-06: ďalšie štýly Stadia — v lište jeden čip rodiny „Stadia".
+  { id: 'stadia-smooth', label: 'Stadia Smooth', requiresIon: false, available: true, unavailableReason: null },
+  { id: 'stadia-outdoors', label: 'Stadia Outdoors', requiresIon: false, available: true, unavailableReason: null },
+  { id: 'stadia-terrain', label: 'Stamen Terrain', requiresIon: false, available: true, unavailableReason: null },
   // OKO 2026-09-05: denná satelitná mozaika NASA GIBS (keyless, verejné dáta).
   { id: 'gibs-truecolor', label: 'NASA GIBS', requiresIon: false, available: true, unavailableReason: null },
   // OKO 2026-09-06: statické NASA podklady — Blue Marble a ASTER reliéf.
@@ -97,14 +101,15 @@ test('the row renders exactly the accepted sources', () => {
     'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'gibs-truecolor', 'ugkk-ortofoto',
   ]);
   assert.deepEqual(container.children.map(chipText), [
-    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'Stadia Dark', 'NASA', 'ÚGKK Ortofoto SR',
+    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'Stadia', 'NASA', 'ÚGKK Ortofoto SR',
   ]);
+  assert.equal(container.children[4].dataset.family, 'stadia');
   assert.equal(container.children[5].dataset.family, 'nasa');
   assert.deepEqual(PRESENTED_CHIP_ENTRIES, [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', { family: 'nasa' }, 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', { family: 'stadia' }, { family: 'nasa' }, 'ugkk-ortofoto',
   ]);
   assert.deepEqual(PRESENTED_MAP_STACK_IDS, [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'stadia-smooth', 'stadia-outdoors', 'stadia-terrain', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto',
   ]);
   assert.ok(container.children.every((chip) => chip.tagName === 'button' && chip.type === 'button'));
   assert.ok(container.children.every((chip) => chip.classList.contains(MAP_STACK_CHIP_CLASS)));
@@ -478,4 +483,24 @@ test('fotoreál cez Cesium ion: title čipu nesie zdroj, nedostupný čip nesie 
   assert.equal(plain.title, 'Google 3D');
   const blocked = mapStackChipModel({ id: 'photoreal', label: 'Google 3D', available: false, unavailableReason: 'Google 3D is unavailable: EEA block' }, 'osm');
   assert.equal(blocked.title, 'Google 3D is unavailable: EEA block');
+});
+
+test('rodina Stadia: štyri štýly pod jedným čipom, predvolený tmavý, lokalizované varianty', () => {
+  _resetMapStackChipsForTest();
+  const stadia = MAP_STACK_FAMILIES.find((f) => f.id === 'stadia');
+  assert.deepEqual([...stadia.memberIds], ['stadia-dark', 'stadia-smooth', 'stadia-outdoors', 'stadia-terrain']);
+  assert.equal(stadia.defaultId, 'stadia-dark', 'tmavý ostáva default — kontrast kontaktov (2026-09-03)');
+  const container = makeElement();
+  const selected = [];
+  renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'osm', onSelect: (id) => selected.push(id), doc });
+  const chip = container.children[4];
+  assert.equal(chip.dataset.family, 'stadia');
+  assert.equal(chip.title, 'Stadia Maps styles — pick the variant below', 'titulok rodiny podľa jej id, nie natvrdo NASA');
+  chip.click();
+  assert.deepEqual(selected, ['stadia-dark']);
+  const row = makeElement();
+  renderMapStackVariants(row, CONTROLLER_STACKS, 'stadia-outdoors', { doc });
+  assert.deepEqual(row.children.map(chipText), ['Dark', 'Light', 'Outdoors', 'Terrain (Stamen)']);
+  assert.deepEqual(row.children.map((c) => c.getAttribute('aria-pressed')), ['false', 'false', 'true', 'false']);
+  _resetMapStackChipsForTest();
 });

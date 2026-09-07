@@ -37,10 +37,16 @@ test('Cockpit has one reset action beside its bottom exit path', () => {
 
   const actions = html.match(/<div class="global-context-actions"[\s\S]*?<\/div>/);
   assert.ok(actions, 'Contact Context actions are missing');
-  assert.ok(
-    actions[0].indexOf('id="cockpit-entry"') < actions[0].indexOf('id="installations-search-btn"'),
-    'Cockpit must precede Search Nearby Sites',
-  );
+  // 2026-09-06 „neviem nájsť kokpit": tlačidlo bývalo v záložke Kontext → Lety
+  // a jej `hidden` ho schovalo aj napriek position:fixed. Teraz je na úrovni
+  // body, pred prepínačom pohľadu, a v gride Kontaktov nesmie byť.
+  assert.doesNotMatch(actions[0], /id="cockpit-entry"/, 'Cockpit entry must not live inside the hidden Contacts tab');
+  const entryAt = html.indexOf('id="cockpit-entry"');
+  const switcherAt = html.indexOf('<nav id="view-switcher"');
+  const flightsTabAt = html.indexOf('id="context-flights-view"');
+  assert.ok(entryAt > -1 && entryAt < switcherAt, 'Cockpit entry sits at body level right before the view switcher');
+  assert.ok(entryAt < flightsTabAt, 'Cockpit entry precedes the Contacts tab panel, outside it');
+  assert.match(css, /\.global-context-actions:has\(#tr3b-toggle:not\(\[hidden\]\)\) \{ grid-template-columns: minmax\(0, 1fr\) auto; \}/, 'context grid no longer reserves a column for the entry');
   assert.match(
     css,
     /body\.cockpit-mode #view-switcher \{[\s\S]*?bottom: max\(clamp\(128px, 15vh, 150px\), env\(safe-area-inset-bottom\)\);[\s\S]*?margin-bottom: -95px;/,
@@ -120,7 +126,9 @@ test('Cockpit shortcut failures do not leak and open Radio owns the first Escape
   assert.match(keydown[1], /#cockpit-utility-controls \[aria-expanded="true"\]/);
   assert.match(
     keydown[1],
-    /const cockpitAttempt = !!\(this\.readAircraftInfo\(\) && this\.viewer\.trackedEntity\?\.position\);[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopImmediatePropagation\(\);[\s\S]*?!this\.isEntryAllowed\(\)/,
+    // 2026-09-06: vstup ide cez requestEntry (Kontakty si zapne sám); politika
+    // isEntryAllowed sa kontroluje tam, nie v handleri klávesy.
+    /const cockpitAttempt = !!\(this\.readAircraftInfo\(\) && this\.viewer\.trackedEntity\?\.position\);[\s\S]*?event\.preventDefault\(\);[\s\S]*?event\.stopImmediatePropagation\(\);[\s\S]*?void this\.requestEntry\(\);/,
   );
 });
 
@@ -863,4 +871,24 @@ test('cockpit state cannot report entryAllowed while already active', () => {
   assert.match(state, /'contacts-starting'/);
   assert.match(state, /'contacts-inactive'/);
   assert.match(state, /'no-tracked-aircraft'/);
+});
+
+test('cockpit entry is discoverable: shown for any tracked aircraft, prepares Contacts itself, reachable on narrow/touch screens', () => {
+  // 2026-09-06 „neviem nájsť kokpit": tlačidlo sa skrývalo, kým nebežal
+  // kontext Kontakty + oba feedy. Teraz sa ukáže pri sledovanom lietadle a
+  // klik/C si Kontakty zapne sám.
+  assert.match(ui, /const available = trackedContact;/, 'entry visibility follows tracking, not the context gate');
+  assert.match(ui, /const needsContext = trackedContact && !this\.isEntryAllowed\(\);/);
+  assert.match(ui, /async requestEntry\(\) \{/);
+  assert.match(ui, /this\._listen\(this\.entry, 'click', \(\) => \{ void this\.requestEntry\(\); \}\);/, 'click goes through requestEntry');
+  assert.match(ui, /if \(this\.active\) \{ this\.exit\(\); return; \}\s*void this\.requestEntry\(\);/, 'C key goes through requestEntry');
+  assert.match(ui, /onPrepareEntry: async \(\) => \{\s*const result = await this\.setContextMode\('flights'\);/, 'preparation = Contacts context (both feeds)');
+  assert.match(ui, /if \(!ready \|\| !this\.isEntryAllowed\(\)\) return false;/, 'policy still gates the actual entry');
+  const i18n = fs.readFileSync(path.join(ROOT, 'src', 'i18nStrings.js'), 'utf8');
+  for (const key of ['cockpit.entry-title', 'cockpit.entry-needs-context-title']) {
+    assert.equal((i18n.match(new RegExp(`'${key.replace('.', '\\.')}':`, 'g')) || []).length, 2, `${key} in EN and SK`);
+  }
+  assert.match(css, /@media \(max-width: 1180px\) \{\s*#cockpit-entry \{ left: auto; right: 16px; bottom: 88px; \}/, 'floating button below ~1180px');
+  assert.match(css, /@media \(pointer: coarse\) \{[\s\S]*?#cockpit-entry \{ min-height: 44px;/, '44px touch target');
+  assert.match(css, /body\.cockpit-mode #view-switcher button \{ min-height: 44px; \}/, 'exit is a touch target too (specific enough to beat the mobile rules)');
 });

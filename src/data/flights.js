@@ -1902,10 +1902,15 @@ function _modelColor(icao24) {
   if (icao24 === _trackedIcao) return Cesium.Color.CYAN;
   if (isMilitaryIcao(icao24)) return MIL_TINT;
   // Rovnaká paleta ako ikony (contactPalette.js): na svetlom podklade je biely
-  // GLB pri 129 km len sivá škvrna, atramentový sa číta ako silueta.
-  return contactIconTint('civil') === 'ink' ? MODEL_INK_TINT : Cesium.Color.WHITE;
+  // GLB pri 129 km len sivá škvrna, atramentový sa číta ako silueta; na
+  // tmavom je od 2026-09-06 FR24 žltý ako ikona (biely splýval so svetlami).
+  return MODEL_TINTS[contactIconTint('civil')] || Cesium.Color.WHITE;
 }
-const MODEL_INK_TINT = Cesium.Color.fromCssColorString(TINT_FILLS.ink);
+/** Farby modelov podľa mena tintu — tie isté vzorky ako zapečené výplne SVG. */
+const MODEL_TINTS = Object.freeze({
+  ink: Cesium.Color.fromCssColorString(TINT_FILLS.ink),
+  fr24: Cesium.Color.fromCssColorString(TINT_FILLS.fr24),
+});
 
 /** The FLEET's 3D-model regime: models3d enabled AND the camera zoomed in past the altitude
  *  ceiling. Since 2026-08-22 the toggle DEFAULTS ON in `proximity`, which is itself the

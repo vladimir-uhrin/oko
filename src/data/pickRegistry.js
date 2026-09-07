@@ -70,6 +70,25 @@ export function unregisterPickOwner(layerId) {
  * @param {string} pickedId - Picked primitive/entity id.
  * @returns {boolean}
  */
+/**
+ * Vlastník picku (id vrstvy) alebo null. Pre kontextové menu pravým
+ * tlačidlom (contextMenu.js): menu potrebuje vedieť, KTORÁ vrstva kontakt
+ * vlastní, nie len či „niekto iný".
+ * @param {string|null} pickedId
+ * @returns {string|null}
+ */
+export function ownerOfPick(pickedId) {
+  if (!pickedId) return null;
+  for (const [ownerId, predicate] of _owners) {
+    try {
+      if (predicate(pickedId)) return ownerId;
+    } catch {
+      // a broken predicate must never break click handling
+    }
+  }
+  return null;
+}
+
 export function isOwnedByOtherLayer(layerId, pickedId) {
   if (!pickedId) return false;
   for (const [ownerId, predicate] of _owners) {

@@ -337,6 +337,11 @@ export const TINT_FILLS = Object.freeze({
   cyan: '#00ffff',
   ink: '#1e3a5f',
   ember: '#c2410c',
+  // 'fr24' (2026-09-06, používateľ: „biele sa prelínajú s glóbusom, navrhujem
+  // ako FR24"): žltá silueta s tmavým obrysom na TMAVOM podklade — nočné
+  // svetlá miest (Black Marble) sú biele až teplé, biela silueta v nich
+  // mizla. Farba zo štýlu Flightradar24; obrys má telo už v sebe.
+  fr24: '#ffd21f',
 });
 export function aircraftIcon(kind, px = FLEET_RASTER_PX, strobe = false, tint = null) {
   const k = BODIES[kind] ? kind : 'airliner';

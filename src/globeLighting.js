@@ -1,3 +1,5 @@
+import * as Cesium from 'cesium';
+
 /**
  * Deň/noc na glóbuse — Flightradar-style terminátor (2026-09-05).
  *
@@ -86,4 +88,44 @@ export function applyGlobeLighting(scene, enabled) {
  */
 export function isGlobeLightingEnabled(scene) {
   return scene?.globe?.enableLighting === true;
+}
+
+/** Ako často si osvetlený glóbus vyžiada snímok, aby terminátor lezol aj v idle (m). */
+export const DAY_NIGHT_TICK_MS = 60_000;
+
+/**
+ * Pusti hodiny scény v REÁLNOM čase a drž terminátor v pohybe (2026-09-06,
+ * „nefunguje deň/noc").
+ *
+ * Cesium Viewer štartuje s `clock.shouldAnimate = false`: `currentTime`
+ * ostane na čase načítania stránky a Slnko — teda terminátor — s ním.
+ * Namerané: po hodine otvorenej appky 59 min driftu ≈ 15° dĺžky; po dni je
+ * terminátor úplne mimo. `ClockStep.SYSTEM_CLOCK` + `shouldAnimate` znamená
+ * „currentTime = systémový čas pri každom ticku" — žiadna animácia dát,
+ * vrstvy čítajú `clock.currentTime` len ako argument `getValue` konštantných
+ * vlastností (overené grepom: žiadne Sampled/availability), takže sa im nič
+ * nezmení. Render governor v idle nekreslí sám od seba — preto minútový tik,
+ * ktorý si vyžiada snímok LEN keď je osvetlenie zapnuté (0,25°/min pohybu
+ * terminátora inak nevidno, kým sa nepohne kamera alebo dáta).
+ * @param {object|null} viewer Cesium Viewer (alebo mock s `clock`).
+ * @param {object} [deps]
+ * @param {(reason: string) => void} [deps.requestRender]
+ * @param {typeof setInterval} [deps.setIntervalImpl]
+ * @param {typeof clearInterval} [deps.clearIntervalImpl]
+ * @returns {(() => void)|null} zastavenie tiku; null bez hodín
+ */
+export function installDayNightClock(viewer, {
+  requestRender = () => {},
+  setIntervalImpl = (fn, ms) => globalThis.setInterval(fn, ms),
+  clearIntervalImpl = (id) => globalThis.clearInterval(id),
+} = {}) {
+  const clock = viewer?.clock;
+  if (!clock) return null;
+  clock.clockStep = Cesium.ClockStep.SYSTEM_CLOCK;
+  clock.multiplier = 1;
+  clock.shouldAnimate = true;
+  const id = setIntervalImpl(() => {
+    if (isGlobeLightingEnabled(viewer.scene)) requestRender('day-night-tick');
+  }, DAY_NIGHT_TICK_MS);
+  return () => clearIntervalImpl(id);
 }

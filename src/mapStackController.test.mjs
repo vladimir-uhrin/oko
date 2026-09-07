@@ -310,7 +310,7 @@ test('ÚGKK stack: svetlá idú nad podklad aj nad jeho underlay', async () => {
 
 test('fotoreál vrstvu odoberie (glóbus je skrytý), návrat na glóbus ju vráti', async () => {
   const { viewer, layers } = layeredViewer();
-  const controller = new MapStackController(viewer, { googleTileset: { show: true } });
+  const controller = new MapStackController(viewer, { googleTileset: { show: true }, nightShaderFactory: () => ({}) });
   controller.setNightLightsEnabled(true);
 
   await controller._activateGlobeStack(MAP_STACKS.find((s) => s.id === 'osm'), null);
@@ -461,4 +461,51 @@ test('nočné svetlá: zosilnenie sleduje kontrast podkladu pri každom prepnut�
   // Späť na OSM: recyklovaná vrstva dostane zosilnenie svetlej mapy znova.
   await controller._activateGlobeStack(MAP_STACKS.find((s) => s.id === 'osm'), null);
   assert.equal(controller._nightLightsLayer.brightness, 3);
+});
+
+test('Stadia štýly: svetlé podklady bez stlmenia, kontrast light, Stamen kredit, keyless', () => {
+  const ids = ['stadia-smooth', 'stadia-outdoors', 'stadia-terrain'];
+  const controller = new MapStackController({}, {});
+  for (const id of ids) {
+    const stack = MAP_STACKS.find((s) => s.id === id);
+    assert.ok(stack, id + ' chýba v MAP_STACKS');
+    assert.equal(stack.kind, 'xyz');
+    assert.equal(stack.requiresIon, false);
+    assert.equal(new URL(stack.xyz.url.replace(/\{[zxy]\}/g, '0')).host, 'tiles.stadiamaps.com');
+    assert.doesNotMatch(stack.xyz.url, /api_key/, 'kľúč nikdy do URL (pravidlo 3)');
+    // @2x = retina, logická veľkosť ostáva 256 (lekcia 2026-09-04).
+    assert.equal(stack.xyz.tileSize, 256);
+    assert.match(stack.xyz.url, /@2x\.png$/);
+    assert.equal(stack.contactContrast, 'light', 'svetlý štýl → tmavé siluety kontaktov');
+    assert.equal(stack.xyz.adjust, undefined, 'svetlé štýly sa nestlmujú');
+    assert.match(stack.xyz.credit, /Stadia Maps/);
+    assert.equal(controller.isStackAvailable(id), true);
+  }
+  assert.match(MAP_STACKS.find((s) => s.id === 'stadia-terrain').xyz.credit, /Stamen Design/, 'Stamen štýl musí menovať Stamen Design');
+});
+
+test('fotoreál: deň/noc nasadí customShader na tileset, glóbusový stack ho odoberie, vypnutie tiež', async () => {
+  const { hasPhotorealNight } = await import('./photorealNight.js');
+  const { viewer } = layeredViewer();
+  const tileset = { show: true };
+  let built = 0;
+  const controller = new MapStackController(viewer, { googleTileset: tileset, nightShaderFactory: () => { built += 1; return { id: built }; } });
+  controller.setNightLightsEnabled(true);
+  await controller._activatePhotoreal(null);
+  assert.equal(hasPhotorealNight(tileset), true, 'na fotoreáli ide deň/noc cez shader');
+  assert.equal(controller.hasNightLightsLayer(), false, 'imagery svetlá na skrytom glóbuse nie');
+
+  await controller._activateGlobeStack(MAP_STACKS.find((s) => s.id === 'osm'), null);
+  assert.equal(hasPhotorealNight(tileset), false, 'na glóbuse shader dole (tileset je aj tak skrytý)');
+  assert.equal(controller.hasNightLightsLayer(), true);
+
+  await controller._activatePhotoreal(null);
+  assert.equal(hasPhotorealNight(tileset), true);
+  controller.setNightLightsEnabled(false);
+  assert.equal(hasPhotorealNight(tileset), false, 'prepínač vypnutý = žiadne zotmenie');
+  assert.equal(built, 1, 'shader sa stavia raz a recykluje');
+  // Bez tilesetu (EHP 403 aj cez ion) je to no-op.
+  const bare = new MapStackController(viewer, {});
+  bare.setNightLightsEnabled(true);
+  await bare._activatePhotoreal(null);
 });

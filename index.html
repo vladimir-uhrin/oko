@@ -352,6 +352,15 @@
     <div class="cockpit-help"><span data-i18n="cockpit.help">ESC EXIT</span> <span>·</span> <span data-i18n="cockpit.help-toggle">C TOGGLE</span></div>
   </section>
 
+  <!-- Vstup do kokpitu: na úrovni body, NIE v záložke Kontext → Lety. Tam bol
+       do 2026-09-06 a `hidden` záložka ho schovala aj napriek position:fixed
+       („neviem ho nájsť"). Ukazuje sa pri každom sledovanom lietadle
+       (CockpitViewController.syncEntry). -->
+  <button id="cockpit-entry" type="button" hidden>
+    <span class="material-symbols-outlined" aria-hidden="true">flight</span>
+    <span data-i18n="cockpit.entry">COCKPIT</span>
+  </button>
+
   <nav id="view-switcher" aria-label="View switcher">
     <button id="cockpit-reset-globe" type="button" aria-label="Reset cockpit to full globe view" data-i18n-title="cockpit.reset-title" title="Exit cockpit and return to full globe view" hidden>
       <span class="material-symbols-outlined" aria-hidden="true">public</span>
@@ -781,10 +790,6 @@
         </div>
         <section id="context-flights-view" class="context-mode-view" role="tabpanel" aria-labelledby="global-context-flights-btn" hidden>
           <div class="global-context-actions" aria-label="Contact Context actions" data-i18n-aria="context.actions-aria">
-            <button id="cockpit-entry" type="button" hidden>
-              <span class="material-symbols-outlined" aria-hidden="true">flight</span>
-              <span data-i18n="cockpit.entry">COCKPIT</span>
-            </button>
             <button data-i18n="context.search-sites" id="installations-search-btn" class="panel-layer-toggle" type="button">SEARCH NEARBY SITES</button>
             <button id="tr3b-toggle" class="tr3b-toggle" type="button" aria-pressed="false" hidden aria-label="Reclassify tracked contact as TR-3B" data-i18n-title="cockpit.tr3b.convert" title="Reclassify as TR-3B">△</button>
           </div>

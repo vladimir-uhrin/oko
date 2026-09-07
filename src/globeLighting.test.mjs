@@ -108,8 +108,8 @@ test('deň/noc: tripwire — tlačidlo v lište (default ON), ui.js wiring, i18n
   const i18n = readFileSync(new URL('./i18nStrings.js', import.meta.url), 'utf8');
   assert.match(i18n, /'pp\.daynight-label': 'Day\/Night'/);
   assert.match(i18n, /'pp\.daynight-label': 'Deň\/noc'/);
-  assert.match(i18n, /'pp\.daynight-title': 'Day\/night — real sun lighting on the globe \(terminator\); globe basemaps only'/);
-  assert.match(i18n, /'pp\.daynight-title': 'Deň\/noc — skutočné osvetlenie glóbusu Slnkom \(terminátor\); len mapové podklady glóbusu'/);
+  assert.match(i18n, /'pp\.daynight-title': 'Day\/night — real sun lighting on the globe \(terminator\) and night shading on Google 3D'/);
+  assert.match(i18n, /'pp\.daynight-title': 'Deň\/noc — skutočné osvetlenie glóbusu Slnkom \(terminátor\) aj zotmenie Google 3D'/);
 });
 
 test('deň/noc rozsvieti aj mestá — svetlá sú viazané na ten istý prepínač', () => {
@@ -128,4 +128,37 @@ test('deň/noc rozsvieti aj mestá — svetlá sú viazané na ten istý prepín
   // Vrstvu vlastní mapStackController (musí prežiť prepnutie podkladu) —
   // ui.js si ju nesmie pridávať do scény sám.
   assert.doesNotMatch(ui, /createNightLightsProvider/, 'ui.js nestavia imagery provider');
+});
+
+test('deň/noc: hodiny scény bežia v reálnom čase a osvetlený glóbus si žiada snímok každú minútu', async () => {
+  // Viewer štartuje so shouldAnimate=false → currentTime zamrzne na čase
+  // načítania a Slnko s ním (namerané: 59 min driftu = 15° dĺžky).
+  const { installDayNightClock, DAY_NIGHT_TICK_MS } = await import('./globeLighting.js');
+  const Cesium = await import('cesium');
+  let tick = null;
+  let cleared = null;
+  const requests = [];
+  const viewer = { clock: { shouldAnimate: false, clockStep: 0, multiplier: 60 }, scene: { globe: { enableLighting: false } } };
+  const stop = installDayNightClock(viewer, {
+    requestRender: (reason) => requests.push(reason),
+    setIntervalImpl: (fn, ms) => { tick = fn; assert.equal(ms, DAY_NIGHT_TICK_MS); return 7; },
+    clearIntervalImpl: (id) => { cleared = id; },
+  });
+  assert.equal(viewer.clock.clockStep, Cesium.ClockStep.SYSTEM_CLOCK, 'currentTime = systémový čas pri každom ticku');
+  assert.equal(viewer.clock.shouldAnimate, true);
+  assert.equal(viewer.clock.multiplier, 1);
+  assert.ok(DAY_NIGHT_TICK_MS >= 30_000 && DAY_NIGHT_TICK_MS <= 120_000, 'terminátor lezie 0,25°/min — minútový tik stačí');
+
+  tick();
+  assert.deepEqual(requests, [], 'bez osvetlenia žiadny snímok navyše');
+  viewer.scene.globe.enableLighting = true;
+  tick();
+  assert.deepEqual(requests, ['day-night-tick']);
+  stop();
+  assert.equal(cleared, 7);
+  assert.equal(installDayNightClock(null), null);
+  assert.equal(installDayNightClock({}), null);
+
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /installDayNightClock\(viewer, \{ requestRender: governorRequestRender \}\)/, 'main.js púšťa hodiny pri štarte');
 });

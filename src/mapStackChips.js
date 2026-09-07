@@ -39,6 +39,12 @@ export const MAP_STACK_VARIANT_CLASS = 'map-stack-chip--variant';
  */
 export const MAP_STACK_FAMILIES = Object.freeze([
   Object.freeze({
+    id: 'stadia',
+    label: 'Stadia',
+    memberIds: Object.freeze(['stadia-dark', 'stadia-smooth', 'stadia-outdoors', 'stadia-terrain']),
+    defaultId: 'stadia-dark',
+  }),
+  Object.freeze({
     id: 'nasa',
     label: 'NASA',
     memberIds: Object.freeze(['gibs-truecolor', 'gibs-blue-marble', 'aster-relief']),
@@ -88,6 +94,9 @@ export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'bing-labels',
   'osm',
   'stadia-dark',
+  'stadia-smooth',
+  'stadia-outdoors',
+  'stadia-terrain',
   'gibs-truecolor',
   'gibs-blue-marble',
   'aster-relief',
@@ -134,7 +143,7 @@ export function mapStackFamilyChipModel(family, stacksById, activeId) {
     requiresIon: false,
     requirement: '',
     unavailableHint: available ? '' : t('mapstack.unavailable', { label: family.label }),
-    title: available ? t('mapstack.family.nasa-title') : t('mapstack.unavailable', { label: family.label }),
+    title: available ? t(`mapstack.family.${family.id}-title`) : t('mapstack.unavailable', { label: family.label }),
   };
 }
 

@@ -142,3 +142,13 @@ test('zapečené tinty pre svetlý podklad: ink/ember sú iné textúry, maják 
   assert.equal(aircraftIcon('airliner', 64, false, 'nezmysel'), aircraftIcon('airliner', 64, false));
   assert.equal(aircraftIcon('tr3b', 64, false, 'ink'), aircraftIcon('tr3b', 64, false));
 });
+
+test('tint fr24: FR24 žltá zapečená v SVG, červený maják ostáva v textúre', async () => {
+  const { aircraftIcon, TINT_FILLS } = await import('./aircraftIcons.js');
+  assert.equal(TINT_FILLS.fr24, '#ffd21f');
+  const uri = aircraftIcon('airliner', 64, true, 'fr24');
+  const svg = Buffer.from(uri.split(',')[1], 'base64').toString('utf8');
+  assert.ok(svg.includes(`fill="${TINT_FILLS.fr24}"`), 'výplň je zapečená v SVG');
+  assert.ok(!svg.includes('fill="white"'), 'biela výplň tela je nahradená');
+  assert.notEqual(aircraftIcon('airliner', 64, true, 'fr24'), aircraftIcon('airliner', 64, true), 'iný raster než biely');
+});
