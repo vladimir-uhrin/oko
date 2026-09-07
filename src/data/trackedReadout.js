@@ -149,13 +149,21 @@ export function createTrackedOverlayEntry(entity) {
     route: model.route ?? null,
     progress: model.progress ?? null,
     footer: Array.isArray(model.footer) ? model.footer.map((line) => String(line)) : [],
+    // 2026-09-07: mini profil (2 riadky s grafom) a núdzový squawk (červený rám).
+    profile: model.profile ?? null,
+    alert: model.alert ?? null,
     anchorRadiusPx: 10,
     anchorRadiusScale: TRACKED_BILLBOARD_SCALE,
     minAnchorGapPx: 16,
     anchorGapPaddingPx: 10,
     verticalOnly: true,
     viewportMargin: 6,
-    edgeFade: 'keyhole',
+    // 2026-09-07 (používateľ: karta v strede „zavadzia", „daj ju vedľa"):
+    // karta je DOKOVANÁ k pravému okraju vo výške stroja, bez vodiacej čiary
+    // a bez okrajového blednutia (na okraji by keyhole fade kartu zhasol).
+    // Fotka (trackedPhoto.js) ide za ňou cez paint rect, horizonCull ostáva.
+    dock: 'right',
+    edgeFade: 'none',
     horizonCull: true,
     terrainOcclusion: false,
     interactive: false,

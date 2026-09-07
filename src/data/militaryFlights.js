@@ -21,8 +21,9 @@ import {
   AIRCRAFT_CATEGORY_IDS, categoryForClass, normalizeHiddenCategories, tallyByCategory,
 } from './aircraftCategories.js';
 import { t } from '../i18n.js';
+import { formatAltitude, formatSpeed, onUnitSystemChange } from '../units.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
-import { aircraftIcon, strobeLightIcon, strobeOn, TRACKED_ICON_PX } from './aircraftIcons.js';
+import { aircraftIcon, strobeLightIcon, strobeOn, strobeOnFor, strobePhaseOffsetMs, TRACKED_ICON_PX } from './aircraftIcons.js';
 import {
   isTr3b, tr3bAircraftClass, tr3bConvertedIds, tr3bIconKind, tr3bTypeLabel,
 } from './tr3bRegistry.js';
@@ -728,7 +729,8 @@ function _toCleanText(value) {
  */
 function _formatAltitude(altitudeFt) {
   if (!Number.isFinite(altitudeFt)) return 'Alt unknown';
-  return `${Math.round(altitudeFt)} ft`;
+  // Jednotky (2026-09-07): feed je v stopách, zobrazenie cez units.js.
+  return formatAltitude(altitudeFt * 0.3048);
 }
 
 /**
@@ -771,8 +773,8 @@ function _buildTrackedLabel(info, icao24) {
   const registration = _toCleanText(info?.registration) || 'Reg unknown';
   const operator = _toCleanText(info?.operator) || 'Operator unknown';
   const altitude = _formatAltitude(info?.altitudeFt);
-  const speedKt = info?.speedMps ? Math.round(info.speedMps * 1.944) : null;
-  const tail = speedKt ? `${altitude} · ${speedKt} kt` : altitude;
+  const speed = info?.speedMps ? formatSpeed(info.speedMps) : '';
+  const tail = speed ? `${altitude} · ${speed}` : altitude;
   const lines = [
     callsign,
     `${type} · ${registration}`,
@@ -785,6 +787,10 @@ function _buildTrackedLabel(info, icao24) {
   if (alert) lines.push(`SQUAWK ${alert.code} · ${alert.label}`);
   return lines.join('\n');
 }
+
+// Živý prepínač jednotiek (2026-09-07): karta sledovaného stroja sa
+// preformátuje hneď, nie až pri ďalšom polle.
+onUnitSystemChange(() => { if (_trackedIcao) _updateTrackedLabelModel(_trackedIcao); });
 
 /** Write the explicit tracked presentation model and refresh its host entry. */
 function _updateTrackedLabelModel(icao24) {
@@ -2009,7 +2015,11 @@ function _fleetTick() {
   // spolu s raster swapom). Povodna verzia prehadzovala celu flotilu naraz a
   // pri oddialenom pohlade tak preblesla cela scena. Cockpit pip rezim a IR
   // boost sa nepreblikavaju.
-  const strobePhase = !_cockpitContactMode && !_irBoost && strobeOn(nowMs);
+  // Fáza per stroj (2026-09-07, „bliká to celé, vždy rovnako"): globálna
+  // fáza ostáva len pre sledovaný stroj; flotila používa strobeOnFor()
+  // s posunom z ICAO24, takže hustý zhluk mihoce náhodne, nie naraz.
+  const strobeAllowed = !_cockpitContactMode && !_irBoost;
+  const strobePhase = strobeAllowed && strobeOn(nowMs);
   if (strobePhase !== _lastStrobeOn) {
     _lastStrobeOn = strobePhase;
     _syncTrackedBillboardImage();
@@ -2156,8 +2166,10 @@ function _fleetTick() {
     // focus/limb recession counts) with hysteresis (atlas has no mips).
     // Drobna silueta raster neprepina, ale STROBO ano: pri ~8 px vyjde
     // kridelne svetlo zhruba na jeden pixel ("jednopixelovy pulzar").
+    if (bb._gevStrobeOffset === undefined) bb._gevStrobeOffset = strobePhaseOffsetMs(icao24);
+    const contactStrobe = strobeAllowed && strobeOnFor(icao24, nowMs, bb._gevStrobeOffset);
     if (bb._gevMicro === true) {
-      const wantStrobe = strobePhase;
+      const wantStrobe = contactStrobe;
       if (wantStrobe !== (bb._gevStrobeOn === true)) {
         bb._gevStrobeOn = wantStrobe;
         _syncFleetBillboardIcon(icao24, bb, _flightData.get(icao24)?.klass);
@@ -2168,7 +2180,7 @@ function _fleetTick() {
         * distanceScale * (globalThis.devicePixelRatio || 1);
       const wantLarge = bb._gevIconLarge ? glyphDevPx > 56 : glyphDevPx > 76;
       // Strobo je detail na blizko — daleke kontakty ho nedostanu vobec.
-      const wantStrobe = strobePhase && cameraDistanceM <= STROBE_MAX_DIST_M;
+      const wantStrobe = contactStrobe && cameraDistanceM <= STROBE_MAX_DIST_M;
       if (wantLarge !== !!bb._gevIconLarge || wantStrobe !== (bb._gevStrobeOn === true)) {
         bb._gevIconLarge = wantLarge;
         bb._gevStrobeOn = wantStrobe;

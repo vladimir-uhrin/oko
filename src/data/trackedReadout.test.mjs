@@ -117,7 +117,8 @@ test('tracked entry factory pins the production protected-lane policy', () => {
   assert.equal(entry.protected, true);
   assert.equal(entry.paintLane, 'tracked');
   assert.equal(entry.collisionGroup, 'ambient-card');
-  assert.equal(entry.edgeFade, 'keyhole');
+  assert.equal(entry.edgeFade, 'none', '2026-09-07: dokovaná karta na okraji nesmie blednúť');
+  assert.equal(entry.dock, 'right', 'karta je dokovaná vpravo, nie nad strojom');
 });
 
 test('tracked entity publishes a protected host entry backed by the frame cache', () => {

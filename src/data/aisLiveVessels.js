@@ -25,7 +25,7 @@ import {
   densityModeActive,
 } from './trafficDensity.js';
 import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
-import { formatKnots } from './detectionDraw.js';
+import { formatVesselSpeedKnots, isMetric } from '../units.js';
 import {
   isOwnedByOtherLayer,
   registerPickOwner,
@@ -732,7 +732,7 @@ const aisLiveVesselsLayer = {
         klass: record.type
           ? normalizeVesselType(record.type).toUpperCase().slice(0, 14) || undefined
           : undefined,
-        metric: isLastKnownVessel(record) ? 'LAST KNOWN' : formatKnots(record.speed),
+        metric: isLastKnownVessel(record) ? 'LAST KNOWN' : formatVesselSpeedKnots(record.speed),
       });
       if (result.length >= maxCount) break;
     }
@@ -2590,6 +2590,8 @@ function displayVesselName(record) {
 }
 
 function formatSpeed(speed) {
+  // Jednotky (2026-09-07): námorne KT, metricky KM/H (units.js drží pomer).
+  if (isMetric()) return speed === null ? '--KM/H' : `${Math.round(speed * 1.852)}KM/H`;
   return speed === null ? '--KT' : `${speed.toFixed(1)}KT`;
 }
 

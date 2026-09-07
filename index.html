@@ -256,6 +256,16 @@
             <strong data-i18n="cockpit.route-unknown" id="cockpit-route-to">UNKNOWN</strong>
           </div>
         </div>
+        <div id="cockpit-route-metar" class="cockpit-route-metar" hidden>
+          <span data-i18n="cockpit.route-metar">DEST METAR</span>
+          <strong id="cockpit-route-metar-text">—</strong>
+        </div>
+        <div id="cockpit-approach" class="cockpit-approach" role="status" aria-label="Approach estimate" data-i18n-aria="cockpit.approach-kicker" hidden>
+          <span class="cockpit-approach-kicker" data-i18n="cockpit.approach-kicker">APPROACH · ESTIMATE</span>
+          <strong id="cockpit-approach-runway">—</strong>
+          <span id="cockpit-approach-distance">—</span>
+          <span id="cockpit-approach-height">—</span>
+        </div>
       </section>
       <header class="cockpit-signal-header">
         <div class="cockpit-brief-heading">
@@ -456,6 +466,15 @@
       <button class="pp-toggle-btn active" id="daynight-toggle" aria-pressed="true" data-i18n-title="pp.daynight-title" title="Day/night — real sun lighting on the globe (terminator)">
         <span class="pp-icon material-symbols-outlined" aria-hidden="true">wb_twilight</span>
         <span class="pp-label" data-i18n="pp.daynight-label">Day/Night</span>
+      </button>
+    </div>
+    <div class="pp-toggle-group">
+      <!-- Jednotky (2026-09-07): letecké (ft/FL, kts) ↔ metrické (m, km/h)
+           pre kokpit, karty a detekčné štítky. Per zariadenie (localStorage,
+           ako jazyk), bez share-link kľúča. Popis nastavuje ui.js podľa voľby. -->
+      <button class="pp-toggle-btn" id="units-toggle" aria-pressed="false" data-i18n-title="pp.units-title" title="Units — aviation (ft, kts) or metric (m, km/h)">
+        <span class="pp-icon material-symbols-outlined" aria-hidden="true">straighten</span>
+        <span class="pp-label">FT · KTS</span>
       </button>
     </div>
     <div class="pp-toggle-group">

@@ -482,7 +482,11 @@ test('real civil track path creates no native label and publishes every cached h
     // Štruktúrovaná karta (2026-09-05): titulok = callsign, kinematika je
     // prvý riadok, trasa a progres sú vlastné riadky s vlajkami a kresleným
     // barom (letiská fixtúry nemajú štát → vlajky null).
-    const { progress, footer, ...model } = entity.gevLabelModel;
+    const { progress, footer, profile, alert, ...model } = entity.gevLabelModel;
+    // 2026-09-07: mini profil (null kým nie sú 3 vzorky) a núdzový squawk
+    // (null pri bežnom kóde) sú vlastné polia modelu, nie footer.
+    assert.equal(profile, null, 'čerstvo sledovaný stroj ešte profil nemá');
+    assert.equal(alert, null, 'bežný squawk = bez poplachu');
     // FR24 blok (2026-08-31): fixtúra sedí ~400 m od AUS, takže 0 % a ETA
     // ~2:13 pri 250 m/s je korektný výstup routeProgress, nie regresia.
     assert.ok(progress.fraction >= 0 && progress.fraction < 0.001);

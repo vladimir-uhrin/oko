@@ -1,4 +1,15 @@
 import * as Cesium from 'cesium';
+import {
+  CELESTIAL_MARKER_PX,
+  MOON_RADIUS_RATIO,
+  SUN_RADIUS_RATIO,
+  brightLimbAngle,
+  drawMoonDisc,
+  drawSunDisc,
+  markerRenderKey,
+  moonIllumination,
+  prepareMarkerCanvas,
+} from './celestialBodies.js';
 import { governorRequestRender } from './renderGovernor.js';
 
 /** Outer edge of the existing NVG/FLIR keyhole in normalized shader space. */
@@ -400,13 +411,14 @@ export class CelestialRing {
     this._moonCanvas.className = 'celestial-ring-canvas celestial-moon-canvas';
     this._moonCtx = this._moonCanvas.getContext('2d', { alpha: true, desynchronized: true });
 
-    this._sunMarker = document.createElement('span');
-    this._sunMarker.className = 'celestial-marker celestial-sun material-symbols-outlined';
-    this._sunMarker.textContent = 'light_mode';
-
-    this._moonMarker = document.createElement('span');
-    this._moonMarker.className = 'celestial-marker celestial-moon material-symbols-outlined';
-    this._moonMarker.textContent = 'dark_mode';
+    // Značky sú plátna s TELESAMI (celestialBodies.js, 2026-09-07): Slnko
+    // ako žiariaci disk, Mesiac so skutočnou fázou z vektorov prstenca.
+    // Glyfy Material Symbols (light_mode/dark_mode) boli „ikony", nie obloha.
+    this._sunMarker = document.createElement('canvas');
+    this._sunMarker.className = 'celestial-marker celestial-sun';
+    this._moonMarker = document.createElement('canvas');
+    this._moonMarker.className = 'celestial-marker celestial-moon';
+    this._markerRenderKey = '';
 
     this._root.append(
       this._ringOutline,
@@ -682,6 +694,7 @@ export class CelestialRing {
       this._moonAngle,
       this._moonOpacity
     );
+    this._renderMarkerBodies();
     this._debug = {
       enabled: true,
       visible: true,
@@ -690,10 +703,30 @@ export class CelestialRing {
       sunOpacity: this._sunOpacity,
       moonOpacity: this._moonOpacity,
       markersCollide,
+      moonPhaseFraction: this._moonPhaseFraction ?? null,
       ephemerisUpdates: this._ephemerisUpdateCount,
       renderScale: this._renderScale,
       disc: { ...disc },
     };
+  }
+
+  /**
+   * Nakresli Slnko a Mesiac do plátien značiek — len keď sa zmení fáza,
+   * smer jasného okraja alebo DPR (kľúč), inak nič (postRender beží často).
+   */
+  _renderMarkerBodies() {
+    const { fraction } = moonIllumination(this._sunFixed, this._moonFixed);
+    const limb = brightLimbAngle(this._sunAngle, this._moonAngle);
+    const dpr = Math.min(3, globalThis.devicePixelRatio || 1);
+    const key = markerRenderKey(fraction, limb, dpr);
+    if (key === this._markerRenderKey) return;
+    this._markerRenderKey = key;
+    const half = CELESTIAL_MARKER_PX / 2;
+    const sunCtx = prepareMarkerCanvas(this._sunMarker, dpr);
+    if (sunCtx) drawSunDisc(sunCtx, half, half, half * SUN_RADIUS_RATIO);
+    const moonCtx = prepareMarkerCanvas(this._moonMarker, dpr);
+    if (moonCtx) drawMoonDisc(moonCtx, half, half, half * MOON_RADIUS_RATIO, fraction, limb);
+    this._moonPhaseFraction = fraction;
   }
 
   /** Read-only geometry snapshot for browser QA. */

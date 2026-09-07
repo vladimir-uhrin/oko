@@ -100,13 +100,13 @@ test('drobná silueta bliká krídelným svetlom, kokpitový pip nie', () => {
     const name = file.includes('military') ? 'military' : 'flights';
     assert.match(
       source,
-      /if \(bb\._gevMicro === true\) \{[\s\S]{0,200}?const wantStrobe = strobePhase;/,
-      `${name}: mikro-silueta blikne na strobo fáze`,
+      /if \(bb\._gevMicro === true\) \{[\s\S]{0,200}?const wantStrobe = contactStrobe;/,
+      `${name}: mikro-silueta blikne vo VLASTNEJ fáze stroja (2026-09-07)`,
     );
     // Vzdialenostná brána tu nedáva zmysel — v tomto režime sú ďaleko všetky.
     assert.doesNotMatch(
       source,
-      /if \(bb\._gevMicro === true\) \{[\s\S]{0,200}?strobePhase && cameraDistanceM/,
+      /if \(bb\._gevMicro === true\) \{[\s\S]{0,200}?contactStrobe && cameraDistanceM/,
       `${name}: mikro strobo nemá vzdialenostnú bránu`,
     );
     // Kurz je pridaná hodnota siluety oproti bodke — rotáciu musí dostať.

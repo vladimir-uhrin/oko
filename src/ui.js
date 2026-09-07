@@ -69,6 +69,18 @@ import {
 import { installDetectionHover } from './data/detectionHover.js';
 import { installContactHoverCard, updateContactHoverCard } from './data/contactHoverCard.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
+import {
+  altitudeDisplayValue,
+  formatThousands,
+  getUnitSystem,
+  isMetric,
+  onUnitSystemChange,
+  speedDisplayValue,
+  toggleUnitSystem,
+} from './units.js';
+import { cachedMetarCardLines, cachedMetarReport, cachedMetarWind, metarStationId, requestAirportMetar } from './data/airportWeather.js';
+import { lookupAirport } from './data/airportLookup.js';
+import { approachLines, approachState, destinationLookupCode, destinationWeatherLine } from './cockpitApproach.js';
 import { addBookmark, loadBookmarks, removeBookmark, saveBookmarks } from './data/bookmarkStore.js';
 import {
   ALLOCATION_STRATEGIES,
@@ -690,9 +702,16 @@ class CockpitViewController {
     getInheritedVisionLabel = null,
     restoreTrackingFrame = null,
     onPrepareEntry = null,
+    onReleasePreparedEntry = null,
   } = {}) {
     this.viewer = viewer;
     this.active = false;
+    // 2026-09-07 („keď opustím kokpit, zostane fragment"): keď Kontakty zapol
+    // až samotný vstup do kokpitu, pri odchode ich vrátime — inak po výstupe
+    // ostal prstenec s kontaktnými šípkami a BRG/CRS štítkami, ktoré tam pred
+    // vstupom neboli.
+    this.onReleasePreparedEntry = typeof onReleasePreparedEntry === 'function' ? onReleasePreparedEntry : null;
+    this._preparedContext = false;
     // Vstup do kokpitu vyžaduje Kontakty (kontext 'flights' + oba letecké
     // feedy). Do 2026-09-06 sa tlačidlo bez nich ani neukázalo — používateľ
     // ho „nevedel nájsť". Teraz sa ukáže pri každom sledovanom lietadle a
@@ -740,6 +759,16 @@ class CockpitViewController {
     this.routeStatus = document.getElementById('cockpit-route-status');
     this.routeDirection = document.getElementById('cockpit-route-direction');
     this.routeDirectionLabel = document.getElementById('cockpit-route-direction-label');
+    // METAR cieľa + priblíženie (2026-09-07, cockpitApproach.js).
+    this.routeMetar = document.getElementById('cockpit-route-metar');
+    this.routeMetarText = document.getElementById('cockpit-route-metar-text');
+    this.approach = document.getElementById('cockpit-approach');
+    this.approachRunway = document.getElementById('cockpit-approach-runway');
+    this.approachDistance = document.getElementById('cockpit-approach-distance');
+    this.approachHeight = document.getElementById('cockpit-approach-height');
+    this._destinationCode = '';
+    this._destinationAirport = null;
+    this._destinationTexts = { metar: '', runway: '', distance: '', height: '' };
     this.visionPrevious = document.getElementById('cockpit-vision-previous');
     this.visionCurrent = document.getElementById('cockpit-vision-current');
     this.visionCurrentLabel = document.getElementById('cockpit-vision-current-label');
@@ -1005,6 +1034,7 @@ class CockpitViewController {
       try {
         const ready = await this.onPrepareEntry();
         if (!ready || !this.isEntryAllowed()) return false;
+        this._preparedContext = true;
       } catch (error) {
         console.warn('[Cockpit] context preparation failed:', error);
         return false;
@@ -1091,6 +1121,84 @@ class CockpitViewController {
 
   clearPredictiveRoute() {
     if (this.routeDirection) this.routeDirection.hidden = true;
+  }
+
+  /** Jednotky sa zmenili: prekresli prístroje hneď (popisky pások aj hodnoty). */
+  refreshUnits() {
+    this._unitsLabelSystem = null;
+    if (this.active && this.lastAircraftInfo) this.updateHud(this.lastAircraftInfo, performance.now(), true);
+  }
+
+  /**
+   * Služby cieľového letiska (2026-09-07): METAR cieľa a odhad priblíženia.
+   * Kód cieľa z adsbdb (IATA) sa lenivo preloží na záznam letiska (ICAO,
+   * výška, dráhy — airportLookup.js); METAR ide cez zdieľanú cache
+   * airportWeather.js (TTL 5 min, jeden dopyt na stanicu), takže volanie
+   * z každého HUD tiku nič nestojí — DOM sa píše len pri zmene textu.
+   * @param {object|null} info getTrackedInfo() sledovaného stroja
+   * @param {object|null} destination cieľ s platnou polohou, inak null
+   */
+  updateDestinationServices(info, destination) {
+    const code = destinationLookupCode(destination);
+    if (!code) {
+      this._destinationCode = '';
+      this._destinationAirport = null;
+      this.renderDestinationWeather(null);
+      this.renderApproach(null);
+      return;
+    }
+    if (code !== this._destinationCode) {
+      this._destinationCode = code;
+      this._destinationAirport = null;
+      lookupAirport(code).then((airport) => {
+        if (this._destinationCode !== code) return;
+        this._destinationAirport = airport;
+        this.updateDestinationServices(info, destination);
+      }).catch(() => {});
+    }
+    const airport = this._destinationAirport;
+    const station = metarStationId({ icao: airport?.icao ?? destination?.icao ?? null });
+    if (station) {
+      void requestAirportMetar(station, { onDone: () => this.renderDestinationWeather(station) });
+    }
+    this.renderDestinationWeather(station);
+    this.renderApproach(approachState({
+      latitude: info?.latitude,
+      longitude: info?.longitude,
+      altitudeM: info?.altitudeM,
+      verticalRateMps: info?.verticalRateMps ?? null,
+      speedMps: info?.velocityMps ?? null,
+      onGround: info?.onGround === true,
+      destination,
+      airport,
+      wind: station ? cachedMetarWind(station) : null,
+    }));
+  }
+
+  renderDestinationWeather(station) {
+    if (!this.routeMetar || !this.routeMetarText) return;
+    const report = station ? cachedMetarReport(station) : null;
+    const pending = Boolean(station) && !report && cachedMetarCardLines(station)[0] === 'METAR…';
+    const text = destinationWeatherLine(report, station, Date.now(), t, { pending });
+    this.routeMetar.hidden = !text;
+    if (text !== this._destinationTexts.metar) {
+      this._destinationTexts.metar = text;
+      this.routeMetarText.textContent = text || '—';
+    }
+  }
+
+  renderApproach(state) {
+    if (!this.approach) return;
+    const lines = approachLines(state, t);
+    this.approach.hidden = !lines;
+    this.hud?.classList.toggle('approach-active', Boolean(lines));
+    if (!lines) return;
+    for (const [key, element] of [['runway', this.approachRunway], ['distance', this.approachDistance], ['height', this.approachHeight]]) {
+      if (element && lines[key] !== this._destinationTexts[key]) {
+        this._destinationTexts[key] = lines[key];
+        element.textContent = lines[key];
+      }
+    }
   }
 
   onKeyDown(event) {
@@ -1211,6 +1319,10 @@ class CockpitViewController {
     this.regionalBriefSubjectId = null;
     document.body.classList.remove('cockpit-mode');
     this.onExited?.();
+    if (this._preparedContext) {
+      this._preparedContext = false;
+      this.onReleasePreparedEntry?.();
+    }
     this.hud?.style.removeProperty('--cockpit-utility-top');
     this.hud?.style.removeProperty('--cockpit-utility-max-height');
     if (this.hud) this.hud.hidden = true;
@@ -1464,7 +1576,17 @@ class CockpitViewController {
     if (this.callsign) {
       this.callsign.textContent = info.callsign || info.registration || info.icao24 || t('cockpit.aircraft');
     }
-    const speedKt = Number.isFinite(info.velocityMps) ? info.velocityMps * 1.94384 : null;
+    // Jednotky (2026-09-07): hodnoty prístrojov v zobrazovacej jednotke
+    // (kts | km/h, ft | m) cez units.js; pásky a kroky sú na hodnotu agnostické.
+    if (this._unitsLabelSystem !== getUnitSystem()) {
+      this._unitsLabelSystem = getUnitSystem();
+      const metric = isMetric();
+      const speedLabel = this.speedRim?.querySelector('.cockpit-altitude-rim-label');
+      if (speedLabel) speedLabel.textContent = t(metric ? 'cockpit.ground-speed-kmh' : 'cockpit.ground-speed-kts');
+      const altLabel = this.altitudeRim?.querySelector('.cockpit-altitude-rim-label');
+      if (altLabel) altLabel.textContent = t(metric ? 'cockpit.altitude-m' : 'cockpit.altitude-ft');
+    }
+    const speedKt = speedDisplayValue(info.velocityMps);
     setCockpitRollingValue(
       this.speed,
       formatSpeedRulerTick(speedKt),
@@ -1485,7 +1607,7 @@ class CockpitViewController {
       const label = element.querySelector('b');
       if (label) label.textContent = formatSpeedRulerTick(tick.valueKt);
     });
-    const altitudeFt = cockpitAltitudeDisplayFt(info.altitudeM, info.onGround);
+    const altitudeFt = info.onGround === true ? 0 : altitudeDisplayValue(info.altitudeM);
     if (this.altitude) {
       const displayedAltitudeFt = Number.isFinite(altitudeFt)
         ? Math.round(altitudeFt)
@@ -1493,7 +1615,7 @@ class CockpitViewController {
       setCockpitRollingValue(
         this.altitude,
         displayedAltitudeFt !== null
-          ? displayedAltitudeFt.toLocaleString('en-US')
+          ? formatThousands(displayedAltitudeFt) // tenká medzera, nie „34,975"
           : '-----',
         displayedAltitudeFt,
         { immediate: forceContext },
@@ -1566,6 +1688,7 @@ class CockpitViewController {
     const origin = info?.route?.origin;
     const destination = info?.route?.destination;
     const validDestination = Number.isFinite(destination?.lat) && Number.isFinite(destination?.lon);
+    this.updateDestinationServices(info, validDestination ? destination : null);
     const routeLabel = (airport) => [airport?.code, airport?.name].filter(Boolean).join(' · ') || t('cockpit.route-unknown');
     if (this.routeFrom) this.routeFrom.textContent = routeLabel(origin);
     if (this.routeTo) this.routeTo.textContent = routeLabel(destination);
@@ -2523,6 +2646,11 @@ export class StyleManager {
         const result = await this.setContextMode('flights');
         return result?.ok === true;
       },
+      // Odchod z kokpitu vráti Kontakty do stavu pred vstupom (len keď ich
+      // zapol vstup). Interná choreografia, nie operátorský dopyt na Kontext.
+      onReleasePreparedEntry: () => {
+        void this.setContextMode(null, { claimVisualAuthority: false });
+      },
       onEntered: () => {
         // A new Cockpit session owns both side rails. Clear standard map-view
         // panels once on entry; NEXT/PREVIOUS never reaches this callback, so
@@ -2708,6 +2836,7 @@ export class StyleManager {
     // ako priezor). Tlačidlo v index.html nesie `active`; _initDayNightToggle
     // ho zosúladí so scénou hneď pri štarte.
     this._dayNightBtn = document.getElementById('daynight-toggle');
+    this._unitsBtn = document.getElementById('units-toggle');
     this._dayNightEnabled = true;
     // Plátno (2D Mercator) — DEFAULT-OFF, guľa je produkt. Session-only.
     this._flatMapBtn = document.getElementById('flatmap-toggle');
@@ -2791,6 +2920,7 @@ export class StyleManager {
     this._initHUDToggle();
     this._initModels3dToggle();
     this._initDayNightToggle();
+    this._initUnitsToggle();
     this._initContextMenus();
     this._initFlatMapToggle();
     this._applyGlobalPostDefaults();
@@ -10350,6 +10480,29 @@ export class StyleManager {
     // Markup nesie default (active) — scéna ho musí dostať hneď pri štarte,
     // inak by svietilo tlačidlo nad neosvetleným glóbusom.
     this._setDayNightEnabled(this._dayNightEnabled);
+  }
+
+  /**
+   * Jednotky výšky a rýchlosti (2026-09-07): letecké (ft/FL, kts, ft/min)
+   * ↔ metrické (m, km/h, m/s) pre kokpit, karty aj detekčné štítky. Voľba
+   * je per zariadenie (localStorage, ako jazyk), prepína sa živo cez
+   * gev:units-changed — units.js je jediné miesto s konverziami.
+   */
+  _initUnitsToggle() {
+    const sync = () => {
+      if (!this._unitsBtn) return;
+      const metric = isMetric();
+      this._unitsBtn.setAttribute('aria-pressed', metric ? 'true' : 'false');
+      this._unitsBtn.classList.toggle('active', metric);
+      const label = this._unitsBtn.querySelector('.pp-label');
+      if (label) label.textContent = t(metric ? 'pp.units-label-metric' : 'pp.units-label-aviation');
+    };
+    sync();
+    this._unitsBtn?.addEventListener('click', () => { toggleUnitSystem(); });
+    onUnitSystemChange(() => {
+      sync();
+      this.cockpitView?.refreshUnits();
+    });
   }
 
   /**

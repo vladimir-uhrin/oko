@@ -8,6 +8,8 @@ import { readFileSync } from 'node:fs';
 import {
   STROBE_FLASH_MS,
   STROBE_PERIOD_MS,
+  strobeOnFor,
+  strobePhaseOffsetMs,
   aircraftIcon,
   strobeOn,
 } from './aircraftIcons.js';
@@ -73,6 +75,31 @@ test('zapečený cyan tint: stroj azúrový, krídlové svetlo ostáva ČERVENÉ
   assert.match(flightsSrc, /_lastStrobeOn[^\n]*\n\s*'cyan',/, 'sync sledovaného glyfu pečie cyan');
 });
 
+test('strobo má fázu PER STROJ z ICAO24 — hustý zhluk nepreblesne naraz (2026-09-07)', () => {
+  const a = strobePhaseOffsetMs('4b1805');
+  const b = strobePhaseOffsetMs('3c6444');
+  assert.equal(a, strobePhaseOffsetMs('4b1805'), 'deterministické');
+  assert.notEqual(a, b, 'rôzne stroje, rôzna fáza');
+  for (const id of ['4b1805', '3c6444', 'a0b1c2', '', undefined]) {
+    const off = strobePhaseOffsetMs(id);
+    assert.ok(Number.isInteger(off) && off >= 0 && off < STROBE_PERIOD_MS, `posun ${off}`);
+  }
+  // Rozptyl: z 500 náhodných ICAO je v ktoromkoľvek okamihu zapnutých ~10 %,
+  // nie 0 % alebo 100 % ako pri spoločnej fáze.
+  const ids = Array.from({ length: 500 }, (_, i) => (0x400000 + i * 7919).toString(16));
+  for (const t of [0, 100, 611, 1150]) {
+    const lit = ids.filter((id) => strobeOnFor(id, t)).length / ids.length;
+    assert.ok(lit > 0.04 && lit < 0.2, `t=${t}: zapnutých ${lit}`);
+  }
+  assert.equal(strobeOnFor('x', 5, 0), strobeOn(5), 'nulový posun = spoločná fáza');
+  for (const file of ['./flights.js', './militaryFlights.js']) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    assert.match(source, /bb\._gevStrobeOffset = strobePhaseOffsetMs\(icao24\)/, `${file}: posun sa cachuje na billboarde`);
+    assert.match(source, /contactStrobe = strobeAllowed && strobeOnFor\(icao24, nowMs, bb\._gevStrobeOffset\)/, `${file}: flotila bliká per stroj`);
+    assert.match(source, /const wantStrobe = contactStrobe;/, `${file}: drobné siluety tiež per stroj`);
+  }
+});
+
 test('TR-3B si nechá vlastné svetlá — strobo sa naň nelepí', () => {
   // Easter egg má trojicu rohových svetiel s vlastným rytmom scény; biele
   // strobo na čiernom trojuholníku by kazilo siluetu.
@@ -100,7 +127,7 @@ test('strobo má JEDINÝ zapisovač textúry a vzdialenostnú bránu', () => {
     assert.match(source, /const STROBE_MAX_DIST_M = \d+/, `${name}: má vzdialenostnú bránu`);
     assert.match(
       source,
-      /wantStrobe = strobePhase && cameraDistanceM <= STROBE_MAX_DIST_M/,
+      /wantStrobe = contactStrobe && cameraDistanceM <= STROBE_MAX_DIST_M/,
       `${name}: brána sa vyhodnocuje per kontakt, nie globálne`,
     );
     assert.match(source, /function _syncFleetBillboardIcon\(/, `${name}: jediný zapisovač`);

@@ -1,3 +1,4 @@
+import { altitudeDisplayValue, formatAltitude, formatVesselSpeedKnots, isMetric } from '../units.js';
 /**
  * @module detectionDraw
  * @description Pure, renderer-agnostic helpers for the detection overlay.
@@ -13,8 +14,6 @@
 const MAX_PRIMARY = 18;
 /** @constant {number} Max characters shown for a label's secondary (class · metric) line. */
 const MAX_SECONDARY = 26;
-/** @constant {number} Metres-to-feet conversion factor. */
-const M_TO_FT = 3.28084;
 
 /**
  * Formats an altitude in metres as an aviation flight level (hundreds of feet),
@@ -25,7 +24,9 @@ const M_TO_FT = 3.28084;
  */
 export function formatFlightLevel(altitudeMeters) {
   if (!Number.isFinite(altitudeMeters) || altitudeMeters <= 0) return '';
-  const fl = Math.round((altitudeMeters * M_TO_FT) / 100);
+  // Jednotky (2026-09-07): metrický režim hlási metre namiesto hladiny.
+  if (isMetric()) return formatAltitude(altitudeMeters);
+  const fl = Math.round(altitudeDisplayValue(altitudeMeters) / 100);
   return 'FL' + String(fl).padStart(3, '0');
 }
 
@@ -36,8 +37,7 @@ export function formatFlightLevel(altitudeMeters) {
  * @returns {string} e.g. '14 kn', or '' when not applicable.
  */
 export function formatKnots(knots) {
-  if (!Number.isFinite(knots) || knots <= 0) return '';
-  return Math.round(knots) + ' kn';
+  return formatVesselSpeedKnots(knots); // '14 kn' | metricky '26 km/h'
 }
 
 /**

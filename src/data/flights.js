@@ -48,7 +48,7 @@ import {
 } from './aircraftCategories.js';
 import { t } from '../i18n.js';
 import { modelAnchorWorld, modelVisualAnchor, trailAnchorForModel, trailHeadStart, visualCenterForModel } from './modelVisualAnchor.js';
-import { aircraftIcon, strobeLightIcon, strobeOn, TRACKED_ICON_PX, TINT_FILLS } from './aircraftIcons.js';
+import { aircraftIcon, strobeLightIcon, strobeOn, strobeOnFor, strobePhaseOffsetMs, TRACKED_ICON_PX, TINT_FILLS } from './aircraftIcons.js';
 import {
   isTr3b, tr3bAircraftClass, tr3bConvertedIds, tr3bIconKind, tr3bTypeLabel,
 } from './tr3bRegistry.js';
@@ -62,6 +62,7 @@ import {
 } from './trafficDensity.js';
 import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
+import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
 import {
   applyTrackedCameraFrame,
   trackedModelScaleForPixelCap,
@@ -108,6 +109,7 @@ import {
   setAircraftRecessionParams,
 } from './aircraftRecession.js';
 import { refreshTrackedReadout } from './trackedReadout.js';
+import { onUnitSystemChange } from '../units.js';
 import { buildTrackedCardModel, formatFlightLine, formatMetaLine, TRACKED_FLIGHT_ACCENT } from './trackedCardModel.js';
 import { resolveFlagIso2 } from './countryFlags.js';
 import {
@@ -411,6 +413,8 @@ function _emitAwarenessEvent(type, detail) {
 
 /** @type {ReturnType<typeof createSquawkWatch>} Sledovač núdzových kódov. */
 const _squawkWatch = createSquawkWatch();
+/** Riedky záznam výšky a rýchlosti per stroj pre mini profil na karte (flightProfile.js). */
+const _profileStore = createProfileStore();
 
 /**
  * Po každom polle ohlás NOVÉ núdzové squawky.
@@ -3065,7 +3069,11 @@ function _fleetTick() {
   // CELÚ flotilu naraz a pri oddialenom pohľade tak prebleskla celá Európa.
   // V cockpit pip režime sa nepreblikáva (kontakty sú bodky, nie siluety);
   // IR boost má vlastnú tepelnú reč — strobo by v nej pôsobilo ako artefakt.
-  const strobePhase = !_cockpitContactMode && !_irBoost && strobeOn(nowMs);
+  // Fáza per stroj (2026-09-07, „bliká to celé, vždy rovnako"): globálna
+  // fáza ostáva len pre sledovaný stroj; flotila používa strobeOnFor()
+  // s posunom z ICAO24, takže hustý zhluk mihoce náhodne, nie naraz.
+  const strobeAllowed = !_cockpitContactMode && !_irBoost;
+  const strobePhase = strobeAllowed && strobeOn(nowMs);
   if (strobePhase !== _lastStrobeOn) {
     _lastStrobeOn = strobePhase;
     _syncTrackedBillboardImage();
@@ -3248,8 +3256,10 @@ function _fleetTick() {
     // „jednopixelový pulzar". Vzdialenostná brána tu nedáva zmysel, v tomto
     // režime sú ďaleko všetky; a keďže bliká len bod na krídle a nie celá
     // ikona, scéna nepôsobí, že bliká ako celok.
+    if (bb._gevStrobeOffset === undefined) bb._gevStrobeOffset = strobePhaseOffsetMs(icao24);
+    const contactStrobe = strobeAllowed && strobeOnFor(icao24, nowMs, bb._gevStrobeOffset);
     if (bb._gevMicro === true) {
-      const wantStrobe = strobePhase;
+      const wantStrobe = contactStrobe;
       if (wantStrobe !== (bb._gevStrobeOn === true)) {
         bb._gevStrobeOn = wantStrobe;
         _syncFleetBillboardIcon(icao24, bb, info?.klass);
@@ -3261,7 +3271,7 @@ function _fleetTick() {
       const wantLarge = bb._gevIconLarge ? glyphDevPx > 56 : glyphDevPx > 76;
       // Strobo je detail na blízko — ďaleké kontakty ho nedostanú vôbec,
       // inak pri oddialenom pohľade prebleskne celá scéna naraz.
-      const wantStrobe = strobePhase && cameraDistanceM <= STROBE_MAX_DIST_M;
+      const wantStrobe = contactStrobe && cameraDistanceM <= STROBE_MAX_DIST_M;
       if (wantLarge !== !!bb._gevIconLarge || wantStrobe !== (bb._gevStrobeOn === true)) {
         bb._gevIconLarge = wantLarge;
         bb._gevStrobeOn = wantStrobe;
@@ -3375,6 +3385,8 @@ function _describeFlight(icao24) {
     altitudeM: Number.isFinite(info?.altitude) ? info.altitude : carto.height,
     renderAltitudeM: Number.isFinite(info?.renderAltitudeM) ? info.renderAltitudeM : carto.height,
     onGround: info?.onGround === true,
+    // Klesanie pre odhad priblíženia v kokpite (2026-09-07); null bez údaja.
+    verticalRateMps: Number.isFinite(info?.verticalRate) ? info.verticalRate : null,
     velocityMps: displayed.speedMps,
     track: displayed.trackDeg,
     stale: Boolean(_missingPolls.get(icao24) || _backoff),
@@ -3776,7 +3788,7 @@ function _trackedLabelText(icao24) {
  */
 function _trackedCardModel(icao24) {
   const parts = _trackedLabelParts(icao24);
-  if (!parts) return { title: icao24, details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null };
+  if (!parts) return { title: icao24, details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null, profile: null, alert: null };
   return buildTrackedCardModel({
     callsign: parts.callsign,
     flightIata: parts.flightIata,
@@ -3785,6 +3797,7 @@ function _trackedCardModel(icao24) {
     identLine: parts.identLine,
     route: parts.route,
     progress: parts.progress,
+    profile: parts.profile,
     alertLine: parts.alertLine,
     metaLine: parts.metaLine,
     nowMs: parts.nowMs,
@@ -3867,8 +3880,15 @@ function _trackedLabelParts(icao24) {
     alertLine: alert ? `SQUAWK ${alert.code} · ${alert.label}` : '',
     metaLine,
     nowMs,
+    // Mini profil (2026-09-07): posledných 30 min výšky a rýchlosti z
+    // vlastného riedkeho záznamu; null kým nie sú aspoň 3 vzorky / 2 min.
+    profile: profileRowFromSamples(_profileStore.samples(icao24), nowMs, { translate: t }),
   };
 }
+
+// Živý prepínač jednotiek (2026-09-07): karta sledovaného stroja sa
+// preformátuje hneď, nie až pri ďalšom polle.
+onUnitSystemChange(() => { if (_trackedIcao) _updateTrackedLabelModel(_trackedIcao); });
 
 /** Write the explicit tracked presentation model and refresh its host entry. */
 function _updateTrackedLabelModel(icao24) {
@@ -4352,6 +4372,7 @@ function _onMilitaryActiveChange(active) {
       _releaseModel(icao24); // military-suppression: drop any 3D model too
       _flightData.delete(icao24);
       _positionHistory.delete(icao24);
+      _profileStore.delete(icao24);
       _displayCourse.delete(icao24);
       _groundSnap.forget(icao24);
       _missingPolls.delete(icao24);
@@ -4433,6 +4454,7 @@ function _setFocusEvidenceAircraft(records = []) {
   _billboards.clear();
   _flightData.clear();
   _positionHistory.clear();
+  _profileStore.clear();
   _displayCourse.clear();
   _missingPolls.clear();
   _focusEvidenceIds.clear();
@@ -4587,6 +4609,7 @@ const flightsLayer = {
     _detectionObjects = new Map();
     _flightData = new Map();
     _positionHistory = new Map();
+    _profileStore.clear();
     _displayCourse.clear();
     _groundSnap.clear();
     _count = 0;
@@ -4876,6 +4899,7 @@ const flightsLayer = {
             _releaseModel(icao24); // military-suppression: drop any 3D model too
             _flightData.delete(icao24);
             _positionHistory.delete(icao24);
+            _profileStore.delete(icao24);
             _displayCourse.delete(icao24);
             _groundSnap.forget(icao24);
             _missingPolls.delete(icao24);
@@ -5122,6 +5146,9 @@ const flightsLayer = {
           if (history.length > POSITION_HISTORY_LIMIT) {
             history.shift();
           }
+          // Mini profil karty (2026-09-07): jedna vzorka za minútu, pre
+          // každý stroj — graf je hotový hneď pri začiatku sledovania.
+          _profileStore.record(icao24, fixEpochMs, alt, meta.velocity);
           // Turn rate from the fix-track history — computed once per new fix
           // (≤5 samples), consumed by the extrapolation paths at tick rate.
           meta.turnRateDps = turnRateFromFixHistory(history);
@@ -5252,6 +5279,7 @@ const flightsLayer = {
         _releaseModel(icao24); // aged-out aircraft: drop its 3D model (no orphan / cap leak)
         _flightData.delete(icao24);
         _positionHistory.delete(icao24);
+        _profileStore.delete(icao24);
         _displayCourse.delete(icao24);
         _groundSnap.forget(icao24);
         _geoidNCache.delete(icao24);
@@ -5395,6 +5423,7 @@ const flightsLayer = {
     _detectionObjects.clear();
     _flightData.clear();
     _positionHistory.clear();
+    _profileStore.clear();
     _displayCourse.clear();
     _groundSnap.clear();
     _displayFloorState.clear();

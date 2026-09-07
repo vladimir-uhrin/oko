@@ -213,8 +213,8 @@ test('military poll refreshes tracked callsign/altitude/kts and marks a missed p
   try {
     await militaryFlightsLayer.update(viewer);
     assert.equal(entity.gevLabelModel.title, 'RCH451');
-    assert.match(entity.gevLabelModel.details.join(' · '), /28000 ft/);
-    assert.match(entity.gevLabelModel.details.join(' · '), /400 kt/);
+    assert.match(entity.gevLabelModel.details.join(' · '), /FL280/, 'jednotky cez units.js (2026-09-07): letecky hladina');
+    assert.match(entity.gevLabelModel.details.join(' · '), /400 kts/);
     // Rovnaký formát riadku ako civilná karta — konvencia SQUAWK CODE · LABEL.
     assert.match(entity.gevLabelModel.details.join('\n'), /SQUAWK 7700 · EMERGENCY/);
 
@@ -326,7 +326,7 @@ test('real military track path creates no native label and publishes every cache
       title: 'RCH451',
       details: [
         'C17 · 05-8152',
-        'United States Air Force · 28000 ft · 450 kt',
+        'United States Air Force · FL280 · 450 kts',
       ],
       accent: '#ffd166',
     });

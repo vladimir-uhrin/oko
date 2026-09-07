@@ -8,6 +8,7 @@ import {
 import { BoundedCohort, stableIdentityHash } from '../data/detectionCohort.js';
 import { LabelArbiter, LABEL_ARBITER_TIMING } from '../data/labelArbiter.js';
 import {
+  dockedPlacement,
   altitudeFade,
   destroyWorldOverlayDraw,
   distanceFade,
@@ -419,6 +420,29 @@ function normalizeRouteRow(route) {
   return { origin, destination };
 }
 
+/** Profile row (2026-09-07): two unit-range series + two labels; null without ≥ 2 altitude points. */
+function normalizeProfileRow(profile) {
+  if (!profile || typeof profile !== 'object') return null;
+  const series = (values) => (Array.isArray(values) ? values : [])
+    .map(Number)
+    .filter(Number.isFinite)
+    .map((v) => Math.max(0, Math.min(1, v)));
+  const altitude = series(profile.altitude);
+  if (altitude.length < 2) return null;
+  return {
+    altitude,
+    speed: series(profile.speed),
+    label: String(profile.label ?? '').trim(),
+    sublabel: String(profile.sublabel ?? '').trim(),
+  };
+}
+
+/** Alert line (2026-09-07): emergency squawk text or null — painters frame the card in red. */
+function normalizeAlertLine(alert) {
+  const text = String(alert ?? '').trim();
+  return text || null;
+}
+
 /** Progress row: fraction 0–1 + label; null when the fraction is not a unit number. */
 function normalizeProgressRow(progress) {
   const fraction = Number(progress?.fraction);
@@ -456,8 +480,11 @@ export function normalizeOverlayEntry(sourceId, entry) {
     titleFlag: normalizeFlagCode(entry.titleFlag),
     route: normalizeRouteRow(entry.route),
     progress: normalizeProgressRow(entry.progress),
-    // Footer rows paint AFTER the decoration rows (data provenance, alerts).
+    profile: normalizeProfileRow(entry.profile),
+    // Footer rows paint AFTER the decoration rows (data provenance); the alert
+    // line closes the card in the alert colour with a red frame.
     footer: Array.isArray(entry.footer) ? entry.footer.map((line) => String(line).trim()).filter(Boolean) : [],
+    alert: normalizeAlertLine(entry.alert),
     accent: entry.accent || WORLD_OVERLAY_STYLE.accent,
     paintLane: entry.paintLane,
     priority: Number.isFinite(Number(entry.priority)) ? Number(entry.priority) : 0,
@@ -542,6 +569,9 @@ export function normalizeOverlayEntry(sourceId, entry) {
       : Number.POSITIVE_INFINITY,
     pinnedBypassesSafeTop: entry.pinnedBypassesSafeTop === true,
     placement: String(entry.placement || 'auto'),
+    // Docked card (2026-09-07): 'right' | 'left' pins the card to a viewport
+    // edge level with its anchor instead of floating over it; null = classic.
+    dock: entry.dock === 'right' || entry.dock === 'left' ? entry.dock : null,
     cardStyle: entry.cardStyle,
     image: entry.image ?? null,
     metadata: entry.metadata ?? null,
@@ -1695,7 +1725,8 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   record.placementInput.preferred = entry.placement;
   record.placementInput.verticalOnly = entry.verticalOnly;
   record.placementInput.viewportMargin = entry.viewportMargin;
-  placementVariants(record.placementInput, record.placements);
+  if (entry.dock) dockedPlacement(record.placementInput, entry.dock, record.placements);
+  else placementVariants(record.placementInput, record.placements);
   // UI exclusion is a PREFERENCE for chrome that composites ABOVE the host, and
   // a HARD VETO for chrome that composites below it.
   //

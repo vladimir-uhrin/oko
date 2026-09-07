@@ -261,11 +261,32 @@ const TRACKED_RASTER_PX = 192;
 //    Krátky flash / dlhá tma ≈ reálny strobe duty cycle.
 export const STROBE_PERIOD_MS = 1200;
 export const STROBE_FLASH_MS = 130;
-/** Je strobo v zapnutej fáze? Čistá funkcia — jedna fáza pre celú flotilu
- *  (reálne stroby nie sú synchrónne, ale per-plane fáza by znamenala
- *  per-plane textúry; jemný jednotný tep číta lepšie než chaos). */
+/** Je strobo v zapnutej fáze (spoločná fáza, používa ju sledovaný stroj)? */
 export function strobeOn(nowMs) {
   return (nowMs % STROBE_PERIOD_MS) < STROBE_FLASH_MS;
+}
+/**
+ * Fázový posun stroba pre konkrétny stroj, 0..PERIOD ms, deterministický
+ * z ICAO24 (FNV-1a). Pôvodná verzia mala jednu fázu pre celú flotilu —
+ * pri hustom pohľade (USA, Európa) preblesol celý zhluk naraz a používateľ
+ * to čítal ako „bliká to celé, vždy rovnako" (2026-09-07). Per-plane fáza
+ * NEznamená per-plane textúry: obe textúry (svetlo zap/vyp) sú zdieľané,
+ * každý billboard medzi nimi len prepína vo vlastnom čase.
+ * @param {string} icao24
+ * @returns {number}
+ */
+export function strobePhaseOffsetMs(icao24) {
+  let h = 0x811c9dc5;
+  const s = String(icao24 ?? '');
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h % STROBE_PERIOD_MS;
+}
+/** Strobo konkrétneho stroja v jeho vlastnej fáze. Čistá funkcia. */
+export function strobeOnFor(icao24, nowMs, offsetMs = strobePhaseOffsetMs(icao24)) {
+  return strobeOn(nowMs + offsetMs);
 }
 // ČERVENÉ polohové svetlo na ĽAVOM krídle (spresnenie 2026-09-03: „na
 // krídlo, ako mávajú lietadlá" — reálna konvencia: červená = port/ľavé

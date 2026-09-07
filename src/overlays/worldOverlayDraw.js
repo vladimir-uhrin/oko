@@ -317,9 +317,23 @@ export function measureOverlayEntry(ctx, entry, out = {}) {
     );
     extraRows += 1;
   }
+  // Mini profile (2026-09-07): a two-line chart with two labels beside it.
+  if (tracked && entry?.profile) {
+    const labelW = Math.max(
+      measureWorldOverlayText(ctx, entry.profile.label || '', WORLD_OVERLAY_STYLE.fontTrackedDetail),
+      measureWorldOverlayText(ctx, entry.profile.sublabel || '', WORLD_OVERLAY_STYLE.fontTrackedDetail),
+    );
+    detailWidth = Math.max(detailWidth, PROFILE_CHART_W + PROFILE_GAP_PX + labelW);
+    extraRows += 2;
+  }
   const footer = tracked && Array.isArray(entry?.footer) ? entry.footer : [];
   for (let i = 0; i < footer.length; i++) {
     detailWidth = Math.max(detailWidth, measureWorldOverlayText(ctx, footer[i], WORLD_OVERLAY_STYLE.fontTrackedDetail));
+    extraRows += 1;
+  }
+  // Emergency squawk (2026-09-07): glyph + text on its own closing line.
+  if (tracked && entry?.alert) {
+    detailWidth = Math.max(detailWidth, ALERT_GLYPH_W + measureWorldOverlayText(ctx, entry.alert, WORLD_OVERLAY_STYLE.fontTrackedDetail));
     extraRows += 1;
   }
 
@@ -363,6 +377,13 @@ export const PROGRESS_BAR_W = 96;
 export const PROGRESS_BAR_H = 4;
 const PROGRESS_BAR_GAP_PX = 8;
 const ROUTE_ARROW = ' → ';
+/** Mini profile chart geometry (2026-09-07): spans two tracked lines. */
+export const PROFILE_CHART_W = 96;
+export const PROFILE_CHART_H = 26;
+const PROFILE_GAP_PX = 8;
+/** Emergency squawk treatment: frame, top rule, glyph and text. */
+export const TRACKED_ALERT_COLOR = '#ff4a4a';
+const ALERT_GLYPH_W = 14;
 
 function flagHeightFor(variant) {
   return FLAG_H[variant] ?? FLAG_H.card;
@@ -449,6 +470,73 @@ function paintProgressRow(ctx, progress, accent, centerX, baseline) {
   ctx.fillText(progress.label || '', x + PROGRESS_BAR_W + PROGRESS_BAR_GAP_PX, baseline);
 }
 
+/** One polyline of unit-range values inside the chart box. */
+function strokeProfileSeries(ctx, values, x, top, w, h, color, width) {
+  if (!values || values.length < 2) return;
+  const n = values.length;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const px = x + 2 + (i / (n - 1)) * (w - 4);
+    const py = top + 3 + (1 - values[i]) * (h - 6);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
+/**
+ * Paint the mini profile: a dim box with the speed curve (faint) under the
+ * altitude curve (accent, with an end dot), and two label lines beside it.
+ * Occupies rows `firstBaseline` and `firstBaseline + lineH`.
+ */
+function paintProfileRow(ctx, profile, accent, centerX, firstBaseline, lineH) {
+  const labelW = Math.max(
+    measureWorldOverlayText(ctx, profile.label || '', ctx.font),
+    measureWorldOverlayText(ctx, profile.sublabel || '', ctx.font),
+  );
+  const total = PROFILE_CHART_W + PROFILE_GAP_PX + labelW;
+  const x = centerX - total / 2;
+  const top = firstBaseline - 11;
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+  ctx.beginPath();
+  roundedRectPath(ctx, x, top, PROFILE_CHART_W, PROFILE_CHART_H, 2);
+  ctx.fill();
+  strokeProfileSeries(ctx, profile.speed, x, top, PROFILE_CHART_W, PROFILE_CHART_H, 'rgba(255, 255, 255, 0.42)', 1);
+  strokeProfileSeries(ctx, profile.altitude, x, top, PROFILE_CHART_W, PROFILE_CHART_H, accent, 1.5);
+  const last = profile.altitude[profile.altitude.length - 1];
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.arc(x + PROFILE_CHART_W - 2, top + 3 + (1 - last) * (PROFILE_CHART_H - 6), 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.textAlign = 'left';
+  ctx.fillText(profile.label || '', x + PROFILE_CHART_W + PROFILE_GAP_PX, firstBaseline);
+  ctx.fillText(profile.sublabel || '', x + PROFILE_CHART_W + PROFILE_GAP_PX, firstBaseline + lineH);
+}
+
+/** Paint the emergency line: warning triangle glyph + text, both in the alert colour. */
+function paintAlertRow(ctx, text, centerX, baseline) {
+  const textW = measureWorldOverlayText(ctx, text, ctx.font);
+  const x = centerX - (ALERT_GLYPH_W + textW) / 2;
+  ctx.save();
+  ctx.fillStyle = TRACKED_ALERT_COLOR;
+  ctx.beginPath();
+  ctx.moveTo(x + 5, baseline - 9);
+  ctx.lineTo(x + 10, baseline);
+  ctx.lineTo(x, baseline);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = WORLD_OVERLAY_STYLE.background;
+  ctx.fillRect(x + 4.3, baseline - 6, 1.4, 3.4);
+  ctx.fillRect(x + 4.3, baseline - 2, 1.4, 1.2);
+  ctx.restore();
+  ctx.fillStyle = TRACKED_ALERT_COLOR;
+  ctx.textAlign = 'left';
+  ctx.fillText(text, x + ALERT_GLYPH_W, baseline);
+}
+
 function writePlacement(out, corner, x, y, w, h, anchorX, anchorY, signedLeaderOffset = 0) {
   const placement = out || {};
   placement.corner = corner;
@@ -482,6 +570,54 @@ function writePlacement(out, corner, x, y, w, h, anchorX, anchorY, signedLeaderO
     placement.leadToY = Math.max(placement.rect.y, Math.min(anchorY, placement.rect.y + h));
   }
   return placement;
+}
+
+/**
+ * Docked placement (2026-09-07, user: the tracked card "gets in the way" in
+ * the middle of the view — "put it beside"): the card sits at the viewport's
+ * right (or left) edge, level with its anchor's screen Y, instead of floating
+ * over the anchor. No leader is drawn for the 'dock' corner (a screen-long
+ * diagonal would be worse than none) — the title names the target.
+ */
+export const DOCK_MARGIN_PX = 24;
+/** Top band kept clear (share of viewport height) — the style label lives there. */
+export const DOCK_TOP_MIN_RATIO = 0.12;
+/** Bottom band kept clear (px) — attribution, voice widget, cockpit entry. */
+export const DOCK_BOTTOM_RESERVE_PX = 96;
+/** Vertical slide between dock variants (px) and their order of preference. */
+const DOCK_VARIANT_GAP_PX = 16;
+const DOCK_VARIANT_OFFSETS = Object.freeze([0, -1, 1, -2, 2]);
+
+/**
+ * Write the single docked placement into `out[0]`. Pure apart from the pooled
+ * output object.
+ * @param {{anchorX:number, anchorY:number, width:number, height:number, viewportWidth:number, viewportHeight:number}} input
+ * @param {'right'|'left'} dock
+ * @param {Array<object>} [out]
+ */
+export function dockedPlacement(input, dock, out = []) {
+  const { anchorX, anchorY, width, height, viewportWidth, viewportHeight } = input;
+  const x = dock === 'left'
+    ? DOCK_MARGIN_PX
+    : Math.max(DOCK_MARGIN_PX, viewportWidth - width - DOCK_MARGIN_PX);
+  const top = Math.min(viewportHeight * DOCK_TOP_MIN_RATIO, Math.max(0, viewportHeight - height));
+  const bottom = Math.max(top, viewportHeight - DOCK_BOTTOM_RESERVE_PX - height);
+  // Variants: level with the anchor first, then one/two card heights up and
+  // down. The host's UI-exclusion pass drops variants under solid chrome
+  // (narrow layouts stack panel headers along the right edge), so the card
+  // slides along the edge instead of hiding behind a panel.
+  const step = height + DOCK_VARIANT_GAP_PX;
+  let count = 0;
+  let previousY = Number.NaN;
+  for (let i = 0; i < DOCK_VARIANT_OFFSETS.length; i++) {
+    const y = Math.max(top, Math.min(bottom, anchorY - height / 2 + DOCK_VARIANT_OFFSETS[i] * step));
+    if (Math.round(y) === previousY) continue;
+    previousY = Math.round(y);
+    out[count] = writePlacement(out[count], 'dock', x, y, width, height, anchorX, anchorY, 0);
+    count += 1;
+  }
+  out.length = count;
+  return out;
 }
 
 const PLACEMENT_ORDERS = Object.freeze({
@@ -817,14 +953,25 @@ export function paintTracked(ctx, entry, placement, alpha = 1) {
   const accent = entry.accent || WORLD_OVERLAY_STYLE.accent;
   ctx.save();
   ctx.globalAlpha = alpha;
-  drawLeader(ctx, placement, accent);
+  // A docked card (2026-09-07) has no leader — see dockedPlacement().
+  if (placement.corner !== 'dock') drawLeader(ctx, placement, accent);
   ctx.beginPath();
   roundedRectPath(ctx, x, y, w, h, 5);
   ctx.fillStyle = WORLD_OVERLAY_STYLE.background;
   ctx.fill();
+  // Emergency squawk (2026-09-07): red frame + red top rule so the alert reads
+  // at a glance, before any text.
+  const alert = entry.alert ? String(entry.alert) : '';
+  if (alert) {
+    ctx.strokeStyle = TRACKED_ALERT_COLOR;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    roundedRectPath(ctx, x + 0.75, y + 0.75, w - 1.5, h - 1.5, 5);
+    ctx.stroke();
+  }
   ctx.beginPath();
   roundedRectPath(ctx, x, y, w, 2, 1);
-  ctx.fillStyle = accent;
+  ctx.fillStyle = alert ? TRACKED_ALERT_COLOR : accent;
   ctx.fill();
 
   ctx.textAlign = 'center';
@@ -851,7 +998,13 @@ export function paintTracked(ctx, entry, placement, alpha = 1) {
     row += 1;
     paintProgressRow(ctx, entry.progress, accent, centerX, titleBaseline + row * layout.lineH);
   }
-  // Footer rows (data provenance, alerts) close the card, dimmer than details.
+  if (entry.profile) {
+    ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
+    ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
+    paintProfileRow(ctx, entry.profile, accent, centerX, titleBaseline + (row + 1) * layout.lineH, layout.lineH);
+    row += 2;
+  }
+  // Footer rows (data provenance) close the card, dimmer than details.
   const footer = Array.isArray(entry.footer) ? entry.footer : [];
   if (footer.length) {
     ctx.textAlign = 'center';
@@ -861,6 +1014,11 @@ export function paintTracked(ctx, entry, placement, alpha = 1) {
       row += 1;
       ctx.fillText(String(footer[i]), centerX, titleBaseline + row * layout.lineH);
     }
+  }
+  if (alert) {
+    row += 1;
+    ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
+    paintAlertRow(ctx, alert, centerX, titleBaseline + row * layout.lineH);
   }
   ctx.restore();
   return placement.rect;

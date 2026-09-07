@@ -88,7 +88,7 @@ test('karta: plný model — IATA v titulku, vlajka registrácie, footer so zdro
   assert.equal(model.progress.label, `33 % · 3${NBSP}245 km left · ETA 3:35 (${clock})`);
 });
 
-test('karta: IATA rovnaké ako volací znak sa neopakuje; STALE ide do titulku; squawk poplach je posledný footer riadok', () => {
+test('karta: IATA rovnaké ako volací znak sa neopakuje; STALE ide do titulku; squawk poplach je VLASTNÉ pole (červený rám), nie footer', () => {
   const model = buildTrackedCardModel({
     callsign: 'N12345',
     flightIata: 'n12345',
@@ -101,7 +101,9 @@ test('karta: IATA rovnaké ako volací znak sa neopakuje; STALE ide do titulku; 
   });
   assert.equal(model.title, 'N12345 · STALE');
   assert.deepEqual(model.details, ['FL350 · 486 kts · 095°', 'TEST AIR · A320']);
-  assert.deepEqual(model.footer, ['OpenSky Network · N12345', 'SQUAWK 7700 · EMERGENCY']);
+  assert.deepEqual(model.footer, ['OpenSky Network · N12345']);
+  assert.equal(model.alert, 'SQUAWK 7700 · EMERGENCY');
+  assert.equal(model.profile, null);
   assert.equal(model.titleFlag, 'us');
   assert.equal(model.route, null);
   assert.equal(model.progress, null);
@@ -115,7 +117,10 @@ test('karta: neznámy štát a chýbajúce dáta — bez vlajky, bez prázdnych 
   assert.equal(model.titleFlag, null);
   assert.equal(model.route, null);
   assert.equal(model.progress, null);
-  assert.deepEqual(buildTrackedCardModel(), { title: '', details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null });
+  assert.deepEqual(buildTrackedCardModel(), { title: '', details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null, profile: null, alert: null });
+  const withProfile = buildTrackedCardModel({ callsign: 'X', profile: { altitude: [0, 1], speed: [], label: 'a', sublabel: 'b' } });
+  assert.deepEqual(withProfile.profile, { altitude: [0, 1], speed: [], label: 'a', sublabel: 'b' });
+  assert.equal(buildTrackedCardModel({ callsign: 'X', profile: 'nope' }).profile, null);
 });
 
 test('karta: riadok trasy — letisko bez štátu má vlajku null, bez kódu aj mesta sa riadok nevykreslí', () => {

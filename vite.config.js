@@ -2705,6 +2705,8 @@ function adsbdbProxy() {
     if (!fr?.origin || !fr?.destination) return null;
     const airport = (a) => ({
       code: a.iata_code || a.icao_code || '',
+      // ICAO navyše (2026-09-07): kokpit ním hľadá METAR cieľa a dráhy.
+      icao: typeof a.icao_code === 'string' && /^[A-Z0-9]{4}$/i.test(a.icao_code.trim()) ? a.icao_code.trim().toUpperCase() : null,
       name: a.municipality || a.name || '',
       lat: Number.isFinite(a.latitude) ? a.latitude : null,
       lon: Number.isFinite(a.longitude) ? a.longitude : null,

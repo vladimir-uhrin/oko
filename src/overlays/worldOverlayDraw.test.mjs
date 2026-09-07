@@ -23,6 +23,12 @@ import {
   CARD_FLAG_GAP_PX,
   PROGRESS_BAR_W,
   PROGRESS_BAR_H,
+  PROFILE_CHART_W,
+  PROFILE_CHART_H,
+  TRACKED_ALERT_COLOR,
+  DOCK_MARGIN_PX,
+  DOCK_BOTTOM_RESERVE_PX,
+  dockedPlacement,
   placementVariants,
   roundedRectPath,
 } from './worldOverlayDraw.js';
@@ -65,6 +71,7 @@ function mockContext() {
     moveTo(...args) { calls.push(['moveTo', ...args]); },
     lineTo(...args) { calls.push(['lineTo', ...args]); },
     arcTo(...args) { calls.push(['arcTo', ...args]); },
+    arc(...args) { calls.push(['arc', ...args]); },
     closePath() { calls.push(['closePath']); },
     fill() { calls.push(['fill']); },
     stroke() { calls.push(['stroke']); },
@@ -646,6 +653,77 @@ test('tracked card decorations (2026-09-05): flag reserves title width, route + 
   paintTracked(ctx2, plainEntry, placement, 1);
   assert.deepEqual(ctx2.calls.filter(([name]) => name === 'fillText').map(([, text]) => text), ['AFR702', 'FL340↑ · 499 kts', 'Air France · B77W']);
   assert.equal(ctx2.calls.filter(([name]) => name === 'fillRect').length, 0);
+});
+
+test('tracked card (2026-09-07): mini profile takes two lines and strokes both curves; an alert adds a red frame, rule and glyph line', () => {
+  const ctx = mockContext();
+  const base = { variant: 'tracked', title: 'AFR702', details: ['FL340↑ · 499 kts'], accent: '#39d0ff' };
+  const plain = measureOverlayEntry(ctx, { ...base }, {});
+  const profile = { altitude: [0, 0.5, 1], speed: [0.2, 0.4, 0.6], label: 'FL120 → FL340', sublabel: '250 → 480 kts · last 28 min' };
+  const withProfile = measureOverlayEntry(ctx, { ...base, profile }, {});
+  assert.equal(withProfile.extraRows, 2, 'the chart spans two lines');
+  assert.equal(withProfile.h, plain.h + 2 * plain.lineH);
+  assert.ok(withProfile.w >= PROFILE_CHART_W + 8 + '250 → 480 kts · last 28 min'.length * 6 + 2 * withProfile.padX);
+  const withAlert = measureOverlayEntry(ctx, { ...base, footer: ['OpenSky · 3C6444'], alert: 'SQUAWK 7700 · EMERGENCY' }, {});
+  assert.equal(withAlert.extraRows, 2, 'footer + alert line');
+
+  const entry = { ...base, profile, alert: 'SQUAWK 7700 · EMERGENCY' };
+  entry._overlayLayout = measureOverlayEntry(ctx, entry, {});
+  const placement = placementVariants({
+    anchorX: 300, anchorY: 200, width: entry._overlayLayout.w, height: entry._overlayLayout.h,
+    viewportWidth: 800, viewportHeight: 600, verticalOnly: true,
+  })[0];
+  paintTracked(ctx, entry, placement, 1);
+  const texts = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+  assert.deepEqual(texts, ['AFR702', 'FL340↑ · 499 kts', 'FL120 → FL340', '250 → 480 kts · last 28 min', 'SQUAWK 7700 · EMERGENCY']);
+  const chartBox = ctx.calls.find(([name, , , w, h]) => name === 'roundRect' && w === PROFILE_CHART_W && h === PROFILE_CHART_H);
+  assert.ok(chartBox, 'chart box drawn');
+  const strokes = ctx.calls.filter(([name]) => name === 'stroke').length;
+  const lineTos = ctx.calls.filter(([name]) => name === 'lineTo').length;
+  assert.ok(ctx.calls.some(([name, value]) => name === 'strokeStyle' && value === TRACKED_ALERT_COLOR), 'red frame');
+  const frame = ctx.calls.find(([name, x, y, w, h]) => name === 'roundRect' && Math.abs(w - (entry._overlayLayout.w - 1.5)) < 1e-9);
+  assert.ok(frame, 'frame is inset by the stroke half-width');
+  // Without an alert nothing is stroked in red and the top rule keeps the accent.
+  const ctx2 = mockContext();
+  const calm = { ...base, profile };
+  calm._overlayLayout = measureOverlayEntry(ctx2, calm, {});
+  paintTracked(ctx2, calm, placement, 1);
+  assert.ok(!ctx2.calls.some(([name, value]) => name === 'strokeStyle' && value === TRACKED_ALERT_COLOR));
+  const calmStrokes = ctx2.calls.filter(([name]) => name === 'stroke').length;
+  assert.equal(calmStrokes, 3, 'leader + speed curve + altitude curve');
+  assert.equal(strokes, calmStrokes + 1, 'the alert adds exactly the frame stroke');
+  assert.equal(lineTos, ctx2.calls.filter(([name]) => name === 'lineTo').length + 2, 'the alert glyph adds two triangle segments');
+});
+
+test('docked placement (2026-09-07): one placement at the viewport edge level with the anchor, clamped, no leader painted', () => {
+  const input = { anchorX: 400, anchorY: 300, width: 200, height: 80, viewportWidth: 1000, viewportHeight: 600 };
+  const right = dockedPlacement(input, 'right');
+  assert.equal(right.length, 5, 'anchor-level first, then ±1 and ±2 card heights along the edge');
+  assert.ok(right.every((p) => p.corner === 'dock' && p.rect.x === right[0].rect.x), 'all variants share the edge x');
+  assert.deepEqual(right.map((p) => p.rect.y), [260, 164, 356, 72, 424], 'order of preference: level, up, down, further up, further down (last one clamped to the bottom reserve)');
+  assert.equal(right[0].rect.x, 1000 - 200 - DOCK_MARGIN_PX);
+  assert.equal(right[0].rect.y, 300 - 40, 'level with the anchor');
+  assert.equal(dockedPlacement(input, 'left')[0].rect.x, DOCK_MARGIN_PX);
+  // Clamps: never into the top band, never over the bottom reserve.
+  const highAnchor = dockedPlacement({ ...input, anchorY: 10 }, 'right');
+  assert.equal(highAnchor[0].rect.y, Math.round(600 * 0.12));
+  assert.ok(highAnchor.length < 5, 'clamped duplicates collapse');
+  assert.equal(dockedPlacement({ ...input, anchorY: 590 }, 'right')[0].rect.y, 600 - DOCK_BOTTOM_RESERVE_PX - 80);
+  // Pooled output object is reused.
+  const pool = [];
+  const first = dockedPlacement(input, 'right', pool)[0];
+  assert.equal(dockedPlacement({ ...input, anchorY: 350 }, 'right', pool)[0], first);
+  // The tracked painter draws no leader for a docked card but still draws the plate.
+  const ctx = mockContext();
+  const entry = { variant: 'tracked', title: 'AFR702', details: ['FL340'], accent: '#39d0ff' };
+  entry._overlayLayout = measureOverlayEntry(ctx, entry, {});
+  const ctxDock = mockContext();
+  paintTracked(ctxDock, entry, right[0], 1);
+  assert.equal(ctxDock.calls.filter(([name]) => name === 'stroke').length, 0, 'no leader stroke');
+  const ctxAbove = mockContext();
+  const above = placementVariants({ ...input, gap: 12 })[0];
+  paintTracked(ctxAbove, entry, above, 1);
+  assert.equal(ctxAbove.calls.filter(([name]) => name === 'stroke').length, 1, 'classic placement keeps its leader');
 });
 
 test('tactical vessel card paints the flag state before the vessel name and shifts the title right', () => {

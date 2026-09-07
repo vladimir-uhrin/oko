@@ -11,13 +11,17 @@
  *   │ Air France · Boeing 777 328ER · F-GZNP       │  identita
  *   │ [FR] CDG Paris → [CI] ABJ Abidjan            │  trasa s vlajkami letísk
  *   │ ▬▬▬▬▬▬▬▬ 33 % · zostáva 3 245 km · ETA 3:35 (21:40) │ kreslený progres
+ *   │ ╱╲╱‾‾‾  FL120 → FL340                        │  mini profil (výška + rýchlosť, 30 min)
+ *   │ ╱       250 → 480 kts · posledných 28 min    │
  *   │ OpenSky Network · fix pred 6 s · SQ 1000 · 3C6444 │ zdroj, vek fixu, squawk, hex
- *   │ SQUAWK 7700 · EMERGENCY                      │  (len keď je čo hlásiť)
+ *   │ ▲ SQUAWK 7700 · EMERGENCY                    │  (len keď je čo hlásiť; červený rám)
  *   └──────────────────────────────────────────────┘
  *
  * `details` ostávajú POLE REŤAZCOV (hlas, kontext aj ostatní čitatelia ich
- * čítajú ďalej). Vlajky, trasa a progres sú SAMOSTATNÉ polia (`titleFlag`,
- * `route`, `progress`), `footer` sú riadky pod progresom (zdroj a poplach).
+ * čítajú ďalej). Vlajky, trasa, progres a profil sú SAMOSTATNÉ polia
+ * (`titleFlag`, `route`, `progress`, `profile`), `footer` sú riadky pod nimi
+ * (zdroj) a `alert` je núdzový squawk — od 2026-09-07 vlastné pole, aby ho
+ * maliar vedel zvýrazniť (červený rám a glyf), nie len posledný footer riadok.
  * Hostiteľ bez podpory ich ignoruje a karta degraduje na text.
  *
  * Bez DOM, bez Cesia — testovateľné čistými vstupmi; čas sa vždy podáva.
@@ -25,23 +29,21 @@
 import { resolveFlagIso2 } from './countryFlags.js';
 import { formatEta, routeSideLabel, verticalTrendGlyph } from './flightProgress.js';
 import { t } from '../i18n.js';
+import {
+  FLIGHT_LEVEL_MIN_FT,
+  formatAltitude,
+  formatSpeed,
+  formatThousands,
+  formatVerticalRateMagnitude,
+} from '../units.js';
+
+// Jednotky (2026-09-07): konverzie a oddeľovač tisícov žijú v units.js —
+// letecký/metrický prepínač platí pre každé zobrazenie výšky a rýchlosti.
+// Pôvodné exporty ostávajú pre existujúcich importérov.
+export { FLIGHT_LEVEL_MIN_FT, formatThousands };
 
 /** Farba sledovaného letu (zhodná s doterajším volaním trackedLabelModelFromText). */
 export const TRACKED_FLIGHT_ACCENT = '#39d0ff';
-/** Nad touto výškou sa hlási letová hladina (FLxxx), pod ňou stopy. */
-export const FLIGHT_LEVEL_MIN_FT = 18_000;
-const M_TO_FT = 3.28084;
-const MPS_TO_KTS = 1.94384;
-const MPS_TO_FPM = 196.850394;
-/** Tenká nezalomiteľná medzera ako oddeľovač tisícov (4 843 km). */
-const THIN_NBSP = '\u202f';
-
-/** Celé číslo s oddelenými tisíckami. Pure. */
-export function formatThousands(value) {
-  const n = Math.round(Number(value));
-  if (!Number.isFinite(n)) return '';
-  return String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, THIN_NBSP).replace(/^/, n < 0 ? '−' : '');
-}
 
 /** Kurz ako trojmiestne stupne (aviatická konvencia): 95 → '095°'. '' pre neznámy. Pure. */
 export function formatTrack(deg) {
@@ -58,8 +60,7 @@ export function formatTrack(deg) {
 export function formatVerticalRate(verticalRateMps) {
   const glyph = verticalTrendGlyph(verticalRateMps);
   if (!glyph) return '';
-  const fpm = Math.round(Math.abs(Number(verticalRateMps)) * MPS_TO_FPM / 10) * 10;
-  return `${glyph}${formatThousands(fpm)} ft/min`;
+  return `${glyph}${formatVerticalRateMagnitude(verticalRateMps)}`;
 }
 
 /**
@@ -68,12 +69,11 @@ export function formatVerticalRate(verticalRateMps) {
  * @param {{altitudeM?: number, onGround?: boolean, verticalRateMps?: number, speedMps?: number, trackDeg?: number}} p
  */
 export function formatFlightLine({ altitudeM, onGround = false, verticalRateMps, speedMps, trackDeg } = {}) {
-  const altFt = Math.round((Number(altitudeM) || 0) * M_TO_FT);
   const trend = onGround ? '' : verticalTrendGlyph(verticalRateMps);
-  const level = altFt >= FLIGHT_LEVEL_MIN_FT ? `FL${Math.round(altFt / 100)}` : `${formatThousands(altFt)} ft`;
+  const level = formatAltitude(Number(altitudeM) || 0);
   const rate = onGround ? '' : formatVerticalRate(verticalRateMps);
   const levelPart = rate ? `${level}${trend} ${rate.slice(1)}` : `${level}${trend}`;
-  const speed = Number(speedMps) ? `${Math.round(Number(speedMps) * MPS_TO_KTS)} kts` : '';
+  const speed = Number(speedMps) ? formatSpeed(speedMps) : '';
   return [levelPart, speed, formatTrack(trackDeg)].filter(Boolean).join(' · ');
 }
 
@@ -157,13 +157,14 @@ export function formatMetaLine({ source, lastContactEpochMs, nowMs, squawk, hex 
  * @param {string} [parts.identLine] „Air France · Boeing 777 328ER · F-GZNP"
  * @param {?{origin: object, destination: object}} [parts.route] plauzibilná trasa (inak null)
  * @param {?{fractionDone: number, remainingKm?: number, etaMinutes: number|null}} [parts.progress]
- * @param {string} [parts.alertLine] „SQUAWK 7700 · EMERGENCY"
+ * @param {string} [parts.alertLine] „SQUAWK 7700 · EMERGENCY" → `alert` (červený rám)
+ * @param {?object} [parts.profile] riadok mini profilu (flightProfile.js) alebo null
  * @param {string} [parts.metaLine] hotový riadok o dátach (viď formatMetaLine); '' = bez riadku
  * @param {number} [parts.nowMs] „teraz" pre hodinu príletu
  * @param {string} [parts.countryIso] ISO2 štátu registrácie (adsbdb)
  * @param {string} [parts.originCountry] meno štátu z OpenSky (fallback)
  * @param {string} [parts.accent]
- * @returns {{title: string, details: string[], footer: string[], accent: string, titleFlag: string|null, route: object|null, progress: object|null}}
+ * @returns {{title: string, details: string[], footer: string[], accent: string, titleFlag: string|null, route: object|null, progress: object|null, profile: object|null, alert: string|null}}
  */
 export function buildTrackedCardModel({
   callsign,
@@ -173,6 +174,7 @@ export function buildTrackedCardModel({
   identLine = '',
   route = null,
   progress = null,
+  profile = null,
   alertLine = '',
   metaLine = '',
   nowMs = NaN,
@@ -184,7 +186,8 @@ export function buildTrackedCardModel({
   const iata = String(flightIata || '').trim().toUpperCase();
   const title = [cs, iata && iata !== cs.toUpperCase() ? iata : '', stale ? 'STALE' : ''].filter(Boolean).join(' · ');
   const details = [flightLine, identLine].map((s) => String(s || '').trim()).filter(Boolean);
-  const footer = [metaLine, alertLine].map((s) => String(s || '').trim()).filter(Boolean);
+  const footer = [metaLine].map((s) => String(s || '').trim()).filter(Boolean);
+  const alert = String(alertLine || '').trim() || null;
   return {
     title,
     details,
@@ -193,5 +196,7 @@ export function buildTrackedCardModel({
     titleFlag: resolveFlagIso2(countryIso, originCountry),
     route: routeRowFromRoute(route),
     progress: progressRowFromProgress(progress, nowMs),
+    profile: profile && typeof profile === 'object' ? profile : null,
+    alert,
   };
 }

@@ -25,6 +25,7 @@
  * nech prelet myšou cez flotilu nespúšťa desiatky dopytov.
  */
 import { flagUrl, resolveFlagIso2 } from './countryFlags.js';
+import { squawkAlert } from './flightProgress.js';
 import {
   formatFlightLine,
   formatMetaLine,
@@ -33,12 +34,12 @@ import {
   routeRowFromRoute,
 } from './trackedCardModel.js';
 import { lookupPlanespottersPhoto } from './trackedPhoto.js';
+import { formatSpeed } from '../units.js';
 
 /** Odsadenie kartičky od kurzora (px) — nesmie sedieť pod hrotom myši. */
 const CARD_OFFSET_PX = 14;
 /** Fotka sa dopytuje až po tomto zotrvaní nad tým istým strojom (ms). */
 export const HOVER_PHOTO_DEBOUNCE_MS = 350;
-const MPS_TO_KTS = 1.94384;
 
 /**
  * Model kartičky pre jedno zhrnutie kontaktu (rovnaké riadky ako karta
@@ -59,7 +60,7 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
 
   const details = [];
   // 1. Let: hladina so stúpaním, rýchlosť, kurz — alebo „na zemi".
-  const speed = Number.isFinite(summary.speedMps) ? `${Math.round(summary.speedMps * MPS_TO_KTS)} kts` : '';
+  const speed = Number.isFinite(summary.speedMps) ? formatSpeed(summary.speedMps) : '';
   let flightLine;
   if (summary.onGround) {
     flightLine = [t('hover.on-ground'), speed, formatTrack(summary.trackDeg)].filter(Boolean).join(' · ');
@@ -92,11 +93,14 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
 
   // 5. Poctivosť o dátach: zdroj, vek fixu, squawk, hex; odhad je priznaný.
   const footer = [];
+  // Núdzový squawk (2026-09-07): vlastné pole ako na sledovanej karte —
+  // karta dostane červený rám a riadok, bežný squawk ostáva v meta riadku.
+  const alert = squawkAlert(summary.squawk);
   const meta = formatMetaLine({
     source: summary.source,
     lastContactEpochMs: summary.lastContactEpochMs,
     nowMs,
-    squawk: summary.squawk,
+    squawk: alert ? '' : summary.squawk,
     hex: summary.layerId === 'flights' || summary.layerId === 'military' ? summary.id : '',
   });
   if (meta) footer.push(meta);
@@ -111,6 +115,7 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
     routeText,
     progress,
     footer,
+    alert: alert ? `SQUAWK ${alert.code} · ${alert.label}` : null,
     military: summary.military === true,
     hex: summary.layerId === 'flights' && /^[0-9a-f]{6}$/.test(hex) ? hex : null,
   };
@@ -132,6 +137,7 @@ export function hoverCardLines(summary, t, nowMs = Date.now()) {
   else if (model.routeText) lines.push(model.routeText);
   if (model.progress) lines.push(model.progress.label);
   lines.push(...model.footer);
+  if (model.alert) lines.push(model.alert);
   return { title: model.title, lines, military: model.military, flag: model.titleFlag };
 }
 
@@ -257,6 +263,13 @@ function renderModel(model, at, t) {
     const row = doc.createElement('div');
     row.className = 'contact-hover-card-footer';
     row.textContent = line;
+    _card.appendChild(row);
+  }
+  _card.classList.toggle('contact-hover-card--alert', Boolean(model.alert));
+  if (model.alert) {
+    const row = doc.createElement('div');
+    row.className = 'contact-hover-card-alert';
+    row.textContent = model.alert;
     _card.appendChild(row);
   }
   const photo = renderPhoto(doc, model, t);
