@@ -34,6 +34,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import https from 'node:https';
+import tls from 'node:tls';
 import { lookup as lookupDns } from 'node:dns/promises';
 import { directionToHeading } from './src/data/directionText.js';
 import {
@@ -2070,6 +2071,56 @@ function shmuRadarProxy() {
     : 'cappi2km';
   const FILE_PREFIX = PRODUCTS[PRODUCT];
   const BASE_URL = `https://opendata.shmu.sk/meteorology/weather/radar/composite/skcomp/${PRODUCT}`;
+  // TLS (2026-09-07, radar bol od 1. 9. STALE): opendata.shmu.sk posiela len
+  // koncový certifikát bez medzičlánku (Sectigo Public Server Authentication
+  // CA DV R36). Prehliadač aj curl si ho dotiahnu cez AIA URL, Node nie →
+  // UNABLE_TO_VERIFY_LEAF_SIGNATURE na každom slote. Medzičlánok je VEREJNÝ
+  // certifikát pribalený v config/ca/ (pôvod a odtlačok v SOURCE.md) a pridaný
+  // k systémovým koreňom — overenie ostáva prísne, nič sa neignoruje.
+  const EXTRA_CA_PATH = path.join(__dirname, 'config', 'ca', 'sectigo-public-server-authentication-ca-dv-r36.pem');
+  let extraCa = null;
+  try {
+    extraCa = fs.readFileSync(EXTRA_CA_PATH, 'utf8');
+  } catch {
+    console.warn('[shmu-radar] extra CA certificate missing — relying on Node roots only:', EXTRA_CA_PATH);
+  }
+  const upstreamAgent = new https.Agent({
+    keepAlive: true,
+    ca: extraCa ? [...tls.rootCertificates, extraCa] : undefined,
+  });
+  /**
+   * GET one upstream product with the extended CA set, a hard timeout and a
+   * byte cap (destroys the socket past `maxBytes`). Resolves to a minimal
+   * fetch-like shape so the refresh loop below stays unchanged; network
+   * errors reject with `cause.code` like undici for the same log line.
+   */
+  function fetchUpstream(url, { timeoutMs, maxBytes }) {
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, { agent: upstreamAgent, headers: { 'user-agent': 'OKO/dev shmu-radar-proxy' } }, (res) => {
+        const chunks = [];
+        let received = 0;
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (received > maxBytes) {
+            req.destroy(Object.assign(new Error(`oversized product (> ${maxBytes} B)`), { cause: { code: 'OVERSIZED' } }));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on('end', () => {
+          const body = Buffer.concat(chunks);
+          resolve({
+            status: res.statusCode,
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+          });
+        });
+        res.on('error', reject);
+      });
+      req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('timeout'), { cause: { code: 'ETIMEDOUT' } })));
+      req.on('error', (err) => reject(err.cause ? err : Object.assign(new Error('fetch failed'), { cause: err })));
+    });
+  }
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
   const META_PATH = path.join(CACHE_DIR, 'shmu-radar.json');
   const framePngPath = (iso) => path.join(CACHE_DIR, `shmu-radar-${String(iso).replace(/[:]/g, '')}.png`);
@@ -2213,7 +2264,7 @@ function shmuRadarProxy() {
     for (const slot of candidateSlots(Date.now())) {
       if (have.has(slot.iso)) continue;
       try {
-        const res = await fetch(slot.url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+        const res = await fetchUpstream(slot.url, { timeoutMs: FETCH_TIMEOUT_MS, maxBytes: MAX_HDF_BYTES });
         if (res.status === 404) continue; // slot not published (yet)
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = await res.arrayBuffer();

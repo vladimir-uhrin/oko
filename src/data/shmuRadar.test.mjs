@@ -222,6 +222,17 @@ test('frame animator: steps through frames, holds on newest, inert for ≤1 fram
   one.stop();
 });
 
+test('proxy overuje TLS s pribaleným medzičlánkom Sectigo (2026-09-07, radar bol STALE od 1. 9.)', () => {
+  const vite = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
+  assert.match(vite, /ca: extraCa \? \[\.\.\.tls\.rootCertificates, extraCa\] : undefined/, 'systémové korene + medzičlánok, nie výmena');
+  assert.doesNotMatch(vite, /rejectUnauthorized:\s*false/, 'TLS sa nikdy neignoruje');
+  assert.match(vite, /fetchUpstream\(slot\.url, \{ timeoutMs: FETCH_TIMEOUT_MS, maxBytes: MAX_HDF_BYTES \}\)/, 'slot ide cez agent s CA, s timeoutom a stropom veľkosti');
+  const pem = readFileSync(new URL('../../config/ca/sectigo-public-server-authentication-ca-dv-r36.pem', import.meta.url), 'utf8');
+  assert.match(pem, /^-----BEGIN CERTIFICATE-----/, 'PEM medzičlánku je pribalený');
+  const source = readFileSync(new URL('../../config/ca/SOURCE.md', import.meta.url), 'utf8');
+  assert.match(source, /8C:54:C3:34:B6:6B:A4:E4/, 'odtlačok zdokumentovaný');
+});
+
 test('layer contract: entity drape, stats, stale surfaced, id/cadence pinned', async () => {
   const meta = {
     ok: true,
