@@ -263,6 +263,13 @@ test('hustota: tripwire — registrácia, i18n EN+SK, kredit, primitív nie imag
 import { shipDensityAlpha, SHIP_DENSITY_ALPHA_LIGHT, SHIP_DENSITY_ALPHA_DARK } from './shipDensity.js';
 import { setBasemapContrast, _resetContactPaletteForTest } from './contactPalette.js';
 
+test('hustota: plášť je FLAT — bez slnečného osvetlenia, inak na nočnej strane zmizne (2026-09-07)', () => {
+  const src = readFileSync(new URL('./densityDrape.js', import.meta.url), 'utf8');
+  assert.match(src, /new Cesium\.EllipsoidSurfaceAppearance\(\{[\s\S]*?translucent: true,[\s\S]*?flat: true,/, 'EllipsoidSurfaceAppearance musí mať flat: true');
+  const radar = readFileSync(new URL('./shmuRadar.js', import.meta.url), 'utf8');
+  assert.match(radar, /new Cesium\.EllipsoidSurfaceAppearance\(\{[\s\S]*?flat: true,/, 'radarový plášť rovnako');
+});
+
 test('hustota: alfa podľa kontrastu — tmavý podklad slabšia, svetlý plná', () => {
   assert.equal(shipDensityAlpha('light'), SHIP_DENSITY_ALPHA_LIGHT);
   assert.equal(shipDensityAlpha('dark'), SHIP_DENSITY_ALPHA_DARK);

@@ -58,9 +58,16 @@ export const NIGHT_LIGHTS_NIGHT_ALPHA = 1;
  * Glóbusový shader (GlobeFS `sampleAndBlend`) porovnáva maximálnu zložku
  * rozdielu voči cieľovej farbe na SUROVEJ hodnote textúry, teda v sRGB, bez
  * linearizácie (overené v Cesium 1.138 — „lineárny" prah 0.02 nevyrezal nič).
- * 0.25 ≈ 64/255: ostávajú len mestá, plamene a lodné svetlá.
+ * 0.25 ≈ 64/255 bol prvý prah, ladený na európskej dlaždici. 2026-09-07
+ * používateľ: „čo sú tie fialové škvrny" nad Saharou a Arábiou — meranie
+ * dlaždíc z=5: Sahara má 94 % pixelov v pásme 40–69/255 (India 73 %, Európa
+ * 12 %, Atlantik 0 %) — to je fialovo-modrý „lesk" púšte v ročnom kompozite,
+ * nie svetlá; skutočné svetlá začínajú pri 100. Prah 64 rezal toto pásmo
+ * napoly (tvrdý rez GlobeFS bez prechodu → fľaky s ostrými okrajmi).
+ * 0.39 ≈ 100/255: púšť zmizne celá, mestá ostanú; najslabšie vidiecke
+ * svetlá 70–99 (3 % Európy) zmiznú tiež — čistejšia mapa.
  */
-export const NIGHT_LIGHTS_BACKGROUND_THRESHOLD = 0.25;
+export const NIGHT_LIGHTS_BACKGROUND_THRESHOLD = 0.39;
 
 /**
  * Zosilnenie svetiel PODĽA KONTRASTU PODKLADU. Nočnú stranu Cesium tlmí

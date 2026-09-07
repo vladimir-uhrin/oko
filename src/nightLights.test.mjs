@@ -62,10 +62,10 @@ test('vrstva svieti len v noci a tmavé pozadie snímky sa vyreže', () => {
   assert.ok(layer.colorToAlpha, 'vyrezanie pozadia chýba');
   assert.equal(layer.colorToAlphaThreshold, NIGHT_LIGHTS_BACKGROUND_THRESHOLD);
   // Prah je v sRGB (GlobeFS porovnáva surovú hodnotu textúry): musí byť nad
-  // ambientnou kresbou pevniny v snímke (max. zložka do ~63/255 = 0.247),
-  // inak nočná strana dostane tmavomodrú platňu namiesto podkladu, a pod
-  // slabými svetlami — príliš veľký by zhasol aj mestá.
-  assert.ok(NIGHT_LIGHTS_BACKGROUND_THRESHOLD >= 0.24 && NIGHT_LIGHTS_BACKGROUND_THRESHOLD < 0.4);
+  // púštnym „leskom" Black Marble (Sahara: 94 % pixelov 40–69/255 → fialové
+  // fľaky pri prahu 64, 2026-09-07) a pod skutočnými svetlami (≥ 100/255) —
+  // príliš veľký by zhasol aj mestá.
+  assert.ok(NIGHT_LIGHTS_BACKGROUND_THRESHOLD >= 0.38 && NIGHT_LIGHTS_BACKGROUND_THRESHOLD < 0.45);
   // Nočnú stranu Cesium tlmí na 0,3 aj so svetlami; bez zosilnenia má mesto
   // rovnaký jas ako more. Strop: 4 × 0,3 by už prepálilo aj predmestia.
   // Bez kontrastu = 'dark' (bezpečnejší default ako v contactPalette).

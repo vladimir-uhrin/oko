@@ -50,10 +50,12 @@ export const PHOTOREAL_NIGHT_LIGHTS_RANGE_M = Object.freeze({ near: 3_000, far: 
 export const PHOTOREAL_NIGHT_TINT = Object.freeze([0.55, 0.68, 1.0]);
 /**
  * Prah, pod ktorým sa jas Black Marble berie ako ambientná kresba pevniny,
- * nie svetlo — ten istý dôvod ako `colorToAlpha` 0,25 v nightLights.js
- * (90 % pixelov je do 63/255). smoothstep 0,22→0,40 namiesto tvrdého rezu.
+ * nie svetlo — ten istý dôvod ako `colorToAlpha` 0,39 v nightLights.js
+ * (púštny lesk 40–69/255 = 0,16–0,27, svetlá od 100/255 = 0,39; meranie
+ * 2026-09-07). smoothstep 0,34→0,50 namiesto tvrdého rezu — začína nad
+ * púšťou, plný jas majú svetlá od ~128/255.
  */
-export const PHOTOREAL_NIGHT_LIGHTS_CUTOFF = Object.freeze({ from: 0.22, to: 0.4 });
+export const PHOTOREAL_NIGHT_LIGHTS_CUTOFF = Object.freeze({ from: 0.34, to: 0.5 });
 
 /**
  * GLSL fragment. `positionWC` = svetová poloha fragmentu (Cesium ju dodá,

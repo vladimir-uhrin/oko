@@ -95,6 +95,12 @@ export function createDensityDrapePrimitive({ rectangle, image, alpha = 1 }) {
     appearance: new Cesium.EllipsoidSurfaceAppearance({
       material: Cesium.Material.fromType('Image', { image, color: Cesium.Color.WHITE.withAlpha(alpha) }),
       translucent: true,
+      // flat: povrchový vzhľad Cesia inak počíta Phongovo osvetlenie Slnkom
+      // — na NOČNEJ strane plášť stmavne do čiernej. Kým hodiny scény stáli
+      // (do 2026-09-06) to nebolo vidno; s reálnym časom „sa hustota letov
+      // dojebala" (používateľ 2026-09-07) — nad Európou večer zmizla, nad
+      // USA cez deň svietila. Dáta sú farba, nie povrch: bez osvetlenia.
+      flat: true,
     }),
     asynchronous: false,
     show: false,

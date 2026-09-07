@@ -118,6 +118,10 @@ export function createRadarFramePrimitive({ rectangle, image }) {
     }),
     appearance: new Cesium.EllipsoidSurfaceAppearance({
       material: Cesium.Material.fromType('Image', { image }),
+      // flat: bez Phongovho osvetlenia Slnkom — radarová ozvena je farba,
+      // nie povrch; inak na nočnej strane stmavne (rovnaká pasca ako
+      // densityDrape.js, 2026-09-07).
+      flat: true,
     }),
     asynchronous: false,
     show: false,

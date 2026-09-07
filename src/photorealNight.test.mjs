@@ -24,7 +24,8 @@ test('fragment shader: normála zo svetovej polohy, Slnko cez czm_sunDirectionWC
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /lon \/ \(2\.0 \* czm_pi\) \+ 0\.5, lat \/ czm_pi \+ 0\.5/);
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /material\.diffuse \* daylight \* tint \+ lights \* warm \* gain \* nightBlend/, 'svetlá sa pripočítavajú len na nočnej strane');
   assert.ok(PHOTOREAL_NIGHT_FLOOR >= 0.08 && PHOTOREAL_NIGHT_FLOOR <= 0.2, 'noc má byť noc (0,28 bolo „slabé"); čitateľnosť dávajú svetlá');
-  assert.ok(PHOTOREAL_NIGHT_LIGHTS_CUTOFF.from >= 0.15 && PHOTOREAL_NIGHT_LIGHTS_CUTOFF.to <= 0.5, 'rez ambientnej kresby Black Marble ako pri colorToAlpha');
+  assert.ok(PHOTOREAL_NIGHT_LIGHTS_CUTOFF.from >= 0.3 && PHOTOREAL_NIGHT_LIGHTS_CUTOFF.from < 0.39, 'rez začína NAD púštnym leskom (≤ 0,27) a pod svetlami (0,39) — 2026-09-07');
+  assert.ok(PHOTOREAL_NIGHT_LIGHTS_CUTOFF.to > PHOTOREAL_NIGHT_LIGHTS_CUTOFF.from && PHOTOREAL_NIGHT_LIGHTS_CUTOFF.to <= 0.55);
 });
 
 test('textúra svetiel: GIBS WMS Black Marble ako jeden rovnobežkový obrázok, statický čas, keyless', () => {
