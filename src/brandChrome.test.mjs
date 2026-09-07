@@ -7,12 +7,15 @@ import { readFileSync } from 'node:fs';
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const i18n = readFileSync(new URL('./i18nStrings.js', import.meta.url), 'utf8');
+const gaze = readFileSync(new URL('./logoGaze.js', import.meta.url), 'utf8');
 
-test('logo: červená zrenica pulzuje jemne (dych + zriedkavý zážeh), screen blend, rešpektuje reduced-motion', () => {
-  assert.match(css, /\.brand-logo::after \{[\s\S]*?mix-blend-mode: screen;[\s\S]*?animation: oko-eye-breathe [\d.]+s ease-in-out infinite, oko-eye-flare [\d.]+s ease-in-out infinite;/);
+test('logo: červená zrenica (skutočný span) pulzuje jemne (dych + zriedkavý zážeh), screen blend; reduced-motion = pomalý dych', () => {
+  assert.match(css, /\.brand-logo \.brand-eye \{[\s\S]*?mix-blend-mode: screen;[\s\S]*?animation: oko-eye-breathe [\d.]+s ease-in-out infinite, oko-eye-flare [\d.]+s ease-in-out infinite;/);
   assert.match(css, /@keyframes oko-eye-breathe \{[\s\S]*?opacity: 0\.4;[\s\S]*?opacity: 0\.8;/, 'dych medzi 0,4 a 0,8 — nie 0 a 1 (žiadne tvrdé blikanie)');
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.brand-logo::after \{ animation: none;/);
-  assert.match(css, /\.brand-logo \{\s*position: relative;/, 'pseudo-element potrebuje relatívny rodič');
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{[^}]*\.brand-logo \.brand-eye \{ animation: oko-eye-breathe 6s ease-in-out infinite; \}/, 'pri obmedzených animáciách pomalý dych, nie statika');
+  assert.match(css, /\.brand-logo \{\s*position: relative;/, 'absolútne umiestnená zrenica potrebuje relatívny rodič');
+  assert.equal((html.match(/<span class="brand-eye" aria-hidden="true"><\/span>/g) || []).length, 2, 'titulné logo aj preloader');
+  assert.match(gaze, /const eye = state\.element\.querySelector\('\.brand-eye'\);\s*state\.element\.replaceChildren\(svg\);\s*if \(eye\) state\.element\.appendChild\(eye\);/, 'inline SVG výmena zrenicu zachová');
 });
 
 test('preloader: podpis „made by Uhrin Vladimír" v štýle mono + azúrová linka, text lokalizovaný EN/SK', () => {

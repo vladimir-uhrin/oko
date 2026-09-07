@@ -577,10 +577,13 @@ body.cockpit-mode #cockpit-cloud-effects.active {
    že žije"): červená zrenica ako pulzujúca žiara nad stredom oka. Stred
    zrenice v SVG (568, 378) vo viewBoxe 180–955 × 120–640 ≈ 50 % / 49,6 %.
    Screen blend, nech azúrová dúhovka presvitá; dva rytmy — pomalý dych a
-   občasný krátky „zážeh" — nikdy tvrdé blikanie. */
-.brand-logo::after {
-  content: '';
+   občasný krátky „zážeh" — nikdy tvrdé blikanie. Je to skutočný <span>,
+   nie ::after: pseudo-elementy titulného loga patria rádiovým krúžkom a
+   logoGaze ich pri výmene <img> za inline SVG zachová (viď logoGaze.js). */
+.brand-logo .brand-eye {
+  display: block;
   position: absolute;
+  z-index: 2;
   left: 50.1%;
   top: 49.6%;
   width: 24%;
@@ -603,7 +606,9 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   94% { filter: brightness(1.1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .brand-logo::after { animation: none; opacity: 0.6; }
+  /* Používateľ si oko výslovne vypýtal — pri obmedzených animáciách ostane
+     len pomalý dych bez zážehu, nie statická bodka. */
+  .brand-logo .brand-eye { animation: oko-eye-breathe 6s ease-in-out infinite; }
 }
 
 .brand-logo > img,

@@ -105,7 +105,11 @@ export function initLogoGaze(root = document) {
         svg.setAttribute('aria-hidden', 'true');
         svg.setAttribute('focusable', 'false');
         svg.querySelector('title')?.remove();
+        // Červená zrenica (.brand-eye, 2026-09-07) je súrodenec obrázka —
+        // po výmene <img> za inline SVG ju treba vrátiť, inak by zmizla.
+        const eye = state.element.querySelector('.brand-eye');
         state.element.replaceChildren(svg);
+        if (eye) state.element.appendChild(eye);
         state.parts = [
           svg.querySelector('#globe'),
           svg.querySelector('#globe_cage'),
