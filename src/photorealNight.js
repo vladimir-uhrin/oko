@@ -37,15 +37,19 @@ export const PHOTOREAL_NIGHT_TEXTURE_URL =
  */
 export const PHOTOREAL_NIGHT_FLOOR = 0.12;
 /**
- * Zosilnenie pripočítaných svetiel PODĽA VZDIALENOSTI kamery od fragmentu.
- * Black Marble má 3 km/px: z výšky je to presná mapa svetiel (gain far),
- * zblízka by tá istá hodnota položila na celé mesto rovnomernú svetlú
- * platňu — namerané 2026-09-06 nad hradom: floor 0,35 + gain 0,9 dalo
- * 0,62 jasu dňa, teda „zamračený deň", nie noc. Zblízka preto len jemná
- * žiara (gain near), prechod medzi 3 a 300 km.
+ * Zosilnenie pripočítaných svetiel PODĹA VZDIALENOSTI kamery od fragmentu.
+ * Textúra Black Marble (WMS 4096 px) má ~10 km na pixel: z výšky glóbusu je
+ * to správna mapa svetiel, zblízka sa jedno mestečko roztiahne na biely
+ * fľak cez celé údolie („ľadovce" nad Alpami, používateľ 2026-09-07:
+ * „to je nahovno — buď vypnúť, alebo spraviť riadne"). Riadne = svetlá sú
+ * detail GLÓBUSU, nie krajiny: pod 400 km od fragmentu nula (near gain 0),
+ * plný jas od 1 500 km — rovnaká hranica, pod ktorou glóbus vypína aj
+ * osvetlenie a vrstvu Black Marble (globeLighting.js). Zotmenie noci ostáva
+ * v každej výške; prvá verzia (gain 0,4 od 3 km) dala 2026-09-06 „zamračený
+ * deň" a 09-07 fľaky.
  */
-export const PHOTOREAL_NIGHT_LIGHTS_GAIN = Object.freeze({ near: 0.4, far: 1.1 });
-export const PHOTOREAL_NIGHT_LIGHTS_RANGE_M = Object.freeze({ near: 3_000, far: 300_000 });
+export const PHOTOREAL_NIGHT_LIGHTS_GAIN = Object.freeze({ near: 0.0, far: 1.1 });
+export const PHOTOREAL_NIGHT_LIGHTS_RANGE_M = Object.freeze({ near: 400_000, far: 1_500_000 });
 /** Chladný nádych nočnej strany (mesačné svetlo) — pri plnom dni 1. */
 export const PHOTOREAL_NIGHT_TINT = Object.freeze([0.55, 0.68, 1.0]);
 /**

@@ -9,6 +9,7 @@ import {
   PHOTOREAL_NIGHT_FRAGMENT,
   PHOTOREAL_NIGHT_LIGHTS_CUTOFF,
   PHOTOREAL_NIGHT_LIGHTS_GAIN,
+  PHOTOREAL_NIGHT_LIGHTS_RANGE_M,
   PHOTOREAL_NIGHT_TEXTURE_URL,
   applyPhotorealNight,
   buildPhotorealNightShader,
@@ -97,6 +98,11 @@ test('applyPhotorealNight: jediný zapisovač customShader, recykluje inštanciu
   assert.deepEqual(calls.at(-1), ['u_lightsGain', PHOTOREAL_NIGHT_LIGHTS_GAIN.near, PHOTOREAL_NIGHT_LIGHTS_GAIN.far]);
   assert.equal(lit.customShader, stub, 'shader ostal nasadený — zotmenie beží');
   assert.equal(applyPhotorealNight(null, true), false);
+  // Svetlá sú detail glóbusu (2026-09-07 „ľadovce"): zblízka nula, plné až
+  // od výšky, kde svieti aj vrstva Black Marble na glóbuse (1 500 km).
+  assert.equal(PHOTOREAL_NIGHT_LIGHTS_GAIN.near, 0, 'zblízka žiadne svetlá');
+  assert.ok(PHOTOREAL_NIGHT_LIGHTS_RANGE_M.near >= 300_000, 'nábeh svetiel začína až stovky km od povrchu');
+  assert.equal(PHOTOREAL_NIGHT_LIGHTS_RANGE_M.far, 1_500_000, 'plný jas na hranici osvetlenia glóbusu');
   assert.equal(applyPhotorealNight(undefined, false), false);
 });
 
