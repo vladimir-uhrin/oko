@@ -1,6 +1,8 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
 import { getBasemapContrast, onContactPaletteChange } from './contactPalette.js';
+import { getActiveMapStack, isGlobeHiddenForStack, onActiveMapStackChange } from './activeMapStack.js';
+import { t } from '../i18n.js';
 
 /**
  * Spoločná továreň pre „historickú hustotu" — statický RGBA PNG raster
@@ -144,6 +146,14 @@ export function createDensityDrapeLayer(config) {
   let _paletteUnsub = null;
   let _preRenderRemover = null;
   let _lastAlpha = -1;
+  let _stackUnsub = null;
+  // Fotoreál (Google 3D): glóbus je skrytý a plášť vo výške 30 m nad
+  // elipsoidom končí POD meshom krajiny — vidno z neho len trhané kusy
+  // („historické lety na Google sú nahovno", používateľ 2026-09-07). Rovnaké
+  // pravidlo ako GIBS prekryvy: len na glóbuse, na fotoreáli skrytý a
+  // getStats to hlási ako stav, nie mlčky.
+  const globeHidden = () => isGlobeHiddenForStack(getActiveMapStack());
+  const visibleNow = () => _enabled && !globeHidden();
 
   function currentAlpha() {
     const height = _viewer?.camera?.positionCartographic?.height;
@@ -158,7 +168,7 @@ export function createDensityDrapeLayer(config) {
     if (Math.abs(alpha - _lastAlpha) < 0.004) return;
     _lastAlpha = alpha;
     uniforms.color = Cesium.Color.WHITE.withAlpha(alpha);
-    _primitive.show = _enabled && alpha > 0;
+    _primitive.show = visibleNow() && alpha > 0;
     governorRequestRender(governorId);
     _viewer?.scene?.requestRender?.();
   }
@@ -177,10 +187,17 @@ export function createDensityDrapeLayer(config) {
     _primitive = primitive;
     _paletteUnsub?.();
     _paletteUnsub = onContactPaletteChange(() => syncAlpha());
+    _stackUnsub?.();
+    _stackUnsub = onActiveMapStackChange(() => {
+      if (_primitive) _primitive.show = visibleNow();
+      _lastAlpha = -1;
+      syncAlpha();
+      governorRequestRender(governorId);
+    });
     _preRenderRemover?.();
     _preRenderRemover = _viewer?.scene?.preRender?.addEventListener?.(syncAlpha) ?? null;
     _viewer?.scene?.primitives?.add?.(primitive);
-    primitive.show = _enabled;
+    primitive.show = visibleNow();
     _lastAlpha = -1;
     syncAlpha();
     _meta = meta;
@@ -225,7 +242,7 @@ export function createDensityDrapeLayer(config) {
     async enable() {
       _enabled = true;
       if (_primitive) {
-        _primitive.show = true;
+        _primitive.show = visibleNow();
         _lastAlpha = -1;
         syncAlpha(); // show rešpektuje zoom-fade hneď
         governorRequestRender(governorId);
@@ -249,6 +266,8 @@ export function createDensityDrapeLayer(config) {
     destroy(viewer) {
       _paletteUnsub?.();
       _paletteUnsub = null;
+      _stackUnsub?.();
+      _stackUnsub = null;
       _preRenderRemover?.();
       _preRenderRemover = null;
       _lastAlpha = -1;
@@ -278,7 +297,8 @@ export function createDensityDrapeLayer(config) {
         source: layer.source,
         lastUpdate: _lastUpdate,
         count: _meta?.stats?.cellsNonzero ?? 0,
-        error: _lastError,
+        // Fotoreál: hlásiť stav, nie mlčať — používateľ inak hľadá chybu v dátach.
+        error: _enabled && globeHidden() ? t('density.globe-only') : _lastError,
         loading: Boolean(_loading),
       };
     },

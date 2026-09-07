@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, openSync, closeSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { _resetActiveMapStackForTest, setActiveMapStack } from './activeMapStack.js';
 import { join } from 'node:path';
 import {
   SHIP_DENSITY_LAYER_ID,
@@ -89,6 +90,32 @@ test('hustota: lifecycle bez DOM — primitív vzniká po načítaní, show sled
   assert.equal(removed.length, 1);
   assert.equal(layer._getStateForTest().hasPrimitive, false);
   assert.equal(layer.getStatus().state, 'idle');
+});
+
+test('hustota: na fotoreáli (Google 3D) je plášť skrytý a getStats to hlási; návrat na glóbus ho ukáže (2026-09-07)', async () => {
+  _resetActiveMapStackForTest();
+  const viewer = { scene: { primitives: { add() {}, remove() {} } } };
+  const layer = createShipDensityLayer({
+    metaUrl: 'meta.json', pngUrl: 'density.png',
+    fetchImpl: async () => ({ ok: true, json: async () => META }),
+    imageLoader: async () => ({}),
+    primitiveFactory: () => ({ show: false }),
+  });
+  layer.init(viewer);
+  await layer.enable();
+  assert.equal(layer._getStateForTest().shown, true, 'na glóbuse viditeľný');
+  assert.equal(layer.getStats().error, null);
+  setActiveMapStack({ id: 'photoreal', kind: 'photoreal' });
+  assert.equal(layer._getStateForTest().shown, false, 'na fotoreáli skrytý — plášť by ležal pod meshom');
+  assert.match(String(layer.getStats().error), /globe|glóbus/i, 'stav sa hlási, nie mlčí');
+  layer.disable();
+  await layer.enable();
+  assert.equal(layer._getStateForTest().shown, false, 'enable na fotoreáli ho neukáže');
+  setActiveMapStack({ id: 'osm', kind: 'globe' });
+  assert.equal(layer._getStateForTest().shown, true, 'návrat na glóbus ho ukáže');
+  assert.equal(layer.getStats().error, null);
+  layer.destroy(viewer);
+  _resetActiveMapStackForTest();
 });
 
 test('hustota: zlyhanie sidecaru je chyba stavu, nie výnimka v enable', async () => {
