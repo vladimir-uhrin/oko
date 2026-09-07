@@ -55,6 +55,7 @@ export const EN_STRINGS = Object.freeze({
   'loading.shared-subject': 'SHARED {label}',
 
   'loader.configuring': 'Configuring viewer...',
+  'loader.made-by': 'made by',
   'loader.start': 'Starting the photorealistic world…',
   'loader.google-tiles': 'Loading Google 3D Tiles...',
   'loader.google-tiles-fallback': 'Google 3D Tiles unavailable ({detail}). Continuing in fallback mode...',
@@ -1055,6 +1056,7 @@ export const SK_STRINGS = Object.freeze({
   'loading.shared-subject': 'ZDIEĽANÉ: {label}',
 
   'loader.configuring': 'Konfigurujem zobrazenie…',
+  'loader.made-by': 'vytvoril',
   'loader.start': 'Štartujem fotorealistický svet…',
   'loader.google-tiles': 'Načítavam Google 3D dlaždice…',
   'loader.google-tiles-fallback': 'Google 3D dlaždice nedostupné ({detail}). Pokračujem v záložnom režime…',

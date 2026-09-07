@@ -23,6 +23,23 @@ export const STARFIELD_FACE_PX = 2048;
 export const STARFIELD_STAR_COUNT = 11000;
 export const STARFIELD_SEED = 20260907;
 export const STARFIELD_FACES = Object.freeze(['positiveX', 'negativeX', 'positiveY', 'negativeY', 'positiveZ', 'negativeZ']);
+/**
+ * Pozadie z Cesium Tycho-2 kociek (2026-09-07, používateľ: „oprav ostrosť
+ * hviezd" po tom, ako prázdna generovaná obloha nevyhovovala): tie isté
+ * JPEG steny, ktoré kreslí predvolený SkyBox, sa položia pod ostré body —
+ * mierne rozmazané a stlmené, takže dávajú Mliečnu dráhu a hustotu oblohy,
+ * kým ostrosť robia body navrchu. Orientácia sedí bez transformácie: stena
+ * `px` ide do toho istého slotu `positiveX`, kam ju dáva aj Cesium.
+ */
+export const TYCHO_FACE_FILES = Object.freeze({
+  positiveX: 'px', negativeX: 'mx', positiveY: 'py', negativeY: 'my', positiveZ: 'pz', negativeZ: 'mz',
+});
+export const TYCHO_BACKGROUND_ALPHA = 0.6;
+export const TYCHO_BACKGROUND_BLUR_PX = 1.2;
+/** URL Tycho steny v Cesium assetoch (rovnaká cesta ako predvolený SkyBox). */
+export function tychoFaceUrl(face) {
+  return Cesium.buildModuleUrl(`Assets/Textures/SkyBox/tycho2t3_80_${TYCHO_FACE_FILES[face]}.jpg`);
+}
 
 /** Farby hviezd (spektrálne triedy zjednodušene): modrobiela, biela, krémová, žltkastá. */
 export const STAR_TINTS = Object.freeze([
@@ -121,7 +138,7 @@ export function cubeFaceOf(d) {
  * @param {number} [options.seed]
  * @returns {Record<string, HTMLCanvasElement>}
  */
-export function paintStarfieldFaces(doc, { facePx = STARFIELD_FACE_PX, count = STARFIELD_STAR_COUNT, seed = STARFIELD_SEED } = {}) {
+export function paintStarfieldFaces(doc, { facePx = STARFIELD_FACE_PX, count = STARFIELD_STAR_COUNT, seed = STARFIELD_SEED, backgrounds = null } = {}) {
   const faces = {};
   for (const face of STARFIELD_FACES) {
     const canvas = doc.createElement('canvas');
@@ -130,6 +147,18 @@ export function paintStarfieldFaces(doc, { facePx = STARFIELD_FACE_PX, count = S
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, facePx, facePx);
+    // Tycho pozadie (voliteľné): stlmené a jemne rozmazané, nech JPEG šum
+    // nesúperí s ostrými bodmi, ale Mliečna dráha ostane.
+    const bg = backgrounds?.[face];
+    if (bg && typeof ctx.drawImage === 'function') {
+      ctx.save?.();
+      if ('filter' in ctx) ctx.filter = `blur(${TYCHO_BACKGROUND_BLUR_PX}px)`;
+      ctx.globalAlpha = TYCHO_BACKGROUND_ALPHA;
+      ctx.drawImage(bg, 0, 0, facePx, facePx);
+      ctx.restore?.();
+      ctx.globalAlpha = 1;
+      if ('filter' in ctx) ctx.filter = 'none';
+    }
     faces[face] = { canvas, ctx };
   }
   for (const star of generateStars(count, seed)) {
@@ -166,12 +195,35 @@ export function paintStarfieldFaces(doc, { facePx = STARFIELD_FACE_PX, count = S
   return out;
 }
 
+/** Načítaj obrázok (null pri zlyhaní — obloha potom ide bez pozadia). */
+export function loadImageElement(url, doc = globalThis.document) {
+  return new Promise((resolve) => {
+    const img = doc?.createElement ? doc.createElement('img') : (typeof Image === 'function' ? new Image() : null);
+    if (!img) { resolve(null); return; }
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/** Šesť Tycho stien (chýbajúca = null pre danú stenu). */
+export async function loadTychoFaces(imageLoader = loadImageElement) {
+  const entries = await Promise.all(STARFIELD_FACES.map(async (face) => [face, await imageLoader(tychoFaceUrl(face))]));
+  const out = {};
+  for (const [face, img] of entries) out[face] = img || null;
+  return out;
+}
+
 /**
- * Vymeň Cesium skybox za ostrý. Vracia funkciu, ktorá vráti pôvodný.
+ * Vymeň Cesium skybox za ostrý (Tycho pozadie + generované body). Vracia
+ * funkciu, ktorá vráti pôvodný; jej `.ready` je Promise<boolean> — true, keď
+ * sa obloha naozaj nasadila (pozadie sa načítava asynchrónne).
  * @param {object} viewer
  * @param {object} [deps]
  * @param {Document} [deps.doc]
  * @param {(faces: Record<string, HTMLCanvasElement>) => object} [deps.skyBoxFactory]
+ * @param {(url: string) => Promise<object|null>} [deps.imageLoader]
+ * @param {boolean} [deps.background] false = len body (bez Tycho)
  * @returns {(() => void)|null}
  */
 export function installSharpStarfield(viewer, {
@@ -181,15 +233,30 @@ export function installSharpStarfield(viewer, {
     for (const face of STARFIELD_FACES) sources[face] = faces[face].toDataURL('image/png');
     return new Cesium.SkyBox({ sources });
   },
+  imageLoader = loadImageElement,
+  background = true,
 } = {}) {
   const scene = viewer?.scene;
   if (!scene || !doc?.createElement) return null;
-  const faces = paintStarfieldFaces(doc);
-  const previous = scene.skyBox;
-  scene.skyBox = skyBoxFactory(faces);
-  scene.requestRender?.();
-  return () => {
+  let previous;
+  let applied = false;
+  let cancelled = false;
+  const revert = () => {
+    cancelled = true;
+    if (!applied) return;
+    applied = false;
     scene.skyBox = previous;
     scene.requestRender?.();
   };
+  revert.ready = (async () => {
+    const backgrounds = background ? await loadTychoFaces(imageLoader) : null;
+    if (cancelled) return false;
+    const faces = paintStarfieldFaces(doc, { backgrounds });
+    previous = scene.skyBox;
+    scene.skyBox = skyBoxFactory(faces);
+    applied = true;
+    scene.requestRender?.();
+    return true;
+  })();
+  return revert;
 }

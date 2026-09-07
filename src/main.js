@@ -159,12 +159,12 @@ async function init() {
     // Viewer inak zmrazí clock.currentTime na čase načítania a Slnko s ním.
     installDayNightClock(viewer, { requestRender: governorRequestRender });
 
-    // Ostré hviezdy (starfield.js): vlastný skybox z bodových hviezd. Bol
-    // predvolený jeden deň (2026-09-07) — používateľ chcel pôvodnú oblohu
-    // Cesia späť („tie hviezdy daj naspäť": Tycho má Mliečnu dráhu a tisíce
-    // hviezd, generovaná obloha pôsobila prázdne). Ostáva ako voľba
-    // `?stars=sharp`; generuje sa po prvom snímku (~100 ms).
-    if (new URLSearchParams(window.location.search).get('stars') === 'sharp') {
+    // Ostré hviezdy (starfield.js): Tycho steny Cesia ako stlmené pozadie
+    // (Mliečna dráha, hustota) + generované ostré body navrchu. Prvá verzia
+    // bola len z bodov a pôsobila prázdne („tie hviezdy daj naspäť"), samotné
+    // Tycho JPEG je rozmazané („oprav ostrosť hviezd") — toto je oboje.
+    // `?stars=cesium` vráti pôvodný skybox. Generuje sa po prvom snímku.
+    if (new URLSearchParams(window.location.search).get('stars') !== 'cesium') {
       setTimeout(() => {
         try { installSharpStarfield(viewer); } catch (error) { console.warn('[Init] sharp starfield unavailable:', error); }
       }, 0);

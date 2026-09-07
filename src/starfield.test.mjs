@@ -8,6 +8,9 @@ import {
   STARFIELD_FACE_PX,
   STARFIELD_STAR_COUNT,
   STAR_TINTS,
+  TYCHO_BACKGROUND_ALPHA,
+  TYCHO_FACE_FILES,
+  tychoFaceUrl,
   cubeFaceOf,
   generateStars,
   installSharpStarfield,
@@ -66,14 +69,19 @@ function fakeDoc() {
   return {
     canvases,
     createElement() {
-      const ops = { fillRect: 0, arc: 0, gradient: 0 };
+      const ops = { fillRect: 0, arc: 0, gradient: 0, drawImage: 0 };
       const ctx = {
         ops,
         fillStyle: null,
+        globalAlpha: 1,
+        filter: 'none',
         fillRect() { ops.fillRect += 1; },
         beginPath() {},
         arc() { ops.arc += 1; },
         fill() {},
+        save() {},
+        restore() {},
+        drawImage() { ops.drawImage += 1; },
         createRadialGradient() { ops.gradient += 1; return { addColorStop() {} }; },
       };
       const canvas = { width: 0, height: 0, ctx, getContext: () => ctx, toDataURL: () => 'data:image/png;base64,x' };
@@ -99,20 +107,48 @@ test('steny: šesť plátien danej veľkosti, čierne pozadie, body ostré (halo
   assert.ok(STARFIELD_STAR_COUNT >= 5000 && STARFIELD_STAR_COUNT <= 20000);
 });
 
-test('inštalácia: vymení skybox a vie ho vrátiť; bez scény/dokumentu no-op', () => {
+test('Tycho pozadie (2026-09-07): keď sú steny dodané, kreslia sa pod body stlmené a rozmazané; bez nich nič', () => {
+  const doc = fakeDoc();
+  const backgrounds = Object.fromEntries(STARFIELD_FACES.map((f) => [f, { face: f }]));
+  paintStarfieldFaces(doc, { facePx: 64, count: 50, seed: 1, backgrounds });
+  assert.equal(doc.canvases.reduce((n, c) => n + c.ctx.ops.drawImage, 0), 6, 'každá stena dostala svoje pozadie');
+  const doc2 = fakeDoc();
+  paintStarfieldFaces(doc2, { facePx: 64, count: 50, seed: 1, backgrounds: { positiveX: { face: 'px' } } });
+  assert.equal(doc2.canvases.reduce((n, c) => n + c.ctx.ops.drawImage, 0), 1, 'chýbajúca stena = bez pozadia, body ostávajú');
+  assert.equal(TYCHO_FACE_FILES.negativeZ, 'mz');
+  assert.match(tychoFaceUrl('positiveX'), /Assets\/Textures\/SkyBox\/tycho2t3_80_px\.jpg$/);
+  assert.ok(TYCHO_BACKGROUND_ALPHA > 0.3 && TYCHO_BACKGROUND_ALPHA < 0.85, 'pozadie stlmené, nie plné');
+});
+
+test('inštalácia: načíta Tycho steny, vymení skybox a vie ho vrátiť (aj pred dokončením); bez scény/dokumentu no-op', async () => {
   const doc = fakeDoc();
   const scene = { skyBox: 'old', renders: 0, requestRender() { this.renders += 1; } };
   let built = null;
-  const revert = installSharpStarfield({ scene }, { doc, skyBoxFactory: (faces) => { built = faces; return { sources: Object.keys(faces) }; } });
+  const urls = [];
+  const revert = installSharpStarfield({ scene }, {
+    doc,
+    skyBoxFactory: (faces) => { built = faces; return { sources: Object.keys(faces) }; },
+    imageLoader: async (url) => { urls.push(url); return { url }; },
+  });
+  assert.equal(scene.skyBox, 'old', 'pred načítaním pozadia sa nič nemení');
+  assert.equal(await revert.ready, true);
+  assert.equal(urls.length, 6);
+  assert.ok(urls.every((u) => /tycho2t3_80_(px|mx|py|my|pz|mz)\.jpg$/.test(u)));
   assert.ok(built && Object.keys(built).length === 6);
   assert.deepEqual(scene.skyBox, { sources: [...STARFIELD_FACES] });
   assert.equal(scene.renders, 1);
   revert();
   assert.equal(scene.skyBox, 'old');
+  // revert pred dokončením = obloha sa nenasadí
+  const scene2 = { skyBox: 'old2', requestRender() {} };
+  const early = installSharpStarfield({ scene: scene2 }, { doc, skyBoxFactory: () => 'new', imageLoader: async () => null });
+  early();
+  assert.equal(await early.ready, false);
+  assert.equal(scene2.skyBox, 'old2');
   assert.equal(installSharpStarfield(null), null);
   assert.equal(installSharpStarfield({ scene }, { doc: {} }), null);
 
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.match(main, /installSharpStarfield\(viewer\)/, 'main.js vie zapnúť ostrú oblohu');
-  assert.match(main, /get\('stars'\) === 'sharp'/, 'predvolená je obloha Cesia, ostrá len cez ?stars=sharp (používateľ 2026-09-07)');
+  assert.match(main, /installSharpStarfield\(viewer\)/, 'main.js zapína ostrú oblohu');
+  assert.match(main, /get\('stars'\) !== 'cesium'/, 'predvolená je ostrá obloha s Tycho pozadím, ?stars=cesium vráti pôvodnú (používateľ 2026-09-07: „oprav ostrosť hviezd")');
 });
