@@ -291,7 +291,9 @@ export class MapStackController {
     this._nightLightsLayer = null;
     this._nightLightsProvider = null;
     this._nightLightsEnabled = false;
-    /** Svetlá miest (Black Marble) zvlášť od Deň/noc — vypínač 2026-09-07. */
+    /** Svetlá miest (Black Marble) zvlášť od Deň/noc — vypínač 2026-09-07.
+     *  Controller default true (spätná kompatibilita testov); UI ich pri
+     *  štarte vypne, kým používateľ nezapne (default vypnuté). */
     this._cityLightsEnabled = true;
     /** Remover preRender listenera, ktorý tlmí svetlá s výškou (viď _applyNightLightsFade). */
     this._nightLightsFadeRemover = null;

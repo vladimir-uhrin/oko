@@ -86,9 +86,10 @@ test('styleNightLightsLayer je bezpečný bez vrstvy', () => {
 
 test('tripwire (2026-09-07): svetlá miest majú vlastný vypínač v paneli Zobrazenie, oddelený od Deň/noc', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /id="night-lights-toggle"[^>]*aria-pressed="true"/, 'tlačidlo existuje a default je zapnuté');
+  assert.match(html, /id="night-lights-toggle"[^>]*aria-pressed="false"/, 'tlačidlo existuje a default je VYPNUTÉ (používateľ 2026-09-07: „vyzerá to ako mraky")');
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY\) === '1'/, 'zapnuté len po výslovnej voľbe');
   assert.match(ui, /setCityLightsEnabled\?\.\(this\._nightLightsEnabled\)/, 'vypínač píše do controllera cez setCityLightsEnabled');
   assert.match(ui, /setNightLightsEnabled\?\.\(this\._dayNightEnabled\)/, 'Deň/noc ostáva hlavným prepínačom');
-  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY = 'oko-night-lights'/, 'voľba per zariadenie');
+  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights'/, 'voľba per zariadenie (nový kľúč, nech stará zapnutá voľba neprežije)');
 });

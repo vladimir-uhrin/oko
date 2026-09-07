@@ -593,14 +593,19 @@ const CCTV_CAL_FIELDS = {
   },
 };
 
-/** localStorage kľúč vypínača svetiel miest (2026-09-07); default zapnuté. */
-const NIGHT_LIGHTS_STORAGE_KEY = 'oko-night-lights';
+/**
+ * localStorage kľúč vypínača svetiel miest (2026-09-07). DEFAULT VYPNUTÉ:
+ * používateľ po dvoch pokusoch („ľadovce", potom „vyzerá to ako mraky —
+ * vypni to") — Black Marble ostáva len ako voľba pre toho, kto ju chce.
+ * Nový kľúč (nie 'oko-night-lights'), nech neprežije stará zapnutá voľba.
+ */
+const NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights';
 function readStoredNightLights() {
   try {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) !== '0';
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -2848,7 +2853,7 @@ export class StyleManager {
     this._dayNightBtn = document.getElementById('daynight-toggle');
     this._unitsBtn = document.getElementById('units-toggle');
     this._dayNightEnabled = true;
-    // Svetlá miest zvlášť (2026-09-07): per zariadenie, default zapnuté.
+    // Svetlá miest zvlášť (2026-09-07): per zariadenie, default VYPNUTÉ.
     this._nightLightsBtn = document.getElementById('night-lights-toggle');
     this._nightLightsEnabled = readStoredNightLights();
     // Plátno (2D Mercator) — DEFAULT-OFF, guľa je produkt. Session-only.
