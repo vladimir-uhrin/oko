@@ -759,6 +759,21 @@
     </div>
   </div>
 
+  <!-- História letov (2026-09-07): vyhľadanie úseku v zázname proxy
+       (SQLite, 7 dní), prehrávanie na glóbuse s grafom výšky a rýchlosti.
+       Obsah skladá historyPanel.js do [data-history-body]. -->
+  <div id="history-panel" class="panel-collapsible collapsed" data-panel-id="history-panel">
+    <div class="panel-glow"></div>
+    <div class="history-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.history" class="panel-title">FLIGHT HISTORY</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="history-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="history-body" data-history-body></div>
+    </div>
+  </div>
+
   </div>
 
   <!-- Global Context is deliberately independent from the left layer accordion. -->

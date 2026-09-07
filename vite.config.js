@@ -28,6 +28,7 @@
 
 import fs from 'node:fs';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
+import { openFlightHistory } from './src/data/flightHistoryStore.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -3368,6 +3369,137 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  *
  * @returns {import('vite').Plugin}
  */
+/**
+ * Vite plugin: história letov (2026-09-07, používateľ: „chcem spätne nájsť
+ * let, trackovať ho, dobré grafické zobrazenie").
+ *
+ * Záznam: obal nad `res.end` pre /api/opensky a /api/adsblol/mil — telo,
+ * ktoré proxy už posiela klientovi, sa zapíše do SQLite
+ * (.gev-cache/flight-history.sqlite, flightHistoryStore.js). Žiadny nový
+ * upstream dopyt, žiadny nový zdroj; ten istý snímok z cache sa nezapíše
+ * dvakrát (kľúč time+počet). Musí byť zaregistrovaný PRED openSkyProxy a
+ * adsbLolProxy — connect volá middleware v poradí registrácie.
+ *
+ * Čítanie:
+ *   GET /api/history/status
+ *   GET /api/history/search?q=<callsign prefix|hex>&hours=24&limit=50
+ *   GET /api/history/track?icao24=<hex>&from=<epoch s>&to=<epoch s>
+ *   GET /api/history/leg?id=<n>
+ * Retencia FLIGHT_HISTORY_RETENTION_DAYS (default 7). FLIGHT_HISTORY=off vypne.
+ */
+function flightHistoryProxy() {
+  // Konfigurácia z .env (loadEnv ju kopíruje do process.env až v config hooku,
+  // preto sa číta LENIVO pri prvom použití, nie pri stavbe pluginu):
+  //   FLIGHT_HISTORY=off                 vypne záznam aj API
+  //   FLIGHT_HISTORY_DB=D:oko-historylight-history.sqlite  (default .gev-cache/)
+  //   FLIGHT_HISTORY_RETENTION_DAYS=30   (default 7)
+  //   FLIGHT_HISTORY_RAW_HOURS=720       plný záznam bez riedenia (default 24;
+  //                                      ≥ retencia = riedenie vypnuté)
+  const config = () => {
+    const days = Number(process.env.FLIGHT_HISTORY_RETENTION_DAYS);
+    const raw = Number(process.env.FLIGHT_HISTORY_RAW_HOURS);
+    return {
+      enabled: String(process.env.FLIGHT_HISTORY || 'on').toLowerCase() !== 'off',
+      dbPath: String(process.env.FLIGHT_HISTORY_DB || '').trim() || path.join(process.cwd(), '.gev-cache', 'flight-history.sqlite'),
+      retentionDays: days > 0 ? days : 7,
+      rawHours: raw > 0 ? raw : 24,
+    };
+  };
+  let store = null;
+  let enabled = true;
+
+  function getStore() {
+    const cfg = config();
+    enabled = cfg.enabled;
+    if (store || !enabled) return store;
+    try {
+      fs.mkdirSync(path.dirname(cfg.dbPath), { recursive: true });
+      store = openFlightHistory(cfg.dbPath, { retentionDays: cfg.retentionDays, rawHours: cfg.rawHours });
+      const st = store.status();
+      console.log(`[flight-history] SQLite ${cfg.dbPath}: ${st.fixes} fixes, ${st.legs} legs, retention ${cfg.retentionDays} d, raw ${cfg.rawHours} h`);
+    } catch (error) {
+      console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
+      store = null;
+    }
+    return store;
+  }
+
+  /** Obal: po odoslaní 200 odpovede zapíš jej telo (asynchrónne k odpovedi). */
+  function tapResponse(res, record) {
+    const originalEnd = res.end.bind(res);
+    const chunks = [];
+    const originalWrite = res.write.bind(res);
+    res.write = (chunk, ...rest) => { if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))); return originalWrite(chunk, ...rest); };
+    res.end = (chunk, ...rest) => {
+      if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      const result = originalEnd(chunk, ...rest);
+      if (res.statusCode === 200 && chunks.length) {
+        const body = Buffer.concat(chunks);
+        setImmediate(() => {
+          try {
+            const s = getStore();
+            if (s) record(s, body);
+          } catch (error) {
+            console.warn('[flight-history] record failed:', error?.message || error);
+          }
+        });
+      }
+      return result;
+    };
+  }
+
+  const json = (res, status, payload) => {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(payload));
+  };
+
+  return {
+    name: 'flight-history',
+    configureServer(server) {
+      server.middlewares.use('/api/opensky', (req, res, next) => {
+        if (enabled) tapResponse(res, (s, body) => s.recordOpenSkyBody(body, res.getHeader('X-Flight-Source') ? 'adsb.lol/regional' : 'opensky'));
+        next();
+      });
+      server.middlewares.use('/api/adsblol/mil', (req, res, next) => {
+        if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/mil'));
+        next();
+      });
+      server.middlewares.use('/api/history', (req, res) => {
+        const url = new URL(req.url, 'http://localhost');
+        const s = getStore();
+        if (!s) { json(res, 503, { error: enabled ? 'history_unavailable' : 'history_disabled' }); return; }
+        try {
+          if (url.pathname === '/status') { json(res, 200, s.status()); return; }
+          if (url.pathname === '/search') {
+            const hours = Math.min(24 * config().retentionDays, Math.max(1, Number(url.searchParams.get('hours')) || 24));
+            const sinceS = Math.floor(Date.now() / 1000) - hours * 3600;
+            const limit = Number(url.searchParams.get('limit')) || 50;
+            json(res, 200, { q: url.searchParams.get('q') || '', hours, legs: s.search(url.searchParams.get('q') || '', { sinceS, limit }) });
+            return;
+          }
+          if (url.pathname === '/track') {
+            const icao24 = url.searchParams.get('icao24') || '';
+            const fromS = Number(url.searchParams.get('from')) || 0;
+            const toS = Number(url.searchParams.get('to')) || Number.MAX_SAFE_INTEGER;
+            json(res, 200, { icao24: icao24.toLowerCase(), fromS, toS, fixes: s.track(icao24, { fromS, toS }) });
+            return;
+          }
+          if (url.pathname === '/leg') {
+            const leg = s.leg(url.searchParams.get('id'));
+            if (!leg) { json(res, 404, { error: 'not_found' }); return; }
+            json(res, 200, leg);
+            return;
+          }
+          json(res, 404, { error: 'unknown_endpoint' });
+        } catch (error) {
+          console.warn('[flight-history] request failed:', error?.message || error);
+          json(res, 500, { error: 'history_error' });
+        }
+      });
+    },
+  };
+}
+
 function openSkyProxy() {
   return {
     name: 'opensky-proxy',
@@ -8300,6 +8432,7 @@ export default defineConfig(({ mode }) => {
   const env = { ...process.env };
   return {
     plugins: [
+      flightHistoryProxy(),
       cesium(),
       openSkyProxy(),
       celestrakProxy(),

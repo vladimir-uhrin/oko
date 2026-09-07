@@ -21,11 +21,12 @@ const tr = (strings) => (k, vars) => { let s = strings[k] || k; for (const [a, b
 test('položky kontaktu: lietadlo sleduj/prestaň + kokpit + kópia ICAO; loď vyber + MMSI; satelit sleduj + NORAD', () => {
   const t = tr(SK_STRINGS);
   const plane = buildContactMenuItems({ layerId: 'flights', id: '39de4f', isTracked: false, canCockpit: false }, t);
-  assert.deepEqual(plane.map((i) => i.id), ['track', 'cockpit', 'copy-id']);
+  assert.deepEqual(plane.map((i) => i.id), ['track', 'cockpit', 'history', 'copy-id']);
   assert.equal(plane[1].disabled, true, 'kokpit bez sledovania je vypnutý');
-  assert.match(plane[2].label, /39DE4F|39de4f/);
+  assert.equal(plane[2].label, 'História letov', '2026-09-07: história pred kópiou ICAO');
+  assert.match(plane[3].label, /39DE4F|39de4f/);
   const tracked = buildContactMenuItems({ layerId: 'military', id: 'ae1234', isTracked: true, canCockpit: true }, t);
-  assert.deepEqual(tracked.map((i) => i.id), ['untrack', 'cockpit', 'copy-id']);
+  assert.deepEqual(tracked.map((i) => i.id), ['untrack', 'cockpit', 'history', 'copy-id']);
   assert.equal(tracked[1].disabled, false);
   const vessel = buildContactMenuItems({ layerId: 'ais-live-vessels', id: '244660123' }, t);
   assert.deepEqual(vessel.map((i) => i.id), ['select', 'copy-id']);
@@ -163,7 +164,7 @@ test('tripwire: ui.js viaže contextmenu na plátno aj riadky vrstiev, kurzor je
   assert.equal((css.match(/cursor: pointer;/g) || []).length, 0, 'žiadny holý cursor: pointer — všetko cez --cursor-pointer');
   assert.ok((css.match(/cursor: var\(--cursor-pointer\)/g) || []).length >= 50, 'pointer pravidlá prepísané na premennú');
   assert.match(css, /\.context-menu \{/);
-  for (const key of ['ctx.track-aircraft', 'ctx.untrack', 'ctx.cockpit', 'ctx.copy-icao', 'ctx.select-vessel', 'ctx.copy-mmsi', 'ctx.track-satellite', 'ctx.copy-norad', 'ctx.fly-here', 'ctx.copy-coords', 'ctx.bookmark-view', 'ctx.reset-globe', 'ctx.layer-on', 'ctx.layer-off', 'ctx.layer-solo', 'ctx.layers-all-off', 'ctx.copied']) {
+  for (const key of ['ctx.track-aircraft', 'ctx.untrack', 'ctx.cockpit', 'ctx.history', 'ctx.copy-icao', 'ctx.select-vessel', 'ctx.copy-mmsi', 'ctx.track-satellite', 'ctx.copy-norad', 'ctx.fly-here', 'ctx.copy-coords', 'ctx.bookmark-view', 'ctx.reset-globe', 'ctx.layer-on', 'ctx.layer-off', 'ctx.layer-solo', 'ctx.layers-all-off', 'ctx.copied']) {
     assert.ok(EN_STRINGS[key] && SK_STRINGS[key], `chýba ${key}`);
   }
 });

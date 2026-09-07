@@ -50,6 +50,8 @@ export function buildContactMenuItems(contact, t) {
   }
   if (kind === 'aircraft') {
     items.push({ id: 'cockpit', label: t('ctx.cockpit'), icon: 'flight', disabled: contact.canCockpit === false });
+    // História letov (2026-09-07): spätné vyhľadanie a prehratie tohto draku.
+    items.push({ id: 'history', label: t('ctx.history'), icon: 'history' });
   }
   items.push({
     id: 'copy-id',

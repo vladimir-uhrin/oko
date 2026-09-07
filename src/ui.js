@@ -51,6 +51,7 @@ import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js
 import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
 import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
+import { installHistoryPanel } from './historyPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
@@ -242,6 +243,7 @@ const SHARE_PANEL_STATE_SPECS = Object.freeze([
   { id: 'cctv-panel' },
   { id: 'radio-panel' },
   { id: 'scene-panel' },
+  { id: 'history-panel' },
   { id: 'global-context-panel' },
   { id: 'pp-toggles' },
   { id: 'param-slider-panel' },
@@ -251,6 +253,7 @@ const COCKPIT_ENTRY_COLLAPSE_PANEL_IDS = Object.freeze([
   'data-panel',
   'cctv-panel',
   'scene-panel',
+  'history-panel',
   'pp-toggles',
   'global-context-panel',
   'radio-panel',
@@ -2913,6 +2916,19 @@ export class StyleManager {
     installNaturalEventCard(viewer, {
       container: document.body,
       onClosed: () => this._dataManager?.layers?.get('natural-events')?.module?.clearSelection?.(),
+    });
+    // História letov (2026-09-07, historyPanel.js): vyhľadanie a prehratie
+    // úseku zo záznamu proxy; „TERAZ ŽIVO" prepne na živé sledovanie hexu.
+    this._historyPanel = installHistoryPanel({
+      viewer,
+      t,
+      onTrackLive: (icao24) => {
+        const flights = this._dataManager?.layers?.get('flights')?.module;
+        if (!flights?.trackById?.(icao24, { origin: 'user' })) {
+          this._dataManager?.layers?.get('military')?.module?.trackById?.(icao24, { origin: 'user' });
+        }
+      },
+      setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
     });
     // Vlajky na kartách sa ťahajú lenivo — dotiahnutá vlajka si vyžiada
     // snímok, nech sa objaví aj na nehybnej kamere (render governor).
@@ -10605,6 +10621,12 @@ export class StyleManager {
       case 'cockpit':
         void this.cockpitView?.requestEntry?.();
         break;
+      case 'history': {
+        const summary = module.getContactSummary?.(pickedId);
+        this._historyPanel?.open({ query: String(pickedId) });
+        void summary;
+        break;
+      }
       case 'copy-id':
         void this._copyTextToClipboard(pickedId);
         break;
