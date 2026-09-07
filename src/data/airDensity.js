@@ -32,8 +32,11 @@ const pngUrlDefault = new URL('./local_data/air_density/air-density.png', import
 export const AIR_DENSITY_ALPHA_LIGHT = 0.85;
 export const AIR_DENSITY_ALPHA_DARK = 0.45;
 const AIR_ALPHAS = Object.freeze({ light: AIR_DENSITY_ALPHA_LIGHT, dark: AIR_DENSITY_ALPHA_DARK });
-export const AIR_DENSITY_FADE_IN_M = 4_000_000;
-export const AIR_DENSITY_FADE_OUT_M = 1_200_000;
+// Zoom-fade (2026-09-07, mriežka 0,05° ≈ 5,6 km): plášť znesie bližší pohľad
+// než lode (0,25°), tak sa neskrýva už od 1 200 km — plný od 1 500 km, preč
+// pod 400 km, kde už hovoria živé lietadlá.
+export const AIR_DENSITY_FADE_IN_M = 1_500_000;
+export const AIR_DENSITY_FADE_OUT_M = 400_000;
 const AIR_FADE = Object.freeze({ fadeInM: AIR_DENSITY_FADE_IN_M, fadeOutM: AIR_DENSITY_FADE_OUT_M });
 
 /**

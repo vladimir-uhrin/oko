@@ -58,9 +58,14 @@ export const HEAT_SEPARATOR_HEX = 0x0e7f7c9d;
 export const HEAT_INFO_LAT_MIN = 1 << 30;
 export const HEAT_DEG_SCALE = 1e6;
 
-const CELL_DEG = 0.25;
-const COLS = Math.round(360 / CELL_DEG); // 1440
-const ROWS = Math.round(180 / CELL_DEG); // 720
+// Cell size: 0.25° shipped first (1440×720). 2026-09-07 the user asked for a
+// SHARP drape ("not sharp on the other maps") — AIR_DENSITY_CELL_DEG=0.05
+// gives 7200×3600 (5.6 km cells; RGBA texture ≈ 104 MB on the GPU, PNG a
+// few MB because most cells are transparent). Same counts, same
+// normalisation, same bridging — only the bin size changes.
+const CELL_DEG = Number(process.env.AIR_DENSITY_CELL_DEG) > 0 ? Number(process.env.AIR_DENSITY_CELL_DEG) : 0.25;
+const COLS = Math.round(360 / CELL_DEG); // 1440 at 0.25°, 7200 at 0.05°
+const ROWS = Math.round(180 / CELL_DEG); // 720 at 0.25°, 3600 at 0.05°
 /** Percentile floor/ceiling for the log normalisation (see ship script). */
 const FLOOR_PERCENTILE = 0.6;
 const CEILING_PERCENTILE = 0.995;
@@ -313,7 +318,7 @@ async function main() {
 - **Built:** ${built} by \`scripts/build-air-density.mjs\`.
 - Input: ${files.length} gzip slices (≈910 MB), ${meta.stats.records.toLocaleString('en-US')} records → ${meta.stats.positions.toLocaleString('en-US')} positions from ${aircraft.size.toLocaleString('en-US')} airframes; skipped ${meta.stats.separators} separators, ${meta.stats.infoEntries.toLocaleString('en-US')} info entries, ${meta.stats.placeholders} placeholders, ${meta.stats.badRecords} out-of-range.
 - Record format: 16 B \`int32 hex, int32 lat, int32 lon, int16 alt, int16 gs\`, degrees × 1e6. Info entries are \`lat >= 2^30\` on the SIGNED value — the naive bit-30 mask also matches negative latitudes and erased the southern hemisphere on the first attempt.
-- Transform: positions **counted** into a 0.25° grid (${COLS}×${ROWS}), then **log-normalised between a floor and a ceiling**: floor = ${(FLOOR_PERCENTILE * 100).toFixed(0)}th percentile of non-zero cells (${Math.round(floor).toLocaleString('en-US')} samples → transparent background), ceiling = ${(CEILING_PERCENTILE * 100).toFixed(1)}th (${Math.round(ceiling).toLocaleString('en-US')}; raw max ${Math.round(max).toLocaleString('en-US')}, clamped so hubs cannot dim the routes). Painted as RGBA, amber ramp, alpha = intensity^${ALPHA_GAMMA}.
+- Transform: positions **counted** into a ${CELL_DEG}° grid (${COLS}×${ROWS}), then **log-normalised between a floor and a ceiling**: floor = ${(FLOOR_PERCENTILE * 100).toFixed(0)}th percentile of non-zero cells (${Math.round(floor).toLocaleString('en-US')} samples → transparent background), ceiling = ${(CEILING_PERCENTILE * 100).toFixed(1)}th (${Math.round(ceiling).toLocaleString('en-US')}; raw max ${Math.round(max).toLocaleString('en-US')}, clamped so hubs cannot dim the routes). Painted as RGBA, amber ramp, alpha = intensity^${ALPHA_GAMMA}.
 
 ## Content
 - **Grid:** ${COLS} × ${ROWS} cells of ${CELL_DEG}°

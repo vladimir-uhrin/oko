@@ -228,8 +228,10 @@ test('lety: tripwire — register (token j pred letiskami), localLayers, i18n EN
 
   const meta = JSON.parse(readFileSync(new URL('./local_data/air_density/air-density.json', import.meta.url), 'utf8'));
   assert.equal(meta.license, 'ODbL 1.0 + CC0 1.0');
-  assert.equal(meta.grid.cols, 1440);
-  assert.equal(meta.grid.rows, 720);
+  // 2026-09-07: prebuild na 0,05° (používateľ: „na iných mapách nie sú ostré") — 7200×3600, 5,6 km bunky.
+  assert.equal(meta.grid.cols, 7200);
+  assert.equal(meta.grid.rows, 3600);
+  assert.equal(meta.grid.cellDeg, 0.05);
   assert.equal(meta.stats.badRecords, 0);
   assert.ok(meta.stats.positions > 10_000_000, 'desiatky miliónov 10-s vzoriek za deň');
   assert.ok(meta.stats.bridged.gaps > 1000, 'oceán premostený');
@@ -239,7 +241,7 @@ test('lety: tripwire — register (token j pred letiskami), localLayers, i18n EN
   assert.match(meta.valueMeaning, /INTERPOLATED/);
   const png = readFileSync(new URL('./local_data/air_density/air-density.png', import.meta.url));
   assert.equal(png.toString('ascii', 1, 4), 'PNG');
-  assert.ok(png.length < 1.5 * 1024 * 1024);
+  assert.ok(png.length < 4 * 1024 * 1024, "0,05° mriežka: 2,5 MB (0,25° mala 97–276 KB)");
   for (const f of ['LICENSE-ODbL.txt', 'LICENSE-cc0.txt', 'README-adsblol.txt']) {
     assert.ok(readFileSync(new URL(`./local_data/air_density/${f}`, import.meta.url)).length > 100, `${f} je v bundli (ODbL notice retention)`);
   }
