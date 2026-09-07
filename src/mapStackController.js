@@ -291,6 +291,8 @@ export class MapStackController {
     this._nightLightsLayer = null;
     this._nightLightsProvider = null;
     this._nightLightsEnabled = false;
+    /** Svetlá miest (Black Marble) zvlášť od Deň/noc — vypínač 2026-09-07. */
+    this._cityLightsEnabled = true;
     /** Remover preRender listenera, ktorý tlmí svetlá s výškou (viď _applyNightLightsFade). */
     this._nightLightsFadeRemover = null;
     this._imageryProviders = new Map();
@@ -483,6 +485,20 @@ export class MapStackController {
     return this._nightLightsEnabled;
   }
 
+  /**
+   * Svetlá miest zvlášť (2026-09-07): Deň/noc (setNightLightsEnabled) je
+   * hlavný prepínač zotmenia; tento vypína len svetlá — na glóbuse vrstvu
+   * Black Marble, na fotoreáli zosilnenie svetiel v shaderi (zotmenie ostáva).
+   * @param {boolean} enabled
+   * @returns {boolean}
+   */
+  setCityLightsEnabled(enabled) {
+    this._cityLightsEnabled = enabled !== false;
+    this._syncNightLightsLayer(this.getActiveStack());
+    governorRequestRender("night-lights");
+    return this._cityLightsEnabled;
+  }
+
   /** Je vrstva nočných svetiel naozaj v scéne? (QA/testy, nie stav prepínača.) */
   hasNightLightsLayer() {
     return !!this._nightLightsLayer;
@@ -502,8 +518,11 @@ export class MapStackController {
   _syncNightLightsLayer(stack) {
     // Fotoreál: glóbus je skrytý, tak deň/noc ide cez customShader na
     // tilesete (photorealNight.js) — ten istý prepínač, iná cesta.
-    applyPhotorealNight(this.googleTileset, this._nightLightsEnabled && stack?.kind === "photoreal", { shaderFactory: this._nightShaderFactory });
-    const wanted = this._nightLightsEnabled && !!stack && stack.kind !== "photoreal";
+    applyPhotorealNight(this.googleTileset, this._nightLightsEnabled && stack?.kind === "photoreal", {
+      shaderFactory: this._nightShaderFactory,
+      lights: this._cityLightsEnabled,
+    });
+    const wanted = this._nightLightsEnabled && this._cityLightsEnabled && !!stack && stack.kind !== "photoreal";
     if (this._nightLightsLayer) {
       this.viewer.imageryLayers.remove(this._nightLightsLayer, false);
       if (!wanted) this._nightLightsLayer = null;

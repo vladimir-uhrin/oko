@@ -277,6 +277,21 @@ function layeredViewer({ googleTileset = null } = {}) {
   };
 }
 
+test('svetlá miest zvlášť (2026-09-07): vypnutie odoberie vrstvu, Deň/noc ostáva; zapnutie ju vráti navrch', async () => {
+  const { viewer, layers } = layeredViewer();
+  const controller = new MapStackController(viewer, {});
+  await controller._activateGlobeStack(MAP_STACKS.find((s) => s.id === 'osm'), null);
+  controller.setNightLightsEnabled(true);
+  assert.equal(controller.hasNightLightsLayer(), true);
+  assert.equal(controller.setCityLightsEnabled(false), false);
+  assert.equal(controller.hasNightLightsLayer(), false, 'svetlá preč');
+  assert.equal(controller._nightLightsEnabled, true, 'Deň/noc sa nevypol');
+  assert.equal(layers.length, 1);
+  assert.equal(controller.setCityLightsEnabled(true), true);
+  assert.equal(controller.hasNightLightsLayer(), true);
+  assert.equal(layers.at(-1), controller._nightLightsLayer, 'späť navrch');
+});
+
 test('nočné svetlá pribudnú nad podklad a ostanú navrchu aj po prepnutí stacku', async () => {
   const { viewer, layers } = layeredViewer();
   const controller = new MapStackController(viewer, {});

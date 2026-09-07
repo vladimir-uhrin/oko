@@ -134,7 +134,7 @@ export function buildPhotorealNightShader({
  * @param {() => object} [deps.shaderFactory]
  * @returns {boolean} je shader nasadený?
  */
-export function applyPhotorealNight(tileset, enabled, { shaderFactory = buildPhotorealNightShader } = {}) {
+export function applyPhotorealNight(tileset, enabled, { shaderFactory = buildPhotorealNightShader, lights = true } = {}) {
   if (!tileset || typeof tileset !== 'object') return false;
   if (!enabled) {
     if (tileset.customShader && tileset.customShader === tileset.gevNightShader) tileset.customShader = undefined;
@@ -142,7 +142,27 @@ export function applyPhotorealNight(tileset, enabled, { shaderFactory = buildPho
   }
   if (!tileset.gevNightShader) tileset.gevNightShader = shaderFactory();
   if (tileset.customShader !== tileset.gevNightShader) tileset.customShader = tileset.gevNightShader;
+  syncPhotorealLights(tileset.gevNightShader, lights);
   return true;
+}
+
+/** Zosilnenie svetiel podľa vypínača: vypnuté = 0 (zotmenie ostáva). Pure. */
+export function photorealLightsGain(lights) {
+  return lights === false ? [0, 0] : [PHOTOREAL_NIGHT_LIGHTS_GAIN.near, PHOTOREAL_NIGHT_LIGHTS_GAIN.far];
+}
+
+/**
+ * Vypínač svetiel miest na fotoreáli (2026-09-07, používateľ: „svetlá miest
+ * daj niekde na vypínač, je to rušivé" — 4096 px textúra Black Marble
+ * zblízka vyzerá ako biele fľaky/ľadovce). Zotmenie Deň/noc ostáva, len
+ * uniform u_lightsGain ide na nulu; shader sa neprestavuje.
+ */
+export function syncPhotorealLights(shader, lights) {
+  if (!shader || shader.gevLights === (lights !== false)) return;
+  const [near, far] = photorealLightsGain(lights);
+  if (typeof shader.setUniform === 'function') shader.setUniform('u_lightsGain', new Cesium.Cartesian2(near, far));
+  else if (shader.uniforms?.u_lightsGain) shader.uniforms.u_lightsGain.value = new Cesium.Cartesian2(near, far);
+  shader.gevLights = lights !== false;
 }
 
 /** Je na tilesete náš shader? (QA/testy) */

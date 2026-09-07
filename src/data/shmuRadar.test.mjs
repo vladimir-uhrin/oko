@@ -1,4 +1,5 @@
 import test from 'node:test';
+import shmuRadarLayer from './shmuRadar.js';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -170,15 +171,20 @@ test('radar legend: model tracks the palette, markup and clean-view hooks pinned
     assert.ok(stop.css.startsWith(`rgba(${r}, ${g}, ${b},`), `stop ${i} color drifted from the palette`);
   }
 
-  // Legenda žije v markup/ui/css — pinni háčiky, nech ju refactor nezhodí.
+  // 2026-09-07: legenda už NEPLÁVA nad plochou (používateľ: „odstráň,
+  // nepatrí tam") — je legendou riadku vrstvy v paneli cez getRowControls.
   const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
-  assert.match(html, /id="radar-legend"[^>]*hidden/);
+  assert.doesNotMatch(html, /id="radar-legend"/, 'plávajúca legenda je preč z markupu');
   const ui = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
-  assert.ok(ui.includes("import { radarLegendStops } from './data/shmuRadarGrid.js'"), 'legend must be built from the palette, not hand-copied colors');
-  assert.ok(ui.includes('this._syncRadarLegend(change);'), 'legend must ride the data-manager subscription');
+  assert.ok(!ui.includes('_syncRadarLegend'), 'ui.js legendu nekreslí');
+  assert.ok(!ui.includes("from './data/shmuRadarGrid.js'"), 'paleta patrí vrstve, nie ui');
   const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
-  assert.match(css, /body\.ui-clean-view #radar-legend/);
-  assert.match(css, /body\.recording-mode #radar-legend/);
+  assert.doesNotMatch(css, /#radar-legend/);
+  const controls = shmuRadarLayer.getRowControls();
+  assert.equal(controls.legend.length, stops.length, 'legenda riadku = paleta');
+  assert.equal(controls.legend[0].label, `${ZMAX_MIN_DISPLAY_DBZ} dBZ`);
+  assert.equal(controls.legend[0].color, stops[0].css);
+  assert.equal(controls.legend[0].count, '', 'gradient, nie počty');
 });
 
 test('frame animator: steps through frames, holds on newest, inert for ≤1 frame', () => {

@@ -1,5 +1,6 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
+import { radarLegendStops } from './shmuRadarGrid.js';
 
 /**
  * SHMÚ precipitation radar overlay — Slovak 5-minute zmax composite (OKO).
@@ -330,6 +331,19 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
       _echoPixels = 0;
       _lastUpdate = null;
       _lastError = null;
+    },
+
+    /**
+     * Stupnica dBZ ako legenda RIADKU vrstvy v paneli (2026-09-07). Do 09-07
+     * plávala ako karta v ľavom dolnom rohu nad celou plochou — používateľ:
+     * „legendu odstráň, nepatrí tam" (svietila aj nad Talianskom, kde radar
+     * nič nepokrýva). Farby priamo z palety rastra (radarLegendStops), čas a
+     * STALE hlási štandardný meta riadok panela z getStats().
+     */
+    getRowControls() {
+      return {
+        legend: radarLegendStops().map((stop) => ({ color: stop.css, label: `${stop.min} dBZ`, count: '' })),
+      };
     },
 
     getStats() {

@@ -104,7 +104,6 @@ import radioLayer, {
 } from './data/radio.js';
 import bikeshareLayer from './data/bikeshare.js';
 import aisLiveVesselsLayer from './data/aisLiveVessels.js';
-import { radarLegendStops } from './data/shmuRadarGrid.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import militaryInstallationsLayer from './data/militaryInstallations.js';
 import rocketLaunchesLayer from './data/rocketLaunches.js';
@@ -593,6 +592,17 @@ const CCTV_CAL_FIELDS = {
     toPatch: (value) => ({ offsetEastM: value }),
   },
 };
+
+/** localStorage kľúč vypínača svetiel miest (2026-09-07); default zapnuté. */
+const NIGHT_LIGHTS_STORAGE_KEY = 'oko-night-lights';
+function readStoredNightLights() {
+  try {
+    if (typeof localStorage === 'undefined') return true;
+    return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
 
 function formatCockpitBriefAge(value) {
   const timestamp = Date.parse(value);
@@ -2838,6 +2848,9 @@ export class StyleManager {
     this._dayNightBtn = document.getElementById('daynight-toggle');
     this._unitsBtn = document.getElementById('units-toggle');
     this._dayNightEnabled = true;
+    // Svetlá miest zvlášť (2026-09-07): per zariadenie, default zapnuté.
+    this._nightLightsBtn = document.getElementById('night-lights-toggle');
+    this._nightLightsEnabled = readStoredNightLights();
     // Plátno (2D Mercator) — DEFAULT-OFF, guľa je produkt. Session-only.
     this._flatMapBtn = document.getElementById('flatmap-toggle');
     this._flatMapEnabled = false;
@@ -2920,6 +2933,7 @@ export class StyleManager {
     this._initHUDToggle();
     this._initModels3dToggle();
     this._initDayNightToggle();
+    this._initNightLightsToggle();
     this._initUnitsToggle();
     this._initContextMenus();
     this._initFlatMapToggle();
@@ -4639,70 +4653,6 @@ export class StyleManager {
   }
 
   /**
-   * Build the SHMÚ radar legend chip once (colors straight from the
-   * rasterizer's palette via radarLegendStops — no hand-copied hex values).
-   * @returns {HTMLElement|null}
-   */
-  _ensureRadarLegend() {
-    const root = document.getElementById('radar-legend');
-    if (!root || root.dataset.built === 'true') return root;
-    root.dataset.built = 'true';
-    const stops = radarLegendStops();
-    const title = document.createElement('span');
-    title.className = 'radar-legend-title';
-    title.setAttribute('data-radar-legend-title', '');
-    title.textContent = 'SHMÚ RADAR'; // vlastné meno produktu — nelokalizuje sa
-    const bar = document.createElement('div');
-    bar.className = 'radar-legend-bar';
-    for (const stop of stops) {
-      const cell = document.createElement('span');
-      cell.style.background = stop.css;
-      bar.appendChild(cell);
-    }
-    const ticks = document.createElement('div');
-    ticks.className = 'radar-legend-ticks';
-    for (const stop of stops) {
-      const tick = document.createElement('span');
-      tick.textContent = String(stop.min);
-      ticks.appendChild(tick);
-    }
-    const unit = document.createElement('span');
-    unit.className = 'radar-legend-unit';
-    unit.textContent = 'dBZ';
-    ticks.appendChild(unit);
-    root.append(title, bar, ticks);
-    return root;
-  }
-
-  /**
-   * Keep the radar legend in lockstep with the shmu-radar layer: visible
-   * exactly while the layer is enabled, title carrying the product's valid
-   * time and its STALE state. Driven from the data-manager subscription —
-   * 'visibility*' events flip it, 'refresh' events retime it.
-   * @param {object} change - Data-manager change event.
-   * @returns {void}
-   */
-  _syncRadarLegend(change) {
-    const type = String(change?.type || '');
-    if (change?.layerId !== 'shmu-radar' && !type.startsWith('visibility')) return;
-    const root = this._ensureRadarLegend();
-    if (!root) return;
-    const enabled = this._dataManager?.isEnabled?.('shmu-radar') === true;
-    root.hidden = !enabled;
-    root.setAttribute('aria-hidden', String(!enabled));
-    if (!enabled) return;
-    const module = this._dataManager?.layers?.get?.('shmu-radar')?.module;
-    const stats = module?.getStats?.() || {};
-    const title = root.querySelector('[data-radar-legend-title]');
-    if (!title) return;
-    const time = Number.isFinite(stats.lastUpdate)
-      ? new Date(stats.lastUpdate).toISOString().slice(11, 16) + ' UTC'
-      : t('radar.awaiting-data').toUpperCase();
-    title.textContent = `SHMÚ RADAR · ${time}`;
-    title.dataset.stale = String(stats.stale === true);
-  }
-
-  /**
    * Connects the layer data manager for traffic sync, CCTV state subscription,
    * and layer enable/disable operations.
    * @param {object|null} dataManager - The DataManager instance, or null to detach.
@@ -4733,7 +4683,6 @@ export class StyleManager {
         if (String(change?.type || '').startsWith('visibility')) {
           this._handleContextLayerChange(change);
         }
-        this._syncRadarLegend(change);
         this._loadingFeedbackEvent = change;
         this._updateGlobalLoadingFeedback(performance.now());
       });
@@ -10483,6 +10432,37 @@ export class StyleManager {
   }
 
   /**
+   * Svetlá miest (2026-09-07, používateľ: „svetlá miest daj niekde na
+   * vypínač, je to rušivé"): NASA Black Marble na nočnej strane sa dá vypnúť
+   * bez vypnutia Deň/noc. Na glóbuse zmizne vrstva, na Google 3D ostane
+   * zotmenie, ale zosilnenie svetiel v shaderi ide na nulu — zblízka totiž
+   * 4096 px textúra vyzerá ako biele fľaky („ľadovce"). Per zariadenie.
+   */
+  _initNightLightsToggle() {
+    this._nightLightsBtn?.addEventListener('click', () => {
+      this._setNightLightsEnabled(!this._nightLightsEnabled);
+    });
+    this._setNightLightsEnabled(this._nightLightsEnabled);
+  }
+
+  _setNightLightsEnabled(enabled) {
+    this._nightLightsEnabled = enabled !== false;
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(NIGHT_LIGHTS_STORAGE_KEY, this._nightLightsEnabled ? '1' : '0');
+    } catch { /* súkromný režim */ }
+    this.mapStackController?.setCityLightsEnabled?.(this._nightLightsEnabled);
+    this._syncNightLightsButtonState();
+  }
+
+  _syncNightLightsButtonState() {
+    if (!this._nightLightsBtn) return;
+    this._nightLightsBtn.classList.toggle('active', this._nightLightsEnabled);
+    this._nightLightsBtn.setAttribute('aria-pressed', this._nightLightsEnabled ? 'true' : 'false');
+    // Bez Deň/noc nemajú svetlá kde svietiť — tlačidlo to povie, nezablokuje.
+    this._nightLightsBtn.classList.toggle('pp-toggle-btn--inert', !this._dayNightEnabled);
+  }
+
+  /**
    * Jednotky výšky a rýchlosti (2026-09-07): letecké (ft/FL, kts, ft/min)
    * ↔ metrické (m, km/h, m/s) pre kokpit, karty aj detekčné štítky. Voľba
    * je per zariadenie (localStorage, ako jazyk), prepína sa živo cez
@@ -10685,6 +10665,7 @@ export class StyleManager {
     // mapStackController — musí prežiť prepnutie podkladu a sadnúť navrch.
     this.mapStackController?.setNightLightsEnabled?.(this._dayNightEnabled);
     this._syncDayNightButtonState();
+    this._syncNightLightsButtonState();
   }
 
   _syncDayNightButtonState() {

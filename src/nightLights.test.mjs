@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import fs from 'node:fs';
 import * as Cesium from 'cesium';
 import {
@@ -81,4 +82,13 @@ test('vrstva svieti len v noci a tmavé pozadie snímky sa vyreže', () => {
 test('styleNightLightsLayer je bezpečný bez vrstvy', () => {
   assert.equal(styleNightLightsLayer(null), null);
   assert.equal(styleNightLightsLayer(undefined), null);
+});
+
+test('tripwire (2026-09-07): svetlá miest majú vlastný vypínač v paneli Zobrazenie, oddelený od Deň/noc', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /id="night-lights-toggle"[^>]*aria-pressed="true"/, 'tlačidlo existuje a default je zapnuté');
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /setCityLightsEnabled\?\.\(this\._nightLightsEnabled\)/, 'vypínač píše do controllera cez setCityLightsEnabled');
+  assert.match(ui, /setNightLightsEnabled\?\.\(this\._dayNightEnabled\)/, 'Deň/noc ostáva hlavným prepínačom');
+  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY = 'oko-night-lights'/, 'voľba per zariadenie');
 });

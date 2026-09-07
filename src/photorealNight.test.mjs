@@ -8,6 +8,7 @@ import {
   PHOTOREAL_NIGHT_FLOOR,
   PHOTOREAL_NIGHT_FRAGMENT,
   PHOTOREAL_NIGHT_LIGHTS_CUTOFF,
+  PHOTOREAL_NIGHT_LIGHTS_GAIN,
   PHOTOREAL_NIGHT_TEXTURE_URL,
   applyPhotorealNight,
   buildPhotorealNightShader,
@@ -82,6 +83,19 @@ test('applyPhotorealNight: jediný zapisovač customShader, recykluje inštanciu
   const foreign = { customShader: { id: 'foreign' }, gevNightShader: { id: 'ours' } };
   applyPhotorealNight(foreign, false, { shaderFactory: factory });
   assert.equal(foreign.customShader.id, 'foreign');
+  // Vypínač svetiel (2026-09-07): zotmenie ostáva, u_lightsGain ide na nulu
+  // cez setUniform; opätovné zapnutie vráti pôvodné zosilnenie; bez zmeny
+  // stavu sa uniform neprepisuje.
+  const calls = [];
+  const stub = { setUniform: (name, value) => calls.push([name, value.x, value.y]) };
+  const lit = { customShader: undefined };
+  applyPhotorealNight(lit, true, { shaderFactory: () => stub, lights: false });
+  assert.deepEqual(calls, [['u_lightsGain', 0, 0]]);
+  applyPhotorealNight(lit, true, { shaderFactory: () => stub, lights: false });
+  assert.equal(calls.length, 1, 'bez zmeny stavu nič');
+  applyPhotorealNight(lit, true, { shaderFactory: () => stub, lights: true });
+  assert.deepEqual(calls.at(-1), ['u_lightsGain', PHOTOREAL_NIGHT_LIGHTS_GAIN.near, PHOTOREAL_NIGHT_LIGHTS_GAIN.far]);
+  assert.equal(lit.customShader, stub, 'shader ostal nasadený — zotmenie beží');
   assert.equal(applyPhotorealNight(null, true), false);
   assert.equal(applyPhotorealNight(undefined, false), false);
 });
