@@ -118,6 +118,12 @@ test('Tycho pozadie (2026-09-07): keď sú steny dodané, kreslia sa pod body st
   assert.equal(TYCHO_FACE_FILES.negativeZ, 'mz');
   assert.match(tychoFaceUrl('positiveX'), /Assets\/Textures\/SkyBox\/tycho2t3_80_px\.jpg$/);
   assert.ok(TYCHO_BACKGROUND_ALPHA > 0.3 && TYCHO_BACKGROUND_ALPHA < 0.85, 'pozadie stlmené, nie plné');
+  // 2026-09-08 („jemnejšie, viac, ostré"): bez rozmazania (fľaky) a slabšie než body.
+  const src = readFileSync(new URL('./starfield.js', import.meta.url), 'utf8');
+  assert.match(src, /export const TYCHO_BACKGROUND_BLUR_PX = 0;/);
+  assert.match(src, /export const STARFIELD_STAR_COUNT = 18000;/);
+  assert.match(src, /ctx\.fillRect\(x, y, 1, 1\);/, 'slabé hviezdy 1 px');
+  assert.match(src, /const haloR = strong \? 5 : 3;/, 'tesné halo');
 });
 
 test('inštalácia: načíta Tycho steny, vymení skybox a vie ho vrátiť (aj pred dokončením); bez scény/dokumentu no-op', async () => {

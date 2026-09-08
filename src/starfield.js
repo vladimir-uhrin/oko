@@ -6,9 +6,9 @@ import * as Cesium from 'cesium';
  * Cesium má defaultný SkyBox z JPEG kociek Tycho-2 po 1024 px na stenu:
  * pri 60° zornom poli a 900 px výške sa každá stena roztiahne cez ~1,3
  * obrazovky, hviezdy sú mäkké fľaky s JPEG šumom. Tento modul postaví
- * VLASTNÝ skybox: šesť plátien po 2048 px, na ktoré nakreslí ~9 000
+ * VLASTNÝ skybox: šesť plátien po 2048 px, na ktoré nakreslí 18 000
  * bodových hviezd s rozdelením jasu ako na oblohe (veľa slabých, málo
- * jasných) — 1 px body, jasné 2–3 px s nepatrným halo, mierne farebné
+ * jasných) — 1 px body, stredné 2 px, jasné malé jadro s tesným halo, mierne farebné
  * (modrobiela / biela / žltkastá). Nie je to hviezdny katalóg (súhvezdia
  * nesedia — Cesium ich ani predtým vo výreze nesľubovalo pre laika),
  * je to čistá obloha bez rozmazania, deterministická zo semienka.
@@ -20,7 +20,10 @@ import * as Cesium from 'cesium';
  */
 
 export const STARFIELD_FACE_PX = 2048;
-export const STARFIELD_STAR_COUNT = 11000;
+// 2026-09-08 (používateľ: „jemnejšie a trocha viac a ostré"): 11 000 → 18 000
+// hviezd, menšie body (slabé 1 px, stredné 2 px), jasné s malým jadrom a tesným
+// halo; Tycho pozadie bez rozmazania a slabšie (fľaky boli rozmazané zhluky).
+export const STARFIELD_STAR_COUNT = 18000;
 export const STARFIELD_SEED = 20260907;
 export const STARFIELD_FACES = Object.freeze(['positiveX', 'negativeX', 'positiveY', 'negativeY', 'positiveZ', 'negativeZ']);
 /**
@@ -34,8 +37,9 @@ export const STARFIELD_FACES = Object.freeze(['positiveX', 'negativeX', 'positiv
 export const TYCHO_FACE_FILES = Object.freeze({
   positiveX: 'px', negativeX: 'mx', positiveY: 'py', negativeY: 'my', positiveZ: 'pz', negativeZ: 'mz',
 });
-export const TYCHO_BACKGROUND_ALPHA = 0.6;
-export const TYCHO_BACKGROUND_BLUR_PX = 1.2;
+export const TYCHO_BACKGROUND_ALPHA = 0.38;
+/** 0 = bez rozmazania (rozmazanie robilo z jasných Tycho hviezd sivé fľaky). */
+export const TYCHO_BACKGROUND_BLUR_PX = 0;
 /** URL Tycho steny v Cesium assetoch (rovnaká cesta ako predvolený SkyBox). */
 export function tychoFaceUrl(face) {
   return Cesium.buildModuleUrl(`Assets/Textures/SkyBox/tycho2t3_80_${TYCHO_FACE_FILES[face]}.jpg`);
@@ -152,7 +156,7 @@ export function paintStarfieldFaces(doc, { facePx = STARFIELD_FACE_PX, count = S
     const bg = backgrounds?.[face];
     if (bg && typeof ctx.drawImage === 'function') {
       ctx.save?.();
-      if ('filter' in ctx) ctx.filter = `blur(${TYCHO_BACKGROUND_BLUR_PX}px)`;
+      if ('filter' in ctx && TYCHO_BACKGROUND_BLUR_PX > 0) ctx.filter = `blur(${TYCHO_BACKGROUND_BLUR_PX}px)`;
       ctx.globalAlpha = TYCHO_BACKGROUND_ALPHA;
       ctx.drawImage(bg, 0, 0, facePx, facePx);
       ctx.restore?.();
@@ -168,19 +172,21 @@ export function paintStarfieldFaces(doc, { facePx = STARFIELD_FACE_PX, count = S
     const y = Math.floor(v * facePx);
     const [r, g, b] = STAR_TINTS[star.tint];
     const br = star.brightness;
+    // Veľkosti v px steny (2048 px ≈ 1,3 px steny na px obrazovky pri 60° FOV):
+    // slabé 1 px, stredné 2 px, jasné jadro r 1,4 / 2,0 px s halo 3 / 5 px.
     if (br < 0.3) {
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.55 + br * 1.5})`;
-      ctx.fillRect(x, y, 2, 2);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.5 + br * 1.5})`;
+      ctx.fillRect(x, y, 1, 1);
     } else if (br < 0.7) {
-      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      ctx.fillRect(x, y, 3, 3);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.8 + (br - 0.3) * 0.5})`;
+      ctx.fillRect(x, y, 2, 2);
     } else {
-      const strong = br >= 0.92;
-      const core = strong ? 3.5 : 2.5;
-      const haloR = strong ? 10 : 6;
+      const strong = br >= 0.94;
+      const core = strong ? 2.0 : 1.4;
+      const haloR = strong ? 5 : 3;
       const halo = ctx.createRadialGradient(x + 1, y + 1, 0, x + 1, y + 1, haloR);
-      halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.75)`);
-      halo.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, 0.25)`);
+      halo.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.55)`);
+      halo.addColorStop(0.45, `rgba(${r}, ${g}, ${b}, 0.14)`);
       halo.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
       ctx.fillStyle = halo;
       ctx.fillRect(x + 1 - haloR, y + 1 - haloR, haloR * 2, haloR * 2);
