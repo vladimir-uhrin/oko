@@ -3242,7 +3242,7 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   background: rgba(57, 208, 255, 0.08);
   color: var(--accent);
   font: 10px var(--font-mono);
-  cursor: pointer;
+  cursor: var(--cursor-pointer);
 }
 .meteo-timeline-btn:hover,
 .meteo-timeline-btn[aria-pressed="true"] { background: rgba(57, 208, 255, 0.22); }
