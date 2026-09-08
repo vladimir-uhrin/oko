@@ -1,4 +1,4 @@
-# scripts/install-oko-server-task.ps1 — zaregistruje strážcu dev servera
+﻿# scripts/install-oko-server-task.ps1 — zaregistruje strážcu dev servera
 # (scripts/oko-server.ps1) ako úlohu Plánovača pre TOHTO používateľa: spustí sa
 # pri prihlásení, beží skryto, po páde ju plánovač do minúty reštartuje.
 #

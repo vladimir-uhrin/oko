@@ -1,4 +1,4 @@
-# scripts/oko-server.ps1 — strážca dev servera OKO (2026-09-08).
+﻿# scripts/oko-server.ps1 — strážca dev servera OKO (2026-09-08).
 #
 # Prečo: dev server spúšťaný z Claude aplikácie (Browser pane) žije len počas
 # relácie agenta — po jej skončení ho aplikácia zastaví, takže „keď prídem domov,
