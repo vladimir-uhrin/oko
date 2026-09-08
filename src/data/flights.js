@@ -63,6 +63,7 @@ import {
 import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
+import { acarsCardLine, cachedAcars, requestAcarsMessages } from './acarsMessages.js';
 import {
   applyTrackedCameraFrame,
   trackedModelScaleForPixelCap,
@@ -3799,6 +3800,7 @@ function _trackedCardModel(icao24) {
     progress: parts.progress,
     profile: parts.profile,
     alertLine: parts.alertLine,
+    acarsLine: parts.acarsLine,
     metaLine: parts.metaLine,
     nowMs: parts.nowMs,
     countryIso: parts.info.countryIso,
@@ -3883,6 +3885,9 @@ function _trackedLabelParts(icao24) {
     // Mini profil (2026-09-07): posledných 30 min výšky a rýchlosti z
     // vlastného riedkeho záznamu; null kým nie sú aspoň 3 vzorky / 2 min.
     profile: profileRowFromSamples(_profileStore.samples(icao24), nowMs, { translate: t }),
+    // ACARS/CPDLC správy (2026-09-08, airframes.io, LEN LOKÁLNE): posledná
+    // správa s počtom za 24 h; '' kým nič nevieme alebo je zdroj vypnutý.
+    acarsLine: acarsCardLine(cachedAcars(icao24)),
   };
 }
 
@@ -3893,6 +3898,11 @@ onUnitSystemChange(() => { if (_trackedIcao) _updateTrackedLabelModel(_trackedIc
 /** Write the explicit tracked presentation model and refresh its host entry. */
 function _updateTrackedLabelModel(icao24) {
   if (!_trackedEntity || icao24 !== _trackedIcao) return;
+  // ACARS správy sledovaného stroja (2026-09-08, len lokálne): dedup + TTL
+  // 60 s sú v module, takže volanie z každého poll-u nič nestojí; onDone
+  // príde LEN po skutočnom fetchi (nie z čerstvej cache), inak by sme sa
+  // tu točili. Karta sa po doručení prebuduje ešte raz.
+  void requestAcarsMessages(icao24, { onDone: () => _updateTrackedLabelModel(icao24) });
   _trackedEntity.gevLabelModel = _trackedCardModel(icao24);
   refreshTrackedReadout(_trackedEntity);
   // The readout and the context slot describe the same contact — refresh them

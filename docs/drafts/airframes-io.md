@@ -90,3 +90,15 @@ do airframes.io, a v OKO zobrazujeme lokálne. Pred verejným nasadením overiť
 2. Potom B: RTL-SDR + acarsdec/dumpvdl2 na Raspberry Pi alebo Linux VM, kŕmiť airframes.io,
    lokálny JSON do OKO proxy; po 7 dňoch požiadať o kľúč.
 3. Hlas veže ostáva mimo: LiveATC (súhlas, SK nepokryté) alebo lokálny SDR len pre seba.
+
+## Stav 2026-09-08 — bod A zapojený LEN LOKÁLNE
+
+- Používateľ: „1 a 3 implementuj ale iba lokálne" → `src/data/acarsMessages.js`, `airframesProxy()` v
+  `vite.config.js` (`/api/acars`), riadok v päte karty letu, sekcia „ACARS · DATALINK" v kokpite.
+- Poistky: `.env` `ACARS_MESSAGES=on` (default vypnuté) + proxy odpovedá len loopbacku (403 inak).
+  Verejné nasadenie ostáva zakázané, kým podmienky nie sú finálne a kým nepríde odpoveď
+  z api@airframes.io.
+- Namerané: `icao` upstream berie ILIKE (proxy posiela malé písmená); ten istý dopyt občas vráti
+  prechodné 404 „Cannot GET" → stale-if-error, nie „žiadne správy". Odpoveď na jednu správu má
+  ~2,8 kB (stanica aj s používateľom a IP) → zhutnenie na ~200 B, z feedera ostáva len ident stanice.
+- Bod B (vlastný prijímač) a mail na api@airframes.io: nezačaté.

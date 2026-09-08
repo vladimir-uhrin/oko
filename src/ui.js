@@ -82,6 +82,7 @@ import {
 import { cachedMetarCardLines, cachedMetarReport, cachedMetarWind, metarStationId, requestAirportMetar } from './data/airportWeather.js';
 import { lookupAirport } from './data/airportLookup.js';
 import { approachLines, approachState, destinationLookupCode, destinationWeatherLine } from './cockpitApproach.js';
+import { acarsCockpitRows, acarsStatusLine, cachedAcars, isAcarsDisabled, requestAcarsMessages } from './data/acarsMessages.js';
 import { addBookmark, loadBookmarks, removeBookmark, saveBookmarks } from './data/bookmarkStore.js';
 import {
   ALLOCATION_STRATEGIES,
@@ -784,6 +785,12 @@ class CockpitViewController {
     this.approachRunway = document.getElementById('cockpit-approach-runway');
     this.approachDistance = document.getElementById('cockpit-approach-distance');
     this.approachHeight = document.getElementById('cockpit-approach-height');
+    // ACARS/CPDLC správy (2026-09-08, airframes.io, LEN LOKÁLNE) — vlastná
+    // sekcia vedľa karty trasy, viditeľná len keď proxy hlási enabled.
+    this.acarsSection = document.getElementById('cockpit-acars');
+    this.acarsStatus = document.getElementById('cockpit-acars-status');
+    this.acarsList = document.getElementById('cockpit-acars-list');
+    this._acarsSignature = '';
     this._destinationCode = '';
     this._destinationAirport = null;
     this._destinationTexts = { metar: '', runway: '', distance: '', height: '' };
@@ -1205,6 +1212,58 @@ class CockpitViewController {
     }
   }
 
+  /**
+   * ACARS/VDL2/HFDL správy sledovaného stroja (2026-09-08, airframes.io,
+   * LEN LOKÁLNE — proxy odpovedá len loopbacku a len s ACARS_MESSAGES=on).
+   * Volané z každého HUD tiku cez updateRoute: modul deduplikuje (TTL 60 s),
+   * onDone príde len po skutočnom fetchi, DOM sa píše len pri zmene.
+   * @param {object|null} info getTrackedInfo() sledovaného stroja
+   */
+  updateAcars(info) {
+    const icao24 = String(info?.icao24 || '').trim().toLowerCase();
+    if (!this.acarsSection) return;
+    if (!icao24 || isAcarsDisabled()) {
+      this.renderAcars(null);
+      return;
+    }
+    void requestAcarsMessages(icao24, { onDone: () => this.renderAcars(icao24) });
+    this.renderAcars(icao24);
+  }
+
+  renderAcars(icao24) {
+    if (!this.acarsSection) return;
+    const entry = icao24 ? cachedAcars(icao24) : null;
+    if (!entry || entry.disabled) {
+      this.acarsSection.hidden = true;
+      this._acarsSignature = '';
+      return;
+    }
+    const rows = acarsCockpitRows(entry);
+    const status = acarsStatusLine(entry, t);
+    const signature = `${status}|${rows.map((r) => `${r.time}${r.label}${r.text}`).join('|')}`;
+    this.acarsSection.hidden = false;
+    if (signature === this._acarsSignature) return;
+    this._acarsSignature = signature;
+    if (this.acarsStatus) this.acarsStatus.textContent = status || '—';
+    if (this.acarsList) {
+      this.acarsList.replaceChildren(...rows.map((row) => {
+        const li = document.createElement('li');
+        li.dataset.kind = row.kind;
+        const time = document.createElement('span');
+        time.className = 'cockpit-acars-time';
+        time.textContent = `${row.time}Z`;
+        const label = document.createElement('span');
+        label.className = 'cockpit-acars-label';
+        label.textContent = `${row.label} · ${row.name}`;
+        const text = document.createElement('span');
+        text.className = 'cockpit-acars-text';
+        text.textContent = row.text || '—';
+        li.append(time, label, text);
+        return li;
+      }));
+    }
+  }
+
   renderApproach(state) {
     if (!this.approach) return;
     const lines = approachLines(state, t);
@@ -1345,6 +1404,7 @@ class CockpitViewController {
     this.hud?.style.removeProperty('--cockpit-utility-max-height');
     if (this.hud) this.hud.hidden = true;
     if (this.route) this.route.hidden = true;
+    this.renderAcars(null);
     this.clearPredictiveRoute();
     this.setVisionMode('optical');
     if (this.signalStream) this.signalStream.hidden = true;
@@ -1707,6 +1767,7 @@ class CockpitViewController {
     const destination = info?.route?.destination;
     const validDestination = Number.isFinite(destination?.lat) && Number.isFinite(destination?.lon);
     this.updateDestinationServices(info, validDestination ? destination : null);
+    this.updateAcars(info);
     const routeLabel = (airport) => [airport?.code, airport?.name].filter(Boolean).join(' · ') || t('cockpit.route-unknown');
     if (this.routeFrom) this.routeFrom.textContent = routeLabel(origin);
     if (this.routeTo) this.routeTo.textContent = routeLabel(destination);

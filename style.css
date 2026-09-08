@@ -3198,6 +3198,91 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   font-size: 7px;
   letter-spacing: 0.05em;
 }
+/* ACARS/CPDLC správy (2026-09-08, airframes.io, len lokálne) — sekcia pod kartou trasy. */
+.cockpit-acars {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 6px 8px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--cockpit-accent) 22%, transparent);
+  color: rgba(224, 247, 255, 0.9);
+  font: 7px/1.25 var(--font-mono);
+  letter-spacing: 0.09em;
+}
+.cockpit-acars[hidden] { display: none; }
+.cockpit-acars-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cockpit-acars-kicker {
+  flex: 0 0 auto;
+  color: var(--cockpit-accent);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+.cockpit-acars-heading small {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--cockpit-accent) 68%, rgba(244, 251, 255, 0.46));
+  font-size: 5px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cockpit-acars-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cockpit-acars-list li {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 1px 6px;
+  padding: 3px 6px;
+  border-left: 1px solid color-mix(in srgb, var(--cockpit-accent) 52%, transparent);
+  background: rgba(0, 7, 12, 0.3);
+}
+/* Riadenie (CPDLC, ADS-C, ATIS/povolenia) jantárovo ako priblíženie — to je „veža". */
+.cockpit-acars-list li[data-kind="atc"] {
+  border-left-color: #ffb347;
+  background: rgba(46, 24, 0, 0.42);
+}
+.cockpit-acars-list li[data-kind="atc"] .cockpit-acars-label { color: #ffb347; }
+.cockpit-acars-time {
+  color: rgba(224, 247, 255, 0.62);
+  font-size: 6px;
+  letter-spacing: 0.06em;
+}
+.cockpit-acars-label {
+  color: color-mix(in srgb, var(--cockpit-accent) 76%, white);
+  font-size: 6px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.cockpit-acars-text {
+  grid-column: 2;
+  overflow: hidden;
+  color: #fff;
+  font-size: 7px;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.cockpit-acars-credit {
+  color: rgba(224, 247, 255, 0.5);
+  font-size: 5px;
+  letter-spacing: 0.06em;
+}
+.cockpit-acars-credit a {
+  color: inherit;
+  text-decoration: none;
+}
+.cockpit-acars-credit a:hover { color: var(--cockpit-accent); }
 #view-switcher {
   position: fixed;
   z-index: 146;
@@ -4082,6 +4167,7 @@ body.cockpit-mode #view-switcher button {
   border-bottom: 0;
 }
 .cockpit-signal-window[data-collapsed="true"] .cockpit-route-card { display: none; }
+.cockpit-signal-window[data-collapsed="true"] .cockpit-acars { display: none; }
 .cockpit-signal-window[data-collapsed="true"] :is(.cockpit-brief-stage, .cockpit-signal-footer) {
   display: none;
 }

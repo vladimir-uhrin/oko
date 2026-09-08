@@ -144,3 +144,13 @@ test('karta: riadok progresu — zostatok a hodina len keď sú známe; podiel m
   assert.equal(progressRowFromProgress({ fractionDone: NaN }), null);
   assert.equal(progressRowFromProgress(null), null);
 });
+
+test('karta: ACARS riadok (airframes.io, len lokálne) ide do päty PRED riadok o dátach; prázdny sa vynechá', () => {
+  const model = buildTrackedCardModel({
+    callsign: 'DLH2ME',
+    acarsLine: 'ACARS 7 · 03:40 CPDLC ↑ ACFT→ATC · POS N33.6 W116.3',
+    metaLine: 'OpenSky Network · 3C6444',
+  });
+  assert.deepEqual(model.footer, ['ACARS 7 · 03:40 CPDLC ↑ ACFT→ATC · POS N33.6 W116.3', 'OpenSky Network · 3C6444']);
+  assert.deepEqual(buildTrackedCardModel({ callsign: 'X', acarsLine: '   ', metaLine: 'M' }).footer, ['M']);
+});

@@ -29,6 +29,7 @@
 import fs from 'node:fs';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
+import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAirframesMessage } from './src/data/acarsMessages.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -2868,6 +2869,154 @@ function adsbdbProxy() {
       });
     },
   };
+}
+
+/**
+ * airframes.io ACARS/VDL2/HFDL/SATCOM správy pre JEDEN sledovaný stroj
+ * (2026-09-08, používateľ: „1 a 3 implementuj ale iba lokálne"; štúdia
+ * docs/drafts/airframes-io.md, podmienky doslovne v DATA_SOURCES.md).
+ *
+ * LEN LOKÁLNE — dve poistky, obe úmyselné:
+ *   1. .env ACARS_MESSAGES=on (default VYPNUTÉ; bez neho /api/acars vracia
+ *      {enabled:false} a klient sa už nepýta),
+ *   2. odpovedá LEN loopbacku (127.0.0.1 / ::1) — verejné nasadenie by
+ *      porušilo „Bulk redistribution … requires prior arrangement" a tier
+ *      „Personal and non-commercial use"; podmienky sú navyše „still being
+ *      finalized".
+ *
+ * Verejný endpoint GET /v1/messages?icao=<hex> (bez kľúča, 60 req/min na IP —
+ * kľúč dostávajú len feederi). Rozpočet: cache 60 s na hex, jeden dopyt
+ * naraz (inflight), najviac 30 dopytov za minútu (polovica limitu upstreamu),
+ * 429 + Retry-After a X-RateLimit-Remaining sa rešpektujú (stale odpoveď),
+ * timeout 8 s, strop 1,5 MB. Upstream občas vráti prechodné 404 „Cannot GET"
+ * (namerané 2026-09-08 na TEN ISTÝ dopyt: raz 404, raz 200) — berie sa ako
+ * dočasná chyba, nie ako „správy neexistujú". Odpoveď sa zhutní
+ * (compactAirframesMessage): žiadne údaje o feederovi okrem identu stanice.
+ */
+function airframesProxy() {
+  const UPSTREAM = 'https://api.airframes.io/v1/messages';
+  const TTL_MS = 60_000;
+  const FAIL_TTL_MS = 30_000;
+  const TIMEOUT_MS = 8_000;
+  const MAX_BYTES = 1.5 * 1024 * 1024;
+  const UPSTREAM_LIMIT = 40; // správ na dopyt (API max 100); 24 h okno je default upstreamu
+  const RATE_PER_MIN = 30;
+  const cache = new Map(); // hex → { at, ttl, messages, error }
+  const inflight = new Map();
+  let windowStartMs = 0;
+  let windowCount = 0;
+  let blockedUntilMs = 0;
+  let upstreamRemaining = null;
+  let upstreamRequests = 0;
+
+  const enabled = () => /^(1|on|true|yes)$/i.test(String(process.env.ACARS_MESSAGES || '').trim());
+  const fresh = (e) => e && Date.now() - e.at < e.ttl;
+
+  function rateOk() {
+    const now = Date.now();
+    if (now - windowStartMs >= 60_000) { windowStartMs = now; windowCount = 0; }
+    return windowCount < RATE_PER_MIN && now >= blockedUntilMs;
+  }
+
+  async function fetchUpstream(hex) {
+    const url = `${UPSTREAM}?icao=${hex}&limit=${UPSTREAM_LIMIT}&exclude_labels=${ACARS_NOISE_LABELS.join(',')}`;
+    windowCount += 1;
+    upstreamRequests += 1;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { Accept: 'application/json', 'User-Agent': 'OKO local dev (personal, non-commercial; cached 60 s)' },
+    });
+    const remaining = Number(res.headers.get('x-ratelimit-remaining'));
+    if (Number.isFinite(remaining)) upstreamRemaining = remaining;
+    if (res.status === 429) {
+      const retry = Number(res.headers.get('retry-after'));
+      blockedUntilMs = Date.now() + (Number.isFinite(retry) && retry > 0 ? Math.min(retry, 300) : 60) * 1000;
+      throw new Error('airframes 429');
+    }
+    if (!res.ok) throw new Error(`airframes HTTP ${res.status}`);
+    const json = await readResponseJsonCapped(res, MAX_BYTES);
+    if (!Array.isArray(json)) throw new Error('airframes: unexpected body');
+    return json.map(compactAirframesMessage).filter(Boolean);
+  }
+
+  function lookup(hex) {
+    const entry = cache.get(hex);
+    if (fresh(entry)) return Promise.resolve({ messages: entry.messages, stale: false, cached: true });
+    if (inflight.has(hex)) return inflight.get(hex);
+    if (!rateOk()) {
+      return Promise.resolve({ messages: entry?.messages || [], stale: true, throttled: true });
+    }
+    const job = (async () => {
+      try {
+        const messages = await fetchUpstream(hex);
+        cache.set(hex, { at: Date.now(), ttl: TTL_MS, messages, error: false });
+        return { messages, stale: false };
+      } catch (err) {
+        // Stale-if-error: čo máme, s poctivým príznakom; inak prázdno + chyba.
+        cache.set(hex, { at: Date.now(), ttl: FAIL_TTL_MS, messages: entry?.messages || [], error: true });
+        return { messages: entry?.messages || [], stale: true, error: String(err?.message || err) };
+      } finally {
+        inflight.delete(hex);
+      }
+    })();
+    inflight.set(hex, job);
+    return job;
+  }
+
+  return {
+    name: 'airframes-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/acars', async (req, res) => {
+        const send = (status, obj) => {
+          res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const url = new URL(String(req.url || '/'), 'http://localhost');
+          const local = isLoopbackAddress(req.socket?.remoteAddress);
+          const on = enabled();
+          if (url.pathname === '/status') {
+            return send(200, {
+              enabled: on && local,
+              configured: on,
+              local,
+              loopbackOnly: true,
+              upstreamRequests,
+              upstreamRemaining,
+              ratePerMin: RATE_PER_MIN,
+              attribution: ACARS_ATTRIBUTION,
+              attributionUrl: ACARS_ATTRIBUTION_URL,
+            });
+          }
+          if (url.pathname !== '/messages') return send(404, { error: 'unknown endpoint' });
+          if (!on) return send(200, { enabled: false, messages: [] });
+          if (!local) return send(403, { enabled: false, error: 'local-only', messages: [] });
+          const hex = String(url.searchParams.get('icao') || '').trim().toLowerCase();
+          if (!/^[0-9a-f]{6}$/.test(hex)) return send(400, { error: 'invalid hex' });
+          const result = await lookup(hex);
+          return send(200, {
+            enabled: true,
+            icao: hex,
+            fetchedAt: new Date().toISOString(),
+            stale: result.stale === true,
+            throttled: result.throttled === true,
+            error: result.error || null,
+            attribution: ACARS_ATTRIBUTION,
+            attributionUrl: ACARS_ATTRIBUTION_URL,
+            messages: result.messages,
+          });
+        } catch (err) {
+          return send(500, { error: String(err?.message || err) });
+        }
+      });
+    },
+  };
+}
+
+/** Loopback test pre „iba lokálne" proxy (airframes). Exportované pre testy. */
+export function isLoopbackAddress(address) {
+  const a = String(address || '').trim().toLowerCase();
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1' || a.startsWith('127.');
 }
 
 /**
@@ -8443,6 +8592,7 @@ export default defineConfig(({ mode }) => {
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),
+      airframesProxy(),
       metarProxy(),
       youtubeLiveProxy(),
       overpassProxy(),

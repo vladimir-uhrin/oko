@@ -158,6 +158,7 @@ export function formatMetaLine({ source, lastContactEpochMs, nowMs, squawk, hex 
  * @param {?{origin: object, destination: object}} [parts.route] plauzibilná trasa (inak null)
  * @param {?{fractionDone: number, remainingKm?: number, etaMinutes: number|null}} [parts.progress]
  * @param {string} [parts.alertLine] „SQUAWK 7700 · EMERGENCY" → `alert` (červený rám)
+ * @param {string} [parts.acarsLine] „ACARS 7 · 03:40 CPDLC ↑ · …" (acarsMessages.js) → prvý riadok päty; '' = bez riadku
  * @param {?object} [parts.profile] riadok mini profilu (flightProfile.js) alebo null
  * @param {string} [parts.metaLine] hotový riadok o dátach (viď formatMetaLine); '' = bez riadku
  * @param {number} [parts.nowMs] „teraz" pre hodinu príletu
@@ -176,6 +177,7 @@ export function buildTrackedCardModel({
   progress = null,
   profile = null,
   alertLine = '',
+  acarsLine = '',
   metaLine = '',
   nowMs = NaN,
   countryIso = null,
@@ -186,7 +188,9 @@ export function buildTrackedCardModel({
   const iata = String(flightIata || '').trim().toUpperCase();
   const title = [cs, iata && iata !== cs.toUpperCase() ? iata : '', stale ? 'STALE' : ''].filter(Boolean).join(' · ');
   const details = [flightLine, identLine].map((s) => String(s || '').trim()).filter(Boolean);
-  const footer = [metaLine].map((s) => String(s || '').trim()).filter(Boolean);
+  // ACARS riadok (2026-09-08, airframes.io, len lokálne) ide do päty PRED
+  // riadok o dátach — je to tiež „čo o stroji vieme z iného kanála".
+  const footer = [acarsLine, metaLine].map((s) => String(s || '').trim()).filter(Boolean);
   const alert = String(alertLine || '').trim() || null;
   return {
     title,

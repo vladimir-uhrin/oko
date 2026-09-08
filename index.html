@@ -267,6 +267,15 @@
           <span id="cockpit-approach-height">—</span>
         </div>
       </section>
+      <!-- ACARS/CPDLC správy (2026-09-08, airframes.io) — LEN LOKÁLNE: proxy odpovedá len loopbacku s ACARS_MESSAGES=on; atribúcia je predpísaná doslovne. -->
+      <section id="cockpit-acars" class="cockpit-acars" aria-label="Datalink messages" data-i18n-aria="cockpit.acars-kicker" hidden>
+        <div class="cockpit-acars-heading">
+          <span class="cockpit-acars-kicker" data-i18n="cockpit.acars-kicker">ACARS · DATALINK</span>
+          <small id="cockpit-acars-status">—</small>
+        </div>
+        <ol id="cockpit-acars-list" class="cockpit-acars-list" aria-live="polite"></ol>
+        <small class="cockpit-acars-credit"><a href="https://airframes.io" target="_blank" rel="noopener noreferrer">Data provided by Airframes.io and its community of feeders.</a></small>
+      </section>
       <header class="cockpit-signal-header">
         <div class="cockpit-brief-heading">
           <span id="cockpit-brief-kicker" class="cockpit-signal-kicker"><i aria-hidden="true"></i> LIVE SIGNALS</span>
