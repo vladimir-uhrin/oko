@@ -21,14 +21,14 @@ test('rampy OKO: azúrová v strede vetra, tabuľka 256×4, CSS gradient, legend
   assert.deepEqual(hexToRgb('#39d0ff'), [57, 208, 255]);
   const table = rampRgbaTable(METEO_RAMPS.wind, METEO_FIELDS.wind.rampRange);
   assert.equal(table.length, 256 * 4);
-  assert.deepEqual(Array.from(table.subarray(0, 3)), hexToRgb('#0a1622'), 'začiatok = prvá zastávka');
+  assert.deepEqual(Array.from(table.subarray(0, 3)), hexToRgb('#123c5a'), 'začiatok = prvá zastávka (bezvetrie tmavomodré, nie čierne)');
   assert.deepEqual(Array.from(table.subarray(255 * 4, 255 * 4 + 3)), [255, 255, 255], 'koniec = biela');
   const mid = Math.round((14 / 45) * 255);
   assert.deepEqual(Array.from(table.subarray(mid * 4, mid * 4 + 3)).map((v) => Math.round(v / 8)), hexToRgb('#39d0ff').map((v) => Math.round(v / 8)), '14 m/s ≈ azúrová --accent');
   assert.match(rampCss(METEO_RAMPS.temp, METEO_FIELDS.temp.rampRange), /^linear-gradient\(90deg, #3b1c6e 0\.0%, .*#8a0c1e 100\.0%\)$/);
   const legend = rampLegend(METEO_RAMPS.wind, 'm/s');
   assert.equal(legend.length, 5);
-  assert.deepEqual(legend[0], { color: '#0a1622', label: '0 m/s', count: '' });
+  assert.deepEqual(legend[0], { color: '#123c5a', label: '0 m/s', count: '' });
 });
 
 test('kroky predpovede: od teraz zaokrúhleného na 3 h, 17 krokov po +48 h; najbližší krok; URL rezu', () => {

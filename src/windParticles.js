@@ -18,13 +18,15 @@
 // WebGL2 = bez častíc, vrstva ostáva (drapéria poľa).
 
 export const WIND_PARTICLE_COUNT_DEFAULT = 65_536; // 256 × 256
-export const WIND_TRAIL_FADE = 0.955;
+// Ladenie 2026-09-08 večer („to je slabé"): dlhšie a jasnejšie stopy, väčšie
+// body, rýchlejší posun — bližšie k hustote a jasu Windy.
+export const WIND_TRAIL_FADE = 0.968;
 export const WIND_TRAIL_FADE_MOVING = 0.6;
 export const WIND_DROP_RATE = 0.003;
 export const WIND_DROP_RATE_BUMP = 0.01;
-/** Sekundy simulovaného času na snímok pri 60 fps (~10 m/s ≈ 0,05°/snímok). */
-export const WIND_SIM_SECONDS_PER_FRAME = 600;
-export const WIND_POINT_SIZE_PX = 1.4;
+/** Sekundy simulovaného času na snímok pri 60 fps (~10 m/s ≈ 0,07°/snímok). */
+export const WIND_SIM_SECONDS_PER_FRAME = 800;
+export const WIND_POINT_SIZE_PX = 2.0;
 
 const WGS84_A = 6378137.0;
 const WGS84_B = 6356752.314245;
@@ -131,7 +133,8 @@ out vec4 o;
 void main() {
   if (v_vis < 0.5) discard;
   vec4 c = texture(u_ramp, vec2(v_speed_t, 0.5));
-  o = vec4(c.rgb, 0.9);
+  // Zosvetlenie k bielej: prúdnice musia svietiť aj nad farebným poľom.
+  o = vec4(mix(c.rgb, vec3(1.0), 0.35), 0.95);
 }`;
 
 function compile(gl, type, src) {

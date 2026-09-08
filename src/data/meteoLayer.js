@@ -32,8 +32,12 @@ export const METEO_CATALOG_URL = '/api/meteo/catalog';
 /** Výška drapérie nad elipsoidom (pod lietadlami, nad podkladom). */
 export const METEO_DRAPE_HEIGHT_M = 2_000;
 export const METEO_FIELD_ALPHA = 0.62;
-/** Podklad vhodný pre polia — tlmený reliéf (Windy má šedomodrú mapu). */
-export const METEO_BASEMAP_ID = 'gibs-blue-marble';
+/**
+ * Podklad pre polia: tmavá vektorová mapa s popiskami (Stadia Alidade Smooth
+ * Dark) — presne to, čo robí Windy: farby poľa na nej svietia, Blue Marble
+ * s nimi súperil („to je slabé", 2026-09-08 večer).
+ */
+export const METEO_BASEMAP_ID = 'stadia-dark';
 /** Koľko krokov dopredu prednačítať. */
 export const METEO_PREFETCH_STEPS = 2;
 
@@ -157,19 +161,51 @@ export function imageToGrid(image, doc, channel, decode) {
  * @param {{isolines: {step: number, emphasis?: number}}} field
  */
 export function createIsolinePrimitive(lines, field) {
-  const collection = new Cesium.PolylineCollection();
+  const root = new Cesium.PrimitiveCollection();
+  const polylines = new Cesium.PolylineCollection();
+  const labels = new Cesium.LabelCollection();
+  const labelStride = ISOLINE_LABEL_STRIDE_POINTS;
   for (const line of lines) {
     const flat = [];
     for (const [lon, lat] of line.points) flat.push(lon, lat, ISOLINE_HEIGHT_M);
     const emphasised = field.isolines?.emphasis !== undefined && Math.abs(line.level - field.isolines.emphasis) < 1e-6;
-    collection.add({
+    polylines.add({
       positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
-      width: emphasised ? 2.2 : 1.1,
-      material: Cesium.Material.fromType('Color', { color: Cesium.Color.fromCssColorString(emphasised ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.42)') }),
+      width: emphasised ? 2.6 : 1.4,
+      material: Cesium.Material.fromType('Color', { color: Cesium.Color.fromCssColorString(emphasised ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.6)') }),
     });
+    // Popisky hodnôt ako Windy: na dlhých čiarach každých ~stride bodov, na kratších v strede.
+    for (const idx of isolineLabelIndices(line.points.length, labelStride)) {
+      const [lon, lat] = line.points[idx];
+      labels.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat, ISOLINE_HEIGHT_M + 500),
+        text: String(line.level),
+        font: `${emphasised ? 'bold ' : ''}11px "JetBrains Mono", "Consolas", monospace`,
+        fillColor: emphasised ? Cesium.Color.WHITE : Cesium.Color.fromCssColorString('#cfeeff'),
+        outlineColor: Cesium.Color.fromCssColorString('rgba(3,12,18,0.9)'),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        scaleByDistance: new Cesium.NearFarScalar(2_000_000, 1.0, 20_000_000, 0.7),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      });
+    }
   }
-  collection.show = true;
-  return collection;
+  root.add(polylines);
+  root.add(labels);
+  root.show = true;
+  return root;
+}
+
+/** Každých `stride` bodov ≥ stride od konca; krátka čiara (≥ minPoints) dostane stred. Pure. */
+export const ISOLINE_LABEL_STRIDE_POINTS = 90;
+export function isolineLabelIndices(length, stride = ISOLINE_LABEL_STRIDE_POINTS, minPoints = 24) {
+  if (length < minPoints) return [];
+  if (length < stride * 1.5) return [Math.floor(length / 2)];
+  const out = [];
+  for (let i = Math.floor(stride / 2); i < length - stride / 4; i += stride) out.push(i);
+  return out;
 }
 
 /**

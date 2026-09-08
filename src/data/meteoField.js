@@ -34,7 +34,7 @@ export const METEO_FIELDS = Object.freeze({
     /** Kanál PNG s hodnotou pre farebnú drapériu (B = rýchlosť). */
     channel: 2,
     decode: [WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1]],
-    alpha: 0.62,
+    alpha: 0.82,
   }),
   temp: Object.freeze({
     id: 'temp',
@@ -45,7 +45,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [-40, 45],
     channel: 0,
     decode: [TEMP_RANGE[0], TEMP_RANGE[1]],
-    alpha: 0.62,
+    alpha: 0.82,
   }),
   pressure: Object.freeze({
     id: 'pressure',
@@ -55,7 +55,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [960, 1050],
     channel: 0,
     decode: [940, 1060],
-    alpha: 0.5,
+    alpha: 0.78,
     /** Izobary každé 4 hPa, 1013 zvýraznená. */
     isolines: { step: 4, emphasis: 1013 },
   }),
@@ -67,7 +67,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [0, 20],
     channel: 0,
     decode: [0, 30],
-    alpha: 0.9,
+    alpha: 0.96,
   }),
   clouds: Object.freeze({
     id: 'clouds',
@@ -77,7 +77,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [0, 100],
     channel: 0,
     decode: [0, 100],
-    alpha: 0.85,
+    alpha: 0.92,
   }),
   gust: Object.freeze({
     id: 'gust',
@@ -87,7 +87,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [0, 45],
     channel: 0,
     decode: [0, 60],
-    alpha: 0.62,
+    alpha: 0.82,
   }),
 });
 
@@ -100,7 +100,7 @@ export const METEO_FIELD_ORDER = Object.freeze(['wind', 'temp', 'pressure', 'pre
  */
 export const METEO_RAMPS = Object.freeze({
   wind: Object.freeze([
-    [0, '#0a1622'], [3, '#0f3a52'], [6, '#12708f'], [10, '#1fb0d8'], [14, '#39d0ff'],
+    [0, '#123c5a'], [3, '#155e86'], [6, '#1a8ab0'], [10, '#25b6dc'], [14, '#39d0ff'],
     [19, '#9be6ff'], [24, '#ffd15c'], [30, '#ff9a2b'], [37, '#ff4a3b'], [45, '#ffffff'],
   ]),
   temp: Object.freeze([
@@ -121,7 +121,7 @@ export const METEO_RAMPS = Object.freeze({
     [0, '#0a1622', 0], [20, '#5d7383', 0.25], [50, '#9fb1bd', 0.55], [80, '#dbe4ea', 0.8], [100, '#ffffff', 0.92],
   ]),
   gust: Object.freeze([
-    [0, '#0a1622'], [5, '#0f3a52'], [10, '#12708f'], [15, '#1fb0d8'], [20, '#39d0ff'],
+    [0, '#123c5a'], [5, '#155e86'], [10, '#1a8ab0'], [15, '#25b6dc'], [20, '#39d0ff'],
     [25, '#9be6ff'], [30, '#ffd15c'], [36, '#ff9a2b'], [42, '#ff4a3b'], [45, '#ffffff'],
   ]),
 });
