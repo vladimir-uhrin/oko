@@ -35,7 +35,9 @@ test('shadery: WGS84 ECEF, zahodenie odvrátenej pologule, GFS mriežka 0..360°
   assert.match(src, /return dot\(n, normalize\(toCam\)\) > 0\.02 \? 1\.0 : 0\.0;/, 'okluzia skalárnym súčinom normály a smeru ku kamere');
   // Spojité čiary, nie bodky: úsečka predchádzajúca → aktuálna poloha, oba konce viditeľné, respawn sa nekreslí.
   assert.match(src, /gl\.drawArrays\(gl\.LINES, 0, total \* 2\);/);
-  assert.match(src, /float vis = flat \? 1\.0 : visible\(pNow\) \* visible\(pPrev\);\s*float ok = vis \* \(distance\(pNow, pPrev\) < u_max_seg_m \? 1\.0 : 0\.0\);/, 'oba konce viditeľné (na plátne vždy), respawn sa nekreslí');
+  // `flat` je v GLSL rezervované slovo (kvalifikátor) — shader sa s ním nezostavil a častice ticho zmizli (2026-09-08).
+  assert.ok(!/bool flat =/.test(src), 'žiadny identifikátor flat v GLSL');
+  assert.match(src, /float vis = isFlat \? 1\.0 : visible\(pNow\) \* visible\(pPrev\);\s*float ok = vis \* \(distance\(pNow, pPrev\) < u_max_seg_m \? 1\.0 : 0\.0\);/, 'oba konce viditeľné (na plátne vždy), respawn sa nekreslí');
   assert.ok(!src.includes('gl.POINTS'), 'žiadne body');
   assert.match(src, /export const WIND_SCREEN_SCALE = 0\.55;/, 'stopy v menšej textúre s LINEAR filtrom = mäkké');
   assert.match(src, /screenA = texture\(gl, gl\.LINEAR, empty, sw, sh\);/);
@@ -45,7 +47,7 @@ test('shadery: WGS84 ECEF, zahodenie odvrátenej pologule, GFS mriežka 0..360°
   assert.match(src, /random_pos\.y = \(degrees\(asin\(random_pos\.y \* 2\.0 - 1\.0\)\) \+ 90\.0\) \/ 180\.0;/, 'rovnomerné zrodenie po guli');
   assert.match(src, /getContext\('webgl2'/, 'vlastný WebGL2 kontext, nie Cesium');
   // Plátno (2D) aj Columbus: projekcia (0, lon·R, lat·R) resp. Mercator, bez okluzie; morph = prázdne plátno.
-  assert.match(src, /vec3 pNow = flat \? projected\(posNow\) : ecef\(posNow\);/, 'plátno používa projekciu Cesia namiesto ECEF');
+  assert.match(src, /vec3 pNow = isFlat \? projected\(posNow\) : ecef\(posNow\);/, 'plátno používa projekciu Cesia namiesto ECEF');
   assert.match(src, /return vec3\(0\.0, A \* lon, y\);/, 'svet 2D = (0, x, y) projekcie');
   assert.match(src, /gl\.uniform1f\(progDraw\.uniforms\.u_mode, mode\);/);
 });

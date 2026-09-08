@@ -153,11 +153,11 @@ void main() {
   vec2 wuv = vec2(fract((lonDeg + 360.0) / 360.0), (90.0 - latDeg) / 180.0);
   vec2 w = mix(u_wind_min, u_wind_max, mix(texture(u_wind, wuv).rg, texture(u_wind_next, wuv).rg, u_mix));
   v_speed_t = clamp((length(w) - u_ramp_range.x) / (u_ramp_range.y - u_ramp_range.x), 0.0, 1.0);
-  bool flat = u_mode > 0.5;
-  vec3 pNow = flat ? projected(posNow) : ecef(posNow);
-  vec3 pPrev = flat ? projected(posPrev) : ecef(posPrev);
+  bool isFlat = u_mode > 0.5;
+  vec3 pNow = isFlat ? projected(posNow) : ecef(posNow);
+  vec3 pPrev = isFlat ? projected(posPrev) : ecef(posPrev);
   // Úsečka len keď sú OBA konce viditeľné (na plátne vždy) a častica sa nezrodila inde (skok cez šev ±180° / respawn).
-  float vis = flat ? 1.0 : visible(pNow) * visible(pPrev);
+  float vis = isFlat ? 1.0 : visible(pNow) * visible(pPrev);
   float ok = vis * (distance(pNow, pPrev) < u_max_seg_m ? 1.0 : 0.0);
   v_vis = ok;
   vec4 clip = u_vp * vec4(a_end > 0.5 ? pNow : pPrev, 1.0);
