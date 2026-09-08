@@ -26,12 +26,30 @@ export const WIND_TRAIL_FADE = 0.975;
 export const WIND_TRAIL_FADE_MOVING = 0.6;
 export const WIND_DROP_RATE = 0.003;
 export const WIND_DROP_RATE_BUMP = 0.01;
-/** Sekundy simulovaného času na snímok pri 60 fps (~10 m/s ≈ 0,07°/snímok). */
-export const WIND_SIM_SECONDS_PER_FRAME = 320;
+/**
+ * Simulovaný čas na snímok sa odvíja od výšky kamery (2026-09-08 noc, „plynulejšie,
+ * elastické, reálne"): cieľ je ~1 px/snímok pri 10 m/s v každom priblížení —
+ * m/px ≈ výška × 1,15 / výška_plátna, teda dt ≈ výška × 1,2e-4 s.
+ */
+export const WIND_SIM_SECONDS_PER_METRE_HEIGHT = 1.2e-4;
+export const WIND_SIM_SECONDS_MIN = 30;
+export const WIND_SIM_SECONDS_MAX = 1500;
+/** Po výraznej zmene výrezu sa častice rýchlo presťahujú do nového výrezu (snímky, drop rate). */
+export const WIND_RESPAWN_BOOST_FRAMES = 40;
+export const WIND_RESPAWN_BOOST_RATE = 0.08;
 /** Rozlíšenie textúry stôp voči plátnu (< 1 = mäkšie čiary, lacnejšie). */
 export const WIND_SCREEN_SCALE = 0.55;
-/** Úsečka dlhšia než toto (m) = častica sa zrodila inde → nekresliť. */
+/** Horný strop dĺžky úsečky (m); skutočná hranica je násobok kroku, viď maxSegmentMetres. */
 export const WIND_MAX_SEGMENT_M = 300_000;
+/**
+ * Hranica „častica sa zrodila inde" podľa skutočného kroku: najrýchlejší vietor
+ * (60 m/s) × simulované sekundy × 3. Pevných 300 km kreslilo pri priblížení
+ * „teleporty" cez celú obrazovku (zrod vo výreze je bližšie než 300 km). Pure.
+ */
+export function maxSegmentMetres(simSeconds) {
+  const dt = Number.isFinite(simSeconds) && simSeconds > 0 ? simSeconds : WIND_SIM_SECONDS_MAX;
+  return Math.max(2_000, Math.min(WIND_MAX_SEGMENT_M, 60 * dt * 3));
+}
 /** Vek častice v snímkoch (Windy/nullschool: každá má pevnú fázu → rovnomerná hustota, nie zhluky). */
 export const WIND_PARTICLE_MAX_AGE_FRAMES = 240;
 
@@ -66,24 +84,37 @@ uniform float u_drop_rate;
 uniform float u_drop_rate_bump;
 uniform float u_frame;     // počítadlo snímkov (vek)
 uniform float u_max_age;   // vek v snímkoch
+uniform vec4 u_spawn;      // výrez zrodu: west, south, width, height (°); height >= 179 = celá guľa
 in vec2 v_uv;
 out vec4 o;
 const vec3 rand_constants = vec3(12.9898, 78.233, 4375.85453);
 float rand(const vec2 co) { float t = dot(rand_constants.xy, co); return fract(sin(t) * (rand_constants.z + t)); }
+// Vietor (m/s) v polohe 0..1; GFS mriežka: stĺpce 0..360° E (začína na 0°), riadok 0 = 90° N.
+vec2 windAt(vec2 p) {
+  float lon = p.x * 360.0 - 180.0;
+  float lat = p.y * 180.0 - 90.0;
+  vec2 wuv = vec2(fract((lon + 360.0) / 360.0), (90.0 - lat) / 180.0);
+  return mix(u_wind_min, u_wind_max, mix(texture(u_wind, wuv).rg, texture(u_wind_next, wuv).rg, u_mix));
+}
+// Posun o vietor za dt sekúnd (m → °, zemepisná šírka skracuje rovnobežky).
+vec2 advance(vec2 p, vec2 w, float dt) {
+  float lat = p.y * 180.0 - 90.0;
+  float coslat = max(cos(radians(lat)), 0.15);
+  float dlon = w.x * dt / (111320.0 * coslat);
+  float dlat = w.y * dt / 110540.0;
+  return vec2(fract(p.x + dlon / 360.0), clamp(p.y + dlat / 180.0, 0.002, 0.998));
+}
 void main() {
   vec4 color = texture(u_particles, v_uv);
   vec2 pos = vec2(color.r / 255.0 + color.b, color.g / 255.0 + color.a); // 0..1
-  float lon = pos.x * 360.0 - 180.0;
-  float lat = pos.y * 180.0 - 90.0;
-  // GFS mriežka: stĺpce 0..360° E (začína na 0°), riadok 0 = 90° N.
-  vec2 wuv = vec2(fract((lon + 360.0) / 360.0), (90.0 - lat) / 180.0);
-  vec2 w = mix(u_wind_min, u_wind_max, mix(texture(u_wind, wuv).rg, texture(u_wind_next, wuv).rg, u_mix));
+  // RK2 (stredový bod): vietor sa vzorkuje aj v polovici kroku, takže častica
+  // sleduje zakrivenú prúdnicu a nie tečnu — čiary sú „elastické", nie lomené.
+  vec2 w1 = windAt(pos);
+  vec2 mid = advance(pos, w1, u_dt * 0.5);
+  vec2 w = windAt(mid);
   float speed = length(w);
   float speed_t = clamp(speed / 40.0, 0.0, 1.0);
-  float coslat = max(cos(radians(lat)), 0.15);
-  float dlon = w.x * u_dt / (111320.0 * coslat);
-  float dlat = w.y * u_dt / 110540.0;
-  vec2 next = vec2(fract(pos.x + dlon / 360.0), clamp(pos.y + dlat / 180.0, 0.002, 0.998));
+  vec2 next = advance(pos, w, u_dt);
   vec2 seed = (pos + v_uv) * u_rand_seed;
   float drop_rate = u_drop_rate + speed_t * u_drop_rate_bump;
   // Vek: každá častica má pevnú fázu (hash jej miesta v textúre), zaniká raz za
@@ -91,9 +122,17 @@ void main() {
   float phase = rand(v_uv * 7.31) * u_max_age;
   float aged = step(mod(u_frame + phase, u_max_age), 0.999);
   float drop = max(step(1.0 - drop_rate, rand(seed)), aged);
-  vec2 random_pos = vec2(rand(seed + 1.3), rand(seed + 2.1));
-  // Rovnomerne po ploche gule: lat = asin(2r-1).
-  random_pos.y = (degrees(asin(random_pos.y * 2.0 - 1.0)) + 90.0) / 180.0;
+  vec2 r = vec2(rand(seed + 1.3), rand(seed + 2.1));
+  vec2 random_pos;
+  if (u_spawn.w >= 179.0) {
+    // Celá guľa: rovnomerne po ploche, lat = asin(2r-1).
+    random_pos = vec2(r.x, (degrees(asin(r.y * 2.0 - 1.0)) + 90.0) / 180.0);
+  } else {
+    // Len viditeľný výrez (Windy): hustota na obrazovke nezávisí od priblíženia.
+    float lon = u_spawn.x + r.x * u_spawn.z;
+    float lat = u_spawn.y + r.y * u_spawn.w;
+    random_pos = vec2(fract((lon + 180.0) / 360.0), clamp((lat + 90.0) / 180.0, 0.002, 0.998));
+  }
   pos = mix(next, random_pos, drop);
   o = vec4(fract(pos * 255.0), floor(pos * 255.0) / 255.0);
 }`;
@@ -173,8 +212,8 @@ out vec4 o;
 void main() {
   if (v_vis < 0.5) discard;
   vec4 c = texture(u_ramp, vec2(v_speed_t, 0.5));
-  // Jemné: mierne zosvetlené, polopriehľadné — stopa vzniká útlmom, nie jasom.
-  o = vec4(mix(c.rgb, vec3(1.0), 0.18), 0.6);
+  // Jemné: mierne zosvetlené; alfa podľa sily vetra (bezvetrie sotva vidno, búrka svieti).
+  o = vec4(mix(c.rgb, vec3(1.0), 0.18), 0.22 + 0.55 * v_speed_t);
 }`;
 
 function compile(gl, type, src) {
@@ -228,6 +267,60 @@ export function sceneModeCode(scene, CesiumNs = globalThis.Cesium) {
   return mercator ? 2 : 1;
 }
 
+/**
+ * Výrez zrodu z viditeľného obdĺžnika kamery (°). Pridá okraj, aby častice
+ * vchádzali do záberu zvonku; keď výrez pokrýva > polovicu sveta (alebo nie je),
+ * zrod je na celej guli. Pure.
+ * @param {{west: number, south: number, east: number, north: number}|null} rectDeg
+ * @param {number} [marginRatio]
+ * @returns {{west: number, south: number, width: number, height: number, global: boolean, areaFraction: number}}
+ */
+export function spawnRectFromView(rectDeg, marginRatio = 0.15) {
+  const GLOBAL = { west: -180, south: -90, width: 360, height: 180, global: true, areaFraction: 1 };
+  if (!rectDeg || ![rectDeg.west, rectDeg.south, rectDeg.east, rectDeg.north].every(Number.isFinite)) return GLOBAL;
+  let width = rectDeg.east - rectDeg.west;
+  if (width < 0) width += 360;
+  const height = rectDeg.north - rectDeg.south;
+  if (width <= 0 || height <= 0) return GLOBAL;
+  const areaFraction = Math.min(1, (width * height) / (360 * 180));
+  if (areaFraction > 0.5 || width >= 300) return GLOBAL;
+  const mw = width * marginRatio;
+  const mh = height * marginRatio;
+  const south = Math.max(-89.9, rectDeg.south - mh);
+  const north = Math.min(89.9, rectDeg.north + mh);
+  return { west: rectDeg.west - mw, south, width: Math.min(360, width + 2 * mw), height: north - south, global: false, areaFraction };
+}
+
+/**
+ * Simulované sekundy na snímok podľa výšky kamery (m): ~1 px/snímok pri 10 m/s. Pure.
+ */
+export function simSecondsPerFrame(heightM) {
+  if (!Number.isFinite(heightM) || heightM <= 0) return WIND_SIM_SECONDS_MAX;
+  return Math.max(WIND_SIM_SECONDS_MIN, Math.min(WIND_SIM_SECONDS_MAX, heightM * WIND_SIM_SECONDS_PER_METRE_HEIGHT));
+}
+
+/**
+ * Koľko častíc kresliť pri danom podiele plochy výrezu: pri celej guli všetky
+ * (polovica je viditeľná), v malom výreze menej, aby hustota na obrazovke ostala
+ * podobná. Pure.
+ */
+export function activeParticleCount(total, areaFraction) {
+  const f = Number.isFinite(areaFraction) ? Math.max(0, Math.min(1, areaFraction)) : 1;
+  const share = Math.max(0.12, Math.min(1, Math.sqrt(f / 0.5)));
+  return Math.max(256, Math.min(total, Math.round(total * share)));
+}
+
+/** Zmenil sa výrez natoľko, že treba častice rýchlo presťahovať? Pure. */
+export function spawnRectChanged(a, b) {
+  if (!a || !b) return true;
+  if (a.global !== b.global) return true;
+  if (a.global) return false;
+  const dw = Math.abs(a.width - b.width) / Math.max(a.width, b.width);
+  const dx = Math.abs(a.west - b.west) / Math.max(a.width, b.width);
+  const dy = Math.abs(a.south - b.south) / Math.max(a.height, b.height);
+  return dw > 0.25 || dx > 0.3 || dy > 0.3;
+}
+
 /** Počet častíc → rozmer štvorcovej stavovej textúry. Pure. */
 export function particleTextureSize(count) {
   return Math.max(16, Math.ceil(Math.sqrt(Math.max(1, count))));
@@ -261,7 +354,7 @@ export function createWindParticles(container, viewer, {
   canvas.setAttribute('aria-hidden', 'true');
   container.appendChild(canvas);
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, preserveDrawingBuffer: false });
-  const state = { supported: Boolean(gl), running: false, visible: true, frame: null, windSet: false, fps: 0, moving: false, mode: 0 };
+  const state = { supported: Boolean(gl), running: false, visible: true, frame: null, windSet: false, fps: 0, moving: false, mode: 0, active: 0, spawn: null };
   if (!gl) return stub(canvas, state);
 
   const res = particleTextureSize(count);
@@ -302,6 +395,9 @@ export function createWindParticles(container, viewer, {
   let lastVp = null;
   const vpArray = new Float32Array(16);
   let lastTime = 0;
+  let spawn = spawnRectFromView(null);
+  let respawnBoost = 0;
+  let active = total;
 
   function resize() {
     const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
@@ -350,7 +446,13 @@ export function createWindParticles(container, viewer, {
       for (let i = 0; i < 16; i += 1) vpArray[i] = pm[i];
     }
     const c = camera.positionWC;
-    return { vp: vpArray, cam: [c.x, c.y, c.z] };
+    let rect = null;
+    try {
+      const r = camera.computeViewRectangle?.(viewer.scene.globe?.ellipsoid);
+      if (r && Cesium?.Math) rect = { west: Cesium.Math.toDegrees(r.west), south: Cesium.Math.toDegrees(r.south), east: Cesium.Math.toDegrees(r.east), north: Cesium.Math.toDegrees(r.north) };
+    } catch { rect = null; }
+    const height = camera.positionCartographic?.height;
+    return { vp: vpArray, cam: [c.x, c.y, c.z], rect, height: Number.isFinite(height) ? height : null };
   }
 
   function frame(now) {
@@ -372,6 +474,15 @@ export function createWindParticles(container, viewer, {
     const moving = matricesDiffer(lastVp, cam.vp);
     lastVp = Float32Array.from(cam.vp);
     state.moving = moving;
+    // Výrez zrodu a hustota podľa priblíženia (Windy: častice žijú len v zábere).
+    const nextSpawn = spawnRectFromView(cam.rect);
+    if (spawnRectChanged(spawn, nextSpawn)) respawnBoost = WIND_RESPAWN_BOOST_FRAMES;
+    spawn = nextSpawn;
+    active = activeParticleCount(total, spawn.areaFraction);
+    state.active = active;
+    state.spawn = spawn;
+    const simDt = simSecondsPerFrame(cam.height) * (dtFrame * 60);
+    state.simDt = simDt;
     const dtFrame = lastTime ? Math.min(0.05, (now - lastTime) / 1000) : 1 / 60;
     lastTime = now;
 
@@ -391,7 +502,7 @@ export function createWindParticles(container, viewer, {
     gl.vertexAttribPointer(progDraw.attribs.a_end, 1, gl.FLOAT, false, 8, 4);
     bindTex(stateA, 0); gl.uniform1i(progDraw.uniforms.u_particles, 0);
     bindTex(stateB, 4); gl.uniform1i(progDraw.uniforms.u_particles_prev, 4);
-    gl.uniform1f(progDraw.uniforms.u_max_seg_m, WIND_MAX_SEGMENT_M);
+    gl.uniform1f(progDraw.uniforms.u_max_seg_m, maxSegmentMetres(simDt));
     gl.uniform1f(progDraw.uniforms.u_mode, mode);
     bindTex(windTex, 1); gl.uniform1i(progDraw.uniforms.u_wind, 1);
     bindTex(windNextTex || windTex, 5); gl.uniform1i(progDraw.uniforms.u_wind_next, 5);
@@ -405,7 +516,7 @@ export function createWindParticles(container, viewer, {
     gl.uniform2f(progDraw.uniforms.u_ramp_range, rampRange[0], rampRange[1]);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.drawArrays(gl.LINES, 0, total * 2);
+    gl.drawArrays(gl.LINES, 0, active * 2);
     gl.disable(gl.BLEND);
 
     // 3. na plátno
@@ -434,8 +545,11 @@ export function createWindParticles(container, viewer, {
     gl.uniform2f(progUpdate.uniforms.u_wind_min, windMin[0], windMin[1]);
     gl.uniform2f(progUpdate.uniforms.u_wind_max, windMax[0], windMax[1]);
     gl.uniform1f(progUpdate.uniforms.u_rand_seed, Math.random());
-    gl.uniform1f(progUpdate.uniforms.u_dt, WIND_SIM_SECONDS_PER_FRAME * (dtFrame * 60));
-    gl.uniform1f(progUpdate.uniforms.u_drop_rate, WIND_DROP_RATE);
+    gl.uniform1f(progUpdate.uniforms.u_dt, simDt);
+    gl.uniform4f(progUpdate.uniforms.u_spawn, spawn.west, spawn.south, spawn.width, spawn.height);
+    const boosted = respawnBoost > 0;
+    if (boosted) respawnBoost -= 1;
+    gl.uniform1f(progUpdate.uniforms.u_drop_rate, boosted ? WIND_RESPAWN_BOOST_RATE : WIND_DROP_RATE);
     gl.uniform1f(progUpdate.uniforms.u_drop_rate_bump, WIND_DROP_RATE_BUMP);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
