@@ -24,7 +24,8 @@ import {
   normalizeCatalog, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
 } from './meteoField.js';
 import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
-import { createPlaceLabels, loadPlaces, placeValueText, sampleGrid, updatePlaceLabelTexts } from './meteoPlaces.js';
+import { PLACE_ID_PREFIX, createPlaceHoverCard, createPlacePoints, loadPlaces, sampleGrid } from './meteoPlaces.js';
+import { resolvePickId } from './pickRegistry.js';
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
 
@@ -230,6 +231,8 @@ export function createMeteoLayer({
   gridReader = imageToGrid,
   particlesFactory = createWindParticles,
   timelineFactory = createMeteoTimeline,
+  pointsFactory = createPlacePoints,
+  hoverFactory = createPlaceHoverCard,
   doc = globalThis.document,
   win = globalThis.window,
   requestFrame = (cb) => globalThis.requestAnimationFrame(cb),
@@ -260,7 +263,16 @@ export function createMeteoLayer({
   let _isolines = null; // Cesium.PrimitiveCollection alebo null
   let _grid = null; // mriežka aktuálneho poľa (izočiary + hodnoty pri mestách)
   let _places = null; // zoznam miest (null = nenačítané)
-  let _placeLabels = null; // Cesium.LabelCollection
+  let _placePoints = null; // Cesium.PointPrimitiveCollection
+  let _hover = null; // DOM karta mesta (meteoPlaces.js)
+  let _hoverTimer = null;
+  let _leaveTimer = null;
+  let _pointer = null;
+  let _hoverPlace = null;
+  let _fieldGrids = {}; // fieldId → mriežka aktuálneho kroku (pre kartu mesta)
+  let _windGrid = null; // { u, v } mriežky aktuálneho kroku
+  let _gridLoads = new Set();
+  let _canvasListeners = null;
   let _fraction = 0; // podiel cesty k ďalšiemu kroku (0..1) pri prehrávaní
   let _playFrame = null;
   let _playLastMs = 0;
@@ -275,16 +287,12 @@ export function createMeteoLayer({
   }
 
   /** Izobary pre polia s `isolines` (tlak): mriežka z obrázka → marching squares → polylines. */
-  function placeValue(place) {
-    return placeValueText(sampleGrid(_grid, place.lat, place.lon), _field);
-  }
-
   function clearPlaces() {
-    if (_placeLabels && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_placeLabels);
-    _placeLabels = null;
+    if (_placePoints && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_placePoints);
+    _placePoints = null;
   }
 
-  /** Popisky miest nad polom: meno + hodnota poľa (Windy). Načítanie miest raz. */
+  /** Body miest nad polom (Windy má popisky; my body + karta pri myši). Načítanie miest raz. */
   function updatePlaces() {
     if (!_viewer || !_enabled) return;
     if (_places === null) {
@@ -292,13 +300,103 @@ export function createMeteoLayer({
       loadPlaces(doFetch).then((list) => { _places = list; if (_enabled) updatePlaces(); }).catch((error) => { console.warn('[Data:Meteo] places failed:', error?.message || error); });
       return;
     }
-    if (!_places.length) return;
-    if (!_placeLabels) {
-      _placeLabels = createPlaceLabels(_places, { valueText: placeValue });
-      _viewer.scene.primitives.add(_placeLabels);
-    } else {
-      updatePlaceLabelTexts(_placeLabels, _places, placeValue);
+    if (!_places.length || _placePoints) return;
+    _placePoints = pointsFactory(_places);
+    _viewer.scene.primitives.add(_placePoints);
+  }
+
+  // ---- karta mesta pri myši (vzor earthquakes.js) ----
+  function gridFor(fieldId) {
+    if (_fieldGrids[fieldId]) return _fieldGrids[fieldId];
+    const iso = _catalog?.steps[_index];
+    if (!iso || _gridLoads.has(fieldId)) return null;
+    _gridLoads.add(fieldId);
+    imageFor(fieldId, iso).then((img) => {
+      _gridLoads.delete(fieldId);
+      if (!img || _catalog?.steps[_index] !== iso) return;
+      const field = METEO_FIELDS[fieldId];
+      _fieldGrids[fieldId] = gridReader(img, doc, field.channel, field.decode);
+      if (_hoverPlace) _hover?.update(placeValues(_hoverPlace));
+    }).catch(() => { _gridLoads.delete(fieldId); });
+    return null;
+  }
+
+  function windGrids() {
+    if (_windGrid) return _windGrid;
+    const img = _currentImages.wind;
+    if (!img) return null;
+    try {
+      _windGrid = { u: gridReader(img, doc, 0, WIND_COMPONENT_RANGE), v: gridReader(img, doc, 1, WIND_COMPONENT_RANGE) };
+    } catch { _windGrid = null; }
+    return _windGrid;
+  }
+
+  /** Hodnoty všetkých polí v meste: undefined = načítava sa, NaN = nedostupné. */
+  function placeValues(place) {
+    const out = {};
+    for (const id of ['temp', 'pressure', 'precip', 'clouds', 'gust']) {
+      const g = gridFor(id);
+      out[id] = g ? sampleGrid(g, place.lat, place.lon) : undefined;
     }
+    const w = windGrids();
+    out.wind = w ? { u: sampleGrid(w.u, place.lat, place.lon), v: sampleGrid(w.v, place.lat, place.lon) } : undefined;
+    return out;
+  }
+
+  function clearHover() {
+    clearTimeout(_hoverTimer); clearTimeout(_leaveTimer);
+    _hoverTimer = null; _pointer = null; _hoverPlace = null;
+    _hover?.hide();
+  }
+
+  function hoverAtPointer() {
+    _hoverTimer = null;
+    if (!_enabled || !_pointer || !_viewer?.scene?.canvas || !_places?.length) return;
+    const bounds = _viewer.scene.canvas.getBoundingClientRect();
+    const x = _pointer.x - bounds.left;
+    const y = _pointer.y - bounds.top;
+    let picked = null;
+    try { picked = resolvePickId(_viewer.scene.pick(new Cesium.Cartesian2(x, y))); } catch { picked = null; }
+    const place = picked && String(picked).startsWith(PLACE_ID_PREFIX) ? _places[Number(String(picked).slice(PLACE_ID_PREFIX.length))] : null;
+    if (place) {
+      clearTimeout(_leaveTimer);
+      _hoverPlace = place;
+      const iso = _catalog?.steps[_index];
+      _hover?.show(place, _pointer, placeValues(place), iso ? stepLabel(iso, _catalog?.run, lang()) : '');
+    } else leaveHover();
+  }
+
+  function moveHover(e) {
+    if (e.buttons || e.pointerType === 'touch') { clearHover(); return; }
+    _pointer = { x: e.clientX, y: e.clientY };
+    if (!_hoverTimer) _hoverTimer = setTimeout(hoverAtPointer, 80);
+  }
+
+  function leaveHover() {
+    clearTimeout(_leaveTimer);
+    _leaveTimer = setTimeout(() => { if (!_hover?.isHovered()) clearHover(); }, 220);
+  }
+
+  function attachHover() {
+    const canvas = _viewer?.scene?.canvas;
+    if (!canvas?.addEventListener || _canvasListeners) return;
+    if (!_hover) _hover = hoverFactory({ document: doc });
+    canvas.addEventListener('pointermove', moveHover);
+    canvas.addEventListener('pointerleave', leaveHover);
+    canvas.addEventListener('pointerdown', clearHover);
+    const removeMove = _viewer.camera?.moveStart?.addEventListener?.(clearHover) || null;
+    _canvasListeners = { canvas, removeMove };
+  }
+
+  function detachHover() {
+    clearHover();
+    if (!_canvasListeners) return;
+    const { canvas, removeMove } = _canvasListeners;
+    canvas.removeEventListener('pointermove', moveHover);
+    canvas.removeEventListener('pointerleave', leaveHover);
+    canvas.removeEventListener('pointerdown', clearHover);
+    removeMove?.();
+    _canvasListeners = null;
   }
 
   function updateIsolines(field, image) {
@@ -308,6 +406,7 @@ export function createMeteoLayer({
     try {
       const full = gridReader(image, doc, field.channel, field.decode);
       _grid = full;
+      _fieldGrids[field.id] = full;
       if (!field.isolines) return;
       const g = downsample(full.values, full.cols, full.rows, ISOLINE_DOWNSAMPLE);
       const dlon = 360 / (g.cols - 1);
@@ -364,6 +463,9 @@ export function createMeteoLayer({
     ]);
     if (token !== _loadToken || !_enabled) return;
     _currentImages = { wind: windImg, windNext, field: fieldImg, fieldNext };
+    _fieldGrids = {};
+    _windGrid = null;
+    _gridLoads = new Set();
     if (!windImg || !fieldImg) {
       _lastError = t('meteo.slice-failed');
       _timeline?.setStatus(_lastError);
@@ -388,6 +490,7 @@ export function createMeteoLayer({
     _drape.material.uniforms.alpha = fieldAlphaNow();
     _drape.primitive.show = _heightFade > 0.02;
     _fraction = 0;
+    if (_hoverPlace) _hover?.update(placeValues(_hoverPlace));
     updateIsolines(field, fieldImg);
     updatePlaces();
     if (_particles && _particlesOn) {
@@ -514,6 +617,7 @@ export function createMeteoLayer({
       _enabled = true;
       requestBasemap();
       _timeline?.show();
+      attachHover();
       if (!_particles && _viewer?.container && _particlesOn) {
         try {
           _particles = particlesFactory(_viewer.container, _viewer);
@@ -535,7 +639,10 @@ export function createMeteoLayer({
       if (_drape) _drape.primitive.show = false;
       clearIsolines();
       clearPlaces();
+      detachHover();
       _grid = null;
+      _fieldGrids = {};
+      _windGrid = null;
       _particles?.stop();
       restoreBasemap();
       governorRequestRender('meteo');
@@ -613,7 +720,7 @@ export function createMeteoLayer({
 
     /** Test seam. */
     _getStateForTest() {
-      return { enabled: _enabled, index: _index, field: _field, particlesOn: _particlesOn, catalog: _catalog, drape: Boolean(_drape), previousStack: _previousStack, fraction: _fraction, places: _places?.length ?? null, labels: Boolean(_placeLabels), grid: Boolean(_grid) };
+      return { enabled: _enabled, index: _index, field: _field, particlesOn: _particlesOn, catalog: _catalog, drape: Boolean(_drape), previousStack: _previousStack, fraction: _fraction, places: _places?.length ?? null, points: Boolean(_placePoints), hover: _hoverPlace?.name ?? null, grid: Boolean(_grid) };
     },
 
     destroy(viewer) {
@@ -621,6 +728,8 @@ export function createMeteoLayer({
       if (_drape) { viewer?.scene?.primitives?.remove?.(_drape.primitive); _drape = null; }
       clearIsolines();
       clearPlaces();
+      detachHover();
+      _hover?.destroy(); _hover = null;
       _particles?.destroy(); _particles = null;
       _timeline?.destroy(); _timeline = null;
       _unsubStack?.(); _unsubStack = null;
