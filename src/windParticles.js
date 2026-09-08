@@ -14,8 +14,8 @@
 //   3. stopy: obrazovková textúra sa prekreslí s útlmom a doň sa nakreslia
 //      nové body; pri pohybe kamery sa stopy zotrú rýchlo (Windy ich maže).
 // Beží vo vlastnom rAF; Cesium kamera dá čerstvé matice bez nutnosti render
-// snímku (viewMatrix je lenivý getter). 2D režim (PLÁTNO) a chýbajúci
-// WebGL2 = bez častíc, vrstva ostáva (drapéria poľa).
+// snímku (viewMatrix je lenivý getter). PLÁTNO (2D) a Columbus kreslia cez
+// projekciu Cesia (u_mode), chýbajúci WebGL2 = bez častíc, vrstva ostáva.
 
 export const WIND_PARTICLE_COUNT_DEFAULT = 16_384; // 128 × 128 — jemná sieť, nie hustá
 // Ladenie 2026-09-08 (používateľ: „jemné a bez rastrov, nie vybodkované"):
@@ -114,11 +114,21 @@ uniform mat4 u_vp;
 uniform vec3 u_cam;
 uniform vec2 u_ramp_range;
 uniform float u_max_seg_m;
+uniform float u_mode; // 0 = 3D glóbus (ECEF), 1 = plátno geografická projekcia, 2 = plátno Mercator
 out float v_speed_t;
 out float v_vis;
 const float A = 6378137.0;
 const float B = 6356752.314245;
+const float PI = 3.141592653589793;
 vec2 decode(vec4 color) { return vec2(color.r / 255.0 + color.b, color.g / 255.0 + color.a); }
+// Cesium 2D/Columbus: svet = (0, x, y) projekcie; geografická x = lon·R, y = lat·R;
+// Mercator y = R·ln(tan(π/4 + lat/2)). Os X sveta nesie výšku (tu 0).
+vec3 projected(vec2 pos) {
+  float lon = radians(pos.x * 360.0 - 180.0);
+  float lat = radians(clamp(pos.y * 180.0 - 90.0, -89.5, 89.5));
+  float y = u_mode > 1.5 ? A * log(tan(PI * 0.25 + lat * 0.5)) : A * lat;
+  return vec3(0.0, A * lon, y);
+}
 vec3 ecef(vec2 pos) {
   float lon = radians(pos.x * 360.0 - 180.0);
   float lat = radians(pos.y * 180.0 - 90.0);
@@ -143,10 +153,12 @@ void main() {
   vec2 wuv = vec2(fract((lonDeg + 360.0) / 360.0), (90.0 - latDeg) / 180.0);
   vec2 w = mix(u_wind_min, u_wind_max, mix(texture(u_wind, wuv).rg, texture(u_wind_next, wuv).rg, u_mix));
   v_speed_t = clamp((length(w) - u_ramp_range.x) / (u_ramp_range.y - u_ramp_range.x), 0.0, 1.0);
-  vec3 pNow = ecef(posNow);
-  vec3 pPrev = ecef(posPrev);
-  // Úsečka len keď sú OBA konce viditeľné a častica sa nezrodila inde (skok cez šev ±180° / respawn).
-  float ok = visible(pNow) * visible(pPrev) * (distance(pNow, pPrev) < u_max_seg_m ? 1.0 : 0.0);
+  bool flat = u_mode > 0.5;
+  vec3 pNow = flat ? projected(posNow) : ecef(posNow);
+  vec3 pPrev = flat ? projected(posPrev) : ecef(posPrev);
+  // Úsečka len keď sú OBA konce viditeľné (na plátne vždy) a častica sa nezrodila inde (skok cez šev ±180° / respawn).
+  float vis = flat ? 1.0 : visible(pNow) * visible(pPrev);
+  float ok = vis * (distance(pNow, pPrev) < u_max_seg_m ? 1.0 : 0.0);
   v_vis = ok;
   vec4 clip = u_vp * vec4(a_end > 0.5 ? pNow : pPrev, 1.0);
   gl_Position = ok > 0.5 ? clip : vec4(2.0, 2.0, 2.0, 1.0);
@@ -201,6 +213,21 @@ function texture(gl, filter, data, width, height) {
   return tex;
 }
 
+/**
+ * Režim scény pre shader: 0 = 3D glóbus, 1 = plátno/Columbus s geografickou
+ * projekciou, 2 = plátno s Mercatorom, −1 = prechod (morph). Pure.
+ * @param {{mode?: number, mapProjection?: object}|null} scene
+ * @param {object} [CesiumNs] test seam (default globalThis.Cesium)
+ */
+export function sceneModeCode(scene, CesiumNs = globalThis.Cesium) {
+  const SceneMode = CesiumNs?.SceneMode;
+  if (!scene || scene.mode === undefined || !SceneMode) return 0;
+  if (scene.mode === SceneMode.MORPHING) return -1;
+  if (scene.mode === SceneMode.SCENE3D) return 0;
+  const mercator = CesiumNs?.WebMercatorProjection && scene.mapProjection instanceof CesiumNs.WebMercatorProjection;
+  return mercator ? 2 : 1;
+}
+
 /** Počet častíc → rozmer štvorcovej stavovej textúry. Pure. */
 export function particleTextureSize(count) {
   return Math.max(16, Math.ceil(Math.sqrt(Math.max(1, count))));
@@ -234,7 +261,7 @@ export function createWindParticles(container, viewer, {
   canvas.setAttribute('aria-hidden', 'true');
   container.appendChild(canvas);
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, preserveDrawingBuffer: false });
-  const state = { supported: Boolean(gl), running: false, visible: true, frame: null, windSet: false, fps: 0, moving: false };
+  const state = { supported: Boolean(gl), running: false, visible: true, frame: null, windSet: false, fps: 0, moving: false, mode: 0 };
   if (!gl) return stub(canvas, state);
 
   const res = particleTextureSize(count);
@@ -330,13 +357,15 @@ export function createWindParticles(container, viewer, {
     state.frame = requestFrame(frame);
     if (!state.running || !state.visible || !windTex) return;
     const scene = viewer?.scene;
-    if (scene?.mode !== undefined && globalThis.Cesium?.SceneMode && scene.mode !== globalThis.Cesium.SceneMode.SCENE3D) {
-      // 2D / Columbus: bez častíc (projekcia by nesedela) — plátno vyprázdniť.
+    const mode = sceneModeCode(scene);
+    if (mode < 0) {
+      // Prechod medzi režimami (morph): plátno vyprázdniť, kým sa nedokončí.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, width || 1, height || 1);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
       return;
     }
+    if (mode !== state.mode) { state.mode = mode; clearScreen(); }
     resize();
     const cam = readCamera();
     if (!cam) return;
@@ -363,6 +392,7 @@ export function createWindParticles(container, viewer, {
     bindTex(stateA, 0); gl.uniform1i(progDraw.uniforms.u_particles, 0);
     bindTex(stateB, 4); gl.uniform1i(progDraw.uniforms.u_particles_prev, 4);
     gl.uniform1f(progDraw.uniforms.u_max_seg_m, WIND_MAX_SEGMENT_M);
+    gl.uniform1f(progDraw.uniforms.u_mode, mode);
     bindTex(windTex, 1); gl.uniform1i(progDraw.uniforms.u_wind, 1);
     bindTex(windNextTex || windTex, 5); gl.uniform1i(progDraw.uniforms.u_wind_next, 5);
     gl.uniform1f(progDraw.uniforms.u_mix, windNextTex ? windMix : 0);

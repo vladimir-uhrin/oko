@@ -3199,11 +3199,12 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   letter-spacing: 0.05em;
 }
 /* Meteorológia sveta (2026-09-08, prototyp): plátno GPU častíc nad scénou
-   (v #cesiumContainer, z4 = nad maskou z1, pod detekciou z5) a spodná časová os. */
+   (v #cesiumContainer, z0 = nad WebGL plátnom Cesia, POD maskou priezoru z1 —
+   používateľ: „nesmie byť mimo" priezoru) a spodná časová os. */
 .wind-particles-canvas {
   position: absolute;
   inset: 0;
-  z-index: 4;
+  z-index: 0;
   display: block;
   width: 100%;
   height: 100%;
