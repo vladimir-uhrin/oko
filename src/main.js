@@ -9,6 +9,7 @@ import earthquakesLayer from './data/earthquakes.js';
 import volcanoesLayer from './data/volcanoes.js';
 import naturalEventsLayer from './data/naturalEvents.js';
 import shmuRadarLayer from './data/shmuRadar.js';
+import meteoLayer from './data/meteoLayer.js';
 import satellitesLayer from './data/satellites.js';
 import rocketLaunchesLayer from './data/rocketLaunches.js';
 import trafficLayer from './data/traffic.js';
@@ -285,6 +286,14 @@ async function init() {
     // Aktívny podklad pre dátové vrstvy (activeMapStack.js): prekryvy NASA GIBS
     // na fotoreáli nemajú povrch a riadok panelu to musí povedať.
     bindActiveMapStackToEvents(window, mapStackController.getActiveStack());
+    // Vrstva si môže vyžiadať vhodný podklad (meteorológia: Blue Marble
+    // namiesto fotoreálu, pri vypnutí späť). Kontrolér ostáva jediným
+    // vlastníkom prepínania — vrstvy len prosia udalosťou.
+    window.addEventListener('gev:request-map-stack', (event) => {
+      const id = String(event?.detail?.id || '');
+      if (!id || !mapStackController.getStack(id) || mapStackController.getActiveId() === id) return;
+      void mapStackController.setStack(id);
+    });
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
@@ -312,6 +321,8 @@ async function init() {
     dataManager.register(volcanoesLayer);
     dataManager.register(naturalEventsLayer);
     dataManager.register(shmuRadarLayer);
+    // Meteorológia sveta (2026-09-08, prototyp GFS: pole + GPU častice + os).
+    dataManager.register(meteoLayer);
     dataManager.register(satellitesLayer);
     dataManager.register(rocketLaunchesLayer);
     rocketLaunchesLayer.attachDataManager(dataManager);

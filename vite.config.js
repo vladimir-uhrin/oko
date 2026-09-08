@@ -30,6 +30,8 @@ import fs from 'node:fs';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
 import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAirframesMessage } from './src/data/acarsMessages.js';
+import { parseNetcdf3, gridOf } from './src/data/netcdf3.js';
+import { METEO_FIELDS, TEMP_RANGE, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, forecastSteps, quantize } from './src/data/meteoField.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -3007,6 +3009,213 @@ function airframesProxy() {
           });
         } catch (err) {
           return send(500, { error: String(err?.message || err) });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * Meteorológia sveta — GFS 0,25° (NOAA/NCEP, verejná doména USA) cez NSF
+ * Unidata THREDDS NetCDF Subset Service (2026-09-08, prototyp „ako Windy").
+ *
+ * Prečo THREDDS a nie NOMADS: NOMADS OpenDAP bol zrušený (SCN 25-81) a ostal
+ * len GRIB2 filter → THREDDS `Best` dataset vracia výrez ako NetCDF-3, ktorý
+ * číta src/data/netcdf3.js bez GRIB knižnice. Jeden dopyt = jedno pole × jeden
+ * čas × celý svet (721×1440, ~8 MB vietor u+v, ~4 MB teplota, ~3 s).
+ *
+ * Endpointy:
+ *   GET /api/meteo/catalog             → { model, run, steps[], attribution, stale }
+ *   GET /api/meteo/slice?var=&time=    → PNG 1440×721 (wind: R=u, G=v, B=rýchlosť; temp: R=°C),
+ *                                        stĺpce posunuté tak, že stĺpec 0 = −180° (Cesium obdĺžnik)
+ *   GET /api/meteo/status
+ * Rozpočet: disk cache `.gev-cache/meteo/<var>/<iso>.png` (+ .json s behom), TTL 3 h
+ * (GFS beží každých 6 h), jeden dopyt naraz na (var, čas), strop 60 upstream
+ * dopytov za hodinu, timeout 90 s, strop 40 MB; chyba → stale PNG ak je.
+ * PNG kóduje devDependency `sharp` (lenivý import; bez neho 503).
+ */
+function meteoProxy() {
+  const NCSS = 'https://thredds.ucar.edu/thredds/ncss/grid/grib/NCEP/GFS/Global_0p25deg/Best';
+  const TTL_MS = 3 * 3600_000;
+  const TIMEOUT_MS = 90_000;
+  const MAX_BYTES = 40 * 1024 * 1024;
+  const RATE_PER_HOUR = 60;
+  const ATTRIBUTION = 'GFS 0.25° forecast — NOAA/NCEP (public domain) via NSF Unidata THREDDS Data Server';
+  const cacheDir = () => String(process.env.METEO_CACHE_DIR || '').trim() || path.join(process.cwd(), '.gev-cache', 'meteo');
+  const inflight = new Map();
+  let windowStartMs = 0;
+  let windowCount = 0;
+  let upstreamRequests = 0;
+  let lastRun = null;
+  let sharpModule = null;
+
+  async function getSharp() {
+    if (sharpModule) return sharpModule;
+    try { sharpModule = (await import('sharp')).default; } catch { sharpModule = null; }
+    return sharpModule;
+  }
+
+  function rateOk() {
+    const now = Date.now();
+    if (now - windowStartMs >= 3600_000) { windowStartMs = now; windowCount = 0; }
+    return windowCount < RATE_PER_HOUR;
+  }
+
+  function ncssUrl(field, iso) {
+    const vars = field.vars.map((v) => `var=${encodeURIComponent(v)}`).join('&');
+    return `${NCSS}?${vars}&north=90&south=-90&west=-180&east=180&horizStride=1&time=${encodeURIComponent(iso)}&vertCoord=${field.vertCoord}&accept=netcdf`;
+  }
+
+  /** Beh modelu z reftime („Hour since 2026-09-01T00:00:00Z"). */
+  function runIsoOf(nc) {
+    const v = nc.vars.reftime || nc.vars.time;
+    if (!v) return null;
+    const m = String(v.attrs?.units || '').match(/since\s+(\S+)/i);
+    const base = m ? Date.parse(m[1]) : NaN;
+    const hours = Number(nc.read(v.name)[0]);
+    if (!Number.isFinite(base) || !Number.isFinite(hours)) return null;
+    const unit = /^hour/i.test(String(v.attrs.units)) ? 3600_000 : (/^minute/i.test(String(v.attrs.units)) ? 60_000 : 1000);
+    return new Date(base + hours * unit).toISOString();
+  }
+
+  /**
+   * NetCDF → RGBA raster 1440×721 so stĺpcom 0 = −180°. Exportované cez
+   * closure pre testy nie je — logika je krátka a overená naživo.
+   */
+  function rasterize(fieldId, nc) {
+    const field = METEO_FIELDS[fieldId];
+    const grids = field.vars.map((name) => gridOf(nc, name));
+    const { rows, cols, lat, lon } = grids[0];
+    const northUp = lat[0] > lat[lat.length - 1];
+    // Posun stĺpcov: nájdi stĺpec s lon ≥ 180 (alebo −180) a otoč polovice.
+    let shift = 0;
+    for (let c = 0; c < cols; c += 1) { if (lon[c] >= 180 || lon[c] < 0 && c === 0) { shift = c; break; } }
+    if (lon[0] < 0) shift = 0; // NCSS už vrátil −180..180
+    const out = Buffer.alloc(rows * cols * 4);
+    for (let r = 0; r < rows; r += 1) {
+      const srcRow = northUp ? r : rows - 1 - r;
+      for (let c = 0; c < cols; c += 1) {
+        const srcCol = (c + shift) % cols;
+        const i = srcRow * cols + srcCol;
+        const o = (r * cols + c) * 4;
+        if (fieldId === 'wind') {
+          const u = grids[0].values[i];
+          const v = grids[1].values[i];
+          out[o] = quantize(u, WIND_COMPONENT_RANGE);
+          out[o + 1] = quantize(v, WIND_COMPONENT_RANGE);
+          out[o + 2] = quantize(Math.hypot(u, v), WIND_SPEED_RANGE);
+        } else {
+          const tc = grids[0].values[i] - 273.15;
+          const q = quantize(tc, TEMP_RANGE);
+          out[o] = q; out[o + 1] = q; out[o + 2] = q;
+        }
+        out[o + 3] = 255;
+      }
+    }
+    return { data: out, width: cols, height: rows };
+  }
+
+  async function fetchSlice(fieldId, iso) {
+    const field = METEO_FIELDS[fieldId];
+    const sharp = await getSharp();
+    if (!sharp) throw Object.assign(new Error('sharp unavailable'), { code: 'NO_SHARP' });
+    windowCount += 1;
+    upstreamRequests += 1;
+    const res = await fetch(ncssUrl(field, iso), {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { 'User-Agent': 'OKO dev (personal, non-commercial; cached 3 h)' },
+    });
+    if (!res.ok) throw new Error(`THREDDS HTTP ${res.status}`);
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_BYTES) throw new Error('THREDDS: oversized');
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_BYTES) throw new Error('THREDDS: oversized');
+    const nc = parseNetcdf3(buf);
+    const run = runIsoOf(nc);
+    const raster = rasterize(fieldId, nc);
+    const png = await sharp(raster.data, { raw: { width: raster.width, height: raster.height, channels: 4 } }).png({ compressionLevel: 6 }).toBuffer();
+    return { png, run };
+  }
+
+  function paths(fieldId, iso) {
+    const dir = path.join(cacheDir(), fieldId);
+    const stem = iso.replace(/[:]/g, '');
+    return { dir, png: path.join(dir, `${stem}.png`), meta: path.join(dir, `${stem}.json`) };
+  }
+
+  async function readCached(fieldId, iso) {
+    const p = paths(fieldId, iso);
+    try {
+      const meta = JSON.parse(await fsp.readFile(p.meta, 'utf8'));
+      const png = await fsp.readFile(p.png);
+      return { png, meta };
+    } catch { return null; }
+  }
+
+  async function getSlice(fieldId, iso) {
+    const cached = await readCached(fieldId, iso);
+    if (cached && Date.now() - Date.parse(cached.meta.fetchedAt) < TTL_MS) {
+      if (cached.meta.run) lastRun = cached.meta.run;
+      return { png: cached.png, run: cached.meta.run, stale: false, cached: true };
+    }
+    const key = `${fieldId}|${iso}`;
+    if (inflight.has(key)) return inflight.get(key);
+    if (!rateOk()) {
+      if (cached) return { png: cached.png, run: cached.meta.run, stale: true, throttled: true };
+      throw Object.assign(new Error('meteo: hourly upstream budget exhausted'), { code: 'BUDGET' });
+    }
+    const job = (async () => {
+      try {
+        const { png, run } = await fetchSlice(fieldId, iso);
+        const p = paths(fieldId, iso);
+        await fsp.mkdir(p.dir, { recursive: true });
+        await fsp.writeFile(p.png, png);
+        await fsp.writeFile(p.meta, JSON.stringify({ run, fetchedAt: new Date().toISOString(), iso, field: fieldId }));
+        if (run) lastRun = run;
+        return { png, run, stale: false };
+      } catch (err) {
+        if (cached) return { png: cached.png, run: cached.meta.run, stale: true, error: String(err?.message || err) };
+        throw err;
+      } finally {
+        inflight.delete(key);
+      }
+    })();
+    inflight.set(key, job);
+    return job;
+  }
+
+  return {
+    name: 'meteo-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/meteo', async (req, res) => {
+        const send = (status, obj) => {
+          res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const url = new URL(String(req.url || '/'), 'http://localhost');
+          if (url.pathname === '/catalog') {
+            return send(200, { model: 'GFS 0.25°', run: lastRun, steps: forecastSteps(Date.now()), attribution: ATTRIBUTION, stale: false });
+          }
+          if (url.pathname === '/status') {
+            return send(200, { upstreamRequests, windowCount, ratePerHour: RATE_PER_HOUR, run: lastRun, cacheDir: cacheDir(), sharp: Boolean(await getSharp()) });
+          }
+          if (url.pathname !== '/slice') return send(404, { error: 'unknown endpoint' });
+          const fieldId = String(url.searchParams.get('var') || '');
+          const iso = String(url.searchParams.get('time') || '');
+          if (!METEO_FIELDS[fieldId]) return send(400, { error: 'unknown var' });
+          if (!/^\d{4}-\d{2}-\d{2}T\d{2}:00:00Z$/.test(iso)) return send(400, { error: 'time must be a whole-hour ISO UTC' });
+          const slice = await getSlice(fieldId, iso);
+          res.writeHead(200, {
+            'Content-Type': 'image/png',
+            'Cache-Control': 'private, max-age=600',
+            'X-Meteo-Run': slice.run || '',
+            'X-Meteo-Stale': slice.stale ? '1' : '0',
+          });
+          return res.end(slice.png);
+        } catch (err) {
+          const code = err?.code === 'BUDGET' ? 429 : (err?.code === 'NO_SHARP' ? 503 : 502);
+          return send(code, { error: String(err?.message || err) });
         }
       });
     },
@@ -8593,6 +8802,7 @@ export default defineConfig(({ mode }) => {
       terrainHeightsProxy(),
       adsbdbProxy(),
       airframesProxy(),
+      meteoProxy(),
       metarProxy(),
       youtubeLiveProxy(),
       overpassProxy(),

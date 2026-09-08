@@ -296,6 +296,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'local-ports', token: 'o', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-ship-density', token: 'n', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-shipping-lanes', token: 'k', disposition: 'enabled-only' }),
+  // Meteorológia (2026-09-08): písmená sú obsadené, ďalšia voľná číslica.
+  Object.freeze({ id: 'meteo-gfs', token: '6', disposition: 'enabled-only' }),
   Object.freeze({ id: 'military', token: 'm', disposition: 'enabled+mirrored-options', optionOwner: 'flights' }),
   Object.freeze({ id: 'military-awareness', token: 'g', disposition: 'enabled-only' }),
   Object.freeze({ id: 'military-installations', token: 'i', disposition: 'enabled-only' }),
