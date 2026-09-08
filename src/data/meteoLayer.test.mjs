@@ -30,7 +30,8 @@ function harness({ isolineFactory = null, gridReader = null, catalog = { model: 
   const win = { dispatchEvent(e) { calls.events.push(e.detail); } };
   const particles = {
     isSupported: () => true,
-    setWind: (img, r) => calls.particles.push(['setWind', r.uRange[0]]),
+    setWind: (img, r) => calls.particles.push(['setWind', r.uRange[0], Boolean(r.next)]),
+    setMix: (f) => calls.particles.push(['setMix', Number(f.toFixed(2))]),
     setRamp: () => calls.particles.push(['setRamp']),
     start: () => calls.particles.push(['start']),
     stop: () => calls.particles.push(['stop']),
@@ -61,7 +62,8 @@ test('enable: katalóg → os so 3 krokmi, rez vetra načítaný, drapéria + č
   layer.init(viewer);
   layer.enable();
   await new Promise((r) => setTimeout(r, 10));
-  assert.deepEqual(calls.fetch, ['/api/meteo/catalog']);
+  assert.equal(calls.fetch[0], '/api/meteo/catalog');
+  assert.ok(calls.fetch.some((u) => u.endsWith('natural_earth/places.json')), 'mestá pre popisky sa načítajú raz');
   assert.equal(timeline.steps.length, 3);
   assert.equal(timeline.shown, true);
   // Jazyk v Node je EN (i18n default), v prehliadači SK — test berie oba.
@@ -162,6 +164,52 @@ test('fáza polia: TLAK → izobary (mriežka z obrázka → marching squares �
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(removed.length, 1, 'izobary odstránené pri zmene poľa');
   assert.equal(calls.primitives[0].material.uniforms.alpha, 0.96);
+  layer.disable();
+  _resetActiveMapStackForTest();
+});
+
+test('plynulé prehrávanie (Windy): mixT a častice idú spojito 0→1 medzi krokmi, potom sa krok prepne; ďalší krok sa v materiáli aj časticiach načíta vopred', async () => {
+  _resetActiveMapStackForTest();
+  setActiveMapStack({ id: 'osm' });
+  const frames = [];
+  const calls = { particles: [], primitives: [] };
+  let onPlay = null;
+  const timeline = { index: 0, setSteps() {}, setIndex(i) { this.index = i; }, getIndex() { return this.index; }, setPlaying() {}, isPlaying: () => false, setStatus() {}, show() {}, hide() {}, destroy() {} };
+  const layer = createMeteoLayer({
+    fetchImpl: async () => ({ ok: true, json: async () => ({ model: 'GFS', run: '2026-09-08T12:00:00Z', steps: ['2026-09-08T18:00:00Z', '2026-09-08T21:00:00Z', '2026-09-09T00:00:00Z'], attribution: '', stale: false }) }),
+    imageLoader: async (url) => ({ src: url }),
+    primitiveFactory: ({ image, imageNext, field }) => { const p = { primitive: { show: false }, material: { uniforms: { image, imageNext, mixT: 0, channel: field.channel } } }; calls.primitives.push(p); return p; },
+    particlesFactory: () => ({ isSupported: () => true, setWind: (i, r) => calls.particles.push(['setWind', Boolean(r.next), r.clear]), setMix: (f) => calls.particles.push(['setMix', Number(f.toFixed(2))]), setRamp() {}, start() {}, stop() {}, destroy() {} }),
+    timelineFactory: (doc, opts) => { onPlay = opts.onPlay; return timeline; },
+    doc: fakeDoc(), win: { dispatchEvent() {} },
+    requestFrame: (cb) => { frames.push(cb); return frames.length; },
+    cancelFrame: () => {},
+  });
+  layer.init({ container: {}, scene: { primitives: { add() {}, remove() {} } } });
+  layer.enable();
+  await new Promise((r) => setTimeout(r, 10));
+  const drape = calls.primitives.at(-1);
+  assert.ok(drape.material.uniforms.imageNext.src.includes('time=2026-09-08T21'), 'ďalší krok je v materiáli');
+  assert.deepEqual(calls.particles.find((c) => c[0] === 'setWind'), ['setWind', true, true], 'častice dostali ďalší krok; prvé nastavenie stopy zmaže');
+  // play: tick po 1 200 ms = polovica kroku (METEO_PLAY_STEP_MS 2 400)
+  onPlay(true);
+  const tick = () => { const cb = frames.pop(); frames.length = 0; return cb; };
+  // dt na snímok je zhora obmedzené na 100 ms (skok karty nezrýchli čas): 12 × 100 ms = 1 200 ms ≈ polovica kroku
+  let now = 1000;
+  tick()(now);           // prvý snímok: dt 16 ms
+  for (let i = 0; i < 12; i += 1) { now += 100; tick()(now); }
+  const f = layer._getStateForTest().fraction;
+  assert.ok(f > 0.5 && f < 0.52, `podiel ~0,5: ${f}`);
+  assert.ok(Math.abs(drape.material.uniforms.mixT - f) < 1e-9, 'mixT drapérie = podiel');
+  assert.equal(calls.particles.at(-1)[0], 'setMix');
+  for (let i = 0; i < 14; i += 1) { now += 100; tick()(now); }
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(layer._getStateForTest().index, 1, 'po 1,0 sa krok prepol');
+  assert.equal(timeline.index, 1);
+  const lastWind = calls.particles.filter((c) => c[0] === 'setWind').at(-1);
+  assert.equal(lastWind[2], false, 'pri prehrávaní sa stopy nemažú (spojitý vietor)');
+  onPlay(false);
+  assert.equal(layer._getStateForTest().fraction, 0);
   layer.disable();
   _resetActiveMapStackForTest();
 });

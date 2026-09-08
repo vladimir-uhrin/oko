@@ -24,8 +24,9 @@ import {
   normalizeCatalog, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
 } from './meteoField.js';
 import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
+import { createPlaceLabels, loadPlaces, placeValueText, sampleGrid, updatePlaceLabelTexts } from './meteoPlaces.js';
 import { createWindParticles } from '../windParticles.js';
-import { createMeteoTimeline, METEO_PLAY_INTERVAL_MS } from '../meteoTimeline.js';
+import { createMeteoTimeline } from '../meteoTimeline.js';
 
 export { METEO_LAYER_ID };
 export const METEO_CATALOG_URL = '/api/meteo/catalog';
@@ -40,6 +41,11 @@ export const METEO_FIELD_ALPHA = 0.62;
 export const METEO_BASEMAP_ID = 'stadia-dark';
 /** Koľko krokov dopredu prednačítať. */
 export const METEO_PREFETCH_STEPS = 2;
+/** Trvanie jedného kroku pri plynulom prehrávaní (ms) — 3 h predpovede za 2,4 s. */
+export const METEO_PLAY_STEP_MS = 2_400;
+/** Útlm podľa výšky kamery: plné pole nad 20 km, nič pod 5 km (drapéria je 2 km nad elipsoidom). */
+export const METEO_FADE_IN_HEIGHT_M = 20_000;
+export const METEO_FADE_OUT_HEIGHT_M = 5_000;
 
 /**
  * Cesium Material: hodnota z textúry (kanál `channel`, 0..1) → skutočná
@@ -51,6 +57,8 @@ export function fieldMaterialFabric() {
     type: 'OkoMeteoField',
     uniforms: {
       image: Cesium.Material.DefaultImageId,
+      imageNext: Cesium.Material.DefaultImageId,
+      mixT: 0,
       ramp: Cesium.Material.DefaultImageId,
       channel: 0,
       decodeMin: 0,
@@ -62,7 +70,8 @@ export function fieldMaterialFabric() {
     source: `
       czm_material czm_getMaterial(czm_materialInput materialInput) {
         czm_material material = czm_getDefaultMaterial(materialInput);
-        vec4 px = texture(image, materialInput.st);
+        // Interpolácia v čase ako Windy: hodnota = mix(krok, ďalší krok, mixT).
+        vec4 px = mix(texture(image, materialInput.st), texture(imageNext, materialInput.st), mixT);
         float raw = channel < 0.5 ? px.r : (channel < 1.5 ? px.g : px.b);
         float value = decodeMin + raw * (decodeMax - decodeMin);
         float u = clamp((value - rampMin) / (rampMax - rampMin), 0.0, 1.0);
@@ -92,9 +101,11 @@ export function rampCanvas(doc, stops, range) {
  * Drapéria celého sveta s meteo materiálom. Injektovateľné v testoch.
  * @param {{image: HTMLImageElement|HTMLCanvasElement, ramp: HTMLCanvasElement, field: object}} input
  */
-export function createFieldPrimitive({ image, ramp, field }) {
+export function createFieldPrimitive({ image, imageNext = null, ramp, field }) {
   const material = new Cesium.Material({ fabric: fieldMaterialFabric() });
   material.uniforms.image = image;
+  material.uniforms.imageNext = imageNext || image;
+  material.uniforms.mixT = 0;
   material.uniforms.ramp = ramp;
   material.uniforms.channel = field.channel;
   material.uniforms.decodeMin = field.decode[0];
@@ -221,6 +232,8 @@ export function createMeteoLayer({
   timelineFactory = createMeteoTimeline,
   doc = globalThis.document,
   win = globalThis.window,
+  requestFrame = (cb) => globalThis.requestAnimationFrame(cb),
+  cancelFrame = (id) => globalThis.cancelAnimationFrame(id),
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   let _viewer = null;
@@ -242,7 +255,17 @@ export function createMeteoLayer({
   let _rowListener = null;
   let _unsubStack = null;
   let _loadToken = 0;
-  let _isolines = null; // Cesium.PolylineCollection alebo null
+  let _heightFade = 1; // 1 = pohľad zhora, 0 = kamera pod/pri drapérii (pole aj častice zhasnú)
+  let _preRender = null;
+  let _isolines = null; // Cesium.PrimitiveCollection alebo null
+  let _grid = null; // mriežka aktuálneho poľa (izočiary + hodnoty pri mestách)
+  let _places = null; // zoznam miest (null = nenačítané)
+  let _placeLabels = null; // Cesium.LabelCollection
+  let _fraction = 0; // podiel cesty k ďalšiemu kroku (0..1) pri prehrávaní
+  let _playFrame = null;
+  let _playLastMs = 0;
+  let _stepPending = false; // krok sa načítava po prekročení 1,0
+  let _currentImages = { wind: null, windNext: null, field: null, fieldNext: null };
 
   const lang = () => (currentLanguage?.() === 'en' ? 'en' : 'sk');
 
@@ -252,11 +275,40 @@ export function createMeteoLayer({
   }
 
   /** Izobary pre polia s `isolines` (tlak): mriežka z obrázka → marching squares → polylines. */
+  function placeValue(place) {
+    return placeValueText(sampleGrid(_grid, place.lat, place.lon), _field);
+  }
+
+  function clearPlaces() {
+    if (_placeLabels && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_placeLabels);
+    _placeLabels = null;
+  }
+
+  /** Popisky miest nad polom: meno + hodnota poľa (Windy). Načítanie miest raz. */
+  function updatePlaces() {
+    if (!_viewer || !_enabled) return;
+    if (_places === null) {
+      _places = [];
+      loadPlaces(doFetch).then((list) => { _places = list; if (_enabled) updatePlaces(); }).catch((error) => { console.warn('[Data:Meteo] places failed:', error?.message || error); });
+      return;
+    }
+    if (!_places.length) return;
+    if (!_placeLabels) {
+      _placeLabels = createPlaceLabels(_places, { valueText: placeValue });
+      _viewer.scene.primitives.add(_placeLabels);
+    } else {
+      updatePlaceLabelTexts(_placeLabels, _places, placeValue);
+    }
+  }
+
   function updateIsolines(field, image) {
     clearIsolines();
-    if (!field.isolines || !image || !_viewer) return;
+    _grid = null;
+    if (!image || !_viewer) return;
     try {
       const full = gridReader(image, doc, field.channel, field.decode);
+      _grid = full;
+      if (!field.isolines) return;
       const g = downsample(full.values, full.cols, full.rows, ISOLINE_DOWNSAMPLE);
       const dlon = 360 / (g.cols - 1);
       const dlat = -180 / (g.rows - 1);
@@ -302,12 +354,16 @@ export function createMeteoLayer({
     const iso = _catalog.steps[_index];
     if (!iso) return;
     const token = ++_loadToken;
+    const nextIso = _catalog.steps[_index + 1] || null;
     _timeline?.setStatus(t('meteo.loading'));
-    const [windImg, fieldImg] = await Promise.all([
+    const [windImg, fieldImg, windNext, fieldNext] = await Promise.all([
       imageFor('wind', iso),
       _field === 'wind' ? imageFor('wind', iso) : imageFor(_field, iso),
+      nextIso ? imageFor('wind', nextIso) : Promise.resolve(null),
+      nextIso ? (_field === 'wind' ? imageFor('wind', nextIso) : imageFor(_field, nextIso)) : Promise.resolve(null),
     ]);
     if (token !== _loadToken || !_enabled) return;
+    _currentImages = { wind: windImg, windNext, field: fieldImg, fieldNext };
     if (!windImg || !fieldImg) {
       _lastError = t('meteo.slice-failed');
       _timeline?.setStatus(_lastError);
@@ -316,22 +372,26 @@ export function createMeteoLayer({
     _lastError = null;
     const field = METEO_FIELDS[_field];
     if (!_drape) {
-      _drape = primitiveFactory({ image: fieldImg, ramp: _ramps[_field], field });
+      _drape = primitiveFactory({ image: fieldImg, imageNext: fieldNext || fieldImg, ramp: _ramps[_field], field });
       _viewer.scene.primitives.add(_drape.primitive);
     } else {
       _drape.material.uniforms.image = fieldImg;
+      _drape.material.uniforms.imageNext = fieldNext || fieldImg;
+      _drape.material.uniforms.mixT = 0;
       _drape.material.uniforms.ramp = _ramps[_field];
       _drape.material.uniforms.channel = field.channel;
       _drape.material.uniforms.decodeMin = field.decode[0];
       _drape.material.uniforms.decodeMax = field.decode[1];
       _drape.material.uniforms.rampMin = field.rampRange[0];
       _drape.material.uniforms.rampMax = field.rampRange[1];
-      _drape.material.uniforms.alpha = Number.isFinite(field.alpha) ? field.alpha : METEO_FIELD_ALPHA;
     }
-    _drape.primitive.show = true;
+    _drape.material.uniforms.alpha = fieldAlphaNow();
+    _drape.primitive.show = _heightFade > 0.02;
+    _fraction = 0;
     updateIsolines(field, fieldImg);
+    updatePlaces();
     if (_particles && _particlesOn) {
-      _particles.setWind(windImg, { uRange: WIND_COMPONENT_RANGE, vRange: WIND_COMPONENT_RANGE });
+      _particles.setWind(windImg, { uRange: WIND_COMPONENT_RANGE, vRange: WIND_COMPONENT_RANGE, next: windNext, clear: _playFrame === null });
       _particles.start();
     }
     _timeline?.setStatus(_catalog.stale ? t('meteo.stale') : t('meteo.forecast'));
@@ -359,19 +419,62 @@ export function createMeteoLayer({
     _previousStack = null;
   }
 
+  /** Alfa poľa pre aktuálne pole × útlm podľa výšky kamery. */
+  function fieldAlphaNow() {
+    const field = METEO_FIELDS[_field];
+    return (Number.isFinite(field?.alpha) ? field.alpha : METEO_FIELD_ALPHA) * _heightFade;
+  }
+
+  /**
+   * Útlm pri nízkej kamere (2026-09-08 noc): drapéria je 2 km nad elipsoidom, pri
+   * kamere pod ňou zakryla celú obrazovku bielou. Windy je 2D a pozerá vždy zhora;
+   * my pole aj častice od 20 km nadol stlmíme a pod 5 km zhasneme.
+   */
+  function syncHeightFade() {
+    const h = _viewer?.scene?.camera?.positionCartographic?.height;
+    if (!Number.isFinite(h)) return;
+    const fade = Math.max(0, Math.min(1, (h - METEO_FADE_OUT_HEIGHT_M) / (METEO_FADE_IN_HEIGHT_M - METEO_FADE_OUT_HEIGHT_M)));
+    if (Math.abs(fade - _heightFade) < 0.01) return;
+    _heightFade = fade;
+    if (_drape) { _drape.material.uniforms.alpha = fieldAlphaNow(); _drape.primitive.show = _enabled && fade > 0.02; }
+    if (_isolines) _isolines.show = fade > 0.02;
+    _particles?.setVisible(fade > 0.05);
+  }
+
+  /** Plynulé prehrávanie (Windy): mixT a častice idú spojito medzi krokmi, krok sa prepne až pri 1,0. */
+  function applyFraction(f) {
+    _fraction = f;
+    if (_drape) _drape.material.uniforms.mixT = _currentImages.fieldNext ? f : 0;
+    _particles?.setMix(_currentImages.windNext ? f : 0);
+    governorRequestRender('meteo');
+  }
+
   function stopPlay() {
     if (_playTimer) { clearInterval(_playTimer); _playTimer = null; }
+    if (_playFrame !== null) { cancelFrame(_playFrame); _playFrame = null; }
+    applyFraction(0);
   }
 
   function startPlay() {
     stopPlay();
-    _playTimer = setInterval(() => {
-      if (!_catalog) return;
+    _playLastMs = 0;
+    const tick = (nowMs) => {
+      _playFrame = requestFrame(tick);
+      if (!_catalog || !_enabled) return;
+      const dt = _playLastMs ? Math.min(100, nowMs - _playLastMs) : 16;
+      _playLastMs = nowMs;
+      const f = _fraction + dt / METEO_PLAY_STEP_MS;
+      if (f < 1 || !_currentImages.fieldNext) { applyFraction(Math.min(f, 0.999)); return; }
+      // Kým sa nový krok načítava, drž mix na konci (0,999) a NEPREPÍNAJ znova —
+      // inak by sa index posúval každý snímok až po dokončenie fetchu.
+      if (_stepPending) { applyFraction(0.999); return; }
+      _stepPending = true;
       const next = (_index + 1) % _catalog.steps.length;
       _index = next;
       _timeline?.setIndex(next);
-      void applyStep();
-    }, METEO_PLAY_INTERVAL_MS);
+      applyStep().finally(() => { _stepPending = false; });
+    };
+    _playFrame = requestFrame(tick);
   }
 
   const layer = {
@@ -400,6 +503,10 @@ export function createMeteoLayer({
         });
       }
       _unsubStack = onActiveMapStackChange?.(() => { /* podklad sa mení mimo nás — nič */ }) || null;
+      if (viewer?.scene?.preRender?.addEventListener && !_preRender) {
+        _preRender = () => syncHeightFade();
+        viewer.scene.preRender.addEventListener(_preRender);
+      }
       console.log('[Data:Meteo] Initialized');
     },
 
@@ -427,6 +534,8 @@ export function createMeteoLayer({
       _timeline?.hide();
       if (_drape) _drape.primitive.show = false;
       clearIsolines();
+      clearPlaces();
+      _grid = null;
       _particles?.stop();
       restoreBasemap();
       governorRequestRender('meteo');
@@ -504,16 +613,18 @@ export function createMeteoLayer({
 
     /** Test seam. */
     _getStateForTest() {
-      return { enabled: _enabled, index: _index, field: _field, particlesOn: _particlesOn, catalog: _catalog, drape: Boolean(_drape), previousStack: _previousStack };
+      return { enabled: _enabled, index: _index, field: _field, particlesOn: _particlesOn, catalog: _catalog, drape: Boolean(_drape), previousStack: _previousStack, fraction: _fraction, places: _places?.length ?? null, labels: Boolean(_placeLabels), grid: Boolean(_grid) };
     },
 
     destroy(viewer) {
       this.disable();
       if (_drape) { viewer?.scene?.primitives?.remove?.(_drape.primitive); _drape = null; }
       clearIsolines();
+      clearPlaces();
       _particles?.destroy(); _particles = null;
       _timeline?.destroy(); _timeline = null;
       _unsubStack?.(); _unsubStack = null;
+      if (_preRender) { viewer?.scene?.preRender?.removeEventListener?.(_preRender); _preRender = null; }
       _images.clear();
     },
   };

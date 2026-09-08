@@ -105,3 +105,9 @@ Podklad: GIBS Blue Marble (automaticky pri zapnutí). Ďalšie polia, radar, izo
 Tlak MSL s izobarami (marching squares, meteoIsolines.js, každé 4 hPa, 1013 zvýraznená), zrážky (mm/h,
 priehľadné bez javu), oblačnosť (%), nárazy vetra; čipy v riadku vrstvy. Ďalej: radar (RainViewer po ToS),
 GIBS geostacionárne snímky, meteogram po kliknutí, izočiary s popiskami, ECMWF/ICON.
+
+## 2026-09-08 noc — tri techniky Windy
+
+Popisky miest s hodnotou nad polom (Natural Earth, vlastná LabelCollection — CARTO dlaždice majú bez kľúča vodoznak),
+interpolácia v čase (mix dvoch rezov v materiáli aj v časticiach, plynulé prehrávanie 2,4 s/krok), vek častíc (pevná fáza).
+Útlm poľa pod 20 km výšky kamery (pod drapériou bola biela obrazovka).

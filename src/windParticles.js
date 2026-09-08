@@ -32,6 +32,8 @@ export const WIND_SIM_SECONDS_PER_FRAME = 320;
 export const WIND_SCREEN_SCALE = 0.55;
 /** Úsečka dlhšia než toto (m) = častica sa zrodila inde → nekresliť. */
 export const WIND_MAX_SEGMENT_M = 300_000;
+/** Vek častice v snímkoch (Windy/nullschool: každá má pevnú fázu → rovnomerná hustota, nie zhluky). */
+export const WIND_PARTICLE_MAX_AGE_FRAMES = 240;
 
 const WGS84_A = 6378137.0;
 const WGS84_B = 6356752.314245;
@@ -54,12 +56,16 @@ const UPDATE_FS = `#version 300 es
 precision highp float;
 uniform sampler2D u_particles;
 uniform sampler2D u_wind;
+uniform sampler2D u_wind_next; // ďalší krok predpovede (interpolácia v čase ako Windy)
+uniform float u_mix;           // 0 = u_wind, 1 = u_wind_next
 uniform vec2 u_wind_min;   // u,v min (m/s)
 uniform vec2 u_wind_max;   // u,v max (m/s)
 uniform float u_rand_seed;
 uniform float u_dt;        // simulované sekundy na snímok
 uniform float u_drop_rate;
 uniform float u_drop_rate_bump;
+uniform float u_frame;     // počítadlo snímkov (vek)
+uniform float u_max_age;   // vek v snímkoch
 in vec2 v_uv;
 out vec4 o;
 const vec3 rand_constants = vec3(12.9898, 78.233, 4375.85453);
@@ -71,7 +77,7 @@ void main() {
   float lat = pos.y * 180.0 - 90.0;
   // GFS mriežka: stĺpce 0..360° E (začína na 0°), riadok 0 = 90° N.
   vec2 wuv = vec2(fract((lon + 360.0) / 360.0), (90.0 - lat) / 180.0);
-  vec2 w = mix(u_wind_min, u_wind_max, texture(u_wind, wuv).rg);
+  vec2 w = mix(u_wind_min, u_wind_max, mix(texture(u_wind, wuv).rg, texture(u_wind_next, wuv).rg, u_mix));
   float speed = length(w);
   float speed_t = clamp(speed / 40.0, 0.0, 1.0);
   float coslat = max(cos(radians(lat)), 0.15);
@@ -80,7 +86,11 @@ void main() {
   vec2 next = vec2(fract(pos.x + dlon / 360.0), clamp(pos.y + dlat / 180.0, 0.002, 0.998));
   vec2 seed = (pos + v_uv) * u_rand_seed;
   float drop_rate = u_drop_rate + speed_t * u_drop_rate_bump;
-  float drop = step(1.0 - drop_rate, rand(seed));
+  // Vek: každá častica má pevnú fázu (hash jej miesta v textúre), zaniká raz za
+  // u_max_age snímkov — rovnomerné rozloženie vekov = rovnomerná hustota čiar.
+  float phase = rand(v_uv * 7.31) * u_max_age;
+  float aged = step(mod(u_frame + phase, u_max_age), 0.999);
+  float drop = max(step(1.0 - drop_rate, rand(seed)), aged);
   vec2 random_pos = vec2(rand(seed + 1.3), rand(seed + 2.1));
   // Rovnomerne po ploche gule: lat = asin(2r-1).
   random_pos.y = (degrees(asin(random_pos.y * 2.0 - 1.0)) + 90.0) / 180.0;
@@ -95,6 +105,8 @@ in float a_end;
 uniform sampler2D u_particles;
 uniform sampler2D u_particles_prev;
 uniform sampler2D u_wind;
+uniform sampler2D u_wind_next;
+uniform float u_mix;
 uniform vec2 u_wind_min;
 uniform vec2 u_wind_max;
 uniform float u_particles_res;
@@ -129,7 +141,7 @@ void main() {
   float lonDeg = pos.x * 360.0 - 180.0;
   float latDeg = pos.y * 180.0 - 90.0;
   vec2 wuv = vec2(fract((lonDeg + 360.0) / 360.0), (90.0 - latDeg) / 180.0);
-  vec2 w = mix(u_wind_min, u_wind_max, texture(u_wind, wuv).rg);
+  vec2 w = mix(u_wind_min, u_wind_max, mix(texture(u_wind, wuv).rg, texture(u_wind_next, wuv).rg, u_mix));
   v_speed_t = clamp((length(w) - u_ramp_range.x) / (u_ramp_range.y - u_ramp_range.x), 0.0, 1.0);
   vec3 pNow = ecef(posNow);
   vec3 pPrev = ecef(posPrev);
@@ -246,6 +258,9 @@ export function createWindParticles(container, viewer, {
   let stateA = texture(gl, gl.NEAREST, seed, res, res);
   let stateB = texture(gl, gl.NEAREST, seed, res, res);
   let windTex = null;
+  let windNextTex = null; // ďalší krok (interpolácia); bez neho = windTex
+  let windMix = 0;
+  let frameCount = 0;
   let rampTex = texture(gl, gl.LINEAR, new Uint8Array(256 * 4).fill(255), 256, 1);
   let rampRange = [0, 45];
   let windMin = [-60, -60];
@@ -349,6 +364,8 @@ export function createWindParticles(container, viewer, {
     bindTex(stateB, 4); gl.uniform1i(progDraw.uniforms.u_particles_prev, 4);
     gl.uniform1f(progDraw.uniforms.u_max_seg_m, WIND_MAX_SEGMENT_M);
     bindTex(windTex, 1); gl.uniform1i(progDraw.uniforms.u_wind, 1);
+    bindTex(windNextTex || windTex, 5); gl.uniform1i(progDraw.uniforms.u_wind_next, 5);
+    gl.uniform1f(progDraw.uniforms.u_mix, windNextTex ? windMix : 0);
     bindTex(rampTex, 3); gl.uniform1i(progDraw.uniforms.u_ramp, 3);
     gl.uniform2f(progDraw.uniforms.u_wind_min, windMin[0], windMin[1]);
     gl.uniform2f(progDraw.uniforms.u_wind_max, windMax[0], windMax[1]);
@@ -379,6 +396,11 @@ export function createWindParticles(container, viewer, {
     bindQuad(progUpdate);
     bindTex(stateA, 0); gl.uniform1i(progUpdate.uniforms.u_particles, 0);
     bindTex(windTex, 1); gl.uniform1i(progUpdate.uniforms.u_wind, 1);
+    bindTex(windNextTex || windTex, 5); gl.uniform1i(progUpdate.uniforms.u_wind_next, 5);
+    gl.uniform1f(progUpdate.uniforms.u_mix, windNextTex ? windMix : 0);
+    frameCount = (frameCount + 1) % 1_000_000;
+    gl.uniform1f(progUpdate.uniforms.u_frame, frameCount);
+    gl.uniform1f(progUpdate.uniforms.u_max_age, WIND_PARTICLE_MAX_AGE_FRAMES);
     gl.uniform2f(progUpdate.uniforms.u_wind_min, windMin[0], windMin[1]);
     gl.uniform2f(progUpdate.uniforms.u_wind_max, windMax[0], windMax[1]);
     gl.uniform1f(progUpdate.uniforms.u_rand_seed, Math.random());
@@ -409,14 +431,20 @@ export function createWindParticles(container, viewer, {
      * @param {HTMLImageElement|HTMLCanvasElement|ImageBitmap} image RG = u,v kvantizované
      * @param {{uRange:[number,number], vRange:[number,number]}} ranges
      */
-    setWind(image, { uRange = [-60, 60], vRange = [-60, 60] } = {}) {
+    setWind(image, { uRange = [-60, 60], vRange = [-60, 60], next = null, clear = true } = {}) {
       if (windTex) gl.deleteTexture(windTex);
       windTex = texture(gl, gl.LINEAR, image);
+      if (windNextTex) { gl.deleteTexture(windNextTex); windNextTex = null; }
+      if (next) windNextTex = texture(gl, gl.LINEAR, next);
+      windMix = 0;
       windMin = [uRange[0], vRange[0]];
       windMax = [uRange[1], vRange[1]];
       state.windSet = true;
-      clearScreen();
+      // Pri plynulom prehrávaní sa stopy nemažú — vietor sa mení spojito.
+      if (clear) clearScreen();
     },
+    /** Podiel ďalšieho kroku 0..1 (interpolácia v čase). */
+    setMix(t) { windMix = Math.max(0, Math.min(1, Number(t) || 0)); },
     /** @param {Uint8ClampedArray|Uint8Array} rgba n×4 @param {[number,number]} range */
     setRamp(rgba, range) {
       if (rampTex) gl.deleteTexture(rampTex);
@@ -444,7 +472,7 @@ export function createWindParticles(container, viewer, {
     getState: () => ({ ...state, count: total, res }),
     destroy() {
       this.stop();
-      for (const tex of [stateA, stateB, windTex, rampTex, screenA, screenB]) if (tex) gl.deleteTexture(tex);
+      for (const tex of [stateA, stateB, windTex, windNextTex, rampTex, screenA, screenB]) if (tex) gl.deleteTexture(tex);
       gl.deleteFramebuffer(fbo);
       canvas.remove();
     },
@@ -455,7 +483,7 @@ function stub(canvas, state) {
   canvas.remove();
   return {
     isSupported: () => false,
-    setWind() {}, setRamp() {}, start() {}, stop() {}, setVisible() {}, destroy() {},
+    setWind() {}, setMix() {}, setRamp() {}, start() {}, stop() {}, setVisible() {}, destroy() {},
     getState: () => ({ ...state, count: 0, res: 0 }),
   };
 }

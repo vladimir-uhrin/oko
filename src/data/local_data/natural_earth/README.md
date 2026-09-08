@@ -34,3 +34,12 @@ See DATA_SOURCES.md.
 
 Duplicate names exist upstream (two "Cordillera Oriental", a sliver + real
 "Canadian Shield", …); the lookup module resolves ties by largest area.
+
+## `places.json` — populated places (2026-09-08, meteorology city labels)
+
+Built by `scripts/build-meteo-places.mjs` from `ne_10m_populated_places_simple.geojson`
+(same nvkelso/natural-earth-vector repo, `master` on 2026-09-08). Keeps places with
+`pop_max ≥ 100 000` or an admin-0 capital (3 116 rows), as compact arrays
+`[name, lat, lon, popThousands, scalerank, iso2, capital]` (coordinates to 3 decimals).
+Used by `src/data/meteoPlaces.js` for the "city + field value" labels drawn above the
+weather fields. Public domain like the rest of this folder.
