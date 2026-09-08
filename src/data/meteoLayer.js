@@ -20,9 +20,10 @@ import { t, currentLanguage } from '../i18n.js';
 import { governorRequestRender } from '../renderGovernor.js';
 import { getActiveMapStack, onActiveMapStackChange } from './activeMapStack.js';
 import {
-  METEO_FIELDS, METEO_LAYER_ID, METEO_RAMPS, WIND_COMPONENT_RANGE,
+  METEO_FIELD_ORDER, METEO_FIELDS, METEO_LAYER_ID, METEO_RAMPS, WIND_COMPONENT_RANGE,
   normalizeCatalog, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
 } from './meteoField.js';
+import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline, METEO_PLAY_INTERVAL_MS } from '../meteoTimeline.js';
 
@@ -63,7 +64,8 @@ export function fieldMaterialFabric() {
         float u = clamp((value - rampMin) / (rampMax - rampMin), 0.0, 1.0);
         vec4 c = texture(ramp, vec2(u, 0.5));
         material.diffuse = c.rgb;
-        material.alpha = alpha;
+        // Rampa nesie alfu (zrážky/oblačnosť sú bez javu priehľadné).
+        material.alpha = c.a * alpha;
         return material;
       }`,
   };
@@ -95,6 +97,7 @@ export function createFieldPrimitive({ image, ramp, field }) {
   material.uniforms.decodeMax = field.decode[1];
   material.uniforms.rampMin = field.rampRange[0];
   material.uniforms.rampMax = field.rampRange[1];
+  material.uniforms.alpha = Number.isFinite(field.alpha) ? field.alpha : METEO_FIELD_ALPHA;
   const primitive = new Cesium.Primitive({
     geometryInstances: new Cesium.GeometryInstance({
       geometry: new Cesium.RectangleGeometry({
@@ -125,6 +128,50 @@ export function loadImage(url, doc = globalThis.document) {
   });
 }
 
+/** Výška izobar nad elipsoidom (nad drapériou, pod lietadlami). */
+export const ISOLINE_HEIGHT_M = 4_000;
+/** Podvzorkovanie mriežky pre izočiary (0,25° → 0,5°): 4× menej práce, čiary ostanú hladké. */
+export const ISOLINE_DOWNSAMPLE = 2;
+
+/**
+ * Obrázok rezu → mriežka hodnôt (dekódovaný kanál). Kreslí do canvasu, číta pixely.
+ * @param {HTMLImageElement} image
+ * @param {Document} doc
+ * @param {number} channel
+ * @param {[number, number]} decode
+ * @returns {{values: Float32Array, cols: number, rows: number}}
+ */
+export function imageToGrid(image, doc, channel, decode) {
+  const canvas = doc.createElement('canvas');
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0);
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return { values: decodeChannel(data, channel, decode), cols: canvas.width, rows: canvas.height };
+}
+
+/**
+ * Izočiary → Cesium PolylineCollection (biele tenké, zvýraznená hladina hrubšia).
+ * @param {Array<{level: number, points: Array<[number, number]>}>} lines
+ * @param {{isolines: {step: number, emphasis?: number}}} field
+ */
+export function createIsolinePrimitive(lines, field) {
+  const collection = new Cesium.PolylineCollection();
+  for (const line of lines) {
+    const flat = [];
+    for (const [lon, lat] of line.points) flat.push(lon, lat, ISOLINE_HEIGHT_M);
+    const emphasised = field.isolines?.emphasis !== undefined && Math.abs(line.level - field.isolines.emphasis) < 1e-6;
+    collection.add({
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+      width: emphasised ? 2.2 : 1.1,
+      material: Cesium.Material.fromType('Color', { color: Cesium.Color.fromCssColorString(emphasised ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.42)') }),
+    });
+  }
+  collection.show = true;
+  return collection;
+}
+
 /**
  * @param {object} [options] test seams
  */
@@ -132,6 +179,8 @@ export function createMeteoLayer({
   fetchImpl = null,
   imageLoader = loadImage,
   primitiveFactory = createFieldPrimitive,
+  isolineFactory = createIsolinePrimitive,
+  gridReader = imageToGrid,
   particlesFactory = createWindParticles,
   timelineFactory = createMeteoTimeline,
   doc = globalThis.document,
@@ -157,8 +206,32 @@ export function createMeteoLayer({
   let _rowListener = null;
   let _unsubStack = null;
   let _loadToken = 0;
+  let _isolines = null; // Cesium.PolylineCollection alebo null
 
   const lang = () => (currentLanguage?.() === 'en' ? 'en' : 'sk');
+
+  function clearIsolines() {
+    if (_isolines && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_isolines);
+    _isolines = null;
+  }
+
+  /** Izobary pre polia s `isolines` (tlak): mriežka z obrázka → marching squares → polylines. */
+  function updateIsolines(field, image) {
+    clearIsolines();
+    if (!field.isolines || !image || !_viewer) return;
+    try {
+      const full = gridReader(image, doc, field.channel, field.decode);
+      const g = downsample(full.values, full.cols, full.rows, ISOLINE_DOWNSAMPLE);
+      const dlon = 360 / (g.cols - 1);
+      const dlat = -180 / (g.rows - 1);
+      const lines = isolines(g.values, g.cols, g.rows, { step: field.isolines.step, min: field.decode[0] + 1, max: field.decode[1] - 1 }, { lon0: -180, lat0: 90, dlon, dlat });
+      _isolines = isolineFactory(lines, field);
+      _viewer.scene.primitives.add(_isolines);
+    } catch (error) {
+      console.warn('[Data:Meteo] isolines failed:', error?.message || error);
+      _isolines = null;
+    }
+  }
 
   function stepsForTimeline() {
     if (!_catalog) return [];
@@ -217,8 +290,10 @@ export function createMeteoLayer({
       _drape.material.uniforms.decodeMax = field.decode[1];
       _drape.material.uniforms.rampMin = field.rampRange[0];
       _drape.material.uniforms.rampMax = field.rampRange[1];
+      _drape.material.uniforms.alpha = Number.isFinite(field.alpha) ? field.alpha : METEO_FIELD_ALPHA;
     }
     _drape.primitive.show = true;
+    updateIsolines(field, fieldImg);
     if (_particles && _particlesOn) {
       _particles.setWind(windImg, { uRange: WIND_COMPONENT_RANGE, vRange: WIND_COMPONENT_RANGE });
       _particles.start();
@@ -279,10 +354,8 @@ export function createMeteoLayer({
       _catalog = null;
       _index = 0;
       _lastError = null;
-      _ramps = {
-        wind: rampCanvas(doc, METEO_RAMPS.wind, METEO_FIELDS.wind.rampRange),
-        temp: rampCanvas(doc, METEO_RAMPS.temp, METEO_FIELDS.temp.rampRange),
-      };
+      _ramps = {};
+      for (const id of METEO_FIELD_ORDER) _ramps[id] = rampCanvas(doc, METEO_RAMPS[id], METEO_FIELDS[id].rampRange);
       if (!_timeline && doc?.body) {
         _timeline = timelineFactory(doc, {
           t,
@@ -317,6 +390,7 @@ export function createMeteoLayer({
       stopPlay();
       _timeline?.hide();
       if (_drape) _drape.primitive.show = false;
+      clearIsolines();
       _particles?.stop();
       restoreBasemap();
       governorRequestRender('meteo');
@@ -376,8 +450,7 @@ export function createMeteoLayer({
       const field = METEO_FIELDS[_field];
       return {
         chips: [
-          { id: 'field-wind', label: t('meteo.chip-wind'), active: _field === 'wind', params: { field: 'wind' } },
-          { id: 'field-temp', label: t('meteo.chip-temp'), active: _field === 'temp', params: { field: 'temp' } },
+          ...METEO_FIELD_ORDER.map((id) => ({ id: `field-${id}`, label: t(`meteo.chip-${id}`), active: _field === id, params: { field: id } })),
           { id: 'particles', label: t('meteo.chip-particles'), active: _particlesOn, params: { particles: !_particlesOn }, disabled: _particles ? !_particles.isSupported() : false },
         ],
         legend: rampLegend(METEO_RAMPS[_field], field.unit),
@@ -401,6 +474,7 @@ export function createMeteoLayer({
     destroy(viewer) {
       this.disable();
       if (_drape) { viewer?.scene?.primitives?.remove?.(_drape.primitive); _drape = null; }
+      clearIsolines();
       _particles?.destroy(); _particles = null;
       _timeline?.destroy(); _timeline = null;
       _unsubStack?.(); _unsubStack = null;

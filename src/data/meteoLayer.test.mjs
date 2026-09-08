@@ -24,7 +24,7 @@ function fakeDoc() {
   };
 }
 
-function harness({ catalog = { model: 'GFS 0.25°', run: '2026-09-08T12:00:00Z', steps: ['2026-09-08T18:00:00Z', '2026-09-08T21:00:00Z', '2026-09-09T00:00:00Z'], attribution: 'x', stale: false }, imageOk = true } = {}) {
+function harness({ isolineFactory = null, gridReader = null, catalog = { model: 'GFS 0.25°', run: '2026-09-08T12:00:00Z', steps: ['2026-09-08T18:00:00Z', '2026-09-08T21:00:00Z', '2026-09-09T00:00:00Z'], attribution: 'x', stale: false }, imageOk = true } = {}) {
   const calls = { fetch: [], images: [], particles: [], events: [], primitives: [] };
   const doc = fakeDoc();
   const win = { dispatchEvent(e) { calls.events.push(e.detail); } };
@@ -45,6 +45,8 @@ function harness({ catalog = { model: 'GFS 0.25°', run: '2026-09-08T12:00:00Z',
     primitiveFactory: ({ image, field }) => { const p = { primitive: { show: false }, material: { uniforms: { image, channel: field.channel } } }; calls.primitives.push(p); return p; },
     particlesFactory: () => particles,
     timelineFactory: () => timeline,
+    ...(isolineFactory ? { isolineFactory } : {}),
+    ...(gridReader ? { gridReader } : {}),
     doc,
     win,
   });
@@ -92,7 +94,7 @@ test('čipy: TEPLOTA prepne pole (kanál R, rez temp), ČASTICE vypne častice; 
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(calls.events.length, 0, 'na OSM sa podklad nemení');
   const controls = layer.getRowControls();
-  assert.deepEqual(controls.chips.map((c) => [c.id, c.active]), [['field-wind', true], ['field-temp', false], ['particles', true]]);
+  assert.deepEqual(controls.chips.map((c) => [c.id, c.active]), [['field-wind', true], ['field-temp', false], ['field-pressure', false], ['field-precip', false], ['field-clouds', false], ['field-gust', false], ['particles', true]]);
   assert.equal(controls.legend[0].label, '0 m/s');
   assert.equal(layer.setParams({ field: 'temp' }), true);
   await new Promise((r) => setTimeout(r, 10));
@@ -134,4 +136,32 @@ test('materiál: fabric číta kanál, dekóduje rozsah a mapuje na rampu; tripw
   assert.match(css, /\.wind-particles-canvas \{[\s\S]*?z-index: 4;/);
   assert.match(css, /\.meteo-timeline \{[\s\S]*?position: fixed;/);
   assert.equal(METEO_LAYER_ID, 'meteo-gfs');
+});
+
+test('fáza polia: TLAK → izobary (mriežka z obrázka → marching squares → továreň), iné pole ich zruší; zrážky majú alfu 0 bez javu', async () => {
+  _resetActiveMapStackForTest();
+  setActiveMapStack({ id: 'osm' });
+  const isoCalls = [];
+  const removed = [];
+  // 1440×721 by bolo pomalé: čítačka vráti malý vrch 41×41 (rovnaký ako v meteoIsolines.test).
+  const gridReader = () => { const cols = 41, rows = 41; const values = new Float32Array(cols * rows); for (let r = 0; r < rows; r += 1) for (let c = 0; c < cols; c += 1) { const dx = (c - 20) / 8, dy = (r - 20) / 8; values[r * cols + c] = 1000 + 30 * Math.exp(-(dx * dx + dy * dy)); } return { values, cols, rows }; };
+  const { layer, viewer, calls } = harness({ gridReader, isolineFactory: (lines, field) => { isoCalls.push([lines.length, field.id, lines[0]?.level]); return { id: isoCalls.length }; } });
+  viewer.scene.primitives.remove = (x) => removed.push(x);
+  layer.init(viewer);
+  layer.enable();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(isoCalls.length, 0, 'vietor bez izočiar');
+  layer.setParams({ field: 'pressure' });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(calls.images.some((u) => u.includes('var=pressure')));
+  assert.equal(isoCalls.length, 1);
+  assert.ok(isoCalls[0][0] > 3, 'niekoľko izobar');
+  assert.equal(isoCalls[0][1], 'pressure');
+  assert.equal(calls.primitives[0].material.uniforms.alpha, 0.5, 'alfa podľa poľa');
+  layer.setParams({ field: 'precip' });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(removed.length, 1, 'izobary odstránené pri zmene poľa');
+  assert.equal(calls.primitives[0].material.uniforms.alpha, 0.9);
+  layer.disable();
+  _resetActiveMapStackForTest();
 });

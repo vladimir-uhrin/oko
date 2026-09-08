@@ -18,28 +18,81 @@ export const WIND_SPEED_RANGE = Object.freeze([0, 60]);
 /** Rozsah kvantizácie teploty 2 m (R), °C. */
 export const TEMP_RANGE = Object.freeze([-60, 60]);
 
-/** Polia prototypu: id → THREDDS premenné, popis, rozsah rampy. */
+/**
+ * Polia: id → THREDDS premenné, prevod jednotiek (`convert`: hodnota × scale + offset),
+ * rozsah kvantizácie do PNG (`decode`), rozsah rampy, kanál PNG, alfa drapérie.
+ * Fáza „polia" (2026-09-08 večer): tlak MSL s izobarami, zrážky, oblačnosť, nárazy.
+ */
 export const METEO_FIELDS = Object.freeze({
   wind: Object.freeze({
     id: 'wind',
     vars: ['u-component_of_wind_height_above_ground', 'v-component_of_wind_height_above_ground'],
     vertCoord: 10,
     unit: 'm/s',
+    convert: { scale: 1, offset: 0 },
     rampRange: [0, 45],
     /** Kanál PNG s hodnotou pre farebnú drapériu (B = rýchlosť). */
     channel: 2,
     decode: [WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1]],
+    alpha: 0.62,
   }),
   temp: Object.freeze({
     id: 'temp',
     vars: ['Temperature_height_above_ground'],
     vertCoord: 2,
     unit: '°C',
+    convert: { scale: 1, offset: -273.15 },
     rampRange: [-40, 45],
     channel: 0,
     decode: [TEMP_RANGE[0], TEMP_RANGE[1]],
+    alpha: 0.62,
+  }),
+  pressure: Object.freeze({
+    id: 'pressure',
+    vars: ['Pressure_reduced_to_MSL_msl'],
+    unit: 'hPa',
+    convert: { scale: 0.01, offset: 0 },
+    rampRange: [960, 1050],
+    channel: 0,
+    decode: [940, 1060],
+    alpha: 0.5,
+    /** Izobary každé 4 hPa, 1013 zvýraznená. */
+    isolines: { step: 4, emphasis: 1013 },
+  }),
+  precip: Object.freeze({
+    id: 'precip',
+    vars: ['Precipitation_rate_surface'],
+    unit: 'mm/h',
+    convert: { scale: 3600, offset: 0 },
+    rampRange: [0, 20],
+    channel: 0,
+    decode: [0, 30],
+    alpha: 0.9,
+  }),
+  clouds: Object.freeze({
+    id: 'clouds',
+    vars: ['Total_cloud_cover_entire_atmosphere'],
+    unit: '%',
+    convert: { scale: 1, offset: 0 },
+    rampRange: [0, 100],
+    channel: 0,
+    decode: [0, 100],
+    alpha: 0.85,
+  }),
+  gust: Object.freeze({
+    id: 'gust',
+    vars: ['Wind_speed_gust_surface'],
+    unit: 'm/s',
+    convert: { scale: 1, offset: 0 },
+    rampRange: [0, 45],
+    channel: 0,
+    decode: [0, 60],
+    alpha: 0.62,
   }),
 });
+
+/** Poradie čipov v riadku vrstvy. */
+export const METEO_FIELD_ORDER = Object.freeze(['wind', 'temp', 'pressure', 'precip', 'clouds', 'gust']);
 
 /**
  * Rampy v identite OKO: tmavá noc → azúrová (--accent #39d0ff) → jantárová → červená.
@@ -53,6 +106,23 @@ export const METEO_RAMPS = Object.freeze({
   temp: Object.freeze([
     [-40, '#3b1c6e'], [-25, '#2c4aa8'], [-12, '#1f8fc4'], [-4, '#39d0ff'], [4, '#7fe2c8'],
     [12, '#e8e77a'], [20, '#ffc04a'], [28, '#ff7a2b'], [36, '#ff3b3b'], [45, '#8a0c1e'],
+  ]),
+  // Tlak: tlakové níže fialovo-modré, výše jantárovo-červené, 1013 tyrkysová.
+  pressure: Object.freeze([
+    [960, '#3b1c6e'], [980, '#2c4aa8'], [995, '#1f8fc4'], [1005, '#39d0ff'], [1013, '#7fe2c8'],
+    [1020, '#e8e77a'], [1030, '#ffc04a'], [1040, '#ff7a2b'], [1050, '#ff3b3b'],
+  ]),
+  // Zrážky a oblačnosť majú ALFU (tretí prvok): bez zrážok je mapa priehľadná.
+  precip: Object.freeze([
+    [0, '#0a1622', 0], [0.2, '#12708f', 0.35], [1, '#1fb0d8', 0.7], [3, '#39d0ff', 0.85],
+    [6, '#9be6ff', 0.9], [10, '#ffd15c', 0.95], [15, '#ff9a2b', 1], [20, '#ff4a3b', 1],
+  ]),
+  clouds: Object.freeze([
+    [0, '#0a1622', 0], [20, '#5d7383', 0.25], [50, '#9fb1bd', 0.55], [80, '#dbe4ea', 0.8], [100, '#ffffff', 0.92],
+  ]),
+  gust: Object.freeze([
+    [0, '#0a1622'], [5, '#0f3a52'], [10, '#12708f'], [15, '#1fb0d8'], [20, '#39d0ff'],
+    [25, '#9be6ff'], [30, '#ffd15c'], [36, '#ff9a2b'], [42, '#ff4a3b'], [45, '#ffffff'],
   ]),
 });
 
@@ -73,20 +143,25 @@ export function hexToRgb(hex) {
 export function rampRgbaTable(stops, range, n = 256) {
   const out = new Uint8ClampedArray(n * 4);
   const [lo, hi] = range;
-  const pts = stops.map(([v, hex]) => [v, hexToRgb(hex)]);
+  // Zastávka = [hodnota, hex, alfa?]; alfa default 1 (zrážky/oblačnosť ju znižujú k nule).
+  const pts = stops.map(([v, hex, alpha]) => [v, hexToRgb(hex), Number.isFinite(alpha) ? alpha : 1]);
   for (let i = 0; i < n; i += 1) {
     const v = lo + ((hi - lo) * i) / (n - 1);
     let a = pts[0];
     let b = pts[pts.length - 1];
-    for (let k = 0; k < pts.length - 1; k += 1) {
-      if (v >= pts[k][0] && v <= pts[k + 1][0]) { a = pts[k]; b = pts[k + 1]; break; }
+    if (v <= pts[0][0]) b = pts[0];
+    else if (v >= pts[pts.length - 1][0]) a = pts[pts.length - 1];
+    else {
+      for (let k = 0; k < pts.length - 1; k += 1) {
+        if (v >= pts[k][0] && v <= pts[k + 1][0]) { a = pts[k]; b = pts[k + 1]; break; }
+      }
     }
     const span = b[0] - a[0];
     const f = span > 0 ? Math.min(1, Math.max(0, (v - a[0]) / span)) : 0;
     out[i * 4] = a[1][0] + (b[1][0] - a[1][0]) * f;
     out[i * 4 + 1] = a[1][1] + (b[1][1] - a[1][1]) * f;
     out[i * 4 + 2] = a[1][2] + (b[1][2] - a[1][2]) * f;
-    out[i * 4 + 3] = 255;
+    out[i * 4 + 3] = Math.round(255 * (a[2] + (b[2] - a[2]) * f));
   }
   return out;
 }

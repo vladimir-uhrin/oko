@@ -31,7 +31,7 @@ import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
 import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAirframesMessage } from './src/data/acarsMessages.js';
 import { parseNetcdf3, gridOf } from './src/data/netcdf3.js';
-import { METEO_FIELDS, TEMP_RANGE, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, forecastSteps, quantize } from './src/data/meteoField.js';
+import { METEO_FIELDS, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, forecastSteps, quantize } from './src/data/meteoField.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -3063,7 +3063,9 @@ function meteoProxy() {
 
   function ncssUrl(field, iso) {
     const vars = field.vars.map((v) => `var=${encodeURIComponent(v)}`).join('&');
-    return `${NCSS}?${vars}&north=90&south=-90&west=-180&east=180&horizStride=1&time=${encodeURIComponent(iso)}&vertCoord=${field.vertCoord}&accept=netcdf`;
+    // vertCoord len pre výškové hladiny (10 m vietor, 2 m teplota); povrchové polia ho nemajú.
+    const vert = Number.isFinite(field.vertCoord) ? `&vertCoord=${field.vertCoord}` : '';
+    return `${NCSS}?${vars}&north=90&south=-90&west=-180&east=180&horizStride=1&time=${encodeURIComponent(iso)}${vert}&accept=netcdf`;
   }
 
   /** Beh modelu z reftime („Hour since 2026-09-01T00:00:00Z"). */
@@ -3105,8 +3107,10 @@ function meteoProxy() {
           out[o + 1] = quantize(v, WIND_COMPONENT_RANGE);
           out[o + 2] = quantize(Math.hypot(u, v), WIND_SPEED_RANGE);
         } else {
-          const tc = grids[0].values[i] - 273.15;
-          const q = quantize(tc, TEMP_RANGE);
+          // Skalárne pole: prevod jednotiek podľa field.convert (K → °C, Pa → hPa,
+          // kg/m²/s → mm/h) a kvantizácia do field.decode; R = G = B.
+          const value = grids[0].values[i] * field.convert.scale + field.convert.offset;
+          const q = quantize(value, field.decode);
           out[o] = q; out[o + 1] = q; out[o + 2] = q;
         }
         out[o + 3] = 255;

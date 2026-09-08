@@ -99,3 +99,9 @@ Používateľ: „GPU, štýl OKO ale grafické znázornenie ako windy… Najprv
 → vrstva `meteo-gfs` (meteoLayer.js, windParticles.js, meteoTimeline.js, meteoField.js, netcdf3.js, meteoProxy).
 **Zmena zdroja oproti plánu:** NOMADS OpenDAP je zrušený (SCN 25-81) → GFS ide z NSF Unidata THREDDS NCSS ako NetCDF-3.
 Podklad: GIBS Blue Marble (automaticky pri zapnutí). Ďalšie polia, radar, izobary, meteogram, ECMWF/ICON = ďalšie fázy.
+
+## Stav 2026-09-08 neskoro večer — fáza „polia" hotová
+
+Tlak MSL s izobarami (marching squares, meteoIsolines.js, každé 4 hPa, 1013 zvýraznená), zrážky (mm/h,
+priehľadné bez javu), oblačnosť (%), nárazy vetra; čipy v riadku vrstvy. Ďalej: radar (RainViewer po ToS),
+GIBS geostacionárne snímky, meteogram po kliknutí, izočiary s popiskami, ECMWF/ICON.
