@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { createWindParticles, matricesDiffer, particleTextureSize, WIND_PARTICLE_COUNT_DEFAULT } from './windParticles.js';
 
 test('rozmer stavovej textúry a detekcia pohybu kamery', () => {
-  assert.equal(particleTextureSize(WIND_PARTICLE_COUNT_DEFAULT), 256);
+  assert.equal(particleTextureSize(WIND_PARTICLE_COUNT_DEFAULT), 128, '16 384 častíc — jemná sieť (používateľ 09-08: „vybodkované")');
   assert.equal(particleTextureSize(10_000), 100);
   assert.equal(particleTextureSize(1), 16, 'minimum 16 × 16');
   const a = new Float32Array(16).fill(1);
@@ -32,7 +32,13 @@ test('bez WebGL2 vráti stub (plátno sa odstráni, isSupported=false, metódy s
 test('shadery: WGS84 ECEF, zahodenie odvrátenej pologule, GFS mriežka 0..360° so severom hore, 16-bit poloha', () => {
   const src = readFileSync(new URL('./windParticles.js', import.meta.url), 'utf8');
   assert.match(src, /const float A = 6378137\.0;\s*const float B = 6356752\.314245;/, 'WGS84 poloosi v shaderi');
-  assert.match(src, /v_vis = dot\(n, normalize\(toCam\)\) > 0\.02 \? 1\.0 : 0\.0;/, 'okluzia skalárnym súčinom normály a smeru ku kamere');
+  assert.match(src, /return dot\(n, normalize\(toCam\)\) > 0\.02 \? 1\.0 : 0\.0;/, 'okluzia skalárnym súčinom normály a smeru ku kamere');
+  // Spojité čiary, nie bodky: úsečka predchádzajúca → aktuálna poloha, oba konce viditeľné, respawn sa nekreslí.
+  assert.match(src, /gl\.drawArrays\(gl\.LINES, 0, total \* 2\);/);
+  assert.match(src, /float ok = visible\(pNow\) \* visible\(pPrev\) \* \(distance\(pNow, pPrev\) < u_max_seg_m \? 1\.0 : 0\.0\);/);
+  assert.ok(!src.includes('gl.POINTS'), 'žiadne body');
+  assert.match(src, /export const WIND_SCREEN_SCALE = 0\.55;/, 'stopy v menšej textúre s LINEAR filtrom = mäkké');
+  assert.match(src, /screenA = texture\(gl, gl\.LINEAR, empty, sw, sh\);/);
   assert.match(src, /if \(v_vis < 0\.5\) discard;/);
   assert.match(src, /vec2 wuv = vec2\(fract\(\(lon \+ 360\.0\) \/ 360\.0\), \(90\.0 - lat\) \/ 180\.0\);/, 'vzorkovanie GFS mriežky (0° E prvý stĺpec, 90° N prvý riadok)');
   assert.match(src, /vec2 pos = vec2\(color\.r \/ 255\.0 \+ color\.b, color\.g \/ 255\.0 \+ color\.a\);/, '16-bit lon/lat v RGBA8');
