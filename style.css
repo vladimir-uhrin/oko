@@ -3198,6 +3198,65 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   font-size: 7px;
   letter-spacing: 0.05em;
 }
+/* Veža cieľa — len online streamy (2026-09-08): YouTube embed + vlastný <audio>. */
+.cockpit-tower {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 6px 8px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--cockpit-accent) 22%, transparent);
+  color: rgba(224, 247, 255, 0.9);
+  font: 7px/1.25 var(--font-mono);
+  letter-spacing: 0.09em;
+}
+.cockpit-tower[hidden] { display: none; }
+.cockpit-tower-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cockpit-tower-kicker {
+  flex: 0 0 auto;
+  color: #ffb347;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+.cockpit-tower-heading small {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--cockpit-accent) 68%, rgba(244, 251, 255, 0.46));
+  font-size: 5px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cockpit-tower-audio {
+  width: 100%;
+  height: 22px;
+  filter: invert(1) hue-rotate(180deg) saturate(0.6);
+}
+.cockpit-tower-audio[hidden] { display: none; }
+.cockpit-tower-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid color-mix(in srgb, var(--cockpit-accent) 40%, transparent);
+  background: #000;
+}
+.cockpit-tower-frame[hidden] { display: none; }
+.cockpit-tower-credit,
+.cockpit-tower-note {
+  color: rgba(224, 247, 255, 0.5);
+  font-size: 5px;
+  letter-spacing: 0.06em;
+}
+.cockpit-tower-credit:empty,
+.cockpit-tower-note[hidden] { display: none; }
+.cockpit-tower-credit a { color: inherit; text-decoration: none; }
+.cockpit-tower-credit a:hover { color: var(--cockpit-accent); }
+.cockpit-signal-window[data-collapsed="true"] .cockpit-tower { display: none; }
 /* ACARS/CPDLC správy (2026-09-08, airframes.io, len lokálne) — sekcia pod kartou trasy. */
 .cockpit-acars {
   display: grid;

@@ -102,3 +102,10 @@ do airframes.io, a v OKO zobrazujeme lokálne. Pred verejným nasadením overiť
   prechodné 404 „Cannot GET" → stale-if-error, nie „žiadne správy". Odpoveď na jednu správu má
   ~2,8 kB (stanica aj s používateľom a IP) → zhutnenie na ~200 B, z feedera ostáva len ident stanice.
 - Bod B (vlastný prijímač) a mail na api@airframes.io: nezačaté.
+
+## 2026-09-08 — bod B zamietnutý, veža len z online streamov
+
+Používateľ: „B nie", „len online streami". Vlastný prijímač sa nerobí. Hlas veže v OKO ide len
+z YouTube live (oficiálny embed) a z vlastných URL v atc-streams.local.json — `src/cockpitTower.js`,
+sekcia v kokpite pre cieľ letu. LiveATC (podmienky), Broadcastify/RadioReference §8 (len osobné
+prezeranie) a Radio Browser (žiadne ATC streamy) sú mimo — zapísané v DATA_SOURCES.md.

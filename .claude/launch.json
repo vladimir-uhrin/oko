@@ -7,6 +7,10 @@
       "runtimeArgs": ["run", "dev"],
       "port": 4173,
       "autoPort": false
+    },
+    {
+      "name": "oko-attach",
+      "url": "http://localhost:4173"
     }
   ]
 }

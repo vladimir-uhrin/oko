@@ -267,6 +267,17 @@
           <span id="cockpit-approach-height">—</span>
         </div>
       </section>
+      <!-- Veža cieľa — LEN ONLINE STREAMY (2026-09-08): YouTube live cez oficiálny embed + vlastný stream (atc-streams.local.json). LiveATC/Broadcastify nie (podmienky). -->
+      <section id="cockpit-tower" class="cockpit-tower" aria-label="Destination tower online stream" data-i18n-aria="cockpit.tower-kicker" hidden>
+        <div class="cockpit-tower-heading">
+          <span class="cockpit-tower-kicker" data-i18n="cockpit.tower-kicker">TOWER · ONLINE STREAM</span>
+          <small id="cockpit-tower-status">—</small>
+        </div>
+        <audio id="cockpit-tower-audio" class="cockpit-tower-audio" controls preload="none" hidden></audio>
+        <iframe id="cockpit-tower-frame" class="cockpit-tower-frame" src="about:blank" title="Tower online stream" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" loading="lazy" hidden></iframe>
+        <div id="cockpit-tower-credit" class="cockpit-tower-credit"></div>
+        <small id="cockpit-tower-note" class="cockpit-tower-note" hidden></small>
+      </section>
       <!-- ACARS/CPDLC správy (2026-09-08, airframes.io) — LEN LOKÁLNE: proxy odpovedá len loopbacku s ACARS_MESSAGES=on; atribúcia je predpísaná doslovne. -->
       <section id="cockpit-acars" class="cockpit-acars" aria-label="Datalink messages" data-i18n-aria="cockpit.acars-kicker" hidden>
         <div class="cockpit-acars-heading">

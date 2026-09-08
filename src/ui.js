@@ -83,6 +83,8 @@ import { cachedMetarCardLines, cachedMetarReport, cachedMetarWind, metarStationI
 import { lookupAirport } from './data/airportLookup.js';
 import { approachLines, approachState, destinationLookupCode, destinationWeatherLine } from './cockpitApproach.js';
 import { acarsCockpitRows, acarsStatusLine, cachedAcars, isAcarsDisabled, requestAcarsMessages } from './data/acarsMessages.js';
+import { towerPickCamera, towerSearchQuery, towerSignature, towerSources, towerStatusLine, youtubeEmbedUrl, youtubeWatchUrl } from './cockpitTower.js';
+import { CAMERA_LOOKUP_NEGATIVE_TTL_MS, CAMERA_LOOKUP_TTL_MS, cameraCreditText } from './data/airportCameras.js';
 import { addBookmark, loadBookmarks, removeBookmark, saveBookmarks } from './data/bookmarkStore.js';
 import {
   ALLOCATION_STRATEGIES,
@@ -791,6 +793,18 @@ class CockpitViewController {
     this.acarsStatus = document.getElementById('cockpit-acars-status');
     this.acarsList = document.getElementById('cockpit-acars-list');
     this._acarsSignature = '';
+    // Veža cieľa — LEN ONLINE STREAMY (2026-09-08, cockpitTower.js): YouTube
+    // live cez oficiálny embed + vlastný stream z atc-streams.local.json.
+    this.towerSection = document.getElementById('cockpit-tower');
+    this.towerStatus = document.getElementById('cockpit-tower-status');
+    this.towerAudio = document.getElementById('cockpit-tower-audio');
+    this.towerFrame = document.getElementById('cockpit-tower-frame');
+    this.towerCredit = document.getElementById('cockpit-tower-credit');
+    this.towerNote = document.getElementById('cockpit-tower-note');
+    this._towerSignature = '';
+    this._towerStreams = undefined; // undefined = ešte nečítané, null = bez súboru
+    this._towerLookups = new Map(); // ICAO → { at, camera }
+    this._towerSearching = new Set();
     this._destinationCode = '';
     this._destinationAirport = null;
     this._destinationTexts = { metar: '', runway: '', distance: '', height: '' };
@@ -1170,6 +1184,7 @@ class CockpitViewController {
       this._destinationAirport = null;
       this.renderDestinationWeather(null);
       this.renderApproach(null);
+      this.renderTower(null);
       return;
     }
     if (code !== this._destinationCode) {
@@ -1182,6 +1197,7 @@ class CockpitViewController {
       }).catch(() => {});
     }
     const airport = this._destinationAirport;
+    this.updateTower(airport?.icao ?? destination?.icao ?? null, airport);
     const station = metarStationId({ icao: airport?.icao ?? destination?.icao ?? null });
     if (station) {
       void requestAirportMetar(station, { onDone: () => this.renderDestinationWeather(station) });
@@ -1219,6 +1235,96 @@ class CockpitViewController {
    * onDone príde len po skutočnom fetchi, DOM sa píše len pri zmene.
    * @param {object|null} info getTrackedInfo() sledovaného stroja
    */
+  /**
+   * Veža cieľového letiska — LEN ONLINE STREAMY (2026-09-08; používateľ „B nie",
+   * „len online streami"). Zdroje: vlastný stream z atc-streams.local.json a
+   * YouTube live (kurátorovaný katalóg, inak jedno vyhľadanie cez /api/youtube-live,
+   * ktoré bez YOUTUBE_API_KEY vráti 503 → negatívna pamäť 30 min). LiveATC ani
+   * Broadcastify sa nepoužívajú (podmienky, DATA_SOURCES.md). Volané z
+   * updateDestinationServices, DOM len pri zmene podpisu.
+   * @param {string|null} icao ICAO cieľa
+   * @param {object|null} airport záznam z airportLookup (name, municipality, iata)
+   */
+  updateTower(icao, airport) {
+    if (!this.towerSection) return;
+    const code = String(icao || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{4}$/.test(code)) { this.renderTower(null); return; }
+    if (this._towerStreams === undefined) {
+      this._towerStreams = null;
+      const url = new URL('./data/local_data/airports/atc-streams.local.json', import.meta.url).href;
+      fetch(url, { cache: 'no-cache' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((json) => { this._towerStreams = json && typeof json === 'object' ? json : null; this.renderTower(code); })
+        .catch(() => { this._towerStreams = null; });
+    }
+    const cached = this._towerLookups.get(code);
+    const fresh = cached && Date.now() - cached.at < (cached.camera ? CAMERA_LOOKUP_TTL_MS : CAMERA_LOOKUP_NEGATIVE_TTL_MS);
+    if (!fresh && airport && !this._towerSearching.has(code) && !towerSources({ icao: code }).camera) {
+      this._towerSearching.add(code);
+      fetch(`/api/youtube-live?q=${encodeURIComponent(towerSearchQuery(airport))}`)
+        .then((res) => (res?.ok ? res.json() : null))
+        .then((json) => { this._towerLookups.set(code, { at: Date.now(), camera: json ? towerPickCamera(json, airport) : null }); })
+        .catch(() => { this._towerLookups.set(code, { at: Date.now(), camera: null }); })
+        .finally(() => { this._towerSearching.delete(code); if (this.active) this.renderTower(code); });
+    }
+    this.renderTower(code);
+  }
+
+  renderTower(icao) {
+    if (!this.towerSection) return;
+    const sources = towerSources({ icao, streams: this._towerStreams, lookup: this._towerLookups.get(String(icao || '').toUpperCase()), searching: this._towerSearching.has(String(icao || '').toUpperCase()) });
+    const signature = towerSignature(sources);
+    if (!sources.icao) {
+      if (this._towerSignature !== '') {
+        this._towerSignature = '';
+        if (this.towerFrame) this.towerFrame.setAttribute('src', 'about:blank');
+        if (this.towerAudio) { try { this.towerAudio.pause(); } catch { /* bez prehrávača */ } this.towerAudio.removeAttribute('src'); this.towerAudio.hidden = true; }
+      }
+      this.towerSection.hidden = true;
+      return;
+    }
+    this.towerSection.hidden = false;
+    if (signature === this._towerSignature) return;
+    const previous = this._towerSignature;
+    this._towerSignature = signature;
+    if (this.towerStatus) this.towerStatus.textContent = towerStatusLine(sources, t);
+    // Vlastný stream: <audio> sa prepíše len pri zmene URL (nereštartovať prehrávanie).
+    if (this.towerAudio) {
+      const url = sources.own?.url || '';
+      if (url && this.towerAudio.getAttribute('src') !== url) this.towerAudio.setAttribute('src', url);
+      if (!url && this.towerAudio.getAttribute('src')) { try { this.towerAudio.pause(); } catch { /* bez prehrávača */ } this.towerAudio.removeAttribute('src'); }
+      this.towerAudio.hidden = !url;
+    }
+    // YouTube: jeden trvalý iframe, src len pri zmene videa; bez videa about:blank (zastaví zvuk).
+    if (this.towerFrame) {
+      const embed = sources.camera ? youtubeEmbedUrl(sources.camera.videoId) : null;
+      const prevVideo = previous.split('|')[2] || '';
+      if (!embed) { if (prevVideo) this.towerFrame.setAttribute('src', 'about:blank'); this.towerFrame.hidden = true; }
+      else {
+        if (prevVideo !== sources.camera.videoId) { this.towerFrame.setAttribute('src', embed); this.towerFrame.setAttribute('title', sources.camera.title || t('cockpit.tower-kicker')); }
+        this.towerFrame.hidden = false;
+      }
+    }
+    if (this.towerCredit) {
+      this.towerCredit.replaceChildren();
+      if (sources.camera) {
+        const credit = document.createElement('a');
+        credit.textContent = cameraCreditText(sources.camera, t);
+        credit.href = sources.camera.channelUrl || youtubeWatchUrl(sources.camera.videoId); credit.target = '_blank'; credit.rel = 'noopener';
+        const open = document.createElement('a');
+        open.textContent = `${t('airport.camera-open')} ↗`;
+        open.href = youtubeWatchUrl(sources.camera.videoId); open.target = '_blank'; open.rel = 'noopener';
+        this.towerCredit.append(credit, ' · ', open);
+      }
+    }
+    if (this.towerNote) {
+      this.towerNote.textContent = sources.camera
+        ? (sources.camera.source === 'search' ? t('airport.camera-found') : t('airport.audio-video-note'))
+        : (sources.own ? '' : t('cockpit.tower-why'));
+      this.towerNote.hidden = !this.towerNote.textContent;
+    }
+  }
+
   updateAcars(info) {
     const icao24 = String(info?.icao24 || '').trim().toLowerCase();
     if (!this.acarsSection) return;
@@ -1405,6 +1511,7 @@ class CockpitViewController {
     if (this.hud) this.hud.hidden = true;
     if (this.route) this.route.hidden = true;
     this.renderAcars(null);
+    this.renderTower(null);
     this.clearPredictiveRoute();
     this.setVisionMode('optical');
     if (this.signalStream) this.signalStream.hidden = true;
