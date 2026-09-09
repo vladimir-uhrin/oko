@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  PLACE_ID_PREFIX, createPlaceHoverCard, createPlacePoints, normalizePlaces, placeHoverModel,
+  PLACE_ID_PREFIX, createPlaceHoverCard, createPlacePoints, nearestWithinRadius, normalizePlaces, placeHoverModel,
   placeValueText, placeVisibleUntilM, sampleGrid, windDirectionText,
 } from './meteoPlaces.js';
 
@@ -112,4 +112,14 @@ test('DOM karta: show/update/hide, bez dokumentu no-op', () => {
   assert.equal(card.current(), null);
   card.destroy();
   assert.equal(root.removed, true);
+});
+
+test('nearestWithinRadius: najbližší kandidát v okruhu, mimo okruhu nič', () => {
+  const A = { name: 'A' }; const B = { name: 'B' };
+  const cands = [{ place: A, x: 100, y: 100 }, { place: B, x: 130, y: 100 }];
+  assert.equal(nearestWithinRadius(cands, 105, 100, 22), A, 'bližšie k A');
+  assert.equal(nearestWithinRadius(cands, 125, 100, 22), B, 'bližšie k B');
+  assert.equal(nearestWithinRadius(cands, 200, 200, 22), null, 'mimo okruhu');
+  assert.equal(nearestWithinRadius([], 0, 0), null);
+  assert.equal(nearestWithinRadius(cands, 100, 121, 22), A, 'hrana okruhu (21 px) ešte trafí');
 });

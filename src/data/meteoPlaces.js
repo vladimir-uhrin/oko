@@ -90,6 +90,25 @@ export function windDirectionText(u, v) {
   return `${shown}° ${COMPASS[idx]}`;
 }
 
+/** Kurzor nemusí trafiť 3 px bodku — karta sa ukáže pri najbližšom meste v tomto okruhu (px). */
+export const PLACE_HOVER_RADIUS_PX = 22;
+
+/**
+ * Najbližší kandidát k (x, y) v okruhu `radius`. Kandidát = { place, x, y }. Pure.
+ * @returns {object|null} place najbližšieho, alebo null
+ */
+export function nearestWithinRadius(candidates, x, y, radius = PLACE_HOVER_RADIUS_PX) {
+  let best = null;
+  let bestD = radius * radius;
+  for (const c of candidates) {
+    const dx = c.x - x;
+    const dy = c.y - y;
+    const d = dx * dx + dy * dy;
+    if (d <= bestD) { bestD = d; best = c.place; }
+  }
+  return best;
+}
+
 /** Načíta a normalizuje mestá. */
 export async function loadPlaces(fetchImpl = globalThis.fetch, url = PLACES_URL) {
   const response = await fetchImpl(url);

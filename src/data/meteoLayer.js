@@ -24,8 +24,7 @@ import {
   normalizeCatalog, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
 } from './meteoField.js';
 import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
-import { PLACE_ID_PREFIX, createPlaceHoverCard, createPlacePoints, loadPlaces, sampleGrid } from './meteoPlaces.js';
-import { resolvePickId } from './pickRegistry.js';
+import { PLACE_POINT_HEIGHT_M, createPlaceHoverCard, createPlacePoints, loadPlaces, nearestWithinRadius, placeVisibleUntilM, sampleGrid } from './meteoPlaces.js';
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
 
@@ -292,6 +291,7 @@ export function createMeteoLayer({
   let _windGrid = null; // { u, v } mriežky aktuálneho kroku
   let _gridLoads = new Set();
   let _canvasListeners = null;
+  const _placeScratch = new Cesium.Cartesian3();
   let _fraction = 0; // podiel cesty k ďalšiemu kroku (0..1) pri prehrávaní
   let _playFrame = null;
   let _playLastMs = 0;
@@ -368,15 +368,32 @@ export function createMeteoLayer({
     _hover?.hide();
   }
 
+  /** Najbližšie viditeľné (pred obzorom) mesto k bodu obrazovky v okruhu. */
+  function nearestPlaceToScreen(x, y) {
+    const scene = _viewer?.scene;
+    if (!scene || !_places?.length) return null;
+    const camHeight = scene.camera?.positionCartographic?.height ?? Infinity;
+    const occluder = scene.globe?.ellipsoid ? new Cesium.EllipsoidalOccluder(scene.globe.ellipsoid, scene.camera.positionWC) : null;
+    const candidates = [];
+    for (const p of _places) {
+      if (camHeight > placeVisibleUntilM(p.pop, p.capital)) continue;
+      const world = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, PLACE_POINT_HEIGHT_M, undefined, _placeScratch);
+      if (occluder && !occluder.isPointVisible(world)) continue;
+      const win = Cesium.SceneTransforms.worldToWindowCoordinates?.(scene, world) || Cesium.SceneTransforms.wgs84ToWindowCoordinates?.(scene, world);
+      if (win) candidates.push({ place: p, x: win.x, y: win.y });
+    }
+    return nearestWithinRadius(candidates, x, y);
+  }
+
   function hoverAtPointer() {
     _hoverTimer = null;
     if (!_enabled || !_pointer || !_viewer?.scene?.canvas || !_places?.length) return;
     const bounds = _viewer.scene.canvas.getBoundingClientRect();
     const x = _pointer.x - bounds.left;
     const y = _pointer.y - bounds.top;
-    let picked = null;
-    try { picked = resolvePickId(_viewer.scene.pick(new Cesium.Cartesian2(x, y))); } catch { picked = null; }
-    const place = picked && String(picked).startsWith(PLACE_ID_PREFIX) ? _places[Number(String(picked).slice(PLACE_ID_PREFIX.length))] : null;
+    // Presný pick na 3 px bodku je ťažký („nič sa nedeje"), tak nájdeme
+    // NAJBLIŽŠIE viditeľné mesto v okruhu od kurzora (2026-09-09).
+    const place = nearestPlaceToScreen(x, y);
     if (place) {
       clearTimeout(_leaveTimer);
       _hoverPlace = place;
