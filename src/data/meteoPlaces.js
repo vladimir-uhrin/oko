@@ -24,11 +24,12 @@ export const PLACE_ID_PREFIX = 'place:';
  * prekrývali desiatky 1 M+ miest — Windy pri oddialení ukazuje len najväčšie.
  */
 export function placeVisibleUntilM(popThousands, capital = false) {
+  // 2026-09-09 („tie bodky to je čo"): ešte redšie — z 1 300 km len 1 M+ mestá.
   if (popThousands >= 8000) return Number.POSITIVE_INFINITY;
-  if (popThousands >= 3000 || capital) return 9_000_000;
-  if (popThousands >= 1000) return 3_500_000;
-  if (popThousands >= 300) return 1_500_000;
-  return 600_000;
+  if (popThousands >= 3000 || capital) return 6_000_000;
+  if (popThousands >= 1000) return 2_500_000;
+  if (popThousands >= 300) return 900_000;
+  return 400_000;
 }
 
 /**
@@ -119,10 +120,11 @@ export function createPlacePoints(places, { collectionFactory = () => new Cesium
     collection.add({
       id: place.id,
       position: Cesium.Cartesian3.fromDegrees(place.lon, place.lat, PLACE_POINT_HEIGHT_M),
-      pixelSize: big ? 5 : 4,
-      color: Cesium.Color.fromCssColorString(big ? 'rgba(57,208,255,0.95)' : 'rgba(155,230,255,0.85)'),
-      outlineColor: Cesium.Color.fromCssColorString('rgba(3,12,18,0.9)'),
-      outlineWidth: 1.5,
+      // Jemné body (2026-09-09): 3–4 px, tlmené, tenký tmavý obrys — sú to len úchyty pre kartu.
+      pixelSize: big ? 4 : 3,
+      color: Cesium.Color.fromCssColorString(big ? 'rgba(57,208,255,0.8)' : 'rgba(155,230,255,0.6)'),
+      outlineColor: Cesium.Color.fromCssColorString('rgba(3,12,18,0.8)'),
+      outlineWidth: 1,
       distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, placeVisibleUntilM(place.pop, place.capital)),
     });
   }

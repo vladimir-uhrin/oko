@@ -481,10 +481,12 @@ export function createWindParticles(container, viewer, {
     active = activeParticleCount(total, spawn.areaFraction);
     state.active = active;
     state.spawn = spawn;
-    const simDt = simSecondsPerFrame(cam.height) * (dtFrame * 60);
-    state.simDt = simDt;
+    // dtFrame MUSÍ byť pred simDt (2026-09-09: TDZ ReferenceError každý snímok →
+    // žiadne prúdnice a záplava výnimiek v konzole).
     const dtFrame = lastTime ? Math.min(0.05, (now - lastTime) / 1000) : 1 / 60;
     lastTime = now;
+    const simDt = simSecondsPerFrame(cam.height) * (dtFrame * 60);
+    state.simDt = simDt;
 
     // 1. stopy: predchádzajúca obrazovka s útlmom → screenB
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);

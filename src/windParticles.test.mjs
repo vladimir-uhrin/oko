@@ -105,3 +105,10 @@ test('hranica úsečky podľa kroku: 60 m/s × dt × 3, dno 2 km, strop 300 km �
   const src = readFileSync(new URL('./windParticles.js', import.meta.url), 'utf8');
   assert.ok(src.includes('gl.uniform1f(progDraw.uniforms.u_max_seg_m, maxSegmentMetres(simDt));'), 'hranica z aktuálneho kroku, nie konštanta');
 });
+
+test('slučka: dtFrame je deklarovaný pred prvým použitím (TDZ chyba 2026-09-09 zabila prúdnice)', () => {
+  const src = readFileSync(new URL('./windParticles.js', import.meta.url), 'utf8');
+  const decl = src.indexOf('const dtFrame = lastTime');
+  const use = src.indexOf('simSecondsPerFrame(cam.height) * (dtFrame * 60)');
+  assert.ok(decl > 0 && use > 0 && decl < use, 'dtFrame deklarovaný pred simDt');
+});

@@ -38,11 +38,11 @@ test('texty hodnôt a smer vetra (meteorologicky: odkiaľ fúka)', () => {
 
 test('viditeľnosť podľa populácie a bundle miest (verejná doména, ≥ 100 k alebo hlavné mesto)', () => {
   assert.equal(placeVisibleUntilM(9000), Number.POSITIVE_INFINITY);
-  assert.equal(placeVisibleUntilM(6000), 9_000_000);
-  assert.equal(placeVisibleUntilM(424, true), 9_000_000, 'hlavné mesto ako 3 M+');
-  assert.equal(placeVisibleUntilM(1200), 3_500_000);
-  assert.equal(placeVisibleUntilM(424, false), 1_500_000);
-  assert.equal(placeVisibleUntilM(120), 600_000);
+  assert.equal(placeVisibleUntilM(6000), 6_000_000);
+  assert.equal(placeVisibleUntilM(424, true), 6_000_000, 'hlavné mesto ako 3 M+');
+  assert.equal(placeVisibleUntilM(1200), 2_500_000);
+  assert.equal(placeVisibleUntilM(424, false), 900_000);
+  assert.equal(placeVisibleUntilM(120), 400_000);
   const json = JSON.parse(readFileSync(new URL('./local_data/natural_earth/places.json', import.meta.url), 'utf8'));
   assert.match(json.meta.license, /public domain/);
   const places = normalizePlaces(json);
@@ -59,10 +59,10 @@ test('body miest: id, veľkosť podľa významu, hĺbkový test ostáva (za obzo
   const points = createPlacePoints(places, { collectionFactory: () => ({ add(o) { items.push(o); return o; }, get length() { return items.length; } }) });
   assert.equal(points.length, 2);
   assert.equal(items[0].id, 'place:0');
-  assert.equal(items[0].pixelSize, 5);
-  assert.equal(items[1].pixelSize, 4);
+  assert.equal(items[0].pixelSize, 4);
+  assert.equal(items[1].pixelSize, 3);
   assert.equal(items[0].disableDepthTestDistance, undefined, 'žiadne vypnutie hĺbkového testu — body za obzorom sa nekreslia');
-  assert.equal(items[1].distanceDisplayCondition.far, 600_000);
+  assert.equal(items[1].distanceDisplayCondition.far, 400_000);
 });
 
 test('model karty: meno, štát/populácia/súradnice, riadky všetkých polí; „…" kým sa načítava, „—" bez hodnoty; vietor so smerom', () => {
