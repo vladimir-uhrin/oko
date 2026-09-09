@@ -193,3 +193,12 @@ test('modelHorizonReachM: limb(kamera) + limb(cestovná hladina), dno = statick�
   assert.equal(modelHorizonReachM(NaN, { minM: 150_000, maxM: 900_000 }), 150_000);
   assert.equal(modelHorizonReachM(0, { minM: 400_000, maxM: 900_000 }), 400_000);
 });
+
+test('modelAutoCap: strop rastie s počtom strojov na obrazovke od základu po tvrdý strop (2026-09-09 „automaticky")', async () => {
+  const { modelAutoCap } = await import('./aircraftRecession.js');
+  assert.equal(modelAutoCap(40, 150, 600), 150, 'málo strojov = základný strop');
+  assert.equal(modelAutoCap(320, 150, 600), 320, 'všetko na obrazovke dostane model');
+  assert.equal(modelAutoCap(900, 150, 600), 600, 'tvrdý strop');
+  assert.equal(modelAutoCap(NaN, 150, 600), 150);
+  assert.equal(modelAutoCap(500, 350, 300), 350, 'strop nikdy pod základ');
+});

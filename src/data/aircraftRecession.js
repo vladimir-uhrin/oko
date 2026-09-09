@@ -182,6 +182,24 @@ export function modelHorizonReachM(cameraHeightM, {
   return clamp(reach, minM, maxM);
 }
 
+/**
+ * Automatický strop modelov (2026-09-09, používateľ: „nestačí to, sprav aby
+ * to bolo automaticky"): každý stroj NA OBRAZOVKE v dosahu dostane model —
+ * strop rastie s ich počtom od základného stropu režimu po tvrdý strop
+ * (výkon: každý model je vlastný draw call + update). Mimo obrazovky sa
+ * modely držia len do základného stropu. Pure.
+ * @param {number} onScreenWanted počet strojov na obrazovke v dosahu pridávania
+ * @param {number} baseCap základný strop režimu (proximity/all)
+ * @param {number} maxCap tvrdý strop
+ * @returns {number}
+ */
+export function modelAutoCap(onScreenWanted, baseCap, maxCap) {
+  const base = Number.isFinite(baseCap) ? Math.max(0, baseCap) : 0;
+  const max = Number.isFinite(maxCap) ? Math.max(base, maxCap) : base;
+  const wanted = Number.isFinite(onScreenWanted) ? onScreenWanted : 0;
+  return Math.round(clamp(wanted, base, max));
+}
+
 /** Najmenšia ikona (CSS px), na ktorú perspektíva modelov billboard zmenší — ostáva klikateľná (pick tolerancia 6 px). */
 export const MODEL_HANDOFF_FLOOR_PX = 14;
 

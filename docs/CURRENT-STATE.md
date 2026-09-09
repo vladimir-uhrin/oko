@@ -924,6 +924,20 @@ This is the current runtime/source-of-truth snapshot for the project.
 >   unchanged, so the cost is bounded; cockpit keeps the static radii for its
 >   pip/near-contact band. Verified from a 7.5 km camera tilted to the horizon:
 >   127 models (47 on screen, 25–683 km), one billboard left on screen.
+>   **Automatic model cap (same day, user: "nestačí to, sprav aby to bolo
+>   automaticky"):** the static caps (150 proximity / 350 all) left dense
+>   horizons (Frankfurt from 7.5 km: ~150 on-screen planes) partly as
+>   billboards. Two pure pieces now size the cap: `modelAutoCap()` in
+>   `aircraftRecession.js` raises it to the number of ON-SCREEN planes inside
+>   the add radius (floor = mode base cap, hard ceiling `MODEL_AUTO_MAX` = 600;
+>   off-screen KEEP/ADD passes stay limited to the base cap), and
+>   `modelFrameBudget.js` throttles it by measured CPU frame cost — a
+>   preRender→postRender EMA meter per layer, `nextModelBudget()` once per
+>   second while no model load is pending: ×0.8 above 22 ms, +40 below 14 ms,
+>   hold in between, start 300, never below the base cap. Measured in the
+>   Browser pane (slow renderer, ~0.2 ms per model, 143 models = +30 ms):
+>   the budget settles at the base cap; on a fast machine it grows until every
+>   on-screen plane to the horizon is a model. Cockpit keeps its own caps.
 > - **Focus-aware contact de-emphasis:** civilian/military aircraft and
 >   satellites publish the selected target's padded screen bounds and camera
 >   distance from the same per-frame position cache already consumed by their

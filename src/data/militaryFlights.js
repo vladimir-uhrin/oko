@@ -60,9 +60,11 @@ import {
 import {
   applyAircraftBillboardTreatment,
   applyAircraftModelTreatment,
+  modelAutoCap,
   modelHandoffScaleCap,
   modelHorizonReachM,
 } from './aircraftRecession.js';
+import { createFrameCostMeter, nextModelBudget } from './modelFrameBudget.js';
 import { refreshTrackedReadout, trackedLabelModelFromText } from './trackedReadout.js';
 import {
   clearTrackedSubjectContext,
@@ -1587,8 +1589,20 @@ function _syncTracked2dRotation() {
 /** Active model cap — the eligibility pre-pass AND _ensureModel's admission checks must use the
  *  SAME value, else 'all' (MODEL_MAX_ALL) marks planes eligible that _ensureModel refuses at the
  *  lower MODEL_MAX, silently degrading 'all' to 'proximity'. */
+/** Tvrdý strop automatického počtu modelov (každý = draw call + update za snímok). */
+const MODEL_AUTO_MAX = 600;
+/** Automatický strop z posledného tiku (modelAutoCap) alebo null = základný strop režimu. */
+let _autoModelCap = null;
+/** Rozpočet modelov podľa času snímku (modelFrameBudget.js): štart v strede pásma, reguluje sa raz za sekundu. */
+const MODEL_BUDGET_START = 300;
+let _modelBudget = MODEL_BUDGET_START;
+let _lastBudgetMs = 0;
+/** @type {{renderMs:() => number, destroy:() => void}|null} merač CPU času snímku */
+let _frameMeter = null;
 function _modelCap() {
-  const mapCap = _models3dMode === 'all' ? MODEL_MAX_ALL : MODEL_MAX;
+  const baseCap = _models3dMode === 'all' ? MODEL_MAX_ALL : MODEL_MAX;
+  // Na mape rastie strop s počtom strojov na obrazovke (2026-09-09 „automaticky").
+  const mapCap = _autoModelCap === null ? baseCap : Math.max(baseCap, _autoModelCap);
   // `Math.min` on purpose: cockpit may only ever LOWER the GLB budget.
   return _cockpitContactMode ? Math.min(COCKPIT_MODEL_MAX, mapCap) : mapCap;
 }
@@ -2071,7 +2085,6 @@ function _fleetTick() {
   // is split by frustum so an off-screen retained model can't starve an on-screen plane (review).
   let modelEligible = null;
   if (useModels) {
-    const cap = _modelCap();
     const camPos = camera.positionWC;
     const addM = _modelAddDistM();
     const addDistSq = addM * addM;
@@ -2094,15 +2107,28 @@ function _fleetTick() {
       cand.push([icao, d2, cull.computeVisibility(_scratchModelBS) !== Cesium.Intersect.OUTSIDE]);
     }
     cand.sort((a, b) => a[1] - b[1]);
-    if (cand.length > cap && (nowMs - _lastModelCapWarnMs) > 5000) {
-      console.warn(`[Data:Military] ${cand.length} planes in 3D range; capped at ${cap} (${_models3dMode}). On-screen prioritized.`);
+    // Automatický strop — zrkadlo flights.js: na obrazovke všetko (po MODEL_AUTO_MAX), mimo len základ.
+    let onScreenWanted = 0;
+    for (const [, d2, inF] of cand) if (inF && d2 <= addDistSq) onScreenWanted++;
+    const baseCap = _models3dMode === 'all' ? MODEL_MAX_ALL : MODEL_MAX;
+    // Rozpočet podľa času snímku: reguluje sa raz za sekundu a len keď sa nič nenačítava
+    // (cena modelov sa ustáli až po dobehnutí načítania).
+    if (_frameMeter && (nowMs - _lastBudgetMs) >= 1000 && _modelPending.size === 0) {
+      _modelBudget = nextModelBudget(_modelBudget, _frameMeter.renderMs(), { baseCap, maxCap: MODEL_AUTO_MAX });
+      _lastBudgetMs = nowMs;
+    }
+    _autoModelCap = _cockpitContactMode ? null : Math.min(modelAutoCap(onScreenWanted, baseCap, MODEL_AUTO_MAX), Math.max(baseCap, _modelBudget));
+    const cap = _modelCap();
+    const offCap = Math.min(cap, baseCap);
+    if (onScreenWanted > cap && (nowMs - _lastModelCapWarnMs) > 5000) {
+      console.warn(`[Data:Military] ${onScreenWanted} planes on screen in 3D range; capped at ${cap} (${_models3dMode}). Nearest prioritized.`);
       _lastModelCapWarnMs = nowMs;
     }
     modelEligible = new Set();
     for (const [icao, , inF] of cand) { if (modelEligible.size >= cap) break; if (inF && _models.has(icao)) modelEligible.add(icao); } // 1. KEEP on-screen
     for (const [icao, d2, inF] of cand) { if (modelEligible.size >= cap) break; if (inF && d2 <= addDistSq && !modelEligible.has(icao)) modelEligible.add(icao); } // 2. ADD on-screen
-    for (const [icao, , inF] of cand) { if (modelEligible.size >= cap) break; if (!inF && _models.has(icao)) modelEligible.add(icao); } // 3. KEEP off-screen (can't starve visible)
-    for (const [icao, d2, inF] of cand) { if (modelEligible.size >= cap) break; if (!inF && d2 <= addDistSq && !modelEligible.has(icao)) modelEligible.add(icao); } // 4. ADD off-screen leftover
+    for (const [icao, , inF] of cand) { if (modelEligible.size >= offCap) break; if (!inF && _models.has(icao)) modelEligible.add(icao); } // 3. KEEP off-screen (can't starve visible)
+    for (const [icao, d2, inF] of cand) { if (modelEligible.size >= offCap) break; if (!inF && d2 <= addDistSq && !modelEligible.has(icao)) modelEligible.add(icao); } // 4. ADD off-screen leftover
     const toRelease = [];
     for (const icao of _models.keys()) {
       if (icao !== _trackedIcao && !modelEligible.has(icao)) toRelease.push(icao);
@@ -2951,6 +2977,7 @@ const militaryFlightsLayer = {
     if (!_preRenderRemove && viewer?.scene) {
       _preRenderRemove = viewer.scene.preRender.addEventListener(_fleetTick);
     }
+    if (!_frameMeter && viewer?.scene) _frameMeter = createFrameCostMeter(viewer.scene);
     if (!_paletteUnsub) _paletteUnsub = onContactPaletteChange(_resyncFleetIconsForPalette);
     if (!_trackedModelPreUpdateRemove && viewer?.scene) {
       _trackedModelPreUpdateRemove = viewer.scene.preUpdate.addEventListener(_updateTrackedModel);
@@ -3001,6 +3028,8 @@ const militaryFlightsLayer = {
       _preRenderRemove();
       _preRenderRemove = null;
     }
+    if (_frameMeter) { _frameMeter.destroy(); _frameMeter = null; }
+    _modelBudget = MODEL_BUDGET_START; _lastBudgetMs = 0; _autoModelCap = null;
     if (_trackedModelPreUpdateRemove) {
       _trackedModelPreUpdateRemove();
       _trackedModelPreUpdateRemove = null;
@@ -3542,6 +3571,8 @@ const militaryFlightsLayer = {
       _preRenderRemove();
       _preRenderRemove = null;
     }
+    if (_frameMeter) { _frameMeter.destroy(); _frameMeter = null; }
+    _modelBudget = MODEL_BUDGET_START; _lastBudgetMs = 0; _autoModelCap = null;
     if (_trackedModelPreUpdateRemove) {
       _trackedModelPreUpdateRemove();
       _trackedModelPreUpdateRemove = null;
