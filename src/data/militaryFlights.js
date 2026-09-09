@@ -60,6 +60,7 @@ import {
 import {
   applyAircraftBillboardTreatment,
   applyAircraftModelTreatment,
+  modelHandoffScaleCap,
 } from './aircraftRecession.js';
 import { refreshTrackedReadout, trackedLabelModelFromText } from './trackedReadout.js';
 import {
@@ -2151,6 +2152,16 @@ function _fleetTick() {
     const isCockpitNear = _cockpitContactMode && _cockpitNearContacts.has(icao24);
     // Ten istý predikát ako prezentácia — `bb.scale` píšu obe cesty.
     const isDot = _isDotContact(icao24);
+    // Perspektíva modelov pre billboardy v režime 3D — zrkadlo flights.js.
+    const scaleCap = (useModels && !isDot)
+      ? modelHandoffScaleCap({
+        cameraDistanceM,
+        modelAddDistM: _modelAddDistM(),
+        modelMinPx: MODEL_MIN_PX / (globalThis.devicePixelRatio || 1),
+        glyphPx: bb.width || 20,
+        distanceScale,
+      })
+      : Number.POSITIVE_INFINITY;
     const treatment = applyAircraftBillboardTreatment({
       billboard: bb,
       baseScale: isDot ? 1 : _militaryBillboardScale(icao24),
@@ -2159,6 +2170,7 @@ function _fleetTick() {
       focusFactor: focus.factor,
       cameraDistanceM,
       cameraHeightM: camera.positionCartographic?.height,
+      scaleCap,
     });
     _billboardLimbScale.set(bb, treatment.factors.scale);
     // Two-tier glyph raster — mirror of flights.js: swap 64/192 px rasters on

@@ -159,6 +159,35 @@ export function aircraftRecessionFactors({ cameraDistanceM, cameraHeightM }, par
   );
 }
 
+/** Najmenšia ikona (CSS px), na ktorú perspektíva modelov billboard zmenší — ostáva klikateľná (pick tolerancia 6 px). */
+export const MODEL_HANDOFF_FLOOR_PX = 14;
+
+/**
+ * Strop škály billboardu v režime 3D modelov (2026-09-09, používateľ: „tie
+ * horné lietadlá pri horizonte nie sú 3D v polohe"): modely majú
+ * minimumPixelSize, takže od hranice pridávania modelov (150 km) sa každý
+ * stroj kreslí ~32 px, ale billboard tesne za ňou mal 20 px × 3 × NearFarScalar
+ * ≈ 56 px — pri horizonte visel rad veľkých plošných siluet. Strop dáva
+ * billboardu perspektívu modelov: na hranici presne minimumPixelSize, ďalej
+ * ∝ 1/vzdialenosť po dno MODEL_HANDOFF_FLOOR_PX. Pure.
+ * @param {object} input
+ * @param {number} input.cameraDistanceM vzdialenosť kamera → stroj
+ * @param {number} input.modelAddDistM polomer pridávania modelov (režim proximity/all)
+ * @param {number} input.modelMinPx minimumPixelSize modelu v CSS px (device px / DPR)
+ * @param {number} input.glyphPx šírka billboardu (bb.width, CSS px)
+ * @param {number} input.distanceScale hodnota NearFarScalar v tejto vzdialenosti
+ * @param {number} [input.floorPx]
+ * @returns {number} horná hranica bb.scale; Infinity pri neplatnom vstupe (bez stropu)
+ */
+export function modelHandoffScaleCap({
+  cameraDistanceM, modelAddDistM, modelMinPx, glyphPx, distanceScale, floorPx = MODEL_HANDOFF_FLOOR_PX,
+}) {
+  if (!(cameraDistanceM > 0) || !(modelAddDistM > 0) || !(modelMinPx > 0)
+    || !(glyphPx > 0) || !(distanceScale > 0)) return Number.POSITIVE_INFINITY;
+  const targetPx = Math.max(floorPx, (modelMinPx * modelAddDistM) / cameraDistanceM);
+  return targetPx / (glyphPx * distanceScale);
+}
+
 /**
  * Production wire helper: compose base scale/alpha, focus emphasis, and limb
  * recession into one deadband-gated billboard write site.
@@ -170,6 +199,8 @@ export function aircraftRecessionFactors({ cameraDistanceM, cameraHeightM }, par
  * @param {number} input.focusFactor
  * @param {number} input.cameraDistanceM
  * @param {number} input.cameraHeightM
+ * @param {number} [input.scaleCap] horná hranica škály (modelHandoffScaleCap); Infinity = bez stropu.
+ *   Výsledný `factors.scale` je efektívny činiteľ (limb × strop), aby ho prezentácia vedela zopakovať.
  * @param {Partial<typeof DEFAULT_AIRCRAFT_RECESSION_PARAMS>} [input.params]
  *
  * IMPORTANT: the returned object (including `factors`) is a module-owned
@@ -185,6 +216,7 @@ export function applyAircraftBillboardTreatment({
   focusFactor,
   cameraDistanceM,
   cameraHeightM,
+  scaleCap = Number.POSITIVE_INFINITY,
   params,
 }) {
   const tuning = resolvedParams(params);
@@ -194,7 +226,11 @@ export function applyAircraftBillboardTreatment({
     tuning,
     _scratchFactors,
   );
-  const scale = baseScale * factors.scale;
+  let scale = baseScale * factors.scale;
+  if (Number.isFinite(scaleCap) && scaleCap > 0 && scale > scaleCap) {
+    scale = scaleCap;
+    if (baseScale > 0) factors.scale = scaleCap / baseScale;
+  }
   const composedTreatment = Math.max(
     tuning.combinedAlphaFloor,
     clamp(focusFactor, 0, 1) * factors.alpha,

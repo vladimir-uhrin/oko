@@ -142,3 +142,41 @@ test('ambient model presentation receives composed alpha without changing blend 
   assert.equal(model.colorBlendAmount, 0.9);
   assert.equal(applyAircraftModelTreatment({ model, baseColor: color, alpha: 0.2, params }), 0);
 });
+
+test('modelHandoffScaleCap: na hranici modelov presne minimumPixelSize, ďalej ∝ 1/d, dno 14 px, neplatný vstup = bez stropu (2026-09-09 „lietadlá pri horizonte nie sú 3D")', async () => {
+  const { modelHandoffScaleCap, MODEL_HANDOFF_FLOOR_PX } = await import('./aircraftRecession.js');
+  const px = (cap, glyphPx, distanceScale) => cap * glyphPx * distanceScale;
+  // Billboard 20 px × NearFarScalar ~2,95 (≈ 59 px) vs model 32 px na 150 km.
+  const at150 = modelHandoffScaleCap({ cameraDistanceM: 150_000, modelAddDistM: 150_000, modelMinPx: 32, glyphPx: 20, distanceScale: 2.95 });
+  assert.ok(Math.abs(px(at150, 20, 2.95) - 32) < 1e-9, 'na hranici = minimumPixelSize');
+  const at300 = modelHandoffScaleCap({ cameraDistanceM: 300_000, modelAddDistM: 150_000, modelMinPx: 32, glyphPx: 20, distanceScale: 2.9 });
+  assert.ok(Math.abs(px(at300, 20, 2.9) - 16) < 1e-9, 'dvojnásobná vzdialenosť = polovica');
+  const at600 = modelHandoffScaleCap({ cameraDistanceM: 600_000, modelAddDistM: 150_000, modelMinPx: 32, glyphPx: 20, distanceScale: 2.8 });
+  assert.ok(Math.abs(px(at600, 20, 2.8) - MODEL_HANDOFF_FLOOR_PX) < 1e-9, 'dno 14 px — ostáva klikateľné');
+  const near = modelHandoffScaleCap({ cameraDistanceM: 50_000, modelAddDistM: 150_000, modelMinPx: 32, glyphPx: 20, distanceScale: 2.98 });
+  assert.ok(px(near, 20, 2.98) > 90, 'pod hranicou strop neobmedzuje bežnú 3× ikonu (96 px > 59 px)');
+  assert.equal(modelHandoffScaleCap({ cameraDistanceM: 0, modelAddDistM: 150_000, modelMinPx: 32, glyphPx: 20, distanceScale: 3 }), Number.POSITIVE_INFINITY);
+  assert.equal(modelHandoffScaleCap({ cameraDistanceM: 1e5, modelAddDistM: NaN, modelMinPx: 32, glyphPx: 20, distanceScale: 3 }), Number.POSITIVE_INFINITY);
+});
+
+test('applyAircraftBillboardTreatment: scaleCap zreže škálu a factors.scale je efektívny činiteľ (prezentácia ho zopakuje)', () => {
+  const color = { withAlpha: (alpha) => ({ alpha }) };
+  const bb = { scale: 1, color: { alpha: 1 } };
+  const capped = applyAircraftBillboardTreatment({
+    billboard: bb, baseScale: 2, baseAlpha: 1, baseColor: color, focusFactor: 1,
+    cameraDistanceM: 1000, cameraHeightM: 5000, scaleCap: 0.5,
+  });
+  assert.equal(capped.scale, 0.5);
+  assert.equal(bb.scale, 0.5);
+  assert.ok(Math.abs(capped.factors.scale - 0.25) < 1e-12, 'efektívny činiteľ = strop / základ');
+  const free = applyAircraftBillboardTreatment({
+    billboard: bb, baseScale: 2, baseAlpha: 1, baseColor: color, focusFactor: 1,
+    cameraDistanceM: 1000, cameraHeightM: 5000, scaleCap: Number.POSITIVE_INFINITY,
+  });
+  assert.equal(free.scale, 2, 'Infinity = bez stropu');
+  const omitted = applyAircraftBillboardTreatment({
+    billboard: bb, baseScale: 2, baseAlpha: 1, baseColor: color, focusFactor: 1,
+    cameraDistanceM: 1000, cameraHeightM: 5000,
+  });
+  assert.equal(omitted.scale, 2, 'vynechaný parameter = bez stropu');
+});

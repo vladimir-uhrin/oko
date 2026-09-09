@@ -107,6 +107,7 @@ import {
   applyAircraftBillboardTreatment,
   applyAircraftModelTreatment,
   getAircraftRecessionParams,
+  modelHandoffScaleCap,
   setAircraftRecessionParams,
 } from './aircraftRecession.js';
 import { refreshTrackedReadout } from './trackedReadout.js';
@@ -3236,6 +3237,18 @@ function _fleetTick() {
     // takže rozdielny úsudok by ikonu naťahoval a zmenšoval každý tik.
     const isDot = _isDotContact(icao24);
     const baseColor = isDot ? _dotBaseColor(icao24) : _fleetBillboardColor(icao24);
+    // Perspektíva modelov pre billboardy v režime 3D (2026-09-09 „lietadlá pri
+    // horizonte nie sú 3D"): za hranicou pridávania modelov nesmie byť ikona
+    // väčšia, než by bol model (minimumPixelSize), a ďalej sa zmenšuje ∝ 1/d.
+    const scaleCap = (useModels && !isDot)
+      ? modelHandoffScaleCap({
+        cameraDistanceM,
+        modelAddDistM: _modelAddDistM(),
+        modelMinPx: MODEL_MIN_PX / (globalThis.devicePixelRatio || 1),
+        glyphPx: bb.width || 20,
+        distanceScale,
+      })
+      : Number.POSITIVE_INFINITY;
     const treatment = applyAircraftBillboardTreatment({
       billboard: bb,
       baseScale: isDot ? 1 : _fleetBillboardScale(icao24, info?.klass),
@@ -3244,6 +3257,7 @@ function _fleetTick() {
       focusFactor: focus.factor,
       cameraDistanceM,
       cameraHeightM: camera.positionCartographic?.height,
+      scaleCap,
     });
     _billboardLimbScale.set(bb, treatment.factors.scale);
     // Two-tier glyph raster (field test 2026-08-16): the billboard atlas

@@ -899,6 +899,21 @@ This is the current runtime/source-of-truth snapshot for the project.
 >   their product is clamped to 0.20 before freshness alpha is applied. Ambient
 >   fleet models receive that same composed alpha; class/ground/cockpit repaints
 >   preserve the current limb scale instead of dropping it for a tick.
+>   **Model-perspective cap (2026-09-09, user: "tie horné lietadlá pri horizonte
+>   nie sú 3D v polohe"):** while the 3D-model regime is active, ambient
+>   billboards beyond the model ADD radius were still 20 px × 3 × NearFarScalar
+>   ≈ 56 px (measured at 183 km from a 7.5 km camera) while every model at the
+>   150 km boundary is `minimumPixelSize` = 32 px — a row of large flat
+>   top-down glyphs floated above the horizon. `modelHandoffScaleCap()` in
+>   `aircraftRecession.js` now caps the billboard scale so the icon equals the
+>   model's minimum pixel size exactly at the ADD radius and shrinks ∝ 1/distance
+>   beyond it, floored at 14 CSS px (still pickable with the 6 px tolerance);
+>   `applyAircraftBillboardTreatment` takes it as `scaleCap` (min with the limb
+>   taper; `factors.scale` becomes the effective factor so presentation repaints
+>   reproduce it). Wired in `flights.js` and `militaryFlights.js` only for
+>   `useModels && !isDot`; the 3× close-range scale, dot/micro tiers and the
+>   3D-off look are untouched. Measured after: 24 px at 247 km, 18–19 px from
+>   325 km to the limb (was 44–56 px).
 > - **Focus-aware contact de-emphasis:** civilian/military aircraft and
 >   satellites publish the selected target's padded screen bounds and camera
 >   distance from the same per-frame position cache already consumed by their
