@@ -61,6 +61,7 @@ import {
   applyAircraftBillboardTreatment,
   applyAircraftModelTreatment,
   modelHandoffScaleCap,
+  modelHorizonReachM,
 } from './aircraftRecession.js';
 import { refreshTrackedReadout, trackedLabelModelFromText } from './trackedReadout.js';
 import {
@@ -1592,12 +1593,23 @@ function _modelCap() {
   return _cockpitContactMode ? Math.min(COCKPIT_MODEL_MAX, mapCap) : mapCap;
 }
 
-/** Active ADD/KEEP radii (m) — mode-aware ('all' reaches ~to the horizon). Mirror of flights.js. */
+/** Strop dosahu modelov po obzor (m) — kandidátov triedi tik, počet modelov drží cap. */
+const MODEL_REACH_MAX_M = 900_000;
+
+/** Active ADD radius (m) — new planes inside this range get a model. Mode-aware: 'all' reaches far.
+ *  Na mape sa polomer roztiahne po obzor (modelHorizonReachM; 2026-09-09 „pri horizonte
+ *  chcem siluety ako modely, nie plošné ikony"); kokpit má vlastné pásmo pipov a ostáva
+ *  na statických polomeroch. Zrkadlo flights.js. */
 function _modelAddDistM() {
-  return _models3dMode === 'all' ? MODEL_ALL_ADD_M : MODEL_PROX_ADD_M;
+  const base = _models3dMode === 'all' ? MODEL_ALL_ADD_M : MODEL_PROX_ADD_M;
+  if (_cockpitContactMode) return base;
+  return modelHorizonReachM(_viewer?.camera?.positionCartographic?.height, { minM: base, maxM: MODEL_REACH_MAX_M });
 }
+/** Active KEEP radius (m) — a modeled plane keeps its model out to here (hysteresis vs ADD). */
 function _modelKeepDistM() {
-  return _models3dMode === 'all' ? MODEL_ALL_KEEP_M : MODEL_PROX_KEEP_M;
+  const base = _models3dMode === 'all' ? MODEL_ALL_KEEP_M : MODEL_PROX_KEEP_M;
+  if (_cockpitContactMode) return base;
+  return Math.max(base, _modelAddDistM() * 1.15);
 }
 
 /** World model matrix from a position + course heading (pitch/roll 0; ENU frame). Writes into

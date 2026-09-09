@@ -180,3 +180,16 @@ test('applyAircraftBillboardTreatment: scaleCap zreže škálu a factors.scale j
   });
   assert.equal(omitted.scale, 2, 'vynechaný parameter = bez stropu');
 });
+
+test('modelHorizonReachM: limb(kamera) + limb(cestovná hladina), dno = statický polomer, strop (2026-09-09 „siluety modelov až po obzor")', async () => {
+  const { modelHorizonReachM, cameraLimbDistanceM } = await import('./aircraftRecession.js');
+  const R = 6_378_137;
+  const expected = cameraLimbDistanceM(7_500, R) + cameraLimbDistanceM(12_500, R);
+  assert.ok(expected > 700_000 && expected < 720_000, 'z 7,5 km ≈ 309 + 399 km');
+  assert.ok(Math.abs(modelHorizonReachM(7_500, { minM: 150_000, maxM: 900_000 }) - expected) < 1e-6);
+  assert.equal(modelHorizonReachM(100_000, { minM: 150_000, maxM: 900_000 }), 900_000, 'strop');
+  assert.ok(modelHorizonReachM(100, { minM: 150_000, maxM: 900_000 }) > 430_000, 'aj zo zeme vidno cestovnú hladinu ~435 km');
+  assert.equal(modelHorizonReachM(100, { minM: 150_000, maxM: 900_000, cruiseAltM: 1 }), 150_000, 'dno: aspoň statický polomer');
+  assert.equal(modelHorizonReachM(NaN, { minM: 150_000, maxM: 900_000 }), 150_000);
+  assert.equal(modelHorizonReachM(0, { minM: 400_000, maxM: 900_000 }), 400_000);
+});

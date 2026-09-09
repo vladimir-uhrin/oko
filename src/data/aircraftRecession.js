@@ -159,6 +159,29 @@ export function aircraftRecessionFactors({ cameraDistanceM, cameraHeightM }, par
   );
 }
 
+/** Cestovná hladina, po ktorú dosah modelov počíta s viditeľnosťou nad obzorom (m). */
+export const MODEL_REACH_CRUISE_ALT_M = 12_500;
+
+/**
+ * Dosah 3D modelov po obzor (2026-09-09, používateľ chce pri horizonte
+ * bočné siluety modelov, nie plošné ikony): stroj v cestovej hladine je
+ * spoza geometrického obzoru kamery vidieť ešte o jeho vlastnú obzorovú
+ * vzdialenosť ďalej, takže dosah = limb(kamera) + limb(cestovná hladina),
+ * zdola ohraničený statickým polomerom režimu a zhora stropom (kandidátov
+ * triedi tik; strop modelov ostáva). Pure.
+ * @param {number} cameraHeightM
+ * @param {{minM:number, maxM:number, cruiseAltM?:number, earthRadiusM?:number}} bounds
+ * @returns {number} metre
+ */
+export function modelHorizonReachM(cameraHeightM, {
+  minM, maxM, cruiseAltM = MODEL_REACH_CRUISE_ALT_M, earthRadiusM = DEFAULT_AIRCRAFT_RECESSION_PARAMS.earthRadiusM,
+}) {
+  if (!Number.isFinite(cameraHeightM) || cameraHeightM <= 0) return minM;
+  const reach = cameraLimbDistanceM(cameraHeightM, earthRadiusM) + cameraLimbDistanceM(cruiseAltM, earthRadiusM);
+  if (!Number.isFinite(reach)) return minM;
+  return clamp(reach, minM, maxM);
+}
+
 /** Najmenšia ikona (CSS px), na ktorú perspektíva modelov billboard zmenší — ostáva klikateľná (pick tolerancia 6 px). */
 export const MODEL_HANDOFF_FLOOR_PX = 14;
 

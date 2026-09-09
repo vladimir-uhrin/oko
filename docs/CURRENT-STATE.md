@@ -914,6 +914,16 @@ This is the current runtime/source-of-truth snapshot for the project.
 >   `useModels && !isDot`; the 3× close-range scale, dot/micro tiers and the
 >   3D-off look are untouched. Measured after: 24 px at 247 km, 18–19 px from
 >   325 km to the limb (was 44–56 px).
+>   **Model reach to the horizon (same day, user compared crops: wants the
+>   side-on model silhouette at the horizon, not the top-down glyph):** on the
+>   map the model ADD radius is no longer the static 150 km (proximity) /
+>   400 km (all) but `modelHorizonReachM()` in `aircraftRecession.js` =
+>   limb(camera height) + limb(12.5 km cruise altitude), floored at the mode's
+>   static radius and capped at 900 km (`MODEL_REACH_MAX_M`); KEEP = ADD × 1.15.
+>   Model caps (150 / 350, nearest-first with on-screen priority) are
+>   unchanged, so the cost is bounded; cockpit keeps the static radii for its
+>   pip/near-contact band. Verified from a 7.5 km camera tilted to the horizon:
+>   127 models (47 on screen, 25–683 km), one billboard left on screen.
 > - **Focus-aware contact de-emphasis:** civilian/military aircraft and
 >   satellites publish the selected target's padded screen bounds and camera
 >   distance from the same per-frame position cache already consumed by their
