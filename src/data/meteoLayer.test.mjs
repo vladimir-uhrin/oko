@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createMeteoLayer, METEO_BASEMAP_ID, METEO_LAYER_ID, fieldMaterialFabric } from './meteoLayer.js';
+import { createMeteoLayer, METEO_BASEMAP_ID, METEO_LAYER_ID, fieldMaterialFabric, renderPassOnly } from './meteoLayer.js';
 import { _resetActiveMapStackForTest, setActiveMapStack } from './activeMapStack.js';
 
 function fakeDoc() {
@@ -227,4 +227,32 @@ test('plynulé prehrávanie (Windy): mixT a častice idú spojito 0→1 medzi kr
 test('drapéria poľa je NEPICKOVATEĽNÁ — inak by kryla scene.pick a zabila hover na lietadlá/mestá (2026-09-09)', () => {
   const src = readFileSync(new URL('./meteoLayer.js', import.meta.url), 'utf8');
   assert.match(src, /allowPicking: false,\s*appearance: new Cesium\.EllipsoidSurfaceAppearance/);
+  // allowPicking:false samo nestačí: Cesium primitív bez pick príkazu prepadne
+  // v pick prechode na farebný príkaz a prepíše pick framebuffer (0/51 zásahov
+  // na lietadlá s drapériou). Drapéria preto ide do scény cez renderPassOnly.
+  assert.match(src, /return \{ primitive: renderPassOnly\(primitive\), material \};/);
+});
+
+test('renderPassOnly: update len vo farebnom prechode (pick/depth/pickVoxel preskočí), show a destroy deleguje', () => {
+  const calls = [];
+  let destroyed = false;
+  const inner = { show: false, update(fs) { calls.push(fs.passes.render ? 'render' : 'other'); }, destroy() { destroyed = true; }, isDestroyed: () => destroyed };
+  const w = renderPassOnly(inner);
+  w.update({ passes: { render: true, pick: false, depth: false } });
+  w.update({ passes: { render: false, pick: true } });
+  w.update({ passes: { render: false, depth: true } });
+  w.update({ passes: { render: false, pickVoxel: true } });
+  w.update({ passes: { render: false } });
+  assert.deepEqual(calls, ['render', 'other'], 'pick, depth a pickVoxel prechod sa ku primitívu nedostanú');
+  w.show = true;
+  assert.equal(inner.show, true);
+  assert.equal(w.show, true);
+  assert.equal(w.inner, inner);
+  assert.equal(w.isDestroyed(), false);
+  w.destroy();
+  assert.equal(destroyed, true);
+  assert.equal(w.isDestroyed(), true);
+  const bare = renderPassOnly({ show: true, update() {} });
+  assert.equal(bare.isDestroyed(), false);
+  assert.equal(bare.destroy(), undefined, 'primitív bez destroy nepadá');
 });

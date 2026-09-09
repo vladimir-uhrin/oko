@@ -103,6 +103,32 @@ export function rampCanvas(doc, stops, range) {
 }
 
 /**
+ * Obal primitívu, ktorý sa kreslí LEN vo farebnom prechode. Cesium totiž
+ * primitív s `allowPicking: false` nevynechá z pick prechodu — bez pick
+ * príkazu prepadne na bežný farebný príkaz a NAMAĽUJE svoje farby do pick
+ * framebufferu (Scene.executeCommand). Drapéria bez hĺbkového testu tak
+ * prepísala celú obrazovku a scene.pick vracal undefined pre všetko —
+ * lietadlá sa nedali klikať ani hoverovať (2026-09-09, overené v prehliadači:
+ * 0/51 zásahov s drapériou, 48/48 s týmto obalom). Preskakuje aj hĺbkový
+ * prechod (pickPosition), kde drapéria nemá čo robiť. Pure okrem delegovania.
+ * @param {{update: Function, destroy?: Function, isDestroyed?: Function, show: boolean}} primitive
+ */
+export function renderPassOnly(primitive) {
+  return {
+    get show() { return primitive.show; },
+    set show(value) { primitive.show = value; },
+    get inner() { return primitive; },
+    update(frameState) {
+      const passes = frameState?.passes;
+      if (passes && (passes.pick || passes.depth || passes.pickVoxel)) return;
+      primitive.update(frameState);
+    },
+    isDestroyed() { return typeof primitive.isDestroyed === 'function' ? primitive.isDestroyed() : false; },
+    destroy() { return typeof primitive.destroy === 'function' ? primitive.destroy() : undefined; },
+  };
+}
+
+/**
  * Drapéria celého sveta s meteo materiálom. Injektovateľné v testoch.
  * @param {{image: HTMLImageElement|HTMLCanvasElement, ramp: HTMLCanvasElement, field: object}} input
  */
@@ -130,9 +156,7 @@ export function createFieldPrimitive({ image, imageNext = null, ramp, field }) {
         granularity: Cesium.Math.toRadians(2),
       }),
     }),
-    // Nepickovateľná: drapéria bez hĺbkového testu sedí pred všetkým, takže
-    // scene.pick by vracala ju namiesto lietadla/mesta pod ňou → nefungoval
-    // by žiadny hover (2026-09-09 „nefunguje ani hover na lietadlá").
+    // Bez pick id; samotné allowPicking:false ale NESTAČÍ — viď renderPassOnly.
     allowPicking: false,
     appearance: new Cesium.EllipsoidSurfaceAppearance({
       material,
@@ -152,7 +176,7 @@ export function createFieldPrimitive({ image, imageNext = null, ramp, field }) {
     asynchronous: false,
     show: false,
   });
-  return { primitive, material };
+  return { primitive: renderPassOnly(primitive), material };
 }
 
 /** Načíta PNG ako dekódovaný <img> (null pri chybe). */
