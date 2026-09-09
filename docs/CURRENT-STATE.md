@@ -1,5 +1,18 @@
 # God's Eye View Current State
 
+### OKO maritime historical context (2026-09-09)
+
+The live AIS row has an additive historical-context panel implemented in
+`src/data/maritimeHistoryPanel.js`. It enables existing shipping-lane, port and
+historical density layers, with session Undo that preserves previously enabled
+layers and subsequent independent visibility choices. A separate Hormuz button
+frames the Persian Gulf at regional scale. Source-period copy explicitly states
+that the World Bank / IMF density is January 2015–February 2021 and not current
+vessel positions; OSM/Bing and zoom-out guidance preserves the existing density
+rendering restrictions. No live AIS ingestion, retention, keys, or provider
+requests change. Recent GFW history is not integrated (authenticated access has
+not been established). Rollback and next-stage notes: `docs/MARITIME-HISTORY.md`.
+
 Updated: August 24, 2026
 
 > **2026-08-23 — first-run mission launcher** (`src/firstRunExperience.js`,

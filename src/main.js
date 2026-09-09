@@ -314,6 +314,7 @@ async function init() {
     // Initialize data layer manager
     const dataManager = new DataLayerManager(viewer, {
       allowQaRegistration: import.meta.env.DEV,
+      mapStackController,
     });
     dataManager.register(flightsLayer);
     dataManager.register(militaryFlightsLayer);

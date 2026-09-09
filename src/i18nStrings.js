@@ -552,6 +552,13 @@ export const EN_STRINGS = Object.freeze({
   // Historical ship density (World Bank / IMF, 2015–2021) — MODELLED, never live
   'layer.local-ship-density.name': 'Historical Ship Density',
   'shipdensity.historical': 'HISTORICAL, not live',
+  'maritime.history-title': 'Maritime context · historical',
+  'maritime.history-note': 'Shipping lanes, ports and AIS density (Jan 2015–Feb 2021, World Bank / IMF). Not current vessel positions. Show it on OSM so it stays visible over the 3D mesh. Empty live AIS does not mean empty seas.',
+  'maritime.history-show': 'Show context on OSM',
+  'maritime.history-undo': 'Undo added layers',
+  'maritime.hormuz': 'Hormuz / Persian Gulf',
+  'maritime.focus-unavailable': 'Exit Cockpit and stop following a contact before moving to the Gulf.',
+  'maritime.history-error': 'Some layers could not be changed. Check their status; Undo remains available for added layers.',
   // Historical air-traffic density (adsb.lol, one day) — MODELLED, never live
   'layer.local-air-density.name': 'Historical Air Traffic Density',
   'airdensity.historical': 'HISTORICAL, not live',
@@ -1594,6 +1601,13 @@ export const SK_STRINGS = Object.freeze({
   // Historická hustota lodí (World Bank / IMF, 2015–2021) — MODELOVANÉ, nikdy živé
   'layer.local-ship-density.name': 'Historická hustota lodí',
   'shipdensity.historical': 'HISTORICKÉ, nie živé',
+  'maritime.history-title': 'Námorný kontext · historický',
+  'maritime.history-note': 'Koridory, prístavy a hustota AIS (január 2015–február 2021, World Bank / IMF). Nie aktuálne polohy lodí. Zobrazí sa na OSM, aby bol kontext viditeľný nad 3D terénom. Prázdne živé AIS neznamená prázdne more.',
+  'maritime.history-show': 'Zobraziť kontext na OSM',
+  'maritime.history-undo': 'Vrátiť pridané vrstvy',
+  'maritime.hormuz': 'Hormuz / Perzský záliv',
+  'maritime.focus-unavailable': 'Pred presunom na záliv ukonči kokpit a sledovanie objektu.',
+  'maritime.history-error': 'Niektoré vrstvy sa nepodarilo zmeniť. Skontroluj ich stav; pridané vrstvy možno stále vrátiť.',
   // Historická hustota letov (adsb.lol, jeden deň) — MODELOVANÉ, nikdy živé
   'layer.local-air-density.name': 'Historická hustota letov',
   'airdensity.historical': 'HISTORICKÉ, nie živé',

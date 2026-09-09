@@ -10345,6 +10345,17 @@ body.scene-playback-mode #first-run-launcher {
 /* Skupina „Prírodné hrozby" v paneli vrstiev (2026-09-05): sekcia v jazyku
    panelu — mono nadpis s rozostupom ako .panel-title, tenké deliace čiary,
    riadky ostávajú bežné .data-toggle-row. Žiadna cudzia oranžová škatuľa. */
+.maritime-history-panel {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(127, 209, 192, 0.2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.maritime-history-panel > strong { color: #7fd1c0; }
+.maritime-history-panel > p { margin: 5px 0; opacity: 0.8; }
+.maritime-history-panel > p:empty { display: none; }
+.maritime-history-panel .data-toggle-controls { display: flex; flex-wrap: wrap; gap: 4px; }
+
 .natural-hazards-card {
   margin: 6px 0 4px;
   padding: 8px 0 2px;

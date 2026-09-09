@@ -1,4 +1,5 @@
 import { governorRequestRender } from '../renderGovernor.js';
+import { createMaritimeHistoryPanel, createMaritimeHistorySession } from './maritimeHistoryPanel.js';
 import { createNaturalHazardsPanel, hazardsSummary, isNaturalHazardLayer } from './naturalHazardsPanel.js';
 import { createGibsOverlayPanel, gibsOverlaySummary, isGibsOverlayLayer } from './gibsOverlayPanel.js';
 import { t } from '../i18n.js';
@@ -133,8 +134,9 @@ export function layerFeedState(stats = {}) {
  * for real-time data overlays on the CesiumJS globe.
  */
 export class DataLayerManager {
-  constructor(viewer, { allowQaRegistration = false } = {}) {
+  constructor(viewer, { allowQaRegistration = false, mapStackController = null } = {}) {
     this.viewer = viewer;
+    this.mapStackController = mapStackController;
     this.layers = new Map(); // id → { module, enabled, initialized, intervalId, lifecycleState, lifecycleUncertain }
     this._listeners = new Set();
     this._visibilityRequestListeners = new Set();
@@ -2037,9 +2039,26 @@ export class DataLayerManager {
 
   _renderToggles() {
     if (!this._toggleContainer) return;
+    if (!this._maritimeHistorySession) {
+      this._maritimeHistorySession = createMaritimeHistorySession(this);
+      const cleanup = ({ layerId }) => {
+        if (layerId !== 'ais-live-vessels') return;
+        this._maritimeHistorySession?.destroy();
+        this._maritimeHistorySession = null;
+        this._beforeDestroyListeners.delete(cleanup);
+      };
+      this._beforeDestroyListeners.add(cleanup);
+    }
     this._toggleContainer.innerHTML = '';
     let hazardsPanel = null;
     let gibsPanel = null;
+    // Keep the maritime recovery action discoverable at the top of the rail;
+    // the AIS row is deliberately lower in the full layer list.
+    if (this.layers.has('ais-live-vessels')) {
+      this._toggleContainer.appendChild(createMaritimeHistoryPanel(
+        document, this, this._maritimeHistorySession,
+      ));
+    }
 
     for (const layer of this.getAll()) {
       if (!layer.showInTogglePanel) continue;
