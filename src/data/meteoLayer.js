@@ -130,6 +130,10 @@ export function createFieldPrimitive({ image, imageNext = null, ramp, field }) {
         granularity: Cesium.Math.toRadians(2),
       }),
     }),
+    // Nepickovateľná: drapéria bez hĺbkového testu sedí pred všetkým, takže
+    // scene.pick by vracala ju namiesto lietadla/mesta pod ňou → nefungoval
+    // by žiadny hover (2026-09-09 „nefunguje ani hover na lietadlá").
+    allowPicking: false,
     appearance: new Cesium.EllipsoidSurfaceAppearance({
       material,
       flat: true,

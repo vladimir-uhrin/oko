@@ -223,3 +223,8 @@ test('plynulé prehrávanie (Windy): mixT a častice idú spojito 0→1 medzi kr
   layer.disable();
   _resetActiveMapStackForTest();
 });
+
+test('drapéria poľa je NEPICKOVATEĽNÁ — inak by kryla scene.pick a zabila hover na lietadlá/mestá (2026-09-09)', () => {
+  const src = readFileSync(new URL('./meteoLayer.js', import.meta.url), 'utf8');
+  assert.match(src, /allowPicking: false,\s*appearance: new Cesium\.EllipsoidSurfaceAppearance/);
+});
