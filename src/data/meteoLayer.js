@@ -31,8 +31,13 @@ import { createMeteoTimeline } from '../meteoTimeline.js';
 
 export { METEO_LAYER_ID };
 export const METEO_CATALOG_URL = '/api/meteo/catalog';
-/** Výška drapérie nad elipsoidom (pod lietadlami, nad podkladom). */
-export const METEO_DRAPE_HEIGHT_M = 2_000;
+/**
+ * Výška drapérie nad elipsoidom: 10 km — NAD celým terénom Google 3D dlaždíc
+ * (Everest 8,8 km + okraje dlaždíc). Pri 2 km terén fotoreálu prerážal pole a
+ * robil v ňom „diery" (používateľ 2026-09-09: „google zle zobrazuje vrstvy").
+ * Z výšky kamery > 30 km je 10 km vizuálne to isté ako povrch.
+ */
+export const METEO_DRAPE_HEIGHT_M = 10_000;
 export const METEO_FIELD_ALPHA = 0.62;
 /**
  * Podklad pre polia: tmavá vektorová mapa s popiskami (Stadia Alidade Smooth
@@ -44,9 +49,9 @@ export const METEO_BASEMAP_ID = 'stadia-dark';
 export const METEO_PREFETCH_STEPS = 2;
 /** Trvanie jedného kroku pri plynulom prehrávaní (ms) — 3 h predpovede za 2,4 s. */
 export const METEO_PLAY_STEP_MS = 2_400;
-/** Útlm podľa výšky kamery: plné pole nad 20 km, nič pod 5 km (drapéria je 2 km nad elipsoidom). */
-export const METEO_FADE_IN_HEIGHT_M = 20_000;
-export const METEO_FADE_OUT_HEIGHT_M = 5_000;
+/** Útlm podľa výšky kamery: plné pole nad 30 km, nič pod 12 km (drapéria je 10 km nad elipsoidom). */
+export const METEO_FADE_IN_HEIGHT_M = 30_000;
+export const METEO_FADE_OUT_HEIGHT_M = 12_000;
 
 /**
  * Cesium Material: hodnota z textúry (kanál `channel`, 0..1) → skutočná
@@ -126,7 +131,21 @@ export function createFieldPrimitive({ image, imageNext = null, ramp, field }) {
         granularity: Cesium.Math.toRadians(2),
       }),
     }),
-    appearance: new Cesium.EllipsoidSurfaceAppearance({ material, flat: true, translucent: true }),
+    appearance: new Cesium.EllipsoidSurfaceAppearance({
+      material,
+      flat: true,
+      translucent: true,
+      // Bez hĺbkového testu: pole sa kreslí NAD terénom (Google 3D dlaždice —
+      // hrubé koreňové dlaždice pri pohľade z vesmíru vyčnievajú aj nad 10 km
+      // a robili v poli diery). Odvrátenú pologuľu odreže orezanie zadných
+      // stien, takže cez guľu nepresvitá pole z druhej strany.
+      renderState: {
+        depthTest: { enabled: false },
+        depthMask: false,
+        cull: { enabled: true, face: Cesium.CullFace.BACK },
+        blending: Cesium.BlendingState.ALPHA_BLEND,
+      },
+    }),
     asynchronous: false,
     show: false,
   });
@@ -144,8 +163,8 @@ export function loadImage(url, doc = globalThis.document) {
   });
 }
 
-/** Výška izobar nad elipsoidom (nad drapériou, pod lietadlami). */
-export const ISOLINE_HEIGHT_M = 4_000;
+/** Výška izobar nad elipsoidom (nad drapériou 10 km, pod lietadlami v cestovnej hladine). */
+export const ISOLINE_HEIGHT_M = 12_000;
 /** Podvzorkovanie mriežky pre izočiary (0,25° → 0,5°): 4× menej práce, čiary ostanú hladké. */
 export const ISOLINE_DOWNSAMPLE = 2;
 

@@ -124,6 +124,12 @@ test('materiál: fabric číta kanál, dekóduje rozsah a mapuje na rampu; tripw
   assert.equal(fabric.type, 'OkoMeteoField');
   assert.match(fabric.source, /float raw = channel < 0\.5 \? px\.r : \(channel < 1\.5 \? px\.g : px\.b\);/);
   assert.match(fabric.source, /texture\(ramp, vec2\(u, 0\.5\)\)/);
+  // Google 3D (2026-09-09 „google zle zobrazuje vrstvy"): pole 10 km nad elipsoidom, bez hĺbkového
+  // testu (terén fotoreálu ho prerážal) a s orezaním zadných stien (druhá pologuľa nepresvitá).
+  const layerSrc = readFileSync(new URL('./meteoLayer.js', import.meta.url), 'utf8');
+  assert.match(layerSrc, /export const METEO_DRAPE_HEIGHT_M = 10_000;/);
+  assert.match(layerSrc, /depthTest: \{ enabled: false \},\s*depthMask: false,\s*cull: \{ enabled: true, face: Cesium\.CullFace\.BACK \},/);
+  assert.match(layerSrc, /export const METEO_FADE_OUT_HEIGHT_M = 12_000;/, 'útlm pod drapériou');
   const registry = readFileSync(new URL('./layerState.js', import.meta.url), 'utf8');
   assert.match(registry, /\{ id: 'meteo-gfs', token: '6', disposition: 'enabled-only' \}/);
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');

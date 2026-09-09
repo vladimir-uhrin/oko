@@ -12,8 +12,8 @@ import * as Cesium from 'cesium';
 import { t } from '../i18n.js';
 
 export const PLACES_URL = new URL('./local_data/natural_earth/places.json', import.meta.url).href;
-/** Výška bodov nad elipsoidom (nad drapériou a izobarami). */
-export const PLACE_POINT_HEIGHT_M = 6_000;
+/** Výška bodov nad elipsoidom (nad drapériou 10 km a izobarami 12 km, nad terénom Googlu). */
+export const PLACE_POINT_HEIGHT_M = 13_000;
 /** Najviac bodov v kolekcii (najväčšie mestá). */
 export const PLACE_POINT_MAX = 1_400;
 export const PLACE_ID_PREFIX = 'place:';
