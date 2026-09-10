@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
 import { radarLegendStops } from './shmuRadarGrid.js';
+import { awaitImageDecode } from './imageDecode.js';
 
 /**
  * SHMÚ precipitation radar overlay — Slovak 5-minute zmax composite (OKO).
@@ -144,8 +145,8 @@ function preloadFrameImage(url) {
     if (typeof Image === 'undefined') { resolve({ testImage: url }); return; }
     const img = new Image();
     img.onload = () => {
-      const decoded = typeof img.decode === 'function' ? img.decode().catch(() => {}) : Promise.resolve();
-      decoded.then(() => resolve(img.naturalWidth > 0 ? img : null));
+      // Dekódovanie smie zdržať, nesmie rozhodovať — viď imageDecode.js.
+      awaitImageDecode(img).then(() => resolve(img.naturalWidth > 0 ? img : null));
     };
     img.onerror = () => resolve(null);
     img.src = url;

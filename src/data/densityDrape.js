@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
 import { getBasemapContrast, onContactPaletteChange } from './contactPalette.js';
 import { getActiveMapStack, isGlobeHiddenForStack, onActiveMapStackChange } from './activeMapStack.js';
+import { awaitImageDecode } from './imageDecode.js';
 import { t } from '../i18n.js';
 
 /**
@@ -76,8 +77,8 @@ export function loadDensityImage(url) {
     if (typeof Image === 'undefined') { resolve({ testImage: url }); return; } // DOM-less testy
     const img = new Image();
     img.onload = () => {
-      const decoded = typeof img.decode === 'function' ? img.decode().catch(() => {}) : Promise.resolve();
-      decoded.then(() => (img.naturalWidth > 0 ? resolve(img) : reject(new Error('empty image'))));
+      // Dekódovanie smie zdržať, nesmie rozhodovať — viď imageDecode.js.
+      awaitImageDecode(img).then(() => (img.naturalWidth > 0 ? resolve(img) : reject(new Error('empty image'))));
     };
     img.onerror = () => reject(new Error('image failed to load'));
     img.src = url;

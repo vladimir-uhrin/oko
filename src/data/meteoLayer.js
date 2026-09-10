@@ -24,6 +24,7 @@ import {
   normalizeCatalog, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
 } from './meteoField.js';
 import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
+import { awaitImageDecode } from './imageDecode.js';
 import { PLACE_POINT_HEIGHT_M, createPlaceHoverCard, createPlacePoints, loadPlaces, nearestWithinRadius, placeVisibleUntilM, sampleGrid } from './meteoPlaces.js';
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
@@ -184,7 +185,8 @@ export function loadImage(url, doc = globalThis.document) {
   return new Promise((resolve) => {
     const img = doc.createElement('img');
     img.decoding = 'async';
-    img.onload = () => (typeof img.decode === 'function' ? img.decode().then(() => resolve(img), () => resolve(img)) : resolve(img));
+    // Dekódovanie smie zdržať, nesmie rozhodovať — viď imageDecode.js.
+    img.onload = () => { awaitImageDecode(img).then(() => resolve(img)); };
     img.onerror = () => resolve(null);
     img.src = url;
   });
