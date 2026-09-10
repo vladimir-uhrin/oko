@@ -49,7 +49,11 @@ export function createMaritimeHistorySession(manager) {
   }
   return {
     get busy() { return busy; },
-    get canRestore() { return owned.size > 0; },
+    // Vlastníctvom je aj prepnutý podklad, nielen vrstvy: keď boli všetky tri
+    // vrstvy zapnuté už predtým, show() prepne fotoreál na OSM a neprevezme
+    // žiadnu vrstvu — Undo by ostalo zašednuté a ten prepnutý podklad by sa
+    // cez panel nedal vrátiť (2026-09-10).
+    get canRestore() { return owned.size > 0 || mapStackOwned; },
     async show() {
       if (busy || abort.signal.aborted) return;
       busy = true;

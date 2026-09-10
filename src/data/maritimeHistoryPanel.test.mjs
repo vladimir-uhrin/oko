@@ -27,7 +27,11 @@ function fixture(initial = []) {
     async setEnabled(id, value, options = {}) {
       calls.push({ id, value, options });
       for (const fn of listeners) fn({ layerId: id, enabled: value, ...options });
-      if (id === fail) throw new Error('fixture failure');
+      // Skutočný DataLayerManager pri zlyhaní vrstvy NEVYHODÍ výnimku — chybu
+      // zachytí, ohlási ju cez visibility-failed a skončí normálne s nezmeneným
+      // stavom. Náhrada, ktorá reject-la, obchádzala vlastné poistky modulu,
+      // takže tri z nich neboli testami nikdy vykonané (2026-09-10).
+      if (id === fail) return;
       if (value) enabled.add(id); else enabled.delete(id);
     },
   };
@@ -61,12 +65,65 @@ test('partial enable failure stays undoable and does not leave the controls busy
   const f = fixture();
   const session = createMaritimeHistorySession(f.manager);
   f.setFailure('local-ports');
-  await assert.rejects(session.show(), /fixture failure/);
+  // Poistka modulu, nie výnimka náhrady: setEnabled dobehne, vrstva ostane vypnutá.
+  await assert.rejects(session.show(), /Maritime context unavailable/);
   assert.equal(session.busy, false);
   assert.equal(session.canRestore, true);
   f.setFailure(null);
   await session.restore();
   assert.equal(f.enabled.size, 0);
+  session.destroy();
+});
+
+test('a layer that refuses to switch off keeps the session undoable and reports it', async () => {
+  const f = fixture();
+  const session = createMaritimeHistorySession(f.manager);
+  await session.show();
+  assert.equal(session.canRestore, true);
+  f.setFailure('local-shipping-lanes');
+  await assert.rejects(session.restore(), /Maritime context restore failed/);
+  assert.equal(session.busy, false);
+  assert.ok(f.enabled.has('local-shipping-lanes'), 'zlyhaná vrstva ostáva zapnutá');
+  assert.equal(session.canRestore, true, 'vlastníctvo sa nezahodí, Undo sa dá zopakovať');
+  f.setFailure(null);
+  await session.restore();
+  assert.equal(f.enabled.size, 0);
+  session.destroy();
+});
+
+test('an unavailable OSM basemap aborts show before any layer is touched', async () => {
+  const f = fixture();
+  let active = 'photoreal';
+  f.manager.mapStackController = {
+    getActiveId: () => active,
+    async setStack() { return { activeId: 'photoreal' }; },
+  };
+  const session = createMaritimeHistorySession(f.manager);
+  await assert.rejects(session.show(), /OSM basemap unavailable/);
+  assert.equal(f.calls.length, 0, 'žiadna vrstva sa nezapla');
+  assert.equal(active, 'photoreal');
+  assert.equal(session.busy, false);
+  session.destroy();
+});
+
+test('undo stays available when show only switched the basemap and adopted no layer', async () => {
+  const f = fixture(MARITIME_HISTORY_IDS);
+  let active = 'photoreal';
+  const stacks = [];
+  f.manager.mapStackController = {
+    getActiveId: () => active,
+    async setStack(id) { stacks.push(id); active = id; return { activeId: id }; },
+  };
+  const session = createMaritimeHistorySession(f.manager);
+  await session.show();
+  assert.equal(active, 'osm');
+  assert.equal(f.calls.length, 0, 'všetky tri vrstvy už boli zapnuté');
+  assert.equal(session.canRestore, true, 'prepnutý podklad je tiež vlastníctvo relácie');
+  await session.restore();
+  assert.equal(active, 'photoreal');
+  assert.deepEqual(stacks, ['osm', 'photoreal']);
+  assert.equal(session.canRestore, false);
+  assert.deepEqual([...f.enabled].sort(), [...MARITIME_HISTORY_IDS].sort(), 'cudzie vrstvy ostali zapnuté');
   session.destroy();
 });
 
