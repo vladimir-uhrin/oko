@@ -111,7 +111,11 @@ export function gfwReportUrl(range, { base = GFW_API_BASE, dataset = GFW_PRESENC
   const url = new URL(`${base}/4wings/report`);
   url.searchParams.set('spatial-resolution', 'LOW');
   url.searchParams.set('temporal-resolution', 'ENTIRE');
-  url.searchParams.set('group-by', 'MMSI');
+  // VESSEL_ID (2026-09-12, „doplň mená"): zoskupenie po MMSI nenesie meno, typ
+  // ani vlajku; po ID lode ich správa nesie priamo (overené: 2 790 z 2 795
+  // riadkov s menom), takže netreba ďalšie dopyty na Vessels API. Jedna bunka
+  // na loď sa aj tak skladá po MMSI (latestGfwCellPerVessel).
+  url.searchParams.set('group-by', 'VESSEL_ID');
   url.searchParams.set('datasets[0]', dataset);
   url.searchParams.set('date-range', `${range.from},${range.to}`);
   url.searchParams.set('format', 'JSON');
@@ -130,7 +134,7 @@ const epochMs = (v) => { const t = Date.parse(String(v || '')); return Number.is
  * Sploští odpoveď 4Wings (`entries[i][datasetKey] = [rows]`) na jednotný tvar.
  * Toleruje neznáme kľúče datasetu aj chýbajúce polia. Pure.
  * @param {object} json
- * @returns {Array<{mmsi:string, name:string, type:string, flag:string, lat:number, lon:number, hours:number, firstSeen:number|null, lastSeen:number|null, vesselId:string}>}
+ * @returns {Array<{mmsi:string, name:string, type:string, flag:string, callsign:string, imo:string, lat:number, lon:number, hours:number, firstSeen:number|null, lastSeen:number|null, vesselId:string}>}
  */
 export function normalizeGfwPresence(json) {
   const out = [];
@@ -149,6 +153,8 @@ export function normalizeGfwPresence(json) {
           name: String(r?.shipName ?? r?.shipname ?? '').trim(),
           type: String(r?.vesselType ?? r?.vessel_type ?? '').trim(),
           flag: String(r?.flag ?? '').trim(),
+          callsign: String(r?.callsign ?? r?.callSign ?? '').trim(),
+          imo: String(r?.imo ?? '').trim(),
           lat,
           lon,
           hours: finite(r?.hours) ?? 0,
@@ -162,21 +168,40 @@ export function normalizeGfwPresence(json) {
   return out;
 }
 
+/** Polia identity, ktoré sa po MMSI dopĺňajú z ktoréhokoľvek riadku tej istej lode. */
+const GFW_IDENTITY_FIELDS = ['name', 'type', 'flag', 'callsign', 'imo'];
+
 /**
  * Jedna bunka na loď: naposledy videná (najneskorší lastSeen), pri zhode s
- * viac hodinami. Riadky bez MMSI ostávajú každý sám (nedajú sa zlúčiť). Pure.
+ * viac hodinami. Riadky bez MMSI ostávajú každý sám (nedajú sa zlúčiť).
+ *
+ * Identita (meno, typ, vlajka, volací znak, IMO) sa dopĺňa z ostatných riadkov
+ * toho istého MMSI: po VESSEL_ID má jedna loď aj viac ID a víťazná (najnovšia)
+ * bunka môže byť práve tá bez mena — naživo tak TASNIM (620999679) v širokom
+ * výreze vyšla ako holé MMSI (2026-09-12, „doplň mená"). Pure.
  * @param {ReturnType<typeof normalizeGfwPresence>} rows
  */
 export function latestGfwCellPerVessel(rows) {
   const best = new Map();
+  const identity = new Map();
   const loose = [];
   for (const r of rows) {
     if (!r.mmsi) { loose.push(r); continue; }
+    let known = identity.get(r.mmsi);
+    if (!known) { known = {}; identity.set(r.mmsi, known); }
+    for (const field of GFW_IDENTITY_FIELDS) if (!known[field] && r[field]) known[field] = r[field];
     const prev = best.get(r.mmsi);
     if (!prev) { best.set(r.mmsi, r); continue; }
     const a = r.lastSeen ?? -Infinity;
     const b = prev.lastSeen ?? -Infinity;
     if (a > b || (a === b && r.hours > prev.hours)) best.set(r.mmsi, r);
   }
-  return [...best.values(), ...loose];
+  const merged = [];
+  for (const r of best.values()) {
+    const known = identity.get(r.mmsi);
+    const out = { ...r };
+    for (const field of GFW_IDENTITY_FIELDS) if (!out[field] && known[field]) out[field] = known[field];
+    merged.push(out);
+  }
+  return [...merged, ...loose];
 }

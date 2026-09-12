@@ -1525,6 +1525,18 @@ function vesselCourseDeg(record) {
  */
 function shipIcon(record, selected) {
   const cssColor = isLastKnownVessel(record) ? '#929ca5' : selected ? '#ffffff' : vesselTypeCss(record.type);
+  return shipIconDataUrl(cssColor, selected);
+}
+
+/**
+ * Silueta trupu ako data URL pre danú farbu — zdieľaná aj so satelitným AIS
+ * (gfwPresence.js, 2026-09-12: „sprav ako ostatné lode"), aby oneskorené lode
+ * mali ten istý trup a farbu podľa typu, nie vlastný glyf. Cache na farbu.
+ * @param {string} cssColor výplň trupu
+ * @param {boolean} [selected] biela/zvýraznená varianta
+ * @returns {string} SVG data URL
+ */
+export function shipIconDataUrl(cssColor, selected = false) {
   const key = `${cssColor}:${selected ? 'selected' : 'normal'}`;
   if (shipIconCache.has(key)) return shipIconCache.get(key);
 

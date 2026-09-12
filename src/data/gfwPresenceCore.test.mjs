@@ -53,12 +53,12 @@ test('gfwPresenceDateRange: okno končí deň PRED koncom 72 h oneskorenia, 2 dn
   assert.equal(gfwPresenceDateRange(now, { delayHours: 0, windowDays: 3 }).to, '2026-09-11');
 });
 
-test('gfwReportUrl: LOW, ENTIRE, group-by MMSI, dataset prítomnosti, JSON', () => {
+test('gfwReportUrl: LOW, ENTIRE, group-by VESSEL_ID, dataset prítomnosti, JSON', () => {
   const url = new URL(gfwReportUrl({ from: '2026-09-07', to: '2026-09-08' }));
   assert.equal(url.origin + url.pathname, 'https://gateway.api.globalfishingwatch.org/v3/4wings/report');
   assert.equal(url.searchParams.get('spatial-resolution'), 'LOW');
   assert.equal(url.searchParams.get('temporal-resolution'), 'ENTIRE');
-  assert.equal(url.searchParams.get('group-by'), 'MMSI');
+  assert.equal(url.searchParams.get('group-by'), 'VESSEL_ID', 'po ID lode nesie správa meno, typ, vlajku, volací znak a IMO');
   assert.equal(url.searchParams.get('datasets[0]'), GFW_PRESENCE_DATASET);
   assert.equal(url.searchParams.get('date-range'), '2026-09-07,2026-09-08');
   assert.equal(url.searchParams.get('format'), 'JSON');
@@ -69,12 +69,12 @@ const SAMPLE = {
   total: 2,
   entries: [{
     'public-global-presence:v3.0': [
-      { mmsi: '663103000', shipName: 'RIA DE DAKAR', vesselType: 'FISHING', flag: 'SEN', lat: 15.68, lon: -17.06, hours: 1.88, entryTimestamp: '2026-09-07T11:00:00Z', exitTimestamp: '2026-09-07T13:00:00Z', vesselId: 'abc' },
+      { mmsi: '663103000', shipName: 'RIA DE DAKAR', vesselType: 'FISHING', flag: 'SEN', callsign: 'DAK1142', imo: '9003342', lat: 15.68, lon: -17.06, hours: 1.88, entryTimestamp: '2026-09-07T11:00:00Z', exitTimestamp: '2026-09-07T13:00:00Z', vesselId: 'abc' },
       { mmsi: '663103000', shipName: 'RIA DE DAKAR', vesselType: 'FISHING', flag: 'SEN', lat: 15.78, lon: -17.16, hours: 0.5, entryTimestamp: '2026-09-08T02:00:00Z', exitTimestamp: '2026-09-08T03:00:00Z', vesselId: 'abc' },
       { mmsi: '', shipName: 'UNKNOWN', lat: 26.1, lon: 56.2, hours: 3 },
       { mmsi: '244660815', shipName: 'VLISSINGEN', vesselType: 'CARGO', flag: 'NLD', lat: '91', lon: 4, hours: 1 },
-      { mmsi: '211000000', lat: 26.5, lon: 56.0, hours: 2, exitTimestamp: '2026-09-08T10:00:00Z' },
-      { mmsi: '211000000', lat: 26.6, lon: 56.1, hours: 5, exitTimestamp: '2026-09-08T10:00:00Z' },
+      { mmsi: '211000000', shipName: 'NORDIC', vesselType: 'TANKER', flag: 'DEU', callsign: 'DABC', lat: 26.5, lon: 56.0, hours: 2, exitTimestamp: '2026-09-08T10:00:00Z', vesselId: 'id-with-name' },
+      { mmsi: '211000000', lat: 26.6, lon: 56.1, hours: 5, exitTimestamp: '2026-09-08T10:00:00Z', vesselId: 'id-anonymous' },
     ],
   }],
 };
@@ -83,7 +83,7 @@ test('normalizeGfwPresence: sploští záznamy, zahodí nepoužiteľné súradni
   const rows = normalizeGfwPresence(SAMPLE);
   assert.equal(rows.length, 5, 'riadok s lat 91 vypadol');
   assert.deepEqual(rows[0], {
-    mmsi: '663103000', name: 'RIA DE DAKAR', type: 'FISHING', flag: 'SEN', lat: 15.68, lon: -17.06, hours: 1.88,
+    mmsi: '663103000', name: 'RIA DE DAKAR', type: 'FISHING', flag: 'SEN', callsign: 'DAK1142', imo: '9003342', lat: 15.68, lon: -17.06, hours: 1.88,
     firstSeen: Date.parse('2026-09-07T11:00:00Z'), lastSeen: Date.parse('2026-09-07T13:00:00Z'), vesselId: 'abc',
   });
   assert.equal(rows[2].name, 'UNKNOWN');
@@ -92,11 +92,19 @@ test('normalizeGfwPresence: sploští záznamy, zahodí nepoužiteľné súradni
   assert.deepEqual(normalizeGfwPresence({ entries: 'x' }), []);
 });
 
-test('latestGfwCellPerVessel: jedna bunka na MMSI = najneskoršia, pri zhode viac hodín; bez MMSI ostáva', () => {
+test('latestGfwCellPerVessel: jedna bunka na MMSI = najneskoršia, pri zhode viac hodín; identita sa dopĺňa z inej bunky tej istej lode; bez MMSI ostáva', () => {
   const rows = latestGfwCellPerVessel(normalizeGfwPresence(SAMPLE));
   const byMmsi = Object.fromEntries(rows.filter(r => r.mmsi).map(r => [r.mmsi, r]));
   assert.equal(rows.length, 3, '2 lode + 1 bez MMSI');
   assert.equal(byMmsi['663103000'].lat, 15.78, 'neskorší exitTimestamp vyhráva');
-  assert.equal(byMmsi['211000000'].hours, 5, 'zhoda času → viac hodín');
+  assert.equal(byMmsi['663103000'].callsign, 'DAK1142', 'volací znak z prvej bunky ostal aj víťaznej');
+  const nordic = byMmsi['211000000'];
+  assert.equal(nordic.hours, 5, 'zhoda času → viac hodín');
+  assert.equal(nordic.vesselId, 'id-anonymous', 'víťazí bunka bez mena…');
+  assert.equal(nordic.name, 'NORDIC', '…ale meno prišlo z druhého ID tej istej lode');
+  assert.equal(nordic.type, 'TANKER');
+  assert.equal(nordic.flag, 'DEU');
+  assert.equal(nordic.callsign, 'DABC');
+  assert.equal(nordic.imo, '', 'chýbajúce pole ostáva prázdne, nič sa nevymýšľa');
   assert.ok(rows.some(r => r.mmsi === '' && r.name === 'UNKNOWN'));
 });
