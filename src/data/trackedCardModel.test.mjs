@@ -154,3 +154,12 @@ test('karta: ACARS riadok (airframes.io, len lokálne) ide do päty PRED riadok 
   assert.deepEqual(model.footer, ['ACARS 7 · 03:40 CPDLC ↑ ACFT→ATC · POS N33.6 W116.3', 'OpenSky Network · 3C6444']);
   assert.deepEqual(buildTrackedCardModel({ callsign: 'X', acarsLine: '   ', metaLine: 'M' }).footer, ['M']);
 });
+
+test('formatTrack: null, undefined a prázdny reťazec nie sú 0° (GFW lode bez kurzu ukazovali „000°", 2026-09-12)', () => {
+  assert.equal(formatTrack(null), '');
+  assert.equal(formatTrack(undefined), '');
+  assert.equal(formatTrack(''), '');
+  assert.equal(formatTrack(0), '000°', 'skutočná nula ostáva sever');
+  assert.equal(formatTrack(359.6), '000°');
+  assert.equal(formatTrack(231.2), '231°');
+});

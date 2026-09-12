@@ -47,6 +47,9 @@ export const TRACKED_FLIGHT_ACCENT = '#39d0ff';
 
 /** Kurz ako trojmiestne stupne (aviatická konvencia): 95 → '095°'. '' pre neznámy. Pure. */
 export function formatTrack(deg) {
+  // null/undefined/'' nie je kurz 0°: Number(null) === 0 kreslilo „000°" pri
+  // lodiach bez kurzu (satelitné AIS z GFW, 2026-09-12).
+  if (deg === null || deg === undefined || deg === '') return '';
   const n = Number(deg);
   if (!Number.isFinite(n)) return '';
   const norm = ((Math.round(n) % 360) + 360) % 360;

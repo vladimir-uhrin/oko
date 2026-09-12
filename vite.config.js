@@ -1936,7 +1936,10 @@ function gfwPresenceProxy() {
     });
     middlewares.use('/api/gfw/status', async (req, res) => {
       const b = await loadBudget();
-      send(res, 200, JSON.stringify({ hasKey: Boolean(token()), dailyCount: b.date === utcDay() ? b.count : 0, budget: dailyBudget(), date: utcDay(), delayHours: GFW_PRESENCE_DELAY_HOURS }), 'NONE');
+      // tokenLength je diagnostika bez tajomstva: proces mohol načítať .env pred
+      // zápisom tokenu (Vite pri zmene .env nereštartoval, 2026-09-12) a potom
+      // posiela zástupný text → upstream 401, hoci súbor je už správny.
+      send(res, 200, JSON.stringify({ hasKey: Boolean(token()), tokenLength: token().length, dailyCount: b.date === utcDay() ? b.count : 0, budget: dailyBudget(), date: utcDay(), delayHours: GFW_PRESENCE_DELAY_HOURS }), 'NONE');
     });
   }
 
