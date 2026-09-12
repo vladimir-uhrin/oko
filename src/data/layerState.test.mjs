@@ -170,8 +170,10 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   // sneh '3', aerosól '4', morský ľad '5' (číslice: písmená došli, 2026-09-06).
   // 30 → 31: meteorológia sveta GFS (token '6', 2026-09-08, prototyp Windy —
   // predpoveď modelu, nie pozorovanie).
-  assert.equal(REGISTERED_LAYER_IDS.length, 31);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 31);
+  // 31 → 32: satelitné AIS oneskorené ~72 h (Global Fishing Watch, token '7',
+  // 2026-09-12 — posledná pozorovaná bunka 0,1°, nie živá poloha).
+  assert.equal(REGISTERED_LAYER_IDS.length, 32);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 32);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),

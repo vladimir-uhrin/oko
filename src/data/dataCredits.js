@@ -289,6 +289,13 @@ export const DATA_CREDITS = [
       '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, downsampled to 0.25° — modelled, not live)',
   },
   {
+    key: 'gfw-presence',
+    html:
+      'Satellite AIS vessel presence (delayed ~72 h, 0.1° cells): ' +
+      '<a href="https://globalfishingwatch.org" target="_blank" rel="noopener">Powered by Global Fishing Watch.</a> ' +
+      '(<a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>, 4Wings public-global-presence — delayed, not live)',
+  },
+  {
     key: 'air-density',
     html:
       'Historical air-traffic density (one day): ' +

@@ -22,6 +22,7 @@ test('hoverCandidatesFromPick: string id → flights+military, mmsi objekt → v
   // Lode: objektové id s mmsi → jeden kandidát na ais-live-vessels.
   assert.deepEqual(hoverCandidatesFromPick({ id: { mmsi: 269057419 } }), [
     { layerId: 'ais-live-vessels', sourceId: '269057419' },
+    { layerId: 'gfw-presence', sourceId: '269057419' },
   ]);
   // Trail, prázdny pick a cudzie objekty → nič.
   assert.deepEqual(hoverCandidatesFromPick({ id: 'gev-trail:mil-head-3' }), []);

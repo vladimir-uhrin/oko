@@ -39,7 +39,12 @@ export function hoverCandidatesFromPick(picked) {
     ];
   }
   if (raw && typeof raw === 'object' && Object.hasOwn(raw, 'mmsi') && raw.mmsi != null) {
-    return [{ layerId: 'ais-live-vessels', sourceId: String(raw.mmsi) }];
+    // Živé lode aj satelitné AIS (GFW, 2026-09-12) nesú MMSI; resolver karty
+    // skúša vrstvy po poradí, prvá s neprázdnym súhrnom vyhrá.
+    const mmsi = String(raw.mmsi);
+    return raw.gfw === true
+      ? [{ layerId: 'gfw-presence', sourceId: mmsi }, { layerId: 'ais-live-vessels', sourceId: mmsi }]
+      : [{ layerId: 'ais-live-vessels', sourceId: mmsi }, { layerId: 'gfw-presence', sourceId: mmsi }];
   }
   return [];
 }

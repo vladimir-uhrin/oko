@@ -32,6 +32,19 @@ import { openFlightHistory } from './src/data/flightHistoryStore.js';
 import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAirframesMessage } from './src/data/acarsMessages.js';
 import { parseNetcdf3, gridOf } from './src/data/netcdf3.js';
 import { METEO_FIELDS, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, forecastSteps, quantize } from './src/data/meteoField.js';
+import {
+  GFW_API_BASE as GFW_PRESENCE_API_BASE,
+  GFW_DELAY_HOURS as GFW_PRESENCE_DELAY_HOURS,
+  gfwBboxError,
+  gfwBboxPolygon,
+  gfwPresenceCacheKey,
+  gfwPresenceDateRange,
+  gfwReportUrl,
+  latestGfwCellPerVessel,
+  normalizeGfwPresence,
+  parseGfwBbox,
+  quantizeGfwBbox,
+} from './src/data/gfwPresenceCore.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1767,6 +1780,170 @@ function rocketLaunchesProxy() {
     configurePreviewServer(server) {
       install(server.middlewares);
     },
+  };
+}
+
+/**
+ * Global Fishing Watch — satelitná prítomnosť lodí (4Wings, dataset
+ * public-global-presence), 2026-09-12. Terestriálny AISStream v Perzskom
+ * zálive nevidí nič; GFW má satelitné AIS s oneskorením ~72 h („Dynamic, near
+ * real time data (72 hour delay)"). Token GFW_API_TOKEN ostáva na serveri —
+ * dokumentácia: „Do not share it, publish it, or embed it in a public web
+ * interface". Licencia CC BY-NC 4.0, atribúcia „Powered by Global Fishing
+ * Watch.", limity 50 000/deň a 1 500 000/mesiac na používateľa.
+ *
+ * GET /api/gfw/presence?bbox=west,south,east,north
+ *   → { rows:[{mmsi,name,type,flag,lat,lon,hours,firstSeen,lastSeen,vesselId}],
+ *       meta:{ range:{from,to}, delayHours, bbox, cellDeg:0.1, source, license, attribution, fetchedAt } }
+ * Výrez sa roztiahne na celé stupne (cache trafí aj pri malom pohybe), hrana
+ * najviac 40° (inak 400). Bez tokenu 503 {error:'no_key'} — vrstva to prizná.
+ * Cache: pamäť + disk (.gev-cache/gfw/), TTL 6 h (dáta sa menia raz denne),
+ * serve-stale-on-error 48 h, single-flight na kľúč, odpoveď do 16 MB.
+ * Rozpočet: GFW_DAILY_REQUEST_BUDGET (predvolene 300 z povolených 50 000)
+ * v .gev-cache/gfw/budget.json podľa UTC dňa; nad ním stale alebo 429.
+ * Per-IP limit 20/min, globálne 60/min — vždy zapnutý (kľúčovaný upstream).
+ * @returns {import('vite').Plugin}
+ */
+function gfwPresenceProxy() {
+  const TTL_MS = 6 * 60 * 60_000;
+  const STALE_MAX_MS = 48 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 25_000;
+  const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+  const MEM_MAX_ENTRIES = 64;
+  const DEFAULT_DAILY_BUDGET = 300;
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'gfw');
+  const BUDGET_PATH = path.join(CACHE_DIR, 'budget.json');
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+  /** @type {Map<string, {at:number, body:string}>} */
+  const mem = new Map();
+  const inFlight = new Map();
+  let budget = null;
+
+  const token = () => String(process.env.GFW_API_TOKEN || '').trim();
+  const dailyBudget = () => {
+    const n = Number(process.env.GFW_DAILY_REQUEST_BUDGET);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_DAILY_BUDGET;
+  };
+  const utcDay = () => new Date().toISOString().slice(0, 10);
+
+  async function loadBudget() {
+    if (budget) return budget;
+    try {
+      const parsed = JSON.parse(await fsp.readFile(BUDGET_PATH, 'utf8'));
+      budget = parsed && parsed.date === utcDay() && Number.isFinite(parsed.count) ? parsed : { date: utcDay(), count: 0 };
+    } catch { budget = { date: utcDay(), count: 0 }; }
+    return budget;
+  }
+  async function spendBudget() {
+    const b = await loadBudget();
+    if (b.date !== utcDay()) { b.date = utcDay(); b.count = 0; }
+    b.count += 1;
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(BUDGET_PATH, JSON.stringify(b), 'utf8'); } catch { /* best effort */ }
+    return b;
+  }
+  const diskPath = (key) => path.join(CACHE_DIR, key.replace(/[^0-9A-Za-z_.@-]/g, '_') + '.json');
+  async function readDisk(key) {
+    try {
+      const parsed = JSON.parse(await fsp.readFile(diskPath(key), 'utf8'));
+      if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') return parsed;
+    } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(key, entry) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(diskPath(key), JSON.stringify(entry), 'utf8'); }
+    catch (error) { console.warn('[gfw-proxy] cache write failed: ' + (error?.message || error)); }
+  }
+  function remember(key, entry) {
+    mem.set(key, entry);
+    if (mem.size > MEM_MAX_ENTRIES) { const oldest = mem.keys().next().value; if (oldest !== undefined) mem.delete(oldest); }
+  }
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Cache-Control': status === 200 ? 'public, max-age=1800' : 'no-store',
+      'X-GEV-Cache': cacheState,
+    });
+    res.end(body);
+  }
+
+  async function fetchUpstream(bbox, range) {
+    const b = await loadBudget();
+    if (b.date === utcDay() && b.count >= dailyBudget()) {
+      const error = new Error('daily budget exhausted'); error.code = 'BUDGET'; throw error;
+    }
+    await spendBudget();
+    const upstream = await fetch(gfwReportUrl(range, { base: GFW_PRESENCE_API_BASE }), {
+      method: 'POST',
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      headers: { Authorization: 'Bearer ' + token(), 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ geojson: gfwBboxPolygon(bbox) }),
+    });
+    const text = await readResponseTextCapped(upstream, MAX_RESPONSE_BYTES);
+    if (!upstream.ok) {
+      const error = new Error('upstream HTTP ' + upstream.status);
+      error.upstreamStatus = upstream.status;
+      throw error;
+    }
+    const rows = latestGfwCellPerVessel(normalizeGfwPresence(JSON.parse(text)));
+    const body = JSON.stringify({
+      rows,
+      meta: {
+        range, delayHours: GFW_PRESENCE_DELAY_HOURS, bbox, cellDeg: 0.1,
+        source: 'Global Fishing Watch · 4Wings public-global-presence',
+        license: 'CC BY-NC 4.0', attribution: 'Powered by Global Fishing Watch.',
+        fetchedAt: Date.now(),
+      },
+    });
+    return { at: Date.now(), body };
+  }
+
+  function install(middlewares) {
+    middlewares.use('/api/gfw/presence', async (req, res) => {
+      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+      if (!token()) { send(res, 503, JSON.stringify({ error: 'no_key', detail: 'GFW_API_TOKEN missing' }), 'NONE'); return; }
+      const url = new URL(req.url || '/', 'http://localhost');
+      const parsed = parseGfwBbox(url.searchParams.get('bbox'));
+      const problem = gfwBboxError(parsed);
+      if (problem) { send(res, 400, JSON.stringify({ error: 'bad_bbox', detail: problem }), 'NONE'); return; }
+      const bbox = quantizeGfwBbox(parsed);
+      const range = gfwPresenceDateRange(Date.now());
+      const key = gfwPresenceCacheKey(bbox, range);
+      const now = Date.now();
+      let cached = mem.get(key) || null;
+      if (!cached) { cached = await readDisk(key); if (cached) remember(key, cached); }
+      if (cached && now - cached.at < TTL_MS) { send(res, 200, cached.body, 'HIT'); return; }
+      if (!limiter(clientKey(req))) {
+        if (cached) { send(res, 200, cached.body, 'STALE-RATELIMIT'); return; }
+        send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+      }
+      const stale = cached && now - cached.at < STALE_MAX_MS ? cached : null;
+      const request = coalesceProxyRequest(inFlight, key, () => fetchUpstream(bbox, range));
+      try {
+        const fresh = await request.promise;
+        remember(key, fresh);
+        void writeDisk(key, fresh);
+        send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        if (stale) {
+          if (!request.shared) console.warn('[gfw-proxy] refresh failed (' + (error?.message || error) + ') — serving stale cache');
+          send(res, 200, stale.body, 'STALE-ERROR');
+          return;
+        }
+        if (error?.code === 'BUDGET') { send(res, 429, JSON.stringify({ error: 'budget' }), 'NONE'); return; }
+        const status = Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : 502;
+        send(res, status, JSON.stringify({ error: 'upstream', detail: status === 502 ? 'Global Fishing Watch unavailable' : 'upstream HTTP ' + status }), 'NONE');
+      }
+    });
+    middlewares.use('/api/gfw/status', async (req, res) => {
+      const b = await loadBudget();
+      send(res, 200, JSON.stringify({ hasKey: Boolean(token()), dailyCount: b.date === utcDay() ? b.count : 0, budget: dailyBudget(), date: utcDay(), delayHours: GFW_PRESENCE_DELAY_HOURS }), 'NONE');
+    });
+  }
+
+  return {
+    name: 'gfw-presence-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
   };
 }
 
@@ -8818,6 +8995,7 @@ export default defineConfig(({ mode }) => {
       gbfsProxy(),
       adsbLolProxy(),
       aisLiveProxy(),
+      gfwPresenceProxy(),
       earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),
