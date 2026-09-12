@@ -131,7 +131,7 @@ test('materiál: fabric číta kanál, dekóduje rozsah a mapuje na rampu; tripw
   assert.match(layerSrc, /depthTest: \{ enabled: false \},\s*depthMask: false,\s*cull: \{ enabled: true, face: Cesium\.CullFace\.BACK \},/);
   assert.match(layerSrc, /export const METEO_FADE_OUT_HEIGHT_M = 12_000;/, 'útlm pod drapériou');
   const registry = readFileSync(new URL('./layerState.js', import.meta.url), 'utf8');
-  assert.match(registry, /\{ id: 'meteo-gfs', token: '6', disposition: 'enabled-only' \}/);
+  assert.match(registry, /\{ id: 'meteo-gfs', token: '6', disposition: 'enabled-only', session: true \}/, 'meteo sa zapína len ručne (2026-09-12)');
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
   assert.match(main, /dataManager\.register\(meteoLayer\);/);
   assert.match(main, /window\.addEventListener\('gev:request-map-stack'/);

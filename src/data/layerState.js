@@ -300,7 +300,10 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'local-ship-density', token: 'n', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-shipping-lanes', token: 'k', disposition: 'enabled-only' }),
   // Meteorológia (2026-09-08): písmená sú obsadené, ďalšia voľná číslica.
-  Object.freeze({ id: 'meteo-gfs', token: '6', disposition: 'enabled-only' }),
+  // session: true = zapína sa LEN ručne (2026-09-12, používateľ: „meteo sa bude
+  // zapínať manuálne" — po reloadoch sa mu vracala sama): nikdy do úložiska,
+  // obnovy po načítaní ani do zdieľaného odkazu. Token ostáva rezervovaný.
+  Object.freeze({ id: 'meteo-gfs', token: '6', disposition: 'enabled-only', session: true }),
   Object.freeze({ id: 'military', token: 'm', disposition: 'enabled+mirrored-options', optionOwner: 'flights' }),
   Object.freeze({ id: 'military-awareness', token: 'g', disposition: 'enabled-only' }),
   Object.freeze({ id: 'military-installations', token: 'i', disposition: 'enabled-only' }),
@@ -318,6 +321,14 @@ export const REGISTERED_LAYER_IDS = Object.freeze(LAYER_STATE_REGISTRY.map((entr
 
 const REGISTRY_BY_ID = new Map(LAYER_STATE_REGISTRY.map((entry) => [entry.id, entry]));
 const REGISTRY_BY_TOKEN = new Map(LAYER_STATE_REGISTRY.map((entry) => [entry.token, entry]));
+/** Vrstvy len na reláciu: zapínajú sa ručne, nikdy sa neukladajú, neobnovujú ani nezdieľajú. */
+export const SESSION_ONLY_LAYER_IDS = Object.freeze(
+  LAYER_STATE_REGISTRY.filter((entry) => entry.session === true).map((entry) => entry.id),
+);
+const SESSION_ONLY = new Set(SESSION_ONLY_LAYER_IDS);
+export function isSessionOnlyLayer(layerId) {
+  return SESSION_ONLY.has(String(layerId));
+}
 const OPTION_OWNER_IDS = Object.freeze([...new Set(
   LAYER_STATE_REGISTRY.map((entry) => entry.optionOwner).filter(Boolean),
 )]);
@@ -363,6 +374,9 @@ export function validateLayerStateRegistry(registry = LAYER_STATE_REGISTRY) {
     if (!VALID_DISPOSITIONS.has(entry.disposition)) {
       throw new Error(`Invalid layer-state disposition: ${entry.id}`);
     }
+    if (entry.session !== undefined && typeof entry.session !== 'boolean') {
+      throw new Error(`Invalid layer-state session flag: ${entry.id}`);
+    }
     if (entry.disposition !== 'enabled-only') {
       if (!entry.optionOwner || optionSpecs(entry.optionOwner).length === 0) {
         throw new Error(`Layer-state option owner missing: ${entry.id}`);
@@ -394,7 +408,10 @@ export function normalizeLayerState(candidate) {
   const requestedEnabled = new Set(
     Array.isArray(input.enabledLayerIds) ? input.enabledLayerIds.map(String) : [],
   );
-  const enabledLayerIds = REGISTERED_LAYER_IDS.filter((id) => requestedEnabled.has(id));
+  // Vrstvy len na reláciu (session: true) sa nikdy nestanú trvalým stavom —
+  // ani z úložiska, ani z odkazu, ani z explicitného zapnutia: zapnú sa a po
+  // načítaní stránky sú zase vypnuté.
+  const enabledLayerIds = REGISTERED_LAYER_IDS.filter((id) => requestedEnabled.has(id) && !SESSION_ONLY.has(id));
   const enabled = new Set(enabledLayerIds);
   const options = Object.fromEntries(OPTION_OWNER_IDS.map((ownerId) => [
     ownerId,

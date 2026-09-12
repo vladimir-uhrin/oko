@@ -7,6 +7,7 @@ import {
   LAYER_STATE_STORAGE_KEY,
   LayerStateCoordinator,
   REGISTERED_LAYER_IDS,
+  SESSION_ONLY_LAYER_IDS,
   SHARE_TRACKING_RESTORE_POLICIES,
   createDefaultLayerState,
   decodeLayerStateParams,
@@ -14,6 +15,7 @@ import {
   normalizeLayerState,
   parseStoredLayerState,
   serializeStoredLayerState,
+  isSessionOnlyLayer,
   validateLayerStateRegistry,
 } from './layerState.js';
 import radioLayer from './radio.js';
@@ -1624,4 +1626,18 @@ test('the owner layer going away revokes the pending watch at any origin', async
     );
     f.coordinator.destroy();
   }
+});
+
+test('vrstvy len na reláciu (meteo-gfs): normalizácia ich vyhodí — nikdy do úložiska, obnovy po reloade ani odkazu; token 6 v starom odkaze sa ignoruje', () => {
+  assert.deepEqual([...SESSION_ONLY_LAYER_IDS], ['meteo-gfs']);
+  assert.equal(isSessionOnlyLayer('meteo-gfs'), true);
+  assert.equal(isSessionOnlyLayer('flights'), false);
+  const state = normalizeLayerState({ enabledLayerIds: ['meteo-gfs', 'flights'] });
+  assert.deepEqual(state.enabledLayerIds, ['flights'], 'meteo sa zapína ručne (používateľ 2026-09-12)');
+  const params = new URLSearchParams();
+  encodeLayerStateParams(params, { enabledLayerIds: ['flights', 'meteo-gfs'] });
+  assert.ok(!(params.get('l') || '').split('.').includes('6'), 'token 6 nikdy v odkaze: ' + params.toString());
+  assert.deepEqual(decodeLayerStateParams(new URLSearchParams('v=2&l=f.6')).enabledLayerIds, ['flights'], 'starý odkaz s meteo → meteo vypnuté, zvyšok platí');
+  assert.equal(serializeStoredLayerState(normalizeLayerState({ enabledLayerIds: ['meteo-gfs'] })), serializeStoredLayerState(createDefaultLayerState()), 'úložisko: to isté ako bez meteo');
+  assert.ok(REGISTERED_LAYER_IDS.includes('meteo-gfs'), 'vrstva ostáva registrovaná, token rezervovaný');
 });

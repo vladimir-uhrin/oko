@@ -89,6 +89,13 @@ Updated: August 24, 2026
 > **What a mission may persist (do not "simplify" this).** Layer enablement is
 > durable in this app (`gev:layer-state:v2`, written by
 > `LayerStateCoordinator._commitExplicit` only for origin `user`/`voice`/`tool`).
+> **Session-only layers** (`session: true` in `LAYER_STATE_REGISTRY` — today only
+> `meteo-gfs`; 2026-09-12, user: „meteo sa bude zapínať manuálne" after it kept
+> coming back on every reload) are dropped by `normalizeLayerState`, so they are
+> never written to `gev:layer-state:v2`, never restored on load and never encoded
+> into share links (an old `l=…6…` link just ignores the token); they start OFF on
+> every load and are switched on by hand. `SESSION_ONLY_LAYER_IDS` /
+> `isSessionOnlyLayer()` expose the set.
 > A mission enables **its own** layers at `origin: 'user'` — durable, exactly as
 > clicking those rows is, because picking the mission *is* that choice. The two
 > Context missions also expand the Context panel, as the visible tabs do; the
