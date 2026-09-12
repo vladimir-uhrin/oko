@@ -57,7 +57,9 @@ const ICON_CACHE = new Map();
 
 /**
  * Radarový terč ako SVG data URL: kosoštvorec s tmavým podkladom; so zhodou
- * s AIS má bodku v strede. Pure (cache podľa farby a zhody).
+ * s AIS má bodku v strede. Vnútro má jemnú výplň (12 %): Cesium pickuje len
+ * nepriehľadné pixely a prázdny stred by kurzor minul — naživo 2026-09-12 sa
+ * karta BEZ AIS neotvárala, kým bol kosoštvorec dutý. Pure (cache podľa farby a zhody).
  * @param {string} cssColor
  * @param {boolean} [matched]
  */
@@ -67,7 +69,7 @@ export function sarIconDataUrl(cssColor, matched = false) {
   if (!url) {
     const dot = matched ? `<circle cx="16" cy="16" r="3.2" fill="${cssColor}"/>` : '';
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">`
-      + `<path d="M16 3 L29 16 L16 29 L3 16 Z" fill="none" stroke="#06131f" stroke-width="5" stroke-linejoin="round" opacity="0.7"/>`
+      + `<path d="M16 3 L29 16 L16 29 L3 16 Z" fill="${cssColor}" fill-opacity="0.12" stroke="#06131f" stroke-width="5" stroke-linejoin="round" opacity="0.7"/>`
       + `<path d="M16 3 L29 16 L16 29 L3 16 Z" fill="none" stroke="${cssColor}" stroke-width="2.4" stroke-linejoin="round"/>${dot}</svg>`;
     url = `data:image/svg+xml;base64,${btoa(svg)}`;
     ICON_CACHE.set(key, url);

@@ -89,6 +89,9 @@ test('sarIconDataUrl a sarAgeAlpha: terč podľa farby a zhody (bodka), útlm po
   assert.notEqual(a, b, 'zhoda má bodku');
   assert.notEqual(b, c, 'farba sa líši');
   assert.equal(sarIconDataUrl('#39d5ff', true), a, 'cache');
+  const svg = Buffer.from(b.slice(b.indexOf(',') + 1), 'base64').toString('utf8');
+  assert.match(svg, /fill="#39d5ff" fill-opacity="0.12"/, 'jemná výplň — dutý stred by pick minul (karta BEZ AIS sa neotvárala)');
+  assert.match(svg, /fill="none" stroke="#39d5ff"/, 'obrys ostáva čistý');
   assert.equal(sarAgeAlpha(0), 0.95);
   assert.equal(sarAgeAlpha(3 * DAY), 0.95);
   assert.equal(sarAgeAlpha(5 * DAY), 0.75);
