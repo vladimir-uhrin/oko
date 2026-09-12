@@ -176,13 +176,18 @@ test('formatTrack: null, undefined a prázdny reťazec nie sú 0° (GFW lode bez
 test('zrozumiteľné riadky (2026-09-12, „aby to pochopil aj debil"): letová hladina s metrami, stúpanie, rýchlosť v km/h, kurz so svetovou stranou, štát, pristátie', () => {
   const tEn = (key, vars = {}) => Object.entries(vars).reduce((acc, [k, v]) => acc.replaceAll(`{${k}}`, String(v)), EN_STRINGS[key] ?? key);
   assert.deepEqual(formatFlightLinesPlain({ altitudeM: 10_973, verticalRateMps: 5, speedMps: 206.3, trackDeg: 327 }, tEn), [
-    'Flight level FL360 (≈ 10 973 m) · climbing 980 ft/min (5,0 m/s)',
+    'Flight level FL360 (≈ 10 973 m)',
+    'climbing 980 ft/min (5,0 m/s)',
     'Speed 401 kts (743 km/h) · heading 327° (NW)',
-  ]);
+  ], 'stúpanie má vlastný riadok — spolu s hladinou mal 64 znakov a karta ho orezala (naživo 2026-09-12)');
   assert.deepEqual(formatFlightLinesPlain({ altitudeM: 3_810, verticalRateMps: -4, speedMps: 100, trackDeg: 90 }, tEn), [
-    'Altitude 12 500 ft (3 810 m) · descending 790 ft/min (4,0 m/s)',
+    'Altitude 12 500 ft (3 810 m)',
+    'descending 790 ft/min (4,0 m/s)',
     'Speed 194 kts (360 km/h) · heading 090° (E)',
   ]);
+  for (const line of formatFlightLinesPlain({ altitudeM: 8_039, verticalRateMps: -11.4, speedMps: 202.7, trackDeg: 347 }, tEn)) {
+    assert.ok(line.length <= 52, `riadok karty do 52 znakov: ${line}`);
+  }
   assert.deepEqual(formatFlightLinesPlain({ altitudeM: 0, onGround: true, speedMps: 6, trackDeg: 10 }, tEn), ['On the ground', 'Speed 12 kts (22 km/h) · heading 010° (N)']);
   assert.deepEqual(formatFlightLinesPlain({ altitudeM: 10_000 }, tEn), ['Flight level FL328 (≈ 10 000 m)'], 'bez rýchlosti a kurzu len jeden riadok');
   assert.equal(compassLabel(327, tEn), 'NW');

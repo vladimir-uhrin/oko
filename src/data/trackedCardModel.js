@@ -7,7 +7,8 @@
  *
  *   ┌──────────────────────────────────────────────┐
  *   │ [FR] AFR702 · AF702                          │  volací znak + IATA číslo (+ STALE)
- *   │ Letová hladina FL340 (≈ 10 360 m) · stúpa 980 ft/min (5,0 m/s) │  zrozumiteľne (2026-09-12)
+ *   │ Letová hladina FL340 (≈ 10 360 m)            │  zrozumiteľne (2026-09-12)
+ *   │ stúpa 980 ft/min (5,0 m/s)                   │  len pri stúpaní/klesaní
  *   │ Rýchlosť 499 kts (924 km/h) · kurz 214° (JZ)  │  obe jednotky, svetová strana
  *   │ Air France · Boeing 777 328ER · F-GZNP       │  identita
  *   │ [FR] CDG Paris (Francúzsko) → [CI] ABJ Abidjan (Pobrežie Slonoviny) │ trasa, vlajky, štáty
@@ -102,13 +103,15 @@ export function formatFlightLine({ altitudeM, onGround = false, verticalRateMps,
 }
 
 /**
- * Dva zrozumiteľné riadky pre sledovanú kartu (2026-09-12, „aby to pochopil
- * aj debil"): `Letová hladina FL360 (≈ 10 970 m) · stúpa 980 ft/min (5,0 m/s)`
- * a `Rýchlosť 401 kts (743 km/h) · kurz 327° (SZ)`. Na zemi `Na zemi`. Pure.
- * @returns {string[]} 1–2 riadky (prázdne časti vypadnú)
+ * Zrozumiteľné riadky pre sledovanú kartu (2026-09-12, „aby to pochopil aj
+ * debil"): `Letová hladina FL360 (≈ 10 973 m)`, pri stúpaní/klesaní vlastný
+ * riadok `stúpa 980 ft/min (5,0 m/s)` (spolu by mal 64 znakov a karta ho
+ * orezala) a `Rýchlosť 401 kts (743 km/h) · kurz 327° (SZ)`. Na zemi `Na zemi`. Pure.
+ * @returns {string[]} 1–3 riadky (prázdne časti vypadnú)
  */
 export function formatFlightLinesPlain({ altitudeM, onGround = false, verticalRateMps, speedMps, trackDeg } = {}, translate = t) {
   let altitudeLine;
+  let verticalLine = '';
   if (onGround) {
     altitudeLine = translate('card.on-ground');
   } else {
@@ -116,13 +119,13 @@ export function formatFlightLinesPlain({ altitudeM, onGround = false, verticalRa
     const fl = /^(FL\d+) \((.+)\)$/.exec(dual);
     altitudeLine = fl ? translate('card.flight-level', { fl: fl[1], m: fl[2] }) : translate('card.altitude', { alt: dual });
     const glyph = verticalTrendGlyph(verticalRateMps);
-    if (glyph) altitudeLine += ` · ${translate(glyph === '↑' ? 'card.climbing' : 'card.descending', { rate: formatVerticalRateDual(verticalRateMps) })}`;
+    if (glyph) verticalLine = translate(glyph === '↑' ? 'card.climbing' : 'card.descending', { rate: formatVerticalRateDual(verticalRateMps) });
   }
   const speed = Number(speedMps) ? translate('card.speed', { speed: formatSpeedDual(speedMps) }) : '';
   const track = formatTrack(trackDeg);
   const heading = track ? translate('card.heading', { deg: track, compass: compassLabel(trackDeg, translate) || '—' }) : '';
   const speedLine = [speed, heading].filter(Boolean).join(' · ');
-  return [altitudeLine, speedLine].filter(Boolean);
+  return [altitudeLine, verticalLine, speedLine].filter(Boolean);
 }
 
 /** Vek posledného fixu: '6 s', '2 min', '1 h'; '' pre neznámy alebo budúci čas. Pure. */
