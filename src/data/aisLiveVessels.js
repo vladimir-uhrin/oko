@@ -45,6 +45,9 @@ import {
   normalizeVesselType,
   vesselPositionAge,
 } from './vesselLabels.js';
+
+/** Uzly → m/s (kartička pod kurzorom formátuje rýchlosť z m/s ako lietadlá). */
+const KN_TO_MPS = 0.514444;
 import { aisPositionUsable } from './aisIngest.js';
 import {
   clearOverlaySource,
@@ -555,6 +558,55 @@ const aisLiveVesselsLayer = {
   },
 
   /**
+   * Kartička pod kurzorom (2026-09-12, používateľ: „keď na lode prejdem
+   * myšou, nič"): ten istý tvar súhrnu, aký dáva flights.getContactSummary,
+   * aby ho contactHoverCard.hoverCardModel vykreslil bez vlastnej vetvy —
+   * meno lode ako titulok, rýchlosť · kurz, stav plavby · typ · dĺžka ·
+   * volací znak, cieľ ako riadok trasy, vlajka z MID, zdroj a vek fixu.
+   * Posledná známa poloha sa prizná ako „bez fixu".
+   * @param {string} id MMSI
+   * @returns {object|null}
+   */
+  getContactSummary(id) {
+    const mmsi = String(id ?? '').trim();
+    const record = mmsi ? state.vesselMap.get(mmsi) : null;
+    if (!record) return null;
+    const flag = mmsiFlag(record.mmsi);
+    const lengthText = Number.isFinite(record.lengthM) && record.lengthM > 0 ? `${Math.round(record.lengthM)} m` : '';
+    // Typ nikdy prázdny: bez neho by karta siahla po t('aircraft.category.…').
+    const type = [normalizeVesselType(record.type), lengthText].filter(Boolean).join(' · ') || 'VESSEL';
+    const destination = String(record.destination || '').trim();
+    // AIS sentinely: heading 511 a course 360 = „nedostupné".
+    const heading = Number.isFinite(record.heading) && record.heading >= 0 && record.heading < 360 ? record.heading : null;
+    const course = Number.isFinite(record.course) && record.course >= 0 && record.course < 360 ? record.course : null;
+    return {
+      layerId: VESSEL_OVERLAY_SOURCE_ID,
+      id: record.mmsi,
+      callsign: String(record.name || '').trim() || record.mmsi,
+      registration: String(record.callSign || '').trim() || null,
+      operator: navStatusLabel(record.navStatus) || null,
+      type,
+      category: null,
+      military: false,
+      onGround: false,
+      altitudeM: null,
+      speedMps: Number.isFinite(record.speed) && record.speed >= 0 ? record.speed * KN_TO_MPS : null,
+      verticalRateMps: null,
+      trackDeg: heading ?? course,
+      routeInfo: null,
+      progress: null,
+      route: destination ? `→ ${destination}` : null,
+      flightIata: null,
+      source: 'AISStream',
+      lastContactEpochMs: Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null,
+      stale: isLastKnownVessel(record),
+      squawk: null,
+      countryIso: flag?.iso2 || null,
+      originCountry: flag?.name || null,
+    };
+  },
+
+  /**
    * Get vessels within a range of a point, sorted nearest-first.
    * @param {Cesium.Cartesian3} centerCartesian Center of the search.
    * @param {number} rangeM Max distance in meters (non-finite = unbounded).
@@ -714,13 +766,11 @@ const aisLiveVesselsLayer = {
 
     const selected = state.selectedRecord;
     const result = [];
-    for (let idx = 0; idx < records.length; idx += 1) {
-      if (((idx - start) % stride) !== 0) continue;
-      const record = records[idx];
-      if (record.billboard && !record.billboard.show) continue;
+    const toObject = (record) => {
+      if (record.billboard && !record.billboard.show) return null;
       const position = record.billboard?.position || record.position;
-      if (!position) continue;
-      result.push({
+      if (!position) return null;
+      return {
         position,
         sourceId: record.mmsi,
         id: record.name || record.mmsi || 'VESSEL',
@@ -733,8 +783,35 @@ const aisLiveVesselsLayer = {
           ? normalizeVesselType(record.type).toUpperCase().slice(0, 14) || undefined
           : undefined,
         metric: isLastKnownVessel(record) ? 'LAST KNOWN' : formatVesselSpeedKnots(record.speed),
-      });
-      if (result.length >= maxCount) break;
+      };
+    };
+    // Loď pod kurzorom a vybraná loď idú VŽDY (2026-09-12, „zameriavače ako
+    // u lietadiel"): stride vyberá ~1 z 13 pri 33 000 lodiach, takže hovered
+    // loď v kohorte spravidla nebola a zameriavač sa nerozsvietil. Lietadlá
+    // to nemajú — dostávajú maxCount Infinity.
+    const forced = new Set();
+    if (Array.isArray(options.hovered)) {
+      for (const c of options.hovered) {
+        if (c && String(c.layerId) === VESSEL_OVERLAY_SOURCE_ID && c.sourceId != null) forced.add(String(c.sourceId));
+      }
+    }
+    if (selected?.mmsi) forced.add(String(selected.mmsi));
+    for (const mmsi of forced) {
+      const record = state.vesselMap.get(mmsi);
+      const object = record ? toObject(record) : null;
+      if (object) result.push(object);
+    }
+    // Rozpočet maxCount platí pre vzorku; vynútené lode idú navyše (1–2 kusy).
+    let sampled = 0;
+    for (let idx = 0; idx < records.length; idx += 1) {
+      if (((idx - start) % stride) !== 0) continue;
+      const record = records[idx];
+      if (forced.has(String(record.mmsi))) continue;
+      const object = toObject(record);
+      if (!object) continue;
+      result.push(object);
+      sampled += 1;
+      if (sampled >= maxCount) break;
     }
     return result;
   },

@@ -53,3 +53,11 @@ test('hover kontrakty: throttle, inštalácia v ui.js a bypass v paint slučke',
   assert.match(detectionJs, /obj\._candidateHovered = hovered;/);
   assert.match(detectionJs, /if \(obj\._candidateHovered\) keyholeAlpha = 1;/);
 });
+
+test('detection odovzdáva hovered kandidátov vrstvám — loď pod kurzorom musí byť v kohorte aj keď ju stride vynechal (2026-09-12)', () => {
+  const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
+  assert.match(detectionJs, /layer\.getDetectableObjects\(\{\s*mode: label,\s*maxCount,\s*seed: 0,[\s\S]*?hovered: _hoverCandidates,\s*\}\)/);
+  const vesselsJs = fs.readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  assert.match(vesselsJs, /if \(Array\.isArray\(options\.hovered\)\)/, 'lode hovered kandidátov honorujú');
+  assert.match(vesselsJs, /getContactSummary\(id\) \{/, 'lode majú súhrn pre kartičku pod kurzorom');
+});

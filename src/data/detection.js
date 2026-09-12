@@ -791,6 +791,9 @@ function _collectDetectableObjects() {
         mode: label,
         maxCount,
         seed: 0,
+        // Loď pod kurzorom musí byť v kohorte aj keď ju stride vynechal —
+        // inak sa hover zameriavač na mori nerozsvieti (2026-09-12).
+        hovered: _hoverCandidates,
       });
       if (items && items.length > 0) {
         for (const item of items) {

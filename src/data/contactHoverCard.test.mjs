@@ -280,3 +280,31 @@ test('tripwire: kartička žije nezávisle od prepínača DETEKCIA', async () =>
   assert.match(hover, /onHover\?\.\(candidates, position\)/, 'jeden pick, dvaja konzumenti');
   assert.match(hover, /onHover\?\.\(\[\], null\)/, 'odchod myši z canvasu kartičku zhasne');
 });
+
+test('loď (2026-09-12): súhrn z aisLiveVessels.getContactSummary sa vykreslí bez vlastnej vetvy a bez surového i18n kľúča', () => {
+  const model = hoverCardModel({
+    layerId: 'ais-live-vessels', id: '244660815', callsign: 'VLISSINGEN', registration: 'PBXY',
+    operator: 'UNDER WAY', type: 'CARGO · 121 m', category: null, military: false, onGround: false,
+    altitudeM: null, speedMps: 14.53 * 0.514444, verticalRateMps: null, trackDeg: 231.2,
+    routeInfo: null, progress: null, route: '→ ROTTERDAM', flightIata: null,
+    source: 'AISStream', lastContactEpochMs: NOW - 9_000, stale: false, squawk: null, countryIso: 'NL', originCountry: 'Netherlands',
+  }, t, NOW);
+  assert.equal(model.title, 'VLISSINGEN');
+  assert.equal(model.titleFlag, 'nl', 'resolveFlagIso2 normalizuje na malé písmená');
+  assert.match(model.details[0], /^\d+ (kts|km\/h) · 231°$/, 'rýchlosť · kurz, bez hladiny');
+  assert.equal(model.details[1], 'UNDER WAY · CARGO · 121 m · PBXY');
+  assert.equal(model.route, null);
+  assert.equal(model.routeText, '→ ROTTERDAM');
+  assert.equal(model.progress, null);
+  assert.match(model.footer[0], /^AISStream · /);
+  assert.equal(model.hex, null, 'hex je len pre lietadlá');
+  assert.equal(model.alert, null);
+  const text = JSON.stringify(model);
+  assert.ok(!text.includes('aircraft.category'), 'typ lode je vždy neprázdny, kategória lietadla sa nevolá');
+  const lines = hoverCardLines({
+    layerId: 'ais-live-vessels', id: '353136000', callsign: '353136000', type: 'VESSEL', category: null,
+    speedMps: null, trackDeg: null, stale: true, source: 'AISStream',
+  }, t, NOW);
+  assert.equal(lines.title, '353136000');
+  assert.ok(lines.lines.includes(t('hover.stale')), 'posledná známa poloha = „bez fixu"');
+});

@@ -2021,3 +2021,64 @@ test('lode: hustota pri pohľade na svet je VYPNUTÁ (rozhodnutie používateľa
     _setVesselStateForTest({ enabled: false });
   }
 });
+
+const FIX_EPOCH = Math.floor(Date.now() / 1000) - 30; // čerstvý fix (< 10 min), inak by bol „last known"
+
+test('getContactSummary: kartička pod kurzorom v tvare flights (2026-09-12 „keď na lode prejdem myšou, nič")', () => {
+  const record = makeRecord({
+    mmsi: '244660815', name: 'VLISSINGEN', callSign: 'PBXY', type: '70', destination: 'ROTTERDAM',
+    speed: 14.53, course: 230.6, heading: 231.2, lengthM: 121.4, navStatus: 0, lastPositionEpoch: FIX_EPOCH,
+  });
+  _setVesselStateForTest({ viewer: {}, records: [record] });
+  try {
+    assert.equal(aisLiveVesselsLayer.getContactSummary('000000000'), null, 'neznáma loď = null');
+    const s = aisLiveVesselsLayer.getContactSummary('244660815');
+    assert.equal(s.layerId, 'ais-live-vessels');
+    assert.equal(s.id, '244660815');
+    assert.equal(s.callsign, 'VLISSINGEN', 'meno lode je titulok');
+    assert.equal(s.registration, 'PBXY');
+    assert.equal(s.operator, 'UNDER WAY', 'stav plavby v riadku stroja');
+    assert.equal(s.type, 'CARGO · 121 m', 'normalizovaný typ + dĺžka');
+    assert.ok(Math.abs(s.speedMps - 14.53 * 0.514444) < 1e-9, 'uzly → m/s pre spoločný formátovač');
+    assert.equal(s.trackDeg, 231.2, 'heading má prednosť pred kurzom');
+    assert.equal(s.route, '→ ROTTERDAM');
+    assert.equal(s.countryIso, 'NL', 'vlajka z MID 244');
+    assert.equal(s.lastContactEpochMs, FIX_EPOCH * 1000);
+    assert.equal(s.stale, false);
+    assert.equal(s.altitudeM, null);
+    assert.equal(s.onGround, false);
+    assert.equal(s.source, 'AISStream');
+  } finally { _setVesselStateForTest({ enabled: false }); }
+});
+
+test('getContactSummary: AIS sentinely a posledná známa poloha', () => {
+  const record = makeRecord({ mmsi: '353136000', name: '', callSign: '', type: '', heading: 511, course: 360, speed: -1, positionState: 'last-known', destination: '' });
+  _setVesselStateForTest({ viewer: {}, records: [record] });
+  try {
+    const s = aisLiveVesselsLayer.getContactSummary('353136000');
+    assert.equal(s.callsign, '353136000', 'bez mena je titulkom MMSI');
+    assert.equal(s.registration, null);
+    assert.equal(s.type, 'VESSEL', 'typ nikdy prázdny — inak by karta siahla po aircraft.category.*');
+    assert.equal(s.trackDeg, null, 'heading 511 a course 360 = nedostupné');
+    assert.equal(s.speedMps, null);
+    assert.equal(s.route, null);
+    assert.equal(s.stale, true, 'posledná známa poloha sa prizná');
+    assert.equal(s.countryIso, 'PA', 'MID 353 = Panama');
+  } finally { _setVesselStateForTest({ enabled: false }); }
+});
+
+test('getDetectableObjects: loď pod kurzorom a vybraná loď idú vždy, aj keď ich stride vynechal („zameriavače ako u lietadiel")', () => {
+  const records = Array.from({ length: 12 }, (_, i) => makeRecord({ mmsi: String(200000000 + i), name: `S${i}` }));
+  _setVesselStateForTest({ viewer: {}, records, selectedRecord: records[7], billboardCollection: { show: true, remove() {} } });
+  try {
+    const plain = aisLiveVesselsLayer.getDetectableObjects({ maxCount: 3, seed: 0 });
+    // stride 4 → indexy 0, 4, 8 + vybraná (7)
+    assert.deepEqual(plain.map(o => o.sourceId), ['200000007', '200000000', '200000004', '200000008']);
+    assert.equal(plain[0].skipLabel, true, 'vybraná loď = sledovaný rámik');
+    const hovered = aisLiveVesselsLayer.getDetectableObjects({ maxCount: 3, seed: 0, hovered: [{ layerId: 'ais-live-vessels', sourceId: '200000005' }, { layerId: 'flights', sourceId: 'abc' }] });
+    assert.ok(hovered.some(o => o.sourceId === '200000005'), 'hovered loď je v kohorte napriek stride');
+    assert.ok(!hovered.some(o => o.sourceId === 'abc'), 'cudzí kandidát (lietadlo) sa ignoruje');
+    const ids = hovered.map(o => o.sourceId);
+    assert.equal(new Set(ids).size, ids.length, 'bez duplikátov');
+  } finally { _setVesselStateForTest({ enabled: false }); }
+});
