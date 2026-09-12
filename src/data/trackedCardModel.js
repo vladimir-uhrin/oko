@@ -246,13 +246,14 @@ export function formatMetaLine({ source, lastContactEpochMs, nowMs, squawk, hex 
  * @param {?{fractionDone: number, remainingKm?: number, etaMinutes: number|null}} [parts.progress]
  * @param {string} [parts.alertLine] „SQUAWK 7700 · EMERGENCY" → `alert` (červený rám)
  * @param {string} [parts.acarsLine] „ACARS 7 · 03:40 CPDLC ↑ · …" (acarsMessages.js) → prvý riadok päty; '' = bez riadku
- * @param {?object} [parts.profile] riadok mini profilu (flightProfile.js) alebo null
+ * @param {?object} [parts.profile] riadok mini profilu (flightProfile.js) alebo null — záloha, keď nie sú grafy
+ * @param {?object} [parts.charts] grafy celého letu (flightCharts.js) alebo null
  * @param {string} [parts.metaLine] hotový riadok o dátach (viď formatMetaLine); '' = bez riadku
  * @param {number} [parts.nowMs] „teraz" pre hodinu príletu
  * @param {string} [parts.countryIso] ISO2 štátu registrácie (adsbdb)
  * @param {string} [parts.originCountry] meno štátu z OpenSky (fallback)
  * @param {string} [parts.accent]
- * @returns {{title: string, details: string[], footer: string[], accent: string, titleFlag: string|null, route: object|null, progress: object|null, profile: object|null, alert: string|null}}
+ * @returns {{title: string, details: string[], footer: string[], accent: string, titleFlag: string|null, route: object|null, progress: object|null, profile: object|null, charts: object|null, alert: string|null}}
  */
 export function buildTrackedCardModel({
   callsign,
@@ -264,6 +265,7 @@ export function buildTrackedCardModel({
   route = null,
   progress = null,
   profile = null,
+  charts = null,
   alertLine = '',
   acarsLine = '',
   metaLine = '',
@@ -290,6 +292,7 @@ export function buildTrackedCardModel({
     route: routeRowFromRoute(route),
     progress: progressRowFromProgress(progress, nowMs),
     profile: profile && typeof profile === 'object' ? profile : null,
+    charts: charts && typeof charts === 'object' ? charts : null,
     alert,
   };
 }

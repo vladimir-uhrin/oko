@@ -501,6 +501,7 @@ test('real civil track path creates no native label and publishes every cached h
       details: ['Flight level FL350 (≈ 10 668 m)', 'Speed 486 kts (900 km/h) · heading 095° (E)', 'TEST AIR · A320'],
       titleFlag: null, // fixtúra nemá origin_country ani adsbdb ISO — bez vlajky
       route: { origin: { label: 'AUS', iso2: null }, destination: { label: 'LAX', iso2: null } },
+      charts: null, // grafy celého letu (2026-09-12) — fixtúra má 1 fix, graf potrebuje 2
       accent: '#39d0ff',
     });
     viewer.scene.preUpdate.raiseEvent();

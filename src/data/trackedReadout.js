@@ -151,6 +151,8 @@ export function createTrackedOverlayEntry(entity) {
     footer: Array.isArray(model.footer) ? model.footer.map((line) => String(line)) : [],
     // 2026-09-07: mini profil (2 riadky s grafom) a núdzový squawk (červený rám).
     profile: model.profile ?? null,
+    // 2026-09-12: grafy celého letu (výška s odhadom + rýchlosť) — vlastné pole.
+    charts: model.charts ?? null,
     alert: model.alert ?? null,
     anchorRadiusPx: 10,
     anchorRadiusScale: TRACKED_BILLBOARD_SCALE,

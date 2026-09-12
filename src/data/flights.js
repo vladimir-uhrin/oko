@@ -63,6 +63,8 @@ import {
 import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
+import { buildFlightCharts } from './flightCharts.js';
+import { cachedTrackedHistory, forgetTrackedHistory, requestTrackedHistory } from './trackedHistory.js';
 import { acarsCardLine, cachedAcars, requestAcarsMessages } from './acarsMessages.js';
 import {
   applyTrackedCameraFrame,
@@ -3852,6 +3854,7 @@ function _trackedCardModel(icao24) {
     route: parts.route,
     progress: parts.progress,
     profile: parts.profile,
+    charts: parts.charts,
     alertLine: parts.alertLine,
     acarsLine: parts.acarsLine,
     metaLine: parts.metaLine,
@@ -3928,6 +3931,24 @@ function _trackedLabelParts(icao24) {
     squawk: alert ? '' : info.squawk,
     hex: icao24,
   });
+  // Grafy celého letu (2026-09-12): história z proxy + živý rad + aktuálny
+  // fix; s trasou aj odhad výšky po pristátie. Mini profil ostáva len ako
+  // záloha, kým graf nemá 2 body.
+  const charts = buildFlightCharts({
+    fixes: cachedTrackedHistory(icao24),
+    samples: _profileStore.samples(icao24),
+    now: {
+      epochMs: Number.isFinite(info.lastContactEpochMs) ? info.lastContactEpochMs : nowMs,
+      altitudeM: info.altitude,
+      speedMps: info.velocity,
+      verticalRateMps: info.verticalRate,
+      lat: info.rawLat,
+      lon: info.rawLon,
+    },
+    route,
+    progress,
+    translate: t,
+  });
   return {
     info,
     callsign: cs,
@@ -3943,7 +3964,8 @@ function _trackedLabelParts(icao24) {
     nowMs,
     // Mini profil (2026-09-07): posledných 30 min výšky a rýchlosti z
     // vlastného riedkeho záznamu; null kým nie sú aspoň 3 vzorky / 2 min.
-    profile: profileRowFromSamples(_profileStore.samples(icao24), nowMs, { translate: t }),
+    profile: charts ? null : profileRowFromSamples(_profileStore.samples(icao24), nowMs, { translate: t }),
+    charts,
     // ACARS/CPDLC správy (2026-09-08, airframes.io, LEN LOKÁLNE): posledná
     // správa s počtom za 24 h; '' kým nič nevieme alebo je zdroj vypnutý.
     acarsLine: acarsCardLine(cachedAcars(icao24)),
@@ -3962,6 +3984,9 @@ function _updateTrackedLabelModel(icao24) {
   // príde LEN po skutočnom fetchi (nie z čerstvej cache), inak by sme sa
   // tu točili. Karta sa po doručení prebuduje ešte raz.
   void requestAcarsMessages(icao24, { onDone: () => _updateTrackedLabelModel(icao24) });
+  // História letu pre grafy karty (2026-09-12): rovnaký vzor — cache s TTL,
+  // onDone len po skutočnom fetchi; bez proxy histórie ostáva 30-min rad.
+  void requestTrackedHistory(icao24, { onDone: () => _updateTrackedLabelModel(icao24) });
   _trackedEntity.gevLabelModel = _trackedCardModel(icao24);
   refreshTrackedReadout(_trackedEntity);
   // The readout and the context slot describe the same contact — refresh them
@@ -4442,6 +4467,7 @@ function _onMilitaryActiveChange(active) {
       _flightData.delete(icao24);
       _positionHistory.delete(icao24);
       _profileStore.delete(icao24);
+          forgetTrackedHistory(icao24);
       _displayCourse.delete(icao24);
       _groundSnap.forget(icao24);
       _missingPolls.delete(icao24);
@@ -4972,6 +4998,7 @@ const flightsLayer = {
             _flightData.delete(icao24);
             _positionHistory.delete(icao24);
             _profileStore.delete(icao24);
+          forgetTrackedHistory(icao24);
             _displayCourse.delete(icao24);
             _groundSnap.forget(icao24);
             _missingPolls.delete(icao24);
@@ -5352,6 +5379,7 @@ const flightsLayer = {
         _flightData.delete(icao24);
         _positionHistory.delete(icao24);
         _profileStore.delete(icao24);
+          forgetTrackedHistory(icao24);
         _displayCourse.delete(icao24);
         _groundSnap.forget(icao24);
         _geoidNCache.delete(icao24);

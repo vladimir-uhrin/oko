@@ -421,6 +421,31 @@ function normalizeRouteRow(route) {
 }
 
 /** Profile row (2026-09-07): two unit-range series + two labels; null without ≥ 2 altitude points. */
+/**
+ * Grafy celého letu (2026-09-12): dve série 0..1 s medzerami (null) po celej
+ * osi, voliteľný odhad výšky; polovičný tvar vráti null, nech maliar nikdy
+ * nevidí nedokončený riadok.
+ */
+function normalizeChartsRow(charts) {
+  if (!charts || typeof charts !== 'object') return null;
+  const series = (values) => (Array.isArray(values) ? values : [])
+    .map((v) => (v === null || v === undefined || v === '' ? null : Number(v)))
+    .map((v) => (v === null ? null : (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : null)));
+  const known = (values) => values.filter((v) => v !== null).length;
+  const altPast = series(charts.altitude?.past);
+  const gsPast = series(charts.speed?.past);
+  if (known(altPast) < 2 && known(gsPast) < 2) return null;
+  const xNow = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(1, Number(v))) : 1);
+  return {
+    mode: charts.mode === 'route' ? 'route' : 'time',
+    forecastLabel: String(charts.forecastLabel ?? '').trim(),
+    titles: { altitude: String(charts.titles?.altitude ?? '').trim(), speed: String(charts.titles?.speed ?? '').trim() },
+    axis: { left: String(charts.axis?.left ?? '').trim(), right: String(charts.axis?.right ?? '').trim() },
+    altitude: { past: altPast, future: series(charts.altitude?.future), xNow: xNow(charts.altitude?.xNow), label: String(charts.altitude?.label ?? '').trim() },
+    speed: { past: gsPast, xNow: xNow(charts.speed?.xNow), label: String(charts.speed?.label ?? '').trim() },
+  };
+}
+
 function normalizeProfileRow(profile) {
   if (!profile || typeof profile !== 'object') return null;
   const series = (values) => (Array.isArray(values) ? values : [])
@@ -481,6 +506,7 @@ export function normalizeOverlayEntry(sourceId, entry) {
     route: normalizeRouteRow(entry.route),
     progress: normalizeProgressRow(entry.progress),
     profile: normalizeProfileRow(entry.profile),
+    charts: normalizeChartsRow(entry.charts),
     // Footer rows paint AFTER the decoration rows (data provenance); the alert
     // line closes the card in the alert colour with a red frame.
     footer: Array.isArray(entry.footer) ? entry.footer.map((line) => String(line).trim()).filter(Boolean) : [],

@@ -89,7 +89,12 @@ test('tripwire: flotila zapisuje vzorky pri každom novom fixe a karta číta pr
   assert.match(flights, /_profileStore\.record\(icao24, fixEpochMs, alt, meta\.velocity\)/, 'zápis pri novom fixe (spolu s DR históriou)');
   assert.match(flights, /_profileStore\.delete\(icao24\)/, 'mazanie spolu s históriou');
   assert.match(flights, /_profileStore\.clear\(\)/, 'čistenie pri vypnutí vrstvy');
-  assert.match(flights, /profile: profileRowFromSamples\(_profileStore\.samples\(icao24\), nowMs/, 'karta dostáva riadok profilu');
+  assert.match(flights, /profile: charts \? null : profileRowFromSamples\(_profileStore\.samples\(icao24\), nowMs/, 'karta dostáva riadok profilu ako zálohu grafov celého letu (2026-09-12)');
+  assert.match(flights, /const charts = buildFlightCharts\(\{/, 'grafy celého letu z histórie + živého radu');
+  assert.match(flights, /requestTrackedHistory\(icao24, \{ onDone/, 'história sledovaného letu sa pýta s onDone ako ACARS');
   const readout = readFileSync(new URL('./trackedReadout.js', import.meta.url), 'utf8');
   assert.match(readout, /profile: model\.profile \?\? null/, 'hostiteľ prenáša profil do entry');
+  assert.match(readout, /charts: model\.charts \?\? null/, 'hostiteľ prenáša grafy celého letu do entry (2026-09-12)');
+  const overlay = readFileSync(new URL('../overlays/worldOverlay.js', import.meta.url), 'utf8');
+  assert.match(overlay, /charts: normalizeChartsRow\(entry\.charts\)/, 'overlay grafy normalizuje, nie preberá naslepo');
 });

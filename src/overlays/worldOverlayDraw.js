@@ -326,6 +326,16 @@ export function measureOverlayEntry(ctx, entry, out = {}) {
     detailWidth = Math.max(detailWidth, PROFILE_CHART_W + PROFILE_GAP_PX + labelW);
     extraRows += 2;
   }
+  // Grafy celého letu (2026-09-12): výška s odhadom a rýchlosť vedľa seba
+  // cez FLIGHT_CHART_ROWS riadkov, pod nimi dve popisky (max · teraz).
+  if (tracked && entry?.charts) {
+    const labelW = Math.max(
+      measureWorldOverlayText(ctx, entry.charts.altitude?.label || '', WORLD_OVERLAY_STYLE.fontTrackedDetail),
+      measureWorldOverlayText(ctx, entry.charts.speed?.label || '', WORLD_OVERLAY_STYLE.fontTrackedDetail),
+    );
+    detailWidth = Math.max(detailWidth, 2 * FLIGHT_CHART_W + FLIGHT_CHART_GAP_PX, labelW);
+    extraRows += FLIGHT_CHART_ROWS + 2;
+  }
   const footer = tracked && Array.isArray(entry?.footer) ? entry.footer : [];
   for (let i = 0; i < footer.length; i++) {
     detailWidth = Math.max(detailWidth, measureWorldOverlayText(ctx, footer[i], WORLD_OVERLAY_STYLE.fontTrackedDetail));
@@ -380,6 +390,11 @@ const ROUTE_ARROW = ' → ';
 /** Mini profile chart geometry (2026-09-07): spans two tracked lines. */
 export const PROFILE_CHART_W = 96;
 export const PROFILE_CHART_H = 26;
+/** Grafy celého letu (2026-09-12): dva boxy vedľa seba cez tri riadky karty + dve popisky. */
+export const FLIGHT_CHART_W = 150;
+export const FLIGHT_CHART_H = 42;
+export const FLIGHT_CHART_GAP_PX = 10;
+export const FLIGHT_CHART_ROWS = 3;
 const PROFILE_GAP_PX = 8;
 /** Emergency squawk treatment: frame, top rule, glyph and text. */
 export const TRACKED_ALERT_COLOR = '#ff4a4a';
@@ -514,6 +529,116 @@ function paintProfileRow(ctx, profile, accent, centerX, firstBaseline, lineH) {
   ctx.textAlign = 'left';
   ctx.fillText(profile.label || '', x + PROFILE_CHART_W + PROFILE_GAP_PX, firstBaseline);
   ctx.fillText(profile.sublabel || '', x + PROFILE_CHART_W + PROFILE_GAP_PX, firstBaseline + lineH);
+}
+
+/** Jedna krivka grafu letu: hodnoty 0..1 alebo null (medzera), voliteľne čiarkovaná (odhad). */
+function strokeChartSeries(ctx, values, x0, y0, w, h, color, width, dashed = false) {
+  const n = values.length;
+  if (n < 2) return;
+  ctx.save();
+  if (dashed && typeof ctx.setLineDash === 'function') ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  let pen = false;
+  for (let i = 0; i < n; i += 1) {
+    const v = values[i];
+    if (v === null || v === undefined) { pen = false; continue; }
+    const x = x0 + (i / (n - 1)) * w;
+    const y = y0 + h - v * h;
+    if (!pen) { ctx.moveTo(x, y); pen = true; } else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Plocha pod krivkou (len súvislé známe úseky) — výška ako v grafe histórie letov. */
+function fillChartArea(ctx, values, x0, y0, w, h, color) {
+  const n = values.length;
+  if (n < 2) return;
+  ctx.save();
+  ctx.fillStyle = color;
+  let i = 0;
+  while (i < n) {
+    while (i < n && (values[i] === null || values[i] === undefined)) i += 1;
+    const start = i;
+    while (i < n && values[i] !== null && values[i] !== undefined) i += 1;
+    if (i - start >= 2) {
+      ctx.beginPath();
+      ctx.moveTo(x0 + (start / (n - 1)) * w, y0 + h);
+      for (let k = start; k < i; k += 1) ctx.lineTo(x0 + (k / (n - 1)) * w, y0 + h - values[k] * h);
+      ctx.lineTo(x0 + ((i - 1) / (n - 1)) * w, y0 + h);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * Grafy celého letu (2026-09-12, „pekný malý graf… aj predpokladaná výška",
+ * „ďalší malý graf rýchlosti"): vľavo výška (plocha + čiara v akcente,
+ * budúcnosť čiarkovaná = ODHAD so značkou), vpravo rýchlosť (jantárová
+ * čiara); v boxoch názov, konce osi (kódy letísk alebo čas) a bodka „teraz";
+ * pod boxmi dve popisky (max · teraz). Zaberá FLIGHT_CHART_ROWS + 2 riadkov.
+ * `rowTop` je účiara riadku nad grafmi.
+ */
+function paintFlightChartsRows(ctx, charts, accent, centerX, rowTop, lineH) {
+  const total = 2 * FLIGHT_CHART_W + FLIGHT_CHART_GAP_PX;
+  const left = centerX - total / 2;
+  const top = rowTop + 5;
+  const innerTop = top + 11;
+  const innerH = FLIGHT_CHART_H - 16;
+  const smallFont = String(ctx.font || WORLD_OVERLAY_STYLE.fontTrackedDetail).replace(/\d+(\.\d+)?px/, '9px');
+  const boxes = [
+    { x: left, series: charts.altitude, title: charts.titles?.altitude || '', color: accent, fill: 'rgba(57, 208, 255, 0.16)', future: charts.altitude?.future || null },
+    { x: left + FLIGHT_CHART_W + FLIGHT_CHART_GAP_PX, series: charts.speed, title: charts.titles?.speed || '', color: 'rgba(255, 179, 71, 0.95)', fill: 'rgba(255, 179, 71, 0.10)', future: null },
+  ];
+  for (const box of boxes) {
+    if (!box.series || !Array.isArray(box.series.past)) continue;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+    ctx.beginPath();
+    roundedRectPath(ctx, box.x, top, FLIGHT_CHART_W, FLIGHT_CHART_H, 3);
+    ctx.fill();
+    const innerX = box.x + 5;
+    const innerW = FLIGHT_CHART_W - 10;
+    fillChartArea(ctx, box.series.past, innerX, innerTop, innerW, innerH, box.fill);
+    strokeChartSeries(ctx, box.series.past, innerX, innerTop, innerW, innerH, box.color, 1.5);
+    const hasFuture = Array.isArray(box.future) && box.future.some((v) => v !== null && v !== undefined);
+    if (hasFuture) strokeChartSeries(ctx, box.future, innerX, innerTop, innerW, innerH, box.color, 1, true);
+    const n = box.series.past.length;
+    const iNow = Math.max(0, Math.min(n - 1, Math.round((Number(box.series.xNow) || 1) * (n - 1))));
+    let vNow = box.series.past[iNow];
+    if (vNow === null || vNow === undefined) for (let k = n - 1; k >= 0; k -= 1) { if (box.series.past[k] !== null && box.series.past[k] !== undefined) { vNow = box.series.past[k]; break; } }
+    if (vNow !== null && vNow !== undefined) {
+      ctx.fillStyle = box.color;
+      ctx.beginPath();
+      ctx.arc(innerX + (iNow / (n - 1)) * innerW, innerTop + innerH - vNow * innerH, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.font = smallFont;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(200, 236, 244, 0.9)';
+    ctx.fillText(box.title, box.x + 5, top + 9);
+    if (hasFuture && charts.forecastLabel) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(150, 175, 185, 0.9)';
+      ctx.fillText(charts.forecastLabel, box.x + FLIGHT_CHART_W - 5, top + 9);
+    }
+    ctx.fillStyle = 'rgba(150, 175, 185, 0.85)';
+    ctx.textAlign = 'left';
+    ctx.fillText(charts.axis?.left || '', box.x + 5, top + FLIGHT_CHART_H - 3);
+    ctx.textAlign = 'right';
+    ctx.fillText(charts.axis?.right || '', box.x + FLIGHT_CHART_W - 5, top + FLIGHT_CHART_H - 3);
+    ctx.restore();
+  }
+  ctx.textAlign = 'center';
+  ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
+  ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
+  const labelBaseline = rowTop + (FLIGHT_CHART_ROWS + 1) * lineH;
+  ctx.fillText(charts.altitude?.label || '', centerX, labelBaseline);
+  ctx.fillText(charts.speed?.label || '', centerX, labelBaseline + lineH);
 }
 
 /** Paint the emergency line: warning triangle glyph + text, both in the alert colour. */
@@ -1003,6 +1128,12 @@ export function paintTracked(ctx, entry, placement, alpha = 1) {
     ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
     paintProfileRow(ctx, entry.profile, accent, centerX, titleBaseline + (row + 1) * layout.lineH, layout.lineH);
     row += 2;
+  }
+  if (entry.charts) {
+    ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
+    ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
+    paintFlightChartsRows(ctx, entry.charts, accent, centerX, titleBaseline + row * layout.lineH, layout.lineH);
+    row += FLIGHT_CHART_ROWS + 2;
   }
   // Footer rows (data provenance) close the card, dimmer than details.
   const footer = Array.isArray(entry.footer) ? entry.footer : [];

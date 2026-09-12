@@ -124,7 +124,7 @@ test('karta: neznámy štát a chýbajúce dáta — bez vlajky, bez prázdnych 
   assert.equal(model.titleFlag, null);
   assert.equal(model.route, null);
   assert.equal(model.progress, null);
-  assert.deepEqual(buildTrackedCardModel(), { title: '', details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null, profile: null, alert: null });
+  assert.deepEqual(buildTrackedCardModel(), { title: '', details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null, profile: null, charts: null, alert: null });
   const withProfile = buildTrackedCardModel({ callsign: 'X', profile: { altitude: [0, 1], speed: [], label: 'a', sublabel: 'b' } });
   assert.deepEqual(withProfile.profile, { altitude: [0, 1], speed: [], label: 'a', sublabel: 'b' });
   assert.equal(buildTrackedCardModel({ callsign: 'X', profile: 'nope' }).profile, null);
@@ -212,4 +212,11 @@ test('zrozumiteľné riadky (2026-09-12, „aby to pochopil aj debil"): letová 
     'Letová hladina FL360 (≈ 10 973 m)',
     'Rýchlosť 401 kts (743 km/h) · kurz 327° (SZ)',
   ]);
+});
+
+test('karta: grafy celého letu (2026-09-12) prechádzajú modelom nezmenené, inak null', () => {
+  const charts = { mode: 'route', altitude: { past: [0, 1] }, speed: { past: [0, 1] } };
+  assert.equal(buildTrackedCardModel({ callsign: 'X', charts }).charts, charts);
+  assert.equal(buildTrackedCardModel({ callsign: 'X' }).charts, null);
+  assert.equal(buildTrackedCardModel({ callsign: 'X', charts: 'nie' }).charts, null);
 });

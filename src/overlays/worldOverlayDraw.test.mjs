@@ -31,6 +31,10 @@ import {
   dockedPlacement,
   placementVariants,
   roundedRectPath,
+  FLIGHT_CHART_H,
+  FLIGHT_CHART_ROWS,
+  FLIGHT_CHART_W,
+  FLIGHT_CHART_GAP_PX,
 } from './worldOverlayDraw.js';
 import { createCctvThumbnailOverlayEntry, createFrameSlot } from '../data/cctvCards.js';
 import {
@@ -78,6 +82,7 @@ function mockContext() {
     fillRect(...args) { calls.push(['fillRect', ...args]); },
     fillText(...args) { calls.push(['fillText', ...args]); },
     drawImage(...args) { calls.push(['drawImage', ...args]); },
+    setLineDash(...args) { calls.push(['setLineDash', ...args]); },
   };
 }
 
@@ -736,4 +741,38 @@ test('tactical vessel card paints the flag state before the vessel name and shif
   const title = ctx.calls.find(([name, text]) => name === 'fillText' && text === 'MSC OSCAR');
   assert.equal(title[2], placement.rect.x + entry._overlayLayout.padX + entry._overlayLayout.titleFlagW, 'title starts after the flag');
   assert.ok(ctx.calls.some(([name, , , w, h]) => name === 'fillRect' && w === 12 && h === 9), 'flag placeholder painted');
+});
+
+test('tracked card (2026-09-12): whole-flight charts take three rows plus two labels; altitude fill + line, dashed forecast, speed line, titles and axis codes', () => {
+  const ctx = mockContext();
+  const base = { variant: 'tracked', title: 'EWG20X', details: ['Letová hladina FL380 (≈ 11 582 m)'], accent: '#39d0ff' };
+  const plain = measureOverlayEntry(ctx, { ...base }, {});
+  const past = [0, 0.5, 1, 1, null, null];
+  const charts = {
+    mode: 'route', forecast: true, forecastLabel: 'odhad', titles: { altitude: 'VÝŠKA', speed: 'RÝCHLOSŤ' }, axis: { left: 'HAM', right: 'ZAD' },
+    altitude: { past, future: [null, null, null, 1, 0.5, 0], maxM: 11_582, xNow: 0.6, label: 'výška max FL380 · teraz FL380' },
+    speed: { past: [0.2, 0.6, 1, 0.9, null, null], maxMps: 213, xNow: 0.6, label: 'rýchlosť max 413 kts · teraz 405 kts (750 km/h)' },
+  };
+  const withCharts = measureOverlayEntry(ctx, { ...base, charts }, {});
+  assert.equal(withCharts.extraRows, FLIGHT_CHART_ROWS + 2, 'tri riadky grafov + dve popisky');
+  assert.equal(withCharts.h, plain.h + (FLIGHT_CHART_ROWS + 2) * plain.lineH);
+  assert.ok(withCharts.w >= 2 * FLIGHT_CHART_W + FLIGHT_CHART_GAP_PX + 2 * withCharts.padX, 'dva boxy vedľa seba sa zmestia');
+  const entry = { ...base, charts };
+  entry._overlayLayout = withCharts;
+  const placement = placementVariants({
+    anchorX: 300, anchorY: 200, width: withCharts.w, height: withCharts.h,
+    viewportWidth: 800, viewportHeight: 600, verticalOnly: true,
+  })[0];
+  paintTracked(ctx, entry, placement, 1);
+  const texts = ctx.calls.filter(([name]) => name === 'fillText').map(([, text]) => text);
+  for (const expected of ['VÝŠKA', 'RÝCHLOSŤ', 'odhad', 'HAM', 'ZAD', charts.altitude.label, charts.speed.label]) {
+    assert.ok(texts.includes(expected), 'text na karte: ' + expected);
+  }
+  assert.equal(texts.filter((x) => x === 'odhad').length, 1, 'odhad len pri výške');
+  const boxes = ctx.calls.filter(([name, , , w, h]) => name === 'roundRect' && w === FLIGHT_CHART_W && h === FLIGHT_CHART_H);
+  assert.equal(boxes.length, 2, 'dva boxy grafov');
+  assert.ok(ctx.calls.some(([name, dash]) => name === 'setLineDash' && Array.isArray(dash) && dash[0] === 3), 'odhad je čiarkovaný');
+  const strokes = ctx.calls.filter(([name]) => name === 'stroke').length;
+  assert.equal(strokes, 1 + 3, 'leader + výška + odhad + rýchlosť');
+  assert.ok(ctx.calls.filter(([name]) => name === 'fill').length >= 4, 'plocha pod výškou, plocha pod rýchlosťou, dve bodky teraz');
 });
