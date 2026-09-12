@@ -3,21 +3,23 @@
 // 2026-09-12. Používateľ: „lode okrem Európy nevidí skoro nikde… potrebujem
 // aktuálne dáta alebo len trochu staré". Terestriálny AISStream v Perzskom
 // zálive nemá ani jednu loď; GFW zbiera AIS aj satelitmi, ale s oneskorením
-// ~72 h a v mriežke 0,1° (~11 km). Táto vrstva teda ukazuje POSLEDNÚ POZOROVANÚ
-// BUNKU každej lode v okne dvoch dní pred oneskorením — nie živú polohu.
+// (posledný úplný deň je D−4) a v bunkách mriežky. Vrstva ukazuje POSLEDNÚ
+// HODINOVÚ BUNKU 0,01° (~1 km) každej lode v ten deň — nie živú polohu; pri
+// rušných moriach proxy spadne na denné bunky 0,1° a meta.mode to povie
+// (2026-09-12, „prečo nemajú pozície?" — v mriežke 0,1° stáli lode v stĺpcoch).
 //
 // Vzhľad (2026-09-12, „sprav ako ostatné lode, len pridaj poznámku
 // oneskorené"): ten istý trup a farba podľa typu ako živé lode
 // (shipIconDataUrl + vesselTypeCss), rovnaký stupeň veľkosti podľa výšky
 // kamery, mená ako karty v spoločnom overlay-i — ale bez kurzu (bunka nemá
-// smer, prova mieri na sever) a s riadkom „ONESKORENÉ ~72 h" v popiske aj v
-// karte pod kurzorom. Pravidlo 2: riadok v paneli nesie obdobie, licenciu
-// CC BY-NC 4.0 a ONESKORENÉ; atribúcia „Powered by Global Fishing Watch." je
+// smer, prova mieri na sever) a s riadkom „ONESKORENÉ · deň" v popiske aj v
+// karte pod kurzorom. Pravidlo 2: riadok v paneli nesie bunky, režim, licenciu
+// CC BY-NC 4.0 a deň dát; atribúcia „Powered by Global Fishing Watch." je
 // v dataCredits.js. Token GFW nikdy neopúšťa server (/api/gfw/presence).
 
 import * as Cesium from 'cesium';
-import { t } from '../i18n.js';
-import { GFW_CELL_DEG, GFW_DELAY_HOURS, quantizeGfwBbox } from './gfwPresenceCore.js';
+import { currentLanguage, t } from '../i18n.js';
+import { GFW_CELL_DEG, GFW_HIGH_CELL_DEG, quantizeGfwBbox } from './gfwPresenceCore.js';
 import { registerPickOwner, unregisterPickOwner } from './pickRegistry.js';
 import {
   VESSEL_CARD_FADE_DISTANCE_M,
@@ -43,7 +45,7 @@ export const GFW_PRESENCE_MAX_POINTS = 6_000;
 export const GFW_PRESENCE_MAX_LABELS = 300;
 /** Debounce po pohybe kamery (ms), aby sa pri plynulom zoome nestrieľali dopyty. */
 export const GFW_PRESENCE_MOVE_DEBOUNCE_MS = 1_500;
-/** Trup nad elipsoidom (m) — bunka 0,1° nemá presnú polohu, výška je len proti z-fightu. */
+/** Trup nad elipsoidom (m) — bunka nemá presnú polohu, výška je len proti z-fightu. */
 export const GFW_PRESENCE_POINT_HEIGHT_M = 20;
 /** Základná mierka trupu = živá loď bez rýchlosti (shipSpeedScale < 8 kn). */
 const HULL_BASE_SCALE = 0.6;
@@ -73,14 +75,49 @@ export function sameBbox(a, b) {
   return Boolean(a && b) && a.west === b.west && a.east === b.east && a.south === b.south && a.north === b.north;
 }
 
+const EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** „2026-09-08" → „8. 9." (sk) / „8 Sep" (en). Pure. */
+export function gfwDayLabel(isoDay, lang = currentLanguage()) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoDay || ''));
+  if (!m) return String(isoDay || '');
+  const d = Number(m[3]);
+  const mo = Number(m[2]);
+  return lang === 'sk' ? `${d}. ${mo}.` : `${d} ${EN_MONTHS[mo - 1] || mo}`;
+}
+
+/** Veľkosť bunky: 0.01 → „0,01" (sk) / „0.01" (en). Pure. */
+export function gfwDegLabel(deg, lang = currentLanguage()) {
+  const text = String(Number.isFinite(deg) ? deg : GFW_CELL_DEG);
+  return lang === 'sk' ? text.replace('.', ',') : text;
+}
+
+/** Hodina UTC z epochy: „8. 9. 23:00" / „8 Sep 23:00"; bez času prázdne. Pure. */
+export function gfwWhenLabel(epochMs, lang = currentLanguage()) {
+  if (!Number.isFinite(epochMs)) return '';
+  const d = new Date(epochMs);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${gfwDayLabel(d.toISOString().slice(0, 10), lang)} ${hh}:${mm}`;
+}
+
+const cellDegOf = (meta) => (Number.isFinite(meta?.cellDeg) ? meta.cellDeg : GFW_HIGH_CELL_DEG);
+const isDayCellMode = (meta) => meta?.mode === 'dayCell';
+
+/** Krátka poznámka „ONESKORENÉ · deň" pre popisky a zameriavače. Pure. */
+export function gfwDelayedLabel(meta, translate = t, lang = currentLanguage()) {
+  return meta?.day ? translate('gfw.delayed', { day: gfwDayLabel(meta.day, lang) }) : translate('gfw.window-pending');
+}
+
 /**
- * Riadok zdroja v paneli: obdobie okna, oneskorenie, licencia, ONESKORENÉ. Pure.
- * @param {{range?:{from:string,to:string}, delayHours?:number}|null} meta
+ * Riadok zdroja v paneli: bunky, režim, licencia, ONESKORENÉ · dáta k dňu. Pure.
+ * @param {{day?:string, cellDeg?:number, mode?:string}|null} meta
  */
-export function gfwSourceLabel(meta, translate = t) {
-  const delay = Number.isFinite(meta?.delayHours) ? meta.delayHours : GFW_DELAY_HOURS;
-  const period = meta?.range?.from && meta?.range?.to ? `${meta.range.from} – ${meta.range.to}` : translate('gfw.window-pending');
-  return `Global Fishing Watch · ${translate('gfw.satellite-ais')} · ${period} · CC BY-NC 4.0 · ${translate('gfw.delayed', { h: delay })}`;
+export function gfwSourceLabel(meta, translate = t, lang = currentLanguage()) {
+  const deg = gfwDegLabel(cellDegOf(meta), lang);
+  const mode = translate(isDayCellMode(meta) ? 'gfw.mode-day' : 'gfw.mode-hourly');
+  const delayed = meta?.day ? translate('gfw.delayed-long', { day: gfwDayLabel(meta.day, lang) }) : translate('gfw.window-pending');
+  return `Global Fishing Watch · ${translate('gfw.satellite-ais', { deg })} · ${mode} · CC BY-NC 4.0 · ${delayed}`;
 }
 
 /** Zobrazované meno: meno lode, inak MMSI, inak VESSEL. Pure. */
@@ -89,21 +126,31 @@ export function gfwDisplayName(row) {
 }
 
 /**
+ * Poznámka o bunke pre kartu: posledná hodinová bunka s časom UTC, alebo denná
+ * bunka (najviac hodín) v záložnom režime. Hodiny = súčet za deň. Pure.
+ */
+export function gfwCellNote(row, meta, translate = t, lang = currentLanguage()) {
+  const deg = gfwDegLabel(cellDegOf(meta), lang);
+  const hours = Number.isFinite(row?.hours) ? Math.round(row.hours * 10) / 10 : 0;
+  if (isDayCellMode(meta) || !Number.isFinite(row?.lastSeen)) return translate('gfw.cell-note-day', { deg, hours });
+  return translate('gfw.cell-note', { deg, when: gfwWhenLabel(row.lastSeen, lang), hours });
+}
+
+/**
  * Súhrn pre kartičku pod kurzorom v tvare flights.getContactSummary. Pure.
  * @param {object} row riadok z proxy
- * @param {{range?:{from:string,to:string}, delayHours?:number}|null} meta
+ * @param {{day?:string, cellDeg?:number, mode?:string}|null} meta
  */
-export function gfwContactSummary(row, meta, translate = t) {
+export function gfwContactSummary(row, meta, translate = t, lang = currentLanguage()) {
   if (!row) return null;
   const mmsi = String(row.mmsi || '').trim();
   const flag = mmsiFlag(mmsi);
-  const delay = Number.isFinite(meta?.delayHours) ? meta.delayHours : GFW_DELAY_HOURS;
   return {
     layerId: GFW_PRESENCE_LAYER_ID,
     id: mmsi || String(row.vesselId || row.name || ''),
     callsign: gfwDisplayName(row),
     registration: String(row.callsign || '').trim() || null,
-    operator: translate('gfw.delayed', { h: delay }),
+    operator: meta?.day ? translate('gfw.delayed-long', { day: gfwDayLabel(meta.day, lang) }) : translate('gfw.window-pending'),
     // Typ nikdy prázdny: bez neho by karta siahla po t('aircraft.category.…').
     type: normalizeVesselType(row.type) || 'VESSEL',
     category: null,
@@ -115,7 +162,7 @@ export function gfwContactSummary(row, meta, translate = t) {
     trackDeg: null,
     routeInfo: null,
     progress: null,
-    route: translate('gfw.cell-note', { deg: String(GFW_CELL_DEG).replace('.', ','), hours: Number.isFinite(row.hours) ? Math.round(row.hours * 10) / 10 : 0 }),
+    route: gfwCellNote(row, meta, translate, lang),
     flightIata: null,
     source: 'Global Fishing Watch',
     lastContactEpochMs: Number.isFinite(row.lastSeen) ? row.lastSeen : null,
@@ -128,10 +175,9 @@ export function gfwContactSummary(row, meta, translate = t) {
 
 /**
  * Popiska mena v tvare karty živých lodí (buildVesselCard), s riadkom
- * ONESKORENÉ namiesto rýchlosti a kurzu. Pure.
+ * ONESKORENÉ · deň namiesto rýchlosti a kurzu. Pure.
  */
-export function gfwLabelCard(row, position, meta, translate = t) {
-  const delay = Number.isFinite(meta?.delayHours) ? meta.delayHours : GFW_DELAY_HOURS;
+export function gfwLabelCard(row, position, meta, translate = t, lang = currentLanguage()) {
   const type = normalizeVesselType(row.type);
   const name = gfwDisplayName(row);
   return {
@@ -142,7 +188,7 @@ export function gfwLabelCard(row, position, meta, translate = t) {
     accent: accentForVesselType(row.type),
     title: name.length > 26 ? `${name.slice(0, 25)}…` : name,
     titleFlag: mmsiFlag(row.mmsi)?.iso2 || null,
-    details: [[type, translate('gfw.delayed', { h: delay })].filter(Boolean).join(' · ')],
+    details: [[type, gfwDelayedLabel(meta, translate, lang)].filter(Boolean).join(' · ')],
     selected: false,
     priority: (row.name ? 1000 : 0) + (row.type ? 40 : 0) + Math.min(400, Math.max(0, Number(row.hours) || 0) * 10),
   };
@@ -423,7 +469,7 @@ export function createGfwPresenceLayer({
           if (c && String(c.layerId) === GFW_PRESENCE_LAYER_ID && c.sourceId != null) forced.add(String(c.sourceId));
         }
       }
-      const delay = Number.isFinite(_meta?.delayHours) ? _meta.delayHours : GFW_DELAY_HOURS;
+      const delayed = gfwDelayedLabel(_meta);
       const toObject = (entry) => {
         const { row, billboard } = entry;
         const key = rowKey(row);
@@ -435,7 +481,7 @@ export function createGfwPresenceLayer({
         object.position = billboard.position;
         object.id = gfwDisplayName(row);
         object.klass = row.type ? normalizeVesselType(row.type).toUpperCase().slice(0, 14) || undefined : undefined;
-        object.metric = t('gfw.delayed', { h: delay });
+        object.metric = delayed;
         return object;
       };
       const isForced = (entry) => forced.has(String(entry.row.mmsi)) || forced.has(rowKey(entry.row));

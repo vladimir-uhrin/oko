@@ -1,12 +1,13 @@
 // src/data/gfwPresenceCore.test.mjs
-// GFW satelitná prítomnosť lodí (2026-09-12): výrez, okno dní, URL správy,
-// normalizácia odpovede 4Wings, posledná bunka na loď.
+// GFW satelitná prítomnosť lodí (2026-09-12): výrez, okno = posledný úplný deň
+// s exkluzívnym koncom, URL správy v oboch režimoch, CSV zo ZIPu, normalizácia
+// JSON, posledná hodinová bunka na loď s dopĺňaním identity.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  GFW_DELAY_HOURS, GFW_MAX_BBOX_SPAN_DEG, GFW_PRESENCE_DATASET,
-  gfwBboxError, gfwBboxPolygon, gfwPresenceCacheKey, gfwPresenceDateRange, gfwReportUrl,
-  latestGfwCellPerVessel, normalizeGfwPresence, parseGfwBbox, quantizeGfwBbox,
+  GFW_DELAY_HOURS, GFW_MAX_BBOX_SPAN_DEG, GFW_MODES, GFW_PRESENCE_DATASET,
+  gfwBboxError, gfwBboxPolygon, gfwPresenceCacheKey, gfwPresenceDateRange, gfwPreviousDayRange, gfwReportUrl, gfwTimeRangeMs,
+  latestGfwCellPerVessel, normalizeGfwPresence, parseCsvRecords, parseGfwBbox, parseGfwPresenceCsv, quantizeGfwBbox,
 } from './gfwPresenceCore.js';
 
 test('parseGfwBbox: west,south,east,north; odmietne nezmysly, antimeridián a mimo sveta', () => {
@@ -42,27 +43,78 @@ test('gfwBboxPolygon: uzavretý obdĺžnik proti smeru hodinových ručičiek', 
   assert.deepEqual(p.coordinates[0], [[47, 23], [60, 23], [60, 31], [47, 31], [47, 23]]);
 });
 
-test('gfwPresenceDateRange: okno končí deň PRED koncom 72 h oneskorenia, 2 dni', () => {
+test('gfwPresenceDateRange: posledný ÚPLNÝ deň (D−4 pri 72 h), `to` je exkluzívny koniec = deň + 1; krok o deň späť', () => {
   const now = Date.UTC(2026, 8, 12, 12, 0, 0); // 12. 9. 2026 12:00 Z
   const r = gfwPresenceDateRange(now);
   assert.equal(r.delayHours, GFW_DELAY_HOURS);
-  // 12. 9. 12:00 − 72 h = 9. 9. 12:00 → deň pred = 8. 9.; okno 2 dni = 7.–8. 9.
-  assert.equal(r.to, '2026-09-08');
-  assert.equal(r.from, '2026-09-07');
-  assert.deepEqual(gfwPresenceDateRange(now, { windowDays: 1 }), { from: '2026-09-08', to: '2026-09-08', delayHours: 72 });
-  assert.equal(gfwPresenceDateRange(now, { delayHours: 0, windowDays: 3 }).to, '2026-09-11');
+  // 12. 9. 12:00 − 72 h = 9. 9. 12:00 → deň pred = 8. 9. (naživo 2026-09-12: dni 4.–8. 9. dostupné, 9. nie)
+  assert.deepEqual(r, { day: '2026-09-08', from: '2026-09-08', to: '2026-09-09', delayHours: 72 });
+  assert.equal(gfwPresenceDateRange(now, { delayHours: 0 }).day, '2026-09-11');
+  assert.deepEqual(gfwPreviousDayRange(r), { day: '2026-09-07', from: '2026-09-07', to: '2026-09-08', delayHours: 72 });
+  assert.equal(gfwPresenceCacheKey({ west: 47, south: 23, east: 60, north: 31 }, r), '47,23,60,31@2026-09-08');
 });
 
-test('gfwReportUrl: LOW, ENTIRE, group-by VESSEL_ID, dataset prítomnosti, JSON', () => {
-  const url = new URL(gfwReportUrl({ from: '2026-09-07', to: '2026-09-08' }));
+test('gfwReportUrl: hlavný režim HIGH + HOURLY + CSV, záložný LOW + ENTIRE + JSON; group-by VESSEL_ID; rozsah from,to', () => {
+  const range = { day: '2026-09-08', from: '2026-09-08', to: '2026-09-09' };
+  const url = new URL(gfwReportUrl(range));
   assert.equal(url.origin + url.pathname, 'https://gateway.api.globalfishingwatch.org/v3/4wings/report');
-  assert.equal(url.searchParams.get('spatial-resolution'), 'LOW');
-  assert.equal(url.searchParams.get('temporal-resolution'), 'ENTIRE');
+  assert.equal(url.searchParams.get('spatial-resolution'), 'HIGH', '0,01° — inak lode stoja v stĺpcoch mriežky 0,1°');
+  assert.equal(url.searchParams.get('temporal-resolution'), 'HOURLY', 'len HOURLY má čas na bunku; pri ENTIRE sú pečiatky za celú loď');
+  assert.equal(url.searchParams.get('format'), 'CSV', 'ZIP s CSV je 6× menší než JSON');
   assert.equal(url.searchParams.get('group-by'), 'VESSEL_ID', 'po ID lode nesie správa meno, typ, vlajku, volací znak a IMO');
   assert.equal(url.searchParams.get('datasets[0]'), GFW_PRESENCE_DATASET);
-  assert.equal(url.searchParams.get('date-range'), '2026-09-07,2026-09-08');
-  assert.equal(url.searchParams.get('format'), 'JSON');
-  assert.equal(gfwPresenceCacheKey({ west: 47, south: 23, east: 60, north: 31 }, { from: '2026-09-07', to: '2026-09-08' }), '47,23,60,31@2026-09-07_2026-09-08');
+  assert.equal(url.searchParams.get('date-range'), '2026-09-08,2026-09-09');
+  const fallback = new URL(gfwReportUrl(range, { mode: GFW_MODES.dayCell }));
+  assert.equal(fallback.searchParams.get('spatial-resolution'), 'LOW');
+  assert.equal(fallback.searchParams.get('temporal-resolution'), 'ENTIRE');
+  assert.equal(fallback.searchParams.get('format'), 'JSON');
+  assert.equal(GFW_MODES.hourly.cellDeg, 0.01);
+  assert.equal(GFW_MODES.dayCell.cellDeg, 0.1);
+});
+
+test('parseCsvRecords: úvodzovky, zdvojené úvodzovky, čiarka a nový riadok v poli, CRLF, koncová čiarka, prázdne riadky', () => {
+  const text = 'a,b,c\r\n1,"x, y","he said ""hi"""\r\n\r\n2,"multi\nline",\n3,,\n';
+  assert.deepEqual(parseCsvRecords(text), [
+    ['a', 'b', 'c'],
+    ['1', 'x, y', 'he said "hi"'],
+    ['2', 'multi\nline', ''],
+    ['3', '', ''],
+  ]);
+  assert.deepEqual(parseCsvRecords(''), []);
+  assert.deepEqual(parseCsvRecords('solo'), [['solo']]);
+});
+
+test('gfwTimeRangeMs: hodinový kôš, samotný deň, nezmysel', () => {
+  assert.equal(gfwTimeRangeMs('2026-09-08 04:00'), Date.UTC(2026, 8, 8, 4, 0, 0));
+  assert.equal(gfwTimeRangeMs('2026-09-08T23:00'), Date.UTC(2026, 8, 8, 23, 0, 0));
+  assert.equal(gfwTimeRangeMs('2026-09-08'), Date.UTC(2026, 8, 8, 0, 0, 0));
+  assert.equal(gfwTimeRangeMs('2026-09-07,2026-09-08'), Date.UTC(2026, 8, 7, 0, 0, 0), 'rozsah ENTIRE → začiatok');
+  assert.equal(gfwTimeRangeMs(''), null);
+  assert.equal(gfwTimeRangeMs(null), null);
+});
+
+const CSV = [
+  'Lat,Lon,Time Range,Vessel ID,Flag,Vessel Name,Entry Timestamp,Exit Timestamp,Gear Type,Vessel Type,MMSI,IMO,CallSign,First Transmission Date,Last Transmission Date,Vessel Presence Hours',
+  '25.190000,56.410000,2026-09-08 04:00,0483d64b0,MUS,DN 30,2026-09-08T00:00:00Z,2026-09-08T23:00:00Z,OTHER,OTHER,645164000,8821735,3BLQ,2012-01-12T09:41:22Z,2026-09-10T07:24:30Z,1.00',
+  '25.540000,57.810001,2026-09-08 09:00,dba991cbc,IRN,"+(!,)`% ""278""",2026-09-08T07:00:00Z,2026-09-08T22:00:00Z,GEAR,GEAR,422002100,,,2026-09-03T16:04:01Z,2026-09-10T22:01:40Z,1.00',
+  '91,4,2026-09-08 09:00,bad,NLD,VLISSINGEN,,,CARGO,CARGO,244660815,,,,,1.00',
+  '26.610000,56.240002,2026-09-07 05:00,9f0c,IRN,MANZAR2,2026-09-07T04:00:00Z,2026-09-07T07:00:00Z,OTHER,CARGO,620800157,,,,,1.00',
+  '',
+].join('\r\n');
+
+test('parseGfwPresenceCsv: hlavička 4Wings → náš tvar; Time Range je firstSeen aj lastSeen; zlé súradnice vypadnú; úvodzovky v mene', () => {
+  const rows = parseGfwPresenceCsv(CSV);
+  assert.equal(rows.length, 3, 'riadok s lat 91 vypadol, prázdny riadok tiež');
+  assert.deepEqual(rows[0], {
+    mmsi: '645164000', name: 'DN 30', type: 'OTHER', flag: 'MUS', callsign: '3BLQ', imo: '8821735',
+    lat: 25.19, lon: 56.41, hours: 1, firstSeen: Date.UTC(2026, 8, 8, 4), lastSeen: Date.UTC(2026, 8, 8, 4), vesselId: '0483d64b0',
+  });
+  assert.equal(rows[1].name, '+(!,)`% "278"', 'čiarka aj zdvojené úvodzovky v mene');
+  assert.equal(rows[1].imo, '');
+  assert.equal(rows[1].callsign, '');
+  assert.equal(rows[2].mmsi, '620800157');
+  assert.deepEqual(parseGfwPresenceCsv(''), []);
+  assert.deepEqual(parseGfwPresenceCsv('foo,bar\n1,2\n'), [], 'bez Lat/Lon nie je čo čítať');
 });
 
 const SAMPLE = {
@@ -92,19 +144,40 @@ test('normalizeGfwPresence: sploští záznamy, zahodí nepoužiteľné súradni
   assert.deepEqual(normalizeGfwPresence({ entries: 'x' }), []);
 });
 
-test('latestGfwCellPerVessel: jedna bunka na MMSI = najneskoršia, pri zhode viac hodín; identita sa dopĺňa z inej bunky tej istej lode; bez MMSI ostáva', () => {
+test('latestGfwCellPerVessel (denné bunky): najneskoršia bunka, pri zhode viac hodín; hodiny sa sčítajú; identita z inej bunky; bez MMSI ostáva', () => {
   const rows = latestGfwCellPerVessel(normalizeGfwPresence(SAMPLE));
   const byMmsi = Object.fromEntries(rows.filter(r => r.mmsi).map(r => [r.mmsi, r]));
   assert.equal(rows.length, 3, '2 lode + 1 bez MMSI');
   assert.equal(byMmsi['663103000'].lat, 15.78, 'neskorší exitTimestamp vyhráva');
+  assert.equal(byMmsi['663103000'].hours, 2.38, 'súčet hodín za všetky bunky lode');
+  assert.equal(byMmsi['663103000'].firstSeen, Date.parse('2026-09-07T11:00:00Z'), 'prvá pečiatka zo staršej bunky');
   assert.equal(byMmsi['663103000'].callsign, 'DAK1142', 'volací znak z prvej bunky ostal aj víťaznej');
   const nordic = byMmsi['211000000'];
-  assert.equal(nordic.hours, 5, 'zhoda času → viac hodín');
-  assert.equal(nordic.vesselId, 'id-anonymous', 'víťazí bunka bez mena…');
+  assert.equal(nordic.vesselId, 'id-anonymous', 'zhoda času → víťazí bunka s viac hodinami, hoci bez mena…');
+  assert.equal(nordic.hours, 7);
   assert.equal(nordic.name, 'NORDIC', '…ale meno prišlo z druhého ID tej istej lode');
   assert.equal(nordic.type, 'TANKER');
   assert.equal(nordic.flag, 'DEU');
   assert.equal(nordic.callsign, 'DABC');
   assert.equal(nordic.imo, '', 'chýbajúce pole ostáva prázdne, nič sa nevymýšľa');
   assert.ok(rows.some(r => r.mmsi === '' && r.name === 'UNKNOWN'));
+});
+
+test('latestGfwCellPerVessel (hodinové bunky): posledná hodina dňa vyhráva bez ohľadu na hodiny bunky; súčet hodín, prvá a posledná hodina', () => {
+  const hour = (h) => Date.UTC(2026, 8, 8, h);
+  const cell = (h, lat, lon, extra = {}) => ({ mmsi: '620800157', name: 'MANZAR2', type: 'CARGO', flag: 'IRN', callsign: '', imo: '', lat, lon, hours: 1, firstSeen: hour(h), lastSeen: hour(h), vesselId: '9f0c', ...extra });
+  const rows = latestGfwCellPerVessel([
+    cell(4, 26.65, 56.25), cell(5, 26.61, 56.24), cell(7, 26.32, 56.24), cell(6, 26.44, 56.24, { hours: 0.4 }),
+    { mmsi: '645164000', name: '', type: '', flag: '', callsign: '', imo: '', lat: 25.19, lon: 56.41, hours: 1, firstSeen: hour(2), lastSeen: hour(2), vesselId: 'x' },
+    { mmsi: '645164000', name: 'DN 30', type: 'OTHER', flag: 'MUS', callsign: '3BLQ', imo: '8821735', lat: 25.19, lon: 56.41, hours: 1, firstSeen: hour(1), lastSeen: hour(1), vesselId: 'y' },
+  ]);
+  const manzar = rows.find((r) => r.mmsi === '620800157');
+  assert.equal(manzar.lat, 26.32, 'bunka z 07:00 — loď ide na juh, posledná hodina je posledná poloha');
+  assert.equal(manzar.lastSeen, hour(7));
+  assert.equal(manzar.firstSeen, hour(4));
+  assert.equal(manzar.hours, 3.4);
+  const dn30 = rows.find((r) => r.mmsi === '645164000');
+  assert.equal(dn30.vesselId, 'x', 'novšia hodina (02:00) vyhráva…');
+  assert.equal(dn30.name, 'DN 30', '…a identita sa doplní z 01:00');
+  assert.equal(dn30.callsign, '3BLQ');
 });

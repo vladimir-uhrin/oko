@@ -34,17 +34,22 @@ import { parseNetcdf3, gridOf } from './src/data/netcdf3.js';
 import { METEO_FIELDS, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, forecastSteps, quantize } from './src/data/meteoField.js';
 import {
   GFW_API_BASE as GFW_PRESENCE_API_BASE,
+  GFW_DAY_STEP_BACK_MAX,
   GFW_DELAY_HOURS as GFW_PRESENCE_DELAY_HOURS,
+  GFW_MODES,
   gfwBboxError,
   gfwBboxPolygon,
   gfwPresenceCacheKey,
   gfwPresenceDateRange,
+  gfwPreviousDayRange,
   gfwReportUrl,
   latestGfwCellPerVessel,
   normalizeGfwPresence,
   parseGfwBbox,
+  parseGfwPresenceCsv,
   quantizeGfwBbox,
 } from './src/data/gfwPresenceCore.js';
+import { zipEntryText } from './src/data/zipEntries.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -769,6 +774,32 @@ export async function readResponseTextCapped(response, maxBytes) {
 /** Parse a fetch() JSON response only after enforcing a hard byte cap. */
 export async function readResponseJsonCapped(response, maxBytes) {
   return JSON.parse(await readResponseTextCapped(response, maxBytes));
+}
+
+/** Binary twin of readResponseTextCapped: the body as a Buffer, aborted past the cap (ZIP reports). */
+export async function readResponseBufferCapped(response, maxBytes) {
+  const tooLarge = () => { const err = new Error('Upstream response too large'); err.code = 'RESPONSE_TOO_LARGE'; return err; };
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (buf.length > maxBytes) throw tooLarge();
+    return buf;
+  }
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch { /* no-op */ }
+      throw tooLarge();
+    }
+    chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+  }
+  return Buffer.concat(chunks, total);
 }
 
 /**
@@ -1793,12 +1824,17 @@ function rocketLaunchesProxy() {
  * Watch.", limity 50 000/deň a 1 500 000/mesiac na používateľa.
  *
  * GET /api/gfw/presence?bbox=west,south,east,north
- *   → { rows:[{mmsi,name,type,flag,lat,lon,hours,firstSeen,lastSeen,vesselId}],
- *       meta:{ range:{from,to}, delayHours, bbox, cellDeg:0.1, source, license, attribution, fetchedAt } }
+ *   → { rows:[{mmsi,name,type,flag,callsign,imo,lat,lon,hours,firstSeen,lastSeen,vesselId}],
+ *       meta:{ range:{from,to}, day, requestedDay, delayHours, bbox, cellDeg, mode, fallback, source, license, attribution, fetchedAt } }
+ * Režim (2026-09-12, „prečo nemajú pozície?"): hlavný = hodinové bunky 0,01°
+ * (HIGH + HOURLY + CSV v ZIPe, posledná hodina lode = jej posledná poloha),
+ * záloha pri priveľkom zipe (rušné more) = denné bunky 0,1° (LOW + ENTIRE +
+ * JSON, meta.mode 'dayCell', meta.fallback 'too_large'). Okno = posledný ÚPLNÝ
+ * deň (D−4); prázdny deň → krok o deň späť (meta.day ≠ meta.requestedDay).
  * Výrez sa roztiahne na celé stupne (cache trafí aj pri malom pohybe), hrana
  * najviac 40° (inak 400). Bez tokenu 503 {error:'no_key'} — vrstva to prizná.
  * Cache: pamäť + disk (.gev-cache/gfw/), TTL 6 h (dáta sa menia raz denne),
- * serve-stale-on-error 48 h, single-flight na kľúč, odpoveď do 16 MB.
+ * serve-stale-on-error 48 h, single-flight na kľúč, zip do 24 MB, JSON do 32 MB.
  * Rozpočet: GFW_DAILY_REQUEST_BUDGET (predvolene 300 z povolených 50 000)
  * v .gev-cache/gfw/budget.json podľa UTC dňa; nad ním stale alebo 429.
  * Per-IP limit 20/min, globálne 60/min — vždy zapnutý (kľúčovaný upstream).
@@ -1807,8 +1843,9 @@ function rocketLaunchesProxy() {
 function gfwPresenceProxy() {
   const TTL_MS = 6 * 60 * 60_000;
   const STALE_MAX_MS = 48 * 60 * 60_000;
-  const UPSTREAM_TIMEOUT_MS = 25_000;
-  const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+  const UPSTREAM_TIMEOUT_MS = 90_000; // celý záliv 19 s; rušné more so zipom aj dlhšie
+  const MAX_RESPONSE_BYTES = 32 * 1024 * 1024; // záložný JSON denných buniek
+  const MAX_ZIP_BYTES = 24 * 1024 * 1024; // hodinové bunky v ZIPe ≈ 20 000 lodí (záliv 6 146 lodí = 7,3 MB)
   const MEM_MAX_ENTRIES = 64;
   const DEFAULT_DAILY_BUDGET = 300;
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'gfw');
@@ -1866,35 +1903,81 @@ function gfwPresenceProxy() {
     res.end(body);
   }
 
-  async function fetchUpstream(bbox, range) {
+  /** Jedna správa upstream v danom režime → surové riadky (ešte nezlúčené po lodiach). */
+  async function fetchReport(bbox, range, mode) {
     const b = await loadBudget();
     if (b.date === utcDay() && b.count >= dailyBudget()) {
       const error = new Error('daily budget exhausted'); error.code = 'BUDGET'; throw error;
     }
     await spendBudget();
-    const upstream = await fetch(gfwReportUrl(range, { base: GFW_PRESENCE_API_BASE }), {
+    const started = Date.now();
+    const upstream = await fetch(gfwReportUrl(range, { base: GFW_PRESENCE_API_BASE, mode }), {
       method: 'POST',
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-      headers: { Authorization: 'Bearer ' + token(), 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: {
+        Authorization: 'Bearer ' + token(),
+        'Content-Type': 'application/json',
+        Accept: mode.format === 'CSV' ? 'application/zip, application/json' : 'application/json',
+      },
       body: JSON.stringify({ geojson: gfwBboxPolygon(bbox) }),
     });
-    const text = await readResponseTextCapped(upstream, MAX_RESPONSE_BYTES);
     if (!upstream.ok) {
+      await readResponseTextCapped(upstream, 64 * 1024).catch(() => '');
       const error = new Error('upstream HTTP ' + upstream.status);
       error.upstreamStatus = upstream.status;
       throw error;
     }
-    const rows = latestGfwCellPerVessel(normalizeGfwPresence(JSON.parse(text)));
-    const body = JSON.stringify({
-      rows,
-      meta: {
-        range, delayHours: GFW_PRESENCE_DELAY_HOURS, bbox, cellDeg: 0.1,
-        source: 'Global Fishing Watch · 4Wings public-global-presence',
-        license: 'CC BY-NC 4.0', attribution: 'Powered by Global Fishing Watch.',
-        fetchedAt: Date.now(),
-      },
-    });
-    return { at: Date.now(), body };
+    let rows;
+    if (mode.format === 'CSV') {
+      const zip = await readResponseBufferCapped(upstream, MAX_ZIP_BYTES);
+      const csv = zipEntryText(zip, (name) => /\.csv$/i.test(name));
+      if (csv === null) { const error = new Error('zip without CSV member'); error.code = 'BAD_ZIP'; throw error; }
+      rows = parseGfwPresenceCsv(csv);
+    } else {
+      rows = normalizeGfwPresence(JSON.parse(await readResponseTextCapped(upstream, MAX_RESPONSE_BYTES)));
+    }
+    console.log('[gfw-proxy] ' + mode.id + ' ' + range.day + ' ' + [bbox.west, bbox.south, bbox.east, bbox.north].join(',') + ': ' + rows.length + ' rows in ' + (Date.now() - started) + ' ms');
+    return rows;
+  }
+
+  /**
+   * Hlavný režim = hodinové bunky 0,01° (ZIP). Priveľký zip alebo zip bez CSV
+   * → záloha denné bunky 0,1° (JSON). Prázdny deň (spracovanie GFW ešte
+   * nedobehlo) → krok o deň späť, najviac GFW_DAY_STEP_BACK_MAX.
+   */
+  async function fetchUpstream(bbox, requestedRange) {
+    let range = requestedRange;
+    for (let step = 0; ; step++) {
+      let mode = GFW_MODES.hourly;
+      let fallback = null;
+      let raw;
+      try {
+        raw = await fetchReport(bbox, range, mode);
+      } catch (error) {
+        if (error?.code !== 'RESPONSE_TOO_LARGE' && error?.code !== 'BAD_ZIP') throw error;
+        fallback = error.code === 'RESPONSE_TOO_LARGE' ? 'too_large' : 'bad_zip';
+        console.warn('[gfw-proxy] hourly report ' + fallback + ' — falling back to day cells (0.1°)');
+        mode = GFW_MODES.dayCell;
+        raw = await fetchReport(bbox, range, mode);
+      }
+      if (!raw.length && step < GFW_DAY_STEP_BACK_MAX) {
+        console.warn('[gfw-proxy] no rows for ' + range.day + ' — trying the previous day');
+        range = gfwPreviousDayRange(range);
+        continue;
+      }
+      const rows = latestGfwCellPerVessel(raw);
+      const body = JSON.stringify({
+        rows,
+        meta: {
+          range: { from: range.from, to: range.to }, day: range.day, requestedDay: requestedRange.day,
+          delayHours: GFW_PRESENCE_DELAY_HOURS, bbox, cellDeg: mode.cellDeg, mode: mode.id, fallback,
+          source: 'Global Fishing Watch · 4Wings public-global-presence',
+          license: 'CC BY-NC 4.0', attribution: 'Powered by Global Fishing Watch.',
+          fetchedAt: Date.now(),
+        },
+      });
+      return { at: Date.now(), body };
+    }
   }
 
   function install(middlewares) {
@@ -1939,7 +2022,7 @@ function gfwPresenceProxy() {
       // tokenLength je diagnostika bez tajomstva: proces mohol načítať .env pred
       // zápisom tokenu (Vite pri zmene .env nereštartoval, 2026-09-12) a potom
       // posiela zástupný text → upstream 401, hoci súbor je už správny.
-      send(res, 200, JSON.stringify({ hasKey: Boolean(token()), tokenLength: token().length, dailyCount: b.date === utcDay() ? b.count : 0, budget: dailyBudget(), date: utcDay(), delayHours: GFW_PRESENCE_DELAY_HOURS }), 'NONE');
+      send(res, 200, JSON.stringify({ hasKey: Boolean(token()), tokenLength: token().length, dailyCount: b.date === utcDay() ? b.count : 0, budget: dailyBudget(), date: utcDay(), delayHours: GFW_PRESENCE_DELAY_HOURS, day: gfwPresenceDateRange(Date.now()).day, mode: GFW_MODES.hourly.id, zipMaxBytes: MAX_ZIP_BYTES }), 'NONE');
     });
   }
 
