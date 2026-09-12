@@ -84,11 +84,11 @@ export function createMaritimeHistorySession(manager) {
 }
 
 export function createMaritimeHistoryPanel(doc, manager, session) {
+  // Kompaktný blok VNÚTRI riadku živých lodí (2026-09-12): bez vlastného
+  // nadpisu — riadok už hovorí „Živé lode"; nadpis ostáva len ako aria-label.
   const root = doc.createElement('section');
   root.className = 'maritime-history-panel';
   root.setAttribute('aria-label', t('maritime.history-title'));
-  const title = doc.createElement('strong');
-  title.textContent = t('maritime.history-title');
   const note = doc.createElement('p');
   note.textContent = t('maritime.history-note');
   const status = doc.createElement('p');
@@ -115,7 +115,8 @@ export function createMaritimeHistoryPanel(doc, manager, session) {
     undo.disabled = session.busy || !session.canRestore;
   }
   sync();
-  root.appendChild(title);
+  // Manažér volá pri obnove riadku (Undo sa inak prepočítalo len po vlastnom kliku).
+  root._syncMaritime = sync;
   root.appendChild(note);
   root.appendChild(actions);
   root.appendChild(status);

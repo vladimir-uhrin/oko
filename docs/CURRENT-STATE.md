@@ -14,7 +14,16 @@ Production vessel and aircraft renderers are unchanged. See
 ### OKO maritime historical context (2026-09-09)
 
 The live AIS row has an additive historical-context panel implemented in
-`src/data/maritimeHistoryPanel.js`. It enables existing shipping-lane, port and
+`src/data/maritimeHistoryPanel.js`. **Placement fixed 2026-09-12** (user, pointing at the
+block pinned above the whole rail: "treba to spojiť s loďami"): the block is no longer
+prepended to the top of the layer rail on mere registration; `_renderToggles` appends it
+INSIDE the `ais-live-vessels` row after the row's meta/controls, `hidden` while the layer
+is off, and `_refreshTogglePanel` re-syncs both the `hidden` state and the block's Undo
+enablement through `root._syncMaritime` (the Undo chip used to recompute only inside its
+own click). The block lost its `<strong>` title (the row already says what it is; the title
+survives as `aria-label`), the note was cut to one sentence in EN and SK, and the CSS is an
+in-row dashed sub-block instead of a standalone card. Tripwires in
+`maritimeHistoryPanel.test.mjs`. It enables existing shipping-lane, port and
 historical density layers, with session Undo that preserves previously enabled
 layers and subsequent independent visibility choices. A separate Hormuz button
 frames the Persian Gulf at regional scale. Source-period copy explicitly states

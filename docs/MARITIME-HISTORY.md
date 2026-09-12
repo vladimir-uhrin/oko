@@ -1,6 +1,6 @@
 # Maritime historical context — reversible first step
 
-The live AIS row now has a separate historical-context panel. Click **Show
+The live AIS row carries a compact historical-context block underneath it (shown only while the layer is on; 2026-09-12 — it used to sit at the top of the whole rail). Click **Show
 historical context** to enable the existing shipping lanes, ports and ship-density
 layers. Click **Hormuz / Persian Gulf** to move to a regional overview. Use the
 OSM basemap to see the density without keyed map requests; the existing density

@@ -2052,13 +2052,6 @@ export class DataLayerManager {
     this._toggleContainer.innerHTML = '';
     let hazardsPanel = null;
     let gibsPanel = null;
-    // Keep the maritime recovery action discoverable at the top of the rail;
-    // the AIS row is deliberately lower in the full layer list.
-    if (this.layers.has('ais-live-vessels')) {
-      this._toggleContainer.appendChild(createMaritimeHistoryPanel(
-        document, this, this._maritimeHistorySession,
-      ));
-    }
 
     for (const layer of this.getAll()) {
       if (!layer.showInTogglePanel) continue;
@@ -2128,6 +2121,15 @@ export class DataLayerManager {
         });
         row.appendChild(controls);
         this._syncRowControls(controls, layer);
+      }
+
+      // Námorný kontext patrí do riadku živých lodí, nie navrch zoznamu
+      // (2026-09-12, používateľ: „treba to spojiť s loďami"): ukáže sa len
+      // keď sú lode zapnuté, obnovuje sa spolu s riadkom.
+      if (layer.id === 'ais-live-vessels' && this._maritimeHistorySession) {
+        const maritime = createMaritimeHistoryPanel(document, this, this._maritimeHistorySession);
+        maritime.hidden = !layer.enabled;
+        row.appendChild(maritime);
       }
 
       if (isNaturalHazardLayer(layer.id)) {
@@ -2255,6 +2257,12 @@ export class DataLayerManager {
       }
 
       this._syncRowControls(row.querySelector('.data-toggle-controls'), layer);
+
+      const maritime = row.querySelector('.maritime-history-panel');
+      if (maritime) {
+        maritime.hidden = !layer.enabled;
+        maritime._syncMaritime?.();
+      }
     }
     // Živý súhrn skupiny „Prírodné hrozby" — táto cesta obnovuje riadky na
     // mieste, takže prvok mimo riadkov by ostal z prvého buildu (2026-09-05).

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import sharp from 'sharp';
-import { createMaritimeHistorySession, MARITIME_HISTORY_IDS, focusMaritimeRegion } from './maritimeHistoryPanel.js';
+import { createMaritimeHistoryPanel, createMaritimeHistorySession, MARITIME_HISTORY_IDS, focusMaritimeRegion } from './maritimeHistoryPanel.js';
 
 test('Gulf focus refuses cockpit and tracking before mutating the camera', () => {
   let flights = 0;
@@ -170,4 +171,29 @@ test('bundled context actually contains visible density, lanes and ports in the 
     if (inside([lon, lat]) && data[(y * info.width + x) * 4 + 3] > 0) visible++;
   }
   assert.ok(visible > 20, `expected visible Gulf density cells, received ${visible}`);
+});
+
+test('panel je kompaktný blok v riadku lodí: bez nadpisu, poznámka + 3 tlačidlá, sync vystavený pre obnovu riadku (2026-09-12 „spojiť s loďami")', () => {
+  const mk = (tag) => ({ tag, children: [], attrs: {}, listeners: {}, hidden: false, textContent: '', className: '', disabled: false,
+    appendChild(c) { this.children.push(c); return c; }, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(k, fn) { this.listeners[k] = fn; } });
+  const doc = { createElement: (tag) => mk(tag) };
+  const session = { busy: false, canRestore: false, show: async () => {}, restore: async () => {} };
+  const root = createMaritimeHistoryPanel(doc, { viewer: null }, session);
+  assert.equal(root.className, 'maritime-history-panel');
+  assert.ok(root.attrs['aria-label'], 'nadpis ostáva len ako aria-label');
+  assert.deepEqual(root.children.map(c => c.tag), ['p', 'div', 'p'], 'poznámka, tlačidlá, stav — žiadny <strong> nadpis');
+  assert.equal(root.children[1].children.length, 3);
+  const undo = root.children[1].children[1];
+  assert.equal(undo.disabled, true);
+  session.canRestore = true;
+  assert.equal(typeof root._syncMaritime, 'function');
+  root._syncMaritime();
+  assert.equal(undo.disabled, false, 'obnova riadku prepočíta Undo podľa relácie');
+});
+
+test('manažér vkladá blok do riadku ais-live-vessels a skrýva ho, keď sú lode vypnuté (tripwire)', () => {
+  const src = readFileSync(new URL('./manager.js', import.meta.url), 'utf8');
+  assert.ok(!/Keep the maritime recovery action discoverable at the top of the rail/.test(src), 'blok už nie je navrchu zoznamu');
+  assert.match(src, /if \(layer\.id === 'ais-live-vessels' && this\._maritimeHistorySession\) \{[\s\S]*?maritime\.hidden = !layer\.enabled;[\s\S]*?row\.appendChild\(maritime\);/);
+  assert.match(src, /const maritime = row\.querySelector\('\.maritime-history-panel'\);[\s\S]*?maritime\.hidden = !layer\.enabled;[\s\S]*?maritime\._syncMaritime\?\.\(\);/);
 });
