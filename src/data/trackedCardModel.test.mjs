@@ -124,7 +124,7 @@ test('karta: neznámy štát a chýbajúce dáta — bez vlajky, bez prázdnych 
   assert.equal(model.titleFlag, null);
   assert.equal(model.route, null);
   assert.equal(model.progress, null);
-  assert.deepEqual(buildTrackedCardModel(), { title: '', details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null, profile: null, charts: null, alert: null });
+  assert.deepEqual(buildTrackedCardModel(), { title: '', details: [], footer: [], accent: TRACKED_FLIGHT_ACCENT, titleFlag: null, route: null, progress: null, profile: null, charts: null, logos: null, alert: null });
   const withProfile = buildTrackedCardModel({ callsign: 'X', profile: { altitude: [0, 1], speed: [], label: 'a', sublabel: 'b' } });
   assert.deepEqual(withProfile.profile, { altitude: [0, 1], speed: [], label: 'a', sublabel: 'b' });
   assert.equal(buildTrackedCardModel({ callsign: 'X', profile: 'nope' }).profile, null);
@@ -219,4 +219,13 @@ test('karta: grafy celého letu (2026-09-12) prechádzajú modelom nezmenené, i
   assert.equal(buildTrackedCardModel({ callsign: 'X', charts }).charts, charts);
   assert.equal(buildTrackedCardModel({ callsign: 'X' }).charts, null);
   assert.equal(buildTrackedCardModel({ callsign: 'X', charts: 'nie' }).charts, null);
+});
+
+test('karta: logá (2026-09-12) prechádzajú modelom len keď aspoň jedno je; kredit ide do päty', () => {
+  const logos = { airline: { url: '/api/logo/img/a.png' }, manufacturer: null };
+  const model = buildTrackedCardModel({ callsign: 'X', logos, logoCredit: 'Logá: Wikimedia Commons · Public domain', metaLine: 'OpenSky' });
+  assert.equal(model.logos, logos);
+  assert.deepEqual(model.footer, ['OpenSky', 'Logá: Wikimedia Commons · Public domain']);
+  assert.equal(buildTrackedCardModel({ callsign: 'X', logos: { airline: null, manufacturer: null } }).logos, null);
+  assert.equal(buildTrackedCardModel({ callsign: 'X' }).logos, null);
 });

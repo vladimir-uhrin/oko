@@ -5,6 +5,7 @@
  * fetching, Cesium scene queries, or source selection policy belongs here.
  */
 
+import { LOGO_GAP_PX, LOGO_HEIGHT_PX, logoDrawSize, paintLogo } from '../data/contactLogos.js';
 import { flagWidth, paintFlag } from '../data/countryFlags.js';
 import { WORLD_OVERLAY_STYLE } from './worldOverlayTokens.js';
 
@@ -326,6 +327,11 @@ export function measureOverlayEntry(ctx, entry, out = {}) {
     detailWidth = Math.max(detailWidth, PROFILE_CHART_W + PROFILE_GAP_PX + labelW);
     extraRows += 2;
   }
+  // Logá dopravcu a výrobcu (2026-09-12): jeden riadok s obrázkami.
+  if (tracked && entry?.logos) {
+    detailWidth = Math.max(detailWidth, measureLogosRow(entry.logos));
+    extraRows += 1;
+  }
   // Grafy celého letu (2026-09-12): výška s odhadom a rýchlosť vedľa seba
   // cez FLIGHT_CHART_ROWS riadkov, pod nimi dve popisky (max · teraz).
   if (tracked && entry?.charts) {
@@ -529,6 +535,24 @@ function paintProfileRow(ctx, profile, accent, centerX, firstBaseline, lineH) {
   ctx.textAlign = 'left';
   ctx.fillText(profile.label || '', x + PROFILE_CHART_W + PROFILE_GAP_PX, firstBaseline);
   ctx.fillText(profile.sublabel || '', x + PROFILE_CHART_W + PROFILE_GAP_PX, firstBaseline + lineH);
+}
+
+/** Šírka riadku lôg: logá vedľa seba s medzerou. */
+function measureLogosRow(logos) {
+  const items = [logos?.airline, logos?.manufacturer].filter(Boolean);
+  return items.reduce((sum, meta) => sum + logoDrawSize(meta).w, 0) + Math.max(0, items.length - 1) * LOGO_GAP_PX;
+}
+
+/** Riadok lôg (2026-09-12): dopravca a výrobca vedľa seba, vycentrované na účiare riadku. */
+function paintLogosRow(ctx, logos, centerX, baseline) {
+  const items = [logos?.airline, logos?.manufacturer].filter(Boolean);
+  if (!items.length) return;
+  const total = measureLogosRow(logos);
+  let x = centerX - total / 2;
+  const top = baseline - LOGO_HEIGHT_PX + 2;
+  for (const meta of items) {
+    x += paintLogo(ctx, meta, x, top, LOGO_HEIGHT_PX) + LOGO_GAP_PX;
+  }
 }
 
 /** Jedna krivka grafu letu: hodnoty 0..1 alebo null (medzera), voliteľne čiarkovaná (odhad). */
@@ -1112,8 +1136,14 @@ export function paintTracked(ctx, entry, placement, alpha = 1) {
   for (let i = 0; i < details.length; i++) {
     ctx.fillText(String(details[i]), centerX, titleBaseline + (i + 1) * layout.lineH);
   }
-  // Decoration rows follow the text details: flagged route, then progress bar.
+  // Decoration rows follow the text details: logos, flagged route, then progress bar.
   let row = details.length;
+  if (entry.logos) {
+    row += 1;
+    paintLogosRow(ctx, entry.logos, centerX, titleBaseline + row * layout.lineH);
+    ctx.fillStyle = WORLD_OVERLAY_STYLE.detail;
+    ctx.font = WORLD_OVERLAY_STYLE.fontTrackedDetail;
+  }
   if (entry.route) {
     row += 1;
     paintRouteRow(ctx, entry.route, centerX, titleBaseline + row * layout.lineH);

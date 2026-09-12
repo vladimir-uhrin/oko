@@ -153,6 +153,8 @@ export function createTrackedOverlayEntry(entity) {
     profile: model.profile ?? null,
     // 2026-09-12: grafy celého letu (výška s odhadom + rýchlosť) — vlastné pole.
     charts: model.charts ?? null,
+    // 2026-09-12: logá dopravcu a výrobcu (Wikipedia/Commons cez proxy).
+    logos: model.logos ?? null,
     alert: model.alert ?? null,
     anchorRadiusPx: 10,
     anchorRadiusScale: TRACKED_BILLBOARD_SCALE,

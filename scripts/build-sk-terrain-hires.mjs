@@ -2,20 +2,30 @@
 // CC-BY 4.0): vybrané LOT-y → quantized-mesh úrovne z15–z18, zliate do
 // celoštátneho tilesetu z DMR 3.5 (.gev-cache/sk-terrain).
 //
-// Kontext (prieskum 2026-09-01): DMR 6.0 je zverejnený len pre 16 zo 73
-// LOT-ov (~26 % SR, celý východ vrátane Tatier chýba — HTTP 404). Preto
-// vložky po LOT-och, nie celoštátne. Default: LOT08 (Bratislava) + LOT10
-// (Dunajská Streda / Žitný ostrov) — fokus projektu, oba publikované.
+// Kontext (prieskum 2026-09-01, aktualizácia 2026-09-12): DMR 6.0 je
+// zverejnený pre 16 zo 73 LOT-ov (~26 % SR; celý východ vrátane Tatier
+// chýba — HTTP 404). Preto vložky po LOT-och, nie celoštátne. Default od
+// 2026-09-12 („chcem čo najväčšiu ostrosť"): VŠETKY publikované LOT-y
+// (SK_HIRES_LOTS=LOT08,LOT10 zúži). Zoznam a URL: GKÚ „ZBGIS – na
+// stiahnutie", sekcia 2. cyklus LLS:
+//   https://opendata.skgeodesy.sk/static/LLS/2_cyklus/<LOT>/<LOT>_DMR6_sjtsk03_bpv.zip
 //
-// Pipeline (resumovateľné kroky ako v build-sk-terrain.mjs):
-//   1. extract   — z už stiahnutého ZIP-u len .tif + .tfw (bsdtar glob;
-//                  .ovr pyramída 2–3 GiB sa preskakuje, CTB si robí vlastnú)
+// Pipeline (resumovateľné kroky ako v build-sk-terrain.mjs), per LOT:
+//   0. download  — curl -C - (resumovateľné) do .part, potom premenovanie;
+//                  hotový LOT (relabeled .tif existuje) sa nesťahuje
+//   1. extract   — zo ZIP-u len .tif + .tfw (bsdtar glob; .ovr pyramída
+//                  2–3 GiB sa preskakuje, CTB si robí vlastnú)
 //   2. warp      — EPSG:8353+8357 → EPSG:4979 (JTSK03 + Bpv → elipsoid,
 //                  PROJ_NETWORK gridy; rovnaký výškový kontrakt ako base)
 //                  s -tr na vzorkovanie z18 (~1,2 m) — plných 0,5 m by pri
 //                  strope z18 len nafúklo medzivýstup 5,8×
 //   3. relabel   — deklaratívne EPSG:4326 (ctb porovnáva SRS s profilom)
-//   4. vrt       — union oboch LOT-ov (susedia; jeden CTB beh, jeden šev)
+//   3b. cleanup  — rozbalený raster (~30 GB), medzivýstup warp a ZIP sa
+//                  zmažú (SK_HIRES_KEEP_ZIP=1 ZIP nechá): 16 LOT-ov by inak
+//                  zabralo ~700 GB, takto špička ~55 GB na LOT
+//   4. vrt       — union všetkých LOT-ov (susedia; jeden CTB beh, jeden šev);
+//                  názvy union súborov a staging nesú hash zoznamu LOT-ov,
+//                  aby iný výber LOT-ov nepoužil staré medzivýsledky
 //   5. maska     — union maska platnosti ~10 m/px (ENVI Byte) pre prune
 //   6. ctb       — quantized-mesh z18→z15 (bez -C: korene rieši base build)
 //   7. prune     — len dlaždice CELÉ vo vnútri dát (hranice LOT-ov ostávajú
@@ -23,8 +33,9 @@
 //   8. merge     — kópia do .gev-cache/sk-terrain (z15 prekryvy prepíše —
 //                  0,5 m zdroj > 10 m zdroj) + prepočet availability overlay
 //
-// Beh: node scripts/build-sk-terrain-hires.mjs   (Docker + stiahnuté ZIPy)
+// Beh: node scripts/build-sk-terrain-hires.mjs   (Docker; ZIPy si stiahne sám)
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,11 +44,18 @@ import { geodeticTileBbox, maskCoversTile, tileRangesForLevel } from '../src/dat
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, '.gev-cache');
 const DMR6_DIR = path.join(CACHE, 'sk-terrain-src', 'dmr6');
-const STAGING = path.join(CACHE, 'sk-terrain-hires');
 const MAIN_TILESET = path.join(CACHE, 'sk-terrain');
 const GDAL_IMAGE = 'ghcr.io/osgeo/gdal:ubuntu-small-latest';
 const CTB_IMAGE = 'tumgis/ctb-quantized-mesh';
-const LOTS = ['LOT08', 'LOT10'];
+/** Všetky LOT-y DMR 6.0 zverejnené ÚGKK k 2026-09-12 (HEAD 200, spolu ~210 GB ZIP). */
+export const PUBLISHED_LOTS = Object.freeze(['LOT04', 'LOT06', 'LOT07', 'LOT08', 'LOT09', 'LOT10', 'LOT11', 'LOT12', 'LOT13', 'LOT16', 'LOT17', 'LOT20', 'LOT27', 'LOT29', 'LOT31', 'LOT32']);
+const LOTS = String(process.env.SK_HIRES_LOTS || '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+if (!LOTS.length) LOTS.push(...PUBLISHED_LOTS);
+for (const lot of LOTS) if (!/^LOT\d\d$/.test(lot)) throw new Error(`Neplatný LOT: ${lot}`);
+const LOT_SET_HASH = createHash('sha1').update(LOTS.join(',')).digest('hex').slice(0, 8);
+const STAGING = path.join(CACHE, LOTS.length === 2 && LOTS[0] === 'LOT08' && LOTS[1] === 'LOT10' ? 'sk-terrain-hires' : `sk-terrain-hires-${LOT_SET_HASH}`);
+const LOT_URL = (lot) => `https://opendata.skgeodesy.sk/static/LLS/2_cyklus/${lot}/${lot}_DMR6_sjtsk03_bpv.zip`;
+const KEEP_ZIP = process.env.SK_HIRES_KEEP_ZIP === '1';
 const MAX_ZOOM = Number(process.env.SK_HIRES_MAX_ZOOM) || 18;
 const MIN_ZOOM = Number(process.env.SK_HIRES_MIN_ZOOM) || 15;
 /** Vzorkovanie cieľa: šírka geodetickej dlaždice z18 / 64 vzoriek ≈ 1,19 m. */
@@ -65,15 +83,39 @@ function step(name, output, fn) {
 }
 
 fs.mkdirSync(STAGING, { recursive: true });
+fs.mkdirSync(DMR6_DIR, { recursive: true });
+console.log(`LOT-y (${LOTS.length}): ${LOTS.join(', ')} · staging ${STAGING}`);
 
-// Per-LOT: extract → warp → relabel.
+// Siroty CTB kontajnerov (lekcia 2026-09-02): každý zabitý build nechal svoj
+// kontajner bežať a písal do toho istého výstupu — pred novým behom zastav.
+{
+  const ps = spawnSync('docker', ['ps', '--filter', `ancestor=${CTB_IMAGE}`, '--format', '{{.ID}}'], { encoding: 'utf8' });
+  const ids = String(ps.stdout || '').split(/\s+/).filter(Boolean);
+  if (ids.length) throw new Error(`Beží CTB kontajner (${ids.join(', ')}) — najprv docker kill, inak dva buildy píšu do jedného výstupu.`);
+}
+
+// Per-LOT: download → extract → warp → relabel → cleanup. Hotový LOT
+// (relabeled .tif) preskočí všetko vrátane sťahovania.
 const warped4326 = [];
 for (const lot of LOTS) {
   const zip = path.join(DMR6_DIR, `${lot}_DMR6_sjtsk03_bpv.zip`);
-  if (!fs.existsSync(zip)) throw new Error(`${zip} chýba — najprv stiahni archív (curl -C -).`);
   const lotDir = path.join(DMR6_DIR, lot);
   const warped = path.join(DMR6_DIR, `${lot}_wgs84_ellips.tif`);
   const relabeled = path.join(DMR6_DIR, `${lot}_wgs84_4326.tif`);
+  if (!FORCE && fs.existsSync(relabeled)) {
+    console.log(`✓ ${lot} — relabeled .tif existuje, preskakujem celý LOT`);
+    warped4326.push(relabeled);
+    continue;
+  }
+
+  step(`${lot} download (${LOT_URL(lot)})`, zip, () => {
+    const part = `${zip}.part`;
+    run('curl', ['-L', '--fail', '--retry', '8', '--retry-all-errors', '--retry-delay', '20', '-C', '-', '-o', part, LOT_URL(lot)], { label: `sťahujem ${lot} (resumovateľne)` });
+    const size = fs.statSync(part).size;
+    if (size < 1024 * 1024 * 1024) throw new Error(`${lot}: stiahnutý ZIP má len ${size} B — asi chybová stránka`);
+    fs.renameSync(part, zip);
+    console.log(`  ${lot}: ${(size / 1e9).toFixed(1)} GB`);
+  });
 
   step(`${lot} extract (.tif/.tfw, bez .ovr)`, lotDir, () => {
     fs.mkdirSync(lotDir, { recursive: true });
@@ -103,26 +145,39 @@ for (const lot of LOTS) {
       inCache(warped), inCache(relabeled)], `gdal_translate ${lot}`);
   });
 
+  // 3b. cleanup: rozbalený raster (~30 GB) a medzivýstup warp už netreba;
+  // ZIP tiež nie (relabeled .tif je jediný vstup do únie a build je odtiaľ
+  // resumovateľný bez sťahovania).
+  step(`${lot} cleanup`, null, () => {
+    for (const p of [lotDir, warped, KEEP_ZIP ? null : zip]) {
+      if (!p || !fs.existsSync(p)) continue;
+      fs.rmSync(p, { recursive: true, force: true });
+      console.log(`  zmazané ${path.basename(p)}`);
+    }
+  });
+
   warped4326.push(relabeled);
 }
 
-// Union VRT + union maska.
-const VRT = path.join(DMR6_DIR, 'dmr6_union_4326.vrt');
-const MASK_BIL = path.join(DMR6_DIR, 'dmr6_union_mask.bil');
-const MASK_META = path.join(DMR6_DIR, 'dmr6_union_mask.json');
+// Union VRT + union maska (názvy nesú hash zoznamu LOT-ov).
+const UNION_SUFFIX = STAGING.endsWith('sk-terrain-hires') ? '' : `_${LOT_SET_HASH}`;
+const VRT = path.join(DMR6_DIR, `dmr6_union_4326${UNION_SUFFIX}.vrt`);
+const MASK_BIL = path.join(DMR6_DIR, `dmr6_union_mask${UNION_SUFFIX}.bil`);
+const MASK_META = path.join(DMR6_DIR, `dmr6_union_mask${UNION_SUFFIX}.json`);
 const CTB_DONE = path.join(STAGING, '.ctb-done');
 const PRUNE_REPORT = path.join(STAGING, 'prune-report.json');
 
 step('union VRT', VRT, () => {
   docker([GDAL_IMAGE, 'gdalbuildvrt', '-vrtnodata', '-9999',
-    inCache(VRT), ...warped4326.map(inCache)], 'gdalbuildvrt LOT08+LOT10');
+    inCache(VRT), ...warped4326.map(inCache)], `gdalbuildvrt ${LOTS.join('+')}`);
 });
 
 step('union maska platnosti (~10 m/px)', MASK_META, () => {
-  // 12000 px na ~1,3° šírky únie ≈ 10–12 m/px — z18 dlaždica (~76 m) je
-  // ~7 px masky, interiérový test má rezervu.
+  // ~10 m/px masky: pri 2 LOT-och (~1,3°) 12 000 px; pri 16 LOT-och je únia
+  // ~4° široká → 36 000 px, aby z18 dlaždica (~76 m) mala ~7 px rezervu.
+  const maskPx = Math.max(12_000, Math.min(48_000, 9_000 * Math.ceil(Math.sqrt(warped4326.length))));
   docker([GDAL_IMAGE, 'gdal_translate', '-of', 'ENVI', '-ot', 'Byte',
-    '-b', 'mask', '-outsize', '12000', '0',
+    '-b', 'mask', '-outsize', String(maskPx), '0',
     inCache(VRT), inCache(MASK_BIL)], 'gdal_translate union maska');
   const hdr = fs.readFileSync(MASK_BIL.replace(/\.bil$/, '.hdr'), 'utf8');
   const dim = (key) => Number(hdr.match(new RegExp(`${key}\\s*=\\s*(\\d+)`))?.[1]);

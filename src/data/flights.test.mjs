@@ -502,6 +502,7 @@ test('real civil track path creates no native label and publishes every cached h
       titleFlag: null, // fixtúra nemá origin_country ani adsbdb ISO — bez vlajky
       route: { origin: { label: 'AUS', iso2: null }, destination: { label: 'LAX', iso2: null } },
       charts: null, // grafy celého letu (2026-09-12) — fixtúra má 1 fix, graf potrebuje 2
+      logos: null, // logá (2026-09-12) — bez proxy odpovede nič
       accent: '#39d0ff',
     });
     viewer.scene.preUpdate.raiseEvent();

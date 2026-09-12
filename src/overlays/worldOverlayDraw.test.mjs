@@ -776,3 +776,27 @@ test('tracked card (2026-09-12): whole-flight charts take three rows plus two la
   assert.equal(strokes, 1 + 3, 'leader + výška + odhad + rýchlosť');
   assert.ok(ctx.calls.filter(([name]) => name === 'fill').length >= 4, 'plocha pod výškou, plocha pod rýchlosťou, dve bodky teraz');
 });
+
+test('tracked card (2026-09-12): logos row takes one line between the ident line and the route, images side by side (placeholder while loading)', () => {
+  const ctx = mockContext();
+  const base = { variant: 'tracked', title: 'EWG20X', details: ['Letová hladina FL380 (≈ 11 582 m)', 'Eurowings · Airbus A319 132'], accent: '#39d0ff' };
+  const plain = measureOverlayEntry(ctx, { ...base }, {});
+  const logos = { airline: { url: '/api/logo/img/0123456789abcdef.png', width: 240, height: 60 }, manufacturer: { url: '/api/logo/img/fedcba9876543210.png', width: 300, height: 100 } };
+  const withLogos = measureOverlayEntry(ctx, { ...base, logos }, {});
+  assert.equal(withLogos.extraRows, 1, 'jeden riadok lôg');
+  assert.equal(withLogos.h, plain.h + plain.lineH);
+  const entry = { ...base, logos, route: { origin: { label: 'HAM', iso2: null }, destination: { label: 'ZAD', iso2: null } } };
+  entry._overlayLayout = measureOverlayEntry(ctx, entry, {});
+  const placement = placementVariants({ anchorX: 300, anchorY: 200, width: entry._overlayLayout.w, height: entry._overlayLayout.h, viewportWidth: 800, viewportHeight: 600, verticalOnly: true })[0];
+  paintTracked(ctx, entry, placement, 1);
+  const rects = ctx.calls.filter(([name]) => name === 'fillRect');
+  assert.ok(rects.length >= 2, 'dva zástupné obdĺžniky, kým sa obrázky ťahajú (bez DOM sa nikdy nenačítajú)');
+  const [, x1, y1, w1] = rects[rects.length - 2];
+  const [, x2, y2, w2] = rects[rects.length - 1];
+  assert.equal(y1, y2, 'na jednom riadku');
+  assert.ok(x2 >= x1 + w1, 'vedľa seba, nie cez seba');
+  assert.equal(w1, 56, '4:1 pri 14 px');
+  assert.equal(w2, 42, '3:1 pri 14 px');
+  const texts = ctx.calls.filter(([name]) => name === 'fillText').map(([, t]) => t);
+  assert.ok(texts.indexOf('HAM') > texts.indexOf('Eurowings · Airbus A319 132'), 'trasa až za logami');
+});

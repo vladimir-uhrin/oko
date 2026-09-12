@@ -97,4 +97,12 @@ test('tripwire: flotila zapisuje vzorky pri každom novom fixe a karta číta pr
   assert.match(readout, /charts: model\.charts \?\? null/, 'hostiteľ prenáša grafy celého letu do entry (2026-09-12)');
   const overlay = readFileSync(new URL('../overlays/worldOverlay.js', import.meta.url), 'utf8');
   assert.match(overlay, /charts: normalizeChartsRow\(entry\.charts\)/, 'overlay grafy normalizuje, nie preberá naslepo');
+  assert.match(readout, /logos: model\.logos \?\? null/, 'hostiteľ prenáša logá (2026-09-12)');
+  assert.match(overlay, /logos: normalizeLogosRow\(entry\.logos\)/, 'overlay logá normalizuje — len URL z našej proxy');
+  const config = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
+  assert.match(config, /function logoProxy\(\)/, 'proxy lôg existuje');
+  assert.match(config, /logoProxy\(\),/, 'proxy lôg je zaregistrovaná');
+  assert.match(config, /if \(repo !== 'shared'\) return \{ ok: false, reason: 'not_commons'/, 'len súbory z Commons');
+  assert.match(config, /acceptableLogoLicense\(license\)/, 'len slobodné licencie');
+  assert.match(config, /'User-Agent': USER_AGENT/, 'každý dopyt na Wikimedia nesie User-Agent s kontaktom');
 });

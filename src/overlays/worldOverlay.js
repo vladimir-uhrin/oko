@@ -446,6 +446,25 @@ function normalizeChartsRow(charts) {
   };
 }
 
+/**
+ * Logá na karte (2026-09-12): každé musí mať URL z našej proxy
+ * (/api/logo/img/…) — cudzie URL by obišli licenčný filter aj cache.
+ */
+function normalizeLogosRow(logos) {
+  if (!logos || typeof logos !== 'object') return null;
+  const one = (meta) => {
+    if (!meta || typeof meta !== 'object') return null;
+    const url = String(meta.url || '');
+    if (!url.startsWith('/api/logo/img/')) return null;
+    const w = Number(meta.width);
+    const h = Number(meta.height);
+    return { url, width: w > 0 ? w : null, height: h > 0 ? h : null, title: String(meta.title || '').trim(), license: String(meta.license || '').trim() };
+  };
+  const airline = one(logos.airline);
+  const manufacturer = one(logos.manufacturer);
+  return airline || manufacturer ? { airline, manufacturer } : null;
+}
+
 function normalizeProfileRow(profile) {
   if (!profile || typeof profile !== 'object') return null;
   const series = (values) => (Array.isArray(values) ? values : [])
@@ -507,6 +526,7 @@ export function normalizeOverlayEntry(sourceId, entry) {
     progress: normalizeProgressRow(entry.progress),
     profile: normalizeProfileRow(entry.profile),
     charts: normalizeChartsRow(entry.charts),
+    logos: normalizeLogosRow(entry.logos),
     // Footer rows paint AFTER the decoration rows (data provenance); the alert
     // line closes the card in the alert colour with a red frame.
     footer: Array.isArray(entry.footer) ? entry.footer.map((line) => String(line).trim()).filter(Boolean) : [],

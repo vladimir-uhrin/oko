@@ -65,6 +65,8 @@ import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
 import { buildFlightCharts } from './flightCharts.js';
 import { cachedTrackedHistory, forgetTrackedHistory, requestTrackedHistory } from './trackedHistory.js';
+import { contactLogosFor, requestContactLogos } from './contactLogos.js';
+import { logoCreditLine } from './logoResolve.js';
 import { acarsCardLine, cachedAcars, requestAcarsMessages } from './acarsMessages.js';
 import {
   applyTrackedCameraFrame,
@@ -3855,6 +3857,8 @@ function _trackedCardModel(icao24) {
     progress: parts.progress,
     profile: parts.profile,
     charts: parts.charts,
+    logos: parts.logos,
+    logoCredit: parts.logoCredit,
     alertLine: parts.alertLine,
     acarsLine: parts.acarsLine,
     metaLine: parts.metaLine,
@@ -3949,6 +3953,11 @@ function _trackedLabelParts(icao24) {
     progress,
     translate: t,
   });
+  // Logá (2026-09-12): len z cache — dopyt beží v _updateTrackedLabelModel.
+  // TR-3B (veľkonočné vajíčko) nemá skutočného dopravcu ani výrobcu.
+  const logos = isTr3b(icao24) ? null : contactLogosFor({ airline: info.airline || info.operator, typeName: info.typeName || info.typeCode });
+  const logoCredits = logos ? [...new Set([logos.airline, logos.manufacturer].filter(Boolean).map((l) => logoCreditLine(l)))] : [];
+  const logoCredit = logoCredits.length ? t('card.logo-credit', { credit: logoCredits.join(' · ') }) : '';
   return {
     info,
     callsign: cs,
@@ -3966,6 +3975,8 @@ function _trackedLabelParts(icao24) {
     // vlastného riedkeho záznamu; null kým nie sú aspoň 3 vzorky / 2 min.
     profile: charts ? null : profileRowFromSamples(_profileStore.samples(icao24), nowMs, { translate: t }),
     charts,
+    logos,
+    logoCredit,
     // ACARS/CPDLC správy (2026-09-08, airframes.io, LEN LOKÁLNE): posledná
     // správa s počtom za 24 h; '' kým nič nevieme alebo je zdroj vypnutý.
     acarsLine: acarsCardLine(cachedAcars(icao24)),
@@ -3987,6 +3998,10 @@ function _updateTrackedLabelModel(icao24) {
   // História letu pre grafy karty (2026-09-12): rovnaký vzor — cache s TTL,
   // onDone len po skutočnom fetchi; bez proxy histórie ostáva 30-min rad.
   void requestTrackedHistory(icao24, { onDone: () => _updateTrackedLabelModel(icao24) });
+  // Logá dopravcu a výrobcu (2026-09-12, Wikipedia/Commons cez proxy): cache
+  // 24 h, onDone len po fetchi; bez loga karta ostáva ako doteraz.
+  const logoInfo = _flightData.get(icao24);
+  if (logoInfo) void requestContactLogos({ airline: logoInfo.airline || logoInfo.operator, typeName: logoInfo.typeName || logoInfo.typeCode }, { onDone: () => _updateTrackedLabelModel(icao24) });
   _trackedEntity.gevLabelModel = _trackedCardModel(icao24);
   refreshTrackedReadout(_trackedEntity);
   // The readout and the context slot describe the same contact — refresh them

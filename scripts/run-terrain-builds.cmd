@@ -27,7 +27,7 @@ if errorlevel 1 (
 )
 echo ---- zaklad hotovy >> "%LOG%"
 
-echo ---- hi-res vlozky ^(DMR 6.0, LOT08+LOT10^) >> "%LOG%"
+echo ---- hi-res vlozky ^(DMR 6.0, vsetky publikovane LOT-y alebo SK_HIRES_LOTS^) >> "%LOG%"
 node scripts\build-sk-terrain-hires.mjs >> "%LOG%" 2>&1
 if errorlevel 1 (
   echo ---- HIRES ZLYHAL ^(exit %errorlevel%^) >> "%LOG%"

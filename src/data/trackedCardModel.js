@@ -248,12 +248,14 @@ export function formatMetaLine({ source, lastContactEpochMs, nowMs, squawk, hex 
  * @param {string} [parts.acarsLine] „ACARS 7 · 03:40 CPDLC ↑ · …" (acarsMessages.js) → prvý riadok päty; '' = bez riadku
  * @param {?object} [parts.profile] riadok mini profilu (flightProfile.js) alebo null — záloha, keď nie sú grafy
  * @param {?object} [parts.charts] grafy celého letu (flightCharts.js) alebo null
+ * @param {?{airline: object|null, manufacturer: object|null}} [parts.logos] logá dopravcu a výrobcu (contactLogos.js) alebo null
+ * @param {string} [parts.logoCredit] riadok kreditu lôg do päty („Logá: Wikimedia Commons · …"); '' = bez riadku
  * @param {string} [parts.metaLine] hotový riadok o dátach (viď formatMetaLine); '' = bez riadku
  * @param {number} [parts.nowMs] „teraz" pre hodinu príletu
  * @param {string} [parts.countryIso] ISO2 štátu registrácie (adsbdb)
  * @param {string} [parts.originCountry] meno štátu z OpenSky (fallback)
  * @param {string} [parts.accent]
- * @returns {{title: string, details: string[], footer: string[], accent: string, titleFlag: string|null, route: object|null, progress: object|null, profile: object|null, charts: object|null, alert: string|null}}
+ * @returns {{title: string, details: string[], footer: string[], accent: string, titleFlag: string|null, route: object|null, progress: object|null, profile: object|null, charts: object|null, logos: object|null, alert: string|null}}
  */
 export function buildTrackedCardModel({
   callsign,
@@ -266,6 +268,8 @@ export function buildTrackedCardModel({
   progress = null,
   profile = null,
   charts = null,
+  logos = null,
+  logoCredit = '',
   alertLine = '',
   acarsLine = '',
   metaLine = '',
@@ -281,7 +285,7 @@ export function buildTrackedCardModel({
   const details = [...flightPart, identLine].map((s) => String(s || '').trim()).filter(Boolean);
   // ACARS riadok (2026-09-08, airframes.io, len lokálne) ide do päty PRED
   // riadok o dátach — je to tiež „čo o stroji vieme z iného kanála".
-  const footer = [acarsLine, metaLine].map((s) => String(s || '').trim()).filter(Boolean);
+  const footer = [acarsLine, metaLine, logoCredit].map((s) => String(s || '').trim()).filter(Boolean);
   const alert = String(alertLine || '').trim() || null;
   return {
     title,
@@ -293,6 +297,7 @@ export function buildTrackedCardModel({
     progress: progressRowFromProgress(progress, nowMs),
     profile: profile && typeof profile === 'object' ? profile : null,
     charts: charts && typeof charts === 'object' ? charts : null,
+    logos: logos && typeof logos === 'object' && (logos.airline || logos.manufacturer) ? logos : null,
     alert,
   };
 }

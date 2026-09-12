@@ -77,16 +77,21 @@ function step(name, output, fn) {
 fs.mkdirSync(SRC_DIR, { recursive: true });
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-step('download', ZIP_PATH, () => {
+// Zdroje po builde upratané (ZIP a warp medzivýstup zmazané, 2026-09-02):
+// keď existuje rozbalený TIFF alebo hotový relabeled TIFF, sťahovanie
+// 2,3 GB ani warp netreba opakovať — inak by každý beh runnera (base pred
+// hires) stál ~40 min a 2,3 GB navyše.
+const SOURCE_READY = fs.existsSync(RAW_TIF) ? RAW_TIF : (fs.existsSync(RELABELED) ? RELABELED : null);
+step('download', SOURCE_READY || ZIP_PATH, () => {
   run('curl', ['-sS', '-L', '--retry', '3', '-o', ZIP_PATH, ZIP_URL], { label: `sťahujem ${ZIP_URL}` });
 });
 
-step('unzip', RAW_TIF, () => {
+step('unzip', fs.existsSync(RELABELED) ? RELABELED : RAW_TIF, () => {
   fs.mkdirSync(path.dirname(RAW_TIF), { recursive: true });
   run('tar', ['-xf', ZIP_PATH, '-C', path.dirname(RAW_TIF)], { label: 'rozbaľujem zip' });
 });
 
-step('warp (Krovak+Bpv → WGS84 elipsoidné)', WARPED, () => {
+step('warp (Krovak+Bpv → WGS84 elipsoidné)', fs.existsSync(RELABELED) ? RELABELED : WARPED, () => {
   docker([GDAL_IMAGE, 'gdalwarp', '-overwrite',
     '-s_srs', 'EPSG:5514+8357', '-t_srs', 'EPSG:4979',
     '-r', 'bilinear', '-dstnodata', '-9999',

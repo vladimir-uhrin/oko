@@ -55,6 +55,7 @@ import {
   quantizeGfwBbox,
 } from './src/data/gfwPresenceCore.js';
 import { zipEntryText } from './src/data/zipEntries.js';
+import { acceptableLogoLicense, airlineTitleCandidates, infoboxLogoFile, normalizeLogoName, stripHtml } from './src/data/logoResolve.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -2066,6 +2067,177 @@ function gfwPresenceProxy() {
 
   return {
     name: 'gfw-presence-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
+ * Logá aerolínií a výrobcov lietadiel pre kartu (2026-09-12, používateľ:
+ * „aj logá spoločnosti a výrobcu lietadiel" → „Wikimedia Commons cez
+ * cachovanú proxy").
+ *
+ *   GET /api/logo?kind=airline|manufacturer&name=<meno alebo titul>
+ *     → { ok:true, kind, name, title, file, license, author, descriptionUrl,
+ *         url:'/api/logo/img/<id>.png', width, height }
+ *     → { ok:false, reason:'no_logo'|'not_commons'|'license'|'bad_request' }
+ *   GET /api/logo/img/<id>.png  — PNG náhľad z Commons, cache 30 dní
+ *
+ * Postup: wikitext stránky na en.wikipedia (kandidáti titulov, potom
+ * fulltext search) → infobox `| logo =` → File: na Commons (imagerepository
+ * musí byť `shared`, nie lokálny fair-use súbor) → licencia z extmetadata
+ * (len PD / CC0 / CC BY / CC BY-SA, viď logoResolve.acceptableLogoLicense)
+ * → thumb PNG 240 px. Každý dopyt nesie User-Agent s kontaktom (politika
+ * Wikimedia Foundation). Cache: pamäť + disk .gev-cache/logos/ (30 d,
+ * negatívna 7 d), single-flight, limiter 20/min/IP. Bez kľúča, bez ceny.
+ * @returns {import('vite').Plugin}
+ */
+function logoProxy() {
+  const TTL_MS = 30 * 24 * 3600_000;
+  const NEG_TTL_MS = 7 * 24 * 3600_000;
+  const MAX_JSON_BYTES = 4 * 1024 * 1024;
+  const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'logos');
+  const WIKI_API = 'https://en.wikipedia.org/w/api.php';
+  // Politika Wikimedia (User-Agent Policy, čítané 2026-09-12): „Client
+  // name/version (contact information) library/framework name/version";
+  // odporúča reťazec „bot" v UA; bez kontaktu „may be blocked without notice".
+  const USER_AGENT = 'OKO-logo-bot/0.1 (https://github.com/vladouh76; vladouh76@gmail.com) node-fetch';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+  const mem = new Map();
+  const inFlight = new Map();
+  const idOf = (key) => createHash('sha1').update(key).digest('hex').slice(0, 16);
+  const metaPath = (id) => path.join(CACHE_DIR, id + '.json');
+  const imgPath = (id) => path.join(CACHE_DIR, id + '.png');
+
+  async function wiki(params) {
+    const url = WIKI_API + '?' + new URLSearchParams({ format: 'json', formatversion: '2', ...params });
+    const r = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, signal: AbortSignal.timeout(20_000) });
+    const text = await readResponseTextCapped(r, MAX_JSON_BYTES);
+    if (!r.ok) { const e = new Error('wikipedia HTTP ' + r.status); e.upstreamStatus = r.status; throw e; }
+    return JSON.parse(text);
+  }
+  async function pagesWikitext(titles) {
+    if (!titles.length) return [];
+    const j = await wiki({ action: 'query', prop: 'revisions', rvprop: 'content', rvslots: 'main', redirects: '1', titles: titles.join('|') });
+    return Array.isArray(j?.query?.pages) ? j.query.pages : [];
+  }
+  async function searchTitles(q) {
+    const j = await wiki({ action: 'query', list: 'search', srsearch: q, srlimit: '3', srnamespace: '0' });
+    return (j?.query?.search || []).map((r) => r.title).filter(Boolean);
+  }
+  async function fileInfo(file) {
+    const j = await wiki({ action: 'query', titles: 'File:' + file, prop: 'imageinfo', iiprop: 'url|extmetadata|mime|size', iiurlwidth: '240' });
+    const page = (j?.query?.pages || [])[0];
+    return { repo: page?.imagerepository || '', info: page?.imageinfo?.[0] || null, missing: page?.missing === true };
+  }
+  const logoFromPages = (pages) => {
+    for (const p of pages) {
+      if (!p || p.missing) continue;
+      const file = infoboxLogoFile(p?.revisions?.[0]?.slots?.main?.content || '');
+      if (file) return { file, title: p.title };
+    }
+    return null;
+  };
+
+  async function resolveLogo(kind, name) {
+    const candidates = kind === 'manufacturer' ? [name] : airlineTitleCandidates(name);
+    let hit = logoFromPages(await pagesWikitext(candidates));
+    if (!hit) {
+      const titles = await searchTitles(kind === 'manufacturer' ? name + ' aircraft manufacturer' : name + ' airline');
+      hit = logoFromPages(await pagesWikitext(titles.filter((t) => !candidates.includes(t))));
+    }
+    if (!hit) return { ok: false, reason: 'no_logo' };
+    // Súbor z Commons je z pohľadu en.wikipedia „missing" (lokálne neexistuje),
+    // imagerepository 'shared' + imageinfo ale prídu — preto sa `missing` neberie.
+    const { repo, info } = await fileInfo(hit.file);
+    if (!info) return { ok: false, reason: 'no_logo', title: hit.title, file: hit.file };
+    if (repo !== 'shared') return { ok: false, reason: 'not_commons', title: hit.title, file: hit.file };
+    const license = String(info?.extmetadata?.LicenseShortName?.value || '').trim();
+    if (!acceptableLogoLicense(license)) return { ok: false, reason: 'license', title: hit.title, file: hit.file, license };
+    const src = info.thumburl || info.url;
+    if (!src) return { ok: false, reason: 'no_logo', title: hit.title, file: hit.file };
+    const r = await fetch(src, { headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(20_000) });
+    const buf = await readResponseBufferCapped(r, MAX_IMAGE_BYTES);
+    if (!r.ok) { const e = new Error('commons HTTP ' + r.status); e.upstreamStatus = r.status; throw e; }
+    const id = idOf(kind + ':' + normalizeLogoName(name));
+    await fsp.mkdir(CACHE_DIR, { recursive: true });
+    await fsp.writeFile(imgPath(id), buf);
+    return {
+      ok: true, kind, name, title: hit.title, file: hit.file, license,
+      author: stripHtml(info?.extmetadata?.Artist?.value || ''),
+      descriptionUrl: info.descriptionurl || '',
+      url: '/api/logo/img/' + id + '.png',
+      width: info.thumbwidth || info.width || null,
+      height: info.thumbheight || info.height || null,
+    };
+  }
+
+  function send(res, status, body, cacheState, contentType = 'application/json') {
+    res.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': status === 200 ? 'public, max-age=86400' : 'no-store', 'X-GEV-Cache': cacheState });
+    res.end(body);
+  }
+
+  function install(middlewares) {
+    middlewares.use('/api/logo/img', async (req, res) => {
+      const m = /^\/([0-9a-f]{16})\.png$/.exec(new URL(req.url || '/', 'http://localhost').pathname);
+      if (!m) { send(res, 404, JSON.stringify({ error: 'not_found' }), 'NONE'); return; }
+      try {
+        const buf = await fsp.readFile(imgPath(m[1]));
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=604800', 'X-GEV-Cache': 'HIT' });
+        res.end(buf);
+      } catch { send(res, 404, JSON.stringify({ error: 'not_found' }), 'NONE'); }
+    });
+    middlewares.use('/api/logo', async (req, res) => {
+      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+      const url = new URL(req.url || '/', 'http://localhost');
+      if (url.pathname !== '/' && url.pathname !== '') { send(res, 404, JSON.stringify({ error: 'not_found' }), 'NONE'); return; }
+      const kind = String(url.searchParams.get('kind') || '').trim();
+      const name = String(url.searchParams.get('name') || '').trim().slice(0, 80);
+      if (!['airline', 'manufacturer'].includes(kind) || !name) { send(res, 400, JSON.stringify({ ok: false, reason: 'bad_request' }), 'NONE'); return; }
+      const key = kind + ':' + normalizeLogoName(name);
+      const id = idOf(key);
+      const now = Date.now();
+      let cached = mem.get(key) || null;
+      if (!cached) {
+        try { const parsed = JSON.parse(await fsp.readFile(metaPath(id), 'utf8')); if (Number.isFinite(parsed?.at)) { cached = parsed; mem.set(key, cached); } } catch { /* miss */ }
+      }
+      // Negatíva: „nemá logo" sa mení s Wikipédiou (1 deň), zamietnutá licencia
+      // alebo lokálny fair-use súbor sú stabilné (7 dní).
+      const negTtl = cached?.body?.reason === 'no_logo' ? 24 * 3600_000 : NEG_TTL_MS;
+      if (cached && now - cached.at < (cached.body.ok ? TTL_MS : negTtl)) { send(res, 200, JSON.stringify(cached.body), 'HIT'); return; }
+      if (!limiter(clientKey(req))) {
+        if (cached) { send(res, 200, JSON.stringify(cached.body), 'STALE-RATELIMIT'); return; }
+        send(res, 429, JSON.stringify({ ok: false, reason: 'rate_limited' }), 'NONE'); return;
+      }
+      const request = coalesceProxyRequest(inFlight, key, async () => {
+        const body = await resolveLogo(kind, name);
+        const entry = { at: Date.now(), body };
+        mem.set(key, entry);
+        try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(metaPath(id), JSON.stringify(entry), 'utf8'); } catch { /* best effort */ }
+        return entry;
+      });
+      // Strop na celý resolve: zaseknutý zdieľaný sľub (naživo 2026-09-12 po
+      // reštarte Vite visel „Airbus" donekonečna) sa po 45 s zahodí, nech
+      // ďalší dopyt skúsi znova namiesto čakania na nikdy nesplnený sľub.
+      let timer = null;
+      const guard = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('logo resolve timeout'), { code: 'TIMEOUT' })), 45_000); });
+      try {
+        const fresh = await Promise.race([request.promise, guard]);
+        send(res, 200, JSON.stringify(fresh.body), request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        if (error?.code === 'TIMEOUT') inFlight.delete(key);
+        if (cached) { send(res, 200, JSON.stringify(cached.body), 'STALE-ERROR'); return; }
+        const status = error?.code === 'TIMEOUT' ? 504 : (Number.isInteger(error?.upstreamStatus) && error.upstreamStatus === 429 ? 429 : 502);
+        send(res, status, JSON.stringify({ ok: false, reason: 'upstream', detail: String(error?.message || error).replace(/[?&]key=[^&\s]+/g, '') }), 'NONE');
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  }
+
+  return {
+    name: 'logo-proxy',
     configureServer(server) { install(server.middlewares); },
     configurePreviewServer(server) { install(server.middlewares); },
   };
@@ -9120,6 +9292,7 @@ export default defineConfig(({ mode }) => {
       adsbLolProxy(),
       aisLiveProxy(),
       gfwPresenceProxy(),
+      logoProxy(),
       earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),
