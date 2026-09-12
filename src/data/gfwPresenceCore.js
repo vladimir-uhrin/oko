@@ -28,6 +28,15 @@
 
 export const GFW_API_BASE = 'https://gateway.api.globalfishingwatch.org/v3';
 export const GFW_PRESENCE_DATASET = 'public-global-presence:latest';
+/**
+ * Radarové detekcie lodí zo Sentinel-1 (SAR), párované na AIS identitu, kde to
+ * ide; riadok bez MMSI/ID lode = detekcia BEZ ZHODY (loď s vypnutým AIS, malé
+ * plavidlo, plošina…). Overené 2026-09-12: Hormuz 655 z 1 828 riadkov za 11 dní
+ * bez zhody; prelety ~02:00 a ~14:00 UTC každé 2–3 dni; najnovší deň D−3.
+ */
+export const GFW_SAR_DATASET = 'public-global-sar-presence:latest';
+/** Okno radarových detekcií (dni): 10 dní = 3–4 prelety nad daným miestom. */
+export const GFW_SAR_WINDOW_DAYS = 10;
 /** Dokumentované oneskorenie dát GFW (h); v praxi je posledný úplný deň D−4. */
 export const GFW_DELAY_HOURS = 72;
 /** Rozlíšenie LOW = 0,1° (~11 km) — záložný režim denných buniek. */
@@ -45,6 +54,8 @@ export const GFW_DAY_STEP_BACK_MAX = 2;
 export const GFW_MODES = Object.freeze({
   hourly: Object.freeze({ id: 'hourly', resolution: 'HIGH', temporal: 'HOURLY', format: 'CSV', cellDeg: GFW_HIGH_CELL_DEG }),
   dayCell: Object.freeze({ id: 'dayCell', resolution: 'LOW', temporal: 'ENTIRE', format: 'JSON', cellDeg: GFW_CELL_DEG }),
+  /** Záloha pre radar: denné bunky 0,1° s dňom preletu (DAILY nesie `date`). */
+  sarDay: Object.freeze({ id: 'sarDay', resolution: 'LOW', temporal: 'DAILY', format: 'JSON', cellDeg: GFW_CELL_DEG }),
 });
 
 /**
@@ -127,6 +138,19 @@ export function gfwPreviousDayRange(range) {
 }
 
 /**
+ * Okno radarových detekcií: posledných `days` dní vrátane dneška (`to` je
+ * exkluzívny zajtrajšok). `day` = dnešok — kľúč cache sa otočí s UTC dňom. Pure.
+ * @param {number} nowMs
+ * @param {{days?:number}} [opts]
+ * @returns {{day:string, from:string, to:string, days:number}}
+ */
+export function gfwSarDateRange(nowMs, { days = GFW_SAR_WINDOW_DAYS } = {}) {
+  const day = isoDay(nowMs);
+  const span = Math.max(1, Math.floor(days));
+  return { day, from: shiftIsoDay(day, -span), to: shiftIsoDay(day, 1), days: span };
+}
+
+/**
  * URL správy 4Wings. Pure.
  * @param {{from:string, to:string}} range
  * @param {{base?:string, dataset?:string, mode?:{resolution:string, temporal:string, format:string}}} [opts]
@@ -157,7 +181,7 @@ const epochMs = (v) => { const t = Date.parse(String(v || '')); return Number.is
  * Sploští JSON odpoveď 4Wings (`entries[i][datasetKey] = [rows]`) na jednotný
  * tvar. Toleruje neznáme kľúče datasetu aj chýbajúce polia. Pure.
  * @param {object} json
- * @returns {Array<{mmsi:string, name:string, type:string, flag:string, callsign:string, imo:string, lat:number, lon:number, hours:number, firstSeen:number|null, lastSeen:number|null, vesselId:string}>}
+ * @returns {Array<{mmsi:string, name:string, type:string, flag:string, callsign:string, imo:string, lat:number, lon:number, hours:number, detections:number, firstSeen:number|null, lastSeen:number|null, vesselId:string}>}
  */
 export function normalizeGfwPresence(json) {
   const out = [];
@@ -170,6 +194,9 @@ export function normalizeGfwPresence(json) {
         const lat = finite(r?.lat);
         const lon = finite(r?.lon);
         if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+        // DAILY/HOURLY JSON nesie čas bunky v `date` (deň alebo hodina); Entry/Exit
+        // sú za celú loď či región. ENTIRE má v `date` rozsah s čiarkou → nechať Exit.
+        const cellTime = typeof r?.date === 'string' && !r.date.includes(',') ? gfwTimeRangeMs(r.date) : null;
         out.push({
           mmsi: String(r?.mmsi ?? '').trim(),
           name: String(r?.shipName ?? r?.shipname ?? '').trim(),
@@ -180,8 +207,9 @@ export function normalizeGfwPresence(json) {
           lat,
           lon,
           hours: finite(r?.hours) ?? 0,
-          firstSeen: epochMs(r?.entryTimestamp),
-          lastSeen: epochMs(r?.exitTimestamp ?? r?.entryTimestamp),
+          detections: finite(r?.detections) ?? 0,
+          firstSeen: cellTime ?? epochMs(r?.entryTimestamp),
+          lastSeen: cellTime ?? epochMs(r?.exitTimestamp ?? r?.entryTimestamp),
           vesselId: String(r?.vesselId ?? r?.vessel_id ?? '').trim(),
         });
       }
@@ -236,7 +264,7 @@ export function parseCsvRecords(text) {
 const CSV_COLUMNS = Object.freeze({
   lat: 'lat', lon: 'lon', timerange: 'timeRange', vesselid: 'vesselId', flag: 'flag', vesselname: 'name', shipname: 'name',
   entrytimestamp: 'entry', exittimestamp: 'exit', vesseltype: 'type', mmsi: 'mmsi', imo: 'imo', callsign: 'callsign',
-  vesselpresencehours: 'hours', hours: 'hours',
+  vesselpresencehours: 'hours', hours: 'hours', detections: 'detections',
 });
 
 /** „2026-09-08 04:00" (hodinový kôš) alebo „2026-09-08" → epocha UTC; inak null. Pure. */
@@ -282,6 +310,7 @@ export function parseGfwPresenceCsv(text) {
       lat,
       lon,
       hours: finite(get(rec, 'hours')) ?? 0,
+      detections: finite(get(rec, 'detections')) ?? 0,
       firstSeen: bin ?? entry,
       lastSeen: bin ?? exit ?? entry,
       vesselId: get(rec, 'vesselId'),
@@ -331,4 +360,36 @@ export function latestGfwCellPerVessel(rows) {
     merged.push(out);
   }
   return [...merged, ...loose];
+}
+
+/**
+ * Radarové detekcie: jedna značka na loď so zhodou (kľúč MMSI, inak ID lode) a
+ * jedna na bunku pre detekcie bez zhody — vždy POSLEDNÝ prelet, súčet detekcií
+ * za okno, prvá/posledná pečiatka, identita doplnená ako pri AIS. Pure.
+ * @param {ReturnType<typeof normalizeGfwPresence>} rows
+ * @returns {Array<ReturnType<typeof normalizeGfwPresence>[number] & {key:string, matched:boolean}>}
+ */
+export function latestGfwSarDetections(rows) {
+  const best = new Map();
+  const agg = new Map();
+  for (const r of rows) {
+    const matched = Boolean(r.mmsi || r.vesselId);
+    const key = matched ? `v:${r.mmsi || r.vesselId}` : `c:${r.lat},${r.lon}`;
+    let a = agg.get(key);
+    if (!a) { a = { matched, detections: 0, firstSeen: null, lastSeen: null }; agg.set(key, a); }
+    a.detections += Number.isFinite(r.detections) && r.detections > 0 ? r.detections : 1;
+    if (r.firstSeen != null && (a.firstSeen == null || r.firstSeen < a.firstSeen)) a.firstSeen = r.firstSeen;
+    if (r.lastSeen != null && (a.lastSeen == null || r.lastSeen > a.lastSeen)) a.lastSeen = r.lastSeen;
+    for (const field of GFW_IDENTITY_FIELDS) if (!a[field] && r[field]) a[field] = r[field];
+    const prev = best.get(key);
+    if (!prev || (r.lastSeen ?? -Infinity) > (prev.lastSeen ?? -Infinity)) best.set(key, r);
+  }
+  const out = [];
+  for (const [key, r] of best) {
+    const a = agg.get(key);
+    const o = { ...r, key, matched: a.matched, detections: a.detections, firstSeen: a.firstSeen, lastSeen: a.lastSeen };
+    for (const field of GFW_IDENTITY_FIELDS) if (!o[field] && a[field]) o[field] = a[field];
+    out.push(o);
+  }
+  return out;
 }

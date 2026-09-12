@@ -291,9 +291,17 @@ export const DATA_CREDITS = [
   {
     key: 'gfw-presence',
     html:
-      'Satellite AIS vessel presence (delayed ~72 h, 0.1° cells): ' +
+      'Satellite AIS vessel presence (delayed ~4 days, hourly 0.01° cells): ' +
       '<a href="https://globalfishingwatch.org" target="_blank" rel="noopener">Powered by Global Fishing Watch.</a> ' +
       '(<a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>, 4Wings public-global-presence — delayed, not live)',
+  },
+  {
+    key: 'gfw-sar',
+    html:
+      'Radar ship detections (Sentinel-1 SAR, last pass in 10 days, 0.01° cells, incl. vessels without AIS): ' +
+      '<a href="https://globalfishingwatch.org" target="_blank" rel="noopener">Powered by Global Fishing Watch.</a> ' +
+      'Contains modified Copernicus Sentinel data ' + new Date().getUTCFullYear() + '. ' +
+      '(<a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>, 4Wings public-global-sar-presence — delayed, not live)',
   },
   {
     key: 'air-density',

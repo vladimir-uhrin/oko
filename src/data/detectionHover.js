@@ -38,6 +38,11 @@ export function hoverCandidatesFromPick(picked) {
       { layerId: 'military', sourceId: raw },
     ];
   }
+  if (raw && typeof raw === 'object' && raw.sar === true && raw.key) {
+    // Radarová detekcia (GFW Sentinel-1, 2026-09-12): kľúč = loď so zhodou
+    // alebo bunka bez zhody; MMSI tu nesmie viesť na živé lode — iný čas.
+    return [{ layerId: 'gfw-sar', sourceId: String(raw.key) }];
+  }
   if (raw && typeof raw === 'object' && Object.hasOwn(raw, 'mmsi') && raw.mmsi != null) {
     // Živé lode aj satelitné AIS (GFW, 2026-09-12) nesú MMSI; resolver karty
     // skúša vrstvy po poradí, prvá s neprázdnym súhrnom vyhrá.

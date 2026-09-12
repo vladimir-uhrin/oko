@@ -256,9 +256,10 @@ test('proxy vo vite.config.js: token len na serveri, POST na 4wings/report, cach
   assert.match(src, /makeRateLimiter\(\{ windowMs: 60_000, max: 20, globalMax: 60 \}\)/, 'limiter vždy zapnutý');
   assert.match(src, /GFW_DAILY_REQUEST_BUDGET/, 'denný rozpočet');
   assert.match(src, /configurePreviewServer\(server\) \{ install\(server\.middlewares\); \}/, 'funguje aj v preview');
-  assert.match(src, /raw = await fetchReport\(bbox, range, mode\)/, 'správa v režime');
-  assert.match(src, /let mode = GFW_MODES\.hourly;/, 'hlavný režim = hodinové bunky 0,01° — inak lode stoja v mriežke');
-  assert.match(src, /mode = GFW_MODES\.dayCell;/, 'záloha denné bunky pri priveľkom zipe');
+  assert.match(src, /raw = await fetchReport\(bbox, range, mode, plan\.dataset\)/, 'správa v režime a datasete plánu');
+  assert.match(src, /primary: GFW_MODES\.hourly, fallback: GFW_MODES\.dayCell/, 'hlavný režim = hodinové bunky 0,01° — inak lode stoja v mriežke; záloha denné bunky');
+  assert.match(src, /primary: GFW_MODES\.hourly, fallback: GFW_MODES\.sarDay/, 'radar: záloha drží deň preletu');
+  assert.match(src, /middlewares\.use\('\/api\/gfw\/sar', handleReport\(PLANS\.sar\)\)/, 'trasa radarových detekcií');
   assert.match(src, /readResponseBufferCapped\(upstream, MAX_ZIP_BYTES\)/, 'zip so stropom bajtov');
   assert.match(src, /zipEntryText\(zip, \(name\) => \/\\\.csv\$\/i\.test\(name\)\)/, 'CSV zo ZIPu');
   assert.match(src, /range = gfwPreviousDayRange\(range\);/, 'prázdny deň → krok o deň späť');

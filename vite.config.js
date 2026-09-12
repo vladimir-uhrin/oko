@@ -37,13 +37,18 @@ import {
   GFW_DAY_STEP_BACK_MAX,
   GFW_DELAY_HOURS as GFW_PRESENCE_DELAY_HOURS,
   GFW_MODES,
+  GFW_PRESENCE_DATASET,
+  GFW_SAR_DATASET,
+  GFW_SAR_WINDOW_DAYS,
   gfwBboxError,
   gfwBboxPolygon,
   gfwPresenceCacheKey,
   gfwPresenceDateRange,
   gfwPreviousDayRange,
   gfwReportUrl,
+  gfwSarDateRange,
   latestGfwCellPerVessel,
+  latestGfwSarDetections,
   normalizeGfwPresence,
   parseGfwBbox,
   parseGfwPresenceCsv,
@@ -1831,6 +1836,12 @@ function rocketLaunchesProxy() {
  * záloha pri priveľkom zipe (rušné more) = denné bunky 0,1° (LOW + ENTIRE +
  * JSON, meta.mode 'dayCell', meta.fallback 'too_large'). Okno = posledný ÚPLNÝ
  * deň (D−4); prázdny deň → krok o deň späť (meta.day ≠ meta.requestedDay).
+ * GET /api/gfw/sar?bbox=… — radarové detekcie Sentinel-1 (dataset
+ * public-global-sar-presence, „sprav tie radarové detekcie" 2026-09-12): to
+ * isté, len okno = posledných 10 dní, zlúčenie na posledný prelet po lodi
+ * (zhoda s AIS) alebo po bunke (bez zhody), záloha LOW + DAILY (drží deň
+ * preletu), bez kroku späť. Atribúcia navyše: „Contains modified Copernicus
+ * Sentinel data <rok>".
  * Výrez sa roztiahne na celé stupne (cache trafí aj pri malom pohybe), hrana
  * najviac 40° (inak 400). Bez tokenu 503 {error:'no_key'} — vrstva to prizná.
  * Cache: pamäť + disk (.gev-cache/gfw/), TTL 6 h (dáta sa menia raz denne),
@@ -1903,15 +1914,15 @@ function gfwPresenceProxy() {
     res.end(body);
   }
 
-  /** Jedna správa upstream v danom režime → surové riadky (ešte nezlúčené po lodiach). */
-  async function fetchReport(bbox, range, mode) {
+  /** Jedna správa upstream v danom režime a datasete → surové riadky (ešte nezlúčené po objektoch). */
+  async function fetchReport(bbox, range, mode, dataset) {
     const b = await loadBudget();
     if (b.date === utcDay() && b.count >= dailyBudget()) {
       const error = new Error('daily budget exhausted'); error.code = 'BUDGET'; throw error;
     }
     await spendBudget();
     const started = Date.now();
-    const upstream = await fetch(gfwReportUrl(range, { base: GFW_PRESENCE_API_BASE, mode }), {
+    const upstream = await fetch(gfwReportUrl(range, { base: GFW_PRESENCE_API_BASE, mode, dataset }), {
       method: 'POST',
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       headers: {
@@ -1936,43 +1947,68 @@ function gfwPresenceProxy() {
     } else {
       rows = normalizeGfwPresence(JSON.parse(await readResponseTextCapped(upstream, MAX_RESPONSE_BYTES)));
     }
-    console.log('[gfw-proxy] ' + mode.id + ' ' + range.day + ' ' + [bbox.west, bbox.south, bbox.east, bbox.north].join(',') + ': ' + rows.length + ' rows in ' + (Date.now() - started) + ' ms');
+    console.log('[gfw-proxy] ' + dataset.replace('public-global-', '').replace(':latest', '') + ' ' + mode.id + ' ' + range.from + '…' + range.to + ' ' + [bbox.west, bbox.south, bbox.east, bbox.north].join(',') + ': ' + rows.length + ' rows in ' + (Date.now() - started) + ' ms');
     return rows;
   }
 
   /**
-   * Hlavný režim = hodinové bunky 0,01° (ZIP). Priveľký zip alebo zip bez CSV
-   * → záloha denné bunky 0,1° (JSON). Prázdny deň (spracovanie GFW ešte
-   * nedobehlo) → krok o deň späť, najviac GFW_DAY_STEP_BACK_MAX.
+   * Plán = dataset + hlavný a záložný režim + zlúčenie po objektoch + okno.
+   * presence: hodinové bunky AIS za posledný úplný deň, záloha denné bunky,
+   *   prázdny deň → krok späť.
+   * sar: radarové detekcie Sentinel-1 za posledných 10 dní, záloha denné bunky
+   *   s dňom preletu, bez kroku späť (okno má 10 dní).
    */
-  async function fetchUpstream(bbox, requestedRange) {
+  const PLANS = Object.freeze({
+    presence: Object.freeze({
+      id: 'presence', dataset: GFW_PRESENCE_DATASET, primary: GFW_MODES.hourly, fallback: GFW_MODES.dayCell,
+      stepBack: GFW_DAY_STEP_BACK_MAX, merge: latestGfwCellPerVessel,
+      source: 'Global Fishing Watch · 4Wings public-global-presence', attribution: 'Powered by Global Fishing Watch.',
+      cacheKey: (bbox, range) => gfwPresenceCacheKey(bbox, range), rangeFor: (now) => gfwPresenceDateRange(now),
+    }),
+    sar: Object.freeze({
+      id: 'sar', dataset: GFW_SAR_DATASET, primary: GFW_MODES.hourly, fallback: GFW_MODES.sarDay,
+      stepBack: 0, merge: latestGfwSarDetections,
+      source: 'Global Fishing Watch · 4Wings public-global-sar-presence (Sentinel-1 SAR)',
+      attribution: 'Powered by Global Fishing Watch. Contains modified Copernicus Sentinel data ' + new Date().getUTCFullYear() + '.',
+      cacheKey: (bbox, range) => 'sar:' + gfwPresenceCacheKey(bbox, range), rangeFor: (now) => gfwSarDateRange(now),
+    }),
+  });
+
+  /**
+   * Hlavný režim = hodinové bunky 0,01° (ZIP). Priveľký zip alebo zip bez CSV
+   * → záložný režim plánu (JSON, 0,1°). Prázdne okno → krok o deň späť, najviac
+   * plan.stepBack (spracovanie GFW ešte nedobehlo).
+   */
+  async function fetchUpstream(bbox, requestedRange, plan) {
     let range = requestedRange;
     for (let step = 0; ; step++) {
-      let mode = GFW_MODES.hourly;
+      let mode = plan.primary;
       let fallback = null;
       let raw;
       try {
-        raw = await fetchReport(bbox, range, mode);
+        raw = await fetchReport(bbox, range, mode, plan.dataset);
       } catch (error) {
         if (error?.code !== 'RESPONSE_TOO_LARGE' && error?.code !== 'BAD_ZIP') throw error;
         fallback = error.code === 'RESPONSE_TOO_LARGE' ? 'too_large' : 'bad_zip';
-        console.warn('[gfw-proxy] hourly report ' + fallback + ' — falling back to day cells (0.1°)');
-        mode = GFW_MODES.dayCell;
-        raw = await fetchReport(bbox, range, mode);
+        console.warn('[gfw-proxy] ' + plan.id + ' hourly report ' + fallback + ' — falling back to ' + plan.fallback.id + ' (0.1°)');
+        mode = plan.fallback;
+        raw = await fetchReport(bbox, range, mode, plan.dataset);
       }
-      if (!raw.length && step < GFW_DAY_STEP_BACK_MAX) {
-        console.warn('[gfw-proxy] no rows for ' + range.day + ' — trying the previous day');
+      if (!raw.length && step < plan.stepBack) {
+        console.warn('[gfw-proxy] ' + plan.id + ': no rows for ' + range.day + ' — trying the previous day');
         range = gfwPreviousDayRange(range);
         continue;
       }
-      const rows = latestGfwCellPerVessel(raw);
+      const rows = plan.merge(raw);
+      let latestSeen = null;
+      for (const r of rows) if (Number.isFinite(r.lastSeen) && (latestSeen === null || r.lastSeen > latestSeen)) latestSeen = r.lastSeen;
       const body = JSON.stringify({
         rows,
         meta: {
-          range: { from: range.from, to: range.to }, day: range.day, requestedDay: requestedRange.day,
-          delayHours: GFW_PRESENCE_DELAY_HOURS, bbox, cellDeg: mode.cellDeg, mode: mode.id, fallback,
-          source: 'Global Fishing Watch · 4Wings public-global-presence',
-          license: 'CC BY-NC 4.0', attribution: 'Powered by Global Fishing Watch.',
+          range: { from: range.from, to: range.to }, day: range.day, requestedDay: requestedRange.day, days: range.days ?? 1,
+          latestSeen, latestDay: latestSeen === null ? null : new Date(latestSeen).toISOString().slice(0, 10),
+          delayHours: GFW_PRESENCE_DELAY_HOURS, bbox, cellDeg: mode.cellDeg, mode: mode.id, fallback, dataset: plan.dataset,
+          source: plan.source, license: 'CC BY-NC 4.0', attribution: plan.attribution,
           fetchedAt: Date.now(),
         },
       });
@@ -1981,7 +2017,7 @@ function gfwPresenceProxy() {
   }
 
   function install(middlewares) {
-    middlewares.use('/api/gfw/presence', async (req, res) => {
+    const handleReport = (plan) => async (req, res) => {
       if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
       if (!token()) { send(res, 503, JSON.stringify({ error: 'no_key', detail: 'GFW_API_TOKEN missing' }), 'NONE'); return; }
       const url = new URL(req.url || '/', 'http://localhost');
@@ -1989,8 +2025,8 @@ function gfwPresenceProxy() {
       const problem = gfwBboxError(parsed);
       if (problem) { send(res, 400, JSON.stringify({ error: 'bad_bbox', detail: problem }), 'NONE'); return; }
       const bbox = quantizeGfwBbox(parsed);
-      const range = gfwPresenceDateRange(Date.now());
-      const key = gfwPresenceCacheKey(bbox, range);
+      const range = plan.rangeFor(Date.now());
+      const key = plan.cacheKey(bbox, range);
       const now = Date.now();
       let cached = mem.get(key) || null;
       if (!cached) { cached = await readDisk(key); if (cached) remember(key, cached); }
@@ -2000,7 +2036,7 @@ function gfwPresenceProxy() {
         send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
       }
       const stale = cached && now - cached.at < STALE_MAX_MS ? cached : null;
-      const request = coalesceProxyRequest(inFlight, key, () => fetchUpstream(bbox, range));
+      const request = coalesceProxyRequest(inFlight, key, () => fetchUpstream(bbox, range, plan));
       try {
         const fresh = await request.promise;
         remember(key, fresh);
@@ -2008,7 +2044,7 @@ function gfwPresenceProxy() {
         send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
       } catch (error) {
         if (stale) {
-          if (!request.shared) console.warn('[gfw-proxy] refresh failed (' + (error?.message || error) + ') — serving stale cache');
+          if (!request.shared) console.warn('[gfw-proxy] ' + plan.id + ' refresh failed (' + (error?.message || error) + ') — serving stale cache');
           send(res, 200, stale.body, 'STALE-ERROR');
           return;
         }
@@ -2016,13 +2052,15 @@ function gfwPresenceProxy() {
         const status = Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : 502;
         send(res, status, JSON.stringify({ error: 'upstream', detail: status === 502 ? 'Global Fishing Watch unavailable' : 'upstream HTTP ' + status }), 'NONE');
       }
-    });
+    };
+    middlewares.use('/api/gfw/presence', handleReport(PLANS.presence));
+    middlewares.use('/api/gfw/sar', handleReport(PLANS.sar));
     middlewares.use('/api/gfw/status', async (req, res) => {
       const b = await loadBudget();
       // tokenLength je diagnostika bez tajomstva: proces mohol načítať .env pred
       // zápisom tokenu (Vite pri zmene .env nereštartoval, 2026-09-12) a potom
       // posiela zástupný text → upstream 401, hoci súbor je už správny.
-      send(res, 200, JSON.stringify({ hasKey: Boolean(token()), tokenLength: token().length, dailyCount: b.date === utcDay() ? b.count : 0, budget: dailyBudget(), date: utcDay(), delayHours: GFW_PRESENCE_DELAY_HOURS, day: gfwPresenceDateRange(Date.now()).day, mode: GFW_MODES.hourly.id, zipMaxBytes: MAX_ZIP_BYTES }), 'NONE');
+      send(res, 200, JSON.stringify({ hasKey: Boolean(token()), tokenLength: token().length, dailyCount: b.date === utcDay() ? b.count : 0, budget: dailyBudget(), date: utcDay(), delayHours: GFW_PRESENCE_DELAY_HOURS, day: gfwPresenceDateRange(Date.now()).day, mode: GFW_MODES.hourly.id, zipMaxBytes: MAX_ZIP_BYTES, sar: { days: GFW_SAR_WINDOW_DAYS, range: gfwSarDateRange(Date.now()) } }), 'NONE');
     });
   }
 

@@ -5,9 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  GFW_DELAY_HOURS, GFW_MAX_BBOX_SPAN_DEG, GFW_MODES, GFW_PRESENCE_DATASET,
-  gfwBboxError, gfwBboxPolygon, gfwPresenceCacheKey, gfwPresenceDateRange, gfwPreviousDayRange, gfwReportUrl, gfwTimeRangeMs,
-  latestGfwCellPerVessel, normalizeGfwPresence, parseCsvRecords, parseGfwBbox, parseGfwPresenceCsv, quantizeGfwBbox,
+  GFW_DELAY_HOURS, GFW_MAX_BBOX_SPAN_DEG, GFW_MODES, GFW_PRESENCE_DATASET, GFW_SAR_DATASET, GFW_SAR_WINDOW_DAYS,
+  gfwBboxError, gfwBboxPolygon, gfwPresenceCacheKey, gfwPresenceDateRange, gfwPreviousDayRange, gfwReportUrl, gfwSarDateRange, gfwTimeRangeMs,
+  latestGfwCellPerVessel, latestGfwSarDetections, normalizeGfwPresence, parseCsvRecords, parseGfwBbox, parseGfwPresenceCsv, quantizeGfwBbox,
 } from './gfwPresenceCore.js';
 
 test('parseGfwBbox: west,south,east,north; odmietne nezmysly, antimeridián a mimo sveta', () => {
@@ -107,7 +107,7 @@ test('parseGfwPresenceCsv: hlavička 4Wings → náš tvar; Time Range je firstS
   assert.equal(rows.length, 3, 'riadok s lat 91 vypadol, prázdny riadok tiež');
   assert.deepEqual(rows[0], {
     mmsi: '645164000', name: 'DN 30', type: 'OTHER', flag: 'MUS', callsign: '3BLQ', imo: '8821735',
-    lat: 25.19, lon: 56.41, hours: 1, firstSeen: Date.UTC(2026, 8, 8, 4), lastSeen: Date.UTC(2026, 8, 8, 4), vesselId: '0483d64b0',
+    lat: 25.19, lon: 56.41, hours: 1, detections: 0, firstSeen: Date.UTC(2026, 8, 8, 4), lastSeen: Date.UTC(2026, 8, 8, 4), vesselId: '0483d64b0',
   });
   assert.equal(rows[1].name, '+(!,)`% "278"', 'čiarka aj zdvojené úvodzovky v mene');
   assert.equal(rows[1].imo, '');
@@ -136,7 +136,7 @@ test('normalizeGfwPresence: sploští záznamy, zahodí nepoužiteľné súradni
   assert.equal(rows.length, 5, 'riadok s lat 91 vypadol');
   assert.deepEqual(rows[0], {
     mmsi: '663103000', name: 'RIA DE DAKAR', type: 'FISHING', flag: 'SEN', callsign: 'DAK1142', imo: '9003342', lat: 15.68, lon: -17.06, hours: 1.88,
-    firstSeen: Date.parse('2026-09-07T11:00:00Z'), lastSeen: Date.parse('2026-09-07T13:00:00Z'), vesselId: 'abc',
+    detections: 0, firstSeen: Date.parse('2026-09-07T11:00:00Z'), lastSeen: Date.parse('2026-09-07T13:00:00Z'), vesselId: 'abc',
   });
   assert.equal(rows[2].name, 'UNKNOWN');
   assert.equal(rows[2].lastSeen, null, 'bez časov = null, nie NaN');
@@ -180,4 +180,71 @@ test('latestGfwCellPerVessel (hodinové bunky): posledná hodina dňa vyhráva b
   assert.equal(dn30.vesselId, 'x', 'novšia hodina (02:00) vyhráva…');
   assert.equal(dn30.name, 'DN 30', '…a identita sa doplní z 01:00');
   assert.equal(dn30.callsign, '3BLQ');
+});
+
+test('gfwSarDateRange: posledných N dní vrátane dneška, exkluzívny zajtrajšok, kľúč = dnešok; URL radaru', () => {
+  const now = Date.UTC(2026, 8, 12, 16, 0, 0);
+  assert.deepEqual(gfwSarDateRange(now), { day: '2026-09-12', from: '2026-09-02', to: '2026-09-13', days: 10 });
+  assert.equal(GFW_SAR_WINDOW_DAYS, 10);
+  assert.deepEqual(gfwSarDateRange(now, { days: 3 }), { day: '2026-09-12', from: '2026-09-09', to: '2026-09-13', days: 3 });
+  const url = new URL(gfwReportUrl(gfwSarDateRange(now), { dataset: GFW_SAR_DATASET, mode: GFW_MODES.sarDay }));
+  assert.equal(url.searchParams.get('datasets[0]'), 'public-global-sar-presence:latest');
+  assert.equal(url.searchParams.get('temporal-resolution'), 'DAILY', 'záloha radaru drží deň preletu');
+  assert.equal(url.searchParams.get('spatial-resolution'), 'LOW');
+  assert.equal(url.searchParams.get('date-range'), '2026-09-02,2026-09-13');
+  assert.equal(GFW_MODES.sarDay.cellDeg, 0.1);
+});
+
+const SAR_CSV = [
+  'Lat,Lon,Time Range,Vessel ID,Flag,Vessel Name,Entry Timestamp,Exit Timestamp,Gear Type,Vessel Type,MMSI,IMO,CallSign,First Transmission Date,Last Transmission Date,Detections',
+  '26.930000,56.310001,2026-09-07 14:00,,,,2026-09-03T02:14:17Z,2026-09-09T02:14:53Z,,,,,,,,1',
+  '26.930000,56.310001,2026-09-09 02:00,,,,2026-09-03T02:14:17Z,2026-09-09T02:14:53Z,,,,,,,,2',
+  '25.400000,56.500000,2026-09-07 14:00,01a6de42e,PAN,GALAXY,2026-09-07T14:16:17Z,2026-09-09T02:14:53Z,CARGO,CARGO,374969000,9287156,3ELF5,2018-12-20T10:44:22Z,2026-09-10T23:59:27Z,1',
+  '25.410000,56.520000,2026-09-09 02:00,01a6de42e,PAN,,2026-09-07T14:16:17Z,2026-09-09T02:14:53Z,CARGO,,374969000,,,,,1',
+  '25.940000,55.840000,2026-09-03 02:00,,,,2026-09-03T02:14:17Z,2026-09-09T02:14:53Z,,,,,,,,1',
+].join('\n');
+
+test('parseGfwPresenceCsv (radar): stĺpec Detections, prázdna identita = bez zhody, čas preletu z Time Range', () => {
+  const rows = parseGfwPresenceCsv(SAR_CSV);
+  assert.equal(rows.length, 5);
+  assert.equal(rows[0].detections, 1);
+  assert.equal(rows[0].hours, 0);
+  assert.equal(rows[0].mmsi, '');
+  assert.equal(rows[0].vesselId, '');
+  assert.equal(rows[0].lastSeen, Date.UTC(2026, 8, 7, 14), 'Entry/Exit sú za región — čas je z Time Range');
+  assert.equal(rows[2].name, 'GALAXY');
+  assert.equal(rows[2].detections, 1);
+});
+
+test('latestGfwSarDetections: loď so zhodou = posledný prelet + identita z iného riadku; bez zhody = jedna značka na bunku, detekcie sa sčítajú', () => {
+  const out = latestGfwSarDetections(parseGfwPresenceCsv(SAR_CSV));
+  assert.equal(out.length, 3, 'GALAXY ×1, bunka 26.93/56.31 ×1, bunka 25.94/55.84 ×1');
+  const galaxy = out.find((r) => r.key === 'v:374969000');
+  assert.equal(galaxy.matched, true);
+  assert.equal(galaxy.lat, 25.41, 'posledný prelet 9. 9. 02:00 vyhráva');
+  assert.equal(galaxy.lastSeen, Date.UTC(2026, 8, 9, 2));
+  assert.equal(galaxy.firstSeen, Date.UTC(2026, 8, 7, 14));
+  assert.equal(galaxy.name, 'GALAXY', 'meno doplnené z riadku zo 7. 9.');
+  assert.equal(galaxy.callsign, '3ELF5');
+  assert.equal(galaxy.imo, '9287156');
+  assert.equal(galaxy.detections, 2);
+  const dark = out.find((r) => r.key === 'c:26.93,56.310001');
+  assert.equal(dark.matched, false);
+  assert.equal(dark.detections, 3, '1 + 2 detekcie v tej istej bunke');
+  assert.equal(dark.lastSeen, Date.UTC(2026, 8, 9, 2));
+  assert.equal(dark.name, '');
+  assert.equal(out.find((r) => r.key === 'c:25.94,55.84').detections, 1);
+  assert.deepEqual(latestGfwSarDetections([]), []);
+});
+
+test('normalizeGfwPresence: DAILY/HOURLY JSON berie čas bunky z `date`, ENTIRE rozsah s čiarkou nie; nesie detections', () => {
+  const rows = normalizeGfwPresence({ entries: [{ x: [
+    { lat: 26.9, lon: 56.4, detections: 8, date: '2026-09-07', entryTimestamp: '2026-09-03T02:14:17Z', exitTimestamp: '2026-09-09T02:14:53Z' },
+    { lat: 26.9, lon: 56.4, hours: 2, date: '2026-09-07,2026-09-08', entryTimestamp: '2026-09-07T00:00:00Z', exitTimestamp: '2026-09-07T23:00:00Z' },
+  ] }] });
+  assert.equal(rows[0].lastSeen, Date.UTC(2026, 8, 7), 'deň preletu, nie regionálny exit');
+  assert.equal(rows[0].firstSeen, Date.UTC(2026, 8, 7));
+  assert.equal(rows[0].detections, 8);
+  assert.equal(rows[1].lastSeen, Date.parse('2026-09-07T23:00:00Z'), 'ENTIRE: rozsah s čiarkou → ostáva exit');
+  assert.equal(rows[1].detections, 0);
 });

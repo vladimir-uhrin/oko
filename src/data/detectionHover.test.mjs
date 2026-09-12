@@ -62,3 +62,8 @@ test('detection odovzdáva hovered kandidátov vrstvám — loď pod kurzorom mu
   assert.match(vesselsJs, /if \(Array\.isArray\(options\.hovered\)\)/, 'lode hovered kandidátov honorujú');
   assert.match(vesselsJs, /getContactSummary\(id\) \{/, 'lode majú súhrn pre kartičku pod kurzorom');
 });
+
+test('hoverCandidatesFromPick: radarová detekcia (sar:true) ide len na gfw-sar podľa kľúča, aj keď nesie MMSI', () => {
+  assert.deepEqual(hoverCandidatesFromPick({ id: { sar: true, key: 'v:374969000', mmsi: '374969000' } }), [{ layerId: 'gfw-sar', sourceId: 'v:374969000' }]);
+  assert.deepEqual(hoverCandidatesFromPick({ id: { sar: true, key: 'c:26.93,56.31', mmsi: '' } }), [{ layerId: 'gfw-sar', sourceId: 'c:26.93,56.31' }]);
+});
