@@ -1,11 +1,12 @@
 # Bundled 3D Model Attribution
 
-The model files in this directory are third-party visual assets. They are not
-covered by the repository's MIT source-code license; each remains available
-under the license listed below.
+This directory contains third-party and original OKO visual assets. Each asset
+is available under the license listed below, separately from the repository's
+MIT source-code license.
 
 | File | Original work and creator | Source | License | Project modifications |
 |---|---|---|---|---|
+| `oko-tanker.glb` | Generic tanker study, OKO project (own work) | [Editable Blender source](../../assets/blender/oko-tanker.blend), [generator](../../scripts/build-tanker-model.py) | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | Blender 4.5 LTS export; 200 m hull, 32 m beam, waterline origin, glTF +Y-up, bow +X, scale 1. Single mesh, eight materials, 4,451 triangles, no textures. Isolated trial at `/demos/tanker/index.html`; not a named ship or AIS observation. |
 | `airplane.glb` | “boeing 747” by [zairiq-123](https://sketchfab.com/zairiq-123) | [Sketchfab model](https://sketchfab.com/3d-models/boeing-747-9b16672038ba48f98e6d80a159044ed9) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Substantially modified and optimized for God's Eye View, including geometry/material simplification and coordinate/orientation preparation. The former 24× runtime calibration is baked into the mesh; location, rotation, and scale are applied; the bounding-box centre is at the origin; and the model uses glTF +Y-up with its nose toward local −X. Geometry remains uncompressed so the aircraft asset does not compete with photogrammetry for Draco worker capacity. |
 | `jet.glb` | “Private Jet” by [Nick the Name](https://sketchfab.com/Nick_The_Name) | [Sketchfab model](https://sketchfab.com/3d-models/private-jet-cbdd1de6ced9461e950eafaa302cc82b) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Repackaged as a glTF binary for the project's military-flight visualization. Imported hierarchy transforms are baked into the meshes; location, rotation, and scale are applied; the bounding-box centre is at the origin; and the model uses meter scale, glTF +Y-up, and the shared nose −X convention. Existing materials are preserved. |
 | `ship.glb` | “Low Poly Cargo Ship” by [Javier_Fernandez](https://sketchfab.com/Javier.Fernandez) | [Sketchfab model](https://sketchfab.com/3d-models/low-poly-cargo-ship-4c22cbaf01c1427f8ab60b3a07b1b32c) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | Optimized and repackaged as a glTF binary for the project's vessel visualization. |

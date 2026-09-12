@@ -1,0 +1,15 @@
+{
+  "name": "OKO generic tanker",
+  "kind": "illustrative-model",
+  "license": "CC0-1.0",
+  "generator": "Blender 4.5.13 LTS",
+  "lengthM": 200,
+  "beamM": 32,
+  "triangles": 4451,
+  "bytes": 294336,
+  "upAxis": "+Y",
+  "bowAxis": "+X",
+  "waterlineM": 0,
+  "source": "assets/blender/oko-tanker.blend",
+  "rebuild": "scripts/build-tanker-model.py"
+}

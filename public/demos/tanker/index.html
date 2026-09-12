@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OKO — tanker z Blenderu</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/cesium/Widgets/widgets.css">
+  <link rel="stylesheet" href="./tanker.css">
+  <script>window.CESIUM_BASE_URL = '/cesium/';</script>
+  <script src="/cesium/Cesium.js" defer></script>
+  <script src="./tanker.js" defer></script>
+</head>
+<body>
+  <main id="viewer" aria-label="Interaktívna 3D ukážka tankera"></main>
+  <header>
+    <a class="brand" href="/">O K O <span>MODEL STUDIO / 01</span></a>
+    <span class="badge">VYTVORENÉ V BLENDERI</span>
+  </header>
+  <section class="intro">
+    <p class="eyebrow">NÁMORNÁ DOPRAVA · 3D ŠTÚDIA</p>
+    <h1>Oceánsky tanker.</h1>
+    <p class="description">Trup, potrubia a mostík v jednom ľahkom modeli.<br>Chyť scénu myšou a prezri si ho zo všetkých strán.</p>
+    <p class="disclaimer">Ilustračný model. Nepredstavuje konkrétnu loď ani živú AIS polohu.</p>
+  </section>
+  <aside class="specs" aria-label="Parametre modelu">
+    <div><span>DĹŽKA TRUPU</span><strong>200 <small>m</small></strong></div>
+    <div><span>ŠÍRKA TRUPU</span><strong>32 <small>m</small></strong></div>
+    <div><span>VEĽKOSŤ MODELU</span><strong id="size">—</strong></div>
+  </aside>
+  <footer>
+    <nav aria-label="Pohľady na model">
+      <button data-view="perspective" aria-pressed="true">Perspektíva</button>
+      <button data-view="side" aria-pressed="false">Zboku</button>
+      <button data-view="top" aria-pressed="false">Zhora</button>
+      <a href="/models/oko-tanker.glb" download>Stiahnuť model ↓</a>
+    </nav>
+    <p id="status" role="status">Načítavam model…</p>
+    <p class="help">Ľavé tlačidlo: otáčanie · Koliesko: priblíženie</p>
+  </footer>
+</body>
+</html>

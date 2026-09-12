@@ -1,5 +1,16 @@
 # God's Eye View Current State
 
+### OKO Blender tanker trial (2026-09-12)
+
+An original Blender tanker is available as an isolated Cesium preview at
+`/demos/tanker/index.html`. The editable source is
+`assets/blender/oko-tanker.blend`, with generator `scripts/build-tanker-model.py`
+and web asset `public/models/oko-tanker.glb`. The preview offers orbit/zoom,
+three camera presets, mobile layout and model download without external/API
+requests. It is clearly labelled as an illustration, not a live vessel.
+Production vessel and aircraft renderers are unchanged. See
+`assets/blender/README.md` for dimensions, rebuild, validation and rollback.
+
 ### OKO maritime historical context (2026-09-09)
 
 The live AIS row has an additive historical-context panel implemented in
