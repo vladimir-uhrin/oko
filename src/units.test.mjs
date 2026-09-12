@@ -21,6 +21,11 @@ import {
   speedDisplayValue,
   speedUnitLabel,
   toggleUnitSystem,
+  formatAltitudeDual,
+  formatAltitudeRangeDual,
+  formatSpeedDual,
+  formatSpeedRangeDual,
+  formatVerticalRateDual,
 } from './units.js';
 
 const NBSP = ' ';
@@ -85,8 +90,8 @@ test('tripwire: spotrebitelia formátujú cez units.js, nie vlastnými konštant
   const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
   for (const [file, must] of [
     ['./data/trackedCardModel.js', /from '\.\.\/units\.js'/],
-    ['./data/flightProfile.js', /formatSpeedRange\(/],
-    ['./data/contactHoverCard.js', /formatSpeed\(summary\.speedMps\)/],
+    ['./data/flightProfile.js', /formatSpeedRangeDual\(/],
+    ['./data/contactHoverCard.js', /formatSpeedDual\(summary\.speedMps\)/],
     ['./cockpitApproach.js', /formatHeightAgl\(/],
     ['./data/detectionDraw.js', /formatVesselSpeedKnots\(|formatAltitude\(/],
     ['./data/militaryFlights.js', /formatAltitude\(|formatSpeed\(/],
@@ -103,4 +108,26 @@ test('tripwire: spotrebitelia formátujú cez units.js, nie vlastnými konštant
   for (const file of ['./data/trackedCardModel.js', './data/flightProfile.js', './data/contactHoverCard.js', './cockpitApproach.js', './data/detectionDraw.js']) {
     assert.doesNotMatch(read(file), /3\.28084|1\.94384|196\.850394/, `${file}: konverzné konštanty žijú len v units.js`);
   }
+});
+
+test('dvojité jednotky pre karty (2026-09-12, „aby to pochopil aj debil"): hlavná podľa prepínača, druhá v zátvorke', () => {
+  _resetUnitsForTest();
+  setUnitSystem('aviation', { persist: false });
+  assert.equal(formatAltitudeDual(10_973), 'FL360 (≈ 10 973 m)');
+  assert.equal(formatAltitudeDual(3_810), '12 500 ft (3 810 m)');
+  assert.equal(formatAltitudeDual(NaN), '');
+  assert.equal(formatSpeedDual(206.3), '401 kts (743 km/h)');
+  assert.equal(formatSpeedDual(NaN), '');
+  assert.equal(formatSpeedDual(0), '0 kts (0 km/h)', 'nula je údaj, nie chýbajúca hodnota (ako formatSpeed)');
+  assert.equal(formatSpeedRangeDual(232, 206.3), '451 → 401 kts (835 → 743 km/h)');
+  assert.equal(formatAltitudeRangeDual(6_096, 10_363), 'FL200 → FL340 (6 096 → 10 363 m)');
+  assert.equal(formatAltitudeRangeDual(3_658, 10_363), '12 001 ft → FL340 (3 658 → 10 363 m)', 'pod FL180 stopy, nad hladina');
+  assert.equal(formatVerticalRateDual(5), '980 ft/min (5,0 m/s)');
+  setUnitSystem('metric', { persist: false });
+  assert.equal(formatAltitudeDual(10_973), '10 973 m (FL360)');
+  assert.equal(formatSpeedDual(206.3), '743 km/h (401 kts)');
+  assert.equal(formatSpeedRangeDual(232, 206.3), '835 → 743 km/h (451 → 401 kts)');
+  assert.equal(formatAltitudeRangeDual(6_096, 10_363), '6 096 → 10 363 m (FL200 → FL340)');
+  assert.equal(formatVerticalRateDual(-5), '5,0 m/s (980 ft/min)');
+  _resetUnitsForTest();
 });

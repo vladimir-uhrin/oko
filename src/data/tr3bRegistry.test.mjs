@@ -215,8 +215,9 @@ test('a conversion survives a poll refresh, in both the billboard and the tracke
     // FR24 blok 2026-08-31) — súčasť živej telemetrie, nie fikcie.
     // Štruktúrovaná karta (2026-09-05): titulok = callsign, kinematika je prvý riadok.
     assert.equal(entity.gevLabelModel.title, 'DAL123');
-    assert.equal(entity.gevLabelModel.details[0], 'FL350↑ 980 ft/min · 486 kts · 095°');
-    assert.deepEqual(entity.gevLabelModel.details.slice(1, 2), ['TR-3B'],
+    assert.equal(entity.gevLabelModel.details[0], 'Flight level FL350 (≈ 10 668 m) · climbing 980 ft/min (5,0 m/s)');
+    assert.equal(entity.gevLabelModel.details[1], 'Speed 486 kts (900 km/h) · heading 095° (E)');
+    assert.deepEqual(entity.gevLabelModel.details.slice(2, 3), ['TR-3B'],
       'the tracked card class line reports TR-3B, replacing operator/type');
     assert.equal(
       [entity.gevLabelModel.title, ...entity.gevLabelModel.details].join(' · ').includes('Southwest'),

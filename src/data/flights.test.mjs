@@ -305,13 +305,14 @@ test('fallback identity fields reach the tracked card: operator · type · regis
     // Štruktúrovaná karta (2026-09-05): titulok je len volací znak, kinematika
     // je prvý riadok detailov (viď pin 'N12345' nižšie).
     assert.equal(entity.gevLabelModel.title, 'UPS275');
-    assert.match(entity.gevLabelModel.details[0], /^FL350 · 486 kts/);
+    assert.match(entity.gevLabelModel.details[0], /^Flight level FL350 \(≈ 10.668 m\)$/);
+    assert.match(entity.gevLabelModel.details[1], /^Speed 486 kts \(900 km\/h\) · heading 095° \(E\)$/);
     // No airline (no adsbdb route yet) → the feed operator substitutes; the
     // full desc outranks the raw type code; the registration differs from the
     // headline callsign, so it earns its slot.
     assert.equal(
-      entity.gevLabelModel.details[1],
-      'UNITED PARCEL SERVICE CO · BOEING 767-300 · N397UP',
+      entity.gevLabelModel.details[2],
+      'UNITED PARCEL SERVICE CO · BOEING 767-300 · reg. N397UP',
     );
     assert.equal(flightsLayer.getTrackedInfo()?.registration, 'N397UP');
   } finally {
@@ -351,8 +352,8 @@ test('adsbdb enrichment outranks feed identity, and a registration headline is n
     // (callsign-less chain: callsign → registration → hex), so the ident
     // line must not repeat it.
     assert.equal(seeded.entity.gevLabelModel.title, 'OM-XYZ');
-    assert.match(seeded.entity.gevLabelModel.details[0], /^FL350/);
-    assert.equal(seeded.entity.gevLabelModel.details[1], 'UNITED PARCEL SERVICE CO · Boeing 767-300F');
+    assert.match(seeded.entity.gevLabelModel.details[0], /^Flight level FL350/);
+    assert.equal(seeded.entity.gevLabelModel.details[2], 'UNITED PARCEL SERVICE CO · Boeing 767-300F');
     assert.equal(flightsLayer.getTrackedInfo()?.registration, 'OM-XYZ');
   } finally {
     globalThis.fetch = realFetch;
@@ -491,13 +492,13 @@ test('real civil track path creates no native label and publishes every cached h
     // ~2:13 pri 250 m/s je korektný výstup routeProgress, nie regresia.
     assert.ok(progress.fraction >= 0 && progress.fraction < 0.001);
     // Zostatok v km a miestna hodina príletu (2026-09-05, „viac informácií o lete").
-    assert.match(progress.label, /^0 % · 1\u202f99\d km left · ETA 2:13 \(\d\d:\d\d\)$/);
+    assert.match(progress.label, /^0 % of the route · 1\u202f99\d km left · landing in 2 h 13 min \(\d\d:\d\d\)$/);
     assert.equal(footer.length, 1, 'footer = riadok o dátach');
     // Fixtúra nemá lastContactEpochMs → bez veku fixu; hex sa hlási veľkými písmenami.
-    assert.match(footer[0], /^OpenSky Network · (fix d+ s ago · )?CIV001$/, 'zdroj (a vek fixu, keď je) + hex');
+    assert.match(footer[0], /^OpenSky Network · (position d+ s ago · )?ICAO CIV001$/, 'zdroj (a vek polohy, keď je) + ICAO hex');
     assert.deepEqual(model, {
       title: 'N12345',
-      details: ['FL350 · 486 kts · 095°', 'TEST AIR · A320'],
+      details: ['Flight level FL350 (≈ 10 668 m)', 'Speed 486 kts (900 km/h) · heading 095° (E)', 'TEST AIR · A320'],
       titleFlag: null, // fixtúra nemá origin_country ani adsbdb ISO — bez vlajky
       route: { origin: { label: 'AUS', iso2: null }, destination: { label: 'LAX', iso2: null } },
       accent: '#39d0ff',

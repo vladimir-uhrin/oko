@@ -115,7 +115,7 @@ import {
 import { createFrameCostMeter, nextModelBudget } from './modelFrameBudget.js';
 import { refreshTrackedReadout } from './trackedReadout.js';
 import { onUnitSystemChange } from '../units.js';
-import { buildTrackedCardModel, formatFlightLine, formatMetaLine, TRACKED_FLIGHT_ACCENT } from './trackedCardModel.js';
+import { buildTrackedCardModel, formatFlightLine, formatFlightLinesPlain, formatMetaLine, TRACKED_FLIGHT_ACCENT } from './trackedCardModel.js';
 import { resolveFlagIso2 } from './countryFlags.js';
 import {
   clearTrackedSubjectContext,
@@ -3846,6 +3846,7 @@ function _trackedCardModel(icao24) {
     callsign: parts.callsign,
     flightIata: parts.flightIata,
     flightLine: parts.flightLine,
+    flightLines: parts.flightLines,
     stale: parts.stale,
     identLine: parts.identLine,
     route: parts.route,
@@ -3879,13 +3880,18 @@ function _trackedLabelParts(icao24) {
   const stale = Boolean(_missingPolls.get(icao24) || _backoff);
   // Hladina s trendom a stúpaním v ft/min, rýchlosť, kurz — trendový glyf
   // ↑/↓ z existujúcej rodiny, prah v flightProgress (±2,5 m/s ≈ 500 ft/min).
-  const flightLine = formatFlightLine({
+  const flightState = {
     altitudeM: info.altitude,
     onGround: info.onGround === true,
     verticalRateMps: info.verticalRate,
     speedMps: info.velocity,
     trackDeg: info.true_track,
-  });
+  };
+  const flightLine = formatFlightLine(flightState);
+  // Karta dostane dva zrozumiteľné riadky (2026-09-12, „aby to pochopil aj
+  // debil"): letová hladina s metrami, rýchlosť aj v km/h, kurz so svetovou
+  // stranou; kompaktný riadok ostáva pre hlas a kontext.
+  const flightLines = formatFlightLinesPlain(flightState);
   // Converted contacts report their class as TR-3B and nothing else — the
   // operator/type identity is exactly what the Easter egg is replacing.
   // Registrácia sa zobrazí len keď NIE JE už titulkom karty (bez callsignu
@@ -3894,7 +3900,7 @@ function _trackedLabelParts(icao24) {
   const reg = info.registration && info.registration !== cs ? info.registration : null;
   const ident = isTr3b(icao24)
     ? tr3bTypeLabel(icao24)
-    : [info.airline || info.operator, info.typeName || info.typeCode, reg].filter(Boolean).join(' · ');
+    : [info.airline || info.operator, info.typeName || info.typeCode, reg ? t('card.reg', { reg }) : null].filter(Boolean).join(' · ');
   // Trasa s mestami (adsbdb municipality) + progres s ETA. Všetko odvodené
   // z dát, ktoré už tečú; keď chýba súradnica alebo letová rýchlosť, riadok/
   // segment sa jednoducho nevykreslí. Gate _routeIsPlausible je ZDIEĹANÝ
@@ -3927,6 +3933,7 @@ function _trackedLabelParts(icao24) {
     callsign: cs,
     flightIata: info.flightIata || '',
     flightLine,
+    flightLines,
     stale,
     identLine: ident || '',
     route,

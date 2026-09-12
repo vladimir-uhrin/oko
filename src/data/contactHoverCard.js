@@ -30,11 +30,12 @@ import {
   formatFlightLine,
   formatMetaLine,
   formatTrack,
+  formatTrackPlain,
   progressRowFromProgress,
   routeRowFromRoute,
 } from './trackedCardModel.js';
 import { lookupPlanespottersPhoto } from './trackedPhoto.js';
-import { formatSpeed } from '../units.js';
+import { formatSpeedDual } from '../units.js';
 
 /** Odsadenie kartičky od kurzora (px) — nesmie sedieť pod hrotom myši. */
 const CARD_OFFSET_PX = 14;
@@ -60,10 +61,10 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
 
   const details = [];
   // 1. Let: hladina so stúpaním, rýchlosť, kurz — alebo „na zemi".
-  const speed = Number.isFinite(summary.speedMps) ? formatSpeed(summary.speedMps) : '';
+  const speed = Number.isFinite(summary.speedMps) ? formatSpeedDual(summary.speedMps) : '';
   let flightLine;
   if (summary.onGround) {
-    flightLine = [t('hover.on-ground'), speed, formatTrack(summary.trackDeg)].filter(Boolean).join(' · ');
+    flightLine = [t('hover.on-ground'), speed, formatTrackPlain(summary.trackDeg)].filter(Boolean).join(' · ');
   } else if (Number.isFinite(summary.altitudeM)) {
     flightLine = formatFlightLine({
       altitudeM: summary.altitudeM,
@@ -72,7 +73,7 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
       trackDeg: summary.trackDeg,
     });
   } else {
-    flightLine = [speed, formatTrack(summary.trackDeg)].filter(Boolean).join(' · ');
+    flightLine = [speed, formatTrackPlain(summary.trackDeg)].filter(Boolean).join(' · ');
   }
   if (flightLine) details.push(flightLine);
 

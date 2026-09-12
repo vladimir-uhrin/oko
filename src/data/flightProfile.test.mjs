@@ -12,7 +12,7 @@ import {
   profileRowFromSamples,
 } from './flightProfile.js';
 
-const t = (key, vars) => (key === 'card.profile-span' ? `last ${vars.min} min` : key);
+const t = (key, vars) => ({ 'card.profile-span': () => `last ${vars.min} min`, 'card.profile-altitude': () => `altitude ${vars.range}`, 'card.profile-speed': () => `speed ${vars.range}` }[key]?.() ?? key);
 
 test('sklad: jedna vzorka za interval, kruhový buffer prepisuje najstaršie, mazanie', () => {
   const store = createProfileStore({ intervalMs: 60_000, maxSamples: 4 });
@@ -52,8 +52,8 @@ test('riadok: normalizované krivky, popisky hladín a rýchlosti, rozpätie v m
   assert.equal(row.speed[0], 0);
   assert.equal(row.speed[20], 1);
   assert.equal(row.spanMin, 20);
-  assert.equal(row.label, '9 843 ft → FL361');
-  assert.equal(row.sublabel, '292 → 486 kts · last 20 min');
+  assert.equal(row.label, 'altitude 9 843 ft → FL361 (3 000 → 11 000 m)');
+  assert.equal(row.sublabel, 'speed 292 → 486 kts (540 → 900 km/h) · last 20 min');
 });
 
 test('riadok: okno 30 min, minimum 3 vzorky a 2 min, plochý let v strede, bez rýchlosti bez krivky', () => {
@@ -69,7 +69,7 @@ test('riadok: okno 30 min, minimum 3 vzorky a 2 min, plochý let v strede, bez r
   assert.ok(flat);
   assert.deepEqual(flat.altitude, [0.5, 0.5, 0.5], 'cestovná hladina: rovná čiara v strede');
   assert.deepEqual(flat.speed, [0.5, 0.5, 0.5]);
-  assert.equal(flat.label, 'FL328 → FL329');
+  assert.equal(flat.label, 'altitude FL328 → FL329 (10 000 → 10 020 m)');
   assert.equal(profileRowFromSamples([
     { epochMs: now - 60_000, altitudeM: 1, speedMps: 1 },
     { epochMs: now - 30_000, altitudeM: 2, speedMps: 1 },

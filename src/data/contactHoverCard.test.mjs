@@ -64,10 +64,10 @@ test('bohatý kontakt: let, stroj s dopravcom, textová trasa, hex v pätičke',
   const card = hoverCardLines(RICH, t, NOW);
   assert.equal(card.title, 'SWR123');
   assert.deepEqual(card.lines, [
-    'FL370 · 450 kts',
+    'FL370 (≈ 11 278 m) · 450 kts (833 km/h)',
     'Swiss · A220-300 · HB-JCA',
     'ZRH → LHR',
-    '4B1815',
+    'ICAO 4B1815',
   ]);
   assert.equal(card.military, false);
 });
@@ -90,18 +90,18 @@ test('plný model (2026-09-05): IATA v titulku, vlajky, trasa s vlajkami letísk
   }, t, NOW);
   assert.equal(model.title, 'SWR123 · LX123');
   assert.equal(model.titleFlag, 'ch');
-  assert.deepEqual(model.details, ['FL370↑ 1\u202f180 ft/min · 450 kts · 303°', 'Swiss · A220-300 · HB-JCA']);
+  assert.deepEqual(model.details, ['FL370 (≈ 11\u202f278 m) ↑1\u202f180 ft/min (6,0 m/s) · 450 kts (833 km/h) · 303° (NW)', 'Swiss · A220-300 · HB-JCA']);
   assert.deepEqual(model.route, {
-    origin: { label: 'ZRH Zurich', iso2: 'ch' },
-    destination: { label: 'LHR London', iso2: 'gb' },
+    origin: { label: 'ZRH Zurich (Switzerland)', iso2: 'ch' },
+    destination: { label: 'LHR London (United Kingdom)', iso2: 'gb' },
   });
   assert.equal(model.progress.fraction, 0.4);
-  assert.match(model.progress.label, /^40 % · 470 km left · ETA 0:34 \(\d\d:\d\d\)$/);
-  assert.deepEqual(model.footer, ['OpenSky Network · fix 9 s ago · SQ 1000 · 4B1815']);
+  assert.match(model.progress.label, /^40 % of the route · 470 km left · landing in 34 min \(\d\d:\d\d\)$/);
+  assert.deepEqual(model.footer, ['OpenSky Network · position 9 s ago · squawk 1000 · ICAO 4B1815']);
   assert.equal(model.hex, '4b1815', 'fotka sa dopytuje len pre lietadlá s platným hexom');
   // Textový pohľad radí: detaily, trasa, progres, pätička.
   const lines = hoverCardLines({ ...RICH, routeInfo: null, progress: null }, t, NOW).lines;
-  assert.equal(lines.at(-1), '4B1815');
+  assert.equal(lines.at(-1), 'ICAO 4B1815');
 });
 
 test('chudobný kontakt (oddialený pohľad): let prvý, kategória zaskočí za chýbajúci typ, hex v pätičke', () => {
@@ -112,16 +112,16 @@ test('chudobný kontakt (oddialený pohľad): let prvý, kategória zaskočí za
   assert.equal(card.title, 'NJE693K');
   // Klesanie -2.93 m/s je za prahom → šípka dole + ft/min; pod FL180 stopy
   // (rovnaká konvencia ako karta sledovaného letu).
-  assert.match(card.lines[0], /^2 000 ft↓ 580 ft\/min · 109 kts$/);
+  assert.match(card.lines[0], /^2.000 ft \(610 m\) ↓580 ft\/min \(2,9 m\/s\) · 109 kts \(202 km\/h\)$/);
   assert.equal(card.lines[1], EN_STRINGS['aircraft.category.bizjet']);
-  assert.equal(card.lines[2], '494116');
+  assert.equal(card.lines[2], 'ICAO 494116');
   assert.equal(card.lines.length, 3, 'žiadne prázdne riadky za chýbajúce polia');
 });
 
 test('šípka stúpania/klesania rešpektuje prah, hladina ju nemá', () => {
   const trend = (rate) => hoverCardLines({ ...SPARSE, verticalRateMps: rate }, t, NOW).lines[0];
-  assert.match(trend(8), /ft↑ /, 'stúpa');
-  assert.match(trend(-8), /ft↓ /, 'klesá');
+  assert.match(trend(8), /\) ↑\d/, 'stúpa');
+  assert.match(trend(-8), /\) ↓\d/, 'klesá');
   assert.doesNotMatch(trend(0), /[↑↓]/, 'v hladine bez šípky');
   assert.doesNotMatch(trend(1.2), /[↑↓]/, 'drobné kolísanie nie je stúpanie');
   assert.doesNotMatch(trend(null), /[↑↓]/, 'neznáma vertikálna rýchlosť nič netvrdí');
@@ -134,7 +134,7 @@ test('stroj na zemi a kontakt bez fixu to povedia; neznáma výška nekreslí �
   const stale = hoverCardLines({ ...SPARSE, stale: true }, t, NOW);
   assert.equal(stale.lines.at(-1), EN_STRINGS['hover.stale'], 'odhad je priznaný, ako posledný');
   const noAlt = hoverCardLines({ ...SPARSE, altitudeM: null, trackDeg: 180 }, t, NOW);
-  assert.equal(noAlt.lines[0], '109 kts · 180°');
+  assert.equal(noAlt.lines[0], '109 kts (202 km/h) · 180° (S)');
 });
 
 test('identita: bez volacieho znaku nastúpi registrácia, potom hex; registrácia sa pod titulkom neopakuje', () => {
@@ -291,7 +291,7 @@ test('loď (2026-09-12): súhrn z aisLiveVessels.getContactSummary sa vykreslí 
   }, t, NOW);
   assert.equal(model.title, 'VLISSINGEN');
   assert.equal(model.titleFlag, 'nl', 'resolveFlagIso2 normalizuje na malé písmená');
-  assert.match(model.details[0], /^\d+ (kts|km\/h) · 231°$/, 'rýchlosť · kurz, bez hladiny');
+  assert.match(model.details[0], /^\d+ kts \(\d+ km\/h\) · 231° \(SW\)$/, 'rýchlosť v oboch jednotkách · kurz so svetovou stranou, bez hladiny');
   assert.equal(model.details[1], 'UNDER WAY · CARGO · 121 m · PBXY');
   assert.equal(model.route, null);
   assert.equal(model.routeText, '→ ROTTERDAM');

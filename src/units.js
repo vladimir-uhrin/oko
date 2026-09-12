@@ -189,6 +189,54 @@ export function formatVesselSpeedKnots(knots, { system = getUnitSystem() } = {})
   return system === 'metric' ? `${Math.round(kn * KN_TO_KMH)} km/h` : `${Math.round(kn)} kn`;
 }
 
+// Dvojité jednotky pre karty (2026-09-12, používateľ: „aby to pochopil aj
+// debil — FL bude aj letová hladina, kts bude rýchlosť, prepočítať na km/h"):
+// hlavná jednotka podľa prepínača, druhá v zátvorke. Popisky pri ikonách ich
+// nepoužívajú (miesto), karty áno.
+
+/** `FL360 (≈ 10 970 m)` · `12 500 ft (3 810 m)` · metricky `10 970 m (FL360)`. Pure. */
+export function formatAltitudeDual(altitudeM, { level = true, system = getUnitSystem() } = {}) {
+  if (!Number.isFinite(Number(altitudeM))) return '';
+  const aviation = formatAltitude(altitudeM, { level, system: 'aviation' });
+  const metric = formatAltitude(altitudeM, { system: 'metric' });
+  if (system === 'metric') return `${metric} (${aviation})`;
+  return aviation.startsWith('FL') ? `${aviation} (≈ ${metric})` : `${aviation} (${metric})`;
+}
+
+/** `FL120 → FL340 (3 660 → 10 360 m)`; metricky `3 660 → 10 360 m (FL120 → FL340)`. Pure. */
+export function formatAltitudeRangeDual(fromM, toM, { system = getUnitSystem() } = {}) {
+  const a = altitudeDisplayValue(fromM, 'metric');
+  const b = altitudeDisplayValue(toM, 'metric');
+  if (a === null || b === null) return '';
+  const aviation = `${formatAltitude(fromM, { system: 'aviation' })} → ${formatAltitude(toM, { system: 'aviation' })}`;
+  const metric = `${formatThousands(a)} → ${formatThousands(b)} m`;
+  return system === 'metric' ? `${metric} (${aviation})` : `${aviation} (${metric})`;
+}
+
+/** `401 kts (743 km/h)`; metricky `743 km/h (401 kts)`; '' bez údaja. Pure. */
+export function formatSpeedDual(speedMps, { system = getUnitSystem() } = {}) {
+  const aviation = formatSpeed(speedMps, { system: 'aviation' });
+  if (!aviation) return '';
+  const metric = formatSpeed(speedMps, { system: 'metric' });
+  return system === 'metric' ? `${metric} (${aviation})` : `${aviation} (${metric})`;
+}
+
+/** `250 → 480 kts (463 → 889 km/h)`; metricky naopak. Pure. */
+export function formatSpeedRangeDual(fromMps, toMps, { system = getUnitSystem() } = {}) {
+  const aviation = formatSpeedRange(fromMps, toMps, { system: 'aviation' });
+  if (!aviation) return '';
+  const metric = formatSpeedRange(fromMps, toMps, { system: 'metric' });
+  return system === 'metric' ? `${metric} (${aviation})` : `${aviation} (${metric})`;
+}
+
+/** `980 ft/min (5,0 m/s)`; metricky `5,0 m/s (980 ft/min)`. Pure. */
+export function formatVerticalRateDual(verticalRateMps, { system = getUnitSystem() } = {}) {
+  const aviation = formatVerticalRateMagnitude(verticalRateMps, { system: 'aviation' });
+  if (!aviation) return '';
+  const metric = formatVerticalRateMagnitude(verticalRateMps, { system: 'metric' });
+  return system === 'metric' ? `${metric} (${aviation})` : `${aviation} (${metric})`;
+}
+
 /** Iba pre testy: zahoď cache voľby. */
 export function _resetUnitsForTest() {
   _system = null;

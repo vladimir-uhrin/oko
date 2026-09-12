@@ -16,7 +16,7 @@
  * krivky 0..1 (výška v akcente, rýchlosť tlmená) + popisky. Bez DOM, bez
  * Cesia; čas sa vždy podáva.
  */
-import { formatAltitude, formatSpeedRange } from '../units.js';
+import { formatAltitude, formatAltitudeRangeDual, formatSpeedRangeDual } from '../units.js';
 
 /** Minimálny odstup dvoch vzoriek jedného stroja (ms). */
 export const PROFILE_SAMPLE_INTERVAL_MS = 60_000;
@@ -135,8 +135,9 @@ export function profileRowFromSamples(samples, nowMs, { windowMs = PROFILE_WINDO
   const first = rows[0];
   const last = rows[rows.length - 1];
   const spanMin = Math.max(1, Math.round(spanMs / 60_000));
-  const label = `${levelLabel(first.altitudeM)} → ${levelLabel(last.altitudeM)}`;
-  const speedPart = spdKnown.length >= 2 ? formatSpeedRange(spdKnown[0], spdKnown[spdKnown.length - 1]) : '';
+  // Obe jednotky a predpona (2026-09-12): „výška FL120 → FL340 (3 660 → 10 360 m)".
+  const label = translate('card.profile-altitude', { range: formatAltitudeRangeDual(first.altitudeM, last.altitudeM) });
+  const speedPart = spdKnown.length >= 2 ? translate('card.profile-speed', { range: formatSpeedRangeDual(spdKnown[0], spdKnown[spdKnown.length - 1]) }) : '';
   const sublabel = [speedPart, translate('card.profile-span', { min: spanMin })].filter(Boolean).join(' · ');
   return {
     altitude: normalizeSeries(alt, PROFILE_FLAT_ALT_M),
