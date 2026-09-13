@@ -4458,11 +4458,48 @@ function gasProxy() {
     } catch { /* diagnostika */ }
     return { cachedAt: entry?.at ?? null, latestDate, countries, ttlMs: GIE_TTL_MS, lastError: route.state.lastError };
   };
+  // Plynovody EÚ + bývalý ZSSR (etapa 5): statický OSM snímok zo
+  // `scripts/build-gas-pipelines.mjs` (.gev-cache/gas/pipelines.geojsonl,
+  // ~6 MB, + pipelines.meta.json s provenance). Za behu žiadny upstream dopyt
+  // — súbor sa streamuje z disku s ETag (veľkosť+mtime), deň v cache
+  // prehliadača (klient ho verziuje dátumom snímku) a gzipom, keď ho klient
+  // prijme (~4× menej). Bez snímku 404 no_snapshot — vrstva to prizná.
+  const PIPELINES_PATH = path.join(CACHE_DIR, 'pipelines.geojsonl');
+  const PIPELINES_META_PATH = path.join(CACHE_DIR, 'pipelines.meta.json');
+  const noSnapshot = (res) => send(res, 404, JSON.stringify({ error: 'no_snapshot', detail: 'run: node scripts/build-gas-pipelines.mjs' }), 'NONE');
+  const pipelinesFile = (filePath, contentType) => async (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    let stat;
+    try { stat = await fsp.stat(filePath); } catch { noSnapshot(res); return; }
+    if (!stat.isFile() || stat.size === 0) { noSnapshot(res); return; }
+    const etag = '"' + stat.size.toString(16) + '-' + Math.floor(stat.mtimeMs).toString(16) + '"';
+    const headers = { 'Cache-Control': 'public, max-age=86400', ETag: etag, Vary: 'Accept-Encoding', 'X-GEV-Cache': 'FILE' };
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); res.end(); return; }
+    const gzip = /\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''));
+    headers['Content-Type'] = contentType;
+    if (gzip) headers['Content-Encoding'] = 'gzip'; else headers['Content-Length'] = String(stat.size);
+    res.writeHead(200, headers);
+    if (req.method === 'HEAD') { res.end(); return; }
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', (error) => { console.warn('[gas-proxy] pipelines read failed: ' + (error?.message || error)); try { res.destroy(); } catch { /* už zavreté */ } });
+    if (gzip) stream.pipe(zlib.createGzip({ level: 6 })).pipe(res); else stream.pipe(res);
+  };
+  async function pipelinesSummary() {
+    try {
+      const [meta, stat] = await Promise.all([fsp.readFile(PIPELINES_META_PATH, 'utf8').then(JSON.parse), fsp.stat(PIPELINES_PATH)]);
+      return { snapshot: meta?.snapshot ?? null, features: meta?.features ?? null, lengthKm: meta?.lengthKm ?? null, bytes: stat.size };
+    } catch {
+      return { snapshot: null, features: 0, lengthKm: null, bytes: 0 };
+    }
+  }
   function install(middlewares) {
     middlewares.use('/api/gas/prices', prices.handler);
     middlewares.use('/api/gas/flows', flows.handler);
     middlewares.use('/api/gas/storage', withGieKey(storage));
     middlewares.use('/api/gas/lng', withGieKey(lng));
+    // Prefixové párovanie connectu: /meta musí byť zaregistrované PRED súborom.
+    middlewares.use('/api/gas/pipelines/meta', pipelinesFile(PIPELINES_META_PATH, 'application/json; charset=utf-8'));
+    middlewares.use('/api/gas/pipelines', pipelinesFile(PIPELINES_PATH, 'application/x-ndjson; charset=utf-8'));
     middlewares.use('/api/gas/status', async (req, res) => {
       const p = await prices.current();
       const f = await flows.current();
@@ -4482,6 +4519,7 @@ function gasProxy() {
         prices: { cachedAt: p?.at ?? null, latestDate, monthlyRows: monthly, ttlMs: TTL_MS, lastError: prices.state.lastError },
         flows: { cachedAt: f?.at ?? null, latestDate: flowsLatest, pointsWithData: flowsWithData, points: GAS_FLOW_POINTS.length, ttlMs: FLOWS_TTL_MS, lastError: flows.state.lastError },
         gie,
+        pipelines: await pipelinesSummary(),
       }), 'NONE');
     });
   }

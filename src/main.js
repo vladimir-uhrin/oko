@@ -20,6 +20,7 @@ import aisLiveVesselsLayer from './data/aisLiveVessels.js';
 import gfwPresenceLayer from './data/gfwPresence.js';
 import gfwSarDetectionsLayer from './data/gfwSarDetections.js';
 import gasFlowsLayer from './data/gasFlowsLayer.js';
+import gasPipelinesLayer from './data/gasPipelinesLayer.js';
 import militaryInstallationsLayer from './data/militaryInstallations.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import localDataLayers from './data/localLayers.js';
@@ -341,6 +342,9 @@ async function init() {
     // Toky plynu (2026-09-13, etapa 4 modulu PLYN): hraničné stanice z ENTSOG
     // ako body s popisom, z tej istej proxy ako karta TOKY v paneli.
     dataManager.register(gasFlowsLayer);
+    // Plynovody EÚ + bývalý ZSSR (2026-09-13, etapa 5 modulu PLYN): statický
+    // OSM snímok zo `scripts/build-gas-pipelines.mjs` cez `/api/gas/pipelines`.
+    dataManager.register(gasPipelinesLayer);
     dataManager.register(militaryInstallationsLayer);
     dataManager.register(militaryAwarenessLayer);
     militaryAwarenessLayer.attachDataManager(dataManager);

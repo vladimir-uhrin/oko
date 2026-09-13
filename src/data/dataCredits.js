@@ -311,6 +311,14 @@ export const DATA_CREDITS = [
       '(Terms and Conditions of Use — source and download date cited on the card; station coordinates approximate)',
   },
   {
+    key: 'gas-pipelines',
+    html:
+      'Gas transmission pipelines, EU and former USSR (static snapshot built from OpenStreetMap; snapshot date shown on the card — not live): ' +
+      '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> ' +
+      '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a>, via the Overpass API; ' +
+      'operator, diameter and status as mapped — completeness varies by country)',
+  },
+  {
     key: 'air-density',
     html:
       'Historical air-traffic density (one day): ' +
