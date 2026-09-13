@@ -8,7 +8,7 @@ import { GAS_PANEL_ID, GAS_PANEL_REFRESH_MS, installGasPanel } from './gasPanel.
 import { GAS_CHART_HEIGHT_PX, chartExtent, drawGasChart, seriesStyle } from './gasChart.js';
 import { CHART_COLORS, CHART_PAD } from './flightHistoryChart.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
-import { buildFlowsPayload } from './data/gasFlows.js';
+import { buildFlowsPayload, formatGwhDay } from './data/gasFlows.js';
 import { buildGiePayload } from './data/gasStorage.js';
 import { buildImportsPayload } from './data/gasImports.js';
 import { EUROSTAT_IMPORTS_JSON_STAT } from './data/fixtures/eurostatImportsFixture.mjs';
@@ -84,7 +84,10 @@ test('gasChart: rozsah s rezervou, štýly podľa poradia, kreslenie = mriežka 
 function fakeDoc() {
   const make = (tag) => {
     const node = {
-      tag, children: [], dataset: {}, style: {}, attributes: {}, listeners: {}, hidden: false, textContent: '', className: '', value: '',
+      tag, children: [], dataset: {}, style: {}, attributes: {}, listeners: {}, hidden: false, _text: '', className: '', value: '',
+      // Ako v DOM: `textContent = ''` vyprázdni aj deti (legenda sa prekresľuje viackrát).
+      get textContent() { return node._text; },
+      set textContent(v) { node._text = String(v); if (node._text === '') node.children.length = 0; },
       appendChild(c) { node.children.push(c); return c; },
       append(...cs) { node.children.push(...cs); },
       setAttribute(k, v) { node.attributes[k] = v; },
@@ -132,10 +135,10 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(st.status, 'ok');
   assert.equal(st.headline, '79,5 €/MWh');
   assert.deepEqual(st.series, ['ttf', 'eu']);
-  assert.deepEqual(st.flows, { loaded: true, ok: true, status: 'ok', lastError: null, rows: 32 }, 'karta TOKY má všetkých 32 smerov katalógu');
+  assert.deepEqual(st.flows, { loaded: true, ok: true, status: 'ok', lastError: null, rows: 43 }, 'karta TOKY má všetkých 43 smerov katalógu');
   const flowsCardEl = find(doc.root.body, (n) => n.dataset.card === 'flows')[0];
   const flowRows = find(flowsCardEl, (n) => n.className === 'gas-flow-row');
-  assert.equal(flowRows.length, 32);
+  assert.equal(flowRows.length, 43);
   assert.equal(flowRows[0].dataset.id, 'lanzhot-in');
   assert.equal(flowRows[0].dataset.level, 'flow');
   assert.equal(find(flowRows[0], (n) => n.className === 'gas-flow-value')[0].textContent, '24,6 GWh/d');
@@ -208,6 +211,18 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(panel._getStateForTest().imports.months, 66, 'MAX = od 2021');
   panel.setImportsRange('2y');
   assert.equal(panel._getStateForTest().imports.months, 24);
+  assert.deepEqual(st.supply, { ok: true, status: 'ok', headline: formatGwhDay(3044.1, 'sk'), rows: 8, days: 31, lngMissing: false }, 'karta ZDROJE: TurkStream 44,1 + LNG 3 000 z fixtúr');
+  const supplyCard = find(doc.root.body, (n) => n.dataset.card === 'supply')[0];
+  assert.equal(find(doc.root.body, (n) => n.dataset.card).map((n) => n.dataset.card).join(','), 'prices,flows,supply,storage,lng,imports', 'poradie kariet');
+  assert.equal(find(supplyCard, (n) => n.className === 'gas-headline-value')[0].textContent, formatGwhDay(3044.1, 'sk'));
+  assert.equal(find(supplyCard, (n) => n.className === 'gas-headline-label')[0].textContent, 'gas.supply-eu · 11. 9. 2026');
+  assert.equal(find(supplyCard, (n) => n.className === 'gas-headline-sub')[0].textContent, 'gas.supply-origin-LNG 99 % · gas.supply-origin-RU 1,4 % · gas.supply-complete {"n":2,"m":2}');
+  const supplyRows = find(supplyCard, (n) => n.className === 'gas-legend-row');
+  assert.equal(supplyRows.length, 8);
+  assert.deepEqual([supplyRows[0].dataset.key, supplyRows[0].dataset.level, supplyRows[1].dataset.key], ['LNG', 'ok', 'RU']);
+  assert.equal(supplyRows[7].dataset.level, 'nodata', 'pôvody bez hlásiaceho bodu sú bez dát, nie nula');
+  assert.equal(find(supplyCard, (n) => n.className === 'gas-status')[0].textContent, 'gas.supply-updated {"date":"11. 9. 2026"}');
+  assert.equal(find(supplyCard, (n) => n.className === 'gas-source')[0].textContent, 'ENTSOG TP 13-09-2026 https://transparency.entsog.eu/ · gas.supply-lng-source');
   const body = doc.root.body;
   const value = find(body, (n) => n.className === 'gas-headline-value')[0];
   assert.equal(value.textContent, '79,5 €/MWh');
@@ -261,13 +276,15 @@ test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[0].textContent, 'gas.unavailable');
   assert.deepEqual(st.flows, { loaded: false, ok: false, status: 'error', lastError: 'HTTP 429', rows: 0 }, 'karta TOKY zlyhá nezávisle od cien');
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[1].textContent, 'gas.flows-unavailable');
+  assert.equal(st.supply.status, 'error', 'mix dodávok bez tokov nejde');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[2].textContent, 'gas.supply-unavailable');
   assert.equal(st.storage.status, 'error');
-  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[2].textContent, 'gas.gie-no-key', '503 no_key = hláška o chýbajúcom kľúči, nie generická');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[3].textContent, 'gas.gie-no-key', '503 no_key = hláška o chýbajúcom kľúči, nie generická');
   assert.equal(st.lng.status, 'error');
-  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[3].textContent, 'gas.lng-unavailable');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[4].textContent, 'gas.lng-unavailable');
   assert.equal(st.imports.status, 'error');
   assert.equal(st.imports.lastError, 'HTTP 502 eurostat');
-  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[4].textContent, 'gas.imports-unavailable');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[5].textContent, 'gas.imports-unavailable');
   panel.open();
   assert.equal(collapsed, false);
   assert.equal(installGasPanel({ doc: { getElementById: () => null }, t }), null);
@@ -334,6 +351,13 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
   assert.match(SK_STRINGS['gas.imports-source'], /Eurostat/, 'Eurostat ako zdroj (podmienka re-use)');
   assert.match(SK_STRINGS['gas.imports-source'], /nezodpovedá/, 'Eurostat žiada disclaimer pri upravených dátach');
   assert.match(css, /\.gas-legend-row \{/);
+  // Etapa 7: mix dodávok podľa pôvodu — žiadny nový dopyt, len katalóg bodov s pôvodom a LNG z ALSI.
+  for (const key of ['gas.flows-west', 'gas.note-franpipe', 'gas.note-zeepipe', 'gas.note-interconnector', 'gas.note-dornum', 'gas.note-emden', 'gas.note-nybro', 'gas.note-bbl', 'gas.note-medgaz', 'gas.note-transmed', 'gas.note-greenstream', 'gas.note-tarifa', 'gas.supply', 'gas.supply-loading', 'gas.supply-unavailable', 'gas.supply-updated', 'gas.supply-eu', 'gas.supply-mcm', 'gas.supply-complete', 'gas.supply-avg7', 'gas.supply-points', 'gas.supply-lng-points', 'gas.supply-lng-source', 'gas.supply-note', 'gas.supply-origin-NO', 'gas.supply-origin-RU', 'gas.supply-origin-RU-UA', 'gas.supply-origin-DZ', 'gas.supply-origin-LY', 'gas.supply-origin-AZ', 'gas.supply-origin-UK', 'gas.supply-origin-LNG']) {
+    assert.ok(EN_STRINGS[key], `EN ${key}`);
+    assert.ok(SK_STRINGS[key], `SK ${key}`);
+  }
+  assert.match(SK_STRINGS['gas.supply-updated'], /predbežné, D−1/, 'mix sa nikdy nevydáva za živý');
+  assert.match(SK_STRINGS['gas.supply-note'], /Bez domácej ťažby/, 'poznámka priznáva, čo v mixe nie je');
   assert.match(css, /#history-panel\.collapsed,\n#gas-panel\.collapsed \{\n  width: var\(--left-collapsed-width\);/, 'zbalené panely ľavého stĺpca majú jednu šírku');
   assert.match(vite, /OKO-gas\/0\.1 \(https:\/\/github\.com\/vladouh76; vladouh76@gmail\.com\)/, 'User-Agent s kontaktom');
   assert.match(vite, /parseAcerCsv\(await fetchText\(ACER_HISTORICAL_URL\)\)/);

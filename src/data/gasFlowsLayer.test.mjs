@@ -53,7 +53,7 @@ function fakeViewer(pick = { value: null }) {
 test('groupStations: smery jednej stanice spolu, rady po smeroch, úroveň stanice = najlepší smer; popis, farba, metadáta karty kontextu', () => {
   const model = buildFlowsModel(PAYLOAD, { lang: 'sk', translate: tKey, nowMs: NOW });
   const stations = groupStations(model.groups.flatMap((g) => g.rows), seriesById);
-  assert.equal(stations.length, 21, '32 smerov = 21 staníc (7 SK + 14 na východe)');
+  assert.equal(stations.length, 31, '43 smerov = 31 staníc (7 SK + 10 na západe, Zeebrugge ZPT+IZT spolu + 14 na východe)');
   assert.equal(stations[0].name, 'Lanžhot');
   assert.equal(stations[0].rows.length, 2);
   assert.equal(stations[0].rows[0].series.length, 20, 'rad smeru ide s riadkom');
@@ -150,7 +150,7 @@ test('karty: kompaktná = taktická karta lodí (interaktívna, tok + deň); roz
   assert.equal(single.details.length, 2);
 });
 
-test('lifecycle: init → enable stiahne toky aj ceny, 21 bodov + 21 kompaktných kariet; klik na kartu/bod rozšíri, znova zbalí, prázdno zbalí; výber z panelu; disable/destroy upracú', async () => {
+test('lifecycle: init → enable stiahne toky aj ceny, 31 bodov + 31 kompaktných kariet; klik na kartu/bod rozšíri, znova zbalí, prázdno zbalí; výber z panelu; disable/destroy upracú', async () => {
   const calls = [];
   const pick = { value: null };
   const handlers = [];
@@ -177,18 +177,18 @@ test('lifecycle: init → enable stiahne toky aj ceny, 21 bodov + 21 kompaktnýc
   assert.deepEqual(calls.sort(), ['/api/gas/flows', '/api/gas/prices'], 'enable + manažérsky update = jedno sťahovanie (single-flight)');
   assert.equal(await managerUpdate, true);
   const st = layer._getStateForTest();
-  assert.equal(st.stations, 21);
-  assert.equal(st.entities, 21);
+  assert.equal(st.stations, 31);
+  assert.equal(st.entities, 31);
   assert.equal(st.prices, 40);
   assert.equal(st.selected, '48.72,16.97', 'zapamätaný výber z panelu sa uplatnil po načítaní');
   assert.equal(host.src, GAS_FLOWS_OVERLAY_SOURCE_ID);
-  assert.equal(host.entries.length, 21);
+  assert.equal(host.entries.length, 31);
   assert.equal(host.visible, true);
   assert.deepEqual(host.options, { cohortLimit: 24, collisionCapacity: 24, moving: false });
   const trackedNow = host.entries.find((e) => e.variant === 'tracked');
   assert.equal(trackedNow.title, 'Lanžhot');
   assert.equal(trackedNow.charts.speed.past.length, 31, 'graf ceny na karte');
-  assert.equal(host.entries.filter((e) => e.variant === 'card').length, 20);
+  assert.equal(host.entries.filter((e) => e.variant === 'card').length, 30);
   // aktivácia z klávesnice na rozšírenej karte = zbaliť
   assert.equal(trackedNow.activate(), true);
   assert.equal(layer._getStateForTest().selected, null);
@@ -222,7 +222,7 @@ test('lifecycle: init → enable stiahne toky aj ceny, 21 bodov + 21 kompaktnýc
   assert.equal(stats.count, 3);
   assert.match(stats.source, /ENTSOG TP 13-09-2026/);
   assert.equal(await layer.update(), true);
-  assert.equal(layer._getStateForTest().entities, 21, 'obnova nezdvojí body');
+  assert.equal(layer._getStateForTest().entities, 31, 'obnova nezdvojí body');
   layer.disable();
   assert.equal(handlers[0].destroyed, true);
   assert.equal(host.visible, false);

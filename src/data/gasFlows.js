@@ -33,12 +33,18 @@ export const ENTSOG_TP_URL = 'https://transparency.entsog.eu/';
 export const KWH_PER_M3 = 10.55;
 /** Po tomto veku posledného plynárenského dňa je rad „zastaraný“ (bežné oneskorenie 1–2 dni). */
 export const GAS_FLOWS_STALE_DAYS = 4;
-export const GAS_FLOW_GROUPS = Object.freeze(['sk', 'east']);
+export const GAS_FLOW_GROUPS = Object.freeze(['sk', 'west', 'east']);
 
 const DAY_MS = 86_400_000;
 const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-const P = (id, group, operator, point, dir, from, to, name, lat, lon, noteKey = null) => Object.freeze({ id, group, operator, point, dir, from, to, name, lat, lon, noteKey });
+/**
+ * `origin` = pôvod plynu pre denný mix dodávok EÚ (gasSupply.js): NO, DZ, LY,
+ * AZ, UK, RU (TurkStream a priame ruské trasy), RU-UA (ruský tranzit cez
+ * Ukrajinu, od 2025 nula); null = bod do mixu nepatrí (vnútro EÚ, zásobník,
+ * export, tranzit do Kaliningradu, vstupy Ukrajiny).
+ */
+const P = (id, group, operator, point, dir, from, to, name, lat, lon, noteKey = null, origin = null) => Object.freeze({ id, group, operator, point, dir, from, to, name, lat, lon, noteKey, origin });
 
 /**
  * Katalóg smerov (operátor + bod + smer podľa ENTSOG `operatorpointdirections`,
@@ -56,31 +62,45 @@ export const GAS_FLOW_POINTS = Object.freeze([
   P('zlievce-out', 'sk', 'SK-TSO-0001', 'ITP-00027', 'exit', 'SK', 'HU', 'Veľké Zlievce', 48.18, 19.44),
   P('vyrava-in', 'sk', 'SK-TSO-0001', 'ITP-00177', 'entry', 'PL', 'SK', 'Výrava', 49.27, 21.98, 'gas.note-vyrava'),
   P('vyrava-out', 'sk', 'SK-TSO-0001', 'ITP-00177', 'exit', 'SK', 'PL', 'Výrava', 49.27, 21.98),
-  P('kapusany-in', 'sk', 'SK-TSO-0001', 'ITP-00117', 'entry', 'UA', 'SK', 'Veľké Kapušany', 48.55, 22.08, 'gas.note-kapusany'),
+  P('kapusany-in', 'sk', 'SK-TSO-0001', 'ITP-00117', 'entry', 'UA', 'SK', 'Veľké Kapušany', 48.55, 22.08, 'gas.note-kapusany', 'RU-UA'),
   P('kapusany-out', 'sk', 'SK-TSO-0001', 'ITP-00117', 'exit', 'SK', 'UA', 'Veľké Kapušany', 48.55, 22.08),
-  P('budince-in', 'sk', 'SK-TSO-0001', 'ITP-00421', 'entry', 'UA', 'SK', 'Budince', 48.53, 22.10),
+  P('budince-in', 'sk', 'SK-TSO-0001', 'ITP-00421', 'entry', 'UA', 'SK', 'Budince', 48.53, 22.10, null, 'RU-UA'),
   P('budince-out', 'sk', 'SK-TSO-0001', 'ITP-00421', 'exit', 'SK', 'UA', 'Budince', 48.53, 22.10),
   P('lab-in', 'sk', 'SK-TSO-0001', 'UGS-00538', 'entry', 'zásobník', 'SK', 'Láb', 48.37, 16.97, 'gas.note-lab'),
   P('lab-out', 'sk', 'SK-TSO-0001', 'UGS-00538', 'exit', 'SK', 'zásobník', 'Láb', 48.37, 16.97),
+  // Západné vstupy do EÚ (etapa 7, 2026-09-13): Nórsko, Spojené kráľovstvo,
+  // Alžírsko, Líbya. Dornum (NETRA) hlásia OGE aj GUD, Emden (EPT1) GUD aj
+  // Thyssengas — rovnaké čísla, preto každý raz; Norpipe (NPT) TP nezverejňuje.
+  P('dunkerque', 'west', 'FR-TSO-0003', 'ITP-00045', 'entry', 'NO', 'FR', 'Dunkerque (Franpipe)', 51.02, 2.20, 'gas.note-franpipe', 'NO'),
+  P('zeebrugge-zpt', 'west', 'BE-TSO-0001', 'ITP-00106', 'entry', 'NO', 'BE', 'Zeebrugge ZPT (Zeepipe)', 51.34, 3.20, 'gas.note-zeepipe', 'NO'),
+  P('zeebrugge-izt', 'west', 'BE-TSO-0001', 'ITP-00061', 'entry', 'GB', 'BE', 'Zeebrugge IZT (Interconnector)', 51.34, 3.20, 'gas.note-interconnector', 'UK'),
+  P('dornum', 'west', 'DE-TSO-0009', 'ITP-00126', 'entry', 'NO', 'DE', 'Dornum (Europipe / NETRA)', 53.64, 7.43, 'gas.note-dornum', 'NO'),
+  P('emden', 'west', 'DE-TSO-0005', 'ITP-00081', 'entry', 'NO', 'DE', 'Emden (EPT1)', 53.36, 7.20, 'gas.note-emden', 'NO'),
+  P('nybro', 'west', 'DK-TSO-0001', 'ITP-00630', 'entry', 'NO', 'DK', 'Nybro (North Sea Entry)', 55.75, 8.15, 'gas.note-nybro', 'NO'),
+  P('bacton-bbl', 'west', 'UK-TSO-0004', 'ITP-00207', 'entry', 'GB', 'NL', 'Bacton (BBL)', 52.87, 1.65, 'gas.note-bbl', 'UK'),
+  P('almeria', 'west', 'ES-TSO-0006', 'ITP-00048', 'entry', 'DZ', 'ES', 'Almería (Medgaz)', 36.83, -2.40, 'gas.note-medgaz', 'DZ'),
+  P('mazara', 'west', 'IT-TSO-0001', 'ITP-00093', 'entry', 'DZ', 'IT', 'Mazara del Vallo (Transmed)', 37.65, 12.59, 'gas.note-transmed', 'DZ'),
+  P('gela', 'west', 'IT-TSO-0001', 'ITP-00074', 'entry', 'LY', 'IT', 'Gela (Greenstream)', 37.07, 14.25, 'gas.note-greenstream', 'LY'),
+  P('tarifa-out', 'west', 'ES-TSO-0006', 'ITP-00082', 'exit', 'ES', 'MA', 'Tarifa (GME)', 36.01, -5.60, 'gas.note-tarifa'),
   // Hranice EÚ s bývalým ZSSR a ruské trasy
-  P('strandzha2', 'east', 'BG-TSO-0001', 'ITP-00549', 'entry', 'TR', 'BG', 'Strandža 2 (TurkStream)', 42.04, 27.45, 'gas.note-turkstream'),
+  P('strandzha2', 'east', 'BG-TSO-0001', 'ITP-00549', 'entry', 'TR', 'BG', 'Strandža 2 (TurkStream)', 42.04, 27.45, 'gas.note-turkstream', 'RU'),
   P('strandzha1', 'east', 'BG-TSO-0001', 'ITP-00041', 'entry', 'TR', 'BG', 'Strandža 1 (Trans-Balkán)', 42.04, 27.45, 'gas.note-transbalkan'),
-  P('greifswald-opal', 'east', 'DE-TSO-0016', 'ITP-00251', 'entry', 'RU', 'DE', 'Greifswald / OPAL', 54.14, 13.66, 'gas.note-nordstream'),
-  P('greifswald-nel', 'east', 'DE-TSO-0017', 'ITP-00247', 'entry', 'RU', 'DE', 'Greifswald / NEL', 54.14, 13.66, 'gas.note-nordstream'),
-  P('imatra', 'east', 'FI-TSO-0003', 'ITP-00024', 'entry', 'RU', 'FI', 'Imatra', 61.17, 28.77, 'gas.note-imatra'),
-  P('narva', 'east', 'EE-TSO-0001', 'ITP-00243', 'entry', 'RU', 'EE', 'Narva', 59.38, 28.19, 'gas.note-baltic'),
-  P('varska', 'east', 'EE-TSO-0001', 'ITP-00187', 'entry', 'RU', 'EE', 'Värska', 57.95, 27.63, 'gas.note-baltic'),
+  P('greifswald-opal', 'east', 'DE-TSO-0016', 'ITP-00251', 'entry', 'RU', 'DE', 'Greifswald / OPAL', 54.14, 13.66, 'gas.note-nordstream', 'RU'),
+  P('greifswald-nel', 'east', 'DE-TSO-0017', 'ITP-00247', 'entry', 'RU', 'DE', 'Greifswald / NEL', 54.14, 13.66, 'gas.note-nordstream', 'RU'),
+  P('imatra', 'east', 'FI-TSO-0003', 'ITP-00024', 'entry', 'RU', 'FI', 'Imatra', 61.17, 28.77, 'gas.note-imatra', 'RU'),
+  P('narva', 'east', 'EE-TSO-0001', 'ITP-00243', 'entry', 'RU', 'EE', 'Narva', 59.38, 28.19, 'gas.note-baltic', 'RU'),
+  P('varska', 'east', 'EE-TSO-0001', 'ITP-00187', 'entry', 'RU', 'EE', 'Värska', 57.95, 27.63, 'gas.note-baltic', 'RU'),
   P('kotlovka', 'east', 'LT-TSO-0001', 'ITP-00085', 'entry', 'BY', 'LT', 'Kotlovka', 55.32, 26.30, 'gas.note-kotlovka'),
   P('sudzha', 'east', 'UA-TSO-0001', 'ITP-00184', 'entry', 'RU', 'UA', 'Sudža', 51.19, 35.27, 'gas.note-sudzha'),
   P('kobryn', 'east', 'UA-TSO-0001', 'ITP-00445', 'entry', 'BY', 'UA', 'Kobryn', 52.21, 24.36, 'gas.note-belarus'),
   P('mozyr', 'east', 'UA-TSO-0001', 'ITP-00446', 'entry', 'BY', 'UA', 'Mozyr', 52.05, 29.25, 'gas.note-belarus'),
-  P('isaccea-in', 'east', 'RO-TSO-0001', 'ITP-00087', 'entry', 'UA', 'RO', 'Isaccea I', 45.27, 28.46, 'gas.note-isaccea'),
+  P('isaccea-in', 'east', 'RO-TSO-0001', 'ITP-00087', 'entry', 'UA', 'RO', 'Isaccea I', 45.27, 28.46, 'gas.note-isaccea', 'RU-UA'),
   P('isaccea-out', 'east', 'RO-TSO-0001', 'ITP-00087', 'exit', 'RO', 'UA', 'Isaccea I', 45.27, 28.46),
-  P('bereg-in', 'east', 'HU-TSO-0001', 'ITP-10006', 'entry', 'UA', 'HU', 'VIP Bereg', 48.20, 22.53, 'gas.note-bereg'),
+  P('bereg-in', 'east', 'HU-TSO-0001', 'ITP-10006', 'entry', 'UA', 'HU', 'VIP Bereg', 48.20, 22.53, 'gas.note-bereg', 'RU-UA'),
   P('bereg-out', 'east', 'HU-TSO-0001', 'ITP-10006', 'exit', 'HU', 'UA', 'VIP Bereg', 48.20, 22.53),
   P('ungheni', 'east', 'RO-TSO-0001', 'ITP-00154', 'exit', 'RO', 'MD', 'Ungheni', 47.21, 27.80, 'gas.note-ungheni'),
-  P('kipoi', 'east', 'AL-TSO-0001', 'ITP-00274', 'entry', 'TR', 'GR', 'Kipoi (TAP)', 40.95, 26.30, 'gas.note-tap'),
-  P('kipi', 'east', 'GR-TSO-0001', 'ITP-00046', 'entry', 'TR', 'GR', 'Kipi (ITG)', 40.95, 26.32, 'gas.note-kipi'),
+  P('kipoi', 'east', 'AL-TSO-0001', 'ITP-00274', 'entry', 'TR', 'GR', 'Kipoi (TAP)', 40.95, 26.30, 'gas.note-tap', 'AZ'),
+  P('kipi', 'east', 'GR-TSO-0001', 'ITP-00046', 'entry', 'TR', 'GR', 'Kipi (ITG)', 40.95, 26.32, 'gas.note-kipi', 'AZ'),
 ]);
 
 /** Kľúč smeru tak, ako ho berie ENTSOG `pointDirection` (malé písmená, bez oddeľovačov). */

@@ -19,6 +19,7 @@ import {
 import { buildFlowsModel, fetchGasFlows, formatGwhDay } from './data/gasFlows.js';
 import { GAS_STORAGE_RANGES, buildLngModel, buildStorageModel, fetchGasLng, fetchGasStorage, formatPctFull } from './data/gasStorage.js';
 import { GAS_IMPORT_RANGES, buildImportsModel, fetchGasImports, formatBcm } from './data/gasImports.js';
+import { buildSupplyModel } from './data/gasSupply.js';
 import { GAS_CHART_HEIGHT_PX, drawGasChart, drawSparkline, drawStackedChart } from './gasChart.js';
 
 export const GAS_SPARK_W = 64;
@@ -112,6 +113,25 @@ export function installGasPanel({
   const flowsSource = el(doc, 'div', 'gas-source', '');
   flowsCard.append(flowsTitle, flowsStatus, flowsBody, flowsNote, flowsSource);
 
+  // ── karta ZDROJE DODÁVOK (mix podľa pôvodu z tokov + LNG, D−1) ──
+  const supplyCard = el(doc, 'section', 'gas-card');
+  supplyCard.dataset.card = 'supply';
+  const supplyTitle = el(doc, 'h3', 'gas-card-title', t('gas.supply'));
+  const supplyStatus = el(doc, 'div', 'gas-status', t('gas.supply-loading'));
+  supplyStatus.dataset.state = 'loading';
+  const supplyHead = el(doc, 'div', 'gas-headline');
+  const supplyValue = el(doc, 'span', 'gas-headline-value', '—');
+  const supplyDelta = el(doc, 'span', 'gas-delta', '');
+  const supplyLabel = el(doc, 'span', 'gas-headline-label', '');
+  const supplySub = el(doc, 'span', 'gas-headline-sub', '');
+  supplyHead.append(supplyValue, supplyDelta, supplyLabel, supplySub);
+  const supplyCanvas = el(doc, 'canvas', 'gas-chart');
+  supplyCanvas.height = GAS_CHART_HEIGHT_PX;
+  const supplyLegend = el(doc, 'div', 'gas-legend');
+  const supplyNote = el(doc, 'div', 'gas-note', '');
+  const supplySource = el(doc, 'div', 'gas-source', '');
+  supplyCard.append(supplyTitle, supplyStatus, supplyHead, supplyCanvas, supplyLegend, supplyNote, supplySource);
+
   // ── karta ZÁSOBNÍKY (GIE AGSI+) ─────────────────────────────────
   let storageRange = '1y';
   const storageCard = el(doc, 'section', 'gas-card');
@@ -190,7 +210,7 @@ export function installGasPanel({
   const importsSource = el(doc, 'div', 'gas-source', '');
   importsCard.append(importsTitle, importsStatus, importsHead, importsRanges, importsCanvas, importsLegend, importsNote, importsSource);
 
-  body.append(status, card, flowsCard, storageCard, lngCard, importsCard);
+  body.append(status, card, flowsCard, supplyCard, storageCard, lngCard, importsCard);
 
   // ── render ──────────────────────────────────────────────────────
   /**
@@ -339,6 +359,54 @@ export function installGasPanel({
     const latest = flowsModel.freshness.latestDate ? formatDateLabel(flowsModel.freshness.latestDate, lng) : '';
     flowsStatus.textContent = flowsModel.freshness.stale ? t('gas.stale', { date: latest || '—' }) : t('gas.flows-updated', { date: latest });
     flowsStatus.dataset.state = flowsModel.freshness.stale ? 'stale' : 'ok';
+    renderSupply();
+  }
+
+  // ── mix dodávok (z tokov + LNG; žiadny ďalší dopyt) ─────────────
+  let supplyModel = null;
+
+  /** Legenda skladaného grafu: vzorka, meno, hodnota, podiel, podriadok (dovoz aj mix). */
+  function renderLegend(container, rows) {
+    container.textContent = '';
+    for (const row of rows) {
+      const r = el(doc, 'div', 'gas-legend-row');
+      r.dataset.key = row.key;
+      r.dataset.level = row.level;
+      const swatch = el(doc, 'span', 'gas-swatch');
+      swatch.style.background = row.color || 'transparent';
+      r.append(
+        swatch,
+        el(doc, 'span', 'gas-legend-name', row.name),
+        el(doc, 'span', 'gas-legend-value', row.valueText),
+        el(doc, 'span', 'gas-legend-pct', row.pctText),
+        el(doc, 'span', 'gas-legend-sub', row.sub),
+      );
+      container.appendChild(r);
+    }
+  }
+
+  function renderSupply() {
+    if (!flowsPayload) return;
+    const lng = language();
+    supplyModel = buildSupplyModel({ flows: flowsPayload, lng: lngPayload }, { lang: lng, translate: t, nowMs: nowMs() });
+    if (!supplyModel.ok) {
+      supplyStatus.textContent = t('gas.supply-unavailable');
+      supplyStatus.dataset.state = 'error';
+      return;
+    }
+    const h = supplyModel.headline;
+    supplyValue.textContent = h.totalText;
+    supplyDelta.textContent = h.mcmText;
+    supplyDelta.dataset.dir = 'flat';
+    supplyLabel.textContent = [t('gas.supply-eu'), h.dateText].join(' · ');
+    supplySub.textContent = [h.sharesText, h.completeText].filter(Boolean).join(' · ');
+    renderLegend(supplyLegend, supplyModel.rows);
+    supplyNote.textContent = supplyModel.note;
+    supplySource.textContent = supplyModel.sourceLine;
+    const latest = formatDateLabel(supplyModel.freshness.latestDate, lng);
+    supplyStatus.textContent = supplyModel.freshness.stale ? t('gas.stale', { date: latest }) : t('gas.supply-updated', { date: latest });
+    supplyStatus.dataset.state = supplyModel.freshness.stale ? 'stale' : 'ok';
+    paintStacked(supplyCanvas, supplyModel.layers, supplyModel.days, { format: (v) => formatGwhDay(v, lng), withYear: false });
   }
 
   async function loadFlows() {
@@ -355,6 +423,8 @@ export function installGasPanel({
       if (!flowsPayload) {
         flowsStatus.textContent = t('gas.flows-unavailable');
         flowsStatus.dataset.state = 'error';
+        supplyStatus.textContent = t('gas.supply-unavailable');
+        supplyStatus.dataset.state = 'error';
       }
     }
   }
@@ -432,6 +502,7 @@ export function installGasPanel({
     lngStatus.textContent = lngModel.freshness.stale ? t('gas.stale', { date: latest || '—' }) : t('gas.lng-updated', { date: latest });
     lngStatus.dataset.state = lngModel.freshness.stale ? 'stale' : 'ok';
     paintSeries(lngCanvas, lngModel.chart.series, { format: (v) => formatGwhDay(v, lng), withYear: true });
+    renderSupply();
   }
 
   const gieErrorKey = (error, fallback) => (error?.code === 'no_key' ? 'gas.gie-no-key' : fallback);
@@ -476,12 +547,12 @@ export function installGasPanel({
   let importsPayload = null; let importsModel = null; let importsToken = 0; let importsError = null;
 
   /** Skladaný graf vrstiev (mld m³ za mesiac) s popiskami max/posledný a krajmi osi. */
-  function paintStacked(target, layers, months, { format = (v) => String(v) } = {}) {
+  function paintStacked(target, layers, labels, { format = (v) => String(v), withYear = true } = {}) {
     const sized = sizedContext(target);
     if (!sized) return;
     const { ctx, width } = sized;
     const lng = language();
-    const totals = months.map((_, i) => layers.reduce((acc, l) => acc + (Number.isFinite(l.values[i]) ? l.values[i] : 0), 0));
+    const totals = labels.map((_, i) => layers.reduce((acc, l) => acc + (Number.isFinite(l.values[i]) ? l.values[i] : 0), 0));
     const max = totals.length ? Math.max(...totals) : null;
     const last = totals.length ? totals[totals.length - 1] : null;
     drawStackedChart(ctx, layers, {
@@ -489,8 +560,8 @@ export function installGasPanel({
       height: GAS_CHART_HEIGHT_PX,
       maxLabel: Number.isFinite(max) ? t('gas.max-label', { v: format(max) }) : '',
       lastLabel: Number.isFinite(last) ? t('gas.last-label', { v: format(last) }) : '',
-      startLabel: months.length ? formatDateLabel(months[0], lng) : '',
-      endLabel: months.length ? formatDateLabel(months[months.length - 1], lng) : '',
+      startLabel: labels.length ? formatDateLabel(labels[0], lng, { year: withYear }) : '',
+      endLabel: labels.length ? formatDateLabel(labels[labels.length - 1], lng, { year: withYear }) : '',
     });
   }
 
@@ -514,22 +585,7 @@ export function installGasPanel({
     importsDelta.dataset.dir = h.dir;
     importsLabel.textContent = [t('gas.imports-eu'), h.dateText].join(' · ');
     importsSub.textContent = [h.twhText, h.ruText, h.transitText, h.lngText].filter(Boolean).join(' · ');
-    importsLegend.textContent = '';
-    for (const row of importsModel.rows) {
-      const r = el(doc, 'div', 'gas-legend-row');
-      r.dataset.key = row.key;
-      r.dataset.level = row.level;
-      const swatch = el(doc, 'span', 'gas-swatch');
-      swatch.style.background = row.color || 'transparent';
-      r.append(
-        swatch,
-        el(doc, 'span', 'gas-legend-name', row.name),
-        el(doc, 'span', 'gas-legend-value', row.valueText),
-        el(doc, 'span', 'gas-legend-pct', row.pctText),
-        el(doc, 'span', 'gas-legend-sub', row.sub),
-      );
-      importsLegend.appendChild(r);
-    }
+    renderLegend(importsLegend, importsModel.rows);
     importsNote.textContent = importsModel.note;
     importsSource.textContent = importsModel.sourceLine;
     const latest = importsModel.freshness.latestMonth ? formatDateLabel(importsModel.freshness.latestMonth, lng) : '';
@@ -591,6 +647,10 @@ export function installGasPanel({
           loaded: Boolean(importsPayload), ok: Boolean(importsModel?.ok), status: importsStatus.dataset.state, lastError: importsError,
           range: importsRange, headline: importsModel?.headline?.totalText ?? null, rows: importsModel?.rows?.length ?? 0,
           months: importsModel?.months?.length ?? 0,
+        },
+        supply: {
+          ok: Boolean(supplyModel?.ok), status: supplyStatus.dataset.state, headline: supplyModel?.headline?.totalText ?? null,
+          rows: supplyModel?.rows?.length ?? 0, days: supplyModel?.days?.length ?? 0, lngMissing: supplyModel?.freshness?.lngMissing ?? null,
         },
       };
     },

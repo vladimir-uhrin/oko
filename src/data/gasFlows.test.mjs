@@ -17,20 +17,22 @@ const row = (operatorKey, pointKey, directionKey, day, kwh, flowStatus = 'Provis
   operatorKey, pointKey, directionKey, unit: 'kWh/d', value: kwh, flowStatus, lastUpdateDateTime: `${day}T06:35:00+02:00`,
 });
 
-test('katalóg: 32 smerov, jedinečné id, skupiny sk/east, kľúče ENTSOG, súradnice v Európe', () => {
-  assert.equal(GAS_FLOW_POINTS.length, 32);
-  assert.equal(new Set(GAS_FLOW_POINTS.map((p) => p.id)).size, 32, 'id sú jedinečné');
-  assert.equal(new Set(GAS_FLOW_POINTS.map(pointDirectionKey)).size, 32, 'smery sú jedinečné');
+test('katalóg: 43 smerov, jedinečné id, skupiny sk/west/east, kľúče ENTSOG, súradnice v Európe', () => {
+  assert.equal(GAS_FLOW_POINTS.length, 43);
+  assert.equal(new Set(GAS_FLOW_POINTS.map((p) => p.id)).size, 43, 'id sú jedinečné');
+  assert.equal(new Set(GAS_FLOW_POINTS.map(pointDirectionKey)).size, 43, 'smery sú jedinečné');
   for (const p of GAS_FLOW_POINTS) {
     assert.ok(GAS_FLOW_GROUPS.includes(p.group), p.id);
     assert.match(p.operator, /^[A-Z]{2}-TSO-\d{4}$/, p.id);
     assert.match(p.point, /^(ITP|UGS)-\d{5}$/, p.id);
     assert.ok(['entry', 'exit'].includes(p.dir), p.id);
-    assert.ok(p.lat > 35 && p.lat < 66 && p.lon > 10 && p.lon < 40, `${p.id} leží v Európe`);
+    assert.ok(p.lat > 35 && p.lat < 66 && p.lon > -6 && p.lon < 40, `${p.id} leží v Európe (Tarifa −5,6° až Sudža 35°)`);
     assert.ok(p.name && p.from && p.to, p.id);
   }
   assert.equal(pointDirectionKey(GAS_FLOW_POINTS[0]), 'sk-tso-0001itp-00051entry', 'malé písmená bez oddeľovačov — tak to berie API');
   assert.equal(GAS_FLOW_POINTS.filter((p) => p.group === 'sk').length, 14);
+  assert.equal(GAS_FLOW_POINTS.filter((p) => p.group === 'west').length, 11);
+  assert.deepEqual(GAS_FLOW_POINTS.filter((p) => p.origin).map((p) => p.origin).filter((v, i, a) => a.indexOf(v) === i), ['RU-UA', 'NO', 'UK', 'DZ', 'LY', 'RU', 'AZ'], 'pôvody pre mix dodávok');
   const sudzha = GAS_FLOW_POINTS.find((p) => p.id === 'sudzha');
   assert.deepEqual([sudzha.operator, sudzha.point, sudzha.dir, sudzha.from, sudzha.to], ['UA-TSO-0001', 'ITP-00184', 'entry', 'RU', 'UA'], 'ukrajinský operátor je v ENTSOG (overené naživo)');
 });
@@ -40,7 +42,7 @@ test('flowWindow a entsogFlowsUrl: 31 dní späť po zajtrajšok, jeden dopyt so
   const url = new URL(entsogFlowsUrl(GAS_FLOW_POINTS, flowWindow(NOW)));
   assert.equal(url.origin + url.pathname, ENTSOG_OPERATIONAL_DATA_URL);
   const pd = url.searchParams.get('pointDirection').split(',');
-  assert.equal(pd.length, 32);
+  assert.equal(pd.length, 43);
   assert.ok(pd.includes('bg-tso-0001itp-00549entry'), 'TurkStream (Strandža 2)');
   assert.equal(url.searchParams.get('indicator'), 'Physical Flow');
   assert.equal(url.searchParams.get('periodType'), 'day');
@@ -77,7 +79,7 @@ test('normalizeFlowRows a summarizeSeries: kWh/d → GWh/d, deň z periodFrom, d
 test('buildFlowsPayload: katalóg + rady + súhrny, smer bez riadkov má prázdny rad a null; citácia podľa čl. 5.2', () => {
   const rows = [row('BG-TSO-0001', 'ITP-00549', 'entry', '2026-09-10', 44_100_000), row('UA-TSO-0001', 'ITP-00184', 'entry', '2026-09-10', 0)];
   const payload = buildFlowsPayload(rows, { fetchedAt: NOW, window: flowWindow(NOW) });
-  assert.equal(payload.points.length, 32);
+  assert.equal(payload.points.length, 43);
   const ts = payload.points.find((p) => p.id === 'strandzha2');
   assert.equal(ts.latest.gwh, 44.1);
   assert.equal(ts.avg7, 44.1);
@@ -111,7 +113,7 @@ test('buildFlowsModel: skupiny v poradí katalógu, úrovne flow/zero/nodata, te
   const payload = buildFlowsPayload(rows, { fetchedAt: NOW });
   const m = buildFlowsModel(payload, { lang: 'sk', translate: tKey, nowMs: NOW });
   assert.equal(m.ok, true);
-  assert.deepEqual(m.groups.map((g) => [g.key, g.title, g.rows.length]), [['sk', 'gas.flows-sk', 14], ['east', 'gas.flows-east', 18]]);
+  assert.deepEqual(m.groups.map((g) => [g.key, g.title, g.rows.length]), [['sk', 'gas.flows-sk', 14], ['west', 'gas.flows-west', 11], ['east', 'gas.flows-east', 18]]);
   const lanzhot = m.groups[0].rows[0];
   assert.equal(lanzhot.id, 'lanzhot-in');
   assert.equal(lanzhot.route, 'CZ → SK');
@@ -127,7 +129,7 @@ test('buildFlowsModel: skupiny v poradí katalógu, úrovne flow/zero/nodata, te
   assert.equal(kapusany.text, '0 GWh/d');
   assert.equal(kapusany.mcmText, '');
   assert.equal(kapusany.note, 'gas.note-kapusany');
-  const mozyr = m.groups[1].rows.find((r) => r.id === 'mozyr');
+  const mozyr = m.groups[2].rows.find((r) => r.id === 'mozyr');
   assert.equal(mozyr.level, 'nodata');
   assert.equal(mozyr.text, 'gas.flow-nodata');
   assert.equal(m.note, 'gas.flows-note');
