@@ -10790,3 +10790,22 @@ body.scene-playback-mode #first-run-launcher {
 }
 .gas-flow-sub { grid-area: sub; }
 .gas-flow-note { grid-area: note; opacity: 0.85; }
+.gas-headline-sub {
+  flex-basis: 100%;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.gas-bar {
+  grid-area: spark;
+  align-self: center;
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(64, 200, 230, 0.15);
+  overflow: hidden;
+}
+.gas-bar[hidden] { display: none; }
+.gas-bar-fill { display: block; height: 100%; background: rgba(57, 208, 255, 0.75); }

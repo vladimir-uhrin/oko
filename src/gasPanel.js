@@ -16,7 +16,8 @@ import { currentLanguage } from './i18n.js';
 import {
   GAS_PRICE_RANGES, buildPricesModel, fetchGasPrices, formatDateLabel, formatEurMwh,
 } from './data/gasPrices.js';
-import { buildFlowsModel, fetchGasFlows } from './data/gasFlows.js';
+import { buildFlowsModel, fetchGasFlows, formatGwhDay } from './data/gasFlows.js';
+import { GAS_STORAGE_RANGES, buildLngModel, buildStorageModel, fetchGasLng, fetchGasStorage, formatPctFull } from './data/gasStorage.js';
 import { GAS_CHART_HEIGHT_PX, drawGasChart, drawSparkline } from './gasChart.js';
 
 export const GAS_SPARK_W = 64;
@@ -50,7 +51,7 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 export function installGasPanel({
   doc = globalThis.document,
   t,
-  api = { prices: fetchGasPrices, flows: fetchGasFlows },
+  api = { prices: fetchGasPrices, flows: fetchGasFlows, storage: fetchGasStorage, lng: fetchGasLng },
   lang = null,
   nowMs = () => Date.now(),
   refreshMs = GAS_PANEL_REFRESH_MS,
@@ -108,32 +109,83 @@ export function installGasPanel({
   const flowsNote = el(doc, 'div', 'gas-note', '');
   const flowsSource = el(doc, 'div', 'gas-source', '');
   flowsCard.append(flowsTitle, flowsStatus, flowsBody, flowsNote, flowsSource);
-  body.append(status, card, flowsCard);
+
+  // ── karta ZÁSOBNÍKY (GIE AGSI+) ─────────────────────────────────
+  let storageRange = '1y';
+  const storageCard = el(doc, 'section', 'gas-card');
+  storageCard.dataset.card = 'storage';
+  const storageTitle = el(doc, 'h3', 'gas-card-title', t('gas.storage'));
+  const storageStatus = el(doc, 'div', 'gas-status', t('gas.storage-loading'));
+  storageStatus.dataset.state = 'loading';
+  const storageHead = el(doc, 'div', 'gas-headline');
+  const storageValue = el(doc, 'span', 'gas-headline-value', '—');
+  const storageDelta = el(doc, 'span', 'gas-delta', '');
+  const storageLabel = el(doc, 'span', 'gas-headline-label', '');
+  const storageSub = el(doc, 'span', 'gas-headline-sub', '');
+  storageHead.append(storageValue, storageDelta, storageLabel, storageSub);
+  const storageRanges = el(doc, 'div', 'gas-ranges');
+  const storageRangeBtns = GAS_STORAGE_RANGES.map((r) => {
+    const b = el(doc, 'button', 'gas-range', t(`gas.range-${r}`));
+    b.type = 'button';
+    b.dataset.range = r;
+    b.setAttribute('aria-pressed', r === storageRange ? 'true' : 'false');
+    b.addEventListener('click', () => { storageRange = r; renderStorage(); });
+    storageRanges.appendChild(b);
+    return b;
+  });
+  const storageCanvas = el(doc, 'canvas', 'gas-chart');
+  storageCanvas.height = GAS_CHART_HEIGHT_PX;
+  const storageRows = el(doc, 'div', 'gas-flows');
+  const storageNote = el(doc, 'div', 'gas-note', '');
+  const storageSource = el(doc, 'div', 'gas-source', '');
+  storageCard.append(storageTitle, storageStatus, storageHead, storageRanges, storageCanvas, storageRows, storageNote, storageSource);
+
+  // ── karta LNG (GIE ALSI) ────────────────────────────────────────
+  const lngCard = el(doc, 'section', 'gas-card');
+  lngCard.dataset.card = 'lng';
+  const lngTitle = el(doc, 'h3', 'gas-card-title', t('gas.lng'));
+  const lngStatus = el(doc, 'div', 'gas-status', t('gas.lng-loading'));
+  lngStatus.dataset.state = 'loading';
+  const lngHead = el(doc, 'div', 'gas-headline');
+  const lngValue = el(doc, 'span', 'gas-headline-value', '—');
+  const lngLabel = el(doc, 'span', 'gas-headline-label', '');
+  const lngSub = el(doc, 'span', 'gas-headline-sub', '');
+  lngHead.append(lngValue, lngLabel, lngSub);
+  const lngCanvas = el(doc, 'canvas', 'gas-chart');
+  lngCanvas.height = GAS_CHART_HEIGHT_PX;
+  const lngRows = el(doc, 'div', 'gas-flows');
+  const lngNote = el(doc, 'div', 'gas-note', '');
+  const lngSource = el(doc, 'div', 'gas-source', '');
+  lngCard.append(lngTitle, lngStatus, lngHead, lngCanvas, lngRows, lngNote, lngSource);
+
+  body.append(status, card, flowsCard, storageCard, lngCard);
 
   // ── render ──────────────────────────────────────────────────────
-  function drawChart() {
-    const ctx = canvas.getContext?.('2d');
-    if (!ctx || !model?.ok) return;
-    const width = Math.max(120, Math.floor(canvas.clientWidth || body.clientWidth || 320));
+  /**
+   * Spoločné kreslenie časového grafu do plátna karty (ceny, zásobníky, LNG).
+   * „posledná“ = najnovší bod cez všetky rady (v MAX cien je to denný TTF, nie
+   * mesačný IMF priemer spred dvoch mesiacov).
+   */
+  function paintSeries(target, series, { format = (v) => String(v), withYear = true } = {}) {
+    const ctx = target.getContext?.('2d');
+    if (!ctx) return;
+    const width = Math.max(120, Math.floor(target.clientWidth || body.clientWidth || 320));
     const dpr = Math.min(3, globalThis.devicePixelRatio || 1);
-    if (canvas.width !== Math.round(width * dpr)) canvas.width = Math.round(width * dpr);
-    if (canvas.height !== Math.round(GAS_CHART_HEIGHT_PX * dpr)) canvas.height = Math.round(GAS_CHART_HEIGHT_PX * dpr);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${GAS_CHART_HEIGHT_PX}px`;
+    if (target.width !== Math.round(width * dpr)) target.width = Math.round(width * dpr);
+    if (target.height !== Math.round(GAS_CHART_HEIGHT_PX * dpr)) target.height = Math.round(GAS_CHART_HEIGHT_PX * dpr);
+    target.style.width = `${width}px`;
+    target.style.height = `${GAS_CHART_HEIGHT_PX}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const series = model.chart.series;
     const lng = language();
-    // „posledná“ = najnovší bod cez všetky rady (v MAX je to denný TTF, nie
-    // mesačný IMF priemer spred dvoch mesiacov).
     let t0 = Infinity; let t1 = -Infinity; let vMax = -Infinity; let last = null;
-    for (const s of series) for (const p of s.points) { if (p.t < t0) t0 = p.t; if (p.t > t1) { t1 = p.t; last = p; } if (p.v > vMax) vMax = p.v; }
-    drawGasChart(ctx, series, {
+    for (const s of series || []) for (const p of s.points) { if (p.t < t0) t0 = p.t; if (p.t > t1) { t1 = p.t; last = p; } if (p.v > vMax) vMax = p.v; }
+    drawGasChart(ctx, series || [], {
       width,
       height: GAS_CHART_HEIGHT_PX,
-      maxLabel: Number.isFinite(vMax) ? t('gas.max-label', { v: formatEurMwh(vMax, lng) }) : '',
-      lastLabel: last ? t('gas.last-label', { v: formatEurMwh(last.v, lng) }) : '',
-      startLabel: Number.isFinite(t0) ? formatDateLabel(isoDay(t0), lng, { year: range !== '1m' }) : '',
-      endLabel: Number.isFinite(t1) ? formatDateLabel(isoDay(t1), lng, { year: range !== '1m' }) : '',
+      maxLabel: Number.isFinite(vMax) ? t('gas.max-label', { v: format(vMax) }) : '',
+      lastLabel: last ? t('gas.last-label', { v: format(last.v) }) : '',
+      startLabel: Number.isFinite(t0) ? formatDateLabel(isoDay(t0), lng, { year: withYear }) : '',
+      endLabel: Number.isFinite(t1) ? formatDateLabel(isoDay(t1), lng, { year: withYear }) : '',
     });
   }
 
@@ -173,7 +225,7 @@ export function installGasPanel({
     const latest = model.freshness.latestDate ? formatDateLabel(model.freshness.latestDate, lng) : '';
     status.textContent = model.freshness.stale ? t('gas.stale', { date: latest }) : t('gas.updated', { date: latest });
     status.dataset.state = model.freshness.stale ? 'stale' : 'ok';
-    drawChart();
+    paintSeries(canvas, model.chart.series, { format: (v) => formatEurMwh(v, lng), withYear: range !== '1m' });
   }
 
   async function loadPrices() {
@@ -257,8 +309,121 @@ export function installGasPanel({
     }
   }
 
+  // ── zásobníky a LNG ─────────────────────────────────────────────
+  let storagePayload = null; let storageModel = null; let storageToken = 0; let storageError = null;
+  let lngPayload = null; let lngModel = null; let lngToken = 0; let lngError = null;
+
+  /** Riadky krajín: meno + hodnota, voliteľný pás naplnenia (% pracovného objemu), podriadok. */
+  function renderCountryRows(container, rows, { valueOf, barOf = null }) {
+    container.textContent = '';
+    for (const row of rows) {
+      const r = el(doc, 'div', 'gas-flow-row');
+      r.dataset.level = row.level;
+      r.dataset.id = row.code;
+      const head = el(doc, 'div', 'gas-flow-head');
+      head.append(el(doc, 'span', 'gas-flow-route', row.name), el(doc, 'span', 'gas-flow-value', valueOf(row)));
+      const pct = barOf ? barOf(row) : null;
+      const bar = el(doc, 'span', 'gas-bar');
+      const fill = el(doc, 'span', 'gas-bar-fill');
+      fill.style.width = `${Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0}%`;
+      bar.appendChild(fill);
+      bar.hidden = !Number.isFinite(pct);
+      r.append(head, bar, el(doc, 'span', 'gas-flow-sub', row.sub || ''));
+      container.appendChild(r);
+    }
+  }
+
+  function renderStorage() {
+    for (const b of storageRangeBtns) {
+      const active = b.dataset.range === storageRange;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    if (!storagePayload) return;
+    const lng = language();
+    storageModel = buildStorageModel(storagePayload, { lang: lng, translate: t, nowMs: nowMs(), range: storageRange });
+    if (!storageModel.ok) {
+      storageStatus.textContent = t('gas.storage-unavailable');
+      storageStatus.dataset.state = 'error';
+      return;
+    }
+    const h = storageModel.headline;
+    storageValue.textContent = h.fullText;
+    storageDelta.textContent = h.netText;
+    storageDelta.dataset.dir = h.dir;
+    storageLabel.textContent = [t('gas.storage-eu'), h.dateText, h.statusText].filter(Boolean).join(' · ');
+    storageSub.textContent = [h.twhText, h.yearAgoText, h.daysText].filter(Boolean).join(' · ');
+    renderCountryRows(storageRows, storageModel.rows, { valueOf: (r) => r.fullText, barOf: (r) => r.fullPct });
+    storageNote.textContent = storageModel.note;
+    storageSource.textContent = storageModel.sourceLine;
+    const latest = storageModel.freshness.latestDate ? formatDateLabel(storageModel.freshness.latestDate, lng) : '';
+    storageStatus.textContent = storageModel.freshness.stale ? t('gas.stale', { date: latest || '—' }) : t('gas.storage-updated', { date: latest });
+    storageStatus.dataset.state = storageModel.freshness.stale ? 'stale' : 'ok';
+    paintSeries(storageCanvas, storageModel.chart.series, { format: (v) => formatPctFull(v, lng), withYear: true });
+  }
+
+  function renderLng() {
+    if (!lngPayload) return;
+    const lng = language();
+    lngModel = buildLngModel(lngPayload, { lang: lng, translate: t, nowMs: nowMs() });
+    if (!lngModel.ok) {
+      lngStatus.textContent = t('gas.lng-unavailable');
+      lngStatus.dataset.state = 'error';
+      return;
+    }
+    const h = lngModel.headline;
+    lngValue.textContent = h.sendOutText;
+    lngLabel.textContent = [t('gas.lng-eu'), h.dateText, h.statusText].filter(Boolean).join(' · ');
+    lngSub.textContent = h.inventoryText;
+    renderCountryRows(lngRows, lngModel.rows, { valueOf: (r) => r.sendOutText });
+    lngNote.textContent = lngModel.note;
+    lngSource.textContent = lngModel.sourceLine;
+    const latest = lngModel.freshness.latestDate ? formatDateLabel(lngModel.freshness.latestDate, lng) : '';
+    lngStatus.textContent = lngModel.freshness.stale ? t('gas.stale', { date: latest || '—' }) : t('gas.lng-updated', { date: latest });
+    lngStatus.dataset.state = lngModel.freshness.stale ? 'stale' : 'ok';
+    paintSeries(lngCanvas, lngModel.chart.series, { format: (v) => formatGwhDay(v, lng), withYear: true });
+  }
+
+  const gieErrorKey = (error, fallback) => (error?.code === 'no_key' ? 'gas.gie-no-key' : fallback);
+
+  async function loadStorage() {
+    const token = ++storageToken;
+    try {
+      const fresh = await api.storage();
+      if (token !== storageToken) return;
+      storagePayload = fresh;
+      storageError = null;
+      renderStorage();
+    } catch (error) {
+      if (token !== storageToken) return;
+      storageError = error?.message || String(error);
+      if (!storagePayload) {
+        storageStatus.textContent = t(gieErrorKey(error, 'gas.storage-unavailable'));
+        storageStatus.dataset.state = 'error';
+      }
+    }
+  }
+
+  async function loadLng() {
+    const token = ++lngToken;
+    try {
+      const fresh = await api.lng();
+      if (token !== lngToken) return;
+      lngPayload = fresh;
+      lngError = null;
+      renderLng();
+    } catch (error) {
+      if (token !== lngToken) return;
+      lngError = error?.message || String(error);
+      if (!lngPayload) {
+        lngStatus.textContent = t(gieErrorKey(error, 'gas.lng-unavailable'));
+        lngStatus.dataset.state = 'error';
+      }
+    }
+  }
+
   function load() {
-    return Promise.all([loadPrices(), loadFlows()]);
+    return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng()]);
   }
 
   const timer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void load(); }, refreshMs) : null;
@@ -269,6 +434,7 @@ export function installGasPanel({
     open() { setCollapsed?.(false); },
     refresh: load,
     setRange(next) { if (GAS_PRICE_RANGES.includes(next)) { range = next; render(); } },
+    setStorageRange(next) { if (GAS_STORAGE_RANGES.includes(next)) { storageRange = next; renderStorage(); } },
     _getStateForTest() {
       return {
         range, loaded: Boolean(payload), ok: Boolean(model?.ok), status: status.dataset.state, lastError,
@@ -276,6 +442,15 @@ export function installGasPanel({
         flows: {
           loaded: Boolean(flowsPayload), ok: Boolean(flowsModel?.ok), status: flowsStatus.dataset.state, lastError: flowsError,
           rows: flowsModel?.groups?.reduce((n, g) => n + g.rows.length, 0) ?? 0,
+        },
+        storage: {
+          loaded: Boolean(storagePayload), ok: Boolean(storageModel?.ok), status: storageStatus.dataset.state, lastError: storageError,
+          range: storageRange, headline: storageModel?.headline?.fullText ?? null, rows: storageModel?.rows?.length ?? 0,
+          points: storageModel?.chart?.series?.[0]?.points?.length ?? 0,
+        },
+        lng: {
+          loaded: Boolean(lngPayload), ok: Boolean(lngModel?.ok), status: lngStatus.dataset.state, lastError: lngError,
+          headline: lngModel?.headline?.sendOutText ?? null, rows: lngModel?.rows?.length ?? 0,
         },
       };
     },

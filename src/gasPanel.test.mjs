@@ -9,6 +9,7 @@ import { GAS_CHART_HEIGHT_PX, chartExtent, drawGasChart, seriesStyle } from './g
 import { CHART_COLORS, CHART_PAD } from './flightHistoryChart.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 import { buildFlowsPayload } from './data/gasFlows.js';
+import { buildGiePayload } from './data/gasStorage.js';
 
 const t = (key, vars) => (vars && Object.keys(vars).length ? `${key} ${JSON.stringify(vars)}` : key);
 const flush = async () => { for (let i = 0; i < 3; i += 1) await new Promise((r) => setImmediate(r)); };
@@ -32,6 +33,17 @@ const FLOWS = buildFlowsPayload([
   flowRow('UA-TSO-0001', 'ITP-00184', 'entry', '2026-09-11', 0),
   flowRow('BG-TSO-0001', 'ITP-00549', 'entry', '2026-09-11', 44_100_000),
 ], { fetchedAt: NOW });
+const agsiRow = (code, day, full, gis, wgv, inj, wd, status = 'C') => ({ name: code, code, gasDayStart: day, gasInStorage: gis, workingGasVolume: wgv, injection: inj, withdrawal: wd, full, status, trend: '0.1', consumptionFull: '21.79', updatedAt: `${day} 08:00:00` });
+const euDays = (n, make) => Array.from({ length: n }, (_, i) => make(new Date(Date.UTC(2026, 8, 11) - i * 86_400_000).toISOString().slice(0, 10), i));
+const STORAGE = buildGiePayload('agsi', {
+  eu: euDays(400, (day, i) => agsiRow('eu', day, String(60 + (i % 20)), '766.9528', '1131.5658', '2020.25', '652.4', i === 0 ? 'E' : 'C')),
+  SK: [agsiRow('SK', '2026-09-11', '52.09', '19.1879', '36.839', '54.71', '34.8')],
+  UA: [agsiRow('UA', '2026-09-11', '34.75', '111.5264', '320.9532', '374.94', '0')],
+}, { fetchedAt: NOW, errors: { DE: 'upstream HTTP 500' } });
+const LNG = buildGiePayload('alsi', {
+  eu: euDays(400, (day, i) => ({ name: 'EU', code: 'eu', gasDayStart: day, inventory: { gwh: '30579.26' }, dtmi: { gwh: '62917.06' }, sendOut: String(3000 + (i % 5) * 20), status: 'E' })),
+  PL: [{ name: 'Poland', code: 'PL', gasDayStart: '2026-09-11', inventory: { gwh: '3289' }, dtmi: { gwh: '3289' }, sendOut: '179', status: 'C' }],
+}, { fetchedAt: NOW });
 
 test('gasChart: rozsah s rezervou, štýly podľa poradia, kreslenie = mriežka + plocha + čiary + popisky; bez radov len mriežka', () => {
   const series = [
@@ -99,6 +111,8 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
     api: {
       prices: async () => { calls.push('prices'); return PAYLOAD; },
       flows: async () => { calls.push('flows'); return FLOWS; },
+      storage: async () => { calls.push('storage'); return STORAGE; },
+      lng: async () => { calls.push('lng'); return LNG; },
     },
     setIntervalImpl: (fn, ms) => { intervals.push(ms); return 42; },
     clearIntervalImpl: (id) => { cleared = id; },
@@ -113,7 +127,8 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(st.headline, '79,5 €/MWh');
   assert.deepEqual(st.series, ['ttf', 'eu']);
   assert.deepEqual(st.flows, { loaded: true, ok: true, status: 'ok', lastError: null, rows: 32 }, 'karta TOKY má všetkých 32 smerov katalógu');
-  const flowRows = find(doc.root.body, (n) => n.className === 'gas-flow-row');
+  const flowsCardEl = find(doc.root.body, (n) => n.dataset.card === 'flows')[0];
+  const flowRows = find(flowsCardEl, (n) => n.className === 'gas-flow-row');
   assert.equal(flowRows.length, 32);
   assert.equal(flowRows[0].dataset.id, 'lanzhot-in');
   assert.equal(flowRows[0].dataset.level, 'flow');
@@ -126,6 +141,36 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   const flowsStatus = find(doc.root.body, (n) => n.className === 'gas-status')[1];
   assert.equal(flowsStatus.textContent, 'gas.flows-updated {"date":"11. 9. 2026"}');
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-source')[1].textContent, 'ENTSOG TP 13-09-2026 https://transparency.entsog.eu/');
+  const { points: storagePoints, ...storageState } = st.storage;
+  assert.deepEqual(storageState, { loaded: true, ok: true, status: 'ok', lastError: null, range: '1y', headline: '60,0 %', rows: 10 }, 'karta ZÁSOBNÍKY: EÚ titulok, 10 krajín');
+  assert.ok(storagePoints >= 360 && storagePoints <= 367, `1R = rok bodov (${storagePoints})`);
+  const storageCard = find(doc.root.body, (n) => n.dataset.card === 'storage')[0];
+  assert.equal(find(storageCard, (n) => n.className === 'gas-headline-value')[0].textContent, '60,0 %');
+  assert.equal(find(storageCard, (n) => n.className === 'gas-delta')[0].textContent, 'gas.storage-net-in {"v":"1 368 GWh/d"}');
+  assert.equal(find(storageCard, (n) => n.className === 'gas-headline-label')[0].textContent, 'gas.storage-eu · 11. 9. 2026 · gas.status-estimated');
+  assert.match(find(storageCard, (n) => n.className === 'gas-headline-sub')[0].textContent, /^gas\.storage-twh .* · gas\.storage-year-ago .* · gas\.storage-days \{"d":"80"\}$/);
+  const storageRows = find(storageCard, (n) => n.className === 'gas-flow-row');
+  assert.equal(storageRows.length, 10);
+  assert.deepEqual([storageRows[0].dataset.id, storageRows[0].dataset.level, find(storageRows[0], (n) => n.className === 'gas-flow-value')[0].textContent], ['SK', 'ok', '52,1 %']);
+  assert.equal(find(storageRows[0], (n) => n.className === 'gas-bar-fill')[0].style.width, '52.09%', 'pás naplnenia');
+  assert.equal(find(storageRows[0], (n) => n.className === 'gas-bar')[0].hidden, false);
+  const de = storageRows.find((r) => r.dataset.id === 'DE');
+  assert.equal(de.dataset.level, 'nodata');
+  assert.equal(find(de, (n) => n.className === 'gas-bar')[0].hidden, true, 'bez dát bez pásu');
+  assert.equal(find(de, (n) => n.className === 'gas-flow-sub')[0].textContent, 'upstream HTTP 500');
+  const storageBtns = find(storageCard, (n) => n.className === 'gas-range');
+  assert.deepEqual(storageBtns.map((b) => b.textContent), ['gas.range-1y', 'gas.range-5y']);
+  storageBtns[1].listeners.click[0]();
+  assert.equal(panel._getStateForTest().storage.range, '5y');
+  assert.equal(panel._getStateForTest().storage.points, 400, '5R = celá história fixtúry');
+  assert.equal(find(storageCard, (n) => n.className === 'gas-status')[0].textContent, 'gas.storage-updated {"date":"11. 9. 2026"}');
+  assert.equal(find(storageCard, (n) => n.className === 'gas-source')[0].textContent, 'gas.gie-source', 'GIE musí byť uvedené ako zdroj');
+  assert.deepEqual(st.lng, { loaded: true, ok: true, status: 'ok', lastError: null, headline: '3 000 GWh/d', rows: 10 }, 'karta LNG');
+  const lngCard = find(doc.root.body, (n) => n.dataset.card === 'lng')[0];
+  assert.equal(find(lngCard, (n) => n.className === 'gas-headline-sub')[0].textContent, 'gas.lng-inventory {"v":"30 579 GWh","b":"62 917 GWh","p":"48,6 %"}');
+  const lngRows = find(lngCard, (n) => n.className === 'gas-flow-row');
+  assert.deepEqual([lngRows[0].dataset.id, lngRows[0].dataset.level, find(lngRows[0], (n) => n.className === 'gas-flow-value')[0].textContent], ['PL', 'ok', '179 GWh/d']);
+  assert.equal(find(lngRows[0], (n) => n.className === 'gas-bar')[0].hidden, true, 'LNG riadky bez pásu');
   const body = doc.root.body;
   const value = find(body, (n) => n.className === 'gas-headline-value')[0];
   assert.equal(value.textContent, '79,5 €/MWh');
@@ -138,7 +183,8 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.deepEqual(sub, ['77,2 €/MWh', '75,5 €/MWh', '78,0 €/MWh']);
   const status = find(body, (n) => n.className === 'gas-status')[0];
   assert.equal(status.textContent, 'gas.updated {"date":"11. 9. 2026"}');
-  const buttons = find(body, (n) => n.className === 'gas-range');
+  const pricesCardEl = find(body, (n) => n.dataset.card === 'prices')[0];
+  const buttons = find(pricesCardEl, (n) => n.className === 'gas-range');
   assert.deepEqual(buttons.map((b) => b.textContent), ['gas.range-1m', 'gas.range-1y', 'gas.range-max']);
   assert.equal(buttons[0].attributes['aria-pressed'], 'true');
   buttons[2].listeners.click[0]();
@@ -153,7 +199,7 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(find(body, (n) => n.className === 'gas-note')[0].textContent, 'gas.ttf-derived-note');
   panel.destroy();
   assert.equal(cleared, 42);
-  assert.deepEqual(calls, ['prices', 'flows'], 'obe karty sa načítajú naraz, každá raz');
+  assert.deepEqual(calls, ['prices', 'flows', 'storage', 'lng'], 'všetky karty sa načítajú naraz, každá raz');
 });
 
 test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null; open() otvorí panel', async () => {
@@ -161,7 +207,12 @@ test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null
   let collapsed = null;
   const panel = installGasPanel({
     doc, t, lang: 'sk', refreshMs: 0,
-    api: { prices: async () => { throw new Error('HTTP 502'); }, flows: async () => { throw new Error('HTTP 429'); } },
+    api: {
+      prices: async () => { throw new Error('HTTP 502'); },
+      flows: async () => { throw new Error('HTTP 429'); },
+      storage: async () => { const e = new Error('no_key'); e.status = 503; e.code = 'no_key'; throw e; },
+      lng: async () => { throw new Error('HTTP 504'); },
+    },
     setCollapsed: (v) => { collapsed = v; },
   });
   await flush();
@@ -172,6 +223,10 @@ test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[0].textContent, 'gas.unavailable');
   assert.deepEqual(st.flows, { loaded: false, ok: false, status: 'error', lastError: 'HTTP 429', rows: 0 }, 'karta TOKY zlyhá nezávisle od cien');
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[1].textContent, 'gas.flows-unavailable');
+  assert.equal(st.storage.status, 'error');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[2].textContent, 'gas.gie-no-key', '503 no_key = hláška o chýbajúcom kľúči, nie generická');
+  assert.equal(st.lng.status, 'error');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[3].textContent, 'gas.lng-unavailable');
   panel.open();
   assert.equal(collapsed, false);
   assert.equal(installGasPanel({ doc: { getElementById: () => null }, t }), null);
@@ -209,6 +264,17 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
     assert.ok(SK_STRINGS[key], `SK ${key}`);
   }
   assert.match(SK_STRINGS['gas.flows-updated'], /predbežné, D−1/, 'toky sa nikdy nevydávajú za živé');
+  assert.match(vite, /middlewares\.use\('\/api\/gas\/storage', withGieKey\(storage\)\)/);
+  assert.match(vite, /middlewares\.use\('\/api\/gas\/lng', withGieKey\(lng\)\)/);
+  assert.match(vite, /headers: \{ 'x-key': gieKey\(\), 'User-Agent': USER_AGENT/, 'kľúč GIE ide len v hlavičke zo servera');
+  assert.match(vite, /error: 'no_key', detail: 'GIE_API_KEY missing'/, 'bez kľúča 503 no_key');
+  assert.match(vite, /GIE_TTL_MS = 3 \* 60 \* 60_000/);
+  assert.ok(!/process\.env/.test(readFileSync(new URL('./data/gasStorage.js', import.meta.url), 'utf8')), 'klient kľúč nikdy nečíta (žiadne process.env v klientskom module)');
+  for (const key of ['gas.storage', 'gas.storage-loading', 'gas.storage-unavailable', 'gas.storage-updated', 'gas.storage-eu', 'gas.storage-twh', 'gas.storage-net-in', 'gas.storage-net-out', 'gas.storage-year-ago', 'gas.storage-days', 'gas.storage-note', 'gas.status-estimated', 'gas.status-confirmed', 'gas.range-5y', 'gas.lng', 'gas.lng-loading', 'gas.lng-unavailable', 'gas.lng-updated', 'gas.lng-eu', 'gas.lng-inventory', 'gas.lng-tanks', 'gas.lng-note', 'gas.gie-no-key', 'gas.gie-source']) {
+    assert.ok(EN_STRINGS[key], `EN ${key}`);
+    assert.ok(SK_STRINGS[key], `SK ${key}`);
+  }
+  assert.match(SK_STRINGS['gas.gie-source'], /GIE AGSI\+ \/ ALSI/, 'GIE ako zdroj je podmienka API');
   assert.match(vite, /OKO-gas\/0\.1 \(https:\/\/github\.com\/vladouh76; vladouh76@gmail\.com\)/, 'User-Agent s kontaktom');
   assert.match(vite, /parseAcerCsv\(await fetchText\(ACER_HISTORICAL_URL\)\)/);
   assert.ok(!/eex\.com|theice\.com/i.test(vite.slice(vite.indexOf('function gasProxy('), vite.indexOf('function gasProxy(') + 8000)), 'žiadne burzové zdroje bez licencie');

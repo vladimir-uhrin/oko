@@ -60,6 +60,7 @@ import {
   ACER_HISTORICAL_URL, FRED_EU_GAS_SERIES, FRED_USD_PER_EUR_SERIES, fredCsvUrl, monthlyEurPerMwh, parseAcerCsv, parseFredCsv,
 } from './src/data/gasPrices.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
+import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -4361,6 +4362,49 @@ function gasProxy() {
     }
     return readResponseTextCapped(upstream, MAX_BYTES);
   }
+  // GIE AGSI+ (zásobníky) a ALSI (LNG): kľúč GIE_API_KEY z .env len v hlavičke
+  // x-key zo servera; bez kľúča 503 no_key (panel to prizná). GIE publikuje
+  // raz denne (EÚ agregát večer, krajiny ráno) → TTL 3 h, stale 7 dní.
+  // Podmienka GIE: „a clear indication on GIE as data source is mandatory"
+  // → GIE_ATTRIBUTION v päte karty.
+  const STORAGE_PATH = path.join(CACHE_DIR, 'storage.json');
+  const LNG_PATH = path.join(CACHE_DIR, 'lng.json');
+  const GIE_TTL_MS = 3 * 60 * 60_000;
+  const GIE_STALE_MAX_MS = 7 * 24 * 60 * 60_000;
+  const gieKey = () => String(process.env.GIE_API_KEY || '').trim();
+  async function fetchGie(url) {
+    const upstream = await fetch(url, {
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      headers: { 'x-key': gieKey(), 'User-Agent': USER_AGENT, Accept: 'application/json' },
+    });
+    if (!upstream.ok) {
+      await readResponseTextCapped(upstream, 64 * 1024).catch(() => '');
+      const error = new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')');
+      error.upstreamStatus = upstream.status;
+      throw error;
+    }
+    return JSON.parse(await readResponseTextCapped(upstream, MAX_BYTES));
+  }
+  async function buildGie(kind) {
+    const started = Date.now();
+    const plan = kind === 'alsi' ? alsiPlan(Date.now()) : agsiPlan(Date.now());
+    const results = {};
+    const errors = {};
+    for (const step of plan) {
+      try {
+        const json = await fetchGie(step.url);
+        results[step.key] = Array.isArray(json?.data) ? json.data : [];
+      } catch (error) {
+        errors[step.key] = String(error?.message || error);
+        if (step.key === 'eu') throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    const payload = buildGiePayload(kind, results, { fetchedAt: Date.now(), errors });
+    const failed = Object.keys(errors);
+    console.log('[gas-proxy] ' + kind + ': EU ' + payload.eu.series.length + ' days, ' + payload.countries.filter((c) => c.series.length).length + '/' + payload.countries.length + ' countries in ' + (Date.now() - started) + ' ms' + (failed.length ? ' — failed: ' + failed.join(', ') : ''));
+    return { at: Date.now(), body: JSON.stringify(payload) };
+  }
   async function buildFlows() {
     const started = Date.now();
     const window = flowWindow(Date.now());
@@ -4396,12 +4440,33 @@ function gasProxy() {
   }
   const prices = cachedRoute('prices', { diskPath: PRICES_PATH, ttlMs: TTL_MS, staleMaxMs: STALE_MAX_MS, build: buildPrices });
   const flows = cachedRoute('flows', { diskPath: FLOWS_PATH, ttlMs: FLOWS_TTL_MS, staleMaxMs: FLOWS_STALE_MAX_MS, build: buildFlows });
+  const storage = cachedRoute('storage', { diskPath: STORAGE_PATH, ttlMs: GIE_TTL_MS, staleMaxMs: GIE_STALE_MAX_MS, build: () => buildGie('agsi') });
+  const lng = cachedRoute('lng', { diskPath: LNG_PATH, ttlMs: GIE_TTL_MS, staleMaxMs: GIE_STALE_MAX_MS, build: () => buildGie('alsi') });
+  const withGieKey = (route) => (req, res) => {
+    if (!gieKey()) { send(res, 503, JSON.stringify({ error: 'no_key', detail: 'GIE_API_KEY missing' }), 'NONE'); return; }
+    return route.handler(req, res);
+  };
+  const gieSummary = async (route) => {
+    const entry = await route.current();
+    let latestDate = null;
+    let countries = null;
+    try {
+      const parsed = entry ? JSON.parse(entry.body) : null;
+      const eu = parsed?.eu?.series;
+      latestDate = Array.isArray(eu) && eu.length ? eu[eu.length - 1].date : null;
+      countries = Array.isArray(parsed?.countries) ? parsed.countries.filter((c) => c.series?.length).length : null;
+    } catch { /* diagnostika */ }
+    return { cachedAt: entry?.at ?? null, latestDate, countries, ttlMs: GIE_TTL_MS, lastError: route.state.lastError };
+  };
   function install(middlewares) {
     middlewares.use('/api/gas/prices', prices.handler);
     middlewares.use('/api/gas/flows', flows.handler);
+    middlewares.use('/api/gas/storage', withGieKey(storage));
+    middlewares.use('/api/gas/lng', withGieKey(lng));
     middlewares.use('/api/gas/status', async (req, res) => {
       const p = await prices.current();
       const f = await flows.current();
+      const gie = { hasKey: Boolean(gieKey()), keyLength: gieKey().length, storage: await gieSummary(storage), lng: await gieSummary(lng) };
       let latestDate = null;
       let monthly = null;
       let flowsLatest = null;
@@ -4416,6 +4481,7 @@ function gasProxy() {
       send(res, 200, JSON.stringify({
         prices: { cachedAt: p?.at ?? null, latestDate, monthlyRows: monthly, ttlMs: TTL_MS, lastError: prices.state.lastError },
         flows: { cachedAt: f?.at ?? null, latestDate: flowsLatest, pointsWithData: flowsWithData, points: GAS_FLOW_POINTS.length, ttlMs: FLOWS_TTL_MS, lastError: flows.state.lastError },
+        gie,
       }), 'NONE');
     });
   }

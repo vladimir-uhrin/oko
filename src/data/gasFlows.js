@@ -185,11 +185,11 @@ export function buildFlowsPayload(rows, { points = GAS_FLOW_POINTS, fetchedAt = 
 const locale = (lang) => (lang === 'sk' ? 'sk-SK' : 'en-GB');
 const fmt = (value, lang, digits) => new Intl.NumberFormat(locale(lang), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 
-/** `24,6 GWh/d`; nula → `0 GWh/d`; null → `—`. */
+/** `24,6 GWh/d` (od 100 bez desatiny: `381 GWh/d`); nula → `0 GWh/d`; null → `—`. */
 export function formatGwhDay(gwh, lang = 'sk') {
   if (!Number.isFinite(gwh)) return '—';
   if (Math.abs(gwh) < 0.05) return '0 GWh/d';
-  return `${fmt(gwh, lang, 1)} GWh/d`;
+  return `${fmt(gwh, lang, Math.abs(gwh) >= 100 ? 0 : 1)} GWh/d`;
 }
 
 /** GWh/d → mil. m³/d pri KWH_PER_M3 (laický prepočet, preto „≈" v texte). */
