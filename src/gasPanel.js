@@ -18,7 +18,8 @@ import {
 } from './data/gasPrices.js';
 import { buildFlowsModel, fetchGasFlows, formatGwhDay } from './data/gasFlows.js';
 import { GAS_STORAGE_RANGES, buildLngModel, buildStorageModel, fetchGasLng, fetchGasStorage, formatPctFull } from './data/gasStorage.js';
-import { GAS_CHART_HEIGHT_PX, drawGasChart, drawSparkline } from './gasChart.js';
+import { GAS_IMPORT_RANGES, buildImportsModel, fetchGasImports, formatBcm } from './data/gasImports.js';
+import { GAS_CHART_HEIGHT_PX, drawGasChart, drawSparkline, drawStackedChart } from './gasChart.js';
 
 export const GAS_SPARK_W = 64;
 export const GAS_SPARK_H = 18;
@@ -51,7 +52,7 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 export function installGasPanel({
   doc = globalThis.document,
   t,
-  api = { prices: fetchGasPrices, flows: fetchGasFlows, storage: fetchGasStorage, lng: fetchGasLng },
+  api = { prices: fetchGasPrices, flows: fetchGasFlows, storage: fetchGasStorage, lng: fetchGasLng, imports: fetchGasImports },
   lang = null,
   nowMs = () => Date.now(),
   refreshMs = GAS_PANEL_REFRESH_MS,
@@ -159,7 +160,37 @@ export function installGasPanel({
   const lngSource = el(doc, 'div', 'gas-source', '');
   lngCard.append(lngTitle, lngStatus, lngHead, lngCanvas, lngRows, lngNote, lngSource);
 
-  body.append(status, card, flowsCard, storageCard, lngCard);
+  // ── karta DOVOZ (Eurostat nrg_ti_gasm: odkiaľ plyn prichádza, mesačne) ──
+  let importsRange = '2y';
+  const importsCard = el(doc, 'section', 'gas-card');
+  importsCard.dataset.card = 'imports';
+  const importsTitle = el(doc, 'h3', 'gas-card-title', t('gas.imports'));
+  const importsStatus = el(doc, 'div', 'gas-status', t('gas.imports-loading'));
+  importsStatus.dataset.state = 'loading';
+  const importsHead = el(doc, 'div', 'gas-headline');
+  const importsValue = el(doc, 'span', 'gas-headline-value', '—');
+  const importsDelta = el(doc, 'span', 'gas-delta', '');
+  const importsLabel = el(doc, 'span', 'gas-headline-label', '');
+  const importsSub = el(doc, 'span', 'gas-headline-sub', '');
+  importsHead.append(importsValue, importsDelta, importsLabel, importsSub);
+  const importsRanges = el(doc, 'div', 'gas-ranges');
+  const importsRangeBtns = GAS_IMPORT_RANGES.map((r) => {
+    const b = el(doc, 'button', 'gas-range', t(`gas.range-${r}`));
+    b.type = 'button';
+    b.dataset.range = r;
+    b.setAttribute('aria-pressed', r === importsRange ? 'true' : 'false');
+    b.addEventListener('click', () => { importsRange = r; renderImports(); });
+    importsRanges.appendChild(b);
+    return b;
+  });
+  const importsCanvas = el(doc, 'canvas', 'gas-chart');
+  importsCanvas.height = GAS_CHART_HEIGHT_PX;
+  const importsLegend = el(doc, 'div', 'gas-legend');
+  const importsNote = el(doc, 'div', 'gas-note', '');
+  const importsSource = el(doc, 'div', 'gas-source', '');
+  importsCard.append(importsTitle, importsStatus, importsHead, importsRanges, importsCanvas, importsLegend, importsNote, importsSource);
+
+  body.append(status, card, flowsCard, storageCard, lngCard, importsCard);
 
   // ── render ──────────────────────────────────────────────────────
   /**
@@ -167,9 +198,10 @@ export function installGasPanel({
    * „posledná“ = najnovší bod cez všetky rady (v MAX cien je to denný TTF, nie
    * mesačný IMF priemer spred dvoch mesiacov).
    */
-  function paintSeries(target, series, { format = (v) => String(v), withYear = true } = {}) {
+  /** Plátno karty v CSS šírke s DPR transformáciou; null bez 2D kontextu (testy). */
+  function sizedContext(target) {
     const ctx = target.getContext?.('2d');
-    if (!ctx) return;
+    if (!ctx) return null;
     const width = Math.max(120, Math.floor(target.clientWidth || body.clientWidth || 320));
     const dpr = Math.min(3, globalThis.devicePixelRatio || 1);
     if (target.width !== Math.round(width * dpr)) target.width = Math.round(width * dpr);
@@ -177,6 +209,13 @@ export function installGasPanel({
     target.style.width = `${width}px`;
     target.style.height = `${GAS_CHART_HEIGHT_PX}px`;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, width };
+  }
+
+  function paintSeries(target, series, { format = (v) => String(v), withYear = true } = {}) {
+    const sized = sizedContext(target);
+    if (!sized) return;
+    const { ctx, width } = sized;
     const lng = language();
     let t0 = Infinity; let t1 = -Infinity; let vMax = -Infinity; let last = null;
     for (const s of series || []) for (const p of s.points) { if (p.t < t0) t0 = p.t; if (p.t > t1) { t1 = p.t; last = p; } if (p.v > vMax) vMax = p.v; }
@@ -433,8 +472,92 @@ export function installGasPanel({
     }
   }
 
+  // ── dovoz podľa pôvodu (Eurostat) ───────────────────────────────
+  let importsPayload = null; let importsModel = null; let importsToken = 0; let importsError = null;
+
+  /** Skladaný graf vrstiev (mld m³ za mesiac) s popiskami max/posledný a krajmi osi. */
+  function paintStacked(target, layers, months, { format = (v) => String(v) } = {}) {
+    const sized = sizedContext(target);
+    if (!sized) return;
+    const { ctx, width } = sized;
+    const lng = language();
+    const totals = months.map((_, i) => layers.reduce((acc, l) => acc + (Number.isFinite(l.values[i]) ? l.values[i] : 0), 0));
+    const max = totals.length ? Math.max(...totals) : null;
+    const last = totals.length ? totals[totals.length - 1] : null;
+    drawStackedChart(ctx, layers, {
+      width,
+      height: GAS_CHART_HEIGHT_PX,
+      maxLabel: Number.isFinite(max) ? t('gas.max-label', { v: format(max) }) : '',
+      lastLabel: Number.isFinite(last) ? t('gas.last-label', { v: format(last) }) : '',
+      startLabel: months.length ? formatDateLabel(months[0], lng) : '',
+      endLabel: months.length ? formatDateLabel(months[months.length - 1], lng) : '',
+    });
+  }
+
+  function renderImports() {
+    for (const b of importsRangeBtns) {
+      const active = b.dataset.range === importsRange;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    if (!importsPayload) return;
+    const lng = language();
+    importsModel = buildImportsModel(importsPayload, { lang: lng, translate: t, nowMs: nowMs(), range: importsRange });
+    if (!importsModel.ok) {
+      importsStatus.textContent = t('gas.imports-unavailable');
+      importsStatus.dataset.state = 'error';
+      return;
+    }
+    const h = importsModel.headline;
+    importsValue.textContent = h.totalText;
+    importsDelta.textContent = h.yoyText;
+    importsDelta.dataset.dir = h.dir;
+    importsLabel.textContent = [t('gas.imports-eu'), h.dateText].join(' · ');
+    importsSub.textContent = [h.twhText, h.ruText, h.transitText, h.lngText].filter(Boolean).join(' · ');
+    importsLegend.textContent = '';
+    for (const row of importsModel.rows) {
+      const r = el(doc, 'div', 'gas-legend-row');
+      r.dataset.key = row.key;
+      r.dataset.level = row.level;
+      const swatch = el(doc, 'span', 'gas-swatch');
+      swatch.style.background = row.color || 'transparent';
+      r.append(
+        swatch,
+        el(doc, 'span', 'gas-legend-name', row.name),
+        el(doc, 'span', 'gas-legend-value', row.valueText),
+        el(doc, 'span', 'gas-legend-pct', row.pctText),
+        el(doc, 'span', 'gas-legend-sub', row.sub),
+      );
+      importsLegend.appendChild(r);
+    }
+    importsNote.textContent = importsModel.note;
+    importsSource.textContent = importsModel.sourceLine;
+    const latest = importsModel.freshness.latestMonth ? formatDateLabel(importsModel.freshness.latestMonth, lng) : '';
+    importsStatus.textContent = importsModel.freshness.stale ? t('gas.stale', { date: latest || '—' }) : t('gas.imports-updated', { date: latest });
+    importsStatus.dataset.state = importsModel.freshness.stale ? 'stale' : 'ok';
+    paintStacked(importsCanvas, importsModel.layers, importsModel.months, { format: (v) => formatBcm(v * 1000, lng) });
+  }
+
+  async function loadImports() {
+    const token = ++importsToken;
+    try {
+      const fresh = await api.imports();
+      if (token !== importsToken) return;
+      importsPayload = fresh;
+      importsError = null;
+      renderImports();
+    } catch (error) {
+      if (token !== importsToken) return;
+      importsError = error?.message || String(error);
+      if (!importsPayload) {
+        importsStatus.textContent = t('gas.imports-unavailable');
+        importsStatus.dataset.state = 'error';
+      }
+    }
+  }
+
   function load() {
-    return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng()]);
+    return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng(), loadImports()]);
   }
 
   const timer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void load(); }, refreshMs) : null;
@@ -446,6 +569,7 @@ export function installGasPanel({
     refresh: load,
     setRange(next) { if (GAS_PRICE_RANGES.includes(next)) { range = next; render(); } },
     setStorageRange(next) { if (GAS_STORAGE_RANGES.includes(next)) { storageRange = next; renderStorage(); } },
+    setImportsRange(next) { if (GAS_IMPORT_RANGES.includes(next)) { importsRange = next; renderImports(); } },
     _getStateForTest() {
       return {
         range, loaded: Boolean(payload), ok: Boolean(model?.ok), status: status.dataset.state, lastError,
@@ -462,6 +586,11 @@ export function installGasPanel({
         lng: {
           loaded: Boolean(lngPayload), ok: Boolean(lngModel?.ok), status: lngStatus.dataset.state, lastError: lngError,
           headline: lngModel?.headline?.sendOutText ?? null, rows: lngModel?.rows?.length ?? 0,
+        },
+        imports: {
+          loaded: Boolean(importsPayload), ok: Boolean(importsModel?.ok), status: importsStatus.dataset.state, lastError: importsError,
+          range: importsRange, headline: importsModel?.headline?.totalText ?? null, rows: importsModel?.rows?.length ?? 0,
+          months: importsModel?.months?.length ?? 0,
         },
       };
     },

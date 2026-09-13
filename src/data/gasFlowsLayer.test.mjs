@@ -86,6 +86,17 @@ test('normalizeDaily: os 31 dní končí posledným dňom radu, medzery null, no
   const zeros = normalizeDaily([{ date: '2026-09-11', gwh: 0 }, { date: '2026-09-10', gwh: 0 }], Date.UTC(2026, 8, 11));
   assert.deepEqual([zeros.values[29], zeros.values[30], zeros.max], [0, 0, 0], 'samé nuly nedelia nulou');
   assert.equal(normalizeDaily([], NOW).last, null);
+  // Ceny (používateľ zakrúžkoval „útržky" grafu TTF): víkend bez hodnoty sa
+  // doplní posledným settlementom, rozsah je min–max s rezervou 8 %.
+  const prices = [{ date: '2026-09-07', v: 80 }, { date: '2026-09-08', v: 82 }, { date: '2026-09-09', v: 78 }, { date: '2026-09-11', v: 80 }];
+  const p = normalizeDaily(prices, Date.UTC(2026, 8, 11), { key: 'v', fill: 'forward', floor: 'min' });
+  assert.equal(p.values[25], null, 'pred prvou hodnotou ostáva medzera');
+  assert.equal(p.values[29], p.values[28], 'chýbajúci 10. 9. = hodnota z 9. 9.');
+  assert.ok(Math.abs(p.values[27] - 0.92) < 1e-9 && Math.abs(p.values[28] - 0.08) < 1e-9, 'max (8. 9.) → 0,92, min (9. 9.) → 0,08');
+  assert.ok(Math.abs(p.values[26] - 0.5) < 1e-9 && Math.abs(p.values[30] - 0.5) < 1e-9, '80 medzi 78 a 82 = stred');
+  assert.deepEqual([p.min, p.max, p.last], [78, 82, 80]);
+  const flat = normalizeDaily([{ date: '2026-09-10', v: 80 }, { date: '2026-09-11', v: 80 }], Date.UTC(2026, 8, 11), { key: 'v', floor: 'min' });
+  assert.equal(flat.values[30], 0.5, 'plochá cena = stred, nie delenie nulou');
 });
 
 test('karty: kompaktná = taktická karta lodí (interaktívna, tok + deň); rozšírená = tracked s vlajkami, cenou, dvoma grafmi 31 dní, profilom druhého smeru a pätou', () => {
@@ -120,7 +131,9 @@ test('karty: kompaktná = taktická karta lodí (interaktívna, tok + deň); roz
   assert.equal(tracked.charts.altitude.past[0], null, 'pred začiatkom radu medzera');
   assert.equal(tracked.charts.altitude.label, 'gas.card-flow-label {"max":"23,8 GWh/d","last":"20,0 GWh/d"}');
   assert.equal(tracked.charts.speed.past.length, 31);
-  assert.equal(tracked.charts.speed.past[30], 1);
+  assert.ok(Math.abs(tracked.charts.speed.past[30] - 0.92) < 1e-9, 'cena: rozsah min–max s rezervou 8 % (posledná = max → 0,92), nie podlaha 0');
+  assert.ok(Math.abs(tracked.charts.speed.past[0] - 0.08) < 1e-9, 'najstarší deň okna = minimum → 0,08');
+  assert.equal(tracked.charts.speed.past.filter((v) => v === null).length, 0, 'víkendy doplnené posledným settlementom, žiadne trhliny');
   assert.equal(tracked.charts.speed.label, 'gas.card-price-label {"max":"79,8 €/MWh","last":"79,8 €/MWh"}');
   assert.deepEqual(tracked.charts.axis, { left: '12. 8.', right: '11. 9.' });
   assert.equal(tracked.profile.label, 'gas.card-flow-chart {"route":"SK → CZ"}');

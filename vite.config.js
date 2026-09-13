@@ -61,6 +61,7 @@ import {
 } from './src/data/gasPrices.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
+import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -4438,7 +4439,38 @@ function gasProxy() {
     console.log('[gas-proxy] prices: ACER ' + acer.length + ' days (latest ' + latestDate + '), monthly ' + monthly.length + ' in ' + (Date.now() - started) + ' ms');
     return { at: Date.now(), body };
   }
+  // Dovoz plynu podľa partnerskej krajiny (Eurostat nrg_ti_gasm, mesačne,
+  // bez kľúča; Eurostat: „reuse … authorised provided the source is
+  // acknowledged", zmeny dát treba uviesť → zoskupenie je pomenované v karte).
+  // Eurostat aktualizuje raz mesačne → TTL 24 h, stale 30 d; proxy vracia už
+  // zoskupený malý payload (~66 mesiacov × 9 skupín), nie 300 kB JSON-stat.
+  const IMPORTS_PATH = path.join(CACHE_DIR, 'imports.json');
+  const IMPORTS_TTL_MS = 24 * 60 * 60_000;
+  const IMPORTS_STALE_MAX_MS = 30 * 24 * 60 * 60_000;
+  async function buildImports() {
+    const started = Date.now();
+    const json = JSON.parse(await fetchText(eurostatImportsUrl()));
+    const payload = buildImportsPayload(json, { fetchedAt: Date.now() });
+    if (!payload.months.length) throw new Error('Eurostat returned no months with a total');
+    const latest = payload.months[payload.months.length - 1];
+    console.log('[gas-proxy] imports: Eurostat ' + payload.months.length + ' months (latest ' + latest + ', updated ' + payload.updated + ') in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body: JSON.stringify(payload) };
+  }
   const prices = cachedRoute('prices', { diskPath: PRICES_PATH, ttlMs: TTL_MS, staleMaxMs: STALE_MAX_MS, build: buildPrices });
+  const imports = cachedRoute('imports', { diskPath: IMPORTS_PATH, ttlMs: IMPORTS_TTL_MS, staleMaxMs: IMPORTS_STALE_MAX_MS, build: buildImports });
+  const importsSummary = async () => {
+    const entry = await imports.current();
+    let latestMonth = null;
+    let months = null;
+    let updated = null;
+    try {
+      const parsed = entry ? JSON.parse(entry.body) : null;
+      months = parsed?.months?.length ?? null;
+      latestMonth = months ? parsed.months[months - 1] : null;
+      updated = parsed?.updated ?? null;
+    } catch { /* diagnostika */ }
+    return { cachedAt: entry?.at ?? null, latestMonth, months, updated, ttlMs: IMPORTS_TTL_MS, lastError: imports.state.lastError };
+  };
   const flows = cachedRoute('flows', { diskPath: FLOWS_PATH, ttlMs: FLOWS_TTL_MS, staleMaxMs: FLOWS_STALE_MAX_MS, build: buildFlows });
   const storage = cachedRoute('storage', { diskPath: STORAGE_PATH, ttlMs: GIE_TTL_MS, staleMaxMs: GIE_STALE_MAX_MS, build: () => buildGie('agsi') });
   const lng = cachedRoute('lng', { diskPath: LNG_PATH, ttlMs: GIE_TTL_MS, staleMaxMs: GIE_STALE_MAX_MS, build: () => buildGie('alsi') });
@@ -4500,6 +4532,7 @@ function gasProxy() {
     // Prefixové párovanie connectu: /meta musí byť zaregistrované PRED súborom.
     middlewares.use('/api/gas/pipelines/meta', pipelinesFile(PIPELINES_META_PATH, 'application/json; charset=utf-8'));
     middlewares.use('/api/gas/pipelines', pipelinesFile(PIPELINES_PATH, 'application/x-ndjson; charset=utf-8'));
+    middlewares.use('/api/gas/imports', imports.handler);
     middlewares.use('/api/gas/status', async (req, res) => {
       const p = await prices.current();
       const f = await flows.current();
@@ -4520,6 +4553,7 @@ function gasProxy() {
         flows: { cachedAt: f?.at ?? null, latestDate: flowsLatest, pointsWithData: flowsWithData, points: GAS_FLOW_POINTS.length, ttlMs: FLOWS_TTL_MS, lastError: flows.state.lastError },
         gie,
         pipelines: await pipelinesSummary(),
+        imports: await importsSummary(),
       }), 'NONE');
     });
   }

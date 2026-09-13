@@ -44,8 +44,61 @@ const TILES = [
   [34, 148, 75, 180],
 ];
 const USER_AGENT = 'OKO-gas-build/0.1 (https://github.com/vladouh76; vladouh76@gmail.com) one-off manual snapshot';
+/** Verzia dopytu v názve surovej cache — nová verzia = staré dlaždice sa nepoužijú. */
+const QUERY_VERSION = 'v2';
+
+/**
+ * Výber (2026-09-13, používateľ: „niekde sú len fragmenty a hluché miesta"):
+ * prieskum SK/AT/CZ/HU ukázal 5 249 plynových potrubí, z toho len 566 s
+ * `usage=transmission`; 1 926 bez `usage` — medzi nimi 132 úsekov FGSZ,
+ * 94 ONTRAS, 22 Gaz-System (prepravcovia), a 246 pomenovaných. Dlhé trasy
+ * (OPAL, WAG, Urengoj–Pomary–Užhorod) sú navyše relácie `route=pipeline`,
+ * ktorých členské úseky často nemajú ani `substance`. Preto: prepravné =
+ * `usage=transmission`, alebo člen plynovej relácie, alebo bez `usage` a
+ * (DN ≥ 300, alebo meno/ref, alebo prevádzkovateľ = prepravca). Distribúcia,
+ * areály a prípojky von; známy priemer < 150 mm von.
+ */
+const EXCLUDED_USAGE = /^(distribution|household_distribution|facility|gathering|service|industrial|storage)$/;
+const TSO_RE = new RegExp([
+  'eustream', 'transgas', 'net4gas', 'gaz[- ]?system', 'fgsz', 'transgaz', 'bulgartransgaz', 'desfa', 'snam', 'enag[aá]s', 'grtgaz', 'ter[eé]ga',
+  'fluxys', 'gasunie', String.raw`\bgts\b`, 'open grid', String.raw`\boge\b`, 'thyssengas', 'gascade', 'bayernets', 'ontras', 'nowega', 'terranets',
+  'ferngas', 'jordgas', 'gastransport', 'gas connect', String.raw`\btag\b`, 'trans austria', 'west austria', 'penta west', 'plinacro', 'gasgrid',
+  'energinet', 'swedegas', 'elering', 'conexus', 'amber grid', String.raw`\bgtsou\b`, 'gas tso of ukraine', 'ukrtransgaz', 'naftogaz', 'gazprom',
+  'газпром', 'трансгаз', 'beltransgaz', 'moldovatransgaz', 'vestmoldtransgaz', 'kaztransgas', 'qazaqgaz', 'intergas', 'uztransgaz', 'turkmengaz',
+  'socar', 'bota[sş]', 'national grid', 'gas networks ireland', String.raw`\bgni\b`, 'nord stream', 'turkstream', 'balkan stream', 'interconnector',
+  String.raw`\bbbl\b`, 'baltic pipe', String.raw`\btap\b`, 'trans adriatic', 'tanap', 'eugal', String.raw`\bopal\b`, String.raw`\bnel\b`, 'megal',
+  String.raw`\bwag\b`, 'transitgas', 'swissgas', 'reganosa', 'ren gasodutos', 'geoplin', 'plinovodi', 'srbijagas', 'transportgas', 'gastrade', 'icgb',
+  'omv gas', 'transmission', 'prenos', 'přeprav', 'preprav', 'transport gazu', 'gasleitung',
+].join('|'), 'i');
 
 const round = (n) => Number(n.toFixed(ROUND));
+
+/** Priemer v mm z tagu `diameter` („1400", „1.4", „DN 800", „700 mm"). */
+function diameterMm(tags) {
+  const raw = String(tags.diameter || '').replace(',', '.');
+  const num = Number(raw.replace(/[^0-9.]/g, ''));
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return num < 10 ? Math.round(num * 1000) : Math.round(num);
+}
+
+/**
+ * Prečo úsek patrí do prepravnej siete (alebo null = von).
+ * @param {Record<string, string>} tags zlúčené tagy (relácia ako predvolené, way navrchu)
+ * @param {boolean} inRelation člen plynovej relácie route=pipeline
+ * @returns {'transmission'|'relation'|'diameter'|'name'|'operator'|null}
+ */
+export function classifyPipeline(tags, inRelation) {
+  const usage = String(tags.usage || '').toLowerCase();
+  if (usage === 'transmission') return 'transmission';
+  if (usage && EXCLUDED_USAGE.test(usage)) return null;
+  if (inRelation) return 'relation';
+  const d = diameterMm(tags);
+  if (d !== null && d < 150) return null;
+  if (d !== null && d >= 300) return 'diameter';
+  if (tags.name || tags['name:en'] || tags.ref) return 'name';
+  if (tags.operator && TSO_RE.test(tags.operator)) return 'operator';
+  return null;
+}
 
 function pointSegDist(p, a, b) {
   const dx = b[0] - a[0];
@@ -121,16 +174,17 @@ const haversineKm = (a, b) => {
 };
 const lengthKm = (coords) => coords.reduce((sum, p, i) => (i ? sum + haversineKm(coords[i - 1], p) : 0), 0);
 
-function toFeatures(el, tile) {
-  const tags = el.tags || {};
+function toFeatures(el, tile, relTags = null) {
+  // Tagy relácie (meno, prevádzkovateľ, priemer, látka) ako predvolené hodnoty
+  // pre členské úseky, ktoré ich nemajú; tagy úseku majú prednosť.
+  const tags = { ...(relTags || {}), ...(el.tags || {}) };
   const coords = (el.geometry || []).map((pt) => [round(pt.lon), round(pt.lat)]);
-  const diameter = Number(String(tags.diameter || '').replace(/[^0-9.]/g, ''));
   const properties = {
     name: tags.name || tags['name:en'] || tags.ref || null,
     nameEn: tags['name:en'] || null,
     operator: tags.operator || null,
     ref: tags.ref || null,
-    diameterMm: Number.isFinite(diameter) && diameter > 0 ? (diameter < 10 ? Math.round(diameter * 1000) : Math.round(diameter)) : null,
+    diameterMm: diameterMm(tags),
     substance: tags.substance || 'gas',
     location: tags.location || null,
     status: tags.disused === 'yes' || tags['disused:man_made'] ? 'disused' : (tags.construction === 'yes' || tags.proposed === 'yes' ? 'planned' : 'operating'),
@@ -149,28 +203,27 @@ function toFeatures(el, tile) {
 
 async function fetchTile(tile) {
   const [S, W, N, E] = tile;
-  const rawPath = path.join(RAW_DIR, `tile-${S}_${W}_${N}_${E}.json`);
+  const rawPath = path.join(RAW_DIR, `tile-${QUERY_VERSION}-${S}_${W}_${N}_${E}.json`);
   if (!REFRESH && fs.existsSync(rawPath)) {
     console.log(`  tile ${tile.join(',')}: raw cache`);
     return JSON.parse(fs.readFileSync(rawPath, 'utf8'));
   }
-  // West of 20° E the `usage=transmission` tag is well maintained (9 411 ways
-  // counted 2026-09-13). Further east (former USSR) many trunk lines carry no
-  // `usage` at all, so those tiles also take untagged ways that have a
-  // diameter or a name — the Soviet trunk system is named and sized, local
-  // distribution is not.
-  const east = W >= 20;
-  const query = east
-    ? `[out:json][timeout:300][bbox:${S},${W},${N},${E}];
+  // Všetky kandidátske úseky (prepravné, alebo bez `usage` s priemerom, menom
+  // či prevádzkovateľom — o zaradení rozhodne classifyPipeline) + členské
+  // úseky plynových relácií route=pipeline (dlhé trasy); relácie samotné
+  // idú s členstvom (`out body`), aby úseky zdedili meno a prevádzkovateľa.
+  const query = `[out:json][timeout:300][bbox:${S},${W},${N},${E}];
 (
   way["man_made"="pipeline"]["substance"~"^(gas|natural_gas)$"]["usage"="transmission"];
   way["man_made"="pipeline"]["substance"~"^(gas|natural_gas)$"][!"usage"]["diameter"];
   way["man_made"="pipeline"]["substance"~"^(gas|natural_gas)$"][!"usage"]["name"];
-);
-out tags geom;`
-    : `[out:json][timeout:300][bbox:${S},${W},${N},${E}];
-way["man_made"="pipeline"]["substance"~"^(gas|natural_gas)$"]["usage"="transmission"];
-out tags geom;`;
+  way["man_made"="pipeline"]["substance"~"^(gas|natural_gas)$"][!"usage"]["operator"];
+)->.w;
+rel["route"="pipeline"]["substance"~"^(gas|natural_gas)$"]["usage"!~"^(distribution|household_distribution|facility|gathering)$"]->.r;
+way(r.r)->.m;
+(.w; .m;);
+out tags geom;
+.r out body;`;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const started = Date.now();
     const res = await fetch(OVERPASS_URL, {
@@ -184,7 +237,8 @@ out tags geom;`;
       const json = JSON.parse(text);
       fs.mkdirSync(RAW_DIR, { recursive: true });
       fs.writeFileSync(rawPath, text, 'utf8');
-      console.log(`  tile ${tile.join(',')}: ${(json.elements || []).length} ways, ${(text.length / 1e6).toFixed(1)} MB in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+      const els = json.elements || [];
+      console.log(`  tile ${tile.join(',')}: ${els.filter((e) => e.type === 'way').length} ways, ${els.filter((e) => e.type === 'relation').length} relations, ${(text.length / 1e6).toFixed(1)} MB in ${((Date.now() - started) / 1000).toFixed(0)} s`);
       return json;
     }
     console.error(`  tile ${tile.join(',')}: Overpass HTTP ${res.status} (attempt ${attempt}/3)`);
@@ -198,14 +252,31 @@ const started = Date.now();
 console.log(`gas pipelines snapshot: ${TILES.length} tiles via ${OVERPASS_URL}${REFRESH ? ' (refresh)' : ''}`);
 const features = [];
 const tileMeta = [];
+const basis = { transmission: 0, relation: 0, diameter: 0, name: 0, operator: 0, excluded: 0 };
 for (let i = 0; i < TILES.length; i++) {
   const tile = TILES[i];
   const json = await fetchTile(tile);
-  const ways = (json.elements || []).filter((el) => el.type === 'way');
-  const parts = ways.flatMap((el) => toFeatures(el, tile));
+  const elements = json.elements || [];
+  const relTagsByWay = new Map();
+  for (const rel of elements) {
+    if (rel.type !== 'relation') continue;
+    for (const m of rel.members || []) if (m.type === 'way' && !relTagsByWay.has(m.ref)) relTagsByWay.set(m.ref, rel.tags || {});
+  }
+  const ways = elements.filter((el) => el.type === 'way');
+  const seenWays = new Set();
+  const parts = [];
+  for (const el of ways) {
+    if (seenWays.has(el.id)) continue; // úsek môže byť v .w aj .m
+    seenWays.add(el.id);
+    const relTags = relTagsByWay.get(el.id) || null;
+    const rule = classifyPipeline({ ...(relTags || {}), ...(el.tags || {}) }, relTags !== null);
+    if (!rule) { basis.excluded += 1; continue; }
+    basis[rule] += 1;
+    parts.push(...toFeatures(el, tile, relTags));
+  }
   features.push(...parts);
-  tileMeta.push({ bbox: tile, ways: ways.length, features: parts.length, osmBase: json.osm3s?.timestamp_osm_base || null });
-  if (i < TILES.length - 1 && !fs.existsSync(path.join(RAW_DIR, `tile-${TILES[i + 1].join('_')}.json`))) {
+  tileMeta.push({ bbox: tile, ways: ways.length, relations: relTagsByWay.size ? elements.filter((el) => el.type === 'relation').length : 0, features: parts.length, osmBase: json.osm3s?.timestamp_osm_base || null });
+  if (i < TILES.length - 1 && !fs.existsSync(path.join(RAW_DIR, `tile-${QUERY_VERSION}-${TILES[i + 1].join('_')}.json`))) {
     await new Promise((resolve) => setTimeout(resolve, PAUSE_MS));
   }
 }
@@ -230,7 +301,8 @@ const meta = {
   source: 'OpenStreetMap via Overpass API',
   license: 'ODbL 1.0 — © OpenStreetMap contributors',
   endpoint: OVERPASS_URL,
-  query: 'way[man_made=pipeline][substance~"^(gas|natural_gas)$"][usage=transmission]',
+  query: `${QUERY_VERSION}: way[man_made=pipeline][substance~gas] with usage=transmission, or no usage + (diameter|name|operator), plus members of rel[route=pipeline][substance~gas]; kept by classifyPipeline`,
+  basis,
   tiles: tileMeta,
   simplifyEpsDeg: SIMPLIFY_EPS_DEG,
   round: ROUND,

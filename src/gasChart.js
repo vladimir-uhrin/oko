@@ -158,3 +158,72 @@ export function drawGasChart(ctx, series, {
   if (endLabel) ctx.fillText(endLabel, x0 + w, y0 + h + 12);
   return extent;
 }
+
+/**
+ * Skladaný plošný graf (dovoz podľa pôvodu): vrstvy s rovnako vzdialenými
+ * mesiacmi na osi x, plochy sa skladajú zdola v poradí vrstiev, spodok = 0,
+ * strop = najvyšší súčet + 8 %; hore tenká čiara súčtu v akcente. Popisky
+ * ako drawGasChart. Vracia { n, max } alebo null (menej než 2 stĺpce).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<{key?: string, color: string, values: Array<number|null>}>} layers
+ * @param {{width: number, height: number, maxLabel?: string, lastLabel?: string, startLabel?: string, endLabel?: string, font?: string}} o
+ */
+export function drawStackedChart(ctx, layers, {
+  width, height, maxLabel = '', lastLabel = '', startLabel = '', endLabel = '',
+  font = '500 9px "JetBrains Mono", monospace',
+} = {}) {
+  ctx.clearRect(0, 0, width, height);
+  const x0 = CHART_PAD.left;
+  const y0 = CHART_PAD.top;
+  const w = Math.max(1, width - CHART_PAD.left - CHART_PAD.right);
+  const h = Math.max(1, height - CHART_PAD.top - CHART_PAD.bottom);
+  ctx.strokeStyle = CHART_COLORS.grid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i <= 4; i += 1) {
+    const y = Math.round(y0 + (h * i) / 4) + 0.5;
+    ctx.moveTo(x0, y); ctx.lineTo(x0 + w, y);
+    const x = Math.round(x0 + (w * i) / 4) + 0.5;
+    ctx.moveTo(x, y0); ctx.lineTo(x, y0 + h);
+  }
+  ctx.stroke();
+  const n = Math.max(0, ...(layers || []).map((l) => l?.values?.length || 0));
+  if (n < 2) return null;
+  const val = (l, i) => (Number.isFinite(l?.values?.[i]) ? Math.max(0, l.values[i]) : 0);
+  const totals = Array.from({ length: n }, (_, i) => (layers || []).reduce((acc, l) => acc + val(l, i), 0));
+  const max = Math.max(...totals, 0);
+  const top = max > 0 ? max * 1.08 : 1;
+  const px = (i) => x0 + (i / (n - 1)) * w;
+  const py = (v) => y0 + h - (v / top) * h;
+  const below = Array(n).fill(0);
+  for (const layer of layers || []) {
+    const upper = below.map((b, i) => b + val(layer, i));
+    ctx.fillStyle = layer.color;
+    ctx.beginPath();
+    ctx.moveTo(px(0), py(below[0]));
+    for (let i = 0; i < n; i += 1) ctx.lineTo(px(i), py(upper[i]));
+    for (let i = n - 1; i >= 0; i -= 1) ctx.lineTo(px(i), py(below[i]));
+    ctx.closePath();
+    ctx.fill();
+    for (let i = 0; i < n; i += 1) below[i] = upper[i];
+  }
+  ctx.strokeStyle = CHART_COLORS.altLine;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i < n; i += 1) { if (i === 0) ctx.moveTo(px(i), py(totals[i])); else ctx.lineTo(px(i), py(totals[i])); }
+  ctx.stroke();
+  ctx.font = font;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = CHART_COLORS.textDim;
+  ctx.textAlign = 'left';
+  if (maxLabel) ctx.fillText(maxLabel, x0, y0 - 4);
+  ctx.fillStyle = CHART_COLORS.altLine;
+  ctx.textAlign = 'right';
+  if (lastLabel) ctx.fillText(lastLabel, x0 + w, y0 - 4);
+  ctx.fillStyle = CHART_COLORS.textDim;
+  ctx.textAlign = 'left';
+  if (startLabel) ctx.fillText(startLabel, x0, y0 + h + 12);
+  ctx.textAlign = 'right';
+  if (endLabel) ctx.fillText(endLabel, x0 + w, y0 + h + 12);
+  return { n, max };
+}

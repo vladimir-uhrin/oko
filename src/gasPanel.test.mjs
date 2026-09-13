@@ -10,6 +10,8 @@ import { CHART_COLORS, CHART_PAD } from './flightHistoryChart.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 import { buildFlowsPayload } from './data/gasFlows.js';
 import { buildGiePayload } from './data/gasStorage.js';
+import { buildImportsPayload } from './data/gasImports.js';
+import { EUROSTAT_IMPORTS_JSON_STAT } from './data/fixtures/eurostatImportsFixture.mjs';
 
 const t = (key, vars) => (vars && Object.keys(vars).length ? `${key} ${JSON.stringify(vars)}` : key);
 const flush = async () => { for (let i = 0; i < 3; i += 1) await new Promise((r) => setImmediate(r)); };
@@ -44,6 +46,7 @@ const LNG = buildGiePayload('alsi', {
   eu: euDays(400, (day, i) => ({ name: 'EU', code: 'eu', gasDayStart: day, inventory: { gwh: '30579.26' }, dtmi: { gwh: '62917.06' }, sendOut: String(3000 + (i % 5) * 20), status: 'E' })),
   PL: [{ name: 'Poland', code: 'PL', gasDayStart: '2026-09-11', inventory: { gwh: '3289' }, dtmi: { gwh: '3289' }, sendOut: '179', status: 'C' }],
 }, { fetchedAt: NOW });
+const IMPORTS = buildImportsPayload(EUROSTAT_IMPORTS_JSON_STAT, { fetchedAt: NOW });
 
 test('gasChart: rozsah s rezervou, štýly podľa poradia, kreslenie = mriežka + plocha + čiary + popisky; bez radov len mriežka', () => {
   const series = [
@@ -114,6 +117,7 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
       flows: async () => { calls.push('flows'); return FLOWS; },
       storage: async () => { calls.push('storage'); return STORAGE; },
       lng: async () => { calls.push('lng'); return LNG; },
+      imports: async () => { calls.push('imports'); return IMPORTS; },
     },
     setIntervalImpl: (fn, ms) => { intervals.push(ms); return 42; },
     clearIntervalImpl: (id) => { cleared = id; },
@@ -181,6 +185,29 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   const lngRows = find(lngCard, (n) => n.className === 'gas-flow-row');
   assert.deepEqual([lngRows[0].dataset.id, lngRows[0].dataset.level, find(lngRows[0], (n) => n.className === 'gas-flow-value')[0].textContent], ['PL', 'ok', '179 GWh/d']);
   assert.equal(find(lngRows[0], (n) => n.className === 'gas-bar')[0].hidden, true, 'LNG riadky bez pásu');
+  assert.deepEqual(st.imports, { loaded: true, ok: true, status: 'ok', lastError: null, range: '2y', headline: '24,7 mld m³', rows: 9, months: 24 }, 'karta DOVOZ: EÚ mimo EÚ, 9 skupín, 2R');
+  const importsCard = find(doc.root.body, (n) => n.dataset.card === 'imports')[0];
+  assert.equal(find(importsCard, (n) => n.className === 'gas-headline-value')[0].textContent, '24,7 mld m³');
+  assert.equal(find(importsCard, (n) => n.className === 'gas-delta')[0].textContent, 'gas.imports-yoy {"v":"+0,0 %"}');
+  assert.equal(find(importsCard, (n) => n.className === 'gas-headline-label')[0].textContent, 'gas.imports-eu · jún 2026');
+  assert.equal(find(importsCard, (n) => n.className === 'gas-headline-sub')[0].textContent, 'gas.imports-twh {"v":"261 TWh"} · gas.imports-ru-share {"pct":"10 %","base":"22 %"} · gas.imports-transit-share {"pct":"0 %","base":"9,3 %"} · gas.imports-lng-share {"pct":"45 %"}');
+  const legendRows = find(importsCard, (n) => n.className === 'gas-legend-row');
+  assert.equal(legendRows.length, 9);
+  assert.deepEqual([legendRows[0].dataset.key, legendRows[0].dataset.level], ['no', 'ok']);
+  assert.equal(find(legendRows[0], (n) => n.className === 'gas-legend-name')[0].textContent, 'gas.imports-group-no');
+  assert.equal(find(legendRows[0], (n) => n.className === 'gas-legend-value')[0].textContent, '8,0 mld m³');
+  assert.equal(find(legendRows[0], (n) => n.className === 'gas-legend-pct')[0].textContent, '32 %');
+  assert.match(find(legendRows[0], (n) => n.className === 'gas-swatch')[0].style.background, /^rgba\(/, 'vzorka farby vrstvy');
+  assert.equal(legendRows[8].dataset.level, 'zero', 'nulové skupiny na konci, stlmené');
+  assert.equal(find(importsCard, (n) => n.className === 'gas-status')[0].textContent, 'gas.imports-updated {"date":"6/2026"}');
+  assert.equal(find(importsCard, (n) => n.className === 'gas-note')[0].textContent, 'gas.imports-note');
+  assert.match(find(importsCard, (n) => n.className === 'gas-source')[0].textContent, /^gas\.imports-source /, 'Eurostat ako zdroj + zoskupenie OKO');
+  const importsBtns = find(importsCard, (n) => n.className === 'gas-range');
+  assert.deepEqual(importsBtns.map((b) => b.textContent), ['gas.range-2y', 'gas.range-max']);
+  importsBtns[1].listeners.click[0]();
+  assert.equal(panel._getStateForTest().imports.months, 66, 'MAX = od 2021');
+  panel.setImportsRange('2y');
+  assert.equal(panel._getStateForTest().imports.months, 24);
   const body = doc.root.body;
   const value = find(body, (n) => n.className === 'gas-headline-value')[0];
   assert.equal(value.textContent, '79,5 €/MWh');
@@ -209,7 +236,7 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(find(body, (n) => n.className === 'gas-note')[0].textContent, 'gas.ttf-derived-note');
   panel.destroy();
   assert.equal(cleared, 42);
-  assert.deepEqual(calls, ['prices', 'flows', 'storage', 'lng'], 'všetky karty sa načítajú naraz, každá raz');
+  assert.deepEqual(calls, ['prices', 'flows', 'storage', 'lng', 'imports'], 'všetky karty sa načítajú naraz, každá raz');
 });
 
 test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null; open() otvorí panel', async () => {
@@ -222,6 +249,7 @@ test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null
       flows: async () => { throw new Error('HTTP 429'); },
       storage: async () => { const e = new Error('no_key'); e.status = 503; e.code = 'no_key'; throw e; },
       lng: async () => { throw new Error('HTTP 504'); },
+      imports: async () => { throw new Error('HTTP 502 eurostat'); },
     },
     setCollapsed: (v) => { collapsed = v; },
   });
@@ -237,6 +265,9 @@ test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[2].textContent, 'gas.gie-no-key', '503 no_key = hláška o chýbajúcom kľúči, nie generická');
   assert.equal(st.lng.status, 'error');
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[3].textContent, 'gas.lng-unavailable');
+  assert.equal(st.imports.status, 'error');
+  assert.equal(st.imports.lastError, 'HTTP 502 eurostat');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[4].textContent, 'gas.imports-unavailable');
   panel.open();
   assert.equal(collapsed, false);
   assert.equal(installGasPanel({ doc: { getElementById: () => null }, t }), null);
@@ -291,6 +322,19 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
     assert.ok(SK_STRINGS[key], `SK ${key}`);
   }
   assert.match(SK_STRINGS['gas.gie-source'], /GIE AGSI\+ \/ ALSI/, 'GIE ako zdroj je podmienka API');
+  // Etapa 6: dovoz podľa pôvodu z Eurostatu (bez kľúča, raz denne, zoskupenie v proxy).
+  assert.match(vite, /middlewares\.use\('\/api\/gas\/imports', imports\.handler\)/);
+  assert.match(vite, /fetchText\(eurostatImportsUrl\(\)\)/);
+  assert.match(vite, /IMPORTS_TTL_MS = 24 \* 60 \* 60_000/, 'Eurostat aktualizuje mesačne — raz denne stačí');
+  for (const key of ['gas.imports', 'gas.imports-loading', 'gas.imports-unavailable', 'gas.imports-updated', 'gas.imports-eu', 'gas.imports-twh', 'gas.imports-yoy', 'gas.imports-ru-share', 'gas.imports-transit-share', 'gas.imports-lng-share', 'gas.imports-intra', 'gas.imports-of-which-lng', 'gas.imports-year-ago', 'gas.imports-group-no', 'gas.imports-group-ru', 'gas.imports-group-transit', 'gas.imports-group-dz', 'gas.imports-group-az', 'gas.imports-group-us', 'gas.imports-group-qa', 'gas.imports-group-lng-other', 'gas.imports-group-other', 'gas.imports-note', 'gas.imports-source', 'gas.range-2y']) {
+    assert.ok(EN_STRINGS[key], `EN ${key}`);
+    assert.ok(SK_STRINGS[key], `SK ${key}`);
+  }
+  assert.match(SK_STRINGS['gas.imports-note'], /tranzit/, 'poznámka priznáva tranzitné priradenie partnera');
+  assert.match(SK_STRINGS['gas.imports-source'], /Eurostat/, 'Eurostat ako zdroj (podmienka re-use)');
+  assert.match(SK_STRINGS['gas.imports-source'], /nezodpovedá/, 'Eurostat žiada disclaimer pri upravených dátach');
+  assert.match(css, /\.gas-legend-row \{/);
+  assert.match(css, /#history-panel\.collapsed,\n#gas-panel\.collapsed \{\n  width: var\(--left-collapsed-width\);/, 'zbalené panely ľavého stĺpca majú jednu šírku');
   assert.match(vite, /OKO-gas\/0\.1 \(https:\/\/github\.com\/vladouh76; vladouh76@gmail\.com\)/, 'User-Agent s kontaktom');
   assert.match(vite, /parseAcerCsv\(await fetchText\(ACER_HISTORICAL_URL\)\)/);
   assert.ok(!/eex\.com|theice\.com/i.test(vite.slice(vite.indexOf('function gasProxy('), vite.indexOf('function gasProxy(') + 8000)), 'žiadne burzové zdroje bez licencie');

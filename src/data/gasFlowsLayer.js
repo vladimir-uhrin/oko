@@ -91,7 +91,7 @@ export function stationColor(level) {
  * @param {{days?: number, key?: string}} [o]
  * @returns {{values: Array<number|null>, max: number, last: number|null, firstDay: string, lastDay: string}}
  */
-export function normalizeDaily(series, endMs, { days = GAS_FLOW_CHART_DAYS, key = 'gwh' } = {}) {
+export function normalizeDaily(series, endMs, { days = GAS_FLOW_CHART_DAYS, key = 'gwh', fill = 'none', floor = 'zero' } = {}) {
   const end = Math.floor(endMs / DAY_MS) * DAY_MS;
   const start = end - (days - 1) * DAY_MS;
   const byDay = new Map();
@@ -102,11 +102,24 @@ export function normalizeDaily(series, endMs, { days = GAS_FLOW_CHART_DAYS, key 
     if (t >= start && t <= end) byDay.set(Math.round((t - start) / DAY_MS), v);
   }
   const raw = Array.from({ length: days }, (_, i) => (byDay.has(i) ? byDay.get(i) : null));
+  // Ceny (2026-09-13, používateľ zakrúžkoval „útržky"): víkend a sviatok
+  // nemajú hodnotu, platí posledný settlement → doplniť dopredu, inak maliar
+  // kreslí každý pracovný týždeň ako samostatný blok.
+  if (fill === 'forward') {
+    let prev = null;
+    for (let i = 0; i < raw.length; i += 1) { if (raw[i] === null) raw[i] = prev; else prev = raw[i]; }
+  }
   const known = raw.filter((v) => v !== null);
   const max = known.length ? Math.max(...known, 0) : 0;
+  const min = known.length ? Math.min(...known) : 0;
   const scale = max > 0 ? max : 1;
   const last = known.length ? known[known.length - 1] : null;
-  return { values: raw.map((v) => (v === null ? null : Math.max(0, Math.min(1, v / scale)))), max, last, firstDay: isoDay(start), lastDay: isoDay(end) };
+  // Tok: podlaha 0 (nula je informácia). Cena: rozsah min–max s rezervou,
+  // lebo pri podlahe 0 sa pohyb ceny (napr. 75–82 €/MWh) stlačí k stropu.
+  const values = floor === 'min'
+    ? raw.map((v) => (v === null ? null : (max > min ? 0.08 + 0.84 * ((v - min) / (max - min)) : 0.5)))
+    : raw.map((v) => (v === null ? null : Math.max(0, Math.min(1, v / scale))));
+  return { values, max, min, last, firstDay: isoDay(start), lastDay: isoDay(end) };
 }
 
 /**
@@ -167,7 +180,7 @@ export function stationTrackedCard(station, position, { translate, lang = 'sk', 
   const endMs = first?.series?.length ? dayMs(first.series[first.series.length - 1].date) : nowMs;
   const flow = normalizeDaily(first?.series || [], endMs);
   const priceRows = (prices || []).filter((r) => Number.isFinite(r?.ttf)).map((r) => ({ date: r.date, v: r.ttf }));
-  const price = normalizeDaily(priceRows, priceRows.length ? dayMs(priceRows[priceRows.length - 1].date) : nowMs, { key: 'v' });
+  const price = normalizeDaily(priceRows, priceRows.length ? dayMs(priceRows[priceRows.length - 1].date) : nowMs, { key: 'v', fill: 'forward', floor: 'min' });
   const lastPrice = priceRows.length ? priceRows[priceRows.length - 1] : null;
   const details = station.rows.map((r) => [`${r.route} ${r.text}`, r.mcmText, r.avg7Text].filter(Boolean).join(' · '));
   if (first?.dateText) details.push([translate('gas.card-day', { date: first.dateText }), first.statusText].filter(Boolean).join(' · '));

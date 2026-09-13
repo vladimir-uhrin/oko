@@ -7211,9 +7211,13 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   display: none !important;
 }
 
+/* Zbalené panely ľavého stĺpca majú jednu šírku (2026-09-13, používateľ:
+   „zarovnaj to" — História letov a Plyn trčali na 360 px vedľa 170 px). */
 #data-panel.collapsed,
 #cctv-panel.collapsed,
-#scene-panel.collapsed {
+#scene-panel.collapsed,
+#history-panel.collapsed,
+#gas-panel.collapsed {
   width: var(--left-collapsed-width);
 }
 
@@ -7222,7 +7226,9 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #data-panel.collapsed .panel-title,
 #cctv-panel.collapsed .panel-title,
 #radio-panel.collapsed .panel-title,
-#scene-panel.collapsed .panel-title {
+#scene-panel.collapsed .panel-title,
+#history-panel.collapsed .panel-title,
+#gas-panel.collapsed .panel-title {
   font-size: 8px;
   letter-spacing: 1.8px;
 }
@@ -7232,6 +7238,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #cctv-panel.collapsed .cctv-panel-inner,
 #radio-panel.collapsed .radio-panel-inner,
 #scene-panel.collapsed .scene-panel-inner,
+#history-panel.collapsed .history-panel-inner,
+#gas-panel.collapsed .gas-panel-inner,
 #param-slider-panel.collapsed,
 #location-bar.collapsed .location-inner {
   padding-bottom: 10px;
@@ -10798,6 +10806,24 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-secondary);
   line-height: 1.4;
 }
+/* Legenda skladaného grafu dovozu: farebná vzorka, meno, objem, podiel, podriadok. */
+.gas-legend { display: flex; flex-direction: column; gap: 2px; }
+.gas-legend-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto 38px;
+  grid-template-areas: "swatch name value pct" "swatch sub sub sub";
+  align-items: baseline;
+  column-gap: 6px;
+  row-gap: 1px;
+  padding: 2px 0;
+  border-top: 1px solid rgba(64, 200, 230, 0.1);
+}
+.gas-swatch { grid-area: swatch; width: 10px; height: 10px; border-radius: 2px; align-self: center; border: 1px solid rgba(255, 255, 255, 0.12); }
+.gas-legend-name { grid-area: name; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: #d6f3fa; }
+.gas-legend-value { grid-area: value; font-family: var(--font-mono); font-size: 10px; color: #d6f3fa; white-space: nowrap; }
+.gas-legend-pct { grid-area: pct; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); white-space: nowrap; text-align: right; }
+.gas-legend-sub { grid-area: sub; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.04em; color: var(--text-secondary); line-height: 1.35; }
+.gas-legend-row[data-level="zero"] .gas-legend-value, .gas-legend-row[data-level="zero"] .gas-legend-name { color: var(--text-secondary); }
 .gas-bar {
   grid-area: spark;
   align-self: center;
