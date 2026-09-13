@@ -105,6 +105,7 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   const doc = fakeDoc();
   const calls = [];
   const intervals = [];
+  const flown = [];
   let cleared = null;
   const panel = installGasPanel({
     doc, t, lang: 'sk', nowMs: () => NOW,
@@ -116,6 +117,7 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
     },
     setIntervalImpl: (fn, ms) => { intervals.push(ms); return 42; },
     clearIntervalImpl: (id) => { cleared = id; },
+    onFlyTo: (target) => { flown.push(target); },
   });
   assert.ok(panel);
   assert.deepEqual(intervals, [GAS_PANEL_REFRESH_MS], 'periodická obnova');
@@ -138,6 +140,14 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(sudzha.dataset.level, 'zero');
   assert.equal(find(sudzha, (n) => n.className === 'gas-flow-note')[0].textContent, 'gas.note-sudzha');
   assert.equal(flowRows.find((r) => r.dataset.id === 'mozyr').dataset.level, 'nodata');
+  assert.equal(flowRows[0].attributes.role, 'button', 'riadok toku je klikateľný');
+  assert.equal(flowRows[0].attributes.title, 'gas.flow-fly');
+  flowRows[0].listeners.click[0]();
+  assert.deepEqual(flown, [{ id: 'lanzhot-in', name: 'Lanžhot', lat: 48.72, lon: 16.97 }], 'klik na riadok = prelet k stanici');
+  const prevented = { key: 'Enter', preventDefault() { this.stopped = true; }, stopped: false };
+  flowRows[1].listeners.keydown[0](prevented);
+  assert.equal(prevented.stopped, true);
+  assert.equal(flown.length, 2);
   const flowsStatus = find(doc.root.body, (n) => n.className === 'gas-status')[1];
   assert.equal(flowsStatus.textContent, 'gas.flows-updated {"date":"11. 9. 2026"}');
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-source')[1].textContent, 'ENTSOG TP 13-09-2026 https://transparency.entsog.eu/');
@@ -247,6 +257,11 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
   assert.match(ui, /import \{ installGasPanel \} from '\.\/gasPanel\.js';/);
   assert.match(ui, /\{ id: 'gas-panel' \},/);
   assert.match(ui, /this\._gasPanel = installGasPanel\(\{/);
+  assert.match(ui, /onFlyTo: \(\{ lat, lon \}\) => \{/, 'klik na riadok toku preletí kameru');
+  assert.match(ui, /setEnabled\?\.\('gas-flows', true, \{ origin: 'user' \}\)/, 'a zapne vrstvu staníc');
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /import gasFlowsLayer from '\.\/data\/gasFlowsLayer\.js';/);
+  assert.match(main, /dataManager\.register\(gasFlowsLayer\);/, 'vrstva tokov je zaregistrovaná');
   for (const key of ['panel.gas', 'gas.prices', 'gas.ttf-derived', 'gas.ttf-derived-note', 'gas.eu-lng', 'gas.nwe', 'gas.south', 'gas.range-1m', 'gas.range-1y', 'gas.range-max', 'gas.per-kwh', 'gas.source-acer', 'gas.source-monthly', 'gas.monthly-label', 'gas.max-label', 'gas.last-label', 'gas.loading', 'gas.unavailable', 'gas.updated', 'gas.stale']) {
     assert.ok(EN_STRINGS[key], `EN ${key}`);
     assert.ok(SK_STRINGS[key], `SK ${key}`);

@@ -3106,6 +3106,16 @@ export class StyleManager {
     this._gasPanel = installGasPanel({
       t,
       setCollapsed: (collapsed) => this.setPanelCollapsed('gas-panel', collapsed, { persist: false, syncShare: false }),
+      // Klik na riadok toku: zapni vrstvu staníc a preleť k nej (120 km nad
+      // hranicou stačí na bod aj popis, nie na konkrétny objekt).
+      onFlyTo: ({ lat, lon }) => {
+        void this._dataManager?.setEnabled?.('gas-flows', true, { origin: 'user' });
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat, 120_000),
+          orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
+          duration: 2,
+        });
+      },
     });
     // Vlajky na kartách sa ťahajú lenivo — dotiahnutá vlajka si vyžiada
     // snímok, nech sa objaví aj na nehybnej kamere (render governor).

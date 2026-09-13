@@ -304,6 +304,13 @@ export const DATA_CREDITS = [
       '(<a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener">CC BY-NC 4.0</a>, 4Wings public-global-sar-presence — delayed, not live)',
   },
   {
+    key: 'gas-flows',
+    html:
+      'Gas flows at interconnection points (physical flow per gas day, provisional, published the next morning): ' +
+      '<a href="https://transparency.entsog.eu/" target="_blank" rel="noopener">ENTSOG Transparency Platform</a> ' +
+      '(Terms and Conditions of Use — source and download date cited on the card; station coordinates approximate)',
+  },
+  {
     key: 'air-density',
     html:
       'Historical air-traffic density (one day): ' +

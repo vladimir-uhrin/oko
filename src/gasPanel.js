@@ -56,6 +56,7 @@ export function installGasPanel({
   nowMs = () => Date.now(),
   refreshMs = GAS_PANEL_REFRESH_MS,
   setCollapsed = null,
+  onFlyTo = null,
   setIntervalImpl = globalThis.setInterval,
   clearIntervalImpl = globalThis.clearInterval,
 } = {}) {
@@ -278,6 +279,16 @@ export function installGasPanel({
         const sub = el(doc, 'span', 'gas-flow-sub', [row.mcmText, row.avg7Text, row.dateText, row.statusText].filter(Boolean).join(' · '));
         r.append(head, spark, sub);
         if (row.note) r.appendChild(el(doc, 'span', 'gas-flow-note', row.note));
+        if (onFlyTo && Number.isFinite(row.lat) && Number.isFinite(row.lon)) {
+          // Klik na riadok = prelet kamery k stanici (a zapnutie vrstvy tokov).
+          r.dataset.fly = 'true';
+          r.setAttribute('role', 'button');
+          r.setAttribute('tabindex', '0');
+          r.setAttribute('title', t('gas.flow-fly'));
+          const fly = () => onFlyTo({ id: row.id, name: row.name, lat: row.lat, lon: row.lon });
+          r.addEventListener('click', fly);
+          r.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); fly(); } });
+        }
         g.appendChild(r);
         const ctx = spark.getContext?.('2d');
         if (ctx) drawSparkline(ctx, row.spark, { width: GAS_SPARK_W, height: GAS_SPARK_H });

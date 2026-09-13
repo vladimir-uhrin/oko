@@ -281,6 +281,7 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'earthquakes', token: 'e', disposition: 'enabled-only' }),
   Object.freeze({ id: 'flights', token: 'f', disposition: 'enabled+options', optionOwner: 'flights' }),
   // Satelitné AIS · oneskorené (Global Fishing Watch, 2026-09-12): ďalšia voľná číslica.
+  Object.freeze({ id: 'gas-flows', token: '9', disposition: 'enabled-only' }),
   Object.freeze({ id: 'gfw-presence', token: '7', disposition: 'enabled-only' }),
   Object.freeze({ id: 'gfw-sar', token: '8', disposition: 'enabled-only' }),
   // NASA GIBS prekryvy (2026-09-06): písmená a–y sú obsadené, tokeny sú
