@@ -4592,6 +4592,36 @@ function gasProxy() {
   };
 }
 
+/**
+ * Verejný tunel (2026-09-13, používateľ: „daj mi to pod doménu uhrin.digital
+ * cez CF tunel, ale SEO noindex"): každá odpoveď dev aj preview servera nesie
+ * `X-Robots-Tag: noindex, nofollow, noarchive` a `/robots.txt` zakazuje všetko
+ * — OKO je pracovný nástroj, nie web na indexovanie (meta robots je aj
+ * v index.html). Plugin je v zozname prvý, aby hlavička sadla skôr, než iná
+ * proxy odpoveď skončí.
+ * @returns {import('vite').Plugin}
+ */
+function noIndexPlugin() {
+  const ROBOTS_TXT = 'User-agent: *\nDisallow: /\n';
+  function install(middlewares) {
+    middlewares.use((req, res, next) => {
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+      if (String(req.url || '').split('?')[0] === '/robots.txt') {
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
+        res.end(ROBOTS_TXT);
+        return;
+      }
+      next();
+    });
+  }
+  return {
+    name: 'oko-noindex',
+    enforce: 'pre',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function flightHistoryProxy() {
   // Konfigurácia z .env (loadEnv ju kopíruje do process.env až v config hooku,
   // preto sa číta LENIVO pri prvom použití, nie pri stavbe pluginu):
@@ -9637,6 +9667,7 @@ export default defineConfig(({ mode }) => {
   const env = { ...process.env };
   return {
     plugins: [
+      noIndexPlugin(),
       flightHistoryProxy(),
       cesium(),
       openSkyProxy(),
@@ -9673,9 +9704,11 @@ export default defineConfig(({ mode }) => {
       host: env.HOST || 'localhost',
       port: parseInt(env.PORT, 10) || 5173,
       // When binding to all interfaces, allow any host; otherwise restrict to local names
+      // + the Cloudflare Tunnel hostname (2026-09-13, oko.uhrin.digital): cloudflared
+      // on this machine forwards to localhost, the bind stays localhost-only.
       allowedHosts: (env.HOST === '0.0.0.0' || env.HOST === '::')
         ? true
-        : ['localhost', '127.0.0.1', '.local'],
+        : ['localhost', '127.0.0.1', '.local', '.uhrin.digital'],
       watch: {
         // Runtime caches and QA output live inside the repo but are not
         // source: heavy or mid-write files there (radar PNGs, terrain
