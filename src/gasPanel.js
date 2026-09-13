@@ -16,7 +16,11 @@ import { currentLanguage } from './i18n.js';
 import {
   GAS_PRICE_RANGES, buildPricesModel, fetchGasPrices, formatDateLabel, formatEurMwh,
 } from './data/gasPrices.js';
-import { GAS_CHART_HEIGHT_PX, drawGasChart } from './gasChart.js';
+import { buildFlowsModel, fetchGasFlows } from './data/gasFlows.js';
+import { GAS_CHART_HEIGHT_PX, drawGasChart, drawSparkline } from './gasChart.js';
+
+export const GAS_SPARK_W = 64;
+export const GAS_SPARK_H = 18;
 
 export const GAS_PANEL_ID = 'gas-panel';
 /** Ceny sa menia raz denne; obnova každých 30 min stačí (proxy má TTL 6 h). */
@@ -46,7 +50,7 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 export function installGasPanel({
   doc = globalThis.document,
   t,
-  api = { prices: fetchGasPrices },
+  api = { prices: fetchGasPrices, flows: fetchGasFlows },
   lang = null,
   nowMs = () => Date.now(),
   refreshMs = GAS_PANEL_REFRESH_MS,
@@ -93,7 +97,18 @@ export function installGasPanel({
   const note = el(doc, 'div', 'gas-note', '');
   const source = el(doc, 'div', 'gas-source', '');
   card.append(cardTitle, headline, subrows, ranges, canvas, laic, note, source);
-  body.append(status, card);
+
+  // ── karta TOKY (ENTSOG, predbežné D−1) ──────────────────────────
+  const flowsCard = el(doc, 'section', 'gas-card');
+  flowsCard.dataset.card = 'flows';
+  const flowsTitle = el(doc, 'h3', 'gas-card-title', t('gas.flows'));
+  const flowsStatus = el(doc, 'div', 'gas-status', t('gas.flows-loading'));
+  flowsStatus.dataset.state = 'loading';
+  const flowsBody = el(doc, 'div', 'gas-flows');
+  const flowsNote = el(doc, 'div', 'gas-note', '');
+  const flowsSource = el(doc, 'div', 'gas-source', '');
+  flowsCard.append(flowsTitle, flowsStatus, flowsBody, flowsNote, flowsSource);
+  body.append(status, card, flowsCard);
 
   // ── render ──────────────────────────────────────────────────────
   function drawChart() {
@@ -161,7 +176,7 @@ export function installGasPanel({
     drawChart();
   }
 
-  async function load() {
+  async function loadPrices() {
     const token = ++loadToken;
     try {
       const fresh = await api.prices();
@@ -179,6 +194,73 @@ export function installGasPanel({
     }
   }
 
+  // ── toky ────────────────────────────────────────────────────────
+  let flowsPayload = null;
+  let flowsModel = null;
+  let flowsToken = 0;
+  let flowsError = null;
+
+  function renderFlows() {
+    if (!flowsPayload) return;
+    const lng = language();
+    flowsModel = buildFlowsModel(flowsPayload, { lang: lng, translate: t, nowMs: nowMs() });
+    flowsBody.textContent = '';
+    if (!flowsModel.ok) {
+      flowsStatus.textContent = t('gas.flows-unavailable');
+      flowsStatus.dataset.state = 'error';
+      return;
+    }
+    for (const group of flowsModel.groups) {
+      const g = el(doc, 'div', 'gas-flow-group');
+      g.dataset.group = group.key;
+      g.appendChild(el(doc, 'h4', 'gas-flow-group-title', group.title));
+      for (const row of group.rows) {
+        const r = el(doc, 'div', 'gas-flow-row');
+        r.dataset.level = row.level;
+        r.dataset.id = row.id;
+        const head = el(doc, 'div', 'gas-flow-head');
+        head.append(el(doc, 'span', 'gas-flow-route', `${row.route} · ${row.name}`), el(doc, 'span', 'gas-flow-value', row.text));
+        const spark = el(doc, 'canvas', 'gas-spark');
+        spark.width = GAS_SPARK_W;
+        spark.height = GAS_SPARK_H;
+        const sub = el(doc, 'span', 'gas-flow-sub', [row.mcmText, row.avg7Text, row.dateText, row.statusText].filter(Boolean).join(' · '));
+        r.append(head, spark, sub);
+        if (row.note) r.appendChild(el(doc, 'span', 'gas-flow-note', row.note));
+        g.appendChild(r);
+        const ctx = spark.getContext?.('2d');
+        if (ctx) drawSparkline(ctx, row.spark, { width: GAS_SPARK_W, height: GAS_SPARK_H });
+      }
+      flowsBody.appendChild(g);
+    }
+    flowsNote.textContent = flowsModel.note;
+    flowsSource.textContent = flowsModel.sourceLine;
+    const latest = flowsModel.freshness.latestDate ? formatDateLabel(flowsModel.freshness.latestDate, lng) : '';
+    flowsStatus.textContent = flowsModel.freshness.stale ? t('gas.stale', { date: latest || '—' }) : t('gas.flows-updated', { date: latest });
+    flowsStatus.dataset.state = flowsModel.freshness.stale ? 'stale' : 'ok';
+  }
+
+  async function loadFlows() {
+    const token = ++flowsToken;
+    try {
+      const fresh = await api.flows();
+      if (token !== flowsToken) return;
+      flowsPayload = fresh;
+      flowsError = null;
+      renderFlows();
+    } catch (error) {
+      if (token !== flowsToken) return;
+      flowsError = error?.message || String(error);
+      if (!flowsPayload) {
+        flowsStatus.textContent = t('gas.flows-unavailable');
+        flowsStatus.dataset.state = 'error';
+      }
+    }
+  }
+
+  function load() {
+    return Promise.all([loadPrices(), loadFlows()]);
+  }
+
   const timer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void load(); }, refreshMs) : null;
   void load();
 
@@ -191,6 +273,10 @@ export function installGasPanel({
       return {
         range, loaded: Boolean(payload), ok: Boolean(model?.ok), status: status.dataset.state, lastError,
         headline: model?.headline?.text ?? null, series: model?.chart?.series?.map((s) => s.key) ?? [],
+        flows: {
+          loaded: Boolean(flowsPayload), ok: Boolean(flowsModel?.ok), status: flowsStatus.dataset.state, lastError: flowsError,
+          rows: flowsModel?.groups?.reduce((n, g) => n + g.rows.length, 0) ?? 0,
+        },
       };
     },
     destroy() { if (timer !== null && typeof clearIntervalImpl === 'function') clearIntervalImpl(timer); },

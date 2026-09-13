@@ -59,6 +59,7 @@ import { acceptableLogoLicense, airlineTitleCandidates, infoboxLogoFile, normali
 import {
   ACER_HISTORICAL_URL, FRED_EU_GAS_SERIES, FRED_USD_PER_EUR_SERIES, fredCsvUrl, monthlyEurPerMwh, parseAcerCsv, parseFredCsv,
 } from './src/data/gasPrices.js';
+import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -4281,10 +4282,13 @@ function gasProxy() {
   const UPSTREAM_TIMEOUT_MS = 25_000;
   const MAX_BYTES = 4 * 1024 * 1024;
   const USER_AGENT = 'OKO-gas/0.1 (https://github.com/vladouh76; vladouh76@gmail.com) node-fetch';
+  const FLOWS_PATH = path.join(CACHE_DIR, 'flows.json');
+  // ENTSOG čl. 5.6 (nezaťažovať platformu): jeden filtrovaný dopyt za hodinu
+  // pre všetkých 32 smerov; čl. 5.7 povoľuje automatické sťahovanie cez API.
+  const FLOWS_TTL_MS = 60 * 60_000;
+  const FLOWS_STALE_MAX_MS = 3 * 24 * 60 * 60_000;
   const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
   const inFlight = new Map();
-  let mem = null;
-  let lastError = null;
 
   function send(res, status, body, cacheState) {
     res.writeHead(status, {
@@ -4294,16 +4298,55 @@ function gasProxy() {
     });
     res.end(body);
   }
-  async function readDisk() {
-    try {
-      const parsed = JSON.parse(await fsp.readFile(PRICES_PATH, 'utf8'));
-      if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') return parsed;
-    } catch { /* miss */ }
-    return null;
-  }
-  async function writeDisk(entry) {
-    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(PRICES_PATH, JSON.stringify(entry), 'utf8'); }
-    catch (error) { console.warn('[gas-proxy] cache write failed: ' + (error?.message || error)); }
+  /**
+   * Spoločná obsluha cachovanej trasy: pamäť → disk → limiter → single-flight
+   * → čerstvé, pri chybe stale (do staleMaxMs) alebo 502.
+   */
+  function cachedRoute(name, { diskPath, ttlMs, staleMaxMs, build }) {
+    const state = { mem: null, lastError: null };
+    async function readDisk() {
+      try {
+        const parsed = JSON.parse(await fsp.readFile(diskPath, 'utf8'));
+        if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') return parsed;
+      } catch { /* miss */ }
+      return null;
+    }
+    async function writeDisk(entry) {
+      try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(diskPath, JSON.stringify(entry), 'utf8'); }
+      catch (error) { console.warn('[gas-proxy] ' + name + ' cache write failed: ' + (error?.message || error)); }
+    }
+    async function current() {
+      if (!state.mem) state.mem = await readDisk();
+      return state.mem;
+    }
+    async function handler(req, res) {
+      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+      const now = Date.now();
+      const mem = await current();
+      if (mem && now - mem.at < ttlMs) { send(res, 200, mem.body, 'HIT'); return; }
+      if (!limiter(clientKey(req))) {
+        if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
+        send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+      }
+      const stale = mem && now - mem.at < staleMaxMs ? mem : null;
+      const request = coalesceProxyRequest(inFlight, name, build);
+      try {
+        const fresh = await request.promise;
+        state.mem = fresh;
+        state.lastError = null;
+        void writeDisk(fresh);
+        send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        state.lastError = String(error?.message || error);
+        if (stale) {
+          if (!request.shared) console.warn('[gas-proxy] ' + name + ' refresh failed (' + state.lastError + ') — serving stale cache');
+          send(res, 200, stale.body, 'STALE-ERROR');
+          return;
+        }
+        send(res, 502, JSON.stringify({ error: 'upstream', detail: state.lastError }), 'NONE');
+      }
+    }
+    return { handler, state, current };
   }
   async function fetchText(url) {
     const upstream = await fetch(url, {
@@ -4318,7 +4361,18 @@ function gasProxy() {
     }
     return readResponseTextCapped(upstream, MAX_BYTES);
   }
-  async function build() {
+  async function buildFlows() {
+    const started = Date.now();
+    const window = flowWindow(Date.now());
+    const json = JSON.parse(await fetchText(entsogFlowsUrl(GAS_FLOW_POINTS, window)));
+    const rows = Array.isArray(json?.operationalData) ? json.operationalData : [];
+    if (!rows.length) throw new Error('ENTSOG returned no rows' + (json?.message ? ' (' + json.message + ')' : ''));
+    const payload = buildFlowsPayload(rows, { fetchedAt: Date.now(), window });
+    const withData = payload.points.filter((p) => p.latest).length;
+    console.log('[gas-proxy] flows: ENTSOG ' + rows.length + ' rows, ' + withData + '/' + GAS_FLOW_POINTS.length + ' point-directions with data in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body: JSON.stringify(payload) };
+  }
+  async function buildPrices() {
     const started = Date.now();
     const acer = parseAcerCsv(await fetchText(ACER_HISTORICAL_URL));
     if (!acer.length) throw new Error('ACER CSV has no rows');
@@ -4340,40 +4394,29 @@ function gasProxy() {
     console.log('[gas-proxy] prices: ACER ' + acer.length + ' days (latest ' + latestDate + '), monthly ' + monthly.length + ' in ' + (Date.now() - started) + ' ms');
     return { at: Date.now(), body };
   }
+  const prices = cachedRoute('prices', { diskPath: PRICES_PATH, ttlMs: TTL_MS, staleMaxMs: STALE_MAX_MS, build: buildPrices });
+  const flows = cachedRoute('flows', { diskPath: FLOWS_PATH, ttlMs: FLOWS_TTL_MS, staleMaxMs: FLOWS_STALE_MAX_MS, build: buildFlows });
   function install(middlewares) {
-    middlewares.use('/api/gas/prices', async (req, res) => {
-      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
-      const now = Date.now();
-      if (!mem) mem = await readDisk();
-      if (mem && now - mem.at < TTL_MS) { send(res, 200, mem.body, 'HIT'); return; }
-      if (!limiter(clientKey(req))) {
-        if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
-        send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
-      }
-      const stale = mem && now - mem.at < STALE_MAX_MS ? mem : null;
-      const request = coalesceProxyRequest(inFlight, 'prices', build);
-      try {
-        const fresh = await request.promise;
-        mem = fresh;
-        lastError = null;
-        void writeDisk(fresh);
-        send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
-      } catch (error) {
-        lastError = String(error?.message || error);
-        if (stale) {
-          if (!request.shared) console.warn('[gas-proxy] refresh failed (' + lastError + ') — serving stale cache');
-          send(res, 200, stale.body, 'STALE-ERROR');
-          return;
-        }
-        send(res, 502, JSON.stringify({ error: 'upstream', detail: lastError }), 'NONE');
-      }
-    });
+    middlewares.use('/api/gas/prices', prices.handler);
+    middlewares.use('/api/gas/flows', flows.handler);
     middlewares.use('/api/gas/status', async (req, res) => {
-      if (!mem) mem = await readDisk();
+      const p = await prices.current();
+      const f = await flows.current();
       let latestDate = null;
       let monthly = null;
-      try { const parsed = mem ? JSON.parse(mem.body) : null; latestDate = parsed?.acer?.latestDate ?? null; monthly = parsed?.monthly?.rows?.length ?? null; } catch { /* diagnostika */ }
-      send(res, 200, JSON.stringify({ prices: { cachedAt: mem?.at ?? null, latestDate, monthlyRows: monthly, ttlMs: TTL_MS, lastError } }), 'NONE');
+      let flowsLatest = null;
+      let flowsWithData = null;
+      try { const parsed = p ? JSON.parse(p.body) : null; latestDate = parsed?.acer?.latestDate ?? null; monthly = parsed?.monthly?.rows?.length ?? null; } catch { /* diagnostika */ }
+      try {
+        const parsed = f ? JSON.parse(f.body) : null;
+        const pts = Array.isArray(parsed?.points) ? parsed.points : [];
+        flowsWithData = f ? pts.filter((x) => x.latest).length : null;
+        for (const x of pts) if (x.latest?.date && (!flowsLatest || x.latest.date > flowsLatest)) flowsLatest = x.latest.date;
+      } catch { /* diagnostika */ }
+      send(res, 200, JSON.stringify({
+        prices: { cachedAt: p?.at ?? null, latestDate, monthlyRows: monthly, ttlMs: TTL_MS, lastError: prices.state.lastError },
+        flows: { cachedAt: f?.at ?? null, latestDate: flowsLatest, pointsWithData: flowsWithData, points: GAS_FLOW_POINTS.length, ttlMs: FLOWS_TTL_MS, lastError: flows.state.lastError },
+      }), 'NONE');
     });
   }
   return {

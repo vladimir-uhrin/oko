@@ -8,6 +8,7 @@ import { GAS_PANEL_ID, GAS_PANEL_REFRESH_MS, installGasPanel } from './gasPanel.
 import { GAS_CHART_HEIGHT_PX, chartExtent, drawGasChart, seriesStyle } from './gasChart.js';
 import { CHART_COLORS, CHART_PAD } from './flightHistoryChart.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
+import { buildFlowsPayload } from './data/gasFlows.js';
 
 const t = (key, vars) => (vars && Object.keys(vars).length ? `${key} ${JSON.stringify(vars)}` : key);
 const flush = async () => { for (let i = 0; i < 3; i += 1) await new Promise((r) => setImmediate(r)); };
@@ -24,6 +25,13 @@ const PAYLOAD = {
   fetchedAt: Date.UTC(2026, 8, 13),
 };
 const NOW = Date.UTC(2026, 8, 13, 10);
+const flowRow = (operatorKey, pointKey, directionKey, day, kwh) => ({ periodFrom: `${day}T06:00:00+02:00`, operatorKey, pointKey, directionKey, unit: 'kWh/d', value: kwh, flowStatus: 'Provisional' });
+const FLOWS = buildFlowsPayload([
+  ...Array.from({ length: 14 }, (_, i) => flowRow('SK-TSO-0001', 'ITP-00051', 'entry', `2026-08-${String(i + 15).padStart(2, '0')}`, 20_000_000 + i * 300_000)),
+  flowRow('SK-TSO-0001', 'ITP-00051', 'entry', '2026-09-11', 24_610_000),
+  flowRow('UA-TSO-0001', 'ITP-00184', 'entry', '2026-09-11', 0),
+  flowRow('BG-TSO-0001', 'ITP-00549', 'entry', '2026-09-11', 44_100_000),
+], { fetchedAt: NOW });
 
 test('gasChart: rozsah s rezervou, štýly podľa poradia, kreslenie = mriežka + plocha + čiary + popisky; bez radov len mriežka', () => {
   const series = [
@@ -88,7 +96,10 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   let cleared = null;
   const panel = installGasPanel({
     doc, t, lang: 'sk', nowMs: () => NOW,
-    api: { prices: async () => { calls.push('prices'); return PAYLOAD; } },
+    api: {
+      prices: async () => { calls.push('prices'); return PAYLOAD; },
+      flows: async () => { calls.push('flows'); return FLOWS; },
+    },
     setIntervalImpl: (fn, ms) => { intervals.push(ms); return 42; },
     clearIntervalImpl: (id) => { cleared = id; },
   });
@@ -101,6 +112,20 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(st.status, 'ok');
   assert.equal(st.headline, '79,5 €/MWh');
   assert.deepEqual(st.series, ['ttf', 'eu']);
+  assert.deepEqual(st.flows, { loaded: true, ok: true, status: 'ok', lastError: null, rows: 32 }, 'karta TOKY má všetkých 32 smerov katalógu');
+  const flowRows = find(doc.root.body, (n) => n.className === 'gas-flow-row');
+  assert.equal(flowRows.length, 32);
+  assert.equal(flowRows[0].dataset.id, 'lanzhot-in');
+  assert.equal(flowRows[0].dataset.level, 'flow');
+  assert.equal(find(flowRows[0], (n) => n.className === 'gas-flow-value')[0].textContent, '24,6 GWh/d');
+  assert.match(find(flowRows[0], (n) => n.className === 'gas-flow-sub')[0].textContent, /^gas\.flow-mcm \{"v":"2,3"\} · .*11\. 9\. · gas\.flow-provisional$/);
+  const sudzha = flowRows.find((r) => r.dataset.id === 'sudzha');
+  assert.equal(sudzha.dataset.level, 'zero');
+  assert.equal(find(sudzha, (n) => n.className === 'gas-flow-note')[0].textContent, 'gas.note-sudzha');
+  assert.equal(flowRows.find((r) => r.dataset.id === 'mozyr').dataset.level, 'nodata');
+  const flowsStatus = find(doc.root.body, (n) => n.className === 'gas-status')[1];
+  assert.equal(flowsStatus.textContent, 'gas.flows-updated {"date":"11. 9. 2026"}');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-source')[1].textContent, 'ENTSOG TP 13-09-2026 https://transparency.entsog.eu/');
   const body = doc.root.body;
   const value = find(body, (n) => n.className === 'gas-headline-value')[0];
   assert.equal(value.textContent, '79,5 €/MWh');
@@ -128,19 +153,25 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(find(body, (n) => n.className === 'gas-note')[0].textContent, 'gas.ttf-derived-note');
   panel.destroy();
   assert.equal(cleared, 42);
-  assert.deepEqual(calls, ['prices']);
+  assert.deepEqual(calls, ['prices', 'flows'], 'obe karty sa načítajú naraz, každá raz');
 });
 
 test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null; open() otvorí panel', async () => {
   const doc = fakeDoc();
   let collapsed = null;
-  const panel = installGasPanel({ doc, t, lang: 'sk', refreshMs: 0, api: { prices: async () => { throw new Error('HTTP 502'); } }, setCollapsed: (v) => { collapsed = v; } });
+  const panel = installGasPanel({
+    doc, t, lang: 'sk', refreshMs: 0,
+    api: { prices: async () => { throw new Error('HTTP 502'); }, flows: async () => { throw new Error('HTTP 429'); } },
+    setCollapsed: (v) => { collapsed = v; },
+  });
   await flush();
   const st = panel._getStateForTest();
   assert.equal(st.loaded, false);
   assert.equal(st.status, 'error');
   assert.equal(st.lastError, 'HTTP 502');
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[0].textContent, 'gas.unavailable');
+  assert.deepEqual(st.flows, { loaded: false, ok: false, status: 'error', lastError: 'HTTP 429', rows: 0 }, 'karta TOKY zlyhá nezávisle od cien');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[1].textContent, 'gas.flows-unavailable');
   panel.open();
   assert.equal(collapsed, false);
   assert.equal(installGasPanel({ doc: { getElementById: () => null }, t }), null);
@@ -170,6 +201,14 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
   assert.match(vite, /function gasProxy\(\)/);
   assert.match(vite, /gasProxy\(\),/, 'plugin je zaregistrovaný');
   assert.match(vite, /middlewares\.use\('\/api\/gas\/prices'/);
+  assert.match(vite, /middlewares\.use\('\/api\/gas\/flows'/);
+  assert.match(vite, /entsogFlowsUrl\(GAS_FLOW_POINTS, window\)/, 'všetky smery jedným dopytom');
+  assert.match(vite, /FLOWS_TTL_MS = 60 \* 60_000/, 'ENTSOG čl. 5.6: raz za hodinu');
+  for (const key of ['gas.flows', 'gas.flows-sk', 'gas.flows-east', 'gas.flows-loading', 'gas.flows-unavailable', 'gas.flows-updated', 'gas.flows-note', 'gas.flow-mcm', 'gas.flow-avg7', 'gas.flow-provisional', 'gas.flow-confirmed', 'gas.flow-nodata', 'gas.note-vyrava', 'gas.note-kapusany', 'gas.note-lab', 'gas.note-turkstream', 'gas.note-transbalkan', 'gas.note-nordstream', 'gas.note-imatra', 'gas.note-baltic', 'gas.note-kotlovka', 'gas.note-sudzha', 'gas.note-belarus', 'gas.note-isaccea', 'gas.note-bereg', 'gas.note-ungheni', 'gas.note-tap', 'gas.note-kipi']) {
+    assert.ok(EN_STRINGS[key], `EN ${key}`);
+    assert.ok(SK_STRINGS[key], `SK ${key}`);
+  }
+  assert.match(SK_STRINGS['gas.flows-updated'], /predbežné, D−1/, 'toky sa nikdy nevydávajú za živé');
   assert.match(vite, /OKO-gas\/0\.1 \(https:\/\/github\.com\/vladouh76; vladouh76@gmail\.com\)/, 'User-Agent s kontaktom');
   assert.match(vite, /parseAcerCsv\(await fetchText\(ACER_HISTORICAL_URL\)\)/);
   assert.ok(!/eex\.com|theice\.com/i.test(vite.slice(vite.indexOf('function gasProxy('), vite.indexOf('function gasProxy(') + 8000)), 'žiadne burzové zdroje bez licencie');

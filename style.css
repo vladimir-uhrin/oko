@@ -10748,3 +10748,45 @@ body.scene-playback-mode #first-run-launcher {
   line-height: 1.4;
 }
 .gas-laic { color: #d6f3fa; }
+.gas-flows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 42vh;
+  overflow: hidden auto;
+}
+.gas-flows::-webkit-scrollbar { width: 6px; }
+.gas-flows::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
+.gas-flow-group-title {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+.gas-flow-row {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  grid-template-areas: "head spark" "sub spark" "note note";
+  column-gap: 8px;
+  row-gap: 1px;
+  padding: 3px 0;
+  border-top: 1px solid rgba(64, 200, 230, 0.1);
+}
+.gas-flow-head { grid-area: head; display: flex; justify-content: space-between; gap: 6px; align-items: baseline; }
+.gas-flow-route { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: #d6f3fa; }
+.gas-flow-value { font-family: var(--font-mono); font-size: 11px; color: #d6f3fa; white-space: nowrap; }
+.gas-flow-row[data-level="zero"] .gas-flow-value { color: var(--text-secondary); }
+.gas-flow-row[data-level="nodata"] .gas-flow-value { color: var(--text-secondary); font-style: italic; }
+.gas-spark { grid-area: spark; width: 64px; height: 18px; align-self: center; }
+.gas-flow-sub, .gas-flow-note {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+.gas-flow-sub { grid-area: sub; }
+.gas-flow-note { grid-area: note; opacity: 0.85; }

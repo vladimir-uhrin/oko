@@ -24,6 +24,45 @@ export function seriesStyle(index) {
 }
 
 /**
+ * Mini-graf pre riadok toku (posledných ~14 dní): plocha + čiara v akcente,
+ * spodok = 0 (nula toku je informácia, nie „min"), 1 px okraj. Vracia
+ * false, keď nie je čo kresliť (menej než 2 hodnoty).
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<number|null>} values
+ * @param {{width: number, height: number, color?: string, fill?: string}} o
+ */
+export function drawSparkline(ctx, values, { width, height, color = CHART_COLORS.altLine, fill = CHART_COLORS.altFill } = {}) {
+  ctx.clearRect(0, 0, width, height);
+  const pts = (values || []).map((v) => (Number.isFinite(v) ? v : null));
+  const valid = pts.filter((v) => v !== null);
+  if (valid.length < 2) return false;
+  const max = Math.max(...valid, 0);
+  const span = max > 0 ? max : 1;
+  const n = pts.length;
+  const x = (i) => 1 + (n > 1 ? (i / (n - 1)) * (width - 2) : 0);
+  const y = (v) => height - 1 - (v / span) * (height - 2);
+  let first = -1; let last = -1;
+  pts.forEach((v, i) => { if (v === null) return; if (first < 0) first = i; last = i; });
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(x(first), height - 1);
+  pts.forEach((v, i) => { if (v !== null) ctx.lineTo(x(i), y(v)); });
+  ctx.lineTo(x(last), height - 1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  let pen = false;
+  pts.forEach((v, i) => {
+    if (v === null) { pen = false; return; }
+    if (!pen) { ctx.moveTo(x(i), y(v)); pen = true; } else ctx.lineTo(x(i), y(v));
+  });
+  ctx.stroke();
+  return true;
+}
+
+/**
  * Spoločný rozsah času a hodnôt všetkých radov (+8 % zvislej rezervy;
  * plochý rad dostane rezervu 10 % hodnoty, aby sa nedelilo nulou).
  * @param {Array<{points: Array<{t: number, v: number}>}>} series
