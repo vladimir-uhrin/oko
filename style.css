@@ -1613,6 +1613,7 @@ body.ui-clean-view #cctv-panel,
 body.ui-clean-view #radio-panel,
 body.ui-clean-view #global-context-panel,
 body.ui-clean-view #history-panel,
+body.ui-clean-view #gas-panel,
 body.ui-clean-view #scene-panel {
   opacity: 0 !important;
   visibility: hidden !important;
@@ -4369,6 +4370,7 @@ body.cockpit-mode #left-panel-stack {
 }
 body.cockpit-mode #left-panel-stack > #scene-panel { display: none !important; }
 body.cockpit-mode #left-panel-stack > #history-panel { display: none !important; }
+body.cockpit-mode #left-panel-stack > #gas-panel { display: none !important; }
 body.cockpit-mode #right-context-rail {
   display: none !important;
 }
@@ -6849,6 +6851,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #left-panel-stack > #cctv-panel,
 #left-panel-stack > #global-context-panel,
 #left-panel-stack > #history-panel,
+#left-panel-stack > #gas-panel,
 #left-panel-stack > #scene-panel {
   position: relative;
   top: auto;
@@ -6872,6 +6875,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 
 #left-panel-stack > #scene-panel { order: 4; }
 #left-panel-stack > #history-panel { order: 5; }
+#left-panel-stack > #gas-panel { order: 6; }
 
 /*
  * Runtime focus mode: the layout engine applies this only when the expanded
@@ -6885,6 +6889,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #left-panel-stack > #data-panel:not(.collapsed),
 #left-panel-stack > #cctv-panel:not(.collapsed),
 #left-panel-stack > #history-panel:not(.collapsed),
+#left-panel-stack > #gas-panel:not(.collapsed),
 #left-panel-stack > #scene-panel:not(.collapsed) {
   box-sizing: border-box;
   flex: 0 1 var(--left-panel-allocated-height, auto);
@@ -6896,7 +6901,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
  * When an expanded panel and its collapsed siblings fit together, preserve
  * the canonical control order and center their combined stack at 50vh.
  */
-#left-panel-stack.layout-tail > :is(#data-panel, #cctv-panel, #scene-panel, #history-panel):not(.collapsed) {
+#left-panel-stack.layout-tail > :is(#data-panel, #cctv-panel, #scene-panel, #history-panel, #gas-panel):not(.collapsed) {
   box-sizing: border-box;
   flex: 0 0 var(--left-panel-allocated-height);
   height: var(--left-panel-allocated-height);
@@ -6906,6 +6911,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #left-panel-stack > #data-panel:not(.collapsed) .data-panel-inner,
 #left-panel-stack > #cctv-panel:not(.collapsed) .cctv-panel-inner,
 #left-panel-stack > #history-panel:not(.collapsed) .history-panel-inner,
+#left-panel-stack > #gas-panel:not(.collapsed) .gas-panel-inner,
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner {
   height: 100%;
   max-height: 100%;
@@ -10644,3 +10650,101 @@ body.scene-playback-mode #first-run-launcher {
   cursor: var(--cursor-pointer);
 }
 .history-speed.active { border-color: rgba(57, 208, 255, 0.7); color: #d6f3fa; background: rgba(57, 208, 255, 0.12); }
+
+/* Panel PLYN (2026-09-13, gasPanel.js): ceny ACER + IMF/FRED, neskôr zásobníky GIE a toky ENTSOG. */
+#gas-panel {
+  --panel-expanded-width: 360px;
+  position: fixed;
+  top: calc(var(--left-stack-top) + (var(--left-stack-gap) * 4));
+  left: var(--left-stack-x);
+  right: auto;
+  bottom: auto;
+  z-index: 100;
+  width: var(--panel-expanded-width);
+  max-height: calc(100vh - 24px);
+}
+#gas-panel .panel-glow {
+  position: absolute;
+  inset: -1px;
+  border-radius: var(--panel-radius);
+  pointer-events: none;
+}
+.gas-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden auto;
+}
+#gas-panel.collapsed .gas-body { display: none; }
+.gas-status {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+.gas-status[data-state="error"], .gas-status[data-state="stale"] { color: #ffb14d; }
+.gas-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(4, 12, 16, 0.35);
+  border: 1px solid rgba(64, 200, 230, 0.14);
+}
+.gas-card-title {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--text-secondary);
+}
+.gas-headline { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.gas-headline-value { font-family: var(--font-mono); font-size: 22px; letter-spacing: 0.04em; color: #d6f3fa; }
+.gas-delta { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--text-secondary); }
+.gas-delta[data-dir="up"] { color: #ffb14d; }
+.gas-delta[data-dir="down"] { color: #39d0ff; }
+.gas-headline-label {
+  flex-basis: 100%;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+.gas-subrows { display: flex; gap: 12px; flex-wrap: wrap; }
+.gas-subrow { display: flex; flex-direction: column; gap: 1px; }
+.gas-subrow-label { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.08em; color: var(--text-secondary); text-transform: uppercase; }
+.gas-subrow-value { font-family: var(--font-mono); font-size: 11px; color: #d6f3fa; }
+.gas-ranges { display: flex; gap: 2px; }
+.gas-range {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border: 1px solid rgba(64, 200, 230, 0.25);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: var(--cursor-pointer);
+}
+.gas-range.active, .gas-range[aria-pressed="true"] { border-color: rgba(57, 208, 255, 0.7); color: #d6f3fa; background: rgba(57, 208, 255, 0.12); }
+.gas-chart {
+  display: block;
+  width: 100%;
+  height: 120px;
+  border-radius: 6px;
+  background: rgba(4, 12, 16, 0.55);
+  border: 1px solid rgba(64, 200, 230, 0.18);
+}
+.gas-laic, .gas-note, .gas-source {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.gas-laic { color: #d6f3fa; }

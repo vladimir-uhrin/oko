@@ -52,6 +52,7 @@ import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
 import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
 import { installHistoryPanel } from './historyPanel.js';
+import { installGasPanel } from './gasPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
@@ -247,6 +248,7 @@ const SHARE_PANEL_STATE_SPECS = Object.freeze([
   { id: 'radio-panel' },
   { id: 'scene-panel' },
   { id: 'history-panel' },
+  { id: 'gas-panel' },
   { id: 'global-context-panel' },
   { id: 'pp-toggles' },
   { id: 'param-slider-panel' },
@@ -257,6 +259,7 @@ const COCKPIT_ENTRY_COLLAPSE_PANEL_IDS = Object.freeze([
   'cctv-panel',
   'scene-panel',
   'history-panel',
+  'gas-panel',
   'pp-toggles',
   'global-context-panel',
   'radio-panel',
@@ -3097,6 +3100,12 @@ export class StyleManager {
         }
       },
       setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
+    });
+    // Plyn (2026-09-13, gasPanel.js): karta CENY z /api/gas/prices (ACER +
+    // IMF/FRED, bez kľúča); zásobníky (GIE) a toky (ENTSOG) pribudnú po etapách.
+    this._gasPanel = installGasPanel({
+      t,
+      setCollapsed: (collapsed) => this.setPanelCollapsed('gas-panel', collapsed, { persist: false, syncShare: false }),
     });
     // Vlajky na kartách sa ťahajú lenivo — dotiahnutá vlajka si vyžiada
     // snímok, nech sa objaví aj na nehybnej kamere (render governor).

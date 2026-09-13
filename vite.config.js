@@ -56,6 +56,9 @@ import {
 } from './src/data/gfwPresenceCore.js';
 import { zipEntryText } from './src/data/zipEntries.js';
 import { acceptableLogoLicense, airlineTitleCandidates, infoboxLogoFile, normalizeLogoName, stripHtml } from './src/data/logoResolve.js';
+import {
+  ACER_HISTORICAL_URL, FRED_EU_GAS_SERIES, FRED_USD_PER_EUR_SERIES, fredCsvUrl, monthlyEurPerMwh, parseAcerCsv, parseFredCsv,
+} from './src/data/gasPrices.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -4252,6 +4255,134 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  *   GET /api/history/leg?id=<n>
  * Retencia FLIGHT_HISTORY_RETENTION_DAYS (default 7). FLIGHT_HISTORY=off vypne.
  */
+// ---------------------------------------------------------------------------
+// Gas prices proxy — ACER TERMINAL (daily, public CSV) + IMF via FRED (monthly)
+// ---------------------------------------------------------------------------
+/**
+ * Panel PLYN, karta CENY (2026-09-13, používateľ: „reálne dáta, ceny na
+ * burzách, história … platiť nechcem"): dva verejné zdroje bez kľúča.
+ *  - ACER TERMINAL historický CSV (nariadenie Rady (EÚ) 2022/2576): denná cena
+ *    LNG pre EÚ/SZ/J v €/MWh + LNG benchmark; TTF front-month sa odvodí ako
+ *    eu − benchmark (parseAcerCsv). ACER zverejňuje v pracovné dni do 18:00
+ *    a 21:00 CET → TTL 6 h, serve-stale 7 dní.
+ *  - IMF Primary Commodity Prices cez keyless FRED CSV (PNGASEUUSDM, mesačne
+ *    od 1992) + kurz DEXUSEU na prepočet do €/MWh. Voliteľné: keď FRED zlyhá,
+ *    ceny ACER idú aj tak (monthly.rows = [], monthly.error).
+ * Cache pamäť + disk (.gev-cache/gas/prices.json), single-flight, limiter
+ * 20/min/IP, User-Agent s kontaktom, strop 4 MB / 25 s na zdroj. Burzové
+ * kotácie (EEX, ICE) sú platené a sem nikdy nepatria.
+ * @returns {import('vite').Plugin}
+ */
+function gasProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'gas');
+  const PRICES_PATH = path.join(CACHE_DIR, 'prices.json');
+  const TTL_MS = 6 * 60 * 60_000;
+  const STALE_MAX_MS = 7 * 24 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 25_000;
+  const MAX_BYTES = 4 * 1024 * 1024;
+  const USER_AGENT = 'OKO-gas/0.1 (https://github.com/vladouh76; vladouh76@gmail.com) node-fetch';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+  const inFlight = new Map();
+  let mem = null;
+  let lastError = null;
+
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Cache-Control': status === 200 ? 'public, max-age=900' : 'no-store',
+      'X-GEV-Cache': cacheState,
+    });
+    res.end(body);
+  }
+  async function readDisk() {
+    try {
+      const parsed = JSON.parse(await fsp.readFile(PRICES_PATH, 'utf8'));
+      if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') return parsed;
+    } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(entry) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(PRICES_PATH, JSON.stringify(entry), 'utf8'); }
+    catch (error) { console.warn('[gas-proxy] cache write failed: ' + (error?.message || error)); }
+  }
+  async function fetchText(url) {
+    const upstream = await fetch(url, {
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/csv,text/plain;q=0.9,*/*;q=0.5' },
+    });
+    if (!upstream.ok) {
+      await readResponseTextCapped(upstream, 64 * 1024).catch(() => '');
+      const error = new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')');
+      error.upstreamStatus = upstream.status;
+      throw error;
+    }
+    return readResponseTextCapped(upstream, MAX_BYTES);
+  }
+  async function build() {
+    const started = Date.now();
+    const acer = parseAcerCsv(await fetchText(ACER_HISTORICAL_URL));
+    if (!acer.length) throw new Error('ACER CSV has no rows');
+    let monthly = [];
+    let monthlyError = null;
+    try {
+      const [gasCsv, fxCsv] = await Promise.all([fetchText(fredCsvUrl(FRED_EU_GAS_SERIES)), fetchText(fredCsvUrl(FRED_USD_PER_EUR_SERIES))]);
+      monthly = monthlyEurPerMwh(parseFredCsv(gasCsv), parseFredCsv(fxCsv));
+    } catch (error) {
+      monthlyError = String(error?.message || error);
+      console.warn('[gas-proxy] FRED monthly failed: ' + monthlyError + ' — serving ACER only');
+    }
+    const latestDate = acer[acer.length - 1].date;
+    const body = JSON.stringify({
+      acer: { rows: acer, latestDate, source: 'ACER TERMINAL · LNG price assessment & benchmark (Regulation (EU) 2022/2576)', url: ACER_HISTORICAL_URL },
+      monthly: { rows: monthly, error: monthlyError, source: 'IMF Primary Commodity Prices via FRED (PNGASEUUSDM), USD→EUR via FRED DEXUSEU monthly average', url: fredCsvUrl(FRED_EU_GAS_SERIES) },
+      fetchedAt: Date.now(),
+    });
+    console.log('[gas-proxy] prices: ACER ' + acer.length + ' days (latest ' + latestDate + '), monthly ' + monthly.length + ' in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body };
+  }
+  function install(middlewares) {
+    middlewares.use('/api/gas/prices', async (req, res) => {
+      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+      const now = Date.now();
+      if (!mem) mem = await readDisk();
+      if (mem && now - mem.at < TTL_MS) { send(res, 200, mem.body, 'HIT'); return; }
+      if (!limiter(clientKey(req))) {
+        if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
+        send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+      }
+      const stale = mem && now - mem.at < STALE_MAX_MS ? mem : null;
+      const request = coalesceProxyRequest(inFlight, 'prices', build);
+      try {
+        const fresh = await request.promise;
+        mem = fresh;
+        lastError = null;
+        void writeDisk(fresh);
+        send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        lastError = String(error?.message || error);
+        if (stale) {
+          if (!request.shared) console.warn('[gas-proxy] refresh failed (' + lastError + ') — serving stale cache');
+          send(res, 200, stale.body, 'STALE-ERROR');
+          return;
+        }
+        send(res, 502, JSON.stringify({ error: 'upstream', detail: lastError }), 'NONE');
+      }
+    });
+    middlewares.use('/api/gas/status', async (req, res) => {
+      if (!mem) mem = await readDisk();
+      let latestDate = null;
+      let monthly = null;
+      try { const parsed = mem ? JSON.parse(mem.body) : null; latestDate = parsed?.acer?.latestDate ?? null; monthly = parsed?.monthly?.rows?.length ?? null; } catch { /* diagnostika */ }
+      send(res, 200, JSON.stringify({ prices: { cachedAt: mem?.at ?? null, latestDate, monthlyRows: monthly, ttlMs: TTL_MS, lastError } }), 'NONE');
+    });
+  }
+  return {
+    name: 'gas-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function flightHistoryProxy() {
   // Konfigurácia z .env (loadEnv ju kopíruje do process.env až v config hooku,
   // preto sa číta LENIVO pri prvom použití, nie pri stavbe pluginu):
@@ -9323,6 +9454,7 @@ export default defineConfig(({ mode }) => {
       aisLiveProxy(),
       gfwPresenceProxy(),
       logoProxy(),
+      gasProxy(),
       earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),
