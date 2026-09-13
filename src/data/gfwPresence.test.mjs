@@ -4,11 +4,11 @@
 // pod kurzorom; popisky mien; zameriavače. Vzhľad = živé lode + ONESKORENÉ · deň.
 // Meta z proxy: hodinové bunky 0,01° (posledná hodina = posledná poloha) alebo
 // záložné denné bunky 0,1° — popisky a karta to musia rozlíšiť.
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  GFW_PRESENCE_LAYER_ID, GFW_PRESENCE_MAX_CAMERA_M, GFW_PRESENCE_OVERLAY_SOURCE_ID,
+  GFW_PRESENCE_LAYER_ID, GFW_PRESENCE_MAX_CAMERA_M, GFW_PRESENCE_OVERLAY_SOURCE_ID, GFW_PRESENCE_RETRY_MS,
   createGfwPresenceLayer, gfwCellNote, gfwContactSummary, gfwDayLabel, gfwDegLabel, gfwDelayedLabel, gfwDisplayName, gfwLabelCard,
   gfwSourceLabel, gfwViewBbox, gfwWhenLabel, sameBbox,
 } from './gfwPresence.js';
@@ -69,7 +69,7 @@ const META_DAY = { ...META, cellDeg: 0.1, mode: 'dayCell', fallback: 'too_large'
 test('register, i18n a kredit: token 7 abecedne za flights, EN aj SK kľúče, atribúcia „Powered by Global Fishing Watch."', () => {
   const entry = LAYER_STATE_REGISTRY.find((e) => e.id === GFW_PRESENCE_LAYER_ID);
   assert.deepEqual(entry, { id: 'gfw-presence', token: '7', disposition: 'enabled-only' });
-  for (const key of ['layer.gfw-presence.name', 'gfw.satellite-ais', 'gfw.mode-hourly', 'gfw.mode-day', 'gfw.delayed', 'gfw.delayed-long', 'gfw.window-pending', 'gfw.zoom-in', 'gfw.empty', 'gfw.no-key', 'gfw.budget', 'gfw.cell-note', 'gfw.cell-note-day']) {
+  for (const key of ['layer.gfw-presence.name', 'gfw.satellite-ais', 'gfw.mode-hourly', 'gfw.mode-day', 'gfw.delayed', 'gfw.delayed-long', 'gfw.window-pending', 'gfw.zoom-in', 'gfw.empty', 'gfw.no-key', 'gfw.budget', 'gfw.throttled', 'gfw.cell-note', 'gfw.cell-note-day']) {
     assert.ok(EN_STRINGS[key], `EN ${key}`);
     assert.ok(SK_STRINGS[key], `SK ${key}`);
   }
@@ -256,7 +256,7 @@ test('proxy vo vite.config.js: token len na serveri, POST na 4wings/report, cach
   assert.match(src, /makeRateLimiter\(\{ windowMs: 60_000, max: 20, globalMax: 60 \}\)/, 'limiter vždy zapnutý');
   assert.match(src, /GFW_DAILY_REQUEST_BUDGET/, 'denný rozpočet');
   assert.match(src, /configurePreviewServer\(server\) \{ install\(server\.middlewares\); \}/, 'funguje aj v preview');
-  assert.match(src, /raw = await fetchReport\(bbox, range, mode, plan\.dataset\)/, 'správa v režime a datasete plánu');
+  assert.match(src, /raw = await fetchReportQueued\(bbox, range, mode, plan\.dataset\)/, 'správa v režime a datasete plánu, cez frontu upstream reportov');
   assert.match(src, /primary: GFW_MODES\.hourly, fallback: GFW_MODES\.dayCell/, 'hlavný režim = hodinové bunky 0,01° — inak lode stoja v mriežke; záloha denné bunky');
   assert.match(src, /primary: GFW_MODES\.hourly, fallback: GFW_MODES\.sarDay/, 'radar: záloha drží deň preletu');
   assert.match(src, /middlewares\.use\('\/api\/gfw\/sar', handleReport\(PLANS\.sar\)\)/, 'trasa radarových detekcií');
@@ -265,4 +265,77 @@ test('proxy vo vite.config.js: token len na serveri, POST na 4wings/report, cach
   assert.match(src, /range = gfwPreviousDayRange\(range\);/, 'prázdny deň → krok o deň späť');
   assert.match(src, /UPSTREAM_TIMEOUT_MS = 90_000/, 'celý záliv trvá ~19 s, rušné more dlhšie');
   assert.ok(!/GFW_API_TOKEN/.test(readFileSync(new URL('./gfwPresence.js', import.meta.url), 'utf8')), 'klient token nikdy nečíta');
+});
+
+test('vrstva: 429 (upstream GFW alebo limit proxy) = dočasné odmietnutie s tichým pokusom o 30 s; budget = minutý rozpočet bez pokusu; disable pokus zruší', async () => {
+  const flush = async () => { for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r)); };
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const calls = [];
+    let status = 429;
+    const fetchImpl = async (u) => {
+      calls.push(u);
+      if (status === 429) return { ok: false, status: 429, json: async () => ({ error: 'upstream', detail: 'upstream HTTP 429' }) };
+      return { ok: true, status: 200, json: async () => ({ rows: ROWS, meta: META }) };
+    };
+    const layer = createGfwPresenceLayer({ fetchImpl, collectionFactory: fakeCollection, overlayHost: fakeOverlay(), now: () => 123 });
+    const viewer = fakeViewer();
+    layer.init(viewer);
+    await layer.enable();
+    await flush();
+    assert.equal(calls.length, 1);
+    assert.match(layer.getStats().error, /429/, 'hláška priznáva odmietnutie GFW');
+    assert.doesNotMatch(layer.getStats().error, /rozpočet|budget/, 'nie je to minutý rozpočet (naživo 2026-09-13: upstream 429 pri AIS + SAR naraz)');
+    mock.timers.tick(GFW_PRESENCE_RETRY_MS - 1);
+    await flush();
+    assert.equal(calls.length, 1, 'pred uplynutím čakania nič');
+    status = 200;
+    mock.timers.tick(1);
+    await flush();
+    assert.equal(calls.length, 2, 'tichý pokus bez pohybu kamery');
+    assert.equal(layer.getStats().error, null);
+    assert.equal(layer._getStateForTest().rows, ROWS.length, 'po pokuse sú lode na mape');
+    mock.timers.tick(GFW_PRESENCE_RETRY_MS * 2);
+    await flush();
+    assert.equal(calls.length, 2, 'po úspechu žiadne ďalšie pokusy');
+    layer.destroy(viewer);
+
+    const budgetCalls = [];
+    const budget = createGfwPresenceLayer({ fetchImpl: async (u) => { budgetCalls.push(u); return { ok: false, status: 429, json: async () => ({ error: 'budget' }) }; }, collectionFactory: fakeCollection, overlayHost: fakeOverlay() });
+    const v2 = fakeViewer();
+    budget.init(v2);
+    await budget.enable();
+    await flush();
+    assert.match(budget.getStats().error, /rozpočet|budget/, 'minutý rozpočet sa hlási ako rozpočet');
+    mock.timers.tick(GFW_PRESENCE_RETRY_MS * 2);
+    await flush();
+    assert.equal(budgetCalls.length, 1, 'rozpočet sa neskúša znova — do polnoci UTC nepomôže');
+    budget.destroy(v2);
+
+    const cancelCalls = [];
+    const cancel = createGfwPresenceLayer({ fetchImpl: async (u) => { cancelCalls.push(u); return { ok: false, status: 429, json: async () => ({ error: 'rate_limited' }) }; }, collectionFactory: fakeCollection, overlayHost: fakeOverlay() });
+    const v3 = fakeViewer();
+    cancel.init(v3);
+    await cancel.enable();
+    await flush();
+    cancel.disable();
+    mock.timers.tick(GFW_PRESENCE_RETRY_MS * 2);
+    await flush();
+    assert.equal(cancelCalls.length, 1, 'vypnutá vrstva nedopytuje');
+    cancel.destroy(v3);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('proxy vo vite.config.js: upstream reporty za sebou + jeden pokus po 429 s Retry-After (GFW neznesie súbežné reporty; naživo 2026-09-13 AIS + SAR naraz) (tripwire)', () => {
+  const src = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
+  assert.match(src, /raw = await fetchReportQueued\(bbox, range, mode, plan\.dataset\)/, 'oba plány idú cez frontu');
+  assert.ok(!/raw = await fetchReport\(bbox/.test(src), 'nič neobchádza frontu');
+  assert.match(src, /upstreamQueue = run\.catch\(\(\) => \{\}\)/, 'fronta prežije chybu predchodcu');
+  assert.match(src, /if \(error\?\.upstreamStatus !== 429\) throw error;/, 'opakuje sa len 429');
+  assert.match(src, /error\.retryAfterMs = retryAfter \* 1000/, 'Retry-After upstreamu sa číta');
+  assert.match(src, /RETRY_429_MIN_MS = 2_000/);
+  assert.match(src, /RETRY_429_MAX_MS = 20_000/, 'strop čakania 20 s (klient čaká 30 s)');
+  assert.ok(GFW_PRESENCE_RETRY_MS > 20_000, 'klientský pokus príde až po proxy pokuse');
 });

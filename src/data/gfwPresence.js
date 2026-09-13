@@ -45,6 +45,8 @@ export const GFW_PRESENCE_MAX_POINTS = 6_000;
 export const GFW_PRESENCE_MAX_LABELS = 300;
 /** Debounce po pohybe kamery (ms), aby sa pri plynulom zoome nestrieľali dopyty. */
 export const GFW_PRESENCE_MOVE_DEBOUNCE_MS = 1_500;
+/** Po 429 (GFW odmietol súbežný report, proxy limit) jeden tichý pokus bez pohybu kamery. */
+export const GFW_PRESENCE_RETRY_MS = 30_000;
 /** Trup nad elipsoidom (m) — bunka nemá presnú polohu, výška je len proti z-fightu. */
 export const GFW_PRESENCE_POINT_HEIGHT_M = 20;
 /** Základná mierka trupu = živá loď bez rýchlosti (shipSpeedScale < 8 kn). */
@@ -313,6 +315,20 @@ export function createGfwPresenceLayer({
     overlayHost.setVisible(GFW_PRESENCE_OVERLAY_SOURCE_ID, true);
   }
 
+  let _retryTimer = null;
+  /**
+   * 429 (GFW odmietol súbežný report — naživo 2026-09-13 pri AIS + SAR zapnutých
+   * naraz, alebo minútový limit proxy): jeden tichý pokus o GFW_PRESENCE_RETRY_MS,
+   * kým ten istý výrez stále nie je načítaný, namiesto čakania na pohyb kamery.
+   */
+  function scheduleRetry(bbox) {
+    clearTimeout(_retryTimer);
+    _retryTimer = setTimeout(() => {
+      _retryTimer = null;
+      if (_enabled && !_loading && JSON.stringify(_bbox) !== JSON.stringify(bbox)) void load(bbox);
+    }, GFW_PRESENCE_RETRY_MS);
+  }
+
   async function load(bbox) {
     const token = ++_requestToken;
     _loading = true;
@@ -324,7 +340,8 @@ export function createGfwPresenceLayer({
       const json = await response.json().catch(() => null);
       if (!response.ok) {
         if (json?.error === 'no_key') { _status = 'no_key'; _error = t('gfw.no-key'); }
-        else if (json?.error === 'budget' || response.status === 429) { _error = t('gfw.budget'); }
+        else if (json?.error === 'budget') { _error = t('gfw.budget'); }
+        else if (response.status === 429) { _error = t('gfw.throttled'); scheduleRetry(bbox); }
         else { _error = `HTTP ${response.status}`; }
         return;
       }
@@ -332,6 +349,8 @@ export function createGfwPresenceLayer({
       _rows = rows;
       _meta = json?.meta || null;
       _bbox = bbox;
+      clearTimeout(_retryTimer);
+      _retryTimer = null;
       _lastUpdate = now();
       _status = rows.length ? 'live' : 'empty';
       syncTier();
@@ -397,6 +416,8 @@ export function createGfwPresenceLayer({
       _enabled = false;
       clearTimeout(_moveTimer);
       _moveTimer = null;
+      clearTimeout(_retryTimer);
+      _retryTimer = null;
       _moveRemove?.();
       _moveRemove = null;
       _changedRemove?.();

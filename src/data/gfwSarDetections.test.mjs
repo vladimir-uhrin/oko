@@ -3,7 +3,7 @@
 // registrácia, i18n, kredit s Copernicus atribúciou, riadok zdroja, karta so
 // zhodou aj bez AIS, popisky len so zhodou, terč podľa zhody a veku, lifecycle
 // s náhradami, zoom-in a no_key, tripwire proxy.
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
@@ -11,6 +11,7 @@ import {
   createGfwSarLayer, sarAgeAlpha, sarContactSummary, sarDisplayName, sarIconDataUrl, sarLabelCard, sarPassLabel, sarSourceLabel,
 } from './gfwSarDetections.js';
 import { EN_STRINGS, SK_STRINGS } from '../i18nStrings.js';
+import { GFW_PRESENCE_RETRY_MS } from './gfwPresence.js';
 import { LAYER_STATE_REGISTRY } from './layerState.js';
 import { DATA_CREDITS } from './dataCredits.js';
 import { VESSEL_TIER_SCALE } from './aisLiveVessels.js';
@@ -254,4 +255,33 @@ test('proxy vo vite.config.js: trasa /api/gfw/sar s plánom radaru — dataset S
   assert.match(src, /Contains modified Copernicus Sentinel data ' \+ new Date\(\)\.getUTCFullYear\(\)/);
   assert.match(src, /cacheKey: \(bbox, range\) => 'sar:' \+ gfwPresenceCacheKey\(bbox, range\)/, 'vlastný priestor cache');
   assert.ok(!/GFW_API_TOKEN/.test(readFileSync(new URL('./gfwSarDetections.js', import.meta.url), 'utf8')), 'klient token nikdy nečíta');
+});
+
+test('vrstva: 429 = dočasné odmietnutie (nie rozpočet) a tichý pokus o 30 s ako pri AIS vrstve', async () => {
+  const flush = async () => { for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r)); };
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const calls = [];
+    let ok = false;
+    const layer = createGfwSarLayer({
+      fetchImpl: async (u) => { calls.push(u); return ok ? { ok: true, status: 200, json: async () => ({ rows: [], meta: { ...META, latestDay: null } }) } : { ok: false, status: 429, json: async () => ({ error: 'upstream', detail: 'upstream HTTP 429' }) }; },
+      collectionFactory: fakeCollection, overlayHost: fakeOverlay(),
+    });
+    const v = fakeViewer();
+    layer.init(v);
+    await layer.enable();
+    await flush();
+    assert.equal(calls.length, 1);
+    assert.match(layer.getStats().error, /429/);
+    assert.doesNotMatch(layer.getStats().error, /rozpočet|budget/, 'upstream 429 nie je minutý rozpočet');
+    ok = true;
+    mock.timers.tick(GFW_PRESENCE_RETRY_MS);
+    await flush();
+    assert.equal(calls.length, 2, 'tichý pokus bez pohybu kamery');
+    assert.equal(layer.getStats().error, null);
+    assert.equal(layer.getStats().status, 'empty');
+    layer.destroy(v);
+  } finally {
+    mock.timers.reset();
+  }
 });

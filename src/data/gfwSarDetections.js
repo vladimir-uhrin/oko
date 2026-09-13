@@ -21,7 +21,7 @@ import * as Cesium from 'cesium';
 import { currentLanguage, t } from '../i18n.js';
 import { GFW_HIGH_CELL_DEG, GFW_SAR_WINDOW_DAYS } from './gfwPresenceCore.js';
 import {
-  GFW_PRESENCE_MAX_CAMERA_M, GFW_PRESENCE_MOVE_DEBOUNCE_MS,
+  GFW_PRESENCE_MAX_CAMERA_M, GFW_PRESENCE_MOVE_DEBOUNCE_MS, GFW_PRESENCE_RETRY_MS,
   gfwDayLabel, gfwDegLabel, gfwViewBbox, gfwWhenLabel, sameBbox,
 } from './gfwPresence.js';
 import { registerPickOwner, unregisterPickOwner } from './pickRegistry.js';
@@ -320,6 +320,16 @@ export function createGfwSarLayer({
     overlayHost.setVisible(GFW_SAR_OVERLAY_SOURCE_ID, true);
   }
 
+  let _retryTimer = null;
+  /** 429 (súbežný report odmietnutý GFW, proxy limit): jeden tichý pokus ako pri AIS vrstve. */
+  function scheduleRetry(bbox) {
+    clearTimeout(_retryTimer);
+    _retryTimer = setTimeout(() => {
+      _retryTimer = null;
+      if (_enabled && !_loading && JSON.stringify(_bbox) !== JSON.stringify(bbox)) void load(bbox);
+    }, GFW_PRESENCE_RETRY_MS);
+  }
+
   async function load(bbox) {
     const token = ++_requestToken;
     _loading = true;
@@ -331,7 +341,8 @@ export function createGfwSarLayer({
       const json = await response.json().catch(() => null);
       if (!response.ok) {
         if (json?.error === 'no_key') { _status = 'no_key'; _error = t('gfw.no-key'); }
-        else if (json?.error === 'budget' || response.status === 429) { _error = t('gfw.budget'); }
+        else if (json?.error === 'budget') { _error = t('gfw.budget'); }
+        else if (response.status === 429) { _error = t('gfw.throttled'); scheduleRetry(bbox); }
         else { _error = `HTTP ${response.status}`; }
         return;
       }
@@ -339,6 +350,8 @@ export function createGfwSarLayer({
       _rows = rows;
       _meta = json?.meta || null;
       _bbox = bbox;
+      clearTimeout(_retryTimer);
+      _retryTimer = null;
       _lastUpdate = now();
       _status = rows.length ? 'live' : 'empty';
       syncTier();
@@ -402,6 +415,8 @@ export function createGfwSarLayer({
       _enabled = false;
       clearTimeout(_moveTimer);
       _moveTimer = null;
+      clearTimeout(_retryTimer);
+      _retryTimer = null;
       _moveRemove?.();
       _moveRemove = null;
       _changedRemove?.();

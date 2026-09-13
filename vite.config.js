@@ -1850,6 +1850,8 @@ function rocketLaunchesProxy() {
  * Rozpočet: GFW_DAILY_REQUEST_BUDGET (predvolene 300 z povolených 50 000)
  * v .gev-cache/gfw/budget.json podľa UTC dňa; nad ním stale alebo 429.
  * Per-IP limit 20/min, globálne 60/min — vždy zapnutý (kľúčovaný upstream).
+ * Upstream reporty idú za sebou a 429 sa raz zopakuje po Retry-After (GFW
+ * neznesie súbežné reporty na jeden token, naživo 2026-09-13 pri AIS + SAR).
  * @returns {import('vite').Plugin}
  */
 function gfwPresenceProxy() {
@@ -1937,6 +1939,8 @@ function gfwPresenceProxy() {
       await readResponseTextCapped(upstream, 64 * 1024).catch(() => '');
       const error = new Error('upstream HTTP ' + upstream.status);
       error.upstreamStatus = upstream.status;
+      const retryAfter = Number(upstream.headers.get('retry-after'));
+      if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfterMs = retryAfter * 1000;
       throw error;
     }
     let rows;
@@ -1950,6 +1954,32 @@ function gfwPresenceProxy() {
     }
     console.log('[gfw-proxy] ' + dataset.replace('public-global-', '').replace(':latest', '') + ' ' + mode.id + ' ' + range.from + '…' + range.to + ' ' + [bbox.west, bbox.south, bbox.east, bbox.north].join(',') + ': ' + rows.length + ' rows in ' + (Date.now() - started) + ' ms');
     return rows;
+  }
+
+  /**
+   * GFW odmieta súbežné reporty na jeden token: naživo 2026-09-13 pri AIS a SAR
+   * vrstve zapnutých naraz dostal druhý report upstream 429 a o 20 s neskôr
+   * prešiel. Upstream reporty preto idú za sebou (jedna fronta pre oba plány)
+   * a 429 sa raz zopakuje po Retry-After (2–20 s), nech vrstva nečaká na
+   * ďalší pohyb kamery. Opakovaný pokus stojí ďalšiu jednotku denného rozpočtu.
+   */
+  const RETRY_429_MIN_MS = 2_000;
+  const RETRY_429_MAX_MS = 20_000;
+  let upstreamQueue = Promise.resolve();
+  function fetchReportQueued(bbox, range, mode, dataset) {
+    const run = upstreamQueue.then(async () => {
+      try {
+        return await fetchReport(bbox, range, mode, dataset);
+      } catch (error) {
+        if (error?.upstreamStatus !== 429) throw error;
+        const wait = Math.min(RETRY_429_MAX_MS, Math.max(RETRY_429_MIN_MS, Number(error.retryAfterMs) || 5_000));
+        console.warn('[gfw-proxy] upstream 429 for ' + dataset + ' — retrying once in ' + Math.round(wait / 1000) + ' s');
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        return fetchReport(bbox, range, mode, dataset);
+      }
+    });
+    upstreamQueue = run.catch(() => {});
+    return run;
   }
 
   /**
@@ -1987,13 +2017,13 @@ function gfwPresenceProxy() {
       let fallback = null;
       let raw;
       try {
-        raw = await fetchReport(bbox, range, mode, plan.dataset);
+        raw = await fetchReportQueued(bbox, range, mode, plan.dataset);
       } catch (error) {
         if (error?.code !== 'RESPONSE_TOO_LARGE' && error?.code !== 'BAD_ZIP') throw error;
         fallback = error.code === 'RESPONSE_TOO_LARGE' ? 'too_large' : 'bad_zip';
         console.warn('[gfw-proxy] ' + plan.id + ' hourly report ' + fallback + ' — falling back to ' + plan.fallback.id + ' (0.1°)');
         mode = plan.fallback;
-        raw = await fetchReport(bbox, range, mode, plan.dataset);
+        raw = await fetchReportQueued(bbox, range, mode, plan.dataset);
       }
       if (!raw.length && step < plan.stepBack) {
         console.warn('[gfw-proxy] ' + plan.id + ': no rows for ' + range.day + ' — trying the previous day');
