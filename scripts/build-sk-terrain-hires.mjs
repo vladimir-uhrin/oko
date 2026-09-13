@@ -63,6 +63,9 @@ const TARGET_DEG = 180 / 2 ** MAX_ZOOM / 64;
 const FORCE = process.env.SK_HIRES_FORCE === '1';
 
 const inCache = (p) => '/cache/' + path.relative(CACHE, p).split(path.sep).join('/');
+// .gev-cache je od 2026-09-13 junction na D:\OKO\gev-cache (C: sa plnil):
+// Node cez junction píše normálne, ale Docker bind mount dostane reálnu cestu.
+const CACHE_REAL = fs.realpathSync.native(CACHE);
 
 function run(cmd, args, { label }) {
   console.log(`\n→ ${label}`);
@@ -72,7 +75,20 @@ function run(cmd, args, { label }) {
   console.log(`  hotovo za ${Math.round((Date.now() - started) / 1000)} s`);
 }
 
-const docker = (args, label) => run('docker', ['run', '--rm', '-e', 'PROJ_NETWORK=ON', '-v', `${CACHE}:/cache`, ...args], { label });
+const docker = (args, label) => run('docker', ['run', '--rm', '-e', 'PROJ_NETWORK=ON', '-v', `${CACHE_REAL}:/cache`, ...args], { label });
+
+/**
+ * Prerušený krok (Ctrl+C, reštart, zabitý kontajner) nesmie nechať polovičný
+ * výstup, ktorý by `step()` nabudúce preskočil ako hotový (naživo 2026-09-13:
+ * 1,5 GB torzo gdalwarp LOT04). Výstup ide do `<cieľ>.tmp` a premenuje sa až
+ * po úspechu; staré .tmp sa pri štarte zahodí.
+ */
+function viaTmp(target, fn) {
+  const tmp = target + '.tmp';
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fn(tmp);
+  fs.renameSync(tmp, target);
+}
 
 function step(name, output, fn) {
   if (!FORCE && output && fs.existsSync(output)) {
@@ -117,10 +133,10 @@ for (const lot of LOTS) {
     console.log(`  ${lot}: ${(size / 1e9).toFixed(1)} GB`);
   });
 
-  step(`${lot} extract (.tif/.tfw, bez .ovr)`, lotDir, () => {
-    fs.mkdirSync(lotDir, { recursive: true });
-    run('tar', ['-xf', zip, '-C', lotDir, 'sjtsk03_bpv/*.tif', 'sjtsk03_bpv/*.tfw'], { label: `rozbaľujem ${lot} (len raster)` });
-  });
+  step(`${lot} extract (.tif/.tfw, bez .ovr)`, lotDir, () => viaTmp(lotDir, (tmp) => {
+    fs.mkdirSync(tmp, { recursive: true });
+    run('tar', ['-xf', zip, '-C', tmp, 'sjtsk03_bpv/*.tif', 'sjtsk03_bpv/*.tfw'], { label: `rozbaľujem ${lot} (len raster)` });
+  }));
 
   const tif = () => {
     const dir = path.join(lotDir, 'sjtsk03_bpv');
@@ -129,20 +145,24 @@ for (const lot of LOTS) {
     return path.join(dir, name);
   };
 
-  step(`${lot} warp → EPSG:4979 @ ~${(TARGET_DEG * 111320).toFixed(2)} m`, warped, () => {
+  step(`${lot} warp → EPSG:4979 @ ~${(TARGET_DEG * 111320).toFixed(2)} m`, warped, () => viaTmp(warped, (tmp) => {
     docker([GDAL_IMAGE, 'gdalwarp', '-overwrite',
       '-s_srs', 'EPSG:8353+8357', '-t_srs', 'EPSG:4979',
       '-tr', String(TARGET_DEG), String(TARGET_DEG),
       '-r', 'bilinear', '-dstnodata', '-9999',
       '-multi', '-wo', 'NUM_THREADS=ALL_CPUS',
       '-co', 'TILED=YES', '-co', 'COMPRESS=DEFLATE', '-co', 'PREDICTOR=3', '-co', 'BIGTIFF=YES',
-      inCache(tif()), inCache(warped)], `gdalwarp ${lot}`);
-  });
+      '-of', 'GTiff',
+      inCache(tif()), inCache(tmp)], `gdalwarp ${lot}`);
+  }));
 
+  // Relabel = len GeoTIFF kľúče (EPSG:4979 → 2D EPSG:4326, aby to CTB zobral):
+  // gdal_edit ich prepíše na mieste za sekundy; gdal_translate prekódovával celý
+  // raster (LOT04 naživo: warp 29 min, translate po ďalších ~10 min stále na 30 %,
+  // 1,6 GB torzo). Warp výstup má už rovnaké creation options, nič sa nestráca.
   step(`${lot} relabel EPSG:4326`, relabeled, () => {
-    docker([GDAL_IMAGE, 'gdal_translate', '-a_srs', 'EPSG:4326',
-      '-co', 'TILED=YES', '-co', 'COMPRESS=DEFLATE', '-co', 'PREDICTOR=3', '-co', 'BIGTIFF=YES',
-      inCache(warped), inCache(relabeled)], `gdal_translate ${lot}`);
+    docker([GDAL_IMAGE, 'gdal_edit.py', '-a_srs', 'EPSG:4326', inCache(warped)], `gdal_edit ${lot}`);
+    fs.renameSync(warped, relabeled);
   });
 
   // 3b. cleanup: rozbalený raster (~30 GB) a medzivýstup warp už netreba;
@@ -181,7 +201,7 @@ step('union maska platnosti (~10 m/px)', MASK_META, () => {
     inCache(VRT), inCache(MASK_BIL)], 'gdal_translate union maska');
   const hdr = fs.readFileSync(MASK_BIL.replace(/\.bil$/, '.hdr'), 'utf8');
   const dim = (key) => Number(hdr.match(new RegExp(`${key}\\s*=\\s*(\\d+)`))?.[1]);
-  const info = spawnSync('docker', ['run', '--rm', '-v', `${CACHE}:/cache`, GDAL_IMAGE,
+  const info = spawnSync('docker', ['run', '--rm', '-v', `${CACHE_REAL}:/cache`, GDAL_IMAGE,
     'gdalinfo', '-json', inCache(VRT)], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (info.status !== 0) throw new Error('gdalinfo VRT zlyhal');
   const gj = JSON.parse(info.stdout);

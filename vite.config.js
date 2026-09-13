@@ -4226,7 +4226,7 @@ function flightHistoryProxy() {
   // Konfigurácia z .env (loadEnv ju kopíruje do process.env až v config hooku,
   // preto sa číta LENIVO pri prvom použití, nie pri stavbe pluginu):
   //   FLIGHT_HISTORY=off                 vypne záznam aj API
-  //   FLIGHT_HISTORY_DB=D:oko-historylight-history.sqlite  (default .gev-cache/)
+  //   FLIGHT_HISTORY_DB=D:\oko-history\flight-history.sqlite  (default .gev-cache/)
   //   FLIGHT_HISTORY_RETENTION_DAYS=30   (default 7)
   //   FLIGHT_HISTORY_RAW_HOURS=720       plný záznam bez riedenia (default 24;
   //                                      ≥ retencia = riedenie vypnuté)

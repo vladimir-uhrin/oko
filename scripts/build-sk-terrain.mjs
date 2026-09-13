@@ -64,7 +64,9 @@ function run(cmd, args, { label }) {
   console.log(`  hotovo za ${Math.round((Date.now() - started) / 1000)} s`);
 }
 
-const docker = (args, label) => run('docker', ['run', '--rm', '-e', 'PROJ_NETWORK=ON', '-v', `${CACHE}:/cache`, ...args], { label });
+// .gev-cache je od 2026-09-13 junction na D:\OKO\gev-cache — Docker dostane reálnu cestu.
+const CACHE_REAL = fs.realpathSync.native(CACHE);
+const docker = (args, label) => run('docker', ['run', '--rm', '-e', 'PROJ_NETWORK=ON', '-v', `${CACHE_REAL}:/cache`, ...args], { label });
 
 function step(name, output, fn) {
   if (!FORCE && output && fs.existsSync(output)) {
@@ -117,7 +119,7 @@ step('maska platnosti dát', MASK_META, () => {
   // Rozmery z ENVI .hdr; bbox z gdalinfo -json warpnutého rastra.
   const hdr = fs.readFileSync(MASK_BIL.replace(/\.bil$/, '.hdr'), 'utf8');
   const dim = (key) => Number(hdr.match(new RegExp(`${key}\\s*=\\s*(\\d+)`))?.[1]);
-  const info = spawnSync('docker', ['run', '--rm', '-v', `${CACHE}:/cache`, GDAL_IMAGE,
+  const info = spawnSync('docker', ['run', '--rm', '-v', `${CACHE_REAL}:/cache`, GDAL_IMAGE,
     'gdalinfo', '-json', inCache(WARPED)], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (info.status !== 0) throw new Error('gdalinfo zlyhal');
   const gj = JSON.parse(info.stdout);
