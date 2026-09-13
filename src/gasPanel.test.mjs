@@ -12,6 +12,7 @@ import { buildFlowsPayload, formatGwhDay } from './data/gasFlows.js';
 import { buildGiePayload } from './data/gasStorage.js';
 import { buildImportsPayload } from './data/gasImports.js';
 import { EUROSTAT_IMPORTS_JSON_STAT } from './data/fixtures/eurostatImportsFixture.mjs';
+import { LNG_FLEET_REFRESH_MS, buildLngFleetIndex, buildLngFleetPayload } from './data/lngFleet.js';
 
 const t = (key, vars) => (vars && Object.keys(vars).length ? `${key} ${JSON.stringify(vars)}` : key);
 const flush = async () => { for (let i = 0; i < 3; i += 1) await new Promise((r) => setImmediate(r)); };
@@ -47,6 +48,14 @@ const LNG = buildGiePayload('alsi', {
   PL: [{ name: 'Poland', code: 'PL', gasDayStart: '2026-09-11', inventory: { gwh: '3289' }, dtmi: { gwh: '3289' }, sendOut: '179', status: 'C' }],
 }, { fetchedAt: NOW });
 const IMPORTS = buildImportsPayload(EUROSTAT_IMPORTS_JSON_STAT, { fetchedAt: NOW });
+const FLEET_INDEX = buildLngFleetIndex({ ships: 1, withMmsi: 1, snapshot: '2026-09-13T18:00:00Z', license: 'CC0 1.0 — Wikidata', rows: [{ imo: '9385673', name: 'GDF Suez Neptune', mmsi: ['257356000'], lengthM: 283.1, built: '2009', operator: 'Höegh LNG' }] });
+const fleetRow = (o) => ({ type: '80', speed: 0, course: 0, nav_status: 0, last_position_epoch: Math.floor(NOW / 1000) - 120, ...o });
+const FLEET = buildLngFleetPayload([
+  fleetRow({ mmsi: '257356000', imo: '9385673', name: 'GDF SUEZ NEPTUNE', destination: 'SWINOUJSCIE', eta: '09-15 06:00', speed: 12.3, length_m: 283, lat: 54.2, lon: 14.3 }),
+  fleetRow({ mmsi: '111111111', name: 'GASLOG GENEVA', destination: 'FUJAIRAH', speed: 14, length_m: 290, lat: 25, lon: 56 }),
+  fleetRow({ mmsi: '222222222', name: 'MAERSK ESSEX', type: '70', length_m: 366, lat: 51, lon: 3 }),
+], FLEET_INDEX, { now: NOW, feed: { status: 'live', active: true, retained: 3, lastMessageAt: '2026-09-13T09:59:00Z', error: null } });
+const FLEET_OFF = buildLngFleetPayload([], FLEET_INDEX, { now: NOW, feed: { status: 'idle', active: false, retained: 0, lastMessageAt: null, error: null } });
 
 test('gasChart: rozsah s rezervou, štýly podľa poradia, kreslenie = mriežka + plocha + čiary + popisky; bez radov len mriežka', () => {
   const series = [
@@ -112,6 +121,7 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   const calls = [];
   const intervals = [];
   const flown = [];
+  const flownVessels = [];
   let cleared = null;
   const panel = installGasPanel({
     doc, t, lang: 'sk', nowMs: () => NOW,
@@ -121,13 +131,15 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
       storage: async () => { calls.push('storage'); return STORAGE; },
       lng: async () => { calls.push('lng'); return LNG; },
       imports: async () => { calls.push('imports'); return IMPORTS; },
+      fleet: async () => { calls.push('fleet'); return FLEET; },
     },
     setIntervalImpl: (fn, ms) => { intervals.push(ms); return 42; },
     clearIntervalImpl: (id) => { cleared = id; },
     onFlyTo: (target) => { flown.push(target); },
+    onFlyToVessel: (target) => { flownVessels.push(target); },
   });
   assert.ok(panel);
-  assert.deepEqual(intervals, [GAS_PANEL_REFRESH_MS], 'periodická obnova');
+  assert.deepEqual(intervals, [GAS_PANEL_REFRESH_MS, LNG_FLEET_REFRESH_MS], 'periodická obnova panela + rýchlejšia obnova LNG tankerov');
   await flush();
   const st = panel._getStateForTest();
   assert.equal(st.loaded, true);
@@ -213,7 +225,29 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(panel._getStateForTest().imports.months, 24);
   assert.deepEqual(st.supply, { ok: true, status: 'ok', headline: formatGwhDay(3044.1, 'sk'), rows: 8, days: 31, lngMissing: false }, 'karta ZDROJE: TurkStream 44,1 + LNG 3 000 z fixtúr');
   const supplyCard = find(doc.root.body, (n) => n.dataset.card === 'supply')[0];
-  assert.equal(find(doc.root.body, (n) => n.dataset.card).map((n) => n.dataset.card).join(','), 'prices,flows,supply,storage,lng,imports', 'poradie kariet');
+  assert.equal(find(doc.root.body, (n) => n.dataset.card).map((n) => n.dataset.card).join(','), 'prices,flows,supply,storage,lng,fleet,imports', 'poradie kariet');
+  assert.deepEqual(st.fleet, { loaded: true, ok: true, state: 'live', status: 'ok', lastError: null, count: 2, headline: '2', enableVisible: false }, 'karta LNG TANKERY: 2 z 3 kontaktov sú LNG');
+  const fleetCard = find(doc.root.body, (n) => n.dataset.card === 'fleet')[0];
+  assert.equal(find(fleetCard, (n) => n.className === 'gas-headline-value')[0].textContent, '2');
+  assert.equal(find(fleetCard, (n) => n.className === 'gas-headline-label')[0].textContent, 'gas.fleet-label {"scanned":"3"}');
+  assert.equal(find(fleetCard, (n) => n.className === 'gas-headline-sub')[0].textContent, 'gas.fleet-confirmed-n {"n":1} · gas.fleet-likely-n {"n":1} · gas.fleet-eu-bound {"n":1} · gas.fleet-moving {"n":2,"fresh":2}');
+  const fleetRows = find(fleetCard, (n) => n.className === 'gas-flow-row');
+  assert.equal(fleetRows.length, 2);
+  assert.deepEqual([fleetRows[0].dataset.id, fleetRows[0].dataset.confidence, fleetRows[0].dataset.eu, fleetRows[0].dataset.fleet, fleetRows[0].attributes.role], ['257356000', 'confirmed', 'true', 'true', 'button'], 'loď do EÚ prvá, klikateľná');
+  assert.equal(find(fleetRows[0], (n) => n.className === 'gas-flow-route')[0].textContent, 'NO · GDF SUEZ NEPTUNE', 'vlajka z MMSI (257 = Nórsko)');
+  assert.equal(find(fleetRows[0], (n) => n.className === 'gas-flow-value')[0].textContent, 'gas.fleet-confirmed');
+  assert.equal(find(fleetRows[0], (n) => n.className === 'gas-flow-sub')[0].textContent, 'gas.fleet-eu · 283 m · gas.fleet-built {"y":"2009"} · gas.fleet-speed {"v":"12,3"} · SWINOUJSCIE · ETA 09-15 06:00 · gas.fleet-age-min {"n":2}');
+  assert.equal(find(fleetRows[0], (n) => n.className === 'gas-flow-note')[0].textContent, 'gas.fleet-reason-wikidata-imo · Höegh LNG');
+  fleetRows[0].listeners.click[0]();
+  assert.deepEqual(flownVessels, [{ mmsi: '257356000', name: 'GDF SUEZ NEPTUNE', lat: 54.2, lon: 14.3 }], 'klik = prelet k lodi');
+  assert.equal(find(fleetCard, (n) => n.className === 'gas-status')[0].textContent, 'gas.fleet-updated {"time":"10:00 UTC"}');
+  assert.equal(find(fleetCard, (n) => n.className === 'gas-note')[0].textContent, 'gas.fleet-note {"ships":"1"}');
+  assert.equal(find(fleetCard, (n) => n.className === 'gas-source')[0].textContent, 'gas.fleet-source {"date":"2026-09-13"}');
+  const fleetButtons = find(fleetCard, (n) => n.className === 'gas-range');
+  assert.deepEqual(fleetButtons.map((b) => [b.dataset.action, b.hidden]), [['refresh', false], ['enable-ais', true]]);
+  fleetButtons[0].listeners.click[0]();
+  await flush();
+  assert.equal(calls.filter((c) => c === 'fleet').length, 2, 'OBNOVIŤ načíta znova');
   assert.equal(find(supplyCard, (n) => n.className === 'gas-headline-value')[0].textContent, formatGwhDay(3044.1, 'sk'));
   assert.equal(find(supplyCard, (n) => n.className === 'gas-headline-label')[0].textContent, 'gas.supply-eu · 11. 9. 2026');
   assert.equal(find(supplyCard, (n) => n.className === 'gas-headline-sub')[0].textContent, 'gas.supply-origin-LNG 99 % · gas.supply-origin-RU 1,4 % · gas.supply-complete {"n":2,"m":2}');
@@ -251,7 +285,7 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(find(body, (n) => n.className === 'gas-note')[0].textContent, 'gas.ttf-derived-note');
   panel.destroy();
   assert.equal(cleared, 42);
-  assert.deepEqual(calls, ['prices', 'flows', 'storage', 'lng', 'imports'], 'všetky karty sa načítajú naraz, každá raz');
+  assert.deepEqual(calls, ['prices', 'flows', 'storage', 'lng', 'imports', 'fleet', 'fleet'], 'všetky karty sa načítajú naraz, každá raz (LNG tankery + jedno ručné OBNOVIŤ)');
 });
 
 test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null; open() otvorí panel', async () => {
@@ -265,6 +299,7 @@ test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null
       storage: async () => { const e = new Error('no_key'); e.status = 503; e.code = 'no_key'; throw e; },
       lng: async () => { throw new Error('HTTP 504'); },
       imports: async () => { throw new Error('HTTP 502 eurostat'); },
+      fleet: async () => { throw new Error('HTTP 500 fleet'); },
     },
     setCollapsed: (v) => { collapsed = v; },
   });
@@ -284,10 +319,41 @@ test('panel: chyba proxy = stav error s hláškou; bez koreňa v DOM vracia null
   assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[4].textContent, 'gas.lng-unavailable');
   assert.equal(st.imports.status, 'error');
   assert.equal(st.imports.lastError, 'HTTP 502 eurostat');
-  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[5].textContent, 'gas.imports-unavailable');
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[6].textContent, 'gas.imports-unavailable');
+  assert.deepEqual([st.fleet.status, st.fleet.lastError], ['error', 'HTTP 500 fleet']);
+  assert.equal(find(doc.root.body, (n) => n.className === 'gas-status')[5].textContent, 'gas.fleet-unavailable');
   panel.open();
   assert.equal(collapsed, false);
   assert.equal(installGasPanel({ doc: { getElementById: () => null }, t }), null);
+});
+
+test('panel: LNG tankery bez feedu AIS = stav off s tlačidlom ZAPNÚŤ AIS, ktoré zapne vrstvu lodí a o 8 s načíta znova', async () => {
+  const doc = fakeDoc();
+  const calls = [];
+  const timeouts = [];
+  let enabled = 0;
+  const panel = installGasPanel({
+    doc, t, lang: 'sk', refreshMs: 0, nowMs: () => NOW,
+    api: {
+      prices: async () => PAYLOAD, flows: async () => FLOWS, storage: async () => STORAGE, lng: async () => LNG, imports: async () => IMPORTS,
+      fleet: async () => { calls.push('fleet'); return FLEET_OFF; },
+    },
+    onEnableAis: () => { enabled += 1; },
+    setTimeoutImpl: (fn, ms) => { timeouts.push([fn, ms]); return 7; },
+  });
+  await flush();
+  const st = panel._getStateForTest().fleet;
+  assert.deepEqual([st.loaded, st.ok, st.state, st.status, st.count, st.enableVisible], [true, false, 'off', 'off', 0, true]);
+  const fleetCard = find(doc.root.body, (n) => n.dataset.card === 'fleet')[0];
+  assert.equal(find(fleetCard, (n) => n.className === 'gas-status')[0].textContent, 'gas.fleet-off');
+  const enableBtn = find(fleetCard, (n) => n.dataset.action === 'enable-ais')[0];
+  assert.equal(enableBtn.hidden, false);
+  enableBtn.listeners.click[0]();
+  assert.equal(enabled, 1, 'zapne vrstvu Živé plavidlá AIS cez ui.js');
+  assert.deepEqual(timeouts.map(([, ms]) => ms), [8000]);
+  timeouts[0][0]();
+  await flush();
+  assert.equal(calls.length, 2, 'po zapnutí feedu sa karta načíta znova');
 });
 
 test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštalácia v ui.js, i18n EN/SK, proxy s kontaktom v UA', () => {
@@ -358,6 +424,21 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
   }
   assert.match(SK_STRINGS['gas.supply-updated'], /predbežné, D−1/, 'mix sa nikdy nevydáva za živý');
   assert.match(SK_STRINGS['gas.supply-note'], /Bez domácej ťažby/, 'poznámka priznáva, čo v mixe nie je');
+  // Etapa 8: LNG tankery z úložiska AIS tejto relácie — trasa nikdy nespúšťa feed sama.
+  assert.match(vite, /middlewares\.use\('\/api\/gas\/lng-fleet'/);
+  const fleetRoute = vite.slice(vite.indexOf("middlewares.use('/api/gas/lng-fleet'"), vite.indexOf("middlewares.use('/api/gas/storage'"));
+  assert.ok(fleetRoute.length > 100 && !/ensureAisStreamConnection/.test(fleetRoute), 'trasa LNG tankerov nesmie otvárať AISStream — to robí vrstva lodí');
+  assert.match(vite, /'Cache-Control': 'no-store', 'X-GEV-Cache': 'NONE' \}\);\n\s+res\.end\(JSON\.stringify\(payload\)\);/, 'živá odpoveď bez cache');
+  assert.match(ui, /onFlyToVessel: \(\{ mmsi, lat, lon \}\) => \{/, 'klik na loď preletí kameru');
+  assert.match(ui, /selectById\?\.\(mmsi\)/, 'a vyberie loď vo vrstve');
+  assert.match(ui, /onEnableAis: \(\) => \{ void this\._dataManager\?\.setEnabled\?\.\('ais-live-vessels', true, \{ origin: 'user' \}\); \}/);
+  assert.match(css, /\.gas-flow-row\[data-fleet\] \{ grid-template-columns: 1fr;/);
+  for (const key of ['gas.fleet', 'gas.fleet-loading', 'gas.fleet-unavailable', 'gas.fleet-off', 'gas.fleet-missing-key', 'gas.fleet-connecting', 'gas.fleet-error', 'gas.fleet-updated', 'gas.fleet-label', 'gas.fleet-confirmed-n', 'gas.fleet-likely-n', 'gas.fleet-eu-bound', 'gas.fleet-moving', 'gas.fleet-confirmed', 'gas.fleet-likely', 'gas.fleet-reason-wikidata-imo', 'gas.fleet-reason-wikidata-mmsi', 'gas.fleet-reason-name', 'gas.fleet-reason-name-size', 'gas.fleet-reason-terminal-size', 'gas.fleet-no-destination', 'gas.fleet-built', 'gas.fleet-speed', 'gas.fleet-age-min', 'gas.fleet-age-h', 'gas.fleet-eu', 'gas.fleet-fly', 'gas.fleet-refresh', 'gas.fleet-enable-ais', 'gas.fleet-note', 'gas.fleet-source']) {
+    assert.ok(EN_STRINGS[key], `EN ${key}`);
+    assert.ok(SK_STRINGS[key], `SK ${key}`);
+  }
+  assert.match(SK_STRINGS['gas.fleet-note'], /tretina svetovej flotily/, 'poznámka priznáva pokrytie zoznamu');
+  assert.match(SK_STRINGS['gas.fleet-likely'], /pravdepodobne/, 'heuristika sa nevydáva za potvrdenie');
   assert.match(css, /#history-panel\.collapsed,\n#gas-panel\.collapsed \{\n  width: var\(--left-collapsed-width\);/, 'zbalené panely ľavého stĺpca majú jednu šírku');
   assert.match(vite, /OKO-gas\/0\.1 \(https:\/\/github\.com\/vladouh76; vladouh76@gmail\.com\)/, 'User-Agent s kontaktom');
   assert.match(vite, /parseAcerCsv\(await fetchText\(ACER_HISTORICAL_URL\)\)/);

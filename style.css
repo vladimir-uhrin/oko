@@ -10824,6 +10824,11 @@ body.scene-playback-mode #first-run-launcher {
 .gas-legend-pct { grid-area: pct; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); white-space: nowrap; text-align: right; }
 .gas-legend-sub { grid-area: sub; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.04em; color: var(--text-secondary); line-height: 1.35; }
 .gas-legend-row[data-level="zero"] .gas-legend-value, .gas-legend-row[data-level="zero"] .gas-legend-name { color: var(--text-secondary); }
+/* Riadky LNG tankerov: bez sparkline, celá šírka; potvrdené v akcente, staršia poloha stlmená. */
+.gas-flow-row[data-fleet] { grid-template-columns: 1fr; grid-template-areas: "head" "sub" "note"; }
+.gas-flow-row[data-fleet][data-confidence="confirmed"] .gas-flow-value { color: #39d0ff; }
+.gas-flow-row[data-fleet][data-level="stale"] .gas-flow-route, .gas-flow-row[data-fleet][data-level="stale"] .gas-flow-value { color: var(--text-secondary); }
+.gas-flow-row[data-fleet][data-eu] .gas-flow-route { color: #ffb14d; }
 .gas-bar {
   grid-area: spark;
   align-self: center;

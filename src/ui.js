@@ -3118,6 +3118,19 @@ export class StyleManager {
           duration: 2,
         });
       },
+      // LNG tankery (etapa 8): riadok karty = zapni živé lode, vyber loď podľa
+      // MMSI (hneď aj po dotiahnutí polôh) a preleť 40 km nad ňu.
+      onFlyToVessel: ({ mmsi, lat, lon }) => {
+        void this._dataManager?.setEnabled?.('ais-live-vessels', true, { origin: 'user' });
+        const select = () => this._dataManager?.layers?.get('ais-live-vessels')?.module?.selectById?.(mmsi);
+        if (!select()) setTimeout(select, 6000);
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat, 40_000),
+          orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
+          duration: 2,
+        });
+      },
+      onEnableAis: () => { void this._dataManager?.setEnabled?.('ais-live-vessels', true, { origin: 'user' }); },
     });
     // Vlajky na kartách sa ťahajú lenivo — dotiahnutá vlajka si vyžiada
     // snímok, nech sa objaví aj na nehybnej kamere (render governor).

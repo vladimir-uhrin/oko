@@ -20,6 +20,8 @@ import { buildFlowsModel, fetchGasFlows, formatGwhDay } from './data/gasFlows.js
 import { GAS_STORAGE_RANGES, buildLngModel, buildStorageModel, fetchGasLng, fetchGasStorage, formatPctFull } from './data/gasStorage.js';
 import { GAS_IMPORT_RANGES, buildImportsModel, fetchGasImports, formatBcm } from './data/gasImports.js';
 import { buildSupplyModel } from './data/gasSupply.js';
+import { LNG_FLEET_REFRESH_MS, buildLngFleetModel, fetchLngFleet } from './data/lngFleet.js';
+import { mmsiFlag } from './data/vesselLabels.js';
 import { GAS_CHART_HEIGHT_PX, drawGasChart, drawSparkline, drawStackedChart } from './gasChart.js';
 
 export const GAS_SPARK_W = 64;
@@ -53,14 +55,17 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 export function installGasPanel({
   doc = globalThis.document,
   t,
-  api = { prices: fetchGasPrices, flows: fetchGasFlows, storage: fetchGasStorage, lng: fetchGasLng, imports: fetchGasImports },
+  api = { prices: fetchGasPrices, flows: fetchGasFlows, storage: fetchGasStorage, lng: fetchGasLng, imports: fetchGasImports, fleet: fetchLngFleet },
   lang = null,
   nowMs = () => Date.now(),
   refreshMs = GAS_PANEL_REFRESH_MS,
   setCollapsed = null,
   onFlyTo = null,
+  onFlyToVessel = null,
+  onEnableAis = null,
   setIntervalImpl = globalThis.setInterval,
   clearIntervalImpl = globalThis.clearInterval,
+  setTimeoutImpl = globalThis.setTimeout,
 } = {}) {
   const root = doc?.getElementById?.(GAS_PANEL_ID);
   const body = root?.querySelector?.('[data-gas-body]');
@@ -180,6 +185,38 @@ export function installGasPanel({
   const lngSource = el(doc, 'div', 'gas-source', '');
   lngCard.append(lngTitle, lngStatus, lngHead, lngCanvas, lngRows, lngNote, lngSource);
 
+  // ── karta LNG TANKERY (úložisko AIS tejto relácie + zoznam Wikidata) ──
+  const fleetCard = el(doc, 'section', 'gas-card');
+  fleetCard.dataset.card = 'fleet';
+  const fleetTitle = el(doc, 'h3', 'gas-card-title', t('gas.fleet'));
+  const fleetStatus = el(doc, 'div', 'gas-status', t('gas.fleet-loading'));
+  fleetStatus.dataset.state = 'loading';
+  const fleetHead = el(doc, 'div', 'gas-headline');
+  const fleetValue = el(doc, 'span', 'gas-headline-value', '—');
+  const fleetLabel = el(doc, 'span', 'gas-headline-label', '');
+  const fleetSub = el(doc, 'span', 'gas-headline-sub', '');
+  fleetHead.append(fleetValue, fleetLabel, fleetSub);
+  const fleetActions = el(doc, 'div', 'gas-ranges');
+  const fleetRefresh = el(doc, 'button', 'gas-range', t('gas.fleet-refresh'));
+  fleetRefresh.type = 'button';
+  fleetRefresh.dataset.action = 'refresh';
+  fleetRefresh.addEventListener('click', () => { void loadFleet(); });
+  // Feed AIS zapína (a platí) vrstva lodí — karta ho sama nikdy nespustí,
+  // len ponúkne tlačidlo, keď feed nebeží.
+  const fleetEnable = el(doc, 'button', 'gas-range', t('gas.fleet-enable-ais'));
+  fleetEnable.type = 'button';
+  fleetEnable.dataset.action = 'enable-ais';
+  fleetEnable.hidden = true;
+  fleetEnable.addEventListener('click', () => {
+    onEnableAis?.();
+    if (typeof setTimeoutImpl === 'function') setTimeoutImpl(() => { void loadFleet(); }, 8000);
+  });
+  fleetActions.append(fleetRefresh, fleetEnable);
+  const fleetRows = el(doc, 'div', 'gas-flows');
+  const fleetNote = el(doc, 'div', 'gas-note', '');
+  const fleetSource = el(doc, 'div', 'gas-source', '');
+  fleetCard.append(fleetTitle, fleetStatus, fleetHead, fleetActions, fleetRows, fleetNote, fleetSource);
+
   // ── karta DOVOZ (Eurostat nrg_ti_gasm: odkiaľ plyn prichádza, mesačne) ──
   let importsRange = '2y';
   const importsCard = el(doc, 'section', 'gas-card');
@@ -210,7 +247,7 @@ export function installGasPanel({
   const importsSource = el(doc, 'div', 'gas-source', '');
   importsCard.append(importsTitle, importsStatus, importsHead, importsRanges, importsCanvas, importsLegend, importsNote, importsSource);
 
-  body.append(status, card, flowsCard, supplyCard, storageCard, lngCard, importsCard);
+  body.append(status, card, flowsCard, supplyCard, storageCard, lngCard, fleetCard, importsCard);
 
   // ── render ──────────────────────────────────────────────────────
   /**
@@ -612,17 +649,86 @@ export function installGasPanel({
     }
   }
 
+  // ── LNG tankery v dosahu AIS ────────────────────────────────────
+  let fleetPayload = null; let fleetModel = null; let fleetToken = 0; let fleetError = null;
+
+  function renderFleet() {
+    if (!fleetPayload) return;
+    const lng = language();
+    fleetModel = buildLngFleetModel(fleetPayload, { lang: lng, translate: t, nowMs: nowMs(), flagOf: mmsiFlag });
+    fleetEnable.hidden = fleetModel.state !== 'off';
+    fleetValue.textContent = fleetModel.headline.countText;
+    fleetLabel.textContent = fleetModel.headline.label;
+    fleetSub.textContent = fleetModel.headline.sub;
+    fleetRows.textContent = '';
+    for (const row of fleetModel.rows) {
+      const r = el(doc, 'div', 'gas-flow-row');
+      r.dataset.level = row.level;
+      r.dataset.id = row.mmsi;
+      r.dataset.confidence = row.confidence;
+      r.dataset.fleet = 'true';
+      if (row.euBound) r.dataset.eu = 'true';
+      const head = el(doc, 'div', 'gas-flow-head');
+      head.append(el(doc, 'span', 'gas-flow-route', [row.flag?.iso2, row.name].filter(Boolean).join(' · ')), el(doc, 'span', 'gas-flow-value', row.confidenceText));
+      const sub = el(doc, 'span', 'gas-flow-sub', [row.euBound ? t('gas.fleet-eu') : '', row.sizeText, row.speedText, row.destinationText, row.ageText].filter(Boolean).join(' · '));
+      r.append(head, sub, el(doc, 'span', 'gas-flow-note', [row.reasonText, row.operator].filter(Boolean).join(' · ')));
+      if (onFlyToVessel && Number.isFinite(row.lat) && Number.isFinite(row.lon)) {
+        r.dataset.fly = 'true';
+        r.setAttribute('role', 'button');
+        r.setAttribute('tabindex', '0');
+        r.setAttribute('title', t('gas.fleet-fly'));
+        const fly = () => onFlyToVessel({ mmsi: row.mmsi, name: row.name, lat: row.lat, lon: row.lon });
+        r.addEventListener('click', fly);
+        r.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); fly(); } });
+      }
+      fleetRows.appendChild(r);
+    }
+    fleetNote.textContent = fleetModel.note;
+    fleetSource.textContent = fleetModel.sourceLine;
+    if (fleetModel.state === 'live') {
+      fleetStatus.textContent = t('gas.fleet-updated', { time: `${new Date(fleetPayload.fetchedAt ?? nowMs()).toISOString().slice(11, 16)} UTC` });
+      fleetStatus.dataset.state = 'ok';
+    } else if (fleetModel.state === 'error') {
+      fleetStatus.textContent = t('gas.fleet-error', { error: fleetPayload?.feed?.error || '—' });
+      fleetStatus.dataset.state = fleetModel.rows.length ? 'stale' : 'error';
+    } else {
+      fleetStatus.textContent = t({ off: 'gas.fleet-off', 'missing-key': 'gas.fleet-missing-key', connecting: 'gas.fleet-connecting' }[fleetModel.state] || 'gas.fleet-off');
+      fleetStatus.dataset.state = fleetModel.state === 'connecting' ? 'loading' : 'off';
+    }
+  }
+
+  async function loadFleet() {
+    const token = ++fleetToken;
+    try {
+      const fresh = await api.fleet();
+      if (token !== fleetToken) return;
+      fleetPayload = fresh;
+      fleetError = null;
+      renderFleet();
+    } catch (error) {
+      if (token !== fleetToken) return;
+      fleetError = error?.message || String(error);
+      if (!fleetPayload) {
+        fleetStatus.textContent = t('gas.fleet-unavailable');
+        fleetStatus.dataset.state = 'error';
+      }
+    }
+  }
+
   function load() {
-    return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng(), loadImports()]);
+    return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng(), loadImports(), loadFleet()]);
   }
 
   const timer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void load(); }, refreshMs) : null;
+  // Lode sa hýbu: LNG tankery sa obnovujú z úložiska servera každých 10 min.
+  const fleetTimer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void loadFleet(); }, LNG_FLEET_REFRESH_MS) : null;
   void load();
 
   return {
     /** Otvor panel (hlasový alias, kontextové menu). */
     open() { setCollapsed?.(false); },
     refresh: load,
+    refreshFleet: loadFleet,
     setRange(next) { if (GAS_PRICE_RANGES.includes(next)) { range = next; render(); } },
     setStorageRange(next) { if (GAS_STORAGE_RANGES.includes(next)) { storageRange = next; renderStorage(); } },
     setImportsRange(next) { if (GAS_IMPORT_RANGES.includes(next)) { importsRange = next; renderImports(); } },
@@ -652,8 +758,16 @@ export function installGasPanel({
           ok: Boolean(supplyModel?.ok), status: supplyStatus.dataset.state, headline: supplyModel?.headline?.totalText ?? null,
           rows: supplyModel?.rows?.length ?? 0, days: supplyModel?.days?.length ?? 0, lngMissing: supplyModel?.freshness?.lngMissing ?? null,
         },
+        fleet: {
+          loaded: Boolean(fleetPayload), ok: Boolean(fleetModel?.ok), state: fleetModel?.state ?? null, status: fleetStatus.dataset.state, lastError: fleetError,
+          count: fleetModel?.rows?.length ?? 0, headline: fleetModel?.headline?.countText ?? null, enableVisible: !fleetEnable.hidden,
+        },
       };
     },
-    destroy() { if (timer !== null && typeof clearIntervalImpl === 'function') clearIntervalImpl(timer); },
+    destroy() {
+      if (typeof clearIntervalImpl !== 'function') return;
+      if (timer !== null) clearIntervalImpl(timer);
+      if (fleetTimer !== null) clearIntervalImpl(fleetTimer);
+    },
   };
 }

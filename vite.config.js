@@ -62,6 +62,7 @@ import {
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
+import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -4524,9 +4525,35 @@ function gasProxy() {
       return { snapshot: null, features: 0, lengthKm: null, bytes: 0 };
     }
   }
+  // LNG tankery v dosahu AIS (etapa 8): číta úložisko AISStream TEJTO relácie
+  // (žiadne nové pripojenie — feed zapína a platí vrstva Živé plavidlá AIS;
+  // bez nej odpoveď hovorí active:false a karta to prizná), potvrdzuje IMO/MMSI
+  // proti zoznamu Wikidata (CC0, local_data/lng_fleet), inak heuristika
+  // meno / cieľ / dĺžka v lngFleet.js. Odpoveď je živá → no-store.
+  const LNG_FLEET_FILE = path.join(process.cwd(), 'src', 'data', 'local_data', 'lng_fleet', 'lng-carriers.json');
+  let _lngFleetIndex = null;
+  function lngFleetIndex() {
+    if (!_lngFleetIndex) {
+      let json = null;
+      try { json = JSON.parse(fs.readFileSync(LNG_FLEET_FILE, 'utf8')); } catch (error) { console.warn('[gas-proxy] lng fleet list unavailable: ' + (error?.message || error)); }
+      _lngFleetIndex = buildLngFleetIndex(json);
+    }
+    return _lngFleetIndex;
+  }
+  function lngFleetFeed() {
+    const feed = aisStreamStatusSnapshot();
+    return { status: feed?.status ?? null, error: feed?.error ?? null, lastMessageAt: feed?.lastMessageAt ?? null, active: Boolean(_aisAdapter), retained: _aisStreamVessels.size };
+  }
   function install(middlewares) {
     middlewares.use('/api/gas/prices', prices.handler);
     middlewares.use('/api/gas/flows', flows.handler);
+    middlewares.use('/api/gas/lng-fleet', (req, res) => {
+      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+      const feed = lngFleetFeed();
+      const payload = buildLngFleetPayload(feed.active ? _aisStreamVessels.values() : [], lngFleetIndex(), { now: Date.now(), feed });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-GEV-Cache': 'NONE' });
+      res.end(JSON.stringify(payload));
+    });
     middlewares.use('/api/gas/storage', withGieKey(storage));
     middlewares.use('/api/gas/lng', withGieKey(lng));
     // Prefixové párovanie connectu: /meta musí byť zaregistrované PRED súborom.
@@ -4554,6 +4581,7 @@ function gasProxy() {
         gie,
         pipelines: await pipelinesSummary(),
         imports: await importsSummary(),
+        lngFleet: { ships: lngFleetIndex().ships, feed: lngFleetFeed() },
       }), 'NONE');
     });
   }
