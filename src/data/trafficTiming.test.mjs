@@ -151,10 +151,13 @@ test('traffic timing pairs real ordering to the scheduling change and guards re-
   let timerId = 0;
   let trafficLayer;
   let viewer;
-  // Kópia žije v .gev-cache (gitignored, watcher-ignored) a NIE v OS tempe:
-  // bare import 'cesium' sa rieši prechodom nahor k node_modules repa.
+  // Kópia žije v node_modules/.cache/oko (gitignored, watcher-ignored) a NIE
+  // v OS tempe: bare import 'cesium' sa rieši prechodom nahor k node_modules
+  // repa. Predtým bývala v .gev-cache — ten je od 2026-09-13 junction na
+  // D:\OKO\gev-cache a Node ESM loader importuje cez REÁLNU cestu, nad ktorou
+  // žiadne node_modules nie sú ("Cannot find package 'cesium'").
   const instanceUrl = new URL(
-    `../../.gev-cache/traffic-timing-under-test-${process.pid}.mjs`,
+    `../../node_modules/.cache/oko/traffic-timing-under-test-${process.pid}.mjs`,
     import.meta.url,
   );
 
