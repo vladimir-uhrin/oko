@@ -257,7 +257,8 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
   assert.match(ui, /import \{ installGasPanel \} from '\.\/gasPanel\.js';/);
   assert.match(ui, /\{ id: 'gas-panel' \},/);
   assert.match(ui, /this\._gasPanel = installGasPanel\(\{/);
-  assert.match(ui, /onFlyTo: \(\{ lat, lon \}\) => \{/, 'klik na riadok toku preletí kameru');
+  assert.match(ui, /onFlyTo: \(\{ id, lat, lon \}\) => \{/, 'klik na riadok toku preletí kameru');
+  assert.match(ui, /selectStationByRowId\?\.\(id\)/, 'a otvorí rozšírenú kartu stanice');
   assert.match(ui, /setEnabled\?\.\('gas-flows', true, \{ origin: 'user' \}\)/, 'a zapne vrstvu staníc');
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /import gasFlowsLayer from '\.\/data\/gasFlowsLayer\.js';/);

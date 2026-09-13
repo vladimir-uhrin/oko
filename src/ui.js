@@ -3108,8 +3108,10 @@ export class StyleManager {
       setCollapsed: (collapsed) => this.setPanelCollapsed('gas-panel', collapsed, { persist: false, syncShare: false }),
       // Klik na riadok toku: zapni vrstvu staníc a preleť k nej (120 km nad
       // hranicou stačí na bod aj popis, nie na konkrétny objekt).
-      onFlyTo: ({ lat, lon }) => {
+      onFlyTo: ({ id, lat, lon }) => {
         void this._dataManager?.setEnabled?.('gas-flows', true, { origin: 'user' });
+        // Rozšírená karta stanice hneď po prelete (pred načítaním sa výber zapamätá).
+        this._dataManager?.layers?.get('gas-flows')?.module?.selectStationByRowId?.(id);
         viewer.camera.flyTo({
           destination: Cesium.Cartesian3.fromDegrees(lon, lat, 120_000),
           orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
