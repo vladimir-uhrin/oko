@@ -663,11 +663,14 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   const block = src.slice(start, end + 4);
 
   // Baseline updated 2026-09-05: the requested volcano layer adds one enum
-  // value to visibility and menu tools. The rest of the schema stays pinned.
-  assert.equal(block.length, 31352, 'tool schema byte length drifted from the frozen baseline');
+  // value to visibility and menu tools. Updated again 2026-09-14: the reworked
+  // sk-overview tile drives the gas layers, so 'gas-flows' and 'gas-pipelines'
+  // joined both layer enums and the common-name mapping sentence names them.
+  // The rest of the schema stays pinned.
+  assert.equal(block.length, 31541, 'tool schema byte length drifted from the frozen baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '854502187ce9de47f000f597a17dd58c2fcf2c96c0c71ea2d77b1db7e6bfd5ed',
+    'e5886b84bed0122834572f7cc1831f87da7583bb16f145b3591e7b97ef474423',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

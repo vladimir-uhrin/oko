@@ -186,7 +186,14 @@ const LAYER_ALIASES = new Map([
   ['energy', 'local-energy'],
   ['energetika', 'local-energy'],
   ['power grid', 'local-energy'],
-  ['pipelines', 'local-energy'],
+  // Plyn (2026-09-14): potrubia už majú vlastnú vrstvu EÚ + bývalý ZSSR,
+  // „pipelines" preto mieri na ňu, nie na energetiku SR.
+  ['pipelines', 'gas-pipelines'],
+  ['gas pipelines', 'gas-pipelines'],
+  ['plynovody', 'gas-pipelines'],
+  ['gas flows', 'gas-flows'],
+  ['gas stations', 'gas-flows'],
+  ['toky plynu', 'gas-flows'],
 ]);
 
 const CITY_ALIASES = new Map([

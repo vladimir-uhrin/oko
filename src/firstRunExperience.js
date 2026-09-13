@@ -92,12 +92,16 @@ export function environmentalLabel(choice = ENVIRONMENTAL_LABEL_CHOICE) {
 export const FIRST_RUN_MISSIONS = Object.freeze({
   // OKO (Fáza 4): the fork's flagship tile — fully keyless on purpose, so the
   // very first click always delivers: SHMÚ precipitation radar (CC BY 4.0,
-  // no key) + the bundled SK energy grid (ODbL snapshot). Both layers are
-  // registered in the shipped set_layer_visibility enum like every other
-  // mission layer.
+  // no key) + gas. 2026-09-14 (user: „elektrinu nateraz vypni", then the
+  // public domain showed the SK power grid again through this very tile):
+  // the tile now enables the gas module's layers — ENTSOG border stations
+  // (`gas-flows`, cards with flows and prices) and the OSM pipeline snapshot
+  // (`gas-pipelines`) — instead of the bundled SK energy grid, which stays in
+  // the panel for a manual switch-on. All layers here are registered in the
+  // shipped set_layer_visibility enum like every other mission layer.
   'sk-overview': Object.freeze({
     kind: 'globe',
-    layerIds: Object.freeze(['shmu-radar', 'local-energy']),
+    layerIds: Object.freeze(['shmu-radar', 'gas-flows', 'gas-pipelines']),
     // Both layers live over Slovakia — pulling out to the whole globe (the
     // generic globe-mission flight) would shrink the payoff to a few pixels.
     // The tile frames the country instead.
