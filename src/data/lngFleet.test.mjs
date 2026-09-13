@@ -51,6 +51,8 @@ test('classifyLngContact: potvrdené IMO/MMSI; pravdepodobné meno, meno + dĺž
   assert.equal(classifyLngContact(row({ name: 'SOME TANKER', length_m: 290, destination: 'PLSWI' }), INDEX).reason, 'terminal-size');
   assert.equal(classifyLngContact(row({ name: 'SOME TANKER', length_m: 290, destination: 'SABINE PASS' }), INDEX).reason, 'terminal-size');
   assert.equal(classifyLngContact(row({ name: 'SOME TANKER', length_m: 290, destination: 'FUJAIRAH' }), INDEX), null);
+  assert.equal(classifyLngContact(row({ name: 'ATLANTIC MAJESTY', length_m: 250, destination: 'NLRTM>LYMEL' }), INDEX), null, 'všeobecný prístav (Rotterdam) tanker neurobí LNG (živý falošný zásah 13. 9.)');
+  assert.equal(classifyLngContact(row({ name: 'SOME TANKER', length_m: 290, destination: 'ROTTERDAM LNG' }), INDEX).reason, 'terminal-size', 'ale „LNG" v cieli áno');
   assert.equal(classifyLngContact(row({ name: 'LNG CARRIER', type: '70' }), INDEX), null, 'známy iný typ = nikdy');
   assert.equal(classifyLngContact(row({ name: 'GAS GROUPER', length_m: 230 }), INDEX), null, '„GAS" samo nestačí (LPG)');
   assert.equal(classifyLngContact(row({ name: 'HOEGH TROVE', type: '70', length_m: 200 }), INDEX), null, 'Höegh autoloď nie je LNG');
