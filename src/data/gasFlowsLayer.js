@@ -479,6 +479,19 @@ export function createGasFlowsLayer({
 
     /** Rozšírená karta stanice (null = zbaliť). */
     selectStation,
+    /**
+     * Výber stanice podľa kľúča (zdieľaný odkaz `subj=gas-flows.s.<kľúč>`,
+     * 2026-09-14). false = kľúč neznámy alebo stanice ešte nenačítané —
+     * volajúci to skúsi znova po načítaní.
+     */
+    selectById(key) {
+      const wanted = String(key ?? '');
+      if (!wanted || !_stations.some((s) => s.key === wanted)) return false;
+      selectStation(wanted);
+      return true;
+    },
+    /** Kľúč rozšírenej stanice alebo null. */
+    getSelectedKey() { return _selectedKey; },
     /** Výber podľa id smeru z karty TOKY (lanzhot-in …); pred načítaním sa zapamätá. */
     selectStationByRowId(rowId) {
       const key = _rowKeyById.get(String(rowId)) || null;

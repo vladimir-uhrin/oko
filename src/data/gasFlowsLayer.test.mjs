@@ -260,3 +260,29 @@ test('register, token a kredit: gas-flows má token 9, i18n mená a texty kariet
   assert.ok(credit);
   assert.match(credit.html, /href="https:\/\/transparency\.entsog\.eu\/"/);
 });
+
+test('selectById (zdieľaný odkaz, 2026-09-14): pred načítaním false, po načítaní vyberie stanicu podľa kľúča, neznámy kľúč výber nezmení', async () => {
+  const pick = { value: null };
+  const layer = createGasFlowsLayer({
+    fetchImpl: async (url) => ({ ok: true, status: 200, json: async () => (url.includes('prices') ? PRICES : PAYLOAD) }),
+    dataSourceFactory: fakeDataSource,
+    handlerFactory: () => fakeHandler(),
+    overlayHost: fakeHost(),
+    translate: tKey,
+    lang: () => 'sk',
+    now: () => NOW,
+  });
+  layer.init(fakeViewer(pick));
+  assert.equal(layer.selectById('lanzhot'), false, 'pred načítaním nič');
+  layer.enable();
+  assert.equal(await layer.update(), true);
+  assert.equal(layer.selectStationByRowId('lanzhot-in'), true);
+  const key = layer.getSelectedKey();
+  assert.ok(key, 'kľúč stanice Lanžhot');
+  layer.selectStation(null);
+  assert.equal(layer.getSelectedKey(), null);
+  assert.equal(layer.selectById(key), true);
+  assert.equal(layer.getSelectedKey(), key);
+  assert.equal(layer.selectById('nope'), false);
+  assert.equal(layer.getSelectedKey(), key, 'neznámy kľúč výber nezmení');
+});

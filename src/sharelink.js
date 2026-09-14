@@ -6,6 +6,7 @@ import {
 } from './data/detectionPolicy.js';
 import { clampScopeTerminusPct } from './scopeMask.js';
 import { decodeLayerStateParams, encodeLayerStateParams } from './data/layerState.js';
+import { SHARE_SUBJECT_PARAM, decodeShareSubject, encodeShareSubject } from './shareSubject.js';
 
 /**
  * Share Links — URL Hash State Management
@@ -231,6 +232,8 @@ export class ShareLinkManager {
         && decodedLayerState === null,
       panelState: decodePanelStateParams(params),
       sharedAtMs: decodeShareCreatedAtMs(params),
+      // Predmet zdieľania (2026-09-14): sledovaný stroj / vybraný objekt.
+      subject: decodeShareSubject(params.get(SHARE_SUBJECT_PARAM)),
     };
     state.restoreAuthority = {
       visual: this._restoreAuthority.visual,
@@ -327,6 +330,9 @@ export class ShareLinkManager {
         mapStack: mapCurrent ? state.mapStack : undefined,
         panelState,
         styleParams: visualCurrent ? state.styleParams : undefined,
+        // Bez „lane": predmet sa obnovuje raz po načítaní; neskorší výber
+        // používateľa ho prirodzene nahradí (ui.js opakuje len kým je čo).
+        subject: state.subject || null,
       });
       restoreStatus = 'applied';
     }
@@ -370,6 +376,19 @@ export class ShareLinkManager {
   /** Install the active visual preset parameter source used by URL generation. */
   setStyleParamStateProvider(provider) {
     this._styleParamStateProvider = typeof provider === 'function' ? provider : null;
+  }
+
+  /**
+   * Install the "what am I looking at" source: tracked aircraft/satellite or
+   * selected vessel/station (`{layerId, kind, id}` or null), see shareSubject.js.
+   */
+  setSubjectStateProvider(provider) {
+    this._subjectStateProvider = typeof provider === 'function' ? provider : null;
+  }
+
+  /** Called when the selection or the tracked subject changes. */
+  onSubjectChange() {
+    this._scheduleUpdate();
   }
 
   /** Called only when the durable layer preference model changes. */
@@ -516,6 +535,9 @@ export class ShareLinkManager {
       this._currentStyle,
       this._styleParamStateProvider?.(this._currentStyle),
     );
+    const subject = encodeShareSubject(this._subjectStateProvider?.() || null);
+    if (subject) params.set(SHARE_SUBJECT_PARAM, subject);
+    else params.delete(SHARE_SUBJECT_PARAM);
 
     // Copy-time metadata is intentionally absent here. `copyLink()` adds a
     // fresh timestamp to its ephemeral URL without aging the live address.

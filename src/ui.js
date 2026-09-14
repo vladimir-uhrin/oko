@@ -71,6 +71,13 @@ import {
 import { installDetectionHover } from './data/detectionHover.js';
 import { installContactHoverCard, updateContactHoverCard } from './data/contactHoverCard.js';
 import { isCoarsePointer } from './mobileShell.js';
+import { getContextStore, getSelectedEntityContext } from './data/contextStore.js';
+import {
+  SUBJECT_RESTORE_DEADLINE_MS,
+  SUBJECT_RESTORE_RETRY_MS,
+  applyShareSubject,
+  readShareSubject,
+} from './shareSubject.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
 import {
   altitudeDisplayValue,
@@ -2916,6 +2923,7 @@ export class StyleManager {
           mapStack,
           panelState,
           styleParams,
+          subject,
         } = state || {};
         // Ignore the retired 'ai-edit' style from older share links.
         if (style && style !== 'normal' && style !== 'ai-edit') {
@@ -2988,12 +2996,25 @@ export class StyleManager {
           : Promise.resolve();
         if (panelState) this._restorePanelState(panelState);
         await mapStackRestore;
+        // Predmet odkazu (sledovaný stroj / vybraný objekt) až po vrstvách;
+        // živé dáta prídu neskôr, preto opakovane (2026-09-14).
+        if (subject) this._restoreShareSubject(subject);
         this._syncShareState();
       },
       isNavigationCurrent: (generation) => generation === this._navigationGeneration,
       cancelOwnedNavigation: () => this.viewer.camera.cancelFlight(),
     });
     this.shareLinkManager.setPanelStateProvider(() => this._buildSharePanelState());
+    // Predmet zdieľania (2026-09-14): sledovaný stroj má prednosť pred
+    // vybraným objektom; výber hlási kontextový sklad udalosťami, sledovanie
+    // hýbe kamerou, takže hash sa prepíše aj bez vlastnej udalosti.
+    this.shareLinkManager.setSubjectStateProvider(() => readShareSubject({
+      dataManager: this._dataManager,
+      selectedContext: getSelectedEntityContext({ dataManager: this._dataManager }),
+    }));
+    for (const type of ['gev:entity-selected', 'gev:entity-selection-cleared']) {
+      window.addEventListener(type, () => this.shareLinkManager?.onSubjectChange?.());
+    }
     this.shareLinkManager.setStyleParamStateProvider((styleName) => {
       const shader = STYLES[styleName];
       const stage = this.stages[styleName];
@@ -4372,6 +4393,33 @@ export class StyleManager {
       liveMode: getDetectionMode(),
       liveDensityPct: parseInt(this._detectionDensitySlider?.value || '50', 10),
     });
+  }
+
+  /**
+   * Obnov predmet zdieľaného odkazu (sledované lietadlo či satelit, vybraná
+   * loď alebo stanica plynu). Živé vrstvy dostanú objekt až s prvým pollom,
+   * preto sa pokus opakuje každých 1,5 s najviac 30 s; končí, keď sa predmet
+   * uplatní, keď ho vrstva nepozná, alebo keď si používateľ medzitým vybral
+   * niečo iné (2026-09-14, zdieľanie A+B).
+   * @param {{ layerId: string, kind: 'tracked'|'selected', id: string }} subject
+   * @returns {void}
+   */
+  _restoreShareSubject(subject) {
+    const startedAt = Date.now();
+    const attempt = async () => {
+      if (this._destroyed) return;
+      const store = getContextStore();
+      if (store.selectedAt && store.selectedAt > startedAt + 250) return; // používateľ už vybral niečo iné
+      let status = 'unsupported';
+      try {
+        status = await applyShareSubject({ dataManager: this._dataManager, subject });
+      } catch {
+        status = 'unsupported';
+      }
+      if (status !== 'pending') return;
+      if (Date.now() - startedAt < SUBJECT_RESTORE_DEADLINE_MS) setTimeout(attempt, SUBJECT_RESTORE_RETRY_MS);
+    };
+    void attempt();
   }
 
   _syncShareState() {
