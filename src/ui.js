@@ -70,6 +70,7 @@ import {
 } from './data/detection.js';
 import { installDetectionHover } from './data/detectionHover.js';
 import { installContactHoverCard, updateContactHoverCard } from './data/contactHoverCard.js';
+import { isCoarsePointer } from './mobileShell.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
 import {
   altitudeDisplayValue,
@@ -3066,7 +3067,10 @@ export class StyleManager {
       },
     });
     installDetectionHover(viewer, {
-      onHover: (candidates, position) => updateContactHoverCard(candidates, position, t),
+      // Dotyk nemá „prejdenie myšou": emulovaný mousemove pri ťuknutí by
+      // otvoril kartičku aj kartu naraz — na prste kartičku kŕmime prázdnym
+      // zoznamom (= zhasnutá) a rozhoduje len ťuknutie (2026-09-14, mobilný plášť).
+      onHover: (candidates, position) => updateContactHoverCard(isCoarsePointer() ? [] : candidates, position, t),
     });
     initTrackedReadout(viewer);
     // Fotka sledovaného lietadla pod kartou (Planespotters Photo API, len

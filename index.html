@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <!-- Verejný tunel (2026-09-13): pracovný nástroj, nikdy do indexov vyhľadávačov. -->
   <meta name="robots" content="noindex, nofollow, noarchive" />
   <title>OKO</title>
@@ -673,6 +673,43 @@
     </div>
   </div>
   </div>
+
+  <!-- Mobilný plášť (2026-09-14): spodná lišta a výsuv pre dotyk / úzku obrazovku.
+       Zobrazí ich src/mobileShell.js cez body.oko-mobile; panely sekcií sa do
+       výsuvu presúvajú dočasne (ten istý DOM uzol) a späť. -->
+  <nav id="oko-appbar" aria-label="Sections" data-i18n-aria="mobile.appbar-aria" hidden>
+    <button type="button" data-oko-section="layers" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">layers</span>
+      <span class="oko-appbar-label" data-i18n="mobile.layers">Layers</span>
+    </button>
+    <button type="button" data-oko-section="scenes" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">movie</span>
+      <span class="oko-appbar-label" data-i18n="mobile.scenes">Scenes</span>
+    </button>
+    <button type="button" data-oko-section="data" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">monitoring</span>
+      <span class="oko-appbar-label" data-i18n="mobile.data">Data</span>
+    </button>
+    <button type="button" data-oko-section="display" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+      <span class="oko-appbar-label" data-i18n="mobile.display">Display</span>
+    </button>
+    <button type="button" data-oko-section="search" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">search</span>
+      <span class="oko-appbar-label" data-i18n="mobile.search">Search</span>
+    </button>
+  </nav>
+  <div id="oko-sheet-backdrop" hidden></div>
+  <section id="oko-sheet" role="dialog" aria-modal="false" aria-labelledby="oko-sheet-title" hidden>
+    <div class="oko-sheet-handle" aria-hidden="true"></div>
+    <div class="oko-sheet-head">
+      <span id="oko-sheet-title" class="oko-sheet-title"></span>
+      <button id="oko-sheet-close" type="button" data-i18n-title="mobile.close" title="Close" aria-label="Close">
+        <span class="material-symbols-outlined" aria-hidden="true">close</span>
+      </button>
+    </div>
+    <div class="oko-sheet-body"></div>
+  </section>
 
   <div id="left-panel-stack">
   <!-- Data Layer Toggle Panel -->

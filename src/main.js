@@ -47,6 +47,8 @@ import {
 } from './renderGovernor.js';
 import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
+import { initMobileShell } from './mobileShell.js';
+import { setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
 
 initLogoGaze();
 
@@ -301,6 +303,14 @@ async function init() {
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
+    // Mobilný plášť (2026-09-14): na dotyku / úzkej obrazovke spodná lišta
+    // a výsuvné panely namiesto bočných stĺpcov; širší výber prstom; bez
+    // ambientných kariet na plátne (jedna vybraná karta naraz).
+    window.__okoMobileShell = initMobileShell({
+      styleManager,
+      scene: viewer.scene,
+      suppressLane: setWorldOverlayLaneSuppressed,
+    });
     // The previous multi-canvas weather compositor remains disabled. Cockpit
     // clouds use a separate, capped low-resolution GPU pass that never attaches
     // Cesium fog or post-process stages and is fully stopped in map mode.

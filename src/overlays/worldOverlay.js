@@ -63,6 +63,35 @@ export const WORLD_OVERLAY_PAINT_LANES = Object.freeze([
 const PAINT_LANE_INDEX = new Map(WORLD_OVERLAY_PAINT_LANES.map((lane, index) => [lane, index]));
 
 /**
+ * Lanes the host must not paint right now. The mobile shell (2026-09-14)
+ * suppresses `ambient-card` on phones: a canvas card for every station or
+ * vessel in range covered the map on a 6-inch screen — only the selected and
+ * tracked cards remain. Suppressed entries keep their queue slot but paint
+ * nothing and register no hit rect, so a tap lands on the entity instead.
+ */
+const _suppressedLanes = new Set();
+
+/**
+ * @param {string} laneId One of `WORLD_OVERLAY_PAINT_LANES`.
+ * @param {boolean} suppressed
+ * @returns {boolean} the applied state
+ */
+export function setWorldOverlayLaneSuppressed(laneId, suppressed) {
+  if (!PAINT_LANE_INDEX.has(laneId)) {
+    throw new TypeError(`Unsupported WorldOverlay paint lane: ${laneId}`);
+  }
+  const lane = PAINT_LANE_INDEX.get(laneId);
+  if (suppressed) _suppressedLanes.add(lane);
+  else _suppressedLanes.delete(lane);
+  return Boolean(suppressed);
+}
+
+/** @param {string} laneId */
+export function isWorldOverlayLaneSuppressed(laneId) {
+  return PAINT_LANE_INDEX.has(laneId) && _suppressedLanes.has(PAINT_LANE_INDEX.get(laneId));
+}
+
+/**
  * Unified UI exclusion inventory. Selectors may match multiple elements; the
  * service caches their rectangles and observes layout/visibility changes.
  *
@@ -2204,11 +2233,14 @@ function paintFrame(keyhole) {
   _ctx.save();
   let itemIndex = 0;
   for (let lane = 0; lane < WORLD_OVERLAY_PAINT_LANES.length; lane++) {
+    // A suppressed lane (mobile shell: ambient cards) still consumes its
+    // queue slots so later lanes stay aligned, but paints nothing.
+    const suppressed = _suppressedLanes.has(lane);
     // Source-owned painters run first inside their lane. Detection therefore
     // retains its former z5 position below every ordinary host entry at z6.
-    paintCustomLane(lane);
+    if (!suppressed) paintCustomLane(lane);
     while (itemIndex < _paintCount && _paintQueue[itemIndex].lane === lane) {
-      paintEntryItem(_paintQueue[itemIndex], keyhole);
+      if (!suppressed) paintEntryItem(_paintQueue[itemIndex], keyhole);
       itemIndex++;
     }
   }

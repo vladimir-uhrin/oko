@@ -10844,3 +10844,218 @@ body.scene-playback-mode #first-run-launcher {
 }
 .gas-bar[hidden] { display: none; }
 .gas-bar-fill { display: block; height: 100%; background: rgba(57, 208, 255, 0.75); }
+
+/* =====================================================================
+   MOBILNÝ PLÁŠŤ (2026-09-14) — body.oko-mobile nastavuje src/mobileShell.js
+   (dotyk so šírkou ≤ 1180 px alebo akákoľvek šírka ≤ 900 px). Bočné stĺpce,
+   HUD a horné indikátory sú skryté; sekcie otvára spodná lišta #oko-appbar do
+   výsuvu #oko-sheet (zdola; na nízkom viewporte naležato zásuvka sprava).
+   Panel vo výsuve je ten istý DOM uzol, len bez fixed pozície a stropov výšky.
+   ===================================================================== */
+:root {
+  --oko-appbar-h: 58px;
+  --oko-safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Zdvih doku, toastu a výsuvu nad lištu: predvolene lišta + 8 px; mobileShell.js
+     ho prepíše na zmeranú výšku lišty (aj so safe-area vložkou na výrezoch). Model
+     v creditAttribution.test.mjs ho vyhodnocuje ako vetovanú premennú na podlahe 0. */
+  --oko-dock-lift: 66px;
+}
+#oko-appbar, #oko-sheet, #oko-sheet-backdrop { display: none; }
+/* Gestá patria Cesiu (otáčanie, pinch), nie stránke (pull-to-refresh, zoom). */
+#cesiumContainer { touch-action: none; }
+
+/* --- skryté na mobile: stĺpce, lišta, HUD, indikátory ------------------ */
+body.oko-mobile #left-panel-stack,
+body.oko-mobile #right-context-rail,
+body.oko-mobile #pp-toggles:not(.oko-in-sheet),
+body.oko-mobile #cctv-panel:not(.oko-in-sheet),
+body.oko-mobile #intel-hud,
+body.oko-mobile #style-indicator,
+body.oko-mobile #hud-toggle,
+body.oko-mobile #title-bar .subtitle,
+body.oko-mobile #lang-switch .indicator-label {
+  display: none !important;
+}
+
+/* --- horná lišta stiahnutá do jedného riadku ---------------------------- */
+body.oko-mobile #title-bar { top: 10px; left: 12px; }
+body.oko-mobile #title-bar h1 { font-size: 15px; gap: 6px; }
+body.oko-mobile #title-bar .title-logo { width: 30px; }
+body.oko-mobile #top-center-actions { top: 10px; }
+body.oko-mobile #lang-switch { top: 14px; right: 12px; }
+body.oko-mobile #lang-switch button { min-width: 30px; min-height: 30px; }
+
+/* --- dok, toast, kokpit nad spodnou lištou ------------------------------ */
+/* Zdvih doku nad lištu nastavuje mobileShell.js inline (style.bottom): dok je
+   prvok modelovaný v creditAttribution.test.mjs a ten pozná len desktopové
+   selektory; výsuv, toast a kokpit sa dvíhajú cez --oko-dock-lift nižšie. */
+body.oko-mobile.oko-sheet-open #command-dock { visibility: hidden; pointer-events: none; }
+body.oko-mobile #toast { bottom: calc(var(--oko-dock-lift) + 76px); }
+body.oko-mobile #view-switcher { bottom: calc(var(--oko-dock-lift) + 4px); }
+body.oko-mobile #cockpit-entry { bottom: calc(var(--oko-dock-lift) + 76px); }
+
+/* --- spodná lišta -------------------------------------------------------- */
+body.oko-mobile #oko-appbar {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--oko-appbar-h) + var(--oko-safe-bottom));
+  padding: 0 4px var(--oko-safe-bottom);
+  z-index: 190;
+  background: rgba(6, 12, 18, 0.94);
+  border-top: 1px solid rgba(64, 200, 230, 0.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+body.oko-mobile #oko-appbar[hidden] { display: none; }
+#oko-appbar button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 44px;
+  padding: 6px 0;
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  color: rgba(190, 225, 240, 0.82);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: var(--cursor-pointer);
+  -webkit-tap-highlight-color: transparent;
+}
+#oko-appbar button .material-symbols-outlined { font-size: 22px; line-height: 1; }
+#oko-appbar button[aria-pressed="true"] { color: #39d0ff; background: rgba(57, 208, 255, 0.10); }
+
+/* --- výsuv --------------------------------------------------------------- */
+body.oko-mobile #oko-sheet-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 186;
+  background: rgba(0, 0, 0, 0.38);
+}
+body.oko-mobile #oko-sheet-backdrop[hidden] { display: none; }
+body.oko-mobile #oko-sheet {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--oko-dock-lift) - 8px);
+  max-height: 62vh;
+  max-height: 62dvh;
+  z-index: 188;
+  background: rgba(8, 16, 24, 0.97);
+  border: 1px solid rgba(64, 200, 230, 0.32);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.5);
+  color: #dff3fb;
+}
+body.oko-mobile #oko-sheet[hidden] { display: none; }
+.oko-sheet-handle {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 4px;
+  margin: 8px auto 2px;
+  border-radius: 2px;
+  background: rgba(190, 225, 240, 0.35);
+}
+.oko-sheet-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 4px 16px;
+}
+.oko-sheet-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #39d0ff;
+}
+#oko-sheet-close {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  color: rgba(190, 225, 240, 0.85);
+  cursor: var(--cursor-pointer);
+}
+.oko-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 0 10px calc(12px + var(--oko-safe-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Panel vo výsuve: nie fixed, celá šírka, bez stropov výšky a bez tabového ◀ */
+.oko-sheet-body > .panel-collapsible.oko-in-sheet {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  flex: 0 0 auto !important;
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+.oko-sheet-body .oko-in-sheet .panel-collapse-btn { display: none !important; }
+.oko-sheet-body .oko-in-sheet .panel-inner,
+.oko-sheet-body .oko-in-sheet .cctv-panel-inner,
+.oko-sheet-body .oko-in-sheet .global-context-panel-inner {
+  max-height: none !important;
+  width: auto !important;
+  max-width: none !important;
+}
+
+/* --- naležato (nízky viewport): zásuvka sprava --------------------------- */
+body.oko-mobile-landscape #oko-sheet {
+  left: auto;
+  right: 0;
+  top: 0;
+  bottom: calc(var(--oko-dock-lift) - 8px);
+  width: min(430px, 72vw);
+  max-height: none;
+  border-radius: 16px 0 0 0;
+  border-bottom: 1px solid rgba(64, 200, 230, 0.32);
+}
+body.oko-mobile-landscape .oko-sheet-handle { display: none; }
+
+/* --- prvé spustenie na mobile: list zdola, väčšie ciele ------------------ */
+body.oko-mobile #first-run-launcher {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--oko-dock-lift) - 8px);
+  transform: none;
+  width: 100vw;
+  max-height: calc(88vh - var(--oko-dock-lift));
+  max-height: calc(88dvh - var(--oko-dock-lift));
+  border-radius: 16px 16px 0 0;
+}
+body.oko-mobile #first-run-launcher .first-run-choices button { min-height: 56px; }
