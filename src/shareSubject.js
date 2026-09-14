@@ -99,6 +99,28 @@ export function readShareSubject({ dataManager = null, selectedContext = null } 
 }
 
 /**
+ * Ľudský názov predmetu pre názov príspevku (volací znak, meno lode, stanica).
+ * Rovnaké poradie ako readShareSubject: sledovaný stroj, potom vybraný objekt.
+ * @returns {string|null}
+ */
+export function readShareSubjectLabel({ dataManager = null, selectedContext = null } = {}) {
+  for (const layerId of TRACKED_SUBJECT_LAYERS) {
+    if (typeof dataManager?.isEnabled === 'function' && !dataManager.isEnabled(layerId)) continue;
+    const module = dataManager?.layers?.get?.(layerId)?.module;
+    if (!module) continue;
+    let label = null;
+    try {
+      const subject = module.getTrackedSubject?.();
+      const info = subject ? null : module.getTrackedInfo?.();
+      label = subject?.label ?? info?.callsign ?? info?.name ?? null;
+    } catch { label = null; }
+    if (label) return String(label).trim() || null;
+  }
+  const label = selectedContext?.label;
+  return label ? String(label).trim() || null : null;
+}
+
+/**
  * Obnov predmet u príjemcu. Vypnutú vrstvu zapne (odosielateľ ju mal zapnutú,
  * inak by predmet v odkaze nebol).
  * @param {{ dataManager?: object|null, subject?: {layerId: string, kind: string, id: string}|null }} input

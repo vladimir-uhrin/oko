@@ -29,6 +29,14 @@
 import fs from 'node:fs';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
+import {
+  SHARE_BODY_MAX_BYTES,
+  clientKeyFromRequest,
+  createShareStore,
+  originFromRequest,
+  renderSharePage,
+  validateSharePayload,
+} from './src/shareStore.js';
 import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAirframesMessage } from './src/data/acarsMessages.js';
 import { parseNetcdf3, gridOf } from './src/data/netcdf3.js';
 import { METEO_FIELDS, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, forecastSteps, quantize } from './src/data/meteoField.js';
@@ -4593,6 +4601,80 @@ function gasProxy() {
 }
 
 /**
+ * Zdieľanie s náhľadom (2026-09-14, variant B, „aj na soc. siete"):
+ *   POST /api/share      stav odkazu + snímka JPEG → krátky odkaz /s/<id>
+ *   GET  /s/<id>         stránka s Open Graph a Twitter značkami (siete si
+ *                        z nej berú obrázok), človeka presmeruje do aplikácie
+ *   GET  /s/<id>.jpg     snímka (nemenná, rok v cache)
+ * Úložisko .gev-cache/share (junction → D:), retencia 90 dní. Verejný
+ * zapisovací endpoint bez kľúča: 30 zdieľaní za hodinu na IP (cez tunel
+ * podľa CF-Connecting-IP, socket je vždy ::1) a 300 celkovo, telo do 640 kB,
+ * JPEG do 400 kB s overenou hlavičkou — logika v src/shareStore.js.
+ * Tunel smeruje /s/ na dev server (scripts/oko-publish.ps1), statický server
+ * ho nepozná; robots.txt povoľuje len /s/.
+ * @returns {import('vite').Plugin}
+ */
+function sharePlugin() {
+  const limiter = makeRateLimiter({ windowMs: 3600_000, max: 30, globalMax: 300 });
+  let store = null;
+  const getStore = () => {
+    if (!store) store = createShareStore({ dir: path.join(process.cwd(), '.gev-cache', 'share') });
+    return store;
+  };
+  const send = (res, status, type, body, extra = {}) => {
+    res.writeHead(status, { 'Content-Type': type, ...extra });
+    res.end(body);
+  };
+  const sendJson = (res, status, payload, extra = {}) => send(res, status, 'application/json; charset=utf-8', JSON.stringify(payload), { 'Cache-Control': 'no-store', ...extra });
+  function install(middlewares) {
+    middlewares.use('/api/share', async (req, res) => {
+      if (req.method !== 'POST') { sendJson(res, 405, { error: 'method_not_allowed' }); return; }
+      if (!limiter(clientKeyFromRequest(req))) { sendJson(res, 429, { error: 'rate_limited' }, { 'Retry-After': '60' }); return; }
+      let body;
+      try {
+        body = JSON.parse((await readRequestBodyCapped(req, SHARE_BODY_MAX_BYTES)).toString('utf8'));
+      } catch (error) {
+        const tooLarge = error?.code === 'BODY_TOO_LARGE';
+        sendJson(res, tooLarge ? 413 : 400, { error: tooLarge ? 'too_large' : 'bad_json' });
+        return;
+      }
+      const checked = validateSharePayload(body);
+      if (!checked.ok) { sendJson(res, 400, { error: checked.error }); return; }
+      try {
+        const record = getStore().save(checked.value);
+        const origin = originFromRequest(req);
+        sendJson(res, 200, { id: record.id, url: `${origin}/s/${record.id}`, image: `${origin}/s/${record.id}.jpg` });
+      } catch (error) {
+        console.warn('[share] save failed:', error?.message || error);
+        sendJson(res, 500, { error: 'store_failed' });
+      }
+    });
+    middlewares.use('/s', (req, res, next) => {
+      let pathname = '/';
+      try { pathname = new URL(req.url || '/', 'http://localhost').pathname; } catch { next(); return; }
+      const match = /^\/([A-Za-z0-9]{6,32})(\.jpg)?$/.exec(pathname);
+      if (!match) { next(); return; }
+      const [, id, wantsImage] = match;
+      const record = getStore().read(id);
+      if (!record) { send(res, 404, 'text/plain; charset=utf-8', 'Not Found', { 'Cache-Control': 'no-store' }); return; }
+      if (wantsImage) {
+        fs.readFile(getStore().imagePath(id), (error, data) => {
+          if (error) { send(res, 404, 'text/plain; charset=utf-8', 'Not Found', { 'Cache-Control': 'no-store' }); return; }
+          send(res, 200, 'image/jpeg', data, { 'Cache-Control': 'public, max-age=31536000, immutable', 'Content-Length': String(data.length) });
+        });
+        return;
+      }
+      send(res, 200, 'text/html; charset=utf-8', renderSharePage({ record, origin: originFromRequest(req) }), { 'Cache-Control': 'public, max-age=300' });
+    });
+  }
+  return {
+    name: 'oko-share',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
  * Dlhšie keep-alive pre origin za cloudflared (2026-09-14, verejná adresa:
  * v konzole občas `502` na /api a v logu tunela „connection was forcibly
  * closed by the remote host" — šesť naraz, vždy len na 4173). Node zatvára
@@ -4627,11 +4709,19 @@ function originKeepAlivePlugin() {
  * @returns {import('vite').Plugin}
  */
 function noIndexPlugin() {
-  const ROBOTS_TXT = 'User-agent: *\nDisallow: /\n';
+  // `Allow: /s/` (2026-09-14): stránky zdieľania s náhľadom smú crawlery
+  // sietí čítať (X a LinkedIn rešpektujú robots.txt); zvyšok webu ostáva
+  // zakázaný a stránky /s/ nesú noindex v <meta>.
+  const ROBOTS_TXT = 'User-agent: *\nDisallow: /\nAllow: /s/\n';
   function install(middlewares) {
     middlewares.use((req, res, next) => {
-      res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
-      if (String(req.url || '').split('?')[0] === '/robots.txt') {
+      const pathname = String(req.url || '').split('?')[0];
+      // Bez hlavičky noindex na /s/<id>: náhľad sietí by ju mohol brať ako
+      // zákaz; noindex tam ostáva v <meta> stránky (renderSharePage).
+      if (!/^\/s\/[A-Za-z0-9]{6,32}(\.jpg)?$/.test(pathname)) {
+        res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+      }
+      if (pathname === '/robots.txt') {
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
         res.end(ROBOTS_TXT);
         return;
@@ -9698,6 +9788,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       noIndexPlugin(),
       originKeepAlivePlugin(),
+      sharePlugin(),
       flightHistoryProxy(),
       cesium(),
       openSkyProxy(),

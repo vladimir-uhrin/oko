@@ -462,14 +462,26 @@ export class ShareLinkManager {
   }
 
   /** Copy a current-state snapshot with a copy-time timestamp. Returns true on success. */
-  async copyLink({ nowMs = Date.now() } = {}) {
+  /**
+   * Zdieľateľný odkaz s časovou pečiatkou (`at`) — ten istý, ktorý kopíruje
+   * copyLink(); zdieľacie okno (2026-09-14) ho posiela na server pre krátky
+   * odkaz s náhľadom. `{ href, hash }`, alebo null bez kamery.
+   */
+  buildShareUrl({ nowMs = Date.now() } = {}) {
     const params = this._buildHashParams();
-    if (!params) return false;
+    if (!params) return null;
     params.set(SHARE_CREATED_AT_PARAM, String(Math.floor(nowMs / 1000)));
-    const copiedUrl = new URL(window.location.href);
-    copiedUrl.hash = params.toString();
+    const url = new URL(window.location.href);
+    const hash = params.toString();
+    url.hash = hash;
+    return { href: url.href, hash };
+  }
+
+  async copyLink({ nowMs = Date.now() } = {}) {
+    const built = this.buildShareUrl({ nowMs });
+    if (!built) return false;
     try {
-      await navigator.clipboard.writeText(copiedUrl.href);
+      await navigator.clipboard.writeText(built.href);
       return true;
     } catch {
       return false;

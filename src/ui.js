@@ -77,7 +77,12 @@ import {
   SUBJECT_RESTORE_RETRY_MS,
   applyShareSubject,
   readShareSubject,
+  readShareSubjectLabel,
 } from './shareSubject.js';
+import { openSharePanel } from './sharePanel.js';
+import { captureShareSnapshot, snapshotStamp } from './shareSnapshot.js';
+import { buildAttributionLine, buildShareCopy } from './shareTargets.js';
+import { currentLanguage } from './i18n.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
 import {
   altitudeDisplayValue,
@@ -10534,9 +10539,44 @@ export class StyleManager {
    * @returns {void}
    */
   _initShareButton() {
-    this._shareBtn.addEventListener('click', async () => {
-      const success = await this.shareLinkManager.copyLink();
-      this._showToast(success ? t('toast.link-copied') : t('toast.copy-failed'));
+    // Zdieľanie s obrázkom (2026-09-14): namiesto tichého kopírovania odkazu
+    // okno s náhľadom, krátkym odkazom a tlačidlami sietí.
+    this._shareBtn.addEventListener('click', () => { void this._openSharePanel(); });
+  }
+
+  /**
+   * Zdieľacie okno (2026-09-14, A+B): odkaz so stavom a predmetom, snímka
+   * toho, čo vidím, krátky odkaz s náhľadom zo servera, tlačidlá pre siete.
+   * Bez servera ostane dlhý odkaz a obrázok v schránke.
+   * @returns {Promise<void>}
+   */
+  async _openSharePanel() {
+    const lang = currentLanguage();
+    const whenMs = Date.now();
+    const selectedContext = getSelectedEntityContext({ dataManager: this._dataManager });
+    const subjectLabel = readShareSubjectLabel({ dataManager: this._dataManager, selectedContext });
+    const cityText = document.getElementById('location-mini-city')?.textContent || '';
+    const placeLabel = cityText.replace(/^[^A-Za-zÀ-ž0-9]*(Location|Poloha):\s*/i, '').trim();
+    const layerNames = (this._dataManager?.getAll?.() || [])
+      .filter((layer) => layer.enabled && layer.showInTogglePanel)
+      .map((layer) => layer.name)
+      .filter(Boolean);
+    const copy = buildShareCopy({
+      subjectLabel,
+      placeLabel: placeLabel && placeLabel !== '--' ? placeLabel : null,
+      layerNames,
+      whenMs,
+      lang,
+    });
+    await openSharePanel({
+      buildLink: () => this.shareLinkManager.buildShareUrl({ nowMs: whenMs }),
+      captureSnapshot: () => captureShareSnapshot({
+        viewer: this.viewer,
+        stamp: snapshotStamp(whenMs, lang),
+        attribution: buildAttributionLine(document.getElementById('cesium-credits')?.textContent),
+      }),
+      copy,
+      toast: (message) => this._showToast(message),
     });
   }
 

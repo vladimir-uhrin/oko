@@ -11066,3 +11066,152 @@ body.oko-mobile #first-run-launcher {
   border-radius: 16px 16px 0 0;
 }
 body.oko-mobile #first-run-launcher .first-run-choices button { min-height: 56px; }
+
+/* =====================================================================
+   ZDIEĽANIE S OBRÁZKOM (2026-09-14) — okno za tlačidlom zdieľania
+   (src/sharePanel.js): náhľad snímky, krátky odkaz, kopírovanie, natívne
+   zdieľanie, tlačidlá sietí. Na mobile list zdola.
+   ===================================================================== */
+#oko-share-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: rgba(0, 0, 0, 0.5);
+}
+#oko-share-backdrop[hidden] { display: none; }
+#oko-share {
+  position: fixed;
+  z-index: 211;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(540px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  background: rgba(8, 16, 24, 0.97);
+  border: 1px solid rgba(64, 200, 230, 0.32);
+  border-radius: 14px;
+  color: #dff3fb;
+  padding: 14px 16px 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+#oko-share[hidden] { display: none; }
+body.oko-mobile #oko-share {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transform: none;
+  width: 100vw;
+  max-height: 88vh;
+  max-height: 88dvh;
+  border-radius: 16px 16px 0 0;
+  padding-bottom: calc(16px + var(--oko-safe-bottom));
+}
+.oko-share-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.oko-share-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #39d0ff;
+}
+.oko-share-close {
+  min-width: 40px;
+  min-height: 40px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: var(--cursor-pointer);
+}
+.oko-share-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1200 / 630;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #06101a;
+  border: 1px solid rgba(64, 200, 230, 0.2);
+}
+.oko-share-preview[hidden] { display: none; }
+.oko-share-status {
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 8px 0;
+}
+.oko-share-status[hidden] { display: none; }
+.oko-share-url {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-all;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 8px 0 4px;
+}
+.oko-share-note {
+  font-size: 11px;
+  opacity: 0.7;
+  margin: 0 0 10px;
+}
+.oko-share-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.oko-share-actions button,
+.oko-share-actions a {
+  flex: 1 1 auto;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(64, 200, 230, 0.35);
+  background: rgba(57, 208, 255, 0.08);
+  color: #dff3fb;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: var(--cursor-pointer);
+}
+.oko-share-actions button[hidden],
+.oko-share-actions a[hidden] { display: none; }
+.oko-share-networks-label {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin: 6px 0;
+}
+.oko-share-networks {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.oko-share-networks a {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #dff3fb;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: var(--cursor-pointer);
+}

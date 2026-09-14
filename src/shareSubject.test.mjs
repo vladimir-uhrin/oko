@@ -9,6 +9,7 @@ import {
   decodeShareSubject,
   encodeShareSubject,
   readShareSubject,
+  readShareSubjectLabel,
   subjectIdFromContextId,
 } from './shareSubject.js';
 
@@ -64,6 +65,19 @@ test('readShareSubject: sledovaný stroj má prednosť, inak vybraný kontext; v
   const disabled = fakeManager({ modules: { flights: { getTrackedSubject: () => ({ id: '4b1805' }) } }, enabled: [] });
   assert.equal(readShareSubject({ dataManager: disabled }), null, 'vypnutá vrstva nič nezdieľa');
   assert.equal(readShareSubject({}), null);
+});
+
+test('readShareSubjectLabel: názov sledovaného stroja, inak vybraného objektu, inak null', () => {
+  const manager = fakeManager({
+    modules: { flights: { getTrackedSubject: () => ({ id: '4b1805', label: 'SWR11H' }) }, satellites: { getTrackedInfo: () => ({ noradId: 25544, name: ' ISS (ZARYA) ' }) } },
+    enabled: ['flights', 'satellites'],
+  });
+  assert.equal(readShareSubjectLabel({ dataManager: manager, selectedContext: { label: 'Kapušany' } }), 'SWR11H');
+  manager.layers.get('flights').module.getTrackedSubject = () => null;
+  assert.equal(readShareSubjectLabel({ dataManager: manager }), 'ISS (ZARYA)');
+  manager.layers.get('satellites').module.getTrackedInfo = () => null;
+  assert.equal(readShareSubjectLabel({ dataManager: manager, selectedContext: { label: 'Kapušany' } }), 'Kapušany');
+  assert.equal(readShareSubjectLabel({ dataManager: manager }), null);
 });
 
 test('applyShareSubject: trackById/selectById podľa druhu, vypnutá vrstva sa zapne, čakanie na dáta = pending', async () => {

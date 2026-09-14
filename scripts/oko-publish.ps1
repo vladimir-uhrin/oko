@@ -62,7 +62,7 @@ $ingress = @"
 
 ingress:
   - hostname: $Hostname
-    path: ^/api(/.*)?$
+    path: ^/(api|s)(/.*)?$
     service: http://localhost:$DevPort
     originRequest:
       connectTimeout: 30s
