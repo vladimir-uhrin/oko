@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS legs (
 CREATE INDEX IF NOT EXISTS legs_icao ON legs(icao24, last_t);
 CREATE INDEX IF NOT EXISTS legs_callsign ON legs(callsign);
 CREATE INDEX IF NOT EXISTS legs_last ON legs(last_t);
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value INTEGER NOT NULL
+);
 `;
 
 // null/undefined/'' → null (Number(null) je 0 — chýbajúca výška nie je hladina mora).
@@ -166,10 +170,31 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   // nie zdroj; nová sa naplní z ďalšieho pollu.
   const version = db.prepare('PRAGMA user_version').get()?.user_version ?? 0;
   if (version !== SCHEMA_VERSION) {
-    db.exec('DROP TABLE IF EXISTS fixes; DROP TABLE IF EXISTS legs;');
+    db.exec('DROP TABLE IF EXISTS fixes; DROP TABLE IF EXISTS legs; DROP TABLE IF EXISTS meta;');
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
   db.exec(SCHEMA);
+
+  // Počty riadkov sa vedú prírastkovo v `meta` (2026-09-14): `SELECT COUNT(*)
+  // FROM fixes` je pri 25 M fixoch plný prechod indexu (~40 s na D:) a
+  // node:sqlite je synchrónne → každý GET /api/history/status zmrazil celý
+  // dev server (aj /robots.txt), cez tunel z toho boli 502 a odozvy 80–100 s.
+  // Jediný zapisovateľ je tento modul, preto sa počítadlá menia v tej istej
+  // transakcii ako zápis alebo prerezávanie; plný COUNT beží len raz pri
+  // prvom otvorení bez `meta` (migrácia) alebo na požiadanie cez recount().
+  const metaGet = db.prepare('SELECT value FROM meta WHERE key = ?');
+  const metaSet = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  const metaAdd = db.prepare('UPDATE meta SET value = value + ? WHERE key = ?');
+  const countFixesFull = db.prepare('SELECT COUNT(*) AS n FROM fixes');
+  const countLegsFull = db.prepare('SELECT COUNT(*) AS n FROM legs');
+  function recountRows() {
+    const fixes = countFixesFull.get()?.n ?? 0;
+    const legs = countLegsFull.get()?.n ?? 0;
+    metaSet.run('fixes_count', fixes);
+    metaSet.run('legs_count', legs);
+    return { fixes, legs };
+  }
+  if (metaGet.get('fixes_count') === undefined || metaGet.get('legs_count') === undefined) recountRows();
 
   const insertFix = db.prepare(`INSERT OR IGNORE INTO fixes (icao24, t, lat, lon, alt, gs, trk, vr, squawk, gnd, src)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -187,8 +212,10 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   const thinFixes = db.prepare(`DELETE FROM fixes WHERE t < ? AND t >= ? AND (t % ${THIN_STEP_S}) >= ${Math.floor(THIN_STEP_S / 4)}`);
   const pageCount = () => { try { return db.prepare('PRAGMA page_count').get()?.page_count ?? 0; } catch { return 0; } };
   const pageSize = () => { try { return db.prepare('PRAGMA page_size').get()?.page_size ?? 0; } catch { return 0; } };
-  const countFixes = db.prepare('SELECT COUNT(*) AS n, MIN(t) AS oldest, MAX(t) AS newest FROM fixes');
-  const countLegs = db.prepare('SELECT COUNT(*) AS n FROM legs');
+  // MIN/MAX cez index fixes_t sú O(log n) — SQLite ich optimalizuje len po
+  // jednom agregáte na dopyt, preto dva dopyty.
+  const oldestFix = db.prepare('SELECT MIN(t) AS v FROM fixes');
+  const newestFix = db.prepare('SELECT MAX(t) AS v FROM fixes');
   const trackStmt = db.prepare(`SELECT t, lat, lon, alt, gs, trk, vr, squawk, gnd FROM fixes
     WHERE icao24 = ? AND t >= ? AND t <= ? ORDER BY t ASC LIMIT ?`);
   const legById = db.prepare('SELECT * FROM legs WHERE id = ?');
@@ -200,6 +227,7 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   function recordFixes(fixes, src) {
     if (!fixes.length) return 0;
     let inserted = 0;
+    let legsInserted = 0;
     db.exec('BEGIN');
     try {
       for (const f of fixes) {
@@ -223,8 +251,11 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
           updateLeg.run(f.t, f.t, f.alt, f.gs, squawks, f.callsign, leg.id);
         } else {
           insertLeg.run(f.icao24, f.callsign, f.country, f.t, f.t, f.alt, f.gs, f.squawk || '', src);
+          legsInserted += 1;
         }
       }
+      if (inserted) metaAdd.run(inserted, 'fixes_count');
+      if (legsInserted) metaAdd.run(legsInserted, 'legs_count');
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -240,12 +271,23 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
     lastPruneMs = nowMs;
     const nowS = Math.floor(nowMs / 1000);
     const cutoff = nowS - retentionDays * 86_400;
-    const a = pruneFixes.run(cutoff).changes;
-    const b = pruneLegs.run(cutoff).changes;
-    // rawHours ≥ retencia = riedenie vypnuté (používateľ 2026-09-07: „veľmi
-    // nezosekávaj dáta" — na prázdnom SSD sa drží plný záznam).
-    const c = rawHours * 3600 >= retentionDays * 86_400 ? 0 : thinFixes.run(nowS - rawHours * 3600, cutoff).changes;
-    return a + b + c;
+    // Jedna transakcia: mazanie aj oprava počítadiel spolu, aby pád medzi
+    // nimi nenechal `meta` rozhodené.
+    db.exec('BEGIN');
+    try {
+      const a = pruneFixes.run(cutoff).changes;
+      const b = pruneLegs.run(cutoff).changes;
+      // rawHours ≥ retencia = riedenie vypnuté (používateľ 2026-09-07: „veľmi
+      // nezosekávaj dáta" — na prázdnom SSD sa drží plný záznam).
+      const c = rawHours * 3600 >= retentionDays * 86_400 ? 0 : thinFixes.run(nowS - rawHours * 3600, cutoff).changes;
+      if (a + c) metaAdd.run(-(a + c), 'fixes_count');
+      if (b) metaAdd.run(-b, 'legs_count');
+      db.exec('COMMIT');
+      return a + b + c;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   return {
@@ -322,14 +364,13 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
         .map((r) => [r.t, r.lat / SCALE_DEG, r.lon / SCALE_DEG, r.alt, tenth(r.gs), tenth(r.trk), tenth(r.vr), r.squawk, r.gnd]);
     },
 
+    /** Stav úložiska — O(1): počty z `meta`, kraje cez index (žiadny COUNT(*)). */
     status() {
-      const f = countFixes.get();
-      const l = countLegs.get();
       return {
-        fixes: f?.n ?? 0,
-        legs: l?.n ?? 0,
-        oldestT: f?.oldest ?? null,
-        newestT: f?.newest ?? null,
+        fixes: metaGet.get('fixes_count')?.value ?? 0,
+        legs: metaGet.get('legs_count')?.value ?? 0,
+        oldestT: oldestFix.get()?.v ?? null,
+        newestT: newestFix.get()?.v ?? null,
         retentionDays,
         rawHours,
         thinStepS: THIN_STEP_S,
@@ -339,6 +380,8 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
     },
 
     prune() { return maybePrune(true); },
+    /** Plný COUNT(*) oboch tabuliek a zápis do `meta` (pomalé; testy, jednorazová kontrola). */
+    recount() { return recountRows(); },
     close() { db.close(); },
   };
 }

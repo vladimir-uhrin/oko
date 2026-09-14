@@ -2,7 +2,9 @@
 // Serverové úložisko histórie letov (2026-09-07) — in-memory SQLite.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import {
   LEG_GAP_S,
   fixFromAdsbLolAircraft,
@@ -135,4 +137,39 @@ test('tripwire: proxy zapisuje odpovede OpenSky aj adsb.lol/mil a vystavuje /api
   assert.match(vite, /'\.gev-cache', 'flight-history\.sqlite'/);
   const ignore = readFileSync(new URL('../../.gitignore', import.meta.url), 'utf8');
   assert.match(ignore, /^\.gev-cache\/?$/m);
+});
+
+test('status(): počty z meta počítadiel sedia s COUNT(*) po zápisoch aj po prerezaní a prežijú zatvorenie/otvorenie súboru — bez plného prechodu fixov pri každom /api/history/status (2026-09-14)', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-fh-'));
+  const file = path.join(dir, 'h.sqlite');
+  let nowMs = (T0 + 100) * 1000;
+  let store = openFlightHistory(file, { retentionDays: 1, now: () => nowMs });
+  store.recordOpenSkyBody(openSkyBody(T0, [row('4b1805', 'SWR11H', T0, 17.2, 48.1, 10000), row('3c6444', 'DLH123', T0, 8.5, 50.0, 11000)]));
+  store.recordOpenSkyBody(openSkyBody(T0 + 30, [row('4b1805', 'SWR11H', T0 + 30, 17.3, 48.2, 10200)]));
+  let st = store.status();
+  assert.equal(st.fixes, 3);
+  assert.equal(st.legs, 2);
+  assert.deepEqual(store.recount(), { fixes: 3, legs: 2 }, 'plný COUNT dáva to isté');
+  assert.equal(st.oldestT, T0);
+  assert.equal(st.newestT, T0 + 30);
+  store.close();
+  store = openFlightHistory(file, { retentionDays: 1, now: () => nowMs });
+  assert.equal(store.status().fixes, 3, 'po otvorení sa číta meta (bez migrácie)');
+  assert.equal(store.status().legs, 2);
+  nowMs = (T0 + 2 * 86_400) * 1000;
+  assert.equal(store.prune(), 5, 'retencia 1 deň: 3 fixy + 2 úseky preč');
+  st = store.status();
+  assert.equal(st.fixes, 0);
+  assert.equal(st.legs, 0);
+  assert.equal(st.oldestT, null);
+  assert.deepEqual(store.recount(), { fixes: 0, legs: 0 });
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('status(): tripwire — žiadny COUNT(*) v ceste stavu (len migrácia a recount())', () => {
+  const src = readFileSync(new URL('./flightHistoryStore.js', import.meta.url), 'utf8');
+  const statusBody = src.slice(src.indexOf('    status() {'), src.indexOf('    prune() {'));
+  assert.doesNotMatch(statusBody, /COUNT\(\*\)|countFixesFull|countLegsFull/, 'status() číta meta, nie COUNT(*)');
+  assert.match(statusBody, /metaGet\.get\('fixes_count'\)/);
 });
