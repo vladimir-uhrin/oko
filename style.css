@@ -11215,3 +11215,4 @@ body.oko-mobile #oko-share {
   text-decoration: none;
   cursor: var(--cursor-pointer);
 }
+.oko-share-note-warn { color: #ffb14d; opacity: 1; }

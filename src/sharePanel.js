@@ -69,7 +69,8 @@ function ensurePanel(doc, win, nav, translate, toast) {
   const copyImage = el(doc, 'button', { text: translate('share.copy-image'), attrs: { type: 'button' } });
   const native = el(doc, 'button', { text: translate('share.native'), attrs: { type: 'button' } });
   const download = el(doc, 'a', { text: translate('share.download'), attrs: { download: 'oko.jpg', href: '#' } });
-  const actions = el(doc, 'div', { className: 'oko-share-actions' }, [copyLink, copyImage, native, download]);
+  const retry = el(doc, 'button', { text: translate('share.retry'), attrs: { type: 'button' } });
+  const actions = el(doc, 'div', { className: 'oko-share-actions' }, [copyLink, copyImage, native, download, retry]);
   const networksLabel = el(doc, 'div', { className: 'oko-share-networks-label', text: translate('share.networks') });
   const networks = el(doc, 'div', { className: 'oko-share-networks' });
   const root = el(doc, 'section', { attrs: { id: 'oko-share', role: 'dialog', 'aria-modal': 'true', 'aria-label': translate('share.title') } }, [
@@ -102,6 +103,10 @@ function ensurePanel(doc, win, nav, translate, toast) {
       toast(translate('share.image-copied'));
     } catch { toast(translate('toast.copy-failed')); }
   });
+  retry.addEventListener('click', () => {
+    // Bez krátkeho odkazu (snímka alebo server zlyhali) skús celý tok znova.
+    if (ui.lastOptions) void openSharePanel(ui.lastOptions);
+  });
   native.addEventListener('click', async () => {
     const session = ui.session;
     if (!session || typeof nav.share !== 'function') return;
@@ -117,7 +122,8 @@ function ensurePanel(doc, win, nav, translate, toast) {
   });
 
   Object.assign(ui, {
-    root, backdrop, preview, status, urlBox, note, copyLink, copyImage, native, download, networks, show, hide,
+    root, backdrop, preview, status, urlBox, note, copyLink, copyImage, native, download, retry, networks, show, hide,
+    lastOptions: null,
     reset() {
       ui.session = null;
       preview.hidden = true;
@@ -125,9 +131,11 @@ function ensurePanel(doc, win, nav, translate, toast) {
       status.textContent = translate('share.preparing');
       urlBox.textContent = '';
       note.textContent = '';
+      note.className = 'oko-share-note';
       copyImage.hidden = true;
       native.hidden = true;
       download.hidden = true;
+      retry.hidden = true;
       networks.textContent = '';
       while (networks.children?.length) networks.removeChild(networks.children[networks.children.length - 1]);
     },
@@ -145,6 +153,9 @@ function ensurePanel(doc, win, nav, translate, toast) {
       native.hidden = typeof nav.share !== 'function';
       urlBox.textContent = session.url;
       note.textContent = translate(session.shortLink ? 'share.short-link' : 'share.long-link');
+      // Dlhý odkaz nemá obrázok v náhľade sietí — zvýrazni a ponúkni nový pokus.
+      note.className = session.shortLink ? 'oko-share-note' : 'oko-share-note oko-share-note-warn';
+      retry.hidden = Boolean(session.shortLink);
       for (const target of buildShareTargets({ url: session.url, text: session.copy.text, title: session.copy.title })) {
         networks.appendChild(el(doc, 'a', { text: target.label, attrs: { href: target.href, target: '_blank', rel: 'noopener noreferrer', 'data-network': target.id } }));
       }
@@ -181,10 +192,14 @@ export async function openSharePanel({
     return null;
   }
   const ui = ensurePanel(doc, win, nav, translate, toast);
+  ui.lastOptions = { document: doc, window: win, navigator: nav, buildLink, captureSnapshot, publish, copy, toast, translate };
   ui.reset();
   ui.show();
   let snapshot = null;
-  try { snapshot = captureSnapshot ? await captureSnapshot() : null; } catch { snapshot = null; }
+  try { snapshot = captureSnapshot ? await captureSnapshot() : null; } catch (error) {
+    console.warn('[share] snapshot failed:', error?.message || error);
+    snapshot = null;
+  }
   let shortLink = null;
   if (snapshot?.jpegDataUrl) {
     shortLink = await publish({
@@ -195,6 +210,7 @@ export async function openSharePanel({
       width: snapshot.width,
       height: snapshot.height,
     });
+    if (!shortLink) console.warn('[share] short link unavailable — /api/share failed, falling back to the long link');
   }
   const session = { url: shortLink?.url || built.href, longUrl: built.href, shortLink, snapshot, copy };
   ui.render(session);

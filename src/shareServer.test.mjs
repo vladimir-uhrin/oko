@@ -23,9 +23,13 @@ test('vite.config.js: sharePlugin za keep-alive pluginom, routes /api/share (POS
   assert.match(vite, /createShareStore\(\{ dir: path\.join\(process\.cwd\(\), '\.gev-cache', 'share'\) \}\)/);
 });
 
-test('tunel: /s/ ide na dev server; statický server aj dev server povoľujú /s/ v robots.txt', () => {
+test('tunel: /s/ ide na dev server; robots.txt (statický aj dev server) púšťa crawlery na stránky, nie na /api/; koreň má predvolené OG značky', () => {
   const publish = read('../scripts/oko-publish.ps1');
   assert.match(publish, /path: \^\/\(api\|s\)\(\/\.\*\)\?\$/, 'ingress: api aj s na dev server');
   const staticServer = read('../scripts/oko-static-server.mjs');
-  assert.match(staticServer, /const ROBOTS_TXT = 'User-agent: \*\\nDisallow: \/\\nAllow: \/s\/\\n';/);
+  assert.match(staticServer, /const ROBOTS_TXT = 'User-agent: \*\\nDisallow: \/api\/\\nAllow: \/\\n';/);
+  const html = read('../index.html');
+  assert.match(html, /<meta property="og:image" content="https:\/\/oko\.uhrin\.digital\/share-default\.jpg" \/>/, 'koreň má predvolený OG obrázok (dlhý odkaz / koreň zdieľaný priamo)');
+  assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/);
+  assert.match(html, /<meta name="robots" content="noindex, nofollow, noarchive" \/>/, 'noindex ostáva — náhľad nie je indexovanie');
 });

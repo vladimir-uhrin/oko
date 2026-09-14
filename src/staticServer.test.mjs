@@ -58,7 +58,7 @@ test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, 
     assert.equal(svg.headers.get('content-type'), 'image/svg+xml');
     assert.equal(svg.headers.get('cache-control'), 'public, max-age=3600');
     const robots = await fetch(base + '/robots.txt');
-    assert.equal(await robots.text(), 'User-agent: *\nDisallow: /\nAllow: /s/\n', 'zakázané všetko okrem stránok zdieľania /s/ (náhľady sietí, 2026-09-14)');
+    assert.equal(await robots.text(), 'User-agent: *\nDisallow: /api/\nAllow: /\n', 'crawlery smú čítať stránky (náhľady sietí), nie /api/; neindexovanie drží noindex (2026-09-14)');
     assert.equal((await fetch(base + '/nope.js')).status, 404);
     assert.equal((await fetch(base + '/assets/..%2F..%2Fpackage.json')).status, 403, 'zakódovaný traversal nevedie von z dist (Forbidden)');
     const api = await fetch(base + '/api/gas/status');

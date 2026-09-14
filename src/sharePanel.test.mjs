@@ -83,6 +83,8 @@ test('bez servera: dlhý odkaz + hláška; bez snímky: hláška a bez obrázkov
   assert.deepEqual(toasts, ['share.upload-failed']);
   const ui = _getSharePanelForTest(doc);
   assert.equal(ui.note.textContent, 'share.long-link');
+  assert.equal(ui.note.className, 'oko-share-note oko-share-note-warn', 'dlhý odkaz je zvýraznený');
+  assert.equal(ui.retry.hidden, false, 'ponúkne nový pokus');
   assert.equal(ui.copyImage.hidden, true, 'bez ClipboardItem sa obrázok nekopíruje');
   assert.equal(ui.native.hidden, true, 'bez navigator.share');
   assert.equal(ui.download.hidden, false, 'snímka je → uložiť');
@@ -100,6 +102,27 @@ test('bez servera: dlhý odkaz + hláška; bez snímky: hláška a bez obrázkov
 
   assert.equal(await openSharePanel({ document: doc, window: {}, navigator: nav, translate, toast: (m) => toasts.push(m), buildLink: () => null }), null);
   assert.equal(toasts.at(-1), 'toast.copy-failed');
+});
+
+test('Skúsiť znova: po neúspechu servera zopakuje celý tok s tými istými voľbami a pri úspechu skryje tlačidlo', async () => {
+  const doc = makeDocument();
+  const nav = { clipboard: { writeText: async () => {} } };
+  let attempts = 0;
+  await openSharePanel({
+    document: doc, window: {}, navigator: nav, translate,
+    buildLink: () => ({ href: 'https://x/#lat=1&lon=2', hash: 'lat=1&lon=2' }),
+    captureSnapshot: async () => snapshot(),
+    publish: async () => { attempts += 1; return attempts >= 2 ? { id: 'B', url: 'https://x/s/B', image: null } : null; },
+  });
+  const ui = _getSharePanelForTest(doc);
+  assert.equal(ui.retry.hidden, false);
+  assert.equal(ui.urlBox.textContent, 'https://x/#lat=1&lon=2');
+  await ui.retry.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, 2);
+  assert.equal(ui.urlBox.textContent, 'https://x/s/B', 'druhý pokus dal krátky odkaz');
+  assert.equal(ui.retry.hidden, true);
+  assert.equal(ui.note.className, 'oko-share-note');
 });
 
 test('publishShareSnapshot: POST JSON na /api/share, {url} späť; chyby a odmietnutia = null', async () => {

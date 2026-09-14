@@ -23,9 +23,11 @@ const flag = (name, fallback) => { const i = args.indexOf(name); return i >= 0 &
 const PORT = Number(flag('--port', process.env.OKO_STATIC_PORT || 4174));
 const DIR = path.resolve(process.cwd(), flag('--dir', 'dist'));
 const HOST = '127.0.0.1';
-// `Allow: /s/` (2026-09-14): stránky zdieľania s náhľadom (dev server cez
-// ingress tunela) smú crawlery sietí čítať; zvyšok ostáva zakázaný.
-const ROBOTS_TXT = 'User-agent: *\nDisallow: /\nAllow: /s/\n';
+// robots.txt (2026-09-14, zdieľanie na siete): crawlery smú čítať stránky
+// (koreň s predvolenými OG značkami, /s/<id> cez ingress tunela), /api/ nie;
+// neindexovanie drží noindex v <meta> + X-Robots-Tag (zákaz v robots.txt by
+// ich crawlerom zatajil a siete by nemali z čoho spraviť náhľad).
+const ROBOTS_TXT = 'User-agent: *\nDisallow: /api/\nAllow: /\n';
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.geojson': 'application/geo+json',

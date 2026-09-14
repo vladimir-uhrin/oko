@@ -16,7 +16,7 @@ test('vite.config.js: noIndexPlugin je prvý plugin, dáva X-Robots-Tag na každ
   assert.match(vite, /function noIndexPlugin\(\)/);
   assert.match(vite, /plugins: \[\n\s+noIndexPlugin\(\),/, 'prvý v zozname, aby hlavička sadla pred proxy odpoveďami');
   assert.match(vite, /res\.setHeader\('X-Robots-Tag', 'noindex, nofollow, noarchive'\)/);
-  assert.match(vite, /const ROBOTS_TXT = 'User-agent: \*\\nDisallow: \/\\nAllow: \/s\/\\n';/, 'zakázané všetko okrem stránok zdieľania /s/ (2026-09-14)');
+  assert.match(vite, /const ROBOTS_TXT = 'User-agent: \*\\nDisallow: \/api\/\\nAllow: \/\\n';/, 'crawlery smú čítať stránky pre náhľady sietí, nie /api/; neindexovanie drží noindex meta + hlavička (2026-09-14)');
   assert.match(vite, /if \(!\/\^\\\/s\\\/\[A-Za-z0-9\]\{6,32\}\(\\\.jpg\)\?\$\/\.test\(pathname\)\) \{\n\s+res\.setHeader\('X-Robots-Tag'/, 'hlavička noindex všade okrem /s/<id>');
   assert.match(vite, /configurePreviewServer\(server\) \{ install\(server\.middlewares\); \},\n\s+\};\n\}\n\nfunction flightHistoryProxy/, 'platí pre dev aj preview server');
   assert.match(vite, /: \['localhost', '127\.0\.0\.1', '\.local', '\.uhrin\.digital'\],/, 'allowedHosts len s tunelovou doménou navyše');

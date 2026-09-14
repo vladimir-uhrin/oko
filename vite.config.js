@@ -4643,6 +4643,7 @@ function sharePlugin() {
       try {
         const record = getStore().save(checked.value);
         const origin = originFromRequest(req);
+        console.log(`[share] ${record.id} ${record.imageBytes} B → ${origin}/s/${record.id}`);
         sendJson(res, 200, { id: record.id, url: `${origin}/s/${record.id}`, image: `${origin}/s/${record.id}.jpg` });
       } catch (error) {
         console.warn('[share] save failed:', error?.message || error);
@@ -4709,10 +4710,12 @@ function originKeepAlivePlugin() {
  * @returns {import('vite').Plugin}
  */
 function noIndexPlugin() {
-  // `Allow: /s/` (2026-09-14): stránky zdieľania s náhľadom smú crawlery
-  // sietí čítať (X a LinkedIn rešpektujú robots.txt); zvyšok webu ostáva
-  // zakázaný a stránky /s/ nesú noindex v <meta>.
-  const ROBOTS_TXT = 'User-agent: *\nDisallow: /\nAllow: /s/\n';
+  // robots.txt (2026-09-14, zdieľanie na siete): crawlery SMÚ čítať stránky
+  // (koreň má predvolené Open Graph značky, /s/<id> snímku), len /api/ nie.
+  // „Neindexovať" zabezpečuje noindex v <meta> a hlavička X-Robots-Tag —
+  // zákaz v robots.txt by ich crawlerom zatajil (Google potom URL aj tak
+  // zaradí bez obsahu) a Facebook / X / LinkedIn by nemali z čoho spraviť náhľad.
+  const ROBOTS_TXT = 'User-agent: *\nDisallow: /api/\nAllow: /\n';
   function install(middlewares) {
     middlewares.use((req, res, next) => {
       const pathname = String(req.url || '').split('?')[0];
