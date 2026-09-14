@@ -21,3 +21,10 @@ test('vite.config.js: noIndexPlugin je prvý plugin, dáva X-Robots-Tag na každ
   assert.match(vite, /: \['localhost', '127\.0\.0\.1', '\.local', '\.uhrin\.digital'\],/, 'allowedHosts len s tunelovou doménou navyše');
   assert.match(vite, /host: env\.HOST \|\| 'localhost',/, 'bind zostáva localhost — tunel forwarduje lokálne');
 });
+
+test('vite.config.js: origin za tunelom drží keep-alive 120 s (headersTimeout 125 s), aby cloudflared nedostával RST → 502 (2026-09-14)', () => {
+  const vite = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
+  assert.match(vite, /function originKeepAlivePlugin\(\)/);
+  assert.match(vite, /httpServer\.keepAliveTimeout = 120_000;\n\s+httpServer\.headersTimeout = 125_000;/, 'headersTimeout > keepAliveTimeout, inak Node nový limit ignoruje');
+  assert.match(vite, /noIndexPlugin\(\),\n\s+originKeepAlivePlugin\(\),/, 'registrovaný hneď za noindex pluginom');
+});

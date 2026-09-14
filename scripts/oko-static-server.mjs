@@ -75,6 +75,13 @@ const server = http.createServer((req, res) => {
   });
 });
 
+// Origin za cloudflared drží nečinné keep-alive spojenie dlhšie než pool
+// tunela (90 s), inak ho Node zatvorí presne keď naň prichádza nová požiadavka
+// a Cloudflare vráti 502 (2026-09-14; to isté robí originKeepAlivePlugin
+// vo vite.config.js pre dev server).
+server.keepAliveTimeout = 120_000;
+server.headersTimeout = 125_000;
+
 server.listen(PORT, HOST, () => {
   console.log(`[oko-static] serving ${DIR} on http://${HOST}:${PORT}/ (noindex; /api/* is the dev server's job)`);
 });

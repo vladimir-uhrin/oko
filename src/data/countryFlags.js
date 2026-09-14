@@ -7,8 +7,9 @@
  * Prečo SVG a nie emoji: Windows nemá emoji glyfy vlajok (Segoe UI Emoji ich
  * kreslí ako dvojicu písmen) a projektové pravidlo drží ikony mimo emoji.
  * Zdroj je MIT sada flag-icons zapečená skriptom `scripts/fetch-flags.mjs`
- * do `local_data/flags/4x3/{iso2}.svg` — každá vlajka sa načíta až keď ju
- * prvá karta potrebuje a ostáva v pamäti (≈ 250 malých obrázkov max).
+ * do `public/flags/4x3/{iso2}.svg` (provenance a tabuľka štátov ostávajú
+ * v `local_data/flags/`) — každá vlajka sa načíta až keď ju prvá karta
+ * potrebuje a ostáva v pamäti (≈ 250 malých obrázkov max).
  *
  * Dva čisté helpery držia mapovanie: `normalizeIso2` (adsbdb, MID tabuľka,
  * BarentsWatch… posielajú ISO2 v rôznych veľkostiach písmen) a
@@ -25,10 +26,17 @@ export const FLAG_ASPECT = 4 / 3;
 /** Rádius orezania rohov pri kreslení do canvasu (px). */
 export const FLAG_CORNER_RADIUS_PX = 1.5;
 
-// Reťazcovo, nie `new URL('./…/', import.meta.url)`: Vite ten tvar prepíše na
-// asset URL a pri adresári zahodí koncovú lomku (naživo 2026-09-05:
-// `…/4x3gb.svg` → SPA fallback text/html → „vlajka zlyhala").
-const FLAG_DIR = `${import.meta.url.replace(/[^/]*$/, '')}local_data/flags/4x3/`;
+// Vlajky ležia v `public/flags/4x3/` (Vite „public dir": servíruje sa doslovne
+// v dev aj v produkčnom builde, bez hashovania). Dovtedy boli v local_data
+// a URL sa skladala z import.meta.url — v builde ukazovala na
+// /assets/local_data/…, ktoré neexistuje (verejná adresa 2026-09-14: 404 na
+// každú vlajku). Súbor sa vyberá až za behu podľa kódu štátu, preto public/
+// a nie bundlovaný import (Vite: dynamicky adresované súbory → public dir).
+// `new URL('./…/', import.meta.url)` nejde ani tak: Vite pri adresári zahodí
+// koncovú lomku (naživo 2026-09-05: `…/4x3gb.svg` → SPA fallback text/html).
+const VITE_ENV = import.meta.env;
+const BASE_URL = (VITE_ENV && VITE_ENV.BASE_URL) || '/';
+const FLAG_DIR = `${BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`}flags/4x3/`;
 const KNOWN = new Set(COUNTRIES.map((c) => c.code));
 
 /** Kľúč pre porovnanie mien: bez diakritiky, malé písmená, jedna medzera. */

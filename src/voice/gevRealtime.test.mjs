@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { DataLayerManager } from '../data/manager.js';
 import { controlRadio, createGevActionRunner } from './gevActions.js';
 import {
+  classifyTokenFailure,
   computeDownscale,
   renderFreshCesiumFrame,
   estimateDataUrlBytes,
@@ -26,6 +27,7 @@ import {
   readStoredVoiceLimits,
   writeStoredVoiceTier,
   writeStoredVoiceLimits,
+  voiceErrorHintKey,
 } from './gevRealtime.js';
 import { createVoiceCostTracker } from './voiceCost.js';
 
@@ -3245,4 +3247,17 @@ test('a genuinely different refused call still gets its own output', async () =>
   await controller.handleRealtimeEvent(lateToolEvent('resp_old', 'call_one'));
   await controller.handleRealtimeEvent(lateToolItemEvent('resp_old', 'call_two', 'item_two'));
   assert.deepEqual(outputs, ['call_one', 'call_two'], 'each distinct call is answered');
+});
+
+test('hlas: chýbajúci kľúč (503 „OPENAI_API_KEY is not set") a zákaz na verejnej adrese (403) dostanú vlastnú radu, ostatné chyby všeobecnú (2026-09-14)', () => {
+  assert.equal(classifyTokenFailure(503, 'OPENAI_API_KEY is not set'), 'voice-unconfigured');
+  assert.equal(classifyTokenFailure(403, 'voice_disabled_on_public_host'), 'voice-forbidden');
+  assert.equal(classifyTokenFailure(503, 'upstream overloaded'), null, '503 bez „not set" je preťaženie, nie chýbajúce nastavenie');
+  assert.equal(classifyTokenFailure(500, 'OPENAI_API_KEY is not set'), null, 'kód sa viaže na 503 z proxy');
+  assert.equal(classifyTokenFailure(undefined, null), null);
+  assert.equal(voiceErrorHintKey({ code: 'voice-unconfigured', message: 'OPENAI_API_KEY is not set' }), 'voice.error-hint-unconfigured');
+  assert.equal(voiceErrorHintKey({ code: null, message: 'OPENAI_API_KEY is not set' }), 'voice.error-hint-unconfigured', 'záznam bez kódu spozná text servera');
+  assert.equal(voiceErrorHintKey({ code: 'voice-forbidden', message: 'HTTP 403' }), 'voice.error-hint-forbidden');
+  assert.equal(voiceErrorHintKey({ code: null, message: 'ICE candidate failed' }), 'voice.error-hint');
+  assert.equal(voiceErrorHintKey(null), 'voice.error-hint');
 });

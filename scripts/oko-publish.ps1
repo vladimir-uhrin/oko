@@ -42,7 +42,9 @@ if (-not (Test-Path (Join-Path $repo 'dist\index.html'))) { throw 'dist/index.ht
 $serverScript = Join-Path $repo 'scripts\oko-static-server.mjs'
 $action = New-ScheduledTaskAction -Execute $node -Argument "`"$serverScript`" --port $StaticPort --dir dist" -WorkingDirectory $repo
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -StartWhenAvailable
+# -Priority 4 = Normal. Task Scheduler defaults to 7 (BelowNormal): with the machine busy (Docker, browser,
+# Defender) the origin got almost no CPU and /api answered in 80-100 s -> 502 through the tunnel (2026-09-14).
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -StartWhenAvailable -Priority 4
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 if (Get-ScheduledTask -TaskName $StaticTaskName -ErrorAction SilentlyContinue) {
   Stop-ScheduledTask -TaskName $StaticTaskName -ErrorAction SilentlyContinue

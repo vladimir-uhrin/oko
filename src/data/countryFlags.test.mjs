@@ -63,7 +63,7 @@ test('vlajky: resolveFlagIso2 berie prvý použiteľný kandidát (kód pred men
 });
 
 test('vlajky: URL a šírka — bundlovaný SVG súbor, pomer 4:3', () => {
-  assert.match(flagUrl('SK'), /\/local_data\/flags\/4x3\/sk\.svg$/);
+  assert.equal(flagUrl('SK'), '/flags/4x3/sk.svg', 'public/flags/4x3 — servírované doslovne v dev aj v produkčnom builde (2026-09-14: build vlajky z local_data nekopíroval → 404)');
   assert.equal(flagUrl('xx'), null);
   assert.equal(FLAG_ASPECT, 4 / 3);
   assert.equal(flagWidth(9), 12);
@@ -129,9 +129,12 @@ test('vlajky: výber ISO štátov zo sady — bez sub-národných a organizáci�
 
 test('vlajky: tripwire — sada na disku (SVG pre SK/FR/US), licencia MIT, verzia, DATA_SOURCES a kredit', () => {
   const dir = new URL('./local_data/flags/', import.meta.url);
+  // SVG súbory sú v public/ (Vite public dir), aby ostali pod rovnakým menom aj
+  // v produkčnom builde — z local_data ich build nekopíroval (2026-09-14).
+  const svgDir = new URL('../../public/flags/4x3/', import.meta.url);
   for (const code of ['sk', 'fr', 'us', 'ci', 'gb']) {
-    const file = new URL(`./4x3/${code}.svg`, dir);
-    assert.ok(existsSync(file), `${code}.svg je v bundli`);
+    const file = new URL(`./${code}.svg`, svgDir);
+    assert.ok(existsSync(file), `${code}.svg je v public/flags/4x3`);
     assert.match(readFileSync(file, 'utf8'), /^<svg /);
   }
   assert.match(readFileSync(new URL('./LICENSE', dir), 'utf8'), /MIT License/);

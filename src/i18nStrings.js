@@ -302,6 +302,8 @@ export const EN_STRINGS = Object.freeze({
   'voice.error-header': 'VOICE SYSTEM ERROR',
   'voice.error-dismiss': 'DISMISS',
   'voice.error-hint': 'Check microphone permission and network access, then try again.',
+  'voice.error-hint-unconfigured': 'Voice is not configured on this server (no OpenAI key). Your microphone and network are not the problem.',
+  'voice.error-hint-forbidden': 'Voice is switched off on this public address; it works only on the local server.',
   'voice.error-start': 'Voice session could not be started.',
 
   // ── Cockpit HUD (static + JS) ─────────────────────────────────────────────
@@ -1585,6 +1587,8 @@ export const SK_STRINGS = Object.freeze({
   'voice.error-header': 'CHYBA HLASOVÉHO SYSTÉMU',
   'voice.error-dismiss': 'ZAVRIEŤ',
   'voice.error-hint': 'Skontroluj povolenie mikrofónu a pripojenie na sieť, potom skús znova.',
+  'voice.error-hint-unconfigured': 'Hlas nie je na tomto serveri nastavený (chýba kľúč OpenAI). Mikrofón ani sieť s tým nesúvisia.',
+  'voice.error-hint-forbidden': 'Hlas je na tejto verejnej adrese vypnutý, funguje len na lokálnom serveri.',
   'voice.error-start': 'Hlasovú reláciu sa nepodarilo spustiť.',
 
   // ── Kokpit HUD ────────────────────────────────────────────────────────────

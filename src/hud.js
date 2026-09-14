@@ -20,6 +20,7 @@ import { CITY_POIS } from './locations.js';
 import { composeLocalityTag } from './hudLocality.js';
 import { ellipsoidalToMslDisplayM, ensureGeoidReady, geoidHeight } from './data/geoid.js';
 import { getBasemapLabelContext } from './voice/gevActions.js';
+import { classifySummaryFailure } from './hudSummaryPolicy.js';
 
 /** Color palettes keyed by shader mode; applied as CSS custom properties. */
 const HUD_COLORS = {
@@ -79,6 +80,9 @@ export class IntelHUD {
     this._timestampInterval = null;
     this._summaryInterval = null;
     this._summaryTypingInterval = null;
+    // Dôvod, prečo server AI súhrn nevydá (bez kľúča OpenAI / zakázaný na tejto
+    // adrese): po prvej takej odpovedi sa už do konca relácie nepýta.
+    this._summaryDisabled = null;
     this._latestMetrics = null;
     this._dataManager = null;
     this._dataManagerUnsubscribe = null;
@@ -625,6 +629,10 @@ export class IntelHUD {
       this._setSummaryText(fallbackText, animate);
       return;
     }
+    if (this._summaryDisabled) {
+      this._setSummaryText(fallbackText, animate);
+      return;
+    }
     if (!force && !this._summaryDirty) return;
 
     const revision = this._summaryRevision;
@@ -666,8 +674,23 @@ export class IntelHUD {
         signal: controller.signal,
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.summary) {
-        throw new Error(data?.error || `HTTP ${response.status}`);
+      if (!response.ok) {
+        const reason = typeof data?.error === 'string'
+          ? data.error
+          : (data?.error?.message || `HTTP ${response.status}`);
+        if (classifySummaryFailure({ status: response.status, error: data?.error }) === 'disabled') {
+          // Trvalý stav servera (bez kľúča OpenAI, alebo súhrn na tejto adrese
+          // zakázaný): ďalšie tiky by len plnili konzolu a tunel — do konca
+          // relácie ostáva lokálny súhrn zo scény (2026-09-14, verejná adresa).
+          this._summaryDisabled = reason;
+          console.info(`[HUD] AI summary off for this session: ${reason}`);
+          this._setSummaryText(fallbackText, animate);
+          return;
+        }
+        throw new Error(reason);
+      }
+      if (!data?.summary) {
+        throw new Error((typeof data?.error === 'string' && data.error) || `HTTP ${response.status}`);
       }
       if (revision !== this._summaryRevision) return;
       this._setSummaryText(data.summary, animate);

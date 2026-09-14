@@ -1701,6 +1701,9 @@ export class GevRealtimeController {
     console.error('[GEV Realtime]', record);
     this.debugLog('error', record);
     this.setStatus('error', formatErrorForDisplay(record));
+    // Rada pod chybou podľa príčiny: chýbajúci kľúč na serveri nie je vec
+    // mikrofónu ani siete (2026-09-14, verejná adresa).
+    if (this.ui.errorHint) this.ui.errorHint.textContent = t(voiceErrorHintKey(record));
     return record;
   }
 
@@ -2314,6 +2317,35 @@ function isNearlyBlackFrame(ctx, width, height) {
  * point a tier at any model id. The caller prices against the returned id, not
  * against its own tier assumption.
  */
+/**
+ * Prečo server nevydal hlasový token (2026-09-14, verejná adresa): odlíši
+ * „hlas nie je nastavený" (503 bez OPENAI_API_KEY) a „na tejto adrese vypnutý"
+ * (403) od bežných chýb, aby rada pod chybou neposielala používateľa
+ * kontrolovať mikrofón a sieť. Pure.
+ * @param {number|null|undefined} status HTTP stav odpovede /api/realtime/token
+ * @param {string|null|undefined} reason text chyby zo servera
+ * @returns {'voice-unconfigured'|'voice-forbidden'|null}
+ */
+export function classifyTokenFailure(status, reason) {
+  if (status === 503 && /OPENAI_API_KEY is not set|not configured/i.test(String(reason || ''))) return 'voice-unconfigured';
+  if (status === 403) return 'voice-forbidden';
+  return null;
+}
+
+/**
+ * i18n kľúč rady pod chybou hlasu podľa záznamu chyby (kód z tokenu má
+ * prednosť, text servera je záloha pre záznamy bez kódu). Pure.
+ * @param {{ code?: string|null, message?: string|null }|null} record
+ * @returns {'voice.error-hint'|'voice.error-hint-unconfigured'|'voice.error-hint-forbidden'}
+ */
+export function voiceErrorHintKey(record) {
+  const code = record?.code
+    || (/OPENAI_API_KEY is not set/i.test(String(record?.message || '')) ? 'voice-unconfigured' : null);
+  if (code === 'voice-unconfigured') return 'voice.error-hint-unconfigured';
+  if (code === 'voice-forbidden') return 'voice.error-hint-forbidden';
+  return 'voice.error-hint';
+}
+
 async function fetchRealtimeToken(tier = DEFAULT_VOICE_TIER) {
   const url = `${TOKEN_URL}?tier=${encodeURIComponent(resolveVoiceModel(tier).tier)}`;
   const response = await fetch(url, { cache: 'no-store' });
@@ -2331,7 +2363,10 @@ async function fetchRealtimeToken(tier = DEFAULT_VOICE_TIER) {
     const reason = typeof data?.error === 'string'
       ? data.error
       : data?.error?.message;
-    throw new Error(reason || `Realtime token failed: HTTP ${response.status}`);
+    const failure = new Error(reason || `Realtime token failed: HTTP ${response.status}`);
+    failure.status = response.status;
+    failure.code = classifyTokenFailure(response.status, reason);
+    throw failure;
   }
   const token = data?.value || data?.client_secret?.value || data?.client_secret;
   if (!token) throw new Error('Realtime token response did not include a client secret');
@@ -2398,6 +2433,7 @@ function createErrorRecord(source, error, extra = {}) {
     timestamp: new Date().toISOString(),
     source,
     name: rtcError?.name || null,
+    code: rtcError?.code || null,
     message: rtcError?.message || extra.errorText || String(error?.message || '').trim() || 'No browser error message supplied',
     errorDetail: rtcError?.errorDetail || null,
     sctpCauseCode: rtcError?.sctpCauseCode ?? null,
@@ -2607,6 +2643,7 @@ function createVoiceControl({ reset = false } = {}) {
     detail: root.querySelector('#gev-voice-detail'),
     helpDetail: root.querySelector('.gev-voice-help-detail'),
     errorDetail: root.querySelector('#gev-voice-error-detail'),
+    errorHint: root.querySelector('.gev-voice-error-hint'),
     tierButton: root.querySelector('#gev-voice-tier'),
     costValue: root.querySelector('#gev-voice-cost-value'),
   };

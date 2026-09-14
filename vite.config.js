@@ -4593,6 +4593,31 @@ function gasProxy() {
 }
 
 /**
+ * Dlhšie keep-alive pre origin za cloudflared (2026-09-14, verejná adresa:
+ * v konzole občas `502` na /api a v logu tunela „connection was forcibly
+ * closed by the remote host" — šesť naraz, vždy len na 4173). Node zatvára
+ * nečinné keep-alive spojenie po 5 s; tunel si ho drží v poole 90 s, a keď
+ * dev server na chvíľu zablokuje event loop (SQLite história, veľký JSON),
+ * časovač vyprší presne vo chvíli, keď na spojení už čaká nová požiadavka →
+ * RST → 502. Origin za proxy má držať spojenie dlhšie než proxy: 120 s
+ * (headersTimeout musí byť väčší než keepAliveTimeout, inak ho Node ignoruje).
+ * Rovnaké hodnoty má scripts/oko-static-server.mjs.
+ * @returns {import('vite').Plugin}
+ */
+function originKeepAlivePlugin() {
+  function apply(httpServer) {
+    if (!httpServer) return;
+    httpServer.keepAliveTimeout = 120_000;
+    httpServer.headersTimeout = 125_000;
+  }
+  return {
+    name: 'oko-origin-keepalive',
+    configureServer(server) { apply(server.httpServer); },
+    configurePreviewServer(server) { apply(server.httpServer); },
+  };
+}
+
+/**
  * Verejný tunel (2026-09-13, používateľ: „daj mi to pod doménu uhrin.digital
  * cez CF tunel, ale SEO noindex"): každá odpoveď dev aj preview servera nesie
  * `X-Robots-Tag: noindex, nofollow, noarchive` a `/robots.txt` zakazuje všetko
@@ -9672,6 +9697,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       noIndexPlugin(),
+      originKeepAlivePlugin(),
       flightHistoryProxy(),
       cesium(),
       openSkyProxy(),

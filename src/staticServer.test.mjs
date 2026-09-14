@@ -72,3 +72,8 @@ test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, 
     child.kill();
   }
 });
+
+test('oko-static-server: keep-alive dlhšie než pool cloudflared (120 s), headersTimeout väčší (2026-09-14)', () => {
+  const src = readFileSync(SCRIPT, 'utf8');
+  assert.match(src, /server\.keepAliveTimeout = 120_000;\n\s*server\.headersTimeout = 125_000;/);
+});

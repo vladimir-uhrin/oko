@@ -3,7 +3,7 @@
 ## Provenance
 - **Source:** [flag-icons](https://github.com/lipis/flag-icons) by Panayiotis Lipiridis and contributors, npm package `flag-icons@7.5.0` (integrity via the npm registry tarball).
 - **License:** **MIT** (`LICENSE` copied here). Attribution is not required by MIT but is given in the Data attribution popover.
-- **What is kept:** the 249 ISO 3166-1 flags in 4:3 (`flags/4x3/*.svg`) and the code→name table from `country.json` (as `countries.js`). Sub-national and organisation flags are not bundled — cards flag STATES only.
+- **What is kept:** the 249 ISO 3166-1 flags in 4:3 (`public/flags/4x3/*.svg` — Vite public dir, served verbatim in dev and in the production build; moved there 2026-09-14 because the build did not copy them from here, provenance stays in this folder) and the code→name table from `country.json` (as `countries.js`). Sub-national and organisation flags are not bundled — cards flag STATES only.
 
 ## Build
 - **Built:** 2026-09-05 by `scripts/fetch-flags.mjs`; 1599 KB of SVG, lazy-loaded one file at a time by `src/data/countryFlags.js`.

@@ -24,9 +24,11 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
   -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`"" `
   -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+# -Priority 4 = Normal. Plánovač dáva úlohám predvolene prioritu 7 (BelowNormal): pri vyťaženom stroji
+# (Docker, prehliadač, Defender) dev server nedostával CPU a /api odpovedalo 80-100 s -> 502 cez tunel (2026-09-14).
 $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit (New-TimeSpan -Days 3650) -MultipleInstances IgnoreNew -StartWhenAvailable `
-  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Priority 4
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 8
