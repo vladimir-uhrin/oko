@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import {
   ENVIRONMENTAL_LABEL_CHOICE,
   EXCLUSIVE_SURFACE_CLASSES,
+  FIRST_RUN_AUTO_SHOW,
   FIRST_RUN_MISSIONS,
   FIRST_RUN_SESSION_KEY,
   FIRST_RUN_STORAGE_KEY,
@@ -34,12 +35,13 @@ const fresh = () => ({
 
 // ── Show policy ──────────────────────────────────────────────────────────────
 
-test('a fresh session receives the launcher, and keeps receiving it', () => {
-  assert.equal(shouldShowFirstRun(fresh()), true);
-  // Not one-shot: a previous session's completion does not suppress a new one.
+test('karta prvého spustenia sa pri načítaní sama neukazuje (2026-09-14, opt-in); ?welcome=1 ju stále vyvolá', () => {
+  assert.equal(FIRST_RUN_AUTO_SHOW, false, 'používateľ: „neviem, načo je to" — karta je len na vyžiadanie');
+  assert.equal(shouldShowFirstRun(fresh()), false, 'čerstvá relácia bez kartičky');
   const returning = fresh();
   returning.sessionStorageRef = memoryStorage(FIRST_RUN_SESSION_KEY);
-  assert.equal(shouldShowFirstRun(returning), true);
+  assert.equal(shouldShowFirstRun(returning), false, 'ani ďalšia relácia');
+  assert.equal(shouldShowFirstRun({ ...fresh(), location: { search: '?welcome=1' } }), true, 'demo/podpora: ?welcome=1');
 });
 
 test('dismissal is session-scoped; only the checkbox suppresses durably', () => {
@@ -50,12 +52,14 @@ test('dismissal is session-scoped; only the checkbox suppresses durably', () => 
   assert.equal(session.read(), 'dismissed');
   // Gone for THIS session...
   assert.equal(shouldShowFirstRun({ storage, sessionStorageRef: session, location: { search: '' } }), false);
-  // ...and back in the next one, because sessionStorage did not survive it.
+  // ...and the session flag alone would let it back next session — but since
+  // 2026-09-14 the launcher is opt-in, so it stays hidden there too (the
+  // session flag still matters for the `?welcome=1` replay flow below).
   assert.equal(shouldShowFirstRun({
     storage,
     sessionStorageRef: memoryStorage(FIRST_RUN_SESSION_KEY),
     location: { search: '' },
-  }), true);
+  }), false);
   // Session dismissal must never have written the durable key.
   assert.equal(storage.read(), null);
 });
@@ -70,22 +74,25 @@ test('the checkbox writes and clears durable suppression, and a storage reset un
     location: { search: '' },
   }), false);
 
-  // Unticking before dismissing takes the suppression back.
+  // Unticking before dismissing takes the suppression back (the durable key is
+  // cleared) — but since 2026-09-14 the launcher is opt-in, so an ordinary
+  // load still stays without it.
   setFirstRunSuppressed(false, storage);
   assert.equal(storage.read(), null);
   assert.equal(shouldShowFirstRun({
     storage,
     sessionStorageRef: memoryStorage(FIRST_RUN_SESSION_KEY),
     location: { search: '' },
-  }), true);
+  }), false);
 
-  // A cleared/hard-reset profile shows it again — an accepted, documented cost.
+  // A cleared/hard-reset profile: the durable flag is gone, the opt-in policy
+  // still keeps the launcher hidden on an ordinary load.
   setFirstRunSuppressed(true, storage);
   assert.equal(shouldShowFirstRun({
     storage: memoryStorage(FIRST_RUN_STORAGE_KEY),
     sessionStorageRef: memoryStorage(FIRST_RUN_SESSION_KEY),
     location: { search: '' },
-  }), true);
+  }), false);
 });
 
 test('welcome params work in both directions and outrank both suppressions', () => {
@@ -113,7 +120,9 @@ test('privacy-restricted storage fails open and every write stays best-effort', 
     setItem: () => { throw new Error('blocked'); },
     removeItem: () => { throw new Error('blocked'); },
   };
-  assert.equal(shouldShowFirstRun({ storage: blocked, sessionStorageRef: blocked }), true);
+  // Opt-in policy (2026-09-14): the replay hatch is the path that must fail open.
+  assert.equal(shouldShowFirstRun({ storage: blocked, sessionStorageRef: blocked, location: { search: '?welcome=1' } }), true);
+  assert.equal(shouldShowFirstRun({ storage: blocked, sessionStorageRef: blocked, location: { search: '' } }), false);
   assert.doesNotThrow(() => setFirstRunSuppressed(true, blocked));
   assert.doesNotThrow(() => rememberFirstRunSessionDismissed(blocked));
 });
@@ -139,9 +148,9 @@ test('a THROWING storage getter still fails open — Safari private mode', () =>
       'a hostile storage getter must not escape shouldShowFirstRun',
     );
     assert.equal(
-      shouldShowFirstRun({ location: { search: '' } }),
+      shouldShowFirstRun({ location: { search: '?welcome=1' } }),
       true,
-      'a visitor whose storage throws must still SEE the launcher',
+      'a visitor whose storage throws must still SEE the launcher when replaying it (?welcome=1; ordinary loads are opt-out since 2026-09-14)',
     );
     assert.doesNotThrow(() => setFirstRunSuppressed(true));
     assert.doesNotThrow(() => setFirstRunSuppressed(false));

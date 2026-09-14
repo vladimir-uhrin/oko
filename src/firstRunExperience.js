@@ -21,7 +21,17 @@ import { t } from './i18n.js';
 //
 // Choosing a mission is deliberately NOT durable suppression: picking a mission
 // is enthusiasm, not "never show me this again".
+//
+// 2026-09-14 (používateľ na verejnej adrese: „toto úplne zruš alebo to daj
+// hidden, aby sa to pri načítaní neobjavovalo — neviem, načo je to"): karta sa
+// pri načítaní SAMA NEUKAZUJE (FIRST_RUN_AUTO_SHOW = false). Modul ostáva pre
+// `?welcome=1` (demo, podpora); pravidlá vyššie platia len v tom režime.
 
+/**
+ * Automatické zobrazenie pri načítaní. Od 2026-09-14 vypnuté: používateľ kartu
+ * nechcel („neviem, načo je to"); zobrazí sa len na vyžiadanie cez `?welcome=1`.
+ */
+export const FIRST_RUN_AUTO_SHOW = false;
 /** Durable suppression. Written ONLY by the "Don't show this again" checkbox. */
 export const FIRST_RUN_STORAGE_KEY = 'gev:first-run-mission:v1';
 /** Per-session dismissal. Written by every close path; scoped to sessionStorage. */
@@ -233,6 +243,8 @@ export function shouldShowFirstRun({
   if (params.get('welcome') === '0') return false;
   // The demo/support escape hatch outranks both suppressions on purpose.
   if (params.get('welcome') === '1') return true;
+  // Bez výslovného `?welcome=1` sa karta neukazuje (2026-09-14).
+  if (!FIRST_RUN_AUTO_SHOW) return false;
   if (readStored('local', storage, FIRST_RUN_STORAGE_KEY) === 'suppressed') return false;
   if (readStored('session', sessionStorageRef, FIRST_RUN_SESSION_KEY) === 'dismissed') return false;
   return true;

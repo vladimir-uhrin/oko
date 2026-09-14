@@ -25,6 +25,8 @@ export const COARSE_PICK_BOX_PX = 18;
 export const DEFAULT_APPBAR_HEIGHT_PX = 58;
 /** Medzera medzi lištou a dokom. */
 export const DOCK_LIFT_GAP_PX = 8;
+/** Výška zbaleného doku (záloha, keď sa nedá zmerať). */
+export const DEFAULT_DOCK_HEIGHT_PX = 62;
 
 /**
  * Sekcie spodnej lišty. `panelIds` sa presunú do výsuvu v tomto poradí,
@@ -259,6 +261,14 @@ export function createMobileShell({
     }
     const dock = doc.getElementById?.('command-dock');
     if (dock?.style) dock.style.bottom = lift > 0 ? `${lift}px` : '';
+    // Kredity Cesium/Google (vľavo dole) nad dok, nie cez neho: na 827 px
+    // ležali v jednom páse s dokom a text „Upgrade for commercial…" mizol
+    // pod lištou Poloha (používateľ: „toto sa prekrýva").
+    const credits = doc.getElementById?.('cesium-credits');
+    if (credits?.style) {
+      const dockHeight = Number(dock?.offsetHeight) || DEFAULT_DOCK_HEIGHT_PX;
+      credits.style.bottom = lift > 0 ? `${lift + dockHeight + DOCK_LIFT_GAP_PX}px` : '';
+    }
     if (!mode.mobile && active) close();
     try { suppressLane?.('ambient-card', mode.mobile); } catch { /* overlay host nie je pripravený */ }
     return mode;

@@ -10886,10 +10886,17 @@ body.oko-mobile #lang-switch { top: 14px; right: 12px; }
 body.oko-mobile #lang-switch button { min-width: 30px; min-height: 30px; }
 
 /* --- dok, toast, kokpit nad spodnou lištou ------------------------------ */
-/* Zdvih doku nad lištu nastavuje mobileShell.js inline (style.bottom): dok je
-   prvok modelovaný v creditAttribution.test.mjs a ten pozná len desktopové
-   selektory; výsuv, toast a kokpit sa dvíhajú cez --oko-dock-lift nižšie. */
+/* Zdvih doku a kreditov Cesium nad lištu nastavuje mobileShell.js inline
+   (style.bottom): oba sú prvky modelované v creditAttribution.test.mjs a ten
+   pozná len desktopové selektory; výsuv, toast a kokpit sa dvíhajú cez
+   --oko-dock-lift nižšie. */
 body.oko-mobile.oko-sheet-open #command-dock { visibility: hidden; pointer-events: none; }
+/* Lišty doku na mobile len s ikonou: text „Poloha" / „Vizuálne predvoľby"
+   pretekal spod hlasovej pilulky (827 px: názov 160 px v 68 px lište). */
+body.oko-mobile #command-dock .panel-title > span:not(.dock-label-icon),
+body.oko-mobile #command-dock .location-toolbar-label > span:not(.dock-label-icon) { display: none !important; }
+body.oko-mobile #command-dock .panel-title,
+body.oko-mobile #command-dock .location-toolbar-label { gap: 0; }
 body.oko-mobile #toast { bottom: calc(var(--oko-dock-lift) + 76px); }
 body.oko-mobile #view-switcher { bottom: calc(var(--oko-dock-lift) + 4px); }
 body.oko-mobile #cockpit-entry { bottom: calc(var(--oko-dock-lift) + 76px); }

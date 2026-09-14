@@ -77,6 +77,7 @@ function buildDom() {
   const dock = add(body, 'div', 'command-dock');
   add(dock, 'div', 'location-bar', 'panel-collapsible collapsed');
   add(dock, 'input', 'location-search');
+  add(body, 'div', 'cesium-credits');
   const appbar = add(body, 'nav', 'oko-appbar');
   appbar.hidden = true;
   for (const section of MOBILE_SECTIONS) {
@@ -190,6 +191,7 @@ test('plášť: desktop nič nemení; na telefóne skryje stĺpce a otvorí sekc
   assert.equal(appbar.hidden, false);
   assert.deepEqual(suppressed.at(-1), ['ambient-card', true], 'ambientné karty na mobile vypnuté');
   assert.equal(byId.get('command-dock').style.bottom, '66px', 'dok zdvihnutý inline nad lištu (58 + 8, bez zmeranej výšky)');
+  assert.equal(byId.get('cesium-credits').style.bottom, '136px', 'kredity nad dokom (66 + 62 + 8), nie v jeho páse');
   assert.equal(doc.documentElement.style.props['--oko-dock-lift'], '66px', 'výsuv/toast dvíha premenná');
 
   const dataPanel = byId.get('data-panel');
@@ -277,6 +279,7 @@ test('plášť: naležato = zásuvka; návrat na desktop otvorený výsuv zatvor
   assert.equal(byId.get('scene-panel').parentNode, leftStack, 'panel späť v stĺpci');
   assert.equal(appbar.hidden, true);
   assert.equal(byId.get('command-dock').style.bottom, '', 'desktop: inline zdvih doku zmazaný');
+  assert.equal(byId.get('cesium-credits').style.bottom, '', 'desktop: kredity späť na CSS');
   assert.equal(doc.documentElement.style.props['--oko-dock-lift'], undefined, 'premenná odstránená');
 });
 
