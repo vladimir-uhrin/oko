@@ -103,6 +103,14 @@ export const DATA_CREDITS = [
       '<a href="https://aisstream.io" target="_blank" rel="noopener">AISStream.io</a>',
   },
   {
+    key: 'aishub',
+    html:
+      'Delayed vessels (AIS, ~1–6 min): ' +
+      '<a href="https://openwaters.io/ais/" target="_blank" rel="noopener">Open Waters AIS (aiscast)</a> ' +
+      'aggregating <a href="https://www.aishub.net" target="_blank" rel="noopener">AISHub</a> and other feeds; ' +
+      'per-source attribution shown in the layer row, non-commercial use',
+  },
+  {
     key: 'mids',
     html:
       'Vessel flag decoding (MID table): ' +

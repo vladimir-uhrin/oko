@@ -18,6 +18,7 @@ import radioLayer from './data/radio.js';
 import bikeshareLayer from './data/bikeshare.js';
 import aisLiveVesselsLayer from './data/aisLiveVessels.js';
 import gfwPresenceLayer from './data/gfwPresence.js';
+import { createAishubVesselsLayer } from './data/aishubVessels.js';
 import gfwSarDetectionsLayer from './data/gfwSarDetections.js';
 import gasFlowsLayer from './data/gasFlowsLayer.js';
 import gasPipelinesLayer from './data/gasPipelinesLayer.js';
@@ -349,6 +350,11 @@ async function init() {
     // Satelitné AIS · oneskorené (GFW, 2026-09-12) — riadok hneď pod živými loďami.
     dataManager.register(gfwPresenceLayer);
     dataManager.register(gfwSarDetectionsLayer);
+    // Lode · oneskorené (AISHub cez aiscast, 2026-09-15): druhý zdroj tam, kde
+    // živý aisstream nevidí nič. Dedup: MMSI, ktoré už vidí živá vrstva, vyhráva.
+    dataManager.register(createAishubVesselsLayer({
+      isLive: (mmsi) => aisLiveVesselsLayer.hasContact(mmsi),
+    }));
     // Toky plynu (2026-09-13, etapa 4 modulu PLYN): hraničné stanice z ENTSOG
     // ako body s popisom, z tej istej proxy ako karta TOKY v paneli.
     dataManager.register(gasFlowsLayer);

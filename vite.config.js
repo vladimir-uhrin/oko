@@ -30,6 +30,14 @@ import fs from 'node:fs';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
 import {
+  AISHUB_MAX_AREA_SQ_DEG,
+  AISHUB_USER_AGENT,
+  aishubBboxError,
+  aishubUpstreamBbox,
+  normalizeAishubCollection,
+  parseAishubBbox,
+} from './src/data/aishubVesselsCore.js';
+import {
   SHARE_BODY_MAX_BYTES,
   clientKeyFromRequest,
   createShareStore,
@@ -1869,6 +1877,109 @@ function rocketLaunchesProxy() {
  * neznesie súbežné reporty na jeden token, naživo 2026-09-13 pri AIS + SAR).
  * @returns {import('vite').Plugin}
  */
+/**
+ * AISHub cez aiscast (openwaters.io) — druhý, ONESKORENÝ zdroj lodí tam, kde
+ * živý aisstream nevidí nič (Hormuz, Singapur, Mexický záliv…), 2026-09-15.
+ * Zadanie: docs/drafts/ais-aishub-druhy-zdroj-zadanie.md.
+ *
+ * GET /api/aiscast/vessels?bbox=west,south,east,north
+ *   → aiscast GET https://ais.openwaters.io/v1/vessels?bbox=south,west,north,east
+ * Bez tokenu (čítanie je verejné, CORS otvorené) — do .env nič nepribúda.
+ * Plocha > ~90 sq° sa odmietne (anonym strop aiscastu je ~100 sq°). Cache 60 s
+ * na bbox v pamäti, in-flight dedupe, per-IP limit (ich strop je 120/min),
+ * poctivý User-Agent. Živý aisstream stream OKO sa NEmení — toto je len HTTP
+ * snímka výrezu.
+ * @returns {import('vite').Plugin}
+ */
+function aiscastVesselsProxy() {
+  const UPSTREAM = 'https://ais.openwaters.io/v1/vessels';
+  const TTL_MS = 60_000;
+  const TIMEOUT_MS = 20_000;
+  const MAX_RESPONSE_BYTES = 24 * 1024 * 1024; // rušný prieliv ≈ 1 600 lodí
+  const MEM_MAX = 96;
+  // Ich limit je 120 req/min na adresu; držíme sa hlboko pod ním.
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 40, globalMax: 90 });
+  /** @type {Map<string,{at:number,body:string}>} */
+  const mem = new Map();
+  const inFlight = new Map();
+
+  function remember(key, entry) {
+    mem.set(key, entry);
+    if (mem.size > MEM_MAX) { const oldest = mem.keys().next().value; if (oldest !== undefined) mem.delete(oldest); }
+  }
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Cache-Control': status === 200 ? 'public, max-age=45' : 'no-store',
+      'X-GEV-Cache': cacheState,
+    });
+    res.end(body);
+  }
+
+  async function fetchUpstream(bbox) {
+    const upstream = await fetch(`${UPSTREAM}?bbox=${encodeURIComponent(aishubUpstreamBbox(bbox))}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { Accept: 'application/geo+json, application/json', 'User-Agent': AISHUB_USER_AGENT },
+    });
+    if (!upstream.ok) {
+      const detail = await readResponseTextCapped(upstream, 4 * 1024).catch(() => '');
+      const error = new Error(`aiscast HTTP ${upstream.status}${detail ? ` — ${detail.slice(0, 120)}` : ''}`);
+      error.upstreamStatus = upstream.status;
+      throw error;
+    }
+    const json = JSON.parse(await readResponseTextCapped(upstream, MAX_RESPONSE_BYTES));
+    const { rows, attribution, counts } = normalizeAishubCollection(json);
+    return {
+      at: Date.now(),
+      body: JSON.stringify({
+        rows,
+        meta: {
+          source: 'AISHub via Open Waters AIS (aiscast)',
+          delayed: true,
+          attribution,
+          counts,
+          bbox,
+          fetchedAt: Date.now(),
+        },
+      }),
+    };
+  }
+
+  function install(middlewares) {
+    middlewares.use('/api/aiscast/vessels', async (req, res) => {
+      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'method_not_allowed' }), 'NONE'); return; }
+      const url = new URL(req.url || '/', 'http://localhost');
+      const bbox = parseAishubBbox(url.searchParams.get('bbox'));
+      const problem = aishubBboxError(bbox, AISHUB_MAX_AREA_SQ_DEG);
+      if (problem) { send(res, 400, JSON.stringify({ error: 'bad_bbox', detail: problem }), 'NONE'); return; }
+      const key = `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`;
+      const now = Date.now();
+      const cached = mem.get(key) || null;
+      if (cached && now - cached.at < TTL_MS) { send(res, 200, cached.body, 'HIT'); return; }
+      if (!limiter(clientKey(req))) {
+        if (cached) { send(res, 200, cached.body, 'STALE-RATELIMIT'); return; }
+        send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+      }
+      const request = coalesceProxyRequest(inFlight, key, () => fetchUpstream(bbox));
+      try {
+        const fresh = await request.promise;
+        remember(key, fresh);
+        send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch (error) {
+        if (cached) { send(res, 200, cached.body, 'STALE-ERROR'); return; }
+        const status = Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : 502;
+        send(res, status, JSON.stringify({ error: 'upstream', detail: error?.message || 'aiscast unavailable' }), 'NONE');
+      }
+    });
+  }
+
+  return {
+    name: 'oko-aiscast-vessels',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function gfwPresenceProxy() {
   const TTL_MS = 6 * 60 * 60_000;
   const STALE_MAX_MS = 48 * 60 * 60_000;
@@ -9829,6 +9940,7 @@ export default defineConfig(({ mode }) => {
       gbfsProxy(),
       adsbLolProxy(),
       aisLiveProxy(),
+      aiscastVesselsProxy(),
       gfwPresenceProxy(),
       logoProxy(),
       gasProxy(),

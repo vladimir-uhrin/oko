@@ -180,8 +180,8 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   // 2026-09-13 — fyzické toky za plynárenský deň, predbežné D−1; nie živé).
   // 34 → 35: plynovody EÚ + bývalý ZSSR (OSM snímok, token '0', 2026-09-13 —
   // statický snímok tranzitných plynovodov s dátumom; nie živé).
-  assert.equal(REGISTERED_LAYER_IDS.length, 35);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 35);
+  assert.equal(REGISTERED_LAYER_IDS.length, 36);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 36);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),
@@ -260,8 +260,11 @@ test('v2 codec distinguishes absent from empty and keeps canonical deterministic
 });
 
 test('unknown enabled-layer tokens reject the payload instead of becoming an empty set', () => {
-  assert.equal(decodeLayerStateParams(new URLSearchParams('v=2&l=z')), null);
-  assert.equal(decodeLayerStateParams(new URLSearchParams('v=2&l=c.z')), null);
+  // Od 2026-09-15 je celá abeceda [a-z0-9] obsadená (36 vrstiev, aishub-vessels
+  // vzal posledný token 'z'), preto „neznámy token" musí byť MIMO gramatiky —
+  // veľké písmeno, ktoré kodér nikdy nevydá.
+  assert.equal(decodeLayerStateParams(new URLSearchParams('v=2&l=Z')), null);
+  assert.equal(decodeLayerStateParams(new URLSearchParams('v=2&l=c.Z')), null);
 });
 
 test('unknown and forbidden option fields are ignored while missing options use codec defaults', () => {
