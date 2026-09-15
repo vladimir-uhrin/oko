@@ -19,6 +19,8 @@ import {
   formatClockUtc,
   formatDuration,
   legTitle,
+  looksLikeRegistration,
+  resolveRegistrationHex,
   searchFlightHistory,
   trackSummary,
 } from './data/flightHistory.js';
@@ -88,7 +90,7 @@ export function installHistoryPanel({
   viewer,
   doc = globalThis.document,
   t,
-  api = { search: searchFlightHistory, track: fetchFlightTrack, status: fetchHistoryStatus },
+  api = { search: searchFlightHistory, track: fetchFlightTrack, status: fetchHistoryStatus, resolveReg: resolveRegistrationHex },
   replayFactory = createFlightReplay,
   onTrackLive = null,
   setCollapsed = null,
@@ -229,11 +231,30 @@ export function installHistoryPanel({
     const token = ++searchToken;
     status.textContent = t('history.searching');
     try {
-      const found = await api.search(input.value, { hours: Number(hours.value) || 24 });
+      // Značka (OM-BYK) sa najprv preloží na hex cez adsbdb, potom hľadá
+      // v histórii podľa hexu — recorder značky neukladá (2026-09-15).
+      const raw = String(input.value || '').trim();
+      let query = raw;
+      let regHint = '';
+      if (looksLikeRegistration(raw) && typeof api.resolveReg === 'function') {
+        const resolved = await api.resolveReg(raw);
+        if (token !== searchToken) return;
+        if (resolved?.hex) {
+          query = resolved.hex;
+          regHint = t('history.resolved-reg', { reg: resolved.registration || raw.toUpperCase(), hex: resolved.hex.toUpperCase() });
+        } else {
+          legs = [];
+          renderList();
+          status.textContent = t('history.reg-not-found', { reg: raw.toUpperCase() });
+          return;
+        }
+      }
+      const found = await api.search(query, { hours: Number(hours.value) || 24 });
       if (token !== searchToken) return;
       legs = found;
       renderList();
-      status.textContent = t('history.results', { n: legs.length });
+      const results = t('history.results', { n: legs.length });
+      status.textContent = regHint ? `${regHint} · ${results}` : results;
     } catch {
       if (token !== searchToken) return;
       legs = [];

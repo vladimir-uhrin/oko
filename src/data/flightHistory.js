@@ -188,6 +188,41 @@ export async function fetchHistoryStatus({ fetcher = globalThis.fetch } = {}) {
 }
 
 /**
+ * Vyzerá dopyt ako evidenčná značka (OM-BYK, N123AB, D-AISP)? Pure.
+ * Značka má písmeno a buď pomlčku, alebo tvar prefix+koncovka, a NIE je to
+ * čistý 6-znakový hex (ten je priamo id stroja) — vtedy ju treba najprv
+ * preložiť na hex cez adsbdb (2026-09-15, „dohľadať flotilu podľa značky").
+ * @param {string} query
+ * @returns {boolean}
+ */
+export function looksLikeRegistration(query) {
+  const q = String(query ?? '').trim().toUpperCase();
+  if (!q || /^[0-9A-F]{6}$/.test(q)) return false; // hex = priame id, nie značka
+  if (/-/.test(q) && /[A-Z]/.test(q) && /^[A-Z0-9-]{3,10}$/.test(q)) return true; // OM-BYK, D-AISP…
+  if (/^N[0-9]{1,5}[A-Z]{0,2}$/.test(q)) return true; // US N-číslo bez pomlčky
+  return false;
+}
+
+/**
+ * Značka → ICAO hex cez `/api/adsbdb/reg/<značka>`. Null, keď adsbdb stroj
+ * nepozná alebo pri chybe. Pure nad `fetcher`.
+ * @param {string} registration
+ * @param {{fetcher?: Function}} [options]
+ * @returns {Promise<{hex: string, registration: string|null, typeCode: string|null}|null>}
+ */
+export async function resolveRegistrationHex(registration, { fetcher = globalThis.fetch } = {}) {
+  const reg = String(registration ?? '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  if (!reg) return null;
+  try {
+    const data = await getJson(`/api/adsbdb/reg/${encodeURIComponent(reg)}`, fetcher);
+    const hex = typeof data?.modeS === 'string' && /^[0-9a-f]{6}$/.test(data.modeS) ? data.modeS : null;
+    return hex ? { hex, registration: data.registration || reg, typeCode: data.typeCode || null } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {string} query volací znak (prefix) alebo hex; '' = najnovšie úseky
  * @param {{hours?: number, limit?: number, fetcher?: Function}} [options]
  * @returns {Promise<Array<object>>} legs

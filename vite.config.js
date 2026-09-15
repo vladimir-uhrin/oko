@@ -3322,6 +3322,9 @@ function adsbdbProxy() {
       typeCode: a.icao_type || null, // ICAO designator, e.g. "B738" — feeds classifyAircraft
       typeName: a.manufacturer && a.type ? `${a.manufacturer} ${a.type}` : (a.type || null),
       registration: a.registration || null,
+      // ICAO 24-bit hex. Potrebné pre hľadanie v histórii podľa značky
+      // (`/api/adsbdb/reg/<značka>` → hex → /api/history/search), 2026-09-15.
+      modeS: typeof a.mode_s === 'string' ? a.mode_s.toLowerCase() : null,
       countryIso: typeof a.registered_owner_country_iso_name === 'string' ? a.registered_owner_country_iso_name : null, // štát registrácie → vlajka
     };
   }
@@ -3380,6 +3383,16 @@ function adsbdbProxy() {
             const hex = String(rawKey || '').toLowerCase();
             if (!/^[0-9a-f]{6}$/.test(hex)) return send(400, { error: 'invalid hex' });
             const data = await lookup('aircraft', hex);
+            return send(200, data ? { found: true, ...data } : { found: false });
+          }
+          if (kind === 'reg') {
+            // Značka (OM-BYK, N123AB…) → aircraft (vrátane hex mode_s) cez ten
+            // istý adsbdb endpoint `/v0/aircraft/{ident}`, ktorý berie aj
+            // registráciu. Slúži na hľadanie v histórii podľa značky
+            // (2026-09-15). Kľúč pre cache je normalizovaný (bez pomlčky, veľké).
+            const reg = String(rawKey || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
+            if (!/^[A-Z0-9-]{2,10}$/.test(reg) || !/[A-Z]/.test(reg)) return send(400, { error: 'invalid registration' });
+            const data = await lookup('aircraft', reg);
             return send(200, data ? { found: true, ...data } : { found: false });
           }
           return send(404, { error: 'unknown endpoint' });

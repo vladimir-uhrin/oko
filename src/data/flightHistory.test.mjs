@@ -13,7 +13,9 @@ import {
   interpolateFix,
   legTitle,
   lerpLon,
+  looksLikeRegistration,
   parseTrackPayload,
+  resolveRegistrationHex,
   searchFlightHistory,
   trackSummary,
 } from './flightHistory.js';
@@ -99,4 +101,26 @@ test('API: search a track volajú /api/history s parametrami a rozbalia odpoveď
   assert.equal(fixes.length, 1);
   assert.equal(calls[1], `/api/history/track?icao24=4b1805&from=${T0}&to=${T0 + 301}`);
   await assert.rejects(() => searchFlightHistory('x', { fetcher: async () => ({ ok: false, status: 503 }) }), /HTTP 503/);
+});
+
+test('looksLikeRegistration: značka s pomlčkou aj US N-číslo áno; hex, volací znak, prázdne nie (2026-09-15)', () => {
+  assert.equal(looksLikeRegistration('OM-BYK'), true);
+  assert.equal(looksLikeRegistration('om-byl'), true);
+  assert.equal(looksLikeRegistration('D-AISP'), true);
+  assert.equal(looksLikeRegistration('N123AB'), true, 'US N-číslo bez pomlčky');
+  assert.equal(looksLikeRegistration('4B1805'), false, '6-hex je priame id, nie značka');
+  assert.equal(looksLikeRegistration('SWR11H'), false, 'volací znak bez pomlčky');
+  assert.equal(looksLikeRegistration(''), false);
+  assert.equal(looksLikeRegistration('OM'), false);
+});
+
+test('resolveRegistrationHex: /api/adsbdb/reg/<značka> → hex; neznáme alebo bez hexu = null', async () => {
+  const calls = [];
+  const okFetcher = async (url) => { calls.push(url); return { ok: true, json: async () => ({ found: true, modeS: '4b1a2c', registration: 'OM-BYK', typeCode: 'A319' }) }; };
+  const r = await resolveRegistrationHex('OM-BYK', { fetcher: okFetcher });
+  assert.deepEqual(r, { hex: '4b1a2c', registration: 'OM-BYK', typeCode: 'A319' });
+  assert.equal(calls[0], '/api/adsbdb/reg/OM-BYK');
+  assert.equal(await resolveRegistrationHex('OM-XXX', { fetcher: async () => ({ ok: true, json: async () => ({ found: false }) }) }), null, 'bez hexu = null');
+  assert.equal(await resolveRegistrationHex('OM-BYK', { fetcher: async () => ({ ok: false, status: 500 }) }), null, 'chyba = null');
+  assert.equal(await resolveRegistrationHex('', { fetcher: okFetcher }), null);
 });
