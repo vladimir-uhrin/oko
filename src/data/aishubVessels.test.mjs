@@ -9,6 +9,7 @@ import {
   AISHUB_LAYER_ID,
   AISHUB_OVERLAY_SOURCE_ID,
   aishubContactSummary,
+  aishubCourseDeg,
   aishubDelayedLabel,
   aishubSourceLabel,
   aishubViewBbox,
@@ -150,4 +151,14 @@ test('getStats + throttled: 429 dá poctivú hlášku, stav sa nezasekne', async
   // getStats() používa globálne t (v testoch EN): „delayed", nie „oneskorené".
   assert.match(layer.getStats().source, /AISHub · (delayed|oneskorené) ~1–6 min/);
   assert.doesNotMatch(layer.getStats().source, /LIVE/i);
+});
+
+test('aishubCourseDeg: heading má prednosť (0–359), inak cog; 511/mimo rozsahu/nič = null (trup na sever)', () => {
+  assert.equal(aishubCourseDeg({ heading: 208, cog: 210 }), 208, 'heading vyhráva');
+  assert.equal(aishubCourseDeg({ heading: 511, cog: 210 }), 210, 'heading 511 = nedostupné → cog');
+  assert.equal(aishubCourseDeg({ heading: null, cog: 0 }), 0, 'cog 0 je platný smer');
+  assert.equal(aishubCourseDeg({ cog: 359.9 }), 359.9);
+  assert.equal(aishubCourseDeg({ heading: null, cog: null }), null, 'bez smeru → null (sever)');
+  assert.equal(aishubCourseDeg({ heading: 400, cog: 720 }), null, 'mimo rozsahu = null');
+  assert.equal(aishubCourseDeg({}), null);
 });

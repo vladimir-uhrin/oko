@@ -29,6 +29,7 @@ import {
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
 import { airIconTier } from './airIconLod.js';
+import { cameraPoseSignature, screenProjectedRotation } from './iconOrientation.js';
 import { AISHUB_MAX_AREA_SQ_DEG } from './aishubVesselsCore.js';
 import { clearOverlaySource, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
 
@@ -44,6 +45,24 @@ export const AISHUB_POINT_HEIGHT_M = 20;
 const HULL_BASE_SCALE = 0.6;
 const HULL_ALPHA = 0.88;
 const KN_TO_MPS = 0.514444;
+
+/**
+ * Smer plavby lode (°): heading, keď je platný (0–359; 511 = „nedostupné"),
+ * inak kurz nad zemou (cog). null = smer neznámy → trup ostane na sever. Pure.
+ * Trup shipIconDataUrl mieri na sever, takže rotácia mapuje priamo na smer,
+ * rovnako ako pri živých lodiach (vesselCourseDeg v aisLiveVessels.js).
+ * @param {{heading?:number, cog?:number}} row
+ * @returns {number|null}
+ */
+export function aishubCourseDeg(row) {
+  // Priamo Number.isFinite na hodnote — `Number(null)` je 0, čo by loď bez
+  // headingu otočilo na sever namiesto pádu na cog.
+  const h = row?.heading;
+  if (Number.isFinite(h) && h >= 0 && h < 360) return h;
+  const c = row?.cog;
+  if (Number.isFinite(c) && c >= 0 && c < 360) return c;
+  return null;
+}
 
 /**
  * Výrez z pohľadu kamery (°), alebo null nad stropom výšky / plochy / bez
@@ -190,6 +209,8 @@ export function createAishubVesselsLayer({
   let _iconTier = 'full';
   let _moveRemove = null;
   let _changedRemove = null;
+  let _preRenderRemove = null;
+  let _poseSig = null;
   let _moveTimer = null;
   let _requestToken = 0;
   let _labelCount = 0;
@@ -216,24 +237,45 @@ export function createAishubVesselsLayer({
   function renderRows(rows) {
     clearBillboards();
     if (!_collection) return;
+    const scene = _viewer?.scene;
     const limit = Math.min(rows.length, AISHUB_MAX_POINTS);
     const scale = hullScale();
     for (let i = 0; i < limit; i++) {
       const row = rows[i];
       const id = { mmsi: String(row.mmsi || ''), aishub: true, name: row.name || '', key: String(row.mmsi) };
+      const position = Cesium.Cartesian3.fromDegrees(row.lon, row.lat, AISHUB_POINT_HEIGHT_M);
+      const course = aishubCourseDeg(row);
+      // Natočenie do smeru plavby, ako pri živých lodiach; bez smeru na sever.
+      const rotation = course === null ? 0 : (screenProjectedRotation(scene, position, course, 0) ?? 0);
       const billboard = _collection.add({
         id,
-        position: Cesium.Cartesian3.fromDegrees(row.lon, row.lat, AISHUB_POINT_HEIGHT_M),
+        position,
         image: shipIconDataUrl(vesselTypeCss(row.type)),
         scale,
-        rotation: 0,
+        rotation,
         alignedAxis: Cesium.Cartesian3.ZERO,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         color: Cesium.Color.WHITE.withAlpha(HULL_ALPHA),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       });
-      _byId.set(id.key, { row, billboard });
+      _byId.set(id.key, { row, billboard, course });
+    }
+    _poseSig = null; // vynúť prepočet natočenia v najbližšom preRender
+  }
+
+  /**
+   * Prepočíta natočenie trupov do smeru plavby pre aktuálnu pózu kamery. Beží
+   * v preRender len keď sa kamera pohla (pose signature), inak nič — pri
+   * tisíckach lodí by prepočet každý snímok stál.
+   */
+  function updateRotations() {
+    const scene = _viewer?.scene;
+    if (!scene) return;
+    for (const entry of _byId.values()) {
+      if (entry.course === null) continue;
+      const rot = screenProjectedRotation(scene, entry.billboard.position, entry.course, entry.billboard.rotation);
+      if (rot !== null && Math.abs(rot - entry.billboard.rotation) > 0.002) entry.billboard.rotation = rot;
     }
   }
 
@@ -354,6 +396,16 @@ export function createAishubVesselsLayer({
       if (!_changedRemove && _viewer?.camera?.changed?.addEventListener) {
         _changedRemove = _viewer.camera.changed.addEventListener(syncTier);
       }
+      // Natočenie trupov do smeru plavby sleduje pózu kamery po snímkoch (ako
+      // živé lode) — prepočet len keď sa kamera pohla.
+      if (!_preRenderRemove && _viewer?.scene?.preRender?.addEventListener) {
+        _preRenderRemove = _viewer.scene.preRender.addEventListener(() => {
+          const sig = cameraPoseSignature(_viewer.camera);
+          if (sig === _poseSig) return;
+          _poseSig = sig;
+          updateRotations();
+        });
+      }
       refreshForView({ force: true });
     },
 
@@ -365,6 +417,9 @@ export function createAishubVesselsLayer({
       _moveRemove = null;
       _changedRemove?.();
       _changedRemove = null;
+      _preRenderRemove?.();
+      _preRenderRemove = null;
+      _poseSig = null;
       unregisterPickOwner(AISHUB_LAYER_ID);
       if (_collection) _collection.show = false;
       _labelCount = 0;
