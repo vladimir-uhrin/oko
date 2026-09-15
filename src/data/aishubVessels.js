@@ -17,7 +17,8 @@
 
 import * as Cesium from 'cesium';
 import { currentLanguage, t } from '../i18n.js';
-import { registerPickOwner, unregisterPickOwner } from './pickRegistry.js';
+import { isOwnedByOtherLayer, registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import { clearSelectedEntityContextForLayer, registerEntityContext, selectEntityContext } from './contextStore.js';
 import {
   VESSEL_CARD_FADE_DISTANCE_M,
   accentForVesselType,
@@ -33,7 +34,7 @@ import { airIconTier } from './airIconLod.js';
 import { isMetric } from '../units.js';
 import { cameraPoseSignature, screenProjectedRotation } from './iconOrientation.js';
 import { AISHUB_MAX_AREA_SQ_DEG } from './aishubVesselsCore.js';
-import { clearOverlaySource, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
+import { clearOverlaySource, hitTestWorldOverlay, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
 
 export const AISHUB_LAYER_ID = 'aishub-vessels';
 export const AISHUB_OVERLAY_SOURCE_ID = 'aishub-vessels';
@@ -187,29 +188,33 @@ export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
  * Popiska mena v tvare karty živých lodí, s riadkom „oneskorené" namiesto
  * LIVE. Pure.
  */
-export function aishubLabelCard(row, position, translate = t, nowMs = Date.now()) {
+export function aishubLabelCard(row, position, translate = t, nowMs = Date.now(), selected = false) {
   // Rovnaká skladba ako buildVesselCard (živé lode): TYP · rýchlosť · kurz,
-  // plus krátky odznak ONESKORENÉ · vek údaja namiesto „LAST KNOWN".
+  // plus krátky odznak ONESKORENÉ · vek údaja namiesto „LAST KNOWN". Vybraná
+  // loď (klik) dostane navyše navigačný stav a je pripnutá (selected/protected).
   const parts = [];
   const type = normalizeVesselType(row.type).toUpperCase().slice(0, 14);
   if (type) parts.push(type);
   if (Number.isFinite(row.sog)) parts.push(formatSpeed(row.sog));
   const direction = aishubCourseDeg(row);
   if (Number.isFinite(direction)) parts.push(`${Math.round(direction)}°`);
+  const nav = selected ? navStatusLabel(row.navStatus) : '';
+  if (nav) parts.push(nav);
   const age = aishubAgeLabel(row.observedAt, nowMs);
   parts.push(age ? `${translate('aishub.badge')} · ${age}` : translate('aishub.badge'));
   const name = aishubDisplayName(row);
   return {
     id: `aishub:${row.mmsi}`,
-    actionable: false,
+    // Klikateľná ako živé lode — klik cez hull (pick) aj cez kartu (hitTest).
+    actionable: true,
     position,
     gapPx: 10,
     accent: accentForVesselType(row.type),
     title: name.length > 26 ? `${name.slice(0, 25)}…` : name,
     titleFlag: mmsiFlag(row.mmsi)?.iso2 || null,
     details: [parts.join(' · ')],
-    selected: false,
-    priority: (row.name ? 1000 : 0) + (row.type ? 40 : 0) + (Number.isFinite(row.sog) && row.sog > 0.5 ? 30 : 0),
+    selected,
+    priority: (selected ? 100000 : 0) + (row.name ? 1000 : 0) + (row.type ? 40 : 0) + (Number.isFinite(row.sog) && row.sog > 0.5 ? 30 : 0),
   };
 }
 
@@ -249,11 +254,14 @@ export function createAishubVesselsLayer({
   let _moveRemove = null;
   let _changedRemove = null;
   let _preRenderRemove = null;
+  let _clickHandler = null;
   let _poseSig = null;
   let _moveTimer = null;
   let _requestToken = 0;
   let _labelCount = 0;
+  let _selectedKey = null;
   const _scratchObjects = new Map();
+  const _contextCarrier = new Map();
 
   function hullScaleFor(sog) {
     return aishubSpeedScale(sog) * vesselTierScale(_iconTier);
@@ -319,6 +327,70 @@ export function createAishubVesselsLayer({
     }
   }
 
+  /** Trup vybranej lode je väčší a s vybraným variantom ikony (ako živé lode). */
+  function applySelectedVisual() {
+    for (const [key, { row, billboard }] of _byId.entries()) {
+      const selected = key === _selectedKey;
+      billboard.scale = hullScaleFor(row.sog) * (selected ? 1.2 : 1);
+      billboard.image = shipIconDataUrl(vesselTypeCss(row.type), selected);
+    }
+  }
+
+  /**
+   * Vyber loď kliknutím (null = zrušiť výber). Publikuje kontext (HUD, „čo
+   * vidím"), zväčší trup a pripne kartu; poctivosť ostáva — je to oneskorená loď.
+   * @param {string|null} key MMSI z _byId
+   */
+  function selectVessel(key) {
+    const next = key && _byId.has(String(key)) ? String(key) : null;
+    _selectedKey = next;
+    if (next && typeof window !== 'undefined') {
+      const { row } = _byId.get(next);
+      const carrier = _contextCarrier.get(next) || { __gevContextId: next };
+      _contextCarrier.set(next, carrier);
+      registerEntityContext(carrier, {
+        id: next,
+        layerId: AISHUB_LAYER_ID,
+        layerName: t('layer.aishub-vessels.name'),
+        source: 'AISHub',
+        label: aishubDisplayName(row),
+        latitude: row.lat,
+        longitude: row.lon,
+        properties: aishubContactSummary(row),
+      });
+      selectEntityContext(carrier);
+    } else if (!next && typeof window !== 'undefined') {
+      clearSelectedEntityContextForLayer(AISHUB_LAYER_ID);
+    }
+    applySelectedVisual();
+    publishLabels();
+    _viewer?.scene?.requestRender?.();
+  }
+
+  function onLeftClick(click) {
+    if (!_enabled || !_viewer) return;
+    const position = click?.position;
+    let picked = null;
+    try { picked = _viewer.scene.pick(position, 10, 10); } catch { picked = null; }
+    const pickedId = resolvePickId(picked);
+    let key = pickedId != null && _byId.has(String(pickedId)) ? String(pickedId) : null;
+    // Iná vrstva už vlastní tento klik — nekonkurovať jej.
+    if (!key && pickedId != null && isOwnedByOtherLayer(AISHUB_LAYER_ID, pickedId)) return;
+    // Karta je na pointer-events:none plátne, takže scene.pick trafí terén za
+    // ňou — over kliknutie proti našim aktívnym hit-obdĺžnikom (ako živé lode).
+    if (!key) {
+      const hit = hitTestWorldOverlay(position?.x, position?.y, { sourceId: AISHUB_OVERLAY_SOURCE_ID });
+      const entryId = hit && String(hit.entryId || '');
+      if (entryId && entryId.startsWith('aishub:')) {
+        const mmsi = entryId.slice('aishub:'.length);
+        if (_byId.has(mmsi)) key = mmsi;
+        else return; // zastaraná karta, nie prázdny terén
+      }
+    }
+    if (key) selectVessel(key);
+    else if (_selectedKey && pickedId == null) selectVessel(null); // prázdny klik = zrušiť výber
+  }
+
   function syncTier() {
     const height = _viewer?.camera?.positionCartographic?.height;
     const next = airIconTier(height, _iconTier);
@@ -342,12 +414,15 @@ export function createAishubVesselsLayer({
       ? (position) => scene.cartesianToCanvasCoordinates(position)
       : null;
     const cards = [];
-    for (const { row, billboard } of _byId.values()) {
-      if (project && width && height) {
+    const nowMs = now();
+    for (const [key, { row, billboard }] of _byId.entries()) {
+      const selected = key === _selectedKey;
+      if (!selected && project && width && height) {
         const win = project(billboard.position);
+        // Vybraná karta ostáva aj mimo stredu; ambientné len na obrazovke.
         if (!win || win.x < 0 || win.y < 0 || win.x > width || win.y > height) continue;
       }
-      cards.push(aishubLabelCard(row, billboard.position));
+      cards.push(aishubLabelCard(row, billboard.position, t, nowMs, selected));
     }
     cards.sort((a, b) => b.priority - a.priority);
     const entries = cards.slice(0, AISHUB_MAX_LABELS).map((card) => applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M));
@@ -384,6 +459,12 @@ export function createAishubVesselsLayer({
       _status = rows.length ? 'live' : 'empty';
       syncTier();
       renderRows(rows);
+      // Výber prežije obnovu výrezu, ak je loď stále v dátach; inak sa zruší.
+      if (_selectedKey && !_byId.has(_selectedKey)) {
+        _selectedKey = null;
+        if (typeof window !== 'undefined') clearSelectedEntityContextForLayer(AISHUB_LAYER_ID);
+      }
+      applySelectedVisual();
       publishLabels();
     } catch (err) {
       if (token === _requestToken) _error = err?.message || String(err);
@@ -435,6 +516,12 @@ export function createAishubVesselsLayer({
       if (!_changedRemove && _viewer?.camera?.changed?.addEventListener) {
         _changedRemove = _viewer.camera.changed.addEventListener(syncTier);
       }
+      // Klik = výber lode (karta + zameriavač), ako pri iných lodiach.
+      // Len s reálnym plátnom (testy majú falošné bez addEventListener).
+      if (!_clickHandler && typeof _viewer?.scene?.canvas?.addEventListener === 'function' && typeof Cesium.ScreenSpaceEventHandler === 'function') {
+        _clickHandler = new Cesium.ScreenSpaceEventHandler(_viewer.scene.canvas);
+        _clickHandler.setInputAction(onLeftClick, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      }
       // Natočenie trupov do smeru plavby sleduje pózu kamery po snímkoch (ako
       // živé lode) — prepočet len keď sa kamera pohla.
       if (!_preRenderRemove && _viewer?.scene?.preRender?.addEventListener) {
@@ -459,6 +546,10 @@ export function createAishubVesselsLayer({
       _preRenderRemove?.();
       _preRenderRemove = null;
       _poseSig = null;
+      _clickHandler?.destroy?.();
+      _clickHandler = null;
+      if (_selectedKey && typeof window !== 'undefined') clearSelectedEntityContextForLayer(AISHUB_LAYER_ID);
+      _selectedKey = null;
       unregisterPickOwner(AISHUB_LAYER_ID);
       if (_collection) _collection.show = false;
       _labelCount = 0;
@@ -518,6 +609,8 @@ export function createAishubVesselsLayer({
       const stride = Math.max(1, Math.ceil(entries.length / maxCount));
       const start = seed % stride;
       const forced = new Set();
+      // Vybraná loď má vždy zameriavač (aj mimo vzorky), ako iné vrstvy.
+      if (_selectedKey) forced.add(_selectedKey);
       if (Array.isArray(options.hovered)) {
         for (const c of options.hovered) {
           if (c && String(c.layerId) === AISHUB_LAYER_ID && c.sourceId != null) forced.add(String(c.sourceId));
@@ -552,8 +645,11 @@ export function createAishubVesselsLayer({
       return result;
     },
 
+    /** Test seam: vyber loď (bez potreby klikať v Cesiu). */
+    _selectForTest(key) { selectVessel(key); },
+
     _getStateForTest() {
-      return { enabled: _enabled, loading: _loading, error: _error, status: _status, rows: _rows.length, bbox: _bbox, meta: _meta, points: _byId.size, labels: _labelCount };
+      return { enabled: _enabled, loading: _loading, error: _error, status: _status, rows: _rows.length, bbox: _bbox, meta: _meta, points: _byId.size, labels: _labelCount, selected: _selectedKey };
     },
   };
 

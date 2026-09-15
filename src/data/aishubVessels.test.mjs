@@ -11,6 +11,7 @@ import {
   aishubAgeLabel,
   aishubContactSummary,
   aishubCourseDeg,
+  aishubLabelCard,
   aishubSpeedScale,
   aishubDelayedLabel,
   aishubSourceLabel,
@@ -188,4 +189,40 @@ test('vek údaja: pod 90 s v sekundách, inak v minútach; SK/EN; bez času prá
   assert.equal(aishubAgeLabel(t0, t0 + 3 * 60_000, 'sk'), 'pred 3 min');
   assert.equal(aishubAgeLabel(t0, t0 + 3 * 60_000, 'en'), '3 min ago');
   assert.equal(aishubAgeLabel(null, t0), '');
+});
+
+test('klik na loď: výber pripne kartu (variant selected) a zvýrazní zameriavač; opäť prázdny výber zruší', async () => {
+  const overlay = fakeOverlay();
+  const layer = createAishubVesselsLayer({ fetchImpl: async () => jsonResponse(PAYLOAD), collectionFactory: fakeCollection, overlayHost: overlay });
+  layer.init(fakeViewer());
+  await layer.enable();
+  await new Promise((r) => setImmediate(r));
+
+  // predtým: žiadny výber, karty sú variant 'card'
+  assert.equal(layer._getStateForTest().selected, null);
+  layer._selectForTest('470000001');
+  assert.equal(layer._getStateForTest().selected, '470000001');
+  const set = overlay.calls.filter((c) => c.op === 'set').at(-1);
+  const sel = set.e.find((entry) => String(entry.id) === 'aishub:470000001');
+  assert.ok(sel, 'vybraná loď má kartu');
+  assert.equal(sel.variant, 'selected', 'pripnutá karta = variant selected');
+  assert.equal(sel.protected, true);
+  assert.equal(sel.maxDistance, Infinity, 'vybraná karta sa nestráca so vzdialenosťou');
+  // zameriavač: vybraná loď je vynútená v detekcii aj mimo vzorky
+  const det = layer.getDetectableObjects({ maxCount: 1 });
+  assert.ok(det.some((o) => String(o.sourceId) === '470000001'), 'vybraná loď má vždy zameriavač');
+
+  layer._selectForTest(null);
+  assert.equal(layer._getStateForTest().selected, null);
+  const set2 = overlay.calls.filter((c) => c.op === 'set').at(-1);
+  assert.ok(!set2.e.some((entry) => entry.variant === 'selected'), 'po zrušení žiadna pripnutá karta');
+});
+
+test('klik: layerLabelCard je klikateľná (actionable → interactive v overlay policy)', () => {
+  const card = aishubLabelCard(PAYLOAD.rows[0], { x: 1 }, (k) => k, Date.UTC(2026, 8, 15, 20, 6));
+  assert.equal(card.actionable, true, 'karta je klikateľná ako živé lode');
+  assert.equal(card.selected, false);
+  const selCard = aishubLabelCard(PAYLOAD.rows[0], { x: 1 }, (k) => k, Date.UTC(2026, 8, 15, 20, 6), true);
+  assert.equal(selCard.selected, true);
+  assert.ok(selCard.priority > card.priority, 'vybraná karta má vyššiu prioritu');
 });
