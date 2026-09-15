@@ -11,8 +11,16 @@
  */
 import { greatCircleKm } from './flightProgress.js';
 
-/** Ponúkané okná vyhľadávania (h). Retencia proxy je 7 dní. */
-export const HISTORY_SEARCH_HOURS = Object.freeze([24, 72, 168]);
+/**
+ * Ponúkané okná vyhľadávania (h): 1, 3, 7, 30, 90 a 365 dní.
+ * Retencia záznamu je 365 dní (plný záznam prvých 30 dní, staršie sa preriedia
+ * na ~1 fix / 2 min), preto sa dá dohľadať späť ktorékoľvek lietadlo z celého
+ * rozsahu, nielen za týždeň (2026-09-15, používateľ: „chcem dohľadať spätne
+ * každé lietadlo"). Úseky (legs) sa nepreriedujú, takže staršie lety sa vždy
+ * nájdu — len ich prehratá dráha je nad 30 dní hrubšia. Server okno oreže na
+ * `24 × retenciu`, takže väčšie hodnoty sú bezpečné aj pri kratšej retencii.
+ */
+export const HISTORY_SEARCH_HOURS = Object.freeze([24, 72, 168, 720, 2160, 8760]);
 /** Počet vzoriek grafu (rovnomerne v čase). */
 export const CHART_SAMPLES = 240;
 
