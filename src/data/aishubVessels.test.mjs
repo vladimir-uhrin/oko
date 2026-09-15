@@ -8,8 +8,10 @@ import assert from 'node:assert/strict';
 import {
   AISHUB_LAYER_ID,
   AISHUB_OVERLAY_SOURCE_ID,
+  aishubAgeLabel,
   aishubContactSummary,
   aishubCourseDeg,
+  aishubSpeedScale,
   aishubDelayedLabel,
   aishubSourceLabel,
   aishubViewBbox,
@@ -54,7 +56,7 @@ const jsonResponse = (payload, ok = true, status = 200) => ({ ok, status, json: 
 // Riadky v tvare, aký vracia proxy (už normalizované).
 const PAYLOAD = {
   rows: [
-    { mmsi: '470000001', name: 'GULF STAR', type: '70', sog: 12.3, cog: 210, heading: 208, source: 'aishub', lat: 26.4, lon: 56.3, observedAt: Date.UTC(2026, 8, 15, 20, 5) },
+    { mmsi: '470000001', name: 'GULF STAR', type: '70', sog: 12.3, cog: 210, heading: 208, navStatus: 0, source: 'aishub', lat: 26.4, lon: 56.3, observedAt: Date.UTC(2026, 8, 15, 20, 5) },
     { mmsi: '470000002', name: '', type: '80', sog: 0.1, cog: 0, heading: 511, source: 'aishub', lat: 26.5, lon: 56.4, observedAt: Date.UTC(2026, 8, 15, 20, 4) },
     { mmsi: '470000003', name: 'ALREADY LIVE', type: '70', sog: 8, cog: 90, source: 'aishub', lat: 26.6, lon: 56.5, observedAt: Date.UTC(2026, 8, 15, 20, 3) },
     { mmsi: '470000009', name: 'OWN FEED', type: '70', sog: 5, cog: 45, source: 'aisstream', lat: 26.7, lon: 56.6, observedAt: Date.UTC(2026, 8, 15, 20, 2) },
@@ -122,19 +124,25 @@ test('load + dedup: aisstream riadky a MMSI, ktoré vidí živá vrstva, sa zaho
 
 test('poctivý label: karta pod kurzorom hovorí ONESKORENÉ, nikdy LIVE; ukazuje rýchlosť a kurz z AIS', () => {
   const tSk = (key, vars = {}) => Object.entries(vars).reduce((s, [k, v]) => s.replaceAll(`{${k}}`, String(v)), SK_STRINGS[key] ?? key);
-  const summary = aishubContactSummary(PAYLOAD.rows[0], tSk);
+  const now = Date.UTC(2026, 8, 15, 20, 8); // 3 min po row0
+  const summary = aishubContactSummary(PAYLOAD.rows[0], tSk, now);
   assert.equal(summary.layerId, AISHUB_LAYER_ID);
   assert.equal(summary.callsign, 'GULF STAR');
-  assert.match(summary.operator, /oneskorené/i);
-  assert.doesNotMatch(summary.operator, /LIVE|live/i);
+  // Zjednotené so živými loďami: operator = nav status; oneskorené + vek v route.
+  assert.equal(summary.operator, 'UNDER WAY', 'nav status ako pri živých lodiach');
+  assert.match(summary.route, /oneskorené/i);
+  assert.match(summary.route, /3 min/, 'vek údaja (jazyk podľa currentLanguage)');
+  assert.doesNotMatch(summary.route, /\bLIVE\b/i);
+  assert.equal(summary.source, 'AISHub');
   assert.equal(summary.stale, false);
   assert.ok(Math.abs(summary.speedMps - 12.3 * 0.514444) < 1e-6, 'sog kn → m/s');
-  assert.equal(summary.trackDeg, 210, 'kurz z cog');
+  assert.equal(summary.trackDeg, 208, 'kurz: heading má prednosť pred cog');
   assert.match(aishubDelayedLabel(tSk), /AISHub · oneskorené ~1–6 min/);
   assert.doesNotMatch(aishubDelayedLabel(tSk), /LIVE/i);
-  // zdroj mimo aishub sa v karte prizná pravdivo
+  // zdroj mimo aishub sa v karte prizná pravdivo (v poli source)
   const other = aishubContactSummary({ ...PAYLOAD.rows[0], source: 'barentswatch' }, tSk);
-  assert.match(other.route, /barentswatch/);
+  assert.match(other.source, /barentswatch/);
+  assert.match(other.source, /AISHub/);
   // riadok zdroja v paneli nesie atribúciu a nikdy nie je LIVE
   const src = aishubSourceLabel(PAYLOAD.meta, tSk);
   assert.match(src, /AISHub · oneskorené ~1–6 min/);
@@ -161,4 +169,23 @@ test('aishubCourseDeg: heading má prednosť (0–359), inak cog; 511/mimo rozsa
   assert.equal(aishubCourseDeg({ heading: null, cog: null }), null, 'bez smeru → null (sever)');
   assert.equal(aishubCourseDeg({ heading: 400, cog: 720 }), null, 'mimo rozsahu = null');
   assert.equal(aishubCourseDeg({}), null);
+});
+
+test('veľkosť trupu podľa rýchlosti — rovnaké prahy ako živé lode', () => {
+  assert.equal(aishubSpeedScale(0), 0.6);
+  assert.equal(aishubSpeedScale(5), 0.6);
+  assert.equal(aishubSpeedScale(8), 0.68);
+  assert.equal(aishubSpeedScale(12.3), 0.68);
+  assert.equal(aishubSpeedScale(18), 0.78);
+  assert.equal(aishubSpeedScale(25), 0.78);
+  assert.equal(aishubSpeedScale(null), 0.6);
+});
+
+test('vek údaja: pod 90 s v sekundách, inak v minútach; SK/EN; bez času prázdne', () => {
+  const t0 = Date.UTC(2026, 8, 15, 20, 0, 0);
+  assert.equal(aishubAgeLabel(t0, t0 + 45_000, 'sk'), 'pred 45 s');
+  assert.equal(aishubAgeLabel(t0, t0 + 45_000, 'en'), '45s ago');
+  assert.equal(aishubAgeLabel(t0, t0 + 3 * 60_000, 'sk'), 'pred 3 min');
+  assert.equal(aishubAgeLabel(t0, t0 + 3 * 60_000, 'en'), '3 min ago');
+  assert.equal(aishubAgeLabel(null, t0), '');
 });

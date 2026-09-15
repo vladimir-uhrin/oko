@@ -761,6 +761,7 @@ export const EN_STRINGS = Object.freeze({
   // AISHub via aiscast — delayed second vessel source (2026-09-15).
   'layer.aishub-vessels.name': 'Vessels · delayed (AISHub)',
   'aishub.delayed': 'AISHub · delayed ~1–6 min',
+  'aishub.badge': 'DELAYED',
   'aishub.delayed-source': '{source} · delayed (via AISHub/aiscast)',
   'aishub.zoom-in': 'zoom in below ~2 600 km to load delayed vessels',
   'aishub.empty': 'no delayed vessels reported in this area',
@@ -2079,6 +2080,7 @@ export const SK_STRINGS = Object.freeze({
   // AISHub cez aiscast — oneskorený druhý zdroj lodí (2026-09-15).
   'layer.aishub-vessels.name': 'Lode · oneskorené (AISHub)',
   'aishub.delayed': 'AISHub · oneskorené ~1–6 min',
+  'aishub.badge': 'ONESKORENÉ',
   'aishub.delayed-source': '{source} · oneskorené (cez AISHub/aiscast)',
   'aishub.zoom-in': 'priblíž pod ~2 600 km, načíta sa oneskorený výrez',
   'aishub.empty': 'v tomto výreze nie sú hlásené oneskorené lode',

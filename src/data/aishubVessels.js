@@ -23,12 +23,14 @@ import {
   accentForVesselType,
   applyVesselOverlayPolicy,
   mmsiFlag,
+  navStatusLabel,
   normalizeVesselType,
   vesselOverlayCohortLimit,
   vesselTypeCss,
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
 import { airIconTier } from './airIconLod.js';
+import { isMetric } from '../units.js';
 import { cameraPoseSignature, screenProjectedRotation } from './iconOrientation.js';
 import { AISHUB_MAX_AREA_SQ_DEG } from './aishubVesselsCore.js';
 import { clearOverlaySource, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
@@ -42,9 +44,35 @@ export const AISHUB_MAX_POINTS = 6_000;
 export const AISHUB_MAX_LABELS = 300;
 export const AISHUB_MOVE_DEBOUNCE_MS = 1_200;
 export const AISHUB_POINT_HEIGHT_M = 20;
-const HULL_BASE_SCALE = 0.6;
-const HULL_ALPHA = 0.88;
 const KN_TO_MPS = 0.514444;
+
+/**
+ * Mierka trupu podľa rýchlosti — rovnaké prahy ako živé lode
+ * (shipSpeedScale v aisLiveVessels.js), aby boli veľkosti jednotné. Pure.
+ * @param {number|null|undefined} sog rýchlosť v uzloch
+ * @returns {number}
+ */
+export function aishubSpeedScale(sog) {
+  const speed = Number(sog) || 0;
+  if (speed >= 18) return 0.78;
+  if (speed >= 8) return 0.68;
+  return 0.6;
+}
+
+/** Krátke KT/KM/H ako pri živých lodiach (formatSpeed). Pure. */
+function formatSpeed(sog) {
+  if (!Number.isFinite(sog)) return isMetric() ? '--KM/H' : '--KT';
+  return isMetric() ? `${Math.round(sog * 1.852)}KM/H` : `${sog.toFixed(1)}KT`;
+}
+
+/** Vek údaja: „pred 3 min" / „45 s"; prázdne bez času. Pure. */
+export function aishubAgeLabel(observedAtMs, nowMs = Date.now(), lang = currentLanguage()) {
+  if (!Number.isFinite(observedAtMs)) return '';
+  const s = Math.max(0, Math.round((nowMs - observedAtMs) / 1000));
+  if (s < 90) return lang === 'en' ? `${s}s ago` : `pred ${s} s`;
+  const m = Math.round(s / 60);
+  return lang === 'en' ? `${m} min ago` : `pred ${m} min`;
+}
 
 /**
  * Smer plavby lode (°): heading, keď je platný (0–359; 511 = „nedostupné"),
@@ -118,17 +146,21 @@ export function aishubSourceLabel(meta, translate = t) {
  * Pure.
  * @param {object} row riadok z proxy
  */
-export function aishubContactSummary(row, translate = t) {
+export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
   if (!row) return null;
   const mmsi = String(row.mmsi || '').trim();
   const flag = mmsiFlag(mmsi);
-  const sog = Number.isFinite(row.sog) ? row.sog : null;
+  const sog = Number.isFinite(row.sog) && row.sog >= 0 ? row.sog : null;
+  // Rovnaké polia a poradie ako živé lode (getContactSummary v aisLiveVessels):
+  // nav status ako operator, typ, rýchlosť, kurz, vlajka. Poctivosť nesie
+  // riadok „route" (oneskorené + vek údaja) a zdroj — nikdy LIVE.
+  const age = aishubAgeLabel(row.observedAt, nowMs);
   return {
     layerId: AISHUB_LAYER_ID,
     id: mmsi || aishubDisplayName(row),
-    callsign: aishubDisplayName(row),
+    callsign: String(row.name || '').trim() || mmsi || 'VESSEL',
     registration: String(row.callsign || '').trim() || null,
-    operator: translate('aishub.delayed'),
+    operator: navStatusLabel(row.navStatus) || null,
     type: normalizeVesselType(row.type) || 'VESSEL',
     category: null,
     military: false,
@@ -136,15 +168,13 @@ export function aishubContactSummary(row, translate = t) {
     altitudeM: null,
     speedMps: sog === null ? null : sog * KN_TO_MPS,
     verticalRateMps: null,
-    trackDeg: Number.isFinite(row.cog) ? row.cog : (Number.isFinite(row.heading) ? row.heading : null),
+    trackDeg: aishubCourseDeg(row),
     routeInfo: null,
     progress: null,
-    // Poctivo aj skutočný pod-zdroj (aishub/barentswatch/…), keď nie je aishub.
-    route: row.source && row.source !== 'aishub'
-      ? translate('aishub.delayed-source', { source: row.source })
-      : translate('aishub.delayed'),
+    route: age ? `${translate('aishub.delayed')} · ${age}` : translate('aishub.delayed'),
     flightIata: null,
-    source: 'AISHub / Open Waters AIS',
+    // Zdroj poctivo: aishub, alebo skutočný pod-zdroj (barentswatch, digitraffic…).
+    source: row.source && row.source !== 'aishub' ? `AISHub · ${row.source}` : 'AISHub',
     lastContactEpochMs: Number.isFinite(row.observedAt) ? row.observedAt : null,
     stale: false,
     squawk: null,
@@ -157,8 +187,17 @@ export function aishubContactSummary(row, translate = t) {
  * Popiska mena v tvare karty živých lodí, s riadkom „oneskorené" namiesto
  * LIVE. Pure.
  */
-export function aishubLabelCard(row, position, translate = t) {
-  const type = normalizeVesselType(row.type);
+export function aishubLabelCard(row, position, translate = t, nowMs = Date.now()) {
+  // Rovnaká skladba ako buildVesselCard (živé lode): TYP · rýchlosť · kurz,
+  // plus krátky odznak ONESKORENÉ · vek údaja namiesto „LAST KNOWN".
+  const parts = [];
+  const type = normalizeVesselType(row.type).toUpperCase().slice(0, 14);
+  if (type) parts.push(type);
+  if (Number.isFinite(row.sog)) parts.push(formatSpeed(row.sog));
+  const direction = aishubCourseDeg(row);
+  if (Number.isFinite(direction)) parts.push(`${Math.round(direction)}°`);
+  const age = aishubAgeLabel(row.observedAt, nowMs);
+  parts.push(age ? `${translate('aishub.badge')} · ${age}` : translate('aishub.badge'));
   const name = aishubDisplayName(row);
   return {
     id: `aishub:${row.mmsi}`,
@@ -168,7 +207,7 @@ export function aishubLabelCard(row, position, translate = t) {
     accent: accentForVesselType(row.type),
     title: name.length > 26 ? `${name.slice(0, 25)}…` : name,
     titleFlag: mmsiFlag(row.mmsi)?.iso2 || null,
-    details: [[type, aishubDelayedLabel(translate)].filter(Boolean).join(' · ')],
+    details: [parts.join(' · ')],
     selected: false,
     priority: (row.name ? 1000 : 0) + (row.type ? 40 : 0) + (Number.isFinite(row.sog) && row.sog > 0.5 ? 30 : 0),
   };
@@ -216,8 +255,8 @@ export function createAishubVesselsLayer({
   let _labelCount = 0;
   const _scratchObjects = new Map();
 
-  function hullScale() {
-    return HULL_BASE_SCALE * vesselTierScale(_iconTier);
+  function hullScaleFor(sog) {
+    return aishubSpeedScale(sog) * vesselTierScale(_iconTier);
   }
 
   /**
@@ -239,7 +278,6 @@ export function createAishubVesselsLayer({
     if (!_collection) return;
     const scene = _viewer?.scene;
     const limit = Math.min(rows.length, AISHUB_MAX_POINTS);
-    const scale = hullScale();
     for (let i = 0; i < limit; i++) {
       const row = rows[i];
       const id = { mmsi: String(row.mmsi || ''), aishub: true, name: row.name || '', key: String(row.mmsi) };
@@ -251,12 +289,14 @@ export function createAishubVesselsLayer({
         id,
         position,
         image: shipIconDataUrl(vesselTypeCss(row.type)),
-        scale,
+        // Veľkosť aj plná krytie ako živé lode — vizuál jednotný, poctivosť
+        // nesie label „oneskorené", nie stlmenie farby (2026-09-15).
+        scale: hullScaleFor(row.sog),
         rotation,
         alignedAxis: Cesium.Cartesian3.ZERO,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
-        color: Cesium.Color.WHITE.withAlpha(HULL_ALPHA),
+        color: Cesium.Color.WHITE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       });
       _byId.set(id.key, { row, billboard, course });
@@ -284,8 +324,7 @@ export function createAishubVesselsLayer({
     const next = airIconTier(height, _iconTier);
     if (next === _iconTier) return;
     _iconTier = next;
-    const scale = hullScale();
-    for (const { billboard } of _byId.values()) billboard.scale = scale;
+    for (const { row, billboard } of _byId.values()) billboard.scale = hullScaleFor(row.sog);
     _viewer?.scene?.requestRender?.();
   }
 
