@@ -21,6 +21,9 @@ test('ion asset je ten istý, ktorý Cesium používa interne, a tileset options
   assert.equal(PHOTOREAL_TILESET_OPTIONS.cacheBytes, 1536 * 1024 * 1024);
   assert.equal(PHOTOREAL_TILESET_OPTIONS.maximumCacheOverflowBytes, 1024 * 1024 * 1024);
   assert.equal(PHOTOREAL_TILESET_OPTIONS.enableCollision, true);
+  // 2026-09-15: vypnuté, aby šikmý pohľad nízko nad zemou nevykresľoval
+  // roztrhaný pás z hrubých dlaždíc (Google aj ion fallback).
+  assert.equal(PHOTOREAL_TILESET_OPTIONS.dynamicScreenSpaceError, false);
 });
 
 test('EHP odmietnutie sa rozpozná podľa textu Google, iné chyby nie', () => {

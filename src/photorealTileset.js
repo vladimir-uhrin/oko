@@ -37,6 +37,16 @@ export const PHOTOREAL_TILESET_OPTIONS = Object.freeze({
   cacheBytes: 1536 * 1024 * 1024,
   maximumCacheOverflowBytes: 1024 * 1024 * 1024,
   enableCollision: true,
+  // `dynamicScreenSpaceError` je v Cesiu pri 3D tilesetoch zapnuté predvolene:
+  // stredným a vzdialeným dlaždicám umelo zvýši prípustnú chybu, aby ušetrilo
+  // výkon. Pri šikmom pohľade nízko nad zemou (napr. Bratislavský hrad, výška
+  // ~450 m, sklon −28°) tým vyberie hrubé nadradené dlaždice, ktorých
+  // zjednodušená sieť sa premietne ako roztrhaný „rozsypaný" pás v strede
+  // obrazu (používateľ 2026-09-15: „prečo mi nevykreslí dobre google mapu?").
+  // Vypnutím sa dlaždice zjemnia (naživo 76 → 133 vybraných) a mesh je ostrý;
+  // platí pre Google aj ion fallback. `foveatedScreenSpaceError` ostáva
+  // predvolene zapnuté — tlmí len okraje, ktoré aj tak zakrýva kruhová maska.
+  dynamicScreenSpaceError: false,
 });
 
 /**
