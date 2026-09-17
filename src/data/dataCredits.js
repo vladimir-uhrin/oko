@@ -179,9 +179,9 @@ export const DATA_CREDITS = [
   {
     key: 'gdelt',
     html:
-      'Cockpit regional headlines: ' +
+      'Cockpit regional headlines &amp; the open-source situation feed (Gulf): ' +
       '<a href="https://www.gdeltproject.org/about.html" target="_blank" rel="noopener">GDELT Project</a> ' +
-      '(location-matched article links; publisher terms apply)',
+      '(aggregated open-news article links — OKO links out, publisher terms apply)',
   },
   {
     key: 'austin-cctv',

@@ -76,6 +76,7 @@ import {
   ACER_HISTORICAL_URL, FRED_EU_GAS_SERIES, FRED_USD_PER_EUR_SERIES, fredCsvUrl, monthlyEurPerMwh, parseAcerCsv, parseFredCsv,
 } from './src/data/gasPrices.js';
 import { YAHOO_SYMBOLS, parseYahooChart, yahooChartUrl } from './src/data/oilPrices.js';
+import { SITUATION_REGIONS, gdeltDocUrl, parseGdeltArticles } from './src/data/situationNews.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -4838,6 +4839,94 @@ function oilPricesProxy() {
   function install(middlewares) { middlewares.use('/api/oil/prices', handler); }
   return {
     name: 'oil-prices-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
+ * Situácia z otvorených zdrojov — pilot (2026-09-17): agregované spravodajstvo
+ * z GDELT DOC 2.0 (keyless, otvorený projekt) pre pomenované regióny
+ * (SITUATION_REGIONS; pilot = záliv). GDELT prosí o max 1 dopyt/5 s a niekedy
+ * vráti 200 s prostým textom „Please limit requests…" — preto pamäť + disk cache
+ * na región (TTL 15 min, stale 6 h), single-flight a limiter; upstream sa volá
+ * najviac raz za TTL na región. Bez kľúča. Agregujeme a ODKAZUJEME, netvoríme text.
+ * @returns {import('vite').Plugin}
+ */
+function situationNewsProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'situation');
+  const TTL_MS = 15 * 60_000;
+  const STALE_MAX_MS = 6 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 20_000;
+  const MAX_BYTES = 6 * 1024 * 1024;
+  const USER_AGENT = 'OKO-situation/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+  const inFlight = new Map();
+  const cache = new Map(); // region -> { at, body }
+
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': status === 200 ? 'public, max-age=300' : 'no-store', 'X-GEV-Cache': cacheState });
+    res.end(body);
+  }
+  const diskPath = (region) => path.join(CACHE_DIR, region + '.json');
+  async function readDisk(region) {
+    try { const p = JSON.parse(await fsp.readFile(diskPath(region), 'utf8')); if (Number.isFinite(p?.at) && typeof p?.body === 'string') return p; } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(region, entry) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(diskPath(region), JSON.stringify(entry), 'utf8'); }
+    catch (error) { console.warn('[situation-proxy] cache write failed: ' + (error?.message || error)); }
+  }
+  async function current(region) {
+    if (!cache.has(region)) { const d = await readDisk(region); if (d) cache.set(region, d); }
+    return cache.get(region) || null;
+  }
+  async function fetchGdelt(url) {
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'application/json,text/plain;q=0.9,*/*;q=0.5' } });
+    const text = await readResponseTextCapped(upstream, MAX_BYTES);
+    if (!upstream.ok) { const error = new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')'); error.upstreamStatus = upstream.status; throw error; }
+    try { return JSON.parse(text); } catch { throw new Error('GDELT returned non-JSON (rate limit?)'); }
+  }
+  async function build(region) {
+    const started = Date.now();
+    const cfg = SITUATION_REGIONS[region];
+    const json = await fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 }));
+    const items = parseGdeltArticles(json);
+    const body = JSON.stringify({ region, items, source: 'GDELT DOC 2.0 (open news article index)', fetchedAt: Date.now() });
+    console.log('[situation-proxy] ' + region + ': ' + items.length + ' articles in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body };
+  }
+  async function handler(req, res) {
+    if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    let region = 'gulf';
+    try { region = new URL(req.url || '/', 'http://localhost').searchParams.get('region') || 'gulf'; } catch { /* default */ }
+    if (!SITUATION_REGIONS[region]) { send(res, 400, JSON.stringify({ error: 'unknown_region' }), 'NONE'); return; }
+    const now = Date.now();
+    const mem = await current(region);
+    if (mem && now - mem.at < TTL_MS) { send(res, 200, mem.body, 'HIT'); return; }
+    if (!limiter(clientKey(req))) {
+      if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
+      send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+    }
+    const stale = mem && now - mem.at < STALE_MAX_MS ? mem : null;
+    const request = coalesceProxyRequest(inFlight, 'situation:' + region, () => build(region));
+    try {
+      const fresh = await request.promise;
+      cache.set(region, fresh);
+      void writeDisk(region, fresh);
+      send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+    } catch (error) {
+      if (stale) {
+        if (!request.shared) console.warn('[situation-proxy] ' + region + ' refresh failed (' + (error?.message || error) + ') — serving stale');
+        send(res, 200, stale.body, 'STALE-ERROR');
+        return;
+      }
+      send(res, 502, JSON.stringify({ error: 'upstream', detail: String(error?.message || error) }), 'NONE');
+    }
+  }
+  function install(middlewares) { middlewares.use('/api/situation-news', handler); }
+  return {
+    name: 'situation-news-proxy',
     configureServer(server) { install(server.middlewares); },
     configurePreviewServer(server) { install(server.middlewares); },
   };
@@ -10064,6 +10153,7 @@ export default defineConfig(({ mode }) => {
       logoProxy(),
       gasProxy(),
       oilPricesProxy(),
+      situationNewsProxy(),
       earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),

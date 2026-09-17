@@ -66,6 +66,7 @@ export const CHOKEPOINT_SCENES = Object.freeze([
     center: Object.freeze({ lat: 26.57, lon: 56.25 }),
     rectDegrees: Object.freeze([54.0, 24.2, 58.6, 28.2]),
     narrowestKm: 33,
+    newsRegion: 'gulf',
     connects: Object.freeze({ en: 'Persian Gulf ↔ Gulf of Oman', sk: 'Perzský záliv ↔ Ománsky záliv' }),
     shores: Object.freeze({ en: 'Iran / UAE · Oman', sk: 'Irán / SAE · Omán' }),
     carries: Object.freeze({ en: 'oil ~21 Mb/d · LNG (Qatar)', sk: 'ropa ~21 Mb/d · LNG (Katar)' }),

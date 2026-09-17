@@ -37,7 +37,7 @@ export const DEFAULT_DOCK_HEIGHT_PX = 62;
 export const MOBILE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'layers', labelKey: 'mobile.layers', panelIds: Object.freeze(['data-panel']), expand: 'data-panel' }),
   Object.freeze({ id: 'scenes', labelKey: 'mobile.scenes', panelIds: Object.freeze(['scene-panel']), expand: 'scene-panel' }),
-  Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'oil-panel', 'history-panel']), expand: 'gas-panel' }),
+  Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'oil-panel', 'gulf-panel', 'history-panel']), expand: 'gas-panel' }),
   Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['pp-toggles', 'cctv-panel', 'global-context-panel']), expand: 'pp-toggles' }),
   Object.freeze({ id: 'search', labelKey: 'mobile.search', panelIds: Object.freeze([]), action: 'location' }),
 ]);
