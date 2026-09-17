@@ -38,7 +38,7 @@ import { installSharpStarfield } from './starfield.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { applyChokepointScene, chokepointSceneById, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
-import { createOilPriceChip } from './oilPriceChip.js';
+import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
@@ -497,6 +497,11 @@ async function init() {
     // via /api/oil/prices; shown whenever a scene is applied, by any trigger.
     const oilPriceChip = createOilPriceChip();
     window.__godsEyeView.oilPriceChip = oilPriceChip;
+    // Oil prices also live in the DATA tab (independent of any scene — the price
+    // is a global macro figure, not something specific to one strait). Lazy-loads
+    // the first time the "CRUDE OIL / ROPA" panel is expanded.
+    const oilPricePanel = createOilPricePanel();
+    window.__godsEyeView.oilPricePanel = oilPricePanel;
     // Live "vessels in the strait now" counter — counts live + delayed AIS
     // contacts inside the scene's rectangle and keeps polling as the feeds load.
     const straitTrafficChip = createStraitTrafficChip({

@@ -870,6 +870,22 @@
     </div>
   </div>
 
+  <!-- Ceny ropy (2026-09-17): Brent/WTI ≈ spot z Yahoo Finance (front-month),
+       USD + EUR, graf 6 mes., deň/52-týž, spread Brent–WTI. Nezávislé od scén
+       (cena ropy je globálna). Obsah skladá oilPriceChip.js (createOilPricePanel)
+       do [data-oil-body]. -->
+  <div id="oil-panel" class="panel-collapsible collapsed" data-panel-id="oil-panel">
+    <div class="panel-glow"></div>
+    <div class="oil-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.oil" class="panel-title">CRUDE OIL</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="oil-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="oil-body" data-oil-body></div>
+    </div>
+  </div>
+
   </div>
 
   <!-- Global Context is deliberately independent from the left layer accordion. -->

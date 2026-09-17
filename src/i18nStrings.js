@@ -797,6 +797,7 @@ export const EN_STRINGS = Object.freeze({
   'oil.unavailable': 'oil prices unavailable',
   'oil.loading': 'loading oil prices…',
   'oil.close': 'Hide oil prices',
+  'panel.oil': 'CRUDE OIL',
   // Strait-traffic counter for chokepoint scenes (2026-09-17) — see src/straitTrafficChip.js.
   'strait-traffic.title': 'STRAIT TRAFFIC',
   'strait-traffic.vessels': 'vessels in view',
@@ -2154,6 +2155,7 @@ export const SK_STRINGS = Object.freeze({
   'oil.unavailable': 'ceny ropy nedostupné',
   'oil.loading': 'načítavam ceny ropy…',
   'oil.close': 'Skryť ceny ropy',
+  'panel.oil': 'ROPA',
   // Počítadlo premávky v úžine pre chokepoint scény (2026-09-17), pozri src/straitTrafficChip.js.
   'strait-traffic.title': 'PREMÁVKA V ÚŽINE',
   'strait-traffic.vessels': 'lodí v zábere',
