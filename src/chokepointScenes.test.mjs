@@ -7,6 +7,7 @@ import {
   applyChokepointScene,
   chokepointSceneAnnotationRequests,
   chokepointSceneById,
+  chokepointSceneFacts,
   chokepointSceneLabel,
   chokepointSceneLayerIds,
   chokepointSceneRectangle,
@@ -142,6 +143,29 @@ test('annotation success is read from the engine result shape', async () => {
   assert.equal(drew.annotated, true);
   const refused = await applyChokepointScene('suez', { ...base, annotate: () => ({ ok: false, drawn: 0 }) });
   assert.equal(refused.annotated, false);
+});
+
+test('every scene carries bilingual curated facts and a narrowest width', () => {
+  for (const scene of CHOKEPOINT_SCENES) {
+    for (const key of ['connects', 'shores', 'carries']) {
+      assert.ok(scene[key]?.en, `${scene.id} ${key}.en`);
+      assert.ok(scene[key]?.sk, `${scene.id} ${key}.sk`);
+    }
+    assert.ok(Number.isFinite(scene.narrowestKm) && scene.narrowestKm > 0, `${scene.id} narrowestKm`);
+  }
+});
+
+test('chokepointSceneFacts picks the language and formats the narrowest width', () => {
+  const hormuz = chokepointSceneById('hormuz');
+  const en = chokepointSceneFacts(hormuz, { lang: 'en', translate: (k) => k });
+  assert.equal(en.connects, 'Persian Gulf ↔ Gulf of Oman');
+  assert.equal(en.narrowest, '~33 km');
+  const sk = chokepointSceneFacts(hormuz, { lang: 'sk', translate: (k) => k });
+  assert.equal(sk.connects, 'Perzský záliv ↔ Ománsky záliv');
+  // canals are sub-kilometre → metres
+  const suez = chokepointSceneFacts(chokepointSceneById('suez'), { lang: 'en', translate: (k) => k });
+  assert.equal(suez.narrowest, '~205 m');
+  assert.equal(chokepointSceneFacts(null), null);
 });
 
 test('every scene has EN and SK name + subtitle strings (dictionary parity)', () => {

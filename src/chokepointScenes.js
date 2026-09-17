@@ -65,48 +65,80 @@ export const CHOKEPOINT_SCENES = Object.freeze([
     name: 'Strait of Hormuz',
     center: Object.freeze({ lat: 26.57, lon: 56.25 }),
     rectDegrees: Object.freeze([54.0, 24.2, 58.6, 28.2]),
+    narrowestKm: 33,
+    connects: Object.freeze({ en: 'Persian Gulf ↔ Gulf of Oman', sk: 'Perzský záliv ↔ Ománsky záliv' }),
+    shores: Object.freeze({ en: 'Iran / UAE · Oman', sk: 'Irán / SAE · Omán' }),
+    carries: Object.freeze({ en: 'oil ~21 Mb/d · LNG (Qatar)', sk: 'ropa ~21 Mb/d · LNG (Katar)' }),
   }),
   Object.freeze({
     id: 'malacca',
     name: 'Strait of Malacca',
     center: Object.freeze({ lat: 2.9, lon: 101.3 }),
     rectDegrees: Object.freeze([98.5, 1.0, 104.5, 5.5]),
+    narrowestKm: 2.8,
+    connects: Object.freeze({ en: 'Andaman Sea ↔ South China Sea', sk: 'Andamanské more ↔ Juhočínske more' }),
+    shores: Object.freeze({ en: 'Indonesia · Malaysia / Singapore', sk: 'Indonézia · Malajzia / Singapur' }),
+    carries: Object.freeze({ en: '~1/4 of traded goods · Gulf oil to E Asia', sk: '~1/4 svetového tovaru · ropa do V Ázie' }),
   }),
   Object.freeze({
     id: 'bab-el-mandeb',
     name: 'Bab-el-Mandeb',
     center: Object.freeze({ lat: 12.6, lon: 43.4 }),
     rectDegrees: Object.freeze([41.8, 11.4, 44.6, 14.0]),
+    narrowestKm: 30,
+    connects: Object.freeze({ en: 'Red Sea ↔ Gulf of Aden', sk: 'Červené more ↔ Adenský záliv' }),
+    shores: Object.freeze({ en: 'Djibouti · Eritrea / Yemen', sk: 'Džibutsko · Eritrea / Jemen' }),
+    carries: Object.freeze({ en: 'oil & goods to the Suez route', sk: 'ropa a tovar na suezskú trasu' }),
   }),
   Object.freeze({
     id: 'suez',
     name: 'Suez Canal',
     center: Object.freeze({ lat: 30.6, lon: 32.35 }),
     rectDegrees: Object.freeze([31.5, 29.3, 33.2, 31.6]),
+    narrowestKm: 0.205,
+    connects: Object.freeze({ en: 'Mediterranean ↔ Red Sea', sk: 'Stredozemné more ↔ Červené more' }),
+    shores: Object.freeze({ en: 'Egypt (both banks)', sk: 'Egypt (oba brehy)' }),
+    carries: Object.freeze({ en: '~12% of global trade · ~10% seaborne oil', sk: '~12% svetového obchodu · ~10% námornej ropy' }),
   }),
   Object.freeze({
     id: 'bosphorus',
     name: 'Bosphorus',
     center: Object.freeze({ lat: 41.1, lon: 29.05 }),
     rectDegrees: Object.freeze([28.4, 40.5, 29.6, 41.5]),
+    narrowestKm: 0.7,
+    connects: Object.freeze({ en: 'Black Sea ↔ Sea of Marmara', sk: 'Čierne more ↔ Marmarské more' }),
+    shores: Object.freeze({ en: 'Türkiye (both banks)', sk: 'Turecko (oba brehy)' }),
+    carries: Object.freeze({ en: 'Russian & Caspian oil · Black Sea grain', sk: 'ruská a kaspická ropa · obilie z Čierneho mora' }),
   }),
   Object.freeze({
     id: 'panama',
     name: 'Panama Canal',
     center: Object.freeze({ lat: 9.1, lon: -79.7 }),
     rectDegrees: Object.freeze([-80.6, 8.5, -78.8, 9.6]),
+    narrowestKm: 0.192,
+    connects: Object.freeze({ en: 'Atlantic ↔ Pacific', sk: 'Atlantik ↔ Pacifik' }),
+    shores: Object.freeze({ en: 'Panama', sk: 'Panama' }),
+    carries: Object.freeze({ en: '~5% of world maritime trade', sk: '~5% svetového námorného obchodu' }),
   }),
   Object.freeze({
     id: 'gibraltar',
     name: 'Strait of Gibraltar',
     center: Object.freeze({ lat: 35.97, lon: -5.5 }),
     rectDegrees: Object.freeze([-6.3, 35.6, -4.7, 36.4]),
+    narrowestKm: 13,
+    connects: Object.freeze({ en: 'Atlantic ↔ Mediterranean', sk: 'Atlantik ↔ Stredozemné more' }),
+    shores: Object.freeze({ en: 'Spain / Morocco', sk: 'Španielsko / Maroko' }),
+    carries: Object.freeze({ en: "Mediterranean's only ocean gate", sk: 'jediná oceánska brána Stredomoria' }),
   }),
   Object.freeze({
     id: 'dover',
     name: 'Strait of Dover',
     center: Object.freeze({ lat: 51.0, lon: 1.45 }),
     rectDegrees: Object.freeze([0.7, 50.6, 2.2, 51.4]),
+    narrowestKm: 33,
+    connects: Object.freeze({ en: 'English Channel ↔ North Sea', sk: 'Lamanšský prieliv ↔ Severné more' }),
+    shores: Object.freeze({ en: 'United Kingdom / France', sk: 'Spojené kráľovstvo / Francúzsko' }),
+    carries: Object.freeze({ en: "world's busiest lane (~400 ships/day)", sk: 'najrušnejšia trasa (~400 lodí/deň)' }),
   }),
 ]);
 
@@ -185,6 +217,34 @@ export function chokepointSceneSubtitle(scene, translate = t) {
   const key = `chokepoint.${scene.id}.subtitle`;
   const translated = translate(key);
   return translated === key ? '' : translated;
+}
+
+/**
+ * Curated facts for the strait-overview card: the one-line subtitle plus the
+ * geography/economics (what it connects, its shores, narrowest width, what flows
+ * through it). The prose is language-picked from the catalog's {en, sk} entries;
+ * the width is formatted here (metres under 1 km — canals — else km).
+ * @param {object} scene
+ * @param {{lang?: string, translate?: (key: string) => string}} [o]
+ * @returns {null | {subtitle: string, connects: string, shores: string, narrowest: string, carries: string}}
+ */
+export function chokepointSceneFacts(scene, { lang = 'sk', translate = t } = {}) {
+  if (!scene) return null;
+  const pick = (obj) => (obj && typeof obj === 'object' ? (obj[lang] ?? obj.en ?? '') : '');
+  let narrowest = '';
+  const km = scene.narrowestKm;
+  if (Number.isFinite(km)) {
+    narrowest = km < 1
+      ? `~${Math.round(km * 1000)} m`
+      : `~${new Intl.NumberFormat(lang === 'sk' ? 'sk-SK' : 'en-GB').format(km)} km`;
+  }
+  return {
+    subtitle: chokepointSceneSubtitle(scene, translate),
+    connects: pick(scene.connects),
+    shores: pick(scene.shores),
+    narrowest,
+    carries: pick(scene.carries),
+  };
 }
 
 /**

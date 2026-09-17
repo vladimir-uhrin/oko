@@ -37,7 +37,7 @@ import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
-import { applyChokepointScene, chokepointSceneById, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
+import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
 import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { initLogoGaze } from './logoGaze.js';
@@ -507,13 +507,20 @@ async function init() {
     const straitTrafficChip = createStraitTrafficChip({
       getLivePositions: () => aisLiveVesselsLayer.getAllPositions(5000),
       getDelayedPositions: () => aishubVesselsLayer.getAllPositions(5000),
+      getDarkPositions: () => gfwSarDetectionsLayer.getAllPositions(),
     });
     window.__godsEyeView.straitTrafficChip = straitTrafficChip;
     const runChokepointScene = (id) => {
       const scene = chokepointSceneById(id);
       const result = applyChokepointScene(id, chokepointSceneDeps);
       void oilPriceChip.refreshAndShow();
-      if (scene) straitTrafficChip.showFor({ rect: scene.rectDegrees, label: chokepointSceneLabel(scene) });
+      if (scene) {
+        straitTrafficChip.showFor({
+          rect: scene.rectDegrees,
+          label: chokepointSceneLabel(scene),
+          facts: chokepointSceneFacts(scene, { lang: currentLanguage(), translate: t }),
+        });
+      }
       return result;
     };
     window.__godsEyeView.chokepointScenes = {

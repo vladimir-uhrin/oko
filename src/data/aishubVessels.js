@@ -613,7 +613,14 @@ export function createAishubVesselsLayer({
       for (const { row } of _byId.values()) {
         if (result.length >= cap) break;
         if (!Number.isFinite(row?.lat) || !Number.isFinite(row?.lon)) continue;
-        result.push({ id: String(row.mmsi), latitude: row.lat, longitude: row.lon });
+        result.push({
+          id: String(row.mmsi),
+          latitude: row.lat,
+          longitude: row.lon,
+          type: row.type ?? null,
+          sog: Number.isFinite(row.sog) ? row.sog : null,
+          navStatus: Number.isFinite(row.navStatus) ? row.navStatus : null,
+        });
       }
       return result;
     },

@@ -459,6 +459,27 @@ export function createGfwSarLayer({
       return stats;
     },
 
+    /**
+     * SAR detection cells for the strait-traffic counter's "no AIS" figure.
+     * `matched` = matched to an AIS identity; a detection with matched:false is a
+     * radar-only ("dark") return. Delayed (last pass in the window), not live.
+     * @returns {Array<{latitude: number, longitude: number, matched: boolean, detections: number}>}
+     */
+    getAllPositions() {
+      if (!_enabled || !_rows.length) return [];
+      const out = [];
+      for (const row of _rows) {
+        if (!Number.isFinite(row?.lat) || !Number.isFinite(row?.lon)) continue;
+        out.push({
+          latitude: row.lat,
+          longitude: row.lon,
+          matched: Boolean(row.matched),
+          detections: Number.isFinite(row.detections) ? row.detections : 1,
+        });
+      }
+      return out;
+    },
+
     hasContact(id) {
       const key = String(id ?? '').trim();
       return Boolean(key) && _byId.has(key);

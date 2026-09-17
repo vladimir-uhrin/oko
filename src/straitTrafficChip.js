@@ -1,32 +1,29 @@
 // src/straitTrafficChip.js
 //
-// Live "vessels in the strait now" counter, shown top-left with a chokepoint
-// scene (the oil-price chip is top-right). It polls the vessel layers every few
-// seconds because the feeds arrive asynchronously — the delayed AISHub layer
-// only loads after the scene flies in, and live AIS trickles in over the
-// websocket — so a one-shot read would undercount. The pure counting lives in
-// src/straitTraffic.js (tested); this is DOM + timer glue.
+// "Strait overview" card shown top-left with a chokepoint scene. It answers
+// "what is this strait and what is moving through it right now":
+//   - curated facts: what it connects, its shores, its narrowest width, what
+//     flows through it (static, from the chokepoint catalog);
+//   - live from AIS: vessels in view now (live + delayed AISHub, deduped), a
+//     type breakdown (tankers / cargo / passenger / other), and movement
+//     (share under way, average speed);
+//   - "no AIS (radar)": Sentinel-1 SAR detections with no AIS match, DELAYED
+//     (per-pass), labelled as such — never mixed into the live "now" count.
+//
+// The pure counting lives in src/straitTraffic.js (tested); the facts in
+// src/chokepointScenes.js (tested). This is DOM + a 4 s poll, because the feeds
+// arrive asynchronously after the scene flies in.
 
 import { buildStraitTrafficModel } from './straitTraffic.js';
 import { t } from './i18n.js';
 
 const DEFAULT_INTERVAL_MS = 4000;
 
-/**
- * @param {object} [deps]
- * @param {Document} [deps.documentRef]
- * @param {() => Array<object>} [deps.getLivePositions]
- * @param {() => Array<object>} [deps.getDelayedPositions]
- * @param {(key: string, vars?: object) => string} [deps.translate]
- * @param {number} [deps.intervalMs]
- * @param {(fn: Function, ms: number) => any} [deps.setIntervalImpl]
- * @param {(handle: any) => void} [deps.clearIntervalImpl]
- * @returns {{ showFor: (o: {rect: ReadonlyArray<number>, label?: string}) => void, hide: () => void, refresh: () => void, element: HTMLElement|null }}
- */
 export function createStraitTrafficChip({
   documentRef = globalThis.document,
   getLivePositions = () => [],
   getDelayedPositions = () => [],
+  getDarkPositions = () => [],
   translate = t,
   intervalMs = DEFAULT_INTERVAL_MS,
   setIntervalImpl = (fn, ms) => setInterval(fn, ms),
@@ -44,7 +41,8 @@ export function createStraitTrafficChip({
   (doc.body || doc.documentElement).appendChild(el);
 
   let rect = null;
-  let sceneLabel = '';
+  let label = '';
+  let facts = null;
   let timer = null;
 
   const div = (cls, text) => { const d = doc.createElement('div'); d.className = cls; if (text != null) d.textContent = text; return d; };
@@ -57,46 +55,76 @@ export function createStraitTrafficChip({
     b.addEventListener('click', hide);
     return b;
   };
-  const header = () => {
-    const head = div('oko-strait-head');
-    const titles = div('oko-strait-titles');
-    titles.appendChild(div('oko-strait-title', translate('strait-traffic.title')));
-    if (sceneLabel) titles.appendChild(div('oko-strait-scene', sceneLabel));
-    head.appendChild(titles);
-    head.appendChild(closeButton());
-    return head;
+  const factRow = (labelKey, value) => {
+    const row = div('oko-strait-fact');
+    row.appendChild(div('oko-strait-fact-k', translate(labelKey)));
+    row.appendChild(div('oko-strait-fact-v', value));
+    return row;
   };
 
   const safe = (getter) => { try { const v = getter(); return Array.isArray(v) ? v : []; } catch { return []; } };
 
-  function render(model, { loading = false } = {}) {
-    const nodes = [header()];
-    if (loading) {
-      nodes.push(div('oko-strait-note', translate('strait-traffic.loading')));
-      el.replaceChildren(...nodes);
-      return;
-    }
-    const big = div('oko-strait-count');
-    big.appendChild(div('oko-strait-num', String(model.total)));
-    big.appendChild(div('oko-strait-unit', translate('strait-traffic.vessels')));
-    nodes.push(big);
+  function header() {
+    const head = div('oko-strait-head');
+    head.appendChild(div('oko-strait-title', label || translate('strait-traffic.title')));
+    head.appendChild(closeButton());
+    return head;
+  }
+
+  function factsBlock() {
+    const nodes = [];
+    if (facts?.subtitle) nodes.push(div('oko-strait-sub', facts.subtitle));
+    if (facts?.connects) nodes.push(factRow('chokepoint.connects', facts.connects));
+    if (facts?.shores) nodes.push(factRow('chokepoint.shores', facts.shores));
+    const tail = [];
+    if (facts?.narrowest) tail.push(`${translate('chokepoint.narrowest')} ${facts.narrowest}`);
+    if (facts?.carries) tail.push(`${translate('chokepoint.carries')} ${facts.carries}`);
+    if (tail.length) nodes.push(div('oko-strait-fact-tail', tail.join(' · ')));
+    return nodes;
+  }
+
+  function liveBlock(model, loading) {
+    if (loading) return [div('oko-strait-note', translate('strait-traffic.loading'))];
+    const nodes = [];
+    const count = div('oko-strait-count');
+    count.appendChild(div('oko-strait-num', String(model.total)));
+    count.appendChild(div('oko-strait-unit', translate('strait-traffic.vessels')));
+    nodes.push(count);
     nodes.push(div('oko-strait-split', translate('strait-traffic.split', { live: model.live, delayed: model.delayed })));
+    if (model.total > 0) {
+      const ty = model.types;
+      let typesText = `${translate('strait-traffic.types-label')}: `
+        + `${translate('strait-traffic.tanker')} ${ty.tanker} · ${translate('strait-traffic.cargo')} ${ty.cargo}`
+        + ` · ${translate('strait-traffic.passenger')} ${ty.passenger} · ${translate('strait-traffic.other')} ${ty.other}`;
+      if (ty.unknown > 0) typesText += ` · ${translate('strait-traffic.unknown')} ${ty.unknown}`;
+      nodes.push(div('oko-strait-types', typesText));
+    }
+    if (model.hasMovement && model.movingPct !== null) {
+      nodes.push(div('oko-strait-move', translate('strait-traffic.moving', { pct: model.movingPct, kts: model.avgSpeedKts ?? '—' })));
+    }
+    if (model.dark > 0) nodes.push(div('oko-strait-dark', translate('strait-traffic.dark', { n: model.dark })));
     nodes.push(div('oko-strait-note', translate('strait-traffic.tracked')));
-    el.replaceChildren(...nodes);
+    return nodes;
+  }
+
+  function render(model, { loading = false } = {}) {
+    el.replaceChildren(header(), ...factsBlock(), div('oko-strait-rule'), ...liveBlock(model, loading));
   }
 
   function refresh() {
     if (el.hidden || !rect) return;
     const live = safe(getLivePositions);
     const delayed = safe(getDelayedPositions);
+    const sar = safe(getDarkPositions);
     if (!live.length && !delayed.length) { render(null, { loading: true }); return; }
-    render(buildStraitTrafficModel({ live, delayed }, rect));
+    render(buildStraitTrafficModel({ live, delayed, sar }, rect));
   }
 
-  function showFor({ rect: nextRect, label = '' } = {}) {
+  function showFor({ rect: nextRect, label: nextLabel = '', facts: nextFacts = null } = {}) {
     if (!Array.isArray(nextRect) || nextRect.length !== 4) return;
     rect = nextRect;
-    sceneLabel = String(label || '');
+    label = String(nextLabel || '');
+    facts = nextFacts;
     el.hidden = false;
     refresh();
     if (timer) clearIntervalImpl(timer);
@@ -117,20 +145,28 @@ function ensureStyle(doc) {
   const style = doc.createElement('style');
   style.id = 'oko-strait-chip-style';
   style.textContent = `
-.oko-strait-chip{position:fixed;top:52px;left:10px;z-index:60;min-width:150px;max-width:220px;
-  padding:8px 10px;border-radius:10px;background:rgba(11,22,34,.82);border:1px solid rgba(57,208,255,.28);
-  box-shadow:0 6px 22px rgba(0,0,0,.45);backdrop-filter:blur(6px);
+.oko-strait-chip{position:fixed;top:52px;left:10px;z-index:60;width:236px;max-width:calc(100vw - 20px);
+  padding:9px 11px;border-radius:11px;background:rgba(11,22,34,.85);border:1px solid rgba(57,208,255,.28);
+  box-shadow:0 8px 26px rgba(0,0,0,.5);backdrop-filter:blur(7px);
   font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#dbeafe;pointer-events:auto;}
 .oko-strait-chip[hidden]{display:none;}
 .oko-strait-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
-.oko-strait-title{font-size:10px;font-weight:600;letter-spacing:.14em;color:#39d0ff;text-transform:uppercase;}
-.oko-strait-scene{font-size:10px;color:#8aa0b6;margin-top:1px;letter-spacing:.02em;}
+.oko-strait-title{font-size:11px;font-weight:600;letter-spacing:.1em;color:#39d0ff;text-transform:uppercase;line-height:1.2;}
 .oko-strait-close{appearance:none;background:none;border:0;color:#8aa0b6;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
 .oko-strait-close:hover{color:#dbeafe;}
-.oko-strait-count{display:flex;align-items:baseline;gap:6px;margin:4px 0 2px;}
+.oko-strait-sub{font-size:10px;color:#aebfd2;margin:3px 0 4px;line-height:1.3;}
+.oko-strait-fact{display:flex;gap:6px;font-size:10px;line-height:1.35;}
+.oko-strait-fact-k{flex:0 0 auto;color:#6f8398;}
+.oko-strait-fact-v{color:#c8d6e6;}
+.oko-strait-fact-tail{font-size:9px;color:#8aa0b6;line-height:1.35;margin-top:1px;}
+.oko-strait-rule{height:1px;background:rgba(57,208,255,.18);margin:6px 0 5px;}
+.oko-strait-count{display:flex;align-items:baseline;gap:6px;}
 .oko-strait-num{font-size:26px;font-weight:700;line-height:1;color:#eaf2ff;font-variant-numeric:tabular-nums;}
 .oko-strait-unit{font-size:10px;color:#8aa0b6;letter-spacing:.04em;}
-.oko-strait-split{font-size:11px;color:#aebfd2;font-variant-numeric:tabular-nums;}
+.oko-strait-split{font-size:11px;color:#aebfd2;font-variant-numeric:tabular-nums;margin-top:2px;}
+.oko-strait-types{font-size:10px;color:#c8d6e6;font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.3;}
+.oko-strait-move{font-size:10px;color:#aebfd2;font-variant-numeric:tabular-nums;margin-top:2px;}
+.oko-strait-dark{font-size:10px;color:#ffb547;font-variant-numeric:tabular-nums;margin-top:2px;}
 .oko-strait-note{font-size:9px;color:#6f8398;letter-spacing:.03em;margin-top:4px;text-transform:uppercase;}
 `;
   (doc.head || doc.documentElement).appendChild(style);

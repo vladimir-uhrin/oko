@@ -673,6 +673,9 @@ const aisLiveVesselsLayer = {
         position,
         latitude: record.lat,
         longitude: record.lon,
+        type: record.type ?? null,
+        sog: Number.isFinite(record.speed) ? record.speed : null,
+        navStatus: record.navStatus ?? null,
       });
     }
     return result;
