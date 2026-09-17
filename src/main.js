@@ -39,6 +39,7 @@ import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { applyChokepointScene, chokepointSceneById, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
 import { createOilPriceChip } from './oilPriceChip.js';
+import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -354,9 +355,10 @@ async function init() {
     dataManager.register(gfwSarDetectionsLayer);
     // Lode · oneskorené (AISHub cez aiscast, 2026-09-15): druhý zdroj tam, kde
     // živý aisstream nevidí nič. Dedup: MMSI, ktoré už vidí živá vrstva, vyhráva.
-    dataManager.register(createAishubVesselsLayer({
+    const aishubVesselsLayer = createAishubVesselsLayer({
       isLive: (mmsi) => aisLiveVesselsLayer.hasContact(mmsi),
-    }));
+    });
+    dataManager.register(aishubVesselsLayer);
     // Toky plynu (2026-09-13, etapa 4 modulu PLYN): hraničné stanice z ENTSOG
     // ako body s popisom, z tej istej proxy ako karta TOKY v paneli.
     dataManager.register(gasFlowsLayer);
@@ -495,9 +497,18 @@ async function init() {
     // via /api/oil/prices; shown whenever a scene is applied, by any trigger.
     const oilPriceChip = createOilPriceChip();
     window.__godsEyeView.oilPriceChip = oilPriceChip;
+    // Live "vessels in the strait now" counter — counts live + delayed AIS
+    // contacts inside the scene's rectangle and keeps polling as the feeds load.
+    const straitTrafficChip = createStraitTrafficChip({
+      getLivePositions: () => aisLiveVesselsLayer.getAllPositions(5000),
+      getDelayedPositions: () => aishubVesselsLayer.getAllPositions(5000),
+    });
+    window.__godsEyeView.straitTrafficChip = straitTrafficChip;
     const runChokepointScene = (id) => {
+      const scene = chokepointSceneById(id);
       const result = applyChokepointScene(id, chokepointSceneDeps);
       void oilPriceChip.refreshAndShow();
+      if (scene) straitTrafficChip.showFor({ rect: scene.rectDegrees, label: chokepointSceneLabel(scene) });
       return result;
     };
     window.__godsEyeView.chokepointScenes = {

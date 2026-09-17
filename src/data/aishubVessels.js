@@ -600,6 +600,24 @@ export function createAishubVesselsLayer({
       return entry ? aishubContactSummary(entry.row) : null;
     },
 
+    /**
+     * Delayed-vessel positions for in-view counting (strait-traffic counter),
+     * same shape as aisLiveVessels.getAllPositions. Empty while disabled/empty.
+     * @param {number} [maxCount=5000]
+     * @returns {Array<{id: string, latitude: number, longitude: number}>}
+     */
+    getAllPositions(maxCount = 5000) {
+      if (!_enabled || !_byId.size) return [];
+      const cap = Number.isFinite(maxCount) && maxCount > 0 ? Math.floor(maxCount) : 5000;
+      const result = [];
+      for (const { row } of _byId.values()) {
+        if (result.length >= cap) break;
+        if (!Number.isFinite(row?.lat) || !Number.isFinite(row?.lon)) continue;
+        result.push({ id: String(row.mmsi), latitude: row.lat, longitude: row.lon });
+      }
+      return result;
+    },
+
     getDetectableObjects(options = {}) {
       if (!_enabled || !_collection || !_collection.show) return [];
       const entries = [..._byId.values()];
