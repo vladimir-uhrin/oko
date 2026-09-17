@@ -37,6 +37,7 @@ import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
+import { applyChokepointScene, chokepointSceneById, listChokepointScenes } from './chokepointScenes.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -469,6 +470,40 @@ async function init() {
       requestRender: governorRequestRender,
     };
     window.__godsEyeView.voiceCommands = initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
+
+    // Maritime chokepoint scenes: enable the vessel / SAR / pipeline layers,
+    // frame a strait and mark it — the upstream "chokehold on oil" reveal built
+    // from layers we already show honestly (see src/chokepointScenes.js). Layer
+    // enables use origin 'user' so a scene persists exactly like clicking those
+    // rows would, matching the first-run missions.
+    const chokepointSceneDeps = {
+      setLayerEnabled: (layerId) => dataManager.setEnabled(layerId, true, { origin: 'user' }),
+      flyToRegion: (rectDegrees) => {
+        if (!viewer?.camera?.flyTo) return null;
+        viewer.trackedEntity = undefined;
+        viewer.camera.flyTo({
+          destination: Cesium.Rectangle.fromDegrees(...rectDegrees),
+          duration: 3.2,
+        });
+        return null;
+      },
+      annotate: (requests) => annotations?.annotate?.(requests, { persist: true, flyTo: false }),
+    };
+    window.__godsEyeView.chokepointScenes = {
+      list: listChokepointScenes,
+      apply: (id) => applyChokepointScene(id, chokepointSceneDeps),
+    };
+    // Shareable deep link `?chokepoint=<id>` (e.g. oko.uhrin.digital/?chokepoint=hormuz).
+    // Apply AFTER camera/layer restore settles so the scene wins over the
+    // default/local layer state, the way an explicit click would.
+    try {
+      const requested = new URLSearchParams(window.location?.search || '').get('chokepoint');
+      if (requested && chokepointSceneById(requested)) {
+        void Promise.resolve(styleManager.initialRestorePromise)
+          .catch(() => {})
+          .then(() => applyChokepointScene(requested, chokepointSceneDeps));
+      }
+    } catch { /* URL parsing is best-effort — a bad param never breaks boot */ }
 
   } catch (error) {
     console.error("God's Eye View initialization failed:", error);
