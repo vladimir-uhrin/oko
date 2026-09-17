@@ -329,11 +329,9 @@ export const DATA_CREDITS = [
   {
     key: 'oil-prices',
     html:
-      'Crude oil spot prices (Brent, WTI — daily, USD/barrel): ' +
-      'U.S. Energy Information Administration ' +
-      '(<a href="https://www.eia.gov" target="_blank" rel="noopener">eia.gov</a>, public domain) ' +
-      'via <a href="https://fred.stlouisfed.org" target="_blank" rel="noopener">FRED</a> ' +
-      '(DCOILBRENTEU, DCOILWTICO — spot, delayed ~1 business day, not futures)',
+      'Crude oil prices (Brent, WTI front-month ≈ spot, USD/bbl) and EUR/USD: ' +
+      '<a href="https://finance.yahoo.com" target="_blank" rel="noopener">Yahoo Finance</a> ' +
+      '(BZ=F, CL=F, EURUSD=X — near real-time, ~15 min delayed; personal, non-commercial use)',
   },
   {
     key: 'air-density',

@@ -2,99 +2,98 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  FRED_BRENT_SERIES,
-  FRED_WTI_SERIES,
+  YAHOO_SYMBOLS,
   buildOilModel,
   fetchOilPrices,
+  formatEurBbl,
   formatUsdBbl,
-  oilFredUrls,
+  parseYahooChart,
+  yahooChartUrl,
 } from './oilPrices.js';
 
-const NOW = Date.UTC(2026, 8, 16); // 2026-09-16
-const brentRows = [
-  { date: '2026-09-11', value: 118.06 },
-  { date: '2026-09-14', value: 121.25 },
-  { date: '2026-09-15', value: 130.80 },
-];
-const wtiRows = [
-  { date: '2026-09-14', value: 102.42 },
-  { date: '2026-09-15', value: 107.02 },
-];
-
-test('oilFredUrls points at the keyless FRED CSV for both series', () => {
-  const { brent, wti } = oilFredUrls();
-  assert.ok(brent.includes('fredgraph.csv'));
-  assert.ok(brent.includes(FRED_BRENT_SERIES));
-  assert.ok(wti.includes(FRED_WTI_SERIES));
-  assert.ok(brent.startsWith('https://'));
+const yahooJson = (price, prevClose, symbol = 'BZ=F') => ({
+  chart: {
+    result: [{
+      meta: {
+        symbol,
+        currency: 'USD',
+        regularMarketPrice: price,
+        chartPreviousClose: prevClose,
+        regularMarketDayHigh: price + 1.28,
+        regularMarketDayLow: price - 3.17,
+        fiftyTwoWeekHigh: 126.1,
+        fiftyTwoWeekLow: 58.72,
+        regularMarketTime: 1_789_000_000,
+      },
+      timestamp: [1_788_000_000, 1_788_086_400, 1_788_172_800],
+      indicators: { quote: [{ close: [100, null, price] }] },
+    }],
+  },
 });
 
-test('formatUsdBbl formats to two decimals and honours the empty case', () => {
-  assert.equal(formatUsdBbl(130.8, 'en'), '130.80 $/bbl');
+test('yahooChartUrl is keyless and carries symbol + range', () => {
+  const url = yahooChartUrl(YAHOO_SYMBOLS.brent, { range: '6mo' });
+  assert.ok(url.startsWith('https://query1.finance.yahoo.com/'));
+  assert.ok(url.includes(encodeURIComponent('BZ=F')));
+  assert.ok(url.includes('range=6mo'));
+});
+
+test('formatters produce USD/EUR per barrel and fail closed', () => {
+  assert.equal(formatUsdBbl(104.72, 'en'), '104.72 $/bbl');
+  assert.equal(formatEurBbl(91.22, 'en'), '91.22 €/bbl');
   assert.equal(formatUsdBbl(null), '—');
-  assert.equal(formatUsdBbl(Number.NaN), '—');
+  assert.equal(formatEurBbl(Number.NaN), '—');
 });
 
-test('buildOilModel fails closed on empty input', () => {
-  assert.equal(buildOilModel(null).ok, false);
-  assert.equal(buildOilModel({ brent: { rows: [] }, wti: { rows: [] } }).ok, false);
+test('parseYahooChart normalizes the quote and drops null closes from the series', () => {
+  const q = parseYahooChart(yahooJson(104.72, 103.42));
+  assert.equal(q.price, 104.72);
+  assert.equal(q.prevClose, 103.42);
+  assert.equal(q.dayHigh, 106);
+  assert.equal(q.week52High, 126.1);
+  assert.equal(q.currency, 'USD');
+  assert.equal(q.marketTimeMs, 1_789_000_000_000);
+  assert.equal(q.series.length, 2); // the middle null close is skipped
+  assert.ok(q.series.every((p) => Number.isFinite(p.t) && Number.isFinite(p.v)));
 });
 
-test('buildOilModel derives latest price, day change and direction for both grades', () => {
-  const model = buildOilModel(
-    { brent: { rows: brentRows }, wti: { rows: wtiRows }, fetchedAt: NOW },
-    { nowMs: NOW, lang: 'en', translate: (key) => key },
-  );
+test('parseYahooChart returns null without a usable price', () => {
+  assert.equal(parseYahooChart({}), null);
+  assert.equal(parseYahooChart({ chart: { result: [{ meta: {} }] } }), null);
+});
+
+test('buildOilModel derives USD+EUR, day change, spread and chart series', () => {
+  const model = buildOilModel({
+    brent: parseYahooChart(yahooJson(104.72, 103.42, 'BZ=F')),
+    wti: parseYahooChart(yahooJson(101.88, 102.43, 'CL=F')),
+    eurusd: { price: 1.148 },
+    fetchedAt: 1_789_000_100_000,
+  }, { lang: 'en', translate: (k) => k });
+
   assert.equal(model.ok, true);
-  assert.equal(model.brent.value, 130.8);
-  assert.match(model.brent.text, /130\.80 \$\/bbl/);
-  assert.equal(model.brent.dir, 'up'); // 121.25 -> 130.80
-  assert.ok(model.brent.pct > 0);
-  assert.equal(model.wti.value, 107.02);
-  assert.equal(model.wti.dir, 'up');
-  assert.equal(model.brent.label, 'oil.brent');
-  assert.equal(model.wti.label, 'oil.wti');
+  assert.equal(model.brent.usd, 104.72);
+  assert.equal(model.brent.dir, 'up'); // 103.42 -> 104.72
+  assert.ok(model.brent.changePct > 0);
+  assert.ok(Math.abs(model.brent.eur - 104.72 / 1.148) < 1e-6);
+  assert.match(model.brent.eurText, /€\/bbl/);
+  assert.equal(model.wti.dir, 'down'); // 102.43 -> 101.88
+  assert.ok(Math.abs(model.spread - (104.72 - 101.88)) < 1e-9);
+  assert.equal(model.chart.series.length, 2);
+  assert.ok(model.brent.dayRangeText && model.brent.week52Text);
+  assert.ok(model.eurusd === 1.148);
 });
 
-test('buildOilModel returns spark points inside the range and a fresh verdict', () => {
-  const model = buildOilModel(
-    { brent: { rows: brentRows }, wti: { rows: wtiRows } },
-    { nowMs: NOW, range: '1m' },
-  );
-  assert.equal(model.spark.brent.length, 3);
-  assert.equal(model.spark.wti.length, 2);
-  assert.ok(model.spark.brent.every((p) => Number.isFinite(p.t) && Number.isFinite(p.v)));
-  assert.equal(model.freshness.latestDate, '2026-09-15');
-  assert.equal(model.freshness.stale, false);
-  assert.equal(model.freshness.ageDays, 1);
-});
-
-test('buildOilModel flags a stale series when the latest print is old', () => {
-  const model = buildOilModel(
-    { brent: { rows: [{ date: '2026-08-01', value: 90 }] }, wti: { rows: [] } },
-    { nowMs: NOW },
-  );
-  assert.equal(model.ok, true);
-  assert.equal(model.freshness.stale, true);
-  assert.ok(model.freshness.ageDays > 5);
+test('without a EUR/USD rate the EUR figure is omitted, not faked', () => {
+  const model = buildOilModel({ brent: parseYahooChart(yahooJson(100, 99)) }, { translate: (k) => k });
+  assert.equal(model.brent.eur, null);
+  assert.equal(model.brent.eurText, null);
   assert.equal(model.wti, null);
-});
-
-test('a down day is reported as a falling direction', () => {
-  const model = buildOilModel(
-    { brent: { rows: [{ date: '2026-09-14', value: 130 }, { date: '2026-09-15', value: 121 }] } },
-    { nowMs: NOW },
-  );
-  assert.equal(model.brent.dir, 'down');
-  assert.ok(model.brent.delta < 0);
+  assert.equal(model.spread, null);
 });
 
 test('fetchOilPrices returns the payload and raises the proxy error shape', async () => {
-  const ok = await fetchOilPrices({
-    fetcher: async () => ({ ok: true, json: async () => ({ brent: { rows: brentRows } }) }),
-  });
-  assert.deepEqual(ok.brent.rows, brentRows);
-
+  const ok = await fetchOilPrices({ fetcher: async () => ({ ok: true, json: async () => ({ brent: { price: 1 } }) }) });
+  assert.equal(ok.brent.price, 1);
   await assert.rejects(
     fetchOilPrices({ fetcher: async () => ({ ok: false, status: 502, json: async () => ({ error: 'upstream' }) }) }),
     (err) => err.message === 'upstream' && err.status === 502,
