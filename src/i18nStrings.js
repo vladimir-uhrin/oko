@@ -768,6 +768,8 @@ export const EN_STRINGS = Object.freeze({
   'aishub.throttled': 'aiscast is throttling requests (429) — try again shortly',
   // Maritime chokepoint scenes (2026-09-17) — see src/chokepointScenes.js.
   'chokepoint.badge': 'CHOKEPOINT',
+  'chokepoint.pick': 'Fly to a chokepoint…',
+  'chokepoint.select-aria': 'Fly to a maritime chokepoint scene',
   'chokepoint.hormuz.name': 'Strait of Hormuz',
   'chokepoint.hormuz.subtitle': '~20% of the world\'s oil passes through here',
   'chokepoint.malacca.name': 'Strait of Malacca',
@@ -2105,6 +2107,8 @@ export const SK_STRINGS = Object.freeze({
   'aishub.throttled': 'aiscast obmedzuje dopyty (429) — skús o chvíľu',
   // Námorné úžiny — chokepoint scény (2026-09-17), pozri src/chokepointScenes.js.
   'chokepoint.badge': 'ÚŽINA',
+  'chokepoint.pick': 'Preleť na úžinu…',
+  'chokepoint.select-aria': 'Preleť na scénu námornej úžiny',
   'chokepoint.hormuz.name': 'Hormuzský prieliv',
   'chokepoint.hormuz.subtitle': 'prejde tadiaľ ~20 % svetovej ropy',
   'chokepoint.malacca.name': 'Malacký prieliv',

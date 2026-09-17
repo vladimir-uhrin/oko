@@ -37,7 +37,7 @@ import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
-import { applyChokepointScene, chokepointSceneById, listChokepointScenes } from './chokepointScenes.js';
+import { applyChokepointScene, chokepointSceneById, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -504,6 +504,27 @@ async function init() {
           .then(() => applyChokepointScene(requested, chokepointSceneDeps));
       }
     } catch { /* URL parsing is best-effort — a bad param never breaks boot */ }
+
+    // In-app trigger: the SCENES panel (bottom-bar "SCENES" tab on touch) carries
+    // a chokepoint dropdown. Options are built here so their labels follow i18n;
+    // picking one applies the scene, then the control resets to its placeholder so
+    // the same strait can be re-picked to re-centre.
+    try {
+      const picker = document.getElementById('chokepoint-select');
+      if (picker) {
+        for (const scene of listChokepointScenes()) {
+          const option = document.createElement('option');
+          option.value = scene.id;
+          option.textContent = chokepointSceneLabel(scene);
+          picker.appendChild(option);
+        }
+        picker.addEventListener('change', () => {
+          const id = picker.value;
+          picker.value = '';
+          if (id) void applyChokepointScene(id, chokepointSceneDeps);
+        });
+      }
+    } catch { /* the picker is optional chrome — its absence never breaks boot */ }
 
   } catch (error) {
     console.error("God's Eye View initialization failed:", error);

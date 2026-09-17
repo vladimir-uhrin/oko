@@ -804,6 +804,14 @@
         <span class="panel-divider"></span>
         <button class="panel-collapse-btn" data-collapse-target="scene-panel" title="Collapse panel">+</button>
       </div>
+      <!-- Chokepoint scenes: fly to a maritime strait with the vessel / SAR /
+           pipeline layers on and mark it. Options + change handler are populated
+           in src/main.js from src/chokepointScenes.js (labels follow i18n). -->
+      <div class="scene-controls scene-chokepoints">
+        <select id="chokepoint-select" aria-label="Fly to a maritime chokepoint scene" data-i18n-aria="chokepoint.select-aria">
+          <option value="" data-i18n="chokepoint.pick">Fly to a chokepoint…</option>
+        </select>
+      </div>
       <div class="scene-controls">
         <select id="scene-select" aria-label="Scene recipe" data-i18n-aria="scene.select-aria"></select>
         <button data-i18n="scene.new" id="scene-new-btn" class="scene-btn">NEW</button>
