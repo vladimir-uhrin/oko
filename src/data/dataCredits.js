@@ -327,6 +327,15 @@ export const DATA_CREDITS = [
       'operator, diameter and status as mapped — completeness varies by country)',
   },
   {
+    key: 'oil-prices',
+    html:
+      'Crude oil spot prices (Brent, WTI — daily, USD/barrel): ' +
+      'U.S. Energy Information Administration ' +
+      '(<a href="https://www.eia.gov" target="_blank" rel="noopener">eia.gov</a>, public domain) ' +
+      'via <a href="https://fred.stlouisfed.org" target="_blank" rel="noopener">FRED</a> ' +
+      '(DCOILBRENTEU, DCOILWTICO — spot, delayed ~1 business day, not futures)',
+  },
+  {
     key: 'air-density',
     html:
       'Historical air-traffic density (one day): ' +

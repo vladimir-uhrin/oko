@@ -75,6 +75,7 @@ import { acceptableLogoLicense, airlineTitleCandidates, infoboxLogoFile, normali
 import {
   ACER_HISTORICAL_URL, FRED_EU_GAS_SERIES, FRED_USD_PER_EUR_SERIES, fredCsvUrl, monthlyEurPerMwh, parseAcerCsv, parseFredCsv,
 } from './src/data/gasPrices.js';
+import { FRED_BRENT_SERIES, FRED_WTI_SERIES } from './src/data/oilPrices.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -4719,6 +4720,111 @@ function gasProxy() {
   }
   return {
     name: 'gas-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
+ * Ceny ropy Brent/WTI pre chokepoint scény (2026-09-17, variant B). Spotové
+ * ceny z FRED keyless CSV (podklad U.S. EIA, public domain) — rovnaký zdrojový
+ * rod ako pri cenách plynu. Denné dáta → pamäť + disk cache (.gev-cache/oil),
+ * TTL 3 h, stale do 7 dní, single-flight, limiter 20/min/IP, bez kľúča.
+ * Front-month futures (EEX/ICE) sú platené a sem nepatria.
+ * @returns {import('vite').Plugin}
+ */
+function oilPricesProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'oil');
+  const PRICES_PATH = path.join(CACHE_DIR, 'prices.json');
+  const TTL_MS = 3 * 60 * 60_000;
+  const STALE_MAX_MS = 7 * 24 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 25_000;
+  const MAX_BYTES = 4 * 1024 * 1024;
+  const USER_AGENT = 'OKO-oil/0.1 (https://github.com/vladouh76; vladouh76@gmail.com) node-fetch';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+  const inFlight = new Map();
+  const state = { mem: null, lastError: null };
+
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Cache-Control': status === 200 ? 'public, max-age=900' : 'no-store',
+      'X-GEV-Cache': cacheState,
+    });
+    res.end(body);
+  }
+  async function fetchText(url) {
+    const upstream = await fetch(url, {
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      headers: { 'User-Agent': USER_AGENT, Accept: 'text/csv,text/plain;q=0.9,*/*;q=0.5' },
+    });
+    if (!upstream.ok) {
+      await readResponseTextCapped(upstream, 64 * 1024).catch(() => '');
+      const error = new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')');
+      error.upstreamStatus = upstream.status;
+      throw error;
+    }
+    return readResponseTextCapped(upstream, MAX_BYTES);
+  }
+  async function readDisk() {
+    try {
+      const parsed = JSON.parse(await fsp.readFile(PRICES_PATH, 'utf8'));
+      if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') return parsed;
+    } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(entry) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(PRICES_PATH, JSON.stringify(entry), 'utf8'); }
+    catch (error) { console.warn('[oil-proxy] cache write failed: ' + (error?.message || error)); }
+  }
+  async function current() {
+    if (!state.mem) state.mem = await readDisk();
+    return state.mem;
+  }
+  async function buildPrices() {
+    const started = Date.now();
+    const [brentCsv, wtiCsv] = await Promise.all([fetchText(fredCsvUrl(FRED_BRENT_SERIES)), fetchText(fredCsvUrl(FRED_WTI_SERIES))]);
+    const brent = parseFredCsv(brentCsv);
+    const wti = parseFredCsv(wtiCsv);
+    if (!brent.length && !wti.length) throw new Error('FRED oil CSV has no rows');
+    const body = JSON.stringify({
+      brent: { rows: brent, source: 'U.S. EIA Crude Oil Price: Brent – Europe (USD/bbl) via FRED DCOILBRENTEU', url: fredCsvUrl(FRED_BRENT_SERIES) },
+      wti: { rows: wti, source: 'U.S. EIA Crude Oil Price: WTI – Cushing, OK (USD/bbl) via FRED DCOILWTICO', url: fredCsvUrl(FRED_WTI_SERIES) },
+      fetchedAt: Date.now(),
+    });
+    console.log('[oil-proxy] prices: Brent ' + brent.length + ' + WTI ' + wti.length + ' days in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body };
+  }
+  async function handler(req, res) {
+    if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    const now = Date.now();
+    const mem = await current();
+    if (mem && now - mem.at < TTL_MS) { send(res, 200, mem.body, 'HIT'); return; }
+    if (!limiter(clientKey(req))) {
+      if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
+      send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+    }
+    const stale = mem && now - mem.at < STALE_MAX_MS ? mem : null;
+    const request = coalesceProxyRequest(inFlight, 'oil-prices', buildPrices);
+    try {
+      const fresh = await request.promise;
+      state.mem = fresh;
+      state.lastError = null;
+      void writeDisk(fresh);
+      send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+    } catch (error) {
+      state.lastError = String(error?.message || error);
+      if (stale) {
+        if (!request.shared) console.warn('[oil-proxy] refresh failed (' + state.lastError + ') — serving stale cache');
+        send(res, 200, stale.body, 'STALE-ERROR');
+        return;
+      }
+      send(res, 502, JSON.stringify({ error: 'upstream', detail: state.lastError }), 'NONE');
+    }
+  }
+  function install(middlewares) { middlewares.use('/api/oil/prices', handler); }
+  return {
+    name: 'oil-prices-proxy',
     configureServer(server) { install(server.middlewares); },
     configurePreviewServer(server) { install(server.middlewares); },
   };
@@ -9944,6 +10050,7 @@ export default defineConfig(({ mode }) => {
       gfwPresenceProxy(),
       logoProxy(),
       gasProxy(),
+      oilPricesProxy(),
       earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),

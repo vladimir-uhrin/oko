@@ -38,6 +38,7 @@ import { installSharpStarfield } from './starfield.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { applyChokepointScene, chokepointSceneById, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
+import { createOilPriceChip } from './oilPriceChip.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -489,9 +490,19 @@ async function init() {
       },
       annotate: (requests) => annotations?.annotate?.(requests, { persist: true, flyTo: false }),
     };
+    // Brent/WTI oil-price chip (variant B): the "what is oil doing" context that
+    // accompanies a chokepoint reveal. Spot prices from FRED (EIA, public domain)
+    // via /api/oil/prices; shown whenever a scene is applied, by any trigger.
+    const oilPriceChip = createOilPriceChip();
+    window.__godsEyeView.oilPriceChip = oilPriceChip;
+    const runChokepointScene = (id) => {
+      const result = applyChokepointScene(id, chokepointSceneDeps);
+      void oilPriceChip.refreshAndShow();
+      return result;
+    };
     window.__godsEyeView.chokepointScenes = {
       list: listChokepointScenes,
-      apply: (id) => applyChokepointScene(id, chokepointSceneDeps),
+      apply: runChokepointScene,
     };
     // Shareable deep link `?chokepoint=<id>` (e.g. oko.uhrin.digital/?chokepoint=hormuz).
     // Apply AFTER camera/layer restore settles so the scene wins over the
@@ -501,7 +512,7 @@ async function init() {
       if (requested && chokepointSceneById(requested)) {
         void Promise.resolve(styleManager.initialRestorePromise)
           .catch(() => {})
-          .then(() => applyChokepointScene(requested, chokepointSceneDeps));
+          .then(() => runChokepointScene(requested));
       }
     } catch { /* URL parsing is best-effort — a bad param never breaks boot */ }
 
@@ -521,7 +532,7 @@ async function init() {
         picker.addEventListener('change', () => {
           const id = picker.value;
           picker.value = '';
-          if (id) void applyChokepointScene(id, chokepointSceneDeps);
+          if (id) void runChokepointScene(id);
         });
       }
     } catch { /* the picker is optional chrome — its absence never breaks boot */ }
