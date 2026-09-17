@@ -303,7 +303,7 @@ function ensureStyle(doc) {
 .oko-oilc-range:hover{color:#dbeafe;}
 .oko-oilc-range.is-on{background:rgba(57,208,255,.22);color:#eaf2ff;border-color:rgba(57,208,255,.5);}
 .oko-oilc-holder{position:relative;width:100%;}
-.oko-oilc-canvas{display:block;width:100%;cursor:crosshair;}
+.oko-oilc-canvas{display:block;width:100%;cursor:ew-resize;touch-action:none;}
 .oko-oilc-tip{position:absolute;pointer-events:none;background:rgba(6,14,22,.95);border:1px solid rgba(57,208,255,.3);
   border-radius:7px;padding:5px 7px;font-size:9.5px;color:#dbeafe;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.5);z-index:2;}
 .oko-oilc-tip[hidden]{display:none;}

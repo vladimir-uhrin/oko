@@ -119,6 +119,7 @@ export function renderOilChart(doc, {
 
   const PAD = { l: 6, r: 6, t: 8, b: 16 };
   let geo = null;
+  let scrubFrac = 1; // movable rider position, 0..1 across the time axis; default = latest
 
   function drawBase() {
     const cssW = Math.max(140, Math.floor(canvas.clientWidth || holder.clientWidth || 300));
@@ -180,22 +181,26 @@ export function renderOilChart(doc, {
     return ctx;
   }
 
-  function onMove(pt) {
-    const ctx = drawBase();
-    if (!ctx || !geo) { tip.hidden = true; return; }
-    const rect = canvas.getBoundingClientRect();
-    const x = pt.clientX - rect.left;
-    const frac = Math.max(0, Math.min(1, (x - PAD.l) / geo.w));
-    const tt = geo.t0 + frac * (geo.t1 - geo.t0);
+  // The rider: a persistent, draggable vertical marker. It is always drawn (so
+  // the values at its position stay on screen), and pointer / touch drag moves
+  // it. This is what makes the chart readable on touch, where hover does not
+  // exist — you drag the rider along the time axis.
+  function drawRider(ctx) {
+    if (!geo || !seriesVals.length) { tip.hidden = true; return; }
+    const tt = geo.t0 + scrubFrac * (geo.t1 - geo.t0);
     const cx = geo.px(tt);
-    ctx.strokeStyle = 'rgba(219,234,254,.5)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(219,234,254,.55)'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(cx, PAD.t); ctx.lineTo(cx, PAD.t + geo.h); ctx.stroke();
+    // grab handle at the top of the rider
+    ctx.fillStyle = '#eaf2ff';
+    ctx.beginPath(); ctx.arc(cx, PAD.t, 3.4, 0, Math.PI * 2); ctx.fill();
     const rows = [];
     for (const s of seriesVals) {
       const bi = nearestIndex(s.ts, tt);
       if (bi < 0) continue;
       const X = geo.px(s.ts[bi]); const Y = geo.py(s.vs[bi]);
-      ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(X, Y, 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(X, Y, 2.9, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(6,14,22,.85)'; ctx.lineWidth = 1; ctx.stroke();
       rows.push({ color: s.color, label: s.label, val: indexed ? s.vs[bi].toFixed(1) : s.vs[bi].toFixed(2), unit: s.unit, t: s.ts[bi] });
     }
     tip.replaceChildren();
@@ -208,20 +213,31 @@ export function renderOilChart(doc, {
     }
     tip.hidden = false;
     const tw = tip.offsetWidth || 130;
-    let left = x + 12;
-    if (left + tw > geo.cssW) left = x - tw - 12;
+    let left = cx + 12;
+    if (left + tw > geo.cssW) left = cx - tw - 12;
     tip.style.left = `${Math.max(2, left)}px`;
     tip.style.top = '2px';
   }
-  const hide = () => { tip.hidden = true; drawBase(); };
 
-  canvas.addEventListener('mousemove', onMove);
-  canvas.addEventListener('mouseleave', hide);
-  canvas.addEventListener('touchstart', (e) => { if (e.touches[0]) onMove(e.touches[0]); }, { passive: true });
-  canvas.addEventListener('touchmove', (e) => { if (e.touches[0]) onMove(e.touches[0]); }, { passive: true });
+  function paint() { const ctx = drawBase(); if (ctx) drawRider(ctx); }
 
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => drawBase());
-  else drawBase();
+  function moveTo(clientX) {
+    if (!geo) return;
+    const rect = canvas.getBoundingClientRect();
+    if (!(rect.width > 0)) return;
+    scrubFrac = Math.max(0, Math.min(1, (clientX - rect.left - PAD.l) / geo.w));
+    paint();
+  }
+
+  let dragging = false;
+  canvas.addEventListener('pointerdown', (e) => { dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch { /* older */ } moveTo(e.clientX); e.preventDefault(); });
+  canvas.addEventListener('pointermove', (e) => { if (dragging || e.pointerType === 'mouse') moveTo(e.clientX); });
+  const endDrag = () => { dragging = false; };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(paint);
+  else paint();
 
   return wrap;
 }
