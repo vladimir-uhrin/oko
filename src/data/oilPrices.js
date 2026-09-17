@@ -188,6 +188,17 @@ export function buildOilModel(payload, { lang = 'sk', translate = (key) => key }
   if (brent?.series?.length) chartSeries.push({ key: 'brent', points: brent.series });
   if (wti?.series?.length) chartSeries.push({ key: 'wti', points: wti.series });
 
+  // Every plottable series (crude + the other commodities), for the interactive
+  // chart. Units differ ($/bbl vs $/MMBtu vs $/gal), so the chart rebases mixed
+  // units to an index; here we just carry the raw daily points + the unit.
+  const chartable = [
+    brentQ && { key: 'brent', label: translate('oil.brent'), unit: '$/bbl', points: brentQ.series },
+    wtiQ && { key: 'wti', label: translate('oil.wti'), unit: '$/bbl', points: wtiQ.series },
+    payload?.natgas && { key: 'natgas', label: translate('oil.natgas'), unit: '$/MMBtu', points: payload.natgas.series },
+    payload?.gasoline && { key: 'gasoline', label: translate('oil.gasoline'), unit: '$/gal', points: payload.gasoline.series },
+    payload?.diesel && { key: 'diesel', label: translate('oil.diesel'), unit: '$/gal', points: payload.diesel.series },
+  ].filter((c) => c && Array.isArray(c.points) && c.points.length >= 2);
+
   return {
     ok: true,
     brent,
@@ -197,6 +208,7 @@ export function buildOilModel(payload, { lang = 'sk', translate = (key) => key }
     eurusd: rate,
     commodities,
     chart: { unit: '$/bbl', series: chartSeries },
+    chartable,
     marketTimeMs,
     stampText: marketTimeMs ? formatStamp(marketTimeMs, lang) : '—',
     sourceLine: translate('oil.source', { time: marketTimeMs ? formatStamp(marketTimeMs, lang) : '—' }),

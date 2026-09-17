@@ -15,13 +15,13 @@
 
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
 import { drawGasChart } from './gasChart.js';
+import { renderOilChart } from './oilChart.js';
 import { currentLanguage, t } from './i18n.js';
 
 const DIR_GLYPH = Object.freeze({ up: '▲', down: '▼', flat: '·' });
 const REFETCH_TTL_MS = 5 * 60_000;
 const CHART_W = 210;
 const CHART_H = 88;
-const RANGE_VALUES = Object.freeze(['1M', '6M', '1Y']);
 const RANGE_DAYS = Object.freeze({ '1M': 31, '6M': 186, '1Y': 370 });
 
 const makeDiv = (doc, cls, text) => { const d = doc.createElement('div'); d.className = cls; if (text != null) d.textContent = text; return d; };
@@ -60,19 +60,6 @@ function gradeBlock(doc, translate, g) {
     wrap.appendChild(makeDiv(doc, 'oko-oil-r52', `${g.lowText}—${g.highText} · ${g.belowHighText} ${translate('oil.below-high')}`));
   }
   return wrap;
-}
-
-function rangeSelector(doc, translate, current, onRange) {
-  const row = makeDiv(doc, 'oko-oil-ranges');
-  for (const value of RANGE_VALUES) {
-    const b = doc.createElement('button');
-    b.type = 'button';
-    b.className = `oko-oil-range${value === current ? ' is-active' : ''}`;
-    b.textContent = value === '1Y' ? translate('oil.range-year') : value;
-    b.addEventListener('click', () => onRange(value));
-    row.appendChild(b);
-  }
-  return row;
 }
 
 function sliceSeriesByRange(series, range) {
@@ -129,15 +116,22 @@ function commoditiesRow(doc, list) {
  * The shared card BODY (no header). `onRange` present → a 1M/6M/1Y selector.
  * @returns {Node[]}
  */
-export function buildOilCardNodes(model, { doc, translate, lang, range = '6M', onRange = null }) {
+export function buildOilCardNodes(model, {
+  doc, translate, lang, range = '6M', onRange = null, selectedKeys = null, onToggle = null, interactive = false,
+}) {
   if (!model?.ok) return [makeDiv(doc, 'oko-oil-note', translate('oil.unavailable'))];
   const nodes = [];
   if (model.brent) nodes.push(gradeBlock(doc, translate, model.brent));
   if (model.wti) nodes.push(gradeBlock(doc, translate, model.wti));
   if (model.spreadText) nodes.push(makeDiv(doc, 'oko-oil-spread', `${translate('oil.spread')} ${model.spreadText}`));
-  if (typeof onRange === 'function') nodes.push(rangeSelector(doc, translate, range, onRange));
-  const canvas = drawChart(doc, model, lang, range);
-  if (canvas) nodes.push(canvas);
+  if (interactive && model.chartable?.length) {
+    // Big interactive chart with per-series toggles + the range selector inside.
+    nodes.push(renderOilChart(doc, { chartable: model.chartable, selectedKeys, range, translate, lang, onToggle, onRange }));
+  } else {
+    // Compact static chart for the floating scene overlay.
+    const canvas = drawChart(doc, model, lang, range);
+    if (canvas) nodes.push(canvas);
+  }
   if (model.commodities?.length) nodes.push(commoditiesRow(doc, model.commodities));
   nodes.push(makeDiv(doc, 'oko-oil-foot', model.sourceLine));
   return nodes;
@@ -217,12 +211,20 @@ export function createOilPricePanel({
   let inFlight = null;
   let loadedOnce = false;
   let range = '6M';
+  const selectedKeys = new Set(['brent', 'wti']);
 
   const paint = () => {
     if (!cachedPayload) return;
-    body.replaceChildren(...buildOilCardNodes(buildOilModel(cachedPayload, { lang, translate, nowMs: now() }), { doc, translate, lang, range, onRange }));
+    body.replaceChildren(...buildOilCardNodes(buildOilModel(cachedPayload, { lang, translate, nowMs: now() }), {
+      doc, translate, lang, range, onRange, selectedKeys, onToggle, interactive: true,
+    }));
   };
   function onRange(next) { range = next; paint(); }
+  function onToggle(key) {
+    if (selectedKeys.has(key)) { if (selectedKeys.size > 1) selectedKeys.delete(key); }
+    else selectedKeys.add(key);
+    paint();
+  }
 
   async function refresh() {
     const fresh = cachedPayload && (now() - cachedAt < REFETCH_TTL_MS);
@@ -290,6 +292,24 @@ function ensureStyle(doc) {
 .oko-oil-commod-v{font-variant-numeric:tabular-nums;}
 .oko-oil-note{font-size:11px;color:#8aa0b6;padding:2px 0;}
 .oko-oil-foot{margin-top:5px;font-size:9px;line-height:1.3;color:#6f8398;letter-spacing:.02em;}
+.oko-oilc{margin:5px 0 3px;}
+.oko-oilc-legend{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:4px;}
+.oko-oilc-chip{appearance:none;background:transparent;border:1px solid var(--c);color:var(--c);opacity:.42;
+  font:inherit;font-size:9.5px;letter-spacing:.03em;padding:1px 7px;border-radius:9px;cursor:pointer;}
+.oko-oilc-chip.is-on{opacity:1;background:color-mix(in srgb, var(--c) 18%, transparent);}
+.oko-oilc-ranges{display:flex;gap:5px;margin-bottom:4px;}
+.oko-oilc-range{appearance:none;background:rgba(57,208,255,.08);border:1px solid rgba(57,208,255,.25);color:#8aa0b6;
+  font:inherit;font-size:9.5px;letter-spacing:.05em;padding:2px 8px;border-radius:6px;cursor:pointer;}
+.oko-oilc-range:hover{color:#dbeafe;}
+.oko-oilc-range.is-on{background:rgba(57,208,255,.22);color:#eaf2ff;border-color:rgba(57,208,255,.5);}
+.oko-oilc-holder{position:relative;width:100%;}
+.oko-oilc-canvas{display:block;width:100%;cursor:crosshair;}
+.oko-oilc-tip{position:absolute;pointer-events:none;background:rgba(6,14,22,.95);border:1px solid rgba(57,208,255,.3);
+  border-radius:7px;padding:5px 7px;font-size:9.5px;color:#dbeafe;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.5);z-index:2;}
+.oko-oilc-tip[hidden]{display:none;}
+.oko-oilc-tip-d{color:#8aa0b6;margin-bottom:2px;}
+.oko-oilc-tip-r{display:flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums;}
+.oko-oilc-tip-sw{width:8px;height:8px;border-radius:2px;flex:0 0 auto;}
 @media (max-width:520px){.oko-oil-chip{top:48px;right:8px;width:240px;}}
 `;
   (doc.head || doc.documentElement).appendChild(style);

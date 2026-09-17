@@ -811,6 +811,8 @@ export const EN_STRINGS = Object.freeze({
   'oil.natgas': 'Nat gas',
   'oil.gasoline': 'Gasoline',
   'oil.diesel': 'Diesel',
+  'oil.pick-series': 'pick a series',
+  'oil.indexed': 'indexed · start = 100',
   // Strait-traffic counter for chokepoint scenes (2026-09-17) — see src/straitTrafficChip.js.
   'strait-traffic.title': 'STRAIT TRAFFIC',
   'strait-traffic.vessels': 'vessels in view',
@@ -2190,6 +2192,8 @@ export const SK_STRINGS = Object.freeze({
   'oil.natgas': 'Zemný plyn',
   'oil.gasoline': 'Benzín',
   'oil.diesel': 'Nafta',
+  'oil.pick-series': 'vyber rad',
+  'oil.indexed': 'index · štart = 100',
   // Počítadlo premávky v úžine pre chokepoint scény (2026-09-17), pozri src/straitTrafficChip.js.
   'strait-traffic.title': 'PREMÁVKA V ÚŽINE',
   'strait-traffic.vessels': 'lodí v zábere',
