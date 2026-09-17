@@ -4735,6 +4735,7 @@ function gasProxy() {
  * @returns {import('vite').Plugin}
  */
 function oilPricesProxy() {
+  // v2: Brent/WTI + natural gas / gasoline / diesel + EURUSD, 1-year daily series.
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'oil');
   const PRICES_PATH = path.join(CACHE_DIR, 'prices.json');
   const TTL_MS = 5 * 60_000;              // Yahoo is near-real-time; keep it fresh but don't hammer.
@@ -4784,23 +4785,27 @@ function oilPricesProxy() {
     return state.mem;
   }
   async function fetchQuote(symbol) {
-    try { return parseYahooChart(await fetchJson(yahooChartUrl(symbol, { range: '6mo', interval: '1d' }))); }
+    try { return parseYahooChart(await fetchJson(yahooChartUrl(symbol))); }
     catch (error) { console.warn('[oil-proxy] ' + symbol + ' failed: ' + (error?.message || error)); return null; }
   }
   async function buildPrices() {
     const started = Date.now();
-    const [brent, wti, eurusd] = await Promise.all([
+    const [brent, wti, eurusd, natgas, gasoline, diesel] = await Promise.all([
       fetchQuote(YAHOO_SYMBOLS.brent), fetchQuote(YAHOO_SYMBOLS.wti), fetchQuote(YAHOO_SYMBOLS.eurusd),
+      fetchQuote(YAHOO_SYMBOLS.natgas), fetchQuote(YAHOO_SYMBOLS.gasoline), fetchQuote(YAHOO_SYMBOLS.diesel),
     ]);
     if (!brent && !wti) throw new Error('Yahoo returned no Brent or WTI quote');
     const body = JSON.stringify({
       brent,
       wti,
       eurusd,
-      source: 'Yahoo Finance chart API — Brent BZ=F, WTI CL=F front-month futures, EURUSD=X (near real-time, ~15 min delayed)',
+      natgas,
+      gasoline,
+      diesel,
+      source: 'Yahoo Finance chart API — Brent BZ=F, WTI CL=F, NG=F, RB=F, HO=F front-month futures + EURUSD=X (near real-time, ~15 min delayed)',
       fetchedAt: Date.now(),
     });
-    console.log('[oil-proxy] Brent ' + (brent?.price ?? 'n/a') + ' WTI ' + (wti?.price ?? 'n/a') + ' EURUSD ' + (eurusd?.price ?? 'n/a') + ' in ' + (Date.now() - started) + ' ms');
+    console.log('[oil-proxy] Brent ' + (brent?.price ?? 'n/a') + ' WTI ' + (wti?.price ?? 'n/a') + ' NG ' + (natgas?.price ?? 'n/a') + ' in ' + (Date.now() - started) + ' ms');
     return { at: Date.now(), body };
   }
   async function handler(req, res) {

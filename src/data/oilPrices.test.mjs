@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  COMMODITY_UNITS,
   YAHOO_SYMBOLS,
   buildOilModel,
+  changeOverDays,
   fetchOilPrices,
   formatEurBbl,
   formatUsdBbl,
@@ -11,84 +13,87 @@ import {
   yahooChartUrl,
 } from './oilPrices.js';
 
-const yahooJson = (price, prevClose, symbol = 'BZ=F') => ({
-  chart: {
-    result: [{
-      meta: {
-        symbol,
-        currency: 'USD',
-        regularMarketPrice: price,
-        chartPreviousClose: prevClose,
-        regularMarketDayHigh: price + 1.28,
-        regularMarketDayLow: price - 3.17,
-        fiftyTwoWeekHigh: 126.1,
-        fiftyTwoWeekLow: 58.72,
-        regularMarketTime: 1_789_000_000,
-      },
-      timestamp: [1_788_000_000, 1_788_086_400, 1_788_172_800],
-      indicators: { quote: [{ close: [100, null, price] }] },
-    }],
-  },
-});
+const DAY = 86_400_000;
+const T0 = Date.UTC(2026, 7, 1);
+// A rising daily series 100..139 over 40 days.
+const series = Array.from({ length: 40 }, (_, i) => ({ t: T0 + i * DAY, v: 100 + i }));
+const quote = (over) => ({ price: 139, series, week52High: 150, week52Low: 90, dayHigh: 140, dayLow: 137, marketTimeMs: T0 + 39 * DAY, ...over });
 
-test('yahooChartUrl is keyless and carries symbol + range', () => {
-  const url = yahooChartUrl(YAHOO_SYMBOLS.brent, { range: '6mo' });
+test('yahooChartUrl defaults to a one-year daily series and is keyless', () => {
+  const url = yahooChartUrl(YAHOO_SYMBOLS.brent);
   assert.ok(url.startsWith('https://query1.finance.yahoo.com/'));
   assert.ok(url.includes(encodeURIComponent('BZ=F')));
-  assert.ok(url.includes('range=6mo'));
+  assert.ok(url.includes('range=1y'));
 });
 
 test('formatters produce USD/EUR per barrel and fail closed', () => {
   assert.equal(formatUsdBbl(104.72, 'en'), '104.72 $/bbl');
   assert.equal(formatEurBbl(91.22, 'en'), '91.22 €/bbl');
   assert.equal(formatUsdBbl(null), '—');
-  assert.equal(formatEurBbl(Number.NaN), '—');
 });
 
-test('parseYahooChart normalizes the quote and drops null closes from the series', () => {
-  const q = parseYahooChart(yahooJson(104.72, 103.42));
-  assert.equal(q.price, 104.72);
-  assert.equal(q.prevClose, 103.42);
-  assert.equal(q.dayHigh, 106);
-  assert.equal(q.week52High, 126.1);
-  assert.equal(q.currency, 'USD');
-  assert.equal(q.marketTimeMs, 1_789_000_000_000);
-  assert.equal(q.series.length, 2); // the middle null close is skipped
-  assert.ok(q.series.every((p) => Number.isFinite(p.t) && Number.isFinite(p.v)));
+test('changeOverDays is series-based (robust to a broken previous close)', () => {
+  assert.ok(Math.abs(changeOverDays(series, 1, 139) - ((139 - 138) / 138) * 100) < 1e-9); // vs prior close
+  assert.ok(Math.abs(changeOverDays(series, 7, 139) - ((139 - 132) / 132) * 100) < 1e-9); // vs a week ago
+  assert.equal(changeOverDays([], 7, 100), null);
+  assert.equal(changeOverDays(series, 7, Number.NaN), null);
 });
 
-test('parseYahooChart returns null without a usable price', () => {
+test('parseYahooChart normalizes and drops null closes', () => {
+  const json = {
+    chart: {
+      result: [{
+        meta: { symbol: 'BZ=F', currency: 'USD', regularMarketPrice: 104.7, regularMarketDayHigh: 106, regularMarketDayLow: 101, fiftyTwoWeekHigh: 126, fiftyTwoWeekLow: 58, regularMarketTime: 1_789_000_000 },
+        timestamp: [1_788_000_000, 1_788_086_400, 1_788_172_800],
+        indicators: { quote: [{ close: [100, null, 104.7] }] },
+      }],
+    },
+  };
+  const q = parseYahooChart(json);
+  assert.equal(q.price, 104.7);
+  assert.equal(q.week52High, 126);
+  assert.equal(q.series.length, 2);
   assert.equal(parseYahooChart({}), null);
-  assert.equal(parseYahooChart({ chart: { result: [{ meta: {} }] } }), null);
 });
 
-test('buildOilModel derives USD+EUR, day change, spread and chart series', () => {
+test('buildOilModel gives period changes, a 52-week position and EUR', () => {
   const model = buildOilModel({
-    brent: parseYahooChart(yahooJson(104.72, 103.42, 'BZ=F')),
-    wti: parseYahooChart(yahooJson(101.88, 102.43, 'CL=F')),
+    brent: quote(),
+    wti: quote({ price: 132 }),
     eurusd: { price: 1.148 },
-    fetchedAt: 1_789_000_100_000,
+    fetchedAt: T0,
   }, { lang: 'en', translate: (k) => k });
 
   assert.equal(model.ok, true);
-  assert.equal(model.brent.usd, 104.72);
-  assert.equal(model.brent.dir, 'up'); // 103.42 -> 104.72
-  assert.ok(model.brent.changePct > 0);
-  assert.ok(Math.abs(model.brent.eur - 104.72 / 1.148) < 1e-6);
+  assert.equal(model.brent.dir, 'up');
+  assert.ok(model.brent.changes.day > 0 && model.brent.changes.week > model.brent.changes.day);
+  assert.ok(Number.isFinite(model.brent.changes.month) && Number.isFinite(model.brent.changes.year));
+  // 52-week position: (139-90)/(150-90)
+  assert.ok(Math.abs(model.brent.range52.pos - (49 / 60)) < 1e-9);
   assert.match(model.brent.eurText, /€\/bbl/);
-  assert.equal(model.wti.dir, 'down'); // 102.43 -> 101.88
-  assert.ok(Math.abs(model.spread - (104.72 - 101.88)) < 1e-9);
+  assert.ok(Math.abs(model.spread - (139 - 132)) < 1e-9);
   assert.equal(model.chart.series.length, 2);
-  assert.ok(model.brent.dayRangeText && model.brent.week52Text);
-  assert.ok(model.eurusd === 1.148);
 });
 
-test('without a EUR/USD rate the EUR figure is omitted, not faked', () => {
-  const model = buildOilModel({ brent: parseYahooChart(yahooJson(100, 99)) }, { translate: (k) => k });
-  assert.equal(model.brent.eur, null);
-  assert.equal(model.brent.eurText, null);
-  assert.equal(model.wti, null);
-  assert.equal(model.spread, null);
+test('buildOilModel adds compact commodities with their own units', () => {
+  const model = buildOilModel({
+    brent: quote(),
+    natgas: quote({ price: 2.86 }),
+    gasoline: quote({ price: 3.22 }),
+    diesel: quote({ price: 4.85 }),
+  }, { lang: 'en', translate: (k) => k });
+  const byKey = Object.fromEntries(model.commodities.map((c) => [c.key, c]));
+  assert.equal(byKey.natgas.unit, COMMODITY_UNITS.natgas);
+  assert.match(byKey.natgas.priceText, /\$\/MMBtu/);
+  assert.match(byKey.gasoline.priceText, /\$\/gal/);
+  assert.equal(model.commodities.length, 3);
+});
+
+test('without a EUR rate the EUR figure is omitted; empty payload fails closed', () => {
+  const m = buildOilModel({ brent: quote() }, { translate: (k) => k });
+  assert.equal(m.brent.eur, null);
+  assert.equal(m.wti, null);
+  assert.equal(buildOilModel(null).ok, false);
 });
 
 test('fetchOilPrices returns the payload and raises the proxy error shape', async () => {

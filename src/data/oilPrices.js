@@ -1,27 +1,39 @@
 // src/data/oilPrices.js
 /**
  * @module oilPrices
- * @description Ceny ropy (Brent / WTI) pre chokepoint scény (2026-09-17,
- * variant B; používateľ chcel ČERSTVÚ cenu — FRED mešká 1–2 dni). Zdroj je
- * Yahoo Finance chart API (BZ=F, CL=F, EURUSD=X): near-real-time cena
- * front-month kontraktu (≈ spot), denná séria na graf, deň min/max, 52-týž a
- * kurz EUR — všetko keyless jedným volaním na symbol.
+ * @description Ceny ropy a energetických komodít pre kartu ROPA (2026-09-17,
+ * variant B; používateľ chcel čerstvé + viac informácií). Zdroj Yahoo Finance
+ * chart API (keyless, jedno volanie na symbol, ročná denná séria):
+ *   Brent BZ=F, WTI CL=F  — front-month ≈ spot, $/bbl (hlavné, s detailom)
+ *   NG=F, RB=F, HO=F      — zemný plyn / benzín / nafta (kompaktne)
+ *   EURUSD=X              — kurz na prepočet do EUR
  *
- * POCTIVOSŤ (pravidlo 2 CLAUDE.md): je to FRONT-MONTH FUTURES, nie čistý spot,
- * a ~15 min oneskorené; karta to hovorí („front-month ≈ spot · Yahoo Finance").
- * Yahoo je NEOFICIÁLNE API a ToS nie je open-data → len osobné/nekomerčné
- * použitie (DATA_SOURCES.md). Modul je čistý (bez DOM): proxy ho importuje na
- * serveri na parsovanie, oilPriceChip.js na zobrazenie.
+ * POCTIVOSŤ (pravidlo 2 CLAUDE.md): front-month FUTURES, nie čistý spot, ~15 min
+ * oneskorené; karta to hovorí. Denná zmena sa počíta z DENNEJ SÉRIE (posledné dva
+ * záznamy), NIE z Yahoo `chartPreviousClose` — ten je pri rolovaní futures
+ * kontraktu nespoľahlivý (skáče o desiatky %). Yahoo je NEOFICIÁLNE API, ToS len
+ * osobné/nekomerčné (DATA_SOURCES.md). Modul je čistý (bez DOM).
  */
 
 import { formatPct } from './gasPrices.js';
 
 export const OIL_PRICES_API = '/api/oil/prices';
-/** Yahoo Finance symboly: Brent + WTI front-month futures, EUR/USD kurz. */
-export const YAHOO_SYMBOLS = Object.freeze({ brent: 'BZ=F', wti: 'CL=F', eurusd: 'EURUSD=X' });
+/** Yahoo symboly: ropa (detail), energetické komodity (kompakt), kurz EUR. */
+export const YAHOO_SYMBOLS = Object.freeze({
+  brent: 'BZ=F',
+  wti: 'CL=F',
+  eurusd: 'EURUSD=X',
+  natgas: 'NG=F',
+  gasoline: 'RB=F',
+  diesel: 'HO=F',
+});
+/** Units per commodity (Yahoo quotes these in USD per the listed unit). */
+export const COMMODITY_UNITS = Object.freeze({ natgas: '$/MMBtu', gasoline: '$/gal', diesel: '$/gal' });
 
-/** Keyless Yahoo chart endpoint (denné sviečky za dané obdobie). */
-export function yahooChartUrl(symbol, { range = '6mo', interval = '1d' } = {}) {
+const DAY_MS = 86_400_000;
+
+/** Keyless Yahoo chart endpoint. A one-year daily series backs the period changes and the chart ranges. */
+export function yahooChartUrl(symbol, { range = '1y', interval = '1d' } = {}) {
   const s = encodeURIComponent(String(symbol));
   return `https://query1.finance.yahoo.com/v8/finance/chart/${s}?interval=${encodeURIComponent(interval)}&range=${encodeURIComponent(range)}`;
 }
@@ -31,7 +43,7 @@ const num = (value, lang, digits = 2) => (Number.isFinite(value)
   ? new Intl.NumberFormat(localeOf(lang), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value)
   : '—');
 
-/** `130,80 $/bbl` (SK) / `130.80 $/bbl` (EN); null → `—`. */
+/** `130,80 $/bbl`; null → `—`. */
 export function formatUsdBbl(value, lang = 'sk', digits = 2) {
   return Number.isFinite(value) ? `${num(value, lang, digits)} $/bbl` : '—';
 }
@@ -39,8 +51,7 @@ export function formatUsdBbl(value, lang = 'sk', digits = 2) {
 export function formatEurBbl(value, lang = 'sk', digits = 2) {
   return Number.isFinite(value) ? `${num(value, lang, digits)} €/bbl` : '—';
 }
-
-/** `17. 9. · 17:46` (SK) / `17 Sep · 17:46` (EN). */
+/** `17. 9. · 17:46`. */
 export function formatStamp(ms, lang = 'sk') {
   if (!Number.isFinite(ms)) return '—';
   const d = new Date(ms);
@@ -50,10 +61,26 @@ export function formatStamp(ms, lang = 'sk') {
 }
 
 /**
- * One Yahoo chart response → a normalized quote. Pure. Returns null when the
- * payload has no usable price.
+ * % change of `currentPrice` versus the daily close closest to `days` ago.
+ * Series-based (robust to the futures-roll break in Yahoo's chartPreviousClose).
+ * @param {Array<{t:number,v:number}>} series ascending daily {t(ms), v}
+ * @param {number} days
+ * @param {number} currentPrice
+ * @returns {number|null} percent, or null when there is no reference point
+ */
+export function changeOverDays(series, days, currentPrice) {
+  if (!Array.isArray(series) || !series.length || !Number.isFinite(currentPrice)) return null;
+  const cutoff = series[series.length - 1].t - days * DAY_MS;
+  let ref = null;
+  for (const p of series) { if (p.t <= cutoff) ref = p; else break; }
+  if (!ref) ref = series[0]; // cutoff older than the series → earliest available
+  if (!Number.isFinite(ref?.v) || ref.v === 0) return null;
+  return ((currentPrice - ref.v) / ref.v) * 100;
+}
+
+/**
+ * One Yahoo chart response → a normalized quote. Pure. null without a price.
  * @param {any} json
- * @returns {null | {symbol: string|null, price: number, prevClose: number|null, dayHigh: number|null, dayLow: number|null, week52High: number|null, week52Low: number|null, marketTimeMs: number|null, currency: string|null, series: Array<{t: number, v: number}>}}
  */
 export function parseYahooChart(json) {
   const result = json?.chart?.result?.[0];
@@ -70,7 +97,6 @@ export function parseYahooChart(json) {
   return {
     symbol: meta.symbol || null,
     price: meta.regularMarketPrice,
-    prevClose: n(meta.chartPreviousClose),
     dayHigh: n(meta.regularMarketDayHigh),
     dayLow: n(meta.regularMarketDayLow),
     week52High: n(meta.fiftyTwoWeekHigh),
@@ -81,11 +107,13 @@ export function parseYahooChart(json) {
   };
 }
 
+const dirOf = (pct) => (pct === null || pct === undefined ? 'flat' : (pct > 0 ? 'up' : (pct < 0 ? 'down' : 'flat')));
+
 /**
- * Display model for the oil card. Change is computed here from price vs the
- * previous close (known scale), not read off Yahoo's own percent field.
- * @param {{brent?: object, wti?: object, eurusd?: object, fetchedAt?: number}|null} payload
- * @param {{lang?: string, translate?: (k: string, v?: object) => string, nowMs?: number}} [o]
+ * Display model for the oil card. Period changes are all series-based (day = vs
+ * the prior close), and each grade carries its 52-week position.
+ * @param {{brent?:object, wti?:object, eurusd?:object, natgas?:object, gasoline?:object, diesel?:object, fetchedAt?:number}|null} payload
+ * @param {{lang?:string, translate?:(k:string,v?:object)=>string}} [o]
  */
 export function buildOilModel(payload, { lang = 'sk', translate = (key) => key } = {}) {
   const brentQ = payload?.brent;
@@ -95,30 +123,65 @@ export function buildOilModel(payload, { lang = 'sk', translate = (key) => key }
 
   const grade = (q, labelKey) => {
     if (!q || !Number.isFinite(q.price)) return null;
-    const changeAbs = Number.isFinite(q.prevClose) ? q.price - q.prevClose : null;
-    const changePct = (changeAbs !== null && q.prevClose) ? (changeAbs / q.prevClose) * 100 : null;
+    const changes = {
+      day: changeOverDays(q.series, 1, q.price),
+      week: changeOverDays(q.series, 7, q.price),
+      month: changeOverDays(q.series, 30, q.price),
+      year: changeOverDays(q.series, 365, q.price),
+    };
     const eur = rate ? q.price / rate : null;
+    const range52 = (Number.isFinite(q.week52Low) && Number.isFinite(q.week52High) && q.week52High > q.week52Low)
+      ? {
+        low: q.week52Low,
+        high: q.week52High,
+        pos: Math.max(0, Math.min(1, (q.price - q.week52Low) / (q.week52High - q.week52Low))),
+        belowHighPct: ((q.week52High - q.price) / q.week52High) * 100,
+      }
+      : null;
+    const periods = ['day', 'week', 'month', 'year'].map((key) => ({
+      key,
+      pct: changes[key],
+      pctText: formatPct(changes[key], lang),
+      dir: dirOf(changes[key]),
+    }));
     return {
       label: translate(labelKey),
       usd: q.price,
       usdText: formatUsdBbl(q.price, lang),
       eur,
       eurText: eur !== null ? formatEurBbl(eur, lang) : null,
-      changeAbs,
-      changePct,
-      pctText: formatPct(changePct, lang),
-      dir: changePct === null ? 'flat' : (changePct > 0 ? 'up' : (changePct < 0 ? 'down' : 'flat')),
-      dayLow: q.dayLow,
-      dayHigh: q.dayHigh,
-      dayRangeText: (Number.isFinite(q.dayLow) && Number.isFinite(q.dayHigh)) ? `${num(q.dayLow, lang)}–${num(q.dayHigh, lang)}` : null,
-      week52Low: q.week52Low,
-      week52High: q.week52High,
-      week52Text: (Number.isFinite(q.week52Low) && Number.isFinite(q.week52High)) ? `${num(q.week52Low, lang)}–${num(q.week52High, lang)}` : null,
+      changes,
+      periods,
+      dayPctText: formatPct(changes.day, lang),
+      dir: dirOf(changes.day),
+      range52,
+      lowText: range52 ? num(range52.low, lang) : null,
+      highText: range52 ? num(range52.high, lang) : null,
+      belowHighText: range52 ? formatPct(-range52.belowHighPct, lang) : null,
       series: Array.isArray(q.series) ? q.series : [],
     };
   };
   const brent = grade(brentQ, 'oil.brent');
   const wti = grade(wtiQ, 'oil.wti');
+
+  const commodity = (q, key) => {
+    if (!q || !Number.isFinite(q.price)) return null;
+    const day = changeOverDays(q.series, 1, q.price);
+    return {
+      key,
+      label: translate(`oil.${key}`),
+      unit: COMMODITY_UNITS[key],
+      priceText: `${num(q.price, lang)} ${COMMODITY_UNITS[key]}`,
+      dir: dirOf(day),
+      pctText: formatPct(day, lang),
+    };
+  };
+  const commodities = [
+    commodity(payload?.natgas, 'natgas'),
+    commodity(payload?.gasoline, 'gasoline'),
+    commodity(payload?.diesel, 'diesel'),
+  ].filter(Boolean);
+
   const spread = (brent && wti) ? brent.usd - wti.usd : null;
   const marketTimeMs = Math.max(brentQ?.marketTimeMs || 0, wtiQ?.marketTimeMs || 0) || null;
   const chartSeries = [];
@@ -132,6 +195,7 @@ export function buildOilModel(payload, { lang = 'sk', translate = (key) => key }
     spread,
     spreadText: spread !== null ? `${spread >= 0 ? '+' : '−'}${num(Math.abs(spread), lang)} $` : null,
     eurusd: rate,
+    commodities,
     chart: { unit: '$/bbl', series: chartSeries },
     marketTimeMs,
     stampText: marketTimeMs ? formatStamp(marketTimeMs, lang) : '—',

@@ -329,9 +329,9 @@ export const DATA_CREDITS = [
   {
     key: 'oil-prices',
     html:
-      'Crude oil prices (Brent, WTI front-month ≈ spot, USD/bbl) and EUR/USD: ' +
+      'Crude oil, natural gas, gasoline &amp; diesel prices (front-month ≈ spot) and EUR/USD: ' +
       '<a href="https://finance.yahoo.com" target="_blank" rel="noopener">Yahoo Finance</a> ' +
-      '(BZ=F, CL=F, EURUSD=X — near real-time, ~15 min delayed; personal, non-commercial use)',
+      '(BZ=F, CL=F, NG=F, RB=F, HO=F, EURUSD=X — near real-time, ~15 min delayed; personal, non-commercial use)',
   },
   {
     key: 'air-density',
