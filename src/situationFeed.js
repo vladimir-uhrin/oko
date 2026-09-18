@@ -13,6 +13,7 @@
 // rel="noopener noreferrer".
 
 import { buildSituationModel, fetchSituationNews } from './data/situationNews.js';
+import { classifyIncident } from './data/gulfIncidents.js';
 import { currentLanguage, t } from './i18n.js';
 
 const REFETCH_TTL_MS = 15 * 60_000;
@@ -48,7 +49,11 @@ export function buildSituationNodes(model, { doc, translate, lang, limit = 30 } 
     }
     const txt = makeDiv(doc, 'oko-sit-txt');
     txt.appendChild(makeDiv(doc, 'oko-sit-title', it.title));
-    txt.appendChild(makeDiv(doc, 'oko-sit-meta', `${it.source}${it.ageLabel ? ` · ${it.ageLabel}` : ''}`));
+    const meta = makeDiv(doc, 'oko-sit-meta');
+    const cls = classifyIncident(it.title);
+    if (cls) meta.appendChild(makeDiv(doc, `oko-sit-badge oko-inc-${cls.severity}`, translate(`incident.type-${cls.type}`)));
+    meta.appendChild(doc.createTextNode(`${it.source}${it.ageLabel ? ` · ${it.ageLabel}` : ''}`));
+    txt.appendChild(meta);
     a.appendChild(txt);
     list.appendChild(a);
   }
@@ -166,6 +171,10 @@ function ensureStyle(doc) {
 .oko-sit-foot{margin-top:6px;}
 .oko-sit-disc{font-size:8.5px;line-height:1.3;color:#6f8398;letter-spacing:.02em;}
 .oko-sit-src{font-size:8.5px;color:#5b6f84;margin-top:1px;}
+.oko-sit-badge{display:inline-block;font-size:8px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:5px;margin-right:5px;border:1px solid currentColor;}
+.oko-sit-badge.oko-inc-critical{color:#f87171;}
+.oko-sit-badge.oko-inc-major{color:#ffb547;}
+.oko-sit-badge.oko-inc-minor{color:#39d0ff;}
 `;
   (doc.head || doc.documentElement).appendChild(style);
 }

@@ -41,6 +41,7 @@ import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokep
 import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { createSituationCard, createSituationPanel } from './situationFeed.js';
+import { createIncidentMarkers } from './gulfIncidentMarkers.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -509,6 +510,10 @@ async function init() {
     window.__godsEyeView.situationPanel = situationPanel;
     const situationCard = createSituationCard();
     window.__godsEyeView.situationCard = situationCard;
+    // Geolocated open-source incident markers on the globe (Phase B): shown with
+    // a scene that has a newsRegion; each marker links out to its source.
+    const incidentMarkers = createIncidentMarkers({ viewer });
+    window.__godsEyeView.incidentMarkers = incidentMarkers;
     // Live "vessels in the strait now" counter — counts live + delayed AIS
     // contacts inside the scene's rectangle and keeps polling as the feeds load.
     const straitTrafficChip = createStraitTrafficChip({
@@ -527,8 +532,13 @@ async function init() {
           label: chokepointSceneLabel(scene),
           facts: chokepointSceneFacts(scene, { lang: currentLanguage(), translate: t }),
         });
-        if (scene.newsRegion) void situationCard.showFor(scene.newsRegion);
-        else situationCard.hide();
+        if (scene.newsRegion) {
+          void situationCard.showFor(scene.newsRegion);
+          void incidentMarkers.showFor(scene.newsRegion);
+        } else {
+          situationCard.hide();
+          incidentMarkers.clear();
+        }
       }
       return result;
     };
