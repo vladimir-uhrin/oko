@@ -48,31 +48,33 @@ test('cleanHeadline strips a trailing " - Outlet" but keeps a dashless title', (
   assert.equal(cleanHeadline(''), '');
 });
 
-test('buildIncidentCards collapses one story from many outlets into a single card with a source count', () => {
+test('buildIncidentCards makes ONE card per place, counting the stories there', () => {
   const items = [
     { title: 'Iran says it struck a tanker in the Strait of Hormuz - Reuters', url: 'https://a/1', source: 'Reuters', publishedAt: 300 },
     { title: 'Iran says it struck a tanker in the Strait of Hormuz - Anadolu', url: 'https://a/2', source: 'Anadolu', publishedAt: 310 },
-    { title: 'Iran says it struck a tanker in the Strait of Hormuz — Al Jazeera', url: 'https://a/3', source: 'Al Jazeera', publishedAt: 305 },
+    { title: 'Drone attack on a second tanker in the Strait of Hormuz — Al Jazeera', url: 'https://a/3', source: 'Al Jazeera', publishedAt: 320 },
     { title: 'Vessel seized off Fujairah - The Hindu', url: 'https://a/4', source: 'The Hindu', publishedAt: 200 },
     { title: 'Oil prices rise on Gulf risk - CNBC', url: 'https://a/5', source: 'CNBC', publishedAt: 400 }, // not an incident
   ];
   const cards = buildIncidentCards(items, { region: 'gulf' });
-  assert.equal(cards.length, 2, 'one strike card (3 outlets merged) + one seizure card');
-  const strike = cards.find((c) => c.type === 'strike');
-  assert.equal(strike.title, 'Iran says it struck a tanker in the Strait of Hormuz', 'outlet suffix stripped');
-  assert.equal(strike.sourceCount, 3, 'three outlets counted');
-  assert.equal(strike.severity, 'critical');
-  // most-severe first: the strike (critical) outranks the seizure (major)
-  assert.equal(cards[0].type, 'strike');
+  assert.equal(cards.length, 2, 'strait (all Hormuz reports) + Fujairah — one card each');
+  const strait = cards.find((c) => c.place === 'Strait of Hormuz');
+  assert.equal(strait.title, 'Drone attack on a second tanker in the Strait of Hormuz', 'newest story at the place, outlet suffix stripped');
+  assert.equal(strait.storyCount, 2, 'two distinct stories at the strait');
+  assert.equal(strait.sourceCount, 3, 'three outlets at the strait');
+  assert.equal(strait.severity, 'critical');
+  // most-severe first: the strait strike (critical) outranks the Fujairah seizure (major)
+  assert.equal(cards[0].place, 'Strait of Hormuz');
   assert.equal(cards[1].type, 'seizure');
   assert.equal(cards[1].place, 'Fujairah');
   assert.ok(cards.every((c) => Number.isFinite(c.lat) && Number.isFinite(c.lon)));
 });
 
-test('buildIncidentCards caps to the requested limit', () => {
-  const items = Array.from({ length: 12 }, (_, i) => ({
-    title: `Missile strike number ${i} near the Strait of Hormuz`, url: `https://a/${i}`, source: `s${i}`, publishedAt: i,
-  }));
+test('buildIncidentCards caps the number of PLACES to the limit', () => {
+  // distinct gazetteer places → distinct location cards
+  const places = ['Fujairah', 'Bandar Abbas', 'Dubai', 'Kharg', 'Basra', 'Bushehr'];
+  const items = places.map((p, i) => ({ title: `Missile strike near ${p}`, url: `https://a/${i}`, source: `s${i}`, publishedAt: i }));
+  assert.equal(buildIncidentCards(items, { region: 'gulf' }).length, 6);
   assert.equal(buildIncidentCards(items, { region: 'gulf', limit: 4 }).length, 4);
   assert.deepEqual(buildIncidentCards([], { region: 'gulf' }), []);
 });

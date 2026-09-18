@@ -139,29 +139,30 @@ function storyKey(title) {
 }
 
 /**
- * Incidents → deduped "hot card" models: one card per distinct STORY (the same
- * headline from many outlets collapses into one, keeping a source count), ordered
- * most-severe then newest, capped to `limit`. This is what the map-anchored cards
- * render; it also fixes the "6 outlets = 6 stacked markers" clutter. Pure.
+ * Incidents → "hot card" models: ONE card per PLACE (so cards sit anchored on the
+ * spot they concern instead of fanning into a detached column when many reports
+ * share the strait). The card carries the most-severe / newest story at that place,
+ * plus `storyCount` (distinct stories there) and `sourceCount` (outlets), ordered
+ * most-severe then newest, capped to `limit`. Pure.
  * @param {Array} items open-source news items (situationNews shape)
  * @param {{region?:string, gazetteer?:ReadonlyArray, limit?:number}} [o]
- * @returns {Array<{lat:number, lon:number, place:string, approx:boolean, type:string, severity:string, title:string, url:string, source:string, publishedAt:number|null, sourceCount:number}>}
+ * @returns {Array<{lat:number, lon:number, place:string, approx:boolean, type:string, severity:string, title:string, url:string, source:string, publishedAt:number|null, storyCount:number, sourceCount:number}>}
  */
 export function buildIncidentCards(items, { region = 'gulf', gazetteer = GULF_GAZETTEER, limit = 6 } = {}) {
   const incidents = buildIncidents(items, { region, gazetteer, limit: 60 });
   const groups = new Map();
   for (const inc of incidents) {
-    const key = storyKey(inc.title);
-    if (!key) continue;
-    let g = groups.get(key);
-    if (!g) { g = { rep: inc, sources: new Set() }; groups.set(key, g); }
+    const locKey = `${inc.lat.toFixed(2)}|${inc.lon.toFixed(2)}`;
+    let g = groups.get(locKey);
+    if (!g) { g = { rep: inc, stories: new Set(), sources: new Set() }; groups.set(locKey, g); }
+    g.stories.add(storyKey(inc.title));
     if (inc.source) g.sources.add(inc.source);
     const better = (SEVERITY_RANK[inc.severity] || 0) > (SEVERITY_RANK[g.rep.severity] || 0)
       || ((SEVERITY_RANK[inc.severity] || 0) === (SEVERITY_RANK[g.rep.severity] || 0)
         && (inc.publishedAt || 0) > (g.rep.publishedAt || 0));
     if (better) g.rep = inc;
   }
-  const cards = [...groups.values()].map(({ rep, sources }) => ({
+  const cards = [...groups.values()].map(({ rep, stories, sources }) => ({
     lat: rep.lat,
     lon: rep.lon,
     place: rep.place,
@@ -172,6 +173,7 @@ export function buildIncidentCards(items, { region = 'gulf', gazetteer = GULF_GA
     url: rep.url,
     source: rep.source,
     publishedAt: rep.publishedAt,
+    storyCount: Math.max(1, stories.size),
     sourceCount: Math.max(1, sources.size),
   }));
   cards.sort((a, b) => (SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]) || ((b.publishedAt || 0) - (a.publishedAt || 0)));

@@ -87,7 +87,7 @@ export function createIncidentCards({
     const parts = [];
     if (model.source) parts.push(model.source);
     if (age) parts.push(age);
-    if (model.sourceCount > 1) parts.push(translate('incident.more', { n: model.sourceCount - 1 }));
+    if (model.storyCount > 1) parts.push(translate('incident.more', { n: model.storyCount - 1 }));
     meta.textContent = parts.join(' · ');
     a.appendChild(meta);
 
@@ -103,15 +103,21 @@ export function createIncidentCards({
     const models = buildIncidentCards(items, { region, limit: MAX_CARDS });
     for (const model of models) {
       const el = makeCard(model);
+      const dot = doc.createElement('span');
+      dot.className = 'oko-hc-pin';
+      dot.style.setProperty('--hc-accent', SEV_COLOR[model.severity] || SEV_COLOR.minor);
+      layer.appendChild(dot);
       layer.appendChild(el);
-      cards.push({ model, el, cartesian: Cesium.Cartesian3.fromDegrees(model.lon, model.lat) });
+      cards.push({ model, el, dot, cartesian: Cesium.Cartesian3.fromDegrees(model.lon, model.lat) });
     }
     place();
     return cards.length;
   }
 
-  // Project every card, cull behind the horizon / off-screen, and de-overlap the
-  // survivors into a downward stack anchored at the first (most-severe) card.
+  // Each card is anchored to its place: a pin dot sits exactly on the projected
+  // point and the card floats beside it (flipping to the other side near an edge).
+  // Cards are culled behind the horizon / off-screen, and the rare case of two
+  // places overlapping on screen is de-overlapped vertically.
   function place() {
     if (layer.hidden || !revealed || !cards.length) { layer.style.visibility = 'hidden'; return; }
     const scene = viewer.scene;
@@ -133,19 +139,24 @@ export function createIncidentCards({
         win = Cesium.SceneTransforms.worldToWindowCoordinates(scene, c.cartesian, scratch);
         if (!win || !Number.isFinite(win.x) || !Number.isFinite(win.y)) ok = false;
       }
-      if (!ok) { c.el.style.visibility = 'hidden'; continue; }
+      if (!ok) { c.el.style.visibility = 'hidden'; c.dot.style.visibility = 'hidden'; continue; }
       visible.push({ c, x: win.x, y: win.y });
     }
     visible.sort((a, b) => a.y - b.y);
     let lastBottom = -Infinity;
     for (const p of visible) {
+      // pin dot exactly on the point (10px circle → centre it)
+      p.c.dot.style.visibility = 'visible';
+      p.c.dot.style.transform = `translate(${Math.round(p.x - 5)}px, ${Math.round(p.y - 5)}px)`;
+      // card beside the point, flipped left when there is no room to the right
       p.c.el.style.visibility = 'visible';
       const w = p.c.el.offsetWidth || 214;
       const h = p.c.el.offsetHeight || 70;
-      let x = p.x + ANCHOR_OFFSET_PX;
-      if (x + w > vw - 8) x = p.x - ANCHOR_OFFSET_PX - w; // no room right → left of the point
+      const flip = p.x + ANCHOR_OFFSET_PX + w > vw - 8;
+      p.c.el.classList.toggle('oko-hc-left', flip);
+      let x = flip ? p.x - ANCHOR_OFFSET_PX - w : p.x + ANCHOR_OFFSET_PX;
       let y = p.y - h / 2;
-      if (y < lastBottom + CARD_GAP_PX) y = lastBottom + CARD_GAP_PX; // stack, don't overlap
+      if (y < lastBottom + CARD_GAP_PX) y = lastBottom + CARD_GAP_PX; // rare: two places overlap
       x = Math.max(8, Math.min(x, Math.max(8, vw - w - 8)));
       y = Math.max(8, Math.min(y, Math.max(8, vh - h - 8)));
       lastBottom = y + h;
@@ -197,6 +208,9 @@ function ensureStyle(doc) {
   style.textContent = `
 .oko-hotcards{position:absolute;inset:0;z-index:59;pointer-events:none;overflow:hidden;}
 .oko-hotcards[hidden]{display:none;}
+.oko-hc-pin{position:absolute;top:0;left:0;width:10px;height:10px;border-radius:50%;
+  background:var(--hc-accent,#39d0ff);box-shadow:0 0 0 2px rgba(11,22,34,.85),0 0 10px var(--hc-accent,#39d0ff);
+  pointer-events:none;will-change:transform;}
 .oko-hotcard{position:absolute;top:0;left:0;width:214px;max-width:calc(100vw - 16px);
   padding:7px 9px 6px;border-radius:10px;background:rgba(11,22,34,.92);
   border:1px solid rgba(57,208,255,.26);border-left:3px solid var(--hc-accent,#39d0ff);
