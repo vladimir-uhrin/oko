@@ -33,6 +33,14 @@ export const SITUATION_REGIONS = Object.freeze({
     query: '"Strait of Hormuz" OR "Persian Gulf" OR "Gulf of Oman"',
     rssQuery: '"Strait of Hormuz" OR "Persian Gulf" OR "Gulf of Oman"',
     timespan: '3d',
+    // Direct publisher RSS: real article URLs (not Google-News redirects), so the
+    // og:image unfurl and link-out work → cards can show photos. Keyword-filtered
+    // to the region on the server; only incident-classified items become markers.
+    directRss: Object.freeze([
+      'https://feeds.bbci.co.uk/news/world/middle_east/rss.xml',
+      'https://www.aljazeera.com/xml/rss/all.xml',
+    ]),
+    match: 'hormuz|persian gulf|arabian gulf|gulf of oman|red sea|bab[- ]?el[- ]?mandeb|houthi|bandar abbas|fujairah|kharg|bushehr|jebel ali|ras tanura|\\btanker|\\bwarship|shipping lane|ship-to-ship',
   }),
 });
 
@@ -83,6 +91,43 @@ export function parseGdeltArticles(json) {
   }
   out.sort((x, y) => (y.publishedAt || 0) - (x.publishedAt || 0));
   return out;
+}
+
+/** A direct article URL (usable for og:image unfurl / link-out) vs a Google-News redirect. Pure. */
+export function isDirectNewsUrl(url) {
+  try { return !/(?:^|\.)news\.google\.com$/i.test(new URL(String(url)).hostname); } catch { return false; }
+}
+
+/** Collapse-key for the same story across sources (drops a trailing " - Outlet"). */
+function newsStoryKey(title) {
+  return String(title || '').toLowerCase().replace(/\s+[-–—]\s+[^-–—]{2,42}$/, '').replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
+}
+
+/**
+ * Merge news items from several sources into one deduped list. When the same
+ * story appears more than once, keep the most useful copy — one that carries an
+ * image beats one with a direct URL beats a bare Google-News redirect, then newer
+ * wins. Newest first. Pure.
+ * @param {Array<Array>} lists
+ * @returns {Array}
+ */
+export function mergeNewsItems(lists) {
+  const byKey = new Map();
+  const score = (it) => (it?.image ? 2 : 0) + (isDirectNewsUrl(it?.url) ? 1 : 0);
+  for (const list of (Array.isArray(lists) ? lists : [])) {
+    for (const it of (Array.isArray(list) ? list : [])) {
+      if (!it?.title || !it?.url) continue;
+      const k = newsStoryKey(it.title);
+      if (!k) continue;
+      const prev = byKey.get(k);
+      if (!prev
+        || score(it) > score(prev)
+        || (score(it) === score(prev) && (it.publishedAt || 0) > (prev.publishedAt || 0))) {
+        byKey.set(k, it);
+      }
+    }
+  }
+  return [...byKey.values()].sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
 }
 
 /** Compact "how long ago" label via i18n keys situation.ago-*. */

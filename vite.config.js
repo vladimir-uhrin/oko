@@ -76,7 +76,7 @@ import {
   ACER_HISTORICAL_URL, FRED_EU_GAS_SERIES, FRED_USD_PER_EUR_SERIES, fredCsvUrl, monthlyEurPerMwh, parseAcerCsv, parseFredCsv,
 } from './src/data/gasPrices.js';
 import { YAHOO_SYMBOLS, parseYahooChart, yahooChartUrl } from './src/data/oilPrices.js';
-import { SITUATION_REGIONS, gdeltDocUrl, parseGdeltArticles } from './src/data/situationNews.js';
+import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, parseGdeltArticles } from './src/data/situationNews.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -4902,24 +4902,49 @@ function situationNewsProxy() {
     items.sort((x, y) => (y.publishedAt || 0) - (x.publishedAt || 0));
     return items;
   }
+  // Direct publisher RSS (BBC, Al Jazeera…): real article URLs (not Google-News
+  // redirects), keyword-filtered to the region, so the client can unfurl og:image
+  // and link out. Each feed fails independently. Reuses the shared RSS parser.
+  async function fetchDirectRss(cfg) {
+    const feeds = Array.isArray(cfg.directRss) ? cfg.directRss : [];
+    if (!feeds.length) return [];
+    const match = cfg.match ? new RegExp(cfg.match, 'i') : null;
+    const lists = await Promise.all(feeds.map(async (url) => {
+      try {
+        const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT } });
+        const xml = await readResponseTextCapped(upstream, MAX_BYTES);
+        if (!upstream.ok) return [];
+        return normalizeRssArticles(xml, 60)
+          .filter((a) => !match || match.test(a.title))
+          .map((a) => ({
+            title: a.title, url: a.url, source: a.domain,
+            publishedAt: a.publishedAt ? Date.parse(a.publishedAt) : null,
+            image: null, lang: null, country: a.sourceCountry || null,
+          }));
+      } catch { return []; }
+    }));
+    return lists.flat();
+  }
   async function build(region) {
     const started = Date.now();
     const cfg = SITUATION_REGIONS[region];
-    let items = [];
-    let source = '';
-    try {
-      const json = await fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 }));
-      items = parseGdeltArticles(json);
-      if (items.length) source = 'GDELT DOC 2.0 (open news article index)';
-    } catch (error) {
-      console.warn('[situation-proxy] ' + region + ' GDELT failed (' + (error?.message || error) + ') — falling back to Google News RSS');
-    }
-    if (!items.length) {
-      items = await fetchRss(cfg);
-      source = 'Google News RSS (open news; GDELT fallback)';
-    }
+    let gdelt = [];
+    try { gdelt = parseGdeltArticles(await fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 }))); }
+    catch (error) { console.warn('[situation-proxy] ' + region + ' GDELT failed (' + (error?.message || error) + ')'); }
+    const direct = await fetchDirectRss(cfg).catch(() => []);
+    // Google News RSS adds broad coverage; fetch it unless GDELT already returned plenty.
+    let google = [];
+    if (gdelt.length < 15) { try { google = await fetchRss(cfg); } catch { /* Google is optional here */ } }
+    // Merge, preferring copies with an image / a direct URL (see mergeNewsItems).
+    const items = mergeNewsItems([gdelt, direct, google]).slice(0, 40);
+    if (!items.length) throw new Error('no items from any source (GDELT/RSS)');
+    const parts = [];
+    if (gdelt.length) parts.push('GDELT');
+    if (direct.length) parts.push('publisher RSS');
+    if (google.length) parts.push('Google News RSS');
+    const source = parts.join(' + ') + ' (open news, deduped)';
     const body = JSON.stringify({ region, items, source, fetchedAt: Date.now() });
-    console.log('[situation-proxy] ' + region + ': ' + items.length + ' articles [' + (source || 'none') + '] in ' + (Date.now() - started) + ' ms');
+    console.log('[situation-proxy] ' + region + ': ' + items.length + ' merged [' + source + '] in ' + (Date.now() - started) + ' ms');
     return { at: Date.now(), body };
   }
   async function handler(req, res) {

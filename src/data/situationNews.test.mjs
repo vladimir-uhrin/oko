@@ -6,6 +6,8 @@ import {
   buildSituationModel,
   fetchSituationNews,
   gdeltDocUrl,
+  isDirectNewsUrl,
+  mergeNewsItems,
   parseGdeltArticles,
   parseGdeltDate,
   relativeAge,
@@ -20,6 +22,32 @@ test('the gulf region carries a Hormuz/Gulf GDELT query', () => {
 test('the gulf region carries an RSS fallback query for when GDELT throttles', () => {
   assert.match(SITUATION_REGIONS.gulf.rssQuery, /Hormuz/);
   assert.match(SITUATION_REGIONS.gulf.rssQuery, /Gulf of Oman/);
+});
+
+test('the gulf region carries direct publisher RSS feeds + a region match', () => {
+  assert.ok(Array.isArray(SITUATION_REGIONS.gulf.directRss) && SITUATION_REGIONS.gulf.directRss.length >= 2);
+  assert.ok(SITUATION_REGIONS.gulf.directRss.every((u) => /^https:\/\//.test(u)));
+  assert.match('Tanker struck near Hormuz', new RegExp(SITUATION_REGIONS.gulf.match, 'i'));
+  assert.doesNotMatch('Local election results in Ohio', new RegExp(SITUATION_REGIONS.gulf.match, 'i'));
+});
+
+test('isDirectNewsUrl distinguishes real article URLs from Google-News redirects', () => {
+  assert.equal(isDirectNewsUrl('https://www.bbc.co.uk/news/articles/abc'), true);
+  assert.equal(isDirectNewsUrl('https://news.google.com/rss/articles/CBMxyz'), false);
+  assert.equal(isDirectNewsUrl('not a url'), false);
+});
+
+test('mergeNewsItems dedupes by story, preferring image > direct URL > redirect, then newest', () => {
+  const google = [{ title: 'Iran strikes tanker in Strait of Hormuz - Reuters', url: 'https://news.google.com/rss/articles/AAA', publishedAt: 300, image: null }];
+  const direct = [{ title: 'Iran strikes tanker in Strait of Hormuz', url: 'https://www.bbc.co.uk/news/articles/xyz', publishedAt: 250, image: null }];
+  const gdelt = [{ title: 'Iran strikes tanker in Strait of Hormuz - AP', url: 'https://apnews.com/story', publishedAt: 200, image: 'https://img/1.jpg' }];
+  const other = [{ title: 'Oil prices climb', url: 'https://news.google.com/rss/articles/BBB', publishedAt: 400, image: null }];
+  const merged = mergeNewsItems([google, direct, gdelt, other]);
+  assert.equal(merged.length, 2, 'the three Hormuz copies collapse into one');
+  const hormuz = merged.find((m) => /Hormuz/.test(m.title));
+  assert.equal(hormuz.image, 'https://img/1.jpg', 'the image-bearing GDELT copy wins over direct/redirect');
+  // newest first overall
+  assert.equal(merged[0].title, 'Oil prices climb');
 });
 
 test('gdeltDocUrl is keyless, JSON, sorted newest-first and clamps maxrecords', () => {
