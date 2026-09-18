@@ -18,9 +18,11 @@ const dataUrl = new URL('./local_data/boundaries/boundaries.geojsonl', import.me
 
 export const COUNTRY_BOUNDARIES_ID = 'country-boundaries';
 
-/** Subtle amber political line — visible over land/sea without fighting the data layers. */
-const LINE_COLOR = Cesium.Color.fromCssColorString('#ffb547').withAlpha(0.5);
-const LINE_WIDTH = 1.2;
+/** Political border line — a visible red (as in the upstream reveal), draped on
+ *  the terrain. Distinct from the cyan shipping lanes; not so heavy it fights the
+ *  data layers. */
+const LINE_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.72);
+const LINE_WIDTH = 1.6;
 
 /**
  * Parse the bundled .geojsonl payload into LineString features. Malformed lines
