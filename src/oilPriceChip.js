@@ -254,11 +254,8 @@ function ensureStyle(doc) {
   const style = doc.createElement('style');
   style.id = 'oko-oil-chip-style';
   style.textContent = `
-.oko-oil-chip{position:fixed;top:52px;right:10px;z-index:60;width:268px;max-width:calc(100vw - 20px);
-  padding:9px 11px;border-radius:11px;background:rgba(11,22,34,.85);border:1px solid rgba(57,208,255,.28);
-  box-shadow:0 8px 26px rgba(0,0,0,.5);backdrop-filter:blur(7px);
-  font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#dbeafe;letter-spacing:.02em;pointer-events:auto;}
-.oko-oil-chip[hidden]{display:none;}
+/* The chip BOX (position, size, z-index) lives in style.css — see
+   "Scene chips" there. Only its inner styling stays here. */
 .oko-oil-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;}
 .oko-oil-title{font-size:10px;font-weight:600;letter-spacing:.14em;color:#ffb547;text-transform:uppercase;}
 .oko-oil-close{appearance:none;background:none;border:0;color:#8aa0b6;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
@@ -310,7 +307,6 @@ function ensureStyle(doc) {
 .oko-oilc-tip-d{color:#8aa0b6;margin-bottom:2px;}
 .oko-oilc-tip-r{display:flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums;}
 .oko-oilc-tip-sw{width:8px;height:8px;border-radius:2px;flex:0 0 auto;}
-@media (max-width:520px){.oko-oil-chip{top:48px;right:8px;width:240px;}}
 `;
   (doc.head || doc.documentElement).appendChild(style);
 }

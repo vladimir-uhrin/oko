@@ -124,7 +124,19 @@ export const WORLD_OVERLAY_OCCLUDER_SELECTORS = Object.freeze([
   '#pp-toggles',
   '#command-dock',
   '#gev-voice-control',
-  '#cesium-credits',
+  // The #cesium-credits element itself measures 0x0 (verified live), and
+  // refreshUiOccluders skips any zero-area rect — so the REQUIRED Google/Cesium
+  // attribution was never actually protected. Its painted children are, exactly
+  // as ui.js already lists them for the panel lanes.
+  '#cesium-credits .cesium-credit-logoContainer',
+  '#cesium-credits .cesium-credit-textContainer',
+  // Chrome the ambient cards must not hide behind. Their boxes are in style.css
+  // (z60 and z100, both above HOST_TOP_Z_INDEX), so these stay SOFT exclusions:
+  // a card may still be drawn under them when it has nowhere else to go, it is
+  // just no longer the placer's first choice.
+  '#lang-switch',
+  '.oko-strait-chip',
+  '.oko-oil-chip',
   '.hud-top-left',
   '.hud-top-right',
   '.hud-bottom-left',

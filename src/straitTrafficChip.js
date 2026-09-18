@@ -145,11 +145,8 @@ function ensureStyle(doc) {
   const style = doc.createElement('style');
   style.id = 'oko-strait-chip-style';
   style.textContent = `
-.oko-strait-chip{position:fixed;top:52px;left:10px;z-index:60;width:236px;max-width:calc(100vw - 20px);
-  padding:9px 11px;border-radius:11px;background:rgba(11,22,34,.85);border:1px solid rgba(57,208,255,.28);
-  box-shadow:0 8px 26px rgba(0,0,0,.5);backdrop-filter:blur(7px);
-  font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#dbeafe;pointer-events:auto;}
-.oko-strait-chip[hidden]{display:none;}
+/* The chip BOX (position, size, z-index) lives in style.css — see
+   "Scene chips" there. Only its inner styling stays here. */
 .oko-strait-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
 .oko-strait-title{font-size:11px;font-weight:600;letter-spacing:.1em;color:#39d0ff;text-transform:uppercase;line-height:1.2;}
 .oko-strait-close{appearance:none;background:none;border:0;color:#8aa0b6;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
