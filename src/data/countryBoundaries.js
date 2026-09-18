@@ -18,11 +18,13 @@ const dataUrl = new URL('./local_data/boundaries/boundaries.geojsonl', import.me
 
 export const COUNTRY_BOUNDARIES_ID = 'country-boundaries';
 
-/** Political border line — a visible red (as in the upstream reveal), draped on
- *  the terrain. Distinct from the cyan shipping lanes; not so heavy it fights the
- *  data layers. */
-const LINE_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.72);
-const LINE_WIDTH = 1.6;
+/** Political border as a "fence" (Cesium wall): a red curtain standing on the
+ *  border line (user „aby pri bočnom pohľade … bol akoby plot"). Reads as a fence
+ *  at the oblique strait zoom and collapses to a thin line from straight above /
+ *  the whole planet. */
+const WALL_HEIGHT_M = 28000; // top of the fence above the ellipsoid
+const WALL_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.3); // translucent red curtain
+const WALL_TOP_COLOR = Cesium.Color.fromCssColorString('#ff6a5e').withAlpha(0.85); // brighter top edge
 
 /**
  * Parse the bundled .geojsonl payload into LineString features. Malformed lines
@@ -64,17 +66,21 @@ export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImp
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const features = parseBoundariesGeojsonl(await response.text());
     if (!features.length) throw new Error('empty dataset');
-    const material = new Cesium.ColorMaterialProperty(LINE_COLOR);
+    const wallMaterial = new Cesium.ColorMaterialProperty(WALL_COLOR);
     for (const feature of features) {
+      const coords = feature.geometry.coordinates;
       const flat = [];
-      for (const [lon, lat] of feature.geometry.coordinates) flat.push(lon, lat);
+      for (const [lon, lat] of coords) flat.push(lon, lat);
       ds.entities.add({
         id: `${COUNTRY_BOUNDARIES_ID}:${feature.id}`,
-        polyline: {
+        wall: {
           positions: Cesium.Cartesian3.fromDegreesArray(flat),
-          width: LINE_WIDTH,
-          material,
-          clampToGround: true,
+          maximumHeights: new Array(coords.length).fill(WALL_HEIGHT_M),
+          minimumHeights: new Array(coords.length).fill(0),
+          material: wallMaterial,
+          outline: true,
+          outlineColor: WALL_TOP_COLOR,
+          outlineWidth: 1,
         },
       });
     }
