@@ -826,7 +826,7 @@ export const EN_STRINGS = Object.freeze({
   'strait-traffic.passenger': 'passenger',
   'strait-traffic.other': 'other',
   'strait-traffic.unknown': 'unknown',
-  // Situation from open sources (2026-09-17, pilot) — see src/situationFeed.js.
+  // Situation from open sources (2026-09-17) — see src/conflictBulletin.js.
   'panel.gulf': 'GULF',
   'situation.title': 'GULF · OPEN SOURCES',
   'bulletin.tab': 'Middle East',
@@ -2231,7 +2231,7 @@ export const SK_STRINGS = Object.freeze({
   'strait-traffic.passenger': 'osobné',
   'strait-traffic.other': 'iné',
   'strait-traffic.unknown': 'neznáme',
-  // Situácia z otvorených zdrojov (2026-09-17, pilot) — pozri src/situationFeed.js.
+  // Situácia z otvorených zdrojov (2026-09-17) — pozri src/conflictBulletin.js.
   'panel.gulf': 'ZÁLIV',
   'situation.title': 'ZÁLIV · OTVORENÉ ZDROJE',
   'bulletin.tab': 'Blízky východ',
