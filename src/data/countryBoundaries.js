@@ -18,13 +18,19 @@ const dataUrl = new URL('./local_data/boundaries/boundaries.geojsonl', import.me
 
 export const COUNTRY_BOUNDARIES_ID = 'country-boundaries';
 
+/** Flat political border line — always visible (map context), draped on the
+ *  terrain. */
+const LINE_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.6);
+const LINE_WIDTH = 1.4;
+
 /** Political border as a "fence" (Cesium wall): a red curtain standing on the
- *  border line (user „aby pri bočnom pohľade … bol akoby plot"). Reads as a fence
- *  at the oblique strait zoom and collapses to a thin line from straight above /
- *  the whole planet. */
+ *  border line (user „aby pri bočnom pohľade … bol akoby plot"). It POPS UP only
+ *  when the camera is within FENCE_MAX_DISTANCE_M of the border (distanceDisplay
+ *  Condition) — from far / the whole planet only the flat line remains. */
 const WALL_HEIGHT_M = 28000; // top of the fence above the ellipsoid
 const WALL_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.3); // translucent red curtain
 const WALL_TOP_COLOR = Cesium.Color.fromCssColorString('#ff6a5e').withAlpha(0.85); // brighter top edge
+const FENCE_MAX_DISTANCE_M = 1_300_000; // the fence shows only below this camera distance
 
 /**
  * Parse the bundled .geojsonl payload into LineString features. Malformed lines
@@ -66,21 +72,31 @@ export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImp
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const features = parseBoundariesGeojsonl(await response.text());
     if (!features.length) throw new Error('empty dataset');
+    const lineMaterial = new Cesium.ColorMaterialProperty(LINE_COLOR);
     const wallMaterial = new Cesium.ColorMaterialProperty(WALL_COLOR);
+    const fenceCondition = new Cesium.DistanceDisplayCondition(0, FENCE_MAX_DISTANCE_M);
     for (const feature of features) {
       const coords = feature.geometry.coordinates;
       const flat = [];
       for (const [lon, lat] of coords) flat.push(lon, lat);
+      const positions = Cesium.Cartesian3.fromDegreesArray(flat);
+      // Flat border line — always on (map context, „hranice nechaj").
       ds.entities.add({
-        id: `${COUNTRY_BOUNDARIES_ID}:${feature.id}`,
+        id: `${COUNTRY_BOUNDARIES_ID}:line:${feature.id}`,
+        polyline: { positions, width: LINE_WIDTH, material: lineMaterial, clampToGround: true },
+      });
+      // Fence — pops up only when the camera is close enough.
+      ds.entities.add({
+        id: `${COUNTRY_BOUNDARIES_ID}:wall:${feature.id}`,
         wall: {
-          positions: Cesium.Cartesian3.fromDegreesArray(flat),
+          positions,
           maximumHeights: new Array(coords.length).fill(WALL_HEIGHT_M),
           minimumHeights: new Array(coords.length).fill(0),
           material: wallMaterial,
           outline: true,
           outlineColor: WALL_TOP_COLOR,
           outlineWidth: 1,
+          distanceDisplayCondition: fenceCondition,
         },
       });
     }
