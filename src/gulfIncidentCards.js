@@ -191,33 +191,32 @@ export function createIncidentCards({
       if (!ok) { c.el.style.visibility = 'hidden'; c.dot.style.visibility = 'hidden'; c.line.style.visibility = 'hidden'; continue; }
       visible.push({ c, x: win.x, y: win.y });
     }
-    visible.sort((a, b) => a.y - b.y);
-    let lastBottom = -Infinity;
+    // Card floats ABOVE its ground dot with a leader line dropping to it (like the
+    // upstream reveal). Process the lowest points first and stack upward so several
+    // cards near one spot don't overlap.
+    visible.sort((a, b) => b.y - a.y);
+    let lastTop = Infinity;
     for (const p of visible) {
-      // pin dot exactly on the point (10px circle → centre it)
       p.c.dot.style.visibility = 'visible';
       p.c.dot.style.transform = `translate(${Math.round(p.x - 5)}px, ${Math.round(p.y - 5)}px)`;
-      // card beside the point, flipped left when there is no room to the right
       p.c.el.style.visibility = 'visible';
-      const w = p.c.el.offsetWidth || 214;
-      const h = p.c.el.offsetHeight || 70;
-      const flip = p.x + ANCHOR_OFFSET_PX + w > vw - 8;
-      p.c.el.classList.toggle('oko-hc-left', flip);
-      let x = flip ? p.x - ANCHOR_OFFSET_PX - w : p.x + ANCHOR_OFFSET_PX;
-      let y = p.y - h / 2;
-      if (y < lastBottom + CARD_GAP_PX) y = lastBottom + CARD_GAP_PX; // rare: two places overlap
-      x = Math.max(8, Math.min(x, Math.max(8, vw - w - 8)));
-      y = Math.max(8, Math.min(y, Math.max(8, vh - h - 8)));
-      lastBottom = y + h;
-      p.c.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
-      // leader line from the ground dot (p.x,p.y) to the card's near edge
-      const anchorX = x <= p.x ? x + w : x;
-      const anchorY = y + h / 2;
-      const dxl = anchorX - p.x;
-      const dyl = anchorY - p.y;
-      const len = Math.hypot(dxl, dyl);
+      const w = p.c.el.offsetWidth || 238;
+      const h = p.c.el.offsetHeight || 90;
+      const cx = Math.max(8, Math.min(p.x - w / 2, Math.max(8, vw - w - 8)));
+      let cy = p.y - ANCHOR_OFFSET_PX - h; // above the point
+      let below = false;
+      if (cy < 8) { cy = p.y + ANCHOR_OFFSET_PX; below = true; } // no room above → below
+      if (!below && cy + h > lastTop - CARD_GAP_PX) cy = lastTop - CARD_GAP_PX - h; // stack upward
+      cy = Math.max(8, Math.min(cy, Math.max(8, vh - h - 8)));
+      lastTop = cy;
+      p.c.el.style.transform = `translate(${Math.round(cx)}px, ${Math.round(cy)}px)`;
+      // leader line: ground dot → the card's near-edge centre
+      const ax = cx + w / 2;
+      const ay = cy > p.y ? cy : cy + h;
+      const dxl = ax - p.x;
+      const dyl = ay - p.y;
       p.c.line.style.visibility = 'visible';
-      p.c.line.style.width = `${Math.round(len)}px`;
+      p.c.line.style.width = `${Math.round(Math.hypot(dxl, dyl))}px`;
       p.c.line.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) rotate(${(Math.atan2(dyl, dxl) * 180 / Math.PI).toFixed(1)}deg)`;
     }
   }
