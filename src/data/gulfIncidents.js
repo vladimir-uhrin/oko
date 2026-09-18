@@ -117,3 +117,63 @@ export function buildIncidents(items, { region = 'gulf', gazetteer = GULF_GAZETT
   }
   return out;
 }
+
+const SEVERITY_RANK = Object.freeze({ critical: 3, major: 2, minor: 1 });
+
+/**
+ * Strip a trailing " - Outlet" / " — Outlet" that Google News RSS appends to a
+ * headline, so the card shows the story, not the publisher (shown separately).
+ * Falls back to the raw title if stripping would empty it. Pure.
+ * @param {string} title
+ * @returns {string}
+ */
+export function cleanHeadline(title) {
+  const raw = String(title ?? '').trim();
+  const stripped = raw.replace(/\s+[-–—]\s+[^-–—]{2,42}$/, '').trim();
+  return stripped || raw;
+}
+
+/** Collapse-key for the same story reported by many outlets. */
+function storyKey(title) {
+  return cleanHeadline(title).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
+}
+
+/**
+ * Incidents → deduped "hot card" models: one card per distinct STORY (the same
+ * headline from many outlets collapses into one, keeping a source count), ordered
+ * most-severe then newest, capped to `limit`. This is what the map-anchored cards
+ * render; it also fixes the "6 outlets = 6 stacked markers" clutter. Pure.
+ * @param {Array} items open-source news items (situationNews shape)
+ * @param {{region?:string, gazetteer?:ReadonlyArray, limit?:number}} [o]
+ * @returns {Array<{lat:number, lon:number, place:string, approx:boolean, type:string, severity:string, title:string, url:string, source:string, publishedAt:number|null, sourceCount:number}>}
+ */
+export function buildIncidentCards(items, { region = 'gulf', gazetteer = GULF_GAZETTEER, limit = 6 } = {}) {
+  const incidents = buildIncidents(items, { region, gazetteer, limit: 60 });
+  const groups = new Map();
+  for (const inc of incidents) {
+    const key = storyKey(inc.title);
+    if (!key) continue;
+    let g = groups.get(key);
+    if (!g) { g = { rep: inc, sources: new Set() }; groups.set(key, g); }
+    if (inc.source) g.sources.add(inc.source);
+    const better = (SEVERITY_RANK[inc.severity] || 0) > (SEVERITY_RANK[g.rep.severity] || 0)
+      || ((SEVERITY_RANK[inc.severity] || 0) === (SEVERITY_RANK[g.rep.severity] || 0)
+        && (inc.publishedAt || 0) > (g.rep.publishedAt || 0));
+    if (better) g.rep = inc;
+  }
+  const cards = [...groups.values()].map(({ rep, sources }) => ({
+    lat: rep.lat,
+    lon: rep.lon,
+    place: rep.place,
+    approx: rep.approx,
+    type: rep.type,
+    severity: rep.severity,
+    title: cleanHeadline(rep.title),
+    url: rep.url,
+    source: rep.source,
+    publishedAt: rep.publishedAt,
+    sourceCount: Math.max(1, sources.size),
+  }));
+  cards.sort((a, b) => (SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]) || ((b.publishedAt || 0) - (a.publishedAt || 0)));
+  return cards.slice(0, Math.max(0, limit));
+}

@@ -40,8 +40,9 @@ import { initAnnotations } from './annotations/index.js';
 import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
 import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
-import { createSituationCard, createSituationPanel } from './situationFeed.js';
-import { createIncidentMarkers } from './gulfIncidentMarkers.js';
+import { createSituationPanel } from './situationFeed.js';
+import { createIncidentCards } from './gulfIncidentCards.js';
+import { createSceneRevealGate } from './sceneRevealGate.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -505,15 +506,14 @@ async function init() {
     const oilPricePanel = createOilPricePanel();
     window.__godsEyeView.oilPricePanel = oilPricePanel;
     // Situation from open sources (pilot): a "GULF / ZÁLIV" panel in the DATA tab
-    // (open-source news via GDELT) plus a compact card shown with the Hormuz scene.
+    // (open-source news via GDELT/RSS). The in-scene reveal is the hot cards below.
     const situationPanel = createSituationPanel({ region: 'gulf' });
     window.__godsEyeView.situationPanel = situationPanel;
-    const situationCard = createSituationCard();
-    window.__godsEyeView.situationCard = situationCard;
-    // Geolocated open-source incident markers on the globe (Phase B): shown with
-    // a scene that has a newsRegion; each marker links out to its source.
-    const incidentMarkers = createIncidentMarkers({ viewer });
-    window.__godsEyeView.incidentMarkers = incidentMarkers;
+    // Map-anchored open-source "hot cards" over the reported places (Phase B):
+    // shown with a scene that has a newsRegion, deduped per story, each links out.
+    // Gated by the reveal gate so they only appear when zoomed in over the strait.
+    const incidentCards = createIncidentCards({ viewer });
+    window.__godsEyeView.incidentCards = incidentCards;
     // Live "vessels in the strait now" counter — counts live + delayed AIS
     // contacts inside the scene's rectangle and keeps polling as the feeds load.
     const straitTrafficChip = createStraitTrafficChip({
@@ -522,6 +522,17 @@ async function init() {
       getDarkPositions: () => gfwSarDetectionsLayer.getAllPositions(),
     });
     window.__godsEyeView.straitTrafficChip = straitTrafficChip;
+    // Reveal-on-approach gate (user: „nech sa všetko objavuje iba pri priblížení
+    // nad Hormuzom, nie na celej planéte"): the fixed chips carry .oko-scene-overlay
+    // so a body class can dim them when the camera pulls back to the whole globe,
+    // and the map-anchored hot cards subscribe via onChange.
+    oilPriceChip.element?.classList?.add('oko-scene-overlay');
+    straitTrafficChip.element?.classList?.add('oko-scene-overlay');
+    const revealGate = createSceneRevealGate({
+      viewer,
+      onChange: (visible) => { incidentCards.setRevealed(visible); },
+    });
+    window.__godsEyeView.sceneRevealGate = revealGate;
     const runChokepointScene = (id) => {
       const scene = chokepointSceneById(id);
       const result = applyChokepointScene(id, chokepointSceneDeps);
@@ -532,13 +543,10 @@ async function init() {
           label: chokepointSceneLabel(scene),
           facts: chokepointSceneFacts(scene, { lang: currentLanguage(), translate: t }),
         });
-        if (scene.newsRegion) {
-          void situationCard.showFor(scene.newsRegion);
-          void incidentMarkers.showFor(scene.newsRegion);
-        } else {
-          situationCard.hide();
-          incidentMarkers.clear();
-        }
+        // Gate all scene overlays by camera distance to this strait's centre.
+        revealGate.activate(scene.center);
+        if (scene.newsRegion) void incidentCards.showFor(scene.newsRegion);
+        else incidentCards.clear();
       }
       return result;
     };
