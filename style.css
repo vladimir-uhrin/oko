@@ -6898,8 +6898,37 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
  * panel's measured natural height plus sibling labels cannot fit inside the
  * live HUD/attribution-safe corridor.
  */
+/*
+ * Collapsed siblings stay VISIBLE in focus mode, exactly as the right rail
+ * already does (see #right-context-rail.layout-focus above). Hiding them left
+ * the one expanded panel stranded as a lone card floating over the globe with
+ * no visible column to belong to. As compact launcher strips they keep the
+ * accordion legible and reachable; the layout engine subtracts their measured
+ * height from the expanded panel's allocation.
+ */
 #left-panel-stack.layout-focus > [data-panel-id].collapsed {
-  display: none;
+  display: block;
+  flex: 0 0 auto;
+  opacity: 0.72;
+}
+#left-panel-stack.layout-focus > [data-panel-id].collapsed:hover,
+#left-panel-stack.layout-focus > [data-panel-id].collapsed:focus-within {
+  opacity: 1;
+}
+
+/*
+ * A collapsed panel here is a launcher strip, and the expanded sibling needs
+ * that vertical budget more than this padding does. Trimming it is lossless —
+ * nothing is clipped, only the dead air above and below the title shrinks.
+ *
+ * Deliberately NOT scoped to .layout-focus: a padding that changed with the
+ * mode would swing the measured sibling height by ~60px, far beyond the
+ * engine's 1% stability band, so focus mode would latch on, shrink the strips,
+ * find it no longer needed the corridor, release, and trigger all over again.
+ */
+#left-panel-stack > [data-panel-id].collapsed > div:not(.panel-glow) {
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 #left-panel-stack > #data-panel:not(.collapsed),

@@ -176,13 +176,39 @@ test('desktop panel lanes use per-panel allocations and presentation-only auto-c
   );
   assert.match(css, /var\(--left-panel-allocated-height/);
   assert.match(css, /var\(--right-panel-allocated-height/);
+  // 2026-09-18 — this assertion used to require `display: none` here, on the
+  // grounds that focus mode must hide every collapsed sibling including
+  // presentation-only auto-collapses. That hid the whole column, so the one
+  // expanded panel was left stranded as a lone card floating over the globe
+  // with nothing to belong to, which is what the user reported. The right rail
+  // had always done the opposite (#right-context-rail.layout-focus keeps them
+  // as `display: block`), so the two lanes disagreed; the left one now matches.
+  // A vanished panel is also harder to recover from than a dimmed strip: the
+  // user can see where it went and click it back.
   assert.match(
     css,
-    /#left-panel-stack\.layout-focus > \[data-panel-id\]\.collapsed\s*\{\s*display:\s*none;/,
-    'focus mode must hide every collapsed sibling, including presentation-only auto-collapses',
+    /#left-panel-stack\.layout-focus > \[data-panel-id\]\.collapsed\s*\{\s*display:\s*block;/,
+    'focus mode must keep collapsed siblings visible so the expanded panel reads as part of a column',
   );
+  // Unchanged and still deliberate: an auto-collapsed panel is treated exactly
+  // like any other collapsed sibling and never singled out for different
+  // presentation.
   assert.doesNotMatch(css, /layout-focus > \[data-panel-id\]\.collapsed:not\(\.layout-auto-collapsed\)/);
-  assert.match(ui, /const hiddenSibling = shouldFocus && panel\.classList\.contains\('collapsed'\);/);
+  assert.doesNotMatch(
+    ui,
+    /const hiddenSibling = shouldFocus/,
+    'collapsed siblings are visible now, so none of them may be marked aria-hidden',
+  );
+  assert.match(
+    ui,
+    /expandedAvailableHeight = shouldFocus[\s\S]*?- siblingHeight/,
+    'visible siblings must come off the expanded allocation or the lane overflows',
+  );
+  assert.match(
+    ui,
+    /renderedPanels = panels\.filter\(\(panel\) => isRenderedOnScreen\(panel\)\)/,
+    'a panel hidden by CSS must not feed its cached ghost height into requiredHeight, which latched focus mode on permanently',
+  );
 });
 
 test('share-panel state excludes responsive collapse and preserves recipient preferences', () => {

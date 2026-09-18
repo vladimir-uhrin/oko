@@ -7913,7 +7913,15 @@ export class StyleManager {
     const availableHeight = Math.max(0, safeBottom - safeTop);
     const naturalExpandedHeights = expandedPanels.map((panel) => this._measureLeftPanelNaturalHeight(panel));
     const naturalExpandedHeight = naturalExpandedHeights.reduce((sum, height) => sum + height, 0);
-    const siblingHeight = panels.reduce((total, panel) => {
+    // Only panels the browser actually paints occupy the corridor. A panel that
+    // CSS hides outright (the cockpit drops history/gas/scene) has no rect, but
+    // `_leftStackCollapsedHeights` still remembers its last painted height — and
+    // that cache is written only while a panel measures non-zero, yet was read
+    // unconditionally. Those ghosts kept requiredHeight permanently above the
+    // corridor, so focus mode latched on and could never release itself.
+    const renderedPanels = panels.filter((panel) => isRenderedOnScreen(panel));
+    const renderedGapCount = Math.max(0, renderedPanels.length - 1);
+    const siblingHeight = renderedPanels.reduce((total, panel) => {
       if (!panel.classList.contains('collapsed')) return total;
       const measured = this._leftStackCollapsedHeights.get(panel.id);
       return total + (measured || panel.getBoundingClientRect().height || 0);
@@ -7923,9 +7931,9 @@ export class StyleManager {
     const rowGap = parseFloat(getComputedStyle(stack).rowGap) || 0;
     if (expandedPanels.length) {
       requiredHeight += naturalExpandedHeight;
-      requiredHeight += rowGap * Math.max(0, panels.length - 1);
+      requiredHeight += rowGap * renderedGapCount;
     } else {
-      requiredHeight += rowGap * Math.max(0, panels.length - 1);
+      requiredHeight += rowGap * renderedGapCount;
     }
 
     const wasFocused = stack.classList.contains('layout-focus');
@@ -7964,9 +7972,14 @@ export class StyleManager {
     const bottomPct = ((viewportHeight - layoutBottom) / viewportHeight) * 100;
     const topValue = `${topPct.toFixed(3)}vh`;
     const bottomValue = `${bottomPct.toFixed(3)}vh`;
+    // Focus mode used to hand the expanded panel the whole corridor, which was
+    // sound only while its collapsed siblings were display:none. They are
+    // visible launcher strips now, so their measured height and every rendered
+    // row gap have to come off the top or the stack overflows its lane.
     const expandedAvailableHeight = shouldFocus
       ? Math.max(0, layoutBottom - layoutTop
-        - rowGap * Math.max(0, expandedPanels.length - 1))
+        - siblingHeight
+        - rowGap * renderedGapCount)
       : naturalExpandedHeight;
     const allocatedExpandedHeights = allocatePanelStackHeights({
       naturalHeights: naturalExpandedHeights,
@@ -8013,11 +8026,9 @@ export class StyleManager {
     // obstacles, which put the strip straight through the briefing card.
     // CockpitView.syncSignalLayout() owns `--cockpit-utility-top` instead.
 
-    for (const panel of panels) {
-      const hiddenSibling = shouldFocus && panel.classList.contains('collapsed');
-      if (hiddenSibling) panel.setAttribute('aria-hidden', 'true');
-      else panel.removeAttribute('aria-hidden');
-    }
+    // Focus mode no longer hides collapsed siblings, so none of them is
+    // aria-hidden any more; clear the attribute this pass used to set.
+    for (const panel of panels) panel.removeAttribute('aria-hidden');
     // The right controls share this top baseline; update them after the left
     // accordion commits an HUD-variant or obstacle-driven position change.
     this._scheduleRightPanelLayout();
