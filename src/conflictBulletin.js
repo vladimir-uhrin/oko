@@ -14,12 +14,13 @@
 // targeting. Neutral tone.
 
 import { buildSituationModel, fetchSituationNews } from './data/situationNews.js';
-import { classifyIncident, locateIncident } from './data/gulfIncidents.js';
+import { classifyIncident, isVideoUrl, locateIncident } from './data/gulfIncidents.js';
 import { createIncidentCards } from './gulfIncidentCards.js';
 import { currentLanguage, t } from './i18n.js';
 
 const REFRESH_TTL_MS = 12 * 60_000;
 const MAX_ROWS = 16;
+const LINK_IMAGE_API = '/api/link-image';
 
 const el = (doc, cls, text) => { const d = doc.createElement('div'); d.className = cls; if (text != null) d.textContent = text; return d; };
 
@@ -57,6 +58,17 @@ export function createConflictBulletin({
   let cached = null;
   let cachedAt = 0;
   let inFlight = null;
+  const imgCache = new Map(); // article url -> og:image | null
+
+  // Resolve an article's preview image via the server-side unfurl proxy (only for
+  // items the feed did not already carry an image for).
+  function unfurlImage(url) {
+    if (imgCache.has(url)) return Promise.resolve(imgCache.get(url));
+    return Promise.resolve(fetch(`${LINK_IMAGE_API}?url=${encodeURIComponent(url)}`, { cache: 'no-store' }))
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((j) => { const s = j && typeof j.image === 'string' && /^https?:\/\//.test(j.image) ? j.image : null; imgCache.set(url, s); return s; })
+      .catch(() => null);
+  }
 
   function header() {
     const h = el(doc, 'oko-bul-header');
@@ -77,15 +89,30 @@ export function createConflictBulletin({
       const a = doc.createElement('a');
       a.className = 'oko-bul-item';
       a.href = it.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      // preview thumbnail (article og:image) — link-out, ▶ for a video link, never embeds
+      const thumb = el(doc, 'oko-bul-thumb');
+      thumb.hidden = true;
+      const img = doc.createElement('img');
+      img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
+      img.addEventListener('error', () => { thumb.hidden = true; });
+      img.addEventListener('load', () => { thumb.hidden = false; });
+      thumb.appendChild(img);
+      if (isVideoUrl(it.url)) { const p = el(doc, 'oko-bul-play'); p.textContent = '▶'; thumb.appendChild(p); }
+      a.appendChild(thumb);
+      if (it.image) img.src = it.image;
+      else if (it.url) void unfurlImage(it.url).then((src) => { if (src) img.src = src; });
+
+      const txt = el(doc, 'oko-bul-txt');
       const head = el(doc, 'oko-bul-head');
       const cls = classifyIncident(it.title);
       if (cls) head.appendChild(el(doc, `oko-bul-badge oko-inc-${cls.severity}`, translate(`incident.type-${cls.type}`)));
       const loc = locateIncident(it.title);
       if (loc) head.appendChild(el(doc, 'oko-bul-place', loc.name));
       if (it.ageLabel) head.appendChild(el(doc, 'oko-bul-age', it.ageLabel));
-      a.appendChild(head);
-      a.appendChild(el(doc, 'oko-bul-title', it.title));
-      a.appendChild(el(doc, 'oko-bul-src', it.source || ''));
+      txt.appendChild(head);
+      txt.appendChild(el(doc, 'oko-bul-title', it.title));
+      txt.appendChild(el(doc, 'oko-bul-src', it.source || ''));
+      a.appendChild(txt);
       list.appendChild(a);
     }
     const foot = el(doc, 'oko-bul-foot');
@@ -146,9 +173,15 @@ function ensureStyle(doc) {
 .oko-bul-close{appearance:none;background:none;border:0;color:#8aa0b6;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
 .oko-bul-close:hover{color:#dbeafe;}
 .oko-bul-list{display:flex;flex-direction:column;gap:7px;overflow-y:auto;flex:1 1 auto;}
-.oko-bul-item{display:block;text-decoration:none;color:inherit;padding:3px 0;border-bottom:1px solid rgba(120,150,180,.12);}
+.oko-bul-item{display:flex;gap:8px;text-decoration:none;color:inherit;padding:3px 0;border-bottom:1px solid rgba(120,150,180,.12);}
 .oko-bul-item:last-child{border-bottom:0;}
 .oko-bul-item:hover .oko-bul-title{color:#8fd9ff;}
+.oko-bul-thumb{position:relative;width:56px;height:42px;flex:0 0 auto;border-radius:5px;overflow:hidden;background:#12202f;}
+.oko-bul-thumb[hidden]{display:none;}
+.oko-bul-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.oko-bul-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:20px;height:20px;border-radius:50%;
+  background:rgba(11,22,34,.72);color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;padding-left:1px;box-shadow:0 0 0 1px rgba(255,255,255,.3);}
+.oko-bul-txt{min-width:0;flex:1 1 auto;}
 .oko-bul-head{display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap;}
 .oko-bul-badge{font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:0 5px;border-radius:5px;border:1px solid currentColor;}
 .oko-bul-badge.oko-inc-critical{color:#f87171;}

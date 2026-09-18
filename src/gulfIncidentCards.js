@@ -144,12 +144,17 @@ export function createIncidentCards({
     const models = buildIncidentCards(items, { region, limit: MAX_CARDS });
     for (const model of models) {
       const el = makeCard(model);
+      const accent = SEV_COLOR[model.severity] || SEV_COLOR.minor;
+      const line = doc.createElement('span'); // leader line: ground dot → card
+      line.className = 'oko-hc-line';
+      line.style.setProperty('--hc-accent', accent);
       const dot = doc.createElement('span');
       dot.className = 'oko-hc-pin';
-      dot.style.setProperty('--hc-accent', SEV_COLOR[model.severity] || SEV_COLOR.minor);
+      dot.style.setProperty('--hc-accent', accent);
+      layer.appendChild(line);
       layer.appendChild(dot);
       layer.appendChild(el);
-      cards.push({ model, el, dot, cartesian: Cesium.Cartesian3.fromDegrees(model.lon, model.lat) });
+      cards.push({ model, el, dot, line, cartesian: Cesium.Cartesian3.fromDegrees(model.lon, model.lat) });
     }
     place();
     return cards.length;
@@ -183,7 +188,7 @@ export function createIncidentCards({
         win = Cesium.SceneTransforms.worldToWindowCoordinates(scene, c.cartesian, scratch);
         if (!win || !Number.isFinite(win.x) || !Number.isFinite(win.y)) ok = false;
       }
-      if (!ok) { c.el.style.visibility = 'hidden'; c.dot.style.visibility = 'hidden'; continue; }
+      if (!ok) { c.el.style.visibility = 'hidden'; c.dot.style.visibility = 'hidden'; c.line.style.visibility = 'hidden'; continue; }
       visible.push({ c, x: win.x, y: win.y });
     }
     visible.sort((a, b) => a.y - b.y);
@@ -205,6 +210,15 @@ export function createIncidentCards({
       y = Math.max(8, Math.min(y, Math.max(8, vh - h - 8)));
       lastBottom = y + h;
       p.c.el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+      // leader line from the ground dot (p.x,p.y) to the card's near edge
+      const anchorX = x <= p.x ? x + w : x;
+      const anchorY = y + h / 2;
+      const dxl = anchorX - p.x;
+      const dyl = anchorY - p.y;
+      const len = Math.hypot(dxl, dyl);
+      p.c.line.style.visibility = 'visible';
+      p.c.line.style.width = `${Math.round(len)}px`;
+      p.c.line.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) rotate(${(Math.atan2(dyl, dxl) * 180 / Math.PI).toFixed(1)}deg)`;
     }
   }
 
@@ -254,8 +268,10 @@ function ensureStyle(doc) {
 .oko-hotcards[hidden]{display:none;}
 .oko-hc-pin{position:absolute;top:0;left:0;width:10px;height:10px;border-radius:50%;
   background:var(--hc-accent,#39d0ff);box-shadow:0 0 0 2px rgba(11,22,34,.85),0 0 10px var(--hc-accent,#39d0ff);
-  pointer-events:none;will-change:transform;}
-.oko-hotcard{position:absolute;top:0;left:0;width:214px;max-width:calc(100vw - 16px);
+  pointer-events:none;will-change:transform;z-index:1;}
+.oko-hc-line{position:absolute;top:0;left:0;height:1.5px;transform-origin:0 0;pointer-events:none;will-change:transform,width;
+  background:linear-gradient(90deg,var(--hc-accent,#39d0ff),transparent);opacity:.8;}
+.oko-hotcard{position:absolute;top:0;left:0;width:238px;max-width:calc(100vw - 16px);
   padding:7px 9px 6px;border-radius:10px;background:rgba(11,22,34,.92);
   border:1px solid rgba(57,208,255,.26);border-left:3px solid var(--hc-accent,#39d0ff);
   box-shadow:0 6px 22px rgba(0,0,0,.5);backdrop-filter:blur(6px);pointer-events:auto;
@@ -277,8 +293,8 @@ function ensureStyle(doc) {
   color:var(--hc-accent,#39d0ff);border:1px solid currentColor;border-radius:5px;padding:0 5px;line-height:1.5;}
 .oko-hc-place{font-size:9px;letter-spacing:.04em;color:#8aa0b6;text-transform:uppercase;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.oko-hc-title{font-size:11px;line-height:1.28;color:#eaf2ff;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.oko-hc-title{font-size:11px;line-height:1.32;color:#eaf2ff;
+  display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;}
 .oko-hc-meta{font-size:9px;color:#6f8398;margin-top:3px;letter-spacing:.02em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .oko-hc-foot{font-size:8px;color:#5b6f84;margin-top:2px;letter-spacing:.03em;text-transform:uppercase;}
