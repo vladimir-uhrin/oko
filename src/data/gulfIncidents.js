@@ -176,10 +176,12 @@ function storyKey(title) {
 }
 
 const VIDEO_HOST = /(?:^|\.)(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|rumble\.com|bitchute\.com)$/i;
+const VIDEO_PATH = /\/(?:video|watch)s?(?:\/|$|\?)/i;
 
-/** True when the link points at a known video host (card shows a ▶ badge, links out — never embeds). Pure. */
+/** True when the link points at a video (known host, or a /video//watch path). The
+ *  card shows a ▶ badge and links out — video is never embedded. Pure. */
 export function isVideoUrl(url) {
-  try { return VIDEO_HOST.test(new URL(String(url)).hostname); } catch { return false; }
+  try { const u = new URL(String(url)); return VIDEO_HOST.test(u.hostname) || VIDEO_PATH.test(u.pathname); } catch { return false; }
 }
 
 /**

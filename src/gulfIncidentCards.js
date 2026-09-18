@@ -84,14 +84,19 @@ export function createIncidentCards({
     thumb.className = 'oko-hc-thumb';
     thumb.hidden = true;
     const img = doc.createElement('img');
-    img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
+    img.alt = ''; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
     img.addEventListener('error', () => { thumb.hidden = true; });
     img.addEventListener('load', () => { thumb.hidden = false; });
     thumb.appendChild(img);
     if (model.isVideo) { const play = doc.createElement('span'); play.className = 'oko-hc-play'; play.textContent = '▶'; thumb.appendChild(play); }
     a.appendChild(thumb);
-    if (model.image) img.src = model.image;
-    else if (model.url) void unfurlImage(model.url).then((src) => { if (src) img.src = src; });
+    // Load the preview through the image proxy — reliable (bypasses slow/hotlink),
+    // cached. Works for a video poster (og:image) too; the ▶ badge marks video.
+    // Reveal the box the moment we have a URL: a display:none <img> is never
+    // fetched (esp. with lazy-loading), which would deadlock the load handler.
+    const setImg = (u) => { if (u) { thumb.hidden = false; img.src = `/api/img?url=${encodeURIComponent(u)}`; } };
+    if (model.image) setImg(model.image);
+    else if (model.url) void unfurlImage(model.url).then(setImg);
 
     const head = doc.createElement('div');
     head.className = 'oko-hc-head';

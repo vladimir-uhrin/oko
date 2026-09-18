@@ -93,14 +93,18 @@ export function createConflictBulletin({
       const thumb = el(doc, 'oko-bul-thumb');
       thumb.hidden = true;
       const img = doc.createElement('img');
-      img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
+      img.alt = ''; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
       img.addEventListener('error', () => { thumb.hidden = true; });
       img.addEventListener('load', () => { thumb.hidden = false; });
       thumb.appendChild(img);
       if (isVideoUrl(it.url)) { const p = el(doc, 'oko-bul-play'); p.textContent = '▶'; thumb.appendChild(p); }
       a.appendChild(thumb);
-      if (it.image) img.src = it.image;
-      else if (it.url) void unfurlImage(it.url).then((src) => { if (src) img.src = src; });
+      // Load previews through the image proxy — reliable (bypasses slow/hotlink), cached.
+      // Reveal the box the moment we have a URL: a display:none <img> is never
+      // fetched (esp. with lazy-loading), which would deadlock the load handler.
+      const setImg = (u) => { if (u) { thumb.hidden = false; img.src = `/api/img?url=${encodeURIComponent(u)}`; } };
+      if (it.image) setImg(it.image);
+      else if (it.url) void unfurlImage(it.url).then(setImg);
 
       const txt = el(doc, 'oko-bul-txt');
       const head = el(doc, 'oko-bul-head');

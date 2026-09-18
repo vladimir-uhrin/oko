@@ -70,10 +70,11 @@ test('buildIncidentCards makes ONE card per place, counting the stories there', 
   assert.ok(cards.every((c) => Number.isFinite(c.lat) && Number.isFinite(c.lon)));
 });
 
-test('isVideoUrl flags known video hosts only', () => {
+test('isVideoUrl flags video hosts and /video//watch paths', () => {
   assert.equal(isVideoUrl('https://www.youtube.com/watch?v=abc'), true);
   assert.equal(isVideoUrl('https://youtu.be/abc'), true);
   assert.equal(isVideoUrl('https://vimeo.com/12345'), true);
+  assert.equal(isVideoUrl('https://www.aljazeera.com/video/newsfeed/2026/9/x'), true); // /video/ path
   assert.equal(isVideoUrl('https://www.reuters.com/world/story'), false);
   assert.equal(isVideoUrl('not a url'), false);
 });

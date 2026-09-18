@@ -5159,6 +5159,94 @@ function linkImageProxy() {
 }
 
 /**
+ * Náhľadový obrázok — bajty (2026-09-18, používateľ chce spoľahlivé náhľady aj
+ * video-postery): `/api/img?url=<obrázok>` stiahne publisherov og:image na
+ * serveri (referer = jeho vlastný origin, aby obišiel hotlink ochranu a pomalé
+ * načítanie z prehliadača), overí že je to obrázok, nacachuje na disk (7 dní) a
+ * pošle bajty klientovi. Náhľad s odkazom von — NEHOSTUJEME článok ani nevkladáme
+ * video. SSRF poistka (len verejné http(s)), strop 6 MB, single-flight, limiter.
+ * Zapísané v DATA_SOURCES.md.
+ * @returns {import('vite').Plugin}
+ */
+function imageProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'img');
+  const TTL_MS = 7 * 24 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 12_000;
+  const MAX_BYTES = 6 * 1024 * 1024;
+  const USER_AGENT = 'Mozilla/5.0 (compatible; OKO-imgproxy/0.1; +https://github.com/vladouh76)';
+  const OK_TYPE = /^image\/(?:jpeg|png|webp|gif|avif|jpg)$/i;
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 150, globalMax: 500 });
+  const inFlight = new Map();
+
+  function isPublicHttpUrl(u) {
+    let x; try { x = new URL(u); } catch { return false; }
+    if (!/^https?:$/.test(x.protocol)) return false;
+    const h = x.hostname.toLowerCase();
+    if (h === 'localhost' || h.endsWith('.localhost') || h === '::1') return false;
+    if (/^(?:127\.|0\.|10\.|192\.168\.|169\.254\.)/.test(h)) return false;
+    if (/^172\.(?:1[6-9]|2\d|3[01])\./.test(h)) return false;
+    return true;
+  }
+  const keyHash = (url) => createHash('sha1').update(url).digest('hex');
+  const metaPath = (hh) => path.join(CACHE_DIR, hh + '.json');
+  const binPath = (hh) => path.join(CACHE_DIR, hh + '.bin');
+  async function readDisk(hh) {
+    try {
+      const m = JSON.parse(await fsp.readFile(metaPath(hh), 'utf8'));
+      if (Number.isFinite(m?.at) && typeof m?.type === 'string' && Date.now() - m.at < TTL_MS) {
+        return { type: m.type, buf: await fsp.readFile(binPath(hh)) };
+      }
+    } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(hh, type, buf) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(binPath(hh), buf); await fsp.writeFile(metaPath(hh), JSON.stringify({ at: Date.now(), type })); }
+    catch { /* best-effort */ }
+  }
+  async function fetchImage(url) {
+    let origin = '';
+    try { origin = new URL(url).origin; } catch { /* */ }
+    const upstream = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'image/*,*/*;q=0.8', Referer: origin ? origin + '/' : '' } });
+    if (!upstream.ok) throw new Error('img HTTP ' + upstream.status);
+    const type = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!OK_TYPE.test(type)) throw new Error('not an image: ' + type);
+    const ab = await upstream.arrayBuffer();
+    if (ab.byteLength > MAX_BYTES) throw new Error('image too large');
+    return { type: type === 'image/jpg' ? 'image/jpeg' : type, buf: Buffer.from(ab) };
+  }
+  function sendImg(res, type, buf, cacheState) {
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=604800', 'X-GEV-Cache': cacheState });
+    res.end(buf);
+  }
+  function sendErr(res, status) {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ error: status }));
+  }
+  async function handler(req, res) {
+    if (req.method !== 'GET') { sendErr(res, 405); return; }
+    let url = '';
+    try { url = new URL(req.url || '/', 'http://localhost').searchParams.get('url') || ''; } catch { /* */ }
+    if (!isPublicHttpUrl(url)) { sendErr(res, 400); return; }
+    const hh = keyHash(url);
+    const hit = await readDisk(hh);
+    if (hit) { sendImg(res, hit.type, hit.buf, 'HIT'); return; }
+    if (!limiter(clientKey(req))) { sendErr(res, 429); return; }
+    const request = coalesceProxyRequest(inFlight, 'img:' + hh, () => fetchImage(url));
+    try {
+      const { type, buf } = await request.promise;
+      void writeDisk(hh, type, buf);
+      sendImg(res, type, buf, request.shared ? 'INFLIGHT' : 'MISS');
+    } catch { sendErr(res, 404); }
+  }
+  function install(middlewares) { middlewares.use('/api/img', handler); }
+  return {
+    name: 'image-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
  * Zdieľanie s náhľadom (2026-09-14, variant B, „aj na soc. siete"):
  *   POST /api/share      stav odkazu + snímka JPEG → krátky odkaz /s/<id>
  *   GET  /s/<id>         stránka s Open Graph a Twitter značkami (siete si
@@ -10382,6 +10470,7 @@ export default defineConfig(({ mode }) => {
       situationNewsProxy(),
       translateProxy(),
       linkImageProxy(),
+      imageProxy(),
       earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),
