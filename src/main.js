@@ -37,7 +37,7 @@ import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
-import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
+import { applyChokepointScene, chokepointSceneAnnotationRequests, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
 import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { createSituationPanel } from './situationFeed.js';
@@ -486,15 +486,27 @@ async function init() {
     const chokepointSceneDeps = {
       setLayerEnabled: (layerId) => dataManager.setEnabled(layerId, true, { origin: 'user' }),
       flyToRegion: (rectDegrees) => {
-        if (!viewer?.camera?.flyTo) return null;
+        if (!viewer?.camera?.flyTo || !Array.isArray(rectDegrees) || rectDegrees.length !== 4) return null;
         viewer.trackedEntity = undefined;
+        // Oblique 3D framing (user „nastav šikmý uhol"): sit south of the strait,
+        // tilt up ~32° and look north across it — like the upstream reveal. We fly
+        // to a Cartesian3 (a Rectangle destination silently no-ops while the 3D
+        // tileset is still streaming); the orientation gives the tilt.
+        const [w, s, e, n] = rectDegrees;
+        const lon = (w + e) / 2;
+        const lat = (s + n) / 2;
+        const spanDeg = Math.max(Math.abs(e - w), Math.abs(n - s));
+        const height = Math.max(140_000, spanDeg * 95_000);
+        const backoffDeg = Math.max(1.3, spanDeg * 0.75);
         viewer.camera.flyTo({
-          destination: Cesium.Rectangle.fromDegrees(...rectDegrees),
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat - backoffDeg, height),
+          orientation: { heading: 0, pitch: Cesium.Math.toRadians(-32), roll: 0 },
           duration: 3.2,
         });
         return null;
       },
-      annotate: (requests) => annotations?.annotate?.(requests, { persist: true, flyTo: false }),
+      // The strait pin is NOT persisted here — the reveal gate annotates/clears it
+      // on approach, so it appears only when zoomed in over the strait.
     };
     // Brent/WTI oil-price chip (variant B): the "what is oil doing" context that
     // accompanies a chokepoint reveal. Spot prices from FRED (EIA, public domain)
@@ -529,9 +541,18 @@ async function init() {
     // and the map-anchored hot cards subscribe via onChange.
     oilPriceChip.element?.classList?.add('oko-scene-overlay');
     straitTrafficChip.element?.classList?.add('oko-scene-overlay');
+    // The active strait's pin request — the gate annotates it on approach and
+    // clears it when you pull back, so the pin appears only when zoomed in.
+    let activeScenePin = null;
     const revealGate = createSceneRevealGate({
       viewer,
-      onChange: (visible) => { incidentCards.setRevealed(visible); },
+      onChange: (visible) => {
+        incidentCards.setRevealed(visible);
+        try {
+          if (!visible) annotations?.clear?.();
+          else if (activeScenePin && (annotations?.count?.() ?? 0) === 0) annotations.annotate(activeScenePin, { persist: true, flyTo: false });
+        } catch { /* annotations are optional chrome */ }
+      },
     });
     window.__godsEyeView.sceneRevealGate = revealGate;
     // Country borders (Natural Earth, public domain): political context drawn on
@@ -549,7 +570,9 @@ async function init() {
           label: chokepointSceneLabel(scene),
           facts: chokepointSceneFacts(scene, { lang: currentLanguage(), translate: t }),
         });
-        // Gate all scene overlays by camera distance to this strait's centre.
+        // Gate all scene overlays — pin, cards, chips — by camera distance to this
+        // strait's centre. The pin is handed to the gate (annotated on approach).
+        activeScenePin = chokepointSceneAnnotationRequests(scene, t);
         revealGate.activate(scene.center);
         void countryBoundaries.show(); // political borders under the reveal
         if (scene.newsRegion) void incidentCards.showFor(scene.newsRegion);
