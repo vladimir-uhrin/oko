@@ -47,13 +47,49 @@ export const GULF_GAZETTEER = Object.freeze([
   Object.freeze({ name: 'Doha', lat: 25.29, lon: 51.53, aliases: ['doha', 'qatar'] }),
   Object.freeze({ name: 'Manama', lat: 26.23, lon: 50.58, aliases: ['manama', 'bahrain'] }),
   Object.freeze({ name: 'Muscat', lat: 23.6, lon: 58.55, aliases: ['muscat'] }),
+  // Wider Middle East conflict (2026-09-18) — Red Sea / Yemen / Horn, Suez, Levant, Iran/Iraq.
+  Object.freeze({ name: 'Aden', lat: 12.79, lon: 45.03, aliases: ['aden'] }),
+  Object.freeze({ name: 'Hodeidah', lat: 14.8, lon: 42.95, aliases: ['hodeidah', 'hudaydah', 'al hudaydah'] }),
+  Object.freeze({ name: 'Mokha', lat: 13.32, lon: 43.25, aliases: ['mokha', 'mocha'] }),
+  Object.freeze({ name: "Sana'a", lat: 15.35, lon: 44.2, aliases: ['sanaa', "sana'a"] }),
+  Object.freeze({ name: 'Djibouti', lat: 11.6, lon: 43.15, aliases: ['djibouti'] }),
+  Object.freeze({ name: 'Port Said', lat: 31.26, lon: 32.3, aliases: ['port said'] }),
+  Object.freeze({ name: 'Ismailia', lat: 30.59, lon: 32.27, aliases: ['ismailia'] }),
+  Object.freeze({ name: 'Suez', lat: 29.97, lon: 32.55, aliases: ['suez canal', 'suez'] }),
+  Object.freeze({ name: 'Eilat', lat: 29.56, lon: 34.95, aliases: ['eilat'] }),
+  Object.freeze({ name: 'Gaza', lat: 31.5, lon: 34.47, aliases: ['gaza'] }),
+  Object.freeze({ name: 'Ashkelon', lat: 31.67, lon: 34.57, aliases: ['ashkelon'] }),
+  Object.freeze({ name: 'Tel Aviv', lat: 32.08, lon: 34.78, aliases: ['tel aviv'] }),
+  Object.freeze({ name: 'Haifa', lat: 32.82, lon: 34.99, aliases: ['haifa'] }),
+  Object.freeze({ name: 'Jerusalem', lat: 31.78, lon: 35.22, aliases: ['jerusalem'] }),
+  Object.freeze({ name: 'Beirut', lat: 33.89, lon: 35.5, aliases: ['beirut'] }),
+  Object.freeze({ name: 'Damascus', lat: 33.51, lon: 36.29, aliases: ['damascus'] }),
+  Object.freeze({ name: 'Tehran', lat: 35.69, lon: 51.39, aliases: ['tehran'] }),
+  Object.freeze({ name: 'Isfahan', lat: 32.65, lon: 51.67, aliases: ['isfahan', 'esfahan'] }),
+  Object.freeze({ name: 'Natanz', lat: 33.72, lon: 51.9, aliases: ['natanz'] }),
+  Object.freeze({ name: 'Baghdad', lat: 33.31, lon: 44.36, aliases: ['baghdad'] }),
+  // Broad chokepoints / seas last (specific places above win).
   Object.freeze({ name: 'Gulf of Oman', lat: 24.5, lon: 58.5, aliases: ['gulf of oman'] }),
   Object.freeze({ name: 'Strait of Hormuz', lat: 26.57, lon: 56.25, aliases: ['strait of hormuz', 'hormuz'] }),
   Object.freeze({ name: 'Persian Gulf', lat: 26.5, lon: 51.5, aliases: ['persian gulf', 'arabian gulf'] }),
+  Object.freeze({ name: 'Bab-el-Mandeb', lat: 12.6, lon: 43.4, aliases: ['bab-el-mandeb', 'bab el-mandeb', 'bab al-mandab', 'mandeb'] }),
+  Object.freeze({ name: 'Gulf of Aden', lat: 12.5, lon: 47.0, aliases: ['gulf of aden'] }),
+  Object.freeze({ name: 'Red Sea', lat: 20.0, lon: 38.0, aliases: ['red sea'] }),
+  // Broad country fallbacks LAST (a specific city/sea above always wins) — so a
+  // mention geolocates to the country, not the region default.
+  Object.freeze({ name: 'Iran', lat: 32.4, lon: 53.7, aliases: ['iran', 'iranian'] }),
+  Object.freeze({ name: 'Israel', lat: 31.4, lon: 35.0, aliases: ['israel', 'israeli'] }),
+  Object.freeze({ name: 'Yemen', lat: 15.5, lon: 44.2, aliases: ['yemen', 'yemeni', 'houthi'] }),
+  Object.freeze({ name: 'Lebanon', lat: 33.9, lon: 35.5, aliases: ['lebanon', 'lebanese', 'hezbollah'] }),
+  Object.freeze({ name: 'Iraq', lat: 33.2, lon: 43.7, aliases: ['iraq', 'iraqi'] }),
+  Object.freeze({ name: 'Egypt', lat: 26.8, lon: 30.8, aliases: ['egypt', 'egyptian'] }),
 ]);
 
 /** Default point for a region when no place is named (pilot: Hormuz). */
-export const REGION_DEFAULT = Object.freeze({ gulf: Object.freeze({ name: 'Strait of Hormuz', lat: 26.57, lon: 56.25 }) });
+export const REGION_DEFAULT = Object.freeze({
+  gulf: Object.freeze({ name: 'Strait of Hormuz', lat: 26.57, lon: 56.25 }),
+  mideast: Object.freeze({ name: 'Red Sea', lat: 20.0, lon: 38.0 }),
+});
 
 /**
  * Classify a headline into an incident class, or null if it does not read like

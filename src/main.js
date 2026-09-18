@@ -44,6 +44,7 @@ import { createSituationPanel } from './situationFeed.js';
 import { createIncidentCards } from './gulfIncidentCards.js';
 import { createSceneRevealGate } from './sceneRevealGate.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
+import { createConflictBulletin } from './conflictBulletin.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -586,6 +587,11 @@ async function init() {
     // any scene, off outside one.
     const countryBoundaries = createCountryBoundaries({ viewer });
     window.__godsEyeView.countryBoundaries = countryBoundaries;
+    // Mini spravodaj — Blízky východ: a toggleable open-source conflict bulletin
+    // for the whole region (Hormuz + Red Sea + Suez + Iran + Israel/Gaza…) with
+    // map-anchored incident markers while open.
+    const conflictBulletin = createConflictBulletin({ viewer });
+    window.__godsEyeView.conflictBulletin = conflictBulletin;
     const runChokepointScene = (id) => {
       const scene = chokepointSceneById(id);
       const result = applyChokepointScene(id, chokepointSceneDeps);

@@ -24,6 +24,17 @@ test('the gulf region carries an RSS fallback query for when GDELT throttles', (
   assert.match(SITUATION_REGIONS.gulf.rssQuery, /Gulf of Oman/);
 });
 
+test('the mideast region is a broad conflict feed with its own query + match', () => {
+  assert.ok(SITUATION_REGIONS.mideast, 'mideast region exists');
+  assert.match(SITUATION_REGIONS.mideast.query, /Red Sea/);
+  assert.match(SITUATION_REGIONS.mideast.query, /Suez Canal/);
+  assert.ok(Array.isArray(SITUATION_REGIONS.mideast.directRss) && SITUATION_REGIONS.mideast.directRss.length >= 2);
+  const re = new RegExp(SITUATION_REGIONS.mideast.match, 'i');
+  assert.match('Houthi drone over the Red Sea', re);
+  assert.match('Israeli strike near Damascus', re);
+  assert.doesNotMatch('Local election results in Ohio', re);
+});
+
 test('the gulf region carries direct publisher RSS feeds + a region match', () => {
   assert.ok(Array.isArray(SITUATION_REGIONS.gulf.directRss) && SITUATION_REGIONS.gulf.directRss.length >= 2);
   assert.ok(SITUATION_REGIONS.gulf.directRss.every((u) => /^https:\/\//.test(u)));

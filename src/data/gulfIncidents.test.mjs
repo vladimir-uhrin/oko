@@ -101,6 +101,15 @@ test('buildIncidentCards caps the number of PLACES to the limit', () => {
   assert.deepEqual(buildIncidentCards([], { region: 'gulf' }), []);
 });
 
+test('the expanded gazetteer geolocates the wider conflict (specific place wins over country)', () => {
+  assert.equal(locateIncident('Ship attacked near Bab el-Mandeb').name, 'Bab-el-Mandeb');
+  assert.equal(locateIncident('Explosion at the Suez Canal').name, 'Suez');
+  assert.equal(locateIncident('Houthi missile toward Eilat').name, 'Eilat'); // specific city before Yemen/Israel
+  assert.equal(locateIncident('Israeli strike in Sanaa').name, "Sana'a"); // Sanaa (specific) before Israel/Yemen
+  assert.equal(locateIncident('Houthis launch drone').name, 'Yemen'); // houthi → Yemen
+  assert.equal(locateIncident('US strike hits Iran facility').name, 'Iran'); // country fallback, not the region default
+});
+
 test('every gazetteer entry has finite coordinates and lowercase aliases', () => {
   for (const p of GULF_GAZETTEER) {
     assert.ok(Number.isFinite(p.lat) && Math.abs(p.lat) <= 90, p.name);

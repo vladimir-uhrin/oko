@@ -42,6 +42,20 @@ export const SITUATION_REGIONS = Object.freeze({
     ]),
     match: 'hormuz|persian gulf|arabian gulf|gulf of oman|red sea|bab[- ]?el[- ]?mandeb|houthi|bandar abbas|fujairah|kharg|bushehr|jebel ali|ras tanura|\\btanker|\\bwarship|shipping lane|ship-to-ship',
   }),
+  // Wider Middle East conflict "mini bulletin" (2026-09-18): one broad feed over
+  // Hormuz + Red Sea/Bab-el-Mandeb + Suez + Yemen + Iran + Israel/Gaza/Levant.
+  // Incidents geolocate to their named place via the expanded gazetteer.
+  mideast: Object.freeze({
+    id: 'mideast',
+    query: '"Strait of Hormuz" OR "Red Sea" OR "Bab el-Mandeb" OR "Suez Canal" OR "Gulf of Aden" OR Houthi OR "Persian Gulf" OR "Gulf of Oman"',
+    rssQuery: '"Red Sea" OR "Strait of Hormuz" OR "Suez Canal" OR "Bab el-Mandeb" OR Houthi OR Yemen OR Iran Israel',
+    timespan: '2d',
+    directRss: Object.freeze([
+      'https://feeds.bbci.co.uk/news/world/middle_east/rss.xml',
+      'https://www.aljazeera.com/xml/rss/all.xml',
+    ]),
+    match: 'hormuz|persian gulf|arabian gulf|gulf of oman|red sea|bab[- ]?el[- ]?mandeb|gulf of aden|houthi|\\byemen\\b|hodeidah|hudaydah|sana|\\baden\\b|mokha|djibouti|suez|port said|ismailia|bandar abbas|fujairah|kharg|bushehr|\\bgaza\\b|ashkelon|tel aviv|\\beilat\\b|haifa|jerusalem|beirut|damascus|\\btehran\\b|isfahan|natanz|baghdad|\\biran\\b|\\bisrael\\b|hezbollah|\\btanker|\\bwarship',
+  }),
 });
 
 /** Keyless GDELT DOC 2.0 article-list endpoint for a query. */

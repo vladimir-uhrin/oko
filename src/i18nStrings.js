@@ -829,6 +829,8 @@ export const EN_STRINGS = Object.freeze({
   // Situation from open sources (2026-09-17, pilot) — see src/situationFeed.js.
   'panel.gulf': 'GULF',
   'situation.title': 'GULF · OPEN SOURCES',
+  'bulletin.tab': 'Middle East',
+  'bulletin.title': 'Mini bulletin · Middle East',
   'situation.now': 'now',
   'situation.ago-m': '{n} min ago',
   'situation.ago-h': '{n} h ago',
@@ -2232,6 +2234,8 @@ export const SK_STRINGS = Object.freeze({
   // Situácia z otvorených zdrojov (2026-09-17, pilot) — pozri src/situationFeed.js.
   'panel.gulf': 'ZÁLIV',
   'situation.title': 'ZÁLIV · OTVORENÉ ZDROJE',
+  'bulletin.tab': 'Blízky východ',
+  'bulletin.title': 'Mini spravodaj · Blízky východ',
   'situation.now': 'teraz',
   'situation.ago-m': 'pred {n} min',
   'situation.ago-h': 'pred {n} h',
