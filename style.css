@@ -4897,6 +4897,14 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   left: var(--left-stack-x);
   z-index: 100;
   width: 360px;
+  /* top + bottom + height over-constrains a fixed box, so `bottom` is dropped
+     and the stack sizes to the panels it actually draws — it used to stretch
+     to 398px while painting 121px, and that phantom height was measured as an
+     obstacle by the world-overlay placer. The layout engine is unaffected: its
+     availableHeight comes from the safeTop/safeBottom corridor (ui.js), not
+     from this element's box. Narrow screens restore the bounded, scrolling
+     height below, where overflow-y:auto needs a real limit to scroll against. */
+  height: max-content;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -5003,11 +5011,19 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #right-context-rail {
   --right-display-collapsed-width: var(--left-collapsed-width);
   --right-context-collapsed-width: var(--left-collapsed-width);
+  /* Expanded panels need a concrete width now that the rail is content-sized:
+     a child `width: 100%` would resolve against the rail's own shrink-to-fit
+     content box and collapse. Narrow screens reset this to 100% below. */
+  --right-panel-expanded-width: 330px;
   position: fixed;
   z-index: 110;
   top: var(--right-stack-safe-top, 26vh);
   right: var(--right-rail-x);
-  width: 330px;
+  /* Was a flat 330px while the collapsed pills only ever draw 176px. Every
+     occluder consumer measures this box, so the rail was reserving 154px of
+     air it never painted and ambient map cards (ship/aircraft labels) were
+     pushed out of space that was in fact free. Size to the real content. */
+  width: fit-content;
   max-height: var(--right-stack-max-height, 70vh);
   display: flex;
   flex-direction: column;
@@ -5025,12 +5041,12 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   pointer-events: auto;
 }
 #right-context-rail #global-context-panel {
-  width: 100%;
+  width: var(--right-panel-expanded-width);
   max-height: 100%;
   pointer-events: auto;
 }
 #right-context-rail #cctv-panel {
-  width: 100%;
+  width: var(--right-panel-expanded-width);
   max-height: 100%;
   pointer-events: auto;
 }
@@ -7442,6 +7458,9 @@ body.scene-playback-mode :is(#clear-selected-layers, #reset-globe-view) {
     bottom: calc(50vh + 8px);
     left: 16px;
     width: auto;
+    /* Undo the desktop content-sizing: here the stack is a bounded, scrolling
+       column, and overflow-y:auto needs top/bottom to derive a real height. */
+    height: auto;
     max-height: none;
     overflow-y: auto;
   }
@@ -7459,6 +7478,9 @@ body.scene-playback-mode :is(#clear-selected-layers, #reset-globe-view) {
     bottom: calc(2vh + 7.5rem);
     left: 16px;
     width: auto;
+    /* The rail spans edge-to-edge here, so expanded panels fill it rather than
+       taking the desktop's fixed 330px. */
+    --right-panel-expanded-width: 100%;
     max-height: none;
     overflow-y: auto;
   }
