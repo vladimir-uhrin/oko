@@ -37,7 +37,7 @@ import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
-import { applyChokepointScene, chokepointSceneAnnotationRequests, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
+import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
 import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { createSituationPanel } from './situationFeed.js';
@@ -541,17 +541,43 @@ async function init() {
     // and the map-anchored hot cards subscribe via onChange.
     oilPriceChip.element?.classList?.add('oko-scene-overlay');
     straitTrafficChip.element?.classList?.add('oko-scene-overlay');
-    // The active strait's pin request — the gate annotates it on approach and
-    // clears it when you pull back, so the pin appears only when zoomed in.
-    let activeScenePin = null;
+    // Gated strait pin — its OWN datasource (amber point + label), NOT the
+    // annotation engine, whose "make-visible" zoom would override the oblique
+    // fly-in (the old km:3-over-water bug). Shown only while the reveal gate says
+    // we are over the strait.
+    const scenePinDs = new Cesium.CustomDataSource('oko-scene-pin');
+    scenePinDs.show = false;
+    try { viewer.dataSources.add(scenePinDs); } catch { /* headless */ }
+    const setScenePin = (scene) => {
+      scenePinDs.entities.removeAll();
+      if (!scene?.center) return;
+      scenePinDs.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(scene.center.lon, scene.center.lat),
+        point: {
+          pixelSize: 11,
+          color: Cesium.Color.fromCssColorString('#ffb547'),
+          outlineColor: Cesium.Color.BLACK.withAlpha(0.65),
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: chokepointSceneLabel(scene),
+          font: '600 13px "IBM Plex Mono", monospace',
+          fillColor: Cesium.Color.fromCssColorString('#ffb547'),
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('#0b1622').withAlpha(0.82),
+          pixelOffset: new Cesium.Cartesian2(12, 0),
+          horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    };
     const revealGate = createSceneRevealGate({
       viewer,
       onChange: (visible) => {
         incidentCards.setRevealed(visible);
-        try {
-          if (!visible) annotations?.clear?.();
-          else if (activeScenePin && (annotations?.count?.() ?? 0) === 0) annotations.annotate(activeScenePin, { persist: true, flyTo: false });
-        } catch { /* annotations are optional chrome */ }
+        scenePinDs.show = visible;
+        viewer.scene?.requestRender?.();
       },
     });
     window.__godsEyeView.sceneRevealGate = revealGate;
@@ -571,8 +597,8 @@ async function init() {
           facts: chokepointSceneFacts(scene, { lang: currentLanguage(), translate: t }),
         });
         // Gate all scene overlays — pin, cards, chips — by camera distance to this
-        // strait's centre. The pin is handed to the gate (annotated on approach).
-        activeScenePin = chokepointSceneAnnotationRequests(scene, t);
+        // strait's centre. The gated pin is drawn in its own datasource.
+        setScenePin(scene);
         revealGate.activate(scene.center);
         void countryBoundaries.show(); // political borders under the reveal
         if (scene.newsRegion) void incidentCards.showFor(scene.newsRegion);
