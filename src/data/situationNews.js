@@ -20,14 +20,18 @@
 export const SITUATION_NEWS_API = '/api/situation-news';
 
 /**
- * Named regions → a GDELT query. Named (not free-text) so the client can never
- * inject an arbitrary GDELT query through the proxy.
- * @type {Readonly<Record<string, {id: string, query: string, timespan: string}>>}
+ * Named regions → a GDELT query (+ a Google News RSS fallback query). Named (not
+ * free-text) so the client can never inject an arbitrary query through the proxy.
+ * `rssQuery` is used when GDELT is throttled/unavailable; kept separate because
+ * the two engines' query syntaxes differ subtly (both here happen to accept
+ * quoted phrases + OR).
+ * @type {Readonly<Record<string, {id: string, query: string, rssQuery: string, timespan: string}>>}
  */
 export const SITUATION_REGIONS = Object.freeze({
   gulf: Object.freeze({
     id: 'gulf',
     query: '"Strait of Hormuz" OR "Persian Gulf" OR "Gulf of Oman"',
+    rssQuery: '"Strait of Hormuz" OR "Persian Gulf" OR "Gulf of Oman"',
     timespan: '3d',
   }),
 });

@@ -17,6 +17,11 @@ test('the gulf region carries a Hormuz/Gulf GDELT query', () => {
   assert.match(SITUATION_REGIONS.gulf.query, /Persian Gulf/);
 });
 
+test('the gulf region carries an RSS fallback query for when GDELT throttles', () => {
+  assert.match(SITUATION_REGIONS.gulf.rssQuery, /Hormuz/);
+  assert.match(SITUATION_REGIONS.gulf.rssQuery, /Gulf of Oman/);
+});
+
 test('gdeltDocUrl is keyless, JSON, sorted newest-first and clamps maxrecords', () => {
   const url = gdeltDocUrl('"Persian Gulf"', { maxrecords: 999 });
   assert.ok(url.startsWith('https://api.gdeltproject.org/api/v2/doc/doc?'));

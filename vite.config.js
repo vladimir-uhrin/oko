@@ -4887,13 +4887,39 @@ function situationNewsProxy() {
     if (!upstream.ok) { const error = new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')'); error.upstreamStatus = upstream.status; throw error; }
     try { return JSON.parse(text); } catch { throw new Error('GDELT returned non-JSON (rate limit?)'); }
   }
+  // Fallback: Google News RSS (open, far less rate-limited than GDELT). Reuses the
+  // shared RSS parser; maps to the situation item shape (ISO date → epoch ms).
+  async function fetchRss(cfg) {
+    const rssParams = new URLSearchParams({ q: String(cfg.rssQuery || cfg.query).replace(/[\\]/g, ' ').trim(), hl: 'en-US', gl: 'US', ceid: 'US:en' });
+    const upstream = await fetch('https://news.google.com/rss/search?' + rssParams.toString(), { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT } });
+    const xml = await readResponseTextCapped(upstream, MAX_BYTES);
+    if (!upstream.ok) throw new Error('RSS HTTP ' + upstream.status + ' (news.google.com)');
+    const items = normalizeRssArticles(xml, 40).map((a) => ({
+      title: a.title, url: a.url, source: a.domain,
+      publishedAt: a.publishedAt ? Date.parse(a.publishedAt) : null,
+      image: null, lang: null, country: a.sourceCountry || null,
+    }));
+    items.sort((x, y) => (y.publishedAt || 0) - (x.publishedAt || 0));
+    return items;
+  }
   async function build(region) {
     const started = Date.now();
     const cfg = SITUATION_REGIONS[region];
-    const json = await fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 }));
-    const items = parseGdeltArticles(json);
-    const body = JSON.stringify({ region, items, source: 'GDELT DOC 2.0 (open news article index)', fetchedAt: Date.now() });
-    console.log('[situation-proxy] ' + region + ': ' + items.length + ' articles in ' + (Date.now() - started) + ' ms');
+    let items = [];
+    let source = '';
+    try {
+      const json = await fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 }));
+      items = parseGdeltArticles(json);
+      if (items.length) source = 'GDELT DOC 2.0 (open news article index)';
+    } catch (error) {
+      console.warn('[situation-proxy] ' + region + ' GDELT failed (' + (error?.message || error) + ') — falling back to Google News RSS');
+    }
+    if (!items.length) {
+      items = await fetchRss(cfg);
+      source = 'Google News RSS (open news; GDELT fallback)';
+    }
+    const body = JSON.stringify({ region, items, source, fetchedAt: Date.now() });
+    console.log('[situation-proxy] ' + region + ': ' + items.length + ' articles [' + (source || 'none') + '] in ' + (Date.now() - started) + ' ms');
     return { at: Date.now(), body };
   }
   async function handler(req, res) {
