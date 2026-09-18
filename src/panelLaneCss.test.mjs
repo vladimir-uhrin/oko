@@ -89,3 +89,23 @@ test('every left-lane panel hides its body when collapsed', () => {
     + `out of the lane: ${missing.join(', ')}. Add "#<id>.collapsed .<id>-body { display: none }".`,
   );
 });
+
+test('every left-lane panel survives a shared link', () => {
+  // 2026-09-18: SHARE_PANEL_STATE_REGISTRY is another hand-kept list, and
+  // _encodePanelStateParam silently drops any panel missing from it. PLYN, ROPA,
+  // ZÁLIV and HISTÓRIA LETOV were all absent, so a recipient never saw what the
+  // sender had open. Same failure mode as the CSS id lists above.
+  const sharelink = readFileSync(new URL('./sharelink.js', import.meta.url), 'utf8');
+  const registry = new Map(
+    [...sharelink.matchAll(/\{ id: '([a-z-]+)', token: '([a-z])'/g)].map((m) => [m[1], m[2]]),
+  );
+  const missing = leftLanePanelIds().filter((id) => !registry.has(id));
+  assert.deepEqual(
+    missing, [],
+    `these lane panels cannot be shared — their open/closed state is dropped from the `
+    + `link: ${missing.join(', ')}. Add them to SHARE_PANEL_STATE_REGISTRY with a free token.`,
+  );
+
+  const tokens = [...registry.values()];
+  assert.equal(new Set(tokens).size, tokens.length, `duplicate share tokens: ${tokens.join(', ')}`);
+});

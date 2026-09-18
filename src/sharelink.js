@@ -43,6 +43,15 @@ const SHARE_PANEL_STATE_REGISTRY = Object.freeze([
   { id: 'global-context-panel', token: 'g', pinnable: false },
   { id: 'pp-toggles', token: 'p', pinnable: false },
   { id: 'param-slider-panel', token: 'm', pinnable: false },
+  // The left DATA lane was missing from shared links entirely: _encodePanelStateParam
+  // iterates this registry and silently drops anything absent, so a recipient never
+  // saw the sender's open ZÁLIV, ROPA, PLYN or HISTÓRIA LETOV. Added 2026-09-18,
+  // when the lane-membership fix finally made ROPA and ZÁLIV expandable at all.
+  // Tokens avoid the taken c/l/d/v/r/s/g/p/m; 'g' was gone, hence 'a' and 'f'.
+  { id: 'gas-panel', token: 'a', pinnable: false },
+  { id: 'history-panel', token: 'h', pinnable: false },
+  { id: 'oil-panel', token: 'o', pinnable: false },
+  { id: 'gulf-panel', token: 'f', pinnable: false },
 ]);
 
 const SHARE_PANEL_STATE_BY_TOKEN = Object.freeze(new Map(
