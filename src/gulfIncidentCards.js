@@ -198,9 +198,9 @@ export function createIncidentCards({
     let lastTop = Infinity;
     for (const p of visible) {
       p.c.dot.style.visibility = 'visible';
-      p.c.dot.style.transform = `translate(${Math.round(p.x - 5)}px, ${Math.round(p.y - 5)}px)`;
+      p.c.dot.style.transform = `translate(${Math.round(p.x - 6)}px, ${Math.round(p.y - 6)}px)`;
       p.c.el.style.visibility = 'visible';
-      const w = p.c.el.offsetWidth || 238;
+      const w = p.c.el.offsetWidth || 252;
       const h = p.c.el.offsetHeight || 90;
       const cx = Math.max(8, Math.min(p.x - w / 2, Math.max(8, vw - w - 8)));
       let cy = p.y - ANCHOR_OFFSET_PX - h; // above the point
@@ -265,12 +265,12 @@ function ensureStyle(doc) {
   style.textContent = `
 .oko-hotcards{position:absolute;inset:0;z-index:59;pointer-events:none;overflow:hidden;}
 .oko-hotcards[hidden]{display:none;}
-.oko-hc-pin{position:absolute;top:0;left:0;width:10px;height:10px;border-radius:50%;
-  background:var(--hc-accent,#39d0ff);box-shadow:0 0 0 2px rgba(11,22,34,.85),0 0 10px var(--hc-accent,#39d0ff);
+.oko-hc-pin{position:absolute;top:0;left:0;width:12px;height:12px;border-radius:50%;
+  background:var(--hc-accent,#39d0ff);box-shadow:0 0 0 2px rgba(11,22,34,.85),0 0 12px var(--hc-accent,#39d0ff);
   pointer-events:none;will-change:transform;z-index:1;}
-.oko-hc-line{position:absolute;top:0;left:0;height:1.5px;transform-origin:0 0;pointer-events:none;will-change:transform,width;
-  background:linear-gradient(90deg,var(--hc-accent,#39d0ff),transparent);opacity:.8;}
-.oko-hotcard{position:absolute;top:0;left:0;width:238px;max-width:calc(100vw - 16px);
+.oko-hc-line{position:absolute;top:0;left:0;height:2px;transform-origin:0 0;pointer-events:none;will-change:transform,width;
+  background:linear-gradient(90deg,var(--hc-accent,#39d0ff),transparent);opacity:.9;}
+.oko-hotcard{position:absolute;top:0;left:0;width:252px;max-width:calc(100vw - 16px);
   padding:7px 9px 6px;border-radius:10px;background:rgba(11,22,34,.92);
   border:1px solid rgba(57,208,255,.26);border-left:3px solid var(--hc-accent,#39d0ff);
   box-shadow:0 6px 22px rgba(0,0,0,.5);backdrop-filter:blur(6px);pointer-events:auto;
@@ -293,7 +293,7 @@ function ensureStyle(doc) {
 .oko-hc-place{font-size:9px;letter-spacing:.04em;color:#8aa0b6;text-transform:uppercase;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .oko-hc-title{font-size:11px;line-height:1.32;color:#eaf2ff;
-  display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;}
+  display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden;}
 .oko-hc-meta{font-size:9px;color:#6f8398;margin-top:3px;letter-spacing:.02em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .oko-hc-foot{font-size:8px;color:#5b6f84;margin-top:2px;letter-spacing:.03em;text-transform:uppercase;}

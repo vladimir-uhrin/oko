@@ -157,13 +157,13 @@ function ensureStyle(doc) {
   const style = doc.createElement('style');
   style.id = 'oko-bulletin-style';
   style.textContent = `
-.oko-bulletin-tab{position:fixed;left:10px;bottom:64px;z-index:61;appearance:none;cursor:pointer;
+.oko-bulletin-tab{position:fixed;right:10px;bottom:74px;z-index:120;appearance:none;cursor:pointer;
   padding:6px 11px;border-radius:9px;background:rgba(11,22,34,.86);color:#ffb547;
   border:1px solid rgba(240,87,77,.5);box-shadow:0 6px 20px rgba(0,0,0,.5);backdrop-filter:blur(6px);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;}
 .oko-bulletin-tab:hover{color:#fff;border-color:#f0574d;}
 .oko-bulletin-tab.is-open{color:#fff;background:rgba(240,87,77,.22);}
-.oko-bulletin{position:fixed;left:10px;bottom:100px;z-index:61;width:300px;max-width:calc(100vw - 20px);max-height:60vh;
+.oko-bulletin{position:fixed;right:10px;bottom:110px;z-index:120;width:300px;max-width:calc(100vw - 20px);max-height:56vh;
   display:flex;flex-direction:column;padding:9px 11px;border-radius:12px;background:rgba(11,22,34,.9);
   border:1px solid rgba(240,87,77,.34);box-shadow:0 10px 30px rgba(0,0,0,.55);backdrop-filter:blur(8px);
   font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#dbeafe;pointer-events:auto;}
