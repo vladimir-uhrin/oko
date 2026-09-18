@@ -43,6 +43,7 @@ import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { createSituationPanel } from './situationFeed.js';
 import { createIncidentCards } from './gulfIncidentCards.js';
 import { createSceneRevealGate } from './sceneRevealGate.js';
+import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -533,6 +534,11 @@ async function init() {
       onChange: (visible) => { incidentCards.setRevealed(visible); },
     });
     window.__godsEyeView.sceneRevealGate = revealGate;
+    // Country borders (Natural Earth, public domain): political context drawn on
+    // the globe with a chokepoint/strike reveal — a standalone overlay, on with
+    // any scene, off outside one.
+    const countryBoundaries = createCountryBoundaries({ viewer });
+    window.__godsEyeView.countryBoundaries = countryBoundaries;
     const runChokepointScene = (id) => {
       const scene = chokepointSceneById(id);
       const result = applyChokepointScene(id, chokepointSceneDeps);
@@ -545,6 +551,7 @@ async function init() {
         });
         // Gate all scene overlays by camera distance to this strait's centre.
         revealGate.activate(scene.center);
+        void countryBoundaries.show(); // political borders under the reveal
         if (scene.newsRegion) void incidentCards.showFor(scene.newsRegion);
         else incidentCards.clear();
       }
