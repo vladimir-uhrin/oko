@@ -10750,6 +10750,16 @@ body.scene-playback-mode #first-run-launcher {
   overflow: hidden auto;
 }
 #gas-panel.collapsed .gas-body { display: none; }
+
+/*
+ * ROPA and ZÁLIV need the same rule every other lane panel already has. They
+ * never had one because they were unclickable until the lane membership fix
+ * (2026-09-18) — a panel that can't be expanded can't fail to collapse. Once
+ * expandable, ROPA kept its whole price chart painted while "collapsed",
+ * measured 423px instead of ~50px, and pushed ZÁLIV off the bottom of the lane.
+ */
+#oil-panel.collapsed .oil-body { display: none; }
+#gulf-panel.collapsed .gulf-body { display: none; }
 .gas-status {
   font-family: var(--font-mono);
   font-size: 9px;

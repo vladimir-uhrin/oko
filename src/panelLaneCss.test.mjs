@@ -66,3 +66,26 @@ test('every left-lane panel has an explicit order, so none silently falls to 0',
   const values = ids.map((id) => ordered.get(id));
   assert.equal(new Set(values).size, values.length, `duplicate order values: ${values.join(', ')}`);
 });
+
+test('every left-lane panel hides its body when collapsed', () => {
+  // 2026-09-18: #oil-panel and #gulf-panel had no such rule, because until the
+  // membership fix above they were unclickable — a panel that cannot be
+  // expanded cannot fail to collapse. The moment they became expandable, ROPA
+  // kept its whole price chart painted while "collapsed" (measured 423px
+  // instead of ~50px) and pushed ZÁLIV off the bottom of the lane.
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...withoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const missing = [];
+  for (const id of leftLanePanelIds()) {
+    const hides = rules.some(([, selectors, body]) => (
+      /display:\s*none/.test(body)
+      && selectors.split(',').some((s) => s.trim().startsWith(`#${id}.collapsed`))
+    ));
+    if (!hides) missing.push(id);
+  }
+  assert.deepEqual(
+    missing, [],
+    `these lane panels stay fully painted while collapsed and will shove their siblings `
+    + `out of the lane: ${missing.join(', ')}. Add "#<id>.collapsed .<id>-body { display: none }".`,
+  );
+});
