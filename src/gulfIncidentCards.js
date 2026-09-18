@@ -160,9 +160,12 @@ export function createIncidentCards({
   // Cards are culled behind the horizon / off-screen, and the rare case of two
   // places overlapping on screen is de-overlapped vertically.
   function place() {
-    if (layer.hidden || !revealed || !cards.length) { layer.style.visibility = 'hidden'; return; }
+    // display:none (not visibility:hidden) — a card sets its own visibility:visible
+    // for occlusion culling, which would otherwise override a hidden parent and
+    // keep showing at planet zoom.
+    if (layer.hidden || !revealed || !cards.length) { layer.style.display = 'none'; return; }
     const scene = viewer.scene;
-    layer.style.visibility = 'visible';
+    layer.style.display = 'block';
     occluder = occluder || new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, scene.camera.positionWC);
     try { occluder.cameraPosition = scene.camera.positionWC; } catch { /* headless */ }
     const view = doc.defaultView;
