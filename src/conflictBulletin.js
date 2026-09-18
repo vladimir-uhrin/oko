@@ -1,10 +1,16 @@
 // src/conflictBulletin.js
 //
-// "Mini spravodaj — Blízky východ" (2026-09-18, user: „chcem sa zamerať na
-// konflikt Irán/Blízky východ/Suez/Jemen ako mini spravodaj"). A compact,
-// toggleable bulletin of the latest open-source conflict news for a broad region
-// (default `mideast`), plus — while it is open — map-anchored incident markers
-// across the region (its own gulfIncidentCards instance).
+// "Mini spravodaj — Blízky východ" (2026-09-18). Originally a floating panel
+// with its own tab; on 2026-09-18 the user asked to tidy the overlays and chose
+// to MERGE it into the existing ZÁLIV panel (#gulf-panel) rather than relocate
+// it. It therefore no longer creates any positioned element of its own — it
+// renders into a panel body it is handed, and the panel owns placement,
+// collapse, height allocation and the mobile drawer.
+//
+// The merge exposed that ZÁLIV and the bulletin were showing two different
+// feeds of the same story: region `gulf` (Hormuz / Persian Gulf) and region
+// `mideast` (Red Sea, Suez, Yemen, Iran/Israel). Both are kept, switched by two
+// chips in the panel, so nothing was lost by merging.
 //
 // It reuses the whole situation-news engine: the merged open-source feed
 // (situationNews.js), keyword classification + gazetteer geolocation
@@ -22,43 +28,60 @@ const REFRESH_TTL_MS = 12 * 60_000;
 const MAX_ROWS = 16;
 const LINK_IMAGE_API = '/api/link-image';
 
+/** Both feeds the merged panel can show, narrow first. */
+export const BULLETIN_REGIONS = Object.freeze([
+  Object.freeze({ id: 'gulf', labelKey: 'panel.gulf' }),
+  Object.freeze({ id: 'mideast', labelKey: 'bulletin.tab' }),
+]);
+
 const el = (doc, cls, text) => { const d = doc.createElement('div'); d.className = cls; if (text != null) d.textContent = text; return d; };
 
+const INERT = {
+  refresh: async () => {}, setRegion: () => {}, destroy: () => {}, element: null,
+  get isOpen() { return false; }, get region() { return null; }, get loadedOnce() { return false; },
+};
+
+/**
+ * Render the conflict bulletin inside an existing panel body.
+ *
+ * @param {object} opts
+ * @param {Element} opts.mountTarget - element to render into (e.g. `#gulf-panel [data-gulf-body]`).
+ * @param {object|null} [opts.cards] - an existing incident-card layer to drive. Pass the app's
+ *   single layer; without it a second one is created and the two fight over the same screen.
+ */
 export function createConflictBulletin({
   viewer = null,
   documentRef = globalThis.document,
-  region = 'mideast',
+  region = 'gulf',
+  mountTarget = null,
+  cards: sharedCards = null,
   fetch: fetchImpl = fetchSituationNews,
   translate = t,
   lang = currentLanguage(),
   now = () => Date.now(),
 } = {}) {
   const doc = documentRef;
-  if (!doc?.createElement) return { show: () => {}, hide: () => {}, toggle: () => {}, destroy: () => {}, element: null, get isOpen() { return false; } };
+  if (!doc?.createElement || !mountTarget) return INERT;
   ensureStyle(doc);
 
-  // Region incident markers — own instance, shown only while the bulletin is open.
-  const cards = viewer ? createIncidentCards({ viewer, translate, lang }) : null;
+  const root = mountTarget;
+  const ownerPanel = root.closest?.('[data-panel-id]') || null;
+  // Only tear down a card layer we created ourselves; a shared one outlives us.
+  const ownsCards = !sharedCards && Boolean(viewer);
+  const cards = sharedCards || (viewer ? createIncidentCards({ viewer, translate, lang }) : null);
+  // Only a layer we created ourselves may be revealed or retargeted from here.
+  // A SHARED layer belongs to the scene reveal gate, which decides visibility by
+  // camera distance — the user asked for hot cards only when zoomed in. Forcing
+  // it visible because a side panel was expanded would defeat exactly that.
+  const drivesCards = ownsCards ? cards : null;
 
-  const root = doc.createElement('aside');
-  root.className = 'oko-bulletin';
-  root.hidden = true;
-  root.setAttribute('aria-live', 'polite');
-  (doc.body || doc.documentElement).appendChild(root);
-
-  const tab = doc.createElement('button');
-  tab.type = 'button';
-  tab.className = 'oko-bulletin-tab';
-  tab.textContent = translate('bulletin.tab');
-  tab.setAttribute('aria-label', translate('bulletin.title'));
-  tab.addEventListener('click', () => (open ? hide() : show()));
-  (doc.body || doc.documentElement).appendChild(tab);
-
+  let activeRegion = BULLETIN_REGIONS.some((r) => r.id === region) ? region : BULLETIN_REGIONS[0].id;
   let open = false;
-  let cached = null;
-  let cachedAt = 0;
-  let inFlight = null;
+  let loadedOnce = false;
+  const cache = new Map(); // region -> { payload, at }
+  const inFlight = new Map(); // region -> promise
   const imgCache = new Map(); // article url -> og:image | null
+  let observer = null;
 
   // Resolve an article's preview image via the server-side unfurl proxy (only for
   // items the feed did not already carry an image for).
@@ -70,15 +93,20 @@ export function createConflictBulletin({
       .catch(() => null);
   }
 
-  function header() {
-    const h = el(doc, 'oko-bul-header');
-    h.appendChild(el(doc, 'oko-bul-h-title', translate('bulletin.title')));
-    const x = doc.createElement('button');
-    x.type = 'button'; x.className = 'oko-bul-close'; x.textContent = '×';
-    x.setAttribute('aria-label', translate('situation.close'));
-    x.addEventListener('click', hide);
-    h.appendChild(x);
-    return h;
+  function regionChips() {
+    const row = el(doc, 'oko-bul-regions');
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', translate('bulletin.title'));
+    for (const r of BULLETIN_REGIONS) {
+      const b = doc.createElement('button');
+      b.type = 'button';
+      b.className = `oko-bul-chip${r.id === activeRegion ? ' is-active' : ''}`;
+      b.textContent = translate(r.labelKey);
+      b.setAttribute('aria-pressed', String(r.id === activeRegion));
+      b.addEventListener('click', () => setRegion(r.id));
+      row.appendChild(b);
+    }
+    return row;
   }
 
   function rows(model) {
@@ -124,59 +152,95 @@ export function createConflictBulletin({
     return [list, foot];
   }
 
-  const paint = () => { if (cached) root.replaceChildren(header(), ...rows(buildSituationModel(cached, { translate, nowMs: now(), limit: MAX_ROWS }))); };
+  const render = (body) => root.replaceChildren(regionChips(), ...body);
+  const paint = () => {
+    const hit = cache.get(activeRegion);
+    render(hit
+      ? rows(buildSituationModel(hit.payload, { translate, nowMs: now(), limit: MAX_ROWS }))
+      : [el(doc, 'oko-bul-note', translate('situation.loading'))]);
+  };
 
   async function refresh() {
-    if (cached && now() - cachedAt < REFRESH_TTL_MS) { paint(); return; }
-    if (!cached) root.replaceChildren(header(), el(doc, 'oko-bul-note', translate('situation.loading')));
-    if (!inFlight) inFlight = Promise.resolve(fetchImpl(region)).then((p) => { cached = p; cachedAt = now(); return p; }).finally(() => { inFlight = null; });
-    try { await inFlight; paint(); }
-    catch { root.replaceChildren(header(), el(doc, 'oko-bul-note', translate('situation.unavailable'))); }
+    const hit = cache.get(activeRegion);
+    if (hit && now() - hit.at < REFRESH_TTL_MS) { paint(); return; }
+    paint(); // loading state while the first fetch for this region is in flight
+    const want = activeRegion;
+    let request = inFlight.get(want);
+    if (!request) {
+      request = Promise.resolve(fetchImpl(want))
+        .then((p) => { cache.set(want, { payload: p, at: now() }); return p; })
+        .finally(() => { inFlight.delete(want); });
+      inFlight.set(want, request);
+    }
+    try { await request; if (activeRegion === want) paint(); }
+    catch { if (activeRegion === want) render([el(doc, 'oko-bul-note', translate('situation.unavailable'))]); }
+  }
+
+  function setRegion(next) {
+    if (next === activeRegion || !BULLETIN_REGIONS.some((r) => r.id === next)) return;
+    activeRegion = next;
+    void refresh();
+    if (drivesCards && open) void drivesCards.showFor(activeRegion);
   }
 
   function show() {
+    if (open) return;
     open = true;
-    root.hidden = false;
-    tab.classList.add('is-open');
+    loadedOnce = true;
     void refresh();
-    if (cards) { void cards.showFor(region); cards.setRevealed(true); }
+    if (drivesCards) { void drivesCards.showFor(activeRegion); drivesCards.setRevealed(true); }
   }
   function hide() {
+    if (!open) return;
     open = false;
-    root.hidden = true;
-    tab.classList.remove('is-open');
-    if (cards) cards.setRevealed(false);
-  }
-  function destroy() {
-    hide();
-    try { cards?.destroy?.(); } catch { /* */ }
-    try { root.remove(); tab.remove(); } catch { /* */ }
+    if (drivesCards) drivesCards.setRevealed(false);
   }
 
-  return { show, hide, toggle: () => (open ? hide() : show()), refresh, destroy, element: root, get isOpen() { return open; } };
+  // The panel owns open/closed; mirror it. Fetch lazily on the first expand so a
+  // collapsed panel costs no upstream request.
+  if (ownerPanel) {
+    const sync = () => {
+      if (ownerPanel.classList.contains('collapsed')) hide(); else show();
+    };
+    try {
+      observer = new MutationObserver(sync);
+      observer.observe(ownerPanel, { attributes: true, attributeFilter: ['class'] });
+    } catch { /* environments without MutationObserver */ }
+    sync();
+  } else {
+    show();
+  }
+
+  function destroy() {
+    hide();
+    try { observer?.disconnect?.(); } catch { /* */ }
+    if (ownsCards) { try { cards?.destroy?.(); } catch { /* */ } }
+    try { root.replaceChildren(); } catch { /* */ }
+  }
+
+  return {
+    refresh, setRegion, destroy, element: root,
+    get isOpen() { return open; },
+    get region() { return activeRegion; },
+    get loadedOnce() { return loadedOnce; },
+  };
 }
 
 function ensureStyle(doc) {
   if (!doc?.getElementById || doc.getElementById('oko-bulletin-style')) return;
   const style = doc.createElement('style');
   style.id = 'oko-bulletin-style';
+  // Rows only. The bulletin no longer positions anything: it lives inside
+  // #gulf-panel, which owns placement, width, height allocation and the mobile
+  // drawer. Nothing here may be position:fixed.
   style.textContent = `
-.oko-bulletin-tab{position:fixed;right:10px;bottom:74px;z-index:120;appearance:none;cursor:pointer;
-  padding:6px 11px;border-radius:9px;background:rgba(11,22,34,.86);color:#ffb547;
-  border:1px solid rgba(240,87,77,.5);box-shadow:0 6px 20px rgba(0,0,0,.5);backdrop-filter:blur(6px);
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;}
-.oko-bulletin-tab:hover{color:#fff;border-color:#f0574d;}
-.oko-bulletin-tab.is-open{color:#fff;background:rgba(240,87,77,.22);}
-.oko-bulletin{position:fixed;right:10px;bottom:110px;z-index:120;width:300px;max-width:calc(100vw - 20px);max-height:56vh;
-  display:flex;flex-direction:column;padding:9px 11px;border-radius:12px;background:rgba(11,22,34,.9);
-  border:1px solid rgba(240,87,77,.34);box-shadow:0 10px 30px rgba(0,0,0,.55);backdrop-filter:blur(8px);
-  font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#dbeafe;pointer-events:auto;}
-.oko-bulletin[hidden]{display:none;}
-.oko-bul-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex:0 0 auto;}
-.oko-bul-h-title{font-size:10px;font-weight:600;letter-spacing:.12em;color:#f0574d;text-transform:uppercase;}
-.oko-bul-close{appearance:none;background:none;border:0;color:#8aa0b6;font-size:16px;line-height:1;cursor:pointer;padding:0 2px;}
-.oko-bul-close:hover{color:#dbeafe;}
-.oko-bul-list{display:flex;flex-direction:column;gap:7px;overflow-y:auto;flex:1 1 auto;}
+.oko-bul-regions{display:flex;gap:5px;margin:0 0 7px;flex:0 0 auto;}
+.oko-bul-chip{appearance:none;cursor:pointer;flex:0 0 auto;padding:3px 8px;border-radius:7px;
+  background:rgba(11,22,34,.5);color:#8aa0b6;border:1px solid rgba(120,150,180,.26);
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;}
+.oko-bul-chip:hover{color:#dbeafe;border-color:rgba(120,150,180,.5);}
+.oko-bul-chip.is-active{color:#fff;background:rgba(240,87,77,.22);border-color:rgba(240,87,77,.6);}
+.oko-bul-list{display:flex;flex-direction:column;gap:7px;overflow-y:auto;flex:1 1 auto;min-height:0;}
 .oko-bul-item{display:flex;gap:8px;text-decoration:none;color:inherit;padding:3px 0;border-bottom:1px solid rgba(120,150,180,.12);}
 .oko-bul-item:last-child{border-bottom:0;}
 .oko-bul-item:hover .oko-bul-title{color:#8fd9ff;}

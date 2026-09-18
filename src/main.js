@@ -40,7 +40,6 @@ import { initAnnotations } from './annotations/index.js';
 import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
 import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
-import { createSituationPanel } from './situationFeed.js';
 import { createIncidentCards } from './gulfIncidentCards.js';
 import { createSceneRevealGate } from './sceneRevealGate.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
@@ -519,10 +518,7 @@ async function init() {
     // the first time the "CRUDE OIL / ROPA" panel is expanded.
     const oilPricePanel = createOilPricePanel();
     window.__godsEyeView.oilPricePanel = oilPricePanel;
-    // Situation from open sources (pilot): a "GULF / ZÁLIV" panel in the DATA tab
-    // (open-source news via GDELT/RSS). The in-scene reveal is the hot cards below.
-    const situationPanel = createSituationPanel({ region: 'gulf' });
-    window.__godsEyeView.situationPanel = situationPanel;
+    // The ZÁLIV panel body is filled further down by the merged conflict bulletin.
     // Map-anchored open-source "hot cards" over the reported places (Phase B):
     // shown with a scene that has a newsRegion, deduped per story, each links out.
     // Gated by the reveal gate so they only appear when zoomed in over the strait.
@@ -587,10 +583,22 @@ async function init() {
     // any scene, off outside one.
     const countryBoundaries = createCountryBoundaries({ viewer });
     window.__godsEyeView.countryBoundaries = countryBoundaries;
-    // Mini spravodaj — Blízky východ: a toggleable open-source conflict bulletin
-    // for the whole region (Hormuz + Red Sea + Suez + Iran + Israel/Gaza…) with
-    // map-anchored incident markers while open.
-    const conflictBulletin = createConflictBulletin({ viewer });
+    // Situation from open sources: the ZÁLIV panel in the DATA lane hosts the
+    // merged bulletin (2026-09-18). It used to be a SECOND floating panel with
+    // its own tab, anchored bottom-right at z120, which covered the whole
+    // right-hand rail whenever it was open and duplicated the same agenda the
+    // ZÁLIV panel already showed. Merging removed both problems; two chips
+    // switch between the narrow Gulf feed and the whole Middle East.
+    //
+    // Deliberately NO viewer and NO card layer: the map-anchored hot cards stay
+    // owned by the reveal gate above, which shows them by camera distance. A
+    // panel must not force them visible while the camera is out at the planet,
+    // and creating a second layer here is what used to run two .oko-hotcards
+    // postRender passes that knew nothing about each other.
+    const conflictBulletin = createConflictBulletin({
+      mountTarget: document.querySelector('#gulf-panel [data-gulf-body]'),
+      region: 'gulf',
+    });
     window.__godsEyeView.conflictBulletin = conflictBulletin;
     const runChokepointScene = (id) => {
       const scene = chokepointSceneById(id);
