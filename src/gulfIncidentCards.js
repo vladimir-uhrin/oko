@@ -21,7 +21,10 @@
 import * as Cesium from 'cesium';
 import { buildIncidentCards } from './data/gulfIncidents.js';
 import { fetchSituationNews, relativeAge } from './data/situationNews.js';
+import { translateText } from './translate.js';
 import { currentLanguage, t } from './i18n.js';
+
+const LINK_IMAGE_API = '/api/link-image';
 
 const SEV_COLOR = Object.freeze({ critical: '#f87171', major: '#ffb547', minor: '#39d0ff' });
 const ANCHOR_OFFSET_PX = 14;
@@ -46,16 +49,27 @@ export function createIncidentCards({
   layer.hidden = true;
   viewer.container.appendChild(layer);
 
-  let cards = []; // { model, el, cartesian }
+  let cards = []; // { model, el, dot, cartesian }
   let revealed = false;
   let inFlight = null;
   let occluder = null;
   const scratch = new Cesium.Cartesian2();
   const cache = new Map(); // region -> { items, at }
+  const imgCache = new Map(); // article url -> og:image url | null
 
   function clear() {
     layer.replaceChildren();
     cards = [];
+  }
+
+  // Resolve an article's preview image (og:image) via the server-side unfurl proxy.
+  // Used only for items the feed did not already carry an image for.
+  function unfurlImage(url) {
+    if (imgCache.has(url)) return Promise.resolve(imgCache.get(url));
+    return Promise.resolve(fetch(`${LINK_IMAGE_API}?url=${encodeURIComponent(url)}`, { cache: 'no-store' }))
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((j) => { const s = j && typeof j.image === 'string' && /^https?:\/\//.test(j.image) ? j.image : null; imgCache.set(url, s); return s; })
+      .catch(() => null);
   }
 
   function makeCard(model) {
@@ -63,6 +77,21 @@ export function createIncidentCards({
     a.className = `oko-hotcard oko-hc-${model.severity}`;
     a.href = model.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
     a.style.setProperty('--hc-accent', SEV_COLOR[model.severity] || SEV_COLOR.minor);
+
+    // Preview image (article og:image) as a link-out thumbnail — like the ZÁLIV
+    // panel. Video is never embedded: a ▶ badge marks it and the card links out.
+    const thumb = doc.createElement('div');
+    thumb.className = 'oko-hc-thumb';
+    thumb.hidden = true;
+    const img = doc.createElement('img');
+    img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
+    img.addEventListener('error', () => { thumb.hidden = true; });
+    img.addEventListener('load', () => { thumb.hidden = false; });
+    thumb.appendChild(img);
+    if (model.isVideo) { const play = doc.createElement('span'); play.className = 'oko-hc-play'; play.textContent = '▶'; thumb.appendChild(play); }
+    a.appendChild(thumb);
+    if (model.image) img.src = model.image;
+    else if (model.url) void unfurlImage(model.url).then((src) => { if (src) img.src = src; });
 
     const head = doc.createElement('div');
     head.className = 'oko-hc-head';
@@ -81,6 +110,17 @@ export function createIncidentCards({
     title.textContent = model.title;
     a.appendChild(title);
 
+    // A machine-translated summary when the UI is not English — labelled as such.
+    const mt = doc.createElement('div');
+    mt.className = 'oko-hc-mt';
+    mt.hidden = true;
+    mt.textContent = translate('incident.mt');
+    if (lang && lang !== 'en') {
+      void translateText(model.title, lang).then((tr) => {
+        if (tr && tr.trim() && tr !== model.title) { title.textContent = tr; title.title = model.title; mt.hidden = false; }
+      });
+    }
+
     const meta = doc.createElement('div');
     meta.className = 'oko-hc-meta';
     const age = relativeAge(model.publishedAt, now(), translate);
@@ -90,6 +130,7 @@ export function createIncidentCards({
     if (model.storyCount > 1) parts.push(translate('incident.more', { n: model.storyCount - 1 }));
     meta.textContent = parts.join(' · ');
     a.appendChild(meta);
+    a.appendChild(mt);
 
     const foot = doc.createElement('div');
     foot.className = 'oko-hc-foot';
@@ -220,7 +261,15 @@ function ensureStyle(doc) {
   will-change:transform;transition:opacity .2s ease;}
 .oko-hotcard:hover{border-color:var(--hc-accent,#39d0ff);}
 .oko-hotcard:hover .oko-hc-title{color:#fff;}
+.oko-hc-thumb{position:relative;width:100%;height:92px;border-radius:7px;overflow:hidden;margin-bottom:6px;background:#0b1622;}
+.oko-hc-thumb[hidden]{display:none;}
+.oko-hc-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.oko-hc-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;
+  background:rgba(11,22,34,.72);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;
+  padding-left:2px;box-shadow:0 0 0 1px rgba(255,255,255,.35);}
 .oko-hc-head{display:flex;align-items:center;gap:6px;margin-bottom:3px;}
+.oko-hc-mt{font-size:8px;color:#5b6f84;margin-top:2px;letter-spacing:.03em;text-transform:uppercase;}
+.oko-hc-mt[hidden]{display:none;}
 .oko-hc-badge{font-size:8px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
   color:var(--hc-accent,#39d0ff);border:1px solid currentColor;border-radius:5px;padding:0 5px;line-height:1.5;}
 .oko-hc-place{font-size:9px;letter-spacing:.04em;color:#8aa0b6;text-transform:uppercase;

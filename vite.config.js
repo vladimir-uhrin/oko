@@ -4959,6 +4959,181 @@ function situationNewsProxy() {
 }
 
 /**
+ * Strojový preklad krátkych textov (2026-09-18, používateľ: „keď prepnem do SK
+ * tak preložený súhrn") cez MyMemory (free, bez kľúča). Prekladá titulky kariet
+ * incidentov EN→SK na klik na jazyk. Preklady sú stabilné → cache na disk 30 dní
+ * (kľúč = sha1(to+text)), single-flight, limiter, strop dĺžky 600 znakov,
+ * povolené len cieľové jazyky z allowlistu. Anonymný tier (bez e-mailu). Zapísané
+ * v DATA_SOURCES.md.
+ * @returns {import('vite').Plugin}
+ */
+function translateProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'translate');
+  const TTL_MS = 30 * 24 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 12_000;
+  const MAX_BYTES = 512 * 1024;
+  const MAX_TEXT = 600;
+  const ALLOWED = new Set(['sk', 'cs', 'de', 'pl', 'uk', 'fr', 'es', 'en']);
+  const USER_AGENT = 'OKO-translate/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 60, globalMax: 200 });
+  const inFlight = new Map();
+  const mem = new Map(); // hash -> { at, body }
+
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': status === 200 ? 'public, max-age=86400' : 'no-store', 'X-GEV-Cache': cacheState });
+    res.end(body);
+  }
+  const keyHash = (to, text) => createHash('sha1').update(to + '\n' + text).digest('hex');
+  const diskPath = (h) => path.join(CACHE_DIR, h + '.json');
+  async function readDisk(h) {
+    try { const p = JSON.parse(await fsp.readFile(diskPath(h), 'utf8')); if (Number.isFinite(p?.at) && typeof p?.body === 'string' && Date.now() - p.at < TTL_MS) return p; } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(h, entry) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(diskPath(h), JSON.stringify(entry), 'utf8'); } catch { /* best-effort */ }
+  }
+  async function current(h) {
+    if (!mem.has(h)) { const d = await readDisk(h); if (d) mem.set(h, d); }
+    return mem.get(h) || null;
+  }
+  async function build(to, text) {
+    const from = 'en';
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } });
+    const raw = await readResponseTextCapped(upstream, MAX_BYTES);
+    if (!upstream.ok) throw new Error('translate HTTP ' + upstream.status);
+    let json; try { json = JSON.parse(raw); } catch { throw new Error('translate returned non-JSON'); }
+    const translated = json?.responseData?.translatedText;
+    if (typeof translated !== 'string' || !translated.trim()) throw new Error('translate empty');
+    if (/MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID (LANGUAGE|EMAIL)/i.test(translated)) throw new Error('translate quota/warning');
+    return { at: Date.now(), body: JSON.stringify({ text: translated, from, to, source: 'MyMemory' }) };
+  }
+  async function handler(req, res) {
+    if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    let to = ''; let text = '';
+    try { const u = new URL(req.url || '/', 'http://localhost'); to = (u.searchParams.get('to') || '').toLowerCase(); text = u.searchParams.get('text') || ''; } catch { /* default */ }
+    if (!ALLOWED.has(to)) { send(res, 400, JSON.stringify({ error: 'unsupported_lang' }), 'NONE'); return; }
+    text = text.slice(0, MAX_TEXT).trim();
+    if (!text) { send(res, 400, JSON.stringify({ error: 'empty' }), 'NONE'); return; }
+    if (to === 'en') { send(res, 200, JSON.stringify({ text, from: 'en', to: 'en', source: 'noop' }), 'NOOP'); return; }
+    const h = keyHash(to, text);
+    const hit = await current(h);
+    if (hit) { send(res, 200, hit.body, 'HIT'); return; } // translations are stable — a hit never expires early
+    if (!limiter(clientKey(req))) { send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return; }
+    const request = coalesceProxyRequest(inFlight, 'tr:' + h, () => build(to, text));
+    try {
+      const fresh = await request.promise;
+      mem.set(h, fresh); void writeDisk(h, fresh);
+      send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+    } catch (error) {
+      send(res, 502, JSON.stringify({ error: 'upstream', detail: String(error?.message || error) }), 'NONE');
+    }
+  }
+  function install(middlewares) { middlewares.use('/api/translate', handler); }
+  return {
+    name: 'translate-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
+ * Náhľadový obrázok článku (2026-09-18, používateľ chce „kartičky s obrázkami"):
+ * `/api/link-image?url=<článok>` prečíta og:image / twitter:image zo stránky
+ * (nasleduje presmerovania, číta len prvých ~512 kB) a vráti len URL obrázka —
+ * OKO ho zobrazí ako náhľad s odkazom von, NEVKLÁDA médiá. SSRF poistka: len
+ * verejné http(s), nie loopback/privátne siete. Cache na disk 7 dní, single-flight,
+ * limiter. Zlyhanie = `{image:null}` (karta ostane textová). Zapísané v DATA_SOURCES.md.
+ * @returns {import('vite').Plugin}
+ */
+function linkImageProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'linkimg');
+  const TTL_MS = 7 * 24 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 9000;
+  const MAX_BYTES = 512 * 1024;
+  const USER_AGENT = 'Mozilla/5.0 (compatible; OKO-linkpreview/0.1; +https://github.com/vladouh76)';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 40, globalMax: 150 });
+  const inFlight = new Map();
+  const mem = new Map();
+
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': status === 200 ? 'public, max-age=604800' : 'no-store', 'X-GEV-Cache': cacheState });
+    res.end(body);
+  }
+  function isPublicHttpUrl(u) {
+    let x; try { x = new URL(u); } catch { return false; }
+    if (!/^https?:$/.test(x.protocol)) return false;
+    const h = x.hostname.toLowerCase();
+    if (h === 'localhost' || h.endsWith('.localhost') || h === '::1') return false;
+    if (/^(?:127\.|0\.|10\.|192\.168\.|169\.254\.)/.test(h)) return false;
+    if (/^172\.(?:1[6-9]|2\d|3[01])\./.test(h)) return false;
+    return true;
+  }
+  function extractOgImage(html, baseUrl) {
+    const metas = String(html || '').match(/<meta[^>]+>/gi) || [];
+    const pick = (prop) => {
+      for (const m of metas) {
+        if (new RegExp(`(?:property|name)\\s*=\\s*["']${prop}["']`, 'i').test(m)) {
+          const c = /content\s*=\s*["']([^"']+)["']/i.exec(m);
+          if (c && c[1]) return c[1];
+        }
+      }
+      return null;
+    };
+    const raw = pick('og:image') || pick('og:image:url') || pick('og:image:secure_url') || pick('twitter:image') || pick('twitter:image:src');
+    if (!raw) return null;
+    try { const abs = new URL(raw, baseUrl).href; return /^https?:\/\//.test(abs) ? abs : null; } catch { return null; }
+  }
+  const keyHash = (url) => createHash('sha1').update(url).digest('hex');
+  const diskPath = (h) => path.join(CACHE_DIR, h + '.json');
+  async function readDisk(h) {
+    try { const p = JSON.parse(await fsp.readFile(diskPath(h), 'utf8')); if (Number.isFinite(p?.at) && typeof p?.body === 'string' && Date.now() - p.at < TTL_MS) return p; } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(h, entry) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(diskPath(h), JSON.stringify(entry), 'utf8'); } catch { /* best-effort */ }
+  }
+  async function current(h) {
+    if (!mem.has(h)) { const d = await readDisk(h); if (d) mem.set(h, d); }
+    return mem.get(h) || null;
+  }
+  async function build(url) {
+    const upstream = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    const finalUrl = upstream.url || url;
+    if (!isPublicHttpUrl(finalUrl)) return { at: Date.now(), body: JSON.stringify({ image: null }) }; // redirected somewhere unsafe
+    const html = await readResponseTextCapped(upstream, MAX_BYTES);
+    const image = extractOgImage(html, finalUrl);
+    return { at: Date.now(), body: JSON.stringify({ image: image || null, source: finalUrl }) };
+  }
+  async function handler(req, res) {
+    if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    let url = '';
+    try { url = new URL(req.url || '/', 'http://localhost').searchParams.get('url') || ''; } catch { /* default */ }
+    if (!isPublicHttpUrl(url)) { send(res, 400, JSON.stringify({ error: 'bad_url' }), 'NONE'); return; }
+    const h = keyHash(url);
+    const hit = await current(h);
+    if (hit) { send(res, 200, hit.body, 'HIT'); return; }
+    if (!limiter(clientKey(req))) { send(res, 200, JSON.stringify({ image: null }), 'RATELIMIT'); return; } // soft-fail: card stays text-only
+    const request = coalesceProxyRequest(inFlight, 'img:' + h, () => build(url));
+    try {
+      const fresh = await request.promise;
+      mem.set(h, fresh); void writeDisk(h, fresh);
+      send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+    } catch {
+      const empty = { at: Date.now(), body: JSON.stringify({ image: null }) };
+      mem.set(h, empty); void writeDisk(h, empty); // cache the miss so we don't refetch a broken article
+      send(res, 200, empty.body, 'ERR');
+    }
+  }
+  function install(middlewares) { middlewares.use('/api/link-image', handler); }
+  return {
+    name: 'link-image-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
  * Zdieľanie s náhľadom (2026-09-14, variant B, „aj na soc. siete"):
  *   POST /api/share      stav odkazu + snímka JPEG → krátky odkaz /s/<id>
  *   GET  /s/<id>         stránka s Open Graph a Twitter značkami (siete si
@@ -10180,6 +10355,8 @@ export default defineConfig(({ mode }) => {
       gasProxy(),
       oilPricesProxy(),
       situationNewsProxy(),
+      translateProxy(),
+      linkImageProxy(),
       earthquakeFeedProxy(),
       trackBackfillProxies(),
       openAiRealtimeProxy(),

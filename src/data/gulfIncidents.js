@@ -113,6 +113,7 @@ export function buildIncidents(items, { region = 'gulf', gazetteer = GULF_GAZETT
       url,
       source: typeof it?.source === 'string' ? it.source : '',
       publishedAt: Number.isFinite(it?.publishedAt) ? it.publishedAt : null,
+      image: typeof it?.image === 'string' && /^https?:\/\//.test(it.image) ? it.image : null,
     });
   }
   return out;
@@ -138,6 +139,13 @@ function storyKey(title) {
   return cleanHeadline(title).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
 }
 
+const VIDEO_HOST = /(?:^|\.)(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|rumble\.com|bitchute\.com)$/i;
+
+/** True when the link points at a known video host (card shows a ▶ badge, links out — never embeds). Pure. */
+export function isVideoUrl(url) {
+  try { return VIDEO_HOST.test(new URL(String(url)).hostname); } catch { return false; }
+}
+
 /**
  * Incidents → "hot card" models: ONE card per PLACE (so cards sit anchored on the
  * spot they concern instead of fanning into a detached column when many reports
@@ -154,15 +162,16 @@ export function buildIncidentCards(items, { region = 'gulf', gazetteer = GULF_GA
   for (const inc of incidents) {
     const locKey = `${inc.lat.toFixed(2)}|${inc.lon.toFixed(2)}`;
     let g = groups.get(locKey);
-    if (!g) { g = { rep: inc, stories: new Set(), sources: new Set() }; groups.set(locKey, g); }
+    if (!g) { g = { rep: inc, stories: new Set(), sources: new Set(), image: null }; groups.set(locKey, g); }
     g.stories.add(storyKey(inc.title));
     if (inc.source) g.sources.add(inc.source);
+    if (!g.image && inc.image) g.image = inc.image; // first available preview image at this place
     const better = (SEVERITY_RANK[inc.severity] || 0) > (SEVERITY_RANK[g.rep.severity] || 0)
       || ((SEVERITY_RANK[inc.severity] || 0) === (SEVERITY_RANK[g.rep.severity] || 0)
         && (inc.publishedAt || 0) > (g.rep.publishedAt || 0));
     if (better) g.rep = inc;
   }
-  const cards = [...groups.values()].map(({ rep, stories, sources }) => ({
+  const cards = [...groups.values()].map(({ rep, stories, sources, image }) => ({
     lat: rep.lat,
     lon: rep.lon,
     place: rep.place,
@@ -173,6 +182,8 @@ export function buildIncidentCards(items, { region = 'gulf', gazetteer = GULF_GA
     url: rep.url,
     source: rep.source,
     publishedAt: rep.publishedAt,
+    image: rep.image || image || null,
+    isVideo: isVideoUrl(rep.url),
     storyCount: Math.max(1, stories.size),
     sourceCount: Math.max(1, sources.size),
   }));

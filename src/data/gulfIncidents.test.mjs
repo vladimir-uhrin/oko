@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { GULF_GAZETTEER, buildIncidentCards, buildIncidents, classifyIncident, cleanHeadline, locateIncident } from './gulfIncidents.js';
+import { GULF_GAZETTEER, buildIncidentCards, buildIncidents, classifyIncident, cleanHeadline, isVideoUrl, locateIncident } from './gulfIncidents.js';
 
 test('classifyIncident recognizes strikes, fires, seizures, blockades — else null', () => {
   assert.equal(classifyIncident('Missile strikes tanker near Hormuz').type, 'strike');
@@ -68,6 +68,28 @@ test('buildIncidentCards makes ONE card per place, counting the stories there', 
   assert.equal(cards[1].type, 'seizure');
   assert.equal(cards[1].place, 'Fujairah');
   assert.ok(cards.every((c) => Number.isFinite(c.lat) && Number.isFinite(c.lon)));
+});
+
+test('isVideoUrl flags known video hosts only', () => {
+  assert.equal(isVideoUrl('https://www.youtube.com/watch?v=abc'), true);
+  assert.equal(isVideoUrl('https://youtu.be/abc'), true);
+  assert.equal(isVideoUrl('https://vimeo.com/12345'), true);
+  assert.equal(isVideoUrl('https://www.reuters.com/world/story'), false);
+  assert.equal(isVideoUrl('not a url'), false);
+});
+
+test('cards carry a preview image (from the item, or any item at the place) and a video flag', () => {
+  const items = [
+    { title: 'Missile strike near Fujairah', url: 'https://youtu.be/x1', source: 'a', publishedAt: 300, image: null },
+    { title: 'Drone attack near Fujairah', url: 'https://b/2', source: 'b', publishedAt: 250, image: 'https://img/2.jpg' },
+  ];
+  const [card] = buildIncidentCards(items, { region: 'gulf' });
+  assert.equal(card.place, 'Fujairah');
+  assert.equal(card.isVideo, true, 'representative (newest) is a youtube link');
+  assert.equal(card.image, 'https://img/2.jpg', 'borrows the image from the other report at the same place');
+  // a bad image url is dropped by buildIncidents
+  const [c2] = buildIncidentCards([{ title: 'Blast near Dubai', url: 'https://c/3', source: 'c', image: 'javascript:evil' }], { region: 'gulf' });
+  assert.equal(c2.image, null);
 });
 
 test('buildIncidentCards caps the number of PLACES to the limit', () => {
