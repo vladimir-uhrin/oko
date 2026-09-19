@@ -51,6 +51,7 @@ import { createUkrainePanel } from './ukrainePanel.js';
 import { createUkraineEventsLayer } from './ukraineEventsLayer.js';
 import { createUkraineControlLayer } from './ukraineControlLayer.js';
 import { createUkraineDeepStateLayer } from './ukraineDeepStateLayer.js';
+import { createUkraineDamageLayer } from './ukraineDamageLayer.js';
 import { createUkraineTimeline, parseShareParams } from './ukraineTimeline.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
@@ -672,7 +673,11 @@ async function init() {
     // a šedej zóny z nášho denného archívu; časová os prepína snímku podľa dňa.
     const ukraineDeepState = createUkraineDeepStateLayer({ viewer });
     window.__godsEyeView.ukraineDeepState = ukraineDeepState;
-    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl, deepstate: ukraineDeepState });
+    // Škody na budovách (etapa 5): statické, zapína sa čipom ŠKODY (nie so smerom —
+    // 18 000 bodov UNOSAT nech si používateľ pridá sám).
+    const ukraineDamage = createUkraineDamageLayer({ viewer });
+    window.__godsEyeView.ukraineDamage = ukraineDamage;
+    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl, deepstate: ukraineDeepState, damage: ukraineDamage });
     window.__godsEyeView.ukraineTimeline = ukraineTimeline;
     let ukrainePanel = null;
     const runFrontScene = (id) => {
@@ -697,6 +702,7 @@ async function init() {
       timeline: ukraineTimeline,
       control: ukraineControl,
       deepstate: ukraineDeepState,
+      damage: ukraineDamage,
       applyScene: (id) => runFrontScene(id),
     });
     window.__godsEyeView.ukrainePanel = ukrainePanel;

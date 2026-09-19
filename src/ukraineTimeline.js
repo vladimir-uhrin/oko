@@ -67,6 +67,7 @@ export function createUkraineTimeline({
   report = null,
   control = null,
   deepstate = null,
+  damage = null,
   mountTarget = null,
   translate = t,
   lang = currentLanguage(),
@@ -175,6 +176,22 @@ export function createUkraineTimeline({
     dsBox.appendChild(dsArea);
     row3.appendChild(dsBox);
   }
+  // Škody na budovách (etapa 5): čip + legenda; UNOSAT body odkrýva kurzor.
+  let dmgChip = null; let dmgLine = null;
+  if (damage) {
+    const dmgBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-dmg');
+    dmgChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.damage'), () => { if (damage.isShown()) damage.hide(); else void damage.show(); }, translate('ukraine.dmg.note'));
+    dmgChip.setAttribute('aria-pressed', 'false');
+    dmgBox.appendChild(dmgChip);
+    const sw = (cls, text) => { const s = el('span', `oko-ukr-tl-ctl-item ${cls}`); s.appendChild(el('i', 'oko-ukr-tl-ctl-sw')); s.appendChild(el('span', '', text)); return s; };
+    dmgBox.appendChild(sw('is-dmg-adm3', translate('ukraine.dmg.adm3')));
+    dmgBox.appendChild(sw('is-dmg-destroyed', translate('ukraine.dmg.cls.destroyed')));
+    dmgBox.appendChild(sw('is-dmg-severe', translate('ukraine.dmg.cls.severe')));
+    dmgBox.appendChild(sw('is-dmg-moderate', translate('ukraine.dmg.cls.moderate')));
+    dmgLine = el('span', 'oko-ukr-tl-ctl-since', '');
+    dmgBox.appendChild(dmgLine);
+    row3.appendChild(dmgBox);
+  }
   const legend = el('div', 'oko-ukr-tl-legend');
   legend.setAttribute('role', 'group');
   legend.setAttribute('aria-label', translate('ukraine.tl.legend'));
@@ -244,6 +261,7 @@ export function createUkraineTimeline({
       applyReport(state);
       void applyControl(state);
       void applyDeepState(state);
+      applyDamageCursor(state);
       renderLegend(); renderMedia(); renderCounts(); drawHistogram(); drawCoverage();
       emit();
       return result;
@@ -327,6 +345,21 @@ export function createUkraineTimeline({
     else if (!st.loading && !dsLine.textContent) dsLine.textContent = translate('ukraine.ds.missing');
     const a = st.areaKm2;
     dsArea.textContent = a ? translate('ukraine.ds.area', { occupied: nf.format(Math.round(a.occupied || 0)), grey: nf.format(Math.round(a.grey || 0)) }) : '';
+  }
+  function renderDamage() {
+    if (!damage || !dmgChip) return;
+    const st = damage.getState();
+    dmgChip.classList.toggle('active', st.shown);
+    dmgChip.setAttribute('aria-pressed', String(st.shown));
+    if (!st.shown) { dmgLine.textContent = ''; return; }
+    if (st.error === 'missing') { dmgLine.textContent = translate('ukraine.dmg.missing'); return; }
+    if (st.error) { dmgLine.textContent = translate('ukraine.tl.error', { detail: st.error }); return; }
+    if (!st.adm3 && st.loading) { dmgLine.textContent = translate('ukraine.tl.loading'); return; }
+    dmgLine.textContent = translate('ukraine.dmg.legend', { n: nf.format(st.damaged), h: nf.format(st.adm3), u: nf.format(st.unosat), v: nf.format(st.visibleUnosat) });
+  }
+  function applyDamageCursor(state) {
+    if (!damage) return;
+    damage.setCursor(state.mode === 'live' ? null : state.cursor);
   }
   function renderControl() {
     if (!control || !ctlChip) return;
@@ -496,6 +529,7 @@ export function createUkraineTimeline({
     const st = control.getState();
     if (!st.points && !st.loading) void applyControl(clock.getState());
   }) || null;
+  const unsubscribeDamage = damage?.onChange?.(() => renderDamage()) || null;
   const unsubscribeDeepState = deepstate?.onChange?.(() => {
     renderDeepState();
     if (!deepstate.isShown()) { _deepstateDay = null; return; }
@@ -573,7 +607,7 @@ export function createUkraineTimeline({
   function destroy() {
     _destroyed = true;
     hide();
-    unsubscribeClock?.(); unsubscribeLayer?.(); unsubscribeControl?.(); unsubscribeDeepState?.();
+    unsubscribeClock?.(); unsubscribeLayer?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.();
     try { root.remove(); } catch { /* */ }
     listeners.clear();
   }
@@ -583,6 +617,6 @@ export function createUkraineTimeline({
     show, hide, isShown: () => _shown, setActiveScene, refresh: () => load(), getState, share, clock, store, showControl, showDeepState,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlCounts, dsChip, dsLine, dsArea }),
+    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlCounts, dsChip, dsLine, dsArea, dmgChip, dmgLine }),
   };
 }

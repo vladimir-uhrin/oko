@@ -11656,3 +11656,8 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-item.is-ds-liberated .oko-ukr-tl-ctl-sw { background: rgba(79, 163, 255, 0.18); border-color: rgba(79, 163, 255, 0.9); }
 .oko-ukr-tl-ctl-item.is-ds-attack .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #ffb547; border-color: #0b1622; }
 .oko-ukr-tl-ctl-item.is-ds-airfield .oko-ukr-tl-ctl-sw { width: 8px; height: 8px; border-radius: 50%; background: #d9a066; border-color: #0b1622; }
+/* Škody: kruh hromady (SAR) a triedy UNOSAT */
+.oko-ukr-tl-ctl-item.is-dmg-adm3 .oko-ukr-tl-ctl-sw { width: 11px; height: 11px; border-radius: 50%; background: rgba(255, 138, 61, 0.55); border-color: #0b1622; }
+.oko-ukr-tl-ctl-item.is-dmg-destroyed .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #f87171; border-color: #f87171; }
+.oko-ukr-tl-ctl-item.is-dmg-severe .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #ff8a3d; border-color: #ff8a3d; }
+.oko-ukr-tl-ctl-item.is-dmg-moderate .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #ffb547; border-color: #ffb547; }

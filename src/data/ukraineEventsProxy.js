@@ -24,6 +24,8 @@
  * počty po dňoch pre prehľad osi; `/api/ukraine/events/status`: stav archivára.
  */
 import zlib from 'node:zlib';
+import path from 'node:path';
+import { promises as fsp } from 'node:fs';
 
 import {
   GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, archiveReport, collectMedia, controlDays, controlFor, controlSnapshot, dayKey, dayList, dayShift,
@@ -142,6 +144,7 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
   const deepstateOff = String(env.UKRAINE_DEEPSTATE || '').toLowerCase() === 'off';
   const controlCache = new Map(); // deň -> { at, json }
   const deepstateCache = new Map();
+  const damageCache = new Map(); // adm3 | unosat -> { at, json }
 
   async function tick(name) {
     if (state.running[name]) return;
@@ -192,6 +195,23 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       return;
     }
     if (!limiter(clientKey(req))) { send(res, 429, { error: 'rate_limited' }, req); return; }
+    if (sub === '/damage/adm3' || sub === '/damage/unosat') {
+      // Statické škody (ETH Zürich / UNOSAT, do 02/2024) — súbor zo stavby
+      // scripts/build-ukraine-damage.mjs; bez súboru 404 no_damage_snapshot.
+      const name = sub.endsWith('adm3') ? 'adm3' : 'unosat';
+      const hit = damageCache.get(name);
+      if (hit && now() - hit.at < 60 * MIN) { send(res, 200, hit.json, req); return; }
+      try {
+        const text = await fsp.readFile(path.join(root, '.gev-cache', 'ukraine', 'damage', `${name}.json`), 'utf8');
+        const json = JSON.parse(text);
+        damageCache.set(name, { at: now(), json });
+        send(res, 200, json, req);
+      } catch (error) {
+        if (error?.code === 'ENOENT') send(res, 404, { error: 'no_damage_snapshot', name }, req);
+        else send(res, 500, { error: 'archive_read_failed', detail: String(error?.message || error) }, req);
+      }
+      return;
+    }
     if (sub === '/deepstate') {
       const at = url.searchParams.get('at') || dayKey(now());
       if (!isDay(at)) { send(res, 400, { error: 'bad_day' }, req); return; }

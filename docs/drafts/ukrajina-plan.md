@@ -33,7 +33,14 @@ overuje znova podľa `new-data-layer`.
   (meno, e-mail, typ „nekomerčný", popis EN + UA s poznámkou o AI asistentovi; CAPTCHA a odoslanie =
   používateľ). Odpoveď do ~3 dní, mlčanie = zamietnuté → potom vrstvu, úlohu a archív zmazať
   (`UKRAINE_DEEPSTATE=off` vypne hneď).
-- Otvorené: 4B Black Bird Group (e-mail), 5 (súhlasy), 6 alerts.in.ua (token). Nepublikované.
+- **Etapa 5 bez súhlasov (09-19, „pokračuj v pláne")**: vrstva ŠKODY — hromady zo Sentinel-1
+  modelu ETH Zürich (Zenodo 15088349, CC BY 4.0, 1 759 hromád / 403 990 pravdepodobne poškodených
+  budov, feb 2022 – feb 2024) ako kruhy + 18 209 bodov UNOSAT 2022 (CC BY-SA, 26 miest) odkrývaných
+  kurzorom; `scripts/build-ukraine-damage.mjs`, `src/data/ukraineDamage.js`,
+  `src/ukraineDamageLayer.js`, čip ŠKODY v osi aj v paneli. Nočné svetlá GIBS a hlasové aliasy
+  odložené (fotoreál nedrapuje imagery; hlas nemá aliasy scén). Opevnenia: nikdy bez súhlasu.
+- Otvorené: 4B Black Bird Group (e-mail), 5 opevnenia/S-1 (súhlasy), 6 alerts.in.ua (token).
+  Nepublikované.
 
 ### Etapa 3 (používateľ: „ako na obrázku, určite časovú os … 1 až 5", potom „fotky z čo najviac zdrojov, aj videá, všetko ukladať") — hotové a overené v pane
 

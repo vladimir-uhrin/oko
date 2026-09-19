@@ -67,6 +67,13 @@ export async function fetchUkraineControl(day, { fetcher = (...a) => fetch(...a)
   if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; throw err; }
   return json;
 }
+/** Statické škody (`adm3` = hromady ETH Zürich, `unosat` = body UNOSAT) z proxy. */
+export async function fetchUkraineDamage(name, { fetcher = (...a) => fetch(...a), base = UKRAINE_EVENTS_API } = {}) {
+  const response = await fetcher(`${base}/damage/${name === 'unosat' ? 'unosat' : 'adm3'}`, { cache: 'no-store' });
+  const json = await response.json().catch(() => null);
+  if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; throw err; }
+  return json;
+}
 /** Snímka DeepState platná pre deň (náš denný archív) z proxy. */
 export async function fetchUkraineDeepState(day, { fetcher = (...a) => fetch(...a), base = UKRAINE_EVENTS_API } = {}) {
   const response = await fetcher(`${base}/deepstate?at=${encodeURIComponent(day)}`, { cache: 'no-store' });

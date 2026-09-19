@@ -34,6 +34,7 @@ export function createUkrainePanel({
   timeline = null,
   control = null,
   deepstate = null,
+  damage = null,
   scenes = listFrontScenes(),
   applyScene = null,
   translate = t,
@@ -118,6 +119,17 @@ export function createUkrainePanel({
     deepstateChip.setAttribute('aria-pressed', 'false');
     deepstateChip.title = translate('ukraine.ds.note');
     chips.appendChild(deepstateChip);
+  }
+  // Čip ŠKODY (etapa 5): statické škody na budovách (ETH Zürich SAR + UNOSAT).
+  let damageChip = null;
+  if (damage) {
+    damageChip = button('data-toggle-chip ukraine-chip ukraine-chip-damage', translate('ukraine.part.damage'), () => {
+      if (damage.isShown()) damage.hide(); else void damage.show();
+    });
+    damageChip.dataset.part = 'damage';
+    damageChip.setAttribute('aria-pressed', 'false');
+    damageChip.title = translate('ukraine.dmg.note');
+    chips.appendChild(damageChip);
   }
   let eventsChip = null;
   if (timeline) {
@@ -285,6 +297,14 @@ export function createUkrainePanel({
   };
   const unsubscribeDeepState = deepstate?.onChange?.(() => updateDeepStateChip()) || null;
   updateDeepStateChip();
+  const updateDamageChip = () => {
+    if (!damageChip) return;
+    const on = Boolean(damage?.isShown?.());
+    damageChip.classList?.toggle?.('active', on);
+    damageChip.setAttribute('aria-pressed', String(on));
+  };
+  const unsubscribeDamage = damage?.onChange?.(() => updateDamageChip()) || null;
+  updateDamageChip();
   update();
   updateReport();
   // Dátum snímku je lacný a hovorí, či snímok vôbec existuje — ťahá sa hneď.
@@ -297,6 +317,6 @@ export function createUkrainePanel({
     updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); mountTarget.replaceChildren(); },
   };
 }
