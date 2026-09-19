@@ -812,6 +812,13 @@
           <option value="" data-i18n="chokepoint.pick">Fly to a chokepoint…</option>
         </select>
       </div>
+      <!-- Smery frontu (modul UKRAJINA, 2026-09-19): zapne podklad a zarámuje
+           úsek frontu. Voľby + handler plní src/main.js z src/ukraineFrontScenes.js. -->
+      <div class="scene-controls scene-fronts">
+        <select id="front-select" aria-label="Fly to a direction of the Ukrainian front" data-i18n-aria="front.select-aria">
+          <option value="" data-i18n="front.pick">Fly to a front direction…</option>
+        </select>
+      </div>
       <div class="scene-controls">
         <select id="scene-select" aria-label="Scene recipe" data-i18n-aria="scene.select-aria"></select>
         <button data-i18n="scene.new" id="scene-new-btn" class="scene-btn">NEW</button>
@@ -899,6 +906,22 @@
         <button class="panel-collapse-btn" data-collapse-target="gulf-panel" title="Collapse panel">+</button>
       </div>
       <div class="gulf-body" data-gulf-body></div>
+    </div>
+  </div>
+
+  <!-- UKRAJINA (2026-09-19, etapa 1): podklad frontu — sídla, cesty, rieky a
+       hranice oblastí zo statického OSM snímku + presety smerov frontu. Obsah
+       skladá src/ukrainePanel.js do [data-ukraine-body]; prekryv je samostatný
+       (tokeny odkazu sú plné), nie vrstva správcu. -->
+  <div id="ukraine-panel" class="panel-collapsible collapsed" data-panel-id="ukraine-panel">
+    <div class="panel-glow"></div>
+    <div class="ukraine-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.ukraine" class="panel-title">UKRAINE</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="ukraine-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="ukraine-body" data-ukraine-body></div>
     </div>
   </div>
 

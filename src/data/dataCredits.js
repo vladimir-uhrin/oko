@@ -339,6 +339,16 @@ export const DATA_CREDITS = [
       'refined-product and gathering lines excluded — completeness varies by country)',
   },
   {
+    // UKRAJINA podklad (2026-09-19, etapa 1): vlastný snímok a vlastný súbor —
+    // tretia OSM databáza vedľa plynovodov a ropovodov, opäť Collective Database.
+    key: 'ukraine-base',
+    html:
+      'Ukraine base map — settlements, roads, rivers and oblast boundaries (static snapshot built from OpenStreetMap; snapshot date shown in the UKRAINE panel — not live): ' +
+      '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> ' +
+      '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a>, via the Overpass API; ' +
+      'place names transliterated BGN/PCGN where OSM has no name:en — completeness varies)',
+  },
+  {
     key: 'oil-prices',
     html:
       'Crude oil, natural gas, gasoline &amp; diesel prices (front-month ≈ spot) and EUR/USD: ' +

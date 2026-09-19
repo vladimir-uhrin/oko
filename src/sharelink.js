@@ -52,6 +52,8 @@ const SHARE_PANEL_STATE_REGISTRY = Object.freeze([
   { id: 'history-panel', token: 'h', pinnable: false },
   { id: 'oil-panel', token: 'o', pinnable: false },
   { id: 'gulf-panel', token: 'f', pinnable: false },
+  // UKRAJINA (2026-09-19): ďalšie voľné písmeno — 'u' ako Ukrajina.
+  { id: 'ukraine-panel', token: 'u', pinnable: false },
 ]);
 
 const SHARE_PANEL_STATE_BY_TOKEN = Object.freeze(new Map(

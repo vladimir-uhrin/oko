@@ -4854,6 +4854,49 @@ function oilPricesProxy() {
     configurePreviewServer(server) { install(server.middlewares); },
   };
 }
+/**
+ * UKRAJINA podklad (2026-09-19, etapa 1; plán docs/drafts/ukrajina-plan.md):
+ * statický OSM snímok zo `scripts/build-ukraine-base.mjs`
+ * (.gev-cache/ukraine/base/{meta,places,villages,roads,rivers,oblasts}.json).
+ * Za behu žiadny upstream dopyt — súbor sa streamuje z disku s ETag
+ * (veľkosť + mtime), deň v cache prehliadača (klient verziuje `?v=<snímok>`)
+ * a gzipom, keď ho klient prijme. Bez snímku 404 no_snapshot — panel to prizná.
+ * Jedna montáž `/api/ukraine/base`; connect odstrihne prefix, zvyšok je názov.
+ */
+function ukraineBaseProxy() {
+  const BASE_DIR = path.join(process.cwd(), '.gev-cache', 'ukraine', 'base');
+  const FILES = Object.freeze({ meta: 'meta.json', places: 'places.json', villages: 'villages.json', roads: 'roads.json', rivers: 'rivers.json', oblasts: 'oblasts.json' });
+  const sendJson = (res, status, body) => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-GEV-Cache': 'NONE' });
+    res.end(body);
+  };
+  async function handler(req, res) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, JSON.stringify({ error: 'Method Not Allowed' })); return; }
+    const name = String(req.url || '').replace(/^\/+/, '').replace(/[?#].*$/, '');
+    const file = FILES[name];
+    if (!file) { sendJson(res, 404, JSON.stringify({ error: 'not_found', datasets: Object.keys(FILES) })); return; }
+    const filePath = path.join(BASE_DIR, file);
+    let stat;
+    try { stat = await fsp.stat(filePath); } catch { stat = null; }
+    if (!stat?.isFile() || stat.size === 0) { sendJson(res, 404, JSON.stringify({ error: 'no_snapshot', detail: 'run: node scripts/build-ukraine-base.mjs' })); return; }
+    const etag = '"' + stat.size.toString(16) + '-' + Math.floor(stat.mtimeMs).toString(16) + '"';
+    const headers = { 'Cache-Control': 'public, max-age=86400', ETag: etag, Vary: 'Accept-Encoding', 'X-GEV-Cache': 'FILE', 'Content-Type': 'application/json; charset=utf-8' };
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); res.end(); return; }
+    const gzip = /\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''));
+    if (gzip) headers['Content-Encoding'] = 'gzip'; else headers['Content-Length'] = String(stat.size);
+    res.writeHead(200, headers);
+    if (req.method === 'HEAD') { res.end(); return; }
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', (error) => { console.warn('[ukraine-base] read failed: ' + (error?.message || error)); try { res.destroy(); } catch { /* už zavreté */ } });
+    if (gzip) stream.pipe(zlib.createGzip({ level: 6 })).pipe(res); else stream.pipe(res);
+  }
+  function install(middlewares) { middlewares.use('/api/ukraine/base', handler); }
+  return {
+    name: 'ukraine-base-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
 
 /**
  * Situácia z otvorených zdrojov — pilot (2026-09-17): agregované spravodajstvo
@@ -10478,6 +10521,7 @@ export default defineConfig(({ mode }) => {
       logoProxy(),
       gasProxy(),
       oilPricesProxy(),
+      ukraineBaseProxy(),
       situationNewsProxy(),
       translateProxy(),
       linkImageProxy(),

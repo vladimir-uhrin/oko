@@ -44,6 +44,9 @@ import { createIncidentCards } from './gulfIncidentCards.js';
 import { createSceneRevealGate } from './sceneRevealGate.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { createConflictBulletin } from './conflictBulletin.js';
+import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
+import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
+import { createUkrainePanel } from './ukrainePanel.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -612,6 +615,76 @@ async function init() {
       region: 'gulf',
     });
     window.__godsEyeView.conflictBulletin = conflictBulletin;
+    // UKRAJINA (2026-09-19, etapa 1; plán docs/drafts/ukrajina-plan.md): podklad
+    // frontu — sídla, cesty, rieky, oblasti zo statického OSM snímku — ako
+    // SAMOSTATNÝ prekryv (tokeny odkazu sú plné, správca odmietne vrstvu bez
+    // tokenu, rovnako ako hranice štátov). Zapína ho panel UKRAJINA v lište
+    // DÁTA a presety smerov frontu (`?front=lyman`, výber v paneli SCÉNY,
+    // window API). Hranice štátov si podklad drží ako držiteľ 'ukraine-base'.
+    const ukraineBase = createUkraineBaseLayer({ viewer });
+    window.__godsEyeView.ukraineBase = ukraineBase;
+    let ukraineBoundariesHeld = false;
+    ukraineBase.onChange((state) => {
+      if (state.shown && !ukraineBoundariesHeld) { ukraineBoundariesHeld = true; void countryBoundaries.retain('ukraine-base'); }
+      if (!state.shown && ukraineBoundariesHeld) { ukraineBoundariesHeld = false; countryBoundaries.release('ukraine-base'); }
+    });
+    const frontSceneDeps = {
+      showBase: () => ukraineBase.show(),
+      // Front sa číta ako mapa: z juhu na sever, strmšie než pri úžinách (−58°,
+      // prehľad −70°); cieľ je Cartesian3 (Rectangle by pri streamujúcich 3D
+      // dlaždiciach ticho neurobil nič — rovnaká pasca ako pri úžinách).
+      flyToRegion: (scene) => {
+        if (!viewer?.camera?.flyTo || !scene?.rectDegrees) return null;
+        viewer.trackedEntity = undefined;
+        const framing = frontSceneFraming(scene.rectDegrees, { overview: Boolean(scene.overview) });
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(framing.lon, framing.lat, framing.heightM),
+          orientation: { heading: Cesium.Math.toRadians(framing.headingDeg), pitch: Cesium.Math.toRadians(framing.pitchDeg), roll: 0 },
+          duration: 3.0,
+        });
+        return null;
+      },
+    };
+    let ukrainePanel = null;
+    const runFrontScene = (id) => {
+      const scene = frontSceneById(id);
+      ukrainePanel?.setActiveScene(scene?.id || null);
+      return applyFrontScene(id, frontSceneDeps);
+    };
+    ukrainePanel = createUkrainePanel({
+      mountTarget: document.querySelector('#ukraine-panel [data-ukraine-body]'),
+      layer: ukraineBase,
+      applyScene: (id) => runFrontScene(id),
+    });
+    window.__godsEyeView.ukrainePanel = ukrainePanel;
+    window.__godsEyeView.frontScenes = { list: listFrontScenes, apply: runFrontScene };
+    // Zdieľateľný odkaz `?front=<smer>` (napr. oko.uhrin.digital/?front=lyman) —
+    // po obnove stavu, aby scéna vyhrala nad predvoleným pohľadom ako klik.
+    try {
+      const requestedFront = new URLSearchParams(window.location?.search || '').get('front');
+      if (requestedFront && frontSceneById(requestedFront)) {
+        void Promise.resolve(styleManager.initialRestorePromise)
+          .catch(() => {})
+          .then(() => runFrontScene(requestedFront));
+      }
+    } catch { /* zlý parameter nikdy nezhodí štart */ }
+    // Výber v paneli SCÉNY (na dotyku záložka SCENES), rovnaký vzor ako úžiny.
+    try {
+      const frontPicker = document.getElementById('front-select');
+      if (frontPicker) {
+        for (const scene of listFrontScenes()) {
+          const option = document.createElement('option');
+          option.value = scene.id;
+          option.textContent = frontSceneLabel(scene);
+          frontPicker.appendChild(option);
+        }
+        frontPicker.addEventListener('change', () => {
+          const id = frontPicker.value;
+          frontPicker.value = '';
+          if (id) void runFrontScene(id);
+        });
+      }
+    } catch { /* výber je voliteľné chróm */ }
     const runChokepointScene = (id) => {
       const scene = chokepointSceneById(id);
       const result = applyChokepointScene(id, chokepointSceneDeps);

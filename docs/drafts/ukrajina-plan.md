@@ -12,6 +12,40 @@ kroku používateľa (žiadosť, e-mail, kľúč) a čo vôbec nie** — a v ako
 overených dvojmo (nálezca + skeptik) sú z nich len 3, zvyšok je jedno čítanie a pred zapojením sa
 overuje znova podľa `new-data-layer`.
 
+## Stav (2026-09-19 večer): ETAPA 1 HOTOVÁ, etapy 2–6 nezačaté
+
+Používateľ: „pokračuj etapou 1". Hotové a overené v pane (podklad OSM stack, lebo Google 3D
+dlaždice sú v pane 403):
+
+- **Snímok** `scripts/build-ukraine-base.mjs` + knižnica `scripts/lib/ukraineBase.mjs`: 4 poludníkové
+  dlaždice, výber polygónom Ukrajiny (Natural Earth 1:50m, rozšírený o 0,2°) + rámec Krymu + pás
+  Kursk/Belgorod; výsledok v `.gev-cache/ukraine/base/`: 1 442 miest a mestečiek, 27 973 obcí,
+  11 353 pospájaných ciest (74 982 km), 2 257 riek (57 845 km, ≥ 30 km v okne), 27 oblastí
+  (4 370 hraničných čiar); 589 s, 13 dopytov, 30 s pauzy. Meta nesie dátum, počty, dopyty.
+- **Proxy** `ukraineBaseProxy()` vo `vite.config.js`: `/api/ukraine/base/{meta,places,villages,roads,rivers,oblasts}`,
+  ETag + gzip (2,6 MB gz pre 4 súbory načítané hneď, obce 1,1 MB gz lenivo), 404 `no_snapshot`.
+- **Prekryv** `src/data/ukraineBaseLayer.js` (+ čisté `src/data/ukraineBase.js`): 4 CustomDataSource
+  (čip = jedno show), body a popisky primknuté k zemi (`CLAMP_TO_GROUND` + bez hĺbkového testu),
+  čiary `clampToGround` BOTH ako rúry, mená `name:en` inak prepis BGN/PCGN (mestá verzálkami),
+  obce až pod 260 km ako kohorta ≤ 1 800 okolo stredu pohľadu, riedenie popisov mriežkou
+  118×26 px po ustálení kamery (nad Lymanom zo 159 km ostalo 444 z 3 242), karta pri prechode
+  myšou (latinka, originál, obyvatelia, dátum snímku), klik na sídlo = prelet (45/22/9 km).
+- **Panel UKRAJINA** (`#ukraine-panel`, poradie 9, `src/ukrainePanel.js`, token zdieľania `u`,
+  mobilná záložka DÁTA): stav snímku, počty, tlačidlo podkladu, čipy, 12 smerov, poctivá
+  poznámka „nič tu nie je línia frontu". Smery `src/ukraineFrontScenes.js` (prehľad + 11 podľa
+  hlásenia GŠ z 19. 9. 2026, Oleksandrivský = kotva približná), spúšťače `?front=<id>`,
+  `#front-select` v SCÉNY, `window.__godsEyeView.frontScenes.apply(id)`; podklad si drží hranice
+  štátov ako držiteľ `ukraine-base`.
+- Testy: 5 nových súborov (knižnica, pomocné funkcie, prekryv, smery, panel) + lane testy panelov
+  prešli automaticky; suite 3 528/3 530 (2 padajúce = meteo agent).
+
+Neoverené / na neskôr: prelet smeru cez `camera.flyTo` (v pane zamŕza pri 403 dlaždiciach — overené
+len `setView` + testy), vzhľad na fotoreáli používateľa (šírky ciest, čitateľnosť popisov na 3D
+meshi), tertiary cesty zblízka, spájanie hraničných čiar oblastí (4 370 úsekov, mohlo by byť ~200),
+GeoNames/HDX zámerne nepoužité (OSM `name:*` a `admin_level=4` stačili), hlasové aliasy.
+Pasce zapísané v `docs/CURRENT-STATE.md` (kumi mirror bez areas, 429 pri rýchlom slede,
+`force-cache` na /api vráti HTML navždy, Natural Earth bez Krymu).
+
 ## 0. Zhrnutie na jednu obrazovku
 
 | Prvok vzoru | Dá sa? | Zdroj | Podmienka |

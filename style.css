@@ -6901,6 +6901,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #left-panel-stack > #gas-panel { order: 6; }
 #left-panel-stack > #oil-panel { order: 7; }
 #left-panel-stack > #gulf-panel { order: 8; }
+#left-panel-stack > #ukraine-panel { order: 9; }
 
 /*
  * Runtime focus mode: the layout engine applies this only when the expanded
@@ -6975,7 +6976,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #left-panel-stack > #gas-panel:not(.collapsed) .gas-panel-inner,
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
-#left-panel-stack > #gulf-panel:not(.collapsed) .gulf-panel-inner {
+#left-panel-stack > #gulf-panel:not(.collapsed) .gulf-panel-inner,
+#left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner {
   height: 100%;
   max-height: 100%;
 }
@@ -6987,7 +6989,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #left-panel-stack > #cctv-panel:not(.collapsed) .cctv-panel-inner,
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
-#left-panel-stack > #gulf-panel:not(.collapsed) .gulf-panel-inner {
+#left-panel-stack > #gulf-panel:not(.collapsed) .gulf-panel-inner,
+#left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner {
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -10445,6 +10448,13 @@ body.scene-playback-mode #first-run-launcher {
 .pipeline-hover-card[data-kind="datacenters"] .pipeline-hover-kind { color: #00ffff; }
 .pipeline-hover-card[data-kind="dams"] { border-left-color: #0088ff; }
 .pipeline-hover-card[data-kind="dams"] .pipeline-hover-kind { color: #0088ff; }
+/* UKRAJINA podklad (2026-09-19): sídla svetlé, rieky oceľová modrá, cesty papierová. */
+.pipeline-hover-card[data-kind="ukraine-places"] { border-left-color: #e8eef3; }
+.pipeline-hover-card[data-kind="ukraine-places"] .pipeline-hover-kind { color: #e8eef3; }
+.pipeline-hover-card[data-kind="ukraine-rivers"] { border-left-color: #6fb7e8; }
+.pipeline-hover-card[data-kind="ukraine-rivers"] .pipeline-hover-kind { color: #6fb7e8; }
+.pipeline-hover-card[data-kind="ukraine-roads"] { border-left-color: #d2cbbf; }
+.pipeline-hover-card[data-kind="ukraine-roads"] .pipeline-hover-kind { color: #d2cbbf; }
 .local-hover-card .pipeline-hover-title .pipeline-hover-flag { margin-right: 6px; vertical-align: 0; }
 .pipeline-hover-card a { color: var(--accent); text-decoration: none; }
 .pipeline-hover-card a:hover { text-decoration: underline; text-underline-offset: 2px; }
@@ -10810,6 +10820,57 @@ body.scene-playback-mode #first-run-launcher {
  */
 #oil-panel.collapsed .oil-body { display: none; }
 #gulf-panel.collapsed .gulf-body { display: none; }
+#ukraine-panel.collapsed .ukraine-body { display: none; }
+
+/*
+ * UKRAJINA (2026-09-19, etapa 1): telo panela podkladu frontu. Stav a titulky
+ * sedia na štýle PLYN (.gas-status, .gas-card-title), čipy na čipoch riadkov
+ * DÁTA (.data-toggle-chip); smery sú zoznam tlačidiel v mono, aktívny svieti.
+ */
+.ukraine-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden auto;
+}
+.ukraine-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ukraine-toggle { flex: 0 0 auto; }
+.ukraine-toggle.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.ukraine-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.ukraine-counts {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+.ukraine-section-title { margin-top: 4px; }
+.ukraine-dirs { display: flex; flex-direction: column; gap: 3px; }
+.ukraine-dir {
+  text-align: left;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  cursor: var(--cursor-pointer);
+  transition: all var(--transition-fast);
+}
+.ukraine-dir:hover, .ukraine-dir:focus-visible { border-color: var(--glass-border-hover); background: rgba(255, 255, 255, 0.06); color: var(--text-primary); outline: none; }
+.ukraine-dir.is-overview { color: var(--text-primary); border-style: dashed; }
+.ukraine-dir.is-active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.ukraine-note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+.ukraine-note.ukraine-dim { color: var(--text-dim); }
 .gas-status {
   font-family: var(--font-mono);
   font-size: 9px;
