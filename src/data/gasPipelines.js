@@ -91,24 +91,78 @@ export function pipelineStatus(properties = {}) {
  * @param {{diameterMm?: number|null, status?: string}} properties
  * @returns {{width: number, alpha: number, dashed: boolean, color: string, status: string}}
  */
+/**
+ * Triedy šírok v px (etapa 4, MERANÉ 2026-09-19 na fotoreáli so zapnutým
+ * sharpenom): doostrenie prepáli vnútro čiary až do ~2 px od okraja, takže
+ * pri 1,4–3 px zostane z orchidey #eab2ff biela 255,190,255 a farba ako kanál
+ * zanikne. Od 4 px (2 px jadro) odtieň prežije (namerané 212,164,228), tmavý
+ * obrys 1 px dá kontrast nad svetlým terénom a pohltí halo doostrenia. Šírka
+ * naďalej znamená priemer: chrbtica DN ≥ 900 najhrubšia; pahýle do 2 km bez
+ * priemeru najtenšie a navyše miznú z diaľky (pipelineDisplayCondition).
+ */
+export const PIPELINE_WIDTHS = Object.freeze({ trunk: 6, main: 5, minor: 4, stub: 3 });
+/** Tmavý obrys pod farbou látky — spoločný pre plyn aj ropu. */
+export const PIPELINE_OUTLINE = Object.freeze({ width: 1, color: '#0b0f14', alpha: 0.7 });
+/** Zvýraznenie výberu: biela, širšia o 3 px, tmavší obrys. */
+export const PIPELINE_SELECTED = Object.freeze({ extraWidth: 3, color: '#ffffff', alpha: 0.95, outline: Object.freeze({ width: 1.5, color: '#0b0f14', alpha: 0.9 }) });
+
+/** Trieda šírky z priemeru a dĺžky úseku. */
+export function pipelineWidthClass(properties = {}) {
+  const d = Number(properties?.diameterMm);
+  const km = Number(properties?.lengthKm);
+  if (Number.isFinite(d) && d >= 900) return 'trunk';
+  if (Number.isFinite(d) && d >= 500) return 'main';
+  if (Number.isFinite(km) && km > 0 && km < 2) return 'stub';
+  return 'minor';
+}
+
+/**
+ * Podmienka zobrazenia podľa dĺžky úseku (etapa 4): 52,8 % úsekov sú dvojbodové
+ * pahýle a 42,3 % je kratších než 1 km — z diaľky sa zlievajú do šumu a nič
+ * nehovoria. Krátke úseky preto miznú skôr než dlhé; úsek od 20 km je vidieť
+ * vždy, lebo z takých sú zložené magistrály. Neznáma dĺžka = nikdy neskrývať.
+ * @param {number|null|undefined} lengthKm
+ * @returns {[number, number]|null} [near, far] v metroch alebo null
+ */
+export function pipelineDisplayCondition(lengthKm) {
+  const km = Number(lengthKm);
+  if (!Number.isFinite(km) || km <= 0) return null;
+  if (km < 1) return [0, 300_000];
+  if (km < 5) return [0, 1_200_000];
+  if (km < 20) return [0, 4_000_000];
+  return null;
+}
+
 export function pipelineStyle(properties = {}) {
   const status = pipelineStatus(properties);
   const kind = pipelineKind(properties);
-  const d = Number(properties?.diameterMm);
   // Šírka znamená priemer rovnako pri oboch látkach — dve protirečivé pravidlá
   // by sa používateľ učiť nemal. Trieda dáva zmysel až od opravy čítania palcov
-  // v scripts/lib/pipelineTags.mjs; predtým padlo do 1,4 px takmer všetko.
-  const width = Number.isFinite(d) && d >= 900 ? 2.8 : (Number.isFinite(d) && d >= 500 ? 2.0 : 1.4);
+  // v scripts/lib/pipelineTags.mjs; predtým padlo do najtenšej takmer všetko.
+  const widthClass = pipelineWidthClass(properties);
+  const dashed = status === 'planned';
   return {
-    width,
+    width: PIPELINE_WIDTHS[widthClass],
+    widthClass,
     // disused zdvihnuté 0,40 → 0,45: pri 0,40 malo nad nočným oceánom kontrast
     // 1,55, teda na hranici neviditeľnosti.
     alpha: status === 'disused' ? 0.45 : (status === 'planned' ? 0.7 : 0.85),
-    dashed: status === 'planned',
+    dashed,
     color: COLORS_BY_KIND[kind][status],
+    // Čiarkovanie a obrys sú dva materiály, ktoré sa v Cesiu nespoja — plánované
+    // majú namiesto obrysu tmavú medzeru medzi čiarkami.
+    outline: dashed ? null : PIPELINE_OUTLINE,
+    gapColor: dashed ? PIPELINE_OUTLINE.color : null,
+    displayCondition: pipelineDisplayCondition(properties?.lengthKm),
     kind,
     status,
   };
+}
+
+/** Štýl zvýraznenia vybraného úseku — odvodený od základného, vždy viditeľný. */
+export function pipelineSelectedStyle(properties = {}) {
+  const base = pipelineStyle(properties);
+  return { ...base, width: base.width + PIPELINE_SELECTED.extraWidth, color: PIPELINE_SELECTED.color, alpha: PIPELINE_SELECTED.alpha, dashed: false, outline: PIPELINE_SELECTED.outline, gapColor: null, displayCondition: null };
 }
 
 /**

@@ -5,7 +5,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { GAS_PIPELINES_LAYER_ID, GAS_PIPELINES_OVERLAY_SOURCE_ID, createGasPipelinesLayer, pipelineCard } from './gasPipelinesLayer.js';
+import * as Cesium from 'cesium';
+import { GAS_PIPELINES_LAYER_ID, GAS_PIPELINES_OVERLAY_SOURCE_ID, createGasPipelinesLayer, defaultGroundSupport, pipelineCard } from './gasPipelinesLayer.js';
 import { GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS } from './gasPipelines.js';
 import { EN_STRINGS, SK_STRINGS } from '../i18nStrings.js';
 import { LAYER_STATE_REGISTRY } from './layerState.js';
@@ -84,8 +85,14 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   assert.equal(st.meta.features, 3);
   const ds = viewer.dataSources.added[0];
   const [transgas, ns2, dn300] = ds.entities.values;
-  assert.equal(transgas.polyline.width, 2.8);
+  assert.equal(transgas.polyline.width, 6, 'chrbtica DN 1400 = 6 px (etapa 4)');
   assert.equal(transgas.polyline.clampToGround, true);
+  assert.equal(transgas.polyline.classificationType, Cesium.ClassificationType.BOTH);
+  assert.equal(transgas.polyline.material.constructor.name, 'PolylineOutlineMaterialProperty', 'plná čiara má tmavý obrys');
+  assert.equal(transgas.polyline.material.outlineWidth.getValue(), 1);
+  assert.equal(transgas.polyline.distanceDisplayCondition, undefined, '120 km úsek je vidieť vždy');
+  assert.equal(dn300.polyline.distanceDisplayCondition.far, 300_000, '0,8 km pahýľ mizne od 300 km');
+  assert.equal(dn300.polyline.width, 3, 'pahýľ bez chrbtice = 3 px');
   assert.equal(transgas.__gasPipeline, 'osm-way-1');
   assert.equal(ns2.polyline.material.constructor.name, 'PolylineDashMaterialProperty', 'plánované sú čiarkované');
   assert.equal(dn300.polyline.material.color.getValue().alpha.toFixed(2), '0.45', 'odstavené sú stlmené');
@@ -97,8 +104,16 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   pick.value = { id: transgas };
   handlers[0].fn({ position: { x: 1, y: 1 } });
   assert.equal(layer._getStateForTest().selected, 'osm-way-1');
-  assert.equal(transgas.polyline.width, 4.8, 'zvýraznenie = širšia biela čiara');
-  assert.equal(transgas.polyline.material.color.getValue().withAlpha(1).toCssHexString().toLowerCase(), GAS_PIPELINE_COLORS.selected);
+  // Etapa 4: výber je JEDNA entita vo vlastnom zdroji, základná dávka sa nemení.
+  assert.equal(transgas.polyline.width, 6, 'základná entita sa výberom nemení');
+  const selection = viewer.dataSources.added[2];
+  assert.equal(selection.id, 'gas-pipelines-selected');
+  assert.equal(selection.show, true);
+  assert.equal(selection.entities.values.length, 1);
+  assert.equal(selection.entities.values[0].polyline.width, 9, 'zvýraznenie = +3 px');
+  assert.equal(selection.entities.values[0].polyline.material.color.getValue().withAlpha(1).toCssHexString().toLowerCase(), GAS_PIPELINE_COLORS.selected);
+  assert.equal(selection.entities.values[0].polyline.distanceDisplayCondition, undefined, 'výber sa nikdy neskrýva');
+  assert.equal(selection.entities.values[0].__gasPipelineSelection, 'osm-way-1');
   assert.equal(viewer.selectedEntity, transgas);
   assert.equal(host.src, GAS_PIPELINES_OVERLAY_SOURCE_ID);
   assert.equal(host.entries.length, 1);
@@ -109,7 +124,8 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   // druhý klik na tú istú čiaru zbalí a vráti štýl
   handlers[0].fn({ position: { x: 1, y: 1 } });
   assert.equal(layer._getStateForTest().selected, null);
-  assert.equal(transgas.polyline.width, 2.8);
+  assert.equal(transgas.polyline.width, 6);
+  assert.equal(selection.entities.values.length, 0, 'zbalenie odstráni zvýraznenie');
   // klik na kartu zbalí; cudzí objekt nechá; prázdno zbalí
   pick.value = { id: ns2 };
   handlers[0].fn({ position: { x: 1, y: 1 } });
@@ -133,7 +149,7 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   assert.equal(host.visible, false);
   assert.equal(ds.show, false);
   layer.destroy(viewer);
-  assert.equal(viewer.dataSources.removed.length, 2, 'plyn aj ropa majú vlastný zdroj (etapa 3), destroy odstráni oba');
+  assert.equal(viewer.dataSources.removed.length, 3, 'plyn, ropa aj výber majú vlastný zdroj (etapy 3–4), destroy odstráni všetky');
   assert.equal(layer._getStateForTest().entities, null);
 });
 
@@ -185,7 +201,7 @@ test('ropa: vlastný snímok z /api/oil, počty na látku, zlúčený popis zdro
   const bezMena = oilDs.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-78');
   assert.equal(druzba.properties.kind, 'oil');
   assert.equal(druzba.polyline.material.color.getValue().withAlpha(1).toCssHexString().toLowerCase(), OIL_PIPELINE_COLORS.operating);
-  assert.equal(druzba.polyline.width, 2.8, 'DN 1220 = chrbtica, šírka znamená priemer rovnako ako pri plyne');
+  assert.equal(druzba.polyline.width, 6, 'DN 1220 = chrbtica, šírka znamená priemer rovnako ako pri plyne');
   assert.equal(ds.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-1').polyline.material.color.getValue().withAlpha(1).toCssHexString().toLowerCase(), GAS_PIPELINE_COLORS.operating, 'plyn si drží svoju farbu');
   // Karta ropovodu: látka slovom v prvom riadku + surový tag z OSM. Farba je
   // druhý kanál, nie jediný.
@@ -387,6 +403,22 @@ test('etapa 3 — hover: pick 7×7 po 80 ms, karta pri kurzore, živý tok ENTSO
   assert.equal(layer._getStateForTest().hover.installed, false);
   layer.destroy(viewer);
   assert.equal(hover.destroyed, true);
+});
+
+test('etapa 4 — bez podpory pozemných čiar: núdzovka 200 m nad elipsoidom, bez clampToGround, priznaná v zdroji', async () => {
+  const layer = createGasPipelinesLayer({ fetchImpl: fetcherOk, dataSourceFactory: fakeDataSource, handlerFactory: fakeHandler, overlayHost: fakeHost(), translate: tKey, lang: () => 'sk', now: () => NOW, groundSupport: () => false });
+  const viewer = fakeViewer();
+  layer.init(viewer);
+  assert.equal(layer._getStateForTest().groundSupported, false);
+  assert.equal(await layer.update(), true);
+  const [transgas] = viewer.dataSources.added[0].entities.values;
+  assert.equal(transgas.polyline.clampToGround, false);
+  assert.equal(transgas.polyline.classificationType, undefined, 'bez prikladania niet čo klasifikovať');
+  const carto = Cesium.Cartographic.fromCartesian(transgas.polyline.positions[0]);
+  assert.ok(Math.abs(carto.height - 200) < 1, 'výška 200 m nad elipsoidom');
+  assert.match(layer.getStats().source, /gas\.pipeline-no-ground$/, 'chip prizná núdzovku (pravidlo 2)');
+  assert.equal(defaultGroundSupport({}), true, 'falošná scéna bez kontextu = predpokladaj podporu, nie výnimku');
+  layer.destroy(viewer);
 });
 
 test('duplicitné id (úsek cez hranicu dlaždice) dostane príponu namiesto výnimky; po zlyhaní sa pri ďalšom pokuse zdroj vyprázdni, nič sa nezdvojí', async () => {

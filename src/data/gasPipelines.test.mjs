@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GAS_PIPELINES_API, GAS_PIPELINES_META_API, GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS,
-  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineDisplayName, pipelineKind, pipelineLocationText, pipelineMidpoint,
-  pipelineOperator, pipelineRoute, pipelineSourceLabel, pipelineStatus, pipelineStyle, pipelineTitle,
+  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineDisplayCondition, pipelineDisplayName, pipelineKind, pipelineLocationText, pipelineMidpoint,
+  pipelineOperator, pipelineRoute, pipelineSelectedStyle, pipelineSourceLabel, pipelineStatus, pipelineStyle, pipelineTitle,
 } from './gasPipelines.js';
 
 const tKey = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
@@ -32,10 +32,28 @@ test('pipelineStatus a pipelineStyle: hrúbka podľa DN, plánované čiarkovan�
   assert.equal(pipelineStatus({ status: 'nezmysel' }), 'operating');
   // 2026-09-19 (etapa 2): pribudlo `kind` a odstavené sa zdvihlo z alfa 0,40 na
   // 0,45 — pri 0,40 malo nad nočným oceánom kontrast 1,55, teda na hranici
-  // neviditeľnosti.
-  assert.deepEqual(pipelineStyle({ diameterMm: 1400 }), { width: 2.8, alpha: 0.85, dashed: false, color: GAS_PIPELINE_COLORS.operating, kind: 'gas', status: 'operating' });
-  assert.deepEqual(pipelineStyle({ diameterMm: 700, status: 'planned' }), { width: 2.0, alpha: 0.7, dashed: true, color: GAS_PIPELINE_COLORS.planned, kind: 'gas', status: 'planned' });
-  assert.deepEqual(pipelineStyle({ status: 'disused' }), { width: 1.4, alpha: 0.45, dashed: false, color: GAS_PIPELINE_COLORS.disused, kind: 'gas', status: 'disused' });
+  // neviditeľnosti. Etapa 4: triedy šírok 6/5/4/3 px (MERANÉ: pod 4 px sharpen
+  // prepáli odtieň na bielu), tmavý obrys pri plných čiarach, tmavá medzera pri
+  // čiarkovaných, podmienka zobrazenia podľa dĺžky úseku.
+  const outline = { width: 1, color: '#0b0f14', alpha: 0.7 };
+  assert.deepEqual(pipelineStyle({ diameterMm: 1400, lengthKm: 120 }), { width: 6, widthClass: 'trunk', alpha: 0.85, dashed: false, color: GAS_PIPELINE_COLORS.operating, outline, gapColor: null, displayCondition: null, kind: 'gas', status: 'operating' });
+  assert.deepEqual(pipelineStyle({ diameterMm: 700, status: 'planned', lengthKm: 3 }), { width: 5, widthClass: 'main', alpha: 0.7, dashed: true, color: GAS_PIPELINE_COLORS.planned, outline: null, gapColor: '#0b0f14', displayCondition: [0, 1_200_000], kind: 'gas', status: 'planned' });
+  assert.deepEqual(pipelineStyle({ status: 'disused' }), { width: 4, widthClass: 'minor', alpha: 0.45, dashed: false, color: GAS_PIPELINE_COLORS.disused, outline, gapColor: null, displayCondition: null, kind: 'gas', status: 'disused' });
+  // Pahýľ: bez priemeru a pod 2 km → najtenší a z 300 km preč.
+  assert.deepEqual(pipelineStyle({ lengthKm: 0.8 }).widthClass, 'stub');
+  assert.equal(pipelineStyle({ lengthKm: 0.8 }).width, 3);
+  assert.deepEqual(pipelineStyle({ lengthKm: 0.8 }).displayCondition, [0, 300_000]);
+  assert.equal(pipelineStyle({ diameterMm: 1000, lengthKm: 0.8 }).widthClass, 'trunk', 'chrbtica ostáva chrbticou aj v krátkom úseku');
+  assert.deepEqual(pipelineDisplayCondition(12), [0, 4_000_000]);
+  assert.equal(pipelineDisplayCondition(20), null, 'od 20 km vždy — z takých sú magistrály');
+  assert.equal(pipelineDisplayCondition(undefined), null, 'neznáma dĺžka sa nikdy neskrýva');
+  // Výber: biela, +3 px, tmavší obrys, nikdy dashed, bez podmienky zobrazenia.
+  const sel = pipelineSelectedStyle({ diameterMm: 700, status: 'planned', lengthKm: 0.5 });
+  assert.equal(sel.width, 8);
+  assert.equal(sel.color, '#ffffff');
+  assert.equal(sel.dashed, false);
+  assert.equal(sel.displayCondition, null);
+  assert.deepEqual(sel.outline, { width: 1.5, color: '#0b0f14', alpha: 0.9 });
 });
 
 test('pipelineKind a ropná paleta: látka z tagu substance, neznáme = plyn', () => {
@@ -53,7 +71,7 @@ test('pipelineKind a ropná paleta: látka z tagu substance, neznáme = plyn', (
   const oil = pipelineStyle({ substance: 'oil', diameterMm: 1400 });
   assert.equal(oil.kind, 'oil');
   assert.equal(oil.color, OIL_PIPELINE_COLORS.operating);
-  assert.equal(oil.width, 2.8);
+  assert.equal(oil.width, 6);
   assert.notEqual(OIL_PIPELINE_COLORS.operating, GAS_PIPELINE_COLORS.operating, 'ropa a plyn nesmú mať tú istú farbu');
 });
 

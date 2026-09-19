@@ -28,7 +28,7 @@ import { clearOverlaySource, hitTestWorldOverlay, setOverlayEntries, setOverlayS
 import { applyVesselOverlayPolicy } from './vesselLabels.js';
 import {
   GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS, OIL_PIPELINES_API, OIL_PIPELINES_META_API,
-  fetchGasPipelines, pipelineDetails, pipelineMidpoint, pipelineSourceLabel, pipelineStyle,
+  fetchGasPipelines, pipelineDetails, pipelineMidpoint, pipelineSelectedStyle, pipelineSourceLabel, pipelineStyle,
   pipelineTitle,
 } from './gasPipelines.js';
 import { fetchGasFlows } from './gasFlows.js';
@@ -46,6 +46,20 @@ export const PIPELINE_HOVER_DELAY_MS = 80;
 export const PIPELINE_HOVER_PICK_PX = 7;
 /** Živé toky ENTSOG pre hover: proxy má cache 1 h, klient si drží 30 min. */
 export const PIPELINE_FLOWS_TTL_MS = 30 * 60 * 1000;
+
+/** Núdzová výška čiar bez podpory pozemných primitív (metre nad elipsoidom). */
+export const FALLBACK_HEIGHT_M = 200;
+
+/**
+ * Stráž podpory pozemných čiar (vzor traffic.js): bez hĺbkovej textúry
+ * GroundPolylinePrimitive nekreslí nič. Falošná scéna v testoch túto otázku
+ * nevie zodpovedať — výnimka znamená „predpokladaj áno".
+ * @param {object|null|undefined} scene
+ * @returns {boolean}
+ */
+export function defaultGroundSupport(scene) {
+  try { return Boolean(Cesium.GroundPolylinePrimitive.isSupported(scene)); } catch { return true; }
+}
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -116,11 +130,16 @@ export function createGasPipelinesLayer({
   flowsFetcher = fetchGasFlows,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
+  groundSupport = defaultGroundSupport,
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   let _viewer = null;
   /** Jeden CustomDataSource na látku: čip = jedno `show`, nie slučka cez entity. */
   let _sources = { gas: null, oil: null };
+  /** Zdroj s jedinou entitou zvýraznenia (etapa 4) — základná dávka sa pri kliku nemení. */
+  let _selection = null;
+  /** GPU vie pozemné čiary (hĺbková textúra); inak núdzovka nad elipsoidom. */
+  let _groundSupported = true;
   let _enabled = false;
   let _loaded = false;
   let _loading = null;
@@ -151,27 +170,82 @@ export function createGasPipelinesLayer({
   let _flowsAt = 0;
   let _flowsPromise = null;
 
+  /**
+   * Materiál (etapa 4, MERANÉ): plná čiara = PolylineOutline s tmavým obrysom
+   * (na pozemnej čiare kreslí — overené pixelmi), plánovaná = čiarkovanie
+   * s tmavou medzerou (obrys a čiarky sú dva materiály, nespoja sa).
+   */
   const material = (style) => {
     const color = Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha);
-    return style.dashed
-      ? new Cesium.PolylineDashMaterialProperty({ color, dashLength: 12 })
-      : new Cesium.ColorMaterialProperty(color);
+    if (style.dashed) {
+      const gapColor = style.gapColor ? Cesium.Color.fromCssColorString(style.gapColor).withAlpha(0.35) : Cesium.Color.TRANSPARENT;
+      return new Cesium.PolylineDashMaterialProperty({ color, gapColor, dashLength: 12 });
+    }
+    if (style.outline) {
+      return new Cesium.PolylineOutlineMaterialProperty({
+        color,
+        outlineColor: Cesium.Color.fromCssColorString(style.outline.color).withAlpha(style.outline.alpha),
+        outlineWidth: style.outline.width,
+      });
+    }
+    return new Cesium.ColorMaterialProperty(color);
   };
 
   const sourceFor = (kind) => _sources[kind === 'oil' ? 'oil' : 'gas'];
   const eachSource = (fn) => { for (const kind of PIPELINE_KINDS) if (_sources[kind]) fn(_sources[kind], kind); };
 
-  /** Látka je viditeľná = vrstva zapnutá A jej čip zapnutý. */
+  /** Látka je viditeľná = vrstva zapnutá A jej čip zapnutý; výber ide s vrstvou. */
   function applySourceVisibility() {
     eachSource((source, kind) => { source.show = _enabled && Boolean(_params[kind]); });
+    if (_selection) _selection.show = _enabled;
   }
 
-  function applyStyle(entity, feature, selected) {
-    const style = pipelineStyle(feature.properties);
-    entity.polyline.width = selected ? style.width + 2 : style.width;
-    entity.polyline.material = selected
-      ? new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString(GAS_PIPELINE_COLORS.selected).withAlpha(0.95))
-      : material(style);
+  /**
+   * Polyline pre entitu: na terén, keď to GPU vie (GroundPolylinePrimitive
+   * potrebuje hĺbkovú textúru); inak 200 m nad elipsoidom ako priznaná
+   * núdzovka — nad horami to bude pod zemou, ale čiara existuje a chip to hlási.
+   */
+  function polylineFor(coordinates, style) {
+    const flat = [];
+    if (_groundSupported) {
+      for (const [lon, lat] of coordinates) flat.push(lon, lat);
+    } else {
+      for (const [lon, lat] of coordinates) flat.push(lon, lat, FALLBACK_HEIGHT_M);
+    }
+    const polyline = {
+      positions: _groundSupported ? Cesium.Cartesian3.fromDegreesArray(flat) : Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+      width: style.width,
+      material: material(style),
+      clampToGround: _groundSupported,
+    };
+    if (_groundSupported) {
+      // BOTH zámerne (nie podľa podkladu ako káble): 21 000 entít sa pri zmene
+      // classificationType prestaví celé (~750 ms zamrznutie, etapa 0) a úspora
+      // je pod 1 ms na snímok. Na fotoreáli (glóbus skrytý) BOTH klasifikuje
+      // dlaždice, na glóbuse terén — viditeľnosť je v oboch prípadoch správna.
+      polyline.classificationType = Cesium.ClassificationType.BOTH;
+    }
+    if (style.displayCondition) {
+      polyline.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(style.displayCondition[0], style.displayCondition[1]);
+    }
+    return polyline;
+  }
+
+  /**
+   * Výber = JEDNA entita vo vlastnom zdroji (etapa 4). Predtým sa menila šírka
+   * a materiál základnej entity, čo prestavovalo celú dávku ~770 tisíc vrcholov
+   * dvakrát na každý klik (namerané zamrznutie). Základné entity sa nedotýkajú.
+   */
+  function renderSelection(record) {
+    if (!_selection) return;
+    _selection.entities.removeAll?.();
+    if (!record) return;
+    const style = pipelineSelectedStyle(record.feature.properties);
+    const entity = _selection.entities.add({
+      id: `${GAS_PIPELINES_LAYER_ID}:selected`,
+      polyline: polylineFor(record.feature.geometry.coordinates, style),
+    });
+    entity.__gasPipelineSelection = record.feature.id;
   }
 
   function publishCard() {
@@ -190,12 +264,10 @@ export function createGasPipelinesLayer({
   }
 
   function selectPipeline(featureId) {
-    const previous = _selectedId ? _features.get(_selectedId) : null;
-    if (previous) applyStyle(previous.entity, previous.feature, false);
     const next = featureId ? _features.get(featureId) : null;
     _selectedId = next ? featureId : null;
+    renderSelection(next);
     if (next) {
-      applyStyle(next.entity, next.feature, true);
       if (typeof window !== 'undefined') {
         const mid = pipelineMidpoint(next.feature.geometry.coordinates);
         registerEntityContext(next.entity, {
@@ -252,16 +324,9 @@ export function createGasPipelinesLayer({
       if (_features.has(id)) { let k = 2; while (_features.has(`${id}#${k}`)) k += 1; id = `${id}#${k}`; }
       const feature = id === raw.id ? raw : { ...raw, id };
       const style = pipelineStyle(feature.properties);
-      const flat = [];
-      for (const [lon, lat] of feature.geometry.coordinates) flat.push(lon, lat);
       const entity = sourceFor(style.kind).entities.add({
         id: `${GAS_PIPELINES_LAYER_ID}:${id}`,
-        polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArray(flat),
-          width: style.width,
-          material: material(style),
-          clampToGround: true,
-        },
+        polyline: polylineFor(feature.geometry.coordinates, style),
         properties: { status: style.status, kind: style.kind, name: feature.properties?.name ?? null },
       });
       entity.__gasPipeline = id;
@@ -398,11 +463,16 @@ export function createGasPipelinesLayer({
 
     init(viewer) {
       _viewer = viewer;
+      _groundSupported = groundSupport(viewer?.scene);
+      if (!_groundSupported) console.warn('[Data:GasPipelines] GroundPolylinePrimitive unsupported — čiary 200 m nad elipsoidom');
       _sources = {
         gas: dataSourceFactory(GAS_PIPELINES_LAYER_ID),
         oil: dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-oil`),
       };
       eachSource((source) => { source.show = false; viewer?.dataSources?.add?.(source); });
+      _selection = dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-selected`);
+      _selection.show = false;
+      viewer?.dataSources?.add?.(_selection);
       _loaded = false;
       _loading = null;
     },
@@ -450,6 +520,8 @@ export function createGasPipelinesLayer({
       if (typeof window !== 'undefined') removeEntityContextsForLayer(GAS_PIPELINES_LAYER_ID);
       const host = viewer || _viewer;
       eachSource((source) => { if (host?.dataSources?.remove) host.dataSources.remove(source, true); });
+      if (_selection && host?.dataSources?.remove) host.dataSources.remove(_selection, true);
+      _selection = null;
       _sources = { gas: null, oil: null };
       _viewer = null;
       _features = new Map();
@@ -521,7 +593,8 @@ export function createGasPipelinesLayer({
         lastUpdate: _lastUpdate,
         loading: Boolean(_loading) && !_loaded,
         error: _error,
-        source: pipelineSourceLabel(combinedMeta(), translate, lang()),
+        // Núdzovka bez pozemných čiar sa hlási v zdroji (pravidlo 2).
+        source: pipelineSourceLabel(combinedMeta(), translate, lang()) + (_groundSupported ? '' : ` · ${translate('gas.pipeline-no-ground')}`),
         kinds: { ..._kinds },
         status: undefined,
       };
@@ -539,7 +612,8 @@ export function createGasPipelinesLayer({
         enabled: _enabled, loaded: _loaded, error: _error, count: _features.size, counts: { ..._counts }, lengthKm: _lengthKm, selected: _selectedId,
         entities: _sources.gas || _sources.oil ? entities : null, hasClick: Boolean(_clickHandler), meta: _meta,
         kinds: { ..._kinds }, oilMeta: _oilMeta, params: { ..._params },
-        sources: { gas: _sources.gas?.show ?? null, oil: _sources.oil?.show ?? null },
+        sources: { gas: _sources.gas?.show ?? null, oil: _sources.oil?.show ?? null, selected: _selection?.show ?? null },
+        selectionEntities: _selection?.entities?.values?.length ?? null, groundSupported: _groundSupported,
         hover: { installed: Boolean(_hoverListeners), timer: Boolean(_hoverTimer), flowsCached: Boolean(_flows) },
       };
     },
