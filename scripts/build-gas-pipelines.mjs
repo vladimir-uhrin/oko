@@ -42,6 +42,19 @@ const TILES = [
   [34, 84, 75, 116],
   [34, 116, 75, 148],
   [34, 148, 75, 180],
+  // Juh (2026-09-19, etapa 1): rovnik -> 34 s. s., rovnake poludnikove rezy ako sever.
+  // PRIPAJA SA NA KONIEC - suffix #N pri dlazdicovych duplikatoch sa prideluje
+  // v poradi TILES, takze predradenie by z existujucich id spravilo #2.
+  // Severna hranica je presne 34, nie 35: clipToBbox ma inkluzivne hranice, takze
+  // dotykajuce sa pasy zdielaju len hranicny bod; prekryv by tu istu zem nakreslil dvakrat.
+  // Rovnik, nie 12 s. s.: pas 0-12 stoji cez cele okno 53 ways (+8 %) a je jedina
+  // hranica, ktora pokryje ram sceny Malacca (spodok 1,0 s. s.).
+  [0, -12, 34, 20],
+  [0, 20, 34, 52],
+  [0, 52, 34, 84],
+  [0, 84, 34, 116],
+  [0, 116, 34, 148],
+  [0, 148, 34, 180],
 ];
 const USER_AGENT = 'OKO-gas-build/0.1 (https://github.com/vladouh76; vladouh76@gmail.com) one-off manual snapshot';
 /** Verzia dopytu v názve surovej cache — nová verzia = staré dlaždice sa nepoužijú. */
@@ -69,6 +82,17 @@ const TSO_RE = new RegExp([
   String.raw`\bbbl\b`, 'baltic pipe', String.raw`\btap\b`, 'trans adriatic', 'tanap', 'eugal', String.raw`\bopal\b`, String.raw`\bnel\b`, 'megal',
   String.raw`\bwag\b`, 'transitgas', 'swissgas', 'reganosa', 'ren gasodutos', 'geoplin', 'plinovodi', 'srbijagas', 'transportgas', 'gastrade', 'icgb',
   'omv gas', 'transmission', 'prenos', 'přeprav', 'preprav', 'transport gazu', 'gasleitung',
+  // -- Juh (2026-09-19, etapa 1) --------------------------------------------
+  // Kazda hodnota overena v taginfo na realnych hodnotach tagu `operator`; co sa
+  // nedalo pozorovat, tu nie je. \b len okolo kratkych latinkovych tokenov -
+  // bez nich by 'grtg' chytilo francuzsky GRTgaz, 'gail' Gailtalbahn a Gaildorf,
+  // 'moge' Limoges a 'kar group' Hawkar Group.
+  'sonatrach', 'سوناطراك', String.raw`\bgrtg\b`, 'dolphin energy', String.raw`\bkar group\b`, String.raw`\bnigc\b`,
+  String.raw`\bgail\b`, String.raw`\biocl\b`, 'indian oil', 'petronas gas', 'perta arun',
+  String.raw`\bmoge\b`, 'trans thai-malaysia', '国家管网',
+  // Iran: operator sa tam systematicky pouziva ako POPIS trasy, nie ako firma.
+  // Bez tychto dvoch nechytime napr. 505 km plynovod Mier (خط لوله گاز صلح).
+  'لوله گاز', 'انتقال گاز',
 ].join('|'), 'i');
 
 const round = (n) => Number(n.toFixed(ROUND));
