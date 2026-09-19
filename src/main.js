@@ -583,6 +583,18 @@ async function init() {
     // any scene, off outside one.
     const countryBoundaries = createCountryBoundaries({ viewer });
     window.__godsEyeView.countryBoundaries = countryBoundaries;
+    // Hranice s potrubiami (2026-09-19, používateľ: „hranice si vyhodil"):
+    // rúry sú cezhraničná infraštruktúra a bez hraníc nemá „kam tečie" na
+    // karte kontext. Vrstva si hranice drží, kým je zapnutá; scéna úžiny je
+    // druhý, nezávislý držiteľ — koniec scény hranice vrstve nezoberie.
+    const syncBoundariesWithPipelines = (enabled) => {
+      if (enabled) void countryBoundaries.retain('gas-pipelines');
+      else countryBoundaries.release('gas-pipelines');
+    };
+    dataManager.subscribe((change) => {
+      if (change?.type === 'visibility' && change.layerId === 'gas-pipelines') syncBoundariesWithPipelines(Boolean(change.enabled));
+    });
+    syncBoundariesWithPipelines(dataManager.isEnabled('gas-pipelines'));
     // Situation from open sources: the ZÁLIV panel in the DATA lane hosts the
     // merged bulletin (2026-09-18). It used to be a SECOND floating panel with
     // its own tab, anchored bottom-right at z120, which covered the whole

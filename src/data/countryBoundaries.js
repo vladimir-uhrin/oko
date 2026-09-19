@@ -61,7 +61,7 @@ export function parseBoundariesGeojsonl(text) {
 export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImpl } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   if (!viewer?.dataSources) {
-    return { show: async () => 0, hide: () => {}, destroy: () => {}, get count() { return 0; } };
+    return { show: async () => 0, hide: () => {}, retain: async () => 0, release: () => {}, destroy: () => {}, get count() { return 0; }, get holders() { return []; } };
   }
   const ds = new Cesium.CustomDataSource(COUNTRY_BOUNDARIES_ID);
   ds.show = false;
@@ -109,21 +109,40 @@ export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImp
     console.log(`[CountryBoundaries] Loaded ${features.length} border lines`);
   }
 
-  async function show() {
-    ds.show = true;
+  // Držitelia (2026-09-19): hranice si môže vyžiadať scéna úžiny AJ vrstva
+  // potrubí („hranice si vyhodil" — rúry sú cezhraničná infraštruktúra a bez
+  // hraníc „kam tečie" nemá kontext). Kreslia sa, kým ich drží aspoň jeden;
+  // uvoľnenie jedného držiteľa druhému hranice nezoberie.
+  const holders = new Set();
+  async function ensureLoaded() {
     if (!loaded && !loading) {
       loading = load().catch((err) => { console.error('[CountryBoundaries] load error:', err); }).finally(() => { loading = null; });
     }
     if (loading) await loading;
-    viewer.scene?.requestRender?.();
     return count;
   }
-  function hide() { ds.show = false; viewer.scene?.requestRender?.(); }
+  async function retain(owner = 'scene') {
+    holders.add(String(owner));
+    ds.show = true;
+    const n = await ensureLoaded();
+    viewer.scene?.requestRender?.();
+    return n;
+  }
+  function release(owner = 'scene') {
+    holders.delete(String(owner));
+    ds.show = holders.size > 0;
+    viewer.scene?.requestRender?.();
+  }
+  /** Scéna: zapni (držiteľ 'scene'). */
+  async function show() { return retain('scene'); }
+  /** Scéna: pusti — hranice ostanú, ak ich drží vrstva potrubí. */
+  function hide() { release('scene'); }
   function destroy() {
     try { viewer.dataSources.remove(ds, true); } catch { /* */ }
+    holders.clear();
     loaded = false;
     loading = null;
   }
 
-  return { show, hide, destroy, get count() { return count; } };
+  return { show, hide, retain, release, destroy, get count() { return count; }, get holders() { return [...holders]; } };
 }

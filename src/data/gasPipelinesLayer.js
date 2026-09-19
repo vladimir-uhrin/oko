@@ -370,7 +370,8 @@ export function createGasPipelinesLayer({
   function installHover() {
     const canvas = _viewer?.scene?.canvas;
     if (_hoverListeners || !canvas?.addEventListener) return;
-    _hover = _hover || hoverFactory({ translate, lang });
+    // Dátum snímku do päty karty (pravidlo 2: statický snímok sa hlási dátumom).
+    _hover = _hover || hoverFactory({ translate, lang, snapshotDate: () => combinedMeta()?.snapshot ?? null });
     _hoverListeners = { pointermove: moveHover, pointerleave: leaveHover, pointerdown: clearHover };
     for (const [type, fn] of Object.entries(_hoverListeners)) canvas.addEventListener(type, fn);
     _removeCameraHover = _viewer?.camera?.moveStart?.addEventListener?.(clearHover) || null;

@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GAS_PIPELINES_API, GAS_PIPELINES_META_API, GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS,
-  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineKind, pipelineMidpoint, pipelineRoute, pipelineSourceLabel,
-  pipelineStatus, pipelineStyle, pipelineTitle,
+  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineDisplayName, pipelineKind, pipelineLocationText, pipelineMidpoint,
+  pipelineOperator, pipelineRoute, pipelineSourceLabel, pipelineStatus, pipelineStyle, pipelineTitle,
 } from './gasPipelines.js';
 
 const tKey = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
@@ -94,6 +94,7 @@ test('pipelineRoute a riadky karty s trasou, kapacitou a tlakom z OSM (etapa 3)'
   assert.equal(pipelineRoute({ from: 'Lubmin', to: 'Rehden' }), 'Lubmin → Rehden');
   assert.equal(pipelineRoute({ from: 'Yamal' }), 'Yamal → ?', 'polovičná trasa nesmie vyzerať ako celá');
   assert.equal(pipelineRoute({ to: ' Rehden ' }), '? → Rehden');
+  assert.equal(pipelineRoute({ from: 'Уренгойское месторождение', to: 'Ужгород' }), 'Urengoyskoe mestorozhdenie → Uzhgorod', 'konce trasy v latinke (3b)');
   // Trasa je v detailoch hneď za prevádzkovateľom.
   assert.deepEqual(pipelineDetails({ operator: 'GASCADE', from: 'Lubmin', to: 'Olbernhau', osm: 5 }, tKey), [
     'gas.pipeline-kind-gas', 'GASCADE', 'gas.pipeline-route: Lubmin → Olbernhau', 'gas.pipeline-status-operating', 'OSM way 5',
@@ -113,6 +114,27 @@ test('pipelineRoute a riadky karty s trasou, kapacitou a tlakom z OSM (etapa 3)'
   assert.deepEqual(pipelineDetailsRows({ pressure: '95' }, tKey)[0], ['gas.pipeline-pressure', '95 bar']);
   assert.deepEqual(pipelineDetailsRows({ pressure: '7.5' }, tKey)[0], ['gas.pipeline-pressure', '7.5 bar']);
   assert.deepEqual(pipelineDetailsRows({ pressure: '100 psi' }, tKey)[0], ['gas.pipeline-pressure', '100 psi']);
+});
+
+test('etapa 3b — mená v latinke, prevádzkovateľ, krajiny a uloženie', () => {
+  assert.deepEqual(pipelineDisplayName({ name: 'Уренгой — Помары — Ужгород' }), { text: 'Urengoy — Pomary — Uzhgorod', original: 'Уренгой — Помары — Ужгород' });
+  assert.deepEqual(pipelineDisplayName({ name: 'Уренгой — Помари — Ужгород', nameLang: 'uk' }), { text: 'Urenhoy — Pomary — Uzhhorod', original: 'Уренгой — Помари — Ужгород' }, 'jazyk zo snímku');
+  assert.deepEqual(pipelineDisplayName({ name: 'Сила Сибири', nameEn: 'Power of Siberia' }), { text: 'Power of Siberia', original: 'Сила Сибири' }, 'name:en má prednosť pred prepisom');
+  assert.deepEqual(pipelineDisplayName({ name: 'Družba', nameSk: 'Družba' }), { text: 'Družba', original: null }, 'rovnaké meno nie je originál');
+  assert.deepEqual(pipelineDisplayName({ name: '西气东输' }), { text: '西气东输', original: null }, 'čínština bez name:en ostáva');
+  assert.deepEqual(pipelineDisplayName({ ref: 'DN300' }), { text: 'DN300', original: null });
+  assert.equal(pipelineTitle({ name: 'Дружба' }, tKey), 'Druzhba');
+  assert.deepEqual(pipelineOperator({ operator: 'ООО «Газпром трансгаз Югорск»' }), { text: 'OOO «Gazprom transgaz Yugorsk»', original: 'ООО «Газпром трансгаз Югорск»' });
+  assert.deepEqual(pipelineOperator({}), { text: '', original: null });
+  assert.equal(pipelineLocationText({ location: 'underground' }, tKey), 'gas.pipeline-location-underground');
+  assert.equal(pipelineLocationText({ location: 'in a tunnel' }, tKey), 'in a tunnel', 'neznáma hodnota doslovne');
+  assert.equal(pipelineLocationText({}, tKey), '');
+  // Klik-karta: krajiny menami v jazyku UI, prevádzkovateľ v latinke, uloženie.
+  assert.deepEqual(pipelineDetails({ operator: 'Транснефть', countries: ['RU', 'BY'], location: 'underground', osm: 3 }, tKey, 'sk', { regionName: (iso) => ({ RU: 'Rusko', BY: 'Bielorusko' })[iso] }), [
+    'gas.pipeline-kind-gas', 'Transneft', 'gas.pipeline-countries: Rusko · Bielorusko', 'gas.pipeline-location: gas.pipeline-location-underground', 'gas.pipeline-status-operating', 'OSM way 3',
+  ]);
+  assert.deepEqual(pipelineDetails({ countries: ['XX'] }, tKey), ['gas.pipeline-kind-gas', 'gas.pipeline-countries: XX', 'gas.pipeline-status-operating'], 'bez prekladu ostane kód');
+  assert.deepEqual(pipelineDetailsRows({ operator: 'Транснефть', location: 'overhead' }, tKey), [['gas.pipeline-operator', 'Transneft'], ['gas.pipeline-location', 'gas.pipeline-location-overhead'], ['gas.pipeline-status-label', 'gas.pipeline-status-operating']]);
 });
 
 test('pipelineMidpoint a pipelineSourceLabel', () => {

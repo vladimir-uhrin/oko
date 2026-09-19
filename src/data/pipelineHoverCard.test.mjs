@@ -49,12 +49,24 @@ test('pipelineHoverModel: látka, meno, riadky z OSM, odkaz na way, body ENTSOG 
   assert.equal(m.title, 'Nord Stream 1');
   assert.equal(m.osmUrl, 'https://www.openstreetmap.org/way/1');
   assert.deepEqual(m.flowIds, ['greifswald-opal', 'greifswald-nel']);
-  assert.deepEqual(m.rows.map(([k]) => k), ['gas.pipeline-operator', 'gas.pipeline-diameter-label', 'gas.pipeline-segment', 'gas.pipeline-route', 'gas.pipeline-pressure', 'gas.pipeline-status-label']);
-  assert.deepEqual(m.rows[3], ['gas.pipeline-route', 'Vyborg → Lubmin']);
+  // Prevádzkovateľ je v karte zvlášť (s originálom), v riadkoch nie je.
+  assert.deepEqual(m.rows.map(([k]) => k), ['gas.pipeline-diameter-label', 'gas.pipeline-segment', 'gas.pipeline-route', 'gas.pipeline-pressure', 'gas.pipeline-status-label']);
+  assert.deepEqual(m.rows[2], ['gas.pipeline-route', 'Vyborg → Lubmin']);
+  assert.deepEqual(m.operator, { text: 'Nord Stream AG', original: null });
+  assert.equal(m.original, null);
+  assert.deepEqual(m.countries, []);
   const o = pipelineHoverModel(DRUZBA, { translate: tKey });
   assert.equal(o.kind, 'oil');
   assert.equal(o.title, 'Družba');
   assert.deepEqual(o.flowIds, [], 'ropa nikdy nedostane bod ENTSOG');
+  // Cyrilika: titulok v latinke, originál zvlášť; krajiny zo snímku; uloženie z OSM.
+  const c = pipelineHoverModel({ id: 'osm-way-9', properties: { name: 'Уренгой — Помары — Ужгород', operator: 'ООО «Газпром трансгаз Югорск»', countries: ['RU', 'UA'], location: 'underground', substance: 'gas', osm: 9 } }, { translate: tKey });
+  assert.equal(c.title, 'Urengoy — Pomary — Uzhgorod');
+  assert.equal(c.original, 'Уренгой — Помары — Ужгород');
+  assert.deepEqual(c.operator, { text: 'OOO «Gazprom transgaz Yugorsk»', original: 'ООО «Газпром трансгаз Югорск»' });
+  assert.deepEqual(c.countries, ['RU', 'UA']);
+  assert.deepEqual(c.rows, [['gas.pipeline-location', 'gas.pipeline-location-underground'], ['gas.pipeline-status-label', 'gas.pipeline-status-operating']]);
+  assert.deepEqual(c.flowIds, ['sudzha', 'kapusany-in']);
   const s = pipelineHoverModel(STUB, { translate: tKey });
   assert.equal(s.title, 'gas.pipeline-unnamed');
   assert.deepEqual(s.flowIds, []);
@@ -64,9 +76,17 @@ test('pipelineHoverModel: látka, meno, riadky z OSM, odkaz na way, body ENTSOG 
 
 test('DOM karta: plyn s tokom → „načítavam" a potom riadky s citáciou ENTSOG; plyn bez bodu a ropa dostanú vysvetlenie namiesto čísla', () => {
   const doc = fakeDocument();
-  const card = createPipelineHoverCard({ document: doc, translate: tKey, lang: () => 'sk' });
+  const card = createPipelineHoverCard({ document: doc, translate: tKey, lang: () => 'sk', regionName: (iso) => ({ AL: 'Albánsko', GR: 'Grécko' })[iso] || '', snapshotDate: () => '2026-09-19T03:07:39Z' });
   const root = doc.body.children[0];
   assert.equal(root.className, 'pipeline-hover-card');
+  // Krajiny s vlajkami a menami v jazyku UI; dátum snímku v päte (pravidlo 2).
+  card.show({ id: 'osm-way-5', properties: { name: 'Trans Adriatic Pipeline', countries: ['AL', 'GR'], substance: 'gas', osm: 5 } }, { x: 1, y: 1 });
+  const countries = byClass(root, 'pipeline-hover-countries')[0];
+  assert.match(text(countries), /Albánsko/);
+  assert.match(text(countries), /Grécko/);
+  assert.deepEqual(byClass(countries, 'pipeline-hover-flag').map((f) => f.alt), ['AL', 'GR']);
+  assert.match(text(byClass(root, 'pipeline-hover-foot')[0]), /gas\.pipeline-snapshot \{"date":"2026-09-19"\}/);
+  card.hide();
   assert.equal(root.hidden, true);
   // NS1: čaká na dva body
   assert.deepEqual(card.show(NS1, { x: 100, y: 50 }), ['greifswald-opal', 'greifswald-nel']);
@@ -90,7 +110,10 @@ test('DOM karta: plyn s tokom → „načítavam" a potom riadky s citáciou ENT
   assert.equal(card.setFlows(NS1, payload), true);
   const flow = byClass(root, 'pipeline-hover-flow')[0];
   assert.doesNotMatch(text(flow), /gas\.pipeline-flow-loading/);
-  assert.match(text(flow), /Greifswald \/ OPAL · RU → DE/);
+  assert.match(text(flow), /RU → \s*DE · Greifswald \/ OPAL/, 'vlajky + kódy + meno bodu');
+  const flags = byClass(flow, 'pipeline-hover-flag');
+  assert.deepEqual(flags.map((f) => f.alt), ['RU', 'DE', 'RU', 'DE'], 'vlajka pre from aj to pri oboch bodoch');
+  assert.match(flags[0].src, /\/ru\.svg$/);
   assert.match(text(flow), /0\sGWh\/d/, 'medzera pred jednotkou je U+202F');
   assert.match(text(flow), /gas\.flow-provisional/);
   assert.match(text(flow), /gas\.note-nordstream/);

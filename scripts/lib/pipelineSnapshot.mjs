@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { diameterMm } from './pipelineTags.mjs';
+import { countriesForCoords } from './pipelineCountries.mjs';
 
 function pointSegDist(p, a, b) {
   const dx = b[0] - a[0];
@@ -117,6 +118,7 @@ export async function buildPipelineSnapshot({
   label, tiles, queryVersion, cacheDir, rawDir, outFile, metaFile,
   buildQuery, classify, queryDescription, overpassUrl, userAgent, refresh,
   simplifyEpsDeg = 0.002, roundDigits = 3, pauseMs = 20_000,
+  countryIndex = null,
 }) {
   const round = (n) => Number(n.toFixed(roundDigits));
 
@@ -125,9 +127,15 @@ export async function buildPipelineSnapshot({
     // pre členské úseky, ktoré ich nemajú; tagy úseku majú prednosť.
     const tags = { ...(relTags || {}), ...(el.tags || {}) };
     const coords = (el.geometry || []).map((pt) => [round(pt.lon), round(pt.lat)]);
+    // Jazyk mena pre prepis cyriliky (etapa 3b): OSM ho nesie nepriamo —
+    // keď `name:uk` (alebo :ru/:be/:kk) je doslovne rovné `name`.
+    const nameLang = ['uk', 'ru', 'be', 'kk'].find((l) => tags[`name:${l}`] && tags[`name:${l}`] === tags.name) || null;
     const properties = {
       name: tags.name || tags['name:en'] || tags.ref || null,
       nameEn: tags['name:en'] || null,
+      nameSk: tags['name:sk'] || null,
+      intName: tags.int_name || null,
+      nameLang,
       operator: tags.operator || null,
       ref: tags.ref || null,
       diameterMm: diameterMm(tags),
@@ -150,7 +158,13 @@ export async function buildPipelineSnapshot({
       .map((part, index, parts) => ({
         type: 'Feature',
         id: parts.length === 1 ? `osm-way-${el.id}` : `osm-way-${el.id}.${index}`,
-        properties: { ...properties, lengthKm: Math.round(lengthKm(part) * 10) / 10 },
+        properties: {
+          ...properties,
+          lengthKm: Math.round(lengthKm(part) * 10) / 10,
+          // Krajiny úseku (etapa 3b) — vlajky v karte. Dopočítané tu, v builde,
+          // bodom v polygóne Natural Earth; do prehliadača idú len ISO2 kódy.
+          countries: countryIndex ? countriesForCoords(countryIndex, part) : [],
+        },
         geometry: { type: 'LineString', coordinates: part },
       }));
   }
@@ -238,7 +252,9 @@ export async function buildPipelineSnapshot({
   const points = features.reduce((n, f) => n + f.geometry.coordinates.length, 0);
   const km = Math.round(features.reduce((n, f) => n + f.properties.lengthKm, 0));
   const named = features.filter((f) => f.properties.name).length;
+  const withCountries = features.filter((f) => f.properties.countries?.length).length;
   const meta = {
+    countries: countryIndex ? { source: 'Natural Earth 1:50m admin-0 countries (public domain)', featuresWithCountry: withCountries } : null,
     snapshot: new Date().toISOString(),
     source: 'OpenStreetMap via Overpass API',
     license: 'ODbL 1.0 — © OpenStreetMap contributors',

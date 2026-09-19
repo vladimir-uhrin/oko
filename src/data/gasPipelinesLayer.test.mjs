@@ -462,6 +462,11 @@ test('tripwires: registrácia v main.js, proxy trasy (meta pred súborom, gzip, 
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
   assert.match(main, /import gasPipelinesLayer from '\.\/data\/gasPipelinesLayer\.js'/);
   assert.match(main, /dataManager\.register\(gasPipelinesLayer\)/);
+  // Hranice s potrubiami (2026-09-19): vrstva ich drží cez retain/release,
+  // scéna úžiny je druhý držiteľ; bez tohto by mimo scény žiadne hranice neboli.
+  assert.match(main, /countryBoundaries\.retain\('gas-pipelines'\)/);
+  assert.match(main, /countryBoundaries\.release\('gas-pipelines'\)/);
+  assert.match(main, /change\.layerId === 'gas-pipelines'/);
   const vite = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
   const metaAt = vite.indexOf("middlewares.use('/api/gas/pipelines/meta'");
   const fileAt = vite.indexOf("middlewares.use('/api/gas/pipelines',");

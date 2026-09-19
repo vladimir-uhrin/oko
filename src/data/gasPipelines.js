@@ -9,6 +9,8 @@
  * Licencia dát: ODbL 1.0, © OpenStreetMap contributors. Modul je čistý
  * (bez Cesia, i18n a DOM) — testuje sa v Node.
  */
+import { latinizeForDisplay } from './latinize.js';
+
 export const GAS_PIPELINES_API = '/api/gas/pipelines';
 export const GAS_PIPELINES_META_API = '/api/gas/pipelines/meta';
 export const GAS_PIPELINE_ATTRIBUTION = '© OpenStreetMap contributors · ODbL';
@@ -109,10 +111,41 @@ export function pipelineStyle(properties = {}) {
   };
 }
 
-/** Meno pre kartu: name → name:en → ref → „plynovod (bez mena)“. */
+/**
+ * Zobrazované meno (etapa 3b, používateľ: „niektoré názvy sú v azbuke"):
+ * name:sk → name:en → int_name → prepis cyriliky → name → ref. `original`
+ * nesie pôvodný zápis, keď sa od zobrazeného líši (karta ho ukáže pod menom
+ * — s mapou a OSM sa porovnáva originál, nie náš prepis). Arabské, perzské
+ * a čínske mená sa neprepisujú: bez `name:en` ostáva originál.
+ * @param {object} properties
+ * @returns {{text: string, original: string|null}}
+ */
+export function pipelineDisplayName(properties = {}) {
+  const pick = (v) => String(v || '').trim();
+  const name = pick(properties?.name);
+  for (const alt of [pick(properties?.nameSk), pick(properties?.nameEn), pick(properties?.intName)]) {
+    if (alt) return { text: alt, original: name && name !== alt ? name : null };
+  }
+  if (name) return latinizeForDisplay(name, { lang: properties?.nameLang || null });
+  return { text: pick(properties?.ref), original: null };
+}
+
+/** Prevádzkovateľ v latinke (+ originál, keď bol v cyrilike). */
+export function pipelineOperator(properties = {}) {
+  return latinizeForDisplay(properties?.operator, { lang: properties?.nameLang || null });
+}
+
+/** OSM `location` potrubia → i18n kľúč; neznáma hodnota ostáva doslovne. */
+const LOCATION_VALUES = new Set(['underground', 'overground', 'surface', 'overhead', 'underwater']);
+export function pipelineLocationText(properties = {}, translate = (k) => k) {
+  const raw = String(properties?.location || '').trim().toLowerCase();
+  if (!raw) return '';
+  return LOCATION_VALUES.has(raw) ? translate(`gas.pipeline-location-${raw}`) : raw;
+}
+
+/** Meno pre kartu: name:sk → name:en → int_name → prepis → name → ref → „plynovod (bez mena)“. */
 export function pipelineTitle(properties = {}, translate = (k) => k) {
-  const name = String(properties?.name || properties?.nameEn || properties?.ref || '').trim();
-  return name || translate(pipelineKind(properties) === 'oil' ? 'gas.pipeline-unnamed-oil' : 'gas.pipeline-unnamed');
+  return pipelineDisplayName(properties).text || translate(pipelineKind(properties) === 'oil' ? 'gas.pipeline-unnamed-oil' : 'gas.pipeline-unnamed');
 }
 
 const locale = (lang) => (lang === 'sk' ? 'sk-SK' : 'en-GB');
@@ -125,8 +158,10 @@ const locale = (lang) => (lang === 'sk' ? 'sk-SK' : 'en-GB');
  * @returns {string|null}
  */
 export function pipelineRoute(properties = {}) {
-  const from = String(properties?.from || '').trim();
-  const to = String(properties?.to || '').trim();
+  // Konce trasy sú miesta z OSM — v cyrilike sa prepíšu ako meno (3b).
+  const lang = properties?.nameLang || null;
+  const from = latinizeForDisplay(properties?.from, { lang }).text;
+  const to = latinizeForDisplay(properties?.to, { lang }).text;
   if (!from && !to) return null;
   return `${from || '?'} → ${to || '?'}`;
 }
@@ -138,7 +173,7 @@ export function pipelineRoute(properties = {}) {
  * @param {string} [lang]
  * @returns {string[]}
  */
-export function pipelineDetails(properties = {}, translate = (k) => k, lang = 'sk') {
+export function pipelineDetails(properties = {}, translate = (k) => k, lang = 'sk', { regionName = (iso) => iso } = {}) {
   const lines = [];
   // Látka ako PRVÝ riadok, a schválne pri OBOCH vrstvách. Bez nej dá pomenovaný
   // ropovod a pomenovaný plynovod textovo nerozlíšiteľnú kartu a jediným
@@ -149,10 +184,15 @@ export function pipelineDetails(properties = {}, translate = (k) => k, lang = 's
   // Surový dôkaz z OSM: prečo je úsek zaradený ako ropa, a zároveň vidno, že
   // substance=fuel (rafinované produkty) sme z ropnej vrstvy vylúčili.
   if (properties?.substance) lines.push('substance=' + properties.substance + ' (OSM)');
-  if (properties?.operator) lines.push(String(properties.operator));
+  if (properties?.operator) lines.push(pipelineOperator(properties).text);
+  // Krajiny úseku (etapa 3b, dopočítané v builde z Natural Earth) — v poradí pozdĺž úseku.
+  const countries = Array.isArray(properties?.countries) ? properties.countries.filter(Boolean) : [];
+  if (countries.length) lines.push(translate('gas.pipeline-countries') + ': ' + countries.map((iso) => regionName(iso) || iso).join(' · '));
   // „Kam tečie" (etapa 3): `from`/`to` z relácie route=pipeline, keď ich OSM má.
   const route = pipelineRoute(properties);
   if (route) lines.push(translate('gas.pipeline-route') + ': ' + route);
+  const location = pipelineLocationText(properties, translate);
+  if (location) lines.push(translate('gas.pipeline-location') + ': ' + location);
   const d = Number(properties?.diameterMm);
   const km = Number(properties?.lengthKm);
   const dims = [];
@@ -175,7 +215,7 @@ export function pipelineDetails(properties = {}, translate = (k) => k, lang = 's
  */
 export function pipelineDetailsRows(properties = {}, translate = (k) => k, lang = 'sk') {
   const rows = [];
-  if (properties?.operator) rows.push([translate('gas.pipeline-operator'), String(properties.operator)]);
+  if (properties?.operator) rows.push([translate('gas.pipeline-operator'), pipelineOperator(properties).text]);
   const d = Number(properties?.diameterMm);
   if (Number.isFinite(d) && d > 0) rows.push([translate('gas.pipeline-diameter-label'), translate('gas.pipeline-diameter', { mm: new Intl.NumberFormat(locale(lang)).format(Math.round(d)) })]);
   const km = Number(properties?.lengthKm);
@@ -189,6 +229,8 @@ export function pipelineDetailsRows(properties = {}, translate = (k) => k, lang 
     const raw = String(properties.pressure).trim();
     rows.push([translate('gas.pipeline-pressure'), /^\d+([.,]\d+)?$/.test(raw) ? `${raw} bar` : raw]);
   }
+  const location = pipelineLocationText(properties, translate);
+  if (location) rows.push([translate('gas.pipeline-location'), location]);
   rows.push([translate('gas.pipeline-status-label'), translate(`gas.pipeline-status-${pipelineStatus(properties)}`)]);
   return rows;
 }

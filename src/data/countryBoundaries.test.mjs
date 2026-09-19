@@ -39,6 +39,29 @@ test('overlay: lazy-loads once on show, hides without reload, safe without a vie
   assert.equal(await noop.show(), 0, 'no viewer → safe no-op');
 });
 
+test('držitelia (2026-09-19): scéna aj vrstva potrubí; hranice ostanú, kým ich drží aspoň jeden', async () => {
+  const added = [];
+  const viewer = { dataSources: { add: (ds) => added.push(ds), remove: () => true }, scene: { requestRender() {} } };
+  const geojsonl = JSON.stringify({ type: 'Feature', id: 1, geometry: { type: 'LineString', coordinates: [[17, 48], [18, 48.5]] } });
+  const fetch = async () => ({ ok: true, text: async () => geojsonl });
+  const layer = createCountryBoundaries({ viewer, fetch });
+  assert.equal(await layer.retain('gas-pipelines'), 1, 'vrstva potrubí si vyžiada hranice');
+  assert.equal(added[0].show, true);
+  assert.deepEqual(layer.holders, ['gas-pipelines']);
+  await layer.show(); // scéna úžiny
+  assert.deepEqual(layer.holders, ['gas-pipelines', 'scene']);
+  layer.hide(); // scéna skončila — potrubia hranice stále držia
+  assert.equal(added[0].show, true, 'uvoľnenie scény nezoberie hranice vrstve potrubí');
+  layer.release('gas-pipelines');
+  assert.equal(added[0].show, false, 'posledný držiteľ preč = hranice preč');
+  assert.deepEqual(layer.holders, []);
+  layer.release('gas-pipelines');
+  assert.equal(added[0].show, false, 'opakované uvoľnenie je neškodné');
+  const noop = createCountryBoundaries({});
+  assert.equal(await noop.retain('x'), 0);
+  assert.deepEqual(noop.holders, []);
+});
+
 test('the bundled boundaries dataset exists and parses to real border lines', () => {
   const text = readFileSync(new URL('./local_data/boundaries/boundaries.geojsonl', import.meta.url), 'utf8');
   const feats = parseBoundariesGeojsonl(text);

@@ -120,6 +120,12 @@ export function pipelineFlowRows(payload, ids, { lang = 'sk', translate = (k) =>
       mcmText: mcm !== null ? translate('gas.flow-mcm', { v: new Intl.NumberFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { maximumFractionDigits: mcm >= 10 ? 0 : 1 }).format(mcm) }) : '',
       dateText: latest?.date ? formatDateLabel(latest.date, lang, { year: false }) : '',
       statusText: latest?.status ? translate(/^prov/i.test(latest.status) ? 'gas.flow-provisional' : 'gas.flow-confirmed') : '',
+      avg7Text: Number.isFinite(p.avg7) && p.avg7 >= 0.05 ? translate('gas.flow-avg7', { v: formatGwhDay(p.avg7, lang) }) : '',
+      // Posledných 14 plynárenských dní na sparkline karty (ako karta TOKY).
+      spark: (p.series || []).slice(-14).map((r) => (Number.isFinite(r?.gwh) ? r.gwh : null)),
+      // Vlajky: `from`/`to` sú ISO2 štátov; „zásobník" a podobné nie sú štát.
+      fromIso: /^[A-Z]{2}$/.test(String(p.from || '')) ? p.from : null,
+      toIso: /^[A-Z]{2}$/.test(String(p.to || '')) ? p.to : null,
       note: p.noteKey ? translate(p.noteKey) : '',
     });
   }

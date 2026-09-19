@@ -49,6 +49,7 @@
 import path from 'node:path';
 
 import { buildPipelineSnapshot } from './lib/pipelineSnapshot.mjs';
+import { loadCountryIndex } from './lib/pipelineCountries.mjs';
 import { makeClassifier } from './lib/pipelineTags.mjs';
 
 const OVERPASS_URL = process.env.OVERPASS_URL || 'https://maps.mail.ru/osm/tools/overpass/api/interpreter';
@@ -127,7 +128,11 @@ way(r.r)->.m;
 out tags geom;
 .r out body;`;
 
+// Krajiny úseku (vlajky v karte) z Natural Earth — len v builde, do snímku idú ISO2 kódy.
+const countryIndex = await loadCountryIndex({ cacheDir: path.join(process.cwd(), '.gev-cache', 'natural-earth') });
+
 await buildPipelineSnapshot({
+  countryIndex,
   label: 'oil',
   tiles: TILES,
   queryVersion: QUERY_VERSION,
