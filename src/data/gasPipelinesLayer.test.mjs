@@ -254,6 +254,17 @@ test('register, token a kredit: gas-pipelines má token 0, i18n mená a texty SK
   assert.match(credit.html, /OpenStreetMap contributors/);
   assert.match(credit.html, /odbl/i);
   assert.match(credit.html, /snapshot|static/i, 'statický snímok, nie živé');
+  for (const key of ['gas.pipeline-unnamed-oil', 'gas.pipeline-kind-gas', 'gas.pipeline-kind-oil']) {
+    assert.ok(EN_STRINGS[key] && SK_STRINGS[key], key);
+  }
+  // Ropa má VLASTNÝ kredit, nie dodatok k plynovému: sú to dve databázy vedľa
+  // seba (Collective Database podľa ODbL §4.5(a)), každá s vlastnou atribúciou.
+  const oilCredit = DATA_CREDITS.find((c) => c.key === 'oil-pipelines');
+  assert.ok(oilCredit);
+  assert.match(oilCredit.html, /OpenStreetMap contributors/);
+  assert.match(oilCredit.html, /odbl/i);
+  assert.match(oilCredit.html, /snapshot|static/i, 'statický snímok, nie živé');
+  assert.notEqual(oilCredit.html, credit.html);
 });
 
 test('tripwires: registrácia v main.js, proxy trasy (meta pred súborom, gzip, 404 no_snapshot), skript buildu bez kľúča', () => {
@@ -279,6 +290,13 @@ test('tripwires: registrácia v main.js, proxy trasy (meta pred súborom, gzip, 
   assert.match(oilScript, /overpass/i);
   assert.ok(!/process.env.[A-Z_]*KEY/.test(oilScript), 'OSM/Overpass nepotrebuje kľúč');
   assert.match(oilScript, /ODbL/, 'licencia v meta snímku');
+  // Hlas: „ropovody" musia mieriť na TÚ ISTÚ vrstvu. Schéma nástrojov vo
+  // vite.config.js je pinovaná na bajt (firstRunExperience.test.mjs), takže
+  // nový enum by ju rozbil — a netreba ho, id vrstvy sa nemení.
+  const voice = readFileSync(new URL('../voice/gevActions.js', import.meta.url), 'utf8');
+  for (const alias of ['ropovody', 'ropovod', 'oil pipelines']) {
+    assert.ok(voice.includes("['" + alias + "', 'gas-pipelines']"), alias);
+  }
   const script = readFileSync(new URL('../../scripts/build-gas-pipelines.mjs', import.meta.url), 'utf8');
   assert.match(script, /overpass/i);
   assert.ok(!/process\.env\.[A-Z_]*KEY/.test(script), 'OSM/Overpass nepotrebuje kľúč');

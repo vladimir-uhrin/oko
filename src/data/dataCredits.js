@@ -327,6 +327,18 @@ export const DATA_CREDITS = [
       'operator, diameter and status as mapped — completeness varies by country)',
   },
   {
+    // Vlastný záznam, nie dodatok k plynovému: ropný snímok je samostatná
+    // databáza (vlastný dotaz, vlastný súbor, vlastná trasa). Podľa ODbL sú
+    // dve databázy vedľa seba Collective Database vyňatá §4.5(a) — zlúčené by
+    // boli Derivative Database s ťažšími povinnosťami.
+    key: 'oil-pipelines',
+    html:
+      'Crude oil trunk pipelines, worldwide (static snapshot built from OpenStreetMap; snapshot date shown on the card — not live): ' +
+      '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> ' +
+      '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a>, via the Overpass API; ' +
+      'refined-product and gathering lines excluded — completeness varies by country)',
+  },
+  {
     key: 'oil-prices',
     html:
       'Crude oil, natural gas, gasoline &amp; diesel prices (front-month ≈ spot) and EUR/USD: ' +

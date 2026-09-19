@@ -191,6 +191,13 @@ const LAYER_ALIASES = new Map([
   ['pipelines', 'gas-pipelines'],
   ['gas pipelines', 'gas-pipelines'],
   ['plynovody', 'gas-pipelines'],
+  // Ropovody (2026-09-19, etapa 2) kreslí TÁ ISTÁ vrstva — schéma nástrojov je
+  // pinovaná na bajt, takže nový enum by ju rozbil, a nie je načo: id vrstvy sa
+  // nemení. Kým etapa 3 nepridá čipy PLYN/ROPA, „ropovody" zapnú obe látky.
+  ['ropovody', 'gas-pipelines'],
+  ['ropovod', 'gas-pipelines'],
+  ['oil pipelines', 'gas-pipelines'],
+  ['crude oil pipelines', 'gas-pipelines'],
   ['gas flows', 'gas-flows'],
   ['gas stations', 'gas-flows'],
   ['toky plynu', 'gas-flows'],
