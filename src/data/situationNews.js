@@ -17,6 +17,8 @@
  * dopyt) a ďalších zdrojov (RSS, UKMTO) do proxy.
  */
 
+import { filterSanctionedNews } from './sanctionedMedia.js';
+
 export const SITUATION_NEWS_API = '/api/situation-news';
 
 /**
@@ -56,7 +58,54 @@ export const SITUATION_REGIONS = Object.freeze({
     ]),
     match: 'hormuz|persian gulf|arabian gulf|gulf of oman|red sea|bab[- ]?el[- ]?mandeb|gulf of aden|houthi|\\byemen\\b|hodeidah|hudaydah|sana|\\baden\\b|mokha|djibouti|suez|port said|ismailia|bandar abbas|fujairah|kharg|bushehr|\\bgaza\\b|ashkelon|tel aviv|\\beilat\\b|haifa|jerusalem|beirut|damascus|\\btehran\\b|isfahan|natanz|baghdad|\\biran\\b|\\bisrael\\b|hezbollah|\\btanker|\\bwarship',
   }),
+  // UKRAJINA (2026-09-19, etapa 2; plán docs/drafts/ukrajina-plan.md kap. 2.3):
+  // front a údery, len ANGLICKÉ zdroje (preklad cez /api/translate ide EN→SK).
+  // Priame RSS nesú pravidlá po zdrojoch (normalizeDirectFeed): obrázok len tam,
+  // kde to podmienky dovoľujú (BBC, Kyiv Independent); Ukrajinska Pravda bez
+  // položiek Interfax-Ukraine (zákaz šírenia) a bez obrázkov (Getty); RFE/RL bez
+  // obrázkov (fotoklauzula); Al Jazeera bez og:image (T&C zakazujú scraping);
+  // štátne agentúry so štítkom „oficiálne UA". Blocklist médií prílohy XV
+  // (sanctionedMedia.js) platí na serveri aj na klientovi. TASS zámerne NIE JE
+  // (otázka č. 4 plánu); ruské médiá prílohy XV nikdy. ISW denné hodnotenie ide
+  // ako jedna pripnutá položka s odkazom von (proxy, `isw: true`).
+  ukraine: Object.freeze({
+    id: 'ukraine',
+    query: '(Ukraine OR Ukrainian OR Kharkiv OR Donetsk OR Zaporizhzhia OR Kherson OR Kyiv OR Sumy) (strike OR shelling OR drone OR missile OR offensive OR frontline OR captured OR advance OR attack) sourcelang:english',
+    rssQuery: 'Ukraine war front strike drone',
+    timespan: '2d',
+    // `limit` = najviac položiek z jedného zdroja (2026-09-19 naživo: Ukrinform
+    // a Ukrajinska Pravda dávajú desiatky správ denne a vytlačili BBC, RFE/RL
+    // aj DW z prvej štyridsiatky úplne); Google News tiež so stropom.
+    directRss: Object.freeze([
+      Object.freeze({ url: 'https://feeds.bbci.co.uk/news/topics/c1vw6q14rzqt/rss.xml', label: 'BBC News', unfurl: true, limit: 8 }),
+      Object.freeze({ url: 'https://kyivindependent.com/news-archive/rss/', label: 'The Kyiv Independent', unfurl: true, limit: 8 }),
+      Object.freeze({ url: 'https://www.pravda.com.ua/eng/rss/view_news/', label: 'Ukrainska Pravda', unfurl: false, drop: 'interfax[- ]ukraine', limit: 8 }),
+      Object.freeze({ url: 'https://www.ukrinform.net/rss/rubric-ato', label: 'Ukrinform', unfurl: false, badge: 'official-ua', limit: 8 }),
+      Object.freeze({ url: 'https://armyinform.com.ua/en/feed/', label: 'ArmyInform', unfurl: false, badge: 'official-ua', limit: 4 }),
+      Object.freeze({ url: 'https://www.rferl.org/api/zviipl-vomx-tpeugmm', label: 'RFE/RL', unfurl: false, limit: 8 }),
+      Object.freeze({ url: 'https://rss.dw.com/rdf/rss-en-all', label: 'DW', unfurl: false, limit: 6 }),
+      Object.freeze({ url: 'https://www.aljazeera.com/xml/rss/all.xml', label: 'Al Jazeera', unfurl: false, limit: 6 }),
+    ]),
+    googleLimit: 12,
+    match: 'ukrain|kyiv|kiev|kharkiv|donetsk|luhansk|zaporizh|kherson|\\bsumy\\b|odesa|odessa|mykolaiv|\\bdnipro\\b|kryvyi rih|poltava|chernihiv|zhytomyr|vinnytsia|\\blviv\\b|crimea|sevastopol|donbas|pokrovsk|kupiansk|kupyansk|\\blyman\\b|kramatorsk|sloviansk|kostiantynivka|kostyantynivka|toretsk|chasiv yar|huliaipole|hulyaipole|orikhiv|vovchansk|belgorod|kursk|bryansk|voronezh|rostov|taganrog|novorossiysk|black sea|sea of azov|shahed|iskander|kinzhal|zelensk|russian (?:forces|troops|army|drones?|missiles?|attack|strike)|general staff',
+    isw: true,
+  }),
 });
+
+/**
+ * Priamy RSS zdroj ako objekt s pravidlami (reťazec = staršie regióny: bez
+ * pravidiel, obrázok povolený). Pure.
+ * @param {string|{url:string,label?:string,unfurl?:boolean,drop?:string,badge?:string}} entry
+ * @returns {{url:string,label:string|null,unfurl:boolean,drop:RegExp|null,badge:string|null}|null}
+ */
+export function normalizeDirectFeed(entry) {
+  if (typeof entry === 'string') return { url: entry, label: null, unfurl: true, drop: null, badge: null, limit: 60 };
+  if (!entry || typeof entry.url !== 'string' || !/^https?:\/\//.test(entry.url)) return null;
+  let drop = null;
+  if (entry.drop) { try { drop = new RegExp(String(entry.drop), 'i'); } catch { drop = null; } }
+  const limit = Number.isFinite(entry.limit) && entry.limit > 0 ? Math.floor(entry.limit) : 60;
+  return { url: entry.url, label: entry.label || null, unfurl: entry.unfurl !== false, drop, badge: entry.badge || null, limit };
+}
 
 /** Keyless GDELT DOC 2.0 article-list endpoint for a query. */
 export function gdeltDocUrl(query, { timespan = '3d', maxrecords = 30 } = {}) {
@@ -161,7 +210,9 @@ export function relativeAge(publishedAt, nowMs, translate = (k) => k) {
  * @param {{translate?: (k:string,v?:object)=>string, nowMs?: number, limit?: number}} [o]
  */
 export function buildSituationModel(payload, { translate = (k) => k, nowMs = Date.now(), limit = 30 } = {}) {
-  const items = (Array.isArray(payload?.items) ? payload.items : [])
+  // Blocklist prílohy XV ešte raz na klientovi (server filtruje tiež) — keby
+  // niekedy prišla cache spred zmeny zoznamu.
+  const items = filterSanctionedNews(Array.isArray(payload?.items) ? payload.items : []).items
     .slice(0, limit)
     .map((it) => ({ ...it, ageLabel: relativeAge(it.publishedAt, nowMs, translate) }));
   return {

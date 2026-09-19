@@ -76,7 +76,9 @@ import {
   ACER_HISTORICAL_URL, FRED_EU_GAS_SERIES, FRED_USD_PER_EUR_SERIES, fredCsvUrl, monthlyEurPerMwh, parseAcerCsv, parseFredCsv,
 } from './src/data/gasPrices.js';
 import { YAHOO_SYMBOLS, parseYahooChart, yahooChartUrl } from './src/data/oilPrices.js';
-import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, parseGdeltArticles } from './src/data/situationNews.js';
+import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, normalizeDirectFeed, parseGdeltArticles } from './src/data/situationNews.js';
+import { filterSanctionedNews } from './src/data/sanctionedMedia.js';
+import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from './src/data/ukraineReport.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -4899,6 +4901,97 @@ function ukraineBaseProxy() {
 }
 
 /**
+ * UKRAJINA (2026-09-19, etapa 2): denné operačné hlásenie Generálneho štábu ZSU
+ * cez ArmyInform (agentúra Ministerstva obrany Ukrajiny, CC BY 4.0, povinný
+ * priamy odkaz). Tag feed nesie len úvod → článok (div.single-content) →
+ * čistý parser v src/data/ukraineReport.js (celkový počet stretov, čas, údery,
+ * smery s počtom útokov). Nikdy wp-json (robots.txt ho zakazuje). Cache 30 min
+ * v pamäti + na disku, pri chybe zastarané do 24 h, single-flight, limiter.
+ * Je to JEDNOSTRANNÉ oficiálne hlásenie — klient to hovorí pri každom čísle.
+ */
+function ukraineReportProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'ukraine');
+  const FILE = path.join(CACHE_DIR, 'report.json');
+  const TTL_MS = 30 * 60_000;
+  const STALE_MAX_MS = 24 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 20_000;
+  const MAX_BYTES = 3 * 1024 * 1024;
+  const USER_AGENT = 'OKO-ukraine/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+  const inFlight = new Map();
+  let mem = null;
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': status === 200 ? 'public, max-age=300' : 'no-store', 'X-GEV-Cache': cacheState });
+    res.end(body);
+  }
+  async function readDisk() {
+    try { const p = JSON.parse(await fsp.readFile(FILE, 'utf8')); if (Number.isFinite(p?.at) && typeof p?.body === 'string') return p; } catch { /* miss */ }
+    return null;
+  }
+  async function writeDisk(entry) {
+    try { await fsp.mkdir(CACHE_DIR, { recursive: true }); await fsp.writeFile(FILE, JSON.stringify(entry), 'utf8'); }
+    catch (error) { console.warn('[ukraine-report] cache write failed: ' + (error?.message || error)); }
+  }
+  async function current() {
+    if (!mem) mem = await readDisk();
+    return mem;
+  }
+  async function fetchText(url) {
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5' } });
+    const text = await readResponseTextCapped(upstream, MAX_BYTES);
+    if (!upstream.ok) throw new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')');
+    return text;
+  }
+  async function build() {
+    const started = Date.now();
+    const items = normalizeRssArticles(await fetchText(ARMYINFORM_OPS_FEED), 5);
+    if (!items.length) throw new Error('empty ArmyInform feed');
+    let report = null;
+    for (const item of items.slice(0, 3)) {
+      const paragraphs = extractReportParagraphs(await fetchText(item.url));
+      const parsed = parseGeneralStaffReport(paragraphs, { publishedAt: item.publishedAt, url: item.url, title: item.title });
+      if (parsed.ok && parsed.directions.length >= 5) { report = parsed; break; }
+      if (!report && parsed.ok) report = parsed;
+    }
+    if (!report) throw new Error('General Staff report not parsed from the latest ArmyInform items');
+    const body = JSON.stringify({ ...report, feed: ARMYINFORM_OPS_FEED, fetchedAt: Date.now() });
+    console.log('[ukraine-report] ' + report.total + ' clashes, ' + report.directions.length + ' directions (' + report.reportedAtText + ') in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body };
+  }
+  async function handler(req, res) {
+    if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    const now = Date.now();
+    const hit = await current();
+    if (hit && now - hit.at < TTL_MS) { send(res, 200, hit.body, 'HIT'); return; }
+    if (!limiter(clientKey(req))) {
+      if (hit) { send(res, 200, hit.body, 'STALE-RATELIMIT'); return; }
+      send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+    }
+    const stale = hit && now - hit.at < STALE_MAX_MS ? hit : null;
+    const request = coalesceProxyRequest(inFlight, 'ukraine-report', () => build());
+    try {
+      const fresh = await request.promise;
+      mem = fresh;
+      void writeDisk(fresh);
+      send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+    } catch (error) {
+      if (stale) {
+        if (!request.shared) console.warn('[ukraine-report] refresh failed (' + (error?.message || error) + ') — serving stale');
+        send(res, 200, stale.body, 'STALE-ERROR');
+        return;
+      }
+      send(res, 502, JSON.stringify({ error: 'upstream', detail: String(error?.message || error) }), 'NONE');
+    }
+  }
+  function install(middlewares) { middlewares.use('/api/ukraine/report', handler); }
+  return {
+    name: 'ukraine-report-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
  * Situácia z otvorených zdrojov — pilot (2026-09-17): agregované spravodajstvo
  * z GDELT DOC 2.0 (keyless, otvorený projekt) pre pomenované regióny
  * (SITUATION_REGIONS; pilot = záliv). GDELT prosí o max 1 dopyt/5 s a niekedy
@@ -4948,7 +5041,7 @@ function situationNewsProxy() {
     const upstream = await fetch('https://news.google.com/rss/search?' + rssParams.toString(), { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT } });
     const xml = await readResponseTextCapped(upstream, MAX_BYTES);
     if (!upstream.ok) throw new Error('RSS HTTP ' + upstream.status + ' (news.google.com)');
-    const items = normalizeRssArticles(xml, 40).map((a) => ({
+    const items = normalizeRssArticles(xml, Number.isFinite(cfg.googleLimit) ? cfg.googleLimit : 40).map((a) => ({
       title: a.title, url: a.url, source: a.domain,
       publishedAt: a.publishedAt ? Date.parse(a.publishedAt) : null,
       image: null, lang: null, country: a.sourceCountry || null,
@@ -4959,25 +5052,67 @@ function situationNewsProxy() {
   // Direct publisher RSS (BBC, Al Jazeera…): real article URLs (not Google-News
   // redirects), keyword-filtered to the region, so the client can unfurl og:image
   // and link out. Each feed fails independently. Reuses the shared RSS parser.
+  // Pravidlá po zdrojoch (UKRAJINA, 2026-09-19; normalizeDirectFeed): `unfurl:false`
+  // → položka nesie noImage (klient nesťahuje og:image — RFE/RL fotoklauzula,
+  // Al Jazeera zákaz scrapingu, Ukrajinska Pravda Getty), `drop` vyhodí položky
+  // (Interfax-Ukraine sa nesmie šíriť), `badge` označí štátne agentúry, `label`
+  // dá zdroju čitateľné meno. Obrázok z feedu (media:content) len tam, kde je
+  // unfurl povolený.
   async function fetchDirectRss(cfg) {
-    const feeds = Array.isArray(cfg.directRss) ? cfg.directRss : [];
+    const feeds = (Array.isArray(cfg.directRss) ? cfg.directRss : []).map(normalizeDirectFeed).filter(Boolean);
     if (!feeds.length) return [];
     const match = cfg.match ? new RegExp(cfg.match, 'i') : null;
-    const lists = await Promise.all(feeds.map(async (url) => {
+    const lists = await Promise.all(feeds.map(async (feed) => {
       try {
-        const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT } });
+        const upstream = await fetch(feed.url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT } });
         const xml = await readResponseTextCapped(upstream, MAX_BYTES);
         if (!upstream.ok) return [];
         return normalizeRssArticles(xml, 60)
           .filter((a) => !match || match.test(a.title))
-          .map((a) => ({
-            title: a.title, url: a.url, source: a.domain,
-            publishedAt: a.publishedAt ? Date.parse(a.publishedAt) : null,
-            image: null, lang: null, country: a.sourceCountry || null,
-          }));
+          .filter((a) => !feed.drop || !feed.drop.test(a.title + ' ' + (a.description || '')))
+          .slice(0, feed.limit)
+          .map((a) => {
+            const item = {
+              title: a.title, url: a.url, source: feed.label || a.domain,
+              publishedAt: a.publishedAt ? Date.parse(a.publishedAt) : null,
+              image: feed.unfurl && a.image ? a.image : null, lang: null, country: a.sourceCountry || null,
+            };
+            if (!feed.unfurl) item.noImage = true;
+            if (feed.badge) item.badge = feed.badge;
+            return item;
+          });
       } catch { return []; }
     }));
     return lists.flat();
+  }
+  // ISW denné hodnotenie (UKRAJINA, 2026-09-19): politika ISW dovoľuje len
+  // odkaz von v publikovanej podobe — žiadny text, mapa ani obrázok. URL je
+  // predvídateľná z dátumu; existenciu overí JEDEN HEAD na dátum raz za 6 h.
+  const ISW_BASE = 'https://www.understandingwar.org/research/russia-ukraine/russian-offensive-campaign-assessment-';
+  const ISW_MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const iswChecks = new Map(); // yyyy-mm-dd -> { at, ok }
+  async function iswPinnedItem() {
+    for (let back = 0; back <= 2; back += 1) {
+      const date = new Date(Date.now() - back * 86_400_000);
+      const key = date.toISOString().slice(0, 10);
+      const url = `${ISW_BASE}${ISW_MONTHS[date.getUTCMonth()]}-${date.getUTCDate()}-${date.getUTCFullYear()}/`;
+      let check = iswChecks.get(key);
+      if (!check || Date.now() - check.at > 6 * 3_600_000) {
+        let ok = false;
+        try { const head = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': USER_AGENT } }); ok = head.ok; } catch { ok = false; }
+        check = { at: Date.now(), ok };
+        iswChecks.set(key, check);
+      }
+      if (!check.ok) continue;
+      const monthName = ISW_MONTHS[date.getUTCMonth()].replace(/^./, (c) => c.toUpperCase());
+      return {
+        title: `ISW — Russian Offensive Campaign Assessment, ${monthName} ${date.getUTCDate()}, ${date.getUTCFullYear()}`,
+        url, source: 'Institute for the Study of War',
+        publishedAt: Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 0),
+        image: null, lang: 'English', country: 'US', noImage: true, badge: 'analysis', pinned: true,
+      };
+    }
+    return null;
   }
   async function build(region) {
     const started = Date.now();
@@ -4989,14 +5124,20 @@ function situationNewsProxy() {
     // Google News RSS adds broad coverage; fetch it unless GDELT already returned plenty.
     let google = [];
     if (gdelt.length < 15) { try { google = await fetchRss(cfg); } catch { /* Google is optional here */ } }
+    // Blocklist médií prílohy XV (čl. 2f nar. 833/2014; C-67/25: aj bezplatný web
+    // je operátor) — vyhadzuje sa ešte pred zlúčením, podľa URL aj domény zdroja.
+    const filtered = filterSanctionedNews([...gdelt, ...direct, ...google]);
+    if (filtered.dropped) console.log('[situation-proxy] ' + region + ': ' + filtered.dropped + ' item(s) dropped by the EU media sanctions blocklist');
     // Merge, preferring copies with an image / a direct URL (see mergeNewsItems).
-    const items = mergeNewsItems([gdelt, direct, google]).slice(0, 40);
+    let items = mergeNewsItems([filtered.items]).slice(0, 40);
+    if (cfg.isw) { const isw = await iswPinnedItem(); if (isw) items = [isw, ...items.filter((it) => it.url !== isw.url)].slice(0, 40); }
     if (!items.length) throw new Error('no items from any source (GDELT/RSS)');
     const parts = [];
     if (gdelt.length) parts.push('GDELT');
     if (direct.length) parts.push('publisher RSS');
     if (google.length) parts.push('Google News RSS');
-    const source = parts.join(' + ') + ' (open news, deduped)';
+    if (cfg.isw) parts.push('ISW link');
+    const source = parts.join(' + ') + ' (open news, deduped, EU media sanctions blocklist applied)';
     const body = JSON.stringify({ region, items, source, fetchedAt: Date.now() });
     console.log('[situation-proxy] ' + region + ': ' + items.length + ' merged [' + source + '] in ' + (Date.now() - started) + ' ms');
     return { at: Date.now(), body };
@@ -5062,7 +5203,10 @@ function translateProxy() {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': status === 200 ? 'public, max-age=86400' : 'no-store', 'X-GEV-Cache': cacheState });
     res.end(body);
   }
-  const keyHash = (to, text) => createHash('sha1').update(to + '\n' + text).digest('hex');
+  // Zdrojový jazyk (UKRAJINA 2026-09-19): hlásenie GŠ je po ukrajinsky, preto
+  // `from=uk`; kľúč cache sa pre `en` nemení, aby staré preklady ostali platné.
+  const ALLOWED_FROM = new Set(['en', 'uk']);
+  const keyHash = (to, text, from = 'en') => createHash('sha1').update((from === 'en' ? '' : from + '|') + to + '\n' + text).digest('hex');
   const diskPath = (h) => path.join(CACHE_DIR, h + '.json');
   async function readDisk(h) {
     try { const p = JSON.parse(await fsp.readFile(diskPath(h), 'utf8')); if (Number.isFinite(p?.at) && typeof p?.body === 'string' && Date.now() - p.at < TTL_MS) return p; } catch { /* miss */ }
@@ -5075,8 +5219,7 @@ function translateProxy() {
     if (!mem.has(h)) { const d = await readDisk(h); if (d) mem.set(h, d); }
     return mem.get(h) || null;
   }
-  async function build(to, text) {
-    const from = 'en';
+  async function build(to, text, from = 'en') {
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
     const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' } });
     const raw = await readResponseTextCapped(upstream, MAX_BYTES);
@@ -5089,17 +5232,17 @@ function translateProxy() {
   }
   async function handler(req, res) {
     if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
-    let to = ''; let text = '';
-    try { const u = new URL(req.url || '/', 'http://localhost'); to = (u.searchParams.get('to') || '').toLowerCase(); text = u.searchParams.get('text') || ''; } catch { /* default */ }
-    if (!ALLOWED.has(to)) { send(res, 400, JSON.stringify({ error: 'unsupported_lang' }), 'NONE'); return; }
+    let to = ''; let text = ''; let from = 'en';
+    try { const u = new URL(req.url || '/', 'http://localhost'); to = (u.searchParams.get('to') || '').toLowerCase(); text = u.searchParams.get('text') || ''; from = (u.searchParams.get('from') || 'en').toLowerCase(); } catch { /* default */ }
+    if (!ALLOWED.has(to) || !ALLOWED_FROM.has(from)) { send(res, 400, JSON.stringify({ error: 'unsupported_lang' }), 'NONE'); return; }
     text = text.slice(0, MAX_TEXT).trim();
     if (!text) { send(res, 400, JSON.stringify({ error: 'empty' }), 'NONE'); return; }
-    if (to === 'en') { send(res, 200, JSON.stringify({ text, from: 'en', to: 'en', source: 'noop' }), 'NOOP'); return; }
-    const h = keyHash(to, text);
+    if (to === from) { send(res, 200, JSON.stringify({ text, from, to, source: 'noop' }), 'NOOP'); return; }
+    const h = keyHash(to, text, from);
     const hit = await current(h);
     if (hit) { send(res, 200, hit.body, 'HIT'); return; } // translations are stable — a hit never expires early
     if (!limiter(clientKey(req))) { send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return; }
-    const request = coalesceProxyRequest(inFlight, 'tr:' + h, () => build(to, text));
+    const request = coalesceProxyRequest(inFlight, 'tr:' + h, () => build(to, text, from));
     try {
       const fresh = await request.promise;
       mem.set(h, fresh); void writeDisk(h, fresh);
@@ -9978,7 +10121,8 @@ function rssTag(block, tag) {
 function normalizeRssArticles(xml, limit = 5) {
   const seen = new Set();
   const articles = [];
-  for (const match of String(xml || '').matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
+  // `<item rdf:about="…">` je RSS 1.0 (DW), preto voliteľné atribúty na <item>.
+  for (const match of String(xml || '').matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/gi)) {
     const item = match[1];
     const title = rssTag(item, 'title').slice(0, 180);
     const url = rssTag(item, 'link');
@@ -9989,13 +10133,18 @@ function normalizeRssArticles(xml, limit = 5) {
     const signature = `${title.toLowerCase()}|${source.toLowerCase() || parsedUrl.hostname}`;
     if (seen.has(signature)) continue;
     seen.add(signature);
-    const rawDate = rssTag(item, 'pubDate');
+    const rawDate = rssTag(item, 'pubDate') || rssTag(item, 'dc:date');
+    // Obrázok z feedu (media:content / enclosure obrázka) a krátky popis —
+    // situačné karty ich používajú podľa pravidiel zdroja (UKRAJINA 2026-09-19).
+    const mediaUrl = /<media:content[^>]+url="([^"]+)"/i.exec(item)?.[1] || /<enclosure[^>]+type="image\/[^"]*"[^>]+url="([^"]+)"/i.exec(item)?.[1] || /<enclosure[^>]+url="([^"]+)"[^>]+type="image\/[^"]*"/i.exec(item)?.[1] || null;
     articles.push({
       title,
       url: parsedUrl.href,
       domain: source || parsedUrl.hostname.replace(/^www\./, ''),
       publishedAt: Number.isNaN(Date.parse(rawDate)) ? null : new Date(rawDate).toISOString(),
       sourceCountry: null,
+      image: mediaUrl && /^https?:\/\//.test(mediaUrl) ? mediaUrl : null,
+      description: rssTag(item, 'description').slice(0, 300),
     });
     if (articles.length >= limit) break;
   }
@@ -10522,6 +10671,7 @@ export default defineConfig(({ mode }) => {
       gasProxy(),
       oilPricesProxy(),
       ukraineBaseProxy(),
+      ukraineReportProxy(),
       situationNewsProxy(),
       translateProxy(),
       linkImageProxy(),

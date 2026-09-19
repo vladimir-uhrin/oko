@@ -16,6 +16,8 @@
  * Pure module (no DOM).
  */
 
+import { UKRAINE_GAZETTEER, classifyUkraineIncident } from './ukraineIncidents.js';
+
 /** Incident classes, in priority order. severity → marker colour on the client. */
 const INCIDENT_RULES = [
   { type: 'strike', severity: 'critical', re: /\b(missile|drone|strike|struck|attack|attacked|shelling|torpedo|projectile|rocket)\b/i },
@@ -85,19 +87,37 @@ export const GULF_GAZETTEER = Object.freeze([
   Object.freeze({ name: 'Egypt', lat: 26.8, lon: 30.8, aliases: ['egypt', 'egyptian'] }),
 ]);
 
-/** Default point for a region when no place is named (pilot: Hormuz). */
+/**
+ * Default point for a region when no place is named (pilot: Hormuz). `null`
+ * (ukraine, 2026-09-19) = an unlocated item gets NO marker: a card „somewhere
+ * in Ukraine" would be noise, not information.
+ */
 export const REGION_DEFAULT = Object.freeze({
   gulf: Object.freeze({ name: 'Strait of Hormuz', lat: 26.57, lon: 56.25 }),
   mideast: Object.freeze({ name: 'Red Sea', lat: 20.0, lon: 38.0 }),
+  ukraine: null,
 });
+
+/** Gazetteer for a region (ukraine has its own; everything else the Gulf/Middle East one). Pure. */
+export function gazetteerForRegion(region) {
+  return region === 'ukraine' ? UKRAINE_GAZETTEER : GULF_GAZETTEER;
+}
+
+/** Region default point, or null when the region says „no marker without a place". */
+export function regionDefaultFor(region) {
+  return Object.prototype.hasOwnProperty.call(REGION_DEFAULT, region) ? REGION_DEFAULT[region] : REGION_DEFAULT.gulf;
+}
 
 /**
  * Classify a headline into an incident class, or null if it does not read like
- * one. Pure.
+ * one. The ukraine region has its own rule set (ground fighting, air defence,
+ * infrastructure with an action word — see ukraineIncidents.js). Pure.
  * @param {string} text
+ * @param {{region?: string}} [o]
  * @returns {{type:string, severity:'critical'|'major'|'minor'}|null}
  */
-export function classifyIncident(text) {
+export function classifyIncident(text, { region = 'gulf' } = {}) {
+  if (region === 'ukraine') return classifyUkraineIncident(text);
   const s = String(text ?? '');
   for (const rule of INCIDENT_RULES) {
     if (rule.re.test(s)) return { type: rule.type, severity: rule.severity };
@@ -126,18 +146,19 @@ export function locateIncident(text, gazetteer = GULF_GAZETTEER) {
  * @param {{region?:string, gazetteer?:ReadonlyArray, limit?:number}} [o]
  * @returns {Array<{lat:number, lon:number, place:string, approx:boolean, type:string, severity:string, title:string, url:string, source:string, publishedAt:number|null}>}
  */
-export function buildIncidents(items, { region = 'gulf', gazetteer = GULF_GAZETTEER, limit = 40 } = {}) {
-  const fallback = REGION_DEFAULT[region] || REGION_DEFAULT.gulf;
+export function buildIncidents(items, { region = 'gulf', gazetteer = gazetteerForRegion(region), limit = 40 } = {}) {
+  const fallback = regionDefaultFor(region);
   const seen = new Set();
   const out = [];
   for (const it of (Array.isArray(items) ? items : [])) {
     if (out.length >= limit) break;
-    const cls = classifyIncident(it?.title);
+    const cls = classifyIncident(it?.title, { region });
     if (!cls) continue;
     const url = typeof it?.url === 'string' ? it.url : '';
     if (!url || seen.has(url)) continue;
-    seen.add(url);
     const loc = locateIncident(it.title, gazetteer);
+    if (!loc && !fallback) continue; // región bez predvoleného bodu: bez miesta bez karty
+    seen.add(url);
     out.push({
       lat: loc ? loc.lat : fallback.lat,
       lon: loc ? loc.lon : fallback.lon,
@@ -150,6 +171,8 @@ export function buildIncidents(items, { region = 'gulf', gazetteer = GULF_GAZETT
       source: typeof it?.source === 'string' ? it.source : '',
       publishedAt: Number.isFinite(it?.publishedAt) ? it.publishedAt : null,
       image: typeof it?.image === 'string' && /^https?:\/\//.test(it.image) ? it.image : null,
+      noImage: Boolean(it?.noImage),
+      badge: typeof it?.badge === 'string' ? it.badge : null,
     });
   }
   return out;
@@ -194,7 +217,7 @@ export function isVideoUrl(url) {
  * @param {{region?:string, gazetteer?:ReadonlyArray, limit?:number}} [o]
  * @returns {Array<{lat:number, lon:number, place:string, approx:boolean, type:string, severity:string, title:string, url:string, source:string, publishedAt:number|null, storyCount:number, sourceCount:number}>}
  */
-export function buildIncidentCards(items, { region = 'gulf', gazetteer = GULF_GAZETTEER, limit = 6 } = {}) {
+export function buildIncidentCards(items, { region = 'gulf', gazetteer = gazetteerForRegion(region), limit = 6 } = {}) {
   const incidents = buildIncidents(items, { region, gazetteer, limit: 60 });
   const groups = new Map();
   for (const inc of incidents) {
@@ -221,6 +244,8 @@ export function buildIncidentCards(items, { region = 'gulf', gazetteer = GULF_GA
     source: rep.source,
     publishedAt: rep.publishedAt,
     image: rep.image || image || null,
+    noImage: Boolean(rep.noImage),
+    badge: rep.badge || null,
     isVideo: isVideoUrl(rep.url),
     storyCount: Math.max(1, stories.size),
     sourceCount: Math.max(1, sources.size),

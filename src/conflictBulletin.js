@@ -20,7 +20,7 @@
 // targeting. Neutral tone.
 
 import { buildSituationModel, fetchSituationNews } from './data/situationNews.js';
-import { classifyIncident, isVideoUrl, locateIncident } from './data/gulfIncidents.js';
+import { classifyIncident, gazetteerForRegion, isVideoUrl, locateIncident } from './data/gulfIncidents.js';
 import { createIncidentCards } from './gulfIncidentCards.js';
 import { currentLanguage, t } from './i18n.js';
 
@@ -53,6 +53,8 @@ export function createConflictBulletin({
   viewer = null,
   documentRef = globalThis.document,
   region = 'gulf',
+  // Vlastný zoznam regiónov (UKRAJINA 2026-09-19: jeden región = bez čipov).
+  regions = BULLETIN_REGIONS,
   mountTarget = null,
   cards: sharedCards = null,
   fetch: fetchImpl = fetchSituationNews,
@@ -75,7 +77,7 @@ export function createConflictBulletin({
   // it visible because a side panel was expanded would defeat exactly that.
   const drivesCards = ownsCards ? cards : null;
 
-  let activeRegion = BULLETIN_REGIONS.some((r) => r.id === region) ? region : BULLETIN_REGIONS[0].id;
+  let activeRegion = regions.some((r) => r.id === region) ? region : regions[0].id;
   let open = false;
   let loadedOnce = false;
   const cache = new Map(); // region -> { payload, at }
@@ -94,10 +96,11 @@ export function createConflictBulletin({
   }
 
   function regionChips() {
+    if (regions.length < 2) return null; // jediný región = prepínač nemá čo prepínať
     const row = el(doc, 'oko-bul-regions');
     row.setAttribute('role', 'group');
     row.setAttribute('aria-label', translate('bulletin.title'));
-    for (const r of BULLETIN_REGIONS) {
+    for (const r of regions) {
       const b = doc.createElement('button');
       b.type = 'button';
       b.className = `oko-bul-chip${r.id === activeRegion ? ' is-active' : ''}`;
@@ -132,13 +135,15 @@ export function createConflictBulletin({
       // fetched (esp. with lazy-loading), which would deadlock the load handler.
       const setImg = (u) => { if (u) { thumb.hidden = false; img.src = `/api/img?url=${encodeURIComponent(u)}`; } };
       if (it.image) setImg(it.image);
-      else if (it.url) void unfurlImage(it.url).then(setImg);
+      // `noImage` = zdroj nedovoľuje sťahovať náhľad (RFE/RL, Al Jazeera, UP) — bez unfurlu.
+      else if (it.url && !it.noImage) void unfurlImage(it.url).then(setImg);
 
       const txt = el(doc, 'oko-bul-txt');
       const head = el(doc, 'oko-bul-head');
-      const cls = classifyIncident(it.title);
+      const cls = classifyIncident(it.title, { region: activeRegion });
       if (cls) head.appendChild(el(doc, `oko-bul-badge oko-inc-${cls.severity}`, translate(`incident.type-${cls.type}`)));
-      const loc = locateIncident(it.title);
+      if (it.badge) head.appendChild(el(doc, 'oko-bul-badge oko-bul-src', translate(`source.${it.badge}`)));
+      const loc = locateIncident(it.title, gazetteerForRegion(activeRegion));
       if (loc) head.appendChild(el(doc, 'oko-bul-place', loc.name));
       if (it.ageLabel) head.appendChild(el(doc, 'oko-bul-age', it.ageLabel));
       txt.appendChild(head);
@@ -152,7 +157,7 @@ export function createConflictBulletin({
     return [list, foot];
   }
 
-  const render = (body) => root.replaceChildren(regionChips(), ...body);
+  const render = (body) => root.replaceChildren(...[regionChips()].filter(Boolean), ...body);
   const paint = () => {
     const hit = cache.get(activeRegion);
     render(hit
@@ -177,7 +182,7 @@ export function createConflictBulletin({
   }
 
   function setRegion(next) {
-    if (next === activeRegion || !BULLETIN_REGIONS.some((r) => r.id === next)) return;
+    if (next === activeRegion || !regions.some((r) => r.id === next)) return;
     activeRegion = next;
     void refresh();
     if (drivesCards && open) void drivesCards.showFor(activeRegion);
@@ -255,6 +260,7 @@ function ensureStyle(doc) {
 .oko-bul-badge.oko-inc-critical{color:#f87171;}
 .oko-bul-badge.oko-inc-major{color:#ffb547;}
 .oko-bul-badge.oko-inc-minor{color:#39d0ff;}
+.oko-bul-badge.oko-bul-src{color:#8fd9ff;border-style:dashed;}
 .oko-bul-place{font-size:9px;letter-spacing:.04em;color:#ffb547;text-transform:uppercase;}
 .oko-bul-age{font-size:9px;color:#6f8398;margin-left:auto;}
 .oko-bul-title{font-size:11px;line-height:1.3;color:#eaf2ff;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}

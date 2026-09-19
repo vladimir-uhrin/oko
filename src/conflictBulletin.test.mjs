@@ -194,3 +194,40 @@ test('every rendered list keeps the provenance disclaimer', async () => {
     assert.equal(disc[0].textContent, 'situation.disclaimer', 'aggregated/unverified notice is not optional');
   });
 });
+
+test('UKRAJINA (2026-09-19): jediný región bez čipov, regionálna klasifikácia, štítok zdroja, noImage bez unfurlu', async () => {
+  await withObserver(async (flush) => {
+    const { doc, panel, mount } = makeEnv();
+    panel.setAttribute('data-panel-id', 'ukraine-panel');
+    panel.classList.remove('collapsed');
+    const fetched = [];
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => { fetched.push(String(url)); return { ok: false }; };
+    try {
+      const b = createConflictBulletin({
+        documentRef: doc, mountTarget: mount, translate, region: 'ukraine', now: () => 1000,
+        regions: [{ id: 'ukraine', labelKey: 'ukraine.news.title' }],
+        fetch: async () => ({
+          region: 'ukraine', source: 'test', fetchedAt: 100,
+          items: [
+            { title: 'Russian forces advance near Pokrovsk', url: 'https://x/1', source: 'Ukrinform', publishedAt: 100, image: null, badge: 'official-ua', noImage: true },
+            { title: 'Drone strike hits Odesa port', url: 'https://x/2', source: 'BBC News', publishedAt: 90, image: null },
+          ],
+        }),
+      });
+      flush();
+      await new Promise((r) => setTimeout(r, 0));
+      assert.equal(b.region, 'ukraine');
+      assert.equal(byClass(mount, 'oko-bul-chip').length, 0, 'jediný región = žiadne čipy');
+      const badges = byClass(mount, 'oko-bul-badge').map((n) => n.textContent);
+      assert.ok(badges.includes('incident.type-ground'), 'ukrajinská trieda pozemné boje');
+      assert.ok(badges.includes('source.official-ua'), 'štítok oficiálneho zdroja');
+      assert.ok(badges.includes('incident.type-strike'));
+      assert.deepEqual(byClass(mount, 'oko-bul-place').map((n) => n.textContent), ['Pokrovsk', 'Odesa'], 'gazetteer Ukrajiny');
+      assert.equal(fetched.some((u) => u.includes('link-image') && u.includes('x%2F1')), false, 'noImage: bez unfurlu');
+      assert.equal(fetched.some((u) => u.includes('link-image') && u.includes('x%2F2')), true, 'bez noImage sa náhľad hľadá');
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+  });
+});

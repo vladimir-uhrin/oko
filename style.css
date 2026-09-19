@@ -10871,6 +10871,34 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-secondary);
 }
 .ukraine-note.ukraine-dim { color: var(--text-dim); }
+/* Etapa 2: hlásenie GŠ (karta), počty na smeroch, správy. */
+.ukraine-report { gap: 5px; }
+.ukraine-report-summary { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: #d6f3fa; }
+.ukraine-report-strikes { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.03em; color: var(--text-secondary); }
+.ukraine-report-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ukraine-report-link { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; color: var(--accent); text-decoration: none; }
+.ukraine-report-link:hover { text-decoration: underline; }
+.ukraine-report-source { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.04em; color: var(--text-dim); }
+.ukraine-dir { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ukraine-dir-name { flex: 1 1 auto; min-width: 0; }
+.ukraine-dir-count {
+  flex: 0 0 auto;
+  min-width: 22px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(11, 22, 34, 0.7);
+  color: #e6eef4;
+}
+.ukraine-dir-count.is-quiet { color: #8aa0b6; }
+.ukraine-dir-count.is-unknown { color: #8a97a3; }
+.ukraine-dir-count.is-mid { color: #ffb547; }
+.ukraine-dir-count.is-high { color: #f87171; }
+.ukraine-news { display: flex; flex-direction: column; min-height: 0; }
 .gas-status {
   font-family: var(--font-mono);
   font-size: 9px;

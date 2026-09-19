@@ -96,7 +96,8 @@ export function createIncidentCards({
     // fetched (esp. with lazy-loading), which would deadlock the load handler.
     const setImg = (u) => { if (u) { thumb.hidden = false; img.src = `/api/img?url=${encodeURIComponent(u)}`; } };
     if (model.image) setImg(model.image);
-    else if (model.url) void unfurlImage(model.url).then(setImg);
+    // `noImage` (UKRAJINA 2026-09-19): zdroj nedovoľuje sťahovať náhľad — bez unfurlu.
+    else if (model.url && !model.noImage) void unfurlImage(model.url).then(setImg);
 
     const head = doc.createElement('div');
     head.className = 'oko-hc-head';

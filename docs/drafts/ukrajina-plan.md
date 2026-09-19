@@ -12,9 +12,32 @@ kroku používateľa (žiadosť, e-mail, kľúč) a čo vôbec nie** — a v ako
 overených dvojmo (nálezca + skeptik) sú z nich len 3, zvyšok je jedno čítanie a pred zapojením sa
 overuje znova podľa `new-data-layer`.
 
-## Stav (2026-09-19 večer): ETAPA 1 HOTOVÁ, etapy 2–6 nezačaté
+## Stav (2026-09-19 noc): ETAPY 1 a 2 HOTOVÉ, etapy 3–6 nezačaté
 
-Používateľ: „pokračuj etapou 1". Hotové a overené v pane (podklad OSM stack, lebo Google 3D
+### Etapa 2 (používateľ: „Fáza 2") — hotové a overené naživo
+
+- **Hlásenie GŠ ZSU** cez ArmyInform (CC BY 4.0): proxy `/api/ukraine/report` (tag feed → článok →
+  čistý parser `src/data/ukraineReport.js`), 19. 9. 2026: 213 stretov, 15 smerov (13 s presetom +
+  Volyň/Polissia), údery (1 raketový, 89 leteckých, 312 KAB, 10 588 dronov, 2 952 ostreľovaní).
+  Prekryv `ukraineReportLayer.js` = skrížené meče + počet pri strede každého smeru (farba podľa
+  intenzity), karta s odsekom v origináli + strojový preklad uk→sk na požiadanie, klik = hlásenie.
+  Panel: karta hlásenia (súhrn, údery, poctivá veta, odkaz) + počet na každom tlačidle smeru, čip STRETY.
+- **Správy** región `ukraine` v `situationNews.js`: GDELT (EN) + Google News + 8 priamych RSS
+  s pravidlami po zdrojoch (`unfurl` len BBC/KI, `drop` Interfax-Ukraine v UP, `badge` oficiálne UA,
+  `limit` na zdroj — Ukrinform a UP inak vytlačili všetkých), ISW ako jediná pripnutá položka
+  (titulok + odkaz, HEAD raz za 6 h). Hot kartičky nad smerom (región `ukraine`, brána priblíženia),
+  bulletin v paneli UKRAJINA (jediný región = bez čipov). Klasifikácia UA (`ukraineIncidents.js`:
+  námorné/PVO pred úderom, infraštruktúra len s činom), gazetteer ~90 miest, bez miesta = bez karty.
+- **Sankčný blocklist** `sanctionedMedia.js` (príloha XV do 16. balíka + Rybar podľa prílohy I),
+  server aj klient. TASS nie je v zozname a ani sa neťahá (otázka č. 4 stále otvorená).
+- Pasce: `\b` pred cyrilikou v JS nikdy nesedí (parser stratil všetky smery, kým sa hranica
+  neprepísala na lookbehind); stop-riadok extraktora bez cyriliky prešiel filtrom; úprava závislosti
+  vite.config.js reštartuje server a preloaduje stránku uprostred overovania.
+- Nedorobené z etapy 2: BBC/RFE/DW sa v prvej šestnástke ukážu až po prestavbe cache (stropy
+  platia od ďalšieho buildu); ArmyInform EN feed mešká dni; miesta z odsekov hlásenia (Torske,
+  Yampil…) sa zatiaľ nekotvia na mapu — dá sa cez snímok sídiel (etapa 3+).
+
+### Etapa 1 (používateľ: „pokračuj etapou 1") — hotové a overené v pane (podklad OSM stack, lebo Google 3D
 dlaždice sú v pane 403):
 
 - **Snímok** `scripts/build-ukraine-base.mjs` + knižnica `scripts/lib/ukraineBase.mjs`: 4 poludníkové

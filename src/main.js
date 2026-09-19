@@ -46,6 +46,7 @@ import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
+import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
@@ -623,10 +624,17 @@ async function init() {
     // window API). Hranice štátov si podklad drží ako držiteľ 'ukraine-base'.
     const ukraineBase = createUkraineBaseLayer({ viewer });
     window.__godsEyeView.ukraineBase = ukraineBase;
+    // Strety (etapa 2): značky smerov s počtom útokov z denného hlásenia GŠ ZSU
+    // (ArmyInform, CC BY 4.0) — vlastný prekryv, ide hore a dole s podkladom;
+    // čip STRETY v paneli je jeho vypínač.
+    const ukraineReport = createUkraineReportLayer({ viewer });
+    window.__godsEyeView.ukraineReport = ukraineReport;
     let ukraineBoundariesHeld = false;
     ukraineBase.onChange((state) => {
       if (state.shown && !ukraineBoundariesHeld) { ukraineBoundariesHeld = true; void countryBoundaries.retain('ukraine-base'); }
       if (!state.shown && ukraineBoundariesHeld) { ukraineBoundariesHeld = false; countryBoundaries.release('ukraine-base'); }
+      if (state.shown && !ukraineReport.isShown()) void ukraineReport.show();
+      if (!state.shown && ukraineReport.isShown()) ukraineReport.hide();
     });
     const frontSceneDeps = {
       showBase: () => ukraineBase.show(),
@@ -649,14 +657,31 @@ async function init() {
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);
       ukrainePanel?.setActiveScene(scene?.id || null);
+      if (scene) {
+        // Hot kartičky správ nad smerom (región `ukraine`, etapa 2) s bránou
+        // priblíženia ako pri úžinách: pri pohľade na planétu sa schovajú.
+        revealGate.activate(scene.center);
+        void incidentCards.showFor('ukraine');
+      }
       return applyFrontScene(id, frontSceneDeps);
     };
     ukrainePanel = createUkrainePanel({
       mountTarget: document.querySelector('#ukraine-panel [data-ukraine-body]'),
       layer: ukraineBase,
+      report: ukraineReport,
       applyScene: (id) => runFrontScene(id),
     });
     window.__godsEyeView.ukrainePanel = ukrainePanel;
+    // Správy z otvorených zdrojov pre región `ukraine` (etapa 2): ten istý
+    // bulletin ako ZÁLIV, jediný región (bez čipov), lenivo pri rozbalení panela.
+    if (ukrainePanel.newsMount) {
+      const ukraineBulletin = createConflictBulletin({
+        mountTarget: ukrainePanel.newsMount,
+        region: 'ukraine',
+        regions: [{ id: 'ukraine', labelKey: 'ukraine.news.title' }],
+      });
+      window.__godsEyeView.ukraineBulletin = ukraineBulletin;
+    }
     window.__godsEyeView.frontScenes = { list: listFrontScenes, apply: runFrontScene };
     // Zdieľateľný odkaz `?front=<smer>` (napr. oko.uhrin.digital/?front=lyman) —
     // po obnove stavu, aby scéna vyhrala nad predvoleným pohľadom ako klik.

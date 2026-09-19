@@ -15,7 +15,7 @@ import { currentLanguage, t } from './i18n.js';
 import { UKRAINE_BASE_PARTS } from './data/ukraineBase.js';
 import { frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 
-const INERT = { element: null, update() {}, setActiveScene() {}, destroy() {} };
+const INERT = { element: null, newsMount: null, update() {}, updateReport() {}, setActiveScene() {}, destroy() {} };
 
 /**
  * @param {object} o
@@ -30,6 +30,7 @@ const INERT = { element: null, update() {}, setActiveScene() {}, destroy() {} };
 export function createUkrainePanel({
   mountTarget = null,
   layer = null,
+  report = null,
   scenes = listFrontScenes(),
   applyScene = null,
   translate = t,
@@ -38,6 +39,7 @@ export function createUkrainePanel({
 } = {}) {
   const doc = documentRef;
   if (!doc?.createElement || !mountTarget || !layer) return INERT;
+  const linkify = (a, href) => { a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; };
 
   const el = (tag, className = '', text = null) => {
     const node = doc.createElement(tag);
@@ -74,27 +76,66 @@ export function createUkrainePanel({
     chips.appendChild(chip);
     chipByPart.set(part, chip);
   }
+  // Čip STRETY (etapa 2): značky smerov s počtom útokov z hlásenia GŠ — vlastný
+  // prekryv, ukazuje sa spolu s podkladom; čip je len jeho vypínač.
+  let reportChip = null;
+  if (report) {
+    reportChip = button('data-toggle-chip ukraine-chip ukraine-chip-report', translate('ukraine.part.report'), () => {
+      report.setEnabled(!report.isEnabled());
+    });
+    reportChip.dataset.part = 'report';
+    reportChip.setAttribute('aria-pressed', 'true');
+    chips.appendChild(reportChip);
+  }
   row.appendChild(chips);
   const counts = el('div', 'ukraine-counts');
   counts.hidden = true;
+  // Hlásenie GŠ (etapa 2): jedna karta so súhrnom, údermi, poctivou poznámkou a odkazom.
+  const reportBox = el('div', 'ukraine-report gas-card');
+  reportBox.hidden = true;
+  const reportTitle = el('div', 'gas-card-title', translate('ukraine.report.title'));
+  const reportSummary = el('div', 'ukraine-report-summary');
+  const reportStrikes = el('div', 'ukraine-report-strikes');
+  const reportClaim = el('p', 'ukraine-note ukraine-dim', translate('ukraine.report.claim'));
+  const reportLink = el('a', 'ukraine-report-link', `${translate('ukraine.report.linkout')} ↗`);
+  reportLink.hidden = true;
+  const reportSource = el('span', 'ukraine-report-source', translate('ukraine.report.source'));
+  const reportFoot = el('div', 'ukraine-report-foot');
+  reportFoot.appendChild(reportLink);
+  reportFoot.appendChild(reportSource);
+  reportBox.appendChild(reportTitle);
+  reportBox.appendChild(reportSummary);
+  reportBox.appendChild(reportStrikes);
+  reportBox.appendChild(reportClaim);
+  reportBox.appendChild(reportFoot);
   const dirsTitle = el('div', 'ukraine-section-title gas-card-title', translate('ukraine.directions'));
   const dirs = el('div', 'ukraine-dirs');
   dirs.setAttribute('role', 'group');
   dirs.setAttribute('aria-label', translate('ukraine.directions'));
   const dirByScene = new Map();
+  const countByScene = new Map();
   for (const scene of scenes) {
-    const b = button(`ukraine-dir${scene.overview ? ' is-overview' : ''}`, frontSceneLabel(scene, translate), () => {
+    const b = button(`ukraine-dir${scene.overview ? ' is-overview' : ''}`, '', () => {
       setActiveScene(scene.id);
       if (typeof applyScene === 'function') void applyScene(scene.id);
     });
+    b.appendChild(el('span', 'ukraine-dir-name', frontSceneLabel(scene, translate)));
+    const count = el('span', 'ukraine-dir-count');
+    count.hidden = true;
+    b.appendChild(count);
     b.dataset.front = scene.id;
     b.setAttribute('aria-pressed', 'false');
     dirs.appendChild(b);
     dirByScene.set(scene.id, b);
+    countByScene.set(scene.id, count);
   }
+  // Správy z otvorených zdrojov (etapa 2): telo plní conflictBulletin z main.js.
+  const newsTitle = el('div', 'ukraine-section-title gas-card-title', translate('ukraine.news.title'));
+  const news = el('div', 'ukraine-news');
+  news.dataset.ukraineNews = '';
   const note = el('p', 'ukraine-note', translate('ukraine.next-stages'));
   const namesNote = el('p', 'ukraine-note ukraine-dim', translate('ukraine.names-note'));
-  mountTarget.replaceChildren(status, row, counts, dirsTitle, dirs, note, namesNote);
+  mountTarget.replaceChildren(status, row, counts, reportBox, dirsTitle, dirs, newsTitle, news, note, namesNote);
 
   // ── Stav ──────────────────────────────────────────────────────────────────
   function statusFor(state) {
@@ -143,16 +184,52 @@ export function createUkrainePanel({
     }
   }
 
+  /** Hlásenie GŠ do karty a počty na tlačidlá smerov (etapa 2). */
+  function updateReport(state = report?.getState?.()) {
+    if (!report || !state) return;
+    if (reportChip) {
+      reportChip.classList?.toggle?.('active', Boolean(state.enabled));
+      reportChip.setAttribute('aria-pressed', String(Boolean(state.enabled)));
+    }
+    const r = state.report;
+    if (!r) {
+      reportBox.hidden = !(state.loading || state.error);
+      reportSummary.textContent = state.loading ? translate('ukraine.report.loading') : (state.error ? translate('ukraine.report.unavailable') : '');
+      reportStrikes.textContent = '';
+      reportLink.hidden = true;
+      for (const count of countByScene.values()) count.hidden = true;
+      return;
+    }
+    reportBox.hidden = false;
+    reportSummary.textContent = translate('ukraine.report.summary', { total: r.total ?? '?', time: r.reportedAtText || '?' });
+    const s = r.strikes || {};
+    const fmt = (v) => (Number.isFinite(v) ? numberFormat.format(v) : '?');
+    reportStrikes.textContent = translate('ukraine.report.strikes', { air: fmt(s.airStrikes), bombs: fmt(s.guidedBombs), drones: fmt(s.kamikazeDrones), shellings: fmt(s.shellings) });
+    if (r.url) { linkify(reportLink, r.url); reportLink.hidden = false; } else reportLink.hidden = true;
+    for (const [sceneId, count] of countByScene) {
+      const entry = state.byScene?.[sceneId];
+      if (!entry) { count.hidden = true; continue; }
+      const n = entry.attacks;
+      count.hidden = false;
+      count.textContent = n === null || n === undefined ? '—' : String(n);
+      count.className = `ukraine-dir-count ${n === null || n === undefined ? 'is-unknown' : (n <= 0 ? 'is-quiet' : (n >= 25 ? 'is-high' : (n >= 10 ? 'is-mid' : 'is-low')))}`;
+    }
+  }
+
   const unsubscribe = layer.onChange((state) => update(state));
+  const unsubscribeReport = report?.onChange?.((state) => updateReport(state)) || null;
   update();
+  updateReport();
   // Dátum snímku je lacný a hovorí, či snímok vôbec existuje — ťahá sa hneď.
   void layer.loadMeta?.();
 
   return {
     element: mountTarget,
+    newsMount: news,
     update,
+    updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); mountTarget.replaceChildren(); },
   };
 }
