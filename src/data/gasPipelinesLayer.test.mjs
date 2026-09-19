@@ -443,16 +443,12 @@ test('etapa 5 — plot na chrbtici v strednom pásme; duch: kohorta pri kamere, 
   layer.enable();
   assert.equal(await layer.update(), true);
   const [transgas, ns2, dn300] = viewer.dataSources.added[0].entities.values;
-  // Plot: len prevádzkovaná chrbtica (DN 1400, 120 km); plánovaná a pahýľ nie.
-  assert.equal(layer._getStateForTest().fences, 1);
-  assert.equal(transgas.wall.maximumHeights[0], 7000);
-  assert.equal(transgas.wall.minimumHeights[0], 0);
-  assert.equal(transgas.wall.distanceDisplayCondition.near, 200_000);
-  assert.equal(transgas.wall.distanceDisplayCondition.far, 1_100_000);
-  assert.equal(transgas.wall.outline, true);
-  assert.equal(transgas.wall.material.color.getValue().alpha.toFixed(2), '0.18');
-  assert.equal(ns2.wall, undefined, 'plánovaná rúra ešte nestojí');
-  assert.equal(dn300.wall, undefined, 'pahýľ bez plotu');
+  // Plot je predvolene VYPNUTÝ (používateľ: „potrubia majú ploty") — žiadna
+  // entita nenesie wall, ani chrbtica. Plot hraníc je iný modul a ostáva.
+  assert.equal(layer._getStateForTest().fences, 0);
+  assert.equal(transgas.wall, undefined, 'bez plotu ani na chrbtici DN 1400');
+  assert.equal(ns2.wall, undefined);
+  assert.equal(dn300.wall, undefined);
   // Duch: po načítaní sa naplánuje kohorta; kamera 50 km nad Transgasom → jeho 3 vrcholy sa navzorkujú raz.
   const ghost = viewer.dataSources.added[3];
   assert.equal(ghost.show, true);
@@ -502,7 +498,7 @@ test('etapa 5 — plot na chrbtici v strednom pásme; duch: kohorta pri kamere, 
   runTimers(); await tick();
   assert.equal(plain._getStateForTest().ghost.supported, false);
   assert.equal(v2.dataSources.added[3].entities.values.length, 0);
-  assert.equal(plain._getStateForTest().fences, 1);
+  assert.equal(plain._getStateForTest().fences, 0);
   plain.destroy(v2);
 });
 

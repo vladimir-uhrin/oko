@@ -169,8 +169,17 @@ export function pipelineStyle(properties = {}) {
  * stuha 7 km. Len prevádzkované chrbtice a hlavné vetvy (DN ≥ 500) — plot na
  * pahýľoch by bol šum, plánované rúry ešte nestoja.
  */
-export const PIPELINE_FENCE = Object.freeze({ heightM: 7000, near: 200_000, far: 1_100_000, alpha: 0.18, topAlpha: 0.75 });
-export function pipelineFenceSpec(properties = {}) {
+export const PIPELINE_FENCE = Object.freeze({
+  // VYPNUTÉ 2026-09-19 večer, používateľ pri pohľade z ~400 km: „oprav ešte aj
+  // potrubia majú ploty" — steny s obrysom na každom z 3 561 krátkych úsekov
+  // vyzerali ako reťaz škatuliek pozdĺž čiary, nie ako stuha. Čiary s obrysom
+  // (etapa 4) sú z uhla čitateľné aj bez plotu; plot HRANÍC ostáva. Mechanizmus
+  // ostáva zapnuteľný (`enabled`) pre prípadný návrat bez obrysov.
+  enabled: false,
+  heightM: 7000, near: 200_000, far: 1_100_000, alpha: 0.18, topAlpha: 0.75,
+});
+export function pipelineFenceSpec(properties = {}, { enabled = PIPELINE_FENCE.enabled } = {}) {
+  if (!enabled) return null;
   const style = pipelineStyle(properties);
   if (style.status !== 'operating') return null;
   if (style.widthClass !== 'trunk' && style.widthClass !== 'main') return null;
