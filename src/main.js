@@ -50,6 +50,7 @@ import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
 import { createUkraineEventsLayer } from './ukraineEventsLayer.js';
 import { createUkraineControlLayer } from './ukraineControlLayer.js';
+import { createUkraineDeepStateLayer } from './ukraineDeepStateLayer.js';
 import { createUkraineTimeline, parseShareParams } from './ukraineTimeline.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
@@ -667,7 +668,11 @@ async function init() {
     // zóny; snímka sleduje deň kurzora časovej osi.
     const ukraineControl = createUkraineControlLayer({ viewer });
     window.__godsEyeView.ukraineControl = ukraineControl;
-    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl });
+    // DeepState (2026-09-19, hobby použitie, súhlas sa žiada): polygóny okupácie
+    // a šedej zóny z nášho denného archívu; časová os prepína snímku podľa dňa.
+    const ukraineDeepState = createUkraineDeepStateLayer({ viewer });
+    window.__godsEyeView.ukraineDeepState = ukraineDeepState;
+    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl, deepstate: ukraineDeepState });
     window.__godsEyeView.ukraineTimeline = ukraineTimeline;
     let ukrainePanel = null;
     const runFrontScene = (id) => {
@@ -681,6 +686,7 @@ async function init() {
         incidentCards.clear();
         ukraineTimeline.show();
         void ukraineTimeline.showControl();
+        void ukraineTimeline.showDeepState();
       }
       return applyFrontScene(id, frontSceneDeps);
     };
@@ -690,6 +696,7 @@ async function init() {
       report: ukraineReport,
       timeline: ukraineTimeline,
       control: ukraineControl,
+      deepstate: ukraineDeepState,
       applyScene: (id) => runFrontScene(id),
     });
     window.__godsEyeView.ukrainePanel = ukrainePanel;

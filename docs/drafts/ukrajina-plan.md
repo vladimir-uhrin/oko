@@ -23,8 +23,16 @@ overuje znova podľa `new-data-layer`.
 - Vojnové požiare The Economist (CC BY 4.0, 454 333 bodov od 2022) ako typ `hotspot` — body bez karty.
 - DeepState: API a mirrory NIE (licencia §2); ich Telegram kanál `DeepStateUA` v páse médií
   (licencia §3: vizuály s logom/odkazom voľné) — odpoveď na otázku používateľa.
-- Otvorené: 4A DeepState API (žiadosť používateľa), 4B Black Bird Group (e-mail), 5 (súhlasy),
-  6 alerts.in.ua (token). Nepublikované.
+- **4A predbežne (používateľ 09-19: „OKO nie je biznis, ale hobby pre mňa a môj FB profil —
+  pridaj zatiaľ všetko, čo vieš, a požiadame DeepState o súhlas")**: `/api/history/last` sa
+  archivuje raz denne (história API je za autorizáciou → naša od 19. 9. 2026), čistý model
+  `src/data/ukraineDeepState.js` (bez jednotiek, bez cudzích území), vrstva
+  `src/ukraineDeepStateLayer.js` (polygóny okupované/šedá/oslobodené/od 2014 + smery útokov +
+  letiská), os prepína snímku podľa dňa, legenda „stav k … · nekomerčné hobby použitie, súhlas sa
+  žiada", zóny Wikipédie sa pri DeepState skryjú. Žiadosť: formulár (Tally) má predvyplnené meno,
+  e-mail a typ „nekomerčný"; popis, reCAPTCHA a odoslanie = používateľ (formulár zakazuje text
+  písaný AI). Pri zamietnutí vrstvu, úlohu a archív zmazať (`UKRAINE_DEEPSTATE=off` vypne hneď).
+- Otvorené: 4B Black Bird Group (e-mail), 5 (súhlasy), 6 alerts.in.ua (token). Nepublikované.
 
 ### Etapa 3 (používateľ: „ako na obrázku, určite časovú os … 1 až 5", potom „fotky z čo najviac zdrojov, aj videá, všetko ukladať") — hotové a overené v pane
 

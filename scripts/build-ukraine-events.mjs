@@ -18,7 +18,7 @@
 // nechce — preto len 90 dní); ArmyInform 1,5 s medzi článkami. Bez kľúčov.
 import {
   GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, backfillReports, collectMedia, controlBackfill, controlSnapshot, dayKey, dayShift,
-  firesRefresh, geoconfirmedRefresh, viinaStatus, viinaYear,
+  deepstateSnapshot, firesRefresh, geoconfirmedRefresh, viinaStatus, viinaYear,
 } from './lib/ukraineArchive.mjs';
 
 const args = process.argv.slice(2);
@@ -30,8 +30,8 @@ const now = Date.now();
 const log = (m) => console.log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-if (!all && !has('--viina') && !has('--geoconfirmed') && !has('--reports') && !has('--media') && !has('--control') && !has('--control-history') && !has('--fires')) {
-  console.log('usage: node scripts/build-ukraine-events.mjs --all | --viina [--years 2022-2026] [--force] | --geoconfirmed [--days 90] | --reports [--pages 6] | --media | --control | --control-history [--step 7] | --fires');
+if (!all && !has('--viina') && !has('--geoconfirmed') && !has('--reports') && !has('--media') && !has('--control') && !has('--control-history') && !has('--fires') && !has('--deepstate')) {
+  console.log('usage: node scripts/build-ukraine-events.mjs --all | --viina [--years 2022-2026] [--force] | --geoconfirmed [--days 90] | --reports [--pages 6] | --media | --control | --control-history [--step 7] | --fires | --deepstate');
   process.exit(2);
 }
 
@@ -45,6 +45,12 @@ if (all || has('--control-history')) {
   const step = Math.max(1, Math.min(60, Number(val('--step', 7)) || 7));
   const r = await controlBackfill(root, { now, stepDays: step, log });
   log(`Kontrola (história po ${step} d): nových ${r.done}, existujúcich ${r.skipped}`);
+}
+
+// DeepStateMap.live (nekomerčné hobby použitie, súhlas sa žiada): posledná snímka.
+if (all || has('--deepstate')) {
+  const r = await deepstateSnapshot(root, { now, force: has('--force'), log });
+  log(`DeepState: ${r.status}${r.day ? ' (deň ' + r.day + ', ' + (r.features ?? '?') + ' prvkov)' : ''}${r.error ? ' — ' + r.error : ''}`);
 }
 
 // Vojnové požiare (The Economist war-fire model, CC BY 4.0): jeden 70 MB CSV.

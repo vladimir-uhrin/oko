@@ -66,6 +66,7 @@ export function createUkraineTimeline({
   clock = createTimelineClock(),
   report = null,
   control = null,
+  deepstate = null,
   mountTarget = null,
   translate = t,
   lang = currentLanguage(),
@@ -155,6 +156,25 @@ export function createUkraineTimeline({
     ctlBox.appendChild(ctlCounts);
     row3.appendChild(ctlBox);
   }
+  // DeepState (hobby použitie, súhlas sa žiada): čip + legenda + „stav k" + plochy.
+  let dsChip = null; let dsLine = null; let dsArea = null;
+  if (deepstate) {
+    const dsBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-ds');
+    dsChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.deepstate'), () => { if (deepstate.isShown()) deepstate.hide(); else void showDeepState(); }, translate('ukraine.ds.note'));
+    dsChip.setAttribute('aria-pressed', 'false');
+    dsBox.appendChild(dsChip);
+    const sw = (cls, text) => { const s = el('span', `oko-ukr-tl-ctl-item ${cls}`); s.appendChild(el('i', 'oko-ukr-tl-ctl-sw')); s.appendChild(el('span', '', text)); return s; };
+    dsBox.appendChild(sw('is-ds-occupied', translate('ukraine.ds.occupied')));
+    dsBox.appendChild(sw('is-ds-grey', translate('ukraine.ds.grey')));
+    dsBox.appendChild(sw('is-ds-liberated', translate('ukraine.ds.liberated')));
+    dsBox.appendChild(sw('is-ds-attack', translate('ukraine.ds.attack')));
+    dsBox.appendChild(sw('is-ds-airfield', translate('ukraine.ds.airfield')));
+    dsLine = el('span', 'oko-ukr-tl-ctl-since', '');
+    dsBox.appendChild(dsLine);
+    dsArea = el('span', 'oko-ukr-tl-ctl-counts', '');
+    dsBox.appendChild(dsArea);
+    row3.appendChild(dsBox);
+  }
   const legend = el('div', 'oko-ukr-tl-legend');
   legend.setAttribute('role', 'group');
   legend.setAttribute('aria-label', translate('ukraine.tl.legend'));
@@ -223,6 +243,7 @@ export function createUkraineTimeline({
       status.dataset.state = _error ? 'error' : 'ready';
       applyReport(state);
       void applyControl(state);
+      void applyDeepState(state);
       renderLegend(); renderMedia(); renderCounts(); drawHistogram(); drawCoverage();
       emit();
       return result;
@@ -269,6 +290,43 @@ export function createUkraineTimeline({
     if (!control) return;
     await control.show({ load: false }); // onChange nižšie natiahne snímku; tu len poistka pre ten istý deň
     await applyControl(clock.getState());
+  }
+  /** Snímka DeepState pre deň kurzora; pred 19. 9. 2026 história nie je (API histórie za autorizáciou). */
+  let _deepstateDay = null;
+  async function applyDeepState(state) {
+    if (!deepstate || !deepstate.isShown()) return;
+    const day = dayKey(state.mode === 'live' ? state.now : state.cursor);
+    if (day === _deepstateDay) return;
+    _deepstateDay = day;
+    try {
+      const snap = await store.deepstate(day);
+      if (_destroyed || _deepstateDay !== day) return;
+      deepstate.setSnapshot(snap);
+    } catch (error) {
+      if (_destroyed) return;
+      deepstate.setSnapshot(null);
+      if (dsLine) dsLine.textContent = error?.status === 404 ? translate('ukraine.ds.missing') : translate('ukraine.tl.error', { detail: error?.message || error });
+    }
+    renderDeepState();
+  }
+  async function showDeepState() {
+    if (!deepstate) return;
+    await deepstate.show({ load: false });
+    await applyDeepState(clock.getState());
+  }
+  function renderDeepState() {
+    if (!deepstate || !dsChip) return;
+    const st = deepstate.getState();
+    dsChip.classList.toggle('active', st.shown);
+    dsChip.setAttribute('aria-pressed', String(st.shown));
+    // Kým sú polygóny DeepState zapnuté, odvodený raster z Wikipédie sa skryje
+    // (dve výplne nad sebou by boli neprehľadné); body Wikipédie ostávajú.
+    control?.setZonesVisible?.(!st.shown);
+    if (!st.shown) { dsLine.textContent = ''; dsArea.textContent = ''; return; }
+    if (st.at) dsLine.textContent = translate('ukraine.ds.since', { date: st.stampText });
+    else if (!st.loading && !dsLine.textContent) dsLine.textContent = translate('ukraine.ds.missing');
+    const a = st.areaKm2;
+    dsArea.textContent = a ? translate('ukraine.ds.area', { occupied: nf.format(Math.round(a.occupied || 0)), grey: nf.format(Math.round(a.grey || 0)) }) : '';
   }
   function renderControl() {
     if (!control || !ctlChip) return;
@@ -438,6 +496,12 @@ export function createUkraineTimeline({
     const st = control.getState();
     if (!st.points && !st.loading) void applyControl(clock.getState());
   }) || null;
+  const unsubscribeDeepState = deepstate?.onChange?.(() => {
+    renderDeepState();
+    if (!deepstate.isShown()) { _deepstateDay = null; return; }
+    const st = deepstate.getState();
+    if (!st.features && !st.loading) void applyDeepState(clock.getState());
+  }) || null;
 
   async function share() {
     const url = shareUrl({ origin, front: _activeScene || 'front', state: clock.getState() });
@@ -509,16 +573,16 @@ export function createUkraineTimeline({
   function destroy() {
     _destroyed = true;
     hide();
-    unsubscribeClock?.(); unsubscribeLayer?.(); unsubscribeControl?.();
+    unsubscribeClock?.(); unsubscribeLayer?.(); unsubscribeControl?.(); unsubscribeDeepState?.();
     try { root.remove(); } catch { /* */ }
     listeners.clear();
   }
 
   return {
     element: root,
-    show, hide, isShown: () => _shown, setActiveScene, refresh: () => load(), getState, share, clock, store, showControl,
+    show, hide, isShown: () => _shown, setActiveScene, refresh: () => load(), getState, share, clock, store, showControl, showDeepState,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlCounts }),
+    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlCounts, dsChip, dsLine, dsArea }),
   };
 }

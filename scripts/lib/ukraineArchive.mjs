@@ -21,6 +21,7 @@ import {
 } from '../../src/data/ukraineMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from '../../src/data/ukraineReport.js';
 import { WIKI_DETAILED_TITLE, WIKI_OVERVIEW_TITLE, controlPointsFromModules, controlSummary } from '../../src/data/ukraineControl.js';
+import { DEEPSTATE_ATTRIBUTION, DEEPSTATE_LAST_URL, deepstateSnapshotFromApi } from '../../src/data/ukraineDeepState.js';
 
 export const VIINA_FIRST_YEAR = 2022;
 export const GEOCONFIRMED_EXPORT = 'https://geoconfirmed.org/api/Map/export/Ukraine/csv';
@@ -570,6 +571,47 @@ export async function firesRefresh(root, { fetchImpl = fetch, now = Date.now(), 
 }
 export const firesEvents = (root, from, to) => readRangeItems(root, 'fires', from, to);
 export async function firesIndex(root) { return (await readJson(firesMetaFile(root)))?.days || {}; }
+
+// ── DeepStateMap.live (nekomerčné hobby použitie, súhlas sa žiada) ────────
+// `/api/history/last` odpovedá bez kľúča; história je za autorizáciou (401 —
+// overené 2026-09-19), preto si dni archivujeme sami. Jeden dopyt za hodinu.
+const deepstateDir = (root) => path.join(archiveDir(root), 'deepstate');
+const deepstateFile = (root, day) => path.join(deepstateDir(root), `${day}.json`);
+/**
+ * Stiahne poslednú snímku, prevedie čistým modelom (bez jednotiek) a uloží pod
+ * DEŇ snímky (z `id`); nezmenené `id` = nič nové. `maxAgeMs` chráni pred
+ * častejším sťahovaním než raz za hodinu.
+ */
+export async function deepstateSnapshot(root, { fetchImpl = fetch, now = Date.now(), force = false, maxAgeMs = 60 * 60_000, log = () => {} } = {}) {
+  const metaFile = path.join(deepstateDir(root), 'meta.json');
+  const meta = (await readJson(metaFile)) || {};
+  if (!force && Number.isFinite(meta.fetchedAt) && now - meta.fetchedAt < maxAgeMs) return { status: 'fresh', day: meta.lastDay || null, id: meta.lastId || null };
+  const started = Date.now();
+  try {
+    const { res, body } = await fetchCapped(fetchImpl, DEEPSTATE_LAST_URL, { timeoutMs: 60_000, maxBytes: 20 * 1024 * 1024, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const snapshot = deepstateSnapshotFromApi(JSON.parse(body));
+    if (!snapshot.day || !snapshot.features.length) throw new Error('no usable features');
+    const changed = snapshot.id !== meta.lastId;
+    if (changed) await writeJsonAtomic(deepstateFile(root, snapshot.day), { ...snapshot, kind: 'deepstate', fetchedAt: now, source: DEEPSTATE_LAST_URL, attribution: DEEPSTATE_ATTRIBUTION, use: 'non-commercial hobby use; consent requested from DeepState (licence §2); units omitted' });
+    await writeJsonAtomic(metaFile, { fetchedAt: now, lastId: snapshot.id, lastDay: snapshot.day, lastAt: snapshot.at, bytes: body.length });
+    log(`[ukraine-events] deepstate: ${changed ? 'new' : 'unchanged'} snapshot ${snapshot.day} (id ${snapshot.id}, ${snapshot.features.length} features, ${body.length} B) in ${Date.now() - started} ms`);
+    return { status: changed ? 'updated' : 'not-modified', day: snapshot.day, id: snapshot.id, features: snapshot.features.length };
+  } catch (error) {
+    log(`[ukraine-events] deepstate failed: ${error?.message || error}`);
+    return { status: meta.lastDay ? 'stale' : 'error', day: meta.lastDay || null, error: String(error?.message || error) };
+  }
+}
+export async function deepstateDays(root) {
+  try { return (await fsp.readdir(deepstateDir(root))).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).map((f) => f.slice(0, 10)).sort(); } catch { return []; }
+}
+/** Snímka platná pre deň: posledná so dňom ≤ `day`, alebo null. */
+export async function deepstateFor(root, day, { days = null } = {}) {
+  const list = days || await deepstateDays(root);
+  let pick = null;
+  for (const d of list) { if (d <= day) pick = d; else break; }
+  return pick ? readJson(deepstateFile(root, pick)) : null;
+}
 
 // Re-export pre CLI a plugin (deň z ms a späť), aby nemuseli siahať do src/data.
 export { dayKey, dayToMs } from "../../src/data/ukraineEvents.js";

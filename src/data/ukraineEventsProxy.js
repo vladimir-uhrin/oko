@@ -27,14 +27,14 @@ import zlib from 'node:zlib';
 
 import {
   GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, archiveReport, collectMedia, controlDays, controlFor, controlSnapshot, dayKey, dayList, dayShift,
-  eventsPayload, firesRefresh, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
+  deepstateDays, deepstateFor, deepstateSnapshot, eventsPayload, firesRefresh, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
 } from '../../scripts/lib/ukraineArchive.mjs';
 
 export const EVENTS_MAX_DAYS = 31;
 export const SUMMARY_MAX_DAYS = 1900;
 const MIN = 60_000;
-const TICK_MS = { news: 15 * MIN, media: 15 * MIN, report: 60 * MIN, geoconfirmed: 6 * 60 * MIN, viina: 6 * 60 * MIN, control: 6 * 60 * MIN, fires: 6 * 60 * MIN };
-const FIRST_DELAY_MS = { news: 20_000, media: 45_000, report: 70_000, geoconfirmed: 100_000, viina: 130_000, control: 160_000, fires: 200_000 };
+const TICK_MS = { news: 15 * MIN, media: 15 * MIN, report: 60 * MIN, geoconfirmed: 6 * 60 * MIN, viina: 6 * 60 * MIN, control: 6 * 60 * MIN, fires: 6 * 60 * MIN, deepstate: 60 * MIN };
+const FIRST_DELAY_MS = { news: 20_000, media: 45_000, report: 70_000, geoconfirmed: 100_000, viina: 130_000, control: 160_000, fires: 200_000, deepstate: 90_000 };
 const UNFURL_PER_TICK = 25;
 
 function simpleLimiter({ windowMs, max }) {
@@ -130,8 +130,18 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
     },
     // Vojnové požiare (Economist): 70 MB CSV, ETag → 304 keď sa nič nezmenilo.
     async fires() { return firesRefresh(root, { fetchImpl, now: now(), log }); },
+    // DeepStateMap.live: posledná snímka raz za hodinu (nekomerčné hobby použitie,
+    // súhlas sa žiada; `UKRAINE_DEEPSTATE=off` vypne); história = naše denné súbory.
+    async deepstate() {
+      if (deepstateOff) return { status: 'disabled' };
+      const r = await deepstateSnapshot(root, { fetchImpl, now: now(), log });
+      if (r.status === 'updated') deepstateCache.clear();
+      return r;
+    },
   };
+  const deepstateOff = String(env.UKRAINE_DEEPSTATE || '').toLowerCase() === 'off';
   const controlCache = new Map(); // deň -> { at, json }
+  const deepstateCache = new Map();
 
   async function tick(name) {
     if (state.running[name]) return;
@@ -182,6 +192,22 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       return;
     }
     if (!limiter(clientKey(req))) { send(res, 429, { error: 'rate_limited' }, req); return; }
+    if (sub === '/deepstate') {
+      const at = url.searchParams.get('at') || dayKey(now());
+      if (!isDay(at)) { send(res, 400, { error: 'bad_day' }, req); return; }
+      const hit = deepstateCache.get(at);
+      if (hit && now() - hit.at < 10 * MIN) { send(res, 200, hit.json, req); return; }
+      try {
+        const days = await deepstateDays(root);
+        const snapshot = await deepstateFor(root, at, { days });
+        if (!snapshot) { send(res, 404, { error: 'no_deepstate_snapshot', at, days: days.length, disabled: deepstateOff }, req); return; }
+        const json = { ...snapshot, requestedAt: at, snapshots: days.length, first: days[0] || null, last: days.at(-1) || null };
+        deepstateCache.set(at, { at: now(), json });
+        if (deepstateCache.size > 64) deepstateCache.delete(deepstateCache.keys().next().value);
+        send(res, 200, json, req);
+      } catch (error) { send(res, 500, { error: 'archive_read_failed', detail: String(error?.message || error) }, req); }
+      return;
+    }
     if (sub === '/control') {
       // Snímka kontroly platná pre deň `at` (posledná so dňom ≤ at); bez `at` = dnes.
       const at = url.searchParams.get('at') || dayKey(now());

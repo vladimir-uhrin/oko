@@ -124,9 +124,9 @@ test('validácia rozsahu, metóda, vypnutý archivár, časovače', async () => 
   assert.equal(res.out.status, 405);
   const on = ukraineEventsProxy({ root, env: {}, fetchImpl: async () => { throw new Error('no network'); }, now: () => NOW, setTimer: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimer: (id) => cleared.push(id), log: () => {} });
   on._start('http://127.0.0.1:4173');
-  assert.equal(timers.length, 7, 'sedem úloh naplánovaných (správy, médiá, GŠ, GeoConfirmed, VIINA, kontrola, požiare)');
+  assert.equal(timers.length, 8, 'osem úloh naplánovaných (správy, médiá, GŠ, GeoConfirmed, VIINA, kontrola, požiare, DeepState)');
   on._stop();
-  assert.equal(cleared.length >= 7, true);
+  assert.equal(cleared.length >= 8, true);
   await on._tick('news');
   assert.match(on._state.last.news.error, /no network/);
   assert.equal(on._state.errors.length, 1);

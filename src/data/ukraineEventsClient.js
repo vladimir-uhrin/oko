@@ -67,6 +67,13 @@ export async function fetchUkraineControl(day, { fetcher = (...a) => fetch(...a)
   if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; throw err; }
   return json;
 }
+/** Snímka DeepState platná pre deň (náš denný archív) z proxy. */
+export async function fetchUkraineDeepState(day, { fetcher = (...a) => fetch(...a), base = UKRAINE_EVENTS_API } = {}) {
+  const response = await fetcher(`${base}/deepstate?at=${encodeURIComponent(day)}`, { cache: 'no-store' });
+  const json = await response.json().catch(() => null);
+  if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; throw err; }
+  return json;
+}
 
 /** Médiá okna (na pás fotiek/videí): všetky médiá udalostí + samostatné, od najnovšieho. Pure. */
 export function mediaInWindow(events) {
@@ -94,10 +101,11 @@ export async function fetchUkraineSummary(from, to, { fetcher = (...a) => fetch(
  * Sklad: kusy sa cachujú (dnešný kus 60 s, minulé kusy 30 min — archivár ich
  * ešte dopĺňa obrázkami), súhrny 10 min. `load` skladá model okna.
  */
-export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, fetchControl = fetchUkraineControl, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, controlTtlMs = 60 * 60_000, maxChunks = 40 } = {}) {
+export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, fetchControl = fetchUkraineControl, fetchDeepState = fetchUkraineDeepState, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, controlTtlMs = 60 * 60_000, maxChunks = 40 } = {}) {
   const chunks = new Map(); // `${from}:${to}` -> { at, payload, promise }
   const summaries = new Map();
   const controls = new Map(); // deň -> { at, payload } (snímka platná pre deň)
+  const deepstates = new Map();
   const evict = (map, max) => { while (map.size > max) map.delete(map.keys().next().value); };
 
   function chunkFor(range) {
@@ -155,6 +163,18 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
     return payload;
   }
 
+  /** Snímka DeepState pre deň (rovnaká cache logika ako kontrola). */
+  async function deepstate(dayOrMs) {
+    const day = typeof dayOrMs === 'string' ? dayOrMs : dayKey(dayOrMs);
+    const hit = deepstates.get(day);
+    if (hit && now() - hit.at < controlTtlMs) return hit.payload;
+    const payload = await fetchDeepState(day);
+    deepstates.set(day, { at: now(), payload });
+    if (payload?.day && payload.day !== day) deepstates.set(payload.day, { at: now(), payload });
+    evict(deepstates, 24);
+    return payload;
+  }
+
   /** Hlásenie GŠ pre deň kurzora (najbližší predchádzajúci deň s hlásením do 3 dní). */
   function reportForDay(reports, ms) {
     for (let back = 0; back <= 3; back += 1) {
@@ -164,5 +184,5 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
     return null;
   }
 
-  return { load, summary, control, reportForDay, chunkRanges, _chunks: chunks };
+  return { load, summary, control, deepstate, reportForDay, chunkRanges, _chunks: chunks };
 }

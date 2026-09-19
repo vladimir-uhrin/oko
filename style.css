@@ -11650,3 +11650,9 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-since { color: #cfe3f5; }
 .oko-ukr-tl-ctl-counts { color: #8aa0b6; }
 .oko-ukr-tl-ctl-chip { font-weight: 700; letter-spacing: 0.06em; }
+/* DeepState legenda: okupované výplň, šedá zóna, oslobodené, smer útoku, letisko */
+.oko-ukr-tl-ctl-item.is-ds-occupied .oko-ukr-tl-ctl-sw { background: rgba(224, 85, 63, 0.32); border-color: rgba(224, 85, 63, 0.9); }
+.oko-ukr-tl-ctl-item.is-ds-grey .oko-ukr-tl-ctl-sw { background: rgba(184, 178, 170, 0.35); border-color: rgba(184, 178, 170, 0.8); }
+.oko-ukr-tl-ctl-item.is-ds-liberated .oko-ukr-tl-ctl-sw { background: rgba(79, 163, 255, 0.18); border-color: rgba(79, 163, 255, 0.9); }
+.oko-ukr-tl-ctl-item.is-ds-attack .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #ffb547; border-color: #0b1622; }
+.oko-ukr-tl-ctl-item.is-ds-airfield .oko-ukr-tl-ctl-sw { width: 8px; height: 8px; border-radius: 50%; background: #d9a066; border-color: #0b1622; }

@@ -33,6 +33,7 @@ export function createUkrainePanel({
   report = null,
   timeline = null,
   control = null,
+  deepstate = null,
   scenes = listFrontScenes(),
   applyScene = null,
   translate = t,
@@ -103,6 +104,20 @@ export function createUkrainePanel({
     controlChip.setAttribute('aria-pressed', 'false');
     controlChip.title = translate('ukraine.ctl.note');
     chips.appendChild(controlChip);
+  }
+  // Čip DEEPSTATE (2026-09-19): polygóny okupácie/šedej zóny z DeepStateMap.live
+  // (nekomerčné hobby použitie, súhlas sa žiada).
+  let deepstateChip = null;
+  if (deepstate) {
+    deepstateChip = button('data-toggle-chip ukraine-chip ukraine-chip-deepstate', translate('ukraine.part.deepstate'), () => {
+      if (deepstate.isShown()) deepstate.hide();
+      else if (timeline?.showDeepState) void timeline.showDeepState();
+      else void deepstate.show();
+    });
+    deepstateChip.dataset.part = 'deepstate';
+    deepstateChip.setAttribute('aria-pressed', 'false');
+    deepstateChip.title = translate('ukraine.ds.note');
+    chips.appendChild(deepstateChip);
   }
   let eventsChip = null;
   if (timeline) {
@@ -262,6 +277,14 @@ export function createUkrainePanel({
   };
   const unsubscribeControl = control?.onChange?.(() => updateControlChip()) || null;
   updateControlChip();
+  const updateDeepStateChip = () => {
+    if (!deepstateChip) return;
+    const on = Boolean(deepstate?.isShown?.());
+    deepstateChip.classList?.toggle?.('active', on);
+    deepstateChip.setAttribute('aria-pressed', String(on));
+  };
+  const unsubscribeDeepState = deepstate?.onChange?.(() => updateDeepStateChip()) || null;
+  updateDeepStateChip();
   update();
   updateReport();
   // Dátum snímku je lacný a hovorí, či snímok vôbec existuje — ťahá sa hneď.
@@ -274,6 +297,6 @@ export function createUkrainePanel({
     updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); mountTarget.replaceChildren(); },
   };
 }

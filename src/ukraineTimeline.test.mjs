@@ -99,7 +99,21 @@ test('os: kostra, LIVE → prehrávanie, načítanie do vrstvy, legenda/filter, 
   };
   const controlCalls = [];
   store.control = async (day) => { controlCalls.push(day); if (day < '2026-09-01') { const e = new Error('no'); e.status = 404; throw e; } return { day: '2026-09-15', revisionAt: '2026-09-15T10:00:00Z', points: [{ lat: 48, lon: 37 }], summary: { settlements: { ua: 2, ru: 1, contested: 1 } } }; };
-  const tl = createUkraineTimeline({ layer, store, clock, report, control, translate: (k, v) => (v ? `${k} ${JSON.stringify(v)}` : k), lang: 'sk', documentRef: doc, now: () => now, setTimer, clearTimer: () => {}, clipboard: clip, origin: 'https://oko.test' });
+  // DeepState: falošná vrstva; kým je zapnutá, zóny Wikipédie sa skryjú
+  const dsListeners = new Set();
+  let dsShown = false; let dsSnapshot = null;
+  const deepstate = {
+    isShown: () => dsShown,
+    async show() { dsShown = true; for (const fn of dsListeners) fn(); },
+    hide() { dsShown = false; dsSnapshot = null; for (const fn of dsListeners) fn(); },
+    setSnapshot(s) { dsSnapshot = s; for (const fn of dsListeners) fn(); },
+    getState: () => ({ shown: dsShown, loading: false, features: dsSnapshot?.features?.length || 0, at: dsSnapshot?.at || null, stampText: dsSnapshot ? '18.9.2026 19:25 UTC' : '', areaKm2: dsSnapshot?.areaKm2 || null }),
+    onChange(fn) { dsListeners.add(fn); return () => dsListeners.delete(fn); },
+  };
+  const zonesCalls = [];
+  control.setZonesVisible = (on) => zonesCalls.push(on);
+  store.deepstate = async (day) => { if (day < '2026-09-18') { const e = new Error('no'); e.status = 404; throw e; } return { day: '2026-09-18', at: '2026-09-18T19:25:38.000Z', features: [{ kind: 'occupied' }], areaKm2: { occupied: 72941, grey: 1674 } }; };
+  const tl = createUkraineTimeline({ layer, store, clock, report, control, deepstate, translate: (k, v) => (v ? `${k} ${JSON.stringify(v)}` : k), lang: 'sk', documentRef: doc, now: () => now, setTimer, clearTimer: () => {}, clipboard: clip, origin: 'https://oko.test' });
   assert.equal(doc.body.children.length, 1);
   const { root, legendBtns, mediaStrip, counts, winBtns, modeBtn } = tl._getStateForTest();
   assert.equal(root.hidden, true);
@@ -171,6 +185,24 @@ test('os: kostra, LIVE → prehrávanie, načítanie do vrstvy, legenda/filter, 
   assert.equal(ctlLine.textContent, 'ukraine.ctl.missing');
   ctlChip.click();
   assert.equal(ctlShown, false);
+  // DeepState: zapnutie natiahne snímku pre deň kurzora (1. 8. 2026 → 404 = chýba), návrat do LIVE → snímka z 18. 9.
+  const { dsChip, dsLine, dsArea } = tl._getStateForTest();
+  await tl.showDeepState();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(dsShown, true);
+  assert.equal(dsChip.getAttribute('aria-pressed'), 'true');
+  assert.equal(dsLine.textContent, 'ukraine.ds.missing', 'pre august 2026 niet snímky');
+  assert.ok(zonesCalls.includes(false), 'zóny Wikipédie sa pri DeepState skryjú');
+  clock.setMode('live');
+  await timers.filter((t) => t.ms === 0).at(-1).fn();
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(dsSnapshot?.day, '2026-09-18');
+  assert.ok(dsLine.textContent.includes('ukraine.ds.since'), dsLine.textContent);
+  assert.match(dsArea.textContent, /"occupied":"72[\s ]941"/, dsArea.textContent); // sk-SK oddeľovač tisícov je úzka medzera
+  dsChip.click();
+  assert.equal(dsShown, false);
+  assert.equal(zonesCalls.at(-1), true, 'po vypnutí DeepState sa zóny Wikipédie vrátia');
   tl.hide();
   assert.equal(root.hidden, true);
   assert.equal(layer.isShown(), false);
