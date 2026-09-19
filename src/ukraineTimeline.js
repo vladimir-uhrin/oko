@@ -65,6 +65,7 @@ export function createUkraineTimeline({
   store = createUkraineEventStore(),
   clock = createTimelineClock(),
   report = null,
+  control = null,
   mountTarget = null,
   translate = t,
   lang = currentLanguage(),
@@ -135,6 +136,25 @@ export function createUkraineTimeline({
   root.appendChild(track);
 
   const row3 = el('div', 'oko-ukr-tl-row oko-ukr-tl-row3');
+  // Územná kontrola (etapa 4C): čip KONTROLA + legenda RU výplň / zóna bojov / body,
+  // „stav k <revízia> · podľa Wikipédie" — snímka sleduje deň kurzora.
+  let ctlChip = null; let ctlLine = null; let ctlCounts = null;
+  if (control) {
+    const ctlBox = el('div', 'oko-ukr-tl-ctl');
+    ctlChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.control'), () => { if (control.isShown()) control.hide(); else void showControl(); }, translate('ukraine.ctl.note'));
+    ctlChip.setAttribute('aria-pressed', 'false');
+    ctlBox.appendChild(ctlChip);
+    const sw = (cls, text) => { const s = el('span', `oko-ukr-tl-ctl-item ${cls}`); s.appendChild(el('i', 'oko-ukr-tl-ctl-sw')); s.appendChild(el('span', '', text)); return s; };
+    ctlBox.appendChild(sw('is-ru', translate('ukraine.ctl.ru')));
+    ctlBox.appendChild(sw('is-zone', translate('ukraine.ctl.zone')));
+    ctlBox.appendChild(sw('is-ua', translate('ukraine.ctl.ua')));
+    ctlBox.appendChild(sw('is-contested', translate('ukraine.ctl.contested')));
+    ctlLine = el('span', 'oko-ukr-tl-ctl-since', '');
+    ctlBox.appendChild(ctlLine);
+    ctlCounts = el('span', 'oko-ukr-tl-ctl-counts', '');
+    ctlBox.appendChild(ctlCounts);
+    row3.appendChild(ctlBox);
+  }
   const legend = el('div', 'oko-ukr-tl-legend');
   legend.setAttribute('role', 'group');
   legend.setAttribute('aria-label', translate('ukraine.tl.legend'));
@@ -202,6 +222,7 @@ export function createUkraineTimeline({
       status.textContent = _error ? translate('ukraine.tl.error', { detail: _error }) : '';
       status.dataset.state = _error ? 'error' : 'ready';
       applyReport(state);
+      void applyControl(state);
       renderLegend(); renderMedia(); renderCounts(); drawHistogram(); drawCoverage();
       emit();
       return result;
@@ -225,6 +246,40 @@ export function createUkraineTimeline({
     if (!report?.setOverride) return;
     if (state.mode === 'live') { report.setOverride(null); return; }
     report.setOverride(store.reportForDay(_reports, state.cursor));
+  }
+  /** Snímka kontroly pre deň kurzora (LIVE = dnes); chýbajúca snímka = poctivý text. */
+  let _controlDay = null;
+  async function applyControl(state) {
+    if (!control || !control.isShown()) return;
+    const day = dayKey(state.mode === 'live' ? state.now : state.cursor);
+    if (day === _controlDay) return;
+    _controlDay = day;
+    try {
+      const snap = await store.control(day);
+      if (_destroyed || _controlDay !== day) return;
+      control.setSnapshot(snap);
+    } catch (error) {
+      if (_destroyed) return;
+      control.setSnapshot(null);
+      if (ctlLine) ctlLine.textContent = error?.status === 404 ? translate('ukraine.ctl.missing') : translate('ukraine.tl.error', { detail: error?.message || error });
+    }
+    renderControl();
+  }
+  async function showControl() {
+    if (!control) return;
+    await control.show({ load: false }); // onChange nižšie natiahne snímku; tu len poistka pre ten istý deň
+    await applyControl(clock.getState());
+  }
+  function renderControl() {
+    if (!control || !ctlChip) return;
+    const st = control.getState();
+    ctlChip.classList.toggle('active', st.shown);
+    ctlChip.setAttribute('aria-pressed', String(st.shown));
+    if (!st.shown) { ctlLine.textContent = ''; ctlCounts.textContent = ''; return; }
+    if (st.revisionAt) ctlLine.textContent = translate('ukraine.ctl.since', { date: shortDay(String(st.revisionAt).slice(0, 10)) + String(st.revisionAt).slice(0, 4) });
+    else if (!st.loading && !ctlLine.textContent) ctlLine.textContent = translate('ukraine.ctl.missing');
+    const s = st.summary?.settlements;
+    ctlCounts.textContent = s ? translate('ukraine.ctl.counts', { ua: nf.format(s.ua), ru: nf.format(s.ru), contested: nf.format(s.contested) }) : '';
   }
 
   // ── vykreslenie ──────────────────────────────────────────────────────────
@@ -377,6 +432,12 @@ export function createUkraineTimeline({
     if (reason === 'mode' || reason === 'cursor' || reason === 'window' || reason === 'end' || reason === 'play') scheduleLoad(reason === 'cursor' ? SCRUB_DEBOUNCE_MS : 0);
   });
   const unsubscribeLayer = layer.onChange(() => { if (_shown) renderCounts(); });
+  const unsubscribeControl = control?.onChange?.(() => {
+    renderControl();
+    if (!control.isShown()) { _controlDay = null; return; } // po skrytí sa pri ďalšom zapnutí snímka natiahne znova
+    const st = control.getState();
+    if (!st.points && !st.loading) void applyControl(clock.getState());
+  }) || null;
 
   async function share() {
     const url = shareUrl({ origin, front: _activeScene || 'front', state: clock.getState() });
@@ -448,16 +509,16 @@ export function createUkraineTimeline({
   function destroy() {
     _destroyed = true;
     hide();
-    unsubscribeClock?.(); unsubscribeLayer?.();
+    unsubscribeClock?.(); unsubscribeLayer?.(); unsubscribeControl?.();
     try { root.remove(); } catch { /* */ }
     listeners.clear();
   }
 
   return {
     element: root,
-    show, hide, isShown: () => _shown, setActiveScene, refresh: () => load(), getState, share, clock, store,
+    show, hide, isShown: () => _shown, setActiveScene, refresh: () => load(), getState, share, clock, store, showControl,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn }),
+    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlCounts }),
   };
 }

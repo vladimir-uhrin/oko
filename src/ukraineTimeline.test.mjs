@@ -86,7 +86,20 @@ test('os: kostra, LIVE → prehrávanie, načítanie do vrstvy, legenda/filter, 
   const timers = [];
   const setTimer = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
   const clip = { text: null, async writeText(s) { this.text = s; } };
-  const tl = createUkraineTimeline({ layer, store, clock, report, translate: (k, v) => (v ? `${k} ${JSON.stringify(v)}` : k), lang: 'sk', documentRef: doc, raf: () => 1, caf: () => {}, now: () => now, setTimer, clearTimer: () => {}, clipboard: clip, origin: 'https://oko.test' });
+  // kontrola: falošná vrstva + falošná snímka zo skladu
+  const ctlListeners = new Set();
+  let ctlShown = false; let ctlSnapshot = null;
+  const control = {
+    isShown: () => ctlShown,
+    async show() { ctlShown = true; for (const fn of ctlListeners) fn(); },
+    hide() { ctlShown = false; ctlSnapshot = null; for (const fn of ctlListeners) fn(); },
+    setSnapshot(s) { ctlSnapshot = s; for (const fn of ctlListeners) fn(); },
+    getState: () => ({ shown: ctlShown, loading: false, points: ctlSnapshot?.points?.length || 0, revisionAt: ctlSnapshot?.revisionAt || null, summary: ctlSnapshot?.summary || null }),
+    onChange(fn) { ctlListeners.add(fn); return () => ctlListeners.delete(fn); },
+  };
+  const controlCalls = [];
+  store.control = async (day) => { controlCalls.push(day); if (day < '2026-09-01') { const e = new Error('no'); e.status = 404; throw e; } return { day: '2026-09-15', revisionAt: '2026-09-15T10:00:00Z', points: [{ lat: 48, lon: 37 }], summary: { settlements: { ua: 2, ru: 1, contested: 1 } } }; };
+  const tl = createUkraineTimeline({ layer, store, clock, report, control, translate: (k, v) => (v ? `${k} ${JSON.stringify(v)}` : k), lang: 'sk', documentRef: doc, now: () => now, setTimer, clearTimer: () => {}, clipboard: clip, origin: 'https://oko.test' });
   assert.equal(doc.body.children.length, 1);
   const { root, legendBtns, mediaStrip, counts, winBtns, modeBtn } = tl._getStateForTest();
   assert.equal(root.hidden, true);
@@ -138,6 +151,26 @@ test('os: kostra, LIVE → prehrávanie, načítanie do vrstvy, legenda/filter, 
   timers.filter((t) => t.ms === 100).at(-1).fn();
   assert.equal(clock.getState().cursor - before, 3 * 3_600_000, '0,5 s reálneho času = 3 h pri 6 h/s');
   clock.pause();
+  // kontrola: čip zapne vrstvu a natiahne snímku pre deň kurzora; legenda nesie revíziu a počty
+  const { ctlChip, ctlLine, ctlCounts } = tl._getStateForTest();
+  assert.equal(ctlChip.getAttribute('aria-pressed'), 'false');
+  await tl.showControl();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(ctlShown, true);
+  assert.deepEqual(controlCalls, ['2026-09-17'], 'deň kurzora (17. 9.)');
+  assert.equal(ctlSnapshot.day, '2026-09-15');
+  assert.equal(ctlChip.getAttribute('aria-pressed'), 'true');
+  assert.ok(ctlLine.textContent.includes('ukraine.ctl.since'), ctlLine.textContent);
+  assert.ok(ctlCounts.textContent.includes('"ua":"2","ru":"1","contested":"1"'), ctlCounts.textContent);
+  clock.setCursor(Date.UTC(2026, 7, 1));
+  await timers.filter((t) => t.ms === 160).at(-1).fn();
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(controlCalls.at(-1), '2026-08-01');
+  assert.equal(ctlSnapshot, null, '404 = žiadna snímka');
+  assert.equal(ctlLine.textContent, 'ukraine.ctl.missing');
+  ctlChip.click();
+  assert.equal(ctlShown, false);
   tl.hide();
   assert.equal(root.hidden, true);
   assert.equal(layer.isShown(), false);

@@ -49,6 +49,7 @@ import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
 import { createUkraineEventsLayer } from './ukraineEventsLayer.js';
+import { createUkraineControlLayer } from './ukraineControlLayer.js';
 import { createUkraineTimeline, parseShareParams } from './ukraineTimeline.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
@@ -662,7 +663,11 @@ async function init() {
     // kartičky ZÁLIV-u pre región `ukraine` (tie ostávajú len pre ZÁLIV).
     ukraineEvents = createUkraineEventsLayer({ viewer });
     window.__godsEyeView.ukraineEvents = ukraineEvents;
-    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport });
+    // Územná kontrola (etapa 4C): body sídiel z Wikipédie (CC BY-SA) + odvodené
+    // zóny; snímka sleduje deň kurzora časovej osi.
+    const ukraineControl = createUkraineControlLayer({ viewer });
+    window.__godsEyeView.ukraineControl = ukraineControl;
+    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl });
     window.__godsEyeView.ukraineTimeline = ukraineTimeline;
     let ukrainePanel = null;
     const runFrontScene = (id) => {
@@ -675,6 +680,7 @@ async function init() {
         revealGate.activate(scene.center);
         incidentCards.clear();
         ukraineTimeline.show();
+        void ukraineTimeline.showControl();
       }
       return applyFrontScene(id, frontSceneDeps);
     };
@@ -683,6 +689,7 @@ async function init() {
       layer: ukraineBase,
       report: ukraineReport,
       timeline: ukraineTimeline,
+      control: ukraineControl,
       applyScene: (id) => runFrontScene(id),
     });
     window.__godsEyeView.ukrainePanel = ukrainePanel;

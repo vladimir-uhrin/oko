@@ -8,8 +8,8 @@ import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 
 import {
-  archiveDayItems, archiveReport, backfillReports, collectMedia, coverageDays, dayList, dayShift, eventsPayload,
-  geoconfirmedEvents, geoconfirmedRefresh, isDay, mergeItems, readDayItems, readReports, viinaEvents, viinaEventsFromBody, viinaStatus, viinaYear,
+  archiveDayItems, archiveReport, backfillReports, collectMedia, controlBackfill, controlDays, controlFor, controlSnapshot, coverageDays, dayList, dayShift, eventsPayload,
+  fireRowToItem, firesByDay, firesEvents, firesRefresh, geoconfirmedEvents, geoconfirmedRefresh, isDay, mergeItems, readDayItems, readReports, summaryPayload, viinaEvents, viinaEventsFromBody, viinaStatus, viinaYear, wikiRevisionUrl,
 } from './ukraineArchive.mjs';
 
 const VIINA_HEADER = 'viina_version,event_id_1pd,date,n_reports,event_ids,sources,geonameid,feature_code,asciiname,ADM1_NAME,ADM1_CODE,ADM2_NAME,ADM2_CODE,longitude,latitude,GEO_PRECISION,t_mil_b,a_rus_b,a_ukr_b,a_rus_init_b,a_ukr_init_b,a_civ_b,a_other_b,t_aad_b,t_airstrike_b,t_airalert_b,t_uav_b,t_armor_b,t_arrest_b,t_artillery_b,t_control_b,t_firefight_b,t_ied_b,t_raid_b,t_occupy_b,t_property_b,t_cyber_b,t_hospital_b,t_milcas_b,t_civcas_b,t_retreat_b,t_loc_b,t_san_b,tid';
@@ -161,7 +161,70 @@ test('hlásenia GŠ: archív po dňoch, spätné naplnenie cez stránkovaný fee
   assert.equal(payload.days, 2);
   assert.deepEqual(payload.coverage.reports, ['2026-09-18', '2026-09-19']);
   assert.equal(payload.reports['2026-09-18'].total, 200);
-  assert.deepEqual(payload.counts, { viina: 0, geoconfirmed: 0, news: 0, media: 0, reports: 2 });
+  assert.deepEqual(payload.counts, { viina: 0, geoconfirmed: 0, news: 0, media: 0, reports: 2, fires: 0 });
   assert.equal(payload.coverage.viina[2026], null);
   assert.ok(payload.attribution.viina.includes('ODbL'));
+});
+
+const LUA_OVERVIEW = 'mk = { rus = "Location dot red.svg", ukr = "Location dot blue.svg", con = "80x80-red-blue-anim.gif" }\nreturn { marks = {\n{ lat = "48.990", long = "37.805", mark = mk.con, marksize = 12, label = "[[Lyman, Ukraine|Lyman]]" },\n{ lat = "48.282", long = "37.185", mark = mk.rus, marksize = 14, label = "[[Pokrovsk]]" },\n} }';
+const LUA_DETAILED = 'local m = require("Module:Russo-Ukrainian war overview map")\nlocal marks = {\n{ lat = "48.700", long = "37.900", mark = mk.ukr, marksize = 4, label = "[[Zalizne]]" },\n}';
+const LUA_OLD = 'return { marks = {\n{ lat = "48.990", long = "37.805", mark = "Location dot blue.svg", marksize = "12", label = "[[Lyman, Ukraine|Lyman]]" },\n} }';
+const wikiJson = (rev, content) => JSON.stringify({ query: { pages: [{ title: 'x', revisions: [{ revid: rev, timestamp: '2026-09-18T10:00:00Z', size: content.length, slots: { main: { content } } }] }] } });
+
+test('kontrola: snímka dnes (oba moduly), stará revízia bez prehľadového, platná snímka pre deň, história po týždňoch', async () => {
+  const root = await tmpRoot();
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    const u = new URL(url);
+    const title = u.searchParams.get('titles'); const start = u.searchParams.get('rvstart');
+    if (title.includes('overview')) return start && start < '2024-04-22' ? response(JSON.stringify({ query: { pages: [{ title, revisions: [] }] } })) : response(wikiJson(11, LUA_OVERVIEW));
+    return start && start < '2024-01-01' ? response(wikiJson(5, LUA_OLD)) : response(wikiJson(22, LUA_DETAILED));
+  };
+  assert.match(wikiRevisionUrl('Module:X', '2023-01-01T23:59:59Z'), /rvdir=older&rvstart=2023-01-01T23%3A59%3A59Z/);
+  const today = await controlSnapshot(root, { fetchImpl, now: NOW });
+  assert.equal(today.status, 'updated');
+  assert.equal(today.count, 3, 'Lyman + Pokrovsk z prehľadového, Zalizne z podrobného');
+  assert.equal((await controlSnapshot(root, { fetchImpl, now: NOW + 60_000 })).status, 'fresh');
+  const old = await controlSnapshot(root, { at: '2023-01-05', fetchImpl, now: NOW });
+  assert.equal(old.status, 'updated');
+  assert.equal(old.count, 1, 'stará revízia: len podrobný modul');
+  assert.ok(!calls.some((u) => u.includes('overview') && u.includes('rvstart=2023')), 'pred vznikom prehľadového modulu sa naň nepýta');
+  assert.deepEqual(await controlDays(root), ['2023-01-05', '2026-09-19']);
+  assert.equal((await controlFor(root, '2024-06-01')).count, 1, 'pre jún 2024 platí snímka z januára 2023');
+  assert.equal((await controlFor(root, '2026-09-19')).count, 3);
+  assert.equal(await controlFor(root, '2022-06-01'), null);
+  const snap = await controlFor(root, '2026-09-19');
+  assert.equal(snap.license.includes('CC BY-SA'), true);
+  assert.equal(snap.revisions.detailed.revid, 22);
+  assert.equal(snap.summary.settlements.contested, 1);
+  const bf = await controlBackfill(root, { fetchImpl, now: NOW, from: '2026-08-20', stepDays: 7, pauseMs: 0 });
+  assert.equal(bf.done, 5, '20.8., 27.8., 3.9., 10.9. a 17.9. (všetky < now − 1 d)');
+});
+
+test('požiare: riadok CSV → položka, po dňoch, obnova s ETag a zápis len zmenených dní, súhrn nesie počty', async () => {
+  const csv = 'id_w_time,LATITUDE,LONGITUDE,ACQ_TIME,date,war_fire,in_urban_area,sustained_excess,war_fire_restrictive\nx,48.42953,22.19841,1251,2026-09-18,1,TRUE,1,1\ny,48.63363,22.22997,15,2026-09-19,1,FALSE,0,0\nz,49.0,30.0,900,2026-09-19,0,FALSE,0,0\n';
+  const it = fireRowToItem({ LATITUDE: '48.42953', LONGITUDE: '22.19841', ACQ_TIME: '15', date: '2026-09-19', in_urban_area: 'TRUE', war_fire_restrictive: '1', sustained_excess: '0' });
+  assert.equal(it.t, Date.UTC(2026, 8, 19, 0, 15), 'ACQ_TIME „15" = 00:15 UTC');
+  assert.equal(it.urban, true);
+  assert.equal(it.restrictive, true);
+  const byDay = firesByDay(csv);
+  assert.deepEqual([...byDay.keys()], ['2026-09-18', '2026-09-19']);
+  assert.equal(byDay.get('2026-09-19').length, 1, 'war_fire=0 vypadne');
+  const root = await tmpRoot();
+  let etagSent = null;
+  const fetchImpl = async (url, init) => { etagSent = init?.headers?.['If-None-Match'] || null; return etagSent === '"abc"' ? response('', { status: 304 }) : response(csv, { headers: { etag: '"abc"' } }); };
+  const r = await firesRefresh(root, { fetchImpl, now: NOW });
+  assert.deepEqual([r.status, r.total, r.days, r.written], ['updated', 2, 2, 2]);
+  assert.equal((await firesRefresh(root, { fetchImpl, now: NOW + 60_000 })).status, 'fresh');
+  assert.equal((await firesRefresh(root, { fetchImpl, now: NOW + 13 * 3_600_000 })).status, 'not-modified');
+  assert.equal(etagSent, '"abc"');
+  const ev = await firesEvents(root, '2026-09-18', '2026-09-19');
+  assert.equal(ev.length, 2);
+  const payload = await eventsPayload(root, '2026-09-19', '2026-09-19', { now: NOW });
+  assert.equal(payload.fires.length, 1);
+  assert.equal(payload.counts.fires, 1);
+  assert.deepEqual(payload.coverage.fires, ['2026-09-19']);
+  const summary = await summaryPayload(root, '2026-09-18', '2026-09-19', { now: NOW });
+  assert.equal(summary.days['2026-09-18'].fires, 1);
 });

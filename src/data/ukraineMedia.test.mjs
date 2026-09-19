@@ -87,7 +87,8 @@ ${tgPost('dsns_telegram', 75181, '2026-09-19T15:10:00+00:00', { text: 'Лише 
   assert.equal(text.kind, 'text');
   assert.equal(text.text, 'Лише текст & ентity — тест');
   assert.equal(parseTelegramPreview('<html></html>').length, 0);
-  assert.ok(TELEGRAM_CHANNELS.every((c) => c.badge === 'official-ua'), 'len oficiálne štátne kanály');
+  assert.ok(TELEGRAM_CHANNELS.every((c) => c.badge === 'official-ua' || c.badge === 'osint'), 'oficiálne štátne kanály + DeepState (vizuály s logom sú voľné)');
+  assert.equal(TELEGRAM_CHANNELS.find((c) => c.name === 'DeepStateUA')?.badge, 'osint');
 });
 
 test('ArmyInform: video prílohy mp4 z RSS (CC BY 4.0)', () => {

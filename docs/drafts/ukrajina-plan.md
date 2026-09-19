@@ -12,7 +12,19 @@ kroku používateľa (žiadosť, e-mail, kľúč) a čo vôbec nie** — a v ako
 overených dvojmo (nálezca + skeptik) sú z nich len 3, zvyšok je jedno čítanie a pred zapojením sa
 overuje znova podľa `new-data-layer`.
 
-## Stav (2026-09-19 večer): ETAPY 1, 2 a 3 (3a+3b+3c) HOTOVÉ, etapy 4–6 nezačaté
+## Stav (2026-09-19 noc): ETAPY 1, 2, 3 a 4C HOTOVÉ; 4A/4B, 5, 6 čakajú na kroky používateľa
+
+### Etapa 4C (provizórium kontroly, používateľ: „pokračuj") — hotové
+- Body kontroly sídiel z Wikipédie (`Module:Russo-Ukrainian war overview map` + `detailed map`,
+  CC BY-SA 4.0): parser `src/data/ukraineControl.js`, snímky po týždňoch od 24. 2. 2022 v archíve
+  (`control/<deň>.json` s revíziami), dnešná každých 6 h; vrstva `src/ukraineControlLayer.js`
+  = body (modrá/červená/jantár) + ODVODENÝ raster zón (RU výplň, šrafovaná zóna bojov) primknutý
+  k terénu aj 3D dlaždiciam; časová os prepína snímku podľa dňa kurzora; čip KONTROLA.
+- Vojnové požiare The Economist (CC BY 4.0, 454 333 bodov od 2022) ako typ `hotspot` — body bez karty.
+- DeepState: API a mirrory NIE (licencia §2); ich Telegram kanál `DeepStateUA` v páse médií
+  (licencia §3: vizuály s logom/odkazom voľné) — odpoveď na otázku používateľa.
+- Otvorené: 4A DeepState API (žiadosť používateľa), 4B Black Bird Group (e-mail), 5 (súhlasy),
+  6 alerts.in.ua (token). Nepublikované.
 
 ### Etapa 3 (používateľ: „ako na obrázku, určite časovú os … 1 až 5", potom „fotky z čo najviac zdrojov, aj videá, všetko ukladať") — hotové a overené v pane
 

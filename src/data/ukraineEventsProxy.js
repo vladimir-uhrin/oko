@@ -26,15 +26,15 @@
 import zlib from 'node:zlib';
 
 import {
-  GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, archiveReport, collectMedia, dayKey, dayList, dayShift,
-  eventsPayload, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
+  GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, archiveReport, collectMedia, controlDays, controlFor, controlSnapshot, dayKey, dayList, dayShift,
+  eventsPayload, firesRefresh, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
 } from '../../scripts/lib/ukraineArchive.mjs';
 
 export const EVENTS_MAX_DAYS = 31;
 export const SUMMARY_MAX_DAYS = 1900;
 const MIN = 60_000;
-const TICK_MS = { news: 15 * MIN, media: 15 * MIN, report: 60 * MIN, geoconfirmed: 6 * 60 * MIN, viina: 6 * 60 * MIN };
-const FIRST_DELAY_MS = { news: 20_000, media: 45_000, report: 70_000, geoconfirmed: 100_000, viina: 130_000 };
+const TICK_MS = { news: 15 * MIN, media: 15 * MIN, report: 60 * MIN, geoconfirmed: 6 * 60 * MIN, viina: 6 * 60 * MIN, control: 6 * 60 * MIN, fires: 6 * 60 * MIN };
+const FIRST_DELAY_MS = { news: 20_000, media: 45_000, report: 70_000, geoconfirmed: 100_000, viina: 130_000, control: 160_000, fires: 200_000 };
 const UNFURL_PER_TICK = 25;
 
 function simpleLimiter({ windowMs, max }) {
@@ -121,7 +121,17 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       }
       return current;
     },
+    // Územná kontrola (Wikipedia, CC BY-SA): najnovšia snímka raz za 6 h; história
+    // po týždňoch ide cez CLI (scripts/build-ukraine-events.mjs --control-history).
+    async control() {
+      const r = await controlSnapshot(root, { fetchImpl, now: now(), log });
+      if (r.status === 'updated') controlCache.clear();
+      return r;
+    },
+    // Vojnové požiare (Economist): 70 MB CSV, ETag → 304 keď sa nič nezmenilo.
+    async fires() { return firesRefresh(root, { fetchImpl, now: now(), log }); },
   };
+  const controlCache = new Map(); // deň -> { at, json }
 
   async function tick(name) {
     if (state.running[name]) return;
@@ -172,6 +182,23 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       return;
     }
     if (!limiter(clientKey(req))) { send(res, 429, { error: 'rate_limited' }, req); return; }
+    if (sub === '/control') {
+      // Snímka kontroly platná pre deň `at` (posledná so dňom ≤ at); bez `at` = dnes.
+      const at = url.searchParams.get('at') || dayKey(now());
+      if (!isDay(at)) { send(res, 400, { error: 'bad_day' }, req); return; }
+      const hit = controlCache.get(at);
+      if (hit && now() - hit.at < 10 * MIN) { send(res, 200, hit.json, req); return; }
+      try {
+        const days = await controlDays(root);
+        const snapshot = await controlFor(root, at, { days });
+        if (!snapshot) { send(res, 404, { error: 'no_control_snapshot', at, days: days.length }, req); return; }
+        const json = { ...snapshot, requestedAt: at, snapshots: days.length, first: days[0] || null, last: days.at(-1) || null };
+        controlCache.set(at, { at: now(), json });
+        if (controlCache.size > 64) controlCache.delete(controlCache.keys().next().value);
+        send(res, 200, json, req);
+      } catch (error) { send(res, 500, { error: 'archive_read_failed', detail: String(error?.message || error) }, req); }
+      return;
+    }
     const isSummary = sub === '/summary';
     const range = parseRange(url, isSummary ? SUMMARY_MAX_DAYS : EVENTS_MAX_DAYS);
     if (range.error) { send(res, 400, range, req); return; }

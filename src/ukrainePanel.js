@@ -32,6 +32,7 @@ export function createUkrainePanel({
   layer = null,
   report = null,
   timeline = null,
+  control = null,
   scenes = listFrontScenes(),
   applyScene = null,
   translate = t,
@@ -90,6 +91,19 @@ export function createUkrainePanel({
   }
   // Čip UDALOSTI (etapa 3): otvorí/zavrie časovú os s vrstvou udalostí (body,
   // karty, fotky a videá); stav odráža os sama cez onChange.
+  // Čip KONTROLA (etapa 4C): body kontroly sídiel + odvodené zóny (Wikipedia, CC BY-SA).
+  let controlChip = null;
+  if (control) {
+    controlChip = button('data-toggle-chip ukraine-chip ukraine-chip-control', translate('ukraine.part.control'), () => {
+      if (control.isShown()) control.hide();
+      else if (timeline?.showControl) void timeline.showControl();
+      else void control.show();
+    });
+    controlChip.dataset.part = 'control';
+    controlChip.setAttribute('aria-pressed', 'false');
+    controlChip.title = translate('ukraine.ctl.note');
+    chips.appendChild(controlChip);
+  }
   let eventsChip = null;
   if (timeline) {
     eventsChip = button('data-toggle-chip ukraine-chip ukraine-chip-events', translate('ukraine.part.events'), () => {
@@ -240,6 +254,14 @@ export function createUkrainePanel({
   };
   const unsubscribeTimeline = timeline?.onChange?.(() => updateEventsChip()) || null;
   updateEventsChip();
+  const updateControlChip = () => {
+    if (!controlChip) return;
+    const on = Boolean(control?.isShown?.());
+    controlChip.classList?.toggle?.('active', on);
+    controlChip.setAttribute('aria-pressed', String(on));
+  };
+  const unsubscribeControl = control?.onChange?.(() => updateControlChip()) || null;
+  updateControlChip();
   update();
   updateReport();
   // Dátum snímku je lacný a hovorí, či snímok vôbec existuje — ťahá sa hneď.
@@ -252,6 +274,6 @@ export function createUkrainePanel({
     updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); mountTarget.replaceChildren(); },
   };
 }

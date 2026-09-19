@@ -74,6 +74,32 @@ test('archivár: tik správ (unfurl náhľadu cez vlastnú proxy) a tik médií 
   assert.equal(decode(summary).days['2026-09-19'].news, 1);
   assert.equal(decode(summary).days['2026-09-19'].media, 1);
   assert.equal(decode(summary).days['2026-09-19'].report.total, 213);
+  // kontrola: bez snímky 404 s poctivým kódom, po tiku snímka platná pre deň
+  const none = await call(plugin, '/control?at=2026-09-19');
+  assert.equal(none.out.status, 404);
+  assert.equal(decode(none).error, 'no_control_snapshot');
+  assert.equal((await call(plugin, '/control?at=zle')).out.status, 400);
+});
+
+test('kontrola cez proxy: tik stiahne moduly Wikipédie, /control vráti snímku platnú pre deň', async () => {
+  const root = await tmpRoot();
+  const lua = 'mk = { rus = "Location dot red.svg" }\nreturn { marks = { { lat = "48.282", long = "37.185", mark = mk.rus, marksize = 14, label = "[[Pokrovsk]]" } } }';
+  const wiki = JSON.stringify({ query: { pages: [{ title: 'x', revisions: [{ revid: 7, timestamp: '2026-09-18T10:00:00Z', size: 1, slots: { main: { content: lua } } }] }] } });
+  const fetchImpl = async (url) => (url.includes('wikipedia.org') ? response(wiki) : response('', { status: 503 }));
+  const plugin = ukraineEventsProxy({ root, env: {}, fetchImpl, now: () => NOW, setTimer: () => 0, clearTimer: () => {}, log: () => {} });
+  plugin._start('http://127.0.0.1:4173');
+  await plugin._tick('control');
+  assert.equal(plugin._state.last.control.result.status, 'updated');
+  const res = await call(plugin, '/control?at=2026-09-19');
+  assert.equal(res.out.status, 200);
+  const json = decode(res);
+  assert.equal(json.count, 1);
+  assert.equal(json.points[0].name, 'Pokrovsk');
+  assert.equal(json.requestedAt, '2026-09-19');
+  assert.equal(json.snapshots, 1);
+  assert.equal((await call(plugin, '/control?at=2026-09-01')).out.status, 404, 'pred prvou snímkou nič');
+  await plugin._tick('fires');
+  assert.match(plugin._state.last.fires.result.status, /error|stale/);
 });
 
 test('validácia rozsahu, metóda, vypnutý archivár, časovače', async () => {
@@ -89,7 +115,7 @@ test('validácia rozsahu, metóda, vypnutý archivár, časovače', async () => 
   assert.equal(tooLong.out.status, 400);
   assert.equal(decode(tooLong).maxDays, EVENTS_MAX_DAYS);
   const empty = decode(await call(plugin, '/?from=2026-09-10&to=2026-09-12'));
-  assert.deepEqual(empty.counts, { viina: 0, geoconfirmed: 0, news: 0, media: 0, reports: 0 });
+  assert.deepEqual(empty.counts, { viina: 0, geoconfirmed: 0, news: 0, media: 0, reports: 0, fires: 0 });
   assert.equal(empty.archiver.enabled, false);
   const server = { middlewares: { use: (p, h) => { server.handler = h; } }, httpServer: null };
   plugin.configureServer(server);
@@ -98,9 +124,9 @@ test('validácia rozsahu, metóda, vypnutý archivár, časovače', async () => 
   assert.equal(res.out.status, 405);
   const on = ukraineEventsProxy({ root, env: {}, fetchImpl: async () => { throw new Error('no network'); }, now: () => NOW, setTimer: (fn, ms) => { timers.push(ms); return timers.length; }, clearTimer: (id) => cleared.push(id), log: () => {} });
   on._start('http://127.0.0.1:4173');
-  assert.equal(timers.length, 5, 'päť úloh naplánovaných');
+  assert.equal(timers.length, 7, 'sedem úloh naplánovaných (správy, médiá, GŠ, GeoConfirmed, VIINA, kontrola, požiare)');
   on._stop();
-  assert.equal(cleared.length >= 5, true);
+  assert.equal(cleared.length >= 7, true);
   await on._tick('news');
   assert.match(on._state.last.news.error, /no network/);
   assert.equal(on._state.errors.length, 1);

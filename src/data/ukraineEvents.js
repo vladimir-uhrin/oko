@@ -32,8 +32,25 @@ export const GEOCONFIRMED_ATTRIBUTION = 'GeoConfirmed · OSINT verified';
 /** Najviac dní na jeden dopyt proxy (okno časovej osi sa načítava po kusoch). */
 export const EVENTS_MAX_DAYS = 31;
 
-/** Typy udalostí (poradie = legenda). */
-export const EVENT_TYPES = Object.freeze(['strike', 'artillery', 'ground', 'air-defence', 'infrastructure', 'naval', 'fire', 'civil', 'alert', 'other']);
+/** Typy udalostí (poradie = legenda); `hotspot` = satelitný vojnový požiar (Economist/FIRMS), len bod, nikdy karta. */
+export const EVENT_TYPES = Object.freeze(['strike', 'artillery', 'ground', 'air-defence', 'infrastructure', 'naval', 'fire', 'civil', 'alert', 'other', 'hotspot']);
+
+/**
+ * Vojnový požiar (The Economist war-fire model: FIRMS anomálie s ML filtrom
+ * baseline) → udalosť `hotspot`: odvodený signál, nie potvrdený úder — bez karty
+ * (`noCard`), úroveň `derived`, čas z ACQ_TIME. Pure.
+ */
+export function fireToEvent(item) {
+  if (!item || !Number.isFinite(item.t) || !Number.isFinite(item.lat) || !Number.isFinite(item.lon)) return null;
+  return {
+    id: item.id || `fire:${item.t}:${item.lat}:${item.lon}`, t: item.t, dayOnly: false,
+    lat: item.lat, lon: item.lon, place: null, region: null, precision: 'point', approx: false,
+    type: 'hotspot', sub: item.urban ? 'urban' : null, severity: item.restrictive ? 'major' : 'minor',
+    level: 'derived', src: 'fires', actor: null, civcas: false, milcas: false, reports: 1, outlets: [],
+    sources: [{ name: 'The Economist war-fire model', url: 'https://github.com/TheEconomist/the-economist-war-fire-model' }],
+    image: null, status: null, noCard: true, media: [],
+  };
+}
 export const SEVERITY_RANK = Object.freeze({ critical: 3, major: 2, minor: 1 });
 
 /** Deň YYYY-MM-DD z ms UTC. Pure. */
@@ -371,7 +388,7 @@ export function eventsInWindow(events, startMs, endMs) {
 export function clusterEvents(events, cellDeg = 0.25) {
   const cells = new Map();
   for (const e of events || []) {
-    if (!Number.isFinite(e?.lat) || !Number.isFinite(e?.lon)) continue;
+    if (!Number.isFinite(e?.lat) || !Number.isFinite(e?.lon) || e.noCard) continue;
     const key = `${Math.floor(e.lat / cellDeg)}:${Math.floor(e.lon / cellDeg)}`;
     let c = cells.get(key);
     if (!c) { c = { key, count: 0, lat: 0, lon: 0, severity: 'minor', types: {}, ids: [] }; cells.set(key, c); }
@@ -388,7 +405,7 @@ export function clusterEvents(events, cellDeg = 0.25) {
  * karty nedostanú. Pure.
  */
 export function pickCards(events, { max = 8 } = {}) {
-  const sorted = [...(events || [])].filter((e) => Number.isFinite(e?.lat) && Number.isFinite(e?.lon) && (!e.approx || e.src === 'news' || e.src === 'media')).sort((a, b) => (SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]) || (b.t - a.t) || ((b.reports || 0) - (a.reports || 0)));
+  const sorted = [...(events || [])].filter((e) => Number.isFinite(e?.lat) && Number.isFinite(e?.lon) && !e.noCard && (!e.approx || e.src === 'news' || e.src === 'media')).sort((a, b) => (SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]) || (b.t - a.t) || ((b.reports || 0) - (a.reports || 0)));
   const taken = new Set();
   const out = [];
   for (const e of sorted) {

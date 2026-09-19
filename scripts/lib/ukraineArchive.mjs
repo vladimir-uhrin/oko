@@ -14,12 +14,13 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 
 import { readZipEntries } from '../../src/data/zipEntries.js';
-import { VIINA_MEDIA_BASE, dayKey, dayToMs, parseGeoconfirmedCsv, parseViinaCsv } from '../../src/data/ukraineEvents.js';
+import { VIINA_MEDIA_BASE, dayKey, dayToMs, parseCsv, parseGeoconfirmedCsv, parseViinaCsv } from '../../src/data/ukraineEvents.js';
 import {
   ARMYINFORM_UA_FEED, TELEGRAM_CHANNELS, YOUTUBE_CHANNELS,
   parseRssVideoEnclosures, parseTelegramPreview, parseYoutubeFeed, telegramPreviewUrl, youtubeFeedUrl,
 } from '../../src/data/ukraineMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from '../../src/data/ukraineReport.js';
+import { WIKI_DETAILED_TITLE, WIKI_OVERVIEW_TITLE, controlPointsFromModules, controlSummary } from '../../src/data/ukraineControl.js';
 
 export const VIINA_FIRST_YEAR = 2022;
 export const GEOCONFIRMED_EXPORT = 'https://geoconfirmed.org/api/Map/export/Ukraine/csv';
@@ -350,7 +351,9 @@ export async function backfillReports(root, { fetchImpl = fetch, normalizeRss = 
  */
 export async function summaryPayload(root, from, to, { now = Date.now(), viinaCache = null } = {}) {
   const days = dayList(from, to);
-  const out = Object.fromEntries(days.map((d) => [d, { viina: 0, geoconfirmed: 0, news: 0, media: 0, report: null, critical: 0, killed: 0, injured: 0, types: {} }]));
+  const out = Object.fromEntries(days.map((d) => [d, { viina: 0, geoconfirmed: 0, news: 0, media: 0, fires: 0, report: null, critical: 0, killed: 0, injured: 0, types: {} }]));
+  const fireIndex = await firesIndex(root);
+  for (const day of days) if (fireIndex[day]) out[day].fires = fireIndex[day];
   const bump = (e) => {
     const d = dayKey(e.t); const row = out[d];
     if (!row) return;
@@ -385,12 +388,13 @@ export async function summaryPayload(root, from, to, { now = Date.now(), viinaCa
 /** Zložený obsah okna pre klienta (udalosti, správy, médiá, hlásenia, pokrytie). */
 export async function eventsPayload(root, from, to, { now = Date.now(), viinaCache = null } = {}) {
   const days = dayList(from, to);
-  const [viina, geoconfirmed, news, media, reports] = await Promise.all([
+  const [viina, geoconfirmed, news, media, reports, fires] = await Promise.all([
     viinaEvents(root, from, to, { cache: viinaCache }),
     geoconfirmedEvents(root, from, to),
     readRangeItems(root, 'news', from, to),
     readRangeItems(root, 'media', from, to),
     readReports(root, from, to),
+    firesEvents(root, from, to),
   ]);
   const coverage = {
     viina: Object.fromEntries(await Promise.all([...new Set(days.map((d) => Number(d.slice(0, 4))))].map(async (y) => { const e = viinaCache?.get(y) || await readJson(viinaFile(root, y)); return [y, e ? { count: e.count, fetchedAt: e.fetchedAt } : null]; }))),
@@ -398,21 +402,174 @@ export async function eventsPayload(root, from, to, { now = Date.now(), viinaCac
     news: await coverageDays(root, 'news', from, to),
     media: await coverageDays(root, 'media', from, to),
     reports: Object.keys(reports),
+    fires: await coverageDays(root, 'fires', from, to),
   };
   return {
     from, to, days: days.length, generatedAt: now,
     events: [...viina, ...geoconfirmed],
-    news, media, reports, coverage,
-    counts: { viina: viina.length, geoconfirmed: geoconfirmed.length, news: news.length, media: media.length, reports: Object.keys(reports).length },
+    news, media, reports, fires, coverage,
+    counts: { viina: viina.length, geoconfirmed: geoconfirmed.length, news: news.length, media: media.length, reports: Object.keys(reports).length, fires: fires.length },
     attribution: {
       viina: 'VIINA 2.0 (Zhukov & Ayers), ODbL 1.0 — vlastný súbor',
       geoconfirmed: 'GeoConfirmed (geoconfirmed.org) — verejné API, odkazy na overené záznamy',
       news: 'otvorené spravodajstvo (GDELT, RSS redakcií, Google News) — len titulok, odkaz a náhľad',
       media: 'YouTube feedy redakcií (vložený prehrávač), oficiálne Telegram kanály UA (náhľad + embed), ArmyInform CC BY 4.0',
       reports: 'Generálny štáb ZSU cez ArmyInform, CC BY 4.0',
+      fires: 'The Economist war-fire model (NASA FIRMS + ML), CC BY 4.0 — odvodené, nie potvrdené údery',
+      control: 'Wikipedia · Russo-Ukrainian war detailed/overview map · CC BY-SA 4.0 — dobrovoľnícka mapa, nie oficiálna línia',
     },
   };
 }
+
+// ── územná kontrola (Wikipedia, CC BY-SA) ─────────────────────────────────
+export const WIKI_API = 'https://en.wikipedia.org/w/api.php';
+/** Prehľadový modul vznikol 22. 4. 2024; skoršie revízie má len podrobný modul. */
+export const WIKI_OVERVIEW_SINCE = '2024-04-22';
+export const CONTROL_FIRST_DAY = '2022-02-24';
+const controlDir = (root) => path.join(archiveDir(root), 'control');
+const controlFile = (root, day) => path.join(controlDir(root), `${day}.json`);
+/** URL revízie modulu k času `at` (ISO) alebo najnovšej. Pure. */
+export function wikiRevisionUrl(title, at = null) {
+  const p = new URLSearchParams({ action: 'query', prop: 'revisions', titles: title, rvslots: 'main', rvprop: 'content|timestamp|ids|size', rvlimit: '1', format: 'json', formatversion: '2' });
+  if (at) { p.set('rvdir', 'older'); p.set('rvstart', at); }
+  return `${WIKI_API}?${p.toString()}`;
+}
+async function wikiRevision(fetchImpl, title, at) {
+  const { res, body } = await fetchCapped(fetchImpl, wikiRevisionUrl(title, at), { timeoutMs: 60_000, maxBytes: 6 * 1024 * 1024, headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`wiki HTTP ${res.status}`);
+  const json = JSON.parse(body);
+  const rev = json?.query?.pages?.[0]?.revisions?.[0];
+  if (!rev?.slots?.main?.content) return null;
+  return { revid: rev.revid, timestamp: rev.timestamp, size: rev.size, content: rev.slots.main.content };
+}
+/**
+ * Snímka kontroly k dňu (`at` = YYYY-MM-DD; posledná revízia do konca dňa UTC)
+ * alebo najnovšia (null): oba moduly → body + súhrn → control/<deň>.json. Súbor
+ * nesie revízie (atribúcia CC BY-SA) a dátum revízie ako „stav k".
+ */
+export async function controlSnapshot(root, { at = null, fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const day = at || dayKey(now);
+  const file = controlFile(root, day);
+  const prev = await readJson(file);
+  if (!force && prev) {
+    const final = at && now - dayToMs(at) > 2 * DAY_MS;
+    if (final || now - (prev.fetchedAt || 0) < 6 * 3_600_000) return { status: 'fresh', day, count: prev.count };
+  }
+  const iso = at ? `${at}T23:59:59Z` : null;
+  try {
+    const detailed = await wikiRevision(fetchImpl, WIKI_DETAILED_TITLE, iso);
+    if (!detailed) throw new Error('no detailed revision');
+    let overview = null;
+    if (!at || at >= WIKI_OVERVIEW_SINCE) { try { overview = await wikiRevision(fetchImpl, WIKI_OVERVIEW_TITLE, iso); } catch { overview = null; } }
+    const points = controlPointsFromModules(overview?.content || '', detailed.content);
+    if (!points.length) throw new Error('no control points parsed');
+    const summary = controlSummary(points);
+    const revisionAt = [detailed.timestamp, overview?.timestamp].filter(Boolean).sort().at(-1);
+    const entry = {
+      day, kind: 'control', fetchedAt: now, at: at || null, revisionAt,
+      revisions: { detailed: { title: WIKI_DETAILED_TITLE, revid: detailed.revid, timestamp: detailed.timestamp }, overview: overview ? { title: WIKI_OVERVIEW_TITLE, revid: overview.revid, timestamp: overview.timestamp } : null },
+      license: 'CC BY-SA 4.0 (derived from Wikipedia; https://creativecommons.org/licenses/by-sa/4.0/)',
+      count: points.length, summary, points,
+    };
+    await writeJsonAtomic(file, entry);
+    log(`[ukraine-events] control ${day}: ${points.length} points (rev ${detailed.revid}${overview ? '+' + overview.revid : ''}, ${revisionAt})`);
+    return { status: 'updated', day, count: points.length, revisionAt };
+  } catch (error) {
+    log(`[ukraine-events] control ${day} failed: ${error?.message || error}`);
+    return { status: prev ? 'stale' : 'error', day, count: prev?.count || 0, error: String(error?.message || error) };
+  }
+}
+/** Zoznam dní so snímkou (zoradený). */
+export async function controlDays(root) {
+  try { return (await fsp.readdir(controlDir(root))).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).map((f) => f.slice(0, 10)).sort(); } catch { return []; }
+}
+/** Snímka platná pre deň: posledná so dňom ≤ `day` (alebo null). */
+export async function controlFor(root, day, { days = null } = {}) {
+  const list = days || await controlDays(root);
+  let pick = null;
+  for (const d of list) { if (d <= day) pick = d; else break; }
+  return pick ? readJson(controlFile(root, pick)) : null;
+}
+/**
+ * História po týždňoch od 24. 2. 2022: jedna snímka na `stepDays`, existujúce
+ * dni sa preskočia; Wikipedia etiketa = jeden dopyt naraz, pauza medzi nimi.
+ */
+export async function controlBackfill(root, { fetchImpl = fetch, now = Date.now(), from = CONTROL_FIRST_DAY, stepDays = 7, pauseMs = 1200, log = () => {}, limit = Infinity } = {}) {
+  const have = new Set(await controlDays(root));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let done = 0; let skipped = 0;
+  for (let t = dayToMs(from); t < now - DAY_MS && done < limit; t += stepDays * DAY_MS) {
+    const day = dayKey(t);
+    if (have.has(day)) { skipped += 1; continue; }
+    const r = await controlSnapshot(root, { at: day, fetchImpl, now, log });
+    if (r.status === 'updated') done += 1;
+    await sleep(pauseMs);
+  }
+  return { done, skipped };
+}
+
+// ── vojnové požiare (The Economist war-fire model, CC BY 4.0) ─────────────
+export const ECONOMIST_FIRES_URL = 'https://raw.githubusercontent.com/TheEconomist/the-economist-war-fire-model/master/output-data/ukraine_war_fires.csv';
+const firesDir = (root) => path.join(archiveDir(root), 'fires');
+const firesFile = (root, day) => path.join(firesDir(root), `${day}.json`);
+const firesMetaFile = (root) => path.join(firesDir(root), 'meta.json');
+/** Riadok CSV Economistu → požiar `{id, t, lat, lon, urban, restrictive, sustained}` alebo null. Pure. */
+export function fireRowToItem(row) {
+  const lat = Number(row.LATITUDE); const lon = Number(row.LONGITUDE);
+  const day = String(row.date || '').slice(0, 10);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || dayToMs(day) === null) return null;
+  const hhmm = String(row.ACQ_TIME || '0').padStart(4, '0');
+  const hh = Math.min(23, Number(hhmm.slice(0, 2)) || 0); const mm = Math.min(59, Number(hhmm.slice(2)) || 0);
+  const t = dayToMs(day) + hh * 3_600_000 + mm * 60_000;
+  return { id: `fire:${day}:${hhmm}:${lat.toFixed(4)}:${lon.toFixed(4)}`, t, lat: Math.round(lat * 1e4) / 1e4, lon: Math.round(lon * 1e4) / 1e4, urban: String(row.in_urban_area).toUpperCase() === 'TRUE', restrictive: row.war_fire_restrictive === '1', sustained: row.sustained_excess === '1' };
+}
+/** CSV → Map(deň → požiare). Pure. */
+export function firesByDay(csvText) {
+  const byDay = new Map();
+  for (const row of parseCsv(csvText, ',')) {
+    if (row.war_fire !== '1' && row.war_fire !== undefined) continue;
+    const it = fireRowToItem(row);
+    if (!it) continue;
+    const day = dayKey(it.t);
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(it);
+  }
+  return byDay;
+}
+/**
+ * Stiahne CSV (70 MB; ETag → 304 = nič), rozloží po dňoch a prepíše len dni,
+ * ktorých počet sa zmenil; index `meta.json` nesie ETag a počty po dňoch.
+ */
+export async function firesRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, maxAgeMs = 12 * 3_600_000, log = () => {} } = {}) {
+  const meta = (await readJson(firesMetaFile(root))) || { days: {} };
+  if (!force && Number.isFinite(meta.fetchedAt) && now - meta.fetchedAt < maxAgeMs) return { status: 'fresh', days: Object.keys(meta.days || {}).length };
+  const started = Date.now();
+  try {
+    const headers = { Accept: 'text/csv' };
+    if (meta.etag && !force) headers['If-None-Match'] = meta.etag;
+    const { res, body } = await fetchCapped(fetchImpl, ECONOMIST_FIRES_URL, { timeoutMs: 300_000, maxBytes: 200 * 1024 * 1024, headers });
+    if (res.status === 304) { await writeJsonAtomic(firesMetaFile(root), { ...meta, fetchedAt: now }); return { status: 'not-modified', days: Object.keys(meta.days || {}).length }; }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const byDay = firesByDay(body);
+    if (!byDay.size) throw new Error('no fires parsed');
+    let written = 0; let total = 0;
+    const days = {};
+    for (const [day, items] of byDay) {
+      days[day] = items.length; total += items.length;
+      if (meta.days?.[day] === items.length) continue;
+      await writeJsonAtomic(firesFile(root, day), { day, kind: 'fires', fetchedAt: now, items });
+      written += 1;
+    }
+    await writeJsonAtomic(firesMetaFile(root), { fetchedAt: now, etag: res.headers?.get?.('etag') || null, bytes: body.length, total, days, source: ECONOMIST_FIRES_URL });
+    log(`[ukraine-events] fires: ${total} war fires over ${byDay.size} days (${body.length} B, ${written} day files written) in ${Date.now() - started} ms`);
+    return { status: 'updated', days: byDay.size, total, written };
+  } catch (error) {
+    log(`[ukraine-events] fires failed: ${error?.message || error}`);
+    return { status: meta.days && Object.keys(meta.days).length ? 'stale' : 'error', days: Object.keys(meta.days || {}).length, error: String(error?.message || error) };
+  }
+}
+export const firesEvents = (root, from, to) => readRangeItems(root, 'fires', from, to);
+export async function firesIndex(root) { return (await readJson(firesMetaFile(root)))?.days || {}; }
 
 // Re-export pre CLI a plugin (deň z ms a späť), aby nemuseli siahať do src/data.
 export { dayKey, dayToMs } from "../../src/data/ukraineEvents.js";

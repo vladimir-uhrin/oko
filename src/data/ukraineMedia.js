@@ -50,6 +50,11 @@ export const TELEGRAM_CHANNELS = Object.freeze([
   Object.freeze({ name: 'ministry_of_defense_ua', label: 'Міноборони України', badge: 'official-ua' }),
   Object.freeze({ name: 'dsns_telegram', label: 'ДСНС України', badge: 'official-ua' }),
   Object.freeze({ name: 'kpszsu', label: 'Повітряні сили ЗСУ', badge: 'official-ua' }),
+  // DeepState (2026-09-19, používateľ: „čo vieme získať z DeepState"): API len po
+  // schválení žiadosti, ale ich licencia (§3) výslovne dovoľuje VIZUÁLNE materiály
+  // s logom/odkazom aj komerčne → denné obrázky mapy z ich kanála ako fotky
+  // s odkazom na príspevok; nikdy API, nikdy mirror.
+  Object.freeze({ name: 'DeepStateUA', label: 'DeepState', badge: 'osint' }),
 ]);
 export const telegramPreviewUrl = (name) => `https://t.me/s/${encodeURIComponent(name)}`;
 export const ARMYINFORM_UA_FEED = 'https://armyinform.com.ua/feed/';
@@ -268,7 +273,7 @@ export function mediaToEvent(item, { classifyEn = null, locateEn = null } = {}) 
     precision: loc ? 'settlement' : 'unknown', approx: true,
     type: cls ? cls.type : 'other', sub: /дрон|БпЛА|шахед|drone|shahed|fpv/i.test(text) ? 'drone' : null,
     severity: cas.killed ? 'critical' : (cls ? cls.severity : 'minor'),
-    level: item.badge === 'official-ua' ? 'official' : 'reported',
+    level: item.badge === 'official-ua' ? 'official' : (item.badge === 'osint' ? 'osint' : 'reported'),
     src: 'media', provider: item.provider, kind: item.kind,
     actor: /росі|russian|окупант|ворож/i.test(text) ? 'ru' : null,
     civcas: Boolean(cas.killed || cas.injured), milcas: false,

@@ -35,8 +35,10 @@ export const SEV_COLOR = Object.freeze({ critical: '#f87171', major: '#ffb547', 
 export const SEV_SIZE = Object.freeze({ critical: 9, major: 7, minor: 5 });
 /** Monochromatické glyfy typov (VS15 vynúti textovú, nie emoji podobu). */
 export const TYPE_GLYPH = Object.freeze({
-  strike: '✸', artillery: '◆', ground: '⚔︎', 'air-defence': '◎', infrastructure: '⌂', naval: '≋', fire: '▲', civil: '●', alert: '△', other: '·',
+  strike: '✸', artillery: '◆', ground: '⚔︎', 'air-defence': '◎', infrastructure: '⌂', naval: '≋', fire: '▲', civil: '●', alert: '△', other: '·', hotspot: '▪',
 });
+/** Vojnové požiare (odvodený satelitný signál) majú vlastnú farbu, nie farbu závažnosti. */
+export const HOTSPOT_COLOR = '#ff8a3d';
 export const LOD_CLUSTER_ABOVE_M = 600_000;
 export const LOD_CHIPS_ABOVE_M = 150_000;
 export const MAX_CARDS = 8;
@@ -163,14 +165,15 @@ export function createUkraineEventsLayer({
     points.removeAll();
     for (const ev of _filtered) {
       if (!Number.isFinite(ev.lat) || !Number.isFinite(ev.lon)) continue;
+      const hotspot = ev.type === 'hotspot';
       points.add({
         position: posFor(ev),
-        color: Cesium.Color.fromCssColorString(SEV_COLOR[ev.severity] || SEV_COLOR.minor).withAlpha(ev.approx ? 0.55 : 0.92),
-        pixelSize: SEV_SIZE[ev.severity] || 5,
+        color: hotspot ? Cesium.Color.fromCssColorString(HOTSPOT_COLOR).withAlpha(ev.severity === 'major' ? 0.85 : 0.55) : Cesium.Color.fromCssColorString(SEV_COLOR[ev.severity] || SEV_COLOR.minor).withAlpha(ev.approx ? 0.55 : 0.92),
+        pixelSize: hotspot ? 3.5 : (SEV_SIZE[ev.severity] || 5),
         outlineColor: Cesium.Color.BLACK.withAlpha(0.7),
         outlineWidth: 1,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        id: { ukraineEvent: ev.id },
+        id: { ukraineEvent: ev.id, hotspotMinor: hotspot && ev.severity !== 'major' },
       });
     }
     requestRender();
@@ -250,7 +253,7 @@ export function createUkraineEventsLayer({
     if (_lod !== 'cluster') {
       const cards = _lod === 'cards' ? pickCards(_inView, { max: MAX_CARDS }) : [];
       for (const ev of cards) wanted.set(ev.id, 'card');
-      const rest = [..._inView].sort(rank).filter((ev) => !wanted.has(ev.id) && Number.isFinite(ev.lat));
+      const rest = [..._inView].sort(rank).filter((ev) => !wanted.has(ev.id) && Number.isFinite(ev.lat) && !ev.noCard);
       const chipMax = _lod === 'cards' ? Math.max(0, MAX_CHIPS - cards.length) : MAX_CHIPS;
       // Jeden čip na miesto (Izium ×3 → jeden čip „Izium +2"); ostatné udalosti
       // miesta ostávajú bodmi a vojdú do karty po kliknutí.
@@ -266,7 +269,7 @@ export function createUkraineEventsLayer({
     }
     if (_selectedId) {
       const sel = _filtered.find((ev) => ev.id === _selectedId);
-      if (sel && Number.isFinite(sel.lat)) wanted.set(sel.id, 'card');
+      if (sel && Number.isFinite(sel.lat) && !sel.noCard) wanted.set(sel.id, 'card');
     }
     // Zruš, čo už netreba; vytvor nové; zmeň druh kde treba.
     for (const [id, c] of _cards) {
@@ -279,6 +282,12 @@ export function createUkraineEventsLayer({
       if (ev) _cards.set(id, makeCardRecord(ev, kind));
     }
     points.show = _shown && _revealed && _lod !== 'cluster';
+    // Vojnové požiare: zďaleka (čipy) len tie s prísnym filtrom modelu (major),
+    // všetky až pri kartách — 2 000 oranžových bodov za týždeň inak prekryje front.
+    for (let i = 0; i < points.length; i += 1) {
+      const p = points.get(i);
+      if (p.id?.hotspotMinor) p.show = _lod === 'cards';
+    }
     const clusters = _shown && _revealed && _lod === 'cluster';
     if (clusters) rebuildClusters();
     clusterPoints.show = clusters; clusterLabels.show = clusters;

@@ -10,7 +10,7 @@
 import { classifyIncident, locateIncident } from './gulfIncidents.js';
 import { filterSanctionedNews } from './sanctionedMedia.js';
 import { UKRAINE_GAZETTEER } from './ukraineIncidents.js';
-import { UKRAINE_EVENTS_API, attachMedia, attachNews, dayKey, eventsInWindow, fetchUkraineEvents, newsItemToEvent } from './ukraineEvents.js';
+import { UKRAINE_EVENTS_API, attachMedia, attachNews, dayKey, eventsInWindow, fetchUkraineEvents, fireToEvent, newsItemToEvent } from './ukraineEvents.js';
 import { mediaToEvent } from './ukraineMedia.js';
 
 export const CHUNK_DAYS = 31;
@@ -53,7 +53,19 @@ export function assembleEvents(payloads, { startMs, endMs }) {
     }
   }
   const merged = attachMedia(attachNews(base, newsEvents), mediaEvents);
-  return eventsInWindow(merged, startMs, endMs);
+  // Vojnové požiare ako body `hotspot` (bez karty) — pripájajú sa až po zlúčení,
+  // aby správy a médiá nešli na požiar namiesto na sídlo.
+  const fires = [];
+  for (const p of payloads || []) for (const it of p?.fires || []) { const ev = fireToEvent(it); if (ev && !seen.has(ev.id)) { seen.add(ev.id); fires.push(ev); } }
+  return eventsInWindow([...merged, ...fires], startMs, endMs);
+}
+
+/** Snímka územnej kontroly platná pre deň (Wikipedia, CC BY-SA) z proxy. */
+export async function fetchUkraineControl(day, { fetcher = (...a) => fetch(...a), base = UKRAINE_EVENTS_API } = {}) {
+  const response = await fetcher(`${base}/control?at=${encodeURIComponent(day)}`, { cache: 'no-store' });
+  const json = await response.json().catch(() => null);
+  if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; throw err; }
+  return json;
 }
 
 /** Médiá okna (na pás fotiek/videí): všetky médiá udalostí + samostatné, od najnovšieho. Pure. */
@@ -82,9 +94,10 @@ export async function fetchUkraineSummary(from, to, { fetcher = (...a) => fetch(
  * Sklad: kusy sa cachujú (dnešný kus 60 s, minulé kusy 30 min — archivár ich
  * ešte dopĺňa obrázkami), súhrny 10 min. `load` skladá model okna.
  */
-export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, maxChunks = 40 } = {}) {
+export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, fetchControl = fetchUkraineControl, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, controlTtlMs = 60 * 60_000, maxChunks = 40 } = {}) {
   const chunks = new Map(); // `${from}:${to}` -> { at, payload, promise }
   const summaries = new Map();
+  const controls = new Map(); // deň -> { at, payload } (snímka platná pre deň)
   const evict = (map, max) => { while (map.size > max) map.delete(map.keys().next().value); };
 
   function chunkFor(range) {
@@ -130,6 +143,18 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
     return payload;
   }
 
+  /** Snímka kontroly pre deň (ms alebo YYYY-MM-DD); rovnaká snímka pre viac dní sa v cache zdieľa podľa jej dňa. */
+  async function control(dayOrMs) {
+    const day = typeof dayOrMs === 'string' ? dayOrMs : dayKey(dayOrMs);
+    const hit = controls.get(day);
+    if (hit && now() - hit.at < controlTtlMs) return hit.payload;
+    const payload = await fetchControl(day);
+    controls.set(day, { at: now(), payload });
+    if (payload?.day && payload.day !== day) controls.set(payload.day, { at: now(), payload });
+    evict(controls, 24);
+    return payload;
+  }
+
   /** Hlásenie GŠ pre deň kurzora (najbližší predchádzajúci deň s hlásením do 3 dní). */
   function reportForDay(reports, ms) {
     for (let back = 0; back <= 3; back += 1) {
@@ -139,5 +164,5 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
     return null;
   }
 
-  return { load, summary, reportForDay, chunkRanges, _chunks: chunks };
+  return { load, summary, control, reportForDay, chunkRanges, _chunks: chunks };
 }

@@ -11633,3 +11633,20 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-timeline .oko-ukr-tl-type { padding-top: 0; padding-bottom: 0; font-size: 9px; }
 .oko-ukr-minichip-extra { color: #8aa0b6; font-size: 8.5px; }
 .oko-ukr-minichip-extra[hidden] { display: none; }
+/* ---- územná kontrola (Wikipedia, CC BY-SA): karta pri bode + legenda v osi ---- */
+.oko-ukr-ctl-tip {
+  position: absolute; top: 0; left: 0; z-index: 60; pointer-events: none; will-change: transform; max-width: 320px;
+  padding: 3px 8px; border-radius: 6px; background: rgba(11, 22, 34, 0.94); border: 1px solid rgba(255, 255, 255, 0.14); border-left: 3px solid var(--ukr-accent, #8a97a3);
+  color: #dbeafe; font: 500 10px 'IBM Plex Mono', ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.oko-ukr-ctl-tip[hidden] { display: none; }
+.oko-ukr-tl-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-basis: 100%; font-size: 9px; color: #8aa0b6; }
+.oko-ukr-tl-ctl-item { display: inline-flex; align-items: center; gap: 4px; }
+.oko-ukr-tl-ctl-sw { display: inline-block; width: 12px; height: 9px; border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.2); }
+.oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw { background: rgba(224, 85, 63, 0.35); border-color: rgba(224, 85, 63, 0.7); }
+.oko-ukr-tl-ctl-item.is-zone .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(255, 181, 71, 0.75) 0 2px, rgba(255, 181, 71, 0.12) 2px 5px); border-color: rgba(255, 181, 71, 0.7); }
+.oko-ukr-tl-ctl-item.is-ua .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #4fa3ff; border-color: #0b1622; }
+.oko-ukr-tl-ctl-item.is-contested .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #ffb547; border-color: #e0553f; }
+.oko-ukr-tl-ctl-since { color: #cfe3f5; }
+.oko-ukr-tl-ctl-counts { color: #8aa0b6; }
+.oko-ukr-tl-ctl-chip { font-weight: 700; letter-spacing: 0.06em; }
