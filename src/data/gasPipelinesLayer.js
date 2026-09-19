@@ -170,7 +170,9 @@ export function createGasPipelinesLayer({
     try {
       const oil = await fetchGasPipelines({ fetcher: doFetch, url: OIL_PIPELINES_API, metaUrl: OIL_PIPELINES_META_API });
       oilFeatures = oil.features;
-      _oilMeta = oil.meta;
+      // Meta len k úsekom, ktoré sa naozaj nakreslia: prázdny ropný súbor s meta
+      // by inak pripočítal do chipu kilometre, ktoré na mape nie sú.
+      _oilMeta = oilFeatures.length ? oil.meta : null;
     } catch (error) {
       _oilMeta = null;
       console.warn('[Data:GasPipelines] ropný snímok nedostupný, kreslím len plyn: ' + (error?.message || error));
@@ -219,7 +221,7 @@ export function createGasPipelinesLayer({
     _loaded = true;
     _lastUpdate = now();
     _error = null;
-    console.log(`[Data:GasPipelines] Loaded ${features.length} segments (${counts.operating} operating, ${counts.planned} planned, ${counts.disused} disused), ${_lengthKm} km`);
+    console.log(`[Data:GasPipelines] Loaded ${features.length} segments (gas ${kinds.gas}, oil ${kinds.oil}; ${counts.operating} operating, ${counts.planned} planned, ${counts.disused} disused), ${_lengthKm} km`);
   }
 
   /**

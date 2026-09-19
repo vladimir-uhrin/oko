@@ -27,13 +27,16 @@
 //   ngl, condensate, lpg, naphtha, diesel, gasoline, jet_fuel — 44 ways total.
 //
 // KNOWN AND HONEST INCOMPLETENESS (project rule 2, must be stated in the UI):
-// this query sees 3 339 of the 14 145 oil ways mapped here — 23.6 %. The other
-// 76 % are completely bare: no usage, no name, no ref, no diameter, no
-// operator, so no query branch can see them and no tag can tell a bare trunk
-// line from a bare well tie-in. The layer therefore shows the attributed
-// quarter, which in the Persian Gulf is thin: the user declined the Global
-// Energy Monitor tracker (it is behind a form asking for personal data), and
-// OSM alone has almost no named Gulf oil lines.
+// the query returns 3 609 of the 14 145 oil ways mapped here (25.5 %) and the
+// classifier keeps 2 841 of those (20.1 %; 768 dropped as gathering, flowline,
+// branch stubs under DN 150, or members of an oil relation that carry their
+// own non-oil `substance`) — figures from `pipelines.meta.json` of the
+// 2026-09-19 snapshot. The other ~75 % are completely bare: no usage, no name,
+// no ref, no diameter, no operator, so no query branch can see them and no tag
+// can tell a bare trunk line from a bare well tie-in. The layer therefore
+// shows the attributed fifth, which in the Persian Gulf is thin: the user
+// declined the Global Energy Monitor tracker (it is behind a form asking for
+// personal data), and OSM alone has almost no named Gulf oil lines.
 //
 // Usage:
 //   node scripts/build-oil-pipelines.mjs            # uses cached raw tiles when present

@@ -198,6 +198,28 @@ test('ropa: vlastný snímok z /api/oil, počty na látku, zlúčený popis zdro
   assert.deepEqual(layer._getStateForTest().kinds, { gas: 0, oil: 0 }, 'destroy upratal aj ropný stav');
 });
 
+test('ropa prítomná, ale prázdna: nakreslí sa len plyn a chip nepripočíta kilometre, ktoré na mape nie sú', async () => {
+  // Súbor existuje, meta existuje, ale build nenašiel ani jeden úsek. Bez
+  // ohľadu na to, prečo, chip nesmie hlásiť ropné km z meta — kreslí sa nič.
+  const fetcher = async (url) => {
+    const path = String(url).split('?')[0];
+    const oil = path.startsWith('/api/oil/');
+    if (path.endsWith('/meta')) return { ok: true, json: async () => (oil ? { snapshot: '2026-09-01T00:00:00Z', features: 0, lengthKm: 999 } : META) };
+    return { ok: true, text: async () => (oil ? '' : TEXT) };
+  };
+  const layer = createGasPipelinesLayer({ fetchImpl: fetcher, dataSourceFactory: fakeDataSource, handlerFactory: fakeHandler, overlayHost: fakeHost(), translate: tKey, lang: () => 'sk', now: () => NOW });
+  const viewer = fakeViewer();
+  layer.init(viewer);
+  assert.equal(await layer.update(), true);
+  const st = layer._getStateForTest();
+  assert.deepEqual(st.kinds, { gas: 3, oil: 0 });
+  assert.equal(st.oilMeta, null, 'prázdny ropný snímok nemá meta');
+  // Medzery v popise sú U+00A0 a U+202F, preto sa porovnáva po normalizácii.
+  const source = layer.getStats().source.replace(/\s/g, ' ');
+  assert.equal(source, '© OpenStreetMap contributors · ODbL · gas.pipeline-snapshot {"date":"2026-09-13"} · 1 351 km', 'starší dátum 2026-09-01 ani 999 km sa do chipu nedostanú');
+  layer.destroy(viewer);
+});
+
 test('duplicitné id (úsek cez hranicu dlaždice) dostane príponu namiesto výnimky; po zlyhaní sa pri ďalšom pokuse zdroj vyprázdni, nič sa nezdvojí', async () => {
   const dupText = `${TEXT}\n${feature('osm-way-1', { name: 'Transgas', diameterMm: 1400, lengthKm: 3.5, status: 'operating', osm: 1 }, [[19, 48.7], [19.5, 48.9]])}`;
   let calls = 0;
