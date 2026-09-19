@@ -122,7 +122,7 @@ export async function buildPipelineSnapshot({
 }) {
   const round = (n) => Number(n.toFixed(roundDigits));
 
-  function toFeatures(el, tile, relTags = null) {
+  function toFeatures(el, tile, relTags = null, relationId = null) {
     // Tagy relácie (meno, prevádzkovateľ, priemer, látka) ako predvolené hodnoty
     // pre členské úseky, ktoré ich nemajú; tagy úseku majú prednosť.
     const tags = { ...(relTags || {}), ...(el.tags || {}) };
@@ -151,6 +151,7 @@ export async function buildPipelineSnapshot({
       pressure: tags.pressure || null,
       status: tags.disused === 'yes' || tags['disused:man_made'] ? 'disused' : (tags.construction === 'yes' || tags.proposed === 'yes' ? 'planned' : 'operating'),
       osm: el.id,
+      relation: relationId,
     };
     return clipToBbox(coords, tile, round)
       .map((part) => simplify(part, simplifyEpsDeg))
@@ -213,10 +214,12 @@ export async function buildPipelineSnapshot({
     const tile = tiles[i];
     const json = await fetchTile(tile);
     const elements = json.elements || [];
+    // Relácia route=pipeline: tagy ako predvolené hodnoty pre členov + jej id
+    // ako kľúč skupiny (etapa 6: klik vyberie celú trasu, nie 900 m pahýľ).
     const relTagsByWay = new Map();
     for (const rel of elements) {
       if (rel.type !== 'relation') continue;
-      for (const m of rel.members || []) if (m.type === 'way' && !relTagsByWay.has(m.ref)) relTagsByWay.set(m.ref, rel.tags || {});
+      for (const m of rel.members || []) if (m.type === 'way' && !relTagsByWay.has(m.ref)) relTagsByWay.set(m.ref, { id: rel.id, tags: rel.tags || {} });
     }
     const ways = elements.filter((el) => el.type === 'way');
     const seenWays = new Set();
@@ -224,11 +227,12 @@ export async function buildPipelineSnapshot({
     for (const el of ways) {
       if (seenWays.has(el.id)) continue; // úsek môže byť v .w aj .m
       seenWays.add(el.id);
-      const relTags = relTagsByWay.get(el.id) || null;
+      const rel = relTagsByWay.get(el.id) || null;
+      const relTags = rel ? rel.tags : null;
       const rule = classify({ ...(relTags || {}), ...(el.tags || {}) }, relTags !== null);
       if (!rule) { basis.excluded += 1; continue; }
       basis[rule] += 1;
-      parts.push(...toFeatures(el, tile, relTags));
+      parts.push(...toFeatures(el, tile, relTags, rel ? rel.id : null));
     }
     features.push(...parts);
     tileMeta.push({ bbox: tile, ways: ways.length, relations: relTagsByWay.size ? elements.filter((el) => el.type === 'relation').length : 0, features: parts.length, osmBase: json.osm3s?.timestamp_osm_base || null });

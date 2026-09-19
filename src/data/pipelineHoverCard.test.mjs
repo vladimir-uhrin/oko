@@ -86,6 +86,11 @@ test('DOM karta: plyn s tokom → „načítavam" a potom riadky s citáciou ENT
   assert.match(text(countries), /Grécko/);
   assert.deepEqual(byClass(countries, 'pipeline-hover-flag').map((f) => f.alt), ['AL', 'GR']);
   assert.match(text(byClass(root, 'pipeline-hover-foot')[0]), /gas\.pipeline-snapshot \{"date":"2026-09-19"\}/);
+  assert.doesNotMatch(text(root), /gas\.pipeline-group/, 'bez skupiny bez riadku trasy');
+  card.hide();
+  // Celá trasa (etapa 6): riadok s počtom úsekov a km, len keď je úsekov viac.
+  card.show({ id: 'osm-way-6', properties: { name: 'Uzhhorod – Košice', substance: 'gas', osm: 6 } }, { x: 1, y: 1 }, { group: { count: 3, lengthKm: 1234 } });
+  assert.match(text(byClass(root, 'pipeline-hover-rows')[0]), /gas\.pipeline-group gas\.pipeline-group-value \{"n":3,"km":"1\s234"\}/);
   card.hide();
   assert.equal(root.hidden, true);
   // NS1: čaká na dva body

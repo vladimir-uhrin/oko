@@ -506,6 +506,61 @@ test('etapa 5 — plot na chrbtici v strednom pásme; duch: kohorta pri kamere, 
   plain.destroy(v2);
 });
 
+test('etapa 6 — klik vyberie celú trasu (relácia), karta a hover hlásia úseky a km; bez skupiny len úsek', async () => {
+  const GROUP_TEXT = [
+    feature('osm-way-11', { name: 'Uzhhorod – Košice', relation: 900, diameterMm: 1400, lengthKm: 40, status: 'operating', osm: 11 }, [[22, 48.6], [21.5, 48.7]]),
+    feature('osm-way-12', { name: 'Uzhhorod – Košice', relation: 900, diameterMm: 1400, lengthKm: 55.5, status: 'operating', osm: 12 }, [[21.5, 48.7], [21, 48.7]]),
+    feature('osm-way-13', { name: 'Uzhhorod – Košice', relation: 900, diameterMm: 1400, lengthKm: 10, status: 'operating', osm: 13 }, [[21, 48.7], [20.9, 48.72]]),
+    feature('osm-way-14', { name: 'Odbočka', diameterMm: 300, lengthKm: 3, status: 'operating', osm: 14 }, [[21, 49], [21.1, 49]]),
+    feature('osm-way-15', { name: 'лупинг', operator: 'Газпром', diameterMm: 1400, lengthKm: 3, status: 'operating', osm: 15 }, [[40, 55], [40.1, 55]]),
+    feature('osm-way-16', { name: 'лупинг', operator: 'Газпром', diameterMm: 1400, lengthKm: 3, status: 'operating', osm: 16 }, [[41, 55], [41.1, 55]]),
+  ].join('\n');
+  const fetcher = async (url) => (String(url).includes('/api/oil/') ? noOil : (url.endsWith('/meta') ? { ok: true, json: async () => META } : { ok: true, text: async () => GROUP_TEXT }));
+  const pick = { value: null };
+  const handlers = [];
+  const host = fakeHost();
+  const shown = [];
+  const hover = { show(f, at, extra) { shown.push([f.id, extra?.group ?? null]); return []; }, setFlows() {}, hide() {}, destroy() {}, isHovered: () => false, current: () => null };
+  const timers = [];
+  const setTimer = (fn) => { timers.push(fn); return timers.length; };
+  const clearTimer = (id) => { timers[id - 1] = null; };
+  const runTimers = () => { const pending = timers.splice(0).filter(Boolean); for (const fn of pending) fn(); };
+  const canvas = { listeners: {}, addEventListener(t, fn) { this.listeners[t] = fn; }, removeEventListener(t) { delete this.listeners[t]; } };
+  const viewer = { ...fakeViewer(pick), scene: { canvas, pick: () => pick.value, requestRender() {} } };
+  const layer = createGasPipelinesLayer({ fetchImpl: fetcher, dataSourceFactory: fakeDataSource, handlerFactory: () => { const h = fakeHandler(); handlers.push(h); return h; }, overlayHost: host, translate: tKey, lang: () => 'sk', now: () => NOW, hoverFactory: () => hover, setTimer, clearTimer, terrainSampler: null });
+  layer.init(viewer);
+  layer.enable();
+  assert.equal(await layer.update(), true);
+  assert.equal(layer._getStateForTest().groups, 1, 'relácia 900 je skupina; „лупинг" je všeobecné meno, netvorí ju');
+  const gasDs = viewer.dataSources.added[0];
+  const selection = viewer.dataSources.added[2];
+  const seg12 = gasDs.entities.values.find((e) => e.__gasPipeline === 'osm-way-12');
+  pick.value = { id: seg12 };
+  handlers[0].fn({ position: { x: 1, y: 1 } });
+  assert.equal(layer._getStateForTest().selected, 'osm-way-12');
+  assert.deepEqual(selection.entities.values.map((e) => e.__gasPipelineSelection), ['osm-way-12', 'osm-way-11', 'osm-way-13'], 'kliknutý úsek prvý, potom zvyšok trasy');
+  assert.equal(selection.entities.values.every((e) => e.polyline.width === 9), true);
+  assert.ok(host.entries[0].details.includes('gas.pipeline-group: gas.pipeline-group-value {"n":3,"km":"106"}'), 'karta: celá trasa 3 úseky · 106 km (40 + 55,5 + 10 = 105,5 → 106)');
+  // Úsek bez skupiny: zvýraznenie len jeho, karta bez riadku trasy.
+  const seg14 = gasDs.entities.values.find((e) => e.__gasPipeline === 'osm-way-14');
+  pick.value = { id: seg14 };
+  handlers[0].fn({ position: { x: 1, y: 1 } });
+  assert.deepEqual(selection.entities.values.map((e) => e.__gasPipelineSelection), ['osm-way-14']);
+  assert.equal(host.entries[0].details.some((d) => d.startsWith('gas.pipeline-group')), false);
+  // Všeobecné meno „лупинг": dva úseky nie sú trasa.
+  const seg15 = gasDs.entities.values.find((e) => e.__gasPipeline === 'osm-way-15');
+  pick.value = { id: seg15 };
+  handlers[0].fn({ position: { x: 1, y: 1 } });
+  assert.deepEqual(selection.entities.values.map((e) => e.__gasPipelineSelection), ['osm-way-15']);
+  // Hover dostane súhrn skupiny (alebo null).
+  pick.value = { id: seg12 };
+  canvas.listeners.pointermove({ clientX: 5, clientY: 5, buttons: 0 }); runTimers();
+  pick.value = { id: seg14 };
+  canvas.listeners.pointermove({ clientX: 6, clientY: 6, buttons: 0 }); runTimers();
+  assert.deepEqual(shown, [['osm-way-12', { count: 3, lengthKm: 106 }], ['osm-way-14', null]]);
+  layer.destroy(viewer);
+});
+
 test('duplicitné id (úsek cez hranicu dlaždice) dostane príponu namiesto výnimky; po zlyhaní sa pri ďalšom pokuse zdroj vyprázdni, nič sa nezdvojí', async () => {
   const dupText = `${TEXT}\n${feature('osm-way-1', { name: 'Transgas', diameterMm: 1400, lengthKm: 3.5, status: 'operating', osm: 1 }, [[19, 48.7], [19.5, 48.9]])}`;
   let calls = 0;

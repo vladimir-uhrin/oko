@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GAS_PIPELINES_API, GAS_PIPELINES_META_API, GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS,
-  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineDisplayCondition, pipelineDisplayName, pipelineFenceSpec, pipelineKind, pipelineLocationText, pipelineMidpoint,
+  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineDisplayCondition, pipelineDisplayName, pipelineFenceSpec, pipelineGroupKey, pipelineGroupSummary, pipelineKind, pipelineLocationText, pipelineMidpoint,
   pipelineOperator, pipelineRoute, pipelineSelectedStyle, pipelineSourceLabel, pipelineStatus, pipelineStyle, pipelineTitle, selectGhostCohort,
 } from './gasPipelines.js';
 
@@ -172,6 +172,19 @@ test('etapa 5 — plot len na prevádzkovaných chrbticiach a hlavných vetvách
   assert.deepEqual(selectGhostCohort(records, cam, { maxVertices: 12 }), ['a'], 'strop vrcholov: a (3) + b (10) by prekročilo 12');
   assert.deepEqual(selectGhostCohort(records, null), []);
   assert.deepEqual(selectGhostCohort([], cam), []);
+});
+
+test('etapa 6 — skupina = celá trasa: relácia, inak meno + prevádzkovateľ; všeobecné mená nespájajú', () => {
+  assert.equal(pipelineGroupKey({ relation: 4711, name: 'x' }), 'rel:4711', 'relácia má prednosť pred menom');
+  assert.equal(pipelineGroupKey({ name: 'Trans Adriatic Pipeline', operator: 'TAP AG' }), 'name:trans adriatic pipeline|tap ag');
+  assert.equal(pipelineGroupKey({ name: '  Trans  Adriatic Pipeline ' }), 'name:trans adriatic pipeline|', 'medzery a veľkosť písmen nehrajú rolu');
+  assert.equal(pipelineGroupKey({ name: 'лупинг', operator: 'Газпром' }), null, '„slučka" je všeobecné slovo, nie trasa');
+  assert.equal(pipelineGroupKey({ name: 'Нефтепровод' }), null);
+  assert.equal(pipelineGroupKey({ name: 'Gas pipeline' }), null);
+  assert.equal(pipelineGroupKey({ name: 'TAG' }), null, 'pod 4 znaky je meno priveľmi krátke');
+  assert.equal(pipelineGroupKey({}), null);
+  assert.deepEqual(pipelineGroupSummary([{ properties: { lengthKm: 120.4 } }, { properties: { lengthKm: 4.2 } }, { properties: {} }]), { count: 3, lengthKm: 125 });
+  assert.deepEqual(pipelineGroupSummary(null), { count: 0, lengthKm: 0 });
 });
 
 test('pipelineMidpoint a pipelineSourceLabel', () => {

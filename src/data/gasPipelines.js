@@ -221,6 +221,35 @@ export function selectGhostCohort(records, camera, { maxDistanceM = PIPELINE_GHO
   return out;
 }
 
+/**
+ * Skupina = celá trasa (etapa 6): úsek je fragment cesty OSM, klik naň by inak
+ * vybral 900 m pahýľ. Kľúč je id relácie route=pipeline, keď existuje; inak
+ * meno + prevádzkovateľ. Všeobecné mená („лупинг" = slučka, „Нефтепровод" =
+ * ropovod, „gas pipeline") nič nespájajú, len by vybrali stovky nesúvisiacich
+ * kusov naprieč krajinou — tie skupinu netvoria.
+ */
+const GENERIC_PIPELINE_NAME_RE = /^(лупинг|лупінг|нефтепровод|нафтопровід|газопровод|газопровід|магистральный газопровод|магістральний газопровід|pipeline|gas pipeline|oil pipeline|gasleitung|erdgasleitung|ölleitung|gazociąg|ropociąg|plynovod|ropovod|خط لوله گاز|خط لوله نفت|输气管道|输油管道|天然气管道|管道)$/i;
+/** Najviac úsekov v jednej mennej skupine — nad tým je meno prakticky všeobecné. */
+export const PIPELINE_GROUP_MAX = 120;
+export function pipelineGroupKey(properties = {}) {
+  const relation = Number(properties?.relation);
+  if (Number.isFinite(relation) && relation > 0) return `rel:${relation}`;
+  const name = String(properties?.name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (name.length < 4 || GENERIC_PIPELINE_NAME_RE.test(name)) return null;
+  const operator = String(properties?.operator || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return `name:${name}|${operator}`;
+}
+
+/**
+ * Súhrn skupiny pre kartu: počet úsekov a súčet km.
+ * @param {Array<{properties?: object}>} features
+ * @returns {{count: number, lengthKm: number}}
+ */
+export function pipelineGroupSummary(features) {
+  const list = Array.isArray(features) ? features : [];
+  return { count: list.length, lengthKm: Math.round(list.reduce((s, f) => s + (Number(f?.properties?.lengthKm) || 0), 0)) };
+}
+
 /** Štýl zvýraznenia vybraného úseku — odvodený od základného, vždy viditeľný. */
 export function pipelineSelectedStyle(properties = {}) {
   const base = pipelineStyle(properties);

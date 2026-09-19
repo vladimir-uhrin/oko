@@ -148,7 +148,7 @@ export function createPipelineHoverCard({
      * @param {{x: number, y: number}} at
      * @returns {string[]} id bodov ENTSOG, ktoré karta čaká cez setFlows (prázdne = nič nečaká)
      */
-    show(feature, at) {
+    show(feature, at, { group = null } = {}) {
       const model = pipelineHoverModel(feature, { translate, lang: lang() });
       if (!model) { hide(); return []; }
       if (current === feature) { place(at); return []; }
@@ -174,6 +174,11 @@ export function createPipelineHoverCard({
       }
       const list = el('dl', '', root, 'pipeline-hover-rows');
       for (const [label, value] of model.rows) { el('dt', label, list); el('dd', value, list); }
+      // Celá trasa (etapa 6): koľko úsekov a km má skupina, do ktorej úsek patrí.
+      if (group && group.count > 1) {
+        el('dt', translate('gas.pipeline-group'), list);
+        el('dd', translate('gas.pipeline-group-value', { n: group.count, km: new Intl.NumberFormat(lang() === 'sk' ? 'sk-SK' : 'en-GB').format(group.lengthKm) }), list);
+      }
       flowRoot = el('div', '', root, 'pipeline-hover-flow');
       if (model.kind === 'oil') {
         el('h4', translate('gas.pipeline-flow-title'), flowRoot);
