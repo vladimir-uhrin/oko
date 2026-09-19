@@ -79,6 +79,7 @@ import { YAHOO_SYMBOLS, parseYahooChart, yahooChartUrl } from './src/data/oilPri
 import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, normalizeDirectFeed, parseGdeltArticles } from './src/data/situationNews.js';
 import { filterSanctionedNews } from './src/data/sanctionedMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from './src/data/ukraineReport.js';
+import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -5075,7 +5076,8 @@ function situationNewsProxy() {
             const item = {
               title: a.title, url: a.url, source: feed.label || a.domain,
               publishedAt: a.publishedAt ? Date.parse(a.publishedAt) : null,
-              image: feed.unfurl && a.image ? a.image : null, lang: null, country: a.sourceCountry || null,
+              // `feedImage`: náhľad z feedu (media:content/enclosure) áno, og:image scraping nie.
+              image: (feed.unfurl || feed.feedImage) && a.image ? a.image : null, lang: null, country: a.sourceCountry || null,
             };
             if (!feed.unfurl) item.noImage = true;
             if (feed.badge) item.badge = feed.badge;
@@ -10136,7 +10138,15 @@ function normalizeRssArticles(xml, limit = 5) {
     const rawDate = rssTag(item, 'pubDate') || rssTag(item, 'dc:date');
     // Obrázok z feedu (media:content / enclosure obrázka) a krátky popis —
     // situačné karty ich používajú podľa pravidiel zdroja (UKRAJINA 2026-09-19).
-    const mediaUrl = /<media:content[^>]+url="([^"]+)"/i.exec(item)?.[1] || /<enclosure[^>]+type="image\/[^"]*"[^>]+url="([^"]+)"/i.exec(item)?.[1] || /<enclosure[^>]+url="([^"]+)"[^>]+type="image\/[^"]*"/i.exec(item)?.[1] || null;
+    // Viac media:content (Guardian: 140 px a 460 px) → najširší (UKRAJINA 2026-09-19).
+    let mediaUrl = null; let mediaWidth = -1;
+    for (const mc of item.matchAll(/<media:content\b([^>]*)>/gi)) {
+      const u = /url="([^"]+)"/i.exec(mc[1])?.[1]; if (!u) continue;
+      const w = Number(/width="(\d+)"/i.exec(mc[1])?.[1] || 0);
+      if (w > mediaWidth) { mediaUrl = u; mediaWidth = w; }
+    }
+    if (!mediaUrl) mediaUrl = /<enclosure[^>]+type="image\/[^"]*"[^>]+url="([^"]+)"/i.exec(item)?.[1] || /<enclosure[^>]+url="([^"]+)"[^>]+type="image\/[^"]*"/i.exec(item)?.[1] || null;
+    if (mediaUrl) mediaUrl = mediaUrl.replace(/&amp;/g, '&');
     articles.push({
       title,
       url: parsedUrl.href,
@@ -10672,6 +10682,7 @@ export default defineConfig(({ mode }) => {
       oilPricesProxy(),
       ukraineBaseProxy(),
       ukraineReportProxy(),
+      ukraineEventsProxy(),
       situationNewsProxy(),
       translateProxy(),
       linkImageProxy(),

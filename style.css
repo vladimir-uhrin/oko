@@ -11450,3 +11450,186 @@ body.oko-mobile #oko-share {
   font-family:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#dbeafe;letter-spacing:.02em;pointer-events:auto;}
 .oko-oil-chip[hidden]{display:none;}
 @media (max-width:520px){.oko-oil-chip{top:126px;right:8px;width:240px;}}
+
+/* =====================================================================
+   UKRAJINA · UDALOSTI A ČASOVÁ OS (etapa 3, 2026-09-19) — vrstva
+   src/ukraineEventsLayer.js kreslí body v Cesiu a karty/čipy v DOM plátne
+   .oko-ukr-cards (absolútne v #cesiumContainer, bez udalostí myši okrem
+   kariet); os src/ukraineTimeline.js je PEVNÝ spodný pás .oko-ukr-timeline
+   (prekážka stĺpcov v ui.js, na mobile nad lištou cez --oko-dock-lift).
+   Farby závažnosti: --ukr-accent (kritická #f87171, veľká #ffb547, malá #39d0ff).
+   ===================================================================== */
+.oko-ukr-cards { position: absolute; inset: 0; z-index: 58; pointer-events: none; overflow: hidden; }
+.oko-ukr-cards[hidden] { display: none; }
+.oko-ukr-pin {
+  position: absolute; top: 0; left: 0; width: 12px; height: 12px; border-radius: 2px;
+  background: var(--ukr-accent, #39d0ff); box-shadow: 0 0 0 2px rgba(11, 22, 34, 0.85), 0 0 10px var(--ukr-accent, #39d0ff);
+  pointer-events: none; will-change: transform; z-index: 1;
+}
+.oko-ukr-pin.sev-minor { width: 8px; height: 8px; }
+.oko-ukr-pin.sev-major { width: 10px; height: 10px; }
+.oko-ukr-line {
+  position: absolute; top: 0; left: 0; height: 1.5px; transform-origin: 0 0; pointer-events: none; will-change: transform, width;
+  background: linear-gradient(90deg, var(--ukr-accent, #39d0ff), rgba(255, 255, 255, 0.15)); opacity: 0.9;
+}
+.oko-ukr-card {
+  position: absolute; top: 0; left: 0; width: 264px; max-width: calc(100vw - 16px);
+  padding: 6px 8px 6px 10px; border-radius: 9px; background: rgba(11, 22, 34, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.12); border-left: 3px solid var(--ukr-accent, #39d0ff);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5); backdrop-filter: blur(6px); pointer-events: auto;
+  color: #dbeafe; font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  will-change: transform; cursor: var(--cursor-arrow);
+}
+.oko-ukr-card.is-selected { border-color: var(--ukr-accent, #39d0ff); box-shadow: 0 0 0 1px var(--ukr-accent, #39d0ff), 0 8px 26px rgba(0, 0, 0, 0.55); z-index: 2; }
+.oko-ukr-card.is-hover { border-color: rgba(255, 255, 255, 0.35); }
+.oko-ukr-card-head { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 4px; }
+.oko-ukr-chip {
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; line-height: 1.5;
+  border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 5px; padding: 0 5px; color: #cfe3f5;
+}
+.oko-ukr-chip-type { color: var(--ukr-accent, #39d0ff); border-color: currentColor; }
+.oko-ukr-level { font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase; color: #8aa0b6; margin-left: auto; }
+.oko-ukr-level.is-official { color: #ffd27a; }
+.oko-ukr-level.is-osint { color: #9be7a3; }
+.oko-ukr-card-close {
+  border: 0; background: transparent; color: #8aa0b6; font-size: 14px; line-height: 1; padding: 0 2px; cursor: var(--cursor-pointer);
+  font-family: inherit;
+}
+.oko-ukr-card-close:hover { color: #fff; }
+.oko-ukr-card-subject { font-size: 12.5px; font-weight: 700; color: #f1f5f8; letter-spacing: 0.02em; }
+.oko-ukr-card-status { font-size: 10.5px; line-height: 1.35; color: #c7d7e6; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.oko-ukr-card-mt { font-size: 8px; color: #5b6f84; margin-top: 2px; letter-spacing: 0.03em; text-transform: uppercase; }
+.oko-ukr-card-mt[hidden] { display: none; }
+.oko-ukr-card-media {
+  position: relative; display: block; width: 100%; height: 104px; margin: 6px 0 2px; padding: 0; border: 0; border-radius: 7px; overflow: hidden;
+  background: #0b1622; cursor: var(--cursor-pointer);
+}
+.oko-ukr-card-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.oko-ukr-card-media.is-noimg { height: 34px; background: rgba(255, 255, 255, 0.05); }
+.oko-ukr-play {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 50%;
+  background: rgba(11, 22, 34, 0.75); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center;
+  padding-left: 2px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+.oko-ukr-media-count { position: absolute; right: 6px; bottom: 5px; font-size: 9px; color: #fff; background: rgba(11, 22, 34, 0.75); border-radius: 4px; padding: 1px 5px; }
+.oko-ukr-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 9px; color: #6f8398; }
+.oko-ukr-card-src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oko-ukr-card-link { color: var(--ukr-accent, #39d0ff); text-decoration: none; white-space: nowrap; }
+.oko-ukr-card-link:hover { text-decoration: underline; }
+.oko-ukr-minichip {
+  position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 4px; max-width: 170px;
+  padding: 1px 7px 1px 5px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.14); border-left: 2px solid var(--ukr-accent, #39d0ff);
+  background: rgba(11, 22, 34, 0.9); color: #dbeafe; font: 500 9.5px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: 0.02em;
+  pointer-events: auto; cursor: var(--cursor-pointer); will-change: transform; white-space: nowrap;
+}
+.oko-ukr-minichip:hover, .oko-ukr-minichip.is-hover { border-color: var(--ukr-accent, #39d0ff); color: #fff; }
+.oko-ukr-minichip-text { overflow: hidden; text-overflow: ellipsis; }
+.oko-ukr-minichip-media { color: var(--ukr-accent, #39d0ff); font-size: 8px; }
+.oko-ukr-glyph { color: var(--ukr-accent, #39d0ff); font-size: 10px; }
+/* lightbox: fotky, YouTube nocookie, Telegram embed, mp4 — v ráme glóbusu */
+.oko-ukr-lightbox {
+  /* nad dokom (#command-dock z 145) a pásom osi, pod toastom (200) */
+  position: absolute; inset: 0; z-index: 190; background: rgba(4, 10, 16, 0.82); display: flex; align-items: center; justify-content: center;
+  pointer-events: auto; padding: 16px;
+}
+.oko-ukr-lightbox[hidden] { display: none; }
+.oko-ukr-lb-box {
+  width: min(880px, 100%); max-height: 100%; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
+  background: rgba(11, 22, 34, 0.98); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  color: #dbeafe; font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+.oko-ukr-lb-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.oko-ukr-lb-title { font-size: 11.5px; color: #f1f5f8; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oko-ukr-lb-meta { font-size: 9px; color: #8aa0b6; white-space: nowrap; }
+.oko-ukr-lb-close { border: 0; background: transparent; color: #8aa0b6; font-size: 20px; line-height: 1; cursor: var(--cursor-pointer); font-family: inherit; }
+.oko-ukr-lb-close:hover { color: #fff; }
+.oko-ukr-lb-body { position: relative; background: #000; min-height: 200px; display: flex; align-items: center; justify-content: center; }
+.oko-ukr-lb-body iframe, .oko-ukr-lb-body video { width: 100%; aspect-ratio: 16 / 9; border: 0; display: block; background: #000; max-height: 70vh; }
+.oko-ukr-lb-body img { max-width: 100%; max-height: 70vh; display: block; object-fit: contain; }
+.oko-ukr-lb-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); width: 36px; height: 56px; border: 0; border-radius: 6px; cursor: var(--cursor-pointer);
+  background: rgba(11, 22, 34, 0.7); color: #fff; font-size: 26px; font-family: inherit;
+}
+.oko-ukr-lb-nav.is-prev { left: 8px; }
+.oko-ukr-lb-nav.is-next { right: 8px; }
+.oko-ukr-lb-counter { position: absolute; right: 10px; bottom: 8px; font-size: 10px; color: #fff; background: rgba(11, 22, 34, 0.7); padding: 1px 6px; border-radius: 4px; }
+.oko-ukr-lb-foot { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.oko-ukr-lb-link { font-size: 10px; color: #39d0ff; text-decoration: none; white-space: nowrap; }
+.oko-ukr-lb-strip { display: flex; gap: 6px; overflow-x: auto; flex: 1 1 auto; }
+.oko-ukr-lb-thumb { width: 56px; height: 40px; flex: 0 0 auto; padding: 0; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 5px; overflow: hidden; background: #0b1622; color: #8aa0b6; cursor: var(--cursor-pointer); }
+.oko-ukr-lb-thumb.is-active { border-color: #39d0ff; }
+.oko-ukr-lb-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* ---- časová os: pevný spodný pás -------------------------------------- */
+.oko-ukr-timeline {
+  /* centrovanie cez margin:auto, nie transform — .oko-scene-overlay pravidlá
+     transform prepisujú (animácia vstupu) a pás by ušiel doprava */
+  position: fixed; left: 0; right: 0; margin: 0 auto; bottom: 14px; transform: none; width: min(1180px, calc(100vw - 32px)); z-index: 61;
+  display: flex; flex-direction: column; gap: 5px; padding: 7px 10px 6px; border-radius: 12px;
+  background: rgba(11, 22, 34, 0.92); border: 1px solid rgba(57, 208, 255, 0.22); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); backdrop-filter: blur(8px);
+  color: #dbeafe; font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; pointer-events: auto; outline: none;
+}
+.oko-ukr-timeline[hidden] { display: none; }
+.oko-ukr-tl-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 20px; }
+.oko-ukr-tl-mode {
+  font: 700 9.5px 'IBM Plex Mono', monospace; letter-spacing: 0.08em; padding: 2px 8px; border-radius: 6px; cursor: var(--cursor-pointer); font-family: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.04); color: #dbeafe;
+}
+.oko-ukr-tl-mode.is-live { color: #9be7a3; border-color: rgba(155, 231, 163, 0.5); }
+.oko-ukr-tl-mode.is-replay { color: #ffb547; border-color: rgba(255, 181, 71, 0.5); }
+.oko-ukr-tl-wins, .oko-ukr-tl-transport, .oko-ukr-tl-legend { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.oko-ukr-tl-btn {
+  border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.04); color: #dbeafe; border-radius: 6px; padding: 1px 7px; cursor: var(--cursor-pointer);
+  font: 600 10px 'IBM Plex Mono', monospace; line-height: 1.5;
+}
+.oko-ukr-tl-btn:hover { border-color: rgba(57, 208, 255, 0.6); color: #fff; }
+.oko-ukr-tl-play { color: #39d0ff; min-width: 28px; }
+.oko-ukr-tl-speed {
+  border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(11, 22, 34, 0.9); color: #dbeafe; border-radius: 6px; padding: 1px 4px; font: 600 10px 'IBM Plex Mono', monospace;
+}
+.oko-ukr-tl-cursor { font-weight: 700; color: #f1f5f8; letter-spacing: 0.03em; white-space: nowrap; }
+.oko-ukr-tl-counts { color: #8aa0b6; letter-spacing: 0.04em; text-transform: uppercase; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; }
+.oko-ukr-tl-status { font-size: 9px; color: #8aa0b6; white-space: nowrap; }
+.oko-ukr-tl-status[data-state="error"] { color: #f87171; }
+.oko-ukr-tl-status[data-state="loading"] { color: #39d0ff; }
+.oko-ukr-tl-close { margin-left: auto; font-size: 13px; }
+.oko-ukr-tl-track { position: relative; height: 44px; border-radius: 6px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); cursor: crosshair; touch-action: none; overflow: hidden; }
+.oko-ukr-tl-hist { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.oko-ukr-tl-coverage { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; pointer-events: none; }
+.oko-ukr-tl-cov { position: absolute; top: 0; height: 100%; background: rgba(155, 231, 163, 0.75); }
+.oko-ukr-tl-cursorline { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #ffb547; box-shadow: 0 0 8px #ffb547; pointer-events: none; }
+.oko-ukr-tl-axis { position: absolute; left: 4px; right: 4px; top: 2px; display: flex; justify-content: space-between; font-size: 8.5px; color: #6f8398; pointer-events: none; letter-spacing: 0.03em; }
+.oko-ukr-tl-row3 { align-items: flex-start; gap: 10px; }
+.oko-ukr-tl-type { display: inline-flex; align-items: center; gap: 4px; }
+.oko-ukr-tl-type.is-off { opacity: 0.45; }
+.oko-ukr-tl-type[hidden] { display: none; }
+.oko-ukr-tl-type-count { color: #8aa0b6; font-weight: 400; }
+.oko-ukr-tl-media { display: flex; flex-direction: column; gap: 3px; flex: 1 1 320px; min-width: 0; }
+.oko-ukr-tl-media[hidden] { display: none; }
+.oko-ukr-tl-media-title { font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #8aa0b6; }
+.oko-ukr-tl-strip { display: flex; gap: 5px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; scrollbar-width: thin; }
+.oko-ukr-tl-thumb {
+  position: relative; flex: 0 0 auto; width: 84px; height: 52px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.12); border-bottom: 2px solid var(--ukr-accent, #39d0ff);
+  border-radius: 6px; overflow: hidden; background: #0b1622; cursor: var(--cursor-pointer); color: #dbeafe;
+}
+.oko-ukr-tl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.oko-ukr-tl-thumb:hover { border-color: var(--ukr-accent, #39d0ff); }
+.oko-ukr-tl-thumb-glyph { position: absolute; left: 4px; top: 3px; font-size: 10px; color: #fff; text-shadow: 0 0 4px #000; }
+.oko-ukr-tl-thumb.is-video .oko-ukr-tl-thumb-glyph { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: rgba(11, 22, 34, 0.75); display: flex; align-items: center; justify-content: center; font-size: 9px; padding-left: 2px; }
+.oko-ukr-tl-thumb.is-noimg .oko-ukr-tl-thumb-glyph { left: 50%; top: 40%; transform: translate(-50%, -50%); font-size: 16px; color: var(--ukr-accent, #39d0ff); }
+.oko-ukr-tl-thumb-cap { position: absolute; left: 0; right: 0; bottom: 0; font-size: 7.5px; line-height: 1.3; padding: 1px 4px; background: rgba(11, 22, 34, 0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.oko-ukr-tl-foot { font-size: 8px; color: #5b6f84; letter-spacing: 0.03em; text-transform: uppercase; }
+body.oko-mobile .oko-ukr-timeline { bottom: calc(var(--oko-dock-lift, 66px) + 6px); width: calc(100vw - 16px); padding: 6px 8px; font-size: 9.5px; }
+body.oko-mobile .oko-ukr-tl-media { display: none; }
+body.oko-mobile .oko-ukr-card { width: 232px; }
+@media (max-width: 720px) { .oko-ukr-tl-counts { flex-basis: 100%; } }
+/* Otvorená os zdvihne spodné prvky o svoju výšku — meria ju ukraineTimeline.js
+   do --oko-ukr-tl-lift. Modelované prvky (#command-dock, #cesium-credits —
+   creditAttribution.test.mjs stráži ich geometriu) dostávajú margin-bottom
+   inline z JS, nie odtiaľto. */
+body.oko-ukr-tl-open #toast,
+body.oko-ukr-tl-open #intel-hud .hud-bottom-left,
+body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr-tl-lift, 0px); }
+.oko-ukr-timeline .oko-ukr-tl-thumb { width: 72px; height: 44px; }
+.oko-ukr-timeline .oko-ukr-tl-type { padding-top: 0; padding-bottom: 0; font-size: 9px; }
+.oko-ukr-minichip-extra { color: #8aa0b6; font-size: 8.5px; }
+.oko-ukr-minichip-extra[hidden] { display: none; }

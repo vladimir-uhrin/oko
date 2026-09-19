@@ -12,7 +12,28 @@ kroku používateľa (žiadosť, e-mail, kľúč) a čo vôbec nie** — a v ako
 overených dvojmo (nálezca + skeptik) sú z nich len 3, zvyšok je jedno čítanie a pred zapojením sa
 overuje znova podľa `new-data-layer`.
 
-## Stav (2026-09-19 noc): ETAPY 1 a 2 HOTOVÉ, etapy 3–6 nezačaté
+## Stav (2026-09-19 večer): ETAPY 1, 2 a 3 (3a+3b+3c) HOTOVÉ, etapy 4–6 nezačaté
+
+### Etapa 3 (používateľ: „ako na obrázku, určite časovú os … 1 až 5", potom „fotky z čo najviac zdrojov, aj videá, všetko ukladať") — hotové a overené v pane
+
+- **3a chrbtica**: archív na disku `.gev-cache/ukraine/events/` (VIINA 2022–2026 po rokoch = 318 947
+  udalostí, GeoConfirmed rolujúcich 90 dní po dňoch, správy a médiá po dňoch, hlásenia GŠ po dňoch),
+  archivár v dev serveri (`src/data/ukraineEventsProxy.js`: správy/médiá 15 min, GŠ 60 min,
+  GeoConfirmed/VIINA 6 h), `/api/ukraine/events?from&to` (≤ 31 d), `/summary`, `/status`, spätné
+  naplnenie `scripts/build-ukraine-events.mjs --all`; čistý model `src/data/ukraineEvents.js`
+  (VIINA príznaky → typ/závažnosť, GeoConfirmed s etickým filtrom, správy a médiá pripojené k bodu
+  toho istého dňa a miesta), `src/data/ukraineMedia.js` (YouTube feedy 9 kanálov, oficiálne
+  Telegram kanály GŠ/MO/DSNS/PS, ArmyInform mp4; ukrajinská klasifikácia a kotvenie azbukou).
+  Fotky navyše z Ukrinform, Guardian a Meduza (náhľad z feedu), Kyiv Post a Euromaidan Press len
+  titulok (zákaz fotiek v podmienkach). Ukladajú sa odkazy a náhľadové URL, nie bajty médií.
+- **3b karty**: `src/ukraineEventsLayer.js` — body (PointPrimitive), zhluky > 600 km, mini čipy
+  150–600 km (jeden na miesto, „+n"), karty < 150 km (max 8, 8 kandidátov rozmiestnenia, vodiace
+  čiary), lightbox (YouTube nocookie, Telegram embed, mp4, galéria fotiek). Nie kópia ZÁLIV kariet.
+- **3c os**: `src/ukraineTimeline.js` + `src/data/ukraineTimelineClock.js` — LIVE/PREHRÁVANIE,
+  okná 24 h/7 d/30 d/od 2022, rýchlosti 1 h/s…2 d/s, histogram s ťahaním, legenda = filter,
+  počítadlá, pás fotiek a videí, GŠ značky pre deň kurzora, odkaz `?front=&t=&win=`.
+- Nepublikované (strom nesie meteo agenta). Otvorené: rozhodnutia č. 4–5 nižšie sú prekonané
+  pokynom používateľa (fotky zo všetkých dovolených zdrojov), ostatné platia.
 
 ### Etapa 2 (používateľ: „Fáza 2") — hotové a overené naživo
 

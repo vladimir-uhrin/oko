@@ -31,6 +31,7 @@ export function createUkrainePanel({
   mountTarget = null,
   layer = null,
   report = null,
+  timeline = null,
   scenes = listFrontScenes(),
   applyScene = null,
   translate = t,
@@ -86,6 +87,19 @@ export function createUkrainePanel({
     reportChip.dataset.part = 'report';
     reportChip.setAttribute('aria-pressed', 'true');
     chips.appendChild(reportChip);
+  }
+  // Čip UDALOSTI (etapa 3): otvorí/zavrie časovú os s vrstvou udalostí (body,
+  // karty, fotky a videá); stav odráža os sama cez onChange.
+  let eventsChip = null;
+  if (timeline) {
+    eventsChip = button('data-toggle-chip ukraine-chip ukraine-chip-events', translate('ukraine.part.events'), () => {
+      if (timeline.isShown()) timeline.hide();
+      else { if (!layer.isShown?.()) void layer.show(); timeline.show(); }
+    });
+    eventsChip.dataset.part = 'events';
+    eventsChip.setAttribute('aria-pressed', 'false');
+    eventsChip.title = translate('ukraine.events.hint');
+    chips.appendChild(eventsChip);
   }
   row.appendChild(chips);
   const counts = el('div', 'ukraine-counts');
@@ -218,6 +232,14 @@ export function createUkrainePanel({
 
   const unsubscribe = layer.onChange((state) => update(state));
   const unsubscribeReport = report?.onChange?.((state) => updateReport(state)) || null;
+  const updateEventsChip = () => {
+    if (!eventsChip) return;
+    const on = Boolean(timeline?.isShown?.());
+    eventsChip.classList?.toggle?.('active', on);
+    eventsChip.setAttribute('aria-pressed', String(on));
+  };
+  const unsubscribeTimeline = timeline?.onChange?.(() => updateEventsChip()) || null;
+  updateEventsChip();
   update();
   updateReport();
   // Dátum snímku je lacný a hovorí, či snímok vôbec existuje — ťahá sa hneď.
@@ -230,6 +252,6 @@ export function createUkrainePanel({
     updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); unsubscribeReport?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); mountTarget.replaceChildren(); },
   };
 }

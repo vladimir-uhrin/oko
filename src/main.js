@@ -48,6 +48,8 @@ import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, li
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
+import { createUkraineEventsLayer } from './ukraineEventsLayer.js';
+import { createUkraineTimeline, parseShareParams } from './ukraineTimeline.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
 import {
@@ -573,10 +575,12 @@ async function init() {
         },
       });
     };
+    let ukraineEvents = null; // vrstva udalostí UKRAJINA (etapa 3) — vzniká nižšie, brána ju už pozná
     const revealGate = createSceneRevealGate({
       viewer,
       onChange: (visible) => {
         incidentCards.setRevealed(visible);
+        ukraineEvents?.setRevealed(visible);
         scenePinDs.show = visible;
         viewer.scene?.requestRender?.();
       },
@@ -653,15 +657,24 @@ async function init() {
         return null;
       },
     };
+    // Etapa 3 (2026-09-19): udalosti (VIINA + GeoConfirmed + správy + fotky/videá)
+    // ako body a karty na glóbuse + časová os v spodnom páse. Nahrádza hot
+    // kartičky ZÁLIV-u pre región `ukraine` (tie ostávajú len pre ZÁLIV).
+    ukraineEvents = createUkraineEventsLayer({ viewer });
+    window.__godsEyeView.ukraineEvents = ukraineEvents;
+    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport });
+    window.__godsEyeView.ukraineTimeline = ukraineTimeline;
     let ukrainePanel = null;
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);
       ukrainePanel?.setActiveScene(scene?.id || null);
+      ukraineTimeline.setActiveScene(scene?.id || null);
       if (scene) {
-        // Hot kartičky správ nad smerom (región `ukraine`, etapa 2) s bránou
-        // priblíženia ako pri úžinách: pri pohľade na planétu sa schovajú.
+        // Brána priblíženia ako pri úžinách: pri pohľade na planétu sa karty
+        // a body schovajú; časová os sa otvorí so smerom.
         revealGate.activate(scene.center);
-        void incidentCards.showFor('ukraine');
+        incidentCards.clear();
+        ukraineTimeline.show();
       }
       return applyFrontScene(id, frontSceneDeps);
     };
@@ -669,6 +682,7 @@ async function init() {
       mountTarget: document.querySelector('#ukraine-panel [data-ukraine-body]'),
       layer: ukraineBase,
       report: ukraineReport,
+      timeline: ukraineTimeline,
       applyScene: (id) => runFrontScene(id),
     });
     window.__godsEyeView.ukrainePanel = ukrainePanel;
@@ -688,9 +702,16 @@ async function init() {
     try {
       const requestedFront = new URLSearchParams(window.location?.search || '').get('front');
       if (requestedFront && frontSceneById(requestedFront)) {
+        // `&t=<ISO>&win=<24h|7d|30d|all>` (etapa 3c): odkaz na okamih časovej osi.
+        const shared = parseShareParams(window.location?.search || '');
         void Promise.resolve(styleManager.initialRestorePromise)
           .catch(() => {})
-          .then(() => runFrontScene(requestedFront));
+          .then(() => runFrontScene(requestedFront))
+          .then(() => {
+            if (!shared) return;
+            if (shared.windowId) ukraineTimeline.clock.setWindow(shared.windowId);
+            if (Number.isFinite(shared.cursor)) ukraineTimeline.clock.setCursor(shared.cursor);
+          });
       }
     } catch { /* zlý parameter nikdy nezhodí štart */ }
     // Výber v paneli SCÉNY (na dotyku záložka SCENES), rovnaký vzor ako úžiny.

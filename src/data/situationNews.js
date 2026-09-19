@@ -80,11 +80,19 @@ export const SITUATION_REGIONS = Object.freeze({
       Object.freeze({ url: 'https://feeds.bbci.co.uk/news/topics/c1vw6q14rzqt/rss.xml', label: 'BBC News', unfurl: true, limit: 8 }),
       Object.freeze({ url: 'https://kyivindependent.com/news-archive/rss/', label: 'The Kyiv Independent', unfurl: true, limit: 8 }),
       Object.freeze({ url: 'https://www.pravda.com.ua/eng/rss/view_news/', label: 'Ukrainska Pravda', unfurl: false, drop: 'interfax[- ]ukraine', limit: 8 }),
-      Object.freeze({ url: 'https://www.ukrinform.net/rss/rubric-ato', label: 'Ukrinform', unfurl: false, badge: 'official-ua', limit: 8 }),
+      Object.freeze({ url: 'https://www.ukrinform.net/rss/rubric-ato', label: 'Ukrinform', unfurl: false, feedImage: true, badge: 'official-ua', limit: 8 }),
       Object.freeze({ url: 'https://armyinform.com.ua/en/feed/', label: 'ArmyInform', unfurl: false, badge: 'official-ua', limit: 4 }),
       Object.freeze({ url: 'https://www.rferl.org/api/zviipl-vomx-tpeugmm', label: 'RFE/RL', unfurl: false, limit: 8 }),
       Object.freeze({ url: 'https://rss.dw.com/rdf/rss-en-all', label: 'DW', unfurl: false, limit: 6 }),
       Object.freeze({ url: 'https://www.aljazeera.com/xml/rss/all.xml', label: 'Al Jazeera', unfurl: false, limit: 6 }),
+      // Doplnené 2026-09-19 („fotky z čo najviac zdrojov"): Guardian a Meduza
+      // dávajú náhľad do feedu (media:content / share card) → feedImage; Kyiv
+      // Post („photographs … may not be reproduced", Interfax-Ukraine zákaz) a
+      // Euromaidan Press („extended reproduction … without permission") bez obrázka.
+      Object.freeze({ url: 'https://www.theguardian.com/world/ukraine/rss', label: 'The Guardian', unfurl: false, feedImage: true, limit: 6 }),
+      Object.freeze({ url: 'https://meduza.io/rss/en/all', label: 'Meduza', unfurl: false, feedImage: true, limit: 5 }),
+      Object.freeze({ url: 'https://www.kyivpost.com/feed', label: 'Kyiv Post', unfurl: false, drop: 'interfax[- ]ukraine', limit: 6 }),
+      Object.freeze({ url: 'https://euromaidanpress.com/feed/', label: 'Euromaidan Press', unfurl: false, limit: 4 }),
     ]),
     googleLimit: 12,
     match: 'ukrain|kyiv|kiev|kharkiv|donetsk|luhansk|zaporizh|kherson|\\bsumy\\b|odesa|odessa|mykolaiv|\\bdnipro\\b|kryvyi rih|poltava|chernihiv|zhytomyr|vinnytsia|\\blviv\\b|crimea|sevastopol|donbas|pokrovsk|kupiansk|kupyansk|\\blyman\\b|kramatorsk|sloviansk|kostiantynivka|kostyantynivka|toretsk|chasiv yar|huliaipole|hulyaipole|orikhiv|vovchansk|belgorod|kursk|bryansk|voronezh|rostov|taganrog|novorossiysk|black sea|sea of azov|shahed|iskander|kinzhal|zelensk|russian (?:forces|troops|army|drones?|missiles?|attack|strike)|general staff',
@@ -99,12 +107,15 @@ export const SITUATION_REGIONS = Object.freeze({
  * @returns {{url:string,label:string|null,unfurl:boolean,drop:RegExp|null,badge:string|null}|null}
  */
 export function normalizeDirectFeed(entry) {
-  if (typeof entry === 'string') return { url: entry, label: null, unfurl: true, drop: null, badge: null, limit: 60 };
+  if (typeof entry === 'string') return { url: entry, label: null, unfurl: true, feedImage: true, drop: null, badge: null, limit: 60 };
   if (!entry || typeof entry.url !== 'string' || !/^https?:\/\//.test(entry.url)) return null;
   let drop = null;
   if (entry.drop) { try { drop = new RegExp(String(entry.drop), 'i'); } catch { drop = null; } }
   const limit = Number.isFinite(entry.limit) && entry.limit > 0 ? Math.floor(entry.limit) : 60;
-  return { url: entry.url, label: entry.label || null, unfurl: entry.unfurl !== false, drop, badge: entry.badge || null, limit };
+  const unfurl = entry.unfurl !== false;
+  // `feedImage` (2026-09-19): náhľad, ktorý redakcia sama dáva do feedu, je
+  // dovolený aj tam, kde og:image scraping nie (Ukrinform, Guardian, Meduza).
+  return { url: entry.url, label: entry.label || null, unfurl, feedImage: unfurl || entry.feedImage === true, drop, badge: entry.badge || null, limit };
 }
 
 /** Keyless GDELT DOC 2.0 article-list endpoint for a query. */

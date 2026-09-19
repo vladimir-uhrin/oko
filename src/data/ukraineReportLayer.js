@@ -188,8 +188,23 @@ export function createUkraineReportLayer({
     if (lifted) requestRender();
   }
 
+  // Historické hlásenie z archívu (časová os, etapa 3c): kým je nastavené,
+  // značky kreslia jeho počty a živé načítanie sa nedotýka zobrazenia.
+  let _override = null;
+  let _live = null;
+  function setOverride(report) {
+    const next = report && typeof report === 'object' ? report : null;
+    if (next === _override) return;
+    if (next && !_override) _live = _report;
+    _override = next;
+    _report = next || _live;
+    _byScene = reportByScene(_report, frontSceneByGsDirection);
+    draw();
+    emit();
+  }
   function load({ force = false } = {}) {
     if (_loading) return _loading;
+    if (_override) return Promise.resolve(_override);
     if (!force && _report && now() - _fetchedAt < REPORT_REFRESH_MS) return Promise.resolve(_report);
     _loading = Promise.resolve(fetchImpl())
       .then((report) => {
@@ -349,6 +364,8 @@ export function createUkraineReportLayer({
     isEnabled: () => _enabled,
     isShown: () => _shown,
     refresh: () => load({ force: true }),
+    setOverride,
+    isOverridden: () => Boolean(_override),
     getState,
     onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
     destroy,
