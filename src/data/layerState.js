@@ -223,6 +223,15 @@ const OPTION_GROUPS = Object.freeze({
     booleanOption('showProjection', 'p', true),
     booleanOption('autoHop', 'a', false),
   ]),
+  // Potrubia (etapa 3, 2026-09-19): jedna vrstva, dve látky, dva čipy. Abeceda
+  // tokenov je celá obsadená, takže ropa nedostala vlastnú vrstvu — býva v
+  // tokene `0` ako dve voľby. Obe sú predvolene zapnuté a `absentValue` je
+  // rovnaké, lebo odkaz bez `lo` má znamenať „všetko, čo vrstva kreslí", a to
+  // je od etapy 2 plyn aj ropa: `0.o.0` = len plyn, `0.g.0` = len ropa.
+  'gas-pipelines': Object.freeze([
+    booleanOption('gas', 'g', true),
+    booleanOption('oil', 'o', true),
+  ]),
   radio: Object.freeze([
     Object.freeze({
       key: 'filter',
@@ -284,7 +293,7 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   // Satelitné AIS · oneskorené (Global Fishing Watch, 2026-09-12): ďalšia voľná číslica.
   Object.freeze({ id: 'gas-flows', token: '9', disposition: 'enabled-only' }),
   // Plynovody EÚ + bývalý ZSSR (OSM snímok, 2026-09-13): posledná voľná číslica.
-  Object.freeze({ id: 'gas-pipelines', token: '0', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'gas-pipelines', token: '0', disposition: 'enabled+options', optionOwner: 'gas-pipelines' }),
   Object.freeze({ id: 'gfw-presence', token: '7', disposition: 'enabled-only' }),
   Object.freeze({ id: 'gfw-sar', token: '8', disposition: 'enabled-only' }),
   // NASA GIBS prekryvy (2026-09-06): písmená a–y sú obsadené, tokeny sú

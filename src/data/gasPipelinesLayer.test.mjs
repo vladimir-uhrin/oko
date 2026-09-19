@@ -133,7 +133,7 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   assert.equal(host.visible, false);
   assert.equal(ds.show, false);
   layer.destroy(viewer);
-  assert.equal(viewer.dataSources.removed.length, 1);
+  assert.equal(viewer.dataSources.removed.length, 2, 'plyn aj ropa majú vlastný zdroj (etapa 3), destroy odstráni oba');
   assert.equal(layer._getStateForTest().entities, null);
 });
 
@@ -178,8 +178,11 @@ test('ropa: vlastný snímok z /api/oil, počty na látku, zlúčený popis zdro
   assert.ok(flat(source).endsWith(flat(new Intl.NumberFormat('sk-SK').format(1691)) + ' km'), source);
   assert.deepEqual(layer.getStats().kinds, { gas: 3, oil: 2 });
   const ds = viewer.dataSources.added[0];
-  const druzba = ds.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-77');
-  const bezMena = ds.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-78');
+  const oilDs = viewer.dataSources.added[1];
+  assert.equal(oilDs.id, 'gas-pipelines-oil');
+  assert.deepEqual([ds.entities.values.length, oilDs.entities.values.length], [3, 2], 'každá látka vo vlastnom zdroji');
+  const druzba = oilDs.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-77');
+  const bezMena = oilDs.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-78');
   assert.equal(druzba.properties.kind, 'oil');
   assert.equal(druzba.polyline.material.color.getValue().withAlpha(1).toCssHexString().toLowerCase(), OIL_PIPELINE_COLORS.operating);
   assert.equal(druzba.polyline.width, 2.8, 'DN 1220 = chrbtica, šírka znamená priemer rovnako ako pri plyne');
@@ -218,6 +221,172 @@ test('ropa prítomná, ale prázdna: nakreslí sa len plyn a chip nepripočíta 
   const source = layer.getStats().source.replace(/\s/g, ' ');
   assert.equal(source, '© OpenStreetMap contributors · ODbL · gas.pipeline-snapshot {"date":"2026-09-13"} · 1 351 km', 'starší dátum 2026-09-01 ani 999 km sa do chipu nedostanú');
   layer.destroy(viewer);
+});
+
+test('etapa 3 — čipy PLYN/ROPA: setParams prepína zdroj látky, zbalí výber, ktorý jej patril, legenda nesie počty a farby', async () => {
+  const host = fakeHost();
+  const pick = { value: null };
+  const handlers = [];
+  let repaints = 0;
+  const OIL_TEXT = feature('osm-way-77', { name: 'Družba', substance: 'oil', diameterMm: 1220, lengthKm: 300, status: 'operating', osm: 77 }, [[22, 48.5], [19, 48.6]]);
+  const fetcher = async (url) => {
+    const path = String(url).split('?')[0];
+    const oil = path.startsWith('/api/oil/');
+    if (path.endsWith('/meta')) return { ok: true, json: async () => (oil ? { snapshot: '2026-09-19T06:00:00Z', features: 1, lengthKm: 300 } : META) };
+    return { ok: true, text: async () => (oil ? OIL_TEXT : TEXT) };
+  };
+  const layer = createGasPipelinesLayer({ fetchImpl: fetcher, dataSourceFactory: fakeDataSource, handlerFactory: () => { const h = fakeHandler(); handlers.push(h); return h; }, overlayHost: host, translate: tKey, lang: () => 'sk', now: () => NOW });
+  layer.setRowControlsListener(() => { repaints += 1; });
+  const viewer = fakeViewer(pick);
+  layer.init(viewer);
+  assert.deepEqual(layer.getParams(), { gas: true, oil: true }, 'predvolene obe látky');
+  layer.enable();
+  assert.equal(await layer.update(), true);
+  assert.equal(repaints, 1, 'po načítaní sa riadok prekreslí — legenda dostala počty');
+  const [gasDs, oilDs] = viewer.dataSources.added;
+  assert.deepEqual([gasDs.show, oilDs.show], [true, true]);
+  const controls = layer.getRowControls();
+  assert.deepEqual(controls.chips.map((c) => [c.id, c.label, c.active, c.params]), [
+    ['kind-gas', 'gas.pipeline-chip-gas', true, { gas: false }],
+    ['kind-oil', 'gas.pipeline-chip-oil', true, { oil: false }],
+  ]);
+  assert.deepEqual(controls.legend.map((l) => [l.label, l.count, l.color]), [
+    ['gas.pipeline-chip-gas', 3, GAS_PIPELINE_COLORS.operating],
+    ['gas.pipeline-chip-oil', 1, OIL_PIPELINE_COLORS.operating],
+  ]);
+  // Vyber ropovod, potom vypni ropu: zdroj sa skryje a výber padne.
+  const druzba = oilDs.entities.values[0];
+  pick.value = { id: druzba };
+  handlers[0].fn({ position: { x: 1, y: 1 } });
+  assert.equal(layer._getStateForTest().selected, 'osm-way-77');
+  assert.equal(layer.setParams({ oil: false }), true);
+  assert.deepEqual(layer.getParams(), { gas: true, oil: false });
+  assert.deepEqual([gasDs.show, oilDs.show], [true, false]);
+  assert.equal(layer._getStateForTest().selected, null, 'vypnutá látka nemôže ostať vybraná');
+  assert.equal(layer.getRowControls().chips[1].active, false);
+  assert.deepEqual(layer.getRowControls().chips[1].params, { oil: true }, 'čip prepína na opak');
+  assert.equal(repaints, 2);
+  // Vypnutie plynu s vybraným plynovodom; neznáme kľúče a nezmysly sa ignorujú.
+  pick.value = { id: gasDs.entities.values[0] };
+  handlers[0].fn({ position: { x: 1, y: 1 } });
+  assert.equal(layer._getStateForTest().selected, 'osm-way-1');
+  assert.equal(layer.setParams({ gas: '0', nezmysel: true, oil: 'x' }), true);
+  assert.deepEqual(layer.getParams(), { gas: false, oil: false });
+  assert.equal(layer._getStateForTest().selected, null);
+  assert.deepEqual([gasDs.show, oilDs.show], [false, false]);
+  assert.equal(layer.setParams({ gas: 'true', oil: 1 }), true);
+  assert.deepEqual([gasDs.show, oilDs.show], [true, true]);
+  // Vypnutá vrstva = obe skryté bez ohľadu na voľby; zapnutie ich vráti podľa volieb.
+  layer.disable();
+  assert.deepEqual([gasDs.show, oilDs.show], [false, false]);
+  layer.setParams({ oil: false });
+  layer.enable();
+  assert.deepEqual([gasDs.show, oilDs.show], [true, false], 'voľba prežije vypnutie vrstvy');
+  layer.destroy(viewer);
+});
+
+test('etapa 3 — hover: pick 7×7 po 80 ms, karta pri kurzore, živý tok ENTSOG len pre napojený plynovod, odchod/klik/kamera zbalia', async () => {
+  const pick = { value: null };
+  const HOVER_TEXT = [
+    feature('osm-way-1', { name: 'Nord Stream 1', operator: 'Nord Stream AG', diameterMm: 1153, lengthKm: 1220, status: 'operating', osm: 1, substance: 'gas' }, [[13.6, 54.1], [20, 55.5]]),
+    feature('osm-way-2', { name: 'Anbindungsleitung', diameterMm: 300, lengthKm: 4, status: 'operating', osm: 2, substance: 'gas' }, [[9, 50], [9.1, 50.1]]),
+  ].join('\n');
+  const OIL_TEXT = feature('osm-way-77', { name: 'Družba', substance: 'oil', diameterMm: 1220, lengthKm: 300, status: 'operating', osm: 77 }, [[22, 48.5], [19, 48.6]]);
+  const fetcher = async (url) => {
+    const path = String(url).split('?')[0];
+    const oil = path.startsWith('/api/oil/');
+    if (path.endsWith('/meta')) return { ok: true, json: async () => (oil ? { snapshot: '2026-09-19T06:00:00Z', features: 1, lengthKm: 300 } : META) };
+    return { ok: true, text: async () => (oil ? OIL_TEXT : HOVER_TEXT) };
+  };
+  const shown = []; let hidden = 0; const flowsSet = []; let hoveredInside = false;
+  const hover = {
+    show(f, at) { shown.push([f.id, at]); this._current = f; return f.properties.name === 'Nord Stream 1' ? ['greifswald-opal', 'greifswald-nel'] : []; },
+    setFlows(f, payload) { flowsSet.push([f.id, payload ? payload.citation : null]); return true; },
+    hide() { hidden += 1; this._current = null; }, destroy() { this.destroyed = true; }, isHovered: () => hoveredInside, current() { return this._current; },
+  };
+  let flowsCalls = 0;
+  const flowsFetcher = async () => { flowsCalls += 1; return { points: [], citation: 'ENTSOG TP 19-09-2026 https://transparency.entsog.eu/' }; };
+  const timers = [];
+  const setTimer = (fn) => { timers.push(fn); return timers.length; };
+  const clearTimer = (id) => { timers[id - 1] = null; };
+  const runTimers = () => { const pending = timers.splice(0).filter(Boolean); for (const fn of pending) fn(); };
+  const canvas = { listeners: {}, addEventListener(t, fn) { this.listeners[t] = fn; }, removeEventListener(t) { delete this.listeners[t]; } };
+  const camera = { moveStart: { listener: null, addEventListener(fn) { this.listener = fn; return () => { this.listener = null; }; } } };
+  const viewer = { ...fakeViewer(pick), scene: { canvas, pick: (pos, w, h) => { viewer.lastPick = [pos.x, pos.y, w, h]; return pick.value; }, requestRender() {} }, camera };
+  let clock = NOW;
+  const layer = createGasPipelinesLayer({ fetchImpl: fetcher, dataSourceFactory: fakeDataSource, handlerFactory: fakeHandler, overlayHost: fakeHost(), translate: tKey, lang: () => 'sk', now: () => clock, hoverFactory: () => hover, flowsFetcher, setTimer, clearTimer });
+  layer.init(viewer);
+  layer.enable();
+  assert.equal(await layer.update(), true);
+  assert.equal(layer._getStateForTest().hover.installed, true);
+  assert.deepEqual(Object.keys(canvas.listeners).sort(), ['pointerdown', 'pointerleave', 'pointermove']);
+  const [gasDs, oilDs] = viewer.dataSources.added;
+  // Pohyb nad Nord Stream 1 → po tiku pick 7×7 → karta + živý tok.
+  pick.value = { id: gasDs.entities.values[0] };
+  canvas.listeners.pointermove({ clientX: 120, clientY: 80, buttons: 0 });
+  assert.equal(shown.length, 0, 'karta až po pauze, nie pri každom pixeli');
+  runTimers();
+  assert.deepEqual(viewer.lastPick, [120, 80, 7, 7]);
+  assert.deepEqual(shown, [['osm-way-1', { x: 120, y: 80 }]]);
+  await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+  assert.deepEqual(flowsSet, [['osm-way-1', 'ENTSOG TP 19-09-2026 https://transparency.entsog.eu/']]);
+  assert.equal(flowsCalls, 1);
+  // Druhý plynovod bez bodu ENTSOG: karta áno, tok sa nesťahuje.
+  pick.value = { id: gasDs.entities.values[1] };
+  canvas.listeners.pointermove({ clientX: 10, clientY: 10, buttons: 0 });
+  runTimers();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(shown.length, 2);
+  assert.equal(flowsSet.length, 1, 'bez napojenia sa tok nesťahuje');
+  // Ropovod: karta áno (látku a „nie je verejné" povie karta sama), tok nie.
+  pick.value = { id: oilDs.entities.values[0] };
+  canvas.listeners.pointermove({ clientX: 11, clientY: 11, buttons: 0 });
+  runTimers();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(shown[2][0], 'osm-way-77');
+  assert.equal(flowsSet.length, 1);
+  // Späť na NS1 v rámci 30 min: tok z cache, nie druhý request.
+  pick.value = { id: gasDs.entities.values[0] };
+  canvas.listeners.pointermove({ clientX: 120, clientY: 80, buttons: 0 });
+  runTimers();
+  await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+  assert.equal(flowsCalls, 1, 'cache 30 min');
+  assert.equal(flowsSet.length, 2);
+  clock = NOW + 31 * 60 * 1000;
+  pick.value = { id: gasDs.entities.values[1] };
+  canvas.listeners.pointermove({ clientX: 1, clientY: 1, buttons: 0 }); runTimers();
+  pick.value = { id: gasDs.entities.values[0] };
+  canvas.listeners.pointermove({ clientX: 120, clientY: 80, buttons: 0 }); runTimers();
+  await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+  assert.equal(flowsCalls, 2, 'po 30 min nový request');
+  // Prázdno pod kurzorom → karta sa schová (ak kurzor nie je v nej).
+  const hiddenBefore = hidden;
+  pick.value = null;
+  canvas.listeners.pointermove({ clientX: 5, clientY: 5, buttons: 0 }); runTimers();
+  assert.equal(hidden, hiddenBefore + 1);
+  hoveredInside = true;
+  canvas.listeners.pointermove({ clientX: 6, clientY: 6, buttons: 0 }); runTimers();
+  assert.equal(hidden, hiddenBefore + 1, 'kurzor v karte ju drží');
+  hoveredInside = false;
+  // Ťahanie / dotyk / klik / pohyb kamery zbalia.
+  canvas.listeners.pointermove({ clientX: 6, clientY: 6, buttons: 1 });
+  assert.equal(hidden, hiddenBefore + 2);
+  canvas.listeners.pointerdown({});
+  assert.equal(hidden, hiddenBefore + 3);
+  camera.moveStart.listener();
+  assert.equal(hidden, hiddenBefore + 4);
+  // Odchod z plátna: až po 220 ms, a len keď kurzor nie je v karte.
+  canvas.listeners.pointerleave({});
+  assert.equal(hidden, hiddenBefore + 4);
+  runTimers();
+  assert.equal(hidden, hiddenBefore + 5);
+  // Vypnutie vrstvy odpojí listenery aj kameru; destroy zničí kartu.
+  layer.disable();
+  assert.deepEqual(Object.keys(canvas.listeners), []);
+  assert.equal(camera.moveStart.listener, null);
+  assert.equal(layer._getStateForTest().hover.installed, false);
+  layer.destroy(viewer);
+  assert.equal(hover.destroyed, true);
 });
 
 test('duplicitné id (úsek cez hranicu dlaždice) dostane príponu namiesto výnimky; po zlyhaní sa pri ďalšom pokuse zdroj vyprázdni, nič sa nezdvojí', async () => {
@@ -267,7 +436,7 @@ test('bez snímku: 404 no_snapshot sa prizná zrozumiteľne; iná chyba pôvodno
 
 test('register, token a kredit: gas-pipelines má token 0, i18n mená a texty SK+EN, kredit OSM/ODbL', () => {
   const entry = LAYER_STATE_REGISTRY.find((e) => e.id === GAS_PIPELINES_LAYER_ID);
-  assert.deepEqual(entry, { id: 'gas-pipelines', token: '0', disposition: 'enabled-only' });
+  assert.deepEqual(entry, { id: 'gas-pipelines', token: '0', disposition: 'enabled+options', optionOwner: 'gas-pipelines' });
   for (const key of ['layer.gas-pipelines.name', 'gas.pipeline-unnamed', 'gas.pipeline-diameter', 'gas.pipeline-length', 'gas.pipeline-status-operating', 'gas.pipeline-status-planned', 'gas.pipeline-status-disused', 'gas.pipeline-snapshot', 'gas.pipeline-no-snapshot']) {
     assert.ok(EN_STRINGS[key] && SK_STRINGS[key], key);
   }
@@ -276,7 +445,7 @@ test('register, token a kredit: gas-pipelines má token 0, i18n mená a texty SK
   assert.match(credit.html, /OpenStreetMap contributors/);
   assert.match(credit.html, /odbl/i);
   assert.match(credit.html, /snapshot|static/i, 'statický snímok, nie živé');
-  for (const key of ['gas.pipeline-unnamed-oil', 'gas.pipeline-kind-gas', 'gas.pipeline-kind-oil']) {
+  for (const key of ['gas.pipeline-unnamed-oil', 'gas.pipeline-kind-gas', 'gas.pipeline-kind-oil', 'gas.pipeline-chip-gas', 'gas.pipeline-chip-oil', 'gas.pipeline-chip-gas-hint', 'gas.pipeline-chip-oil-hint', 'gas.pipeline-route', 'gas.pipeline-flow-title', 'gas.pipeline-flow-none', 'gas.pipeline-flow-oil-none', 'gas.pipeline-flow-unavailable', 'gas.pipeline-hover-hint']) {
     assert.ok(EN_STRINGS[key] && SK_STRINGS[key], key);
   }
   // Ropa má VLASTNÝ kredit, nie dodatok k plynovému: sú to dve databázy vedľa

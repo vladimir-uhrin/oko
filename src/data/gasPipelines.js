@@ -118,6 +118,20 @@ export function pipelineTitle(properties = {}, translate = (k) => k) {
 const locale = (lang) => (lang === 'sk' ? 'sk-SK' : 'en-GB');
 
 /**
+ * Trasa z tagov `from` → `to` (nesú ich relácie route=pipeline; členské úseky
+ * ich dedia v builde). Jeden koniec bez druhého ostáva „?" — polovičná trasa
+ * je stále informácia, ale nesmie vyzerať ako celá.
+ * @param {object} properties
+ * @returns {string|null}
+ */
+export function pipelineRoute(properties = {}) {
+  const from = String(properties?.from || '').trim();
+  const to = String(properties?.to || '').trim();
+  if (!from && !to) return null;
+  return `${from || '?'} → ${to || '?'}`;
+}
+
+/**
  * Riadky karty: prevádzkovateľ, priemer, dĺžka úseku, stav, OSM id.
  * @param {object} properties
  * @param {(k: string, v?: object) => string} translate
@@ -136,6 +150,9 @@ export function pipelineDetails(properties = {}, translate = (k) => k, lang = 's
   // substance=fuel (rafinované produkty) sme z ropnej vrstvy vylúčili.
   if (properties?.substance) lines.push('substance=' + properties.substance + ' (OSM)');
   if (properties?.operator) lines.push(String(properties.operator));
+  // „Kam tečie" (etapa 3): `from`/`to` z relácie route=pipeline, keď ich OSM má.
+  const route = pipelineRoute(properties);
+  if (route) lines.push(translate('gas.pipeline-route') + ': ' + route);
   const d = Number(properties?.diameterMm);
   const km = Number(properties?.lengthKm);
   const dims = [];
@@ -145,6 +162,35 @@ export function pipelineDetails(properties = {}, translate = (k) => k, lang = 's
   lines.push(translate(`gas.pipeline-status-${pipelineStatus(properties)}`));
   if (properties?.osm) lines.push(`OSM way ${properties.osm}`);
   return lines;
+}
+
+/**
+ * Riadky `[popis, hodnota]` pre hover kartu (etapa 3): len to, čo úsek naozaj
+ * má — prevádzkovateľ, priemer, dĺžka úseku, trasa, kapacita a tlak z OSM,
+ * stav. Látka a OSM id sú v karte zvlášť (hlavička, odkaz), preto tu nie sú.
+ * @param {object} properties
+ * @param {(k: string, v?: object) => string} translate
+ * @param {string} [lang]
+ * @returns {Array<[string, string]>}
+ */
+export function pipelineDetailsRows(properties = {}, translate = (k) => k, lang = 'sk') {
+  const rows = [];
+  if (properties?.operator) rows.push([translate('gas.pipeline-operator'), String(properties.operator)]);
+  const d = Number(properties?.diameterMm);
+  if (Number.isFinite(d) && d > 0) rows.push([translate('gas.pipeline-diameter-label'), translate('gas.pipeline-diameter', { mm: new Intl.NumberFormat(locale(lang)).format(Math.round(d)) })]);
+  const km = Number(properties?.lengthKm);
+  if (Number.isFinite(km) && km > 0) rows.push([translate('gas.pipeline-segment'), translate('gas.pipeline-length', { km: new Intl.NumberFormat(locale(lang), { maximumFractionDigits: km < 10 ? 1 : 0 }).format(km) })]);
+  const route = pipelineRoute(properties);
+  if (route) rows.push([translate('gas.pipeline-route'), route]);
+  if (properties?.capacity) rows.push([translate('gas.pipeline-capacity'), String(properties.capacity)]);
+  // OSM `pressure` je podľa wiki v baroch a mapuje sa väčšinou ako holé číslo
+  // („95"); holému číslu sa jednotka dopíše, čokoľvek iné ostáva doslovne.
+  if (properties?.pressure) {
+    const raw = String(properties.pressure).trim();
+    rows.push([translate('gas.pipeline-pressure'), /^\d+([.,]\d+)?$/.test(raw) ? `${raw} bar` : raw]);
+  }
+  rows.push([translate('gas.pipeline-status-label'), translate(`gas.pipeline-status-${pipelineStatus(properties)}`)]);
+  return rows;
 }
 
 /**

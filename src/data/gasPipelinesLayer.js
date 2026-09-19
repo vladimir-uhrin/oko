@@ -10,6 +10,13 @@
  * + karta v overlay (meno, prevádzkovateľ, priemer, dĺžka úseku, stav, OSM
  * id) a záznam v kontextovom paneli; klik do prázdna zbalí.
  *
+ * Etapa 2 (2026-09-19): ropovody z vlastného snímku (`/api/oil/pipelines`)
+ * v tej istej vrstve, orchideovou farbou. Etapa 3: dva čipy PLYN / ROPA
+ * (voľby `gas`/`oil` v tokene `0`, každá látka vo vlastnom CustomDataSource,
+ * aby vypnutie bolo jedno `show` a nie 18 000 entít) a hover karta — prejdenie
+ * myšou cez rúru ukáže meno, trasu z OSM a pri plynovodoch napojených na
+ * hraničný bod ENTSOG aj živý tok (D−1), pri rope poctivé „nie je verejné".
+ *
  * Tvar podľa skEnergy.js (CustomDataSource, entity clampToGround, lenivé
  * načítanie pri prvom update) a gasFlowsLayer.js (overlay host, klik).
  * Statický snímok → `source` hovorí dátum snímku, nikdy „naživo“.
@@ -20,15 +27,25 @@ import { registerEntityContext, removeEntityContextsForLayer, selectEntityContex
 import { clearOverlaySource, hitTestWorldOverlay, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
 import { applyVesselOverlayPolicy } from './vesselLabels.js';
 import {
-  GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINES_API, OIL_PIPELINES_META_API,
-  fetchGasPipelines, pipelineDetails, pipelineKind, pipelineMidpoint, pipelineSourceLabel, pipelineStyle,
+  GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS, OIL_PIPELINES_API, OIL_PIPELINES_META_API,
+  fetchGasPipelines, pipelineDetails, pipelineMidpoint, pipelineSourceLabel, pipelineStyle,
   pipelineTitle,
 } from './gasPipelines.js';
+import { fetchGasFlows } from './gasFlows.js';
+import { createPipelineHoverCard } from './pipelineHoverCard.js';
 
 export const GAS_PIPELINES_LAYER_ID = 'gas-pipelines';
 export const GAS_PIPELINES_OVERLAY_SOURCE_ID = 'gas-pipelines';
 /** Statický snímok: manažérsky tik raz za hodinu je lacný no-op po načítaní. */
 export const GAS_PIPELINES_REFRESH_MS = 60 * 60 * 1000;
+/** Látky = zdroje entít; poradie je poradie čipov a legendy. */
+export const PIPELINE_KINDS = Object.freeze(['gas', 'oil']);
+/** Hover: pauza po pohybe kurzora pred pickom (ako zemetrasenia). */
+export const PIPELINE_HOVER_DELAY_MS = 80;
+/** Hover: pick obdĺžnik v px — 1,4 px čiara sa presným 3×3 pickom netrafí. */
+export const PIPELINE_HOVER_PICK_PX = 7;
+/** Živé toky ENTSOG pre hover: proxy má cache 1 h, klient si drží 30 min. */
+export const PIPELINE_FLOWS_TTL_MS = 30 * 60 * 1000;
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -65,6 +82,14 @@ export function pipelineCard(feature, position, translate, lang, { activate = nu
   });
 }
 
+/** `true`/`false`, `'1'`/`'0'`, `'true'`/`'false'` → boolean; iné → null (ignoruje sa). */
+function normalizeFlag(value) {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1' || value === 'true') return true;
+  if (value === 0 || value === '0' || value === 'false') return false;
+  return null;
+}
+
 /**
  * @param {object} [o]
  * @param {typeof fetch|null} [o.fetchImpl]
@@ -74,6 +99,10 @@ export function pipelineCard(feature, position, translate, lang, { activate = nu
  * @param {(k: string, v?: object) => string} [o.translate]
  * @param {() => string} [o.lang]
  * @param {() => number} [o.now]
+ * @param {(o: object) => object} [o.hoverFactory] hover karta (test: falošná)
+ * @param {Function} [o.flowsFetcher] `fetchGasFlows`-kompatibilný (test: falošný)
+ * @param {Function} [o.setTimer]
+ * @param {Function} [o.clearTimer]
  */
 export function createGasPipelinesLayer({
   fetchImpl = null,
@@ -83,10 +112,15 @@ export function createGasPipelinesLayer({
   translate = translateDefault,
   lang = () => currentLanguage(),
   now = () => Date.now(),
+  hoverFactory = (o) => createPipelineHoverCard(o),
+  flowsFetcher = fetchGasFlows,
+  setTimer = (fn, ms) => setTimeout(fn, ms),
+  clearTimer = (id) => clearTimeout(id),
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   let _viewer = null;
-  let _dataSource = null;
+  /** Jeden CustomDataSource na látku: čip = jedno `show`, nie slučka cez entity. */
+  let _sources = { gas: null, oil: null };
   let _enabled = false;
   let _loaded = false;
   let _loading = null;
@@ -97,11 +131,25 @@ export function createGasPipelinesLayer({
   let _kinds = { gas: 0, oil: 0 };
   /** Meta ropného snímku; null, keď ropný build ešte nebežal. */
   let _oilMeta = null;
+  /** Voľby látok (etapa 3) — trvalý stav cez token `0`, viď layerState.js. */
+  let _params = { gas: true, oil: true };
+  let _rowControlsListener = null;
   let _lengthKm = 0;
   let _lastUpdate = null;
   let _error = null;
   let _selectedId = null;
   let _clickHandler = null;
+  // Hover (etapa 3)
+  let _hover = null;
+  let _hoverTimer = null;
+  let _leaveTimer = null;
+  let _pointer = null;
+  let _hoverListeners = null;
+  let _removeCameraHover = null;
+  // Živé toky ENTSOG pre hover karty — jedna odpoveď proxy pre všetky rúry.
+  let _flows = null;
+  let _flowsAt = 0;
+  let _flowsPromise = null;
 
   const material = (style) => {
     const color = Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha);
@@ -109,6 +157,14 @@ export function createGasPipelinesLayer({
       ? new Cesium.PolylineDashMaterialProperty({ color, dashLength: 12 })
       : new Cesium.ColorMaterialProperty(color);
   };
+
+  const sourceFor = (kind) => _sources[kind === 'oil' ? 'oil' : 'gas'];
+  const eachSource = (fn) => { for (const kind of PIPELINE_KINDS) if (_sources[kind]) fn(_sources[kind], kind); };
+
+  /** Látka je viditeľná = vrstva zapnutá A jej čip zapnutý. */
+  function applySourceVisibility() {
+    eachSource((source, kind) => { source.show = _enabled && Boolean(_params[kind]); });
+  }
 
   function applyStyle(entity, feature, selected) {
     const style = pipelineStyle(feature.properties);
@@ -147,7 +203,7 @@ export function createGasPipelinesLayer({
           layerId: GAS_PIPELINES_LAYER_ID,
           layerName: translate('layer.gas-pipelines.name'),
           source: pipelineSourceLabel(combinedMeta(), translate, lang()),
-          dataSource: _dataSource,
+          dataSource: sourceFor(pipelineStyle(next.feature.properties).kind),
           label: pipelineTitle(next.feature.properties, translate),
           properties: Object.fromEntries(pipelineDetails(next.feature.properties, translate, lang()).map((line, i) => [`${i + 1}`, line])),
           latitude: mid ? Number(mid.lat.toFixed(6)) : null,
@@ -183,12 +239,12 @@ export function createGasPipelinesLayer({
     _features = new Map();
     // Po neúspešnom pokuse nesmú v zdroji ostať polovičné entity (Cesium by
     // pri opakovanom add() s tým istým id vyhodilo výnimku).
-    _dataSource.entities.removeAll?.();
+    eachSource((source) => source.entities.removeAll?.());
     const counts = { operating: 0, planned: 0, disused: 0 };
     const kinds = { gas: 0, oil: 0 };
     let km = 0;
-    // ~15 000 úsekov: bez pozastavenia udalostí by každý add() prekresľoval.
-    _dataSource.entities.suspendEvents?.();
+    // ~21 000 úsekov: bez pozastavenia udalostí by každý add() prekresľoval.
+    eachSource((source) => source.entities.suspendEvents?.());
     for (const raw of features) {
       // Úsek cez hranicu dlaždice môže prísť dvakrát s tým istým OSM id —
       // druhý výskyt dostane príponu, entity id musia byť jedinečné.
@@ -198,7 +254,7 @@ export function createGasPipelinesLayer({
       const style = pipelineStyle(feature.properties);
       const flat = [];
       for (const [lon, lat] of feature.geometry.coordinates) flat.push(lon, lat);
-      const entity = _dataSource.entities.add({
+      const entity = sourceFor(style.kind).entities.add({
         id: `${GAS_PIPELINES_LAYER_ID}:${id}`,
         polyline: {
           positions: Cesium.Cartesian3.fromDegreesArray(flat),
@@ -214,7 +270,7 @@ export function createGasPipelinesLayer({
       kinds[style.kind] += 1;
       km += Number(feature.properties?.lengthKm) || 0;
     }
-    _dataSource.entities.resumeEvents?.();
+    eachSource((source) => source.entities.resumeEvents?.());
     _counts = counts;
     _kinds = kinds;
     _lengthKm = Math.round(km);
@@ -222,6 +278,8 @@ export function createGasPipelinesLayer({
     _lastUpdate = now();
     _error = null;
     console.log(`[Data:GasPipelines] Loaded ${features.length} segments (gas ${kinds.gas}, oil ${kinds.oil}; ${counts.operating} operating, ${counts.planned} planned, ${counts.disused} disused), ${_lengthKm} km`);
+    // Legenda v riadku vrstvy hlási počty na látku — až teraz sú známe.
+    _rowControlsListener?.();
   }
 
   /**
@@ -263,6 +321,72 @@ export function createGasPipelinesLayer({
     _clickHandler = null;
   }
 
+  // ── Hover (etapa 3) ─────────────────────────────────────────────────────
+  /**
+   * Živé toky ENTSOG: jedna odpoveď proxy pre všetky hover karty, 30 min.
+   * Vracia payload alebo null (chyba) — karta z null urobí „nedostupné".
+   */
+  function loadFlows() {
+    if (_flows && now() - _flowsAt < PIPELINE_FLOWS_TTL_MS) return Promise.resolve(_flows);
+    if (_flowsPromise) return _flowsPromise;
+    _flowsPromise = Promise.resolve()
+      .then(() => flowsFetcher({ fetcher: doFetch }))
+      .then((payload) => { _flows = payload || null; _flowsAt = now(); _flowsPromise = null; return _flows; })
+      .catch((error) => { _flowsPromise = null; console.warn('[Data:GasPipelines] živé toky nedostupné: ' + (error?.message || error)); return null; });
+    return _flowsPromise;
+  }
+
+  function clearHover() {
+    if (_hoverTimer) { clearTimer(_hoverTimer); _hoverTimer = null; }
+    if (_leaveTimer) { clearTimer(_leaveTimer); _leaveTimer = null; }
+    _hover?.hide();
+  }
+
+  function hoverAtPointer() {
+    _hoverTimer = null;
+    if (!_enabled || !_hover || !_pointer || !_viewer?.scene?.pick) return;
+    let picked = null;
+    try { picked = _viewer.scene.pick(new Cesium.Cartesian2(_pointer.x, _pointer.y), PIPELINE_HOVER_PICK_PX, PIPELINE_HOVER_PICK_PX); } catch { picked = null; }
+    const id = picked?.id?.__gasPipeline;
+    const record = id ? _features.get(id) : null;
+    if (!record) { if (!_hover.isHovered()) _hover.hide(); return; }
+    const flowIds = _hover.show(record.feature, _pointer);
+    if (flowIds.length) {
+      void loadFlows().then((payload) => { _hover?.setFlows(record.feature, payload); });
+    }
+  }
+
+  function moveHover(e) {
+    if (e.buttons || e.pointerType === 'touch') { clearHover(); return; }
+    _pointer = { x: e.clientX, y: e.clientY };
+    if (!_hoverTimer) _hoverTimer = setTimer(hoverAtPointer, PIPELINE_HOVER_DELAY_MS);
+  }
+
+  function leaveHover() {
+    if (_leaveTimer) clearTimer(_leaveTimer);
+    _leaveTimer = setTimer(() => { _leaveTimer = null; if (!_hover?.isHovered()) clearHover(); }, 220);
+  }
+
+  function installHover() {
+    const canvas = _viewer?.scene?.canvas;
+    if (_hoverListeners || !canvas?.addEventListener) return;
+    _hover = _hover || hoverFactory({ translate, lang });
+    _hoverListeners = { pointermove: moveHover, pointerleave: leaveHover, pointerdown: clearHover };
+    for (const [type, fn] of Object.entries(_hoverListeners)) canvas.addEventListener(type, fn);
+    _removeCameraHover = _viewer?.camera?.moveStart?.addEventListener?.(clearHover) || null;
+  }
+
+  function removeHover() {
+    clearHover();
+    const canvas = _viewer?.scene?.canvas;
+    if (_hoverListeners && canvas?.removeEventListener) {
+      for (const [type, fn] of Object.entries(_hoverListeners)) canvas.removeEventListener(type, fn);
+    }
+    _hoverListeners = null;
+    _removeCameraHover?.();
+    _removeCameraHover = null;
+  }
+
   const layer = {
     id: GAS_PIPELINES_LAYER_ID,
     get name() { return translate('layer.gas-pipelines.name'); },
@@ -273,25 +397,29 @@ export function createGasPipelinesLayer({
 
     init(viewer) {
       _viewer = viewer;
-      _dataSource = dataSourceFactory(GAS_PIPELINES_LAYER_ID);
-      _dataSource.show = false;
-      viewer?.dataSources?.add?.(_dataSource);
+      _sources = {
+        gas: dataSourceFactory(GAS_PIPELINES_LAYER_ID),
+        oil: dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-oil`),
+      };
+      eachSource((source) => { source.show = false; viewer?.dataSources?.add?.(source); });
       _loaded = false;
       _loading = null;
     },
 
     enable() {
       _enabled = true;
-      if (_dataSource) _dataSource.show = true;
+      applySourceVisibility();
       installClick();
+      installHover();
       if (!_loaded && !_loading) void layer.update();
       else publishCard();
     },
 
     disable() {
       _enabled = false;
-      if (_dataSource) _dataSource.show = false;
+      applySourceVisibility();
       removeClick();
+      removeHover();
       if (_selectedId) selectPipeline(null);
       overlayHost.clearSource(GAS_PIPELINES_OVERLAY_SOURCE_ID);
       overlayHost.setVisible(GAS_PIPELINES_OVERLAY_SOURCE_ID, false);
@@ -316,10 +444,12 @@ export function createGasPipelinesLayer({
 
     destroy(viewer) {
       layer.disable();
+      _hover?.destroy?.();
+      _hover = null;
       if (typeof window !== 'undefined') removeEntityContextsForLayer(GAS_PIPELINES_LAYER_ID);
       const host = viewer || _viewer;
-      if (_dataSource && host?.dataSources?.remove) host.dataSources.remove(_dataSource, true);
-      _dataSource = null;
+      eachSource((source) => { if (host?.dataSources?.remove) host.dataSources.remove(source, true); });
+      _sources = { gas: null, oil: null };
       _viewer = null;
       _features = new Map();
       _loaded = false;
@@ -327,6 +457,61 @@ export function createGasPipelinesLayer({
       _meta = null;
       _oilMeta = null;
       _kinds = { gas: 0, oil: 0 };
+      _flows = null;
+      _flowsAt = 0;
+      _flowsPromise = null;
+    },
+
+    /**
+     * Voľby látok (etapa 3): `{ gas?: boolean, oil?: boolean }`. Neznáme kľúče
+     * a nezmyselné hodnoty sa ignorujú; vypnutie látky zbalí výber aj hover,
+     * ak patrili jej. Manažér volá po kliku na čip aj pri obnove z odkazu.
+     */
+    setParams(params = {}) {
+      let changed = false;
+      for (const kind of PIPELINE_KINDS) {
+        if (!Object.hasOwn(params || {}, kind)) continue;
+        const value = normalizeFlag(params[kind]);
+        if (value === null || value === _params[kind]) continue;
+        _params = { ..._params, [kind]: value };
+        changed = true;
+      }
+      if (!changed) return true;
+      applySourceVisibility();
+      const selected = _selectedId ? _features.get(_selectedId) : null;
+      if (selected && !_params[pipelineStyle(selected.feature.properties).kind]) selectPipeline(null);
+      clearHover();
+      _rowControlsListener?.();
+      _viewer?.scene?.requestRender?.();
+      return true;
+    },
+
+    getParams() {
+      return { ..._params };
+    },
+
+    /** Čipy PLYN / ROPA + legenda s počtami a farbami látok. */
+    getRowControls() {
+      const colors = { gas: GAS_PIPELINE_COLORS.operating, oil: OIL_PIPELINE_COLORS.operating };
+      return {
+        chips: PIPELINE_KINDS.map((kind) => ({
+          id: `kind-${kind}`,
+          label: translate(`gas.pipeline-chip-${kind}`),
+          title: translate(`gas.pipeline-chip-${kind}-hint`),
+          active: Boolean(_params[kind]),
+          params: { [kind]: !_params[kind] },
+        })),
+        legend: PIPELINE_KINDS.map((kind) => ({
+          label: translate(`gas.pipeline-chip-${kind}`),
+          count: _kinds[kind],
+          color: colors[kind],
+          blurb: translate(`gas.pipeline-chip-${kind}-hint`),
+        })),
+      };
+    },
+
+    setRowControlsListener(listener) {
+      _rowControlsListener = typeof listener === 'function' ? listener : null;
     },
 
     getStats() {
@@ -348,10 +533,13 @@ export function createGasPipelinesLayer({
     selectPipeline,
 
     _getStateForTest() {
+      const entities = PIPELINE_KINDS.reduce((n, kind) => n + (_sources[kind]?.entities?.values?.length ?? 0), 0);
       return {
         enabled: _enabled, loaded: _loaded, error: _error, count: _features.size, counts: { ..._counts }, lengthKm: _lengthKm, selected: _selectedId,
-        entities: _dataSource?.entities?.values?.length ?? null, hasClick: Boolean(_clickHandler), meta: _meta,
-        kinds: { ..._kinds }, oilMeta: _oilMeta,
+        entities: _sources.gas || _sources.oil ? entities : null, hasClick: Boolean(_clickHandler), meta: _meta,
+        kinds: { ..._kinds }, oilMeta: _oilMeta, params: { ..._params },
+        sources: { gas: _sources.gas?.show ?? null, oil: _sources.oil?.show ?? null },
+        hover: { installed: Boolean(_hoverListeners), timer: Boolean(_hoverTimer), flowsCached: Boolean(_flows) },
       };
     },
   };

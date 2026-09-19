@@ -1648,3 +1648,23 @@ test('vrstvy len na reláciu (meteo-gfs): normalizácia ich vyhodí — nikdy do
   assert.equal(serializeStoredLayerState(normalizeLayerState({ enabledLayerIds: ['meteo-gfs'] })), serializeStoredLayerState(createDefaultLayerState()), 'úložisko: to isté ako bez meteo');
   assert.ok(REGISTERED_LAYER_IDS.includes('meteo-gfs'), 'vrstva ostáva registrovaná, token rezervovaný');
 });
+
+test('potrubia (etapa 3): token 0 nesie voľby látok g/o; odkaz bez lo = plyn aj ropa, `0.o.0` = len plyn', () => {
+  const entry = LAYER_STATE_REGISTRY.find((e) => e.id === 'gas-pipelines');
+  assert.deepEqual(entry, { id: 'gas-pipelines', token: '0', disposition: 'enabled+options', optionOwner: 'gas-pipelines' });
+  const both = decodeLayerStateParams(new URLSearchParams('v=2&l=0'));
+  assert.deepEqual(both.options['gas-pipelines'], { gas: true, oil: true }, 'starý odkaz bez lo kreslí všetko, čo vrstva má');
+  const gasOnly = decodeLayerStateParams(new URLSearchParams('v=2&l=0&lo=0.o.0'));
+  assert.deepEqual(gasOnly.options['gas-pipelines'], { gas: true, oil: false });
+  const oilOnly = decodeLayerStateParams(new URLSearchParams('v=2&l=0&lo=0.g.0'));
+  assert.deepEqual(oilOnly.options['gas-pipelines'], { gas: false, oil: true });
+  // Predvolené hodnoty sa do odkazu nepíšu; vypnutá látka áno.
+  const params = new URLSearchParams('v=2');
+  encodeLayerStateParams(params, both);
+  assert.equal(params.has('lo'), false);
+  encodeLayerStateParams(params, gasOnly);
+  assert.equal(params.get('lo'), '0.o.0');
+  assert.deepEqual(decodeLayerStateParams(new URLSearchParams(params)), gasOnly, 'round-trip');
+  // Nezmysel v hodnote sa ignoruje a padne na absentValue, nie na chybu.
+  assert.deepEqual(decodeLayerStateParams(new URLSearchParams('v=2&l=0&lo=0.o.x')).options['gas-pipelines'], { gas: true, oil: true });
+});

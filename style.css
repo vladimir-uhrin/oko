@@ -10421,6 +10421,31 @@ body.scene-playback-mode #first-run-launcher {
 .earthquake-hover-card dd { margin: 0; font-variant-numeric: tabular-nums; }
 .earthquake-hover-photo { margin-top: 12px; font-size: 10px; color: #a9b5c3; }
 .earthquake-hover-photo img { display: block; width: 100%; height: 150px; object-fit: cover; border-radius: 8px; margin-bottom: 7px; }
+/* Hover karta potrubí (etapa 3, 2026-09-19): rovnaký tvar ako karta zemetrasení,
+   lem vo farbe látky — jantár plyn, orchidea ropa — a sekcia živého toku. */
+.pipeline-hover-card {
+  position: fixed; z-index: 210; width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px); overflow: auto; overscroll-behavior: contain;
+  padding: 16px 18px; color: #e8edf3; background: rgba(13, 20, 29, .97);
+  border: 1px solid rgba(255, 177, 77, .45); border-radius: 14px;
+  box-shadow: 0 12px 40px #0008; font: 12px/1.5 var(--font-sans);
+  pointer-events: auto; overflow-wrap: anywhere;
+}
+.pipeline-hover-card[hidden] { display: none; }
+.pipeline-hover-card[data-kind="oil"] { border-color: rgba(234, 178, 255, .5); }
+.pipeline-hover-card h3 { margin: 2px 24px 8px 0; font-size: 15px; line-height: 1.3; }
+.pipeline-hover-card a { color: #9adfff; text-decoration: underline; text-underline-offset: 2px; }
+.pipeline-hover-kind { display: inline-block; font: 600 10px/1 var(--font-mono); letter-spacing: .08em; color: #ffb14d; margin-bottom: 6px; }
+.pipeline-hover-card[data-kind="oil"] .pipeline-hover-kind { color: #eab2ff; }
+.pipeline-hover-close { position: absolute; right: 10px; top: 8px; width: 28px; height: 28px; border: 0; background: transparent; color: #e8edf3; font-size: 24px; cursor: var(--cursor-pointer); }
+.pipeline-hover-card dl { display: grid; grid-template-columns: 96px 1fr; gap: 3px 10px; margin: 6px 0 0; }
+.pipeline-hover-card dt { color: #a9b5c3; }
+.pipeline-hover-card dd { margin: 0; font-variant-numeric: tabular-nums; }
+.pipeline-hover-flow { border-top: 1px solid #ffffff18; padding-top: 10px; margin-top: 10px; }
+.pipeline-hover-flow h4 { margin: 0 0 6px; font: 600 10px/1.2 var(--font-mono); letter-spacing: .08em; color: #a9b5c3; }
+.pipeline-hover-flow-point { margin: 6px 0; }
+.pipeline-hover-flow-point strong { font: 600 16px var(--font-mono); color: #ffb366; }
+.pipeline-hover-note { color: #a9b5c3; font-size: 11px; margin: 8px 0 0; }
 /* Skupina „Prírodné hrozby" v paneli vrstiev (2026-09-05): sekcia v jazyku
    panelu — mono nadpis s rozostupom ako .panel-title, tenké deliace čiary,
    riadky ostávajú bežné .data-toggle-row. Žiadna cudzia oranžová škatuľa. */

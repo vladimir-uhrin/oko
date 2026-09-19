@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GAS_PIPELINES_API, GAS_PIPELINES_META_API, GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS,
-  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineKind, pipelineMidpoint, pipelineSourceLabel,
+  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineKind, pipelineMidpoint, pipelineRoute, pipelineSourceLabel,
   pipelineStatus, pipelineStyle, pipelineTitle,
 } from './gasPipelines.js';
 
@@ -87,6 +87,32 @@ test('pipelineTitle a pipelineDetails: meno → name:en → ref → bez mena; ri
     'gas.pipeline-status-operating',
     'OSM way 9',
   ]);
+});
+
+test('pipelineRoute a riadky karty s trasou, kapacitou a tlakom z OSM (etapa 3)', () => {
+  assert.equal(pipelineRoute({}), null);
+  assert.equal(pipelineRoute({ from: 'Lubmin', to: 'Rehden' }), 'Lubmin → Rehden');
+  assert.equal(pipelineRoute({ from: 'Yamal' }), 'Yamal → ?', 'polovičná trasa nesmie vyzerať ako celá');
+  assert.equal(pipelineRoute({ to: ' Rehden ' }), '? → Rehden');
+  // Trasa je v detailoch hneď za prevádzkovateľom.
+  assert.deepEqual(pipelineDetails({ operator: 'GASCADE', from: 'Lubmin', to: 'Olbernhau', osm: 5 }, tKey), [
+    'gas.pipeline-kind-gas', 'GASCADE', 'gas.pipeline-route: Lubmin → Olbernhau', 'gas.pipeline-status-operating', 'OSM way 5',
+  ]);
+  // Riadky [popis, hodnota] pre hover kartu: len to, čo úsek naozaj má.
+  assert.deepEqual(pipelineDetailsRows({ substance: 'oil', operator: 'MERO', diameterMm: 700, lengthKm: 12.3, from: 'Lobau', to: 'St. Valentin', capacity: '10 Mt/a', pressure: '60 bar', status: 'operating', osm: 9 }, tKey, 'en'), [
+    ['gas.pipeline-operator', 'MERO'],
+    ['gas.pipeline-diameter-label', 'gas.pipeline-diameter {"mm":"700"}'],
+    ['gas.pipeline-segment', 'gas.pipeline-length {"km":"12"}'],
+    ['gas.pipeline-route', 'Lobau → St. Valentin'],
+    ['gas.pipeline-capacity', '10 Mt/a'],
+    ['gas.pipeline-pressure', '60 bar'],
+    ['gas.pipeline-status-label', 'gas.pipeline-status-operating'],
+  ]);
+  assert.deepEqual(pipelineDetailsRows({}, tKey), [['gas.pipeline-status-label', 'gas.pipeline-status-operating']]);
+  // Holé číslo v `pressure` je podľa OSM wiki v baroch — jednotka sa dopíše; text ostáva.
+  assert.deepEqual(pipelineDetailsRows({ pressure: '95' }, tKey)[0], ['gas.pipeline-pressure', '95 bar']);
+  assert.deepEqual(pipelineDetailsRows({ pressure: '7.5' }, tKey)[0], ['gas.pipeline-pressure', '7.5 bar']);
+  assert.deepEqual(pipelineDetailsRows({ pressure: '100 psi' }, tKey)[0], ['gas.pipeline-pressure', '100 psi']);
 });
 
 test('pipelineMidpoint a pipelineSourceLabel', () => {

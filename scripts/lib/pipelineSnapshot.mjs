@@ -133,6 +133,14 @@ export async function buildPipelineSnapshot({
       diameterMm: diameterMm(tags),
       substance: tags.substance || label,
       location: tags.location || null,
+      // Etapa 3 (2026-09-19): „kam tečie" z OSM. `from`/`to` nesú takmer výlučne
+      // relácie route=pipeline (plyn 21, ropa 11 z ~190) a členské cesty ich
+      // dedia cez relTags; `capacity` a `pressure` sú zriedkavé, ale keď sú,
+      // sú to jediné tvrdé čísla o rúre, ktoré OSM má. Voľný text, bez prepočtu.
+      from: tags.from || null,
+      to: tags.to || null,
+      capacity: tags.capacity || null,
+      pressure: tags.pressure || null,
       status: tags.disused === 'yes' || tags['disused:man_made'] ? 'disused' : (tags.construction === 'yes' || tags.proposed === 'yes' ? 'planned' : 'operating'),
       osm: el.id,
     };
