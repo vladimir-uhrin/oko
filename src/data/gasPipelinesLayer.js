@@ -20,7 +20,8 @@ import { registerEntityContext, removeEntityContextsForLayer, selectEntityContex
 import { clearOverlaySource, hitTestWorldOverlay, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
 import { applyVesselOverlayPolicy } from './vesselLabels.js';
 import {
-  GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, fetchGasPipelines, pipelineDetails, pipelineMidpoint, pipelineSourceLabel, pipelineStyle,
+  GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINES_API, OIL_PIPELINES_META_API,
+  fetchGasPipelines, pipelineDetails, pipelineKind, pipelineMidpoint, pipelineSourceLabel, pipelineStyle,
   pipelineTitle,
 } from './gasPipelines.js';
 
@@ -92,6 +93,10 @@ export function createGasPipelinesLayer({
   let _meta = null;
   let _features = new Map();
   let _counts = { operating: 0, planned: 0, disused: 0 };
+  /** Koľko úsekov je plyn a koľko ropa (etapa 2) — do stavu vrstvy a logu. */
+  let _kinds = { gas: 0, oil: 0 };
+  /** Meta ropného snímku; null, keď ropný build ešte nebežal. */
+  let _oilMeta = null;
   let _lengthKm = 0;
   let _lastUpdate = null;
   let _error = null;
@@ -122,7 +127,7 @@ export function createGasPipelinesLayer({
     const mid = pipelineMidpoint(record.feature.geometry.coordinates);
     const position = Cesium.Cartesian3.fromDegrees(mid.lon, mid.lat, 30);
     overlayHost.setEntries(GAS_PIPELINES_OVERLAY_SOURCE_ID, [
-      pipelineCard(record.feature, position, translate, lang(), { activate: () => { selectPipeline(null); return true; }, source: pipelineSourceLabel(_meta, translate, lang()) }),
+      pipelineCard(record.feature, position, translate, lang(), { activate: () => { selectPipeline(null); return true; }, source: pipelineSourceLabel(combinedMeta(), translate, lang()) }),
     ], { cohortLimit: 1, collisionCapacity: 1, moving: false });
     overlayHost.setVisible(GAS_PIPELINES_OVERLAY_SOURCE_ID, true);
     _viewer?.scene?.requestRender?.();
@@ -141,7 +146,7 @@ export function createGasPipelinesLayer({
           id: `${GAS_PIPELINES_LAYER_ID}:${featureId}`,
           layerId: GAS_PIPELINES_LAYER_ID,
           layerName: translate('layer.gas-pipelines.name'),
-          source: pipelineSourceLabel(_meta, translate, lang()),
+          source: pipelineSourceLabel(combinedMeta(), translate, lang()),
           dataSource: _dataSource,
           label: pipelineTitle(next.feature.properties, translate),
           properties: Object.fromEntries(pipelineDetails(next.feature.properties, translate, lang()).map((line, i) => [`${i + 1}`, line])),
@@ -156,14 +161,29 @@ export function createGasPipelinesLayer({
   }
 
   async function load() {
-    const { features, meta } = await fetchGasPipelines({ fetcher: doFetch });
-    if (!features.length) throw new Error('empty snapshot');
+    const { features: gasFeatures, meta } = await fetchGasPipelines({ fetcher: doFetch });
+    if (!gasFeatures.length) throw new Error('empty snapshot');
+    // Ropa (2026-09-19, etapa 2) je VOLITEĽNÁ: vlastný snímok, vlastná trasa,
+    // a keď chýba (404 no_snapshot, lebo build ešte nebežal), plyn sa musí
+    // nakresliť aj tak. Preto sa jej zlyhanie len zaloguje.
+    let oilFeatures = [];
+    try {
+      const oil = await fetchGasPipelines({ fetcher: doFetch, url: OIL_PIPELINES_API, metaUrl: OIL_PIPELINES_META_API });
+      oilFeatures = oil.features;
+      _oilMeta = oil.meta;
+    } catch (error) {
+      _oilMeta = null;
+      console.warn('[Data:GasPipelines] ropný snímok nedostupný, kreslím len plyn: ' + (error?.message || error));
+    }
+    // OSM way id sú jedinečné naprieč látkami, takže sa kľúče nezrazia.
+    const features = oilFeatures.length ? [...gasFeatures, ...oilFeatures] : gasFeatures;
     _meta = meta;
     _features = new Map();
     // Po neúspešnom pokuse nesmú v zdroji ostať polovičné entity (Cesium by
     // pri opakovanom add() s tým istým id vyhodilo výnimku).
     _dataSource.entities.removeAll?.();
     const counts = { operating: 0, planned: 0, disused: 0 };
+    const kinds = { gas: 0, oil: 0 };
     let km = 0;
     // ~15 000 úsekov: bez pozastavenia udalostí by každý add() prekresľoval.
     _dataSource.entities.suspendEvents?.();
@@ -184,20 +204,37 @@ export function createGasPipelinesLayer({
           material: material(style),
           clampToGround: true,
         },
-        properties: { status: style.status, name: feature.properties?.name ?? null },
+        properties: { status: style.status, kind: style.kind, name: feature.properties?.name ?? null },
       });
       entity.__gasPipeline = id;
       _features.set(id, { feature, entity });
       counts[style.status] += 1;
+      kinds[style.kind] += 1;
       km += Number(feature.properties?.lengthKm) || 0;
     }
     _dataSource.entities.resumeEvents?.();
     _counts = counts;
+    _kinds = kinds;
     _lengthKm = Math.round(km);
     _loaded = true;
     _lastUpdate = now();
     _error = null;
     console.log(`[Data:GasPipelines] Loaded ${features.length} segments (${counts.operating} operating, ${counts.planned} planned, ${counts.disused} disused), ${_lengthKm} km`);
+  }
+
+  /**
+   * Popis zdroja pre chip: plyn a ropa sú DVA snímky toho istého zdroja (OSM,
+   * ODbL), ale na mape sú jedna vrstva. Kilometre preto sčítavame — inak by
+   * chip hlásil menej, než je nakreslené — a dátum berieme ten STARŠÍ, lebo
+   * tvrdenie „dáta sú najviac takto staré“ musí platiť pre obe látky.
+   * @returns {object|null}
+   */
+  function combinedMeta() {
+    if (!_oilMeta) return _meta;
+    if (!_meta) return _oilMeta;
+    const dates = [_meta.snapshot, _oilMeta.snapshot].filter(Boolean).map(String).sort();
+    const km = (Number(_meta.lengthKm) || 0) + (Number(_oilMeta.lengthKm) || 0);
+    return { ..._meta, snapshot: dates[0] ?? null, lengthKm: km || null };
   }
 
   function installClick() {
@@ -229,7 +266,7 @@ export function createGasPipelinesLayer({
     get name() { return translate('layer.gas-pipelines.name'); },
     // Monochromatický glyf (žiadne emoji): rúra.
     icon: '⌇',
-    get source() { return pipelineSourceLabel(_meta, translate, lang()); },
+    get source() { return pipelineSourceLabel(combinedMeta(), translate, lang()); },
     updateInterval: GAS_PIPELINES_REFRESH_MS,
 
     init(viewer) {
@@ -286,6 +323,8 @@ export function createGasPipelinesLayer({
       _loaded = false;
       _loading = null;
       _meta = null;
+      _oilMeta = null;
+      _kinds = { gas: 0, oil: 0 };
     },
 
     getStats() {
@@ -294,7 +333,8 @@ export function createGasPipelinesLayer({
         lastUpdate: _lastUpdate,
         loading: Boolean(_loading) && !_loaded,
         error: _error,
-        source: pipelineSourceLabel(_meta, translate, lang()),
+        source: pipelineSourceLabel(combinedMeta(), translate, lang()),
+        kinds: { ..._kinds },
         status: undefined,
       };
     },
@@ -309,6 +349,7 @@ export function createGasPipelinesLayer({
       return {
         enabled: _enabled, loaded: _loaded, error: _error, count: _features.size, counts: { ..._counts }, lengthKm: _lengthKm, selected: _selectedId,
         entities: _dataSource?.entities?.values?.length ?? null, hasClick: Boolean(_clickHandler), meta: _meta,
+        kinds: { ..._kinds }, oilMeta: _oilMeta,
       };
     },
   };

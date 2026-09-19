@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { GAS_PIPELINES_LAYER_ID, GAS_PIPELINES_OVERLAY_SOURCE_ID, createGasPipelinesLayer, pipelineCard } from './gasPipelinesLayer.js';
-import { GAS_PIPELINE_COLORS } from './gasPipelines.js';
+import { GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS } from './gasPipelines.js';
 import { EN_STRINGS, SK_STRINGS } from '../i18nStrings.js';
 import { LAYER_STATE_REGISTRY } from './layerState.js';
 import { DATA_CREDITS } from './dataCredits.js';
@@ -42,7 +42,14 @@ function fakeViewer(pick = { value: null }) {
     selectedEntity: undefined,
   };
 }
-const fetcherOk = async (url) => (url.endsWith('/meta') ? { ok: true, json: async () => META } : { ok: true, text: async () => TEXT });
+// Ropa (etapa 2) sa ťahá z vlastnej trasy /api/oil/pipelines. Tento stub ju
+// nemá, takže testy nižšie zároveň overujú to dôležité: keď ropný snímok
+// chýba (404 no_snapshot, build ešte nebežal), plyn sa MUSÍ nakresliť aj tak.
+const noOil = { ok: false, status: 404, json: async () => ({ error: 'no_snapshot' }) };
+const fetcherOk = async (url) => {
+  if (String(url).includes('/api/oil/')) return noOil;
+  return url.endsWith('/meta') ? { ok: true, json: async () => META } : { ok: true, text: async () => TEXT };
+};
 
 test('pipelineCard: vybraná karta s menom, riadkami a zdrojom v päte', () => {
   const card = pipelineCard({ id: 'osm-way-1', properties: { name: 'Transgas', operator: 'eustream', diameterMm: 1400, lengthKm: 120.4, osm: 1 } }, { x: 1, y: 2, z: 3 }, tKey, 'sk', { source: 'zdroj X' });
@@ -50,7 +57,7 @@ test('pipelineCard: vybraná karta s menom, riadkami a zdrojom v päte', () => {
   assert.equal(card.variant, 'selected');
   assert.equal(card.protected, true);
   assert.equal(card.title, 'Transgas');
-  assert.deepEqual(card.details, ['eustream', 'gas.pipeline-diameter {"mm":"1 400"} · gas.pipeline-length {"km":"120"}', 'gas.pipeline-status-operating', 'OSM way 1', 'zdroj X']);
+  assert.deepEqual(card.details, ['gas.pipeline-kind-gas', 'eustream', 'gas.pipeline-diameter {"mm":"1 400"} · gas.pipeline-length {"km":"120"}', 'gas.pipeline-status-operating', 'OSM way 1', 'zdroj X']);
   assert.equal(card.interactive, true);
 });
 
@@ -71,6 +78,8 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   assert.equal(st.loaded, true);
   assert.equal(st.count, 3);
   assert.deepEqual(st.counts, { operating: 1, planned: 1, disused: 1 });
+  assert.deepEqual(st.kinds, { gas: 3, oil: 0 }, 'ropný snímok chýbal (404), plyn sa nakreslil aj tak');
+  assert.equal(st.oilMeta, null);
   assert.equal(st.lengthKm, 1351);
   assert.equal(st.meta.features, 3);
   const ds = viewer.dataSources.added[0];
@@ -79,7 +88,7 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   assert.equal(transgas.polyline.clampToGround, true);
   assert.equal(transgas.__gasPipeline, 'osm-way-1');
   assert.equal(ns2.polyline.material.constructor.name, 'PolylineDashMaterialProperty', 'plánované sú čiarkované');
-  assert.equal(dn300.polyline.material.color.getValue().alpha.toFixed(2), '0.40', 'odstavené sú stlmené');
+  assert.equal(dn300.polyline.material.color.getValue().alpha.toFixed(2), '0.45', 'odstavené sú stlmené');
   assert.equal(layer.getStats().count, 3);
   assert.equal(layer.getStats().source, '© OpenStreetMap contributors · ODbL · gas.pipeline-snapshot {"date":"2026-09-13"} · 1 351 km');
   assert.equal(layer.source, layer.getStats().source);
@@ -128,10 +137,72 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   assert.equal(layer._getStateForTest().entities, null);
 });
 
+test('ropa: vlastný snímok z /api/oil, počty na látku, zlúčený popis zdroja, ropná karta', async () => {
+  const OIL_TEXT = [
+    feature('osm-way-77', { name: 'Družba', substance: 'oil', diameterMm: 1220, lengthKm: 300, status: 'operating', osm: 77 }, [[22, 48.5], [19, 48.6]]),
+    feature('osm-way-78', { substance: 'crude_oil', diameterMm: 700, lengthKm: 40, status: 'operating', osm: 78 }, [[54, 27], [56, 26]]),
+  ].join('\n');
+  const OIL_META = { snapshot: '2026-09-19T06:00:00Z', features: 2, lengthKm: 340 };
+  const urls = [];
+  const fetcher = async (url) => {
+    const path = String(url).split('?')[0];
+    urls.push(path);
+    const oil = path.startsWith('/api/oil/');
+    if (path.endsWith('/meta')) return { ok: true, json: async () => (oil ? OIL_META : META) };
+    return { ok: true, text: async () => (oil ? OIL_TEXT : TEXT) };
+  };
+  const pick = { value: null };
+  const handlers = [];
+  const host = fakeHost();
+  const layer = createGasPipelinesLayer({ fetchImpl: fetcher, dataSourceFactory: fakeDataSource, handlerFactory: () => { const h = fakeHandler(); handlers.push(h); return h; }, overlayHost: host, translate: tKey, lang: () => 'sk', now: () => NOW });
+  const viewer = fakeViewer(pick);
+  layer.init(viewer);
+  layer.enable();
+  assert.equal(await layer.update(), true);
+  // Plyn sa ťahá PRVÝ a ropa až po ňom — zlyhanie ropy tak nikdy nezablokuje plyn.
+  assert.deepEqual(urls, ['/api/gas/pipelines/meta', '/api/gas/pipelines', '/api/oil/pipelines/meta', '/api/oil/pipelines']);
+  const st = layer._getStateForTest();
+  assert.equal(st.count, 5);
+  assert.deepEqual(st.kinds, { gas: 3, oil: 2 });
+  assert.equal(st.oilMeta.features, 2);
+  assert.equal(st.entities, 5);
+  // Chip hlási SÚČET oboch snímkov (1351,2 + 340 km) a ten STARŠÍ z dvoch
+  // dátumov — inak by tvrdil menej kilometrov, než je nakreslených, a čerstvosť
+  // ropy by vydával za čerstvosť plynu.
+  const source = layer.getStats().source;
+  assert.match(source, /OpenStreetMap contributors/);
+  assert.match(source, /"date":"2026-09-13"/, 'dátum je ten STARŠÍ z dvoch snímkov');
+  // Pozor na medzery: oddeľovač tisícov je U+00A0 a pred „km“ je U+202F,
+  // takže doslovné porovnanie reťazca tu vyzerá správne a pritom padá.
+  const flat = (x) => x.replace(/\s/g, ' ');
+  assert.ok(flat(source).endsWith(flat(new Intl.NumberFormat('sk-SK').format(1691)) + ' km'), source);
+  assert.deepEqual(layer.getStats().kinds, { gas: 3, oil: 2 });
+  const ds = viewer.dataSources.added[0];
+  const druzba = ds.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-77');
+  const bezMena = ds.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-78');
+  assert.equal(druzba.properties.kind, 'oil');
+  assert.equal(druzba.polyline.material.color.getValue().withAlpha(1).toCssHexString().toLowerCase(), OIL_PIPELINE_COLORS.operating);
+  assert.equal(druzba.polyline.width, 2.8, 'DN 1220 = chrbtica, šírka znamená priemer rovnako ako pri plyne');
+  assert.equal(ds.entities.values.find((e) => e.id === 'gas-pipelines:osm-way-1').polyline.material.color.getValue().withAlpha(1).toCssHexString().toLowerCase(), GAS_PIPELINE_COLORS.operating, 'plyn si drží svoju farbu');
+  // Karta ropovodu: látka slovom v prvom riadku + surový tag z OSM. Farba je
+  // druhý kanál, nie jediný.
+  pick.value = { id: druzba };
+  handlers[0].fn({ position: { x: 1, y: 1 } });
+  assert.equal(host.entries[0].title, 'Družba');
+  assert.equal(host.entries[0].details[0], 'gas.pipeline-kind-oil');
+  assert.equal(host.entries[0].details[1], 'substance=oil (OSM)');
+  pick.value = { id: bezMena };
+  handlers[0].fn({ position: { x: 1, y: 1 } });
+  assert.equal(host.entries[0].title, 'gas.pipeline-unnamed-oil', 'bezmenný ropovod sa nesmie volať „plynovod“');
+  layer.destroy(viewer);
+  assert.deepEqual(layer._getStateForTest().kinds, { gas: 0, oil: 0 }, 'destroy upratal aj ropný stav');
+});
+
 test('duplicitné id (úsek cez hranicu dlaždice) dostane príponu namiesto výnimky; po zlyhaní sa pri ďalšom pokuse zdroj vyprázdni, nič sa nezdvojí', async () => {
   const dupText = `${TEXT}\n${feature('osm-way-1', { name: 'Transgas', diameterMm: 1400, lengthKm: 3.5, status: 'operating', osm: 1 }, [[19, 48.7], [19.5, 48.9]])}`;
   let calls = 0;
   const fetcher = async (url) => {
+    if (String(url).includes('/api/oil/')) return noOil;
     if (url.endsWith('/meta')) return { ok: true, json: async () => META };
     calls += 1;
     if (calls === 1) return { ok: false, status: 502, json: async () => ({ error: 'upstream' }) };
@@ -197,6 +268,17 @@ test('tripwires: registrácia v main.js, proxy trasy (meta pred súborom, gzip, 
   assert.match(vite, /'no_snapshot'/);
   assert.match(vite, /zlib\.createGzip/);
   assert.match(vite, /max-age=86400/);
+  const oilMetaAt = vite.indexOf("middlewares.use('/api/oil/pipelines/meta'");
+  const oilFileAt = vite.indexOf("middlewares.use('/api/oil/pipelines',");
+  assert.ok(oilMetaAt > 0 && oilFileAt > oilMetaAt, 'tá istá pasca prefixu platí aj pre ropu');
+  // Ropa MUSÍ mať vlastný súbor a vlastný adresár: zlúčená s plynom by podľa
+  // ODbL bola Derivative Database, kým dve databázy vedľa seba sú Collective
+  // Database vyňatá §4.5(a).
+  assert.match(vite, /'.gev-cache', 'oil'/, 'ropný snímok má vlastný adresár');
+  const oilScript = readFileSync(new URL('../../scripts/build-oil-pipelines.mjs', import.meta.url), 'utf8');
+  assert.match(oilScript, /overpass/i);
+  assert.ok(!/process.env.[A-Z_]*KEY/.test(oilScript), 'OSM/Overpass nepotrebuje kľúč');
+  assert.match(oilScript, /ODbL/, 'licencia v meta snímku');
   const script = readFileSync(new URL('../../scripts/build-gas-pipelines.mjs', import.meta.url), 'utf8');
   assert.match(script, /overpass/i);
   assert.ok(!/process\.env\.[A-Z_]*KEY/.test(script), 'OSM/Overpass nepotrebuje kľúč');

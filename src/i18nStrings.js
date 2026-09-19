@@ -177,6 +177,12 @@ export const EN_STRINGS = Object.freeze({
   'gas.card-price-label': 'max {max} · last {last}',
   'gas.card-footer': 'ENTSOG · physical flow per gas day · provisional, D−1 · station position approximate',
   'gas.pipeline-unnamed': 'gas pipeline (unnamed)',
+  'gas.pipeline-unnamed-oil': 'oil pipeline (unnamed)',
+  // Substance is stated in WORDS on both layers, not only by colour: no single hue
+  // can stay distinct from amber, the red border fence and the cyan lanes at once
+  // under red-green colour blindness.
+  'gas.pipeline-kind-gas': 'GAS PIPELINE · natural gas',
+  'gas.pipeline-kind-oil': 'OIL PIPELINE · crude oil',
   'gas.pipeline-diameter': 'DN {mm} mm',
   'gas.pipeline-length': '{km} km',
   'gas.pipeline-status-operating': 'in operation (as mapped in OSM)',
@@ -1582,6 +1588,12 @@ export const SK_STRINGS = Object.freeze({
   'gas.card-price-label': 'max {max} · posledná {last}',
   'gas.card-footer': 'ENTSOG · fyzický tok za plynárenský deň · predbežné, D−1 · poloha stanice približná',
   'gas.pipeline-unnamed': 'plynovod (bez mena)',
+  'gas.pipeline-unnamed-oil': 'ropovod (bez mena)',
+  // Látku hovorí karta SLOVOM pri oboch vrstvách, nielen farbou: žiadny odtieň
+  // nezvládne naraz odstup od jantára, červeného plotu hraníc aj tyrkysových
+  // koridorov pri červeno-zelenej farbosleposti.
+  'gas.pipeline-kind-gas': 'PLYNOVOD · zemný plyn',
+  'gas.pipeline-kind-oil': 'ROPOVOD · ropa (surová)',
   'gas.pipeline-diameter': 'DN {mm} mm',
   'gas.pipeline-length': '{km} km',
   'gas.pipeline-status-operating': 'v prevádzke (podľa OSM)',

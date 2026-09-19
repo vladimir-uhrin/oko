@@ -4633,12 +4633,19 @@ function gasProxy() {
   // prijme (~4× menej). Bez snímku 404 no_snapshot — vrstva to prizná.
   const PIPELINES_PATH = path.join(CACHE_DIR, 'pipelines.geojsonl');
   const PIPELINES_META_PATH = path.join(CACHE_DIR, 'pipelines.meta.json');
-  const noSnapshot = (res) => send(res, 404, JSON.stringify({ error: 'no_snapshot', detail: 'run: node scripts/build-gas-pipelines.mjs' }), 'NONE');
-  const pipelinesFile = (filePath, contentType) => async (req, res) => {
+  // Ropovody (etapa 2, 2026-09-19) idú z VLASTNÉHO snímku a vlastného adresára.
+  // Zlúčiť ich s plynovým súborom sa nesmie: podľa ODbL by z celku bola
+  // Derivative Database, kým dve nezávislé databázy vedľa seba sú Collective
+  // Database, vyňatá podľa §4.5(a). Servírovanie je inak identické.
+  const OIL_CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'oil');
+  const OIL_PIPELINES_PATH = path.join(OIL_CACHE_DIR, 'pipelines.geojsonl');
+  const OIL_PIPELINES_META_PATH = path.join(OIL_CACHE_DIR, 'pipelines.meta.json');
+  const noSnapshot = (res, script = 'build-gas-pipelines.mjs') => send(res, 404, JSON.stringify({ error: 'no_snapshot', detail: 'run: node scripts/' + script }), 'NONE');
+  const pipelinesFile = (filePath, contentType, script = 'build-gas-pipelines.mjs') => async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
     let stat;
-    try { stat = await fsp.stat(filePath); } catch { noSnapshot(res); return; }
-    if (!stat.isFile() || stat.size === 0) { noSnapshot(res); return; }
+    try { stat = await fsp.stat(filePath); } catch { noSnapshot(res, script); return; }
+    if (!stat.isFile() || stat.size === 0) { noSnapshot(res, script); return; }
     const etag = '"' + stat.size.toString(16) + '-' + Math.floor(stat.mtimeMs).toString(16) + '"';
     const headers = { 'Cache-Control': 'public, max-age=86400', ETag: etag, Vary: 'Accept-Encoding', 'X-GEV-Cache': 'FILE' };
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); res.end(); return; }
@@ -4693,6 +4700,10 @@ function gasProxy() {
     // Prefixové párovanie connectu: /meta musí byť zaregistrované PRED súborom.
     middlewares.use('/api/gas/pipelines/meta', pipelinesFile(PIPELINES_META_PATH, 'application/json; charset=utf-8'));
     middlewares.use('/api/gas/pipelines', pipelinesFile(PIPELINES_PATH, 'application/x-ndjson; charset=utf-8'));
+    // Ropovody — to isté, aj s tým istým poradím: /meta PRED súborom, inak by
+    // prefixové párovanie connectu poslalo na /meta celý 1,2 MB ndjson.
+    middlewares.use('/api/oil/pipelines/meta', pipelinesFile(OIL_PIPELINES_META_PATH, 'application/json; charset=utf-8', 'build-oil-pipelines.mjs'));
+    middlewares.use('/api/oil/pipelines', pipelinesFile(OIL_PIPELINES_PATH, 'application/x-ndjson; charset=utf-8', 'build-oil-pipelines.mjs'));
     middlewares.use('/api/gas/imports', imports.handler);
     middlewares.use('/api/gas/status', async (req, res) => {
       const p = await prices.current();

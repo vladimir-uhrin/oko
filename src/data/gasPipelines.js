@@ -13,12 +13,50 @@ export const GAS_PIPELINES_API = '/api/gas/pipelines';
 export const GAS_PIPELINES_META_API = '/api/gas/pipelines/meta';
 export const GAS_PIPELINE_ATTRIBUTION = '© OpenStreetMap contributors · ODbL';
 /** Jantár ako plyn v Energetike SR; plánované čiarkovane; odstavené stlmené. */
+export const OIL_PIPELINES_API = '/api/oil/pipelines';
+export const OIL_PIPELINES_META_API = '/api/oil/pipelines/meta';
+
 export const GAS_PIPELINE_COLORS = Object.freeze({
   operating: '#ffb14d',
   planned: '#ffd28a',
   disused: '#7a6a52',
   selected: '#ffffff',
 });
+
+/**
+ * Ropa má vlastnú paletu (2026-09-19, etapa 2). Jantár nešiel použiť ani
+ * v odtieni: v scéne úžiny je jantárová už plynová magistrála, trup tankera
+ * (#ffb347) aj pin scény (#ffb547) — merané CIEDE2000 1,5 a 2,3 od plynového
+ * #ffb14d, teda prakticky tá istá farba. Práve pri rope by to zavádzalo.
+ * Orchidea je 48,9 dE od plynu, 36,2 od červeného plotu hraníc (#f0574d, ktorý
+ * je zapnutý v každej scéne úžiny) a 41,9 od tyrkysových lodných koridorov;
+ * pod deuteranopiou drží 50,6 od plotu a 53,4 od plynu, čo zelené a limetkové
+ * kandidátky neprežijú. Fialová #a78bde je obsadená — to je reč lietadiel.
+ *
+ * Farba však NIE JE jediný kanál: karta hovorí látku aj slovom, lebo žiadny
+ * odtieň nezvládne naraz odstup od jantára, červenej a tyrkysovej pri
+ * červeno-zelenej farbosleposti.
+ */
+export const OIL_PIPELINE_COLORS = Object.freeze({
+  operating: '#eab2ff',
+  planned: '#f3d1ff',
+  disused: '#87768d',
+  selected: '#ffffff',
+});
+
+const OIL_SUBSTANCE_RE = /^(oil|crude_oil|petroleum)$/i;
+
+/**
+ * Látka úseku podľa tagu `substance`, ktorý snímok nesie. Neznáme = plyn,
+ * lebo plynová vrstva je staršia a jej snímok má substance vyplnenú vždy.
+ * @param {object} properties
+ * @returns {'oil'|'gas'}
+ */
+export function pipelineKind(properties = {}) {
+  return OIL_SUBSTANCE_RE.test(String(properties?.substance || '')) ? 'oil' : 'gas';
+}
+
+const COLORS_BY_KIND = Object.freeze({ gas: GAS_PIPELINE_COLORS, oil: OIL_PIPELINE_COLORS });
 
 /**
  * Jeden Feature na riadok; poškodené riadky sa zahodia, nie sú fatálne.
@@ -53,13 +91,20 @@ export function pipelineStatus(properties = {}) {
  */
 export function pipelineStyle(properties = {}) {
   const status = pipelineStatus(properties);
+  const kind = pipelineKind(properties);
   const d = Number(properties?.diameterMm);
+  // Šírka znamená priemer rovnako pri oboch látkach — dve protirečivé pravidlá
+  // by sa používateľ učiť nemal. Trieda dáva zmysel až od opravy čítania palcov
+  // v scripts/lib/pipelineTags.mjs; predtým padlo do 1,4 px takmer všetko.
   const width = Number.isFinite(d) && d >= 900 ? 2.8 : (Number.isFinite(d) && d >= 500 ? 2.0 : 1.4);
   return {
     width,
-    alpha: status === 'disused' ? 0.4 : (status === 'planned' ? 0.7 : 0.85),
+    // disused zdvihnuté 0,40 → 0,45: pri 0,40 malo nad nočným oceánom kontrast
+    // 1,55, teda na hranici neviditeľnosti.
+    alpha: status === 'disused' ? 0.45 : (status === 'planned' ? 0.7 : 0.85),
     dashed: status === 'planned',
-    color: GAS_PIPELINE_COLORS[status],
+    color: COLORS_BY_KIND[kind][status],
+    kind,
     status,
   };
 }
@@ -67,7 +112,7 @@ export function pipelineStyle(properties = {}) {
 /** Meno pre kartu: name → name:en → ref → „plynovod (bez mena)“. */
 export function pipelineTitle(properties = {}, translate = (k) => k) {
   const name = String(properties?.name || properties?.nameEn || properties?.ref || '').trim();
-  return name || translate('gas.pipeline-unnamed');
+  return name || translate(pipelineKind(properties) === 'oil' ? 'gas.pipeline-unnamed-oil' : 'gas.pipeline-unnamed');
 }
 
 const locale = (lang) => (lang === 'sk' ? 'sk-SK' : 'en-GB');
@@ -81,6 +126,15 @@ const locale = (lang) => (lang === 'sk' ? 'sk-SK' : 'en-GB');
  */
 export function pipelineDetails(properties = {}, translate = (k) => k, lang = 'sk') {
   const lines = [];
+  // Látka ako PRVÝ riadok, a schválne pri OBOCH vrstvách. Bez nej dá pomenovaný
+  // ropovod a pomenovaný plynovod textovo nerozlíšiteľnú kartu a jediným
+  // rozdielom ostane farba — čo pri červeno-zelenej farbosleposti nestačí.
+  // Keby hlavičku dostala len ropa, používateľ by sa naučil „karta bez
+  // hlavičky = plyn", čo je presne to implicitné pravidlo, ktorému sa vyhýbame.
+  lines.push(translate('gas.pipeline-kind-' + pipelineKind(properties)));
+  // Surový dôkaz z OSM: prečo je úsek zaradený ako ropa, a zároveň vidno, že
+  // substance=fuel (rafinované produkty) sme z ropnej vrstvy vylúčili.
+  if (properties?.substance) lines.push('substance=' + properties.substance + ' (OSM)');
   if (properties?.operator) lines.push(String(properties.operator));
   const d = Number(properties?.diameterMm);
   const km = Number(properties?.lengthKm);
