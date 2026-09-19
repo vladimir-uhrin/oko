@@ -59,8 +59,16 @@ export function diameterMm(tags) {
  * @param {number} [o.bigDiameterMm] nad týmto priemerom je to preprava aj bez ďalších tagov
  * @returns {(tags: Record<string,string>, inRelation: boolean) => 'transmission'|'relation'|'diameter'|'name'|'operator'|null}
  */
-export function makeClassifier({ excludedUsage, operatorRe, minDiameterMm = 150, bigDiameterMm = 300 }) {
+export function makeClassifier({ excludedUsage, operatorRe, substanceRe = null, minDiameterMm = 150, bigDiameterMm = 300 }) {
   return function classify(tags, inRelation) {
+    // Vlastná látka cesty má prednosť pred VŠETKÝM ostatným. Relácia
+    // route=pipeline nesie substance na sebe, ale jej členské cesty majú
+    // vlastné tagy — bez tejto kontroly sa do ropného snímku dostali úseky
+    // substance=fuel (rafinované produkty), naphtha, hydrocarbons aj gas,
+    // teda presne to, čo query aj DATA_SOURCES.md deklarujú ako vylúčené
+    // (nájdené 2026-09-19 na živej vrstve: 29 z 2 628 úsekov).
+    const substance = String(tags.substance || '').trim().toLowerCase();
+    if (substanceRe && substance && !substanceRe.test(substance)) return null;
     const usage = String(tags.usage || '').toLowerCase();
     if (usage === 'transmission') return 'transmission';
     if (usage && excludedUsage.test(usage)) return null;

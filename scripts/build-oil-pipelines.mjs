@@ -107,7 +107,8 @@ const OIL_OPERATOR_RE = new RegExp([
   '国家管网', 'pipechina',
 ].join('|'), 'i');
 
-export const classifyOilPipeline = makeClassifier({ excludedUsage: EXCLUDED_USAGE, operatorRe: OIL_OPERATOR_RE });
+const OIL_SUBSTANCE_RE = /^(oil|crude_oil|petroleum)$/i;
+export const classifyOilPipeline = makeClassifier({ excludedUsage: EXCLUDED_USAGE, operatorRe: OIL_OPERATOR_RE, substanceRe: OIL_SUBSTANCE_RE });
 
 /** Same four-branch shape as gas, with the oil substances. */
 const buildQuery = ([S, W, N, E]) => `[out:json][timeout:300][bbox:${S},${W},${N},${E}];

@@ -72,3 +72,30 @@ test('klasifikátor s opraveným priemerom mení výsledok pri palcoch', () => {
   // A úzka 8-palcová rúra, ktorú stará verzia nafúkla na 8000 mm a pustila dnu.
   assert.equal(classify({ diameter: '8"' }, false), null);
 });
+
+test('substanceRe: vlastná látka cesty prebije aj reláciu aj usage=transmission', () => {
+  const oil = makeClassifier({
+    excludedUsage: /^(distribution|flowline)$/,
+    operatorRe: /transneft/i,
+    substanceRe: /^(oil|crude_oil|petroleum)$/i,
+  });
+  // Toto je tá chyba z 2026-09-19: relácia route=pipeline nesie substance=oil,
+  // ale jej členské cesty majú vlastné tagy. Do ropného snímku sa tak dostalo
+  // 29 z 2 628 úsekov, ktoré ropa nie sú — 20× fuel (rafinované produkty).
+  assert.equal(oil({ substance: 'fuel' }, true), null, 'rafinované produkty nie sú ropa');
+  assert.equal(oil({ substance: 'naphtha' }, true), null);
+  assert.equal(oil({ substance: 'hydrocarbons' }, true), null, 'viacfázový prúd zo sondy nie je ropa');
+  assert.equal(oil({ substance: 'gas' }, true), null, 'plyn nesmie prísť ropnou reláciou');
+  // Ani usage=transmission ju nesmie prepašovať — látka sa kontroluje PRVÁ.
+  assert.equal(oil({ substance: 'fuel', usage: 'transmission' }, false), null);
+  // Čo ropa JE, prejde všetkými vetvami.
+  assert.equal(oil({ substance: 'oil' }, true), 'relation');
+  assert.equal(oil({ substance: 'crude_oil', usage: 'transmission' }, false), 'transmission');
+  assert.equal(oil({ substance: 'PETROLEUM', diameter: '24"' }, false), 'diameter', 'veľké písmená a palce');
+  // Cesta BEZ vlastnej látky látku dedí z relácie — inak by vypadli úseky,
+  // ktoré sú otagované len na relácii.
+  assert.equal(oil({}, true), 'relation');
+  // Bez substanceRe sa správa presne ako predtým.
+  const old = makeClassifier({ excludedUsage: /^(distribution)$/, operatorRe: /x/ });
+  assert.equal(old({ substance: 'fuel' }, true), 'relation');
+});

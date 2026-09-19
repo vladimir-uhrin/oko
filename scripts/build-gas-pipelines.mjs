@@ -102,7 +102,12 @@ const TSO_RE = new RegExp([
  * build nemusel kopírovať — `diameterMm` mala chybu v čítaní palcov a dva domovy
  * pre jeden defekt sú presne to, čomu sa vyhýbame.
  */
-export const classifyPipeline = makeClassifier({ excludedUsage: EXCLUDED_USAGE, operatorRe: TSO_RE });
+// Tá istá diera ako pri rope: členská cesta relácie má vlastnú látku.
+// substance=cng je stlačený zemný plyn a v snímku je jedna taká cesta —
+// necháva sa, aby oprava nemenila výstup; ide o uzavretie diery, nie
+// o prefiltrovanie snímku.
+const GAS_SUBSTANCE_RE = /^(gas|natural_gas|cng)$/i;
+export const classifyPipeline = makeClassifier({ excludedUsage: EXCLUDED_USAGE, operatorRe: TSO_RE, substanceRe: GAS_SUBSTANCE_RE });
 
 /**
  * Všetky kandidátske úseky (prepravné, alebo bez `usage` s priemerom, menom
