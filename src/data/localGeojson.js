@@ -17,7 +17,13 @@ import {
 } from './localLabelLod.js';
 import { isAirportCardOpen } from './airportCard.js';
 import { LOCAL_MARKER_BASE_PX } from './localMarkerIcons.js';
-import { PORTS_LAYER_ID, portImportance, portOverlayCopy } from './portsData.js';
+import { PORTS_LAYER_ID, portImportance, portOverlayCopy, portTitleFlag } from './portsData.js';
+import { createLocalHoverCard } from './localHoverCard.js';
+import { t as translateDefault } from '../i18n.js';
+
+/** Hover popup nad značkou (2026-09-19): pauza po pohybe a pick obdĺžnik ako pri rúrach. */
+export const LOCAL_HOVER_DELAY_MS = 80;
+export const LOCAL_HOVER_PICK_PX = 7;
 import { cachedMetarCardLines, metarStationId } from './airportWeather.js';
 import {
   clearSelectedEntityContextForLayer,
@@ -142,6 +148,8 @@ export function localInfrastructureOverlayCopy(properties, layerId, tier = 'full
       details.push(clampCardLine(line));
     }
   } else if (layerId === PORTS_LAYER_ID) {
+    // Vlajka štátu aj prístavom (2026-09-19) — WPI nesie meno štátu, nie kód.
+    titleFlag = portTitleFlag(props);
     for (const line of portOverlayCopy(props)) details.push(clampCardLine(line));
   }
 
@@ -357,8 +365,22 @@ export function createLocalGeoJsonLayer({
   // localInfrastructureOverlayCopy — vrstva tak vie do karty doplniť
   // asynchrónne dáta (letiská: METAR), bez per-frame prepočtov pre všetkých.
   onFeatureSelected = null,
+  // Hover popup nad značkou (2026-09-19, používateľ pri bodke prístavu na
+  // ropovode: „aj tie uzly sprav vyskakovacie"): z diaľky sú značky len
+  // bodky bez mena, prechod myšou povie, čo to je — bez kliku a priblíženia.
+  hover = true,
+  hoverFactory = (o) => createLocalHoverCard(o),
+  hoverTimers = { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle) },
+  translate = translateDefault,
 }) {
   let _dataSource = null;
+  let _hover = null;
+  let _hoverTimer = null;
+  let _hoverLeaveTimer = null;
+  let _hoverPointer = null;
+  let _hoverListeners = null;
+  let _hoverCameraRemover = null;
+  let _hoverViewer = null;
   const _markerImageUri = typeof markerImage === 'function' ? markerImage(color) : (markerImage || null);
   /** @type {'full'|'compact'|'code'|'hidden'} Posledný stupeň popisu (hysteréza). */
   let _labelTier = 'full';
@@ -422,8 +444,55 @@ export function createLocalGeoJsonLayer({
     host: overlayHost,
   });
 
+  // ── Hover popup (vzor gasPipelinesLayer.js) ────────────────────────────
+  function clearHover() {
+    if (_hoverTimer) { hoverTimers.clear(_hoverTimer); _hoverTimer = null; }
+    if (_hoverLeaveTimer) { hoverTimers.clear(_hoverLeaveTimer); _hoverLeaveTimer = null; }
+    _hover?.hide();
+  }
+  function hoverAtPointer() {
+    _hoverTimer = null;
+    const viewer = _hoverViewer;
+    if (!_enabled || !_hover || !_hoverPointer || !viewer?.scene?.pick) return;
+    let picked = null;
+    try { picked = viewer.scene.pick(new Cesium.Cartesian2(_hoverPointer.x, _hoverPointer.y), LOCAL_HOVER_PICK_PX, LOCAL_HOVER_PICK_PX); } catch { picked = null; }
+    const entity = picked?.id;
+    if (!entity || entity.__localLayerId !== id) { if (!_hover.isHovered()) _hover.hide(); return; }
+    const copy = localInfrastructureOverlayCopy(propertyObject(entity), id, 'full');
+    _hover.show({ layerId: id, kindText: `${translate(`layer.${id}.name`)} · ${source}`, title: copy.title, titleFlag: copy.titleFlag, details: copy.details, source }, _hoverPointer, String(entity.id ?? copy.title));
+  }
+  function moveHover(e) {
+    if (e.buttons || e.pointerType === 'touch') { clearHover(); return; }
+    _hoverPointer = { x: e.clientX, y: e.clientY };
+    if (!_hoverTimer) _hoverTimer = hoverTimers.set(hoverAtPointer, LOCAL_HOVER_DELAY_MS);
+  }
+  function leaveHover() {
+    if (_hoverLeaveTimer) hoverTimers.clear(_hoverLeaveTimer);
+    _hoverLeaveTimer = hoverTimers.set(() => { _hoverLeaveTimer = null; if (!_hover?.isHovered()) clearHover(); }, 220);
+  }
+  function installHover(viewer) {
+    const canvas = viewer?.scene?.canvas;
+    if (!hover || _hoverListeners || !canvas?.addEventListener) return;
+    _hoverViewer = viewer;
+    _hover = _hover || hoverFactory({ translate });
+    _hoverListeners = { pointermove: moveHover, pointerleave: leaveHover, pointerdown: clearHover };
+    for (const [type, fn] of Object.entries(_hoverListeners)) canvas.addEventListener(type, fn);
+    _hoverCameraRemover = viewer?.camera?.moveStart?.addEventListener?.(clearHover) || null;
+  }
+  function removeHover() {
+    clearHover();
+    const canvas = _hoverViewer?.scene?.canvas;
+    if (_hoverListeners && canvas?.removeEventListener) {
+      for (const [type, fn] of Object.entries(_hoverListeners)) canvas.removeEventListener(type, fn);
+    }
+    _hoverListeners = null;
+    _hoverCameraRemover?.();
+    _hoverCameraRemover = null;
+  }
+
   const disableLayer = (viewer) => {
     _enabled = false;
+    removeHover();
     clearGroundRetryRender();
     if (_dataSource) _dataSource.show = false;
     _overlayPublisher.hide();
@@ -730,6 +799,9 @@ export function createLocalGeoJsonLayer({
         }
       }
 
+      // 2b. Hover popup nad značkou — pri každom zapnutí, vlastná stráž.
+      if (_enabled) installHover(viewer);
+
       // 3. Add an incredibly fast pre-render occluder to hide points behind the globe
       if (_enabled && !_preRenderRemover) {
         _preRenderRemover = viewer.scene.preRender.addEventListener(() => {
@@ -887,6 +959,8 @@ export function createLocalGeoJsonLayer({
       // Defensively disable first so listeners and selection state are
       // torn down even if destroy is called while the layer is enabled.
       disableLayer(viewer);
+      _hover?.destroy?.();
+      _hover = null;
       if (_clickHandler) {
         _clickHandler.destroy();
         _clickHandler = null;

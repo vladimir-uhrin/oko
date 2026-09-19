@@ -11,6 +11,8 @@
  * a zero-metre draft. All numeric fields here treat <= 0 as null.
  */
 
+import { countryIso2FromName } from './countryFlags.js';
+
 export const PORTS_LAYER_ID = 'local-ports';
 
 function cleanText(value) {
@@ -109,6 +111,21 @@ export function portOverlayCopy(props) {
   ].filter(Boolean).join(' · ');
   if (capacityLine) details.push(capacityLine);
   return details;
+}
+
+/**
+ * Vlajka štátu prístavu pre karty. WPI nesie v `country` CELÉ MENO štátu
+ * („United States", „Ukraine"), nie ISO kód — prevod robí countryIso2FromName
+ * z countryFlags.js; neznáme meno = bez vlajky. Rovnaký kontrakt (malé
+ * písmená) ako airportTitleFlag.
+ * @param {object} props Bundled feature properties.
+ * @returns {string|null} napr. 'ua'
+ */
+export function portTitleFlag(props) {
+  const raw = cleanText(props?.country);
+  if (!raw) return null;
+  const code = /^[A-Za-z]{2}$/.test(raw) ? raw : countryIso2FromName(raw);
+  return code ? String(code).toLowerCase() : null;
 }
 
 /**

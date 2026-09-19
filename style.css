@@ -10436,6 +10436,16 @@ body.scene-playback-mode #first-run-launcher {
 }
 .pipeline-hover-card[hidden] { display: none; }
 .pipeline-hover-card[data-kind="oil"] { border-left-color: #eab2ff; }
+/* Lokálne značky (localHoverCard.js) zdieľajú kartu; lem vo farbe vrstvy. */
+.pipeline-hover-card[data-kind="ports"] { border-left-color: #7fd1c0; }
+.pipeline-hover-card[data-kind="ports"] .pipeline-hover-kind { color: #7fd1c0; }
+.pipeline-hover-card[data-kind="airports"] { border-left-color: #ff66d4; }
+.pipeline-hover-card[data-kind="airports"] .pipeline-hover-kind { color: #ff66d4; }
+.pipeline-hover-card[data-kind="datacenters"] { border-left-color: #00ffff; }
+.pipeline-hover-card[data-kind="datacenters"] .pipeline-hover-kind { color: #00ffff; }
+.pipeline-hover-card[data-kind="dams"] { border-left-color: #0088ff; }
+.pipeline-hover-card[data-kind="dams"] .pipeline-hover-kind { color: #0088ff; }
+.local-hover-card .pipeline-hover-title .pipeline-hover-flag { margin-right: 6px; vertical-align: 0; }
 .pipeline-hover-card a { color: var(--accent); text-decoration: none; }
 .pipeline-hover-card a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .pipeline-hover-kind { display: block; font-size: 8.5px; letter-spacing: 1.2px; color: #ffb14d; margin-right: 24px; }
