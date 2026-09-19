@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GAS_PIPELINES_API, GAS_PIPELINES_META_API, GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS,
-  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineDisplayCondition, pipelineDisplayName, pipelineKind, pipelineLocationText, pipelineMidpoint,
-  pipelineOperator, pipelineRoute, pipelineSelectedStyle, pipelineSourceLabel, pipelineStatus, pipelineStyle, pipelineTitle,
+  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineDetailsRows, pipelineDisplayCondition, pipelineDisplayName, pipelineFenceSpec, pipelineKind, pipelineLocationText, pipelineMidpoint,
+  pipelineOperator, pipelineRoute, pipelineSelectedStyle, pipelineSourceLabel, pipelineStatus, pipelineStyle, pipelineTitle, selectGhostCohort,
 } from './gasPipelines.js';
 
 const tKey = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
@@ -153,6 +153,25 @@ test('etapa 3b — mená v latinke, prevádzkovateľ, krajiny a uloženie', () =
   ]);
   assert.deepEqual(pipelineDetails({ countries: ['XX'] }, tKey), ['gas.pipeline-kind-gas', 'gas.pipeline-countries: XX', 'gas.pipeline-status-operating'], 'bez prekladu ostane kód');
   assert.deepEqual(pipelineDetailsRows({ operator: 'Транснефть', location: 'overhead' }, tKey), [['gas.pipeline-operator', 'Transneft'], ['gas.pipeline-location', 'gas.pipeline-location-overhead'], ['gas.pipeline-status-label', 'gas.pipeline-status-operating']]);
+});
+
+test('etapa 5 — plot len na prevádzkovaných chrbticiach a hlavných vetvách, nižší než plot hraníc; kohorta ducha najbližšie prvé so stropmi', () => {
+  const fence = pipelineFenceSpec({ diameterMm: 1400, lengthKm: 50 });
+  assert.deepEqual(fence, { heightM: 7000, near: 200_000, far: 1_100_000, color: GAS_PIPELINE_COLORS.operating, alpha: 0.18, topAlpha: 0.75, kind: 'gas' });
+  assert.ok(fence.heightM < 18667 / 2, 'nižší než plot hraníc (18 667 m), aby sa nad Hormuzom nezliali');
+  assert.equal(pipelineFenceSpec({ diameterMm: 600, substance: 'oil' }).color, OIL_PIPELINE_COLORS.operating);
+  assert.equal(pipelineFenceSpec({ diameterMm: 1400, status: 'planned' }), null, 'plánovaná rúra ešte nestojí');
+  assert.equal(pipelineFenceSpec({ diameterMm: 1400, status: 'disused' }), null);
+  assert.equal(pipelineFenceSpec({ diameterMm: 300, lengthKm: 40 }), null, 'vedľajšia vetva bez plotu');
+  assert.equal(pipelineFenceSpec({ lengthKm: 0.5 }), null, 'pahýľ bez plotu');
+  const cam = { x: 0, y: 0, z: 0 };
+  const rec = (id, d, points = 3, widthClass = 'minor') => ({ id, mid: { x: d, y: 0, z: 0 }, points, widthClass });
+  const records = [rec('far', 400_000), rec('c', 30_000), rec('a', 1_000), rec('stub', 500, 2, 'stub'), rec('b', 10_000, 10)];
+  assert.deepEqual(selectGhostCohort(records, cam), ['a', 'b', 'c'], 'do 250 km, najbližšie prvé, pahýle nikdy');
+  assert.deepEqual(selectGhostCohort(records, cam, { cap: 2 }), ['a', 'b']);
+  assert.deepEqual(selectGhostCohort(records, cam, { maxVertices: 12 }), ['a'], 'strop vrcholov: a (3) + b (10) by prekročilo 12');
+  assert.deepEqual(selectGhostCohort(records, null), []);
+  assert.deepEqual(selectGhostCohort([], cam), []);
 });
 
 test('pipelineMidpoint a pipelineSourceLabel', () => {

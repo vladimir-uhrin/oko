@@ -24,7 +24,7 @@ const META = { snapshot: '2026-09-13T20:00:00Z', features: 3, lengthKm: 1351.2 }
 
 function fakeDataSource(id) {
   const values = [];
-  return { id, show: true, entities: { values, add(e) { values.push(e); return e; }, removeAll() { values.length = 0; } } };
+  return { id, show: true, entities: { values, add(e) { values.push(e); return e; }, remove(e) { const i = values.indexOf(e); if (i >= 0) values.splice(i, 1); return i >= 0; }, removeAll() { values.length = 0; } } };
 }
 function fakeHandler() { return { fn: null, destroyed: false, setInputAction(fn) { this.fn = fn; }, destroy() { this.destroyed = true; } }; }
 function fakeHost() {
@@ -149,7 +149,7 @@ test('lifecycle: lenivé načítanie pri enable, entity podľa stavu (čiarkovan
   assert.equal(host.visible, false);
   assert.equal(ds.show, false);
   layer.destroy(viewer);
-  assert.equal(viewer.dataSources.removed.length, 3, 'plyn, ropa aj výber majú vlastný zdroj (etapy 3–4), destroy odstráni všetky');
+  assert.equal(viewer.dataSources.removed.length, 4, 'plyn, ropa, výber aj duch majú vlastný zdroj (etapy 3–5), destroy odstráni všetky');
   assert.equal(layer._getStateForTest().entities, null);
 });
 
@@ -419,6 +419,91 @@ test('etapa 4 — bez podpory pozemných čiar: núdzovka 200 m nad elipsoidom, 
   assert.match(layer.getStats().source, /gas\.pipeline-no-ground$/, 'chip prizná núdzovku (pravidlo 2)');
   assert.equal(defaultGroundSupport({}), true, 'falošná scéna bez kontextu = predpokladaj podporu, nie výnimku');
   layer.destroy(viewer);
+});
+
+test('etapa 5 — plot na chrbtici v strednom pásme; duch: kohorta pri kamere, výšky navzorkované raz, depthFail čiara len zblízka, pohyb kamery/čip/vypnutie', async () => {
+  const timers = [];
+  const setTimer = (fn) => { timers.push(fn); return timers.length; };
+  const clearTimer = (id) => { timers[id - 1] = null; };
+  const runTimers = () => { const pending = timers.splice(0).filter(Boolean); for (const fn of pending) fn(); };
+  const tick = async () => { for (let i = 0; i < 4; i += 1) await new Promise((r) => setImmediate(r)); };
+  const samplings = [];
+  const camera = {
+    positionWC: Cesium.Cartesian3.fromDegrees(18, 48.5, 50_000),
+    positionCartographic: { height: 50_000 },
+    moveEnd: { listener: null, addEventListener(fn) { this.listener = fn; return () => { this.listener = null; }; } },
+  };
+  const base = fakeViewer();
+  const viewer = { ...base, camera, scene: { ...base.scene, camera } };
+  // Výšky zo spoločného resolvera (/api/terrain/heights), nie z 3D dlaždíc — viď PIPELINE_GHOST.
+  const terrainSampler = async (points) => { samplings.push({ n: points.length, first: points[0] }); return points.map(() => 100); };
+  const layer = createGasPipelinesLayer({ fetchImpl: fetcherOk, dataSourceFactory: fakeDataSource, handlerFactory: fakeHandler, overlayHost: fakeHost(), translate: tKey, lang: () => 'sk', now: () => NOW, setTimer, clearTimer, terrainSampler });
+  layer.init(viewer);
+  assert.deepEqual(viewer.dataSources.added.map((d) => d.id), ['gas-pipelines', 'gas-pipelines-oil', 'gas-pipelines-selected', 'gas-pipelines-ghost']);
+  layer.enable();
+  assert.equal(await layer.update(), true);
+  const [transgas, ns2, dn300] = viewer.dataSources.added[0].entities.values;
+  // Plot: len prevádzkovaná chrbtica (DN 1400, 120 km); plánovaná a pahýľ nie.
+  assert.equal(layer._getStateForTest().fences, 1);
+  assert.equal(transgas.wall.maximumHeights[0], 7000);
+  assert.equal(transgas.wall.minimumHeights[0], 0);
+  assert.equal(transgas.wall.distanceDisplayCondition.near, 200_000);
+  assert.equal(transgas.wall.distanceDisplayCondition.far, 1_100_000);
+  assert.equal(transgas.wall.outline, true);
+  assert.equal(transgas.wall.material.color.getValue().alpha.toFixed(2), '0.18');
+  assert.equal(ns2.wall, undefined, 'plánovaná rúra ešte nestojí');
+  assert.equal(dn300.wall, undefined, 'pahýľ bez plotu');
+  // Duch: po načítaní sa naplánuje kohorta; kamera 50 km nad Transgasom → jeho 3 vrcholy sa navzorkujú raz.
+  const ghost = viewer.dataSources.added[3];
+  assert.equal(ghost.show, true);
+  assert.equal(layer._getStateForTest().ghost.listening, true);
+  runTimers(); await tick();
+  assert.deepEqual(samplings, [{ n: 3, first: [17, 48] }], 'vzorkuje sa raz, body [lon, lat] úseku');
+  assert.equal(ghost.entities.values.length, 1);
+  const g = ghost.entities.values[0];
+  assert.equal(g.__gasPipelineGhost, 'osm-way-1');
+  assert.equal(g.polyline.positions.length, 3);
+  assert.ok(Math.abs(Cesium.Cartographic.fromCartesian(g.polyline.positions[1]).height - 103) < 0.5, 'navzorkovaná výška + 3 m');
+  assert.equal(g.polyline.width, 5, 'o 1 px tenší než pozemná čiara');
+  assert.equal(g.polyline.arcType, Cesium.ArcType.NONE);
+  assert.equal(g.polyline.material, Cesium.Color.TRANSPARENT, 'viditeľnú časť kreslí pozemná čiara');
+  assert.equal(g.polyline.depthFailMaterial.constructor.name, 'PolylineDashMaterialProperty', 'za terénom čiarkovaná');
+  assert.equal(g.polyline.depthFailMaterial.color.getValue().alpha.toFixed(2), '0.55');
+  assert.equal(g.polyline.distanceDisplayCondition.far, 250_000);
+  // Pohyb kamery na tom istom mieste: z cache, žiadne nové vzorkovanie.
+  camera.moveEnd.listener(); runTimers(); await tick();
+  assert.equal(samplings.length, 1, 'výšky sú v cache');
+  assert.equal(ghost.entities.values.length, 1);
+  // Kamera vysoko → kohorta prázdna → duchovia preč; späť dole → z cache naspäť.
+  camera.positionCartographic.height = 600_000;
+  camera.moveEnd.listener(); runTimers(); await tick();
+  assert.equal(ghost.entities.values.length, 0, 'nad 250 km bez duchov');
+  camera.positionCartographic.height = 50_000;
+  camera.moveEnd.listener(); runTimers(); await tick();
+  assert.equal(ghost.entities.values.length, 1);
+  assert.equal(samplings.length, 1);
+  // Čip vypne plyn → duch plynovodu zmizne, ropa by ostala.
+  layer.setParams({ gas: false }); runTimers(); await tick();
+  assert.equal(ghost.entities.values.length, 0);
+  layer.setParams({ gas: true }); runTimers(); await tick();
+  assert.equal(ghost.entities.values.length, 1);
+  // Vypnutie odpojí kameru a schová ducha; destroy odstráni štyri zdroje.
+  layer.disable();
+  assert.equal(camera.moveEnd.listener, null);
+  assert.equal(ghost.show, false);
+  assert.equal(layer._getStateForTest().ghost.listening, false);
+  layer.destroy(viewer);
+  assert.equal(viewer.dataSources.removed.length, 4);
+  // Bez resolvera výšok niet ducha, ale plot a čiary áno.
+  const plain = createGasPipelinesLayer({ fetchImpl: fetcherOk, dataSourceFactory: fakeDataSource, handlerFactory: fakeHandler, overlayHost: fakeHost(), translate: tKey, lang: () => 'sk', now: () => NOW, setTimer, clearTimer, terrainSampler: null });
+  const v2 = fakeViewer();
+  plain.init(v2); plain.enable();
+  assert.equal(await plain.update(), true);
+  runTimers(); await tick();
+  assert.equal(plain._getStateForTest().ghost.supported, false);
+  assert.equal(v2.dataSources.added[3].entities.values.length, 0);
+  assert.equal(plain._getStateForTest().fences, 1);
+  plain.destroy(v2);
 });
 
 test('duplicitné id (úsek cez hranicu dlaždice) dostane príponu namiesto výnimky; po zlyhaní sa pri ďalšom pokuse zdroj vyprázdni, nič sa nezdvojí', async () => {

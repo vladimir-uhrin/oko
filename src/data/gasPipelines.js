@@ -159,6 +159,68 @@ export function pipelineStyle(properties = {}) {
   };
 }
 
+/**
+ * Plot (etapa 5, viditeľnosť II): priesvitná stena vo farbe látky stojaca na
+ * chrbtici, viditeľná len v strednom pásme vzdialenosti kamery — z bočného
+ * pohľadu je rúra stuha nad terénom, nie čiarka za hrebeňom. Odlíšenie od
+ * červeného plotu hraníc (18 667 m, pásmo 300–1 300 km) je vo výške (tretina)
+ * aj v odtieni; pásma sa prekrývajú zámerne. Výška je nad ELIPSOIDOM ako pri
+ * hraniciach: 7 km vytŕča nad Zagros aj Iránsku plošinu, v nížine je to
+ * stuha 7 km. Len prevádzkované chrbtice a hlavné vetvy (DN ≥ 500) — plot na
+ * pahýľoch by bol šum, plánované rúry ešte nestoja.
+ */
+export const PIPELINE_FENCE = Object.freeze({ heightM: 7000, near: 200_000, far: 1_100_000, alpha: 0.18, topAlpha: 0.75 });
+export function pipelineFenceSpec(properties = {}) {
+  const style = pipelineStyle(properties);
+  if (style.status !== 'operating') return null;
+  if (style.widthClass !== 'trunk' && style.widthClass !== 'main') return null;
+  return { heightM: PIPELINE_FENCE.heightM, near: PIPELINE_FENCE.near, far: PIPELINE_FENCE.far, color: style.color, alpha: PIPELINE_FENCE.alpha, topAlpha: PIPELINE_FENCE.topAlpha, kind: style.kind };
+}
+
+/**
+ * Duch (etapa 5): zblízka sa pozemná čiara stráca za hrebeňmi. Pre ohraničenú
+ * kohortu úsekov pri kamere sa zistí elipsoidná výška terénu na každom vrchole
+ * (spoločný resolver `terrainHeights.js` → proxy `/api/terrain/heights`,
+ * Re:Earth, disk cache; raz na úsek, cache) a nakreslí sa statická čiara
+ * s `depthFailMaterial` — vidno ju LEN tam, kde ju terén zakrýva. Pevná výška
+ * nad elipsoidom by nad Zagrosom bola 1–3 km pod zemou, preto vzorkovanie.
+ * PREČO NIE `scene.sampleHeightMostDetailed` (2026-09-19, skúsené): núti načítať
+ * najdetailnejšie 3D dlaždice pre každý bod v okruhu 250 km — tisíce požiadaviek
+ * na fotoreálne dlaždice (kvóta) a v pane sa to nikdy nedokončilo. A nie
+ * `Cesium.sampleTerrain(viewer.terrainProvider)`: na fotoreáli je provider
+ * plochý EllipsoidTerrainProvider (glóbus skrytý), výšky by boli 0.
+ * Pásmo sa s plotom prekrýva (200–250 km), aby netreba bolo hysterézny automat.
+ */
+export const PIPELINE_GHOST = Object.freeze({ maxDistanceM: 250_000, cap: 60, maxVertices: 600, retryMs: 300_000, liftM: 3, widthDelta: 1, alpha: 0.55, dashLength: 10 });
+
+/**
+ * Kohorta pre ducha: úseky (okrem pahýľov) so stredom do `maxDistanceM` od
+ * kamery, najbližšie prvé, najviac `cap` úsekov a `maxVertices` vrcholov.
+ * Čistá funkcia nad {x,y,z} — bez Cesia, testuje sa v Node.
+ * @param {Array<{id: string, mid: {x: number, y: number, z: number}, points: number, widthClass: string}>} records
+ * @param {{x: number, y: number, z: number}} camera
+ * @param {{maxDistanceM?: number, cap?: number, maxVertices?: number}} [o]
+ * @returns {string[]} id úsekov
+ */
+export function selectGhostCohort(records, camera, { maxDistanceM = PIPELINE_GHOST.maxDistanceM, cap = PIPELINE_GHOST.cap, maxVertices = PIPELINE_GHOST.maxVertices } = {}) {
+  if (!camera || !Array.isArray(records)) return [];
+  const near = [];
+  for (const r of records) {
+    if (!r?.mid || r.widthClass === 'stub') continue;
+    const d = Math.hypot(r.mid.x - camera.x, r.mid.y - camera.y, r.mid.z - camera.z);
+    if (d <= maxDistanceM) near.push({ id: r.id, d, points: Number(r.points) || 2 });
+  }
+  near.sort((a, b) => a.d - b.d);
+  const out = [];
+  let vertices = 0;
+  for (const r of near) {
+    if (out.length >= cap || vertices + r.points > maxVertices) break;
+    out.push(r.id);
+    vertices += r.points;
+  }
+  return out;
+}
+
 /** Štýl zvýraznenia vybraného úseku — odvodený od základného, vždy viditeľný. */
 export function pipelineSelectedStyle(properties = {}) {
   const base = pipelineStyle(properties);

@@ -27,12 +27,13 @@ import { registerEntityContext, removeEntityContextsForLayer, selectEntityContex
 import { clearOverlaySource, hitTestWorldOverlay, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
 import { applyVesselOverlayPolicy } from './vesselLabels.js';
 import {
-  GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS, OIL_PIPELINES_API, OIL_PIPELINES_META_API,
-  fetchGasPipelines, pipelineDetails, pipelineMidpoint, pipelineSelectedStyle, pipelineSourceLabel, pipelineStyle,
-  pipelineTitle,
+  GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS, OIL_PIPELINES_API, OIL_PIPELINES_META_API, PIPELINE_GHOST,
+  fetchGasPipelines, pipelineDetails, pipelineFenceSpec, pipelineMidpoint, pipelineSelectedStyle, pipelineSourceLabel, pipelineStyle,
+  pipelineTitle, selectGhostCohort,
 } from './gasPipelines.js';
 import { fetchGasFlows } from './gasFlows.js';
 import { createPipelineHoverCard } from './pipelineHoverCard.js';
+import { resolveEllipsoidalGround } from './terrainHeights.js';
 
 export const GAS_PIPELINES_LAYER_ID = 'gas-pipelines';
 export const GAS_PIPELINES_OVERLAY_SOURCE_ID = 'gas-pipelines';
@@ -49,6 +50,8 @@ export const PIPELINE_FLOWS_TTL_MS = 30 * 60 * 1000;
 
 /** Núdzová výška čiar bez podpory pozemných primitív (metre nad elipsoidom). */
 export const FALLBACK_HEIGHT_M = 200;
+/** Duch: pauza po pohybe kamery pred novou kohortou (moveEnd chodí v dávkach). */
+export const PIPELINE_GHOST_DEBOUNCE_MS = 250;
 
 /**
  * Stráž podpory pozemných čiar (vzor traffic.js): bez hĺbkovej textúry
@@ -59,6 +62,19 @@ export const FALLBACK_HEIGHT_M = 200;
  */
 export function defaultGroundSupport(scene) {
   try { return Boolean(Cesium.GroundPolylinePrimitive.isSupported(scene)); } catch { return true; }
+}
+
+/**
+ * Elipsoidné výšky terénu pre body [lon, lat] zo spoločného resolvera
+ * (`/api/terrain/heights`, Re:Earth). Geoidná núdzovka resolvera (proxy
+ * nedostupná) sa vracia ako null — duch na geoide by bol pod horami, radšej
+ * žiadny a skúsiť neskôr.
+ * @param {number[][]} points
+ * @returns {Promise<Array<number|null>>}
+ */
+export async function defaultTerrainSampler(points) {
+  const resolved = await resolveEllipsoidalGround(points.map(([lon, lat]) => ({ lat, lon })));
+  return points.map((_, i) => { const r = resolved[i]; return r && r.source === 'reearth' && Number.isFinite(r.ellipsoid) ? r.ellipsoid : null; });
 }
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
@@ -117,6 +133,8 @@ function normalizeFlag(value) {
  * @param {Function} [o.flowsFetcher] `fetchGasFlows`-kompatibilný (test: falošný)
  * @param {Function} [o.setTimer]
  * @param {Function} [o.clearTimer]
+ * @param {(scene: object) => boolean} [o.groundSupport]
+ * @param {((points: number[][]) => Promise<Array<number|null>>)|null} [o.terrainSampler] výšky pre ducha (test: falošný; null = bez ducha)
  */
 export function createGasPipelinesLayer({
   fetchImpl = null,
@@ -131,6 +149,7 @@ export function createGasPipelinesLayer({
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
   groundSupport = defaultGroundSupport,
+  terrainSampler = defaultTerrainSampler,
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   let _viewer = null;
@@ -140,6 +159,17 @@ export function createGasPipelinesLayer({
   let _selection = null;
   /** GPU vie pozemné čiary (hĺbková textúra); inak núdzovka nad elipsoidom. */
   let _groundSupported = true;
+  /** Koľko entít dostalo plot (etapa 5). */
+  let _fenceCount = 0;
+  // Duch (etapa 5): zdroj statických čiar s depthFailMaterial pre kohortu pri kamere.
+  let _ghost = null;
+  /** id → { positions: Cartesian3[]|null, at } — null = vzorkovanie zlyhalo, skúsi sa znova po retryMs. */
+  let _ghostHeights = new Map();
+  let _ghostRecords = null;
+  let _ghostTimer = null;
+  let _ghostToken = 0;
+  let _removeGhostMove = null;
+  let _ghostSamples = 0;
   let _enabled = false;
   let _loaded = false;
   let _loading = null;
@@ -198,6 +228,7 @@ export function createGasPipelinesLayer({
   function applySourceVisibility() {
     eachSource((source, kind) => { source.show = _enabled && Boolean(_params[kind]); });
     if (_selection) _selection.show = _enabled;
+    if (_ghost) _ghost.show = _enabled;
   }
 
   /**
@@ -246,6 +277,135 @@ export function createGasPipelinesLayer({
       polyline: polylineFor(record.feature.geometry.coordinates, style),
     });
     entity.__gasPipelineSelection = record.feature.id;
+  }
+
+  // ── Plot (etapa 5) ──────────────────────────────────────────────────────
+  /** Stena vo farbe látky od elipsoidu po `heightM`, len v strednom pásme (DDC). */
+  function wallFor(coordinates, fence) {
+    const flat = [];
+    for (const [lon, lat] of coordinates) flat.push(lon, lat);
+    const color = Cesium.Color.fromCssColorString(fence.color);
+    return {
+      positions: Cesium.Cartesian3.fromDegreesArray(flat),
+      maximumHeights: new Array(coordinates.length).fill(fence.heightM),
+      minimumHeights: new Array(coordinates.length).fill(0),
+      material: new Cesium.ColorMaterialProperty(color.withAlpha(fence.alpha)),
+      outline: true,
+      outlineColor: color.withAlpha(fence.topAlpha),
+      outlineWidth: 1,
+      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(fence.near, fence.far),
+    };
+  }
+
+  // ── Duch (etapa 5) ──────────────────────────────────────────────────────
+  /** Duch potrebuje pozemné čiary (inak niet čo dopĺňať) a resolver výšok. */
+  function ghostSupported() {
+    return _groundSupported && typeof terrainSampler === 'function';
+  }
+
+  /** Stredy úsekov ako {x,y,z} pre čistú kohortu — raz po načítaní, nie na každý pohyb. */
+  function buildGhostRecords() {
+    _ghostRecords = [];
+    for (const [id, { feature }] of _features) {
+      const mid = pipelineMidpoint(feature.geometry.coordinates);
+      if (!mid) continue;
+      const c = Cesium.Cartesian3.fromDegrees(mid.lon, mid.lat);
+      _ghostRecords.push({ id, mid: { x: c.x, y: c.y, z: c.z }, points: feature.geometry.coordinates.length, widthClass: pipelineStyle(feature.properties).widthClass });
+    }
+  }
+
+  function clearGhostTimer() {
+    if (_ghostTimer) { clearTimer(_ghostTimer); _ghostTimer = null; }
+  }
+
+  function scheduleGhost() {
+    if (!_enabled || !_loaded || !_ghost || !ghostSupported()) return;
+    clearGhostTimer();
+    _ghostTimer = setTimer(() => { _ghostTimer = null; void refreshGhost(); }, PIPELINE_GHOST_DEBOUNCE_MS);
+  }
+
+  /** Cartesian3 s výškou pre úsek; null, keď chýba viac než jeden vrchol. */
+  function ghostPositions(coordinates, heights) {
+    const positions = [];
+    coordinates.forEach(([lon, lat], i) => {
+      const h = heights[i];
+      if (!Number.isFinite(h)) return;
+      positions.push(Cesium.Cartesian3.fromDegrees(lon, lat, h + PIPELINE_GHOST.liftM));
+    });
+    return positions.length >= 2 && positions.length >= coordinates.length - 1 ? positions : null;
+  }
+
+  async function refreshGhost() {
+    if (!_enabled || !_ghost || !_ghostRecords || !_viewer?.scene?.camera) return;
+    const camera = _viewer.scene.camera;
+    const cam = camera.positionWC;
+    const height = camera.positionCartographic?.height;
+    const token = ++_ghostToken;
+    const ids = Number.isFinite(height) && height > PIPELINE_GHOST.maxDistanceM
+      ? []
+      : selectGhostCohort(_ghostRecords, cam).filter((id) => _params[pipelineStyle(_features.get(id).feature.properties).kind]);
+    // Chýbajúce alebo neúspešné (po retryMs) výšky sa navzorkujú z terénu.
+    const missing = ids.filter((id) => { const c = _ghostHeights.get(id); return !c || (!c.positions && now() - c.at > PIPELINE_GHOST.retryMs); });
+    if (missing.length) {
+      const points = [];
+      const owners = [];
+      for (const id of missing) {
+        for (const [lon, lat] of _features.get(id).feature.geometry.coordinates) { points.push([lon, lat]); owners.push(id); }
+      }
+      let heights = null;
+      try { heights = await terrainSampler(points); } catch (error) { heights = null; console.warn('[Data:GasPipelines] duch: výšky terénu zlyhali: ' + (error?.message || error)); }
+      if (token !== _ghostToken) return; // kamera sa medzitým pohla — platí novšia kohorta
+      _ghostSamples += points.length;
+      const byOwner = new Map();
+      for (const id of missing) byOwner.set(id, []);
+      if (Array.isArray(heights)) heights.forEach((h, i) => byOwner.get(owners[i]).push(h));
+      const at = now();
+      for (const id of missing) {
+        const coordinates = _features.get(id).feature.geometry.coordinates;
+        _ghostHeights.set(id, { positions: Array.isArray(heights) ? ghostPositions(coordinates, byOwner.get(id)) : null, at });
+      }
+    }
+    // Zosúladiť nakreslené s kohortou: odobrať cudzie, pridať chýbajúce s výškou.
+    const wanted = new Set(ids.filter((id) => _ghostHeights.get(id)?.positions));
+    for (const entity of [...(_ghost.entities.values || [])]) {
+      if (!wanted.has(entity.__gasPipelineGhost)) _ghost.entities.remove?.(entity) ?? _ghost.entities.removeById?.(entity.id);
+    }
+    const present = new Set((_ghost.entities.values || []).map((e) => e.__gasPipelineGhost));
+    for (const id of wanted) {
+      if (present.has(id)) continue;
+      const { feature } = _features.get(id);
+      const style = pipelineStyle(feature.properties);
+      const entity = _ghost.entities.add({
+        id: `${GAS_PIPELINES_LAYER_ID}:ghost:${id}`,
+        polyline: {
+          positions: _ghostHeights.get(id).positions,
+          width: Math.max(1, style.width - PIPELINE_GHOST.widthDelta),
+          arcType: Cesium.ArcType.NONE,
+          // Viditeľná časť sa nekreslí (to robí pozemná čiara); depthFail = len za terénom.
+          material: Cesium.Color.TRANSPARENT,
+          depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
+            color: Cesium.Color.fromCssColorString(style.color).withAlpha(PIPELINE_GHOST.alpha),
+            gapColor: Cesium.Color.TRANSPARENT,
+            dashLength: PIPELINE_GHOST.dashLength,
+          }),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, PIPELINE_GHOST.maxDistanceM),
+        },
+      });
+      entity.__gasPipelineGhost = id;
+    }
+    _viewer.scene.requestRender?.();
+  }
+
+  function installGhostMove() {
+    if (_removeGhostMove || !ghostSupported()) return;
+    _removeGhostMove = _viewer?.scene?.camera?.moveEnd?.addEventListener?.(scheduleGhost) || null;
+  }
+
+  function removeGhostMove() {
+    clearGhostTimer();
+    _ghostToken += 1;
+    _removeGhostMove?.();
+    _removeGhostMove = null;
   }
 
   function publishCard() {
@@ -315,6 +475,7 @@ export function createGasPipelinesLayer({
     const counts = { operating: 0, planned: 0, disused: 0 };
     const kinds = { gas: 0, oil: 0 };
     let km = 0;
+    let fences = 0;
     // ~21 000 úsekov: bez pozastavenia udalostí by každý add() prekresľoval.
     eachSource((source) => source.entities.suspendEvents?.());
     for (const raw of features) {
@@ -324,11 +485,15 @@ export function createGasPipelinesLayer({
       if (_features.has(id)) { let k = 2; while (_features.has(`${id}#${k}`)) k += 1; id = `${id}#${k}`; }
       const feature = id === raw.id ? raw : { ...raw, id };
       const style = pipelineStyle(feature.properties);
+      const fence = _groundSupported ? pipelineFenceSpec(feature.properties) : null;
       const entity = sourceFor(style.kind).entities.add({
         id: `${GAS_PIPELINES_LAYER_ID}:${id}`,
         polyline: polylineFor(feature.geometry.coordinates, style),
+        // Plot (etapa 5) na tej istej entite: čip látky ho skryje spolu s čiarou.
+        ...(fence ? { wall: wallFor(feature.geometry.coordinates, fence) } : {}),
         properties: { status: style.status, kind: style.kind, name: feature.properties?.name ?? null },
       });
+      if (fence) fences += 1;
       entity.__gasPipeline = id;
       _features.set(id, { feature, entity });
       counts[style.status] += 1;
@@ -338,10 +503,14 @@ export function createGasPipelinesLayer({
     eachSource((source) => source.entities.resumeEvents?.());
     _counts = counts;
     _kinds = kinds;
+    _fenceCount = fences;
     _lengthKm = Math.round(km);
     _loaded = true;
     _lastUpdate = now();
     _error = null;
+    _ghostHeights = new Map();
+    buildGhostRecords();
+    scheduleGhost();
     console.log(`[Data:GasPipelines] Loaded ${features.length} segments (gas ${kinds.gas}, oil ${kinds.oil}; ${counts.operating} operating, ${counts.planned} planned, ${counts.disused} disused), ${_lengthKm} km`);
     // Legenda v riadku vrstvy hlási počty na látku — až teraz sú známe.
     _rowControlsListener?.();
@@ -473,6 +642,9 @@ export function createGasPipelinesLayer({
       _selection = dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-selected`);
       _selection.show = false;
       viewer?.dataSources?.add?.(_selection);
+      _ghost = dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-ghost`);
+      _ghost.show = false;
+      viewer?.dataSources?.add?.(_ghost);
       _loaded = false;
       _loading = null;
     },
@@ -482,8 +654,9 @@ export function createGasPipelinesLayer({
       applySourceVisibility();
       installClick();
       installHover();
+      installGhostMove();
       if (!_loaded && !_loading) void layer.update();
-      else publishCard();
+      else { publishCard(); scheduleGhost(); }
     },
 
     disable() {
@@ -491,6 +664,7 @@ export function createGasPipelinesLayer({
       applySourceVisibility();
       removeClick();
       removeHover();
+      removeGhostMove();
       if (_selectedId) selectPipeline(null);
       overlayHost.clearSource(GAS_PIPELINES_OVERLAY_SOURCE_ID);
       overlayHost.setVisible(GAS_PIPELINES_OVERLAY_SOURCE_ID, false);
@@ -522,6 +696,11 @@ export function createGasPipelinesLayer({
       eachSource((source) => { if (host?.dataSources?.remove) host.dataSources.remove(source, true); });
       if (_selection && host?.dataSources?.remove) host.dataSources.remove(_selection, true);
       _selection = null;
+      if (_ghost && host?.dataSources?.remove) host.dataSources.remove(_ghost, true);
+      _ghost = null;
+      _ghostHeights = new Map();
+      _ghostRecords = null;
+      _fenceCount = 0;
       _sources = { gas: null, oil: null };
       _viewer = null;
       _features = new Map();
@@ -554,6 +733,7 @@ export function createGasPipelinesLayer({
       const selected = _selectedId ? _features.get(_selectedId) : null;
       if (selected && !_params[pipelineStyle(selected.feature.properties).kind]) selectPipeline(null);
       clearHover();
+      scheduleGhost();
       _rowControlsListener?.();
       _viewer?.scene?.requestRender?.();
       return true;
@@ -612,8 +792,10 @@ export function createGasPipelinesLayer({
         enabled: _enabled, loaded: _loaded, error: _error, count: _features.size, counts: { ..._counts }, lengthKm: _lengthKm, selected: _selectedId,
         entities: _sources.gas || _sources.oil ? entities : null, hasClick: Boolean(_clickHandler), meta: _meta,
         kinds: { ..._kinds }, oilMeta: _oilMeta, params: { ..._params },
-        sources: { gas: _sources.gas?.show ?? null, oil: _sources.oil?.show ?? null, selected: _selection?.show ?? null },
+        sources: { gas: _sources.gas?.show ?? null, oil: _sources.oil?.show ?? null, selected: _selection?.show ?? null, ghost: _ghost?.show ?? null },
         selectionEntities: _selection?.entities?.values?.length ?? null, groundSupported: _groundSupported,
+        fences: _fenceCount,
+        ghost: { supported: ghostSupported(), drawn: _ghost?.entities?.values?.length ?? null, cached: _ghostHeights.size, samples: _ghostSamples, listening: Boolean(_removeGhostMove), timer: Boolean(_ghostTimer) },
         hover: { installed: Boolean(_hoverListeners), timer: Boolean(_hoverTimer), flowsCached: Boolean(_flows) },
       };
     },
