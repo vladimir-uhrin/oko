@@ -29,9 +29,10 @@ overuje znova podľa `new-data-layer`.
   `src/data/ukraineDeepState.js` (bez jednotiek, bez cudzích území), vrstva
   `src/ukraineDeepStateLayer.js` (polygóny okupované/šedá/oslobodené/od 2014 + smery útokov +
   letiská), os prepína snímku podľa dňa, legenda „stav k … · nekomerčné hobby použitie, súhlas sa
-  žiada", zóny Wikipédie sa pri DeepState skryjú. Žiadosť: formulár (Tally) má predvyplnené meno,
-  e-mail a typ „nekomerčný"; popis, reCAPTCHA a odoslanie = používateľ (formulár zakazuje text
-  písaný AI). Pri zamietnutí vrstvu, úlohu a archív zmazať (`UKRAINE_DEEPSTATE=off` vypne hneď).
+  žiada", zóny Wikipédie sa pri DeepState skryjú. Žiadosť: formulár (Tally) ODOSLANÝ 19. 9. 2026
+  (meno, e-mail, typ „nekomerčný", popis EN + UA s poznámkou o AI asistentovi; CAPTCHA a odoslanie =
+  používateľ). Odpoveď do ~3 dní, mlčanie = zamietnuté → potom vrstvu, úlohu a archív zmazať
+  (`UKRAINE_DEEPSTATE=off` vypne hneď).
 - Otvorené: 4B Black Bird Group (e-mail), 5 (súhlasy), 6 alerts.in.ua (token). Nepublikované.
 
 ### Etapa 3 (používateľ: „ako na obrázku, určite časovú os … 1 až 5", potom „fotky z čo najviac zdrojov, aj videá, všetko ukladať") — hotové a overené v pane
