@@ -310,3 +310,45 @@ test('onChange hlási zmeny a destroy odoberie zdroje, handler aj kartu', async 
   assert.equal(await layer.show(), false, 'po destroy sa nič nezobrazí');
   assert.equal(layer.id, UKRAINE_BASE_ID);
 });
+
+test('getPlaceIndex: mestá + obce (obce sa pre index dotiahnu aj zďaleka, snímok bez show), kľúče v azbuke, postavený raz', async () => {
+  const { layer, calls } = make({ camera: { height: 900_000, lon: 37.8, lat: 48.97 } });
+  const index = await layer.getPlaceIndex();
+  assert.ok(calls.some((u) => u.includes('/places')), 'snímok sa načítal bez show()');
+  assert.ok(calls.some((u) => u.includes('/villages')), 'obce sa pre index dotiahli');
+  assert.deepEqual([...index.keys()].sort(), ['далеко', 'дробишеве', 'краматорськ', 'лиман', 'ямпіль']);
+  assert.equal(index.get('краматорськ')[0].en, 'Kramatorsk');
+  assert.equal(index.get('ямпіль')[0].cls, 'village');
+  const before = calls.length;
+  assert.equal(await layer.getPlaceIndex(), index, 'druhé volanie = ten istý index');
+  assert.equal(calls.length, before, 'bez ďalšieho fetchu');
+  assert.equal(layer.getState().villagesLoaded, true);
+  assert.equal(index.get('ямпіль')[0].id, 3, 'index nesie OSM id (pre rezerváciu)');
+});
+
+test('setReservedPlaces: sídla prevzaté hlásením GŠ sa v podklade skryjú (mesto aj obec, aj obec pridaná neskôr), riedenie ich nepočíta, uvoľnenie vráti', async () => {
+  const camera = { height: 120_000, lon: 37.8, lat: 48.97 };
+  const { layer, viewer, clock } = make({ camera });
+  await layer.show();
+  await settle();
+  const { placeRecords, villageRecords } = layer._getStateForTest();
+  assert.equal(villageRecords.size, 2);
+  layer.setReservedPlaces([2, 3]);
+  assert.equal(placeRecords.get(2).entity.show, false, 'Lyman (mesto) skrytý');
+  assert.equal(villageRecords.get(3).entity.show, false, 'Yampil (obec) skrytá');
+  assert.notEqual(villageRecords.get(4).entity.show, false, 'nerezervovaná obec ostáva');
+  assert.notEqual(placeRecords.get(1).entity.show, false);
+  // Odlet a návrat: obec 3 sa pridá znova — a hneď skrytá.
+  viewer.camera.positionCartographic.height = 500_000;
+  for (const fn of viewer.camera.moveEnd.listeners) fn();
+  clock.flush();
+  assert.equal(villageRecords.size, 0);
+  viewer.camera.positionCartographic.height = 100_000;
+  for (const fn of viewer.camera.moveEnd.listeners) fn();
+  clock.flush();
+  assert.equal(villageRecords.get(3).entity.show, false, 'nová kohorta rešpektuje rezerváciu');
+  assert.equal(villageRecords.get(3).reservedHidden, true);
+  layer.setReservedPlaces([]);
+  assert.equal(placeRecords.get(2).entity.show, true);
+  assert.equal(villageRecords.get(3).entity.show, true);
+});

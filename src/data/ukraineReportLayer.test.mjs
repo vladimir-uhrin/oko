@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
 import { REPORT_MARKER_URI, UKRAINE_REPORT_ID, createUkraineReportLayer, reportIntensityColor, reportMarkerText } from './ukraineReportLayer.js';
+import { buildPlaceIndex } from './ukraineReportPlaces.js';
 
 const REPORT = {
   ok: true, total: 213, reportedAtText: '08:00 19.9.', url: 'https://armyinform.com.ua/x', source: 'ArmyInform', official: 'ua',
@@ -33,7 +34,9 @@ function fakeViewer(pick = () => null) {
 const timers = () => { const pending = []; return { setTimer: (fn) => { pending.push(fn); return pending.length; }, clearTimer: (id) => { pending[id - 1] = null; }, flush() { for (const fn of pending.splice(0)) if (fn) fn(); } }; };
 const tKey = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
 
-function make({ pick, report = REPORT, translateText, nowMs = 1_000_000 } = {}) {
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+function make({ pick, report = REPORT, translateText, nowMs = 1_000_000, placeIndex, reservePlaces } = {}) {
   const viewer = fakeViewer(pick);
   const hover = fakeHover();
   const handler = fakeHandler();
@@ -52,6 +55,8 @@ function make({ pick, report = REPORT, translateText, nowMs = 1_000_000 } = {}) 
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
     now: () => nowMs,
+    placeIndex,
+    reservePlaces,
   });
   return { layer, viewer, hover, handler, clock, fetches };
 }
@@ -168,4 +173,70 @@ test('destroy odoberie zdroj, handler aj kartu', async () => {
   assert.equal(hover.destroyed, true);
   assert.equal(await layer.show(), false);
   assert.equal(layer.id, UKRAINE_REPORT_ID);
+});
+
+test('sídla z odsekov: bod + popisok na každé menované sídlo, sídlo dvoch smerov raz so sčítanými zmienkami, karta sídla, neurčené spočítané, override prekreslí', async () => {
+  const index = buildPlaceIndex([
+    { geometry: { type: 'Point', coordinates: [37.86, 48.98] }, properties: { id: 11, name: 'Торське', lang: 'uk', cls: 'village', pop: 2000 } },
+    { geometry: { type: 'Point', coordinates: [37.7, 49.0] }, properties: { id: 12, name: 'Новоселівка', lang: 'uk', cls: 'village' } },
+    { geometry: { type: 'Point', coordinates: [37.3, 48.4] }, properties: { id: 13, name: 'Новоселівка', lang: 'uk', cls: 'village' } },
+    { geometry: { type: 'Point', coordinates: [37.20337, 48.35399] }, properties: { id: 14, name: 'Родинське', lang: 'uk', en: 'Rodynske', cls: 'town', pop: 9000 } },
+  ]);
+  const reservations = [];
+  const report = { ...REPORT, directions: [
+    { gs: 'Лиманський', attacks: 5, text: 'П’ять атак росіяни здійснили на Лиманському напрямку — у районі Торського та в напрямках Надії й Новоселівки.' },
+    { gs: 'Покровський', attacks: 29, text: 'Найбільше бойових зіткнень відбулося на Покровському напрямку — 29. Ворог атакував у районах Родинського, Новоселівки та Торського.' },
+  ] };
+  let picked = null;
+  let indexCalls = 0;
+  const { layer, hover, handler, clock } = make({ pick: () => picked, report, placeIndex: async () => { indexCalls += 1; return index; }, reservePlaces: (ids) => reservations.push([...ids].sort()) });
+  await layer.show();
+  await settle();
+  const { placeRecords, ds } = layer._getStateForTest();
+  assert.deepEqual(reservations.at(-1), [11, 12, 13, 14], 'podklad dostal id nakreslených sídiel');
+  const byName = (name) => [...placeRecords.values()].filter((r) => r.place.name === name);
+  assert.equal(placeRecords.size, 4, 'Torske raz, Rodynske raz, dve rôzne Novoselivky');
+  assert.equal(byName('Новоселівка').length, 2, 'rovnaké meno na dvoch miestach = dva body (kľúč meno + poloha)');
+  assert.deepEqual(byName('Новоселівка').map((r) => `${r.lon}:${r.hits[0].scene.id}`).sort(), ['37.3:pokrovsk', '37.7:lyman'], 'každý smer dostal svoju Novoselivku');
+  const [torske] = byName('Торське');
+  assert.equal(torske.mentions, 2, 'Torske menujú dva smery → jeden bod');
+  assert.deepEqual(torske.hits.map((h) => h.scene.id), ['lyman', 'pokrovsk']);
+  assert.equal(torske.entity.label.text, 'Torske ×2', 'popisok latinkou + počet zmienok');
+  assert.equal(torske.entity.point.color.toCssHexString(), Cesium.Color.fromCssColorString(reportIntensityColor(29)).toCssHexString(), 'farba = intenzívnejší z oboch smerov');
+  assert.equal(byName('Родинське')[0].entity.label.text, 'Rodynske');
+  assert.equal(ds.entities.values.filter((e) => String(e.id).includes(':place:')).length, 4);
+  const state = layer.getState();
+  assert.equal(state.placesCount, 4);
+  assert.equal(state.placesUnresolved, 1, '„Надії" nie je v indexe');
+  assert.equal(indexCalls, 1);
+  // Karta sídla.
+  picked = { id: torske.entity };
+  handler.move({ endPosition: { x: 10, y: 10 } });
+  clock.flush();
+  const model = hover.shown.at(-1).model;
+  assert.equal(model.kindText, 'ukraine.report.place-kind');
+  assert.equal(model.title, 'Torske · Торське');
+  assert.equal(model.details[0], 'ukraine.report.place-mentions {"n":2}');
+  assert.equal(model.details[1], 'Lyman direction · ukraine.report.attacks {"n":5}');
+  assert.equal(model.details[2], 'Pokrovsk direction · ukraine.report.attacks {"n":29}');
+  assert.ok(model.details.includes('ukraine.report.place-note'));
+  assert.equal(model.details.at(-1), 'ukraine.report.claim');
+  // Historické hlásenie bez sídiel → body zmiznú; návrat na živé ich vráti.
+  layer.setOverride({ ...report, directions: [{ gs: 'Лиманський', attacks: 1, text: 'Одна атака на Лиманському напрямку.' }] });
+  await settle();
+  assert.equal(placeRecords.size, 0);
+  assert.equal(ds.entities.values.filter((e) => String(e.id).includes(':place:')).length, 0);
+  assert.deepEqual(reservations.at(-1), [], 'bez sídiel sa rezervácia uvoľní');
+  layer.setOverride(null);
+  await settle();
+  assert.equal(placeRecords.size, 4);
+  assert.deepEqual(reservations.at(-1), [11, 12, 13, 14]);
+  // Čip STRETY vypnutý = podklad dostane svoje obce späť; zapnutý = znova rezervované.
+  layer.setEnabled(false);
+  assert.deepEqual(reservations.at(-1), []);
+  layer.setEnabled(true);
+  assert.deepEqual(reservations.at(-1), [11, 12, 13, 14]);
+  const n = reservations.length;
+  layer.setEnabled(true);
+  assert.equal(reservations.length, n, 'nezmenená rezervácia sa neposiela znova');
 });

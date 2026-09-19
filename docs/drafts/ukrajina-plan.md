@@ -83,8 +83,16 @@ overuje znova podľa `new-data-layer`.
   neprepísala na lookbehind); stop-riadok extraktora bez cyriliky prešiel filtrom; úprava závislosti
   vite.config.js reštartuje server a preloaduje stránku uprostred overovania.
 - Nedorobené z etapy 2: BBC/RFE/DW sa v prvej šestnástke ukážu až po prestavbe cache (stropy
-  platia od ďalšieho buildu); ArmyInform EN feed mešká dni; miesta z odsekov hlásenia (Torske,
-  Yampil…) sa zatiaľ nekotvia na mapu — dá sa cez snímok sídiel (etapa 3+).
+  platia od ďalšieho buildu); ArmyInform EN feed mešká dni. **Miesta z odsekov hlásenia — DOROBENÉ
+  2026-09-19:** `src/data/ukraineReportPlaces.js` (mená za „у районі / в напрямках / поблизу" v genitíve
+  → kandidáti nominatívu pravidlami koncoviek + výnimky ako Часів Яр → index mien sídel z OSM snímku
+  cez `ukraineBaseLayer.getPlaceIndex()`, pri rovnakých menách najbližšie k stredu smeru do 120 km),
+  vrstva hlásenia ich kreslí ako malé body + popisky vo farbe intenzity smeru (bod do 700 km, popisok
+  do 260 km), karta „sídlo menované v hlásení" s poznámkou, že nejde o líniu frontu ani polohu jednotky;
+  panel ukazuje „N menovaných sídiel". Podklad pre tieto sídla skryje vlastný bod aj popisok
+  (`setReservedPlaces`; bod podkladu na tom istom pixeli vyhrával výber myšou aj nad vyšším zdrojom).
+  Geokódovanie beží v prehliadači, nič odvodené sa neukladá (ODbL). Naživo 19. 9.: 41 mien, 40 nájdených
+  (42 bodov — tri rôzne Novoselivky), Юрківка neurčená (najbližšia rovnomenná 195 km).
 
 ### Etapa 1 (používateľ: „pokračuj etapou 1") — hotové a overené v pane (podklad OSM stack, lebo Google 3D
 dlaždice sú v pane 403):

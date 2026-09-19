@@ -11,14 +11,23 @@
  * Karta pri prechode myšou: smer, počet útokov, čas hlásenia, odsek hlásenia
  * v origináli (ukrajinsky) a strojový preklad na požiadanie (MyMemory cez
  * /api/translate, `from=uk`), vždy so štítkom „jednostranné oficiálne hlásenie".
+ *
+ * Sídla z odsekov (otvorená položka etapy 2, dorobené 2026-09-19): mená za
+ * „у районі / в напрямках / поблизу" v genitíve → nominatív → index sídel podkladu
+ * (`placeIndex`, ukraineBaseLayer.getPlaceIndex; geokódovanie v prehliadači) →
+ * malý bod + popisok vo farbe intenzity smeru, jedno sídlo raz aj keď ho menujú
+ * dva smery (zmienky sa sčítajú). Karta: „sídlo menované v hlásení", smer(y) a
+ * počty, poznámka, že nejde o líniu frontu ani polohu jednotky.
  */
 import * as Cesium from 'cesium';
 import { currentLanguage, t as translateDefault } from '../i18n.js';
 import { translateText as translateTextDefault } from '../translate.js';
 import { frontSceneByGsDirection, frontSceneLabel, listFrontScenes } from '../ukraineFrontScenes.js';
 import { createLocalHoverCard } from './localHoverCard.js';
+import { placeLabel } from './ukraineBase.js';
 import { defaultTerrainSampler } from './ukraineBaseLayer.js';
 import { fetchUkraineReport, reportByScene } from './ukraineReport.js';
+import { directionPlaces, placeKey } from './ukraineReportPlaces.js';
 
 export const UKRAINE_REPORT_ID = 'ukraine-report';
 export const REPORT_REFRESH_MS = 30 * 60_000;
@@ -26,6 +35,9 @@ export const REPORT_HOVER_DELAY_MS = 80;
 export const REPORT_HOVER_PICK_PX = 9;
 /** Značky vidno až po tejto vzdialenosti kamery (m) — aj z pohľadu na celý front. */
 export const REPORT_FAR_M = 3_600_000;
+/** Sídla z odsekov: bod do 700 km, popisok do 260 km (zďaleka by to bol len mrak bodiek). */
+export const REPORT_PLACE_FAR_M = 700_000;
+export const REPORT_PLACE_LABEL_FAR_M = 260_000;
 const FONT = '"IBM Plex Mono", monospace';
 
 /** Skrížené meče, jednofarebné (svetlé s tmavým obrysom), ako data URI. */
@@ -83,10 +95,14 @@ export function createUkraineReportLayer({
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
   now = () => Date.now(),
+  /** Async poskytovateľ indexu sídel (ukraineBaseLayer.getPlaceIndex); bez neho sa sídla z odsekov nekreslia. */
+  placeIndex = null,
+  /** Odovzdá podkladu OSM id nakreslených sídiel (ukraineBaseLayer.setReservedPlaces), aby skryl svoj bod + popisok; [] = uvoľniť. */
+  reservePlaces = null,
 } = {}) {
   const inert = {
     id: UKRAINE_REPORT_ID, show: async () => false, hide() {}, setEnabled() {}, isEnabled: () => true, isShown: () => false,
-    refresh: async () => null, getState: () => ({ shown: false, enabled: true, loading: false, error: 'no-viewer', report: null, byScene: {}, fetchedAt: null }),
+    refresh: async () => null, getState: () => ({ shown: false, enabled: true, loading: false, error: 'no-viewer', report: null, byScene: {}, fetchedAt: null, placesCount: 0, placesUnresolved: 0 }),
     onChange: () => () => {}, destroy() {},
   };
   if (!viewer?.dataSources) return inert;
@@ -104,6 +120,10 @@ export function createUkraineReportLayer({
   let _byScene = new Map();
   let _fetchedAt = 0;
   const _records = new Map(); // sceneId → { entity, scene, entry }
+  const _placeRecords = new Map(); // „meno|lat,lon" → { kind: 'place', entity, place, hits: [{scene, entry}], mentions }
+  let _placesToken = 0;
+  let _placesUnresolved = 0;
+  let _reservationKey = '';
   const _byEntityId = new Map();
   const _listeners = new Set();
   let _handler = null;
@@ -122,13 +142,31 @@ export function createUkraineReportLayer({
   function applyVisibility() {
     ds.show = _shown && _enabled;
     if (!ds.show) _hover?.hide?.();
+    applyReservation();
     requestRender();
   }
+  /** Podklad skryje svoje body/popisky sídiel, ktoré kreslíme my — len kým sme viditeľní. */
+  function applyReservation() {
+    if (typeof reservePlaces !== 'function') return;
+    const ids = ds.show ? [..._placeRecords.values()].map((r) => r.place.id).filter((id) => id !== null && id !== undefined) : [];
+    const key = ids.join(',');
+    if (key === _reservationKey) return;
+    _reservationKey = key;
+    try { reservePlaces(ids); } catch (error) { console.warn('[UkraineReport] reservePlaces failed:', error?.message || error); }
+  }
 
+  function clearPlaces() {
+    for (const record of _placeRecords.values()) { try { ds.entities.remove(record.entity); } catch { /* */ } }
+    _placeRecords.clear();
+    _placesUnresolved = 0;
+    applyReservation();
+  }
   function draw() {
     for (const record of _records.values()) { try { ds.entities.remove(record.entity); } catch { /* */ } }
     _records.clear();
+    clearPlaces();
     _byEntityId.clear();
+    _placesToken += 1; // rozbehnuté drawPlaces() zo starého hlásenia sa zahodí
     if (!_report) return;
     for (const sc of scenes) {
       const entry = _byScene.get(sc.id);
@@ -165,20 +203,90 @@ export function createUkraineReportLayer({
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_FAR_M),
         },
       });
-      const record = { entity, scene: sc, entry, lon: sc.center.lon, lat: sc.center.lat, lifted: false };
+      const record = { kind: 'direction', entity, scene: sc, entry, lon: sc.center.lon, lat: sc.center.lat, lifted: false };
       _records.set(sc.id, record);
       _byEntityId.set(entityId, record);
     }
     requestRender();
     void liftMarkers();
+    void drawPlaces();
   }
 
-  /** Jednorazový zdvih značiek na výšku terénu (11 bodov, jedna dávka, cache resolvera). */
+  /** Sídla menované v odsekoch smerov → body (index sídel z podkladu, geokódovanie v prehliadači, nič sa neukladá). */
+  async function drawPlaces() {
+    if (!_report || typeof placeIndex !== 'function') return;
+    const token = _placesToken;
+    let index = null;
+    try { index = await placeIndex(); } catch (error) { console.warn('[UkraineReport] place index unavailable:', error?.message || error); return; }
+    if (_destroyed || token !== _placesToken || !(index instanceof Map) || !index.size) return;
+    const found = new Map();
+    let unresolved = 0;
+    for (const sc of scenes) {
+      const entry = _byScene.get(sc.id);
+      if (!entry || !sc.center) continue;
+      const result = directionPlaces(entry.texts, index, sc.center);
+      unresolved += result.unresolved.length;
+      for (const p of result.places) {
+        // Kľúč = meno + poloha: 66 Novoselivok je 66 rôznych sídiel, nie jedno.
+        const key = `${placeKey(p.name)}|${p.lat.toFixed(4)},${p.lon.toFixed(4)}`;
+        const rec = found.get(key);
+        if (rec) { rec.mentions += p.mentions; rec.hits.push({ scene: sc, entry }); continue; }
+        found.set(key, { kind: 'place', place: p, mentions: p.mentions, hits: [{ scene: sc, entry }], lon: p.lon, lat: p.lat, lifted: false, entity: null });
+      }
+    }
+    _placesUnresolved = unresolved;
+    const outline = Cesium.Color.fromCssColorString('#0b1622').withAlpha(0.9);
+    for (const [key, rec] of found) {
+      const attacks = Math.max(...rec.hits.map((h) => (Number.isFinite(h.entry.attacks) ? h.entry.attacks : -1)));
+      const color = Cesium.Color.fromCssColorString(reportIntensityColor(attacks >= 0 ? attacks : null));
+      const entityId = `${UKRAINE_REPORT_ID}:place:${key}`;
+      const label = placeLabel({ name: rec.place.name, en: rec.place.en, lang: 'uk', cls: rec.place.cls });
+      const text = rec.mentions > 1 ? `${label.text} ×${rec.mentions}` : label.text;
+      rec.entity = ds.entities.add({
+        id: entityId,
+        position: Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat),
+        point: {
+          pixelSize: 7,
+          color,
+          outlineColor: outline,
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_PLACE_FAR_M),
+        },
+        label: {
+          text,
+          font: `500 11px ${FONT}`,
+          fillColor: color,
+          outlineColor: outline,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(8, 0),
+          horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_PLACE_LABEL_FAR_M),
+        },
+      });
+      _placeRecords.set(key, rec);
+      _byEntityId.set(entityId, rec);
+    }
+    // Zdroj obcí podkladu vzniká neskôr než tento zdroj a kreslí sa nad ním — bod
+    // sídla by pod bodom obce nešiel ani vybrať (pick vracia vrchný). Preto hore.
+    try { viewer.dataSources.raiseToTop?.(ds); } catch { /* headless */ }
+    applyReservation();
+    requestRender();
+    emit();
+    void liftMarkers();
+  }
+
+  /** Jednorazový zdvih značiek a sídiel na výšku terénu (jedna dávka, cache resolvera). */
   async function liftMarkers() {
-    const pending = [..._records.values()].filter((r) => !r.lifted);
+    const pending = [..._records.values(), ..._placeRecords.values()].filter((r) => r.entity && !r.lifted && !r.lifting);
     if (!pending.length || typeof terrainSampler !== 'function') return;
+    pending.forEach((r) => { r.lifting = true; });
     let heights;
     try { heights = await terrainSampler(pending.map((r) => [r.lon, r.lat])); } catch { heights = null; }
+    pending.forEach((r) => { r.lifting = false; });
     if (_destroyed || !Array.isArray(heights)) return;
     let lifted = 0;
     pending.forEach((r, i) => {
@@ -227,13 +335,33 @@ export function createUkraineReportLayer({
   }
 
   // ── Karta pri prechode myšou ──────────────────────────────────────────────
-  function hoverModelFor(record, translated = null) {
-    const { entry, scene: sc } = record;
-    const language = lang();
-    const attacksText = entry.attacks === null
+  function attacksText(entry) {
+    return entry.attacks === null
       ? translate('ukraine.report.unknown')
       : (entry.attacks === 0 ? translate('ukraine.report.none') : translate('ukraine.report.attacks', { n: entry.attacks }));
-    const details = [attacksText];
+  }
+  /** Karta sídla z odsekov: zmienky, smer(y) s počtami, čas hlásenia, poznámka o povahe údaja. */
+  function placeModelFor(record) {
+    const { place, hits, mentions } = record;
+    const label = placeLabel({ name: place.name, en: place.en, lang: 'uk', cls: place.cls });
+    const details = [translate('ukraine.report.place-mentions', { n: mentions })];
+    for (const h of hits) details.push(`${frontSceneLabel(h.scene, translate)} · ${attacksText(h.entry)}`);
+    if (_report?.reportedAtText) details.push(translate('ukraine.report.summary', { total: _report.total ?? '?', time: _report.reportedAtText }));
+    details.push(translate('ukraine.report.place-note'));
+    details.push(translate('ukraine.report.claim'));
+    return {
+      layerId: 'ukraine-report',
+      kindText: translate('ukraine.report.place-kind'),
+      title: label.text && label.text !== place.name ? `${label.text} · ${place.name}` : place.name,
+      details,
+      source: translate('ukraine.report.source'),
+    };
+  }
+  function hoverModelFor(record, translated = null) {
+    if (record.kind === 'place') return placeModelFor(record);
+    const { entry, scene: sc } = record;
+    const language = lang();
+    const details = [attacksText(entry)];
     if (_report?.reportedAtText) details.push(`${translate('ukraine.report.summary', { total: _report.total ?? '?', time: _report.reportedAtText })}`);
     const text = entry.texts.join(' ');
     if (translated && translated !== text) {
@@ -264,6 +392,7 @@ export function createUkraineReportLayer({
 
   function showCard(record, at) {
     const key = record.entity.id;
+    if (record.kind === 'place') { _hover.show(hoverModelFor(record), at, key); return; }
     const text = record.entry.texts.join(' ');
     const cached = _translations.get(text) || null;
     _hover.show(hoverModelFor(record, cached), at, key);
@@ -341,7 +470,7 @@ export function createUkraineReportLayer({
   function getState() {
     const byScene = {};
     for (const [id, entry] of _byScene) byScene[id] = { attacks: entry.attacks, unknown: entry.unknown, gs: [...entry.gs] };
-    return { shown: _shown, enabled: _enabled, loading: Boolean(_loading), error: _error, report: _report, byScene, fetchedAt: _fetchedAt || null };
+    return { shown: _shown, enabled: _enabled, loading: Boolean(_loading), error: _error, report: _report, byScene, fetchedAt: _fetchedAt || null, placesCount: _placeRecords.size, placesUnresolved: _placesUnresolved };
   }
   function destroy() {
     _destroyed = true;
@@ -352,6 +481,7 @@ export function createUkraineReportLayer({
     _hover?.destroy?.();
     try { viewer.dataSources.remove(ds, true); } catch { /* */ }
     _records.clear();
+    _placeRecords.clear();
     _byEntityId.clear();
     _listeners.clear();
   }
@@ -369,6 +499,6 @@ export function createUkraineReportLayer({
     getState,
     onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ ds, records: _records, byEntityId: _byEntityId, hover: _hover, camera }),
+    _getStateForTest: () => ({ ds, records: _records, placeRecords: _placeRecords, byEntityId: _byEntityId, hover: _hover, camera }),
   };
 }

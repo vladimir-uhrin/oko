@@ -47,6 +47,7 @@ import {
   snapshotDateText,
   villagesWanted,
 } from './ukraineBase.js';
+import { buildPlaceIndex } from './ukraineReportPlaces.js';
 
 export const UKRAINE_BASE_ID = 'ukraine-base';
 export const UKRAINE_HOVER_DELAY_MS = 80;
@@ -122,7 +123,7 @@ export function createUkraineBaseLayer({
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   const inert = {
     id: UKRAINE_BASE_ID, show: async () => false, hide() {}, toggle: async () => false, isShown: () => false,
-    setPart() {}, getParts: () => ({ ...defaultParts() }), loadMeta: async () => null,
+    setPart() {}, getParts: () => ({ ...defaultParts() }), loadMeta: async () => null, getPlaceIndex: async () => new Map(), setReservedPlaces() {},
     getState: () => ({ shown: false, loading: false, loaded: false, error: 'no-viewer', meta: null, parts: defaultParts(), counts: emptyCounts(), villagesLoaded: false, snapshotDate: null }),
     onChange: () => () => {}, refresh() {}, destroy() {},
   };
@@ -153,7 +154,11 @@ export function createUkraineBaseLayer({
   /** Záznamy sídiel (mestá + mestečká) a kohorty obcí: id → record. */
   const _placeRecords = new Map();
   const _villageRecords = new Map();
+  /** OSM id sídiel, ktoré kreslí iná vrstva (hlásenie GŠ): bod aj popisok podkladu sa skryjú, aby nevyhrávali výber myšou. */
+  let _reserved = new Set();
   let _villageFeatures = null;
+  let _placeFeatures = null; // mestá a mestečká (pre index mien hlásenia GŠ)
+  let _placeIndex = null;
   let _villagesPromise = null;
   /** entity.id → record (karta pri prechode myšou). */
   const _byEntityId = new Map();
@@ -258,9 +263,24 @@ export function createUkraineBaseLayer({
       },
       label: labelFor(text, { fontPx: style.fontPx, weight: style.weight, colorCss: style.color, displayCondition: placeLabelDisplayCondition(props.cls), background: props.cls === 'city' }),
     });
-    const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true, lifted: false };
+    const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true, lifted: false, reservedHidden: false };
     _byEntityId.set(entityId, record);
+    applyReservedTo(record);
     return record;
+  }
+
+  function applyReservedTo(record) {
+    const hide = _reserved.has(String(record.id));
+    if (record.reservedHidden === hide) return;
+    record.reservedHidden = hide;
+    record.entity.show = !hide;
+  }
+  /** Sídla prevzaté inou vrstvou (hlásenie GŠ kreslí vlastný bod + popisok); prázdny zoznam = uvoľniť. */
+  function setReservedPlaces(ids) {
+    _reserved = new Set((Array.isArray(ids) ? ids : []).filter((id) => id !== null && id !== undefined).map(String));
+    for (const record of _placeRecords.values()) applyReservedTo(record);
+    for (const record of _villageRecords.values()) applyReservedTo(record);
+    requestRender();
   }
 
   /**
@@ -435,6 +455,8 @@ export function createUkraineBaseLayer({
       if (!meta) return false;
       const [places, roads, rivers, oblasts] = await Promise.all(['places', 'roads', 'rivers', 'oblasts'].map((name) => fetchJson(versioned(name))));
       if (_destroyed) return false;
+      _placeFeatures = (places?.features || []).filter((f) => f?.geometry?.type === 'Point');
+      _placeIndex = null;
       buildPlaces(places);
       buildRoads(roads);
       buildRivers(rivers);
@@ -519,8 +541,8 @@ export function createUkraineBaseLayer({
     const candidates = [];
     const all = [..._placeRecords.values(), ..._villageRecords.values()];
     for (const record of all) {
-      // Popisky za hranicou DDC sú skryté aj tak — nech neblokujú bunku.
-      if (record.labelFar < info.height) continue;
+      // Popisky za hranicou DDC sú skryté aj tak — nech neblokujú bunku; rezervované (skryté) tiež nie.
+      if (record.labelFar < info.height || record.reservedHidden) continue;
       const p = project(record.position);
       if (!p) continue;
       candidates.push({ id: record.entity.id, importance: record.importance, x: p.x, y: p.y });
@@ -689,6 +711,7 @@ export function createUkraineBaseLayer({
       parts: { ..._parts },
       counts: { ..._counts },
       villagesLoaded: Boolean(_villageFeatures),
+      reservedPlaces: _reserved.size,
       snapshotDate: dateText,
     };
   }
@@ -708,6 +731,21 @@ export function createUkraineBaseLayer({
     _listeners.clear();
   }
 
+  /**
+   * Index ukrajinských mien sídel (mestá + obce) pre geokódovanie hlásenia GŠ
+   * (ukraineReportPlaces.js). Obce sa dotiahnu, ak ešte nie sú (1,1 MB gz); index
+   * sa stavia raz na snímok. Geokódovanie beží v prehliadači — ODbL derivát sa neukladá.
+   */
+  async function getPlaceIndex() {
+    if (_placeIndex) return _placeIndex;
+    if (!_placeFeatures) await load();
+    const villages = _villageFeatures || (await loadVillages()) || [];
+    if (_destroyed) return new Map();
+    const index = buildPlaceIndex([...(_placeFeatures || []), ...villages]);
+    if (index.size) _placeIndex = index; // prázdny (snímok chýba) sa necachuje — ďalší pokus po načítaní
+    return index;
+  }
+
   return {
     id: UKRAINE_BASE_ID,
     show,
@@ -717,6 +755,8 @@ export function createUkraineBaseLayer({
     setPart,
     getParts: () => ({ ..._parts }),
     loadMeta,
+    getPlaceIndex,
+    setReservedPlaces,
     getState,
     onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
     refresh,

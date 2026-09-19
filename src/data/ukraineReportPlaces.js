@@ -1,0 +1,176 @@
+// src/data/ukraineReportPlaces.js
+/**
+ * @module ukraineReportPlaces
+ * @description Sídla z odsekov denného hlásenia Generálneho štábu ZSU → body na mape
+ * (otvorená položka etapy 2, 2026-09-19). Hlásenie menuje obce v GENITÍVE za
+ * spojeniami „у районі / в районах / у напрямку / в напрямках / поблизу"
+ * („у районах Петропавлівки, Куп’янська-Вузлового та Новоосинового"). Modul:
+ *  - vytiahne zoznamy mien (veľké začiatočné písmeno, pomlčky, apostrofy, viac slov),
+ *  - z genitívu odvodí kandidátov nominatívu jednoduchými pravidlami koncoviek
+ *    (-ки → -ка, -ого → -е/-ий, -ової → -ова…, -оля → -іль, výnimky ako Часів Яр),
+ *  - overí ich proti indexu mien sídel z OSM snímku (podklad UKRAJINA; ODbL,
+ *    geokódovanie beží v prehliadači, nič odvodené sa neukladá) a pri viacerých
+ *    zhodách vyberie sídlo najbližšie k stredu smeru.
+ * Poctivosť: sú to miesta, ktoré hlásenie menuje (oficiálne UA), nie polohy
+ * jednotiek — čl. 114-2 TZ UA sa netýka. Čistý modul.
+ */
+
+/** Spúšťacie spojenia (za nimi zoznam mien). */
+// `\b` pred azbukou v JS nikdy nesedí (pasca z etapy 2) → hranica slova lookbehindom.
+export const PLACE_TRIGGER_RE = /(?:(?<![А-Яа-яІіЇїЄєҐґ])(?:у|в)\s+(?:район[іеу]|районах|напрямку|напрямках|напрямі)|(?<![А-Яа-яІіЇїЄєҐґ])поблизу|(?<![А-Яа-яІіЇїЄєҐґ])неподалік(?:\s+від)?|населених\s+пунктів)\s+/gu;
+const CYR_UP = 'А-ЯІЇЄҐ';
+const CYR = "А-Яа-яІіЇїЄєҐґ'’ʼ";
+const NAME_TOKEN = `[${CYR_UP}][${CYR}]*(?:-[${CYR_UP}]?[${CYR}]+)*`;
+const NAME_RE = new RegExp(`^${NAME_TOKEN}(?:\\s+${NAME_TOKEN}){0,2}`, 'u');
+const CONNECTOR_RE = /^(?:,\s*|\s+(?:та|й|і)\s+)/u;
+/** Slová, ktoré vyzerajú ako meno, ale sú vetné („Сили", „Ворог"…). */
+const NOT_NAMES = new Set(['сили', 'ворог', 'противник', 'російські', 'росіяни', 'українські', 'наші']);
+
+export const PLACE_EXCEPTIONS = Object.freeze({
+  'часового яру': 'Часів Яр', 'часовому яру': 'Часів Яр', 'русиного яру': 'Русин Яр', 'києва': 'Київ', 'львова': 'Львів', 'харкова': 'Харків',
+});
+
+/** Normalizácia mena na kľúč indexu (malé písmená, jednotný apostrof, jedna medzera). Pure. */
+export function placeKey(name) {
+  return String(name ?? '').toLowerCase().replace(/[’ʼ`´]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+/** Zoznamy mien za spúšťacími spojeniami v texte odseku. Pure. */
+export function extractPlaceMentions(text) {
+  const s = String(text ?? '').replace(/\s+/g, ' ');
+  const out = [];
+  PLACE_TRIGGER_RE.lastIndex = 0;
+  let m;
+  while ((m = PLACE_TRIGGER_RE.exec(s))) {
+    let rest = s.slice(m.index + m[0].length);
+    for (let guard = 0; guard < 24; guard += 1) {
+      const nm = NAME_RE.exec(rest);
+      if (!nm) break;
+      const raw = nm[0];
+      const first = raw.split(/\s+/)[0].toLowerCase();
+      if (NOT_NAMES.has(first)) break;
+      out.push(raw);
+      rest = rest.slice(raw.length);
+      const c = CONNECTOR_RE.exec(rest);
+      if (!c) break;
+      rest = rest.slice(c[0].length);
+    }
+  }
+  return out;
+}
+
+/** Kandidáti nominatívu jedného slova (vrátane identity). Pure. */
+export function nominativeCandidates(word) {
+  const w = String(word ?? '');
+  const out = [w];
+  // kmeň aspoň 2 znaky („Яру" → „Яр")
+  const add = (suffix, reps) => { if (w.length >= suffix.length + 2 && w.endsWith(suffix)) for (const r of reps) out.push(w.slice(0, -suffix.length) + r); };
+  add('ового', ['ове', 'овий', 'ів']);
+  add('ього', ['є', 'ій']);
+  if (!w.endsWith('ового') && !w.endsWith('ього')) add('ого', ['е', 'ий']);
+  add('ьої', ['я']);
+  if (!w.endsWith('ьої')) add('ої', ['а']);
+  add('их', ['і']); add('іх', ['і']);
+  add('ів', ['и']);
+  add('ії', ['ія']); add('ці', ['ця']); add('ні', ['ня']); add('ки', ['ка']); add('ги', ['га']); add('хи', ['ха']);
+  if (/[^кгх]и$/u.test(w)) add('и', ['а']);
+  add('оля', ['іль']); add('ова', ['ів']); add('єва', ['їв']); add('ева', ['ів']);
+  if (!/(?:ова|єва|ева)$/u.test(w)) add('а', ['', 'о']);
+  if (!w.endsWith('оля')) add('я', ['ь', 'й', '']);
+  add('у', ['', 'а']); add('ю', ['я']);
+  return [...new Set(out)];
+}
+/** Kandidáti slova s pomlčkou: každá časť sa skloňuje („Куп’янська-Вузлового" → „Куп’янськ-Вузловий"), súčin so stropom. */
+function hyphenCandidates(word, cap = 16) {
+  let combos = [''];
+  for (const part of word.split('-')) {
+    const next = [];
+    for (const prefix of combos) for (const c of nominativeCandidates(part)) { next.push(prefix ? `${prefix}-${c}` : c); if (next.length >= cap) break; }
+    combos = next;
+  }
+  return combos;
+}
+/** Kandidáti celého mena (viac slov = súčin, pomlčka = súčin častí; strop 16). Pure. */
+export function nameCandidates(raw) {
+  const key = placeKey(raw);
+  if (PLACE_EXCEPTIONS[key]) return [PLACE_EXCEPTIONS[key]];
+  const words = String(raw).trim().split(/\s+/);
+  let combos = [''];
+  for (const word of words) {
+    const cands = word.includes('-') ? hyphenCandidates(word) : nominativeCandidates(word);
+    const next = [];
+    for (const prefix of combos) for (const c of cands) { next.push(prefix ? `${prefix} ${c}` : c); if (next.length >= 16) break; }
+    combos = next;
+  }
+  return [...new Set(combos)];
+}
+
+/**
+ * Index mien sídel z GeoJSON prvkov podkladu (`properties.name` v ukrajinčine,
+ * `lang === 'uk'` alebo azbuka). Map(kľúč → [{name, en, lat, lon, cls, pop}]). Pure.
+ */
+export function buildPlaceIndex(features) {
+  const index = new Map();
+  for (const f of features || []) {
+    const p = f?.properties || f;
+    const name = p?.name;
+    if (!name || !/[А-Яа-яІіЇїЄєҐґ]/u.test(name)) continue;
+    const c = f.geometry?.coordinates;
+    const lon = Number(c?.[0] ?? p.lon); const lat = Number(c?.[1] ?? p.lat);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const key = placeKey(name);
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push({ id: p.id ?? null, name, en: p.en || null, lat, lon, cls: p.cls || null, pop: Number(p.pop) || 0 });
+  }
+  return index;
+}
+const kmBetween = (a, b) => { const dy = (b.lat - a.lat) * 111.32; const dx = (b.lon - a.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180); return Math.hypot(dx, dy); };
+
+/** Bonus triedy pri rovnakých menách: mesto vyhrá nad obcou s rovnakým menom, ak je o pár km ďalej (Добропілля: mesto 20 km vs. obec 18 km). */
+export const CLASS_BONUS_KM = Object.freeze({ city: 30, town: 15 });
+
+/**
+ * Meno v genitíve → sídlo z indexu: prvý kandidát so zhodou; pri viacerých sídlach
+ * najbližšie k `center` (do `maxKm`, vzdialenosť mínus bonus triedy), inak najľudnatejšie. Pure.
+ */
+export function resolvePlace(raw, index, { center = null, maxKm = 120 } = {}) {
+  for (const cand of nameCandidates(raw)) {
+    const hits = index.get(placeKey(cand));
+    if (!hits?.length) continue;
+    let pick = null;
+    if (center) {
+      let best = Infinity;
+      for (const h of hits) {
+        const d = kmBetween(center, h);
+        if (d > maxKm) continue;
+        const score = d - (CLASS_BONUS_KM[h.cls] || 0);
+        if (score < best) { best = score; pick = h; }
+      }
+    }
+    if (!pick && !center) pick = [...hits].sort((a, b) => b.pop - a.pop)[0];
+    if (pick) return { ...pick, raw, nominative: cand };
+  }
+  return null;
+}
+
+/**
+ * Odseky jedného smeru → sídla s počtom zmienok. Pure.
+ * @param {string[]} texts odseky (entry.texts z reportByScene)
+ * @param {Map} index buildPlaceIndex
+ * @param {{lat:number,lon:number}|null} center stred smeru
+ */
+export function directionPlaces(texts, index, center = null) {
+  const byKey = new Map();
+  const unresolved = [];
+  for (const text of texts || []) {
+    for (const raw of extractPlaceMentions(text)) {
+      const hit = resolvePlace(raw, index, { center });
+      if (!hit) { unresolved.push(raw); continue; }
+      const key = placeKey(hit.name);
+      const rec = byKey.get(key) || { ...hit, mentions: 0 };
+      rec.mentions += 1;
+      byKey.set(key, rec);
+    }
+  }
+  return { places: [...byKey.values()], unresolved };
+}

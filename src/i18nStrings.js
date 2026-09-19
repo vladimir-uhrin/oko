@@ -1013,6 +1013,11 @@ export const EN_STRINGS = Object.freeze({
   'ukraine.dmg.note': 'static snapshot to February 2024 (ETH Zürich Sentinel-1 model, CC BY 4.0) and UNOSAT damage assessments of 26 cities in 2022 (CC BY-SA); buildings only, never people',
   'ukraine.dmg.attribution': 'ETH Zürich · Dietrich et al. 2025 (Zenodo) · contains modified Copernicus Sentinel data · UNOSAT/UNITAR',
   'ukraine.dmg.missing': 'damage snapshot not built yet (scripts/build-ukraine-damage.mjs)',
+  // General Staff report places (2026-09-19): settlements the report names per direction.
+  'ukraine.report.place-kind': 'Settlement named in the General Staff report',
+  'ukraine.report.place-mentions': 'named {n}× in the report',
+  'ukraine.report.place-note': 'the report says fighting took place „in the area of" or „towards" this settlement — not a front line, not a unit position',
+  'ukraine.report.places-count': '{n} settlements named',
   'ukraine.place.city': 'City',
   'ukraine.place.town': 'Town',
   'ukraine.place.village': 'Village',
@@ -2660,6 +2665,11 @@ export const SK_STRINGS = Object.freeze({
   'ukraine.dmg.note': 'statický snímok do februára 2024 (model ETH Zürich zo Sentinel-1, CC BY 4.0) a hodnotenia škôd UNOSAT v 26 mestách z roku 2022 (CC BY-SA); budovy, nikdy osoby',
   'ukraine.dmg.attribution': 'ETH Zürich · Dietrich et al. 2025 (Zenodo) · obsahuje upravené dáta Copernicus Sentinel · UNOSAT/UNITAR',
   'ukraine.dmg.missing': 'snímok škôd ešte nie je zostavený (scripts/build-ukraine-damage.mjs)',
+  // Sídla z hlásenia GŠ (2026-09-19): obce, ktoré hlásenie menuje po smeroch.
+  'ukraine.report.place-kind': 'Sídlo menované v hlásení Generálneho štábu',
+  'ukraine.report.place-mentions': 'v hlásení {n}×',
+  'ukraine.report.place-note': 'hlásenie hovorí o bojoch „v priestore" alebo „v smere" tohto sídla — nie je to línia frontu ani poloha jednotky',
+  'ukraine.report.places-count': '{n} menovaných sídiel',
   'ukraine.place.city': 'Mesto',
   'ukraine.place.town': 'Mestečko',
   'ukraine.place.village': 'Obec',

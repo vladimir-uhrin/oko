@@ -634,7 +634,13 @@ async function init() {
     // Strety (etapa 2): značky smerov s počtom útokov z denného hlásenia GŠ ZSU
     // (ArmyInform, CC BY 4.0) — vlastný prekryv, ide hore a dole s podkladom;
     // čip STRETY v paneli je jeho vypínač.
-    const ukraineReport = createUkraineReportLayer({ viewer });
+    // Sídla z odsekov hlásenia (2026-09-19): geokódujú sa v prehliadači indexom mien
+    // z OSM podkladu (ODbL; nič odvodené sa neukladá).
+    const ukraineReport = createUkraineReportLayer({
+      viewer,
+      placeIndex: () => ukraineBase.getPlaceIndex(),
+      reservePlaces: (ids) => ukraineBase.setReservedPlaces(ids),
+    });
     window.__godsEyeView.ukraineReport = ukraineReport;
     let ukraineBoundariesHeld = false;
     ukraineBase.onChange((state) => {

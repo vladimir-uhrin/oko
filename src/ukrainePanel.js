@@ -256,7 +256,8 @@ export function createUkrainePanel({
       return;
     }
     reportBox.hidden = false;
-    reportSummary.textContent = translate('ukraine.report.summary', { total: r.total ?? '?', time: r.reportedAtText || '?' });
+    reportSummary.textContent = translate('ukraine.report.summary', { total: r.total ?? '?', time: r.reportedAtText || '?' })
+      + (state.placesCount > 0 ? ` · ${translate('ukraine.report.places-count', { n: state.placesCount })}` : '');
     const s = r.strikes || {};
     const fmt = (v) => (Number.isFinite(v) ? numberFormat.format(v) : '?');
     reportStrikes.textContent = translate('ukraine.report.strikes', { air: fmt(s.airStrikes), bombs: fmt(s.guidedBombs), drones: fmt(s.kamikazeDrones), shellings: fmt(s.shellings) });
