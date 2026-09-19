@@ -1,9 +1,10 @@
 # Potrubia (plynovody + ropovody) — stav, ako sa k tomu vrátiť, čo ostalo
 
 Stav k **2026-09-19 večer**. Všetkých šesť etáp plánu z 2026-09-18 je hotových
-(+ etapa 3b a hover lokálnych značiek). Vetva `codex/blender-tanker-trial`,
-commity `b923bc9 … f284579`, **nič nepushnuté**. Publikované na
-oko.uhrin.digital z čistého exportu HEAD (`f284579`, build `index-BXoTsYWs.js`).
+(+ etapa 3b, hover lokálnych značiek, plot rúr vypnutý). Vetva
+`codex/blender-tanker-trial`, commity `b923bc9 … 03b049e` (aktuálny koniec reťaze:
+`git log`), **nič nepushnuté**. Publikované na oko.uhrin.digital z čistého exportu
+HEAD `03b049e` (build `index-CuDo8FZ_.js`).
 Autoritatívne detaily po etapách: `docs/CURRENT-STATE.md` (bullety „Pipelines
 stage …"), licencie: `DATA_SOURCES.md` (riadky OSM gas / OSM oil / Natural
 Earth). Otvorené body: sekcia 8 nižšie.
