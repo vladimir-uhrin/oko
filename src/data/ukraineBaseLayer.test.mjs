@@ -91,12 +91,15 @@ function make(overrides = {}) {
     handlerFactory: () => handler,
     hoverFactory: (o) => { fakeHover(o); return hover; },
     groundSupport: () => true,
+    terrainSampler: overrides.terrainSampler || (async (points) => { sampled.push(points.length); return points.map(() => 120); }),
     projectorFactory: projector,
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
   });
-  return { layer, viewer, hover, handler, clock, calls };
+  return { layer, viewer, hover, handler, clock, calls, sampled };
 }
+const sampled = [];
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 test('bez viewera je prekryv neškodný', async () => {
   const layer = createUkraineBaseLayer({});
@@ -133,10 +136,39 @@ test('show: meta najprv, potom 4 súbory s verziou snímku; entity podľa čast�
   assert.equal(road.polyline.clampToGround, true);
   assert.equal(road.polyline.classificationType, Cesium.ClassificationType.BOTH);
   assert.ok(road.polyline.distanceDisplayCondition instanceof Cesium.DistanceDisplayCondition);
-  // Body a popisky sa primkýnajú k zemi a nekryje ich terén.
+  // Body a popisky NEmajú CLAMP_TO_GROUND (pri streamovaní dlaždíc drahé); terén ich nekryje.
   const city = sources.places.entities.values[0];
-  assert.equal(city.point.heightReference, Cesium.HeightReference.CLAMP_TO_GROUND);
+  assert.equal(city.point.heightReference, undefined);
+  assert.equal(city.label.heightReference, undefined);
   assert.equal(city.label.disableDepthTestDistance, Number.POSITIVE_INFINITY);
+});
+
+test('výšky: sídla aj voľné popisky sa zdvihnú RAZ z resolvera (dávkovo), nie pri každej dlaždici; zlyhanie = elipsoid + odklad', async () => {
+  sampled.length = 0;
+  const { layer } = make({ camera: { height: 900_000 } });
+  await layer.show();
+  await settle(); await settle();
+  const { placeRecords, looseLabels, liftSamples } = layer._getStateForTest();
+  assert.deepEqual(sampled, [2, 2], 'jedna dávka pre sídla, jedna pre popisky riek/oblastí');
+  assert.equal(liftSamples, 4);
+  for (const r of placeRecords.values()) {
+    assert.equal(r.lifted, true);
+    assert.ok(Math.abs(Cesium.Cartographic.fromCartesian(r.position).height - 120) < 0.5, 'záznam nesie zdvihnutú polohu');
+    assert.ok(Math.abs(Cesium.Cartographic.fromCartesian(r.entity.position.getValue ? r.entity.position.getValue(Cesium.JulianDate.now()) : r.entity.position).height - 120) < 0.5, 'entita tiež');
+  }
+  assert.equal(looseLabels.every((l) => l.lifted), true);
+  await layer.show();
+  await settle();
+  assert.deepEqual(sampled, [2, 2], 'druhý show nič nevzorkuje');
+  // Zlyhanie resolvera: ostáva elipsoid, ďalší pokus až po odklade.
+  sampled.length = 0;
+  const failing = make({ camera: { height: 900_000 }, terrainSampler: async (points) => { sampled.push(points.length); throw new Error('proxy down'); } });
+  await failing.layer.show();
+  await settle(); await settle();
+  const first = [...failing.layer._getStateForTest().placeRecords.values()][0];
+  assert.equal(first.lifted, false);
+  assert.ok(Math.abs(Cesium.Cartographic.fromCartesian(first.position).height) < 0.5);
+  assert.equal(sampled.length, 1, 'po chybe sa druhá dávka (popisky) v odklade nespúšťa');
 });
 
 test('čipy: časť vypnutá = zdroj skrytý; hide skryje všetko bez straty dát; druhý show nič neťahá', async () => {

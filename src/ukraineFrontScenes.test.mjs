@@ -55,11 +55,11 @@ test('i18n: každý preset má meno v EN aj SK a názvy sú rôzne', () => {
 test('rámovanie: z juhu na sever, výška podľa rozpätia, prehľad strmšie a vyššie', () => {
   const lyman = frontSceneFraming(frontSceneById('lyman').rectDegrees);
   assert.equal(lyman.headingDeg, 0);
-  assert.equal(lyman.pitchDeg, -58);
+  assert.equal(lyman.pitchDeg, -64, 'strmšie než úžiny — horizont plný 3D dlaždíc stál CPU');
   assert.ok(lyman.lat < 49.0, 'kamera stojí južne od stredu');
   assert.ok(lyman.heightM >= 140_000 && lyman.heightM <= 180_000, `~160 km, dostali sme ${lyman.heightM}`);
   const front = frontSceneFraming(frontSceneById('front').rectDegrees, { overview: true });
-  assert.equal(front.pitchDeg, -70);
+  assert.equal(front.pitchDeg, -72);
   assert.ok(front.heightM > lyman.heightM);
   assert.equal(frontSceneFraming([0, 0, 0.1, 0.1]).heightM, 70_000, 'spodný strop');
   assert.equal(frontSceneFraming([0, 0, 40, 40]).heightM, 1_400_000, 'horný strop');

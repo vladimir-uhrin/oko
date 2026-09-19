@@ -12,14 +12,19 @@
  * stredu pohľadu, riedenie popisov mriežkou po ustálení kamery, karta pri
  * prechode myšou (latinka + originál). Čisté výpočty žijú v ukraineBase.js.
  *
- * Výšky: body a popisky s `heightReference: CLAMP_TO_GROUND` (Cesium 1.124
- * primkne k terénu AJ k 3D dlaždiciam) + `disableDepthTestDistance`, aby ich
- * pri šikmom pohľade nezakryl kopec; čiary `clampToGround` s klasifikáciou
- * BOTH ako rúry (na fotoreáli klasifikujú dlaždice, na glóbuse terén).
+ * Výšky: body a popisky NIE cez `heightReference: CLAMP_TO_GROUND` — pri
+ * streamovaní Google 3D dlaždíc by každá načítaná dlaždica prepočítavala výšku
+ * ~3 000 entít (používateľ 2026-09-19 večer: „strašne vysoké hodnoty CPU";
+ * prístavy sa tej istej pasci vyhýbajú vlastným vzorkovaním). Namiesto toho sa
+ * výška zistí RAZ zo spoločného resolvera `/api/terrain/heights` (Re:Earth DEM,
+ * dávky po 200, cache) a entita sa zdvihne; kým výška nepríde, sedí na
+ * elipsoide a `disableDepthTestDistance` ju drží nad terénom. Čiary
+ * `clampToGround` s klasifikáciou BOTH ako rúry (lacné, merané).
  */
 import * as Cesium from 'cesium';
 import { currentLanguage, t as translateDefault } from '../i18n.js';
 import { createLocalHoverCard } from './localHoverCard.js';
+import { resolveEllipsoidalGround } from './terrainHeights.js';
 import {
   CAMERA_SETTLE_MS,
   OBLAST_STYLE,
@@ -54,6 +59,21 @@ const LABEL_OUTLINE = '#0b1622';
 /** GPU vie pozemné čiary (hĺbková textúra)? Bez scény optimisticky áno. */
 export function defaultGroundSupport(scene) {
   try { return scene ? Cesium.GroundPolylinePrimitive.isSupported(scene) : true; } catch { return true; }
+}
+
+/** Po tomto čase (ms) sa po neúspešnom vzorkovaní výšok skúsi znova. */
+export const LIFT_RETRY_MS = 120_000;
+
+/**
+ * Elipsoidné výšky terénu pre body [lon, lat] zo spoločného resolvera
+ * (`/api/terrain/heights`, Re:Earth). Geoidná núdzovka sa vracia ako null —
+ * radšej bod na elipsoide než „presne" na geoide. Rovnaké ako pri rúrach.
+ * @param {number[][]} points
+ * @returns {Promise<Array<number|null>>}
+ */
+export async function defaultTerrainSampler(points) {
+  const resolved = await resolveEllipsoidalGround(points.map(([lon, lat]) => ({ lat, lon })));
+  return points.map((_, i) => { const r = resolved[i]; return r && r.source === 'reearth' && Number.isFinite(r.ellipsoid) ? r.ellipsoid : null; });
 }
 
 /** Premietnutie do okna (Cesium 1.124: worldToWindowCoordinates; starší názov ako záloha). */
@@ -93,9 +113,11 @@ export function createUkraineBaseLayer({
   handlerFactory = (canvas) => new Cesium.ScreenSpaceEventHandler(canvas),
   hoverFactory = (o) => createLocalHoverCard(o),
   groundSupport = defaultGroundSupport,
+  terrainSampler = defaultTerrainSampler,
   projectorFactory = defaultProjector,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
+  now = () => Date.now(),
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   const inert = {
@@ -135,6 +157,10 @@ export function createUkraineBaseLayer({
   let _villagesPromise = null;
   /** entity.id → record (karta pri prechode myšou). */
   const _byEntityId = new Map();
+  /** Popisky bez záznamu (rieky, oblasti) — zdvíhajú sa raz po načítaní. */
+  const _looseLabels = [];
+  let _liftFailedAt = 0;
+  let _liftSamples = 0;
   const _listeners = new Set();
   let _cameraTimer = null;
   let _removeMoveEnd = null;
@@ -195,7 +221,6 @@ export function createUkraineBaseLayer({
       pixelOffset: new Cesium.Cartesian2(offsetX, -1),
       horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
       verticalOrigin: Cesium.VerticalOrigin.CENTER,
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     };
     if (displayCondition) {
@@ -228,15 +253,51 @@ export function createUkraineBaseLayer({
         color: Cesium.Color.fromCssColorString(style.color).withAlpha(0.95),
         outlineColor: Cesium.Color.fromCssColorString(LABEL_OUTLINE).withAlpha(0.85),
         outlineWidth: props.cls === 'village' ? 1 : 1.5,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         distanceDisplayCondition: ddc(placePointDisplayCondition(props.cls)),
       },
       label: labelFor(text, { fontPx: style.fontPx, weight: style.weight, colorCss: style.color, displayCondition: placeLabelDisplayCondition(props.cls), background: props.cls === 'city' }),
     });
-    const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true };
+    const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true, lifted: false };
     _byEntityId.set(entityId, record);
     return record;
+  }
+
+  /**
+   * Zdvihni záznamy na výšku terénu (raz, dávkovo, s cache resolvera). Záznam
+   * bez výšky (proxy nedostupná) ostáva na elipsoide a skúsi sa znova po
+   * LIFT_RETRY_MS. Nikdy nespúšťa nič pri každom snímku ani pri každej dlaždici.
+   * @param {Array<{lon:number, lat:number, entity:object, position:object, lifted?:boolean}>} records
+   */
+  let _liftChain = Promise.resolve(0);
+  function liftRecords(records) {
+    // Jedna dávka po druhej (resolver sám delí po 200 a posiela sekvenčne):
+    // druhá dávka po zlyhaní prvej vidí odklad a proxy nezahltí.
+    _liftChain = _liftChain.then(() => liftRecordsNow(records)).catch(() => 0);
+    return _liftChain;
+  }
+  async function liftRecordsNow(records) {
+    const pending = records.filter((r) => r && !r.lifted);
+    if (!pending.length || typeof terrainSampler !== 'function' || _destroyed) return 0;
+    if (_liftFailedAt && now() - _liftFailedAt < LIFT_RETRY_MS) return 0;
+    let heights;
+    try { heights = await terrainSampler(pending.map((r) => [r.lon, r.lat])); } catch { heights = null; }
+    if (_destroyed) return 0;
+    if (!Array.isArray(heights)) { _liftFailedAt = now(); return 0; }
+    let lifted = 0;
+    for (let i = 0; i < pending.length; i += 1) {
+      const h = heights[i];
+      const r = pending[i];
+      if (!Number.isFinite(h)) continue;
+      r.position = Cesium.Cartesian3.fromDegrees(r.lon, r.lat, h);
+      try { r.entity.position = r.position; } catch { /* entita už preč */ }
+      r.lifted = true;
+      lifted += 1;
+    }
+    if (!lifted) _liftFailedAt = now();
+    _liftSamples += pending.length;
+    if (lifted) requestRender();
+    return lifted;
   }
 
   function removeRecord(ds, record) {
@@ -252,6 +313,14 @@ export function createUkraineBaseLayer({
       if (record) _placeRecords.set(record.id, record);
     }
     _counts.places = _placeRecords.size;
+    void liftRecords([..._placeRecords.values()]);
+  }
+
+  /** Popisok bez záznamu (rieka, oblasť): zapamätať na jednorazový zdvih. */
+  function looseLabel(entity, lon, lat) {
+    const item = { entity, lon, lat, position: Cesium.Cartesian3.fromDegrees(lon, lat), lifted: false };
+    _looseLabels.push(item);
+    return item;
   }
 
   function buildRoads(collection) {
@@ -289,11 +358,12 @@ export function createUkraineBaseLayer({
       if (Number(props.km) >= RIVER_STYLE.bigKm && key && !labelled.has(key)) {
         labelled.add(key);
         const [lon, lat] = midpoint(feature.geometry.coordinates);
-        ds.entities.add({
+        const label = ds.entities.add({
           id: `${UKRAINE_BASE_ID}:river-label:${n}`,
           position: Cesium.Cartesian3.fromDegrees(lon, lat),
           label: labelFor(lineLabel(props).text, { fontPx: 10.5, weight: 500, colorCss: RIVER_STYLE.color, italic: true, displayCondition: [0, 700_000], offsetX: 4 }),
         });
+        looseLabel(label, lon, lat);
       }
     }
     _counts.rivers = n;
@@ -311,13 +381,15 @@ export function createUkraineBaseLayer({
       if (!Array.isArray(oblast.center)) continue;
       const text = lineLabel(oblast).text;
       if (!text) continue;
-      ds.entities.add({
+      const label = ds.entities.add({
         id: `${UKRAINE_BASE_ID}:oblast-label:${oblast.id}`,
         position: Cesium.Cartesian3.fromDegrees(oblast.center[0], oblast.center[1]),
         label: labelFor(text, { fontPx: 10, weight: 600, colorCss: OBLAST_STYLE.color, displayCondition: [OBLAST_STYLE.labelNearM, OBLAST_STYLE.labelFarM], offsetX: 0, uppercase: true }),
       });
+      looseLabel(label, oblast.center[0], oblast.center[1]);
     }
     _counts.oblasts = n;
+    void liftRecords(_looseLabels);
   }
 
   // ── Načítanie ─────────────────────────────────────────────────────────────
@@ -423,18 +495,20 @@ export function createUkraineBaseLayer({
     if (!_villageFeatures) { void loadVillages(); return; }
     const cohort = selectVillageCohort(_villageFeatures, info.rect, { lon: info.lon, lat: info.lat });
     const keep = new Set();
+    const fresh = [];
     for (const feature of cohort) {
       const id = feature.properties?.id;
       keep.add(id);
       if (!_villageRecords.has(id)) {
         const record = addPlace(ds, feature);
-        if (record) _villageRecords.set(id, record);
+        if (record) { _villageRecords.set(id, record); fresh.push(record); }
       }
     }
     for (const [id, record] of _villageRecords) {
       if (!keep.has(id)) { removeRecord(ds, record); _villageRecords.delete(id); }
     }
     _counts.villagesCohort = _villageRecords.size;
+    if (fresh.length) void liftRecords(fresh);
   }
 
   function declutter(info) {
@@ -648,7 +722,7 @@ export function createUkraineBaseLayer({
     refresh,
     destroy,
     /** Len pre testy. */
-    _getStateForTest: () => ({ sources, placeRecords: _placeRecords, villageRecords: _villageRecords, byEntityId: _byEntityId, ground, hover: _hover }),
+    _getStateForTest: () => ({ sources, placeRecords: _placeRecords, villageRecords: _villageRecords, byEntityId: _byEntityId, looseLabels: _looseLabels, liftSamples: _liftSamples, ground, hover: _hover }),
   };
 }
 

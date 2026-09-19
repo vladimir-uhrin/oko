@@ -17,6 +17,7 @@ import { currentLanguage, t as translateDefault } from '../i18n.js';
 import { translateText as translateTextDefault } from '../translate.js';
 import { frontSceneByGsDirection, frontSceneLabel, listFrontScenes } from '../ukraineFrontScenes.js';
 import { createLocalHoverCard } from './localHoverCard.js';
+import { defaultTerrainSampler } from './ukraineBaseLayer.js';
 import { fetchUkraineReport, reportByScene } from './ukraineReport.js';
 
 export const UKRAINE_REPORT_ID = 'ukraine-report';
@@ -78,6 +79,7 @@ export function createUkraineReportLayer({
   dataSourceFactory = (id) => new Cesium.CustomDataSource(id),
   handlerFactory = (canvas) => new Cesium.ScreenSpaceEventHandler(canvas),
   hoverFactory = (o) => createLocalHoverCard(o),
+  terrainSampler = defaultTerrainSampler,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
   now = () => Date.now(),
@@ -133,6 +135,8 @@ export function createUkraineReportLayer({
       if (!entry || !sc.center) continue;
       const color = Cesium.Color.fromCssColorString(reportIntensityColor(entry.attacks));
       const entityId = `${UKRAINE_REPORT_ID}:${sc.id}`;
+      // Bez CLAMP_TO_GROUND (pri streamovaní dlaždíc drahé — viď ukraineBaseLayer):
+      // výška sa zistí raz z resolvera terénu nižšie.
       const entity = ds.entities.add({
         id: entityId,
         position: Cesium.Cartesian3.fromDegrees(sc.center.lon, sc.center.lat),
@@ -140,7 +144,6 @@ export function createUkraineReportLayer({
           image: REPORT_MARKER_URI,
           width: 22,
           height: 22,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_FAR_M),
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
@@ -158,16 +161,31 @@ export function createUkraineReportLayer({
           pixelOffset: new Cesium.Cartesian2(16, 0),
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_FAR_M),
         },
       });
-      const record = { entity, scene: sc, entry };
+      const record = { entity, scene: sc, entry, lon: sc.center.lon, lat: sc.center.lat, lifted: false };
       _records.set(sc.id, record);
       _byEntityId.set(entityId, record);
     }
     requestRender();
+    void liftMarkers();
+  }
+
+  /** Jednorazový zdvih značiek na výšku terénu (11 bodov, jedna dávka, cache resolvera). */
+  async function liftMarkers() {
+    const pending = [..._records.values()].filter((r) => !r.lifted);
+    if (!pending.length || typeof terrainSampler !== 'function') return;
+    let heights;
+    try { heights = await terrainSampler(pending.map((r) => [r.lon, r.lat])); } catch { heights = null; }
+    if (_destroyed || !Array.isArray(heights)) return;
+    let lifted = 0;
+    pending.forEach((r, i) => {
+      if (!Number.isFinite(heights[i])) return;
+      try { r.entity.position = Cesium.Cartesian3.fromDegrees(r.lon, r.lat, heights[i]); r.lifted = true; lifted += 1; } catch { /* entita už preč */ }
+    });
+    if (lifted) requestRender();
   }
 
   function load({ force = false } = {}) {

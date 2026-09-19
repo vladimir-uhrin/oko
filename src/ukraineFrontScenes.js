@@ -189,7 +189,10 @@ export function frontSceneFraming(rectDegrees, { overview = false } = {}) {
   const lon = (w + e) / 2;
   const lat = (s + n) / 2;
   const spanDeg = Math.max(Math.abs(e - w), Math.abs(n - s));
-  const pitchDeg = overview ? -70 : -58;
+  // Strmšie než úžiny (−32°): pohľad k horizontu núti Google 3D dlaždice
+  // streamovať obrovskú plochu (používateľ 2026-09-19: vysoké CPU) a front sa
+  // číta ako mapa, nie panoráma.
+  const pitchDeg = overview ? -72 : -64;
   // ~1° rámca ≈ 110 km → 130 km výšky pri −58° drží celý rámec v zábere.
   const heightM = Math.min(1_400_000, Math.max(70_000, spanDeg * 118_000));
   const backoffDeg = overview ? spanDeg * 0.18 : spanDeg * 0.36;

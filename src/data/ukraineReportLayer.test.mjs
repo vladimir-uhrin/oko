@@ -48,6 +48,7 @@ function make({ pick, report = REPORT, translateText, nowMs = 1_000_000 } = {}) 
     dataSourceFactory: fakeDataSource,
     handlerFactory: () => handler,
     hoverFactory: () => hover,
+    terrainSampler: async (points) => points.map(() => 80),
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
     now: () => nowMs,
@@ -89,8 +90,13 @@ test('show: jeden fetch, značka na každý preset so smerom (Sumy zlúčené, O
   assert.equal(label('pokrovsk').fillColor.toCssHexString().toLowerCase(), '#f87171');
   const bb = records.get('lyman').entity.billboard;
   assert.equal(bb.image, REPORT_MARKER_URI);
-  assert.equal(bb.heightReference, Cesium.HeightReference.CLAMP_TO_GROUND);
+  assert.equal(bb.heightReference, undefined, 'bez CLAMP_TO_GROUND — výška z resolvera');
   assert.equal(bb.disableDepthTestDistance, Number.POSITIVE_INFINITY);
+  await new Promise((r) => setTimeout(r, 0));
+  const lymanPos = records.get('lyman').entity.position;
+  const carto = Cesium.Cartographic.fromCartesian(lymanPos.getValue ? lymanPos.getValue(Cesium.JulianDate.now()) : lymanPos);
+  assert.ok(Math.abs(carto.height - 80) < 0.5, 'značka zdvihnutá na výšku terénu');
+  assert.equal(records.get('lyman').lifted, true);
   await layer.show();
   assert.equal(fetches.length, 1, 'do 30 min sa znova neťahá');
   const state = layer.getState();
