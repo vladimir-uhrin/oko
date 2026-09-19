@@ -69,6 +69,85 @@ GeoNames/HDX zámerne nepoužité (OSM `name:*` a `admin_level=4` stačili), hla
 Pasce zapísané v `docs/CURRENT-STATE.md` (kumi mirror bez areas, 429 pri rýchlom slede,
 `force-cache` na /api vráti HTML navždy, Natural Earth bez Krymu).
 
+## Návrh (2026-09-19 noc): karty udalostí a časová os podľa upstream vzoru — nahrádza etapu 3
+
+Používateľ ukázal snímku z upstream videa (scéna „Hormuz Blockade"): karty ukotvené na mape
+vodiacou čiarou k malému štvorčeku, s farebným pásom závažnosti (CRITICAL / MINOR), typom
+(MISSILE / PROJECTILE), časom UTC, predmetom (Safesea Vishnu), jedným stavovým riadkom („ABLAZE.
+1 killed.", „Unverified.") a fotkou; dole časová os s prehrávaním (1h/s … 2d/s, LIVE / PLAYBACK),
+legenda kategórií, vľavo počítadlá (VESSELS IN VIEW, STRAIT TRANSITS s vlajkami). Pokyn: **nekopírovať
+karty ZÁLIV-u ani ich rozmiestnenie** — chce to „nejako takto". Upstream to má ako ručne
+zostavený dataset udalostí prehrávaný scénou; my to spravíme z otvorených zdrojov, živo aj s históriou.
+
+### Čo je inak než dnešné karty (prečo nový renderer)
+- ZÁLIV karty = titulky správ zoskupené po miestach, jedna karta na miesto, vertikálny stĺpec.
+  Vzor = **udalosti** (čas + miesto + typ + závažnosť + stav), každá zvlášť, rozložené okolo kotvy.
+- Preto: nový čistý model `src/data/ukraineEvents.js` (udalosť = `{id, t, lat, lon, place, type,
+  severity, subject, status, level, sources[], image?}`) a nový renderer
+  `src/ukraineEventCards.js` (nie gulfIncidentCards). Hot kartičky ZÁLIV-u ostanú, ako sú; Ukrajina
+  na ne prestane siahať (`incidentCards.showFor('ukraine')` zmizne).
+
+### Karta (štýl OKO, tvar podľa vzoru)
+```
+┌──────────────────────────────────┐
+│ KRITICKÉ · RAKETA · 14:00 UTC    │ ← pás farby závažnosti (červená / jantár / modrá), mono
+│ Kramatorsk                       │ ← predmet: sídlo alebo objekt (nikdy osoba)
+│ zasiahnutá bytovka · 2 zranení   │ ← stavový riadok (z titulku / typu; počty len „hlásené")
+│ ▣ fotka (len kde to smieme)      │ ← og:image BBC / Kyiv Independent; inak monochromatický glyf typu
+│ Ukrinform · oficiálne UA · ↗     │ ← zdroj · úroveň overenia · odkaz von
+└──────────────────────────────────┘
+        ╲ vodiaca čiara k štvorčeku (veľkosť = závažnosť)
+```
+- Úrovne overenia (poctivosť): **oficiálne UA** (GŠ, Ukrinform), **OSINT overené** (GeoConfirmed —
+  overené proti záberom; médiá sú odkazy, nikdy embed), **hlásené · neoverené** (správy, VIINA).
+- Rozmiestnenie: 8 kandidátskych polôh okolo kotvy, prvá bez prekryvu (mriežka v pixeloch),
+  preferencia vpravo hore; žiadny stĺpec. LOD podľa vzdialenosti kamery: > 600 km len štvorčeky
+  (zhluk 0,05° s počtom), 150–600 km štvorček + mini čip (glyf typu + čas), < 150 km plná karta
+  (max 8, priorita závažnosť → čerstvosť). Brána priblíženia ostáva.
+- Fotky: iba z feedov, ktoré to dovoľujú (BBC, KI `media:content`/og:image); GeoConfirmed a
+  sociálne siete = len odkaz. Bez fotky karta dostane glyf typu, nie prázdny rám.
+
+### Dáta za tým (namiesto pôvodnej etapy 3, všetko už preverené v prieskume)
+| Zdroj | Dáva | Úroveň | Poznámka |
+|---|---|---|---|
+| **VIINA 2.0** (ODbL, denne) | udalosti od 24. 2. 2022: čas na minútu, sídlo (GEO_PRECISION), typ (`t_airstrike`, `t_artillery`, `t_mil`…), aktér s pravdepodobnosťou, URL správy | hlásené | chrbtica časovej osi; vlastný ODbL súbor/DB na D: |
+| **GeoConfirmed API** (bez kľúča) | overené OSINT body s dátumom, súradnicami, popisom, odkazom | OSINT overené | User-Agent s kontaktom, Cache-Control; ORBAT/jednotky NIKDY |
+| **Správy** (etapa 2) | titulok + zdroj + obrázok | hlásené | zlúčiť s VIINA udalosťou (to isté sídlo ± 6 h) → fotka a titulok na karte, inak samostatná karta |
+| **GŠ hlásenie** (etapa 2) | počty po smeroch za deň | oficiálne UA | počítadlá + história hlásení po dňoch (ukladať každé, dopĺňať spätne z dátumových URL) |
+| Economist war-fire / FIRMS | tepelné anomálie `war_fire` | odvodené | voliteľná vrstva malých štvorčekov, nie karty (zaplavilo by to) |
+
+Server: denný pull VIINA (zip → JSON po dňoch), GeoConfirmed po hodinách, `/api/ukraine/events?from&to`
+(cache po dňoch), `/api/ukraine/reports?days=30` (uložené hlásenia GŠ).
+
+### Časová os (spodný pás ako vo vzore)
+- Engine: existujúci `ReplayClock` (rýchlosti, rAF) z histórie letov; UI nové `src/ukraineTimeline.js`
+  v štýle OKO: čip **LIVE / PREHRÁVANIE** hore, dole jazdec s oknom (24 h · 7 d · 30 d · od 2022),
+  rýchlosti 1h/s · 6h/s · 12h/s · 1d/s · 2d/s, play/pause.
+- LIVE = posledných 24 h (voliteľne 6 h / 72 h), staršie karty blednú na štvorčeky. PREHRÁVANIE =
+  udalosti sa objavia v čase `t`, žijú ~12 h modelového času ako karta, potom ostane štvorček;
+  počty GŠ a značky stretov prepínajú na deň pod jazdcom; podklad stojí.
+- Je to pevný spodný pás len počas aktívnej scény Ukrajiny (`.oko-scene-overlay`, brána
+  priblíženia) → prekážky rozloženia panelov, mobilný plášť, test overlayIslands.
+
+### Legenda a počítadlá
+- Legenda dole (ako vzor, naše kategórie): údery (rakety/drony/KAB) · delostrelectvo · pozemné boje ·
+  PVO · infraštruktúra · námorné · civilný dopad (len počty, nikdy osoby).
+- Vľavo pás počítadiel v štýle „VESSELS IN VIEW": **UDALOSTI V ZÁBERE 37 / 1 204** s čipmi typov
+  a oblastí; **GŠ 213 stretov · 08:00**; pod jazdcom deň.
+
+### Etapy (nahrádzajú pôvodnú etapu 3; odhad)
+3a. Chrbtica udalostí — 3 d: VIINA pull + DB po dňoch, GeoConfirmed proxy, zlúčenie so správami
+    a GŠ históriou, `/api/ukraine/events`, čistý model + testy.
+3b. Nový renderer kariet — 2 d: karta podľa vzoru, štvorčeky, vodiace čiary, rozmiestnenie okolo
+    kotvy, LOD, fotky len z dovolených zdrojov; Ukrajina prestane používať ZÁLIV karty.
+3c. Časová os + legenda + počítadlá — 2–3 d: ReplayClock, spodný pás, LIVE/PREHRÁVANIE, prepínanie
+    dňa pre GŠ značky, zdieľanie času v odkaze (`t=`).
+
+### Rozhodnutia pre používateľa
+1. LIVE okno predvolene 24 h? 2. História VIINA celá od 2022 (~200 MB, DB na D:) alebo len 90 dní?
+3. Počty obetí v stavovom riadku (len „hlásené", bez mien) áno/nie? 4. Fotky len BBC/KI, alebo
+radšej všade glyf? 5. Neskôr preniesť aj ZÁLIV na nový renderer?
+
 ## 0. Zhrnutie na jednu obrazovku
 
 | Prvok vzoru | Dá sa? | Zdroj | Podmienka |
