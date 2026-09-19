@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -21,9 +21,17 @@ export function assertNode24AllocationRuntime(version = process.versions.node) {
   return version;
 }
 
-/** Discover repository unit tests in stable path order. */
+/**
+ * Discover repository unit tests in stable path order.
+ *
+ * Scans `src/` and `scripts/lib/`. The second root was added 2026-09-19 when the
+ * pipeline tag parsing moved into `scripts/lib/pipelineTags.mjs` so the gas and
+ * oil builds could share one implementation: a test that the suite never runs is
+ * decoration, and this one guards a parser bug that silently discarded 24-inch
+ * pipelines. Build scripts themselves stay out — they execute on import.
+ */
 export function discoverUnitTestFiles(root = process.cwd()) {
-  const sourceRoot = path.join(root, 'src');
+  const roots = [path.join(root, 'src'), path.join(root, 'scripts', 'lib')];
   const files = [];
   const visit = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -34,7 +42,9 @@ export function discoverUnitTestFiles(root = process.cwd()) {
       }
     }
   };
-  visit(sourceRoot);
+  for (const dir of roots) {
+    if (existsSync(dir)) visit(dir);
+  }
   return files.sort();
 }
 

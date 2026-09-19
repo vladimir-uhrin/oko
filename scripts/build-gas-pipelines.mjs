@@ -24,6 +24,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { diameterMm, makeClassifier } from './lib/pipelineTags.mjs';
+
 const OVERPASS_URL = process.env.OVERPASS_URL || 'https://maps.mail.ru/osm/tools/overpass/api/interpreter';
 const REFRESH = process.argv.includes('--refresh');
 const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'gas');
@@ -97,32 +99,16 @@ const TSO_RE = new RegExp([
 
 const round = (n) => Number(n.toFixed(ROUND));
 
-/** Priemer v mm z tagu `diameter` („1400", „1.4", „DN 800", „700 mm"). */
-function diameterMm(tags) {
-  const raw = String(tags.diameter || '').replace(',', '.');
-  const num = Number(raw.replace(/[^0-9.]/g, ''));
-  if (!Number.isFinite(num) || num <= 0) return null;
-  return num < 10 ? Math.round(num * 1000) : Math.round(num);
-}
-
 /**
  * Prečo úsek patrí do prepravnej siete (alebo null = von).
- * @param {Record<string, string>} tags zlúčené tagy (relácia ako predvolené, way navrchu)
- * @param {boolean} inRelation člen plynovej relácie route=pipeline
- * @returns {'transmission'|'relation'|'diameter'|'name'|'operator'|null}
+ *
+ * Logika aj čítanie priemeru žijú v scripts/lib/pipelineTags.mjs, aby ich ropný
+ * build nemusel kopírovať — `diameterMm` mala chybu v palcoch a dva domovy pre
+ * jeden defekt sú presne to, čomu sa vyhýbame.
+ *
+ * @type {(tags: Record<string,string>, inRelation: boolean) => 'transmission'|'relation'|'diameter'|'name'|'operator'|null}
  */
-export function classifyPipeline(tags, inRelation) {
-  const usage = String(tags.usage || '').toLowerCase();
-  if (usage === 'transmission') return 'transmission';
-  if (usage && EXCLUDED_USAGE.test(usage)) return null;
-  if (inRelation) return 'relation';
-  const d = diameterMm(tags);
-  if (d !== null && d < 150) return null;
-  if (d !== null && d >= 300) return 'diameter';
-  if (tags.name || tags['name:en'] || tags.ref) return 'name';
-  if (tags.operator && TSO_RE.test(tags.operator)) return 'operator';
-  return null;
-}
+export const classifyPipeline = makeClassifier({ excludedUsage: EXCLUDED_USAGE, operatorRe: TSO_RE });
 
 function pointSegDist(p, a, b) {
   const dx = b[0] - a[0];
