@@ -17,6 +17,7 @@
 
 import * as Cesium from 'cesium';
 import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText } from './data/ukraineDeepState.js';
+import { hatchMaterialFor } from './data/screenPatternMaterials.js';
 import { fetchUkraineDeepState } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
 import { currentLanguage, t } from './i18n.js';
@@ -26,9 +27,55 @@ const LIFT_BATCH = 200;
 const HOVER_MS = 90;
 const INERT = {
   id: UKRAINE_DEEPSTATE_ID, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, loadLatest: async () => {},
-  getState: () => ({ shown: false, loading: false, error: null, day: null, at: null, stampText: '', counts: null, areaKm2: null, features: 0 }),
+  setStyle() {}, getStyle: () => 'default', sideAt: () => null,
+  getState: () => ({ shown: false, loading: false, error: null, day: null, at: null, stampText: '', counts: null, areaKm2: null, features: 0, style: 'default' }),
   onChange() { return () => {}; }, destroy() {},
 };
+
+/** Druhy DeepState, ktoré znamenajú ruskú kontrolu (pre stranu sídla). */
+export const DEEPSTATE_RU_KINDS = Object.freeze(['occupied', 'ordlo', 'crimea', 'tuzla']);
+/** Štýly vrstvy: KARTA = tenšie obrysy, sivá zóna šrafovaná (K3, vzorka). */
+export const DEEPSTATE_STYLES = Object.freeze({
+  default: Object.freeze({ greyWidth: 1.2, width: 1.8, greyOutline: 0.75, outline: 0.9, hatch: false }),
+  karta: Object.freeze({ greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true }),
+});
+
+/** Index polygónov pre rýchle „v ktorej zóne je bod": vonkajší prstenec + bbox. Pure. */
+export function buildPolyIndex(features) {
+  const out = [];
+  for (const f of features || []) {
+    if (f?.type !== 'Polygon' || !Array.isArray(f.rings?.[0]) || f.rings[0].length < 4) continue;
+    let w = 180, s = 90, e = -180, n = -90;
+    for (const [lon, lat] of f.rings[0]) { if (lon < w) w = lon; if (lon > e) e = lon; if (lat < s) s = lat; if (lat > n) n = lat; }
+    out.push({ kind: f.kind, ring: f.rings[0], bbox: [w, s, e, n] });
+  }
+  return out;
+}
+function pointInRing(lon, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+/**
+ * Strana bodu podľa polygónov DeepState: okupované → 'ru', sivá zóna → 'contested',
+ * inak `fallback` (vrstva dáva 'ua', keď snímka má okupované polygóny — všetko mimo
+ * nich DeepState považuje za územie pod kontrolou UA; bez snímky null). Pure.
+ */
+export function sideFromPolygons(index, lon, lat, { fallback = null } = {}) {
+  if (!Array.isArray(index) || !Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  let grey = false;
+  for (const p of index) {
+    const [w, s, e, n] = p.bbox;
+    if (lon < w || lon > e || lat < s || lat > n) continue;
+    if (!pointInRing(lon, lat, p.ring)) continue;
+    if (DEEPSTATE_RU_KINDS.includes(p.kind)) return 'ru';
+    if (p.kind === 'grey') grey = true;
+  }
+  return grey ? 'contested' : fallback;
+}
 
 /** Pozície kruhu [lon,lat] → Cartesian3 (bez výšky = primknuté). */
 export function ringPositions(ring) {
@@ -68,6 +115,8 @@ export function createUkraineDeepStateLayer({
 
   let _shown = false;
   let _snapshot = null;
+  let _polyIndex = [];
+  let _style = 'default';
   let _loading = false;
   let _error = null;
   let _destroyed = false;
@@ -80,6 +129,7 @@ export function createUkraineDeepStateLayer({
     ds.entities.removeAll();
     points.removeAll();
     if (!_snapshot?.features?.length) { requestRender(); return; }
+    const st = DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default;
     let n = 0;
     for (const f of _snapshot.features) {
       const colour = Cesium.Color.fromCssColorString(DEEPSTATE_COLORS[f.kind] || '#8a97a3');
@@ -88,14 +138,16 @@ export function createUkraineDeepStateLayer({
         const outer = ringPositions(f.rings[0]);
         const holes = f.rings.slice(1).map((r) => new Cesium.PolygonHierarchy(ringPositions(r)));
         n += 1;
+        // Sivá zóna na KARTE: šrafovanie 45° v obrazovkových px (ako „územie bojov" vo vzorke); bez cache materiálov výplň.
+        const material = (st.hatch && f.kind === 'grey') ? (hatchMaterialFor(DEEPSTATE_COLORS.grey, { lineAlpha: 0.6, fillAlpha: 0.1 }) || colour.withAlpha(alpha)) : colour.withAlpha(alpha);
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:poly:${n}`,
-          polygon: { hierarchy: new Cesium.PolygonHierarchy(outer, holes), material: colour.withAlpha(alpha), classificationType: Cesium.ClassificationType.BOTH },
+          polygon: { hierarchy: new Cesium.PolygonHierarchy(outer, holes), material, classificationType: Cesium.ClassificationType.BOTH },
           properties: { deepstate: { kind: f.kind, en: f.en, uk: f.uk, areaKm2: f.areaKm2, description: f.description || null } },
         });
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:line:${n}`,
-          polyline: { positions: outer, width: f.kind === 'grey' ? 1.2 : 1.8, material: colour.withAlpha(f.kind === 'grey' ? 0.75 : 0.9), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
+          polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : st.width, material: colour.withAlpha(f.kind === 'grey' ? st.greyOutline : st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
         });
       } else if (f.type === 'Point' && Number.isFinite(f.lat) && Number.isFinite(f.lon)) {
         const attack = f.kind === 'attack';
@@ -175,9 +227,23 @@ export function createUkraineDeepStateLayer({
   // ── verejné API ──────────────────────────────────────────────────────────
   function setSnapshot(snapshot) {
     _snapshot = snapshot && Array.isArray(snapshot.features) ? snapshot : null;
+    _polyIndex = buildPolyIndex(_snapshot?.features);
     _error = null;
     rebuild();
     emit();
+  }
+  /** Štýl 'default' | 'karta' (K3): tenšie obrysy, sivá zóna šrafovaná. */
+  function setStyle(mode) {
+    const next = DEEPSTATE_STYLES[mode] ? mode : 'default';
+    if (next === _style) return;
+    _style = next;
+    if (_snapshot) rebuild();
+    emit();
+  }
+  /** Strana bodu podľa polygónov snímky: 'ru' | 'contested' | 'ua' (mimo polygónov, keď snímka má okupované) | null bez snímky. */
+  function sideAt(lon, lat) {
+    const hasOccupied = _polyIndex.some((p) => DEEPSTATE_RU_KINDS.includes(p.kind));
+    return sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied ? 'ua' : null });
   }
   async function loadLatest(day = null) {
     if (_loading) return;
@@ -209,6 +275,7 @@ export function createUkraineDeepStateLayer({
       shown: _shown, loading: _loading, error: _error,
       day: _snapshot?.day || null, at: _snapshot?.at || null, stampText: deepstateStampText(_snapshot), datetime: _snapshot?.datetime || null,
       counts: _snapshot?.counts || null, areaKm2: _snapshot?.areaKm2 || null, features: _snapshot?.features?.length || 0, snapshots: _snapshot?.snapshots ?? null,
+      style: _style,
     };
   }
   function destroy() {
@@ -222,8 +289,9 @@ export function createUkraineDeepStateLayer({
   return {
     id: UKRAINE_DEEPSTATE_ID,
     show, hide, isShown: () => _shown, setSnapshot, loadLatest, getState,
+    setStyle, getStyle: () => _style, sideAt,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ ds, points, tip }),
+    _getStateForTest: () => ({ ds, points, tip, polyIndex: _polyIndex }),
   };
 }

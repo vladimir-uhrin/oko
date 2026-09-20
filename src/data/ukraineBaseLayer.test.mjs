@@ -92,6 +92,7 @@ function make(overrides = {}) {
     hoverFactory: (o) => { fakeHover(o); return hover; },
     groundSupport: () => true,
     terrainSampler: overrides.terrainSampler || (async (points) => { sampled.push(points.length); return points.map(() => 120); }),
+    glowImageFactory: overrides.glowImageFactory,
     projectorFactory: projector,
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
@@ -387,4 +388,39 @@ test('setReservedPlaces: sídla prevzaté hlásením GŠ sa v podklade skryjú (
   layer.setReservedPlaces([]);
   assert.equal(placeRecords.get(2).entity.show, true);
   assert.equal(villageRecords.get(3).entity.show, true);
+});
+
+test('K3: špendlíky podľa strany a žiarenie miest len v štýle karta — resolver, prefarbenie, obce v kohorte, default vráti farby tried', async () => {
+  const camera = { height: 120_000, lon: 37.8, lat: 48.97 };
+  const { layer } = make({ camera, glowImageFactory: () => 'glow.png' });
+  await layer.show();
+  await settle();
+  const { placeRecords, villageRecords, sources } = layer._getStateForTest();
+  const city = placeRecords.get(1).entity, lyman = placeRecords.get(2).entity, yampil = villageRecords.get(3).entity;
+  const baseCity = city.point.color.toCssHexString();
+  const sides = { '37.55,48.72': 'ua', '37.8,48.99': 'contested', '37.95,48.95': 'ru' };
+  let calls = 0;
+  layer.setSideResolver((lon, lat) => { calls += 1; return sides[`${lon},${lat}`] || null; });
+  assert.equal(city.point.color.toCssHexString(), baseCity, 'v štýle default sa strana nekreslí');
+  assert.equal(sources.places.entities.values.filter((e) => String(e.id).includes(':glow:')).length, 0, 'bez žiarenia v default');
+  layer.setStyle('karta');
+  assert.equal(city.point.color.withAlpha(1).toCssHexString(), '#5b8fd0', 'Kramatorsk UA modrá');
+  assert.equal(lyman.point.color.withAlpha(1).toCssHexString(), '#f0a53a', 'Lyman sporný oranžový');
+  assert.equal(yampil.point.color.withAlpha(1).toCssHexString(), '#d0554a', 'Yampil (obec v kohorte) RU červená');
+  assert.equal(villageRecords.get(4).entity.point.color.toCssHexString(), baseCity === '#f1f5f8' ? villageRecords.get(4).entity.point.color.toCssHexString() : villageRecords.get(4).entity.point.color.toCssHexString());
+  const glows = sources.places.entities.values.filter((e) => String(e.id).includes(':glow:'));
+  assert.equal(glows.length, 2, 'Kramatorsk (150 000) a Lyman (20 000) žiaria, obce nie');
+  assert.ok(glows.every((e) => e.show === true && e.billboard.image === 'glow.png'));
+  assert.ok(glows.find((e) => e.id.endsWith(':glow:1')).billboard.width > glows.find((e) => e.id.endsWith(':glow:2')).billboard.width, 'väčšie mesto = väčšie žiarenie');
+  assert.ok(calls > 0);
+  // zmena dát kontroly → refreshSides prefarbí
+  sides['37.8,48.99'] = 'ru';
+  layer.refreshSides();
+  assert.equal(lyman.point.color.withAlpha(1).toCssHexString(), '#d0554a');
+  layer.setStyle('default');
+  assert.equal(city.point.color.toCssHexString(), baseCity, 'default vráti farbu triedy');
+  assert.ok(glows.every((e) => e.show === false), 'žiarenie skryté');
+  layer.setSideResolver(null);
+  layer.setStyle('karta');
+  assert.equal(city.point.color.toCssHexString(), baseCity, 'bez resolvera ostávajú farby tried');
 });

@@ -28,7 +28,8 @@ const HOVER_MS = 90;
 
 const INERT = {
   id: UKRAINE_CONTROL_ID, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, setPointsVisible() {}, setZonesVisible() {},
-  getState: () => ({ shown: false, loading: false, error: null, day: null, revisionAt: null, summary: null, counts: null, points: 0 }),
+  setStyle() {}, getStyle: () => 'default', sideAt: () => null,
+  getState: () => ({ shown: false, loading: false, error: null, day: null, revisionAt: null, summary: null, counts: null, points: 0, style: 'default' }),
   onChange() { return () => {}; }, destroy() {},
 };
 
@@ -42,25 +43,44 @@ export function cssRgb(hex) {
  * Vykreslí raster zón na plátno: RU výplň, kontestované šrafovanie, UA nič.
  * Vracia to isté plátno (alebo null bez 2D kontextu). Nie je čisté (Canvas).
  */
-export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCALE, ruAlpha = 0.30, hatchAlpha = 0.6, uaAlpha = 0.0 } = {}) {
+export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCALE, ruAlpha = 0.30, hatchAlpha = 0.6, uaAlpha = 0.0, soft = 0, createCanvas = null } = {}) {
   const ctx = canvas?.getContext?.('2d');
   if (!ctx || !raster) return null;
   const w = raster.width * scale; const h = raster.height * scale;
   canvas.width = w; canvas.height = h;
   ctx.clearRect(0, 0, w, h);
   const [rr, rg, rb] = cssRgb(CONTROL_COLORS.ru); const [ur, ug, ub] = cssRgb(CONTROL_COLORS.ua);
-  ctx.fillStyle = `rgba(${rr}, ${rg}, ${rb}, ${ruAlpha})`;
-  for (let row = 0; row < raster.height; row += 1) {
-    let runStart = -1;
-    for (let col = 0; col <= raster.width; col += 1) {
-      const code = col < raster.width ? raster.cells[row * raster.width + col] : -1;
-      if (code === CONTROL_CODE.ru) { if (runStart < 0) runStart = col; continue; }
-      if (runStart >= 0) { ctx.fillRect(runStart * scale, row * scale, (col - runStart) * scale, scale); runStart = -1; }
+  const paintFills = (g, s) => {
+    g.fillStyle = `rgba(${rr}, ${rg}, ${rb}, ${ruAlpha})`;
+    for (let row = 0; row < raster.height; row += 1) {
+      let runStart = -1;
+      for (let col = 0; col <= raster.width; col += 1) {
+        const code = col < raster.width ? raster.cells[row * raster.width + col] : -1;
+        if (code === CONTROL_CODE.ru) { if (runStart < 0) runStart = col; continue; }
+        if (runStart >= 0) { g.fillRect(runStart * s, row * s, (col - runStart) * s, s); runStart = -1; }
+      }
     }
-  }
-  if (uaAlpha > 0) {
-    ctx.fillStyle = `rgba(${ur}, ${ug}, ${ub}, ${uaAlpha})`;
-    for (let row = 0; row < raster.height; row += 1) for (let col = 0; col < raster.width; col += 1) if (raster.cells[row * raster.width + col] === CONTROL_CODE.ua) ctx.fillRect(col * scale, row * scale, scale, scale);
+    if (uaAlpha > 0) {
+      g.fillStyle = `rgba(${ur}, ${ug}, ${ub}, ${uaAlpha})`;
+      for (let row = 0; row < raster.height; row += 1) for (let col = 0; col < raster.width; col += 1) if (raster.cells[row * raster.width + col] === CONTROL_CODE.ua) g.fillRect(col * s, row * s, s, s);
+    }
+  };
+  // Mäkké okraje (KARTA K3): výplne 1 px na bunku do pomocného plátna, potom
+  // zväčšené s vyhladzovaním a rozmazaním — zóny prestanú byť schodovité.
+  // Šrafovanie ostáva ostré. Bez továrne na plátno (testy) sa kreslí naostro.
+  const off = soft > 0 && typeof createCanvas === 'function' ? createCanvas() : null;
+  const og = off?.getContext?.('2d');
+  if (og) {
+    off.width = raster.width; off.height = raster.height;
+    og.clearRect(0, 0, raster.width, raster.height);
+    paintFills(og, 1);
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    if ('filter' in ctx) ctx.filter = `blur(${soft}px)`;
+    ctx.drawImage(off, 0, 0, w, h);
+    ctx.restore();
+  } else {
+    paintFills(ctx, scale);
   }
   // Šrafovanie: orežeme na kontestované bunky, potom diagonály cez celé plátno.
   ctx.save();
@@ -82,6 +102,34 @@ export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCAL
   ctx.restore();
   return canvas;
 }
+
+/**
+ * Strana najbližšieho sídla z bodov Wikipédie do `maxKm` (settlement/rural), inak null.
+ * Pure. Pre špendlíky podkladu na KARTE (K3).
+ * @returns {'ua'|'ru'|'contested'|null}
+ */
+export function nearestSide(points, lon, lat, maxKm = 3) {
+  if (!Array.isArray(points) || !Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  let best = null; let bestD = maxKm;
+  for (const p of points) {
+    if (p.kind !== 'settlement' && p.kind !== 'rural') continue;
+    const dLat = (p.lat - lat) * 111.32; if (Math.abs(dLat) > bestD) continue;
+    const dLon = (p.lon - lon) * 111.32 * cosLat; if (Math.abs(dLon) > bestD) continue;
+    const d = Math.hypot(dLat, dLon);
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  if (!best) return null;
+  if (best.side === 'ua' || best.side === 'ru') return best.side;
+  if (best.side === 'contested' || best.side === 'mixed') return 'contested';
+  return null;
+}
+
+/** Štýlové režimy rastra zón: KARTA = mäkké okraje, slabšia RU výplň, body Wikipédie skryté (špendlíky podkladu ich nahradia). */
+export const CONTROL_STYLES = Object.freeze({
+  default: Object.freeze({ soft: 0, ruAlpha: 0.30, points: true }),
+  karta: Object.freeze({ soft: 3, ruAlpha: 0.26, points: false }),
+});
 
 /** Veľkosť bodu podľa triedy populácie a druhu. Pure. */
 export function controlPointSize(p) {
@@ -132,6 +180,7 @@ export function createUkraineControlLayer({
   let _zonesVisible = true;
   let _snapshot = null;
   let _raster = null;
+  let _style = 'default';
   let _loading = false;
   let _error = null;
   let _destroyed = false;
@@ -160,7 +209,8 @@ export function createUkraineControlLayer({
       });
     }
     _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX });
-    const painted = paintControlCanvas(_raster, canvas);
+    const st = CONTROL_STYLES[_style] || CONTROL_STYLES.default;
+    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, ruAlpha: st.ruAlpha, createCanvas: () => doc.createElement('canvas') });
     if (painted) {
       const b = _raster.bbox;
       zoneEntity = ds.entities.add({
@@ -173,10 +223,21 @@ export function createUkraineControlLayer({
         },
       });
     }
-    points.show = _shown && _pointsVisible;
+    points.show = pointsShown();
     requestRender();
     void lift();
   }
+  const pointsShown = () => _shown && _pointsVisible && (CONTROL_STYLES[_style] || CONTROL_STYLES.default).points;
+  /** Štýl 'default' | 'karta' (K3): prekreslí raster mäkko a skryje body Wikipédie. */
+  function setStyle(mode) {
+    const next = CONTROL_STYLES[mode] ? mode : 'default';
+    if (next === _style) return;
+    _style = next;
+    if (_snapshot) rebuild(); else points.show = pointsShown();
+    emit();
+  }
+  /** Strana najbližšieho sídla z bodov Wikipédie (do 3 km), inak null. */
+  function sideAt(lon, lat, { maxKm = 3 } = {}) { return nearestSide(_snapshot?.points, lon, lat, maxKm); }
   function lift() {
     if (typeof terrainSampler !== 'function') return Promise.resolve();
     _liftChain = _liftChain.then(async () => {
@@ -244,7 +305,7 @@ export function createUkraineControlLayer({
     if (_destroyed) return false;
     _shown = true;
     ds.show = _zonesVisible;
-    points.show = _pointsVisible;
+    points.show = pointsShown();
     installHandler();
     requestRender();
     emit();
@@ -259,14 +320,14 @@ export function createUkraineControlLayer({
     requestRender();
     emit();
   }
-  function setPointsVisible(on) { _pointsVisible = Boolean(on); points.show = _shown && _pointsVisible; requestRender(); emit(); }
+  function setPointsVisible(on) { _pointsVisible = Boolean(on); points.show = pointsShown(); requestRender(); emit(); }
   function setZonesVisible(on) { _zonesVisible = Boolean(on); ds.show = _shown && _zonesVisible; if (zoneEntity?.rectangle) zoneEntity.rectangle.show = _zonesVisible; requestRender(); emit(); }
   function getState() {
     return {
       shown: _shown, loading: _loading, error: _error, pointsVisible: _pointsVisible, zonesVisible: _zonesVisible,
       day: _snapshot?.day || null, revisionAt: _snapshot?.revisionAt || null, snapshots: _snapshot?.snapshots ?? null,
       summary: _snapshot ? (_snapshot.summary || controlSummary(_snapshot.points)) : null, counts: _raster?.counts || null, points: _snapshot?.points?.length || 0,
-      revisions: _snapshot?.revisions || null,
+      revisions: _snapshot?.revisions || null, style: _style,
     };
   }
   function destroy() {
@@ -280,6 +341,7 @@ export function createUkraineControlLayer({
   return {
     id: UKRAINE_CONTROL_ID,
     show, hide, isShown: () => _shown, setSnapshot, loadLatest, setPointsVisible, setZonesVisible, getState,
+    setStyle, getStyle: () => _style, sideAt,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
     _getStateForTest: () => ({ points, ds, canvas, raster: _raster, zoneEntity, tip }),

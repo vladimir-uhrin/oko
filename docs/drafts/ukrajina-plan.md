@@ -226,8 +226,12 @@ Zápis: `docs/CURRENT-STATE.md` („KARTA — cartographic mode, stages K0 + K1"
   (AREAS_DRAW_CLASSES), podklad má štýl `karta` (čiary ×0,5, body ×0,72, písma ×0,9), rampa reliéfu
   podľa schválenej vzorky; pravá príčina čierneho glóbusu bol render governor (fronta dlaždíc sa bez
   snímku nespracuje) → strážca dlaždíc v idle režime. Otvorené: obrysy DeepState a raster Wikipédie (K3).
-- **K3 zóny jemne (1 deň)**: raster 0,01° + rozmazanie, šrafovanie, farba sídiel podľa strany,
-  žiarenie miest; legenda hovorí „odvodené z Wikipédie / DeepState".
+- **K3 zóny jemne (1 deň)** — HOTOVÉ 09-20: raster KONTROLA s mäkkými okrajmi (výplne 1 px/bunku +
+  rozmazanie, šrafovanie ostré), sivá zóna DeepState šrafovaná 45° v obrazovkových px (Fabric
+  `OkoHatch45`), obrysy DeepState tenšie, špendlíky sídiel podľa strany (Wikipedia bod do 3 km, inak
+  polygóny DeepState, mimo nich UA), žiarenie miest od 10 000 obyv.; všetko len v štýle `karta`.
+  Pôvodný plán: raster 0,01° + rozmazanie, šrafovanie, farba sídiel podľa strany, žiarenie miest;
+  legenda hovorí „odvodené z Wikipédie / DeepState".
 - **K4 boje a smery (½–1 deň)**: blesky, odznaky ciest, DeepState šípky s normálou frontu —
   len po súhlase.
 - **K5 export (½ dňa)**: titulok, legenda, mapka, snímka, „čistá karta".

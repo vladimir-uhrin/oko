@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONTROL_CODE } from './data/ukraineControl.js';
-import { controlPointSize, createUkraineControlLayer, cssRgb, paintControlCanvas } from './ukraineControlLayer.js';
+import { CONTROL_STYLES, controlPointSize, createUkraineControlLayer, cssRgb, nearestSide, paintControlCanvas } from './ukraineControlLayer.js';
 
 function fakeCanvas() {
   const calls = [];
@@ -49,4 +49,41 @@ test('bez viewera je vrstva inertná', () => {
   assert.equal(inert.isShown(), false);
   inert.setSnapshot({ points: [] });
   assert.equal(inert.getState().points, 0);
+});
+
+test('K3: nearestSide — najbližšie sídlo do 3 km, infraštruktúra sa nepočíta, mixed = contested, ďaleko = null', () => {
+  const pts = [
+    { lat: 48.99, lon: 37.80, side: 'contested', kind: 'settlement' },
+    { lat: 48.98, lon: 37.95, side: 'ru', kind: 'settlement' },
+    { lat: 49.03, lon: 37.55, side: 'ua', kind: 'infrastructure' },
+    { lat: 49.03, lon: 37.60, side: 'mixed', kind: 'rural' },
+  ];
+  assert.equal(nearestSide(pts, 37.805, 48.992), 'contested');
+  assert.equal(nearestSide(pts, 37.94, 48.985), 'ru');
+  assert.equal(nearestSide(pts, 37.55, 49.03), null, 'infraštruktúra nie je sídlo');
+  assert.equal(nearestSide(pts, 37.6, 49.03), 'contested', 'mixed → contested');
+  assert.equal(nearestSide(pts, 37.0, 48.5), null);
+  assert.equal(nearestSide(pts, 37.805, 48.992, 0.1), null, 'maxKm ostro');
+  assert.equal(nearestSide(null, 37, 48), null);
+  assert.deepEqual(CONTROL_STYLES.karta.points, false);
+});
+
+test('K3: paintControlCanvas mäkko — výplne 1 px na bunku do pomocného plátna, rozmazané zväčšenie, šrafovanie ostré; bez továrne ostrý spôsob', () => {
+  const raster = { width: 4, height: 2, cells: Uint8Array.from([2, 2, 0, 3, 1, 2, 3, 0]) };
+  const canvas = fakeCanvas();
+  const offs = [];
+  const createCanvas = () => { const c = fakeCanvas(); c.getContext().drawImage = undefined; offs.push(c); return c; };
+  const ctx = canvas.getContext();
+  ctx.drawImage = (...a) => canvas.calls.push(['drawImage', ...a.slice(1)]);
+  ctx.filter = 'none';
+  const out = paintControlCanvas(raster, canvas, { scale: 2, soft: 3, createCanvas });
+  assert.equal(out, canvas);
+  assert.equal(offs.length, 1); assert.equal(offs[0].width, 4); assert.equal(offs[0].height, 2);
+  assert.ok(offs[0].calls.some((c) => c[0] === 'fillRect'), 'výplne šli do pomocného plátna');
+  assert.ok(!canvas.calls.some((c) => c[0] === 'fillRect' && String(c[1]).includes('224, 85, 63')), 'na výstupe žiadna ostrá RU výplň');
+  assert.ok(canvas.calls.some((c) => c[0] === 'drawImage' && c[3] === 8 && c[4] === 4), 'pomocné plátno nakreslené v plnej veľkosti');
+  assert.equal(canvas.calls.filter((c) => c[0] === 'stroke').length, 1, 'šrafovanie ostré na výstupe');
+  const crisp = fakeCanvas();
+  paintControlCanvas(raster, crisp, { scale: 2, soft: 3 });
+  assert.ok(crisp.calls.some((c) => c[0] === 'fillRect'), 'bez továrne kreslí naostro');
 });

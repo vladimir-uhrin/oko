@@ -697,6 +697,19 @@ async function init() {
     // a šedej zóny z nášho denného archívu; časová os prepína snímku podľa dňa.
     const ukraineDeepState = createUkraineDeepStateLayer({ viewer });
     window.__godsEyeView.ukraineDeepState = ukraineDeepState;
+    // KARTA K3 (2026-09-20): špendlíky sídiel podľa strany (Wikipedia body do 3 km,
+    // inak polygóny DeepState), mäkký raster KONTROLA a šrafovaná sivá zóna — len
+    // v štýle karta; pri zmene dát sa špendlíky prefarbia.
+    ukraineBase.setSideResolver((lon, lat) => ukraineControl.sideAt(lon, lat) ?? ukraineDeepState.sideAt(lon, lat));
+    ukraineControl.onChange(() => ukraineBase.refreshSides());
+    ukraineDeepState.onChange(() => ukraineBase.refreshSides());
+    const applyUkraineZoneStyle = (stack) => {
+      const mode = stack?.kind === 'hillshade' ? 'karta' : 'default';
+      ukraineControl.setStyle(mode);
+      ukraineDeepState.setStyle(mode);
+    };
+    applyUkraineZoneStyle(getActiveMapStack());
+    onActiveMapStackChange(applyUkraineZoneStyle);
     // Škody na budovách (etapa 5): statické, zapína sa čipom ŠKODY (nie so smerom —
     // 18 000 bodov UNOSAT nech si používateľ pridá sám).
     const ukraineDamage = createUkraineDamageLayer({ viewer });

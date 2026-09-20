@@ -65,6 +65,23 @@ export const UKRAINE_BASE_STYLES = Object.freeze({
   default: Object.freeze({ line: 1, point: 1, font: 1 }),
   karta: Object.freeze({ line: 0.5, point: 0.72, font: 0.9 }),
 });
+/** Farby špendlíkov podľa strany (KARTA K3, ako vo vzorke): UA modrá, RU červená, sporné oranžová. */
+export const SIDE_PIN_COLORS = Object.freeze({ ua: '#5b8fd0', ru: '#d0554a', contested: '#f0a53a' });
+/** Žiarenie miest na KARTE: od tejto populácie, polomer z populácie, teplá červená. */
+export const GLOW_MIN_POP = 10_000;
+export const GLOW_COLOR = '#ff5a4a';
+export const GLOW_ALPHA = 0.3;
+export function glowRadiusPx(pop) { return Math.min(70, 26 + 14 * Math.log10(Math.max(1, (Number(pop) || 0) / 5000))); }
+/** Radiálny gradient (biely stred → priehľadné) ako obrázok billboardu; farbu dodá billboard.color. */
+export function defaultGlowImage(doc = globalThis.document) {
+  if (!doc?.createElement) return null;
+  const c = doc.createElement('canvas'); c.width = 64; c.height = 64;
+  const g = c.getContext('2d'); if (!g) return null;
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.55, 'rgba(255,255,255,0.4)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  return c;
+}
 
 /** GPU vie pozemné čiary (hĺbková textúra)? Bez scény optimisticky áno. */
 export function defaultGroundSupport(scene) {
@@ -128,11 +145,12 @@ export function createUkraineBaseLayer({
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
   now = () => Date.now(),
+  glowImageFactory = defaultGlowImage,
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   const inert = {
     id: UKRAINE_BASE_ID, show: async () => false, hide() {}, toggle: async () => false, isShown: () => false,
-    setPart() {}, getParts: () => ({ ...defaultParts() }), loadMeta: async () => null, getPlaceIndex: async () => new Map(), setReservedPlaces() {}, setStyle() {}, getStyle: () => 'default',
+    setPart() {}, getParts: () => ({ ...defaultParts() }), loadMeta: async () => null, getPlaceIndex: async () => new Map(), setReservedPlaces() {}, setStyle() {}, getStyle: () => 'default', setSideResolver() {}, refreshSides() {},
     getState: () => ({ shown: false, loading: false, loaded: false, error: 'no-viewer', meta: null, parts: defaultParts(), counts: emptyCounts(), villagesLoaded: false, snapshotDate: null }),
     onChange: () => () => {}, refresh() {}, destroy() {},
   };
@@ -173,6 +191,11 @@ export function createUkraineBaseLayer({
   const _byEntityId = new Map();
   /** Popisky bez záznamu (rieky, oblasti) — zdvíhajú sa raz po načítaní. */
   const _looseLabels = [];
+  // Strana sídla (KARTA K3): resolver z vrstiev KONTROLA/DeepState (main.js); špendlíky
+  // podľa strany a žiarenie miest sa kreslia len v štýle 'karta'.
+  let _sideResolver = null;
+  let _glowImage = undefined; // undefined = ešte neskúšané, null = nedostupné
+  const glowImage = () => { if (_glowImage === undefined) { try { _glowImage = glowImageFactory?.() || null; } catch { _glowImage = null; } } return _glowImage; };
   // Štýl (UKRAINE_BASE_STYLES): položky { entity, line?, point?, font? } so ZÁKLADNÝMI hodnotami.
   let _styleMode = 'default';
   const _styled = new Set();
@@ -198,8 +221,56 @@ export function createUkraineBaseLayer({
     if (next === _styleMode) return;
     _styleMode = next;
     for (const item of _styled) applyStyleItem(item);
+    refreshSides();
     requestRender();
     emit();
+  }
+  /** Farba bodu sídla: v štýle karta podľa strany (resolver), inak farba triedy. */
+  function pinColorFor(record) {
+    const base = (PLACE_STYLE[record.props.cls] || PLACE_STYLE.village).color;
+    if (_styleMode !== 'karta' || typeof _sideResolver !== 'function') return base;
+    let side = null;
+    try { side = _sideResolver(record.lon, record.lat, record.props); } catch { side = null; }
+    return SIDE_PIN_COLORS[side] || base;
+  }
+  function applySide(record) {
+    const css = pinColorFor(record);
+    if (record.pinCss === css) return;
+    record.pinCss = css;
+    try { if (record.entity.point) record.entity.point.color = Cesium.Color.fromCssColorString(css).withAlpha(0.95); } catch { /* */ }
+  }
+  /** Žiarenie mesta (billboard pod špendlíkom) — len karta, mestá a mestečká od GLOW_MIN_POP. */
+  function applyGlow(record) {
+    const wants = _styleMode === 'karta' && (record.cls === 'city' || record.cls === 'town') && (Number(record.props.pop) || 0) >= GLOW_MIN_POP;
+    if (!wants) { if (record.glow) record.glow.show = false; return; }
+    if (!record.glow) {
+      const image = glowImage();
+      if (!image) return;
+      const r = glowRadiusPx(record.props.pop);
+      record.glow = sources.places.entities.add({
+        id: `${UKRAINE_BASE_ID}:glow:${record.id}`,
+        position: record.position,
+        billboard: {
+          image, width: 2 * r, height: 2 * r,
+          color: Cesium.Color.fromCssColorString(GLOW_COLOR).withAlpha(GLOW_ALPHA),
+          distanceDisplayCondition: ddc([0, 1_500_000]),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        },
+      });
+    }
+    record.glow.show = true;
+  }
+  /** Nastaví zdroj strany sídla (lon, lat, props) → 'ua'|'ru'|'contested'|null a prefarbí špendlíky. */
+  function setSideResolver(fn) {
+    _sideResolver = typeof fn === 'function' ? fn : null;
+    refreshSides();
+  }
+  /** Prefarbí všetky špendlíky a žiarenia podľa aktuálneho štýlu a resolvera (po zmene dát kontroly). */
+  function refreshSides() {
+    for (const record of _placeRecords.values()) { applySide(record); applyGlow(record); }
+    for (const record of _villageRecords.values()) applySide(record);
+    requestRender();
   }
   let _liftFailedAt = 0;
   let _liftSamples = 0;
@@ -303,6 +374,9 @@ export function createUkraineBaseLayer({
     const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true, lifted: false, reservedHidden: false };
     _byEntityId.set(entityId, record);
     record.styleItem = registerStyle(entity, { point: style.pointPx, font: { px: style.fontPx, weight: style.weight, italic: false } });
+    record.pinCss = style.color;
+    applySide(record);
+    if (props.cls !== 'village') applyGlow(record);
     applyReservedTo(record);
     return record;
   }
@@ -361,6 +435,7 @@ export function createUkraineBaseLayer({
   function removeRecord(ds, record) {
     _byEntityId.delete(record.entity.id);
     if (record.styleItem) _styled.delete(record.styleItem);
+    if (record.glow) { try { ds.entities.remove(record.glow); } catch { /* */ } record.glow = null; }
     try { ds.entities.remove(record.entity); } catch { /* už preč */ }
   }
 
@@ -804,6 +879,8 @@ export function createUkraineBaseLayer({
     setReservedPlaces,
     setStyle,
     getStyle: () => _styleMode,
+    setSideResolver,
+    refreshSides,
     getState,
     onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
     refresh,
