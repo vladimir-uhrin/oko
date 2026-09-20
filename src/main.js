@@ -45,6 +45,9 @@ import { createSceneRevealGate } from './sceneRevealGate.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
+import { createUkraineKartaOverlay, drawKartaExport } from './ukraineKartaOverlay.js';
+import { captureShareSnapshot, snapshotStamp } from './shareSnapshot.js';
+import { buildAttributionLine } from './shareTargets.js';
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
@@ -580,11 +583,14 @@ async function init() {
       });
     };
     let ukraineEvents = null; // vrstva udalostí UKRAJINA (etapa 3) — vzniká nižšie, brána ju už pozná
+    let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
+    let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
     const revealGate = createSceneRevealGate({
       viewer,
       onChange: (visible) => {
         incidentCards.setRevealed(visible);
         ukraineEvents?.setRevealed(visible);
+        kartaOverlay?.setRevealed(visible);
         scenePinDs.show = visible;
         viewer.scene?.requestRender?.();
       },
@@ -711,6 +717,46 @@ async function init() {
     };
     applyUkraineZoneStyle(getActiveMapStack());
     onActiveMapStackChange(applyUkraineZoneStyle);
+
+    // Rám „hotovej mapy" KARTA (K5): titulok + legenda + prehľadová mapka; len na
+    // podklade KARTA a pri priblížení (brána), „čistá karta" schová chróm, „Snímka"
+    // zapečie rám do zdieľanej snímky.
+    async function exportKarta() {
+      if (!kartaOverlay) return;
+      const creditsText = document.querySelector('#cesium-credits')?.textContent || '';
+      try {
+        const snap = await captureShareSnapshot({
+          viewer,
+          stamp: snapshotStamp(Date.now(), currentLanguage()),
+          attribution: buildAttributionLine(creditsText),
+          decorate: (ctx, w, h) => drawKartaExport(ctx, kartaOverlay.getModel(), w, h),
+        });
+        if (!snap?.jpegDataUrl) return;
+        const a = document.createElement('a');
+        a.href = snap.jpegDataUrl;
+        a.download = `oko-karta-${activeFrontScene?.id || 'front'}-${new Date().toISOString().slice(0, 10)}.jpg`;
+        document.body.appendChild(a); a.click(); a.remove();
+      } catch (error) { console.warn('[karta] export failed:', error?.message || error); }
+    }
+    kartaOverlay = createUkraineKartaOverlay({
+      translate: t,
+      lang: () => currentLanguage(),
+      control: ukraineControl,
+      deepstate: ukraineDeepState,
+      report: ukraineReport,
+      getViewRect: () => {
+        try {
+          const r = viewer.camera.computeViewRectangle();
+          if (r) return [Cesium.Math.toDegrees(r.west), Cesium.Math.toDegrees(r.south), Cesium.Math.toDegrees(r.east), Cesium.Math.toDegrees(r.north)];
+        } catch { /* mimo glóbusu */ }
+        return activeFrontScene?.rectDegrees || null;
+      },
+      onExport: () => { void exportKarta(); },
+    });
+    window.__godsEyeView.ukraineKartaOverlay = kartaOverlay;
+    kartaOverlay.setStack(getActiveMapStack());
+    onActiveMapStackChange((stack) => kartaOverlay.setStack(stack));
+    viewer.camera?.moveEnd?.addEventListener?.(() => { if (kartaOverlay.isVisible()) kartaOverlay.update(); });
     // Škody na budovách (etapa 5): statické, zapína sa čipom ŠKODY (nie so smerom —
     // 18 000 bodov UNOSAT nech si používateľ pridá sám).
     const ukraineDamage = createUkraineDamageLayer({ viewer });
@@ -720,6 +766,8 @@ async function init() {
     let ukrainePanel = null;
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);
+      activeFrontScene = scene || null;
+      kartaOverlay?.setScene(scene || null);
       ukrainePanel?.setActiveScene(scene?.id || null);
       ukraineTimeline.setActiveScene(scene?.id || null);
       if (scene) {

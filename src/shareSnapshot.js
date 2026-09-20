@@ -35,6 +35,7 @@ export async function captureShareSnapshot({
   height = SHARE_IMAGE_HEIGHT,
   stamp = '',
   attribution = '',
+  decorate = null,
 } = {}) {
   if (!doc?.createElement) return null;
   const sources = [];
@@ -59,6 +60,11 @@ export async function captureShareSnapshot({
     if (!sw || !sh) continue;
     const crop = fitCover(sw, sh, width, height);
     try { ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height); } catch { /* prázdne alebo cudzie plátno */ }
+  }
+
+  // Voliteľný rám (KARTA K5: titulok, legenda, mapka) sa zapečie nad pás atribúcie.
+  if (typeof decorate === 'function') {
+    try { decorate(ctx, width, height - STRIP_HEIGHT_PX); } catch { /* rám je najlepšia snaha */ }
   }
 
   // Pás s pečiatkou a atribúciou.

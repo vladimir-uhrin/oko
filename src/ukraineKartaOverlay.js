@@ -1,0 +1,373 @@
+// src/ukraineKartaOverlay.js
+/**
+ * @module ukraineKartaOverlay
+ * @description Rám „hotovej mapy" pre kartografický režim KARTA (K5): titulok
+ * so smerom a stavom, legenda podľa zapnutých vrstiev a prehľadová mapka
+ * Ukrajiny s obdĺžnikom pohľadu. Tri ostrovy sa ukazujú len na podklade KARTA
+ * (kind hillshade) a schovajú sa pri pohľade na planétu (brána priblíženia).
+ * Tlačidlo „čistá karta" schová chróm appky (telo dostane triedu
+ * `oko-karta-clean`), aby sa dala mapa odfotiť; snímku bakuje `shareSnapshot`.
+ *
+ * Geometria ostrovov je v `style.css` (test overlayIslands zakazuje `position:
+ * fixed` vo vstreknutom `<style>`); tento modul plní len obsah a prepína triedy.
+ */
+import { frontSceneLabel } from './ukraineFrontScenes.js';
+import { UKRAINE_OUTLINE_BBOX, UKRAINE_OUTLINE_RINGS } from './data/ukraineOutline.js';
+
+export const KARTA_OVERLAY_ID = 'oko-karta-overlay';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Farby legendy (zhodné s vrstvami KARTA). */
+export const KARTA_LEGEND_COLORS = Object.freeze({
+  occupied: '#d0554a', grey: '#8a8f98', ru: '#e0553f',
+  pinUa: '#5b8fd0', pinRu: '#d0554a', pinContested: '#f0a53a',
+  combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a',
+});
+
+/**
+ * Projekcia [lon, lat] → { x, y } do rámu mapky (ekvirektangulárna, x stlačené
+ * o cos(stredná šírka), zachovaný pomer strán, okraj `pad`). Pure.
+ * @param {number[]} bbox [W, S, E, N]
+ */
+export function makeInsetProjection(bbox, width, height, pad = 6) {
+  const [W, S, E, N] = bbox;
+  const kx = Math.cos(((S + N) / 2) * Math.PI / 180);
+  const geoW = Math.max(1e-6, (E - W) * kx);
+  const geoH = Math.max(1e-6, (N - S));
+  const availW = Math.max(1, width - pad * 2);
+  const availH = Math.max(1, height - pad * 2);
+  const s = Math.min(availW / geoW, availH / geoH);
+  const ox = pad + (availW - geoW * s) / 2;
+  const oy = pad + (availH - geoH * s) / 2;
+  const project = (lon, lat) => ({ x: ox + (lon - W) * kx * s, y: oy + (N - lat) * s });
+  const rect = (rectDeg) => {
+    const a = project(rectDeg[0], rectDeg[3]);
+    const b = project(rectDeg[2], rectDeg[1]);
+    return { x: a.x, y: a.y, w: Math.max(3, b.x - a.x), h: Math.max(3, b.y - a.y) };
+  };
+  return { project, rect, scale: s };
+}
+
+/** SVG `d` pre prstenec cez danú projekciu. Pure. */
+export function insetRingPath(project, ring) {
+  if (!Array.isArray(ring) || !ring.length) return '';
+  let d = '';
+  for (let i = 0; i < ring.length; i += 1) {
+    const p = project(ring[i][0], ring[i][1]);
+    d += `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)} `;
+  }
+  return `${d}Z`;
+}
+
+/** Titulok: názov smeru (alebo všeobecný) + „stav k …" + zdroje. Pure. */
+export function kartaTitleModel({ scene = null, dateText = '', sources = [], translate = (k) => k } = {}) {
+  const title = scene ? frontSceneLabel(scene, translate) : translate('ukraine.karta.title');
+  const subtitle = dateText ? translate('ukraine.karta.state', { date: dateText }) : '';
+  return { title, subtitle, sources: sources.filter(Boolean).join(' · ') };
+}
+
+/** „Stav k" dátum: hlásenie GŠ, inak DeepState, inak revízia Wikipédie. Pure. */
+export function kartaDateText({ report = null, deepstate = null, control = null } = {}) {
+  if (report?.reportedAtText) return report.reportedAtText;
+  if (deepstate?.stampText) return deepstate.stampText;
+  if (control?.revisionAt) return String(control.revisionAt).slice(0, 10);
+  return '';
+}
+
+/** Zdroje aktívnych vrstiev (na titulok/legendu). Pure. */
+export function kartaSources({ report = null, deepstate = null, control = null, translate = (k) => k } = {}) {
+  const out = [];
+  if (report?.shown) out.push(translate('ukraine.karta.src.gs'));
+  if (deepstate?.shown) out.push(translate('ukraine.karta.src.deepstate'));
+  else if (control?.shown) out.push(translate('ukraine.karta.src.wiki'));
+  out.push(translate('ukraine.karta.src.osm'));
+  return out;
+}
+
+/** Položky legendy podľa toho, ktoré vrstvy sú zapnuté. Pure. */
+export function kartaLegendItems({ report = null, deepstate = null, control = null, translate = (k) => k } = {}) {
+  const c = KARTA_LEGEND_COLORS;
+  const items = [];
+  if (deepstate?.shown) {
+    items.push({ key: 'occupied', colorCss: c.occupied, label: translate('ukraine.karta.legend.occupied') });
+    items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
+  } else if (control?.shown) {
+    items.push({ key: 'ru', colorCss: c.ru, label: translate('ukraine.karta.legend.ru') });
+  }
+  items.push({ key: 'pin-ua', colorCss: c.pinUa, dot: true, label: translate('ukraine.karta.legend.pin-ua') });
+  items.push({ key: 'pin-ru', colorCss: c.pinRu, dot: true, label: translate('ukraine.karta.legend.pin-ru') });
+  if (report?.shown) items.push({ key: 'combat', colorCss: c.combat, glyph: 'bolt', label: translate('ukraine.karta.legend.combat') });
+  items.push({ key: 'road', colorCss: c.road, glyph: 'shield', label: translate('ukraine.karta.legend.road') });
+  return items;
+}
+
+function roundRectPath(g, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  g.beginPath();
+  g.moveTo(x + rad, y);
+  g.arcTo(x + w, y, x + w, y + h, rad);
+  g.arcTo(x + w, y + h, x, y + h, rad);
+  g.arcTo(x, y + h, x, y, rad);
+  g.arcTo(x, y, x + w, y, rad);
+  g.closePath();
+}
+
+/**
+ * Zapečie rám KARTA (titulok, legenda, prehľadová mapka) do plátna snímky
+ * (K5 export). `area` je výška kresliacej plochy nad pásom atribúcie. Kreslí
+ * priamo cez ctx 2D — používa sa ako `decorate` v shareSnapshot.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {object} model getModel() z overlay
+ */
+export function drawKartaExport(ctx, model, width, height, { font = 'system-ui, "Segoe UI", sans-serif' } = {}) {
+  if (!ctx || !model) return;
+  const pad = 22;
+  ctx.save();
+  ctx.textBaseline = 'alphabetic';
+  // Titulok vľavo hore.
+  const t = model.title || {};
+  if (t.title) {
+    ctx.font = `700 26px ${font}`;
+    const tw = ctx.measureText(t.title.toUpperCase()).width;
+    ctx.font = `12px ${font}`;
+    const sw = Math.max(t.subtitle ? ctx.measureText(t.subtitle).width : 0, t.sources ? ctx.measureText(t.sources).width : 0);
+    const boxW = Math.min(width * 0.6, Math.max(tw, sw) + 28);
+    const boxH = 34 + (t.subtitle ? 20 : 0) + (t.sources ? 18 : 0);
+    ctx.fillStyle = 'rgba(8, 14, 22, 0.74)';
+    roundRectPath(ctx, pad, pad, boxW, boxH, 8); ctx.fill();
+    ctx.fillStyle = '#f2f8fd'; ctx.font = `700 26px ${font}`;
+    ctx.fillText(t.title.toUpperCase(), pad + 14, pad + 28);
+    let ty = pad + 28;
+    if (t.subtitle) { ty += 20; ctx.fillStyle = '#9fb2c4'; ctx.font = `12px ${font}`; ctx.fillText(t.subtitle, pad + 14, ty); }
+    if (t.sources) { ty += 18; ctx.fillStyle = '#6d8296'; ctx.font = `11px ${font}`; ctx.fillText(t.sources, pad + 14, ty); }
+  }
+  // Legenda vľavo dole.
+  const items = Array.isArray(model.legend) ? model.legend : [];
+  if (items.length) {
+    ctx.font = `12px ${font}`;
+    const rowH = 20, headH = 18;
+    const boxW = Math.min(width * 0.34, 40 + Math.max(...items.map((i) => ctx.measureText(i.label).width)));
+    const boxH = headH + items.length * rowH + 12;
+    const bx = pad, by = height - boxH - pad;
+    ctx.fillStyle = 'rgba(8, 14, 22, 0.74)';
+    roundRectPath(ctx, bx, by, boxW, boxH, 8); ctx.fill();
+    ctx.fillStyle = '#7f93a6'; ctx.font = `10px ${font}`;
+    ctx.fillText((model.legendHead || 'LEGENDA'), bx + 12, by + 14);
+    items.forEach((item, i) => {
+      const ry = by + headH + 8 + i * rowH;
+      ctx.fillStyle = item.colorCss || '#888';
+      if (item.dot) { ctx.beginPath(); ctx.arc(bx + 16, ry + 4, 5, 0, Math.PI * 2); ctx.fill(); }
+      else { roundRectPath(ctx, bx + 10, ry - 2, 16, 11, 2); ctx.fill(); }
+      ctx.fillStyle = '#cdd9e4'; ctx.font = `12px ${font}`;
+      ctx.fillText(item.label, bx + 34, ry + 8);
+    });
+  }
+  // Prehľadová mapka vpravo dole.
+  const insetW = 200, insetH = 144;
+  const ix = width - insetW - pad, iy = height - insetH - pad;
+  ctx.fillStyle = 'rgba(8, 14, 22, 0.74)';
+  roundRectPath(ctx, ix, iy, insetW, insetH, 8); ctx.fill();
+  const proj = makeInsetProjection(UKRAINE_OUTLINE_BBOX, insetW, insetH, 12);
+  ctx.save();
+  ctx.translate(ix, iy);
+  ctx.strokeStyle = 'rgba(150, 180, 205, 0.6)'; ctx.lineWidth = 1; ctx.fillStyle = 'rgba(120, 150, 175, 0.10)';
+  for (const ring of UKRAINE_OUTLINE_RINGS) {
+    if (!ring.length) continue;
+    ctx.beginPath();
+    ring.forEach(([lon, lat], i) => { const p = proj.project(lon, lat); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  if (Array.isArray(model.viewRect) && model.viewRect.length === 4) {
+    const r = proj.rect(model.viewRect);
+    ctx.strokeStyle = '#00d4ff'; ctx.fillStyle = 'rgba(0, 212, 255, 0.16)'; ctx.lineWidth = 1.4;
+    ctx.fillRect(r.x, r.y, r.w, r.h); ctx.strokeRect(r.x, r.y, r.w, r.h);
+  }
+  if (model.scene?.center) {
+    const p = proj.project(model.scene.center.lon, model.scene.center.lat);
+    ctx.fillStyle = '#f87171'; ctx.strokeStyle = 'rgba(6,12,20,0.85)'; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
+function el(doc, tag, cls, text) {
+  const node = doc.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+/**
+ * @param {object} o
+ * @param {Document} [o.documentRef]
+ * @param {Function} [o.translate]
+ * @param {() => string} [o.lang]
+ * @param {object} [o.control] vrstva KONTROLA (getState/onChange/isShown)
+ * @param {object} [o.deepstate]
+ * @param {object} [o.report]
+ * @param {() => number[]|null} [o.getViewRect] aktuálny obdĺžnik pohľadu [W,S,E,N]
+ * @param {(clean: boolean) => void} [o.onCleanChange]
+ * @param {() => any} [o.onExport] klik na „Snímka"
+ */
+export function createUkraineKartaOverlay({
+  documentRef = globalThis.document,
+  translate = (k) => k,
+  lang = () => 'sk',
+  control = null,
+  deepstate = null,
+  report = null,
+  getViewRect = () => null,
+  onCleanChange = () => {},
+  onExport = () => {},
+} = {}) {
+  const doc = documentRef;
+  const inert = {
+    id: KARTA_OVERLAY_ID, setStack() {}, setScene() {}, setRevealed() {}, update() {},
+    setClean() {}, isClean: () => false, isVisible: () => false, destroy() {},
+    _getStateForTest: () => ({ visible: false }),
+  };
+  if (!doc?.createElement || !doc.body) return inert;
+
+  let _scene = null;
+  let _isKarta = false;
+  let _revealed = true;
+  let _clean = false;
+  let _destroyed = false;
+
+  const root = el(doc, 'div', 'oko-karta-overlay');
+  root.id = KARTA_OVERLAY_ID;
+  root.setAttribute('aria-hidden', 'true');
+
+  // Titulok.
+  const titleIsland = el(doc, 'div', 'oko-karta-island oko-karta-title');
+  const titleH = el(doc, 'div', 'oko-karta-title-name');
+  const titleSub = el(doc, 'div', 'oko-karta-title-state');
+  const titleSrc = el(doc, 'div', 'oko-karta-title-src');
+  titleIsland.append(titleH, titleSub, titleSrc);
+
+  // Legenda.
+  const legendIsland = el(doc, 'div', 'oko-karta-island oko-karta-legend');
+  const legendList = el(doc, 'ul', 'oko-karta-legend-list');
+  legendIsland.append(el(doc, 'div', 'oko-karta-legend-head', translate('ukraine.karta.legend.head')), legendList);
+
+  // Prehľadová mapka.
+  const insetIsland = el(doc, 'div', 'oko-karta-island oko-karta-inset');
+  const svg = doc.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 150 108');
+  svg.setAttribute('class', 'oko-karta-inset-svg');
+  const outlinePath = doc.createElementNS(SVG_NS, 'path');
+  outlinePath.setAttribute('class', 'oko-karta-inset-outline');
+  const viewRectEl = doc.createElementNS(SVG_NS, 'rect');
+  viewRectEl.setAttribute('class', 'oko-karta-inset-view');
+  const dot = doc.createElementNS(SVG_NS, 'circle');
+  dot.setAttribute('class', 'oko-karta-inset-dot');
+  dot.setAttribute('r', '2.4');
+  svg.append(outlinePath, viewRectEl, dot);
+  insetIsland.append(svg);
+
+  // Nástroje (čistá karta + snímka) — ostávajú aj v čistom režime.
+  const tools = el(doc, 'div', 'oko-karta-island oko-karta-tools');
+  const cleanBtn = el(doc, 'button', 'oko-karta-tool', translate('ukraine.karta.clean'));
+  cleanBtn.type = 'button';
+  cleanBtn.setAttribute('aria-pressed', 'false');
+  const shotBtn = el(doc, 'button', 'oko-karta-tool', translate('ukraine.karta.shot'));
+  shotBtn.type = 'button';
+  tools.append(cleanBtn, shotBtn);
+
+  root.append(titleIsland, legendIsland, insetIsland, tools);
+  doc.body.appendChild(root);
+
+  const insetProj = makeInsetProjection(UKRAINE_OUTLINE_BBOX, 150, 108, 6);
+  outlinePath.setAttribute('d', UKRAINE_OUTLINE_RINGS.map((ring) => insetRingPath(insetProj.project, ring)).join(' '));
+
+  function drawInset() {
+    const rect = typeof getViewRect === 'function' ? getViewRect() : null;
+    if (Array.isArray(rect) && rect.length === 4) {
+      const r = insetProj.rect(rect);
+      viewRectEl.setAttribute('x', r.x.toFixed(1)); viewRectEl.setAttribute('y', r.y.toFixed(1));
+      viewRectEl.setAttribute('width', r.w.toFixed(1)); viewRectEl.setAttribute('height', r.h.toFixed(1));
+      viewRectEl.style.display = '';
+    } else {
+      viewRectEl.style.display = 'none';
+    }
+    if (_scene?.center) {
+      const p = insetProj.project(_scene.center.lon, _scene.center.lat);
+      dot.setAttribute('cx', p.x.toFixed(1)); dot.setAttribute('cy', p.y.toFixed(1));
+      dot.style.display = '';
+    } else {
+      dot.style.display = 'none';
+    }
+  }
+
+  function legendRow(item) {
+    const li = el(doc, 'li', 'oko-karta-legend-row');
+    const sw = el(doc, 'span', `oko-karta-swatch oko-karta-swatch-${item.dot ? 'dot' : item.glyph ? `glyph glyph-${item.glyph}` : item.pattern === 'hatch' ? 'hatch' : 'fill'}`);
+    sw.style.setProperty('--sw', item.colorCss);
+    li.append(sw, el(doc, 'span', 'oko-karta-legend-label', item.label));
+    return li;
+  }
+
+  function update() {
+    if (_destroyed) return;
+    const cs = control?.getState?.() || null;
+    const ds = deepstate?.getState?.() || null;
+    const rs = report?.getState?.() || null;
+    const dateText = kartaDateText({ report: rs, deepstate: ds, control: cs });
+    const sources = kartaSources({ report: rs, deepstate: ds, control: cs, translate });
+    const title = kartaTitleModel({ scene: _scene, dateText, sources, translate });
+    titleH.textContent = title.title;
+    titleSub.textContent = title.subtitle;
+    titleSub.style.display = title.subtitle ? '' : 'none';
+    titleSrc.textContent = title.sources;
+    const items = kartaLegendItems({ report: rs, deepstate: ds, control: cs, translate });
+    legendList.replaceChildren(...items.map(legendRow));
+    drawInset();
+  }
+
+  function applyVisibility() {
+    const visible = _isKarta && _revealed;
+    root.classList.toggle('is-visible', visible);
+    if (visible) update();
+  }
+
+  function setStack(stack) { _isKarta = stack?.kind === 'hillshade'; if (!_isKarta && _clean) setClean(false); applyVisibility(); }
+  function setScene(scene) { _scene = scene || null; applyVisibility(); }
+  function setRevealed(on) { _revealed = Boolean(on); applyVisibility(); }
+  function setClean(on) {
+    _clean = Boolean(on);
+    try { doc.body.classList.toggle('oko-karta-clean', _clean); } catch { /* */ }
+    cleanBtn.setAttribute('aria-pressed', String(_clean));
+    cleanBtn.textContent = translate(_clean ? 'ukraine.karta.clean-off' : 'ukraine.karta.clean');
+    try { onCleanChange(_clean); } catch { /* */ }
+  }
+
+  cleanBtn.addEventListener('click', () => setClean(!_clean));
+  shotBtn.addEventListener('click', () => { try { onExport(); } catch { /* */ } });
+
+  const unsubs = [];
+  for (const layer of [control, deepstate, report]) {
+    if (layer?.onChange) unsubs.push(layer.onChange(() => { if (root.classList.contains('is-visible')) update(); }));
+  }
+
+  function destroy() {
+    _destroyed = true;
+    for (const u of unsubs) { try { u(); } catch { /* */ } }
+    if (_clean) { try { doc.body.classList.remove('oko-karta-clean'); } catch { /* */ } }
+    try { root.remove(); } catch { /* */ }
+  }
+
+  return {
+    id: KARTA_OVERLAY_ID,
+    setStack, setScene, setRevealed, update,
+    setClean, isClean: () => _clean, isVisible: () => root.classList.contains('is-visible'),
+    getModel: () => ({
+      title: kartaTitleModel({ scene: _scene, dateText: kartaDateText({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.() }), sources: kartaSources({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }), translate }),
+      legend: kartaLegendItems({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }),
+      legendHead: translate('ukraine.karta.legend.head'),
+      scene: _scene, viewRect: typeof getViewRect === 'function' ? getViewRect() : null,
+    }),
+    destroy,
+    _getStateForTest: () => ({ root, titleH, titleSub, legendList, viewRectEl, dot, cleanBtn, shotBtn, isKarta: _isKarta, revealed: _revealed, clean: _clean }),
+  };
+}

@@ -11661,3 +11661,63 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-item.is-dmg-destroyed .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #f87171; border-color: #f87171; }
 .oko-ukr-tl-ctl-item.is-dmg-severe .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #ff8a3d; border-color: #ff8a3d; }
 .oko-ukr-tl-ctl-item.is-dmg-moderate .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #ffb547; border-color: #ffb547; }
+
+/* ── KARTA — rám „hotovej mapy" (K5) ────────────────────────────────────────
+   Ostrovy titulku / legendy / prehľadovej mapky režimu KARTA. Geometria (poloha,
+   z-index) je TU, nie vo vstreknutom <style> (test overlayIslands to vyžaduje). */
+.oko-karta-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 92; display: none; }
+.oko-karta-overlay.is-visible { display: block; }
+.oko-karta-island {
+  position: absolute; pointer-events: auto;
+  background: rgba(10, 16, 24, 0.72);
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  color: #dfe9f2; font-family: var(--font-mono);
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.4);
+}
+.oko-karta-title { top: 66px; left: 16px; max-width: 46vw; padding: 10px 14px; }
+.oko-karta-title-name { font-size: 17px; font-weight: 700; letter-spacing: 0.02em; color: #f2f8fd; text-transform: uppercase; line-height: 1.2; }
+.oko-karta-title-state { font-size: 11px; color: #9fb2c4; margin-top: 3px; }
+.oko-karta-title-src { font-size: 10px; color: #6d8296; margin-top: 4px; }
+.oko-karta-legend { bottom: 104px; left: 16px; padding: 9px 12px; }
+.oko-karta-legend-head { font-size: 10px; letter-spacing: 0.14em; color: #7f93a6; text-transform: uppercase; margin-bottom: 6px; }
+.oko-karta-legend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.oko-karta-legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #cdd9e4; }
+.oko-karta-swatch { width: 16px; height: 12px; border-radius: 2px; flex: none; background: var(--sw); }
+.oko-karta-swatch-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid rgba(6, 12, 20, 0.8); }
+.oko-karta-swatch-hatch { background: repeating-linear-gradient(45deg, var(--sw) 0 1.5px, transparent 1.5px 5px); border: 1px solid rgba(160, 170, 180, 0.5); }
+.oko-karta-swatch-glyph { background: none; }
+.oko-karta-swatch-glyph.glyph-bolt { width: 12px; height: 14px; background: var(--sw); clip-path: polygon(54% 0, 28% 54%, 46% 54%, 38% 100%, 72% 40%, 50% 40%, 62% 0); }
+.oko-karta-swatch-glyph.glyph-shield { width: 18px; height: 12px; background: var(--sw); border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.25); }
+.oko-karta-inset { bottom: 104px; right: 16px; width: 168px; padding: 8px; }
+.oko-karta-inset-svg { display: block; width: 100%; height: auto; }
+.oko-karta-inset-outline { fill: rgba(120, 150, 175, 0.10); stroke: rgba(150, 180, 205, 0.55); stroke-width: 0.8; }
+.oko-karta-inset-view { fill: rgba(0, 212, 255, 0.16); stroke: #00d4ff; stroke-width: 1; }
+.oko-karta-inset-dot { fill: #f87171; stroke: rgba(6, 12, 20, 0.85); stroke-width: 0.8; }
+.oko-karta-tools { top: 66px; right: 16px; display: flex; gap: 6px; padding: 6px; }
+.oko-karta-tool { pointer-events: auto; font-family: var(--font-mono); font-size: 11px; color: #cfe6f2; background: rgba(0, 212, 255, 0.10); border: 1px solid rgba(0, 212, 255, 0.30); border-radius: 6px; padding: 5px 9px; cursor: var(--cursor-pointer); }
+.oko-karta-tool:hover { background: rgba(0, 212, 255, 0.20); }
+.oko-karta-tool[aria-pressed="true"] { background: rgba(0, 212, 255, 0.28); color: #eafaff; }
+
+/* „Čistá karta": schovaj chróm, nechaj mapu, tento rám a kredit Cesium/Google. */
+body.oko-karta-clean #title-bar,
+body.oko-karta-clean #style-indicator,
+body.oko-karta-clean #lang-switch,
+body.oko-karta-clean #top-center-actions,
+body.oko-karta-clean #command-dock,
+body.oko-karta-clean #control-panel,
+body.oko-karta-clean #location-bar,
+body.oko-karta-clean #data-panel,
+body.oko-karta-clean #ukraine-panel,
+body.oko-karta-clean #traffic-sync-chip,
+body.oko-karta-clean #cctv-sync-chip,
+body.oko-karta-clean #global-loading-status,
+body.oko-karta-clean .oko-ukr-timeline { display: none !important; }
+
+@media (max-width: 900px) {
+  .oko-karta-title { max-width: 62vw; top: 58px; }
+  .oko-karta-tools { top: 58px; }
+  .oko-karta-inset { width: 124px; bottom: 122px; }
+  .oko-karta-legend { bottom: 122px; }
+}
