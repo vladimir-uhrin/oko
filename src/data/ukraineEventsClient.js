@@ -108,7 +108,7 @@ export async function fetchUkraineSummary(from, to, { fetcher = (...a) => fetch(
  * Sklad: kusy sa cachujú (dnešný kus 60 s, minulé kusy 30 min — archivár ich
  * ešte dopĺňa obrázkami), súhrny 10 min. `load` skladá model okna.
  */
-export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, fetchControl = fetchUkraineControl, fetchDeepState = fetchUkraineDeepState, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, controlTtlMs = 60 * 60_000, maxChunks = 40 } = {}) {
+export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, fetchControl = fetchUkraineControl, fetchDeepState = fetchUkraineDeepState, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, controlTtlMs = 15 * 60_000, maxChunks = 40 } = {}) {
   const chunks = new Map(); // `${from}:${to}` -> { at, payload, promise }
   const summaries = new Map();
   const controls = new Map(); // deň -> { at, payload } (snímka platná pre deň)

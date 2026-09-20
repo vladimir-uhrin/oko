@@ -23,6 +23,18 @@ const IMG_API = '/api/img';
 const SCRUB_DEBOUNCE_MS = 160;
 const PLAY_TICK_MS = 100;
 const LIVE_REFRESH_MS = 60_000;
+
+/**
+ * Tá istá zónová snímka (kontrola: `revisionAt` revízie Wikipédie, DeepState:
+ * `at` upstream snímky)? V LIVE sa snímka toho istého dňa pýta znova každý tik,
+ * prekresľuje sa však len pri inej identite — raster a polygóny sa nestavajú nadarmo.
+ * @param {object|null} snap nová snímka zo skladu
+ * @param {object|null} state stav vrstvy (`getState()`)
+ * @param {'revisionAt'|'at'} key identita snímky
+ */
+export function sameZoneSnapshot(snap, state, key) {
+  return (snap?.[key] ?? null) === (state?.[key] ?? null);
+}
 const MEDIA_STRIP_MAX = 40;
 const D = 86_400_000;
 
@@ -286,22 +298,33 @@ export function createUkraineTimeline({
     if (state.mode === 'live') { report.setOverride(null); return; }
     report.setOverride(store.reportForDay(_reports, state.cursor));
   }
-  /** Snímka kontroly pre deň kurzora (LIVE = dnes); chýbajúca snímka = poctivý text. */
+  /**
+   * Snímka kontroly pre deň kurzora (LIVE = dnes); chýbajúca snímka = poctivý text.
+   * LIVE obnova (2026-09-20): ten istý deň sa pýta znova pri každom tiku (60 s);
+   * sklad drží snímku hodinu (`controlTtlMs`), po TTL ide dopyt na server, kde
+   * archivár sťahuje DeepState každú hodinu a Wikipédiu každých 6 h. Prekreslí sa
+   * len pri inej revízii; zlyhaná obnova nechá poslednú snímku na mape.
+   */
   let _controlDay = null;
+  let _controlTask = null;
   async function applyControl(state) {
     if (!control || !control.isShown()) return;
     const day = dayKey(state.mode === 'live' ? state.now : state.cursor);
-    if (day === _controlDay) return;
+    const refresh = day === _controlDay;
+    if (refresh && (state.mode !== 'live' || _controlTask)) return;
     _controlDay = day;
+    const task = store.control(day);
+    _controlTask = task;
     try {
-      const snap = await store.control(day);
+      const snap = await task;
       if (_destroyed || _controlDay !== day) return;
+      if (refresh && sameZoneSnapshot(snap, control.getState(), 'revisionAt')) return;
       control.setSnapshot(snap);
     } catch (error) {
-      if (_destroyed) return;
+      if (_destroyed || refresh) return;
       control.setSnapshot(null);
       if (ctlLine) ctlLine.textContent = error?.status === 404 ? translate('ukraine.ctl.missing') : translate('ukraine.tl.error', { detail: error?.message || error });
-    }
+    } finally { if (_controlTask === task) _controlTask = null; }
     renderControl();
   }
   async function showControl() {
@@ -311,20 +334,25 @@ export function createUkraineTimeline({
   }
   /** Snímka DeepState pre deň kurzora; pred 19. 9. 2026 história nie je (API histórie za autorizáciou). */
   let _deepstateDay = null;
+  let _deepstateTask = null;
   async function applyDeepState(state) {
     if (!deepstate || !deepstate.isShown()) return;
     const day = dayKey(state.mode === 'live' ? state.now : state.cursor);
-    if (day === _deepstateDay) return;
+    const refresh = day === _deepstateDay; // LIVE obnova ako pri kontrole (hodinový archív DeepState)
+    if (refresh && (state.mode !== 'live' || _deepstateTask)) return;
     _deepstateDay = day;
+    const task = store.deepstate(day);
+    _deepstateTask = task;
     try {
-      const snap = await store.deepstate(day);
+      const snap = await task;
       if (_destroyed || _deepstateDay !== day) return;
+      if (refresh && sameZoneSnapshot(snap, deepstate.getState(), 'at')) return;
       deepstate.setSnapshot(snap);
     } catch (error) {
-      if (_destroyed) return;
+      if (_destroyed || refresh) return;
       deepstate.setSnapshot(null);
       if (dsLine) dsLine.textContent = error?.status === 404 ? translate('ukraine.ds.missing') : translate('ukraine.tl.error', { detail: error?.message || error });
-    }
+    } finally { if (_deepstateTask === task) _deepstateTask = null; }
     renderDeepState();
   }
   async function showDeepState() {

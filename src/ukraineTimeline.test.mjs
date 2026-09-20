@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createUkraineTimeline, parseShareParams, shareUrl, shortDay } from './ukraineTimeline.js';
+import { createUkraineTimeline, parseShareParams, sameZoneSnapshot, shareUrl, shortDay } from './ukraineTimeline.js';
 import { createTimelineClock } from './data/ukraineTimelineClock.js';
 
 function fakeDocument() {
@@ -209,4 +209,85 @@ test('os: kostra, LIVE → prehrávanie, načítanie do vrstvy, legenda/filter, 
   assert.equal(overrides.at(-1), null);
   tl.destroy();
   assert.equal(doc.body.children.length, 0);
+});
+
+test('LIVE obnova zón: ten istý deň sa pýta znova každý tik, prekreslí sa len pri novej revízii/snímke, zlyhaná obnova nechá poslednú snímku, v prehrávaní sa nepýta', async () => {
+  const doc = fakeDocument();
+  const layer = fakeLayer();
+  let now = T0;
+  const clock = createTimelineClock({ now: () => now, windowId: '24h' });
+  const store = {
+    async load() { return { events: [], reports: {}, coverage: { news: [], media: [] }, errors: [], chunks: 1 }; },
+    async summary() { return { days: {} }; },
+    reportForDay() { return null; },
+  };
+  let ctlRev = '2026-09-15T10:00:00Z'; let ctlFail = false; const controlCalls = []; const ctlSets = [];
+  store.control = async (day) => { controlCalls.push(day); if (ctlFail) throw new Error('sieť'); return { day: '2026-09-15', revisionAt: ctlRev, points: [{ lat: 48, lon: 37 }], summary: { settlements: { ua: 1, ru: 0, contested: 0 } } }; };
+  let dsAt = '2026-09-18T19:25:38.000Z'; const dsCalls = []; const dsSets = [];
+  store.deepstate = async (day) => { dsCalls.push(day); return { day: '2026-09-18', at: dsAt, features: [{ kind: 'occupied' }], areaKm2: { occupied: 1, grey: 1 } }; };
+  const ctlListeners = new Set(); let ctlShown = false; let ctlSnapshot = null;
+  const control = {
+    isShown: () => ctlShown,
+    async show() { ctlShown = true; for (const fn of ctlListeners) fn(); },
+    hide() { ctlShown = false; ctlSnapshot = null; for (const fn of ctlListeners) fn(); },
+    setSnapshot(s) { ctlSnapshot = s; ctlSets.push(s?.revisionAt ?? null); for (const fn of ctlListeners) fn(); },
+    setZonesVisible() {},
+    getState: () => ({ shown: ctlShown, loading: false, points: ctlSnapshot?.points?.length || 0, day: ctlSnapshot?.day || null, revisionAt: ctlSnapshot?.revisionAt || null, summary: ctlSnapshot?.summary || null }),
+    onChange(fn) { ctlListeners.add(fn); return () => ctlListeners.delete(fn); },
+  };
+  const dsListeners = new Set(); let dsShown = false; let dsSnapshot = null;
+  const deepstate = {
+    isShown: () => dsShown,
+    async show() { dsShown = true; for (const fn of dsListeners) fn(); },
+    hide() { dsShown = false; dsSnapshot = null; for (const fn of dsListeners) fn(); },
+    setSnapshot(s) { dsSnapshot = s; dsSets.push(s?.at ?? null); for (const fn of dsListeners) fn(); },
+    getState: () => ({ shown: dsShown, loading: false, features: dsSnapshot?.features?.length || 0, day: dsSnapshot?.day || null, at: dsSnapshot?.at || null, stampText: dsSnapshot ? 'x' : '', areaKm2: dsSnapshot?.areaKm2 || null }),
+    onChange(fn) { dsListeners.add(fn); return () => dsListeners.delete(fn); },
+  };
+  const timers = [];
+  const setTimer = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await new Promise((r) => setImmediate(r)); };
+  const tl = createUkraineTimeline({ layer, store, clock, control, deepstate, translate: (k) => k, lang: 'sk', documentRef: doc, now: () => now, setTimer, clearTimer: () => {}, origin: 'https://oko.test' });
+  tl.show();
+  await tl.showControl();
+  await tl.showDeepState();
+  await settle();
+  // LIVE = dnes; sklad dedupuje opakované dopyty toho istého dňa (TTL 15 min), preto stačí, že sa pýtal dnešok a snímka sa nastavila práve raz.
+  assert.ok(controlCalls.every((d) => d === '2026-09-19') && controlCalls.includes('2026-09-19'), 'LIVE = dnes');
+  assert.ok(dsCalls.every((d) => d === '2026-09-19') && dsCalls.includes('2026-09-19'));
+  assert.deepEqual(ctlSets, ['2026-09-15T10:00:00Z'], 'snímka nastavená raz');
+  assert.deepEqual(dsSets, ['2026-09-18T19:25:38.000Z']);
+  // tik LIVE (60 s) → načítanie → snímka toho istého dňa sa pýta znova, rovnaká identita = bez prekreslenia
+  const liveTick = async () => { timers.filter((t) => t.ms === 60_000).at(-1).fn(); timers.filter((t) => t.ms === 0).at(-1).fn(); await settle(); };
+  controlCalls.length = 0; dsCalls.length = 0;
+  now += 60_000; await liveTick();
+  assert.ok(controlCalls.includes('2026-09-19'), 'ten istý deň sa v LIVE pýta znova');
+  assert.ok(dsCalls.includes('2026-09-19'));
+  assert.equal(ctlSets.length, 1, 'rovnaká revízia = raster sa nestavia znova');
+  assert.equal(dsSets.length, 1, 'rovnaká snímka DeepState = polygóny sa nestavajú znova');
+  // archív má novú revíziu / snímku → prekreslí sa a legenda nesie nový dátum
+  ctlRev = '2026-09-19T08:00:00Z'; dsAt = '2026-09-19T06:09:11.000Z';
+  now += 60_000; await liveTick();
+  assert.equal(ctlSets.at(-1), '2026-09-19T08:00:00Z');
+  assert.equal(dsSets.at(-1), '2026-09-19T06:09:11.000Z');
+  const { ctlLine, dsLine } = tl._getStateForTest();
+  assert.ok(ctlLine.textContent.includes('ukraine.ctl.since'), ctlLine.textContent);
+  assert.ok(dsLine.textContent.includes('ukraine.ds.since'), dsLine.textContent);
+  // zlyhaná obnova (sieť) nechá poslednú snímku aj text legendy
+  ctlFail = true;
+  now += 60_000; await liveTick();
+  assert.equal(ctlSnapshot?.revisionAt, '2026-09-19T08:00:00Z', 'chyba pri obnove nezmaže mapu');
+  assert.ok(ctlLine.textContent.includes('ukraine.ctl.since'));
+  assert.equal(ctlSets.length, 2);
+  ctlFail = false;
+  // prehrávanie: ten istý deň kurzora sa už nepýta (posun v rámci dňa)
+  const before = controlCalls.length;
+  clock.setCursor(T0 - 3_600_000);
+  assert.equal(clock.getState().mode, 'replay');
+  timers.at(-1).fn();
+  await settle();
+  assert.equal(controlCalls.length, before, 'v prehrávaní sa snímka toho istého dňa nepýta znova');
+  assert.equal(sameZoneSnapshot({ revisionAt: 'a' }, { revisionAt: 'a' }, 'revisionAt'), true);
+  assert.equal(sameZoneSnapshot({ at: 'b' }, { at: 'a' }, 'at'), false);
+  assert.equal(sameZoneSnapshot(null, { revisionAt: null }, 'revisionAt'), true, 'nič a nič = to isté');
 });
