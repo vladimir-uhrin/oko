@@ -222,6 +222,19 @@ test('KARTA (K1): keyless hillshade stack — proxy URL bez S3, tieňovanie z de
   assert.equal(globe.baseColor.toCssHexString(), '#0b1622');
   c2._applyGlobeBaseColor(MAP_STACKS.find((s) => s.id === 'osm'));
   assert.equal(globe.baseColor.toCssHexString(), Cesium.Color.BLACK.toCssHexString(), 'návrat na pôvodnú farbu');
+  // hmla: KARTA ju vypne (zelený pás z nočnej farby atmosféry), iný stack vráti pôvodný stav
+  assert.equal(stack.fog, false);
+  const fog = { enabled: true };
+  const c3 = new MapStackController({ scene: { fog } }, {});
+  c3._applySceneFog(stack);
+  assert.equal(fog.enabled, false);
+  c3._applySceneFog(stack);
+  assert.equal(fog.enabled, false, 'opakované vypnutie nemení odložený stav');
+  c3._applySceneFog(MAP_STACKS.find((s) => s.id === 'osm'));
+  assert.equal(fog.enabled, true, 'návrat hmly');
+  c3._applySceneFog(MAP_STACKS.find((s) => s.id === 'osm'));
+  assert.equal(fog.enabled, true);
+  new MapStackController({}, {})._applySceneFog(stack); // bez scény neškodné
 });
 
 test('provider XYZ deklaruje LOGICKÚ veľkosť dlaždice a je cachovaný', async () => {

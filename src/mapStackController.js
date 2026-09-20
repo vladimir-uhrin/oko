@@ -74,6 +74,12 @@ export const MAP_STACKS = [
     // po odchode používateľov stav).
     globeBaseColor: '#0b1622',
     postProcess: { sharpen: false, bloom: false },
+    // Hmla Cesia (scene.fog) berie farbu z atmosféry a v noci je pri terminátore
+    // zelenkastá — na tmavom reliéfe to bol zelený pás cez stred Ukrajiny, ktorý
+    // sa hýbal s časom (namerané 2026-09-20: pás zmizol len s fog.enabled=false;
+    // atmosféra oblohy, atmosféra pri zemi, osvetlenie ani post-procesy neboli).
+    // Kartografická mapa hmlu nepotrebuje; pri inom podklade sa vráti.
+    fog: false,
   },
   {
     id: 'stadia-dark',
@@ -456,6 +462,7 @@ export class MapStackController {
       // owns the final state now, so don't commit ours or emit a stale 'ready'.
       if (gen !== this._switchGen) return this.getState();
       this._activeId = stack.id;
+      this._applySceneFog(stack);
       // Show/hide of tilesets + imagery swaps need a frame in idle mode;
       // subsequent tile loads self-request via Cesium. (perf wave 2)
       governorRequestRender('map-stack');
@@ -660,6 +667,23 @@ export class MapStackController {
     this.viewer.scene.globe.show = true;
     this._applyGlobeBaseColor(stack);
     await this._setWorldTerrainEnabled(this._prefersWorldTerrain(), gen);
+  }
+
+  /**
+   * Hmla scény podľa podkladu: descriptor `fog: false` ju vypne (KARTA), iný
+   * stack vráti stav spred prvého vypnutia. Bez viewera/hmly nič.
+   * @param {object} stack
+   */
+  _applySceneFog(stack) {
+    const fog = this.viewer?.scene?.fog;
+    if (!fog) return;
+    if (stack?.fog === false) {
+      if (this._fogBeforeStack === undefined) this._fogBeforeStack = fog.enabled;
+      fog.enabled = false;
+    } else if (this._fogBeforeStack !== undefined) {
+      fog.enabled = this._fogBeforeStack;
+      this._fogBeforeStack = undefined;
+    }
   }
 
   /**
