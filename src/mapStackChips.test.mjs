@@ -73,6 +73,8 @@ const CONTROLLER_STACKS = [
   { id: 'bing-aerial', label: 'Bing Aerial', requiresIon: true, available: true, unavailableReason: null },
   { id: 'bing-labels', label: 'Bing Labels', requiresIon: true, available: true, unavailableReason: null },
   { id: 'osm', label: 'OSM', requiresIon: false, available: true, unavailableReason: null },
+  // OKO 2026-09-20: kartografický režim KARTA (hillshade z normal dlaždíc), hneď za OSM.
+  { id: 'karta', label: 'Karta frontu', requiresIon: false, available: true, unavailableReason: null },
   // OKO 2026-09-03: tmavý podklad pre kontrast vzdušných kontaktov (keyless
   // na localhoste). Stojí ZA osm, aby indexy detí v testoch nižšie sedeli.
   { id: 'stadia-dark', label: 'Stadia Dark', requiresIon: false, available: true, unavailableReason: null },
@@ -97,19 +99,20 @@ test('the row renders exactly the accepted sources', () => {
   // chýbala v allowliste, takže sa k nej používateľ nevedel preklikať.
   // 2026-09-06: tri NASA rastre sú JEDEN čip rodiny (dataset.family = 'nasa'),
   // ktorého cieľ je predvolený člen; varianty žijú v samostatnom rade.
+  // 2026-09-20: 'karta' (kartografický režim KARTA, hillshade) hneď za OSM.
   assert.deepEqual(container.children.map((chip) => chip.dataset.stackId), [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'gibs-truecolor', 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'karta', 'stadia-dark', 'gibs-truecolor', 'ugkk-ortofoto',
   ]);
   assert.deepEqual(container.children.map(chipText), [
-    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'Stadia', 'NASA', 'ÚGKK Ortofoto SR',
+    'Google 3D', 'Bing Aerial', 'Bing Labels', 'OSM', 'Karta frontu', 'Stadia', 'NASA', 'ÚGKK Ortofoto SR',
   ]);
-  assert.equal(container.children[4].dataset.family, 'stadia');
-  assert.equal(container.children[5].dataset.family, 'nasa');
+  assert.equal(container.children[5].dataset.family, 'stadia');
+  assert.equal(container.children[6].dataset.family, 'nasa');
   assert.deepEqual(PRESENTED_CHIP_ENTRIES, [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', { family: 'stadia' }, { family: 'nasa' }, 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'karta', { family: 'stadia' }, { family: 'nasa' }, 'ugkk-ortofoto',
   ]);
   assert.deepEqual(PRESENTED_MAP_STACK_IDS, [
-    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'stadia-smooth', 'stadia-outdoors', 'stadia-terrain', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto',
+    'photoreal', 'bing-aerial', 'bing-labels', 'osm', 'karta', 'stadia-dark', 'stadia-smooth', 'stadia-outdoors', 'stadia-terrain', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto',
   ]);
   assert.ok(container.children.every((chip) => chip.tagName === 'button' && chip.type === 'button'));
   assert.ok(container.children.every((chip) => chip.classList.contains(MAP_STACK_CHIP_CLASS)));
@@ -419,7 +422,7 @@ test('rodina NASA: klik zapne predvolený člen, potom si pamätá naposledy akt
   const container = makeElement();
   const selected = [];
   renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'osm', onSelect: (id) => selected.push(id), doc });
-  const nasa = container.children[5];
+  const nasa = container.children[6];
   assert.equal(nasa.getAttribute('aria-pressed'), 'false');
   nasa.click();
   assert.deepEqual(selected, ['gibs-truecolor'], 'prvý klik = predvolený člen');
@@ -493,7 +496,7 @@ test('rodina Stadia: štyri štýly pod jedným čipom, predvolený tmavý, loka
   const container = makeElement();
   const selected = [];
   renderMapStackChips(container, CONTROLLER_STACKS, { activeId: 'osm', onSelect: (id) => selected.push(id), doc });
-  const chip = container.children[4];
+  const chip = container.children[5];
   assert.equal(chip.dataset.family, 'stadia');
   assert.equal(chip.title, 'Stadia Maps styles — pick the variant below', 'titulok rodiny podľa jej id, nie natvrdo NASA');
   chip.click();

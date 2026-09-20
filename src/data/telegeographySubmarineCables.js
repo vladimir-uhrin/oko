@@ -213,7 +213,9 @@ const CABLE_GLOBE_STACK_IDS = Object.freeze(
   // NASA GIBS je raster na Cesium glóbuse, takže pozemné úseky káblov naň patria.
   // 'gibs-blue-marble' a 'aster-relief' (2026-09-06): statické NASA rastre na
   // Cesium glóbuse — ten istý prípad ako gibs-truecolor.
-  new Set(['bing-aerial', 'bing-labels', 'osm', 'stadia-dark', 'stadia-smooth', 'stadia-outdoors', 'stadia-terrain', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto']),
+  // 'karta' (2026-09-20): hillshade z normal dlaždíc tieňovaný v prehliadači —
+  // stále raster na viditeľnom Cesium glóbuse, káble idú na terén.
+  new Set(['bing-aerial', 'bing-labels', 'osm', 'karta', 'stadia-dark', 'stadia-smooth', 'stadia-outdoors', 'stadia-terrain', 'gibs-truecolor', 'gibs-blue-marble', 'aster-relief', 'ugkk-ortofoto']),
 );
 
 /**

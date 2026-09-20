@@ -192,6 +192,38 @@ test('tmavý podklad je dostupný bez ion tokenu aj bez Google tilesetu', () => 
   assert.equal(controller.isStackAvailable('stadia-dark'), true);
 });
 
+test('KARTA (K1): keyless hillshade stack — proxy URL bez S3, tieňovanie z descriptora, provider cachovaný, post-process hinty, farba glóbusu', async () => {
+  const stack = MAP_STACKS.find((s) => s.id === 'karta');
+  assert.ok(stack, 'stack karta existuje');
+  assert.equal(stack.kind, 'hillshade');
+  assert.equal(stack.requiresIon, false);
+  assert.equal(stack.contactContrast, 'dark');
+  assert.equal(stack.shortLabel, 'KARTA');
+  assert.match(stack.hillshade.url, /^\/api\/relief\//, 'dlaždice idú cez proxy (S3 nemá CORS)');
+  assert.ok(!/amazonaws|s3\./.test(stack.hillshade.url));
+  assert.match(stack.hillshade.credit, /Mapzen|Nextzen/);
+  assert.match(stack.hillshade.credit, /SRTM/);
+  assert.deepEqual(stack.postProcess, { sharpen: false, bloom: false });
+  assert.equal(stack.globeBaseColor, '#0b1622');
+  assert.equal(stack.hillshade.shading.flipY, true, 'zelený kanál Mapzenu = juh (overené na Donci)');
+  const controller = new MapStackController({}, {});
+  assert.equal(controller.isStackAvailable('karta'), true, 'bez tokenu aj bez Google tilesetu');
+  const provider = await controller._getImageryProvider(stack);
+  assert.equal(provider.tileWidth, 256);
+  assert.equal(provider.maximumLevel, 15);
+  assert.equal(provider.shading.amp, 2.5);
+  assert.equal(provider.shading.azimuth, 315);
+  assert.ok(provider.tilingScheme instanceof Cesium.WebMercatorTilingScheme);
+  assert.equal(await controller._getImageryProvider(stack), provider, 'cachovaný');
+  // farba glóbusu: KARTA nastaví tmavú modrú, iný stack vráti pôvodnú
+  const globe = { baseColor: Cesium.Color.BLACK.clone(), show: false };
+  const c2 = new MapStackController({ scene: { globe } }, {});
+  c2._applyGlobeBaseColor(stack);
+  assert.equal(globe.baseColor.toCssHexString(), '#0b1622');
+  c2._applyGlobeBaseColor(MAP_STACKS.find((s) => s.id === 'osm'));
+  assert.equal(globe.baseColor.toCssHexString(), Cesium.Color.BLACK.toCssHexString(), 'návrat na pôvodnú farbu');
+});
+
 test('provider XYZ deklaruje LOGICKÚ veľkosť dlaždice a je cachovaný', async () => {
   const controller = new MapStackController({}, {});
   const stack = stadia();

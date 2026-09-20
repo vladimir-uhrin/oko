@@ -126,6 +126,118 @@ GeoNames/HDX zámerne nepoužité (OSM `name:*` a `admin_level=4` stačili), hla
 Pasce zapísané v `docs/CURRENT-STATE.md` (kumi mirror bez areas, 429 pri rýchlom slede,
 `force-cache` na /api vráti HTML navždy, Natural Earth bez Krymu).
 
+## Návrh (2026-09-19): „jemná" karta frontu ako Rybar — kartografický režim KARTA
+
+Používateľ ukázal Rybarovu mapu „Лиманское направление — обстановка к исходу 17 сентября 2026"
+a chce OKO „takéto jemnučké". Toto je rozklad vzoru na prvky, čo z toho už máme, čo je poctivo
+dostupné, ako to v Cesiu spraviť a v akých etapách. Nič z Rybarovho OBSAHU (zóny, šípky, opevnenia)
+sa nepreberá — preberá sa len kartografický jazyk; obsah ostáva z našich zdrojov (GŠ, Wikipedia,
+DeepState po súhlase, VIINA/GeoConfirmed, OSM).
+
+### Čo robí tú mapu jemnou (rozklad vzoru)
+
+1. **Reliéf**: tmavý modro-sivý hillshade (svetlo zo severozápadu), hrebene a údolia jemne
+   vidno aj v rovinatom Donbase; lesy ako tmavšie plochy s bielym bodkovaním (NP Sviati Hory,
+   Serebrianske lesníctvo); **zástavba každej obce ako svetlosivý polygón**; vodné plochy
+   svetlomodré (Oskilská nádrž), rieky tenké modré s kurzívou pozdĺž toku.
+2. **Zóny**: červená (RU) a modrá (UA) polopriehľadné plochy s mäkkým okrajom, oranžové
+   šrafovanie 45° = „územie bojov", jemná textúra vo výplni.
+3. **Čiary**: cesty biele 1 px, hlavné žlté s odznakom (T-05-13, O0526), železnica čierno-biela
+   čiarkovaná, hranica oblasti biela čiarkovaná, opevnenia tenká červená.
+4. **Body**: sídla ako malé okrúhle špendlíky vo farbe strany, mestá s červeným „žiarením"
+   (Izium, Lyman, Sviatohirsk), boje = blesk v šesťuholníku, šípky útokov (modré RU, červené UA).
+5. **Typografia a rám**: biely sans s tmavým lemom, mestá verzálkami, popisky s vodiacimi čiarami
+   („Kemping Varadero"), titulok s dátumom, legenda, prehľadová mapka vpravo hore, výrez vľavo dole.
+6. **Nič nie je hrubé**: alfa 0,3–0,5, hrúbky 1–1,5 px, tlmené farby, žiadne emoji, žiadne tiene UI.
+
+### Čo už OKO má a čo chýba
+
+- Máme: OSM snímok (sídla, cesty s ref, rieky, hranice oblastí), hover karty, smery frontu,
+  hlásenie GŠ (počty + menované sídla), udalosti a os, DeepState polygóny (súhlas čaká), zóny
+  z Wikipédie (raster 0,05°, ostré bunky), škody, požiare, podklady OSM/Bing/ASTER, 2D PLÁTNO,
+  zdieľanie snímky s atribúciou.
+- Chýba: reliéf tohto druhu, **plošné vrstvy** (zástavba, lesy, voda), železnice, mäkké zóny
+  a šrafovanie, farba sídla podľa strany, žiarenie miest, rieky kurzívou pozdĺž toku, odznaky
+  ciest, titulok + legenda + mapka pre export, celkovo tichší štýl čiar a popisov.
+
+### Zdroje — čo je overené (19. 9. večer)
+
+| Prvok | Zdroj | Licencia / podmienky | Stav |
+|---|---|---|---|
+| Reliéf | Mapzen/Nextzen terrain tiles na AWS Open Data: `normal/{z}/{x}/{y}.png` (normály v RGB + výška v alfa) a `terrarium/…` | verejné DEM (SRTM, EU-DEM, GMTED, ETOPO1) s povinnou atribúciou; bez kľúča, bez kvóty | **overené**: z12 nad Lymanom 200, 56 kB / 0,6 s (normal), 21 kB (terrarium) |
+| Tmavý podklad bez popisov (záloha) | CARTO Dark Matter `dark_nolabels` | CARTO free basemaps: nekomerčné použitie, atribúcia CARTO + OSM | overené: 200, 6 kB/dlaždica — hotový cudzí štýl, menšia kontrola |
+| Zástavba, lesy, voda, železnice, odznaky | OSM cez Overpass do snímku (rovnaká pipeline ako sídla; `landuse=residential/industrial`, `natural=wood`/`landuse=forest`, `natural=water`, `railway=rail`) | ODbL, vlastný súbor ako doteraz | Overpass (hlavný aj kumi) dnes večer vracia HTML namiesto JSON → počty pre okno Lyman zmeria sonda K0 |
+| Land cover (lesy) | ESA WorldCover 10 m | CC BY 4.0 | WMTS terrascope dnes neodpovedal → náhrada OSM lesy stačí |
+| Zóny a strana sídla | Wikipedia body (status per sídlo) + DeepState (po súhlase) | CC BY-SA / súhlas | máme; strana sídla = prepojiť Wikipedia body s OSM sídlami podľa mena a vzdialenosti |
+| Opevnenia | OSM `military=trench`, `barrier=tank_trap` (mapované z verejných snímok) | ODbL | **etická otázka** — nekresliť bez rozhodnutia používateľa (viď otázky) |
+| Šípky útokov | DeepState `attack_direction` body; smer = normála frontu v tom bode (odvodené) | súhlas | bez DeepState žiadne šípky — nikdy vymyslené (platí rozhodnutie z prieskumu) |
+
+### Technika v Cesiu (ako sa to dá poctivo dosiahnuť)
+
+- **Reliéf**: vlastný `ImageryProvider`, ktorého `requestImage` vráti canvas: stiahne normal
+  dlaždicu, per pixel `hillshade = dot(normála, svetlo 315°/45°)`, mapuje do tmavej rampy
+  (#0d1b2a → #3b5068), výška z alfa dá jemný odtieň nížin/vrchov. Normály sú v dlaždici → žiadne
+  švy, žiadni susedia. Nový map stack **KARTA** (`kind: custom`, `requiresIon: false`), Google 3D
+  vypnuté; reliéf je v obraze, nie v geometrii → funguje v 3D zhora aj v 2D PLÁTNE a v pane.
+- **Štýl režimu**: sharpen 0 (pod 4 px prepaľuje na bielo — merané pri rúrach), bloom 0, msaa 4
+  (už je), popisky s halo, `scaleByDistance` pri čiarach, tlmená paleta v jednom tokene štýlu,
+  z ktorého čítajú všetky vrstvy UKRAJINA (dnes majú farby napevno).
+- **Plochy**: GroundPrimitive dávky po triede (zástavba svetlosivá α 0,35; voda; lesy s
+  bodkovaným Fabric materiálom `fract(st·rep)`), šrafovanie zón 45° vlastným materiálom
+  `fract((s+t)·rep) < 0,5` (StripeMaterial vie len 0°/90°). Overené v repe: 18 378 entít rúr =
+  4 draw commandy, takže tisíce polygónov v dávkach nie sú prekážka.
+- **Mäkké zóny**: raster z Wikipedia bodov 0,01° + Gaussovo rozmazanie 2–3 buniek na plátne
+  → ImageMaterial (dnes 0,05° ostré); DeepState polygóny buď rasterizovať do toho istého plátna
+  (jednotný mäkký vzhľad), alebo GroundPrimitive so šrafovaným materiálom pre sivú zónu.
+- **Sídla**: špendlík SVG vo farbe strany (Wikipedia status; s DeepState point-in-polygon),
+  mestá + žiarenie (radiálny gradient billboard 40–80 px, α 0,25); rieky kurzívou po úsekoch
+  (billboard textu otočený podľa azimutu úseku, 1 popis na ~40 km toku); cesty 1 px biele,
+  primárne žlté s odznakom ref (SVG billboard v strede úseku); železnice PolylineDash.
+- **Boje**: sídla z hlásenia (dnes body) → blesk v šesťuholníku vo farbe intenzity smeru; skrížené
+  meče s počtom ostávajú na strede smeru.
+- **Rám a export**: titulok („LYMANSKÝ SMER · stav k 08:00 19. 9. 2026 · hlásenie GŠ ZSU · zdroje"),
+  legenda, prehľadová mapka (SVG z hraníc oblastí snímku + obdĺžnik pohľadu) ako HTML ostrovy
+  režimu KARTA; snímka cez `/api/share` ich zapečie; voliteľne „čistá karta" (skrytý HUD).
+
+### Etapy (každá končí testami, riadkom v DATA_SOURCES a zápisom do CURRENT-STATE)
+
+**Stav 2026-09-20: vzorka schválená („je to dobré"), K0 a K1 HOTOVÉ** — podklad KARTA je v prepínači
+máp (čip hneď za OSM), reliéf z normal dlaždíc cez `/api/relief` (S3 nemá CORS) tieňovaný
+v prehliadači (`src/hillshadeImagery.js`, zelený kanál Mapzenu = juh → flipY, vyhladenie 1,4 px
+s lemom proti švom), sharpen/bloom sa v KARTE vypnú a po odchode vrátia, farba glóbusu #0b1622.
+Overpass počty pre okno Lyman (po zjednodušení): zástavba 4 833, lesy 4 437, voda 696, železnice 169.
+Zápis: `docs/CURRENT-STATE.md` („KARTA — cartographic mode, stages K0 + K1"). Ďalej K2.
+
+- **K0 sonda (½ dňa)** — HOTOVÉ 09-20: provider reliéfu z normal dlaždíc + meranie (ms/dlaždica, pamäť, vzhľad
+  v 3D zhora aj v 2D), porovnanie s CARTO Dark; Overpass počty (okno Lyman, celý front) →
+  rozhodnutie o objeme a dlaždicovaní snímku.
+- **K1 podklad KARTA (1 deň)** — HOTOVÉ 09-20 (stack, post-procesing, čip; štýlový token čiar a popisov
+  ostáva na K2, kde pribudnú plochy): stack + štýlový token (post-procesing, čiary, popisky), čip KARTA
+  v paneli UKRAJINA, voliteľne zapnúť smerom frontu; všetko existujúce (hover, os, karty) beží ďalej.
+- **K2 snímok v3 (1–1,5 dňa)**: build pridá zástavbu, lesy, vodu, železnice, odznaky; zjednodušenie
+  (Douglas–Peucker + prah plochy), po oknách smerov, nie celý front naraz; GroundPrimitive dávky.
+- **K3 zóny jemne (1 deň)**: raster 0,01° + rozmazanie, šrafovanie, farba sídiel podľa strany,
+  žiarenie miest; legenda hovorí „odvodené z Wikipédie / DeepState".
+- **K4 boje a smery (½–1 deň)**: blesky, odznaky ciest, DeepState šípky s normálou frontu —
+  len po súhlase.
+- **K5 export (½ dňa)**: titulok, legenda, mapka, snímka, „čistá karta".
+
+Spolu ~5 dní práce; K0–K1 dajú prvý dojem hneď (reliéf + tichší štýl je 70 % „jemnosti").
+
+### Otázky pre používateľa (K0–K1 idú aj bez odpovede)
+
+1. **Opevnenia** z OSM (`military=trench`): kresliť? Rybar ich kreslí; my sme si dali čiaru
+   „žiadne polohy jednotiek" a čl. 114-2 TZ UA. Zákopy sú statická infraštruktúra viditeľná na
+   verejných snímkach, no sú to aj polohy — rozhodnutie je tvoje; bez rozhodnutia nekreslím.
+2. **Písmo popisov na mape**: sans ako Rybar (Inter/Roboto — kartografickejšie) alebo Plex Mono
+   (štýl OKO)? Odporúčam sans na mape, Plex Mono ostáva v UI.
+3. **Šípky**: potvrdiť, že len z DeepState `attack_direction` (po súhlase), inak žiadne.
+4. **Reliéf**: vlastný z normal dlaždíc (odporúčam: bez kľúča, plná kontrola farby, bez švov)
+   alebo CARTO Dark (hotové, cudzí štýl, limity pre nekomerčné použitie).
+5. **Pohľad**: 3D zhora s možnosťou naklonenia (odporúčam) alebo 2D PLÁTNO — reliéf je v obraze,
+   funguje v oboch.
+6. **Jazyk popisov**: nechať SK/EN latinku + originál (Rybar je v ruštine; my nie).
+
 ## Návrh (2026-09-19 noc): karty udalostí a časová os podľa upstream vzoru — nahrádza etapu 3
 
 Používateľ ukázal snímku z upstream videa (scéna „Hormuz Blockade"): karty ukotvené na mape

@@ -93,6 +93,7 @@ export const PRESENTED_MAP_STACK_IDS = Object.freeze([
   'bing-aerial',
   'bing-labels',
   'osm',
+  'karta',
   'stadia-dark',
   'stadia-smooth',
   'stadia-outdoors',

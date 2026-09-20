@@ -3774,6 +3774,33 @@ export class StyleManager {
     if (this._sharpenSlider) {
       this._applySharpenIntensity(parseInt(this._sharpenSlider.value, 10) / 100);
     }
+    // Podklad mohol byť aktívny skôr, než vznikli post-process stupne (obnova z odkazu).
+    this._applyStackPostProcess(this.mapStackController?.getActiveStack?.() || null);
+  }
+
+  /**
+   * Post-process podľa podkladu (mapStackController descriptor `postProcess`):
+   * KARTA vypína sharpen (pod 4 px prepaľuje čiary na bielo) a bloom (rozmazáva
+   * popisky). Stav používateľa spred prepnutia sa odloží a po odchode na iný
+   * podklad vráti; ručné zapnutie počas KARTY sa rešpektuje až do odchodu.
+   * @param {object|null} stack aktívny map stack (alebo null)
+   * @returns {void}
+   */
+  _applyStackPostProcess(stack) {
+    if (!this._sharpenStage || !this._bloomStage) return;
+    const hints = stack?.postProcess || null;
+    if (hints) {
+      if (!this._postProcessBeforeStack) this._postProcessBeforeStack = { sharpen: this.sharpenEnabled, bloom: this.bloomEnabled, stackId: stack.id };
+      if (hints.sharpen === false && this.sharpenEnabled) this._setSharpenEnabled(false);
+      if (hints.bloom === false && this.bloomEnabled) this._setBloomEnabled(false);
+      return;
+    }
+    if (this._postProcessBeforeStack) {
+      const prev = this._postProcessBeforeStack;
+      this._postProcessBeforeStack = null;
+      if (prev.sharpen && !this.sharpenEnabled) this._setSharpenEnabled(true);
+      if (prev.bloom && !this.bloomEnabled) this._setBloomEnabled(true);
+    }
   }
 
   /**
@@ -4098,6 +4125,7 @@ export class StyleManager {
   _renderMapStackState(state) {
     if (!state) return;
     syncMapStackChips(this._mapStackChips, state.activeId);
+    if (state.status !== 'switching') this._applyStackPostProcess(state.activeStack);
     renderMapStackVariants(this._mapStackVariants, this.mapStackController?.getStacks?.() || [], state.activeId, {
       onSelect: (stackId) => { this._setMapStack(stackId); },
     });

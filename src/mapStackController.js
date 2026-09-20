@@ -8,6 +8,7 @@ import { gibsImageryDay } from './gibsTime.js';
 import { IMAGERY_ROLE, tagImageryRole } from './imageryOrder.js';
 import { basemapContrastForStack } from './data/contactPalette.js';
 import { applyPhotorealNight, buildPhotorealNightShader } from './photorealNight.js';
+import { createHillshadeImageryProvider } from './hillshadeImagery.js';
 
 // Deň snímky žije v gibsTime.js (zdieľa ho aj data/gibsOverlays.js); tu sa
 // re-exportuje, lebo testy a staršie importy ho čítajú odtiaľto.
@@ -46,6 +47,33 @@ export const MAP_STACKS = [
     // Svetlý podklad: ikony kontaktov dostanú tmavú zapečenú výplň
     // (contactPalette.js). Satelit, fotoreál a tmavé mapy ostávajú 'dark'.
     contactContrast: 'light',
+  },
+  {
+    id: 'karta',
+    label: 'Karta frontu',
+    shortLabel: 'KARTA',
+    kind: 'hillshade',
+    requiresIon: false,
+    contactContrast: 'dark',
+    // Kartografický režim KARTA (etapa K1, 2026-09-20; vzorka docs/drafts/karta-vzorka):
+    // tmavý analytický hillshade v štýle situačných máp. Zdroj = Mapzen/Nextzen
+    // „normal" dlaždice (AWS Open Data, verejné DEM: SRTM, EU-DEM, GMTED, ETOPO1;
+    // bez kľúča), tieňované v prehliadači (hillshadeImagery.js): svetlo 315°/45°,
+    // sklony ×2,5 (Donbas je rovina), vyhladenie 1,4 px, zelený kanál = juh
+    // (overené na údolí Donca) → flipY. S3 nemá CORS → /api/relief (disková cache
+    // navždy, dlaždice sú statické). Level 15 ≈ 4,8 m/px, ďalej Cesium zväčšuje.
+    hillshade: {
+      url: '/api/relief/{z}/{x}/{y}.png',
+      maximumLevel: 15,
+      credit: 'Reliéf: Mapzen/Nextzen terrain tiles (AWS Open Data) · SRTM (NASA/USGS), EU-DEM (Copernicus), GMTED2010, ETOPO1',
+      shading: { azimuth: 315, altitude: 45, amp: 2.5, smooth: 1.4, flipY: true },
+    },
+    // Pod dlaždicami a v medzerách tá istá tmavá modrá ako v rampe (Cesium inak
+    // ukáže čiernu); sharpen pod 4 px prepaľuje čiary na bielo a bloom rozmazáva
+    // popisky — KARTA má byť mäkká, takže obe post-procesy vypína (ui.js vráti
+    // po odchode používateľov stav).
+    globeBaseColor: '#0b1622',
+    postProcess: { sharpen: false, bloom: false },
   },
   {
     id: 'stadia-dark',
@@ -630,7 +658,25 @@ export class MapStackController {
 
     if (this.googleTileset) this.googleTileset.show = false;
     this.viewer.scene.globe.show = true;
+    this._applyGlobeBaseColor(stack);
     await this._setWorldTerrainEnabled(this._prefersWorldTerrain(), gen);
+  }
+
+  /**
+   * Farba glóbusu pod dlaždicami (KARTA: tmavá modrá z rampy, aby diery a
+   * ešte nenačítané dlaždice neboli čierne). Iné stacky dostanú pôvodnú farbu
+   * Cesia, odloženú pri prvom prepnutí.
+   * @param {object} stack
+   */
+  _applyGlobeBaseColor(stack) {
+    const globe = this.viewer?.scene?.globe;
+    if (!globe) return;
+    if (!this._defaultGlobeBaseColor && globe.baseColor?.clone) this._defaultGlobeBaseColor = globe.baseColor.clone();
+    if (stack?.globeBaseColor) {
+      try { globe.baseColor = Cesium.Color.fromCssColorString(stack.globeBaseColor); } catch { /* neplatná farba v descriptore */ }
+    } else if (this._defaultGlobeBaseColor) {
+      globe.baseColor = this._defaultGlobeBaseColor;
+    }
   }
 
   /**
@@ -670,6 +716,16 @@ export class MapStackController {
         maximumLevel: cfg.maximumLevel,
         rectangle: Cesium.Rectangle.fromDegrees(...cfg.rectangleDegrees),
         credit: cfg.credit,
+      });
+    } else if (stack.kind === 'hillshade') {
+      // Normal dlaždice tieňované v prehliadači (hillshadeImagery.js); zdroj,
+      // svetlo aj rampa žijú v descriptore.
+      const cfg = stack.hillshade;
+      provider = createHillshadeImageryProvider({
+        url: cfg.url,
+        maximumLevel: cfg.maximumLevel,
+        credit: cfg.credit,
+        shading: cfg.shading,
       });
     } else if (stack.kind === 'xyz') {
       // Obyčajné XYZ raster dlaždice. Konfigurácia žije v descriptore (ako pri

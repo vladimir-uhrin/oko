@@ -80,6 +80,7 @@ import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, normalizeDirectFeed, pa
 import { filterSanctionedNews } from './src/data/sanctionedMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from './src/data/ukraineReport.js';
 import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
+import { reliefTilesProxy } from './src/data/reliefTilesProxy.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -10683,6 +10684,8 @@ export default defineConfig(({ mode }) => {
       ukraineBaseProxy(),
       ukraineReportProxy(),
       ukraineEventsProxy(),
+      // Normal dlaždice reliéfu pre podklad KARTA (S3 bez CORS, cache navždy).
+      reliefTilesProxy(),
       situationNewsProxy(),
       translateProxy(),
       linkImageProxy(),
