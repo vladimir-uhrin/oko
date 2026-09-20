@@ -16,9 +16,9 @@ export const AREAS_MAX_TILES = 6;
 export const AREAS_CACHE_TILES = 12;
 /** Štýl plôch (vzorka KARTA): zástavba svetlosivá, les tmavozelený s bodkami, voda modrá, železnica čiarkovaná. */
 export const AREAS_STYLE = Object.freeze({
-  built: Object.freeze({ color: '#cdd5de', alpha: 0.28 }),
+  built: Object.freeze({ color: '#cdd5de', alpha: 0.34 }),
   forest: Object.freeze({ color: '#1f3a30', alpha: 0.45, dotColor: '#e8f0f6', dotAlpha: 0.42, spacingPx: 7, radius: 0.16 }),
-  water: Object.freeze({ color: '#5f93c4', alpha: 0.4 }),
+  water: Object.freeze({ color: '#5f93c4', alpha: 0.5 }),
   rail: Object.freeze({ color: '#e8f0f6', gapColor: '#08101a', widthPx: 1.4, dashLength: 12 }),
 });
 
@@ -67,8 +67,9 @@ export function fallbackRect(center, halfDeg = 1.2) {
 export const AREAS_DRAW_MIN_KM2 = Object.freeze({ built: 0.02, forest: 0.08, water: 0.03 });
 export const AREAS_DRAW_MAX = Object.freeze({ built: 2500, forest: 2000, water: 800, rail: 1500 });
 /**
- * Triedy, ktoré sa kreslia. Lesy NIE: používateľ 2026-09-20 („tie lesy určite nie" —
- * bodkovanie rušilo); dáta v dlaždiciach ostávajú, keby raz stačil tichý tón.
+ * Triedy, ktoré sa kreslia. Lesy NIE — rozhodnutie používateľa 2026-09-20 po dvoch
+ * pohľadoch na KARTU („skús zapnúť tie lesy" → „nie, lesy vypni"). Dáta v dlaždiciach
+ * ostávajú aj materiál bodiek; zapnutie = pridať 'forest' do tohto zoznamu.
  */
 export const AREAS_DRAW_CLASSES = Object.freeze(['built', 'water', 'rail']);
 /** Plocha prstenca (km², lokálna rovina). Pure. */

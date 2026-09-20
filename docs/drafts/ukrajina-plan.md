@@ -221,10 +221,11 @@ Zápis: `docs/CURRENT-STATE.md` („KARTA — cartographic mode, stages K0 + K1"
   na glóbusových podkladoch; čip PLOCHY. Entity boli primalé (27 000 = čierny glóbus). Pôvodný plán: build
   pridá zástavbu, lesy, vodu, železnice, odznaky; zjednodušenie (Douglas–Peucker + prah plochy), po oknách
   smerov, nie celý front naraz; GroundPrimitive dávky.
-  **Prvý pohľad používateľa 09-20**: „lesy vybodkované sú rušivé, chcel som jemnejšie línie, pozadie bolo
-  tmavšie" → lesy sa nekreslia vôbec, podklad má štýl `karta` (čiary ×0,5, body ×0,72, písma ×0,9), rampa
-  reliéfu stmavená; pravá príčina čierneho glóbusu bol render governor (fronta dlaždíc sa bez snímku
-  nespracuje) → strážca dlaždíc v idle režime. Otvorené: obrysy DeepState a raster Wikipédie na KARTE (K3).
+  **Pohľady používateľa 09-20**: prvá výhrada („lesy rušivé, jemnejšie línie, tmavšie pozadie") patrila
+  inému glóbusu; na samotnej KARTE potom lesy skúsil a vypol („nie lesy vypni") → lesy sa nekreslia
+  (AREAS_DRAW_CLASSES), podklad má štýl `karta` (čiary ×0,5, body ×0,72, písma ×0,9), rampa reliéfu
+  podľa schválenej vzorky; pravá príčina čierneho glóbusu bol render governor (fronta dlaždíc sa bez
+  snímku nespracuje) → strážca dlaždíc v idle režime. Otvorené: obrysy DeepState a raster Wikipédie (K3).
 - **K3 zóny jemne (1 deň)**: raster 0,01° + rozmazanie, šrafovanie, farba sídiel podľa strany,
   žiarenie miest; legenda hovorí „odvodené z Wikipédie / DeepState".
 - **K4 boje a smery (½–1 deň)**: blesky, odznaky ciest, DeepState šípky s normálou frontu —

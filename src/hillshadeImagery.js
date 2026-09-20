@@ -20,13 +20,13 @@
 import * as Cesium from 'cesium';
 
 /**
- * Tmavá rampa KARTA: rovina = mid, osvetlený svah = lit, tieň = shadow.
- * 2026-09-20 stmavené (používateľ: „pozadie bolo tmavšie predtým") — pôvodne
- * mid 30/44/58, lit 104/124/146.
+ * Tmavá rampa KARTA: rovina = mid, osvetlený svah = lit, tieň = shadow — hodnoty
+ * schválenej vzorky (docs/drafts/karta-vzorka). Krátko boli stmavené na základe
+ * výhrady, ktorá patrila inému glóbusu (2026-09-20), preto späť.
  */
-export const KARTA_PALETTE = Object.freeze({ mid: [22, 33, 45], lit: [82, 100, 120], shadow: [5, 10, 17] });
-/** Predvolené tieňovanie (zladené na vzorke nad Lymanom; amp 2,0 po stmavení — 2,5 rozsvecovalo svahy). */
-export const HILLSHADE_DEFAULTS = Object.freeze({ azimuth: 315, altitude: 45, amp: 2.0, smooth: 1.4, flipY: true, gamma: 0.8, tileSize: 256, margin: 4 });
+export const KARTA_PALETTE = Object.freeze({ mid: [30, 44, 58], lit: [104, 124, 146], shadow: [7, 14, 23] });
+/** Predvolené tieňovanie (zladené na vzorke nad Lymanom). */
+export const HILLSHADE_DEFAULTS = Object.freeze({ azimuth: 315, altitude: 45, amp: 2.5, smooth: 1.4, flipY: true, gamma: 0.8, tileSize: 256, margin: 4 });
 
 /**
  * Smer k svetlu ako jednotkový vektor [východ, sever, hore].

@@ -25,12 +25,12 @@ test('dlaždice v obdĺžniku a výber najbližších dostupných so stropom', (
   assert.deepEqual(fallbackRect({ lat: 49, lon: 37 }, 1), [36, 48.3, 38, 49.7]);
 });
 
-test('filterAreasForDraw: lesy sa nekreslia (rozhodnutie používateľa), prah plochy a strop na triedu', () => {
+test('filterAreasForDraw: lesy sa nekreslia (rozhodnutie používateľa po dvoch pohľadoch), prah plochy, výber tried a strop na triedu', () => {
   const sq = (lon, lat, d) => [[lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]];
-  const data = { built: [[sq(37, 48, 0.02)], [sq(37, 48, 0.001)]], forest: [[sq(37, 48, 0.2)]], water: [[sq(37, 48, 0.03)]], rail: [[[37, 48], [37.1, 48]]] };
+  const data = { built: [[sq(37, 48, 0.02)], [sq(37, 48, 0.001)]], forest: [[sq(37, 48, 0.2)], [sq(37, 48, 0.002)]], water: [[sq(37, 48, 0.03)]], rail: [[[37, 48], [37.1, 48]]] };
   const out = filterAreasForDraw(data);
-  assert.deepEqual(out.counts, { built: 1, forest: 0, water: 1, rail: 1 });
-  assert.deepEqual(filterAreasForDraw(data, { classes: ['forest'] }).counts, { built: 0, forest: 1, water: 0, rail: 0 });
+  assert.deepEqual(out.counts, { built: 1, forest: 0, water: 1, rail: 1 }, 'drobná zástavba vypadla prahom, lesy vôbec');
+  assert.deepEqual(filterAreasForDraw(data, { classes: ['built', 'forest', 'water', 'rail'] }).counts, { built: 1, forest: 1, water: 1, rail: 1 }, 's lesmi na požiadanie (drobný les vypadol prahom)');
   assert.deepEqual(filterAreasForDraw(data, { max: { built: 0, forest: 0, water: 0, rail: 0 } }).counts, { built: 0, forest: 0, water: 0, rail: 0 });
 });
 
