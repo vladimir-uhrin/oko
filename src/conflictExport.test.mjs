@@ -21,9 +21,13 @@ test('pomery kartičiek: feed/štvorec/story, fallback na feed', () => {
   assert.deepEqual(cardRatio('nieco'), CARD_RATIOS.feed, 'neznámy = feed');
 });
 
-test('defaultConflictFacts: zdroje podľa druhu, Ukrajina prázdna (dodá KARTA)', () => {
-  assert.ok(defaultConflictFacts(conflictById('chokepoint:hormuz')).sources.includes('Global Fishing Watch'));
+test('defaultConflictFacts: zdroje podľa druhu, úžina má legendu, Ukrajina prázdna (dodá KARTA)', () => {
+  const hz = defaultConflictFacts(conflictById('chokepoint:hormuz'), { translate: (k) => k });
+  assert.ok(hz.sources.includes('Global Fishing Watch'));
+  assert.deepEqual(hz.legend.map((i) => i.key), ['ships', 'sar', 'pipeline'], 'úžina má legendu symboliky');
+  assert.equal(hz.legendHead, 'ukraine.karta.legend.head');
   assert.ok(defaultConflictFacts(conflictById('gulf')).sources.includes('GDELT'));
+  assert.deepEqual(defaultConflictFacts(conflictById('gulf')).legend, [], 'situácia bez legendy');
   assert.deepEqual(defaultConflictFacts(conflictById('ukraine:lyman')).sources, []);
   assert.deepEqual(defaultConflictFacts(null), { sources: [], legend: [], legendHead: '' });
 });

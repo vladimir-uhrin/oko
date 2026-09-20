@@ -21,11 +21,23 @@ export const CARD_RATIOS = Object.freeze({
 export const CARD_RATIO_IDS = Object.freeze(['feed', 'square', 'story']);
 export function cardRatio(id) { return CARD_RATIOS[id] || CARD_RATIOS.feed; }
 
+/** Legenda úžiny: symbolika, ktorú scéna zapína (lode / radar SAR / potrubie). */
+export const CHOKEPOINT_LEGEND_COLORS = Object.freeze({ ships: '#5b8fd0', sar: '#f0a53a', pipeline: '#eab2ff' });
+
 /** Zdroje/legenda podľa druhu konfliktu (Ukrajinu dodá KARTA prekryv). Pure. */
-export function defaultConflictFacts(conflict) {
+export function defaultConflictFacts(conflict, { translate = (k) => k } = {}) {
   if (!conflict) return { sources: [], legend: [], legendHead: '' };
   if (conflict.kind === 'chokepoint') {
-    return { sources: ['Global Fishing Watch', 'Sentinel-1', 'OpenStreetMap', 'Yahoo Finance'], legend: [], legendHead: '' };
+    const c = CHOKEPOINT_LEGEND_COLORS;
+    return {
+      sources: ['Global Fishing Watch', 'Sentinel-1', 'OpenStreetMap', 'Yahoo Finance'],
+      legend: [
+        { key: 'ships', colorCss: c.ships, dot: true, label: translate('conflicts.legend.ships') },
+        { key: 'sar', colorCss: c.sar, label: translate('conflicts.legend.sar') },
+        { key: 'pipeline', colorCss: c.pipeline, label: translate('conflicts.legend.pipeline') },
+      ],
+      legendHead: translate('ukraine.karta.legend.head'),
+    };
   }
   if (conflict.kind === 'situation') {
     return { sources: ['GDELT', 'BBC', 'Al Jazeera', 'Google News'], legend: [], legendHead: '' };

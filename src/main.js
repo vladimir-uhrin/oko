@@ -756,8 +756,15 @@ async function init() {
             const r = viewer.camera.computeViewRectangle();
             if (r) viewRect = [Cesium.Math.toDegrees(r.west), Cesium.Math.toDegrees(r.south), Cesium.Math.toDegrees(r.east), Cesium.Math.toDegrees(r.north)];
           } catch { /* mimo glóbusu */ }
-          const facts = defaultConflictFacts(c);
-          model = conflictCardModel(c, { viewRect, dateText: conflictStateDate(), sources: facts.sources, legend: facts.legend, legendHead: facts.legendHead, translate: t });
+          const facts = defaultConflictFacts(c, { translate: t });
+          let dateText = conflictStateDate();
+          if (c.kind === 'chokepoint' && c.scene) {
+            const f = chokepointSceneFacts(c.scene, { lang: currentLanguage(), translate: t });
+            const bits = [f?.narrowest, f?.carries].filter(Boolean);
+            if (bits.length) dateText = bits.join(' · ');
+            else if (f?.subtitle) dateText = f.subtitle;
+          }
+          model = conflictCardModel(c, { viewRect, dateText, sources: facts.sources, legend: facts.legend, legendHead: facts.legendHead, translate: t });
         }
         const creditsText = document.querySelector('#cesium-credits')?.textContent || '';
         const snap = await captureConflictCard({ viewer, model, ratio, lang: currentLanguage(), creditsText });
