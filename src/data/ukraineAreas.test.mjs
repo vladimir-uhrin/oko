@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AREAS_MAX_HEIGHT_M, AREAS_STYLE, areasWanted, cssToRgb01, fallbackRect, pickAreaTiles, tileBbox, tileKeyFor, tilesInRect } from './ukraineAreas.js';
+import { AREAS_MAX_HEIGHT_M, AREAS_STYLE, areasWanted, cssToRgb01, fallbackRect, filterAreasForDraw, pickAreaTiles, tileBbox, tileKeyFor, tilesInRect } from './ukraineAreas.js';
 
 test('kľúč a bbox dlaždice', () => {
   assert.equal(tileKeyFor(48.99, 37.8), 'N48E037');
@@ -23,6 +23,15 @@ test('dlaždice v obdĺžniku a výber najbližších dostupných so stropom', (
   assert.deepEqual(picked, ['N49E037', 'N49E038', 'N48E037'], 'najbližšie k stredu (49,1° N: severné dlaždice bližšie), len dostupné, max 3');
   assert.deepEqual(pickAreaTiles({ rect: [0, 0, 1, 1], center: { lat: 0.5, lon: 0.5 }, available: new Set() }), []);
   assert.deepEqual(fallbackRect({ lat: 49, lon: 37 }, 1), [36, 48.3, 38, 49.7]);
+});
+
+test('filterAreasForDraw: lesy sa nekreslia (rozhodnutie používateľa), prah plochy a strop na triedu', () => {
+  const sq = (lon, lat, d) => [[lon, lat], [lon + d, lat], [lon + d, lat + d], [lon, lat + d], [lon, lat]];
+  const data = { built: [[sq(37, 48, 0.02)], [sq(37, 48, 0.001)]], forest: [[sq(37, 48, 0.2)]], water: [[sq(37, 48, 0.03)]], rail: [[[37, 48], [37.1, 48]]] };
+  const out = filterAreasForDraw(data);
+  assert.deepEqual(out.counts, { built: 1, forest: 0, water: 1, rail: 1 });
+  assert.deepEqual(filterAreasForDraw(data, { classes: ['forest'] }).counts, { built: 0, forest: 1, water: 0, rail: 0 });
+  assert.deepEqual(filterAreasForDraw(data, { max: { built: 0, forest: 0, water: 0, rail: 0 } }).counts, { built: 0, forest: 0, water: 0, rail: 0 });
 });
 
 test('štýl a farby', () => {

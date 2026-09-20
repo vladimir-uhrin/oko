@@ -66,7 +66,7 @@ export const MAP_STACKS = [
       url: '/api/relief/{z}/{x}/{y}.png',
       maximumLevel: 15,
       credit: 'Reliéf: Mapzen/Nextzen terrain tiles (AWS Open Data) · SRTM (NASA/USGS), EU-DEM (Copernicus), GMTED2010, ETOPO1',
-      shading: { azimuth: 315, altitude: 45, amp: 2.5, smooth: 1.4, flipY: true },
+      shading: { azimuth: 315, altitude: 45, amp: 2.0, smooth: 1.4, flipY: true },
     },
     // Pod dlaždicami a v medzerách tá istá tmavá modrá ako v rampe (Cesium inak
     // ukáže čiernu); sharpen pod 4 px prepaľuje čiary na bielo a bloom rozmazáva

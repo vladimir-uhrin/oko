@@ -35,6 +35,31 @@ let _viewer = null;
 let _installed = false;
 const _holds = new Set();
 
+/**
+ * Strážca dlaždíc glóbusu v nečinnom režime (2026-09-20, KARTA): po prepnutí
+ * podkladu vykreslí governor jeden snímok, dlaždice terénu/podkladu sa zaradia
+ * do fronty — a keď ich RequestScheduler odloží bez jedinej aktívnej požiadavky,
+ * Cesium už ďalší snímok nevyžiada (fronta sa spracúva len v snímku). Namerané:
+ * 121 s bez snímku, glóbus čierny, 40 ručných renderov ho hneď dotiahlo. Kým
+ * je glóbus nenačítaný, pýtame snímok každých TILE_WATCH_MS; po dotiahnutí je
+ * tick prázdny (jedna vlastnosť na 0,4 s).
+ */
+export const TILE_WATCH_MS = 400;
+let _tileWatch = null;
+// unref: v Node (testy) nesmie interval držať proces nažive; v prehliadači je id číslo bez unref.
+const defaultTimers = () => ({ setInterval: (fn, ms) => { const id = setInterval(fn, ms); id?.unref?.(); return id; }, clearInterval: (id) => clearInterval(id) });
+let _timers = defaultTimers();
+function tileWatchTick() {
+  const scene = _viewer?.scene;
+  if (!scene || !scene.requestRenderMode) return;
+  const globe = scene.globe;
+  if (globe?.show && globe.tilesLoaded === false) scene.requestRender?.();
+}
+function syncTileWatch(idle) {
+  if (idle && !_tileWatch) _tileWatch = _timers.setInterval(tileWatchTick, TILE_WATCH_MS);
+  else if (!idle && _tileWatch) { _timers.clearInterval(_tileWatch); _tileWatch = null; }
+}
+
 /** Debug trail of the most recent one-shot render requests (idle mode only). */
 const _recentRequests = [];
 const RECENT_REQUEST_CAP = 16;
@@ -50,6 +75,7 @@ function applyMode() {
     // continuous frame mutated is on screen before the loop stops.
     scene.requestRender?.();
   }
+  syncTileWatch(!continuous);
 }
 
 /**
@@ -60,10 +86,11 @@ function applyMode() {
  * @param {Cesium.Viewer} viewer
  * @returns {void}
  */
-export function installRenderGovernor(viewer) {
+export function installRenderGovernor(viewer, { timers = null } = {}) {
   if (!viewer?.scene) throw new TypeError('installRenderGovernor requires a Cesium viewer');
   _viewer = viewer;
   _installed = true;
+  if (timers) _timers = timers;
   // Never let Cesium re-render on simulation-time deltas behind our back —
   // idle means idle. All re-renders are camera/tiles (Cesium-native) or
   // explicit requests.
@@ -130,8 +157,12 @@ export function getRenderGovernorDiagnostics() {
 
 /** Test seam: reset module state between unit tests. */
 export function _resetRenderGovernorForTest() {
+  if (_tileWatch) { try { _timers.clearInterval(_tileWatch); } catch { /* */ } _tileWatch = null; }
+  _timers = defaultTimers();
   _viewer = null;
   _installed = false;
   _holds.clear();
   _recentRequests.length = 0;
 }
+/** Test seam: je strážca dlaždíc aktívny? */
+export function _isTileWatchArmedForTest() { return _tileWatch !== null; }

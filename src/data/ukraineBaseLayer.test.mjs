@@ -326,6 +326,42 @@ test('getPlaceIndex: mestá + obce (obce sa pre index dotiahnu aj zďaleka, sní
   assert.equal(index.get('ямпіль')[0].id, 3, 'index nesie OSM id (pre rezerváciu)');
 });
 
+test('setStyle karta: čiary polovičné, body a písma menšie (aj obce pridané neskôr), default vráti pôvodné, neznámy režim = default', async () => {
+  const camera = { height: 120_000, lon: 37.8, lat: 48.97 };
+  const { layer, viewer, clock } = make({ camera });
+  await layer.show();
+  await settle();
+  const { sources, placeRecords, villageRecords } = layer._getStateForTest();
+  const road = sources.roads.entities.values[0];
+  const river = sources.rivers.entities.values[0];
+  const baseRoad = road.polyline.width, baseRiver = river.polyline.width;
+  const city = placeRecords.get(1).entity;
+  const basePx = city.point.pixelSize, baseFont = city.label.font;
+  assert.equal(layer.getStyle(), 'default');
+  layer.setStyle('karta');
+  assert.equal(layer.getState().style, 'karta');
+  assert.equal(road.polyline.width, baseRoad * 0.5);
+  assert.equal(river.polyline.width, baseRiver * 0.5);
+  assert.ok(Math.abs(city.point.pixelSize - basePx * 0.72) < 1e-9);
+  assert.match(city.label.font, /11\.7px/, '13 px × 0,9');
+  assert.ok(Math.abs(villageRecords.get(3).entity.point.pixelSize - 3.5 * 0.72) < 1e-9, 'obec v kohorte tiež');
+  // obec pridaná až v režime karta dostane násobok hneď pri vzniku
+  viewer.camera.positionCartographic.height = 500_000;
+  for (const fn of viewer.camera.moveEnd.listeners) fn();
+  clock.flush();
+  viewer.camera.positionCartographic.height = 100_000;
+  for (const fn of viewer.camera.moveEnd.listeners) fn();
+  clock.flush();
+  assert.ok(Math.abs(villageRecords.get(3).entity.point.pixelSize - 3.5 * 0.72) < 1e-9, 'nová kohorta v režime karta');
+  layer.setStyle('default');
+  assert.equal(road.polyline.width, baseRoad);
+  assert.equal(city.point.pixelSize, basePx);
+  assert.equal(city.label.font, baseFont);
+  assert.equal(villageRecords.get(3).entity.point.pixelSize, 3.5);
+  layer.setStyle('nonsense');
+  assert.equal(layer.getStyle(), 'default');
+});
+
 test('setReservedPlaces: sídla prevzaté hlásením GŠ sa v podklade skryjú (mesto aj obec, aj obec pridaná neskôr), riedenie ich nepočíta, uvoľnenie vráti', async () => {
   const camera = { height: 120_000, lon: 37.8, lat: 48.97 };
   const { layer, viewer, clock } = make({ camera });

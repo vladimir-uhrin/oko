@@ -101,12 +101,12 @@ test('show: meta, výber dlaždíc podľa pohľadu (2 z 3), primitívy v scene.g
   assert.deepEqual(state.visibleKeys.sort(), ['N48E037', 'N49E037'], 'N47E036 nepretína pohľad');
   assert.equal(state.tilesAvailable, 3);
   assert.equal(calls.filter((u) => u.endsWith('/meta')).length, 1);
-  assert.deepEqual(state.counts, { built: 3, forest: 1, water: 1, rail: 1 }, '0,001° štvorec (0,008 km²) vypadol');
+  assert.deepEqual(state.counts, { built: 3, forest: 0, water: 1, rail: 1 }, '0,001° štvorec (0,008 km²) vypadol; lesy sa nekreslia');
   const { tiles } = layer._getStateForTest();
   const t = tiles.get('N48E037');
   assert.equal(t.loaded, true);
-  assert.equal(t.prims.length, 4);
-  assert.equal(viewer.scene.groundPrimitives.items.length, 5, '4 + 1 primitív');
+  assert.equal(t.prims.length, 3, 'voda, zástavba, železnica — bez lesa');
+  assert.equal(viewer.scene.groundPrimitives.items.length, 4, '3 + 1 primitív');
   assert.ok(t.prims.every((p) => p.show === true));
 });
 

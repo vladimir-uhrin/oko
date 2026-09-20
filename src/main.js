@@ -26,7 +26,7 @@ import militaryInstallationsLayer from './data/militaryInstallations.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import localDataLayers from './data/localLayers.js';
 import gibsOverlayLayers from './data/gibsOverlays.js';
-import { bindActiveMapStackToEvents } from './data/activeMapStack.js';
+import { bindActiveMapStackToEvents, getActiveMapStack, onActiveMapStackChange } from './data/activeMapStack.js';
 import { LAYER_STATE_REGISTRY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
@@ -631,6 +631,11 @@ async function init() {
     // DÁTA a presety smerov frontu (`?front=lyman`, výber v paneli SCÉNY,
     // window API). Hranice štátov si podklad drží ako držiteľ 'ukraine-base'.
     const ukraineBase = createUkraineBaseLayer({ viewer });
+    // KARTA (2026-09-20, „chcel som jemnejšie línie"): na kartografickom podklade
+    // podklad UKRAJINA kreslí polovičné čiary a menšie body/popisy; inde pôvodné.
+    const applyUkraineBaseStyle = (stack) => ukraineBase.setStyle(stack?.kind === 'hillshade' ? 'karta' : 'default');
+    applyUkraineBaseStyle(getActiveMapStack());
+    onActiveMapStackChange(applyUkraineBaseStyle);
     window.__godsEyeView.ukraineBase = ukraineBase;
     // Strety (etapa 2): značky smerov s počtom útokov z denného hlásenia GŠ ZSU
     // (ArmyInform, CC BY 4.0) — vlastný prekryv, ide hore a dole s podkladom;

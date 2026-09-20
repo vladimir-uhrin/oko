@@ -211,7 +211,7 @@ test('KARTA (K1): keyless hillshade stack — proxy URL bez S3, tieňovanie z de
   const provider = await controller._getImageryProvider(stack);
   assert.equal(provider.tileWidth, 256);
   assert.equal(provider.maximumLevel, 15);
-  assert.equal(provider.shading.amp, 2.5);
+  assert.equal(provider.shading.amp, 2.0);
   assert.equal(provider.shading.azimuth, 315);
   assert.ok(provider.tilingScheme instanceof Cesium.WebMercatorTilingScheme);
   assert.equal(await controller._getImageryProvider(stack), provider, 'cachovaný');

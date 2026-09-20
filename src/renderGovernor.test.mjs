@@ -7,6 +7,8 @@ import {
   governorRequestRender,
   getRenderGovernorDiagnostics,
   _resetRenderGovernorForTest,
+  _isTileWatchArmedForTest,
+  TILE_WATCH_MS,
 } from './renderGovernor.js';
 
 function makeViewer() {
@@ -97,4 +99,33 @@ test('holds registered before install apply at install time', () => {
   assert.equal(scene.requestRenderMode, false, 'pre-install hold keeps continuous mode');
   releaseContinuousRender('flights');
   assert.equal(scene.requestRenderMode, true);
+});
+
+test('strážca dlaždíc: v idle pýta snímok, kým glóbus nemá dlaždice; po dotiahnutí mlčí; hold ho vypne, release znova zapne (KARTA 2026-09-20: čierny glóbus 121 s)', () => {
+  const { viewer, scene, calls } = makeViewer();
+  scene.globe = { show: true, tilesLoaded: false };
+  const intervals = [];
+  const timers = { setInterval: (fn, ms) => { intervals.push({ fn, ms, cleared: false }); return intervals.length; }, clearInterval: (id) => { intervals[id - 1].cleared = true; } };
+  installRenderGovernor(viewer, { timers });
+  assert.equal(_isTileWatchArmedForTest(), true, 'idle po inštalácii = strážca beží');
+  assert.equal(intervals[0].ms, TILE_WATCH_MS);
+  const before = calls.requestRender;
+  intervals[0].fn();
+  assert.equal(calls.requestRender, before + 1, 'nenačítané dlaždice → snímok');
+  scene.globe.tilesLoaded = true;
+  intervals[0].fn();
+  assert.equal(calls.requestRender, before + 1, 'načítané → nič');
+  scene.globe.tilesLoaded = false; scene.globe.show = false;
+  intervals[0].fn();
+  assert.equal(calls.requestRender, before + 1, 'skrytý glóbus (fotoreál) → nič');
+  holdContinuousRender('flights');
+  assert.equal(_isTileWatchArmedForTest(), false, 'súvislý režim = strážca netreba');
+  assert.equal(intervals[0].cleared, true);
+  releaseContinuousRender('flights');
+  assert.equal(_isTileWatchArmedForTest(), true);
+  assert.equal(intervals.length, 2, 'znova nasadený');
+  scene.requestRenderMode = false; // niekto prepol mimo governora — tick nesmie pýtať snímky
+  scene.globe.show = true;
+  intervals[1].fn();
+  assert.equal(calls.requestRender, before + 2, 'len settling frame z release, tick v continuous mlčí');
 });

@@ -56,6 +56,15 @@ export const UKRAINE_HOVER_PICK_PX = 7;
 export const FALLBACK_HEIGHT_M = 200;
 const FONT = '"IBM Plex Mono", monospace';
 const LABEL_OUTLINE = '#0b1622';
+/**
+ * Štýlové režimy podkladu (setStyle): KARTA = polovičné hrúbky čiar, menšie body
+ * a popisy — používateľ 2026-09-20: „chcel som jemnejšie línie". Násobky sa
+ * aplikujú pri vzniku entity aj spätne na už nakreslené.
+ */
+export const UKRAINE_BASE_STYLES = Object.freeze({
+  default: Object.freeze({ line: 1, point: 1, font: 1 }),
+  karta: Object.freeze({ line: 0.5, point: 0.72, font: 0.9 }),
+});
 
 /** GPU vie pozemné čiary (hĺbková textúra)? Bez scény optimisticky áno. */
 export function defaultGroundSupport(scene) {
@@ -123,7 +132,7 @@ export function createUkraineBaseLayer({
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   const inert = {
     id: UKRAINE_BASE_ID, show: async () => false, hide() {}, toggle: async () => false, isShown: () => false,
-    setPart() {}, getParts: () => ({ ...defaultParts() }), loadMeta: async () => null, getPlaceIndex: async () => new Map(), setReservedPlaces() {},
+    setPart() {}, getParts: () => ({ ...defaultParts() }), loadMeta: async () => null, getPlaceIndex: async () => new Map(), setReservedPlaces() {}, setStyle() {}, getStyle: () => 'default',
     getState: () => ({ shown: false, loading: false, loaded: false, error: 'no-viewer', meta: null, parts: defaultParts(), counts: emptyCounts(), villagesLoaded: false, snapshotDate: null }),
     onChange: () => () => {}, refresh() {}, destroy() {},
   };
@@ -164,6 +173,34 @@ export function createUkraineBaseLayer({
   const _byEntityId = new Map();
   /** Popisky bez záznamu (rieky, oblasti) — zdvíhajú sa raz po načítaní. */
   const _looseLabels = [];
+  // Štýl (UKRAINE_BASE_STYLES): položky { entity, line?, point?, font? } so ZÁKLADNÝMI hodnotami.
+  let _styleMode = 'default';
+  const _styled = new Set();
+  const styleScale = () => UKRAINE_BASE_STYLES[_styleMode] || UKRAINE_BASE_STYLES.default;
+  const fontString = ({ px, weight, italic }, scale) => `${italic ? 'italic ' : ''}${weight} ${Math.round(px * scale * 10) / 10}px ${FONT}`;
+  function applyStyleItem(item) {
+    const s = styleScale();
+    try {
+      if (item.line != null && item.entity.polyline) item.entity.polyline.width = item.line * s.line;
+      if (item.point != null && item.entity.point) item.entity.point.pixelSize = item.point * s.point;
+      if (item.font && item.entity.label) item.entity.label.font = fontString(item.font, s.font);
+    } catch { /* entita už preč */ }
+  }
+  function registerStyle(entity, base) {
+    const item = { entity, ...base };
+    _styled.add(item);
+    if (_styleMode !== 'default') applyStyleItem(item);
+    return item;
+  }
+  /** Prepne štýl podkladu ('default' | 'karta') a prepočíta hrúbky, body a písma všetkých entít. */
+  function setStyle(mode) {
+    const next = UKRAINE_BASE_STYLES[mode] ? mode : 'default';
+    if (next === _styleMode) return;
+    _styleMode = next;
+    for (const item of _styled) applyStyleItem(item);
+    requestRender();
+    emit();
+  }
   let _liftFailedAt = 0;
   let _liftSamples = 0;
   const _listeners = new Set();
@@ -265,6 +302,7 @@ export function createUkraineBaseLayer({
     });
     const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true, lifted: false, reservedHidden: false };
     _byEntityId.set(entityId, record);
+    record.styleItem = registerStyle(entity, { point: style.pointPx, font: { px: style.fontPx, weight: style.weight, italic: false } });
     applyReservedTo(record);
     return record;
   }
@@ -322,6 +360,7 @@ export function createUkraineBaseLayer({
 
   function removeRecord(ds, record) {
     _byEntityId.delete(record.entity.id);
+    if (record.styleItem) _styled.delete(record.styleItem);
     try { ds.entities.remove(record.entity); } catch { /* už preč */ }
   }
 
@@ -352,6 +391,7 @@ export function createUkraineBaseLayer({
       const style = roadStyle(props.cls);
       const entityId = `${UKRAINE_BASE_ID}:road:${n}`;
       const entity = ds.entities.add({ id: entityId, polyline: polylineFor(feature.geometry.coordinates, { width: style.width, material: roadMaterial(props.cls), displayCondition: [0, style.farM] }) });
+      registerStyle(entity, { line: style.width });
       _byEntityId.set(entityId, { kind: 'road', props, entity });
       n += 1;
     }
@@ -371,6 +411,7 @@ export function createUkraineBaseLayer({
       const props = feature.properties || {};
       const entityId = `${UKRAINE_BASE_ID}:river:${n}`;
       const entity = ds.entities.add({ id: entityId, polyline: polylineFor(feature.geometry.coordinates, { width: RIVER_STYLE.width, material: riverMaterial, displayCondition: riverDisplayCondition(props.km) }) });
+      registerStyle(entity, { line: RIVER_STYLE.width });
       _byEntityId.set(entityId, { kind: 'river', props, entity });
       n += 1;
       // Popisok veľkej rieky raz (na najdlhšom úseku, ktorý príde prvý — build ich radí za sebou).
@@ -383,6 +424,7 @@ export function createUkraineBaseLayer({
           position: Cesium.Cartesian3.fromDegrees(lon, lat),
           label: labelFor(lineLabel(props).text, { fontPx: 10.5, weight: 500, colorCss: RIVER_STYLE.color, italic: true, displayCondition: [0, 700_000], offsetX: 4 }),
         });
+        registerStyle(label, { font: { px: 10.5, weight: 500, italic: true } });
         looseLabel(label, lon, lat);
       }
     }
@@ -394,7 +436,7 @@ export function createUkraineBaseLayer({
     let n = 0;
     for (const feature of collection?.features || []) {
       if (feature?.geometry?.type !== 'LineString' || feature.geometry.coordinates.length < 2) continue;
-      ds.entities.add({ id: `${UKRAINE_BASE_ID}:oblast:${n}`, polyline: polylineFor(feature.geometry.coordinates, { width: OBLAST_STYLE.width, material: oblastMaterial, displayCondition: [0, OBLAST_STYLE.farM] }) });
+      registerStyle(ds.entities.add({ id: `${UKRAINE_BASE_ID}:oblast:${n}`, polyline: polylineFor(feature.geometry.coordinates, { width: OBLAST_STYLE.width, material: oblastMaterial, displayCondition: [0, OBLAST_STYLE.farM] }) }), { line: OBLAST_STYLE.width });
       n += 1;
     }
     for (const oblast of collection?.oblasts || []) {
@@ -406,6 +448,7 @@ export function createUkraineBaseLayer({
         position: Cesium.Cartesian3.fromDegrees(oblast.center[0], oblast.center[1]),
         label: labelFor(text, { fontPx: 10, weight: 600, colorCss: OBLAST_STYLE.color, displayCondition: [OBLAST_STYLE.labelNearM, OBLAST_STYLE.labelFarM], offsetX: 0, uppercase: true }),
       });
+      registerStyle(label, { font: { px: 10, weight: 600, italic: false } });
       looseLabel(label, oblast.center[0], oblast.center[1]);
     }
     _counts.oblasts = n;
@@ -712,6 +755,7 @@ export function createUkraineBaseLayer({
       counts: { ..._counts },
       villagesLoaded: Boolean(_villageFeatures),
       reservedPlaces: _reserved.size,
+      style: _styleMode,
       snapshotDate: dateText,
     };
   }
@@ -727,6 +771,7 @@ export function createUkraineBaseLayer({
     for (const part of UKRAINE_BASE_PARTS) { try { viewer.dataSources.remove(sources[part], true); } catch { /* */ } }
     _placeRecords.clear();
     _villageRecords.clear();
+    _styled.clear();
     _byEntityId.clear();
     _listeners.clear();
   }
@@ -757,6 +802,8 @@ export function createUkraineBaseLayer({
     loadMeta,
     getPlaceIndex,
     setReservedPlaces,
+    setStyle,
+    getStyle: () => _styleMode,
     getState,
     onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
     refresh,

@@ -16,10 +16,10 @@ export const AREAS_MAX_TILES = 6;
 export const AREAS_CACHE_TILES = 12;
 /** Štýl plôch (vzorka KARTA): zástavba svetlosivá, les tmavozelený s bodkami, voda modrá, železnica čiarkovaná. */
 export const AREAS_STYLE = Object.freeze({
-  built: Object.freeze({ color: '#cdd5de', alpha: 0.36 }),
+  built: Object.freeze({ color: '#cdd5de', alpha: 0.28 }),
   forest: Object.freeze({ color: '#1f3a30', alpha: 0.45, dotColor: '#e8f0f6', dotAlpha: 0.42, spacingPx: 7, radius: 0.16 }),
-  water: Object.freeze({ color: '#5f93c4', alpha: 0.5 }),
-  rail: Object.freeze({ color: '#e8f0f6', gapColor: '#08101a', widthPx: 2.2, dashLength: 14 }),
+  water: Object.freeze({ color: '#5f93c4', alpha: 0.4 }),
+  rail: Object.freeze({ color: '#e8f0f6', gapColor: '#08101a', widthPx: 1.4, dashLength: 12 }),
 });
 
 const pad = (n, w) => String(Math.abs(n)).padStart(w, '0');
@@ -66,6 +66,11 @@ export function fallbackRect(center, halfDeg = 1.2) {
 /** Prahy plochy (km²) a stropy na dlaždicu pri kreslení — 27 000 polygónov na 4 dlaždice zablokovalo hlavné vlákno (meranie 2026-09-20). */
 export const AREAS_DRAW_MIN_KM2 = Object.freeze({ built: 0.02, forest: 0.08, water: 0.03 });
 export const AREAS_DRAW_MAX = Object.freeze({ built: 2500, forest: 2000, water: 800, rail: 1500 });
+/**
+ * Triedy, ktoré sa kreslia. Lesy NIE: používateľ 2026-09-20 („tie lesy určite nie" —
+ * bodkovanie rušilo); dáta v dlaždiciach ostávajú, keby raz stačil tichý tón.
+ */
+export const AREAS_DRAW_CLASSES = Object.freeze(['built', 'water', 'rail']);
 /** Plocha prstenca (km², lokálna rovina). Pure. */
 export function ringAreaKm2(ring) {
   if (!ring || ring.length < 3) return 0;
@@ -83,14 +88,15 @@ export function ringAreaKm2(ring) {
  * prvé, snímok ich už tak radí). Pure.
  * @param {{ built?: number[][][][], forest?: number[][][][], water?: number[][][][], rail?: number[][][] }} data
  */
-export function filterAreasForDraw(data, { minKm2 = AREAS_DRAW_MIN_KM2, max = AREAS_DRAW_MAX } = {}) {
+export function filterAreasForDraw(data, { minKm2 = AREAS_DRAW_MIN_KM2, max = AREAS_DRAW_MAX, classes = AREAS_DRAW_CLASSES } = {}) {
   const out = { counts: {} };
+  const on = new Set(classes);
   for (const cls of ['built', 'forest', 'water']) {
-    const kept = (data?.[cls] || []).filter((rings) => Array.isArray(rings?.[0]) && ringAreaKm2(rings[0]) >= minKm2[cls]);
+    const kept = on.has(cls) ? (data?.[cls] || []).filter((rings) => Array.isArray(rings?.[0]) && ringAreaKm2(rings[0]) >= minKm2[cls]) : [];
     out[cls] = kept.slice(0, max[cls]);
     out.counts[cls] = out[cls].length;
   }
-  out.rail = (data?.rail || []).slice(0, max.rail);
+  out.rail = on.has('rail') ? (data?.rail || []).slice(0, max.rail) : [];
   out.counts.rail = out.rail.length;
   return out;
 }
