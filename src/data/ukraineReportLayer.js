@@ -312,8 +312,13 @@ export function createUkraineReportLayer({
           font: `500 11px ${FONT}`,
           fillColor: color,
           outlineColor: outline,
-          outlineWidth: 3,
+          // Na KARTE tmavá podložka, aby amber popisok bojov čítal nad hustými
+          // podkladovými popiskami; obrys tenší, podložku netreba prehlušiť.
+          outlineWidth: _styleMode === 'karta' ? 2 : 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          showBackground: _styleMode === 'karta',
+          backgroundColor: Cesium.Color.fromCssColorString('#0b1622').withAlpha(0.72),
+          backgroundPadding: new Cesium.Cartesian2(5, 3),
           pixelOffset: new Cesium.Cartesian2(placeLabelOffsetX(useBolt, rec.boltSize), 0),
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
@@ -372,7 +377,11 @@ export function createUkraineReportLayer({
     try {
       if (e.point) e.point.show = !useBolt;
       if (e.billboard) e.billboard.show = useBolt;
-      if (e.label) e.label.pixelOffset = new Cesium.Cartesian2(placeLabelOffsetX(useBolt, rec.boltSize || 0), 0);
+      if (e.label) {
+        e.label.pixelOffset = new Cesium.Cartesian2(placeLabelOffsetX(useBolt, rec.boltSize || 0), 0);
+        e.label.showBackground = _styleMode === 'karta';
+        e.label.outlineWidth = _styleMode === 'karta' ? 2 : 3;
+      }
     } catch { /* entita už preč */ }
   }
   /** Štýl blesku ('karta' = sídla z hlásenia ako blesky intenzity, inak body). */

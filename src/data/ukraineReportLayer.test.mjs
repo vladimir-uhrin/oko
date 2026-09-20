@@ -270,10 +270,11 @@ test('K4: v štýle karta sú sídla z hlásenia blesky (bod skrytý), default =
   const e = rec.entity;
   assert.equal(e.billboard.image, 'bolt:#e6eef4', 'blesk sfarbený intenzitou (5 útokov)');
   assert.ok(boltCalls.includes('#e6eef4'));
-  // default: bod viditeľný, blesk skrytý
+  // default: bod viditeľný, blesk skrytý, popisok bez podložky
   assert.equal(e.point.show, true);
   assert.equal(e.billboard.show, false);
   assert.equal(e.label.pixelOffset.x, 8);
+  assert.equal(e.label.showBackground, false, 'v default žiadna podložka popisku');
   assert.equal(e.billboard.distanceDisplayCondition.far, REPORT_BOLT_FAR_M);
   // karta: bod skrytý, blesk viditeľný, popisok odsadený od blesku
   layer.setStyle('karta');
@@ -281,6 +282,7 @@ test('K4: v štýle karta sú sídla z hlásenia blesky (bod skrytý), default =
   assert.equal(e.point.show, false);
   assert.equal(e.billboard.show, true);
   assert.equal(e.label.pixelOffset.x, placeLabelOffsetX(true, rec.boltSize));
+  assert.equal(e.label.showBackground, true, 'na KARTE tmavá podložka popisku bojov');
   // späť
   layer.setStyle('default');
   assert.equal(e.point.show, true);

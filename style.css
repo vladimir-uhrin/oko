@@ -11700,20 +11700,10 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-karta-tool:hover { background: rgba(0, 212, 255, 0.20); }
 .oko-karta-tool[aria-pressed="true"] { background: rgba(0, 212, 255, 0.28); color: #eafaff; }
 
-/* „Čistá karta": schovaj chróm, nechaj mapu, tento rám a kredit Cesium/Google. */
-body.oko-karta-clean #title-bar,
-body.oko-karta-clean #style-indicator,
-body.oko-karta-clean #lang-switch,
-body.oko-karta-clean #top-center-actions,
-body.oko-karta-clean #command-dock,
-body.oko-karta-clean #control-panel,
-body.oko-karta-clean #location-bar,
-body.oko-karta-clean #data-panel,
-body.oko-karta-clean #ukraine-panel,
-body.oko-karta-clean #traffic-sync-chip,
-body.oko-karta-clean #cctv-sync-chip,
-body.oko-karta-clean #global-loading-status,
-body.oko-karta-clean .oko-ukr-timeline { display: none !important; }
+/* „Čistá karta": schovaj VŠETOK chróm (aj budúci) — nechaj len mapu, tento rám
+   a kredit Cesium/Google (podmienky Map Tiles). Allow-list namiesto zoznamu
+   selektorov chrómu, aby nová funkcia nepretiekla do čistej snímky. */
+body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="cesium-credits"]) { display: none !important; }
 
 @media (max-width: 900px) {
   .oko-karta-title { max-width: 62vw; top: 58px; }
