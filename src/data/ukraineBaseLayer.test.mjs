@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
-import { GLOW_FULL_M, GLOW_GONE_M, UKRAINE_BASE_ID, createUkraineBaseLayer } from './ukraineBaseLayer.js';
+import { GLOW_FULL_M, GLOW_GONE_M, ROAD_SHIELD_FAR_M, UKRAINE_BASE_ID, createUkraineBaseLayer, defaultRoadShieldImage, roadPolylineLengthDeg, roadPolylineMidpoint, roadRefDisplay, roadRefKind, roadShieldSpecs } from './ukraineBaseLayer.js';
 import { VILLAGE_LOAD_MAX_HEIGHT_M } from './ukraineBase.js';
 
 const META = { snapshot: '2026-09-19T12:00:00.000Z', datasets: { places: { features: 2 } } };
@@ -93,6 +93,7 @@ function make(overrides = {}) {
     groundSupport: () => true,
     terrainSampler: overrides.terrainSampler || (async (points) => { sampled.push(points.length); return points.map(() => 120); }),
     glowImageFactory: overrides.glowImageFactory,
+    roadShieldFactory: overrides.roadShieldFactory,
     projectorFactory: projector,
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
@@ -430,4 +431,59 @@ test('K3: špendlíky podľa strany a žiarenie miest len v štýle karta — re
   layer.setSideResolver(null);
   layer.setStyle('karta');
   assert.equal(city.point.color.toCssHexString(), baseCity, 'bez resolvera ostávajú farby tried');
+});
+
+test('K4: odznaky ciest — latinizácia kódu, trieda, odznaky (primár + európsky), geometria', () => {
+  assert.equal(roadRefDisplay('М-03'), 'M-03');
+  assert.equal(roadRefDisplay('35А-001;М-17'), '35A-001', 'prvé číslo, cyrilika → latinka');
+  assert.equal(roadRefDisplay('  Т-05-02 '), 'T-05-02');
+  assert.equal(roadRefKind('M-03'), 'national');
+  assert.equal(roadRefKind('H-20'), 'national');
+  assert.equal(roadRefKind('E40'), 'european');
+  assert.equal(roadRefKind('P-66'), 'regional');
+  assert.equal(roadRefKind('T-0504'), 'regional');
+  assert.equal(roadRefKind('885'), 'other');
+  assert.equal(roadRefKind('DN22'), 'other');
+  assert.deepEqual(roadShieldSpecs('М-03;E40'), [{ text: 'M-03', kind: 'national' }, { text: 'E40', kind: 'european' }]);
+  assert.deepEqual(roadShieldSpecs('Р-66'), [{ text: 'P-66', kind: 'regional' }]);
+  assert.deepEqual(roadShieldSpecs(''), []);
+  assert.ok(Math.abs(roadPolylineLengthDeg([[0, 0], [0, 1], [0, 2]]) - 2) < 1e-9);
+  assert.deepEqual(roadPolylineMidpoint([[0, 0], [0, 2]]), [0, 1]);
+  assert.deepEqual(roadPolylineMidpoint([[0, 0], [0, 1], [0, 3]]), [0, 1.5], 'polovica DĹŽKY, nie počtu bodov');
+});
+
+test('K4: defaultRoadShieldImage kreslí do plátna, bez document vráti null', () => {
+  const ctx = {
+    font: '', textBaseline: '', textAlign: '', shadowColor: '', shadowBlur: 0, shadowOffsetY: 0, fillStyle: '', strokeStyle: '', lineWidth: 1,
+    measureText: (t) => ({ width: String(t).length * 7 }),
+    scale() {}, save() {}, restore() {}, beginPath() {}, moveTo() {}, arcTo() {}, closePath() {}, fill() {}, stroke() {}, fillText() {},
+  };
+  const doc = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
+  const img = defaultRoadShieldImage([{ text: 'M-03', kind: 'national' }], doc, 2);
+  assert.ok(img && img.image && img.width > 0 && img.height > 0);
+  const two = defaultRoadShieldImage([{ text: 'M-03', kind: 'national' }, { text: 'E40', kind: 'european' }], doc, 2);
+  assert.ok(two.width > img.width, 'dva odznaky sú širšie');
+  assert.equal(defaultRoadShieldImage([{ text: 'M-03', kind: 'national' }], null), null, 'bez document nič');
+  assert.equal(defaultRoadShieldImage([], doc), null, 'bez kódov nič');
+});
+
+test('K4: odznak cesty vzniká len s ref, je skrytý v default a viditeľný v karta, dohľad = min(trieda, strop)', async () => {
+  const shieldCalls = [];
+  const { layer } = make({ camera: { height: 120_000, lon: 37.7, lat: 48.9 }, roadShieldFactory: (specs) => { shieldCalls.push(specs); return { image: `shield:${specs.map((s) => s.text).join('+')}`, width: 24, height: 18 }; } });
+  await layer.show();
+  await settle();
+  const { roadShields, byEntityId } = layer._getStateForTest();
+  assert.equal(roadShields.size, 1, 'len cesta s ref (M-03) dostane odznak, druhá bez ref nie');
+  const shield = [...roadShields][0];
+  assert.ok(String(shield.id).includes(':road-shield:'));
+  assert.equal(shield.billboard.image, 'shield:M-03');
+  assert.equal(shield.billboard.show, false, 'v štýle default je odznak skrytý');
+  assert.equal(shield.billboard.distanceDisplayCondition.far, ROAD_SHIELD_FAR_M, 'primary far 850k > strop 380k → strop');
+  const rec = byEntityId.get(shield.id);
+  assert.equal(rec.kind, 'road');
+  assert.equal(rec.props.ref, 'M-03', 'hover odznaku ukáže kartu cesty');
+  layer.setStyle('karta');
+  assert.equal(shield.billboard.show, true, 'v štýle karta je odznak viditeľný');
+  layer.setStyle('default');
+  assert.equal(shield.billboard.show, false, 'späť skrytý');
 });

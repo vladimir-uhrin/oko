@@ -92,6 +92,124 @@ export function defaultGlowImage(doc = globalThis.document) {
   return c;
 }
 
+// ── Odznaky ciest (KARTA K4) ────────────────────────────────────────────────
+/**
+ * Malé štítky s číslom cesty ako na Rybarovej mape. Kód sa latinizuje (М-03 →
+ * M-03), farbu určuje trieda kódu: M/H = štátne (modrá), E = európske (zelená),
+ * P/T/O/C/A/R = oblastné (oceľová), inak sivá. Odznak vidno len v štýle `karta`
+ * a len pri priblížení (aby pri oddialení mapu nezaplavili).
+ */
+export const ROAD_SHIELD_FONT = '700 11px system-ui, "Segoe UI", Roboto, sans-serif';
+export const ROAD_SHIELD_COLORS = Object.freeze({
+  national: Object.freeze({ fill: '#2f5ea8', text: '#eef3fb' }),
+  european: Object.freeze({ fill: '#2e7d55', text: '#eef7f0' }),
+  regional: Object.freeze({ fill: '#4a5a6b', text: '#e8eef3' }),
+  other: Object.freeze({ fill: '#3a4653', text: '#dfe6ec' }),
+});
+/** Strop dohľadu odznaku (m) a pásmo doznievania/zmenšenia na jeho okraji. */
+export const ROAD_SHIELD_FAR_M = 380_000;
+export const ROAD_SHIELD_FADE_FROM = 0.62;
+export const ROAD_SHIELD_FAR_SCALE = 0.78;
+const ROAD_REF_CYR = Object.freeze({ М: 'M', Н: 'H', Р: 'P', Т: 'T', О: 'O', С: 'C', А: 'A', К: 'K', Е: 'E', Г: 'G', В: 'V', Д: 'D', Л: 'L', П: 'P', Х: 'H', И: 'I', Й: 'Y', У: 'U', Ф: 'F', Б: 'B', Ц: 'C', Ч: 'Ch', Ш: 'Sh', Я: 'Ya', Ю: 'Yu', Э: 'E', Ы: 'Y', З: 'Z' });
+function latinizeRoadRef(token) {
+  let out = '';
+  for (const ch of String(token || '').trim()) out += (ROAD_REF_CYR[ch] || ch);
+  return out.replace(/\s+/g, '');
+}
+/** Zobrazený (latinizovaný) kód prvého referenčného čísla úseku. Pure. */
+export function roadRefDisplay(ref) { return latinizeRoadRef(String(ref || '').split(';')[0]); }
+/** Trieda kódu podľa prvého písmena: national | european | regional | other. Pure. */
+export function roadRefKind(refDisplay) {
+  const m = /^([A-Za-z]+)/.exec(String(refDisplay || ''));
+  const p = m ? m[1].toUpperCase() : '';
+  if (p === 'M' || p === 'H') return 'national';
+  if (p === 'E') return 'european';
+  if (p === 'P' || p === 'T' || p === 'O' || p === 'C' || p === 'A' || p === 'R') return 'regional';
+  return 'other';
+}
+/** Odznaky pre úsek: primárny kód + prípadné druhé európske číslo (ako reálne značenie). Max 2. Pure. */
+export function roadShieldSpecs(ref) {
+  const parts = String(ref || '').split(';').map(latinizeRoadRef).filter(Boolean);
+  if (!parts.length) return [];
+  const specs = [{ text: parts[0], kind: roadRefKind(parts[0]) }];
+  const euro = parts.find((p) => roadRefKind(p) === 'european');
+  if (euro && euro !== parts[0]) specs.push({ text: euro, kind: 'european' });
+  return specs;
+}
+/** Dĺžka lomenej čiary v stupňoch (s korekciou na šírku). Pure. */
+export function roadPolylineLengthDeg(coords) {
+  let len = 0;
+  for (let i = 1; i < coords.length; i += 1) {
+    const dx = (coords[i][0] - coords[i - 1][0]) * Math.cos((coords[i][1] + coords[i - 1][1]) * Math.PI / 360);
+    const dy = coords[i][1] - coords[i - 1][1];
+    len += Math.hypot(dx, dy);
+  }
+  return len;
+}
+/** Bod v polovici dĺžky lomenej čiary (nie v polovici počtu bodov). Pure. */
+export function roadPolylineMidpoint(coords) {
+  if (!Array.isArray(coords) || coords.length < 2) return coords?.[0] || [0, 0];
+  const half = roadPolylineLengthDeg(coords) / 2;
+  let acc = 0;
+  for (let i = 1; i < coords.length; i += 1) {
+    const dx = (coords[i][0] - coords[i - 1][0]) * Math.cos((coords[i][1] + coords[i - 1][1]) * Math.PI / 360);
+    const dy = coords[i][1] - coords[i - 1][1];
+    const seg = Math.hypot(dx, dy);
+    if (acc + seg >= half) {
+      const f = seg ? (half - acc) / seg : 0;
+      return [coords[i - 1][0] + (coords[i][0] - coords[i - 1][0]) * f, coords[i - 1][1] + (coords[i][1] - coords[i - 1][1]) * f];
+    }
+    acc += seg;
+  }
+  return coords[Math.floor(coords.length / 2)];
+}
+function roundRectPath(g, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2);
+  g.beginPath();
+  g.moveTo(x + rad, y);
+  g.arcTo(x + w, y, x + w, y + h, rad);
+  g.arcTo(x + w, y + h, x, y + h, rad);
+  g.arcTo(x, y + h, x, y, rad);
+  g.arcTo(x, y, x + w, y, rad);
+  g.closePath();
+}
+/**
+ * Nakreslí odznak(y) cesty do plátna (DPR pre ostrosť) a vráti { image, width,
+ * height } pre billboard, alebo null bez document. Farbu a text pečie priamo
+ * (billboard.color ostáva biely). Pure aparát, závislý len na `doc`.
+ */
+export function defaultRoadShieldImage(specs, doc = globalThis.document, dpr = (globalThis.devicePixelRatio || 2)) {
+  if (!doc?.createElement || !Array.isArray(specs) || !specs.length) return null;
+  const scale = Math.max(1, Math.min(3, dpr));
+  const H = 18, PADX = 5, GAP = 3, RAD = 3, MARGIN = 1;
+  const meas = doc.createElement('canvas').getContext?.('2d');
+  if (!meas) return null;
+  meas.font = ROAD_SHIELD_FONT;
+  const items = specs.slice(0, 2).map((s) => ({ ...s, w: Math.ceil(meas.measureText(s.text).width) + PADX * 2 }));
+  const cssW = items.reduce((a, it) => a + it.w, 0) + GAP * (items.length - 1) + MARGIN * 2;
+  const cssH = H + MARGIN * 2;
+  const c = doc.createElement('canvas');
+  c.width = Math.ceil(cssW * scale); c.height = Math.ceil(cssH * scale);
+  const g = c.getContext?.('2d');
+  if (!g) return null;
+  g.scale(scale, scale);
+  g.font = ROAD_SHIELD_FONT; g.textBaseline = 'middle'; g.textAlign = 'center';
+  let x = MARGIN;
+  for (const it of items) {
+    const col = ROAD_SHIELD_COLORS[it.kind] || ROAD_SHIELD_COLORS.other;
+    g.save();
+    roundRectPath(g, x, MARGIN, it.w, H, RAD);
+    g.shadowColor = 'rgba(6,12,20,0.9)'; g.shadowBlur = 2.5; g.shadowOffsetY = 0.5;
+    g.fillStyle = col.fill; g.fill();
+    g.restore();
+    roundRectPath(g, x + 0.75, MARGIN + 0.75, it.w - 1.5, H - 1.5, RAD - 0.5);
+    g.lineWidth = 1; g.strokeStyle = 'rgba(255,255,255,0.22)'; g.stroke();
+    g.fillStyle = col.text; g.fillText(it.text, x + it.w / 2, MARGIN + H / 2 + 0.5);
+    x += it.w + GAP;
+  }
+  return { image: c, width: cssW, height: cssH };
+}
+
 /** GPU vie pozemné čiary (hĺbková textúra)? Bez scény optimisticky áno. */
 export function defaultGroundSupport(scene) {
   try { return scene ? Cesium.GroundPolylinePrimitive.isSupported(scene) : true; } catch { return true; }
@@ -155,6 +273,7 @@ export function createUkraineBaseLayer({
   clearTimer = (id) => clearTimeout(id),
   now = () => Date.now(),
   glowImageFactory = defaultGlowImage,
+  roadShieldFactory = defaultRoadShieldImage,
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   const inert = {
@@ -205,6 +324,9 @@ export function createUkraineBaseLayer({
   let _sideResolver = null;
   let _glowImage = undefined; // undefined = ešte neskúšané, null = nedostupné
   const glowImage = () => { if (_glowImage === undefined) { try { _glowImage = glowImageFactory?.() || null; } catch { _glowImage = null; } } return _glowImage; };
+  // Odznaky ciest (KARTA K4): billboardy so štítkom čísla; len v štýle 'karta'.
+  const _roadShields = new Set();
+  const _shieldImgCache = new Map(); // signatúra → { image, width, height } | null
   // Štýl (UKRAINE_BASE_STYLES): položky { entity, line?, point?, font? } so ZÁKLADNÝMI hodnotami.
   let _styleMode = 'default';
   const _styled = new Set();
@@ -231,8 +353,14 @@ export function createUkraineBaseLayer({
     _styleMode = next;
     for (const item of _styled) applyStyleItem(item);
     refreshSides();
+    applyRoadShieldVisibility();
     requestRender();
     emit();
+  }
+  /** Odznaky ciest sú viditeľné len v štýle 'karta'. */
+  function applyRoadShieldVisibility() {
+    const on = _styleMode === 'karta';
+    for (const entity of _roadShields) { try { if (entity.billboard) entity.billboard.show = on; } catch { /* preč */ } }
   }
   /** Farba bodu sídla: v štýle karta podľa strany (resolver), inak farba triedy. */
   function pinColorFor(record) {
@@ -471,6 +599,9 @@ export function createUkraineBaseLayer({
   function buildRoads(collection) {
     const ds = sources.roads;
     let n = 0;
+    // Odznak na cestu: jeden na (kód, bunku 1°) — najdlhší úsek v bunke, takže sa
+    // opakuje pozdĺž dlhej cesty ≈ každých 100 km a vždy je blízko pohľadu.
+    const picks = new Map();
     for (const feature of collection?.features || []) {
       if (feature?.geometry?.type !== 'LineString' || feature.geometry.coordinates.length < 2) continue;
       const props = feature.properties || {};
@@ -480,8 +611,52 @@ export function createUkraineBaseLayer({
       registerStyle(entity, { line: style.width });
       _byEntityId.set(entityId, { kind: 'road', props, entity });
       n += 1;
+      if (props.ref) {
+        const disp = roadRefDisplay(props.ref);
+        // Číselné miestne kódy (napr. „885") na vedľajších cestách sú šum — odznak len na hlavnejších.
+        if (disp && !(props.cls === 'secondary' && roadRefKind(disp) === 'other')) {
+          const coords = feature.geometry.coordinates;
+          const len = roadPolylineLengthDeg(coords);
+          const [mlon, mlat] = roadPolylineMidpoint(coords);
+          const key = `${disp}|${Math.floor(mlon)}|${Math.floor(mlat)}`;
+          const prev = picks.get(key);
+          if (!prev || len > prev.len) picks.set(key, { key, ref: props.ref, cls: props.cls, lon: mlon, lat: mlat, len });
+        }
+      }
     }
     _counts.roads = n;
+    buildRoadShields(picks);
+  }
+
+  function buildRoadShields(picks) {
+    const ds = sources.roads;
+    for (const pick of picks.values()) {
+      const specs = roadShieldSpecs(pick.ref);
+      if (!specs.length) continue;
+      const sig = specs.map((s) => `${s.kind}:${s.text}`).join('|');
+      let img = _shieldImgCache.get(sig);
+      if (img === undefined) { try { img = roadShieldFactory?.(specs) || null; } catch { img = null; } _shieldImgCache.set(sig, img); }
+      if (!img) continue;
+      const farM = Math.min(roadStyle(pick.cls).farM, ROAD_SHIELD_FAR_M);
+      const id = `${UKRAINE_BASE_ID}:road-shield:${pick.key}`;
+      const entity = ds.entities.add({
+        id,
+        position: Cesium.Cartesian3.fromDegrees(pick.lon, pick.lat),
+        billboard: {
+          image: img.image, width: img.width, height: img.height,
+          show: _styleMode === 'karta',
+          distanceDisplayCondition: ddc([0, farM]),
+          translucencyByDistance: new Cesium.NearFarScalar(farM * ROAD_SHIELD_FADE_FROM, 1, farM, 0),
+          scaleByDistance: new Cesium.NearFarScalar(farM * ROAD_SHIELD_FADE_FROM, 1, farM, ROAD_SHIELD_FAR_SCALE),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        },
+      });
+      _roadShields.add(entity);
+      // Hover ukáže kartu cesty (rovnaká ako pri čiare); shield sa nezaráta do počtu ciest.
+      _byEntityId.set(id, { kind: 'road', props: { cls: pick.cls, ref: pick.ref }, entity });
+    }
   }
 
   function midpoint(coords) {
@@ -857,6 +1032,8 @@ export function createUkraineBaseLayer({
     for (const part of UKRAINE_BASE_PARTS) { try { viewer.dataSources.remove(sources[part], true); } catch { /* */ } }
     _placeRecords.clear();
     _villageRecords.clear();
+    _roadShields.clear();
+    _shieldImgCache.clear();
     _styled.clear();
     _byEntityId.clear();
     _listeners.clear();
@@ -897,7 +1074,7 @@ export function createUkraineBaseLayer({
     refresh,
     destroy,
     /** Len pre testy. */
-    _getStateForTest: () => ({ sources, placeRecords: _placeRecords, villageRecords: _villageRecords, byEntityId: _byEntityId, looseLabels: _looseLabels, liftSamples: _liftSamples, ground, hover: _hover }),
+    _getStateForTest: () => ({ sources, placeRecords: _placeRecords, villageRecords: _villageRecords, roadShields: _roadShields, byEntityId: _byEntityId, looseLabels: _looseLabels, liftSamples: _liftSamples, ground, hover: _hover }),
   };
 }
 
