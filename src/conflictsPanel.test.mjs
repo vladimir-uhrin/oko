@@ -98,3 +98,19 @@ test('panel: bez documentu je inertný', () => {
   assert.equal(p.isOpen(), false);
   assert.doesNotThrow(() => { p.open(); p.close(); p.toggle(); p.destroy(); });
 });
+
+test('panel: tlačidlo prehľadu skopíruje sumár, bez onDigest tlačidlo nie je', async () => {
+  const doc = fakeDoc();
+  const writes = [];
+  const clipboard = { writeText: async (t) => { writes.push(t); } };
+  const p = createConflictsPanel({ documentRef: doc, translate: (k) => k, conflicts: CONFLICTS, onExport: async () => {}, onDigest: async () => 'DIGEST', clipboard });
+  const { digestBtn, status } = p._getStateForTest();
+  assert.ok(digestBtn, 'tlačidlo prehľadu je, keď je onDigest');
+  digestBtn.dispatch('click');
+  for (let i = 0; i < 4; i += 1) await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(writes, ['DIGEST']);
+  assert.equal(status.textContent, 'summary.copied');
+  // bez onDigest → žiadne tlačidlo
+  const p2 = createConflictsPanel({ documentRef: fakeDoc(), translate: (k) => k, conflicts: CONFLICTS, onExport: async () => {} });
+  assert.equal(p2._getStateForTest().digestBtn, null);
+});

@@ -49,6 +49,8 @@ import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
+import { buildUkraineDigest } from './conflictSummary.js';
+import { fetchUkraineReport } from './data/ukraineReport.js';
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
@@ -813,6 +815,16 @@ async function init() {
         if (!c) return;
         await frameConflict(c);
         await exportConflict({ conflict: c, ratio });
+      },
+      onDigest: async () => {
+        try {
+          const report = await fetchUkraineReport();
+          const lang = currentLanguage();
+          let today;
+          try { today = new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' }).format(new Date()); }
+          catch { today = new Date().toISOString().slice(0, 10); }
+          return buildUkraineDigest({ report, translate: t, dateText: report?.reportedAtText || today }).text;
+        } catch (error) { console.warn('[conflict] digest failed:', error?.message || error); return null; }
       },
     });
     window.__godsEyeView.conflictsPanel = conflictsPanel;

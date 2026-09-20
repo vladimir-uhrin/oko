@@ -34,6 +34,8 @@ export function createConflictsPanel({
   ratios = ['feed', 'square', 'story'],
   initialRatio = 'feed',
   onExport = async () => {},
+  onDigest = null,
+  clipboard = (globalThis.navigator && globalThis.navigator.clipboard) || null,
 } = {}) {
   const doc = documentRef;
   const inert = { id: CONFLICTS_PANEL_ID, open() {}, close() {}, toggle() {}, isOpen: () => false, destroy() {}, _getStateForTest: () => ({}) };
@@ -99,9 +101,17 @@ export function createConflictsPanel({
   const allBtn = el(doc, 'button', 'oko-conflicts-all', translate('conflicts.exportAll'));
   allBtn.type = 'button';
   allBtn.addEventListener('click', () => { void runExport(conflicts.slice()); });
+  foot.append(allBtn);
+  let digestBtn = null;
+  if (typeof onDigest === 'function') {
+    digestBtn = el(doc, 'button', 'oko-conflicts-digest', translate('summary.copy'));
+    digestBtn.type = 'button';
+    digestBtn.addEventListener('click', () => { void runDigest(); });
+    foot.append(digestBtn);
+  }
   const status = el(doc, 'div', 'oko-conflicts-status');
   status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-  foot.append(allBtn, status);
+  foot.append(status);
   panel.append(foot);
 
   doc.body.append(launch, panel);
@@ -114,8 +124,20 @@ export function createConflictsPanel({
   function setBusy(on, text = '') {
     _busy = on;
     launch.disabled = on; allBtn.disabled = on;
+    if (digestBtn) digestBtn.disabled = on;
     for (const b of rowButtons) b.disabled = on;
     status.textContent = text;
+  }
+  async function runDigest() {
+    if (_busy || typeof onDigest !== 'function') return;
+    setBusy(true, '');
+    let text = null;
+    try { text = await onDigest(); } catch { text = null; }
+    if (text && clipboard?.writeText) {
+      try { await clipboard.writeText(text); setBusy(false, translate('summary.copied')); return; }
+      catch { /* schránka odmietla — spadne na prázdny stav nižšie */ }
+    }
+    setBusy(false, text ? translate('summary.copied') : translate('summary.empty'));
   }
   async function runExport(items) {
     if (_busy || !items.length) return;
@@ -146,6 +168,6 @@ export function createConflictsPanel({
     open, close, toggle, isOpen: () => !panel.hidden,
     getRatio: () => _ratio, setRatio,
     destroy,
-    _getStateForTest: () => ({ launch, panel, closeBtn, allBtn, status, ratioBtns, rowButtons, regions, isBusy: () => _busy }),
+    _getStateForTest: () => ({ launch, panel, closeBtn, allBtn, digestBtn, status, ratioBtns, rowButtons, regions, isBusy: () => _busy }),
   };
 }

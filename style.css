@@ -11761,5 +11761,12 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
   border-radius: 8px; padding: 7px; cursor: var(--cursor-pointer);
 }
 .oko-conflicts-all:hover { background: rgba(0, 212, 255, 0.28); }
+.oko-conflicts-digest {
+  width: 100%; margin-top: 7px; font-family: var(--font-mono); font-size: 11px; color: #cdd9e4;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px; padding: 6px; cursor: var(--cursor-pointer);
+}
+.oko-conflicts-digest:hover { background: rgba(255, 255, 255, 0.12); }
+.oko-conflicts-digest:disabled { opacity: 0.5; cursor: default; }
 .oko-conflicts-status { font-size: 10.5px; color: #9fb2c4; margin-top: 7px; min-height: 13px; text-align: center; }
 body.oko-karta-clean .oko-conflicts-launch, body.oko-karta-clean .oko-conflicts-panel { display: none !important; }
