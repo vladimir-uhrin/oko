@@ -959,6 +959,10 @@ export const EN_STRINGS = Object.freeze({
   'ukraine.level.derived': 'derived · model',
   'ukraine.src.fires': 'The Economist war-fire model · NASA FIRMS',
   'ukraine.part.control': 'CONTROL',
+  // KARTA K2 (2026-09-20): OSM areas by 1° tiles.
+  'ukraine.part.areas': 'AREAS',
+  'ukraine.areas.note': 'Built-up areas, forests, water bodies and railways from OpenStreetMap (ODbL), drawn below 420 km on globe map stacks (not on Google 3D)',
+  'ukraine.areas.missing': 'Area tiles are not built yet: node scripts/build-ukraine-areas.mjs',
   'ukraine.ctl.title': 'TERRITORIAL CONTROL · per Wikipedia',
   'ukraine.ctl.ua': 'Ukrainian control',
   'ukraine.ctl.ru': 'Russian control',
@@ -2611,6 +2615,10 @@ export const SK_STRINGS = Object.freeze({
   'ukraine.level.derived': 'odvodené · model',
   'ukraine.src.fires': 'model vojnových požiarov The Economist · NASA FIRMS',
   'ukraine.part.control': 'KONTROLA',
+  // KARTA K2 (2026-09-20): plochy OSM po dlaždiciach 1°.
+  'ukraine.part.areas': 'PLOCHY',
+  'ukraine.areas.note': 'Zástavba, lesy, vodné plochy a železnice z OpenStreetMap (ODbL); kreslia sa do 420 km na glóbusových podkladoch (nie na Google 3D)',
+  'ukraine.areas.missing': 'Dlaždice plôch ešte nie sú postavené: node scripts/build-ukraine-areas.mjs',
   'ukraine.ctl.title': 'ÚZEMNÁ KONTROLA · podľa Wikipédie',
   'ukraine.ctl.ua': 'ukrajinská kontrola',
   'ukraine.ctl.ru': 'ruská kontrola',

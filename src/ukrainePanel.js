@@ -34,6 +34,7 @@ export function createUkrainePanel({
   timeline = null,
   control = null,
   deepstate = null,
+  areas = null,
   damage = null,
   scenes = listFrontScenes(),
   applyScene = null,
@@ -119,6 +120,18 @@ export function createUkrainePanel({
     deepstateChip.setAttribute('aria-pressed', 'false');
     deepstateChip.title = translate('ukraine.ds.note');
     chips.appendChild(deepstateChip);
+  }
+  // Čip PLOCHY (KARTA K2, 2026-09-20): zástavba, lesy, voda a železnice z OSM
+  // po dlaždiciach; zobrazenie sleduje podklad, čip je len vypínač.
+  let areasChip = null;
+  if (areas) {
+    areasChip = button('data-toggle-chip ukraine-chip ukraine-chip-areas', translate('ukraine.part.areas'), () => {
+      areas.setEnabled(!areas.isEnabled());
+    });
+    areasChip.dataset.part = 'areas';
+    areasChip.setAttribute('aria-pressed', String(Boolean(areas.isEnabled())));
+    areasChip.title = translate('ukraine.areas.note');
+    chips.appendChild(areasChip);
   }
   // Čip ŠKODY (etapa 5): statické škody na budovách (ETH Zürich SAR + UNOSAT).
   let damageChip = null;
@@ -290,6 +303,16 @@ export function createUkrainePanel({
   };
   const unsubscribeControl = control?.onChange?.(() => updateControlChip()) || null;
   updateControlChip();
+  const updateAreasChip = () => {
+    if (!areasChip) return;
+    const st = areas.getState();
+    areasChip.classList?.toggle?.('active', Boolean(st.enabled));
+    areasChip.setAttribute('aria-pressed', String(Boolean(st.enabled)));
+    areasChip.classList?.toggle?.('is-loading', Boolean(st.loading));
+    areasChip.title = st.error === 'no_snapshot' ? translate('ukraine.areas.missing') : translate('ukraine.areas.note');
+  };
+  const unsubscribeAreas = areas?.onChange?.(() => updateAreasChip()) || null;
+  updateAreasChip();
   const updateDeepStateChip = () => {
     if (!deepstateChip) return;
     const on = Boolean(deepstate?.isShown?.());
@@ -318,6 +341,6 @@ export function createUkrainePanel({
     updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); unsubscribeAreas?.(); mountTarget.replaceChildren(); },
   };
 }

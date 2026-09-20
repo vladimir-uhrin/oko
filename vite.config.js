@@ -4877,8 +4877,11 @@ function ukraineBaseProxy() {
   async function handler(req, res) {
     if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, JSON.stringify({ error: 'Method Not Allowed' })); return; }
     const name = String(req.url || '').replace(/^\/+/, '').replace(/[?#].*$/, '');
-    const file = FILES[name];
-    if (!file) { sendJson(res, 404, JSON.stringify({ error: 'not_found', datasets: Object.keys(FILES) })); return; }
+    // Plochy K2 (KARTA): `areas/meta` a `areas/<N48E037>` — dlaždice 1°×1° zo
+    // scripts/build-ukraine-areas.mjs, ten istý snímkový adresár.
+    const areasTile = /^areas\/([NS]\d{2}[EW]\d{3})$/.exec(name);
+    const file = name === 'areas/meta' ? path.join('areas', 'meta.json') : (areasTile ? path.join('areas', `${areasTile[1]}.json`) : FILES[name]);
+    if (!file) { sendJson(res, 404, JSON.stringify({ error: 'not_found', datasets: [...Object.keys(FILES), 'areas/meta', 'areas/<tile>'] })); return; }
     const filePath = path.join(BASE_DIR, file);
     let stat;
     try { stat = await fsp.stat(filePath); } catch { stat = null; }

@@ -50,6 +50,7 @@ import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
 import { createUkraineEventsLayer } from './ukraineEventsLayer.js';
 import { createUkraineControlLayer } from './ukraineControlLayer.js';
+import { createUkraineAreasLayer } from './data/ukraineAreasLayer.js';
 import { createUkraineDeepStateLayer } from './ukraineDeepStateLayer.js';
 import { createUkraineDamageLayer } from './ukraineDamageLayer.js';
 import { createUkraineTimeline, parseShareParams } from './ukraineTimeline.js';
@@ -675,6 +676,18 @@ async function init() {
     // zóny; snímka sleduje deň kurzora časovej osi.
     const ukraineControl = createUkraineControlLayer({ viewer });
     window.__godsEyeView.ukraineControl = ukraineControl;
+    // Plochy OSM (KARTA K2): zástavba, lesy, voda, železnice po dlaždiciach —
+    // ukazujú sa s podkladom UKRAJINA, len na glóbusových podkladoch a zblízka.
+    const ukraineAreas = createUkraineAreasLayer({ viewer });
+    window.__godsEyeView.ukraineAreas = ukraineAreas;
+    let ukraineAreasWanted = false;
+    ukraineBase.onChange((state) => {
+      const want = Boolean(state?.shown);
+      if (want === ukraineAreasWanted) return;
+      ukraineAreasWanted = want;
+      if (want) void ukraineAreas.show(); else ukraineAreas.hide();
+    });
+    if (ukraineBase.isShown()) { ukraineAreasWanted = true; void ukraineAreas.show(); }
     // DeepState (2026-09-19, hobby použitie, súhlas sa žiada): polygóny okupácie
     // a šedej zóny z nášho denného archívu; časová os prepína snímku podľa dňa.
     const ukraineDeepState = createUkraineDeepStateLayer({ viewer });
@@ -708,6 +721,7 @@ async function init() {
       timeline: ukraineTimeline,
       control: ukraineControl,
       deepstate: ukraineDeepState,
+      areas: ukraineAreas,
       damage: ukraineDamage,
       applyScene: (id) => runFrontScene(id),
     });

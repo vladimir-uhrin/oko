@@ -214,8 +214,13 @@ Zápis: `docs/CURRENT-STATE.md` („KARTA — cartographic mode, stages K0 + K1"
 - **K1 podklad KARTA (1 deň)** — HOTOVÉ 09-20 (stack, post-procesing, čip; štýlový token čiar a popisov
   ostáva na K2, kde pribudnú plochy): stack + štýlový token (post-procesing, čiary, popisky), čip KARTA
   v paneli UKRAJINA, voliteľne zapnúť smerom frontu; všetko existujúce (hover, os, karty) beží ďalej.
-- **K2 snímok v3 (1–1,5 dňa)**: build pridá zástavbu, lesy, vodu, železnice, odznaky; zjednodušenie
-  (Douglas–Peucker + prah plochy), po oknách smerov, nie celý front naraz; GroundPrimitive dávky.
+- **K2 snímok v3 (1–1,5 dňa)** — HOTOVÉ 09-20 (bez odznakov ciest → K4): `scripts/build-ukraine-areas.mjs`
+  po dlaždiciach 1°×1° nad oknami smerov (26 dlaždíc, od Donbasu von, meta po každej), vlastníctvo podľa
+  ťažiska, Douglas–Peucker 12 m, prahy plochy; klient `ukraineAreasLayer.js` = dávkové GroundPrimitive
+  na triedu (les = vlastný materiál bodiek v obrazovkových px), ≤ 6 dlaždíc, LRU 12, len do 420 km a len
+  na glóbusových podkladoch; čip PLOCHY. Entity boli primalé (27 000 = čierny glóbus). Pôvodný plán: build
+  pridá zástavbu, lesy, vodu, železnice, odznaky; zjednodušenie (Douglas–Peucker + prah plochy), po oknách
+  smerov, nie celý front naraz; GroundPrimitive dávky.
 - **K3 zóny jemne (1 deň)**: raster 0,01° + rozmazanie, šrafovanie, farba sídiel podľa strany,
   žiarenie miest; legenda hovorí „odvodené z Wikipédie / DeepState".
 - **K4 boje a smery (½–1 deň)**: blesky, odznaky ciest, DeepState šípky s normálou frontu —
