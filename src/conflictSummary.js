@@ -50,3 +50,38 @@ export function buildUkraineDigest({ report = null, translate = (k) => k, dateTe
   const text = [head, ...body, totalLine, source].filter(Boolean).join('\n');
   return { lines, total, text };
 }
+
+/** Riadok ropy z modelu (`buildOilModel`): „Brent … · WTI …" (≈ spot), inak ''. Pure. */
+export function oilDigestLine(oilModel) {
+  if (!oilModel || oilModel.ok === false) return '';
+  const parts = [];
+  if (oilModel.brent?.usdText) parts.push(`Brent ${oilModel.brent.usdText}`);
+  if (oilModel.wti?.usdText) parts.push(`WTI ${oilModel.wti.usdText}`);
+  return parts.join(' · ');
+}
+
+/**
+ * Viacsekciový prehľad naprieč konfliktmi (OKO nie je len Ukrajina): Ukrajina
+ * (hlásenie GŠ), ropa (≈ spot) a Blízky východ (počet správ z otvorených
+ * zdrojov). Sekcia bez dát sa vynechá. Etická čiara: počty, ceny a zdroje —
+ * žiadne osoby ani polohy, žiadne titulky správ (len počet + odkaz). Pure.
+ */
+export function buildConflictDigest({ report = null, oilModel = null, gulfCount = null, translate = (k) => k, dateText = '' } = {}) {
+  const date = dateText || report?.reportedAtText || '';
+  const blocks = [date ? translate('summary.head', { date }) : translate('summary.head-nodate')];
+  const uaLines = frontDigestLines(report, { translate }).filter((l) => l.attacks != null && l.attacks > 0);
+  const total = report && report.total != null ? Number(report.total) : null;
+  if (uaLines.length || total != null) {
+    const sec = [translate('summary.section.ukraine')];
+    for (const l of uaLines) sec.push(`• ${l.label}: ${l.attacks}`);
+    if (total != null) sec.push(translate('summary.ukraine.total', { n: total }));
+    blocks.push(sec.join('\n'));
+  }
+  const oil = oilDigestLine(oilModel);
+  if (oil) blocks.push(`${translate('summary.section.oil')}\n${oil}`);
+  if (gulfCount != null && Number.isFinite(gulfCount)) {
+    blocks.push(`${translate('summary.section.gulf')}\n${translate('summary.gulf.count', { n: gulfCount })}`);
+  }
+  blocks.push(translate('summary.sources'));
+  return { text: blocks.join('\n\n'), sections: { ukraine: uaLines.length, oil: Boolean(oil), gulf: gulfCount } };
+}

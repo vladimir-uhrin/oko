@@ -49,8 +49,10 @@ import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
-import { buildUkraineDigest } from './conflictSummary.js';
+import { buildConflictDigest } from './conflictSummary.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
+import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
+import { buildSituationModel, fetchSituationNews } from './data/situationNews.js';
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
@@ -818,12 +820,15 @@ async function init() {
       },
       onDigest: async () => {
         try {
-          const report = await fetchUkraineReport();
           const lang = currentLanguage();
           let today;
           try { today = new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' }).format(new Date()); }
           catch { today = new Date().toISOString().slice(0, 10); }
-          return buildUkraineDigest({ report, translate: t, dateText: report?.reportedAtText || today }).text;
+          const [rep, oil, gulf] = await Promise.allSettled([fetchUkraineReport(), fetchOilPrices(), fetchSituationNews('gulf')]);
+          const report = rep.status === 'fulfilled' ? rep.value : null;
+          const oilModel = oil.status === 'fulfilled' ? buildOilModel(oil.value, { lang, translate: t }) : null;
+          const gulfCount = gulf.status === 'fulfilled' ? buildSituationModel(gulf.value, { translate: t, limit: 200 }).count : null;
+          return buildConflictDigest({ report, oilModel, gulfCount, translate: t, dateText: report?.reportedAtText || today }).text;
         } catch (error) { console.warn('[conflict] digest failed:', error?.message || error); return null; }
       },
     });

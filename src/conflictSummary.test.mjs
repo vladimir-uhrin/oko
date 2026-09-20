@@ -55,3 +55,50 @@ test('buildUkraineDigest: prázdne hlásenie = hlavička + zdroj, bez pádu', ()
   assert.match(d.text, /Zdroj: GŠ ZSU/);
   assert.doesNotMatch(d.text, /•/, 'žiadne riadky smerov');
 });
+
+import { buildConflictDigest, oilDigestLine } from './conflictSummary.js';
+
+const trAll = (k, v) => {
+  const m = {
+    'summary.head': `OKO · Prehľad · ${v?.date}`,
+    'summary.head-nodate': 'OKO · Prehľad',
+    'summary.section.ukraine': 'UKRAJINA:',
+    'summary.section.oil': 'ROPA:',
+    'summary.section.gulf': 'BLÍZKY VÝCHOD:',
+    'summary.gulf.count': `${v?.n} správ`,
+    'summary.ukraine.total': `Spolu: ${v?.n}`,
+    'summary.sources': 'Zdroje: …',
+  };
+  return m[k] ?? k;
+};
+
+test('oilDigestLine: Brent + WTI, prázdny model = ""', () => {
+  assert.equal(oilDigestLine({ ok: true, brent: { usdText: '$74.20/bbl' }, wti: { usdText: '$70.10/bbl' } }), 'Brent $74.20/bbl · WTI $70.10/bbl');
+  assert.equal(oilDigestLine({ ok: true, brent: { usdText: '$74/bbl' } }), 'Brent $74/bbl');
+  assert.equal(oilDigestLine({ ok: false }), '');
+  assert.equal(oilDigestLine(null), '');
+});
+
+test('buildConflictDigest: viac sekcií (Ukrajina + ropa + Blízky východ), prázdne sa vynechajú', () => {
+  const d = buildConflictDigest({
+    report: REPORT,
+    oilModel: { ok: true, brent: { usdText: '$74.20/bbl' }, wti: { usdText: '$70.10/bbl' } },
+    gulfCount: 12,
+    translate: trAll,
+    dateText: '20. 9. 2026',
+  });
+  assert.match(d.text, /^OKO · Prehľad · 20\. 9\. 2026/);
+  assert.match(d.text, /UKRAJINA:/);
+  assert.match(d.text, /• Pokrovsk direction: 29/);
+  assert.match(d.text, /Spolu: 213/);
+  assert.match(d.text, /ROPA:\nBrent \$74\.20\/bbl · WTI \$70\.10\/bbl/);
+  assert.match(d.text, /BLÍZKY VÝCHOD:\n12 správ/);
+  assert.match(d.text, /Zdroje: …/);
+  assert.equal(d.sections.oil, true);
+  assert.equal(d.sections.gulf, 12);
+  // bez ropy a zálivu → tie sekcie chýbajú
+  const d2 = buildConflictDigest({ report: REPORT, oilModel: null, gulfCount: null, translate: trAll, dateText: 'x' });
+  assert.doesNotMatch(d2.text, /ROPA:/);
+  assert.doesNotMatch(d2.text, /BLÍZKY VÝCHOD:/);
+  assert.match(d2.text, /UKRAJINA:/);
+});
