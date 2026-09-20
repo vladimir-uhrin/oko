@@ -11770,3 +11770,18 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
 .oko-conflicts-digest:disabled { opacity: 0.5; cursor: default; }
 .oko-conflicts-status { font-size: 10.5px; color: #9fb2c4; margin-top: 7px; min-height: 13px; text-align: center; }
 body.oko-karta-clean .oko-conflicts-launch, body.oko-karta-clean .oko-conflicts-panel { display: none !important; }
+
+/* ── Hľadať čokoľvek: príkazová paleta (orientácia v OKU) ────────────────────
+   Modálne pole nad všetkým; jedno miesto na miesto/vrstvu/scénu/akciu. */
+.oko-cmd { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-start; justify-content: center; background: rgba(4, 10, 16, 0.55); backdrop-filter: blur(2px); }
+.oko-cmd[hidden] { display: none; }
+.oko-cmd-box { margin-top: 12vh; width: min(560px, 92vw); background: rgba(12, 18, 26, 0.98); border: 1px solid rgba(0, 212, 255, 0.30); border-radius: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); overflow: hidden; }
+.oko-cmd-input { width: 100%; box-sizing: border-box; padding: 14px 16px; font-family: var(--font-sans); font-size: 16px; color: #eaf4fb; background: transparent; border: none; border-bottom: 1px solid rgba(255, 255, 255, 0.10); outline: none; }
+.oko-cmd-input::placeholder { color: #7f93a6; }
+.oko-cmd-results { max-height: 52vh; overflow: auto; padding: 6px; }
+.oko-cmd-group { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #6d8296; padding: 9px 10px 4px; }
+.oko-cmd-row { display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left; background: none; border: none; border-radius: 8px; padding: 8px 10px; cursor: var(--cursor-pointer); color: #dfe9f2; }
+.oko-cmd-row.is-sel { background: rgba(0, 212, 255, 0.16); }
+.oko-cmd-label { font-family: var(--font-sans); font-size: 14px; color: #eaf4fb; }
+.oko-cmd-hint { font-family: var(--font-mono); font-size: 11px; color: #7f93a6; margin-left: auto; white-space: nowrap; }
+.oko-cmd-empty { padding: 16px; text-align: center; color: #7f93a6; font-family: var(--font-mono); font-size: 12px; }

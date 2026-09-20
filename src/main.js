@@ -49,6 +49,8 @@ import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
+import { createCommandPalette } from './commandPalette.js';
+import { flyToGlobeView, searchAndFlyTo } from './locations.js';
 import { buildConflictDigest } from './conflictSummary.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
@@ -840,6 +842,42 @@ async function init() {
       },
     });
     window.__godsEyeView.conflictsPanel = conflictsPanel;
+
+    // Hľadať čokoľvek (orientácia v OKU): jedno pole nájde miesto, konflikt,
+    // vrstvu aj akciu — ľudské názvy, bez odborných výrazov. Klávesa „/" alebo
+    // tlačidlo lupy v hornej lište. Zoznam sa skladá nanovo pri každom otvorení.
+    const buildCommands = () => {
+      const cmds = [];
+      for (const c of listConflicts()) {
+        cmds.push({ id: `scene:${c.id}`, label: conflictTitle(c, t), group: 'scene', keywords: [c.region, c.name, c.sceneId || ''], run: () => { void frameConflict(c); } });
+      }
+      for (const [layerId, key] of [['flights', 'cmd.layer.flights'], ['military', 'cmd.layer.military'], ['satellites', 'cmd.layer.satellites'], ['gas-pipelines', 'cmd.layer.gas']]) {
+        cmds.push({ id: `layer:${layerId}`, label: t(key), hint: t('cmd.toggle.hint'), group: 'layer', keywords: [layerId], run: () => { try { dataManager.setEnabled(layerId, !dataManager.isEnabled(layerId), { origin: 'user' }); } catch { /* */ } } });
+      }
+      cmds.push({ id: 'view:world', label: t('cmd.action.world'), hint: t('cmd.action.world.hint'), group: 'view', keywords: ['reset', 'svet', 'world', 'globe'], run: () => { try { flyToGlobeView(viewer); } catch { /* */ } } });
+      cmds.push({ id: 'view:karta', label: t('cmd.action.karta'), group: 'view', keywords: ['karta', 'front', 'mapa'], run: () => { void styleManager._setMapStack('karta'); } });
+      cmds.push({ id: 'view:osm', label: t('cmd.action.osm'), group: 'view', keywords: ['osm', 'mapa', 'plain'], run: () => { void styleManager._setMapStack('osm'); } });
+      cmds.push({ id: 'view:photoreal', label: t('cmd.action.photoreal'), group: 'view', keywords: ['3d', 'foto', 'google', 'photoreal'], run: () => { void styleManager._setMapStack('photoreal'); } });
+      cmds.push({ id: 'view:clean', label: t('cmd.action.clean'), group: 'view', keywords: ['čistá', 'clean', 'screenshot'], run: () => { kartaOverlay?.setClean(!kartaOverlay.isClean()); } });
+      cmds.push({ id: 'view:conflicts', label: t('cmd.action.conflicts'), group: 'view', keywords: ['kartičky', 'export', 'cards'], run: () => { conflictsPanel?.open(); } });
+      return cmds;
+    };
+    const commandPalette = createCommandPalette({
+      translate: t,
+      getCommands: buildCommands,
+      onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
+    });
+    window.__godsEyeView.commandPalette = commandPalette;
+    try {
+      const cmdLaunch = document.createElement('button');
+      cmdLaunch.type = 'button';
+      cmdLaunch.id = 'cmd-launch';
+      cmdLaunch.setAttribute('aria-label', t('cmd.launch'));
+      cmdLaunch.title = t('cmd.launch');
+      cmdLaunch.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">search</span>';
+      cmdLaunch.addEventListener('click', () => commandPalette.toggle());
+      document.getElementById('top-center-actions')?.appendChild(cmdLaunch);
+    } catch { /* lišta akcií nemusí existovať */ }
     kartaOverlay.setStack(getActiveMapStack());
     onActiveMapStackChange((stack) => kartaOverlay.setStack(stack));
     viewer.camera?.moveEnd?.addEventListener?.(() => { if (kartaOverlay.isVisible()) kartaOverlay.update(); });
