@@ -232,9 +232,13 @@ Zápis: `docs/CURRENT-STATE.md` („KARTA — cartographic mode, stages K0 + K1"
   polygóny DeepState, mimo nich UA), žiarenie miest od 10 000 obyv.; všetko len v štýle `karta`.
   Pôvodný plán: raster 0,01° + rozmazanie, šrafovanie, farba sídiel podľa strany, žiarenie miest;
   legenda hovorí „odvodené z Wikipédie / DeepState".
-- **K4 boje a smery (½–1 deň)**: blesky, odznaky ciest, DeepState šípky s normálou frontu —
-  len po súhlase.
-- **K5 export (½ dňa)**: titulok, legenda, mapka, snímka, „čistá karta".
+- **K4 boje a smery** — časti 1+2 HOTOVÉ 09-20 (f51e17f, d404f8e): odznaky ciest (roadShieldSpecs,
+  1 583 štítkov) + blesky pri sídlach z hlásenia GŠ (defaultBoltImage, intenzita); ostávajú len
+  DeepState šípky útokov s normálou frontu — LEN po súhlase DeepState.
+- **K5 export** — HOTOVÉ 09-20 (9184d2d): rám hotovej mapy `ukraineKartaOverlay.js` (titulok, legenda,
+  prehľadová mapka Ukrajiny z Natural Earth s obdĺžnikom pohľadu), „čistá karta" (schová chróm), „Snímka"
+  zapečie rám do zdieľanej snímky (captureShareSnapshot `decorate` + drawKartaExport). Overené: export
+  JPEG 1200×630 s rámom aj odznakmi/bleskami. **VŠETKÝCH K0–K5 hotových** okrem K4 šípok (súhlas).
 
 Spolu ~5 dní práce; K0–K1 dajú prvý dojem hneď (reliéf + tichší štýl je 70 % „jemnosti").
 
