@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
-import { REPORT_BOLT_FAR_M, REPORT_MARKER_URI, UKRAINE_REPORT_ID, boltSizePx, createUkraineReportLayer, defaultBoltImage, placeLabelOffsetX, reportIntensityColor, reportMarkerText } from './ukraineReportLayer.js';
+import { REPORT_BOLT_FAR_M, REPORT_MARKER_URI, UKRAINE_REPORT_ID, boltSizePx, createUkraineReportLayer, deconflictLabels, defaultBoltImage, labelBox, placeLabelOffsetX, reportIntensityColor, reportMarkerText } from './ukraineReportLayer.js';
 import { buildPlaceIndex } from './ukraineReportPlaces.js';
 
 const REPORT = {
@@ -29,14 +29,19 @@ function fakeHover() {
   return { shown: [], hidden: 0, key: null, show(model, at, key) { this.shown.push({ model, at, key }); this.key = key; return true; }, hide() { this.hidden += 1; this.key = null; }, current() { return this.key; }, isHovered: () => false, destroy() { this.destroyed = true; } };
 }
 function fakeViewer(pick = () => null) {
-  return { dataSources: { added: [], removed: [], add(ds) { this.added.push(ds); }, remove(ds) { this.removed.push(ds); } }, scene: { canvas: { addEventListener() {}, removeEventListener() {} }, pick, requestRender() {} }, camera: {} };
+  const moveEnd = { listeners: [], addEventListener(fn) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter((f) => f !== fn); }; } };
+  return {
+    dataSources: { added: [], removed: [], add(ds) { this.added.push(ds); }, remove(ds) { this.removed.push(ds); } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {}, clientWidth: 1200, clientHeight: 800 }, pick, requestRender() {} },
+    camera: { moveEnd },
+  };
 }
 const timers = () => { const pending = []; return { setTimer: (fn) => { pending.push(fn); return pending.length; }, clearTimer: (id) => { pending[id - 1] = null; }, flush() { for (const fn of pending.splice(0)) if (fn) fn(); } }; };
 const tKey = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-function make({ pick, report = REPORT, translateText, nowMs = 1_000_000, placeIndex, reservePlaces, boltImageFactory } = {}) {
+function make({ pick, report = REPORT, translateText, nowMs = 1_000_000, placeIndex, reservePlaces, boltImageFactory, projectorFactory } = {}) {
   const viewer = fakeViewer(pick);
   const hover = fakeHover();
   const handler = fakeHandler();
@@ -58,6 +63,8 @@ function make({ pick, report = REPORT, translateText, nowMs = 1_000_000, placeIn
     placeIndex,
     reservePlaces,
     boltImageFactory,
+    projectorFactory,
+    settleMs: 0,
   });
   return { layer, viewer, hover, handler, clock, fetches };
 }
@@ -300,4 +307,51 @@ test('K4: bez boltImageFactory ostane bod aj v karte (napr. Node/headless)', asy
   assert.equal(rec.entity.billboard, undefined, 'žiadny billboard');
   layer.setStyle('karta');
   assert.equal(rec.entity.point.show, true, 'bod ostane, keď blesk nie je');
+});
+
+test('K4: rozmiestnenie popiskov — labelBox polohy, greedy bez prekryvu, meče pevné, plno = skryť', () => {
+  const it = { x: 100, y: 100, w: 40, h: 16, off: 10 };
+  assert.deepEqual(labelBox(it, 'right'), { x: 110, y: 92, w: 40, h: 16 });
+  assert.deepEqual(labelBox(it, 'left'), { x: 50, y: 92, w: 40, h: 16 });
+  assert.deepEqual(labelBox(it, 'up'), { x: 80, y: 74, w: 40, h: 16 });
+  assert.deepEqual(labelBox(it, 'down'), { x: 80, y: 110, w: 40, h: 16 });
+  // dva takmer na sebe: vyššia priorita ostane vpravo, nižšia ustúpi inam (nie null)
+  const a = { key: 'a', x: 100, y: 100, w: 60, h: 16, off: 8, priority: 10 };
+  const b = { key: 'b', x: 108, y: 100, w: 60, h: 16, off: 8, priority: 5 };
+  const r = deconflictLabels([a, b]);
+  assert.equal(r.a, 'right');
+  assert.notEqual(r.b, 'right', 'nižšia priorita nedostane obsadené right');
+  assert.ok(r.b !== null, 'našla sa iná voľná poloha');
+  // meč (fixed) je vždy right a nikdy sa neskrýva
+  const m = { key: 'm', x: 100, y: 100, w: 30, h: 16, off: 16, fixed: 'right', priority: Infinity };
+  assert.equal(deconflictLabels([m]).m, 'right');
+  // obklopený zo všetkých strán → skrytý
+  const big = { key: 'big', x: 100, y: 100, w: 400, h: 400, off: 0, fixed: 'right', priority: Infinity };
+  const t = { key: 't', x: 150, y: 150, w: 40, h: 16, off: 8, priority: 1 };
+  assert.equal(deconflictLabels([big, t]).t, null, 'keď žiadna poloha nesadne, popisok sa skryje');
+});
+
+test('K4: relayout na KARTE presunie/schová prekrývajúce sa popisky (všetky na jednom mieste)', async () => {
+  const index = buildPlaceIndex([
+    { geometry: { type: 'Point', coordinates: [37.80, 48.99] }, properties: { id: 21, name: 'Торське', lang: 'uk', cls: 'village' } },
+    { geometry: { type: 'Point', coordinates: [37.70, 49.00] }, properties: { id: 22, name: 'Ямпіль', lang: 'uk', cls: 'village' } },
+    { geometry: { type: 'Point', coordinates: [37.30, 48.40] }, properties: { id: 23, name: 'Дружба', lang: 'uk', cls: 'village' } },
+  ]);
+  const report = { ...REPORT, directions: [{ gs: 'Лиманський', attacks: 12, text: 'Бої у районах Торського, Ямполя та Дружби.' }] };
+  const proj = () => () => ({ x: 600, y: 400 }); // všetko na jeden bod = maximálny konflikt
+  const { layer } = make({ report, placeIndex: async () => index, boltImageFactory: (css) => `bolt:${css}`, projectorFactory: proj });
+  layer.setStyle('karta');
+  await layer.show();
+  await settle();
+  layer.relayout();
+  const labels = [...layer._getStateForTest().placeRecords.values()].map((r) => r.entity.label);
+  assert.ok(labels.length >= 2, 'aspoň dve sídla');
+  const plainRight = labels.filter((l) => l.show !== false && l.pixelOffset.y === 0 && l.pixelOffset.x > 0).length;
+  assert.ok(plainRight < labels.length, 'nie všetky ostali vpravo — konflikt vyriešený');
+  assert.ok(labels.some((l) => l.show === false) || labels.some((l) => l.pixelOffset.y !== 0 || l.pixelOffset.x < 0), 'aspoň presun alebo skrytie');
+  // mimo KARTY sa všetko vráti vpravo a zobrazí
+  layer.setStyle('default');
+  layer.relayout();
+  const after = [...layer._getStateForTest().placeRecords.values()].map((r) => r.entity.label);
+  assert.ok(after.every((l) => l.show !== false && l.pixelOffset.x === 8 && l.pixelOffset.y === 0), 'default = všetko vpravo, viditeľné');
 });

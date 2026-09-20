@@ -79,6 +79,64 @@ export function boltSizePx(attacks, mentions = 1) {
 }
 /** Vodorovný odstup popisku od kotvy: pri blesku od jeho polovice, inak 8 px. Pure. */
 export function placeLabelOffsetX(useBolt, boltSize = 0) { return useBolt ? Math.round(boltSize / 2) + 4 : 8; }
+
+// ── Rozmiestnenie popiskov v obrazovke (KARTA: proti prekryvom) ──────────────
+export const LABEL_CHAR_PX = 6.6;   // šírka znaku Plex Mono 11px
+export const LABEL_H_PX = 16;       // výška pilulky popisku
+export const LABEL_W_PAD = 12;      // podložka + obrys k šírke textu
+export const LABEL_PLACEMENTS = Object.freeze(['right', 'left', 'up', 'down']);
+/** Obrazovkový obdĺžnik popisku pre danú polohu voči kotve (x,y). Pure. */
+export function labelBox(item, placement) {
+  const off = item.off ?? 8; const w = item.w; const h = item.h;
+  switch (placement) {
+    case 'left': return { x: item.x - off - w, y: item.y - h / 2, w, h };
+    case 'up': return { x: item.x - w / 2, y: item.y - off - h, w, h };
+    case 'down': return { x: item.x - w / 2, y: item.y + off, w, h };
+    default: return { x: item.x + off, y: item.y - h / 2, w, h }; // right
+  }
+}
+/**
+ * Greedy rozmiestnenie popiskov: podľa priority zhora skúša polohy (vpravo,
+ * vľavo, hore, dole), vezme prvú bez prekryvu; keď žiadna nesadne, popisok
+ * skryje (kotva/blesk ostane). `fixed` prvky (krížené meče) sa nehýbu a nikdy
+ * neskrývajú — sú len prekážky. Pure.
+ * @returns {Record<string, 'right'|'left'|'up'|'down'|null>}
+ */
+export function deconflictLabels(items, { pad = 2 } = {}) {
+  const overlap = (a, b) => !(a.x + a.w + pad <= b.x || b.x + b.w + pad <= a.x || a.y + a.h + pad <= b.y || b.y + b.h + pad <= a.y);
+  const placed = [];
+  const result = {};
+  const order = [...items].sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  for (const it of order) {
+    if (it.fixed) { placed.push(labelBox(it, it.fixed)); result[it.key] = it.fixed; continue; }
+    let chosen = null;
+    for (const p of (it.candidates || LABEL_PLACEMENTS)) {
+      const box = labelBox(it, p);
+      if (!placed.some((pb) => overlap(box, pb))) { chosen = p; placed.push(box); break; }
+    }
+    result[it.key] = chosen;
+  }
+  return result;
+}
+/** Projektor svet → okno (px) zo scény; null keď za horizontom. */
+function defaultReportProjector(scene) {
+  const fn = Cesium.SceneTransforms?.worldToWindowCoordinates || Cesium.SceneTransforms?.wgs84ToWindowCoordinates;
+  if (!fn || !scene) return () => null;
+  const scratch = new Cesium.Cartesian2();
+  return (position) => { try { const o = fn(scene, position, scratch); return o ? { x: o.x, y: o.y } : null; } catch { return null; } };
+}
+/** Aplikuje polohu popisku na Cesium label (pixelOffset + originy + show). */
+export function applyLabelPlacement(label, placement, off) {
+  if (!label) return;
+  if (placement === null) { label.show = false; return; }
+  label.show = true;
+  const P = (x, y) => new Cesium.Cartesian2(x, y);
+  const H = Cesium.HorizontalOrigin; const V = Cesium.VerticalOrigin;
+  if (placement === 'left') { label.pixelOffset = P(-off, 0); label.horizontalOrigin = H.RIGHT; label.verticalOrigin = V.CENTER; }
+  else if (placement === 'up') { label.pixelOffset = P(0, -off); label.horizontalOrigin = H.CENTER; label.verticalOrigin = V.BOTTOM; }
+  else if (placement === 'down') { label.pixelOffset = P(0, off); label.horizontalOrigin = H.CENTER; label.verticalOrigin = V.TOP; }
+  else { label.pixelOffset = P(off, 0); label.horizontalOrigin = H.LEFT; label.verticalOrigin = V.CENTER; }
+}
 /** Cesta blesku v štvorci 0..28 (smerom dole). */
 const BOLT_PATH = Object.freeze([[15, 3], [8, 16], [13, 16], [11, 25], [20, 12], [14, 12], [17, 3]]);
 /**
@@ -141,11 +199,15 @@ export function createUkraineReportLayer({
   reservePlaces = null,
   /** Obrázok blesku (KARTA K4) podľa css farby; bez neho ostane bod aj v štýle karta. */
   boltImageFactory = defaultBoltImage,
+  /** Projektor svet → okno (px) pre rozmiestnenie popiskov (KARTA); testy dajú vlastný. */
+  projectorFactory = defaultReportProjector,
+  /** Pauza po pohybe kamery pred prepočtom rozmiestnenia (ms). */
+  settleMs = 200,
 } = {}) {
   const inert = {
     id: UKRAINE_REPORT_ID, show: async () => false, hide() {}, setEnabled() {}, isEnabled: () => true, isShown: () => false,
     refresh: async () => null, getState: () => ({ shown: false, enabled: true, loading: false, error: 'no-viewer', report: null, byScene: {}, fetchedAt: null, placesCount: 0, placesUnresolved: 0 }),
-    setStyle() {}, getStyle: () => 'default',
+    setStyle() {}, getStyle: () => 'default', relayout() {},
     onChange: () => () => {}, destroy() {},
   };
   if (!viewer?.dataSources) return inert;
@@ -179,6 +241,10 @@ export function createUkraineReportLayer({
   // Štýl blesku pri sídlach (KARTA K4): v 'karta' sídla z hlásenia = blesk intenzity, inak bod.
   let _styleMode = 'default';
   const _boltImgCache = new Map(); // css → obrázok | null
+  // Rozmiestnenie popiskov (KARTA): projekcia + prepočet po ustálení kamery.
+  const _project = typeof projectorFactory === 'function' ? projectorFactory(scene) : () => null;
+  let _cameraTimer = null;
+  let _removeMoveEnd = null;
 
   const requestRender = () => { try { scene?.requestRender?.(); } catch { /* headless */ } };
   function emit() {
@@ -293,6 +359,7 @@ export function createUkraineReportLayer({
       let boltImg = _boltImgCache.get(colorCss);
       if (boltImg === undefined) { try { boltImg = boltImageFactory?.(colorCss) || null; } catch { boltImg = null; } _boltImgCache.set(colorCss, boltImg); }
       rec.boltSize = boltSizePx(attacks >= 0 ? attacks : null, rec.mentions);
+      rec.attacks = attacks >= 0 ? attacks : 0; // priorita rozmiestnenia popiskov
       rec.hasBolt = Boolean(boltImg);
       const useBolt = _styleMode === 'karta' && rec.hasBolt;
       const options = {
@@ -347,6 +414,7 @@ export function createUkraineReportLayer({
     // sídla by pod bodom obce nešiel ani vybrať (pick vracia vrchný). Preto hore.
     try { viewer.dataSources.raiseToTop?.(ds); } catch { /* headless */ }
     applyReservation();
+    layoutLabels();
     requestRender();
     emit();
     void liftMarkers();
@@ -390,8 +458,67 @@ export function createUkraineReportLayer({
     if (next === _styleMode) return;
     _styleMode = next;
     for (const rec of _placeRecords.values()) applyPlaceStyle(rec);
+    layoutLabels();
     requestRender();
     emit();
+  }
+
+  const labelWidthPx = (text) => String(text || '').length * LABEL_CHAR_PX + LABEL_W_PAD;
+  /**
+   * Rozmiestni popisky sídiel v obrazovke tak, aby sa neprekrývali (KARTA): krížené
+   * meče sú pevné prekážky, sídla si podľa priority (viac útokov/zmienok) hľadajú
+   * voľnú polohu, nezmestené sa skryjú (blesk ostane). Mimo KARTY = pôvodná poloha.
+   */
+  function layoutLabels() {
+    // Mimo KARTY: každý popisok späť do pôvodnej polohy (vpravo, bez skrytia).
+    if (_styleMode !== 'karta' || !_shown) {
+      for (const rec of _placeRecords.values()) {
+        if (rec.entity?.label) applyLabelPlacement(rec.entity.label, 'right', placeLabelOffsetX(false, 0));
+      }
+      return;
+    }
+    const width = scene?.canvas?.clientWidth || scene?.canvas?.width || 0;
+    const height = scene?.canvas?.clientHeight || scene?.canvas?.height || 0;
+    // KARTA bez rozmerov plátna (headless) → nechaj polohu z applyPlaceStyle.
+    if (!width || !height) return;
+    const camPos = camera?.positionWC || null;
+    const items = [];
+    const recByKey = new Map();
+    // Krížené meče smerov = pevné prekážky (nikdy sa nehýbu ani neskrývajú).
+    for (const rec of _records.values()) {
+      if (!rec.entity) continue;
+      const p = _project(Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat));
+      if (!p) continue;
+      items.push({ key: `m:${rec.scene.id}`, x: p.x, y: p.y, w: labelWidthPx(rec.entity.label?.text), h: LABEL_H_PX, off: 16, fixed: 'right', priority: Number.POSITIVE_INFINITY });
+    }
+    // Sídla: len tie v dosahu popisku (DDC) a na obrazovke.
+    for (const rec of _placeRecords.values()) {
+      const label = rec.entity?.label;
+      if (!label) continue;
+      const pos = Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat);
+      const withinDdc = camPos ? Cesium.Cartesian3.distance(camPos, pos) < REPORT_PLACE_LABEL_FAR_M : true;
+      const p = withinDdc ? _project(pos) : null;
+      if (!p || p.x < -80 || p.y < -80 || p.x > width + 80 || p.y > height + 80) {
+        applyLabelPlacement(label, 'right', placeLabelOffsetX(_styleMode === 'karta' && rec.hasBolt, rec.boltSize || 0));
+        continue;
+      }
+      items.push({ key: `p:${rec.entity.id}`, x: p.x, y: p.y, w: labelWidthPx(label.text), h: LABEL_H_PX, off: placeLabelOffsetX(rec.hasBolt, rec.boltSize || 0), priority: (rec.attacks || 0) * 2 + (rec.mentions || 1) });
+      recByKey.set(`p:${rec.entity.id}`, rec);
+    }
+    const placement = deconflictLabels(items, { pad: 2 });
+    for (const [key, rec] of recByKey) {
+      applyLabelPlacement(rec.entity.label, placement[key] ?? null, placeLabelOffsetX(rec.hasBolt, rec.boltSize || 0));
+    }
+    requestRender();
+  }
+
+  function scheduleLayout() {
+    if (_cameraTimer) clearTimer(_cameraTimer);
+    _cameraTimer = setTimer(() => { _cameraTimer = null; layoutLabels(); }, settleMs);
+  }
+  function installCamera() {
+    if (_removeMoveEnd || !camera?.moveEnd?.addEventListener) return;
+    _removeMoveEnd = camera.moveEnd.addEventListener(scheduleLayout);
   }
 
   // Historické hlásenie z archívu (časová os, etapa 3c): kým je nastavené,
@@ -550,6 +677,7 @@ export function createUkraineReportLayer({
     _shown = true;
     applyVisibility();
     installHover();
+    installCamera();
     const report = await load();
     if (_destroyed) return false;
     applyVisibility();
@@ -573,6 +701,8 @@ export function createUkraineReportLayer({
   function destroy() {
     _destroyed = true;
     hide();
+    if (_cameraTimer) clearTimer(_cameraTimer);
+    if (_removeMoveEnd) { try { _removeMoveEnd(); } catch { /* */ } _removeMoveEnd = null; }
     if (_hoverTimer) clearTimer(_hoverTimer);
     if (_handler) { try { _handler.destroy(); } catch { /* */ } _handler = null; }
     if (_canvasLeave && scene?.canvas?.removeEventListener) scene.canvas.removeEventListener('pointerleave', _canvasLeave);
@@ -596,6 +726,7 @@ export function createUkraineReportLayer({
     isOverridden: () => Boolean(_override),
     setStyle,
     getStyle: () => _styleMode,
+    relayout: () => layoutLabels(),
     getState,
     onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
     destroy,
