@@ -47,7 +47,8 @@ import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
-import { conflictById, listConflicts } from './data/conflictsCatalog.js';
+import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
+import { createConflictsPanel } from './conflictsPanel.js';
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
@@ -761,6 +762,24 @@ async function init() {
         return snap;
       } catch (error) { console.warn('[conflict] export failed:', error?.message || error); return null; }
     }
+    // Zarámuj konflikt (panel B): Ukrajina na KARTE + smer, úžina jej scéna,
+    // situácia ručný let; potom nechaj ustáliť dlaždice pred zachytením.
+    async function frameConflict(conflict) {
+      if (!conflict) return;
+      if (conflict.kind === 'ukraine-front') {
+        try { void Promise.resolve(styleManager._setMapStack('karta')).catch(() => {}); } catch { /* */ }
+        try { runFrontScene(conflict.sceneId); } catch { /* */ }
+      } else if (conflict.kind === 'chokepoint') {
+        try { runChokepointScene(conflict.sceneId); } catch { /* */ }
+      } else {
+        activeChokepoint = null; activeFrontScene = null;
+        try {
+          const [w, s, e, n] = conflict.rectDegrees;
+          viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(w, s, e, n), duration: 1.8 });
+        } catch { /* */ }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3500));
+    }
     kartaOverlay = createUkraineKartaOverlay({
       translate: t,
       lang: () => currentLanguage(),
@@ -784,6 +803,19 @@ async function init() {
       ratios: CARD_RATIO_IDS,
       exportCard: (id, ratio = 'feed') => exportConflict({ conflict: id ? conflictById(id) : null, ratio }),
     };
+    // Panel „Kartičky konfliktov" (B): zoznam po regiónoch, pomer, export po jednom aj dávkou.
+    const conflictsPanel = createConflictsPanel({
+      translate: t,
+      conflicts: listConflicts().map((c) => ({ id: c.id, region: c.region, kind: c.kind, label: conflictTitle(c, t) })),
+      ratios: CARD_RATIO_IDS,
+      onExport: async (item, ratio) => {
+        const c = conflictById(item.id);
+        if (!c) return;
+        await frameConflict(c);
+        await exportConflict({ conflict: c, ratio });
+      },
+    });
+    window.__godsEyeView.conflictsPanel = conflictsPanel;
     kartaOverlay.setStack(getActiveMapStack());
     onActiveMapStackChange((stack) => kartaOverlay.setStack(stack));
     viewer.camera?.moveEnd?.addEventListener?.(() => { if (kartaOverlay.isVisible()) kartaOverlay.update(); });

@@ -11711,3 +11711,55 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
   .oko-karta-inset { width: 124px; bottom: 122px; }
   .oko-karta-legend { bottom: 122px; }
 }
+
+/* ── Kartičky konfliktov (propagácia B) ─────────────────────────────────────
+   Samostatný plávajúci panel + spúšťač. Geometria TU (test overlayIslands). */
+.oko-conflicts-launch {
+  position: fixed; left: 16px; bottom: 44px; z-index: 95;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+  color: #cfe6f2; background: rgba(10, 16, 24, 0.82);
+  border: 1px solid rgba(0, 212, 255, 0.30); border-radius: 8px;
+  padding: 7px 11px; cursor: var(--cursor-pointer); backdrop-filter: blur(6px);
+}
+.oko-conflicts-launch:hover { background: rgba(0, 212, 255, 0.18); }
+.oko-conflicts-launch[aria-expanded="true"] { background: rgba(0, 212, 255, 0.26); color: #eafaff; }
+.oko-conflicts-panel {
+  position: fixed; left: 16px; top: 66px; z-index: 96;
+  width: 300px; max-height: calc(100vh - 160px); overflow: auto;
+  font-family: var(--font-mono); color: #dfe9f2;
+  background: rgba(10, 16, 24, 0.92); border: 1px solid rgba(0, 212, 255, 0.22);
+  border-radius: 12px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px); padding: 12px 14px;
+}
+.oko-conflicts-head { display: flex; align-items: center; justify-content: space-between; }
+.oko-conflicts-title { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #f2f8fd; }
+.oko-conflicts-close { background: none; border: none; color: #9fb2c4; font-size: 14px; cursor: var(--cursor-pointer); padding: 2px 6px; }
+.oko-conflicts-close:hover { color: #eafaff; }
+.oko-conflicts-sub { font-size: 10.5px; color: #7f93a6; margin: 3px 0 10px; }
+.oko-conflicts-ratios { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.oko-conflicts-ratios-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #7f93a6; margin-right: 2px; }
+.oko-conflicts-ratio {
+  font-family: var(--font-mono); font-size: 11px; color: #cdd9e4;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px; padding: 4px 9px; cursor: var(--cursor-pointer);
+}
+.oko-conflicts-ratio[aria-pressed="true"] { background: rgba(0, 212, 255, 0.24); border-color: rgba(0, 212, 255, 0.5); color: #eafaff; }
+.oko-conflicts-region { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #6d8296; margin: 10px 0 4px; }
+.oko-conflicts-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.oko-conflicts-name { font-size: 12px; color: #cdd9e4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oko-conflicts-export {
+  flex: none; font-family: var(--font-mono); font-size: 10.5px; color: #cfe6f2;
+  background: rgba(0, 212, 255, 0.10); border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: 6px; padding: 3px 8px; cursor: var(--cursor-pointer);
+}
+.oko-conflicts-export:hover { background: rgba(0, 212, 255, 0.2); }
+.oko-conflicts-export:disabled, .oko-conflicts-all:disabled, .oko-conflicts-launch:disabled { opacity: 0.5; cursor: default; }
+.oko-conflicts-foot { margin-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px; }
+.oko-conflicts-all {
+  width: 100%; font-family: var(--font-mono); font-size: 11.5px; color: #eafaff;
+  background: rgba(0, 212, 255, 0.18); border: 1px solid rgba(0, 212, 255, 0.4);
+  border-radius: 8px; padding: 7px; cursor: var(--cursor-pointer);
+}
+.oko-conflicts-all:hover { background: rgba(0, 212, 255, 0.28); }
+.oko-conflicts-status { font-size: 10.5px; color: #9fb2c4; margin-top: 7px; min-height: 13px; text-align: center; }
+body.oko-karta-clean .oko-conflicts-launch, body.oko-karta-clean .oko-conflicts-panel { display: none !important; }
