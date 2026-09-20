@@ -39,8 +39,11 @@ overuje znova podľa `new-data-layer`.
   kurzorom; `scripts/build-ukraine-damage.mjs`, `src/data/ukraineDamage.js`,
   `src/ukraineDamageLayer.js`, čip ŠKODY v osi aj v paneli. Nočné svetlá GIBS a hlasové aliasy
   odložené (fotoreál nedrapuje imagery; hlas nemá aliasy scén). Opevnenia: nikdy bez súhlasu.
-- Otvorené: 4B Black Bird Group (e-mail), 5 opevnenia/S-1 (súhlasy), 6 alerts.in.ua (token).
-  Nepublikované.
+- Otvorené: **4B Black Bird Group — žiadosť PRIPRAVENÁ 09-20 v `docs/drafts/bbg-4b-request.md`,
+  čaká na odoslanie používateľom** (contact@blackbirdgroup.fi; ich frontová mapa = odhadovaná
+  kontrola terénu UA/RU/sivá zóna, nie taktické polohy → sedí; bez otvorenej licencie, priama cesta
+  cez BBG, lebo ACLED zakazuje redistribúciu surových dát; po súhlase + GeoJSON sa vrstva postaví ako
+  DeepState a využije zóny z K3); 5 opevnenia/S-1 (súhlasy), 6 alerts.in.ua (token). Nepublikované.
 
 ### Etapa 3 (používateľ: „ako na obrázku, určite časovú os … 1 až 5", potom „fotky z čo najviac zdrojov, aj videá, všetko ukladať") — hotové a overené v pane
 
