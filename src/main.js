@@ -707,6 +707,7 @@ async function init() {
       const mode = stack?.kind === 'hillshade' ? 'karta' : 'default';
       ukraineControl.setStyle(mode);
       ukraineDeepState.setStyle(mode);
+      ukraineReport.setStyle(mode); // KARTA K4: sídla z hlásenia GŠ = blesky intenzity
     };
     applyUkraineZoneStyle(getActiveMapStack());
     onActiveMapStackChange(applyUkraineZoneStyle);

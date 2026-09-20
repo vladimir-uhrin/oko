@@ -66,6 +66,46 @@ export function reportMarkerText(attacks) {
   return String(Math.max(0, Math.round(Number(attacks))));
 }
 
+// ── Blesky pri sídlach (KARTA K4) ───────────────────────────────────────────
+/** Dohľad blesku (m) a pásmo doznievania/zmenšenia — aby pri oddialení sídla nesplynuli do fľakov. */
+export const REPORT_BOLT_FAR_M = 460_000;
+export const REPORT_BOLT_FADE_FROM = 0.6;
+export const REPORT_BOLT_FAR_SCALE = 0.6;
+/** Veľkosť blesku (px): základ + jemne podľa intenzity útokov a počtu zmienok. Pure. */
+export function boltSizePx(attacks, mentions = 1) {
+  const a = (attacks === null || attacks === undefined) ? 0 : Math.max(0, Number(attacks));
+  const size = 15 + Math.min(8, Math.log2(1 + a) * 2.2) + Math.min(3, (Number(mentions) || 1) - 1);
+  return Math.round(size);
+}
+/** Vodorovný odstup popisku od kotvy: pri blesku od jeho polovice, inak 8 px. Pure. */
+export function placeLabelOffsetX(useBolt, boltSize = 0) { return useBolt ? Math.round(boltSize / 2) + 4 : 8; }
+/** Cesta blesku v štvorci 0..28 (smerom dole). */
+const BOLT_PATH = Object.freeze([[15, 3], [8, 16], [13, 16], [11, 25], [20, 12], [14, 12], [17, 3]]);
+/**
+ * Blesk (kontakt v sídle) sfarbený intenzitou, s tmavou svätožiarou a svetlým
+ * rámom — ako obrázok billboardu. Farbu pečie priamo (billboard.color biely),
+ * cachuje sa podľa css. Vráti plátno alebo null bez document.
+ */
+export function defaultBoltImage(css, doc = globalThis.document, dpr = (globalThis.devicePixelRatio || 2)) {
+  if (!doc?.createElement) return null;
+  const S = 28;
+  const scale = Math.max(1, Math.min(3, dpr));
+  const c = doc.createElement('canvas');
+  c.width = Math.round(S * scale); c.height = Math.round(S * scale);
+  const g = c.getContext?.('2d');
+  if (!g) return null;
+  g.scale(scale, scale);
+  g.beginPath();
+  BOLT_PATH.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.closePath();
+  g.save();
+  g.shadowColor = 'rgba(6,12,20,0.95)'; g.shadowBlur = 3; g.shadowOffsetY = 0.5;
+  g.fillStyle = css; g.fill();
+  g.restore();
+  g.lineWidth = 0.9; g.strokeStyle = 'rgba(255,255,255,0.45)'; g.stroke();
+  return c;
+}
+
 /**
  * @param {object} o
  * @param {object} o.viewer
@@ -99,10 +139,13 @@ export function createUkraineReportLayer({
   placeIndex = null,
   /** Odovzdá podkladu OSM id nakreslených sídiel (ukraineBaseLayer.setReservedPlaces), aby skryl svoj bod + popisok; [] = uvoľniť. */
   reservePlaces = null,
+  /** Obrázok blesku (KARTA K4) podľa css farby; bez neho ostane bod aj v štýle karta. */
+  boltImageFactory = defaultBoltImage,
 } = {}) {
   const inert = {
     id: UKRAINE_REPORT_ID, show: async () => false, hide() {}, setEnabled() {}, isEnabled: () => true, isShown: () => false,
     refresh: async () => null, getState: () => ({ shown: false, enabled: true, loading: false, error: 'no-viewer', report: null, byScene: {}, fetchedAt: null, placesCount: 0, placesUnresolved: 0 }),
+    setStyle() {}, getStyle: () => 'default',
     onChange: () => () => {}, destroy() {},
   };
   if (!viewer?.dataSources) return inert;
@@ -133,6 +176,9 @@ export function createUkraineReportLayer({
   let _canvasLeave = null;
   let _destroyed = false;
   const _translations = new Map(); // text → translated
+  // Štýl blesku pri sídlach (KARTA K4): v 'karta' sídla z hlásenia = blesk intenzity, inak bod.
+  let _styleMode = 'default';
+  const _boltImgCache = new Map(); // css → obrázok | null
 
   const requestRender = () => { try { scene?.requestRender?.(); } catch { /* headless */ } };
   function emit() {
@@ -238,11 +284,18 @@ export function createUkraineReportLayer({
     const outline = Cesium.Color.fromCssColorString('#0b1622').withAlpha(0.9);
     for (const [key, rec] of found) {
       const attacks = Math.max(...rec.hits.map((h) => (Number.isFinite(h.entry.attacks) ? h.entry.attacks : -1)));
-      const color = Cesium.Color.fromCssColorString(reportIntensityColor(attacks >= 0 ? attacks : null));
+      const colorCss = reportIntensityColor(attacks >= 0 ? attacks : null);
+      const color = Cesium.Color.fromCssColorString(colorCss);
       const entityId = `${UKRAINE_REPORT_ID}:place:${key}`;
       const label = placeLabel({ name: rec.place.name, en: rec.place.en, lang: 'uk', cls: rec.place.cls });
       const text = rec.mentions > 1 ? `${label.text} ×${rec.mentions}` : label.text;
-      rec.entity = ds.entities.add({
+      // KARTA K4: sídlo z hlásenia = blesk (kontakt) sfarbený intenzitou; inde ostáva bod.
+      let boltImg = _boltImgCache.get(colorCss);
+      if (boltImg === undefined) { try { boltImg = boltImageFactory?.(colorCss) || null; } catch { boltImg = null; } _boltImgCache.set(colorCss, boltImg); }
+      rec.boltSize = boltSizePx(attacks >= 0 ? attacks : null, rec.mentions);
+      rec.hasBolt = Boolean(boltImg);
+      const useBolt = _styleMode === 'karta' && rec.hasBolt;
+      const options = {
         id: entityId,
         position: Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat),
         point: {
@@ -250,6 +303,7 @@ export function createUkraineReportLayer({
           color,
           outlineColor: outline,
           outlineWidth: 2,
+          show: !useBolt,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_PLACE_FAR_M),
         },
@@ -260,13 +314,27 @@ export function createUkraineReportLayer({
           outlineColor: outline,
           outlineWidth: 3,
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          pixelOffset: new Cesium.Cartesian2(8, 0),
+          pixelOffset: new Cesium.Cartesian2(placeLabelOffsetX(useBolt, rec.boltSize), 0),
           horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_PLACE_LABEL_FAR_M),
         },
-      });
+      };
+      if (boltImg) {
+        options.billboard = {
+          image: boltImg,
+          width: rec.boltSize,
+          height: rec.boltSize,
+          show: useBolt,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, REPORT_BOLT_FAR_M),
+          translucencyByDistance: new Cesium.NearFarScalar(REPORT_BOLT_FAR_M * REPORT_BOLT_FADE_FROM, 1, REPORT_BOLT_FAR_M, 0),
+          scaleByDistance: new Cesium.NearFarScalar(REPORT_BOLT_FAR_M * REPORT_BOLT_FADE_FROM, 1, REPORT_BOLT_FAR_M, REPORT_BOLT_FAR_SCALE),
+        };
+      }
+      rec.entity = ds.entities.add(options);
       _placeRecords.set(key, rec);
       _byEntityId.set(entityId, rec);
     }
@@ -294,6 +362,27 @@ export function createUkraineReportLayer({
       try { r.entity.position = Cesium.Cartesian3.fromDegrees(r.lon, r.lat, heights[i]); r.lifted = true; lifted += 1; } catch { /* entita už preč */ }
     });
     if (lifted) requestRender();
+  }
+
+  /** Prepne bod/blesk a odstup popisku jedného sídla podľa aktuálneho štýlu. */
+  function applyPlaceStyle(rec) {
+    const e = rec.entity;
+    if (!e) return;
+    const useBolt = _styleMode === 'karta' && rec.hasBolt;
+    try {
+      if (e.point) e.point.show = !useBolt;
+      if (e.billboard) e.billboard.show = useBolt;
+      if (e.label) e.label.pixelOffset = new Cesium.Cartesian2(placeLabelOffsetX(useBolt, rec.boltSize || 0), 0);
+    } catch { /* entita už preč */ }
+  }
+  /** Štýl blesku ('karta' = sídla z hlásenia ako blesky intenzity, inak body). */
+  function setStyle(mode) {
+    const next = mode === 'karta' ? 'karta' : 'default';
+    if (next === _styleMode) return;
+    _styleMode = next;
+    for (const rec of _placeRecords.values()) applyPlaceStyle(rec);
+    requestRender();
+    emit();
   }
 
   // Historické hlásenie z archívu (časová os, etapa 3c): kým je nastavené,
@@ -496,9 +585,11 @@ export function createUkraineReportLayer({
     refresh: () => load({ force: true }),
     setOverride,
     isOverridden: () => Boolean(_override),
+    setStyle,
+    getStyle: () => _styleMode,
     getState,
     onChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ ds, records: _records, placeRecords: _placeRecords, byEntityId: _byEntityId, hover: _hover, camera }),
+    _getStateForTest: () => ({ ds, records: _records, placeRecords: _placeRecords, byEntityId: _byEntityId, hover: _hover, camera, styleMode: _styleMode }),
   };
 }

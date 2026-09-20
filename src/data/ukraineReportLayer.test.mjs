@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
-import { REPORT_MARKER_URI, UKRAINE_REPORT_ID, createUkraineReportLayer, reportIntensityColor, reportMarkerText } from './ukraineReportLayer.js';
+import { REPORT_BOLT_FAR_M, REPORT_MARKER_URI, UKRAINE_REPORT_ID, boltSizePx, createUkraineReportLayer, defaultBoltImage, placeLabelOffsetX, reportIntensityColor, reportMarkerText } from './ukraineReportLayer.js';
 import { buildPlaceIndex } from './ukraineReportPlaces.js';
 
 const REPORT = {
@@ -36,7 +36,7 @@ const tKey = (key, vars) => (vars ? `${key} ${JSON.stringify(vars)}` : key);
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-function make({ pick, report = REPORT, translateText, nowMs = 1_000_000, placeIndex, reservePlaces } = {}) {
+function make({ pick, report = REPORT, translateText, nowMs = 1_000_000, placeIndex, reservePlaces, boltImageFactory } = {}) {
   const viewer = fakeViewer(pick);
   const hover = fakeHover();
   const handler = fakeHandler();
@@ -57,6 +57,7 @@ function make({ pick, report = REPORT, translateText, nowMs = 1_000_000, placeIn
     now: () => nowMs,
     placeIndex,
     reservePlaces,
+    boltImageFactory,
   });
   return { layer, viewer, hover, handler, clock, fetches };
 }
@@ -239,4 +240,62 @@ test('sídla z odsekov: bod + popisok na každé menované sídlo, sídlo dvoch 
   const n = reservations.length;
   layer.setEnabled(true);
   assert.equal(reservations.length, n, 'nezmenená rezervácia sa neposiela znova');
+});
+
+test('K4: blesk pri sídle — veľkosť podľa intenzity, odstup popisku, kreslenie do plátna', () => {
+  assert.equal(boltSizePx(null), 15, 'bez počtu = základ');
+  assert.ok(boltSizePx(5) > 15 && boltSizePx(29) > boltSizePx(5), 'väčšia intenzita = väčší blesk');
+  assert.ok(boltSizePx(29) <= 26, 'strop');
+  assert.ok(boltSizePx(5, 3) > boltSizePx(5, 1), 'viac zmienok o kúsok väčší');
+  assert.equal(placeLabelOffsetX(false), 8, 'bod = 8 px');
+  assert.equal(placeLabelOffsetX(true, 20), 14, 'blesk = polovica + 4');
+  const ctx = { fillStyle: '', strokeStyle: '', lineWidth: 1, shadowColor: '', shadowBlur: 0, shadowOffsetY: 0, scale() {}, save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, fill() {}, stroke() {} };
+  const doc = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
+  assert.ok(defaultBoltImage('#f87171', doc, 2), 'plátno vzniklo');
+  assert.equal(defaultBoltImage('#f87171', null), null, 'bez document nič');
+});
+
+test('K4: v štýle karta sú sídla z hlásenia blesky (bod skrytý), default = bod; setStyle prepína a dohľad blesku', async () => {
+  const index = buildPlaceIndex([
+    { geometry: { type: 'Point', coordinates: [37.86, 48.98] }, properties: { id: 11, name: 'Торське', lang: 'uk', cls: 'village' } },
+  ]);
+  const report = { ...REPORT, directions: [{ gs: 'Лиманський', attacks: 5, text: 'Бої у районі Торського.' }] };
+  const boltCalls = [];
+  const { layer } = make({ report, placeIndex: async () => index, boltImageFactory: (css) => { boltCalls.push(css); return `bolt:${css}`; } });
+  await layer.show();
+  await settle();
+  const { placeRecords } = layer._getStateForTest();
+  assert.equal(placeRecords.size, 1);
+  const rec = [...placeRecords.values()][0];
+  const e = rec.entity;
+  assert.equal(e.billboard.image, 'bolt:#e6eef4', 'blesk sfarbený intenzitou (5 útokov)');
+  assert.ok(boltCalls.includes('#e6eef4'));
+  // default: bod viditeľný, blesk skrytý
+  assert.equal(e.point.show, true);
+  assert.equal(e.billboard.show, false);
+  assert.equal(e.label.pixelOffset.x, 8);
+  assert.equal(e.billboard.distanceDisplayCondition.far, REPORT_BOLT_FAR_M);
+  // karta: bod skrytý, blesk viditeľný, popisok odsadený od blesku
+  layer.setStyle('karta');
+  assert.equal(layer.getStyle(), 'karta');
+  assert.equal(e.point.show, false);
+  assert.equal(e.billboard.show, true);
+  assert.equal(e.label.pixelOffset.x, placeLabelOffsetX(true, rec.boltSize));
+  // späť
+  layer.setStyle('default');
+  assert.equal(e.point.show, true);
+  assert.equal(e.billboard.show, false);
+});
+
+test('K4: bez boltImageFactory ostane bod aj v karte (napr. Node/headless)', async () => {
+  const index = buildPlaceIndex([{ geometry: { type: 'Point', coordinates: [37.86, 48.98] }, properties: { id: 11, name: 'Торське', lang: 'uk', cls: 'village' } }]);
+  const report = { ...REPORT, directions: [{ gs: 'Лиманський', attacks: 5, text: 'Бої у районі Торського.' }] };
+  const { layer } = make({ report, placeIndex: async () => index, boltImageFactory: () => null });
+  await layer.show();
+  await settle();
+  const rec = [...layer._getStateForTest().placeRecords.values()][0];
+  assert.equal(rec.hasBolt, false);
+  assert.equal(rec.entity.billboard, undefined, 'žiadny billboard');
+  layer.setStyle('karta');
+  assert.equal(rec.entity.point.show, true, 'bod ostane, keď blesk nie je');
 });
