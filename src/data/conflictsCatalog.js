@@ -11,6 +11,7 @@
  */
 import { CHOKEPOINT_SCENES, chokepointSceneLabel } from '../chokepointScenes.js';
 import { FRONT_SCENES, frontSceneLabel } from '../ukraineFrontScenes.js';
+import { WORLD_OUTLINE_BBOX, WORLD_OUTLINE_RINGS } from './worldOutline.js';
 
 export const CONFLICT_KINDS = Object.freeze(['ukraine-front', 'chokepoint', 'situation']);
 export const CONFLICT_REGIONS = Object.freeze(['ukraine', 'maritime', 'middle-east']);
@@ -76,6 +77,11 @@ export function conflictTitle(conflict, translate = (k) => k) {
  * Živé fakty (dátum, zdroje, legenda, obdĺžnik) dodá volajúci z behu. Pure.
  */
 export function buildConflictCardModel(conflict, { dateText = '', sources = [], legend = [], legendHead = '', viewRect = null, translate = (k) => k } = {}) {
+  // Prehľadová mapka: Ukrajina má vlastný obrys (drawKartaExport ho má ako
+  // predvolený), globálne konflikty dostanú obrys sveta s bodkou miesta.
+  const inset = conflict && conflict.region !== 'ukraine'
+    ? { rings: WORLD_OUTLINE_RINGS, bbox: WORLD_OUTLINE_BBOX }
+    : null;
   return {
     title: {
       title: conflictTitle(conflict, translate),
@@ -86,5 +92,6 @@ export function buildConflictCardModel(conflict, { dateText = '', sources = [], 
     legendHead,
     scene: conflict ? { center: conflict.center } : null,
     viewRect: viewRect || (conflict ? conflict.rectDegrees : null),
+    inset,
   };
 }

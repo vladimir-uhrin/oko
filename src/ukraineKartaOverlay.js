@@ -121,57 +121,62 @@ function roundRectPath(g, x, y, w, h, r) {
  */
 export function drawKartaExport(ctx, model, width, height, { font = 'system-ui, "Segoe UI", sans-serif' } = {}) {
   if (!ctx || !model) return;
-  const pad = 22;
+  // Mierka podľa menšej strany (feed 1200×630 → 1; štvorec/story 1080 → ~1,8),
+  // aby text nebol na väčších pomeroch drobný. Feed ostáva 1:1 (KARTA nezmenená).
+  const s = Math.max(1, Math.min(2, Math.min(width, height) / 600));
+  const pad = Math.round(22 * s);
+  const inset = model.inset && Array.isArray(model.inset.rings) ? model.inset : { rings: UKRAINE_OUTLINE_RINGS, bbox: UKRAINE_OUTLINE_BBOX };
+  const px = (v) => Math.round(v * s);
   ctx.save();
   ctx.textBaseline = 'alphabetic';
   // Titulok vľavo hore.
   const t = model.title || {};
   if (t.title) {
-    ctx.font = `700 26px ${font}`;
+    ctx.font = `700 ${px(26)}px ${font}`;
     const tw = ctx.measureText(t.title.toUpperCase()).width;
-    ctx.font = `12px ${font}`;
+    ctx.font = `${px(12)}px ${font}`;
     const sw = Math.max(t.subtitle ? ctx.measureText(t.subtitle).width : 0, t.sources ? ctx.measureText(t.sources).width : 0);
-    const boxW = Math.min(width * 0.6, Math.max(tw, sw) + 28);
-    const boxH = 34 + (t.subtitle ? 20 : 0) + (t.sources ? 18 : 0);
+    const boxW = Math.min(width * 0.62, Math.max(tw, sw) + px(28));
+    const boxH = px(34) + (t.subtitle ? px(20) : 0) + (t.sources ? px(18) : 0);
     ctx.fillStyle = 'rgba(8, 14, 22, 0.74)';
-    roundRectPath(ctx, pad, pad, boxW, boxH, 8); ctx.fill();
-    ctx.fillStyle = '#f2f8fd'; ctx.font = `700 26px ${font}`;
-    ctx.fillText(t.title.toUpperCase(), pad + 14, pad + 28);
-    let ty = pad + 28;
-    if (t.subtitle) { ty += 20; ctx.fillStyle = '#9fb2c4'; ctx.font = `12px ${font}`; ctx.fillText(t.subtitle, pad + 14, ty); }
-    if (t.sources) { ty += 18; ctx.fillStyle = '#6d8296'; ctx.font = `11px ${font}`; ctx.fillText(t.sources, pad + 14, ty); }
+    roundRectPath(ctx, pad, pad, boxW, boxH, px(8)); ctx.fill();
+    ctx.fillStyle = '#f2f8fd'; ctx.font = `700 ${px(26)}px ${font}`;
+    ctx.fillText(t.title.toUpperCase(), pad + px(14), pad + px(28));
+    let ty = pad + px(28);
+    if (t.subtitle) { ty += px(20); ctx.fillStyle = '#9fb2c4'; ctx.font = `${px(12)}px ${font}`; ctx.fillText(t.subtitle, pad + px(14), ty); }
+    if (t.sources) { ty += px(18); ctx.fillStyle = '#6d8296'; ctx.font = `${px(11)}px ${font}`; ctx.fillText(t.sources, pad + px(14), ty); }
   }
   // Legenda vľavo dole.
   const items = Array.isArray(model.legend) ? model.legend : [];
   if (items.length) {
-    ctx.font = `12px ${font}`;
-    const rowH = 20, headH = 18;
-    const boxW = Math.min(width * 0.34, 40 + Math.max(...items.map((i) => ctx.measureText(i.label).width)));
-    const boxH = headH + items.length * rowH + 12;
+    ctx.font = `${px(12)}px ${font}`;
+    const rowH = px(20), headH = px(18);
+    const boxW = Math.min(width * 0.36, px(40) + Math.max(...items.map((i) => ctx.measureText(i.label).width)));
+    const boxH = headH + items.length * rowH + px(12);
     const bx = pad, by = height - boxH - pad;
     ctx.fillStyle = 'rgba(8, 14, 22, 0.74)';
-    roundRectPath(ctx, bx, by, boxW, boxH, 8); ctx.fill();
-    ctx.fillStyle = '#7f93a6'; ctx.font = `10px ${font}`;
-    ctx.fillText((model.legendHead || 'LEGENDA'), bx + 12, by + 14);
+    roundRectPath(ctx, bx, by, boxW, boxH, px(8)); ctx.fill();
+    ctx.fillStyle = '#7f93a6'; ctx.font = `${px(10)}px ${font}`;
+    ctx.fillText((model.legendHead || 'LEGENDA'), bx + px(12), by + px(14));
     items.forEach((item, i) => {
-      const ry = by + headH + 8 + i * rowH;
+      const ry = by + headH + px(8) + i * rowH;
       ctx.fillStyle = item.colorCss || '#888';
-      if (item.dot) { ctx.beginPath(); ctx.arc(bx + 16, ry + 4, 5, 0, Math.PI * 2); ctx.fill(); }
-      else { roundRectPath(ctx, bx + 10, ry - 2, 16, 11, 2); ctx.fill(); }
-      ctx.fillStyle = '#cdd9e4'; ctx.font = `12px ${font}`;
-      ctx.fillText(item.label, bx + 34, ry + 8);
+      if (item.dot) { ctx.beginPath(); ctx.arc(bx + px(16), ry + px(4), px(5), 0, Math.PI * 2); ctx.fill(); }
+      else { roundRectPath(ctx, bx + px(10), ry - px(2), px(16), px(11), px(2)); ctx.fill(); }
+      ctx.fillStyle = '#cdd9e4'; ctx.font = `${px(12)}px ${font}`;
+      ctx.fillText(item.label, bx + px(34), ry + px(8));
     });
   }
-  // Prehľadová mapka vpravo dole.
-  const insetW = 200, insetH = 144;
+  // Prehľadová mapka vpravo dole (obrys z modelu: KARTA = Ukrajina, inak svet).
+  const insetW = px(200), insetH = px(144);
   const ix = width - insetW - pad, iy = height - insetH - pad;
   ctx.fillStyle = 'rgba(8, 14, 22, 0.74)';
-  roundRectPath(ctx, ix, iy, insetW, insetH, 8); ctx.fill();
-  const proj = makeInsetProjection(UKRAINE_OUTLINE_BBOX, insetW, insetH, 12);
+  roundRectPath(ctx, ix, iy, insetW, insetH, px(8)); ctx.fill();
+  const proj = makeInsetProjection(inset.bbox || UKRAINE_OUTLINE_BBOX, insetW, insetH, px(12));
   ctx.save();
   ctx.translate(ix, iy);
   ctx.strokeStyle = 'rgba(150, 180, 205, 0.6)'; ctx.lineWidth = 1; ctx.fillStyle = 'rgba(120, 150, 175, 0.10)';
-  for (const ring of UKRAINE_OUTLINE_RINGS) {
+  for (const ring of inset.rings) {
     if (!ring.length) continue;
     ctx.beginPath();
     ring.forEach(([lon, lat], i) => { const p = proj.project(lon, lat); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
@@ -185,7 +190,7 @@ export function drawKartaExport(ctx, model, width, height, { font = 'system-ui, 
   if (model.scene?.center) {
     const p = proj.project(model.scene.center.lon, model.scene.center.lat);
     ctx.fillStyle = '#f87171'; ctx.strokeStyle = 'rgba(6,12,20,0.85)'; ctx.lineWidth = 0.8;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(p.x, p.y, px(3.2), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
   ctx.restore();
   ctx.restore();

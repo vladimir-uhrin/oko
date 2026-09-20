@@ -45,9 +45,9 @@ import { createSceneRevealGate } from './sceneRevealGate.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
-import { createUkraineKartaOverlay, drawKartaExport } from './ukraineKartaOverlay.js';
-import { captureShareSnapshot, snapshotStamp } from './shareSnapshot.js';
-import { buildAttributionLine } from './shareTargets.js';
+import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
+import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
+import { conflictById, listConflicts } from './data/conflictsCatalog.js';
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
@@ -585,6 +585,7 @@ async function init() {
     let ukraineEvents = null; // vrstva udalostí UKRAJINA (etapa 3) — vzniká nižšie, brána ju už pozná
     let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
     let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
+    let activeChokepoint = null; // aktívna úžina (pre export kartičky konfliktu)
     const revealGate = createSceneRevealGate({
       viewer,
       onChange: (visible) => {
@@ -721,22 +722,44 @@ async function init() {
     // Rám „hotovej mapy" KARTA (K5): titulok + legenda + prehľadová mapka; len na
     // podklade KARTA a pri priblížení (brána), „čistá karta" schová chróm, „Snímka"
     // zapečie rám do zdieľanej snímky.
-    async function exportKarta() {
-      if (!kartaOverlay) return;
-      const creditsText = document.querySelector('#cesium-credits')?.textContent || '';
+    // Aktívny konflikt z aktuálnej scény (úžina má prednosť, potom smer frontu).
+    function activeConflict() {
+      if (activeChokepoint) return conflictById(`chokepoint:${activeChokepoint.id}`);
+      if (activeFrontScene) return conflictById(`ukraine:${activeFrontScene.id}`);
+      return null;
+    }
+    function conflictStateDate(whenMs = Date.now()) {
+      const lang = currentLanguage();
+      const locale = lang === 'en' ? 'en-GB' : 'sk-SK';
+      let day;
+      try { day = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'numeric', year: 'numeric' }).format(new Date(whenMs)); }
+      catch { day = new Date(whenMs).toISOString().slice(0, 10); }
+      return t('ukraine.karta.state', { date: day });
+    }
+    // Export zdieľacej kartičky konfliktu (A aj B): Ukrajinu berie zo živého KARTA
+    // prekryvu, ostatné z katalógu; aktuálny pohľad + rám v danom pomere → stiahne.
+    async function exportConflict({ conflict = null, ratio = 'feed' } = {}) {
+      const c = conflict || activeConflict();
+      if (!c) { console.warn('[conflict] no active conflict to export'); return null; }
       try {
-        const snap = await captureShareSnapshot({
-          viewer,
-          stamp: snapshotStamp(Date.now(), currentLanguage()),
-          attribution: buildAttributionLine(creditsText),
-          decorate: (ctx, w, h) => drawKartaExport(ctx, kartaOverlay.getModel(), w, h),
-        });
-        if (!snap?.jpegDataUrl) return;
-        const a = document.createElement('a');
-        a.href = snap.jpegDataUrl;
-        a.download = `oko-karta-${activeFrontScene?.id || 'front'}-${new Date().toISOString().slice(0, 10)}.jpg`;
-        document.body.appendChild(a); a.click(); a.remove();
-      } catch (error) { console.warn('[karta] export failed:', error?.message || error); }
+        let model;
+        if (c.kind === 'ukraine-front' && kartaOverlay) {
+          model = kartaOverlay.getModel();
+        } else {
+          let viewRect = null;
+          try {
+            const r = viewer.camera.computeViewRectangle();
+            if (r) viewRect = [Cesium.Math.toDegrees(r.west), Cesium.Math.toDegrees(r.south), Cesium.Math.toDegrees(r.east), Cesium.Math.toDegrees(r.north)];
+          } catch { /* mimo glóbusu */ }
+          const facts = defaultConflictFacts(c);
+          model = conflictCardModel(c, { viewRect, dateText: conflictStateDate(), sources: facts.sources, legend: facts.legend, legendHead: facts.legendHead, translate: t });
+        }
+        const creditsText = document.querySelector('#cesium-credits')?.textContent || '';
+        const snap = await captureConflictCard({ viewer, model, ratio, lang: currentLanguage(), creditsText });
+        if (!snap) return null;
+        downloadCardSnapshot(snap, conflictCardFilename(c, ratio, new Date().toISOString()));
+        return snap;
+      } catch (error) { console.warn('[conflict] export failed:', error?.message || error); return null; }
     }
     kartaOverlay = createUkraineKartaOverlay({
       translate: t,
@@ -751,9 +774,16 @@ async function init() {
         } catch { /* mimo glóbusu */ }
         return activeFrontScene?.rectDegrees || null;
       },
-      onExport: () => { void exportKarta(); },
+      onExport: () => { void exportConflict({ ratio: 'feed' }); },
     });
     window.__godsEyeView.ukraineKartaOverlay = kartaOverlay;
+    // Propagácia: export kartičiek naprieč konfliktmi (A: aktívna scéna; B: panel).
+    window.__godsEyeView.conflicts = {
+      list: () => listConflicts(),
+      active: () => activeConflict(),
+      ratios: CARD_RATIO_IDS,
+      exportCard: (id, ratio = 'feed') => exportConflict({ conflict: id ? conflictById(id) : null, ratio }),
+    };
     kartaOverlay.setStack(getActiveMapStack());
     onActiveMapStackChange((stack) => kartaOverlay.setStack(stack));
     viewer.camera?.moveEnd?.addEventListener?.(() => { if (kartaOverlay.isVisible()) kartaOverlay.update(); });
@@ -767,6 +797,7 @@ async function init() {
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);
       activeFrontScene = scene || null;
+      activeChokepoint = null;
       kartaOverlay?.setScene(scene || null);
       ukrainePanel?.setActiveScene(scene?.id || null);
       ukraineTimeline.setActiveScene(scene?.id || null);
@@ -840,6 +871,8 @@ async function init() {
     } catch { /* výber je voliteľné chróm */ }
     const runChokepointScene = (id) => {
       const scene = chokepointSceneById(id);
+      activeChokepoint = scene || null;
+      activeFrontScene = null;
       const result = applyChokepointScene(id, chokepointSceneDeps);
       void oilPriceChip.refreshAndShow();
       if (scene) {
