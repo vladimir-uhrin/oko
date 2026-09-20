@@ -71,6 +71,15 @@ export const SIDE_PIN_COLORS = Object.freeze({ ua: '#5b8fd0', ru: '#d0554a', con
 export const GLOW_MIN_POP = 10_000;
 export const GLOW_COLOR = '#ff5a4a';
 export const GLOW_ALPHA = 0.3;
+/**
+ * Žiarenie je v obrazovkových px, preto pri oddialení stovky kruhov splynú do
+ * červených fľakov (používateľ 2026-09-20 nad východnou Ukrajinou). Do
+ * GLOW_FULL_M vzdialenosti kamery je plné (preset smeru ≈ 180–230 km pri −64°),
+ * po GLOW_GONE_M lineárne slabne na nulu a zmenšuje sa, ďalej sa nekreslí.
+ */
+export const GLOW_FULL_M = 240_000;
+export const GLOW_GONE_M = 480_000;
+export const GLOW_FAR_SCALE = 0.45;
 export function glowRadiusPx(pop) { return Math.min(70, 26 + 14 * Math.log10(Math.max(1, (Number(pop) || 0) / 5000))); }
 /** Radiálny gradient (biely stred → priehľadné) ako obrázok billboardu; farbu dodá billboard.color. */
 export function defaultGlowImage(doc = globalThis.document) {
@@ -253,7 +262,9 @@ export function createUkraineBaseLayer({
         billboard: {
           image, width: 2 * r, height: 2 * r,
           color: Cesium.Color.fromCssColorString(GLOW_COLOR).withAlpha(GLOW_ALPHA),
-          distanceDisplayCondition: ddc([0, 1_500_000]),
+          distanceDisplayCondition: ddc([0, GLOW_GONE_M]),
+          translucencyByDistance: new Cesium.NearFarScalar(GLOW_FULL_M, 1.0, GLOW_GONE_M, 0.0),
+          scaleByDistance: new Cesium.NearFarScalar(GLOW_FULL_M, 1.0, GLOW_GONE_M, GLOW_FAR_SCALE),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
         },

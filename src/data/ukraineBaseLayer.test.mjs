@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
-import { UKRAINE_BASE_ID, createUkraineBaseLayer } from './ukraineBaseLayer.js';
+import { GLOW_FULL_M, GLOW_GONE_M, UKRAINE_BASE_ID, createUkraineBaseLayer } from './ukraineBaseLayer.js';
 import { VILLAGE_LOAD_MAX_HEIGHT_M } from './ukraineBase.js';
 
 const META = { snapshot: '2026-09-19T12:00:00.000Z', datasets: { places: { features: 2 } } };
@@ -412,6 +412,13 @@ test('K3: špendlíky podľa strany a žiarenie miest len v štýle karta — re
   assert.equal(glows.length, 2, 'Kramatorsk (150 000) a Lyman (20 000) žiaria, obce nie');
   assert.ok(glows.every((e) => e.show === true && e.billboard.image === 'glow.png'));
   assert.ok(glows.find((e) => e.id.endsWith(':glow:1')).billboard.width > glows.find((e) => e.id.endsWith(':glow:2')).billboard.width, 'väčšie mesto = väčšie žiarenie');
+  // Oddialenie: žiarenie je v px, preto s vzdialenosťou kamery slabne na nulu, zmenšuje sa a nad GLOW_GONE_M sa nekreslí (fľaky nad celou Ukrajinou).
+  const glowBb = glows.find((e) => e.id.endsWith(':glow:1')).billboard;
+  assert.ok(glowBb.translucencyByDistance instanceof Cesium.NearFarScalar, 'útlm podľa vzdialenosti');
+  assert.deepEqual([glowBb.translucencyByDistance.near, glowBb.translucencyByDistance.nearValue, glowBb.translucencyByDistance.far, glowBb.translucencyByDistance.farValue], [GLOW_FULL_M, 1, GLOW_GONE_M, 0]);
+  assert.ok(glowBb.scaleByDistance instanceof Cesium.NearFarScalar && glowBb.scaleByDistance.far === GLOW_GONE_M && glowBb.scaleByDistance.farValue < 1, 'ďaleko sa zmenšuje');
+  assert.equal(glowBb.distanceDisplayCondition.far, GLOW_GONE_M, 'nad GLOW_GONE_M sa žiarenie nekreslí');
+  assert.ok(GLOW_FULL_M >= 230_000, 'preset smeru (výška ~160 km pri −64° ≈ 180–230 km od kamery) má plné žiarenie');
   assert.ok(calls > 0);
   // zmena dát kontroly → refreshSides prefarbí
   sides['37.8,48.99'] = 'ru';
