@@ -151,6 +151,30 @@ nemal, vrátane celého zamerania OKA na Ukrajinu.
 `fixtures/checkpoints.json` prepísaný na icon_eu: **8 bodov od 11,58° E
 (Mníchov) po 30,52° E (Kyjev)**, zámerne pretínajú doménu.
 
+## Fáza 1 — priebeh
+
+**M3 lazy-load: FAIL → PASS.** Príčinou bolo, že `meteoLayer.js` sa
+inštanciuje už pri importe (`export default createMeteoLayer()`), takže
+statický import v `main.js` ťahal 6 modulov pri každom štarte.
+
+Riešenie `src/data/meteoLazy.js`: správca číta metadáta (id/name/icon) hneď
+pri registrácii, aby vrstvu vedel ukázať v zozname — tie teda zástupca nesie
+sám. Skutočný modul sa dotiahne dynamickým importom až v `init()`, ktorý
+správca awaituje tesne pred `enable()`. Metadáta sú zopakované zámerne
+(importovať ich z `meteoLayer.js` by ten modul načítalo) a proti rozídeniu
+ich stráži `meteoLazy.test.mjs`.
+
+```
+pred:  beforeOpen = 6 modulov   → FAIL
+po:    beforeOpen = []          → PASS
+       afterOpen  = 6 modulov + /api/meteo/catalog + /slice
+```
+
+Overené aj naživo, že vrstva po zlenivení naozaj funguje (test by prešiel aj
+pre rozbitú vrstvu): pred otvorením v zozname a nenačítaná, po otvorení
+načítaná, 25 krokov, bez chyby, časová os aj plátno častíc na mieste.
+Determinizmus 2× zhodný. Celá suite 3710/3710.
+
 ## Denník kôl
 
 | Dátum | Kus | Kolo | Verdikt | Najväčšia medzera | Zmena |
@@ -159,3 +183,4 @@ nemal, vrátane celého zamerania OKA na Ukrajinu.
 | 2026-09-21 | M3 | meranie | **FAIL** | 6 weather modulov pred otvorením | `check-lazy.js` napísaný, determinizmus OK |
 | 2026-09-21 | fixture | zachytenie | OK | snímky Windy chýbajú | 6 bodov + 6 rezov, drift 0 h; opravené 2 chyby skriptu |
 | 2026-09-21 | model | rozhodnutie | — | icon_d2 nepokrýval UA | používateľ: **icon_eu**; fixture prepísaný na 8 bodov |
+| 2026-09-21 | M3 | Fáza 1 | **PASS** | — | `meteoLazy.js`: 0 requestov pred otvorením (bolo 6 modulov) |

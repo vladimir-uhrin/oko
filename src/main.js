@@ -9,7 +9,9 @@ import earthquakesLayer from './data/earthquakes.js';
 import volcanoesLayer from './data/volcanoes.js';
 import naturalEventsLayer from './data/naturalEvents.js';
 import shmuRadarLayer from './data/shmuRadar.js';
-import meteoLayer from './data/meteoLayer.js';
+// Lenivý zástupca: skutočný meteoLayer.js sa dotiahne až pri otvorení vrstvy
+// (obmedzenie zadania — news stránky nesmú ťahať weather kód). Viď meteoLazy.js.
+import meteoLayer from './data/meteoLazy.js';
 import satellitesLayer from './data/satellites.js';
 import rocketLaunchesLayer from './data/rocketLaunches.js';
 import trafficLayer from './data/traffic.js';
