@@ -98,9 +98,45 @@ pre vrstvu, ktorá je len rozbitá. Oprava patrí do Fázy 1.
 `wind_speed_unit=ms` je nutné vynútiť (inak vracia km/h a tolerancia ±1 m/s
 by sa merala na nesprávnej veličine).
 
+## Pokrytie icon_d2 — NAMERANÉ, nie odhadnuté (2026-09-21)
+
+Obdĺžnik mriežky z GRIB Section 3 (−3,94…20,34° E) **NIE JE** test pokrytia:
+natívna doména je rotovaná a rohy sú maskované (v GRIB-e bitmapa, platných len
+754 862 z 906 390 bodov). Overené dopytmi na Open-Meteo:
+
+```
+OK    Bratislava · Trnava · Nitra · Trenčín · Viedeň · Brno · Praha
+      Mníchov · Záhreb · Graz
+MIMO  Žilina · Banská Bystrica · Košice · Budapešť
+      → {"reason":"No data is available for this location"}
+```
+
+**icon_d2 teda pokrýva len západné Slovensko** — východná hrana reže SR okolo
+18,1–18,7° E. To je zásadné pre zadanie: ak má vrstva sedieť s icon_d2, pre
+väčšinu SR a pre CELÚ Ukrajinu (hlavné zameranie OKA) model dáta nemá.
+Na zváženie: `icon_eu` (7 km) siaha po 62,5° E a Ukrajinu pokrýva celú.
+
+## Fixture zachytený
+
+`fixtures/checkpoints.json` — 6 bodov (všetky overené, že dáta majú),
+`fixtures/2026-09-21-base/` — 6 rezov, `driftHours: 0` voči okamihu zachytenia.
+
+**POZOR:** snímky z Windy pre tento okamih NEEXISTUJÚ — fixture vznikol na
+pokyn používateľa, aby sa odblokovala Fáza 1. Pre Fázu 2 treba
+`capture-fixture.js` spustiť ZNOVA v tej istej minúte ako fotenie Windy.
+
+### Dve chyby v mojom skripte, ktoré som našiel a opravil
+
+1. **Obdĺžniková kontrola domény** prijala Žilinu aj Budapešť, hoci tam model
+   dáta nemá. Nahradené sondou na zdroj (`probePoint`) — doménu nehádam.
+2. **Výber rezu `files[0]`** bral najstarší rez v cache: fixture miešal dnešné
+   checkpointy s rastrom spred 13 dní. Nahradené `nearestSlice()`; manifest
+   teraz nesie `driftHours`, nech je odchýlka vidieť.
+
 ## Denník kôl
 
 | Dátum | Kus | Kolo | Verdikt | Najväčšia medzera | Zmena |
 |---|---|---|---|---|---|
 | 2026-09-21 | — | Fáza 0 | plán zapísaný | refs + fixtures chýbajú | rozklad, kamery, M1–M5 |
 | 2026-09-21 | M3 | meranie | **FAIL** | 6 weather modulov pred otvorením | `check-lazy.js` napísaný, determinizmus OK |
+| 2026-09-21 | fixture | zachytenie | OK | snímky Windy chýbajú | 6 bodov + 6 rezov, drift 0 h; opravené 2 chyby skriptu |

@@ -1,0 +1,91 @@
+{
+  "capturedAt": "2026-09-21T14:44:23.287Z",
+  "model": "icon_d2",
+  "api": "open-meteo",
+  "points": [
+    {
+      "id": "bratislava",
+      "name": "Bratislava",
+      "lat": 48.15,
+      "lon": 17.11,
+      "time": "2026-09-21T14:30",
+      "temperature_2m": 18.8,
+      "wind_speed_10m": 5.81,
+      "wind_direction_10m": 318,
+      "precipitation": 0,
+      "cloud_cover": 49,
+      "pressure_msl": 1023.1,
+      "sourceUrl": "https://api.open-meteo.com/v1/forecast?latitude=48.15&longitude=17.11&current=temperature_2m%2Cwind_speed_10m%2Cwind_direction_10m%2Cprecipitation%2Ccloud_cover%2Cpressure_msl&models=icon_d2&wind_speed_unit=ms&timezone=UTC"
+    },
+    {
+      "id": "nitra",
+      "name": "Nitra",
+      "lat": 48.31,
+      "lon": 18.09,
+      "time": "2026-09-21T14:30",
+      "temperature_2m": 17.9,
+      "wind_speed_10m": 7.07,
+      "wind_direction_10m": 315,
+      "precipitation": 0,
+      "cloud_cover": 43,
+      "pressure_msl": 1022.3,
+      "sourceUrl": "https://api.open-meteo.com/v1/forecast?latitude=48.31&longitude=18.09&current=temperature_2m%2Cwind_speed_10m%2Cwind_direction_10m%2Cprecipitation%2Ccloud_cover%2Cpressure_msl&models=icon_d2&wind_speed_unit=ms&timezone=UTC"
+    },
+    {
+      "id": "vieden",
+      "name": "Viedeň",
+      "lat": 48.21,
+      "lon": 16.37,
+      "time": "2026-09-21T14:30",
+      "temperature_2m": 19,
+      "wind_speed_10m": 5.52,
+      "wind_direction_10m": 314,
+      "precipitation": 0,
+      "cloud_cover": 72,
+      "pressure_msl": 1023.7,
+      "sourceUrl": "https://api.open-meteo.com/v1/forecast?latitude=48.21&longitude=16.37&current=temperature_2m%2Cwind_speed_10m%2Cwind_direction_10m%2Cprecipitation%2Ccloud_cover%2Cpressure_msl&models=icon_d2&wind_speed_unit=ms&timezone=UTC"
+    },
+    {
+      "id": "brno",
+      "name": "Brno",
+      "lat": 49.2,
+      "lon": 16.61,
+      "time": "2026-09-21T14:30",
+      "temperature_2m": 16,
+      "wind_speed_10m": 3.7,
+      "wind_direction_10m": 308,
+      "precipitation": 0,
+      "cloud_cover": 73,
+      "pressure_msl": 1023.6,
+      "sourceUrl": "https://api.open-meteo.com/v1/forecast?latitude=49.2&longitude=16.61&current=temperature_2m%2Cwind_speed_10m%2Cwind_direction_10m%2Cprecipitation%2Ccloud_cover%2Cpressure_msl&models=icon_d2&wind_speed_unit=ms&timezone=UTC"
+    },
+    {
+      "id": "mnichov",
+      "name": "Mníchov",
+      "lat": 48.14,
+      "lon": 11.58,
+      "time": "2026-09-21T14:30",
+      "temperature_2m": 16.3,
+      "wind_speed_10m": 2.97,
+      "wind_direction_10m": 315,
+      "precipitation": 0,
+      "cloud_cover": 82,
+      "pressure_msl": 1028.6,
+      "sourceUrl": "https://api.open-meteo.com/v1/forecast?latitude=48.14&longitude=11.58&current=temperature_2m%2Cwind_speed_10m%2Cwind_direction_10m%2Cprecipitation%2Ccloud_cover%2Cpressure_msl&models=icon_d2&wind_speed_unit=ms&timezone=UTC"
+    },
+    {
+      "id": "zahreb",
+      "name": "Záhreb",
+      "lat": 45.81,
+      "lon": 15.98,
+      "time": "2026-09-21T14:30",
+      "temperature_2m": 20.1,
+      "wind_speed_10m": 0.91,
+      "wind_direction_10m": 186,
+      "precipitation": 0,
+      "cloud_cover": 100,
+      "pressure_msl": 1023.3,
+      "sourceUrl": "https://api.open-meteo.com/v1/forecast?latitude=45.81&longitude=15.98&current=temperature_2m%2Cwind_speed_10m%2Cwind_direction_10m%2Cprecipitation%2Ccloud_cover%2Cpressure_msl&models=icon_d2&wind_speed_unit=ms&timezone=UTC"
+    }
+  ]
+}

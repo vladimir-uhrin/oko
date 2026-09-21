@@ -18,24 +18,33 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-/** Doména DWD ICON-D2, zmeraná z GRIB Section 3 (2026-09-21). Pure. */
-export const ICON_D2_DOMAIN = Object.freeze({ west: -3.94, east: 20.34, south: 43.18, north: 58.08 });
+// Obdĺžnik mriežky icon_d2 z GRIB Section 3 je -3,94…20,34° E / 43,18…58,08° N,
+// ALE natívna doména je ROTOVANÁ a rohy obdĺžnika sú maskované (v GRIB-e bitmapa:
+// platných len 754 862 z 906 390 bodov). Obdĺžnik preto NIE JE test pokrytia —
+// overené 2026-09-21: Žilina, Banská Bystrica, Košice aj Budapešť ležia vnútri
+// obdĺžnika, no Open-Meteo pre ne vracia {"reason":"No data is available for this
+// location"}. Doménu preto nehádame, pýtame sa zdroja (probePoint nižšie).
 
-/** Leží bod v doméne icon_d2? Mimo nej model nemá dáta a tolerancia sa nedá splniť. Pure. */
-export function insideIconD2(lat, lon) {
-  return lat >= ICON_D2_DOMAIN.south && lat <= ICON_D2_DOMAIN.north
-    && lon >= ICON_D2_DOMAIN.west && lon <= ICON_D2_DOMAIN.east;
+/** Overí, či model pre bod naozaj má dáta. Vracia dôvod zdroja, nie náš odhad. */
+export async function probePoint(lat, lon) {
+  const url = openMeteoUrl(lat, lon);
+  const res = await fetch(url, { headers: { 'User-Agent': UA } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.error) return { ok: false, reason: body.reason || `HTTP ${res.status}` };
+  return { ok: true, current: body.current || {} };
 }
 
-/** Body sú zámerne všetky vnútri domény d2 — Košice (21,26° E) by boli MIMO. */
+/** Body OVERENÉ 2026-09-21, že icon_d2 pre ne dáta má (mimo: Žilina, BB, Košice, Budapešť). */
 export const DEFAULT_POINTS = Object.freeze([
   { id: 'bratislava', name: 'Bratislava', lat: 48.15, lon: 17.11 },
-  { id: 'zilina', name: 'Žilina', lat: 49.22, lon: 18.74 },
+  { id: 'nitra', name: 'Nitra', lat: 48.31, lon: 18.09 },
   { id: 'vieden', name: 'Viedeň', lat: 48.21, lon: 16.37 },
   { id: 'brno', name: 'Brno', lat: 49.20, lon: 16.61 },
   { id: 'mnichov', name: 'Mníchov', lat: 48.14, lon: 11.58 },
   { id: 'zahreb', name: 'Záhreb', lat: 45.81, lon: 15.98 },
 ]);
+
+const UA = 'OKO/meteo-gauntlet (hobby; kontakt v repo)';
 
 const VARS = ['temperature_2m', 'wind_speed_10m', 'wind_direction_10m', 'precipitation', 'cloud_cover', 'pressure_msl'];
 
@@ -51,14 +60,34 @@ export function openMeteoUrl(lat, lon) {
   return `https://api.open-meteo.com/v1/forecast?${p}`;
 }
 
+/** Meno súboru rezu (2026-09-08T210000Z.png) → ms. NaN, keď sa nedá čítať. Pure. */
+export function sliceStamp(file) {
+  const m = String(file).match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z/);
+  if (!m) return NaN;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+}
+
+/** Rez najbližší k okamihu zachytenia. Pure. */
+export function nearestSlice(files, capturedAtIso) {
+  const target = Date.parse(capturedAtIso);
+  let best = null;
+  let bestDiff = Infinity;
+  for (const f of files) {
+    const t = sliceStamp(f);
+    if (!Number.isFinite(t)) continue;
+    const d = Math.abs(t - target);
+    if (d < bestDiff) { bestDiff = d; best = f; }
+  }
+  return best;
+}
+
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 
 async function main() {
   const name = arg('--name', null);
   if (!name) { console.error('chýba --name <meno-fixture>'); process.exit(2); }
 
-  const bad = DEFAULT_POINTS.filter((p) => !insideIconD2(p.lat, p.lon));
-  if (bad.length) { console.error('body mimo domény icon_d2:', bad.map((b) => b.id).join(', ')); process.exit(2); }
+
 
   const capturedAt = new Date().toISOString();
   console.log(`zachytávam fixture "${name}" @ ${capturedAt}`);
@@ -67,10 +96,14 @@ async function main() {
   const points = [];
   for (const p of DEFAULT_POINTS) {
     const url = openMeteoUrl(p.lat, p.lon);
-    const res = await fetch(url, { headers: { 'User-Agent': 'OKO/meteo-gauntlet (hobby; kontakt v repo)' } });
-    if (!res.ok) { console.error(`Open-Meteo ${res.status} pre ${p.id}`); process.exit(1); }
-    const j = await res.json();
-    const c = j.current || {};
+    const probe = await probePoint(p.lat, p.lon);
+    if (!probe.ok) {
+      console.error(`
+${p.name}: model pre tento bod nemá dáta — ${probe.reason}`);
+      console.error('Doména icon_d2 je rotovaná; obdĺžnik mriežky nestačí. Vyber iný bod.');
+      process.exit(1);
+    }
+    const c = probe.current;
     points.push({
       id: p.id, name: p.name, lat: p.lat, lon: p.lon,
       time: c.time || null,
@@ -96,8 +129,11 @@ async function main() {
     for (const field of await fs.readdir(cache)) {
       const fdir = path.join(cache, field);
       if (!(await fs.stat(fdir)).isDirectory()) continue;
-      const files = (await fs.readdir(fdir)).filter((f) => f.endsWith('.png')).sort();
-      const pick = files[0];
+      const files = (await fs.readdir(fdir)).filter((f) => f.endsWith('.png'));
+      // NAJBLIŽŠÍ rez k okamihu zachytenia, nie prvý po zoradení. files[0] bral
+      // najstarší rez v cache — fixture by miešal dnešné checkpointy s rastrom
+      // spred týždňov, čo je presne to, čo má „same instant" vylúčiť.
+      const pick = nearestSlice(files, capturedAt);
       if (!pick) continue;
       const stem = pick.replace(/\.png$/, '');
       for (const ext of ['.png', '.json']) {
@@ -105,12 +141,13 @@ async function main() {
           await fs.copyFile(path.join(fdir, stem + ext), path.join(dir, 'slices', `${field}__${stem}${ext}`));
         } catch { /* meta nemusí byť */ }
       }
-      copied.push(`${field}/${stem}`);
+      const drift = Math.round(Math.abs(sliceStamp(pick) - Date.parse(capturedAt)) / 3600000);
+      copied.push({ slice: `${field}/${stem}`, driftHours: drift });
     }
   } catch { console.warn('  (cache rezov sa nedá čítať — fixture bude len s checkpointmi)'); }
 
   await fs.writeFile(path.resolve('fixtures', 'checkpoints.json'),
-    JSON.stringify({ capturedAt, model: 'icon_d2', api: 'open-meteo', domain: ICON_D2_DOMAIN, points }, null, 2) + '\n');
+    JSON.stringify({ capturedAt, model: 'icon_d2', api: 'open-meteo', points }, null, 2) + '\n');
   await fs.writeFile(path.join(dir, 'manifest.json'),
     JSON.stringify({ name, capturedAt, model: 'icon_d2', slices: copied.sort() }, null, 2) + '\n');
 
