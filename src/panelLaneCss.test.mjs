@@ -58,9 +58,10 @@ test('every left-lane panel has an explicit order, so none silently falls to 0',
   const missing = ids.filter((id) => !ordered.has(id));
   assert.deepEqual(missing, [], `these left-lane panels have no order and would sort above the rest: ${missing.join(', ')}`);
 
-  // The reported regression, pinned by name.
-  assert.equal(ordered.get('oil-panel'), 7);
-  assert.equal(ordered.get('gulf-panel'), 8);
+  // The reported regression, pinned by name. Zone bands (2026-09-20): ROPA sits
+  // in the ENERGIA decade, ZÁLIV in the KONFLIKTY one.
+  assert.equal(ordered.get('oil-panel'), 32);
+  assert.equal(ordered.get('gulf-panel'), 22);
 
   // Orders must stay distinct, or the flex sort falls back to DOM order.
   const values = ids.map((id) => ordered.get(id));
@@ -108,4 +109,90 @@ test('every left-lane panel survives a shared link', () => {
 
   const tokens = [...registry.values()];
   assert.equal(new Set(tokens).size, tokens.length, `duplicate share tokens: ${tokens.join(', ')}`);
+});
+
+// ── Zóny v ľavom pruhu (2026-09-20) ──────────────────────────────────────────
+
+/** Zóny tak, ako ich číta človek. VRSTVY má jediný panel a nadpis zámerne nemá. */
+const LANE_ZONES = [
+  { zone: null, panels: ['data-panel', 'cctv-panel'] },
+  { zone: 'conflicts', panels: ['ukraine-panel', 'gulf-panel'] },
+  { zone: 'energy', panels: ['gas-panel', 'oil-panel'] },
+  { zone: 'tools', panels: ['scene-panel', 'history-panel'] },
+];
+
+const laneOrders = () => new Map(
+  [...css.matchAll(/#left-panel-stack > #([a-z-]+)\s*\{[^}]*order:\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]),
+);
+const zoneOrders = () => new Map(
+  [...css.matchAll(/#left-panel-stack > \.lane-zone(?:\[data-lane-zone="([a-z-]+)"\])?\s*\{[^}]*order:\s*(\d+)/g)]
+    .map((m) => [m[1] || 'conflicts', Number(m[2])]),
+);
+
+test('každý panel pruhu patrí práve do jednej zóny', () => {
+  // Zovšeobecnenie chyby oil/gulf: nový panel sa už nedá pridať bez zaradenia.
+  const declared = leftLanePanelIds();
+  const assigned = LANE_ZONES.flatMap((z) => z.panels);
+  assert.deepEqual(
+    declared.filter((id) => !assigned.includes(id)), [],
+    'tieto panely nemajú zónu — doplň ich do LANE_ZONES aj do poradia v style.css',
+  );
+  assert.equal(new Set(assigned).size, assigned.length, 'panel nesmie byť v dvoch zónach');
+});
+
+test('nadpis zóny sa radí priamo nad svoje panely a pod predchádzajúcu zónu', () => {
+  const orders = laneOrders();
+  const zones = zoneOrders();
+  let previousMax = -Infinity;
+  for (const { zone, panels } of LANE_ZONES) {
+    const values = panels.map((id) => {
+      const v = orders.get(id);
+      assert.ok(Number.isFinite(v), `#${id} nemá order — spadol by na 0 a vyskočil nad všetko`);
+      return v;
+    });
+    if (zone) {
+      const head = zones.get(zone);
+      assert.ok(Number.isFinite(head), `nadpis zóny ${zone} nemá order`);
+      assert.ok(head > previousMax, `nadpis ${zone} (${head}) musí byť pod predchádzajúcou zónou`);
+      assert.ok(values.every((v) => v > head), `nadpis ${zone} musí byť nad svojimi panelmi`);
+    }
+    previousMax = Math.max(previousMax, ...values);
+  }
+});
+
+test('nadpis zóny nie je panel — bez data-panel-id, id aj panel-collapsible', () => {
+  // S data-panel-id by ho layout engine bral ako plochu s 96px podlahou a
+  // panelLaneCss by od neho pýtal share token; s id by ho chytil guard vyššie.
+  const start = html.indexOf('id="left-panel-stack"');
+  const end = html.indexOf('id="right-context-rail"', start);
+  const lane = html.slice(start, end);
+  const zones = [...lane.matchAll(/<div class="lane-zone"[^>]*>/g)].map((m) => m[0]);
+  assert.ok(zones.length >= 3, `očakávam nadpisy zón v pruhu, našiel som ${zones.length}`);
+  for (const tag of zones) {
+    assert.doesNotMatch(tag, /data-panel-id/, `nadpis nesmie mať data-panel-id: ${tag}`);
+    assert.doesNotMatch(tag, /\sid=/, `nadpis nesmie mať id: ${tag}`);
+    assert.doesNotMatch(tag, /panel-collapsible/, `nadpis nie je panel: ${tag}`);
+  }
+});
+
+test('nepanelové deti pruhu majú order a klikateľné si pýtajú pointer-events', () => {
+  // Pruh je pointer-events:none a vracia ho len [data-panel-id] — tlačidlo bez
+  // vlastného pointer-events sa vykreslí a nedá sa naň kliknúť.
+  const zones = zoneOrders();
+  assert.ok(zones.size >= 3, 'každý nadpis zóny potrebuje order');
+  const launch = css.match(/#left-panel-stack > \.oko-conflicts-launch \{([^}]*)\}/);
+  assert.ok(launch, 'spúšťač Kartičiek v pruhu potrebuje vlastné pravidlo');
+  assert.match(launch[1], /order:\s*\d+/, 'inak spadne na order 0 a vyskočí nad Dátové vrstvy');
+  assert.match(launch[1], /pointer-events:\s*auto/, 'inak sa naň nedá kliknúť');
+  assert.match(launch[1], /position:\s*relative|position:\s*static/, 'musí prestať byť position: fixed');
+});
+
+test('čistý pohľad skryje celý pruh, nielen ručný zoznam id', () => {
+  // Zoznam id na to nestačil: #oil-panel, #gulf-panel a #ukraine-panel v ňom
+  // chýbali a v čistom pohľade ostávali viditeľné.
+  assert.match(
+    css,
+    /body\.ui-clean-view #left-panel-stack \{[^}]*visibility:\s*hidden/,
+    'skry pruh ako celok, inak každý nový panel aj nadpis zóny ostane nad glóbusom',
+  );
 });

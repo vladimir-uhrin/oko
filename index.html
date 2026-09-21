@@ -795,6 +795,90 @@
     </div>
   </div>
 
+  <!-- Nadpisy zón (2026-09-20). Plochý súrodenec panelov, NIKDY obal: lane
+       membership stojí na `#left-panel-stack > [data-panel-id]`. Preto tu nie je
+       ani data-panel-id (inak by nadpis chcel share token a 96px podlahu v
+       layout engine), ani id (guard na `#left-panel-stack > #<id>`). Poradie
+       určuje `order:` v style.css — bez neho by prvok spadol na 0 a vyskočil
+       nad Dátové vrstvy. Zóna VRSTVY nadpis nemá, má jediný panel. -->
+  <div class="lane-zone" data-lane-zone="conflicts">
+    <span class="lane-zone-text" data-i18n="lane.zone.conflicts">CONFLICTS</span>
+    <span class="panel-divider" aria-hidden="true"></span>
+  </div>
+
+  <!-- UKRAJINA (2026-09-19, etapa 1): podklad frontu — sídla, cesty, rieky a
+       hranice oblastí zo statického OSM snímku + presety smerov frontu. Obsah
+       skladá src/ukrainePanel.js do [data-ukraine-body]; prekryv je samostatný
+       (tokeny odkazu sú plné), nie vrstva správcu. -->
+  <div id="ukraine-panel" class="panel-collapsible collapsed" data-panel-id="ukraine-panel">
+    <div class="panel-glow"></div>
+    <div class="ukraine-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.ukraine" class="panel-title">UKRAINE</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="ukraine-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="ukraine-body" data-ukraine-body></div>
+    </div>
+  </div>
+
+  <!-- Situácia z otvorených zdrojov: agregované správy z otvorených zdrojov,
+       odkazy von, nič sa nereprodukuje. Obsah skladá conflictBulletin.js do
+       [data-gulf-body] — dva čipy prepínajú región záliv/Blízky východ
+       (2026-09-18, zlúčené sem z bývalého plávajúceho bulletinu). -->
+  <div id="gulf-panel" class="panel-collapsible collapsed" data-panel-id="gulf-panel">
+    <div class="panel-glow"></div>
+    <div class="gulf-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.gulf" class="panel-title">GULF</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="gulf-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="gulf-body" data-gulf-body></div>
+    </div>
+  </div>
+
+  <div class="lane-zone" data-lane-zone="energy">
+    <span class="lane-zone-text" data-i18n="lane.zone.energy">ENERGY</span>
+    <span class="panel-divider" aria-hidden="true"></span>
+  </div>
+
+  <!-- Plyn (2026-09-13): ceny ACER + IMF/FRED (denne/mesačne, bez kľúča),
+       ďalšie karty (zásobníky GIE, toky ENTSOG) pribúdajú po etapách.
+       Obsah skladá gasPanel.js do [data-gas-body]. -->
+  <div id="gas-panel" class="panel-collapsible collapsed" data-panel-id="gas-panel">
+    <div class="panel-glow"></div>
+    <div class="gas-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.gas" class="panel-title">GAS</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="gas-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="gas-body" data-gas-body></div>
+    </div>
+  </div>
+
+  <!-- Ceny ropy (2026-09-17): Brent/WTI ≈ spot z Yahoo Finance (front-month),
+       USD + EUR, graf 6 mes., deň/52-týž, spread Brent–WTI. Nezávislé od scén
+       (cena ropy je globálna). Obsah skladá oilPriceChip.js (createOilPricePanel)
+       do [data-oil-body]. -->
+  <div id="oil-panel" class="panel-collapsible collapsed" data-panel-id="oil-panel">
+    <div class="panel-glow"></div>
+    <div class="oil-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.oil" class="panel-title">CRUDE OIL</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="oil-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="oil-body" data-oil-body></div>
+    </div>
+  </div>
+
+  <div class="lane-zone" data-lane-zone="tools">
+    <span class="lane-zone-text" data-i18n="lane.zone.tools">TOOLS</span>
+    <span class="panel-divider" aria-hidden="true"></span>
+  </div>
+
   <!-- Scene Director Panel -->
   <div id="scene-panel" class="panel-collapsible collapsed" data-panel-id="scene-panel">
     <div class="panel-glow"></div>
@@ -859,69 +943,6 @@
         <button class="panel-collapse-btn" data-collapse-target="history-panel" title="Collapse panel">+</button>
       </div>
       <div class="history-body" data-history-body></div>
-    </div>
-  </div>
-
-  <!-- Plyn (2026-09-13): ceny ACER + IMF/FRED (denne/mesačne, bez kľúča),
-       ďalšie karty (zásobníky GIE, toky ENTSOG) pribúdajú po etapách.
-       Obsah skladá gasPanel.js do [data-gas-body]. -->
-  <div id="gas-panel" class="panel-collapsible collapsed" data-panel-id="gas-panel">
-    <div class="panel-glow"></div>
-    <div class="gas-panel-inner scene-panel-inner">
-      <div class="panel-header">
-        <span data-i18n="panel.gas" class="panel-title">GAS</span>
-        <span class="panel-divider"></span>
-        <button class="panel-collapse-btn" data-collapse-target="gas-panel" title="Collapse panel">+</button>
-      </div>
-      <div class="gas-body" data-gas-body></div>
-    </div>
-  </div>
-
-  <!-- Ceny ropy (2026-09-17): Brent/WTI ≈ spot z Yahoo Finance (front-month),
-       USD + EUR, graf 6 mes., deň/52-týž, spread Brent–WTI. Nezávislé od scén
-       (cena ropy je globálna). Obsah skladá oilPriceChip.js (createOilPricePanel)
-       do [data-oil-body]. -->
-  <div id="oil-panel" class="panel-collapsible collapsed" data-panel-id="oil-panel">
-    <div class="panel-glow"></div>
-    <div class="oil-panel-inner scene-panel-inner">
-      <div class="panel-header">
-        <span data-i18n="panel.oil" class="panel-title">CRUDE OIL</span>
-        <span class="panel-divider"></span>
-        <button class="panel-collapse-btn" data-collapse-target="oil-panel" title="Collapse panel">+</button>
-      </div>
-      <div class="oil-body" data-oil-body></div>
-    </div>
-  </div>
-
-  <!-- Situácia z otvorených zdrojov: agregované správy z otvorených zdrojov,
-       odkazy von, nič sa nereprodukuje. Obsah skladá conflictBulletin.js do
-       [data-gulf-body] — dva čipy prepínajú región záliv/Blízky východ
-       (2026-09-18, zlúčené sem z bývalého plávajúceho bulletinu). -->
-  <div id="gulf-panel" class="panel-collapsible collapsed" data-panel-id="gulf-panel">
-    <div class="panel-glow"></div>
-    <div class="gulf-panel-inner scene-panel-inner">
-      <div class="panel-header">
-        <span data-i18n="panel.gulf" class="panel-title">GULF</span>
-        <span class="panel-divider"></span>
-        <button class="panel-collapse-btn" data-collapse-target="gulf-panel" title="Collapse panel">+</button>
-      </div>
-      <div class="gulf-body" data-gulf-body></div>
-    </div>
-  </div>
-
-  <!-- UKRAJINA (2026-09-19, etapa 1): podklad frontu — sídla, cesty, rieky a
-       hranice oblastí zo statického OSM snímku + presety smerov frontu. Obsah
-       skladá src/ukrainePanel.js do [data-ukraine-body]; prekryv je samostatný
-       (tokeny odkazu sú plné), nie vrstva správcu. -->
-  <div id="ukraine-panel" class="panel-collapsible collapsed" data-panel-id="ukraine-panel">
-    <div class="panel-glow"></div>
-    <div class="ukraine-panel-inner scene-panel-inner">
-      <div class="panel-header">
-        <span data-i18n="panel.ukraine" class="panel-title">UKRAINE</span>
-        <span class="panel-divider"></span>
-        <button class="panel-collapse-btn" data-collapse-target="ukraine-panel" title="Collapse panel">+</button>
-      </div>
-      <div class="ukraine-body" data-ukraine-body></div>
     </div>
   </div>
 

@@ -2,7 +2,7 @@ import * as Cesium from 'cesium';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { StyleManager } from './ui.js';
 import { flyToBratislava } from './camera.js';
-import { DataLayerManager } from './data/manager.js';
+import { DataLayerManager, layerDisplayName } from './data/manager.js';
 import flightsLayer from './data/flights.js';
 import militaryFlightsLayer from './data/militaryFlights.js';
 import earthquakesLayer from './data/earthquakes.js';
@@ -50,6 +50,7 @@ import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCard
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
 import { createCommandPalette } from './commandPalette.js';
+import { LAYER_GROUP_ORDER, isCatalogLayer, layerGroup, layerKeywords } from './layerCategories.js';
 import { flyToGlobeView, searchAndFlyTo } from './locations.js';
 import { buildConflictDigest } from './conflictSummary.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
@@ -821,6 +822,10 @@ async function init() {
       translate: t,
       conflicts: listConflicts().map((c) => ({ id: c.id, region: c.region, kind: c.kind, label: conflictTitle(c, t) })),
       ratios: CARD_RATIO_IDS,
+      // Domov v zóne KONFLIKTY namiesto voľného plávania vľavo dole; kotvíme pred
+      // nadpis ENERGIA, aby DOM poradie sedelo s tým, čo oko vidí.
+      launchTarget: document.getElementById('left-panel-stack'),
+      launchBefore: document.querySelector('#left-panel-stack .lane-zone[data-lane-zone="energy"]'),
       onExport: async (item, ratio) => {
         const c = conflictById(item.id);
         if (!c) return;
@@ -846,13 +851,29 @@ async function init() {
     // Hľadať čokoľvek (orientácia v OKU): jedno pole nájde miesto, konflikt,
     // vrstvu aj akciu — ľudské názvy, bez odborných výrazov. Klávesa „/" alebo
     // tlačidlo lupy v hornej lište. Zoznam sa skladá nanovo pri každom otvorení.
+    // Konflikty sú roztriedené podľa regiónu (Ukrajina / Úžiny a moria / Blízky
+    // východ), vrstvy podľa ľudských tém (Vo vzduchu, Na mori, Zem a počasie…) —
+    // aby sa dal celok listovať prehľadne, nie ako jeden dlhý zoznam.
+    const CONFLICT_GROUP = { ukraine: 'ukraine', maritime: 'maritime', 'middle-east': 'mideast' };
     const buildCommands = () => {
       const cmds = [];
       for (const c of listConflicts()) {
-        cmds.push({ id: `scene:${c.id}`, label: conflictTitle(c, t), group: 'scene', keywords: [c.region, c.name, c.sceneId || ''], run: () => { void frameConflict(c); } });
+        cmds.push({ id: `scene:${c.id}`, label: conflictTitle(c, t), group: CONFLICT_GROUP[c.region] || 'ukraine', keywords: [c.region, c.name, c.sceneId || ''], run: () => { void frameConflict(c); } });
       }
-      for (const [layerId, key] of [['flights', 'cmd.layer.flights'], ['military', 'cmd.layer.military'], ['satellites', 'cmd.layer.satellites'], ['gas-pipelines', 'cmd.layer.gas']]) {
-        cmds.push({ id: `layer:${layerId}`, label: t(key), hint: t('cmd.toggle.hint'), group: 'layer', keywords: [layerId], run: () => { try { dataManager.setEnabled(layerId, !dataManager.isEnabled(layerId), { origin: 'user' }); } catch { /* */ } } });
+      let layers = [];
+      try { layers = dataManager.getAll() || []; } catch { layers = []; }
+      for (const layer of layers) {
+        if (!isCatalogLayer(layer)) continue;
+        const id = layer.id;
+        const on = (() => { try { return dataManager.isEnabled(id); } catch { return false; } })();
+        cmds.push({
+          id: `layer:${id}`,
+          label: layerDisplayName(layer),
+          hint: t(on ? 'cmd.toggle.off' : 'cmd.toggle.on'),
+          group: layerGroup(id),
+          keywords: [id, ...layerKeywords(id)],
+          run: () => { try { dataManager.setEnabled(id, !dataManager.isEnabled(id), { origin: 'user' }); } catch { /* */ } },
+        });
       }
       cmds.push({ id: 'view:world', label: t('cmd.action.world'), hint: t('cmd.action.world.hint'), group: 'view', keywords: ['reset', 'svet', 'world', 'globe'], run: () => { try { flyToGlobeView(viewer); } catch { /* */ } } });
       cmds.push({ id: 'view:karta', label: t('cmd.action.karta'), group: 'view', keywords: ['karta', 'front', 'mapa'], run: () => { void styleManager._setMapStack('karta'); } });
@@ -865,6 +886,8 @@ async function init() {
     const commandPalette = createCommandPalette({
       translate: t,
       getCommands: buildCommands,
+      // Poradie: konflikty (podľa regiónu) → vrstvy (podľa témy) → zobrazenie.
+      groupOrder: ['ukraine', 'maritime', 'mideast', ...LAYER_GROUP_ORDER, 'view'],
       onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
     });
     window.__godsEyeView.commandPalette = commandPalette;

@@ -52,6 +52,35 @@ test('panel: štruktúra, regióny, riadky s exportom, skrytý na štarte', () =
   assert.ok(doc.body.children.includes(launch) && doc.body.children.includes(panel));
 });
 
+test('panel: spúšťač smie bývať v pruhu, flyout ostáva na body', () => {
+  const doc = fakeDoc();
+  const lane = fakeNode('div');
+  const anchor = fakeNode('div');
+  anchor.parentNode = lane;
+  lane.children.push(anchor);
+  lane.insertBefore = (node, before) => { lane.children.splice(lane.children.indexOf(before), 0, node); return node; };
+  const p = createConflictsPanel({
+    documentRef: doc, translate: tr, conflicts: CONFLICTS, onExport: async () => {},
+    launchTarget: lane, launchBefore: anchor,
+  });
+  const { launch, panel } = p._getStateForTest();
+  assert.ok(lane.children.includes(launch), 'spúšťač je v pruhu');
+  assert.equal(lane.children.indexOf(launch), lane.children.indexOf(anchor) - 1, 'pred kotvou, aby DOM poradie sedelo s vizuálnym');
+  assert.ok(!doc.body.children.includes(launch), 'a už nie voľne na body');
+  assert.ok(doc.body.children.includes(panel), 'flyout ostáva na body — je position:fixed');
+});
+
+test('panel: bez insertBefore sa spúšťač pripne na koniec cieľa', () => {
+  const doc = fakeDoc();
+  const lane = fakeNode('div');
+  const p = createConflictsPanel({
+    documentRef: doc, translate: tr, conflicts: CONFLICTS, onExport: async () => {},
+    launchTarget: lane, launchBefore: fakeNode('div'), // kotva mimo cieľa → fallback
+  });
+  const { launch } = p._getStateForTest();
+  assert.ok(lane.children.includes(launch));
+});
+
 test('panel: toggle, výber pomeru, export jedného volá onExport s pomerom', async () => {
   const doc = fakeDoc();
   const calls = [];

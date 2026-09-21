@@ -53,12 +53,16 @@ function el(doc, tag, cls, text) {
  * @param {Function} [o.translate]
  * @param {() => ReadonlyArray<object>} o.getCommands vracia príkazy { id, label, hint?, group, keywords?, run() }
  * @param {(query: string) => any} [o.onGeocode] núdzové „hľadať na mape", keď nič nesadne
+ * @param {ReadonlyArray<string>} [o.groupOrder] poradie skupín vo výsledkoch (ľudské názvy dodá i18n)
+ * @param {number} [o.limit] koľko výsledkov naraz (prázdny dopyt = listovanie katalógu, treba vyšší strop)
  */
 export function createCommandPalette({
   documentRef = globalThis.document,
   translate = (k) => k,
   getCommands = () => [],
   onGeocode = null,
+  groupOrder = COMMAND_GROUP_ORDER,
+  limit = 80,
 } = {}) {
   const doc = documentRef;
   const inert = { id: COMMAND_PALETTE_ID, open() {}, close() {}, toggle() {}, isOpen: () => false, destroy() {}, _getStateForTest: () => ({}) };
@@ -94,12 +98,12 @@ export function createCommandPalette({
   }
   function render() {
     const q = input.value;
-    const found = searchCommands(getCommands(), q, { limit: 40 });
+    const found = searchCommands(getCommands(), q, { limit });
     results.replaceChildren();
     _rows = [];
     const groups = new Map();
     for (const c of found) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
-    const order = [...COMMAND_GROUP_ORDER, ...[...groups.keys()].filter((g) => !COMMAND_GROUP_ORDER.includes(g))];
+    const order = [...groupOrder, ...[...groups.keys()].filter((g) => !groupOrder.includes(g))];
     for (const g of order) {
       const items = groups.get(g);
       if (!items || !items.length) continue;

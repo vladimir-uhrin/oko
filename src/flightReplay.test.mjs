@@ -121,6 +121,6 @@ test('tripwire: značka používa siluetu a orientáciu flotily; panel je zapoje
   assert.match(html, /id="history-panel"[^>]*data-panel-id="history-panel"/);
   assert.match(html, /data-history-body/);
   const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
-  assert.match(css, /#left-panel-stack > #history-panel \{ order: 5; \}/);
+  assert.match(css, /#left-panel-stack > #history-panel \{ order: 42; \}/);
   assert.match(css, /body\.cockpit-mode #left-panel-stack > #history-panel \{ display: none !important; \}/);
 });

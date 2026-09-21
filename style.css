@@ -1620,6 +1620,18 @@ body.ui-clean-view #scene-panel {
   pointer-events: none !important;
 }
 
+/*
+ * The hand-kept id list above predates the left lane and silently omits
+ * #oil-panel, #gulf-panel and #ukraine-panel — all three stayed fully visible
+ * in clean view — and it would omit every zone heading too. Hiding the lane
+ * itself covers the whole column, including panels added later.
+ */
+body.ui-clean-view #left-panel-stack {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 body.ui-clean-view #scene-runtime.active {
   opacity: 1;
   visibility: visible;
@@ -6888,20 +6900,84 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   pointer-events: auto;
 }
 
+/*
+ * Zone bands (2026-09-20). The lane reads as named zones instead of one flat
+ * pile: VRSTVY (no heading — single panel) · KONFLIKTY · ENERGIA · NÁSTROJE.
+ * Each zone owns a decade so a new panel slots in without renumbering, and
+ * the heading always sorts directly above its own members.
+ *
+ * Every child of the lane MUST carry an order. #left-panel-stack is a flex
+ * container, so an orderless child falls to 0 and jumps above DATA LAYERS —
+ * half of the regression documented in the comment above.
+ */
 #left-panel-stack > #data-panel {
-  order: 1;
+  order: 10;
 }
 
+/* Declared in the lane markup but re-parented into the right rail at boot by
+   ui.js `_initRightPanelAdaptiveLayout`. The rule stays because
+   panelLaneCss.test.mjs reads the markup, not the live DOM. */
 #left-panel-stack > #cctv-panel {
-  order: 2;
+  order: 11;
 }
 
-#left-panel-stack > #scene-panel { order: 4; }
-#left-panel-stack > #history-panel { order: 5; }
-#left-panel-stack > #gas-panel { order: 6; }
-#left-panel-stack > #oil-panel { order: 7; }
-#left-panel-stack > #gulf-panel { order: 8; }
-#left-panel-stack > #ukraine-panel { order: 9; }
+#left-panel-stack > #ukraine-panel { order: 21; }
+#left-panel-stack > #gulf-panel { order: 22; }
+#left-panel-stack > #gas-panel { order: 31; }
+#left-panel-stack > #oil-panel { order: 32; }
+#left-panel-stack > #scene-panel { order: 41; }
+#left-panel-stack > #history-panel { order: 42; }
+
+/*
+ * Zone heading: a flat sibling of the panels, not a wrapper. Wrapping would
+ * break the direct-child combinators that panelStackLayout.test.mjs pins and,
+ * worse, would stop `#left-panel-stack > [data-panel-id]` from applying — six
+ * panels would spring back to their own `position: fixed` coordinates.
+ *
+ * It carries no data-panel-id, so the layout engine does not allocate height to
+ * it; the engine instead measures it as fixed lane chrome (see ui.js
+ * `_syncLeftPanelAdaptiveLayout`, `renderedDecorations`).
+ */
+#left-panel-stack > .lane-zone {
+  order: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Never the default `1 1 auto`: with flex-shrink the heading collapses to
+     zero height exactly when the lane is crowded, and because it then measures
+     ~0 the accounting "agrees" — a silent, unmeasurable loss. */
+  flex: 0 0 auto;
+  align-self: stretch;
+  box-sizing: border-box;
+  padding: 0 4px;
+  margin: 2px 0 0;
+  /* The lane is pointer-events:none and hands it back only to [data-panel-id].
+     A heading is decoration: staying transparent keeps globe clicks working
+     through it. Interactive children must claim pointer-events themselves. */
+  pointer-events: none;
+  user-select: none;
+}
+
+#left-panel-stack > .lane-zone[data-lane-zone="energy"] { order: 30; }
+#left-panel-stack > .lane-zone[data-lane-zone="tools"] { order: 40; }
+
+.lane-zone-text {
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  line-height: 14px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+/*
+ * Cockpit hides both NÁSTROJE members (#scene-panel, #history-panel), which
+ * would leave the heading floating above nothing. ENERGIA stays: #oil-panel is
+ * not hidden in cockpit.
+ */
+body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { display: none !important; }
 
 /*
  * Runtime focus mode: the layout engine applies this only when the expanded
@@ -7562,6 +7638,11 @@ body.scene-playback-mode :is(#clear-selected-layers, #reset-globe-view) {
     right: auto;
     bottom: auto;
     left: auto;
+    width: 100%;
+  }
+
+  /* Zone headings shrink-to-fit inside the 100%-wide narrow lane otherwise. */
+  #left-panel-stack > .lane-zone {
     width: 100%;
   }
 
@@ -11723,8 +11804,34 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
 }
 .oko-conflicts-launch:hover { background: rgba(0, 212, 255, 0.18); }
 .oko-conflicts-launch[aria-expanded="true"] { background: rgba(0, 212, 255, 0.26); color: #eafaff; }
+
+/*
+ * Domov v zóne KONFLIKTY (2026-09-20): v toku pruhu, bez vlastných súradníc.
+ * (1,1,0) prebije blok vyššie (0,1,0), takže `position: fixed` naozaj padne —
+ * inak by tlačidlo vyzeralo nepresunuté, neprispelo by výškou a výpočet pruhu
+ * by s tým „súhlasil". Pruh je `pointer-events: none` a vracia ho len
+ * `[data-panel-id]`, preto si ho tlačidlo musí vypýtať samo, inak sa vykreslí
+ * a nedá sa naň kliknúť.
+ */
+#left-panel-stack > .oko-conflicts-launch {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  order: 23;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  pointer-events: auto;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 5px 9px;
+  border-radius: 999px;
+}
+
 .oko-conflicts-panel {
-  position: fixed; left: 16px; top: 66px; z-index: 96;
+  /* Pruh má z-index 100 a panely sa promujú do 139; pri 96 by sa flyout schoval
+     za pruh, v ktorom teraz býva jeho spúšťač. */
+  position: fixed; left: 16px; top: 66px; z-index: 141;
   width: 300px; max-height: calc(100vh - 160px); overflow: auto;
   font-family: var(--font-mono); color: #dfe9f2;
   background: rgba(10, 16, 24, 0.92); border: 1px solid rgba(0, 212, 255, 0.22);

@@ -209,6 +209,19 @@ test('desktop panel lanes use per-panel allocations and presentation-only auto-c
     /renderedPanels = panels\.filter\(\(panel\) => isRenderedOnScreen\(panel\)\)/,
     'a panel hidden by CSS must not feed its cached ghost height into requiredHeight, which latched focus mode on permanently',
   );
+  // Zóny (2026-09-20) sú flex deti pruhu bez data-panel-id: majú výšku aj medzeru,
+  // ale do `panels` nespadnú. Bez tohto vyjde requiredHeight nízko, focus mode
+  // nenaskočí a pruh prekreslí atribúciu Cesium/Google.
+  assert.match(
+    ui,
+    /renderedDecorations = \[\.\.\.stack\.children\]\.filter\([\s\S]*?!child\.matches\('\[data-panel-id\]'\)/,
+    'non-panel lane children (zone headings) must be measured too',
+  );
+  assert.match(
+    ui,
+    /renderedGapCount = Math\.max\(0, renderedPanels\.length \+ renderedDecorations\.length - 1\)/,
+    'every painted lane child adds a row gap, not just panels',
+  );
 });
 
 test('share-panel state excludes responsive collapse and preserves recipient preferences', () => {

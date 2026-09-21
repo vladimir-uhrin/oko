@@ -218,6 +218,31 @@ test('share startup isolates panel defaults from recipient-local collapse prefer
   );
 });
 
+test('Cockpit hides a zone heading whose every panel it hides', () => {
+  // NÁSTROJE = #scene-panel + #history-panel, oba sú v kokpite skryté, takže
+  // nadpis by ostal visieť nad prázdnom. ENERGIA ostáva — #oil-panel skrytý nie je.
+  const hiddenInCockpit = new Set(
+    [...css.matchAll(/body\.cockpit-mode #left-panel-stack > #([a-z-]+)\s*\{\s*display:\s*none/g)].map((m) => m[1]),
+  );
+  const zones = {
+    conflicts: ['ukraine-panel', 'gulf-panel'],
+    energy: ['gas-panel', 'oil-panel'],
+    tools: ['scene-panel', 'history-panel'],
+  };
+  for (const [zone, panels] of Object.entries(zones)) {
+    const allHidden = panels.every((id) => hiddenInCockpit.has(id));
+    const headingHidden = new RegExp(
+      `body\\.cockpit-mode #left-panel-stack > \\.lane-zone\\[data-lane-zone="${zone}"\\]\\s*\\{\\s*display:\\s*none`,
+    ).test(css);
+    assert.equal(
+      headingHidden, allHidden,
+      allHidden
+        ? `zóna ${zone} je v kokpite celá skrytá — skry aj jej nadpis, inak visí nad prázdnom`
+        : `zóna ${zone} má v kokpite viditeľný panel — jej nadpis sa skrývať nesmie`,
+    );
+  }
+});
+
 test('Cockpit owns a focused shared Display portal and compact Radio controls', () => {
   const hiddenRule = css.match(/body\.cockpit-mode :is\(([^)]*)\)\s*\{\s*display:\s*none\s*!important;/);
   assert.ok(hiddenRule, 'Cockpit hidden-chrome rule is missing');

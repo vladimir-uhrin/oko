@@ -7714,6 +7714,11 @@ export class StyleManager {
         const inner = [...panel.children].find((child) => !child.classList.contains('panel-glow'));
         if (inner) this._leftStackResizeObserver.observe(inner);
       });
+      // Zone headings and other non-panel lane chrome also occupy the corridor;
+      // their height changes on a language switch or when the text wraps.
+      stack.querySelectorAll(':scope > :not([data-panel-id])').forEach((chrome) => {
+        this._leftStackResizeObserver.observe(chrome);
+      });
       document.querySelectorAll(LEFT_STACK_OBSTACLE_SELECTOR).forEach((element) => {
         this._leftStackResizeObserver.observe(element);
       });
@@ -7952,12 +7957,24 @@ export class StyleManager {
     // unconditionally. Those ghosts kept requiredHeight permanently above the
     // corridor, so focus mode latched on and could never release itself.
     const renderedPanels = panels.filter((panel) => isRenderedOnScreen(panel));
-    const renderedGapCount = Math.max(0, renderedPanels.length - 1);
+    // Zone headings (2026-09-20) are flex children of the lane WITHOUT a
+    // data-panel-id, so they never enter `panels` — but the browser still gives
+    // them height and a row gap each. Counting only panels here is the whole bug
+    // class: requiredHeight comes in low, focus mode never latches, and the stack
+    // paints past safeBottom over the Cesium/Google attribution.
+    const renderedDecorations = [...stack.children].filter(
+      (child) => !child.matches('[data-panel-id]') && isRenderedOnScreen(child),
+    );
+    const decorationHeight = renderedDecorations.reduce(
+      (total, child) => total + (child.getBoundingClientRect().height || 0),
+      0,
+    );
+    const renderedGapCount = Math.max(0, renderedPanels.length + renderedDecorations.length - 1);
     const siblingHeight = renderedPanels.reduce((total, panel) => {
       if (!panel.classList.contains('collapsed')) return total;
       const measured = this._leftStackCollapsedHeights.get(panel.id);
       return total + (measured || panel.getBoundingClientRect().height || 0);
-    }, 0);
+    }, decorationHeight);
     let requiredHeight = siblingHeight;
 
     const rowGap = parseFloat(getComputedStyle(stack).rowGap) || 0;
@@ -7977,7 +7994,7 @@ export class StyleManager {
       : requiredHeight > availableHeight - stabilityBand);
     const tailRequiredHeight = naturalExpandedHeight
       + siblingHeight
-      + rowGap * Math.max(0, panels.length - 1);
+      + rowGap * Math.max(0, panels.length + renderedDecorations.length - 1);
     // A compact expansion should not make the whole control stack jump down
     // merely to center a few short rows. Preserve the normal top anchor when
     // the centered stack would begin below it; tall stacks can still grow

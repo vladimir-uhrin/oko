@@ -26,6 +26,10 @@ function el(doc, tag, cls, text) {
  * @param {ReadonlyArray<string>} [o.ratios]
  * @param {string} [o.initialRatio]
  * @param {(conflict: object, ratio: string) => Promise<any>} o.onExport
+ * @param {Element} [o.launchTarget] kam pripnúť spúšťač (predvolene `<body>`, teda
+ *   voľne plávajúce tlačidlo); zóna KONFLIKTY v ľavom pruhu mu dáva domov
+ * @param {Element} [o.launchBefore] voliteľná kotva pre `insertBefore`, aby DOM
+ *   poradie sedelo s vizuálnym; bez nej sa pripne na koniec cieľa
  */
 export function createConflictsPanel({
   documentRef = globalThis.document,
@@ -36,6 +40,8 @@ export function createConflictsPanel({
   onExport = async () => {},
   onDigest = null,
   clipboard = (globalThis.navigator && globalThis.navigator.clipboard) || null,
+  launchTarget = null,
+  launchBefore = null,
 } = {}) {
   const doc = documentRef;
   const inert = { id: CONFLICTS_PANEL_ID, open() {}, close() {}, toggle() {}, isOpen: () => false, destroy() {}, _getStateForTest: () => ({}) };
@@ -114,7 +120,16 @@ export function createConflictsPanel({
   foot.append(status);
   panel.append(foot);
 
-  doc.body.append(launch, panel);
+  // Spúšťač smie bývať v pruhu (zóna KONFLIKTY); samotný panel ostáva na <body>,
+  // lebo je `position: fixed` — ako flex dieťa pruhu by ho pod 720 px orezal
+  // `overflow-y: auto` a odscrolloval by sa preč.
+  const host = launchTarget || doc.body;
+  if (launchBefore && typeof host.insertBefore === 'function' && launchBefore.parentNode === host) {
+    host.insertBefore(launch, launchBefore);
+  } else {
+    host.append(launch);
+  }
+  doc.body.append(panel);
 
   function setRatio(r) {
     if (!ratios.includes(r)) return;

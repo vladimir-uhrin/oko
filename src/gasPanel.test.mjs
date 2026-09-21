@@ -362,7 +362,7 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
   assert.match(html, /data-i18n="panel\.gas"/);
   assert.match(html, /<div class="gas-body" data-gas-body><\/div>/);
   const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
-  assert.match(css, /#left-panel-stack > #gas-panel \{ order: 6; \}/, 'hneď za Históriou letov');
+  assert.match(css, /#left-panel-stack > #gas-panel \{ order: 31; \}/, 'prvý v zóne ENERGIA');
   assert.match(css, /body\.cockpit-mode #left-panel-stack > #gas-panel \{ display: none !important; \}/);
   assert.match(css, /body\.ui-clean-view #gas-panel,/);
   assert.match(css, /#left-panel-stack > #gas-panel:not\(\.collapsed\) \.gas-panel-inner/);
