@@ -181,3 +181,116 @@ primárny, aby sa správanie nemenilo.
 Ak si používateľ založí bezplatný Stadia účet a autorizuje doménu, stačí ju pridať do
 `STADIA_KEYLESS_HOSTS` — Stadia autorizuje **Origin**, nie `api_key` v URL, takže žiadny
 kľúč do prehliadača ani do proxy nejde.
+
+---
+
+## 2026-09-21 — KDE SOM SKONČIL (handover pred reštartom PC)
+
+Vetva `codex/blender-tanker-trial`, všetko **zacommitované**, pracovný strom čistý
+(okrem netrackovaných súborov druhých agentov: `docs/research/`, `scripts/research-*.mjs`,
+`docs/drafts/cctv-viac-kamier-plan.md`, `docs/drafts/karta-vzorka/`).
+Vetva je **len lokálna** — na `origin` neexistuje, nič nie je odtlačené.
+Web `oko.uhrin.digital` beží na **staršom builde**; po reštarte treba „publikuj".
+
+### Čo v tento deň pribudlo (commity odspodu)
+
+| commit | čo |
+|---|---|
+| `0e9f497` | meteo sa načíta až pri zapnutí (`meteoLazy.js`) |
+| `0ea4ca1` | Windy gauntlet uzavretý rozhodnutím používateľa |
+| `2a3ac75` | výškové hladiny vetra — dátová vrstva |
+| `43ab5c7` | výškové hladiny — prepínač v UI |
+| `96f9f9d` | oprava: častice animujú tú hladinu, ktorú pole kreslí |
+| `b1c41ae` | vietor v letovej hladine na karte lietadla |
+| `7c24010` | oprava strany bočného vetra + dopĺňanie karty po načítaní mriežky |
+| `4c2ba75` | hladiny 200 a 150 hPa |
+| `c2fa69a` | hustota, dĺžka stopy a rýchlosť prúdnic podľa priblíženia |
+| `453cca7` | `DENSITY_MIN` 0,10 → 0,15 (ladenie používateľa) |
+| `20ba388` | `TRAIL_FADE_NEAR` 0,90 → 0,93 (ladenie používateľa) |
+
+### Výškové hladiny vetra
+
+`WIND_LEVELS` v `meteoField.js`: `wind` (10 m), `wind850`, `wind700`, `wind500`,
+`wind250`, `wind200`, `wind150`. `levelPa` je v **pascaloch** (85000, nie 850) — tak to
+chce THREDDS `vertCoord`, overené v `dataset.xml`. Továreň `isobaricWind(id, levelPa,
+speedMax)` vyrába `vars: u/v-component_of_wind_isobaric`; rozsahy **60 / 60 / 90 / 130 /
+130 / 110 m/s** sú NAMERANÉ globálne maximá (stride 3), nie odhad — jadro jetu je
+okolo 250–200 hPa a nad ním slabne.
+
+Tri miesta, ktoré musia ísť spolu, inak vzniknú tiché chyby (všetky tri sa už raz pokazili):
+
+1. `meteoRasterize.js` vetví na `isWindField(fieldId)`, **nie** na `fieldId === 'wind'` —
+   inak hladiny spadnú do skalárnej vetvy a u/v sa dekóduje ako skalár.
+2. `applyStep()` používa `const windId = isWindField(_field) ? _field : 'wind'` —
+   inak pole kreslí 250 hPa a prúdnice animujú prízemný vietor.
+3. `rampStopsFor(fieldId)` **preškáľuje** zarážky rampy na rozsah hladiny
+   (0…45 → 0…98 m/s pri 250 hPa) pri zachovaní farieb — bez toho všetko nad 45 m/s
+   spadne do poslednej zarážky a jet je jednoliato biely. Rovnako sa musí preškálovať
+   rampa ČASTÍC v `setParams`.
+
+### Vietor v letovej hladine na karte lietadla
+
+`src/data/flightWind.js` (čistá matematika, bez Cesia):
+`LEVEL_ALTITUDE_M` (ISA výšky hladín), `levelForAltitude()`, `windRelativeToTrack()`,
+`flightLevelOf()`. Karta sa skladá v `trackedCardModel.formatWindLines()`; `flights.js`
+si vietor pýta cez **`meteoLazy`** (nie `meteoLayer` — inak by sa zabil lazy-load) a
+prekresľuje kartu na udalosť `gev:meteo-wind-grid`, lebo mriežka dobieha až po zložení karty.
+
+**Znamienko bočného vetra bolo 180° zlé a moje testy tú istú chybu zakódovali** —
+odhalilo sa to až ručným prepočtom u/v na živom lete UAE69. Správne:
+`crossMps = v * ax - u * ay`, kladné = vietor prichádza **sprava**.
+Regresný test drží hodnoty z toho letu.
+
+### Ladenie prúdnic podľa priblíženia (`windParticles.js`)
+
+Používateľ: „strašne veľa prúdnic, pri zazoomovaní je to úplne biele, idú dosť rýchlo."
+Tri čisté regulátory, každý jedna konštanta:
+
+- `densityForHeight()` — `DENSITY_FAR_M` 3 000 km, `DENSITY_NEAR_M` 120 km,
+  **`DENSITY_MIN = 0,15`**. 12 000 km → 100 %, 1 000 km → 41 %, 250 km → 19 %,
+  120 km a nižšie → 15 %.
+- `trailFadeForHeight()` — **`TRAIL_FADE_NEAR = 0,93`** zblízka, `WIND_TRAIL_FADE` 0,965
+  ďaleko. 120 km → ~14 snímkov stopy, 1 000 km → ~17, 3 000 km a viac → ~29.
+- `speedScaleForRange()` — odmocnina z `WIND_BASE_RANGE_TOP / rozsah hladiny`;
+  200 hPa ide ×0,68. Plný pomer by dal ×0,46, keby to ešte malo byť pomalšie.
+
+Testy sa viažu na **konštanty, nie na literály**, takže ďalšie ladenie je zmena jedného
+čísla bez dotyku testov.
+
+### Stav testov — POZOR, dôležité
+
+- Hlavná suite: **3724 / 3724 zelená**.
+- `node` z PATH je na tomto stroji **v22.15.1**, pod ním sa alokačné mikrobenchmarky
+  **ticho preskočia** („budgets are calibrated for Node 24"). Node 24 je vo fnm:
+  `~/AppData/Roaming/fnm/node-versions/v24.20.0/installation/node.exe`.
+- Pod **Node 24** gate beží a `src/overlays/worldOverlayAllocation.test.mjs` má
+  **3 červené** z 13 (rozpočty na alokácie svetových popisiek):
+  Phase 5 host sources (+6,8 %: medián 151 643 B proti stropu 142 000),
+  Phase 5 + rocket markers, shared-host + Radio text (+3,5 %: 188 459 proti 182 000).
+  `src/data/focusAllocations.test.mjs` je zelený (1/1).
+- **Nesúvisia so žiadnou z dnešných zmien** — `worldOverlay` neimportuje `windParticles`
+  a po `git stash` tej istej zmeny padajú na čistom HEAD rovnako. Testy som **nemenil
+  ani nezvyšoval tolerancie**; čaká rozhodnutie používateľa, či sa to má riešiť.
+
+### Ako nadviazať (overovanie v Browser pane)
+
+Meteo je session-only, po každom načítaní vypnuté. Zapnutie z konzoly stránky:
+
+```js
+const dm = window.__godsEyeView.dataManager;
+dm.setEnabled('meteo-gfs', true);              // isEnabled sa prepne AŽ po ~20 s (lazy import + dáta)
+const row = document.querySelector('[data-layer-id="meteo-gfs"]');
+[...row.querySelectorAll('button')].find((b) => b.textContent.trim() === '200 hPa').click();
+```
+
+**Pasca:** beh unit suite zapisuje do stromu → Vite spraví **full reload** pane →
+meteo sa vypne a podklad sa vráti. Neoverovať vizuálne a nepúšťať testy súčasne.
+`camera.flyTo` v pane zamŕza na 403 dlaždiciach — používať `camera.setView`.
+
+### Čo je otvorené
+
+1. Rozhodnutie o tých 3 alokačných testoch pod Node 24.
+2. Publikovanie na `oko.uhrin.digital` (beží starší build).
+3. Stadia na doméne (401) — čaká na bezplatný účet a autorizáciu Originu.
+4. Ďalšie fázy meteo: **vlny (WaveWatch III)** ako najbližší kandidát, radar RainViewer
+   po ToS, GIBS geostacionárne, meteogram po kliknutí, ECMWF/ICON.
