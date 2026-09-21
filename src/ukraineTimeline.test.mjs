@@ -291,3 +291,89 @@ test('LIVE obnova zón: ten istý deň sa pýta znova každý tik, prekreslí sa
   assert.equal(sameZoneSnapshot({ at: 'b' }, { at: 'a' }, 'at'), false);
   assert.equal(sameZoneSnapshot(null, { revisionAt: null }, 'revisionAt'), true, 'nič a nič = to isté');
 });
+
+test('vek zdroja v legende: čerstvý len dátum, nad prahom ZASTARANÉ; DeepState má prísnejší prah', async () => {
+  // Skutočný prípad z 21. 9. 2026: Wikipédia svoj modul od 13. 8. neupravila,
+  // takže na mape svietila 39 dní stará línia frontu a nič na to neupozornilo.
+  const doc = fakeDocument();
+  const layer = fakeLayer();
+  let now = T0;
+  const clock = createTimelineClock({ now: () => now, windowId: '24h' });
+  const store = {
+    async load() { return { events: [], reports: {}, coverage: { news: [], media: [] }, errors: [], chunks: 1 }; },
+    async summary() { return { days: {} }; },
+    reportForDay() { return null; },
+  };
+  let ctlRev = '2026-09-15T10:00:00Z';
+  store.control = async () => ({ day: '2026-09-15', revisionAt: ctlRev, points: [{ lat: 48, lon: 37 }], summary: { settlements: { ua: 1, ru: 0, contested: 0 } } });
+  // 30 hodín pred T0 — zámerne cez polnoc, aby to bol naozaj jeden deň, nie „dnes".
+  let dsAt = '2026-09-18T06:00:00.000Z';
+  store.deepstate = async () => ({ day: '2026-09-18', at: dsAt, features: [{ kind: 'occupied' }], areaKm2: { occupied: 1, grey: 1 } });
+  const ctlListeners = new Set(); let ctlShown = false; let ctlSnapshot = null;
+  const control = {
+    isShown: () => ctlShown,
+    async show() { ctlShown = true; for (const fn of ctlListeners) fn(); },
+    hide() { ctlShown = false; ctlSnapshot = null; for (const fn of ctlListeners) fn(); },
+    setSnapshot(s) { ctlSnapshot = s; for (const fn of ctlListeners) fn(); },
+    setZonesVisible() {},
+    getState: () => ({ shown: ctlShown, loading: false, points: 1, day: ctlSnapshot?.day || null, revisionAt: ctlSnapshot?.revisionAt || null, summary: ctlSnapshot?.summary || null }),
+    onChange(fn) { ctlListeners.add(fn); return () => ctlListeners.delete(fn); },
+  };
+  const dsListeners = new Set(); let dsShown = false; let dsSnapshot = null;
+  const deepstate = {
+    isShown: () => dsShown,
+    async show() { dsShown = true; for (const fn of dsListeners) fn(); },
+    hide() { dsShown = false; dsSnapshot = null; for (const fn of dsListeners) fn(); },
+    setSnapshot(s) { dsSnapshot = s; for (const fn of dsListeners) fn(); },
+    getState: () => ({ shown: dsShown, loading: false, features: 1, day: dsSnapshot?.day || null, at: dsSnapshot?.at || null, stampText: dsSnapshot ? 'x' : '', areaKm2: dsSnapshot?.areaKm2 || null }),
+    onChange(fn) { dsListeners.add(fn); return () => dsListeners.delete(fn); },
+  };
+  const timers = [];
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await new Promise((r) => setImmediate(r)); };
+  const tl = createUkraineTimeline({
+    layer, store, clock, control, deepstate, translate: (k) => k, lang: 'sk', documentRef: doc,
+    now: () => now, setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimer: () => {}, origin: 'https://oko.test',
+  });
+  tl.show();
+  const { ctlAge, dsAge } = tl._getStateForTest();
+
+  assert.equal(ctlAge.textContent, '', 'vypnutá vrstva nehlási vek');
+
+  // 4 dni pod prahom 14 → len vek, žiadne varovanie
+  await tl.showControl();
+  await settle();
+  assert.equal(ctlAge.textContent, 'ukraine.age.many');
+  assert.equal(ctlAge.className.includes('is-stale'), false);
+  assert.equal(ctlAge.title, '');
+
+  // tá istá revízia o 30 dní neskôr = 34 dní → ZASTARANÉ
+  now += 30 * D;
+  control.setSnapshot(ctlSnapshot);
+  assert.equal(ctlAge.textContent, 'ukraine.age.many · ukraine.src.stale');
+  assert.equal(ctlAge.className.includes('is-stale'), true);
+  assert.equal(ctlAge.title, 'ukraine.src.stale-note', 'varovanie vysvetlí, čo to znamená');
+
+  // čerstvá revízia zhasne varovanie aj triedu
+  now = T0;
+  ctlRev = '2026-09-19T08:00:00Z';
+  control.setSnapshot({ day: '2026-09-19', revisionAt: ctlRev, points: [], summary: null });
+  assert.equal(ctlAge.textContent, 'ukraine.age.today', 'dnešná revízia nemá tvar „pred 0 dňami"');
+  assert.equal(ctlAge.className.includes('is-stale'), false);
+
+  // DeepState: jeden deň starý snímok je v poriadku (zámerné oneskorenie 2–3 dni)
+  await tl.showDeepState();
+  await settle();
+  assert.equal(dsAge.textContent, 'ukraine.age.one', 'jeden deň má vlastný tvar');
+  assert.equal(dsAge.className.includes('is-stale'), false);
+
+  // ten istý snímok o 5 dní neskôr už znamená, že stojí zdroj alebo archivár
+  now += 5 * D;
+  deepstate.setSnapshot(dsSnapshot);
+  assert.equal(dsAge.textContent, 'ukraine.age.many · ukraine.src.stale');
+  assert.equal(dsAge.className.includes('is-stale'), true);
+
+  // vypnutie vrstvy vek zmaže aj s varovaním
+  deepstate.hide();
+  assert.equal(dsAge.textContent, '');
+  assert.equal(dsAge.className.includes('is-stale'), false);
+});

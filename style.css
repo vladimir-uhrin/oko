@@ -11729,6 +11729,11 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-item.is-ua .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #4fa3ff; border-color: #0b1622; }
 .oko-ukr-tl-ctl-item.is-contested .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #ffb547; border-color: #e0553f; }
 .oko-ukr-tl-ctl-since { color: #cfe3f5; }
+/* Vek zdroja: tlmený, kým je v poriadku; nad prahom jantárový rámček so slovom
+   ZASTARANÉ, aby sa dal prehliadnuť rovnako ťažko ako farba na mape. */
+.oko-ukr-tl-ctl-age { color: #8aa0b6; }
+.oko-ukr-tl-ctl-age:empty { display: none; }
+.oko-ukr-tl-ctl-age.is-stale { color: #ffb547; font-weight: 700; letter-spacing: 0.04em; border: 1px solid rgba(255, 181, 71, 0.55); border-radius: 3px; padding: 0 4px; background: rgba(255, 181, 71, 0.1); }
 .oko-ukr-tl-ctl-counts { color: #8aa0b6; }
 .oko-ukr-tl-ctl-chip { font-weight: 700; letter-spacing: 0.06em; }
 /* DeepState legenda: okupované výplň, šedá zóna, oslobodené, smer útoku, letisko */

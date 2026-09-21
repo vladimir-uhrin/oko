@@ -17,6 +17,7 @@ import { EVENT_TYPES, dayKey } from './data/ukraineEvents.js';
 import { createUkraineEventStore, mediaInWindow } from './data/ukraineEventsClient.js';
 import { TIMELINE_SPEEDS, TIMELINE_WINDOWS, createTimelineClock, cursorText, histogramBins } from './data/ukraineTimelineClock.js';
 import { TYPE_GLYPH, SEV_COLOR } from './ukraineEventsLayer.js';
+import { CONTROL_STALE_DAYS, DEEPSTATE_STALE_DAYS, ageText, freshnessOf } from './data/ukraineFreshness.js';
 import { currentLanguage, t } from './i18n.js';
 
 const IMG_API = '/api/img';
@@ -152,7 +153,7 @@ export function createUkraineTimeline({
   const row3 = el('div', 'oko-ukr-tl-row oko-ukr-tl-row3');
   // Územná kontrola (etapa 4C): čip KONTROLA + legenda RU výplň / zóna bojov / body,
   // „stav k <revízia> · podľa Wikipédie" — snímka sleduje deň kurzora.
-  let ctlChip = null; let ctlLine = null; let ctlCounts = null;
+  let ctlChip = null; let ctlLine = null; let ctlAge = null; let ctlCounts = null;
   if (control) {
     const ctlBox = el('div', 'oko-ukr-tl-ctl');
     ctlChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.control'), () => { if (control.isShown()) control.hide(); else void showControl(); }, translate('ukraine.ctl.note'));
@@ -165,12 +166,16 @@ export function createUkraineTimeline({
     ctlBox.appendChild(sw('is-contested', translate('ukraine.ctl.contested')));
     ctlLine = el('span', 'oko-ukr-tl-ctl-since', '');
     ctlBox.appendChild(ctlLine);
+    // Vek zdroja je vlastný prvok, nie prívesok „stav k" — dátum sa prekladá,
+    // vek sa počíta pri každom prekreslení a pri prahu mení farbu.
+    ctlAge = el('span', 'oko-ukr-tl-ctl-age', '');
+    ctlBox.appendChild(ctlAge);
     ctlCounts = el('span', 'oko-ukr-tl-ctl-counts', '');
     ctlBox.appendChild(ctlCounts);
     row3.appendChild(ctlBox);
   }
   // DeepState (hobby použitie, súhlas sa žiada): čip + legenda + „stav k" + plochy.
-  let dsChip = null; let dsLine = null; let dsArea = null;
+  let dsChip = null; let dsLine = null; let dsAge = null; let dsArea = null;
   if (deepstate) {
     const dsBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-ds');
     dsChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.deepstate'), () => { if (deepstate.isShown()) deepstate.hide(); else void showDeepState(); }, translate('ukraine.ds.note'));
@@ -184,6 +189,8 @@ export function createUkraineTimeline({
     dsBox.appendChild(sw('is-ds-airfield', translate('ukraine.ds.airfield')));
     dsLine = el('span', 'oko-ukr-tl-ctl-since', '');
     dsBox.appendChild(dsLine);
+    dsAge = el('span', 'oko-ukr-tl-ctl-age', '');
+    dsBox.appendChild(dsAge);
     dsArea = el('span', 'oko-ukr-tl-ctl-counts', '');
     dsBox.appendChild(dsArea);
     row3.appendChild(dsBox);
@@ -368,7 +375,8 @@ export function createUkraineTimeline({
     // Kým sú polygóny DeepState zapnuté, odvodený raster z Wikipédie sa skryje
     // (dve výplne nad sebou by boli neprehľadné); body Wikipédie ostávajú.
     control?.setZonesVisible?.(!st.shown);
-    if (!st.shown) { dsLine.textContent = ''; dsArea.textContent = ''; return; }
+    if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; return; }
+    renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS);
     if (st.at) dsLine.textContent = translate('ukraine.ds.since', { date: st.stampText });
     else if (!st.loading && !dsLine.textContent) dsLine.textContent = translate('ukraine.ds.missing');
     const a = st.areaKm2;
@@ -389,12 +397,26 @@ export function createUkraineTimeline({
     if (!damage) return;
     damage.setCursor(state.mode === 'live' ? null : state.cursor);
   }
+  /**
+   * Vek zdroja do vlastného prvku vedľa „stav k". Nad prahom pribudne slovo
+   * ZASTARANÉ a trieda, ktorá ho zafarbí: samotný dátum nikto neprepočítava,
+   * takže päť týždňov stará línia frontu vyzerala rovnako dôveryhodne ako včerajšia.
+   */
+  function renderAge(node, at, staleDays) {
+    if (!node) return;
+    const { ageDays: days, stale } = freshnessOf(at, now(), staleDays);
+    const text = ageText(days, translate);
+    node.textContent = stale ? `${text} · ${translate('ukraine.src.stale')}` : text;
+    node.classList.toggle('is-stale', stale);
+    node.title = stale ? translate('ukraine.src.stale-note') : '';
+  }
   function renderControl() {
     if (!control || !ctlChip) return;
     const st = control.getState();
     ctlChip.classList.toggle('active', st.shown);
     ctlChip.setAttribute('aria-pressed', String(st.shown));
-    if (!st.shown) { ctlLine.textContent = ''; ctlCounts.textContent = ''; return; }
+    if (!st.shown) { ctlLine.textContent = ''; renderAge(ctlAge, null, CONTROL_STALE_DAYS); ctlCounts.textContent = ''; return; }
+    renderAge(ctlAge, st.revisionAt, CONTROL_STALE_DAYS);
     if (st.revisionAt) ctlLine.textContent = translate('ukraine.ctl.since', { date: shortDay(String(st.revisionAt).slice(0, 10)) + String(st.revisionAt).slice(0, 4) });
     else if (!st.loading && !ctlLine.textContent) ctlLine.textContent = translate('ukraine.ctl.missing');
     const s = st.summary?.settlements;
@@ -645,6 +667,6 @@ export function createUkraineTimeline({
     show, hide, isShown: () => _shown, setActiveScene, refresh: () => load(), getState, share, clock, store, showControl, showDeepState,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlCounts, dsChip, dsLine, dsArea, dmgChip, dmgLine }),
+    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlAge, ctlCounts, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
   };
 }

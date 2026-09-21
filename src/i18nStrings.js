@@ -988,6 +988,12 @@ export const EN_STRINGS = Object.freeze({
   'ukraine.ctl.note': 'volunteer map compiled from text reports (copying from other maps is prohibited there), updated irregularly — zones are derived from settlement points, this is NOT an official front line',
   'ukraine.ctl.attribution': 'Wikipedia · Russo-Ukrainian war detailed map · CC BY-SA 4.0 (derived data shared under the same licence)',
   'ukraine.ctl.missing': 'no control snapshot for this day yet',
+  // Vek zdroja (2026-09-21): dátum bez veku nikto neprepočítava — viď src/data/ukraineFreshness.js.
+  'ukraine.age.today': 'today',
+  'ukraine.age.one': '{n} day ago',
+  'ukraine.age.many': '{n} days ago',
+  'ukraine.src.stale': 'STALE',
+  'ukraine.src.stale-note': 'the source has not been updated for a long time — this may be materially out of date',
   // DeepStateMap.live (2026-09-19, hobby use, consent requested) — see src/ukraineDeepStateLayer.js.
   'ukraine.part.deepstate': 'DEEPSTATE',
   'ukraine.ds.title': 'DEEPSTATE · per DeepStateMap.live',
@@ -2730,6 +2736,12 @@ export const SK_STRINGS = Object.freeze({
   'ukraine.ctl.note': 'dobrovoľnícka mapa skladaná z textových správ (kopírovanie z iných máp je tam zakázané), aktualizovaná nepravidelne — zóny sú odvodené z bodov sídiel, NIE JE to oficiálna línia frontu',
   'ukraine.ctl.attribution': 'Wikipedia · Russo-Ukrainian war detailed map · CC BY-SA 4.0 (odvodené dáta pod rovnakou licenciou)',
   'ukraine.ctl.missing': 'pre tento deň ešte nie je snímka kontroly',
+  // Vek zdroja (2026-09-21): dátum bez veku nikto neprepočítava — viď src/data/ukraineFreshness.js.
+  'ukraine.age.today': 'dnes',
+  'ukraine.age.one': 'pred {n} dňom',
+  'ukraine.age.many': 'pred {n} dňami',
+  'ukraine.src.stale': 'ZASTARANÉ',
+  'ukraine.src.stale-note': 'zdroj sa dlho neaktualizoval — údaj môže byť vecne neaktuálny',
   // DeepStateMap.live (2026-09-19, hobby použitie, súhlas sa žiada) — src/ukraineDeepStateLayer.js.
   'ukraine.part.deepstate': 'DEEPSTATE',
   'ukraine.ds.title': 'DEEPSTATE · podľa DeepStateMap.live',
