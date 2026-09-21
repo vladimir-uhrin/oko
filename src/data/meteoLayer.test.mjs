@@ -101,7 +101,8 @@ test('čipy: TEPLOTA prepne pole (kanál R, rez temp), ČASTICE vypne častice; 
   const controls = layer.getRowControls();
   assert.deepEqual(controls.chips.map((c) => [c.id, c.active]), [['field-wind', true], ['field-temp', false], ['field-pressure', false], ['field-precip', false], ['field-clouds', false], ['field-gust', false], ['particles', true],
     // Výber hladiny (2026-09-21) — len pri vetre, preto je tu a pri teplote nie.
-    ['level-wind', true], ['level-wind850', false], ['level-wind700', false], ['level-wind500', false], ['level-wind250', false]]);
+    ['level-wind', true], ['level-wind850', false], ['level-wind700', false], ['level-wind500', false],
+    ['level-wind250', false], ['level-wind200', false], ['level-wind150', false]]);
   assert.equal(controls.legend[0].label, '0 m/s');
   assert.equal(layer.setParams({ field: 'temp' }), true);
   await new Promise((r) => setTimeout(r, 10));

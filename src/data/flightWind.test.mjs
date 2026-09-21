@@ -22,7 +22,10 @@ test('levelForAltitude vyberie najbližšiu hladinu, nie tú pod alebo nad', () 
   assert.equal(levelForAltitude(5600).id, 'wind500');
   // Dopravné lietadlo v FL340 (~10 360 m) → 250 hPa, presne preto to robíme.
   assert.equal(levelForAltitude(10_363).id, 'wind250');
-  assert.equal(levelForAltitude(11_500).id, 'wind250', 'nad najvyššou hladinou ostane najvyššia');
+  // Bežné cestovné hladiny dopravných lietadiel — kvôli nim to celé vzniklo.
+  assert.equal(levelForAltitude(11_500).id, 'wind200', 'FL380 je bližšie k 200 hPa');
+  assert.equal(levelForAltitude(13_106).id, 'wind150', 'FL430 → 150 hPa (predtým padalo na 250)');
+  assert.equal(levelForAltitude(20_000).id, 'wind150', 'nad najvyššou hladinou ostane najvyššia');
   assert.equal(levelForAltitude(NaN), null);
   assert.equal(levelForAltitude(undefined), null);
 });

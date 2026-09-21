@@ -22,6 +22,8 @@ export const LEVEL_ALTITUDE_M = Object.freeze({
   wind700: 3012,
   wind500: 5574,
   wind250: 10363,
+  wind200: 11784,
+  wind150: 13608,
 });
 
 /** Hladina najbližšia k výške letu. Pure. */

@@ -88,6 +88,10 @@ export const METEO_FIELDS = Object.freeze({
   wind700: isobaricWind('wind700', 70000, 60),
   wind500: isobaricWind('wind500', 50000, 90),
   wind250: isobaricWind('wind250', 25000, 130),
+  // Namerané globálne maximá (stride 3): 200 hPa 92,0 · 150 hPa 80,1 m/s.
+  // Jadro jetu je okolo 250–200 hPa a nad ním slabne.
+  wind200: isobaricWind('wind200', 20000, 130),
+  wind150: isobaricWind('wind150', 15000, 110),
   gust: Object.freeze({
     id: 'gust',
     vars: ['Wind_speed_gust_surface'],
@@ -123,6 +127,8 @@ export const WIND_LEVELS = Object.freeze([
   Object.freeze({ id: 'wind700', levelPa: 70000, label: '700 hPa' }),
   Object.freeze({ id: 'wind500', levelPa: 50000, label: '500 hPa' }),
   Object.freeze({ id: 'wind250', levelPa: 25000, label: '250 hPa' }),
+  Object.freeze({ id: 'wind200', levelPa: 20000, label: '200 hPa' }),
+  Object.freeze({ id: 'wind150', levelPa: 15000, label: '150 hPa' }),
 ]);
 
 /** Je pole vetrom (prízemným alebo výškovým)? Pure. */
