@@ -6,6 +6,7 @@ import {
   METEO_FIELDS, METEO_RAMPS, TEMP_RANGE, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE,
   dequantize, forecastSteps, hexToRgb, nearestStepIndex, normalizeCatalog, quantize,
   rampCss, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
+  METEO_FIELD_ORDER, WIND_LEVELS, isWindField, windLevelOf,
 } from './meteoField.js';
 
 test('kvantizácia: 0..255 nad rozsahom, NaN → 0, späť s presnosťou rozsahu/255', () => {
@@ -54,4 +55,36 @@ test('popisky: krok s dňom a lead-om od behu (SK/EN), beh modelu, katalóg z pr
   assert.deepEqual([catLegacy.baked, catLegacy.bakedTotal, catLegacy.model], [0, 1, 'GFS 0.25°'], 'stará proxy bez baked polí → 0 / počet krokov');
   assert.equal(normalizeCatalog({ steps: [] }), null);
   assert.equal(normalizeCatalog(null), null);
+});
+
+test('výškové hladiny vetra: Pa nie hPa, vlastný rozsah na hladinu, mimo čipov', () => {
+  // GFS má os `isobaric` v PASCALOCH (dataset.xml: units="Pa"). Zámena za hPa
+  // by ticho vrátila úplne inú hladinu, preto to drží test.
+  assert.equal(METEO_FIELDS.wind850.vertCoord, 85000);
+  assert.equal(METEO_FIELDS.wind250.vertCoord, 25000);
+  for (const l of WIND_LEVELS.filter((x) => x.levelPa)) {
+    const f = METEO_FIELDS[l.id];
+    assert.ok(f, `pole ${l.id} musí existovať`);
+    assert.deepEqual(f.vars, ['u-component_of_wind_isobaric', 'v-component_of_wind_isobaric']);
+    assert.equal(f.vertCoord, l.levelPa, 'vertCoord = hladina v Pa');
+  }
+
+  // Namerané globálne maximá: 850 → 51,7 · 500 → 71,3 · 250 → 94,0 m/s.
+  // Rozsah musí mať nad nimi rezervu, inak sa jadro tryskového prúdenia oreže
+  // a častice sa hýbu nesprávnou rýchlosťou (orezalo by aj |u|).
+  assert.ok(METEO_FIELDS.wind250.decode[1] > 94, '250 hPa musí uniesť viac než 94 m/s');
+  assert.ok(METEO_FIELDS.wind500.decode[1] > 71.3, '500 hPa musí uniesť viac než 71,3 m/s');
+  assert.equal(METEO_FIELDS.wind250.componentRange[1], METEO_FIELDS.wind250.decode[1],
+    'zložky u/v majú rovnaký strop ako rýchlosť');
+  assert.ok(METEO_FIELDS.wind500.decode[1] > METEO_FIELDS.wind850.decode[1],
+    'vyššia hladina = širší rozsah');
+
+  // Hladiny sa nesmú objaviť ako ďalšie čipy polí — majú vlastný prepínač.
+  for (const id of ['wind850', 'wind700', 'wind500', 'wind250']) {
+    assert.ok(!METEO_FIELD_ORDER.includes(id), `${id} nepatrí medzi čipy polí`);
+  }
+  assert.equal(isWindField('wind250'), true);
+  assert.equal(isWindField('temp'), false);
+  assert.equal(windLevelOf('wind500').label, '500 hPa');
+  assert.equal(windLevelOf('temp'), null);
 });

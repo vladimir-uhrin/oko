@@ -83,6 +83,11 @@ export const METEO_FIELDS = Object.freeze({
     decode: [0, 100],
     alpha: 0.92,
   }),
+  // Výškové hladiny vetra — definície nižšie pri WIND_LEVELS.
+  wind850: isobaricWind('wind850', 85000, 60),
+  wind700: isobaricWind('wind700', 70000, 60),
+  wind500: isobaricWind('wind500', 50000, 90),
+  wind250: isobaricWind('wind250', 25000, 130),
   gust: Object.freeze({
     id: 'gust',
     vars: ['Wind_speed_gust_surface'],
@@ -97,6 +102,55 @@ export const METEO_FIELDS = Object.freeze({
 
 /** Poradie čipov v riadku vrstvy. */
 export const METEO_FIELD_ORDER = Object.freeze(['wind', 'temp', 'pressure', 'precip', 'clouds', 'gust']);
+
+/**
+ * VÝŠKOVÉ HLADINY VETRA (2026-09-21). GFS ich má ako `*_isobaric` s vertikálnou
+ * osou `isobaric` v PASCALOCH (nie hPa — overené v dataset.xml: units="Pa",
+ * 41 hladín, 25000 = 250 hPa). Zámena Pa/hPa by ticho vrátila inú hladinu.
+ *
+ * KAŽDÁ HLADINA MÁ VLASTNÝ ROZSAH KVANTIZÁCIE. Namerané globálne maximá
+ * (stride 4, skutočné špičky sú vyššie): 850 hPa 51,7 · 700 hPa 51,3 ·
+ * 500 hPa 71,3 · 250 hPa 94,0 m/s. Pri pôvodnom [0, 60] by sa jadro tryskového
+ * prúdenia OREZALO — vyšla by plochá presýtená škvrna a častice by sa hýbali
+ * nesprávnou rýchlosťou, lebo aj |u| presahuje 60. Rozsahy nesú headroom.
+ *
+ * Hladiny sa zámerne NEpečú (`bake: false`): sú to štyri polia navyše, teda
+ * ~+130 MB na beh. Proxy ich stiahne a nacachuje pri prvom použití.
+ */
+export const WIND_LEVELS = Object.freeze([
+  Object.freeze({ id: 'wind', levelPa: null, label: '10 m' }),
+  Object.freeze({ id: 'wind850', levelPa: 85000, label: '850 hPa' }),
+  Object.freeze({ id: 'wind700', levelPa: 70000, label: '700 hPa' }),
+  Object.freeze({ id: 'wind500', levelPa: 50000, label: '500 hPa' }),
+  Object.freeze({ id: 'wind250', levelPa: 25000, label: '250 hPa' }),
+]);
+
+/** Je pole vetrom (prízemným alebo výškovým)? Pure. */
+export function isWindField(fieldId) {
+  return WIND_LEVELS.some((l) => l.id === fieldId);
+}
+
+/** Popis hladiny pre dané pole; null pre nevietor. Pure. */
+export function windLevelOf(fieldId) {
+  return WIND_LEVELS.find((l) => l.id === fieldId) || null;
+}
+
+/** Definícia jedného výškového poľa vetra. Pure. */
+function isobaricWind(id, levelPa, speedMax) {
+  return Object.freeze({
+    id,
+    vars: ['u-component_of_wind_isobaric', 'v-component_of_wind_isobaric'],
+    vertCoord: levelPa,
+    unit: 'm/s',
+    convert: { scale: 1, offset: 0 },
+    rampRange: [0, Math.round(speedMax * 0.75)],
+    channel: 2,
+    decode: [0, speedMax],
+    componentRange: [-speedMax, speedMax],
+    alpha: 0.82,
+    bake: false,
+  });
+}
 
 /**
  * Rampy v identite OKO: tmavá noc → azúrová (--accent #39d0ff) → jantárová → červená.

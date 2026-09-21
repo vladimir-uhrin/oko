@@ -8,7 +8,7 @@
 // (Cesium obdĺžnik), riadok 0 = sever. Vietor: R = u, G = v, B = rýchlosť;
 // skalárne polia: R = G = B = kvantizovaná hodnota po field.convert.
 
-import { METEO_FIELDS, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, quantize } from './meteoField.js';
+import { METEO_FIELDS, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, isWindField, quantize } from './meteoField.js';
 import { gridOf } from './netcdf3.js';
 
 /**
@@ -44,18 +44,26 @@ export function rasterizeMeteoField(fieldId, nc) {
   for (let c = 0; c < cols; c += 1) { if (lon[c] >= 180 || (lon[c] < 0 && c === 0)) { shift = c; break; } }
   if (lon[0] < 0) shift = 0; // NCSS už vrátil −180..180
   const out = Buffer.alloc(rows * cols * 4);
+  // Rozsahy kvantizácie sú vlastnosťou POĽA (hladiny), nie modulu.
+  const compRange = field.componentRange || WIND_COMPONENT_RANGE;
+  const speedRange = field.decode || WIND_SPEED_RANGE;
   for (let r = 0; r < rows; r += 1) {
     const srcRow = northUp ? r : rows - 1 - r;
     for (let c = 0; c < cols; c += 1) {
       const srcCol = (c + shift) % cols;
       const i = srcRow * cols + srcCol;
       const o = (r * cols + c) * 4;
-      if (fieldId === 'wind') {
+      if (isWindField(fieldId)) {
+        // Vetví sa podľa RODINY vetra, nie podľa jediného id: výškové hladiny
+        // (wind850…wind250) sú tiež dvojzložkové a s fieldId === 'wind' by
+        // spadli do skalárnej vetvy a spracovali len u ako skalár.
+        // Rozsahy sú NA HLADINU — na 250 hPa presahuje aj |u| hodnotu 60,
+        // takže pevné ±60 by jadro tryskového prúdenia orezalo.
         const u = grids[0].values[i];
         const v = grids[1].values[i];
-        out[o] = quantize(u, WIND_COMPONENT_RANGE);
-        out[o + 1] = quantize(v, WIND_COMPONENT_RANGE);
-        out[o + 2] = quantize(Math.hypot(u, v), WIND_SPEED_RANGE);
+        out[o] = quantize(u, compRange);
+        out[o + 1] = quantize(v, compRange);
+        out[o + 2] = quantize(Math.hypot(u, v), speedRange);
       } else {
         // Skalárne pole: prevod jednotiek podľa field.convert (K → °C, Pa → hPa,
         // kg/m²/s → mm/h) a kvantizácia do field.decode; R = G = B.
