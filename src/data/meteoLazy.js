@@ -77,8 +77,10 @@ const layer = {
     _real?.setRowControlsListener?.(_rowListener);
   },
 
-  // Čipy patria aktívnej vrstve; kým nie je načítaná, niet čo ponúkať.
-  getRowControls() { return _real ? _real.getRowControls() : []; },
+  // Čipy patria aktívnej vrstve; kým nie je načítaná, niet čo ponúkať — ale
+  // TVAR musí sedieť ({chips, legend}), inak UI spadne na .chips z prázdneho
+  // poľa. Prázdne pole tu bola chyba, ktorú odhalilo až volanie z prehliadača.
+  getRowControls() { return _real ? _real.getRowControls() : { chips: [], legend: [] }; },
 
   getStats() {
     return _real ? _real.getStats() : { count: 0, loading: false, error: null };

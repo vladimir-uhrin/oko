@@ -30,7 +30,11 @@ test('pred dotiahnutím nič nepadá a nevymýšľa si stav', () => {
   _resetMeteoLazyForTest();
   assert.equal(isMeteoLoaded(), false);
   assert.deepEqual(lazy.getParams(), { ...METEO_LAZY_PARAMS }, 'predvolby zhodné s vrstvou');
-  assert.deepEqual(lazy.getRowControls(), [], 'čipy patria až aktívnej vrstve');
+  // TVAR sa musí zhodovať so skutočnou vrstvou aj pred načítaním — prázdne
+  // POLE tu bola chyba: UI číta .chips a spadlo by.
+  const rc = lazy.getRowControls();
+  assert.ok(!Array.isArray(rc), 'getRowControls vracia objekt, nie pole');
+  assert.deepEqual(rc, { chips: [], legend: [] }, 'čipy patria až aktívnej vrstve');
   assert.equal(lazy.getStats().count, 0);
   assert.match(lazy.source, /THREDDS/, 'zdroj povie, čo je isté, bez vymysleného behu');
   // Volania životného cyklu pred init() nesmú hodiť.

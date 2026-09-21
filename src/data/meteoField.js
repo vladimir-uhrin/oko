@@ -130,6 +130,29 @@ export function isWindField(fieldId) {
   return WIND_LEVELS.some((l) => l.id === fieldId);
 }
 
+/**
+ * Zastávky rampy pre pole. Výškové hladiny vetra zdieľajú paletu prízemného
+ * vetra — líšia sa ROZSAHOM (METEO_FIELDS[id].rampRange), nie farbami, takže
+ * na 250 hPa sa tá istá škála roztiahne až k tryskovému prúdeniu. Pure.
+ */
+export function rampStopsFor(fieldId) {
+  if (METEO_RAMPS[fieldId]) return METEO_RAMPS[fieldId];
+  if (!isWindField(fieldId)) return null;
+  // Zastávky vetra sú v m/s (0…45). Na výškovej hladine treba tú istú paletu
+  // ROZTIAHNUŤ na jej rozsah — inak by všetko nad 45 m/s spadlo na poslednú
+  // zastávku a celé jadro tryskového prúdenia by splynulo do jednej bielej
+  // plochy. Zároveň tým legenda ukáže čísla, ktoré na tej hladine platia.
+  const range = METEO_FIELDS[fieldId]?.rampRange;
+  const base = METEO_RAMPS.wind;
+  if (!range) return base;
+  const top = base[base.length - 1][0];
+  const k = range[1] / top;
+  if (!Number.isFinite(k) || k <= 0) return base;
+  return Object.freeze(base.map(([v, hex, alpha]) => Object.freeze(
+    alpha === undefined ? [Math.round(v * k), hex] : [Math.round(v * k), hex, alpha],
+  )));
+}
+
 /** Popis hladiny pre dané pole; null pre nevietor. Pure. */
 export function windLevelOf(fieldId) {
   return WIND_LEVELS.find((l) => l.id === fieldId) || null;

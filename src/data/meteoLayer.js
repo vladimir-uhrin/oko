@@ -22,6 +22,7 @@ import { getActiveMapStack, onActiveMapStackChange } from './activeMapStack.js';
 import {
   METEO_FIELD_ORDER, METEO_FIELDS, METEO_LAYER_ID, METEO_RAMPS, WIND_COMPONENT_RANGE,
   normalizeCatalog, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
+  WIND_LEVELS, isWindField, rampStopsFor, windLevelOf,
 } from './meteoField.js';
 import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
 import { awaitImageDecode } from './imageDecode.js';
@@ -617,6 +618,16 @@ export function createMeteoLayer({
     _previousStack = null;
   }
 
+  /**
+   * Rampa častíc musí ísť s AKTÍVNOU hladinou. Natvrdo wind by na 250 hPa
+   * zafarbilo jet podľa škály prízemného vetra — všetko by svietilo naplno.
+   */
+  function particleRampArgs() {
+    const id = isWindField(_field) ? _field : 'wind';
+    const range = METEO_FIELDS[id].rampRange;
+    return [rampRgbaTable(rampStopsFor(id), range), range];
+  }
+
   /** Alfa poľa pre aktuálne pole × útlm podľa výšky kamery. */
   function fieldAlphaNow() {
     const field = METEO_FIELDS[_field];
@@ -681,7 +692,9 @@ export function createMeteoLayer({
     icon: '≋',
     get source() {
       const run = _catalog ? runLabel(_catalog.run, lang()) : (lang() === 'en' ? 'GFS 0.25°' : 'GFS 0,25°');
-      return `NOAA/NCEP ${run} · NSF Unidata THREDDS · ${t('meteo.forecast')}`;
+      const lvl = windLevelOf(_field);
+      const at = lvl && lvl.levelPa ? ` · ${lvl.label}` : '';
+      return `NOAA/NCEP ${run}${at} · NSF Unidata THREDDS · ${t('meteo.forecast')}`;
     },
     updateInterval: 30 * 60 * 1000,
 
@@ -692,7 +705,11 @@ export function createMeteoLayer({
       _index = 0;
       _lastError = null;
       _ramps = {};
-      for (const id of METEO_FIELD_ORDER) _ramps[id] = rampCanvas(doc, METEO_RAMPS[id], METEO_FIELDS[id].rampRange);
+      // Aj výškové hladiny — inak by pri prepnutí nebola drapéria čím zafarbiť.
+      for (const id of [...METEO_FIELD_ORDER, ...WIND_LEVELS.map((l) => l.id)]) {
+        if (_ramps[id]) continue;
+        _ramps[id] = rampCanvas(doc, rampStopsFor(id), METEO_FIELDS[id].rampRange);
+      }
       if (!_timeline && doc?.body) {
         _timeline = timelineFactory(doc, {
           t,
@@ -716,7 +733,7 @@ export function createMeteoLayer({
       if (!_particles && _viewer?.container && _particlesOn) {
         try {
           _particles = particlesFactory(_viewer.container, _viewer);
-          _particles.setRamp(rampRgbaTable(METEO_RAMPS.wind, METEO_FIELDS.wind.rampRange), METEO_FIELDS.wind.rampRange);
+          _particles.setRamp(...particleRampArgs());
         } catch (error) {
           console.warn('[Data:Meteo] particles unavailable:', error?.message || error);
           _particles = null;
@@ -773,13 +790,19 @@ export function createMeteoLayer({
      */
     setParams(params = {}) {
       let changed = false;
-      if (params.field && METEO_FIELDS[params.field] && params.field !== _field) { _field = params.field; changed = true; }
+      if (params.field && METEO_FIELDS[params.field] && params.field !== _field) {
+        _field = params.field;
+        changed = true;
+        // Rampa častíc musí ísť s hladinou. Bez toho by sa na 250 hPa jet
+        // farbil škálou prízemného vetra a všetko by svietilo naplno.
+        if (_particles) _particles.setRamp(...particleRampArgs());
+      }
       if (typeof params.particles === 'boolean' && params.particles !== _particlesOn) {
         _particlesOn = params.particles;
         if (_particlesOn) {
           if (!_particles && _viewer?.container) {
             _particles = particlesFactory(_viewer.container, _viewer);
-            _particles.setRamp(rampRgbaTable(METEO_RAMPS.wind, METEO_FIELDS.wind.rampRange), METEO_FIELDS.wind.rampRange);
+            _particles.setRamp(...particleRampArgs());
           }
         } else _particles?.stop();
         changed = true;
@@ -799,8 +822,13 @@ export function createMeteoLayer({
         chips: [
           ...METEO_FIELD_ORDER.map((id) => ({ id: `field-${id}`, label: t(`meteo.chip-${id}`), active: _field === id, params: { field: id } })),
           { id: 'particles', label: t('meteo.chip-particles'), active: _particlesOn, params: { particles: !_particlesOn }, disabled: _particles ? !_particles.isSupported() : false },
+          // Výber hladiny sa ukáže LEN pri vetre — ako na Windy. Hladiny nie sú
+          // ďalšie polia v zozname, je to druhý rozmer toho istého poľa.
+          ...(isWindField(_field)
+            ? WIND_LEVELS.map((l) => ({ id: `level-${l.id}`, label: l.label, active: _field === l.id, params: { field: l.id }, group: 'level' }))
+            : []),
         ],
-        legend: rampLegend(METEO_RAMPS[_field], field.unit),
+        legend: rampLegend(rampStopsFor(_field), field.unit),
       };
     },
 

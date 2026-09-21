@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createMeteoLayer, METEO_BASEMAP_FALLBACK_ID, METEO_BASEMAP_ID, METEO_LAYER_ID, basemapForHost, fieldMaterialFabric, renderPassOnly } from './meteoLayer.js';
 import { _resetActiveMapStackForTest, setActiveMapStack } from './activeMapStack.js';
+import { METEO_FIELDS } from './meteoField.js';
 
 function fakeDoc() {
   const canvasCtx = { createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }), putImageData() {} };
@@ -32,7 +33,7 @@ function harness({ isolineFactory = null, gridReader = null, catalog = { model: 
     isSupported: () => true,
     setWind: (img, r) => calls.particles.push(['setWind', r.uRange[0], Boolean(r.next)]),
     setMix: (f) => calls.particles.push(['setMix', Number(f.toFixed(2))]),
-    setRamp: () => calls.particles.push(['setRamp']),
+    setRamp: (table, range) => calls.particles.push(['setRamp', table, range]),
     start: () => calls.particles.push(['start']),
     stop: () => calls.particles.push(['stop']),
     destroy: () => calls.particles.push(['destroy']),
@@ -98,13 +99,17 @@ test('čipy: TEPLOTA prepne pole (kanál R, rez temp), ČASTICE vypne častice; 
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(calls.events.length, 0, 'na OSM sa podklad nemení');
   const controls = layer.getRowControls();
-  assert.deepEqual(controls.chips.map((c) => [c.id, c.active]), [['field-wind', true], ['field-temp', false], ['field-pressure', false], ['field-precip', false], ['field-clouds', false], ['field-gust', false], ['particles', true]]);
+  assert.deepEqual(controls.chips.map((c) => [c.id, c.active]), [['field-wind', true], ['field-temp', false], ['field-pressure', false], ['field-precip', false], ['field-clouds', false], ['field-gust', false], ['particles', true],
+    // Výber hladiny (2026-09-21) — len pri vetre, preto je tu a pri teplote nie.
+    ['level-wind', true], ['level-wind850', false], ['level-wind700', false], ['level-wind500', false], ['level-wind250', false]]);
   assert.equal(controls.legend[0].label, '0 m/s');
   assert.equal(layer.setParams({ field: 'temp' }), true);
   await new Promise((r) => setTimeout(r, 10));
   assert.ok(calls.images.some((u) => u.includes('var=temp&time=2026-09-08T18')));
   assert.equal(calls.primitives[0].material.uniforms.channel, 0);
   assert.equal(layer.getRowControls().legend[0].label, '-40 °C');
+  assert.ok(!layer.getRowControls().chips.some((c) => c.id.startsWith('level-')),
+    'pri teplote sa výber hladiny neponúka — hladiny sú rozmer vetra, nie samostatné polia');
   layer.setParams({ particles: false });
   assert.ok(calls.particles.some((c) => c[0] === 'stop'));
   assert.deepEqual(layer.getParams(), { field: 'temp', particles: false });
@@ -267,4 +272,37 @@ test('podklad podľa hostiteľa: Stadia bez kľúča len na localhoste, inde bez
   assert.equal(basemapForHost('OKO.UHRIN.DIGITAL'), METEO_BASEMAP_FALLBACK_ID, 'bez ohľadu na veľkosť písmen');
   assert.equal(basemapForHost(''), METEO_BASEMAP_ID, 'neznáme prostredie → primárny, správanie sa nemení');
   assert.equal(basemapForHost(null), METEO_BASEMAP_ID);
+});
+
+test('hladiny vetra: prepnutie mení rez, škálu legendy aj rampu častíc', async () => {
+  _resetActiveMapStackForTest();
+  setActiveMapStack({ id: 'osm' });
+  const { layer, viewer, calls } = harness();
+  layer.init(viewer);
+  layer.enable();
+  await new Promise((r) => setTimeout(r, 10));
+
+  // Legenda ukazuje každú druhú zastávku, takže sa nespolieham na konkrétne
+  // číslo — porovnávam vrchol škály pred prepnutím a po ňom.
+  const topOf = () => Number(String(layer.getRowControls().legend.at(-1).label).replace(/[^0-9.]/g, ''));
+  const surfaceTop = topOf();
+  assert.ok(surfaceTop > 0, 'prízemná škála má vrchol');
+
+  assert.equal(layer.setParams({ field: 'wind250' }), true);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(calls.images.some((u) => u.includes('var=wind250')), 'ťahá sa rez hladiny');
+
+  // …a na 250 hPa sa musí roztiahnuť, inak by jet svietil celý naplno.
+  const jetTop = topOf();
+  assert.ok(jetTop > surfaceTop,
+    `škála 250 hPa (${jetTop}) sa má roztiahnuť nad prízemnú (${surfaceTop}), inak by jet svietil celý naplno`);
+
+  // Rampa častíc ide s hladinou — inak by sa farbil jet škálou prízemného vetra.
+  const ramps = calls.particles.filter((c) => c[0] === 'setRamp');
+  assert.ok(ramps.length > 0, 'rampa častíc sa nastavuje');
+  assert.deepEqual(ramps.at(-1)[2], METEO_FIELDS.wind250.rampRange, 'posledná rampa je rozsah 250 hPa');
+
+  // Zdroj musí povedať, ktorú hladinu vidím.
+  assert.match(layer.source, /250 hPa/, 'zdroj nesie hladinu');
+  _resetActiveMapStackForTest();
 });
