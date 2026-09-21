@@ -299,6 +299,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   // NASA GIBS prekryvy (2026-09-06): písmená a–y sú obsadené, tokeny sú
   // číslice — regex registra ich pripúšťa. Krytie sa do odkazu neukladá.
   Object.freeze({ id: 'gibs-aerosol', token: '4', disposition: 'enabled-only' }),
+  // Nočné svetlá (2026-09-21): prvý token mimo a–z0–9 — abeceda bola plná.
+  Object.freeze({ id: 'gibs-night-lights', token: 'N', disposition: 'enabled-only' }),
   Object.freeze({ id: 'gibs-precip', token: '2', disposition: 'enabled-only' }),
   Object.freeze({ id: 'gibs-sea-ice', token: '5', disposition: 'enabled-only' }),
   Object.freeze({ id: 'gibs-snow', token: '3', disposition: 'enabled-only' }),
@@ -381,7 +383,13 @@ export function validateLayerStateRegistry(registry = LAYER_STATE_REGISTRY) {
     if (!/^[a-z0-9-]+$/.test(entry.id)) throw new Error(`Invalid layer-state id: ${entry.id}`);
     if (ids.has(entry.id)) throw new Error(`Duplicate layer-state id: ${entry.id}`);
     ids.add(entry.id);
-    if (!/^[a-z0-9]$/.test(entry.token || '')) throw new Error(`Invalid layer-state token: ${entry.id}`);
+    // Veľké písmená pribudli 2026-09-21: a–z aj 0–9 boli obsadené do posledného
+    // znaku (36 vrstiev = 36 tokenov), takže 37. vrstva sa inak pridať nedala.
+    // Dekodér porovnáva tokeny bez zmeny veľkosti, takže staré odkazy platia
+    // ďalej; NOVÝ token starší build odmietne — to je zámer `decodeLayerStateParams`
+    // („radšej celý payload zahodiť než ticho vyrobiť prázdnu množinu"), čiže po
+    // pridaní vrstvy treba publikovať, inak odkazy s ňou na doméne nefungujú.
+    if (!/^[a-zA-Z0-9]$/.test(entry.token || '')) throw new Error(`Invalid layer-state token: ${entry.id}`);
     if (tokens.has(entry.token)) throw new Error(`Duplicate layer-state token: ${entry.token}`);
     tokens.add(entry.token);
     if (!VALID_DISPOSITIONS.has(entry.disposition)) {

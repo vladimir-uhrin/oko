@@ -154,6 +154,33 @@ export const GIBS_OVERLAYS = Object.freeze([
     ]),
     opacity: 0.8,
   }),
+  // Nočné svetlá (2026-09-21, pre modul UKRAJINA — výpadky prúdu sú z orbity vidieť
+  // ako zhasnuté mestá). Voľba produktu je meraná, nie odhadnutá:
+  //  - VIIRS_SNPP_DayNightBand_ENCC je MŔTVY (posledný deň 2023-07-07) — nepoužívať;
+  //  - VIIRS_NOAA20_DayNightBand_At_Sensor_Radiance začína až 2024-03-25, teda bez
+  //    predvojnového porovnania;
+  //  - SNPP At-Sensor Radiance ide od 2020-11-18 dodnes — overené HTTP 200 pre
+  //    2021-01-15, 2022-02-23 (deň pred inváziou) aj 2022-10-11 (prvé veľké údery
+  //    na sieť), takže os UKRAJINY má proti čomu porovnávať.
+  // POCTIVOSŤ: je to radiancia NA SENZORE, nie korigovaná Black Marble (VNP46A2 je
+  // gap-filled a BRDF-korigovaná, ale colormapu v GIBS nemá, takže by nemala legendu).
+  // Mesiac, oblaky a polárna žiara jas dvíhajú — tmavé mesto NIE JE dôkaz výpadku.
+  Object.freeze({
+    id: 'gibs-night-lights',
+    layer: 'VIIRS_SNPP_DayNightBand_At_Sensor_Radiance',
+    level: 8,
+    icon: '☾',
+    product: 'VIIRS SNPP DNB (at-sensor)',
+    colormap: 'https://gibs.earthdata.nasa.gov/colormaps/v1.3/VIIRS_DayNightBand_At_Sensor_Radiance.xml',
+    legend: Object.freeze([
+      { color: 'rgb(7,7,7)', label: '0' },
+      { color: 'rgb(118,118,118)', label: '4,5' },
+      { color: 'rgb(165,165,165)', label: '10' },
+      { color: 'rgb(210,210,210)', label: '20' },
+      { color: 'rgb(255,255,255)', label: '38+ nW/cm²sr' },
+    ]),
+    opacity: 0.85,
+  }),
 ]);
 
 export const GIBS_OVERLAY_LAYER_IDS = Object.freeze(GIBS_OVERLAYS.map((d) => d.id));

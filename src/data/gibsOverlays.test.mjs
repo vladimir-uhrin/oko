@@ -83,8 +83,8 @@ test('deň snímky: jeden zdroj pravdy (gibsTime.js), controller ho re-exportuje
   assert.equal(gibsImageryDay(Date.UTC(2026, 0, 1, 0, 30)), '2025-12-31', 'prechod cez rok');
 });
 
-test('katalóg: päť vrstiev, WMTS REST z/y/x, png, úrovne podľa GetCapabilities', () => {
-  assert.deepEqual([...GIBS_OVERLAY_LAYER_IDS], ['gibs-sst', 'gibs-precip', 'gibs-snow', 'gibs-aerosol', 'gibs-sea-ice']);
+test('katalóg: šesť vrstiev, WMTS REST z/y/x, png, úrovne podľa GetCapabilities', () => {
+  assert.deepEqual([...GIBS_OVERLAY_LAYER_IDS], ['gibs-sst', 'gibs-precip', 'gibs-snow', 'gibs-aerosol', 'gibs-sea-ice', 'gibs-night-lights']);
   const levels = Object.fromEntries(GIBS_OVERLAYS.map((d) => [d.layer, d.level]));
   // Overené 2026-09-06 z WMTSCapabilities epsg3857/best — vyššia úroveň = 404.
   assert.deepEqual(levels, {
@@ -93,6 +93,10 @@ test('katalóg: päť vrstiev, WMTS REST z/y/x, png, úrovne podľa GetCapabilit
     MODIS_Terra_NDSI_Snow_Cover: 8,
     MODIS_Combined_Value_Added_AOD: 6,
     GHRSST_L4_MUR_Sea_Ice_Concentration: 7,
+    // Nočné svetlá 2026-09-21 (SNPP DNB at-sensor): Level 8 overený dlaždicami
+    // pre 2021-01-15, 2022-02-23 aj dnešok. Pozor, bratské vrstvy majú iný strop —
+    // VIIRS_NOAA20_DayNightBand je Level 7 a na 8 vráti 400 InvalidParameterValue.
+    VIIRS_SNPP_DayNightBand_At_Sensor_Radiance: 8,
   });
   for (const def of GIBS_OVERLAYS) {
     const url = gibsOverlayUrl(def, '2026-09-05');
