@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { activeParticleCount, createWindParticles, matricesDiffer, maxSegmentMetres, particleTextureSize, sceneModeCode, simSecondsPerFrame, spawnRectChanged, spawnRectFromView, WIND_PARTICLE_COUNT_DEFAULT } from './windParticles.js';
+import { activeParticleCount, densityForHeight, trailFadeForHeight, TRAIL_FADE_NEAR, WIND_TRAIL_FADE, speedScaleForRange, DENSITY_FAR_M, DENSITY_NEAR_M, DENSITY_MIN, WIND_BASE_RANGE_TOP, createWindParticles, matricesDiffer, maxSegmentMetres, particleTextureSize, sceneModeCode, simSecondsPerFrame, spawnRectChanged, spawnRectFromView, WIND_PARTICLE_COUNT_DEFAULT } from './windParticles.js';
 
 test('rozmer stavovej textúry a detekcia pohybu kamery', () => {
   assert.equal(particleTextureSize(WIND_PARTICLE_COUNT_DEFAULT), 222, '49 152 častíc — hustá sieť (Windy pass 17-09: „veľmi slabé")');
@@ -109,6 +109,44 @@ test('hranica úsečky podľa kroku: 60 m/s × dt × 3, dno 2 km, strop 300 km �
 test('slučka: dtFrame je deklarovaný pred prvým použitím (TDZ chyba 2026-09-09 zabila prúdnice)', () => {
   const src = readFileSync(new URL('./windParticles.js', import.meta.url), 'utf8');
   const decl = src.indexOf('const dtFrame = lastTime');
-  const use = src.indexOf('simSecondsPerFrame(cam.height) * (dtFrame * 60)');
+  // Hľadá sa DEKLARÁCIA simDt, nie presné znenie výrazu — tripwire má strážiť
+  // poradie, nie to, čo všetko sa do simDt násobí (2026-09-21 tam pribudlo
+  // spomalenie podľa hladiny a doslovná zhoda by padla bez skutočnej chyby).
+  const use = src.indexOf('const simDt =');
   assert.ok(decl > 0 && use > 0 && decl < use, 'dtFrame deklarovaný pred simDt');
+  assert.match(src.slice(use, use + 200), /dtFrame/, 'simDt naozaj používa dtFrame');
+});
+
+test('hustota podľa výšky kamery: plná pri planéte, výrazne menej pri priblížení', () => {
+  // Používateľ 2026-09-21: „strašne veľa prúdnic… pri zazoomovaní je to úplne biele."
+  // Podiel plochy to nerieši — častice žijú len v zábere, takže po priblížení sa
+  // ten istý počet stlačí na tú istú obrazovku.
+  assert.equal(densityForHeight(12_000_000), 1, 'pohľad na planétu = plná hustota');
+  assert.equal(densityForHeight(DENSITY_FAR_M), 1);
+  assert.equal(densityForHeight(DENSITY_NEAR_M), DENSITY_MIN);
+  assert.equal(densityForHeight(10_000), DENSITY_MIN, 'pod prahom už neklesá');
+  assert.ok(densityForHeight(1_000_000) < 0.6 && densityForHeight(1_000_000) > DENSITY_MIN, 'medzi tým plynulo');
+  assert.ok(densityForHeight(300_000) < densityForHeight(1_000_000), 'monotónne klesá');
+  assert.equal(densityForHeight(NaN), 1, 'neznáma výška nič neuberá');
+});
+
+test('spomalenie podľa hladiny: jet je rýchlejší, ale nelieta cez obrazovku', () => {
+  assert.equal(speedScaleForRange(WIND_BASE_RANGE_TOP), 1, 'prízemný vietor sa nespomaľuje');
+  assert.ok(speedScaleForRange(130) < 1, '250/200 hPa sa spomalí');
+  assert.ok(speedScaleForRange(130) > 0.5, 'ale nie na polovicu — jet MÁ vyzerať rýchlejšie');
+  assert.ok(speedScaleForRange(130) < speedScaleForRange(90), 'širší rozsah = väčšie spomalenie');
+  assert.equal(speedScaleForRange(30), 1, 'užší rozsah než prízemný nezrýchľuje');
+  assert.equal(speedScaleForRange(NaN), 1);
+});
+
+test('dĺžka stopy podľa výšky: dlhá pri planéte, krátka zblízka', () => {
+  // V malej oblasti fúka všade rovnako, takže dlhé stopy sa zlejú do statického
+  // hrebeňa rovnobežných čiar — presne to používateľ videl ako „úplne biele".
+  assert.equal(trailFadeForHeight(12_000_000), WIND_TRAIL_FADE);
+  assert.equal(trailFadeForHeight(DENSITY_FAR_M), WIND_TRAIL_FADE);
+  assert.equal(trailFadeForHeight(DENSITY_NEAR_M), TRAIL_FADE_NEAR);
+  assert.ok(trailFadeForHeight(250_000) < WIND_TRAIL_FADE, 'zblízka kratšia stopa');
+  assert.ok(trailFadeForHeight(250_000) >= TRAIL_FADE_NEAR);
+  assert.ok(trailFadeForHeight(400_000) > trailFadeForHeight(250_000), 'monotónne');
+  assert.equal(trailFadeForHeight(NaN), WIND_TRAIL_FADE, 'neznáma výška nič nemení');
 });

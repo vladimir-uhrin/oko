@@ -44,6 +44,14 @@ export const WIND_RESPAWN_BOOST_RATE = 0.08;
 export const WIND_SCREEN_SCALE = 0.75;
 /** Horný strop dĺžky úsečky (m); skutočná hranica je násobok kroku, viď maxSegmentMetres. */
 export const WIND_MAX_SEGMENT_M = 300_000;
+/** Hustota prúdnic podľa výšky kamery (2026-09-21): plná ďaleko, tretina zblízka. */
+export const DENSITY_FAR_M = 3_000_000;
+export const DENSITY_NEAR_M = 120_000;
+export const DENSITY_MIN = 0.10;
+/** Dĺžka stopy podľa výšky: zblízka kratšia, inak z čiar vznikne statický hrebeň. */
+export const TRAIL_FADE_NEAR = 0.90;
+/** Rozsah prízemného vetra — referencia pre spomalenie vyšších hladín. */
+export const WIND_BASE_RANGE_TOP = 60;
 /**
  * Hranica „častica sa zrodila inde" podľa skutočného kroku: najrýchlejší vietor
  * (60 m/s) × simulované sekundy × 3. Pevných 300 km kreslilo pri priblížení
@@ -315,6 +323,45 @@ export function activeParticleCount(total, areaFraction) {
   return Math.max(256, Math.min(total, Math.round(total * share)));
 }
 
+/**
+ * Koľko z hustoty ponechať pri danej výške kamery. Pri pohľade na planétu plnú,
+ * pri priblížení výrazne menej (používateľ 2026-09-21: „strašne veľa prúdnic…
+ * pri zazoomovaní je to úplne biele").
+ *
+ * Prečo to samotný podiel plochy nerieši: častice žijú LEN v zábere, takže po
+ * priblížení sa ten istý počet stlačí na tú istú obrazovku — hustota na
+ * obrazovke teda nezávisí od plochy výrezu, ale od POČTU. Preto druhý regulátor.
+ * Pure.
+ */
+export function densityForHeight(heightM) {
+  if (!Number.isFinite(heightM) || heightM <= 0) return 1;
+  const t = Math.max(0, Math.min(1, (heightM - DENSITY_NEAR_M) / (DENSITY_FAR_M - DENSITY_NEAR_M)));
+  return DENSITY_MIN + (1 - DENSITY_MIN) * t;
+}
+
+/**
+ * Spomalenie podľa rozsahu hladiny. Model rýchlosti mieri na ~1 px/snímok pri
+ * 10 m/s, lenže na 200 hPa fúka 90 m/s — prúdnice potom cez obrazovku doslova
+ * lietajú. Odmocnina zámerne: jet MÁ vyzerať rýchlejšie než prízemný vietor,
+ * len nie deväťnásobne. Pure.
+ */
+export function speedScaleForRange(rangeTop) {
+  const top = Number(rangeTop);
+  if (!Number.isFinite(top) || top <= 0) return 1;
+  return Math.sqrt(WIND_BASE_RANGE_TOP / Math.max(WIND_BASE_RANGE_TOP, top));
+}
+
+/**
+ * Útlm stopy podľa výšky kamery. Pri pohľade na planétu dlhé stopy kreslia
+ * prúdenie; pri priblížení sa z nich stane hrebeň takmer rovnobežných čiar,
+ * lebo v malej oblasti fúka všade rovnako. Zblízka teda kratšie. Pure.
+ */
+export function trailFadeForHeight(heightM) {
+  if (!Number.isFinite(heightM) || heightM <= 0) return WIND_TRAIL_FADE;
+  const t = Math.max(0, Math.min(1, (heightM - DENSITY_NEAR_M) / (DENSITY_FAR_M - DENSITY_NEAR_M)));
+  return TRAIL_FADE_NEAR + (WIND_TRAIL_FADE - TRAIL_FADE_NEAR) * t;
+}
+
 /** Zmenil sa výrez natoľko, že treba častice rýchlo presťahovať? Pure. */
 export function spawnRectChanged(a, b) {
   if (!a || !b) return true;
@@ -483,14 +530,14 @@ export function createWindParticles(container, viewer, {
     const nextSpawn = spawnRectFromView(cam.rect);
     if (spawnRectChanged(spawn, nextSpawn)) respawnBoost = WIND_RESPAWN_BOOST_FRAMES;
     spawn = nextSpawn;
-    active = activeParticleCount(total, spawn.areaFraction);
+    active = Math.max(256, Math.round(activeParticleCount(total, spawn.areaFraction) * densityForHeight(cam.height)));
     state.active = active;
     state.spawn = spawn;
     // dtFrame MUSÍ byť pred simDt (2026-09-09: TDZ ReferenceError každý snímok →
     // žiadne prúdnice a záplava výnimiek v konzole).
     const dtFrame = lastTime ? Math.min(0.05, (now - lastTime) / 1000) : 1 / 60;
     lastTime = now;
-    const simDt = simSecondsPerFrame(cam.height) * (dtFrame * 60);
+    const simDt = simSecondsPerFrame(cam.height) * speedScaleForRange(windMax?.[0]) * (dtFrame * 60);
     state.simDt = simDt;
 
     // 1. stopy: predchádzajúca obrazovka s útlmom → screenB
@@ -498,7 +545,7 @@ export function createWindParticles(container, viewer, {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, screenB, 0);
     gl.viewport(0, 0, sw, sh);
     gl.disable(gl.BLEND);
-    drawTexture(screenA, moving ? WIND_TRAIL_FADE_MOVING : WIND_TRAIL_FADE);
+    drawTexture(screenA, moving ? WIND_TRAIL_FADE_MOVING : trailFadeForHeight(cam.height));
 
     // 2. úsečky predchádzajúca → aktuálna poloha (stateB = stav pred posledným posunom)
     gl.useProgram(progDraw.p);
