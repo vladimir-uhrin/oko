@@ -47,7 +47,12 @@ export function levelForAltitude(altitudeM) {
  *
  * @returns {{speedMps: number, fromDeg: number, headMps: number, crossMps: number}}
  *   `headMps` > 0 = ZADNÝ vietor (tlačí), < 0 = protivietor.
- *   `crossMps` > 0 = bočný sprava.
+ *   `crossMps` > 0 = vietor PRICHÁDZA sprava (ako to číta pilot), < 0 zľava.
+ *
+ * POZOR NA ZNAMIENKO: `u * ay - v * ax` je zložka vetra smerom DOPRAVA od
+ * lietadla, čo je OPAK toho, odkiaľ vietor prichádza. Overené na živom lete
+ * (UAE69, kurz 282°, vietor z 348°): zdroj je 66° napravo od nosa, teda
+ * „sprava", hoci tá zložka vychádza záporná. Preto je vzorec otočený.
  */
 export function windRelativeToTrack(u, v, trackDeg) {
   const speedMps = Math.hypot(u, v);
@@ -63,7 +68,7 @@ export function windRelativeToTrack(u, v, trackDeg) {
     speedMps,
     fromDeg: from,
     headMps: u * ax + v * ay,      // priemet vetra do smeru letu
-    crossMps: u * ay - v * ax,     // priemet doprava od smeru letu
+    crossMps: v * ax - u * ay,     // > 0 = prichádza sprava (viď poznámku vyššie)
   };
 }
 

@@ -46,10 +46,14 @@ test('windRelativeToTrack: zadný vietor kladný, protivietor záporný, bočný
   // Let na sever, vietor fúka na juh → protivietor.
   assert.equal(Math.round(windRelativeToTrack(0, -10, 0).headMps), -10);
 
-  // Let na sever, vietor fúka na východ → čistý bočný sprava.
+  // Let na sever, vietor FÚKA na východ (u = +10) → prichádza zo ZÁPADU (270°),
+  // čo je naľavo od kurzu 0. Môj pôvodný test tvrdil opak — chybu odhalil až
+  // prepočet živého letu (UAE69), nie test.
   const cross = windRelativeToTrack(10, 0, 0);
   assert.equal(Math.round(cross.headMps), 0);
-  assert.equal(Math.round(cross.crossMps), 10, 'bočný sprava je kladný');
+  assert.equal(Math.round(cross.crossMps), -10, 'fúka doprava = prichádza ZĽAVA');
+  // A naopak: vietor fúkajúci na západ prichádza z východu = sprava.
+  assert.equal(Math.round(windRelativeToTrack(-10, 0, 0).crossMps), 10, 'prichádza sprava');
 
   // Let na východ (kurz 90), vietor na východ → zadný.
   assert.equal(Math.round(windRelativeToTrack(10, 0, 90).headMps), 10);
@@ -74,4 +78,17 @@ test('flightLevelOf: metre → FL po desiatkach', () => {
   assert.equal(flightLevelOf(3048), 100, 'FL100');
   assert.equal(flightLevelOf(0), 0);
   assert.equal(flightLevelOf(NaN), null);
+});
+
+test('regresia zo živého letu: UAE69 kurz 282°, vietor z 348° prichádza SPRAVA', () => {
+  // 122 kts ≈ 62,8 m/s z 348° → fúka na 168°.
+  const sp = 62.8;
+  const toward = (168 * Math.PI) / 180;
+  const u = Math.sin(toward) * sp;
+  const v = Math.cos(toward) * sp;
+  const w = windRelativeToTrack(u, v, 282);
+  assert.ok(w.headMps < 0, 'protivietor');
+  assert.ok(Math.abs(w.headMps) > 20 && Math.abs(w.headMps) < 30, 'okolo 25 m/s (~49 kts)');
+  assert.ok(w.crossMps > 0, 'zdroj 66° napravo od nosa = prichádza SPRAVA');
+  assert.ok(Math.abs(Math.hypot(w.headMps, w.crossMps) - sp) < 1e-9, 'energia sedí');
 });

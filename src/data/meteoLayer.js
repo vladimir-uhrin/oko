@@ -431,6 +431,10 @@ export function createMeteoLayer({
       const range = METEO_FIELDS[fieldId].componentRange || WIND_COMPONENT_RANGE;
       try {
         _levelWindGrids[fieldId] = { u: gridReader(img, doc, 0, range), v: gridReader(img, doc, 1, range) };
+        // Karta letu sa stavia raz; kým sa rez načítaval, vietor v nej nebol.
+        // Bez tohto oznámenia by sa už nikdy nedoplnil a vietor by sa ukázal
+        // len pri šťastnom načasovaní.
+        win?.dispatchEvent?.(new CustomEvent('gev:meteo-wind-grid', { detail: { fieldId } }));
       } catch { /* rez sa nedá čítať — karta jednoducho vietor neukáže */ }
     }).catch(() => { _gridLoads.delete(key); });
     return null;

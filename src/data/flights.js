@@ -3998,6 +3998,15 @@ function _trackedLabelParts(icao24) {
 onUnitSystemChange(() => { if (_trackedIcao) _updateTrackedLabelModel(_trackedIcao); });
 
 /** Write the explicit tracked presentation model and refresh its host entry. */
+// Keď meteo dotiahne mriežku hladiny, karta sledovaného stroja sa prebuduje —
+// inak by v nej vietor chýbal navždy, lebo prvé volanie flightWindAt() len
+// spustí načítanie a vráti null. Registruje sa raz, na module.
+if (typeof window !== 'undefined') {
+  window.addEventListener('gev:meteo-wind-grid', () => {
+    if (_trackedIcao) _updateTrackedLabelModel(_trackedIcao);
+  });
+}
+
 function _updateTrackedLabelModel(icao24) {
   if (!_trackedEntity || icao24 !== _trackedIcao) return;
   // ACARS správy sledovaného stroja (2026-09-08, len lokálne): dedup + TTL
