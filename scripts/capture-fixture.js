@@ -26,22 +26,32 @@ import path from 'node:path';
 // location"}. Doménu preto nehádame, pýtame sa zdroja (probePoint nižšie).
 
 /** Overí, či model pre bod naozaj má dáta. Vracia dôvod zdroja, nie náš odhad. */
-export async function probePoint(lat, lon) {
-  const url = openMeteoUrl(lat, lon);
+export async function probePoint(lat, lon, model = DEFAULT_MODEL) {
+  const url = openMeteoUrl(lat, lon, model);
   const res = await fetch(url, { headers: { 'User-Agent': UA } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.error) return { ok: false, reason: body.reason || `HTTP ${res.status}` };
   return { ok: true, current: body.current || {} };
 }
 
-/** Body OVERENÉ 2026-09-21, že icon_d2 pre ne dáta má (mimo: Žilina, BB, Košice, Budapešť). */
+// MODEL: používateľ 2026-09-21 rozhodol icon_eu namiesto icon_d2 zo zadania.
+// Dôvod je zmeraný: icon_d2 má rotovanú doménu s maskovanými rohmi a pokrýva
+// len ZÁPADNÉ Slovensko (Žilina, B. Bystrica, Košice aj Budapešť = bez dát).
+// icon_eu (0,0625°, ~7 km) siaha po 62,5° E — overené, že dáta má aj Košice,
+// Užhorod, Ľvov, Kyjev a Charkov, teda hlavné zameranie OKA.
+export const DEFAULT_MODEL = 'icon_eu';
+
+/** Body OVERENÉ 2026-09-21, že icon_eu pre ne dáta má. Zámerne pretínajú doménu
+ *  od západu (Mníchov) po východ (Charkov) — vrátane tých, ktoré icon_d2 nemal. */
 export const DEFAULT_POINTS = Object.freeze([
   { id: 'bratislava', name: 'Bratislava', lat: 48.15, lon: 17.11 },
-  { id: 'nitra', name: 'Nitra', lat: 48.31, lon: 18.09 },
+  { id: 'zilina', name: 'Žilina', lat: 49.22, lon: 18.74 },
+  { id: 'kosice', name: 'Košice', lat: 48.72, lon: 21.26 },
+  { id: 'uzhorod', name: 'Užhorod', lat: 48.62, lon: 22.30 },
+  { id: 'lviv', name: 'Ľvov', lat: 49.84, lon: 24.03 },
+  { id: 'kyjev', name: 'Kyjev', lat: 50.45, lon: 30.52 },
   { id: 'vieden', name: 'Viedeň', lat: 48.21, lon: 16.37 },
-  { id: 'brno', name: 'Brno', lat: 49.20, lon: 16.61 },
   { id: 'mnichov', name: 'Mníchov', lat: 48.14, lon: 11.58 },
-  { id: 'zahreb', name: 'Záhreb', lat: 45.81, lon: 15.98 },
 ]);
 
 const UA = 'OKO/meteo-gauntlet (hobby; kontakt v repo)';
@@ -49,11 +59,12 @@ const UA = 'OKO/meteo-gauntlet (hobby; kontakt v repo)';
 const VARS = ['temperature_2m', 'wind_speed_10m', 'wind_direction_10m', 'precipitation', 'cloud_cover', 'pressure_msl'];
 
 /** URL Open-Meteo pre jeden bod, model icon_d2, vietor v m/s (nie km/h!). Pure. */
-export function openMeteoUrl(lat, lon) {
+export function openMeteoUrl(lat, lon, model = DEFAULT_MODEL) {
+  const MODEL = model;
   const p = new URLSearchParams({
     latitude: String(lat), longitude: String(lon),
     current: VARS.join(','),
-    models: 'icon_d2',
+    models: MODEL,
     wind_speed_unit: 'ms',
     timezone: 'UTC',
   });
@@ -89,14 +100,15 @@ async function main() {
 
 
 
+  const MODEL = arg('--model', DEFAULT_MODEL);
   const capturedAt = new Date().toISOString();
-  console.log(`zachytávam fixture "${name}" @ ${capturedAt}`);
+  console.log(`zachytávam fixture "${name}" @ ${capturedAt} · model ${MODEL}`);
   console.log('→ ODFOŤ WINDY TERAZ (ten istý okamih), ak si tak neurobil pred spustením\n');
 
   const points = [];
   for (const p of DEFAULT_POINTS) {
-    const url = openMeteoUrl(p.lat, p.lon);
-    const probe = await probePoint(p.lat, p.lon);
+    const url = openMeteoUrl(p.lat, p.lon, MODEL);
+    const probe = await probePoint(p.lat, p.lon, MODEL);
     if (!probe.ok) {
       console.error(`
 ${p.name}: model pre tento bod nemá dáta — ${probe.reason}`);
@@ -147,9 +159,9 @@ ${p.name}: model pre tento bod nemá dáta — ${probe.reason}`);
   } catch { console.warn('  (cache rezov sa nedá čítať — fixture bude len s checkpointmi)'); }
 
   await fs.writeFile(path.resolve('fixtures', 'checkpoints.json'),
-    JSON.stringify({ capturedAt, model: 'icon_d2', api: 'open-meteo', points }, null, 2) + '\n');
+    JSON.stringify({ capturedAt, model: MODEL, api: 'open-meteo', points }, null, 2) + '\n');
   await fs.writeFile(path.join(dir, 'manifest.json'),
-    JSON.stringify({ name, capturedAt, model: 'icon_d2', slices: copied.sort() }, null, 2) + '\n');
+    JSON.stringify({ name, capturedAt, model: MODEL, slices: copied.sort() }, null, 2) + '\n');
 
   console.log(`\nzapísané: fixtures/checkpoints.json (${points.length} bodov), fixtures/${name}/ (${copied.length} rezov)`);
 }

@@ -133,6 +133,24 @@ pokyn používateľa, aby sa odblokovala Fáza 1. Pre Fázu 2 treba
    checkpointy s rastrom spred 13 dní. Nahradené `nearestSlice()`; manifest
    teraz nesie `driftHours`, nech je odchýlka vidieť.
 
+## ZMENA ZADANIA používateľom (2026-09-21): icon_d2 → icon_eu
+
+Pôvodné obmedzenie znelo „Open-Meteo, model **icon_d2**". Po tom, čo meranie
+ukázalo, že icon_d2 pokrýva len západné Slovensko a vôbec nie Ukrajinu,
+používateľ na otázku odpovedal **„eu"**. Vrstva aj checkpointy teda cielia na
+**`icon_eu`** (0,0625°, ~7 km, po 62,5° E).
+
+Zaznamenané výslovne, lebo HARD RULES zakazujú meniť testy a tolerancie:
+toto je **rozhodnutie zadávateľa**, nie moje zmäkčenie latky. Tolerancie
+(±0,5 °C, ±1 m/s, ±15°) ostávajú nedotknuté.
+
+Overené, že icon_eu dáta má: Bratislava, Žilina, B. Bystrica, Košice,
+Užhorod, Ľvov, Kyjev, Charkov, Budapešť, Viedeň — teda všetko, čo icon_d2
+nemal, vrátane celého zamerania OKA na Ukrajinu.
+
+`fixtures/checkpoints.json` prepísaný na icon_eu: **8 bodov od 11,58° E
+(Mníchov) po 30,52° E (Kyjev)**, zámerne pretínajú doménu.
+
 ## Denník kôl
 
 | Dátum | Kus | Kolo | Verdikt | Najväčšia medzera | Zmena |
@@ -140,3 +158,4 @@ pokyn používateľa, aby sa odblokovala Fáza 1. Pre Fázu 2 treba
 | 2026-09-21 | — | Fáza 0 | plán zapísaný | refs + fixtures chýbajú | rozklad, kamery, M1–M5 |
 | 2026-09-21 | M3 | meranie | **FAIL** | 6 weather modulov pred otvorením | `check-lazy.js` napísaný, determinizmus OK |
 | 2026-09-21 | fixture | zachytenie | OK | snímky Windy chýbajú | 6 bodov + 6 rezov, drift 0 h; opravené 2 chyby skriptu |
+| 2026-09-21 | model | rozhodnutie | — | icon_d2 nepokrýval UA | používateľ: **icon_eu**; fixture prepísaný na 8 bodov |
