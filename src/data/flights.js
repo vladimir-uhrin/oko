@@ -119,7 +119,11 @@ import {
 import { createFrameCostMeter, nextModelBudget } from './modelFrameBudget.js';
 import { refreshTrackedReadout } from './trackedReadout.js';
 import { onUnitSystemChange } from '../units.js';
-import { buildTrackedCardModel, formatFlightLine, formatFlightLinesPlain, formatMetaLine, TRACKED_FLIGHT_ACCENT } from './trackedCardModel.js';
+import { buildTrackedCardModel, formatFlightLine, formatFlightLinesPlain, formatMetaLine, formatWindLines, TRACKED_FLIGHT_ACCENT } from './trackedCardModel.js';
+// Lenivý zástupca, NIE meteoLayer.js — karta letu nesmie ťahať meteo zásobník
+// (obišlo by to lenivé načítanie, viď scripts/check-lazy.js). Keď meteo nie je
+// zapnuté, flightWindAt() vráti null a riadok o vetre sa jednoducho nevykreslí.
+import meteoLazy from './meteoLazy.js';
 import { resolveFlagIso2 } from './countryFlags.js';
 import {
   clearTrackedSubjectContext,
@@ -3899,6 +3903,12 @@ function _trackedLabelParts(icao24) {
   // debil"): letová hladina s metrami, rýchlosť aj v km/h, kurz so svetovou
   // stranou; kompaktný riadok ostáva pre hlas a kontext.
   const flightLines = formatFlightLinesPlain(flightState);
+  // Vietor v letovej hladine (2026-09-21): spojenie leteckej vrstvy s meteo.
+  // Hladina sa vyberá podľa VÝŠKY LETU, nie podľa toho, čo je práve na mape.
+  if (!flightState.onGround) {
+    const wind = meteoLazy.flightWindAt(info.rawLat, info.rawLon, flightState.altitudeM, flightState.trackDeg);
+    for (const line of formatWindLines(wind)) flightLines.push(line);
+  }
   // Converted contacts report their class as TR-3B and nothing else — the
   // operator/type identity is exactly what the Easter egg is replacing.
   // Registrácia sa zobrazí len keď NIE JE už titulkom karty (bez callsignu

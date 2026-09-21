@@ -109,6 +109,33 @@ export function formatFlightLine({ altitudeM, onGround = false, verticalRateMps,
  * orezala) a `Rýchlosť 401 kts (743 km/h) · kurz 327° (SZ)`. Na zemi `Na zemi`. Pure.
  * @returns {string[]} 1–3 riadky (prázdne časti vypadnú)
  */
+/**
+ * Riadky o vetre v letovej hladine. Prázdne pole, keď meteo vrstva nie je
+ * načítaná alebo pre daný bod nemá dáta — karta si NIKDY nič nevymyslí.
+ *
+ * Je to MODEL (predpoveď GFS), nie meranie z lietadla; riadok to hovorí.
+ * @param {{level: object, speedMps: number, fromDeg: number, headMps: number, crossMps: number}|null} wind
+ */
+export function formatWindLines(wind, translate = t) {
+  if (!wind || !Number.isFinite(wind.speedMps)) return [];
+  const lines = [translate('card.wind-level', {
+    level: wind.level.label,
+    speed: formatSpeedDual(wind.speedMps),
+    dir: `${Math.round(wind.fromDeg)}°`,
+  })];
+  if (Number.isFinite(wind.headMps) && Math.abs(wind.headMps) >= 1) {
+    lines.push(translate(wind.headMps >= 0 ? 'card.wind-tail' : 'card.wind-head',
+      { v: formatSpeedDual(Math.abs(wind.headMps)) }));
+  }
+  if (Number.isFinite(wind.crossMps) && Math.abs(wind.crossMps) >= 1) {
+    lines.push(translate('card.wind-cross', {
+      v: formatSpeedDual(Math.abs(wind.crossMps)),
+      side: translate(wind.crossMps >= 0 ? 'card.wind-right' : 'card.wind-left'),
+    }));
+  }
+  return lines;
+}
+
 export function formatFlightLinesPlain({ altitudeM, onGround = false, verticalRateMps, speedMps, trackDeg } = {}, translate = t) {
   let altitudeLine;
   let verticalLine = '';

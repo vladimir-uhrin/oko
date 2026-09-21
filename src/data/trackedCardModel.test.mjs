@@ -16,7 +16,7 @@ import {
   formatTrack,
   formatFixAge,
   formatEtaClock,
-  formatMetaLine,
+  formatMetaLine, formatWindLines,
   formatThousands,
   compassLabel,
   formatEtaPlain,
@@ -228,4 +228,36 @@ test('karta: logá (2026-09-12) prechádzajú modelom len keď aspoň jedno je; 
   assert.deepEqual(model.footer, ['OpenSky', 'Logá: Wikimedia Commons · Public domain']);
   assert.equal(buildTrackedCardModel({ callsign: 'X', logos: { airline: null, manufacturer: null } }).logos, null);
   assert.equal(buildTrackedCardModel({ callsign: 'X' }).logos, null);
+});
+
+test('vietor v letovej hladine: nič bez dát, zadný/proti, bočný so stranou', () => {
+  const tr = (k, v) => (v ? `${k}:${JSON.stringify(v)}` : k);
+  // Bez dát karta NIČ nevymyslí.
+  assert.deepEqual(formatWindLines(null, tr), []);
+  assert.deepEqual(formatWindLines({ speedMps: NaN }, tr), []);
+
+  const base = { level: { label: '250 hPa' }, speedMps: 40, fromDeg: 270.4 };
+
+  // Zadný vietor (kladná zložka) a bočný sprava (kladná).
+  const tail = formatWindLines({ ...base, headMps: 30, crossMps: 12 }, tr);
+  assert.equal(tail.length, 3);
+  assert.match(tail[0], /card\.wind-level/);
+  assert.match(tail[0], /250 hPa/);
+  assert.match(tail[0], /270°/, 'smer sa zaokrúhli');
+  assert.match(tail[1], /card\.wind-tail/);
+  assert.match(tail[2], /card\.wind-cross/);
+  assert.match(tail[2], /card\.wind-right/);
+
+  // Protivietor (záporná zložka) a bočný zľava.
+  const head = formatWindLines({ ...base, headMps: -25, crossMps: -8 }, tr);
+  assert.match(head[1], /card\.wind-head/);
+  assert.match(head[2], /card\.wind-left/);
+
+  // Zložky pod 1 m/s sú šum — riadok sa nepridá.
+  const calm = formatWindLines({ ...base, headMps: 0.4, crossMps: -0.2 }, tr);
+  assert.equal(calm.length, 1, 'ostane len riadok s rýchlosťou a smerom');
+
+  // Bez kurzu (NaN zložky) ostane tiež len prvý riadok.
+  const noTrack = formatWindLines({ ...base, headMps: NaN, crossMps: NaN }, tr);
+  assert.equal(noTrack.length, 1);
 });

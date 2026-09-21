@@ -26,6 +26,7 @@ import {
 } from './meteoField.js';
 import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
 import { awaitImageDecode } from './imageDecode.js';
+import { levelForAltitude, windRelativeToTrack } from './flightWind.js';
 import { PLACE_POINT_HEIGHT_M, createPlaceHoverCard, createPlacePoints, loadPlaces, nearestWithinRadius, placeVisibleUntilM, sampleGrid } from './meteoPlaces.js';
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
@@ -348,6 +349,7 @@ export function createMeteoLayer({
   let _hoverPlace = null;
   let _fieldGrids = {}; // fieldId → mriežka aktuálneho kroku (pre kartu mesta)
   let _windGrid = null; // { u, v } mriežky aktuálneho kroku
+  let _levelWindGrids = {}; // fieldId → { u, v } pre kartu letu (aj iná hladina, než sa kreslí)
   let _gridLoads = new Set();
   let _canvasListeners = null;
   const _placeScratch = new Cesium.Cartesian3();
@@ -410,6 +412,45 @@ export function createMeteoLayer({
       _windGrid = { u: gridReader(img, doc, 0, range), v: gridReader(img, doc, 1, range) };
     } catch { _windGrid = null; }
     return _windGrid;
+  }
+
+  /**
+   * Mriežky u/v pre ĽUBOVOĽNÚ hladinu vetra — aj takú, ktorá sa práve nekreslí.
+   * Null, kým sa rez nenačíta (načítanie sa spustí a vráti sa null, rovnako ako
+   * v gridFor). Rozsah dekódovania patrí hladine.
+   */
+  function windGridForLevel(fieldId) {
+    if (_levelWindGrids[fieldId]) return _levelWindGrids[fieldId];
+    const iso = _catalog?.steps[_index];
+    const key = `uv:${fieldId}`;
+    if (!iso || _gridLoads.has(key)) return null;
+    _gridLoads.add(key);
+    imageFor(fieldId, iso).then((img) => {
+      _gridLoads.delete(key);
+      if (!img || _catalog?.steps[_index] !== iso) return;
+      const range = METEO_FIELDS[fieldId].componentRange || WIND_COMPONENT_RANGE;
+      try {
+        _levelWindGrids[fieldId] = { u: gridReader(img, doc, 0, range), v: gridReader(img, doc, 1, range) };
+      } catch { /* rez sa nedá čítať — karta jednoducho vietor neukáže */ }
+    }).catch(() => { _gridLoads.delete(key); });
+    return null;
+  }
+
+  /**
+   * Vietor v letovej hladine pre kartu lietadla. Vyberie hladinu NAJBLIŽŠIU
+   * výške letu (nie tú, ktorá sa práve kreslí) a rozloží ju voči kurzu.
+   * Vracia null, kým dáta nie sú — karta si nič nevymýšľa.
+   */
+  function flightWindAt(lat, lon, altitudeM, trackDeg) {
+    if (!_enabled || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const level = levelForAltitude(altitudeM);
+    if (!level) return null;
+    const g = windGridForLevel(level.id);
+    if (!g) return null;
+    const u = sampleGrid(g.u, lat, lon);
+    const v = sampleGrid(g.v, lat, lon);
+    if (!Number.isFinite(u) || !Number.isFinite(v)) return null;
+    return { level, ...windRelativeToTrack(u, v, trackDeg) };
   }
 
   /** Hodnoty všetkých polí v meste: undefined = načítava sa, NaN = nedostupné. */
@@ -568,6 +609,7 @@ export function createMeteoLayer({
     _currentImages = { wind: windImg, windNext, field: fieldImg, fieldNext };
     _fieldGrids = {};
     _windGrid = null;
+    _levelWindGrids = {};
     _gridLoads = new Set();
     if (!windImg || !fieldImg) {
       _lastError = t('meteo.slice-failed');
@@ -766,6 +808,7 @@ export function createMeteoLayer({
       _grid = null;
       _fieldGrids = {};
       _windGrid = null;
+    _levelWindGrids = {};
       _particles?.stop();
       restoreBasemap();
       governorRequestRender('meteo');
@@ -824,6 +867,8 @@ export function createMeteoLayer({
     },
 
     getParams() { return { field: _field, particles: _particlesOn }; },
+    /** Vietor v letovej hladine pre kartu lietadla; null, keď dáta nie sú. */
+    flightWindAt,
 
     setRowControlsListener(fn) { _rowListener = typeof fn === 'function' ? fn : null; },
 

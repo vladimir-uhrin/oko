@@ -85,6 +85,16 @@ const layer = {
   getStats() {
     return _real ? _real.getStats() : { count: 0, loading: false, error: null };
   },
+
+  /**
+   * Vietor v letovej hladine pre kartu lietadla. Kým meteo vrstva nie je
+   * načítaná, vracia null — karta vietor jednoducho neukáže a NIČ SI NEVYMYSLÍ.
+   * Zámerne NEspúšťa načítanie: karta letu nesmie ťahať meteo zásobník, to by
+   * obišlo lenivé načítanie (M3).
+   */
+  flightWindAt(lat, lon, altitudeM, trackDeg) {
+    return _real?.flightWindAt ? _real.flightWindAt(lat, lon, altitudeM, trackDeg) : null;
+  },
 };
 
 export default layer;
