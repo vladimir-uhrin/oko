@@ -1,4 +1,43 @@
-# Meteo gauntlet — plán a denník
+# Meteo gauntlet — UZAVRETÉ 2026-09-21
+
+> **Tento smer sa neuzavrel dokončením, ale rozhodnutím.** Používateľ:
+> „nechaj to tak, pôjdeme vlastnou cestou." Windy prestáva byť latkou;
+> meteo v OKU sa ďalej vyvíja po svojom. Nič z nižšie uvedeného nie je
+> rozpracovaná úloha — je to záznam, čo sa stihlo a čo sa pritom zistilo.
+
+## Čo z toho ostáva v hre (s Windy nesúvisí)
+
+- `src/data/meteoLazy.js` + `meteoLazy.test.mjs` — meteo sa načíta až pri
+  otvorení vrstvy. Hodnota je samostatná: rýchlejší štart pre každého, kto
+  meteo nezapne. **Ostáva.**
+- `scripts/check-lazy.js` — regresná stráž presne k tomu. **Ostáva.**
+
+## Čo sa stalo mŕtvym
+
+- `fixtures/` a `scripts/capture-fixture.js` — dávali zmysel len pre slepé
+  A/B proti Windy a pre checkpointy `icon_eu`, ktoré sa nesledujú.
+- Kusy 1–10 a kamery C1–C5 nižšie: neodpracované, neplánujú sa.
+
+## Trvalý nález, ktorý prežije tento smer
+
+Doména **`icon_d2` nie je obdĺžnik svojej mriežky.** Natívna doména je
+rotovaná a rohy sú maskované (v GRIB-e bitmapa: platných 754 862 z 906 390
+bodov). Zmerané dopytmi na Open-Meteo:
+
+```
+OK    Bratislava · Trnava · Nitra · Trenčín · Viedeň · Brno · Praha
+      Mníchov · Záhreb · Graz
+MIMO  Žilina · Banská Bystrica · Košice · Budapešť
+```
+
+`icon_d2` teda pokrýva len **západné Slovensko** a Ukrajinu vôbec.
+`icon_eu` (0,0625°, ~7 km) siaha po 62,5° E — overené, že dáta má aj Košice,
+Užhorod, Ľvov, Kyjev a Charkov. Pre akékoľvek budúce meteo nad Ukrajinou je
+to rozdiel medzi „ide to" a „nejde to".
+
+---
+
+# Pôvodný plán (archív)
 
 Cieľ: meteo vrstva OKO na úrovni **Windy (windy.com)**. Zadanie a pravidlá určil
 používateľ; tento súbor je plán (Fáza 0) a potom denník každého kola.

@@ -2,6 +2,19 @@
 
 ## Airport audio source investigation (2026-09-06)
 
+Expanded worker-assisted research on2026-09-08 found100 airports with HTTP
+audio responses (114 channel URLs), including Prievidza LZPE and7 Polish
+airfields via SkyRadio. This is transport verification, not listening or
+integration permission. Full evidence and negative results:
+[ATC research report](docs/research/atc-research-2026-09-08.md).
+The empty bundled catalogue described below remains unchanged by this research.
+
+Bratislava verification (2026-09-08): the SlovakAviation LZIB spotter page
+links to legacy LiveATC players for mounts `lzib` (Tower/Approach) and `lzib3`
+(ATIS). Direct HTTPS GET header checks against `d.liveatc.net` returned
+HTTP 404 with text/html for both, not audio. These legacy references do not
+establish working current coverage. No broken endpoint was enabled in OKO.
+
 The radio card is audio-only following the user's request. There are currently
 **zero bundled direct audio sources**; user-configured audio remains supported.
 [Broadcastify terms](https://www.broadcastify.com/terms/) sections 8–9 require
