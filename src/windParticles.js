@@ -49,7 +49,7 @@ export const DENSITY_FAR_M = 3_000_000;
 export const DENSITY_NEAR_M = 120_000;
 export const DENSITY_MIN = 0.15;
 /** Dĺžka stopy podľa výšky: zblízka kratšia, inak z čiar vznikne statický hrebeň. */
-export const TRAIL_FADE_NEAR = 0.90;
+export const TRAIL_FADE_NEAR = 0.93;
 /** Rozsah prízemného vetra — referencia pre spomalenie vyšších hladín. */
 export const WIND_BASE_RANGE_TOP = 60;
 /**
