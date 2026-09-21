@@ -8,7 +8,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promises as fsp } from 'node:fs';
 
-import { EVENTS_MAX_DAYS, ukraineEventsProxy } from './ukraineEventsProxy.js';
+import { EVENTS_MAX_DAYS, ukraineEventsProxy, deepstateAllowedForHost } from './ukraineEventsProxy.js';
 
 const NOW = Date.UTC(2026, 8, 19, 12);
 const tmpRoot = async () => fsp.mkdtemp(path.join(os.tmpdir(), 'oko-ukr-proxy-'));
@@ -130,4 +130,28 @@ test('validácia rozsahu, metóda, vypnutý archivár, časovače', async () => 
   await on._tick('news');
   assert.match(on._state.last.news.error, /no network/);
   assert.equal(on._state.errors.length, 1);
+});
+
+test('DeepState sa mimo localhostu neposkytuje, kým nepríde súhlas', () => {
+  // Licencia §2 zakazuje „distribution, publication, proxying" bez súhlasu;
+  // žiadosť je odoslaná 19. 9. 2026 a odpoveď ešte neprišla.
+  for (const host of ['localhost', 'localhost:4173', '127.0.0.1:4173', '[::1]:4173', '::1', 'app.localhost:5173', '  LOCALHOST:4173  ']) {
+    assert.equal(deepstateAllowedForHost(host), true, host);
+  }
+  for (const host of ['oko.uhrin.digital', 'OKO.UHRIN.DIGITAL', 'localhost.evil.com', 'evil-localhost.example.com', '', null, undefined]) {
+    assert.equal(deepstateAllowedForHost(host), false, String(host));
+  }
+});
+
+test('rozhoduje HOSTITEĽ, nie adresa — cez tunel chodí aj verejná návšteva z loopbacku', () => {
+  // Preto sa nedá použiť req.socket.remoteAddress: Cloudflare Tunnel sa pripája
+  // na localhost:4173, takže pre verejnú aj domácu návštevu je adresa rovnaká.
+  assert.equal(deepstateAllowedForHost('oko.uhrin.digital'), false, 'doména je publikovanie');
+  assert.equal(deepstateAllowedForHost('localhost:4173'), true, 'domáce prezeranie je hobby použitie');
+});
+
+test('UKRAINE_DEEPSTATE=consent otvorí DeepState všade — jediné miesto, kde sa súhlas zapne', () => {
+  for (const host of ['oko.uhrin.digital', '', null]) {
+    assert.equal(deepstateAllowedForHost(host, { consent: true }), true, String(host));
+  }
 });

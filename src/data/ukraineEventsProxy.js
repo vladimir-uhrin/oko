@@ -56,6 +56,32 @@ const clientKey = (req) => String(req.headers?.['x-forwarded-for'] || req.socket
  * @param {{root?: string, env?: NodeJS.ProcessEnv, fetchImpl?: typeof fetch, now?: () => number, setTimer?: Function, clearTimer?: Function, log?: Function}} [opts]
  * @returns {import('vite').Plugin & {_tick: (name: string) => Promise<void>, _state: object}}
  */
+/**
+ * Smie táto požiadavka dostať DeepState? Rozhoduje HOSTITEĽ z hlavičky, nie IP:
+ * cez Cloudflare Tunnel prichádza aj verejná návšteva z loopbacku, takže adresa
+ * nerozlíši nič. Rovnaký vzor ako `basemapForHost()` pri Stadii.
+ *
+ * Kým súhlas DeepState nie je (žiadosť odoslaná 19. 9. 2026), licencia §2
+ * zakazuje „distribution, publication, proxying" — lokálne prezeranie je vlastné
+ * hobby použitie, verejná doména už je publikovanie. `UKRAINE_DEEPSTATE=consent`
+ * to otvorí, keď súhlas príde; `=off` vypne aj lokálne. Chýbajúca hlavička =
+ * radšej nie. Pure.
+ * @param {unknown} host hlavička Host (môže niesť port)
+ * @param {{consent?: boolean}} [o]
+ * @returns {boolean}
+ */
+export function deepstateAllowedForHost(host, { consent = false } = {}) {
+  if (consent) return true;
+  const raw = String(host ?? '').trim().toLowerCase();
+  // IPv6 v hlavičke Host býva v zátvorkách (`[::1]:4173`). Holé `::1` je samé
+  // samý dvojbodkový — orezanie „:port" by z neho spravilo `:`, preto sa port
+  // odstrihne len vtedy, keď je dvojbodka v adrese jediná.
+  const bracketed = /^\[([^\]]+)\]/.exec(raw);
+  const name = bracketed ? bracketed[1] : (raw.split(':').length === 2 ? raw.split(':')[0] : raw);
+  if (!name) return false;
+  return name === 'localhost' || name === '127.0.0.1' || name === '::1' || name.endsWith('.localhost');
+}
+
 export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m) } = {}) {
   const enabled = env.UKRAINE_ARCHIVE !== 'off';
   const viinaCache = new Map();
@@ -141,7 +167,9 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       return r;
     },
   };
-  const deepstateOff = String(env.UKRAINE_DEEPSTATE || '').toLowerCase() === 'off';
+  const deepstateMode = String(env.UKRAINE_DEEPSTATE || '').toLowerCase();
+  const deepstateOff = deepstateMode === 'off';
+  const deepstateConsent = deepstateMode === 'consent';
   const controlCache = new Map(); // deň -> { at, json }
   const deepstateCache = new Map();
   const damageCache = new Map(); // adm3 | unosat -> { at, json }
@@ -213,6 +241,13 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       return;
     }
     if (sub === '/deepstate') {
+      // Licencia §2 zakazuje „distribution, publication, proxying" bez súhlasu.
+      // Žiadosť je odoslaná 19. 9. 2026, odpoveď ešte neprišla — takže lokálne
+      // prezeranie áno (vlastné hobby použitie), verejná doména nie.
+      if (!deepstateAllowedForHost(req.headers?.host, { consent: deepstateConsent })) {
+        send(res, 451, { error: 'deepstate_consent_pending' }, req);
+        return;
+      }
       const at = url.searchParams.get('at') || dayKey(now());
       if (!isDay(at)) { send(res, 400, { error: 'bad_day' }, req); return; }
       const hit = deepstateCache.get(at);

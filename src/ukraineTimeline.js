@@ -358,7 +358,13 @@ export function createUkraineTimeline({
     } catch (error) {
       if (_destroyed || refresh) return;
       deepstate.setSnapshot(null);
-      if (dsLine) dsLine.textContent = error?.status === 404 ? translate('ukraine.ds.missing') : translate('ukraine.tl.error', { detail: error?.message || error });
+      // 451 = server odmietol servírovať DeepState mimo localhostu, kým nepríde
+      // súhlas (licencia §2). Nie je to chyba siete — povedz to ako stav.
+      if (dsLine) {
+        if (error?.status === 404) dsLine.textContent = translate('ukraine.ds.missing');
+        else if (error?.status === 451) dsLine.textContent = translate('ukraine.ds.disabled');
+        else dsLine.textContent = translate('ukraine.tl.error', { detail: error?.message || error });
+      }
     } finally { if (_deepstateTask === task) _deepstateTask = null; }
     renderDeepState();
   }
