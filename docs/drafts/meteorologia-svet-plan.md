@@ -111,3 +111,73 @@ GIBS geostacionárne snímky, meteogram po kliknutí, izočiary s popiskami, ECM
 Popisky miest s hodnotou nad polom (Natural Earth, vlastná LabelCollection — CARTO dlaždice majú bez kľúča vodoznak),
 interpolácia v čase (mix dvoch rezov v materiáli aj v časticiach, plynulé prehrávanie 2,4 s/krok), vek častíc (pevná fáza).
 Útlm poľa pod 20 km výšky kamery (pod drapériou bola biela obrazovka).
+
+## 2026-09-17 — fáza 1 (stabilizácia): vyťažená rasterizácia, offline bake, horizont +72 h
+
+Po revízii plánu: rasterizácia z closure proxy → `src/data/meteoRasterize.js` (čistá, 6 testov);
+nový `scripts/meteo-bake.mjs` (+ `meteo-bake.ps1`, `install-meteo-bake-task.ps1` — úloha
+`OKO meteo bake`, 4×/deň ~45 min po behoch 00/06/12/18 UTC, sériovo s 1,5 s pauzami)
+pečie 6 polí × 25 krokov do tej istej cache schémy ako proxy (`meta.baked = true`),
+takže proxy je čítač cache + dopĺňač. Horizont 48 → 72 h (`METEO_HORIZON_HOURS`, testy).
+Katalóg proxy hlási `baked`/`bakedTotal` a `stale` podľa veku najnovšieho behu v cache;
+`normalizeCatalog` ich nesie. THREDDS zostáva komunitný server (terms 404 od 8. 9.) —
+bake drží šetrné tempo; presun na NOAA NODD S3 GRIB2 ostáva pre fázu ECMWF/ICON.
+Overené: bake upekol reálny rez (beh 16.9. 18Z), katalóg naživo 25 krokov, meteo 37/37.
+
+**Otvorené (odložené 17. 9.):** meteo podklad Stadia funguje len na localhoste (keyless režim
+viazaný na Origin); cez tunel `oko.uhrin.digital` vracia 401 → glóbus ostáva modrý bez podkladu.
+Riešenie: bezplatný Stadia účet + doménová autorizácia `oko.uhrin.digital` (NIE api_key do URL).
+Na rozhodnutie používateľa — meteo sa zatiaľ pozerá cez `http://localhost:4173/`.
+
+## 2026-09-20 — prebratie a zosúladenie (Claude)
+
+Používateľ: „meteo musíš dorobiť ty… musíš to prebrať a zosúladiť."
+
+**Čo bolo rozbité.** Po „Windy pass 1" (konzistentný: rampa `#155e86`, tmavý podklad,
+sýte prúdnice, 49 152 častíc, horizont +72 h, pečený katalóg — testy aj kód sedeli)
+sa začal **„Windy pass 2"**, ktorý sa **zmenil len v kóde, nie v testoch**:
+pole vetra dostalo zeleno-fialovú paletu **bez alfy** pri `alpha: 0,92`, podklad sa
+prepol na svetlý a prúdnice na takmer biele. Výsledok overený v prehliadači:
+**celá planéta jednoliato neónovo zelená**, bez pobreží a popisov — teda presne to,
+čo Windy nerobí. Navyše 2 červené testy a hlavička `windParticles.js` popisovala
+hodnoty, ktoré v kóde už neboli.
+
+**Ako je to vyriešené.** Zámer pass 2 („farebná VÝPLŇ, nie len čiary") je zachovaný,
+ale spravený tak, aby mapa ostala čitateľná — **alfu nesie RAMPA**, nie konštanta,
+rovnakým mechanizmom, aký už používajú zrážky a oblačnosť
+(`rampRgbaTable` berie `[hodnota, hex, alfa]`, shader robí `material.alpha = c.a * alpha`):
+
+- rampa vetra späť do identity OKO (modrá → azúrová `--accent` → jantárová → biela)
+  a s alfou 0,18 v pokoji → 1,0 pri búrke; `alpha` poľa 0,92 → 0,82,
+- prúdnice späť na sýtu rampu (`mix(…, 0.05)`, alfa `0,35 + 0,65 × rýchlosť`),
+- podklad späť `stadia-dark` (prepína sa len z `photoreal`, inak rešpektuje voľbu
+  používateľa), stmavenie zdieľaného `stadia-dark` (0,28/0,7) vrátené na 0,45/0,85,
+- komentáre zosúladené s kódom.
+
+**Ponechané z pass 1 (dobrá práca, nesahané):** `meteoRasterize.js` + testy,
+`scripts/meteo-bake.mjs` / `.ps1` / úloha Plánovača, horizont +72 h,
+`baked`/`bakedTotal` v katalógu, 49 152 častíc, `WIND_SCREEN_SCALE 0,75`, fade 0,965.
+
+**Stav:** celá suite **3704/3704 zelená** (predtým 2 červené). Overené naživo:
+pole má štruktúru (azúrové prúdy, jantárové tryskové prúdenie), podklad je cez
+pokojné oblasti vidieť. Cache 203 MB, katalóg 25 krokov, beh 20. 9. 12Z.
+
+**Stále otvorené:** Stadia cez tunel `oko.uhrin.digital` vracia 401 (keyless režim je
+viazaný na Origin) → na doméne ostáva glóbus bez podkladu; treba bezplatný Stadia účet
+s doménovou autorizáciou. Ďalej fázy 2+: radar (RainViewer po ToS), GIBS geostacionárne,
+meteogram po kliknutí, ECMWF/ICON.
+
+### 2026-09-20 — podklad na doméne vyriešený bez účtu
+
+Overené `curl`-om: tá istá Stadia dlaždica vráti **200** s Origin `http://localhost:4173`
+a **401** s Origin `https://oko.uhrin.digital` — bezkľúčový režim Stadia obsluhuje len
+lokálny vývoj. Meteo preto na doméne ostávalo bez podkladu.
+
+Riešenie **nezávisí od účtu**: `basemapForHost()` (čistá, testovaná) vyberie podklad podľa
+hostiteľa — localhost → `stadia-dark`, čokoľvek iné → **bezkľúčové `gibs-blue-marble`**
+(NASA, ten istý podklad, s akým prototyp začínal). Neznámy hostiteľ (Node, testy) →
+primárny, aby sa správanie nemenilo.
+
+Ak si používateľ založí bezplatný Stadia účet a autorizuje doménu, stačí ju pridať do
+`STADIA_KEYLESS_HOSTS` — Stadia autorizuje **Origin**, nie `api_key` v URL, takže žiadny
+kľúč do prehliadača ani do proxy nejde.

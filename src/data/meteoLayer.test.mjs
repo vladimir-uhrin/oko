@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createMeteoLayer, METEO_BASEMAP_ID, METEO_LAYER_ID, fieldMaterialFabric, renderPassOnly } from './meteoLayer.js';
+import { createMeteoLayer, METEO_BASEMAP_FALLBACK_ID, METEO_BASEMAP_ID, METEO_LAYER_ID, basemapForHost, fieldMaterialFabric, renderPassOnly } from './meteoLayer.js';
 import { _resetActiveMapStackForTest, setActiveMapStack } from './activeMapStack.js';
 
 function fakeDoc() {
@@ -255,4 +255,16 @@ test('renderPassOnly: update len vo farebnom prechode (pick/depth/pickVoxel pres
   const bare = renderPassOnly({ show: true, update() {} });
   assert.equal(bare.isDestroyed(), false);
   assert.equal(bare.destroy(), undefined, 'primitív bez destroy nepadá');
+});
+
+test('podklad podľa hostiteľa: Stadia bez kľúča len na localhoste, inde bezkľúčové GIBS', () => {
+  // Overené 2026-09-20 curl-om: tá istá dlaždica = 200 pre Origin localhost,
+  // 401 pre https://oko.uhrin.digital. Na doméne teda meteo ostávalo bez podkladu.
+  assert.equal(basemapForHost('localhost'), METEO_BASEMAP_ID);
+  assert.equal(basemapForHost('127.0.0.1'), METEO_BASEMAP_ID);
+  assert.equal(basemapForHost('oko.localhost'), METEO_BASEMAP_ID, 'poddomény localhostu tiež');
+  assert.equal(basemapForHost('oko.uhrin.digital'), METEO_BASEMAP_FALLBACK_ID, 'doména → bezkľúčový podklad');
+  assert.equal(basemapForHost('OKO.UHRIN.DIGITAL'), METEO_BASEMAP_FALLBACK_ID, 'bez ohľadu na veľkosť písmen');
+  assert.equal(basemapForHost(''), METEO_BASEMAP_ID, 'neznáme prostredie → primárny, správanie sa nemení');
+  assert.equal(basemapForHost(null), METEO_BASEMAP_ID);
 });

@@ -2,7 +2,7 @@
 // Meteorológia sveta — vrstva „GFS · vietor a teplota" (2026-09-08, prototyp
 // „ako Windy, štýl OKO", používateľ: GPU častice, najprv prototyp).
 //
-// Čo robí: pre každý krok predpovede (3 h, +48 h) stiahne z proxy /api/meteo
+// Čo robí: pre každý krok predpovede (3 h, +72 h) stiahne z proxy /api/meteo
 // dva PNG rezy — vietor (R=u, G=v, B=rýchlosť) a teplotu (R) — a ukáže:
 //   - farebné pole cez plochú drapériu (Cesium Primitive s vlastným Material
 //     fabricom: textúra hodnôt × 1D rampa v identite OKO, meteoField.js),
@@ -42,9 +42,36 @@ export const METEO_FIELD_ALPHA = 0.62;
 /**
  * Podklad pre polia: tmavá vektorová mapa s popiskami (Stadia Alidade Smooth
  * Dark) — presne to, čo robí Windy: farby poľa na nej svietia, Blue Marble
- * s nimi súperil („to je slabé", 2026-09-08 večer).
+ * s nimi súperil („to je slabé", 2026-09-08 večer). Výplň je teraz v pokoji
+ * priehľadná, takže popisy a pobrežia cez ňu čítať ide.
  */
 export const METEO_BASEMAP_ID = 'stadia-dark';
+/**
+ * Stadia v bezkľúčovom režime obsluhuje LEN lokálny vývoj — overené 2026-09-20:
+ * tá istá dlaždica vráti 200 s Origin `http://localhost:4173` a 401 s Origin
+ * `https://oko.uhrin.digital`. Na doméne teda meteo ostávalo bez podkladu.
+ * Preto sa podklad volí podľa hostiteľa a mimo localhostu padá na bezkľúčové
+ * NASA GIBS (ten istý podklad, s akým prototyp začínal).
+ *
+ * Keď si v bezplatnom Stadia účte autorizuješ doménu, stačí ju pridať do
+ * STADIA_KEYLESS_HOSTS — inak sa nič meniť nemusí (Stadia autorizuje Origin,
+ * nie api_key v URL).
+ */
+export const METEO_BASEMAP_FALLBACK_ID = 'gibs-blue-marble';
+export const STADIA_KEYLESS_HOSTS = Object.freeze(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Ktorý podklad má meteo pýtať pre daného hostiteľa. Prázdny/neznámy hostiteľ
+ * (testy, Node) → primárny, nech sa správanie nemení. Pure.
+ * @param {string|null|undefined} hostname
+ * @returns {string}
+ */
+export function basemapForHost(hostname) {
+  const h = String(hostname || '').trim().toLowerCase();
+  if (!h) return METEO_BASEMAP_ID;
+  if (STADIA_KEYLESS_HOSTS.includes(h) || h.endsWith('.localhost')) return METEO_BASEMAP_ID;
+  return METEO_BASEMAP_FALLBACK_ID;
+}
 /** Koľko krokov dopredu prednačítať. */
 export const METEO_PREFETCH_STEPS = 2;
 /** Trvanie jedného kroku pri plynulom prehrávaní (ms) — 3 h predpovede za 2,4 s. */
@@ -303,6 +330,7 @@ export function createMeteoLayer({
   let _stale = false;
   let _playTimer = null;
   let _previousStack = null;
+  let _meteoStackId = null; // ktorý podklad sme si naozaj vypýtali (Stadia vs GIBS)
   let _rowListener = null;
   let _unsubStack = null;
   let _loadToken = 0;
@@ -573,7 +601,8 @@ export function createMeteoLayer({
     const id = active?.id || null;
     if (id === 'photoreal' || id === null) {
       _previousStack = id;
-      win?.dispatchEvent?.(new CustomEvent('gev:request-map-stack', { detail: { id: METEO_BASEMAP_ID, reason: 'meteo' } }));
+      _meteoStackId = basemapForHost(win?.location?.hostname);
+      win?.dispatchEvent?.(new CustomEvent('gev:request-map-stack', { detail: { id: _meteoStackId, reason: 'meteo' } }));
     } else {
       _previousStack = null;
     }
@@ -582,7 +611,7 @@ export function createMeteoLayer({
   function restoreBasemap() {
     if (!_previousStack) return;
     const active = getActiveMapStack();
-    if (active?.id === METEO_BASEMAP_ID) {
+    if (active?.id === (_meteoStackId || METEO_BASEMAP_ID)) {
       win?.dispatchEvent?.(new CustomEvent('gev:request-map-stack', { detail: { id: _previousStack, reason: 'meteo-restore' } }));
     }
     _previousStack = null;

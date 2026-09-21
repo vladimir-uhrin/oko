@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { activeParticleCount, createWindParticles, matricesDiffer, maxSegmentMetres, particleTextureSize, sceneModeCode, simSecondsPerFrame, spawnRectChanged, spawnRectFromView, WIND_PARTICLE_COUNT_DEFAULT } from './windParticles.js';
 
 test('rozmer stavovej textúry a detekcia pohybu kamery', () => {
-  assert.equal(particleTextureSize(WIND_PARTICLE_COUNT_DEFAULT), 128, '16 384 častíc — jemná sieť (používateľ 09-08: „vybodkované")');
+  assert.equal(particleTextureSize(WIND_PARTICLE_COUNT_DEFAULT), 222, '49 152 častíc — hustá sieť (Windy pass 17-09: „veľmi slabé")');
   assert.equal(particleTextureSize(10_000), 100);
   assert.equal(particleTextureSize(1), 16, 'minimum 16 × 16');
   const a = new Float32Array(16).fill(1);
@@ -38,7 +38,7 @@ test('shadery: WGS84 ECEF, zahodenie odvrátenej pologule, GFS mriežka 0..360°
   assert.ok(!/bool flat =/.test(src), 'žiadny identifikátor flat v GLSL');
   assert.match(src, /float vis = isFlat \? 1\.0 : visible\(pNow\) \* visible\(pPrev\);\s*float ok = vis \* \(distance\(pNow, pPrev\) < u_max_seg_m \? 1\.0 : 0\.0\);/, 'oba konce viditeľné (na plátne vždy), respawn sa nekreslí');
   assert.ok(!src.includes('gl.POINTS'), 'žiadne body');
-  assert.match(src, /export const WIND_SCREEN_SCALE = 0\.55;/, 'stopy v menšej textúre s LINEAR filtrom = mäkké');
+  assert.match(src, /export const WIND_SCREEN_SCALE = 0\.75;/, 'stopy v menšej textúre s LINEAR filtrom = mäkké (0,75 = ostrejšie, Windy pass)');
   assert.match(src, /screenA = texture\(gl, gl\.LINEAR, empty, sw, sh\);/);
   assert.match(src, /if \(v_vis < 0\.5\) discard;/);
   assert.match(src, /vec2 wuv = vec2\(fract\(\(lon \+ 360\.0\) \/ 360\.0\), \(90\.0 - lat\) \/ 180\.0\);/, 'vzorkovanie GFS mriežky (0° E prvý stĺpec, 90° N prvý riadok)');
@@ -48,7 +48,7 @@ test('shadery: WGS84 ECEF, zahodenie odvrátenej pologule, GFS mriežka 0..360°
   // Plynulosť: RK2 (vietor v strede kroku), zrod vo výreze, jas podľa vetra, rýchlosť podľa výšky.
   assert.match(src, /vec2 mid = advance\(pos, w1, u_dt \* 0\.5\);\s*vec2 w = windAt\(mid\);/, 'RK2');
   assert.match(src, /uniform vec4 u_spawn;/);
-  assert.match(src, /o = vec4\(mix\(c\.rgb, vec3\(1\.0\), 0\.18\), 0\.22 \+ 0\.55 \* v_speed_t\);/);
+  assert.match(src, /o = vec4\(mix\(c\.rgb, vec3\(1\.0\), 0\.05\), 0\.35 \+ 0\.65 \* v_speed_t\);/, 'Windy pass: sýta rampa, alfa 0,35 + 0,65 × rýchlosť');
   assert.match(src, /simSecondsPerFrame\(cam\.height\)/);
   assert.match(src, /gl\.drawArrays\(gl\.LINES, 0, active \* 2\);/);
   // Plátno (2D) aj Columbus: projekcia (0, lon·R, lat·R) resp. Mercator, bez okluzie; morph = prázdne plátno.
@@ -90,10 +90,10 @@ test('rýchlosť podľa výšky (~1 px/snímok pri 10 m/s) a počet aktívnych �
   assert.equal(simSecondsPerFrame(50_000), 30, 'spodná hranica');
   assert.equal(simSecondsPerFrame(25_000_000), 1500, 'horná hranica');
   assert.equal(simSecondsPerFrame(NaN), 1500);
-  assert.equal(activeParticleCount(16384, 1), 16384);
-  assert.equal(activeParticleCount(16384, 0.5), 16384);
-  assert.equal(activeParticleCount(16384, 0.1), Math.round(16384 * Math.sqrt(0.2)));
-  assert.equal(activeParticleCount(16384, 0.001), Math.round(16384 * 0.12), 'dno 12 %');
+  assert.equal(activeParticleCount(49152, 1), 49152);
+  assert.equal(activeParticleCount(49152, 0.5), 49152);
+  assert.equal(activeParticleCount(49152, 0.1), Math.round(49152 * Math.sqrt(0.2)));
+  assert.equal(activeParticleCount(49152, 0.001), Math.round(49152 * 0.12), 'dno 12 %');
 });
 
 test('hranica úsečky podľa kroku: 60 m/s × dt × 3, dno 2 km, strop 300 km — inak „teleporty" cez obrazovku pri priblížení', () => {

@@ -46,8 +46,9 @@ import {
   validateSharePayload,
 } from './src/shareStore.js';
 import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAirframesMessage } from './src/data/acarsMessages.js';
-import { parseNetcdf3, gridOf } from './src/data/netcdf3.js';
-import { METEO_FIELDS, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE, forecastSteps, quantize } from './src/data/meteoField.js';
+import { parseNetcdf3 } from './src/data/netcdf3.js';
+import { METEO_FIELDS, forecastSteps } from './src/data/meteoField.js';
+import { rasterizeMeteoField, runIsoOf } from './src/data/meteoRasterize.js';
 import {
   GFW_API_BASE as GFW_PRESENCE_API_BASE,
   GFW_DAY_STEP_BACK_MAX,
@@ -3716,56 +3717,8 @@ function meteoProxy() {
     return `${NCSS}?${vars}&north=90&south=-90&west=-180&east=180&horizStride=1&time=${encodeURIComponent(iso)}${vert}&accept=netcdf`;
   }
 
-  /** Beh modelu z reftime („Hour since 2026-09-01T00:00:00Z"). */
-  function runIsoOf(nc) {
-    const v = nc.vars.reftime || nc.vars.time;
-    if (!v) return null;
-    const m = String(v.attrs?.units || '').match(/since\s+(\S+)/i);
-    const base = m ? Date.parse(m[1]) : NaN;
-    const hours = Number(nc.read(v.name)[0]);
-    if (!Number.isFinite(base) || !Number.isFinite(hours)) return null;
-    const unit = /^hour/i.test(String(v.attrs.units)) ? 3600_000 : (/^minute/i.test(String(v.attrs.units)) ? 60_000 : 1000);
-    return new Date(base + hours * unit).toISOString();
-  }
-
-  /**
-   * NetCDF → RGBA raster 1440×721 so stĺpcom 0 = −180°. Exportované cez
-   * closure pre testy nie je — logika je krátka a overená naživo.
-   */
-  function rasterize(fieldId, nc) {
-    const field = METEO_FIELDS[fieldId];
-    const grids = field.vars.map((name) => gridOf(nc, name));
-    const { rows, cols, lat, lon } = grids[0];
-    const northUp = lat[0] > lat[lat.length - 1];
-    // Posun stĺpcov: nájdi stĺpec s lon ≥ 180 (alebo −180) a otoč polovice.
-    let shift = 0;
-    for (let c = 0; c < cols; c += 1) { if (lon[c] >= 180 || lon[c] < 0 && c === 0) { shift = c; break; } }
-    if (lon[0] < 0) shift = 0; // NCSS už vrátil −180..180
-    const out = Buffer.alloc(rows * cols * 4);
-    for (let r = 0; r < rows; r += 1) {
-      const srcRow = northUp ? r : rows - 1 - r;
-      for (let c = 0; c < cols; c += 1) {
-        const srcCol = (c + shift) % cols;
-        const i = srcRow * cols + srcCol;
-        const o = (r * cols + c) * 4;
-        if (fieldId === 'wind') {
-          const u = grids[0].values[i];
-          const v = grids[1].values[i];
-          out[o] = quantize(u, WIND_COMPONENT_RANGE);
-          out[o + 1] = quantize(v, WIND_COMPONENT_RANGE);
-          out[o + 2] = quantize(Math.hypot(u, v), WIND_SPEED_RANGE);
-        } else {
-          // Skalárne pole: prevod jednotiek podľa field.convert (K → °C, Pa → hPa,
-          // kg/m²/s → mm/h) a kvantizácia do field.decode; R = G = B.
-          const value = grids[0].values[i] * field.convert.scale + field.convert.offset;
-          const q = quantize(value, field.decode);
-          out[o] = q; out[o + 1] = q; out[o + 2] = q;
-        }
-        out[o + 3] = 255;
-      }
-    }
-    return { data: out, width: cols, height: rows };
-  }
+  // Rasterizácia (NetCDF → RGBA) a beh modelu z reftime žijú v
+  // src/data/meteoRasterize.js — zdieľané s offline pečením (scripts/meteo-bake).
 
   async function fetchSlice(fieldId, iso) {
     const field = METEO_FIELDS[fieldId];
@@ -3784,7 +3737,7 @@ function meteoProxy() {
     if (buf.length > MAX_BYTES) throw new Error('THREDDS: oversized');
     const nc = parseNetcdf3(buf);
     const run = runIsoOf(nc);
-    const raster = rasterize(fieldId, nc);
+    const raster = rasterizeMeteoField(fieldId, nc);
     const png = await sharp(raster.data, { raw: { width: raster.width, height: raster.height, channels: 4 } }).png({ compressionLevel: 6 }).toBuffer();
     return { png, run };
   }
@@ -3802,6 +3755,38 @@ function meteoProxy() {
       const png = await fsp.readFile(p.png);
       return { png, meta };
     } catch { return null; }
+  }
+
+  /** Najnovší beh v cache (z .json metadát) — pre katalóg, keď proxy ešte nič neslúžila. */
+  async function latestCachedRun() {
+    try {
+      const root = cacheDir();
+      let best = null;
+      for (const fieldId of await fsp.readdir(root)) {
+        const dir = path.join(root, fieldId);
+        const files = await fsp.readdir(dir).catch(() => []);
+        for (const f of files) {
+          if (!f.endsWith('.json')) continue;
+          try {
+            const meta = JSON.parse(await fsp.readFile(path.join(dir, f), 'utf8'));
+            if (meta.run && (!best || Date.parse(meta.run) > Date.parse(best.run))) best = meta;
+          } catch { /* poškodený meta súbor preskočíme */ }
+        }
+      }
+      return best;
+    } catch { return null; }
+  }
+
+  /** Či je krok (všetky polia) upečený — bake píše meta.baked = true. */
+  async function stepBaked(iso) {
+    const stem = iso.replace(/[:]/g, '');
+    for (const fieldId of Object.keys(METEO_FIELDS)) {
+      try {
+        const meta = JSON.parse(await fsp.readFile(path.join(cacheDir(), fieldId, `${stem}.json`), 'utf8'));
+        if (meta.baked !== true) return false;
+      } catch { return false; }
+    }
+    return true;
   }
 
   async function getSlice(fieldId, iso) {
@@ -3847,10 +3832,26 @@ function meteoProxy() {
         try {
           const url = new URL(String(req.url || '/'), 'http://localhost');
           if (url.pathname === '/catalog') {
-            return send(200, { model: 'GFS 0.25°', run: lastRun, steps: forecastSteps(Date.now()), attribution: ATTRIBUTION, stale: false });
+            const steps = forecastSteps(Date.now());
+            // Bake stav: koľko krokov je upečených komplet (všetky polia) a
+            // najnovší beh v cache. Katalóg pomenuje zdroj údajov.
+            const bakedFlags = await Promise.all(steps.map((s) => stepBaked(s)));
+            const bakedCount = bakedFlags.filter(Boolean).length;
+            const cached = lastRun ? null : await latestCachedRun();
+            const run = lastRun || cached?.run || null;
+            const stale = !run || (Date.now() - Date.parse(run)) > 12 * 3600_000;
+            return send(200, {
+              model: 'GFS 0.25°', run, steps, attribution: ATTRIBUTION, stale,
+              baked: bakedCount, bakedTotal: steps.length,
+            });
           }
           if (url.pathname === '/status') {
-            return send(200, { upstreamRequests, windowCount, ratePerHour: RATE_PER_HOUR, run: lastRun, cacheDir: cacheDir(), sharp: Boolean(await getSharp()) });
+            const cached = lastRun ? null : await latestCachedRun();
+            return send(200, {
+              upstreamRequests, windowCount, ratePerHour: RATE_PER_HOUR,
+              run: lastRun || cached?.run || null, cacheDir: cacheDir(),
+              sharp: Boolean(await getSharp()), lastBake: cached?.fetchedAt || null,
+            });
           }
           if (url.pathname !== '/slice') return send(404, { error: 'unknown endpoint' });
           const fieldId = String(url.searchParams.get('var') || '');
@@ -4858,6 +4859,7 @@ function oilPricesProxy() {
     configurePreviewServer(server) { install(server.middlewares); },
   };
 }
+
 /**
  * UKRAJINA podklad (2026-09-19, etapa 1; plán docs/drafts/ukrajina-plan.md):
  * statický OSM snímok zo `scripts/build-ukraine-base.mjs`

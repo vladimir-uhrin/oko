@@ -17,12 +17,15 @@
 // snímku (viewMatrix je lenivý getter). PLÁTNO (2D) a Columbus kreslia cez
 // projekciu Cesia (u_mode), chýbajúci WebGL2 = bez častíc, vrstva ostáva.
 
-export const WIND_PARTICLE_COUNT_DEFAULT = 16_384; // 128 × 128 — jemná sieť, nie hustá
+export const WIND_PARTICLE_COUNT_DEFAULT = 49_152; // 192 × 256 — hustá sieť (Windy pass 2026-09-17: „veľmi slabé")
 // Ladenie 2026-09-08 (používateľ: „jemné a bez rastrov, nie vybodkované"):
 // častica sa kreslí ako ÚSEČKA z predchádzajúcej do aktuálnej polohy (žiadne
 // bodky medzi snímkami), stopy žijú v menšej textúre s lineárnym filtrom
 // (mäkké), pomalší posun a menej častíc.
-export const WIND_TRAIL_FADE = 0.975;
+// Windy pass 2026-09-17 (používateľ: „veľmi slabé, chcem ako WINDY"):
+// dlhšie stopy (fade 0,965), jasnejšie a sýte čiary (alfa 0,35 + 0,65 × rýchlosť,
+// takmer žiadne bielenie — farba rampy svieti), ostrejšia textúra stôp (0,75).
+export const WIND_TRAIL_FADE = 0.965;
 export const WIND_TRAIL_FADE_MOVING = 0.6;
 export const WIND_DROP_RATE = 0.003;
 export const WIND_DROP_RATE_BUMP = 0.01;
@@ -37,8 +40,8 @@ export const WIND_SIM_SECONDS_MAX = 1500;
 /** Po výraznej zmene výrezu sa častice rýchlo presťahujú do nového výrezu (snímky, drop rate). */
 export const WIND_RESPAWN_BOOST_FRAMES = 40;
 export const WIND_RESPAWN_BOOST_RATE = 0.08;
-/** Rozlíšenie textúry stôp voči plátnu (< 1 = mäkšie čiary, lacnejšie). */
-export const WIND_SCREEN_SCALE = 0.55;
+/** Rozlíšenie textúry stôp voči plátnu (< 1 = mäkšie čiary, lacnejšie; 0,75 = ostrejšie, Windy pass). */
+export const WIND_SCREEN_SCALE = 0.75;
 /** Horný strop dĺžky úsečky (m); skutočná hranica je násobok kroku, viď maxSegmentMetres. */
 export const WIND_MAX_SEGMENT_M = 300_000;
 /**
@@ -212,8 +215,10 @@ out vec4 o;
 void main() {
   if (v_vis < 0.5) discard;
   vec4 c = texture(u_ramp, vec2(v_speed_t, 0.5));
-  // Jemné: mierne zosvetlené; alfa podľa sily vetra (bezvetrie sotva vidno, búrka svieti).
-  o = vec4(mix(c.rgb, vec3(1.0), 0.18), 0.22 + 0.55 * v_speed_t);
+  // Sýta farba rampy (takmer žiadne bielenie), alfa rastie s vetrom: bezvetrie
+  // sotva vidno, búrka svieti. Pole pod čiarami je v pokoji priehľadné, takže
+  // sa neprebíjajú s výplňou — preto smú byť jasné.
+  o = vec4(mix(c.rgb, vec3(1.0), 0.05), 0.35 + 0.65 * v_speed_t);
 }`;
 
 function compile(gl, type, src) {

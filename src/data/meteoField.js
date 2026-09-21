@@ -8,9 +8,9 @@
 // MODELOVÉ dáta (predpoveď), nikdy nie pozorovanie — UI to musí hovoriť.
 
 export const METEO_LAYER_ID = 'meteo-gfs';
-/** Krok predpovede v hodinách a horizont prototypu. */
+/** Krok predpovede v hodinách a horizont (fáza 1 krok 3: 48 → 72 h). */
 export const METEO_STEP_HOURS = 3;
-export const METEO_HORIZON_HOURS = 48;
+export const METEO_HORIZON_HOURS = 72;
 /** Rozsah kvantizácie zložiek vetra v PNG (R = u, G = v), m/s. */
 export const WIND_COMPONENT_RANGE = Object.freeze([-60, 60]);
 /** Rozsah kvantizácie rýchlosti vetra (B), m/s. */
@@ -24,6 +24,10 @@ export const TEMP_RANGE = Object.freeze([-60, 60]);
  * Fáza „polia" (2026-09-08 večer): tlak MSL s izobarami, zrážky, oblačnosť, nárazy.
  */
 export const METEO_FIELDS = Object.freeze({
+  // Farebná VÝPLŇ ako na Windy (používateľ 2026-09-17), ale mapa musí ostať
+  // čitateľná: alfu nesie RAMPA (pokoj priehľadný → búrka plná), nie konštanta.
+  // Plná drapéria 0,92 bez alfy v rampe zaliala celú planétu jednou farbou —
+  // nebolo vidieť pobrežia ani popisy, čo je presne to, čo Windy NEROBÍ.
   wind: Object.freeze({
     id: 'wind',
     vars: ['u-component_of_wind_height_above_ground', 'v-component_of_wind_height_above_ground'],
@@ -99,9 +103,13 @@ export const METEO_FIELD_ORDER = Object.freeze(['wind', 'temp', 'pressure', 'pre
  * Zastávky [hodnota, hex]. Vietor v m/s, teplota v °C.
  */
 export const METEO_RAMPS = Object.freeze({
+  // Vietor v identite OKO: modrá → azúrová (--accent #39d0ff) → jantárová → biela.
+  // TRETÍ prvok je ALFA — v pokoji takmer priehľadná, aby bolo vidieť podklad
+  // (pobrežia, popisy miest), pri búrke plná. Rovnaký princíp ako zrážky nižšie.
   wind: Object.freeze([
-    [0, '#123c5a'], [3, '#155e86'], [6, '#1a8ab0'], [10, '#25b6dc'], [14, '#39d0ff'],
-    [19, '#9be6ff'], [24, '#ffd15c'], [30, '#ff9a2b'], [37, '#ff4a3b'], [45, '#ffffff'],
+    [0, '#155e86', 0.18], [3, '#1a8ab0', 0.38], [6, '#25b6dc', 0.55], [10, '#39d0ff', 0.70],
+    [14, '#9be6ff', 0.80], [19, '#ffd15c', 0.88], [24, '#ff9a2b', 0.94], [30, '#ff4a3b', 1],
+    [37, '#ff2f6b', 1], [45, '#ffffff', 1],
   ]),
   temp: Object.freeze([
     [-40, '#3b1c6e'], [-25, '#2c4aa8'], [-12, '#1f8fc4'], [-4, '#39d0ff'], [4, '#7fe2c8'],
@@ -256,7 +264,7 @@ export function runLabel(runIso, lang = 'sk') {
 /**
  * Normalizuje katalóg z proxy. Pure.
  * @param {object|null} json
- * @returns {{steps: string[], run: string|null, model: string, attribution: string, stale: boolean}|null}
+ * @returns {{steps: string[], run: string|null, model: string, attribution: string, stale: boolean, baked: number, bakedTotal: number}|null}
  */
 export function normalizeCatalog(json) {
   if (!json || !Array.isArray(json.steps) || !json.steps.length) return null;
@@ -268,5 +276,7 @@ export function normalizeCatalog(json) {
     model: String(json.model || 'GFS 0.25°'),
     attribution: String(json.attribution || ''),
     stale: json.stale === true,
+    baked: Number(json.baked) || 0,
+    bakedTotal: Number(json.bakedTotal) || steps.length,
   };
 }
