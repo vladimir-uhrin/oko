@@ -7,6 +7,8 @@ import {
   applyFrontScene,
   frontSceneByGsDirection,
   frontSceneById,
+  frontSceneChoices,
+  resolveFrontScene,
   frontSceneFraming,
   frontSceneLabel,
   listFrontScenes,
@@ -80,4 +82,60 @@ test('applyFrontScene: podklad najprv, rámovanie posledné a najlepšia snaha; 
   const noBase = await applyFrontScene('sumy', { showBase: async () => { throw new Error('no snapshot'); } });
   assert.equal(noBase.ok, true, 'scéna prežije aj bez podkladu — kamera aspoň zarámuje');
   assert.equal(noBase.baseShown, false);
+});
+
+// Prekladač ako v appke pre SK — resolver musí sedieť aj na preloženom mene,
+// lebo práve to používateľ povie nahlas.
+const SK_FRONT = {
+  'front.front.name': 'Celý front',
+  'front.lyman.name': 'Lymanský smer',
+  'front.kupiansk.name': 'Kupianský smer',
+  'front.pokrovsk.name': 'Pokrovský smer (Myrnohrad, Dobropillia)',
+  'front.kherson.name': 'Ľavý breh Dnipra – Cherson',
+  'front.kostiantynivka.name': 'Kosťantynivský smer (Časiv Jar, Toreck)',
+};
+const trSk = (key) => SK_FRONT[key] || key;
+
+test('resolveFrontScene: id, ukrajinské meno z hlásenia, anglické aj preložené meno', () => {
+  assert.equal(resolveFrontScene('lyman', trSk)?.id, 'lyman', 'holé id');
+  assert.equal(resolveFrontScene('  LYMAN  ', trSk)?.id, 'lyman', 'veľkosť a medzery nerozhodujú');
+  assert.equal(resolveFrontScene('Лиманський', trSk)?.id, 'lyman', 'meno smeru z hlásenia GŠ');
+  assert.equal(resolveFrontScene("Куп'янський", trSk)?.id, 'kupiansk', 'apostrof v azbuke');
+  assert.equal(resolveFrontScene('Lyman direction', trSk)?.id, 'lyman', 'anglické meno');
+  assert.equal(resolveFrontScene('Lymanský smer', trSk)?.id, 'lyman', 'preložené meno');
+});
+
+test('resolveFrontScene skladá diakritiku — „lymansky smer" je to isté', () => {
+  // Hlas aj klávesnica bez diakritiky sú bežné; bez skladania by to nenašlo nič.
+  assert.equal(resolveFrontScene('lymansky smer', trSk)?.id, 'lyman');
+  assert.equal(resolveFrontScene('kostantynivsky smer', trSk)?.id, 'kostiantynivka');
+  assert.equal(resolveFrontScene('cely front', trSk)?.id, 'front');
+});
+
+test('resolveFrontScene nájde smer aj podľa mesta v zátvorke prekladu', () => {
+  assert.equal(resolveFrontScene('Myrnohrad', trSk)?.id, 'pokrovsk');
+  assert.equal(resolveFrontScene('Časiv Jar', trSk)?.id, 'kostiantynivka');
+});
+
+test('nejednoznačný dopyt vráti null, nie prvý v poradí', () => {
+  // Pri hlase je lepšie spýtať sa než odletieť na iný úsek frontu.
+  assert.equal(resolveFrontScene('smer', trSk), null, '„smer" sedí na viacero');
+  assert.equal(resolveFrontScene('direction'), null);
+  assert.equal(resolveFrontScene('xyz', trSk), null);
+  assert.equal(resolveFrontScene('', trSk), null);
+  assert.equal(resolveFrontScene(null, trSk), null);
+  assert.equal(resolveFrontScene(undefined, trSk), null);
+});
+
+test('presné id vyhrá nad čiastočnou zhodou v inom mene', () => {
+  // `front` je id celého frontu a zároveň podreťazec anglických mien ostatných.
+  assert.equal(resolveFrontScene('front', trSk)?.id, 'front');
+});
+
+test('frontSceneChoices dá id + čitateľné meno pre každý smer', () => {
+  const choices = frontSceneChoices(trSk);
+  assert.equal(choices.length, FRONT_SCENES.length);
+  assert.deepEqual(choices.map((c) => c.id), FRONT_SCENES.map((s) => s.id));
+  assert.equal(choices.find((c) => c.id === 'lyman').label, 'Lymanský smer');
+  assert.ok(choices.every((c) => c.label && c.label !== `front.${c.id}.name`), 'nikde holý kľúč');
 });

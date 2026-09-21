@@ -2990,3 +2990,50 @@ test('front5: 0.99 km due EAST is the subject, though a degree box rejects it', 
     assert.equal(result.window.centeredOn, 'N546PC');
   });
 });
+
+test('show_front: zoznam smerov a rámovanie podľa mena', async () => {
+  const applied = [];
+  const runner = createGevActionRunner({
+    ...createVoiceNavigationHarness(), dataManager: { layers: new Map() },
+    getFrontScenes: () => ({ apply: (id) => { applied.push(id); return Promise.resolve({ ok: true, id }); } }),
+  });
+
+  const list = await runner('show_front', { action: 'list' });
+  assert.equal(list.ok, true);
+  assert.equal(list.fronts.length, 12, 'dvanásť presetov smerov');
+  assert.ok(list.fronts.every((f) => f.id && f.label), 'každý má id aj čitateľné meno');
+
+  const shown = await runner('show_front', { action: 'show', frontId: 'Lyman direction' });
+  assert.equal(shown.ok, true);
+  assert.equal(shown.frontId, 'lyman');
+  assert.deepEqual(applied, ['lyman'], 'rámovanie sa spustilo raz');
+
+  // Meno smeru z hlásenia GŠ hovorí model aj používateľ.
+  await runner('show_front', { action: 'show', frontId: 'Покровський' });
+  assert.deepEqual(applied, ['lyman', 'pokrovsk']);
+});
+
+test('show_front pri nejednoznačnom mene nikam neodletí a ponúkne zoznam', async () => {
+  // Odletieť na iný úsek frontu, než používateľ myslel, je horšie než sa spýtať.
+  const applied = [];
+  const runner = createGevActionRunner({
+    ...createVoiceNavigationHarness(), dataManager: { layers: new Map() },
+    getFrontScenes: () => ({ apply: (id) => { applied.push(id); return Promise.resolve({ ok: true, id }); } }),
+  });
+  for (const frontId of ['smer', 'úplne vymyslené', '']) {
+    const out = await runner('show_front', { action: 'show', frontId });
+    assert.equal(out.ok, false, frontId);
+    assert.ok(out.fronts.length > 0, 'vráti, z čoho sa dá vybrať');
+  }
+  assert.deepEqual(applied, [], 'kamera sa nepohla ani raz');
+});
+
+test('show_front bez presetov (skorý boot) hlási nedostupnosť, nespadne', async () => {
+  const runner = createGevActionRunner({
+    ...createVoiceNavigationHarness(), dataManager: { layers: new Map() },
+    getFrontScenes: () => null,
+  });
+  const out = await runner('show_front', { action: 'list' });
+  assert.equal(out.ok, false);
+  assert.match(out.error, /unavailable/i);
+});

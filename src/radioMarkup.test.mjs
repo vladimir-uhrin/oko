@@ -21,11 +21,17 @@ function realtimeTools() {
   return new Function(`return ${literal};`)();
 }
 
-test('Realtime schema exposes the authoritative 28-tool inventory', () => {
+test('Realtime schema exposes the authoritative 29-tool inventory', () => {
   const tools = realtimeTools();
-  assert.equal(tools.length, 28);
+  // 28 → 29: show_front (2026-09-21) — presety smerov ukrajinského frontu.
+  assert.equal(tools.length, 29);
   const names = tools.map((tool) => tool.name);
-  assert.equal(new Set(names).size, 28, 'tool names are unique');
+  assert.equal(new Set(names).size, 29, 'tool names are unique');
+  const front = tools.find((tool) => tool.name === 'show_front');
+  assert.ok(front, 'show_front musí byť v inventári, inak ho model nikdy nezavolá');
+  assert.deepEqual(front.parameters.properties.action.enum, ['list', 'show']);
+  assert.deepEqual(front.parameters.required, ['action']);
+  assert.equal(front.parameters.additionalProperties, false);
   assert.ok(names.includes('set_context_mode'));
   assert.ok(names.includes('control_cockpit'));
   assert.ok(names.includes('select_nearest_aircraft'));
@@ -182,12 +188,14 @@ test('no unchanged Realtime tool definition drifts silently', () => {
   const unchanged = realtimeTools()
     .filter((tool) => !TOUCHED.has(tool.name))
     .sort((a, b) => a.name.localeCompare(b.name));
-  assert.equal(unchanged.length, 19);
+  // 19 → 20 (2026-09-21): pribudol show_front, ktorý do TOUCHED nepatrí — je nový,
+  // nie „potichu zmenený". Digest prepočítaný podľa návodu v komentári vyššie.
+  assert.equal(unchanged.length, 20);
   const digest = createHash('sha256')
     .update(JSON.stringify(unchanged))
     .digest('hex')
     .slice(0, 16);
-  assert.equal(digest, 'bec5d5804021d11d', 'an unchanged Realtime tool definition drifted');
+  assert.equal(digest, '956970eefaf3b054', 'an unchanged Realtime tool definition drifted');
 });
 
 test('Radio volume and mission speed share the Sharpen slider visual language', () => {

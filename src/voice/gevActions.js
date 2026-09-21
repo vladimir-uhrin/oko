@@ -17,6 +17,7 @@ import militaryAwarenessLayer, {
 import { initCameraVerbs, moveCamera, flyRoute, interruptCameraMotion, adjustOrbitRange } from '../cameraVerbs.js';
 import { cachedGroundFloor, warmGroundFloor } from '../data/groundFloor.js';
 import { isPickedWorldPosition } from '../data/scenePick.js';
+import { frontSceneChoices, frontSceneLabel, resolveFrontScene } from '../ukraineFrontScenes.js';
 import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
@@ -313,7 +314,12 @@ export function readLayerLifecycleSummary(dataManager, layerId, { fallbackEnable
   };
 }
 
-export function createGevActionRunner({ viewer, styleManager, dataManager, sceneDirector = null, annotations = null }) {
+export function createGevActionRunner({
+  viewer, styleManager, dataManager, sceneDirector = null, annotations = null,
+  // Presety smerov frontu vznikajú až neskoro v boote main.js (po paneli UKRAJINA),
+  // kým hlas sa inicializuje skôr — preto lenivý čítač, nie hodnota.
+  getFrontScenes = () => globalThis.__godsEyeView?.frontScenes || null,
+}) {
   installViewTargetPrewarm(viewer);
   initCameraVerbs(viewer, getViewTargetCartesian);
   return async function runGevAction(name, rawArgs = {}, runOptions = {}) {
@@ -920,6 +926,10 @@ export function createGevActionRunner({ viewer, styleManager, dataManager, scene
       return controlScene(sceneDirector, args);
     }
 
+    if (name === 'show_front') {
+      return showFront(getFrontScenes(), args);
+    }
+
     if (name === 'control_cctv') {
       return controlCctv(dataManager, args, styleManager);
     }
@@ -1112,6 +1122,37 @@ function controlScene(sceneDirector, args = {}) {
     return { ok: true, action: 'control_scene', playing: scene.title, shots: scene.shots };
   }
   throw new Error(`Unknown scene action: ${args.action || 'missing'}`);
+}
+
+/**
+ * Hlasové presety smerov ukrajinského frontu. Oddelené od `control_scene`
+ * zámerne: ten riadi kinematografické scény (beží minúty, dá sa zastaviť),
+ * toto je jeden skok kamery na úsek frontu a hneď sa vracia.
+ *
+ * Pri nejednoznačnom mene NEODLETÍ nikam a vráti zoznam — odletieť na iný úsek
+ * frontu, než používateľ myslel, je horšie než sa spýtať.
+ */
+function showFront(frontScenes, args = {}) {
+  if (!frontScenes || typeof frontScenes.apply !== 'function') {
+    return { ok: false, action: 'show_front', error: 'Ukraine front presets unavailable' };
+  }
+  const action = String(args.action || '').toLowerCase();
+  const choices = frontSceneChoices();
+  if (action === 'list') {
+    return { ok: true, action: 'show_front', fronts: choices };
+  }
+  if (action === 'show') {
+    const query = String(args.frontId || '').trim();
+    if (!query) return { ok: false, action: 'show_front', error: 'Which direction?', fronts: choices };
+    const scene = resolveFrontScene(query);
+    if (!scene) {
+      return { ok: false, action: 'show_front', error: `No front direction matched "${query}"`, fronts: choices };
+    }
+    // Rámovanie je dlhý let — nečakáme naň, aby sa realtime slučka nezasekla.
+    void Promise.resolve(frontScenes.apply(scene.id)).catch(() => {});
+    return { ok: true, action: 'show_front', frontId: scene.id, front: frontSceneLabel(scene) };
+  }
+  throw new Error(`Unknown front action: ${args.action || 'missing'}`);
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */

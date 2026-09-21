@@ -675,11 +675,16 @@ test('the voice TOOL SCHEMA is byte-identical to main — the mission mapping is
   // value to visibility and menu tools. Updated again 2026-09-14: the reworked
   // sk-overview tile drives the gas layers, so 'gas-flows' and 'gas-pipelines'
   // joined both layer enums and the common-name mapping sentence names them.
+  // Updated again 2026-09-21: a genuinely NEW tool, show_front (Ukraine front
+  // presets). That is a different thing from what this guard watches — it exists
+  // so the FIRST-RUN MISSIONS cannot quietly grow the schema, and they still
+  // have not; but any schema edit busts the voice session cache, which is why
+  // the baseline is re-derived openly instead of loosened.
   // The rest of the schema stays pinned.
-  assert.equal(block.length, 31541, 'tool schema byte length drifted from the frozen baseline');
+  assert.equal(block.length, 32241, 'tool schema byte length drifted from the frozen baseline');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'e5886b84bed0122834572f7cc1831f87da7583bb16f145b3591e7b97ef474423',
+    '359bf160eaa2addd4c1101a8fbb37682f7ed4e26ea23b43492c66cc0dfdcf0c5',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
 

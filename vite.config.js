@@ -8187,7 +8187,7 @@ function openAiRealtimeProxy() {
             'For visual filter requests, call set_visual_style with one of the allowed style IDs.',
             'Disambiguation table — basemap vs layer vs style: basemap switching requires an explicit stack name — "Bing aerial" means set_map_stack bing-aerial, "aerial with labels" means bing-labels, "OSM"/"road map" means osm, "Google 3D"/"photorealistic" means photoreal. Any mention of "satellite" or "satellites" ALWAYS means the satellites DATA LAYER via set_layer_visibility, never a basemap. "surveillance"/"night vision"/"thermal" are visual STYLES via set_visual_style.',
             'HUD requests ("hud on/off", "switch to operator/minimal/tactical layout") use set_hud. Detection requests ("detection on", "dense mode", "balanced mode", "sparse mode", "set density to 25", "use weighted allocation") use set_detection. Density snaps to 0/25/50/75/100 and derives Sparse/Balanced/Dense; panoptic is a legacy alias for Dense.',
-            'Bloom/sharpen requests use set_post_processing. Scene requests ("play orbital watch", "stop the scene", "what scenes are there") use control_scene. CCTV camera requests ("next camera", "nearest camera", "select the Congress camera", "show coverage") use control_cctv — the CCTV layer must be enabled first.',
+            'Bloom/sharpen requests use set_post_processing. Scene requests ("play orbital watch", "stop the scene", "what scenes are there") use control_scene. CCTV camera requests ("next camera", "nearest camera", "select the Congress camera", "show coverage") use control_cctv — the CCTV layer must be enabled first. Requests about the war in Ukraine that name a sector ("Ukraine", "the front", "Lyman direction", "Pokrovsk", "Lymansky smer") use show_front, NOT control_scene — those are map presets, not cinematic playback.',
             'Radio playback requests use control_radio. "Turn on/start the radio" means action=play; action=enable only reveals Radio markers and must be reserved for explicit "show/enable the Radio layer/markers" requests. After a prepared playback result, briefly confirm any other completed actions and say "Turning on the radio"—never claim it is already playing. The client keeps Radio muted until playback is verified, then closes voice before restoring Radio volume. Examples: "play news near Austin" → select category=news locationId=austin; "play US news" → select category=news country=US; "Radio volume 30" → volume; pause/resume/stop/next/previous use the matching action. Radio selection never moves the camera.',
             '"Track/follow <something specific>" (a callsign, ship name, satellite name) uses track_entity. "Take me to the biggest fire" uses track_entity with query "biggest fire" (the fires layer must be enabled). Bare "orbit" means camera orbit of the current landmark. "Stop following/tracking" uses stop_tracking.',
             '"Show me which planes are overhead"/"frame the ships"/"show me the satellites above" use frame_overhead with the matching target.',
@@ -8931,6 +8931,20 @@ const GEV_REALTIME_TOOLS = [
       properties: {
         action: { type: 'string', enum: ['list', 'play', 'stop', 'next', 'status'] },
         sceneId: { type: 'string', description: 'Scene id or (partial) title for play.' },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    type: 'function',
+    name: 'show_front',
+    description: 'Ukraine front directions: "list" returns the presets, "show" frames one by id or name (e.g. "Lyman", "Lymansky smer", "Pokrovsk", "whole front"). Framing opens the UKRAINE module and flies the camera; it returns immediately. An ambiguous name frames nothing and returns the list instead.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: { type: 'string', enum: ['list', 'show'] },
+        frontId: { type: 'string', description: 'Direction id or name for show — English, Slovak or the Ukrainian General Staff name.' },
       },
       required: ['action'],
     },

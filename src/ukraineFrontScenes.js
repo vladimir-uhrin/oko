@@ -218,3 +218,71 @@ export async function applyFrontScene(id, { showBase, flyToRegion } = {}) {
   }
   return { ok: true, id: scene.id, scene, baseShown };
 }
+
+/**
+ * Zloženie textu na porovnanie LATINKOU: diakritika preč, apostrofy preč,
+ * ostatné oddeľovače na medzeru. Azbuku zámerne NEskladá — NFD by z „й" spravilo
+ * „и" a ukrajinské mená smerov by prestali sedieť; tie rieši
+ * `frontSceneByGsDirection`, ktorý ich porovnáva v pôvodnom tvare. Pure.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function foldLatin(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[’ʼ'`]/g, '')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Smer frontu podľa toho, ako ho človek povie: id (`lyman`), ukrajinské meno
+ * z hlásenia GŠ (`Лиманський`), anglické meno (`Lyman direction`) alebo
+ * preložené meno (`Lymanský smer`). Skladá diakritiku, takže „lymansky smer"
+ * sedí tiež.
+ *
+ * Hľadá od najpresnejšieho k najvoľnejšiemu a **pri nejednoznačnej zhode vráti
+ * `null`** — pri hlase je lepšie spýtať sa než odletieť na iný úsek frontu.
+ * Pure (prekladač sa odovzdáva).
+ *
+ * @param {unknown} query
+ * @param {(key: string) => string} [translate]
+ * @returns {FrontScene|null}
+ */
+export function resolveFrontScene(query, translate = t) {
+  const raw = String(query ?? '').trim();
+  if (!raw) return null;
+  const exactId = frontSceneById(raw);
+  if (exactId) return exactId;
+  const byGs = frontSceneByGsDirection(raw);
+  if (byGs) return byGs;
+
+  const key = foldLatin(raw);
+  if (!key) return null;
+  const candidates = FRONT_SCENES.map((scene) => ({
+    scene,
+    names: [scene.id, scene.name, frontSceneLabel(scene, translate)].map(foldLatin).filter(Boolean),
+  }));
+
+  const exact = candidates.filter((c) => c.names.includes(key));
+  if (exact.length === 1) return exact[0].scene;
+  if (exact.length > 1) return null;
+
+  const prefix = candidates.filter((c) => c.names.some((n) => n.startsWith(key)));
+  if (prefix.length === 1) return prefix[0].scene;
+  if (prefix.length > 1) return null;
+
+  const partial = candidates.filter((c) => c.names.some((n) => n.includes(key)));
+  return partial.length === 1 ? partial[0].scene : null;
+}
+
+/**
+ * Zoznam smerov pre hlas a paletu: id + čitateľné meno. Pure.
+ * @param {(key: string) => string} [translate]
+ * @returns {Array<{id: string, label: string}>}
+ */
+export function frontSceneChoices(translate = t) {
+  return FRONT_SCENES.map((scene) => ({ id: scene.id, label: frontSceneLabel(scene, translate) }));
+}
