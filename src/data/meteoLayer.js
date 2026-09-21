@@ -399,12 +399,15 @@ export function createMeteoLayer({
     return null;
   }
 
+  /** Mriežky u/v pre vietor, ktorý sa práve animuje (teda pre aktívnu hladinu). */
   function windGrids() {
     if (_windGrid) return _windGrid;
     const img = _currentImages.wind;
     if (!img) return null;
+    const id = isWindField(_field) ? _field : 'wind';
+    const range = METEO_FIELDS[id].componentRange || WIND_COMPONENT_RANGE;
     try {
-      _windGrid = { u: gridReader(img, doc, 0, WIND_COMPONENT_RANGE), v: gridReader(img, doc, 1, WIND_COMPONENT_RANGE) };
+      _windGrid = { u: gridReader(img, doc, 0, range), v: gridReader(img, doc, 1, range) };
     } catch { _windGrid = null; }
     return _windGrid;
   }
@@ -550,11 +553,16 @@ export function createMeteoLayer({
     const token = ++_loadToken;
     const nextIso = _catalog.steps[_index + 1] || null;
     _timeline?.setStatus(t('meteo.loading'));
+    // Častice musia animovať TÚ hladinu, ktorú pole kreslí — inak by na 250 hPa
+    // svietil jantárový jet, ale body by sa hýbali prízemným vetrom. Nad
+    // nevetrovým poľom (teplota, tlak…) ostáva prízemný vietor, ako na Windy.
+    const windId = isWindField(_field) ? _field : 'wind';
+    const sameImage = windId === _field;
     const [windImg, fieldImg, windNext, fieldNext] = await Promise.all([
-      imageFor('wind', iso),
-      _field === 'wind' ? imageFor('wind', iso) : imageFor(_field, iso),
-      nextIso ? imageFor('wind', nextIso) : Promise.resolve(null),
-      nextIso ? (_field === 'wind' ? imageFor('wind', nextIso) : imageFor(_field, nextIso)) : Promise.resolve(null),
+      imageFor(windId, iso),
+      sameImage ? imageFor(windId, iso) : imageFor(_field, iso),
+      nextIso ? imageFor(windId, nextIso) : Promise.resolve(null),
+      nextIso ? (sameImage ? imageFor(windId, nextIso) : imageFor(_field, nextIso)) : Promise.resolve(null),
     ]);
     if (token !== _loadToken || !_enabled) return;
     _currentImages = { wind: windImg, windNext, field: fieldImg, fieldNext };
@@ -589,7 +597,10 @@ export function createMeteoLayer({
     updateIsolines(field, fieldImg);
     updatePlaces();
     if (_particles && _particlesOn) {
-      _particles.setWind(windImg, { uRange: WIND_COMPONENT_RANGE, vRange: WIND_COMPONENT_RANGE, next: windNext, clear: _playFrame === null });
+      // Rozsah dekódovania patrí hladine: na 250 hPa presahuje |u| hodnotu 60,
+      // takže pevné ±60 by častice hnalo nesprávnou rýchlosťou.
+      const wRange = METEO_FIELDS[windId].componentRange || WIND_COMPONENT_RANGE;
+      _particles.setWind(windImg, { uRange: wRange, vRange: wRange, next: windNext, clear: _playFrame === null });
       _particles.start();
     }
     _timeline?.setStatus(_catalog.stale ? t('meteo.stale') : t('meteo.forecast'));

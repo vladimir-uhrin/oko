@@ -306,3 +306,33 @@ test('hladiny vetra: prepnutie mení rez, škálu legendy aj rampu častíc', as
   assert.match(layer.source, /250 hPa/, 'zdroj nesie hladinu');
   _resetActiveMapStackForTest();
 });
+
+test('častice animujú TÚ hladinu, ktorú pole kreslí (a s jej rozsahom)', async () => {
+  _resetActiveMapStackForTest();
+  setActiveMapStack({ id: 'osm' });
+  const { layer, viewer, calls } = harness();
+  layer.init(viewer);
+  layer.enable();
+  await new Promise((r) => setTimeout(r, 10));
+
+  calls.images.length = 0;
+  layer.setParams({ field: 'wind250' });
+  await new Promise((r) => setTimeout(r, 10));
+  // Bez tejto opravy by sa ťahal aj var=wind (10 m) pre častice a na 250 hPa
+  // by svietil jantárový jet, ale body by sa hýbali prízemným vetrom.
+  assert.ok(calls.images.some((u) => u.includes('var=wind250')), 'ťahá sa rez hladiny');
+  assert.ok(!calls.images.some((u) => /var=wind&/.test(u)), 'prízemný vietor sa pre častice už neťahá');
+
+  // Rozsah dekódovania musí ísť s hladinou: na 250 hPa presahuje |u| hodnotu
+  // 60, takže pevné ±60 by častice hnalo nesprávnou rýchlosťou.
+  const ranges = calls.particles.filter((c) => c[0] === 'setWind').map((c) => c[1]);
+  assert.equal(ranges.at(-1), METEO_FIELDS.wind250.componentRange[0], 'častice dostali rozsah 250 hPa');
+
+  // Nad NEvetrovým poľom ostáva prízemný vietor — ako na Windy. (Obraz je už
+  // v cache, takže sa neťahá znova; overujem to cez rozsah, nie cez request.)
+  layer.setParams({ field: 'temp' });
+  await new Promise((r) => setTimeout(r, 10));
+  const afterTemp = calls.particles.filter((c) => c[0] === 'setWind').map((c) => c[1]).at(-1);
+  assert.equal(afterTemp, -60, 'nad teplotou sa častice vrátia k prízemnému vetru');
+  _resetActiveMapStackForTest();
+});
