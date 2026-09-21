@@ -47,7 +47,7 @@ export const WIND_MAX_SEGMENT_M = 300_000;
 /** Hustota prúdnic podľa výšky kamery (2026-09-21): plná ďaleko, tretina zblízka. */
 export const DENSITY_FAR_M = 3_000_000;
 export const DENSITY_NEAR_M = 120_000;
-export const DENSITY_MIN = 0.10;
+export const DENSITY_MIN = 0.15;
 /** Dĺžka stopy podľa výšky: zblízka kratšia, inak z čiar vznikne statický hrebeň. */
 export const TRAIL_FADE_NEAR = 0.90;
 /** Rozsah prízemného vetra — referencia pre spomalenie vyšších hladín. */
