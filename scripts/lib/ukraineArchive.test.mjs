@@ -152,6 +152,31 @@ test('hlásenia GŠ: archív po dňoch, spätné naplnenie cez stránkovaný fee
     { status: 'stored', day: '2026-09-22' },
     'náhradou je čas publikovania článku',
   );
+  // Zdroj sa pomýli v MESIACI: článok z 11. 9. 2026 píše „станом на 8:00 11 серпня".
+  // Bez kontroly by sa uložil pod 11. 8. a prepísal skutočné augustové hlásenie.
+  assert.deepEqual(
+    await archiveReport(root, {
+      ok: true,
+      reportedAt: '2026-08-11T05:00:00.000Z',
+      publishedAt: Date.parse('2026-09-11T05:11:49Z'),
+      total: 235,
+      fetchedAt: NOW,
+    }),
+    { status: 'stored', day: '2026-09-11' },
+    'pri mesačnom rozdiele rozhoduje deň vydania, nie „станом на"',
+  );
+  // Bežný rozdiel v minútach sa NESMIE prepísať dňom vydania.
+  assert.deepEqual(
+    await archiveReport(root, {
+      ok: true,
+      reportedAt: '2026-09-22T05:00:00.000Z',
+      publishedAt: Date.parse('2026-09-22T05:11:23Z'),
+      total: 248,
+      fetchedAt: NOW + 1, // novšie než náhradný zápis vyššie, nech sa naozaj uloží
+    }),
+    { status: 'stored', day: '2026-09-22' },
+    '11 minút rozdielu je normálny stav',
+  );
   const reports = await readReports(root, '2026-09-18', '2026-09-19');
   assert.equal(reports['2026-09-19'].total, 213);
   const feedXml = (page) => `<rss><channel>${page === 1 ? '<item><title>213 боєзіткнень</title><link>https://armyinform.com.ua/a/</link><pubDate>Sat, 19 Sep 2026 05:00:00 +0000</pubDate></item><item><title>200 боєзіткнень</title><link>https://armyinform.com.ua/b/</link><pubDate>Fri, 18 Sep 2026 05:00:00 +0000</pubDate></item>' : ''}</channel></rss>`;

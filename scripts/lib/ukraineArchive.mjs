@@ -286,11 +286,24 @@ export async function collectMedia({ fetchImpl = fetch, log = () => {}, youtube 
  * teda v ten istý deň, takže horší odhad dňa je stále lepší než žiadny deň.
  * Pure.
  */
+/**
+ * Ako ďaleko smie byť „станом на …" od času vydania článku, kým mu ešte veríme.
+ * Hlásenie vychádza ~05:11 UTC v to isté ráno, ktoré opisuje, takže rozdiel býva
+ * v minútach; deň a pol je štedrá rezerva na posun pásma či neskorú publikáciu.
+ */
+const REPORT_DAY_DRIFT_MS = 36 * 3600_000;
+
 export const reportDay = (report) => {
-  for (const candidate of [report?.reportedAt, report?.publishedAt]) {
-    const t = typeof candidate === 'number' ? candidate : Date.parse(candidate || '');
-    if (Number.isFinite(t)) return dayKey(t);
+  const reported = Date.parse(report?.reportedAt || '');
+  const published = typeof report?.publishedAt === 'number' ? report.publishedAt : Date.parse(report?.publishedAt || '');
+  // ZDROJ SA V MESIACI POMÝLI: článok z 11. 9. 2026 doslova píše „станом на
+  // 8:00 11 серпня". Kým sme verili len „станом на", septembrové hlásenie sa
+  // uložilo pod 11. 8. a PREPÍSALO skutočné augustové — 11. 9. pritom ostal
+  // prázdny. Deň vydania je kotva, „станом на" je len popis.
+  if (Number.isFinite(reported) && Number.isFinite(published)) {
+    return dayKey(Math.abs(published - reported) > REPORT_DAY_DRIFT_MS ? published : reported);
   }
+  for (const t of [reported, published]) if (Number.isFinite(t)) return dayKey(t);
   return null;
 };
 /** Minimálny RSS 2.0 čítač položiek (titulok, odkaz, dátum ISO) pre CLI bez vite.config.js. Pure. */
