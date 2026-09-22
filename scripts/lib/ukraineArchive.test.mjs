@@ -144,7 +144,14 @@ test('hlásenia GŠ: archív po dňoch, spätné naplnenie cez stránkovaný fee
   const report = { ok: true, reportedAt: '2026-09-19T05:00:00.000Z', total: 213, directions: [{ name: 'Лиманський', attacks: 20 }], fetchedAt: NOW };
   assert.deepEqual(await archiveReport(root, report), { status: 'stored', day: '2026-09-19' });
   assert.deepEqual(await archiveReport(root, { ...report, total: 1, fetchedAt: NOW - 1 }), { status: 'kept', day: '2026-09-19' });
-  assert.deepEqual(await archiveReport(root, { ok: true }), { status: 'no-day' });
+  assert.deepEqual(await archiveReport(root, { ok: true }), { status: 'no-day' }, 'bez času aj bez publikovania niet dňa');
+  // Keď parser nevytiahne „станом на …", deň sa NESMIE stratiť: 20. aj 22. 9. 2026
+  // v archíve chýbali práve preto (ArmyInform napísal hodinu s bodkou).
+  assert.deepEqual(
+    await archiveReport(root, { ok: true, reportedAt: null, publishedAt: Date.parse('2026-09-22T05:11:23Z'), total: 248, fetchedAt: NOW }),
+    { status: 'stored', day: '2026-09-22' },
+    'náhradou je čas publikovania článku',
+  );
   const reports = await readReports(root, '2026-09-18', '2026-09-19');
   assert.equal(reports['2026-09-19'].total, 213);
   const feedXml = (page) => `<rss><channel>${page === 1 ? '<item><title>213 боєзіткнень</title><link>https://armyinform.com.ua/a/</link><pubDate>Sat, 19 Sep 2026 05:00:00 +0000</pubDate></item><item><title>200 боєзіткнень</title><link>https://armyinform.com.ua/b/</link><pubDate>Fri, 18 Sep 2026 05:00:00 +0000</pubDate></item>' : ''}</channel></rss>`;

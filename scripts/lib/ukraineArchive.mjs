@@ -277,7 +277,22 @@ export async function collectMedia({ fetchImpl = fetch, log = () => {}, youtube 
 }
 
 // ── hlásenia GŠ ───────────────────────────────────────────────────────────
-export const reportDay = (report) => { const t = Date.parse(report?.reportedAt || ''); return Number.isFinite(t) ? dayKey(t) : null; };
+/**
+ * Deň, pod ktorý hlásenie patrí. Prednosť má `reportedAt` („станом на 08:00
+ * 22 вересня"), ale keď ho parser nevytiahne, NESMIE sa deň stratiť: 20. aj
+ * 22. 9. 2026 v archíve chýbali práve preto, že ArmyInform napísal hodinu
+ * s bodkou, `reportedAt` vyšiel null a `archiveReport` deň ticho zahodil.
+ * Druhá voľba je preto čas publikovania článku — hlásenie vychádza ~05:11 UTC,
+ * teda v ten istý deň, takže horší odhad dňa je stále lepší než žiadny deň.
+ * Pure.
+ */
+export const reportDay = (report) => {
+  for (const candidate of [report?.reportedAt, report?.publishedAt]) {
+    const t = typeof candidate === 'number' ? candidate : Date.parse(candidate || '');
+    if (Number.isFinite(t)) return dayKey(t);
+  }
+  return null;
+};
 /** Minimálny RSS 2.0 čítač položiek (titulok, odkaz, dátum ISO) pre CLI bez vite.config.js. Pure. */
 export function simpleRssItems(xml, limit = 20) {
   const out = [];

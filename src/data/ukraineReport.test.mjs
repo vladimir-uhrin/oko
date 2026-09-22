@@ -141,3 +141,24 @@ test('fetchUkraineReport: JSON alebo výnimka so statusom', async () => {
     (e) => e.message === 'upstream' && e.status === 502,
   );
 });
+
+test('čas hlásenia: ArmyInform píše hodinu raz s dvojbodkou, raz s bodkou', () => {
+  // Skutočné vety zo zdroja. 21. 9. 2026 mala dvojbodku, 22. 9. bodku — kým sme
+  // brali len dvojbodku, hlásenie na doméne nevedelo povedať, kedy platí
+  // (reportedAt aj reportedAtText boli null).
+  const dot = reportTimestamp(
+    'Про це йдеться у зведенні Генерального штабу ЗСУ з оперативною інформацією станом на 08.00 22 вересня.',
+    { year: 2026 },
+  );
+  assert.ok(dot, 'bodkový tvar sa musí nájsť');
+  assert.deepEqual({ time: dot.time, day: dot.day, month: dot.month }, { time: '08:00', day: 22, month: 9 });
+  assert.equal(dot.iso, '2026-09-22T05:00:00.000Z');
+
+  // Oddeľovač zdroja sa nesmie presakovať do popisku — vždy HH:MM.
+  assert.equal(reportTimestamp('станом на 8:00 1 січня', { year: 2026 }).time, '08:00', 'jednociferná hodina sa doplní nulou');
+  assert.equal(reportTimestamp('станом на 8.00 1 січня', { year: 2026 }).time, '08:00');
+
+  // Čokoľvek iné než dvojbodka/bodka nie je čas.
+  assert.equal(reportTimestamp('станом на 08,00 22 вересня', { year: 2026 }), null);
+  assert.equal(reportTimestamp('станом на 0800 22 вересня', { year: 2026 }), null);
+});

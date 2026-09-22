@@ -137,15 +137,26 @@ export function directionsInParagraph(paragraph) {
   return out;
 }
 
-/** „станом на 08:00 19 вересня" → {time, day, month} alebo null. Pure. */
+/**
+ * „станом на 08:00 19 вересня" → {time, day, month} alebo null. Pure.
+ *
+ * ArmyInform píše hodinu raz s dvojbodkou, raz s BODKOU („станом на 08.00
+ * 22 вересня") — líši sa to článok od článku, nie dátum od dátumu (21. 9.
+ * malo dvojbodku, 22. 9. bodku). Kým sme brali len dvojbodku, hlásenie
+ * nevedelo povedať, KEDY platí: `reportedAt` aj `reportedAtText` boli null
+ * a karta na doméne bola bez času. Obe formy sa normalizujú na `HH:MM`.
+ */
 export function reportTimestamp(text, { year = null } = {}) {
-  const m = normalizeUkText(text).match(/станом на (\d{1,2}:\d{2})\s+(\d{1,2})\s+([а-яії]+)/i);
+  const m = normalizeUkText(text).match(/станом на (\d{1,2})[:.](\d{2})\s+(\d{1,2})\s+([а-яії]+)/i);
   if (!m) return null;
-  const month = UK_MONTHS_GENITIVE.indexOf(m[3].toLowerCase()) + 1;
+  const month = UK_MONTHS_GENITIVE.indexOf(m[4].toLowerCase()) + 1;
   if (!month) return null;
-  const out = { time: m[1], day: Number(m[2]), month };
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  // Hodina sa vždy vydá ako HH:MM, nech je v zdroji bodka alebo dvojbodka —
+  // inak by sa oddeľovač zdroja presakoval do popisku karty.
+  const out = { time: `${String(hh).padStart(2, '0')}:${m[2]}`, day: Number(m[3]), month };
   if (Number.isFinite(year)) {
-    const [hh, mm] = m[1].split(':').map(Number);
     // Kyjev: EEST (UTC+3) v lete, EET (UTC+2) v zime — hrubo podľa mesiaca.
     const offsetH = month >= 4 && month <= 10 ? 3 : 2;
     out.iso = new Date(Date.UTC(year, month - 1, out.day, hh - offsetH, mm)).toISOString();
