@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { assembleEvents, chunkRanges, createUkraineEventStore, mediaInWindow } from './ukraineEventsClient.js';
+import {
+  hasVisualMedia, assembleEvents, chunkRanges, createUkraineEventStore, mediaInWindow } from './ukraineEventsClient.js';
 
 const D = 86_400_000;
 const T0 = Date.UTC(2026, 8, 19, 12);
@@ -77,4 +78,32 @@ test('sklad: kusy, TTL dnešného kusu, chyby kusov, súhrn, hlásenie dňa', as
   const reports = { '2026-09-17': { total: 1 }, '2026-09-19': { total: 2 } };
   assert.equal(store.reportForDay(reports, Date.UTC(2026, 8, 18, 10)).total, 1, 'najbližší predchádzajúci deň');
   assert.equal(store.reportForDay(reports, Date.UTC(2026, 8, 25)), null);
+});
+
+test('pás FOTKY A VIDEÁ berie len to, čo naozaj má obrázok alebo video', () => {
+  // Telegramové kanály sú z väčšiny text: 22. 9. 2026 malo okno 292 položiek,
+  // z toho 196 textových hlásení bez prílohy — kreslili sa ako prázdne dlaždice.
+  assert.equal(hasVisualMedia({ kind: 'text', thumb: null, photos: [], videos: 0 }), false);
+  assert.equal(hasVisualMedia({ kind: 'photo', thumb: 'https://cdn/x.jpg' }), true);
+  assert.equal(hasVisualMedia({ kind: 'photo', thumb: null, photos: ['https://cdn/a.jpg'] }), true, 'fotka bez náhľadu je stále fotka');
+  // Prílohy ArmyInformu náhľad nemajú, ale prehrať sa dajú.
+  assert.equal(hasVisualMedia({ kind: 'video', provider: 'file', thumb: null, photos: [] }), true);
+  assert.equal(hasVisualMedia({ kind: 'text', videos: 2 }), true, 'počet videí rozhoduje aj bez kind');
+  assert.equal(hasVisualMedia(null), false);
+  assert.equal(hasVisualMedia({}), false);
+});
+
+test('mediaInWindow textové príspevky vyhodí a nezapočíta', () => {
+  const events = [{
+    id: 'e1', t: 3, place: 'Kyiv', type: 'strike', severity: 'minor', level: 'reported',
+    media: [
+      { kind: 'text', url: 'https://t.me/c/1', thumb: null, photos: [], videos: 0 },
+      { kind: 'photo', url: 'https://t.me/c/2', thumb: 'https://cdn/2.jpg' },
+      { kind: 'video', url: 'https://armyinform/3.mp4', thumb: null, provider: 'file' },
+    ],
+  }];
+  const out = mediaInWindow(events);
+  assert.equal(out.length, 2, 'z troch ostanú dve — text odpadne');
+  assert.deepEqual(out.map((m) => m.kind).sort(), ['photo', 'video']);
+  assert.ok(out.every((m) => m.eventId === 'e1' && m.place === 'Kyiv'), 'kontext udalosti ostáva');
 });

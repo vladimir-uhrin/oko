@@ -83,12 +83,28 @@ export async function fetchUkraineDeepState(day, { fetcher = (...a) => fetch(...
 }
 
 /** Médiá okna (na pás fotiek/videí): všetky médiá udalostí + samostatné, od najnovšieho. Pure. */
+/**
+ * Nesie položka naozaj obrázok alebo video? Telegramové kanály sú z väčšiny
+ * TEXT: za 22. 9. 2026 bolo v okne 292 položiek, z toho 196 textových hlásení
+ * bez prílohy (typicky „Повітряні сили ЗСУ" o dronoch). Pás sa volá FOTKY
+ * A VIDEÁ, takže sa kreslili ako prázdne dlaždice a ešte sa aj počítali.
+ *
+ * Video bez náhľadu je stále video — prílohy ArmyInformu (`provider: 'file'`)
+ * náhľad nemajú, ale prehrať sa dajú, takže v páse ostávajú so značkou ▶.
+ * Pure.
+ */
+export function hasVisualMedia(m) {
+  if (!m) return false;
+  if (m.kind === 'video' || Number(m.videos) > 0) return true;
+  return Boolean(m.thumb) || (Array.isArray(m.photos) && m.photos.length > 0);
+}
+
 export function mediaInWindow(events) {
   const out = []; const seen = new Set();
   for (const e of events || []) {
     for (const m of e.media || []) {
       const key = m.url || m.thumb;
-      if (!key || seen.has(key)) continue;
+      if (!key || !hasVisualMedia(m) || seen.has(key)) continue;
       seen.add(key);
       out.push({ ...m, t: e.t, eventId: e.id, place: e.place || null, type: e.type, severity: e.severity, level: e.level });
     }
