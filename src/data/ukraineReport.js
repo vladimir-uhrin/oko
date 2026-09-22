@@ -138,6 +138,13 @@ export function directionsInParagraph(paragraph) {
 }
 
 /**
+ * Ako ďaleko smie byť „станом на …" od času vydania článku, kým mu ešte veríme.
+ * Deň a pol je štedrá rezerva na pásmo aj neskorú publikáciu; preklep v mesiaci
+ * (jediný pozorovaný prípad) je od nej na míle ďaleko.
+ */
+export const REPORT_STAMP_DRIFT_MS = 36 * 3600_000;
+
+/**
  * „станом на 08:00 19 вересня" → {time, day, month} alebo null. Pure.
  *
  * ArmyInform píše hodinu raz s dvojbodkou, raz s BODKOU („станом на 08.00
@@ -194,6 +201,18 @@ export function parseGeneralStaffReport(paragraphs, meta = {}) {
   const publishedMs = meta.publishedAt ? new Date(meta.publishedAt).getTime() : NaN;
   const year = Number.isFinite(publishedMs) ? new Date(publishedMs).getUTCFullYear() : null;
   const stamp = reportTimestamp(all, { year });
+  // Zdroj sa v mesiaci pomýli: článok z 11. 9. 2026 doslova píše „станом на
+  // 8:00 11 серпня". Hlásenie vychádza v to isté ráno, ktoré opisuje (~05:11 UTC),
+  // takže bežný rozdiel je v minútach a deň vydania je spoľahlivejšia kotva než
+  // ručne napísaná značka. Keď sa rozídu, vyhráva vydanie — inak by sa septembrové
+  // hlásenie tvárilo ako augustové a v archíve prepísalo cudzí deň.
+  const stampMs = stamp?.iso ? Date.parse(stamp.iso) : Number.NaN;
+  const sourceStampText = stamp ? `${stamp.time} ${stamp.day}.${stamp.month}.` : null;
+  const stampDrifted = Number.isFinite(stampMs) && Number.isFinite(publishedMs)
+    && Math.abs(publishedMs - stampMs) > REPORT_STAMP_DRIFT_MS;
+  // Pri posune vydania nevieme hodinu, takže sa uvádza len dátum — tvrdiť „08:00"
+  // o čase, ktorý sme si domysleli, by bola tá istá chyba ako veriť zdroju.
+  const publishedDate = stampDrifted ? new Date(publishedMs) : null;
   const directions = [];
   const seen = new Set();
   for (const p of list) {
@@ -210,8 +229,11 @@ export function parseGeneralStaffReport(paragraphs, meta = {}) {
   return {
     ok: directions.length > 0 || total !== null,
     total,
-    reportedAt: stamp?.iso ?? null,
-    reportedAtText: stamp ? `${stamp.time} ${stamp.day}.${stamp.month}.` : null,
+    reportedAt: publishedDate ? publishedDate.toISOString() : (stamp?.iso ?? null),
+    reportedAtText: publishedDate ? `${publishedDate.getUTCDate()}.${publishedDate.getUTCMonth() + 1}.` : sourceStampText,
+    // Čo tvrdil zdroj, aj keď sme mu neuverili — nech sa to dá v UI vysvetliť.
+    stampDrifted,
+    sourceStampText,
     strikes: strikesInText(list.slice(0, 4).join(' ')),
     directions,
     directionsWithActivity: directions.filter((d) => Number(d.attacks) > 0).length,

@@ -271,6 +271,12 @@ export function createUkrainePanel({
     reportBox.hidden = false;
     reportSummary.textContent = translate('ukraine.report.summary', { total: r.total ?? '?', time: r.reportedAtText || '?' })
       + (state.placesCount > 0 ? ` · ${translate('ukraine.report.places-count', { n: state.placesCount })}` : '');
+    // Zdroj si v značke „станом на" občas pomýli mesiac (11. 9. 2026 → „11 серпня").
+    // Vtedy karta ukazuje dátum vydania; čo tvrdil zdroj, patrí do vysvetlenia,
+    // nie do ticha — inak to vyzerá, že sme si dátum vymysleli my.
+    reportSummary.title = r.stampDrifted && r.sourceStampText
+      ? translate('ukraine.report.stamp-drifted', { text: r.sourceStampText })
+      : '';
     const s = r.strikes || {};
     const fmt = (v) => (Number.isFinite(v) ? numberFormat.format(v) : '?');
     reportStrikes.textContent = translate('ukraine.report.strikes', { air: fmt(s.airStrikes), bombs: fmt(s.guidedBombs), drones: fmt(s.kamikazeDrones), shellings: fmt(s.shellings) });

@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  REPORT_STAMP_DRIFT_MS,
   attacksInParagraph,
   directionNominative,
   directionsInParagraph,
@@ -161,4 +162,47 @@ test('čas hlásenia: ArmyInform píše hodinu raz s dvojbodkou, raz s bodkou', 
   // Čokoľvek iné než dvojbodka/bodka nie je čas.
   assert.equal(reportTimestamp('станом на 08,00 22 вересня', { year: 2026 }), null);
   assert.equal(reportTimestamp('станом на 0800 22 вересня', { year: 2026 }), null);
+});
+
+test('keď „станом на" utečie od vydania článku, rozhoduje vydanie', () => {
+  // Skutočný prípad: článok z 11. 9. 2026 doslova píše „станом на 8:00 11 серпня".
+  // Kým sme značke verili, septembrové hlásenie sa tvárilo ako augustové a
+  // v archíve prepísalo skutočný 11. august.
+  const ps = [
+    'Протягом минулої доби загалом зафіксовано 235 бойових зіткнень.',
+    'Про це йдеться в оперативній інформації Генерального штабу ЗСУ станом на 8:00 11 серпня.',
+    'На Лиманському напрямку ворог 12 разів атакував наші позиції.',
+  ];
+  const r = parseGeneralStaffReport(ps, { publishedAt: '2026-09-11T05:11:49.000Z', url: 'u', title: 't' });
+  assert.equal(r.stampDrifted, true);
+  assert.equal(r.reportedAt, '2026-09-11T05:11:49.000Z', 'deň vydania je kotva');
+  assert.equal(r.reportedAtText, '11.9.', 'hodinu nepoznáme, tak ju netvrdíme');
+  assert.equal(r.sourceStampText, '08:00 11.8.', 'čo tvrdil zdroj, ostáva k dispozícii');
+});
+
+test('bežný rozdiel v minútach značku nezhodí', () => {
+  const ps = [
+    'Протягом минулої доби загалом зафіксовано 248 бойових зіткнень.',
+    'Про це йдеться у зведенні Генерального штабу ЗСУ станом на 08.00 22 вересня.',
+    'На Лиманському напрямку ворог 12 разів атакував наші позиції.',
+  ];
+  const r = parseGeneralStaffReport(ps, { publishedAt: '2026-09-22T05:11:23.000Z', url: 'u', title: 't' });
+  assert.equal(r.stampDrifted, false);
+  assert.equal(r.reportedAtText, '08:00 22.9.', 'dôveryhodná značka sa zobrazí aj s hodinou');
+  assert.equal(r.reportedAt, '2026-09-22T05:00:00.000Z');
+});
+
+test('prah posunu je práve na hranici tolerantný', () => {
+  const ps = ['Загалом 100 бойових зіткнень.', 'станом на 08:00 11 вересня.', 'На Лиманському напрямку ворог 1 раз атакував.'];
+  const base = Date.parse('2026-09-11T05:00:00.000Z');
+  const at = (ms) => parseGeneralStaffReport(ps, { publishedAt: new Date(base + ms).toISOString(), url: 'u', title: 't' });
+  assert.equal(at(REPORT_STAMP_DRIFT_MS).stampDrifted, false, 'presne na prahu ešte veríme');
+  assert.equal(at(REPORT_STAMP_DRIFT_MS + 60_000).stampDrifted, true);
+});
+
+test('bez času publikovania niet s čím porovnávať — značka platí', () => {
+  const ps = ['Загалом 100 бойових зіткнень.', 'станом на 08:00 11 серпня.', 'На Лиманському напрямку ворог 1 раз атакував.'];
+  const r = parseGeneralStaffReport(ps, { url: 'u', title: 't' });
+  assert.equal(r.stampDrifted, false);
+  assert.equal(r.reportedAtText, '08:00 11.8.');
 });

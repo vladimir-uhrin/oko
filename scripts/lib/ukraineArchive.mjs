@@ -19,7 +19,7 @@ import {
   ARMYINFORM_UA_FEED, TELEGRAM_CHANNELS, YOUTUBE_CHANNELS,
   parseRssVideoEnclosures, parseTelegramPreview, parseYoutubeFeed, telegramPreviewUrl, youtubeFeedUrl,
 } from '../../src/data/ukraineMedia.js';
-import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from '../../src/data/ukraineReport.js';
+import { ARMYINFORM_OPS_FEED, REPORT_STAMP_DRIFT_MS, extractReportParagraphs, parseGeneralStaffReport } from '../../src/data/ukraineReport.js';
 import { WIKI_DETAILED_TITLE, WIKI_OVERVIEW_TITLE, controlPointsFromModules, controlSummary } from '../../src/data/ukraineControl.js';
 import { DEEPSTATE_ATTRIBUTION, DEEPSTATE_LAST_URL, deepstateSnapshotFromApi } from '../../src/data/ukraineDeepState.js';
 
@@ -286,13 +286,8 @@ export async function collectMedia({ fetchImpl = fetch, log = () => {}, youtube 
  * teda v ten istý deň, takže horší odhad dňa je stále lepší než žiadny deň.
  * Pure.
  */
-/**
- * Ako ďaleko smie byť „станом на …" od času vydania článku, kým mu ešte veríme.
- * Hlásenie vychádza ~05:11 UTC v to isté ráno, ktoré opisuje, takže rozdiel býva
- * v minútach; deň a pol je štedrá rezerva na posun pásma či neskorú publikáciu.
- */
-const REPORT_DAY_DRIFT_MS = 36 * 3600_000;
-
+// Prah je jeden a ten istý ako v parseri (ukraineReport.js) — dve kópie 36 hodín
+// by sa raz rozišli a archív by ukladal inam, než čo ukazuje karta.
 export const reportDay = (report) => {
   const reported = Date.parse(report?.reportedAt || '');
   const published = typeof report?.publishedAt === 'number' ? report.publishedAt : Date.parse(report?.publishedAt || '');
@@ -301,7 +296,7 @@ export const reportDay = (report) => {
   // uložilo pod 11. 8. a PREPÍSALO skutočné augustové — 11. 9. pritom ostal
   // prázdny. Deň vydania je kotva, „станом на" je len popis.
   if (Number.isFinite(reported) && Number.isFinite(published)) {
-    return dayKey(Math.abs(published - reported) > REPORT_DAY_DRIFT_MS ? published : reported);
+    return dayKey(Math.abs(published - reported) > REPORT_STAMP_DRIFT_MS ? published : reported);
   }
   for (const t of [reported, published]) if (Number.isFinite(t)) return dayKey(t);
   return null;
