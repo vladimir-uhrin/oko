@@ -64,3 +64,20 @@ test('ageText skladá text cez odovzdaný prekladač', () => {
   assert.equal(ageText(39, translate), 'ukraine.age.many:39');
   assert.equal(ageText(null, translate), '', 'bez veku nič nepíšeme');
 });
+
+test('vek sa ráta voči PREZERANÉMU dňu, nie voči dnešku', async () => {
+  const { viewedRefMs } = await import('./ukraineFreshness.js');
+  const now = Date.parse('2026-09-23T05:39:00Z');
+  // LIVE: prezeraný deň je dnešok → presne „teraz", nič sa nemení.
+  assert.equal(viewedRefMs('2026-09-23', now), now);
+  // Prehrávanie: koniec dňa kurzora.
+  assert.equal(viewedRefMs('2022-03-01', now), Date.parse('2022-03-01T23:59:59.999Z'));
+  // Snímka z 25. 2. 2022 pri pohľade na 1. 3. 2022 je 4 dni stará, nie 1 670.
+  assert.equal(ageDays('2022-02-25T10:00:00Z', viewedRefMs('2022-03-01', now)), 4);
+  assert.equal(freshnessOf('2022-02-25T10:00:00Z', viewedRefMs('2022-03-01', now), CONTROL_STALE_DAYS).stale, false);
+  // Budúci deň sa nesmie stať referenciou.
+  assert.equal(viewedRefMs('2026-12-31', now), now);
+  // Bez dňa alebo s nezmyslom = „teraz".
+  assert.equal(viewedRefMs(null, now), now);
+  assert.equal(viewedRefMs('zajtra', now), now);
+});

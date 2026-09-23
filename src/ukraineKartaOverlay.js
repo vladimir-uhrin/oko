@@ -13,6 +13,7 @@
  */
 import { frontSceneLabel } from './ukraineFrontScenes.js';
 import { UKRAINE_OUTLINE_BBOX, UKRAINE_OUTLINE_RINGS } from './data/ukraineOutline.js';
+import { STALE_DIM } from './data/ukraineFreshness.js';
 
 export const KARTA_OVERLAY_ID = 'oko-karta-overlay';
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -92,7 +93,8 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
     items.push({ key: 'occupied', colorCss: c.occupied, label: translate('ukraine.karta.legend.occupied') });
     items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
   } else if (control?.shown) {
-    items.push({ key: 'ru', colorCss: c.ru, label: translate('ukraine.karta.legend.ru') });
+    // Zastaraná snímka sa na mape kreslí stlmene — vzorka musí ustúpiť rovnako.
+    items.push({ key: 'ru', colorCss: c.ru, label: translate('ukraine.karta.legend.ru'), ...(control.stale ? { dim: STALE_DIM } : {}) });
   }
   items.push({ key: 'pin-ua', colorCss: c.pinUa, dot: true, label: translate('ukraine.karta.legend.pin-ua') });
   items.push({ key: 'pin-ru', colorCss: c.pinRu, dot: true, label: translate('ukraine.karta.legend.pin-ru') });
@@ -161,8 +163,10 @@ export function drawKartaExport(ctx, model, width, height, { font = 'system-ui, 
     items.forEach((item, i) => {
       const ry = by + headH + px(8) + i * rowH;
       ctx.fillStyle = item.colorCss || '#888';
+      ctx.globalAlpha = Number.isFinite(item.dim) ? item.dim : 1;
       if (item.dot) { ctx.beginPath(); ctx.arc(bx + px(16), ry + px(4), px(5), 0, Math.PI * 2); ctx.fill(); }
       else { roundRectPath(ctx, bx + px(10), ry - px(2), px(16), px(11), px(2)); ctx.fill(); }
+      ctx.globalAlpha = 1;
       ctx.fillStyle = '#cdd9e4'; ctx.font = `${px(12)}px ${font}`;
       ctx.fillText(item.label, bx + px(34), ry + px(8));
     });
@@ -309,6 +313,7 @@ export function createUkraineKartaOverlay({
     const li = el(doc, 'li', 'oko-karta-legend-row');
     const sw = el(doc, 'span', `oko-karta-swatch oko-karta-swatch-${item.dot ? 'dot' : item.glyph ? `glyph glyph-${item.glyph}` : item.pattern === 'hatch' ? 'hatch' : 'fill'}`);
     sw.style.setProperty('--sw', item.colorCss);
+    if (Number.isFinite(item.dim)) sw.style.opacity = String(item.dim);
     li.append(sw, el(doc, 'span', 'oko-karta-legend-label', item.label));
     return li;
   }

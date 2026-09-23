@@ -161,3 +161,13 @@ test('drawKartaExport: nakreslí titulok/legendu/mapku bez pádu, prázdny model
   assert.ok(texts.includes('ruská kontrola'));
   assert.doesNotThrow(() => drawKartaExport(ctx, null, 1200, 594), 'prázdny model neuškodí');
 });
+
+test('A2: vzorka ruskej kontroly na KARTE sa stlmí spolu s mapou', async () => {
+  const { STALE_DIM } = await import('./data/ukraineFreshness.js');
+  const staleItems = kartaLegendItems({ control: { shown: true, stale: true } });
+  const freshItems = kartaLegendItems({ control: { shown: true, stale: false } });
+  assert.equal(staleItems.find((i) => i.key === 'ru').dim, STALE_DIM);
+  assert.equal(freshItems.find((i) => i.key === 'ru').dim, undefined, 'čerstvá vzorka bez stlmenia');
+  // Špendlíky sídiel nie sú zo snímky Wikipédie — nestlmujú sa.
+  assert.equal(staleItems.find((i) => i.key === 'pin-ua').dim, undefined);
+});

@@ -473,3 +473,40 @@ test('bežná chyba siete DeepState NEskryje — to nie je odmietnutie', async (
   assert.equal(tl.isDeepStateAvailable(), true);
   assert.ok(dsLine.textContent.includes('ukraine.tl.error'), dsLine.textContent);
 });
+
+test('A2: vek sa ráta voči prezeranému dňu — pri prehrávaní roku 2022 nie je snímka z roku 2022 „stará"', async () => {
+  const doc = fakeDocument();
+  const layer = fakeLayer();
+  const now = Date.parse('2026-09-23T05:39:00Z');
+  const clock = createTimelineClock({ now: () => now, windowId: '24h' });
+  const store = {
+    async load() { return { events: [], reports: {}, coverage: { news: [], media: [] }, errors: [], chunks: 1 }; },
+    async summary() { return { days: {} }; },
+    reportForDay() { return null; },
+    async control() { return null; },
+  };
+  const ctlListeners = new Set(); let snap = null;
+  const control = {
+    isShown: () => true, async show() {}, hide() {}, setZonesVisible() {},
+    setSnapshot(s) { snap = s; for (const fn of ctlListeners) fn(); },
+    // Stav vrstvy nesie aj requestedAt a stale — tak, ako ho počíta skutočná vrstva.
+    getState: () => ({ shown: true, loading: false, points: 1, revisionAt: snap?.revisionAt || null, requestedAt: snap?.requestedAt || null, stale: Boolean(snap?.stale), summary: null }),
+    onChange(fn) { ctlListeners.add(fn); return () => ctlListeners.delete(fn); },
+  };
+  const tl = createUkraineTimeline({
+    layer, store, clock, control, translate: (k) => k, lang: 'sk', documentRef: doc,
+    now: () => now, setTimer: () => 0, clearTimer: () => {}, origin: 'https://oko.test',
+  });
+  tl.show();
+  const { ctlAge, ctlBox } = tl._getStateForTest();
+  // Prehrávanie 1. 3. 2022: revízia z 25. 2. je voči tomu dňu 4 dni stará.
+  control.setSnapshot({ revisionAt: '2022-02-25T10:00:00Z', requestedAt: '2022-03-01', stale: false });
+  assert.equal(ctlAge.textContent, 'ukraine.age.many', 'vek je zobrazený');
+  assert.equal(ctlAge.className.includes('is-stale'), false, 'ale NIE ako zastaraný — voči 1. 3. 2022 je čerstvý');
+  assert.equal(ctlBox.className.includes('is-stale'), false, 'vzorky výplní v legende naplno');
+  // LIVE: tá istá revízia z 13. 8. pri pohľade na dnešok je zastaraná.
+  control.setSnapshot({ revisionAt: '2026-08-13T09:28:11Z', requestedAt: '2026-09-23', stale: true });
+  assert.equal(ctlAge.textContent, 'ukraine.age.many · ukraine.src.stale');
+  assert.equal(ctlAge.className.includes('is-stale'), true);
+  assert.equal(ctlBox.className.includes('is-stale'), true, 'vzorky v legende ustúpia spolu s mapou');
+});

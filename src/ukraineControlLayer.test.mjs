@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CONTROL_CODE } from './data/ukraineControl.js';
-import { CONTROL_STYLES, controlPointSize, createUkraineControlLayer, cssRgb, nearestSide, paintControlCanvas } from './ukraineControlLayer.js';
+import { CONTROL_STYLES, controlPointSize, controlZoneAlphas, createUkraineControlLayer, cssRgb, nearestSide, paintControlCanvas } from './ukraineControlLayer.js';
 
 function fakeCanvas() {
   const calls = [];
@@ -86,4 +86,15 @@ test('K3: paintControlCanvas mäkko — výplne 1 px na bunku do pomocného plá
   const crisp = fakeCanvas();
   paintControlCanvas(raster, crisp, { scale: 2, soft: 3 });
   assert.ok(crisp.calls.some((c) => c[0] === 'fillRect'), 'bez továrne kreslí naostro');
+});
+
+test('A2: zastaraná snímka stlmí výplň aj šrafovanie o STALE_DIM, čerstvá nie', async () => {
+  const { STALE_DIM } = await import('./data/ukraineFreshness.js');
+  const fresh = controlZoneAlphas(CONTROL_STYLES.default, false);
+  const stale = controlZoneAlphas(CONTROL_STYLES.default, true);
+  assert.equal(fresh.ruAlpha, CONTROL_STYLES.default.ruAlpha, 'čerstvá kreslí naplno');
+  assert.equal(stale.ruAlpha, CONTROL_STYLES.default.ruAlpha * STALE_DIM);
+  assert.equal(stale.hatchAlpha, fresh.hatchAlpha * STALE_DIM, 'aj zóna bojov je rovnako stará');
+  // Štýl KARTA má vlastnú slabšiu výplň — stlmenie sa na ňu násobí, neprepisuje ju.
+  assert.equal(controlZoneAlphas(CONTROL_STYLES.karta, true).ruAlpha, CONTROL_STYLES.karta.ruAlpha * STALE_DIM);
 });

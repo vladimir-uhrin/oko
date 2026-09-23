@@ -19,6 +19,7 @@ import * as Cesium from 'cesium';
 import { CONTROL_CODE, CONTROL_COLORS, CONTROL_RASTER_BBOX, controlRaster, controlSummary } from './data/ukraineControl.js';
 import { fetchUkraineControl } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
+import { CONTROL_STALE_DAYS, STALE_DIM, freshnessOf, viewedRefMs } from './data/ukraineFreshness.js';
 import { currentLanguage, t } from './i18n.js';
 
 export const UKRAINE_CONTROL_ID = 'ukraine-control';
@@ -125,6 +126,21 @@ export function nearestSide(points, lon, lat, maxKm = 3) {
   return null;
 }
 
+/**
+ * Krytie výplní zón pre štýl a vek snímky. Pri zastaranej snímke sa RU výplň aj
+ * šrafovanie zóny bojov stlmia o STALE_DIM — tá istá hodnota ako vzorky
+ * v legende osi a KARTY, aby mapa a legenda nikdy nesedeli každá inak. Pure.
+ * @param {{ruAlpha: number}} style prvok CONTROL_STYLES
+ * @param {boolean} stale
+ * @returns {{ruAlpha: number, hatchAlpha: number}}
+ */
+export function controlZoneAlphas(style, stale) {
+  const dim = stale ? STALE_DIM : 1;
+  return { ruAlpha: style.ruAlpha * dim, hatchAlpha: CONTROL_HATCH_ALPHA * dim };
+}
+/** Krytie šrafovania zóny bojov (predvolené v paintControlCanvas). */
+export const CONTROL_HATCH_ALPHA = 0.6;
+
 /** Štýlové režimy rastra zón: KARTA = mäkké okraje, slabšia RU výplň, body Wikipédie skryté (špendlíky podkladu ich nahradia). */
 export const CONTROL_STYLES = Object.freeze({
   default: Object.freeze({ soft: 0, ruAlpha: 0.30, points: true }),
@@ -210,7 +226,7 @@ export function createUkraineControlLayer({
     }
     _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX });
     const st = CONTROL_STYLES[_style] || CONTROL_STYLES.default;
-    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, ruAlpha: st.ruAlpha, createCanvas: () => doc.createElement('canvas') });
+    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, ...controlZoneAlphas(st, snapshotFreshness().stale), createCanvas: () => doc.createElement('canvas') });
     if (painted) {
       const b = _raster.bbox;
       zoneEntity = ds.entities.add({
@@ -321,6 +337,13 @@ export function createUkraineControlLayer({
     emit();
   }
   function setPointsVisible(on) { _pointsVisible = Boolean(on); points.show = pointsShown(); requestRender(); emit(); }
+  /**
+   * Vek snímky voči PREZERANÉMU dňu (`requestedAt` z odpovede servera), nie voči
+   * dnešku — pri prehrávaní histórie by inak bola každá stará snímka „zastaraná".
+   */
+  function snapshotFreshness() {
+    return freshnessOf(_snapshot?.revisionAt, viewedRefMs(_snapshot?.requestedAt, now()), CONTROL_STALE_DAYS);
+  }
   function setZonesVisible(on) { _zonesVisible = Boolean(on); ds.show = _shown && _zonesVisible; if (zoneEntity?.rectangle) zoneEntity.rectangle.show = _zonesVisible; requestRender(); emit(); }
   function getState() {
     return {
@@ -328,6 +351,7 @@ export function createUkraineControlLayer({
       day: _snapshot?.day || null, revisionAt: _snapshot?.revisionAt || null, snapshots: _snapshot?.snapshots ?? null,
       summary: _snapshot ? (_snapshot.summary || controlSummary(_snapshot.points)) : null, counts: _raster?.counts || null, points: _snapshot?.points?.length || 0,
       revisions: _snapshot?.revisions || null, style: _style,
+      requestedAt: _snapshot?.requestedAt || null, ...snapshotFreshness(),
     };
   }
   function destroy() {

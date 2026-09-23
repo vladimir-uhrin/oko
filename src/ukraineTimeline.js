@@ -17,7 +17,7 @@ import { EVENT_TYPES, dayKey } from './data/ukraineEvents.js';
 import { createUkraineEventStore, mediaInWindow } from './data/ukraineEventsClient.js';
 import { TIMELINE_SPEEDS, TIMELINE_WINDOWS, createTimelineClock, cursorText, histogramBins } from './data/ukraineTimelineClock.js';
 import { TYPE_GLYPH, SEV_COLOR } from './ukraineEventsLayer.js';
-import { CONTROL_STALE_DAYS, DEEPSTATE_STALE_DAYS, ageText, freshnessOf } from './data/ukraineFreshness.js';
+import { CONTROL_STALE_DAYS, DEEPSTATE_STALE_DAYS, ageText, freshnessOf, viewedRefMs } from './data/ukraineFreshness.js';
 import { currentLanguage, t } from './i18n.js';
 
 const IMG_API = '/api/img';
@@ -153,9 +153,9 @@ export function createUkraineTimeline({
   const row3 = el('div', 'oko-ukr-tl-row oko-ukr-tl-row3');
   // Územná kontrola (etapa 4C): čip KONTROLA + legenda RU výplň / zóna bojov / body,
   // „stav k <revízia> · podľa Wikipédie" — snímka sleduje deň kurzora.
-  let ctlChip = null; let ctlLine = null; let ctlAge = null; let ctlCounts = null;
+  let ctlBox = null; let ctlChip = null; let ctlLine = null; let ctlAge = null; let ctlCounts = null;
   if (control) {
-    const ctlBox = el('div', 'oko-ukr-tl-ctl');
+    ctlBox = el('div', 'oko-ukr-tl-ctl');
     ctlChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.control'), () => { if (control.isShown()) control.hide(); else void showControl(); }, translate('ukraine.ctl.note'));
     ctlChip.setAttribute('aria-pressed', 'false');
     ctlBox.appendChild(ctlChip);
@@ -407,7 +407,7 @@ export function createUkraineTimeline({
     // nekreslí nič, niet čo prekrývať.
     control?.setZonesVisible?.(!(st.shown && st.features > 0));
     if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; return; }
-    renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS);
+    renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS, st.requestedAt);
     if (st.at) dsLine.textContent = translate('ukraine.ds.since', { date: st.stampText });
     else if (!st.loading && !dsLine.textContent) dsLine.textContent = translate('ukraine.ds.missing');
     const a = st.areaKm2;
@@ -433,9 +433,10 @@ export function createUkraineTimeline({
    * ZASTARANÉ a trieda, ktorá ho zafarbí: samotný dátum nikto neprepočítava,
    * takže päť týždňov stará línia frontu vyzerala rovnako dôveryhodne ako včerajšia.
    */
-  function renderAge(node, at, staleDays) {
+  function renderAge(node, at, staleDays, requestedAt = null) {
     if (!node) return;
-    const { ageDays: days, stale } = freshnessOf(at, now(), staleDays);
+    // Voči PREZERANÉMU dňu: pri prehrávaní roku 2022 nie je snímka z roku 2022 stará.
+    const { ageDays: days, stale } = freshnessOf(at, viewedRefMs(requestedAt, now()), staleDays);
     const text = ageText(days, translate);
     node.textContent = stale ? `${text} · ${translate('ukraine.src.stale')}` : text;
     node.classList.toggle('is-stale', stale);
@@ -447,7 +448,10 @@ export function createUkraineTimeline({
     ctlChip.classList.toggle('active', st.shown);
     ctlChip.setAttribute('aria-pressed', String(st.shown));
     if (!st.shown) { ctlLine.textContent = ''; renderAge(ctlAge, null, CONTROL_STALE_DAYS); ctlCounts.textContent = ''; return; }
-    renderAge(ctlAge, st.revisionAt, CONTROL_STALE_DAYS);
+    renderAge(ctlAge, st.revisionAt, CONTROL_STALE_DAYS, st.requestedAt);
+    // Vzorky výplní v legende sa stlmia spolu s mapou, inak by legenda ukazovala
+    // sýtu červenú a mapa bledú — a čitateľ by hľadal dve rôzne veci.
+    ctlBox?.classList.toggle('is-stale', Boolean(st.stale));
     if (st.revisionAt) ctlLine.textContent = translate('ukraine.ctl.since', { date: shortDay(String(st.revisionAt).slice(0, 10)) + String(st.revisionAt).slice(0, 4) });
     else if (!st.loading && !ctlLine.textContent) ctlLine.textContent = translate('ukraine.ctl.missing');
     const s = st.summary?.settlements;
@@ -700,6 +704,6 @@ export function createUkraineTimeline({
     isDeepStateAvailable: () => !_deepstateBlocked,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
+    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
   };
 }

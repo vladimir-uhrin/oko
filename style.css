@@ -11725,6 +11725,10 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* `display: flex` vyššie by prebilo atribút hidden — riadok DeepState sa skrýva,
    keď ho server na verejnej doméne odmietne (451), a musí naozaj zmiznúť. */
 .oko-ukr-tl-ctl[hidden] { display: none; }
+/* Zastaraná snímka kontroly: mapa kreslí výplne na polovicu (CONTROL_STALE_DIM)
+   a vzorky v legende musia ustúpiť rovnako, inak nesedia s tým, čo je na mape. */
+.oko-ukr-tl-ctl.is-stale .oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw,
+.oko-ukr-tl-ctl.is-stale .oko-ukr-tl-ctl-item.is-zone .oko-ukr-tl-ctl-sw { opacity: 0.5; }
 .oko-ukr-tl-ctl-item { display: inline-flex; align-items: center; gap: 4px; }
 .oko-ukr-tl-ctl-sw { display: inline-block; width: 12px; height: 9px; border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.2); }
 .oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw { background: rgba(224, 85, 63, 0.35); border-color: rgba(224, 85, 63, 0.7); }

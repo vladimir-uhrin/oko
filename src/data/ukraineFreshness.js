@@ -35,6 +35,15 @@ export const CONTROL_STALE_DAYS = 14;
 export const DEEPSTATE_STALE_DAYS = 4;
 
 /**
+ * O koľko sa stlmí výplň zastaranej snímky — na mape aj vo vzorke legendy.
+ * Značka ZASTARANÉ v legende nestačí: mapa 40 dní stará sa kreslila rovnako
+ * sýto ako včerajšia a oko číta farbu, nie legendu. Polovica je ešte čitateľná
+ * (tvar zón ostáva), ale na prvý pohľad sa líši od čerstvej. Jedna hodnota pre
+ * mapu, legendu osi aj legendu KARTY, aby nikdy nesedeli každá inak.
+ */
+export const STALE_DIM = 0.5;
+
+/**
  * Vek v celých dňoch nadol, alebo `null`, keď dátum chýba či je nečitateľný.
  * Budúci dátum dá 0, nie záporné číslo — „o dva dni čerstvé" nie je stav, ktorý
  * by sa dal zobraziť, a zdroje s posunutým pásmom by inak hlásili −1. Pure.
@@ -78,4 +87,24 @@ export function ageText(days, translate) {
   const key = ageTextKey(days);
   if (!key) return '';
   return translate(key, { n: days });
+}
+
+/**
+ * Referenčný čas pre vek snímky: koniec PREZERANÉHO dňa, no nikdy budúcnosť.
+ *
+ * V LIVE je prezeraný deň dnešok, takže vyjde „teraz" a nič sa nemení. Pri
+ * prehrávaní histórie je to koniec dňa kurzora — kým sa vek počítal od „teraz",
+ * snímka z roku 2022 pri pohľade na rok 2022 svietila „pred 1 000 dňami ·
+ * ZASTARANÉ", hoci voči dňu, na ktorý sa človek pozerá, bola čerstvá.
+ *
+ * `requestedDay` je deň, pre ktorý server snímku vydal (`requestedAt`
+ * v odpovedi /api/ukraine/events/control a …/deepstate). Bez neho = „teraz".
+ * Pure.
+ */
+export function viewedRefMs(requestedDay, nowMs) {
+  if (!Number.isFinite(nowMs)) return nowMs;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(requestedDay || ''));
+  if (!m) return nowMs;
+  const dayEnd = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
+  return Math.min(nowMs, dayEnd);
 }

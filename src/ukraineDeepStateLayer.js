@@ -275,7 +275,7 @@ export function createUkraineDeepStateLayer({
       shown: _shown, loading: _loading, error: _error,
       day: _snapshot?.day || null, at: _snapshot?.at || null, stampText: deepstateStampText(_snapshot), datetime: _snapshot?.datetime || null,
       counts: _snapshot?.counts || null, areaKm2: _snapshot?.areaKm2 || null, features: _snapshot?.features?.length || 0, snapshots: _snapshot?.snapshots ?? null,
-      style: _style,
+      style: _style, requestedAt: _snapshot?.requestedAt || null,
     };
   }
   function destroy() {
