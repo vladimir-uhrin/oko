@@ -382,3 +382,94 @@ test('vek zdroja v legende: čerstvý len dátum, nad prahom ZASTARANÉ; DeepSta
   assert.equal(dsAge.textContent, '');
   assert.equal(dsAge.className.includes('is-stale'), false);
 });
+
+test('DeepState odmietnutý serverom (451) sa SKRYJE — nič sa neruší a ďalej sa nepýta', async () => {
+  // Na verejnej doméne server DeepState neposkytuje, kým nepríde súhlas.
+  // Používateľ: „deep state neruš, skry" — riadok aj vrstva zmiznú, archív aj
+  // lokálne zobrazenie ostávajú, a keď súhlas príde, server odpovie 200.
+  const doc = fakeDocument();
+  const layer = fakeLayer();
+  const now = T0;
+  const clock = createTimelineClock({ now: () => now, windowId: '24h' });
+  const store = {
+    async load() { return { events: [], reports: {}, coverage: { news: [], media: [] }, errors: [], chunks: 1 }; },
+    async summary() { return { days: {} }; },
+    reportForDay() { return null; },
+  };
+  const dsCalls = [];
+  store.deepstate = async (day) => { dsCalls.push(day); const e = new Error('deepstate_consent_pending'); e.status = 451; throw e; };
+  store.control = async () => ({ day: '2026-09-19', revisionAt: '2026-09-19T08:00:00Z', points: [{ lat: 48, lon: 37 }], summary: null });
+  const zonesCalls = [];
+  const control = {
+    isShown: () => true, async show() {}, hide() {}, setSnapshot() {},
+    setZonesVisible: (on) => zonesCalls.push(on),
+    getState: () => ({ shown: true, loading: false, points: 1, revisionAt: null, summary: null }),
+    onChange() { return () => {}; },
+  };
+  const dsListeners = new Set(); let dsShown = false; let dsSnapshot = 'pôvodná';
+  const deepstate = {
+    isShown: () => dsShown,
+    async show() { dsShown = true; for (const fn of dsListeners) fn(); },
+    hide() { dsShown = false; for (const fn of dsListeners) fn(); },
+    setSnapshot(s) { dsSnapshot = s; },
+    getState: () => ({ shown: dsShown, loading: false, features: 0, day: null, at: null, stampText: '', areaKm2: null }),
+    onChange(fn) { dsListeners.add(fn); return () => dsListeners.delete(fn); },
+  };
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await new Promise((r) => setImmediate(r)); };
+  const tl = createUkraineTimeline({
+    layer, store, clock, control, deepstate, translate: (k) => k, lang: 'sk', documentRef: doc,
+    now: () => now, setTimer: () => 0, clearTimer: () => {}, origin: 'https://oko.test',
+  });
+  tl.show();
+  const { dsBox } = tl._getStateForTest();
+  assert.equal(dsBox.hidden, false, 'kým server neodpovie, riadok je na mieste (lokálne tam aj ostane)');
+  assert.equal(tl.isDeepStateAvailable(), true);
+
+  await tl.showDeepState();
+  await settle();
+  assert.equal(dsBox.hidden, true, 'po 451 riadok zmizne');
+  assert.equal(dsShown, false, 'vrstva sa vypne, nekreslí prázdno');
+  assert.equal(dsSnapshot, null);
+  assert.equal(tl.isDeepStateAvailable(), false);
+  assert.equal(tl.getState().deepstateAvailable, false);
+  assert.equal(zonesCalls.at(-1), true, 'zóny Wikipédie ostávajú viditeľné');
+
+  // Front scéna volá showDeepState pri každom prepnutí smeru — už sa nepýta.
+  const before = dsCalls.length;
+  await tl.showDeepState();
+  await settle();
+  assert.equal(dsCalls.length, before, 'po 451 sa DeepState znova nepýta');
+  assert.equal(dsShown, false);
+});
+
+test('bežná chyba siete DeepState NEskryje — to nie je odmietnutie', async () => {
+  const doc = fakeDocument();
+  const layer = fakeLayer();
+  const clock = createTimelineClock({ now: () => T0, windowId: '24h' });
+  const store = {
+    async load() { return { events: [], reports: {}, coverage: { news: [], media: [] }, errors: [], chunks: 1 }; },
+    async summary() { return { days: {} }; },
+    reportForDay() { return null; },
+    async deepstate() { const e = new Error('sieť'); e.status = 502; throw e; },
+  };
+  const dsListeners = new Set(); let dsShown = false;
+  const deepstate = {
+    isShown: () => dsShown,
+    async show() { dsShown = true; for (const fn of dsListeners) fn(); },
+    hide() { dsShown = false; for (const fn of dsListeners) fn(); },
+    setSnapshot() {},
+    getState: () => ({ shown: dsShown, loading: false, features: 0, at: null, stampText: '', areaKm2: null }),
+    onChange(fn) { dsListeners.add(fn); return () => dsListeners.delete(fn); },
+  };
+  const tl = createUkraineTimeline({
+    layer, store, clock, deepstate, translate: (k) => k, lang: 'sk', documentRef: doc,
+    now: () => T0, setTimer: () => 0, clearTimer: () => {}, origin: 'https://oko.test',
+  });
+  tl.show();
+  await tl.showDeepState();
+  for (let i = 0; i < 6; i += 1) await new Promise((r) => setImmediate(r));
+  const { dsBox, dsLine } = tl._getStateForTest();
+  assert.equal(dsBox.hidden, false, 'výpadok siete sa hlási, neskrýva');
+  assert.equal(tl.isDeepStateAvailable(), true);
+  assert.ok(dsLine.textContent.includes('ukraine.tl.error'), dsLine.textContent);
+});

@@ -1089,7 +1089,6 @@ export const EN_STRINGS = Object.freeze({
   'cmd.toggle.off': '✓ on — turn off',
   'ukraine.ds.attribution': 'DeepStateMap.live · own symbology · units omitted · non-commercial hobby use, consent requested',
   'ukraine.ds.missing': 'no DeepState snapshot for this day (archived daily since 19 Sep 2026)',
-  'ukraine.ds.disabled': 'DeepState is not served publicly until DeepState answers the consent request',
   // Stage 5 (2026-09-19): building damage — ETH Zürich SAR model (CC BY 4.0) + UNOSAT points (CC BY-SA).
   'ukraine.part.damage': 'DAMAGE',
   'ukraine.dmg.title': 'BUILDING DAMAGE · static',
@@ -2840,7 +2839,6 @@ export const SK_STRINGS = Object.freeze({
   'cmd.toggle.off': '✓ zapnuté — vypnúť',
   'ukraine.ds.attribution': 'DeepStateMap.live · vlastná symbolika · bez jednotiek · nekomerčné hobby použitie, súhlas sa žiada',
   'ukraine.ds.missing': 'pre tento deň nie je snímka DeepState (archivujeme denne od 19. 9. 2026)',
-  'ukraine.ds.disabled': 'DeepState sa verejne neposkytuje, kým nepríde súhlas od DeepState',
   // Etapa 5 (2026-09-19): škody na budovách — SAR model ETH Zürich (CC BY 4.0) + body UNOSAT (CC BY-SA).
   'ukraine.part.damage': 'ŠKODY',
   'ukraine.dmg.title': 'ŠKODY NA BUDOVÁCH · statické',

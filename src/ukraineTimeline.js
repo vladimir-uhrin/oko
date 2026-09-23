@@ -175,9 +175,14 @@ export function createUkraineTimeline({
     row3.appendChild(ctlBox);
   }
   // DeepState (hobby použitie, súhlas sa žiada): čip + legenda + „stav k" + plochy.
-  let dsChip = null; let dsLine = null; let dsAge = null; let dsArea = null;
+  let dsBox = null; let dsChip = null; let dsLine = null; let dsAge = null; let dsArea = null;
+  // Server odmieta DeepState mimo localhostu (451), kým nepríde súhlas. Vtedy sa
+  // riadok SKRYJE — nič sa neruší: archív beží ďalej, lokálne ostáva viditeľný
+  // a keď súhlas príde (UKRAINE_DEEPSTATE=consent), vráti sa sám. Rozhoduje
+  // odpoveď servera, nie druhá kópia pravidla o hostiteľoch v prehliadači.
+  let _deepstateBlocked = false;
   if (deepstate) {
-    const dsBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-ds');
+    dsBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-ds');
     dsChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.deepstate'), () => { if (deepstate.isShown()) deepstate.hide(); else void showDeepState(); }, translate('ukraine.ds.note'));
     dsChip.setAttribute('aria-pressed', 'false');
     dsBox.appendChild(dsChip);
@@ -356,20 +361,36 @@ export function createUkraineTimeline({
       if (refresh && sameZoneSnapshot(snap, deepstate.getState(), 'at')) return;
       deepstate.setSnapshot(snap);
     } catch (error) {
-      if (_destroyed || refresh) return;
+      if (_destroyed) return;
+      // 451 = server DeepState mimo localhostu neposkytuje, kým nepríde súhlas
+      // (licencia §2). Nie je to chyba siete ani prázdny deň — riadok sa skryje.
+      if (error?.status === 451) { blockDeepState(); return; }
+      if (refresh) return;
       deepstate.setSnapshot(null);
-      // 451 = server odmietol servírovať DeepState mimo localhostu, kým nepríde
-      // súhlas (licencia §2). Nie je to chyba siete — povedz to ako stav.
       if (dsLine) {
-        if (error?.status === 404) dsLine.textContent = translate('ukraine.ds.missing');
-        else if (error?.status === 451) dsLine.textContent = translate('ukraine.ds.disabled');
-        else dsLine.textContent = translate('ukraine.tl.error', { detail: error?.message || error });
+        dsLine.textContent = error?.status === 404
+          ? translate('ukraine.ds.missing')
+          : translate('ukraine.tl.error', { detail: error?.message || error });
       }
     } finally { if (_deepstateTask === task) _deepstateTask = null; }
     renderDeepState();
   }
+  /**
+   * Server povedal 451: skryť riadok aj vrstvu a ďalej sa nepýtať. Príznak sa
+   * nastaví PRED `hide()`, lebo panel na zmenu vrstvy hneď pozerá, či je
+   * DeepState dostupný — inak by svoj čip ešte raz vykreslil.
+   */
+  function blockDeepState() {
+    if (_deepstateBlocked) return;
+    _deepstateBlocked = true;
+    _deepstateDay = null;
+    if (dsBox) dsBox.hidden = true;
+    deepstate?.setSnapshot?.(null);
+    deepstate?.hide?.();
+    emit();
+  }
   async function showDeepState() {
-    if (!deepstate) return;
+    if (!deepstate || _deepstateBlocked) return;
     await deepstate.show({ load: false });
     await applyDeepState(clock.getState());
   }
@@ -662,7 +683,7 @@ export function createUkraineTimeline({
   }
   function setActiveScene(id) { _activeScene = id || null; }
   function getState() {
-    return { shown: _shown, events: _events.length, error: _error, clock: clock.getState(), types: _types ? [..._types] : null, reports: Object.keys(_reports).length, activeScene: _activeScene };
+    return { shown: _shown, events: _events.length, error: _error, clock: clock.getState(), types: _types ? [..._types] : null, reports: Object.keys(_reports).length, activeScene: _activeScene, deepstateAvailable: !_deepstateBlocked };
   }
   function destroy() {
     _destroyed = true;
@@ -675,8 +696,10 @@ export function createUkraineTimeline({
   return {
     element: root,
     show, hide, isShown: () => _shown, setActiveScene, refresh: () => load(), getState, share, clock, store, showControl, showDeepState,
+    /** False, keď server DeepState pre túto adresu odmietol (451) — panel podľa toho skryje čip. */
+    isDeepStateAvailable: () => !_deepstateBlocked,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlAge, ctlCounts, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
+    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
   };
 }

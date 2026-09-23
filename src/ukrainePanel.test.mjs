@@ -200,3 +200,29 @@ test('destroy odpojí poslucháča a vyprázdni telo', () => {
   layer.emit({ shown: true });
   assert.equal(mount.children.length, 0, 'po destroy sa nič nekreslí');
 });
+
+test('čip DEEPSTATE sa skryje spolu s riadkom osi, keď server odmietne (451)', () => {
+  // „deep state neruš, skry" — čip nezmizne z kódu, len sa nezobrazí tam, kde
+  // ho server odmieta; lokálne a po súhlase je späť.
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const tlListeners = new Set();
+  let available = true;
+  const timeline = {
+    isShown: () => false, show() {}, hide() {},
+    isDeepStateAvailable: () => available,
+    onChange(fn) { tlListeners.add(fn); return () => tlListeners.delete(fn); },
+  };
+  const dsListeners = new Set();
+  const deepstate = { isShown: () => false, hide() {}, onChange(fn) { dsListeners.add(fn); return () => dsListeners.delete(fn); } };
+  createUkrainePanel({ mountTarget: mount, layer: fakeLayer(), timeline, deepstate, translate: tKey, lang: 'sk', documentRef: doc });
+  const chip = walk(mount).find((n) => n.dataset?.part === 'deepstate');
+  assert.ok(chip, 'čip existuje');
+  assert.equal(chip.hidden, false, 'kým je DeepState dostupný, čip je vidieť');
+  available = false;
+  for (const fn of tlListeners) fn();
+  assert.equal(chip.hidden, true, 'po odmietnutí sa čip skryje');
+  available = true;
+  for (const fn of tlListeners) fn();
+  assert.equal(chip.hidden, false, 'keď súhlas príde, čip sa vráti sám');
+});

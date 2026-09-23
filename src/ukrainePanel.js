@@ -299,7 +299,7 @@ export function createUkrainePanel({
     eventsChip.classList?.toggle?.('active', on);
     eventsChip.setAttribute('aria-pressed', String(on));
   };
-  const unsubscribeTimeline = timeline?.onChange?.(() => updateEventsChip()) || null;
+  const unsubscribeTimeline = timeline?.onChange?.(() => { updateEventsChip(); updateDeepStateChip(); }) || null;
   updateEventsChip();
   const updateControlChip = () => {
     if (!controlChip) return;
@@ -321,6 +321,9 @@ export function createUkrainePanel({
   updateAreasChip();
   const updateDeepStateChip = () => {
     if (!deepstateChip) return;
+    // Server DeepState pre túto adresu odmietol (451, kým nepríde súhlas) —
+    // čip sa skryje rovnako ako riadok v osi. Nič sa neruší, len nezobrazuje.
+    deepstateChip.hidden = timeline?.isDeepStateAvailable?.() === false;
     const on = Boolean(deepstate?.isShown?.());
     deepstateChip.classList?.toggle?.('active', on);
     deepstateChip.setAttribute('aria-pressed', String(on));
