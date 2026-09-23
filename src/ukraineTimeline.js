@@ -36,6 +36,22 @@ const LIVE_REFRESH_MS = 60_000;
 export function sameZoneSnapshot(snap, state, key) {
   return (snap?.[key] ?? null) === (state?.[key] ?? null);
 }
+/** Kľúč voľby „zbalená os" v úložisku prehliadača (len pohodlie diváka). */
+export const TIMELINE_COLLAPSED_KEY = 'oko.ukraine.timeline.collapsed';
+/** localStorage, ak je dostupný — súkromné okno či zablokované úložisko môže hodiť výnimku. */
+function defaultStorage() {
+  try { return globalThis.localStorage ?? null; } catch { return null; }
+}
+/** Predvolene zbalené; uložené '0' = rozbalené. Chyba úložiska = predvolená hodnota. Pure. */
+export function readCollapsed(storage) {
+  try {
+    const v = storage?.getItem?.(TIMELINE_COLLAPSED_KEY);
+    return v === '0' ? false : true;
+  } catch { return true; }
+}
+function writeCollapsed(storage, on) {
+  try { storage?.setItem?.(TIMELINE_COLLAPSED_KEY, on ? '1' : '0'); } catch { /* bez úložiska sa voľba nezapamätá */ }
+}
 const MEDIA_STRIP_MAX = 40;
 const D = 86_400_000;
 
@@ -89,6 +105,7 @@ export function createUkraineTimeline({
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
   clipboard = globalThis.navigator?.clipboard || null,
+  storage = defaultStorage(),
   origin = globalThis.location?.origin || '',
 } = {}) {
   const doc = documentRef;
@@ -130,6 +147,11 @@ export function createUkraineTimeline({
   row1.appendChild(counts);
   const status = el('span', 'oko-ukr-tl-status');
   row1.appendChild(status);
+  // A3: legendy vrstiev a typov sa dajú zbaliť. Predvolene zbalené — v pane os
+  // zaberala tretinu výšky a mapa, ktorá je hlavný produkt, sa pod ňu nezmestila.
+  // Zbalené ostáva ovládanie, histogram, čerstvosť zdrojov, čipy vrstiev a médiá.
+  const legendBtn = button('oko-ukr-tl-btn oko-ukr-tl-legend-toggle', '', () => setCollapsed(!_collapsed));
+  row1.appendChild(legendBtn);
   const shareBtn = button('oko-ukr-tl-btn oko-ukr-tl-share', '⛓︎', () => void share(), translate('ukraine.tl.share'));
   row1.appendChild(shareBtn);
   const closeBtn = button('oko-ukr-tl-btn oko-ukr-tl-close', '×', () => hide(), translate('ukraine.tl.close'));
@@ -246,6 +268,17 @@ export function createUkraineTimeline({
   root.appendChild(row3);
   const foot = el('div', 'oko-ukr-tl-foot', translate('ukraine.tl.attribution'));
   root.appendChild(foot);
+  let _collapsed = readCollapsed(storage);
+  /** Zbalí/rozbalí legendy; voľba sa pamätá pre tohto diváka (nie pre všetkých). */
+  function setCollapsed(on) {
+    _collapsed = Boolean(on);
+    root.classList.toggle('is-collapsed', _collapsed);
+    legendBtn.textContent = `${translate('ukraine.tl.legend-toggle')} ${_collapsed ? '▾' : '▴'}`;
+    legendBtn.title = translate(_collapsed ? 'ukraine.tl.legend-show' : 'ukraine.tl.legend-hide');
+    legendBtn.setAttribute('aria-expanded', String(!_collapsed));
+    writeCollapsed(storage, _collapsed);
+  }
+  setCollapsed(_collapsed);
   (mountTarget || doc.body).appendChild(root);
 
   // ── stav ─────────────────────────────────────────────────────────────────
@@ -468,6 +501,9 @@ export function createUkraineTimeline({
   // ── vykreslenie ──────────────────────────────────────────────────────────
   function setTypes(types) {
     _types = types;
+    // Aktívny filter typov sa pri zbalenej osi neskryje — inak by udalosti
+    // „zmizli" a človek by nevidel prečo.
+    root.classList.toggle('has-filter', Boolean(types));
     layer.setFilter({ types });
     renderLegend(); renderCounts();
   }
@@ -748,6 +784,6 @@ export function createUkraineTimeline({
     isDeepStateAvailable: () => !_deepstateBlocked,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, fresh, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
+    _getStateForTest: () => ({ legendBtn, root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, fresh, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
   };
 }

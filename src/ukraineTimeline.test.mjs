@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createUkraineTimeline, parseShareParams, sameZoneSnapshot, shareUrl, shortDay } from './ukraineTimeline.js';
+import { TIMELINE_COLLAPSED_KEY, createUkraineTimeline, parseShareParams, readCollapsed, sameZoneSnapshot, shareUrl, shortDay } from './ukraineTimeline.js';
 import { createTimelineClock } from './data/ukraineTimelineClock.js';
 
 function fakeDocument() {
@@ -551,4 +551,68 @@ test('A4: riadok čerstvosti ukáže každý kreslený zdroj a zastaraný prezra
   assert.equal(items[1].className.includes('is-stale'), false, 'dnešné hlásenie je čerstvé');
   // Text dnešného zdroja je „dnes", nie dátum.
   assert.ok(items[2].children.some((c) => c.textContent === 'ukraine.fresh.events ukraine.age.today'));
+});
+
+test('A3: voľba zbalenej osi — predvolene zbalená, pamätá sa, chyba úložiska nič nerozbije', () => {
+  const mem = (initial = null) => { let v = initial; return { getItem: () => v, setItem: (_k, x) => { v = x; }, get value() { return v; } }; };
+  assert.equal(readCollapsed(mem(null)), true, 'nový divák: zbalená — mapa má prednosť');
+  assert.equal(readCollapsed(mem('1')), true);
+  assert.equal(readCollapsed(mem('0')), false, 'kto si ju rozbalil, dostane rozbalenú');
+  assert.equal(readCollapsed(null), true, 'bez úložiska predvolená hodnota');
+  assert.equal(readCollapsed({ getItem() { throw new Error('SecurityError'); } }), true, 'súkromné okno nesmie zhodiť os');
+  assert.equal(TIMELINE_COLLAPSED_KEY, 'oko.ukraine.timeline.collapsed');
+});
+
+test('A3: tlačidlo LEGENDA zbalí a rozbalí os a voľbu si zapamätá', () => {
+  const doc = fakeDocument();
+  const layer = fakeLayer();
+  let stored = null;
+  const storage = { getItem: () => stored, setItem: (_k, v) => { stored = v; } };
+  const clock = createTimelineClock({ now: () => T0, windowId: '24h' });
+  const store = {
+    async load() { return { events: [], reports: {}, coverage: { news: [], media: [] }, errors: [], chunks: 1 }; },
+    async summary() { return { days: {} }; },
+    reportForDay() { return null; },
+  };
+  const tl = createUkraineTimeline({
+    layer, store, clock, storage, translate: (k) => k, lang: 'sk', documentRef: doc,
+    now: () => T0, setTimer: () => 0, clearTimer: () => {}, origin: 'https://oko.test',
+  });
+  const { root, legendBtn } = tl._getStateForTest();
+  assert.equal(root.className.includes('is-collapsed'), true, 'predvolene zbalená');
+  assert.equal(legendBtn.getAttribute('aria-expanded'), 'false');
+  assert.equal(legendBtn.title, 'ukraine.tl.legend-show');
+  legendBtn.click();
+  assert.equal(root.className.includes('is-collapsed'), false);
+  assert.equal(legendBtn.getAttribute('aria-expanded'), 'true');
+  assert.equal(stored, '0', 'voľba sa zapamätá');
+  legendBtn.click();
+  assert.equal(root.className.includes('is-collapsed'), true);
+  assert.equal(stored, '1');
+});
+
+test('A3: úložisko, ktoré hodí výnimku pri zápise, os nezhodí', () => {
+  const doc = fakeDocument();
+  const storage = { getItem: () => null, setItem() { throw new Error('QuotaExceededError'); } };
+  const tl = createUkraineTimeline({
+    layer: fakeLayer(), storage, clock: createTimelineClock({ now: () => T0, windowId: '24h' }),
+    store: { async load() { return { events: [], reports: {}, coverage: {}, errors: [], chunks: 1 }; }, async summary() { return { days: {} }; }, reportForDay() { return null; } },
+    translate: (k) => k, lang: 'sk', documentRef: doc, now: () => T0, setTimer: () => 0, clearTimer: () => {},
+  });
+  const { root, legendBtn } = tl._getStateForTest();
+  legendBtn.click();
+  assert.equal(root.className.includes('is-collapsed'), false, 'prepnutie funguje aj bez zápisu');
+});
+
+test('A3: aktívny filter typov sa pod zbalenou osou neskryje', () => {
+  const doc = fakeDocument();
+  const tl = createUkraineTimeline({
+    layer: fakeLayer(), storage: null, clock: createTimelineClock({ now: () => T0, windowId: '24h' }),
+    store: { async load() { return { events: [], reports: {}, coverage: {}, errors: [], chunks: 1 }; }, async summary() { return { days: {} }; }, reportForDay() { return null; } },
+    translate: (k) => k, lang: 'sk', documentRef: doc, now: () => T0, setTimer: () => 0, clearTimer: () => {},
+  });
+  const { root, legendBtns } = tl._getStateForTest();
+  assert.equal(root.className.includes('has-filter'), false);
+  legendBtns.get('strike').b.click();
+  assert.equal(root.className.includes('has-filter'), true, 'CSS podľa has-filter nechá legendu viditeľnú');
 });

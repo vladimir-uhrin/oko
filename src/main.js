@@ -912,6 +912,9 @@ async function init() {
     window.__godsEyeView.ukraineDamage = ukraineDamage;
     const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl, deepstate: ukraineDeepState, damage: ukraineDamage });
     window.__godsEyeView.ukraineTimeline = ukraineTimeline;
+    // Os vzniká až teraz a štartuje skrytá — ľavý stĺpec ju pri štarte nevidel
+    // a na zmenu jej výšky (zobrazenie, zbalenie legendy) nereagoval.
+    styleManager.observeLeftStackObstacle?.(ukraineTimeline.element);
     let ukrainePanel = null;
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);

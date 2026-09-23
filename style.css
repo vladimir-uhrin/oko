@@ -11738,6 +11738,14 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-fresh-dot { width: 6px; height: 6px; border-radius: 50%; background: #4fd08a; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .oko-ukr-tl-fresh-item.is-stale { color: #ffb547; }
 .oko-ukr-tl-fresh-item.is-stale .oko-ukr-tl-fresh-dot { background: #ffb547; }
+/* A3: zbalená os. Ostáva ovládanie, histogram, čerstvosť zdrojov, pás médií
+   a ČIPY vrstiev (sú to vypínače, nie legenda) — vedľa seba v jednom riadku.
+   Vzorky, „stav k", vek, počty a legenda typov sa ukážu po rozbalení. */
+.oko-ukr-tl-legend-toggle { letter-spacing: 0.06em; }
+.oko-ukr-timeline.is-collapsed .oko-ukr-tl-ctl { flex-basis: auto; }
+.oko-ukr-timeline.is-collapsed .oko-ukr-tl-ctl > :not(.oko-ukr-tl-ctl-chip) { display: none; }
+/* Aktívny filter typov sa neskryje — inak by udalosti „zmizli" bez vysvetlenia. */
+.oko-ukr-timeline.is-collapsed:not(.has-filter) .oko-ukr-tl-legend { display: none; }
 .oko-ukr-tl-ctl-item { display: inline-flex; align-items: center; gap: 4px; }
 .oko-ukr-tl-ctl-sw { display: inline-block; width: 12px; height: 9px; border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.2); }
 .oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw { background: rgba(224, 85, 63, 0.35); border-color: rgba(224, 85, 63, 0.7); }

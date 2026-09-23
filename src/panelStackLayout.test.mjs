@@ -326,3 +326,20 @@ test('expanded right panels highlight the title divider without changing collaps
     /#param-slider-panel:not\(\.collapsed\) \.param-panel-divider\s*\{[\s\S]*?linear-gradient\(90deg, rgb\(0 212 255 \/ 28%\), rgba\(0, 212, 255, 0\.18\) 58%, transparent\);/,
   );
 });
+
+test('neskoro vytvorená prekážka (os UKRAJINA) sa dá ľavému stĺpcu zaregistrovať a main.js to robí', () => {
+  // Prekážky sa zbierajú RAZ pri štarte a len viditeľné (`:not([hidden])`).
+  // Os UKRAJINA vzniká neskôr a štartuje skrytá — bez dodatočnej registrácie
+  // layout na jej výšku nereagoval a rozbalená os prekrývala panely o 132 px.
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  const method = ui.slice(ui.indexOf('  observeLeftStackObstacle(element) {'));
+  assert.ok(method.length > 0, 'StyleManager.observeLeftStackObstacle existuje');
+  const body = method.slice(0, method.indexOf('\n  }\n'));
+  assert.match(body, /this\._leftStackResizeObserver\?\.observe\(element\)/, 'prvok sa sleduje bez ohľadu na hidden');
+  assert.match(body, /this\._scheduleLeftPanelLayout\(\)/, 'a layout sa hneď prepočíta');
+  const created = main.indexOf('const ukraineTimeline = createUkraineTimeline(');
+  const registered = main.indexOf('styleManager.observeLeftStackObstacle?.(ukraineTimeline.element)');
+  assert.ok(created > 0 && registered > created, 'main.js os zaregistruje hneď po jej vytvorení');
+  assert.ok(registered - created < 600, 'registrácia je pri vytvorení osi, nie niekde ďaleko');
+});

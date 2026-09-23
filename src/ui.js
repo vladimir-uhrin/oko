@@ -7783,6 +7783,24 @@ export class StyleManager {
    * Batches adaptive accordion work into one animation frame.
    * @returns {void}
    */
+  /**
+   * Prekážka ľavého stĺpca, ktorá vznikne až po štarte (os UKRAJINA).
+   * _initLeftPanelAdaptiveLayout zbiera prekážky RAZ a len viditeľné
+   * (`:not([hidden])`), takže neskoro vytvorená a na začiatku skrytá os sa
+   * nikdy nesledovala: jej zobrazenie, zbalenie ani rozbalenie layout
+   * neprepočítalo a panely zostali za ňou (namerané 2026-09-23: 132 px prekryvu
+   * pri rozbalenej osi). Meranie prekážok selektor vyhodnocuje až pri layoute,
+   * chýbal len podnet. ResizeObserver hlási aj prechod skrytý ↔ viditeľný,
+   * preto sa sleduje prvok bez ohľadu na atribút hidden.
+   * @param {Element|null} element
+   * @returns {void}
+   */
+  observeLeftStackObstacle(element) {
+    if (!element) return;
+    this._leftStackResizeObserver?.observe(element);
+    this._scheduleLeftPanelLayout();
+  }
+
   _scheduleLeftPanelLayout({ reconsiderAutoCollapse = false } = {}) {
     if (reconsiderAutoCollapse) this._leftStackReconsiderAutoCollapse = true;
     if (!this._leftPanelStack || this._leftStackLayoutFrame !== null) return;

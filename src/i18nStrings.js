@@ -1002,6 +1002,10 @@ export const EN_STRINGS = Object.freeze({
   'ukraine.fresh.deepstate': 'DeepState',
   'ukraine.fresh.report': 'GS report',
   'ukraine.fresh.events': 'events',
+  // A3 (2026-09-23): zbaliteľné legendy osi.
+  'ukraine.tl.legend-toggle': 'LEGEND',
+  'ukraine.tl.legend-show': 'Show the layer and event-type legends',
+  'ukraine.tl.legend-hide': 'Hide the legends — more room for the map',
   'ukraine.src.stale-note': 'the source has not been updated for a long time — this may be materially out of date',
   // DeepStateMap.live (2026-09-19, hobby use, consent requested) — see src/ukraineDeepStateLayer.js.
   'ukraine.part.deepstate': 'DEEPSTATE',
@@ -2758,6 +2762,10 @@ export const SK_STRINGS = Object.freeze({
   'ukraine.fresh.deepstate': 'DeepState',
   'ukraine.fresh.report': 'hlásenie GŠ',
   'ukraine.fresh.events': 'udalosti',
+  // A3 (2026-09-23): zbaliteľné legendy osi.
+  'ukraine.tl.legend-toggle': 'LEGENDA',
+  'ukraine.tl.legend-show': 'Zobraziť legendu vrstiev a typov udalostí',
+  'ukraine.tl.legend-hide': 'Skryť legendu — viac miesta pre mapu',
   'ukraine.src.stale-note': 'zdroj sa dlho neaktualizoval — údaj môže byť vecne neaktuálny',
   // DeepStateMap.live (2026-09-19, hobby použitie, súhlas sa žiada) — src/ukraineDeepStateLayer.js.
   'ukraine.part.deepstate': 'DEEPSTATE',
