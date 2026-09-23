@@ -192,7 +192,11 @@ test('os: kostra, LIVE → prehrávanie, načítanie do vrstvy, legenda/filter, 
   assert.equal(dsShown, true);
   assert.equal(dsChip.getAttribute('aria-pressed'), 'true');
   assert.equal(dsLine.textContent, 'ukraine.ds.missing', 'pre august 2026 niet snímky');
-  assert.ok(zonesCalls.includes(false), 'zóny Wikipédie sa pri DeepState skryjú');
+  // ZMENENÉ 2026-09-23: tvrdilo sa tu, že zóny Wikipédie sa skryjú UŽ pri zapnutom
+  // čipe. To bola chyba a bolo ju vidieť naživo na doméne: server tam DeepState
+  // odmieta (451, kým nepríde súhlas), takže „zapnutý" znamenal prázdno — a mapa
+  // ostala BEZ ZÓN, aj tých z Wikipédie. Skrývať sa má až to, čo má čo prekrývať.
+  assert.equal(zonesCalls.includes(false), false, 'bez snímky DeepState zóny Wikipédie ZOSTÁVAJÚ');
   clock.setMode('live');
   await timers.filter((t) => t.ms === 0).at(-1).fn();
   await new Promise((r) => setImmediate(r));
@@ -200,6 +204,7 @@ test('os: kostra, LIVE → prehrávanie, načítanie do vrstvy, legenda/filter, 
   assert.equal(dsSnapshot?.day, '2026-09-18');
   assert.ok(dsLine.textContent.includes('ukraine.ds.since'), dsLine.textContent);
   assert.match(dsArea.textContent, /"occupied":"72[\s ]941"/, dsArea.textContent); // sk-SK oddeľovač tisícov je úzka medzera
+  assert.equal(zonesCalls.at(-1), false, 'až keď DeepState naozaj kreslí, raster Wikipédie ustúpi');
   dsChip.click();
   assert.equal(dsShown, false);
   assert.equal(zonesCalls.at(-1), true, 'po vypnutí DeepState sa zóny Wikipédie vrátia');

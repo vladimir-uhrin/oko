@@ -378,9 +378,13 @@ export function createUkraineTimeline({
     const st = deepstate.getState();
     dsChip.classList.toggle('active', st.shown);
     dsChip.setAttribute('aria-pressed', String(st.shown));
-    // Kým sú polygóny DeepState zapnuté, odvodený raster z Wikipédie sa skryje
-    // (dve výplne nad sebou by boli neprehľadné); body Wikipédie ostávajú.
-    control?.setZonesVisible?.(!st.shown);
+    // Kým DeepState NAOZAJ KRESLÍ, odvodený raster z Wikipédie sa skryje (dve
+    // výplne nad sebou by boli neprehľadné); body Wikipédie ostávajú.
+    // Podmienkou sú polygóny, nie zapnutý čip: na verejnej doméne server
+    // DeepState odmieta (451, kým nepríde súhlas), takže „zapnutý" znamenal
+    // prázdno — a mapa ostala BEZ ZÓN, aj tých z Wikipédie. Keď DeepState
+    // nekreslí nič, niet čo prekrývať.
+    control?.setZonesVisible?.(!(st.shown && st.features > 0));
     if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; return; }
     renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS);
     if (st.at) dsLine.textContent = translate('ukraine.ds.since', { date: st.stampText });
