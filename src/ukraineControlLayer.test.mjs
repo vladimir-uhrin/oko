@@ -88,13 +88,15 @@ test('K3: paintControlCanvas mäkko — výplne 1 px na bunku do pomocného plá
   assert.ok(crisp.calls.some((c) => c[0] === 'fillRect'), 'bez továrne kreslí naostro');
 });
 
-test('A2: zastaraná snímka stlmí výplň aj šrafovanie o STALE_DIM, čerstvá nie', async () => {
+test('A2: zastaraná snímka stlmí RU výplň o STALE_DIM, šrafovanie zóny bojov ostáva naplno', async () => {
   const { STALE_DIM } = await import('./data/ukraineFreshness.js');
   const fresh = controlZoneAlphas(CONTROL_STYLES.default, false);
   const stale = controlZoneAlphas(CONTROL_STYLES.default, true);
   assert.equal(fresh.ruAlpha, CONTROL_STYLES.default.ruAlpha, 'čerstvá kreslí naplno');
   assert.equal(stale.ruAlpha, CONTROL_STYLES.default.ruAlpha * STALE_DIM);
-  assert.equal(stale.hatchAlpha, fresh.hatchAlpha * STALE_DIM, 'aj zóna bojov je rovnako stará');
+  // Šrafovanie zóny bojov ostáva naplno — stlmené bolo na doméne nevýrazné
+  // (používateľ 2026-09-23). O veku hovorí výplň, značka a riadok ZDROJE.
+  assert.equal(stale.hatchAlpha, fresh.hatchAlpha, 'zóna bojov sa nestlmuje');
   // Štýl KARTA má vlastnú slabšiu výplň — stlmenie sa na ňu násobí, neprepisuje ju.
   assert.equal(controlZoneAlphas(CONTROL_STYLES.karta, true).ruAlpha, CONTROL_STYLES.karta.ruAlpha * STALE_DIM);
 });

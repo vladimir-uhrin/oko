@@ -127,16 +127,21 @@ export function nearestSide(points, lon, lat, maxKm = 3) {
 }
 
 /**
- * Krytie výplní zón pre štýl a vek snímky. Pri zastaranej snímke sa RU výplň aj
- * šrafovanie zóny bojov stlmia o STALE_DIM — tá istá hodnota ako vzorky
- * v legende osi a KARTY, aby mapa a legenda nikdy nesedeli každá inak. Pure.
+ * Krytie výplní zón pre štýl a vek snímky. Pri zastaranej snímke sa RU výplň
+ * stlmí o STALE_DIM — tá istá hodnota ako vzorka v legende osi a KARTY, aby mapa
+ * a legenda nikdy nesedeli každá inak.
+ *
+ * Šrafovanie zóny bojov sa NEstlmuje: pôvodne ustúpilo spolu s výplňou, no na
+ * doméne bolo potom nevýrazné (používateľ 2026-09-23: „to šrafovanie je
+ * nevýrazné teraz") a zóna bojov je presne to, čo človek na mape hľadá. Vek
+ * zdroja naďalej hovorí bledšia výplň, značka ZASTARANÉ a riadok ZDROJE. Pure.
  * @param {{ruAlpha: number}} style prvok CONTROL_STYLES
  * @param {boolean} stale
  * @returns {{ruAlpha: number, hatchAlpha: number}}
  */
 export function controlZoneAlphas(style, stale) {
   const dim = stale ? STALE_DIM : 1;
-  return { ruAlpha: style.ruAlpha * dim, hatchAlpha: CONTROL_HATCH_ALPHA * dim };
+  return { ruAlpha: style.ruAlpha * dim, hatchAlpha: CONTROL_HATCH_ALPHA };
 }
 /** Krytie šrafovania zóny bojov (predvolené v paintControlCanvas). */
 export const CONTROL_HATCH_ALPHA = 0.6;

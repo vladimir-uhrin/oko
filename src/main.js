@@ -674,6 +674,10 @@ async function init() {
     });
     const frontSceneDeps = {
       showBase: () => ukraineBase.show(),
+      // Front scéna upratuje mapu: ostatné vrstvy (po úžinách typicky lode,
+      // prístavy, trasy a plynovody) vypne; vrstvy UKRAJINY nie sú v správcovi.
+      listLayers: () => dataManager.getAll(),
+      disableLayer: (id) => { dataManager.setEnabled(id, false); return true; },
       // Front sa číta ako mapa: z juhu na sever, strmšie než pri úžinách (−58°,
       // prehľad −70°); cieľ je Cartesian3 (Rectangle by pri streamujúcich 3D
       // dlaždiciach ticho neurobil nič — rovnaká pasca ako pri úžinách).

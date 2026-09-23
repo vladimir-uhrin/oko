@@ -8,6 +8,7 @@ import {
   frontSceneByGsDirection,
   frontSceneById,
   frontSceneChoices,
+  frontSceneLayersToDisable,
   resolveFrontScene,
   frontSceneFraming,
   frontSceneLabel,
@@ -138,4 +139,40 @@ test('frontSceneChoices dá id + čitateľné meno pre každý smer', () => {
   assert.deepEqual(choices.map((c) => c.id), FRONT_SCENES.map((s) => s.id));
   assert.equal(choices.find((c) => c.id === 'lyman').label, 'Lymanský smer');
   assert.ok(choices.every((c) => c.label && c.label !== `front.${c.id}.name`), 'nikde holý kľúč');
+});
+
+test('front scéna vypne ostatné zapnuté vrstvy z panela, interné nechá', () => {
+  // „vypni všetko ostatné ako potrubia atď." — po úžine Hormuz ostali zapnuté
+  // lode, radar lodí, prístavy, trasy a plynovody aj nad Ukrajinou.
+  const layers = [
+    { id: 'gas-pipelines', enabled: true, showInTogglePanel: true },
+    { id: 'ais-live-vessels', enabled: true, showInTogglePanel: true },
+    { id: 'flights', enabled: false, showInTogglePanel: true },
+    { id: 'military-awareness', enabled: true, showInTogglePanel: false },
+  ];
+  assert.deepEqual(frontSceneLayersToDisable(layers), ['gas-pipelines', 'ais-live-vessels'], 'vypnuté ostávajú, interné sa nedotkne');
+  assert.deepEqual(frontSceneLayersToDisable([]), []);
+  assert.deepEqual(frontSceneLayersToDisable(null), []);
+});
+
+test('applyFrontScene vrstvy vypne a povie, ktoré — skôr než rámuje', async () => {
+  const calls = [];
+  const out = await applyFrontScene('lyman', {
+    listLayers: () => [
+      { id: 'gas-pipelines', enabled: true, showInTogglePanel: true },
+      { id: 'local-ports', enabled: true, showInTogglePanel: true },
+    ],
+    disableLayer: (id) => { calls.push(['disable', id]); return true; },
+    showBase: () => { calls.push(['base']); return true; },
+    flyToRegion: () => { calls.push(['fly']); },
+  });
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.disabledLayerIds, ['gas-pipelines', 'local-ports']);
+  assert.deepEqual(calls.map((c) => c[0]), ['disable', 'disable', 'base', 'fly'], 'najprv upratať, potom podklad a let');
+});
+
+test('applyFrontScene bez správcu vrstiev funguje ako doteraz', async () => {
+  const out = await applyFrontScene('lyman', {});
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.disabledLayerIds, []);
 });

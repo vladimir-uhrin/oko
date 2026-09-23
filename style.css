@@ -11725,10 +11725,10 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* `display: flex` vyššie by prebilo atribút hidden — riadok DeepState sa skrýva,
    keď ho server na verejnej doméne odmietne (451), a musí naozaj zmiznúť. */
 .oko-ukr-tl-ctl[hidden] { display: none; }
-/* Zastaraná snímka kontroly: mapa kreslí výplne na polovicu (CONTROL_STALE_DIM)
-   a vzorky v legende musia ustúpiť rovnako, inak nesedia s tým, čo je na mape. */
-.oko-ukr-tl-ctl.is-stale .oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw,
-.oko-ukr-tl-ctl.is-stale .oko-ukr-tl-ctl-item.is-zone .oko-ukr-tl-ctl-sw { opacity: 0.5; }
+/* Zastaraná snímka kontroly: mapa kreslí RU výplň na polovicu (STALE_DIM)
+   a vzorka v legende musí ustúpiť rovnako. Šrafovanie zóny bojov ostáva naplno
+   (na mape aj vo vzorke) — stlmené bolo nevýrazné. */
+.oko-ukr-tl-ctl.is-stale .oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw { opacity: 0.5; }
 /* A4: riadok čerstvosti zdrojov — jedna tichá línia; zastaraný zdroj sa
    prezradí jantárovou bodkou a textom, čerstvý ostáva v pozadí. */
 .oko-ukr-tl-fresh { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 9px; color: #8aa0b6; padding: 2px 0 0; }

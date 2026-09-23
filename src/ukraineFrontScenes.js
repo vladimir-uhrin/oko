@@ -206,9 +206,20 @@ export function frontSceneFraming(rectDegrees, { overview = false } = {}) {
  * @param {{showBase?: () => Promise<any>|any, flyToRegion?: (scene: FrontScene) => any}} deps
  * @returns {Promise<{ok: boolean, id: string, scene?: FrontScene, baseShown: boolean, error?: string}>}
  */
-export async function applyFrontScene(id, { showBase, flyToRegion } = {}) {
+export async function applyFrontScene(id, { showBase, flyToRegion, listLayers, disableLayer } = {}) {
   const scene = frontSceneById(id);
-  if (!scene) return { ok: false, id: String(id ?? ''), baseShown: false, error: 'unknown-front' };
+  if (!scene) return { ok: false, id: String(id ?? ''), baseShown: false, disabledLayerIds: [], error: 'unknown-front' };
+  // Najprv upratať mapu: scény úžin vrstvy len ZAPÍNAJÚ, takže po Hormuze ostali
+  // lode, prístavy, trasy a plynovody zapnuté aj nad Ukrajinou (používateľ
+  // 2026-09-23: „vypni všetko ostatné ako potrubia atď.").
+  const disabledLayerIds = [];
+  if (typeof listLayers === 'function' && typeof disableLayer === 'function') {
+    let ids = [];
+    try { ids = frontSceneLayersToDisable(listLayers()); } catch { ids = []; }
+    for (const layerId of ids) {
+      try { if ((await disableLayer(layerId)) !== false) disabledLayerIds.push(layerId); } catch { /* ďalšia vrstva */ }
+    }
+  }
   let baseShown = false;
   if (typeof showBase === 'function') {
     try { baseShown = (await showBase()) !== false; } catch { baseShown = false; }
@@ -216,7 +227,23 @@ export async function applyFrontScene(id, { showBase, flyToRegion } = {}) {
   if (typeof flyToRegion === 'function') {
     try { await flyToRegion(scene); } catch { /* rámovanie je najlepšia snaha */ }
   }
-  return { ok: true, id: scene.id, scene, baseShown };
+  return { ok: true, id: scene.id, scene, baseShown, disabledLayerIds };
+}
+
+/**
+ * Ktoré vrstvy front scéna vypne: všetky ZAPNUTÉ vrstvy správcu, ktoré človek
+ * vidí v paneli. Vrstvy modulu UKRAJINA (podklad, kontrola, DeepState, udalosti,
+ * hlásenie, škody, plochy) nie sú vrstvy správcu, takže sa ich to netýka.
+ * Interné vrstvy mimo panela (`showInTogglePanel: false`) sa nechajú na pokoji —
+ * nie sú to veci, ktoré by človek na mape zapínal, a ich vypnutie by nič neupratalo.
+ * Pure.
+ * @param {ReadonlyArray<{id: string, enabled?: boolean, showInTogglePanel?: boolean}>} layers `dataManager.getAll()`
+ * @returns {string[]}
+ */
+export function frontSceneLayersToDisable(layers) {
+  return (Array.isArray(layers) ? layers : [])
+    .filter((layer) => layer && layer.enabled && layer.showInTogglePanel !== false)
+    .map((layer) => layer.id);
 }
 
 /**
