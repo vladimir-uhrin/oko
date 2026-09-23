@@ -120,15 +120,24 @@ export async function fetchUkraineSummary(from, to, { fetcher = (...a) => fetch(
   return json;
 }
 
+/** Odseky smerov z hlásení GŠ po dňoch (karta smeru, ≤ 92 dní). */
+export async function fetchUkraineDirections(from, to, { fetcher = (...a) => fetch(...a), base = UKRAINE_EVENTS_API } = {}) {
+  const response = await fetcher(`${base}/directions?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: 'no-store' });
+  const json = await response.json().catch(() => null);
+  if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; throw err; }
+  return json;
+}
+
 /**
  * Sklad: kusy sa cachujú (dnešný kus 60 s, minulé kusy 30 min — archivár ich
  * ešte dopĺňa obrázkami), súhrny 10 min. `load` skladá model okna.
  */
-export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, fetchControl = fetchUkraineControl, fetchDeepState = fetchUkraineDeepState, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, controlTtlMs = 15 * 60_000, maxChunks = 40 } = {}) {
+export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetchSummary = fetchUkraineSummary, fetchControl = fetchUkraineControl, fetchDeepState = fetchUkraineDeepState, fetchDirections = fetchUkraineDirections, now = Date.now, chunkTtlMs = 60_000, pastTtlMs = 30 * 60_000, summaryTtlMs = 10 * 60_000, controlTtlMs = 15 * 60_000, maxChunks = 40 } = {}) {
   const chunks = new Map(); // `${from}:${to}` -> { at, payload, promise }
   const summaries = new Map();
   const controls = new Map(); // deň -> { at, payload } (snímka platná pre deň)
   const deepstates = new Map();
+  const directionRanges = new Map(); // `${from}:${to}` -> { at, payload, promise }
   const evict = (map, max) => { while (map.size > max) map.delete(map.keys().next().value); };
 
   function chunkFor(range) {
@@ -174,6 +183,22 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
     return payload;
   }
 
+  /**
+   * Odseky smerov pre rozsah dní (karta smeru). Súbežné žiadosti o ten istý
+   * rozsah zdieľajú jeden dopyt; zlyhanie sa necachuje (ďalší pokus ide na server).
+   */
+  function directions(from, to) {
+    const key = `${from}:${to}`;
+    const hit = directionRanges.get(key);
+    if (hit?.payload && now() - hit.at < summaryTtlMs) return Promise.resolve(hit.payload);
+    if (hit?.promise) return hit.promise;
+    const promise = Promise.resolve(fetchDirections(from, to))
+      .then((payload) => { directionRanges.set(key, { at: now(), payload }); evict(directionRanges, 12); return payload; })
+      .catch((error) => { directionRanges.delete(key); throw error; });
+    directionRanges.set(key, { promise });
+    return promise;
+  }
+
   /** Snímka kontroly pre deň (ms alebo YYYY-MM-DD); rovnaká snímka pre viac dní sa v cache zdieľa podľa jej dňa. */
   async function control(dayOrMs) {
     const day = typeof dayOrMs === 'string' ? dayOrMs : dayKey(dayOrMs);
@@ -207,5 +232,5 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
     return null;
   }
 
-  return { load, summary, control, deepstate, reportForDay, chunkRanges, _chunks: chunks };
+  return { load, summary, directions, control, deepstate, reportForDay, chunkRanges, _chunks: chunks };
 }

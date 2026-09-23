@@ -11,15 +11,18 @@
 //   node scripts/build-ukraine-events.mjs --viina [--years 2022-2026] [--force]
 //   node scripts/build-ukraine-events.mjs --geoconfirmed [--days 90]
 //   node scripts/build-ukraine-events.mjs --reports [--pages 6]
+//   node scripts/build-ukraine-events.mjs --reparse-reports [--from D] [--to D] [--dry-run]
+//     (po oprave parsera: stiahne uložené články znova, zmenené dni zapíše, originál do reports-backup/<čas>/)
 //   node scripts/build-ukraine-events.mjs --media
 //
 // Etiketa: VIINA je jeden zip na rok (LFS media, ~0,6–8 MB); GeoConfirmed po
 // 30-dňových oknách s pauzou (API prosí nehammerovať; hromadný export histórie
 // nechce — preto len 90 dní); ArmyInform 1,5 s medzi článkami. Bez kľúčov.
 import {
-  GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, backfillReports, collectMedia, controlBackfill, controlSnapshot, dayKey, dayShift,
-  deepstateSnapshot, firesRefresh, geoconfirmedRefresh, viinaStatus, viinaYear,
+  GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDir, archiveDayItems, backfillReports, collectMedia, controlBackfill, controlSnapshot, dayKey, dayShift,
+  deepstateSnapshot, firesRefresh, geoconfirmedRefresh, reparseReports, viinaStatus, viinaYear,
 } from './lib/ukraineArchive.mjs';
+import path from 'node:path';
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
@@ -30,8 +33,8 @@ const now = Date.now();
 const log = (m) => console.log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-if (!all && !has('--viina') && !has('--geoconfirmed') && !has('--reports') && !has('--media') && !has('--control') && !has('--control-history') && !has('--fires') && !has('--deepstate')) {
-  console.log('usage: node scripts/build-ukraine-events.mjs --all | --viina [--years 2022-2026] [--force] | --geoconfirmed [--days 90] | --reports [--pages 6] | --media | --control | --control-history [--step 7] | --fires | --deepstate');
+if (!all && !has('--viina') && !has('--geoconfirmed') && !has('--reports') && !has('--media') && !has('--control') && !has('--control-history') && !has('--fires') && !has('--deepstate') && !has('--reparse-reports')) {
+  console.log('usage: node scripts/build-ukraine-events.mjs --all | --viina [--years 2022-2026] [--force] | --geoconfirmed [--days 90] | --reports [--pages 6] | --media | --control | --control-history [--step 7] | --fires | --deepstate | --reparse-reports [--from D] [--to D] [--dry-run]');
   process.exit(2);
 }
 
@@ -86,6 +89,19 @@ if (all || has('--reports')) {
   const pages = Math.max(1, Math.min(30, Number(val('--pages', 6)) || 6));
   const r = await backfillReports(root, { pages, now, log });
   log(`Hlásenia GŠ: prezretých ${r.seen}, uložených ${r.stored}`);
+}
+
+if (has('--reparse-reports')) {
+  // Zámerne nie v --all: opravu archívu spúšťa človek, keď sa zmenil parser.
+  const to = val('--to', dayKey(now));
+  const from = val('--from', dayShift(to, -91));
+  const stamp = new Date(now).toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const backupDir = path.join(archiveDir(root), 'reports-backup', stamp);
+  const dryRun = has('--dry-run');
+  const r = await reparseReports(root, { from, to, backupDir, dryRun, now, log });
+  log(`Preparsovanie hlásení ${from}..${to}${dryRun ? ' (DRY RUN, nič nezapísané)' : ''}: skontrolovaných ${r.checked}, zmenených ${r.updated.length}, rovnakých ${r.same}, preskočených ${r.skipped.length}`);
+  for (const s of r.skipped) log(`  preskočené ${s.day}: ${s.reason}`);
+  if (!dryRun && r.updated.length) log(`  záloha originálov: ${backupDir}`);
 }
 
 if (all || has('--media')) {

@@ -14,6 +14,7 @@
 import { currentLanguage, t } from './i18n.js';
 import { UKRAINE_BASE_PARTS } from './data/ukraineBase.js';
 import { frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
+import { reportRefDay } from './data/ukraineDirectionTrend.js';
 
 const INERT = { element: null, newsMount: null, update() {}, updateReport() {}, setActiveScene() {}, destroy() {} };
 
@@ -23,6 +24,7 @@ const INERT = { element: null, newsMount: null, update() {}, updateReport() {}, 
  * @param {object} o.layer prekryv podkladu (createUkraineBaseLayer)
  * @param {ReadonlyArray<object>} [o.scenes] presety smerov
  * @param {(id: string) => any} [o.applyScene] spustí preset (main.js)
+ * @param {object} [o.directionCard] karta smeru (createUkraineDirectionCard) — vkladá sa pod aktívny smer
  * @param {Function} [o.translate]
  * @param {string} [o.lang]
  * @param {Document} [o.documentRef]
@@ -36,6 +38,7 @@ export function createUkrainePanel({
   deepstate = null,
   areas = null,
   damage = null,
+  directionCard = null,
   scenes = listFrontScenes(),
   applyScene = null,
   translate = t,
@@ -250,6 +253,12 @@ export function createUkrainePanel({
       b.classList?.toggle?.('is-active', on);
       b.setAttribute('aria-pressed', String(on));
     }
+    // Karta smeru (B5) sedí hneď pod tlačidlom aktívneho smeru — zoznam má
+    // 12 riadkov a karta pod ním by bola mimo pohľadu.
+    const card = directionCard?.element;
+    const anchor = activeScene ? dirByScene.get(activeScene) : null;
+    if (card && anchor && typeof dirs.insertBefore === 'function') dirs.insertBefore(card, anchor.nextSibling || null);
+    directionCard?.setScene?.(activeScene);
   }
 
   /** Hlásenie GŠ do karty a počty na tlačidlá smerov (etapa 2). */
@@ -260,6 +269,8 @@ export function createUkrainePanel({
       reportChip.setAttribute('aria-pressed', String(Boolean(state.enabled)));
     }
     const r = state.report;
+    // Karta smeru počíta k dňu zobrazeného hlásenia (LIVE aj deň kurzora osi).
+    directionCard?.setRefDay?.(r ? reportRefDay(r) : null);
     if (!r) {
       reportBox.hidden = !(state.loading || state.error);
       reportSummary.textContent = state.loading ? translate('ukraine.report.loading') : (state.error ? translate('ukraine.report.unavailable') : '');
@@ -350,6 +361,6 @@ export function createUkrainePanel({
     updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); unsubscribeAreas?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); unsubscribeAreas?.(); directionCard?.destroy?.(); mountTarget.replaceChildren(); },
   };
 }

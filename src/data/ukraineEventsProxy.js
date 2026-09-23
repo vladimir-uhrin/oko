@@ -21,7 +21,9 @@
  *
  * `/api/ukraine/events?from&to` (≤ 31 dní): udalosti + správy + médiá +
  * hlásenia + pokrytie; `/api/ukraine/events/summary?from&to` (≤ 1 900 dní):
- * počty po dňoch pre prehľad osi; `/api/ukraine/events/status`: stav archivára.
+ * počty po dňoch pre prehľad osi; `/api/ukraine/events/directions?from&to`
+ * (≤ 92 dní): odseky smerov z hlásení GŠ pre kartu smeru;
+ * `/api/ukraine/events/status`: stav archivára.
  */
 import zlib from 'node:zlib';
 import path from 'node:path';
@@ -29,11 +31,13 @@ import { promises as fsp } from 'node:fs';
 
 import {
   GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, archiveReport, collectMedia, controlDays, controlFor, controlSnapshot, dayKey, dayList, dayShift,
-  deepstateDays, deepstateFor, deepstateSnapshot, eventsPayload, firesRefresh, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
+  deepstateDays, deepstateFor, deepstateSnapshot, directionsPayload, eventsPayload, firesRefresh, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
 } from '../../scripts/lib/ukraineArchive.mjs';
 
 export const EVENTS_MAX_DAYS = 31;
 export const SUMMARY_MAX_DAYS = 1900;
+/** Karta smeru ťahá 30 dní; strop drží odpoveď malú (len odseky smerov). */
+export const DIRECTIONS_MAX_DAYS = 92;
 const MIN = 60_000;
 const TICK_MS = { news: 15 * MIN, media: 15 * MIN, report: 60 * MIN, geoconfirmed: 6 * 60 * MIN, viina: 6 * 60 * MIN, control: 6 * 60 * MIN, fires: 6 * 60 * MIN, deepstate: 60 * MIN };
 const FIRST_DELAY_MS = { news: 20_000, media: 45_000, report: 70_000, geoconfirmed: 100_000, viina: 130_000, control: 160_000, fires: 200_000, deepstate: 90_000 };
@@ -276,6 +280,21 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
         const json = { ...snapshot, requestedAt: at, snapshots: days.length, first: days[0] || null, last: days.at(-1) || null };
         controlCache.set(at, { at: now(), json });
         if (controlCache.size > 64) controlCache.delete(controlCache.keys().next().value);
+        send(res, 200, json, req);
+      } catch (error) { send(res, 500, { error: 'archive_read_failed', detail: String(error?.message || error) }, req); }
+      return;
+    }
+    if (sub === '/directions') {
+      // Karta smeru (B5): odseky smerov z archívu hlásení GŠ po dňoch.
+      const range = parseRange(url, DIRECTIONS_MAX_DAYS);
+      if (range.error) { send(res, 400, range, req); return; }
+      const key = `D:${range.from}:${range.to}`;
+      const hit = payloadCache.get(key);
+      if (hit && now() - hit.at < 10 * MIN) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = await directionsPayload(root, range.from, range.to, { now: now() });
+        payloadCache.set(key, { at: now(), json });
+        if (payloadCache.size > 64) payloadCache.delete(payloadCache.keys().next().value);
         send(res, 200, json, req);
       } catch (error) { send(res, 500, { error: 'archive_read_failed', detail: String(error?.message || error) }, req); }
       return;

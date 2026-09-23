@@ -107,13 +107,21 @@ export function attacksInParagraph(paragraph) {
   const p = normalizeUkText(paragraph);
   let m = p.match(/напрямк(?:у|ах)\s*[—–-]\s*(\d[\d ]*)/i);
   if (m) return parseUkNumber(m[1]);
-  m = p.match(new RegExp(`${CYR_START}(двічі|тричі)\\s+(?:\\S+\\s+){0,2}?атакув`, 'i'));
+  // Vsuvka medzi pomlčkami: „Найбільше атак за добу — 31 — російські війська
+  // здійснили на Костянтинівському напрямку" (30. 8. 2026).
+  m = p.match(/атак\S*(?:\s+[^\s—–-]+){0,2}\s*[—–]\s*(\d[\d ]*?)\s*[—–]/i);
+  if (m) return parseUkNumber(m[1]);
+  // „двічі атакував", ale aj „двічі проводив наступальні дії" (30. 8. 2026).
+  m = p.match(new RegExp(`${CYR_START}(двічі|тричі)\\s+(?:\\S+\\s+){0,2}?(?:атакув|проводи|штурмув)`, 'i'));
   if (m) return TIMES_ADVERBS[m[1].toLowerCase()];
   m = p.match(new RegExp(`${CYR_START}${NUM_RE}\\s+раз(?:и|ів)?\\s+(?:\\S+\\s+){0,2}?атакув`, 'i'));
   if (m) return parseUkNumber(m[1]);
   m = p.match(new RegExp(`${CYR_START}${NUM_RE}\\s+(?:\\S+\\s+){0,2}?(?:атак|штурмов|наступальн|спроб|бойов)`, 'i'));
   if (m) return parseUkNumber(m[1]);
-  if (/не проводил|не виявлено|не здійснював|не здійснювали|не було|не зафіксовано/i.test(p)) return 0;
+  // „не проводив" (jednotné číslo, „ворог … не проводив") je rovnaká nula ako
+  // „не проводили" — kým ho regex nepoznal, 40 z 57 archivovaných dní malo
+  // nejaký smer „neznámy" namiesto výslovnej nuly.
+  if (/не проводи(?:в|ли)|не виявлено|не здійснював|не здійснювали|не було|не зафіксовано/i.test(p)) return 0;
   return null;
 }
 
@@ -187,6 +195,22 @@ export function strikesInText(text) {
 }
 
 /**
+ * Súhrn frontu: „213 бойових зіткнень", „231 бойове зіткнення" (číslo končí
+ * na 1), „242 бойові зіткнення", „261 боєзіткнення". Pôvodný vzor poznal len
+ * prvé dva tvary — 11 z 57 archivovaných dní ostalo bez súčtu (4 z nich oprava vrátila, zvyšok sú popoludňajšie hlásenia bez súčtu) a 30. 8. 2026
+ * dostali Kosťantynivský aj Pokrovský smer „221 útokov" zo súhrnnej vety.
+ */
+export const REPORT_TOTAL_RE = /(\d[\d ]*)\s+(?:бойов(?:их|і|е)\s+зіткнен|боєзіткнен)/i;
+
+/**
+ * Súhrnný odsek bez vety so súhrnom: „231 бойове зіткнення. Найбільше атак …
+ * на Костянтинівському напрямку — 35." → „Найбільше атак … — 35.". Pure.
+ */
+function withoutTotalSentence(paragraph) {
+  return paragraph.split(/(?<=[.!?])\s+/).filter((sentence) => !REPORT_TOTAL_RE.test(sentence)).join(' ').trim();
+}
+
+/**
  * Celé hlásenie z odsekov. Odsek so súhrnom („… 213 бойових зіткнень") dáva
  * celkový počet a nie je smerom; ostatné odseky so smerom dávajú
  * {gs, attacks, text}; dva smery v jednom odseku zdieľajú počet aj text.
@@ -196,7 +220,7 @@ export function strikesInText(text) {
 export function parseGeneralStaffReport(paragraphs, meta = {}) {
   const list = (Array.isArray(paragraphs) ? paragraphs : []).map(normalizeUkText).filter(Boolean);
   const all = list.join('\n');
-  const totalMatch = all.match(/(\d[\d ]*)\s+бойов(?:их|і)\s+зіткнен/i);
+  const totalMatch = all.match(REPORT_TOTAL_RE);
   const total = totalMatch ? parseUkNumber(totalMatch[1]) : null;
   const publishedMs = meta.publishedAt ? new Date(meta.publishedAt).getTime() : NaN;
   const year = Number.isFinite(publishedMs) ? new Date(publishedMs).getUTCFullYear() : null;
@@ -214,16 +238,29 @@ export function parseGeneralStaffReport(paragraphs, meta = {}) {
   // o čase, ktorý sme si domysleli, by bola tá istá chyba ako veriť zdroju.
   const publishedDate = stampDrifted ? new Date(publishedMs) : null;
   const directions = [];
-  const seen = new Set();
-  for (const p of list) {
-    if (/\d[\d ]*\s+бойов(?:их|і)\s+зіткнен/i.test(p)) continue; // súhrn, nie smer
+  const byGs = new Map();
+  for (const raw of list) {
+    // Súhrnná veta nie je smer — jej číslo je súčet frontu. Zvyšok odseku však
+    // smer niesť môže („Найбільше атак … на Костянтинівському напрямку — 35").
+    const p = REPORT_TOTAL_RE.test(raw) ? withoutTotalSentence(raw) : raw;
+    if (!p) continue;
     const names = directionsInParagraph(p);
     if (!names.length) continue;
     const attacks = attacksInParagraph(p);
+    const shared = names.length > 1;
     for (const gs of names) {
-      if (seen.has(gs)) continue;
-      seen.add(gs);
-      directions.push({ gs, attacks, text: p, shared: names.length > 1 });
+      const prev = byGs.get(gs);
+      if (prev) {
+        // Prvý výskyt vyhráva, OKREM keď bol bez počtu alebo spoločný pre dva
+        // smery a neskorší odsek patrí len tomuto smeru a počet má („Найбільше
+        // атак … на Костянтинівському та Покровському напрямках" a potom
+        // vlastné odseky s 31 a 30).
+        if (attacks !== null && !shared && (prev.attacks === null || prev.shared)) Object.assign(prev, { attacks, text: p, shared: false });
+        continue;
+      }
+      const entry = { gs, attacks, text: p, shared };
+      byGs.set(gs, entry);
+      directions.push(entry);
     }
   }
   return {

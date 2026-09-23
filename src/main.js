@@ -61,6 +61,7 @@ import { buildSituationModel, fetchSituationNews } from './data/situationNews.js
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
+import { createUkraineDirectionCard } from './ukraineDirectionCard.js';
 import { createUkraineEventsLayer } from './ukraineEventsLayer.js';
 import { createUkraineControlLayer } from './ukraineControlLayer.js';
 import { createUkraineAreasLayer } from './data/ukraineAreasLayer.js';
@@ -938,6 +939,21 @@ async function init() {
       }
       return applyFrontScene(id, frontSceneDeps);
     };
+    // Karta smeru (B5): trend útokov z archívu hlásení GŠ + najčastejšie sídla;
+    // klik na sídlo = kamera nad neho (z juhu, ako front scéna).
+    const ukraineDirectionCard = createUkraineDirectionCard({
+      loadDirections: ukraineTimeline.store?.directions ? (from, to) => ukraineTimeline.store.directions(from, to) : null,
+      placeIndex: () => ukraineBase.getPlaceIndex(),
+      onPlace: ({ lat, lon }) => {
+        if (!viewer?.camera?.flyToBoundingSphere || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        viewer.trackedEntity = undefined;
+        viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(lon, lat, 0), 1), {
+          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-58), 22_000),
+          duration: 2.0,
+        });
+      },
+    });
+    window.__godsEyeView.ukraineDirectionCard = ukraineDirectionCard;
     ukrainePanel = createUkrainePanel({
       mountTarget: document.querySelector('#ukraine-panel [data-ukraine-body]'),
       layer: ukraineBase,
@@ -947,6 +963,7 @@ async function init() {
       deepstate: ukraineDeepState,
       areas: ukraineAreas,
       damage: ukraineDamage,
+      directionCard: ukraineDirectionCard,
       applyScene: (id) => runFrontScene(id),
     });
     window.__godsEyeView.ukrainePanel = ukrainePanel;

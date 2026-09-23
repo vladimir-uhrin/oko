@@ -330,6 +330,22 @@ export async function readReports(root, from, to) {
   return out;
 }
 /**
+ * Odseky smerov z hlásení GŠ po dňoch — pre kartu smeru (trend útokov, sídlá).
+ * Len to, čo karta potrebuje (počty, odseky, čas hlásenia), nie celé hlásenie;
+ * deň bez hlásenia v odpovedi CHÝBA, aby ho karta ukázala ako dieru, nie nulu.
+ */
+export async function directionsPayload(root, from, to, { now = Date.now() } = {}) {
+  const reports = await readReports(root, from, to);
+  const days = {};
+  for (const [day, r] of Object.entries(reports)) {
+    const directions = (Array.isArray(r.directions) ? r.directions : [])
+      .filter((d) => d && typeof d.gs === 'string' && d.gs)
+      .map((d) => ({ gs: d.gs, attacks: Number.isFinite(d.attacks) ? d.attacks : null, text: typeof d.text === 'string' ? d.text : '', shared: Boolean(d.shared) }));
+    days[day] = { total: Number.isFinite(r.total) ? r.total : null, reportedAt: r.reportedAt || null, reportedAtText: r.reportedAtText || null, directions };
+  }
+  return { from, to, days, generatedAt: now, attribution: 'Generálny štáb ZSU cez ArmyInform, CC BY 4.0' };
+}
+/**
  * Spätné naplnenie hlásení z tagového feedu ArmyInform (`?paged=N`, WordPress):
  * články sa parsujú rovnakým čistým parserom ako živé hlásenie. Zdvorilá pauza
  * medzi článkami; už archivované dni sa preskočia.
@@ -365,6 +381,54 @@ export async function backfillReports(root, { fetchImpl = fetch, normalizeRss = 
     }
   }
   return { seen, stored };
+}
+
+/** Porovnávací odtlačok hlásenia: súčet a smery (bez textov, časov a poradia). Pure. */
+export const reportFingerprint = (r) => JSON.stringify({
+  total: r?.total ?? null,
+  directions: (r?.directions || []).map((d) => [d.gs, d.attacks ?? null, Boolean(d.shared)]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+});
+
+/**
+ * Preparsovanie archivovaných hlásení po oprave parsera: článok z uloženého
+ * `url` sa stiahne znova a prejde aktuálnym parserom. Zapíše sa len deň, kde
+ * sa súčet alebo smery zmenili — pôvodný súbor ide najprv do `backupDir`.
+ * Deň sa nikdy nepresúva (iný deň po parse = preskočiť, nie prepísať cudzí).
+ * @returns {Promise<{checked:number, updated:string[], same:number, skipped:Array<{day:string, reason:string}>}>}
+ */
+export async function reparseReports(root, { from, to, backupDir, fetchImpl = fetch, pauseMs = 1500, now = Date.now(), dryRun = false, log = () => {} } = {}) {
+  if (!dryRun && !backupDir) throw new Error('reparseReports: backupDir je povinný');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const out = { checked: 0, updated: [], same: 0, skipped: [] };
+  const days = await readReports(root, from, to);
+  let first = true;
+  for (const [day, stored] of Object.entries(days)) {
+    out.checked += 1;
+    if (!stored?.url) { out.skipped.push({ day, reason: 'no-url' }); continue; }
+    try {
+      if (!first) await sleep(pauseMs);
+      first = false;
+      const { res, body } = await fetchCapped(fetchImpl, stored.url, { timeoutMs: 20_000, maxBytes: 3 * 1024 * 1024 });
+      if (!res.ok) { out.skipped.push({ day, reason: `HTTP ${res.status}` }); continue; }
+      const publishedAt = stored.publishedAt ?? null;
+      const parsed = parseGeneralStaffReport(extractReportParagraphs(body), { publishedAt, url: stored.url, title: stored.title || undefined });
+      if (!parsed.ok || parsed.directions.length < 5) { out.skipped.push({ day, reason: 'unparsed' }); continue; }
+      const reportedAt = parsed.reportedAt || stored.reportedAt || null;
+      const next = { ...stored, ...parsed, reportedAt, day, fetchedAt: stored.fetchedAt ?? now, reparsedAt: now };
+      if (reportDay(next) !== day) { out.skipped.push({ day, reason: `day-mismatch ${reportDay(next)}` }); continue; }
+      if (reportFingerprint(next) === reportFingerprint(stored)) { out.same += 1; continue; }
+      const before = (stored.directions || []).map((d) => `${d.gs}:${d.attacks ?? '?'}`).join(' ');
+      const after = next.directions.map((d) => `${d.gs}:${d.attacks ?? '?'}`).join(' ');
+      log(`[reports] ${day}: súčet ${stored.total ?? '?'} → ${next.total ?? '?'}\n  pred: ${before}\n  po:   ${after}`);
+      out.updated.push(day);
+      if (dryRun) continue;
+      const backup = path.join(backupDir, `${day}.json`);
+      await fsp.mkdir(backupDir, { recursive: true });
+      try { await fsp.access(backup); } catch { await fsp.copyFile(dayFile(root, 'reports', day), backup); }
+      await writeJsonAtomic(dayFile(root, 'reports', day), next);
+    } catch (error) { out.skipped.push({ day, reason: String(error?.message || error) }); }
+  }
+  return out;
 }
 
 // ── súhrn po dňoch (prehľad časovej osi „od 2022") ────────────────────────

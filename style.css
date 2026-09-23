@@ -10979,6 +10979,90 @@ body.scene-playback-mode #first-run-launcher {
 .ukraine-dir-count.is-unknown { color: #8a97a3; }
 .ukraine-dir-count.is-mid { color: #ffb547; }
 .ukraine-dir-count.is-high { color: #f87171; }
+/*
+ * Karta smeru (B5, 2026-09-23): vkladá sa pod tlačidlo aktívneho smeru.
+ * Stĺpce = útoky po dňoch z archívu hlásení GŠ; prázdny stĺpec = hlásenie
+ * chýba, bodka = smer nespomenutý, šrafa = popoludňajšie priebežné hlásenie.
+ */
+.ukraine-dircard {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 1px 0 4px;
+  padding: 7px 8px 8px;
+  border: 1px solid var(--accent-dim);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(11, 22, 34, 0.55);
+}
+.ukraine-dircard[hidden] { display: none; }
+.ukraine-dircard-head { display: flex; flex-direction: column; gap: 1px; }
+.ukraine-dircard-name { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--text-primary); }
+.ukraine-dircard-gs { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.03em; color: var(--text-dim); }
+.ukraine-dircard-today { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.ukraine-dircard-num { font-family: var(--font-mono); font-size: 18px; font-weight: 700; line-height: 1; color: #e6eef4; }
+.ukraine-dircard-unit { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.03em; color: var(--text-secondary); }
+.ukraine-dircard-trend {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+.ukraine-dircard-trend[hidden] { display: none; }
+.ukraine-dircard-trend[data-trend="up"] { color: #ffb547; }
+.ukraine-dircard-trend[data-trend="down"] { color: #8aa0b6; }
+.ukraine-dircard-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 38px;
+  padding-bottom: 1px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.ukraine-dircard-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 1px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 1px 1px 0 0;
+}
+.ukraine-dircard-bar.is-ref { background: var(--accent); }
+.ukraine-dircard-bar.is-zero { height: 1px; background: rgba(255, 255, 255, 0.35); }
+.ukraine-dircard-bar.is-missing { height: 100%; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.ukraine-dircard-bar.is-unknown { height: 2px; background: #8a97a3; }
+.ukraine-dircard-bar.is-unmentioned { height: 3px; background: none; }
+.ukraine-dircard-bar.is-unmentioned::after { content: ''; display: block; width: 3px; height: 3px; margin: 0 auto; border-radius: 50%; background: #8a97a3; }
+.ukraine-dircard-bar.is-partial {
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 60%, transparent) 0 2px, transparent 2px 4px);
+}
+.ukraine-dircard-axis { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.04em; color: var(--text-dim); }
+.ukraine-dircard-stats { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.03em; color: var(--text-secondary); }
+.ukraine-dircard-places-title { margin-top: 2px; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.08em; color: var(--text-dim); }
+.ukraine-dircard-places-title[hidden], .ukraine-dircard-places[hidden] { display: none; }
+.ukraine-dircard-places { display: flex; flex-wrap: wrap; gap: 3px; }
+.ukraine-dircard-place {
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  cursor: var(--cursor-pointer);
+  transition: all var(--transition-fast);
+}
+.ukraine-dircard-place:hover, .ukraine-dircard-place:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+.ukraine-dircard-dim { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+.ukraine-dircard-status { margin: 0; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.03em; color: var(--text-secondary); }
+.ukraine-dircard-status[hidden] { display: none; }
+.ukraine-dircard-status[data-state="error"] { color: #ffb14d; }
+.ukraine-dircard-note { margin: 2px 0 0; font-family: var(--font-mono); font-size: 8px; line-height: 1.4; letter-spacing: 0.02em; color: var(--text-dim); }
 .ukraine-news { display: flex; flex-direction: column; min-height: 0; }
 .gas-status {
   font-family: var(--font-mono);
