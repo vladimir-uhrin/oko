@@ -35,8 +35,13 @@ const INERT = {
 /** Druhy DeepState, ktoré znamenajú ruskú kontrolu (pre stranu sídla). */
 export const DEEPSTATE_RU_KINDS = Object.freeze(['occupied', 'ordlo', 'crimea', 'tuzla']);
 /** Štýly vrstvy: KARTA = tenšie obrysy, sivá zóna šrafovaná (K3, vzorka). */
+// Šrafovaná sivá zóna aj v bežnom štýle (2026-09-23, používateľ: „to šrafované
+// mi zmizlo"): kým DeepState kreslí, raster Wikipédie so žltou zónou bojov sa
+// skryje (dve výplne naraz by boli neprehľadné) a plná sivá zóna ho nenahradila —
+// na mape nezostalo nič šrafované. Teraz šrafuje aktuálnu sivú zónu DeepState;
+// je užšia než naša odvodená 7 km zóna, lebo je to ich meraná nikoho zem.
 export const DEEPSTATE_STYLES = Object.freeze({
-  default: Object.freeze({ greyWidth: 1.2, width: 1.8, greyOutline: 0.75, outline: 0.9, hatch: false }),
+  default: Object.freeze({ greyWidth: 1.2, width: 1.8, greyOutline: 0.75, outline: 0.9, hatch: true }),
   karta: Object.freeze({ greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true }),
 });
 

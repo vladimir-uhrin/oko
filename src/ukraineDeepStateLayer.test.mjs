@@ -45,3 +45,11 @@ test('K3: index polygónov a strana bodu — okupované = ru, sivá zóna = cont
   assert.equal(inert.sideAt(38.5, 48.5), null);
   assert.equal(inert.getStyle(), 'default');
 });
+
+test('sivá zóna DeepState je šrafovaná v každom štýle — inak po skrytí rastra Wikipédie nezostane šrafované nič', () => {
+  // Používateľ 2026-09-23: „to šrafované mi zmizlo". Kým DeepState kreslí, žltá
+  // zóna bojov z Wikipédie sa skryje; plná sivá zóna ju nenahradila.
+  for (const [name, style] of Object.entries(DEEPSTATE_STYLES)) {
+    assert.equal(style.hatch, true, `štýl ${name} šrafuje sivú zónu`);
+  }
+});
