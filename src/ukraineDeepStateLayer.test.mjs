@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEEPSTATE_STYLES, buildPolyIndex, createUkraineDeepStateLayer, ringPositions, sideFromPolygons } from './ukraineDeepStateLayer.js';
+import { deepstateGreyCss, DEEPSTATE_STYLES, buildPolyIndex, createUkraineDeepStateLayer, ringPositions, sideFromPolygons } from './ukraineDeepStateLayer.js';
 
 test('ringPositions prevedie [lon,lat] na Cartesian3 (bez výšky = primknuté)', () => {
   const pos = ringPositions([[37.8, 48.99], [37.9, 49.0]]);
@@ -52,4 +52,22 @@ test('sivá zóna DeepState je šrafovaná v každom štýle — inak po skrytí
   for (const [name, style] of Object.entries(DEEPSTATE_STYLES)) {
     assert.equal(style.hatch, true, `štýl ${name} šrafuje sivú zónu`);
   }
+});
+
+test('sivá zóna: v bežnom štýle jantárové pruhy, KARTA ostáva sivá a jemná', async () => {
+  const { DEEPSTATE_COLORS } = await import('./data/ukraineDeepState.js');
+  // „Šrafovanie je také ledabolo a táto farba zaniká" — sivé 1 px čiary splývali
+  // so satelitným terénom. Jantárová = v OKU sporné / smer útoku.
+  assert.equal(deepstateGreyCss(DEEPSTATE_STYLES.default), '#ffb547');
+  const d = DEEPSTATE_STYLES.default.greyHatch;
+  // Jemné čiary áno („jemnejšie šrafovanie"), ale nie bledé — sivé na alfe 0,6
+  // zanikali v teréne. Tenkú čiaru drží viditeľnú sýtosť, nie hrúbka.
+  assert.ok(d.lineAlpha >= 0.7, 'jemná čiara musí byť dosť sýta, inak zanikne');
+  assert.ok(DEEPSTATE_STYLES.default.greyOutline >= 0.8, 'okraj zóny drží jej tvar aj pri oddialení');
+  // KARTU používateľ schválil podľa vzorky — nesmie sa zmeniť ani o pixel.
+  assert.equal(deepstateGreyCss(DEEPSTATE_STYLES.karta), DEEPSTATE_COLORS.grey);
+  assert.deepEqual({ ...DEEPSTATE_STYLES.karta.greyHatch }, { lineAlpha: 0.6, fillAlpha: 0.1 });
+  assert.equal(DEEPSTATE_STYLES.karta.greyOutline, 0.6);
+  assert.equal(DEEPSTATE_STYLES.karta.greyWidth, 0.7);
+  assert.equal(deepstateGreyCss(null), DEEPSTATE_COLORS.grey, 'bez štýlu pôvodná sivá');
 });

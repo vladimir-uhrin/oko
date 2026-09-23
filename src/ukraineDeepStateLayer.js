@@ -40,10 +40,30 @@ export const DEEPSTATE_RU_KINDS = Object.freeze(['occupied', 'ordlo', 'crimea', 
 // skryje (dve výplne naraz by boli neprehľadné) a plná sivá zóna ho nenahradila —
 // na mape nezostalo nič šrafované. Teraz šrafuje aktuálnu sivú zónu DeepState;
 // je užšia než naša odvodená 7 km zóna, lebo je to ich meraná nikoho zem.
+//
+// Druhé kolo (to isté popoludnie, „šrafovanie je také ledabolo a skús inú farbu,
+// táto zaniká"): sivé 1 px čiary s rozstupom 9 px pôsobili na satelitnom podklade
+// ako jemná textúra terénu, nie ako zámerné šrafovanie. Bežný štýl preto kreslí
+// JANTÁROVÉ čiary (v OKU = sporné / smer útoku, ako zóna bojov z Wikipédie, ktorú
+// používateľ zakrúžkoval) s výrazným okrajom. Tretie kolo („jemnejšie šrafovanie"):
+// hrubé pruhy pôsobili ako výstražná páska, preto tenké husté čiary — jemné, no
+// dosť sýte (alfa 0,78), aby znova nezanikli ako tie sivé. KARTA ostáva
+// sivá a jemná — tú používateľ schválil podľa vzorky a na svetlom reliéfe funguje.
 export const DEEPSTATE_STYLES = Object.freeze({
-  default: Object.freeze({ greyWidth: 1.2, width: 1.8, greyOutline: 0.75, outline: 0.9, hatch: true }),
-  karta: Object.freeze({ greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true }),
+  default: Object.freeze({
+    greyWidth: 1.6, width: 1.8, greyOutline: 0.9, outline: 0.9, hatch: true,
+    greyCss: '#ffb547', greyHatch: Object.freeze({ lineAlpha: 0.78, fillAlpha: 0.06, spacing: 8, thickness: 0.2 }),
+  }),
+  karta: Object.freeze({
+    greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true,
+    greyCss: null, greyHatch: Object.freeze({ lineAlpha: 0.6, fillAlpha: 0.1 }),
+  }),
 });
+
+/** Farba sivej zóny pre štýl (KARTA = pôvodná sivá). Pure. */
+export function deepstateGreyCss(style) {
+  return (style && style.greyCss) || DEEPSTATE_COLORS.grey;
+}
 
 /** Index polygónov pre rýchle „v ktorej zóne je bod": vonkajší prstenec + bbox. Pure. */
 export function buildPolyIndex(features) {
@@ -144,7 +164,8 @@ export function createUkraineDeepStateLayer({
         const holes = f.rings.slice(1).map((r) => new Cesium.PolygonHierarchy(ringPositions(r)));
         n += 1;
         // Sivá zóna na KARTE: šrafovanie 45° v obrazovkových px (ako „územie bojov" vo vzorke); bez cache materiálov výplň.
-        const material = (st.hatch && f.kind === 'grey') ? (hatchMaterialFor(DEEPSTATE_COLORS.grey, { lineAlpha: 0.6, fillAlpha: 0.1 }) || colour.withAlpha(alpha)) : colour.withAlpha(alpha);
+        const greyColour = Cesium.Color.fromCssColorString(deepstateGreyCss(st));
+        const material = (st.hatch && f.kind === 'grey') ? (hatchMaterialFor(deepstateGreyCss(st), st.greyHatch) || greyColour.withAlpha(alpha)) : colour.withAlpha(alpha);
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:poly:${n}`,
           polygon: { hierarchy: new Cesium.PolygonHierarchy(outer, holes), material, classificationType: Cesium.ClassificationType.BOTH },
@@ -152,7 +173,7 @@ export function createUkraineDeepStateLayer({
         });
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:line:${n}`,
-          polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : st.width, material: colour.withAlpha(f.kind === 'grey' ? st.greyOutline : st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
+          polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : st.width, material: f.kind === 'grey' ? greyColour.withAlpha(st.greyOutline) : colour.withAlpha(st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
         });
       } else if (f.type === 'Point' && Number.isFinite(f.lat) && Number.isFinite(f.lon)) {
         const attack = f.kind === 'attack';
@@ -221,7 +242,7 @@ export function createUkraineDeepStateLayer({
         } catch { info = null; }
         if (info && info.kind) {
           tip.textContent = tipTextFor(info);
-          tip.style.setProperty('--ukr-accent', DEEPSTATE_COLORS[info.kind] || '#8a97a3');
+          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'));
           tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
           tip.hidden = false;
         } else tip.hidden = true;

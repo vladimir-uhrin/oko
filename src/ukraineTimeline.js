@@ -436,6 +436,8 @@ export function createUkraineTimeline({
     if (!deepstate || !dsChip) return;
     renderFresh();
     const st = deepstate.getState();
+    // Sivá zóna má v bežnom štýle jantárové pruhy, na KARTE sivé — vzorka ide s ňou.
+    dsBox?.classList.toggle('is-karta', st.style === 'karta');
     dsChip.classList.toggle('active', st.shown);
     dsChip.setAttribute('aria-pressed', String(st.shown));
     // Kým DeepState NAOZAJ KRESLÍ, odvodený raster z Wikipédie sa skryje (dve
