@@ -996,6 +996,12 @@ export const EN_STRINGS = Object.freeze({
   'ukraine.age.one': '{n} day ago',
   'ukraine.age.many': '{n} days ago',
   'ukraine.src.stale': 'STALE',
+  // A4 (2026-09-23): riadok čerstvosti zdrojov v osi.
+  'ukraine.fresh.title': 'SOURCES',
+  'ukraine.fresh.control': 'Wikipedia',
+  'ukraine.fresh.deepstate': 'DeepState',
+  'ukraine.fresh.report': 'GS report',
+  'ukraine.fresh.events': 'events',
   'ukraine.src.stale-note': 'the source has not been updated for a long time — this may be materially out of date',
   // DeepStateMap.live (2026-09-19, hobby use, consent requested) — see src/ukraineDeepStateLayer.js.
   'ukraine.part.deepstate': 'DEEPSTATE',
@@ -2746,6 +2752,12 @@ export const SK_STRINGS = Object.freeze({
   'ukraine.age.one': 'pred {n} dňom',
   'ukraine.age.many': 'pred {n} dňami',
   'ukraine.src.stale': 'ZASTARANÉ',
+  // A4 (2026-09-23): riadok čerstvosti zdrojov v osi.
+  'ukraine.fresh.title': 'ZDROJE',
+  'ukraine.fresh.control': 'Wikipédia',
+  'ukraine.fresh.deepstate': 'DeepState',
+  'ukraine.fresh.report': 'hlásenie GŠ',
+  'ukraine.fresh.events': 'udalosti',
   'ukraine.src.stale-note': 'zdroj sa dlho neaktualizoval — údaj môže byť vecne neaktuálny',
   // DeepStateMap.live (2026-09-19, hobby použitie, súhlas sa žiada) — src/ukraineDeepStateLayer.js.
   'ukraine.part.deepstate': 'DEEPSTATE',

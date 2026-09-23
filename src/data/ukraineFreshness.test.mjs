@@ -81,3 +81,40 @@ test('vek sa ráta voči PREZERANÉMU dňu, nie voči dnešku', async () => {
   assert.equal(viewedRefMs(null, now), now);
   assert.equal(viewedRefMs('zajtra', now), now);
 });
+
+test('A4: riadok čerstvosti — jeden záznam na zdroj, každý so svojím prahom', async () => {
+  const { freshnessRow, REPORT_STALE_DAYS, EVENTS_STALE_DAYS } = await import('./ukraineFreshness.js');
+  const refMs = Date.parse('2026-09-23T14:00:00Z');
+  const row = freshnessRow({
+    controlAt: '2026-08-13T09:28:11Z',
+    deepstateAt: '2026-09-23T07:38:00Z',
+    reportAt: '2026-09-23T05:00:00Z',
+    newestEventMs: Date.parse('2026-09-23T13:40:00Z'),
+    refMs,
+  });
+  assert.deepEqual(row.map((r) => r.id), ['control', 'deepstate', 'report', 'events'], 'pevné poradie');
+  const by = Object.fromEntries(row.map((r) => [r.id, r]));
+  assert.equal(by.control.ageDays, 41);
+  assert.equal(by.control.stale, true, 'Wikipédia 41 dní nad prahom 14');
+  assert.equal(by.deepstate.stale, false);
+  assert.equal(by.report.stale, false);
+  assert.equal(by.events.ageDays, 0);
+  assert.ok(REPORT_STALE_DAYS <= 2 && EVENTS_STALE_DAYS <= 2, 'denné zdroje majú prísny prah');
+});
+
+test('A4: zdroj bez dátumu sa vynechá — nič sa nedomýšľa', async () => {
+  const { freshnessRow } = await import('./ukraineFreshness.js');
+  const refMs = Date.parse('2026-09-23T14:00:00Z');
+  // Na doméne je DeepState skrytý a vypnutá vrstva nemá dátum.
+  const row = freshnessRow({ controlAt: '2026-08-13T09:28:11Z', deepstateAt: null, reportAt: '', newestEventMs: Number.NaN, refMs });
+  assert.deepEqual(row.map((r) => r.id), ['control']);
+  assert.deepEqual(freshnessRow({ refMs }), [], 'nič zapnuté = prázdny riadok');
+});
+
+test('A4: hlásenie staré tri dni je zastarané, dva dni ešte nie', async () => {
+  const { freshnessRow } = await import('./ukraineFreshness.js');
+  const refMs = Date.parse('2026-09-23T14:00:00Z');
+  const at = (days) => new Date(refMs - days * 86_400_000).toISOString();
+  assert.equal(freshnessRow({ reportAt: at(2), refMs })[0].stale, false);
+  assert.equal(freshnessRow({ reportAt: at(3), refMs })[0].stale, true);
+});

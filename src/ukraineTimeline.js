@@ -17,7 +17,7 @@ import { EVENT_TYPES, dayKey } from './data/ukraineEvents.js';
 import { createUkraineEventStore, mediaInWindow } from './data/ukraineEventsClient.js';
 import { TIMELINE_SPEEDS, TIMELINE_WINDOWS, createTimelineClock, cursorText, histogramBins } from './data/ukraineTimelineClock.js';
 import { TYPE_GLYPH, SEV_COLOR } from './ukraineEventsLayer.js';
-import { CONTROL_STALE_DAYS, DEEPSTATE_STALE_DAYS, ageText, freshnessOf, viewedRefMs } from './data/ukraineFreshness.js';
+import { CONTROL_STALE_DAYS, DEEPSTATE_STALE_DAYS, ageText, freshnessOf, freshnessRow, viewedRefMs } from './data/ukraineFreshness.js';
 import { currentLanguage, t } from './i18n.js';
 
 const IMG_API = '/api/img';
@@ -149,6 +149,11 @@ export function createUkraineTimeline({
   const axis = el('div', 'oko-ukr-tl-axis');
   track.appendChild(axis);
   root.appendChild(track);
+  // A4: jeden riadok s čerstvosťou zdrojov, ktoré mapa práve kreslí. Dátumy boli
+  // rozhádzané na štyroch miestach a nikto ich neporovnal.
+  const fresh = el('div', 'oko-ukr-tl-fresh');
+  fresh.hidden = true;
+  root.appendChild(fresh);
 
   const row3 = el('div', 'oko-ukr-tl-row oko-ukr-tl-row3');
   // Územná kontrola (etapa 4C): čip KONTROLA + legenda RU výplň / zóna bojov / body,
@@ -396,6 +401,7 @@ export function createUkraineTimeline({
   }
   function renderDeepState() {
     if (!deepstate || !dsChip) return;
+    renderFresh();
     const st = deepstate.getState();
     dsChip.classList.toggle('active', st.shown);
     dsChip.setAttribute('aria-pressed', String(st.shown));
@@ -444,6 +450,7 @@ export function createUkraineTimeline({
   }
   function renderControl() {
     if (!control || !ctlChip) return;
+    renderFresh();
     const st = control.getState();
     ctlChip.classList.toggle('active', st.shown);
     ctlChip.setAttribute('aria-pressed', String(st.shown));
@@ -485,11 +492,48 @@ export function createUkraineTimeline({
       b.hidden = !(countBy[type] || 0) && type !== 'strike' && type !== 'ground';
     }
   }
+  /** Hlásenie GŠ pre prezeraný deň (LIVE = dnes, inak deň kurzora). */
+  function reportForView(state) {
+    return state.mode === 'live' ? (_reports[dayKey(state.now)] || store.reportForDay(_reports, state.now)) : store.reportForDay(_reports, state.cursor);
+  }
+  /**
+   * Riadok čerstvosti: čo mapa kreslí a aké je to staré voči PREZERANÉMU dňu.
+   * Zdroj bez dátumu sa vynechá; skrytý DeepState (451 na doméne) sa nespomína.
+   */
+  function renderFresh() {
+    const state = clock.getState();
+    const viewMs = state.mode === 'live' ? now() : state.cursor;
+    const refMs = viewedRefMs(dayKey(viewMs), now());
+    const cs = control?.isShown?.() ? control.getState() : null;
+    const ds = deepstate && !_deepstateBlocked && deepstate.isShown() ? deepstate.getState() : null;
+    const rep = reportForView(state);
+    let newest = null;
+    for (const e of _events) if (Number.isFinite(e.t) && e.t <= refMs && (newest === null || e.t > newest)) newest = e.t;
+    const row = freshnessRow({ controlAt: cs?.revisionAt, deepstateAt: ds?.at, reportAt: rep?.reportedAt, newestEventMs: newest, refMs });
+    fresh.replaceChildren();
+    fresh.hidden = !row.length;
+    if (!row.length) return;
+    fresh.appendChild(el('span', 'oko-ukr-tl-fresh-title', translate('ukraine.fresh.title')));
+    for (const r of row) {
+      const label = translate(`ukraine.fresh.${r.id}`);
+      const atMs = typeof r.at === 'number' ? r.at : Date.parse(r.at);
+      const dateText = r.ageDays === 0 ? translate('ukraine.age.today') : shortDay(dayKey(atMs));
+      const item = el('span', `oko-ukr-tl-fresh-item is-${r.id}${r.stale ? ' is-stale' : ''}`);
+      item.appendChild(el('i', 'oko-ukr-tl-fresh-dot'));
+      item.appendChild(el('span', 'oko-ukr-tl-fresh-text', `${label} ${dateText}`));
+      // V riadku stačí „dnes" alebo „13.8.", tooltip nesie presný dátum aj s rokom —
+      // inak by pri dnešku zopakoval „dnes · dnes".
+      const day = dayKey(atMs);
+      item.title = [label, `${shortDay(day)}${day.slice(0, 4)}`, ageText(r.ageDays, translate), r.stale ? translate('ukraine.src.stale') : null].filter(Boolean).join(' · ');
+      fresh.appendChild(item);
+    }
+  }
   function renderCounts() {
+    renderFresh();
     const ls = layer.getState();
     const parts = [translate('ukraine.tl.in-view', { n: nf.format(ls.inView), total: nf.format(ls.total) })];
     const state = clock.getState();
-    const rep = state.mode === 'live' ? (_reports[dayKey(state.now)] || store.reportForDay(_reports, state.now)) : store.reportForDay(_reports, state.cursor);
+    const rep = reportForView(state);
     if (rep && Number.isFinite(rep.total)) parts.push(translate('ukraine.tl.gs', { n: nf.format(rep.total), day: shortDay(rep.day || dayKey(Date.parse(rep.reportedAt || '') || state.cursor)) }));
     const media = mediaInWindow(_events);
     if (media.length) parts.push(translate('ukraine.tl.media', { n: nf.format(media.length) }));
@@ -704,6 +748,6 @@ export function createUkraineTimeline({
     isDeepStateAvailable: () => !_deepstateBlocked,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
+    _getStateForTest: () => ({ root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, fresh, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
   };
 }

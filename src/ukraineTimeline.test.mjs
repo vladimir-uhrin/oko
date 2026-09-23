@@ -510,3 +510,45 @@ test('A2: vek sa ráta voči prezeranému dňu — pri prehrávaní roku 2022 ni
   assert.equal(ctlAge.className.includes('is-stale'), true);
   assert.equal(ctlBox.className.includes('is-stale'), true, 'vzorky v legende ustúpia spolu s mapou');
 });
+
+test('A4: riadok čerstvosti ukáže každý kreslený zdroj a zastaraný prezradí', async () => {
+  const timers = [];
+  const doc = fakeDocument();
+  const layer = fakeLayer();
+  const now = T0;
+  const clock = createTimelineClock({ now: () => now, windowId: '24h' });
+  const events = [{ id: 'e1', t: T0 - 3_600_000, lat: 48, lon: 37, place: 'Lyman', type: 'strike', severity: 'minor', level: 'reported', src: 'news', sources: [], media: [] }];
+  const store = {
+    async load() { return { events, reports: { '2026-09-19': { total: 213, day: '2026-09-19', reportedAt: '2026-09-19T05:00:00Z' } }, coverage: { news: [], media: [] }, errors: [], chunks: 1 }; },
+    async summary() { return { days: {} }; },
+    reportForDay(r, ms) { return r[new Date(ms).toISOString().slice(0, 10)] || null; },
+    async control() { return null; },
+  };
+  const ctlListeners = new Set(); let snap = null;
+  const control = {
+    isShown: () => true, async show() {}, hide() {}, setZonesVisible() {},
+    setSnapshot(s) { snap = s; for (const fn of ctlListeners) fn(); },
+    getState: () => ({ shown: true, loading: false, points: 1, revisionAt: snap?.revisionAt || null, requestedAt: snap?.requestedAt || null, stale: true, summary: null }),
+    onChange(fn) { ctlListeners.add(fn); return () => ctlListeners.delete(fn); },
+  };
+  const tl = createUkraineTimeline({
+    layer, store, clock, control, translate: (k) => k, lang: 'sk', documentRef: doc,
+    now: () => now, setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimer: () => {}, origin: 'https://oko.test',
+  });
+  tl.show();
+  // Načítanie okna je naplánované časovačom 0 ms — spustiť ho ručne, ako v ostatných testoch.
+  await timers.filter((x) => x.ms === 0).at(-1)?.fn();
+  for (let i = 0; i < 8; i += 1) await new Promise((r) => setImmediate(r));
+  control.setSnapshot({ revisionAt: '2026-08-13T09:28:11Z', requestedAt: '2026-09-19' });
+  const { fresh } = tl._getStateForTest();
+  assert.equal(fresh.hidden, false);
+  const items = fresh.children.filter((c) => c.className.includes('oko-ukr-tl-fresh-item'));
+  const ids = items.map((c) => c.className.match(/is-(control|deepstate|report|events)/)?.[1]);
+  assert.deepEqual(ids, ['control', 'report', 'events'], 'DeepState vypnutý = v riadku nie je');
+  const ctl = items[0];
+  assert.ok(ctl.className.includes('is-stale'), 'Wikipédia 37 dní voči 19. 9. je zastaraná');
+  assert.ok(ctl.title.includes('ukraine.src.stale'), 'tooltip to povie slovom');
+  assert.equal(items[1].className.includes('is-stale'), false, 'dnešné hlásenie je čerstvé');
+  // Text dnešného zdroja je „dnes", nie dátum.
+  assert.ok(items[2].children.some((c) => c.textContent === 'ukraine.fresh.events ukraine.age.today'));
+});

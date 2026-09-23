@@ -108,3 +108,50 @@ export function viewedRefMs(requestedDay, nowMs) {
   const dayEnd = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
   return Math.min(nowMs, dayEnd);
 }
+
+/**
+ * Hlásenie GŠ vychádza denne (~05:11 UTC). Dva dni bez neho znamenajú, že stojí
+ * zdroj alebo náš archivár — ArmyInform za 60 dní vynechal štyri dni, nikdy dva
+ * po sebe.
+ */
+export const REPORT_STALE_DAYS = 2;
+
+/**
+ * Udalosti okna (správy, médiá, GeoConfirmed, VIINA) pribúdajú každú štvrťhodinu;
+ * dva dni bez jedinej novej znamenajú, že stoja zdroje, nie že je ticho na fronte.
+ */
+export const EVENTS_STALE_DAYS = 2;
+
+/**
+ * Riadok „čerstvosť zdrojov" (A4, 2026-09-23): jeden záznam na zdroj, ktorý mapa
+ * práve kreslí. Dátumy boli rozhádzané na štyroch miestach (legenda kontroly,
+ * legenda DeepState, počítadlo GŠ, nikde pri udalostiach) a nikto ich neporovnal.
+ *
+ * Každý zdroj má vlastný prah, lebo každý žije iným tempom — Wikipédia 14 dní,
+ * DeepState 4, hlásenie aj udalosti 2. Vek sa ráta voči `refMs` z viewedRefMs,
+ * teda voči PREZERANÉMU dňu, rovnako ako značka veku a stlmenie mapy.
+ * Zdroj bez dátumu (vypnutá vrstva, prázdne okno) sa vynechá — nič sa nedomýšľa.
+ * Pure.
+ *
+ * @param {object} o
+ * @param {string|null} [o.controlAt] revízia Wikipédie, ak je kontrola zapnutá
+ * @param {string|number|null} [o.deepstateAt] snímka DeepState, ak je dostupný a zapnutý
+ * @param {string|null} [o.reportAt] `reportedAt` hlásenia pre prezeraný deň
+ * @param {number|null} [o.newestEventMs] najnovšia udalosť okna (≤ refMs)
+ * @param {number} o.refMs
+ * @returns {Array<{id: 'control'|'deepstate'|'report'|'events', at: string|number, ageDays: number, stale: boolean}>}
+ */
+export function freshnessRow({ controlAt = null, deepstateAt = null, reportAt = null, newestEventMs = null, refMs } = {}) {
+  const out = [];
+  const add = (id, at, staleDays) => {
+    if (at == null || at === '') return;
+    const f = freshnessOf(at, refMs, staleDays);
+    if (f.ageDays === null) return;
+    out.push({ id, at, ...f });
+  };
+  add('control', controlAt, CONTROL_STALE_DAYS);
+  add('deepstate', deepstateAt, DEEPSTATE_STALE_DAYS);
+  add('report', reportAt, REPORT_STALE_DAYS);
+  add('events', Number.isFinite(newestEventMs) ? newestEventMs : null, EVENTS_STALE_DAYS);
+  return out;
+}
