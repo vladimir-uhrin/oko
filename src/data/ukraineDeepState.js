@@ -140,6 +140,16 @@ export function deepstateSnapshotFromApi(json) {
 /** Mirror cyterat/deepstate-map-data sťahuje DeepState raz denne ~03:00 UTC. */
 export const DEEPSTATE_MIRROR_HOUR_UTC = 3;
 export const DEEPSTATE_MIRROR_ATTRIBUTION = 'DeepStateMap.live via the unofficial GitHub mirror cyterat/deepstate-map-data';
+/** Repozitár mirroru podľa id (cyterat = pôvodný, lazar-bit = záložný fork). Pure. */
+export function deepstateMirrorRepo(id) {
+  return id === 'lazar-bit' ? 'lazar-bit/deepstate-map-data-analytics' : 'cyterat/deepstate-map-data';
+}
+/** Atribúcia snímky podľa mirroru, z ktorého deň naozaj prišiel. Pure. */
+export function deepstateMirrorAttribution(id) {
+  return id === 'lazar-bit'
+    ? 'DeepStateMap.live via the unofficial GitHub mirror lazar-bit/deepstate-map-data-analytics (fork of cyterat/deepstate-map-data)'
+    : DEEPSTATE_MIRROR_ATTRIBUTION;
+}
 
 /**
  * Denný súbor mirroru → snímka v tvare `deepstateSnapshotFromApi` (vrstva,
@@ -151,7 +161,7 @@ export const DEEPSTATE_MIRROR_ATTRIBUTION = 'DeepStateMap.live via the unofficia
  * @param {object} geojson súbor mirroru
  * @param {{ dateKey: string, fallbackDays?: number, upstreamUnavailable?: boolean }} meta dateKey = YYYYMMDD súboru
  */
-export function deepstateSnapshotFromMirror(geojson, { dateKey, fallbackDays = 0, upstreamUnavailable = false } = {}) {
+export function deepstateSnapshotFromMirror(geojson, { dateKey, fallbackDays = 0, upstreamUnavailable = false, mirror = 'cyterat' } = {}) {
   const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(dateKey ?? ''));
   const day = m ? `${m[1]}-${m[2]}-${m[3]}` : null;
   const at = day ? `${day}T${String(DEEPSTATE_MIRROR_HOUR_UTC).padStart(2, '0')}:00:00.000Z` : null;
@@ -171,7 +181,7 @@ export function deepstateSnapshotFromMirror(geojson, { dateKey, fallbackDays = 0
     }
   }
   return {
-    id: null, at, atApprox: true, day, datetime: null, source: 'mirror', mirrorDate: dateKey || null,
+    id: null, at, atApprox: true, day, datetime: null, source: 'mirror', mirror: mirror === 'lazar-bit' ? 'lazar-bit' : 'cyterat', mirrorDate: dateKey || null,
     fallbackDays, upstreamUnavailable: Boolean(upstreamUnavailable),
     features,
     counts: features.length ? { occupied: features.length } : {},

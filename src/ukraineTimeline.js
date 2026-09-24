@@ -470,7 +470,7 @@ export function createUkraineTimeline({
     if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; return; }
     renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS, st.requestedAt);
     if (st.at) {
-      dsLine.textContent = translate(st.source === 'mirror' ? 'ukraine.ds.since-mirror' : 'ukraine.ds.since', { date: st.stampText })
+      dsLine.textContent = translate(st.source === 'mirror' ? 'ukraine.ds.since-mirror' : 'ukraine.ds.since', { date: st.stampText, mirror: st.mirror === 'lazar-bit' ? 'lazar-bit/deepstate-map-data-analytics' : 'cyterat/deepstate-map-data' })
         + (st.source === 'mirror' && st.upstreamUnavailable ? ` · ${translate('ukraine.ds.mirror-older')}` : '');
     } else if (!st.loading && !dsLine.textContent) {
       // Kým dopyt beží (mirror môže trvať do 30 s), nie je to „chýbajúci deň".
@@ -592,7 +592,7 @@ export function createUkraineTimeline({
       // V riadku stačí „dnes" alebo „13.8.", tooltip nesie presný dátum aj s rokom —
       // inak by pri dnešku zopakoval „dnes · dnes".
       const day = dayKey(atMs);
-      item.title = [label, `${shortDay(day)}${day.slice(0, 4)}`, ageText(r.ageDays, translate), r.stale ? translate('ukraine.src.stale') : null, viaMirror ? translate('ukraine.fresh.deepstate-mirror-title') : null].filter(Boolean).join(' · ');
+      item.title = [label, `${shortDay(day)}${day.slice(0, 4)}`, ageText(r.ageDays, translate), r.stale ? translate('ukraine.src.stale') : null, viaMirror ? translate('ukraine.fresh.deepstate-mirror-title', { mirror: ds?.mirror === 'lazar-bit' ? 'lazar-bit/deepstate-map-data-analytics' : 'cyterat/deepstate-map-data' }) : null].filter(Boolean).join(' · ');
       fresh.appendChild(item);
     }
   }

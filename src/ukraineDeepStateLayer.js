@@ -16,7 +16,7 @@
 // (19. 9. 2026) história nie je — API histórie je za autorizáciou.
 
 import * as Cesium from 'cesium';
-import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText } from './data/ukraineDeepState.js';
+import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText, deepstateMirrorRepo } from './data/ukraineDeepState.js';
 import { hatchMaterialFor } from './data/screenPatternMaterials.js';
 import { fetchUkraineDeepState } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
@@ -155,10 +155,10 @@ export function createUkraineDeepStateLayer({
   let _creditSource = null;
   function syncCredit() {
     const draws = _shown && Boolean(_snapshot?.features?.length);
-    const src = draws ? (_snapshot.source === 'mirror' ? 'mirror' : 'archive') : null;
+    const src = draws ? (_snapshot.source === 'mirror' ? `mirror:${deepstateMirrorRepo(_snapshot.mirror)}` : 'archive') : null;
     if (src === _creditSource) return;
     _creditSource = src;
-    ds.credit = src ? new Cesium.Credit(src === 'mirror' ? 'DeepStateMap.live (via mirror cyterat/deepstate-map-data)' : 'DeepStateMap.live', true) : undefined;
+    ds.credit = src ? new Cesium.Credit(src === 'archive' ? 'DeepStateMap.live' : `DeepStateMap.live (via mirror ${deepstateMirrorRepo(_snapshot.mirror)})`, true) : undefined;
   }
   function rebuild() {
     ds.entities.removeAll();
@@ -319,7 +319,7 @@ export function createUkraineDeepStateLayer({
       counts: _snapshot?.counts || null, areaKm2: _snapshot?.areaKm2 || null, features: _snapshot?.features?.length || 0, snapshots: _snapshot?.snapshots ?? null,
       style: _style, requestedAt: _snapshot?.requestedAt || null,
       // Zdroj snímky: náš archív z API (`archive`) alebo mirror cyterat (`mirror`, len okupované).
-      source: _snapshot?.source || (_snapshot ? 'archive' : null), atApprox: Boolean(_snapshot?.atApprox),
+      source: _snapshot?.source || (_snapshot ? 'archive' : null), mirror: _snapshot?.mirror || null, atApprox: Boolean(_snapshot?.atApprox),
       fallbackDays: _snapshot?.fallbackDays ?? 0, upstreamUnavailable: Boolean(_snapshot?.upstreamUnavailable),
     };
   }

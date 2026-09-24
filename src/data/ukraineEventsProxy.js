@@ -33,8 +33,8 @@ import {
   GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, archiveReport, collectMedia, controlDays, controlFor, controlSnapshot, dayKey, dayList, dayShift,
   deepstateDays, deepstateFor, deepstateSnapshot, directionsPayload, eventsPayload, firesRefresh, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
 } from '../../scripts/lib/ukraineArchive.mjs';
-import { DEEPSTATE_ANALYTICS_LICENSE, DEEPSTATE_ANALYTICS_NOTE, MIRROR_FIRST_DAY, createDeepStateMirror, dateKeyProblem, getFormattedDateKey } from './deepstateAnalyticsProxy.js';
-import { DEEPSTATE_MIRROR_ATTRIBUTION, deepstateSnapshotFromMirror } from './ukraineDeepState.js';
+import { DEEPSTATE_ANALYTICS_NOTE, DEEPSTATE_MIRRORS, MIRROR_FIRST_DAY, createDeepStateMirror, dateKeyProblem, deepstateMirrorLicense, getFormattedDateKey } from './deepstateAnalyticsProxy.js';
+import { deepstateMirrorAttribution, deepstateSnapshotFromMirror } from './ukraineDeepState.js';
 
 export const EVENTS_MAX_DAYS = 31;
 export const SUMMARY_MAX_DAYS = 1900;
@@ -189,7 +189,7 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
   // archív nemá (beží od 19. 9. 2026; mirror má súbory od 8. 7. 2024).
   const mirrorOn = !deepstateOff && String(env.UKRAINE_DEEPSTATE_MIRROR || '').toLowerCase() !== 'off';
   let mirror = deepstateMirror;
-  const getMirror = () => { if (!mirror) mirror = createDeepStateMirror({ root, fetchImpl, now, log }); return mirror; };
+  const getMirror = () => { if (!mirror) mirror = createDeepStateMirror({ root, fetchImpl, now, log, mirrors: DEEPSTATE_MIRRORS }); return mirror; };
   const controlCache = new Map(); // deň -> { at, json }
   const deepstateCache = new Map();
   const damageCache = new Map(); // adm3 | unosat -> { at, json }
@@ -311,10 +311,10 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
           else send(res, 404, { error: 'no_deepstate_snapshot', source: 'mirror', at, checkedDays: r.checkedDays }, req);
           return;
         }
-        const snapshot = deepstateSnapshotFromMirror(r.found.data, { dateKey: r.found.key, fallbackDays: r.fallbackDays, upstreamUnavailable: r.upstreamUnavailable });
+        const snapshot = deepstateSnapshotFromMirror(r.found.data, { dateKey: r.found.key, fallbackDays: r.fallbackDays, upstreamUnavailable: r.upstreamUnavailable, mirror: r.found.mirror });
         const json = {
           ...snapshot, requestedAt: at,
-          attribution: DEEPSTATE_MIRROR_ATTRIBUTION, license: DEEPSTATE_ANALYTICS_LICENSE, note: DEEPSTATE_ANALYTICS_NOTE,
+          attribution: deepstateMirrorAttribution(snapshot.mirror), license: deepstateMirrorLicense(snapshot.mirror), note: DEEPSTATE_ANALYTICS_NOTE,
           ...(archiveAllowed ? { archiveDays: days.length, archiveFirst: days[0] || null } : {}),
         };
         // Starší súbor kvôli výpadku mirroru sa necachuje — o 10 min môže byť správny.
