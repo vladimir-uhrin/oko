@@ -28,7 +28,7 @@ const HOVER_MS = 90;
 const INERT = {
   id: UKRAINE_DEEPSTATE_ID, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, loadLatest: async () => {},
   setStyle() {}, getStyle: () => 'default', sideAt: () => null,
-  getState: () => ({ shown: false, loading: false, error: null, day: null, at: null, stampText: '', counts: null, areaKm2: null, features: 0, style: 'default' }),
+  getState: () => ({ shown: false, loading: false, error: null, day: null, at: null, stampText: '', counts: null, areaKm2: null, features: 0, style: 'default', source: null }),
   onChange() { return () => {}; }, destroy() {},
 };
 
@@ -150,9 +150,20 @@ export function createUkraineDeepStateLayer({
   const listeners = new Set();
   const emit = () => { const s = getState(); for (const fn of listeners) { try { fn(s); } catch { /* */ } } };
 
+  // Atribúcia v riadku kreditov (a tým aj na zdieľanom obrázku) — len kým vrstva
+  // naozaj kreslí; text podľa zdroja snímky (licencia DeepState §3: textový odkaz).
+  let _creditSource = null;
+  function syncCredit() {
+    const draws = _shown && Boolean(_snapshot?.features?.length);
+    const src = draws ? (_snapshot.source === 'mirror' ? 'mirror' : 'archive') : null;
+    if (src === _creditSource) return;
+    _creditSource = src;
+    ds.credit = src ? new Cesium.Credit(src === 'mirror' ? 'DeepStateMap.live (via mirror cyterat/deepstate-map-data)' : 'DeepStateMap.live', true) : undefined;
+  }
   function rebuild() {
     ds.entities.removeAll();
     points.removeAll();
+    syncCredit();
     if (!_snapshot?.features?.length) { requestRender(); return; }
     const st = DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default;
     let n = 0;
@@ -269,7 +280,10 @@ export function createUkraineDeepStateLayer({
   /** Strana bodu podľa polygónov snímky: 'ru' | 'contested' | 'ua' (mimo polygónov, keď snímka má okupované) | null bez snímky. */
   function sideAt(lon, lat) {
     const hasOccupied = _polyIndex.some((p) => DEEPSTATE_RU_KINDS.includes(p.kind));
-    return sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied ? 'ua' : null });
+    // Mirror nesie len okupované územie, šedú zónu nie — mimo polygónov preto
+    // stranu nevieme (inak by špendlíky v šedej zóne zmodreli ako UA).
+    const mirror = _snapshot?.source === 'mirror';
+    return sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied && !mirror ? 'ua' : null });
   }
   async function loadLatest(day = null) {
     if (_loading) return;
@@ -281,6 +295,7 @@ export function createUkraineDeepStateLayer({
   async function show({ day = null, load = true } = {}) {
     if (_destroyed) return false;
     _shown = true;
+    syncCredit();
     ds.show = true; points.show = true;
     installHandler();
     requestRender();
@@ -292,6 +307,7 @@ export function createUkraineDeepStateLayer({
   function hide() {
     if (!_shown) return;
     _shown = false;
+    syncCredit();
     ds.show = false; points.show = false; tip.hidden = true;
     requestRender();
     emit();
@@ -302,6 +318,9 @@ export function createUkraineDeepStateLayer({
       day: _snapshot?.day || null, at: _snapshot?.at || null, stampText: deepstateStampText(_snapshot), datetime: _snapshot?.datetime || null,
       counts: _snapshot?.counts || null, areaKm2: _snapshot?.areaKm2 || null, features: _snapshot?.features?.length || 0, snapshots: _snapshot?.snapshots ?? null,
       style: _style, requestedAt: _snapshot?.requestedAt || null,
+      // Zdroj snímky: náš archív z API (`archive`) alebo mirror cyterat (`mirror`, len okupované).
+      source: _snapshot?.source || (_snapshot ? 'archive' : null), atApprox: Boolean(_snapshot?.atApprox),
+      fallbackDays: _snapshot?.fallbackDays ?? 0, upstreamUnavailable: Boolean(_snapshot?.upstreamUnavailable),
     };
   }
   function destroy() {

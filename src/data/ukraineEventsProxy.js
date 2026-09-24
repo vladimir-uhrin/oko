@@ -33,6 +33,8 @@ import {
   GEOCONFIRMED_ROLLING_DAYS, VIINA_FIRST_YEAR, archiveDayItems, archiveReport, collectMedia, controlDays, controlFor, controlSnapshot, dayKey, dayList, dayShift,
   deepstateDays, deepstateFor, deepstateSnapshot, directionsPayload, eventsPayload, firesRefresh, geoconfirmedRefresh, isDay, summaryPayload, viinaStatus, viinaYear,
 } from '../../scripts/lib/ukraineArchive.mjs';
+import { DEEPSTATE_ANALYTICS_LICENSE, DEEPSTATE_ANALYTICS_NOTE, MIRROR_FIRST_DAY, createDeepStateMirror, dateKeyProblem, getFormattedDateKey } from './deepstateAnalyticsProxy.js';
+import { DEEPSTATE_MIRROR_ATTRIBUTION, deepstateSnapshotFromMirror } from './ukraineDeepState.js';
 
 export const EVENTS_MAX_DAYS = 31;
 export const SUMMARY_MAX_DAYS = 1900;
@@ -54,7 +56,14 @@ function simpleLimiter({ windowMs, max }) {
     return true;
   };
 }
-const clientKey = (req) => String(req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'anon').split(',')[0].trim();
+// Kľúč limitera: CF-Connecting-IP (nastavuje Cloudflare), inak socket. PRVÁ
+// hodnota X-Forwarded-For patrí klientovi — Cloudflare skutočnú IP pripája za ňu,
+// takže striedaním prvej hodnoty sa dal limit obísť (kontrola 24. 9. 2026).
+const clientKey = (req) => {
+  const cf = req.headers?.['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.trim()) return cf.trim();
+  return String(req.socket?.remoteAddress || 'anon');
+};
 
 /**
  * @param {{root?: string, env?: NodeJS.ProcessEnv, fetchImpl?: typeof fetch, now?: () => number, setTimer?: Function, clearTimer?: Function, log?: Function}} [opts]
@@ -69,7 +78,9 @@ const clientKey = (req) => String(req.headers?.['x-forwarded-for'] || req.socket
  * zakazuje „distribution, publication, proxying" — lokálne prezeranie je vlastné
  * hobby použitie, verejná doména už je publikovanie. `UKRAINE_DEEPSTATE=consent`
  * to otvorí, keď súhlas príde; `=off` vypne aj lokálne. Chýbajúca hlavička =
- * radšej nie. Pure.
+ * radšej nie. Týka sa NÁŠHO archívu z API DeepState; verejná doména od 24. 9.
+ * 2026 dostáva namiesto neho snímku z mirroru cyterat (rozhodnutie vlastníka,
+ * pravidlo „žiadne mirrory" zrušené; `UKRAINE_DEEPSTATE_MIRROR=off` vráti 451). Pure.
  * @param {unknown} host hlavička Host (môže niesť port)
  * @param {{consent?: boolean}} [o]
  * @returns {boolean}
@@ -86,7 +97,7 @@ export function deepstateAllowedForHost(host, { consent = false } = {}) {
   return name === 'localhost' || name === '127.0.0.1' || name === '::1' || name.endsWith('.localhost');
 }
 
-export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m) } = {}) {
+export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m), deepstateMirror = null } = {}) {
   const enabled = env.UKRAINE_ARCHIVE !== 'off';
   const viinaCache = new Map();
   const payloadCache = new Map(); // key -> { at, json }
@@ -174,6 +185,11 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
   const deepstateMode = String(env.UKRAINE_DEEPSTATE || '').toLowerCase();
   const deepstateOff = deepstateMode === 'off';
   const deepstateConsent = deepstateMode === 'consent';
+  // Mirror cyterat (vlastník 24. 9. 2026): verejná doména + dni, ktoré náš
+  // archív nemá (beží od 19. 9. 2026; mirror má súbory od 8. 7. 2024).
+  const mirrorOn = !deepstateOff && String(env.UKRAINE_DEEPSTATE_MIRROR || '').toLowerCase() !== 'off';
+  let mirror = deepstateMirror;
+  const getMirror = () => { if (!mirror) mirror = createDeepStateMirror({ root, fetchImpl, now, log }); return mirror; };
   const controlCache = new Map(); // deň -> { at, json }
   const deepstateCache = new Map();
   const damageCache = new Map(); // adm3 | unosat -> { at, json }
@@ -245,26 +261,66 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       return;
     }
     if (sub === '/deepstate') {
-      // Licencia §2 zakazuje „distribution, publication, proxying" bez súhlasu.
-      // Žiadosť je odoslaná 19. 9. 2026, odpoveď ešte neprišla — takže lokálne
-      // prezeranie áno (vlastné hobby použitie), verejná doména nie.
-      if (!deepstateAllowedForHost(req.headers?.host, { consent: deepstateConsent })) {
+      // Náš archív z API DeepState: licencia §2 zakazuje „distribution,
+      // publication, proxying" bez súhlasu (žiadosť odoslaná 19. 9. 2026) —
+      // preto len lokálne. Verejná doména dostáva od 24. 9. 2026 snímku
+      // z mirroru cyterat (rozhodnutie vlastníka); mirror vypnutý = 451 ako predtým.
+      const archiveAllowed = deepstateAllowedForHost(req.headers?.host, { consent: deepstateConsent });
+      if (!archiveAllowed && !mirrorOn) {
         send(res, 451, { error: 'deepstate_consent_pending' }, req);
         return;
       }
       const at = url.searchParams.get('at') || dayKey(now());
       if (!isDay(at)) { send(res, 400, { error: 'bad_day' }, req); return; }
-      const hit = deepstateCache.get(at);
+      const cacheKey = (archiveAllowed ? 'A:' : 'M:') + at;
+      const hit = deepstateCache.get(cacheKey);
       if (hit && now() - hit.at < 10 * MIN) { send(res, 200, hit.json, req); return; }
-      try {
-        const days = await deepstateDays(root);
-        const snapshot = await deepstateFor(root, at, { days });
-        if (!snapshot) { send(res, 404, { error: 'no_deepstate_snapshot', at, days: days.length, disabled: deepstateOff }, req); return; }
-        const json = { ...snapshot, requestedAt: at, snapshots: days.length, first: days[0] || null, last: days.at(-1) || null };
-        deepstateCache.set(at, { at: now(), json });
+      const remember = (json) => {
+        deepstateCache.set(cacheKey, { at: now(), json });
         if (deepstateCache.size > 64) deepstateCache.delete(deepstateCache.keys().next().value);
+      };
+      let days = [];
+      if (archiveAllowed) {
+        try {
+          days = await deepstateDays(root);
+          const snapshot = await deepstateFor(root, at, { days });
+          if (snapshot) {
+            const json = { ...snapshot, source: 'archive', requestedAt: at, snapshots: days.length, first: days[0] || null, last: days.at(-1) || null };
+            remember(json);
+            send(res, 200, json, req);
+            return;
+          }
+        } catch (error) { send(res, 500, { error: 'archive_read_failed', detail: String(error?.message || error) }, req); return; }
+        if (!mirrorOn) { send(res, 404, { error: 'no_deepstate_snapshot', at, days: days.length, disabled: deepstateOff }, req); return; }
+      }
+      // Mirror: deň kurzora (LIVE = dnes, súbor vzniká ~03:00 UTC), inak až 7 starších.
+      const todayKey = getFormattedDateKey(0, new Date(now()));
+      let key = at.replace(/-/g, '');
+      const problem = dateKeyProblem(key, todayKey);
+      if (problem === 'future') key = todayKey;
+      if (problem === 'before_mirror') {
+        const firstDay = MIRROR_FIRST_DAY.slice(0, 4) + '-' + MIRROR_FIRST_DAY.slice(4, 6) + '-' + MIRROR_FIRST_DAY.slice(6);
+        send(res, 404, { error: 'no_deepstate_snapshot', source: 'mirror', at, firstDay }, req);
+        return;
+      }
+      try {
+        const r = await getMirror().lookup({ requestedDate: key, maxFallback: 7 });
+        if (!r.found) {
+          if (r.upstreamProblem) send(res, 502, { error: 'deepstate_mirror_unavailable', source: 'mirror', at, upstreamStatus: r.upstreamStatus }, req);
+          else if (r.budgetExhausted) send(res, 503, { error: 'deepstate_mirror_slow', source: 'mirror', at }, req);
+          else send(res, 404, { error: 'no_deepstate_snapshot', source: 'mirror', at, checkedDays: r.checkedDays }, req);
+          return;
+        }
+        const snapshot = deepstateSnapshotFromMirror(r.found.data, { dateKey: r.found.key, fallbackDays: r.fallbackDays, upstreamUnavailable: r.upstreamUnavailable });
+        const json = {
+          ...snapshot, requestedAt: at,
+          attribution: DEEPSTATE_MIRROR_ATTRIBUTION, license: DEEPSTATE_ANALYTICS_LICENSE, note: DEEPSTATE_ANALYTICS_NOTE,
+          ...(archiveAllowed ? { archiveDays: days.length, archiveFirst: days[0] || null } : {}),
+        };
+        // Starší súbor kvôli výpadku mirroru sa necachuje — o 10 min môže byť správny.
+        if (!r.upstreamUnavailable) remember(json);
         send(res, 200, json, req);
-      } catch (error) { send(res, 500, { error: 'archive_read_failed', detail: String(error?.message || error) }, req); }
+      } catch (error) { send(res, 500, { error: 'deepstate_mirror_failed', detail: String(error?.message || error) }, req); }
       return;
     }
     if (sub === '/control') {

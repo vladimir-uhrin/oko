@@ -78,7 +78,8 @@ export async function fetchUkraineDamage(name, { fetcher = (...a) => fetch(...a)
 export async function fetchUkraineDeepState(day, { fetcher = (...a) => fetch(...a), base = UKRAINE_EVENTS_API } = {}) {
   const response = await fetcher(`${base}/deepstate?at=${encodeURIComponent(day)}`, { cache: 'no-store' });
   const json = await response.json().catch(() => null);
-  if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; throw err; }
+  // Telo chyby ide s ňou: 404 z mirroru (`source: 'mirror'`) má iný text než 404 z archívu.
+  if (!response.ok) { const err = new Error(json?.error ? String(json.error) : `HTTP ${response.status}`); err.status = response.status; err.body = json; throw err; }
   return json;
 }
 
@@ -218,7 +219,8 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
     if (hit && now() - hit.at < controlTtlMs) return hit.payload;
     const payload = await fetchDeepState(day);
     deepstates.set(day, { at: now(), payload });
-    if (payload?.day && payload.day !== day) deepstates.set(payload.day, { at: now(), payload });
+    // Pod vlastným dňom s requestedAt toho dňa — inak by vek meral od cudzieho dňa.
+    if (payload?.day && payload.day !== day) deepstates.set(payload.day, { at: now(), payload: { ...payload, requestedAt: payload.day } });
     evict(deepstates, 24);
     return payload;
   }

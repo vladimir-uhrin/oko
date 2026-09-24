@@ -75,12 +75,20 @@ export function kartaDateText({ report = null, deepstate = null, control = null 
   return '';
 }
 
+/** DeepState je zdroj zón len vtedy, keď naozaj kreslí (načítava sa / 404 / 502 = nie). Pure. */
+function deepstateDraws(deepstate) {
+  return Boolean(deepstate?.shown) && (deepstate.features === undefined || deepstate.features > 0);
+}
+
 /** Zdroje aktívnych vrstiev (na titulok/legendu). Pure. */
 export function kartaSources({ report = null, deepstate = null, control = null, translate = (k) => k } = {}) {
   const out = [];
   if (report?.shown) out.push(translate('ukraine.karta.src.gs'));
-  if (deepstate?.shown) out.push(translate('ukraine.karta.src.deepstate'));
-  else if (control?.shown) out.push(translate('ukraine.karta.src.wiki'));
+  const dsDraws = deepstateDraws(deepstate);
+  const mirror = dsDraws && deepstate.source === 'mirror';
+  if (dsDraws) out.push(translate(mirror ? 'ukraine.karta.src.deepstate-mirror' : 'ukraine.karta.src.deepstate'));
+  // Pri mirrore ostáva na mape pás bojov z Wikipédie — jej CC BY-SA kredit patrí sem tiež.
+  if (control?.shown && (!dsDraws || mirror)) out.push(translate('ukraine.karta.src.wiki'));
   out.push(translate('ukraine.karta.src.osm'));
   return out;
 }
@@ -89,9 +97,11 @@ export function kartaSources({ report = null, deepstate = null, control = null, 
 export function kartaLegendItems({ report = null, deepstate = null, control = null, translate = (k) => k } = {}) {
   const c = KARTA_LEGEND_COLORS;
   const items = [];
-  if (deepstate?.shown) {
+  if (deepstateDraws(deepstate)) {
     items.push({ key: 'occupied', colorCss: c.occupied, label: translate('ukraine.karta.legend.occupied') });
-    items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
+    // Mirror šedú zónu nemá — namiesto nej je na mape pás bojov z Wikipédie.
+    if (deepstate.source !== 'mirror') items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
+    else if (control?.shown) items.push({ key: 'contested', colorCss: c.ru, pattern: 'hatch', label: translate('ukraine.karta.legend.contested') });
   } else if (control?.shown) {
     // Zastaraná snímka sa na mape kreslí stlmene — vzorka musí ustúpiť rovnako.
     items.push({ key: 'ru', colorCss: c.ru, label: translate('ukraine.karta.legend.ru'), ...(control.stale ? { dim: STALE_DIM } : {}) });

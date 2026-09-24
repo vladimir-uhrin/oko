@@ -335,6 +335,7 @@ export function createUkrainePanel({
     // Server DeepState pre túto adresu odmietol (451, kým nepríde súhlas) —
     // čip sa skryje rovnako ako riadok v osi. Nič sa neruší, len nezobrazuje.
     deepstateChip.hidden = timeline?.isDeepStateAvailable?.() === false;
+    deepstateChip.title = translate(deepstate?.getState?.()?.source === 'mirror' ? 'ukraine.ds.note-mirror' : 'ukraine.ds.note');
     const on = Boolean(deepstate?.isShown?.());
     deepstateChip.classList?.toggle?.('active', on);
     deepstateChip.setAttribute('aria-pressed', String(on));

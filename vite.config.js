@@ -82,7 +82,7 @@ import { filterSanctionedNews } from './src/data/sanctionedMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from './src/data/ukraineReport.js';
 import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
 import { reliefTilesProxy } from './src/data/reliefTilesProxy.js';
-import { deepstateAnalyticsProxy } from './src/data/deepstateAnalyticsProxy.js';
+import { createDeepStateMirror, deepstateAnalyticsProxy } from './src/data/deepstateAnalyticsProxy.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -10659,6 +10659,13 @@ function skTerrainProxy() {
  * plugins, configures the dev server host/port, and exposes selected
  * API keys to the client as import.meta.env defines.
  */
+/** Jedno jadro mirroru DeepState pre obe trasy (vytvorí sa pri prvom použití). */
+let deepStateMirrorInstance = null;
+function sharedDeepStateMirror() {
+  if (!deepStateMirrorInstance) deepStateMirrorInstance = createDeepStateMirror();
+  return deepStateMirrorInstance;
+}
+
 export default defineConfig(({ mode }) => {
   // Load only this checkout's dotenv files. Shell/Keychain values still win,
   // and no sibling workspace is consulted implicitly.
@@ -10703,10 +10710,12 @@ export default defineConfig(({ mode }) => {
       oilPricesProxy(),
       ukraineBaseProxy(),
       ukraineReportProxy(),
-      ukraineEventsProxy(),
+      // Mirror cyterat DeepState: jedno jadro (cache, pauza po chybe) pre vrstvu
+      // DeepState na doméne (ukraineEventsProxy) aj demo /api/deepstate/analytics.
+      ukraineEventsProxy({ deepstateMirror: sharedDeepStateMirror() }),
       // Normal dlaždice reliéfu pre podklad KARTA (S3 bez CORS, cache navždy).
       reliefTilesProxy(),
-      deepstateAnalyticsProxy(),
+      deepstateAnalyticsProxy({ mirror: sharedDeepStateMirror() }),
       situationNewsProxy(),
       translateProxy(),
       linkImageProxy(),

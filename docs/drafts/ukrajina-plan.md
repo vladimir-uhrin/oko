@@ -390,7 +390,8 @@ Licencie sú citované doslovne v prílohe; tu len verdikt a dôvod. „Overené
 | Zdroj | Verdikt | Prečo | Krok |
 |---|---|---|---|
 | **DeepStateMap.live API** (`/api/history/last`, multipolygóny okupovaného územia, história od 2022, zámerné oneskorenie 2–3 dni) | 🟡 | Licenčná zmluva (3. 9. 2025): API zadarmo len pre dobrovoľnícke/charitatívne/obranné subjekty, komerční so súhlasom, **proxying tretím stranám zakázaný**; OKO (nekomerčný, nie charita) je v medzere → treba súhlas | používateľ vyplní https://api.deepstatemap.live/request, výslovne opíše server-side proxy s cache pre verejný nekomerčný portál |
-| cyterat/deepstate-map-data mirror, longlinecode feed (+ Cesium adaptér) | ❌ | Overené ×2: mirror ťahá DS API a republikuje = expresne zakázané proxying; longlinecode je navyše ISW derivát aj v dennom feede. **Ani ako núdzový zdroj.** Ako referencia implementácie (clampToGround, contact_line z polygónu) áno | — (VÝNIMKA VLASTNÍKA 23. 9. 2026: samostatné demo + `/api/deepstate/analytics`, viď pravidlo 5) |
+| cyterat/deepstate-map-data mirror | ✅ rozhodnutie vlastníka (23.–24. 9. 2026) | Licenčné fakty platia ďalej: GPL-3.0 len na skripty, dáta pod licenciou DeepState (§2 zakazuje proxying bez súhlasu), mirror súhlas nedeklaruje. Vlastník pravidlo „žiadne mirrory" zrušil: mirror je zdroj vrstvy DeepState na verejnej doméne a pre dni mimo nášho archívu (história od 8. 7. 2024) + demo `/demos/deepstate-analytics/index.html`. Len okupované územie (vrátane Krymu a ORDLO), bez šedej zóny | hotové (DATA_SOURCES.md) |
+| longlinecode feed (+ Cesium adaptér) | ❌ | Overené ×2: DS mirror + ISW derivát aj v dennom feede (ISW deriváty bez súhlasu zakazuje). Ako referencia implementácie (clampToGround, contact_line z polygónu) áno | — |
 | **Black Bird Group ry** (Fínsko; konzervatívna metodika, explicitná šedá zóna, história od 1. dňa; týždenný export do ACLED) | 🟡 | Bez verejného downloadu, ale web: „happy to cooperate with research institutions and media … non-profit or public-facing adaptations" | používateľ napíše contact@blackbirdgroup.fi |
 | **ISW ArcGIS FeatureServer** (Assessed Russian Control, claimed, infiltration, advances, 24 h gains, fortifikácie; verejné bez tokenu) | ❌ (🟡 len s písomným súhlasom) | Overené ×2: licenseInfo „You may not use this geodata without the written consent of ISW"; policy zakazuje „incorporation … into mapping platforms" a redistribúciu „via API, or through automated means" | e-mail ISW (kontakt na policy stránke, maskovaný Cloudflare) — rozhodnutie používateľa |
 | ISW Map Room (denné PNG, RSS `feed/?post_type=map`) | ❌ ako obsah; ✅ len **titulok + dátum + odkaz von** | Overené ×2: aj hotlink obrázka v karte je hraničný („mapping platform"); nálezca sa tu mýlil, skeptik opravil | — |
@@ -490,12 +491,9 @@ so zdrojom a dátumom a DeepState a ISW sa nikdy nezlievajú do jednej vrstvy.**
    zoznamy vojakov, poloha autora záberu; záznamy s `graphic=true` (GeoConfirmed, Bellingcat) bez
    médií; Berkeley §31: ukladať len typ, čas, miesto, zdroj.
 4. **ISW**: nič okrem titulku + dátumu + odkazu von. Žiadne vektory, obrázky, ani hotlink.
-5. **DeepState**: žiadne mirrory (cyterat, longlinecode). Iba vlastný API kľúč po schválení, alebo
-   §3 zmluvy (vizuál s logom/odkazom = ich screenshot/iframe, nie naše vrstvy).
-   **VÝNIMKA VLASTNÍKA (23. 9. 2026, „Nechať — zadal som to ja"):** samostatné demo
-   `/demos/deepstate-analytics/index.html` a endpoint `/api/deepstate/analytics` čítajú mirror cyterat. Platí len pre ne —
-   vrstvy UKRAJINY mirror ďalej nepoužívajú. Nemazať, neblokovať; povinné: zdroj „podľa DeepStateMap.live, cez
-   neoficiálny mirror", dátum súboru, oneskorenie 2–3 dni, „nie živá frontová línia" (DATA_SOURCES.md).
+5. *(Zrušené vlastníkom 24. 9. 2026 — pravidlo „DeepState: žiadne mirrory" už neplatí. Mirror cyterat
+   je zdroj vrstvy DeepState na verejnej doméne a pre dni mimo nášho archívu; licenčné fakty a povinné
+   označenie zdroja sú v DATA_SOURCES.md. Číslo ostáva, aby odkazy na pravidlá 6 a 7 sedeli.)*
 6. **Share-alike**: OSM podklad a VIINA = ODbL, každý vlastný súbor; Wikipedia derivát = CC BY-SA
    samostatný dataset s licenciou a odkazom; nemiešať s CC BY dátami do jednej DB.
 7. **Poctivosť v UI**: každá vrstva nesie zdroj, dátum snímku, oneskorenie a kategóriu

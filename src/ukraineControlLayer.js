@@ -28,7 +28,7 @@ const LIFT_BATCH = 200;
 const HOVER_MS = 90;
 
 const INERT = {
-  id: UKRAINE_CONTROL_ID, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, setPointsVisible() {}, setZonesVisible() {},
+  id: UKRAINE_CONTROL_ID, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, setPointsVisible() {}, setZonesVisible() {}, setRuFillVisible() {},
   setStyle() {}, getStyle: () => 'default', sideAt: () => null,
   getState: () => ({ shown: false, loading: false, error: null, day: null, revisionAt: null, summary: null, counts: null, points: 0, style: 'default' }),
   onChange() { return () => {}; }, destroy() {},
@@ -199,6 +199,7 @@ export function createUkraineControlLayer({
   let _shown = false;
   let _pointsVisible = true;
   let _zonesVisible = true;
+  let _ruFill = true; // mirror DeepState kreslí okupované sám; pás bojov z Wikipédie ostáva
   let _snapshot = null;
   let _raster = null;
   let _style = 'default';
@@ -231,7 +232,8 @@ export function createUkraineControlLayer({
     }
     _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX });
     const st = CONTROL_STYLES[_style] || CONTROL_STYLES.default;
-    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, ...controlZoneAlphas(st, snapshotFreshness().stale), createCanvas: () => doc.createElement('canvas') });
+    const alphas = controlZoneAlphas(st, snapshotFreshness().stale);
+    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, ...alphas, ...(_ruFill ? {} : { ruAlpha: 0 }), createCanvas: () => doc.createElement('canvas') });
     if (painted) {
       const b = _raster.bbox;
       zoneEntity = ds.entities.add({
@@ -349,6 +351,14 @@ export function createUkraineControlLayer({
   function snapshotFreshness() {
     return freshnessOf(_snapshot?.revisionAt, viewedRefMs(_snapshot?.requestedAt, now()), CONTROL_STALE_DAYS);
   }
+  /** RU výplň rastra zapnutá/vypnutá (šrafovaný pás bojov ostáva); prekreslí zóny. */
+  function setRuFillVisible(on) {
+    const next = Boolean(on);
+    if (next === _ruFill) return;
+    _ruFill = next;
+    if (_snapshot) rebuild();
+    emit();
+  }
   function setZonesVisible(on) { _zonesVisible = Boolean(on); ds.show = _shown && _zonesVisible; if (zoneEntity?.rectangle) zoneEntity.rectangle.show = _zonesVisible; requestRender(); emit(); }
   function getState() {
     return {
@@ -369,7 +379,7 @@ export function createUkraineControlLayer({
   }
   return {
     id: UKRAINE_CONTROL_ID,
-    show, hide, isShown: () => _shown, setSnapshot, loadLatest, setPointsVisible, setZonesVisible, getState,
+    show, hide, isShown: () => _shown, setSnapshot, loadLatest, setPointsVisible, setZonesVisible, setRuFillVisible, getState,
     setStyle, getStyle: () => _style, sideAt,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,

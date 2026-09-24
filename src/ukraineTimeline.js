@@ -396,7 +396,11 @@ export function createUkraineTimeline({
     try {
       const snap = await task;
       if (_destroyed || _deepstateDay !== day) return;
-      if (refresh && sameZoneSnapshot(snap, deepstate.getState(), 'at')) return;
+      // Rovnaký čas NESTAČÍ: súbor mirroru má pevný čas (deň 03:00 UTC), ale jeho
+      // zdroj alebo príznak „mirror nedostupný" sa môže zmeniť bez nového súboru.
+      const cur = deepstate.getState();
+      if (refresh && sameZoneSnapshot(snap, cur, 'at') && (snap?.source || 'archive') === (cur.source || 'archive')
+        && Boolean(snap?.upstreamUnavailable) === Boolean(cur.upstreamUnavailable)) return;
       deepstate.setSnapshot(snap);
     } catch (error) {
       if (_destroyed) return;
@@ -406,9 +410,16 @@ export function createUkraineTimeline({
       if (refresh) return;
       deepstate.setSnapshot(null);
       if (dsLine) {
+        // 404 z mirroru = deň pred jeho históriou (8. 7. 2024); 404 z archívu = náš
+        // archív ten deň nemá. Výpadok mirroru nie je „prázdny deň".
+        const mirror = error?.body?.source === 'mirror';
+        // „História od 8. 7. 2024" len pre deň pred ňou; inak mirror nemá súbor v okne.
+        const mirrorKey = error?.body?.firstDay ? 'ukraine.ds.missing-mirror' : 'ukraine.ds.missing-mirror-window';
         dsLine.textContent = error?.status === 404
-          ? translate('ukraine.ds.missing')
-          : translate('ukraine.tl.error', { detail: error?.message || error });
+          ? translate(mirror ? mirrorKey : 'ukraine.ds.missing')
+          : mirror && (error?.status === 502 || error?.status === 503)
+            ? translate('ukraine.ds.mirror-down')
+            : translate('ukraine.tl.error', { detail: error?.message || error });
       }
     } finally { if (_deepstateTask === task) _deepstateTask = null; }
     renderDeepState();
@@ -438,7 +449,11 @@ export function createUkraineTimeline({
     const st = deepstate.getState();
     // Sivá zóna má v bežnom štýle jantárové pruhy, na KARTE sivé — vzorka ide s ňou.
     dsBox?.classList.toggle('is-karta', st.style === 'karta');
+    // Mirror nesie len okupované územie — vzorky šedej zóny, oslobodených území,
+    // smerov a letísk by sľubovali niečo, čo mapa nekreslí.
+    dsBox?.classList.toggle('is-mirror', st.source === 'mirror');
     dsChip.classList.toggle('active', st.shown);
+    dsChip.title = translate(st.source === 'mirror' ? 'ukraine.ds.note-mirror' : 'ukraine.ds.note');
     dsChip.setAttribute('aria-pressed', String(st.shown));
     // Kým DeepState NAOZAJ KRESLÍ, odvodený raster z Wikipédie sa skryje (dve
     // výplne nad sebou by boli neprehľadné); body Wikipédie ostávajú.
@@ -446,13 +461,25 @@ export function createUkraineTimeline({
     // DeepState odmieta (451, kým nepríde súhlas), takže „zapnutý" znamenal
     // prázdno — a mapa ostala BEZ ZÓN, aj tých z Wikipédie. Keď DeepState
     // nekreslí nič, niet čo prekrývať.
-    control?.setZonesVisible?.(!(st.shown && st.features > 0));
+    // Mirror nemá šedú zónu: šrafovaný pás bojov z Wikipédie preto ostáva a schová
+    // sa len jej RU výplň (dve výplne okupovaného nad sebou by boli neprehľadné).
+    const dsDraws = st.shown && st.features > 0;
+    const mirrorDraws = dsDraws && st.source === 'mirror';
+    control?.setZonesVisible?.(!dsDraws || mirrorDraws);
+    control?.setRuFillVisible?.(!mirrorDraws);
     if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; return; }
     renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS, st.requestedAt);
-    if (st.at) dsLine.textContent = translate('ukraine.ds.since', { date: st.stampText });
-    else if (!st.loading && !dsLine.textContent) dsLine.textContent = translate('ukraine.ds.missing');
+    if (st.at) {
+      dsLine.textContent = translate(st.source === 'mirror' ? 'ukraine.ds.since-mirror' : 'ukraine.ds.since', { date: st.stampText })
+        + (st.source === 'mirror' && st.upstreamUnavailable ? ` · ${translate('ukraine.ds.mirror-older')}` : '');
+    } else if (!st.loading && !dsLine.textContent) {
+      // Kým dopyt beží (mirror môže trvať do 30 s), nie je to „chýbajúci deň".
+      dsLine.textContent = translate(_deepstateTask ? 'ukraine.tl.loading' : 'ukraine.ds.missing');
+    }
     const a = st.areaKm2;
-    dsArea.textContent = a ? translate('ukraine.ds.area', { occupied: nf.format(Math.round(a.occupied || 0)), grey: nf.format(Math.round(a.grey || 0)) }) : '';
+    dsArea.textContent = !a ? ''
+      : st.source === 'mirror' ? translate('ukraine.ds.area-mirror', { occupied: nf.format(Math.round(a.occupied || 0)) })
+        : translate('ukraine.ds.area', { occupied: nf.format(Math.round(a.occupied || 0)), grey: nf.format(Math.round(a.grey || 0)) });
   }
   function renderDamage() {
     if (!damage || !dmgChip) return;
@@ -553,7 +580,10 @@ export function createUkraineTimeline({
     if (!row.length) return;
     fresh.appendChild(el('span', 'oko-ukr-tl-fresh-title', translate('ukraine.fresh.title')));
     for (const r of row) {
-      const label = translate(`ukraine.fresh.${r.id}`);
+      // Zdroj DeepState z mirroru musí byť vidno aj pri zbalenej osi (riadok ZDROJE
+      // je jediné, čo z DeepState zostane) — vrátane tooltipu s menom mirroru.
+      const viaMirror = r.id === 'deepstate' && ds?.source === 'mirror';
+      const label = translate(viaMirror ? 'ukraine.fresh.deepstate-mirror' : `ukraine.fresh.${r.id}`);
       const atMs = typeof r.at === 'number' ? r.at : Date.parse(r.at);
       const dateText = r.ageDays === 0 ? translate('ukraine.age.today') : shortDay(dayKey(atMs));
       const item = el('span', `oko-ukr-tl-fresh-item is-${r.id}${r.stale ? ' is-stale' : ''}`);
@@ -562,7 +592,7 @@ export function createUkraineTimeline({
       // V riadku stačí „dnes" alebo „13.8.", tooltip nesie presný dátum aj s rokom —
       // inak by pri dnešku zopakoval „dnes · dnes".
       const day = dayKey(atMs);
-      item.title = [label, `${shortDay(day)}${day.slice(0, 4)}`, ageText(r.ageDays, translate), r.stale ? translate('ukraine.src.stale') : null].filter(Boolean).join(' · ');
+      item.title = [label, `${shortDay(day)}${day.slice(0, 4)}`, ageText(r.ageDays, translate), r.stale ? translate('ukraine.src.stale') : null, viaMirror ? translate('ukraine.fresh.deepstate-mirror-title') : null].filter(Boolean).join(' · ');
       fresh.appendChild(item);
     }
   }

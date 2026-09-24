@@ -11,11 +11,12 @@
  * dáta. Dáta sú © DeepStateMap.live a platí pre ne ich licenčná zmluva
  * (§2 zakazuje šírenie, publikovanie a „proxying" bez súhlasu); mirror
  * súhlas DeepState nedeklaruje (docs/drafts/ukrajina-zdroje-prieskum.md).
- * Hlavné vrstvy UKRAJINY mirror nepoužívajú (plán, pravidlo 5). Toto demo
- * a endpoint sú VÝSLOVNÁ VÝNIMKA vlastníka projektu z 23. 9. 2026 („Nechať —
- * zadal som to ja") — preto nesú zdroj, licenciu a výhrady priamo v odpovedi
- * a endpoint zámerne nemá bránu podľa hostiteľa. Nikdy ich neoznačovať za
- * otvorené dáta.
+ * Používa sa z ROZHODNUTIA VLASTNÍKA: 23. 9. 2026 demo a endpoint ponechal
+ * („Nechať — zadal som to ja"), 24. 9. 2026 zrušil pravidlo „žiadne mirrory"
+ * a mirror sa stal zdrojom vrstvy DeepState na verejnej doméne
+ * (`createDeepStateMirror` zdieľa ukraineEventsProxy). Licenčné fakty to
+ * nemení — preto zdroj, licencia a výhrady idú priamo v odpovedi. Endpoint
+ * zámerne nemá bránu podľa hostiteľa. Nikdy neoznačovať za otvorené dáta.
  *
  * Náklady na upstream (pravidlo 4): pamäť 15 min → disk bez TTL (denný súbor
  * sa nemení) → negatívna cache 404 (30 min pre dnešok/včerajšok, 6 h staršie)
@@ -44,7 +45,7 @@ export const DEEPSTATE_ANALYTICS_LICENSE = Object.freeze({
   dataUrl: 'https://deepstatemap.live/license-en.html',
   mirrorCode: 'GPL-3.0 (applies to the mirror scripts, not to the data)',
   mirrorUrl: 'https://github.com/cyterat/deepstate-map-data',
-  consent: 'none declared; kept as an explicit exception by the OKO owner (2026-09-23)',
+  consent: 'none declared; used by decision of the OKO owner (2026-09-23/24)',
 });
 export const DEEPSTATE_ANALYTICS_NOTE =
   'Date = day the mirror downloaded the file (scheduled ~03:00 UTC); DeepState itself publishes with a deliberate 2–3 day delay. '
@@ -204,9 +205,24 @@ function withBudget(shared, ms) {
 }
 
 /**
- * Vite plugin pre `/api/deepstate/analytics`.
+ * Stav 1 čísla dňa z mirroru: `invalid` / `future` / `before_mirror` / null. Pure.
+ * @param {string} key YYYYMMDD
+ * @param {string} todayKey YYYYMMDD (UTC)
  */
-export function deepstateAnalyticsProxy(opts = {}) {
+export function dateKeyProblem(key, todayKey) {
+  if (parseDateKey(key) === null) return 'invalid';
+  if (key > todayKey) return 'future';
+  if (key < MIRROR_FIRST_DAY) return 'before_mirror';
+  return null;
+}
+
+/**
+ * Jadro mirroru — cache, pauza po chybe, overovanie súborov a hľadanie dňa.
+ * Zdieľa ho demo (`/api/deepstate/analytics`) aj vrstva DeepState UKRAJINY
+ * (`/api/ukraine/events/deepstate` na verejnej doméne a pre dni bez vlastného
+ * archívu; vlastník zrušil pravidlo „žiadne mirrory" 24. 9. 2026).
+ */
+export function createDeepStateMirror(opts = {}) {
   const projectRoot = opts.root || process.cwd();
   const cacheDir = opts.cacheDir || path.join(projectRoot, '.gev-cache', CACHE_DIR_NAME);
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
@@ -216,7 +232,6 @@ export function deepstateAnalyticsProxy(opts = {}) {
   const memoryCache = new Map(); // dateKey -> { json, cachedAt }
   const missing = new Map(); // dateKey -> checkedAt (upstream povedal 404 / nepoužiteľné)
   const inFlight = new Map(); // dateKey -> Promise<json|null>
-  const limiter = simpleLimiter({ windowMs: 60_000, max: 60, now });
   let upstreamBackoffUntil = 0; // po chybe mirroru: dovtedy len pamäť a disk
   let lastUpstreamStatus = null;
 
@@ -344,6 +359,93 @@ export function deepstateAnalyticsProxy(opts = {}) {
     return null;
   }
 
+  /**
+   * Nájde snímku: `requestedDate` (YYYYMMDD, už overený) alebo predvolene
+   * VČERAJŠOK (kalendárny UTC deň, nie „teraz − 24 h"), potom až `maxFallback`
+   * starších dní. Pri predvolenom dopyte, keď mirror stojí dlhšie než okno,
+   * najnovší súbor z disku najviac 30 dní starý (`outsideWindow`).
+   */
+  async function lookup({ requestedDate = null, maxFallback = DEFAULT_MAX_FALLBACK_DAYS } = {}) {
+    const started = now();
+    const baseKey = requestedDate || getFormattedDateKey(1, new Date(started));
+    const baseMs = parseDateKey(baseKey);
+
+    let found = null;
+    let fallbackDays = 0;
+    let checkedDays = 0;
+    let unresolvedDays = 0;
+    let upstreamError = null;
+    let budgetExhausted = false;
+    const backoffActive = started < upstreamBackoffUntil;
+
+    for (let i = 0; i <= maxFallback; i += 1) {
+      const key = getFormattedDateKey(i, new Date(baseMs));
+      if (key < MIRROR_FIRST_DAY) break;
+      const remaining = REQUEST_BUDGET_MS - (now() - started);
+      if (remaining <= 1000) budgetExhausted = true;
+      const allowUpstream = !upstreamError && !backoffActive && !budgetExhausted;
+      try {
+        const result = await snapshotFor(key, { allowUpstream, budgetMs: remaining });
+        if (result.outOfBudget) budgetExhausted = true;
+        if (result.resolved) checkedDays += 1; else unresolvedDays += 1;
+        if (result.data) { found = { key, data: result.data, source: result.source }; fallbackDays = i; break; }
+      } catch (error) {
+        // Po prvej chybe (nie 404) už GitHub nebombardujeme: v tomto dopyte len
+        // pamäť a disk, a ďalšie dopyty čakajú aspoň minútu (alebo Retry-After).
+        upstreamError = error;
+        unresolvedDays += 1;
+        upstreamBackoffUntil = now() + Math.min(BACKOFF_MAX_MS, Math.max(BACKOFF_MIN_MS, error?.retryAfterMs ?? 0));
+        lastUpstreamStatus = error?.upstreamStatus ?? null;
+        log(`[deepstate-mirror] ${key}: ${error?.message || error} — GitHub pauza do ${new Date(upstreamBackoffUntil).toISOString()}`);
+      }
+    }
+
+    // Mirror stojí dlhšie než okno: najnovší súbor z disku, najviac 30 dní starý —
+    // len pri predvolenom dopyte; výslovný dátum dostane poctivé „nie je".
+    let outsideWindow = false;
+    if (!found && requestedDate === null) {
+      const minKey = getFormattedDateKey(STALE_DISK_MAX_DAYS, new Date(baseMs));
+      const disk = await newestOnDisk(minKey > MIRROR_FIRST_DAY ? minKey : MIRROR_FIRST_DAY, baseKey);
+      if (disk) {
+        found = { key: disk.key, data: disk.data, source: 'disk-stale' };
+        fallbackDays = Math.round((baseMs - parseDateKey(disk.key)) / DAY_MS);
+        outsideWindow = true;
+      }
+    }
+
+    const upstreamProblem = Boolean(upstreamError) || (backoffActive && unresolvedDays > 0);
+    return {
+      baseKey,
+      found,
+      fallbackDays,
+      checkedDays,
+      unresolvedDays,
+      outsideWindow,
+      upstreamProblem,
+      budgetExhausted,
+      // Prečo je súbor starší / prečo nie je: mirror nedostupný (chyba / pauza po
+      // chybe / čas) vs. novšie súbory naozaj neexistujú.
+      upstreamUnavailable: unresolvedDays > 0,
+      upstreamStatus: unresolvedDays > 0 || upstreamProblem
+        ? (upstreamError?.upstreamStatus ?? (budgetExhausted && !backoffActive ? 'timeout' : lastUpstreamStatus))
+        : null,
+      retryAfterSec: Math.max(1, Math.ceil((upstreamBackoffUntil - now()) / 1000)),
+    };
+  }
+
+  return { lookup, cacheDir, now };
+}
+
+/**
+ * Vite plugin pre `/api/deepstate/analytics` (samostatné demo).
+ * `opts.mirror` = zdieľané jadro; bez neho si plugin vytvorí vlastné.
+ */
+export function deepstateAnalyticsProxy(opts = {}) {
+  const mirror = opts.mirror || createDeepStateMirror(opts);
+  const now = opts.now || mirror.now || Date.now;
+  const log = opts.log || console.log;
+  const limiter = simpleLimiter({ windowMs: 60_000, max: 60, now });
+
   function send(req, res, status, json, extra = {}) {
     const body = Buffer.from(JSON.stringify(json));
     const gzip = status === 200 && body.length > 1024 && /\bgzip\b/i.test(String(req?.headers?.['accept-encoding'] || ''));
@@ -377,74 +479,24 @@ export function deepstateAnalyticsProxy(opts = {}) {
       send(req, res, 400, { ok: false, error: 'bad_url' });
       return;
     }
-    const started = now();
-    const todayKey = getFormattedDateKey(0, new Date(started));
+    const todayKey = getFormattedDateKey(0, new Date(now()));
     const rawDate = url.searchParams.get('date');
     const requestedDate = rawDate === null || rawDate === '' ? null : rawDate;
     if (requestedDate !== null) {
-      const reason = parseDateKey(requestedDate) === null ? 'invalid'
-        : requestedDate > todayKey ? 'future'
-          : requestedDate < MIRROR_FIRST_DAY ? 'before_mirror' : null;
+      const reason = dateKeyProblem(requestedDate, todayKey);
       if (reason) {
         send(req, res, 400, { ok: false, error: 'bad_date', reason, requestedDate, firstDay: MIRROR_FIRST_DAY, today: todayKey });
         return;
       }
     }
     const maxFallback = parseMaxFallback(url.searchParams.get('maxFallback'));
-    // Predvolene VČERAJŠOK podľa zadania — kalendárny UTC deň, nie „teraz − 24 h".
-    const baseKey = requestedDate || getFormattedDateKey(1, new Date(started));
-    const baseMs = parseDateKey(baseKey);
+    const r = await mirror.lookup({ requestedDate, maxFallback });
 
-    let found = null;
-    let fallbackDays = 0;
-    let checkedDays = 0;
-    let unresolvedDays = 0;
-    let upstreamError = null;
-    let budgetExhausted = false;
-    const backoffActive = started < upstreamBackoffUntil;
-
-    for (let i = 0; i <= maxFallback; i += 1) {
-      const key = getFormattedDateKey(i, new Date(baseMs));
-      if (key < MIRROR_FIRST_DAY) break;
-      const remaining = REQUEST_BUDGET_MS - (now() - started);
-      if (remaining <= 1000) budgetExhausted = true;
-      const allowUpstream = !upstreamError && !backoffActive && !budgetExhausted;
-      try {
-        const result = await snapshotFor(key, { allowUpstream, budgetMs: remaining });
-        if (result.outOfBudget) budgetExhausted = true;
-        if (result.resolved) checkedDays += 1; else unresolvedDays += 1;
-        if (result.data) { found = { key, data: result.data, source: result.source }; fallbackDays = i; break; }
-      } catch (error) {
-        // Po prvej chybe (nie 404) už GitHub nebombardujeme: v tomto dopyte len
-        // pamäť a disk, a ďalšie dopyty čakajú aspoň minútu (alebo Retry-After).
-        upstreamError = error;
-        unresolvedDays += 1;
-        upstreamBackoffUntil = now() + Math.min(BACKOFF_MAX_MS, Math.max(BACKOFF_MIN_MS, error?.retryAfterMs ?? 0));
-        lastUpstreamStatus = error?.upstreamStatus ?? null;
-        log(`[deepstate-analytics] ${key}: ${error?.message || error} — GitHub pauza do ${new Date(upstreamBackoffUntil).toISOString()}`);
-      }
-    }
-
-    // Mirror stojí dlhšie než okno: najnovší súbor z disku, najviac 30 dní starý —
-    // len pri predvolenom dopyte; výslovný ?date= dostane poctivé „nie je".
-    let outsideWindow = false;
-    if (!found && requestedDate === null) {
-      const minKey = getFormattedDateKey(STALE_DISK_MAX_DAYS, new Date(baseMs));
-      const disk = await newestOnDisk(minKey > MIRROR_FIRST_DAY ? minKey : MIRROR_FIRST_DAY, baseKey);
-      if (disk) {
-        found = { key: disk.key, data: disk.data, source: 'disk-stale' };
-        fallbackDays = Math.round((baseMs - parseDateKey(disk.key)) / DAY_MS);
-        outsideWindow = true;
-      }
-    }
-
-    const upstreamProblem = Boolean(upstreamError) || (backoffActive && unresolvedDays > 0);
-    if (!found) {
-      const who = { requestedDate: requestedDate || 'yesterday', checkedDays, unresolvedDays };
-      if (upstreamProblem) {
-        const retry = Math.max(1, Math.ceil((upstreamBackoffUntil - now()) / 1000));
-        send(req, res, 502, { ok: false, error: 'upstream_unavailable', upstreamStatus: upstreamError?.upstreamStatus ?? lastUpstreamStatus, ...who }, { 'Retry-After': String(retry) });
-      } else if (budgetExhausted) {
+    if (!r.found) {
+      const who = { requestedDate: requestedDate || 'yesterday', checkedDays: r.checkedDays, unresolvedDays: r.unresolvedDays };
+      if (r.upstreamProblem) {
+        send(req, res, 502, { ok: false, error: 'upstream_unavailable', upstreamStatus: r.upstreamStatus, ...who }, { 'Retry-After': String(r.retryAfterSec) });
+      } else if (r.budgetExhausted) {
         send(req, res, 503, { ok: false, error: 'upstream_slow', ...who }, { 'Retry-After': '30' });
       } else {
         send(req, res, 404, { ok: false, error: 'no_data_available', ...who });
@@ -452,19 +504,18 @@ export function deepstateAnalyticsProxy(opts = {}) {
       return;
     }
 
+    const found = r.found;
     const areaKm2 = calculateGeoJsonAreaKm2(found.data);
     const payload = {
       ok: true,
       date: formatDisplayDate(found.key),
       dateKey: found.key,
       requestedDate: requestedDate ? formatDisplayDate(requestedDate) : null,
-      fallbackDays,
-      stale: fallbackDays > 0,
-      outsideWindow,
-      // Prečo je súbor starší: mirror nedostupný (chyba / pauza po chybe / čas)
-      // vs. novšie súbory naozaj neexistujú — demo to hovorí nahlas.
-      upstreamUnavailable: unresolvedDays > 0,
-      upstreamStatus: unresolvedDays > 0 ? (upstreamError?.upstreamStatus ?? (budgetExhausted ? 'timeout' : lastUpstreamStatus)) : null,
+      fallbackDays: r.fallbackDays,
+      stale: r.fallbackDays > 0,
+      outsideWindow: r.outsideWindow,
+      upstreamUnavailable: r.upstreamUnavailable,
+      upstreamStatus: r.upstreamUnavailable ? r.upstreamStatus : null,
       areaKm2,
       formattedArea: Math.round(areaKm2).toLocaleString('en-US') + ' km²',
       areaMethod: DEEPSTATE_ANALYTICS_AREA_METHOD,
@@ -498,7 +549,8 @@ export function deepstateAnalyticsProxy(opts = {}) {
       server.middlewares.use('/api/deepstate/analytics', middleware);
     },
     _handler: middleware,
-    _dir: cacheDir,
+    _dir: mirror.cacheDir,
+    _mirror: mirror,
     _calculateArea: calculateGeoJsonAreaKm2,
   };
 }

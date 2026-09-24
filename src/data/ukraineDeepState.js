@@ -19,6 +19,10 @@
  *    (Abcházsko, Podnestersko, „Východné Prusko", Karélia… — cudzie konflikty a
  *    politické komentáre mapy), hlavné mestá, neoznačené prvky.
  * Symbolika je vlastná (licencia zakazuje „identické objekty"). Čistý modul.
+ *
+ * Druhý zdroj (24. 9. 2026, rozhodnutie vlastníka): denný súbor GitHub mirroru
+ * cyterat/deepstate-map-data → `deepstateSnapshotFromMirror` (verejná doména
+ * a dni mimo nášho archívu). Nesie len okupované územie, `source: 'mirror'`.
  */
 
 export const DEEPSTATE_LAST_URL = 'https://deepstatemap.live/api/history/last';
@@ -133,10 +137,53 @@ export function deepstateSnapshotFromApi(json) {
   return { id: Number.isFinite(id) ? id : null, at, day: at ? at.slice(0, 10) : null, datetime: json?.datetime || null, features, counts, areaKm2 };
 }
 
-/** Text „stav k" z `at` (UTC) pre legendu. Pure. */
+/** Mirror cyterat/deepstate-map-data sťahuje DeepState raz denne ~03:00 UTC. */
+export const DEEPSTATE_MIRROR_HOUR_UTC = 3;
+export const DEEPSTATE_MIRROR_ATTRIBUTION = 'DeepStateMap.live via the unofficial GitHub mirror cyterat/deepstate-map-data';
+
+/**
+ * Denný súbor mirroru → snímka v tvare `deepstateSnapshotFromApi` (vrstva,
+ * časová os aj KARTA ju kreslia bez vlastnej cesty). Mirror nesie JEDEN
+ * MultiPolygon bez vlastností: okupované + Krym + ORDLO zlúčené, bez šedej
+ * zóny, oslobodených území, smerov a letísk — všetko je `occupied`.
+ * `at` = deň súboru o ~03:00 UTC (čas sťahovania mirrorom, nie čas DeepState;
+ * `atApprox`), zdroj `mirror`. Pure.
+ * @param {object} geojson súbor mirroru
+ * @param {{ dateKey: string, fallbackDays?: number, upstreamUnavailable?: boolean }} meta dateKey = YYYYMMDD súboru
+ */
+export function deepstateSnapshotFromMirror(geojson, { dateKey, fallbackDays = 0, upstreamUnavailable = false } = {}) {
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(dateKey ?? ''));
+  const day = m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+  const at = day ? `${day}T${String(DEEPSTATE_MIRROR_HOUR_UTC).padStart(2, '0')}:00:00.000Z` : null;
+  const geoms = geojson?.type === 'FeatureCollection' ? (geojson.features || []).map((f) => f?.geometry)
+    : geojson?.type === 'Feature' ? [geojson.geometry] : [geojson];
+  const features = [];
+  let km2Total = 0;
+  for (const g of geoms) {
+    if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
+    const polys = g.type === 'Polygon' ? [g.coordinates] : g.coordinates;
+    for (const poly of polys || []) {
+      const rings = cleanRings(poly);
+      if (!rings.length) continue;
+      const km2 = polygonAreaKm2(rings);
+      km2Total += km2;
+      features.push({ kind: 'occupied', type: 'Polygon', rings, areaKm2: Math.round(km2 * 10) / 10, en: 'Occupied (incl. Crimea and areas held since 2014)', uk: null, key: 'mirror', description: null });
+    }
+  }
+  return {
+    id: null, at, atApprox: true, day, datetime: null, source: 'mirror', mirrorDate: dateKey || null,
+    fallbackDays, upstreamUnavailable: Boolean(upstreamUnavailable),
+    features,
+    counts: features.length ? { occupied: features.length } : {},
+    areaKm2: features.length ? { occupied: Math.round(km2Total) } : {},
+  };
+}
+
+/** Text „stav k" z `at` (UTC) pre legendu; mirror = len deň (čas DeepState nepoznáme). Pure. */
 export function deepstateStampText(snapshot) {
   if (!snapshot?.at) return '';
   const d = new Date(snapshot.at);
+  if (snapshot.source === 'mirror') return `${d.getUTCDate()}.${d.getUTCMonth() + 1}.${d.getUTCFullYear()}`;
   const hh = String(d.getUTCHours()).padStart(2, '0'); const mm = String(d.getUTCMinutes()).padStart(2, '0');
   return `${d.getUTCDate()}.${d.getUTCMonth() + 1}.${d.getUTCFullYear()} ${hh}:${mm} UTC`;
 }

@@ -96,7 +96,9 @@ export function buildAttributionLine(creditsText) {
     .filter((part) => part && !/upgrade|attribution|^data$/i.test(part));
   const out = [];
   const seen = new Set();
-  for (const part of ['Google', 'Cesium ion', ...parts]) {
+  // DeepState ide dopredu: výrez má 6 miest a jeho licencia (§3) chce textový odkaz.
+  const ranked = [...parts.filter((p) => /deepstate/i.test(p)), ...parts.filter((p) => !/deepstate/i.test(p))];
+  for (const part of ['Google', 'Cesium ion', ...ranked]) {
     const key = part.toLowerCase().replace(/^google maps$/, 'google').replace(/^cesium$/, 'cesium ion');
     if (seen.has(key)) continue;
     seen.add(key);
