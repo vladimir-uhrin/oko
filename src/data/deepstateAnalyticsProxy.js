@@ -12,8 +12,8 @@
  * (§2 zakazuje šírenie, publikovanie a „proxying" bez súhlasu); mirror
  * súhlas DeepState nedeklaruje (docs/drafts/ukrajina-zdroje-prieskum.md).
  * Používa sa z ROZHODNUTIA VLASTNÍKA: 23. 9. 2026 demo a endpoint ponechal
- * („Nechať — zadal som to ja"), 24. 9. 2026 zrušil pravidlo „žiadne mirrory"
- * a mirror sa stal zdrojom vrstvy DeepState na verejnej doméne
+ * („Nechať — zadal som to ja"), od 24. 9. 2026 mirrory používame a mirror je
+ * zdrojom vrstvy DeepState na verejnej doméne
  * (`createDeepStateMirror` zdieľa ukraineEventsProxy). Licenčné fakty to
  * nemení — preto zdroj, licencia a výhrady idú priamo v odpovedi. Endpoint
  * zámerne nemá bránu podľa hostiteľa. Nikdy neoznačovať za otvorené dáta.
@@ -220,7 +220,7 @@ export function dateKeyProblem(key, todayKey) {
  * Jadro mirroru — cache, pauza po chybe, overovanie súborov a hľadanie dňa.
  * Zdieľa ho demo (`/api/deepstate/analytics`) aj vrstva DeepState UKRAJINY
  * (`/api/ukraine/events/deepstate` na verejnej doméne a pre dni bez vlastného
- * archívu; vlastník zrušil pravidlo „žiadne mirrory" 24. 9. 2026).
+ * archívu; mirrory používame z rozhodnutia vlastníka, 24. 9. 2026).
  */
 export function createDeepStateMirror(opts = {}) {
   const projectRoot = opts.root || process.cwd();

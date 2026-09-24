@@ -21,8 +21,8 @@ overuje znova podľa `new-data-layer`.
   = body (modrá/červená/jantár) + ODVODENÝ raster zón (RU výplň, šrafovaná zóna bojov) primknutý
   k terénu aj 3D dlaždiciam; časová os prepína snímku podľa dňa kurzora; čip KONTROLA.
 - Vojnové požiare The Economist (CC BY 4.0, 454 333 bodov od 2022) ako typ `hotspot` — body bez karty.
-- DeepState: API a mirrory NIE (licencia §2); ich Telegram kanál `DeepStateUA` v páse médií
-  (licencia §3: vizuály s logom/odkazom voľné) — odpoveď na otázku používateľa.
+- DeepState: vlastný archív z API (lokálne) + mirror cyterat (verejná doména a história od 8. 7. 2024);
+  ich Telegram kanál `DeepStateUA` v páse médií (licencia §3: vizuály s logom/odkazom voľné).
 - **4A predbežne (používateľ 09-19: „OKO nie je biznis, ale hobby pre mňa a môj FB profil —
   pridaj zatiaľ všetko, čo vieš, a požiadame DeepState o súhlas")**: `/api/history/last` sa
   archivuje raz denne (história API je za autorizáciou → naša od 19. 9. 2026), čistý model
@@ -390,8 +390,8 @@ Licencie sú citované doslovne v prílohe; tu len verdikt a dôvod. „Overené
 | Zdroj | Verdikt | Prečo | Krok |
 |---|---|---|---|
 | **DeepStateMap.live API** (`/api/history/last`, multipolygóny okupovaného územia, história od 2022, zámerné oneskorenie 2–3 dni) | 🟡 | Licenčná zmluva (3. 9. 2025): API zadarmo len pre dobrovoľnícke/charitatívne/obranné subjekty, komerční so súhlasom, **proxying tretím stranám zakázaný**; OKO (nekomerčný, nie charita) je v medzere → treba súhlas | používateľ vyplní https://api.deepstatemap.live/request, výslovne opíše server-side proxy s cache pre verejný nekomerčný portál |
-| cyterat/deepstate-map-data mirror | ✅ rozhodnutie vlastníka (23.–24. 9. 2026) | Licenčné fakty platia ďalej: GPL-3.0 len na skripty, dáta pod licenciou DeepState (§2 zakazuje proxying bez súhlasu), mirror súhlas nedeklaruje. Vlastník pravidlo „žiadne mirrory" zrušil: mirror je zdroj vrstvy DeepState na verejnej doméne a pre dni mimo nášho archívu (história od 8. 7. 2024) + demo `/demos/deepstate-analytics/index.html`. Len okupované územie (vrátane Krymu a ORDLO), bez šedej zóny | hotové (DATA_SOURCES.md) |
-| longlinecode feed (+ Cesium adaptér) | ❌ | Overené ×2: DS mirror + ISW derivát aj v dennom feede (ISW deriváty bez súhlasu zakazuje). Ako referencia implementácie (clampToGround, contact_line z polygónu) áno | — |
+| cyterat/deepstate-map-data mirror | ✅ rozhodnutie vlastníka (23.–24. 9. 2026) | Licenčné fakty platia ďalej: GPL-3.0 len na skripty, dáta pod licenciou DeepState (§2 zakazuje proxying bez súhlasu), mirror súhlas nedeklaruje. Používame: mirror je zdroj vrstvy DeepState na verejnej doméne a pre dni mimo nášho archívu (história od 8. 7. 2024) + demo `/demos/deepstate-analytics/index.html`. Len okupované územie (vrátane Krymu a ORDLO), bez šedej zóny | hotové (DATA_SOURCES.md) |
+| longlinecode feed (+ Cesium adaptér) | ❌ (len kvôli ISW) | Overené ×2: DeepState časť je ten istý mirror cyterat (ten používame priamo); história 2022 – 7/2024 je rekonštrukcia z ISW a ISW deriváty bez súhlasu zakazuje (pravidlo 4). Ako referencia implementácie (clampToGround, contact_line z polygónu) áno | — |
 | **Black Bird Group ry** (Fínsko; konzervatívna metodika, explicitná šedá zóna, história od 1. dňa; týždenný export do ACLED) | 🟡 | Bez verejného downloadu, ale web: „happy to cooperate with research institutions and media … non-profit or public-facing adaptations" | používateľ napíše contact@blackbirdgroup.fi |
 | **ISW ArcGIS FeatureServer** (Assessed Russian Control, claimed, infiltration, advances, 24 h gains, fortifikácie; verejné bez tokenu) | ❌ (🟡 len s písomným súhlasom) | Overené ×2: licenseInfo „You may not use this geodata without the written consent of ISW"; policy zakazuje „incorporation … into mapping platforms" a redistribúciu „via API, or through automated means" | e-mail ISW (kontakt na policy stránke, maskovaný Cloudflare) — rozhodnutie používateľa |
 | ISW Map Room (denné PNG, RSS `feed/?post_type=map`) | ❌ ako obsah; ✅ len **titulok + dátum + odkaz von** | Overené ×2: aj hotlink obrázka v karte je hraničný („mapping platform"); nálezca sa tu mýlil, skeptik opravil | — |
@@ -491,15 +491,12 @@ so zdrojom a dátumom a DeepState a ISW sa nikdy nezlievajú do jednej vrstvy.**
    zoznamy vojakov, poloha autora záberu; záznamy s `graphic=true` (GeoConfirmed, Bellingcat) bez
    médií; Berkeley §31: ukladať len typ, čas, miesto, zdroj.
 4. **ISW**: nič okrem titulku + dátumu + odkazu von. Žiadne vektory, obrázky, ani hotlink.
-5. *(Zrušené vlastníkom 24. 9. 2026 — pravidlo „DeepState: žiadne mirrory" už neplatí. Mirror cyterat
-   je zdroj vrstvy DeepState na verejnej doméne a pre dni mimo nášho archívu; licenčné fakty a povinné
-   označenie zdroja sú v DATA_SOURCES.md. Číslo ostáva, aby odkazy na pravidlá 6 a 7 sedeli.)*
-6. **Share-alike**: OSM podklad a VIINA = ODbL, každý vlastný súbor; Wikipedia derivát = CC BY-SA
+5. **Share-alike**: OSM podklad a VIINA = ODbL, každý vlastný súbor; Wikipedia derivát = CC BY-SA
    samostatný dataset s licenciou a odkazom; nemiešať s CC BY dátami do jednej DB.
-7. **Poctivosť v UI**: každá vrstva nesie zdroj, dátum snímku, oneskorenie a kategóriu
+6. **Poctivosť v UI**: každá vrstva nesie zdroj, dátum snímku, oneskorenie a kategóriu
    (oficiálne UA / tvrdí RU / OSINT overené / odvodené / archív). Disclaimer ako DeepState: mapa
    nie je na plánovanie evakuácie ani trás.
-8. **Registrácie a formuláre vypĺňa používateľ** (GEM precedens), kľúče len v `.env` a na serveri.
+7. **Registrácie a formuláre vypĺňa používateľ** (GEM precedens), kľúče len v `.env` a na serveri.
 
 ## 4. Architektúra
 
@@ -628,7 +625,7 @@ KLIENT src/data/
   ostatné = jedno čítanie s doslovným citátom; pred každým zapojením: checklist `new-data-layer`
   (vzorka odpovede, frekvencia, kľúč, ToS, počet objektov, živé vs. modelované) a riadok do
   `DATA_SOURCES.md` aj pre zamietnuté („preverené a nepoužité": ACLED, Liveuamap, GADM, EOG VNF,
-  Ukraine War Archive, CIR, mirror DeepState, Rybar, príloha XV).
+  Ukraine War Archive, CIR, Rybar, príloha XV).
 - Neznáme: čo presne vracia DeepState API (šedá zóna? šípky? história?) — zistí sa až s kľúčom;
   formát Black Bird Group; formálna licencia GeoConfirmed a Bellingcat dát; Terms WarSpotting;
   UCDP licencia (stránka CC BY 4.0 vs. staršie zrkadlá NC); akvizičný plán S-1 nad Ukrajinou.

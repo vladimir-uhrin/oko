@@ -79,8 +79,8 @@ const clientKey = (req) => {
  * hobby použitie, verejná doména už je publikovanie. `UKRAINE_DEEPSTATE=consent`
  * to otvorí, keď súhlas príde; `=off` vypne aj lokálne. Chýbajúca hlavička =
  * radšej nie. Týka sa NÁŠHO archívu z API DeepState; verejná doména od 24. 9.
- * 2026 dostáva namiesto neho snímku z mirroru cyterat (rozhodnutie vlastníka,
- * pravidlo „žiadne mirrory" zrušené; `UKRAINE_DEEPSTATE_MIRROR=off` vráti 451). Pure.
+ * 2026 dostáva namiesto neho snímku z mirroru cyterat (rozhodnutie vlastníka —
+ * mirrory používame; `UKRAINE_DEEPSTATE_MIRROR=off` vráti 451). Pure.
  * @param {unknown} host hlavička Host (môže niesť port)
  * @param {{consent?: boolean}} [o]
  * @returns {boolean}
