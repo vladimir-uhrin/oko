@@ -349,9 +349,16 @@ test('K4: relayout na KARTE presunie/schová prekrývajúce sa popisky (všetky 
   const plainRight = labels.filter((l) => l.show !== false && l.pixelOffset.y === 0 && l.pixelOffset.x > 0).length;
   assert.ok(plainRight < labels.length, 'nie všetky ostali vpravo — konflikt vyriešený');
   assert.ok(labels.some((l) => l.show === false) || labels.some((l) => l.pixelOffset.y !== 0 || l.pixelOffset.x < 0), 'aspoň presun alebo skrytie');
-  // mimo KARTY sa všetko vráti vpravo a zobrazí
+  // Aj v bežnom štýle sa prekrývajúce popisky rozmiestnia (vlastník 2026-09-24);
+  // odstup je od bodu (8 px), nie od blesku.
   layer.setStyle('default');
   layer.relayout();
   const after = [...layer._getStateForTest().placeRecords.values()].map((r) => r.entity.label);
-  assert.ok(after.every((l) => l.show !== false && l.pixelOffset.x === 8 && l.pixelOffset.y === 0), 'default = všetko vpravo, viditeľné');
+  const plainAfter = after.filter((l) => l.show !== false && l.pixelOffset.y === 0 && l.pixelOffset.x > 0).length;
+  assert.ok(plainAfter < after.length, 'aj v bežnom štýle konflikt vyriešený');
+  assert.ok(after.every((l) => l.show === false || Math.abs(l.pixelOffset.x) === 8 || l.pixelOffset.x === 0), 'odstup od bodu 8 px (bez blesku)');
+  // Skrytá vrstva vráti všetko do pôvodnej polohy.
+  layer.hide();
+  layer.relayout();
+  assert.ok([...layer._getStateForTest().placeRecords.values()].every((r) => r.entity.label.show !== false && r.entity.label.pixelOffset.x === 8), 'skrytá = pôvodná poloha');
 });

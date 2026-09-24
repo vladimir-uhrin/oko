@@ -16,7 +16,7 @@
  * Pure module (no DOM).
  */
 
-import { UKRAINE_GAZETTEER, classifyUkraineIncident } from './ukraineIncidents.js';
+import { UKRAINE_GAZETTEER, UKRAINE_OBLASTS_EN, classifyUkraineIncident } from './ukraineIncidents.js';
 
 /** Incident classes, in priority order. severity → marker colour on the client. */
 const INCIDENT_RULES = [
@@ -127,14 +127,85 @@ export function classifyIncident(text, { region = 'gulf' } = {}) {
 
 /**
  * First gazetteer place named in the text, else null. Pure.
+ *
+ * For the Ukraine gazetteer (2026-09-24) matching is STRICT, because plain
+ * substrings put namesakes hundreds of km off („drones near Nova Borova,
+ * Zhytomyr region" → Borova in Kharkiv oblast): whole words only (an English
+ * plural/possessive is allowed), an alias preceded by a place-name adjective
+ * (Nova/Stara/Velyka/Mala…) is a different place and is skipped, and when an
+ * oblast that really qualifies the place — a header right before it („Zhytomyr
+ * region: …", „… region — …", „In the X region, …") or „in/of (the) X region" /
+ * „(X Oblast)" right after it, never across a sentence, dash or line break —
+ * lies more than 250 km away, the place is a namesake and the oblast is
+ * returned (approx). Oblast centres (Kyiv, Kharkiv, Odesa…) are never demoted.
+ * The Gulf gazetteer keeps plain substring matching.
  * @param {string} text
  * @param {ReadonlyArray} [gazetteer]
- * @returns {{name:string, lat:number, lon:number}|null}
+ * @returns {{name:string, lat:number, lon:number, approx?:boolean}|null}
  */
 export function locateIncident(text, gazetteer = GULF_GAZETTEER) {
   const s = String(text ?? '').toLowerCase();
+  if (gazetteer === UKRAINE_GAZETTEER) return locateStrict(s, gazetteer);
   for (const place of gazetteer) {
     if (place.aliases.some((a) => s.includes(a))) return { name: place.name, lat: place.lat, lon: place.lon };
+  }
+  return null;
+}
+
+const EN_ADJ_BEFORE_RE = /(?:^|[^a-z])(?:nova|novo|novyi|nove|stara|staryi|stare|velyka|velykyi|velyke|mala|malyi|male|verkhnia|verkhnii|nyzhnia|nyzhnii|bila|bilyi|chervona|chervonyi|zelena|zelenyi)\s+$/;
+const EN_OBLAST_RE = /([a-z][a-z-]+)\s+(?:region|oblast|province)(?![a-z])/g;
+const EN_BREAK_RE = /[.!?;|\n–—]/;
+/** Krajské mestá — ich menovec nie je dôvod premiestniť správu do inej oblasti. */
+const EN_OBLAST_CENTRES = new Set(['Kyiv', 'Kharkiv', 'Odesa', 'Lviv', 'Dnipro', 'Zaporizhzhia', 'Mykolaiv', 'Kherson', 'Sumy', 'Chernihiv', 'Poltava', 'Zhytomyr', 'Vinnytsia', 'Cherkasy', 'Kropyvnytskyi', 'Khmelnytskyi', 'Ternopil', 'Rivne', 'Lutsk', 'Ivano-Frankivsk', 'Uzhhorod', 'Chernivtsi', 'Donetsk', 'Luhansk']);
+const EN_FROM_TOWARD_RE = /(?:^|[^a-z])(?:from|toward|towards|to|into|heading for)\s+(?:the\s+)?$/;
+const escapeRe = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const enAliasRe = new Map();
+/** Prvý výskyt aliasu ako celého slova, ktorý nepredchádza prídavné meno sídla; [start, end] alebo null. */
+function findAlias(s, alias) {
+  let re = enAliasRe.get(alias);
+  if (!re) { re = new RegExp(`(?<![a-z])${escapeRe(alias)}(?:'s|s)?(?![a-z])`, 'g'); enAliasRe.set(alias, re); }
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(s))) {
+    if (!EN_ADJ_BEFORE_RE.test(s.slice(Math.max(0, m.index - 16), m.index))) return [m.index, m.index + m[0].length];
+  }
+  return null;
+}
+const kmBetweenEn = (a, b) => { const dy = (b.lat - a.lat) * 111.32; const dx = (b.lon - a.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180); return Math.hypot(dx, dy); };
+function locateStrict(s, gazetteer) {
+  const oblasts = [];
+  EN_OBLAST_RE.lastIndex = 0;
+  let om;
+  while ((om = EN_OBLAST_RE.exec(s))) {
+    const key = om[1].replace(/^the-?/, '');
+    const hit = UKRAINE_OBLASTS_EN[key];
+    if (hit) oblasts.push({ ...hit, at: om.index, end: om.index + om[0].length });
+  }
+  for (const place of gazetteer) {
+    let span = null;
+    for (const alias of place.aliases) {
+      const sp = findAlias(s, alias);
+      if (sp && (!span || sp[0] < span[0])) span = sp;
+    }
+    if (!span) continue;
+    const loc = { name: place.name, lat: place.lat, lon: place.lon };
+    if (/Oblast$/.test(place.name) || !oblasts.length || EN_OBLAST_CENTRES.has(place.name)) return loc;
+    const [at, end] = span;
+    // Pred sídlom len nadpis („Zhytomyr region: …", „… region — …") alebo „In the X region, …".
+    const before = oblasts.filter((o) => {
+      if (o.end > at || at - o.end > 60 || EN_FROM_TOWARD_RE.test(s.slice(Math.max(0, o.at - 16), o.at))) return false;
+      const header = /^[ \t]*[:–—-]/.exec(s.slice(o.end, at));
+      const inPhrase = /(?:^|[^a-z])in\s+(?:the\s+)?$/.test(s.slice(Math.max(0, o.at - 8), o.at)) && /^[ \t]*,/.test(s.slice(o.end, at));
+      if (!header && !inPhrase) return false;
+      const gap = s.slice(o.end, at).replace(/^[ \t]*[:–—,-]/, '');
+      return !EN_BREAK_RE.test(gap);
+    }).at(-1);
+    // Za sídlom len „in (the) X region", „of X region" alebo „(X Oblast)" — nie holá čiarka, „and" ani nový riadok.
+    const after = oblasts.find((o) => o.at >= end && /^[ \t]*(?:(?:in|of)[ \t]+(?:the[ \t]+)?|\([ \t]*)$/.test(s.slice(end, o.at)));
+    const hints = [before, after].filter(Boolean);
+    if (!hints.length || hints.some((h) => kmBetweenEn(h, place) <= 250)) return loc;
+    const h = hints[0];
+    return { name: h.name, lat: h.lat, lon: h.lon, approx: true };
   }
   return null;
 }

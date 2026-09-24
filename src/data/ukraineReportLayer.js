@@ -538,13 +538,15 @@ export function createUkraineReportLayer({
 
   const labelWidthPx = (text) => String(text || '').length * LABEL_CHAR_PX + LABEL_W_PAD;
   /**
-   * Rozmiestni popisky sídiel v obrazovke tak, aby sa neprekrývali (KARTA): krížené
-   * meče sú pevné prekážky, sídla si podľa priority (viac útokov/zmienok) hľadajú
-   * voľnú polohu, nezmestené sa skryjú (blesk ostane). Mimo KARTY = pôvodná poloha.
+   * Rozmiestni popisky sídiel v obrazovke tak, aby sa neprekrývali (oba štýly):
+   * krížené meče sú pevné prekážky, sídla si podľa priority (viac útokov/zmienok)
+   * hľadajú voľnú polohu, nezmestené sa skryjú (bod/blesk ostane).
    */
   function layoutLabels() {
-    // Mimo KARTY: každý popisok späť do pôvodnej polohy (vpravo, bez skrytia).
-    if (_styleMode !== 'karta' || !_shown) {
+    // Rozmiestnenie v OBOCH štýloch (vlastník 2026-09-24: „odsunutie tých, ktoré sa
+    // prekrývajú“ aj v bežnom štýle). Skrytá vrstva = pôvodná poloha (vpravo, bez skrytia).
+    const bolts = _styleMode === 'karta';
+    if (!_shown) {
       for (const rec of _placeRecords.values()) {
         if (rec.entity?.label) applyLabelPlacement(rec.entity.label, 'right', placeLabelOffsetX(false, 0));
       }
@@ -552,7 +554,7 @@ export function createUkraineReportLayer({
     }
     const width = scene?.canvas?.clientWidth || scene?.canvas?.width || 0;
     const height = scene?.canvas?.clientHeight || scene?.canvas?.height || 0;
-    // KARTA bez rozmerov plátna (headless) → nechaj polohu z applyPlaceStyle.
+    // Bez rozmerov plátna (headless) → nechaj polohu z applyPlaceStyle.
     if (!width || !height) return;
     const camPos = camera?.positionWC || null;
     const items = [];
@@ -575,15 +577,15 @@ export function createUkraineReportLayer({
       const withinDdc = camPos ? Cesium.Cartesian3.distance(camPos, pos) < REPORT_PLACE_LABEL_FAR_M : true;
       const p = withinDdc ? _project(pos) : null;
       if (!p || p.x < -80 || p.y < -80 || p.x > width + 80 || p.y > height + 80) {
-        applyLabelPlacement(label, 'right', placeLabelOffsetX(_styleMode === 'karta' && rec.hasBolt, rec.boltSize || 0));
+        applyLabelPlacement(label, 'right', placeLabelOffsetX(bolts && rec.hasBolt, rec.boltSize || 0));
         continue;
       }
-      items.push({ key: `p:${rec.entity.id}`, x: p.x, y: p.y, w: labelWidthPx(label.text), h: LABEL_H_PX, off: placeLabelOffsetX(rec.hasBolt, rec.boltSize || 0), priority: (rec.attacks || 0) * 2 + (rec.mentions || 1) });
+      items.push({ key: `p:${rec.entity.id}`, x: p.x, y: p.y, w: labelWidthPx(label.text), h: LABEL_H_PX, off: placeLabelOffsetX(bolts && rec.hasBolt, rec.boltSize || 0), priority: (rec.attacks || 0) * 2 + (rec.mentions || 1) });
       recByKey.set(`p:${rec.entity.id}`, rec);
     }
     const placement = deconflictLabels(items, { pad: 2 });
     for (const [key, rec] of recByKey) {
-      applyLabelPlacement(rec.entity.label, placement[key] ?? null, placeLabelOffsetX(rec.hasBolt, rec.boltSize || 0));
+      applyLabelPlacement(rec.entity.label, placement[key] ?? null, placeLabelOffsetX(bolts && rec.hasBolt, rec.boltSize || 0));
     }
     requestRender();
   }

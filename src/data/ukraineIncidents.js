@@ -143,6 +143,41 @@ export const UKRAINE_GAZETTEER = Object.freeze([
 ]);
 
 /**
+ * Oblasti Ukrajiny po anglicky (kľúč = slovo pred „region/oblast/province") →
+ * ťažisko. Slúži prísnemu lokátoru anglických správ na odhalenie menovca
+ * („near Nova Borova, Zhytomyr region" ≠ Borova na Charkovsku). Pure dáta.
+ */
+export const UKRAINE_OBLASTS_EN = Object.freeze({
+  vinnytsia: Object.freeze({ name: 'Vinnytsia Oblast', lat: 49.1, lon: 28.5 }),
+  volyn: Object.freeze({ name: 'Volyn Oblast', lat: 51.2, lon: 25.1 }),
+  zhytomyr: Object.freeze({ name: 'Zhytomyr Oblast', lat: 50.6, lon: 28.4 }),
+  zakarpattia: Object.freeze({ name: 'Zakarpattia Oblast', lat: 48.4, lon: 23.3 }),
+  transcarpathian: Object.freeze({ name: 'Zakarpattia Oblast', lat: 48.4, lon: 23.3 }),
+  'ivano-frankivsk': Object.freeze({ name: 'Ivano-Frankivsk Oblast', lat: 48.8, lon: 24.6 }),
+  kyiv: Object.freeze({ name: 'Kyiv Oblast', lat: 50.4, lon: 30.6 }),
+  kirovohrad: Object.freeze({ name: 'Kirovohrad Oblast', lat: 48.4, lon: 32.0 }),
+  luhansk: Object.freeze({ name: 'Luhansk Oblast', lat: 48.8, lon: 38.9 }),
+  lviv: Object.freeze({ name: 'Lviv Oblast', lat: 49.8, lon: 24.0 }),
+  mykolaiv: Object.freeze({ name: 'Mykolaiv Oblast', lat: 47.2, lon: 31.8 }),
+  poltava: Object.freeze({ name: 'Poltava Oblast', lat: 49.6, lon: 33.9 }),
+  rivne: Object.freeze({ name: 'Rivne Oblast', lat: 51.0, lon: 26.3 }),
+  ternopil: Object.freeze({ name: 'Ternopil Oblast', lat: 49.4, lon: 25.6 }),
+  khmelnytskyi: Object.freeze({ name: 'Khmelnytskyi Oblast', lat: 49.4, lon: 26.9 }),
+  cherkasy: Object.freeze({ name: 'Cherkasy Oblast', lat: 49.2, lon: 31.5 }),
+  chernivtsi: Object.freeze({ name: 'Chernivtsi Oblast', lat: 48.3, lon: 25.9 }),
+  chernihiv: Object.freeze({ name: 'Chernihiv Oblast', lat: 51.4, lon: 32.1 }),
+  kharkiv: Object.freeze({ name: 'Kharkiv Oblast', lat: 49.6, lon: 36.9 }),
+  sumy: Object.freeze({ name: 'Sumy Oblast', lat: 51.0, lon: 34.5 }),
+  donetsk: Object.freeze({ name: 'Donetsk Oblast', lat: 48.3, lon: 37.5 }),
+  zaporizhzhia: Object.freeze({ name: 'Zaporizhzhia Oblast', lat: 47.4, lon: 35.6 }),
+  zaporizhia: Object.freeze({ name: 'Zaporizhzhia Oblast', lat: 47.4, lon: 35.6 }),
+  kherson: Object.freeze({ name: 'Kherson Oblast', lat: 46.7, lon: 33.3 }),
+  dnipropetrovsk: Object.freeze({ name: 'Dnipropetrovsk Oblast', lat: 48.4, lon: 35.5 }),
+  odesa: Object.freeze({ name: 'Odesa Oblast', lat: 46.5, lon: 30.3 }),
+  odessa: Object.freeze({ name: 'Odesa Oblast', lat: 46.5, lon: 30.3 }),
+});
+
+/**
  * Trieda udalosti pre titulok z ukrajinského regiónu, inak null. Pure.
  * @param {string} text
  * @returns {{type:string, severity:'critical'|'major'|'minor'}|null}

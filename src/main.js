@@ -44,6 +44,7 @@ import { createOilPriceChip, createOilPricePanel } from './oilPriceChip.js';
 import { createStraitTrafficChip } from './straitTrafficChip.js';
 import { createIncidentCards } from './gulfIncidentCards.js';
 import { createSceneRevealGate } from './sceneRevealGate.js';
+import { createMapScaleBar } from './mapScaleBar.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
@@ -597,9 +598,16 @@ async function init() {
     let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
     let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
     let activeChokepoint = null; // aktívna úžina (pre export kartičky konfliktu)
+    // Režim mapy (2026-09-24, „prehľadnosť ako špičkové portály"): kým je kamera
+    // pri scéne frontu/úžiny, dekoratívny HUD sa skryje a dok zosvetlí (style.css
+    // `body.oko-map-focus`); pri pohľade na planétu sa všetko vráti.
+    const setMapFocus = (on) => { try { document.body.classList.toggle('oko-map-focus', Boolean(on)); } catch { /* */ } };
+    // Pri každej zmene scény (aj keď brána neprepne — napr. úžina → situácia „Perzský záliv").
+    const syncMapFocus = () => setMapFocus(revealGate.isRevealed() && Boolean(activeFrontScene || activeChokepoint));
     const revealGate = createSceneRevealGate({
       viewer,
       onChange: (visible) => {
+        setMapFocus(visible && Boolean(activeFrontScene || activeChokepoint));
         incidentCards.setRevealed(visible);
         ukraineEvents?.setRevealed(visible);
         kartaOverlay?.setRevealed(visible);
@@ -608,6 +616,9 @@ async function init() {
       },
     });
     window.__godsEyeView.sceneRevealGate = revealGate;
+    // Mierka v km — len v režime mapy.
+    const mapScaleBar = createMapScaleBar({ viewer, lang: () => currentLanguage() });
+    window.__godsEyeView.mapScaleBar = mapScaleBar;
     // Country borders (Natural Earth, public domain): political context drawn on
     // the globe with a chokepoint/strike reveal — a standalone overlay, on with
     // any scene, off outside one.
@@ -800,6 +811,7 @@ async function init() {
         try { runChokepointScene(conflict.sceneId); } catch { /* */ }
       } else {
         activeChokepoint = null; activeFrontScene = null;
+        syncMapFocus();
         try {
           const [w, s, e, n] = conflict.rectDegrees;
           viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(w, s, e, n), duration: 1.8 });
@@ -943,6 +955,7 @@ async function init() {
         void ukraineTimeline.showControl();
         void ukraineTimeline.showDeepState();
       }
+      syncMapFocus();
       return applyFrontScene(id, frontSceneDeps);
     };
     // Karta smeru (B5): trend útokov z archívu hlásení GŠ + najčastejšie sídla;
@@ -1023,6 +1036,7 @@ async function init() {
       activeChokepoint = scene || null;
       activeFrontScene = null;
       const result = applyChokepointScene(id, chokepointSceneDeps);
+      syncMapFocus();
       void oilPriceChip.refreshAndShow();
       if (scene) {
         straitTrafficChip.showFor({

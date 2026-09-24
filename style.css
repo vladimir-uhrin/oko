@@ -12055,3 +12055,36 @@ body.oko-karta-clean .oko-conflicts-launch, body.oko-karta-clean .oko-conflicts-
 .oko-cmd-label { font-family: var(--font-sans); font-size: 14px; color: #eaf4fb; }
 .oko-cmd-hint { font-family: var(--font-mono); font-size: 11px; color: #7f93a6; margin-left: auto; white-space: nowrap; }
 .oko-cmd-empty { padding: 16px; text-align: center; color: #7f93a6; font-family: var(--font-mono); font-size: 12px; }
+
+/* =====================================================================
+   REŽIM MAPY (2026-09-24, vlastník: „prehľadnosť ako špičkové portály"):
+   kým je kamera pri scéne frontu/úžiny (brána priblíženia), nad mapou ostane
+   len to, čo sa číta — dekoratívny taktický HUD (klasifikácia, KH11, pravítka,
+   GSD/NIIRS) sa skryje, súradnice vľavo dole ostanú; dok sa zosvetlí a vráti
+   pod myšou alebo pri fokuse. Geometriu doku (creditAttribution.test.mjs) to
+   nemení — len opacity/visibility.
+   ===================================================================== */
+body.oko-map-focus #intel-hud .hud-top-bar,
+body.oko-map-focus #intel-hud .hud-top-left,
+body.oko-map-focus #intel-hud .hud-top-right,
+body.oko-map-focus #intel-hud .hud-bottom-right,
+body.oko-map-focus #intel-hud .hud-edge { opacity: 0; visibility: hidden; transition: opacity 0.25s ease, visibility 0.25s; }
+body.oko-map-focus #command-dock:not(:hover):not(:focus-within) { opacity: 0.42; }
+/* Mierka v km (src/mapScaleBar.js) — poloha z JS (nad súradnicami HUD-u). */
+.oko-scale { position: fixed; left: 36px; top: 0; z-index: 60; display: flex; align-items: center; gap: 6px; pointer-events: none;
+  font: 600 10px 'IBM Plex Mono', ui-monospace, monospace; color: #e6eef4; letter-spacing: 0.04em; text-shadow: 0 0 3px #0b1622, 0 0 2px #0b1622; }
+.oko-scale[hidden] { display: none; }
+.oko-scale-bar { display: block; height: 6px; border: 2px solid #e6eef4; border-top: 0; box-shadow: 0 1px 0 rgba(11, 22, 34, 0.9), 0 -1px 0 rgba(11, 22, 34, 0.5); }
+/* Legenda hlásenia GŠ v časovej osi. */
+.oko-ukr-tl-ctl-title { font-size: 8.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: #cfe3f5; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 5px; padding: 0 5px; }
+.oko-ukr-timeline.is-collapsed .oko-ukr-tl-rp { display: none; }
+.oko-ukr-tl-ctl-item.is-rp-marker .oko-ukr-tl-ctl-sw { width: 12px; height: 12px; border: 0; background: none; position: relative; }
+.oko-ukr-tl-ctl-item.is-rp-marker .oko-ukr-tl-ctl-sw::before { content: '⚔︎'; position: absolute; inset: -2px 0 0 1px; font: 700 11px 'IBM Plex Mono', ui-monospace, monospace; color: #e6eef4; text-shadow: 0 0 2px #0b1622; }
+.oko-ukr-tl-ctl-item.is-rp-0 .oko-ukr-tl-ctl-sw, .oko-ukr-tl-ctl-item.is-rp-low .oko-ukr-tl-ctl-sw,
+.oko-ukr-tl-ctl-item.is-rp-mid .oko-ukr-tl-ctl-sw, .oko-ukr-tl-ctl-item.is-rp-high .oko-ukr-tl-ctl-sw { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #0b1622; }
+.oko-ukr-tl-ctl-item.is-rp-0 .oko-ukr-tl-ctl-sw { background: #8aa0b6; }
+.oko-ukr-tl-ctl-item.is-rp-low .oko-ukr-tl-ctl-sw { background: #e6eef4; }
+.oko-ukr-tl-ctl-item.is-rp-mid .oko-ukr-tl-ctl-sw { background: #ffb547; }
+.oko-ukr-tl-ctl-item.is-rp-high .oko-ukr-tl-ctl-sw { background: #f87171; }
+.oko-ukr-tl-ctl-item.is-rp-na .oko-ukr-tl-ctl-sw { width: 8px; height: 8px; border-radius: 50%; border: 1.5px dashed #8a97a3; background: none; }
+.oko-ukr-tl-rp[hidden] { display: none; }

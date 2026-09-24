@@ -302,6 +302,8 @@ export function createUkraineDeepStateLayer({
   // ── karta pri prechode myšou (body aj polygóny) ──────────────────────────
   function tipTextFor(info) {
     if (!info) return '';
+    // Línia kontaktu: odvodená, s dĺžkou úseku.
+    if (info.kind === 'contact' && Number.isFinite(info.km)) return translate('ukraine.ds.contact-km', { km: info.km });
     const kindText = translate(`ukraine.ds.${info.kind}`);
     const name = lang === 'uk' ? (info.uk || info.en) : (info.en || info.uk);
     const parts = [kindText];
@@ -326,7 +328,7 @@ export function createUkraineDeepStateLayer({
         } catch { info = null; }
         if (info && info.kind) {
           tip.textContent = tipTextFor(info);
-          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'));
+          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : ((info.kind === 'contact' ? (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).contact.css : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'))));
           tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
           tip.hidden = false;
         } else tip.hidden = true;

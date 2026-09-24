@@ -121,7 +121,8 @@ export function createUkrainePanel({
     });
     deepstateChip.dataset.part = 'deepstate';
     deepstateChip.setAttribute('aria-pressed', 'false');
-    deepstateChip.title = translate('ukraine.ds.note');
+    // Bez súhlasu je jediný zdroj mirror (24. 9. 2026 „len mirrory").
+    deepstateChip.title = translate('ukraine.ds.note-mirror');
     chips.appendChild(deepstateChip);
   }
   // Čip PLOCHY (KARTA K2, 2026-09-20): zástavba, lesy, voda a železnice z OSM
@@ -335,7 +336,7 @@ export function createUkrainePanel({
     // Server DeepState pre túto adresu odmietol (451, kým nepríde súhlas) —
     // čip sa skryje rovnako ako riadok v osi. Nič sa neruší, len nezobrazuje.
     deepstateChip.hidden = timeline?.isDeepStateAvailable?.() === false;
-    deepstateChip.title = translate(deepstate?.getState?.()?.source === 'mirror' ? 'ukraine.ds.note-mirror' : 'ukraine.ds.note');
+    deepstateChip.title = translate(deepstate?.getState?.()?.source === 'archive' ? 'ukraine.ds.note' : 'ukraine.ds.note-mirror');
     const on = Boolean(deepstate?.isShown?.());
     deepstateChip.classList?.toggle?.('active', on);
     deepstateChip.setAttribute('aria-pressed', String(on));

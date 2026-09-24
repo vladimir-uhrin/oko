@@ -210,7 +210,7 @@ export function createUkraineTimeline({
   let _deepstateBlocked = false;
   if (deepstate) {
     dsBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-ds');
-    dsChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.deepstate'), () => { if (deepstate.isShown()) deepstate.hide(); else void showDeepState(); }, translate('ukraine.ds.note'));
+    dsChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.deepstate'), () => { if (deepstate.isShown()) deepstate.hide(); else void showDeepState(); }, translate('ukraine.ds.note-mirror'));
     dsChip.setAttribute('aria-pressed', 'false');
     dsBox.appendChild(dsChip);
     const sw = (cls, text) => { const s = el('span', `oko-ukr-tl-ctl-item ${cls}`); s.appendChild(el('i', 'oko-ukr-tl-ctl-sw')); s.appendChild(el('span', '', text)); return s; };
@@ -243,6 +243,25 @@ export function createUkraineTimeline({
     dmgLine = el('span', 'oko-ukr-tl-ctl-since', '');
     dmgBox.appendChild(dmgLine);
     row3.appendChild(dmgBox);
+  }
+  // Hlásenie GŠ (2026-09-24): čo znamenajú „✕ N" a farby sídiel — bez vysvetlivky
+  // boli oranžové a biele body na mape nečitateľné.
+  let rpBox = null;
+  if (report) {
+    rpBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-rp');
+    rpBox.hidden = !report.isShown?.();
+    rpBox.appendChild(el('span', 'oko-ukr-tl-ctl-title', translate('ukraine.rp.title')));
+    const item = (cls, text) => { const s = el('span', `oko-ukr-tl-ctl-item ${cls}`); s.appendChild(el('i', 'oko-ukr-tl-ctl-sw')); s.appendChild(el('span', '', text)); return s; };
+    rpBox.appendChild(item('is-rp-marker', translate('ukraine.rp.marker')));
+    rpBox.appendChild(el('span', 'oko-ukr-tl-ctl-since', translate('ukraine.rp.places')));
+    rpBox.appendChild(item('is-rp-0', '0'));
+    rpBox.appendChild(item('is-rp-low', '1–9'));
+    rpBox.appendChild(item('is-rp-mid', '10–24'));
+    rpBox.appendChild(item('is-rp-high', '25+'));
+    rpBox.appendChild(item('is-rp-na', translate('ukraine.rp.na')));
+    row3.appendChild(rpBox);
+    // Riadok len keď značky hlásenia naozaj kreslíme.
+    try { report.onChange?.((st) => { rpBox.hidden = !(st?.shown ?? report.isShown?.()); }); } catch { /* */ }
   }
   const legend = el('div', 'oko-ukr-tl-legend');
   legend.setAttribute('role', 'group');
@@ -454,7 +473,7 @@ export function createUkraineTimeline({
     // smerov a letísk by sľubovali niečo, čo mapa nekreslí.
     dsBox?.classList.toggle('is-mirror', st.source === 'mirror');
     dsChip.classList.toggle('active', st.shown);
-    dsChip.title = translate(st.source === 'mirror' ? 'ukraine.ds.note-mirror' : 'ukraine.ds.note');
+    dsChip.title = translate(st.source === 'archive' ? 'ukraine.ds.note' : 'ukraine.ds.note-mirror');
     dsChip.setAttribute('aria-pressed', String(st.shown));
     // Kým DeepState NAOZAJ KRESLÍ, odvodený raster z Wikipédie sa skryje (dve
     // výplne nad sebou by boli neprehľadné); body Wikipédie ostávajú.
@@ -817,6 +836,7 @@ export function createUkraineTimeline({
     isDeepStateAvailable: () => !_deepstateBlocked,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
+    isLegendCollapsed: () => _collapsed,
     _getStateForTest: () => ({ legendBtn, root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, fresh, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
   };
 }

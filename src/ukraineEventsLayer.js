@@ -100,6 +100,7 @@ export const CARD_OBSTACLE_SELECTOR = [
   '#left-panel-stack > .panel-collapsible', '#left-panel-stack > .oko-conflicts-launch',
   '#right-context-rail .panel-collapsible', '.oko-karta-island',
   '#oko-appbar', '#oko-sheet', // mobilný plášť
+  '.oko-scale', // mierka v km (režim mapy)
 ].join(', ');
 /** Obdĺžniky prekážok (okno) → súradnice kontajnera, orezané na výrez; mimo výrezu vypadnú. Pure. */
 export function obstacleBoxes(rects, origin = { left: 0, top: 0 }, viewport = { w: Infinity, h: Infinity }) {

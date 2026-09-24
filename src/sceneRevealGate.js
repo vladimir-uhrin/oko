@@ -46,7 +46,15 @@ export function createSceneRevealGate({
     const camera = viewer?.scene?.camera;
     if (!center || !camera?.positionWC) return;
     let distance;
-    try { distance = Cesium.Cartesian3.distance(camera.positionWC, center); } catch { return; }
+    try {
+      // V 2D a Columbus je positionWC v premietnutom rámci (nie ECEF) — vzdialenosť
+      // počítaj z kartografickej polohy, ktorá platí vo všetkých režimoch.
+      const c = camera.positionCartographic;
+      const pos = c && Number.isFinite(c.longitude) && Number.isFinite(c.latitude)
+        ? Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, Number.isFinite(c.height) ? c.height : 0)
+        : camera.positionWC;
+      distance = Cesium.Cartesian3.distance(pos, center);
+    } catch { return; }
     const next = shouldReveal(distance, revealWithinMeters);
     if (next === revealed) return;
     revealed = next;
