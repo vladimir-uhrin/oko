@@ -23,7 +23,14 @@ import { CONTROL_STALE_DAYS, STALE_DIM, freshnessOf, viewedRefMs } from './data/
 import { currentLanguage, t } from './i18n.js';
 
 export const UKRAINE_CONTROL_ID = 'ukraine-control';
-export const CONTROL_RASTER_SCALE = 4; // px na bunku plátna (372 × 168 buniek → 1 488 × 672 px)
+export const CONTROL_RASTER_SCALE = 8; // px na bunku plátna (372 × 168 buniek → 2 976 × 1 344 px) — tenké pruhy aj zblízka
+/**
+ * Šírka pásu bojov (2026-09-24, vlastník: „stenši pás"): obe strany rovnako ďaleko ±5 km
+ * a sporné sídlo do 4 km. Najužší pás bez prerušení na snímke Wikipédie 24. 9. 2026:
+ * 578 buniek namiesto 845 (7/7 km), 0 priamych RU|UA hrán; pri 4,5 km už 3 diery.
+ */
+export const CONTROL_BAND_KM = 5;
+export const CONTROL_CONTESTED_KM = 4;
 const LIFT_BATCH = 200;
 const HOVER_MS = 90;
 
@@ -77,7 +84,8 @@ export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCAL
     paintFills(og, 1);
     ctx.save();
     ctx.imageSmoothingEnabled = true;
-    if ('filter' in ctx) ctx.filter = `blur(${soft}px)`;
+    // Rozmazanie je v px výstupného plátna — prepočet na 4 px/bunku drží vzhľad KARTY.
+    if ('filter' in ctx) ctx.filter = `blur(${(soft * scale) / 4}px)`;
     ctx.drawImage(off, 0, 0, w, h);
     ctx.restore();
   } else {
@@ -94,8 +102,9 @@ export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCAL
     ctx.fillStyle = `rgba(${hr}, ${hg}, ${hb}, ${hatchAlpha * 0.25})`;
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = `rgba(${hr}, ${hg}, ${hb}, ${hatchAlpha})`;
-    ctx.lineWidth = Math.max(1, scale * 0.35);
-    const step = scale * 2.5;
+    // Tenké pruhy (1/8 bunky ≈ 0,5 km) o čosi hustejšie — pás pôsobí ľahko aj zblízka.
+    ctx.lineWidth = Math.max(1, scale * 0.14);
+    const step = scale * 2;
     ctx.beginPath();
     for (let x = -h; x < w; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x + h, h); }
     ctx.stroke();
@@ -230,7 +239,7 @@ export function createUkraineControlLayer({
         id: { ukraineControl: p },
       });
     }
-    _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX });
+    _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX, bandKm: CONTROL_BAND_KM, contestedKm: CONTROL_CONTESTED_KM });
     const st = CONTROL_STYLES[_style] || CONTROL_STYLES.default;
     const alphas = controlZoneAlphas(st, snapshotFreshness().stale);
     const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, ...alphas, ...(_ruFill ? {} : { ruAlpha: 0 }), createCanvas: () => doc.createElement('canvas') });

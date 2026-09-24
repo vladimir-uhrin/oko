@@ -143,7 +143,7 @@ export const CONTROL_CODE = Object.freeze({ none: 0, ua: 1, ru: 2, contested: 3 
  * od akéhokoľvek bodu = bez údaja. Vzdialenosti v km s kosínusom šírky. Pure.
  * @returns {{width:number,height:number,cellDeg:number,bbox:object,cells:Uint8Array,counts:{ua:number,ru:number,contested:number,none:number}}}
  */
-export function controlRaster(points, { bbox = CONTROL_RASTER_BBOX, cellDeg = 0.05, maxKm = 35, bandKm = 7 } = {}) {
+export function controlRaster(points, { bbox = CONTROL_RASTER_BBOX, cellDeg = 0.05, maxKm = 35, bandKm = 7, contestedKm = bandKm } = {}) {
   const width = Math.max(1, Math.round((bbox.east - bbox.west) / cellDeg));
   const height = Math.max(1, Math.round((bbox.north - bbox.south) / cellDeg));
   const cells = new Uint8Array(width * height);
@@ -172,7 +172,7 @@ export function controlRaster(points, { bbox = CONTROL_RASTER_BBOX, cellDeg = 0.
       const dMin = Math.min(dU, dR, dC);
       let code = CONTROL_CODE.none;
       if (dMin <= maxKm) {
-        if (dC <= bandKm || Math.abs(dU - dR) <= bandKm) code = CONTROL_CODE.contested;
+        if (dC <= contestedKm || Math.abs(dU - dR) <= bandKm) code = CONTROL_CODE.contested;
         else code = dR < dU ? CONTROL_CODE.ru : CONTROL_CODE.ua;
       }
       cells[row * width + col] = code;
