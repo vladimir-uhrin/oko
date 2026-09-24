@@ -173,7 +173,7 @@ test('kontrola 24. 9.: sklad uloží snímku pod jej dňom s requestedAt toho d�
 });
 
 test('záložný mirror lazar-bit: deň, ktorý cyterat nemá, alebo výpadok cyteratu; pôvod súboru prežije reštart', async () => {
-  const { DEEPSTATE_MIRRORS, createDeepStateMirror } = await import('./deepstateAnalyticsProxy.js');
+  const { DEEPSTATE_MIRRORS, createDeepStateMirror } = await import('./deepstateMirror.js');
   const { deepstateMirrorAttribution } = await import('./ukraineDeepState.js');
   assert.deepEqual(DEEPSTATE_MIRRORS.map((m) => m.id), ['cyterat', 'lazar-bit']);
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'oko-ds-fork-'));
@@ -230,8 +230,9 @@ test('trasa vrstvy: deň z forku nesie jeho atribúciu a pôvod', async () => {
 });
 
 test('kontrola 24. 9. (fork): atribúcia aj licencia menujú skutočný mirror; pôvod na disku sa nerozíde so súborom', async () => {
-  const { DEEPSTATE_MIRRORS, deepstateAnalyticsProxy, deepstateAnalyticsAttribution, deepstateMirrorLicense, createDeepStateMirror } = await import('./deepstateAnalyticsProxy.js');
-  assert.match(deepstateAnalyticsAttribution('lazar-bit'), /lazar-bit\/deepstate-map-data-analytics \(fork of cyterat/);
+  const { DEEPSTATE_MIRRORS, deepstateMirrorLicense, createDeepStateMirror } = await import('./deepstateMirror.js');
+  const { deepstateMirrorAttribution } = await import('./ukraineDeepState.js');
+  assert.match(deepstateMirrorAttribution('lazar-bit'), /lazar-bit\/deepstate-map-data-analytics \(fork of cyterat/);
   assert.equal(deepstateMirrorLicense('lazar-bit').mirrorUrl, 'https://github.com/lazar-bit/deepstate-map-data-analytics');
   assert.equal(deepstateMirrorLicense('cyterat').mirrorUrl, 'https://github.com/cyterat/deepstate-map-data');
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'oko-ds-fork-'));
@@ -239,14 +240,9 @@ test('kontrola 24. 9. (fork): atribúcia aj licencia menujú skutočný mirror; 
   let forkOnly = true;
   const fetchImpl = async (url) => (url.includes('lazar-bit') ? ok(MIRROR_FILE) : (forkOnly ? status(404) : ok(MIRROR_FILE)));
   const mirror = createDeepStateMirror({ root, fetchImpl, now: () => NOW, log: () => {}, mirrors: DEEPSTATE_MIRRORS });
-  const plugin = deepstateAnalyticsProxy({ mirror, log: () => {} });
-  const res = { status: 0, headers: null, body: null, writeHead(s, h) { this.status = s; this.headers = h; }, end(b) { this.body = b; } };
-  await plugin._handler({ method: 'GET', url: '/?date=20251126&maxFallback=0', headers: {}, socket: { remoteAddress: '10.0.0.9' } }, res);
-  const body = JSON.parse(res.body.toString('utf8'));
-  assert.equal(body.mirror, 'lazar-bit');
-  assert.match(body.attribution, /lazar-bit/);
-  assert.equal(body.license.mirrorUrl, 'https://github.com/lazar-bit/deepstate-map-data-analytics');
-  assert.match(body.sourceUrl, /lazar-bit/);
+  const got = await mirror.lookup({ requestedDate: '20251126', maxFallback: 0 });
+  assert.equal(got.found.mirror, 'lazar-bit');
+  assert.equal(deepstateMirrorLicense(got.found.mirror).mirrorUrl, 'https://github.com/lazar-bit/deepstate-map-data-analytics');
   const side = path.join(mirror.cacheDir, '20251126.mirror');
   assert.equal((await fsp.readFile(side, 'utf8')).trim(), 'lazar-bit');
   // ten istý deň neskôr od cyteratu (súbor zmazaný z disku) — starý štítok zmizne

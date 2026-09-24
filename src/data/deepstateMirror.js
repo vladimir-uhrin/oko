@@ -1,24 +1,25 @@
-// src/data/deepstateAnalyticsProxy.js
+// src/data/deepstateMirror.js
 /**
- * @module deepstateAnalyticsProxy
- * @description Jadro mirroru DeepState (`createDeepStateMirror`) pre vrstvu
- * DeepState UKRAJINY + Vite plugin `/api/deepstate/analytics` (2026-09-23;
- * samostatné demo, pre ktoré vznikol, vlastník 24. 9. 2026 zmazal — „omyl v prompte").
- * Stiahne denný GeoJSON okupovaného územia z GitHub mirroru
- * cyterat/deepstate-map-data (záloha: jeho fork lazar-bit, ktorý DeepState
- * sťahuje sám), drží ho v pamäti a na disku, pri chýbajúcom dni padne na
- * starší a vráti rozlohu (km²) aj samotnú geometriu.
+ * @module deepstateMirror
+ * @description Jadro GitHub mirrorov DeepState pre vrstvu DeepState modulu
+ * UKRAJINA (`/api/ukraine/events/deepstate` v ukraineEventsProxy.js — verejná
+ * doména a dni mimo nášho archívu z API). Stiahne denný GeoJSON okupovaného
+ * územia z cyterat/deepstate-map-data, pri jeho výpadku alebo chýbajúcom dni
+ * z forku lazar-bit/deepstate-map-data-analytics (vlastný scraper), drží ho
+ * v pamäti a na disku a pri chýbajúcom dni padne na starší.
  *
- * LICENCIA — POCTIVO: GPL-3.0 mirroru sa vzťahuje len na jeho skripty, nie na
+ * História: vzniklo 23. 9. 2026 ako `deepstateAnalyticsProxy.js` (jadro +
+ * endpoint `/api/deepstate/analytics` pre samostatné demo). Demo aj endpoint
+ * vlastník 24. 9. 2026 zmazal („omyl v prompte", „zmaž ak je to potrebné" —
+ * nič ich nepoužívalo); ostalo len jadro. Priečinok cache sa nepremenoval.
+ *
+ * LICENCIA — POCTIVO: GPL-3.0 mirrorov sa vzťahuje len na ich skripty, nie na
  * dáta. Dáta sú © DeepStateMap.live a platí pre ne ich licenčná zmluva
- * (§2 zakazuje šírenie, publikovanie a „proxying" bez súhlasu); mirror
- * súhlas DeepState nedeklaruje (docs/drafts/ukrajina-zdroje-prieskum.md).
- * Používa sa z ROZHODNUTIA VLASTNÍKA: 23. 9. 2026 demo a endpoint ponechal
- * („Nechať — zadal som to ja"), od 24. 9. 2026 mirrory používame a mirror je
- * zdrojom vrstvy DeepState na verejnej doméne
- * (`createDeepStateMirror` zdieľa ukraineEventsProxy). Licenčné fakty to
- * nemení — preto zdroj, licencia a výhrady idú priamo v odpovedi. Endpoint
- * zámerne nemá bránu podľa hostiteľa. Nikdy neoznačovať za otvorené dáta.
+ * (§2 zakazuje šírenie, publikovanie a „proxying" bez súhlasu); mirrory
+ * súhlas DeepState nedeklarujú (docs/drafts/ukrajina-zdroje-prieskum.md).
+ * Mirrory OKO používa z rozhodnutia vlastníka (23.–24. 9. 2026). Licenčné
+ * fakty to nemení — preto zdroj, licencia a výhrady idú priamo v odpovedi
+ * vrstvy. Nikdy neoznačovať za otvorené dáta.
  *
  * Náklady na upstream (pravidlo 4): pamäť 15 min → disk bez TTL (denný súbor
  * sa nemení) → negatívna cache 404 (30 min pre dnešok/včerajšok, 6 h staršie)
@@ -29,11 +30,10 @@
  */
 
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { promises as fsp } from 'node:fs';
 import { polygonAreaKm2 } from './ukraineDeepState.js';
 
-export const DEEPSTATE_ANALYTICS_UPSTREAM_BASE =
+export const DEEPSTATE_CYTERAT_BASE =
   'https://raw.githubusercontent.com/cyterat/deepstate-map-data/main/data';
 /**
  * Mirrory v poradí dôvery. cyterat = pôvodný repozitár; lazar-bit = jeho fork,
@@ -43,18 +43,15 @@ export const DEEPSTATE_ANALYTICS_UPSTREAM_BASE =
  * (GPL-3.0 na skripty, dáta pod licenciou DeepState).
  */
 export const DEEPSTATE_MIRRORS = Object.freeze([
-  Object.freeze({ id: 'cyterat', repo: 'cyterat/deepstate-map-data', base: DEEPSTATE_ANALYTICS_UPSTREAM_BASE }),
+  Object.freeze({ id: 'cyterat', repo: 'cyterat/deepstate-map-data', base: DEEPSTATE_CYTERAT_BASE }),
   Object.freeze({ id: 'lazar-bit', repo: 'lazar-bit/deepstate-map-data-analytics', base: 'https://raw.githubusercontent.com/lazar-bit/deepstate-map-data-analytics/main/data' }),
 ]);
 /** Najstarší súbor v mirrore (prieskum 2026-09-19) — pred ním sa nehľadá. */
 export const MIRROR_FIRST_DAY = '20240708';
 export const DEFAULT_MAX_FALLBACK_DAYS = 7;
-export const MAX_FALLBACK_DAYS = 14;
 
-/** Atribúcia pri čísle (odpoveď a testy); pre fork ju skladá `deepstateAnalyticsAttribution`. */
-export const DEEPSTATE_ANALYTICS_ATTRIBUTION =
-  'Territory under Russian control according to DeepStateMap.live, via the unofficial GitHub mirror cyterat/deepstate-map-data';
-export const DEEPSTATE_ANALYTICS_LICENSE = Object.freeze({
+/** Licenčný blok, ktorý nesie každá snímka z mirroru. */
+export const DEEPSTATE_MIRROR_LICENSE = Object.freeze({
   data: 'DeepStateMap.live licence agreement — not open data; distribution, publication and proxying need DeepState consent',
   dataUrl: 'https://deepstatemap.live/license-en.html',
   mirrorCode: 'GPL-3.0 (applies to the mirror scripts, not to the data)',
@@ -62,40 +59,29 @@ export const DEEPSTATE_ANALYTICS_LICENSE = Object.freeze({
   consent: 'none declared; used by decision of the OKO owner (2026-09-23/24)',
 });
 const mirrorById = (id) => DEEPSTATE_MIRRORS.find((m) => m.id === id) || DEEPSTATE_MIRRORS[0];
-/** Atribúcia podľa mirroru, z ktorého deň naozaj prišiel. Pure. */
-export function deepstateAnalyticsAttribution(mirrorId) {
-  const m = mirrorById(mirrorId);
-  return m.id === 'cyterat' ? DEEPSTATE_ANALYTICS_ATTRIBUTION
-    : `Territory under Russian control according to DeepStateMap.live, via the unofficial GitHub mirror ${m.repo} (fork of cyterat/deepstate-map-data)`;
-}
 /** Licenčný blok s odkazom na skutočný mirror. Pure. */
 export function deepstateMirrorLicense(mirrorId) {
   const m = mirrorById(mirrorId);
-  return m.id === 'cyterat' ? DEEPSTATE_ANALYTICS_LICENSE : { ...DEEPSTATE_ANALYTICS_LICENSE, mirrorUrl: `https://github.com/${m.repo}` };
+  return m.id === 'cyterat' ? DEEPSTATE_MIRROR_LICENSE : { ...DEEPSTATE_MIRROR_LICENSE, mirrorUrl: `https://github.com/${m.repo}` };
 }
-export const DEEPSTATE_ANALYTICS_NOTE =
+/** Výhrady ku každej snímke z mirroru. */
+export const DEEPSTATE_MIRROR_NOTE =
   'Date = day the mirror downloaded the file (scheduled ~03:00 UTC); DeepState itself publishes with a deliberate 2–3 day delay. '
   + 'Includes Crimea and areas occupied since 2014. Not a live front line; not for evacuation or route planning.';
-export const DEEPSTATE_ANALYTICS_AREA_METHOD =
-  'OKO estimate: spherical polygon area, R = 6371.0088 km, holes subtracted — not a DeepState figure';
 
-const CACHE_DIR_NAME = 'deepstate-analytics';
-const DAY_MS = 86_400_000;
+const CACHE_DIR_NAME = 'deepstate-analytics'; // pôvodné meno z 23. 9. — nepremenúvať, cache ostáva
 const MIN = 60_000;
 const MEMORY_TTL_MS = 15 * MIN;
 const MEMORY_MAX = 16;
 const MISSING_TTL_RECENT_MS = 30 * MIN;
 const MISSING_TTL_OLD_MS = 6 * 60 * MIN;
 const MISSING_MAX = 128;
-const LIMITER_MAX_KEYS = 500;
-const USER_AGENT = 'OKO/0.1 (https://github.com/vladouh76; spatial-analytics)';
+const USER_AGENT = 'OKO/0.1 (https://github.com/vladouh76; deepstate-mirror)';
 const UPSTREAM_TIMEOUT_MS = 12_000; // na jeden mirror — dva sa zmestia do rozpočtu 30 s
 const REQUEST_BUDGET_MS = 30_000;
 /** Po chybe mirroru (nie 404) sa na GitHub nechodí aspoň minútu, najviac 15 min (Retry-After). */
 const BACKOFF_MIN_MS = MIN;
 const BACKOFF_MAX_MS = 15 * MIN;
-/** Starší súbor z disku mimo okna fallbacku — najviac mesiac starý. */
-export const STALE_DISK_MAX_DAYS = 30;
 const OUT_OF_BUDGET = Symbol('out-of-budget');
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -116,12 +102,6 @@ export function parseDateKey(key) {
   if (!m) return null;
   const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   return getFormattedDateKey(0, new Date(ms)) === key ? ms : null;
-}
-
-/** Formátuje YYYYMMDD na YYYY-MM-DD. Pure. */
-export function formatDisplayDate(dateKey) {
-  if (!dateKey || typeof dateKey !== 'string' || dateKey.length !== 8) return dateKey;
-  return `${dateKey.slice(0, 4)}-${dateKey.slice(4, 6)}-${dateKey.slice(6, 8)}`;
 }
 
 /** URL upstream súboru na GitHube. Pure. */
@@ -170,36 +150,6 @@ export function isUsableSnapshot(geojson) {
   return calculateGeoJsonAreaKm2(geojson) > 0;
 }
 
-/** Kľúč klienta: za tunelom CF-Connecting-IP, inak socket. */
-export function getClientIp(req) {
-  const cf = req?.headers?.['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.trim()) return cf.trim();
-  return req?.socket?.remoteAddress || 'local';
-}
-
-/** `maxFallback` z dopytu: nečíslo = predvolené, inak 0 … 14. Pure. */
-export function parseMaxFallback(raw) {
-  const n = Number.parseInt(String(raw ?? ''), 10);
-  return Number.isFinite(n) ? Math.min(MAX_FALLBACK_DAYS, Math.max(0, n)) : DEFAULT_MAX_FALLBACK_DAYS;
-}
-
-function simpleLimiter({ windowMs, max, now = Date.now }) {
-  const hits = new Map();
-  return (key) => {
-    const t = now();
-    let arr = hits.get(key);
-    if (!arr) {
-      arr = [];
-      hits.set(key, arr);
-      if (hits.size > LIMITER_MAX_KEYS) hits.delete(hits.keys().next().value);
-    }
-    while (arr.length && t - arr[0] > windowMs) arr.shift();
-    if (arr.length >= max) return false;
-    arr.push(t);
-    return true;
-  };
-}
-
 class UpstreamError extends Error {
   constructor(status, message, retryAfterMs = null) {
     super(message || `Upstream HTTP ${status}`);
@@ -244,7 +194,7 @@ export function dateKeyProblem(key, todayKey) {
 
 /**
  * Jadro mirroru — cache, pauza po chybe, overovanie súborov a hľadanie dňa.
- * Zdieľa ho `/api/deepstate/analytics` aj vrstva DeepState UKRAJINY
+ * Používa ho vrstva DeepState UKRAJINY
  * (`/api/ukraine/events/deepstate` na verejnej doméne a pre dni bez vlastného
  * archívu; mirrory používame z rozhodnutia vlastníka, 24. 9. 2026).
  */
@@ -429,27 +379,11 @@ export function createDeepStateMirror(opts = {}) {
     return { data, source: data ? 'upstream' : null, resolved: true };
   }
 
-  /** Najnovší použiteľný súbor na disku v rozsahu [minKey, maxKey] — keď mirror stojí dlhšie než okno. */
-  async function newestOnDisk(minKey, maxKey) {
-    let names = [];
-    try { names = await fsp.readdir(cacheDir); } catch { return null; }
-    const keys = names
-      .map((n) => /^(\d{8})\.geojson$/.exec(n)?.[1])
-      .filter((k) => k && parseDateKey(k) !== null && k <= maxKey && k >= minKey)
-      .sort()
-      .reverse();
-    for (const key of keys) {
-      const data = await readDisk(key);
-      if (data) return { key, data };
-    }
-    return null;
-  }
-
   /**
    * Nájde snímku: `requestedDate` (YYYYMMDD, už overený) alebo predvolene
    * VČERAJŠOK (kalendárny UTC deň, nie „teraz − 24 h"), potom až `maxFallback`
-   * starších dní. Pri predvolenom dopyte, keď mirror stojí dlhšie než okno,
-   * najnovší súbor z disku najviac 30 dní starý (`outsideWindow`).
+   * starších dní. (Starší súbor z disku mimo okna ponúkal len zmazaný endpoint;
+   * vrstva vždy pýta konkrétny deň a mimo okna dostane poctivé „nie je".)
    */
   async function lookup({ requestedDate = null, maxFallback = DEFAULT_MAX_FALLBACK_DAYS } = {}) {
     const started = now();
@@ -484,19 +418,6 @@ export function createDeepStateMirror(opts = {}) {
       }
     }
 
-    // Mirror stojí dlhšie než okno: najnovší súbor z disku, najviac 30 dní starý —
-    // len pri predvolenom dopyte; výslovný dátum dostane poctivé „nie je".
-    let outsideWindow = false;
-    if (!found && requestedDate === null) {
-      const minKey = getFormattedDateKey(STALE_DISK_MAX_DAYS, new Date(baseMs));
-      const disk = await newestOnDisk(minKey > MIRROR_FIRST_DAY ? minKey : MIRROR_FIRST_DAY, baseKey);
-      if (disk) {
-        found = { key: disk.key, data: disk.data, source: 'disk-stale', mirror: mirrorOf.get(disk.key) || 'cyterat' };
-        fallbackDays = Math.round((baseMs - parseDateKey(disk.key)) / DAY_MS);
-        outsideWindow = true;
-      }
-    }
-
     const upstreamProblem = Boolean(upstreamError) || (backoffActive && unresolvedDays > 0);
     return {
       baseKey,
@@ -504,7 +425,6 @@ export function createDeepStateMirror(opts = {}) {
       fallbackDays,
       checkedDays,
       unresolvedDays,
-      outsideWindow,
       upstreamProblem,
       budgetExhausted,
       // Prečo je súbor starší / prečo nie je: mirror nedostupný (chyba / pauza po
@@ -518,124 +438,4 @@ export function createDeepStateMirror(opts = {}) {
   }
 
   return { lookup, cacheDir, now, mirrors };
-}
-
-/**
- * Vite plugin pre `/api/deepstate/analytics` (len JSON; stránka dema zmazaná 24. 9. 2026).
- * `opts.mirror` = zdieľané jadro; bez neho si plugin vytvorí vlastné.
- */
-export function deepstateAnalyticsProxy(opts = {}) {
-  const mirror = opts.mirror || createDeepStateMirror(opts);
-  const now = opts.now || mirror.now || Date.now;
-  const log = opts.log || console.log;
-  const limiter = simpleLimiter({ windowMs: 60_000, max: 60, now });
-
-  function send(req, res, status, json, extra = {}) {
-    const body = Buffer.from(JSON.stringify(json));
-    const gzip = status === 200 && body.length > 1024 && /\bgzip\b/i.test(String(req?.headers?.['accept-encoding'] || ''));
-    const out = gzip ? zlib.gzipSync(body, { level: 6 }) : body;
-    const headers = {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': status === 200 ? 'public, max-age=300' : 'no-store',
-      'Content-Length': String(out.length),
-      ...extra,
-    };
-    if (gzip) { headers['Content-Encoding'] = 'gzip'; headers.Vary = 'Accept-Encoding'; }
-    res.writeHead(status, headers);
-    res.end(req?.method === 'HEAD' ? undefined : out);
-  }
-
-  async function handler(req, res) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      send(req, res, 405, { ok: false, error: 'method_not_allowed' }, { Allow: 'GET, HEAD' });
-      return;
-    }
-
-    if (!limiter(getClientIp(req))) {
-      send(req, res, 429, { ok: false, error: 'too_many_requests' }, { 'Retry-After': '60' });
-      return;
-    }
-
-    // Connect po odrezaní prefixu podá napr. „//x:99999" — new URL() by hodil
-    // a async handler bez tohto try by zhodil celý dev server (a s ním /api domény).
-    let url;
-    try { url = new URL(req.url || '/', 'http://localhost'); } catch {
-      send(req, res, 400, { ok: false, error: 'bad_url' });
-      return;
-    }
-    const todayKey = getFormattedDateKey(0, new Date(now()));
-    const rawDate = url.searchParams.get('date');
-    const requestedDate = rawDate === null || rawDate === '' ? null : rawDate;
-    if (requestedDate !== null) {
-      const reason = dateKeyProblem(requestedDate, todayKey);
-      if (reason) {
-        send(req, res, 400, { ok: false, error: 'bad_date', reason, requestedDate, firstDay: MIRROR_FIRST_DAY, today: todayKey });
-        return;
-      }
-    }
-    const maxFallback = parseMaxFallback(url.searchParams.get('maxFallback'));
-    const r = await mirror.lookup({ requestedDate, maxFallback });
-
-    if (!r.found) {
-      const who = { requestedDate: requestedDate || 'yesterday', checkedDays: r.checkedDays, unresolvedDays: r.unresolvedDays };
-      if (r.upstreamProblem) {
-        send(req, res, 502, { ok: false, error: 'upstream_unavailable', upstreamStatus: r.upstreamStatus, ...who }, { 'Retry-After': String(r.retryAfterSec) });
-      } else if (r.budgetExhausted) {
-        send(req, res, 503, { ok: false, error: 'upstream_slow', ...who }, { 'Retry-After': '30' });
-      } else {
-        send(req, res, 404, { ok: false, error: 'no_data_available', ...who });
-      }
-      return;
-    }
-
-    const found = r.found;
-    const areaKm2 = calculateGeoJsonAreaKm2(found.data);
-    const payload = {
-      ok: true,
-      date: formatDisplayDate(found.key),
-      dateKey: found.key,
-      requestedDate: requestedDate ? formatDisplayDate(requestedDate) : null,
-      fallbackDays: r.fallbackDays,
-      stale: r.fallbackDays > 0,
-      outsideWindow: r.outsideWindow,
-      upstreamUnavailable: r.upstreamUnavailable,
-      upstreamStatus: r.upstreamUnavailable ? r.upstreamStatus : null,
-      areaKm2,
-      formattedArea: Math.round(areaKm2).toLocaleString('en-US') + ' km²',
-      areaMethod: DEEPSTATE_ANALYTICS_AREA_METHOD,
-      featuresCount: Array.isArray(found.data.features) ? found.data.features.length : 1,
-      sourceUrl: deepstateRawUrl(found.key, DEEPSTATE_MIRRORS.find((m) => m.id === found.mirror) || DEEPSTATE_MIRRORS[0]),
-      mirror: found.mirror,
-      attribution: deepstateAnalyticsAttribution(found.mirror),
-      license: deepstateMirrorLicense(found.mirror),
-      note: DEEPSTATE_ANALYTICS_NOTE,
-      geojson: found.data,
-    };
-    send(req, res, 200, payload, { 'X-OKO-Source': found.source });
-  }
-
-  /** Middleware: žiadna výnimka z handlera nesmie ostať neodchytená (zhodila by server). */
-  function middleware(req, res) {
-    return handler(req, res).catch((error) => {
-      log(`[deepstate-analytics] interná chyba: ${error?.stack || error}`);
-      try {
-        if (!res.headersSent) send(req, res, 500, { ok: false, error: 'internal' });
-        else res.end();
-      } catch { /* odpoveď už je preč */ }
-    });
-  }
-
-  return {
-    name: 'deepstate-analytics-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/deepstate/analytics', middleware);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use('/api/deepstate/analytics', middleware);
-    },
-    _handler: middleware,
-    _dir: mirror.cacheDir,
-    _mirror: mirror,
-    _calculateArea: calculateGeoJsonAreaKm2,
-  };
 }
