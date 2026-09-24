@@ -80,7 +80,9 @@ const clientKey = (req) => {
  * to otvorí, keď súhlas príde; `=off` vypne aj lokálne. Chýbajúca hlavička =
  * radšej nie. Týka sa NÁŠHO archívu z API DeepState; verejná doména od 24. 9.
  * 2026 dostáva namiesto neho snímku z mirroru cyterat (rozhodnutie vlastníka —
- * mirrory používame; `UKRAINE_DEEPSTATE_MIRROR=off` vráti 451). Pure.
+ * mirrory používame; `UKRAINE_DEEPSTATE_MIRROR=off` vráti 451). Od 24. 9. 2026
+ * („len mirrory") trasa archív bez súhlasu nečíta ani na localhoste — pravidlo
+ * hostiteľa ostáva pre prípad, že by súhlas prišiel len pre domáce použitie. Pure.
  * @param {unknown} host hlavička Host (môže niesť port)
  * @param {{consent?: boolean}} [o]
  * @returns {boolean}
@@ -173,10 +175,11 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
     },
     // Vojnové požiare (Economist): 70 MB CSV, ETag → 304 keď sa nič nezmenilo.
     async fires() { return firesRefresh(root, { fetchImpl, now: now(), log }); },
-    // DeepStateMap.live: posledná snímka raz za hodinu (nekomerčné hobby použitie,
-    // súhlas sa žiada; `UKRAINE_DEEPSTATE=off` vypne); história = naše denné súbory.
+    // DeepStateMap.live API: LEN so súhlasom (`UKRAINE_DEEPSTATE=consent`). Na žiadosť
+    // z 19. 9. 2026 do termínu neprišla odpoveď = zamietnuté (pravidlo plánu);
+    // vlastník 24. 9. 2026: „len mirrory" — bez súhlasu sa z API nesťahuje nič.
     async deepstate() {
-      if (deepstateOff) return { status: 'disabled' };
+      if (!deepstateConsent) return { status: 'disabled', reason: 'mirror-only' };
       const r = await deepstateSnapshot(root, { fetchImpl, now: now(), log });
       if (r.status === 'updated') deepstateCache.clear();
       return r;
@@ -261,11 +264,10 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
       return;
     }
     if (sub === '/deepstate') {
-      // Náš archív z API DeepState: licencia §2 zakazuje „distribution,
-      // publication, proxying" bez súhlasu (žiadosť odoslaná 19. 9. 2026) —
-      // preto len lokálne. Verejná doména dostáva od 24. 9. 2026 snímku
-      // z mirroru cyterat (rozhodnutie vlastníka); mirror vypnutý = 451 ako predtým.
-      const archiveAllowed = deepstateAllowedForHost(req.headers?.host, { consent: deepstateConsent });
+      // Len mirrory (vlastník 24. 9. 2026, „len mirrory"): náš archív z API
+      // DeepState sa číta len so súhlasom (`UKRAINE_DEEPSTATE=consent`), inak má
+      // KAŽDÝ hostiteľ vrátane localhostu snímku z GitHub mirroru; mirror vypnutý = 451.
+      const archiveAllowed = deepstateConsent;
       if (!archiveAllowed && !mirrorOn) {
         send(res, 451, { error: 'deepstate_consent_pending' }, req);
         return;

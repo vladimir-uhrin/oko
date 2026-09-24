@@ -13,12 +13,16 @@
 //    MINI ČIPY (glyf + miesto) k najzávažnejším udalostiam v zábere, pod 150 km
 //    KARTY (najviac 8, výber pickCards) + čipy k ďalším; vybraná udalosť (klik
 //    na bod alebo čip) má kartu vždy;
-//  - karta: lem závažnosti, čipy typ + čas, predmet (miesto), stavový riadok,
-//    fotka/video (náhľad cez /api/img, video/fotky sa otvárajú v lightboxe —
-//    YouTube nocookie prehrávač, oficiálny Telegram embed, ArmyInform mp4 priamo),
-//    pätička zdroj · úroveň overenia · odkaz von; MT preklad označený;
+//  - karta (2026-09-24 zmenšená, používateľ: „nemusia byť také veľké“): predvolene
+//    MALÁ — glyf typu, miesto, čas, dva riadky textu; PLNÁ až po výbere (klik na
+//    bod/kartu): čipy typ + čas, úroveň overenia, text, MT označenie, fotka/video
+//    (náhľad cez /api/img, lightbox — YouTube nocookie, Telegram embed, ArmyInform
+//    mp4), pätička zdroj · odkaz von. Bez náhľadu nikdy prázdny rámček: video či
+//    fotky bez obrázka = odkaz v pätičke, čisto textový príspevok nemá médium;
 //  - rozmiestnenie: 8 kandidátov okolo kotvy (hore, dole, vpravo, vľavo, 4 rohy)
-//    bez prekrytia už položených kariet, vodiaca čiara ku kotve, orez za obzorom.
+//    bez prekrytia kariet ANI panelov (os, dok, ľavý a pravý pruh — sú nad
+//    vrstvou kariet); karta bez voľného miesta sa neukáže (bod ostane, klik ju
+//    otvorí), vybraná vždy; značky kotiev pod kartami; vodiaca čiara, orez za obzorom.
 //
 // Etická čiara: udalosti a infraštruktúra, nikdy osoby — žiadne mená, jednotky
 // ani polohy ukrajinských síl; počty obetí len ako „hlásené". Vrstva NIE JE
@@ -41,7 +45,7 @@ export const TYPE_GLYPH = Object.freeze({
 export const HOTSPOT_COLOR = '#ff8a3d';
 export const LOD_CLUSTER_ABOVE_M = 600_000;
 export const LOD_CHIPS_ABOVE_M = 150_000;
-export const MAX_CARDS = 8;
+export const MAX_CARDS = 6;
 export const MAX_CHIPS = 24;
 const ANCHOR_GAP_PX = 16;
 const LIFT_BATCH = 200;
@@ -84,6 +88,90 @@ export function placeBox(anchor, size, placed, viewport, gap = ANCHOR_GAP_PX) {
   }
   const c = candidates[0];
   return { x: Math.max(6, Math.min(c.x, viewport.w - w - 6)), y: Math.max(6, Math.min(c.y, viewport.h - h - 6)), w, h, free: false };
+}
+
+/**
+ * Panely nad vrstvou kariet (z-index > 58), ktoré karta nesmie zakryť — inak
+ * by bola pod nimi schovaná: časová os, dok, ľavý a pravý pruh, horná lišta a
+ * ostrovy rámu KARTY (titulok, legenda, prehľadová mapka, nástroje).
+ */
+export const CARD_OBSTACLE_SELECTOR = [
+  '.oko-ukr-timeline', '#command-dock', '#title-bar', '#top-center-actions',
+  '#left-panel-stack > .panel-collapsible', '#left-panel-stack > .oko-conflicts-launch',
+  '#right-context-rail .panel-collapsible', '.oko-karta-island',
+  '#oko-appbar', '#oko-sheet', // mobilný plášť
+].join(', ');
+/** Obdĺžniky prekážok (okno) → súradnice kontajnera, orezané na výrez; mimo výrezu vypadnú. Pure. */
+export function obstacleBoxes(rects, origin = { left: 0, top: 0 }, viewport = { w: Infinity, h: Infinity }) {
+  const out = [];
+  for (const r of rects || []) {
+    if (!r || !(r.width > 0) || !(r.height > 0)) continue;
+    const x0 = Math.max(0, r.left - origin.left); const y0 = Math.max(0, r.top - origin.top);
+    const x1 = Math.min(viewport.w, r.left - origin.left + r.width); const y1 = Math.min(viewport.h, r.top - origin.top + r.height);
+    if (x1 <= x0 || y1 <= y0) continue;
+    out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, obstacle: true });
+  }
+  return out;
+}
+const insideBox = (p, b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+/**
+ * Posunie obdĺžnik na najbližšie miesto mimo všetkých prekážok (v okne); inak ho
+ * nechá. Kandidáti sú krížový súčin okrajov prekážok v OBOCH osiach — pri paneli
+ * vľavo a osi dole je voľné miesto „vpravo od panela A nad osou". Pure.
+ */
+export function clearOfObstacles(box, obstacles, viewport, pad = 6) {
+  const hits = obstacles.filter((o) => overlaps(box, o, 0));
+  if (!hits.length) return box;
+  const xs = [box.x]; const ys = [box.y];
+  for (const o of obstacles) { xs.push(o.x + o.w + pad, o.x - box.w - pad); ys.push(o.y + o.h + pad, o.y - box.h - pad); }
+  const cands = [];
+  for (const x of xs) for (const y of ys) cands.push({ ...box, x, y });
+  const inside = (c) => c.x >= 6 && c.y >= 6 && c.x + c.w <= viewport.w - 6 && c.y + c.h <= viewport.h - 6;
+  cands.sort((a, b) => (Math.abs(a.x - box.x) + Math.abs(a.y - box.y)) - (Math.abs(b.x - box.x) + Math.abs(b.y - box.y)));
+  return cands.find((c) => inside(c) && !obstacles.some((o) => overlaps(c, o, 0))) || box;
+}
+/**
+ * Rozmiestnenie kariet a čipov (poradie = priorita): prekážky sú od začiatku
+ * „položené", takže ich karta obíde; kotva pod panelom alebo karta bez voľného
+ * miesta = skryť (okrem vybranej, tá sa ukáže vždy). Pure.
+ * @param {Array<{id:string, x:number, y:number, w:number, h:number, gap?:number, selected?:boolean}>} items
+ * @returns {Map<string, {x:number,y:number,w:number,h:number,free:boolean}|null>}
+ */
+export function layoutCards(items, { viewport, obstacles = [] } = {}) {
+  const placed = obstacles.map((o) => ({ ...o }));
+  const out = new Map();
+  for (const it of items || []) {
+    if (!it.selected && obstacles.some((o) => insideBox(it, o))) { out.set(it.id, null); continue; }
+    const gap = it.gap ?? ANCHOR_GAP_PX;
+    let box = placeBox({ x: it.x, y: it.y }, { w: it.w, h: it.h }, placed, viewport, gap);
+    if (!box.free && !it.selected) { out.set(it.id, null); continue; }
+    // Vybraná (ide prvá, `placed` = len prekážky): radšej kdekoľvek mimo panelov než pod nimi.
+    if (!box.free) box = clearOfObstacles(box, obstacles, viewport);
+    placed.push(box);
+    out.set(it.id, box);
+  }
+  return out;
+}
+/** Tvar slova pre počet (sk: 1 / 2–4 / 5+; en: 1 / viac). Pure. */
+export function pluralForm(n, lang = 'sk') {
+  const k = Math.abs(Math.trunc(Number(n) || 0));
+  if (k === 1) return 'one';
+  if (lang === 'sk' && k >= 2 && k <= 4) return 'few';
+  return 'many';
+}
+/** Krátky čas do malej karty: dnešok (UTC) = „HH:MM UTC", inak „D.M." — pásmo nahlas, nie miestny čas. Pure. */
+export function compactTimeText(ev, nowMs) {
+  const d = new Date(ev?.t);
+  if (Number.isNaN(d.getTime())) return '';
+  const date = `${d.getUTCDate()}.${d.getUTCMonth() + 1}.`;
+  if (ev.dayOnly) return date;
+  const today = new Date(nowMs);
+  const same = d.getUTCFullYear() === today.getUTCFullYear() && d.getUTCMonth() === today.getUTCMonth() && d.getUTCDate() === today.getUTCDate();
+  return same ? `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC` : date;
+}
+/** Médiá, ktoré sa dajú ukázať (video/fotky); čisto textový príspevok nie je médium. Pure. */
+export function showableMedia(media) {
+  return (Array.isArray(media) ? media : []).filter((m) => m && m.kind !== 'text' && (m.kind === 'video' || m.kind === 'photo' || m.thumb || m.embed || m.videoUrl || m.photos?.length));
 }
 
 /** Úroveň priblíženia podľa výšky kamery (m). Pure. */
@@ -291,7 +379,10 @@ export function createUkraineEventsLayer({
     const clusters = _shown && _revealed && _lod === 'cluster';
     if (clusters) rebuildClusters();
     clusterPoints.show = clusters; clusterLabels.show = clusters;
-    _dirty = false;
+    // Výber kariet sa zmenil (nové, výber, iná veľkosť) → rozmiestniť pri
+    // najbližšom snímku aj bez pohybu kamery. Predtým sa tu príznak nuloval a
+    // vybraná (väčšia) karta aj nové karty ostali na starom mieste / v rohu.
+    _dirty = true;
     requestRender();
     emit();
   }
@@ -299,32 +390,56 @@ export function createUkraineEventsLayer({
   function removeCard(c) {
     try { c.el.remove(); c.pin.remove(); c.line?.remove(); } catch { /* */ }
   }
+  /** Karta zmenila veľkosť alebo okolie (obrázok, preklad, panel) → rozmiestniť pri ďalšom snímku. */
+  function markLayoutDirty() {
+    _dirty = true;
+    requestRender();
+  }
   function el(tag, className, text) { const n = doc.createElement(tag); if (className) n.className = className; if (text != null) n.textContent = text; return n; }
 
-  function mediaThumb(ev, model) {
-    const media = model.media || [];
+  /** Otvorí médiá udalosti (lightbox) alebo zdroj, keď médium nie je. */
+  function openEventMedia(ev, model, media) {
+    const first = media[0] || null;
+    if (first) openMedia(first, { title: model.title, list: media, ev });
+    else if (model.url) { try { globalThis.open?.(model.url, '_blank', 'noopener'); } catch { /* */ } }
+  }
+  /** „N fotiek" v správnom tvare (1 fotka, 2–4 fotky, 5+ fotiek). */
+  function photosText(n) {
+    const k = Math.max(1, n);
+    return translate(`ukraine.card.photos.${pluralForm(k, lang)}`, { n: k });
+  }
+  /** Text odkazu na médiá bez náhľadu: „▶ video" / „▣ N fotiek". */
+  function mediaLinkText(media) {
+    const first = media[0];
+    if (first?.kind === 'video') return `▶ ${translate('ukraine.card.video')}`;
+    const n = media.reduce((a, m) => a + (m.photos?.length || 1), 0);
+    return `▣ ${photosText(n)}`;
+  }
+  /**
+   * Náhľad len so skutočným obrázkom; bez neho (alebo keď sa nenačíta) nikdy
+   * prázdny rámček — `onNoImage` pridá odkaz do pätičky.
+   */
+  function mediaThumb(ev, model, media, onNoImage) {
     const first = media[0] || null;
     const src = model.image || first?.thumb || null;
-    if (!src && !first) return null;
-    const box = el('button', 'oko-ukr-card-media');
+    if (!src) { if (first) onNoImage({ failed: false }); return null; }
+    const box = el('button', 'oko-ukr-card-media is-loading');
     box.type = 'button';
-    if (src) {
-      const img = doc.createElement('img');
-      img.alt = ''; img.decoding = 'async'; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
-      img.src = `${IMG_API}?url=${encodeURIComponent(src)}`;
-      img.addEventListener('error', () => { img.remove(); box.classList.add('is-noimg'); });
-      box.appendChild(img);
-    } else box.classList.add('is-noimg');
     const isVideo = first?.kind === 'video';
+    // Kým obrázok nepríde, znak typu média — nie prázdny tmavý rámček.
+    if (!isVideo) box.appendChild(el('span', 'oko-ukr-card-media-wait', '▣'));
+    const img = doc.createElement('img');
+    // eager: načíta sa už pri malej karte (rámček je skrytý), po rozbalení je hotový.
+    img.alt = ''; img.decoding = 'async'; img.loading = 'eager'; img.referrerPolicy = 'no-referrer';
+    img.addEventListener('load', () => { box.classList.remove('is-loading'); });
+    img.addEventListener('error', () => { box.remove(); onNoImage({ failed: true }); markLayoutDirty(); });
+    img.src = `${IMG_API}?url=${encodeURIComponent(src)}`;
+    box.appendChild(img);
     if (isVideo) box.appendChild(el('span', 'oko-ukr-play', '▶'));
     const n = media.length + (model.image && !first ? 1 : 0);
     if (n > 1) box.appendChild(el('span', 'oko-ukr-media-count', `+${n - 1}`));
-    box.title = isVideo ? translate('ukraine.card.video') : translate('ukraine.card.photos', { n: Math.max(1, n) });
-    box.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      if (first) openMedia(first, { title: model.title, list: media, ev });
-      else if (model.url) { try { globalThis.open?.(model.url, '_blank', 'noopener'); } catch { /* */ } }
-    });
+    box.title = isVideo ? translate('ukraine.card.video') : photosText(n);
+    box.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openEventMedia(ev, model, media); });
     return box;
   }
 
@@ -333,6 +448,8 @@ export function createUkraineEventsLayer({
     const accent = SEV_COLOR[ev.severity] || SEV_COLOR.minor;
     const pin = el('span', `oko-ukr-pin sev-${ev.severity}`);
     pin.style.setProperty('--ukr-accent', accent);
+    // Skryté až do prvého rozmiestnenia — inak nová karta blikne v ľavom hornom rohu.
+    pin.style.visibility = 'hidden';
     layer.appendChild(pin);
     let node; let line = null;
     if (kind === 'chip') {
@@ -341,7 +458,8 @@ export function createUkraineEventsLayer({
       node.style.setProperty('--ukr-accent', accent);
       node.appendChild(el('span', 'oko-ukr-glyph', TYPE_GLYPH[ev.type] || TYPE_GLYPH.other));
       node.appendChild(el('span', 'oko-ukr-minichip-text', model.title));
-      if (ev.media?.length) node.appendChild(el('span', 'oko-ukr-minichip-media', ev.media[0].kind === 'video' ? '▶' : '▣'));
+      const chipMedia = showableMedia(ev.media);
+      if (chipMedia.length) node.appendChild(el('span', 'oko-ukr-minichip-media', chipMedia[0].kind === 'video' ? '▶' : '▣'));
       const extra = el('span', 'oko-ukr-minichip-extra', '');
       extra.hidden = true;
       node.appendChild(extra);
@@ -350,6 +468,7 @@ export function createUkraineEventsLayer({
     } else {
       line = el('span', 'oko-ukr-line');
       line.style.setProperty('--ukr-accent', accent);
+      line.style.visibility = 'hidden';
       layer.appendChild(line);
       node = el('article', `oko-ukr-card sev-${ev.severity}${ev.id === _selectedId ? ' is-selected' : ''}`);
       node.style.setProperty('--ukr-accent', accent);
@@ -362,24 +481,70 @@ export function createUkraineEventsLayer({
       close.addEventListener('click', (e) => { e.stopPropagation(); if (_selectedId === ev.id) select(null); else { removeCard(_cards.get(ev.id)); _cards.delete(ev.id); } });
       head.appendChild(close);
       node.appendChild(head);
-      node.appendChild(el('div', 'oko-ukr-card-subject', model.title + (model.approx ? ` · ${translate('ukraine.card.approx')}` : '')));
+      // Predmet: v malej karte glyf + „≈" + miesto + čas + ikona média; v plnej miesto a „približná poloha".
+      const media = showableMedia(model.media);
+      const subject = el('div', 'oko-ukr-card-subject');
+      subject.appendChild(el('span', 'oko-ukr-card-glyph', TYPE_GLYPH[ev.type] || TYPE_GLYPH.other));
+      if (model.approx) { const m = el('span', 'oko-ukr-card-approxmark', '≈'); m.title = translate('ukraine.card.approx'); subject.appendChild(m); }
+      const titleEl = el('span', 'oko-ukr-card-title', model.title);
+      titleEl.title = model.approx ? `${model.title} · ${translate('ukraine.card.approx')}` : model.title;
+      subject.appendChild(titleEl);
+      if (model.approx) subject.appendChild(el('span', 'oko-ukr-card-approx', ` · ${translate('ukraine.card.approx')}`));
+      const flag = (media.length || model.image) ? el('span', 'oko-ukr-card-mediaflag', media[0]?.kind === 'video' ? '▶' : '▣') : null;
+      if (flag) subject.appendChild(flag);
+      const when = el('span', 'oko-ukr-card-when', compactTimeText(ev, now()));
+      when.title = model.timeText;
+      subject.appendChild(when);
+      node.appendChild(subject);
+      node.title = `${model.typeText} · ${model.timeText}`;
       const status = el('div', 'oko-ukr-card-status', model.status || '');
       node.appendChild(status);
+      // Malá karta: úroveň overenia (a strojový preklad) vždy viditeľne — poctivé označenie.
+      // „Strojový preklad" ide PRED úroveň a neskracuje sa (skracuje sa len úroveň).
+      const meta = el('div', `oko-ukr-card-meta is-${ev.level}`);
+      const metaMt = el('span', 'oko-ukr-card-meta-mt', `${translate('ukraine.card.mt')} ·`);
+      metaMt.hidden = true;
+      const metaLevel = el('span', 'oko-ukr-card-meta-level', model.levelText);
+      meta.appendChild(metaMt);
+      meta.appendChild(metaLevel);
+      meta.title = model.levelText;
+      node.appendChild(meta);
       const mt = el('div', 'oko-ukr-card-mt', translate('ukraine.card.mt'));
       mt.hidden = true;
+      node.appendChild(mt);
       // Strojový preklad stavového riadku (EN správy / UK médiá) do jazyka UI, označený.
       const srcLang = ev.src === 'media' && ev.media?.[0]?.provider !== 'youtube' ? 'uk' : (ev.src === 'news' || ev.src === 'media' ? 'en' : null);
       if (model.status && srcLang && lang && lang !== srcLang && typeof translateTextImpl === 'function') {
         void Promise.resolve(translateTextImpl(model.status, lang, srcLang === 'uk' ? { from: 'uk' } : undefined))
-          .then((tr) => { if (tr && tr.trim() && tr !== model.status && !_destroyed) { status.textContent = tr; status.title = model.status; mt.hidden = false; } })
+          .then((tr) => {
+            if (!tr || !tr.trim() || tr === model.status || _destroyed) return;
+            status.textContent = tr; status.title = model.status; mt.hidden = false;
+            metaMt.hidden = false;
+            meta.title = `${translate('ukraine.card.mt')} · ${model.levelText}`;
+            markLayoutDirty();
+          })
           .catch(() => {});
       }
-      const thumb = mediaThumb(ev, model);
-      if (thumb) node.appendChild(thumb);
-      node.appendChild(mt);
       const foot = el('footer', 'oko-ukr-card-foot');
       const srcText = [model.sourceText, ev.sources?.length > 1 ? `+${ev.sources.length - 1}` : null].filter(Boolean).join(' ');
       foot.appendChild(el('span', 'oko-ukr-card-src', srcText));
+      let mediaLink = null;
+      const addMediaLink = ({ failed = false } = {}) => {
+        if (failed && !media.length) { flag?.remove(); return; } // len og:image, ktorý nie je → nič neponúkať
+        if (mediaLink || !media.length) return;
+        const first = media[0];
+        // Fotka, ktorej náhľad zlyhal, by v lightboxe zlyhala znova → otvor príspevok.
+        const openPost = failed && first.kind !== 'video' && (first.url || model.url);
+        mediaLink = el('button', 'oko-ukr-card-medialink', `${mediaLinkText(media)}${openPost ? ' ↗' : ''}`);
+        mediaLink.type = 'button';
+        mediaLink.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation();
+          if (openPost) { try { globalThis.open?.(openPost, '_blank', 'noopener'); } catch { /* */ } } else openEventMedia(ev, model, media);
+        });
+        foot.insertBefore(mediaLink, foot.children[1] || null);
+      };
+      const thumb = mediaThumb(ev, model, media, addMediaLink);
+      if (thumb) node.appendChild(thumb);
       if (model.url) {
         const a = el('a', 'oko-ukr-card-link', `${translate('ukraine.card.source')} ↗`);
         a.href = model.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
@@ -388,7 +553,9 @@ export function createUkraineEventsLayer({
       node.appendChild(foot);
       node.addEventListener('click', () => { if (_selectedId !== ev.id) select(ev.id); });
     }
+    node.style.visibility = 'hidden';
     layer.appendChild(node);
+    _dirty = true;
     const record = { model, ev, el: node, pin, line, kind, cartesian: posFor(ev) };
     if (kind === 'chip') updateChipExtra(record);
     return record;
@@ -419,6 +586,7 @@ export function createUkraineEventsLayer({
     const vw = viewer.container.clientWidth || view?.innerWidth || 0;
     const vh = viewer.container.clientHeight || view?.innerHeight || 0;
     const viewport = { w: vw, h: vh };
+    const obstacles = currentObstacles(viewport);
     const visible = [];
     for (const c of _cards.values()) {
       let ok = true;
@@ -433,12 +601,15 @@ export function createUkraineEventsLayer({
     }
     // Karty najprv (väčšie, dôležitejšie), potom čipy; vybraná karta úplne prvá.
     visible.sort((a, b) => (Number(b.c.ev.id === _selectedId) - Number(a.c.ev.id === _selectedId)) || (Number(b.c.kind === 'card') - Number(a.c.kind === 'card')) || rank(a.c.ev, b.c.ev));
-    const placed = [];
+    const boxes = layoutCards(visible.map((p) => ({
+      id: p.c.ev.id, x: p.x, y: p.y,
+      w: p.c.el.offsetWidth || (p.c.kind === 'card' ? 204 : 120), h: p.c.el.offsetHeight || (p.c.kind === 'card' ? 52 : 22),
+      gap: p.c.kind === 'card' ? ANCHOR_GAP_PX : 8, selected: p.c.ev.id === _selectedId,
+    })), { viewport, obstacles });
     for (const p of visible) {
-      const size = { w: p.c.el.offsetWidth || (p.c.kind === 'card' ? 264 : 120), h: p.c.el.offsetHeight || (p.c.kind === 'card' ? 120 : 22) };
-      const box = placeBox({ x: p.x, y: p.y }, size, placed, viewport, p.c.kind === 'card' ? ANCHOR_GAP_PX : 8);
-      if (!box.free && p.c.kind === 'chip') { p.c.el.style.visibility = 'hidden'; p.c.pin.style.visibility = 'hidden'; continue; } // čip bez miesta = radšej nič
-      placed.push(box);
+      const box = boxes.get(p.c.ev.id);
+      // Bez voľného miesta (alebo kotva pod panelom) radšej nič; bod ostane a klik kartu otvorí.
+      if (!box) { p.c.el.style.visibility = 'hidden'; if (p.c.line) p.c.line.style.visibility = 'hidden'; p.c.pin.style.visibility = p.c.kind === 'card' ? 'visible' : 'hidden'; if (p.c.kind === 'card') { const half = 6; p.c.pin.style.transform = `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)`; } continue; }
       const half = (p.c.kind === 'card' ? 6 : 4);
       p.c.pin.style.visibility = 'visible';
       p.c.pin.style.transform = `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)`;
@@ -454,6 +625,41 @@ export function createUkraineEventsLayer({
         p.c.line.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) rotate(${(Math.atan2(dy, dx) * 180 / Math.PI).toFixed(1)}deg)`;
       }
     }
+  }
+
+  /**
+   * Je prvok naozaj na obrazovke? Čistý pohľad (V) a skryté panely majú
+   * `visibility: hidden` / `opacity: 0`, ale obdĺžnik si nechajú (vzor isVisible
+   * v splitFlap.js).
+   */
+  function elementShown(n) {
+    try {
+      if (typeof n.checkVisibility === 'function') return n.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+      const view = doc.defaultView;
+      for (let e = n; e && e.nodeType === 1; e = e.parentElement) {
+        const cs = view?.getComputedStyle?.(e);
+        if (!cs) break;
+        if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false;
+      }
+    } catch { /* */ }
+    return true;
+  }
+  /** Prekážky (panely nad kartami) v súradniciach kontajnera; merané najviac raz za 400 ms. */
+  let _obstacleCache = { at: -Infinity, key: '', boxes: [] };
+  function currentObstacles(viewport) {
+    const t = now();
+    const key = `${viewport.w}x${viewport.h}`;
+    if (t - _obstacleCache.at < 400 && _obstacleCache.key === key) return _obstacleCache.boxes;
+    let rects = [];
+    try {
+      rects = [...doc.querySelectorAll(CARD_OBSTACLE_SELECTOR)]
+        .filter((n) => !n.closest?.('[hidden]') && !viewer.container.contains?.(n) && elementShown(n))
+        .map((n) => n.getBoundingClientRect());
+    } catch { rects = []; }
+    let origin = { left: 0, top: 0 };
+    try { const r = viewer.container.getBoundingClientRect(); origin = { left: r.left, top: r.top }; } catch { /* */ }
+    _obstacleCache = { at: t, key, boxes: obstacleBoxes(rects, origin, viewport) };
+    return _obstacleCache.boxes;
   }
 
   // ── lightbox ─────────────────────────────────────────────────────────────
@@ -490,6 +696,12 @@ export function createUkraineEventsLayer({
     } else if (media.provider === 'telegram' && media.kind === 'photo' && Array.isArray(media.photos) && media.photos.length) {
       let idx = 0;
       const img = doc.createElement('img'); img.alt = ''; img.decoding = 'async';
+      img.addEventListener('error', () => {
+        // Galéria bez fotky nemá čo listovať — šípky a počítadlo preč.
+        for (const n of [...(body.children || [])]) if (n !== img) n.remove?.();
+        if (media.embed) { const f = doc.createElement('iframe'); f.src = media.embed; f.title = media.title || 'Telegram'; f.referrerPolicy = 'strict-origin-when-cross-origin'; img.replaceWith?.(f); }
+        else if (media.url) { const a = el('a', 'oko-ukr-lb-link', `${translate('ukraine.media.open')} ↗`); a.href = media.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; img.replaceWith?.(a); }
+      });
       const showPhoto = () => { img.src = `${IMG_API}?url=${encodeURIComponent(media.photos[idx])}`; counter.textContent = `${idx + 1} / ${media.photos.length}`; };
       const counter = el('span', 'oko-ukr-lb-counter');
       body.appendChild(img);
@@ -630,6 +842,17 @@ export function createUkraineEventsLayer({
   };
   try { viewer.camera.moveEnd.addEventListener(onMoveEnd); } catch { /* */ }
   try { viewer.camera.changed.addEventListener(onMoveEnd); } catch { /* */ }
+  // Panely sa rozbaľujú/zbaľujú klikom a klávesmi (čistý pohľad V), okno mení
+  // veľkosť — kamera pritom stojí, takže bez tohto by karty ostali pod panelom
+  // alebo skryté. Po doznení prechodu (350 ms) nové meranie prekážok.
+  let uiTimer = null;
+  const onUiChange = () => {
+    if (!_shown) return;
+    if (uiTimer) clearTimeout(uiTimer);
+    uiTimer = setTimeout(() => { uiTimer = null; if (_destroyed) return; _obstacleCache.at = -Infinity; markLayoutDirty(); }, 350);
+  };
+  const UI_EVENTS = ['click', 'keyup', 'pointerup', 'touchend'];
+  try { for (const t of UI_EVENTS) doc.addEventListener(t, onUiChange, { capture: true, passive: true }); doc.defaultView?.addEventListener?.('resize', onUiChange); } catch { /* */ }
   const postRender = scene.postRender;
   let removePostRender = null;
   if (postRender?.addEventListener) { postRender.addEventListener(place); removePostRender = () => postRender.removeEventListener(place); }
@@ -644,6 +867,8 @@ export function createUkraineEventsLayer({
     if (handler) { try { handler.destroy(); } catch { /* */ } handler = null; }
     if (hoverTimer) clearTimeout(hoverTimer);
     doc.removeEventListener('keydown', onKey);
+    try { for (const t of UI_EVENTS) doc.removeEventListener(t, onUiChange, { capture: true }); doc.defaultView?.removeEventListener?.('resize', onUiChange); } catch { /* */ }
+    if (uiTimer) clearTimeout(uiTimer);
     for (const c of _cards.values()) removeCard(c);
     _cards.clear();
     try { scene.primitives.remove(points); scene.primitives.remove(clusterPoints); scene.primitives.remove(clusterLabels); } catch { /* */ }

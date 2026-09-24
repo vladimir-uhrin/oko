@@ -11631,22 +11631,36 @@ body.oko-mobile #oko-share {
   background: var(--ukr-accent, #39d0ff); box-shadow: 0 0 0 2px rgba(11, 22, 34, 0.85), 0 0 10px var(--ukr-accent, #39d0ff);
   pointer-events: none; will-change: transform; z-index: 1;
 }
+/* Poradie vrstiev: značky a čiary < čipy < karty < karta pod myšou < vybraná
+   (2026-09-24: značky iných udalostí sa kreslili CEZ karty). */
 .oko-ukr-pin.sev-minor { width: 8px; height: 8px; }
 .oko-ukr-pin.sev-major { width: 10px; height: 10px; }
 .oko-ukr-line {
-  position: absolute; top: 0; left: 0; height: 1.5px; transform-origin: 0 0; pointer-events: none; will-change: transform, width;
+  position: absolute; top: 0; left: 0; height: 1.5px; transform-origin: 0 0; pointer-events: none; will-change: transform, width; z-index: 1;
   background: linear-gradient(90deg, var(--ukr-accent, #39d0ff), rgba(255, 255, 255, 0.15)); opacity: 0.9;
 }
+/* Malá karta (predvolene) ~204 × 52 px; plná až po výbere (2026-09-24, „nemusia byť také veľké“). */
 .oko-ukr-card {
-  position: absolute; top: 0; left: 0; width: 264px; max-width: calc(100vw - 16px);
-  padding: 6px 8px 6px 10px; border-radius: 9px; background: rgba(11, 22, 34, 0.93);
-  border: 1px solid rgba(255, 255, 255, 0.12); border-left: 3px solid var(--ukr-accent, #39d0ff);
+  position: absolute; top: 0; left: 0; width: 204px; max-width: calc(100vw - 16px); z-index: 3;
+  padding: 4px 7px 5px 8px; border-radius: 8px; background: rgba(11, 22, 34, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.12); border-left: 2px solid var(--ukr-accent, #39d0ff);
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5); backdrop-filter: blur(6px); pointer-events: auto;
   color: #dbeafe; font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   will-change: transform; cursor: var(--cursor-arrow);
 }
-.oko-ukr-card.is-selected { border-color: var(--ukr-accent, #39d0ff); box-shadow: 0 0 0 1px var(--ukr-accent, #39d0ff), 0 8px 26px rgba(0, 0, 0, 0.55); z-index: 2; }
-.oko-ukr-card.is-hover { border-color: rgba(255, 255, 255, 0.35); }
+.oko-ukr-card.is-selected { width: 252px; padding: 6px 8px 6px 10px; border-left-width: 3px; border-color: var(--ukr-accent, #39d0ff); box-shadow: 0 0 0 1px var(--ukr-accent, #39d0ff), 0 8px 26px rgba(0, 0, 0, 0.55); z-index: 5; }
+.oko-ukr-card.is-hover { border-color: rgba(255, 255, 255, 0.35); z-index: 4; }
+.oko-ukr-card:not(.is-selected) { cursor: var(--cursor-pointer); }
+.oko-ukr-card:not(.is-selected) .oko-ukr-card-head,
+.oko-ukr-card:not(.is-selected) .oko-ukr-card-approx,
+.oko-ukr-card:not(.is-selected) .oko-ukr-card-mt,
+.oko-ukr-card:not(.is-selected) .oko-ukr-card-media,
+.oko-ukr-card:not(.is-selected) .oko-ukr-card-foot,
+.oko-ukr-card.is-selected .oko-ukr-card-glyph,
+.oko-ukr-card.is-selected .oko-ukr-card-approxmark,
+.oko-ukr-card.is-selected .oko-ukr-card-mediaflag,
+.oko-ukr-card.is-selected .oko-ukr-card-when,
+.oko-ukr-card.is-selected .oko-ukr-card-meta { display: none; }
 .oko-ukr-card-head { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-bottom: 4px; }
 .oko-ukr-chip {
   font-size: 8.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; line-height: 1.5;
@@ -11661,16 +11675,36 @@ body.oko-mobile #oko-share {
   font-family: inherit;
 }
 .oko-ukr-card-close:hover { color: #fff; }
-.oko-ukr-card-subject { font-size: 12.5px; font-weight: 700; color: #f1f5f8; letter-spacing: 0.02em; }
-.oko-ukr-card-status { font-size: 10.5px; line-height: 1.35; color: #c7d7e6; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.oko-ukr-card-subject { display: flex; align-items: baseline; gap: 4px; min-width: 0; font-size: 11px; font-weight: 700; color: #f1f5f8; letter-spacing: 0.02em; }
+.oko-ukr-card.is-selected .oko-ukr-card-subject { display: block; font-size: 12.5px; }
+.oko-ukr-card-glyph { color: var(--ukr-accent, #39d0ff); font-size: 10px; flex: 0 0 auto; }
+.oko-ukr-card-approxmark { color: #8aa0b6; font-weight: 500; flex: 0 0 auto; }
+.oko-ukr-card-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oko-ukr-card.is-selected .oko-ukr-card-title { white-space: normal; }
+.oko-ukr-card-approx { font-weight: 500; color: #8aa0b6; font-size: 10.5px; }
+.oko-ukr-card-mediaflag { color: var(--ukr-accent, #39d0ff); font-size: 8px; flex: 0 0 auto; }
+.oko-ukr-card-when { flex: 0 0 auto; font-size: 8.5px; font-weight: 500; color: #8aa0b6; letter-spacing: 0; }
+.oko-ukr-card-status { font-size: 9.5px; line-height: 1.3; color: #c7d7e6; margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.oko-ukr-card.is-selected .oko-ukr-card-status { font-size: 10.5px; line-height: 1.35; margin-top: 2px; -webkit-line-clamp: 6; }
+/* Malá karta: úroveň overenia + „strojový preklad" vždy viditeľne (poctivé označenie). */
+.oko-ukr-card-meta { display: flex; gap: 4px; min-width: 0; font-size: 7.5px; letter-spacing: 0.06em; text-transform: uppercase; color: #8aa0b6; margin-top: 2px; white-space: nowrap; }
+.oko-ukr-card-meta-mt { flex: 0 0 auto; color: #c7d7e6; }
+.oko-ukr-card-meta-mt[hidden] { display: none; }
+.oko-ukr-card-meta-level { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.oko-ukr-card-meta.is-official .oko-ukr-card-meta-level { color: #ffd27a; }
+.oko-ukr-card-meta.is-osint .oko-ukr-card-meta-level { color: #9be7a3; }
 .oko-ukr-card-mt { font-size: 8px; color: #5b6f84; margin-top: 2px; letter-spacing: 0.03em; text-transform: uppercase; }
 .oko-ukr-card-mt[hidden] { display: none; }
 .oko-ukr-card-media {
-  position: relative; display: block; width: 100%; height: 104px; margin: 6px 0 2px; padding: 0; border: 0; border-radius: 7px; overflow: hidden;
+  position: relative; display: block; width: 100%; height: 96px; margin: 6px 0 2px; padding: 0; border: 0; border-radius: 7px; overflow: hidden;
   background: #0b1622; cursor: var(--cursor-pointer);
 }
 .oko-ukr-card-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.oko-ukr-card-media.is-noimg { height: 34px; background: rgba(255, 255, 255, 0.05); }
+.oko-ukr-card-media.is-loading { background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0 6px, transparent 6px 12px), #0b1622; }
+.oko-ukr-card-media-wait { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--ukr-accent, #39d0ff); font-size: 18px; opacity: 0.7; }
+.oko-ukr-card-media:not(.is-loading) .oko-ukr-card-media-wait { display: none; }
+.oko-ukr-card-medialink { border: 0; background: transparent; padding: 0; font: inherit; color: var(--ukr-accent, #39d0ff); white-space: nowrap; cursor: var(--cursor-pointer); }
+.oko-ukr-card-medialink:hover { text-decoration: underline; }
 .oko-ukr-play {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 50%;
   background: rgba(11, 22, 34, 0.75); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center;
@@ -11685,7 +11719,7 @@ body.oko-mobile #oko-share {
   position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 4px; max-width: 170px;
   padding: 1px 7px 1px 5px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.14); border-left: 2px solid var(--ukr-accent, #39d0ff);
   background: rgba(11, 22, 34, 0.9); color: #dbeafe; font: 500 9.5px 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: 0.02em;
-  pointer-events: auto; cursor: var(--cursor-pointer); will-change: transform; white-space: nowrap;
+  pointer-events: auto; cursor: var(--cursor-pointer); will-change: transform; white-space: nowrap; z-index: 2;
 }
 .oko-ukr-minichip:hover, .oko-ukr-minichip.is-hover { border-color: var(--ukr-accent, #39d0ff); color: #fff; }
 .oko-ukr-minichip-text { overflow: hidden; text-overflow: ellipsis; }
@@ -11785,7 +11819,8 @@ body.oko-mobile #oko-share {
 .oko-ukr-tl-foot { font-size: 8px; color: #5b6f84; letter-spacing: 0.03em; text-transform: uppercase; }
 body.oko-mobile .oko-ukr-timeline { bottom: calc(var(--oko-dock-lift, 66px) + 6px); width: calc(100vw - 16px); padding: 6px 8px; font-size: 9.5px; }
 body.oko-mobile .oko-ukr-tl-media { display: none; }
-body.oko-mobile .oko-ukr-card { width: 232px; }
+body.oko-mobile .oko-ukr-card { width: 188px; }
+body.oko-mobile .oko-ukr-card.is-selected { width: 232px; }
 @media (max-width: 720px) { .oko-ukr-tl-counts { flex-basis: 100%; } }
 /* Otvorená os zdvihne spodné prvky o svoju výšku — meria ju ukraineTimeline.js
    do --oko-ukr-tl-lift. Modelované prvky (#command-dock, #cesium-credits —
@@ -11846,11 +11881,16 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-chip { font-weight: 700; letter-spacing: 0.06em; }
 /* DeepState legenda: okupované výplň, šedá zóna, oslobodené, smer útoku, letisko */
 .oko-ukr-tl-ctl-item.is-ds-occupied .oko-ukr-tl-ctl-sw { background: rgba(224, 85, 63, 0.32); border-color: rgba(224, 85, 63, 0.9); }
+/* Línia kontaktu (odvodená z polygónov): čiara s tmavým lemom ako na mape. */
+.oko-ukr-tl-ctl-item.is-ds-contact .oko-ukr-tl-ctl-sw { height: 3px; border-radius: 1px; background: #ff4b3e; border: 0; box-shadow: 0 0 0 1px rgba(11, 22, 34, 0.85); }
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-contact .oko-ukr-tl-ctl-sw { background: #b3261e; box-shadow: none; height: 2px; }
 /* Sivá zóna sa na mape kreslí šrafovane — vzorka musí vyzerať rovnako: v bežnom
    štýle jantárové pruhy (DEEPSTATE_STYLES.default.greyCss), na KARTE sivé. */
 .oko-ukr-tl-ctl-item.is-ds-grey .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(255, 181, 71, 0.85) 0 2px, rgba(255, 181, 71, 0.1) 2px 5px); border-color: rgba(255, 181, 71, 0.9); }
 .oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-grey .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(184, 178, 170, 0.8) 0 2px, rgba(184, 178, 170, 0.1) 2px 5px); border-color: rgba(184, 178, 170, 0.8); }
-.oko-ukr-tl-ctl-item.is-ds-liberated .oko-ukr-tl-ctl-sw { background: rgba(79, 163, 255, 0.18); border-color: rgba(79, 163, 255, 0.9); }
+/* Oslobodené: modrá šrafa 135° (na mape OkoHatch135), aby nevyzerala ako voda; KARTA plná ako predtým. */
+.oko-ukr-tl-ctl-item.is-ds-liberated .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(79, 163, 255, 0.6) 0 1.5px, rgba(79, 163, 255, 0.05) 1.5px 5px); border-color: rgba(79, 163, 255, 0.55); }
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-liberated .oko-ukr-tl-ctl-sw { background: rgba(79, 163, 255, 0.18); border-color: rgba(79, 163, 255, 0.9); }
 .oko-ukr-tl-ctl-item.is-ds-attack .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #ffb547; border-color: #0b1622; }
 .oko-ukr-tl-ctl-item.is-ds-airfield .oko-ukr-tl-ctl-sw { width: 8px; height: 8px; border-radius: 50%; background: #d9a066; border-color: #0b1622; }
 /* Snímka z mirroru cyterat nesie len okupované územie (vrátane Krymu a ORDLO) —
@@ -11888,6 +11928,7 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-karta-legend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
 .oko-karta-legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #cdd9e4; }
 .oko-karta-swatch { width: 16px; height: 12px; border-radius: 2px; flex: none; background: var(--sw); }
+.oko-karta-swatch-line { height: 3px; border-radius: 1px; align-self: center; }
 .oko-karta-swatch-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid rgba(6, 12, 20, 0.8); }
 .oko-karta-swatch-hatch { background: repeating-linear-gradient(45deg, var(--sw) 0 1.5px, transparent 1.5px 5px); border: 1px solid rgba(160, 170, 180, 0.5); }
 .oko-karta-swatch-glyph { background: none; }

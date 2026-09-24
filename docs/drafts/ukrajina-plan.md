@@ -21,7 +21,10 @@ overuje znova podľa `new-data-layer`.
   = body (modrá/červená/jantár) + ODVODENÝ raster zón (RU výplň, šrafovaná zóna bojov) primknutý
   k terénu aj 3D dlaždiciam; časová os prepína snímku podľa dňa kurzora; čip KONTROLA.
 - Vojnové požiare The Economist (CC BY 4.0, 454 333 bodov od 2022) ako typ `hotspot` — body bez karty.
-- DeepState: vlastný archív z API (lokálne) + mirror cyterat (verejná doména a história od 8. 7. 2024);
+- DeepState: **len mirrory** (vlastník 24. 9. 2026 — žiadosť o súhlas bez odpovede = zamietnutá):
+  cyterat + záloha lazar-bit pre všetkých hostiteľov vrátane localhostu; vlastné sťahovanie z API
+  a čítanie archívu (19.–24. 9.) len s `UKRAINE_DEEPSTATE=consent`; o zmazaní archívu rozhodne vlastník.
+  (Pôvodne: vlastný archív z API lokálne + mirror cyterat pre verejnú doménu a históriu od 8. 7. 2024.)
   ich Telegram kanál `DeepStateUA` v páse médií (licencia §3: vizuály s logom/odkazom voľné).
 - **4A predbežne (používateľ 09-19: „OKO nie je biznis, ale hobby pre mňa a môj FB profil —
   pridaj zatiaľ všetko, čo vieš, a požiadame DeepState o súhlas")**: `/api/history/last` sa

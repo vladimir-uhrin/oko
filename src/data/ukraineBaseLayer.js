@@ -61,6 +61,11 @@ const LABEL_OUTLINE = '#0b1622';
  * a popisy — používateľ 2026-09-20: „chcel som jemnejšie línie". Násobky sa
  * aplikujú pri vzniku entity aj spätne na už nakreslené.
  */
+/** Lem popiskov podkladu podľa štýlu: bežný hrubší a plný (2026-09-24, meno sa strácalo v šrafe), KARTA ako vo vzorke. */
+export const BASE_LABEL_OUTLINE = Object.freeze({
+  default: Object.freeze({ width: 4, alpha: 1 }),
+  karta: Object.freeze({ width: 3, alpha: 0.9 }),
+});
 export const UKRAINE_BASE_STYLES = Object.freeze({
   default: Object.freeze({ line: 1, point: 1, font: 1 }),
   karta: Object.freeze({ line: 0.5, point: 0.72, font: 0.9 }),
@@ -337,7 +342,12 @@ export function createUkraineBaseLayer({
     try {
       if (item.line != null && item.entity.polyline) item.entity.polyline.width = item.line * s.line;
       if (item.point != null && item.entity.point) item.entity.point.pixelSize = item.point * s.point;
-      if (item.font && item.entity.label) item.entity.label.font = fontString(item.font, s.font);
+      if (item.font && item.entity.label) {
+        item.entity.label.font = fontString(item.font, s.font);
+        const o = BASE_LABEL_OUTLINE[_styleMode] || BASE_LABEL_OUTLINE.default;
+        item.entity.label.outlineWidth = o.width;
+        item.entity.label.outlineColor = Cesium.Color.fromCssColorString(LABEL_OUTLINE).withAlpha(o.alpha);
+      }
     } catch { /* entita už preč */ }
   }
   function registerStyle(entity, base) {
@@ -467,8 +477,9 @@ export function createUkraineBaseLayer({
       text: uppercase ? text.toUpperCase() : text,
       font: `${italic ? 'italic ' : ''}${weight} ${fontPx}px ${FONT}`,
       fillColor: Cesium.Color.fromCssColorString(colorCss),
-      outlineColor: Cesium.Color.fromCssColorString(LABEL_OUTLINE).withAlpha(0.9),
-      outlineWidth: 3,
+      // Lem podľa štýlu (BASE_LABEL_OUTLINE); registerStyle ho prepne na KARTU.
+      outlineColor: Cesium.Color.fromCssColorString(LABEL_OUTLINE).withAlpha(BASE_LABEL_OUTLINE.default.alpha),
+      outlineWidth: BASE_LABEL_OUTLINE.default.width,
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
       pixelOffset: new Cesium.Cartesian2(offsetX, -1),
       horizontalOrigin: Cesium.HorizontalOrigin.LEFT,

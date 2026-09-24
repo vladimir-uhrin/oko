@@ -20,7 +20,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Farby legendy (zhodné s vrstvami KARTA). */
 export const KARTA_LEGEND_COLORS = Object.freeze({
-  occupied: '#d0554a', grey: '#8a8f98', ru: '#e0553f',
+  occupied: '#d0554a', grey: '#8a8f98', ru: '#e0553f', contact: '#b3261e',
   pinUa: '#5b8fd0', pinRu: '#d0554a', pinContested: '#f0a53a',
   combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a',
 });
@@ -99,6 +99,7 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
   const items = [];
   if (deepstateDraws(deepstate)) {
     items.push({ key: 'occupied', colorCss: c.occupied, label: translate('ukraine.karta.legend.occupied') });
+    if (deepstate.contact > 0) items.push({ key: 'contact', colorCss: c.contact, line: true, label: translate('ukraine.karta.legend.contact') });
     // Mirror šedú zónu nemá — namiesto nej je na mape pás bojov z Wikipédie.
     if (deepstate.source !== 'mirror') items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
     else if (control?.shown) items.push({ key: 'contested', colorCss: c.ru, pattern: 'hatch', label: translate('ukraine.karta.legend.contested') });
@@ -175,6 +176,7 @@ export function drawKartaExport(ctx, model, width, height, { font = 'system-ui, 
       ctx.fillStyle = item.colorCss || '#888';
       ctx.globalAlpha = Number.isFinite(item.dim) ? item.dim : 1;
       if (item.dot) { ctx.beginPath(); ctx.arc(bx + px(16), ry + px(4), px(5), 0, Math.PI * 2); ctx.fill(); }
+      else if (item.line) { ctx.fillRect(bx + px(10), ry + px(2.5), px(16), px(3)); }
       else { roundRectPath(ctx, bx + px(10), ry - px(2), px(16), px(11), px(2)); ctx.fill(); }
       ctx.globalAlpha = 1;
       ctx.fillStyle = '#cdd9e4'; ctx.font = `${px(12)}px ${font}`;
@@ -321,7 +323,7 @@ export function createUkraineKartaOverlay({
 
   function legendRow(item) {
     const li = el(doc, 'li', 'oko-karta-legend-row');
-    const sw = el(doc, 'span', `oko-karta-swatch oko-karta-swatch-${item.dot ? 'dot' : item.glyph ? `glyph glyph-${item.glyph}` : item.pattern === 'hatch' ? 'hatch' : 'fill'}`);
+    const sw = el(doc, 'span', `oko-karta-swatch oko-karta-swatch-${item.dot ? 'dot' : item.line ? 'line' : item.glyph ? `glyph glyph-${item.glyph}` : item.pattern === 'hatch' ? 'hatch' : 'fill'}`);
     sw.style.setProperty('--sw', item.colorCss);
     if (Number.isFinite(item.dim)) sw.style.opacity = String(item.dim);
     li.append(sw, el(doc, 'span', 'oko-karta-legend-label', item.label));

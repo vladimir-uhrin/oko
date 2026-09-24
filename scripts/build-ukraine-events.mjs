@@ -50,8 +50,11 @@ if (all || has('--control-history')) {
   log(`Kontrola (história po ${step} d): nových ${r.done}, existujúcich ${r.skipped}`);
 }
 
-// DeepStateMap.live (nekomerčné hobby použitie, súhlas sa žiada): posledná snímka.
-if (all || has('--deepstate')) {
+// DeepStateMap.live API: len so súhlasom (UKRAINE_DEEPSTATE=consent) — od 24. 9. 2026
+// „len mirrory" (žiadosť bez odpovede = zamietnutá); --all ho vynecháva.
+if (has('--deepstate') && String(process.env.UKRAINE_DEEPSTATE || '').toLowerCase() !== 'consent') {
+  log('DeepState: preskočené — len mirrory, API iba so súhlasom (UKRAINE_DEEPSTATE=consent)');
+} else if (has('--deepstate')) {
   const r = await deepstateSnapshot(root, { now, force: has('--force'), log });
   log(`DeepState: ${r.status}${r.day ? ' (deň ' + r.day + ', ' + (r.features ?? '?') + ' prvkov)' : ''}${r.error ? ' — ' + r.error : ''}`);
 }

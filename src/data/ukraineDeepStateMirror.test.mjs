@@ -1,8 +1,10 @@
 // src/data/ukraineDeepStateMirror.test.mjs — vrstva DeepState z mirroru cyterat
 // (rozhodnutie vlastníka 24. 9. 2026: „Sprav 3 a vymaž toto pravidlo"):
 // prevod súboru na snímku, trasa /api/ukraine/events/deepstate na verejnej
-// doméne (mirror namiesto 451) a na localhoste (archív, mirror len pre dni,
-// ktoré archív nemá), poctivé 404/502, vypínač, legenda KARTY bez šedej zóny.
+// doméne (mirror namiesto 451) a na localhoste — od 24. 9. 2026 („len mirrory")
+// tiež mirror; vlastný archív z API len so súhlasom (UKRAINE_DEEPSTATE=consent,
+// vtedy má prednosť a mirror dopĺňa dni) — poctivé 404/502, vypínač, legenda
+// KARTY bez šedej zóny.
 // Bez siete: fetch je vstreknutý, koreň je dočasný priečinok.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -104,8 +106,23 @@ test('verejná doména: deň pred históriou mirroru = 404 so zdrojom; výpadok 
   assert.equal((await dsOff.call('/deepstate?at=2026-09-24', 'oko.uhrin.digital')).out.status, 451, 'UKRAINE_DEEPSTATE=off vypína aj mirror');
 });
 
-test('localhost: vlastný archív má prednosť, mirror len pre dni, ktoré archív nemá', async () => {
+test('„len mirrory" (24. 9. 2026): aj localhost dostane mirror, archív z API sa bez súhlasu nečíta', async () => {
   const s = await setup(async () => ok(MIRROR_FILE));
+  const dir = path.join(s.root, '.gev-cache', 'ukraine', 'events', 'deepstate');
+  await fsp.mkdir(dir, { recursive: true });
+  await fsp.writeFile(path.join(dir, '2026-09-22.json'), JSON.stringify({ id: 1, at: '2026-09-22T10:00:00.000Z', day: '2026-09-22', features: [{ kind: 'grey', type: 'Polygon', rings: square(37, 48) }], counts: { grey: 1 }, areaKm2: { grey: 8000 }, source: 'https://deepstatemap.live/api/history/last' }));
+  const res = await s.call('/deepstate?at=2026-09-22', 'localhost:4173');
+  assert.equal(res.out.status, 200);
+  assert.equal(decode(res).source, 'mirror', 'archív leží na disku, ale bez súhlasu sa nepoužije');
+  assert.deepEqual(s.calls, ['20260922']);
+  // Archivár sa bez súhlasu na API nepýta.
+  const plugin = ukraineEventsProxy({ root: s.root, env: {}, now: () => NOW, setTimer: () => 0, clearTimer: () => {}, log: () => {}, fetchImpl: async () => { throw new Error('API sa nesmie volať'); } });
+  await plugin._tick('deepstate');
+  assert.deepEqual(plugin._state.last.deepstate.result, { status: 'disabled', reason: 'mirror-only' });
+});
+
+test('so súhlasom (UKRAINE_DEEPSTATE=consent): vlastný archív má prednosť, mirror len pre dni, ktoré archív nemá', async () => {
+  const s = await setup(async () => ok(MIRROR_FILE), { env: { UKRAINE_DEEPSTATE: 'consent' } });
   const dir = path.join(s.root, '.gev-cache', 'ukraine', 'events', 'deepstate');
   await fsp.mkdir(dir, { recursive: true });
   await fsp.writeFile(path.join(dir, '2026-09-19.json'), JSON.stringify({ id: 1, at: '2026-09-19T10:00:00.000Z', day: '2026-09-19', features: [{ kind: 'grey', type: 'Polygon', rings: square(37, 48) }], counts: { grey: 1 }, areaKm2: { grey: 8000 }, source: 'https://deepstatemap.live/api/history/last' }));

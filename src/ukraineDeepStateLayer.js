@@ -18,6 +18,8 @@
 import * as Cesium from 'cesium';
 import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText, deepstateMirrorRepo } from './data/ukraineDeepState.js';
 import { hatchMaterialFor } from './data/screenPatternMaterials.js';
+import { contactLinePaths, pathLengthKm } from './data/ukraineContactLine.js';
+import { UKRAINE_LAND_RINGS } from './data/ukraineLand.js';
 import { fetchUkraineDeepState } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
 import { currentLanguage, t } from './i18n.js';
@@ -27,7 +29,7 @@ const LIFT_BATCH = 200;
 const HOVER_MS = 90;
 const INERT = {
   id: UKRAINE_DEEPSTATE_ID, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, loadLatest: async () => {},
-  setStyle() {}, getStyle: () => 'default', sideAt: () => null,
+  setStyle() {}, getStyle: () => 'default', sideAt: () => null, frontKm: () => null, contactPaths: () => [],
   getState: () => ({ shown: false, loading: false, error: null, day: null, at: null, stampText: '', counts: null, areaKm2: null, features: 0, style: 'default', source: null }),
   onChange() { return () => {}; }, destroy() {},
 };
@@ -53,10 +55,20 @@ export const DEEPSTATE_STYLES = Object.freeze({
   default: Object.freeze({
     greyWidth: 1.6, width: 1.8, greyOutline: 0.9, outline: 0.9, hatch: true,
     greyCss: '#ffb547', greyHatch: Object.freeze({ lineAlpha: 0.78, fillAlpha: 0.06, spacing: 8, thickness: 0.2 }),
+    // Oslobodené: modrá šrafa OPAČNÝM smerom (135°), nie plná výplň — plná modrá
+    // vyzerala ako jazero/rieka (2026-09-24). Okraj tenký a svetlý, nie „rieka".
+    liberatedHatch: Object.freeze({ lineAlpha: 0.42, fillAlpha: 0.03, spacing: 10, thickness: 0.16, direction: -1 }),
+    recentHatch: Object.freeze({ lineAlpha: 0.62, fillAlpha: 0.06, spacing: 7, thickness: 0.2, direction: -1 }),
+    liberatedOutline: 0.5, liberatedWidth: 1.0,
+    // Línia kontaktu (odvodená z polygónov): jasná červená s tmavým lemom — nad
+    // satelitom aj šrafou ju oko nájde prvú (ako línia na mapách ISW/NYT).
+    contact: Object.freeze({ css: '#ff4b3e', alpha: 0.95, width: 4, outlineCss: '#0b1622', outlineAlpha: 0.85, outlineWidth: 1 }),
   }),
   karta: Object.freeze({
     greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true,
     greyCss: null, greyHatch: Object.freeze({ lineAlpha: 0.6, fillAlpha: 0.1 }),
+    // KARTA: tenšia tmavočervená bez lemu (jemná mapa, svetlý reliéf).
+    contact: Object.freeze({ css: '#b3261e', alpha: 0.95, width: 2.2, outlineCss: null, outlineAlpha: 0, outlineWidth: 0 }),
   }),
 });
 
@@ -102,6 +114,46 @@ export function sideFromPolygons(index, lon, lat, { fallback = null } = {}) {
   return grey ? 'contested' : fallback;
 }
 
+/** Najväčší odstup dňa snímky DeepState od dňa hlásenia, keď sa línia ešte použije na kotvy. */
+export const FRONT_MAX_DAY_GAP = 3;
+/**
+ * Hodí sa snímka dňa `snapshotDay` k hláseniu dňa `reportDay` (YYYY-MM-DD)? Snímka
+ * smie byť najviac FRONT_MAX_DAY_GAP dní staršia a najviac deň novšia (DeepState
+ * mešká). Bez dňa hlásenia áno; bez dňa snímky nie. Pure.
+ */
+export function deepstateDayFits(snapshotDay, reportDay, maxGap = FRONT_MAX_DAY_GAP) {
+  if (!reportDay) return true;
+  const s = Date.parse(`${String(snapshotDay || '').slice(0, 10)}T00:00:00Z`);
+  const r = Date.parse(`${String(reportDay).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(s) || !Number.isFinite(r)) return false;
+  const gap = (r - s) / 86_400_000;
+  return gap >= -1 && gap <= maxGap;
+}
+
+/** Polomery (km) a počet smerov vzorkovania pre frontDistanceKm. */
+export const FRONT_SAMPLE_RADII_KM = Object.freeze([1, 2, 3, 5, 8, 12, 18, 24]);
+export const FRONT_SAMPLE_DIRS = 8;
+/**
+ * Približná vzdialenosť bodu k línii kontaktu (km): najmenší polomer, na ktorom
+ * sa strana podľa polygónov (ru / sporné / ostatné) líši od strany bodu. Hranice
+ * medzi dvoma ruskými druhmi (okupované × ORDLO × Krym) stranu nemenia, takže
+ * sa ako front nerátajú. Bez zmeny do posledného polomeru Infinity. Pure.
+ */
+export function frontDistanceKm(index, lon, lat, { radii = FRONT_SAMPLE_RADII_KM, dirs = FRONT_SAMPLE_DIRS } = {}) {
+  if (!Array.isArray(index) || !index.length || !Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  const side = (x, y) => sideFromPolygons(index, x, y, { fallback: 'other' });
+  const here = side(lon, lat);
+  const kmLat = 1 / 111.32;
+  const kmLon = 1 / (111.32 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+  for (const r of radii) {
+    for (let k = 0; k < dirs; k += 1) {
+      const a = (2 * Math.PI * k) / dirs;
+      if (side(lon + Math.cos(a) * r * kmLon, lat + Math.sin(a) * r * kmLat) !== here) return r;
+    }
+  }
+  return Infinity;
+}
+
 /** Pozície kruhu [lon,lat] → Cartesian3 (bez výšky = primknuté). */
 export function ringPositions(ring) {
   return ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
@@ -141,6 +193,8 @@ export function createUkraineDeepStateLayer({
   let _shown = false;
   let _snapshot = null;
   let _polyIndex = [];
+  const _frontCache = new Map(); // "lon,lat" → km k línii pre aktuálnu snímku
+  let _contact = []; // úseky línie kontaktu [[lon,lat],…] pre aktuálnu snímku
   let _style = 'default';
   let _loading = false;
   let _error = null;
@@ -176,7 +230,11 @@ export function createUkraineDeepStateLayer({
         n += 1;
         // Sivá zóna na KARTE: šrafovanie 45° v obrazovkových px (ako „územie bojov" vo vzorke); bez cache materiálov výplň.
         const greyColour = Cesium.Color.fromCssColorString(deepstateGreyCss(st));
-        const material = (st.hatch && f.kind === 'grey') ? (hatchMaterialFor(deepstateGreyCss(st), st.greyHatch) || greyColour.withAlpha(alpha)) : colour.withAlpha(alpha);
+        const libHatch = f.kind === 'liberated' ? st.liberatedHatch : f.kind === 'liberated-recent' ? st.recentHatch : null;
+        const material = (st.hatch && f.kind === 'grey') ? (hatchMaterialFor(deepstateGreyCss(st), st.greyHatch) || greyColour.withAlpha(alpha))
+          : libHatch ? (hatchMaterialFor(DEEPSTATE_COLORS[f.kind], libHatch) || colour.withAlpha(alpha))
+            : colour.withAlpha(alpha);
+        const lib = Boolean(libHatch);
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:poly:${n}`,
           polygon: { hierarchy: new Cesium.PolygonHierarchy(outer, holes), material, classificationType: Cesium.ClassificationType.BOTH },
@@ -184,7 +242,7 @@ export function createUkraineDeepStateLayer({
         });
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:line:${n}`,
-          polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : st.width, material: f.kind === 'grey' ? greyColour.withAlpha(st.greyOutline) : colour.withAlpha(st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
+          polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : (lib ? st.liberatedWidth : st.width), material: f.kind === 'grey' ? greyColour.withAlpha(st.greyOutline) : colour.withAlpha(lib ? st.liberatedOutline : st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
         });
       } else if (f.type === 'Point' && Number.isFinite(f.lat) && Number.isFinite(f.lon)) {
         const attack = f.kind === 'attack';
@@ -198,6 +256,21 @@ export function createUkraineDeepStateLayer({
           id: { ukraineDeepState: f },
         });
       }
+    }
+    // Línia kontaktu nad plochami (zIndex), primknutá k terénu aj 3D dlaždiciam.
+    const cs = st.contact;
+    if (cs && _contact.length) {
+      const lineColor = Cesium.Color.fromCssColorString(cs.css).withAlpha(cs.alpha);
+      const material = cs.outlineWidth > 0
+        ? new Cesium.PolylineOutlineMaterialProperty({ color: lineColor, outlineColor: Cesium.Color.fromCssColorString(cs.outlineCss).withAlpha(cs.outlineAlpha), outlineWidth: cs.outlineWidth })
+        : lineColor;
+      _contact.forEach((path, k) => {
+        ds.entities.add({
+          id: `${UKRAINE_DEEPSTATE_ID}:contact:${k}`,
+          polyline: { positions: ringPositions(path), width: cs.width, material, clampToGround: true, classificationType: Cesium.ClassificationType.BOTH, zIndex: 10 },
+          properties: { deepstate: { kind: 'contact', km: Math.round(pathLengthKm(path)) } },
+        });
+      });
     }
     points.show = _shown;
     requestRender();
@@ -265,6 +338,9 @@ export function createUkraineDeepStateLayer({
   function setSnapshot(snapshot) {
     _snapshot = snapshot && Array.isArray(snapshot.features) ? snapshot : null;
     _polyIndex = buildPolyIndex(_snapshot?.features);
+    _frontCache.clear();
+    // Línia kontaktu sa počíta raz na snímku (~30–50 ms pri 3–11 tis. vrcholoch).
+    try { _contact = contactLinePaths(_polyIndex, UKRAINE_LAND_RINGS); } catch { _contact = []; }
     _error = null;
     rebuild();
     emit();
@@ -284,6 +360,20 @@ export function createUkraineDeepStateLayer({
     // stranu nevieme (inak by špendlíky v šedej zóne zmodreli ako UA).
     const mirror = _snapshot?.source === 'mirror';
     return sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied && !mirror ? 'ua' : null });
+  }
+  /**
+   * Vzdialenosť k línii (km) podľa aktuálnej snímky; null bez ruských polygónov
+   * a keď vrstva nekreslí (skrytá vrstva drží snímku iného dňa — časová os ju
+   * vtedy nemení) a keď je snímka z iného dňa než hlásenie (`reportDay`; po
+   * zatvorení osi v prehrávaní ostane snímka dňa kurzora). Cache do ďalšej snímky.
+   */
+  function frontKm(lon, lat, { reportDay = null } = {}) {
+    if (!_shown) return null;
+    if (!deepstateDayFits(_snapshot?.day, reportDay)) return null;
+    if (!_polyIndex.some((p) => DEEPSTATE_RU_KINDS.includes(p.kind))) return null;
+    const key = `${Number(lon).toFixed(4)},${Number(lat).toFixed(4)}`;
+    if (!_frontCache.has(key)) _frontCache.set(key, frontDistanceKm(_polyIndex, lon, lat));
+    return _frontCache.get(key);
   }
   async function loadLatest(day = null) {
     if (_loading) return;
@@ -316,6 +406,7 @@ export function createUkraineDeepStateLayer({
     return {
       shown: _shown, loading: _loading, error: _error,
       day: _snapshot?.day || null, at: _snapshot?.at || null, stampText: deepstateStampText(_snapshot), datetime: _snapshot?.datetime || null,
+      contact: _contact.length, contactKm: Math.round(_contact.reduce((sum, path) => sum + pathLengthKm(path), 0)),
       counts: _snapshot?.counts || null, areaKm2: _snapshot?.areaKm2 || null, features: _snapshot?.features?.length || 0, snapshots: _snapshot?.snapshots ?? null,
       style: _style, requestedAt: _snapshot?.requestedAt || null,
       // Zdroj snímky: náš archív z API (`archive`) alebo mirror cyterat (`mirror`, len okupované).
@@ -334,7 +425,9 @@ export function createUkraineDeepStateLayer({
   return {
     id: UKRAINE_DEEPSTATE_ID,
     show, hide, isShown: () => _shown, setSnapshot, loadLatest, getState,
-    setStyle, getStyle: () => _style, sideAt,
+    setStyle, getStyle: () => _style, sideAt, frontKm,
+    /** Úseky línie kontaktu aktuálnej snímky (kópia). */
+    contactPaths: () => _contact.map((p) => p.slice()),
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
     _getStateForTest: () => ({ ds, points, tip, polyIndex: _polyIndex }),

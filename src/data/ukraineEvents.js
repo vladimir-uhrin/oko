@@ -482,7 +482,8 @@ export function eventCardModel(ev, { translate = (k) => k, lang = 'sk' } = {}) {
     timeText: eventTimeText(ev, lang),
     title: ev.place || translate('ukraine.ev.unknown-place'),
     status: eventStatusText(ev, translate),
-    levelText: translate(`ukraine.level.${ev.level}`),
+    // OSINT mimo GeoConfirmed (napr. kanál DeepState) nesie meno svojho zdroja, nie „GeoConfirmed".
+    levelText: ev.level === 'osint' && ev.src !== 'geoconfirmed' ? translate('ukraine.level.osint-source', { source: ev.sources?.[0]?.name || 'OSINT' }) : translate(`ukraine.level.${ev.level}`),
     sourceText: ev.src === 'viina' ? translate('ukraine.src.viina') : (ev.src === 'geoconfirmed' ? translate('ukraine.src.geoconfirmed') : (ev.sources?.[0]?.name || '')),
     url: ev.sources?.[0]?.url || null,
     image: ev.image || null,

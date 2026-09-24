@@ -169,6 +169,8 @@ export function parseRssVideoEnclosures(xml, { label = 'ArmyInform', badge = 'of
  * regex bez okrajov; matcher dovolí až 5 písmen pádovej koncovky. Oblasti sú
  * samostatné položky (Харківщина ≠ Харків).
  */
+/** Prídavné meno oblasti + slovo oblasti (aj „обл.", aj súradné „Одеської та Миколаївської областей"). */
+const oblAdjStem = (stem) => `${stem}[а-яіїєґ'’ʼ]*(?:(?:(?:,\\s*|\\s+(?:та|і|й)\\s+)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+)+\\s+обл(?:астей|астях)|\\s+обл(?:аст[а-яіїєґ'’ʼ]*|\\.)?)`;
 export const UK_PLACE_STEMS = Object.freeze({
   Pokrovsk: 'Покровськ', Myrnohrad: 'Мирноград', Dobropillia: 'Добропілл', Kostiantynivka: 'Костянтинівк', 'Chasiv Yar': 'Час[оі]в[а-я]* Яр', Toretsk: 'Торецьк', Bakhmut: 'Бахмут', Siversk: 'Сіверськ',
   Lyman: 'Лиман', Sloviansk: "Слов['’ʼ]янськ", Kramatorsk: 'Краматорськ', Druzhkivka: 'Дружківк', Kupiansk: "Куп['’ʼ]янськ", Izium: 'Ізюм', Borova: 'Боров(?:а|ої|ій|у)', Vovchansk: 'Вовчанськ',
@@ -180,37 +182,172 @@ export const UK_PLACE_STEMS = Object.freeze({
   Ternopil: 'Терноп[іо]л', Rivne: 'Рівн(?:е|ого|ому|ім)', Lutsk: 'Луцьк', Lviv: 'Льв[іо]в', 'Ivano-Frankivsk': 'Івано-Франківськ', Uzhhorod: 'Ужгород', Chernivtsi: 'Чернівц', Sevastopol: 'Севастопол', Simferopol: 'Сімферопол',
   Feodosia: 'Феодос', Kerch: 'Керч', Dzhankoi: 'Джанко', Saky: 'Сак(?:и|ах|ами)', Yevpatoria: 'Євпатор', Belgorod: 'Б[єе]лгород', Shebekino: 'Шебекін', Kursk: 'Курськ', Sudzha: 'Судж', Bryansk: 'Брянськ', Voronezh: 'Воронеж|Вороніж',
   'Rostov-on-Don': 'Ростов', Taganrog: 'Таганро', Novorossiysk: 'Новоросійськ', Tuapse: 'Туапсе', Engels: 'Енгельс', Ryazan: 'Рязан', Moscow: 'Москв', Donbas: 'Донбас', Crimea: 'Крим', 'Black Sea': 'Чорн[а-я]* мор', 'Sea of Azov': 'Азовськ[а-я]* мор',
-  'Kharkiv Oblast': 'Харківщин|Харківськ[а-я]* област', 'Sumy Oblast': 'Сумщин|Сумськ[а-я]* област', 'Donetsk Oblast': 'Донеччин|Донецьк[а-я]* област', 'Zaporizhzhia Oblast': 'Запоріжчин|Запорізьк[а-я]* област', 'Kherson Oblast': 'Херсонщин|Херсонськ[а-я]* област',
-  'Dnipropetrovsk Oblast': 'Дніпропетровщин|Дніпропетровськ[а-я]* област', 'Odesa Oblast': 'Одещин|Одеськ[а-я]* област',
+  // [а-яіїє]: aj „Донецької / Одеській області" (šikmé pády majú і/ї).
+  'Kharkiv Oblast': `Харківщин|${oblAdjStem('Харківськ')}`, 'Sumy Oblast': `Сумщин|${oblAdjStem('Сумськ')}`, 'Donetsk Oblast': `Донеччин|${oblAdjStem('Донецьк')}`, 'Zaporizhzhia Oblast': `Запоріжчин|${oblAdjStem('Запорізьк')}`, 'Kherson Oblast': `Херсонщин|${oblAdjStem('Херсонськ')}`,
+  'Dnipropetrovsk Oblast': `Дніпропетровщин|${oblAdjStem('Дніпропетровськ')}`, 'Odesa Oblast': `Одещин|${oblAdjStem('Одеськ')}`,
 });
 const CYR = "А-Яа-яІіЇїЄєҐґ'’ʼ";
+const LOW = "а-яіїєґ'’ʼ";
+/**
+ * Chvost oblasti za prídavným menom: „… обл(асть)/обл." alebo súradné prídavné
+ * mená s MNOŽNÝM „областей/областях" („Вінницької та Черкаської областей").
+ * Množné číslo je podmienka — „у Києві та Київській області" je mesto a oblasť.
+ */
+const OBL_TAIL = `(?:(?:(?:,\\s*|\\s+(?:та|і|й)\\s+)[А-ЯІЇЄҐ][${LOW}-]+)+\\s+обл(?:астей|астях)|\\s+обл(?:аст[${LOW}]*|\\.)?)`;
+/**
+ * Prídavné mená pred menom sídla, ktoré z neho robia INÉ sídlo („Нова Борова" na
+ * Žitomirsku ≠ Borova na Charkovsku, „Нова Одеса" ≠ Odesa) — 2026-09-24 poplach
+ * zo Žitomirska stál na mape pri Kupjansku. Výslovné koncovky (tvrdé kmene
+ * a mäkké Верхн-/Нижн-): „Біля" (pri) ani „Новини" (správy) nie sú prídavné mená.
+ * Regióny (Krym, Donbas, moria) sa nekontrolujú — „Старий Крим" leží na Kryme.
+ */
+const NAME_ADJ_BEFORE = "(?<!(?:(?:Нов|Стар|Велик|Мал|Червон|Біл|Зелен|Сух|Золот|Кам['’ʼ]ян)(?:а|ий|е|і|ої|ого|ій|ому|у|ою|их|им)|(?:Верхн|Нижн)(?:я|ій|є|і|ьої|ього|ьому|ю|ьою|іх|ім))\\s)";
+const REGION_NAMES = new Set(['Crimea', 'Donbas', 'Black Sea', 'Sea of Azov']);
+/**
+ * Mestá s menom na -ськ/-цьк, ktorých prídavné tvary („Покровське", „Покровського")
+ * bývajú iné sídla (dedina Покровське na Dnipropetrovsku) — prijmú sa len so
+ * slovom „напрям…/район…/громад…" za nimi. Mestá, ktorých meno samo je prídavné
+ * meno (Кропивницький, Хмельницький), sa nekontrolujú.
+ */
+const ADJ_NAMESAKE_STEMS = new Set(['Pokrovsk', 'Toretsk', 'Siversk', 'Sloviansk', 'Kramatorsk', 'Kupiansk', 'Vovchansk', 'Berdiansk', 'Sievierodonetsk', 'Donetsk', 'Luhansk', 'Chornomorsk', 'Lutsk', 'Kursk', 'Bryansk', 'Novorossiysk']);
 const ukStemRe = new Map();
-const stemRe = (stem) => {
-  let re = ukStemRe.get(stem);
+const stemRe = (stem, name = '') => {
+  const key = `${name}|${stem}`;
+  let re = ukStemRe.get(key);
   // (?!щин|ськ): „Харківщина" je oblasť, „Лиманський (напрямок)" prídavné meno —
   // ani jedno nie je zmienka mesta (kmene končiace na -ськ majú ськ v sebe, tie
   // lookahead nebrzdí: „Покровському напрямку" → Pokrovsk, smer nesie meno mesta).
-  if (!re) { re = new RegExp(`(?<![${CYR}])(?:${stem})(?!щин|ськ)[а-яіїєґ'’ʼ]{0,5}(?![${CYR}])`); ukStemRe.set(stem, re); }
+  // „-щин-" do 3 písmen („Рівненщина") je oblasť. „… обл(асть)" za kmeňom — aj cez
+  // súradné prídavné mená — je oblasť, nie mesto („Донецька область" ≠ Doneck).
+  if (!re) {
+    const adj = REGION_NAMES.has(name) ? '' : NAME_ADJ_BEFORE;
+    const adjNamesake = ADJ_NAMESAKE_STEMS.has(name) ? `(?!(?:е|ого|ому|ий|ої|ій|ою)(?![${LOW}])(?!\\s+(?:напрям|район|громад|відтин|фронт)))` : '';
+    re = new RegExp(`${adj}(?<![${CYR}])(?:${stem})(?!щин|ськ)(?![${LOW}]{0,3}щин)(?![${LOW}]{0,6}${OBL_TAIL})${adjNamesake}[${LOW}]{0,5}(?![${CYR}])`, 'u');
+    ukStemRe.set(key, re);
+  }
   return re;
 };
 /**
+ * Oblasti mimo gazetteeru (na odhalenie menovca a ako hrubá poloha len v tom
+ * prípade): kmeň + ťažisko. Oblasti gazetteeru ostávajú v UK_PLACE_STEMS.
+ */
+export const UK_OBLAST_HINTS = Object.freeze({
+  'Vinnytsia Oblast': { re: `Вінниччин|${oblAdjStem('Вінницьк')}`, lat: 49.1, lon: 28.5 },
+  'Volyn Oblast': { re: `Волин(?:ь|і|ню)(?![${LOW}])|${oblAdjStem('Волинськ')}`, lat: 51.2, lon: 25.1 },
+  'Zhytomyr Oblast': { re: `Житомирщин|${oblAdjStem('Житомирськ')}`, lat: 50.6, lon: 28.4 },
+  'Zakarpattia Oblast': { re: `Закарпатт|${oblAdjStem('Закарпатськ')}`, lat: 48.4, lon: 23.3 },
+  'Ivano-Frankivsk Oblast': { re: `Прикарпатт|Івано-Франківщин|${oblAdjStem('Івано-Франківськ')}`, lat: 48.8, lon: 24.6 },
+  'Kyiv Oblast': { re: `Київщин|${oblAdjStem('Київськ')}`, lat: 50.4, lon: 30.6 },
+  'Kirovohrad Oblast': { re: `Кіровоградщин|${oblAdjStem('Кіровоградськ')}`, lat: 48.4, lon: 32.0 },
+  'Luhansk Oblast': { re: `Луганщин|${oblAdjStem('Луганськ')}`, lat: 48.8, lon: 38.9 },
+  'Lviv Oblast': { re: `Львівщин|${oblAdjStem('Львівськ')}`, lat: 49.8, lon: 24.0 },
+  'Mykolaiv Oblast': { re: `Миколаївщин|${oblAdjStem('Миколаївськ')}`, lat: 47.2, lon: 31.8 },
+  'Poltava Oblast': { re: `Полтавщин|${oblAdjStem('Полтавськ')}`, lat: 49.6, lon: 33.9 },
+  'Rivne Oblast': { re: `Рівненщин|${oblAdjStem('Рівненськ')}`, lat: 51.0, lon: 26.3 },
+  'Ternopil Oblast': { re: `Тернопільщин|${oblAdjStem('Тернопільськ')}`, lat: 49.4, lon: 25.6 },
+  'Khmelnytskyi Oblast': { re: `Хмельниччин|${oblAdjStem('Хмельницьк')}`, lat: 49.4, lon: 26.9 },
+  'Cherkasy Oblast': { re: `Черкащин|${oblAdjStem('Черкаськ')}`, lat: 49.2, lon: 31.5 },
+  'Chernivtsi Oblast': { re: `Буковин(?:а|и|і|у|ою)(?![${LOW}])|Чернівеччин|${oblAdjStem('Чернівецьк')}`, lat: 48.3, lon: 25.9 },
+  'Chernihiv Oblast': { re: `Чернігівщин|${oblAdjStem('Чернігівськ')}`, lat: 51.4, lon: 32.1 },
+});
+const oblastHintRe = new Map();
+// Zhoda zje aj pádovú koncovku („Житомирщин|а", „…област|і") — tvar sa číta z celého slova.
+const hintRe = (re) => { let r = oblastHintRe.get(re); if (!r) { r = new RegExp(`(?<![${CYR}])(?:${re})[${LOW}]*`, 'u'); oblastHintRe.set(re, r); } return r; };
+/** Sídlo ďalej od oblasti, ktorá ho kvalifikuje = menovec z inej oblasti (km). */
+export const OBLAST_NAMESAKE_KM = 250;
+/** Oblasť kvalifikuje sídlo za ňou len do tejto vzdialenosti (znaky) a bez oddeľovača úseku. */
+export const OBLAST_QUALIFY_CHARS = 60;
+// Oddeľovač úseku: veta, bodkočiarka, zvislica, nový riadok — aj emoji, ktorým hlásenia
+// Vzdušných síl začínajú položky zoznamu („… Одещини 🏍 … Кривого Рогу").
+const SEGMENT_BREAK_RE = /[.!?;|\n]|\p{Extended_Pictographic}/u;
+// Emoji hneď za nadpisom oblasti („Житомирщина: 🛵 БпЛА …") úsek nedelí.
+const HEADER_EMOJI_RE = /^[\s:–—-]*(?:\p{Extended_Pictographic}|️|‍)+/u;
+// Skratky s bodkou nie sú koniec vety („в р-ні н.п. Борова", „м. Суми", „обл.").
+const ABBREV_RE = new RegExp(`(?<![${CYR}])(?:н\\.\\s?п\\.|р[-—–]н[іа]?\\.?|смт\\.?|обл\\.|м\\.|с\\.)`, 'gu');
+/**
+ * Tvar zmienky oblasti z celého slova: nominatív (nadpis „Житомирщина:"),
+ * genitív („Житомирщини", „Житомирської області"), lokál („на Житомирщині",
+ * „у Житомирській області"), akuzatív („на Київщину" = smer). Pure.
+ */
+function oblastForm(phrase) {
+  const w = phrase.toLowerCase();
+  if (/обл/u.test(w)) {
+    const adj = /^\S*?(ої|ій|ою|их|а|у)(?=[\s,])/u.exec(w)?.[1];
+    return ({ а: 'nom', ої: 'gen', их: 'gen', ій: 'loc', у: 'acc', ою: 'ins' })[adj] || 'other';
+  }
+  const tail = /(щин|буковин|волин|карпатт)([а-яіїєґ]*)$/u.exec(w);
+  if (!tail) return 'other';
+  const [, root, e] = tail;
+  if (root === 'волин') return e === 'ь' ? 'nom' : (e === 'і' ? 'loc' : 'other');
+  if (root === 'карпатт') return e === 'я' ? 'nom' : (e === 'і' ? 'loc' : 'other');
+  return ({ а: 'nom', и: 'gen', і: 'loc', у: 'acc', ою: 'ins' })[e] || 'other';
+}
+/** Predložka tesne pred zmienkou („з", „на", „до"…), malými písmenami, alebo ''. */
+function prepositionBefore(s, at) {
+  const m = new RegExp(`(?:^|[^${CYR}])(з|із|зі|від|до|на|у|в|по|через|повз)\\s+$`, 'iu').exec(s.slice(Math.max(0, at - 10), at));
+  return m ? m[1].toLowerCase() : '';
+}
+/** Odkiaľ/kam — takáto oblasť sídlo nekvalifikuje. */
+const FROM_OR_TOWARD = new Set(['з', 'із', 'зі', 'від', 'до', 'через', 'повз']);
+const kmApprox = (a, b) => { const dy = (b.lat - a.lat) * 111.32; const dx = (b.lon - a.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180); return Math.hypot(dx, dy); };
+/**
  * Sídlo gazetteeru menované v ukrajinskom texte NAJSKÔR (poloha v texte, nie
  * poradie gazetteeru — súhrn DSNS menuje viac miest, prvé je predmet); oblasť
- * až keď nesedí žiadne sídlo. Pure.
+ * až keď nesedí žiadne sídlo. Keď oblasť, ktorá sídlo NAOZAJ kvalifikuje, leží
+ * od neho ďalej než OBLAST_NAMESAKE_KM, sídlo je menovec z inej oblasti →
+ * poloha oblasti (približná). Kvalifikuje: pred sídlom v tom istom úseku (do 60
+ * znakov, bez . ! ? ; | emoji a nového riadku; skratky „н.п." neprekážajú) nadpis
+ * „Житомирщина:" alebo lokál „на Житомирщині"; za sídlom lokál, genitív bez
+ * predložky („Новомиколаївки Запорізької області") alebo zátvorka „(Рівненщина)".
+ * Nekvalifikuje: odkiaľ/kam („з Одещини", „на Київщину", „до Київщини"). Bez
+ * sídla len oblasť gazetteeru (UK_OBLAST_HINTS polohu samy nedávajú). Pure.
  */
 export function locateUkText(text, gazetteer = UKRAINE_GAZETTEER) {
   const s = String(text ?? '');
   if (!s) return null;
-  let best = null; let bestAt = Infinity; let oblast = null; let oblastAt = Infinity;
+  let best = null; let bestAt = Infinity; let bestEnd = Infinity;
+  const oblasts = []; // { name, lat, lon, at, end, form, prep, gazetteer }
+  const addOblast = (name, lat, lon, m, gaz) => {
+    oblasts.push({ name, lat, lon, at: m.index, end: m.index + m[0].length, form: oblastForm(m[0]), prep: prepositionBefore(s, m.index), gazetteer: gaz });
+  };
   for (const place of gazetteer) {
     const stem = UK_PLACE_STEMS[place.name];
     if (!stem) continue;
-    const m = stemRe(stem).exec(s);
+    const m = stemRe(stem, place.name).exec(s);
     if (!m) continue;
-    if (/Oblast$/.test(place.name)) { if (m.index < oblastAt) { oblast = place; oblastAt = m.index; } continue; }
-    if (m.index < bestAt) { best = place; bestAt = m.index; }
+    if (/Oblast$/.test(place.name)) { addOblast(place.name, place.lat, place.lon, m, true); continue; }
+    if (m.index < bestAt) { best = place; bestAt = m.index; bestEnd = m.index + m[0].length; }
   }
-  if (best) return { name: best.name, lat: best.lat, lon: best.lon };
+  for (const [name, h] of Object.entries(UK_OBLAST_HINTS)) {
+    const m = hintRe(h.re).exec(s);
+    if (m) addOblast(name, h.lat, h.lon, m, false);
+  }
+  oblasts.sort((a, b) => a.at - b.at);
+  if (best) {
+    const before = oblasts.filter((o) => {
+      if (o.end > bestAt || bestAt - o.end > OBLAST_QUALIFY_CHARS || FROM_OR_TOWARD.has(o.prep)) return false;
+      const gap = s.slice(o.end, bestAt).replace(HEADER_EMOJI_RE, '').replace(ABBREV_RE, ' ');
+      if (SEGMENT_BREAK_RE.test(gap)) return false;
+      if (o.form === 'loc') return true;
+      return o.form === 'nom' && /^\s*[:–—-]/u.test(s.slice(o.end));
+    }).at(-1);
+    const after = oblasts.find((o) => {
+      if (o.at < bestEnd || FROM_OR_TOWARD.has(o.prep)) return false;
+      const gap = s.slice(bestEnd, o.at);
+      if (!/^[\s(«"„—–-]*(?:(?:на|у|в)\s+)?$/u.test(gap)) return false;
+      if (o.form === 'loc') return true;
+      if (o.form === 'gen') return !/(?:на|у|в)\s+$/u.test(gap);
+      return o.form === 'nom' && /\(\s*$/u.test(gap);
+    });
+    const hints = [before, after].filter(Boolean);
+    if (!hints.length || hints.some((h) => kmApprox(h, best) <= OBLAST_NAMESAKE_KM)) return { name: best.name, lat: best.lat, lon: best.lon };
+    const hint = hints[0];
+    return { name: hint.name, lat: hint.lat, lon: hint.lon, approx: true };
+  }
+  // Bez sídla len oblasti gazetteeru (ako doteraz): nápovedy ostatných oblastí slúžia
+  // len na odhalenie menovca — inak by na mapu pribudli stovky bodov v ťažiskách
+  // oblastí vrátane príbehov o ľuďoch („блогер з Буковини"), čo nechceme.
+  const oblast = oblasts.find((o) => o.gazetteer);
   return oblast ? { name: oblast.name, lat: oblast.lat, lon: oblast.lon, approx: true } : null;
 }
 

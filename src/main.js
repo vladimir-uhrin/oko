@@ -664,6 +664,9 @@ async function init() {
       viewer,
       placeIndex: () => ukraineBase.getPlaceIndex(),
       reservePlaces: (ids) => ukraineBase.setReservedPlaces(ids),
+      // DeepState vzniká nižšie — volá sa až pri kreslení (lenivo).
+      frontKm: (lon, lat, opts) => window.__godsEyeView.ukraineDeepState?.frontKm?.(lon, lat, opts) ?? null,
+      frontDay: () => window.__godsEyeView.ukraineDeepState?.getState?.().day ?? null,
     });
     window.__godsEyeView.ukraineReport = ukraineReport;
     let ukraineBoundariesHeld = false;
@@ -725,6 +728,9 @@ async function init() {
     ukraineBase.setSideResolver((lon, lat) => ukraineControl.sideAt(lon, lat) ?? ukraineDeepState.sideAt(lon, lat));
     ukraineControl.onChange(() => ukraineBase.refreshSides());
     ukraineDeepState.onChange(() => ukraineBase.refreshSides());
+    // Značky smerov hlásenia GŠ stoja pri sídle najbližšom k línii podľa DeepState
+    // (2026-09-24); nová snímka = prepočet kotiev.
+    ukraineDeepState.onChange(() => ukraineReport.reanchor());
     const applyUkraineZoneStyle = (stack) => {
       const mode = stack?.kind === 'hillshade' ? 'karta' : 'default';
       ukraineControl.setStyle(mode);
