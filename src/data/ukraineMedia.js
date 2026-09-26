@@ -173,7 +173,7 @@ export function parseRssVideoEnclosures(xml, { label = 'ArmyInform', badge = 'of
 const oblAdjStem = (stem) => `${stem}[а-яіїєґ'’ʼ]*(?:(?:(?:,\\s*|\\s+(?:та|і|й)\\s+)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+)+\\s+обл(?:астей|астях)|\\s+обл(?:аст[а-яіїєґ'’ʼ]*|\\.)?)`;
 export const UK_PLACE_STEMS = Object.freeze({
   Pokrovsk: 'Покровськ', Myrnohrad: 'Мирноград', Dobropillia: 'Добропілл', Kostiantynivka: 'Костянтинівк', 'Chasiv Yar': 'Час[оі]в[а-яіїєґ]* Яр', Toretsk: 'Торецьк', Bakhmut: 'Бахмут', Siversk: 'Сіверськ',
-  Lyman: 'Лиман', Sloviansk: "Слов['’ʼ]янськ", Kramatorsk: 'Краматорськ', Druzhkivka: 'Дружківк', Kupiansk: "Куп['’ʼ]янськ", Izium: 'Ізюм', Borova: 'Боров(?:а|ої|ій|у)', Vovchansk: 'Вовчанськ',
+  Lyman: 'Лиман(?!к)', Sloviansk: "Слов['’ʼ]янськ", Kramatorsk: 'Краматорськ', Druzhkivka: 'Дружківк', Kupiansk: "Куп['’ʼ]янськ", Izium: 'Ізюм', Borova: 'Боров(?:а|ої|ій|у)', Vovchansk: 'Вовчанськ',
   Huliaipole: 'Гуляйпол', Orikhiv: 'Оріх[іо]в', 'Velyka Novosilka': 'Велик[а-яіїєґ]* Новосілк', Vuhledar: 'Вугледар', Kurakhove: 'Курахов', Avdiivka: 'Авдіївк', Donetsk: 'Донецьк', Horlivka: 'Горлівк',
   Mariupol: 'Маріупол', Berdiansk: 'Бердянськ', Melitopol: 'Мелітопол', 'Enerhodar (Zaporizhzhia NPP)': 'Енергодар|ЗАЕС', Luhansk: 'Луганськ', Sievierodonetsk: 'Сєвєродонецьк', Kherson: 'Херсон',
   'Nova Kakhovka': 'Нов[а-яіїєґ]* Каховк', Oleshky: 'Олешк', Zaporizhzhia: 'Запоріжж', Nikopol: 'Нікопол', Dnipro: 'Дніпр(?:о|а|і|ом)', 'Kryvyi Rih': 'Крив[а-яіїєґ]* Р[іо]г|Кривбас', Pavlohrad: 'Павлоград', Kremenchuk: 'Кременчу',

@@ -44,8 +44,11 @@ test('oblasť rozhodne o menovcovi len keď sídlo naozaj kvalifikuje', () => {
   assert.equal(OBLAST_NAMESAKE_KM, 250);
   assert.equal(OBLAST_QUALIFY_CHARS, 60);
   // Za sídlom len cez predložku.
-  const r = locateUkText('Реактивний БпЛА на Лиманку на Одещині з моря. На Одесу!');
-  assert.equal(r.name, 'Odesa Oblast', 'Лиманка na Odesku ≠ Lyman na Donbase');
+  // 2026-09-26 (so súhlasom): kmeň Lymanu už nematchuje „Лиманка" (iné sídlo), preto
+  // menovec = Лиман na Odesku (obec pri Tatarbunaroch), nie Лиманка.
+  const r = locateUkText('Реактивний БпЛА на Лиман на Одещині з моря. На Одесу!');
+  assert.equal(r.name, 'Odesa Oblast', 'Лиман na Odesku ≠ Lyman na Donbase');
+  assert.equal(locateUkText('Реактивний БпЛА на Лиманку на Одещині з моря. На Одесу!')?.name, 'Odesa', 'Лиманка nie je Lyman — ostáva mesto Odesa z vety');
   assert.equal(r.approx, true);
   assert.equal(at('Бої за Лиман тривають, Донеччина'), 'Lyman', 'čiarka a sloveso medzi = nekvalifikuje');
   // Pred sídlom v tom istom úseku (aj s emoji hneď za nadpisom oblasti).
