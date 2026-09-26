@@ -28,7 +28,7 @@ import { placeLabel } from './ukraineBase.js';
 import { defaultTerrainSampler } from './ukraineBaseLayer.js';
 import { fetchUkraineReport, reportByScene } from './ukraineReport.js';
 import { directionAnchor, directionPlaces, placeKey } from './ukraineReportPlaces.js';
-import { ARROW_CSS, ARROW_MAX_KM, ARROW_OUTLINE_CSS, arrowScale, attackArrowPath, attackArrowPolygon } from './ukraineAttackArrows.js';
+import { ARROW_CSS, ARROW_LODS, ARROW_MAX_KM, ARROW_OUTLINE_CSS, arrowScale, attackArrowPath, attackArrowPolygon } from './ukraineAttackArrows.js';
 
 export const UKRAINE_REPORT_ID = 'ukraine-report';
 export const REPORT_REFRESH_MS = 30 * 60_000;
@@ -317,27 +317,31 @@ export function createUkraineReportLayer({
       let cp = null;
       try { cp = contactPoint(rec.lon, rec.lat, { reportDay }); } catch { cp = null; }
       if (!cp || !(cp.km <= ARROW_MAX_KM)) continue;
-      const path = attackArrowPath(cp, rec, { name: rec.place?.name });
-      if (!path) continue;
       // Telo šípky = pozemný polygón v km (rastie s mapou ako u Rybara; materiál
       // PolylineArrow na primknutých čiarach Cesium nekreslí), tmavý obrys = čiara okolo.
-      const ring = attackArrowPolygon(path, { scale: arrowScale(rec.attacks) });
-      if (!ring) continue;
-      const positions = ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
-      const base = `${rec.entity.id}:arrow`;
-      const ddc = () => new Cesium.DistanceDisplayCondition(0, REPORT_BOLT_FAR_M);
-      const arrow = ds.entities.add({
-        id: base,
-        polygon: { hierarchy: new Cesium.PolygonHierarchy(positions), material: Cesium.Color.fromCssColorString(ARROW_CSS).withAlpha(0.92), classificationType: Cesium.ClassificationType.BOTH, zIndex: 13, show: visible, distanceDisplayCondition: ddc() },
-      });
-      const outline = ds.entities.add({
-        id: `${base}:outline`,
-        polyline: { positions: [...positions, positions[0]], width: 2, material: Cesium.Color.fromCssColorString(ARROW_OUTLINE_CSS).withAlpha(0.9), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH, zIndex: 14, show: visible, distanceDisplayCondition: ddc() },
-      });
-      rec.arrowEntities = [outline, arrow];
+      // Dve úrovne detailu (ARROW_LODS): zblízka pôvodná, z pohľadu na smer väčšia.
+      const made = [];
+      for (const lod of ARROW_LODS) {
+        const path = attackArrowPath(cp, rec, { name: rec.place?.name, lenMinKm: lod.lenMinKm, lenMaxKm: lod.lenMaxKm });
+        const ring = path ? attackArrowPolygon(path, { scale: arrowScale(rec.attacks) * lod.scale }) : null;
+        if (!ring) continue;
+        const positions = ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
+        const base = lod.id === 'near' ? `${rec.entity.id}:arrow` : `${rec.entity.id}:arrow:${lod.id}`;
+        const ddc = () => new Cesium.DistanceDisplayCondition(lod.near, Math.min(lod.far, REPORT_BOLT_FAR_M));
+        const arrow = ds.entities.add({
+          id: base,
+          polygon: { hierarchy: new Cesium.PolygonHierarchy(positions), material: Cesium.Color.fromCssColorString(ARROW_CSS).withAlpha(0.92), classificationType: Cesium.ClassificationType.BOTH, zIndex: 13, show: visible, distanceDisplayCondition: ddc() },
+        });
+        const outline = ds.entities.add({
+          id: `${base}:outline`,
+          polyline: { positions: [...positions, positions[0]], width: 2, material: Cesium.Color.fromCssColorString(ARROW_OUTLINE_CSS).withAlpha(0.9), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH, zIndex: 14, show: visible, distanceDisplayCondition: ddc() },
+        });
+        made.push(outline, arrow);
+      }
+      if (!made.length) continue;
+      rec.arrowEntities = made;
       rec.arrow = { km: Math.round(cp.km * 10) / 10 };
-      _byEntityId.set(outline.id, rec);
-      _byEntityId.set(arrow.id, rec);
+      for (const e of made) _byEntityId.set(e.id, rec);
     }
   }
   function clearPlaces() {

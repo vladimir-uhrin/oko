@@ -73,6 +73,35 @@ export const UKRAINE_BASE_STYLES = Object.freeze({
 });
 /** Farby špendlíkov podľa strany (KARTA K3, ako vo vzorke): UA modrá, RU červená, sporné oranžová. */
 export const SIDE_PIN_COLORS = Object.freeze({ ua: '#5b8fd0', ru: '#d0554a', contested: '#f0a53a' });
+/**
+ * Šesťuholníky sídiel na KARTE (2026-09-26, vzorka Rybar): sídlo so známou stranou
+ * je šesťuholník vo farbe strany s tmavým lemom a svetlým stredom, veľkosť podľa
+ * triedy (px). Sídlo bez známej strany ostáva malým bodom.
+ */
+export const HEX_PIN_PX = Object.freeze({ city: 17, town: 13, village: 10 });
+/** Vrcholy šesťuholníka so špičkou hore okolo (cx, cy) s polomerom r (px). Pure. */
+export function hexPinVertices(cx, cy, r) {
+  const out = [];
+  for (let k = 0; k < 6; k += 1) {
+    const a = (Math.PI / 3) * k - Math.PI / 2;
+    out.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+  }
+  return out;
+}
+/**
+ * Obrázok šesťuholníka ako data URL (reťazec = jeden záznam v atlase textúr pre
+ * všetky sídla tej farby; plátno by Cesium pridalo do atlasu pre každý billboard znova).
+ */
+export function defaultHexPinImage(css, doc = globalThis.document) {
+  if (!doc?.createElement || !css) return null;
+  const S = 48; const c = doc.createElement('canvas'); c.width = S; c.height = S;
+  const g = c.getContext?.('2d'); if (!g) return null;
+  const path = (r) => { g.beginPath(); hexPinVertices(S / 2, S / 2, r).forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); };
+  path(S / 2 - 2); g.fillStyle = '#0b1622'; g.fill();
+  path(S / 2 - 5); g.fillStyle = css; g.fill();
+  g.beginPath(); g.arc(S / 2, S / 2, S * 0.13, 0, Math.PI * 2); g.fillStyle = 'rgba(241, 245, 248, 0.92)'; g.fill();
+  try { return c.toDataURL('image/png'); } catch { return null; }
+}
 /** Žiarenie miest na KARTE: od tejto populácie, polomer z populácie, teplá červená. */
 export const GLOW_MIN_POP = 10_000;
 export const GLOW_COLOR = '#ff5a4a';
@@ -114,6 +143,19 @@ export const ROAD_SHIELD_COLORS = Object.freeze({
 });
 /** Strop dohľadu odznaku (m) a pásmo doznievania/zmenšenia na jeho okraji. */
 export const ROAD_SHIELD_FAR_M = 380_000;
+/**
+ * Dosah odznaku podľa kódu cesty (2026-09-26, „hlavné cesty len na úrovni smeru"):
+ * pri pohľade na smer (≈ 180 km) len M/H/E a P, oblastné T/O až zbližša, miestne
+ * (C…, dlhé čísla) len celkom zblízka. Pure.
+ */
+export function roadShieldFarM(refDisplay) {
+  const m = /^([A-Za-z]+)[-\s]?(\d*)/.exec(String(refDisplay || ''));
+  const p = m ? m[1].toUpperCase() : '';
+  if (p === 'M' || p === 'H' || p === 'E') return ROAD_SHIELD_FAR_M;
+  if (p === 'P') return 200_000;
+  if (p === 'T' || p === 'O') return 110_000;
+  return 50_000;
+}
 export const ROAD_SHIELD_FADE_FROM = 0.62;
 export const ROAD_SHIELD_FAR_SCALE = 0.78;
 const ROAD_REF_CYR = Object.freeze({ М: 'M', Н: 'H', Р: 'P', Т: 'T', О: 'O', С: 'C', А: 'A', К: 'K', Е: 'E', Г: 'G', В: 'V', Д: 'D', Л: 'L', П: 'P', Х: 'H', И: 'I', Й: 'Y', У: 'U', Ф: 'F', Б: 'B', Ц: 'C', Ч: 'Ch', Ш: 'Sh', Я: 'Ya', Ю: 'Yu', Э: 'E', Ы: 'Y', З: 'Z' });
@@ -280,6 +322,8 @@ export function createUkraineBaseLayer({
   now = () => Date.now(),
   glowImageFactory = defaultGlowImage,
   roadShieldFactory = defaultRoadShieldImage,
+  /** Šesťuholník sídla (KARTA) podľa css farby strany → obrázok billboardu (data URL). */
+  hexPinFactory = defaultHexPinImage,
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   const inert = {
@@ -373,19 +417,36 @@ export function createUkraineBaseLayer({
     const on = _styleMode === 'karta';
     for (const entity of _roadShields) { try { if (entity.billboard) entity.billboard.show = on; } catch { /* preč */ } }
   }
-  /** Farba bodu sídla: v štýle karta podľa strany (resolver), inak farba triedy. */
-  function pinColorFor(record) {
+  const _hexImgCache = new Map(); // css → data URL | null
+  const hexImage = (css) => {
+    if (!_hexImgCache.has(css)) { let img = null; try { img = hexPinFactory?.(css) || null; } catch { img = null; } _hexImgCache.set(css, img); }
+    return _hexImgCache.get(css);
+  };
+  /** Farba a strana sídla: v štýle karta podľa strany (resolver), inak farba triedy bez strany. */
+  function pinFor(record) {
     const base = (PLACE_STYLE[record.props.cls] || PLACE_STYLE.village).color;
-    if (_styleMode !== 'karta' || typeof _sideResolver !== 'function') return base;
+    if (_styleMode !== 'karta' || typeof _sideResolver !== 'function') return { css: base, side: null };
     let side = null;
     try { side = _sideResolver(record.lon, record.lat, record.props); } catch { side = null; }
-    return SIDE_PIN_COLORS[side] || base;
+    return SIDE_PIN_COLORS[side] ? { css: SIDE_PIN_COLORS[side], side } : { css: base, side: null };
   }
+  /**
+   * Špendlík sídla podľa strany: na KARTE so známou stranou šesťuholník (billboard,
+   * bod skrytý, popisok odsunutý za šesťuholník), inak bod vo farbe triedy/strany.
+   */
   function applySide(record) {
-    const css = pinColorFor(record);
-    if (record.pinCss === css) return;
+    const { css, side } = pinFor(record);
+    const hex = side ? hexImage(css) : null;
+    const key = `${css}|${hex ? 'hex' : 'dot'}`;
+    if (record.pinKey === key) return;
+    record.pinKey = key;
     record.pinCss = css;
-    try { if (record.entity.point) record.entity.point.color = Cesium.Color.fromCssColorString(css).withAlpha(0.95); } catch { /* */ }
+    const e = record.entity;
+    try {
+      if (e.point) { e.point.color = Cesium.Color.fromCssColorString(css).withAlpha(0.95); e.point.show = !hex; }
+      if (e.billboard) { if (hex) e.billboard.image = hex; e.billboard.show = Boolean(hex); }
+      if (e.label) e.label.pixelOffset = new Cesium.Cartesian2(hex ? Math.round((HEX_PIN_PX[record.cls] || HEX_PIN_PX.village) / 2) + 4 : 8, -1);
+    } catch { /* entita už preč */ }
   }
   /** Žiarenie mesta (billboard pod špendlíkom) — len karta, mestá a mestečká od GLOW_MIN_POP. */
   function applyGlow(record) {
@@ -522,6 +583,16 @@ export function createUkraineBaseLayer({
         // Obce dobiehajú priesvitnosťou, nie skokom (2026-09-26).
         ...(props.cls === 'village' ? { translucencyByDistance: new Cesium.NearFarScalar(placePointDisplayCondition('village')[1] * VILLAGE_POINT_FADE_FROM, 1, placePointDisplayCondition('village')[1], 0) } : {}),
       },
+      // Šesťuholník strany (KARTA) — obrázok a viditeľnosť nastaví applySide.
+      billboard: {
+        show: false,
+        width: HEX_PIN_PX[props.cls] || HEX_PIN_PX.village,
+        height: HEX_PIN_PX[props.cls] || HEX_PIN_PX.village,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        distanceDisplayCondition: ddc(placePointDisplayCondition(props.cls)),
+        ...(props.cls === 'village' ? { translucencyByDistance: new Cesium.NearFarScalar(placePointDisplayCondition('village')[1] * VILLAGE_POINT_FADE_FROM, 1, placePointDisplayCondition('village')[1], 0) } : {}),
+      },
       label: labelFor(text, { fontPx: style.fontPx, weight: style.weight, colorCss: style.color, displayCondition: placeLabelDisplayCondition(props.cls), background: props.cls === 'city' }),
     });
     const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true, lifted: false, reservedHidden: false };
@@ -651,7 +722,7 @@ export function createUkraineBaseLayer({
       let img = _shieldImgCache.get(sig);
       if (img === undefined) { try { img = roadShieldFactory?.(specs) || null; } catch { img = null; } _shieldImgCache.set(sig, img); }
       if (!img) continue;
-      const farM = Math.min(roadStyle(pick.cls).farM, ROAD_SHIELD_FAR_M);
+      const farM = Math.min(roadStyle(pick.cls).farM, roadShieldFarM(specs[0].text));
       const id = `${UKRAINE_BASE_ID}:road-shield:${pick.key}`;
       const entity = ds.entities.add({
         id,

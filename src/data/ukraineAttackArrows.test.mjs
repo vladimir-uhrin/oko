@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
-  ARROW_BACK_KM, ARROW_HEAD_GAP_KM, ARROW_HEAD_L_KM, ARROW_HEAD_W_KM, ARROW_LEN_MAX, ARROW_LEN_MIN, ARROW_MAX_KM, ARROW_MIN_KM, ARROW_SAMPLES, ARROW_SHAFT_KM,
+  ARROW_BACK_KM, ARROW_HEAD_GAP_KM, ARROW_HEAD_L_KM, ARROW_HEAD_W_KM, ARROW_LEN_MAX, ARROW_LODS, ARROW_LEN_MIN, ARROW_MAX_KM, ARROW_MIN_KM, ARROW_SAMPLES, ARROW_SHAFT_KM,
   arrowBendSign, arrowScale, attackArrowPath, attackArrowPolygon,
 } from './ukraineAttackArrows.js';
 import { EN_STRINGS, SK_STRINGS } from '../i18nStrings.js';
@@ -89,6 +89,19 @@ test('attackArrowPolygon: driek konštantnej šírky, hrot so špičkou na konci
   assert.equal(attackArrowPolygon(null), null);
 });
 
+test('ARROW_LODS: zblízka pôvodná šípka, z pohľadu na smer väčšia; pásma na seba nadväzujú', () => {
+  assert.equal(ARROW_LODS.length, 2);
+  const [near, far] = ARROW_LODS;
+  assert.equal(near.near, 0);
+  assert.equal(near.far, far.near, 'bez medzery a prekryvu');
+  assert.ok(far.scale > near.scale && far.lenMinKm > near.lenMinKm && far.lenMaxKm > near.lenMaxKm);
+  // šípka pre ďaleký pohľad je dlhšia, hrot stále 0,6 km pred sídlom
+  const from = { lon: 37.8, lat: 49.0 }; const to = { lon: 37.8, lat: 49.0 + 2 / KM };
+  const pNear = attackArrowPath(from, to, near); const pFar = attackArrowPath(from, to, far);
+  assert.ok(kmBetween(pFar[0], pFar[pFar.length - 1]) > kmBetween(pNear[0], pNear[pNear.length - 1]) + 3);
+  assert.ok(Math.abs(kmBetween(pFar[pFar.length - 1], [to.lon, to.lat]) - ARROW_HEAD_GAP_KM) < 0.05);
+});
+
 test('KARTA: ostré hrany — plná výplň s tmavým obrysom, bez odvodenej línie; pás bojov s nižšou výplňou', () => {
   const k = DEEPSTATE_STYLES.karta;
   assert.equal(k.contact, null, 'odvodená línia sa v KARTE nekreslí');
@@ -108,6 +121,8 @@ test('vrstva hlásenia GŠ: šípky len s líniou, nie do okupovaného, len v KA
   assert.match(src, /if \(side === 'ru'\) continue;/, 'sídlo v okupovanom území bez šípky');
   assert.match(src, /if \(!cp \|\| !\(cp\.km <= ARROW_MAX_KM\)\) continue;/);
   assert.match(src, /polygon: \{ hierarchy: new Cesium\.PolygonHierarchy\(positions\)[^}]*zIndex: 13/, 'telo = pozemný polygón nad líniou');
+  assert.match(src, /for \(const lod of ARROW_LODS\) \{/, 'dve úrovne detailu');
+  assert.match(src, /new Cesium\.DistanceDisplayCondition\(lod\.near, Math\.min\(lod\.far, REPORT_BOLT_FAR_M\)\)/);
   assert.doesNotMatch(src, /PolylineArrowMaterialProperty/, 'PolylineArrow na primknutých čiarach nekreslí hrot');
   assert.match(src, /if \(a\.polygon\) a\.polygon\.show = on; if \(a\.polyline\) a\.polyline\.show = on;/, 'mimo KARTY skryté');
   assert.match(src, /arrows: \[\.\.\._placeRecords\.values\(\)\]\.filter\(\(r\) => r\.arrow\)\.length/);

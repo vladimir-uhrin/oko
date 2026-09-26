@@ -126,8 +126,9 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
     // Zastaraná snímka sa na mape kreslí stlmene — vzorka musí ustúpiť rovnako.
     items.push({ key: 'ru', colorCss: c.ru, label: translate('ukraine.karta.legend.ru'), ...(control.stale ? { dim: STALE_DIM } : {}) });
   }
-  items.push({ key: 'pin-ua', colorCss: c.pinUa, dot: true, label: translate('ukraine.karta.legend.pin-ua') });
-  items.push({ key: 'pin-ru', colorCss: c.pinRu, dot: true, label: translate('ukraine.karta.legend.pin-ru') });
+  // Sídla sú na KARTE šesťuholníky vo farbe strany (ukraineBaseLayer HEX_PIN_PX, vzorka Rybar).
+  items.push({ key: 'pin-ua', colorCss: c.pinUa, glyph: 'hex', label: translate('ukraine.karta.legend.pin-ua') });
+  items.push({ key: 'pin-ru', colorCss: c.pinRu, glyph: 'hex', label: translate('ukraine.karta.legend.pin-ru') });
   if (report?.shown) items.push({ key: 'combat', colorCss: c.combat, glyph: 'bolt', label: translate('ukraine.karta.legend.combat') });
   if (report?.shown && report.arrows > 0) items.push({ key: 'attack', colorCss: c.attack, glyph: 'arrow', label: translate('ukraine.karta.legend.attack') });
   items.push({ key: 'road', colorCss: c.road, glyph: 'shield', label: translate('ukraine.karta.legend.road') });
@@ -196,6 +197,7 @@ export function drawKartaExport(ctx, model, width, height, { font = 'system-ui, 
       ctx.fillStyle = item.colorCss || '#888';
       ctx.globalAlpha = Number.isFinite(item.dim) ? item.dim : 1;
       if (item.dot) { ctx.beginPath(); ctx.arc(bx + px(16), ry + px(4), px(5), 0, Math.PI * 2); ctx.fill(); }
+      else if (item.glyph === 'hex') { ctx.beginPath(); for (let k = 0; k < 6; k += 1) { const a = (Math.PI / 3) * k - Math.PI / 2; const x = bx + px(18) + px(6) * Math.cos(a); const y = ry + px(4) + px(6) * Math.sin(a); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); } ctx.closePath(); ctx.fill(); }
       else if (item.line) { ctx.fillRect(bx + px(10), ry + px(2.5), px(16), px(3)); }
       else { roundRectPath(ctx, bx + px(10), ry - px(2), px(16), px(11), px(2)); ctx.fill(); }
       ctx.globalAlpha = 1;

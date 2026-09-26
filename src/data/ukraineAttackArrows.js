@@ -84,6 +84,16 @@ export function attackArrowPath(from, to, {
   return out;
 }
 
+/**
+ * Úrovne detailu podľa vzdialenosti kamery (m): zblízka pôvodná šípka, pri
+ * pohľade na celý smer (≈ 180 km, 1 km ≈ 2–5 px) dvojnásobne hrubšia a dlhšia —
+ * inak by bola 10–30 px čiarka. Rozsah dĺžok (km) platí pre attackArrowPath.
+ */
+export const ARROW_LODS = Object.freeze([
+  Object.freeze({ id: 'near', near: 0, far: 90_000, scale: 1, lenMinKm: ARROW_LEN_MIN, lenMaxKm: ARROW_LEN_MAX }),
+  Object.freeze({ id: 'far', near: 90_000, far: 460_000, scale: 2, lenMinKm: 11, lenMaxKm: 18 }),
+]);
+
 /** Mierka tela šípky podľa počtu útokov smeru: 1–9 = 1, 10–24 = 1,25, 25+ = 1,5; bez útokov 0 (nekreslí sa). Pure. */
 export function arrowScale(attacks) {
   if (!(attacks > 0)) return 0;

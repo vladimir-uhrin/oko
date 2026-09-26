@@ -275,6 +275,8 @@ export function createUkraineDeepStateLayer({
   const _frontCache = new Map(); // "lon,lat" → km k línii pre aktuálnu snímku
   let _contact = []; // úseky línie kontaktu [[lon,lat],…] pre aktuálnu snímku
   let _insetRings = null; // hrubý obrys okupovaného pre prehľadovú mapku (lenivo)
+  let _sideBand = undefined; // raster pásu FRONT_ZONE_KM pre stranu z mirroru (lenivo; null = nedá sa)
+  const _sideCache = new Map(); // "lon,lat" → strana z mirroru mimo polygónov
   const _zones = new Map(); // `${uaKm}|${ruKm}` → raster pásma pre aktuálnu snímku (null = prázdne)
   let _prev = null; // staršia snímka pre zmenu za týždeň: { day, forDay, index }
   let _change = null; // raster rozdielu (occupiedChangeRaster) + fromDay/toDay
@@ -551,6 +553,8 @@ export function createUkraineDeepStateLayer({
     try { _contact = contactLinePaths(_polyIndex, UKRAINE_LAND_RINGS); } catch { _contact = []; }
     _zones.clear(); // pásma sa počítajú lenivo pri prvom kreslení v štýle, ktorý ich má (~70 ms)
     _insetRings = null;
+    _sideBand = undefined;
+    _sideCache.clear();
     _error = null;
     if (_change && _change.toDay !== _snapshot?.day) _change = null; // rozdiel patrí k inému dňu
     rebuild();
@@ -568,10 +572,35 @@ export function createUkraineDeepStateLayer({
   /** Strana bodu podľa polygónov snímky: 'ru' | 'contested' | 'ua' (mimo polygónov, keď snímka má okupované) | null bez snímky. */
   function sideAt(lon, lat) {
     const hasOccupied = _polyIndex.some((p) => DEEPSTATE_RU_KINDS.includes(p.kind));
-    // Mirror nesie len okupované územie, šedú zónu nie — mimo polygónov preto
+    // Mirror nesie len okupované územie, šedú zónu nie — tesne pri línii preto
     // stranu nevieme (inak by špendlíky v šedej zóne zmodreli ako UA).
     const mirror = _snapshot?.source === 'mirror';
-    return sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied && !mirror ? 'ua' : null });
+    const side = sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied && !mirror ? 'ua' : null });
+    if (side !== null || !mirror || !hasOccupied) return side;
+    return mirrorUaSide(lon, lat) ? 'ua' : null;
+  }
+  /**
+   * Strana z mirroru mimo okupovaného (2026-09-26, šesťuholníky ako Rybar): na
+   * pevnine Ukrajiny a ďalej než FRONT_ZONE_KM od dnešnej línie = ukrajinská strana
+   * (tak ju kreslí aj DeepState); v odvodenom páse pri línii (náhrada sivej zóny)
+   * stranu nevieme. Cache do ďalšej snímky.
+   */
+  function mirrorUaSide(lon, lat) {
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return false;
+    const key = `${lon.toFixed(4)},${lat.toFixed(4)}`;
+    if (_sideCache.has(key)) return _sideCache.get(key);
+    let ua = UKRAINE_LAND_RINGS.some((ring) => pointInRing(lon, lat, ring));
+    if (ua && _contact.length) {
+      if (_sideBand === undefined) { try { _sideBand = frontZoneRaster(_contact, _polyIndex, { landRings: UKRAINE_LAND_RINGS, radiusKm: FRONT_ZONE_KM, ruRadiusKm: 0 }); } catch { _sideBand = null; } }
+      const z = _sideBand;
+      if (z) {
+        const c = Math.floor((lon - z.bbox.west) / z.cellDeg);
+        const r = Math.floor((z.bbox.north - lat) / z.cellDeg);
+        if (c >= 0 && r >= 0 && c < z.width && r < z.height && z.values[r * z.width + c] > 0) ua = false;
+      }
+    }
+    _sideCache.set(key, ua);
+    return ua;
   }
   /**
    * Vzdialenosť k línii (km) podľa aktuálnej snímky; null bez ruských polygónov
