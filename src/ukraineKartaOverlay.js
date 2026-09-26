@@ -22,7 +22,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 export const KARTA_LEGEND_COLORS = Object.freeze({
   occupied: '#d0554a', grey: '#8a8f98', ru: '#e0553f', contact: '#b3261e',
   pinUa: '#5b8fd0', pinRu: '#d0554a', pinContested: '#f0a53a',
-  combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a',
+  combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a', band: '#f0922e',
 });
 
 /**
@@ -100,9 +100,10 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
   if (deepstateDraws(deepstate)) {
     items.push({ key: 'occupied', colorCss: c.occupied, label: translate('ukraine.karta.legend.occupied') });
     if (deepstate.contact > 0) items.push({ key: 'contact', colorCss: c.contact, line: true, label: translate('ukraine.karta.legend.contact') });
-    // Mirror šedú zónu nemá — namiesto nej je na mape pás bojov z Wikipédie.
+    // Mirror šedú zónu nemá — namiesto nej je oranžovo šrafovaný pás cez líniu, odvodený
+    // z dnešnej línie (DEEPSTATE_STYLES.karta.combatBand; 2026-09-26, vzorka Rybar).
     if (deepstate.source !== 'mirror') items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
-    else if (control?.shown) items.push({ key: 'contested', colorCss: c.ru, pattern: 'hatch', label: translate('ukraine.karta.legend.contested') });
+    else items.push({ key: 'contested', colorCss: c.band, pattern: 'hatch', label: translate('ukraine.karta.legend.contested') });
   } else if (control?.shown) {
     // Zastaraná snímka sa na mape kreslí stlmene — vzorka musí ustúpiť rovnako.
     items.push({ key: 'ru', colorCss: c.ru, label: translate('ukraine.karta.legend.ru'), ...(control.stale ? { dim: STALE_DIM } : {}) });
@@ -183,20 +184,28 @@ export function drawKartaExport(ctx, model, width, height, { font = 'system-ui, 
       ctx.fillText(item.label, bx + px(34), ry + px(8));
     });
   }
-  // Prehľadová mapka vpravo dole (obrys z modelu: KARTA = Ukrajina, inak svet).
+  // Prehľadová mapka vpravo hore (ako náhľad na mapách Rybar; obrys z modelu: KARTA = Ukrajina, inak svet).
   const insetW = px(200), insetH = px(144);
-  const ix = width - insetW - pad, iy = height - insetH - pad;
+  const ix = width - insetW - pad, iy = pad;
   ctx.fillStyle = 'rgba(8, 14, 22, 0.74)';
   roundRectPath(ctx, ix, iy, insetW, insetH, px(8)); ctx.fill();
   const proj = makeInsetProjection(inset.bbox || UKRAINE_OUTLINE_BBOX, insetW, insetH, px(12));
   ctx.save();
   ctx.translate(ix, iy);
-  ctx.strokeStyle = 'rgba(150, 180, 205, 0.6)'; ctx.lineWidth = 1; ctx.fillStyle = 'rgba(120, 150, 175, 0.10)';
+  ctx.strokeStyle = 'rgba(150, 180, 205, 0.6)'; ctx.lineWidth = 1; ctx.fillStyle = 'rgba(43, 92, 138, 0.55)';
   for (const ring of inset.rings) {
     if (!ring.length) continue;
     ctx.beginPath();
     ring.forEach(([lon, lat], i) => { const p = proj.project(lon, lat); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
     ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  if (Array.isArray(model.occupied) && model.occupied.length) {
+    ctx.fillStyle = 'rgba(158, 44, 52, 0.85)'; ctx.strokeStyle = 'rgba(210, 80, 80, 0.7)'; ctx.lineWidth = 0.8;
+    for (const ring of model.occupied) {
+      ctx.beginPath();
+      ring.forEach(([lon, lat], i) => { const p = proj.project(lon, lat); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); });
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
   }
   if (Array.isArray(model.viewRect) && model.viewRect.length === 4) {
     const r = proj.rect(model.viewRect);
@@ -279,12 +288,15 @@ export function createUkraineKartaOverlay({
   svg.setAttribute('class', 'oko-karta-inset-svg');
   const outlinePath = doc.createElementNS(SVG_NS, 'path');
   outlinePath.setAttribute('class', 'oko-karta-inset-outline');
+  // Ruská kontrola v mapke (ako náhľad na mapách Rybar), z hrubého obrysu DeepState.
+  const occupiedPath = doc.createElementNS(SVG_NS, 'path');
+  occupiedPath.setAttribute('class', 'oko-karta-inset-occupied');
   const viewRectEl = doc.createElementNS(SVG_NS, 'rect');
   viewRectEl.setAttribute('class', 'oko-karta-inset-view');
   const dot = doc.createElementNS(SVG_NS, 'circle');
   dot.setAttribute('class', 'oko-karta-inset-dot');
   dot.setAttribute('r', '2.4');
-  svg.append(outlinePath, viewRectEl, dot);
+  svg.append(outlinePath, occupiedPath, viewRectEl, dot);
   insetIsland.append(svg);
 
   // Nástroje (čistá karta + snímka) — ostávajú aj v čistom režime.
@@ -303,6 +315,8 @@ export function createUkraineKartaOverlay({
   outlinePath.setAttribute('d', UKRAINE_OUTLINE_RINGS.map((ring) => insetRingPath(insetProj.project, ring)).join(' '));
 
   function drawInset() {
+    const occ = deepstateDraws(deepstate?.getState?.()) ? (deepstate?.occupiedOutline?.() || []) : [];
+    occupiedPath.setAttribute('d', occ.map((ring) => insetRingPath(insetProj.project, ring)).join(' '));
     const rect = typeof getViewRect === 'function' ? getViewRect() : null;
     if (Array.isArray(rect) && rect.length === 4) {
       const r = insetProj.rect(rect);
@@ -388,6 +402,7 @@ export function createUkraineKartaOverlay({
       legend: kartaLegendItems({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }),
       legendHead: translate('ukraine.karta.legend.head'),
       scene: _scene, viewRect: typeof getViewRect === 'function' ? getViewRect() : null,
+      occupied: deepstateDraws(deepstate?.getState?.()) ? (deepstate?.occupiedOutline?.() || []) : [],
     }),
     destroy,
     _getStateForTest: () => ({ root, titleH, titleSub, legendList, viewRectEl, dot, cleanBtn, shotBtn, isKarta: _isKarta, revealed: _revealed, clean: _clean }),

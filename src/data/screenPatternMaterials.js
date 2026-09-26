@@ -67,6 +67,8 @@ function frontZoneFabric(CesiumRef) {
         rect: new CesiumRef.Cartesian4(0, 0, 1, 1),
         zoneColor: new CesiumRef.Color(1.0, 0.48, 0.24, 0.42),
         hatchColor: new CesiumRef.Color(1.0, 0.29, 0.24, 0.62),
+        // Výplň medzi šrafami (KARTA: oranžové pruhy na priesvitnej oranžovej ako Rybar; inak 0).
+        hatchFill: new CesiumRef.Color(1.0, 0.29, 0.24, 0.0),
         spacing: HATCH_DEFAULTS.spacingPx,
         thickness: HATCH_DEFAULTS.thickness,
       },
@@ -86,9 +88,10 @@ function frontZoneFabric(CesiumRef) {
   float d = min(t, 1.0 - t) * 2.0;
   float line = 1.0 - smoothstep(thickness, thickness + 0.25, d);
   float aUa = s.r * zoneColor.a;
-  float aRu = s.g * line * hatchColor.a;
+  float aRu = s.g * mix(hatchFill.a, hatchColor.a, line);
+  vec3 cRu = mix(hatchFill.rgb, hatchColor.rgb, line);
   float a = aUa + aRu * (1.0 - aUa);
-  m.diffuse = a > 0.0 ? (zoneColor.rgb * aUa + hatchColor.rgb * aRu * (1.0 - aUa)) / a : zoneColor.rgb;
+  m.diffuse = a > 0.0 ? (zoneColor.rgb * aUa + cRu * aRu * (1.0 - aUa)) / a : zoneColor.rgb;
   m.alpha = a;
   return m;
 }`,
@@ -160,8 +163,8 @@ export function geoImageMaterialFor(image, bbox) {
 
 /** MaterialProperty prifrontového pásma (textúra R/G + geodetický obdĺžnik v radiánoch). */
 export class FrontZoneMaterialProperty {
-  constructor({ image, rect, zoneColor, hatchColor, spacing = HATCH_DEFAULTS.spacingPx, thickness = HATCH_DEFAULTS.thickness } = {}) {
-    this._uniforms = { image, rect, zoneColor, hatchColor, spacing, thickness };
+  constructor({ image, rect, zoneColor, hatchColor, hatchFill = null, spacing = HATCH_DEFAULTS.spacingPx, thickness = HATCH_DEFAULTS.thickness } = {}) {
+    this._uniforms = { image, rect, zoneColor, hatchColor, hatchFill: hatchFill || hatchColor.withAlpha(0), spacing, thickness };
     this._definitionChanged = new Cesium.Event();
   }
   get isConstant() { return true; }
@@ -175,7 +178,7 @@ export class FrontZoneMaterialProperty {
  * Materiál pásma pre raster s `bbox` v stupňoch; farby z CSS a krytia. Bez cache
  * materiálov (Node) = null.
  */
-export function frontZoneMaterialFor(image, bbox, { zoneCss = '#ff7a3d', zoneAlpha = 0.42, hatchCss = '#ff4b3e', hatchAlpha = 0.62, spacing = HATCH_DEFAULTS.spacingPx, thickness = HATCH_DEFAULTS.thickness } = {}) {
+export function frontZoneMaterialFor(image, bbox, { zoneCss = '#ff7a3d', zoneAlpha = 0.42, hatchCss = '#ff4b3e', hatchAlpha = 0.62, hatchFillAlpha = 0, spacing = HATCH_DEFAULTS.spacingPx, thickness = HATCH_DEFAULTS.thickness } = {}) {
   if (!image || !bbox || !ensureHatchMaterial(Cesium)) return null;
   const rad = (d) => (d * Math.PI) / 180;
   return new FrontZoneMaterialProperty({
@@ -183,6 +186,7 @@ export function frontZoneMaterialFor(image, bbox, { zoneCss = '#ff7a3d', zoneAlp
     rect: new Cesium.Cartesian4(rad(bbox.west), rad(bbox.south), rad(bbox.east), rad(bbox.north)),
     zoneColor: Cesium.Color.fromCssColorString(zoneCss).withAlpha(zoneAlpha),
     hatchColor: Cesium.Color.fromCssColorString(hatchCss).withAlpha(hatchAlpha),
+    hatchFill: Cesium.Color.fromCssColorString(hatchCss).withAlpha(hatchFillAlpha),
     spacing, thickness,
   });
 }

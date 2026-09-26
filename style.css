@@ -11945,9 +11945,11 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-karta-swatch-glyph { background: none; }
 .oko-karta-swatch-glyph.glyph-bolt { width: 12px; height: 14px; background: var(--sw); clip-path: polygon(54% 0, 28% 54%, 46% 54%, 38% 100%, 72% 40%, 50% 40%, 62% 0); }
 .oko-karta-swatch-glyph.glyph-shield { width: 18px; height: 12px; background: var(--sw); border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.25); }
-.oko-karta-inset { bottom: 104px; right: 16px; width: 168px; padding: 8px; }
+/* Prehľadová mapka vpravo hore pod nástrojmi (2026-09-26, vzorka Rybar: náhľad Ukrajiny s okupovaným územím). */
+.oko-karta-inset { top: 112px; right: 16px; width: 168px; padding: 8px; }
 .oko-karta-inset-svg { display: block; width: 100%; height: auto; }
-.oko-karta-inset-outline { fill: rgba(120, 150, 175, 0.10); stroke: rgba(150, 180, 205, 0.55); stroke-width: 0.8; }
+.oko-karta-inset-outline { fill: rgba(43, 92, 138, 0.55); stroke: rgba(150, 180, 205, 0.55); stroke-width: 0.8; }
+.oko-karta-inset-occupied { fill: rgba(158, 44, 52, 0.85); stroke: rgba(210, 80, 80, 0.7); stroke-width: 0.5; }
 .oko-karta-inset-view { fill: rgba(0, 212, 255, 0.16); stroke: #00d4ff; stroke-width: 1; }
 .oko-karta-inset-dot { fill: #f87171; stroke: rgba(6, 12, 20, 0.85); stroke-width: 0.8; }
 .oko-karta-tools { top: 66px; right: 16px; display: flex; gap: 6px; padding: 6px; }
@@ -11963,7 +11965,7 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
 @media (max-width: 900px) {
   .oko-karta-title { max-width: 62vw; top: 58px; }
   .oko-karta-tools { top: 58px; }
-  .oko-karta-inset { width: 124px; bottom: 122px; }
+  .oko-karta-inset { width: 124px; top: 100px; }
   .oko-karta-legend { bottom: 122px; }
 }
 

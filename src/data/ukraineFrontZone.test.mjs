@@ -77,7 +77,8 @@ test('vrstva: predvolený štýl má pásmo a žiaru, KARTA nie; legenda a texty
   const karta = src.slice(src.indexOf('karta: Object.freeze({'), src.indexOf('});', src.indexOf('karta: Object.freeze({')));
   assert.doesNotMatch(karta, /zone:|contactGlow:/, 'KARTA ostáva jemná');
   assert.match(src, /new Cesium\.PolylineGlowMaterialProperty\(/);
-  assert.match(src, /frontZoneRaster\(_contact, _polyIndex, \{ landRings: UKRAINE_LAND_RINGS, ruRadiusKm: st\.zoneRu \? FRONT_ZONE_RU_KM : 0 \}\)/, 'z dnešnej línie, orezané pevninou');
+  assert.match(src, /frontZoneRaster\(_contact, _polyIndex, \{ landRings: UKRAINE_LAND_RINGS, radiusKm: uaKm, ruRadiusKm: ruKm \}\)/, 'z dnešnej línie, orezané pevninou');
+  assert.match(src, /const ruKm = band \? band\.ruKm : \(st\.zoneRu \? FRONT_ZONE_RU_KM : 0\);/);
   assert.match(src, /zoneRu: Object\.freeze\(\{ css: '#ff4b3e', lineAlpha: 0\.62, spacing: 8, thickness: 0\.22 \}\)/);
   assert.match(src, /material: mat, classificationType: Cesium\.ClassificationType\.BOTH/, 'jeden obdĺžnik, materiál OkoFrontZone');
   assert.doesNotMatch(src, /ImageMaterialProperty\(\{ image: zc/, 'nie ImageMaterialProperty (st pri veľkom obdĺžniku sedelo o km vedľa)');
@@ -114,4 +115,43 @@ test('plátno pásma: R = ukrajinská strana, G = okupovaná, alfa 255 len kde n
   assert.deepEqual([...put.data], [200, 0, 0, 255, 0, 255, 0, 255, 0, 0, 0, 0]);
   assert.equal(paintFrontZoneCanvas({ ...zone, cells: 0, ruCells: 0 }, canvas), null);
   assert.equal(paintFrontZoneCanvas(zone, { getContext: () => null }), null);
+});
+
+test('KARTA ako vzorka Rybar: oranžovo šrafovaný pás cez obe strany línie, náhľad s okupovaným územím vpravo hore', async () => {
+  const src = readFileSync(new URL('../ukraineDeepStateLayer.js', import.meta.url), 'utf8');
+  const karta = src.slice(src.indexOf('karta: Object.freeze({'), src.indexOf('});', src.indexOf('karta: Object.freeze({')) + 3);
+  assert.match(karta, /combatBand: Object\.freeze\(\{ css: '#f0922e', lineAlpha: 0\.9, fillAlpha: 0\.22, spacing: 7, thickness: 0\.36, uaKm: 3, ruKm: 5 \}\)/);
+  const { combatBandMask, coarseOccupiedRings } = await import('../ukraineDeepStateLayer.js');
+  const m = combatBandMask({ width: 3, height: 1, cells: 1, ruCells: 1, values: Uint8Array.from([90, 0, 0]), ruValues: Uint8Array.from([0, 40, 0]) });
+  assert.deepEqual([...m.ruValues], [255, 255, 0], 'UA aj RU časť pásma = plná maska');
+  assert.deepEqual([...m.values], [0, 0, 0], 'žiadny oranžový prechod, len šrafa');
+  assert.equal(m.ruCells, 2);
+  const rings = coarseOccupiedRings([
+    { type: 'Polygon', kind: 'occupied', rings: [[[37, 48], [37.01, 48], [37.2, 48], [37.2, 48.2], [37, 48.2], [37, 48]]] },
+    { type: 'Polygon', kind: 'liberated', rings: [[[36, 48], [36.2, 48], [36.2, 48.2], [36, 48]]] },
+  ]);
+  assert.equal(rings.length, 1, 'len ruská kontrola');
+  assert.ok(!rings[0].some(([lon]) => lon === 37.01), 'blízke body sa riedia');
+  const { kartaLegendItems } = await import('../ukraineKartaOverlay.js');
+  const mirror = kartaLegendItems({ deepstate: { shown: true, source: 'mirror', features: 21 }, translate: (k) => k });
+  const band = mirror.find((i) => i.key === 'contested');
+  assert.ok(band && band.pattern === 'hatch' && band.colorCss === '#f0922e', 'pás v legende aj bez vrstvy Wikipédie');
+  const { EN_STRINGS, SK_STRINGS } = await import('../i18nStrings.js');
+  assert.match(SK_STRINGS['ukraine.karta.legend.contested'], /odvodený/);
+  assert.doesNotMatch(SK_STRINGS['ukraine.karta.legend.contested'], /Wikipédia/, 'pás už nie je z Wikipédie');
+  assert.ok(EN_STRINGS['ukraine.ds.band-tip'] && SK_STRINGS['ukraine.ds.band-tip']);
+  const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.oko-karta-inset \{ top: 112px; right: 16px; width: 168px; padding: 8px; \}/, 'náhľad vpravo hore');
+  assert.match(css, /\.oko-karta-inset-occupied \{ fill: rgba\(158, 44, 52, 0\.85\)/);
+  const ov = readFileSync(new URL('../ukraineKartaOverlay.js', import.meta.url), 'utf8');
+  assert.match(ov, /const ix = width - insetW - pad, iy = pad;/, 'aj v exporte vpravo hore');
+  assert.match(ov, /deepstate\?\.occupiedOutline\?\.\(\)/);
+});
+
+test('scéna frontu sa otvára v KARTE a pri odchode vráti pôvodný podklad (vlastník: „Áno, front vždy v KARTE")', () => {
+  const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  assert.match(main, /if \(scene && mapStackController\.getActiveId\(\) !== 'karta'\) \{\n\s+autoKartaPrev = mapStackController\.getActiveId\(\);\n\s+try \{ void Promise\.resolve\(styleManager\._setMapStack\('karta'\)\)/);
+  assert.match(main, /const runChokepointScene = \(id\) => \{\n\s+restoreAutoKarta\(\);/, 'úžina vráti podklad');
+  assert.match(main, /ukraineTimeline\.onChange\(\(st\) => \{ if \(!st\?\.shown && autoKartaPrev\) restoreAutoKarta\(\); \}\);/, 'zatvorená os vráti podklad');
+  assert.match(main, /onActiveMapStackChange\(\(stack\) => \{ if \(stack\?\.id !== 'karta'\) autoKartaPrev = null; \}\);/, 'ručná zmena podkladu sa nevracia');
 });

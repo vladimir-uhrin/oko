@@ -76,6 +76,10 @@ export const DEEPSTATE_STYLES = Object.freeze({
     greyCss: null, greyHatch: Object.freeze({ lineAlpha: 0.6, fillAlpha: 0.1 }),
     // KARTA: tenšia tmavočervená bez lemu (jemná mapa, svetlý reliéf).
     contact: Object.freeze({ css: '#b3261e', alpha: 0.95, width: 2.2, outlineCss: null, outlineAlpha: 0, outlineWidth: 0 }),
+    // 2026-09-26 (vlastník so vzorkou mapy Rybar: „ja som to chcel takto"): územie bojov
+    // ako oranžovo šrafovaný pás CEZ obe strany línie (3 km k UA, 5 km do okupovaného),
+    // odvodené z dnešnej línie DeepState — mirror sivú zónu nemá.
+    combatBand: Object.freeze({ css: '#f0922e', lineAlpha: 0.9, fillAlpha: 0.22, spacing: 7, thickness: 0.36, uaKm: 3, ruKm: 5 }),
   }),
 });
 
@@ -183,6 +187,38 @@ export function paintFrontZoneCanvas(zone, canvas) {
   return canvas;
 }
 
+/**
+ * Pás bojov pre KARTA: jedna maska cez obe strany (G = 255, kde je UA alebo RU časť
+ * pásma; R = 0), aby materiál kreslil len oranžovú šrafu s výplňou. Pure.
+ */
+export function combatBandMask(zone) {
+  const n = zone.values.length;
+  const g = new Uint8Array(n);
+  let cells = 0;
+  for (let i = 0; i < n; i += 1) if (zone.values[i] || zone.ruValues?.[i]) { g[i] = 255; cells += 1; }
+  return { ...zone, values: new Uint8Array(n), ruValues: g, cells: 0, ruCells: cells };
+}
+
+/**
+ * Hrubý obrys ruskej kontroly pre prehľadovú mapku KARTY (2026-09-26, vzorka Rybar
+ * „aj s malým náhľadom"): vonkajšie prstence ruských druhov, body riedené na krok
+ * ≥ `stepDeg`, prstence s menej než 4 bodmi preč. Pure.
+ */
+export function coarseOccupiedRings(features, { stepDeg = 0.06 } = {}) {
+  const out = [];
+  for (const f of features || []) {
+    if (f?.type !== 'Polygon' || !DEEPSTATE_RU_KINDS.includes(f.kind) || !Array.isArray(f.rings?.[0])) continue;
+    const ring = f.rings[0];
+    const kept = [];
+    for (const p of ring) {
+      const last = kept[kept.length - 1];
+      if (!last || Math.abs(p[0] - last[0]) >= stepDeg || Math.abs(p[1] - last[1]) >= stepDeg) kept.push([Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100]);
+    }
+    if (kept.length >= 4) out.push(kept);
+  }
+  return out;
+}
+
 /** Pozície kruhu [lon,lat] → Cartesian3 (bez výšky = primknuté). */
 export function ringPositions(ring) {
   return ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
@@ -224,7 +260,8 @@ export function createUkraineDeepStateLayer({
   let _polyIndex = [];
   const _frontCache = new Map(); // "lon,lat" → km k línii pre aktuálnu snímku
   let _contact = []; // úseky línie kontaktu [[lon,lat],…] pre aktuálnu snímku
-  let _zone; // raster prifrontového pásma pre aktuálnu snímku (undefined = ešte nepočítaný)
+  let _insetRings = null; // hrubý obrys okupovaného pre prehľadovú mapku (lenivo)
+  const _zones = new Map(); // `${uaKm}|${ruKm}` → raster pásma pre aktuálnu snímku (null = prázdne)
   let _style = 'default';
   let _loading = false;
   let _error = null;
@@ -289,16 +326,25 @@ export function createUkraineDeepStateLayer({
     }
     // Prifrontové pásmo (len štýly so `zone`): jeden primknutý obdĺžnik, materiál
     // OkoFrontZone si polohu berie z geodetických súradníc fragmentu (nie zo st).
-    if (st.zone && _contact.length) {
-      if (_zone === undefined) { try { _zone = frontZoneRaster(_contact, _polyIndex, { landRings: UKRAINE_LAND_RINGS, ruRadiusKm: st.zoneRu ? FRONT_ZONE_RU_KM : 0 }); } catch { _zone = null; } }
-      const zc = _zone ? paintFrontZoneCanvas(_zone, doc.createElement('canvas')) : null;
-      const mat = zc ? frontZoneMaterialFor(zc, _zone.bbox, { zoneCss: st.zone.css, zoneAlpha: st.zone.maxAlpha, hatchCss: st.zoneRu?.css, hatchAlpha: st.zoneRu ? st.zoneRu.lineAlpha : 0, spacing: st.zoneRu?.spacing, thickness: st.zoneRu?.thickness }) : null;
+    if ((st.zone || st.combatBand) && _contact.length) {
+      // Predvolený štýl: oranžový prechod na UA strane + červená šrafa v okupovanom.
+      // KARTA: jeden oranžovo šrafovaný pás cez obe strany (maska = UA ∪ RU časť).
+      const band = st.combatBand;
+      const uaKm = band ? band.uaKm : FRONT_ZONE_KM;
+      const ruKm = band ? band.ruKm : (st.zoneRu ? FRONT_ZONE_RU_KM : 0);
+      const key = `${uaKm}|${ruKm}`;
+      if (!_zones.has(key)) { let z = null; try { z = frontZoneRaster(_contact, _polyIndex, { landRings: UKRAINE_LAND_RINGS, radiusKm: uaKm, ruRadiusKm: ruKm }); } catch { z = null; } _zones.set(key, z); }
+      const _zone = _zones.get(key);
+      const zc = _zone ? paintFrontZoneCanvas(band ? combatBandMask(_zone) : _zone, doc.createElement('canvas')) : null;
+      const mat = !zc ? null : band
+        ? frontZoneMaterialFor(zc, _zone.bbox, { zoneAlpha: 0, hatchCss: band.css, hatchAlpha: band.lineAlpha, hatchFillAlpha: band.fillAlpha, spacing: band.spacing, thickness: band.thickness })
+        : frontZoneMaterialFor(zc, _zone.bbox, { zoneCss: st.zone.css, zoneAlpha: st.zone.maxAlpha, hatchCss: st.zoneRu?.css, hatchAlpha: st.zoneRu ? st.zoneRu.lineAlpha : 0, spacing: st.zoneRu?.spacing, thickness: st.zoneRu?.thickness });
       if (mat) {
         const b = _zone.bbox;
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:zone`,
           rectangle: { coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north), material: mat, classificationType: Cesium.ClassificationType.BOTH },
-          properties: { deepstate: { kind: 'zone' } },
+          properties: { deepstate: { kind: band ? 'band' : 'zone' } },
         });
       }
     }
@@ -361,6 +407,7 @@ export function createUkraineDeepStateLayer({
     if (info.kind === 'contact' && Number.isFinite(info.km)) return translate('ukraine.ds.contact-km', { km: info.km });
     if (info.kind === 'zone') return translate('ukraine.ds.zone-tip', { km: FRONT_ZONE_KM });
     if (info.kind === 'zone-ru') return translate('ukraine.ds.zone-ru-tip', { km: FRONT_ZONE_RU_KM });
+    if (info.kind === 'band') { const b = (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).combatBand; return translate('ukraine.ds.band-tip', { ua: b?.uaKm ?? 3, ru: b?.ruKm ?? 5 }); }
     const kindText = translate(`ukraine.ds.${info.kind}`);
     const name = lang === 'uk' ? (info.uk || info.en) : (info.en || info.uk);
     const parts = [kindText];
@@ -391,7 +438,7 @@ export function createUkraineDeepStateLayer({
         } catch { info = null; }
         if (info && info.kind) {
           tip.textContent = tipTextFor(info);
-          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : ((info.kind === 'contact' ? (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).contact.css : info.kind === 'zone' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zone?.css || '#ff7a3d') : info.kind === 'zone-ru' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zoneRu?.css || '#ff4b3e') : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'))));
+          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : ((info.kind === 'contact' ? (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).contact.css : info.kind === 'zone' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zone?.css || '#ff7a3d') : info.kind === 'zone-ru' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zoneRu?.css || '#ff4b3e') : info.kind === 'band' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).combatBand?.css || '#f0922e') : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'))));
           tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
           tip.hidden = false;
         } else tip.hidden = true;
@@ -406,7 +453,8 @@ export function createUkraineDeepStateLayer({
     _frontCache.clear();
     // Línia kontaktu sa počíta raz na snímku (~30–50 ms pri 3–11 tis. vrcholoch).
     try { _contact = contactLinePaths(_polyIndex, UKRAINE_LAND_RINGS); } catch { _contact = []; }
-    _zone = undefined; // pásmo sa počíta lenivo pri prvom kreslení v štýle, ktorý ho má (~70 ms)
+    _zones.clear(); // pásma sa počítajú lenivo pri prvom kreslení v štýle, ktorý ich má (~70 ms)
+    _insetRings = null;
     _error = null;
     rebuild();
     emit();
@@ -472,7 +520,7 @@ export function createUkraineDeepStateLayer({
     return {
       shown: _shown, loading: _loading, error: _error,
       day: _snapshot?.day || null, at: _snapshot?.at || null, stampText: deepstateStampText(_snapshot), datetime: _snapshot?.datetime || null,
-      contact: _contact.length, contactKm: Math.round(_contact.reduce((sum, path) => sum + pathLengthKm(path), 0)), zoneCells: _zone?.cells || 0, zoneRuCells: _zone?.ruCells || 0,
+      contact: _contact.length, contactKm: Math.round(_contact.reduce((sum, path) => sum + pathLengthKm(path), 0)), zoneCells: [..._zones.values()].reduce((a, z) => a + (z?.cells || 0), 0), zoneRuCells: [..._zones.values()].reduce((a, z) => a + (z?.ruCells || 0), 0),
       counts: _snapshot?.counts || null, areaKm2: _snapshot?.areaKm2 || null, features: _snapshot?.features?.length || 0, snapshots: _snapshot?.snapshots ?? null,
       style: _style, requestedAt: _snapshot?.requestedAt || null,
       // Zdroj snímky: náš archív z API (`archive`) alebo mirror cyterat (`mirror`, len okupované).
@@ -492,6 +540,8 @@ export function createUkraineDeepStateLayer({
     id: UKRAINE_DEEPSTATE_ID,
     show, hide, isShown: () => _shown, setSnapshot, loadLatest, getState,
     setStyle, getStyle: () => _style, sideAt, frontKm,
+    /** Hrubý obrys ruskej kontroly pre prehľadovú mapku (prázdne bez snímky). */
+    occupiedOutline: () => { if (!_snapshot?.features?.length) return []; if (!_insetRings) _insetRings = coarseOccupiedRings(_snapshot.features); return _insetRings; },
     /** Úseky línie kontaktu aktuálnej snímky (kópia). */
     contactPaths: () => _contact.map((p) => p.slice()),
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },

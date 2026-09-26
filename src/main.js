@@ -814,6 +814,7 @@ async function init() {
         try { runChokepointScene(conflict.sceneId); } catch { /* */ }
       } else {
         activeChokepoint = null; activeFrontScene = null;
+        restoreAutoKarta();
         syncMapFocus();
         try {
           const [w, s, e, n] = conflict.rectDegrees;
@@ -946,8 +947,24 @@ async function init() {
     // a na zmenu jej výšky (zobrazenie, zbalenie legendy) nereagoval.
     styleManager.observeLeftStackObstacle?.(ukraineTimeline.element);
     let ukrainePanel = null;
+    // Front sa otvára v KARTE (2026-09-26, vlastník so vzorkou mapy Rybar: „ja som to
+    // chcel takto" → „Áno, front vždy v KARTE"). Predchádzajúci podklad sa pamätá
+    // a vráti sa pri odchode zo smeru (úžina, iný konflikt, zatvorená os) — ak si
+    // medzitým používateľ podklad nezmenil sám.
+    let autoKartaPrev = null;
+    const restoreAutoKarta = () => {
+      const prev = autoKartaPrev; autoKartaPrev = null;
+      if (prev && mapStackController.getActiveId() === 'karta') { try { void Promise.resolve(styleManager._setMapStack(prev)).catch(() => {}); } catch { /* */ } }
+    };
+    onActiveMapStackChange((stack) => { if (stack?.id !== 'karta') autoKartaPrev = null; });
+    // Zatvorená časová os = odchod zo smeru.
+    ukraineTimeline.onChange((st) => { if (!st?.shown && autoKartaPrev) restoreAutoKarta(); });
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);
+      if (scene && mapStackController.getActiveId() !== 'karta') {
+        autoKartaPrev = mapStackController.getActiveId();
+        try { void Promise.resolve(styleManager._setMapStack('karta')).catch(() => {}); } catch { /* */ }
+      }
       activeFrontScene = scene || null;
       activeChokepoint = null;
       kartaOverlay?.setScene(scene || null);
@@ -1040,6 +1057,7 @@ async function init() {
       }
     } catch { /* výber je voliteľné chróm */ }
     const runChokepointScene = (id) => {
+      restoreAutoKarta();
       const scene = chokepointSceneById(id);
       activeChokepoint = scene || null;
       activeFrontScene = null;
