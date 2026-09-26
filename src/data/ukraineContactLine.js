@@ -270,3 +270,68 @@ export function frontZoneRaster(paths, index, { radiusKm = FRONT_ZONE_KM, ruRadi
   }
   return { width, height, cellDeg, bbox: { west, south: north - height * cellDeg, east: west + width * cellDeg, north }, values, cells, ruValues, ruCells };
 }
+
+// ── Zmena za týždeň (2026-09-26, návrh po upratanom ráme: „+N km² za týždeň") ──
+/** Koľko dní dozadu sa porovnáva (mirror má denné súbory). */
+export const CHANGE_DAYS = 7;
+/** Bunka rastra rozdielu (° zem. dĺžky/šírky; 0,01° ≈ 1,1 × 0,7 km na 48° s. š.). */
+export const CHANGE_CELL_DEG = 0.01;
+/** Strop buniek rastra rozdielu — nad ním sa rozdiel nepočíta (poistka pamäte). */
+export const CHANGE_MAX_CELLS = 4_000_000;
+
+/** 'YYYY-MM-DD' posunuté o `delta` dní (UTC); neplatný vstup = null. Pure. */
+export function shiftDay(day, delta) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+  if (!m || !Number.isFinite(delta)) return null;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + delta)).toISOString().slice(0, 10);
+}
+/** Počet dní od `from` po `to` ('YYYY-MM-DD'); neplatné = null. Pure. */
+export function daysBetween(from, to) {
+  const p = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '')); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN; };
+  const a = p(from); const b = p(to);
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.round((b - a) / 86_400_000) : null;
+}
+
+/**
+ * Rozdiel ruskej kontroly medzi dvoma snímkami DeepState ako raster: bunky, ktoré
+ * sú dnes ruské a predtým neboli (`ruValues` = obsadené), a bunky, ktoré boli ruské
+ * a dnes nie sú (`values` = oslobodené). Plochy sú súčet buniek (cos(šírka) na
+ * riadok), zaokrúhlené na desatinu km². Je to GEOMETRICKÝ rozdiel dvoch denných
+ * polygónov (rastrom 0,01° zmizne drobný šum digitalizácie), nie údaj DeepState —
+ * popis a legenda to hovoria. Bez ruských polygónov na jednej strane = null. Pure.
+ * @param {Array<{kind:string, ring:Array<[number,number]>}>} indexNow dnešný index polygónov (buildPolyIndex)
+ * @param {Array<{kind:string, ring:Array<[number,number]>}>} indexBefore index staršej snímky
+ * @returns {{width:number,height:number,cellDeg:number,bbox:{west:number,south:number,east:number,north:number},values:Uint8Array,cells:number,ruValues:Uint8Array,ruCells:number,lostKm2:number,gainedKm2:number}|null}
+ */
+export function occupiedChangeRaster(indexNow, indexBefore, { cellDeg = CHANGE_CELL_DEG, ruKinds = CONTACT_RU_KINDS, maxCells = CHANGE_MAX_CELLS } = {}) {
+  const ringsOf = (index) => (Array.isArray(index) ? index : []).filter((p) => ruKinds.includes(p?.kind) && Array.isArray(p.ring) && p.ring.length >= 4).map((p) => p.ring);
+  const now = ringsOf(indexNow); const before = ringsOf(indexBefore);
+  if (!now.length || !before.length || !(cellDeg > 0)) return null;
+  let w = 180; let s = 90; let e = -180; let n = -90;
+  for (const ring of [...now, ...before]) for (const [x, y] of ring) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+  if (!(e > w) || !(n > s)) return null;
+  const west = Math.floor(w / cellDeg) * cellDeg - cellDeg;
+  const north = Math.ceil(n / cellDeg) * cellDeg + cellDeg;
+  const width = Math.ceil((e - west) / cellDeg) + 2;
+  const height = Math.ceil((north - s) / cellDeg) + 2;
+  if (width * height > maxCells) return null;
+  const a = ringMask(now, width, height, west, north, cellDeg);
+  const b = ringMask(before, width, height, west, north, cellDeg);
+  const values = new Uint8Array(width * height);
+  const ruValues = new Uint8Array(width * height);
+  let cells = 0; let ruCells = 0; let lostKm2 = 0; let gainedKm2 = 0;
+  for (let r = 0; r < height; r += 1) {
+    const lat = north - (r + 0.5) * cellDeg;
+    const cellKm2 = cellDeg * cellDeg * KM_PER_DEG * KM_PER_DEG * Math.cos((lat * Math.PI) / 180);
+    for (let c = 0; c < width; c += 1) {
+      const idx = r * width + c;
+      if (a[idx] && !b[idx]) { ruValues[idx] = 255; ruCells += 1; gainedKm2 += cellKm2; }
+      else if (b[idx] && !a[idx]) { values[idx] = 255; cells += 1; lostKm2 += cellKm2; }
+    }
+  }
+  return {
+    width, height, cellDeg, bbox: { west, south: north - height * cellDeg, east: west + width * cellDeg, north },
+    values, cells, ruValues, ruCells,
+    lostKm2: Math.round(lostKm2 * 10) / 10, gainedKm2: Math.round(gainedKm2 * 10) / 10,
+  };
+}

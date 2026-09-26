@@ -62,6 +62,7 @@ import { fetchUkraineReport } from './data/ukraineReport.js';
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
 import { buildSituationModel, fetchSituationNews } from './data/situationNews.js';
 import { createUkraineBaseLayer } from './data/ukraineBaseLayer.js';
+import { pickPlaceSide } from './data/ukraineBase.js';
 import { createUkraineReportLayer } from './data/ukraineReportLayer.js';
 import { createUkrainePanel } from './ukrainePanel.js';
 import { createUkraineDirectionCard } from './ukraineDirectionCard.js';
@@ -739,7 +740,8 @@ async function init() {
     // KARTA K3 (2026-09-20): špendlíky sídiel podľa strany (Wikipedia body do 3 km,
     // inak polygóny DeepState), mäkký raster KONTROLA a šrafovaná sivá zóna — len
     // v štýle karta; pri zmene dát sa špendlíky prefarbia.
-    ukraineBase.setSideResolver((lon, lat) => ukraineControl.sideAt(lon, lat) ?? ukraineDeepState.sideAt(lon, lat));
+    // 2026-09-26: keď je snímka Wikipédie zastaraná, rozhoduje dnešný DeepState (pickPlaceSide).
+    ukraineBase.setSideResolver((lon, lat) => pickPlaceSide({ wiki: ukraineControl.sideAt(lon, lat), deepstate: ukraineDeepState.sideAt(lon, lat), wikiStale: Boolean(ukraineControl.getState?.()?.stale) }));
     ukraineControl.onChange(() => ukraineBase.refreshSides());
     ukraineDeepState.onChange(() => ukraineBase.refreshSides());
     // Značky smerov hlásenia GŠ stoja pri sídle najbližšom k línii podľa DeepState

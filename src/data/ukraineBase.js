@@ -227,3 +227,15 @@ export function snapshotDateText(meta, { lang = 'sk' } = {}) {
   const text = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', year: 'numeric' }).format(date);
   return { dateText: text.replace(/\s+/g, ' ').trim(), snapshotIso: iso };
 }
+
+/**
+ * Strana sídla pre špendlík KARTY (2026-09-26): body Wikipédie (do 3 km) majú
+ * prednosť, kým je ich snímka čerstvá — nesú aj „sporné". Keď je zastaraná
+ * (CONTROL_STALE_DAYS; Wikipédia stála 39 dní), rozhoduje dnešný DeepState
+ * a Wikipédia len dopĺňa, kde polygóny mlčia. Pure.
+ * @param {{ wiki?: string|null, deepstate?: string|null, wikiStale?: boolean }} input
+ * @returns {string|null} 'ua' | 'ru' | 'contested' | null
+ */
+export function pickPlaceSide({ wiki = null, deepstate = null, wikiStale = false } = {}) {
+  return wikiStale ? (deepstate ?? wiki ?? null) : (wiki ?? deepstate ?? null);
+}

@@ -18,6 +18,7 @@ import { createUkraineEventStore, mediaInWindow } from './data/ukraineEventsClie
 import { TIMELINE_SPEEDS, TIMELINE_WINDOWS, createTimelineClock, cursorText, histogramBins } from './data/ukraineTimelineClock.js';
 import { TYPE_GLYPH, SEV_COLOR } from './ukraineEventsLayer.js';
 import { CONTROL_STALE_DAYS, DEEPSTATE_STALE_DAYS, ageText, freshnessOf, freshnessRow, viewedRefMs } from './data/ukraineFreshness.js';
+import { CHANGE_DAYS } from './data/ukraineContactLine.js';
 import { currentLanguage, t } from './i18n.js';
 
 const IMG_API = '/api/img';
@@ -203,7 +204,7 @@ export function createUkraineTimeline({
     row3.appendChild(ctlBox);
   }
   // DeepState (hobby použitie, súhlas sa žiada): čip + legenda + „stav k" + plochy.
-  let dsBox = null; let dsChip = null; let dsLine = null; let dsAge = null; let dsArea = null;
+  let dsBox = null; let dsChip = null; let dsLine = null; let dsAge = null; let dsArea = null; let dsChange = null;
   // Server odmieta DeepState mimo localhostu (451), kým nepríde súhlas. Vtedy sa
   // riadok SKRYJE — nič sa neruší: archív beží ďalej, lokálne ostáva viditeľný
   // a keď súhlas príde (UKRAINE_DEEPSTATE=consent), vráti sa sám. Rozhoduje
@@ -219,6 +220,8 @@ export function createUkraineTimeline({
     dsBox.appendChild(sw('is-ds-contact', translate('ukraine.ds.contact')));
     dsBox.appendChild(sw('is-ds-zone', translate('ukraine.ds.zone')));
     dsBox.appendChild(sw('is-ds-zone-ru', translate('ukraine.ds.zone-ru')));
+    dsBox.appendChild(sw('is-ds-gained', translate('ukraine.ds.gained')));
+    dsBox.appendChild(sw('is-ds-lost', translate('ukraine.ds.lost')));
     dsBox.appendChild(sw('is-ds-grey', translate('ukraine.ds.grey')));
     dsBox.appendChild(sw('is-ds-liberated', translate('ukraine.ds.liberated')));
     dsBox.appendChild(sw('is-ds-attack', translate('ukraine.ds.attack')));
@@ -229,6 +232,9 @@ export function createUkraineTimeline({
     dsBox.appendChild(dsAge);
     dsArea = el('span', 'oko-ukr-tl-ctl-counts', '');
     dsBox.appendChild(dsArea);
+    // Zmena za týždeň (odvodená z dvoch snímok mirroru) — číslo s poctivým titulkom.
+    dsChange = el('span', 'oko-ukr-tl-ctl-counts oko-ukr-tl-ds-change', '');
+    dsBox.appendChild(dsChange);
     row3.appendChild(dsBox);
   }
   // Škody na budovách (etapa 5): čip + legenda; UNOSAT body odkrýva kurzor.
@@ -509,7 +515,7 @@ export function createUkraineTimeline({
     control?.setZonesVisible?.(!dsDraws);
     control?.setRuFillVisible?.(true);
     ctlBox?.classList?.toggle?.('is-nozones', dsDraws);
-    if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; return; }
+    if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; if (dsChange) { dsChange.textContent = ''; dsChange.title = ''; } return; }
     renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS, st.requestedAt);
     if (st.at) {
       dsLine.textContent = translate(st.source === 'mirror' ? 'ukraine.ds.since-mirror' : 'ukraine.ds.since', { date: st.stampText, mirror: st.mirror === 'lazar-bit' ? 'lazar-bit/deepstate-map-data-analytics' : 'cyterat/deepstate-map-data' })
@@ -522,6 +528,14 @@ export function createUkraineTimeline({
     dsArea.textContent = !a ? ''
       : st.source === 'mirror' ? translate('ukraine.ds.area-mirror', { occupied: nf.format(Math.round(a.occupied || 0)) })
         : translate('ukraine.ds.area', { occupied: nf.format(Math.round(a.occupied || 0)), grey: nf.format(Math.round(a.grey || 0)) });
+    if (dsChange) {
+      const ch = st.change;
+      const dayText = (day) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || '')); return m ? `${+m[3]}.${+m[2]}.${m[1]}` : '—'; };
+      dsChange.textContent = ch
+        ? translate('ukraine.ds.change-line', { days: ch.days ?? CHANGE_DAYS, gained: nf.format(Math.round(ch.gainedKm2 || 0)), lost: nf.format(Math.round(ch.lostKm2 || 0)) })
+        : (st.changeLoading ? '…' : '');
+      dsChange.title = ch ? translate('ukraine.ds.change-tip', { from: dayText(ch.fromDay), to: dayText(ch.toDay) }) : '';
+    }
   }
   function renderDamage() {
     if (!damage || !dmgChip) return;

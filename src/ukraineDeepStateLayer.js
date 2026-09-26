@@ -18,7 +18,7 @@
 import * as Cesium from 'cesium';
 import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText, deepstateMirrorRepo } from './data/ukraineDeepState.js';
 import { frontZoneMaterialFor, hatchMaterialFor } from './data/screenPatternMaterials.js';
-import { FRONT_ZONE_KM, FRONT_ZONE_RU_KM, contactLinePaths, frontZoneRaster, pathLengthKm } from './data/ukraineContactLine.js';
+import { CHANGE_DAYS, FRONT_ZONE_KM, FRONT_ZONE_RU_KM, contactLinePaths, daysBetween, frontZoneRaster, occupiedChangeRaster, pathLengthKm, shiftDay } from './data/ukraineContactLine.js';
 import { UKRAINE_LAND_RINGS } from './data/ukraineLand.js';
 import { fetchUkraineDeepState } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
@@ -70,6 +70,9 @@ export const DEEPSTATE_STYLES = Object.freeze({
     zone: Object.freeze({ css: '#ff7a3d', maxAlpha: 0.42 }),
     // Okupovaná strana pri línii: červené šrafy v obrazovkových px orezané maskou (≤ 8 km).
     zoneRu: Object.freeze({ css: '#ff4b3e', lineAlpha: 0.62, spacing: 8, thickness: 0.22 }),
+    // Zmena za 7 dní (2026-09-26): novo obsadené = hustá karmínová šrafa s výplňou
+    // (nad pásmom, zIndex 8), oslobodené = plná modrá; obe odvodené z dvoch snímok.
+    change: Object.freeze({ gainedCss: '#ff2d55', gainedLine: 0.9, gainedFill: 0.3, lostCss: '#2f9bff', lostAlpha: 0.55, spacing: 5, thickness: 0.42 }),
   }),
   karta: Object.freeze({
     greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true,
@@ -80,6 +83,8 @@ export const DEEPSTATE_STYLES = Object.freeze({
     // ako oranžovo šrafovaný pás CEZ obe strany línie (3 km k UA, 5 km do okupovaného),
     // odvodené z dnešnej línie DeepState — mirror sivú zónu nemá.
     combatBand: Object.freeze({ css: '#f0922e', lineAlpha: 0.9, fillAlpha: 0.22, spacing: 7, thickness: 0.36, uaKm: 3, ruKm: 5 }),
+    // KARTA: tmavšia karmínová a mapová modrá, aby sa líšili od oranžového pásu bojov.
+    change: Object.freeze({ gainedCss: '#b3001b', gainedLine: 0.92, gainedFill: 0.38, lostCss: '#1f5fbf', lostAlpha: 0.6, spacing: 5, thickness: 0.42 }),
   }),
 });
 
@@ -262,6 +267,9 @@ export function createUkraineDeepStateLayer({
   let _contact = []; // úseky línie kontaktu [[lon,lat],…] pre aktuálnu snímku
   let _insetRings = null; // hrubý obrys okupovaného pre prehľadovú mapku (lenivo)
   const _zones = new Map(); // `${uaKm}|${ruKm}` → raster pásma pre aktuálnu snímku (null = prázdne)
+  let _prev = null; // staršia snímka pre zmenu za týždeň: { day, forDay, index }
+  let _change = null; // raster rozdielu (occupiedChangeRaster) + fromDay/toDay
+  let _changeTask = null; // bežiaci dopyt staršej snímky
   let _style = 'default';
   let _loading = false;
   let _error = null;
@@ -280,6 +288,64 @@ export function createUkraineDeepStateLayer({
     if (src === _creditSource) return;
     _creditSource = src;
     ds.credit = src ? new Cesium.Credit(src === 'archive' ? 'DeepStateMap.live' : `DeepStateMap.live (via mirror ${deepstateMirrorRepo(_snapshot.mirror)})`, true) : undefined;
+  }
+  /**
+   * Obdĺžnik zmeny za týždeň nad plochami a pásmom (zIndex 8): R = oslobodené
+   * (plná farba), G = obsadené (šrafy) — ten istý materiál OkoFrontZone ako pásmo.
+   * Kreslí sa len k snímke, pre ktorú bol rozdiel spočítaný.
+   */
+  function addChangeEntity() {
+    const old = ds.entities.getById(`${UKRAINE_DEEPSTATE_ID}:change`);
+    if (old) ds.entities.remove(old);
+    const st = DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default;
+    const cfg = st.change;
+    if (!cfg || !_change || _change.toDay !== _snapshot?.day || !(_change.cells || _change.ruCells)) return;
+    const canvas = paintFrontZoneCanvas(_change, doc.createElement('canvas'));
+    const mat = canvas ? frontZoneMaterialFor(canvas, _change.bbox, { zoneCss: cfg.lostCss, zoneAlpha: cfg.lostAlpha, hatchCss: cfg.gainedCss, hatchAlpha: cfg.gainedLine, hatchFillAlpha: cfg.gainedFill, spacing: cfg.spacing, thickness: cfg.thickness }) : null;
+    if (!mat) return;
+    const b = _change.bbox;
+    ds.entities.add({
+      id: `${UKRAINE_DEEPSTATE_ID}:change`,
+      rectangle: { coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north), material: mat, classificationType: Cesium.ClassificationType.BOTH, zIndex: 8 },
+      properties: { deepstate: { kind: 'change' } },
+    });
+  }
+  /** Bunka rastra zmeny pod bodom: 'gained' | 'lost' | null. */
+  function changeAt(lon, lat) {
+    if (!_change || !Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    const c = Math.floor((lon - _change.bbox.west) / _change.cellDeg);
+    const r = Math.floor((_change.bbox.north - lat) / _change.cellDeg);
+    if (c < 0 || r < 0 || c >= _change.width || r >= _change.height) return null;
+    const idx = r * _change.width + c;
+    return _change.ruValues[idx] ? 'gained' : _change.values[idx] ? 'lost' : null;
+  }
+  /**
+   * Zmena za týždeň: stiahne snímku spred CHANGE_DAYS dní (proxy pri chýbajúcom dni
+   * padne na starší súbor — skutočný rozsah nesie `fromDay`), spočíta rastrový
+   * rozdiel a prekreslí obdĺžnik. Kým beží, stav hlási `changeLoading`; keď sa
+   * medzitým zmení deň snímky, výsledok sa zahodí.
+   */
+  async function loadChange() {
+    const day = _snapshot?.day;
+    if (!day || !_snapshot?.features?.length) { _prev = null; _change = null; return; }
+    const wantDay = shiftDay(day, -CHANGE_DAYS);
+    if (!wantDay || (_prev?.forDay === day && _change?.toDay === day)) return;
+    const task = (async () => {
+      let snap = null;
+      try { snap = await fetchDeepState(wantDay); } catch { snap = null; }
+      if (_destroyed || _snapshot?.day !== day) return;
+      const usable = snap && Array.isArray(snap.features) && snap.day && snap.day < day;
+      _prev = { day: usable ? snap.day : null, forDay: day, index: usable ? buildPolyIndex(snap.features) : [] };
+      let change = null;
+      try { change = _prev.index.length ? occupiedChangeRaster(_polyIndex, _prev.index) : null; } catch { change = null; }
+      if (change) { change.fromDay = _prev.day; change.toDay = day; change.days = daysBetween(_prev.day, day); }
+      _change = change;
+      addChangeEntity();
+      requestRender();
+    })();
+    _changeTask = task;
+    emit();
+    try { await task; } finally { if (_changeTask === task) _changeTask = null; if (!_destroyed) emit(); }
   }
   function rebuild() {
     ds.entities.removeAll();
@@ -348,6 +414,7 @@ export function createUkraineDeepStateLayer({
         });
       }
     }
+    addChangeEntity();
     // Línia kontaktu nad plochami (zIndex), primknutá k terénu aj 3D dlaždiciam.
     const cs = st.contact;
     if (cs && _contact.length && st.contactGlow) {
@@ -400,6 +467,8 @@ export function createUkraineDeepStateLayer({
     return _liftChain;
   }
 
+  /** 'YYYY-MM-DD' → 'D.M.YYYY' pre texty (mirror pozná len deň). */
+  const dayText = (day) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || '')); return m ? `${+m[3]}.${+m[2]}.${m[1]}` : '—'; };
   // ── karta pri prechode myšou (body aj polygóny) ──────────────────────────
   function tipTextFor(info) {
     if (!info) return '';
@@ -408,6 +477,7 @@ export function createUkraineDeepStateLayer({
     if (info.kind === 'zone') return translate('ukraine.ds.zone-tip', { km: FRONT_ZONE_KM });
     if (info.kind === 'zone-ru') return translate('ukraine.ds.zone-ru-tip', { km: FRONT_ZONE_RU_KM });
     if (info.kind === 'band') { const b = (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).combatBand; return translate('ukraine.ds.band-tip', { ua: b?.uaKm ?? 3, ru: b?.ruKm ?? 5 }); }
+    if (info.kind === 'change-gained' || info.kind === 'change-lost') return translate(info.kind === 'change-gained' ? 'ukraine.ds.gained-tip' : 'ukraine.ds.lost-tip', { from: dayText(_change?.fromDay), to: dayText(_change?.toDay) });
     const kindText = translate(`ukraine.ds.${info.kind}`);
     const name = lang === 'uk' ? (info.uk || info.en) : (info.en || info.uk);
     const parts = [kindText];
@@ -430,6 +500,22 @@ export function createUkraineDeepStateLayer({
           if (f && typeof f === 'object') info = f;
           else if (picked?.id?.properties?.deepstate) info = picked.id.properties.deepstate.getValue?.() || picked.id.properties.deepstate;
           // Pásmo je jeden obdĺžnik pre obe strany — strana podľa polygónov pod kurzorom.
+          // Obdĺžnik zmeny kryje celé okupované územie: mimo zmenených buniek sa
+          // pozrie, čo je pod ním (drillPick), aby polygóny a pásmo ostali čitateľné.
+          if (info?.kind === 'change') {
+            const cart = scene.camera.pickEllipsoid(pos);
+            const cg = cart ? Cesium.Cartographic.fromCartesian(cart) : null;
+            const at = cg ? changeAt(Cesium.Math.toDegrees(cg.longitude), Cesium.Math.toDegrees(cg.latitude)) : null;
+            if (at) info = { kind: at === 'gained' ? 'change-gained' : 'change-lost' };
+            else {
+              info = null;
+              for (const p of scene.drillPick(pos, 4, 6, 6) || []) {
+                const g = p?.id?.ukraineDeepState || p?.primitive?.id?.ukraineDeepState;
+                const q = g && typeof g === 'object' ? g : (p?.id?.properties?.deepstate?.getValue?.() || p?.id?.properties?.deepstate || null);
+                if (q && q.kind && q.kind !== 'change') { info = q; break; }
+              }
+            }
+          }
           if (info?.kind === 'zone') {
             const cart = scene.camera.pickEllipsoid(pos);
             const cg = cart ? Cesium.Cartographic.fromCartesian(cart) : null;
@@ -438,7 +524,7 @@ export function createUkraineDeepStateLayer({
         } catch { info = null; }
         if (info && info.kind) {
           tip.textContent = tipTextFor(info);
-          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : ((info.kind === 'contact' ? (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).contact.css : info.kind === 'zone' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zone?.css || '#ff7a3d') : info.kind === 'zone-ru' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zoneRu?.css || '#ff4b3e') : info.kind === 'band' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).combatBand?.css || '#f0922e') : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'))));
+          tip.style.setProperty('--ukr-accent', info.kind === 'change-gained' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).change?.gainedCss || '#ff2d55') : info.kind === 'change-lost' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).change?.lostCss || '#2f9bff') : info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : ((info.kind === 'contact' ? (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).contact.css : info.kind === 'zone' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zone?.css || '#ff7a3d') : info.kind === 'zone-ru' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zoneRu?.css || '#ff4b3e') : info.kind === 'band' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).combatBand?.css || '#f0922e') : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'))));
           tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
           tip.hidden = false;
         } else tip.hidden = true;
@@ -456,8 +542,10 @@ export function createUkraineDeepStateLayer({
     _zones.clear(); // pásma sa počítajú lenivo pri prvom kreslení v štýle, ktorý ich má (~70 ms)
     _insetRings = null;
     _error = null;
+    if (_change && _change.toDay !== _snapshot?.day) _change = null; // rozdiel patrí k inému dňu
     rebuild();
     emit();
+    void loadChange();
   }
   /** Štýl 'default' | 'karta' (K3): tenšie obrysy, sivá zóna šrafovaná. */
   function setStyle(mode) {
@@ -526,6 +614,11 @@ export function createUkraineDeepStateLayer({
       // Zdroj snímky: náš archív z API (`archive`) alebo mirror cyterat (`mirror`, len okupované).
       source: _snapshot?.source || (_snapshot ? 'archive' : null), mirror: _snapshot?.mirror || null, atApprox: Boolean(_snapshot?.atApprox),
       fallbackDays: _snapshot?.fallbackDays ?? 0, upstreamUnavailable: Boolean(_snapshot?.upstreamUnavailable),
+      // Zmena za týždeň (odvodená z dvoch snímok): null kým nie je spočítaná alebo patrí inému dňu.
+      change: _change && _change.toDay === _snapshot?.day
+        ? { days: _change.days, fromDay: _change.fromDay, toDay: _change.toDay, gainedKm2: _change.gainedKm2, lostKm2: _change.lostKm2, gainedCells: _change.ruCells, lostCells: _change.cells }
+        : null,
+      changeLoading: Boolean(_changeTask),
     };
   }
   function destroy() {

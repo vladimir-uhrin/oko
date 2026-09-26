@@ -23,6 +23,8 @@ export const KARTA_LEGEND_COLORS = Object.freeze({
   occupied: '#d0554a', grey: '#8a8f98', ru: '#e0553f', contact: '#b3261e',
   pinUa: '#5b8fd0', pinRu: '#d0554a', pinContested: '#f0a53a',
   combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a', band: '#f0922e',
+  // Zmena za týždeň (DEEPSTATE_STYLES.karta.change): obsadené karmínová šrafa, oslobodené modrá.
+  gained: '#b3001b', lost: '#1f5fbf',
 });
 
 /**
@@ -61,9 +63,10 @@ export function insetRingPath(project, ring) {
 }
 
 /** Titulok: názov smeru (alebo všeobecný) + „stav k …" + zdroje. Pure. */
-export function kartaTitleModel({ scene = null, dateText = '', sources = [], translate = (k) => k } = {}) {
+export function kartaTitleModel({ scene = null, dateText = '', sources = [], changeText = '', translate = (k) => k } = {}) {
   const title = scene ? frontSceneLabel(scene, translate) : translate('ukraine.karta.title');
-  const subtitle = dateText ? translate('ukraine.karta.state', { date: dateText }) : '';
+  // „stav k …“ + zmena za týždeň (odvodená z dvoch snímok mirroru), keď je spočítaná.
+  const subtitle = [dateText ? translate('ukraine.karta.state', { date: dateText }) : '', changeText].filter(Boolean).join(' · ');
   return { title, subtitle, sources: sources.filter(Boolean).join(' · ') };
 }
 
@@ -81,6 +84,13 @@ function deepstateDraws(deepstate) {
 }
 
 /** Zdroje aktívnych vrstiev (na titulok/legendu). Pure. */
+/** Text zmeny za týždeň pre titulok: „za 7 dní: RU +12 km² · UA +3 km²"; prázdny bez rozdielu. Pure. */
+export function kartaChangeText(deepstate, translate = (k) => k, lang = 'sk') {
+  const ch = deepstateDraws(deepstate) ? deepstate.change : null;
+  if (!ch || !Number.isFinite(ch.days)) return '';
+  const fmt = (v) => Math.round(v || 0).toLocaleString(lang === 'sk' ? 'sk-SK' : 'en-GB');
+  return translate('ukraine.karta.change', { days: ch.days, gained: fmt(ch.gainedKm2), lost: fmt(ch.lostKm2) });
+}
 export function kartaSources({ report = null, deepstate = null, control = null, translate = (k) => k } = {}) {
   const out = [];
   if (report?.shown) out.push(translate('ukraine.karta.src.gs'));
@@ -104,6 +114,12 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
     // z dnešnej línie (DEEPSTATE_STYLES.karta.combatBand; 2026-09-26, vzorka Rybar).
     if (deepstate.source !== 'mirror') items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
     else items.push({ key: 'contested', colorCss: c.band, pattern: 'hatch', label: translate('ukraine.karta.legend.contested') });
+    // Zmena za týždeň: vzorky len keď je rozdiel spočítaný a naozaj niečo zmenil.
+    const ch = deepstate.change;
+    if (ch && Number.isFinite(ch.days)) {
+      if (ch.gainedCells > 0) items.push({ key: 'gained', colorCss: c.gained, pattern: 'hatch', label: translate('ukraine.karta.legend.gained', { days: ch.days }) });
+      if (ch.lostCells > 0) items.push({ key: 'lost', colorCss: c.lost, label: translate('ukraine.karta.legend.lost', { days: ch.days }) });
+    }
   } else if (control?.shown) {
     // Zastaraná snímka sa na mape kreslí stlmene — vzorka musí ustúpiť rovnako.
     items.push({ key: 'ru', colorCss: c.ru, label: translate('ukraine.karta.legend.ru'), ...(control.stale ? { dim: STALE_DIM } : {}) });
@@ -358,7 +374,7 @@ export function createUkraineKartaOverlay({
     const rs = report?.getState?.() || null;
     const dateText = kartaDateText({ report: rs, deepstate: ds, control: cs });
     const sources = kartaSources({ report: rs, deepstate: ds, control: cs, translate });
-    const title = kartaTitleModel({ scene: _scene, dateText, sources, translate });
+    const title = kartaTitleModel({ scene: _scene, dateText, sources, changeText: kartaChangeText(ds, translate, lang()), translate });
     titleH.textContent = title.title;
     titleSub.textContent = title.subtitle;
     titleSub.style.display = title.subtitle ? '' : 'none';
@@ -411,7 +427,7 @@ export function createUkraineKartaOverlay({
     /** Ostrovy rámu — main.js ich hlási pruhom panelov ako prekážky (ui.js observe*StackObstacle). */
     elements: { title: titleIsland, legend: legendIsland, inset: insetIsland, tools },
     getModel: () => ({
-      title: kartaTitleModel({ scene: _scene, dateText: kartaDateText({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.() }), sources: kartaSources({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }), translate }),
+      title: kartaTitleModel({ scene: _scene, dateText: kartaDateText({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.() }), sources: kartaSources({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }), changeText: kartaChangeText(deepstate?.getState?.(), translate, lang()), translate }),
       legend: kartaLegendItems({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }),
       legendHead: translate('ukraine.karta.legend.head'),
       scene: _scene, viewRect: typeof getViewRect === 'function' ? getViewRect() : null,

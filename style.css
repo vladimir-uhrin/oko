@@ -11890,6 +11890,12 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* Prifrontové pásmo (2026-09-26): prechod od línie do stratena; KARTA ho nekreslí. */
 .oko-ukr-tl-ctl-item.is-ds-zone .oko-ukr-tl-ctl-sw { background: linear-gradient(90deg, rgba(255, 122, 61, 0.42), rgba(255, 122, 61, 0)); border-color: rgba(255, 122, 61, 0.35); }
 .oko-ukr-tl-ds.is-karta .is-ds-zone { display: none; }
+/* Zmena za týždeň (2026-09-26): obsadené = hustá karmínová šrafa, oslobodené = plná modrá; farby = DEEPSTATE_STYLES.change. */
+.oko-ukr-tl-ctl-item.is-ds-gained .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(255, 45, 85, 0.9) 0 1.5px, rgba(255, 45, 85, 0.3) 1.5px 4px); border-color: #ff2d55; }
+.oko-ukr-tl-ctl-item.is-ds-lost .oko-ukr-tl-ctl-sw { background: rgba(47, 155, 255, 0.55); border-color: #2f9bff; }
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-gained .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(179, 0, 27, 0.92) 0 1.5px, rgba(179, 0, 27, 0.38) 1.5px 4px); border-color: #b3001b; }
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-lost .oko-ukr-tl-ctl-sw { background: rgba(31, 95, 191, 0.6); border-color: #1f5fbf; }
+.oko-ukr-tl-ds-change:not(:empty) { cursor: help; }
 .oko-ukr-tl-ctl-item.is-ds-zone-ru .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(255, 75, 62, 0.75) 0 1.5px, rgba(224, 85, 63, 0.18) 1.5px 5px); border-color: rgba(255, 75, 62, 0.55); }
 .oko-ukr-tl-ds.is-karta .is-ds-zone-ru { display: none; }
 /* Sivá zóna sa na mape kreslí šrafovane — vzorka musí vyzerať rovnako: v bežnom
