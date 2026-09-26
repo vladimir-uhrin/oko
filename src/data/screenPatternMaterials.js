@@ -42,13 +42,149 @@ function hatchFabric(CesiumRef, type, axis) {
   };
 }
 
-/** Zaregistruje oba šrafovacie materiály (raz na proces). Vracia false bez cache materiálov. */
+/**
+ * Prifrontové pásmo jedným materiálom (2026-09-26): textúra nesie dve masky —
+ * R = ukrajinská strana (oranžový prechod), G = okupovaná strana (červené šrafy 45°
+ * v obrazovkových px; vlastník: „tú hluché miesto by si mohol vyplniť šrafovaním").
+ *
+ * Súradnice textúry sa NEberú z `materialInput.st`: pri veľkom pozemnom obdĺžniku
+ * (≈ 5,7° × 4,8°) ich Cesium počíta sférickou aproximáciou a pásmo sedelo o pár km
+ * vedľa polygónov (overené: raster 0 nezhôd, na mape oranžové fľaky v okupovanom
+ * výbežku pri Lymane). Poloha fragmentu sa preto počíta priesečníkom lúča od kamery
+ * (smer z `positionToEyeEC`) s elipsoidom WGS84 a z nej geodetická šírka/dĺžka
+ * (1 − e² = 0,99330562) → presne podľa `rect` (západ, juh, východ, sever v radiánoch).
+ * Samotné `positionToEyeEC` ako polohu použiť nejde — pri klasifikácii nie je
+ * delené `w` (dĺžka nesedí, overené: celý obdĺžnik jednej farby); smer áno.
+ * Terén sa zanedbá: pri výške 150 m a sklone −64° je to ~70 m.
+ */
+export const FRONT_ZONE_MATERIAL_TYPE = 'OkoFrontZone';
+function frontZoneFabric(CesiumRef) {
+  return {
+    fabric: {
+      type: FRONT_ZONE_MATERIAL_TYPE,
+      uniforms: {
+        image: 'czm_defaultImage',
+        rect: new CesiumRef.Cartesian4(0, 0, 1, 1),
+        zoneColor: new CesiumRef.Color(1.0, 0.48, 0.24, 0.42),
+        hatchColor: new CesiumRef.Color(1.0, 0.29, 0.24, 0.62),
+        spacing: HATCH_DEFAULTS.spacingPx,
+        thickness: HATCH_DEFAULTS.thickness,
+      },
+      source: `czm_material czm_getMaterial(czm_materialInput materialInput) {
+  czm_material m = czm_getDefaultMaterial(materialInput);
+  // czm_rayEllipsoidIntersectionInterval berie lúč a stred elipsoidu v OČNÝCH súradniciach
+  // (vnútri ich prevedie cez czm_inverseModelView) — kamera je počiatok, stred Zeme czm_view[3].
+  vec3 dirEC = normalize(-materialInput.positionToEyeEC);
+  czm_raySegment hit = czm_rayEllipsoidIntersectionInterval(czm_ray(vec3(0.0), dirEC), czm_view[3].xyz, vec3(1.0 / 6378137.0, 1.0 / 6378137.0, 1.0 / 6356752.314245));
+  vec3 p = czm_viewerPositionWC + max(hit.start, 0.0) * normalize(czm_inverseViewRotation * dirEC);
+  float lon = atan(p.y, p.x);
+  float lat = atan(p.z, length(p.xy) * 0.99330562);
+  vec2 uv = vec2((lon - rect.x) / (rect.z - rect.x), (lat - rect.y) / (rect.w - rect.y));
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { m.alpha = 0.0; return m; }
+  vec4 s = texture(image, uv);
+  float t = fract((gl_FragCoord.x + gl_FragCoord.y) / spacing);
+  float d = min(t, 1.0 - t) * 2.0;
+  float line = 1.0 - smoothstep(thickness, thickness + 0.25, d);
+  float aUa = s.r * zoneColor.a;
+  float aRu = s.g * line * hatchColor.a;
+  float a = aUa + aRu * (1.0 - aUa);
+  m.diffuse = a > 0.0 ? (zoneColor.rgb * aUa + hatchColor.rgb * aRu * (1.0 - aUa)) / a : zoneColor.rgb;
+  m.alpha = a;
+  return m;
+}`,
+    },
+    translucent: true,
+  };
+}
+
+/**
+ * Obrázok presne podľa geodetických súradníc (2026-09-26): ten istý výpočet polohy
+ * ako OkoFrontZone, textúra sa vykreslí tak, ako je (rgba). Pre raster zón
+ * Wikipédie — ImageMaterialProperty na obdĺžniku 18° × 8° sedel o kilometre vedľa.
+ */
+export const GEO_IMAGE_MATERIAL_TYPE = 'OkoGeoImage';
+function geoImageFabric(CesiumRef) {
+  return {
+    fabric: {
+      type: GEO_IMAGE_MATERIAL_TYPE,
+      uniforms: { image: 'czm_defaultImage', rect: new CesiumRef.Cartesian4(0, 0, 1, 1) },
+      source: `czm_material czm_getMaterial(czm_materialInput materialInput) {
+  czm_material m = czm_getDefaultMaterial(materialInput);
+  vec3 dirEC = normalize(-materialInput.positionToEyeEC);
+  czm_raySegment hit = czm_rayEllipsoidIntersectionInterval(czm_ray(vec3(0.0), dirEC), czm_view[3].xyz, vec3(1.0 / 6378137.0, 1.0 / 6378137.0, 1.0 / 6356752.314245));
+  vec3 p = czm_viewerPositionWC + max(hit.start, 0.0) * normalize(czm_inverseViewRotation * dirEC);
+  float lon = atan(p.y, p.x);
+  float lat = atan(p.z, length(p.xy) * 0.99330562);
+  vec2 uv = vec2((lon - rect.x) / (rect.z - rect.x), (lat - rect.y) / (rect.w - rect.y));
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { m.alpha = 0.0; return m; }
+  vec4 s = texture(image, uv);
+  m.diffuse = s.rgb;
+  m.alpha = s.a;
+  return m;
+}`,
+    },
+    translucent: true,
+  };
+}
+
+/** Zaregistruje šrafovacie materiály (raz na proces). Vracia false bez cache materiálov. */
 export function ensureHatchMaterial(CesiumRef = Cesium) {
   const cache = CesiumRef?.Material?._materialCache;
   if (!cache?.addMaterial) return false;
   if (!cache.getMaterial?.(HATCH_MATERIAL_TYPE)) cache.addMaterial(HATCH_MATERIAL_TYPE, hatchFabric(CesiumRef, HATCH_MATERIAL_TYPE, 'gl_FragCoord.x + gl_FragCoord.y'));
   if (!cache.getMaterial?.(HATCH_MATERIAL_TYPE_135)) cache.addMaterial(HATCH_MATERIAL_TYPE_135, hatchFabric(CesiumRef, HATCH_MATERIAL_TYPE_135, 'gl_FragCoord.x - gl_FragCoord.y'));
+  if (!cache.getMaterial?.(FRONT_ZONE_MATERIAL_TYPE)) cache.addMaterial(FRONT_ZONE_MATERIAL_TYPE, frontZoneFabric(CesiumRef));
+  if (!cache.getMaterial?.(GEO_IMAGE_MATERIAL_TYPE)) cache.addMaterial(GEO_IMAGE_MATERIAL_TYPE, geoImageFabric(CesiumRef));
   return true;
+}
+
+/** MaterialProperty obrázka v geodetickom obdĺžniku (radiány). */
+export class GeoImageMaterialProperty {
+  constructor({ image, rect } = {}) {
+    this._uniforms = { image, rect };
+    this._definitionChanged = new Cesium.Event();
+  }
+  get isConstant() { return true; }
+  get definitionChanged() { return this._definitionChanged; }
+  getType() { return GEO_IMAGE_MATERIAL_TYPE; }
+  getValue(time, result) { const r = result || {}; Object.assign(r, this._uniforms); return r; }
+  equals(other) { return other === this; }
+}
+
+/** Obrázok (plátno) presne na `bbox` v stupňoch; bez cache materiálov (Node) = null. */
+export function geoImageMaterialFor(image, bbox) {
+  if (!image || !bbox || !ensureHatchMaterial(Cesium)) return null;
+  const rad = (d) => (d * Math.PI) / 180;
+  return new GeoImageMaterialProperty({ image, rect: new Cesium.Cartesian4(rad(bbox.west), rad(bbox.south), rad(bbox.east), rad(bbox.north)) });
+}
+
+/** MaterialProperty prifrontového pásma (textúra R/G + geodetický obdĺžnik v radiánoch). */
+export class FrontZoneMaterialProperty {
+  constructor({ image, rect, zoneColor, hatchColor, spacing = HATCH_DEFAULTS.spacingPx, thickness = HATCH_DEFAULTS.thickness } = {}) {
+    this._uniforms = { image, rect, zoneColor, hatchColor, spacing, thickness };
+    this._definitionChanged = new Cesium.Event();
+  }
+  get isConstant() { return true; }
+  get definitionChanged() { return this._definitionChanged; }
+  getType() { return FRONT_ZONE_MATERIAL_TYPE; }
+  getValue(time, result) { const r = result || {}; Object.assign(r, this._uniforms); return r; }
+  equals(other) { return other === this; }
+}
+
+/**
+ * Materiál pásma pre raster s `bbox` v stupňoch; farby z CSS a krytia. Bez cache
+ * materiálov (Node) = null.
+ */
+export function frontZoneMaterialFor(image, bbox, { zoneCss = '#ff7a3d', zoneAlpha = 0.42, hatchCss = '#ff4b3e', hatchAlpha = 0.62, spacing = HATCH_DEFAULTS.spacingPx, thickness = HATCH_DEFAULTS.thickness } = {}) {
+  if (!image || !bbox || !ensureHatchMaterial(Cesium)) return null;
+  const rad = (d) => (d * Math.PI) / 180;
+  return new FrontZoneMaterialProperty({
+    image,
+    rect: new Cesium.Cartesian4(rad(bbox.west), rad(bbox.south), rad(bbox.east), rad(bbox.north)),
+    zoneColor: Cesium.Color.fromCssColorString(zoneCss).withAlpha(zoneAlpha),
+    hatchColor: Cesium.Color.fromCssColorString(hatchCss).withAlpha(hatchAlpha),
+    spacing, thickness,
+  });
 }
 
 /** MaterialProperty pre entity: šrafovanie 45° (`direction` −1 = 135°) danou farbou (čiary + slabá výplň). */

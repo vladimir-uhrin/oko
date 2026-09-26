@@ -146,6 +146,8 @@ export function contactLinePaths(index, landRings, {
 
 /** Šírka prifrontového pásma (km od línie kontaktu, na ukrajinskej strane). */
 export const FRONT_ZONE_KM = 6;
+/** Šrafovaná okupovaná strana pri línii (km). */
+export const FRONT_ZONE_RU_KM = 8;
 /** Bunka rastra pásma (°) ≈ 1,1 × 0,75 km na 48° s. š. */
 export const FRONT_ZONE_CELL_DEG = 0.01;
 
@@ -200,7 +202,7 @@ function ringMask(rings, width, height, west, north, cellDeg) {
  * @param {Array<{kind:string, ring:Array<[number,number]>}>} index polygóny DeepState
  * @returns {{width:number,height:number,cellDeg:number,bbox:{west:number,south:number,east:number,north:number},values:Uint8Array,cells:number}|null}
  */
-export function frontZoneRaster(paths, index, { radiusKm = FRONT_ZONE_KM, cellDeg = FRONT_ZONE_CELL_DEG, ruKinds = CONTACT_RU_KINDS, landRings = null } = {}) {
+export function frontZoneRaster(paths, index, { radiusKm = FRONT_ZONE_KM, ruRadiusKm = FRONT_ZONE_RU_KM, cellDeg = FRONT_ZONE_CELL_DEG, ruKinds = CONTACT_RU_KINDS, landRings = null } = {}) {
   const segs = [];
   let w = 180; let s = 90; let e = -180; let n = -90;
   for (const path of Array.isArray(paths) ? paths : []) {
@@ -212,8 +214,9 @@ export function frontZoneRaster(paths, index, { radiusKm = FRONT_ZONE_KM, cellDe
     }
   }
   if (!segs.length) return null;
-  const padLat = radiusKm / KM_PER_DEG;
-  const padLon = radiusKm / (KM_PER_DEG * Math.max(0.1, Math.cos((Math.max(Math.abs(s), Math.abs(n)) * Math.PI) / 180)));
+  const reachKm = Math.max(radiusKm, ruRadiusKm || 0);
+  const padLat = reachKm / KM_PER_DEG;
+  const padLon = reachKm / (KM_PER_DEG * Math.max(0.1, Math.cos((Math.max(Math.abs(s), Math.abs(n)) * Math.PI) / 180)));
   const west = Math.floor((w - padLon) / cellDeg) * cellDeg;
   const north = Math.ceil((n + padLat) / cellDeg) * cellDeg;
   const width = Math.max(1, Math.ceil((e + padLon - west) / cellDeg));
@@ -247,12 +250,23 @@ export function frontZoneRaster(paths, index, { radiusKm = FRONT_ZONE_KM, cellDe
   const landList = (Array.isArray(landRings) ? landRings : []).filter((r) => Array.isArray(r) && r.length >= 4);
   const landMask = landList.length ? ringMask(landList, width, height, west, north, cellDeg) : null;
   const values = new Uint8Array(width * height);
-  let cells = 0;
+  // Okupovaná strana (2026-09-26, vlastník: „tú hluché miesto by si mohol vyplniť
+  // šrafovaním" — výbežok okupovaného územia obklopený líniou bol len slabou výplňou):
+  // maska do `ruRadiusKm` od línie, plná do polovice, potom lineárne do nuly.
+  const ruValues = new Uint8Array(width * height);
+  let cells = 0; let ruCells = 0;
   for (let idx = 0; idx < values.length; idx += 1) {
     const d = dist[idx];
-    if (!(d < radiusKm) || ruMask[idx] || (landMask && !landMask[idx])) continue;
+    if (ruMask[idx]) {
+      if (ruRadiusKm > 0 && d < ruRadiusKm) {
+        ruValues[idx] = Math.max(1, Math.round(255 * Math.min(1, (ruRadiusKm - d) / (ruRadiusKm * 0.5))));
+        ruCells += 1;
+      }
+      continue;
+    }
+    if (!(d < radiusKm) || (landMask && !landMask[idx])) continue;
     values[idx] = Math.max(1, Math.round(255 * Math.pow(1 - d / radiusKm, 1.6)));
     cells += 1;
   }
-  return { width, height, cellDeg, bbox: { west, south: north - height * cellDeg, east: west + width * cellDeg, north }, values, cells };
+  return { width, height, cellDeg, bbox: { west, south: north - height * cellDeg, east: west + width * cellDeg, north }, values, cells, ruValues, ruCells };
 }

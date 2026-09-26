@@ -21,6 +21,7 @@ import { fetchUkraineControl } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
 import { CONTROL_STALE_DAYS, STALE_DIM, freshnessOf, viewedRefMs } from './data/ukraineFreshness.js';
 import { currentLanguage, t } from './i18n.js';
+import { geoImageMaterialFor } from './data/screenPatternMaterials.js';
 
 export const UKRAINE_CONTROL_ID = 'ukraine-control';
 export const CONTROL_RASTER_SCALE = 8; // px na bunku plátna (372 × 168 buniek → 2 976 × 1 344 px) — tenké pruhy aj zblízka
@@ -332,7 +333,8 @@ export function createUkraineControlLayer({
         id: `${UKRAINE_CONTROL_ID}:zones`,
         rectangle: {
           coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
-          material: new Cesium.ImageMaterialProperty({ image: canvas, transparent: true }),
+          // Presne podľa geodetických súradníc (ImageMaterialProperty na 18° × 8° sedel o km vedľa).
+          material: geoImageMaterialFor(canvas, b) || new Cesium.ImageMaterialProperty({ image: canvas, transparent: true }),
           classificationType: Cesium.ClassificationType.BOTH,
           show: _zonesVisible,
         },

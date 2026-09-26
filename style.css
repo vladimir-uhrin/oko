@@ -11890,6 +11890,8 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* Prifrontové pásmo (2026-09-26): prechod od línie do stratena; KARTA ho nekreslí. */
 .oko-ukr-tl-ctl-item.is-ds-zone .oko-ukr-tl-ctl-sw { background: linear-gradient(90deg, rgba(255, 122, 61, 0.42), rgba(255, 122, 61, 0)); border-color: rgba(255, 122, 61, 0.35); }
 .oko-ukr-tl-ds.is-karta .is-ds-zone { display: none; }
+.oko-ukr-tl-ctl-item.is-ds-zone-ru .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(255, 75, 62, 0.75) 0 1.5px, rgba(224, 85, 63, 0.18) 1.5px 5px); border-color: rgba(255, 75, 62, 0.55); }
+.oko-ukr-tl-ds.is-karta .is-ds-zone-ru { display: none; }
 /* Sivá zóna sa na mape kreslí šrafovane — vzorka musí vyzerať rovnako: v bežnom
    štýle jantárové pruhy (DEEPSTATE_STYLES.default.greyCss), na KARTE sivé. */
 .oko-ukr-tl-ctl-item.is-ds-grey .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(255, 181, 71, 0.85) 0 2px, rgba(255, 181, 71, 0.1) 2px 5px); border-color: rgba(255, 181, 71, 0.9); }

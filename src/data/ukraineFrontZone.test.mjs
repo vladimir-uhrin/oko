@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { FRONT_ZONE_KM, contactLinePaths, frontZoneRaster } from './ukraineContactLine.js';
+import { FRONT_ZONE_KM, FRONT_ZONE_RU_KM, contactLinePaths, frontZoneRaster } from './ukraineContactLine.js';
 
 // Štvorec „okupovaného" územia 37,0–37,6 E × 48,0–48,4 N; celé okolie je „pevnina".
 const occupied = [[37.0, 48.0], [37.6, 48.0], [37.6, 48.4], [37.0, 48.4], [37.0, 48.0]];
@@ -33,6 +33,20 @@ test('pásmo len na ukrajinskej strane, klesá od línie, končí na FRONT_ZONE_
     const lon = z.bbox.west + (c + 0.5) * z.cellDeg; const lat = z.bbox.north - (r + 0.5) * z.cellDeg;
     assert.ok(!(lon > 37.0 && lon < 37.6 && lat > 48.0 && lat < 48.4), `bunka ${lon},${lat} v okupovanom`);
   }
+});
+
+test('okupovaná strana (šrafy, vlastník: „tú hluché miesto by si mohol vyplniť šrafovaním"): len v ruskej kontrole, plná do polovice, do FRONT_ZONE_RU_KM', () => {
+  assert.equal(FRONT_ZONE_RU_KM, 8);
+  const z = frontZoneRaster(paths, index, { landRings: land });
+  const kmLon = 1 / (111.32 * Math.cos((48.2 * Math.PI) / 180));
+  const ru = (lon, lat) => z.ruValues[Math.floor((z.bbox.north - lat) / z.cellDeg) * z.width + Math.floor((lon - z.bbox.west) / z.cellDeg)];
+  assert.ok(z.ruCells > 0);
+  assert.equal(ru(37.0 + 2 * kmLon, 48.2), 255, '2 km za líniou = plná šrafa');
+  assert.ok(ru(37.0 + 6 * kmLon, 48.2) > 0 && ru(37.0 + 6 * kmLon, 48.2) < 255, '6 km = slabne');
+  assert.equal(ru(37.0 + 10 * kmLon, 48.2), 0, 'za 8 km nič');
+  assert.equal(ru(37.0 - 2 * kmLon, 48.2), 0, 'ukrajinská strana bez šrafy');
+  const none = frontZoneRaster(paths, index, { landRings: land, ruRadiusKm: 0 });
+  assert.equal(none.ruCells, 0, 'ruRadiusKm 0 = bez šrafy (KARTA)');
 });
 
 test('pevnina orezáva pásmo (more, Rusko); bez línie nič', () => {
@@ -63,12 +77,41 @@ test('vrstva: predvolený štýl má pásmo a žiaru, KARTA nie; legenda a texty
   const karta = src.slice(src.indexOf('karta: Object.freeze({'), src.indexOf('});', src.indexOf('karta: Object.freeze({')));
   assert.doesNotMatch(karta, /zone:|contactGlow:/, 'KARTA ostáva jemná');
   assert.match(src, /new Cesium\.PolylineGlowMaterialProperty\(/);
-  assert.match(src, /frontZoneRaster\(_contact, _polyIndex, \{ landRings: UKRAINE_LAND_RINGS \}\)/, 'z dnešnej línie, orezané pevninou');
+  assert.match(src, /frontZoneRaster\(_contact, _polyIndex, \{ landRings: UKRAINE_LAND_RINGS, ruRadiusKm: st\.zoneRu \? FRONT_ZONE_RU_KM : 0 \}\)/, 'z dnešnej línie, orezané pevninou');
+  assert.match(src, /zoneRu: Object\.freeze\(\{ css: '#ff4b3e', lineAlpha: 0\.62, spacing: 8, thickness: 0\.22 \}\)/);
+  assert.match(src, /material: mat, classificationType: Cesium\.ClassificationType\.BOTH/, 'jeden obdĺžnik, materiál OkoFrontZone');
+  assert.doesNotMatch(src, /ImageMaterialProperty\(\{ image: zc/, 'nie ImageMaterialProperty (st pri veľkom obdĺžniku sedelo o km vedľa)');
+  // Materiály: poloha z lúča a elipsoidu v OČNÝCH súradniciach, nie z materialInput.st.
+  const mats = readFileSync(new URL('./screenPatternMaterials.js', import.meta.url), 'utf8');
+  for (const type of ['OkoFrontZone', 'OkoGeoImage']) assert.ok(mats.includes(`'${type}'`), type);
+  const shaders = mats.match(/source: `[\s\S]*?`/g).filter((s) => s.includes('rect.'));
+  assert.equal(shaders.length, 2);
+  for (const sh of shaders) {
+    assert.match(sh, /czm_rayEllipsoidIntersectionInterval\(czm_ray\(vec3\(0\.0\), dirEC\), czm_view\[3\]\.xyz,/, 'lúč a stred Zeme v očných súradniciach');
+    assert.match(sh, /atan\(p\.z, length\(p\.xy\) \* 0\.99330562\)/, 'geodetická šírka WGS84');
+    assert.doesNotMatch(sh, /materialInput\.st/);
+  }
+  const ctl = readFileSync(new URL('../ukraineControlLayer.js', import.meta.url), 'utf8');
+  assert.match(ctl, /material: geoImageMaterialFor\(canvas, b\) \|\| new Cesium\.ImageMaterialProperty/, 'aj raster Wikipédie presne');
   const tl = readFileSync(new URL('../ukraineTimeline.js', import.meta.url), 'utf8');
   assert.match(tl, /sw\('is-ds-zone', translate\('ukraine\.ds\.zone'\)\)/);
+  assert.match(tl, /sw\('is-ds-zone-ru', translate\('ukraine\.ds\.zone-ru'\)\)/);
   const { EN_STRINGS, SK_STRINGS } = await import('../i18nStrings.js');
-  for (const k of ['ukraine.ds.zone', 'ukraine.ds.zone-tip']) { assert.ok(EN_STRINGS[k]); assert.ok(SK_STRINGS[k]); }
+  for (const k of ['ukraine.ds.zone', 'ukraine.ds.zone-tip', 'ukraine.ds.zone-ru', 'ukraine.ds.zone-ru-tip']) { assert.ok(EN_STRINGS[k]); assert.ok(SK_STRINGS[k]); }
   assert.match(SK_STRINGS['ukraine.ds.zone-tip'], /odvodená geometria, nie mapa bojov/);
   const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
   assert.match(css, /\.oko-ukr-tl-ds\.is-karta \.is-ds-zone \{ display: none; \}/);
+  assert.match(css, /\.oko-ukr-tl-ds\.is-karta \.is-ds-zone-ru \{ display: none; \}/);
+});
+
+test('plátno pásma: R = ukrajinská strana, G = okupovaná, alfa 255 len kde niečo je', async () => {
+  const { paintFrontZoneCanvas } = await import('../ukraineDeepStateLayer.js');
+  let put = null;
+  const ctx = { createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }), putImageData: (img) => { put = img; } };
+  const canvas = { width: 0, height: 0, getContext: () => ctx };
+  const zone = { width: 3, height: 1, cells: 1, ruCells: 1, values: Uint8Array.from([200, 0, 0]), ruValues: Uint8Array.from([0, 255, 0]) };
+  assert.equal(paintFrontZoneCanvas(zone, canvas), canvas);
+  assert.deepEqual([...put.data], [200, 0, 0, 255, 0, 255, 0, 255, 0, 0, 0, 0]);
+  assert.equal(paintFrontZoneCanvas({ ...zone, cells: 0, ruCells: 0 }, canvas), null);
+  assert.equal(paintFrontZoneCanvas(zone, { getContext: () => null }), null);
 });

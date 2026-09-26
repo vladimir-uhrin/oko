@@ -17,8 +17,8 @@
 
 import * as Cesium from 'cesium';
 import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText, deepstateMirrorRepo } from './data/ukraineDeepState.js';
-import { hatchMaterialFor } from './data/screenPatternMaterials.js';
-import { FRONT_ZONE_KM, contactLinePaths, frontZoneRaster, pathLengthKm } from './data/ukraineContactLine.js';
+import { frontZoneMaterialFor, hatchMaterialFor } from './data/screenPatternMaterials.js';
+import { FRONT_ZONE_KM, FRONT_ZONE_RU_KM, contactLinePaths, frontZoneRaster, pathLengthKm } from './data/ukraineContactLine.js';
 import { UKRAINE_LAND_RINGS } from './data/ukraineLand.js';
 import { fetchUkraineDeepState } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
@@ -68,6 +68,8 @@ export const DEEPSTATE_STYLES = Object.freeze({
     // odvodené z dnešnej línie (frontZoneRaster) — namiesto 44 dní starého pásu Wikipédie.
     contactGlow: Object.freeze({ width: 18, alpha: 0.6, power: 0.14 }),
     zone: Object.freeze({ css: '#ff7a3d', maxAlpha: 0.42 }),
+    // Okupovaná strana pri línii: červené šrafy v obrazovkových px orezané maskou (≤ 8 km).
+    zoneRu: Object.freeze({ css: '#ff4b3e', lineAlpha: 0.62, spacing: 8, thickness: 0.22 }),
   }),
   karta: Object.freeze({
     greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true,
@@ -160,22 +162,22 @@ export function frontDistanceKm(index, lon, lat, { radii = FRONT_SAMPLE_RADII_KM
 }
 
 /**
- * Raster prifrontového pásma → plátno (1 px = 1 bunka, riadok 0 = sever): farba
- * `zone.css`, krytie = hodnota bunky / 255 × `zone.maxAlpha`. Vracia plátno alebo
- * null (bez 2D kontextu / prázdne pásmo). Nie je čisté (Canvas).
+ * Raster prifrontového pásma → plátno pre materiál OkoFrontZone (1 px = 1 bunka,
+ * riadok 0 = sever): R = ukrajinská strana (prechod), G = okupovaná strana (šrafy),
+ * alfa 255 všade, kde niečo je (inak by prehliadač pri premultiplikácii RGB zahodil).
+ * Prázdne pásmo alebo bez 2D kontextu = null. Nie je čisté (Canvas).
  */
-export function paintZoneCanvas(zone, canvas, { css = '#ff7a3d', maxAlpha = 0.42 } = {}) {
+export function paintFrontZoneCanvas(zone, canvas) {
   const ctx = canvas?.getContext?.('2d');
-  if (!ctx || !zone?.cells) return null;
+  if (!ctx || !zone || !(zone.cells || zone.ruCells)) return null;
   canvas.width = zone.width; canvas.height = zone.height;
   const img = ctx.createImageData(zone.width, zone.height);
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(css) || [null, 'ff', '7a', '3d'];
-  const [r, g, b] = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  const ru = zone.ruValues || new Uint8Array(zone.values.length);
   for (let i = 0; i < zone.values.length; i += 1) {
-    const v = zone.values[i];
-    if (!v) continue;
+    const u = zone.values[i]; const r = ru[i];
+    if (!u && !r) continue;
     const o = i * 4;
-    img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = b; img.data[o + 3] = Math.round(v * maxAlpha);
+    img.data[o] = u; img.data[o + 1] = r; img.data[o + 2] = 0; img.data[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
   return canvas;
@@ -285,15 +287,17 @@ export function createUkraineDeepStateLayer({
         });
       }
     }
-    // Prifrontové pásmo (len štýly so `zone`): obrázok rastra na obdĺžniku, primknutý.
+    // Prifrontové pásmo (len štýly so `zone`): jeden primknutý obdĺžnik, materiál
+    // OkoFrontZone si polohu berie z geodetických súradníc fragmentu (nie zo st).
     if (st.zone && _contact.length) {
-      if (_zone === undefined) { try { _zone = frontZoneRaster(_contact, _polyIndex, { landRings: UKRAINE_LAND_RINGS }); } catch { _zone = null; } }
-      const zc = _zone ? paintZoneCanvas(_zone, doc.createElement('canvas'), st.zone) : null;
-      if (zc) {
+      if (_zone === undefined) { try { _zone = frontZoneRaster(_contact, _polyIndex, { landRings: UKRAINE_LAND_RINGS, ruRadiusKm: st.zoneRu ? FRONT_ZONE_RU_KM : 0 }); } catch { _zone = null; } }
+      const zc = _zone ? paintFrontZoneCanvas(_zone, doc.createElement('canvas')) : null;
+      const mat = zc ? frontZoneMaterialFor(zc, _zone.bbox, { zoneCss: st.zone.css, zoneAlpha: st.zone.maxAlpha, hatchCss: st.zoneRu?.css, hatchAlpha: st.zoneRu ? st.zoneRu.lineAlpha : 0, spacing: st.zoneRu?.spacing, thickness: st.zoneRu?.thickness }) : null;
+      if (mat) {
         const b = _zone.bbox;
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:zone`,
-          rectangle: { coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north), material: new Cesium.ImageMaterialProperty({ image: zc, transparent: true }), classificationType: Cesium.ClassificationType.BOTH },
+          rectangle: { coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north), material: mat, classificationType: Cesium.ClassificationType.BOTH },
           properties: { deepstate: { kind: 'zone' } },
         });
       }
@@ -356,6 +360,7 @@ export function createUkraineDeepStateLayer({
     // Línia kontaktu: odvodená, s dĺžkou úseku.
     if (info.kind === 'contact' && Number.isFinite(info.km)) return translate('ukraine.ds.contact-km', { km: info.km });
     if (info.kind === 'zone') return translate('ukraine.ds.zone-tip', { km: FRONT_ZONE_KM });
+    if (info.kind === 'zone-ru') return translate('ukraine.ds.zone-ru-tip', { km: FRONT_ZONE_RU_KM });
     const kindText = translate(`ukraine.ds.${info.kind}`);
     const name = lang === 'uk' ? (info.uk || info.en) : (info.en || info.uk);
     const parts = [kindText];
@@ -377,10 +382,16 @@ export function createUkraineDeepStateLayer({
           const f = picked?.id?.ukraineDeepState || picked?.primitive?.id?.ukraineDeepState;
           if (f && typeof f === 'object') info = f;
           else if (picked?.id?.properties?.deepstate) info = picked.id.properties.deepstate.getValue?.() || picked.id.properties.deepstate;
+          // Pásmo je jeden obdĺžnik pre obe strany — strana podľa polygónov pod kurzorom.
+          if (info?.kind === 'zone') {
+            const cart = scene.camera.pickEllipsoid(pos);
+            const cg = cart ? Cesium.Cartographic.fromCartesian(cart) : null;
+            if (cg && sideFromPolygons(_polyIndex, Cesium.Math.toDegrees(cg.longitude), Cesium.Math.toDegrees(cg.latitude)) === 'ru') info = { kind: 'zone-ru' };
+          }
         } catch { info = null; }
         if (info && info.kind) {
           tip.textContent = tipTextFor(info);
-          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : ((info.kind === 'contact' ? (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).contact.css : info.kind === 'zone' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zone?.css || '#ff7a3d') : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'))));
+          tip.style.setProperty('--ukr-accent', info.kind === 'grey' ? deepstateGreyCss(DEEPSTATE_STYLES[_style]) : ((info.kind === 'contact' ? (DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).contact.css : info.kind === 'zone' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zone?.css || '#ff7a3d') : info.kind === 'zone-ru' ? ((DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default).zoneRu?.css || '#ff4b3e') : (DEEPSTATE_COLORS[info.kind] || '#8a97a3'))));
           tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
           tip.hidden = false;
         } else tip.hidden = true;
@@ -461,7 +472,7 @@ export function createUkraineDeepStateLayer({
     return {
       shown: _shown, loading: _loading, error: _error,
       day: _snapshot?.day || null, at: _snapshot?.at || null, stampText: deepstateStampText(_snapshot), datetime: _snapshot?.datetime || null,
-      contact: _contact.length, contactKm: Math.round(_contact.reduce((sum, path) => sum + pathLengthKm(path), 0)), zoneCells: _zone?.cells || 0,
+      contact: _contact.length, contactKm: Math.round(_contact.reduce((sum, path) => sum + pathLengthKm(path), 0)), zoneCells: _zone?.cells || 0, zoneRuCells: _zone?.ruCells || 0,
       counts: _snapshot?.counts || null, areaKm2: _snapshot?.areaKm2 || null, features: _snapshot?.features?.length || 0, snapshots: _snapshot?.snapshots ?? null,
       style: _style, requestedAt: _snapshot?.requestedAt || null,
       // Zdroj snímky: náš archív z API (`archive`) alebo mirror cyterat (`mirror`, len okupované).

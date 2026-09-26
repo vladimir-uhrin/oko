@@ -218,6 +218,7 @@ export function createUkraineTimeline({
     dsBox.appendChild(sw('is-ds-occupied', translate('ukraine.ds.occupied')));
     dsBox.appendChild(sw('is-ds-contact', translate('ukraine.ds.contact')));
     dsBox.appendChild(sw('is-ds-zone', translate('ukraine.ds.zone')));
+    dsBox.appendChild(sw('is-ds-zone-ru', translate('ukraine.ds.zone-ru')));
     dsBox.appendChild(sw('is-ds-grey', translate('ukraine.ds.grey')));
     dsBox.appendChild(sw('is-ds-liberated', translate('ukraine.ds.liberated')));
     dsBox.appendChild(sw('is-ds-attack', translate('ukraine.ds.attack')));
