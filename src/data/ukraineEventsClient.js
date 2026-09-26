@@ -11,7 +11,7 @@ import { classifyIncident, locateIncident } from './gulfIncidents.js';
 import { filterSanctionedNews } from './sanctionedMedia.js';
 import { UKRAINE_GAZETTEER } from './ukraineIncidents.js';
 import { UKRAINE_EVENTS_API, attachMedia, attachNews, dayKey, eventsInWindow, fetchUkraineEvents, fireToEvent, newsItemToEvent } from './ukraineEvents.js';
-import { mediaToEvent } from './ukraineMedia.js';
+import { mediaToAlert, mediaToEvent } from './ukraineMedia.js';
 
 export const CHUNK_DAYS = 31;
 const D = 86_400_000;
@@ -58,6 +58,22 @@ export function assembleEvents(payloads, { startMs, endMs }) {
   const fires = [];
   for (const p of payloads || []) for (const it of p?.fires || []) { const ev = fireToEvent(it); if (ev && !seen.has(ev.id)) { seen.add(ev.id); fires.push(ev); } }
   return eventsInWindow([...merged, ...fires], startMs, endMs);
+}
+
+/**
+ * Poplachy Vzdušných síl okna (samostatný prúd, nie udalosti — tie sa pri
+ * zlučovaní pripájajú k iným), od najstaršieho. Pure.
+ */
+export function assembleAlerts(payloads, { startMs, endMs }) {
+  const out = []; const seen = new Set();
+  for (const p of payloads || []) {
+    for (const it of p?.media || []) {
+      const a = mediaToAlert(it);
+      if (!a || seen.has(a.id) || a.t < startMs || a.t > endMs) continue;
+      seen.add(a.id); out.push(a);
+    }
+  }
+  return out.sort((a, b) => a.t - b.t);
 }
 
 /** Snímka územnej kontroly platná pre deň (Wikipedia, CC BY-SA) z proxy. */
@@ -170,7 +186,7 @@ export function createUkraineEventStore({ fetchEvents = fetchUkraineEvents, fetc
       for (const k of ['geoconfirmed', 'news', 'media', 'reports']) coverage[k].push(...(p?.coverage?.[k] || []));
       Object.assign(coverage.viina, p?.coverage?.viina || {});
     }
-    return { events: assembleEvents(payloads, { startMs, endMs }), reports, coverage, errors, chunks: payloads.length, fetchedAt: now() };
+    return { events: assembleEvents(payloads, { startMs, endMs }), alerts: assembleAlerts(payloads, { startMs, endMs }), reports, coverage, errors, chunks: payloads.length, fetchedAt: now() };
   }
 
   async function summary(startMs, endMs) {

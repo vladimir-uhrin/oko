@@ -172,16 +172,16 @@ export function parseRssVideoEnclosures(xml, { label = 'ArmyInform', badge = 'of
 /** Prídavné meno oblasti + slovo oblasti (aj „обл.", aj súradné „Одеської та Миколаївської областей"). */
 const oblAdjStem = (stem) => `${stem}[а-яіїєґ'’ʼ]*(?:(?:(?:,\\s*|\\s+(?:та|і|й)\\s+)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+)+\\s+обл(?:астей|астях)|\\s+обл(?:аст[а-яіїєґ'’ʼ]*|\\.)?)`;
 export const UK_PLACE_STEMS = Object.freeze({
-  Pokrovsk: 'Покровськ', Myrnohrad: 'Мирноград', Dobropillia: 'Добропілл', Kostiantynivka: 'Костянтинівк', 'Chasiv Yar': 'Час[оі]в[а-я]* Яр', Toretsk: 'Торецьк', Bakhmut: 'Бахмут', Siversk: 'Сіверськ',
+  Pokrovsk: 'Покровськ', Myrnohrad: 'Мирноград', Dobropillia: 'Добропілл', Kostiantynivka: 'Костянтинівк', 'Chasiv Yar': 'Час[оі]в[а-яіїєґ]* Яр', Toretsk: 'Торецьк', Bakhmut: 'Бахмут', Siversk: 'Сіверськ',
   Lyman: 'Лиман', Sloviansk: "Слов['’ʼ]янськ", Kramatorsk: 'Краматорськ', Druzhkivka: 'Дружківк', Kupiansk: "Куп['’ʼ]янськ", Izium: 'Ізюм', Borova: 'Боров(?:а|ої|ій|у)', Vovchansk: 'Вовчанськ',
-  Huliaipole: 'Гуляйпол', Orikhiv: 'Оріх[іо]в', 'Velyka Novosilka': 'Велик[а-я]* Новосілк', Vuhledar: 'Вугледар', Kurakhove: 'Курахов', Avdiivka: 'Авдіївк', Donetsk: 'Донецьк', Horlivka: 'Горлівк',
+  Huliaipole: 'Гуляйпол', Orikhiv: 'Оріх[іо]в', 'Velyka Novosilka': 'Велик[а-яіїєґ]* Новосілк', Vuhledar: 'Вугледар', Kurakhove: 'Курахов', Avdiivka: 'Авдіївк', Donetsk: 'Донецьк', Horlivka: 'Горлівк',
   Mariupol: 'Маріупол', Berdiansk: 'Бердянськ', Melitopol: 'Мелітопол', 'Enerhodar (Zaporizhzhia NPP)': 'Енергодар|ЗАЕС', Luhansk: 'Луганськ', Sievierodonetsk: 'Сєвєродонецьк', Kherson: 'Херсон',
-  'Nova Kakhovka': 'Нов[а-я]* Каховк', Oleshky: 'Олешк', Zaporizhzhia: 'Запоріжж', Nikopol: 'Нікопол', Dnipro: 'Дніпр(?:о|а|і|ом)', 'Kryvyi Rih': 'Крив[а-я]* Р[іо]г|Кривбас', Pavlohrad: 'Павлоград', Kremenchuk: 'Кременчу',
-  Mykolaiv: 'Миколаїв|Миколаєв', Odesa: 'Одес', Chornomorsk: 'Чорноморськ', Izmail: 'Ізмаїл', Reni: 'Рені', Kharkiv: 'Харк[іо]в', Chuhuiv: 'Чугу[їє]в', Sumy: 'Сум(?:и|ах|ами)', Konotop: 'Конотоп', Shostka: 'Шостк',
-  Poltava: 'Полтав', Chernihiv: 'Черніг[іо]в', Kyiv: 'Ки[єї]в', 'Bila Tserkva': 'Біл[а-я]* Церкв', Zhytomyr: 'Житомир', Vinnytsia: 'Вінниц', Cherkasy: 'Черкас', Kropyvnytskyi: 'Кропивницьк', Khmelnytskyi: 'Хмельницьк',
+  'Nova Kakhovka': 'Нов[а-яіїєґ]* Каховк', Oleshky: 'Олешк', Zaporizhzhia: 'Запоріжж', Nikopol: 'Нікопол', Dnipro: 'Дніпр(?:о|а|і|ом)', 'Kryvyi Rih': 'Крив[а-яіїєґ]* Р[іо]г|Кривбас', Pavlohrad: 'Павлоград', Kremenchuk: 'Кременчу',
+  Mykolaiv: 'Миколаїв|Миколаєв', Odesa: 'Одес', Chornomorsk: 'Чорноморськ', Izmail: 'Ізмаїл', Reni: 'Рені', Kharkiv: 'Харк[іо]в', Chuhuiv: 'Чугу[їє]в', Sumy: 'Сум(?:и|ах|ами|ам|(?![а-яіїєґ]))', Konotop: 'Конотоп', Shostka: 'Шостк',
+  Poltava: 'Полтав', Chernihiv: 'Черніг[іо]в', Kyiv: 'Ки[єї]в', 'Bila Tserkva': 'Біл[а-яіїєґ]* Церкв', Zhytomyr: 'Житомир', Vinnytsia: 'Вінниц', Cherkasy: 'Черкас', Kropyvnytskyi: 'Кропивницьк', Khmelnytskyi: 'Хмельницьк',
   Ternopil: 'Терноп[іо]л', Rivne: 'Рівн(?:е|ого|ому|ім)', Lutsk: 'Луцьк', Lviv: 'Льв[іо]в', 'Ivano-Frankivsk': 'Івано-Франківськ', Uzhhorod: 'Ужгород', Chernivtsi: 'Чернівц', Sevastopol: 'Севастопол', Simferopol: 'Сімферопол',
   Feodosia: 'Феодос', Kerch: 'Керч', Dzhankoi: 'Джанко', Saky: 'Сак(?:и|ах|ами)', Yevpatoria: 'Євпатор', Belgorod: 'Б[єе]лгород', Shebekino: 'Шебекін', Kursk: 'Курськ', Sudzha: 'Судж', Bryansk: 'Брянськ', Voronezh: 'Воронеж|Вороніж',
-  'Rostov-on-Don': 'Ростов', Taganrog: 'Таганро', Novorossiysk: 'Новоросійськ', Tuapse: 'Туапсе', Engels: 'Енгельс', Ryazan: 'Рязан', Moscow: 'Москв', Donbas: 'Донбас', Crimea: 'Крим', 'Black Sea': 'Чорн[а-я]* мор', 'Sea of Azov': 'Азовськ[а-я]* мор',
+  'Rostov-on-Don': 'Ростов', Taganrog: 'Таганро', Novorossiysk: 'Новоросійськ', Tuapse: 'Туапсе', Engels: 'Енгельс', Ryazan: 'Рязан', Moscow: 'Москв', Donbas: 'Донбас', Crimea: 'Крим', 'Black Sea': 'Чорн[а-яіїєґ]* мор', 'Sea of Azov': 'Азовськ[а-яіїєґ]* мор',
   // [а-яіїє]: aj „Донецької / Одеській області" (šikmé pády majú і/ї).
   'Kharkiv Oblast': `Харківщин|${oblAdjStem('Харківськ')}`, 'Sumy Oblast': `Сумщин|${oblAdjStem('Сумськ')}`, 'Donetsk Oblast': `Донеччин|${oblAdjStem('Донецьк')}`, 'Zaporizhzhia Oblast': `Запоріжчин|${oblAdjStem('Запорізьк')}`, 'Kherson Oblast': `Херсонщин|${oblAdjStem('Херсонськ')}`,
   'Dnipropetrovsk Oblast': `Дніпропетровщин|${oblAdjStem('Дніпропетровськ')}`, 'Odesa Oblast': `Одещин|${oblAdjStem('Одеськ')}`,
@@ -291,6 +291,30 @@ function prepositionBefore(s, at) {
 const FROM_OR_TOWARD = new Set(['з', 'із', 'зі', 'від', 'до', 'через', 'повз']);
 const kmApprox = (a, b) => { const dy = (b.lat - a.lat) * 111.32; const dx = (b.lon - a.lon) * 111.32 * Math.cos((a.lat * Math.PI) / 180); return Math.hypot(dx, dy); };
 /**
+ * Zmienky oblastí, ktoré NAOZAJ kvalifikujú sídlo na [at, end): pred ním v tom istom
+ * úseku nadpis „Житомирщина:" alebo lokál, za ním lokál / genitív bez predložky /
+ * zátvorka (pravidlá v komentári locateUkText). Spoločné pre geokodér aj poplachy. Pure.
+ * @param {Array<{name:string,lat:number,lon:number,at:number,end:number,form:string,prep:string}>} oblasts zoradené podľa `at`
+ */
+function qualifyingOblasts(s, oblasts, at, end) {
+  const before = oblasts.filter((o) => {
+    if (o.end > at || at - o.end > OBLAST_QUALIFY_CHARS || FROM_OR_TOWARD.has(o.prep)) return false;
+    const gap = s.slice(o.end, at).replace(HEADER_EMOJI_RE, '').replace(ABBREV_RE, ' ');
+    if (SEGMENT_BREAK_RE.test(gap)) return false;
+    if (o.form === 'loc') return true;
+    return o.form === 'nom' && /^\s*[:–—-]/u.test(s.slice(o.end));
+  }).at(-1);
+  const after = oblasts.find((o) => {
+    if (o.at < end || FROM_OR_TOWARD.has(o.prep)) return false;
+    const gap = s.slice(end, o.at);
+    if (!/^[\s(«"„—–-]*(?:(?:на|у|в)\s+)?$/u.test(gap)) return false;
+    if (o.form === 'loc') return true;
+    if (o.form === 'gen') return !/(?:на|у|в)\s+$/u.test(gap);
+    return o.form === 'nom' && /\(\s*$/u.test(gap);
+  });
+  return [before, after].filter(Boolean);
+}
+/**
  * Sídlo gazetteeru menované v ukrajinskom texte NAJSKÔR (poloha v texte, nie
  * poradie gazetteeru — súhrn DSNS menuje viac miest, prvé je predmet); oblasť
  * až keď nesedí žiadne sídlo. Keď oblasť, ktorá sídlo NAOZAJ kvalifikuje, leží
@@ -324,22 +348,7 @@ export function locateUkText(text, gazetteer = UKRAINE_GAZETTEER) {
   }
   oblasts.sort((a, b) => a.at - b.at);
   if (best) {
-    const before = oblasts.filter((o) => {
-      if (o.end > bestAt || bestAt - o.end > OBLAST_QUALIFY_CHARS || FROM_OR_TOWARD.has(o.prep)) return false;
-      const gap = s.slice(o.end, bestAt).replace(HEADER_EMOJI_RE, '').replace(ABBREV_RE, ' ');
-      if (SEGMENT_BREAK_RE.test(gap)) return false;
-      if (o.form === 'loc') return true;
-      return o.form === 'nom' && /^\s*[:–—-]/u.test(s.slice(o.end));
-    }).at(-1);
-    const after = oblasts.find((o) => {
-      if (o.at < bestEnd || FROM_OR_TOWARD.has(o.prep)) return false;
-      const gap = s.slice(bestEnd, o.at);
-      if (!/^[\s(«"„—–-]*(?:(?:на|у|в)\s+)?$/u.test(gap)) return false;
-      if (o.form === 'loc') return true;
-      if (o.form === 'gen') return !/(?:на|у|в)\s+$/u.test(gap);
-      return o.form === 'nom' && /\(\s*$/u.test(gap);
-    });
-    const hints = [before, after].filter(Boolean);
+    const hints = qualifyingOblasts(s, oblasts, bestAt, bestEnd);
     if (!hints.length || hints.some((h) => kmApprox(h, best) <= OBLAST_NAMESAKE_KM)) return { name: best.name, lat: best.lat, lon: best.lon };
     const hint = hints[0];
     return { name: hint.name, lat: hint.lat, lon: hint.lon, approx: true };
@@ -349,6 +358,115 @@ export function locateUkText(text, gazetteer = UKRAINE_GAZETTEER) {
   // oblastí vrátane príbehov o ľuďoch („блогер з Буковини"), čo nechceme.
   const oblast = oblasts.find((o) => o.gazetteer);
   return oblast ? { name: oblast.name, lat: oblast.lat, lon: oblast.lon, approx: true } : null;
+}
+
+// ── Poplachy Vzdušných síl → ohrozené oblasti ─────────────────────────────
+/** Príspevky kanála Vzdušných síl ZSU (`t.me/kpszsu`). */
+export const AIR_FORCE_ID_PREFIX = 'tg:kpszsu/';
+/** Hrozba z neba (drony aj „Реактивний" bez slova БпЛА, rakety, KAB/„авіаційних бомб", balistika, „ціль", „Бандероль", „в укриття"). */
+const ALERT_THREAT_RE = /Бр?пЛА|безпілотн|реактивн|ракет|КАБ|бомб|боєприпас|Бандерол|балісти|ціл[ьіе]|шахед|крилат|укритт|засоб[а-яіїєґ]*\s+ураженн|тактичн[а-яіїєґ]*\s+авіаці/iu;
+/** „Відбій (тривоги/загрози)" = koniec poplachu, nie nová hrozba. */
+const ALL_CLEAR_RE = /відбій/iu;
+/** „засобів ураження" (zbrane) nie je „ураження" (zásah) — pred testom dopadu preč. */
+const MEANS_OF_DESTRUCTION_RE = /засоб[а-яіїєґ]*\s+ураженн[а-яіїєґ]*/giu;
+/** Odkiaľ („з Брянська", „з Одещини на Вінниччину") — to miesto hrozbou nie je. */
+const ORIGIN_PREPS = new Set(['з', 'із', 'зі', 'від']);
+/** „на півночі від Черкас", „північніше від …" = poloha vedľa miesta, nie pôvod. */
+const RELATIVE_FROM_RE = /(?:півн|півд|сх[іо]д|зах[іо]д)[а-яіїєґ-]*\s+від\s+$/iu;
+/**
+ * Menšie sídla, ktoré Vzdušné sily menujú často a gazetteer ich nemá (výber
+ * z archívu 2026-09-11…26), priamo na oblasť. Len jednoznačné mená — Калинівка,
+ * Семенівка, Софіївка, Юріївка či Південне sú v krajine viackrát, tie tu nie sú.
+ */
+const ALERT_PLACE_OBLASTS = Object.freeze([
+  ['Kyiv Oblast', ['Васильк[іо]в', 'Славутич', 'Бровар', 'Вишгород', 'Гостомел', 'Боярк', 'Обух[іо]в', 'Іванк[іо]в', "Коцюбинськ", 'Борисп[іо]л', 'Глевах', 'Буч(?:а|у|і|ею)(?![а-яіїєґ])', 'Димер', 'Ірпін', 'Кагарлик', 'Переяслав', 'Бородянк', 'Макар[іо]в', 'Миронівк', 'Ржищ[іо]в', 'Фаст[іо]в', 'Узин', 'Чорнобил', 'Вишнев(?:е|ого|ому)(?![а-яіїєґ])', 'Київськ[а-яіїєґ]* водосховищ']],
+  ['Chernihiv Oblast', ['Городн', 'Ріпк', 'Сновськ', 'Добрянк', 'Любеч', 'Сосниц', 'Короп', 'Козел[еь]ц', 'Гончарівськ', 'Прилук', 'Ніжин', 'Бахмач']],
+  ['Poltava Oblast', ['Нов[а-яіїєґ]* Санжар', 'Білик', 'Кобеляк', 'Котельв', 'Диканьк', 'Решетилівк', 'Лубн', 'Глобин', 'Машівк', 'Миргород', 'Гадяч', 'Горішн[а-яіїєґ]* Плавн']],
+  ['Zhytomyr Oblast', ['Коростен', 'Овруч', 'Звягел', 'Коростиш[іо]в', 'Бердич[іо]в']],
+  ['Vinnytsia Oblast', ['Вапнярк', 'Липов[еі]ц', 'Козятин', 'Хмільник', 'Жмеринк', 'Погребищ', 'Бершад', 'Оратов', 'Крижопол', 'Гайсин', 'Ладижин', 'Могил[іь][в-]*-Подільськ']],
+  ['Khmelnytskyi Oblast', ['Старокостянтин[іо]в', "Кам['’ʼ]ян[еі]ц[ья]-Подільськ", 'Шепетівк', 'Нетішин']],
+  ['Cherkasy Oblast', ['Сміл', 'Кан[іео]в(?!ськ)', 'Канівськ[а-яіїєґ]* водосховищ', 'Золотонош', 'Драб[іо]в', 'Умань', 'Умані']],
+  ['Kirovohrad Oblast', ["Знам['’ʼ]янк", 'Долинськ', 'Бобрин[еі]ц']],
+  ['Mykolaiv Oblast', ['Вознесенськ', 'Очак[іо]в', 'Баштанк', 'Південноукраїнськ']],
+  ['Odesa Oblast', ['Заток', 'Татарбунар', 'Біляївк', 'Доброслав', 'Буялик', 'Вилков', 'Білгород-Дністровськ']],
+  ['Dnipropetrovsk Oblast', ['Магдалинівк', "Кам['’ʼ]янськ[а-яіїєґ]* водосховищ", 'Новомосковськ', 'Марганц', 'Жовт[іо]в[оі]д', 'Синельников']],
+  ['Zaporizhzhia Oblast', ['Вільнянськ']],
+  ['Kharkiv Oblast', ['Салт[іо]в', 'Печеніг', 'Балаклі', 'Красноград', 'Богодух[іо]в']],
+  ['Sumy Oblast', ['Глух[іо]в', 'Охтирк', 'Ромн']],
+  ['Rivne Oblast', ['Сарн(?:и|ах)(?![а-яіїєґ])', 'Дубн(?:о|а|і)(?![а-яіїєґ])', 'Вараш']],
+  ['Volyn Oblast', ['Ковел', 'Володимир[а-яіїєґ]*-Волинськ']],
+  ['Lviv Oblast', ['Стрий', 'Стрия', 'Дрогобич', 'Червоноград', 'Шептицьк']],
+]);
+/**
+ * Miesta, ktoré hlásenie Vzdušných síl označuje ako ohrozené, v poradí textu:
+ * oblasti gazetteeru aj UK_OBLAST_HINTS (tu slúžia ako cieľ, nie ako bod na mape)
+ * a sídla gazetteeru („у напрямку Кривого Рогу"). Bez miest pôvodu („з …"),
+ * bez regiónov (Krym, Donbas, moria). `kind` = 'oblast' | 'place'. Pure.
+ * @returns {Array<{name:string, lat:number, lon:number, kind:'oblast'|'place'}>}
+ */
+export function alertTargets(text, gazetteer = UKRAINE_GAZETTEER) {
+  const s = String(text ?? '');
+  if (!s) return [];
+  const hits = [];
+  const scan = (name, lat, lon, re, kind) => {
+    const g = new RegExp(re.source, 'gu');
+    let m;
+    while ((m = g.exec(s))) {
+      const origin = ORIGIN_PREPS.has(prepositionBefore(s, m.index)) && !RELATIVE_FROM_RE.test(s.slice(Math.max(0, m.index - 30), m.index));
+      if (!origin) { hits.push({ name, lat, lon, kind, at: m.index, end: m.index + m[0].length }); return; }
+      if (!m[0].length) g.lastIndex += 1;
+    }
+  };
+  // Zmienky oblastí s tvarom a predložkou — na odhalenie menovca sídla (ako v locateUkText).
+  const mentions = [];
+  const mention = (name, lat, lon, m) => mentions.push({ name, lat, lon, at: m.index, end: m.index + m[0].length, form: oblastForm(m[0]), prep: prepositionBefore(s, m.index) });
+  for (const place of gazetteer) {
+    if (!/Oblast$/.test(place.name) || !UK_PLACE_STEMS[place.name]) continue;
+    const m = stemRe(UK_PLACE_STEMS[place.name], place.name).exec(s);
+    if (m) mention(place.name, place.lat, place.lon, m);
+  }
+  for (const [name, h] of Object.entries(UK_OBLAST_HINTS)) { const m = hintRe(h.re).exec(s); if (m) mention(name, h.lat, h.lon, m); }
+  mentions.sort((a, b) => a.at - b.at);
+  for (const place of gazetteer) {
+    const stem = UK_PLACE_STEMS[place.name];
+    if (!stem || REGION_NAMES.has(place.name)) continue;
+    scan(place.name, place.lat, place.lon, stemRe(stem, place.name), /Oblast$/.test(place.name) ? 'oblast' : 'place');
+  }
+  for (const [name, h] of Object.entries(UK_OBLAST_HINTS)) scan(name, h.lat, h.lon, hintRe(h.re), 'oblast');
+  // Menšie sídla z tabuľky → rovno ich oblasť (poloha = ťažisko oblasti).
+  for (const [oblast, stems] of ALERT_PLACE_OBLASTS) {
+    const c = oblastCentre(oblast, gazetteer);
+    if (c) scan(oblast, c.lat, c.lon, stemRe(stems.join('|'), `alert:${oblast}`), 'oblast');
+  }
+  // Jedna oblasť raz (nadpis „Київщина:" aj „у напрямку Василькова"); sídlo, ktoré
+  // kvalifikuje vzdialená oblasť, je menovec („Лиманка на Одещині" ≠ Lyman na Donbase)
+  // — to isté pravidlo ako v locateUkText, oblasť sama ostáva cieľom.
+  const seen = new Set();
+  return hits.sort((a, b) => a.at - b.at).filter((h) => {
+    if (h.kind === 'oblast') return !seen.has(h.name) && seen.add(h.name);
+    const q = qualifyingOblasts(s, mentions, h.at, h.end);
+    return !q.length || q.some((o) => kmApprox(o, h) <= OBLAST_NAMESAKE_KM);
+  }).map(({ at, end, ...rest }) => rest);
+}
+function oblastCentre(name, gazetteer) {
+  const h = UK_OBLAST_HINTS[name];
+  if (h) return { lat: h.lat, lon: h.lon };
+  const g = gazetteer.find((p) => p.name === name);
+  return g ? { lat: g.lat, lon: g.lon } : null;
+}
+/**
+ * Príspevok Vzdušných síl → poplach `{id, t, targets, text, url}` alebo null.
+ * Poplach = hrozba z neba BEZ dopadu (súhrny „збито/подавлено", zásahy a „відбій"
+ * sa nepočítajú) a s aspoň jedným ohrozeným miestom. Z raw položky, nie z udalosti —
+ * udalosti sa pri zlučovaní môžu pripojiť k iným (attachMedia). Pure.
+ */
+export function mediaToAlert(item, gazetteer = UKRAINE_GAZETTEER) {
+  if (!item || !Number.isFinite(item.publishedAt) || !String(item.id || '').startsWith(AIR_FORCE_ID_PREFIX)) return null;
+  const text = `${item.title || ''}\n${item.text || item.description || ''}`.trim();
+  if (!ALERT_THREAT_RE.test(text) || UK_IMPACT_RE.test(text.replace(MEANS_OF_DESTRUCTION_RE, ' ')) || ALL_CLEAR_RE.test(text)) return null;
+  const targets = alertTargets(text, gazetteer);
+  if (!targets.length) return null;
+  return { id: item.id, t: item.publishedAt, targets, text: clip(text, 200), url: item.url || null };
 }
 
 /** Pravidlá pre ukrajinský text (poradie = priorita). */

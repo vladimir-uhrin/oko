@@ -11904,6 +11904,9 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-item.is-dmg-destroyed .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #f87171; border-color: #f87171; }
 .oko-ukr-tl-ctl-item.is-dmg-severe .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #ff8a3d; border-color: #ff8a3d; }
 .oko-ukr-tl-ctl-item.is-dmg-moderate .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #ffb547; border-color: #ffb547; }
+/* Poplachy (2026-09-26): fialová výplň oblasti — plná (< 1 h) a slabnúca (1–3 h); farby = ukraineAlertAreasLayer.js */
+.oko-ukr-tl-ctl-item.is-al-now .oko-ukr-tl-ctl-sw { background: rgba(176, 124, 255, 0.55); border-color: #b07cff; }
+.oko-ukr-tl-ctl-item.is-al-fading .oko-ukr-tl-ctl-sw { background: rgba(176, 124, 255, 0.16); border-color: rgba(176, 124, 255, 0.55); }
 
 /* ── KARTA — rám „hotovej mapy" (K5) ────────────────────────────────────────
    Ostrovy titulku / legendy / prehľadovej mapky režimu KARTA. Geometria (poloha,

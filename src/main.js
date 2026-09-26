@@ -68,6 +68,7 @@ import { createUkraineControlLayer } from './ukraineControlLayer.js';
 import { createUkraineAreasLayer } from './data/ukraineAreasLayer.js';
 import { createUkraineDeepStateLayer } from './ukraineDeepStateLayer.js';
 import { createUkraineDamageLayer } from './ukraineDamageLayer.js';
+import { createUkraineAlertAreasLayer } from './ukraineAlertAreasLayer.js';
 import { createUkraineTimeline, parseShareParams } from './ukraineTimeline.js';
 import { initLogoGaze } from './logoGaze.js';
 import { initCockpitCloudEffects } from './cockpitCloudEffects.js';
@@ -933,7 +934,11 @@ async function init() {
     // 18 000 bodov UNOSAT nech si používateľ pridá sám).
     const ukraineDamage = createUkraineDamageLayer({ viewer });
     window.__godsEyeView.ukraineDamage = ukraineDamage;
-    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl, deepstate: ukraineDeepState, damage: ukraineDamage });
+    // Poplachy (2026-09-26): oblasti ohrozené podľa hlásení Vzdušných síl — dáta
+    // dodáva os (hlásenia okna + čas kurzora), zapína sa čipom POPLACHY.
+    const ukraineAlerts = createUkraineAlertAreasLayer({ viewer });
+    window.__godsEyeView.ukraineAlerts = ukraineAlerts;
+    const ukraineTimeline = createUkraineTimeline({ layer: ukraineEvents, report: ukraineReport, control: ukraineControl, deepstate: ukraineDeepState, damage: ukraineDamage, alerts: ukraineAlerts });
     window.__godsEyeView.ukraineTimeline = ukraineTimeline;
     // Os vzniká až teraz a štartuje skrytá — ľavý stĺpec ju pri štarte nevidel
     // a na zmenu jej výšky (zobrazenie, zbalenie legendy) nereagoval.
@@ -982,6 +987,7 @@ async function init() {
       deepstate: ukraineDeepState,
       areas: ukraineAreas,
       damage: ukraineDamage,
+      alerts: ukraineAlerts,
       directionCard: ukraineDirectionCard,
       applyScene: (id) => runFrontScene(id),
     });

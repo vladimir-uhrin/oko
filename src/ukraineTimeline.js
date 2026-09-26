@@ -97,6 +97,7 @@ export function createUkraineTimeline({
   control = null,
   deepstate = null,
   damage = null,
+  alerts = null,
   mountTarget = null,
   translate = t,
   lang = currentLanguage(),
@@ -244,6 +245,22 @@ export function createUkraineTimeline({
     dmgBox.appendChild(dmgLine);
     row3.appendChild(dmgBox);
   }
+  // Poplachy (2026-09-26): oblasti ohrozené podľa hlásení Vzdušných síl ZSU —
+  // čip + legenda (plná < 1 h, slabne do 3 h) + poctivá poznámka, že to nie je
+  // oficiálna mapa poplachov. Predvolene vypnuté (ako ŠKODY).
+  let alChip = null; let alLine = null;
+  if (alerts) {
+    const alBox = el('div', 'oko-ukr-tl-ctl oko-ukr-tl-al');
+    alChip = button('data-toggle-chip oko-ukr-tl-type oko-ukr-tl-ctl-chip', translate('ukraine.part.alerts'), () => { if (alerts.isShown()) alerts.hide(); else void alerts.show(); }, translate('ukraine.al.note'));
+    alChip.setAttribute('aria-pressed', 'false');
+    alBox.appendChild(alChip);
+    const sw = (cls, text) => { const s = el('span', `oko-ukr-tl-ctl-item ${cls}`); s.appendChild(el('i', 'oko-ukr-tl-ctl-sw')); s.appendChild(el('span', '', text)); return s; };
+    alBox.appendChild(sw('is-al-now', translate('ukraine.al.now')));
+    alBox.appendChild(sw('is-al-fading', translate('ukraine.al.fading')));
+    alLine = el('span', 'oko-ukr-tl-ctl-since', '');
+    alBox.appendChild(alLine);
+    row3.appendChild(alBox);
+  }
   // Hlásenie GŠ (2026-09-24): čo znamenajú „✕ N" a farby sídiel — bez vysvetlivky
   // boli oranžové a biele body na mape nečitateľné.
   let rpBox = null;
@@ -344,6 +361,7 @@ export function createUkraineTimeline({
       void applyControl(state);
       void applyDeepState(state);
       applyDamageCursor(state);
+      alerts?.setAlerts?.(result.alerts || [], state.cursor);
       renderLegend(); renderMedia(); renderCounts(); drawHistogram(); drawCoverage();
       emit();
       return result;
@@ -511,6 +529,18 @@ export function createUkraineTimeline({
     if (st.error) { dmgLine.textContent = translate('ukraine.tl.error', { detail: st.error }); return; }
     if (!st.adm3 && st.loading) { dmgLine.textContent = translate('ukraine.tl.loading'); return; }
     dmgLine.textContent = translate('ukraine.dmg.legend', { n: nf.format(st.damaged), h: nf.format(st.adm3), u: nf.format(st.unosat), v: nf.format(st.visibleUnosat) });
+  }
+  function renderAlerts() {
+    if (!alerts || !alChip) return;
+    const st = alerts.getState();
+    alChip.classList.toggle('active', st.shown);
+    alChip.setAttribute('aria-pressed', String(st.shown));
+    if (!st.shown) { alLine.textContent = ''; return; }
+    if (st.error) { alLine.textContent = translate('ukraine.tl.error', { detail: st.error }); return; }
+    if (!st.loaded) { alLine.textContent = translate('ukraine.tl.loading'); return; }
+    if (!st.active.length) { alLine.textContent = translate('ukraine.al.none'); return; }
+    const ago = Math.max(0, Math.round((st.at - st.lastT) / 60_000));
+    alLine.textContent = translate('ukraine.al.legend', { n: nf.format(st.active.length), min: nf.format(ago) });
   }
   function applyDamageCursor(state) {
     if (!damage) return;
@@ -747,6 +777,7 @@ export function createUkraineTimeline({
     if (!st.points && !st.loading) void applyControl(clock.getState());
   }) || null;
   const unsubscribeDamage = damage?.onChange?.(() => renderDamage()) || null;
+  const unsubscribeAlerts = alerts?.onChange?.(() => renderAlerts()) || null;
   const unsubscribeDeepState = deepstate?.onChange?.(() => {
     renderDeepState();
     if (!deepstate.isShown()) { _deepstateDay = null; return; }
@@ -824,7 +855,7 @@ export function createUkraineTimeline({
   function destroy() {
     _destroyed = true;
     hide();
-    unsubscribeClock?.(); unsubscribeLayer?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.();
+    unsubscribeClock?.(); unsubscribeLayer?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); unsubscribeAlerts?.();
     try { root.remove(); } catch { /* */ }
     listeners.clear();
   }
@@ -837,6 +868,6 @@ export function createUkraineTimeline({
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
     isLegendCollapsed: () => _collapsed,
-    _getStateForTest: () => ({ legendBtn, root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, fresh, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine }),
+    _getStateForTest: () => ({ legendBtn, root, canvas, legendBtns, mediaStrip, counts, status, cursorLine, winBtns, playBtn, modeBtn, fresh, ctlBox, ctlChip, ctlLine, ctlAge, ctlCounts, dsBox, dsChip, dsLine, dsAge, dsArea, dmgChip, dmgLine, alChip, alLine }),
   };
 }

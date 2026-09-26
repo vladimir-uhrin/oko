@@ -38,6 +38,7 @@ export function createUkrainePanel({
   deepstate = null,
   areas = null,
   damage = null,
+  alerts = null,
   directionCard = null,
   scenes = listFrontScenes(),
   applyScene = null,
@@ -147,6 +148,20 @@ export function createUkrainePanel({
     damageChip.setAttribute('aria-pressed', 'false');
     damageChip.title = translate('ukraine.dmg.note');
     chips.appendChild(damageChip);
+  }
+  // Čip POPLACHY (2026-09-26): oblasti ohrozené podľa hlásení Vzdušných síl.
+  // Dáta dodáva časová os — zapnutie ju otvorí, ak je zatvorená.
+  let alertsChip = null;
+  if (alerts) {
+    alertsChip = button('data-toggle-chip ukraine-chip ukraine-chip-alerts', translate('ukraine.part.alerts'), () => {
+      if (alerts.isShown()) { alerts.hide(); return; }
+      void alerts.show();
+      if (timeline && !timeline.isShown()) { if (!layer.isShown?.()) void layer.show(); timeline.show(); }
+    });
+    alertsChip.dataset.part = 'alerts';
+    alertsChip.setAttribute('aria-pressed', 'false');
+    alertsChip.title = translate('ukraine.al.note');
+    chips.appendChild(alertsChip);
   }
   let eventsChip = null;
   if (timeline) {
@@ -351,6 +366,14 @@ export function createUkrainePanel({
   };
   const unsubscribeDamage = damage?.onChange?.(() => updateDamageChip()) || null;
   updateDamageChip();
+  const updateAlertsChip = () => {
+    if (!alertsChip) return;
+    const on = Boolean(alerts?.isShown?.());
+    alertsChip.classList?.toggle?.('active', on);
+    alertsChip.setAttribute('aria-pressed', String(on));
+  };
+  const unsubscribeAlerts = alerts?.onChange?.(() => updateAlertsChip()) || null;
+  updateAlertsChip();
   update();
   updateReport();
   // Dátum snímku je lacný a hovorí, či snímok vôbec existuje — ťahá sa hneď.
@@ -363,6 +386,6 @@ export function createUkrainePanel({
     updateReport,
     setActiveScene,
     get activeScene() { return activeScene; },
-    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); unsubscribeAreas?.(); directionCard?.destroy?.(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribe?.(); unsubscribeReport?.(); unsubscribeTimeline?.(); unsubscribeControl?.(); unsubscribeDeepState?.(); unsubscribeDamage?.(); unsubscribeAlerts?.(); unsubscribeAreas?.(); directionCard?.destroy?.(); mountTarget.replaceChildren(); },
   };
 }
