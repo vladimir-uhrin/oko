@@ -243,15 +243,16 @@ test('tripwires main.js: panel + bulletin v ňom, window API dejísk, ?mideast=,
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
 
   // Importy z katalógu dejísk a panela.
-  assert.match(main, /import \{ applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel \} from '\.\/data\/mideastTheatres\.js';/);
+  assert.match(main, /import \{ MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel \} from '\.\/data\/mideastTheatres\.js';/);
   assert.match(main, /import \{ createMideastPanel \} from '\.\/mideastPanel\.js';/);
 
   // Panel sa montuje do tela #mideast-panel a klik na dejisko volá runMideastTheatre.
   assert.match(main, /createMideastPanel\(\{\s*mountTarget: document\.querySelector\('#mideast-panel \[data-mideast-body\]'\),\s*theatres: listMideastTheatres\(\),\s*applyTheatre: \(id\) => runMideastTheatre\(id\),/);
   assert.match(main, /window\.__godsEyeView\.mideastPanel = mideastPanel;/);
   // Bulletin bývalého ZÁLIV-u žije v slote správ panela (vnútri [data-panel-id],
-  // aby sa načítal lenivo); verejný debug handle ostáva.
-  assert.match(main, /createConflictBulletin\(\{ mountTarget: mideastPanel\.newsMount, region: 'gulf' \}\)/);
+  // aby sa načítal lenivo); verejný debug handle ostáva. Etapa 3 (2026-09-26):
+  // predvolený je celý región a čipy nesú región každého dejiska.
+  assert.match(main, /createConflictBulletin\(\{ mountTarget: mideastPanel\.newsMount, region: 'mideast', regions: MIDEAST_BULLETIN_REGIONS \}\)/);
   assert.match(main, /window\.__godsEyeView\.conflictBulletin = conflictBulletin;/);
   assert.doesNotMatch(main, /gulf-panel|data-gulf-body/, 'starý mount #gulf-panel zanikol');
 

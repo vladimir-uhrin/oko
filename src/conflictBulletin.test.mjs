@@ -231,3 +231,47 @@ test('UKRAJINA (2026-09-19): jediný región bez čipov, regionálna klasifikác
     }
   });
 });
+
+test('BLÍZKY VÝCHOD (etapa 3, 2026-09-26): čip na dejisko, výber dejiska prepne čip, riadok čipov sa zalamuje', async () => {
+  const { MIDEAST_BULLETIN_REGIONS } = await import('./data/mideastTheatres.js');
+  await withObserver(async (flush) => {
+    const { doc, panel, mount } = makeEnv();
+    panel.classList.remove('collapsed');
+    const asked = [];
+    const b = createConflictBulletin({
+      documentRef: doc, mountTarget: mount, translate, region: 'mideast', regions: MIDEAST_BULLETIN_REGIONS,
+      fetch: async (r) => {
+        asked.push(r);
+        return { region: r, source: 'test', fetchedAt: 100, items: [
+          { title: 'Israel strikes Iran nuclear sites', url: `https://x/${r}/1`, source: 'BBC News', publishedAt: 100, image: null, noImage: true },
+          { title: 'Strike on Khan Younis tent camp', url: `https://x/${r}/2`, source: 'UN News', publishedAt: 90, image: null, noImage: true, badge: 'un' },
+        ] };
+      },
+      now: () => 1000,
+    });
+    flush();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(b.region, 'mideast', 'predvolený je celý región');
+    const chips = byClass(mount, 'oko-bul-chip');
+    assert.deepEqual(chips.map((c) => c.textContent), MIDEAST_BULLETIN_REGIONS.map((r) => r.labelKey));
+    // výber dejiska (main.js runMideastTheatre → setRegion(scene.newsRegion))
+    b.setRegion('lebanon');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(b.region, 'lebanon');
+    assert.equal(byClass(mount, 'oko-bul-chip')[3].getAttribute('aria-pressed'), 'true');
+    b.setRegion('atlantis'); // neznámy región sa ignoruje
+    assert.equal(b.region, 'lebanon');
+    assert.deepEqual(asked, ['mideast', 'lebanon']);
+    // kartička stojí na zasiahnutom mieste, nie na útočníkovi; štítok OSN
+    assert.deepEqual(byClass(mount, 'oko-bul-place').map((n) => n.textContent), ['Iran', 'Khan Younis']);
+    assert.ok(byClass(mount, 'oko-bul-badge').map((n) => n.textContent).includes('source.un'));
+  });
+});
+
+test('riadok čipov sa zalamuje (deväť čipov v úzkom paneli)', async () => {
+  const { doc, mount } = makeEnv();
+  const styles = [];
+  doc.head.appendChild = (node) => { styles.push(node.textContent); return node; };
+  createConflictBulletin({ documentRef: doc, mountTarget: mount, translate, fetch: async (r) => payload(r), now: () => 1000 });
+  assert.match(styles.join('\n'), /\.oko-bul-regions\{[^}]*flex-wrap:wrap/);
+});

@@ -52,15 +52,25 @@ export function createIncidentCards({
 
   let cards = []; // { model, el, dot, cartesian }
   let revealed = false;
-  let inFlight = null;
+  // Dopyt na región zvlášť a „lístok" poslednej požiadavky (BLÍZKY VÝCHOD etapa 3,
+  // 2026-09-26): pri deviatich regiónoch prepnutie dejiska počas načítania už
+  // nesmie nakresliť karty predošlého regiónu (dovtedy jeden spoločný inFlight
+  // vrátil druhému volaniu údaje prvého a neskorá odpoveď prekreslila aktuálne karty).
+  const inFlight = new Map(); // region -> promise
+  let ticket = 0;
   let occluder = null;
   const scratch = new Cesium.Cartesian2();
   const cache = new Map(); // region -> { items, at }
   const imgCache = new Map(); // article url -> og:image url | null
 
-  function clear() {
+  function clearCards() {
     layer.replaceChildren();
     cards = [];
+  }
+  /** Zmaže karty a zruší platnosť ešte bežiaceho načítania (neskorá odpoveď už nekreslí). */
+  function clear() {
+    ticket += 1;
+    clearCards();
   }
 
   // Resolve an article's preview image (og:image) via the server-side unfurl proxy.
@@ -147,7 +157,7 @@ export function createIncidentCards({
   }
 
   function draw(items, region) {
-    clear();
+    clearCards();
     const models = buildIncidentCards(items, { region, limit: MAX_CARDS });
     for (const model of models) {
       const el = makeCard(model);
@@ -236,19 +246,27 @@ export function createIncidentCards({
   }
 
   async function showFor(region = 'gulf') {
+    const mine = ++ticket;
     layer.hidden = false;
     const hit = cache.get(region);
     if (hit && now() - hit.at < REFETCH_TTL_MS) return draw(hit.items, region);
-    if (!inFlight) {
-      inFlight = Promise.resolve(fetchImpl(region))
+    let request = inFlight.get(region);
+    if (!request) {
+      request = Promise.resolve(fetchImpl(region))
         // Blocklist médií aj na klientovi: server filtruje pred zlúčením, ale
         // disková cache /api/situation-news prežije rozšírenie zoznamu až 6 h
         // (bulletin a UKRAJINA filtrujú znova, karty doteraz nie — 2026-09-26).
         .then((p) => { const items = filterSanctionedNews(p?.items || []).items; cache.set(region, { items, at: now() }); return { ...(p || {}), items }; })
-        .finally(() => { inFlight = null; });
+        .finally(() => { inFlight.delete(region); });
+      inFlight.set(region, request);
     }
-    try { const payload = await inFlight; return draw(payload?.items || [], region); }
-    catch { clear(); return 0; }
+    try {
+      const payload = await request;
+      return mine === ticket ? draw(payload?.items || [], region) : 0;
+    } catch {
+      if (mine === ticket) clearCards();
+      return 0;
+    }
   }
 
   const postRender = viewer.scene.postRender;

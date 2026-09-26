@@ -22,6 +22,34 @@ import { filterSanctionedNews } from './sanctionedMedia.js';
 export const SITUATION_NEWS_API = '/api/situation-news';
 
 /**
+ * Priame RSS zdroje Blízkeho východu (etapa 3 modulu BLÍZKY VÝCHOD, 2026-09-26; plán
+ * docs/drafts/blizky-vychod-plan.md kap. 6, prieskum kap. H — feedy overené 24. a 26. 9.).
+ * Len titulok + odkaz: `unfurl:false` (bez sťahovania og:image zo stránky článku) a obrázok
+ * z feedu len tam, kde je precedens (Guardian, ako pri UKRAJINE). `limit` na zdroj, aby
+ * 300-položkový Asharq nevytlačil ostatných. Každý feed je ešte filtrovaný `match`
+ * regiónu. Štátne a stranícke médiá listované v EÚ (Press TV, Tasnim, Al-Masirah,
+ * Al-Manar…) tu nie sú nikdy — blocklist ich vyhodí aj z GDELT a Google News.
+ */
+const MIDEAST_FEEDS = Object.freeze({
+  bbc: Object.freeze({ url: 'https://feeds.bbci.co.uk/news/world/middle_east/rss.xml', label: 'BBC News', unfurl: true, limit: 8 }),
+  aljazeera: Object.freeze({ url: 'https://www.aljazeera.com/xml/rss/all.xml', label: 'Al Jazeera', unfurl: false, limit: 6 }),
+  guardian: Object.freeze({ url: 'https://www.theguardian.com/world/middleeast/rss', label: 'The Guardian', unfurl: false, feedImage: true, limit: 6 }),
+  france24: Object.freeze({ url: 'https://www.france24.com/en/middle-east/rss', label: 'France 24', unfurl: false, limit: 6 }),
+  asharq: Object.freeze({ url: 'https://english.aawsat.com/feed', label: 'Asharq Al-Awsat', unfurl: false, limit: 8 }),
+  national: Object.freeze({ url: 'https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml', label: 'The National', unfurl: false, limit: 6 }),
+  almonitor: Object.freeze({ url: 'https://www.al-monitor.com/rss', label: 'Al-Monitor', unfurl: false, limit: 5 }),
+  // Spravodajstvo OSN — štítok „OSN", nie nezávislé médium.
+  unnews: Object.freeze({ url: 'https://news.un.org/feed/subscribe/en/news/region/middle-east/feed/rss.xml', label: 'UN News', unfurl: false, badge: 'un', limit: 5 }),
+  toi: Object.freeze({ url: 'https://www.timesofisrael.com/feed/', label: 'The Times of Israel', unfurl: false, limit: 6 }),
+  haaretz: Object.freeze({ url: 'https://www.haaretz.com/srv/haaretz-latest-headlines', label: 'Haaretz', unfurl: false, limit: 6 }),
+  // Štátna agentúra Libanonu (nie je na žiadnom zozname EÚ) — tvrdenie štátu, nie overenie;
+  // štítok ako Ukrinform/ArmyInform pri UKRAJINE.
+  nna: Object.freeze({ url: 'https://www.nna-leb.gov.lb/en/rss', label: 'NNA Lebanon', unfurl: false, badge: 'official-lb', limit: 6 }),
+  // Londýnska exilová stanica (financovanie nezverejnené — uvedené v DATA_SOURCES.md): štítok „exilové".
+  iranintl: Object.freeze({ url: 'https://www.iranintl.com/en/feed', label: 'Iran International', unfurl: false, badge: 'exile', limit: 6 }),
+});
+
+/**
  * Named regions → a GDELT query (+ a Google News RSS fallback query). Named (not
  * free-text) so the client can never inject an arbitrary query through the proxy.
  * `rssQuery` is used when GDELT is throttled/unavailable; kept separate because
@@ -39,8 +67,10 @@ export const SITUATION_REGIONS = Object.freeze({
     // og:image unfurl and link-out work → cards can show photos. Keyword-filtered
     // to the region on the server; only incident-classified items become markers.
     directRss: Object.freeze([
-      'https://feeds.bbci.co.uk/news/world/middle_east/rss.xml',
-      'https://www.aljazeera.com/xml/rss/all.xml',
+      MIDEAST_FEEDS.bbc,
+      // Al Jazeera bez og:image (T&C zakazujú scraping — zistené pri UKRAJINE 2026-09-19,
+      // zosúladené pre Blízky východ 2026-09-26): len titulok a odkaz.
+      MIDEAST_FEEDS.aljazeera,
     ]),
     match: 'hormuz|persian gulf|arabian gulf|gulf of oman|red sea|bab[- ]?el[- ]?mandeb|houthi|bandar abbas|fujairah|kharg|bushehr|jebel ali|ras tanura|\\btanker|\\bwarship|shipping lane|ship-to-ship',
   }),
@@ -53,8 +83,11 @@ export const SITUATION_REGIONS = Object.freeze({
     rssQuery: '"Red Sea" OR "Strait of Hormuz" OR "Suez Canal" OR "Bab el-Mandeb" OR Houthi OR Yemen OR Iran Israel',
     timespan: '2d',
     directRss: Object.freeze([
-      'https://feeds.bbci.co.uk/news/world/middle_east/rss.xml',
-      'https://www.aljazeera.com/xml/rss/all.xml',
+      MIDEAST_FEEDS.bbc,
+      MIDEAST_FEEDS.aljazeera,
+      MIDEAST_FEEDS.asharq,
+      MIDEAST_FEEDS.guardian,
+      MIDEAST_FEEDS.france24,
     ]),
     match: 'hormuz|persian gulf|arabian gulf|gulf of oman|red sea|bab[- ]?el[- ]?mandeb|gulf of aden|houthi|\\byemen\\b|hodeidah|hudaydah|sana|\\baden\\b|mokha|djibouti|suez|port said|ismailia|bandar abbas|fujairah|kharg|bushehr|\\bgaza\\b|ashkelon|tel aviv|\\beilat\\b|haifa|jerusalem|beirut|damascus|\\btehran\\b|isfahan|natanz|baghdad|\\biran\\b|\\bisrael\\b|hezbollah|\\btanker|\\bwarship',
   }),
@@ -98,6 +131,95 @@ export const SITUATION_REGIONS = Object.freeze({
     googleLimit: 12,
     match: 'ukrain|kyiv|kiev|kharkiv|donetsk|luhansk|zaporizh|kherson|\\bsumy\\b|odesa|odessa|mykolaiv|\\bdnipro\\b|kryvyi rih|poltava|chernihiv|zhytomyr|vinnytsia|\\blviv\\b|crimea|sevastopol|donbas|pokrovsk|kupiansk|kupyansk|\\blyman\\b|kramatorsk|sloviansk|kostiantynivka|kostyantynivka|toretsk|chasiv yar|huliaipole|hulyaipole|orikhiv|vovchansk|belgorod|kursk|bryansk|voronezh|rostov|taganrog|novorossiysk|black sea|sea of azov|shahed|iskander|kinzhal|zelensk|russian (?:forces|troops|army|drones?|missiles?|attack|strike)|general staff',
     isw: true,
+  }),
+  // BLÍZKY VÝCHOD po dejiskách (etapa 3, 2026-09-26): jeden región správ na dejisko
+  // (mideastTheatres.js `newsRegion`), aby Libanon neukazoval Jemen a Gaza nie Irán.
+  // `match` filtruje titulky priamych RSS (sonda 26. 9.: z 14 feedov nad týmito
+  // výrazmi; IAEA nedala nič, DW len 1 — nezaradené). Asharq má 300 položiek, preto
+  // limit; „Saudi/Riyadh" v Jemene NIE je (chytalo domáce saudské správy).
+  iran: Object.freeze({
+    id: 'iran',
+    query: '(Iran OR Iranian OR Tehran OR Isfahan OR Natanz OR Fordow OR Bushehr OR IRGC) (strike OR airstrike OR attack OR missile OR drone OR explosion OR nuclear OR ceasefire) sourcelang:english',
+    rssQuery: 'Iran strike OR attack OR missile OR drone OR IRGC OR nuclear',
+    timespan: '2d',
+    directRss: Object.freeze([
+      MIDEAST_FEEDS.bbc, MIDEAST_FEEDS.iranintl, MIDEAST_FEEDS.asharq, MIDEAST_FEEDS.almonitor,
+      MIDEAST_FEEDS.france24, MIDEAST_FEEDS.national, MIDEAST_FEEDS.guardian, MIDEAST_FEEDS.aljazeera,
+    ]),
+    googleLimit: 15,
+    match: 'iran|tehran|isfahan|esfahan|natanz|fordow|bandar abbas|bushehr|kharg|tabriz|shiraz|mashhad|kermanshah|ahvaz|chabahar|parchin|qeshm|\\bjask\\b|\\bqom\\b|\\barak\\b|\\birgc\\b|revolutionary guard',
+  }),
+  lebanon: Object.freeze({
+    id: 'lebanon',
+    query: '(Lebanon OR Lebanese OR Hezbollah OR Beirut OR Nabatieh OR "Bint Jbeil" OR Litani OR UNIFIL) (strike OR airstrike OR attack OR rocket OR drone OR shelling OR ceasefire OR killed) sourcelang:english',
+    rssQuery: 'Lebanon OR Hezbollah strike OR attack OR drone OR ceasefire',
+    timespan: '2d',
+    directRss: Object.freeze([
+      MIDEAST_FEEDS.bbc, MIDEAST_FEEDS.nna, MIDEAST_FEEDS.asharq, MIDEAST_FEEDS.haaretz,
+      MIDEAST_FEEDS.national, MIDEAST_FEEDS.unnews, MIDEAST_FEEDS.france24, MIDEAST_FEEDS.aljazeera,
+    ]),
+    googleLimit: 15,
+    match: 'leban|hezbollah|hizballah|beirut|litani|\\btyre\\b|nabatieh|bint jbeil|khiam|sidon|marjayoun|bekaa|baalbek|unifil|naqoura|dahieh|dahiyeh',
+  }),
+  palestine: Object.freeze({
+    id: 'palestine',
+    query: '(Gaza OR "West Bank" OR Rafah OR "Khan Younis" OR Jenin OR Nablus OR Hebron OR Hamas OR UNRWA) (strike OR airstrike OR attack OR raid OR killed OR ceasefire OR aid OR settlers) sourcelang:english',
+    rssQuery: 'Gaza OR "West Bank" strike OR attack OR raid OR ceasefire OR aid',
+    timespan: '2d',
+    directRss: Object.freeze([
+      MIDEAST_FEEDS.bbc, MIDEAST_FEEDS.unnews, MIDEAST_FEEDS.guardian, MIDEAST_FEEDS.france24,
+      MIDEAST_FEEDS.toi, MIDEAST_FEEDS.haaretz, MIDEAST_FEEDS.asharq, MIDEAST_FEEDS.aljazeera,
+    ]),
+    googleLimit: 15,
+    match: 'gaza|west bank|rafah|khan yunis|khan younis|deir al-balah|jabalia|beit lahia|beit hanoun|jenin|nablus|hebron|tulkarm|ramallah|tubas|qalqilya|bethlehem|jericho|hamas|\\bunrwa\\b',
+  }),
+  israel: Object.freeze({
+    id: 'israel',
+    query: '(Israel OR Israeli OR "Tel Aviv" OR Haifa OR Jerusalem OR Eilat OR Golan OR "Iron Dome") (missile OR rocket OR drone OR sirens OR interception OR attack OR strike OR explosion) sourcelang:english',
+    rssQuery: 'Israel missile OR rocket OR drone OR sirens OR interception OR attack',
+    timespan: '2d',
+    directRss: Object.freeze([
+      MIDEAST_FEEDS.bbc, MIDEAST_FEEDS.toi, MIDEAST_FEEDS.haaretz, MIDEAST_FEEDS.france24,
+      MIDEAST_FEEDS.guardian, MIDEAST_FEEDS.national, MIDEAST_FEEDS.asharq, MIDEAST_FEEDS.aljazeera,
+    ]),
+    googleLimit: 15,
+    match: 'israel|tel aviv|haifa|jerusalem|eilat|ashkelon|ashdod|beersheba|dimona|negev|galilee|golan|kiryat shmona|metula|nahariya|safed|sderot|nevatim|iron dome|home front command',
+  }),
+  redsea: Object.freeze({
+    id: 'redsea',
+    query: '(Houthi OR Houthis OR Yemen OR Hodeidah OR Sanaa OR "Red Sea" OR "Bab el-Mandeb" OR "Gulf of Aden") (strike OR airstrike OR attack OR missile OR drone OR ship OR vessel OR tanker) sourcelang:english',
+    rssQuery: 'Houthi OR Yemen OR "Red Sea" strike OR attack OR missile OR ship',
+    timespan: '2d',
+    directRss: Object.freeze([
+      MIDEAST_FEEDS.bbc, MIDEAST_FEEDS.asharq, MIDEAST_FEEDS.national, MIDEAST_FEEDS.unnews,
+      MIDEAST_FEEDS.france24, MIDEAST_FEEDS.almonitor, MIDEAST_FEEDS.aljazeera,
+    ]),
+    googleLimit: 15,
+    match: 'houthi|ansar ?allah|yemen|\\bsanaa\\b|sana\'a|hodeidah|hudaydah|\\baden\\b|marib|taiz|mokha|saada|red sea|bab[- ]?el[- ]?mandeb|bab al-mandab|gulf of aden|jizan|jazan|najran',
+  }),
+  syria: Object.freeze({
+    id: 'syria',
+    query: '(Syria OR Syrian OR Damascus OR Aleppo OR Homs OR Idlib OR Latakia OR Daraa OR Suwayda OR Quneitra OR SDF) (strike OR airstrike OR attack OR clashes OR drone OR shelling OR explosion OR killed) sourcelang:english',
+    rssQuery: 'Syria strike OR attack OR clashes OR drone OR explosion',
+    timespan: '2d',
+    directRss: Object.freeze([
+      MIDEAST_FEEDS.bbc, MIDEAST_FEEDS.asharq, MIDEAST_FEEDS.france24, MIDEAST_FEEDS.national,
+      MIDEAST_FEEDS.unnews, MIDEAST_FEEDS.haaretz, MIDEAST_FEEDS.aljazeera,
+    ]),
+    googleLimit: 15,
+    match: 'syria|damascus|aleppo|\\bhoms\\b|\\bhama\\b|idlib|latakia|tartus|quneitra|daraa|deraa|suwayda|sweida|raqqa|deir ez-zor|deir ezzor|hasakah|qamishli|kobani|\\bsdf\\b',
+  }),
+  iraq: Object.freeze({
+    id: 'iraq',
+    query: '(Iraq OR Iraqi OR Baghdad OR Erbil OR Basra OR Kirkuk OR Mosul OR "Ain al-Asad") (strike OR airstrike OR attack OR drone OR rocket OR explosion OR militia) sourcelang:english',
+    rssQuery: 'Iraq strike OR attack OR drone OR rocket OR militia',
+    timespan: '2d',
+    directRss: Object.freeze([
+      MIDEAST_FEEDS.bbc, MIDEAST_FEEDS.asharq, MIDEAST_FEEDS.national, MIDEAST_FEEDS.almonitor,
+      MIDEAST_FEEDS.france24, MIDEAST_FEEDS.aljazeera,
+    ]),
+    googleLimit: 15,
+    match: 'iraq|baghdad|erbil|basra|mosul|kirkuk|anbar|ain al-asad|kataib hezbollah|popular mobili[sz]ation|\\bpmf\\b|kurdistan region',
   }),
 });
 

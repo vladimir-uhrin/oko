@@ -217,7 +217,15 @@ KLIENT
    podľa modulu, vrstva bodov + odvodený
    raster len tam, kde je hustota (Gaza, juh Libanonu, jemenské fronty). Test: parser na
    fixtúrach z 24. 9., mapovanie ikon, raster viacerých strán.
-3. **Správy po dejiskách** — 2 d. Regióny `lebanon`, `gaza`, `israel`, `iran`, `red-sea`
+3. **Správy po dejiskách** — **HOTOVÉ 2026-09-26** (regióny `iran`, `lebanon`, `palestine` = Gaza +
+   Západný breh, `israel`, `redsea` = Jemen + Červené more, `syria`, `iraq`; 12 priamych RSS
+   v `MIDEAST_FEEDS`, len titulok + odkaz, štítky NNA „oficiálne LB", UN News „OSN", Iran
+   International „exilové médium"; deväť čipov spravodaja v paneli, dejisko prepne čip; aktér →
+   cieľ vyriešené bodovaním zmienok — „Israeli strike on Yemen" → Jemen, demonymum pred zbraňou nie
+   je miesto, štáty a široké moria „približne"; triedenie pozná množné čísla a „blocked/closed"
+   len pri trase; závod hot kariet pri prepnutí dejiska opravený). Ostáva: pripnuté oficiálne
+   položky (dnes UN News a NNA len ako bežné riadky so štítkom; IAEA feed nedal nič, Crisis Group
+   nezaradený) a zdroje v ar/fa/he s prekladom (dnes len anglické feedy). Pôvodný rozsah: 2 d. Regióny `lebanon`, `gaza`, `israel`, `iran`, `red-sea`
    (+ existujúce `gulf`, `mideast`) s dopytmi GDELT/Google News a priamymi RSS s pravidlami
    (unfurl/feedImage/drop/limit/badge); pripnuté oficiálne (UN News, IAEA, Crisis Group, NNA);
    gazetteer rozšíriť a **opraviť aktér → cieľ** (otvorené zo ZÁLIV-u: „Israeli strike on

@@ -50,7 +50,7 @@ import { createMapScaleBar } from './mapScaleBar.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
-import { applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
+import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
 import { createMideastPanel } from './mideastPanel.js';
 import { createMideastControl } from './mideastControlLayer.js';
 import { createPortwatchCard } from './portwatchCard.js';
@@ -681,8 +681,9 @@ async function init() {
     // news slot of the BLÍZKY VÝCHOD panel. It used to be a SECOND floating panel
     // with its own tab, anchored bottom-right at z120, which covered the whole
     // right-hand rail whenever it was open and duplicated the same agenda the
-    // ZÁLIV panel already showed. Merging removed both problems; two chips
-    // switch between the narrow Gulf feed and the whole Middle East. The mount
+    // ZÁLIV panel already showed. Merging removed both problems; chips switch
+    // between the whole Middle East, the narrow Gulf feed and (etapa 3,
+    // 2026-09-26) one feed per theatre — picking a theatre flips the chip. The mount
     // is INSIDE the panel, so the bulletin finds its owner via
     // closest('[data-panel-id]') and fetches lazily on the first expand.
     //
@@ -692,7 +693,7 @@ async function init() {
     // and creating a second layer here is what used to run two .oko-hotcards
     // postRender passes that knew nothing about each other.
     const conflictBulletin = mideastPanel.newsMount
-      ? createConflictBulletin({ mountTarget: mideastPanel.newsMount, region: 'gulf' })
+      ? createConflictBulletin({ mountTarget: mideastPanel.newsMount, region: 'mideast', regions: MIDEAST_BULLETIN_REGIONS })
       : null;
     window.__godsEyeView.conflictBulletin = conflictBulletin;
     // PRECHODY ÚŽINAMI (BLÍZKY VÝCHOD, etapa 5a, 2026-09-26): IMF PortWatch — Hormuz,

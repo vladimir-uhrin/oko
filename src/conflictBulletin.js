@@ -30,7 +30,11 @@ const REFRESH_TTL_MS = 12 * 60_000;
 const MAX_ROWS = 16;
 const LINK_IMAGE_API = '/api/link-image';
 
-/** Both feeds the merged panel can show, narrow first. */
+/**
+ * Default pair of feeds (narrow first). The BLÍZKY VÝCHOD panel passes its own,
+ * longer list — one chip per theatre (mideastTheatres.js MIDEAST_BULLETIN_REGIONS,
+ * etapa 3, 2026-09-26); the chip row wraps.
+ */
 export const BULLETIN_REGIONS = Object.freeze([
   Object.freeze({ id: 'gulf', labelKey: 'panel.gulf' }),
   Object.freeze({ id: 'mideast', labelKey: 'bulletin.tab' }),
@@ -241,7 +245,7 @@ function ensureStyle(doc) {
   // its host panel (#mideast-panel or #ukraine-panel), which owns placement,
   // width, height allocation and the mobile drawer. Nothing here may be position:fixed.
   style.textContent = `
-.oko-bul-regions{display:flex;gap:5px;margin:0 0 7px;flex:0 0 auto;}
+.oko-bul-regions{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 7px;flex:0 0 auto;}
 .oko-bul-chip{appearance:none;cursor:pointer;flex:0 0 auto;padding:3px 8px;border-radius:7px;
   background:rgba(11,22,34,.5);color:#8aa0b6;border:1px solid rgba(120,150,180,.26);
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;}

@@ -71,7 +71,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'Iran — strikes',
     center: Object.freeze({ lat: 32.5, lon: 53.5 }),
     rectDegrees: Object.freeze([44, 25, 63.5, 39.8]),
-    newsRegion: 'mideast',
+    newsRegion: 'iran',
     layerIds: Object.freeze([]),
     control: Object.freeze([]),
   }),
@@ -80,7 +80,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'South Lebanon',
     center: Object.freeze({ lat: 33.3, lon: 35.45 }),
     rectDegrees: Object.freeze([35.0, 32.95, 36.2, 33.7]),
-    newsRegion: 'mideast',
+    newsRegion: 'lebanon',
     layerIds: Object.freeze([]),
     control: Object.freeze(['israel-palestine', 'lebanon']),
   }),
@@ -89,7 +89,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'Gaza',
     center: Object.freeze({ lat: 31.42, lon: 34.38 }),
     rectDegrees: Object.freeze([34.15, 31.2, 34.6, 31.65]),
-    newsRegion: 'mideast',
+    newsRegion: 'palestine',
     layerIds: Object.freeze([]),
     control: Object.freeze(['israel-palestine']),
   }),
@@ -98,7 +98,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'Israel — alerts and impacts',
     center: Object.freeze({ lat: 31.8, lon: 35.0 }),
     rectDegrees: Object.freeze([34.2, 29.4, 35.95, 33.4]),
-    newsRegion: 'mideast',
+    newsRegion: 'israel',
     layerIds: Object.freeze([]),
     // Plán kap. 2: kontrola „—" (Izrael sám nemá sporné sídla; Gaza a Západný
     // breh majú vlastné dejiská s modulom IP).
@@ -109,7 +109,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'West Bank',
     center: Object.freeze({ lat: 31.95, lon: 35.25 }),
     rectDegrees: Object.freeze([34.85, 31.3, 35.6, 32.6]),
-    newsRegion: 'mideast',
+    newsRegion: 'palestine',
     layerIds: Object.freeze([]),
     control: Object.freeze(['israel-palestine']),
   }),
@@ -118,7 +118,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'Yemen and Bab al-Mandab',
     center: Object.freeze({ lat: 14.5, lon: 43.0 }),
     rectDegrees: Object.freeze([41, 11.5, 46, 17.5]),
-    newsRegion: 'mideast',
+    newsRegion: 'redsea',
     layerIds: Object.freeze([...MARITIME_LAYERS]),
     control: Object.freeze(['yemen']),
   }),
@@ -127,7 +127,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'Yemen',
     center: Object.freeze({ lat: 15.5, lon: 47.5 }),
     rectDegrees: Object.freeze([42, 12, 54, 19]),
-    newsRegion: 'mideast',
+    newsRegion: 'redsea',
     layerIds: Object.freeze([]),
     control: Object.freeze(['yemen']),
   }),
@@ -136,7 +136,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'South Syria',
     center: Object.freeze({ lat: 33.0, lon: 36.0 }),
     rectDegrees: Object.freeze([35.6, 32.3, 36.9, 33.8]),
-    newsRegion: 'mideast',
+    newsRegion: 'syria',
     layerIds: Object.freeze([]),
     control: Object.freeze(['syria']),
   }),
@@ -145,7 +145,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     name: 'Iraq',
     center: Object.freeze({ lat: 33.3, lon: 44.4 }),
     rectDegrees: Object.freeze([38.8, 29, 48.6, 37.4]),
-    newsRegion: 'mideast',
+    newsRegion: 'iraq',
     layerIds: Object.freeze([]),
     control: Object.freeze([]),
   }),
@@ -196,6 +196,24 @@ export function validateMideastTheatres(theatres = MIDEAST_THEATRES) {
 }
 
 validateMideastTheatres();
+
+/**
+ * Čipy spravodaja v paneli BLÍZKY VÝCHOD (etapa 3, 2026-09-26): celý región,
+ * Záliv a potom regióny dejísk v poradí katalógu. Výber dejiska prepne čip sám
+ * (main.js runMideastTheatre → setRegion); čipom sa dajú čítať správy iného
+ * dejiska bez presunu kamery. Každé `newsRegion` katalógu tu má čip (test).
+ */
+export const MIDEAST_BULLETIN_REGIONS = Object.freeze([
+  Object.freeze({ id: 'mideast', labelKey: 'bulletin.tab' }),
+  Object.freeze({ id: 'gulf', labelKey: 'panel.gulf' }),
+  Object.freeze({ id: 'iran', labelKey: 'bulletin.region.iran' }),
+  Object.freeze({ id: 'lebanon', labelKey: 'bulletin.region.lebanon' }),
+  Object.freeze({ id: 'palestine', labelKey: 'bulletin.region.palestine' }),
+  Object.freeze({ id: 'israel', labelKey: 'bulletin.region.israel' }),
+  Object.freeze({ id: 'redsea', labelKey: 'bulletin.region.redsea' }),
+  Object.freeze({ id: 'syria', labelKey: 'bulletin.region.syria' }),
+  Object.freeze({ id: 'iraq', labelKey: 'bulletin.region.iraq' }),
+]);
 
 /** Všetky dejiská v poradí z plánu (prehľad prvý). */
 export function listMideastTheatres() {

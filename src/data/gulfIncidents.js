@@ -18,18 +18,40 @@
 
 import { UKRAINE_GAZETTEER, UKRAINE_OBLASTS_EN, classifyUkraineIncident } from './ukraineIncidents.js';
 
-/** Incident classes, in priority order. severity → marker colour on the client. */
+/**
+ * Incident classes, in priority order. severity → marker colour on the client.
+ * `context` (etapa 3 BLÍZKEHO VÝCHODU, 2026-09-26): generic words („blocked",
+ * „closed", „shut") count as a blockade only next to a route, port or border —
+ * „CNN blocked from trip" or „SIM cards blocked" are not a blockade; the word
+ * „blockade" itself always is. Plurals count too („Israeli strikes kill…",
+ * „Iran fires missiles…" — dovtedy ich pravidlo nepoznalo).
+ */
 const INCIDENT_RULES = [
-  { type: 'strike', severity: 'critical', re: /\b(missile|drone|strike|struck|attack|attacked|shelling|torpedo|projectile|rocket)\b/i },
-  { type: 'fire', severity: 'critical', re: /\b(explosion|explode[sd]?|blast|ablaze|on fire|caught fire|burning)\b/i },
+  { type: 'strike', severity: 'critical', re: /\b(missiles?|drones?|strikes?|airstrikes?|struck|attacks?|attacked|shelling|shelled|torpedo(?:es|ed)?|projectiles?|rockets?|bombing|bombed)\b/i },
+  { type: 'fire', severity: 'critical', re: /\b(explosions?|explode[sd]?|blasts?|ablaze|on fire|caught fire|burning)\b/i },
   { type: 'seizure', severity: 'major', re: /\b(seiz(?:e|ed|ure)|detain(?:ed)?|boarded|captur(?:e|ed)|hijack(?:ed)?|impound(?:ed)?)\b/i },
-  { type: 'blockade', severity: 'major', re: /\b(blockad(?:e|ed)|blocked|shut|closed|mine[sd]?|mined|threat(?:en|ens|ened)? to close)\b/i },
+  { type: 'blockade', severity: 'major', re: /\b(blockad(?:e|ed))\b/i },
+  {
+    type: 'blockade', severity: 'major',
+    re: /\b(blocked|shut|closed|closes|closing|mine[sd]?|mined|threat(?:en|ens|ened)? to close)\b/i,
+    context: /\b(straits?|ports?|canal|shipping|ships?|vessels?|tankers?|crossings?|border|airspace|airports?|routes?|lanes?|waters|gulf|sea|hormuz|mandeb|terminals?|pipelines?)\b/i,
+  },
 ];
+/**
+ * Pred triedením sa vymaže, čo nie je dnešná udalosť: nevojenské „strike" (štrajk,
+ * dohoda — „India's bank strike", „US and Iran strike deal") a výročný odkaz na útok
+ * 7. októbra 2023 („Netanyahu says October 7 attack…" — retrospektívy nie sú karta).
+ */
+const NON_MILITARY_STRIKE_RE = /\b(?:hunger|general|labou?r|bank|workers'?|teachers'?|doctors'?|nurses'?|nationwide|rail|transport|dockers'?)\s+strikes?\b|\b(?:strikes?|struck|striking)\s+(?:a\s+)?(?:deal|agreement|balance|chord|pact|tone|note|compromise)\b|\b(?:oct(?:ober)?\.?\s*7(?:th)?|7(?:th)?\s+oct(?:ober)?\.?)(?:\s+(?:hamas|hamas-led))?\s+(?:attacks?|massacres?|assault|raid)\b/gi;
 
 /**
- * Bundled Gulf-region gazetteer (place → coords). `aliases` are lowercase
- * substrings matched against the headline; ordered specific → broad so a named
- * port wins over "the Gulf". `[lat, lon]`.
+ * Bundled Gulf / Middle East gazetteer (place → coords). `aliases` are lowercase
+ * words matched against the headline (whole words — see locateIncident).
+ * `kind` sets the precedence tier: a named place (default) beats an `area` or a
+ * `sea`, which beat a `country`; `broad: true` marks a point that stands for a
+ * large area (a country or a wide sea) — a match there is flagged approximate.
+ * BLÍZKY VÝCHOD etapa 3 (2026-09-26) added the places of each theatre
+ * (Libanon, Gaza, Západný breh, Izrael, Jemen, Sýria, Irak, Irán).
  */
 export const GULF_GAZETTEER = Object.freeze([
   Object.freeze({ name: 'Bandar Abbas', lat: 27.18, lon: 56.28, aliases: ['bandar abbas'] }),
@@ -59,7 +81,7 @@ export const GULF_GAZETTEER = Object.freeze([
   Object.freeze({ name: 'Ismailia', lat: 30.59, lon: 32.27, aliases: ['ismailia'] }),
   Object.freeze({ name: 'Suez', lat: 29.97, lon: 32.55, aliases: ['suez canal', 'suez'] }),
   Object.freeze({ name: 'Eilat', lat: 29.56, lon: 34.95, aliases: ['eilat'] }),
-  Object.freeze({ name: 'Gaza', lat: 31.5, lon: 34.47, aliases: ['gaza'] }),
+  Object.freeze({ name: 'Gaza City', lat: 31.52, lon: 34.45, aliases: ['gaza city'] }),
   Object.freeze({ name: 'Ashkelon', lat: 31.67, lon: 34.57, aliases: ['ashkelon'] }),
   Object.freeze({ name: 'Tel Aviv', lat: 32.08, lon: 34.78, aliases: ['tel aviv'] }),
   Object.freeze({ name: 'Haifa', lat: 32.82, lon: 34.99, aliases: ['haifa'] }),
@@ -70,21 +92,120 @@ export const GULF_GAZETTEER = Object.freeze([
   Object.freeze({ name: 'Isfahan', lat: 32.65, lon: 51.67, aliases: ['isfahan', 'esfahan'] }),
   Object.freeze({ name: 'Natanz', lat: 33.72, lon: 51.9, aliases: ['natanz'] }),
   Object.freeze({ name: 'Baghdad', lat: 33.31, lon: 44.36, aliases: ['baghdad'] }),
-  // Broad chokepoints / seas last (specific places above win).
-  Object.freeze({ name: 'Gulf of Oman', lat: 24.5, lon: 58.5, aliases: ['gulf of oman'] }),
-  Object.freeze({ name: 'Strait of Hormuz', lat: 26.57, lon: 56.25, aliases: ['strait of hormuz', 'hormuz'] }),
-  Object.freeze({ name: 'Persian Gulf', lat: 26.5, lon: 51.5, aliases: ['persian gulf', 'arabian gulf'] }),
-  Object.freeze({ name: 'Bab-el-Mandeb', lat: 12.6, lon: 43.4, aliases: ['bab-el-mandeb', 'bab el-mandeb', 'bab al-mandab', 'mandeb'] }),
-  Object.freeze({ name: 'Gulf of Aden', lat: 12.5, lon: 47.0, aliases: ['gulf of aden'] }),
-  Object.freeze({ name: 'Red Sea', lat: 20.0, lon: 38.0, aliases: ['red sea'] }),
-  // Broad country fallbacks LAST (a specific city/sea above always wins) — so a
-  // mention geolocates to the country, not the region default.
-  Object.freeze({ name: 'Iran', lat: 32.4, lon: 53.7, aliases: ['iran', 'iranian'] }),
-  Object.freeze({ name: 'Israel', lat: 31.4, lon: 35.0, aliases: ['israel', 'israeli'] }),
-  Object.freeze({ name: 'Yemen', lat: 15.5, lon: 44.2, aliases: ['yemen', 'yemeni', 'houthi'] }),
-  Object.freeze({ name: 'Lebanon', lat: 33.9, lon: 35.5, aliases: ['lebanon', 'lebanese', 'hezbollah'] }),
-  Object.freeze({ name: 'Iraq', lat: 33.2, lon: 43.7, aliases: ['iraq', 'iraqi'] }),
-  Object.freeze({ name: 'Egypt', lat: 26.8, lon: 30.8, aliases: ['egypt', 'egyptian'] }),
+  // BLÍZKY VÝCHOD po dejiskách (etapa 3, 2026-09-26). Libanon:
+  Object.freeze({ name: 'Dahieh', lat: 33.85, lon: 35.51, aliases: ['dahieh', 'dahiyeh'] }),
+  Object.freeze({ name: 'Tyre', lat: 33.27, lon: 35.2, aliases: ['tyre'] }),
+  Object.freeze({ name: 'Sidon', lat: 33.56, lon: 35.37, aliases: ['sidon', 'saida'] }),
+  Object.freeze({ name: 'Nabatieh', lat: 33.38, lon: 35.48, aliases: ['nabatieh', 'nabatiyeh', 'nabatiye'] }),
+  Object.freeze({ name: 'Bint Jbeil', lat: 33.12, lon: 35.43, aliases: ['bint jbeil'] }),
+  Object.freeze({ name: 'Khiam', lat: 33.33, lon: 35.61, aliases: ['khiam'] }),
+  Object.freeze({ name: 'Marjayoun', lat: 33.36, lon: 35.59, aliases: ['marjayoun'] }),
+  Object.freeze({ name: 'Naqoura', lat: 33.12, lon: 35.14, aliases: ['naqoura'] }),
+  Object.freeze({ name: 'Baalbek', lat: 34.01, lon: 36.21, aliases: ['baalbek'] }),
+  // Gaza a Západný breh:
+  Object.freeze({ name: 'Rafah', lat: 31.29, lon: 34.25, aliases: ['rafah'] }),
+  Object.freeze({ name: 'Khan Younis', lat: 31.35, lon: 34.3, aliases: ['khan younis', 'khan yunis'] }),
+  Object.freeze({ name: 'Deir al-Balah', lat: 31.42, lon: 34.35, aliases: ['deir al-balah', 'deir el-balah'] }),
+  Object.freeze({ name: 'Jabalia', lat: 31.53, lon: 34.48, aliases: ['jabalia', 'jabaliya'] }),
+  Object.freeze({ name: 'Beit Lahia', lat: 31.55, lon: 34.5, aliases: ['beit lahia', 'beit lahiya'] }),
+  Object.freeze({ name: 'Beit Hanoun', lat: 31.54, lon: 34.54, aliases: ['beit hanoun'] }),
+  Object.freeze({ name: 'Jenin', lat: 32.46, lon: 35.3, aliases: ['jenin'] }),
+  Object.freeze({ name: 'Nablus', lat: 32.22, lon: 35.26, aliases: ['nablus'] }),
+  Object.freeze({ name: 'Tulkarm', lat: 32.31, lon: 35.03, aliases: ['tulkarm', 'tulkarem'] }),
+  Object.freeze({ name: 'Tubas', lat: 32.32, lon: 35.37, aliases: ['tubas'] }),
+  Object.freeze({ name: 'Qalqilya', lat: 32.19, lon: 34.97, aliases: ['qalqilya', 'qalqiliya'] }),
+  Object.freeze({ name: 'Ramallah', lat: 31.9, lon: 35.2, aliases: ['ramallah'] }),
+  Object.freeze({ name: 'Bethlehem', lat: 31.7, lon: 35.2, aliases: ['bethlehem'] }),
+  Object.freeze({ name: 'Hebron', lat: 31.53, lon: 35.1, aliases: ['hebron'] }),
+  Object.freeze({ name: 'Jericho', lat: 31.86, lon: 35.46, aliases: ['jericho'] }),
+  // Izrael:
+  Object.freeze({ name: 'Ashdod', lat: 31.8, lon: 34.65, aliases: ['ashdod'] }),
+  Object.freeze({ name: 'Sderot', lat: 31.52, lon: 34.6, aliases: ['sderot'] }),
+  Object.freeze({ name: 'Beersheba', lat: 31.25, lon: 34.79, aliases: ['beersheba', "be'er sheva", 'beer sheva'] }),
+  Object.freeze({ name: 'Dimona', lat: 31.07, lon: 35.03, aliases: ['dimona'] }),
+  Object.freeze({ name: 'Nevatim', lat: 31.21, lon: 35.01, aliases: ['nevatim'] }),
+  Object.freeze({ name: 'Kiryat Shmona', lat: 33.21, lon: 35.57, aliases: ['kiryat shmona'] }),
+  Object.freeze({ name: 'Metula', lat: 33.28, lon: 35.58, aliases: ['metula'] }),
+  Object.freeze({ name: 'Nahariya', lat: 33.01, lon: 35.1, aliases: ['nahariya'] }),
+  Object.freeze({ name: 'Safed', lat: 32.96, lon: 35.5, aliases: ['safed', 'tzfat'] }),
+  // Jemen a Saudská Arábia (údery na infraštruktúru):
+  Object.freeze({ name: 'Ras Isa', lat: 15.12, lon: 42.83, aliases: ['ras isa'] }),
+  Object.freeze({ name: 'Marib', lat: 15.46, lon: 45.32, aliases: ['marib'] }),
+  Object.freeze({ name: 'Taiz', lat: 13.58, lon: 44.02, aliases: ['taiz'] }),
+  Object.freeze({ name: 'Saada', lat: 16.94, lon: 43.76, aliases: ['saada', "sa'dah"] }),
+  Object.freeze({ name: 'Jizan', lat: 16.89, lon: 42.55, aliases: ['jizan', 'jazan'] }),
+  Object.freeze({ name: 'Najran', lat: 17.49, lon: 44.13, aliases: ['najran'] }),
+  Object.freeze({ name: 'Jeddah', lat: 21.49, lon: 39.19, aliases: ['jeddah'] }),
+  Object.freeze({ name: 'Yanbu', lat: 24.09, lon: 38.06, aliases: ['yanbu'] }),
+  Object.freeze({ name: 'Riyadh', lat: 24.71, lon: 46.68, aliases: ['riyadh'] }),
+  Object.freeze({ name: 'Abqaiq', lat: 25.94, lon: 49.68, aliases: ['abqaiq'] }),
+  Object.freeze({ name: 'Ras Laffan', lat: 25.91, lon: 51.55, aliases: ['ras laffan'] }),
+  // Sýria:
+  Object.freeze({ name: 'Aleppo', lat: 36.2, lon: 37.16, aliases: ['aleppo'] }),
+  Object.freeze({ name: 'Homs', lat: 34.73, lon: 36.72, aliases: ['homs'] }),
+  Object.freeze({ name: 'Hama', lat: 35.13, lon: 36.75, aliases: ['hama'] }), // celé slovo: „Hamas" nie je Hama
+  Object.freeze({ name: 'Idlib', lat: 35.93, lon: 36.63, aliases: ['idlib'] }),
+  Object.freeze({ name: 'Latakia', lat: 35.52, lon: 35.78, aliases: ['latakia'] }),
+  Object.freeze({ name: 'Tartus', lat: 34.89, lon: 35.89, aliases: ['tartus', 'tartous'] }),
+  Object.freeze({ name: 'Quneitra', lat: 33.13, lon: 35.82, aliases: ['quneitra'] }),
+  Object.freeze({ name: 'Daraa', lat: 32.62, lon: 36.1, aliases: ['daraa', 'deraa'] }),
+  Object.freeze({ name: 'Suwayda', lat: 32.71, lon: 36.57, aliases: ['suwayda', 'sweida', 'sweidaa'] }),
+  Object.freeze({ name: 'Palmyra', lat: 34.56, lon: 38.27, aliases: ['palmyra'] }),
+  Object.freeze({ name: 'Raqqa', lat: 35.95, lon: 39.01, aliases: ['raqqa'] }),
+  Object.freeze({ name: 'Deir ez-Zor', lat: 35.34, lon: 40.14, aliases: ['deir ez-zor', 'deir ezzor', 'deir el-zour', 'deir al-zor'] }),
+  Object.freeze({ name: 'Hasakah', lat: 36.5, lon: 40.75, aliases: ['hasakah', 'hasaka'] }),
+  Object.freeze({ name: 'Qamishli', lat: 37.05, lon: 41.23, aliases: ['qamishli'] }),
+  Object.freeze({ name: 'Kobani', lat: 36.89, lon: 38.36, aliases: ['kobani', 'kobane'] }),
+  // Irak:
+  Object.freeze({ name: 'Erbil', lat: 36.19, lon: 44.01, aliases: ['erbil', 'irbil'] }),
+  Object.freeze({ name: 'Sulaymaniyah', lat: 35.56, lon: 45.44, aliases: ['sulaymaniyah', 'sulaimaniyah'] }),
+  Object.freeze({ name: 'Mosul', lat: 36.34, lon: 43.13, aliases: ['mosul'] }),
+  Object.freeze({ name: 'Kirkuk', lat: 35.47, lon: 44.39, aliases: ['kirkuk'] }),
+  Object.freeze({ name: 'Ain al-Asad', lat: 33.8, lon: 42.44, aliases: ['ain al-asad', 'ain al asad', 'al-asad air base'] }),
+  // Irán:
+  Object.freeze({ name: 'Fordow', lat: 34.88, lon: 50.99, aliases: ['fordow', 'fordo'] }),
+  Object.freeze({ name: 'Qom', lat: 34.64, lon: 50.88, aliases: ['qom'] }),
+  Object.freeze({ name: 'Arak', lat: 34.09, lon: 49.69, aliases: ['arak'] }),
+  Object.freeze({ name: 'Parchin', lat: 35.52, lon: 51.77, aliases: ['parchin'] }),
+  Object.freeze({ name: 'Tabriz', lat: 38.08, lon: 46.29, aliases: ['tabriz'] }),
+  Object.freeze({ name: 'Kermanshah', lat: 34.31, lon: 47.07, aliases: ['kermanshah'] }),
+  Object.freeze({ name: 'Ahvaz', lat: 31.32, lon: 48.67, aliases: ['ahvaz', 'ahwaz'] }),
+  Object.freeze({ name: 'Shiraz', lat: 29.59, lon: 52.58, aliases: ['shiraz'] }),
+  Object.freeze({ name: 'Mashhad', lat: 36.3, lon: 59.6, aliases: ['mashhad'] }),
+  Object.freeze({ name: 'Qeshm', lat: 26.95, lon: 56.27, aliases: ['qeshm'] }),
+  Object.freeze({ name: 'Jask', lat: 25.64, lon: 57.77, aliases: ['jask'] }),
+  Object.freeze({ name: 'Chabahar', lat: 25.29, lon: 60.64, aliases: ['chabahar'] }),
+  // Oblasti (pod menovaným miestom, nad štátom). „South Lebanon" drží údery na juhu
+  // Libanonu mimo stredu krajiny; pás Gazy je malý, Západný breh široký.
+  Object.freeze({ name: 'Gaza', lat: 31.42, lon: 34.38, kind: 'area', aliases: ['gaza', 'gazan'] }),
+  Object.freeze({ name: 'West Bank', lat: 31.95, lon: 35.25, kind: 'area', broad: true, aliases: ['west bank'] }),
+  Object.freeze({ name: 'South Lebanon', lat: 33.25, lon: 35.4, kind: 'area', aliases: ['south lebanon', 'southern lebanon'] }),
+  Object.freeze({ name: 'Litani', lat: 33.34, lon: 35.25, kind: 'area', aliases: ['litani'] }),
+  Object.freeze({ name: 'Bekaa', lat: 33.85, lon: 35.9, kind: 'area', broad: true, aliases: ['bekaa', 'beqaa'] }),
+  Object.freeze({ name: 'Golan Heights', lat: 33.0, lon: 35.75, kind: 'area', aliases: ['golan'] }),
+  Object.freeze({ name: 'Jordan Valley', lat: 32.0, lon: 35.5, kind: 'area', aliases: ['jordan valley'] }),
+  Object.freeze({ name: 'Galilee', lat: 32.9, lon: 35.4, kind: 'area', broad: true, aliases: ['galilee'] }),
+  Object.freeze({ name: 'Negev', lat: 30.8, lon: 34.8, kind: 'area', broad: true, aliases: ['negev'] }),
+  // Broad chokepoints / seas (a named place beats them).
+  Object.freeze({ name: 'Gulf of Oman', lat: 24.5, lon: 58.5, kind: 'sea', broad: true, aliases: ['gulf of oman'] }),
+  Object.freeze({ name: 'Strait of Hormuz', lat: 26.57, lon: 56.25, kind: 'sea', aliases: ['strait of hormuz', 'hormuz'] }),
+  Object.freeze({ name: 'Persian Gulf', lat: 26.5, lon: 51.5, kind: 'sea', broad: true, aliases: ['persian gulf', 'arabian gulf'] }),
+  Object.freeze({ name: 'Bab-el-Mandeb', lat: 12.6, lon: 43.4, kind: 'sea', aliases: ['bab-el-mandeb', 'bab el-mandeb', 'bab al-mandab', 'mandeb'] }),
+  Object.freeze({ name: 'Gulf of Aden', lat: 12.5, lon: 47.0, kind: 'sea', broad: true, aliases: ['gulf of aden'] }),
+  Object.freeze({ name: 'Red Sea', lat: 20.0, lon: 38.0, kind: 'sea', broad: true, aliases: ['red sea'] }),
+  // Country fallbacks LAST (any place, area or sea wins) — so a mention
+  // geolocates to the country (approx.), not the region default.
+  Object.freeze({ name: 'Iran', lat: 32.4, lon: 53.7, kind: 'country', broad: true, aliases: ['iran', 'iranian'] }),
+  Object.freeze({ name: 'Israel', lat: 31.4, lon: 35.0, kind: 'country', broad: true, aliases: ['israel', 'israeli'] }),
+  Object.freeze({ name: 'Yemen', lat: 15.5, lon: 44.2, kind: 'country', broad: true, aliases: ['yemen', 'yemeni', 'houthi'] }),
+  Object.freeze({ name: 'Lebanon', lat: 33.9, lon: 35.5, kind: 'country', broad: true, aliases: ['lebanon', 'lebanese', 'hezbollah'] }),
+  Object.freeze({ name: 'Iraq', lat: 33.2, lon: 43.7, kind: 'country', broad: true, aliases: ['iraq', 'iraqi'] }),
+  Object.freeze({ name: 'Syria', lat: 35.0, lon: 38.5, kind: 'country', broad: true, aliases: ['syria', 'syrian'] }),
+  Object.freeze({ name: 'Jordan', lat: 31.2, lon: 36.5, kind: 'country', broad: true, aliases: ['jordan', 'jordanian'] }),
+  Object.freeze({ name: 'Saudi Arabia', lat: 24.0, lon: 45.0, kind: 'country', broad: true, aliases: ['saudi arabia', 'saudi'] }),
+  Object.freeze({ name: 'United Arab Emirates', lat: 24.0, lon: 54.0, kind: 'country', broad: true, aliases: ['uae', 'united arab emirates', 'emirati'] }),
+  Object.freeze({ name: 'Oman', lat: 21.0, lon: 57.0, kind: 'country', broad: true, aliases: ['oman', 'omani'] }),
+  Object.freeze({ name: 'Egypt', lat: 26.8, lon: 30.8, kind: 'country', broad: true, aliases: ['egypt', 'egyptian'] }),
 ]);
 
 /**
@@ -96,6 +217,15 @@ export const REGION_DEFAULT = Object.freeze({
   gulf: Object.freeze({ name: 'Strait of Hormuz', lat: 26.57, lon: 56.25 }),
   mideast: Object.freeze({ name: 'Red Sea', lat: 20.0, lon: 38.0 }),
   ukraine: null,
+  // Dejiská BLÍZKEHO VÝCHODU (etapa 3, 2026-09-26): bez menovaného miesta bez karty,
+  // ako pri UKRAJINE — karta „niekde v Iráne" by bola šum, nie informácia.
+  iran: null,
+  lebanon: null,
+  palestine: null,
+  israel: null,
+  redsea: null,
+  syria: null,
+  iraq: null,
 });
 
 /** Gazetteer for a region (ukraine has its own; everything else the Gulf/Middle East one). Pure. */
@@ -118,9 +248,9 @@ export function regionDefaultFor(region) {
  */
 export function classifyIncident(text, { region = 'gulf' } = {}) {
   if (region === 'ukraine') return classifyUkraineIncident(text);
-  const s = String(text ?? '');
+  const s = String(text ?? '').replace(NON_MILITARY_STRIKE_RE, ' ');
   for (const rule of INCIDENT_RULES) {
-    if (rule.re.test(s)) return { type: rule.type, severity: rule.severity };
+    if (rule.re.test(s) && (!rule.context || rule.context.test(s))) return { type: rule.type, severity: rule.severity };
   }
   return null;
 }
@@ -138,18 +268,106 @@ export function classifyIncident(text, { region = 'gulf' } = {}) {
  * „(X Oblast)" right after it, never across a sentence, dash or line break —
  * lies more than 250 km away, the place is a namesake and the oblast is
  * returned (approx). Oblast centres (Kyiv, Kharkiv, Odesa…) are never demoted.
- * The Gulf gazetteer keeps plain substring matching.
+ *
+ * The Gulf / Middle East gazetteer (BLÍZKY VÝCHOD etapa 3, 2026-09-26) matches
+ * whole words too (so „Hamas" is not Hama and „Bin Laden" not Aden) and picks
+ * the place the event HAPPENED, not the one that acted: „Israel strikes Iran" →
+ * Iran, „Iran fires missiles at Israel" → Israel. Every mention is scored — the
+ * tier of the place (named place > area or sea > country) first, then its role
+ * in the headline: a locative („in/at/near/on/over … X") or a struck object
+ * („strikes/hits/killed X") counts for it, „from X" against it, and an actor
+ * („X strikes…", „X's army says…", „… by X") drops below every other mention.
+ * A demonym or an organisation (Israeli, Houthi, Hezbollah…) is weaker than a
+ * proper name; a match inside a longer name of another place („Aden" in „Gulf of
+ * Aden") does not count. Ties go to the earlier mention. A `broad` place
+ * (country, wide sea) comes back `approx: true`.
  * @param {string} text
  * @param {ReadonlyArray} [gazetteer]
  * @returns {{name:string, lat:number, lon:number, approx?:boolean}|null}
  */
 export function locateIncident(text, gazetteer = GULF_GAZETTEER) {
-  const s = String(text ?? '').toLowerCase();
-  if (gazetteer === UKRAINE_GAZETTEER) return locateStrict(s, gazetteer);
-  for (const place of gazetteer) {
-    if (place.aliases.some((a) => s.includes(a))) return { name: place.name, lat: place.lat, lon: place.lon };
+  if (gazetteer === UKRAINE_GAZETTEER) return locateStrict(String(text ?? '').toLowerCase(), gazetteer);
+  return locateScored(String(text ?? '').toLowerCase().replace(/[’‘ʼ`]/g, "'").replace(/[‐‑]/g, '-'), gazetteer);
+}
+
+/** Tier podľa druhu miesta: menované miesto > oblasť či more > štát. */
+const KIND_TIER = Object.freeze({ place: 3, area: 2, sea: 2, country: 1 });
+/** Demonymá a organizácie — slabší dôkaz miesta než vlastné meno. */
+const ME_WEAK_ALIASES = new Set(['iranian', 'israeli', 'yemeni', 'houthi', 'lebanese', 'hezbollah', 'iraqi', 'syrian', 'jordanian', 'saudi', 'emirati', 'omani', 'egyptian', 'gazan']);
+const ME_DIR = '(?:(?:north|south|east|west|central|northern|southern|eastern|western|north-?eastern|north-?western|south-?eastern|south-?western|occupied|coastal)\\s+)?';
+/** Predložka miesta tesne pred menom („in/at/near/on/over/across … X") — najsilnejší znak miesta udalosti. */
+const ME_LOCATIVE_RE = new RegExp(`(?:^|[^a-z])(?:in|at|near|on|over|across|inside|into|onto|off|toward|towards|against)\\s+(?:the\\s+)?${ME_DIR}$`);
+/** Zasiahnutý predmet („strikes X", „hits X", „killed X"). */
+const ME_OBJECT_RE = new RegExp(`(?:^|[^a-z])(?:hits?|struck|strikes?|striking|attacks?|attacked|attacking|bombs?|bombed|bombing|pounds?|pounded|pounding|targets?|targeted|targeting|raids?|raided|shells?|shelled|shelling|invades?|invaded|kills?|killed)\\s+(?:the\\s+)?${ME_DIR}$`);
+/** „from X" — odkiaľ, nie kde. */
+const ME_SOURCE_RE = new RegExp(`(?:^|[^a-z])from\\s+(?:the\\s+)?${ME_DIR}$`);
+/** „… by X" — pôvodca v trpnom rode. */
+const ME_BY_RE = /(?:^|[^a-z])by\s+(?:the\s+)?$/;
+/**
+ * Demonymum pred zbraňou či silami („Israeli drone…", „in Israeli strike", „Houthi
+ * missile…", „Iranian forces…") hovorí, KTO, nie KDE — ale „Iranian military base",
+ * „Houthi missile launchers" sú zasiahnuté objekty (cieľ), tie ostávajú.
+ */
+const ME_ARMS_AFTER_RE = /^(?:'s)?\s+(?:artillery|drones?|uavs?|air ?strikes?|strikes?|missiles?|rockets?|jets?|warplanes?|fighter jets?|forces|troops|army|military|navy|air force|soldiers?|settlers?|tanks?|gunboats?|warships?|fire|gunfire|shelling|raids?|bombardment|attacks?|offensive|operations?|incursions?|militias?|militants?|fighters?)(?![a-z])(?!\s+(?:bases?|sites?|facilit(?:y|ies)|depots?|headquarters|hq|airbases?|installations?|positions?|ports?|compounds?|factor(?:y|ies)|plants?|warehouses?|camps?|launchers?|stockpiles?|production)(?![a-z]))/;
+/** X (+ 's / zložka) + činné sloveso útoku či vyhlásenia = aktér („Israel strikes…", „Iran's IRGC seizes…"); trpný rod („hit by") nie. */
+const ME_AGENT_AFTER_RE = /^(?:'s)?(?:\s+(?:military|army|forces|troops|navy|air force|jets?|warplanes?|drones?|missiles?|rockets?|militants?|fighters?|militias?|government|officials?|revolutionary guards?|irgc|idf|police|authorities))?\s+(?:says?|said|claims?|claimed|warns?|warned|vows?|vowed|threatens?|threatened|accuses?|accused|strikes?|struck|hits?|attacks?|attacked|launch(?:es|ed)?|fires?|fired|kills?|killed|bombs?|bombed|shells?|shelled|pounds?|pounded|raids?|raided|storms?|stormed|seizes?|seized|captures?|captured|detains?|detained|hijacks?|hijacked|retaliates?|retaliated|sends?|sent|deploys?|deployed|expands?|expanded|resumes?|resumed|escalates?|escalated)(?![a-z])(?!\s+by(?![a-z]))/;
+const meAliasRe = new Map();
+/** Celé slovo; množné „s" len pri demonymách (-i, -an: Houthis, Iranians), privlastňovacie 's vždy. */
+function meAliasRegex(alias) {
+  let re = meAliasRe.get(alias);
+  if (!re) {
+    const plural = /(?:i|an)$/.test(alias) ? '|s' : '';
+    re = new RegExp(`(?<![a-z])${escapeRe(alias)}(?:'s${plural})?(?![a-z])`, 'g');
+    meAliasRe.set(alias, re);
   }
-  return null;
+  return re;
+}
+/**
+ * Úloha zmienky v titulku: aktér −2500 (pod každú inú zmienku), miesto +30,
+ * predmet +20, „from" −30, demonymum −5; `null` = zmienka nie je miesto vôbec
+ * (demonymum pred zbraňou či silami: „Israeli drone explodes on house",
+ * „killed in Israeli strike").
+ */
+function meRoleScore(s, at, end, alias) {
+  const before = s.slice(Math.max(0, at - 48), at);
+  const after = s.slice(end, end + 72);
+  const weak = ME_WEAK_ALIASES.has(alias);
+  if (weak && ME_ARMS_AFTER_RE.test(after)) return null;
+  const locative = ME_LOCATIVE_RE.test(before);
+  const object = !locative && ME_OBJECT_RE.test(before);
+  if (ME_BY_RE.test(before) || ME_AGENT_AFTER_RE.test(after)) return -2500;
+  let score = 0;
+  if (locative) score += 30;
+  else if (object) score += 20;
+  else if (ME_SOURCE_RE.test(before)) score -= 30;
+  if (weak) score -= 5;
+  return score;
+}
+function locateScored(s, gazetteer) {
+  const hits = [];
+  gazetteer.forEach((place, order) => {
+    const tier = (KIND_TIER[place.kind] ?? KIND_TIER.place) * 1000;
+    for (const alias of place.aliases) {
+      const re = meAliasRegex(alias);
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(s))) {
+        const at = m.index;
+        const end = at + m[0].length;
+        const role = meRoleScore(s, at, end, alias);
+        hits.push({ place, order, at, end, score: role === null ? null : tier + role });
+      }
+    }
+  });
+  // Zhoda vnútri dlhšieho mena iného miesta („aden" v „gulf of aden", „lebanon" v „south lebanon") sa nepočíta.
+  const kept = hits.filter((h) => h.score !== null
+    && !hits.some((o) => o.place !== h.place && o.at <= h.at && o.end >= h.end && o.end - o.at > h.end - h.at));
+  if (!kept.length) return null;
+  kept.sort((a, b) => (b.score - a.score) || (a.at - b.at) || (a.order - b.order));
+  const best = kept[0].place;
+  const loc = { name: best.name, lat: best.lat, lon: best.lon };
+  if (best.broad) loc.approx = true;
+  return loc;
 }
 
 const EN_ADJ_BEFORE_RE = /(?:^|[^a-z])(?:nova|novo|novyi|nove|stara|staryi|stare|velyka|velykyi|velyke|mala|malyi|male|verkhnia|verkhnii|nyzhnia|nyzhnii|bila|bilyi|chervona|chervonyi|zelena|zelenyi)\s+$/;
@@ -234,7 +452,9 @@ export function buildIncidents(items, { region = 'gulf', gazetteer = gazetteerFo
       lat: loc ? loc.lat : fallback.lat,
       lon: loc ? loc.lon : fallback.lon,
       place: loc ? loc.name : fallback.name,
-      approx: !loc, // true when we fell back to the region default
+      // true when we fell back to the region default, or the place stands for a
+      // large area (a country, a wide sea, a demoted Ukrainian namesake)
+      approx: !loc || loc.approx === true,
       type: cls.type,
       severity: cls.severity,
       title: String(it.title),

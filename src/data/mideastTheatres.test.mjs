@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 
 import {
+  MIDEAST_BULLETIN_REGIONS,
   MIDEAST_THEATRES,
   OVERVIEW_BACKOFF_MAX_DEG,
   THEATRE_HEIGHT_CAP_M,
@@ -45,8 +46,15 @@ test('katalóg je platný: 12 dejísk z plánu (kap. 2), prehľad prvý, vrstvy 
   assert.deepEqual([...theatreById('gulf').layerIds], ['gas-pipelines', 'local-ports']);
   for (const scene of MIDEAST_THEATRES) assert.ok(!scene.layerIds.includes('local-energy'), `${scene.id}: local-energy je SK sieť`);
   assert.deepEqual([...theatreById('gaza').layerIds], []);
-  assert.equal(theatreById('hormuz').newsRegion, 'gulf');
-  assert.equal(theatreById('gaza').newsRegion, 'mideast');
+  // etapa 3 (2026-09-26): každé dejisko má vlastné správy
+  assert.deepEqual(
+    Object.fromEntries(MIDEAST_THEATRES.map((s) => [s.id, s.newsRegion])),
+    {
+      overview: 'mideast', hormuz: 'gulf', gulf: 'gulf', iran: 'iran', 'south-lebanon': 'lebanon',
+      gaza: 'palestine', israel: 'israel', 'west-bank': 'palestine', 'red-sea': 'redsea', yemen: 'redsea',
+      'south-syria': 'syria', iraq: 'iraq',
+    },
+  );
   // kľúče modulov Wikipédie pre etapu 2 — len dáta
   assert.deepEqual([...theatreById('south-lebanon').control], ['israel-palestine', 'lebanon']);
   assert.deepEqual([...theatreById('gaza').control], ['israel-palestine']);
@@ -250,4 +258,17 @@ test('theatreChoices dá id + čitateľné meno pre každé dejisko v poradí ka
   assert.equal(choices.find((c) => c.id === 'south-lebanon').label, 'Južný Libanon');
   assert.ok(choices.every((c) => c.label && c.label !== `theatre.${c.id}.name`), 'nikde holý kľúč');
   assert.equal(theatreChoices((k) => k).find((c) => c.id === 'hormuz').label, 'Hormuz and the blockade', 'bez prekladu EN meno');
+});
+
+test('čipy spravodaja: celý región, Záliv a každý región dejísk práve raz, s prekladom v oboch jazykoch', () => {
+  const ids = MIDEAST_BULLETIN_REGIONS.map((r) => r.id);
+  assert.deepEqual(ids, ['mideast', 'gulf', 'iran', 'lebanon', 'palestine', 'israel', 'redsea', 'syria', 'iraq']);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const scene of MIDEAST_THEATRES) assert.ok(ids.includes(scene.newsRegion), `${scene.id}: čip ${scene.newsRegion}`);
+  for (const r of MIDEAST_BULLETIN_REGIONS) {
+    assert.ok(Object.hasOwn(SITUATION_REGIONS, r.id), `${r.id}: server región pozná`);
+    assert.ok(EN_STRINGS[r.labelKey] && SK_STRINGS[r.labelKey], `${r.labelKey}: EN aj SK`);
+    assert.ok(Object.isFrozen(r));
+  }
+  assert.ok(Object.isFrozen(MIDEAST_BULLETIN_REGIONS));
 });

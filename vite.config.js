@@ -5072,15 +5072,32 @@ function situationNewsProxy() {
   // (Interfax-Ukraine sa nesmie šíriť), `badge` označí štátne agentúry, `label`
   // dá zdroju čitateľné meno. Obrázok z feedu (media:content) len tam, kde je
   // unfurl povolený.
+  // Ten istý feed zdieľa viac regiónov (BBC, Asharq, Al Jazeera… v deviatich
+  // regiónoch BLÍZKEHO VÝCHODU, etapa 3, 2026-09-26): jeden stiahnutý text na
+  // 5 min pre všetky, nie deväť dopytov na toho istého vydavateľa. Chyba sa
+  // nepamätá (ďalší región skúsi znova).
+  const FEED_MEMO_MS = 5 * 60_000;
+  const feedMemo = new Map(); // url -> { at, promise<string|null> }
+  function fetchFeedText(url) {
+    const hit = feedMemo.get(url);
+    if (hit && Date.now() - hit.at < FEED_MEMO_MS) return hit.promise;
+    const promise = (async () => {
+      const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT } });
+      const xml = await readResponseTextCapped(upstream, MAX_BYTES);
+      return upstream.ok ? xml : null;
+    })();
+    feedMemo.set(url, { at: Date.now(), promise });
+    promise.then((xml) => { if (xml === null) feedMemo.delete(url); }, () => feedMemo.delete(url));
+    return promise;
+  }
   async function fetchDirectRss(cfg) {
     const feeds = (Array.isArray(cfg.directRss) ? cfg.directRss : []).map(normalizeDirectFeed).filter(Boolean);
     if (!feeds.length) return [];
     const match = cfg.match ? new RegExp(cfg.match, 'i') : null;
     const lists = await Promise.all(feeds.map(async (feed) => {
       try {
-        const upstream = await fetch(feed.url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT } });
-        const xml = await readResponseTextCapped(upstream, MAX_BYTES);
-        if (!upstream.ok) return [];
+        const xml = await fetchFeedText(feed.url);
+        if (xml === null) return [];
         return normalizeRssArticles(xml, 60)
           .filter((a) => !match || match.test(a.title))
           .filter((a) => !feed.drop || !feed.drop.test(a.title + ' ' + (a.description || '')))
@@ -10135,10 +10152,18 @@ async function fetchRegionalText(url, {
   }
 }
 
+const RSS_NAMED_ENTITIES = Object.freeze({ apos: "'", nbsp: ' ', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', ndash: '–', mdash: '—', hellip: '…' });
+const rssCodePoint = (cp, fallback) => (Number.isInteger(cp) && cp > 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : fallback);
 function decodeRssText(value) {
   return String(value || '')
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    // Číselné a bežné pomenované entity — The Times of Israel a Haaretz kódujú
+    // úvodzovky dvakrát („&amp;#8216;", „&#x27;"), v titulkoch ostávali ako text
+    // (BLÍZKY VÝCHOD etapa 3, 2026-09-26).
+    .replace(/&#(\d{1,7});/g, (m, d) => rssCodePoint(Number(d), m))
+    .replace(/&#x([0-9a-f]{1,6});/gi, (m, h) => rssCodePoint(parseInt(h, 16), m))
+    .replace(/&(apos|nbsp|lsquo|rsquo|ldquo|rdquo|ndash|mdash|hellip);/g, (m, n) => RSS_NAMED_ENTITIES[n] || m)
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }

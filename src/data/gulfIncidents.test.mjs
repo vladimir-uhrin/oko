@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { GULF_GAZETTEER, buildIncidentCards, buildIncidents, classifyIncident, cleanHeadline, isVideoUrl, locateIncident } from './gulfIncidents.js';
+import { GULF_GAZETTEER, buildIncidentCards, buildIncidents, classifyIncident, cleanHeadline, gazetteerForRegion, isVideoUrl, locateIncident, regionDefaultFor } from './gulfIncidents.js';
 
 test('classifyIncident recognizes strikes, fires, seizures, blockades — else null', () => {
   assert.equal(classifyIncident('Missile strikes tanker near Hormuz').type, 'strike');
@@ -116,5 +116,87 @@ test('every gazetteer entry has finite coordinates and lowercase aliases', () =>
     assert.ok(Number.isFinite(p.lat) && Math.abs(p.lat) <= 90, p.name);
     assert.ok(Number.isFinite(p.lon) && Math.abs(p.lon) <= 180, p.name);
     assert.ok(p.aliases.length && p.aliases.every((a) => a === a.toLowerCase()), p.name);
+    assert.ok(p.kind === undefined || ['area', 'sea', 'country'].includes(p.kind), `${p.name}: druh ${p.kind}`);
   }
+  // mená miest sú jedinečné (karta sa zoskupuje podľa súradníc a nesie meno)
+  const names = GULF_GAZETTEER.map((p) => p.name);
+  assert.equal(new Set(names).size, names.length);
+  // žiadny alias nepatrí dvom miestam
+  const aliases = GULF_GAZETTEER.flatMap((p) => p.aliases);
+  assert.equal(new Set(aliases).size, aliases.length);
+  // body dejísk BLÍZKEHO VÝCHODU ležia v regióne (10–40° s. š., 25–62° v. d.)
+  for (const p of GULF_GAZETTEER) assert.ok(p.lat > 10 && p.lat < 40 && p.lon > 25 && p.lon < 62, p.name);
+});
+
+// BLÍZKY VÝCHOD etapa 3 (2026-09-26): kartička patrí miestu udalosti, nie útočníkovi.
+test('locateIncident picks the place struck, not the actor (Middle East)', () => {
+  const at = (t) => locateIncident(t)?.name ?? null;
+  assert.equal(at('Israel strikes Iran nuclear sites'), 'Iran');
+  assert.equal(at('Iran fires missiles at Israel'), 'Israel');
+  assert.equal(at('Hezbollah fires rockets into northern Israel'), 'Israel');
+  assert.equal(at('Israel strikes Houthi targets'), 'Yemen');
+  assert.equal(at('Israeli strikes kill 12 across Lebanon'), 'Lebanon');
+  assert.equal(at('Tehran says it struck Israeli bases'), 'Israel', 'mesto ako aktér ustúpi štátu v role cieľa');
+  assert.equal(at('Tehran hit by Israeli strikes'), 'Tehran', 'trpný rod: „hit by" nie je aktér');
+  assert.equal(at('Tanker seized by Iran in Gulf of Oman'), 'Gulf of Oman', '„by X" je pôvodca');
+  assert.equal(at('Missile launched from Yemen towards Israel intercepted'), 'Israel', '„from X" je odkiaľ');
+  assert.equal(at('Israel intercepts missile launched from Yemen'), 'Israel', 'zachytenie sa deje nad Izraelom');
+  assert.equal(at('Israel strikes Hezbollah in Syria'), 'Syria', 'predložka miesta prebije predmet');
+  assert.equal(at('Iran-backed militia attacks US base in Iraq'), 'Iraq');
+  assert.equal(at('Israel strikes Iranian military base'), 'Iran', 'zasiahnutý objekt s demonymom je cieľ');
+  assert.equal(at('US strikes Houthi missile launchers'), 'Yemen');
+  assert.equal(at('Israeli drones strike Hezbollah positions'), 'Lebanon');
+  // demonymum pred zbraňou hovorí, kto útočí — bez iného miesta radšej žiadna kartička
+  assert.equal(at('Hezbollah fighters killed in Israeli strike'), null);
+  assert.equal(at('Security update: Israeli artillery shelling of outskirts of Mayfadoun town, Israeli drone explodes on house'), null);
+  // menované miesto má prednosť pred oblasťou, morom aj štátom
+  assert.equal(at('Hamas says Israeli strike killed 3 in Khan Younis'), 'Khan Younis');
+  assert.equal(at('Strike in Gaza kills 5 near Rafah'), 'Rafah');
+  assert.equal(at('Israeli strikes kill 12 in southern Lebanon'), 'South Lebanon');
+  assert.equal(at('Settlers attack village near Ramallah in the West Bank'), 'Ramallah');
+  assert.equal(at("Iran’s Revolutionary Guards say they hit Israel’s Nevatim base"), 'Nevatim');
+  assert.equal(at('Houthis claim attack on ship in Red Sea'), 'Red Sea');
+});
+
+test('locateIncident matches whole words and the longest name', () => {
+  const at = (t) => locateIncident(t)?.name ?? null;
+  assert.equal(at('Clashes in Hama as Hamas leaders meet'), 'Hama', '„Hamas" nie je Hama');
+  assert.equal(at('Hamas leaders meet in Cairo'), null);
+  assert.equal(at('Bin Laden documentary released'), null, '„Laden" nie je Aden');
+  assert.equal(at('Ship attacked in the Gulf of Aden'), 'Gulf of Aden', '„aden" vnútri „gulf of aden" sa nepočíta');
+  assert.equal(at('Mine found in the Gulf of Oman'), 'Gulf of Oman');
+  assert.equal(at('Drone attack on Ain al-Asad air base'), 'Ain al-Asad');
+});
+
+test('broad places (countries, wide seas) come back approximate; a card says so', () => {
+  assert.equal(locateIncident('US strike hits Iran facility').approx, true);
+  assert.equal(locateIncident('Ship attacked in the Red Sea').approx, true);
+  assert.equal(locateIncident('Tanker struck off Bandar Abbas').approx, undefined);
+  assert.equal(locateIncident('Two tankers hit in Strait of Hormuz').approx, undefined, 'úžina je úzka — presná');
+  const [inc] = buildIncidents([{ title: 'Israel strikes Iran nuclear sites', url: 'https://a/1', source: 'a' }], { region: 'iran' });
+  assert.equal(inc.place, 'Iran');
+  assert.equal(inc.approx, true);
+});
+
+test('Middle East theatres have no default point: no named place, no card', () => {
+  for (const region of ['iran', 'lebanon', 'palestine', 'israel', 'redsea', 'syria', 'iraq']) {
+    assert.equal(regionDefaultFor(region), null, region);
+    assert.equal(gazetteerForRegion(region), GULF_GAZETTEER, region);
+    assert.deepEqual(buildIncidents([{ title: 'Explosion reported overnight', url: 'https://a/1' }], { region }), [], region);
+  }
+  assert.equal(regionDefaultFor('gulf').name, 'Strait of Hormuz', 'ZÁLIV si predvolený bod drží');
+});
+
+test('classifyIncident: generic „blocked/closed" needs a route; a labour strike or a deal is no attack', () => {
+  assert.equal(classifyIncident('CNN Blocked from Trump Trip on Saturday'), null);
+  assert.equal(classifyIncident('Iranians report SIM cards blocked over political posts'), null);
+  assert.equal(classifyIncident("India's three-day bank strike could impact residents in UAE"), null);
+  assert.equal(classifyIncident('US and Iran strike deal on Hormuz'), null);
+  assert.equal(classifyIncident('Netanyahu Says October 7 Attack On Israel Is Like 9/11 Happening 16 Times'), null, 'retrospektíva nie je dnešná udalosť');
+  assert.equal(classifyIncident('Israel received repeated warnings before Oct. 7 Hamas attack'), null);
+  assert.equal(classifyIncident('Drone attack on Eilat port on October 7th anniversary').type, 'strike', 'dnešný útok v deň výročia ostáva');
+  assert.equal(classifyIncident('Egypt closes Rafah crossing').type, 'blockade');
+  assert.equal(classifyIncident('Hormuz blockade continues').type, 'blockade');
+  assert.equal(classifyIncident('Airspace closed over Iraq').type, 'blockade');
+  assert.equal(classifyIncident('Drone strike on Sanaa').type, 'strike');
 });
