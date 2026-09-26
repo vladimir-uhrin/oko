@@ -11930,13 +11930,43 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
   color: #dfe9f2; font-family: var(--font-mono);
   box-shadow: 0 4px 22px rgba(0, 0, 0, 0.4);
 }
-.oko-karta-title { top: 66px; left: 16px; max-width: 46vw; padding: 10px 14px; }
-.oko-karta-title-name { font-size: 17px; font-weight: 700; letter-spacing: 0.02em; color: #f2f8fd; text-transform: uppercase; line-height: 1.2; }
-.oko-karta-title-state { font-size: 11px; color: #9fb2c4; margin-top: 3px; }
-.oko-karta-title-src { font-size: 10px; color: #6d8296; margin-top: 4px; }
-.oko-karta-legend { bottom: 104px; left: 16px; padding: 9px 12px; }
-.oko-karta-legend-head { font-size: 10px; letter-spacing: 0.14em; color: #7f93a6; text-transform: uppercase; margin-bottom: 6px; }
-.oko-karta-legend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+/* Upratané 2026-09-26 („chcem to prehľadné"): ostrovy sedia v pásoch, kde nič
+   iné nie je, a zarovnané s chrómom — titulok vľavo hore POD logom (#title-bar
+   končí ~89 px, ľavý okraj 36 px ako logo), nástroje a náhľad vpravo hore POD
+   prepínačom jazyka (#lang-switch končí ~121 px, pravý okraj 36 px ako indikátor
+   štýlu), legenda vpravo DOLE nad otvorenou časovou osou (--oko-ukr-tl-lift ju
+   meria) s mierkou v päte (mapScaleBar.js sa kotví na .oko-karta-legend-scale).
+   Ľavý pruh a pravá lišta sa ostrovom vyhýbajú samy — sú v zoznamoch prekážok
+   LEFT/RIGHT_STACK_OBSTACLE_SELECTOR (ui.js): panely tečú pod titulkom, lišta
+   medzi náhľadom a legendou. Legenda NIE JE vľavo dole ako u Rybara zámerne:
+   ľavý stĺpec je pilier zbalených panelov (~440 px) a pri 900 px výšky by mu
+   legenda vzala miesto — pretiekol by cez ňu (z-index nepomôže, len kapacita).
+   Súradnicový roh HUD-u (.hud-bottom-left) v ráme nekreslíme z toho istého
+   dôvodu — pri otvorenej osi naň pilier tiekol už predtým. */
+.oko-karta-title { top: 98px; left: 36px; max-width: min(40vw, 420px); padding: 7px 12px; }
+.oko-karta-title-name { font-size: 16px; font-weight: 700; letter-spacing: 0.02em; color: #f2f8fd; text-transform: uppercase; line-height: 1.2; }
+.oko-karta-title-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; margin-top: 2px; }
+.oko-karta-title-state { font-size: 11px; color: #9fb2c4; }
+.oko-karta-title-src { font-size: 10px; color: #6d8296; }
+/* Podlaha 96 px = nad pilulkou mikrofónu (#gev-voice-control, right/bottom 36) pri KARTE bez osi. */
+.oko-karta-legend { bottom: max(96px, calc(var(--oko-ukr-tl-lift, 0px) + 4px)); right: 36px; width: min(48vw, 400px); padding: 8px 12px; }
+.oko-karta-legend-head { font-size: 10px; letter-spacing: 0.14em; color: #7f93a6; text-transform: uppercase; margin-bottom: 5px; }
+/* Dva stĺpce: sedem riadkov by v páse nad osou nemalo miesto; dlhé popisy sa lámu. */
+.oko-karta-legend-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 14px; }
+.oko-karta-legend-label { line-height: 1.25; }
+/* Päta legendy = miesto pre mierku (mapScaleBar.js ju sem kotví; nad ostrovom cez z-index). */
+.oko-karta-legend-scale { height: 16px; margin-top: 7px; }
+body.oko-karta-frame .oko-scale { z-index: 93; }
+body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
+/* Pilier zbalených panelov (~440 px) sa pri nízkom okne (≤ ~900 px s otvorenou
+   osou) do koridoru pod titulkom nezmestí — namiesto pretečenia cez kredity sa
+   pruh v ráme obmedzí na koridor (engine ho píše do --left-stack-safe-*) a roluje. */
+body.oko-karta-frame #left-panel-stack { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; scrollbar-width: thin; }
+/* Pod 1348 px by dvojstĺpcová legenda vpravo dole siahala pod stredový dok — jeden stĺpec. */
+@media (max-width: 1347px) {
+  .oko-karta-legend { width: min(48vw, 300px); }
+  .oko-karta-legend-list { grid-template-columns: 1fr; }
+}
 .oko-karta-legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #cdd9e4; }
 .oko-karta-swatch { width: 16px; height: 12px; border-radius: 2px; flex: none; background: var(--sw); }
 .oko-karta-swatch-line { height: 3px; border-radius: 1px; align-self: center; }
@@ -11946,13 +11976,13 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-karta-swatch-glyph.glyph-bolt { width: 12px; height: 14px; background: var(--sw); clip-path: polygon(54% 0, 28% 54%, 46% 54%, 38% 100%, 72% 40%, 50% 40%, 62% 0); }
 .oko-karta-swatch-glyph.glyph-shield { width: 18px; height: 12px; background: var(--sw); border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.25); }
 /* Prehľadová mapka vpravo hore pod nástrojmi (2026-09-26, vzorka Rybar: náhľad Ukrajiny s okupovaným územím). */
-.oko-karta-inset { top: 112px; right: 16px; width: 168px; padding: 8px; }
+.oko-karta-inset { top: 178px; right: 36px; width: 168px; padding: 8px; }
 .oko-karta-inset-svg { display: block; width: 100%; height: auto; }
 .oko-karta-inset-outline { fill: rgba(43, 92, 138, 0.55); stroke: rgba(150, 180, 205, 0.55); stroke-width: 0.8; }
 .oko-karta-inset-occupied { fill: rgba(158, 44, 52, 0.85); stroke: rgba(210, 80, 80, 0.7); stroke-width: 0.5; }
 .oko-karta-inset-view { fill: rgba(0, 212, 255, 0.16); stroke: #00d4ff; stroke-width: 1; }
 .oko-karta-inset-dot { fill: #f87171; stroke: rgba(6, 12, 20, 0.85); stroke-width: 0.8; }
-.oko-karta-tools { top: 66px; right: 16px; display: flex; gap: 6px; padding: 6px; }
+.oko-karta-tools { top: 130px; right: 36px; display: flex; gap: 6px; padding: 6px; }
 .oko-karta-tool { pointer-events: auto; font-family: var(--font-mono); font-size: 11px; color: #cfe6f2; background: rgba(0, 212, 255, 0.10); border: 1px solid rgba(0, 212, 255, 0.30); border-radius: 6px; padding: 5px 9px; cursor: var(--cursor-pointer); }
 .oko-karta-tool:hover { background: rgba(0, 212, 255, 0.20); }
 .oko-karta-tool[aria-pressed="true"] { background: rgba(0, 212, 255, 0.28); color: #eafaff; }
@@ -11960,13 +11990,20 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* „Čistá karta": schovaj VŠETOK chróm (aj budúci) — nechaj len mapu, tento rám
    a kredit Cesium/Google (podmienky Map Tiles). Allow-list namiesto zoznamu
    selektorov chrómu, aby nová funkcia nepretiekla do čistej snímky. */
-body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="cesium-credits"]):not(#account-actions):not(#account-dialog[open]) { display: none !important; }
+body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="cesium-credits"]):not(#account-actions):not(#account-dialog[open]):not(.oko-scale) { display: none !important; }
 
 @media (max-width: 900px) {
-  .oko-karta-title { max-width: 62vw; top: 58px; }
-  .oko-karta-tools { top: 58px; }
-  .oko-karta-inset { width: 124px; top: 100px; }
-  .oko-karta-legend { bottom: 122px; }
+  /* Mobil: logo aj prepínač jazyka sú v jednom riadku do ~48 px; HUD tu nie je. */
+  /* Titulok vľavo od nástrojov (tie majú ~172 px) — inak sa prekryjú. */
+  .oko-karta-title { max-width: calc(100vw - 204px); top: 54px; left: 12px; }
+  .oko-karta-tools { top: 54px; right: 12px; }
+  .oko-karta-inset { width: 124px; top: 100px; right: 12px; }
+  /* Kredity Cesium/Google sú na mobile nad dokom (mobileShell: dock-lift + 62 + 8 = 136 px)
+     — legenda nad nimi. S otvorenou osou nie je na telefóne pre legendu miesto
+     (os sama má 235 px a vlastný prepínač LEGENDA), tak sa schová. */
+  .oko-karta-legend { right: 12px; width: min(62vw, 280px); bottom: calc(var(--oko-dock-lift, 66px) + 106px); }
+  .oko-karta-legend-list { grid-template-columns: 1fr; }
+  body.oko-ukr-tl-open .oko-karta-legend { display: none; }
 }
 
 /* ── Kartičky konfliktov (propagácia B) ─────────────────────────────────────

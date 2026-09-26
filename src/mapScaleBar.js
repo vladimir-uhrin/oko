@@ -58,14 +58,20 @@ export function createMapScaleBar({ viewer, documentRef = null, lang = () => 'sk
     const h = el.offsetHeight || 18;
     const vh = doc.defaultView?.innerHeight || 800;
     let left = 36; let top = vh - h - 24;
-    if (hr && hr.height > 0) {
+    // Rám KARTA (2026-09-26): súradnicový roh je schovaný; mierka ide do päty
+    // legendy (slot .oko-karta-legend-scale) — legenda + mierka ako na tlačenej mape.
+    const slot = doc.querySelector('#oko-karta-overlay.is-visible .oko-karta-legend-scale');
+    const sr = slot && typeof slot.checkVisibility === 'function' && slot.checkVisibility({ opacityProperty: true, visibilityProperty: true }) ? slot.getBoundingClientRect() : null;
+    if (sr && sr.height > 0) {
+      left = sr.left; top = sr.top + (sr.height - h) / 2;
+    } else if (hr && hr.height > 0) {
       // Vpravo od súradníc, zarovnané so spodkom — nad nimi je rezerva ľavého panela.
       left = hr.right + 14; top = hr.bottom - h - 2;
     } else {
       // Bez HUD-u (mobil, čistý pohľad): nad najvyšším spodným chrómom v páse mierky
-      // (os, dok, mobilná lišta).
+      // (os, dok, mobilná lišta, kredity Cesium/Google — na mobile sú zdvihnuté nad dok).
       let floor = vh;
-      for (const sel of ['.oko-ukr-timeline', '#command-dock', '#oko-appbar']) {
+      for (const sel of ['.oko-ukr-timeline', '#command-dock', '#oko-appbar', '#cesium-credits']) {
         const n = doc.querySelector(sel);
         if (!n || n.hidden || (typeof n.checkVisibility === 'function' && !n.checkVisibility({ opacityProperty: false, visibilityProperty: true }))) continue;
         const r = n.getBoundingClientRect();

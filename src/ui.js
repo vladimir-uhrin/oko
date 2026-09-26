@@ -346,6 +346,7 @@ const COCKPIT_BRIEF_PAGES = [
  */
 const LEFT_STACK_OBSTACLE_SELECTOR = [
   '.oko-ukr-timeline:not([hidden])', // časová os UKRAJINA (2026-09-19): pevný spodný pás
+  '#oko-karta-overlay.is-visible .oko-karta-title', // rám KARTA (2026-09-26): titulok vľavo hore
   '#cockpit-hud .cockpit-topline',
   '#cockpit-hud .cockpit-topline > div',
   '#title-bar',
@@ -399,6 +400,9 @@ function isRenderedOnScreen(element) {
  */
 const RIGHT_STACK_OBSTACLE_SELECTOR = [
   '.oko-ukr-timeline:not([hidden])', // časová os UKRAJINA (2026-09-19): pevný spodný pás
+  '#oko-karta-overlay.is-visible .oko-karta-tools', // rám KARTA (2026-09-26): nástroje a náhľad vpravo hore, legenda vpravo dole
+  '#oko-karta-overlay.is-visible .oko-karta-inset',
+  '#oko-karta-overlay.is-visible .oko-karta-legend',
   '#cockpit-hud .cockpit-topline',
   '#cockpit-hud .cockpit-topline > div',
   '#title-bar',
@@ -7801,6 +7805,18 @@ export class StyleManager {
     if (!element) return;
     this._leftStackResizeObserver?.observe(element);
     this._scheduleLeftPanelLayout();
+  }
+
+  /**
+   * Pravá obdoba observeLeftStackObstacle: prekážka pravej lišty, ktorá vznikla
+   * až po inicializácii (ostrovy rámu KARTA, 2026-09-26).
+   * @param {Element|null} element
+   * @returns {void}
+   */
+  observeRightStackObstacle(element) {
+    if (!element) return;
+    this._rightStackResizeObserver?.observe(element);
+    this._scheduleRightPanelLayout();
   }
 
   _scheduleLeftPanelLayout({ reconsiderAutoCollapse = false } = {}) {

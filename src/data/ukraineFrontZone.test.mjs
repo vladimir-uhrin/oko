@@ -141,7 +141,7 @@ test('KARTA ako vzorka Rybar: oranžovo šrafovaný pás cez obe strany línie, 
   assert.doesNotMatch(SK_STRINGS['ukraine.karta.legend.contested'], /Wikipédia/, 'pás už nie je z Wikipédie');
   assert.ok(EN_STRINGS['ukraine.ds.band-tip'] && SK_STRINGS['ukraine.ds.band-tip']);
   const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
-  assert.match(css, /\.oko-karta-inset \{ top: 112px; right: 16px; width: 168px; padding: 8px; \}/, 'náhľad vpravo hore');
+  assert.match(css, /\.oko-karta-inset \{ top: 178px; right: 36px; width: 168px; padding: 8px; \}/, 'náhľad vpravo hore pod nástrojmi a prepínačom jazyka (upratanie 2026-09-26)');
   assert.match(css, /\.oko-karta-inset-occupied \{ fill: rgba\(158, 44, 52, 0\.85\)/);
   const ov = readFileSync(new URL('../ukraineKartaOverlay.js', import.meta.url), 'utf8');
   assert.match(ov, /const ix = width - insetW - pad, iy = pad;/, 'aj v exporte vpravo hore');

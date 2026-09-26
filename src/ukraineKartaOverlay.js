@@ -254,7 +254,7 @@ export function createUkraineKartaOverlay({
   const doc = documentRef;
   const inert = {
     id: KARTA_OVERLAY_ID, setStack() {}, setScene() {}, setRevealed() {}, update() {},
-    setClean() {}, isClean: () => false, isVisible: () => false, destroy() {},
+    setClean() {}, isClean: () => false, isVisible: () => false, destroy() {}, elements: {},
     _getStateForTest: () => ({ visible: false }),
   };
   if (!doc?.createElement || !doc.body) return inert;
@@ -274,12 +274,19 @@ export function createUkraineKartaOverlay({
   const titleH = el(doc, 'div', 'oko-karta-title-name');
   const titleSub = el(doc, 'div', 'oko-karta-title-state');
   const titleSrc = el(doc, 'div', 'oko-karta-title-src');
-  titleIsland.append(titleH, titleSub, titleSrc);
+  // Stav a zdroje v jednom riadku (lámu sa, keď sa nezmestia): ľavý stĺpec je
+  // pilier zbalených panelov a každý px výšky titulku mu chýba (2026-09-26).
+  const titleMeta = el(doc, 'div', 'oko-karta-title-meta');
+  titleMeta.append(titleSub, titleSrc);
+  titleIsland.append(titleH, titleMeta);
 
   // Legenda.
   const legendIsland = el(doc, 'div', 'oko-karta-island oko-karta-legend');
   const legendList = el(doc, 'ul', 'oko-karta-legend-list');
-  legendIsland.append(el(doc, 'div', 'oko-karta-legend-head', translate('ukraine.karta.legend.head')), legendList);
+  // Päta legendy: slot, na ktorý sa kotví mierka (mapScaleBar.js) — legenda + mierka ako na tlačenej mape.
+  const legendScale = el(doc, 'div', 'oko-karta-legend-scale');
+  legendScale.setAttribute('aria-hidden', 'true');
+  legendIsland.append(el(doc, 'div', 'oko-karta-legend-head', translate('ukraine.karta.legend.head')), legendList, legendScale);
 
   // Prehľadová mapka.
   const insetIsland = el(doc, 'div', 'oko-karta-island oko-karta-inset');
@@ -364,6 +371,9 @@ export function createUkraineKartaOverlay({
   function applyVisibility() {
     const visible = _isKarta && _revealed;
     root.classList.toggle('is-visible', visible);
+    // Rám karty na <body>: style.css podľa neho schová súradnicový roh HUD-u
+    // (jeho miesto vľavo dole má legenda) — 2026-09-26, upratanie prekryvov.
+    try { doc.body.classList.toggle('oko-karta-frame', visible); } catch { /* */ }
     if (visible) update();
   }
 
@@ -390,6 +400,7 @@ export function createUkraineKartaOverlay({
     _destroyed = true;
     for (const u of unsubs) { try { u(); } catch { /* */ } }
     if (_clean) { try { doc.body.classList.remove('oko-karta-clean'); } catch { /* */ } }
+    try { doc.body.classList.remove('oko-karta-frame'); } catch { /* */ }
     try { root.remove(); } catch { /* */ }
   }
 
@@ -397,6 +408,8 @@ export function createUkraineKartaOverlay({
     id: KARTA_OVERLAY_ID,
     setStack, setScene, setRevealed, update,
     setClean, isClean: () => _clean, isVisible: () => root.classList.contains('is-visible'),
+    /** Ostrovy rámu — main.js ich hlási pruhom panelov ako prekážky (ui.js observe*StackObstacle). */
+    elements: { title: titleIsland, legend: legendIsland, inset: insetIsland, tools },
     getModel: () => ({
       title: kartaTitleModel({ scene: _scene, dateText: kartaDateText({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.() }), sources: kartaSources({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }), translate }),
       legend: kartaLegendItems({ report: report?.getState?.(), deepstate: deepstate?.getState?.(), control: control?.getState?.(), translate }),

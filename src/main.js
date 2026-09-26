@@ -839,6 +839,13 @@ async function init() {
       onExport: () => { void exportConflict({ ratio: 'feed' }); },
     });
     window.__godsEyeView.ukraineKartaOverlay = kartaOverlay;
+    // Ostrovy rámu sú prekážky pruhov (ui.js *_STACK_OBSTACLE_SELECTOR): ľavý pruh
+    // tečie pod titulkom, pravá lišta medzi náhľadom hore a legendou dole.
+    // Vznikli až teraz — pozorovatelia z inicializácie ich nevideli.
+    styleManager.observeLeftStackObstacle?.(kartaOverlay.elements?.title);
+    styleManager.observeRightStackObstacle?.(kartaOverlay.elements?.tools);
+    styleManager.observeRightStackObstacle?.(kartaOverlay.elements?.inset);
+    styleManager.observeRightStackObstacle?.(kartaOverlay.elements?.legend);
     // Propagácia: export kartičiek naprieč konfliktmi (A: aktívna scéna; B: panel).
     window.__godsEyeView.conflicts = {
       list: () => listConflicts(),
