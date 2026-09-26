@@ -82,6 +82,7 @@ import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, normalizeDirectFeed, pa
 import { filterSanctionedNews } from './src/data/sanctionedMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from './src/data/ukraineReport.js';
 import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
+import { mideastEventsProxy } from './src/data/mideastEventsProxy.js';
 import { reliefTilesProxy } from './src/data/reliefTilesProxy.js';
 import { DEEPSTATE_MIRRORS, createDeepStateMirror } from './src/data/deepstateMirror.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
@@ -10725,6 +10726,7 @@ export default defineConfig(({ mode }) => {
       // Vrstva DeepState na doméne a dni mimo archívu: GitHub mirrory cyterat +
       // záloha fork lazar-bit (jadro src/data/deepstateMirror.js).
       ukraineEventsProxy({ deepstateMirror: createDeepStateMirror({ mirrors: DEEPSTATE_MIRRORS }) }),
+      mideastEventsProxy(),
       // Normal dlaždice reliéfu pre podklad KARTA (S3 bez CORS, cache navždy).
       reliefTilesProxy(),
       situationNewsProxy(),

@@ -10,6 +10,29 @@
  * oblúk = obliehané z jednej strany, 3×3/4×4 bodky = vidiecka prítomnosť; lietadlo,
  * kotva, elektráreň, základňa… = infraštruktúra s farbou strany).
  *
+ * Od 2026-09-26 (etapa 2 modulu BLÍZKY VÝCHOD) je tento súbor TENKÝ OBAL nad spoločným
+ * jadrom `wikiControl.js`: Ukrajina je jedna konfigurácia (`UKRAINE_CONTROL_CONFIG`),
+ * každý doterajší export drží meno, signatúru aj predvolené hodnoty (testy Ukrajiny bez
+ * zmeny). Nové moduly (Izrael–Palestína, Jemen, Sýria, Libanon) volajú jadro priamo.
+ *
+ * ZÁMERNÉ ODCHÝLKY od pôvodného parsera (výstup nie je bajt po bajte rovnaký na vstupoch,
+ * ktoré pôvodné testy Ukrajiny nepokrývali; všetky sú opravy a sú pripnuté testom
+ * „Ukrajina cez obal: zámerné odchýlky…" v wikiControl.test.mjs):
+ *  1. Zakomentované značky Lua (`-- { lat = … }`, `--[[ … ]]`) sa ZAHODIA — pôvodný parser
+ *     ich počítal ako živé sídla (`stripLuaComments` beží pred hľadaním záznamov).
+ *  2. Značka s `marksize` ≥ 40 (`OVERLAY_MARKSIZE`) je obrázok podkladu → `skipped`,
+ *     nie bod — pôvodný parser poznal len cestný prekryv podľa mena.
+ *  3. Popisy: `&nbsp;`/`&amp;` sa dekódujú, HTML značky (`<small>…</small>`) sa odstránia
+ *     a biele znaky zlúčia — pôvodné mená ich niesli doslovne (4 mená s `&nbsp;` v archíve).
+ *  4. Ikona infraštruktúry so známym tvarom, no BEZ farby strany (`Fighter-jet-black-icon.svg`)
+ *     dáva `markStatus` = null (neznáma, počítaná v jadre) — pôvodne `{ side: null, kind }`;
+ *     z bodov vypadla v oboch prípadoch.
+ *  5. `controlRaster` s LEN spornými/zmiešanými sídlami (bez ua/ru) dáva bunkám za polomerom
+ *     sporného `none` — pôvodne 'ua' (artefakt porovnania Infinity < Infinity). Skutočný
+ *     modul má vždy obe strany; pri nich je raster bit po bite zhodný s hrubou silou.
+ * Kontinuita archívu: prvý tik po nasadení prepočíta tú istú revíziu novým kódom, takže
+ * počet bodov sa môže zmeniť bez úpravy na Wikipédii (revisionAt ostáva) — poctivo tu.
+ *
  * Licencia CC BY-SA 4.0: odvodený súbor bodov a raster zón sú Adapted Material —
  * vydávajú sa pod CC BY-SA s odkazom na revíziu (DATA_SOURCES.md). Wikipédia mapu
  * skladá z textových správ („copying from maps is strictly prohibited"), takže
@@ -21,92 +44,52 @@
  * najbližšieho sídla (RU výplň tlmená, UA bez výplne ako u Rybara), pás, kde sú
  * obe strany blízko alebo sídlo kontestované, = šrafovaná zóna bojov. Čistý modul.
  */
+import {
+  UKRAINE_CONTROL_CONFIG, UKRAINE_DEFAULT_MK, UKRAINE_MARKSIZE_POP,
+  parseMkTable as wikiParseMkTable, plainLabel as wikiPlainLabel,
+  wikiControlCodes, wikiControlColours, wikiControlPoints, wikiControlRaster, wikiControlSummary, wikiMarkStatus, wikiParseLuaMarks, wikiSideText,
+} from './wikiControl.js';
+
+export { UKRAINE_CONTROL_CONFIG };
 
 /** Skratky `mk` z prehľadového modulu (záloha, keď ich revízia nemá). */
-export const DEFAULT_MK = Object.freeze({
-  con: '80x80-red-blue-anim.gif', grz: 'Location dot grey.svg', rus: 'Location dot red.svg', shr: 'Map-ctl2-red+blue.svg', ukr: 'Location dot blue.svg',
-  rNN: 'Map-arcNN-red.svg', rNE: 'Map-arcNE-red.svg', rEE: 'Map-arcEE-red.svg', rSE: 'Map-arcSE-red.svg', rSS: 'Map-arcSS-red.svg', rSW: 'Map-arcSW-red.svg', rWW: 'Map-arcWW-red.svg', rNW: 'Map-arcNW-red.svg',
-  uNN: 'Map-arcNN-blue.svg', uNE: 'Map-arcNE-blue.svg', uEE: 'Map-arcEE-blue.svg', uSE: 'Map-arcSE-blue.svg', uSS: 'Map-arcSS-blue.svg', uSW: 'Map-arcSW-blue.svg', uWW: 'Map-arcWW-blue.svg', uNW: 'Map-arcNW-blue.svg',
-});
-export const WIKI_OVERVIEW_TITLE = 'Module:Russo-Ukrainian war overview map';
-export const WIKI_DETAILED_TITLE = 'Module:Russo-Ukrainian war detailed map';
-export const WIKI_ATTRIBUTION = 'Wikipedia · Russo-Ukrainian war detailed map · CC BY-SA 4.0';
+export const DEFAULT_MK = UKRAINE_DEFAULT_MK;
+export const WIKI_OVERVIEW_TITLE = UKRAINE_CONTROL_CONFIG.titles[0].title;
+export const WIKI_DETAILED_TITLE = UKRAINE_CONTROL_CONFIG.titles[1].title;
+export const WIKI_ATTRIBUTION = UKRAINE_CONTROL_CONFIG.attribution;
 /** Veľkosť značky → trieda populácie (komentár v module). */
-export const MARKSIZE_POP = Object.freeze({ 35: 'capital', 28: '1m', 24: '500k', 20: '200k', 16: '100k', 14: '50k', 12: '20k', 10: '10k', 8: '5k', 6: '2k', 5: '1k', 4: 'small' });
+export const MARKSIZE_POP = UKRAINE_MARKSIZE_POP;
 
 /** Tabuľka skratiek `mk = { key = "file" }` z Lua zdroja (alebo záloha). Pure. */
 export function parseMkTable(src) {
-  const m = /\bmk\s*=\s*\{([\s\S]*?)\}/.exec(String(src || ''));
-  if (!m) return { ...DEFAULT_MK };
-  const out = { ...DEFAULT_MK };
-  for (const kv of m[1].matchAll(/(\w+)\s*=\s*"([^"]+)"/g)) out[kv[1]] = kv[2];
-  return out;
+  return wikiParseMkTable(src, DEFAULT_MK);
 }
 
 /** `[[Lyman, Ukraine|Lyman]]` → „Lyman"; `[[Bakhmut]]` → „Bakhmut"; bez odkazu = text. Pure. */
 export function plainLabel(label) {
-  const s = String(label ?? '').trim();
-  const m = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/.exec(s);
-  if (m) return (m[2] || m[1]).trim();
-  return s.replace(/'''?/g, '').trim() || null;
+  return wikiPlainLabel(label);
 }
 
 /**
- * Ikona → { side: 'ua'|'ru'|'none'|'contested'|'mixed', kind, pressure? }.
- * `pressure` = strana, ktorá obliehanú/tlačenú lokalitu tlačí (oblúk jej farby). Pure.
+ * Ikona → { side: 'ua'|'ru'|'none'|'contested'|'mixed', kind, pressure? } alebo null
+ * (neznáma ikona bez farby, cestný podklad, aj známy tvar infraštruktúry bez farby strany —
+ * odchýlka 4 v hlavičke). `pressure` = strana, ktorá obliehanú/tlačenú lokalitu tlačí
+ * (oblúk jej farby). Pure.
  */
 export function markStatus(icon) {
-  const s = String(icon || '');
-  const low = s.toLowerCase();
-  const colour = /blue/.test(low) ? 'ua' : (/red/.test(low) ? 'ru' : (/grey|gray/.test(low) ? 'none' : null));
-  if (/80x80-red-blue-anim/.test(low)) return { side: 'contested', kind: 'settlement' };
-  if (/map-ctl2-red\+blue/.test(low)) return { side: 'mixed', kind: 'settlement' };
-  if (/^location dot/.test(low)) return { side: colour || 'none', kind: 'settlement' };
-  if (/^map-arc/.test(low)) return { side: colour === 'ua' ? 'ru' : 'ua', kind: 'settlement', pressure: colour, direction: (/map-arc([nsew]{2})/i.exec(s)?.[1] || '').toUpperCase() || null };
-  if (/^map-circle/.test(low)) return { side: colour || 'contested', kind: 'settlement', pressure: colour === 'ua' ? 'ru' : 'ua' };
-  if (/^[34]x[34]dot/.test(low)) return { side: colour || 'none', kind: 'rural' };
-  if (/fighter-jet/.test(low)) return { side: colour, kind: 'airbase' };
-  if (/helicopter/.test(low)) return { side: colour, kind: 'heliport' };
-  if (/anchor/.test(low)) return { side: colour, kind: 'port' };
-  if (/nuclearpowerplant/.test(low)) return { side: colour, kind: 'industry' };
-  if (/abm-/.test(low)) return { side: colour, kind: 'base' };
-  if (/map-peak/.test(low)) return { side: colour, kind: 'hill' };
-  if (/gota0/.test(low)) return { side: /gota03/.test(low) ? 'ua' : 'ru', kind: 'oilgas' };
-  if (/bsicon/.test(low)) return { side: colour, kind: 'hydro' };
-  if (/mountain pass/.test(low)) return { side: null, kind: 'border' };
-  if (/arch dam/.test(low)) return { side: null, kind: 'dam' };
-  if (/roadmap overlay/.test(low)) return null;
-  return colour ? { side: colour, kind: 'other' } : null;
+  const status = wikiMarkStatus(icon, UKRAINE_CONTROL_CONFIG);
+  return status && !status.skip ? status : null;
 }
 
 /**
  * Lua zdroj modulu → záznamy `{ lat, lon, icon, side, kind, pressure, size, pop,
- * name, link }` (bez podkladovej cestnej mapy a bez značiek bez strany). Pure.
+ * name, link }` (bez podkladovej cestnej mapy, bez značiek bez strany, bez zakomentovaných
+ * značiek a bez obrázkov s marksize ≥ 40 — odchýlky 1–3 v hlavičke). Pure.
  * @param {string} src Lua text
  * @param {Record<string,string>} [mk] tabuľka skratiek (predvolene z toho istého zdroja)
  */
 export function parseLuaMarks(src, mk = null) {
-  const text = String(src || '');
-  const table = mk || parseMkTable(text);
-  const out = [];
-  for (const m of text.matchAll(/\{([^{}]*\blat\s*=\s*"[^"]*"[^{}]*)\}/g)) {
-    const body = m[1];
-    const field = (name) => {
-      const r = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|mk\\.(\\w+)|lp\\.(\\w+)|(-?\\d+(?:\\.\\d+)?))`).exec(body);
-      if (!r) return null;
-      if (r[3] !== undefined) return table[r[3]] || null;
-      return r[1] ?? r[2] ?? r[4] ?? r[5] ?? null;
-    };
-    const lat = Number(field('lat')); const lon = Number(field('long'));
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    const icon = field('mark');
-    const status = markStatus(icon);
-    if (!status || !status.side) continue;
-    const size = Number(field('marksize')) || null;
-    const name = plainLabel(field('label')) || plainLabel(field('link')) || null;
-    out.push({ lat: Math.round(lat * 1e4) / 1e4, lon: Math.round(lon * 1e4) / 1e4, icon, side: status.side, kind: status.kind, pressure: status.pressure || null, direction: status.direction || null, size, pop: size ? (MARKSIZE_POP[size] || (size >= 12 ? '20k' : 'small')) : null, name, link: field('link') || null });
-  }
-  return out;
+  return wikiParseLuaMarks(src, UKRAINE_CONTROL_CONFIG, { mk }).points;
 }
 
 /**
@@ -115,79 +98,37 @@ export function parseLuaMarks(src, mk = null) {
  * z prehľadového). Duplicitné súradnice (na 3 desatinné) vyhrá podrobný. Pure.
  */
 export function controlPointsFromModules(overviewSrc, detailedSrc) {
-  const mk = parseMkTable(overviewSrc || '');
-  const byKey = new Map();
-  for (const p of parseLuaMarks(overviewSrc || '', mk)) byKey.set(`${p.lat.toFixed(3)},${p.lon.toFixed(3)}`, { ...p, module: 'overview' });
-  for (const p of parseLuaMarks(detailedSrc || '', mk)) byKey.set(`${p.lat.toFixed(3)},${p.lon.toFixed(3)}`, { ...p, module: 'detailed' });
-  return [...byKey.values()];
+  const sources = [{ id: 'overview', src: overviewSrc || '' }, { id: 'detailed', src: detailedSrc || '' }];
+  return wikiControlPoints(sources, UKRAINE_CONTROL_CONFIG, { mk: parseMkTable(overviewSrc || '') }).points;
 }
 
 /** Počty bodov podľa strany a druhu (pre panel a legendu). Pure. */
 export function controlSummary(points) {
-  const out = { total: 0, settlements: { ua: 0, ru: 0, contested: 0, mixed: 0, none: 0 }, infrastructure: { ua: 0, ru: 0 } };
-  for (const p of points || []) {
-    out.total += 1;
-    if (p.kind === 'settlement' || p.kind === 'rural') { if (p.side in out.settlements) out.settlements[p.side] += 1; } else if (p.side === 'ua' || p.side === 'ru') out.infrastructure[p.side] += 1;
-  }
-  return out;
+  return wikiControlSummary(points, UKRAINE_CONTROL_CONFIG);
 }
 
 /** Predvolený rámec rastra: Ukrajina s Krymom a pohraničím RU (Kursk/Belgorod). */
-export const CONTROL_RASTER_BBOX = Object.freeze({ west: 22.0, south: 44.2, east: 40.6, north: 52.6 });
-export const CONTROL_CODE = Object.freeze({ none: 0, ua: 1, ru: 2, contested: 3 });
+export const CONTROL_RASTER_BBOX = UKRAINE_CONTROL_CONFIG.bbox;
+export const CONTROL_CODE = wikiControlCodes(UKRAINE_CONTROL_CONFIG);
 
 /**
  * Odvodený raster zón: každá bunka podľa najbližšieho sídla (settlement/rural,
  * kontestované rátajú pre obe strany); pás `bandKm`, kde je druhá strana rovnako
  * blízko alebo najbližšie sídlo je kontestované, = zóna bojov; ďalej než `maxKm`
- * od akéhokoľvek bodu = bez údaja. Vzdialenosti v km s kosínusom šírky. Pure.
+ * od akéhokoľvek bodu = bez údaja. Vzdialenosti v km s kosínusom šírky. Vstup len so
+ * spornými sídlami dáva `none`, nie 'ua' (odchýlka 5 v hlavičke). Pure.
  * @returns {{width:number,height:number,cellDeg:number,bbox:object,cells:Uint8Array,counts:{ua:number,ru:number,contested:number,none:number}}}
  */
 export function controlRaster(points, { bbox = CONTROL_RASTER_BBOX, cellDeg = 0.05, maxKm = 35, bandKm = 7, contestedKm = bandKm } = {}) {
-  const width = Math.max(1, Math.round((bbox.east - bbox.west) / cellDeg));
-  const height = Math.max(1, Math.round((bbox.north - bbox.south) / cellDeg));
-  const cells = new Uint8Array(width * height);
-  const ua = []; const ru = []; const con = [];
-  for (const p of points || []) {
-    if (p.kind !== 'settlement' && p.kind !== 'rural') continue;
-    if (p.side === 'ua') ua.push(p); else if (p.side === 'ru') ru.push(p); else if (p.side === 'contested' || p.side === 'mixed') con.push(p);
-  }
-  const counts = { ua: 0, ru: 0, contested: 0, none: 0 };
-  const KM_LAT = 111.32;
-  const nearest = (list, lat, lon, cosLat) => {
-    let best = Infinity;
-    for (const p of list) {
-      const dy = (p.lat - lat) * KM_LAT; const dx = (p.lon - lon) * KM_LAT * cosLat;
-      const d = dx * dx + dy * dy;
-      if (d < best) best = d;
-    }
-    return Math.sqrt(best);
-  };
-  for (let row = 0; row < height; row += 1) {
-    const lat = bbox.north - (row + 0.5) * cellDeg; // riadok 0 = sever (ako obrázok)
-    const cosLat = Math.cos((lat * Math.PI) / 180);
-    for (let col = 0; col < width; col += 1) {
-      const lon = bbox.west + (col + 0.5) * cellDeg;
-      const dU = nearest(ua, lat, lon, cosLat); const dR = nearest(ru, lat, lon, cosLat); const dC = nearest(con, lat, lon, cosLat);
-      const dMin = Math.min(dU, dR, dC);
-      let code = CONTROL_CODE.none;
-      if (dMin <= maxKm) {
-        if (dC <= contestedKm || Math.abs(dU - dR) <= bandKm) code = CONTROL_CODE.contested;
-        else code = dR < dU ? CONTROL_CODE.ru : CONTROL_CODE.ua;
-      }
-      cells[row * width + col] = code;
-      if (code === CONTROL_CODE.ua) counts.ua += 1; else if (code === CONTROL_CODE.ru) counts.ru += 1; else if (code === CONTROL_CODE.contested) counts.contested += 1; else counts.none += 1;
-    }
-  }
-  return { width, height, cellDeg, bbox: { ...bbox }, cells, counts };
+  return wikiControlRaster(points, UKRAINE_CONTROL_CONFIG, { bbox, cellDeg, maxKm, bandKm, contestedKm });
 }
 
 /** Farby strán (monochromatický štýl OKO; RU tehlová tlmená, UA modrá, kontestované jantár). */
-export const CONTROL_COLORS = Object.freeze({ ua: '#4fa3ff', ru: '#e0553f', contested: '#ffb547', mixed: '#c68cff', none: '#8a97a3' });
+export const CONTROL_COLORS = wikiControlColours(UKRAINE_CONTROL_CONFIG);
 
 /**
  * Text stavu pre kartu/legendu (i18n kľúče `ukraine.ctl.*`). Pure.
  */
 export function controlSideText(side, translate = (k) => k) {
-  return translate(`ukraine.ctl.${side || 'none'}`);
+  return wikiSideText(side, UKRAINE_CONTROL_CONFIG, translate);
 }
