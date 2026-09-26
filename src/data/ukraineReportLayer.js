@@ -28,6 +28,7 @@ import { placeLabel } from './ukraineBase.js';
 import { defaultTerrainSampler } from './ukraineBaseLayer.js';
 import { fetchUkraineReport, reportByScene } from './ukraineReport.js';
 import { directionAnchor, directionPlaces, placeKey } from './ukraineReportPlaces.js';
+import { ARROW_CSS, ARROW_MAX_KM, ARROW_OUTLINE_CSS, arrowScale, attackArrowPath, attackArrowPolygon } from './ukraineAttackArrows.js';
 
 export const UKRAINE_REPORT_ID = 'ukraine-report';
 export const REPORT_REFRESH_MS = 30 * 60_000;
@@ -219,6 +220,10 @@ export function createUkraineReportLayer({
   frontKm = null,
   /** Deň snímky línie (YYYY-MM-DD) pre vetu na karte. */
   frontDay = null,
+  /** Najbližší bod línie kontaktu — ukraineDeepStateLayer.nearestContactPoint(lon, lat, { reportDay }); bez neho sa šípky nekreslia. */
+  contactPoint = null,
+  /** Strana bodu podľa DeepState (ukraineDeepStateLayer.sideAt): sídlo v okupovanom území šípku nedostane. */
+  sideAt = null,
 } = {}) {
   const inert = {
     id: UKRAINE_REPORT_ID, show: async () => false, hide() {}, setEnabled() {}, isEnabled: () => true, isShown: () => false,
@@ -284,7 +289,59 @@ export function createUkraineReportLayer({
     try { reservePlaces(ids); } catch (error) { console.warn('[UkraineReport] reservePlaces failed:', error?.message || error); }
   }
 
+  /** Šípky smerov útoku preč (entity aj väzby na kartu). */
+  function clearArrows() {
+    for (const rec of _placeRecords.values()) {
+      for (const e of rec.arrowEntities || []) { try { _byEntityId.delete(e.id); ds.entities.remove(e); } catch { /* */ } }
+      rec.arrowEntities = null; rec.arrow = null;
+    }
+  }
+  /**
+   * Šípky smerov útoku (KARTA, 2026-09-26, vzorka Rybar): od najbližšieho bodu
+   * DNEŠNEJ línie kontaktu (DeepState) k sídlu, pri ktorom hlásenie GŠ uvádza
+   * útoky (blesk). Sídlo v okupovanom území šípku nedostane (ukazovala by do tyla),
+   * ďaleko od línie (> ARROW_MAX_KM) tiež. Dve čiary: tmavý lem pod farebnou
+   * šípkou (PolylineArrow), hrúbka podľa počtu útokov. Odvodená geometria — karta
+   * sídla to hovorí.
+   */
+  function drawArrows() {
+    clearArrows();
+    if (_destroyed || typeof contactPoint !== 'function') return;
+    const reportDay = typeof _report?.reportedAt === 'string' ? _report.reportedAt.slice(0, 10) : null;
+    const visible = _styleMode === 'karta';
+    for (const rec of _placeRecords.values()) {
+      if (!rec.entity || !(rec.attacks > 0)) continue;
+      let side = null;
+      try { side = typeof sideAt === 'function' ? sideAt(rec.lon, rec.lat) : null; } catch { side = null; }
+      if (side === 'ru') continue;
+      let cp = null;
+      try { cp = contactPoint(rec.lon, rec.lat, { reportDay }); } catch { cp = null; }
+      if (!cp || !(cp.km <= ARROW_MAX_KM)) continue;
+      const path = attackArrowPath(cp, rec, { name: rec.place?.name });
+      if (!path) continue;
+      // Telo šípky = pozemný polygón v km (rastie s mapou ako u Rybara; materiál
+      // PolylineArrow na primknutých čiarach Cesium nekreslí), tmavý obrys = čiara okolo.
+      const ring = attackArrowPolygon(path, { scale: arrowScale(rec.attacks) });
+      if (!ring) continue;
+      const positions = ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
+      const base = `${rec.entity.id}:arrow`;
+      const ddc = () => new Cesium.DistanceDisplayCondition(0, REPORT_BOLT_FAR_M);
+      const arrow = ds.entities.add({
+        id: base,
+        polygon: { hierarchy: new Cesium.PolygonHierarchy(positions), material: Cesium.Color.fromCssColorString(ARROW_CSS).withAlpha(0.92), classificationType: Cesium.ClassificationType.BOTH, zIndex: 13, show: visible, distanceDisplayCondition: ddc() },
+      });
+      const outline = ds.entities.add({
+        id: `${base}:outline`,
+        polyline: { positions: [...positions, positions[0]], width: 2, material: Cesium.Color.fromCssColorString(ARROW_OUTLINE_CSS).withAlpha(0.9), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH, zIndex: 14, show: visible, distanceDisplayCondition: ddc() },
+      });
+      rec.arrowEntities = [outline, arrow];
+      rec.arrow = { km: Math.round(cp.km * 10) / 10 };
+      _byEntityId.set(outline.id, rec);
+      _byEntityId.set(arrow.id, rec);
+    }
+  }
   function clearPlaces() {
+    clearArrows();
     _scenePlaces.clear();
     for (const record of _placeRecords.values()) { try { ds.entities.remove(record.entity); } catch { /* */ } }
     _placeRecords.clear();
@@ -438,6 +495,7 @@ export function createUkraineReportLayer({
     // sídla by pod bodom obce nešiel ani vybrať (pick vracia vrchný). Preto hore.
     try { viewer.dataSources.raiseToTop?.(ds); } catch { /* headless */ }
     applyReservation();
+    drawArrows();
     layoutLabels();
     requestRender();
     emit();
@@ -482,7 +540,11 @@ export function createUkraineReportLayer({
   /** Po zmene línie (nová snímka DeepState) prepočíta kotvy značiek. */
   function reanchor() {
     if (_destroyed || !_scenePlaces.size) return;
-    if (!placeAnchors()) return;
+    const moved = placeAnchors();
+    // Nová línia = nové šípky, aj keď kotvy značiek ostali.
+    drawArrows();
+    emit();
+    if (!moved) { requestRender(); return; }
     void liftMarkers();
     layoutLabels();
     requestRender();
@@ -516,6 +578,7 @@ export function createUkraineReportLayer({
     if (!e) return;
     const useBolt = _styleMode === 'karta' && rec.hasBolt;
     try {
+      for (const a of rec.arrowEntities || []) { const on = _styleMode === 'karta'; if (a.polygon) a.polygon.show = on; if (a.polyline) a.polyline.show = on; }
       if (e.point) e.point.show = !useBolt;
       if (e.billboard) e.billboard.show = useBolt;
       if (e.label) {
@@ -650,6 +713,7 @@ export function createUkraineReportLayer({
     const details = [translate('ukraine.report.place-mentions', { n: mentions })];
     for (const h of hits) details.push(`${frontSceneLabel(h.scene, translate)} · ${attacksText(h.entry)}`);
     if (_report?.reportedAtText) details.push(translate('ukraine.report.summary', { total: _report.total ?? '?', time: _report.reportedAtText }));
+    if (record.arrow) details.push(translate('ukraine.report.arrow-note'));
     details.push(translate('ukraine.report.place-note'));
     details.push(translate('ukraine.report.claim'));
     return {
@@ -780,7 +844,7 @@ export function createUkraineReportLayer({
   function getState() {
     const byScene = {};
     for (const [id, entry] of _byScene) byScene[id] = { attacks: entry.attacks, unknown: entry.unknown, gs: [...entry.gs] };
-    return { shown: _shown, enabled: _enabled, loading: Boolean(_loading), error: _error, report: _report, byScene, fetchedAt: _fetchedAt || null, placesCount: _placeRecords.size, placesUnresolved: _placesUnresolved };
+    return { shown: _shown, enabled: _enabled, loading: Boolean(_loading), error: _error, report: _report, byScene, fetchedAt: _fetchedAt || null, placesCount: _placeRecords.size, arrows: [..._placeRecords.values()].filter((r) => r.arrow).length, placesUnresolved: _placesUnresolved };
   }
   function destroy() {
     _destroyed = true;

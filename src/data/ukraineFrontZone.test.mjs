@@ -120,7 +120,7 @@ test('plátno pásma: R = ukrajinská strana, G = okupovaná, alfa 255 len kde n
 test('KARTA ako vzorka Rybar: oranžovo šrafovaný pás cez obe strany línie, náhľad s okupovaným územím vpravo hore', async () => {
   const src = readFileSync(new URL('../ukraineDeepStateLayer.js', import.meta.url), 'utf8');
   const karta = src.slice(src.indexOf('karta: Object.freeze({'), src.indexOf('});', src.indexOf('karta: Object.freeze({')) + 3);
-  assert.match(karta, /combatBand: Object\.freeze\(\{ css: '#f0922e', lineAlpha: 0\.9, fillAlpha: 0\.22, spacing: 7, thickness: 0\.36, uaKm: 3, ruKm: 5 \}\)/);
+  assert.match(karta, /combatBand: Object\.freeze\(\{ css: '#f0922e', lineAlpha: 0\.92, fillAlpha: 0\.26, spacing: 6, thickness: 0\.4, uaKm: 6, ruKm: 2\.5 \}\)/);
   const { combatBandMask, coarseOccupiedRings } = await import('../ukraineDeepStateLayer.js');
   const m = combatBandMask({ width: 3, height: 1, cells: 1, ruCells: 1, values: Uint8Array.from([90, 0, 0]), ruValues: Uint8Array.from([0, 40, 0]) });
   assert.deepEqual([...m.ruValues], [255, 255, 0], 'UA aj RU časť pásma = plná maska');

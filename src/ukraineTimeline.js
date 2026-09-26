@@ -284,6 +284,7 @@ export function createUkraineTimeline({
     rpBox.appendChild(item('is-rp-mid', '10–24'));
     rpBox.appendChild(item('is-rp-high', '25+'));
     rpBox.appendChild(item('is-rp-na', translate('ukraine.rp.na')));
+    rpBox.appendChild(item('is-rp-arrow', translate('ukraine.rp.arrow')));
     row3.appendChild(rpBox);
     // Riadok len keď značky hlásenia naozaj kreslíme.
     try { report.onChange?.((st) => { rpBox.hidden = !(st?.shown ?? report.isShown?.()); }); } catch { /* */ }

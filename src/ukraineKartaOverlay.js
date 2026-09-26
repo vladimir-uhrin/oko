@@ -25,6 +25,7 @@ export const KARTA_LEGEND_COLORS = Object.freeze({
   combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a', band: '#f0922e',
   // Zmena za týždeň (DEEPSTATE_STYLES.karta.change): obsadené karmínová šrafa, oslobodené modrá.
   gained: '#b3001b', lost: '#1f5fbf',
+  attack: '#ff3b30',
 });
 
 /**
@@ -109,7 +110,8 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
   const items = [];
   if (deepstateDraws(deepstate)) {
     items.push({ key: 'occupied', colorCss: c.occupied, label: translate('ukraine.karta.legend.occupied') });
-    if (deepstate.contact > 0) items.push({ key: 'contact', colorCss: c.contact, line: true, label: translate('ukraine.karta.legend.contact') });
+    // KARTA (2026-09-26) odvodenú líniu nekreslí — hranu robí obrys polygónu; vzorka len mimo štýlu karta.
+    if (deepstate.contact > 0 && deepstate.style !== 'karta') items.push({ key: 'contact', colorCss: c.contact, line: true, label: translate('ukraine.karta.legend.contact') });
     // Mirror šedú zónu nemá — namiesto nej je oranžovo šrafovaný pás cez líniu, odvodený
     // z dnešnej línie (DEEPSTATE_STYLES.karta.combatBand; 2026-09-26, vzorka Rybar).
     if (deepstate.source !== 'mirror') items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
@@ -127,6 +129,7 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
   items.push({ key: 'pin-ua', colorCss: c.pinUa, dot: true, label: translate('ukraine.karta.legend.pin-ua') });
   items.push({ key: 'pin-ru', colorCss: c.pinRu, dot: true, label: translate('ukraine.karta.legend.pin-ru') });
   if (report?.shown) items.push({ key: 'combat', colorCss: c.combat, glyph: 'bolt', label: translate('ukraine.karta.legend.combat') });
+  if (report?.shown && report.arrows > 0) items.push({ key: 'attack', colorCss: c.attack, glyph: 'arrow', label: translate('ukraine.karta.legend.attack') });
   items.push({ key: 'road', colorCss: c.road, glyph: 'shield', label: translate('ukraine.karta.legend.road') });
   return items;
 }

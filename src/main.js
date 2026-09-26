@@ -700,6 +700,9 @@ async function init() {
       // DeepState vzniká nižšie — volá sa až pri kreslení (lenivo).
       frontKm: (lon, lat, opts) => window.__godsEyeView.ukraineDeepState?.frontKm?.(lon, lat, opts) ?? null,
       frontDay: () => window.__godsEyeView.ukraineDeepState?.getState?.().day ?? null,
+      // Šípky smerov útoku (KARTA, 2026-09-26): od dnešnej línie k sídlu z hlásenia.
+      contactPoint: (lon, lat, opts) => window.__godsEyeView.ukraineDeepState?.nearestContactPoint?.(lon, lat, opts) ?? null,
+      sideAt: (lon, lat) => window.__godsEyeView.ukraineDeepState?.sideAt?.(lon, lat) ?? null,
     });
     window.__godsEyeView.ukraineReport = ukraineReport;
     let ukraineBoundariesHeld = false;

@@ -74,11 +74,14 @@ test('vrstva DeepState: línia sa kreslí nad plochami, stav nesie počet a dĺ�
   assert.equal(lines[0].polyline.zIndex.getValue(), 10, 'nad obrysmi plôch');
   assert.equal(lines[0].polyline.width.getValue(), DEEPSTATE_STYLES.default.contact.width);
   layer.setStyle('karta');
-  const kartaLine = layer._getStateForTest().ds.entities.values.find((e) => String(e.id).includes(':contact:'));
-  assert.equal(kartaLine.polyline.width.getValue(), DEEPSTATE_STYLES.karta.contact.width, 'KARTA: tenšia');
+  // KARTA (2026-09-26, vzorka Rybar „ostré hrany“): odvodená línia sa nekreslí — hranu robí sám obrys polygónu.
+  assert.equal(DEEPSTATE_STYLES.karta.contact, null);
+  assert.equal(layer._getStateForTest().ds.entities.values.some((e) => String(e.id).includes(':contact:')), false, 'KARTA: bez odvodenej línie');
+  assert.equal(layer.getState().contact, 1, 'línia sa ďalej počíta (pásmo, šípky, náhľad)');
   const keys = (ds) => kartaLegendItems({ deepstate: ds, translate: (k) => k }).map((i) => i.key);
   assert.ok(keys({ shown: true, source: 'mirror', features: 1, contact: 1 }).includes('contact'));
   assert.ok(!keys({ shown: true, source: 'mirror', features: 1, contact: 0 }).includes('contact'));
+  assert.ok(!keys({ shown: true, source: 'mirror', features: 1, contact: 1, style: 'karta' }).includes('contact'), 'v KARTE bez vzorky línie');
   assert.equal(kartaLegendItems({ deepstate: { shown: true, contact: 2 } }).find((i) => i.key === 'contact').line, true);
   layer.destroy();
 });

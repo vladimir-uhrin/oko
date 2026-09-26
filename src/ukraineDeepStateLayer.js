@@ -75,14 +75,23 @@ export const DEEPSTATE_STYLES = Object.freeze({
     change: Object.freeze({ gainedCss: '#ff2d55', gainedLine: 0.9, gainedFill: 0.3, lostCss: '#2f9bff', lostAlpha: 0.55, spacing: 5, thickness: 0.42 }),
   }),
   karta: Object.freeze({
-    greyWidth: 0.7, width: 1.0, greyOutline: 0.6, outline: 0.8, hatch: true,
+    greyWidth: 0.7, width: 1.6, greyOutline: 0.6, outline: 0.95, hatch: true,
     greyCss: null, greyHatch: Object.freeze({ lineAlpha: 0.6, fillAlpha: 0.1 }),
-    // KARTA: tenšia tmavočervená bez lemu (jemná mapa, svetlý reliéf).
-    contact: Object.freeze({ css: '#b3261e', alpha: 0.95, width: 2.2, outlineCss: null, outlineAlpha: 0, outlineWidth: 0 }),
+    // 2026-09-26 (vlastník so vzorkou Rybar: „frontová línia ostré hrany a nie je vidno
+    // ani šedá zóna"): hranu frontu robí SÁM obrys polygónu — plná tmavočervená
+    // výplň s ostrým tmavým obrysom, odvodená línia kontaktu sa v KARTE nekreslí
+    // (kľukatila sa v páse bojov ako pílka). Pásmo sa z nej ďalej počíta.
+    contact: null,
+    fillCss: Object.freeze({ occupied: '#b8352f', crimea: '#a33a33', ordlo: '#a33a33', tuzla: '#a33a33' }),
+    fillAlpha: Object.freeze({ occupied: 0.46, crimea: 0.36, ordlo: 0.36, tuzla: 0.36 }),
+    outlineCss: Object.freeze({ occupied: '#5e0f0f', crimea: '#5e0f0f', ordlo: '#5e0f0f', tuzla: '#5e0f0f' }),
     // 2026-09-26 (vlastník so vzorkou mapy Rybar: „ja som to chcel takto"): územie bojov
     // ako oranžovo šrafovaný pás CEZ obe strany línie (3 km k UA, 5 km do okupovaného),
     // odvodené z dnešnej línie DeepState — mirror sivú zónu nemá.
-    combatBand: Object.freeze({ css: '#f0922e', lineAlpha: 0.9, fillAlpha: 0.22, spacing: 7, thickness: 0.36, uaKm: 3, ruKm: 5 }),
+    // Sivá zóna ako u Rybara (2026-09-26, vlastník: „so sivou zónou ako Rybar!“): pás bojov
+    // hlavne na ukrajinskej strane línie (6 km; do okupovaného 2,5 km), hustejšia a
+    // výraznejšia šrafa — mirror sivú zónu nemá, toto je jej odvodená náhrada.
+    combatBand: Object.freeze({ css: '#f0922e', lineAlpha: 0.92, fillAlpha: 0.26, spacing: 6, thickness: 0.4, uaKm: 6, ruKm: 2.5 }),
     // KARTA: tmavšia karmínová a mapová modrá, aby sa líšili od oranžového pásu bojov.
     change: Object.freeze({ gainedCss: '#b3001b', gainedLine: 0.92, gainedFill: 0.38, lostCss: '#1f5fbf', lostAlpha: 0.6, spacing: 5, thickness: 0.42 }),
   }),
@@ -355,9 +364,10 @@ export function createUkraineDeepStateLayer({
     const st = DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default;
     let n = 0;
     for (const f of _snapshot.features) {
-      const colour = Cesium.Color.fromCssColorString(DEEPSTATE_COLORS[f.kind] || '#8a97a3');
+      const colour = Cesium.Color.fromCssColorString(st.fillCss?.[f.kind] || DEEPSTATE_COLORS[f.kind] || '#8a97a3');
       if (f.type === 'Polygon' && Array.isArray(f.rings) && f.rings.length) {
-        const alpha = DEEPSTATE_FILL_ALPHA[f.kind] ?? 0.2;
+        const alpha = st.fillAlpha?.[f.kind] ?? DEEPSTATE_FILL_ALPHA[f.kind] ?? 0.2;
+        const outlineColour = st.outlineCss?.[f.kind] ? Cesium.Color.fromCssColorString(st.outlineCss[f.kind]) : colour;
         const outer = ringPositions(f.rings[0]);
         const holes = f.rings.slice(1).map((r) => new Cesium.PolygonHierarchy(ringPositions(r)));
         n += 1;
@@ -375,7 +385,7 @@ export function createUkraineDeepStateLayer({
         });
         ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:line:${n}`,
-          polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : (lib ? st.liberatedWidth : st.width), material: f.kind === 'grey' ? greyColour.withAlpha(st.greyOutline) : colour.withAlpha(lib ? st.liberatedOutline : st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
+          polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : (lib ? st.liberatedWidth : st.width), material: f.kind === 'grey' ? greyColour.withAlpha(st.greyOutline) : outlineColour.withAlpha(lib ? st.liberatedOutline : st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
         });
       } else if (f.type === 'Point' && Number.isFinite(f.lat) && Number.isFinite(f.lon)) {
         const attack = f.kind === 'attack';
@@ -577,6 +587,27 @@ export function createUkraineDeepStateLayer({
     if (!_frontCache.has(key)) _frontCache.set(key, frontDistanceKm(_polyIndex, lon, lat));
     return _frontCache.get(key);
   }
+  /**
+   * Najbližší bod dnešnej línie kontaktu k bodu ({ lon, lat, km }); rovnaké
+   * brány ako frontKm. Pre šípky smerov útoku (ukraineReportLayer, KARTA).
+   */
+  function nearestContactPoint(lon, lat, { reportDay = null } = {}) {
+    if (!_shown || !_contact.length || !Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    if (!deepstateDayFits(_snapshot?.day, reportDay)) return null;
+    const kx = 111.32 * Math.cos((lat * Math.PI) / 180); const ky = 111.32;
+    let best = null; let bestD = Infinity;
+    for (const path of _contact) {
+      for (let i = 1; i < path.length; i += 1) {
+        const ax = (path[i - 1][0] - lon) * kx; const ay = (path[i - 1][1] - lat) * ky;
+        const bx = (path[i][0] - lon) * kx; const by = (path[i][1] - lat) * ky;
+        const dx = bx - ax; const dy = by - ay; const len2 = dx * dx + dy * dy;
+        const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+        const px = ax + t * dx; const py = ay + t * dy; const d = Math.hypot(px, py);
+        if (d < bestD) { bestD = d; best = { lon: lon + px / kx, lat: lat + py / ky, km: d }; }
+      }
+    }
+    return best;
+  }
   async function loadLatest(day = null) {
     if (_loading) return;
     _loading = true; emit();
@@ -632,7 +663,7 @@ export function createUkraineDeepStateLayer({
   return {
     id: UKRAINE_DEEPSTATE_ID,
     show, hide, isShown: () => _shown, setSnapshot, loadLatest, getState,
-    setStyle, getStyle: () => _style, sideAt, frontKm,
+    setStyle, getStyle: () => _style, sideAt, frontKm, nearestContactPoint,
     /** Hrubý obrys ruskej kontroly pre prehľadovú mapku (prázdne bez snímky). */
     occupiedOutline: () => { if (!_snapshot?.features?.length) return []; if (!_insetRings) _insetRings = coarseOccupiedRings(_snapshot.features); return _insetRings; },
     /** Úseky línie kontaktu aktuálnej snímky (kópia). */
