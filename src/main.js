@@ -869,6 +869,8 @@ async function init() {
         return activeFrontScene?.rectDegrees || null;
       },
       onExport: () => { void exportConflict({ ratio: 'feed' }); },
+      // Zakotvená pravá lišta (kartaRailDock.js) zbalí svoje panely len na čas rámu — bez uloženia.
+      setPanelCollapsed: (id, collapsed) => styleManager.setPanelCollapsed?.(id, collapsed, { persist: false, syncShare: false }),
     });
     window.__godsEyeView.ukraineKartaOverlay = kartaOverlay;
     // Ostrovy rámu sú prekážky pruhov (ui.js *_STACK_OBSTACLE_SELECTOR): ľavý pruh
