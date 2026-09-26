@@ -166,7 +166,9 @@ photoreal aj glóbusových stackoch. Káblová vrstva ostáva v kóde (rebase),
 len už nie je jediná „infra" voľba.
 
 **4b — SK first-run.** Prvý let už nejde do Austinu: `flyToBratislava`
-(kamera JZ od centra, pohľad cez Dunaj na Staré mesto — plný 3D mesh podľa
+(od 2026-09-26 kamera SV od centra nad Starým Mestom, pohľad na hrad —
+pôvodný pohľad z JZ cez Dunaj mal v strede záberu hrubú sieť Googlu na južnom
+svahu hradu a nábreží, rovnakú cez Google aj Cesium ion; plný 3D mesh podľa
 Fázy 0). Mission karta má novú prvú dlaždicu **SLOVENSKÝ PREHĽAD** —
 zámerne úplne keyless (SHMÚ radar CC BY + bundlovaná energetika ODbL),
 takže prvý klik nového návštevníka vždy doručí. Hlasové aliasy: „radar",

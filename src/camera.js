@@ -64,11 +64,18 @@ export function flyToBratislava(viewer) {
 
   setTimeout(() => {
     viewer.camera.flyTo({
-      // Camera SW of the centre looking NE across the Danube and the old town.
-      destination: Cesium.Cartesian3.fromDegrees(17.0870, 48.1330, 700),
+      // Camera NE of the centre, above the old town, looking SW at the castle
+      // (2026-09-26, owner: „potrebujem súrne opraviť túto dlaždicu"): the
+      // former view from the SW across the Danube had Google's coarse mesh
+      // patch (south slope of the castle hill, the embankment, part of the
+      // river — identical via Google direct and Cesium ion, unchanged at
+      // 4× finer screen-space error) smeared across the middle of the first
+      // frame every visitor sees. From this side the castle and the old town
+      // are sharp and the patch stays out of the main frame.
+      destination: Cesium.Cartesian3.fromDegrees(17.1180, 48.1520, 750),
       orientation: {
-        heading: Cesium.Math.toRadians(38),
-        pitch: Cesium.Math.toRadians(-28),
+        heading: Cesium.Math.toRadians(215),
+        pitch: Cesium.Math.toRadians(-26),
         roll: 0.0,
       },
       duration: 4.0,
