@@ -1,19 +1,26 @@
 // OKO — archív modulu BLÍZKY VÝCHOD z príkazového riadka (etapa 2 „KONTROLA SÍDIEL",
-// 2026-09-26; plán docs/drafts/blizky-vychod-plan.md). Dev proxy
-// (src/data/mideastEventsProxy.js) archivuje dnešné snímky priebežne; tento skript
-// stiahne snímku hned alebo naplní históriu po týždňoch:
+// 2026-09-26; etapa 5a „PRECHODY ÚŽINAMI"; plán docs/drafts/blizky-vychod-plan.md). Dev
+// proxy (src/data/mideastEventsProxy.js) archivuje priebežne; tento skript stiahne hneď
+// alebo naplní históriu po týždňoch:
 //   .gev-cache/mideast/events/control/<modul>/<deň>.json   kontrola sídiel z Lua modulu
 //       Wikipédie (CC BY-SA 4.0, Wikipedia contributors) — israel-palestine, yemen, syria, lebanon
+//   .gev-cache/mideast/events/portwatch/<úžina>.json       denné prechody úžinou z IMF PortWatch
+//       (od 1. 1. 2019; hormuz, bab-el-mandeb, suez, cape; atribúcia MMF)
 //
 // Usage:
-//   node scripts/build-mideast-events.mjs --all                       (= --control pre všetky moduly)
+//   node scripts/build-mideast-events.mjs --all                       (= --control + --portwatch)
 //   node scripts/build-mideast-events.mjs --control [--module <id>] [--force]
 //   node scripts/build-mideast-events.mjs --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N]
+//   node scripts/build-mideast-events.mjs --portwatch [--force]
 //
 // Etiketa Wikimedia: jeden dopyt naraz, pauza 1,2 s medzi dopytmi, popisný User-Agent
 // s kontaktom (scripts/lib/mideastArchive.mjs). Históriu (jeden dopyt na týždeň a
-// modul) spúšťa človek — `--all` ju zámerne vynecháva.
-import { MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, isDay, wikiControlSnapshot } from './lib/mideastArchive.mjs';
+// modul) spúšťa človek — `--all` ju zámerne vynecháva. PortWatch (verejný ArcGIS MMF):
+// úžiny postupne s pauzou 1,5 s; prvé stiahnutie = celá séria (3 strany na úžinu).
+import {
+  MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, isDay, portwatchRefresh, wikiControlSnapshot,
+} from './lib/mideastArchive.mjs';
+import { PORTWATCH_KEYS } from '../src/data/portwatch.js';
 
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
@@ -24,9 +31,9 @@ const now = Date.now();
 const log = (m) => console.log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PAUSE_MS = 1200;
-const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N]\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}`;
+const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force]\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
 
-if (!all && !has('--control') && !has('--control-history')) {
+if (!all && !has('--control') && !has('--control-history') && !has('--portwatch')) {
   console.log(usage);
   process.exit(2);
 }
@@ -65,5 +72,14 @@ if (has('--control-history')) {
     if (i > 0) await sleep(PAUSE_MS);
     const r = await controlBackfill(root, moduleId, { from, stepDays: step, limit, pauseMs: PAUSE_MS, now, log });
     log(`Kontrola história ${moduleId} (po ${step} d od ${from}${Number.isFinite(limit) ? ', strop ' + limit : ''}): nových ${r.done}, existujúcich ${r.skipped}, chýb ${r.errors}`);
+  }
+}
+
+// Prechody úžinami (IMF PortWatch): štyri úžiny postupne, pauza 1,5 s.
+if (all || has('--portwatch')) {
+  for (const [i, key] of PORTWATCH_KEYS.entries()) {
+    if (i > 0) await sleep(1500);
+    const r = await portwatchRefresh(root, key, { now, force: has('--force'), log });
+    log(`PortWatch ${key}: ${r.status} · ${r.count} dní · posledný ${r.lastDay || '—'}${r.fetched !== undefined ? ` · stiahnutých ${r.fetched}` : ''}${r.error ? ' — ' + r.error : ''}`);
   }
 }

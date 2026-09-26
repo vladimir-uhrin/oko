@@ -10,7 +10,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promises as fsp } from 'node:fs';
 
-import { CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
+import { CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, PORTWATCH_FIRST_DELAY_MS, PORTWATCH_TICK_MS, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
 import { controlFile } from '../../scripts/lib/mideastArchive.mjs';
 
@@ -141,7 +141,7 @@ test('validácia: bad_module so zoznamom modulov, bad_day, 405 pre iné metódy,
   assert.equal((await call(plugin, '/status', { method: 'DELETE' })).out.status, 405);
   const other = await call(plugin, '/?from=2026-09-24');
   assert.equal(other.out.status, 404, 'udalosti prídu v ďalších etapách — kým nie, poctivé 404');
-  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD']);
+  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N']);
   const server = mount(plugin);
   const res = fakeRes();
   await server.handler({ method: 'GET', url: 'http://[zle', headers: {}, socket: {} }, res);
@@ -161,14 +161,16 @@ test('časovače: štyri úlohy rozostúpené po minúte od 200 s, vypnutý arch
   assert.equal((await call(off, '/control?module=lebanon&at=2026-09-24')).out.status, 404, 'trasa funguje aj s vypnutým archivárom');
   const on = mideastEventsProxy({ root, env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   on._start('http://127.0.0.1:4173');
-  assert.equal(timers.length, 4, 'jedna úloha na modul');
-  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz)');
+  assert.equal(timers.length, 5, 'jedna úloha na modul + PortWatch (etapa 5a)');
+  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000, 440_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz), PortWatch po nich');
   assert.equal(CONTROL_FIRST_DELAY_MS, 200_000);
   assert.equal(CONTROL_STAGGER_MS, 60_000);
   assert.equal(CONTROL_TICK_MS, 6 * 60 * 60_000);
+  assert.equal(PORTWATCH_FIRST_DELAY_MS, 440_000);
+  assert.equal(PORTWATCH_TICK_MS, 6 * 60 * 60_000);
   assert.equal(on._state.base, 'http://127.0.0.1:4173');
   on._stop();
-  assert.ok(cleared.length >= 4, 'stop zruší všetky časovače');
+  assert.ok(cleared.length >= 5, 'stop zruší všetky časovače');
 });
 
 test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zatvorený server = žiadny zombie archivár); bez stopu sa preplánuje na 6 h; reštart nezdvojí', async () => {
@@ -181,7 +183,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const slowFetch = async (url) => { await gate; return wikiFetch(url); };
   const plugin = mideastEventsProxy({ root, env: {}, fetchImpl: slowFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   plugin._start('http://127.0.0.1:4173');
-  assert.equal(armed.length, 4);
+  assert.equal(armed.length, 5, '4 moduly + PortWatch');
   assert.equal(armed[0].ms, CONTROL_FIRST_DELAY_MS);
   const inflight = armed[0].fn(); // časovač control:israel-palestine vystrelil, tik čaká na Wikipédiu
   await new Promise((r) => setImmediate(r));
@@ -189,7 +191,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   plugin._stop(); // server zavrel (reštart Vite) uprostred dopytu
   release();
   await inflight;
-  assert.equal(armed.length, 4, 'po stop() sa rozbehnutý tik NEpreplánuje');
+  assert.equal(armed.length, 5, 'po stop() sa rozbehnutý tik NEpreplánuje');
   assert.equal(plugin._state.running['control:israel-palestine'], false);
   assert.equal(plugin._state.last['control:israel-palestine'].result.status, 'updated', 'rozbehnutý tik poctivo dobehne a snímku uloží');
   // bez stopu: spätné volanie sa po tiku preplánuje presne na tik 6 h
@@ -197,9 +199,9 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const live = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer: (fn, ms) => { armed2.push({ fn, ms }); return armed2.length; }, clearTimer, log: () => {} });
   live._start('http://127.0.0.1:4173');
   await armed2[3].fn(); // control:lebanon
-  assert.equal(armed2.length, 5, 'jeden nový časovač');
-  assert.equal(armed2[4].ms, CONTROL_TICK_MS);
-  // reštart (stop + start) počas tiku: nová generácia si naplánuje svoje 4, starý tik nepridá piaty
+  assert.equal(armed2.length, 6, 'jeden nový časovač');
+  assert.equal(armed2[5].ms, CONTROL_TICK_MS);
+  // reštart (stop + start) počas tiku: nová generácia si naplánuje svojich 5, starý tik nepridá ďalší
   const armed3 = [];
   let release3; const gate3 = new Promise((r) => { release3 = r; });
   const restart = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: async (url) => { await gate3; return wikiFetch(url); }, now: () => NOW, setTimer: (fn, ms) => { armed3.push({ fn, ms }); return armed3.length; }, clearTimer, log: () => {} });
@@ -208,10 +210,10 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   await new Promise((r) => setImmediate(r));
   restart._stop();
   restart._start('http://127.0.0.1:4173');
-  assert.equal(armed3.length, 8, 'nový štart naplánoval svoje 4');
+  assert.equal(armed3.length, 10, 'nový štart naplánoval svojich 5');
   release3();
   await old;
-  assert.equal(armed3.length, 8, 'starý tik z predošlej generácie nič nepridal');
+  assert.equal(armed3.length, 10, 'starý tik z predošlej generácie nič nepridal');
 });
 
 test('gzip len pri výslovnom tokene s q > 0, Vary: Accept-Encoding na každej stlačiteľnej 200, nie na malých ani chybových', async () => {
@@ -316,4 +318,53 @@ test('/status je verejný: počty a časy, žiadne texty chýb; vnútorný _stat
   assert.deepEqual(s2.control['israel-palestine'], { snapshots: 1, first: '2026-09-24', last: '2026-09-24' });
   assert.equal(s2.errors, 0);
   assert.equal(s2.lastErrorAt, null);
+});
+
+/** Falošný ArcGIS pre PortWatch: pre každú úžinu 60 dní do 20. 9. 2026 (počet = 10 + index úžiny). */
+const pwFetch = (calls = []) => async (url) => {
+  if (!url.includes('arcgis.com')) return wikiFetch(url);
+  calls.push(url);
+  const portid = /portid='([^']+)'/.exec(new URL(url).searchParams.get('where') || '')?.[1] || '';
+  const n = Number(portid.replace('chokepoint', '')) || 0;
+  const features = [];
+  for (let i = 59; i >= 0; i -= 1) {
+    const d = new Date(Date.UTC(2026, 8, 20) - i * 86_400_000).toISOString().slice(0, 10);
+    features.push({ attributes: { date: d, n_total: 10 + n, n_tanker: n, n_container: 0, n_dry_bulk: 0, n_general_cargo: 0, n_roro: 0, capacity: 1000, capacity_tanker: 0 } });
+  }
+  return response(JSON.stringify({ features }));
+};
+
+test('/portwatch (etapa 5a): 404 pred sťahovaním, úloha stiahne štyri úžiny postupne, chvost + priemer pred krízou, allowlist kľúčov, orez dní, cache', async () => {
+  const root = await tmpRoot();
+  const calls = [];
+  const slept = [];
+  const plugin = makePlugin(root, { fetchImpl: pwFetch(calls), sleep: async (ms) => { slept.push(ms); } });
+  const before = await call(plugin, '/portwatch?keys=hormuz');
+  assert.equal(before.out.status, 404);
+  assert.deepEqual(decode(before), { error: 'no_portwatch_snapshot', keys: ['hormuz'] });
+  await plugin._tick('portwatch');
+  assert.equal(calls.length, 4, 'jedna strana na úžinu');
+  assert.deepEqual(calls.map((u) => /portid='([^']+)'/.exec(new URL(u).searchParams.get('where'))[1]), ['chokepoint6', 'chokepoint4', 'chokepoint1', 'chokepoint7']);
+  assert.deepEqual(slept, [1500, 1500, 1500], 'pauza medzi úžinami, nie pred prvou');
+  assert.equal(plugin._state.last.portwatch.result.status, 'updated');
+  assert.equal(plugin._state.last.portwatch.result.day, '2026-09-20');
+  const ok = await call(plugin, '/portwatch?keys=hormuz,cape&days=45', { gzip: true });
+  assert.equal(ok.out.status, 200);
+  const json = decode(ok);
+  assert.deepEqual(json.chokepoints.map((c) => c.key), ['hormuz', 'cape']);
+  assert.equal(json.chokepoints[0].rows.length, 45);
+  assert.equal(json.chokepoints[0].rows.at(-1)[1], 16, 'Hormuz = chokepoint6 → 16/deň v syntetickej sérii');
+  assert.equal(json.chokepoints[0].baseline.id, 'iran-war');
+  assert.equal(json.chokepoints[0].baseline.mean, null, 'syntetická séria nesiaha do okna pred krízou → null, nie vymyslené číslo');
+  assert.match(json.attribution, /International Monetary Fund/);
+  // orez dní na 30–1 000 a allowlist
+  assert.equal(decode(await call(plugin, '/portwatch?keys=suez&days=5')).chokepoints[0].rows.length, 30);
+  const bad = await call(plugin, '/portwatch?keys=hormuz,../etc');
+  assert.equal(bad.out.status, 400);
+  assert.deepEqual(decode(bad), { error: 'bad_keys', keys: ['hormuz', 'bab-el-mandeb', 'suez', 'cape'] });
+  assert.equal((await call(plugin, '/portwatch?keys=')).out.status, 200, 'prázdne keys = všetky štyri');
+  // /status ukazuje úlohu PortWatch bez textov chýb
+  const s = decode(await call(plugin, '/status'));
+  assert.equal(s.last.portwatch.ok, true);
+  assert.equal(s.last.portwatch.count, 240);
 });

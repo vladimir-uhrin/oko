@@ -78,7 +78,7 @@ test('kostra: stav, 12 dejísk (prehľad prvý a čiarkovaný), miesto pre sprá
   assert.equal(status.dataset.state, 'ready');
   assert.ok(status.classList.contains('gas-status'), 'stav sedí na štýle PLYN');
   const titles = byClass(mount, 'mideast-section-title');
-  assert.deepEqual(titles.map((x) => x.textContent), ['mideast.theatres', 'mideast.news.title']);
+  assert.deepEqual(titles.map((x) => x.textContent), ['mideast.theatres', 'mideast.pw.title', 'mideast.news.title']);
   const group = byClass(mount, 'mideast-dirs')[0];
   assert.equal(group.attrs.role, 'group');
   assert.equal(group.attrs['aria-label'], 'mideast.theatres');
@@ -98,8 +98,12 @@ test('kostra: stav, 12 dejísk (prehľad prvý a čiarkovaný), miesto pre sprá
   assert.equal(news.dataset.mideastNews, '');
   assert.equal(byClass(mount, 'mideast-note')[0].textContent, 'mideast.note');
   assert.equal(panel.activeTheatre, null);
-  // Poradie v tele: stav → titulok → dejiská → titulok → správy → poznámka.
-  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-section-title', 'mideast-news', 'mideast-note']);
+  // Etapa 5a: miesto pre kartu PRECHODY ÚŽINAMI (plní ju portwatchCard.js z main.js).
+  const transits = byClass(mount, 'mideast-transits')[0];
+  assert.equal(panel.transitsMount, transits);
+  assert.equal(transits.dataset.mideastTransits, '');
+  // Poradie v tele: stav → titulok → dejiská → titulok → prechody → titulok → správy → poznámka.
+  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
 });
 
 test('skutočný katalóg: predvolený popisok je theatreLabel (EN meno bez prekladu, SK s prekladom), prehľad prvý', () => {
@@ -327,7 +331,7 @@ test('etapa 2 — čip KONTROLA SÍDIEL: rad čipov za dejiskami, prepína sprá
   const mount = doc.createElement('div');
   const control = fakeControl();
   const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control, translate: tKey, lang: 'sk', documentRef: doc });
-  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-section-title', 'mideast-news', 'mideast-note']);
+  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
   const chips = byClass(mount, 'mideast-chips')[0];
   assert.equal(chips.attrs.role, 'group');
   assert.equal(chips.attrs['aria-label'], 'mideast.part.control');

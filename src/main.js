@@ -53,6 +53,8 @@ import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, li
 import { applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
 import { createMideastPanel } from './mideastPanel.js';
 import { createMideastControl } from './mideastControlLayer.js';
+import { createPortwatchCard } from './portwatchCard.js';
+import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
@@ -693,6 +695,14 @@ async function init() {
       ? createConflictBulletin({ mountTarget: mideastPanel.newsMount, region: 'gulf' })
       : null;
     window.__godsEyeView.conflictBulletin = conflictBulletin;
+    // PRECHODY ÚŽINAMI (BLÍZKY VÝCHOD, etapa 5a, 2026-09-26): IMF PortWatch — Hormuz,
+    // Báb al-Mandab, Suez, Mys dobrej nádeje. Karta sťahuje až pri prvom rozbalení
+    // panela (/api/mideast/events/portwatch, archív servera), zvýrazní úžinu dejiska
+    // alebo scény úžiny. Odhady MMF z AIS, predbežné — karta to hovorí sama.
+    const portwatchCard = mideastPanel.transitsMount
+      ? createPortwatchCard({ mountTarget: mideastPanel.transitsMount })
+      : null;
+    window.__godsEyeView.portwatchCard = portwatchCard;
     // UKRAJINA (2026-09-19, etapa 1; plán docs/drafts/ukrajina-plan.md): podklad
     // frontu — sídla, cesty, rieky, oblasti zo statického OSM snímku — ako
     // SAMOSTATNÝ prekryv (tokeny odkazu sú plné, správca odmietne vrstvu bez
@@ -865,6 +875,7 @@ async function init() {
         activeChokepoint = null; activeFrontScene = null; activeTheatre = null;
         mideastPanel?.setActiveTheatre?.(null);
         void mideastControl.setTheatre(null);
+        portwatchCard?.setActive?.(null);
         restoreAutoKarta();
         syncMapFocus();
         try {
@@ -1030,6 +1041,7 @@ async function init() {
       activeTheatre = null;
       mideastPanel?.setActiveTheatre?.(null);
       void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
+      portwatchCard?.setActive?.(null);
       kartaOverlay?.setScene(scene || null);
       ukrainePanel?.setActiveScene(scene?.id || null);
       ukraineTimeline.setActiveScene(scene?.id || null);
@@ -1127,6 +1139,8 @@ async function init() {
       activeTheatre = null;
       mideastPanel?.setActiveTheatre?.(null);
       void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
+      // Scéna úžiny s údajmi PortWatch (hormuz, bab-el-mandeb, suez) zvýrazní svoj riadok karty.
+      portwatchCard?.setActive?.(PORTWATCH_KEYS.includes(scene?.id) ? scene.id : null);
       const result = applyChokepointScene(id, chokepointSceneDeps);
       syncMapFocus();
       void oilPriceChip.refreshAndShow();
@@ -1220,6 +1234,7 @@ async function init() {
       ukrainePanel?.setActiveScene?.(null);
       ukraineTimeline.setActiveScene(null);
       mideastPanel?.setActiveTheatre?.(scene?.id || null);
+      portwatchCard?.setActive?.(portwatchKeyForTheatre(scene?.id)); // Hormuz/Záliv → Hormuz, Jemen/Červené more → Báb al-Mandab
       // KONTROLA SÍDIEL (etapa 2): správca prepne moduly Wikipédie podľa `scene.control`
       // a raster zón prepočíta v rámci dejiska (+0,2°), nie nad celým modulom; bez
       // dejiska (null) vrstvy schová. Pred rámovaním, aby sa body natiahli počas letu.

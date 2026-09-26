@@ -24,13 +24,18 @@
  *    200 `{ ...snapshot, requestedAt, snapshots, first, last }` s bodmi;
  *    cache 10 min na `${module}:${at}`, strop 64 kľúčov; gzip nad 1 KiB len pri tokene
  *    `gzip` s q > 0 (`acceptsGzip`) a s `Vary: Accept-Encoding` na každej stlačiteľnej 200.
+ *  - `/portwatch?keys=hormuz,suez&days=400` (etapa 5a, 2026-09-26): denné prechody úžinami
+ *    z IMF PortWatch — posledných `days` riadkov (30–1 000, predvolene 400) + priemer okna
+ *    „pred krízou" z celej série; 400 bad_keys, 404 no_portwatch_snapshot; cache 10 min.
+ *    Úloha `portwatch` (tik 6 h, prvá 440 s po štarte) obnovuje štyri úžiny postupne.
  * Bezpečnosť handlera: každý `await` aj `new URL` v try/catch — odmietnutý Promise
  * z async connect middleware zhodí dev server.
  */
 import zlib from 'node:zlib';
 
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
-import { controlDays, controlFor, controlIndex, dayKey, isDay, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
+import { PORTWATCH_KEYS } from './portwatch.js';
+import { controlDays, controlFor, controlIndex, dayKey, isDay, portwatchPayload, portwatchRefresh, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
 
 const MIN = 60_000;
 /** Tik úlohy kontroly (moduly Wikipédie sa menia po hodinách; história cez CLI). */
@@ -41,6 +46,12 @@ export const CONTROL_STAGGER_MS = 60_000;
 export const CONTROL_CACHE_TTL_MS = 10 * MIN;
 export const CONTROL_CACHE_MAX = 64;
 export const MIDEAST_EVENTS_MOUNT = '/api/mideast/events';
+/** Úloha PortWatch: tik 6 h (dataset MMF ide raz týždenne), prvý beh po moduloch Wikipédie. */
+export const PORTWATCH_TICK_MS = 6 * 60 * MIN;
+export const PORTWATCH_FIRST_DELAY_MS = 440_000;
+/** Pauza medzi úžinami v jednom tiku (verejný ArcGIS, bez kľúča — nezahlcovať). */
+export const PORTWATCH_PAUSE_MS = 1_500;
+export const PORTWATCH_DAYS_DEFAULT = 400;
 
 function simpleLimiter({ windowMs, max }) {
   const hits = new Map();
@@ -86,10 +97,11 @@ export function acceptsGzip(acceptEncoding) {
  *   `now` je FUNKCIA (plugin volá `now()`); do knižnice ide číslo `now()`.
  * @returns {import('vite').Plugin & {_tick: (name: string) => Promise<void>, _state: object, _start: (base: string) => void, _stop: () => void}}
  */
-export function mideastEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m) } = {}) {
+export function mideastEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   const enabled = env.MIDEAST_ARCHIVE !== 'off';
   const limiter = simpleLimiter({ windowMs: MIN, max: 40 });
   const controlCache = new Map(); // `${module}:${at}` -> { at, json }
+  const portwatchCache = new Map(); // `${keys}:${days}` -> { at, json }
   const timers = new Map();
   const state = { enabled, base: null, running: {}, last: {}, errors: [] };
   const note = (name, error) => { const msg = `${name}: ${error?.message || error}`; state.errors = [{ at: now(), msg }, ...state.errors].slice(0, 20); log(`[mideast-events] ${msg}`); };
@@ -111,6 +123,20 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
     tickMs[name] = CONTROL_TICK_MS;
     firstDelayMs[name] = CONTROL_FIRST_DELAY_MS + i * CONTROL_STAGGER_MS;
   });
+  // IMF PortWatch (etapa 5a): štyri úžiny postupne s pauzou; čerstvosť 6 h drží knižnica.
+  jobs.portwatch = async () => {
+    const results = [];
+    for (const [i, key] of PORTWATCH_KEYS.entries()) {
+      if (i) await sleep(PORTWATCH_PAUSE_MS);
+      results.push(await portwatchRefresh(root, key, { fetchImpl, now: now(), log }));
+    }
+    if (results.some((r) => r.status === 'updated')) portwatchCache.clear();
+    const failed = results.filter((r) => r.status === 'error' || r.status === 'stale');
+    const lastDay = results.map((r) => r.lastDay).filter(Boolean).sort().at(-1) || null;
+    return { status: failed.length ? (failed.length === results.length ? 'error' : 'partial') : (results.some((r) => r.status === 'updated') ? 'updated' : 'fresh'), day: lastDay, count: results.reduce((s, r) => s + (r.count || 0), 0) };
+  };
+  tickMs.portwatch = PORTWATCH_TICK_MS;
+  firstDelayMs.portwatch = PORTWATCH_FIRST_DELAY_MS;
 
   async function tick(name) {
     if (!jobs[name] || state.running[name]) return;
@@ -206,8 +232,27 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
       } catch (error) { note('control', error); send(res, 500, { error: 'archive_read_failed' }, req); }
       return;
     }
+    if (sub === '/portwatch') {
+      // Prechody úžinami (IMF PortWatch): kľúče z allowlistu, chvost `days` riadkov + priemer pred krízou.
+      const rawKeys = (url.searchParams.get('keys') || PORTWATCH_KEYS.join(',')).split(',').map((k) => k.trim()).filter(Boolean);
+      const keys = [...new Set(rawKeys)];
+      if (!keys.length || keys.some((k) => !PORTWATCH_KEYS.includes(k))) { send(res, 400, { error: 'bad_keys', keys: [...PORTWATCH_KEYS] }, req); return; }
+      const daysRaw = Number(url.searchParams.get('days') || PORTWATCH_DAYS_DEFAULT);
+      const days = Number.isFinite(daysRaw) ? Math.min(1000, Math.max(30, Math.floor(daysRaw))) : PORTWATCH_DAYS_DEFAULT;
+      const cacheKey = `${keys.join(',')}:${days}`;
+      const hit = portwatchCache.get(cacheKey);
+      if (hit && now() - hit.at < CONTROL_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = await portwatchPayload(root, keys, { days, nowMs: now() });
+        if (!json.chokepoints.length) { send(res, 404, { error: 'no_portwatch_snapshot', keys }, req); return; }
+        portwatchCache.set(cacheKey, { at: now(), json });
+        if (portwatchCache.size > CONTROL_CACHE_MAX) portwatchCache.delete(portwatchCache.keys().next().value);
+        send(res, 200, json, req);
+      } catch (error) { note('portwatch', error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
     // Udalosti (`/?from&to`) prídu v ďalších etapách plánu; kým nie sú, poctivé 404.
-    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
+    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
   }
   async function handler(req, res) {
     try { await route(req, res); } catch (error) {

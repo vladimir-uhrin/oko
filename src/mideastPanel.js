@@ -25,7 +25,7 @@ import { theatreLabel } from './data/mideastTheatres.js';
 import { ageText } from './data/ukraineFreshness.js';
 import { wikiControlModuleById } from './data/wikiControl.js';
 
-const INERT = { element: null, newsMount: null, activeTheatre: null, setActiveTheatre() {}, destroy() {} };
+const INERT = { element: null, newsMount: null, transitsMount: null, activeTheatre: null, setActiveTheatre() {}, destroy() {} };
 
 /** `#4fa3ff` + krytie → `rgba(79, 163, 255, a)`; inú hodnotu nechá tak (bez krytia). Pure. */
 export function swatchColour(css, alpha) {
@@ -116,13 +116,19 @@ export function createMideastPanel({
     legend.hidden = true;
   }
 
+  // PRECHODY ÚŽINAMI (etapa 5a): telo plní karta PortWatch z main.js (portwatchCard.js);
+  // mount je VNÚTRI panela, karta si vlastníka nájde cez closest('[data-panel-id]').
+  const transitsTitle = el('div', 'mideast-section-title gas-card-title', translate('mideast.pw.title'));
+  const transits = el('div', 'mideast-transits');
+  transits.dataset.mideastTransits = '';
+
   // Správy z otvorených zdrojov: telo plní conflictBulletin z main.js (mount musí
   // byť VNÚTRI panela — bulletin hľadá vlastníka cez closest('[data-panel-id]')).
   const newsTitle = el('div', 'mideast-section-title gas-card-title', translate('mideast.news.title'));
   const news = el('div', 'mideast-news');
   news.dataset.mideastNews = '';
   const note = el('p', 'mideast-note', translate('mideast.note'));
-  mountTarget.replaceChildren(status, dirsTitle, dirs, ...(chips ? [chips, legend] : []), newsTitle, news, note);
+  mountTarget.replaceChildren(status, dirsTitle, dirs, ...(chips ? [chips, legend] : []), transitsTitle, transits, newsTitle, news, note);
 
   // ── Legenda kontroly ──────────────────────────────────────────────────────
   // t() vracia pri chýbajúcom kľúči samotný kľúč → padá sa na anglický popis z konfigurácie
@@ -215,6 +221,7 @@ export function createMideastPanel({
   return {
     element: mountTarget,
     newsMount: news,
+    transitsMount: transits,
     setActiveTheatre,
     get activeTheatre() { return activeTheatre; },
     destroy() { unsubscribeControl?.(); dirByTheatre.clear(); mountTarget.replaceChildren(); },

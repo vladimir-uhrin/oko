@@ -11151,6 +11151,40 @@ body.scene-playback-mode #first-run-launcher {
 .mideast-legend-age { color: #8aa0b6; }
 .mideast-legend-age.is-stale { color: #ffb547; font-weight: 700; letter-spacing: 0.04em; border: 1px solid rgba(255, 181, 71, 0.55); border-radius: 3px; padding: 0 4px; background: rgba(255, 181, 71, 0.1); }
 .mideast-legend-note { margin: 0; font-size: 8px; line-height: 1.4; letter-spacing: 0.02em; color: var(--text-dim); }
+/*
+ * BLÍZKY VÝCHOD etapa 5a (PRECHODY ÚŽINAMI, 2026-09-26): karta IMF PortWatch
+ * (src/portwatchCard.js) — riadok na úžinu: meno, Ø 7 dní, zmena voči obdobiu pred
+ * krízou (pokles červeno, nárast jantárovo — obchádzka okolo Afriky nie je „dobrá
+ * správa"), mini graf roka s prerušovanou čiarou priemeru pred krízou, posledný deň
+ * a pomenované okno. Aktívne dejisko/úžina = akcentový okraj. Vek nad prahom =
+ * rovnaká jantárová značka ZASTARANÉ ako legenda kontroly.
+ */
+.mideast-transits { display: flex; flex-direction: column; min-height: 0; }
+.oko-pw { display: flex; flex-direction: column; gap: 6px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.03em; color: var(--text-secondary); }
+.oko-pw-status[hidden] { display: none; }
+.oko-pw-status[data-state="empty"] { color: #ffb14d; }
+.oko-pw-status[data-state="error"] { color: #ff8585; }
+.oko-pw-rows { display: flex; flex-direction: column; gap: 6px; }
+.oko-pw-row { display: flex; flex-direction: column; gap: 2px; padding: 4px 6px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 4px; background: rgba(255, 255, 255, 0.02); }
+.oko-pw-row.is-active { border-color: var(--accent); background: var(--accent-dim); }
+.oko-pw-head { display: flex; align-items: baseline; gap: 6px; }
+.oko-pw-name { flex: 1 1 auto; min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oko-pw-avg { flex: 0 0 auto; color: #cfe3f5; }
+.oko-pw-pct { flex: 0 0 auto; font-weight: 700; }
+.oko-pw-pct.is-down { color: #ff8585; }
+.oko-pw-pct.is-up { color: #ffb547; }
+.oko-pw-pct.is-flat { color: var(--text-secondary); }
+.oko-pw-spark { display: block; width: 168px; height: 28px; max-width: 100%; }
+.oko-pw-row.is-stale .oko-pw-spark { opacity: 0.5; }
+.oko-pw-sub, .oko-pw-base { font-size: 8px; line-height: 1.35; color: #8aa0b6; }
+.oko-pw-base { color: var(--text-dim); }
+.oko-pw-note { margin: 0; font-size: 8px; line-height: 1.4; letter-spacing: 0.02em; color: var(--text-dim); }
+.oko-pw-src { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-size: 8px; letter-spacing: 0.04em; color: var(--text-dim); }
+.oko-pw-since { color: #cfe3f5; }
+.oko-pw-age { color: #8aa0b6; }
+.oko-pw-age.is-stale { color: #ffb547; font-weight: 700; letter-spacing: 0.04em; border: 1px solid rgba(255, 181, 71, 0.55); border-radius: 3px; padding: 0 4px; background: rgba(255, 181, 71, 0.1); }
+.oko-pw-link { color: var(--accent); text-decoration: none; }
+.oko-pw-link:hover, .oko-pw-link:focus-visible { text-decoration: underline; }
 .gas-status {
   font-family: var(--font-mono);
   font-size: 9px;

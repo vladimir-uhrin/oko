@@ -8,6 +8,8 @@
 //                                (CC BY-SA 4.0, Wikipedia contributors) — jeden
 //                                adresár na modul, aby sa snímky rôznych modulov
 //                                nemiešali (israel-palestine, yemen, syria, lebanon)
+//   portwatch/<úžina>.json       denné prechody úžinou z IMF PortWatch od 1. 1. 2019
+//                                (etapa 5a, 2026-09-26; kompaktné riadky, src/data/portwatch.js)
 // Ďalšie druhy (GeoConfirmed × 4 konflikty, UCDP, UKMTO, správy) prídu v ďalších
 // etapách plánu vedľa tohto súboru v tom istom koreni.
 //
@@ -19,6 +21,10 @@ import path from 'node:path';
 
 import { dayKey, dayToMs, isDay, readJson, wikiRevisionUrl, writeJsonAtomic } from './ukraineArchive.mjs';
 import { MIDEAST_CONTROL_MODULE_IDS, wikiControlModuleById, wikiControlPoints, wikiControlSummary } from '../../src/data/wikiControl.js';
+import {
+  PORTWATCH_ATTRIBUTION, PORTWATCH_DATASET_URL, PORTWATCH_FIRST_DAY, PORTWATCH_KEYS, PORTWATCH_LICENSE, PORTWATCH_PAGE_SIZE, PW,
+  meanOver, mergePortwatchRows, parsePortwatchFeatures, portwatchChokepoint, portwatchQueryUrl,
+} from '../../src/data/portwatch.js';
 
 export { MIDEAST_CONTROL_MODULE_IDS };
 export const USER_AGENT = 'OKO-mideast/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
@@ -251,6 +257,104 @@ export async function controlBackfill(root, moduleId, { from = MIDEAST_CONTROL_F
     await sleep(pauseMs);
   }
   return { done, skipped, errors };
+}
+
+// ── IMF PortWatch — denné prechody úžinami (etapa 5a, 2026-09-26) ─────────
+/** Obnova najviac raz za 6 h (dataset MMF sa mení približne raz týždenne). */
+export const PORTWATCH_FRESH_MS = 6 * 3_600_000;
+/** Pri obnove sa znova stiahne posledných N dní — MMF spätne opravuje predbežné dni. */
+export const PORTWATCH_OVERLAP_DAYS = 45;
+/** Poistka proti nekonečnému stránkovaniu (celá séria od 2019 = 3 strany po 1 000). */
+export const PORTWATCH_MAX_PAGES = 12;
+/** Strop tela jednej strany (1 000 riadkov JSON ≈ 150 kB). */
+export const PORTWATCH_PAGE_MAX_BYTES = 4 * 1024 * 1024;
+export const portwatchDir = (root) => path.join(archiveDir(root), 'portwatch');
+export const portwatchFile = (root, key) => path.join(portwatchDir(root), `${key}.json`);
+/** Len kľúče z PORTWATCH_KEYS (aj ako názov súboru). Pure. */
+export const isPortwatchKey = (key) => typeof key === 'string' && PORTWATCH_KEYS.includes(key);
+
+/**
+ * Obnoví sériu úžiny: bez súboru celá séria od 1. 1. 2019, inak od posledného dňa mínus
+ * `PORTWATCH_OVERLAP_DAYS` (opravy predbežných dní) a zlúčenie (novšie vyhráva). Strany
+ * po 1 000 riadkov vzostupne, kým strana nie je plná. Čerstvosť 6 h drží `fetchedAt`
+ * na disku. Pri chybe ostáva stará séria (`stale`); bez nej `error`. Nikdy nehádže.
+ * @param {string} root
+ * @param {string} key 'hormuz' | 'bab-el-mandeb' | 'suez' | 'cape'
+ * @param {{fetchImpl?: typeof fetch, now?: number|(() => number), force?: boolean, log?: Function}} [o]
+ * @returns {Promise<{status: 'updated'|'fresh'|'stale'|'error', key: string, lastDay: string|null, count: number, fetched?: number, error?: string}>}
+ */
+export async function portwatchRefresh(root, key, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const base = { key, lastDay: null, count: 0 };
+  if (!isPortwatchKey(key)) return { status: 'error', ...base, error: `unknown chokepoint '${key}' (${PORTWATCH_KEYS.join(', ')})` };
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', ...base, error: `bad now '${String(now)}'` };
+  const cp = portwatchChokepoint(key);
+  const file = portwatchFile(root, key);
+  const prev = await readJson(file);
+  const prevRows = Array.isArray(prev?.rows) ? prev.rows : [];
+  if (!force && prev && prevRows.length && nowMs - (Number(prev.fetchedAt) || 0) < PORTWATCH_FRESH_MS) {
+    return { status: 'fresh', key, lastDay: prev.lastDay || null, count: prevRows.length };
+  }
+  const fromDay = prev?.lastDay && isDay(prev.lastDay) && prevRows.length
+    ? dayKey(Math.max(dayToMs(PORTWATCH_FIRST_DAY), dayToMs(prev.lastDay) - PORTWATCH_OVERLAP_DAYS * DAY_MS))
+    : null;
+  try {
+    const fetched = [];
+    for (let page = 0; ; page += 1) {
+      if (page >= PORTWATCH_MAX_PAGES) throw new Error(`PortWatch: more than ${PORTWATCH_MAX_PAGES} pages`);
+      const url = portwatchQueryUrl(cp.portid, { fromDay, offset: page * PORTWATCH_PAGE_SIZE });
+      const { res, body } = await fetchCapped(fetchImpl, url, { timeoutMs: 60_000, maxBytes: PORTWATCH_PAGE_MAX_BYTES, headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`PortWatch HTTP ${res.status}`);
+      let json;
+      try { json = JSON.parse(body); } catch { throw new Error('PortWatch: invalid JSON'); }
+      fetched.push(...parsePortwatchFeatures(json));
+      const n = Array.isArray(json.features) ? json.features.length : 0;
+      if (n < PORTWATCH_PAGE_SIZE && !json.exceededTransferLimit) break;
+    }
+    const rows = mergePortwatchRows(prevRows, fetched);
+    if (!rows.length) throw new Error('PortWatch: no rows');
+    const lastDay = rows.at(-1)[PW.day];
+    await writeJsonAtomic(file, {
+      key, portid: cp.portid, name: cp.name, kind: 'portwatch', fetchedAt: nowMs, from: fromDay, lastDay,
+      source: PORTWATCH_DATASET_URL, attribution: PORTWATCH_ATTRIBUTION, license: PORTWATCH_LICENSE, rows,
+    });
+    log(`[mideast-events] portwatch ${key}: ${rows.length} days → ${lastDay} (${fetched.length} fetched${fromDay ? ` since ${fromDay}` : ', full series'})`);
+    return { status: 'updated', key, lastDay, count: rows.length, fetched: fetched.length };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] portwatch ${key} failed: ${message}`);
+    if (prevRows.length) return { status: 'stale', key, lastDay: prev.lastDay || null, count: prevRows.length, error: message };
+    return { status: 'error', ...base, error: message };
+  }
+}
+
+/** Uložená séria úžiny alebo null (neznámy kľúč, chýbajúci či nečitateľný súbor). */
+export async function portwatchRead(root, key) {
+  if (!isPortwatchKey(key)) return null;
+  const json = await readJson(portwatchFile(root, key));
+  return json && Array.isArray(json.rows) ? json : null;
+}
+
+/**
+ * Telo `/api/mideast/events/portwatch`: pre každú úžinu so sériou posledných `days`
+ * riadkov a priemer okna „pred krízou" spočítaný z CELEJ série (klient má len chvost).
+ * Úžiny bez súboru sa vynechajú; prázdny zoznam = volajúci vráti 404.
+ */
+export async function portwatchPayload(root, keys, { days = 400, nowMs = Date.now() } = {}) {
+  const chokepoints = [];
+  for (const key of keys) {
+    const snap = await portwatchRead(root, key);
+    if (!snap || !snap.rows.length) continue;
+    const b = portwatchChokepoint(key).baseline;
+    const total = meanOver(snap.rows, b.from, b.to, PW.total);
+    const tanker = meanOver(snap.rows, b.from, b.to, PW.tanker);
+    chokepoints.push({
+      key, portid: snap.portid, name: snap.name, fetchedAt: snap.fetchedAt ?? null, lastDay: snap.lastDay ?? snap.rows.at(-1)[PW.day],
+      baseline: { ...b, mean: total.mean, meanTanker: tanker.mean, days: total.days },
+      rows: snap.rows.slice(-Math.max(1, Math.floor(days))),
+    });
+  }
+  return { source: PORTWATCH_DATASET_URL, attribution: PORTWATCH_ATTRIBUTION, license: PORTWATCH_LICENSE, generatedAt: nowMs, chokepoints };
 }
 
 export { dayKey, dayToMs, isDay } from './ukraineArchive.mjs';

@@ -228,8 +228,11 @@ KLIENT
    Wikipédia šablóna feb–júl (po otázke 3), UKMTO varovania (parser PDF z mscio.eu, súradnice
    z textu, inak pomenované more); renderer kariet a os parametrizované regiónom. Test: adaptéry
    (CSV so `;` a BOM, prehodené súradnice šablóny), etický filter, oneskorenie, dedup GC/UCDP.
-5. **More a vzduch** — 3 d. PortWatch karta (Hormuz, Báb al-Mandab, Suez; baseline 2023;
-   „1 prechod vs. ~85") — dá sa vytiahnuť dopredu ako rýchla výhra; UKMTO body v scénach
+5. **More a vzduch** — 3 d. **5a PortWatch HOTOVÉ 2026-09-26** (karta PRECHODY ÚŽINAMI v paneli:
+   Hormuz, Báb al-Mandab, Suez + Mys dobrej nádeje ako obchádzka; okno pred krízou po úžine —
+   Hormuz rok pred vojnou s Iránom Ø 84,8, Červené more 1. 1.–15. 11. 2023; archív celej série
+   od 2019 na D:, prírastok 45 dní; 20. 9.: −96 % / −67 % / −43 % / +81 %). Ostáva zo stage 5:
+   UKMTO body v scénach
    Hormuz/Červené more; EASA CZIB na FIR z VATSpy (vlastný CC BY-SA súbor); zberač rušenia GPS
    z adsb.lol (6 kruhov po 10 min → bunky 0,5° za deň → densityDrape, prahy 2 %/10 %). Test:
    parsery, výpočet podielu, mapovanie CZIB → FIR.
