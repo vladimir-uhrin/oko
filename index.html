@@ -822,19 +822,21 @@
     </div>
   </div>
 
-  <!-- Situácia z otvorených zdrojov: agregované správy z otvorených zdrojov,
-       odkazy von, nič sa nereprodukuje. Obsah skladá conflictBulletin.js do
-       [data-gulf-body] — dva čipy prepínajú región záliv/Blízky východ
-       (2026-09-18, zlúčené sem z bývalého plávajúceho bulletinu). -->
-  <div id="gulf-panel" class="panel-collapsible collapsed" data-panel-id="gulf-panel">
+  <!-- BLÍZKY VÝCHOD (2026-09-26, etapa 1): dejiská regiónu (presety kamery zo
+       src/data/mideastTheatres.js) + správy z otvorených zdrojov. Obsah skladá
+       src/mideastPanel.js do [data-mideast-body]; bulletin (conflictBulletin.js)
+       doň montuje main.js do .mideast-news — odkazy von, nič sa nereprodukuje.
+       BLÍZKY VÝCHOD pohltil panel ZÁLIV (2026-09-26): bývalý panel ZÁLIV tu
+       zanikol, jeho token odkazu 'f' zdedil #mideast-panel (sharelink.js). -->
+  <div id="mideast-panel" class="panel-collapsible collapsed" data-panel-id="mideast-panel">
     <div class="panel-glow"></div>
-    <div class="gulf-panel-inner scene-panel-inner">
+    <div class="mideast-panel-inner scene-panel-inner">
       <div class="panel-header">
-        <span data-i18n="panel.gulf" class="panel-title">GULF</span>
+        <span data-i18n="panel.mideast" class="panel-title">MIDDLE EAST</span>
         <span class="panel-divider"></span>
-        <button class="panel-collapse-btn" data-collapse-target="gulf-panel" title="Collapse panel">+</button>
+        <button class="panel-collapse-btn" data-collapse-target="mideast-panel" title="Collapse panel">+</button>
       </div>
-      <div class="gulf-body" data-gulf-body></div>
+      <div class="mideast-body" data-mideast-body></div>
     </div>
   </div>
 
@@ -901,6 +903,14 @@
       <div class="scene-controls scene-fronts">
         <select id="front-select" aria-label="Fly to a direction of the Ukrainian front" data-i18n-aria="front.select-aria">
           <option value="" data-i18n="front.pick">Fly to a front direction…</option>
+        </select>
+      </div>
+      <!-- Dejiská Blízkeho východu (modul BLÍZKY VÝCHOD, 2026-09-26): zarámuje
+           dejisko a zapne jeho vrstvy. Voľby + handler plní src/main.js
+           z src/data/mideastTheatres.js (popisky podľa i18n). -->
+      <div class="scene-controls scene-mideast">
+        <select id="mideast-select" aria-label="Fly to a Middle East theatre" data-i18n-aria="mideast.select-aria">
+          <option value="" data-i18n="mideast.pick">Fly to a Middle East theatre…</option>
         </select>
       </div>
       <div class="scene-controls">

@@ -50,6 +50,8 @@ import { createMapScaleBar } from './mapScaleBar.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
+import { applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
+import { createMideastPanel } from './mideastPanel.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
@@ -574,7 +576,10 @@ async function init() {
     const scenePinDs = new Cesium.CustomDataSource('oko-scene-pin');
     scenePinDs.show = false;
     try { viewer.dataSources.add(scenePinDs); } catch { /* headless */ }
-    const setScenePin = (scene) => {
+    // Popisok pinu je parameter (2026-09-26): úžiny ho nechajú na chokepointSceneLabel,
+    // dejiská BLÍZKEHO VÝCHODU podávajú theatreLabel — inak by pin hľadal
+    // `chokepoint.<id>.name`, nenašiel a ukázal EN meno namiesto prekladu.
+    const setScenePin = (scene, labelText = scene ? chokepointSceneLabel(scene) : '') => {
       scenePinDs.entities.removeAll();
       if (!scene?.center) return;
       scenePinDs.entities.add({
@@ -587,7 +592,7 @@ async function init() {
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
-          text: chokepointSceneLabel(scene),
+          text: labelText,
           font: '600 13px "IBM Plex Mono", monospace',
           fillColor: Cesium.Color.fromCssColorString('#ffb547'),
           showBackground: true,
@@ -602,16 +607,17 @@ async function init() {
     let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
     let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
     let activeChokepoint = null; // aktívna úžina (pre export kartičky konfliktu)
+    let activeTheatre = null; // aktívne dejisko BLÍZKEHO VÝCHODU (2026-09-26) — tri premenné sú vzájomne výlučné
     // Režim mapy (2026-09-24, „prehľadnosť ako špičkové portály"): kým je kamera
     // pri scéne frontu/úžiny, dekoratívny HUD sa skryje a dok zosvetlí (style.css
     // `body.oko-map-focus`); pri pohľade na planétu sa všetko vráti.
     const setMapFocus = (on) => { try { document.body.classList.toggle('oko-map-focus', Boolean(on)); } catch { /* */ } };
     // Pri každej zmene scény (aj keď brána neprepne — napr. úžina → situácia „Perzský záliv").
-    const syncMapFocus = () => setMapFocus(revealGate.isRevealed() && Boolean(activeFrontScene || activeChokepoint));
+    const syncMapFocus = () => setMapFocus(revealGate.isRevealed() && Boolean(activeFrontScene || activeChokepoint || activeTheatre));
     const revealGate = createSceneRevealGate({
       viewer,
       onChange: (visible) => {
-        setMapFocus(visible && Boolean(activeFrontScene || activeChokepoint));
+        setMapFocus(visible && Boolean(activeFrontScene || activeChokepoint || activeTheatre));
         incidentCards.setRevealed(visible);
         ukraineEvents?.setRevealed(visible);
         kartaOverlay?.setRevealed(visible);
@@ -640,22 +646,34 @@ async function init() {
       if (change?.type === 'visibility' && change.layerId === 'gas-pipelines') syncBoundariesWithPipelines(Boolean(change.enabled));
     });
     syncBoundariesWithPipelines(dataManager.isEnabled('gas-pipelines'));
-    // Situation from open sources: the ZÁLIV panel in the DATA lane hosts the
-    // merged bulletin (2026-09-18). It used to be a SECOND floating panel with
-    // its own tab, anchored bottom-right at z120, which covered the whole
+    // BLÍZKY VÝCHOD (2026-09-26, etapa 1; plán docs/drafts/blizky-vychod-plan.md):
+    // panel v zóne KONFLIKTY pohltil bývalý panel ZÁLIV (jeho markup zanikol). Telo
+    // panela kreslí src/mideastPanel.js — stav, zoznam dejísk a miesto pre správy.
+    // Klik na dejisko volá runMideastTheatre, ktoré vzniká až nižšie; volá sa len
+    // za behu (po dokončení init), preto šípka a nie priamy odkaz.
+    const mideastPanel = createMideastPanel({
+      mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
+      theatres: listMideastTheatres(),
+      applyTheatre: (id) => runMideastTheatre(id),
+    });
+    window.__godsEyeView.mideastPanel = mideastPanel;
+    // Situation from open sources: the merged bulletin (2026-09-18) now fills the
+    // news slot of the BLÍZKY VÝCHOD panel. It used to be a SECOND floating panel
+    // with its own tab, anchored bottom-right at z120, which covered the whole
     // right-hand rail whenever it was open and duplicated the same agenda the
     // ZÁLIV panel already showed. Merging removed both problems; two chips
-    // switch between the narrow Gulf feed and the whole Middle East.
+    // switch between the narrow Gulf feed and the whole Middle East. The mount
+    // is INSIDE the panel, so the bulletin finds its owner via
+    // closest('[data-panel-id]') and fetches lazily on the first expand.
     //
     // Deliberately NO viewer and NO card layer: the map-anchored hot cards stay
     // owned by the reveal gate above, which shows them by camera distance. A
     // panel must not force them visible while the camera is out at the planet,
     // and creating a second layer here is what used to run two .oko-hotcards
     // postRender passes that knew nothing about each other.
-    const conflictBulletin = createConflictBulletin({
-      mountTarget: document.querySelector('#gulf-panel [data-gulf-body]'),
-      region: 'gulf',
-    });
+    const conflictBulletin = mideastPanel.newsMount
+      ? createConflictBulletin({ mountTarget: mideastPanel.newsMount, region: 'gulf' })
+      : null;
     window.__godsEyeView.conflictBulletin = conflictBulletin;
     // UKRAJINA (2026-09-19, etapa 1; plán docs/drafts/ukrajina-plan.md): podklad
     // frontu — sídla, cesty, rieky, oblasti zo statického OSM snímku — ako
@@ -759,8 +777,10 @@ async function init() {
     // Rám „hotovej mapy" KARTA (K5): titulok + legenda + prehľadová mapka; len na
     // podklade KARTA a pri priblížení (brána), „čistá karta" schová chróm, „Snímka"
     // zapečie rám do zdieľanej snímky.
-    // Aktívny konflikt z aktuálnej scény (úžina má prednosť, potom smer frontu).
+    // Aktívny konflikt z aktuálnej scény (dejisko, úžina, potom smer frontu —
+    // každý run wrapper nuluje ostatné dve premenné, takže naraz platí len jedna).
     function activeConflict() {
+      if (activeTheatre) return conflictById(`mideast:${activeTheatre.id}`);
       if (activeChokepoint) return conflictById(`chokepoint:${activeChokepoint.id}`);
       if (activeFrontScene) return conflictById(`ukraine:${activeFrontScene.id}`);
       return null;
@@ -806,7 +826,8 @@ async function init() {
       } catch (error) { console.warn('[conflict] export failed:', error?.message || error); return null; }
     }
     // Zarámuj konflikt (panel B): Ukrajina na KARTE + smer, úžina jej scéna,
-    // situácia ručný let; potom nechaj ustáliť dlaždice pred zachytením.
+    // dejisko BLÍZKEHO VÝCHODU jeho preset, situácia ručný let; potom nechaj
+    // ustáliť dlaždice pred zachytením.
     async function frameConflict(conflict) {
       if (!conflict) return;
       if (conflict.kind === 'ukraine-front') {
@@ -814,8 +835,13 @@ async function init() {
         try { runFrontScene(conflict.sceneId); } catch { /* */ }
       } else if (conflict.kind === 'chokepoint') {
         try { runChokepointScene(conflict.sceneId); } catch { /* */ }
+      } else if (conflict.kind === 'mideast-theatre') {
+        // Dejisko má vlastný let (Cartesian3, rámovanie posledné); všeobecná vetva
+        // nižšie letí na Rectangle, čo pri streamujúcich 3D dlaždiciach ticho nič nespraví.
+        try { await runMideastTheatre(conflict.sceneId); } catch { /* */ }
       } else {
-        activeChokepoint = null; activeFrontScene = null;
+        activeChokepoint = null; activeFrontScene = null; activeTheatre = null;
+        mideastPanel?.setActiveTheatre?.(null);
         restoreAutoKarta();
         syncMapFocus();
         try {
@@ -976,6 +1002,8 @@ async function init() {
       }
       activeFrontScene = scene || null;
       activeChokepoint = null;
+      activeTheatre = null;
+      mideastPanel?.setActiveTheatre?.(null);
       kartaOverlay?.setScene(scene || null);
       ukrainePanel?.setActiveScene(scene?.id || null);
       ukraineTimeline.setActiveScene(scene?.id || null);
@@ -1070,6 +1098,8 @@ async function init() {
       const scene = chokepointSceneById(id);
       activeChokepoint = scene || null;
       activeFrontScene = null;
+      activeTheatre = null;
+      mideastPanel?.setActiveTheatre?.(null);
       const result = applyChokepointScene(id, chokepointSceneDeps);
       syncMapFocus();
       void oilPriceChip.refreshAndShow();
@@ -1125,6 +1155,100 @@ async function init() {
         });
       }
     } catch { /* the picker is optional chrome — its absence never breaks boot */ }
+
+    // BLÍZKY VÝCHOD — dejiská (2026-09-26, etapa 1; src/data/mideastTheatres.js).
+    // Rovnaká kostra ako smery frontu a úžiny: stav → panel → brána priblíženia →
+    // pin → hranice → hot karty → apply (vrstvy, rámovanie POSLEDNÉ). Dejisko
+    // upratuje mapu ako front (cudzie vrstvy správcu vypne) a zapne vlastné
+    // `layerIds` s origin 'user', takže sa uložia do stavu/odkazu ako klik na
+    // riadky vrstiev. Nič tu nie je línia frontu ani poloha jednotiek — len rámec
+    // pohľadu, vrstvy, ktoré už ukazujeme poctivo, a správy z otvorených zdrojov.
+    const theatreDeps = {
+      listLayers: () => dataManager.getAll(),
+      disableLayer: (id) => { dataManager.setEnabled(id, false); return true; },
+      setLayerEnabled: (layerId) => dataManager.setEnabled(layerId, true, { origin: 'user' }),
+      // Cieľ je Cartesian3 + orientácia (Rectangle by pri streamujúcich 3D
+      // dlaždiciach ticho neurobil nič — rovnaká pasca ako pri úžinách a fronte);
+      // výšku aj odstup na juh stráži theatreFraming, aby kamera ostala pod
+      // prahom brány (1 500 000 m ku stredu dejiska) aj pri prehľade regiónu.
+      flyToRegion: (scene) => {
+        if (!viewer?.camera?.flyTo || !scene?.rectDegrees) return null;
+        viewer.trackedEntity = undefined;
+        const framing = theatreFraming(scene.rectDegrees, { overview: Boolean(scene.overview) });
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(framing.lon, framing.lat, framing.heightM),
+          orientation: { heading: Cesium.Math.toRadians(framing.headingDeg), pitch: Cesium.Math.toRadians(framing.pitchDeg), roll: 0 },
+          duration: 3.0,
+        });
+        return null;
+      },
+    };
+    const runMideastTheatre = (id) => {
+      restoreAutoKarta(); // odchod z KARTY frontu, rovnako ako pri úžinách
+      const scene = theatreById(id);
+      activeTheatre = scene || null;
+      activeFrontScene = null;
+      activeChokepoint = null;
+      kartaOverlay?.setScene?.(null);
+      ukrainePanel?.setActiveScene?.(null);
+      ukraineTimeline.setActiveScene(null);
+      mideastPanel?.setActiveTheatre?.(scene?.id || null);
+      // Čip „premávka v úžine" patrí poslednej úžine a ďalej by pollval jej rámec;
+      // brána presunutá na dejisko by ho po prílete znova odkryla (nález 2026-09-26).
+      straitTrafficChip.hide();
+      if (scene) {
+        // Brána priblíženia: pin, čipy aj karty len pri pohľade na dejisko;
+        // pri pohľade na planétu sa všetko schová (rovnako ako úžiny a front).
+        revealGate.activate(scene.center);
+        setScenePin(scene, theatreLabel(scene));
+        // Hranice štátov ako držiteľ (plán kap. 6, etapa 1). Udalosť „koniec
+        // scény" dnes neexistuje, takže držiteľa nikto neuvoľní — hranice ostanú
+        // ako po úžine (tá volá jednorazové show()).
+        void countryBoundaries.retain('mideast-theatre');
+        // Hot karty (hlásené · neoverené) pre región správ dejiska; bez regiónu
+        // sa staré karty zmažú. Bulletin v paneli prepne ten istý región (plán
+        // etapa 1: „čipy podľa dejiska"; setRegion neznámy región ignoruje).
+        if (scene.newsRegion) void incidentCards.showFor(scene.newsRegion);
+        else incidentCards.clear();
+        conflictBulletin?.setRegion?.(scene.newsRegion);
+      }
+      syncMapFocus();
+      return applyMideastTheatre(id, theatreDeps);
+    };
+    window.__godsEyeView.mideastTheatres = { list: listMideastTheatres, apply: runMideastTheatre };
+    // Zdieľateľný odkaz `?mideast=<dejisko>` (napr. oko.uhrin.digital/?mideast=gaza):
+    // po obnove stavu ako `?front=`, aby scéna vyhrala nad predvoleným pohľadom.
+    // Ak URL nesie aj PLATNÝ `?front=` alebo `?chokepoint=`, dejisko ustúpi — inak
+    // by vyhrala náhoda poradia registrácie. Neplatná konkurenčná hodnota (preklep)
+    // dejisko neblokuje. Id sa overí PRED čakaním.
+    try {
+      const params = new URLSearchParams(window.location?.search || '');
+      const requestedTheatre = params.get('mideast');
+      const otherSceneRequested = Boolean(frontSceneById(params.get('front') || '') || chokepointSceneById(params.get('chokepoint') || ''));
+      if (requestedTheatre && !otherSceneRequested && theatreById(requestedTheatre)) {
+        void Promise.resolve(styleManager.initialRestorePromise)
+          .catch(() => {})
+          .then(() => runMideastTheatre(requestedTheatre));
+      }
+    } catch { /* zlý parameter nikdy nezhodí štart */ }
+    // Výber v paneli SCÉNY (na dotyku záložka SCENES): popisky podľa i18n v čase
+    // bootu; po výbere reset na placeholder, aby sa to isté dejisko dalo vybrať znova.
+    try {
+      const theatrePicker = document.getElementById('mideast-select');
+      if (theatrePicker) {
+        for (const scene of listMideastTheatres()) {
+          const option = document.createElement('option');
+          option.value = scene.id;
+          option.textContent = theatreLabel(scene);
+          theatrePicker.appendChild(option);
+        }
+        theatrePicker.addEventListener('change', () => {
+          const id = theatrePicker.value;
+          theatrePicker.value = '';
+          if (id) void runMideastTheatre(id);
+        });
+      }
+    } catch { /* výber je voliteľné chróm — bez neho štart nepadá */ }
 
   } catch (error) {
     console.error("God's Eye View initialization failed:", error);

@@ -46,7 +46,7 @@ function makeEnv() {
   const body = makeNode('body');
   const head = makeNode('head');
   const panel = makeNode('div');
-  panel.setAttribute('data-panel-id', 'gulf-panel');
+  panel.setAttribute('data-panel-id', 'mideast-panel');
   panel.classList.add('collapsed');
   const mount = makeNode('div');
   panel.appendChild(mount);

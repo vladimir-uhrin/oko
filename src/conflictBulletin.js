@@ -2,8 +2,10 @@
 //
 // "Mini spravodaj — Blízky východ" (2026-09-18). Originally a floating panel
 // with its own tab; on 2026-09-18 the user asked to tidy the overlays and chose
-// to MERGE it into the existing ZÁLIV panel (#gulf-panel) rather than relocate
-// it. It therefore no longer creates any positioned element of its own — it
+// to MERGE it into the existing ZÁLIV panel rather than relocate it; since
+// 2026-09-26 that panel is BLÍZKY VÝCHOD (#mideast-panel, mount `mideastPanel.newsMount`)
+// and a theatre switch also switches the bulletin's region (main.js runMideastTheatre).
+// It therefore no longer creates any positioned element of its own — it
 // renders into a panel body it is handed, and the panel owns placement,
 // collapse, height allocation and the mobile drawer.
 //
@@ -45,7 +47,7 @@ const INERT = {
  * Render the conflict bulletin inside an existing panel body.
  *
  * @param {object} opts
- * @param {Element} opts.mountTarget - element to render into (e.g. `#gulf-panel [data-gulf-body]`).
+ * @param {Element} opts.mountTarget - element to render into (e.g. `mideastPanel.newsMount`, an element inside `#mideast-panel`).
  * @param {object|null} [opts.cards] - an existing incident-card layer to drive. Pass the app's
  *   single layer; without it a second one is created and the two fight over the same screen.
  */
@@ -236,8 +238,8 @@ function ensureStyle(doc) {
   const style = doc.createElement('style');
   style.id = 'oko-bulletin-style';
   // Rows only. The bulletin no longer positions anything: it lives inside
-  // #gulf-panel, which owns placement, width, height allocation and the mobile
-  // drawer. Nothing here may be position:fixed.
+  // its host panel (#mideast-panel or #ukraine-panel), which owns placement,
+  // width, height allocation and the mobile drawer. Nothing here may be position:fixed.
   style.textContent = `
 .oko-bul-regions{display:flex;gap:5px;margin:0 0 7px;flex:0 0 auto;}
 .oko-bul-chip{appearance:none;cursor:pointer;flex:0 0 auto;padding:3px 8px;border-radius:7px;

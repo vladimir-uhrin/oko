@@ -187,7 +187,11 @@ KLIENT
    „preverené a nepoužité" v DATA_SOURCES (Liveuamap, Tzofar, gpsjam, NGA, COD-AB z GADM).
    Oprava prieskumu: Tasnim je listovaná vyk. nar. 2023/1779 (15. 9. 2023), nie 2025/776.
    Otázky kap. 8 stále čakajú na používateľa.
-1. **Kostra + dejiská + panel** — 2 d. `mideastTheatres.js` (12 dejísk), `?mideast=`, SCÉNY
+1. **Kostra + dejiská + panel** — **HOTOVÉ 2026-09-26** (3 agenti + 3 oponentúry, 19 nálezov
+   zapracovaných; panel BLÍZKY VÝCHOD pohltil ZÁLIV — otázka 2 rozhodnutá odporúčaním, token `f`;
+   situácia `gulf` v katalógu nahradená dejiskami; `local-energy` odstránené = SK sieť; prehľad
+   drží kameru < 1,5 M m od stredu kvôli bráne = široký šikmý pohľad, nie celý rámec; hlas
+   `show_theatre` až v etape 7). Pôvodný rozsah: `mideastTheatres.js` (12 dejísk), `?mideast=`, SCÉNY
    rozbaľovačka, panel BLÍZKY VÝCHOD v zóne Konflikty (ZÁLIV bulletin sa presunie dnu, čipy
    podľa dejiska), `conflictsCatalog` dostane dejiská (kartičky a export fungujú hneď), hranice
    štátov cez retain. Test: presety, resolver, panel, lane testy.

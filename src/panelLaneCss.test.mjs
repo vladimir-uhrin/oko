@@ -59,9 +59,10 @@ test('every left-lane panel has an explicit order, so none silently falls to 0',
   assert.deepEqual(missing, [], `these left-lane panels have no order and would sort above the rest: ${missing.join(', ')}`);
 
   // The reported regression, pinned by name. Zone bands (2026-09-20): ROPA sits
-  // in the ENERGIA decade, ZÁLIV in the KONFLIKTY one.
+  // in the ENERGIA decade, ZÁLIV in the KONFLIKTY one — since 2026-09-26 the
+  // BLÍZKY VÝCHOD panel inherits ZÁLIV's slot (#gulf-panel is gone).
   assert.equal(ordered.get('oil-panel'), 32);
-  assert.equal(ordered.get('gulf-panel'), 22);
+  assert.equal(ordered.get('mideast-panel'), 22);
 
   // Orders must stay distinct, or the flex sort falls back to DOM order.
   const values = ids.map((id) => ordered.get(id));
@@ -116,7 +117,7 @@ test('every left-lane panel survives a shared link', () => {
 /** Zóny tak, ako ich číta človek. VRSTVY má jediný panel a nadpis zámerne nemá. */
 const LANE_ZONES = [
   { zone: null, panels: ['data-panel', 'cctv-panel'] },
-  { zone: 'conflicts', panels: ['ukraine-panel', 'gulf-panel'] },
+  { zone: 'conflicts', panels: ['ukraine-panel', 'mideast-panel'] },
   { zone: 'energy', panels: ['gas-panel', 'oil-panel'] },
   { zone: 'tools', panels: ['scene-panel', 'history-panel'] },
 ];

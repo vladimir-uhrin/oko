@@ -39,10 +39,32 @@ export function defaultConflictFacts(conflict, { translate = (k) => k } = {}) {
       legendHead: translate('ukraine.karta.legend.head'),
     };
   }
+  if (conflict.kind === 'mideast-theatre') {
+    // Dejisko Blízkeho východu (etapa 1, 2026-09-26): správy z otvorených zdrojov
+    // vždy; k nim len zdroje vrstiev, ktoré dejisko naozaj zapína — radar SAR
+    // (Global Fishing Watch nad Sentinel-1) a potrubia (snímok OpenStreetMap,
+    // ODbL vyžaduje uvedenie). Trasy a prístavy nie sú z OSM, tie sa nepripisujú.
+    // Legenda príde s vlastnými vrstvami modulu (kontrola, udalosti).
+    return { sources: mideastTheatreSources(conflict.scene), legend: [], legendHead: '' };
+  }
   if (conflict.kind === 'situation') {
     return { sources: ['GDELT', 'BBC', 'Al Jazeera', 'Google News'], legend: [], legendHead: '' };
   }
   return { sources: [], legend: [], legendHead: '' };
+}
+
+/** Zdroje kartičky dejiska podľa zapínaných vrstiev (správy + SAR + OSM potrubia). Pure. */
+export function mideastTheatreSources(scene) {
+  const layerIds = new Set(Array.isArray(scene?.layerIds) ? scene.layerIds : []);
+  const sources = ['GDELT', 'BBC', 'Al Jazeera', 'Google News'];
+  // Povinné atribúcie podľa DATA_SOURCES.md: AIS poskytovatelia, koridory
+  // (P. Benden, CC BY 4.0, upravené), GFW + Sentinel-1, OSM (ODbL) pri potrubiach.
+  if (layerIds.has('ais-live-vessels')) sources.push('AISStream.io');
+  if (layerIds.has('aishub-vessels')) sources.push('AISHub · Open Waters AIS');
+  if (layerIds.has('local-shipping-lanes')) sources.push('Global Shipping Lanes — P. Benden (CC BY 4.0, modified)');
+  if (layerIds.has('gfw-sar')) sources.push('Global Fishing Watch', 'Sentinel-1');
+  if (layerIds.has('gas-pipelines')) sources.push('OpenStreetMap');
+  return sources;
 }
 
 /**

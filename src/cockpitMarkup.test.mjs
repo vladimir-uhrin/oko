@@ -225,7 +225,7 @@ test('Cockpit hides a zone heading whose every panel it hides', () => {
     [...css.matchAll(/body\.cockpit-mode #left-panel-stack > #([a-z-]+)\s*\{\s*display:\s*none/g)].map((m) => m[1]),
   );
   const zones = {
-    conflicts: ['ukraine-panel', 'gulf-panel'],
+    conflicts: ['ukraine-panel', 'mideast-panel'],
     energy: ['gas-panel', 'oil-panel'],
     tools: ['scene-panel', 'history-panel'],
   };

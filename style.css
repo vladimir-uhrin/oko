@@ -6922,7 +6922,7 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 
 #left-panel-stack > #ukraine-panel { order: 21; }
-#left-panel-stack > #gulf-panel { order: 22; }
+#left-panel-stack > #mideast-panel { order: 22; }
 #left-panel-stack > #gas-panel { order: 31; }
 #left-panel-stack > #oil-panel { order: 32; }
 #left-panel-stack > #scene-panel { order: 41; }
@@ -7052,7 +7052,7 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
 #left-panel-stack > #gas-panel:not(.collapsed) .gas-panel-inner,
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
-#left-panel-stack > #gulf-panel:not(.collapsed) .gulf-panel-inner,
+#left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
 #left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner {
   height: 100%;
   max-height: 100%;
@@ -7065,7 +7065,7 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
 #left-panel-stack > #cctv-panel:not(.collapsed) .cctv-panel-inner,
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
-#left-panel-stack > #gulf-panel:not(.collapsed) .gulf-panel-inner,
+#left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
 #left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner {
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -10900,7 +10900,8 @@ body.scene-playback-mode #first-run-launcher {
  * measured 423px instead of ~50px, and pushed ZÁLIV off the bottom of the lane.
  */
 #oil-panel.collapsed .oil-body { display: none; }
-#gulf-panel.collapsed .gulf-body { display: none; }
+/* BLÍZKY VÝCHOD (2026-09-26) zdedil riadok po ZÁLIV-e (#gulf-panel zanikol). */
+#mideast-panel.collapsed .mideast-body { display: none; }
 #ukraine-panel.collapsed .ukraine-body { display: none; }
 
 /*
@@ -11064,6 +11065,52 @@ body.scene-playback-mode #first-run-launcher {
 .ukraine-dircard-status[data-state="error"] { color: #ffb14d; }
 .ukraine-dircard-note { margin: 2px 0 0; font-family: var(--font-mono); font-size: 8px; line-height: 1.4; letter-spacing: 0.02em; color: var(--text-dim); }
 .ukraine-news { display: flex; flex-direction: column; min-height: 0; }
+/*
+ * BLÍZKY VÝCHOD (2026-09-26, etapa 1): telo panela dejísk. Zámerne KÓPIA
+ * pravidiel .ukraine-*, nie premenovanie — ukrainePanel.test.mjs stojí na
+ * triedach ukraine-*. Stav a titulky sedia na štýle PLYN (.gas-status,
+ * .gas-card-title); dejiská sú zoznam tlačidiel v mono, aktívne svieti,
+ * prehľad regiónu má čiarkovaný rám. Správy (.mideast-news) plní bulletin.
+ */
+.mideast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden auto;
+}
+.mideast-section-title { margin-top: 4px; }
+.mideast-dirs { display: flex; flex-direction: column; gap: 3px; }
+.mideast-dir {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  cursor: var(--cursor-pointer);
+  transition: all var(--transition-fast);
+}
+.mideast-dir:hover, .mideast-dir:focus-visible { border-color: var(--glass-border-hover); background: rgba(255, 255, 255, 0.06); color: var(--text-primary); outline: none; }
+.mideast-dir.is-overview { color: var(--text-primary); border-style: dashed; }
+.mideast-dir.is-active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.mideast-dir-name { flex: 1 1 auto; min-width: 0; }
+.mideast-note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+.mideast-news { display: flex; flex-direction: column; min-height: 0; }
 .gas-status {
   font-family: var(--font-mono);
   font-size: 9px;

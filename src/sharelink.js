@@ -51,7 +51,10 @@ const SHARE_PANEL_STATE_REGISTRY = Object.freeze([
   { id: 'gas-panel', token: 'a', pinnable: false },
   { id: 'history-panel', token: 'h', pinnable: false },
   { id: 'oil-panel', token: 'o', pinnable: false },
-  { id: 'gulf-panel', token: 'f', pinnable: false },
+  // BLÍZKY VÝCHOD (2026-09-26): panel pohltil bývalý ZÁLIV (#gulf-panel zanikol)
+  // a zdedil jeho token 'f', aby staré zdieľané odkazy ďalej prepínali tú istú
+  // líniu panela, namiesto toho, aby ich stav ticho vypadol.
+  { id: 'mideast-panel', token: 'f', pinnable: false },
   // UKRAJINA (2026-09-19): ďalšie voľné písmeno — 'u' ako Ukrajina.
   { id: 'ukraine-panel', token: 'u', pinnable: false },
 ]);

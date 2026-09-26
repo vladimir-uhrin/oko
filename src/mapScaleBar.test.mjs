@@ -51,7 +51,8 @@ test('brána priblíženia platí aj v 2D (PLÁTNO): vzdialenosť z kartografick
 
 test('režim mapy sa zosúladí pri každej zmene scény (aj bez preklopenia brány)', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.match(main, /const syncMapFocus = \(\) => setMapFocus\(revealGate\.isRevealed\(\) && Boolean\(activeFrontScene \|\| activeChokepoint\)\);/);
+  // 2026-09-26: tretia rodina scén (dejiská BLÍZKEHO VÝCHODU) rozšírila výraz o activeTheatre.
+  assert.match(main, /const syncMapFocus = \(\) => setMapFocus\(revealGate\.isRevealed\(\) && Boolean\(activeFrontScene \|\| activeChokepoint \|\| activeTheatre\)\);/);
   assert.ok((main.match(/syncMapFocus\(\);/g) || []).length >= 3, 'front, úžina a situácia bez scény');
 });
 
