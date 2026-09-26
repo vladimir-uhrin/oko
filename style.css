@@ -11950,7 +11950,7 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* „Čistá karta": schovaj VŠETOK chróm (aj budúci) — nechaj len mapu, tento rám
    a kredit Cesium/Google (podmienky Map Tiles). Allow-list namiesto zoznamu
    selektorov chrómu, aby nová funkcia nepretiekla do čistej snímky. */
-body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="cesium-credits"]) { display: none !important; }
+body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="cesium-credits"]):not(#account-actions):not(#account-dialog[open]) { display: none !important; }
 
 @media (max-width: 900px) {
   .oko-karta-title { max-width: 62vw; top: 58px; }

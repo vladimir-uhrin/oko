@@ -27,6 +27,7 @@
  */
 
 import fs from 'node:fs';
+import { authPlugin } from './src/auth/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
 import {
@@ -10667,13 +10668,21 @@ export default defineConfig(({ mode }) => {
     if (process.env[key] === undefined) process.env[key] = val;
   }
   const env = { ...process.env };
+  // Recovery/profile entry must not load the Cesium engine or map resources.
+  const cesiumGlobe = cesium();
+  const cesiumHtml = cesiumGlobe.transformIndexHtml;
+  cesiumGlobe.transformIndexHtml = function (html, context) {
+    if (context.path === '/account.html') return [];
+    return cesiumHtml.call(this, html, context);
+  };
   return {
     plugins: [
       noIndexPlugin(),
       originKeepAlivePlugin(),
       sharePlugin(),
       flightHistoryProxy(),
-      cesium(),
+      authPlugin(env),
+      cesiumGlobe,
       openSkyProxy(),
       celestrakProxy(),
       tomtomProxy(),
@@ -10740,6 +10749,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.CESIUM_ION_TOKEN': JSON.stringify(env.CESIUM_ION_TOKEN),
     },
     build: {
+      rollupOptions: { input: { globe: path.resolve(__dirname, 'index.html'), account: path.resolve(__dirname, 'account.html') } },
       // The Cesium engine bundle is inherently large; raise the warning ceiling
       // so the build log isn't dominated by an expected chunk-size notice.
       chunkSizeWarningLimit: 1500,

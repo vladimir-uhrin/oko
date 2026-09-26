@@ -69,6 +69,10 @@ const server = http.createServer((req, res) => {
       'Content-Length': String(stat.size),
       ETag: etag,
       'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : (ext === '.html' ? 'no-cache' : 'public, max-age=3600'),
+      ...(pathname === '/account.html' ? {
+        'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'",
+      } : {}),
     };
     if (req.headers['if-none-match'] === etag) { send(res, 304, { ETag: etag, 'Cache-Control': headers['Cache-Control'] }, ''); return; }
     res.writeHead(200, { 'X-Robots-Tag': 'noindex, nofollow, noarchive', ...headers });

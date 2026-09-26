@@ -1,6 +1,7 @@
 node_modules
 dist
 .env
+.auth-data/
 *.log
 screenshots/
 qa-shots/

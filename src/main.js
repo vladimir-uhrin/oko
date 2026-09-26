@@ -1,4 +1,6 @@
 import * as Cesium from 'cesium';
+import { initAuthPanel } from './auth/panel.js';
+import './auth/panel.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { StyleManager } from './ui.js';
 import { flyToBratislava } from './camera.js';
@@ -1104,4 +1106,6 @@ async function init() {
   }
 }
 
+// Account state is optional and cannot block the public globe startup.
+try { initAuthPanel(); } catch { console.warn('[Account] Account panel could not initialize.'); }
 init();
