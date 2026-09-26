@@ -198,14 +198,17 @@ export const CONTROL_STYLES = Object.freeze({
 });
 
 /**
- * Body Wikipédie v tyle (2026-09-26, vlastník: „mestá bodky sú veľmi rušivé"):
- * 1 150 bodov naraz pri pohľade na smer (~160 km) bola hustá sieť bodiek. Bod je
- * „front", ak je sporný/zmiešaný, infraštruktúra, väčšie mesto (size ≥ 16) alebo
- * leží do `cells` buniek rastra (0,05° ≈ 5 km na bunku) od pásu bojov — tie sa
- * kreslia vždy. Ostatné („rear") sa ukážu až zblízka: sídla do REAR_SETTLEMENT_FAR_M,
- * dediny do REAR_RURAL_FAR_M (vzdialenosť kamery), s dobehom priesvitnosti. Pure.
- * @returns {'front'|'rear'}
+ * Body Wikipédie po vrstvách (2026-09-26, vlastník: „mestá bodky sú veľmi rušivé",
+ * potom „je to hrôza" — aj 414 bodov pri fronte bolo priveľa): pri pohľade na smer
+ * (~160 km) ostanú len body, ktoré nesú informáciu navyše k polygónom — „front" =
+ * sporné/zmiešané sídla, infraštruktúra a väčšie mestá (size ≥ 16); UA/RU sídla
+ * do `cells` buniek rastra (0,05° ≈ 5 km) od pásu bojov sú „near" a ukážu sa pod
+ * NEAR_*_FAR_M, ostatné („rear") pod REAR_*_FAR_M (vzdialenosť kamery; sídlo vs
+ * dedina), vždy s dobehom priesvitnosti. Pure.
+ * @returns {'front'|'near'|'rear'}
  */
+export const NEAR_SETTLEMENT_FAR_M = 120_000;
+export const NEAR_RURAL_FAR_M = 70_000;
 export const REAR_SETTLEMENT_FAR_M = 90_000;
 export const REAR_RURAL_FAR_M = 55_000;
 export function controlPointRelevance(p, raster, { cells = 2 } = {}) {
@@ -213,17 +216,24 @@ export function controlPointRelevance(p, raster, { cells = 2 } = {}) {
   if (p.side === 'contested' || p.side === 'mixed') return 'front';
   if (p.kind !== 'settlement' && p.kind !== 'rural') return 'front';
   if ((Number(p.size) || 0) >= 16) return 'front';
-  if (!raster?.cells || !raster.bbox) return 'front';
+  if (!raster?.cells || !raster.bbox) return 'near';
   const { bbox, cellDeg, width, height } = raster;
   const col = Math.floor((p.lon - bbox.west) / cellDeg);
   const row = Math.floor((bbox.north - p.lat) / cellDeg);
-  if (col < 0 || row < 0 || col >= width || row >= height) return 'front';
+  if (col < 0 || row < 0 || col >= width || row >= height) return 'near';
   for (let r = Math.max(0, row - cells); r <= Math.min(height - 1, row + cells); r += 1) {
     for (let c = Math.max(0, col - cells); c <= Math.min(width - 1, col + cells); c += 1) {
-      if (raster.cells[r * width + c] === CONTROL_CODE.contested) return 'front';
+      if (raster.cells[r * width + c] === CONTROL_CODE.contested) return 'near';
     }
   }
   return 'rear';
+}
+/** Vzdialenosť kamery (m), po ktorú sa bod kreslí; null = vždy. Pure. */
+export function controlPointFarM(p, tier) {
+  if (tier === 'front') return null;
+  const rural = p?.kind === 'rural';
+  if (tier === 'near') return rural ? NEAR_RURAL_FAR_M : NEAR_SETTLEMENT_FAR_M;
+  return rural ? REAR_RURAL_FAR_M : REAR_SETTLEMENT_FAR_M;
 }
 
 /** Veľkosť bodu podľa triedy populácie a druhu. Pure. */
@@ -298,9 +308,9 @@ export function createUkraineControlLayer({
       if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
       const colour = CONTROL_COLORS[p.side] || CONTROL_COLORS.none;
       const infra = p.kind !== 'settlement' && p.kind !== 'rural';
-      const rear = controlPointRelevance(p, _raster) === 'rear';
-      if (!rear) _frontPoints += 1;
-      const farM = p.kind === 'rural' ? REAR_RURAL_FAR_M : REAR_SETTLEMENT_FAR_M;
+      const tier = controlPointRelevance(p, _raster);
+      if (tier === 'front') _frontPoints += 1;
+      const farM = controlPointFarM(p, tier);
       points.add({
         position: posFor(p),
         color: Cesium.Color.fromCssColorString(colour).withAlpha(infra ? 0.75 : (p.kind === 'rural' ? 0.6 : 0.95)),
@@ -308,8 +318,8 @@ export function createUkraineControlLayer({
         outlineColor: p.side === 'contested' ? Cesium.Color.fromCssColorString(CONTROL_COLORS.ru).withAlpha(0.9) : Cesium.Color.BLACK.withAlpha(0.7),
         outlineWidth: p.side === 'contested' ? 2 : 1,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        // Body v tyle až zblízka, s dobehom — pri pohľade na smer ostane len front.
-        ...(rear ? { distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, farM), translucencyByDistance: new Cesium.NearFarScalar(farM * 0.6, 1, farM, 0) } : {}),
+        // Body pri páse a v tyle až zblízka, s dobehom — pri pohľade na smer ostane len front.
+        ...(farM ? { distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, farM), translucencyByDistance: new Cesium.NearFarScalar(farM * 0.6, 1, farM, 0) } : {}),
         id: { ukraineControl: p },
       });
     }

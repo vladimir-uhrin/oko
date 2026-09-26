@@ -499,12 +499,14 @@ export function createUkraineTimeline({
     // DeepState odmieta (451, kým nepríde súhlas), takže „zapnutý" znamenal
     // prázdno — a mapa ostala BEZ ZÓN, aj tých z Wikipédie. Keď DeepState
     // nekreslí nič, niet čo prekrývať.
-    // Mirror nemá šedú zónu: šrafovaný pás bojov z Wikipédie preto ostáva a schová
-    // sa len jej RU výplň (dve výplne okupovaného nad sebou by boli neprehľadné).
+    // 2026-09-26 (vlastník o páse Wikipédie nad polygónmi mirroru: „je to hrôza"):
+    // kým DeepState kreslí, celý raster Wikipédie (RU výplň aj pás bojov) je preč —
+    // front hovorí okupované územie + odvodená línia kontaktu; 44 dní starý pás
+    // z Wikipédie k tomu pridával len jantárové fľaky. Legenda schová jeho vzorky.
     const dsDraws = st.shown && st.features > 0;
-    const mirrorDraws = dsDraws && st.source === 'mirror';
-    control?.setZonesVisible?.(!dsDraws || mirrorDraws);
-    control?.setRuFillVisible?.(!mirrorDraws);
+    control?.setZonesVisible?.(!dsDraws);
+    control?.setRuFillVisible?.(true);
+    ctlBox?.classList?.toggle?.('is-nozones', dsDraws);
     if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; return; }
     renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS, st.requestedAt);
     if (st.at) {

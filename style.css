@@ -11848,6 +11848,9 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
    a vzorka v legende musí ustúpiť rovnako. Šrafovanie zóny bojov ostáva naplno
    (na mape aj vo vzorke) — stlmené bolo nevýrazné. */
 .oko-ukr-tl-ctl.is-stale .oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw { opacity: 0.5; }
+/* Kým DeepState kreslí, raster Wikipédie (RU výplň aj pás bojov) je skrytý — vzorky preč (2026-09-26). */
+.oko-ukr-tl-ctl.is-nozones .oko-ukr-tl-ctl-item.is-ru,
+.oko-ukr-tl-ctl.is-nozones .oko-ukr-tl-ctl-item.is-zone { display: none; }
 /* A4: riadok čerstvosti zdrojov — jedna tichá línia; zastaraný zdroj sa
    prezradí jantárovou bodkou a textom, čerstvý ostáva v pozadí. */
 .oko-ukr-tl-fresh { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 9px; color: #8aa0b6; padding: 2px 0 0; }

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { CONTROL_CODE, controlRaster } from './ukraineControl.js';
-import { CONTROL_STYLES, REAR_RURAL_FAR_M, REAR_SETTLEMENT_FAR_M, controlPointRelevance, paintControlCanvas } from '../ukraineControlLayer.js';
+import { CONTROL_STYLES, NEAR_RURAL_FAR_M, NEAR_SETTLEMENT_FAR_M, REAR_RURAL_FAR_M, REAR_SETTLEMENT_FAR_M, controlPointFarM, controlPointRelevance, paintControlCanvas } from '../ukraineControlLayer.js';
 
 function fakeCanvas() {
   const calls = [];
@@ -42,7 +42,7 @@ test('predvolený štýl kreslí pás mäkko (bez pruhov), KARTA ostáva šrafov
   assert.equal(hatched.calls.filter((c) => c[0] === 'stroke').length, 1, 'predvolené volanie (KARTA, testy pásu) šrafuje ako doteraz');
 });
 
-test('body v tyle: sporné, infraštruktúra, mestá a okolie pásu = front; dedina 20 km od pásu = rear', () => {
+test('vrstvy bodov: front = sporné, infraštruktúra, mestá; okolie pásu = near; dedina 20 km od pásu = rear', () => {
   const pts = [
     { kind: 'settlement', side: 'ua', lat: 48.0, lon: 37.0, size: 8 },
     { kind: 'settlement', side: 'ru', lat: 48.0, lon: 37.3, size: 8 },
@@ -51,21 +51,30 @@ test('body v tyle: sporné, infraštruktúra, mestá a okolie pásu = front; ded
     { kind: 'airbase', side: 'ru', lat: 48.7, lon: 38.9, size: 4 },
   ];
   const r = controlRaster(pts, { bbox: { west: 36, south: 47.5, east: 39.5, north: 49 }, bandKm: 5, contestedKm: 4 });
-  assert.equal(controlPointRelevance(pts[0], r), 'front', 'sídlo pri páse');
-  assert.equal(controlPointRelevance(pts[1], r), 'front');
+  assert.equal(controlPointRelevance(pts[0], r), 'near', 'sídlo pri páse');
+  assert.equal(controlPointRelevance(pts[1], r), 'near');
   assert.equal(controlPointRelevance(pts[2], r), 'rear', 'dedina hlboko v tyle');
   assert.equal(controlPointRelevance(pts[3], r), 'front', 'mesto (size ≥ 16) vždy');
   assert.equal(controlPointRelevance(pts[4], r), 'front', 'infraštruktúra vždy');
   assert.equal(controlPointRelevance({ kind: 'rural', side: 'contested', lat: 48.6, lon: 36.4 }, r), 'front', 'sporné vždy');
-  assert.equal(controlPointRelevance({ kind: 'rural', side: 'ua', lat: 55, lon: 20, size: 4 }, r), 'front', 'mimo rastra sa neskrýva');
-  assert.equal(controlPointRelevance(pts[2], null), 'front', 'bez rastra sa neskrýva');
-  assert.ok(REAR_RURAL_FAR_M < REAR_SETTLEMENT_FAR_M && REAR_SETTLEMENT_FAR_M < 160_000, 'pri pohľade na smer (~160 km) tyl nevidno');
+  assert.equal(controlPointRelevance({ kind: 'rural', side: 'ua', lat: 55, lon: 20, size: 4 }, r), 'near', 'mimo rastra = ako pri páse');
+  assert.equal(controlPointRelevance(pts[2], null), 'near', 'bez rastra = ako pri páse');
+  assert.equal(controlPointFarM(pts[3], 'front'), null, 'front vždy');
+  assert.equal(controlPointFarM(pts[0], 'near'), NEAR_SETTLEMENT_FAR_M);
+  assert.equal(controlPointFarM(pts[2], 'near'), NEAR_RURAL_FAR_M);
+  assert.equal(controlPointFarM(pts[2], 'rear'), REAR_RURAL_FAR_M);
+  assert.equal(controlPointFarM(pts[0], 'rear'), REAR_SETTLEMENT_FAR_M);
+  assert.ok(REAR_RURAL_FAR_M < REAR_SETTLEMENT_FAR_M && NEAR_RURAL_FAR_M < NEAR_SETTLEMENT_FAR_M && NEAR_SETTLEMENT_FAR_M < 160_000, 'pri pohľade na smer (~160 km) ostane len front');
 });
 
-test('vrstva dáva bodom v tyle podmienku vzdialenosti a legenda ukazuje mäkkú stuhu', () => {
+test('vrstva dáva bodom podmienku vzdialenosti; kým DeepState kreslí, raster Wikipédie je preč aj s legendou; vzorka pásu = stuha', () => {
   const src = readFileSync(new URL('../ukraineControlLayer.js', import.meta.url), 'utf8');
-  assert.match(src, /rear \? \{ distanceDisplayCondition: new Cesium\.DistanceDisplayCondition\(0, farM\), translucencyByDistance: new Cesium\.NearFarScalar\(farM \* 0\.6, 1, farM, 0\) \} : \{\}/);
+  assert.match(src, /farM \? \{ distanceDisplayCondition: new Cesium\.DistanceDisplayCondition\(0, farM\), translucencyByDistance: new Cesium\.NearFarScalar\(farM \* 0\.6, 1, farM, 0\) \} : \{\}/);
   assert.match(src, /_raster = controlRaster\([\s\S]*?\);\n\s+_frontPoints = 0;\n\s+for \(const p of _snapshot\.points\)/, 'raster pred bodmi');
+  const tl = readFileSync(new URL('../ukraineTimeline.js', import.meta.url), 'utf8');
+  assert.match(tl, /control\?\.setZonesVisible\?\.\(!dsDraws\);/, 'aj pri mirrore (bez šedej zóny) raster Wikipédie ustúpi');
+  assert.match(tl, /ctlBox\?\.classList\?\.toggle\?\.\('is-nozones', dsDraws\);/);
   const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.oko-ukr-tl-ctl\.is-nozones \.oko-ukr-tl-ctl-item\.is-ru,\s*\.oko-ukr-tl-ctl\.is-nozones \.oko-ukr-tl-ctl-item\.is-zone \{ display: none; \}/);
   assert.match(css, /\.oko-ukr-tl-ctl-item\.is-zone \.oko-ukr-tl-ctl-sw \{ background: radial-gradient/, 'vzorka legendy = stuha, nie pruhy');
 });
