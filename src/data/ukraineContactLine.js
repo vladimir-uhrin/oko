@@ -143,3 +143,116 @@ export function contactLinePaths(index, landRings, {
   }
   return paths;
 }
+
+/** Šírka prifrontového pásma (km od línie kontaktu, na ukrajinskej strane). */
+export const FRONT_ZONE_KM = 6;
+/** Bunka rastra pásma (°) ≈ 1,1 × 0,75 km na 48° s. š. */
+export const FRONT_ZONE_CELL_DEG = 0.01;
+
+/**
+ * Maska mriežky (1 = stred bunky leží v niektorom prstenci) riadkovým vypĺňaním:
+ * pre každý riadok priesečníky hrán prstenca so šírkou stredu riadku, zoradené,
+ * párne-nepárne úseky. Presné ako bod v polygóne, ale O(hrany + bunky). Pure.
+ */
+function ringMask(rings, width, height, west, north, cellDeg) {
+  const mask = new Uint8Array(width * height);
+  const rows = new Array(height);
+  for (const ring of rings) {
+    for (let r = 0; r < height; r += 1) rows[r] = null;
+    const n = ring.length;
+    for (let i = 0; i < n; i += 1) {
+      const [x0, y0] = ring[i]; const [x1, y1] = ring[(i + 1) % n];
+      if (y0 === y1) continue;
+      const lo = Math.min(y0, y1); const hi = Math.max(y0, y1);
+      // riadky, ktorých stred (north − (r + 0,5)·cell) leží v [lo, hi)
+      const rTop = Math.max(0, Math.ceil((north - hi) / cellDeg - 0.5));
+      const rBot = Math.min(height - 1, Math.floor((north - lo) / cellDeg - 0.5));
+      for (let r = rTop; r <= rBot; r += 1) {
+        const lat = north - (r + 0.5) * cellDeg;
+        if (lat < lo || lat >= hi) continue;
+        const x = x0 + ((lat - y0) * (x1 - x0)) / (y1 - y0);
+        (rows[r] ||= []).push(x);
+      }
+    }
+    for (let r = 0; r < height; r += 1) {
+      const xs = rows[r];
+      if (!xs || xs.length < 2) continue;
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const c0 = Math.max(0, Math.ceil((xs[k] - west) / cellDeg - 0.5));
+        const c1 = Math.min(width - 1, Math.floor((xs[k + 1] - west) / cellDeg - 0.5));
+        for (let c = c0; c <= c1; c += 1) mask[r * width + c] = 1;
+      }
+    }
+  }
+  return mask;
+}
+
+/**
+ * Prifrontové pásmo (2026-09-26, vlastník: „teraz tam nevidno vôbec nič na
+ * frontovej línii"): mirror DeepState nemá sivú zónu, pás z Wikipédie je 44 dní
+ * starý a nad dnešnými polygónmi vyzeral ako fľaky. Pásmo sa preto odvodí priamo
+ * z DNEŠNEJ línie kontaktu: bunky do `radiusKm` od línie, mimo ruskej kontroly
+ * a (ak je daná) na pevnine Ukrajiny, s intenzitou klesajúcou od línie
+ * ((1 − d/R)^1,6, 1–255). Geometria, nie údaj o bojoch — kreslí sa a popisuje ako
+ * „do N km od línie, odvodené". Pure.
+ * @param {Array<Array<[number,number]>>} paths úseky línie kontaktu
+ * @param {Array<{kind:string, ring:Array<[number,number]>}>} index polygóny DeepState
+ * @returns {{width:number,height:number,cellDeg:number,bbox:{west:number,south:number,east:number,north:number},values:Uint8Array,cells:number}|null}
+ */
+export function frontZoneRaster(paths, index, { radiusKm = FRONT_ZONE_KM, cellDeg = FRONT_ZONE_CELL_DEG, ruKinds = CONTACT_RU_KINDS, landRings = null } = {}) {
+  const segs = [];
+  let w = 180; let s = 90; let e = -180; let n = -90;
+  for (const path of Array.isArray(paths) ? paths : []) {
+    for (let i = 1; i < (path?.length || 0); i += 1) {
+      const [x0, y0] = path[i - 1]; const [x1, y1] = path[i];
+      if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
+      segs.push(x0, y0, x1, y1);
+      w = Math.min(w, x0, x1); e = Math.max(e, x0, x1); s = Math.min(s, y0, y1); n = Math.max(n, y0, y1);
+    }
+  }
+  if (!segs.length) return null;
+  const padLat = radiusKm / KM_PER_DEG;
+  const padLon = radiusKm / (KM_PER_DEG * Math.max(0.1, Math.cos((Math.max(Math.abs(s), Math.abs(n)) * Math.PI) / 180)));
+  const west = Math.floor((w - padLon) / cellDeg) * cellDeg;
+  const north = Math.ceil((n + padLat) / cellDeg) * cellDeg;
+  const width = Math.max(1, Math.ceil((e + padLon - west) / cellDeg));
+  const height = Math.max(1, Math.ceil((north - (s - padLat)) / cellDeg));
+  const dist = new Float32Array(width * height).fill(Infinity);
+  for (let k = 0; k < segs.length; k += 4) {
+    const x0 = segs[k]; const y0 = segs[k + 1]; const x1 = segs[k + 2]; const y1 = segs[k + 3];
+    const c0 = Math.max(0, Math.floor((Math.min(x0, x1) - padLon - west) / cellDeg));
+    const c1 = Math.min(width - 1, Math.floor((Math.max(x0, x1) + padLon - west) / cellDeg));
+    const r0 = Math.max(0, Math.floor((north - (Math.max(y0, y1) + padLat)) / cellDeg));
+    const r1 = Math.min(height - 1, Math.floor((north - (Math.min(y0, y1) - padLat)) / cellDeg));
+    for (let r = r0; r <= r1; r += 1) {
+      const lat = north - (r + 0.5) * cellDeg;
+      const kx = KM_PER_DEG * Math.cos((lat * Math.PI) / 180);
+      const ax = (x0 - west) * kx; const ay = (y0 - lat) * KM_PER_DEG;
+      const bx = (x1 - west) * kx; const by = (y1 - lat) * KM_PER_DEG;
+      const dx = bx - ax; const dy = by - ay; const len2 = dx * dx + dy * dy;
+      for (let c = c0; c <= c1; c += 1) {
+        const px = (c + 0.5) * cellDeg * kx;
+        const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx - ay * dy) / len2)) : 0;
+        const d = Math.hypot(px - (ax + t * dx), ay + t * dy);
+        const idx = r * width + c;
+        if (d < dist[idx]) dist[idx] = d;
+      }
+    }
+  }
+  const ruRings = (Array.isArray(index) ? index : []).filter((p) => ruKinds.includes(p?.kind) && Array.isArray(p.ring) && p.ring.length >= 4).map((p) => p.ring);
+  const ruMask = ringMask(ruRings, width, height, west, north, cellDeg);
+  // Pevnina Ukrajiny (voliteľne): konce línie pri štátnej hranici a pobreží nesmú
+  // pásmom pretiecť do Ruska ani do mora.
+  const landList = (Array.isArray(landRings) ? landRings : []).filter((r) => Array.isArray(r) && r.length >= 4);
+  const landMask = landList.length ? ringMask(landList, width, height, west, north, cellDeg) : null;
+  const values = new Uint8Array(width * height);
+  let cells = 0;
+  for (let idx = 0; idx < values.length; idx += 1) {
+    const d = dist[idx];
+    if (!(d < radiusKm) || ruMask[idx] || (landMask && !landMask[idx])) continue;
+    values[idx] = Math.max(1, Math.round(255 * Math.pow(1 - d / radiusKm, 1.6)));
+    cells += 1;
+  }
+  return { width, height, cellDeg, bbox: { west, south: north - height * cellDeg, east: west + width * cellDeg, north }, values, cells };
+}
