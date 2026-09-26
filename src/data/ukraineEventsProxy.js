@@ -35,6 +35,9 @@ import {
 } from '../../scripts/lib/ukraineArchive.mjs';
 import { DEEPSTATE_MIRROR_NOTE, DEEPSTATE_MIRRORS, MIRROR_FIRST_DAY, createDeepStateMirror, dateKeyProblem, deepstateMirrorLicense, getFormattedDateKey } from './deepstateMirror.js';
 import { deepstateMirrorAttribution, deepstateSnapshotFromMirror } from './ukraineDeepState.js';
+import { DEEPSTATE_FULL_MIRROR_LICENSE, DEEPSTATE_FULL_MIRROR_NOTE, deepstateSnapshotFromFullMirror } from './deepstateFullMirror.js';
+/** Súbor celej mapy starší než toľko dní od požadovaného dňa → radšej cyterat (mirror mohol zastať). */
+export const FULL_MIRROR_MAX_AGE_DAYS = 7;
 
 export const EVENTS_MAX_DAYS = 31;
 export const SUMMARY_MAX_DAYS = 1900;
@@ -99,7 +102,7 @@ export function deepstateAllowedForHost(host, { consent = false } = {}) {
   return name === 'localhost' || name === '127.0.0.1' || name === '::1' || name.endsWith('.localhost');
 }
 
-export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m), deepstateMirror = null } = {}) {
+export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m), deepstateMirror = null, deepstateFullMirror = null } = {}) {
   const enabled = env.UKRAINE_ARCHIVE !== 'off';
   const viinaCache = new Map();
   const payloadCache = new Map(); // key -> { at, json }
@@ -191,6 +194,8 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
   // Mirror cyterat (vlastník 24. 9. 2026): verejná doména + dni, ktoré náš
   // archív nemá (beží od 19. 9. 2026; mirror má súbory od 8. 7. 2024).
   const mirrorOn = !deepstateOff && String(env.UKRAINE_DEEPSTATE_MIRROR || '').toLowerCase() !== 'off';
+  // Celá mapa so sivou zónou (SmartFinn/wararchive-website, 2026-09-26) — len keď ju vite.config.js odovzdá.
+  const fullMirrorOn = mirrorOn && Boolean(deepstateFullMirror) && String(env.UKRAINE_DEEPSTATE_FULL_MIRROR || '').toLowerCase() !== 'off';
   let mirror = deepstateMirror;
   const getMirror = () => { if (!mirror) mirror = createDeepStateMirror({ root, fetchImpl, now, log, mirrors: DEEPSTATE_MIRRORS }); return mirror; };
   const controlCache = new Map(); // deň -> { at, json }
@@ -304,6 +309,26 @@ export function ukraineEventsProxy({ root = process.cwd(), env = process.env, fe
         const firstDay = MIRROR_FIRST_DAY.slice(0, 4) + '-' + MIRROR_FIRST_DAY.slice(4, 6) + '-' + MIRROR_FIRST_DAY.slice(6);
         send(res, 404, { error: 'no_deepstate_snapshot', source: 'mirror', at, firstDay }, req);
         return;
+      }
+      // Najprv celá mapa so sivou zónou; ak ju nemá alebo je jej súbor priveľmi starý, cyterat.
+      if (fullMirrorOn) {
+        const dayReq = key.slice(0, 4) + '-' + key.slice(4, 6) + '-' + key.slice(6);
+        try {
+          const f = await deepstateFullMirror.lookup(dayReq);
+          if (f.found) {
+            const snapshot = deepstateSnapshotFromFullMirror(f.found.geojson, { commitAt: f.found.at, sha: f.found.sha, requestedDay: dayReq });
+            if (snapshot.features.length && snapshot.fallbackDays <= FULL_MIRROR_MAX_AGE_DAYS) {
+              const json = {
+                ...snapshot, requestedAt: at,
+                attribution: deepstateMirrorAttribution(snapshot.mirror), license: DEEPSTATE_FULL_MIRROR_LICENSE, note: DEEPSTATE_FULL_MIRROR_NOTE,
+                ...(archiveAllowed ? { archiveDays: days.length, archiveFirst: days[0] || null } : {}),
+              };
+              remember(json);
+              send(res, 200, json, req);
+              return;
+            }
+          }
+        } catch (error) { log(`[ukraine-events] deepstate full mirror: ${error?.message || error}`); }
       }
       try {
         const r = await getMirror().lookup({ requestedDate: key, maxFallback: 7 });

@@ -65,8 +65,11 @@ test('sivá zóna: v bežnom štýle jantárové pruhy, KARTA ostáva sivá a je
   assert.ok(d.lineAlpha >= 0.7, 'jemná čiara musí byť dosť sýta, inak zanikne');
   assert.ok(DEEPSTATE_STYLES.default.greyOutline >= 0.8, 'okraj zóny drží jej tvar aj pri oddialení');
   // KARTU používateľ schválil podľa vzorky — nesmie sa zmeniť ani o pixel.
-  assert.equal(deepstateGreyCss(DEEPSTATE_STYLES.karta), DEEPSTATE_COLORS.grey);
-  assert.deepEqual({ ...DEEPSTATE_STYLES.karta.greyHatch }, { lineAlpha: 0.6, fillAlpha: 0.1 });
+  // Výnimka 2026-09-26 (vlastník: „so sivou zónou ako Rybar!" a „použi sivú zónu
+  // s mirrorov!"): sivá zóna na KARTE = oranžová šrafa „územia bojov" ako pás,
+  // ktorý schválil podľa vzorky Rybar. Obrys a hrúbka ostávajú.
+  assert.equal(deepstateGreyCss(DEEPSTATE_STYLES.karta), '#f0922e');
+  assert.deepEqual({ ...DEEPSTATE_STYLES.karta.greyHatch }, { lineAlpha: 0.92, fillAlpha: 0.26, spacing: 6, thickness: 0.4 });
   assert.equal(DEEPSTATE_STYLES.karta.greyOutline, 0.6);
   assert.equal(DEEPSTATE_STYLES.karta.greyWidth, 0.7);
   assert.equal(deepstateGreyCss(null), DEEPSTATE_COLORS.grey, 'bez štýlu pôvodná sivá');

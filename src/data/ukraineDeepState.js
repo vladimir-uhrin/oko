@@ -140,12 +140,14 @@ export function deepstateSnapshotFromApi(json) {
 /** Mirror cyterat/deepstate-map-data sťahuje DeepState raz denne ~03:00 UTC. */
 export const DEEPSTATE_MIRROR_HOUR_UTC = 3;
 export const DEEPSTATE_MIRROR_ATTRIBUTION = 'DeepStateMap.live via the unofficial GitHub mirror cyterat/deepstate-map-data';
-/** Repozitár mirroru podľa id (cyterat = pôvodný, lazar-bit = záložný fork). Pure. */
+/** Repozitár mirroru podľa id (cyterat = pôvodný, lazar-bit = záložný fork, wararchive = celá mapa so sivou zónou). Pure. */
 export function deepstateMirrorRepo(id) {
+  if (id === 'wararchive') return 'SmartFinn/wararchive-website';
   return id === 'lazar-bit' ? 'lazar-bit/deepstate-map-data-analytics' : 'cyterat/deepstate-map-data';
 }
 /** Atribúcia snímky podľa mirroru, z ktorého deň naozaj prišiel. Pure. */
 export function deepstateMirrorAttribution(id) {
+  if (id === 'wararchive') return 'DeepStateMap.live via the unofficial GitHub mirror SmartFinn/wararchive-website (full map incl. grey zone)';
   return id === 'lazar-bit'
     ? 'DeepStateMap.live via the unofficial GitHub mirror lazar-bit/deepstate-map-data-analytics (fork of cyterat/deepstate-map-data)'
     : DEEPSTATE_MIRROR_ATTRIBUTION;

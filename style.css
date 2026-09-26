@@ -11952,7 +11952,8 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* Sivá zóna sa na mape kreslí šrafovane — vzorka musí vyzerať rovnako: v bežnom
    štýle jantárové pruhy (DEEPSTATE_STYLES.default.greyCss), na KARTE sivé. */
 .oko-ukr-tl-ctl-item.is-ds-grey .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(255, 181, 71, 0.85) 0 2px, rgba(255, 181, 71, 0.1) 2px 5px); border-color: rgba(255, 181, 71, 0.9); }
-.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-grey .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(184, 178, 170, 0.8) 0 2px, rgba(184, 178, 170, 0.1) 2px 5px); border-color: rgba(184, 178, 170, 0.8); }
+/* KARTA (2026-09-26): sivá zóna oranžovou šrafou ako „územie bojov“ u Rybara. */
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-grey .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(240, 146, 46, 0.92) 0 2px, rgba(240, 146, 46, 0.26) 2px 5px); border-color: rgba(240, 146, 46, 0.9); }
 /* Oslobodené: modrá šrafa 135° (na mape OkoHatch135), aby nevyzerala ako voda; KARTA plná ako predtým. */
 .oko-ukr-tl-ctl-item.is-ds-liberated .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(79, 163, 255, 0.6) 0 1.5px, rgba(79, 163, 255, 0.05) 1.5px 5px); border-color: rgba(79, 163, 255, 0.55); }
 .oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-liberated .oko-ukr-tl-ctl-sw { background: rgba(79, 163, 255, 0.18); border-color: rgba(79, 163, 255, 0.9); }
@@ -11964,6 +11965,12 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ds.is-mirror .is-ds-liberated,
 .oko-ukr-tl-ds.is-mirror .is-ds-attack,
 .oko-ukr-tl-ds.is-mirror .is-ds-airfield { display: none; }
+/* Mirror celej mapy (SmartFinn/wararchive-website, 2026-09-26) má sivú zónu a oslobodené,
+   body (smery, letiská) nie; skutočná sivá zóna nahrádza odvodený pás. */
+.oko-ukr-tl-ds.is-full-mirror .is-ds-attack,
+.oko-ukr-tl-ds.is-full-mirror .is-ds-airfield,
+.oko-ukr-tl-ds.has-grey .is-ds-zone,
+.oko-ukr-tl-ds.has-grey .is-ds-zone-ru { display: none; }
 /* Škody: kruh hromady (SAR) a triedy UNOSAT */
 .oko-ukr-tl-ctl-item.is-dmg-adm3 .oko-ukr-tl-ctl-sw { width: 11px; height: 11px; border-radius: 50%; background: rgba(255, 138, 61, 0.55); border-color: #0b1622; }
 .oko-ukr-tl-ctl-item.is-dmg-destroyed .oko-ukr-tl-ctl-sw { width: 7px; height: 7px; border-radius: 50%; background: #f87171; border-color: #f87171; }

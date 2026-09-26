@@ -19,6 +19,7 @@ import { TIMELINE_SPEEDS, TIMELINE_WINDOWS, createTimelineClock, cursorText, his
 import { TYPE_GLYPH, SEV_COLOR } from './ukraineEventsLayer.js';
 import { CONTROL_STALE_DAYS, DEEPSTATE_STALE_DAYS, ageText, freshnessOf, freshnessRow, viewedRefMs } from './data/ukraineFreshness.js';
 import { CHANGE_DAYS } from './data/ukraineContactLine.js';
+import { deepstateMirrorRepo } from './data/ukraineDeepState.js';
 import { currentLanguage, t } from './i18n.js';
 
 const IMG_API = '/api/img';
@@ -499,7 +500,11 @@ export function createUkraineTimeline({
     dsBox?.classList.toggle('is-karta', st.style === 'karta');
     // Mirror nesie len okupované územie — vzorky šedej zóny, oslobodených území,
     // smerov a letísk by sľubovali niečo, čo mapa nekreslí.
-    dsBox?.classList.toggle('is-mirror', st.source === 'mirror');
+    // Neúplný mirror (len okupované) = is-mirror; mirror celej mapy (sivá zóna, bez bodov) = is-full-mirror.
+    const hasGrey = (st.counts?.grey || 0) > 0;
+    dsBox?.classList.toggle('is-mirror', st.source === 'mirror' && !hasGrey);
+    dsBox?.classList.toggle('is-full-mirror', st.source === 'mirror' && hasGrey);
+    dsBox?.classList.toggle('has-grey', hasGrey);
     dsChip.classList.toggle('active', st.shown);
     dsChip.title = translate(st.source === 'archive' ? 'ukraine.ds.note' : 'ukraine.ds.note-mirror');
     dsChip.setAttribute('aria-pressed', String(st.shown));
@@ -520,7 +525,7 @@ export function createUkraineTimeline({
     if (!st.shown) { dsLine.textContent = ''; renderAge(dsAge, null, DEEPSTATE_STALE_DAYS); dsArea.textContent = ''; if (dsChange) { dsChange.textContent = ''; dsChange.title = ''; } return; }
     renderAge(dsAge, st.at, DEEPSTATE_STALE_DAYS, st.requestedAt);
     if (st.at) {
-      dsLine.textContent = translate(st.source === 'mirror' ? 'ukraine.ds.since-mirror' : 'ukraine.ds.since', { date: st.stampText, mirror: st.mirror === 'lazar-bit' ? 'lazar-bit/deepstate-map-data-analytics' : 'cyterat/deepstate-map-data' })
+      dsLine.textContent = translate(st.source === 'mirror' ? 'ukraine.ds.since-mirror' : 'ukraine.ds.since', { date: st.stampText, mirror: deepstateMirrorRepo(st.mirror) })
         + (st.source === 'mirror' && st.upstreamUnavailable ? ` · ${translate('ukraine.ds.mirror-older')}` : '');
     } else if (!st.loading && !dsLine.textContent) {
       // Kým dopyt beží (mirror môže trvať do 30 s), nie je to „chýbajúci deň".
@@ -528,7 +533,7 @@ export function createUkraineTimeline({
     }
     const a = st.areaKm2;
     dsArea.textContent = !a ? ''
-      : st.source === 'mirror' ? translate('ukraine.ds.area-mirror', { occupied: nf.format(Math.round(a.occupied || 0)) })
+      : st.source === 'mirror' && !a.grey ? translate('ukraine.ds.area-mirror', { occupied: nf.format(Math.round(a.occupied || 0)) })
         : translate('ukraine.ds.area', { occupied: nf.format(Math.round(a.occupied || 0)), grey: nf.format(Math.round(a.grey || 0)) });
     if (dsChange) {
       const ch = st.change;
@@ -662,7 +667,7 @@ export function createUkraineTimeline({
       // V riadku stačí „dnes" alebo „13.8.", tooltip nesie presný dátum aj s rokom —
       // inak by pri dnešku zopakoval „dnes · dnes".
       const day = dayKey(atMs);
-      item.title = [label, `${shortDay(day)}${day.slice(0, 4)}`, ageText(r.ageDays, translate), r.stale ? translate('ukraine.src.stale') : null, viaMirror ? translate('ukraine.fresh.deepstate-mirror-title', { mirror: ds?.mirror === 'lazar-bit' ? 'lazar-bit/deepstate-map-data-analytics' : 'cyterat/deepstate-map-data' }) : null].filter(Boolean).join(' · ');
+      item.title = [label, `${shortDay(day)}${day.slice(0, 4)}`, ageText(r.ageDays, translate), r.stale ? translate('ukraine.src.stale') : null, viaMirror ? translate('ukraine.fresh.deepstate-mirror-title', { mirror: deepstateMirrorRepo(ds?.mirror) }) : null].filter(Boolean).join(' · ');
       fresh.appendChild(item);
     }
   }

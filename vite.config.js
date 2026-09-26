@@ -85,6 +85,7 @@ import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
 import { mideastEventsProxy } from './src/data/mideastEventsProxy.js';
 import { reliefTilesProxy } from './src/data/reliefTilesProxy.js';
 import { DEEPSTATE_MIRRORS, createDeepStateMirror } from './src/data/deepstateMirror.js';
+import { createDeepStateFullMirror } from './src/data/deepstateFullMirror.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
@@ -10725,7 +10726,8 @@ export default defineConfig(({ mode }) => {
       ukraineReportProxy(),
       // Vrstva DeepState na doméne a dni mimo archívu: GitHub mirrory cyterat +
       // záloha fork lazar-bit (jadro src/data/deepstateMirror.js).
-      ukraineEventsProxy({ deepstateMirror: createDeepStateMirror({ mirrors: DEEPSTATE_MIRRORS }) }),
+      // Sivá zóna (2026-09-26): celá mapa DeepState z mirroru SmartFinn/wararchive-website má prednosť.
+      ukraineEventsProxy({ deepstateMirror: createDeepStateMirror({ mirrors: DEEPSTATE_MIRRORS }), deepstateFullMirror: createDeepStateFullMirror() }),
       mideastEventsProxy(),
       // Normal dlaždice reliéfu pre podklad KARTA (S3 bez CORS, cache navždy).
       reliefTilesProxy(),

@@ -65,6 +65,8 @@ export const KARTA_LABEL_FAMILY = '"Inter", "Segoe UI", Roboto, system-ui, sans-
  * aplikujú pri vzniku entity aj spätne na už nakreslené.
  */
 /** Lem popiskov podkladu podľa štýlu: bežný hrubší a plný (2026-09-24, meno sa strácalo v šrafe), KARTA ako vo vzorke. */
+/** Hranica oblasti na KARTE (2026-09-26, ako Rybar): plná biela čiara namiesto slabej čiarkovanej. */
+export const OBLAST_KARTA_STYLE = Object.freeze({ width: 2.2, color: '#e8eef3', alpha: 0.78 });
 export const BASE_LABEL_OUTLINE = Object.freeze({
   default: Object.freeze({ width: 4, alpha: 1 }),
   karta: Object.freeze({ width: 3, alpha: 0.9 }),
@@ -388,7 +390,12 @@ export function createUkraineBaseLayer({
   function applyStyleItem(item) {
     const s = styleScale();
     try {
-      if (item.line != null && item.entity.polyline) item.entity.polyline.width = item.line * s.line;
+      if (item.oblast && item.entity.polyline) {
+        // KARTA: plná biela hranica oblasti (bez násobku čiar); inak pôvodná čiarkovaná.
+        const karta = _styleMode === 'karta';
+        item.entity.polyline.width = karta ? OBLAST_KARTA_STYLE.width : item.line * s.line;
+        item.entity.polyline.material = karta ? oblastKartaMaterial : oblastMaterial;
+      } else if (item.line != null && item.entity.polyline) item.entity.polyline.width = item.line * s.line;
       if (item.point != null && item.entity.point) item.entity.point.pixelSize = item.point * s.point;
       if (item.font && item.entity.label) {
         item.entity.label.font = fontString(item.font, s);
@@ -522,6 +529,7 @@ export function createUkraineBaseLayer({
   };
   const riverMaterial = new Cesium.ColorMaterialProperty(color(RIVER_STYLE.color, RIVER_STYLE.alpha));
   const oblastMaterial = new Cesium.PolylineDashMaterialProperty({ color: color(OBLAST_STYLE.color, OBLAST_STYLE.alpha), dashLength: OBLAST_STYLE.dashLength });
+  const oblastKartaMaterial = new Cesium.ColorMaterialProperty(color(OBLAST_KARTA_STYLE.color, OBLAST_KARTA_STYLE.alpha));
 
   function polylineFor(coordinates, { width, material, displayCondition }) {
     const flat = [];
@@ -786,7 +794,7 @@ export function createUkraineBaseLayer({
     let n = 0;
     for (const feature of collection?.features || []) {
       if (feature?.geometry?.type !== 'LineString' || feature.geometry.coordinates.length < 2) continue;
-      registerStyle(ds.entities.add({ id: `${UKRAINE_BASE_ID}:oblast:${n}`, polyline: polylineFor(feature.geometry.coordinates, { width: OBLAST_STYLE.width, material: oblastMaterial, displayCondition: [0, OBLAST_STYLE.farM] }) }), { line: OBLAST_STYLE.width });
+      registerStyle(ds.entities.add({ id: `${UKRAINE_BASE_ID}:oblast:${n}`, polyline: polylineFor(feature.geometry.coordinates, { width: OBLAST_STYLE.width, material: oblastMaterial, displayCondition: [0, OBLAST_STYLE.farM] }) }), { line: OBLAST_STYLE.width, oblast: true });
       n += 1;
     }
     for (const oblast of collection?.oblasts || []) {

@@ -20,7 +20,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Farby legendy (zhodné s vrstvami KARTA). */
 export const KARTA_LEGEND_COLORS = Object.freeze({
-  occupied: '#8e2330', uaArea: '#2f6aa3', grey: '#8a8f98', ru: '#e0553f', contact: '#b3261e',
+  occupied: '#8e2330', uaArea: '#2f6aa3', grey: '#8a8f98', liberated: '#4fa3ff', ru: '#e0553f', contact: '#b3261e',
   pinUa: '#5b8fd0', pinRu: '#d0554a', pinContested: '#f0a53a',
   combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a', band: '#f0922e',
   // Zmena za týždeň (DEEPSTATE_STYLES.karta.change): obsadené karmínová šrafa, oslobodené modrá.
@@ -116,8 +116,12 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
     if (deepstate.contact > 0 && deepstate.style !== 'karta') items.push({ key: 'contact', colorCss: c.contact, line: true, label: translate('ukraine.karta.legend.contact') });
     // Mirror šedú zónu nemá — namiesto nej je oranžovo šrafovaný pás cez líniu, odvodený
     // z dnešnej línie (DEEPSTATE_STYLES.karta.combatBand; 2026-09-26, vzorka Rybar).
-    if (deepstate.source !== 'mirror') items.push({ key: 'grey', colorCss: c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
+    // Sivá zóna: archív z API aj mirror celej mapy ju majú (na KARTE oranžová šrafa ako
+    // „územie bojov" u Rybara); neúplný mirror nie — vtedy odvodený pás pri línii.
+    const hasGrey = deepstate.source !== 'mirror' || (deepstate.counts?.grey || 0) > 0;
+    if (hasGrey) items.push({ key: 'grey', colorCss: deepstate.style === 'karta' ? c.band : c.grey, pattern: 'hatch', label: translate('ukraine.karta.legend.grey') });
     else items.push({ key: 'contested', colorCss: c.band, pattern: 'hatch', label: translate('ukraine.karta.legend.contested') });
+    if ((deepstate.counts?.liberated || 0) + (deepstate.counts?.['liberated-recent'] || 0) > 0) items.push({ key: 'liberated', colorCss: c.liberated, label: translate('ukraine.karta.legend.liberated') });
     // Zmena za týždeň: vzorky len keď je rozdiel spočítaný a naozaj niečo zmenil.
     const ch = deepstate.change;
     if (ch && Number.isFinite(ch.days)) {

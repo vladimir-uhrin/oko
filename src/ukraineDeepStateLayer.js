@@ -76,7 +76,9 @@ export const DEEPSTATE_STYLES = Object.freeze({
   }),
   karta: Object.freeze({
     greyWidth: 0.7, width: 1.6, greyOutline: 0.6, outline: 0.95, hatch: true,
-    greyCss: null, greyHatch: Object.freeze({ lineAlpha: 0.6, fillAlpha: 0.1 }),
+    // Sivá zóna DeepState na KARTE ako „územie bojov" u Rybara (2026-09-26, vlastník:
+    // „so sivou zónou ako Rybar!"): oranžová šrafa s výplňou, rovnaký vzhľad ako pás bojov.
+    greyCss: '#f0922e', greyHatch: Object.freeze({ lineAlpha: 0.92, fillAlpha: 0.26, spacing: 6, thickness: 0.4 }),
     // 2026-09-26 (vlastník so vzorkou Rybar: „frontová línia ostré hrany a nie je vidno
     // ani šedá zóna"): hranu frontu robí SÁM obrys polygónu — plná tmavočervená
     // výplň s ostrým tmavým obrysom, odvodená línia kontaktu sa v KARTE nekreslí
@@ -89,6 +91,9 @@ export const DEEPSTATE_STYLES = Object.freeze({
     // Ukrajinská strana tónovaná do tmavomodra (mapa je dvojfarebná ako u Rybara):
     // pevnina UA mínus ruská kontrola (a sivá zóna archívu) mínus pás bojov. Odvodené.
     uaTint: Object.freeze({ css: '#2f6aa3', alpha: 0.3 }),
+    // Oslobodené územie (aj z roku 2022) na KARTE bez obrysov — čiary naprieč celou
+    // Charkivskou oblasťou mapu rušili (2026-09-26, mirror celej mapy); jemná výplň ostáva.
+    noLiberatedOutline: true,
     // 2026-09-26 (vlastník so vzorkou mapy Rybar: „ja som to chcel takto"): územie bojov
     // ako oranžovo šrafovaný pás CEZ obe strany línie (3 km k UA, 5 km do okupovaného),
     // odvodené z dnešnej línie DeepState — mirror sivú zónu nemá.
@@ -430,7 +435,7 @@ export function createUkraineDeepStateLayer({
           polygon: { hierarchy: new Cesium.PolygonHierarchy(outer, holes), material, classificationType: Cesium.ClassificationType.BOTH },
           properties: { deepstate: { kind: f.kind, en: f.en, uk: f.uk, areaKm2: f.areaKm2, description: f.description || null } },
         });
-        ds.entities.add({
+        if (!(st.noLiberatedOutline && (f.kind === 'liberated' || f.kind === 'liberated-recent'))) ds.entities.add({
           id: `${UKRAINE_DEEPSTATE_ID}:line:${n}`,
           polyline: { positions: outer, width: f.kind === 'grey' ? st.greyWidth : (lib ? st.liberatedWidth : st.width), material: f.kind === 'grey' ? greyColour.withAlpha(st.greyOutline) : outlineColour.withAlpha(lib ? st.liberatedOutline : st.outline), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH },
         });
@@ -450,7 +455,9 @@ export function createUkraineDeepStateLayer({
     // Prifrontové pásmo (len štýly so `zone`): jeden primknutý obdĺžnik, materiál
     // OkoFrontZone si polohu berie z geodetických súradníc fragmentu (nie zo st).
     let bandForTint = null; // pás bojov KARTY → výrez z tónu ukrajinskej strany
-    if ((st.zone || st.combatBand) && _contact.length) {
+    // Skutočná sivá zóna (archív z API alebo mirror celej mapy) nahrádza odvodený pás.
+    const hasGrey = _snapshot.features.some((f) => f.kind === 'grey');
+    if ((st.zone || st.combatBand) && _contact.length && !hasGrey) {
       // Predvolený štýl: oranžový prechod na UA strane + červená šrafa v okupovanom.
       // KARTA: jeden oranžovo šrafovaný pás cez obe strany (maska = UA ∪ RU časť).
       const band = st.combatBand;
@@ -634,9 +641,10 @@ export function createUkraineDeepStateLayer({
     const hasOccupied = _polyIndex.some((p) => DEEPSTATE_RU_KINDS.includes(p.kind));
     // Mirror nesie len okupované územie, šedú zónu nie — tesne pri línii preto
     // stranu nevieme (inak by špendlíky v šedej zóne zmodreli ako UA).
-    const mirror = _snapshot?.source === 'mirror';
-    const side = sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied && !mirror ? 'ua' : null });
-    if (side !== null || !mirror || !hasOccupied) return side;
+    // Neúplný mirror = len okupované územie (cyterat); mirror celej mapy má sivú zónu ako archív.
+    const partial = _snapshot?.source === 'mirror' && !_polyIndex.some((p) => p.kind === 'grey');
+    const side = sideFromPolygons(_polyIndex, lon, lat, { fallback: hasOccupied && !partial ? 'ua' : null });
+    if (side !== null || !partial || !hasOccupied) return side;
     return mirrorUaSide(lon, lat) ? 'ua' : null;
   }
   /**
