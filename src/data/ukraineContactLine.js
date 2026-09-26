@@ -335,3 +335,118 @@ export function occupiedChangeRaster(indexNow, indexBefore, { cellDeg = CHANGE_C
     lostKm2: Math.round(lostKm2 * 10) / 10, gainedKm2: Math.round(gainedKm2 * 10) / 10,
   };
 }
+
+// ── Obrysy plôch zmeny (2026-09-26, vlastník: „hmlovinu prerob na jasnejšiu, svetlejšiu
+//    s jasnými vymedzeniami približnými") ─────────────────────────────────────
+/**
+ * Binárna maska buniek (1 = plné) → uzavreté prstence po hranách buniek v súradniciach
+ * mriežky (x = stĺpec, y = riadok), plné vždy vľavo od smeru (vonkajšie proti smeru
+ * hodinových ručičiek v mriežke so severom hore, diery v smere). Sedlový vrchol
+ * (dve plné bunky len cez roh) sa rozpojí stále rovnako (odbočiť doľava). Pure.
+ * @param {ArrayLike<number>} mask dĺžky width·height, riadok 0 = sever
+ * @returns {Array<Array<[number,number]>>}
+ */
+export function maskToGridRings(mask, width, height) {
+  const at = (c, r) => (c >= 0 && r >= 0 && c < width && r < height && mask[r * width + c] ? 1 : 0);
+  // Hrana ide z vrcholu (x,y) do (x2,y2); kľúč vrcholu „x,y" → zoznam hrán z neho.
+  const out = new Map();
+  const add = (x, y, x2, y2) => { const k = `${x},${y}`; (out.get(k) || out.set(k, []).get(k)).push([x2, y2]); };
+  for (let r = 0; r < height; r += 1) {
+    for (let c = 0; c < width; c += 1) {
+      if (!at(c, r)) continue;
+      // Obrys proti smeru hodinových ručičiek v mriežke (y rastie na juh): plné vľavo.
+      if (!at(c, r - 1)) add(c + 1, r, c, r);         // horná hrana → na západ
+      if (!at(c - 1, r)) add(c, r, c, r + 1);         // ľavá hrana → na juh
+      if (!at(c, r + 1)) add(c, r + 1, c + 1, r + 1); // dolná hrana → na východ
+      if (!at(c + 1, r)) add(c + 1, r + 1, c + 1, r); // pravá hrana → na sever
+    }
+  }
+  const rings = [];
+  const dirOf = (a, b) => [Math.sign(b[0] - a[0]), Math.sign(b[1] - a[1])];
+  for (const [startKey, list] of out) {
+    while (list.length) {
+      const [sx, sy] = startKey.split(',').map(Number);
+      const ring = [[sx, sy]];
+      let prev = [sx, sy];
+      let next = list.shift();
+      let guard = 0;
+      while (next && guard < 1_000_000) {
+        guard += 1;
+        if (next[0] === sx && next[1] === sy) break;
+        ring.push(next);
+        const cand = out.get(`${next[0]},${next[1]}`) || [];
+        if (!cand.length) break;
+        let pick = 0;
+        if (cand.length > 1) {
+          // sedlo: odboč doľava vzhľadom na smer príchodu
+          const [dx, dy] = dirOf(prev, next);
+          const left = [dy, -dx];
+          const i = cand.findIndex((p) => { const [ex, ey] = dirOf(next, p); return ex === left[0] && ey === left[1]; });
+          pick = i >= 0 ? i : 0;
+        }
+        prev = next;
+        next = cand.splice(pick, 1)[0];
+      }
+      if (ring.length >= 4) rings.push(ring);
+    }
+  }
+  // Zlúč kolineárne body (rovné úseky po bunkách).
+  return rings.map((ring) => ring.filter((p, i) => {
+    const a = ring[(i - 1 + ring.length) % ring.length]; const b = ring[(i + 1) % ring.length];
+    return (b[0] - a[0]) * (p[1] - a[1]) !== (b[1] - a[1]) * (p[0] - a[0]);
+  })).filter((ring) => ring.length >= 3);
+}
+
+/** Chaikinovo zaoblenie uzavretého prstenca (`iterations`×, podiel 1/4). Pure. */
+export function smoothRing(ring, iterations = 2) {
+  let pts = ring;
+  for (let k = 0; k < iterations; k += 1) {
+    const next = [];
+    for (let i = 0; i < pts.length; i += 1) {
+      const [x0, y0] = pts[i]; const [x1, y1] = pts[(i + 1) % pts.length];
+      next.push([0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1], [0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1]);
+    }
+    pts = next;
+  }
+  return pts;
+}
+
+/** Plocha prstenca v mriežke (Shoelace, znamienko = orientácia). Pure. */
+function gridArea(ring) {
+  let s = 0;
+  for (let i = 0; i < ring.length; i += 1) { const [x0, y0] = ring[i]; const [x1, y1] = ring[(i + 1) % ring.length]; s += x0 * y1 - x1 * y0; }
+  return s / 2;
+}
+function inGridRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i]; const [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Plochy zmeny ako zaoblené polygóny v [lon,lat]: `{ lost: [[outer, ...holes]], gained: [...] }`
+ * z rastra occupiedChangeRaster (R = oslobodené `values`, G = obsadené `ruValues`).
+ * Obrys ide po hranách buniek, potom Chaikin — hranica je jasná, ale PRIBLIŽNÁ
+ * (bunka 0,01°). Plochy menšie než `minCells` buniek sa vynechajú (šum). Pure.
+ */
+export function changeAreaPolygons(change, { minCells = 2, smooth = 2 } = {}) {
+  const empty = { lost: [], gained: [] };
+  if (!change?.bbox || !change.width || !change.height) return empty;
+  const { west, north } = change.bbox; const cell = change.cellDeg;
+  const toLonLat = ([x, y]) => [west + x * cell, north - y * cell];
+  const build = (vals) => {
+    if (!vals) return [];
+    const rings = maskToGridRings(vals, change.width, change.height);
+    // V mriežke (y na juh) má vonkajší obrys plné vľavo → záporná plocha; diera kladná.
+    const outers = rings.filter((r) => gridArea(r) < 0 && -gridArea(r) >= minCells);
+    const holes = rings.filter((r) => gridArea(r) > 0);
+    return outers.map((outer) => {
+      const own = holes.filter((h) => inGridRing(h[0][0] + 0.5, h[0][1] + 0.5, outer) || inGridRing(h[0][0], h[0][1], outer));
+      return [outer, ...own].map((r) => smoothRing(r, smooth).map(toLonLat));
+    });
+  };
+  return { lost: build(change.values), gained: build(change.ruValues) };
+}

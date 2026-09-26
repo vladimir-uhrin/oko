@@ -18,7 +18,7 @@
 import * as Cesium from 'cesium';
 import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText, deepstateMirrorRepo } from './data/ukraineDeepState.js';
 import { frontZoneMaterialFor, geoImageMaterialFor, hatchMaterialFor } from './data/screenPatternMaterials.js';
-import { CHANGE_DAYS, FRONT_ZONE_KM, FRONT_ZONE_RU_KM, contactLinePaths, daysBetween, frontZoneRaster, occupiedChangeRaster, pathLengthKm, shiftDay } from './data/ukraineContactLine.js';
+import { CHANGE_DAYS, FRONT_ZONE_KM, FRONT_ZONE_RU_KM, changeAreaPolygons, contactLinePaths, daysBetween, frontZoneRaster, occupiedChangeRaster, pathLengthKm, shiftDay } from './data/ukraineContactLine.js';
 import { UKRAINE_LAND_RINGS } from './data/ukraineLand.js';
 import { fetchUkraineDeepState } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
@@ -101,8 +101,10 @@ export const DEEPSTATE_STYLES = Object.freeze({
     // hlavne na ukrajinskej strane línie (6 km; do okupovaného 2,5 km), hustejšia a
     // výraznejšia šrafa — mirror sivú zónu nemá, toto je jej odvodená náhrada.
     combatBand: Object.freeze({ css: '#f0922e', lineAlpha: 0.92, fillAlpha: 0.26, spacing: 6, thickness: 0.4, uaKm: 6, ruKm: 2.5 }),
-    // KARTA: tmavšia karmínová a mapová modrá, aby sa líšili od oranžového pásu bojov.
-    change: Object.freeze({ gainedCss: '#b3001b', gainedLine: 0.92, gainedFill: 0.38, lostCss: '#1f5fbf', lostAlpha: 0.6, spacing: 5, thickness: 0.42 }),
+    // KARTA (2026-09-26, vlastník: „hmlovinu prerob na jasnejšiu, svetlejšiu s jasnými
+    // vymedzeniami približnými"): namiesto rozmazaného rastra VEKTOROVÉ plochy — obrys po
+    // hranách buniek 0,01° zaoblený (približný), svetlá výplň a jasná svetlá hrana.
+    change: Object.freeze({ mode: 'vector', lostCss: '#8fd3ff', lostFill: 0.45, lostLine: '#e6f6ff', gainedCss: '#ff6b78', gainedFill: 0.4, gainedLine: '#ffd6da', lineWidth: 2 }),
   }),
 });
 
@@ -356,11 +358,38 @@ export function createUkraineDeepStateLayer({
    * Kreslí sa len k snímke, pre ktorú bol rozdiel spočítaný.
    */
   function addChangeEntity() {
-    const old = ds.entities.getById(`${UKRAINE_DEEPSTATE_ID}:change`);
-    if (old) ds.entities.remove(old);
+    const prefix = `${UKRAINE_DEEPSTATE_ID}:change`;
+    for (const e of ds.entities.values.filter((x) => String(x.id).startsWith(prefix))) ds.entities.remove(e);
     const st = DEEPSTATE_STYLES[_style] || DEEPSTATE_STYLES.default;
     const cfg = st.change;
     if (!cfg || !_change || _change.toDay !== _snapshot?.day || !(_change.cells || _change.ruCells)) return;
+    if (cfg.mode === 'vector') {
+      // KARTA: zaoblené plochy s jasnou hranou (changeAreaPolygons), výplň nad pásom, hrana nad líniou.
+      const areas = changeAreaPolygons(_change);
+      const pos = (ring) => ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat));
+      let k = 0;
+      for (const [kind, list, fillCss, fillAlpha, lineCss] of [['change-lost', areas.lost, cfg.lostCss, cfg.lostFill, cfg.lostLine], ['change-gained', areas.gained, cfg.gainedCss, cfg.gainedFill, cfg.gainedLine]]) {
+        for (const rings of list) {
+          k += 1;
+          const outer = pos(rings[0]);
+          ds.entities.add({
+            id: `${prefix}:${k}`,
+            polygon: { hierarchy: new Cesium.PolygonHierarchy(outer, rings.slice(1).map((r) => new Cesium.PolygonHierarchy(pos(r)))), material: Cesium.Color.fromCssColorString(fillCss).withAlpha(fillAlpha), classificationType: Cesium.ClassificationType.BOTH, zIndex: 8 },
+            properties: { deepstate: { kind } },
+          });
+          for (let h = 0; h < rings.length; h += 1) {
+            const line = h ? pos(rings[h]) : outer;
+            ds.entities.add({
+              id: `${prefix}:${k}:line:${h}`,
+              polyline: { positions: [...line, line[0]], width: cfg.lineWidth, material: Cesium.Color.fromCssColorString(lineCss).withAlpha(0.95), clampToGround: true, classificationType: Cesium.ClassificationType.BOTH, zIndex: 11 },
+              properties: { deepstate: { kind } },
+            });
+          }
+        }
+      }
+      requestRender();
+      return;
+    }
     const canvas = paintFrontZoneCanvas(_change, doc.createElement('canvas'));
     const mat = canvas ? frontZoneMaterialFor(canvas, _change.bbox, { zoneCss: cfg.lostCss, zoneAlpha: cfg.lostAlpha, hatchCss: cfg.gainedCss, hatchAlpha: cfg.gainedLine, hatchFillAlpha: cfg.gainedFill, spacing: cfg.spacing, thickness: cfg.thickness }) : null;
     if (!mat) return;

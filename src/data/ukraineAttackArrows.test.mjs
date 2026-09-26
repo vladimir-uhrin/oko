@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   ARROW_BACK_KM, ARROW_HEAD_GAP_KM, ARROW_HEAD_L_KM, ARROW_HEAD_W_KM, ARROW_LEN_MAX, ARROW_LODS, ARROW_LEN_MIN, ARROW_MAX_KM, ARROW_MIN_KM, ARROW_SAMPLES, ARROW_SHAFT_KM,
-  arrowBendSign, arrowScale, attackArrowPath, attackArrowPolygon,
+  ARROW_PAIR_CONVERGE, arrowBendSign, arrowScale, attackArrowPair, attackArrowPath, attackArrowPolygon,
 } from './ukraineAttackArrows.js';
 import { EN_STRINGS, SK_STRINGS } from '../i18nStrings.js';
 import { DEEPSTATE_STYLES } from '../ukraineDeepStateLayer.js';
@@ -98,8 +98,27 @@ test('ARROW_LODS: zblízka pôvodná šípka, z pohľadu na smer väčšia; pás
   // šípka pre ďaleký pohľad je dlhšia, hrot stále 0,6 km pred sídlom
   const from = { lon: 37.8, lat: 49.0 }; const to = { lon: 37.8, lat: 49.0 + 2 / KM };
   const pNear = attackArrowPath(from, to, near); const pFar = attackArrowPath(from, to, far);
-  assert.ok(kmBetween(pFar[0], pFar[pFar.length - 1]) > kmBetween(pNear[0], pNear[pNear.length - 1]) + 3);
+  assert.ok(kmBetween(pFar[0], pFar[pFar.length - 1]) > kmBetween(pNear[0], pNear[pNear.length - 1]) + 1.5);
   assert.ok(Math.abs(kmBetween(pFar[pFar.length - 1], [to.lon, to.lat]) - ARROW_HEAD_GAP_KM) < 0.05);
+  // 2026-09-26 („šípka veľká, radšej dve menšie"): mierka zblízka < 1, z diaľky < 1,5, obe úrovne s dvojicou.
+  assert.ok(near.scale < 1 && far.scale < 1.5 && near.pairOffsetKm > 0 && far.pairOffsetKm > near.pairOffsetKm);
+});
+
+test('attackArrowPair: dve súbežné šípky, na začiatku ±offset, pri hrote bližšie (zbiehajú sa), obe končia pred sídlom', () => {
+  const from = { lon: 37.8, lat: 49.0 }; const to = { lon: 37.8, lat: 49.0 + 6 / KM };
+  const pair = attackArrowPair(from, to, { offsetKm: 1.2, bend: 0 });
+  assert.equal(pair.length, 2);
+  const kx = KM * Math.cos(49.03 * Math.PI / 180);
+  const startGap = Math.abs(pair[0][0][0] - pair[1][0][0]) * kx;
+  const endGap = Math.abs(pair[0].at(-1)[0] - pair[1].at(-1)[0]) * kx;
+  // Pri línii 2,4 km od seba, pri sídle 2,4 × ARROW_PAIR_CONVERGE; začiatok šípky leží za líniou
+  // (predĺženie dozadu), preto je tam odstup väčší a hrot 0,6 km pred sídlom o niečo väčší než 0,84.
+  assert.ok(startGap > 2.4 && startGap < 4, `štart za líniou širšie (${startGap.toFixed(2)})`);
+  assert.ok(endGap > 2.4 * ARROW_PAIR_CONVERGE && endGap < 1.3, `hrot bližšie (${endGap.toFixed(2)})`);
+  assert.ok(pair.every((p) => p.at(-1)[1] < to.lat), 'obe pred sídlom');
+  assert.equal(attackArrowPair(from, from), null);
+  const src = readFileSync(new URL('./ukraineReportLayer.js', import.meta.url), 'utf8');
+  assert.match(src, /const pair = attackArrowPair\(cp, rec, \{[^}]*offsetKm: lod\.pairOffsetKm \}\) \|\| \[\];/);
 });
 
 test('KARTA: ostré hrany — plná výplň s tmavým obrysom, bez odvodenej línie; pás bojov s nižšou výplňou', () => {

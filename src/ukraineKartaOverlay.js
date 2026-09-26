@@ -24,7 +24,8 @@ export const KARTA_LEGEND_COLORS = Object.freeze({
   pinUa: '#5b8fd0', pinRu: '#d0554a', pinContested: '#f0a53a',
   combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a', band: '#f0922e',
   // Zmena za týždeň (DEEPSTATE_STYLES.karta.change): obsadené karmínová šrafa, oslobodené modrá.
-  gained: '#b3001b', lost: '#1f5fbf',
+  // Zmena za 7 dní na KARTE = svetlé plochy s jasnou hranou (DEEPSTATE_STYLES.karta.change).
+  gained: '#ff6b78', lost: '#8fd3ff',
   attack: '#ff3b30',
 });
 
@@ -125,7 +126,7 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
     // Zmena za týždeň: vzorky len keď je rozdiel spočítaný a naozaj niečo zmenil.
     const ch = deepstate.change;
     if (ch && Number.isFinite(ch.days)) {
-      if (ch.gainedCells > 0) items.push({ key: 'gained', colorCss: c.gained, pattern: 'hatch', label: translate('ukraine.karta.legend.gained', { days: ch.days }) });
+      if (ch.gainedCells > 0) items.push({ key: 'gained', colorCss: c.gained, label: translate('ukraine.karta.legend.gained', { days: ch.days }) });
       if (ch.lostCells > 0) items.push({ key: 'lost', colorCss: c.lost, label: translate('ukraine.karta.legend.lost', { days: ch.days }) });
     }
   } else if (control?.shown) {

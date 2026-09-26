@@ -47,6 +47,28 @@ export const LOD_CLUSTER_ABOVE_M = 600_000;
 export const LOD_CHIPS_ABOVE_M = 150_000;
 export const MAX_CARDS = 6;
 export const MAX_CHIPS = 24;
+/**
+ * Kartičky aj pre udalosti tesne za okrajom záberu (2026-09-26, vlastník: „mal som tam aj
+ * kartičky s news a tie zmizli" — bližší výrez smeru zhora zachytil 1 udalosť z 340; správy
+ * sú často geokódované len na oblasť, napr. „Kharkiv Oblast" ~90 km od Lymanu). Okolie =
+ * záber zväčšený o tento podiel šírky/výšky na každú stranu. Počet „v zábere" ostáva prísny.
+ */
+export const NEAR_VIEW_FRACTION = 0.6;
+/** Odstup kotvy od okraja obrazovky (px), keď je miesto udalosti mimo záberu. */
+export const EDGE_INSET_PX = 26;
+/** Rezerva okolo panelov pre kartičku pri okraji (px): ~polovica šírky malej karty a jej výška. */
+export const EDGE_CARD_PAD = Object.freeze({ x: 60, y: 72 });
+/**
+ * Kotva kartičky v okne: miesto na obrazovke ostáva; mimo nej sa pritiahne k okraju
+ * (odstup `inset`) a vráti uhol (°) od pritiahnutej kotvy k skutočnému miestu pre šípku. Pure.
+ * @returns {{x:number, y:number, edge:boolean, angleDeg:number}}
+ */
+export function clampAnchorToViewport(x, y, vw, vh, inset = EDGE_INSET_PX) {
+  const cx = Math.min(Math.max(x, inset), vw - inset);
+  const cy = Math.min(Math.max(y, inset), vh - inset);
+  const edge = cx !== x || cy !== y;
+  return { x: cx, y: cy, edge, angleDeg: edge ? (Math.atan2(y - cy, x - cx) * 180) / Math.PI : 0 };
+}
 const ANCHOR_GAP_PX = 16;
 const LIFT_BATCH = 200;
 const HOVER_PICK_MS = 90;
@@ -115,6 +137,24 @@ export function obstacleBoxes(rects, origin = { left: 0, top: 0 }, viewport = { 
   return out;
 }
 const insideBox = (p, b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+/**
+ * Kotva pri okraji (clampAnchorToViewport) pod panelom sa posúva k stredu okna po krokoch
+ * `step` px, kým nie je mimo všetkých prekážok; uhol šípky sa prepočíta k skutočnému miestu
+ * `target`. Bez voľného miesta null. Pure.
+ */
+export function nudgeEdgeAnchor(anchor, obstacles, vw, vh, target, { step = 12, maxSteps = 80, pad = EDGE_CARD_PAD } = {}) {
+  let x = anchor.x; let y = anchor.y;
+  // Prekážky zväčšené o miesto pre kartičku (`pad`), inak by kotva sadla tesne vedľa panela a kartička sa nezmestila.
+  const grown = (obstacles || []).map((o) => ({ x: o.x - pad.x, y: o.y - pad.y, w: o.w + 2 * pad.x, h: o.h + 2 * pad.y }));
+  const blocked = (px, py) => grown.some((o) => insideBox({ x: px, y: py }, o));
+  for (let i = 0; i < maxSteps && blocked(x, y); i += 1) {
+    const dx = vw / 2 - x; const dy = vh / 2 - y; const d = Math.hypot(dx, dy);
+    if (d < step) break;
+    x += (dx / d) * step; y += (dy / d) * step;
+  }
+  if (blocked(x, y)) return null;
+  return { x, y, edge: true, angleDeg: (Math.atan2(target.y - y, target.x - x) * 180) / Math.PI };
+}
 /**
  * Posunie obdĺžnik na najbližšie miesto mimo všetkých prekážok (v okne); inak ho
  * nechá. Kandidáti sú krížový súčin okrajov prekážok v OBOCH osiach — pri paneli
@@ -234,6 +274,8 @@ export function createUkraineEventsLayer({
   let _hoverId = null;
   let _lod = 'cluster';
   let _inView = [];
+  let _nearOnly = []; // udalosti za okrajom záberu (NEAR_VIEW_FRACTION) — kartičky pri okraji
+  let _nearIds = new Set();
   let _cards = new Map(); // id -> { model, ev, el, pin, line, cartesian, kind: 'card'|'chip' }
   let _chipExtra = new Map(); // id čipu -> počet ďalších udalostí toho istého miesta
   const _chipOwner = new Map(); // miesto -> id udalosti s čipom
@@ -324,11 +366,12 @@ export function createUkraineEventsLayer({
   function viewRect() {
     try { return scene.camera.computeViewRectangle(Cesium.Ellipsoid.WGS84) || null; } catch { return null; }
   }
-  function eventsInView() {
+  function eventsInView(grow = 0) {
     const rect = viewRect();
     if (!rect) return [];
-    const w = Cesium.Math.toDegrees(rect.west); const e = Cesium.Math.toDegrees(rect.east);
-    const s = Cesium.Math.toDegrees(rect.south); const n = Cesium.Math.toDegrees(rect.north);
+    let w = Cesium.Math.toDegrees(rect.west); let e = Cesium.Math.toDegrees(rect.east);
+    let s = Cesium.Math.toDegrees(rect.south); let n = Cesium.Math.toDegrees(rect.north);
+    if (grow > 0 && e > w && n > s) { const dx = (e - w) * grow; const dy = (n - s) * grow; w -= dx; e += dx; s -= dy; n += dy; }
     return _filtered.filter((ev) => Number.isFinite(ev.lat) && ev.lat >= s && ev.lat <= n && ev.lon >= w && ev.lon <= e);
   }
   const rank = (a, b) => (SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity]) || (b.t - a.t) || ((b.reports || 0) - (a.reports || 0));
@@ -338,11 +381,18 @@ export function createUkraineEventsLayer({
     if (_destroyed) return;
     _lod = lodForHeight(cameraHeight());
     _inView = eventsInView();
+    // Okolie záberu len pri kartách (priblížený pohľad) — zďaleka by pritiahlo polovicu Ukrajiny.
+    const inIds = new Set(_inView.map((ev) => ev.id));
+    _nearOnly = _lod === 'cards' ? eventsInView(NEAR_VIEW_FRACTION).filter((ev) => !inIds.has(ev.id)) : [];
+    _nearIds = new Set(_nearOnly.map((ev) => ev.id));
     const wanted = new Map(); // id -> 'card'|'chip'
     if (_lod !== 'cluster') {
-      const cards = _lod === 'cards' ? pickCards(_inView, { max: MAX_CARDS }) : [];
+      // Najprv udalosti v zábere, zvyšné miesta vyplnia tie za okrajom (kartička pri okraji so šípkou).
+      const cardsIn = _lod === 'cards' ? pickCards(_inView, { max: MAX_CARDS }) : [];
+      const cardsNear = _lod === 'cards' && cardsIn.length < MAX_CARDS ? pickCards(_nearOnly, { max: MAX_CARDS - cardsIn.length }) : [];
+      const cards = [...cardsIn, ...cardsNear];
       for (const ev of cards) wanted.set(ev.id, 'card');
-      const rest = [..._inView].sort(rank).filter((ev) => !wanted.has(ev.id) && Number.isFinite(ev.lat) && !ev.noCard);
+      const rest = [...[..._inView].sort(rank), ...[..._nearOnly].sort(rank)].filter((ev) => !wanted.has(ev.id) && Number.isFinite(ev.lat) && !ev.noCard);
       const chipMax = _lod === 'cards' ? Math.max(0, MAX_CHIPS - cards.length) : MAX_CHIPS;
       // Jeden čip na miesto (Izium ×3 → jeden čip „Izium +2"); ostatné udalosti
       // miesta ostávajú bodmi a vojdú do karty po kliknutí.
@@ -595,10 +645,17 @@ export function createUkraineEventsLayer({
       let win = null;
       if (ok) {
         win = Cesium.SceneTransforms.worldToWindowCoordinates(scene, c.cartesian, scratch2);
-        if (!win || !Number.isFinite(win.x) || !Number.isFinite(win.y) || win.x < -40 || win.y < -40 || win.x > vw + 40 || win.y > vh + 40) ok = false;
+        if (!win || !Number.isFinite(win.x) || !Number.isFinite(win.y)) ok = false;
+      }
+      let edge = null;
+      if (ok && (win.x < -40 || win.y < -40 || win.x > vw + 40 || win.y > vh + 40)) {
+        // Za okrajom: len udalosti z okolia záberu (NEAR_VIEW_FRACTION) — kotva k okraju, šípka k miestu.
+        // Kotva k okraju a spod panelov k stredu (inak by ju rozloženie ako „pod panelom“ skrylo).
+        if (_nearIds.has(c.ev.id)) edge = nudgeEdgeAnchor(clampAnchorToViewport(win.x, win.y, vw, vh), obstacles, vw, vh, { x: win.x, y: win.y });
+        if (!edge) ok = false;
       }
       if (!ok) { c.el.style.visibility = 'hidden'; c.pin.style.visibility = 'hidden'; if (c.line) c.line.style.visibility = 'hidden'; continue; }
-      visible.push({ c, x: win.x, y: win.y });
+      visible.push(edge ? { c, x: edge.x, y: edge.y, edge } : { c, x: win.x, y: win.y, edge: null });
     }
     // Karty najprv (väčšie, dôležitejšie), potom čipy; vybraná karta úplne prvá.
     visible.sort((a, b) => (Number(b.c.ev.id === _selectedId) - Number(a.c.ev.id === _selectedId)) || (Number(b.c.kind === 'card') - Number(a.c.kind === 'card')) || rank(a.c.ev, b.c.ev));
@@ -610,10 +667,14 @@ export function createUkraineEventsLayer({
     for (const p of visible) {
       const box = boxes.get(p.c.ev.id);
       // Bez voľného miesta (alebo kotva pod panelom) radšej nič; bod ostane a klik kartu otvorí.
-      if (!box) { p.c.el.style.visibility = 'hidden'; if (p.c.line) p.c.line.style.visibility = 'hidden'; p.c.pin.style.visibility = p.c.kind === 'card' ? 'visible' : 'hidden'; if (p.c.kind === 'card') { const half = 6; p.c.pin.style.transform = `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)`; } continue; }
+      // Kartička pri okraji bez miesta: skryť aj značku (štvorček pri okraji by klamal o polohe).
+      if (!box) { p.c.el.style.visibility = 'hidden'; if (p.c.line) p.c.line.style.visibility = 'hidden'; p.c.pin.style.visibility = p.c.kind === 'card' && !p.edge ? 'visible' : 'hidden'; if (p.c.kind === 'card' && !p.edge) { const half = 6; p.c.pin.style.transform = `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)`; } continue; }
       const half = (p.c.kind === 'card' ? 6 : 4);
       p.c.pin.style.visibility = 'visible';
-      p.c.pin.style.transform = `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)`;
+      // Miesto mimo záberu: značka = šípka pri okraji otočená k miestu; kartička o niečo tlmenejšia.
+      p.c.pin.classList.toggle('is-edge', Boolean(p.edge));
+      p.c.el.classList.toggle('is-edge', Boolean(p.edge));
+      p.c.pin.style.transform = `translate(${Math.round(p.x - half)}px, ${Math.round(p.y - half)}px)${p.edge ? ` rotate(${p.edge.angleDeg.toFixed(1)}deg)` : ''}`;
       p.c.el.style.visibility = 'visible';
       p.c.el.style.transform = `translate(${Math.round(box.x)}px, ${Math.round(box.y)}px)`;
       if (p.c.line) {

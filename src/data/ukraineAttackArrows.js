@@ -90,9 +90,37 @@ export function attackArrowPath(from, to, {
  * inak by bola 10–30 px čiarka. Rozsah dĺžok (km) platí pre attackArrowPath.
  */
 export const ARROW_LODS = Object.freeze([
-  Object.freeze({ id: 'near', near: 0, far: 90_000, scale: 1, lenMinKm: ARROW_LEN_MIN, lenMaxKm: ARROW_LEN_MAX }),
-  Object.freeze({ id: 'far', near: 90_000, far: 460_000, scale: 2, lenMinKm: 11, lenMaxKm: 18 }),
+  // 2026-09-26 (vlastník: „šípka veľká, radšej dve menšie"): každá úroveň kreslí DVOJICU
+  // menších šípok vedľa seba (ako u Rybara); pairOffsetKm = bočný odstup na začiatku.
+  Object.freeze({ id: 'near', near: 0, far: 90_000, scale: 0.7, lenMinKm: ARROW_LEN_MIN, lenMaxKm: ARROW_LEN_MAX, pairOffsetKm: 1.1 }),
+  Object.freeze({ id: 'far', near: 90_000, far: 460_000, scale: 1.15, lenMinKm: 9, lenMaxKm: 15, pairOffsetKm: 2 }),
 ]);
+/** Koniec dvojice sa zbieha k sídlu: bočný odstup pri hrote = tento podiel odstupu na začiatku. */
+export const ARROW_PAIR_CONVERGE = 0.35;
+
+/**
+ * Dvojica šípok od línie k sídlu (2026-09-26, „radšej dve menšie"): dve cesty
+ * attackArrowPath posunuté kolmo na smer o ±offsetKm na začiatku a
+ * ±offsetKm·ARROW_PAIR_CONVERGE pri hrote (mierne sa zbiehajú), prehnuté na tú
+ * istú stranu, aby ostali súbežné. Null ako attackArrowPath. Pure.
+ */
+export function attackArrowPair(from, to, { offsetKm = 1.1, converge = ARROW_PAIR_CONVERGE, ...opts } = {}) {
+  if (!from || !to || ![from.lon, from.lat, to.lon, to.lat].every(Number.isFinite)) return null;
+  const lat0 = (from.lat + to.lat) / 2;
+  const kx = KM_PER_DEG * Math.cos((lat0 * Math.PI) / 180);
+  const vx = (to.lon - from.lon) * kx; const vy = (to.lat - from.lat) * KM_PER_DEG;
+  const d = Math.hypot(vx, vy);
+  if (!(d > 0)) return null;
+  const px = -vy / d; const py = vx / d; // jednotková kolmica v km
+  const shift = (p, km) => ({ lon: p.lon + (px * km) / kx, lat: p.lat + (py * km) / KM_PER_DEG });
+  const out = [];
+  for (const sgn of [1, -1]) {
+    const path = attackArrowPath(shift(from, sgn * offsetKm), shift(to, sgn * offsetKm * converge), opts);
+    if (!path) return null;
+    out.push(path);
+  }
+  return out;
+}
 
 /** Mierka tela šípky podľa počtu útokov smeru: 1–9 = 1, 10–24 = 1,25, 25+ = 1,5; bez útokov 0 (nekreslí sa). Pure. */
 export function arrowScale(attacks) {

@@ -100,7 +100,7 @@ test('i18n: kľúče zmeny v oboch jazykoch hovoria „odvodené"', () => {
 test('vrstva DeepState: zmena sa načíta po snímke, kreslí sa ako obdĺžnik nad pásmom a stav ju hlási', () => {
   const src = readFileSync(new URL('../ukraineDeepStateLayer.js', import.meta.url), 'utf8');
   assert.match(src, /change: Object\.freeze\(\{ gainedCss: '#ff2d55'/, 'štýl default');
-  assert.match(src, /change: Object\.freeze\(\{ gainedCss: '#b3001b'/, 'štýl karta');
+  assert.match(src, /change: Object\.freeze\(\{ mode: 'vector', lostCss: '#8fd3ff'/, 'štýl karta: vektorové plochy s jasnou hranou (2026-09-26)');
   assert.match(src, /const wantDay = shiftDay\(day, -CHANGE_DAYS\);/);
   assert.match(src, /snap\.day < day/, 'staršia snímka musí byť naozaj staršia (fallback proxy ide len dozadu)');
   assert.match(src, /if \(_destroyed \|\| _snapshot\?\.day !== day\) return;/, 'výsledok pre iný deň sa zahodí');

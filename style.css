@@ -11682,6 +11682,10 @@ body.oko-mobile #oko-share {
    (2026-09-24: značky iných udalostí sa kreslili CEZ karty). */
 .oko-ukr-pin.sev-minor { width: 8px; height: 8px; }
 .oko-ukr-pin.sev-major { width: 10px; height: 10px; }
+/* Udalosť za okrajom záberu (2026-09-26): značka = šípka pri okraji otočená k miestu
+   (ukraineEventsLayer.clampAnchorToViewport), kartička tlmenejšia. */
+.oko-ukr-pin.is-edge { width: 12px; height: 12px; border-radius: 0; clip-path: polygon(0 15%, 100% 50%, 0 85%, 22% 50%); box-shadow: none; transform-origin: 50% 50%; }
+.oko-ukr-card.is-edge, .oko-ukr-minichip.is-edge { opacity: 0.86; border-style: dashed; }
 .oko-ukr-line {
   position: absolute; top: 0; left: 0; height: 1.5px; transform-origin: 0 0; pointer-events: none; will-change: transform, width; z-index: 1;
   background: linear-gradient(90deg, var(--ukr-accent, #39d0ff), rgba(255, 255, 255, 0.15)); opacity: 0.9;
@@ -11944,8 +11948,8 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 /* Zmena za týždeň (2026-09-26): obsadené = hustá karmínová šrafa, oslobodené = plná modrá; farby = DEEPSTATE_STYLES.change. */
 .oko-ukr-tl-ctl-item.is-ds-gained .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(255, 45, 85, 0.9) 0 1.5px, rgba(255, 45, 85, 0.3) 1.5px 4px); border-color: #ff2d55; }
 .oko-ukr-tl-ctl-item.is-ds-lost .oko-ukr-tl-ctl-sw { background: rgba(47, 155, 255, 0.55); border-color: #2f9bff; }
-.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-gained .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(179, 0, 27, 0.92) 0 1.5px, rgba(179, 0, 27, 0.38) 1.5px 4px); border-color: #b3001b; }
-.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-lost .oko-ukr-tl-ctl-sw { background: rgba(31, 95, 191, 0.6); border-color: #1f5fbf; }
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-gained .oko-ukr-tl-ctl-sw { background: rgba(255, 107, 120, 0.4); border-color: #ffd6da; }
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-lost .oko-ukr-tl-ctl-sw { background: rgba(143, 211, 255, 0.45); border-color: #e6f6ff; }
 .oko-ukr-tl-ds-change:not(:empty) { cursor: help; }
 .oko-ukr-tl-ctl-item.is-ds-zone-ru .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(135deg, rgba(255, 75, 62, 0.75) 0 1.5px, rgba(224, 85, 63, 0.18) 1.5px 5px); border-color: rgba(255, 75, 62, 0.55); }
 .oko-ukr-tl-ds.is-karta .is-ds-zone-ru { display: none; }
