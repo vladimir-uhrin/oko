@@ -184,11 +184,25 @@ export function frontSceneLabel(scene, translate = t) {
  * @param {{overview?: boolean}} [o]
  * @returns {{lon: number, lat: number, heightM: number, pitchDeg: number, headingDeg: number}}
  */
-export function frontSceneFraming(rectDegrees, { overview = false } = {}) {
+/**
+ * Výrez smeru v KARTE (2026-09-26, vlastník: „sprav" — ako mapa Rybar): zhora
+ * (−80°) a zhruba o polovicu bližšie. KARTA nemá Google 3D dlaždice, takže dôvod
+ * šikmého −64° (CPU pri horizonte plnom dlaždíc) tu neplatí.
+ */
+export const FRONT_KARTA_PITCH_DEG = -80;
+export const FRONT_KARTA_HEIGHT_PER_DEG = 72_000;
+export const FRONT_KARTA_MIN_HEIGHT_M = 55_000;
+export function frontSceneFraming(rectDegrees, { overview = false, karta = false } = {}) {
   const [w, s, e, n] = rectDegrees;
   const lon = (w + e) / 2;
   const lat = (s + n) / 2;
   const spanDeg = Math.max(Math.abs(e - w), Math.abs(n - s));
+  if (karta && !overview) {
+    const heightM = Math.min(1_400_000, Math.max(FRONT_KARTA_MIN_HEIGHT_M, spanDeg * FRONT_KARTA_HEIGHT_PER_DEG));
+    // Kamera južne od stredu tak, aby os pohľadu mierila do stredu rámca.
+    const backoffDeg = heightM / Math.tan((Math.abs(FRONT_KARTA_PITCH_DEG) * Math.PI) / 180) / 111_320;
+    return { lon, lat: lat - backoffDeg, heightM, pitchDeg: FRONT_KARTA_PITCH_DEG, headingDeg: 0 };
+  }
   // Strmšie než úžiny (−32°): pohľad k horizontu núti Google 3D dlaždice
   // streamovať obrovskú plochu (používateľ 2026-09-19: vysoké CPU) a front sa
   // číta ako mapa, nie panoráma.

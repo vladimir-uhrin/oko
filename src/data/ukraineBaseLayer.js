@@ -57,6 +57,8 @@ export const UKRAINE_HOVER_PICK_PX = 7;
 export const FALLBACK_HEIGHT_M = 200;
 const FONT = '"IBM Plex Mono", monospace';
 const LABEL_OUTLINE = '#0b1622';
+/** Písmo popiskov v KARTE (Inter sa načítava v index.html, váhy do 600). */
+export const KARTA_LABEL_FAMILY = '"Inter", "Segoe UI", Roboto, system-ui, sans-serif';
 /**
  * Štýlové režimy podkladu (setStyle): KARTA = polovičné hrúbky čiar, menšie body
  * a popisy — používateľ 2026-09-20: „chcel som jemnejšie línie". Násobky sa
@@ -69,7 +71,8 @@ export const BASE_LABEL_OUTLINE = Object.freeze({
 });
 export const UKRAINE_BASE_STYLES = Object.freeze({
   default: Object.freeze({ line: 1, point: 1, font: 1 }),
-  karta: Object.freeze({ line: 0.5, point: 0.72, font: 0.9 }),
+  // 2026-09-26 („sprav" — ako Rybar): väčšie a tučné bezpätkové popisy, sídla biele.
+  karta: Object.freeze({ line: 0.5, point: 0.72, font: 1.15, family: KARTA_LABEL_FAMILY, weightMin: 600, placeLabelCss: '#f4f7fa' }),
 });
 /** Farby špendlíkov podľa strany (KARTA K3, ako vo vzorke): UA modrá, RU červená, sporné oranžová. */
 export const SIDE_PIN_COLORS = Object.freeze({ ua: '#5b8fd0', ru: '#d0554a', contested: '#f0a53a' });
@@ -381,14 +384,15 @@ export function createUkraineBaseLayer({
   let _styleMode = 'default';
   const _styled = new Set();
   const styleScale = () => UKRAINE_BASE_STYLES[_styleMode] || UKRAINE_BASE_STYLES.default;
-  const fontString = ({ px, weight, italic }, scale) => `${italic ? 'italic ' : ''}${weight} ${Math.round(px * scale * 10) / 10}px ${FONT}`;
+  const fontString = ({ px, weight, italic }, s) => `${italic ? 'italic ' : ''}${Math.max(weight, s.weightMin || 0)} ${Math.round(px * s.font * 10) / 10}px ${s.family || FONT}`;
   function applyStyleItem(item) {
     const s = styleScale();
     try {
       if (item.line != null && item.entity.polyline) item.entity.polyline.width = item.line * s.line;
       if (item.point != null && item.entity.point) item.entity.point.pixelSize = item.point * s.point;
       if (item.font && item.entity.label) {
-        item.entity.label.font = fontString(item.font, s.font);
+        item.entity.label.font = fontString(item.font, s);
+        if (item.color) item.entity.label.fillColor = Cesium.Color.fromCssColorString(s.placeLabelCss || item.color);
         const o = BASE_LABEL_OUTLINE[_styleMode] || BASE_LABEL_OUTLINE.default;
         item.entity.label.outlineWidth = o.width;
         item.entity.label.outlineColor = Cesium.Color.fromCssColorString(LABEL_OUTLINE).withAlpha(o.alpha);
@@ -597,7 +601,7 @@ export function createUkraineBaseLayer({
     });
     const record = { id: props.id, kind: 'place', cls: props.cls, props, lon, lat, position, entity, importance: placeImportance(props), labelFar: placeLabelDisplayCondition(props.cls)[1], labelShown: true, lifted: false, reservedHidden: false };
     _byEntityId.set(entityId, record);
-    record.styleItem = registerStyle(entity, { point: style.pointPx, font: { px: style.fontPx, weight: style.weight, italic: false } });
+    record.styleItem = registerStyle(entity, { point: style.pointPx, font: { px: style.fontPx, weight: style.weight, italic: false }, color: style.color });
     record.pinCss = style.color;
     applySide(record);
     if (props.cls !== 'village') applyGlow(record);

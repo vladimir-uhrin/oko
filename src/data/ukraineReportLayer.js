@@ -90,6 +90,8 @@ export function dayText(day) {
 }
 /** Tmavý lem popisku sídla (px): KARTA 2 (má podložku), bežný štýl 4 — nad šrafou a ortofotom. Pure. */
 export function placeLabelOutlinePx(style) { return style === 'karta' ? 2 : 4; }
+/** Písmo popisku sídla z hlásenia: v KARTE bezpätkové tučné ako podklad (2026-09-26, ako Rybar), inak Plex Mono. Pure. */
+export function placeLabelFont(style) { return style === 'karta' ? '600 12.5px "Inter", "Segoe UI", Roboto, system-ui, sans-serif' : `500 11px ${FONT}`; }
 /** Vodorovný odstup popisku od kotvy: pri blesku od jeho polovice, inak 8 px. Pure. */
 export function placeLabelOffsetX(useBolt, boltSize = 0) { return useBolt ? Math.round(boltSize / 2) + 4 : 8; }
 
@@ -460,7 +462,7 @@ export function createUkraineReportLayer({
         },
         label: {
           text,
-          font: `500 11px ${FONT}`,
+          font: placeLabelFont(_styleMode),
           fillColor: color,
           outlineColor: outline,
           // Na KARTE tmavá podložka, aby amber popisok bojov čítal nad hustými
@@ -589,6 +591,7 @@ export function createUkraineReportLayer({
         e.label.pixelOffset = new Cesium.Cartesian2(placeLabelOffsetX(useBolt, rec.boltSize || 0), 0);
         e.label.showBackground = _styleMode === 'karta';
         e.label.outlineWidth = placeLabelOutlinePx(_styleMode);
+        e.label.font = placeLabelFont(_styleMode);
       }
     } catch { /* entita už preč */ }
   }

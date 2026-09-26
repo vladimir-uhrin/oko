@@ -724,7 +724,8 @@ async function init() {
       flyToRegion: (scene) => {
         if (!viewer?.camera?.flyTo || !scene?.rectDegrees) return null;
         viewer.trackedEntity = undefined;
-        const framing = frontSceneFraming(scene.rectDegrees, { overview: Boolean(scene.overview) });
+        // Smer sa otvára v KARTE (runFrontScene) → výrez zhora a bližšie ako mapa Rybar.
+        const framing = frontSceneFraming(scene.rectDegrees, { overview: Boolean(scene.overview), karta: !scene.overview });
         viewer.camera.flyTo({
           destination: Cesium.Cartesian3.fromDegrees(framing.lon, framing.lat, framing.heightM),
           orientation: { heading: Cesium.Math.toRadians(framing.headingDeg), pitch: Cesium.Math.toRadians(framing.pitchDeg), roll: 0 },

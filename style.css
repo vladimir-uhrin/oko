@@ -11931,6 +11931,10 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-chip { font-weight: 700; letter-spacing: 0.06em; }
 /* DeepState legenda: okupované výplň, šedá zóna, oslobodené, smer útoku, letisko */
 .oko-ukr-tl-ctl-item.is-ds-occupied .oko-ukr-tl-ctl-sw { background: rgba(224, 85, 63, 0.32); border-color: rgba(224, 85, 63, 0.9); }
+/* KARTA (2026-09-26, ako Rybar): bordové okupované a modrý tón ukrajinskej strany; mimo KARTY tón nie je. */
+.oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-occupied .oko-ukr-tl-ctl-sw { background: rgba(142, 35, 48, 0.64); border-color: #3d0a0e; }
+.oko-ukr-tl-ctl-item.is-ds-ua .oko-ukr-tl-ctl-sw { background: rgba(47, 106, 163, 0.45); border-color: rgba(47, 106, 163, 0.9); }
+.oko-ukr-tl-ds:not(.is-karta) .is-ds-ua { display: none; }
 /* Línia kontaktu (odvodená z polygónov): čiara s tmavým lemom ako na mape. */
 .oko-ukr-tl-ctl-item.is-ds-contact .oko-ukr-tl-ctl-sw { height: 3px; border-radius: 1px; background: #ff4b3e; border: 0; box-shadow: 0 0 0 1px rgba(11, 22, 34, 0.85); }
 .oko-ukr-tl-ds.is-karta .oko-ukr-tl-ctl-item.is-ds-contact .oko-ukr-tl-ctl-sw { background: #b3261e; box-shadow: none; height: 2px; }

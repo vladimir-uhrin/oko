@@ -20,7 +20,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** Farby legendy (zhodné s vrstvami KARTA). */
 export const KARTA_LEGEND_COLORS = Object.freeze({
-  occupied: '#d0554a', grey: '#8a8f98', ru: '#e0553f', contact: '#b3261e',
+  occupied: '#8e2330', uaArea: '#2f6aa3', grey: '#8a8f98', ru: '#e0553f', contact: '#b3261e',
   pinUa: '#5b8fd0', pinRu: '#d0554a', pinContested: '#f0a53a',
   combat: '#f87171', road: '#2f5ea8', glow: '#ff5a4a', band: '#f0922e',
   // Zmena za týždeň (DEEPSTATE_STYLES.karta.change): obsadené karmínová šrafa, oslobodené modrá.
@@ -110,6 +110,8 @@ export function kartaLegendItems({ report = null, deepstate = null, control = nu
   const items = [];
   if (deepstateDraws(deepstate)) {
     items.push({ key: 'occupied', colorCss: c.occupied, label: translate('ukraine.karta.legend.occupied') });
+    // Tón ukrajinskej strany kreslí len štýl karta (DEEPSTATE_STYLES.karta.uaTint).
+    if (deepstate.style === 'karta') items.push({ key: 'ua-area', colorCss: c.uaArea, label: translate('ukraine.karta.legend.ua-area') });
     // KARTA (2026-09-26) odvodenú líniu nekreslí — hranu robí obrys polygónu; vzorka len mimo štýlu karta.
     if (deepstate.contact > 0 && deepstate.style !== 'karta') items.push({ key: 'contact', colorCss: c.contact, line: true, label: translate('ukraine.karta.legend.contact') });
     // Mirror šedú zónu nemá — namiesto nej je oranžovo šrafovaný pás cez líniu, odvodený

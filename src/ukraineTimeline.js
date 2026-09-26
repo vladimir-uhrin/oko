@@ -217,6 +217,7 @@ export function createUkraineTimeline({
     dsBox.appendChild(dsChip);
     const sw = (cls, text) => { const s = el('span', `oko-ukr-tl-ctl-item ${cls}`); s.appendChild(el('i', 'oko-ukr-tl-ctl-sw')); s.appendChild(el('span', '', text)); return s; };
     dsBox.appendChild(sw('is-ds-occupied', translate('ukraine.ds.occupied')));
+    dsBox.appendChild(sw('is-ds-ua', translate('ukraine.ds.ua-area')));
     dsBox.appendChild(sw('is-ds-contact', translate('ukraine.ds.contact')));
     dsBox.appendChild(sw('is-ds-zone', translate('ukraine.ds.zone')));
     dsBox.appendChild(sw('is-ds-zone-ru', translate('ukraine.ds.zone-ru')));

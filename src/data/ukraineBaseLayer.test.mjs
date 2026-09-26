@@ -328,7 +328,7 @@ test('getPlaceIndex: mestá + obce (obce sa pre index dotiahnu aj zďaleka, sní
   assert.equal(index.get('ямпіль')[0].id, 3, 'index nesie OSM id (pre rezerváciu)');
 });
 
-test('setStyle karta: čiary polovičné, body a písma menšie (aj obce pridané neskôr), default vráti pôvodné, neznámy režim = default', async () => {
+test('setStyle karta: čiary polovičné, body menšie, popisy väčšie a tučné (aj obce pridané neskôr), default vráti pôvodné, neznámy režim = default', async () => {
   const camera = { height: 120_000, lon: 37.8, lat: 48.97 };
   const { layer, viewer, clock } = make({ camera });
   await layer.show();
@@ -345,7 +345,8 @@ test('setStyle karta: čiary polovičné, body a písma menšie (aj obce pridan�
   assert.equal(road.polyline.width, baseRoad * 0.5);
   assert.equal(river.polyline.width, baseRiver * 0.5);
   assert.ok(Math.abs(city.point.pixelSize - basePx * 0.72) < 1e-9);
-  assert.match(city.label.font, /11\.7px/, '13 px × 0,9');
+  // 2026-09-26 (vlastník: „sprav“ — väčšie tučné popisy ako Rybar): 13 px × 1,15, Inter 600; čiary a body ostávajú jemné.
+  assert.match(city.label.font, /^600 15px "Inter"/, '13 px × 1,15 ≈ 15 px, Inter 600');
   assert.ok(Math.abs(villageRecords.get(3).entity.point.pixelSize - 3.5 * 0.72) < 1e-9, 'obec v kohorte tiež');
   // obec pridaná až v režime karta dostane násobok hneď pri vzniku
   viewer.camera.positionCartographic.height = 500_000;

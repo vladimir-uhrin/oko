@@ -17,7 +17,7 @@
 
 import * as Cesium from 'cesium';
 import { DEEPSTATE_COLORS, DEEPSTATE_FILL_ALPHA, deepstateStampText, deepstateMirrorRepo } from './data/ukraineDeepState.js';
-import { frontZoneMaterialFor, hatchMaterialFor } from './data/screenPatternMaterials.js';
+import { frontZoneMaterialFor, geoImageMaterialFor, hatchMaterialFor } from './data/screenPatternMaterials.js';
 import { CHANGE_DAYS, FRONT_ZONE_KM, FRONT_ZONE_RU_KM, contactLinePaths, daysBetween, frontZoneRaster, occupiedChangeRaster, pathLengthKm, shiftDay } from './data/ukraineContactLine.js';
 import { UKRAINE_LAND_RINGS } from './data/ukraineLand.js';
 import { fetchUkraineDeepState } from './data/ukraineEventsClient.js';
@@ -82,9 +82,13 @@ export const DEEPSTATE_STYLES = Object.freeze({
     // výplň s ostrým tmavým obrysom, odvodená línia kontaktu sa v KARTE nekreslí
     // (kľukatila sa v páse bojov ako pílka). Pásmo sa z nej ďalej počíta.
     contact: null,
-    fillCss: Object.freeze({ occupied: '#b8352f', crimea: '#a33a33', ordlo: '#a33a33', tuzla: '#a33a33' }),
-    fillAlpha: Object.freeze({ occupied: 0.46, crimea: 0.36, ordlo: 0.36, tuzla: 0.36 }),
-    outlineCss: Object.freeze({ occupied: '#5e0f0f', crimea: '#5e0f0f', ordlo: '#5e0f0f', tuzla: '#5e0f0f' }),
+    // 2026-09-26 („sprav" — ako Rybar): tmavá bordová namiesto lososovej.
+    fillCss: Object.freeze({ occupied: '#8e2330', crimea: '#7f2530', ordlo: '#7f2530', tuzla: '#7f2530' }),
+    fillAlpha: Object.freeze({ occupied: 0.64, crimea: 0.52, ordlo: 0.52, tuzla: 0.52 }),
+    outlineCss: Object.freeze({ occupied: '#3d0a0e', crimea: '#3d0a0e', ordlo: '#3d0a0e', tuzla: '#3d0a0e' }),
+    // Ukrajinská strana tónovaná do tmavomodra (mapa je dvojfarebná ako u Rybara):
+    // pevnina UA mínus ruská kontrola (a sivá zóna archívu) mínus pás bojov. Odvodené.
+    uaTint: Object.freeze({ css: '#2f6aa3', alpha: 0.3 }),
     // 2026-09-26 (vlastník so vzorkou mapy Rybar: „ja som to chcel takto"): územie bojov
     // ako oranžovo šrafovaný pás CEZ obe strany línie (3 km k UA, 5 km do okupovaného),
     // odvodené z dnešnej línie DeepState — mirror sivú zónu nemá.
@@ -96,6 +100,47 @@ export const DEEPSTATE_STYLES = Object.freeze({
     change: Object.freeze({ gainedCss: '#b3001b', gainedLine: 0.92, gainedFill: 0.38, lostCss: '#1f5fbf', lostAlpha: 0.6, spacing: 5, thickness: 0.42 }),
   }),
 });
+
+/** Rozlíšenie plátna tónu ukrajinskej strany (px na stupeň; 150 ≈ 0,5–0,75 km na px). */
+export const UA_TINT_PX_PER_DEG = 150;
+/** Obdĺžnik prstencov [W, S, E, N] s okrajom `pad` (°); prázdne = null. Pure. */
+export function ringsBBox(rings, pad = 0.05) {
+  let w = 180; let s = 90; let e = -180; let n = -90;
+  for (const ring of rings || []) for (const [x, y] of ring || []) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+  return e > w && n > s ? [w - pad, s - pad, e + pad, n + pad] : null;
+}
+/**
+ * Plátno tónu ukrajinskej strany pre KARTU (2026-09-26, ako Rybar): pevnina
+ * Ukrajiny vyplnená farbou `css` s krytím `alpha`, potom vyrezané (destination-out)
+ * ruské a sivé polygóny a pás bojov (plátno `bandCanvas` v obdĺžniku `bandBBox`).
+ * Vektorové cesty s vyhladením — hrana nie je zubatá ako pri rastri buniek.
+ * Vracia { canvas, bbox } alebo null. Nie je čisté (Canvas).
+ */
+export function paintUaTintCanvas(canvas, { landRings, cutRings = [], bandCanvas = null, bandBBox = null, css, alpha, pxPerDeg = UA_TINT_PX_PER_DEG }) {
+  const ctx = canvas?.getContext?.('2d');
+  const bb = ringsBBox(landRings);
+  if (!ctx || !bb) return null;
+  const [west, south, east, north] = bb;
+  canvas.width = Math.ceil((east - west) * pxPerDeg);
+  canvas.height = Math.ceil((north - south) * pxPerDeg);
+  const X = (lon) => (lon - west) * pxPerDeg;
+  const Y = (lat) => (north - lat) * pxPerDeg;
+  const trace = (ring) => { ring.forEach(([lon, lat], i) => (i ? ctx.lineTo(X(lon), Y(lat)) : ctx.moveTo(X(lon), Y(lat)))); ctx.closePath(); };
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = css;
+  for (const ring of landRings) { ctx.beginPath(); trace(ring); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = '#000';
+  for (const rings of cutRings) { if (!rings?.length) continue; ctx.beginPath(); rings.forEach(trace); ctx.fill('evenodd'); }
+  if (bandCanvas && bandBBox) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(bandCanvas, X(bandBBox.west), Y(bandBBox.north), (bandBBox.east - bandBBox.west) * pxPerDeg, (bandBBox.north - bandBBox.south) * pxPerDeg);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  return { canvas, bbox: { west, south, east, north } };
+}
 
 /** Farba sivej zóny pre štýl (KARTA = pôvodná sivá). Pure. */
 export function deepstateGreyCss(style) {
@@ -404,6 +449,7 @@ export function createUkraineDeepStateLayer({
     }
     // Prifrontové pásmo (len štýly so `zone`): jeden primknutý obdĺžnik, materiál
     // OkoFrontZone si polohu berie z geodetických súradníc fragmentu (nie zo st).
+    let bandForTint = null; // pás bojov KARTY → výrez z tónu ukrajinskej strany
     if ((st.zone || st.combatBand) && _contact.length) {
       // Predvolený štýl: oranžový prechod na UA strane + červená šrafa v okupovanom.
       // KARTA: jeden oranžovo šrafovaný pás cez obe strany (maska = UA ∪ RU časť).
@@ -417,6 +463,7 @@ export function createUkraineDeepStateLayer({
       const mat = !zc ? null : band
         ? frontZoneMaterialFor(zc, _zone.bbox, { zoneAlpha: 0, hatchCss: band.css, hatchAlpha: band.lineAlpha, hatchFillAlpha: band.fillAlpha, spacing: band.spacing, thickness: band.thickness })
         : frontZoneMaterialFor(zc, _zone.bbox, { zoneCss: st.zone.css, zoneAlpha: st.zone.maxAlpha, hatchCss: st.zoneRu?.css, hatchAlpha: st.zoneRu ? st.zoneRu.lineAlpha : 0, spacing: st.zoneRu?.spacing, thickness: st.zoneRu?.thickness });
+      if (band && zc) bandForTint = { canvas: zc, bbox: _zone.bbox };
       if (mat) {
         const b = _zone.bbox;
         ds.entities.add({
@@ -427,6 +474,19 @@ export function createUkraineDeepStateLayer({
       }
     }
     addChangeEntity();
+    // Tón ukrajinskej strany (KARTA, ako Rybar): jeden pozemný obdĺžnik s plátnom cez
+    // OkoGeoImage (presne zarovnané). Bez vlastností = bez karty pri prechode myšou
+    // (inak by nad celou Ukrajinou visela bublina).
+    if (st.uaTint) {
+      const cutRings = _snapshot.features.filter((f) => f.type === 'Polygon' && (DEEPSTATE_RU_KINDS.includes(f.kind) || f.kind === 'grey') && Array.isArray(f.rings)).map((f) => f.rings);
+      let tint = null;
+      try { tint = paintUaTintCanvas(doc.createElement('canvas'), { landRings: UKRAINE_LAND_RINGS, cutRings, bandCanvas: bandForTint?.canvas, bandBBox: bandForTint?.bbox, css: st.uaTint.css, alpha: st.uaTint.alpha }); } catch { tint = null; }
+      const mat = tint ? geoImageMaterialFor(tint.canvas, tint.bbox) : null;
+      if (mat) {
+        const b = tint.bbox;
+        ds.entities.add({ id: `${UKRAINE_DEEPSTATE_ID}:ua-tint`, rectangle: { coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north), material: mat, classificationType: Cesium.ClassificationType.BOTH } });
+      }
+    }
     // Línia kontaktu nad plochami (zIndex), primknutá k terénu aj 3D dlaždiciam.
     const cs = st.contact;
     if (cs && _contact.length && st.contactGlow) {
