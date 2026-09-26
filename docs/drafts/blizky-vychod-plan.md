@@ -195,7 +195,22 @@ KLIENT
    rozbaľovačka, panel BLÍZKY VÝCHOD v zóne Konflikty (ZÁLIV bulletin sa presunie dnu, čipy
    podľa dejiska), `conflictsCatalog` dostane dejiská (kartičky a export fungujú hneď), hranice
    štátov cez retain. Test: presety, resolver, panel, lane testy.
-2. **KONTROLA SÍDIEL z Wikipédie** — 2–3 d. `wikiControl.js` (Ukrajina prepnutá na config,
+2. **KONTROLA SÍDIEL z Wikipédie** — **HOTOVÉ 2026-09-26** (`src/data/wikiControl.js` = jeden
+   parser riadený konfiguráciou modulu, Ukrajina prepnutá na `UKRAINE_CONTROL_CONFIG` bez zmeny
+   jej testov; 4 moduly IP/Jemen/Sýria/Libanon s legendami overenými 24. 9. proti caption a /doc,
+   archív `.gev-cache/mideast/events/control/<modul>/<deň>.json` + `/api/mideast/events/control`,
+   správca vrstiev po dejiskách s rastrom len v rámci dejiska + 0,2°, čip a legenda po moduloch
+   v paneli, vek zdroja s prahom modulu 14/30/45/30 d, ZASTARANÉ jantárovo). Otvorené: hĺbka
+   spätnej histórie (dnes týždenne od 28. 2. 2026, IP ideálne od 7. 10. 2023 — jeden dopyt
+   naraz, 1,2 s pauzy), voľba výplne po stranách (dnes každá strana vlastnou farbou s rovnakým
+   krytím 0,30 — 0,26 na KARTE, Ukrajina plní len RU — rozhodnutie vlastníka, ktoré strany nechať
+   bez výplne), spoločný pohľad na Libanon (dnes dve vrstvy a dve legendy, IP + Lebanese
+   insurgency, zámerne nezlúčené; raster zón kreslí len prvý modul dejiska = IP, libanonská vrstva
+   pridáva len body, aby sa dva priesvitné rastre nad tými istými dedinami nezlievali). Oponentúra
+   klienta 26. 9. zapracovaná (rez bodov podľa kódov modulu a mimo rastra dejiska = tyl, brána
+   priblíženia schová vrstvy, 200 bez snímky = porucha, deň snímky pamätaný po vrstvách, atribúcia
+   konfigurácie = riadok archívu, SK popisy strán). Pôvodný rozsah: 2–3 d.
+   `wikiControl.js` (Ukrajina prepnutá na config,
    jej testy bez zmeny) + 4 konfigurácie (IP vrátane juhu Libanonu, Jemen, Sýria, Lebanese
    insurgency), overenie legiend farieb na stránkach máp, archív snímok po týždňoch spätne
    podľa histórie revízií (IP aspoň od 28. 2. 2026, ideálne od 10/2023), vek zdroja s prahom

@@ -679,7 +679,7 @@ const IP_CONFIG = {
   ...MIDEAST_COMMON,
   id: 'israel-palestine',
   titles: [{ id: 'main', title: 'Module:Israeli-Palestinian conflict detailed map' }],
-  attribution: 'Wikipedia · Israeli-Palestinian conflict detailed map · CC BY-SA 4.0',
+  attribution: 'Wikipedia contributors · Module:Israeli-Palestinian conflict detailed map · CC BY-SA 4.0',
   bbox: { west: 32.05, south: 29.4, east: 37.15, north: 36.1 },
   cellDeg: 0.02, maxKm: 12, bandKm: 3, contestedKm: 3,
   sides: [
@@ -723,7 +723,7 @@ const YEMEN_CONFIG = {
   ...MIDEAST_COMMON,
   id: 'yemen',
   titles: [{ id: 'main', title: 'Module:Yemeni Civil War detailed map' }],
-  attribution: 'Wikipedia · Yemeni Civil War detailed map · CC BY-SA 4.0',
+  attribution: 'Wikipedia contributors · Module:Yemeni Civil War detailed map · CC BY-SA 4.0',
   bbox: { west: 42.5, south: 12.55, east: 54.15, north: 18.4 },
   cellDeg: 0.05, maxKm: 35, bandKm: 7, contestedKm: 7,
   sides: [
@@ -759,7 +759,7 @@ const SYRIA_CONFIG = {
   ...MIDEAST_COMMON,
   id: 'syria',
   titles: [{ id: 'main', title: 'Module:Syrian Civil War detailed map' }],
-  attribution: 'Wikipedia · Syrian Civil War detailed map · CC BY-SA 4.0',
+  attribution: 'Wikipedia contributors · Module:Syrian Civil War detailed map · CC BY-SA 4.0',
   bbox: { west: 35.65, south: 32.25, east: 42.45, north: 37.35 },
   cellDeg: 0.05, maxKm: 35, bandKm: 7, contestedKm: 7,
   sides: [
@@ -790,7 +790,7 @@ const LEBANON_CONFIG = {
   id: 'lebanon',
   titles: [{ id: 'main', title: 'Module:Lebanese insurgency detailed map' }],
   alsoModules: ['israel-palestine'],
-  attribution: 'Wikipedia · Lebanese insurgency detailed map · CC BY-SA 4.0',
+  attribution: 'Wikipedia contributors · Module:Lebanese insurgency detailed map · CC BY-SA 4.0',
   bbox: { west: 35.05, south: 33.0, east: 36.65, north: 34.75 },
   cellDeg: 0.02, maxKm: 12, bandKm: 3, contestedKm: 3,
   sides: [

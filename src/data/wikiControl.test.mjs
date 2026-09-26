@@ -440,7 +440,7 @@ test('konfigurácie Blízkeho východu: štyri moduly, jedinečné strany s farb
     assert.deepEqual([c.cellDeg, c.maxKm, c.bandKm, c.staleDays], expect[c.id], c.id);
     assert.equal(c.contestedKm, c.bandKm);
     assert.equal(c.license, 'CC BY-SA 4.0');
-    assert.match(c.attribution, /^Wikipedia · .+ detailed map · CC BY-SA 4\.0$/);
+    assert.match(c.attribution, /^Wikipedia contributors · Module:.+ detailed map · CC BY-SA 4\.0$/, 'ten istý riadok, aký píše archív do snímky (mideastArchive.mjs)');
     assert.equal(c.i18nPrefix, `mideast.ctl.${c.id}`);
     assert.ok(c.bbox.west < c.bbox.east && c.bbox.south < c.bbox.north);
     assert.ok(Object.isFrozen(c) && Object.isFrozen(c.sides) && Object.isFrozen(c.icons) && Object.isFrozen(c.bbox), `${c.id} zmrazené`);

@@ -11111,6 +11111,46 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-secondary);
 }
 .mideast-news { display: flex; flex-direction: column; min-height: 0; }
+/*
+ * BLÍZKY VÝCHOD etapa 2 (KONTROLA SÍDIEL, 2026-09-26): čip a legenda modulov Wikipédie
+ * (src/mideastPanel.js + src/mideastControlLayer.js). Farby vzoriek idú INLINE
+ * z konfigurácie modulu (src/data/wikiControl.js) — tá istá ikona je v každom module
+ * iná strana, preto tu nie sú triedy strán ako pri .oko-ukr-tl-ctl-item.is-ru.
+ * Vzorka 10 × 10 px; sporné a zmiešané okrúhle ako body na mape; vek nad prahom modulu
+ * = jantárová značka ZASTARANÉ (rovnaká ako .oko-ukr-tl-ctl-age.is-stale). Čip bez
+ * modulov v dejisku je disabled — nie „čaká sa" (.data-toggle-chip:disabled), ale šípka.
+ */
+.mideast-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.mideast-chip { flex: 0 0 auto; }
+.mideast-chip.is-loading { color: var(--text-secondary); border-color: rgba(255, 255, 255, 0.18); }
+.mideast-chip:disabled { cursor: var(--cursor-arrow); opacity: 0.5; }
+.mideast-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+.mideast-legend[hidden] { display: none; }
+.mideast-legend-module { display: flex; flex-direction: column; gap: 3px; }
+.mideast-legend-title { font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #8aa0b6; }
+.mideast-legend-state { color: var(--text-dim); }
+.mideast-legend-state[data-state="missing"] { color: #ffb14d; }
+.mideast-legend-state[data-state="error"] { color: #ff8585; }
+.mideast-legend-items { display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.mideast-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.mideast-legend-swatch { display: inline-block; width: 10px; height: 10px; flex: 0 0 auto; border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.2); }
+.mideast-legend-item.is-contested .mideast-legend-swatch, .mideast-legend-item.is-mixed .mideast-legend-swatch { border-radius: 50%; }
+/* Zastaraná snímka: vzorky výplní stlmené ako mapa (STALE_DIM), sporné body ostávajú. */
+.mideast-legend-module.is-stale .mideast-legend-item.is-side .mideast-legend-swatch { opacity: 0.5; }
+.mideast-legend-count { color: #8aa0b6; }
+.mideast-legend-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; font-size: 8px; letter-spacing: 0.04em; color: var(--text-dim); }
+.mideast-legend-since { color: #cfe3f5; }
+.mideast-legend-age { color: #8aa0b6; }
+.mideast-legend-age.is-stale { color: #ffb547; font-weight: 700; letter-spacing: 0.04em; border: 1px solid rgba(255, 181, 71, 0.55); border-radius: 3px; padding: 0 4px; background: rgba(255, 181, 71, 0.1); }
+.mideast-legend-note { margin: 0; font-size: 8px; line-height: 1.4; letter-spacing: 0.02em; color: var(--text-dim); }
 .gas-status {
   font-family: var(--font-mono);
   font-size: 9px;

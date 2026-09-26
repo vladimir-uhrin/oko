@@ -14,9 +14,17 @@
 // Poctivosť: „podľa Wikipédie · stav k <revízia> · CC BY-SA", zóny odvodené —
 // nie oficiálna línia frontu. Časová os prepína snímku podľa dňa kurzora.
 // Etická čiara: sídla a objekty, nikdy jednotky (Wikipedia modul jednotky nemá).
+//
+// Od 2026-09-26 (etapa 2 modulu BLÍZKY VÝCHOD) je vrstva PARAMETRIZOVANÁ konfiguráciou
+// modulu Wikipédie (`config` z src/data/wikiControl.js): kódy buniek, farby a výplne
+// strán, prstenec sporného sídla, kľúč výberu, mená zdroja dát a entity, prefix i18n,
+// prah zastarania aj rámec rastra sú per inštancia. Predvolené hodnoty = dnešná
+// Ukrajina (správanie aj pinované riadky zdroja bez zmeny); Blízky východ si vytvára
+// jednu inštanciu na modul cez src/mideastControlLayer.js.
 
 import * as Cesium from 'cesium';
-import { CONTROL_CODE, CONTROL_COLORS, CONTROL_RASTER_BBOX, controlRaster, controlSummary } from './data/ukraineControl.js';
+import { CONTROL_CODE, CONTROL_COLORS, CONTROL_RASTER_BBOX, UKRAINE_CONTROL_CONFIG, controlRaster } from './data/ukraineControl.js';
+import { wikiControlCodes, wikiControlColours, wikiControlRaster, wikiControlSummary } from './data/wikiControl.js';
 import { fetchUkraineControl } from './data/ukraineEventsClient.js';
 import { defaultTerrainSampler } from './data/ukraineBaseLayer.js';
 import { CONTROL_STALE_DAYS, STALE_DIM, freshnessOf, viewedRefMs } from './data/ukraineFreshness.js';
@@ -24,6 +32,9 @@ import { currentLanguage, t } from './i18n.js';
 import { geoImageMaterialFor } from './data/screenPatternMaterials.js';
 
 export const UKRAINE_CONTROL_ID = 'ukraine-control';
+/** Kľúč, pod ktorým bod nesie svoj záznam v `id` primitívy (per inštancia — dve vrstvy si nekradnú výber). */
+export const UKRAINE_CONTROL_PICK_KEY = 'ukraineControl';
+const UKRAINE_SIDE_IDS = Object.freeze(UKRAINE_CONTROL_CONFIG.sides.map((s) => s.id));
 export const CONTROL_RASTER_SCALE = 8; // px na bunku plátna (372 × 168 buniek → 2 976 × 1 344 px) — tenké pruhy aj zblízka
 /**
  * Šírka pásu bojov (2026-09-24, vlastník: „stenši pás"): obe strany rovnako ďaleko ±5 km
@@ -36,7 +47,7 @@ const LIFT_BATCH = 200;
 const HOVER_MS = 90;
 
 const INERT = {
-  id: UKRAINE_CONTROL_ID, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, setPointsVisible() {}, setZonesVisible() {}, setRuFillVisible() {},
+  id: UKRAINE_CONTROL_ID, config: UKRAINE_CONTROL_CONFIG, show: async () => false, hide() {}, isShown: () => false, setSnapshot() {}, loadLatest: async () => {}, setPointsVisible() {}, setZonesVisible() {}, setRuFillVisible() {}, setRasterBbox() {},
   setStyle() {}, getStyle: () => 'default', sideAt: () => null,
   getState: () => ({ shown: false, loading: false, error: null, day: null, revisionAt: null, summary: null, counts: null, points: 0, style: 'default' }),
   onChange() { return () => {}; }, destroy() {},
@@ -48,30 +59,49 @@ export function cssRgb(hex) {
   return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [255, 255, 255];
 }
 
+/** Platný rámec `{west,south,east,north}` (konečné čísla, west < east, south < north) ako kópia, inak null. Pure. */
+export function normalizeBbox(bbox) {
+  if (!bbox || typeof bbox !== 'object') return null;
+  const { west, south, east, north } = bbox;
+  if (![west, south, east, north].every(Number.isFinite) || !(west < east) || !(south < north)) return null;
+  return { west, south, east, north };
+}
+const sameBbox = (a, b) => a === b || Boolean(a && b && a.west === b.west && a.south === b.south && a.east === b.east && a.north === b.north);
+
 /**
- * Vykreslí raster zón na plátno: RU výplň, kontestované šrafovanie, UA nič.
+ * Vykreslí raster zón na plátno: výplne strán, kontestované šrafovanie/stuha, ostatné nič.
+ * Predvolene Ukrajina (RU výplň `ruAlpha`, UA len pri `uaAlpha > 0`, kódy CONTROL_CODE);
+ * modul s N stranami podá `fills: [{ code, css, alpha }]` z konfigurácie, `codes`
+ * (kód sporných buniek) a `contestedCss` (farba pásu). Každá výplň sa kreslí po behoch
+ * buniek v riadku (jeden obdĺžnik na beh); výplň s krytím 0 sa nekreslí vôbec.
  * Vracia to isté plátno (alebo null bez 2D kontextu). Nie je čisté (Canvas).
  */
-export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCALE, ruAlpha = 0.30, hatchAlpha = 0.6, uaAlpha = 0.0, soft = 0, band = 'hatch', bandSoft = 3, createCanvas = null } = {}) {
+export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCALE, ruAlpha = 0.30, hatchAlpha = 0.6, uaAlpha = 0.0, soft = 0, band = 'hatch', bandSoft = 3, createCanvas = null, fills = null, codes = CONTROL_CODE, contestedCss = CONTROL_COLORS.contested } = {}) {
   const ctx = canvas?.getContext?.('2d');
   if (!ctx || !raster) return null;
   const w = raster.width * scale; const h = raster.height * scale;
   canvas.width = w; canvas.height = h;
   ctx.clearRect(0, 0, w, h);
-  const [rr, rg, rb] = cssRgb(CONTROL_COLORS.ru); const [ur, ug, ub] = cssRgb(CONTROL_COLORS.ua);
-  const paintFills = (g, s) => {
-    g.fillStyle = `rgba(${rr}, ${rg}, ${rb}, ${ruAlpha})`;
+  const fillList = Array.isArray(fills) ? fills : [
+    { code: CONTROL_CODE.ru, css: CONTROL_COLORS.ru, alpha: ruAlpha },
+    ...(uaAlpha > 0 ? [{ code: CONTROL_CODE.ua, css: CONTROL_COLORS.ua, alpha: uaAlpha }] : []),
+  ];
+  const paintRuns = (g, s, code) => {
     for (let row = 0; row < raster.height; row += 1) {
       let runStart = -1;
       for (let col = 0; col <= raster.width; col += 1) {
-        const code = col < raster.width ? raster.cells[row * raster.width + col] : -1;
-        if (code === CONTROL_CODE.ru) { if (runStart < 0) runStart = col; continue; }
+        const cell = col < raster.width ? raster.cells[row * raster.width + col] : -1;
+        if (cell === code) { if (runStart < 0) runStart = col; continue; }
         if (runStart >= 0) { g.fillRect(runStart * s, row * s, (col - runStart) * s, s); runStart = -1; }
       }
     }
-    if (uaAlpha > 0) {
-      g.fillStyle = `rgba(${ur}, ${ug}, ${ub}, ${uaAlpha})`;
-      for (let row = 0; row < raster.height; row += 1) for (let col = 0; col < raster.width; col += 1) if (raster.cells[row * raster.width + col] === CONTROL_CODE.ua) g.fillRect(col * s, row * s, s, s);
+  };
+  const paintFills = (g, s) => {
+    for (const f of fillList) {
+      if (!(f.alpha > 0)) continue; // vypnutá výplň (mirror DeepState kreslí sám) — nič, ani priesvitne
+      const [r, gg, b] = cssRgb(f.css);
+      g.fillStyle = `rgba(${r}, ${gg}, ${b}, ${f.alpha})`;
+      paintRuns(g, s, f.code);
     }
   };
   // Mäkké okraje (KARTA K3): výplne 1 px na bunku do pomocného plátna, potom
@@ -97,19 +127,9 @@ export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCAL
   // okrajom namiesto šikmých pruhov, ktoré sa nad zeleným terénom čítali ako
   // zeleno-žlté schodovité čiary. Bez továrne na plátno (testy) ostrá výplň.
   if (band === 'soft') {
-    const [hr, hg, hb] = cssRgb(CONTROL_COLORS.contested);
+    const [hr, hg, hb] = cssRgb(contestedCss);
     const fill = `rgba(${hr}, ${hg}, ${hb}, ${hatchAlpha * 0.5})`;
-    const paintBand = (g, s) => {
-      g.fillStyle = fill;
-      for (let row = 0; row < raster.height; row += 1) {
-        let runStart = -1;
-        for (let col = 0; col <= raster.width; col += 1) {
-          const code = col < raster.width ? raster.cells[row * raster.width + col] : -1;
-          if (code === CONTROL_CODE.contested) { if (runStart < 0) runStart = col; continue; }
-          if (runStart >= 0) { g.fillRect(runStart * s, row * s, (col - runStart) * s, s); runStart = -1; }
-        }
-      }
-    };
+    const paintBand = (g, s) => { g.fillStyle = fill; paintRuns(g, s, codes.contested); };
     const offBand = bandSoft > 0 && typeof createCanvas === 'function' ? createCanvas() : null;
     const bg = offBand?.getContext?.('2d');
     if (bg) {
@@ -128,10 +148,10 @@ export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCAL
   ctx.save();
   ctx.beginPath();
   let any = false;
-  for (let row = 0; row < raster.height; row += 1) for (let col = 0; col < raster.width; col += 1) if (raster.cells[row * raster.width + col] === CONTROL_CODE.contested) { ctx.rect(col * scale, row * scale, scale, scale); any = true; }
+  for (let row = 0; row < raster.height; row += 1) for (let col = 0; col < raster.width; col += 1) if (raster.cells[row * raster.width + col] === codes.contested) { ctx.rect(col * scale, row * scale, scale, scale); any = true; }
   if (any) {
     ctx.clip();
-    const [hr, hg, hb] = cssRgb(CONTROL_COLORS.contested);
+    const [hr, hg, hb] = cssRgb(contestedCss);
     ctx.fillStyle = `rgba(${hr}, ${hg}, ${hb}, ${hatchAlpha * 0.25})`;
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = `rgba(${hr}, ${hg}, ${hb}, ${hatchAlpha})`;
@@ -148,10 +168,11 @@ export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCAL
 
 /**
  * Strana najbližšieho sídla z bodov Wikipédie do `maxKm` (settlement/rural), inak null.
+ * `sides` = id strán modulu (predvolene Ukrajina ua/ru); sporné aj zmiešané = 'contested'.
  * Pure. Pre špendlíky podkladu na KARTE (K3).
- * @returns {'ua'|'ru'|'contested'|null}
+ * @returns {string|null} id strany | 'contested' | null
  */
-export function nearestSide(points, lon, lat, maxKm = 3) {
+export function nearestSide(points, lon, lat, maxKm = 3, sides = null) {
   if (!Array.isArray(points) || !Number.isFinite(lon) || !Number.isFinite(lat)) return null;
   const cosLat = Math.cos((lat * Math.PI) / 180);
   let best = null; let bestD = maxKm;
@@ -163,7 +184,8 @@ export function nearestSide(points, lon, lat, maxKm = 3) {
     if (d < bestD) { bestD = d; best = p; }
   }
   if (!best) return null;
-  if (best.side === 'ua' || best.side === 'ru') return best.side;
+  const ids = Array.isArray(sides) ? sides : UKRAINE_SIDE_IDS;
+  if (ids.includes(best.side)) return best.side;
   if (best.side === 'contested' || best.side === 'mixed') return 'contested';
   return null;
 }
@@ -206,13 +228,18 @@ export const CONTROL_STYLES = Object.freeze({
  * do `cells` buniek rastra (0,05° ≈ 5 km) od pásu bojov sú „near" a ukážu sa pod
  * NEAR_*_FAR_M, ostatné („rear") pod REAR_*_FAR_M (vzdialenosť kamery; sídlo vs
  * dedina), vždy s dobehom priesvitnosti. Pure.
+ *
+ * `contested` = kód sporných buniek rastra modulu (Ukrajina 3; modul s N stranami N+1 — bez
+ * neho by sa za pás bojov bral kód tretej strany, v Gaze Hamas), `outside` = stupeň bodu mimo
+ * rámca rastra: Ukrajina 'near' (raster kryje celý modul, mimo neho je len pár bodov), dejisko
+ * Blízkeho východu 'rear' (raster kryje len dejisko — sýrske sídla mimo neho sú tyl).
  * @returns {'front'|'near'|'rear'}
  */
 export const NEAR_SETTLEMENT_FAR_M = 120_000;
 export const NEAR_RURAL_FAR_M = 70_000;
 export const REAR_SETTLEMENT_FAR_M = 90_000;
 export const REAR_RURAL_FAR_M = 55_000;
-export function controlPointRelevance(p, raster, { cells = 2 } = {}) {
+export function controlPointRelevance(p, raster, { cells = 2, contested = CONTROL_CODE.contested, outside = 'near' } = {}) {
   if (!p) return 'rear';
   if (p.side === 'contested' || p.side === 'mixed') return 'front';
   if (p.kind !== 'settlement' && p.kind !== 'rural') return 'front';
@@ -221,10 +248,10 @@ export function controlPointRelevance(p, raster, { cells = 2 } = {}) {
   const { bbox, cellDeg, width, height } = raster;
   const col = Math.floor((p.lon - bbox.west) / cellDeg);
   const row = Math.floor((bbox.north - p.lat) / cellDeg);
-  if (col < 0 || row < 0 || col >= width || row >= height) return 'near';
+  if (col < 0 || row < 0 || col >= width || row >= height) return outside;
   for (let r = Math.max(0, row - cells); r <= Math.min(height - 1, row + cells); r += 1) {
     for (let c = Math.max(0, col - cells); c <= Math.min(width - 1, col + cells); c += 1) {
-      if (raster.cells[r * width + c] === CONTROL_CODE.contested) return 'near';
+      if (raster.cells[r * width + c] === contested) return 'near';
     }
   }
   return 'rear';
@@ -249,25 +276,59 @@ export function controlPointSize(p) {
 }
 
 /**
+ * Vrstva kontroly sídiel pre JEDEN modul Wikipédie. Predvolené hodnoty = Ukrajina.
  * @param {object} o
  * @param {import('cesium').Viewer} o.viewer
+ * @param {object} [o.config] konfigurácia modulu (src/data/wikiControl.js): strany, farby, výplne, rámec, cellDeg, prefix i18n
+ * @param {(day: string) => Promise<object>} [o.fetchControl] snímka platná pre deň
+ * @param {string} [o.layerId] meno zdroja dát; entita zón = `${layerId}:zones`
+ * @param {string} [o.pickKey] kľúč záznamu bodu v `id` primitívy (per inštancia)
+ * @param {string} [o.i18nPrefix] `${prefix}.<strana>`, `${prefix}.kind.<druh>`; druh padá na `ukraine.ctl.kind.*`
+ * @param {number} [o.staleDays] prah ZASTARANÉ voči prezeranému dňu
+ * @param {{west:number,south:number,east:number,north:number}|null} [o.rasterBbox] rámec rastra zón (dejisko), inak rámec modulu
  */
 export function createUkraineControlLayer({
   viewer,
+  config = UKRAINE_CONTROL_CONFIG,
+  fetchControl = fetchUkraineControl,
+  layerId = UKRAINE_CONTROL_ID,
+  pickKey = UKRAINE_CONTROL_PICK_KEY,
+  i18nPrefix = config.i18nPrefix,
+  staleDays = CONTROL_STALE_DAYS,
+  rasterBbox = null,
   translate = t,
   lang = currentLanguage(),
-  fetchControl = fetchUkraineControl,
   terrainSampler = defaultTerrainSampler,
   documentRef = null,
   now = () => Date.now(),
 } = {}) {
   const doc = documentRef || viewer?.container?.ownerDocument;
   const scene = viewer?.scene;
-  if (!scene || !doc?.createElement) return INERT;
+  if (!scene || !doc?.createElement) return { ...INERT, id: layerId, config };
+
+  // Konfigurácia modulu → kódy buniek, farby, ktoré strany dostávajú výplň, prstenec sporného sídla.
+  const isUkraine = config === UKRAINE_CONTROL_CONFIG || config?.id === UKRAINE_CONTROL_CONFIG.id;
+  const codes = wikiControlCodes(config);
+  const colours = wikiControlColours(config);
+  const sideIds = config.sides.map((s) => s.id);
+  const fillSides = config.sides.filter((s) => s.fill);
+  // Ukrajina: prstenec sporného sídla v RU červenej (útočník); moduly s 3+ stranami neutrálne jantárovo.
+  const ringCss = isUkraine ? CONTROL_COLORS.ru : (config.contestedCss || colours.contested);
+  // „Okolie pásu" v bunkách rastra ≈ 10 km: 2 bunky pri 0,05°, 5 pri 0,02° (Gaza, juh Libanonu).
+  const relevanceCells = Math.max(1, Math.round(0.1 / (Number(config.cellDeg) || 0.05)));
+  // Texty: `${prefix}.<kľúč>` → rodičovský prefix modulov (`mideast.ctl.<kľúč>`) → `ukraine.ctl.<kľúč>`.
+  // t() vracia pri chýbajúcom kľúči samotný kľúč; rodič sa skúša len, keď má sám bodku
+  // ('mideast.ctl' áno, 'ukraine' nie).
+  const parentPrefix = (() => { const i = String(i18nPrefix).lastIndexOf('.'); const p = i > 0 ? String(i18nPrefix).slice(0, i) : ''; return p.includes('.') ? p : ''; })();
+  const keyText = (...keys) => { for (const k of keys) { if (!k) continue; const s = translate(k); if (s && s !== k) return s; } return ''; };
+  /** Prvý kľúč, ktorý slovník pozná (pre texty s premennými, ktoré sa prekladajú až s hodnotami); inak posledný. */
+  const keyFor = (...keys) => keys.find((k) => k && translate(k) !== k) || keys.at(-1);
+  const sideText = (side) => keyText(`${i18nPrefix}.${side || 'none'}`, parentPrefix && `${parentPrefix}.${side || 'none'}`, `ukraine.ctl.${side || 'none'}`) || String(side || '');
+  const kindText = (kind) => keyText(`${i18nPrefix}.kind.${kind}`, parentPrefix && `${parentPrefix}.kind.${kind}`, `ukraine.ctl.kind.${kind}`);
 
   const points = scene.primitives.add(new Cesium.PointPrimitiveCollection());
   points.show = false;
-  const ds = new Cesium.CustomDataSource(UKRAINE_CONTROL_ID);
+  const ds = new Cesium.CustomDataSource(layerId);
   viewer.dataSources.add(ds);
   ds.show = false;
   const canvas = doc.createElement('canvas');
@@ -285,6 +346,7 @@ export function createUkraineControlLayer({
   let _pointsVisible = true;
   let _zonesVisible = true;
   let _ruFill = true; // mirror DeepState kreslí okupované sám; pás bojov z Wikipédie ostáva
+  let _rasterBbox = normalizeBbox(rasterBbox); // null = rámec modulu
   let _snapshot = null;
   let _raster = null;
   let _frontPoints = 0;
@@ -303,34 +365,42 @@ export function createUkraineControlLayer({
     _raster = null;
     if (!_snapshot?.points?.length) { requestRender(); return; }
     // Raster najprv — o tom, ktoré body sa kreslia zďaleka, rozhoduje blízkosť pásu bojov.
-    _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX, bandKm: CONTROL_BAND_KM, contestedKm: CONTROL_CONTESTED_KM });
+    // Ukrajina s predvoleným rámcom ide obalom ukraineControl.js (tento riadok pinuje
+    // ukraineControlClutter.test.mjs); iný modul alebo vlastný rámec dejiska ide jadrom
+    // s konfiguráciou modulu (cellDeg, maxKm) — Ukrajina si aj vtedy drží šírky vrstvy.
+    if (isUkraine && !_rasterBbox) _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX, bandKm: CONTROL_BAND_KM, contestedKm: CONTROL_CONTESTED_KM });
+    else _raster = wikiControlRaster(_snapshot.points, config, { bbox: _rasterBbox || config.bbox, ...(isUkraine ? { bandKm: CONTROL_BAND_KM, contestedKm: CONTROL_CONTESTED_KM } : {}) });
     _frontPoints = 0;
     for (const p of _snapshot.points) {
       if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
-      const colour = CONTROL_COLORS[p.side] || CONTROL_COLORS.none;
+      const colour = colours[p.side] || colours.none;
       const infra = p.kind !== 'settlement' && p.kind !== 'rural';
-      const tier = controlPointRelevance(p, _raster);
+      // Sporný kód z konfigurácie modulu; mimo rastra dejiska je bod tyl (Ukrajina: raster kryje celý modul → 'near').
+      const tier = controlPointRelevance(p, _raster, { cells: relevanceCells, contested: codes.contested, outside: isUkraine ? 'near' : 'rear' });
       if (tier === 'front') _frontPoints += 1;
       const farM = controlPointFarM(p, tier);
       points.add({
         position: posFor(p),
         color: Cesium.Color.fromCssColorString(colour).withAlpha(infra ? 0.75 : (p.kind === 'rural' ? 0.6 : 0.95)),
         pixelSize: p.side === 'contested' ? controlPointSize(p) + 3 : controlPointSize(p),
-        outlineColor: p.side === 'contested' ? Cesium.Color.fromCssColorString(CONTROL_COLORS.ru).withAlpha(0.9) : Cesium.Color.BLACK.withAlpha(0.7),
+        outlineColor: p.side === 'contested' ? Cesium.Color.fromCssColorString(ringCss).withAlpha(0.9) : Cesium.Color.BLACK.withAlpha(0.7),
         outlineWidth: p.side === 'contested' ? 2 : 1,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         // Body pri páse a v tyle až zblízka, s dobehom — pri pohľade na smer ostane len front.
         ...(farM ? { distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, farM), translucencyByDistance: new Cesium.NearFarScalar(farM * 0.6, 1, farM, 0) } : {}),
-        id: { ukraineControl: p },
+        id: { [pickKey]: p },
       });
     }
     const st = CONTROL_STYLES[_style] || CONTROL_STYLES.default;
     const alphas = controlZoneAlphas(st, snapshotFreshness().stale);
-    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, band: st.band, bandSoft: st.bandSoft, ...alphas, ...(_ruFill ? {} : { ruAlpha: 0 }), createCanvas: () => doc.createElement('canvas') });
+    // Výplne strán z konfigurácie (Ukrajina len RU; moduly s 3+ stranami všetky) s jedným
+    // krytím; vypnutá výplň (mirror DeepState kreslí sám) = 0 → nekreslí sa.
+    const fills = fillSides.map((s) => ({ code: codes[s.id], css: s.css, alpha: _ruFill ? alphas.ruAlpha : 0 }));
+    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, band: st.band, bandSoft: st.bandSoft, hatchAlpha: alphas.hatchAlpha, fills, codes, contestedCss: colours.contested, createCanvas: () => doc.createElement('canvas') });
     if (painted) {
       const b = _raster.bbox;
       zoneEntity = ds.entities.add({
-        id: `${UKRAINE_CONTROL_ID}:zones`,
+        id: `${layerId}:zones`,
         rectangle: {
           coordinates: Cesium.Rectangle.fromDegrees(b.west, b.south, b.east, b.north),
           // Presne podľa geodetických súradníc (ImageMaterialProperty na 18° × 8° sedel o km vedľa).
@@ -353,8 +423,8 @@ export function createUkraineControlLayer({
     if (_snapshot) rebuild(); else points.show = pointsShown();
     emit();
   }
-  /** Strana najbližšieho sídla z bodov Wikipédie (do 3 km), inak null. */
-  function sideAt(lon, lat, { maxKm = 3 } = {}) { return nearestSide(_snapshot?.points, lon, lat, maxKm); }
+  /** Strana najbližšieho sídla z bodov Wikipédie (do 3 km; id strany modulu alebo 'contested'), inak null. */
+  function sideAt(lon, lat, { maxKm = 3 } = {}) { return nearestSide(_snapshot?.points, lon, lat, maxKm, sideIds); }
   function lift() {
     if (typeof terrainSampler !== 'function') return Promise.resolve();
     _liftChain = _liftChain.then(async () => {
@@ -370,7 +440,7 @@ export function createUkraineControlLayer({
         batch.forEach((p, j) => { if (Number.isFinite(heights[j])) heightCache.set(p.k, heights[j]); });
       }
       if (_destroyed) return;
-      for (let i = 0; i < points.length; i += 1) { const pt = points.get(i); const p = pt.id?.ukraineControl; if (p && heightCache.has(hKey(p))) pt.position = posFor(p); }
+      for (let i = 0; i < points.length; i += 1) { const pt = points.get(i); const p = pt.id?.[pickKey]; if (p && heightCache.has(hKey(p))) pt.position = posFor(p); }
       requestRender();
     }).catch(() => {});
     return _liftChain;
@@ -378,10 +448,13 @@ export function createUkraineControlLayer({
 
   // ── karta pri prechode myšou ─────────────────────────────────────────────
   function tipText(p) {
-    const parts = [p.name || p.link || '', translate(`ukraine.ctl.${p.side || 'none'}`)];
-    const kind = translate(`ukraine.ctl.kind.${p.kind}`);
-    if (kind && kind !== `ukraine.ctl.kind.${p.kind}`) parts.push(kind);
-    if (p.pressure && p.direction) parts.push(translate('ukraine.ctl.pressure', { side: translate(`ukraine.ctl.${p.pressure}`), dir: p.direction }));
+    const parts = [p.name || p.link || '', sideText(p.side)];
+    const kind = kindText(p.kind);
+    if (kind) parts.push(kind);
+    // Sporné/zmiešané sídlo s odvodenou dvojicou strán (moduly Blízkeho východu): „A ↔ B".
+    if (Array.isArray(p.between) && p.between.length === 2) parts.push(`${sideText(p.between[0])} ↔ ${sideText(p.between[1])}`);
+    // Tlak z oblúka: `${prefix}.pressure` → rodič (`mideast.ctl.pressure` — tvar bez skloňovania mena strany) → Ukrajina.
+    if (p.pressure && p.direction) parts.push(translate(keyFor(`${i18nPrefix}.pressure`, parentPrefix && `${parentPrefix}.pressure`, 'ukraine.ctl.pressure'), { side: sideText(p.pressure), dir: p.direction }));
     return parts.filter(Boolean).join(' · ');
   }
   function installHandler() {
@@ -393,10 +466,10 @@ export function createUkraineControlLayer({
       hoverTimer = setTimeout(() => {
         hoverTimer = null;
         let p = null;
-        try { const picked = scene.pick(pos, 6, 6); p = picked?.id?.ukraineControl || picked?.primitive?.id?.ukraineControl || null; } catch { p = null; }
+        try { const picked = scene.pick(pos, 6, 6); p = picked?.id?.[pickKey] || picked?.primitive?.id?.[pickKey] || null; } catch { p = null; }
         if (p && typeof p === 'object') {
           tip.textContent = tipText(p);
-          tip.style.setProperty('--ukr-accent', CONTROL_COLORS[p.side] || CONTROL_COLORS.none);
+          tip.style.setProperty('--ukr-accent', colours[p.side] || colours.none);
           tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
           tip.hidden = false;
         } else tip.hidden = true;
@@ -443,13 +516,24 @@ export function createUkraineControlLayer({
    * dnešku — pri prehrávaní histórie by inak bola každá stará snímka „zastaraná".
    */
   function snapshotFreshness() {
-    return freshnessOf(_snapshot?.revisionAt, viewedRefMs(_snapshot?.requestedAt, now()), CONTROL_STALE_DAYS);
+    return freshnessOf(_snapshot?.revisionAt, viewedRefMs(_snapshot?.requestedAt, now()), staleDays);
   }
-  /** RU výplň rastra zapnutá/vypnutá (šrafovaný pás bojov ostáva); prekreslí zóny. */
+  /** Výplň strán rastra zapnutá/vypnutá (pás bojov ostáva); Ukrajina: RU výplň. Prekreslí zóny. */
   function setRuFillVisible(on) {
     const next = Boolean(on);
     if (next === _ruFill) return;
     _ruFill = next;
+    if (_snapshot) rebuild();
+    emit();
+  }
+  /**
+   * Rámec rastra zón: dejisko (rámec dejiska s okrajom) alebo null = rámec modulu.
+   * Prekreslí, keď je snímka; body sa nemenia (raster rozhoduje len o tom, čo je „pri páse").
+   */
+  function setRasterBbox(bbox) {
+    const next = normalizeBbox(bbox);
+    if (sameBbox(next, _rasterBbox)) return;
+    _rasterBbox = next;
     if (_snapshot) rebuild();
     emit();
   }
@@ -458,9 +542,9 @@ export function createUkraineControlLayer({
     return {
       shown: _shown, loading: _loading, error: _error, pointsVisible: _pointsVisible, zonesVisible: _zonesVisible,
       day: _snapshot?.day || null, revisionAt: _snapshot?.revisionAt || null, snapshots: _snapshot?.snapshots ?? null,
-      summary: _snapshot ? (_snapshot.summary || controlSummary(_snapshot.points)) : null, counts: _raster?.counts || null, points: _snapshot?.points?.length || 0, frontPoints: _frontPoints,
+      summary: _snapshot ? (_snapshot.summary || wikiControlSummary(_snapshot.points, config)) : null, counts: _raster?.counts || null, points: _snapshot?.points?.length || 0, frontPoints: _frontPoints,
       revisions: _snapshot?.revisions || null, style: _style,
-      requestedAt: _snapshot?.requestedAt || null, ...snapshotFreshness(),
+      requestedAt: _snapshot?.requestedAt || null, rasterBbox: _rasterBbox, ...snapshotFreshness(),
     };
   }
   function destroy() {
@@ -472,11 +556,17 @@ export function createUkraineControlLayer({
     listeners.clear();
   }
   return {
-    id: UKRAINE_CONTROL_ID,
-    show, hide, isShown: () => _shown, setSnapshot, loadLatest, setPointsVisible, setZonesVisible, setRuFillVisible, getState,
+    id: layerId,
+    config,
+    show, hide, isShown: () => _shown, setSnapshot, loadLatest, setPointsVisible, setZonesVisible, setRuFillVisible, setRasterBbox, getState,
     setStyle, getStyle: () => _style, sideAt,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ points, ds, canvas, raster: _raster, zoneEntity, tip }),
+    _getStateForTest: () => ({ points, ds, canvas, raster: _raster, zoneEntity, tip, tipText }),
   };
+}
+
+/** Tenký alias pre iné moduly Wikipédie: `createWikiControlLayer({ viewer, config, fetchControl, layerId, … })`. */
+export function createWikiControlLayer(opts = {}) {
+  return createUkraineControlLayer(opts);
 }

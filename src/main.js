@@ -52,6 +52,7 @@ import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 import { applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
 import { createMideastPanel } from './mideastPanel.js';
+import { createMideastControl } from './mideastControlLayer.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
@@ -621,6 +622,8 @@ async function init() {
         incidentCards.setRevealed(visible);
         ukraineEvents?.setRevealed(visible);
         kartaOverlay?.setRevealed(visible);
+        // KONTROLA SÍDIEL Blízkeho východu: pri pohľade na planétu sa body aj raster schovajú, čip ostáva.
+        if (visible) void mideastControl.show(); else mideastControl.hide();
         scenePinDs.show = visible;
         viewer.scene?.requestRender?.();
       },
@@ -651,10 +654,25 @@ async function init() {
     // panela kreslí src/mideastPanel.js — stav, zoznam dejísk a miesto pre správy.
     // Klik na dejisko volá runMideastTheatre, ktoré vzniká až nižšie; volá sa len
     // za behu (po dokončení init), preto šípka a nie priamy odkaz.
+    //
+    // KONTROLA SÍDIEL (2026-09-26, etapa 2; src/mideastControlLayer.js): správca drží
+    // jednu parametrizovanú vrstvu na modul Wikipédie (IP, Jemen, Sýria, Libanon) a
+    // vytvára ju lenivo až pri dejisku, ktoré modul žiada (`scene.control`). Vzniká
+    // PRED panelom, lebo panel z neho kreslí čip a legendu po moduloch. Rovnako ako
+    // vrstvy UKRAJINY je to samostatný prekryv (tokeny odkazu sú plné) a ZÁMERNE
+    // nejde do ukraineBase.setSideResolver — iný modul, iná legenda, iné strany.
+    const mideastControl = createMideastControl({ viewer });
+    window.__godsEyeView.mideastControl = mideastControl;
+    // KARTA: na kartografickom podklade mäkší raster bez bodov, inde predvolený —
+    // ten istý vzor ako applyUkraineZoneStyle nižšie.
+    const applyMideastControlStyle = (stack) => mideastControl.setStyle(stack?.kind === 'hillshade' ? 'karta' : 'default');
+    applyMideastControlStyle(getActiveMapStack());
+    onActiveMapStackChange(applyMideastControlStyle);
     const mideastPanel = createMideastPanel({
       mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
       theatres: listMideastTheatres(),
       applyTheatre: (id) => runMideastTheatre(id),
+      control: mideastControl,
     });
     window.__godsEyeView.mideastPanel = mideastPanel;
     // Situation from open sources: the merged bulletin (2026-09-18) now fills the
@@ -846,6 +864,7 @@ async function init() {
       } else {
         activeChokepoint = null; activeFrontScene = null; activeTheatre = null;
         mideastPanel?.setActiveTheatre?.(null);
+        void mideastControl.setTheatre(null);
         restoreAutoKarta();
         syncMapFocus();
         try {
@@ -1010,6 +1029,7 @@ async function init() {
       activeChokepoint = null;
       activeTheatre = null;
       mideastPanel?.setActiveTheatre?.(null);
+      void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
       kartaOverlay?.setScene(scene || null);
       ukrainePanel?.setActiveScene(scene?.id || null);
       ukraineTimeline.setActiveScene(scene?.id || null);
@@ -1106,6 +1126,7 @@ async function init() {
       activeFrontScene = null;
       activeTheatre = null;
       mideastPanel?.setActiveTheatre?.(null);
+      void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
       const result = applyChokepointScene(id, chokepointSceneDeps);
       syncMapFocus();
       void oilPriceChip.refreshAndShow();
@@ -1199,6 +1220,10 @@ async function init() {
       ukrainePanel?.setActiveScene?.(null);
       ukraineTimeline.setActiveScene(null);
       mideastPanel?.setActiveTheatre?.(scene?.id || null);
+      // KONTROLA SÍDIEL (etapa 2): správca prepne moduly Wikipédie podľa `scene.control`
+      // a raster zón prepočíta v rámci dejiska (+0,2°), nie nad celým modulom; bez
+      // dejiska (null) vrstvy schová. Pred rámovaním, aby sa body natiahli počas letu.
+      void mideastControl.setTheatre(scene || null);
       // Čip „premávka v úžine" patrí poslednej úžine a ďalej by pollval jej rámec;
       // brána presunutá na dejisko by ho po prílete znova odkryla (nález 2026-09-26).
       straitTrafficChip.hide();
