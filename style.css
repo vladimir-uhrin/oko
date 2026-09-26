@@ -12026,6 +12026,10 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-karta-legend-scale { height: 16px; margin-top: 7px; }
 body.oko-karta-frame .oko-scale { z-index: 93; }
 body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
+/* Pravá lišta panelov v ráme KARTA (2026-09-26, vlastník ju zakrúžkoval: „treba presunúť, neskôr sa
+   bude robiť poriadok“): vľavo od náhľadu Ukrajiny (náhľad right 36 + šírka 168 + medzera 10);
+   spodok jej určí legenda (data-rail-bound="bottom" → resolveHudRailLayout). Dočasné do upratania panelov. */
+body.oko-karta-frame #right-context-rail { right: 214px; }
 /* Pilier zbalených panelov (~440 px) sa pri nízkom okne (≤ ~900 px s otvorenou
    osou) do koridoru pod titulkom nezmestí — namiesto pretečenia cez kredity sa
    pruh v ráme obmedzí na koridor (engine ho píše do --left-stack-safe-*) a roluje. */

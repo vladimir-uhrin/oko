@@ -310,6 +310,8 @@ export function createUkraineKartaOverlay({
 
   // Legenda.
   const legendIsland = el(doc, 'div', 'oko-karta-island oko-karta-legend');
+  // Spodná hranica pravej lišty panelov (ui.js → resolveHudRailLayout bottomBound): lišta končí nad legendou.
+  legendIsland.setAttribute('data-rail-bound', 'bottom');
   const legendList = el(doc, 'ul', 'oko-karta-legend-list');
   // Päta legendy: slot, na ktorý sa kotví mierka (mapScaleBar.js) — legenda + mierka ako na tlačenej mape.
   const legendScale = el(doc, 'div', 'oko-karta-legend-scale');

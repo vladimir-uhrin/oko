@@ -300,20 +300,28 @@ export function resolveHudRailLayout({
   baseBottom,
   gap = 12,
   align = 'center',
+  minBoundHeight = 150,
 }) {
   if (![viewportHeight, panelHeight, laneLeft, laneRight, baseTop, baseBottom]
     .every(Number.isFinite) || viewportHeight <= 0 || laneRight <= laneLeft) return null;
   const midpoint = viewportHeight * 0.5;
   let safeTop = Math.max(0, baseTop);
   let safeBottom = Math.min(viewportHeight, baseBottom);
+  let boundBottom = Infinity;
 
   for (const rect of obstacles) {
     if (![rect?.left, rect?.right, rect?.top, rect?.bottom].every(Number.isFinite)) continue;
     if (rect.right <= laneLeft || rect.left >= laneRight || rect.bottom <= rect.top) continue;
+    // Výslovne spodná hranica (bottomBound, napr. legenda rámu KARTA, 2026-09-26): obmedzí spodok
+    // aj keď presahuje cez stred — inak by ju pravidlo stredu ignorovalo a lišta by ležala na nej.
+    if (rect.bottomBound) { boundBottom = Math.min(boundBottom, rect.top - gap); continue; }
     if (rect.bottom <= midpoint) safeTop = Math.max(safeTop, rect.bottom + gap);
     else if (rect.top >= midpoint) safeBottom = Math.min(safeBottom, rect.top - gap);
   }
 
+  // Spodná hranica bottomBound len keď nad ňou ostane použiteľné miesto (minBoundHeight);
+  // inak by lišta zmizla úplne — radšej pôvodné správanie (prekryv) než nedostupné panely.
+  if (boundBottom - safeTop >= minBoundHeight) safeBottom = Math.min(safeBottom, boundBottom);
   safeBottom = Math.max(safeTop, safeBottom);
   const availableHeight = Math.max(0, safeBottom - safeTop);
   const renderedHeight = Math.min(Math.max(0, panelHeight), availableHeight);

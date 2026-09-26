@@ -135,3 +135,27 @@ test('DOM: rám prepína body.oko-karta-frame s viditeľnosťou a vystaví ostro
   overlay.destroy();
   assert.equal(body.classList.contains('oko-karta-frame'), false, 'destroy upratá triedu');
 });
+
+// ── Pravá lišta panelov v ráme KARTA (2026-09-26, vlastník ju zakrúžkoval: „treba presunúť,
+//    neskôr sa bude robiť poriadok") ──────────────────────────────────────────────────────
+test('KARTA: pravá lišta vľavo od náhľadu, legenda je jej spodná hranica (aj cez stred), bez miesta sa hranica neuplatní', async () => {
+  const { resolveHudRailLayout } = await import('./cockpitMath.js');
+  const legend = { left: 1089, right: 1489, top: 360, bottom: 590, bottomBound: true };
+  const base = { viewportHeight: 808, panelHeight: 400, laneLeft: 1039, laneRight: 1311, baseTop: 130, baseBottom: 776, gap: 10, align: 'start' };
+  const bound = resolveHudRailLayout({ ...base, obstacles: [legend] });
+  assert.equal(bound.safeBottom, 350, 'končí nad legendou');
+  assert.equal(bound.top, 130);
+  // bez príznaku by pravidlo stredu legendu (360–590 cez stred 404) ignorovalo
+  assert.equal(resolveHudRailLayout({ ...base, obstacles: [{ ...legend, bottomBound: false }] }).safeBottom, 776);
+  // nad legendou < minBoundHeight (150) → hranica sa neuplatní, lišta nezmizne
+  const tight = resolveHudRailLayout({ ...base, obstacles: [{ ...legend, top: 200, bottom: 430 }] });
+  assert.equal(tight.safeBottom, 776);
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.oko-karta-frame #right-context-rail \{ right: 214px; \}/, 'vľavo od náhľadu (36 + 168 + 10)');
+  assert.doesNotMatch(css, /body\.oko-karta-frame #right-context-rail \{[^}]*(top|max-height|bottom):/, 'vrchol a výšku riadi rozloženie (creditAttribution.test)');
+  const ov = readFileSync(new URL('./ukraineKartaOverlay.js', import.meta.url), 'utf8');
+  assert.match(ov, /legendIsland\.setAttribute\('data-rail-bound', 'bottom'\);/);
+  assert.match(ui, /bottomBound: obstacle\.dataset\?\.railBound === 'bottom',/);
+  assert.match(ui, /const kartaTools = document\.querySelector\('#oko-karta-overlay\.is-visible \.oko-karta-tools'\);/, 'v ráme začína na úrovni tlačidiel KARTY');
+  assert.match(ui, /this\._rightStackMutationObserver\.observe\(document\.documentElement, \{ attributes: true, attributeFilter: \['style'\] \}\);/, 'posun legendy (premenné na <html>) prepočíta lištu');
+});

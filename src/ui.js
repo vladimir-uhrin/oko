@@ -7469,6 +7469,9 @@ export class StyleManager {
         attributes: true,
         attributeFilter: ['class', 'hidden', 'data-variant'],
       });
+      // Premenné na <html> (--oko-ukr-tl-lift z časovej osi, --oko-dock-lift) posúvajú legendu rámu KARTA,
+      // ktorá je spodnou hranicou lišty (data-rail-bound) — posun bez zmeny veľkosti ResizeObserver nevidí.
+      this._rightStackMutationObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
       const hud = document.getElementById('intel-hud');
       if (hud) {
         this._rightStackMutationObserver.observe(hud, {
@@ -7553,9 +7556,15 @@ export class StyleManager {
     const safeGap = Math.max(8, viewportHeight * 0.012);
     const stackRect = stack.getBoundingClientRect();
     const leftStackTop = this._leftPanelStack?.getBoundingClientRect().top;
-    const alignedTop = Number.isFinite(leftStackTop)
-      ? leftStackTop
-      : viewportHeight * 0.26;
+    // Rám KARTA (2026-09-26): lišta stojí vľavo od náhľadu (style.css) a začína už na úrovni
+    // tlačidiel KARTY — nad legendou je inak na zbalené panely primálo miesta.
+    const kartaTools = document.querySelector('#oko-karta-overlay.is-visible .oko-karta-tools');
+    const kartaToolsTop = kartaTools ? kartaTools.getBoundingClientRect().top : NaN;
+    const alignedTop = Number.isFinite(kartaToolsTop) && kartaToolsTop > 0
+      ? (Number.isFinite(leftStackTop) ? Math.min(leftStackTop, kartaToolsTop) : kartaToolsTop)
+      : Number.isFinite(leftStackTop)
+        ? leftStackTop
+        : viewportHeight * 0.26;
     const obstacleRects = [];
 
     for (const obstacle of document.querySelectorAll(RIGHT_STACK_OBSTACLE_SELECTOR)) {
@@ -7576,6 +7585,8 @@ export class StyleManager {
         right: rect.right,
         top: rect.top,
         bottom: rect.bottom,
+        // data-rail-bound="bottom" (legenda rámu KARTA): spodná hranica lišty aj cez stred obrazovky.
+        bottomBound: obstacle.dataset?.railBound === 'bottom',
       });
     }
 
