@@ -5052,6 +5052,9 @@ function situationNewsProxy() {
     if (!upstream.ok) throw new Error('RSS HTTP ' + upstream.status + ' (news.google.com)');
     const items = normalizeRssArticles(xml, Number.isFinite(cfg.googleLimit) ? cfg.googleLimit : 40).map((a) => ({
       title: a.title, url: a.url, source: a.domain,
+      // host vydavateľa z `<source url>` — jediné, podľa čoho blocklist spozná
+      // sankcionované médium za presmerovaním news.google.com (2026-09-26)
+      sourceHost: a.sourceHost || null,
       publishedAt: a.publishedAt ? Date.parse(a.publishedAt) : null,
       image: null, lang: null, country: a.sourceCountry || null,
     }));
@@ -10154,6 +10157,12 @@ function normalizeRssArticles(xml, limit = 5) {
     try { parsedUrl = new URL(url); } catch { continue; }
     if (!title || !['http:', 'https:'].includes(parsedUrl.protocol)) continue;
     const source = rssTag(item, 'source');
+    // `<source url="https://vydavatel.tld">Meno</source>` (Google News): `url` odkazu je
+    // presmerovanie news.google.com a `source` je zobrazované meno, takže sankčný
+    // blocklist by vydavateľa nikdy nespoznal — host vydavateľa ide zvlášť (2026-09-26).
+    let sourceHost = null;
+    const sourceUrl = /<source\b[^>]*\burl="([^"]+)"/i.exec(item)?.[1];
+    if (sourceUrl) { try { sourceHost = new URL(sourceUrl.replace(/&amp;/g, '&')).hostname.replace(/^www\./, '') || null; } catch { sourceHost = null; } }
     const signature = `${title.toLowerCase()}|${source.toLowerCase() || parsedUrl.hostname}`;
     if (seen.has(signature)) continue;
     seen.add(signature);
@@ -10173,6 +10182,7 @@ function normalizeRssArticles(xml, limit = 5) {
       title,
       url: parsedUrl.href,
       domain: source || parsedUrl.hostname.replace(/^www\./, ''),
+      sourceHost,
       publishedAt: Number.isNaN(Date.parse(rawDate)) ? null : new Date(rawDate).toISOString(),
       sourceCountry: null,
       image: mediaUrl && /^https?:\/\//.test(mediaUrl) ? mediaUrl : null,

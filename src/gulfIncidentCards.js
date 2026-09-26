@@ -20,6 +20,7 @@
 
 import * as Cesium from 'cesium';
 import { buildIncidentCards } from './data/gulfIncidents.js';
+import { filterSanctionedNews } from './data/sanctionedMedia.js';
 import { fetchSituationNews, relativeAge } from './data/situationNews.js';
 import { translateText } from './translate.js';
 import { currentLanguage, t } from './i18n.js';
@@ -240,7 +241,10 @@ export function createIncidentCards({
     if (hit && now() - hit.at < REFETCH_TTL_MS) return draw(hit.items, region);
     if (!inFlight) {
       inFlight = Promise.resolve(fetchImpl(region))
-        .then((p) => { cache.set(region, { items: p?.items || [], at: now() }); return p; })
+        // Blocklist médií aj na klientovi: server filtruje pred zlúčením, ale
+        // disková cache /api/situation-news prežije rozšírenie zoznamu až 6 h
+        // (bulletin a UKRAJINA filtrujú znova, karty doteraz nie — 2026-09-26).
+        .then((p) => { const items = filterSanctionedNews(p?.items || []).items; cache.set(region, { items, at: now() }); return { ...(p || {}), items }; })
         .finally(() => { inFlight = null; });
     }
     try { const payload = await inFlight; return draw(payload?.items || [], region); }

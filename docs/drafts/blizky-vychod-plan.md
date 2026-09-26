@@ -180,10 +180,13 @@ KLIENT
 ## 6. Etapy (odhad; každá končí testami, riadkami v `DATA_SOURCES.md`, zápisom do
 `docs/CURRENT-STATE.md` a commitom `git commit -- <moje cesty>` — strom nesie cudzie zmeny)
 
-0. **Mantinely** — 0,5 d. `sanctionedMedia.js` sekcia Blízky východ + test (domény Press TV,
-   IRIB, Tasnim, Fars, Sepah, Al-Masirah, Saba Saná, Al-Manar, al-Kassám); riadky „preverené a
-   nepoužité" (Liveuamap, Tzofar, gpsjam, NGA, ACLED body, COD-AB z GADM, ISW); odpovede na
-   otázky kap. 8.
+0. **Mantinely** — **HOTOVÉ 2026-09-26.** `sanctionedMedia.js` sekcia Blízky východ (17 záznamov,
+   základy `eu-iran-hr` / `eu-terror-list` / `eu-yemen`, `note` s právnym aktom; Fars a
+   Al-Manar/Al-Nour výslovne „precautionary", Saba z Adenu neblokovaná) + test; medzera Google
+   News zaplátaná (`sourceHost` z `<source url>`); hot karty filtrujú aj na klientovi; riadky
+   „preverené a nepoužité" v DATA_SOURCES (Liveuamap, Tzofar, gpsjam, NGA, COD-AB z GADM).
+   Oprava prieskumu: Tasnim je listovaná vyk. nar. 2023/1779 (15. 9. 2023), nie 2025/776.
+   Otázky kap. 8 stále čakajú na používateľa.
 1. **Kostra + dejiská + panel** — 2 d. `mideastTheatres.js` (12 dejísk), `?mideast=`, SCÉNY
    rozbaľovačka, panel BLÍZKY VÝCHOD v zóne Konflikty (ZÁLIV bulletin sa presunie dnu, čipy
    podľa dejiska), `conflictsCatalog` dostane dejiská (kartičky a export fungujú hneď), hranice

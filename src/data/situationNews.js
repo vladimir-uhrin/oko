@@ -64,10 +64,11 @@ export const SITUATION_REGIONS = Object.freeze({
   // kde to podmienky dovoľujú (BBC, Kyiv Independent); Ukrajinska Pravda bez
   // položiek Interfax-Ukraine (zákaz šírenia) a bez obrázkov (Getty); RFE/RL bez
   // obrázkov (fotoklauzula); Al Jazeera bez og:image (T&C zakazujú scraping);
-  // štátne agentúry so štítkom „oficiálne UA". Blocklist médií prílohy XV
-  // (sanctionedMedia.js) platí na serveri aj na klientovi. TASS zámerne NIE JE
-  // (otázka č. 4 plánu); ruské médiá prílohy XV nikdy. ISW denné hodnotenie ide
-  // ako jedna pripnutá položka s odkazom von (proxy, `isw: true`).
+  // štátne agentúry so štítkom „oficiálne UA". Blocklist médií (sanctionedMedia.js:
+  // príloha XV + Rybar; od 2026-09-26 aj Irán/Jemen/Libanon/Palestína podľa
+  // zmrazenia aktív) platí na serveri aj na klientovi pre VŠETKY regióny. TASS
+  // zámerne NIE JE (otázka č. 4 plánu); ruské médiá prílohy XV nikdy. ISW denné
+  // hodnotenie ide ako jedna pripnutá položka s odkazom von (proxy, `isw: true`).
   ukraine: Object.freeze({
     id: 'ukraine',
     query: '(Ukraine OR Ukrainian OR Kharkiv OR Donetsk OR Zaporizhzhia OR Kherson OR Kyiv OR Sumy) (strike OR shelling OR drone OR missile OR offensive OR frontline OR captured OR advance OR attack) sourcelang:english',
