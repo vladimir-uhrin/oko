@@ -11868,7 +11868,7 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-ukr-tl-ctl-item { display: inline-flex; align-items: center; gap: 4px; }
 .oko-ukr-tl-ctl-sw { display: inline-block; width: 12px; height: 9px; border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.2); }
 .oko-ukr-tl-ctl-item.is-ru .oko-ukr-tl-ctl-sw { background: rgba(224, 85, 63, 0.35); border-color: rgba(224, 85, 63, 0.7); }
-.oko-ukr-tl-ctl-item.is-zone .oko-ukr-tl-ctl-sw { background: repeating-linear-gradient(45deg, rgba(255, 181, 71, 0.75) 0 2px, rgba(255, 181, 71, 0.12) 2px 5px); border-color: rgba(255, 181, 71, 0.7); }
+.oko-ukr-tl-ctl-item.is-zone .oko-ukr-tl-ctl-sw { background: radial-gradient(ellipse at center, rgba(255, 181, 71, 0.42), rgba(255, 181, 71, 0.16)); border-color: rgba(255, 181, 71, 0.7); }
 .oko-ukr-tl-ctl-item.is-ua .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #4fa3ff; border-color: #0b1622; }
 .oko-ukr-tl-ctl-item.is-contested .oko-ukr-tl-ctl-sw { width: 9px; height: 9px; border-radius: 50%; background: #ffb547; border-color: #e0553f; }
 .oko-ukr-tl-ctl-since { color: #cfe3f5; }

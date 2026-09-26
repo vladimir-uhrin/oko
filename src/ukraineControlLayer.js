@@ -51,7 +51,7 @@ export function cssRgb(hex) {
  * Vykreslí raster zón na plátno: RU výplň, kontestované šrafovanie, UA nič.
  * Vracia to isté plátno (alebo null bez 2D kontextu). Nie je čisté (Canvas).
  */
-export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCALE, ruAlpha = 0.30, hatchAlpha = 0.6, uaAlpha = 0.0, soft = 0, createCanvas = null } = {}) {
+export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCALE, ruAlpha = 0.30, hatchAlpha = 0.6, uaAlpha = 0.0, soft = 0, band = 'hatch', bandSoft = 3, createCanvas = null } = {}) {
   const ctx = canvas?.getContext?.('2d');
   if (!ctx || !raster) return null;
   const w = raster.width * scale; const h = raster.height * scale;
@@ -91,7 +91,39 @@ export function paintControlCanvas(raster, canvas, { scale = CONTROL_RASTER_SCAL
   } else {
     paintFills(ctx, scale);
   }
-  // Šrafovanie: orežeme na kontestované bunky, potom diagonály cez celé plátno.
+  // Mäkký pás (predvolený štýl od 2026-09-26, vlastník: „tie zelené pruhy sprav
+  // lepšie"): kontestované bunky ako jedna priesvitná jantárová stuha s rozmazaným
+  // okrajom namiesto šikmých pruhov, ktoré sa nad zeleným terénom čítali ako
+  // zeleno-žlté schodovité čiary. Bez továrne na plátno (testy) ostrá výplň.
+  if (band === 'soft') {
+    const [hr, hg, hb] = cssRgb(CONTROL_COLORS.contested);
+    const fill = `rgba(${hr}, ${hg}, ${hb}, ${hatchAlpha * 0.5})`;
+    const paintBand = (g, s) => {
+      g.fillStyle = fill;
+      for (let row = 0; row < raster.height; row += 1) {
+        let runStart = -1;
+        for (let col = 0; col <= raster.width; col += 1) {
+          const code = col < raster.width ? raster.cells[row * raster.width + col] : -1;
+          if (code === CONTROL_CODE.contested) { if (runStart < 0) runStart = col; continue; }
+          if (runStart >= 0) { g.fillRect(runStart * s, row * s, (col - runStart) * s, s); runStart = -1; }
+        }
+      }
+    };
+    const offBand = bandSoft > 0 && typeof createCanvas === 'function' ? createCanvas() : null;
+    const bg = offBand?.getContext?.('2d');
+    if (bg) {
+      offBand.width = raster.width; offBand.height = raster.height;
+      bg.clearRect(0, 0, raster.width, raster.height);
+      paintBand(bg, 1);
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      if ('filter' in ctx) ctx.filter = `blur(${(bandSoft * scale) / 4}px)`;
+      ctx.drawImage(offBand, 0, 0, w, h);
+      ctx.restore();
+    } else paintBand(ctx, scale);
+    return canvas;
+  }
+  // Šrafovanie (KARTA): orežeme na kontestované bunky, potom diagonály cez celé plátno.
   ctx.save();
   ctx.beginPath();
   let any = false;
@@ -155,11 +187,44 @@ export function controlZoneAlphas(style, stale) {
 /** Krytie šrafovania zóny bojov (predvolené v paintControlCanvas). */
 export const CONTROL_HATCH_ALPHA = 0.6;
 
-/** Štýlové režimy rastra zón: KARTA = mäkké okraje, slabšia RU výplň, body Wikipédie skryté (špendlíky podkladu ich nahradia). */
+/**
+ * Štýlové režimy rastra zón: predvolený = mäkká stuha pásu bojov (`band: 'soft'`),
+ * KARTA = mäkké okraje výplní, šrafovaný pás ako vo vzorke, slabšia RU výplň, body
+ * Wikipédie skryté (špendlíky podkladu ich nahradia).
+ */
 export const CONTROL_STYLES = Object.freeze({
-  default: Object.freeze({ soft: 0, ruAlpha: 0.30, points: true }),
-  karta: Object.freeze({ soft: 3, ruAlpha: 0.26, points: false }),
+  default: Object.freeze({ soft: 0, ruAlpha: 0.30, points: true, band: 'soft', bandSoft: 3 }),
+  karta: Object.freeze({ soft: 3, ruAlpha: 0.26, points: false, band: 'hatch', bandSoft: 0 }),
 });
+
+/**
+ * Body Wikipédie v tyle (2026-09-26, vlastník: „mestá bodky sú veľmi rušivé"):
+ * 1 150 bodov naraz pri pohľade na smer (~160 km) bola hustá sieť bodiek. Bod je
+ * „front", ak je sporný/zmiešaný, infraštruktúra, väčšie mesto (size ≥ 16) alebo
+ * leží do `cells` buniek rastra (0,05° ≈ 5 km na bunku) od pásu bojov — tie sa
+ * kreslia vždy. Ostatné („rear") sa ukážu až zblízka: sídla do REAR_SETTLEMENT_FAR_M,
+ * dediny do REAR_RURAL_FAR_M (vzdialenosť kamery), s dobehom priesvitnosti. Pure.
+ * @returns {'front'|'rear'}
+ */
+export const REAR_SETTLEMENT_FAR_M = 90_000;
+export const REAR_RURAL_FAR_M = 55_000;
+export function controlPointRelevance(p, raster, { cells = 2 } = {}) {
+  if (!p) return 'rear';
+  if (p.side === 'contested' || p.side === 'mixed') return 'front';
+  if (p.kind !== 'settlement' && p.kind !== 'rural') return 'front';
+  if ((Number(p.size) || 0) >= 16) return 'front';
+  if (!raster?.cells || !raster.bbox) return 'front';
+  const { bbox, cellDeg, width, height } = raster;
+  const col = Math.floor((p.lon - bbox.west) / cellDeg);
+  const row = Math.floor((bbox.north - p.lat) / cellDeg);
+  if (col < 0 || row < 0 || col >= width || row >= height) return 'front';
+  for (let r = Math.max(0, row - cells); r <= Math.min(height - 1, row + cells); r += 1) {
+    for (let c = Math.max(0, col - cells); c <= Math.min(width - 1, col + cells); c += 1) {
+      if (raster.cells[r * width + c] === CONTROL_CODE.contested) return 'front';
+    }
+  }
+  return 'rear';
+}
 
 /** Veľkosť bodu podľa triedy populácie a druhu. Pure. */
 export function controlPointSize(p) {
@@ -211,6 +276,7 @@ export function createUkraineControlLayer({
   let _ruFill = true; // mirror DeepState kreslí okupované sám; pás bojov z Wikipédie ostáva
   let _snapshot = null;
   let _raster = null;
+  let _frontPoints = 0;
   let _style = 'default';
   let _loading = false;
   let _error = null;
@@ -225,10 +291,16 @@ export function createUkraineControlLayer({
     if (zoneEntity) { try { ds.entities.remove(zoneEntity); } catch { /* */ } zoneEntity = null; }
     _raster = null;
     if (!_snapshot?.points?.length) { requestRender(); return; }
+    // Raster najprv — o tom, ktoré body sa kreslia zďaleka, rozhoduje blízkosť pásu bojov.
+    _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX, bandKm: CONTROL_BAND_KM, contestedKm: CONTROL_CONTESTED_KM });
+    _frontPoints = 0;
     for (const p of _snapshot.points) {
       if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
       const colour = CONTROL_COLORS[p.side] || CONTROL_COLORS.none;
       const infra = p.kind !== 'settlement' && p.kind !== 'rural';
+      const rear = controlPointRelevance(p, _raster) === 'rear';
+      if (!rear) _frontPoints += 1;
+      const farM = p.kind === 'rural' ? REAR_RURAL_FAR_M : REAR_SETTLEMENT_FAR_M;
       points.add({
         position: posFor(p),
         color: Cesium.Color.fromCssColorString(colour).withAlpha(infra ? 0.75 : (p.kind === 'rural' ? 0.6 : 0.95)),
@@ -236,13 +308,14 @@ export function createUkraineControlLayer({
         outlineColor: p.side === 'contested' ? Cesium.Color.fromCssColorString(CONTROL_COLORS.ru).withAlpha(0.9) : Cesium.Color.BLACK.withAlpha(0.7),
         outlineWidth: p.side === 'contested' ? 2 : 1,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Body v tyle až zblízka, s dobehom — pri pohľade na smer ostane len front.
+        ...(rear ? { distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, farM), translucencyByDistance: new Cesium.NearFarScalar(farM * 0.6, 1, farM, 0) } : {}),
         id: { ukraineControl: p },
       });
     }
-    _raster = controlRaster(_snapshot.points, { bbox: CONTROL_RASTER_BBOX, bandKm: CONTROL_BAND_KM, contestedKm: CONTROL_CONTESTED_KM });
     const st = CONTROL_STYLES[_style] || CONTROL_STYLES.default;
     const alphas = controlZoneAlphas(st, snapshotFreshness().stale);
-    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, ...alphas, ...(_ruFill ? {} : { ruAlpha: 0 }), createCanvas: () => doc.createElement('canvas') });
+    const painted = paintControlCanvas(_raster, canvas, { soft: st.soft, band: st.band, bandSoft: st.bandSoft, ...alphas, ...(_ruFill ? {} : { ruAlpha: 0 }), createCanvas: () => doc.createElement('canvas') });
     if (painted) {
       const b = _raster.bbox;
       zoneEntity = ds.entities.add({
@@ -373,7 +446,7 @@ export function createUkraineControlLayer({
     return {
       shown: _shown, loading: _loading, error: _error, pointsVisible: _pointsVisible, zonesVisible: _zonesVisible,
       day: _snapshot?.day || null, revisionAt: _snapshot?.revisionAt || null, snapshots: _snapshot?.snapshots ?? null,
-      summary: _snapshot ? (_snapshot.summary || controlSummary(_snapshot.points)) : null, counts: _raster?.counts || null, points: _snapshot?.points?.length || 0,
+      summary: _snapshot ? (_snapshot.summary || controlSummary(_snapshot.points)) : null, counts: _raster?.counts || null, points: _snapshot?.points?.length || 0, frontPoints: _frontPoints,
       revisions: _snapshot?.revisions || null, style: _style,
       requestedAt: _snapshot?.requestedAt || null, ...snapshotFreshness(),
     };

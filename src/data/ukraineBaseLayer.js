@@ -46,6 +46,7 @@ import {
   selectVillageCohort,
   snapshotDateText,
   villagesWanted,
+  VILLAGE_POINT_FADE_FROM,
 } from './ukraineBase.js';
 import { buildPlaceIndex } from './ukraineReportPlaces.js';
 
@@ -518,6 +519,8 @@ export function createUkraineBaseLayer({
         outlineWidth: props.cls === 'village' ? 1 : 1.5,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         distanceDisplayCondition: ddc(placePointDisplayCondition(props.cls)),
+        // Obce dobiehajú priesvitnosťou, nie skokom (2026-09-26).
+        ...(props.cls === 'village' ? { translucencyByDistance: new Cesium.NearFarScalar(placePointDisplayCondition('village')[1] * VILLAGE_POINT_FADE_FROM, 1, placePointDisplayCondition('village')[1], 0) } : {}),
       },
       label: labelFor(text, { fontPx: style.fontPx, weight: style.weight, colorCss: style.color, displayCondition: placeLabelDisplayCondition(props.cls), background: props.cls === 'city' }),
     });

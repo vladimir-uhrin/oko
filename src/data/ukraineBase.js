@@ -27,9 +27,16 @@ export const ROAD_CLASSES = Object.freeze(['motorway', 'trunk', 'primary', 'seco
 
 /** Dôležitosť sídla na riedenie popisov (rovnaká škála ako letiská/prístavy: 300/150/60). */
 export const PLACE_IMPORTANCE = Object.freeze({ city: 300, town: 150, village: 60 });
-/** Po akú vzdialenosť kamery (m) sa kreslí popisok / bod sídla. */
-export const PLACE_LABEL_FAR_M = Object.freeze({ city: 2_500_000, town: 700_000, village: 160_000 });
-export const PLACE_POINT_FAR_M = Object.freeze({ city: 4_000_000, town: 1_200_000, village: 230_000 });
+/**
+ * Po akú vzdialenosť kamery (m) sa kreslí popisok / bod sídla. Obce (2026-09-26,
+ * vlastník: „mestá bodky sú veľmi rušivé"): bod aj popisok až do 130 km — pri
+ * pohľade na smer (výška ~160 km, vzdialenosť ~180 km) kreslilo 1 800 bodiek bez
+ * popisu, ktoré nič nehovorili; body obcí navyše dobiehajú priesvitnosťou
+ * (VILLAGE_POINT_FADE_FROM × far → far), aby sa pri približovaní nevynorili naraz.
+ */
+export const PLACE_LABEL_FAR_M = Object.freeze({ city: 2_500_000, town: 700_000, village: 130_000 });
+export const PLACE_POINT_FAR_M = Object.freeze({ city: 4_000_000, town: 1_200_000, village: 130_000 });
+export const VILLAGE_POINT_FADE_FROM = 0.65;
 /** Obce sa načítajú a kreslia až pod touto výškou kamery (m); 27 000 bodov naraz by dusilo scénu. */
 export const VILLAGE_LOAD_MAX_HEIGHT_M = 260_000;
 /** Strop kohorty obcí v scéne (najbližšie k stredu pohľadu). */
