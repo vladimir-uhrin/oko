@@ -291,8 +291,11 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   white-space: nowrap;
   pointer-events: auto;
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: rgba(232, 234, 237, 0.55);
+  /* 2026-09-27 vlastník: „sprav, aby to bolo čo najnenápadnejšie" — odstrániť ani skryť sa to
+     nesmie (Cesium ion + Google, podmienky; 3D mesto ide cez ion), tak aspoň drobne a tlmene:
+     9 px, tlmená farba; logá čitateľné (ion proporčne na 16 px, Google v pôvodnej veľkosti). */
+  font-size: 9px;
+  color: rgba(232, 234, 237, 0.42);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 #cesium-credits .cesium-credit-logoContainer,
@@ -303,8 +306,15 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 }
 #cesium-credits a,
 #cesium-credits .cesium-credit-expand-link {
-  color: rgba(232, 234, 237, 0.7);
+  color: rgba(232, 234, 237, 0.5);
 }
+/* Logo Cesium ion (138×28) proporčne na výšku 16 px — nezmenené, len menšie; Cesium mu každú
+   snímku píše inline vertical-align, preto !important. Logo Google ostáva 98×18. */
+#cesium-credits img[src*="ion-credit"] { height: 16px; width: auto; vertical-align: -4px !important; }
+/* Vnútorný obal od Cesia má vlastných 10 px (widgets.css) — veľkosť berie od nás. */
+#cesium-credits .cesium-widget-credits { font-size: inherit; }
+/* Oddeľovač „•" medzi kreditmi nie je súčasť atribúcie — ešte tlmenejší. */
+#cesium-credits .cesium-credit-delimiter { color: rgba(232, 234, 237, 0.25); }
 
 /* Cesium's stock attribution lightbox grows with every registered data source.
    Keep the title and close affordance fixed while the complete, unabridged

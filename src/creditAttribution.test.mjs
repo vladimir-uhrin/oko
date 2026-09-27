@@ -25,7 +25,9 @@ const REM_PX = 16;
 // 600/700/800/830/900px viewports by qa-shots/quickwins/credit-probe.mjs and
 // re-measured on every run of that sweep. The CSS inputs that determine them
 // are guarded below, because a change there invalidates the constant.
-const CREDIT_HEIGHT_PX = 28;
+// 2026-09-27: 28 -> 18 px (vlastník: „čo najnenápadnejšie"): písmo 9 px, logo ion na 16 px;
+// najvyšší prvok je logo Google 98x18 — premerané živo pri 660 aj 1525 px.
+const CREDIT_HEIGHT_PX = 18;
 const COMPACT_DOCK_HEIGHT_PX = 62;
 
 // Clear air the notice must keep above it. The stylesheet aims for 12px.
@@ -458,8 +460,8 @@ test('the inputs behind the measured constants are unchanged', () => {
   const creditBase = RULES.find((rule) => rule.parts.length === 1 && rule.parts[0] === '#cesium-credits');
   assert.ok(creditBase, '#cesium-credits base rule is missing');
   const declOf = (rule, prop) => rule.decls.find((decl) => decl.prop === prop)?.value;
-  assert.equal(declOf(creditBase, 'font-size'), '10px', 'credit font-size drives its measured 28px height');
-  assert.equal(declOf(creditBase, 'white-space'), 'nowrap', 'a wrapping credit is taller than the measured 28px');
+  assert.equal(declOf(creditBase, 'font-size'), '9px', 'credit font-size drives its measured 18px height');
+  assert.equal(declOf(creditBase, 'white-space'), 'nowrap', 'a wrapping credit is taller than the measured 18px');
   for (const prop of ['height', 'min-height', 'max-height', 'line-height', 'padding']) {
     assert.equal(declOf(creditBase, prop), undefined, `#cesium-credits gained ${prop}; re-measure CREDIT_HEIGHT_PX`);
   }
