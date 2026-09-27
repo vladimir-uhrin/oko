@@ -289,3 +289,17 @@ test('plášť bez značiek v DOM je nečinný (cudzí dokument, testy)', () => 
   assert.equal(shell.open('layers'), false);
   assert.deepEqual(shell.sync(), { mobile: false, landscape: false });
 });
+
+test('dok na mobile: pod ikonou krátky popis Poloha / Štýl (vlastník 09-27: „človek nevie, čo to je")', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  const i18n = readFileSync(new URL('./i18nStrings.js', import.meta.url), 'utf8');
+  assert.ok(html.includes('<span class="dock-label-short" data-i18n="panel.visual-presets.short">STYLE</span>'));
+  assert.ok(html.includes('<span class="dock-label-short" data-i18n="panel.location.short">PLACE</span>'));
+  assert.match(css, /\.dock-label-short \{ display: none; \}/, 'na počítači len dlhý názov');
+  assert.match(css, /body\.oko-mobile #command-dock \.panel-title > span:not\(\.dock-label-icon\):not\(\.dock-label-short\)/, 'dlhý názov skrytý, krátky nie');
+  assert.match(css, /body\.oko-mobile #command-dock \.dock-label-short \{\s*display: block;/);
+  assert.match(i18n, /'panel\.visual-presets\.short': 'Štýl',/);
+  assert.match(i18n, /'panel\.location\.short': 'Poloha',/);
+});
