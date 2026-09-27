@@ -289,11 +289,16 @@ function makeFlag(doc, iso2) {
 }
 
 function appendRouteSide(doc, parent, side) {
+  // Vlajka a meno letiska sú jeden celok — pri zalomení dlhej trasy nesmie vlajka ostať na
+  // konci riadku a letisko na ďalšom.
+  const wrap = doc.createElement('span');
+  wrap.className = 'contact-hover-card-route-side';
   const flag = makeFlag(doc, side?.iso2);
-  if (flag) parent.appendChild(flag);
+  if (flag) wrap.appendChild(flag);
   const label = doc.createElement('span');
   label.textContent = side?.label || '';
-  parent.appendChild(label);
+  wrap.appendChild(label);
+  parent.appendChild(wrap);
 }
 
 function renderPhoto(doc, model, t) {

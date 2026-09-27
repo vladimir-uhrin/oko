@@ -208,7 +208,10 @@ test('DOM lifecycle: riadky, vlajky, progres bar, fotka po zotrvaní (debounce),
   assert.equal(card.children[0].children[0].className, 'contact-hover-card-flag', 'vlajka pred titulkom');
   assert.match(card.children[0].children[0].src, /\/ch\.svg$/);
   const route = card.children[3];
-  assert.equal(route.children.filter((c) => c.className === 'contact-hover-card-flag').length, 2, 'vlajky oboch letísk');
+  // každá strana trasy = vlajka + letisko v jednom obale (pri zalomení sa nerozdelia, 09-27)
+  const sides = route.children.filter((c) => c.className === 'contact-hover-card-route-side');
+  assert.equal(sides.length, 2, 'dve strany trasy');
+  assert.equal(sides.filter((s) => s.children[0]?.className === 'contact-hover-card-flag').length, 2, 'vlajky oboch letísk pri svojom letisku');
   assert.equal(card.children[4].children[0].children[0].style.width, '40%', 'progres bar');
   assert.equal(card.style.transform, 'translate(114px, 114px)');
   // Fotka: až po debounce, jeden dopyt na stroj. (Popri nej beží obnovovanie kartičky — HOVER_REFRESH_MS.)
@@ -384,6 +387,16 @@ test('grafy pod kurzorom: model z buildFlightCharts, kartička ich dokreslí, ke
   const lines = card.children.filter((c) => c.className === 'contact-hover-card-line').map((c) => c.textContent);
   assert.ok(lines.includes(charts.altitude.label) && lines.includes(charts.speed.label), 'max · teraz pod grafmi');
   _resetContactHoverCardForTest();
+});
+
+test('dlhá trasa a progres sa v kartičke zalomia, nevytečú (vlastník 09-27: „text preteká")', () => {
+  const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
+  const rule = (sel) => css.match(new RegExp(`\\n${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`))?.[1] || '';
+  for (const sel of ['.contact-hover-card-route', '.contact-hover-card-progress']) {
+    assert.ok(rule(sel), `${sel} existuje`);
+    assert.doesNotMatch(rule(sel), /white-space:\s*nowrap/, `${sel} nesmie byť nowrap — kartička má max-width`);
+  }
+  assert.match(rule('.contact-hover-card-route'), /flex-wrap:\s*wrap/);
 });
 
 test('tripwire: súhrn lietadla počíta grafy ako karta po kliknutí a zotrvanie si vypýta históriu letu (flights.js)', () => {

@@ -10015,19 +10015,24 @@ body.scene-playback-mode #first-run-launcher {
 /* Bohatá kartička (2026-09-05, „chcem to mouse over"): trasa s vlajkami,
    kreslený progres, riadok o dátach a fotka — rovnaká reč ako karta
    sledovaného letu. Kartička myš nechytá, iba odkaz s fotkou (viď modul). */
+/* Dlhé mená letísk (2026-09-27, „text preteká"): riadok trasy aj progresu sa zalamuje, nikdy
+   nevyjde z kartičky (max-width 320 px) — kontrola naživo: trasa BCN→VIE +24 px, progres +109 px. */
 .contact-hover-card-route {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 2px 4px;
   margin-top: 2px;
   font-size: 9px;
   letter-spacing: 0.5px;
   color: var(--text-secondary);
-  white-space: nowrap;
 }
 
 .contact-hover-card-route .contact-hover-card-flag {
   margin-right: 1px;
+}
+.contact-hover-card-route-side {
+  min-width: 0;
 }
 
 .contact-hover-card-route-arrow {
@@ -10042,7 +10047,9 @@ body.scene-playback-mode #first-run-launcher {
   font-size: 9px;
   letter-spacing: 0.5px;
   color: var(--text-secondary);
-  white-space: nowrap;
+}
+.contact-hover-card-progress > span {
+  min-width: 0;
 }
 
 .contact-hover-card-progress-bar {
