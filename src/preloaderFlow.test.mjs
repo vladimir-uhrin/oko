@@ -85,7 +85,11 @@ test('zapojenie: malý vstup PRED main.js, oko a texty preloadera bez zmeny, pl�
   const src = readFileSync(new URL('../public/preloaderFlow.js', import.meta.url), 'utf8');
   assert.ok(!/^import /m.test(src), 'bez importov — malý samostatný balík');
   assert.match(src, /loseContext\(\)/, 'po skrytí sa GPU kontext uvoľní');
-  assert.match(src, /prefers-reduced-motion: reduce/, 'obmedzený pohyb = nehybný obraz');
+  assert.match(src, /prefers-reduced-motion: reduce/);
+  // obmedzený pohyb = pomalší vír, NIE nehybný obraz (vlastník 09-27: „zostane zamrznuté")
+  assert.match(src, /const CALM_SPEED = 0\.5;/);
+  assert.match(src, /\* \(calm \? CALM_SPEED : 1\);/);
+  assert.ok(!/still/.test(src), 'žiadna nehybná vetva');
   assert.match(src, /querySelector\?\.\('\.loader-logo'\)/, 'vír sa točí okolo oka');
 });
 

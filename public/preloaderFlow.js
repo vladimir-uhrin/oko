@@ -25,9 +25,12 @@
  * riadky), obrazovka je jeden priechod s jedným čítaním bunky a atlasu na pixel (viac vzoriek len
  * v úvode), 30 snímok/s, najviac 1,5 px na bod. V ukážke sa glóbus pod preloaderom pozastaví.
  *
+ * Obmedzený pohyb (Windows s vypnutými animáciami ho hlási — aj u vlastníka): vír sa točí
+ * polovičnou rýchlosťou; nehybný obraz vlastník videl ako „zamrznuté" (2026-09-27).
+ *
  * Samostatný malý súbor bez importov v public/ (index.html ho načíta PRED main.js; Vite ho nespojí
  * s 2,3 MB balíkom appky, takže sa kreslí hneď — skripty zo src/ by zlúčil do jedného súboru). Bez WebGL2 ostáva
- * statický preloader; pri „obmedziť pohyb" nehybný obraz. `?preloader=demo` podrží preloader
+ * statický preloader. `?preloader=demo` podrží preloader
  * (Esc / klik = koniec).
  */
 
@@ -47,8 +50,8 @@ export const FLOW_AMBER_WORDS = Object.freeze(['ODHAD', 'OMEŠKANÉ', 'ČIASTOČ
 export const FLOW_COLORS = Object.freeze({ bg: '#070a14', ink: '#2e5596', amber: '#8a5a1c' });
 const FLOW_FPS = 30;
 const FLOW_MAX_DPR = 1.5;
-/** Nehybný obraz pri „obmedziť pohyb": hodiny víru, keď je už pekne navinutý. */
-const STILL_CLOCK = 5;
+/** Pri „obmedziť pohyb" sa vír točí touto časťou rýchlosti (nie nehybne — to vyzeralo zamrznuto). */
+const CALM_SPEED = 0.5;
 
 /** Polomer superelipsy n = 4 (zaoblený obdĺžnik) v natiahnutých súradniciach — okraj stredu je r = 1. */
 export function clearRadius(X, Y) {
@@ -266,7 +269,7 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
   if (!screen || !content || screen.classList.contains('hidden')) return null;
   const logo = content.querySelector?.('.loader-logo') || null;
   const demo = /(?:^|[?&])preloader=demo(?:&|$)/.test(win.location?.search || '');
-  const still = !demo && Boolean(win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const calm = !demo && Boolean(win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
   const canvas = doc.createElement('canvas');
   canvas.id = 'loader-flow';
@@ -394,14 +397,13 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
   const frame = (now) => {
     if (stopped) return;
     if (!t0) t0 = now;
-    if (!still && drawnAt && now - drawnAt < 1000 / FLOW_FPS - 2) { raf = win.requestAnimationFrame(frame); return; }
+    if (drawnAt && now - drawnAt < 1000 / FLOW_FPS - 2) { raf = win.requestAnimationFrame(frame); return; }
     drawnAt = now;
     // skutočný čas (úvod beží v sekundách, aj keď štart Cesia pribrzdí snímky); krok hodín víru je
     // obmedzený, aby po zaseknutí neskočil
-    const dt = still ? 0 : (last ? Math.min(0.25, (now - last) / 1000) : 1 / FLOW_FPS);
+    const dt = last ? Math.min(0.25, (now - last) / 1000) : 1 / FLOW_FPS;
     last = now; t = (now - t0) / 1000;
-    clock += dt * flowStageSpeed(stage) * (outroAt ? 3 : 1);
-    if (still) { t = 6; clock = STILL_CLOCK; }
+    clock += dt * flowStageSpeed(stage) * (outroAt ? 3 : 1) * (calm ? CALM_SPEED : 1);
     // štart pri skrytom okne (šírka 0) alebo zmena bez udalosti resize — veľkosť sa overí každú
     // snímku; stred sa premeriava, kým nie je rozložený (potom pri zmene stavu a veľkosti)
     if (canvas.width !== Math.max(1, Math.round(win.innerWidth * Math.min(FLOW_MAX_DPR, win.devicePixelRatio || 1)))) resize();
@@ -438,14 +440,14 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
     gl.uniform1f(u.uAtlasCols, atlas.cols);
     gl.uniform1f(u.uCharCount, block.chars.length + 1);
     gl.uniform1f(u.uDpr, dpr);
-    gl.uniform1f(u.uFx, still ? 0 : Math.exp(-t / 0.9));
+    gl.uniform1f(u.uFx, Math.exp(-t / 0.9));
     gl.uniform3fv(u.uInk, colors.ink);
     gl.uniform3fv(u.uAmber, colors.amber);
     gl.uniform3fv(u.uBg, colors.bg);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, atlas.tex); gl.uniform1i(u.uAtlas, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, cells.tex); gl.uniform1i(u.uCells, 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (!still) raf = win.requestAnimationFrame(frame);
+    raf = win.requestAnimationFrame(frame);
   };
 
   const observers = [];
@@ -464,7 +466,7 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
   let resizeTimer = 0;
   const onResize = () => {
     win.clearTimeout(resizeTimer);
-    resizeTimer = win.setTimeout(() => { resize(); if (still && !stopped) raf = win.requestAnimationFrame(frame); }, 120);
+    resizeTimer = win.setTimeout(resize, 120);
   };
   win.addEventListener('resize', onResize);
   canvas.addEventListener('webglcontextlost', stop);
@@ -505,7 +507,7 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
 
   raf = win.requestAnimationFrame(frame);
   return {
-    stop, get stage() { return stage; }, get demo() { return demo; }, get still() { return still; },
+    stop, get stage() { return stage; }, get demo() { return demo; }, get calm() { return calm; },
     /** Na overenie v prehliadači: hodiny víru, bunka, stred (CSS px). */
     debug: () => ({ clock, t, cell: [...cell], grid: [...grid], obs: { ...obs }, swirlC: { ...swirlC }, dpr }),
     /** Na overenie: koľko buniek mriežky má znak (číta 1. priechod z GPU). */
