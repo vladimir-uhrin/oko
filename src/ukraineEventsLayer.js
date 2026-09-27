@@ -119,7 +119,7 @@ export function placeBox(anchor, size, placed, viewport, gap = ANCHOR_GAP_PX) {
  */
 export const CARD_OBSTACLE_SELECTOR = [
   '.oko-ukr-timeline', '#command-dock', '#title-bar', '#top-center-actions',
-  '#left-panel-stack > .panel-collapsible', '#left-panel-stack > .oko-conflicts-launch',
+  '#left-panel-stack > .panel-collapsible', '#left-panel-stack .oko-conflicts-launch',
   '#right-context-rail .panel-collapsible', '.oko-karta-island',
   '#oko-appbar', '#oko-sheet', // mobilný plášť
   '.oko-scale', // mierka v km (režim mapy)

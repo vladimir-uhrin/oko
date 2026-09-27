@@ -183,11 +183,15 @@ test('nepanelové deti pruhu majú order a klikateľné si pýtajú pointer-even
   // vlastného pointer-events sa vykreslí a nedá sa naň kliknúť.
   const zones = zoneOrders();
   assert.ok(zones.size >= 3, 'každý nadpis zóny potrebuje order');
-  const launch = css.match(/#left-panel-stack > \.oko-conflicts-launch \{([^}]*)\}/);
-  assert.ok(launch, 'spúšťač Kartičiek v pruhu potrebuje vlastné pravidlo');
-  assert.match(launch[1], /order:\s*\d+/, 'inak spadne na order 0 a vyskočí nad Dátové vrstvy');
+  // 2026-09-27: spúšťač Kartičiek už nie je dieťa pruhu (pilulka ležala cez nadpis ENERGIA),
+  // býva v riadku nadpisu KONFLIKTY — nadpis je pointer-events: none, tlačidlo si ho pýta samo.
+  assert.doesNotMatch(css, /#left-panel-stack > \.oko-conflicts-launch \{/, 'žiadna samostatná pilulka v toku pruhu');
+  const launch = css.match(/#left-panel-stack > \.lane-zone > \.oko-conflicts-launch \{([^}]*)\}/);
+  assert.ok(launch, 'spúšťač Kartičiek v nadpise zóny potrebuje vlastné pravidlo');
   assert.match(launch[1], /pointer-events:\s*auto/, 'inak sa naň nedá kliknúť');
-  assert.match(launch[1], /position:\s*relative|position:\s*static/, 'musí prestať byť position: fixed');
+  assert.match(launch[1], /position:\s*static/, 'musí prestať byť position: fixed');
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.ok(main.includes(`launchTarget: document.querySelector('#left-panel-stack > .lane-zone[data-lane-zone="conflicts"]')`), 'domov = nadpis KONFLIKTY');
 });
 
 test('čistý pohľad skryje celý pruh, nielen ručný zoznam id', () => {

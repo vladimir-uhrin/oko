@@ -12211,27 +12211,35 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
 .oko-conflicts-launch[aria-expanded="true"] { background: rgba(0, 212, 255, 0.26); color: #eafaff; }
 
 /*
- * Domov v zóne KONFLIKTY (2026-09-20): v toku pruhu, bez vlastných súradníc.
- * (1,1,0) prebije blok vyššie (0,1,0), takže `position: fixed` naozaj padne —
- * inak by tlačidlo vyzeralo nepresunuté, neprispelo by výškou a výpočet pruhu
- * by s tým „súhlasil". Pruh je `pointer-events: none` a vracia ho len
- * `[data-panel-id]`, preto si ho tlačidlo musí vypýtať samo, inak sa vykreslí
- * a nedá sa naň kliknúť.
+ * Domov v riadku nadpisu zóny KONFLIKTY (2026-09-27; od 09-20 to bola samostatná pilulka
+ * v toku pruhu — vyzerala ako panel a v tesnom stĺpci ležala cez nadpis ENERGIA). Je to akcia
+ * nad celou zónou (kartičky všetkých konfliktov), preto sedí vpravo za čiarou nadpisu.
+ * (1,2,0) prebije blok vyššie, takže `position: fixed` naozaj padne. Nadpis je
+ * `pointer-events: none` (dekorácia, klik ide na glóbus), tlačidlo si ho musí vypýtať samo.
  */
-#left-panel-stack > .oko-conflicts-launch {
-  position: relative;
+#left-panel-stack > .lane-zone > .oko-conflicts-launch {
+  position: static;
   inset: auto;
   z-index: auto;
-  order: 23;
   flex: 0 0 auto;
-  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   pointer-events: auto;
-  font-size: 9px;
+  font-size: 8.5px;
+  line-height: 12px;
   letter-spacing: 2px;
   text-transform: uppercase;
-  padding: 5px 9px;
+  padding: 1px 8px 1px 5px;
   border-radius: 999px;
+  color: var(--text-dim);
+  background: transparent;
+  border-color: rgba(0, 212, 255, 0.22);
+  backdrop-filter: none;
 }
+#left-panel-stack > .lane-zone > .oko-conflicts-launch .material-symbols-outlined { font-size: 12px; line-height: 12px; letter-spacing: 0; }
+#left-panel-stack > .lane-zone > .oko-conflicts-launch:hover { color: #eafaff; background: rgba(0, 212, 255, 0.18); }
+#left-panel-stack > .lane-zone > .oko-conflicts-launch[aria-expanded="true"] { color: #eafaff; background: rgba(0, 212, 255, 0.26); }
 
 .oko-conflicts-panel {
   /* Pruh má z-index 100 a panely sa promujú do 139; pri 96 by sa flyout schoval
@@ -12282,6 +12290,11 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
 .oko-conflicts-digest:disabled { opacity: 0.5; cursor: default; }
 .oko-conflicts-status { font-size: 10.5px; color: #9fb2c4; margin-top: 7px; min-height: 13px; text-align: center; }
 body.oko-karta-clean .oko-conflicts-launch, body.oko-karta-clean .oko-conflicts-panel { display: none !important; }
+/* Na počítači sa panel otvára VEDĽA ľavého stĺpca (2026-09-27): spúšťač býva v nadpise
+   KONFLIKTY, pri left: 16px by panel zakryl celý stĺpec aj svoje tlačidlo. Pruh má 360 px. */
+@media (min-width: 721px) {
+  .oko-conflicts-panel { left: calc(var(--left-stack-x, 52px) + 372px); }
+}
 
 /* ── Hľadať čokoľvek: príkazová paleta (orientácia v OKU) ────────────────────
    Modálne pole nad všetkým; jedno miesto na miesto/vrstvu/scénu/akciu. */

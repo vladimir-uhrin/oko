@@ -945,10 +945,14 @@ async function init() {
       translate: t,
       conflicts: listConflicts().map((c) => ({ id: c.id, region: c.region, kind: c.kind, label: conflictTitle(c, t) })),
       ratios: CARD_RATIO_IDS,
-      // Domov v zóne KONFLIKTY namiesto voľného plávania vľavo dole; kotvíme pred
-      // nadpis ENERGIA, aby DOM poradie sedelo s tým, čo oko vidí.
-      launchTarget: document.getElementById('left-panel-stack'),
-      launchBefore: document.querySelector('#left-panel-stack .lane-zone[data-lane-zone="energy"]'),
+      // Domov v riadku nadpisu zóny KONFLIKTY (2026-09-27): akcia nad celou zónou, nie panel —
+      // samostatná pilulka pod Blízkym východom vyzerala ako panel a v tesnom stĺpci ležala cez
+      // nadpis ENERGIA (vlastník: „aj toto treba zmysluplne poupratať a logicky").
+      launchTarget: document.querySelector('#left-panel-stack > .lane-zone[data-lane-zone="conflicts"]')
+        || document.getElementById('left-panel-stack'),
+      launchLabel: t('conflicts.launch.short'),
+      launchIcon: 'ios_share',
+      launchHint: `${t('conflicts.launch')} — ${t('conflicts.subtitle')}`,
       onExport: async (item, ratio) => {
         const c = conflictById(item.id);
         if (!c) return;

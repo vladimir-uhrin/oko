@@ -30,6 +30,9 @@ function el(doc, tag, cls, text) {
  *   voľne plávajúce tlačidlo); zóna KONFLIKTY v ľavom pruhu mu dáva domov
  * @param {Element} [o.launchBefore] voliteľná kotva pre `insertBefore`, aby DOM
  *   poradie sedelo s vizuálnym; bez nej sa pripne na koniec cieľa
+ * @param {string} [o.launchLabel] krátky nápis spúšťača (predvolene celý názov `conflicts.launch`)
+ * @param {string} [o.launchIcon] názov ikony Material Symbols pred nápisom (monochromatická)
+ * @param {string} [o.launchHint] bublina (title) — čo tlačidlo robí
  */
 export function createConflictsPanel({
   documentRef = globalThis.document,
@@ -42,6 +45,9 @@ export function createConflictsPanel({
   clipboard = (globalThis.navigator && globalThis.navigator.clipboard) || null,
   launchTarget = null,
   launchBefore = null,
+  launchLabel = null,
+  launchIcon = null,
+  launchHint = null,
 } = {}) {
   const doc = documentRef;
   const inert = { id: CONFLICTS_PANEL_ID, open() {}, close() {}, toggle() {}, isOpen: () => false, destroy() {}, _getStateForTest: () => ({}) };
@@ -51,9 +57,19 @@ export function createConflictsPanel({
   let _busy = false;
   let _destroyed = false;
 
-  const launch = el(doc, 'button', 'oko-conflicts-launch', translate('conflicts.launch'));
+  const launchName = translate('conflicts.launch');
+  const launch = el(doc, 'button', 'oko-conflicts-launch');
+  if (launchIcon) {
+    const icon = el(doc, 'span', 'material-symbols-outlined', launchIcon);
+    icon.setAttribute('aria-hidden', 'true');
+    launch.append(icon);
+  }
+  launch.append(el(doc, 'span', 'oko-conflicts-launch-label', launchLabel || launchName));
   launch.type = 'button';
   launch.setAttribute('aria-expanded', 'false');
+  // krátky nápis v nadpise zóny nestačí čítačke ani bublina — celý názov
+  if (launchLabel && launchLabel !== launchName) launch.setAttribute('aria-label', launchName);
+  if (launchHint) launch.setAttribute('title', launchHint);
 
   const panel = el(doc, 'section', 'oko-conflicts-panel');
   panel.id = CONFLICTS_PANEL_ID;

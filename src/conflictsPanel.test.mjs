@@ -70,6 +70,30 @@ test('panel: spúšťač smie bývať v pruhu, flyout ostáva na body', () => {
   assert.ok(doc.body.children.includes(panel), 'flyout ostáva na body — je position:fixed');
 });
 
+test('panel: spúšťač v nadpise zóny — ikona, krátky nápis, celý názov pre čítačku a bublina', () => {
+  const doc = fakeDoc();
+  const heading = fakeNode('div');
+  const p = createConflictsPanel({
+    documentRef: doc, translate: tr, conflicts: CONFLICTS, onExport: async () => {},
+    launchTarget: heading, launchLabel: 'Kartičky', launchIcon: 'ios_share', launchHint: 'Kartičky konfliktov — export',
+  });
+  const { launch } = p._getStateForTest();
+  assert.equal(heading.children.at(-1), launch, 'na konci riadku nadpisu');
+  const [icon, label] = launch.children;
+  assert.equal(icon.className, 'material-symbols-outlined');
+  assert.equal(icon.textContent, 'ios_share');
+  assert.equal(icon.getAttribute('aria-hidden'), 'true', 'ligatúru ikony čítačka nečíta');
+  assert.equal(label.textContent, 'Kartičky');
+  assert.equal(launch.getAttribute('aria-label'), tr('conflicts.launch'));
+  assert.equal(launch.getAttribute('title'), 'Kartičky konfliktov — export');
+  // bez volieb: plný názov, žiadna ikona ani aria-label navyše
+  const plain = createConflictsPanel({ documentRef: fakeDoc(), translate: tr, conflicts: CONFLICTS, onExport: async () => {} });
+  const b = plain._getStateForTest().launch;
+  assert.equal(b.children.length, 1);
+  assert.equal(b.children[0].textContent, tr('conflicts.launch'));
+  assert.equal(b.getAttribute('aria-label'), null);
+});
+
 test('panel: bez insertBefore sa spúšťač pripne na koniec cieľa', () => {
   const doc = fakeDoc();
   const lane = fakeNode('div');
