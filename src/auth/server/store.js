@@ -71,6 +71,14 @@ export function openAuthStore(filename) {
         type TEXT NOT NULL, created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS security_events_user ON security_events(user_id, created_at);
+      -- Sledované lety (2026-09-27): len kľúč letu/stroja a krátky popis, nič o polohe používateľa.
+      -- Aditívna tabuľka BEZ zvýšenia user_version — staršia verzia servera DB ďalej otvorí.
+      CREATE TABLE IF NOT EXISTS followed_flights (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        key TEXT NOT NULL CHECK (length(key) <= 16), hex TEXT, callsign TEXT,
+        label TEXT NOT NULL DEFAULT '' CHECK (length(label) <= 80), created_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, key)
+      );
       PRAGMA user_version = 5; COMMIT;
     `);
   } catch (error) {
@@ -224,6 +232,20 @@ export function openAuthStore(filename) {
       });
     },
     deleteSession: (hash) => db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hash),
+    follows: userId => db.prepare(`SELECT key, hex, callsign, label, created_at AS addedAt FROM followed_flights
+      WHERE user_id = ? ORDER BY created_at DESC, rowid DESC`).all(userId),
+    /** Pridá sledovaný let; existujúci kľúč len obnoví popis. false = plný zoznam. */
+    addFollow(userId, item, now, max) {
+      return transaction(() => {
+        const exists = db.prepare('SELECT 1 FROM followed_flights WHERE user_id = ? AND key = ?').get(userId, item.key);
+        if (!exists && db.prepare('SELECT COUNT(*) AS n FROM followed_flights WHERE user_id = ?').get(userId).n >= max) return false;
+        db.prepare(`INSERT INTO followed_flights (user_id, key, hex, callsign, label, created_at) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(user_id, key) DO UPDATE SET hex = excluded.hex, callsign = excluded.callsign, label = excluded.label`)
+          .run(userId, item.key, item.hex, item.callsign, item.label, now);
+        return true;
+      });
+    },
+    removeFollow: (userId, key) => db.prepare('DELETE FROM followed_flights WHERE user_id = ? AND key = ?').run(userId, key).changes,
     consume(key, limit, windowMs, now) {
       return transaction(() => {
         const old = db.prepare('SELECT count, expires_at FROM auth_limits WHERE key = ?').get(key);

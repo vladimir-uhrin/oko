@@ -85,6 +85,24 @@ export function createAuthClient({ fetchImpl = (...args) => fetch(...args) } = {
       return null;
     }
   }
+  /**
+   * Zápis mimo panela účtu (sledované lety, 2026-09-27): bez globálneho `busy` — klik na
+   * glóbuse nesmie zablokovať formuláre v paneli ani sa stratiť, keď panel práve pracuje.
+   * Vypršaná session prepne stav na hosťa rovnako ako mutate().
+   */
+  async function write(path, method, body) {
+    try {
+      if (!csrfToken) csrfToken = (await request('/api/auth/csrf')).csrfToken;
+      return await request(path, method, body, csrfToken);
+    } catch (error) {
+      if (error.message === 'csrf_failed') csrfToken = null;
+      if (error.message === 'authentication_required' && state.user) {
+        csrfToken = null; revision++; securityGeneration++;
+        publish({ user: null, status: 'guest', security: null, securityStatus: 'idle', error: error.message });
+      }
+      throw error;
+    }
+  }
   async function exportAccount() {
     const ticket = revision;
     const userId = state.user?.id;
@@ -118,5 +136,8 @@ export function createAuthClient({ fetchImpl = (...args) => fetch(...args) } = {
     verifyEmail: token => mutate('/api/auth/verify-email', 'POST', { token }),
     confirmEmailChange: token => mutate('/api/auth/confirm-email', 'POST', { token }),
     exportAccount,
+    follows: () => request('/api/account/follows'),
+    follow: data => write('/api/account/follows', 'POST', data),
+    unfollow: key => write('/api/account/follows', 'DELETE', { key }),
   };
 }

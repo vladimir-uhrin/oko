@@ -6038,6 +6038,29 @@ const flightsLayer = {
     return _billboards.has(id) || _billboards.has(id.toLowerCase());
   },
 
+  /**
+   * Sledované lety (2026-09-27): živé kontakty podľa identity — hex stroja alebo volací znak
+   * letu. Jeden prechod záznamami, volá sa zriedka (followedFlights.js, raz za FOLLOW_POLL_MS)
+   * a len keď má prihlásený používateľ niečo sledované. Bez dopytov na sieť.
+   * @param {{hexes?: Set<string>, callsigns?: Set<string>}} identity hex malými, znaky veľkými
+   * @returns {Array<{hex: string, callsign: string|null, onGround: boolean, altitudeM: number|null}>}
+   */
+  findContactsByIdentity({ hexes = new Set(), callsigns = new Set() } = {}) {
+    if (!hexes.size && !callsigns.size) return [];
+    const out = [];
+    for (const [icao24, info] of _flightData) {
+      const callsign = String(info?.callsign || '').trim().toUpperCase() || null;
+      if (!hexes.has(icao24) && !(callsign && callsigns.has(callsign))) continue;
+      out.push({
+        hex: icao24,
+        callsign,
+        onGround: info?.onGround === true,
+        altitudeM: Number.isFinite(info?.altitude) ? info.altitude : null,
+      });
+    }
+    return out;
+  },
+
   getAllPositions(maxCount = 500) {
     if (!_billboardCollection || _billboards.size === 0) return [];
     const limit = Number.isFinite(maxCount) ? Math.max(1, Math.floor(maxCount)) : 500;

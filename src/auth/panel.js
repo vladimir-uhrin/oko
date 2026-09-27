@@ -127,7 +127,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   const guest = el('div', 'auth-guest');
   const hero = el('aside', 'auth-hero');
   const heroList = el('ul');
-  for (const key of ['auth.hero-1', 'auth.hero-2', 'auth.hero-3']) heroList.append(el('li', '', t(key)));
+  for (const key of ['auth.hero-1', 'auth.hero-4', 'auth.hero-2', 'auth.hero-3']) heroList.append(el('li', '', t(key)));
   hero.append(el('p', 'auth-kicker', t('auth.kicker')), el('h3', '', t('auth.hero-title')), heroList, note('auth.hero-note'));
   const guestForm = el('div', 'auth-guest-form');
   guest.append(hero, guestForm);
@@ -332,7 +332,11 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   pages.devices.append(el('h3', '', t('auth.devices')), note('auth.sessions-note'), securityLoading, securityRetry, sessions, revokeOthers, confirmationBox);
   pages.activity.append(el('h3', '', t('auth.activity')), note('auth.activity-note'), activityLoading, activityRefresh, events);
   const retry = btn('auth-secondary', t('auth.retry'), () => void client.refresh());
-  guestForm.append(intro, tabs, credentials.node, retry, continueGuest);
+  // Dôvod otvorenia z glóbusu (2026-09-27, sledovanie letov: „pre neprihlásených ich presmeruj na
+  // prihlásenie") — jedna veta nad formulárom, len pre hosťa, po zatvorení zmizne.
+  const reasonNote = el('p', 'auth-reason'); reasonNote.setAttribute('role', 'note'); reasonNote.hidden = true;
+  let reasonKey = null;
+  guestForm.append(reasonNote, intro, tabs, credentials.node, retry, continueGuest);
   shell.append(header, title, status, guest, center, el('p', 'auth-footer', t('auth.public-note')));
   dialog.append(shell); document.body.append(dialog, toast);
   let mode = linkAction?.action === 'reset' ? 'reset' : linkAction ? 'verify' : 'login';
@@ -402,6 +406,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     password.meter.hidden = !['register', 'reset'].includes(mode);
     for (const b of dialog.querySelectorAll('.auth-primary')) b.classList.toggle('is-busy', state.busy);
     title.textContent = t(showAccount ? 'auth.center' : mode === 'register' ? 'auth.create-title' : mode === 'forgot' ? 'auth.recovery-title' : mode === 'reset' ? 'auth.reset-title' : mode === 'verify' ? 'auth.confirm-email-title' : 'auth.welcome');
+    reasonNote.hidden = showAccount || linkMode || !reasonKey; reasonNote.textContent = reasonKey && !showAccount ? t(reasonKey) : '';
     intro.hidden = showAccount || linkMode; tabs.hidden = showAccount || unavailable || checking || linkMode || mode === 'forgot';
     center.hidden = !showAccount; credentials.node.hidden = showAccount || unavailable || checking; retry.hidden = !unavailable;
     name.wrapper.hidden = mode !== 'register'; name.input.required = mode === 'register';
@@ -506,8 +511,9 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     void action(() => client.requestEmailChange({ email: newEmail.input.value, currentPassword: emailPassword.input.value }), 'auth.email-change-sent').finally(clearPasswords);
   });
   const unsubscribe = client.subscribe(render);
-  async function open(target = null) {
+  async function open(target = null, { reason = null } = {}) {
     closeMenu();
+    reasonKey = typeof reason === 'string' && reason ? reason : null;
     if (target && pages[target]) selectPage(target);
     if (!dialog.open) {
       dialog.showModal();
@@ -518,6 +524,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   }
   opener.addEventListener('click', () => { if (client.getState().user && !dialog.open) toggleMenu(); else void open(); });
   dialog.addEventListener('close', () => {
+    reasonKey = null;
     clearPasswords(); clearPhoto(); renderPhoto(client.getState()); opener.setAttribute('aria-expanded', 'false'); pendingRevoke = undefined; confirmationBox.hidden = true;
     // Focus goes back to the launcher (dialog pattern) — the browser would otherwise try the
     // menu item that opened the centre, which is hidden again by now, and land on <body>.
@@ -537,5 +544,5 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   if (broadcast) broadcast.onmessage = event => { if (event.data === 'changed') onFocus(); };
   const interval = setInterval(() => { if (client.getState().user) onFocus(); }, 30000);
   void client.refresh();
-  return { client, open, destroy() { destroyed = true; clearPhoto(); clearInterval(interval); clearTimeout(timer); unsubscribe(); broadcast?.close(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); document.removeEventListener('keydown', claimEscape, true); document.removeEventListener('pointerdown', onOutside, true); dialog.remove(); menu.remove(); opener.remove(); toast.remove(); if (ownedMount) mount.remove(); } };
+  return { client, open, close: () => { if (dialog.open) dialog.close(); }, isOpen: () => dialog.open, destroy() { destroyed = true; clearPhoto(); clearInterval(interval); clearTimeout(timer); unsubscribe(); broadcast?.close(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); document.removeEventListener('keydown', claimEscape, true); document.removeEventListener('pointerdown', onOutside, true); dialog.remove(); menu.remove(); opener.remove(); toast.remove(); if (ownedMount) mount.remove(); } };
 }

@@ -22,6 +22,9 @@
 .auth-kicker { font: 10px var(--font-mono, monospace); letter-spacing: .18em; color: var(--accent, #00d4ff); text-transform: uppercase; margin-bottom: 10px; }
 .auth-dialog h2 { font-size: 25px; font-weight: 500; letter-spacing: -.04em; margin: 0 0 10px; }
 .auth-intro { font-size: 13px; line-height: 1.6; color: #9aa7b5; }
+/* Dôvod otvorenia z glóbusu (sledovanie letov): cyan akcent, nad úvodom. */
+.auth-reason { margin: 0 0 12px; padding: 10px 12px; font-size: 12.5px; line-height: 1.55; color: #bdefff; background: #0a2a3480; border: 1px solid #2fc4e340; border-left: 3px solid #39d5ff; border-radius: 8px; }
+.auth-reason[hidden] { display: none; }
 .auth-tabs { display: flex; gap: 5px; background: #04080e; border: 1px solid #ffffff0d; border-radius: 9px; padding: 4px; margin-top: 24px; }
 .auth-tabs button { flex: 1; border: 0; padding: 10px; border-radius: 6px; font-size: 12px; color: #a1a9b4; background: transparent; }
 .auth-tabs button[aria-pressed=true] { background: #16303c; color: #8cecff; }

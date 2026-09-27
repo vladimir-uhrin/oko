@@ -92,6 +92,8 @@ export const AUTH_EN = {
   'auth.hero-3': 'Download your own account data at any time',
   'auth.hero-note': 'The globe and all layers stay open without an account.',
   'auth.field-error': 'Check this field',
+  'auth.hero-4': 'Followed flights — saved to your account, at the top of Search',
+  'follow.login-reason': 'Following flights needs an account. Sign in or create one — the selected flight is then added automatically.',
 };
 export const AUTH_SK = {
   'auth.photo': 'Vaša profilová fotka', 'auth.choose-photo': 'Vybrať fotku', 'auth.save-photo': 'Uložiť fotku',
@@ -183,4 +185,6 @@ export const AUTH_SK = {
   'auth.hero-3': 'Údaje svojho účtu si kedykoľvek stiahnete',
   'auth.hero-note': 'Glóbus a všetky vrstvy zostávajú prístupné aj bez účtu.',
   'auth.field-error': 'Skontrolujte toto pole',
+  'auth.hero-4': 'Sledované lety — uložené k účtu, navrchu v hľadaní',
+  'follow.login-reason': 'Sledovanie letov je pre prihlásených. Prihláste sa alebo si vytvorte účet — vybraný let sa potom pridá sám.',
 };

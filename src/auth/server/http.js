@@ -4,6 +4,7 @@ import { normalizeEmail, validateCredentials, validEmail, validPassword, validat
 import { hashPassword, verifyPassword } from './passwords.js';
 import { unavailableMailer, accountMail } from './mail.js';
 import { receivePhoto } from './photos.js';
+import { FOLLOW_MAX, sanitizeFollow, validFollowKey } from '../follows.js';
 
 export const SESSION_TTL_MS = 7 * 86400_000;
 export const SESSION_IDLE_MS = 86400_000;
@@ -238,7 +239,7 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       const routes = { '/api/auth/session': ['GET'], '/api/auth/csrf': ['GET'], '/api/auth/register': ['POST'],
         '/api/auth/login': ['POST'], '/api/auth/logout': ['POST'], '/api/account': ['GET', 'PATCH'],
         '/api/account/password': ['POST'], '/api/account/security': ['GET'], '/api/account/export': ['GET'],
-        '/api/account/photo': ['GET', 'PUT', 'DELETE'],
+        '/api/account/photo': ['GET', 'PUT', 'DELETE'], '/api/account/follows': ['GET', 'POST', 'DELETE'],
         '/api/account/sessions/revoke-others': ['POST'], '/api/account/sessions/revoke': ['POST'], '/api/account/email/verification': ['POST'],
         '/api/account/email/change': ['POST'], '/api/auth/email/verify': ['POST'],
         '/api/auth/password/forgot': ['POST'], '/api/auth/password/reset': ['POST'],
@@ -259,7 +260,31 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       if (pathname === '/api/account' && req.method === 'GET') return json(res, 200, { user: publicUser(ctx.session) });
       if (['/api/account/security', '/api/account/export'].includes(pathname)) {
         const security = store.security(ctx.session.user_id, ctx.hash, now(), SESSION_IDLE_MS);
-        return json(res, 200, pathname.endsWith('/export') ? { exportedAt: now(), user: publicUser(ctx.session), ...security } : security);
+        return json(res, 200, pathname.endsWith('/export')
+          ? { exportedAt: now(), user: publicUser(ctx.session), ...security, follows: store.follows(ctx.session.user_id) }
+          : security);
+      }
+      // Sledované lety (2026-09-27): len pre prihláseného (required vyššie), zápis s Origin + CSRF.
+      if (pathname === '/api/account/follows') {
+        if (req.method === 'GET') return json(res, 200, { follows: store.follows(ctx.session.user_id), max: FOLLOW_MAX });
+        rate(ctx, 'follows', ctx.session.user_id, 120);
+        const body = await readJson(req);
+        let item = null;
+        if (req.method === 'POST') {
+          fields(body, ['hex', 'callsign', 'label']);
+          item = sanitizeFollow(body);
+          if (!item) throw fail('invalid_flight');
+        } else {
+          fields(body, ['key']);
+          if (!validFollowKey(body.key)) throw fail('invalid_flight');
+        }
+        const follows = store.transaction(() => {
+          active(ctx);
+          if (item && !store.addFollow(ctx.session.user_id, item, now(), FOLLOW_MAX)) throw fail('follow_limit', 409);
+          if (!item) store.removeFollow(ctx.session.user_id, body.key);
+          return store.follows(ctx.session.user_id);
+        });
+        return json(res, 200, { follows, max: FOLLOW_MAX });
       }
       if (pathname === '/api/account/photo') {
         if (req.method === 'GET') {

@@ -126,6 +126,7 @@ iba preto, že má rolu vlastníka.
 ```text
 src/auth/
   validation.js          spoločná validácia; server ju vždy zopakuje
+  follows.js             sledované lety: kľúč letu/stroja, validácia (server aj glóbus)
   client.js              in-memory stav a same-origin fetch
   panel.js               registrácia / prihlásenie / editácia profilu (DOM)
   panel.css              tmavý OKO panel, cyan akcent, mobilné rozloženie
@@ -163,7 +164,10 @@ načítavania, úspechu, chyby a nedostupnosti backendu.
 | `/api/account/security` | GET | Iba vlastné aktívne relácie a posledné udalosti |
 | `/api/account/sessions/revoke` | POST | `{id}` verejné ID vlastnej relácie, nikdy token/hash |
 | `/api/account/sessions/revoke-others` | POST | Odhlási ostatné relácie, ponechá aktuálnu |
-| `/api/account/export` | GET | Vlastný profil, relácie a udalosti; žiadne tajomstvá |
+| `/api/account/export` | GET | Vlastný profil, relácie, udalosti a sledované lety; žiadne tajomstvá |
+| `/api/account/follows` | GET | Vlastné sledované lety `{follows, max}` (najviac 50) |
+| `/api/account/follows` | POST | `{hex?, callsign?, label?}` — let dopravcu podľa volacieho znaku, inak stroj podľa hexu; 409 `follow_limit` |
+| `/api/account/follows` | DELETE | `{key}` (`cs:AUA40H` / `hex:44003a`) — odoberie iba z vlastného zoznamu |
 | `/api/account/verification` | POST | Pošle jednorazový overovací odkaz |
 | `/api/account/email` | POST | `{email,currentPassword}`, pošle potvrdenie na novú adresu |
 | `/api/auth/forgot-password` | POST | `{email}`, generická odpoveď bez odhalenia účtu |
@@ -258,6 +262,14 @@ Pre GET overí session; pre zápis aj Origin a CSRF. Frontend môže na chránen
 view skontrolovať `auth.getState().user` a otvoriť prihlasovací panel. Táto UI
 kontrola je len navigácia — oprávnenie vždy rozhodne server. Aktuálne
 chránený view je profil v paneli, nie glóbus alebo jeho URL.
+
+Sledované lety (2026-09-27, `src/followedFlights.js`): tlačidlo SLEDOVAŤ nad KOKPIT
+pri sledovanom lietadle. Host po kliku dostane panel s vetou prečo
+(`open(null, { reason: 'follow.login-reason' })`); vybraný let sa po prihlásení do
+10 minút pridá sám a panel sa zavrie. Zoznam je na serveri (`followed_flights`,
+aditívna tabuľka bez zvýšenia `user_version`), v „Hľadať čokoľvek" je navrchu
+skupina Sledované lety; stav (vo vzduchu / na zemi / nie je v živých dátach) je
+len z toho, čo práve tečie vo feede — nič sa nedopytuje navyše.
 
 ## Nahranie vlastného avatara
 

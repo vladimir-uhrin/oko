@@ -1,5 +1,6 @@
 import * as Cesium from 'cesium';
 import { initAuthPanel } from './auth/panel.js';
+import { createFollowedFlights, installFollowButton } from './followedFlights.js';
 import './auth/panel.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { StyleManager } from './ui.js';
@@ -982,8 +983,33 @@ async function init() {
     // východ), vrstvy podľa ľudských tém (Vo vzduchu, Na mori, Zem a počasie…) —
     // aby sa dal celok listovať prehľadne, nie ako jeden dlhý zoznam.
     const CONFLICT_GROUP = { ukraine: 'ukraine', maritime: 'maritime', 'middle-east': 'mideast' };
+    // Sledované lety (2026-09-27, vlastník: „sledovanie letov, ale len pre prihlásených … pre
+    // neprihlásených ich presmeruj na prihlásenie"): tlačidlo SLEDOVAŤ nad KOKPIT, zoznam k účtu,
+    // navrchu v hľadaní, toast pri vzlete/pristátí. Bez účtu (panel nenaštartoval) sa nič nepridá.
+    let followedFlights = null;
+    try {
+      if (accountCenter) {
+        followedFlights = createFollowedFlights({
+          account: accountCenter,
+          translate: t,
+          notify: (text) => styleManager._showToast(text, { durationMs: 4500 }),
+          findContacts: (identity) => flightsLayer.findContactsByIdentity?.(identity) || [],
+          trackContact: (hex) => flightsLayer.trackById?.(hex, { origin: 'user' }) === true,
+        });
+        const followButton = installFollowButton({
+          doc: document,
+          followed: followedFlights,
+          getTracked: () => flightsLayer.getTrackedInfo?.() || null,
+          translate: t,
+        });
+        viewer.trackedEntityChanged?.addEventListener?.(() => followButton.sync());
+        setInterval(() => followButton.sync(), 1500);
+        window.__godsEyeView.followedFlights = followedFlights;
+      }
+    } catch (error) { console.warn('[follow] followed flights unavailable:', error?.message || error); }
     const buildCommands = () => {
       const cmds = [];
+      try { cmds.push(...(followedFlights?.commands() || [])); } catch { /* sledované lety sú voliteľné */ }
       for (const c of listConflicts()) {
         cmds.push({ id: `scene:${c.id}`, label: conflictTitle(c, t), group: CONFLICT_GROUP[c.region] || 'ukraine', keywords: [c.region, c.name, c.sceneId || ''], run: () => { void frameConflict(c); } });
       }
@@ -1017,7 +1043,8 @@ async function init() {
       getCommands: buildCommands,
       // Poradie (2026-09-27, vlastník o lupe: „toto tlačidlo patrí Ukrajine" — prázdne hľadanie
       // začínalo 12 smermi frontu): zobrazenie → vrstvy (podľa témy) → konflikty (podľa regiónu).
-      groupOrder: ['view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
+      // Sledované lety prihláseného (09-27) úplne navrchu — sú to jeho vlastné položky.
+      groupOrder: ['follows', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
       onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
     });
     window.__godsEyeView.commandPalette = commandPalette;
@@ -1334,5 +1361,7 @@ async function init() {
 }
 
 // Account state is optional and cannot block the public globe startup.
-try { initAuthPanel(); } catch { console.warn('[Account] Account panel could not initialize.'); }
+// Inštancia ide aj sledovaným letom (init → createFollowedFlights): prihlásenie, zoznam k účtu.
+let accountCenter = null;
+try { accountCenter = initAuthPanel(); } catch { console.warn('[Account] Account panel could not initialize.'); }
 init();

@@ -109,7 +109,8 @@ test('prázdne hľadanie nezačína Ukrajinou: zobrazenie (úvodný pohľad) →
   // vlastník o lupe: „toto tlačidlo patrí Ukrajine" — paleta otvárala 12 smerov frontu ako prvé
   const { readFileSync } = await import('node:fs');
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.ok(main.includes("groupOrder: ['view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],"));
+  // 09-27: sledované lety prihláseného sú úplne navrchu (followedFlights.js)
+  assert.ok(main.includes("groupOrder: ['follows', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],"));
   assert.match(main, /cmds\.push\(\{ id: 'view:home', label: t\('cmd\.action\.home'\)[^\n]*resetToGlobeView\(\{ home: true \}\)/);
   assert.ok(main.indexOf("id: 'view:home'") < main.indexOf("id: 'view:world'"), 'úvodný pohľad je prvý riadok zobrazenia');
 });

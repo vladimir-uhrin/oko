@@ -2518,6 +2518,49 @@ body.ui-clean-view #scene-runtime.active {
   outline: none;
 }
 #cockpit-entry .material-symbols-outlined { color: #00dcff; font-size: 18px; }
+
+/* SLEDOVAŤ let (2026-09-27, followedFlights.js): rovnaké tlačidlo ako KOKPIT, stojí NAD ním
+   a zrkadlí jeho polohy (šírka ≤ 1180 px, dotyk, mobilný dok, kokpit). Host vidí zámok —
+   klik ho pošle na prihlásenie; sledovaný let má plný akcent. */
+#follow-flight {
+  position: fixed;
+  left: calc(50% + 270px);
+  bottom: 80px;
+  z-index: 151;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 220, 255, 0.5);
+  border-radius: 8px;
+  background: rgba(2, 12, 18, 0.9);
+  color: #dceeff;
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  box-shadow: 0 0 18px rgba(0, 220, 255, 0.14);
+  cursor: var(--cursor-pointer);
+}
+#follow-flight[hidden] { display: none; }
+#follow-flight .material-symbols-outlined { color: #00dcff; font-size: 18px; }
+#follow-flight:hover, #follow-flight:focus-visible { border-color: #00dcff; color: #fff; outline: none; }
+#follow-flight[data-guest="true"] .material-symbols-outlined { color: rgba(220, 238, 255, 0.7); }
+#follow-flight[aria-pressed="true"] { border-color: #00dcff; background: rgba(0, 72, 92, 0.92); color: #fff; }
+#follow-flight[aria-busy="true"] { opacity: 0.6; cursor: progress; }
+@media (max-width: 1180px) {
+  #follow-flight { left: auto; right: 16px; bottom: 134px; }
+}
+@media (pointer: coarse) {
+  #follow-flight { min-height: 44px; padding: 0 16px; font-size: 11px; bottom: 86px; }
+  #follow-flight .material-symbols-outlined { font-size: 22px; }
+}
+@media (pointer: coarse) and (max-width: 1180px) {
+  #follow-flight { bottom: 140px; }
+}
+body.oko-mobile #follow-flight { bottom: calc(var(--oko-dock-lift) + 128px); }
+body.cockpit-mode #follow-flight,
+body.ui-clean-view #follow-flight,
+body.recording-mode #follow-flight { display: none !important; }
 #cockpit-entry kbd {
   padding: 3px 5px;
   border: 1px solid rgba(220, 238, 255, 0.25);
