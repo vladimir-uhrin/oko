@@ -115,6 +115,6 @@ test('ukážka pozastaví glóbus pod preloaderom (60 snímok/s + Google 3D dla�
 test('build pridá k odkazu na preloader odtlačok obsahu (?v=…) — Cloudflare by inak hodiny servoval starú verziu', () => {
   const cfg = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
   assert.match(cfg, /function preloaderCacheBustPlugin\(\)/);
-  assert.match(cfg, /plugins: \[\n {6}preloaderCacheBustPlugin\(\),/);
+  assert.match(cfg, /\n {6}preloaderCacheBustPlugin\(\),\n {4}\],/, 'na konci zoznamu — poradie ostatných pluginov strážia iné testy');
   assert.ok(cfg.includes("html.replace('src=\"/preloaderFlow.js\"'"), 'prepisuje presne odkaz z index.html');
 });

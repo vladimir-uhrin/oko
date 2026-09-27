@@ -10732,7 +10732,6 @@ export default defineConfig(({ mode }) => {
   };
   return {
     plugins: [
-      preloaderCacheBustPlugin(),
       noIndexPlugin(),
       originKeepAlivePlugin(),
       sharePlugin(),
@@ -10783,6 +10782,8 @@ export default defineConfig(({ mode }) => {
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
+      // Odkaz na preloader víru s odtlačkom obsahu (Cloudflare cache) — na konci, poradie iných nemení.
+      preloaderCacheBustPlugin(),
     ],
     server: {
       host: env.HOST || 'localhost',
