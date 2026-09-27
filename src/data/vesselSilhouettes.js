@@ -224,8 +224,19 @@ export const FAMILY_SIZE_M = Object.freeze({
 /** Dĺžka trupu v obrázku (px): ikona zhora 28 px (−14…14), silueta L, čelný pohľad šírka trupu. */
 const TOP_HULL_PX = 28;
 const END_HULL_PX = { pleasure: 12, fishing: 12, tug: 16 };
-/** Najmenšia dĺžka trupu na obrazovke (px), aby loď zďaleka nezmizla; najväčšia (tesne pri lodi). */
-export const VESSEL_HULL_PX = Object.freeze({ min: 14, max: 900 });
+/**
+ * Dĺžka trupu na obrazovke (px): najmenej `min`, aby loď zďaleka nezmizla; STROP pre 110 m loď
+ * `cap` (menšie lode úmerne odmocnine dĺžky, v rozsahu capMin–capMax). 2026-09-27 vlastník po
+ * skutočnej veľkosti zblízka: „zblízka nemusia byť veľké, vyzerá to nahovno" — remorkér mal stovky px
+ * a zakrýval skutočné lode z 3D modelu. Zďaleka ostáva skutočná veľkosť, zblízka loď ďalej nerastie.
+ */
+export const VESSEL_HULL_PX = Object.freeze({ min: 14, cap: 72, capMin: 26, capMax: 90 });
+
+/** Strop dĺžky trupu (px) pre loď danej dĺžky (m). Pure. */
+export function vesselHullCapPx(lengthM) {
+  const L = Number.isFinite(lengthM) && lengthM > 0 ? lengthM : 110;
+  return Math.max(VESSEL_HULL_PX.capMin, Math.min(VESSEL_HULL_PX.capMax, VESSEL_HULL_PX.cap * Math.sqrt(L / 110)));
+}
 
 /**
  * Skutočná dĺžka / šírka lode (m): AIS, ak je rozumná (5–400 m), inak typická pre rodinu. Pure.
@@ -258,13 +269,15 @@ export function vesselRealScale({ kind, family, lengthM, beamM, distanceM, fovyR
   if (!(distanceM > 0) || !(fovyRad > 0) || !(viewportHeightPx > 0)) return null;
   const pxPerM = viewportHeightPx / (2 * distanceM * Math.tan(fovyRad / 2));
   const size = vesselSizeM(family, lengthM, beamM);
-  const clampPx = (px, min) => Math.max(min, Math.min(VESSEL_HULL_PX.max, px));
+  const cap = vesselHullCapPx(size.lengthM);
   if (kind === 'end') {
+    // spredu: šírka trupu so stropom v pomere šírka/dĺžka
     const imagePx = END_HULL_PX[family] ?? 20;
-    return clampPx(size.beamM * pxPerM, VESSEL_HULL_PX.min * 0.5) / imagePx;
+    const endCap = Math.max(VESSEL_HULL_PX.min * 0.5, cap * (size.beamM / size.lengthM) * 2.5);
+    return Math.max(VESSEL_HULL_PX.min * 0.5, Math.min(endCap, size.beamM * pxPerM)) / imagePx;
   }
   const imagePx = kind === 'top' ? TOP_HULL_PX : (FAMILY_LENGTH_PX[family] ?? FAMILY_LENGTH_PX.generic);
-  return clampPx(size.lengthM * pxPerM, VESSEL_HULL_PX.min) / imagePx;
+  return Math.max(VESSEL_HULL_PX.min, Math.min(cap, size.lengthM * pxPerM)) / imagePx;
 }
 
 const _cache = new Map();

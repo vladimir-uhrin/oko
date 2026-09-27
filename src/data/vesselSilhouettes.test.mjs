@@ -14,6 +14,7 @@ import {
   vesselFamily,
   vesselViewAngles,
   vesselViewFor,
+  vesselHullCapPx,
   vesselRealScale,
   vesselSizeM,
   vesselViewKind,
@@ -119,18 +120,25 @@ test('skutočná veľkosť: trup má na obrazovke svoju dĺžku v metroch, zďal
   const near = (a, b, eps = 1e-3) => Math.abs(a - b) <= eps;
   const cam = { fovyRad: Math.PI / 3, viewportHeightPx: 860 };
   const pxPerM = 860 / (2 * 1000 * Math.tan(Math.PI / 6)); // ~0,745 px/m na 1 km
-  // výletná loď 110 m z boku na 1 km: ~82 px trupu; obrázok má trup 112 px
-  const side = vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 1000, ...cam });
-  assert.ok(near(side, (110 * pxPerM) / 112));
+  // výletná loď 110 m z boku na 2 km: ~41 px trupu (pod stropom); obrázok má trup 112 px
+  const px2 = (110 * pxPerM) / 2;
+  const side = vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 2000, ...cam });
+  assert.ok(near(side, px2 / 112));
   // dvakrát ďalej = polovičná (bez stropu a podlahy)
-  assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 2000, ...cam }), side / 2));
+  assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 4000, ...cam }), side / 2));
   // AIS dĺžka má prednosť pred typickou
-  assert.ok(vesselRealScale({ kind: 'side', family: 'passenger', lengthM: 135, distanceM: 1000, ...cam }) > side);
-  // zďaleka podlaha 14 px (loď nezmizne), zblízka strop
+  assert.ok(vesselRealScale({ kind: 'side', family: 'passenger', lengthM: 135, distanceM: 2000, ...cam }) > side);
+  // zďaleka podlaha 14 px (loď nezmizne)
   assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 60_000, ...cam }), VESSEL_HULL_PX.min / 112));
-  assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 5, ...cam }), VESSEL_HULL_PX.max / 112));
+  // zblízka STROP (vlastník: „zblízka nemusia byť veľké"): 110 m loď najviac 72 px, remorkér ~34 px
+  assert.deepEqual(VESSEL_HULL_PX, { min: 14, cap: 72, capMin: 26, capMax: 90 });
+  assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 5, ...cam }), 72 / 112));
+  assert.ok(near(vesselHullCapPx(25), 72 * Math.sqrt(25 / 110)));
+  assert.ok(near(vesselRealScale({ kind: 'side', family: 'tug', distanceM: 5, ...cam }), vesselHullCapPx(25) / FAMILY_LENGTH_PX.tug));
+  assert.equal(vesselHullCapPx(400), 90);
+  assert.equal(vesselHullCapPx(5), 26);
   // ikona zhora: trup 28 px v obrázku; remorkér menší ako výletná loď
-  assert.ok(near(vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 1000, ...cam }), (110 * pxPerM) / 28));
+  assert.ok(near(vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 2000, ...cam }), px2 / 28));
   assert.ok(vesselRealScale({ kind: 'top', family: 'tug', distanceM: 1000, ...cam }) < vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 1000, ...cam }));
   // spredu: šírka trupu
   assert.ok(near(vesselRealScale({ kind: 'end', family: 'passenger', distanceM: 1000, ...cam }), (11.4 * pxPerM) / 20));
