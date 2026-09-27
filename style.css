@@ -633,6 +633,51 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   text-transform: uppercase;
 }
 
+/* Aplikácia vo vývoji (2026-09-27, vlastník: „napísať, že je app vo vývoji, napr. BETA červeným").
+   Červená = zrenica loga (rgb 255 46 46). Titulok aj preloader; bez vlastného pulzu. */
+.beta-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ff2e2e;
+  text-shadow: 0 0 10px rgba(255, 46, 46, 0.45);
+  border: 1px solid rgba(255, 46, 46, 0.6);
+  border-radius: 3px;
+  padding: 3px 3px 3px 5px;
+  vertical-align: middle;
+}
+/* Titulok je pointer-events: none (klik ide na glóbus) — odznak si ho vezme kvôli bubline. */
+#title-bar .beta-badge { align-self: center; pointer-events: auto; cursor: help; }
+.loader-content h2 .beta-badge { margin-left: 4px; position: relative; top: -2px; }
+
+/* Podpis autora pod heslom — rovnaká reč ako .loader-credit v preloaderi, len v riadku. */
+#title-bar .title-credit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 12px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+#title-bar .title-credit-rule {
+  display: block;
+  width: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(0, 246, 255, 0), rgba(0, 246, 255, 0.7));
+}
+#title-bar .title-credit strong { font-weight: 500; color: var(--accent); }
+/* Rám KARTA má titulok hneď pod logom (top 98 px, ukraineKartaLayout.test) — podpis by ležal
+   cez neho; kartička/export nesie vlastnú atribúciu. */
+body.oko-karta-frame #title-bar .title-credit { display: none; }
+
 /* ── Style Indicator ──────────────────────────── */
 #style-indicator {
   position: fixed;
@@ -11385,6 +11430,7 @@ body.oko-mobile #intel-hud,
 body.oko-mobile #style-indicator,
 body.oko-mobile #hud-toggle,
 body.oko-mobile #title-bar .subtitle,
+body.oko-mobile #title-bar .title-credit,
 body.oko-mobile #lang-switch .indicator-label {
   display: none !important;
 }

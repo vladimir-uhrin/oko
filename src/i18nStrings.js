@@ -74,6 +74,7 @@ export const EN_STRINGS = Object.freeze({
   'lang.label': 'Language',
 
   'title.subtitle': 'NO PLACE LEFT BEHIND',
+  'title.beta-hint': 'In development — things may change or break',
   'style.active-label': 'Active style',
 
   'actions.clear-layers': 'Turn off all selected data layers',
@@ -2085,6 +2086,7 @@ export const SK_STRINGS = Object.freeze({
   'lang.label': 'Jazyk',
 
   'title.subtitle': 'ŽIADNE MIESTO NEOSTANE BOKOM',
+  'title.beta-hint': 'Aplikácia vo vývoji — veci sa môžu meniť alebo nefungovať',
   'style.active-label': 'Aktívny štýl',
 
   'actions.clear-layers': 'Vypnúť všetky zvolené dátové vrstvy',
