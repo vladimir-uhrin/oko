@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   HOVER_PHOTO_DEBOUNCE_MS,
+  HOVER_REFRESH_MS,
   hoverCardLines,
   hoverCardModel,
   installContactHoverCard,
@@ -210,13 +211,14 @@ test('DOM lifecycle: riadky, vlajky, progres bar, fotka po zotrvaní (debounce),
   assert.equal(route.children.filter((c) => c.className === 'contact-hover-card-flag').length, 2, 'vlajky oboch letísk');
   assert.equal(card.children[4].children[0].children[0].style.width, '40%', 'progres bar');
   assert.equal(card.style.transform, 'translate(114px, 114px)');
-  // Fotka: až po debounce, jeden dopyt na stroj.
+  // Fotka: až po debounce, jeden dopyt na stroj. (Popri nej beží obnovovanie kartičky — HOVER_REFRESH_MS.)
+  const photoTimers = () => timers.filter((x) => x.ms === HOVER_PHOTO_DEBOUNCE_MS);
   assert.equal(lookups.length, 0);
-  assert.equal(timers.length, 1);
-  assert.equal(timers[0].ms, HOVER_PHOTO_DEBOUNCE_MS);
+  assert.equal(photoTimers().length, 1);
   updateContactHoverCard([{ layerId: 'flights', sourceId: '4b1815' }], { x: 120, y: 100 }, t);
-  assert.equal(timers.length, 1, 'ten istý stroj = ten istý časovač, bez reštartu');
-  timers[0].fn?.();
+  assert.equal(photoTimers().length, 1, 'ten istý stroj = ten istý časovač, bez reštartu');
+  assert.equal(timers.filter((x) => x.ms === HOVER_REFRESH_MS).length, 1, 'obnovovanie sa pri tom istom stroji nereštartuje');
+  photoTimers()[0].fn?.();
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(lookups, ['4b1815']);
   assert.deepEqual(dwells, [{ layerId: 'flights', sourceId: '4b1815' }], 'zotrvanie vypýta enrichment raz');
@@ -243,6 +245,152 @@ test('DOM lifecycle: riadky, vlajky, progres bar, fotka po zotrvaní (debounce),
   destroyContactHoverCard();
   assert.equal(container.children.length, 0);
   _resetContactHoverCardForTest();
+});
+
+test('kartička sa sama obnoví, keď dobehne trasa, dopravca a logá — bez pohybu myšou (vlastník 09-27: „nezobrazí sa mi všetko, čo má")', () => {
+  _resetContactHoverCardForTest();
+  const makeEl = (tag) => ({
+    tagName: tag, children: [], style: {}, hidden: false, className: '', attrs: {}, listeners: {},
+    classList: { toggle() {}, contains() { return false; } },
+    get textContent() { return this._text ?? this.children.map((c) => (typeof c === 'string' ? c : c.textContent)).join(''); },
+    set textContent(v) { this._text = v; this.children = []; },
+    appendChild(c) { this.children.push(c); return c; },
+    remove() {}, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {},
+    get offsetWidth() { return 200; }, get offsetHeight() { return 90; },
+    get childNodes() { return this.children; },
+    ownerDocument: null,
+  });
+  const doc = { createElement: (tag) => { const el = makeEl(tag); el.ownerDocument = doc; return el; }, createTextNode: (x) => x, defaultView: { innerWidth: 1000, innerHeight: 800 } };
+  const container = makeEl('body'); container.ownerDocument = doc;
+  const summary = { ...RICH, routeInfo: null, operator: null };
+  const timers = [];
+  installContactHoverCard({
+    container,
+    resolveSummary: () => summary,
+    lookupPhoto: async () => null,
+    setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    clearTimeoutImpl: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
+  });
+  const card = container.children[0];
+  updateContactHoverCard([{ layerId: 'flights', sourceId: '4b1815' }], { x: 100, y: 100 }, t);
+  assert.ok(!card.children.some((c) => c.className === 'contact-hover-card-route'), 'trasa ešte nie je');
+  // dobehne trasa, čitateľné riadky a logá — myš stojí
+  summary.routeInfo = { origin: { code: 'VIE', name: 'Vienna', country: 'AT' }, destination: { code: 'AER', name: 'Sochi', country: 'RU' } };
+  summary.flightLines = ['FL 137 · 4 214 m · stúpa', '338 kts (626 km/h) · 104° (V)'];
+  summary.logos = { airline: { url: '/api/logo/img/austrian.png' }, manufacturer: null };
+  summary.logoCredit = 'Logá: Wikimedia Commons · PD';
+  const refresh = timers.filter((x) => x.ms === HOVER_REFRESH_MS && x.fn).at(-1);
+  assert.ok(refresh, 'obnovovanie beží, kým je kartička zobrazená');
+  refresh.fn();
+  const classes = card.children.map((c) => c.className);
+  assert.ok(classes.includes('contact-hover-card-route'), 'trasa sa dokreslila');
+  assert.ok(classes.includes('contact-hover-card-logos'), 'logá dopravcu');
+  assert.equal(card.children.find((c) => c.className === 'contact-hover-card-logos').children[0].src, '/api/logo/img/austrian.png');
+  const lines = card.children.filter((c) => c.className === 'contact-hover-card-line').map((c) => c.textContent);
+  assert.equal(lines[0], 'FL 137 · 4 214 m · stúpa', 'čitateľné riadky letu ako karta po kliknutí');
+  assert.ok(card.children.some((c) => c.className === 'contact-hover-card-footer' && /Wikimedia/.test(c.textContent)), 'kredit lôg v päte');
+  // zhasnutie zastaví obnovovanie
+  updateContactHoverCard([], null, t);
+  assert.equal(card.hidden, true);
+  assert.ok(timers.filter((x) => x.ms === HOVER_REFRESH_MS).every((x) => x.fn === null || x === refresh), 'žiadne ďalšie obnovovanie po zhasnutí');
+  _resetContactHoverCardForTest();
+});
+
+test('lietadlá: súhrn pod kurzorom nesie čitateľné riadky, vietor a logá ako karta po kliknutí (flights.js)', () => {
+  const src = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('...hoverExtras(icao24, info),'));
+  assert.match(src, /function hoverExtras\(icao24, info\) \{[\s\S]*?formatFlightLinesPlain\(flightState\)[\s\S]*?meteoLazy\.flightWindAt\([\s\S]*?contactLogosFor\(who\)/);
+});
+
+/** Stúpanie z letiska: 20 minút po minúte, 0 → 10 km, rýchlosť 80 → 230 m/s. */
+function climbCharts() {
+  const t0 = NOW - 20 * 60_000;
+  const fixes = Array.from({ length: 21 }, (_, i) => ({
+    t: Math.round((t0 + i * 60_000) / 1000),
+    lat: 48.17 + i * 0.05,
+    lon: 17.21 + i * 0.05,
+    alt: i * 500,
+    gs: 80 + i * 7.5,
+  }));
+  return { t0, fixes };
+}
+
+test('grafy pod kurzorom (vlastník 09-27: „mala tam byť aj rýchlosť, stúpanie, grafy"): SVG z čísel, prerušenie pri medzere, odhad čiarkovaný', async () => {
+  const { hoverChartSvg, HOVER_CHART_W, HOVER_CHART_H } = await import('./contactHoverCard.js');
+  const style = { color: 'rgb(57, 208, 255)', fill: 'rgba(57, 208, 255, 0.16)' };
+  assert.equal(hoverChartSvg({ past: [null, 0.5, null] }, style), '', 'jeden bod nie je graf');
+  const svg = hoverChartSvg({ past: [0, 0.5, null, null, 0.8, 1], future: [null, null, null, null, null, 1, 0.6, 0], xNow: 5 / 7 }, style);
+  assert.ok(svg.startsWith('<svg') && svg.endsWith('</svg>'));
+  assert.ok(svg.includes(`width="${HOVER_CHART_W}"`) && svg.includes(`height="${HOVER_CHART_H}"`));
+  assert.equal((svg.match(/stroke-width="1\.5"/g) || []).length, 2, 'medzera v dátach = dva úseky, nie čiara cez ňu');
+  assert.match(svg, /stroke-dasharray="3 2"/, 'odhad do pristátia čiarkovaný');
+  assert.match(svg, /<circle /, 'bodka „teraz"');
+  assert.doesNotMatch(svg, /<text|NaN/, 'len čísla a pevné farby');
+  assert.doesNotMatch(hoverChartSvg({ past: [0.2, 0.4, 0.6] }, style), /dasharray/, 'bez odhadu žiadna čiarkovaná');
+});
+
+test('grafy pod kurzorom: model z buildFlightCharts, kartička ich dokreslí, keď dorazí história (bez pohybu myšou)', async () => {
+  const { buildFlightCharts } = await import('./flightCharts.js');
+  const { fixes } = climbCharts();
+  const charts = buildFlightCharts({
+    fixes,
+    samples: [],
+    now: { epochMs: NOW, altitudeM: 10_000, speedMps: 230, verticalRateMps: 8, lat: 49.17, lon: 18.21 },
+    translate: t,
+  });
+  assert.ok(charts, 'z histórie vzniknú grafy');
+  const model = hoverCardModel({ ...RICH, charts }, t, NOW);
+  assert.ok(model.charts.altitude && model.charts.speed);
+  assert.equal(model.charts.altitude.label, charts.altitude.label);
+  assert.equal(model.charts.titles.altitude, charts.titles.altitude);
+  assert.equal(hoverCardModel({ ...RICH, charts: null }, t, NOW).charts, null, 'bez histórie žiadny prázdny graf');
+  assert.equal(hoverCardModel({ ...RICH, charts: { altitude: { past: [null, 1] }, speed: { past: [] } } }, t, NOW).charts, null);
+  assert.ok(hoverCardLines({ ...RICH, charts }, t, NOW).lines.includes(charts.speed.label), 'popisky max · teraz aj v textovom pohľade');
+
+  _resetContactHoverCardForTest();
+  const makeEl = (tag) => ({
+    tagName: tag, children: [], style: {}, hidden: false, className: '', attrs: {}, listeners: {},
+    classList: { toggle() {}, contains() { return false; } },
+    get textContent() { return this._text ?? this.children.map((c) => (typeof c === 'string' ? c : c.textContent)).join(''); },
+    set textContent(v) { this._text = v; this.children = []; },
+    appendChild(c) { this.children.push(c); return c; },
+    remove() {}, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {},
+    get offsetWidth() { return 200; }, get offsetHeight() { return 90; },
+    get childNodes() { return this.children; },
+    ownerDocument: null,
+  });
+  const doc = { createElement: (tag) => { const el = makeEl(tag); el.ownerDocument = doc; return el; }, createTextNode: (x) => x, defaultView: { innerWidth: 1000, innerHeight: 800 } };
+  const container = makeEl('body'); container.ownerDocument = doc;
+  const summary = { ...RICH, charts: null };
+  const timers = [];
+  installContactHoverCard({
+    container,
+    resolveSummary: () => summary,
+    lookupPhoto: async () => null,
+    setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    clearTimeoutImpl: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
+  });
+  const card = container.children[0];
+  updateContactHoverCard([{ layerId: 'flights', sourceId: '4b1815' }], { x: 100, y: 100 }, t);
+  assert.ok(!card.children.some((c) => c.className === 'contact-hover-card-charts'), 'história ešte nedorazila');
+  summary.charts = charts;
+  timers.filter((x) => x.ms === HOVER_REFRESH_MS && x.fn).at(-1).fn();
+  const row = card.children.find((c) => c.className === 'contact-hover-card-charts');
+  assert.ok(row, 'grafy sa dokreslili');
+  assert.equal(row.children.length, 2, 'výška aj rýchlosť');
+  const img = row.children[0].children.find((c) => c.tagName === 'img');
+  assert.match(img.src, /^data:image\/svg\+xml,/);
+  assert.ok(row.children[0].textContent.includes(charts.titles.altitude), 'názov grafu');
+  const lines = card.children.filter((c) => c.className === 'contact-hover-card-line').map((c) => c.textContent);
+  assert.ok(lines.includes(charts.altitude.label) && lines.includes(charts.speed.label), 'max · teraz pod grafmi');
+  _resetContactHoverCardForTest();
+});
+
+test('tripwire: súhrn lietadla počíta grafy ako karta po kliknutí a zotrvanie si vypýta históriu letu (flights.js)', () => {
+  const src = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
+  assert.match(src, /function hoverExtras\(icao24, info\) \{[\s\S]*?buildFlightCharts\(\{\s*fixes: cachedTrackedHistory\(icao24\),\s*samples: _profileStore\.samples\(icao24\)/);
+  assert.match(src, /return \{ flightLines, charts, logos, logoCredit:/);
+  assert.match(src, /_requestRouteEnrichment\(icao24\);[\s\S]{0,300}void requestTrackedHistory\(icao24\);/);
 });
 
 test('preklady existujú v oboch jazykoch, kartička nechytá myš, iba odkaz s fotkou', () => {

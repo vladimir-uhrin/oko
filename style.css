@@ -9954,6 +9954,54 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-secondary);
 }
 
+/* Logá dopravcu a výrobcu (2026-09-27, ako karta po kliknutí) — svetlý podklad, logá z Commons
+   bývajú tmavé na priehľadnom. */
+.contact-hover-card-logos {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.contact-hover-card-logos img {
+  height: 16px;
+  max-width: 88px;
+  object-fit: contain;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+/* Grafy výšky a rýchlosti (2026-09-27, ako karta po kliknutí) — dva boxy vedľa seba. */
+.contact-hover-card-charts {
+  display: flex;
+  gap: 6px;
+  margin: 5px 0 1px;
+}
+.contact-hover-card-chart {
+  padding: 3px 4px 2px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.contact-hover-card-chart img {
+  display: block;
+}
+.contact-hover-card-chart-head,
+.contact-hover-card-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 8px;
+  letter-spacing: 0.4px;
+  line-height: 1.3;
+}
+.contact-hover-card-chart-head {
+  color: rgba(200, 236, 244, 0.9);
+}
+.contact-hover-card-chart-forecast,
+.contact-hover-card-chart-axis {
+  color: rgba(150, 175, 185, 0.9);
+}
+
 .contact-hover-card-flag {
   display: inline-block;
   width: 12px;

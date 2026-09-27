@@ -39,6 +39,97 @@ import { formatSpeedDual } from '../units.js';
 
 /** Odsadenie kartičky od kurzora (px) — nesmie sedieť pod hrotom myši. */
 const CARD_OFFSET_PX = 14;
+/** Plocha jedného grafu v kartičke (px) — dva vedľa seba sa zmestia do max-width kartičky. */
+export const HOVER_CHART_W = 136;
+export const HOVER_CHART_H = 30;
+/** Farby ako grafy na karte po kliknutí (worldOverlayDraw.js): výška v akcente, rýchlosť jantárová. */
+const CHART_STYLE = {
+  altitude: { color: 'rgb(57, 208, 255)', fill: 'rgba(57, 208, 255, 0.16)' },
+  speed: { color: 'rgb(255, 179, 71)', fill: 'rgba(255, 179, 71, 0.10)' },
+};
+
+function knownCount(values) {
+  return Array.isArray(values) ? values.filter((v) => Number.isFinite(v)).length : 0;
+}
+
+/**
+ * Súvislé úseky série (null = medzera) ako body v plátne `width × height`.
+ * Hodnoty sú normalizované 0..1 (buildFlightCharts), hore je 1.
+ */
+function chartRuns(values, width, height) {
+  const runs = [];
+  const n = values.length;
+  let run = null;
+  for (let i = 0; i < n; i += 1) {
+    const v = values[i];
+    if (!Number.isFinite(v)) { run = null; continue; }
+    if (!run) { run = []; runs.push(run); }
+    const x = n > 1 ? (i / (n - 1)) * width : 0;
+    const y = height - Math.max(0, Math.min(1, v)) * (height - 2) - 1;
+    run.push([Number(x.toFixed(1)), Number(y.toFixed(1))]);
+  }
+  return runs;
+}
+
+/**
+ * SVG jedného grafu kartičky (čistá funkcia): plocha + čiara minulosti, budúcnosť (odhad)
+ * čiarkovaná, bodka „teraz". Len čísla a pevné farby — žiadny text zvonka, takže data URL
+ * obrázok nemôže niesť nič podstrčené.
+ * @param {{past: Array<?number>, future?: Array<?number>|null, xNow?: number}} series
+ * @param {{color: string, fill: string, width?: number, height?: number}} style
+ * @returns {string} `<svg …>`, prázdny reťazec keď séria nemá dva známe body
+ */
+export function hoverChartSvg(series, { color, fill, width = HOVER_CHART_W, height = HOVER_CHART_H }) {
+  const past = Array.isArray(series?.past) ? series.past : [];
+  if (knownCount(past) < 2) return '';
+  const parts = [];
+  for (const run of chartRuns(past, width, height)) {
+    if (run.length < 2) continue;
+    const line = run.map(([x, y], k) => `${k ? 'L' : 'M'}${x} ${y}`).join('');
+    parts.push(`<path d="${line}L${run[run.length - 1][0]} ${height}L${run[0][0]} ${height}Z" fill="${fill}"/>`);
+    parts.push(`<path d="${line}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>`);
+  }
+  const future = Array.isArray(series.future) ? series.future : [];
+  if (knownCount(future) >= 2) {
+    for (const run of chartRuns(future, width, height)) {
+      if (run.length < 2) continue;
+      const line = run.map(([x, y], k) => `${k ? 'L' : 'M'}${x} ${y}`).join('');
+      parts.push(`<path d="${line}" fill="none" stroke="${color}" stroke-width="1" stroke-dasharray="3 2" opacity="0.8"/>`);
+    }
+  }
+  // „teraz": posledný známy bod minulosti najbližšie k xNow
+  const n = past.length;
+  let iNow = Math.max(0, Math.min(n - 1, Math.round((Number.isFinite(series.xNow) ? series.xNow : 1) * (n - 1))));
+  while (iNow > 0 && !Number.isFinite(past[iNow])) iNow -= 1;
+  if (Number.isFinite(past[iNow])) {
+    const x = n > 1 ? (iNow / (n - 1)) * width : 0;
+    const y = height - Math.max(0, Math.min(1, past[iNow])) * (height - 2) - 1;
+    parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="${color}"/>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${parts.join('')}</svg>`;
+}
+
+/**
+ * Grafy pre kartičku z výstupu buildFlightCharts — len keď aspoň jeden má z čoho kresliť.
+ * @param {object|null|undefined} charts
+ * @returns {?{titles: {altitude: string, speed: string}, forecastLabel: string, axis: {left: string, right: string}, altitude: object|null, speed: object|null}}
+ */
+function hoverCharts(charts) {
+  if (!charts || typeof charts !== 'object') return null;
+  const pick = (s, withFuture) => (knownCount(s?.past) >= 2
+    ? { past: s.past, future: withFuture && knownCount(s.future) >= 2 ? s.future : null, xNow: s.xNow, label: String(s.label ?? '').trim() }
+    : null);
+  const altitude = pick(charts.altitude, true);
+  const speed = pick(charts.speed, false);
+  if (!altitude && !speed) return null;
+  return {
+    titles: { altitude: String(charts.titles?.altitude || ''), speed: String(charts.titles?.speed || '') },
+    forecastLabel: String(charts.forecastLabel || ''),
+    axis: { left: String(charts.axis?.left || ''), right: String(charts.axis?.right || '') },
+    altitude,
+    speed,
+  };
+}
 /** Fotka sa dopytuje až po tomto zotrvaní nad tým istým strojom (ms). */
 export const HOVER_PHOTO_DEBOUNCE_MS = 350;
 
@@ -75,7 +166,11 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
   } else {
     flightLine = [speed, formatTrackPlain(summary.trackDeg)].filter(Boolean).join(' · ');
   }
-  if (flightLine) details.push(flightLine);
+  // Vrstva, ktorá pošle čitateľné riadky ako karta po kliknutí (lety: hladina v ft aj m, rýchlosť
+  // aj v km/h, kurz so svetovou stranou, vietor vo výške letu), má prednosť pred kompaktným riadkom.
+  const readable = Array.isArray(summary.flightLines) ? summary.flightLines.filter(Boolean) : [];
+  if (readable.length) details.push(...readable);
+  else if (flightLine) details.push(flightLine);
 
   // 2. Stroj: dopravca · typ · registrácia (keď nie je titulkom), inak aspoň kategória.
   const machine = [
@@ -106,6 +201,7 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
   });
   if (meta) footer.push(meta);
   if (summary.stale) footer.push(t('hover.stale'));
+  if (summary.logoCredit) footer.push(String(summary.logoCredit));
 
   const hex = String(summary.id || '').trim().toLowerCase();
   return {
@@ -119,6 +215,10 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
     alert: alert ? `SQUAWK ${alert.code} · ${alert.label}` : null,
     military: summary.military === true,
     hex: summary.layerId === 'flights' && /^[0-9a-f]{6}$/.test(hex) ? hex : null,
+    logos: summary.logos && (summary.logos.airline?.url || summary.logos.manufacturer?.url) ? summary.logos : null,
+    // grafy výšky (s odhadom) a rýchlosti ako na karte po kliknutí (2026-09-27, vlastník: „mala tam
+    // byť aj rýchlosť, stúpanie, grafy atď.")
+    charts: hoverCharts(summary.charts),
   };
 }
 
@@ -137,6 +237,8 @@ export function hoverCardLines(summary, t, nowMs = Date.now()) {
   if (model.route) lines.push(`${model.route.origin.label} → ${model.route.destination.label}`);
   else if (model.routeText) lines.push(model.routeText);
   if (model.progress) lines.push(model.progress.label);
+  if (model.charts?.altitude?.label) lines.push(model.charts.altitude.label);
+  if (model.charts?.speed?.label) lines.push(model.charts.speed.label);
   lines.push(...model.footer);
   if (model.alert) lines.push(model.alert);
   return { title: model.title, lines, military: model.military, flag: model.titleFlag };
@@ -154,6 +256,16 @@ let _lastModel = null;
 let _lastT = null;
 /** @type {ReturnType<typeof setTimeout>|null} */
 let _photoTimer = null;
+/**
+ * Obnovovanie zobrazenej kartičky (2026-09-27, vlastník: „keď prejdem myšou na lietadlo, nezobrazí
+ * sa mi všetko, čo má"): typ, trasa, dopravca, logá a fotka dobiehajú až po zotrvaní, no kartička
+ * sa prekreslila len pri ďalšom pohybe myšou — s myšou na mieste ostala neúplná. Kým je zobrazená,
+ * každých HOVER_REFRESH_MS si znova prečíta súhrn a prekreslí sa, keď sa zmenil.
+ */
+export const HOVER_REFRESH_MS = 1000;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let _refreshTimer = null;
+let _lastSig = '';
 /** @type {Map<string, object|null>} hex → fotka (alebo null) už známa tejto kartičke */
 const _photoByHex = new Map();
 let _pointerOnPhoto = false;
@@ -214,6 +326,54 @@ function renderPhoto(doc, model, t) {
   return link;
 }
 
+function appendText(doc, parent, className, text) {
+  const el = doc.createElement('span');
+  if (className) el.className = className;
+  el.textContent = text || '';
+  parent.appendChild(el);
+  return el;
+}
+
+/** Dva grafy vedľa seba (názov + odhad hore, konce osi dole) a pod nimi popisky max · teraz. */
+function renderCharts(doc, charts) {
+  const row = doc.createElement('div');
+  row.className = 'contact-hover-card-charts';
+  for (const key of ['altitude', 'speed']) {
+    const series = charts[key];
+    if (!series) continue;
+    const svg = hoverChartSvg(series, CHART_STYLE[key]);
+    if (!svg) continue;
+    const box = doc.createElement('div');
+    box.className = 'contact-hover-card-chart';
+    const head = doc.createElement('div');
+    head.className = 'contact-hover-card-chart-head';
+    appendText(doc, head, '', charts.titles[key]);
+    if (series.future && charts.forecastLabel) appendText(doc, head, 'contact-hover-card-chart-forecast', charts.forecastLabel);
+    box.appendChild(head);
+    const img = doc.createElement('img');
+    img.src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    img.alt = '';
+    img.width = HOVER_CHART_W;
+    img.height = HOVER_CHART_H;
+    box.appendChild(img);
+    const axis = doc.createElement('div');
+    axis.className = 'contact-hover-card-chart-axis';
+    appendText(doc, axis, '', charts.axis.left);
+    appendText(doc, axis, '', charts.axis.right);
+    box.appendChild(axis);
+    row.appendChild(box);
+  }
+  if (!row.childNodes.length) return;
+  _card.appendChild(row);
+  for (const key of ['altitude', 'speed']) {
+    if (!charts[key]?.label) continue;
+    const line = doc.createElement('div');
+    line.className = 'contact-hover-card-line';
+    line.textContent = charts[key].label;
+    _card.appendChild(line);
+  }
+}
+
 function renderModel(model, at, t) {
   const doc = _card.ownerDocument;
   _card.textContent = '';
@@ -223,6 +383,20 @@ function renderModel(model, at, t) {
   if (flag) title.appendChild(flag);
   title.appendChild(doc.createTextNode(model.title));
   _card.appendChild(title);
+  // logá dopravcu a výrobcu (ako karta po kliknutí; Wikimedia Commons, kredit v päte)
+  if (model.logos) {
+    const row = doc.createElement('div');
+    row.className = 'contact-hover-card-logos';
+    for (const logo of [model.logos.airline, model.logos.manufacturer]) {
+      if (!logo?.url) continue;
+      const img = doc.createElement('img');
+      img.src = logo.url;
+      img.alt = '';
+      img.decoding = 'async';
+      row.appendChild(img);
+    }
+    if (row.childNodes.length) _card.appendChild(row);
+  }
   for (const line of model.details) {
     const row = doc.createElement('div');
     row.className = 'contact-hover-card-line';
@@ -260,6 +434,7 @@ function renderModel(model, at, t) {
     row.appendChild(label);
     _card.appendChild(row);
   }
+  if (model.charts) renderCharts(doc, model.charts);
   for (const line of model.footer) {
     const row = doc.createElement('div');
     row.className = 'contact-hover-card-footer';
@@ -294,6 +469,33 @@ function placeCard(at) {
   _card.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
 }
 
+function modelSignature(model) {
+  try { return JSON.stringify(model); } catch { return String(Math.random()); }
+}
+
+function cancelRefresh() {
+  if (_refreshTimer !== null) { _clearTimeoutImpl(_refreshTimer); _refreshTimer = null; }
+}
+
+function scheduleRefresh() {
+  cancelRefresh();
+  _refreshTimer = _setTimeoutImpl(() => {
+    _refreshTimer = null;
+    if (!_card || _card.hidden || !_lastCandidate || !_lastT) return;
+    let summary = null;
+    try { summary = _resolveSummary?.([_lastCandidate]) || null; } catch { summary = null; }
+    const model = hoverCardModel(summary, _lastT);
+    if (!model) return; // kontakt zmizol — kartičku zhasne až pohyb myši, nech neblikne
+    const sig = modelSignature(model);
+    if (sig !== _lastSig) {
+      _lastSig = sig;
+      _lastModel = model;
+      renderModel(model, _lastAt, _lastT);
+    }
+    scheduleRefresh();
+  }, HOVER_REFRESH_MS);
+}
+
 function cancelPhotoTimer() {
   if (_photoTimer !== null) { _clearTimeoutImpl(_photoTimer); _photoTimer = null; }
 }
@@ -325,6 +527,8 @@ function scheduleDwell(model, t) {
 
 function hideCard() {
   cancelPhotoTimer();
+  cancelRefresh();
+  _lastSig = '';
   _currentKey = null;
   _lastModel = null;
   _pointerOnPhoto = false;
@@ -384,13 +588,16 @@ export function updateContactHoverCard(candidates, at, t) {
   _lastModel = model;
   _lastT = t;
   _lastCandidate = { layerId: summary.layerId, sourceId: String(summary.id || '') };
+  _lastSig = modelSignature(model);
   renderModel(model, at, t);
   if (keyChanged) scheduleDwell(model, t);
+  if (keyChanged || _refreshTimer === null) scheduleRefresh();
 }
 
 /** Odstráni kartičku (teardown viewera). */
 export function destroyContactHoverCard() {
   cancelPhotoTimer();
+  cancelRefresh();
   _card?.remove();
   _card = null;
   _resolveSummary = null;

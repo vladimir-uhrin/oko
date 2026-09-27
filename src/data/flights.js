@@ -3879,6 +3879,58 @@ function _trackedCardModel(icao24) {
  * @param {string} icao24
  * @returns {?{info: object, callsign: string, flightLine: string, stale: boolean, identLine: string, route: object|null, progress: object|null, alertLine: string}}
  */
+/**
+ * Doplnky kartičky pod kurzorom zo zdrojov karty sledovaného letu: čitateľné riadky letu + vietor
+ * vo výške letu, logá z cache (chýbajúce sa vyžiadajú — contactLogos dopyt zdvojene nepustí;
+ * kartička sa sama obnovuje, takže dotiahnuté logo sa ukáže bez pohybu myšou).
+ * @param {string} icao24
+ * @param {object} info záznam z _flightData
+ * @returns {{flightLines: string[], logos: object|null, logoCredit: string}}
+ */
+function hoverExtras(icao24, info) {
+  const flightState = {
+    altitudeM: info.altitude,
+    onGround: info.onGround === true,
+    verticalRateMps: info.verticalRate,
+    speedMps: info.velocity,
+    trackDeg: info.true_track,
+  };
+  const flightLines = formatFlightLinesPlain(flightState);
+  if (!flightState.onGround) {
+    const wind = meteoLazy.flightWindAt(info.rawLat, info.rawLon, flightState.altitudeM, flightState.trackDeg);
+    for (const line of formatWindLines(wind)) flightLines.push(line);
+  }
+  // Grafy výšky (s odhadom po pristátie) a rýchlosti — ako karta po kliknutí: história letu
+  // z proxy (vyžiada ju zotrvanie, prefetchContactDetails) + vlastné minútové vzorky každého stroja.
+  const route = info.route && _routeIsPlausible(icao24, info.route) ? info.route : null;
+  const progress = route
+    ? routeProgress({ origin: route.origin, destination: route.destination, lat: info.rawLat, lon: info.rawLon, speedMps: info.velocity })
+    : null;
+  const charts = buildFlightCharts({
+    fixes: cachedTrackedHistory(icao24),
+    samples: _profileStore.samples(icao24),
+    now: {
+      epochMs: Number.isFinite(info.lastContactEpochMs) ? info.lastContactEpochMs : Date.now(),
+      altitudeM: info.altitude,
+      speedMps: info.velocity,
+      verticalRateMps: info.verticalRate,
+      lat: info.rawLat,
+      lon: info.rawLon,
+    },
+    route,
+    progress,
+    translate: t,
+  });
+  if (isTr3b(icao24)) return { flightLines, charts, logos: null, logoCredit: '' };
+  const who = { airline: info.airline || info.operator, typeName: info.typeName || info.typeCode };
+  const logos = contactLogosFor(who);
+  if ((who.airline && !logos?.airline) || (who.typeName && !logos?.manufacturer)) {
+    void requestContactLogos(who).catch(() => {});
+  }
+  const credits = logos ? [...new Set([logos.airline, logos.manufacturer].filter(Boolean).map((l) => logoCreditLine(l)))] : [];
+  return { flightLines, charts, logos, logoCredit: credits.length ? t('card.logo-credit', { credit: credits.join(' · ') }) : '' };
+}
+
 function _trackedLabelParts(icao24) {
   const info = _flightData.get(icao24);
   if (!info) return null;
@@ -5733,6 +5785,11 @@ const flightsLayer = {
       // fallback meno štátu z OpenSky).
       countryIso: resolveFlagIso2(info.countryIso, info.originCountry),
       stale: _missingPolls.get(icao24) > 0,
+      // Kartička pod kurzorom ako karta po kliknutí (2026-09-27, vlastník: „keď prejdem myšou na
+      // lietadlo, nezobrazí sa mi všetko, čo má"): dva čitateľné riadky letu + vietor vo výške
+      // letu (rovnaké ako _trackedLabelParts), logá dopravcu a výrobcu z cache. Grafy celého letu
+      // ostávajú na karte po kliknutí — potrebujú históriu letu z proxy.
+      ...hoverExtras(icao24, info),
     };
   },
 
@@ -5748,6 +5805,9 @@ const flightsLayer = {
     if (!_flightData.has(icao24)) return;
     _requestTypeEnrichment(icao24, true);
     _requestRouteEnrichment(icao24);
+    // história letu pre grafy kartičky pod kurzorom (ten istý proxy a cache ako karta po kliknutí;
+    // kartička sa obnovuje sama, takže grafy sa ukážu, keď história dorazí)
+    void requestTrackedHistory(icao24);
   },
 
   /** Filter kategórií ako čipy pod riadkom vrstvy (viď `_categoryChips`). */
