@@ -1,4 +1,4 @@
-// src/preloaderFlow.js
+// public/preloaderFlow.js
 /**
  * @module preloaderFlow
  * @description Víchor textu okolo oka v preloaderi — ako úvod midjourney.com (2026-09-26/27,
@@ -25,7 +25,8 @@
  * riadky), obrazovka je jeden priechod s jedným čítaním bunky a atlasu na pixel (viac vzoriek len
  * v úvode), 30 snímok/s, najviac 1,5 px na bod. V ukážke sa glóbus pod preloaderom pozastaví.
  *
- * Samostatný malý vstup bez importov (index.html ho načíta PRED main.js). Bez WebGL2 ostáva
+ * Samostatný malý súbor bez importov v public/ (index.html ho načíta PRED main.js; Vite ho nespojí
+ * s 2,3 MB balíkom appky, takže sa kreslí hneď — skripty zo src/ by zlúčil do jedného súboru). Bez WebGL2 ostáva
  * statický preloader; pri „obmedziť pohyb" nehybný obraz. `?preloader=demo` podrží preloader
  * (Esc / klik = koniec).
  */

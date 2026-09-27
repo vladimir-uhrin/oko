@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import {
   FLOW_AMBER_WORDS, FLOW_STAGE_SPEEDS, FLOW_SWIRL, buildFlowBlock, clearRadius, flowStageSpeed,
   obstacleFromRect, startPreloaderFlow, swirlSource,
-} from './preloaderFlow.js';
+} from '../public/preloaderFlow.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
 
@@ -68,7 +68,7 @@ test('bez prehliadača / bez preloadera sa nič nespustí', () => {
 
 test('zapojenie: malý vstup PRED main.js, oko a texty preloadera bez zmeny, plátno pod obsahom', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const flow = html.indexOf('<script type="module" src="/src/preloaderFlow.js"></script>');
+  const flow = html.indexOf('<script type="module" src="/preloaderFlow.js"></script>');
   const main = html.indexOf('<script type="module" src="/src/main.js"></script>');
   assert.ok(flow > 0 && main > flow, 'preloaderFlow.js sa načíta pred main.js');
   for (const line of [
@@ -80,7 +80,7 @@ test('zapojenie: malý vstup PRED main.js, oko a texty preloadera bez zmeny, pl�
   assert.match(css, /\.loader-content \{\n {2}position: relative;\n {2}z-index: 1;/, 'obsah nad plátnom');
   assert.match(css, /#loader-flow \{\n {2}position: absolute;\n {2}inset: 0;/);
   assert.match(css, /html\.oko-preloader-demo #loading-screen\.hidden \{/, '?preloader=demo podrží preloader');
-  const src = readFileSync(new URL('./preloaderFlow.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/preloaderFlow.js', import.meta.url), 'utf8');
   assert.ok(!/^import /m.test(src), 'bez importov — malý samostatný balík');
   assert.match(src, /loseContext\(\)/, 'po skrytí sa GPU kontext uvoľní');
   assert.match(src, /prefers-reduced-motion: reduce/, 'obmedzený pohyb = nehybný obraz');
@@ -88,7 +88,7 @@ test('zapojenie: malý vstup PRED main.js, oko a texty preloadera bez zmeny, pl�
 });
 
 test('nároky (vlastník: „mimoriadne náročné na hardvér"): 30 snímok/s, najviac 1,5 px na bod, obrazovka jeden priechod', () => {
-  const src = readFileSync(new URL('./preloaderFlow.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/preloaderFlow.js', import.meta.url), 'utf8');
   assert.match(src, /const FLOW_FPS = 30;/);
   assert.match(src, /const FLOW_MAX_DPR = 1\.5;/);
   assert.ok(!/const FS_POST|const FS_GLYPH|scene = target/.test(src), 'žiadny medzisnímok na celú obrazovku');
@@ -98,7 +98,7 @@ test('nároky (vlastník: „mimoriadne náročné na hardvér"): 30 snímok/s, 
 });
 
 test('ukážka pozastaví glóbus pod preloaderom (60 snímok/s + Google 3D dlaždice by bežali naprázdno) a po konci ho rozbehne', () => {
-  const src = readFileSync(new URL('./preloaderFlow.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/preloaderFlow.js', import.meta.url), 'utf8');
   assert.match(src, /if \(!demo \|\| !screen\.classList\.contains\('hidden'\)\) return;/, 'len v ukážke a len nad hotovou appkou');
   assert.match(src, /pausedViewer\.useDefaultRenderLoop = !doc\.hidden;/, 'po ukážke podľa viditeľnosti okna (ako main.js)');
   assert.match(src, /viewer\.useDefaultRenderLoop = false; pausedViewer = viewer;/);

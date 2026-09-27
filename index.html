@@ -1178,9 +1178,10 @@
     </div>
   </div>
 
-  <!-- Prúd dát okolo stredu preloadera (src/preloaderFlow.js): malý samostatný vstup PRED veľkým
-       main.js, aby sa kreslil hneď; oko ani texty preloadera nemení, prúd ich obteká. -->
-  <script type="module" src="/src/preloaderFlow.js"></script>
+  <!-- Víchor textu okolo oka v preloaderi (public/preloaderFlow.js): samostatný malý súbor z public/,
+       ktorý Vite NEspojí s balíkom appky (skripty v index.html by inak zlúčil do jedného 2,3 MB
+       súboru) — kreslí sa hneď, kým sa appka ešte sťahuje; oko ani texty preloadera nemení. -->
+  <script type="module" src="/preloaderFlow.js"></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>
