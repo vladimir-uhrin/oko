@@ -47,6 +47,44 @@ export function flyToPreset(viewer, presetName, duration = 3.0) {
 }
 
 /**
+ * Úvodný pohľad OKA nad Bratislavou — jeden zdroj pravdy pre štart aj tlačidlo „domov"
+ * (glóbus hore v strede, 2026-09-27: „ak stlačím túto ikonu, nech priletí nad BA do
+ * polohy základnej"). Východne od centra nad Ružinovom, pohľad na ZJZ hore Dunajom.
+ */
+export const HOME_VIEW = Object.freeze({
+  longitude: 17.1743,
+  latitude: 48.1564,
+  heightM: 1488,
+  headingDeg: 241,
+  pitchDeg: -12,
+});
+
+/**
+ * Prelet na úvodný pohľad (HOME_VIEW). Tvar volieb ako flyToGlobeView v locations.js.
+ * @param {Cesium.Viewer} viewer
+ * @param {{duration?: number, onComplete?: Function, onCancel?: Function}} [options]
+ * @returns {{latitude: number, longitude: number, heightM: number}}
+ */
+export function flyToHomeView(viewer, options = {}) {
+  viewer.camera.cancelFlight();
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(HOME_VIEW.longitude, HOME_VIEW.latitude, HOME_VIEW.heightM),
+    orientation: {
+      heading: Cesium.Math.toRadians(HOME_VIEW.headingDeg),
+      pitch: Cesium.Math.toRadians(HOME_VIEW.pitchDeg),
+      roll: 0.0,
+    },
+    duration: Number.isFinite(options.duration) && options.duration > 0 ? options.duration : 3.0,
+    easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+    endTransform: Cesium.Matrix4.IDENTITY,
+    // Cesium číta complete/cancel (nie onComplete/onCancel) — ako flyToGlobeView.
+    complete: options.onComplete,
+    cancel: options.onCancel,
+  });
+  return { latitude: HOME_VIEW.latitude, longitude: HOME_VIEW.longitude, heightM: HOME_VIEW.heightM };
+}
+
+/**
  * OKO first-load view: Bratislava with the Danube leading toward Žitný
  * ostrov. Same two-step shape as flyToAustin — start high, then a cinematic
  * settle onto the old town at an oblique angle (the city has full
@@ -75,10 +113,10 @@ export function flyToBratislava(viewer) {
       // 2026-09-27 (owner, screenshot „daj túto polohu zobrazenia ako úvodnú"): east of the
       // centre over Ružinov, looking WSW up the Danube — bridges, Petržalka, old town and the
       // castle in one frame.
-      destination: Cesium.Cartesian3.fromDegrees(17.1743, 48.1564, 1488),
+      destination: Cesium.Cartesian3.fromDegrees(HOME_VIEW.longitude, HOME_VIEW.latitude, HOME_VIEW.heightM),
       orientation: {
-        heading: Cesium.Math.toRadians(241),
-        pitch: Cesium.Math.toRadians(-12),
+        heading: Cesium.Math.toRadians(HOME_VIEW.headingDeg),
+        pitch: Cesium.Math.toRadians(HOME_VIEW.pitchDeg),
         roll: 0.0,
       },
       duration: 4.0,

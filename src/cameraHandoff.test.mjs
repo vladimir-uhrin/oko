@@ -289,7 +289,8 @@ test('a direct globe gesture retires delayed camera and selection restore only',
 
 test('newer navigation, reset, Cockpit, and teardown share one generation', () => {
   assert.equal((ui.match(/_navigationGeneration \+= 1/g) || []).length, 1);
-  const reset = body(ui, /resetToGlobeView\(\) \{([\s\S]*?)\n  \}/, 'reset');
+  // 2026-09-27: jedna cesta resetu s voľbou home (tlačidlo hore = úvodný pohľad nad BA)
+  const reset = body(ui, /resetToGlobeView\(\{ home = false \} = \{\}\) \{([\s\S]*?)\n  \}/, 'reset');
   ordered(reset, [
     'if (this._globeResetPromise) return this._globeResetPromise;',
     'this._stampNavigation();',

@@ -32,7 +32,7 @@ test('Cockpit has one reset action beside its bottom exit path', () => {
   assert.doesNotMatch(viewSwitcher[0], /id="reset-globe-view"/, 'map-only reset must stay outside Cockpit');
   assert.match(
     viewSwitcher[0],
-    /id="cockpit-reset-globe"[^>]*type="button"[^>]*aria-label="Reset cockpit to full globe view"[^>]*hidden[\s\S]*?public[\s\S]*?RESET[\s\S]*?id="map-view-switch"/,
+    /id="cockpit-reset-globe"[^>]*type="button"[^>]*aria-label="Exit cockpit to the home view over Bratislava"[^>]*hidden[\s\S]*?public[\s\S]*?RESET[\s\S]*?id="map-view-switch"/,
   );
 
   const actions = html.match(/<div class="global-context-actions"[\s\S]*?<\/div>/);
@@ -255,7 +255,8 @@ test('Cockpit owns a focused shared Display portal and compact Radio controls', 
   assert.match(html, /data-cockpit-display-slot="detection"[\s\S]*?data-cockpit-display-slot="parameters"[\s\S]*?data-cockpit-display-slot="models3d"/);
   assert.doesNotMatch(html, /data-cockpit-display-slot="presets"/);
   assert.match(html, /id="clear-selected-layers"[^>]*aria-label="Clear selected data layers"/);
-  assert.match(html, /id="reset-globe-view"[^>]*aria-label="Reset to full globe view"/);
+  // 2026-09-27: tlačidlo letí domov nad Bratislavu (camera.js HOME_VIEW), nie na celý glóbus
+  assert.match(html, /id="reset-globe-view"[^>]*aria-label="Home view over Bratislava"/);
   assert.match(css, /#top-center-actions\s*\{[\s\S]*?left:\s*50%;[\s\S]*?display:\s*flex;[\s\S]*?transform:\s*translateX\(-50%\)/);
   assert.match(css, /body\.ui-clean-view #top-center-actions/);
   assert.match(css, /body\.recording-mode #top-center-actions/);
@@ -496,7 +497,7 @@ test('Cockpit hides the complete top-center globe action group', () => {
 });
 
 test('Reset releases Contact camera ownership through its selection-preserving route', () => {
-  const resetStart = ui.indexOf('resetToGlobeView()');
+  const resetStart = ui.indexOf('resetToGlobeView({ home = false } = {}) {');
   const contextRelease = ui.indexOf("militaryAwarenessLayer.releaseCameraOwnership?.({ origin: 'tool' })", resetStart);
   const satelliteRelease = ui.indexOf("satellitesLayer.stopTracking?.({ origin: 'tool' })", resetStart);
 
@@ -916,4 +917,15 @@ test('cockpit entry is discoverable: shown for any tracked aircraft, prepares Co
   assert.match(css, /@media \(max-width: 1180px\) \{\s*#cockpit-entry \{ left: auto; right: 16px; bottom: 88px; \}/, 'floating button below ~1180px');
   assert.match(css, /@media \(pointer: coarse\) \{[\s\S]*?#cockpit-entry \{ min-height: 44px;/, '44px touch target');
   assert.match(css, /body\.cockpit-mode #view-switcher button \{ min-height: 44px; \}/, 'exit is a touch target too (specific enough to beat the mobile rules)');
+});
+
+test('tlačidlo s glóbusom hore = domov nad Bratislavu; hlas a menu „Celý glóbus" ostávajú na glóbuse (2026-09-27)', () => {
+  // vlastník: „ak stlačím túto ikonu, nech priletí nad BA do polohy základnej"
+  assert.match(ui, /this\._globeResetHandler = \(\) => \{ this\.resetToGlobeView\(\{ home: true \}\); \};/);
+  assert.match(ui, /const target = home \? flyToHomeView\(this\.viewer, flight\) : flyToGlobeView\(this\.viewer, flight\);/);
+  assert.match(ui, /action: home \? 'fly_home' : 'zoom_to_globe',/);
+  assert.match(ui, /case 'reset-globe':\s*\n\s*\/\/[^\n]*\n\s*void this\.resetToGlobeView\(\);/, 'položka menu „Celý glóbus" nejde cez tlačidlo');
+  const camera = fs.readFileSync(path.join(ROOT, 'src', 'camera.js'), 'utf8');
+  assert.match(camera, /export const HOME_VIEW = Object\.freeze\(\{\s*longitude: 17\.1743,\s*latitude: 48\.1564,\s*heightM: 1488,\s*headingDeg: 241,\s*pitchDeg: -12,\s*\}\);/);
+  assert.match(camera, /destination: Cesium\.Cartesian3\.fromDegrees\(HOME_VIEW\.longitude, HOME_VIEW\.latitude, HOME_VIEW\.heightM\),/, 'štart aj tlačidlo z jedného zdroja');
 });

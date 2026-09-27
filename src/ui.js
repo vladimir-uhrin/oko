@@ -16,6 +16,7 @@ import {
   decodeBloomIntensity,
 } from './bloom.js';
 import { LOCATIONS, CITY_POIS, GLOBE_VIEW, flyToGlobeView, flyToPresetLocation, flyToPOI, searchAndFlyTo } from './locations.js';
+import { HOME_VIEW, flyToHomeView } from './camera.js';
 import { locationMiniStatus } from './locationStatus.js';
 import { interruptCameraMotion } from './cameraVerbs.js';
 import {
@@ -10507,7 +10508,9 @@ export class StyleManager {
 
   /** Wire the persistent reset control to the same route used by voice. */
   _initResetGlobeButton() {
-    this._globeResetHandler = () => { this.resetToGlobeView(); };
+    // Tlačidlo (hore v strede aj v kokpite) = domov nad Bratislavu; hlas a menu „Celý glóbus"
+    // volajú resetToGlobeView() bez voľby.
+    this._globeResetHandler = () => { this.resetToGlobeView({ home: true }); };
     for (const button of [this._resetGlobeBtn, this._cockpitResetGlobeBtn]) {
       button?.addEventListener('click', this._globeResetHandler);
     }
@@ -10598,9 +10601,14 @@ export class StyleManager {
   /**
    * Release every camera owner and return to the canonical full-globe frame.
    * Repeated requests adopt the in-flight reset rather than cancelling it.
+   * `home: true` (tlačidlo s glóbusom hore v strede, 2026-09-27: „ak stlačím túto ikonu, nech
+   * priletí nad BA do polohy základnej") ide tou istou cestou — uvoľní všetkých vlastníkov
+   * kamery —, len cieľom je úvodný pohľad nad Bratislavou (camera.js HOME_VIEW). Hlas
+   * (zoom_to_globe) a položka menu „Celý glóbus" ostávajú na glóbuse.
+   * @param {{home?: boolean}} [options]
    * @returns {Promise<object>} Canonical reset result shared with voice.
    */
-  resetToGlobeView() {
+  resetToGlobeView({ home = false } = {}) {
     if (this._globeResetPromise) return this._globeResetPromise;
     this._stampNavigation();
     interruptCameraMotion('reset-globe');
@@ -10634,9 +10642,9 @@ export class StyleManager {
       const carto = this.viewer.camera.positionCartographic;
       const result = {
         ok: !cancelled,
-        action: 'zoom_to_globe',
+        action: home ? 'fly_home' : 'zoom_to_globe',
         cancelled,
-        heightKm: Math.round(GLOBE_VIEW.heightM / 1000),
+        heightKm: home ? Math.round(HOME_VIEW.heightM / 100) / 10 : Math.round(GLOBE_VIEW.heightM / 1000),
         centeredOn: {
           latitude: Number(Cesium.Math.toDegrees(carto.latitude).toFixed(2)),
           longitude: Number(Cesium.Math.toDegrees(carto.longitude).toFixed(2)),
@@ -10649,14 +10657,13 @@ export class StyleManager {
     };
     timer = window.setTimeout(() => {
       const height = this.viewer.camera.positionCartographic?.height;
-      finish(!Number.isFinite(height) || Math.abs(height - GLOBE_VIEW.heightM) > 1000);
+      const goal = home ? HOME_VIEW.heightM : GLOBE_VIEW.heightM;
+      finish(!Number.isFinite(height) || Math.abs(height - goal) > (home ? 300 : 1000));
     }, 4200);
     this._resetGlobeBtn?.setAttribute('aria-label', t('actions.resetting-view-aria'));
     this._cockpitResetGlobeBtn?.setAttribute('aria-label', t('actions.resetting-cockpit-aria'));
-    const target = flyToGlobeView(this.viewer, {
-      onComplete: () => finish(false),
-      onCancel: () => finish(true),
-    });
+    const flight = { onComplete: () => finish(false), onCancel: () => finish(true) };
+    const target = home ? flyToHomeView(this.viewer, flight) : flyToGlobeView(this.viewer, flight);
     if (!target) finish(true);
     return resetPromise;
   }
@@ -11078,7 +11085,8 @@ export class StyleManager {
         this._saveCurrentBookmark();
         break;
       case 'reset-globe':
-        this._resetGlobeBtn?.click();
+        // „Celý glóbus" naozaj na glóbus — tlačidlo hore od 2026-09-27 letí domov nad BA
+        void this.resetToGlobeView();
         break;
       default:
         break;
