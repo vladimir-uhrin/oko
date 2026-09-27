@@ -1178,6 +1178,9 @@
     </div>
   </div>
 
+  <!-- Prúd dát okolo stredu preloadera (src/preloaderFlow.js): malý samostatný vstup PRED veľkým
+       main.js, aby sa kreslil hneď; oko ani texty preloadera nemení, prúd ich obteká. -->
+  <script type="module" src="/src/preloaderFlow.js"></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>
