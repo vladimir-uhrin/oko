@@ -1956,7 +1956,7 @@ test('lode: 3D modely sa zapnú len pod stropom výšky a keď je prepínač zap
       'vypnutý prepínač = žiadne modely bez ohľadu na výšku',
     );
   } finally {
-    _setShipModels3dForTest(true);
+    _setShipModels3dForTest(false); // späť na predvolené (klasické ikony)
     _setVesselOverlayHostForTest(null);
     _setVesselStateForTest({ enabled: false });
   }
@@ -2106,4 +2106,18 @@ test('lode (ikona, stopa aj 3D model) stoja na hladine z groundFloor; povrch sa 
   assert.match(src, /updateVisibility\(true\);\n {2}warmVesselSurfaceInView\(\);\n\}/, 'po každom načítaní lodí');
   assert.match(src, /const VESSEL_SURFACE_WARM_ALT_M = 150_000;/, 'len pri nízkej kamere — 33 k lodí sa nedopytuje');
   assert.ok(!/vesselDatumHeightM\(currentGeoidN/.test(src), 'žiadne miesto už neberie len hladinu mora');
+});
+
+test('lode zblízka = klasické ikony trupu, 3D modely ship.glb predvolene vypnuté (vlastník 09-27: „vyrenderované lode nie sú dobré, použi klasické")', () => {
+  assert.equal(_getShipModelStateForTest().enabled, false, 'predvolene bez 3D modelov');
+  const camera = makeLodCamera(17.12, 48.13, 1_000); // hlboko pod stropom 15 km
+  _setVesselOverlayHostForTest(NOOP_HOST);
+  _setVesselStateForTest({ viewer: { camera }, records: [makeLodRecord('M2', 17.12, 48.13)] });
+  try {
+    _tickVesselRuntimeForTest(0);
+    assert.equal(shipModels3dRegimeActive(), false, 'ani pri 1 km nie je 3D model');
+  } finally {
+    _setVesselOverlayHostForTest(null);
+    _setVesselStateForTest({ enabled: false });
+  }
 });

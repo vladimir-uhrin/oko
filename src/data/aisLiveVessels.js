@@ -952,8 +952,12 @@ const state = {
   densityPoints: null,
   /** Kreslí sa hustota namiesto jednotlivých lodí? */
   densityMode: false,
-  /** Zapnuté 3D modely lodí zblízka (default áno, ako „proximity" pri lietadlách). */
-  shipModels3d: true,
+  /**
+   * 3D modely lodí zblízka — VYPNUTÉ (2026-09-27, vlastník: „vyrenderované lode nie sú dobré,
+   * použi klasické"): jeden nákladný trup ship.glb (~125 m) pre remorkér aj osobnú loď na Dunaji
+   * nepôsobil dobre; lode sú aj zblízka klasické ikony trupu. Kód modelov ostáva (zapnúť = true).
+   */
+  shipModels3d: false,
   /** @type {object|null} PrimitiveCollection s glTF trupmi. */
   modelCollection: null,
   /** @type {Map<string|object, object>} kľúč (MMSI alebo record) -> Cesium.Model. */
