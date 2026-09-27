@@ -1002,6 +1002,8 @@ async function init() {
           run: () => { try { dataManager.setEnabled(id, !dataManager.isEnabled(id), { origin: 'user' }); } catch { /* */ } },
         });
       }
+      // Úvodný pohľad ako tlačidlo s glóbusom hore (camera.js HOME_VIEW) — prvý riadok prázdneho hľadania.
+      cmds.push({ id: 'view:home', label: t('cmd.action.home'), hint: t('cmd.action.home.hint'), group: 'view', keywords: ['domov', 'home', 'bratislava', 'úvod', 'start'], run: () => { void styleManager.resetToGlobeView({ home: true }); } });
       cmds.push({ id: 'view:world', label: t('cmd.action.world'), hint: t('cmd.action.world.hint'), group: 'view', keywords: ['reset', 'svet', 'world', 'globe'], run: () => { try { flyToGlobeView(viewer); } catch { /* */ } } });
       cmds.push({ id: 'view:karta', label: t('cmd.action.karta'), group: 'view', keywords: ['karta', 'front', 'mapa'], run: () => { void styleManager._setMapStack('karta'); } });
       cmds.push({ id: 'view:osm', label: t('cmd.action.osm'), group: 'view', keywords: ['osm', 'mapa', 'plain'], run: () => { void styleManager._setMapStack('osm'); } });
@@ -1013,8 +1015,9 @@ async function init() {
     const commandPalette = createCommandPalette({
       translate: t,
       getCommands: buildCommands,
-      // Poradie: konflikty (podľa regiónu) → vrstvy (podľa témy) → zobrazenie.
-      groupOrder: ['ukraine', 'maritime', 'mideast', ...LAYER_GROUP_ORDER, 'view'],
+      // Poradie (2026-09-27, vlastník o lupe: „toto tlačidlo patrí Ukrajine" — prázdne hľadanie
+      // začínalo 12 smermi frontu): zobrazenie → vrstvy (podľa témy) → konflikty (podľa regiónu).
+      groupOrder: ['view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
       onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
     });
     window.__godsEyeView.commandPalette = commandPalette;

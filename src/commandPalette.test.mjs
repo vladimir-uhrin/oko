@@ -104,3 +104,12 @@ test('paleta: núdzové „hľadať na mape", keď nič nesadne', () => {
   rows[0].dispatch('click');
   assert.deepEqual(geo, ['Bratislava']);
 });
+
+test('prázdne hľadanie nezačína Ukrajinou: zobrazenie (úvodný pohľad) → vrstvy → konflikty (2026-09-27)', async () => {
+  // vlastník o lupe: „toto tlačidlo patrí Ukrajine" — paleta otvárala 12 smerov frontu ako prvé
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.ok(main.includes("groupOrder: ['view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],"));
+  assert.match(main, /cmds\.push\(\{ id: 'view:home', label: t\('cmd\.action\.home'\)[^\n]*resetToGlobeView\(\{ home: true \}\)/);
+  assert.ok(main.indexOf("id: 'view:home'") < main.indexOf("id: 'view:world'"), 'úvodný pohľad je prvý riadok zobrazenia');
+});
