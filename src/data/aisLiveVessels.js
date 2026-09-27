@@ -56,6 +56,7 @@ import {
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
 import { ensureGeoidReady, geoidHeight } from './geoid.js';
+import { cachedGroundFloor, resolveGroundFloorCells } from './groundFloor.js';
 import {
   registerSpriteCollection,
   restoreSpriteOrder,
@@ -158,6 +159,17 @@ const TRAIL_HEIGHT_M = 3;
  * is always fine (clears tide/mesh noise in the photoreal sea mesh).
  */
 const VESSEL_LIFT_M = 3;
+/**
+ * Hladina riek a jazier (2026-09-27, vlastník: „lode na Dunaji nech plávu na rieke, nie mimo
+ * Dunaja"): hladina mora (geoid) platí na mori, ale Dunaj v Bratislave je ~130 m nad morom —
+ * lode tam sedeli ~130 m pod hladinou (3D modely na elipsoide ~175 m) a pri šikmom pohľade
+ * sa kreslili vedľa rieky. Pod touto výškou kamery sa lodiam v zábere dotiahne povrch
+ * (groundFloor: vykreslený povrch / DEM Re:Earth cez /api/terrain/heights) — vyššie sa
+ * ~130 m chyba neprejaví a 33 k lodí sa nedopytuje.
+ */
+const VESSEL_SURFACE_WARM_ALT_M = 150_000;
+/** Najviac lodí v zábere, ktorým sa na jedno načítanie dotiahne povrch (bunky ~111 m sa zlúčia). */
+const VESSEL_SURFACE_WARM_MAX = 800;
 /** Combined cap on trail vertices (server backfill + live accumulation). */
 const TRAIL_MAX_POINTS = 400;
 /** Minimum movement (m) before a reconcile refresh appends a new trail point. */
@@ -370,6 +382,22 @@ export function vesselDatumHeightM(geoidN, liftM) {
 }
 
 /**
+ * Výška hladiny pod loďou: vyššia z hladiny mora (geoid N) a povrchu z groundFloor (rieka,
+ * jazero, prieplav — Dunaj v Bratislave ~175 m nad elipsoidom). Na mori je povrch z DEM na
+ * úrovni mora alebo pod ňou (batymetria), takže vyhrá geoid a nič sa nemení; kým bunka povrchu
+ * nie je načítaná, platí geoid (doterajšie správanie). Čistá funkcia, exportovaná pre testy.
+ * @param {number|null|undefined} geoidN - Undulácia N (m) alebo null, kým je mriežka studená.
+ * @param {number|null|undefined} floorM - Elipsoidická výška povrchu v bunke alebo null.
+ * @param {number} liftM - Zdvih nad hladinou (m).
+ * @returns {number}
+ */
+export function vesselSurfaceHeightM(geoidN, floorM, liftM) {
+  const sea = Number.isFinite(geoidN) ? geoidN : 0;
+  const surface = Number.isFinite(floorM) ? Math.max(sea, floorM) : sea;
+  return surface + liftM;
+}
+
+/**
  * Reduce one vessel-selection gesture to the layer-owned action it should
  * perform. The interaction handler reserves only vessel-record residuals and
  * trail picks as no-ops. The interaction wire also reserves sibling-owned
@@ -417,6 +445,11 @@ function normalizeSelectionMmsi(value) {
  */
 function currentGeoidN(lat, lon) {
   return _geoidReady ? geoidHeight(lat, lon) : null;
+}
+
+/** Výška na vykreslenie lode: hladina (more alebo rieka) + zdvih. */
+function vesselRenderHeightM(lat, lon, liftM) {
+  return vesselSurfaceHeightM(currentGeoidN(lat, lon), cachedGroundFloor(lat, lon), liftM);
 }
 
 /** @type {Map<string, string>} `${cssColor}:${variant}` -> hull-silhouette SVG data URL */
@@ -909,6 +942,8 @@ const state = {
   /** Test-only key target paired with interactionHandlerFactory. */
   interactionKeyTarget: null,
   preRenderRemover: null,
+  /** Poradie dotiahnutia povrchu lodí v zábere (neskoršie načítanie má prednosť). */
+  surfaceWarmToken: 0,
   lastVisibilityUpdate: 0,
   lastFocusUpdate: 0,
   /** @type {'full'|'medium'|'micro'} Stupeň veľkosti lodných ikon (airIconLod.js). */
@@ -1331,6 +1366,44 @@ function reconcileVessels(viewer, rows) {
   if (selectedEvicted) clearVesselInspection({ evicted: true });
   state.lastVisibilityUpdate = 0;
   updateVisibility(true);
+  warmVesselSurfaceInView();
+}
+
+/**
+ * Lodiam v zábere (pri nízkej kamere) dotiahne povrch pod nimi — hladinu rieky alebo jazera —
+ * a po načítaní ich naň presunie. Každý pohyb kamery aj tak vyvolá nové načítanie lodí pre
+ * nový výrez (preRender, do ~5 s), takže toto beží po každom z nich; už známe bunky sa
+ * nedopytujú. Nikdy neblokuje ani nehádže.
+ * @returns {void}
+ */
+function warmVesselSurfaceInView() {
+  const camera = state.viewer?.camera;
+  const height = camera?.positionCartographic?.height;
+  if (!Number.isFinite(height) || height > VESSEL_SURFACE_WARM_ALT_M) return;
+  let rect = null;
+  try { rect = camera.computeViewRectangle?.(Cesium.Ellipsoid.WGS84); } catch { rect = null; }
+  if (!rect) return;
+  const west = Cesium.Math.toDegrees(rect.west);
+  const east = Cesium.Math.toDegrees(rect.east);
+  const south = Cesium.Math.toDegrees(rect.south);
+  const north = Cesium.Math.toDegrees(rect.north);
+  if (east < west) return; // cez 180° poludník pri nízkej kamere nebýva
+  const pending = [];
+  for (const record of state.vesselRecords) {
+    if (pending.length >= VESSEL_SURFACE_WARM_MAX) break;
+    if (!Number.isFinite(record?.lat) || !Number.isFinite(record?.lon)) continue;
+    if (record.lat < south || record.lat > north || record.lon < west || record.lon > east) continue;
+    if (cachedGroundFloor(record.lat, record.lon) != null) continue;
+    pending.push(record);
+  }
+  if (!pending.length) return;
+  const token = ++state.surfaceWarmToken;
+  resolveGroundFloorCells(pending).then(() => {
+    if (token !== state.surfaceWarmToken || !state.enabled) return;
+    refloorVesselRecords(pending);
+    state.lastVisibilityUpdate = 0;
+    state.viewer?.scene?.requestRender?.();
+  }).catch(() => { /* bez povrchu ostáva hladina mora */ });
 }
 
 /**
@@ -1438,7 +1511,7 @@ function normalizeVessel(row) {
   // Vertical datum: anchor at the SEA SURFACE (geoid, h = N + lift), not the
   // ellipsoid — at height 0 everything that projects record.position (clicks,
   // detection brackets, cards, getNearby) points up to ~45 m under the water.
-  const heightM = vesselDatumHeightM(currentGeoidN(lat, lon), VESSEL_LIFT_M);
+  const heightM = vesselRenderHeightM(lat, lon, VESSEL_LIFT_M);
   const position = Cesium.Cartesian3.fromDegrees(lon, lat, heightM);
   // Surface normal at this position — used as alignedAxis so billboard
   // rotation operates in the local tangent plane (true world heading)
@@ -1707,8 +1780,10 @@ function refreshVesselModels(nowMs) {
       ensureShipModel(key, record);
       continue; // ešte sa načítava — ikona drží vizuál
     }
+    // na hladine (more alebo rieka), nie na elipsoide — ten je na Dunaji ~175 m pod vodou
     const pos = Cesium.Cartesian3.fromDegrees(
-      record.lon, record.lat, SHIP_MODEL_LIFT_M, Cesium.Ellipsoid.WGS84, _scratchShipPos,
+      record.lon, record.lat, vesselRenderHeightM(record.lat, record.lon, SHIP_MODEL_LIFT_M),
+      Cesium.Ellipsoid.WGS84, _scratchShipPos,
     );
     shipModelMatrix(pos, vesselCourseDeg(record), model.modelMatrix);
     if (!model.ready) {
@@ -2269,7 +2344,7 @@ function selectVessel(record) {
  */
 function vesselTrailPosition(record) {
   if (!Number.isFinite(record?.lat) || !Number.isFinite(record?.lon)) return null;
-  const heightM = vesselDatumHeightM(currentGeoidN(record.lat, record.lon), TRAIL_HEIGHT_M);
+  const heightM = vesselRenderHeightM(record.lat, record.lon, TRAIL_HEIGHT_M);
   return Cesium.Cartesian3.fromDegrees(record.lon, record.lat, heightM);
 }
 
@@ -2281,11 +2356,11 @@ function vesselTrailPosition(record) {
  * is known. (A selected-vessel trail cannot exist that early — selection
  * needs a rendered pick — so trail vertices are not revisited.)
  */
-function refloorVesselRecords() {
-  if (!state.vesselRecords.length) return;
-  for (const record of state.vesselRecords) {
+function refloorVesselRecords(records = state.vesselRecords) {
+  if (!records.length) return;
+  for (const record of records) {
     if (!Number.isFinite(record.lat) || !Number.isFinite(record.lon)) continue;
-    const heightM = vesselDatumHeightM(currentGeoidN(record.lat, record.lon), VESSEL_LIFT_M);
+    const heightM = vesselRenderHeightM(record.lat, record.lon, VESSEL_LIFT_M);
     record.position = Cesium.Cartesian3.fromDegrees(record.lon, record.lat, heightM);
     if (record.billboard) record.billboard.position = record.position;
   }
@@ -2341,7 +2416,7 @@ async function backfillVesselTrail(mmsi, token) {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     // Per-sample N (≤ TRAIL_MAX_POINTS lookups) — same sea-surface datum as
     // the live vertices so the spliced trail is height-continuous.
-    const heightM = vesselDatumHeightM(currentGeoidN(lat, lon), TRAIL_HEIGHT_M);
+    const heightM = vesselRenderHeightM(lat, lon, TRAIL_HEIGHT_M);
     older.push(Cesium.Cartesian3.fromDegrees(lon, lat, heightM));
   }
   if (!older.length) return;

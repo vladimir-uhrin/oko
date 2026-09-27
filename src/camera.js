@@ -72,10 +72,12 @@ export function flyToBratislava(viewer) {
       // 4× finer screen-space error) smeared across the middle of the first
       // frame every visitor sees. From this side the castle and the old town
       // are sharp and the patch stays out of the main frame.
-      destination: Cesium.Cartesian3.fromDegrees(17.1180, 48.1520, 750),
+      // 2026-09-27 (owner, screenshot „potrebujem nastaviť default polohu túto"):
+      // lower and flatter over the same side — Danube, castle and Petržalka in one frame.
+      destination: Cesium.Cartesian3.fromDegrees(17.1297, 48.1588, 630),
       orientation: {
-        heading: Cesium.Math.toRadians(215),
-        pitch: Cesium.Math.toRadians(-26),
+        heading: Cesium.Math.toRadians(221),
+        pitch: Cesium.Math.toRadians(-12),
         roll: 0.0,
       },
       duration: 4.0,

@@ -14,6 +14,7 @@ import {
   cardScreenSeparated,
   reduceVesselSelection,
   vesselDatumHeightM,
+  vesselSurfaceHeightM,
   _bindVesselInteractionForTest,
   _setVesselStateForTest,
   _reconcileVesselsForTest,
@@ -2081,4 +2082,28 @@ test('getDetectableObjects: loď pod kurzorom a vybraná loď idú vždy, aj ke�
     const ids = hovered.map(o => o.sourceId);
     assert.equal(new Set(ids).size, ids.length, 'bez duplikátov');
   } finally { _setVesselStateForTest({ enabled: false }); }
+});
+
+// ── Hladina riek (2026-09-27, vlastník: „lode na Dunaji nech plávu na rieke, nie mimo Dunaja") ──
+test('vesselSurfaceHeightM: na mori hladina mora, na rieke povrch rieky (Dunaj v BA ~180 m nad elipsoidom)', () => {
+  // more: DEM na úrovni mora alebo pod ňou (batymetria) → vyhrá geoid, nič sa nemení
+  assert.equal(vesselSurfaceHeightM(44.2, 44.2, 3), 47.2);
+  assert.equal(vesselSurfaceHeightM(43.8, 41.0, 3), 46.8, 'prístav pod hladinou mora → hladina mora');
+  // Dunaj pri Bratislave: /api/terrain/heights 179–181 m (135–137 m n. m. + N 43,9)
+  assert.equal(vesselSurfaceHeightM(43.9, 181.5, 3), 184.5);
+  // kým bunka nie je načítaná alebo je mriežka studená, doterajšie správanie
+  assert.equal(vesselSurfaceHeightM(43.9, null, 3), 46.9);
+  assert.equal(vesselSurfaceHeightM(null, null, 3), 3);
+  assert.equal(vesselSurfaceHeightM(null, 181.5, 3), 184.5);
+});
+
+test('lode (ikona, stopa aj 3D model) stoja na hladine z groundFloor; povrch sa dotiahne lodiam v zábere po každom načítaní', () => {
+  const src = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  assert.match(src, /import \{ cachedGroundFloor, resolveGroundFloorCells \} from '\.\/groundFloor\.js';/);
+  assert.match(src, /const heightM = vesselRenderHeightM\(lat, lon, VESSEL_LIFT_M\);/, 'ikona pri načítaní');
+  assert.match(src, /record\.lon, record\.lat, vesselRenderHeightM\(record\.lat, record\.lon, SHIP_MODEL_LIFT_M\),/, '3D model už nie na elipsoide');
+  assert.ok(!/record\.lon, record\.lat, SHIP_MODEL_LIFT_M, Cesium\.Ellipsoid\.WGS84/.test(src));
+  assert.match(src, /updateVisibility\(true\);\n {2}warmVesselSurfaceInView\(\);\n\}/, 'po každom načítaní lodí');
+  assert.match(src, /const VESSEL_SURFACE_WARM_ALT_M = 150_000;/, 'len pri nízkej kamere — 33 k lodí sa nedopytuje');
+  assert.ok(!/vesselDatumHeightM\(currentGeoidN/.test(src), 'žiadne miesto už neberie len hladinu mora');
 });
