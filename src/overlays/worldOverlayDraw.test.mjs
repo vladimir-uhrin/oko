@@ -700,6 +700,37 @@ test('tracked card (2026-09-07): mini profile takes two lines and strokes both c
   assert.equal(lineTos, ctx2.calls.filter(([name]) => name === 'lineTo').length + 2, 'the alert glyph adds two triangle segments');
 });
 
+test('docked placement (2026-09-27, „lietadlo nevidno"): široká karta v úzkom okne nesedí na stroji, fotka pod ňou sa ráta', async () => {
+  const { dockCoversAnchor } = await import('./worldOverlayDraw.js');
+  // 660 × 860 okno (panel), karta 500 × 300 s grafmi, stroj v strede
+  const input = { anchorX: 330, anchorY: 430, width: 500, height: 300, viewportWidth: 660, viewportHeight: 860 };
+  const plain = dockedPlacement(input, 'right');
+  assert.ok(dockCoversAnchor(plain[0].rect, 330, 430, 36), 'bez voľby: prvá varianta (vo výške stroja) ho prekryje');
+  const clear = dockedPlacement({ ...input, anchorClearPx: 36, reserveBelowPx: 66 }, 'right');
+  assert.ok(clear.length >= plain.length, 'žiadna varianta nezmizne; pribudnú tesne nad a pod strojom');
+  assert.ok(!dockCoversAnchor(clear[0].rect, 330, 430, 36, 66), 'prvá voľba nechá stroj aj s okolím voľný');
+  assert.ok(clear[0].rect.y + 300 + 66 <= 430 - 36 || clear[0].rect.y >= 430 + 36, 'karta aj s fotkou je nad alebo pod strojom');
+  // desatinná kotva (živé meranie: 429,9999999994) nesmie urobiť z variantu tesne nad strojom „kryjúci"
+  const fractional = dockedPlacement({ ...input, anchorY: 429.9999999994, height: 252, anchorClearPx: 36, reserveBelowPx: 66 }, 'right');
+  const hugAbove = fractional.find((p) => p.rect.y + 252 + 66 < 430 && p.rect.y > 60);
+  assert.ok(hugAbove, 'tesne nad strojom existuje');
+  assert.equal(dockCoversAnchor(hugAbove.rect, 330, 429.9999999994, 36, 66), false);
+  // široké okno: karta pri pravom okraji stroj neprekrýva → poradie ostáva (vo výške stroja prvá)
+  const wide = { anchorX: 720, anchorY: 430, width: 500, height: 300, viewportWidth: 1440, viewportHeight: 860 };
+  const wideClear = dockedPlacement({ ...wide, anchorClearPx: 36, reserveBelowPx: 66 }, 'right').map((p) => p.rect.y);
+  const widePlain = dockedPlacement(wide, 'right').map((p) => p.rect.y);
+  assert.deepEqual(wideClear.slice(0, widePlain.length), widePlain, 'pôvodné poradie; nové varianty až na konci');
+  // keď kryjú všetky (nízke okno), prvá voľba ostáva vo výške stroja
+  const short = { ...input, viewportHeight: 420, anchorY: 210 };
+  assert.equal(dockedPlacement({ ...short, anchorClearPx: 36, reserveBelowPx: 66 }, 'right')[0].rect.y,
+    dockedPlacement(short, 'right')[0].rect.y);
+  // bez anchorClearPx presne pôvodné správanie (iné dokované karty): žiadne varianty navyše
+  assert.equal(plain.length, 5);
+  const { readFileSync } = await import('node:fs');
+  const readout = readFileSync(new URL('../data/trackedReadout.js', import.meta.url), 'utf8');
+  assert.match(readout, /dock: 'right',[\s\S]{0,300}dockAnchorClearPx: 36,\s*dockReserveBelowPx: 66,/);
+});
+
 test('docked placement (2026-09-07): one placement at the viewport edge level with the anchor, clamped, no leader painted', () => {
   const input = { anchorX: 400, anchorY: 300, width: 200, height: 80, viewportWidth: 1000, viewportHeight: 600 };
   const right = dockedPlacement(input, 'right');

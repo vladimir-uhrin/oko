@@ -64,7 +64,13 @@ import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
 import { buildFlightCharts } from './flightCharts.js';
-import { cachedTrackedHistory, forgetTrackedHistory, requestTrackedHistory } from './trackedHistory.js';
+import {
+  cachedTrackedHistory,
+  forgetTrackedHistory,
+  loadTrackedHistory,
+  requestTrackedHistory,
+  trailWaypointsFromHistory,
+} from './trackedHistory.js';
 import { contactLogosFor, requestContactLogos } from './contactLogos.js';
 import { logoCreditLine } from './logoResolve.js';
 import { acarsCardLine, cachedAcars, requestAcarsMessages } from './acarsMessages.js';
@@ -3594,35 +3600,48 @@ function _startTrail(icao24) {
  * @returns {Promise<void>}
  */
 async function _backfillTrail(icao24, token, oldestFixEpochSec) {
-  let path = null;
+  // 2026-09-27 (vlastník: „vykresľovanie trasy lietadla sa niekedy objaví a niekedy nie"):
+  // OpenSky /tracks vracia 404 po pristátí a pri limite nič — trasa potom mala len pár bodov
+  // od kliknutia. PRVÝ zdroj je lokálny archív letov (/api/history/track, 24 h, bez kvóty;
+  // ten istý dopyt ako grafy karty), len aktuálny úsek letu. OpenSky ostáva zálohou.
+  let parsed = [];
   try {
-    const response = await fetch('/api/opensky-track?icao24=' + encodeURIComponent(icao24), {
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    path = Array.isArray(data?.path) ? data.path : null;
-  } catch {
-    return; // silent fallback to the accumulated trail
-  }
-  if (!path || token !== _trailBackfillToken || icao24 !== _trackedIcao) return;
+    const fixes = await loadTrackedHistory(icao24);
+    parsed = trailWaypointsFromHistory(fixes, { nowS: Math.floor(Date.now() / 1000), beforeS: oldestFixEpochSec });
+  } catch { parsed = []; }
+  if (token !== _trailBackfillToken || icao24 !== _trackedIcao) return;
 
-  // OpenSky track waypoints: [time, latitude, longitude, baro_altitude, true_track, on_ground]
-  // Height-datum fix (Task 6): /tracks only ever reports barometric/MSL altitude
+  if (!parsed.length) {
+    let path = null;
+    try {
+      const response = await fetch('/api/opensky-track?icao24=' + encodeURIComponent(icao24), {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      path = Array.isArray(data?.path) ? data.path : null;
+    } catch {
+      return; // silent fallback to the accumulated trail
+    }
+    if (!path || token !== _trailBackfillToken || icao24 !== _trackedIcao) return;
+    // OpenSky track waypoints: [time, latitude, longitude, baro_altitude, true_track, on_ground]
+    for (const waypoint of path) {
+      if (!Array.isArray(waypoint)) continue;
+      const [time, lat, lon, baroAlt] = waypoint;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      if (!Number.isFinite(time) || time >= oldestFixEpochSec) continue;
+      parsed.push({ lat, lon, baroAlt });
+    }
+  }
+  if (!parsed.length) return;
+
+  // Height-datum fix (Task 6): /tracks (a rovnako archív) nesie len barometrickú/MSL výšku
   // (no per-waypoint geo_altitude in this endpoint), so waypoint render height is
   // the documented visual FALLBACK baroM + geoidHeight(waypointLat, waypointLon)
   // — geometrically approximate, not exact, same honesty caveat as the live
   // baro-fallback branch of pickRenderAltitudeM.
   await ensureGeoidReady();
-  const parsed = [];
-  for (const waypoint of path) {
-    if (!Array.isArray(waypoint)) continue;
-    const [time, lat, lon, baroAlt] = waypoint;
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    if (!Number.isFinite(time) || time >= oldestFixEpochSec) continue;
-    parsed.push({ lat, lon, baroAlt });
-  }
-  if (!parsed.length) return;
+  if (token !== _trailBackfillToken || icao24 !== _trackedIcao) return;
 
   // Field-test fix (WAKE01 trail-underground, 2026-07-06 — mirror of
   // militaryFlights.js): resolve the coarse ellipsoidal ground along the track

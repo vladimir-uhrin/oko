@@ -167,6 +167,10 @@ export function createTrackedOverlayEntry(entity) {
     // a bez okrajového blednutia (na okraji by keyhole fade kartu zhasol).
     // Fotka (trackedPhoto.js) ide za ňou cez paint rect, horizonCull ostáva.
     dock: 'right',
+    // 2026-09-27 (vlastník: „lietadlo nevidno"): veľká karta s grafmi v užšom okne siahala cez
+    // stred a sedela na stroji — radšej sa posunie nad/pod neho. Pás s fotkou (~64 px) je jej časť.
+    dockAnchorClearPx: 36,
+    dockReserveBelowPx: 66,
     edgeFade: 'none',
     horizonCull: true,
     terrainOcclusion: false,

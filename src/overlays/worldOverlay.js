@@ -9,6 +9,7 @@ import { BoundedCohort, stableIdentityHash } from '../data/detectionCohort.js';
 import { LabelArbiter, LABEL_ARBITER_TIMING } from '../data/labelArbiter.js';
 import {
   dockedPlacement,
+  dockCoversAnchor,
   altitudeFade,
   destroyWorldOverlayDraw,
   distanceFade,
@@ -152,6 +153,10 @@ export const WORLD_OVERLAY_OCCLUDER_SELECTORS = Object.freeze([
   // toggled). Every other cockpit selector was removed — see the block comment.
   '#cockpit-context',
   '#cockpit-signal-stream',
+  // Tlačidlá pri sledovanom lietadle (2026-09-27): pevné, malé, len MIMO kokpitu (v ňom sú
+  // skryté). Dokovaná karta s variantami tesne pod strojom na ne inak vedela sadnúť.
+  '#cockpit-entry',
+  '#follow-flight',
 ]);
 
 /**
@@ -660,6 +665,10 @@ export function normalizeOverlayEntry(sourceId, entry) {
     // Docked card (2026-09-07): 'right' | 'left' pins the card to a viewport
     // edge level with its anchor instead of floating over it; null = classic.
     dock: entry.dock === 'right' || entry.dock === 'left' ? entry.dock : null,
+    // Dokovaná karta nesmie prekryť svoj stroj (2026-09-27, „lietadlo nevidno"): okolie kotvy
+    // a pás pod kartou (fotka), ktoré sa pri výbere varianty držia voľné.
+    dockAnchorClearPx: Number.isFinite(Number(entry.dockAnchorClearPx)) ? Math.max(0, Number(entry.dockAnchorClearPx)) : 0,
+    dockReserveBelowPx: Number.isFinite(Number(entry.dockReserveBelowPx)) ? Math.max(0, Number(entry.dockReserveBelowPx)) : 0,
     cardStyle: entry.cardStyle,
     image: entry.image ?? null,
     metadata: entry.metadata ?? null,
@@ -1813,8 +1822,13 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   record.placementInput.preferred = entry.placement;
   record.placementInput.verticalOnly = entry.verticalOnly;
   record.placementInput.viewportMargin = entry.viewportMargin;
-  if (entry.dock) dockedPlacement(record.placementInput, entry.dock, record.placements);
-  else placementVariants(record.placementInput, record.placements);
+  if (entry.dock) {
+    // Len dokovaná karta (jedna) — zápis do placementInput všetkých kandidátov by pri každom
+    // snímku balil double (alokačný test „tracked readout live": +15 B/kandidáta).
+    record.placementInput.anchorClearPx = entry.dockAnchorClearPx;
+    record.placementInput.reserveBelowPx = entry.dockReserveBelowPx;
+    dockedPlacement(record.placementInput, entry.dock, record.placements);
+  } else placementVariants(record.placementInput, record.placements);
   // UI exclusion is a PREFERENCE for chrome that composites ABOVE the host, and
   // a HARD VETO for chrome that composites below it.
   //
@@ -1826,13 +1840,20 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   // That justification fails for chrome UNDER the host — `#intel-hud` is z2,
   // below both host surfaces — where a kept placement would render ON TOP of the
   // HUD text. Labels never cover the UI, so those rects keep the absolute veto.
-  let softClear = 0;
-  for (let i = 0; i < record.placements.length; i++) {
+  // Dokovaná karta so strojom (2026-09-27, „lietadlo nevidno"): viditeľný stroj je dôležitejší
+  // než mäkký chróm — nad strojom bývajú prechodné stavové čipy, pod ním tlačidlá; filter nižšie
+  // vyradil každú voľnú variantu a ostala len tá NA stroji. orderDockedPlacements radí: voľný
+  // stroj s najmenej chrómu → kryje stroj; tvrdý chróm ostáva zákazom. (Koniec funkcie ostáva
+  // inline — vyčlenenie do samostatnej funkcie zvýšilo alokácie na snímok, alokačný test.)
+  const dockedAnchor = entry.dock && entry.dockAnchorClearPx > 0;
+  if (dockedAnchor) orderDockedPlacements(record, entry);
+  let softClear = dockedAnchor ? record.placements.length : 0;
+  for (let i = 0; !dockedAnchor && i < record.placements.length; i++) {
     const placement = record.placements[i];
     if (overlayRectIntersectsAny(placement.rect, _uiOcclusionRects)) continue;
     record.placements[softClear++] = placement;
   }
-  if (softClear === 0) {
+  if (!dockedAnchor && softClear === 0) {
     // Nothing is clear of everything: fall back to placements that at least
     // clear the below-host chrome, and veto the entry if even that is impossible.
     let hardClear = 0;
@@ -1879,6 +1900,72 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   record.candidate.screenX = record.screen.x;
   record.candidate.screenY = record.screen.y;
   return record;
+}
+
+/** Pooled scores for orderDockedPlacements (a docked entry has ≤ 7 variants). */
+const _dockScores = [];
+
+/** Plocha prekrytia varianty (aj s pásom pod ňou — fotka) s chrómom, px². Bez alokácie. */
+function softChromeOverlapArea(rect, reserveBelow, uiRects) {
+  let area = 0;
+  const bottom = rect.y + rect.h + reserveBelow;
+  for (let i = 0; i < uiRects.length; i++) {
+    const ui = uiRects[i];
+    const w = Math.min(rect.x + rect.w, ui.x + ui.w) - Math.max(rect.x, ui.x);
+    const h = Math.min(bottom, ui.y + ui.h) - Math.max(rect.y, ui.y);
+    if (w > 0 && h > 0) area += w * h;
+  }
+  return area;
+}
+
+/** Skóre krytia stroja — prevýši akúkoľvek plochu chrómu v okne. */
+const DOCK_COVERS_ANCHOR_SCORE = 1e9;
+
+/**
+ * Dokovaná karta: zoradí varianty (stabilne, bez alokácie) — najprv tie, ktoré nechajú
+ * stroj voľný, medzi nimi s najmenšou plochou pod mäkkým chrómom (prechodné čipy hore
+ * sú lepšie než tlačidlá, dok a povinná atribúcia dole); tvrdý chróm variantu vyradí.
+ * @returns {boolean} ostala aspoň jedna varianta
+ */
+function orderDockedPlacements(record, entry) {
+  const input = record.placementInput;
+  // Zdieľaný objekt volieb — beží každý snímok, bez alokácie.
+  _dockOrderInput.anchorX = input.anchorX;
+  _dockOrderInput.anchorY = input.anchorY;
+  _dockOrderInput.clearPx = entry.dockAnchorClearPx;
+  _dockOrderInput.reserveBelowPx = input.reserveBelowPx;
+  _dockOrderInput.uiRects = _uiOcclusionRects;
+  _dockOrderInput.scores = _dockScores;
+  return orderDockedVariants(record.placements, _dockOrderInput);
+}
+const _dockOrderInput = { anchorX: 0, anchorY: 0, clearPx: 0, reserveBelowPx: 0, uiRects: null, scores: null };
+
+/**
+ * Čisté jadro orderDockedPlacements (testovateľné): zoradí `placements` na mieste.
+ * @param {Array<{rect: {x:number,y:number,w:number,h:number}}>} placements
+ * @param {{anchorX:number, anchorY:number, clearPx:number, reserveBelowPx?:number, uiRects: Array<{x:number,y:number,w:number,h:number,hard?:boolean}>, scores?: number[]}} o
+ * @returns {boolean} ostala aspoň jedna varianta
+ */
+export function orderDockedVariants(placements, { anchorX, anchorY, clearPx, reserveBelowPx = 0, uiRects, scores = [] }) {
+  let n = 0;
+  for (let i = 0; i < placements.length; i++) {
+    const placement = placements[i];
+    if (overlayRectIntersectsAnyHard(placement.rect, uiRects)) continue;
+    const covers = dockCoversAnchor(placement.rect, anchorX, anchorY, clearPx, reserveBelowPx);
+    const score = (covers ? DOCK_COVERS_ANCHOR_SCORE : 0) + softChromeOverlapArea(placement.rect, reserveBelowPx, uiRects);
+    // stabilné vkladanie podľa skóre
+    let j = n;
+    while (j > 0 && scores[j - 1] > score) {
+      placements[j] = placements[j - 1];
+      scores[j] = scores[j - 1];
+      j -= 1;
+    }
+    placements[j] = placement;
+    scores[j] = score;
+    n += 1;
+  }
+  placements.length = n;
+  return n > 0;
 }
 
 /**

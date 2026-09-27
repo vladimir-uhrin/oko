@@ -1514,15 +1514,51 @@ test('opt-in anchor separation thins a co-located cohort before the arbiter sees
   assert.ok(project(112) > 0, 'separation thins the cohort without emptying it');
 });
 
+test('dokovaná karta (vlastník 09-27: „lietadlo nevidno"): voľný stroj pred čipmi, najmenej chrómu, atribúcia a tlačidlá dole prehrávajú', async () => {
+  const { orderDockedVariants } = await import('./worldOverlay.js');
+  const { dockedPlacement } = await import('./worldOverlayDraw.js');
+  // živý prípad 660 × 860: LAN583, karta 543 × 250, stroj v strede (330, 430)
+  const placements = dockedPlacement({
+    anchorX: 330, anchorY: 430, width: 543, height: 250, viewportWidth: 660, viewportHeight: 860,
+    anchorClearPx: 36, reserveBelowPx: 66,
+  }, 'right');
+  const ui = [
+    { x: 261, y: 74, w: 138, h: 24, hard: false }, // stavový štítok načítania
+    { x: 239, y: 112, w: 182, h: 24, hard: false }, // synchronizácia dopravy
+    { x: 248, y: 146, w: 164, h: 24, hard: false }, // synchronizácia kamier
+    { x: 533, y: 628, w: 111, h: 38, hard: false }, // SLEDOVAŤ
+    { x: 548, y: 680, w: 96, h: 38, hard: false }, // KOKPIT
+    { x: 12, y: 704, w: 440, h: 18, hard: false }, // atribúcia Cesium/Google
+    { x: 192, y: 732, w: 276, h: 62, hard: false }, // hlasový dok
+  ];
+  assert.equal(orderDockedVariants(placements, { anchorX: 330, anchorY: 430, clearPx: 36, reserveBelowPx: 66, uiRects: ui }), true);
+  const first = placements[0].rect;
+  assert.ok(first.y + 250 + 66 <= 430 - 36, 'nad strojom, aj s fotkou');
+  assert.ok(placements.some((p) => p.rect.y > 430), 'spodné varianty ostali ako záloha');
+  // tvrdý chróm (pod hostiteľom, napr. HUD roh) variantu vyradí úplne
+  const hardAll = dockedPlacement({ anchorX: 330, anchorY: 430, width: 543, height: 250, viewportWidth: 660, viewportHeight: 860, anchorClearPx: 36, reserveBelowPx: 66 }, 'right');
+  assert.equal(orderDockedVariants(hardAll, { anchorX: 330, anchorY: 430, clearPx: 36, reserveBelowPx: 66, uiRects: [{ x: 0, y: 0, w: 660, h: 860, hard: true }] }), false);
+  // bez prekážok: stroj voľný vyhráva nad variantou vo výške stroja
+  const free = dockedPlacement({ anchorX: 330, anchorY: 430, width: 543, height: 250, viewportWidth: 660, viewportHeight: 860, anchorClearPx: 36, reserveBelowPx: 66 }, 'right');
+  orderDockedVariants(free, { anchorX: 330, anchorY: 430, clearPx: 36, reserveBelowPx: 66, uiRects: [] });
+  assert.ok(free[0].rect.y + 250 + 66 <= 394 || free[0].rect.y >= 466);
+  const host = readFileSync(new URL('./worldOverlay.js', import.meta.url), 'utf8');
+  assert.match(host, /const dockedAnchor = entry\.dock && entry\.dockAnchorClearPx > 0;\s*if \(dockedAnchor\) orderDockedPlacements\(record, entry\);/);
+  assert.doesNotMatch(host, /function finishPlacementCandidate/, 'koniec projekcie ostáva inline (alokačný test)');
+});
+
 test('the occluder inventory carries no cockpit line-art chrome', () => {
   // Source-level disposition pin. Cockpit chrome renders ABOVE the overlay
   // (#cockpit-hud is z145 against this host's z5/z6), so under the AR-HUD model
   // world content simply passes beneath it. The rim/topline/arc/rail elements
   // are also viewport-scale, which is what made them catastrophic as
   // exclusions. Only the two solid backdrop-filled windows may remain.
+  // 2026-09-27: + #cockpit-entry — the solid KOKPIT button shown only OUTSIDE the
+  // cockpit (hidden inside), not HUD line art; the docked tracked card must not sit on it.
   const cockpitSelectors = WORLD_OVERLAY_OCCLUDER_SELECTORS
     .filter((selector) => selector.includes('cockpit'));
-  assert.deepEqual(cockpitSelectors, ['#cockpit-context', '#cockpit-signal-stream']);
+  assert.deepEqual(cockpitSelectors, ['#cockpit-context', '#cockpit-signal-stream', '#cockpit-entry']);
+  assert.ok(WORLD_OVERLAY_OCCLUDER_SELECTORS.includes('#follow-flight'));
   for (const selector of WORLD_OVERLAY_OCCLUDER_SELECTORS) {
     assert.equal(selector.startsWith('.cockpit-'), false,
       `${selector} is cockpit line art and must not exclude anything`);

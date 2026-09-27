@@ -738,6 +738,15 @@ const DOCK_VARIANT_GAP_PX = 16;
 const DOCK_VARIANT_OFFSETS = Object.freeze([0, -1, 1, -2, 2]);
 
 /**
+ * Prekrýva obdĺžnik karty (s pásom pod ňou) okolie kotvy? Pure, bez alokácie.
+ * @param {{x:number,y:number,w:number,h:number}} rect
+ */
+export function dockCoversAnchor(rect, anchorX, anchorY, clear, reserveBelow = 0) {
+  return anchorX + clear > rect.x && anchorX - clear < rect.x + rect.w
+    && anchorY + clear > rect.y && anchorY - clear < rect.y + rect.h + reserveBelow;
+}
+
+/**
  * Write the single docked placement into `out[0]`. Pure apart from the pooled
  * output object.
  * @param {{anchorX:number, anchorY:number, width:number, height:number, viewportWidth:number, viewportHeight:number}} input
@@ -746,6 +755,12 @@ const DOCK_VARIANT_OFFSETS = Object.freeze([0, -1, 1, -2, 2]);
  */
 export function dockedPlacement(input, dock, out = []) {
   const { anchorX, anchorY, width, height, viewportWidth, viewportHeight } = input;
+  // 2026-09-27 (vlastník: „lietadlo nevidno"): karta s grafmi a logami je taká veľká, že
+  // v užšom okne siaha cez stred — a prvá varianta (vo výške stroja) ho prekryla. Varianty,
+  // ktoré nechajú okolie kotvy voľné (`anchorClearPx`, vrátane pásu pod kartou — fotka,
+  // `reserveBelowPx`), idú dopredu; poradie medzi nimi ostáva. Keď kryjú všetky, nič sa nemení.
+  const anchorClear = Math.max(0, Number(input.anchorClearPx) || 0);
+  const reserveBelow = Math.max(0, Number(input.reserveBelowPx) || 0);
   const x = dock === 'left'
     ? DOCK_MARGIN_PX
     : Math.max(DOCK_MARGIN_PX, viewportWidth - width - DOCK_MARGIN_PX);
@@ -765,7 +780,38 @@ export function dockedPlacement(input, dock, out = []) {
     out[count] = writePlacement(out[count], 'dock', x, y, width, height, anchorX, anchorY, 0);
     count += 1;
   }
+  if (anchorClear > 0) {
+    // Tesne nad / tesne pod strojom (aj do horného pásu a dolnej rezervy — chróm tam stráži
+    // hostiteľov UI-exclusion pass): vysoká karta s fotkou sa inak do okna vedľa stroja nezmestí.
+    const minY = 6;
+    const maxY = Math.max(minY, viewportHeight - height - reserveBelow - 6);
+    // ±2 px: kotva je desatinná (429,9999…) a y sa zaokrúhľuje — presne na hrane by
+    // dockCoversAnchor hlásil krytie o zlomok pixla a voľná varianta by prehrala.
+    const hugAbove = Math.max(minY, Math.min(maxY, Math.floor(anchorY - anchorClear - reserveBelow - height) - 2));
+    const hugBelow = Math.max(minY, Math.min(maxY, Math.ceil(anchorY + anchorClear) + 2));
+    for (let h = 0; h < 2; h++) {
+      const y = h === 0 ? hugAbove : hugBelow;
+      let duplicate = false;
+      for (let i = 0; i < count; i++) if (out[i].rect.y === Math.round(y)) duplicate = true;
+      if (duplicate) continue;
+      out[count] = writePlacement(out[count], 'dock', x, y, width, height, anchorX, anchorY, 0);
+      count += 1;
+    }
+  }
   out.length = count;
+  if (anchorClear > 0 && count > 1) {
+    // Stabilné rozdelenie bez alokácie (beží každý snímok): voľné dopredu, kryjúce za ne.
+    let free = 0;
+    for (let i = 0; i < count; i++) {
+      if (dockCoversAnchor(out[i].rect, anchorX, anchorY, anchorClear, reserveBelow)) continue;
+      if (i !== free) {
+        const moved = out[i];
+        for (let k = i; k > free; k--) out[k] = out[k - 1];
+        out[free] = moved;
+      }
+      free += 1;
+    }
+  }
   return out;
 }
 
