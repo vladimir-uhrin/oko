@@ -25,6 +25,34 @@ export const VESSEL_OVERLAY_MAX_COHORT = VESSEL_DEFAULT_LABEL_LIMIT;
  */
 export const VESSEL_CARD_FADE_DISTANCE_M = 300_000;
 
+/** Rezerva výrezu pre dopyt lodí: podiel rozmeru na každú stranu a najmenej stupňov. */
+export const VESSEL_VIEW_PAD = Object.freeze({ fraction: 0.15, minDeg: 0.05 });
+
+/**
+ * Rozšíri výrez kamery (stupne) pre dopyt lodí o rezervu. Cesium `computeViewRectangle` počíta
+ * na elipsoide vo výške 0 m — pri šikmom pohľade nad terénom (Bratislava ~180 m nad elipsoidom)
+ * spodok obrazovky z výrezu vypadne: úvodný pohľad mal južný okraj 48,1425°, Dunaj v centre
+ * tečie na 48,13–48,142°, takže lode na rieke pod kamerou sa vôbec nepýtali (2026-09-27,
+ * vlastník: „tie lode nevidno alebo sú mimo"). Cez antimeridián (west > east) sa nemení; ak by
+ * rezerva prekročila strop plochy, vráti pôvodný výrez. Pure.
+ * @param {{west:number,south:number,east:number,north:number}} rect stupne
+ * @param {{fraction?:number,minDeg?:number,maxAreaSqDeg?:number}} [opts]
+ * @returns {{west:number,south:number,east:number,north:number}}
+ */
+export function padVesselViewBounds(rect, { fraction = VESSEL_VIEW_PAD.fraction, minDeg = VESSEL_VIEW_PAD.minDeg, maxAreaSqDeg = Infinity } = {}) {
+  const { west, south, east, north } = rect || {};
+  if (![west, south, east, north].every(Number.isFinite) || !(west < east) || !(south < north)) return rect;
+  const padLon = Math.max(minDeg, (east - west) * fraction);
+  const padLat = Math.max(minDeg, (north - south) * fraction);
+  const out = {
+    west: Math.max(-180, west - padLon),
+    south: Math.max(-90, south - padLat),
+    east: Math.min(180, east + padLon),
+    north: Math.min(90, north + padLat),
+  };
+  return (out.east - out.west) * (out.north - out.south) > maxAreaSqDeg ? rect : out;
+}
+
 /**
  * Vek fixu, od ktorého ho karta priznáva textom ("(3 min)"). Pod ním je fix
  * považovaný za čerstvý a formát karty sa nemení.

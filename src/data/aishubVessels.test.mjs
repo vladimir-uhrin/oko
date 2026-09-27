@@ -85,7 +85,8 @@ test('aishubViewBbox: null nad výškou, null nad plochou (>90 sq°), zaokrúhle
   assert.equal(aishubViewBbox(fakeViewer({ heightM: 9_000_000 })), null, 'privysoko = null');
   assert.equal(aishubViewBbox(fakeViewer({ rect: null })), null, 'bez obdĺžnika = null');
   assert.equal(aishubViewBbox(fakeViewer({ rect: { west: 0, south: 0, east: 20, north: 20 } })), null, '400 sq° > strop = null');
-  assert.deepEqual(aishubViewBbox(fakeViewer({ rect: { west: 55.5, south: 25.8, east: 57.2, north: 27.2 } })), { west: 55.5, south: 25.8, east: 57.2, north: 27.2 });
+  // rezerva 15 % na každú stranu (2026-09-27: šikmý pohľad nad terénom odrezal Dunaj pod kamerou)
+  assert.deepEqual(aishubViewBbox(fakeViewer({ rect: { west: 55.5, south: 25.8, east: 57.2, north: 27.2 } })), { west: 55.25, south: 25.59, east: 57.46, north: 27.41 });
   assert.equal(sameBbox({ west: 1, south: 2, east: 3, north: 4 }, { west: 1, south: 2, east: 3, north: 4 }), true);
 
   // Tripwire: nad stropom plochy vrstva enable() NEzavolá fetch (žiadny ?bbox=).
@@ -111,7 +112,8 @@ test('load + dedup: aisstream riadky a MMSI, ktoré vidí živá vrstva, sa zaho
   await new Promise((r) => setImmediate(r));
 
   assert.equal(urls.length, 1);
-  assert.match(urls[0], /\/api\/aiscast\/vessels\?bbox=55\.5,25\.8,57\.2,27\.2$/, 'dopyt na viditeľný výrez');
+  // výrez 55,5–57,2 × 25,8–27,2 + rezerva 15 % (padVesselViewBounds, 2026-09-27)
+  assert.match(urls[0], /\/api\/aiscast\/vessels\?bbox=55\.25,25\.59,57\.46,27\.41$/, 'dopyt na viditeľný výrez s rezervou');
   const state = layer._getStateForTest();
   // 4 riadky − 1 aisstream (OWN FEED) − 1 živý (ALREADY LIVE) = 2
   assert.equal(state.rows, 2, 'aisstream aj živý MMSI vypadli');

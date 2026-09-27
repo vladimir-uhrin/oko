@@ -178,3 +178,23 @@ test('mmsiFlag: MID prefix bežného lodného MMSI určuje vlajkový štát', ()
   // Číslo namiesto reťazca sa toleruje (MMSI chodí z JSON aj ako number).
   assert.equal(mmsiFlag(267940000).iso2, 'SK');
 });
+
+test('padVesselViewBounds: rezerva výrezu pre dopyt lodí — Dunaj pod kamerou úvodného pohľadu už nevypadne (2026-09-27)', async () => {
+  const { padVesselViewBounds, VESSEL_VIEW_PAD } = await import('./vesselLabels.js');
+  assert.deepEqual(VESSEL_VIEW_PAD, { fraction: 0.15, minDeg: 0.05 });
+  // skutočný výrez úvodného pohľadu nad BA (computeViewRectangle, elipsoid 0 m): juh 48,1425
+  const home = padVesselViewBounds({ west: 15.2757, south: 48.1425, east: 19.0729, north: 49.3790 });
+  assert.ok(home.south < 48.13, `juh ${home.south} musí zahrnúť Dunaj v centre (48,13–48,142)`);
+  // malý výrez: aspoň 0,05° na stranu
+  const tiny = padVesselViewBounds({ west: 17.1, south: 48.1, east: 17.12, north: 48.12 });
+  assert.ok(Math.abs(tiny.west - 17.05) < 1e-9 && Math.abs(tiny.north - 48.17) < 1e-9);
+  // svetové okraje sa orežú
+  assert.deepEqual(padVesselViewBounds({ west: -179.9, south: -89.9, east: 179.9, north: 89.9 }), { west: -180, south: -90, east: 180, north: 90 });
+  // strop plochy: rezerva by ho prekročila → pôvodný výrez
+  const big = { west: 0, south: 0, east: 9, north: 9 };
+  assert.deepEqual(padVesselViewBounds(big, { maxAreaSqDeg: 90 }), big);
+  // cez antimeridián a nezmysly sa nemenia
+  const wrap = { west: 170, south: 0, east: -170, north: 10 };
+  assert.equal(padVesselViewBounds(wrap), wrap);
+  assert.equal(padVesselViewBounds(null), null);
+});

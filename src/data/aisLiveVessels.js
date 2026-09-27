@@ -43,6 +43,7 @@ import {
   vesselTypeCss,
   vesselOverlayCohortLimit,
   normalizeVesselType,
+  padVesselViewBounds,
   vesselPositionAge,
 } from './vesselLabels.js';
 
@@ -1251,8 +1252,14 @@ function vesselViewBounds() {
   try {
     const rect = camera.computeViewRectangle?.(Cesium.Ellipsoid.WGS84);
     if (!rect) return '';
-    return [rect.west, rect.south, rect.east, rect.north]
-      .map(v => Cesium.Math.toDegrees(v).toFixed(4)).join(',');
+    // rezerva: výrez z elipsoidu pri šikmom pohľade odreže spodok obrazovky (vesselLabels.js)
+    const padded = padVesselViewBounds({
+      west: Cesium.Math.toDegrees(rect.west),
+      south: Cesium.Math.toDegrees(rect.south),
+      east: Cesium.Math.toDegrees(rect.east),
+      north: Cesium.Math.toDegrees(rect.north),
+    });
+    return [padded.west, padded.south, padded.east, padded.north].map(v => v.toFixed(4)).join(',');
   } catch { return ''; }
 }
 

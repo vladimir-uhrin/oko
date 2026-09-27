@@ -27,6 +27,7 @@ import {
   mmsiFlag,
   navStatusLabel,
   normalizeVesselType,
+  padVesselViewBounds,
   vesselOverlayCohortLimit,
   vesselTypeCss,
 } from './vesselLabels.js';
@@ -106,11 +107,15 @@ export function aishubViewBbox(viewer, { maxCameraM = AISHUB_MAX_CAMERA_M, maxAr
   if (!camera || !(camera.positionCartographic?.height <= maxCameraM)) return null;
   const rect = camera.computeViewRectangle?.(Cesium.Ellipsoid.WGS84);
   if (!rect) return null;
-  const west = Cesium.Math.toDegrees(rect.west);
-  const east = Cesium.Math.toDegrees(rect.east);
-  const south = Cesium.Math.toDegrees(rect.south);
-  const north = Cesium.Math.toDegrees(rect.north);
-  if (![west, east, south, north].every(Number.isFinite) || !(west < east) || !(south < north)) return null;
+  const raw = {
+    west: Cesium.Math.toDegrees(rect.west),
+    east: Cesium.Math.toDegrees(rect.east),
+    south: Cesium.Math.toDegrees(rect.south),
+    north: Cesium.Math.toDegrees(rect.north),
+  };
+  if (![raw.west, raw.east, raw.south, raw.north].every(Number.isFinite) || !(raw.west < raw.east) || !(raw.south < raw.north)) return null;
+  // rezerva ako živé lode (výrez z elipsoidu odreže spodok šikmého pohľadu), v strope plochy
+  const { west, east, south, north } = padVesselViewBounds(raw, { maxAreaSqDeg });
   if ((east - west) * (north - south) > maxAreaSqDeg) return null;
   const round = (v) => Math.round(v * 100) / 100;
   return { west: round(west), south: round(south), east: round(east), north: round(north) };
