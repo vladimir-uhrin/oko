@@ -54,13 +54,15 @@ test('KARTA: legenda vpravo dole nad časovou osou (zdvih z --oko-ukr-tl-lift), 
   assert.match(css, /@media \(max-width: 1347px\) \{\s*\.oko-karta-legend \{ width: min\(48vw, 300px\); \}\s*\.oko-karta-legend-list \{ grid-template-columns: 1fr; \}/, 'pod 1348 px jeden stĺpec, inak by legenda siahala pod stredový dok (476 px)');
 });
 
-test('KARTA: rám schová súradnicový roh HUD-u a obmedzí ľavý pruh na koridor (roluje, nepreteká)', () => {
+test('KARTA: rám schová súradnicový roh HUD-u a ľavý pruh sa zmestí do koridoru (roluje, nepreteká)', () => {
   assert.match(css, /body\.oko-karta-frame #intel-hud \.hud-bottom-left \{ display: none; \}/);
   assert.doesNotMatch(css, /body\.oko-map-focus #intel-hud \.hud-bottom-left/, 'mimo rámu (režim mapy) súradnice ostávajú — mapScaleBar.test');
-  const lane = /body\.oko-karta-frame #left-panel-stack \{([^}]*)\}/.exec(css);
-  assert.ok(lane, 'pravidlo pruhu v ráme chýba');
+  // od 2026-09-27 platí všade (leftLane.test), nie len v ráme — a posuvník PRIJÍMA myš (inak otáčal mapu)
+  const lane = /#left-panel-stack\.oko-lane-with-rail \{([^}]*)\}/.exec(css);
+  assert.ok(lane, 'pravidlo pruhu chýba');
   assert.match(lane[1], /max-height: calc\(100vh - var\(--left-stack-safe-top, var\(--left-stack-top\)\) - var\(--left-stack-safe-bottom, 4vh\)\)/);
   assert.match(lane[1], /overflow-y: auto/);
+  assert.match(lane[1], /pointer-events: auto/);
   // čistá karta necháva mierku (súčasť hotovej mapy)
   assert.match(css, /body\.oko-karta-clean > \*:not\(#cesiumContainer\)[^{]*:not\(\.oko-scale\) \{ display: none !important; \}/);
 });
@@ -155,98 +157,4 @@ test('KARTA: legenda je spodná hranica pravej lišty (aj cez stred), bez miesta
   assert.match(ui, /bottomBound: obstacle\.dataset\?\.railBound === 'bottom',/);
   assert.match(ui, /const kartaTools = document\.querySelector\('#oko-karta-overlay\.is-visible \.oko-karta-tools'\);/, 'v ráme začína na úrovni tlačidiel KARTY');
   assert.match(ui, /this\._rightStackMutationObserver\.observe\(document\.documentElement, \{ attributes: true, attributeFilter: \['style'\] \}\);/, 'posun legendy (premenné na <html>) prepočíta lištu');
-});
-
-// ── Pravá lišta v ráme KARTA na vrch ľavého stĺpca (2026-09-26, vlastník ju zakrúžkoval a šípkou
-//    ukázal hore do ľavého stĺpca: „toto musí zmiznúť a dať tam, kde som dal šípku") ──────────
-function fakeEl(id) {
-  const props = new Map();
-  const classes = new Set();
-  const el = {
-    id, parentNode: null, children: [],
-    get nextSibling() { const p = this.parentNode; if (!p) return null; const i = p.children.indexOf(this); return p.children[i + 1] || null; },
-    get firstChild() { return this.children[0] || null; },
-    style: { setProperty: (k, v) => props.set(k, v), removeProperty: (k) => props.delete(k), getPropertyValue: (k) => props.get(k) || '' },
-    classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c), toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)) },
-    detach() { if (this.parentNode) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); this.parentNode = null; } },
-    insertBefore(child, ref) { child.detach(); const i = ref ? this.children.indexOf(ref) : -1; this.children.splice(i < 0 ? this.children.length : i, 0, child); child.parentNode = this; },
-    appendChild(child) { this.insertBefore(child, null); },
-    props,
-  };
-  return el;
-}
-
-test('KARTA: pravá lišta sa v ráme zakotví na vrch ľavého stĺpca a po odchode sa vráti na svoje miesto', async () => {
-  const { createKartaRailDock, DOCKED_INLINE } = await import('./kartaRailDock.js');
-  const bodyEl = fakeEl('body');
-  const app = fakeEl('app');
-  const lane = fakeEl('left-panel-stack');
-  const dataPanel = fakeEl('data-panel');
-  const rail = fakeEl('right-context-rail');
-  const after = fakeEl('after-rail');
-  lane.appendChild(dataPanel);
-  app.appendChild(lane); app.appendChild(rail); app.appendChild(after);
-  const byId = { 'left-panel-stack': lane, 'right-context-rail': rail };
-  const doc = { body: bodyEl, getElementById: (id) => byId[id] || null };
-  const dock = createKartaRailDock(doc);
-
-  assert.equal(dock.setDocked(true), true);
-  assert.equal(rail.parentNode, lane, 'lišta je v ľavom stĺpci');
-  assert.equal(lane.firstChild, rail, 'na vrchu, nad DÁTOVÝMI VRSTVAMI');
-  assert.ok(lane.classList.contains('oko-lane-with-rail'), 'pruh vie, že nesie lištu (posúvanie, podlaha výšky)');
-  assert.ok(rail.classList.contains('oko-rail-docked'));
-  assert.equal(rail.props.get('position'), 'relative', 'poloha inline (creditAttribution.test stráži CSS lišty)');
-  assert.equal(rail.props.get('top'), 'auto');
-  assert.equal(dock.setDocked(true), false, 'idempotentné');
-
-  assert.equal(dock.setDocked(false), true);
-  assert.equal(rail.parentNode, app);
-  assert.equal(rail.nextSibling, after, 'vrátená presne na pôvodné miesto');
-  assert.equal(rail.classList.contains('oko-rail-docked'), false);
-  assert.equal(lane.classList.contains('oko-lane-with-rail'), false);
-  for (const k of Object.keys(DOCKED_INLINE)) assert.equal(rail.props.has(k), false, `inline ${k} zmazané`);
-
-  bodyEl.classList.add('oko-mobile');
-  assert.equal(dock.setDocked(true), false, 'na mobile nič — panely nosí výsuv plášťa');
-  assert.equal(rail.parentNode, app);
-  assert.equal(createKartaRailDock({ body: bodyEl, getElementById: () => null }).setDocked(true), false, 'bez prvkov nič');
-});
-
-test('lišta vľavo VŽDY (vlastník 09-27: „presunúť na druhú stranu"): zapína ju main.js, rám KARTA ju už neriadi', () => {
-  const ov = readFileSync(new URL('./ukraineKartaOverlay.js', import.meta.url), 'utf8');
-  assert.ok(!ov.includes('railDock'), 'rám KARTA lištu neukotvuje ani neuvoľňuje');
-  assert.ok(main.includes('const railDock = createKartaRailDock(document);'), 'main.js ju ukotví hneď po StyleManageri');
-  assert.ok(main.includes("railDock.setDocked(!document.body.classList.contains('oko-mobile'))"), 'na mobile nie (obe strany skryté, panely vo výsuve)');
-  assert.ok(!main.includes('setPanelCollapsed: (id, collapsed)'), 'Zobrazenie sa nezbaľuje — ostáva, ako ho má používateľ');
-  assert.match(css, /#left-panel-stack\.oko-lane-with-rail \{ max-height: calc\(100vh/, 'pruh s lištou sa zmestí do koridoru a posúva sa');
-  assert.match(css, /#left-panel-stack\.oko-lane-with-rail > \[data-panel-id\]:not\(\.collapsed\) \{ min-height: min\(30vh, 200px\); \}/, 'rozbalený panel nespadne na 0 px');
-  assert.equal(prop('#left-panel-stack > .oko-rail-docked', 'order'), '0', 'nad #data-panel (order 10)');
-  assert.ok(!css.includes('body.oko-karta-frame #right-context-rail'), 'staré pravidlo vľavo od náhľadu je preč');
-  assert.ok(ui.includes("if (stack.classList.contains('oko-rail-docked')) {"), 'koridor pravej lišty sa pri zakotvení nepočíta');
-  assert.ok(ui.includes("stack.dataset.layoutMode = 'docked';"));
-});
-
-test('KARTA: zakotvenie zbalí rozbalené panely lišty bez uloženia a po odchode ich rozbalí', async () => {
-  const { createKartaRailDock } = await import('./kartaRailDock.js');
-  const app = fakeEl('app');
-  const lane = fakeEl('left-panel-stack');
-  const rail = fakeEl('right-context-rail');
-  const display = fakeEl('pp-toggles');
-  const cams = fakeEl('cctv-panel');
-  const ctx = fakeEl('global-context-panel');
-  cams.classList.add('collapsed');
-  for (const p of [display, cams, ctx]) rail.appendChild(p);
-  app.appendChild(lane); app.appendChild(rail);
-  const byId = { 'left-panel-stack': lane, 'right-context-rail': rail, 'pp-toggles': display, 'cctv-panel': cams, 'global-context-panel': ctx };
-  const calls = [];
-  const setPanelCollapsed = (id, collapsed) => { calls.push([id, collapsed]); byId[id].classList.toggle('collapsed', collapsed); };
-  const dock = createKartaRailDock({ body: fakeEl('body'), getElementById: (id) => byId[id] || null }, { setPanelCollapsed });
-
-  dock.setDocked(true);
-  assert.deepEqual(calls, [['pp-toggles', true], ['global-context-panel', true]], 'zbalí len rozbalené (Kamery už boli zbalené)');
-  // počas rámu používateľ Kontext rozbalí a znova zbalí — po odchode sa vráti stav pred KARTOU
-  calls.length = 0;
-  dock.setDocked(false);
-  assert.deepEqual(calls, [['pp-toggles', false], ['global-context-panel', false]]);
-  assert.ok(cams.classList.contains('collapsed'), 'Kamery ostanú zbalené');
 });

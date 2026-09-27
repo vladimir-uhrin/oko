@@ -56,7 +56,7 @@ import { createMideastControl } from './mideastControlLayer.js';
 import { createPortwatchCard } from './portwatchCard.js';
 import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
-import { createKartaRailDock } from './kartaRailDock.js';
+import { createLeftLane } from './leftLane.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
@@ -346,13 +346,28 @@ async function init() {
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
-    // Pravá lišta panelov (Zobrazenie, Kamery, Kontext) na vrchu ľavého stĺpca — vždy na počítači
-    // (vlastník 2026-09-27: „potrebujem to presunúť na druhú stranu"; predtým len v ráme KARTA).
-    // Na mobile sa nepresúva (obe strany sú skryté, panely nosí výsuv); pri prepnutí sa zosúladí.
-    const railDock = createKartaRailDock(document);
-    const syncRailDock = () => railDock.setDocked(!document.body.classList.contains('oko-mobile'));
-    syncRailDock();
-    new MutationObserver(syncRailDock).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    // Ľavý stĺpec v logickom poriadku (vlastník 2026-09-27; src/leftLane.js): Zobrazenie, Kamery
+    // a Kontext sú panely ľavého pruhu v zónach, naraz je otvorený jeden panel, celá hlavička
+    // otvára. Na mobile sa nepresúva (obe strany skryté, panely nosí výsuv); pri prepnutí sa zosúladí.
+    const leftLane = createLeftLane({
+      doc: document,
+      setPanelCollapsed: (id, collapsed, opts) => styleManager.setPanelCollapsed?.(id, collapsed, opts),
+      syncPanel: (panel) => styleManager._syncPanelCollapseButton?.(panel),
+      // engine meria cez vnútorný obal; Zobrazenie ho nemá (namerá 44 px) — jeho obsah ukáže scrollHeight
+      measurePanel: (panel) => Math.max(styleManager._measureLeftPanelNaturalHeight?.(panel) || 0, panel.scrollHeight || 0),
+    });
+    const syncLeftLane = () => {
+      if (document.body.classList.contains('oko-mobile')) { leftLane.undock(); return; }
+      if (leftLane.dock()) leftLane.enforceSingleOpen({ persist: true });
+    };
+    syncLeftLane();
+    leftLane.installHeaderToggle();
+    leftLane.installRevealOnOpen();
+    new MutationObserver(syncLeftLane).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    // Obnova odkazu môže otvoriť viac panelov naraz — po nej zase jeden.
+    window.addEventListener('gev:initial-share-restore-settled', () => { leftLane.enforceSingleOpen(); leftLane.fitOpen(); });
+    // panel otvorený už pri štarte (spravidla Dátové vrstvy) sa zmeria, keď má obsah
+    setTimeout(() => leftLane.fitOpen(), 1500);
     // Mobilný plášť (2026-09-14): na dotyku / úzkej obrazovke spodná lišta
     // a výsuvné panely namiesto bočných stĺpcov; širší výber prstom; bez
     // ambientných kariet na plátne (jedna vybraná karta naraz).
@@ -506,6 +521,7 @@ async function init() {
     syncVisibilitySuspension();
 
     window.__godsEyeView = {
+      leftLane,
       viewer,
       styleManager,
       tileset,

@@ -7537,19 +7537,6 @@ export class StyleManager {
         this._syncPanelCollapseButton(panel);
       }
     }
-    // Rám KARTA (2026-09-26): lišta je zakotvená na vrchu ľavého stĺpca (kartaRailDock.js) —
-    // polohu a výšku jej dáva ľavý pruh, nie tento koridor; zbalené panely sa neschovávajú.
-    if (stack.classList.contains('oko-rail-docked')) {
-      stack.classList.remove('layout-focus', 'layout-exclusive');
-      stack.style.removeProperty('--right-stack-safe-top');
-      stack.style.removeProperty('--right-stack-max-height');
-      for (const panel of panels) {
-        panel.removeAttribute('aria-hidden');
-        panel.style.removeProperty('--right-panel-allocated-height');
-      }
-      stack.dataset.layoutMode = 'docked';
-      return;
-    }
     const isMobile = window.matchMedia('(max-width: 720px)').matches;
     const hasExpandedPanel = panels.some((panel) => (
       !panel.classList.contains('collapsed') && (!isMobile || panel.id !== 'pp-toggles')
@@ -8158,7 +8145,8 @@ export class StyleManager {
    * @returns {void}
    */
   _syncPanelCollapseButton(panelEl) {
-    const isRightRail = ['pp-toggles', 'cctv-panel', 'global-context-panel'].includes(panelEl?.id);
+    // podľa miesta, nie mena: Zobrazenie, Kamery a Kontext sú od 2026-09-27 v ľavom pruhu (+/−)
+    const isRightRail = panelEl?.parentElement?.id === 'right-context-rail';
     const collapsed = panelEl.classList.contains('collapsed');
     panelEl.querySelectorAll('.panel-collapse-btn[data-collapse-target]').forEach((btn) => {
       const owner = btn.closest('[data-panel-id], #param-slider-panel');
@@ -8486,6 +8474,13 @@ export class StyleManager {
       const otherPanel = document.getElementById('location-bar');
       if (otherPanel && !otherPanel.classList.contains('dock-pinned')) {
         this.setPanelCollapsed('location-bar', true, { restore, persist, syncShare });
+      }
+    }
+    // Ľavý stĺpec je akordeón (2026-09-27, src/leftLane.js): otvorenie panela zbalí ostatné otvorené
+    // panely pruhu — jeden posuvník, žiadne panely pod okrajom.
+    if (!nextCollapsed && explicit && !restore && panelEl.parentElement === this._leftPanelStack) {
+      for (const other of this._leftPanelStack.querySelectorAll(':scope > [data-panel-id]:not(.collapsed)')) {
+        if (other !== panelEl) this.setPanelCollapsed(other.id, true, { explicit: true, persist, syncShare });
       }
     }
     panelEl.classList.toggle('collapsed', nextCollapsed);
@@ -11359,7 +11354,7 @@ export class StyleManager {
     if (!this._cctvPanel) return;
     const inner = this._cctvPanel.querySelector('.cctv-panel-inner');
     requestAnimationFrame(() => {
-      if (this._cctvPanel.parentElement?.id === 'right-context-rail') {
+      if (['right-context-rail', 'left-panel-stack'].includes(this._cctvPanel.parentElement?.id)) {
         this._cctvPanel.style.maxHeight = '';
         if (inner) inner.style.maxHeight = '';
         this._scheduleRightPanelLayout();

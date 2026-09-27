@@ -122,6 +122,7 @@ export const EN_STRINGS = Object.freeze({
   'lane.zone.conflicts': 'Conflicts',
   'lane.zone.energy': 'Energy',
   'lane.zone.tools': 'Tools',
+  'lane.zone.settings': 'Settings',
   // Mobile shell (2026-09-14): bottom app bar + sheet on touch / narrow screens.
   'mobile.appbar-aria': 'Sections',
   'mobile.layers': 'Layers',
@@ -2131,6 +2132,7 @@ export const SK_STRINGS = Object.freeze({
   'lane.zone.conflicts': 'Konflikty',
   'lane.zone.energy': 'Energia',
   'lane.zone.tools': 'Nástroje',
+  'lane.zone.settings': 'Nastavenia',
   // Mobilný plášť (2026-09-14): spodná lišta + výsuv na dotyku / úzkej obrazovke.
   'mobile.appbar-aria': 'Sekcie',
   'mobile.layers': 'Vrstvy',

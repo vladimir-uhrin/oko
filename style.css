@@ -6930,11 +6930,11 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   order: 10;
 }
 
-/* Declared in the lane markup but re-parented into the right rail at boot by
-   ui.js `_initRightPanelAdaptiveLayout`. The rule stays because
-   panelLaneCss.test.mjs reads the markup, not the live DOM. */
+/* Declared in the lane markup, re-parented into the right rail at boot by ui.js
+   `_initRightPanelAdaptiveLayout` and — since 2026-09-27 — moved back into the lane by
+   src/leftLane.js together with Context and Display. Its place is the TOOLS zone. */
 #left-panel-stack > #cctv-panel {
-  order: 11;
+  order: 43;
 }
 
 #left-panel-stack > #ukraine-panel { order: 21; }
@@ -12116,25 +12116,42 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
 .oko-karta-legend-scale { height: 16px; margin-top: 7px; }
 body.oko-karta-frame .oko-scale { z-index: 93; }
 body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
-/* Pravá lišta panelov (Zobrazenie, Kamery, Kontext) v ráme KARTA zakotvená na vrchu ľavého stĺpca
-   (2026-09-26, vlastník ju zakrúžkoval a šípkou ukázal hore do ľavého stĺpca; kartaRailDock.js ju
-   presúva a polohu mení inline). Dočasné do upratania panelov. */
-#left-panel-stack > .oko-rail-docked { order: 0; flex: 0 0 auto; }
-/* Od 2026-09-27 je lišta vľavo vždy: pruh s lištou sa zmestí do koridoru a posúva sa (inak by
-   rozbalené Zobrazenie vytlačilo panely pod okraj) a rozbalený panel pruhu nespadne na 0 px
-   (engine mu v plnom koridore nedal nič a hlavička ležala cez nadpis zóny). */
-#left-panel-stack.oko-lane-with-rail { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; scrollbar-width: thin; }
-#left-panel-stack.oko-lane-with-rail > [data-panel-id]:not(.collapsed) { min-height: min(30vh, 200px); }
-/* Zbalené pilulky vľavo ako ostatné v pruhu; rozbalený panel má strop a roluje sám (DÁTOVÉ VRSTVY ostanú). */
-#left-panel-stack > #right-context-rail.oko-rail-docked > [data-panel-id].collapsed { margin-left: 0; }
-#left-panel-stack > #right-context-rail.oko-rail-docked > [data-panel-id]:not(.collapsed) { max-height: min(46vh, 420px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-/* Pilier zbalených panelov (~440 px) sa pri nízkom okne (≤ ~900 px s otvorenou
-   osou) do koridoru pod titulkom nezmestí — namiesto pretečenia cez kredity sa
-   pruh v ráme obmedzí na koridor (engine ho píše do --left-stack-safe-*) a roluje. */
-body.oko-karta-frame #left-panel-stack { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; scrollbar-width: thin; }
-/* V nízkom koridore (otvorená os) dal engine rozbalenému panelu 0 px a jeho hlavička ležala cez nadpis
-   zóny („KONFLIKTY / DÁTOVÉ VRSTVY" cez seba, 2026-09-26). Pruh v ráme roluje — panel dostane aspoň toľko. */
-body.oko-karta-frame #left-panel-stack > [data-panel-id]:not(.collapsed) { min-height: min(30vh, 200px); }
+/* Ľavý stĺpec v logickom poriadku (2026-09-27, src/leftLane.js; vlastník: „neviem dobre otvoriť karty,
+   celý posuvník mi otáča mapu, treba v tom spraviť logický poriadok"). Zobrazenie, Kamery a Kontext
+   sú riadne panely pruhu: Kamery a Kontext v zóne NÁSTROJE, Zobrazenie v zóne NASTAVENIA na konci.
+   Naraz je otvorený jeden panel (ui.js setPanelCollapsed), takže sa stĺpec spravidla zmestí.
+   Keď nie (nízke okno, os v KARTE), posúva sa — a vtedy PRIJÍMA myš: pruh má inak
+   pointer-events: none (medzi panelmi sa chytá mapa) a jeho posuvník aj koliesko išli na mapu. */
+#left-panel-stack > #global-context-panel { order: 44; }
+#left-panel-stack > .lane-zone[data-lane-zone="settings"] { order: 50; }
+#left-panel-stack > #pp-toggles { order: 51; }
+#left-panel-stack.oko-lane-with-rail { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; pointer-events: auto; }
+/* Otvorený panel: v tesnom koridore (engine mu nemá čo prideliť) by spadol na pár px a hlavička by
+   ležala cez nadpis zóny. Dostane preto svoju prirodzenú výšku (--lane-open-natural, zapíše ju
+   leftLane.js fit()), najviac záber stĺpca mínus 56 px, aby vykukol ďalší riadok — a aspoň
+   min(30vh, 200px). Nezmeraný panel má len toto minimum. min-height prebije max-height enginu. */
+#left-panel-stack.oko-lane-with-rail > [data-panel-id]:not(.collapsed) {
+  min-height: min(var(--lane-open-natural, min(30vh, 200px)), max(min(30vh, 200px), calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh) - 56px)));
+}
+/* Šírky presunutých panelov ako v pruhu: zbalené = pásik (min-width pruhu), rozbalené 330 px. */
+#left-panel-stack > #pp-toggles.collapsed,
+#left-panel-stack > #cctv-panel.collapsed,
+#left-panel-stack > #global-context-panel.collapsed { width: auto; }
+#left-panel-stack > #pp-toggles.collapsed .pp-header-row { width: var(--left-collapsed-width); }
+#left-panel-stack > #pp-toggles:not(.collapsed),
+#left-panel-stack > #cctv-panel:not(.collapsed),
+#left-panel-stack > #global-context-panel:not(.collapsed) { width: 330px; }
+/* Jeden posuvník: vnútro otvoreného panela, nikdy mapa pod ním. */
+#left-panel-stack > #pp-toggles:not(.collapsed) { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+#left-panel-stack > #global-context-panel:not(.collapsed) .global-context-panel-inner { height: 100%; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+/* Celá hlavička panela otvára a zatvára (leftLane.js installHeaderToggle). */
+#left-panel-stack > [data-panel-id] .panel-header,
+#left-panel-stack > [data-panel-id] .pp-header-row { cursor: var(--cursor-pointer); }
+/* Kokpit skrýval pravú lištu celú — tieto panely ostávajú v kokpite skryté aj v pruhu. */
+body.cockpit-mode #left-panel-stack > #pp-toggles,
+body.cockpit-mode #left-panel-stack > #cctv-panel,
+body.cockpit-mode #left-panel-stack > #global-context-panel,
+body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="settings"] { display: none !important; }
 /* Pod 1348 px by dvojstĺpcová legenda vpravo dole siahala pod stredový dok — jeden stĺpec. */
 @media (max-width: 1347px) {
   .oko-karta-legend { width: min(48vw, 300px); }

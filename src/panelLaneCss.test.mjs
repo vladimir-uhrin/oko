@@ -114,12 +114,14 @@ test('every left-lane panel survives a shared link', () => {
 
 // ── Zóny v ľavom pruhu (2026-09-20) ──────────────────────────────────────────
 
-/** Zóny tak, ako ich číta človek. VRSTVY má jediný panel a nadpis zámerne nemá. */
+/** Zóny tak, ako ich číta človek. VRSTVY má jediný panel a nadpis zámerne nemá.
+ *  2026-09-27: Kamery prešli do NÁSTROJOV (leftLane.js; Kontext a Zobrazenie sú v markupe pravej
+ *  lišty, ich poradie stráži leftLane.test). */
 const LANE_ZONES = [
-  { zone: null, panels: ['data-panel', 'cctv-panel'] },
+  { zone: null, panels: ['data-panel'] },
   { zone: 'conflicts', panels: ['ukraine-panel', 'mideast-panel'] },
   { zone: 'energy', panels: ['gas-panel', 'oil-panel'] },
-  { zone: 'tools', panels: ['scene-panel', 'history-panel'] },
+  { zone: 'tools', panels: ['scene-panel', 'history-panel', 'cctv-panel'] },
 ];
 
 const laneOrders = () => new Map(
