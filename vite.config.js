@@ -10691,6 +10691,24 @@ function skTerrainProxy() {
 }
 
 /**
+ * Preloader víru (public/preloaderFlow.js, 2026-09-27) nemá v názve odtlačok ako súbory z balíka —
+ * Cloudflare ho drží hodiny v cache a nová verzia by sa u návštevníkov neprejavila. Odkaz v index.html
+ * dostane ?v=<odtlačok obsahu>; index.html sám sa necachuje (no-cache), takže zmena sa prejaví hneď.
+ */
+function preloaderCacheBustPlugin() {
+  return {
+    name: 'oko-preloader-cache-bust',
+    transformIndexHtml(html) {
+      let v = '0';
+      try {
+        v = createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'public', 'preloaderFlow.js'))).digest('hex').slice(0, 10);
+      } catch { /* bez súboru bez odtlačku */ }
+      return html.replace('src="/preloaderFlow.js"', () => `src="/preloaderFlow.js?v=${v}"`);
+    },
+  };
+}
+
+/**
  * Main Vite configuration factory.
  *
  * Loads .env files via Vite's loadEnv, registers Cesium + local proxy
@@ -10714,6 +10732,7 @@ export default defineConfig(({ mode }) => {
   };
   return {
     plugins: [
+      preloaderCacheBustPlugin(),
       noIndexPlugin(),
       originKeepAlivePlugin(),
       sharePlugin(),
