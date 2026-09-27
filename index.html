@@ -1180,8 +1180,9 @@
 
   <!-- Víchor textu okolo oka v preloaderi (public/preloaderFlow.js): samostatný malý súbor z public/,
        ktorý Vite NEspojí s balíkom appky (skripty v index.html by inak zlúčil do jedného 2,3 MB
-       súboru) — kreslí sa hneď, kým sa appka ešte sťahuje; oko ani texty preloadera nemení. -->
-  <script type="module" src="/preloaderFlow.js"></script>
+       súboru); async, lebo Vite dá balík appky do <head> a moduly bez async sa spúšťajú v poradí —
+       preloader by čakal na appku. Kreslí sa hneď, kým sa appka sťahuje; oko ani texty nemení. -->
+  <script type="module" async src="/preloaderFlow.js"></script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

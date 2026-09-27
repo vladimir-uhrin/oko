@@ -68,9 +68,11 @@ test('bez prehliadača / bez preloadera sa nič nespustí', () => {
 
 test('zapojenie: malý vstup PRED main.js, oko a texty preloadera bez zmeny, plátno pod obsahom', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const flow = html.indexOf('<script type="module" src="/preloaderFlow.js"></script>');
+  const flow = html.indexOf('<script type="module" async src="/preloaderFlow.js"></script>');
   const main = html.indexOf('<script type="module" src="/src/main.js"></script>');
   assert.ok(flow > 0 && main > flow, 'preloaderFlow.js sa načíta pred main.js');
+  // async: Vite presunie balík appky do <head>; bez async by sa preloader spustil až po ňom
+  assert.ok(html.includes('<script type="module" async src="/preloaderFlow.js"></script>'));
   for (const line of [
     '<span class="loader-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /><span class="brand-eye" aria-hidden="true"></span></span>',
     '<h2>OK<span class="title-accent">O</span></h2>',
