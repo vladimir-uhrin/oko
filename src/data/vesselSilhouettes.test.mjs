@@ -150,3 +150,71 @@ test('skutočná veľkosť: trup má na obrazovke svoju dĺžku v metroch, zďal
   assert.deepEqual(vesselSizeM('tug', 0, null), { lengthM: FAMILY_SIZE_M.tug[0], beamM: FAMILY_SIZE_M.tug[1] });
   assert.equal(vesselSizeM('cargo', 1200).lengthM, FAMILY_SIZE_M.cargo[0], '1200 m je chyba AIS');
 });
+
+test('smer lode na zobrazenie: heading → v pohybe COG → stojaca pri rieke proti prúdu → COG (vlastník: „začni a poctivo")', async () => {
+  const { vesselDisplayCourseDeg, MOORED_SPEED_KN } = await import('./vesselSilhouettes.js');
+  const river = () => 270;
+  assert.equal(MOORED_SPEED_KN, 0.5);
+  assert.equal(vesselDisplayCourseDeg({ heading: 268, course: 173, speedKn: 0 }, river), 268, 'gyro heading platí aj v stoji');
+  assert.equal(vesselDisplayCourseDeg({ heading: 511, course: 173, speedKn: 0 }, river), 270, '511 = nedostupné');
+  assert.equal(vesselDisplayCourseDeg({ heading: null, course: 355.6, speedKn: 0 }, river), 270, 'COG stojacej lode je šum');
+  assert.equal(vesselDisplayCourseDeg({ heading: null, course: 95, speedKn: 6 }, river), 95, 'v pohybe COG');
+  assert.equal(vesselDisplayCourseDeg({ heading: null, course: 355.6, speedKn: 0 }, () => null), 355.6, 'mimo rieky ako doteraz');
+  assert.equal(vesselDisplayCourseDeg({ heading: null, course: null, speedKn: 0 }, () => null), null);
+  const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
+  assert.match(live, /const direction = vesselDisplayCourseDeg\(\{[\s\S]*?\}, riverUpstreamBearing\);/);
+  assert.match(hub, /const course = aishubDisplayCourseDeg\(row\);/);
+  assert.match(live + hub, /void loadRiverIndex\(\);/);
+});
+
+test('rezerva hraníc pohľadu: pri uhle tesne na hranici loď nepreskakuje', async () => {
+  const { VIEW_HYSTERESIS_DEG } = await import('./vesselSilhouettes.js');
+  assert.equal(VIEW_HYSTERESIS_DEG, 3);
+  const at = (e, rel = 90) => ({ elevationDeg: e, relAzimuthDeg: rel });
+  // prvé zobrazenie: čisté hranice
+  assert.equal(vesselViewKind(at(54)).kind, 'oblique');
+  assert.equal(vesselViewKind(at(56)).kind, 'top');
+  // zhora sa drží do 52°, šikmo sa stane zhora až od 58°
+  assert.equal(vesselViewKind(at(53), SILHOUETTE_VIEW, 'top').kind, 'top');
+  assert.equal(vesselViewKind(at(51), SILHOUETTE_VIEW, 'top').kind, 'oblique');
+  assert.equal(vesselViewKind(at(57), SILHOUETTE_VIEW, 'oblique').kind, 'oblique');
+  assert.equal(vesselViewKind(at(58.5), SILHOUETTE_VIEW, 'oblique').kind, 'top');
+  // šikmo / z boku okolo 22°
+  assert.equal(vesselViewKind(at(20), SILHOUETTE_VIEW, 'oblique').kind, 'oblique');
+  assert.equal(vesselViewKind(at(18.5), SILHOUETTE_VIEW, 'oblique').kind, 'side');
+  assert.equal(vesselViewKind(at(24), SILHOUETTE_VIEW, 'side').kind, 'side');
+  assert.equal(vesselViewKind(at(25.5), SILHOUETTE_VIEW, 'side').kind, 'oblique');
+  // kužeľ spredu 25° ± 3°
+  assert.equal(vesselViewKind(at(10, 27), SILHOUETTE_VIEW, 'end').kind, 'end');
+  assert.equal(vesselViewKind(at(10, 23), SILHOUETTE_VIEW, 'side').kind, 'side');
+  assert.equal(vesselViewKind(at(10, 21), SILHOUETTE_VIEW, 'side').kind, 'end');
+});
+
+test('lode bok po boku: siluetu za bližšou loďou stlmiť, bližšia ostane navrchu; rohy zameriavača len pri hoveri', async () => {
+  const { overlappedSilhouettes, silhouetteImageSize, DIM_OPACITY, OVERLAP_SHARE } = await import('./vesselSilhouettes.js');
+  assert.equal(OVERLAP_SHARE, 0.35);
+  const near = { key: 'near', x: 100, y: 100, w: 80, h: 24, distance: 400 };
+  const far = { key: 'far', x: 110, y: 104, w: 80, h: 24, distance: 430 };
+  const apart = { key: 'apart', x: 400, y: 100, w: 80, h: 24, distance: 450 };
+  const graze = { key: 'graze', x: 170, y: 100, w: 80, h: 24, distance: 460 }; // prekryv 10 px z 80
+  const dim = overlappedSilhouettes([far, apart, near, graze]);
+  assert.deepEqual([...dim].sort(), ['far'], 'len loď z väčšej časti za bližšou');
+  assert.equal(overlappedSilhouettes([]).size, 0);
+  assert.deepEqual(silhouetteImageSize('passenger', 'side'), { width: FAMILY_LENGTH_PX.passenger + 16, height: 34 });
+  assert.deepEqual(silhouetteImageSize('tug', 'end'), { width: 30, height: 34 });
+  // stlmená silueta = krytie zapečené v obrázku (farbu billboardu drží fokus), vlastná cache
+  const faded = silhouetteSvg('passenger', 'side', '#ff7adf', { dim: true }).svg;
+  assert.match(faded, new RegExp(`opacity="${DIM_OPACITY}"`));
+  assert.notEqual(silhouetteDataUrl('passenger', 'side', '#ff7adf', { dim: true }), silhouetteDataUrl('passenger', 'side', '#ff7adf', {}));
+  assert.match(silhouetteSvg('tug', 'end', '#f7f0a3', { dim: true }).svg, /opacity=/);
+  // detekcia: silueta bez rohov, kým na ňu nejde myš alebo nie je sledovaná; popisok ostáva
+  const detection = readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
+  assert.match(detection, /const drawBracket = !obj\.quietBracket \|\| hovered \|\| isTracked;/);
+  assert.match(detection, /if \(drawBracket\) appendCornerBracket\(pathFor\(bracketPaths, color, bracketAlpha\), sx, sy, halfW, halfH\);/);
+  const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
+  assert.match(live, /quietBracket: Boolean\(state\.shipSilhouettes && record\.view\),/);
+  assert.match(hub, /object\.quietBracket = Boolean\(_silhouettes && entry\.view\);/);
+  assert.match(live, /if \(doRotations && camView && scene && camera\) refreshSilhouetteOverlap\(scene, camera\);/);
+});

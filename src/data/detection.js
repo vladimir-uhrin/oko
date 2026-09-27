@@ -1310,8 +1310,12 @@ function _drawOverlay(frame) {
     const bracketAlpha = hovered
       ? 1
       : detectionBracketAlpha(obj.type, keyholeAlpha, keyholeOutsideOpacity) * rangeAlpha;
+    // Loď so siluetou (šikmo / z boku / spredu, vesselSilhouettes.js, 2026-09-27) je sama čitateľná
+    // a rohy cez ňu robili z kotviacich lodí jednu škvrnu — rohy len pri hoveri alebo sledovaní;
+    // popisok (meno · rýchlosť) aj poradie calloutov ostávajú.
+    const drawBracket = !obj.quietBracket || hovered || isTracked;
     if (bracketAlpha > 0) {
-      appendCornerBracket(pathFor(bracketPaths, color, bracketAlpha), sx, sy, halfW, halfH);
+      if (drawBracket) appendCornerBracket(pathFor(bracketPaths, color, bracketAlpha), sx, sy, halfW, halfH);
       visibleCount++;
       if (obj.type === 'AIR') aircraftBracketSectors[detectionHorizontalSector(sx, width)]++;
       if (bracketAlpha >= 1) bracketOpacityCounts.full++;

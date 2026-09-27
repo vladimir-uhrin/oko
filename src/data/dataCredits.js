@@ -260,6 +260,13 @@ export const DATA_CREDITS = [
       '(ODbL 1.0) + Open Infrastructure Map',
   },
   {
+    key: 'danube-centerline',
+    html:
+      'Danube centreline (orienting moored vessels upstream): ' +
+      '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> ' +
+      '(ODbL 1.0, snapshot 2026-09-27)',
+  },
+  {
     key: 'sk-energy',
     html:
       'SK energy grid (400/220 kV + gas transmission): ' +

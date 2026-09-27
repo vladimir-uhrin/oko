@@ -27,6 +27,8 @@ import { normalizeVesselType } from './vesselLabels.js';
 export const SILHOUETTE_MAX_CAMERA_M = 40_000;
 /** Hranice pohľadu: nad TOP zhora, nad OBLIQUE šikmo, inak z boku; END = kužeľ okolo osi lode. */
 export const SILHOUETTE_VIEW = Object.freeze({ topDeg: 55, obliqueDeg: 22, endConeDeg: 25 });
+/** Rezerva okolo hraníc pohľadu (°) — proti preskakovaniu siluety na hranici pri pohybe kamery. */
+export const VIEW_HYSTERESIS_DEG = 3;
 
 const DARK = '#04121a';
 
@@ -99,14 +101,22 @@ export function vesselViewAngles(shipPos, cameraPos, courseDeg) {
  * @param {{elevationDeg: number, relAzimuthDeg: number}|null} angles
  * @returns {{kind: 'top'|'oblique'|'side'|'end', bowRight: boolean}}
  */
-export function vesselViewKind(angles, view = SILHOUETTE_VIEW) {
-  if (!angles || !(angles.elevationDeg < view.topDeg)) return { kind: 'top', bowRight: true };
+export function vesselViewKind(angles, view = SILHOUETTE_VIEW, prevKind = null) {
+  if (!angles) return { kind: 'top', bowRight: true };
+  // Rezerva okolo hraníc (VIEW_HYSTERESIS_DEG): pri uhle tesne na hranici loď pri pohybe kamery
+  // preskakovala medzi pohľadmi — doterajší pohľad sa drží, kým uhol hranicu zreteľne neprejde.
+  // Bez predošlého pohľadu (prvé zobrazenie) platia čisté hranice.
+  const h = prevKind == null ? 0 : VIEW_HYSTERESIS_DEG;
+  const e = angles.elevationDeg;
+  const topEdge = prevKind === 'top' ? view.topDeg - h : view.topDeg + h;
+  if (e >= topEdge) return { kind: 'top', bowRight: true };
   const rel = angles.relAzimuthDeg * Math.PI / 180;
   // kamera po pravoboku (rel 0–180°) vidí príď vpravo
   const bowRight = Math.sin(rel) >= 0;
-  const alongAxis = Math.abs(Math.sin(rel)) < Math.sin(view.endConeDeg * Math.PI / 180);
-  if (alongAxis) return { kind: 'end', bowRight };
-  return { kind: angles.elevationDeg >= view.obliqueDeg ? 'oblique' : 'side', bowRight };
+  const cone = view.endConeDeg + (prevKind === 'end' ? h : -h);
+  if (Math.abs(Math.sin(rel)) < Math.sin(cone * Math.PI / 180)) return { kind: 'end', bowRight };
+  const obliqueEdge = prevKind === 'oblique' || prevKind === 'top' ? view.obliqueDeg - h : view.obliqueDeg + h;
+  return { kind: e >= obliqueEdge ? 'oblique' : 'side', bowRight };
 }
 
 // ── Kreslenie ───────────────────────────────────────────────────────────────────────────────
@@ -282,6 +292,42 @@ export function vesselRealScale({ kind, family, lengthM, beamM, distanceM, fovyR
 
 const _cache = new Map();
 
+// ── Prekryv kotviacich lodí ─────────────────────────────────────────────────────────────────
+/** Krytie siluety, ktorú zakrýva bližšia loď (zapečené v obrázku — farbu billboardu drží fokus). */
+export const DIM_OPACITY = 0.42;
+/** Podiel plochy menšej siluety, od ktorého sa prekryv berie ako „loď za loďou". */
+export const OVERLAP_SHARE = 0.35;
+
+/** Rozmer obrázka siluety (px pri mierke 1). Pure. */
+export function silhouetteImageSize(family, kind) {
+  if (kind === 'end') return { width: 30, height: 34 };
+  return { width: (FAMILY_LENGTH_PX[family] ?? FAMILY_LENGTH_PX.generic) + 16, height: 34 };
+}
+
+/**
+ * Ktoré siluety stlmiť: bez hĺbkového testu sa vzdialenejšia loď môže nakresliť CEZ bližšiu a lode
+ * vyviazané bok po boku splývali do jednej škvrny (2026-09-27). Každú siluetu, ktorú z väčšej časti
+ * zakrýva BLIŽŠIA, stlmí — bližšia ostane čitateľná navrchu. Pure.
+ * @param {Array<{key: *, x: number, y: number, w: number, h: number, distance: number}>} items
+ *   obdĺžnik na obrazovke (x, y = ľavý horný roh) a vzdialenosť od kamery
+ * @returns {Set<*>} kľúče na stlmenie
+ */
+export function overlappedSilhouettes(items, share = OVERLAP_SHARE) {
+  const sorted = [...(items || [])].filter((i) => i && i.w > 0 && i.h > 0).sort((a, b) => a.distance - b.distance);
+  const dim = new Set();
+  for (let i = 0; i < sorted.length; i++) {
+    const far = sorted[i];
+    for (let j = 0; j < i; j++) {
+      const near = sorted[j];
+      const ix = Math.min(far.x + far.w, near.x + near.w) - Math.max(far.x, near.x);
+      const iy = Math.min(far.y + far.h, near.y + near.h) - Math.max(far.y, near.y);
+      if (ix <= 0 || iy <= 0) continue;
+      if ((ix * iy) / Math.min(far.w * far.h, near.w * near.h) >= share) { dim.add(far.key); break; }
+    }
+  }
+  return dim;
+}
+
 /**
  * SVG siluety. Pure (reťazec).
  * @param {string} family vesselFamily
@@ -290,13 +336,13 @@ const _cache = new Map();
  * @param {{bowRight?: boolean, moving?: boolean}} [o]
  * @returns {{svg: string, width: number, height: number}}
  */
-export function silhouetteSvg(family, kind, color, { bowRight = true, moving = false } = {}) {
+export function silhouetteSvg(family, kind, color, { bowRight = true, moving = false, dim = false } = {}) {
   const base = color;
   const pal = { base, light: mixHex(base, '#ffffff', 0.28), hull: mixHex(base, DARK, 0.45), deck: mixHex(base, DARK, 0.22) };
   if (kind === 'end') {
     const width = 30; const height = 34;
     const inner = endView(family, pal);
-    return { width, height, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="-15 -32 ${width} ${height}">${inner}</svg>` };
+    return { width, height, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="-15 -32 ${width} ${height}"><g${dim ? ` opacity="${DIM_OPACITY}"` : ''}>${inner}</g></svg>` };
   }
   const L = FAMILY_LENGTH_PX[family] ?? FAMILY_LENGTH_PX.generic;
   const width = L + 16; const height = 34;
@@ -311,7 +357,7 @@ export function silhouetteSvg(family, kind, color, { bowRight = true, moving = f
     inner += hullSide(L, deck, family === 'pleasure' ? 3 : 5, pal.hull);
   }
   inner += sideUpperworks(family, L, pal);
-  const flip = bowRight ? '' : ` transform="translate(${L - 8},0) scale(-1,1)"`;
+  const flip = (bowRight ? '' : ` transform="translate(${L - 8},0) scale(-1,1)"`) + (dim ? ` opacity="${DIM_OPACITY}"` : '');
   return {
     width,
     height,
@@ -324,7 +370,7 @@ export function silhouetteSvg(family, kind, color, { bowRight = true, moving = f
  * @returns {string}
  */
 export function silhouetteDataUrl(family, kind, color, opts = {}) {
-  const key = `${family}|${kind}|${color}|${opts.bowRight !== false ? 'r' : 'l'}|${opts.moving ? 'm' : 's'}`;
+  const key = `${family}|${kind}|${color}|${opts.bowRight !== false ? 'r' : 'l'}|${opts.moving ? 'm' : 's'}|${opts.dim ? 'd' : 'f'}`;
   const hit = _cache.get(key);
   if (hit) return hit;
   const { svg } = silhouetteSvg(family, kind, color, opts);
@@ -339,7 +385,29 @@ export function silhouetteDataUrl(family, kind, color, opts = {}) {
  * @param {{position?: object, height?: number}} cam poloha kamery (ECEF) a jej výška nad zemou
  * @param {number} courseDeg
  */
-export function vesselViewFor(shipPos, cam, courseDeg) {
+export function vesselViewFor(shipPos, cam, courseDeg, prevKind = null) {
   if (!cam?.position || !(cam.height < SILHOUETTE_MAX_CAMERA_M)) return { kind: 'top', bowRight: true };
-  return vesselViewKind(vesselViewAngles(shipPos, cam.position, courseDeg));
+  return vesselViewKind(vesselViewAngles(shipPos, cam.position, courseDeg), SILHOUETTE_VIEW, prevKind);
+}
+
+// ── Smer lode na zobrazenie ─────────────────────────────────────────────────────────────────
+/** Pod touto rýchlosťou (uzly) loď stojí a jej COG je šum. */
+export const MOORED_SPEED_KN = 0.5;
+const validDeg = (v) => Number.isFinite(v) && v >= 0 && v < 360;
+
+/**
+ * Smer, ktorým má ikona / silueta lode mieriť (2026-09-27, „začni a poctivo"): heading, ak ho loď
+ * hlási (gyro — presný aj v stoji; 511 = nedostupné); v pohybe COG; v stoji bez headingu smer
+ * PROTI PRÚDU z osi rieky (riečne lode sa vyväzujú prídou proti prúdu) — COG stojacej lode je šum
+ * (vedľa seba 355°, 287°, 193°); inak COG ako doteraz. Pure (riverBearing dodá volajúci).
+ * @param {{heading?: number, course?: number, speedKn?: number, lat?: number, lon?: number}} v
+ * @param {(lat: number, lon: number) => number|null} [riverBearing]
+ * @returns {number|null}
+ */
+export function vesselDisplayCourseDeg({ heading, course, speedKn, lat, lon } = {}, riverBearing = null) {
+  if (validDeg(heading)) return heading;
+  if (Number(speedKn) >= MOORED_SPEED_KN && validDeg(course)) return course;
+  const up = typeof riverBearing === 'function' ? riverBearing(lat, lon) : null;
+  if (validDeg(up)) return up;
+  return validDeg(course) ? course : null;
 }

@@ -74,7 +74,8 @@ import {
 } from './focusDeemphasis.js';
 import { requestWorldFocus } from '../worldFocus.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
-import { SILHOUETTE_MAX_CAMERA_M, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
+import { SILHOUETTE_MAX_CAMERA_M, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
+import { loadRiverIndex, onRiverIndexReady, riverUpstreamBearing } from './riverDirection.js';
 
 const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
 
@@ -483,6 +484,15 @@ const aisLiveVesselsLayer = {
     ensureCollections(activeViewer);
     installInteraction(activeViewer);
     setVisible(true);
+    // os Dunaja pre natočenie stojacich lodí (riverDirection.js) — po načítaní prepočítať smer
+    void loadRiverIndex();
+    if (!state.riverReadyOff) {
+      state.riverReadyOff = onRiverIndexReady(() => {
+        _lastCamPoseSig = null; // vynúti prepočet natočenia a pohľadov v najbližšom prechode
+        state.lastVisibilityUpdate = 0;
+        state.viewer?.scene?.requestRender?.();
+      });
+    }
     // Height-datum fix: warm the geoid grid once per layer-enable, never
     // blocking a poll. The first refresh may land pre-resolve (N = 0), and
     // the next is up to 60 s out — so re-floor in place on resolve. A load
@@ -821,6 +831,8 @@ const aisLiveVesselsLayer = {
           ? normalizeVesselType(record.type).toUpperCase().slice(0, 14) || undefined
           : undefined,
         metric: isLastKnownVessel(record) ? 'LAST KNOWN' : formatVesselSpeedKnots(record.speed),
+        // silueta (šikmo / z boku / spredu) bez rohov zameriavača, kým na ňu nejde myš (detection.js)
+        quietBracket: Boolean(state.shipSilhouettes && record.view),
       };
     };
     // Loď pod kurzorom a vybraná loď idú VŽDY (2026-09-12, „zameriavače ako
@@ -1606,7 +1618,15 @@ export function vesselTierScale(tier) {
  * @returns {number} Course in degrees (0 when unknown).
  */
 function vesselCourseDeg(record) {
-  const direction = record.heading ?? record.course;
+  // heading (aj v stoji) → v pohybe COG → stojaca loď pri rieke proti prúdu → COG → sever
+  // (vesselDisplayCourseDeg; heading 511 = nedostupné už nenatočí trup o 151°)
+  const direction = vesselDisplayCourseDeg({
+    heading: record.heading,
+    course: record.course,
+    speedKn: record.speed,
+    lat: record.lat,
+    lon: record.lon,
+  }, riverUpstreamBearing);
   return Number.isFinite(direction) ? direction : 0;
 }
 
@@ -1625,9 +1645,38 @@ function shipIcon(record, selected) {
     return silhouetteDataUrl(vesselFamily(record.type), view.kind, cssColor, {
       bowRight: view.bowRight,
       moving: Number(record.speed) > 0.5,
+      dim: record.dimmed === true,
     });
   }
   return shipIconDataUrl(cssColor, selected);
+}
+
+const _scratchSilScreen = new Cesium.Cartesian2();
+
+/**
+ * Lode vyviazané bok po boku: siluetu, ktorú z väčšej časti zakrýva BLIŽŠIA loď, stlmí (obrázok
+ * s nižším krytím — farbu billboardu drží fokus). Bez hĺbkového testu by sa vzdialenejšia mohla
+ * nakresliť cez bližšiu a obe splývali do škvrny (2026-09-27). Beží pri pohybe kamery.
+ */
+function refreshSilhouetteOverlap(scene, camera) {
+  const items = [];
+  for (const record of state.vesselRecords) {
+    const bb = record.billboard;
+    if (!record.view || !bb?.show) continue;
+    const screen = Cesium.SceneTransforms.worldToWindowCoordinates(scene, record.position, _scratchSilScreen);
+    if (!screen) continue;
+    const size = silhouetteImageSize(vesselFamily(record.type), record.view.kind);
+    const w = size.width * bb.scale;
+    const h = size.height * bb.scale;
+    items.push({ key: record, x: screen.x - w / 2, y: screen.y - h, w, h, distance: Cesium.Cartesian3.distance(camera.positionWC, record.position) });
+  }
+  const dim = overlappedSilhouettes(items);
+  for (const record of state.vesselRecords) {
+    const next = Boolean(record.view) && dim.has(record) && record !== state.selectedRecord;
+    if (Boolean(record.dimmed) === next) continue;
+    record.dimmed = next;
+    if (record.billboard) record.billboard.image = shipIcon(record, record === state.selectedRecord);
+  }
 }
 
 /**
@@ -1638,11 +1687,12 @@ function shipIcon(record, selected) {
  */
 function applyVesselView(record, camView) {
   const view = state.shipSilhouettes && camView
-    ? vesselViewFor(record.position, camView, vesselCourseDeg(record))
+    ? vesselViewFor(record.position, camView, vesselCourseDeg(record), record.viewKind ?? null)
     : null;
   const top = !view || view.kind === 'top';
   const prev = record.view;
   record.view = top ? null : view;
+  record.viewKind = view ? view.kind : null; // rezerva hraníc pohľadu (vesselViewKind)
   // Skutočná veľkosť (2026-09-27: „čo najrealistickejšie pri scrolovaní"): trup má na obrazovke
   // svoju dĺžku v metroch pri danej vzdialenosti, zďaleka aspoň VESSEL_HULL_PX.min. Nad 40 km
   // platia doterajšie stupne ikon (airIconLod), rovnako pri ?lode=klasik.
@@ -2066,6 +2116,7 @@ function updateVisibility(force = false) {
         if (region) region.horizonEligible++;
       }
     }
+    if (doRotations && camView && scene && camera) refreshSilhouetteOverlap(scene, camera);
     updateClusteredLabels(labelCandidates);
   }
   if (focusPass && scene && camera) {

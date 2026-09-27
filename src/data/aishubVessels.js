@@ -32,7 +32,13 @@ import {
   vesselTypeCss,
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
-import { SILHOUETTE_MAX_CAMERA_M, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
+import { SILHOUETTE_MAX_CAMERA_M, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
+import { loadRiverIndex, onRiverIndexReady, riverUpstreamBearing } from './riverDirection.js';
+
+/** Smer trupu na zobrazenie: heading → v pohybe cog → stojaca pri rieke proti prúdu → cog (vesselSilhouettes). */
+function aishubDisplayCourseDeg(row) {
+  return vesselDisplayCourseDeg({ heading: row?.heading, course: row?.cog, speedKn: row?.sog, lat: row?.lat, lon: row?.lon }, riverUpstreamBearing);
+}
 import { airIconTier } from './airIconLod.js';
 import { isMetric } from '../units.js';
 import { cameraPoseSignature, screenProjectedRotation } from './iconOrientation.js';
@@ -286,6 +292,7 @@ export function createAishubVesselsLayer({
   let _requestToken = 0;
   let _labelCount = 0;
   let _selectedKey = null;
+  let _riverReadyOff = null;
   // siluety podľa uhla pohľadu (vesselSilhouettes.js; `?lode=klasik` = len ikony zhora)
   const _silhouettes = shipSilhouettesEnabled();
   const _scratchObjects = new Map();
@@ -318,8 +325,9 @@ export function createAishubVesselsLayer({
       const row = rows[i];
       const id = { mmsi: String(row.mmsi || ''), aishub: true, name: row.name || '', key: String(row.mmsi) };
       const position = Cesium.Cartesian3.fromDegrees(row.lon, row.lat, AISHUB_POINT_HEIGHT_M);
-      const course = aishubCourseDeg(row);
-      // Natočenie do smeru plavby, ako pri živých lodiach; bez smeru na sever.
+      // Natočenie do smeru plavby, ako pri živých lodiach (stojaca loď pri rieke proti prúdu);
+      // bez smeru na sever. Hlásený kurz (aishubCourseDeg) ostáva v kartičke a súhrne.
+      const course = aishubDisplayCourseDeg(row);
       const rotation = course === null ? 0 : (screenProjectedRotation(scene, position, course, 0) ?? 0);
       const billboard = _collection.add({
         id,
@@ -352,6 +360,7 @@ export function createAishubVesselsLayer({
       return silhouetteDataUrl(vesselFamily(entry.row.type), entry.view.kind, selected ? '#ffffff' : color, {
         bowRight: entry.view.bowRight,
         moving: Number(entry.row.sog) > 0.5,
+        dim: entry.dimmed === true && !selected,
       });
     }
     return shipIconDataUrl(color, selected);
@@ -377,7 +386,8 @@ export function createAishubVesselsLayer({
     const realSize = camView && camView.height < SILHOUETTE_MAX_CAMERA_M;
     for (const [key, entry] of _byId.entries()) {
       // siluety podľa uhla pohľadu (vesselSilhouettes.js); zhora ostáva natočená ikona
-      const view = camView ? vesselViewFor(entry.billboard.position, camView, entry.course ?? 0) : null;
+      const view = camView ? vesselViewFor(entry.billboard.position, camView, entry.course ?? 0, entry.viewKind ?? null) : null;
+      entry.viewKind = view ? view.kind : null; // rezerva hraníc pohľadu
       const next = view && view.kind !== 'top' ? view : null;
       // skutočná veľkosť trupu pri danej vzdialenosti (AISHub dĺžku nenesie → typická pre rodinu)
       entry.realScale = realSize
@@ -400,6 +410,26 @@ export function createAishubVesselsLayer({
       if (next || entry.course === null) continue;
       const rot = screenProjectedRotation(scene, entry.billboard.position, entry.course, entry.billboard.rotation);
       if (rot !== null && Math.abs(rot - entry.billboard.rotation) > 0.002) entry.billboard.rotation = rot;
+    }
+    // lode vyviazané bok po boku: siluetu za bližšou loďou stlmiť (ako živé lode)
+    if (camView && realSize) {
+      const items = [];
+      for (const entry of _byId.values()) {
+        if (!entry.view) continue;
+        const screen = Cesium.SceneTransforms.worldToWindowCoordinates(scene, entry.billboard.position);
+        if (!screen) continue;
+        const size = silhouetteImageSize(vesselFamily(entry.row.type), entry.view.kind);
+        const w = size.width * entry.billboard.scale;
+        const h = size.height * entry.billboard.scale;
+        items.push({ key: entry, x: screen.x - w / 2, y: screen.y - h, w, h, distance: Cesium.Cartesian3.distance(camView.position, entry.billboard.position) });
+      }
+      const dim = overlappedSilhouettes(items);
+      for (const [key, entry] of _byId.entries()) {
+        const next = Boolean(entry.view) && dim.has(entry) && key !== _selectedKey;
+        if (Boolean(entry.dimmed) === next) continue;
+        entry.dimmed = next;
+        entry.billboard.image = iconFor(entry, key === _selectedKey);
+      }
     }
   }
 
@@ -585,6 +615,15 @@ export function createAishubVesselsLayer({
     async enable() {
       _enabled = true;
       if (_collection) _collection.show = true;
+      // os Dunaja pre stojace lode (riverDirection.js) — po načítaní prepočítať smer trupov
+      void loadRiverIndex();
+      if (!_riverReadyOff) {
+        _riverReadyOff = onRiverIndexReady(() => {
+          for (const entry of _byId.values()) entry.course = aishubDisplayCourseDeg(entry.row);
+          _poseSig = null;
+          _viewer?.scene?.requestRender?.();
+        });
+      }
       registerPickOwner(AISHUB_LAYER_ID, (pickedId) => layer.hasContact(pickedId));
       if (!_moveRemove && _viewer?.camera?.moveEnd?.addEventListener) {
         _moveRemove = _viewer.camera.moveEnd.addEventListener(onMoveEnd);
@@ -730,6 +769,8 @@ export function createAishubVesselsLayer({
         object.id = aishubDisplayName(row);
         object.klass = row.type ? normalizeVesselType(row.type).toUpperCase().slice(0, 14) || undefined : undefined;
         object.metric = delayed;
+        // silueta bez rohov zameriavača, kým na ňu nejde myš (detection.js, ako živé lode)
+        object.quietBracket = Boolean(_silhouettes && entry.view);
         return object;
       };
       const result = [];
