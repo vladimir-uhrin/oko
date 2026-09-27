@@ -23,13 +23,6 @@
 
 import { normalizeVesselType } from './vesselLabels.js';
 
-/**
- * Mierka siluety podľa vzdialenosti kamery (Cesium NearFarScalar): zblízka väčšia — skutočná 110 m
- * loď na 250 m zaberá tretinu obrazovky, 70 px ikona pôsobila ako hračka; z diaľky menšia.
- */
-// 09-27 vlastník: „nie sú trochu veľké?" — 1,9 → 1,2 blízko, 0,6 → 0,5 ďaleko (~o tretinu menšie)
-export const SILHOUETTE_SCALE_BY_DISTANCE = Object.freeze({ near: 250, nearScale: 1.2, far: 8000, farScale: 0.5 });
-
 /** Nad touto výškou kamery (m) sú lode drobné a z diaľky — vždy ikona zhora, bez výpočtu. */
 export const SILHOUETTE_MAX_CAMERA_M = 40_000;
 /** Hranice pohľadu: nad TOP zhora, nad OBLIQUE šikmo, inak z boku; END = kužeľ okolo osi lode. */
@@ -217,6 +210,61 @@ function endView(family, pal) {
   if (family === 'tug' || family === 'cargo' || family === 'tanker') out += windows(-3, 3, -14.5, 2);
   if (family === 'fishing') out += line(0, -11, 0, -24, base, 1);
   return out;
+}
+
+// ── Skutočná veľkosť ────────────────────────────────────────────────────────────────────────
+/**
+ * Typická dĺžka a šírka trupu (m) pre rodinu, keď AIS dĺžku nehlási (AISHub ju nenesie):
+ * výletná loď na Dunaji ~110 × 11,4 m, motorová nákladná ~100 × 11 m, remorkér / tlačný čln ~25 × 8 m.
+ */
+export const FAMILY_SIZE_M = Object.freeze({
+  passenger: [110, 11.4], cargo: [100, 11], tanker: [100, 11], generic: [60, 9],
+  tug: [25, 8], fishing: [20, 6], pleasure: [12, 4],
+});
+/** Dĺžka trupu v obrázku (px): ikona zhora 28 px (−14…14), silueta L, čelný pohľad šírka trupu. */
+const TOP_HULL_PX = 28;
+const END_HULL_PX = { pleasure: 12, fishing: 12, tug: 16 };
+/** Najmenšia dĺžka trupu na obrazovke (px), aby loď zďaleka nezmizla; najväčšia (tesne pri lodi). */
+export const VESSEL_HULL_PX = Object.freeze({ min: 14, max: 900 });
+
+/**
+ * Skutočná dĺžka / šírka lode (m): AIS, ak je rozumná (5–400 m), inak typická pre rodinu. Pure.
+ * @returns {{lengthM: number, beamM: number}}
+ */
+export function vesselSizeM(family, lengthM, beamM) {
+  const [defL, defB] = FAMILY_SIZE_M[family] || FAMILY_SIZE_M.generic;
+  const L = Number.isFinite(lengthM) && lengthM >= 5 && lengthM <= 400 ? lengthM : defL;
+  // bez šírky z AIS: typická šírka rodiny v pomere k dĺžke (dlhší trup = širší)
+  const B = Number.isFinite(beamM) && beamM >= 2 && beamM <= 70 ? beamM : Math.max(2, Math.min(70, defB * (L / defL)));
+  return { lengthM: L, beamM: B };
+}
+
+/**
+ * Mierka billboardu lode tak, aby trup mal na obrazovke svoju skutočnú dĺžku (2026-09-27, vlastník:
+ * „veľké, treba im upraviť aj veľkosť pri scrolovaní, aby to bolo čo najrealistickejšie"):
+ * px na meter vo vzdialenosti lode = výška plátna / (2 · d · tan(fovy/2)). Zďaleka aspoň
+ * VESSEL_HULL_PX.min, aby loď nezmizla. Pure.
+ * @param {object} o
+ * @param {'top'|'oblique'|'side'|'end'} o.kind
+ * @param {string} o.family
+ * @param {number} [o.lengthM] AIS dĺžka
+ * @param {number} [o.beamM] AIS šírka
+ * @param {number} o.distanceM vzdialenosť kamery od lode
+ * @param {number} o.fovyRad zvislé zorné pole kamery
+ * @param {number} o.viewportHeightPx výška plátna (CSS px)
+ * @returns {number|null} násobok veľkosti obrázka; null = nedá sa spočítať
+ */
+export function vesselRealScale({ kind, family, lengthM, beamM, distanceM, fovyRad, viewportHeightPx }) {
+  if (!(distanceM > 0) || !(fovyRad > 0) || !(viewportHeightPx > 0)) return null;
+  const pxPerM = viewportHeightPx / (2 * distanceM * Math.tan(fovyRad / 2));
+  const size = vesselSizeM(family, lengthM, beamM);
+  const clampPx = (px, min) => Math.max(min, Math.min(VESSEL_HULL_PX.max, px));
+  if (kind === 'end') {
+    const imagePx = END_HULL_PX[family] ?? 20;
+    return clampPx(size.beamM * pxPerM, VESSEL_HULL_PX.min * 0.5) / imagePx;
+  }
+  const imagePx = kind === 'top' ? TOP_HULL_PX : (FAMILY_LENGTH_PX[family] ?? FAMILY_LENGTH_PX.generic);
+  return clampPx(size.lengthM * pxPerM, VESSEL_HULL_PX.min) / imagePx;
 }
 
 const _cache = new Map();

@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import {
   FAMILY_LENGTH_PX,
   SILHOUETTE_MAX_CAMERA_M,
-  SILHOUETTE_SCALE_BY_DISTANCE,
+  FAMILY_SIZE_M,
+  VESSEL_HULL_PX,
   SILHOUETTE_VIEW,
   shipSilhouettesEnabled,
   silhouetteDataUrl,
@@ -13,6 +14,8 @@ import {
   vesselFamily,
   vesselViewAngles,
   vesselViewFor,
+  vesselRealScale,
+  vesselSizeM,
   vesselViewKind,
 } from './vesselSilhouettes.js';
 
@@ -98,14 +101,44 @@ test('návrat ku klasickým ikonám: ?lode=klasik alebo localStorage oko:lode=kl
 });
 
 test('vrstvy: živé AIS aj AISHub kreslia siluety cez ten istý modul, silueta stojí na hladine', () => {
-  assert.deepEqual(SILHOUETTE_SCALE_BY_DISTANCE, { near: 250, nearScale: 1.2, far: 8000, farScale: 0.5 });
   const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
   const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
   assert.match(live, /shipSilhouettes: shipSilhouettesEnabled\(\),/);
+  assert.match(live, /if \(Number\.isFinite\(record\.realScale\)\) return record\.realScale;/, 'skutočná veľkosť v jednom mieste (shipScale)');
+  assert.match(hub, /return Number\.isFinite\(entry\.realScale\) \? entry\.realScale : hullScaleFor\(entry\.row\.sog\);/);
+  assert.doesNotMatch(live + hub, /scaleByDistance/, 'veľkosť dáva skutočná dĺžka, nie krivka podľa vzdialenosti');
   assert.match(live, /if \(state\.shipSilhouettes && view && view\.kind !== 'top'\) \{\s*return silhouetteDataUrl\(vesselFamily\(record\.type\)/);
   assert.match(live, /bb\.verticalOrigin = top \? Cesium\.VerticalOrigin\.CENTER : Cesium\.VerticalOrigin\.BOTTOM;/);
-  assert.match(live, /if \(visible && doRotations && scene && applyVesselView\(record, camView\)\) \{/, 'natočenie len pre ikonu zhora');
+  assert.match(live, /if \(visible && scene && \(doRotations \|\| record\.realScale === undefined\) && applyVesselView\(record, camView\)\) \{/, 'natočenie len pre ikonu zhora; nová loď dostane veľkosť hneď');
   assert.match(hub, /const _silhouettes = shipSilhouettesEnabled\(\);/);
   assert.match(hub, /entry\.billboard\.verticalOrigin = next \? Cesium\.VerticalOrigin\.BOTTOM : Cesium\.VerticalOrigin\.CENTER;/);
   assert.match(hub, /entry\.billboard\.image = iconFor\(entry, selected\);/, 'výber lode kreslí tú istú siluetu');
+});
+
+test('skutočná veľkosť: trup má na obrazovke svoju dĺžku v metroch, zďaleka aspoň 14 px (vlastník: „čo najrealistickejšie pri scrolovaní")', () => {
+  const near = (a, b, eps = 1e-3) => Math.abs(a - b) <= eps;
+  const cam = { fovyRad: Math.PI / 3, viewportHeightPx: 860 };
+  const pxPerM = 860 / (2 * 1000 * Math.tan(Math.PI / 6)); // ~0,745 px/m na 1 km
+  // výletná loď 110 m z boku na 1 km: ~82 px trupu; obrázok má trup 112 px
+  const side = vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 1000, ...cam });
+  assert.ok(near(side, (110 * pxPerM) / 112));
+  // dvakrát ďalej = polovičná (bez stropu a podlahy)
+  assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 2000, ...cam }), side / 2));
+  // AIS dĺžka má prednosť pred typickou
+  assert.ok(vesselRealScale({ kind: 'side', family: 'passenger', lengthM: 135, distanceM: 1000, ...cam }) > side);
+  // zďaleka podlaha 14 px (loď nezmizne), zblízka strop
+  assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 60_000, ...cam }), VESSEL_HULL_PX.min / 112));
+  assert.ok(near(vesselRealScale({ kind: 'side', family: 'passenger', distanceM: 5, ...cam }), VESSEL_HULL_PX.max / 112));
+  // ikona zhora: trup 28 px v obrázku; remorkér menší ako výletná loď
+  assert.ok(near(vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 1000, ...cam }), (110 * pxPerM) / 28));
+  assert.ok(vesselRealScale({ kind: 'top', family: 'tug', distanceM: 1000, ...cam }) < vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 1000, ...cam }));
+  // spredu: šírka trupu
+  assert.ok(near(vesselRealScale({ kind: 'end', family: 'passenger', distanceM: 1000, ...cam }), (11.4 * pxPerM) / 20));
+  // nezmysly = null (vrstva nechá doterajšiu veľkosť)
+  assert.equal(vesselRealScale({ kind: 'side', family: 'cargo', distanceM: 0, ...cam }), null);
+  assert.equal(vesselRealScale({ kind: 'side', family: 'cargo', distanceM: 100, fovyRad: 0, viewportHeightPx: 860 }), null);
+  // rozmery: AIS v rozumnom rozsahu, inak typické pre rodinu
+  assert.deepEqual(vesselSizeM('tug', 30, 9), { lengthM: 30, beamM: 9 });
+  assert.deepEqual(vesselSizeM('tug', 0, null), { lengthM: FAMILY_SIZE_M.tug[0], beamM: FAMILY_SIZE_M.tug[1] });
+  assert.equal(vesselSizeM('cargo', 1200).lengthM, FAMILY_SIZE_M.cargo[0], '1200 m je chyba AIS');
 });

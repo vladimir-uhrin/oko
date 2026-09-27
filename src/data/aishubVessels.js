@@ -32,10 +32,7 @@ import {
   vesselTypeCss,
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
-import { SILHOUETTE_SCALE_BY_DISTANCE as SIL_SBD, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselViewFor } from './vesselSilhouettes.js';
-
-/** Siluety zmenšuje vzdialenosť (ako živé lode). */
-const AISHUB_SILHOUETTE_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(SIL_SBD.near, SIL_SBD.nearScale, SIL_SBD.far, SIL_SBD.farScale);
+import { SILHOUETTE_MAX_CAMERA_M, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
 import { airIconTier } from './airIconLod.js';
 import { isMetric } from '../units.js';
 import { cameraPoseSignature, screenProjectedRotation } from './iconOrientation.js';
@@ -343,6 +340,11 @@ export function createAishubVesselsLayer({
     _poseSig = null; // vynúť prepočet natočenia v najbližšom preRender
   }
 
+  /** Mierka trupu: skutočná veľkosť (updateRotations, kamera pod 40 km), inak doterajšia podľa rýchlosti. */
+  function entryScale(entry) {
+    return Number.isFinite(entry.realScale) ? entry.realScale : hullScaleFor(entry.row.sog);
+  }
+
   /** Obrázok trupu: silueta pre pohľad šikmo/z boku/spredu, inak ikona zhora (ako živé lode). */
   function iconFor(entry, selected) {
     const color = vesselTypeCss(entry.row.type);
@@ -365,16 +367,33 @@ export function createAishubVesselsLayer({
     if (!scene) return;
     const camera = _viewer?.camera;
     const camView = _silhouettes && camera?.positionWC
-      ? { position: camera.positionWC, height: camera.positionCartographic?.height }
+      ? {
+        position: camera.positionWC,
+        height: camera.positionCartographic?.height,
+        fovy: camera.frustum?.fovy,
+        viewportHeight: scene.canvas?.clientHeight,
+      }
       : null;
+    const realSize = camView && camView.height < SILHOUETTE_MAX_CAMERA_M;
     for (const [key, entry] of _byId.entries()) {
       // siluety podľa uhla pohľadu (vesselSilhouettes.js); zhora ostáva natočená ikona
       const view = camView ? vesselViewFor(entry.billboard.position, camView, entry.course ?? 0) : null;
       const next = view && view.kind !== 'top' ? view : null;
+      // skutočná veľkosť trupu pri danej vzdialenosti (AISHub dĺžku nenesie → typická pre rodinu)
+      entry.realScale = realSize
+        ? vesselRealScale({
+          kind: next?.kind || 'top',
+          family: vesselFamily(entry.row.type),
+          distanceM: Cesium.Cartesian3.distance(camView.position, entry.billboard.position),
+          fovyRad: camView.fovy,
+          viewportHeightPx: camView.viewportHeight,
+        })
+        : null;
+      const scale = entryScale(entry) * (key === _selectedKey ? 1.2 : 1);
+      if (Math.abs(entry.billboard.scale - scale) > 1e-3) entry.billboard.scale = scale;
       if (next?.kind !== entry.view?.kind || next?.bowRight !== entry.view?.bowRight) {
         entry.view = next;
         entry.billboard.verticalOrigin = next ? Cesium.VerticalOrigin.BOTTOM : Cesium.VerticalOrigin.CENTER;
-        entry.billboard.scaleByDistance = next ? AISHUB_SILHOUETTE_SCALE_BY_DISTANCE : undefined;
         if (next) entry.billboard.rotation = 0;
         entry.billboard.image = iconFor(entry, key === _selectedKey);
       }
@@ -388,7 +407,7 @@ export function createAishubVesselsLayer({
   function applySelectedVisual() {
     for (const [key, entry] of _byId.entries()) {
       const selected = key === _selectedKey;
-      entry.billboard.scale = hullScaleFor(entry.row.sog) * (selected ? 1.2 : 1);
+      entry.billboard.scale = entryScale(entry) * (selected ? 1.2 : 1);
       entry.billboard.image = iconFor(entry, selected);
     }
   }
@@ -453,7 +472,7 @@ export function createAishubVesselsLayer({
     const next = airIconTier(height, _iconTier);
     if (next === _iconTier) return;
     _iconTier = next;
-    for (const { row, billboard } of _byId.values()) billboard.scale = hullScaleFor(row.sog);
+    for (const [key, entry] of _byId.entries()) entry.billboard.scale = entryScale(entry) * (key === _selectedKey ? 1.2 : 1);
     _viewer?.scene?.requestRender?.();
   }
 

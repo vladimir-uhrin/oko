@@ -74,7 +74,7 @@ import {
 } from './focusDeemphasis.js';
 import { requestWorldFocus } from '../worldFocus.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
-import { SILHOUETTE_SCALE_BY_DISTANCE as SIL_SBD, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselViewFor } from './vesselSilhouettes.js';
+import { SILHOUETTE_MAX_CAMERA_M, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
 
 const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
 
@@ -1575,6 +1575,8 @@ function finiteNumber(value) {
 }
 
 function shipScale(record) {
+  // skutočná veľkosť trupu (applyVesselView, kamera pod 40 km); inak doterajšie stupne ikon
+  if (Number.isFinite(record.realScale)) return record.realScale;
   return shipSpeedScale(record) * vesselTierScale(state.iconTier);
 }
 
@@ -1628,9 +1630,6 @@ function shipIcon(record, selected) {
   return shipIconDataUrl(cssColor, selected);
 }
 
-/** Siluety zmenšuje vzdialenosť (ikona zhora má pevnú veľkosť ako doteraz). */
-const SILHOUETTE_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(SIL_SBD.near, SIL_SBD.nearScale, SIL_SBD.far, SIL_SBD.farScale);
-
 /**
  * Pohľad na loď (zhora / šikmo / z boku / spredu) pre pózu kamery — ukotvenie a mierku billboardu
  * prispôsobí druhu: silueta stojí na hladine (spodok obrázka = hladina), ikona zhora je v strede.
@@ -1644,10 +1643,26 @@ function applyVesselView(record, camView) {
   const top = !view || view.kind === 'top';
   const prev = record.view;
   record.view = top ? null : view;
+  // Skutočná veľkosť (2026-09-27: „čo najrealistickejšie pri scrolovaní"): trup má na obrazovke
+  // svoju dĺžku v metroch pri danej vzdialenosti, zďaleka aspoň VESSEL_HULL_PX.min. Nad 40 km
+  // platia doterajšie stupne ikon (airIconLod), rovnako pri ?lode=klasik.
+  record.realScale = state.shipSilhouettes && camView && camView.height < SILHOUETTE_MAX_CAMERA_M
+    ? vesselRealScale({
+      kind: view?.kind || 'top',
+      family: vesselFamily(record.type),
+      lengthM: record.lengthM,
+      beamM: record.beamM,
+      distanceM: Cesium.Cartesian3.distance(camView.position, record.position),
+      fovyRad: camView.fovy,
+      viewportHeightPx: camView.viewportHeight,
+    })
+    : null;
   const bb = record.billboard;
-  if (bb && (prev?.kind !== record.view?.kind || prev?.bowRight !== record.view?.bowRight)) {
+  if (!bb) return top;
+  const scale = shipScale(record) * (record === state.selectedRecord ? 1.2 : 1);
+  if (Math.abs(bb.scale - scale) > 1e-3) bb.scale = scale;
+  if (prev?.kind !== record.view?.kind || prev?.bowRight !== record.view?.bowRight) {
     bb.verticalOrigin = top ? Cesium.VerticalOrigin.CENTER : Cesium.VerticalOrigin.BOTTOM;
-    bb.scaleByDistance = top ? undefined : SILHOUETTE_SCALE_BY_DISTANCE;
     if (!top) bb.rotation = 0;
     bb.image = shipIcon(record, record === state.selectedRecord);
   }
@@ -2006,9 +2021,14 @@ function updateVisibility(force = false) {
     const poseSig = camera ? cameraPoseSignature(camera) : '';
     const doRotations = force || poseSig !== _lastCamPoseSig;
     if (doRotations) _lastCamPoseSig = poseSig;
-    // póza kamery pre siluety lodí (raz za prechod, nie na loď)
-    const camView = doRotations && camera && state.shipSilhouettes
-      ? { position: camera.positionWC, height: camera.positionCartographic?.height }
+    // póza kamery pre siluety a skutočnú veľkosť lodí (raz za prechod, nie na loď)
+    const camView = camera && state.shipSilhouettes
+      ? {
+        position: camera.positionWC,
+        height: camera.positionCartographic?.height,
+        fovy: camera.frustum?.fovy,
+        viewportHeight: scene?.canvas?.clientHeight,
+      }
       : null;
     const occluder = makeOccluder();
     const labelCandidates = [];
@@ -2029,7 +2049,8 @@ function updateVisibility(force = false) {
         // druhé pravidlo). Labely aj tak berú `visible`, takže modelovaná loď
         // má stále štítok.
         record.billboard.show = visible && !shipModelOwnsVisual(record);
-        if (visible && doRotations && scene && applyVesselView(record, camView)) {
+        // pohľad a veľkosť pri pohybe kamery; nová loď (ešte nespočítaná) hneď
+        if (visible && scene && (doRotations || record.realScale === undefined) && applyVesselView(record, camView)) {
           const rot = screenProjectedRotation(
             scene, record.position, vesselCourseDeg(record), record.billboard.rotation
           );
