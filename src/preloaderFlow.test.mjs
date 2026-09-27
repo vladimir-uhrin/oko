@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
-  FLOW_AMBER_WORDS, FLOW_STAGE_SPEEDS, FLOW_SWIRL, buildFlowBlock, clearRadius, flowStageSpeed,
+  FLOW_AMBER_WORDS, FLOW_CLEAR_FADE, FLOW_STAGE_SPEEDS, FLOW_SWIRL, buildFlowBlock, clearFade, clearRadius, flowStageSpeed,
   obstacleFromRect, startPreloaderFlow, swirlSource,
 } from '../public/preloaderFlow.js';
 
@@ -27,12 +27,33 @@ test('vír Midjourney: na začiatku rovný blok, uhol = hodiny × 0,1 / max(0,1;
 });
 
 test('voľný stred: zaoblený obdĺžnik tesne okolo .loader-content (oko + texty nezmenené, text ho obteká)', () => {
+  // 09-27: okraj 14/10 px a polosi aspoň 128/96 (predtým 26/18, 150/110) — plynulý prechod ide von
+  // od okraja, stred by inak opticky narástol (vlastník: „prázdne hluché miesto zruš")
   const o = obstacleFromRect({ left: 500, top: 300, width: 260, height: 240 });
-  assert.deepEqual(o, { cx: 630, cy: 420, a: 156, b: 138 });
+  assert.deepEqual(o, { cx: 630, cy: 420, a: 144, b: 130 });
   const small = obstacleFromRect({ left: 600, top: 300, width: 120, height: 100 });
-  assert.equal(small.a, 150); assert.equal(small.b, 110);
+  assert.equal(small.a, 128); assert.equal(small.b, 96);
   assert.ok(near(clearRadius(1, 0), 1) && near(clearRadius(0, 1), 1), 'okraj je r = 1');
   assert.ok(clearRadius(0.8, 0.8) < 1, 'rohy obdĺžnika sú vnútri (superelipsa, nie elipsa)');
+});
+
+test('okraj voľného stredu je plynulý prechod (vlastník 09-27: „toto by som mohol spraviť fade"), stred ostáva prázdny', () => {
+  const src = readFileSync(new URL('../public/preloaderFlow.js', import.meta.url), 'utf8');
+  assert.deepEqual(FLOW_CLEAR_FADE, { inner: 1, outer: 1.4 });
+  assert.equal(clearFade(0.5), 0, 'vnútri nič — oko a texty sa neprekryjú');
+  assert.equal(clearFade(1), 0);
+  assert.ok(near(clearFade(1.2), 0.5));
+  assert.equal(clearFade(1.4), 1);
+  assert.equal(clearFade(3), 1);
+  for (let d = 1; d < 1.4; d += 0.05) assert.ok(clearFade(d + 0.05) >= clearFade(d), 'nabieha plynule');
+  // shader: 1. priechod zapíše krytie do G, obrazovka ním násobí písmeno
+  assert.match(src, /if \(d < uFade\.x\) \{ o = vec4\(0\.0\); return; \}/);
+  assert.match(src, /o = vec4\(float\(code\)\/255\.0, smoothstep\(uFade\.x, uFade\.y, d\), 0\.0, 1\.0\);/);
+  assert.match(src, /texture\(uAtlas, \(vec2\(gx, gy\)\*uCell \+ inCell\)\/uAtlasSize\)\.r\*cc\.g;/);
+  // obsah preloadera (texty) leží celý vnútri r < 1 — prechod ho nikdy nezasiahne
+  const content = { left: 0, top: 0, width: 224, height: 191 };
+  const ob = obstacleFromRect(content);
+  assert.ok(clearRadius((content.width / 2) / ob.a, 0) < 1 && clearRadius(0, (content.height / 2) / ob.b) < 1);
 });
 
 test('stupne načítania zrýchľujú hodiny víru a orezávajú sa na posledný', () => {

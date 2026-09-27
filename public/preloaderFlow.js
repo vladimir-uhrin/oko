@@ -16,8 +16,9 @@
  *
  * OKO: to isté, len blok sú riadky „/oko …" z vrstiev OKA (lety, lode, satelity, hladiny, radar,
  * plyn, front; stav ŽIVÉ, zriedka jantárové ODHAD / OMEŠKANÉ ako v appke), vír sa točí okolo oka
- * a oko + OKO + stav + podpis ostávajú bez zmeny — text ich ostro obteká (voľný zaoblený obdĺžnik
- * tesne okolo `.loader-content`, bez stmievania). Každá zmena textu stavu = ďalší stupeň
+ * a oko + OKO + stav + podpis ostávajú bez zmeny — text ich obteká (voľný zaoblený obdĺžnik tesne okolo
+ * `.loader-content`); okraj voľného stredu je plynulý prechod (FLOW_CLEAR_FADE, vlastník 09-27: „toto by
+ * som mohol spraviť fade"), nie ostrá hrana — stred ostáva prázdny, stmieva sa len pás okolo neho. Každá zmena textu stavu = ďalší stupeň
  * načítania, vír sa zrýchli. Úvod: glitch náhodných znakov + rozmazanie, potom ostré písmo.
  *
  * Nároky: Midjourney každú snímku počíta bunky na procesore, kreslí text cez fillText a posiela
@@ -38,8 +39,12 @@
 export const FLOW_FONT_PX = 11;
 /** Riadky husto ako u Midjourney (tam je písmo dokonca vyššie ako rozostup riadkov). */
 export const FLOW_LINE_PX = 12;
-/** Okraj voľného stredu okolo `.loader-content` (CSS px) a minimálne polosi. */
-export const FLOW_CLEAR_PAD = Object.freeze({ x: 26, y: 18, minA: 150, minB: 110 });
+/** Okraj voľného stredu okolo `.loader-content` (CSS px) a minimálne polosi. Menší než pri ostrej hrane
+ *  (26/18, 150/110) — prechod FLOW_CLEAR_FADE ide von od okraja, stred by inak opticky narástol. */
+export const FLOW_CLEAR_PAD = Object.freeze({ x: 14, y: 10, minA: 128, minB: 96 });
+/** Plynulý okraj voľného stredu v jednotkách polomeru superelipsy (okraj = 1): pod inner nič,
+ *  od inner po outer písmo nabieha (smoothstep), ďalej plné. */
+export const FLOW_CLEAR_FADE = Object.freeze({ inner: 1, outer: 1.4 });
 /** Vír: uhol = hodiny × rate / max(core, r) — hodnoty Midjourney. */
 export const FLOW_SWIRL = Object.freeze({ rate: 0.1, core: 0.1 });
 /** Rýchlosť hodín víru podľa stupňa načítania (každá zmena textu stavu = ďalší stupeň). */
@@ -58,6 +63,12 @@ export function clearRadius(X, Y) {
   const x2 = X * X;
   const y2 = Y * Y;
   return Math.sqrt(Math.sqrt(x2 * x2 + y2 * y2));
+}
+
+/** Krytie písmena pri polomere d (clearRadius) — smoothstep ako v shaderi. */
+export function clearFade(d, fade = FLOW_CLEAR_FADE) {
+  const x = Math.min(1, Math.max(0, (d - fade.inner) / (fade.outer - fade.inner)));
+  return x * x * (3 - 2 * x);
 }
 
 /**
@@ -185,13 +196,15 @@ precision highp float; precision highp int; precision highp usampler2D;
 in vec2 vUv; out vec4 o;
 uniform vec2 uGrid, uCell, uRes, uSwirlC;
 uniform vec4 uObs;
+uniform vec2 uFade;
 uniform float uClock, uRate, uCore;
 uniform usampler2D uText;
 float rn(vec2 q){ vec2 a = q*q; return sqrt(sqrt(a.x*a.x + a.y*a.y)); }
 void main(){
   vec2 cell = vec2(floor(gl_FragCoord.x), uGrid.y - 1.0 - floor(gl_FragCoord.y));
   vec2 p = (cell + 0.5)*uCell;
-  if (rn((p - uObs.xy)/uObs.zw) < 1.0) { o = vec4(0.0); return; }
+  float d = rn((p - uObs.xy)/uObs.zw);
+  if (d < uFade.x) { o = vec4(0.0); return; }
   vec2 hs = 0.5*uRes;
   vec2 n = vec2(p.x - uSwirlC.x, uSwirlC.y - p.y)/hs;
   float ang = uClock*uRate/max(uCore, length(n));
@@ -201,7 +214,8 @@ void main(){
   vec2 sc = floor(src/uCell);
   if (sc.x < 0.0 || sc.y < 0.0 || sc.x >= uGrid.x || sc.y >= uGrid.y) { o = vec4(0.0); return; }
   uint code = texelFetch(uText, ivec2(int(sc.x), int(sc.y)), 0).r;
-  o = vec4(float(code)/255.0, 0.0, 0.0, 1.0);
+  // G = krytie písmena na plynulom okraji voľného stredu
+  o = vec4(float(code)/255.0, smoothstep(uFade.x, uFade.y, d), 0.0, 1.0);
 }`;
 
 // 2. priechod — obrazovka ako u Midjourney (vlastný zápis): zakrivenie nabieha 3 s, písmeno
@@ -218,7 +232,8 @@ float h21(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p + 45.32); re
 vec3 glyphAt(vec2 fc){
   vec2 cell = floor(fc/uCell);
   if (cell.x < 0.0 || cell.y < 0.0 || cell.x >= uGrid.x || cell.y >= uGrid.y) return vec3(0.0);
-  uint code = uint(texelFetch(uCells, ivec2(int(cell.x), int(uGrid.y - 1.0 - cell.y)), 0).r*255.0 + 0.5);
+  vec2 cc = texelFetch(uCells, ivec2(int(cell.x), int(uGrid.y - 1.0 - cell.y)), 0).rg;
+  uint code = uint(cc.r*255.0 + 0.5);
   uint idx = code & 127u;
   if (idx == 0u) return vec3(0.0);
   bool amber = (code & 128u) != 0u;
@@ -228,7 +243,7 @@ vec3 glyphAt(vec2 fc){
   }
   vec2 inCell = floor(fc - cell*uCell) + 0.5;
   float gx = mod(float(idx), uAtlasCols), gy = floor(float(idx)/uAtlasCols);
-  return (amber ? uAmber : uInk)*texture(uAtlas, (vec2(gx, gy)*uCell + inCell)/uAtlasSize).r;
+  return (amber ? uAmber : uInk)*texture(uAtlas, (vec2(gx, gy)*uCell + inCell)/uAtlasSize).r*cc.g;
 }
 void main(){
   float k = 1.0 - pow(1.0 - min(uTime/3.0, 1.0), 2.0);
@@ -377,6 +392,8 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
 
   let stage = 0; let clock = 0; let t = 0; let t0 = 0; let last = 0; let drawnAt = 0;
   let raf = 0; let stopped = false; let outroAt = 0; let measuredAt = 0;
+  // medzery medzi snímkami (ms) — na overenie sekania: čo zdrží hlavné vlákno, zastaví aj vír
+  const gaps = { max: 0, over100: 0, over250: 0, frames: 0 };
   // Ukážka (?preloader=demo) drží preloader nad hotovou appkou: glóbus Cesium by pod ním ďalej
   // kreslil 60× za sekundu a sťahoval Google 3D dlaždice (kvóta) — nikto ho nevidí, tak sa pozastaví
   // a po ukončení ukážky rozbehne. Pri bežnom štarte sa glóbus pod preloaderom normálne načítava.
@@ -401,6 +418,12 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
     drawnAt = now;
     // skutočný čas (úvod beží v sekundách, aj keď štart Cesia pribrzdí snímky); krok hodín víru je
     // obmedzený, aby po zaseknutí neskočil
+    if (last) {
+      const gap = now - last;
+      gaps.frames += 1; gaps.max = Math.max(gaps.max, gap);
+      if (gap > 100) gaps.over100 += 1;
+      if (gap > 250) gaps.over250 += 1;
+    }
     const dt = last ? Math.min(0.25, (now - last) / 1000) : 1 / FLOW_FPS;
     last = now; t = (now - t0) / 1000;
     clock += dt * flowStageSpeed(stage) * (outroAt ? 3 : 1) * (calm ? CALM_SPEED : 1);
@@ -421,6 +444,7 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
     gl.uniform2f(c.uRes, canvas.width, canvas.height);
     gl.uniform2f(c.uSwirlC, swirlC.x * dpr, swirlC.y * dpr);
     gl.uniform4f(c.uObs, obs.cx * dpr, obs.cy * dpr, obs.a * dpr, obs.b * dpr);
+    gl.uniform2f(c.uFade, FLOW_CLEAR_FADE.inner, FLOW_CLEAR_FADE.outer);
     gl.uniform1f(c.uClock, clock);
     gl.uniform1f(c.uRate, FLOW_SWIRL.rate);
     gl.uniform1f(c.uCore, FLOW_SWIRL.core);
@@ -509,7 +533,7 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
   return {
     stop, get stage() { return stage; }, get demo() { return demo; }, get calm() { return calm; },
     /** Na overenie v prehliadači: hodiny víru, bunka, stred (CSS px). */
-    debug: () => ({ clock, t, cell: [...cell], grid: [...grid], obs: { ...obs }, swirlC: { ...swirlC }, dpr }),
+    debug: () => ({ clock, t, cell: [...cell], grid: [...grid], obs: { ...obs }, swirlC: { ...swirlC }, dpr, gaps: { ...gaps, max: Math.round(gaps.max) } }),
     /** Na overenie: koľko buniek mriežky má znak (číta 1. priechod z GPU). */
     debugCells: () => {
       const px = new Uint8Array(cells.w * cells.h * 4);

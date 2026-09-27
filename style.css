@@ -11432,7 +11432,6 @@ body.oko-mobile #intel-hud,
 body.oko-mobile #style-indicator,
 body.oko-mobile #hud-toggle,
 body.oko-mobile #title-bar .subtitle,
-body.oko-mobile #title-bar .title-credit,
 body.oko-mobile #lang-switch .indicator-label {
   display: none !important;
 }
@@ -11441,9 +11440,19 @@ body.oko-mobile #lang-switch .indicator-label {
 body.oko-mobile #title-bar { top: 10px; left: 12px; }
 body.oko-mobile #title-bar h1 { font-size: 15px; gap: 6px; }
 body.oko-mobile #title-bar .title-logo { width: 30px; }
+/* Podpis autora aj na mobile (vlastník 09-27: „aj na mobilných zariadeniach musí byť vidno moje meno") —
+   heslo je skryté, podpis ostáva drobne pod OKO BETA. */
+body.oko-mobile #title-bar .title-credit { margin-top: 3px; gap: 6px; font-size: 7.5px; line-height: 10px; letter-spacing: 2px; }
+body.oko-mobile #title-bar .title-credit-rule { width: 14px; }
 body.oko-mobile #top-center-actions { top: 10px; }
 body.oko-mobile #lang-switch { top: 14px; right: 12px; }
 body.oko-mobile #lang-switch button { min-width: 30px; min-height: 30px; }
+/* Úzky telefón: ikony akcií v strede by ležali cez OKO BETA a podpis autora (tie siahajú po ~181 px,
+   ikony začínajú pri w/2 − 98) — idú do druhého riadku, stav načítania pod ne. */
+@media (max-width: 579px) {
+  body.oko-mobile #top-center-actions { top: 52px; }
+  body.oko-mobile #global-loading-status { top: 96px; }
+}
 
 /* --- dok, toast, kokpit nad spodnou lištou ------------------------------ */
 /* Zdvih doku a kreditov Cesium nad lištu nastavuje mobileShell.js inline

@@ -31,7 +31,9 @@ test('BETA červeným pri názve v titulku aj v preloaderi; pod heslom podpis au
   assert.ok(sub > 0 && credit > sub, 'podpis pod heslom');
   assert.match(css, /#title-bar \.title-credit strong \{[^}]*color: var\(--accent\);/);
   assert.match(css, /body\.oko-karta-frame #title-bar \.title-credit \{ display: none; \}/, 'v ráme KARTA by ležal cez titulok (top 98 px)');
-  assert.match(css, /body\.oko-mobile #title-bar \.title-credit,/, 'na mobile ako heslo skrytý');
+  // vlastník 09-27: „aj na mobilných zariadeniach musí byť vidno moje meno" — heslo skryté, podpis nie
+  assert.doesNotMatch(css, /body\.oko-mobile #title-bar \.title-credit,/, 'podpis sa na mobile neskrýva');
+  assert.match(css, /body\.oko-mobile #title-bar \.title-credit \{[^}]*font-size: 7\.5px;/, 'na mobile drobne pod OKO BETA');
 });
 
 test('preloader: podpis „made by Uhrin Vladimír" v štýle mono + azúrová linka, text lokalizovaný EN/SK', () => {
