@@ -98,7 +98,7 @@ test('návrat ku klasickým ikonám: ?lode=klasik alebo localStorage oko:lode=kl
 });
 
 test('vrstvy: živé AIS aj AISHub kreslia siluety cez ten istý modul, silueta stojí na hladine', () => {
-  assert.deepEqual(SILHOUETTE_SCALE_BY_DISTANCE, { near: 250, nearScale: 1.9, far: 8000, farScale: 0.6 });
+  assert.deepEqual(SILHOUETTE_SCALE_BY_DISTANCE, { near: 250, nearScale: 1.2, far: 8000, farScale: 0.5 });
   const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
   const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
   assert.match(live, /shipSilhouettes: shipSilhouettesEnabled\(\),/);

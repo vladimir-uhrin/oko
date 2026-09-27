@@ -27,7 +27,8 @@ import { normalizeVesselType } from './vesselLabels.js';
  * Mierka siluety podľa vzdialenosti kamery (Cesium NearFarScalar): zblízka väčšia — skutočná 110 m
  * loď na 250 m zaberá tretinu obrazovky, 70 px ikona pôsobila ako hračka; z diaľky menšia.
  */
-export const SILHOUETTE_SCALE_BY_DISTANCE = Object.freeze({ near: 250, nearScale: 1.9, far: 8000, farScale: 0.6 });
+// 09-27 vlastník: „nie sú trochu veľké?" — 1,9 → 1,2 blízko, 0,6 → 0,5 ďaleko (~o tretinu menšie)
+export const SILHOUETTE_SCALE_BY_DISTANCE = Object.freeze({ near: 250, nearScale: 1.2, far: 8000, farScale: 0.5 });
 
 /** Nad touto výškou kamery (m) sú lode drobné a z diaľky — vždy ikona zhora, bez výpočtu. */
 export const SILHOUETTE_MAX_CAMERA_M = 40_000;
