@@ -165,6 +165,8 @@ načítavania, úspechu, chyby a nedostupnosti backendu.
 | `/api/account/sessions/revoke` | POST | `{id}` verejné ID vlastnej relácie, nikdy token/hash |
 | `/api/account/sessions/revoke-others` | POST | Odhlási ostatné relácie, ponechá aktuálnu |
 | `/api/account/export` | GET | Vlastný profil, relácie, udalosti a sledované lety; žiadne tajomstvá |
+| `/api/auth/oauth/{google,github}/start` | GET | `?return=/lokálna/cesta[&link=1]` → 303 na poskytovateľa; len z nášho pôvodu |
+| `/api/auth/oauth/{google,github}/callback` | GET | Návrat od poskytovateľa → 303 na `return` s `?auth=…` alebo `?auth_error=…` |
 | `/api/account/follows` | GET | Vlastné sledované lety `{follows, max}` (najviac 50) |
 | `/api/account/follows` | POST | `{hex?, callsign?, label?}` — let dopravcu podľa volacieho znaku, inak stroj podľa hexu; 409 `follow_limit` |
 | `/api/account/follows` | DELETE | `{key}` (`cs:AUA40H` / `hex:44003a`) — odoberie iba z vlastného zoznamu |
@@ -262,6 +264,35 @@ Pre GET overí session; pre zápis aj Origin a CSRF. Frontend môže na chránen
 view skontrolovať `auth.getState().user` a otvoriť prihlasovací panel. Táto UI
 kontrola je len navigácia — oprávnenie vždy rozhodne server. Aktuálne
 chránený view je profil v paneli, nie glóbus alebo jeho URL.
+
+## Prihlásenie cez Google a GitHub (2026-09-27)
+
+`src/auth/server/oauth.js` + trasy v `http.js`. Autorizačný kód s PKCE (S256) beží
+celý na serveri; client secret je len v `.env` (`AUTH_GOOGLE_CLIENT_ID/SECRET`,
+`AUTH_GITHUB_CLIENT_ID/SECRET`). Poskytovateľ sa v paneli ukáže, iba keď má server
+obe hodnoty (`capabilities.oauth`).
+
+- `state` je jednorazový, platí 10 minút, drží sa v pamäti servera a je naviazaný na
+  prehliadač cez `HttpOnly; SameSite=Lax` cookie `oko_oauth` / `__Host-oko_oauth`
+  s náhodným nonce (ochrana proti podvrhnutému prihláseniu). Návratová cesta je len
+  lokálna (nie `//…`, nie `/api`).
+- Callback je z podstaty cross-site navigácia; namiesto Sec-Fetch-Site ho chráni state +
+  nonce, Host sa overuje vždy. Po `await` na poskytovateľa sa session číta nanovo.
+- Nový účet: e-mail overený poskytovateľom (`email_verified = 1`), heslo žiadne
+  (`password_hash = '!oauth'` neprejde `verifyPassword`). GitHub berie primárny overený
+  e-mail z `/user/emails`; bez overeného e-mailu účet nevznikne.
+- **Existujúci účet s rovnakým e-mailom sa NEPREPÁJA automaticky** (lokálny e-mail nemusí
+  byť overený — niekto by si mohol vopred založiť účet s cudzou adresou). Majiteľ sa
+  prihlási heslom a v Centre účtu → Prehľad → Prepojené prihlásenia klikne Pripojiť
+  (`start?link=1`; server prepojí len do práve prihláseného účtu).
+- Tabuľka `oauth_identities` (provider, subject → user) je aditívna bez zvýšenia
+  `user_version`; identity sú v `/api/account/security` aj v exporte.
+- Nastavenie: Google Cloud Console → APIs & Services → Credentials → OAuth client ID
+  (Web application), redirect URI `http://localhost:4173/api/auth/oauth/google/callback`
+  a `https://oko.uhrin.digital/api/auth/oauth/google/callback`. GitHub → Settings →
+  Developer settings → **GitHub Apps** (viac callback URL, na rozdiel od OAuth App),
+  callback `…/api/auth/oauth/github/callback` pre oba pôvody, Account permission
+  „Email addresses: Read-only". Oboje zadarmo.
 
 Sledované lety (2026-09-27, `src/followedFlights.js`): tlačidlo SLEDOVAŤ nad KOKPIT
 pri sledovanom lietadle. Host po kliku dostane panel s vetou prečo

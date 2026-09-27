@@ -79,6 +79,16 @@ export function openAuthStore(filename) {
         label TEXT NOT NULL DEFAULT '' CHECK (length(label) <= 80), created_at INTEGER NOT NULL,
         PRIMARY KEY (user_id, key)
       );
+      -- Prihlásenie cez Google/GitHub (2026-09-27): identita poskytovateľa → účet. Aditívne,
+      -- bez zvýšenia user_version. E-mail je len pre prehľad v účte a export.
+      CREATE TABLE IF NOT EXISTS oauth_identities (
+        provider TEXT NOT NULL CHECK (provider IN ('google', 'github')),
+        subject TEXT NOT NULL CHECK (length(subject) <= 255),
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email TEXT, created_at INTEGER NOT NULL,
+        PRIMARY KEY (provider, subject),
+        UNIQUE (user_id, provider)
+      );
       PRAGMA user_version = 5; COMMIT;
     `);
   } catch (error) {
@@ -246,6 +256,30 @@ export function openAuthStore(filename) {
       });
     },
     removeFollow: (userId, key) => db.prepare('DELETE FROM followed_flights WHERE user_id = ? AND key = ?').run(userId, key).changes,
+    identity: (provider, subject) => db.prepare('SELECT * FROM oauth_identities WHERE provider = ? AND subject = ?').get(provider, subject),
+    identities: userId => db.prepare(`SELECT provider, email, created_at AS createdAt FROM oauth_identities
+      WHERE user_id = ? ORDER BY created_at, provider`).all(userId),
+    /** Prepojí identitu s účtom; false = identita alebo poskytovateľ už je obsadený. */
+    linkIdentity(userId, provider, subject, email, now) {
+      const result = db.prepare(`INSERT INTO oauth_identities (provider, subject, user_id, email, created_at)
+        VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`).run(provider, subject, userId, email, now);
+      return result.changes > 0;
+    },
+    /**
+     * Nový účet z overenej identity poskytovateľa: e-mail overený poskytovateľom, BEZ hesla
+     * (hash '!oauth' neprejde verifyPassword — prihlásenie heslom je nemožné).
+     */
+    createOAuthUser(email, displayName, provider, subject, now) {
+      return transaction(() => {
+        const id = randomUUID();
+        const created = db.prepare(`INSERT INTO users (id, email, display_name, password_hash, created_at, email_verified)
+          VALUES (?, ?, ?, '!oauth', ?, 1) ON CONFLICT(email) DO NOTHING`).run(id, email, displayName, now);
+        if (!created.changes) return null;
+        db.prepare('INSERT INTO oauth_identities (provider, subject, user_id, email, created_at) VALUES (?, ?, ?, ?, ?)')
+          .run(provider, subject, id, email, now);
+        return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      });
+    },
     consume(key, limit, windowMs, now) {
       return transaction(() => {
         const old = db.prepare('SELECT count, expires_at FROM auth_limits WHERE key = ?').get(key);

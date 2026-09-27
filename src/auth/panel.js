@@ -26,6 +26,35 @@ function guestIcon() {
   for (const n of [head, body]) { n.setAttribute('fill', 'none'); n.setAttribute('stroke', 'currentColor'); n.setAttribute('stroke-width', '1.7'); n.setAttribute('stroke-linecap', 'round'); svg.append(n); }
   return svg;
 }
+/** Poskytovatelia prihlásenia (2026-09-27) v poradí tlačidiel; zobrazia sa len nastavené. */
+const OAUTH_PROVIDERS = Object.freeze([['google', 'Google'], ['github', 'GitHub']]);
+/**
+ * Znak poskytovateľa ako inline SVG (CSP stránka účtu nemá ikonový font). Google „G" ostáva
+ * vo svojich farbách (pravidlá značky Google), GitHub mark je jednofarebný (currentColor).
+ */
+function providerIcon(id) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false'); svg.setAttribute('class', 'auth-oauth-icon');
+  const paths = id === 'google'
+    ? [['#EA4335', 'M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z'],
+      ['#4285F4', 'M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z'],
+      ['#FBBC05', 'M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z'],
+      ['#34A853', 'M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z']]
+    : [['currentColor', 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z']];
+  svg.setAttribute('viewBox', id === 'google' ? '0 0 48 48' : '0 0 16 16');
+  for (const [fill, d] of paths) { const p = document.createElementNS(SVG_NS, 'path'); p.setAttribute('fill', fill); p.setAttribute('d', d); svg.append(p); }
+  return svg;
+}
+const providerLabel = id => (OAUTH_PROVIDERS.find(([key]) => key === id)?.[1] || id);
+/** Aktuálne miesto (bez našich značiek) — kam sa po prihlásení vrátiť; glóbus nesie stav v #hash. */
+function currentReturnPath(standalone) {
+  if (standalone) return '/account.html';
+  try {
+    const params = new URLSearchParams(location.search); params.delete('auth'); params.delete('auth_error');
+    const query = params.toString();
+    return `${location.pathname}${query ? `?${query}` : ''}${location.hash}`;
+  } catch { return '/'; }
+}
 const COLORS = ['cyan', 'green', 'amber', 'violet'];
 const date = value => value ? new Intl.DateTimeFormat(currentLanguage() === 'sk' ? 'sk-SK' : 'en-GB',
   { dateStyle: 'medium', timeStyle: 'short' }).format(value) : t('auth.not-recorded');
@@ -43,6 +72,9 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   const btn = (cls, text, handler) => { const n = el('button', cls, text); n.type = 'button'; if (handler) n.addEventListener('click', handler); return n; };
   const note = key => el('p', 'auth-hint', t(key));
   const standalone = Boolean(document.body?.classList.contains('account-standalone'));
+  const oauthStartUrl = (id, { link = false } = {}) => `/api/auth/oauth/${id}/start?return=${encodeURIComponent(currentReturnPath(standalone))}${link ? '&link=1' : ''}`;
+  /** Chyba z návratu od poskytovateľa (…?auth_error=kód) — drží sa, kým sa dialóg nezavrie. */
+  let oauthError = null;
   const opener = btn('auth-launcher'); opener.id = 'account-btn'; opener.setAttribute('aria-haspopup', 'dialog');
   const launcherAvatar = el('span', 'auth-launcher-avatar'); launcherAvatar.setAttribute('aria-hidden', 'true');
   launcherAvatar.append(guestIcon());
@@ -197,7 +229,11 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   summary.append(btn('auth-secondary', t('auth.edit-profile'), () => selectPage('profile')));
   const checklist = card('auth.profile-progress'); const checks = el('ul', 'auth-checks'); checklist.append(checks);
   const plan = card('auth.plan', 'auth.plan-note'); plan.append(el('strong', 'auth-plan-name', t('auth.free')));
-  overviewGrid.append(summary, checklist, plan); pages.overview.append(overviewHero, overviewGrid);
+  // Prepojené prihlásenia (Google/GitHub): stav z /api/account/security (identities), pripojenie
+  // cez /start?link=1 — server prepojí len do účtu, ktorý je práve prihlásený.
+  const linkedCard = card('auth.linked-title', 'auth.linked-note'); linkedCard.hidden = true;
+  const linkedList = el('ul', 'auth-linked'); linkedCard.append(linkedList);
+  overviewGrid.append(summary, checklist, plan, linkedCard); pages.overview.append(overviewHero, overviewGrid);
 
   const profileForm = form('auth-profile-form', 'auth.save');
   const editName = field('auth-profile-name', 'auth.name', 'text', 'nickname', 80);
@@ -336,7 +372,19 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   // prihlásenie") — jedna veta nad formulárom, len pre hosťa, po zatvorení zmizne.
   const reasonNote = el('p', 'auth-reason'); reasonNote.setAttribute('role', 'note'); reasonNote.hidden = true;
   let reasonKey = null;
-  guestForm.append(reasonNote, intro, tabs, credentials.node, retry, continueGuest);
+  // Prihlásenie cez Google/GitHub (2026-09-27, „v štýle OKO"): tlačidlá len pre poskytovateľov,
+  // ktoré server naozaj má (capabilities.oauth). Odkaz vedie na náš /start — tok beží na serveri.
+  const oauthBox = el('div', 'auth-oauth'); oauthBox.hidden = true;
+  const oauthButtons = {};
+  for (const [id, label] of OAUTH_PROVIDERS) {
+    const link = el('a', `auth-oauth-btn auth-oauth-${id}`); link.dataset.provider = id;
+    link.append(providerIcon(id), el('span', '', t('auth.oauth-continue', { provider: label })));
+    link.addEventListener('click', () => { link.href = oauthStartUrl(id); });
+    link.href = oauthStartUrl(id);
+    oauthButtons[id] = link; oauthBox.append(link);
+  }
+  oauthBox.append(el('p', 'auth-oauth-divider', t('auth.oauth-or')));
+  guestForm.append(reasonNote, intro, oauthBox, tabs, credentials.node, retry, continueGuest);
   shell.append(header, title, status, guest, center, el('p', 'auth-footer', t('auth.public-note')));
   dialog.append(shell); document.body.append(dialog, toast);
   let mode = linkAction?.action === 'reset' ? 'reset' : linkAction ? 'verify' : 'login';
@@ -349,7 +397,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     for (const input of dialog.querySelectorAll('[data-secret]')) { input.value = ''; input.type = 'password'; }
     for (const reveal of dialog.querySelectorAll('.auth-reveal')) { reveal.textContent = t('auth.show-password'); reveal.setAttribute('aria-pressed', 'false'); }
   }
-  function setMode(next, preserveMessage = false) { mode = next; if (!preserveMessage) message(''); clearPasswords(); clearFieldErrors(); render(client.getState()); (next === 'register' ? name.input : email.input).focus(); }
+  function setMode(next, preserveMessage = false) { mode = next; if (!preserveMessage) { message(''); oauthError = null; } clearPasswords(); clearFieldErrors(); render(client.getState()); (next === 'register' ? name.input : email.input).focus(); }
   function selectPage(next) {
     page = next; message(''); pendingRevoke = undefined; confirmationBox.hidden = true; clearPasswords(); clearFieldErrors(); clearPhoto(); render(client.getState());
     if (['overview', 'devices', 'activity'].includes(next)) void client.loadSecurity();
@@ -383,6 +431,31 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     }
     if (!state.security?.events?.length) events.append(el('li', 'auth-hint', pending ? t('auth.loading-security') : failed ? t('auth.security-error') : t('auth.no-events')));
   }
+  /** Karta Prepojené prihlásenia: nastavení poskytovatelia, pripojený alebo tlačidlo Pripojiť. */
+  function renderLinked(state, oauth) {
+    const providers = OAUTH_PROVIDERS.filter(([id]) => oauth[id]);
+    linkedCard.hidden = !state.user || !providers.length;
+    if (linkedCard.hidden) return;
+    const identities = Array.isArray(state.security?.identities) ? state.security.identities : [];
+    const signature = JSON.stringify([providers.map(([id]) => id), identities.map((i) => [i.provider, i.email]), currentLanguage()]);
+    if (linkedList.dataset.signature === signature) return;
+    linkedList.dataset.signature = signature;
+    linkedList.replaceChildren();
+    for (const [id, label] of providers) {
+      const linked = identities.find((i) => i.provider === id);
+      const row = el('li', `auth-linked-row${linked ? ' is-linked' : ''}`);
+      const name = el('span', 'auth-linked-name'); name.append(providerIcon(id), el('strong', '', label));
+      row.append(name);
+      if (linked) row.append(el('span', 'auth-linked-state', linked.email ? `${t('auth.linked-connected')} · ${linked.email}` : t('auth.linked-connected')));
+      else {
+        const connect = el('a', 'auth-secondary auth-linked-connect', t('auth.linked-connect'));
+        connect.href = oauthStartUrl(id, { link: true });
+        connect.addEventListener('click', () => { connect.href = oauthStartUrl(id, { link: true }); });
+        row.append(connect);
+      }
+      linkedList.append(row);
+    }
+  }
   function render(state) {
     const user = state.user; const loggedIn = Boolean(user); const unavailable = state.status === 'unavailable'; const checking = state.status === 'checking';
     const linkMode = mode === 'reset' || mode === 'verify'; const showAccount = loggedIn && !linkMode;
@@ -403,6 +476,10 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     dialog.dataset.guest = String(plainGuest);
     guest.hidden = showAccount; hero.hidden = !plainGuest;
     continueGuest.hidden = standalone || !plainGuest || mode === 'forgot';
+    const oauth = state.capabilities?.oauth || {};
+    oauthBox.hidden = !(plainGuest && (oauth.google || oauth.github) && (mode === 'login' || mode === 'register'));
+    for (const [id] of OAUTH_PROVIDERS) oauthButtons[id].hidden = !oauth[id];
+    renderLinked(state, oauth);
     password.meter.hidden = !['register', 'reset'].includes(mode);
     for (const b of dialog.querySelectorAll('.auth-primary')) b.classList.toggle('is-busy', state.busy);
     title.textContent = t(showAccount ? 'auth.center' : mode === 'register' ? 'auth.create-title' : mode === 'forgot' ? 'auth.recovery-title' : mode === 'reset' ? 'auth.reset-title' : mode === 'verify' ? 'auth.confirm-email-title' : 'auth.welcome');
@@ -452,7 +529,8 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
       if (lastUser && !user && state.status === 'guest') notify(t(state.error === 'authentication_required' ? 'auth.session-expired' : 'auth.logged-out'));
     }
     lastUser = user; renderSecurity(state);
-    if (state.error) message(errorText(state.error), 'error');
+    if (oauthError && !state.user) message(errorText(oauthError), 'error');
+    else if (state.error) message(errorText(state.error), 'error');
     else if (checking) message(t('auth.checking'));
     else if (state.busy) message(t('auth.working'));
     else if (status.dataset.kind !== 'success') message('');
@@ -474,6 +552,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   };
   credentials.node.addEventListener('submit', event => {
     event.preventDefault(); if (client.getState().busy) return;
+    oauthError = null;
     if (mode === 'verify') {
       void action(async () => {
         if (linkAction?.action === 'email') await client.confirmEmailChange(linkAction.token);
@@ -524,7 +603,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   }
   opener.addEventListener('click', () => { if (client.getState().user && !dialog.open) toggleMenu(); else void open(); });
   dialog.addEventListener('close', () => {
-    reasonKey = null;
+    reasonKey = null; oauthError = null;
     clearPasswords(); clearPhoto(); renderPhoto(client.getState()); opener.setAttribute('aria-expanded', 'false'); pendingRevoke = undefined; confirmationBox.hidden = true;
     // Focus goes back to the launcher (dialog pattern) — the browser would otherwise try the
     // menu item that opened the centre, which is hidden again by now, and land on <body>.
@@ -544,5 +623,19 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
   if (broadcast) broadcast.onmessage = event => { if (event.data === 'changed') onFocus(); };
   const interval = setInterval(() => { if (client.getState().user) onFocus(); }, 30000);
   void client.refresh();
+  // Návrat od Google/GitHub: …?auth=google | auth=google-linked | auth_error=kód. Značku zmažeme
+  // z adresy (glóbus si stav drží v #hash, ten ostáva) a povieme, čo sa stalo.
+  (function consumeOAuthMarker() {
+    let params;
+    try { params = new URLSearchParams(location.search); } catch { return; }
+    const done = params.get('auth'); const failed = params.get('auth_error');
+    if (!done && !failed) return;
+    params.delete('auth'); params.delete('auth_error');
+    const query = params.toString();
+    try { history.replaceState(history.state, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash}`); } catch { /* adresa ostane */ }
+    if (failed && /^[a-z_]{2,40}$/.test(failed)) { oauthError = failed; setMode('login', true); void open(); return; }
+    const match = /^(google|github)(-linked)?$/.exec(done || '');
+    if (match) notify(t(match[2] ? 'auth.oauth-linked' : 'auth.oauth-signed-in', { provider: providerLabel(match[1]) }));
+  })();
   return { client, open, close: () => { if (dialog.open) dialog.close(); }, isOpen: () => dialog.open, destroy() { destroyed = true; clearPhoto(); clearInterval(interval); clearTimeout(timer); unsubscribe(); broadcast?.close(); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); document.removeEventListener('keydown', claimEscape, true); document.removeEventListener('pointerdown', onOutside, true); dialog.remove(); menu.remove(); opener.remove(); toast.remove(); if (ownedMount) mount.remove(); } };
 }

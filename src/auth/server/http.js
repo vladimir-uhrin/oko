@@ -1,10 +1,13 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
-import { normalizeEmail, validateCredentials, validEmail, validPassword, validateProfile } from '../validation.js';
+import { normalizeEmail, validateCredentials, validEmail, validName, validPassword, validateProfile } from '../validation.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { unavailableMailer, accountMail } from './mail.js';
 import { receivePhoto } from './photos.js';
 import { FOLLOW_MAX, sanitizeFollow, validFollowKey } from '../follows.js';
+import {
+  OAUTH_STATE_TTL_MS, authorizeUrl, createOAuthStateStore, fetchOAuthIdentity, safeReturnPath, withQueryParam,
+} from './oauth.js';
 
 export const SESSION_TTL_MS = 7 * 86400_000;
 export const SESSION_IDLE_MS = 86400_000;
@@ -104,16 +107,22 @@ async function readJson(req) {
 
 /** Framework-free controllers plus reusable authentication / CSRF middleware. */
 export function createAuthService({ store, origins = [], trustProxy = false, now = Date.now,
-  passwords = { hash: hashPassword, verify: verifyPassword }, mailer = unavailableMailer }) {
+  passwords = { hash: hashPassword, verify: verifyPassword }, mailer = unavailableMailer,
+  oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args) }) {
   let lastPrune = 0;
   const pendingRecovery = new Set();
+  const oauthStates = createOAuthStateStore({ now });
   const mailConfigured = mailer.configured === true && typeof mailer.send === 'function' && Boolean(mailer.publicUrl);
   const capabilities = Object.freeze({ mailConfigured, emailVerification: mailConfigured,
-    passwordReset: mailConfigured, emailChange: mailConfigured, passwordChange: true, sessionManagement: true, accountExport: true });
-  function context(req, res, { mutation = false, required = false } = {}) {
+    passwordReset: mailConfigured, emailChange: mailConfigured, passwordChange: true, sessionManagement: true, accountExport: true,
+    // Prihlásenie cez Google/GitHub (2026-09-27): len poskytovatelia s ID aj tajomstvom v .env.
+    oauth: Object.freeze({ google: Boolean(oauthProviders.google), github: Boolean(oauthProviders.github) }) });
+  function context(req, res, { mutation = false, required = false, providerReturn = false } = {}) {
     const origin = expectedOrigin(req, origins);
-    if (req.headers['sec-fetch-site'] === 'cross-site' || (req.headers.origin && req.headers.origin !== origin)
-      || (mutation && req.headers.origin !== origin)) throw fail('origin_denied', 403);
+    // Návrat od poskytovateľa (OAuth callback) je z podstaty cross-site navigácia GET; chráni ho
+    // jednorazový state + nonce v cookie, nie Sec-Fetch-Site. Host sa overuje vždy (expectedOrigin).
+    if (!providerReturn && (req.headers['sec-fetch-site'] === 'cross-site' || (req.headers.origin && req.headers.origin !== origin)
+      || (mutation && req.headers.origin !== origin))) throw fail('origin_denied', 403);
     const secure = origin.startsWith('https:');
     const name = secure ? '__Host-oko_session' : 'oko_session';
     const token = cookieToken(req, name);
@@ -132,7 +141,7 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
     if (session) store.touchSession(hash, time);
     let ip = req.socket.remoteAddress || 'unknown';
     if (trustProxy && loopback(ip) && isIP(req.headers['cf-connecting-ip'] || '')) ip = req.headers['cf-connecting-ip'];
-    return { secure, name, token, hash: session ? hash : null, session, time, ip, res, label: sessionLabel(req.headers['user-agent']) };
+    return { origin, secure, name, token, hash: session ? hash : null, session, time, ip, res, label: sessionLabel(req.headers['user-agent']) };
   }
   function rate(ctx, bucket, identity, count, ms = 15 * 60_000) {
     const key = createHash('sha256').update(`${bucket}:${identity}`).digest('hex');
@@ -222,6 +231,107 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
     if (status === 503) res.setHeader('Retry-After', '3');
     json(res, status, { error: error.status ? error.message : 'server_error' });
   }
+  // ── Prihlásenie cez Google/GitHub (2026-09-27) ────────────────────────────────
+  const oauthCookie = secure => (secure ? '__Host-oko_oauth' : 'oko_oauth');
+  /** Presmerovanie prehliadača (303) bez cache a bez referera — URL s kódom nikam neunikne. */
+  function redirect(res, location) {
+    res.statusCode = 303;
+    res.setHeader('Location', location);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.end();
+  }
+  /** Pridá Set-Cookie k už nastaveným (session cookie z rotate()). */
+  function appendCookie(res, name, value, secure, ttlMs) {
+    const cookie = `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(ttlMs / 1000)}${secure ? '; Secure' : ''}`;
+    const previous = res.getHeader('Set-Cookie');
+    res.setHeader('Set-Cookie', previous ? [].concat(previous, cookie) : cookie);
+  }
+  const oauthName = (identity, email) => {
+    const name = String(identity.name || '').trim();
+    if (validName(name)) return [...name].slice(0, 80).join('');
+    const local = String(email || '').split('@')[0];
+    return validName(local) ? [...local].slice(0, 80).join('') : 'OKO';
+  };
+  async function oauthStart(req, res, providerId) {
+    const url = new URL(req.url || '/', 'http://localhost');
+    const returnTo = safeReturnPath(url.searchParams.get('return'));
+    const provider = oauthProviders[providerId];
+    if (!provider) return redirect(res, withQueryParam(returnTo, 'auth_error', 'oauth_unavailable'));
+    const ctx = context(req, res);
+    try {
+      rate(ctx, 'oauth-start-ip', ctx.ip, 30);
+      rate(ctx, 'oauth-start-global', 'all', 600);
+      const wantsLink = url.searchParams.get('link') === '1';
+      const linkUserId = wantsLink ? ctx.session?.user_id || null : null;
+      if (wantsLink && !linkUserId) throw fail('authentication_required', 401);
+      const begun = oauthStates.begin({ provider: providerId, returnTo, linkUserId });
+      if (!begun) throw fail('rate_limited', 429);
+      appendCookie(res, oauthCookie(ctx.secure), begun.nonce, ctx.secure, OAUTH_STATE_TTL_MS);
+      return redirect(res, authorizeUrl(provider, {
+        redirectUri: `${ctx.origin}/api/auth/oauth/${providerId}/callback`, state: begun.state, verifier: begun.verifier,
+      }));
+    } catch (error) {
+      return redirect(res, withQueryParam(returnTo, 'auth_error', error.status ? error.message : 'server_error'));
+    }
+  }
+  async function oauthCallback(req, res, providerId) {
+    const url = new URL(req.url || '/', 'http://localhost');
+    const ctx = context(req, res, { providerReturn: true });
+    let returnTo = '/';
+    try {
+      rate(ctx, 'oauth-callback-ip', ctx.ip, 30);
+      const entry = oauthStates.take({
+        state: url.searchParams.get('state'), nonce: cookieToken(req, oauthCookie(ctx.secure)), provider: providerId,
+      });
+      const provider = oauthProviders[providerId];
+      if (!entry || !provider) throw fail('oauth_state');
+      returnTo = entry.returnTo;
+      if (url.searchParams.get('error')) throw fail('oauth_cancelled');
+      const identity = await fetchOAuthIdentity(provider, {
+        code: url.searchParams.get('code'), verifier: entry.verifier, fetchImpl: oauthFetch,
+        redirectUri: `${ctx.origin}/api/auth/oauth/${providerId}/callback`,
+      });
+      const email = identity.email && validEmail(identity.email) ? normalizeEmail(identity.email) : null;
+      const outcome = store.transaction(() => {
+        // Po await: stav session čítať nanovo, nie zo snímky pred sieťou.
+        const session = ctx.hash ? store.findSession(ctx.hash, now(), SESSION_IDLE_MS) : null;
+        const existing = store.identity(identity.provider, identity.subject);
+        if (entry.linkUserId) {
+          if (session?.user_id !== entry.linkUserId) throw fail('oauth_link_session', 409);
+          if (existing && existing.user_id !== entry.linkUserId) throw fail('oauth_identity_in_use', 409);
+          if (!existing) {
+            if (!store.linkIdentity(entry.linkUserId, identity.provider, identity.subject, email, now())) throw fail('oauth_provider_linked', 409);
+            store.event(entry.linkUserId, `${identity.provider}_linked`, now());
+          }
+          return { marker: `${providerId}-linked` };
+        }
+        if (existing) {
+          store.recordLogin(existing.user_id, now());
+          store.event(existing.user_id, `login_${identity.provider}`, now());
+          rotate(ctx, existing.user_id);
+          return { marker: providerId };
+        }
+        if (!email || !identity.emailVerified) throw fail('oauth_email_unverified', 409);
+        // Existujúci účet s tým istým e-mailom sa NEPREPÁJA automaticky — lokálny e-mail nemusí byť
+        // overený (niekto by si mohol vopred založiť účet s cudzou adresou). Prepojiť ho môže
+        // majiteľ po prihlásení heslom (link=1).
+        if (store.userByEmail(email)) throw fail('oauth_email_exists', 409);
+        const user = store.createOAuthUser(email, oauthName(identity, email), identity.provider, identity.subject, now());
+        if (!user) throw fail('oauth_email_exists', 409);
+        store.recordLogin(user.id, now());
+        store.event(user.id, `registered_${identity.provider}`, now());
+        rotate(ctx, user.id);
+        return { marker: providerId };
+      });
+      appendCookie(res, oauthCookie(ctx.secure), '', ctx.secure, 0);
+      return redirect(res, withQueryParam(returnTo, 'auth', outcome.marker));
+    } catch (error) {
+      appendCookie(res, oauthCookie(ctx.secure), '', ctx.secure, 0);
+      return redirect(res, withQueryParam(returnTo, 'auth_error', error.status ? error.message : 'server_error'));
+    }
+  }
+
   const requireAuthenticated = (req, res, next) => {
     try {
       const ctx = context(req, res, { required: true, mutation: !['GET', 'HEAD', 'OPTIONS'].includes(req.method) });
@@ -235,6 +345,11 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
     const pathname = Object.hasOwn(ROUTE_ALIASES, requestedPath) ? ROUTE_ALIASES[requestedPath] : requestedPath;
     if (!(pathname === '/api/account' || pathname.startsWith('/api/account/') || pathname === '/api/auth' || pathname.startsWith('/api/auth/'))) return next();
     try {
+      const oauthRoute = /^\/api\/auth\/oauth\/(google|github)\/(start|callback)$/.exec(pathname);
+      if (oauthRoute) {
+        if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); throw fail('method_not_allowed', 405); }
+        return oauthRoute[2] === 'start' ? await oauthStart(req, res, oauthRoute[1]) : await oauthCallback(req, res, oauthRoute[1]);
+      }
       let sessionId = /^\/api\/account\/sessions\/([a-f0-9-]{36})$/.exec(pathname)?.[1];
       const routes = { '/api/auth/session': ['GET'], '/api/auth/csrf': ['GET'], '/api/auth/register': ['POST'],
         '/api/auth/login': ['POST'], '/api/auth/logout': ['POST'], '/api/account': ['GET', 'PATCH'],
@@ -259,7 +374,8 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       }
       if (pathname === '/api/account' && req.method === 'GET') return json(res, 200, { user: publicUser(ctx.session) });
       if (['/api/account/security', '/api/account/export'].includes(pathname)) {
-        const security = store.security(ctx.session.user_id, ctx.hash, now(), SESSION_IDLE_MS);
+        const security = { ...store.security(ctx.session.user_id, ctx.hash, now(), SESSION_IDLE_MS),
+          identities: store.identities(ctx.session.user_id) };
         return json(res, 200, pathname.endsWith('/export')
           ? { exportedAt: now(), user: publicUser(ctx.session), ...security, follows: store.follows(ctx.session.user_id) }
           : security);

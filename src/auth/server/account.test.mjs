@@ -33,8 +33,10 @@ test('no-mail capabilities are truthful for anonymous and authenticated clients'
   const f = await fixture(t, { mailer: { configured: false } }), client = f.client();
   const anonymous = await client.request('/api/auth/session');
   assert.equal(anonymous.headers.has('set-cookie'), false);
+  // 2026-09-27: + oauth — bez AUTH_GOOGLE_*/AUTH_GITHUB_* v .env žiadne tlačidlá poskytovateľov.
   assert.deepEqual(anonymous.data.capabilities, { mailConfigured: false, emailVerification: false, passwordReset: false,
-    emailChange: false, passwordChange: true, sessionManagement: true, accountExport: true });
+    emailChange: false, passwordChange: true, sessionManagement: true, accountExport: true,
+    oauth: { google: false, github: false } });
   await client.register();
   assert.deepEqual((await client.request('/api/auth/session')).data.capabilities, anonymous.data.capabilities);
   for (const [route, body] of [['/api/account/email/verification', {}], ['/api/auth/password/forgot', { email: credentials.email }],

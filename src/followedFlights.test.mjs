@@ -100,6 +100,34 @@ test('host: klik otvorí prihlásenie s dôvodom, nič sa neuloží; po prihlás
   followed.destroy();
 });
 
+test('čakajúci let prežije presmerovanie na Google/GitHub (sessionStorage) a po prihlásení sa pridá', async () => {
+  const { FOLLOW_PENDING_STORAGE_KEY } = await import('./followedFlights.js');
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+  let clock = 5_000_000;
+  // pred presmerovaním: host klikne SLEDOVAŤ
+  const before = fakeAccount();
+  const first = createFollowedFlights({ account: before.account, translate: t, storage, now: () => clock, setIntervalImpl: () => 1, clearIntervalImpl: () => {} });
+  await first.toggle(AUA);
+  assert.ok(store.has(FOLLOW_PENDING_STORAGE_KEY));
+  assert.doesNotMatch(store.get(FOLLOW_PENDING_STORAGE_KEY), /@|user|mail/i, 'len let, nič o používateľovi');
+  first.destroy();
+  // po návrate: nová stránka, prihlásený
+  clock += 60_000;
+  const after = fakeAccount({ user: { id: 'u1' } });
+  const second = createFollowedFlights({ account: after.account, translate: t, storage, now: () => clock, setIntervalImpl: () => 1, clearIntervalImpl: () => {} });
+  await tick(); await tick();
+  assert.deepEqual(after.calls.follow, [{ hex: '44003a', callsign: 'AUA40H', label: 'AUA40H · BCN → VIE' }]);
+  assert.equal(store.has(FOLLOW_PENDING_STORAGE_KEY), false, 'spotrebované');
+  second.destroy();
+  // poškodený alebo starý záznam sa ignoruje
+  store.set(FOLLOW_PENDING_STORAGE_KEY, '{"hex":"<b>","at":1}');
+  const bad = fakeAccount({ user: { id: 'u1' } });
+  createFollowedFlights({ account: bad.account, translate: t, storage, now: () => clock, setIntervalImpl: () => 1, clearIntervalImpl: () => {} }).destroy();
+  await tick();
+  assert.equal(bad.calls.follow.length, 0);
+});
+
 test('host, ktorý sa prihlási až o dlho neskôr, nedostane let pridaný nečakane', async () => {
   const fake = fakeAccount();
   let clock = 1_000_000;

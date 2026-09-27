@@ -2,6 +2,7 @@ import path from 'node:path';
 import { openAuthStore } from './store.js';
 import { createAuthService, parseOrigins } from './http.js';
 import { createWebhookMailer } from './mail.js';
+import { oauthProvidersFromEnv } from './oauth.js';
 
 export const AUTH_FILE_DENY = ['**/.auth-data/**', '**/*.sqlite*', '**/*.db', '**/*.db-*'];
 
@@ -11,6 +12,8 @@ export function authPlugin(env = process.env) {
   let filename;
   const origins = parseOrigins(env.AUTH_ORIGINS || '');
   const mailer = createWebhookMailer(env, { origins });
+  // Google/GitHub (2026-09-27): ID a tajomstvo len z .env servera, nikdy do prehliadača.
+  const oauthProviders = oauthProvidersFromEnv(env);
   const install = server => {
     let store;
     let auth;
@@ -48,7 +51,7 @@ export function authPlugin(env = process.env) {
       try {
         if (!auth) {
           store = openAuthStore(filename);
-          auth = createAuthService({ store, origins, mailer, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
+          auth = createAuthService({ store, origins, mailer, oauthProviders, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
         }
         void auth.middleware(req, res, next);
       } catch {

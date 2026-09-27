@@ -23,6 +23,27 @@ export const FOLLOW_POLL_MS = 15_000;
 export const FOLLOW_NOTIFY_COOLDOWN_MS = 10 * 60_000;
 /** Let, ktorý host chcel sledovať, sa po prihlásení pridá len v tomto okne (ms) — nie o hodinu neskôr. */
 export const FOLLOW_PENDING_TTL_MS = 10 * 60_000;
+/**
+ * Čakajúci let prežije aj presmerovanie na Google/GitHub a späť (2026-09-27): sessionStorage
+ * tejto karty prehliadača — len identifikátor letu a čas, nič o používateľovi.
+ */
+export const FOLLOW_PENDING_STORAGE_KEY = 'oko-follow-pending';
+
+function defaultStorage() {
+  try { return globalThis.sessionStorage || null; } catch { return null; }
+}
+
+/** Načíta čakajúci let zo storage (validovaný, v okne TTL), inak null. */
+export function readPendingFollow(storage, nowMs) {
+  let raw = null;
+  try { raw = storage?.getItem(FOLLOW_PENDING_STORAGE_KEY) ?? null; } catch { return null; }
+  if (!raw) return null;
+  let parsed = null;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  const item = sanitizeFollow(parsed);
+  if (!item || !Number.isFinite(parsed?.at) || nowMs - parsed.at > FOLLOW_PENDING_TTL_MS || parsed.at > nowMs + 60_000) return null;
+  return { hex: item.hex, callsign: item.callsign, label: item.label, at: parsed.at };
+}
 
 /**
  * Popis letu do zoznamu: „AUA40H · BCN → VIE", inak registrácia alebo hex.
@@ -90,11 +111,20 @@ export function createFollowedFlights({
   setIntervalImpl = (fn, ms) => setInterval(fn, ms),
   clearIntervalImpl = (id) => clearInterval(id),
   now = Date.now,
+  storage = defaultStorage(),
 } = {}) {
   const client = account?.client || null;
   let follows = [];
   let loadedFor = null; // id používateľa, pre ktorého je zoznam načítaný
-  let pending = null; // let, ktorý host chcel sledovať pred prihlásením
+  // let, ktorý host chcel sledovať pred prihlásením (aj po návrate z Google/GitHub)
+  let pending = readPendingFollow(storage, now());
+  const savePending = (value) => {
+    pending = value;
+    try {
+      if (value) storage?.setItem(FOLLOW_PENDING_STORAGE_KEY, JSON.stringify(value));
+      else storage?.removeItem(FOLLOW_PENDING_STORAGE_KEY);
+    } catch { /* bez storage platí len v pamäti */ }
+  };
   let prevStatus = null;
   const lastStatus = new Map();
   const seenAirborne = new Set();
@@ -209,7 +239,7 @@ export function createFollowedFlights({
     const flight = { hex: contact.hex ?? contact.icao24, callsign: contact.callsign, label: followLabelFor(contact) };
     if (!followKey(flight)) return false;
     if (!user()) {
-      pending = { ...flight, at: now() };
+      savePending({ ...flight, at: now() });
       try { await account?.open?.(null, { reason: 'follow.login-reason' }); } catch { /* panel je voliteľný */ }
       return false;
     }
@@ -221,11 +251,12 @@ export function createFollowedFlights({
   const unsubscribe = client?.subscribe?.((state) => {
     const id = state?.user?.id || null;
     if (id === loadedFor) return;
-    if (!id) { loadedFor = null; pending = null; setFollows([]); return; }
+    // odhlásenie (hosť → hosť sa odfiltruje vyššie, čakajúci let z presmerovania ostáva)
+    if (!id) { loadedFor = null; savePending(null); setFollows([]); return; }
     void load().then(async () => {
       if (!pending || user()?.id !== id) return;
       const flight = pending;
-      pending = null;
+      savePending(null);
       if (now() - flight.at > FOLLOW_PENDING_TTL_MS) return;
       try { account?.close?.(); } catch { /* */ }
       if (!entryFor({ hex: flight.hex, callsign: flight.callsign })) await add(flight);
