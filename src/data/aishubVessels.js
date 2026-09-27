@@ -21,6 +21,7 @@ import { isOwnedByOtherLayer, registerPickOwner, resolvePickId, unregisterPickOw
 import { clearSelectedEntityContextForLayer, registerEntityContext, selectEntityContext } from './contextStore.js';
 import {
   VESSEL_CARD_FADE_DISTANCE_M,
+  VESSEL_POSITION_STALE_SEC,
   accentForVesselType,
   applyVesselOverlayPolicy,
   mmsiFlag,
@@ -189,9 +190,29 @@ export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
  * LIVE. Pure.
  */
 export function aishubLabelCard(row, position, translate = t, nowMs = Date.now(), selected = false) {
-  // Rovnaká skladba ako buildVesselCard (živé lode): TYP · rýchlosť · kurz,
-  // plus krátky odznak ONESKORENÉ · vek údaja namiesto „LAST KNOWN". Vybraná
-  // loď (klik) dostane navyše navigačný stav a je pripnutá (selected/protected).
+  const name = aishubDisplayName(row);
+  const stale = Number.isFinite(row.observedAt) && nowMs - row.observedAt >= VESSEL_POSITION_STALE_SEC * 1000;
+  if (!selected) {
+    // Okolitá loď: len vlajka a meno (2026-09-27, vlastník: „pri tých lodiach je to rušivé,
+    // treba dať len základné info a až po prejdení myšou plné info" — typ, rýchlosť, kurz a vek
+    // ukáže kartička pod kurzorom). Poloha staršia ako VESSEL_POSITION_STALE_SEC (ako živé lode)
+    // má sivý okraj a riadok ONESKORENÉ · vek — stav dát ostáva viditeľný bez prejdenia myšou.
+    const age = aishubAgeLabel(row.observedAt, nowMs);
+    return {
+      id: `aishub:${row.mmsi}`,
+      actionable: true,
+      position,
+      gapPx: 10,
+      accent: stale ? '146, 156, 165' : accentForVesselType(row.type),
+      title: name.length > 26 ? `${name.slice(0, 25)}…` : name,
+      titleFlag: mmsiFlag(row.mmsi)?.iso2 || null,
+      details: stale ? [age ? `${translate('aishub.badge')} · ${age}` : translate('aishub.badge')] : [],
+      selected: false,
+      priority: (row.name ? 1000 : 0) + (row.type ? 40 : 0) + (Number.isFinite(row.sog) && row.sog > 0.5 ? 30 : 0),
+    };
+  }
+  // Vybraná loď (klik): plná skladba ako karta živých lodí — TYP · rýchlosť · kurz · navigačný
+  // stav, plus ONESKORENÉ · vek údaja namiesto „LAST KNOWN"; je pripnutá (selected/protected).
   const parts = [];
   const type = normalizeVesselType(row.type).toUpperCase().slice(0, 14);
   if (type) parts.push(type);
@@ -202,7 +223,6 @@ export function aishubLabelCard(row, position, translate = t, nowMs = Date.now()
   if (nav) parts.push(nav);
   const age = aishubAgeLabel(row.observedAt, nowMs);
   parts.push(age ? `${translate('aishub.badge')} · ${age}` : translate('aishub.badge'));
-  const name = aishubDisplayName(row);
   return {
     id: `aishub:${row.mmsi}`,
     // Klikateľná ako živé lode — klik cez hull (pick) aj cez kartu (hitTest).

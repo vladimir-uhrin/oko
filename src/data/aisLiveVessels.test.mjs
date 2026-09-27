@@ -1290,10 +1290,12 @@ test('vessel trail lifecycle: reconciliation eviction clears an orphaned trail',
   }
 });
 
-test('buildVesselCard: name title + type/speed/heading detail line', () => {
+// 2026-09-27 vlastník: „pri tých lodiach je to rušivé, treba dať len základné info a až po prejdení
+// myšou plné info" — okolitá karta = vlajka + meno; typ/rýchlosť/kurz nesie kartička pod kurzorom.
+test('buildVesselCard: okolitá loď — len vlajka a meno, bez riadku typ/rýchlosť/kurz', () => {
   const card = buildVesselCard(makeRecord());
   assert.equal(card.title, 'EVER GIVEN');
-  assert.deepEqual(card.details, ['CONTAINER SHIP · 14.5KT · 231°']);
+  assert.deepEqual(card.details, []);
   assert.equal(card.accent, '57, 213, 255');
   assert.equal(card.selected, false);
   assert.equal(card.position, POS);
@@ -1302,11 +1304,14 @@ test('buildVesselCard: name title + type/speed/heading detail line', () => {
   assert.ok(Number.isFinite(card.gapPx) && card.gapPx > 0);
 });
 
-test('buildVesselCard: heading falls back to course; missing parts are omitted', () => {
-  const card = buildVesselCard(makeRecord({ heading: null, type: '', speed: null }));
-  assert.deepEqual(card.details, ['231°']);
-  const bare = buildVesselCard(makeRecord({ heading: null, course: null, type: '', speed: null }));
-  assert.deepEqual(bare.details, []);
+test('buildVesselCard: posledná známa poloha ostáva priznaná aj na okolitej karte (sivý okraj + LAST KNOWN)', () => {
+  const stale = buildVesselCard(makeRecord({ positionState: 'last-known', lastPositionEpoch: Date.now() / 1000 - 3600 }));
+  assert.equal(stale.details.length, 1);
+  assert.match(stale.details[0], /^LAST KNOWN · /);
+  assert.equal(stale.accent, '146, 156, 165');
+  // plné údaje ostávajú na vybranej karte (klik) — kurz padá na course
+  const selected = buildSelectedVesselCard(makeRecord({ heading: null }));
+  assert.match(selected.details[0], /231°/);
 });
 
 test('buildVesselCard: unnamed vessels title as MMSI; long names truncate', () => {
@@ -1329,8 +1334,8 @@ test('buildVesselCard: tanker types carry the amber accent', () => {
 
 test('buildVesselCard: numeric AIS type codes read as family names, not digits', () => {
   const card = buildVesselCard(makeRecord({ type: '84' }));
-  assert.deepEqual(card.details, ['TANKER · 14.5KT · 231°']);
   assert.equal(card.accent, '255, 179, 71');
+  assert.match(buildSelectedVesselCard(makeRecord({ type: '84' })).details[0], /^TANKER · 14.5KT · 231°/);
 });
 
 test('cardScreenSeparated: rejects candidates inside the min separation radius', () => {

@@ -2628,20 +2628,19 @@ function trimHudValue(value, maxLength) {
 }
 
 /**
- * Card model for an ambient (decluttered-in) vessel — name title plus one
- * compact type/speed/heading detail line, anchored at the record's current
- * rendered position (height-datum caveat: no datum work here). Pure —
+ * Card model for an ambient (decluttered-in) vessel — len vlajka a meno
+ * (2026-09-27, vlastník: „pri tých lodiach je to rušivé, treba dať len základné
+ * info a až po prejdení myšou sa zobrazí plné info"). Typ, rýchlosť, kurz a vek
+ * ukáže kartička pod kurzorom (contactHoverCard cez getContactSummary) — nad
+ * ikonou aj nad týmto štítkom (detectionHover → hoverCandidatesFromOverlayHit).
+ * Poctivosť stavu ostáva: posledná známa poloha má sivý okraj a jeden riadok
+ * LAST KNOWN · vek. Anchored at the record's current rendered position. Pure —
  * exported for unit tests.
  * @param {Object} record - Vessel record.
  * @returns {Object} vesselLabels entry.
  */
 export function buildVesselCard(record) {
   const parts = [];
-  const type = vesselTypeShort(record);
-  if (type) parts.push(type);
-  if (record.speed !== null && record.speed !== undefined) parts.push(formatSpeed(record.speed));
-  const direction = record.heading ?? record.course;
-  if (Number.isFinite(direction)) parts.push(`${Math.round(direction)}°`);
   if (isLastKnownVessel(record)) parts.push(`LAST KNOWN · ${vesselPositionAge(record.lastPositionEpoch, Date.now()).label || 'age unknown'}`);
   return {
     id: vesselOverlayEntryId(record),

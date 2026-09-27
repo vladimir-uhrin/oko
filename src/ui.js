@@ -55,7 +55,7 @@ import { destroyNaturalEventCard, installNaturalEventCard } from './data/natural
 import { installHistoryPanel } from './historyPanel.js';
 import { installGasPanel } from './gasPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
-import { destroyWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
+import { destroyWorldOverlay, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
   destroyDetection,
   initDetection,
@@ -3112,6 +3112,8 @@ export class StyleManager {
       // otvoril kartičku aj kartu naraz — na prste kartičku kŕmime prázdnym
       // zoznamom (= zhasnutá) a rozhoduje len ťuknutie (2026-09-14, mobilný plášť).
       onHover: (candidates, position) => updateContactHoverCard(isCoarsePointer() ? [] : candidates, position, t),
+      // Štítky lodí (vlajka + meno, 2026-09-27) sú na plátne overlay — plné údaje aj nad nimi.
+      overlayHitTest: (x, y) => hitTestWorldOverlay(x, y, { collisionGroup: 'ambient-card' }),
     });
     initTrackedReadout(viewer);
     // Fotka sledovaného lietadla pod kartou (Planespotters Photo API, len

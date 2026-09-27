@@ -218,6 +218,22 @@ test('klik na loď: výber pripne kartu (variant selected) a zvýrazní zameriav
   assert.ok(!set2.e.some((entry) => entry.variant === 'selected'), 'po zrušení žiadna pripnutá karta');
 });
 
+test('okolitá loď AISHub: len vlajka a meno; stará poloha (≥ 10 min) sivý okraj + ONESKORENÉ · vek', () => {
+  // 2026-09-27 vlastník: „pri tých lodiach je to rušivé, treba dať len základné info a až po prejdení myšou plné info"
+  const row = PAYLOAD.rows[0]; // observedAt 20:05
+  const fresh = aishubLabelCard(row, { x: 1 }, (k) => k, Date.UTC(2026, 8, 15, 20, 6));
+  assert.equal(fresh.title, 'GULF STAR');
+  assert.deepEqual(fresh.details, [], 'bez typu, rýchlosti, kurzu a „oneskorené pred 60 s"');
+  assert.notEqual(fresh.accent, '146, 156, 165');
+  const stale = aishubLabelCard(row, { x: 1 }, (k) => k, Date.UTC(2026, 8, 15, 20, 20));
+  assert.equal(stale.details.length, 1);
+  assert.match(stale.details[0], /^aishub\.badge · /);
+  assert.equal(stale.accent, '146, 156, 165', 'sivý okraj ako posledná známa poloha živých lodí');
+  // vybraná (klik) ostáva plná
+  const sel = aishubLabelCard(row, { x: 1 }, (k) => k, Date.UTC(2026, 8, 15, 20, 6), true);
+  assert.match(sel.details[0], /· 12\.3KT · 208° · /);
+});
+
 test('klik: layerLabelCard je klikateľná (actionable → interactive v overlay policy)', () => {
   const card = aishubLabelCard(PAYLOAD.rows[0], { x: 1 }, (k) => k, Date.UTC(2026, 8, 15, 20, 6));
   assert.equal(card.actionable, true, 'karta je klikateľná ako živé lode');

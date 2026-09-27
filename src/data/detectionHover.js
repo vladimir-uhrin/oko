@@ -47,9 +47,34 @@ export function hoverCandidatesFromPick(picked) {
     // Živé lode aj satelitné AIS (GFW, 2026-09-12) nesú MMSI; resolver karty
     // skúša vrstvy po poradí, prvá s neprázdnym súhrnom vyhrá.
     const mmsi = String(raw.mmsi);
+    // Oneskorené lode AISHub (trup nesie aishub: true) — ich súhrn má len vrstva AISHub;
+    // bez nej by kartička pod kurzorom nad trupom AISHub ostala prázdna (2026-09-27).
+    if (raw.aishub === true) {
+      return [{ layerId: 'aishub-vessels', sourceId: mmsi }, { layerId: 'ais-live-vessels', sourceId: mmsi }];
+    }
     return raw.gfw === true
       ? [{ layerId: 'gfw-presence', sourceId: mmsi }, { layerId: 'ais-live-vessels', sourceId: mmsi }]
       : [{ layerId: 'ais-live-vessels', sourceId: mmsi }, { layerId: 'gfw-presence', sourceId: mmsi }];
+  }
+  return [];
+}
+
+/**
+ * Štítok lode na plátne world overlay (nie je Cesium primitívum, scene.pick ho netrafí) →
+ * kandidáti kartičky pod kurzorom (2026-09-27: okolitá loď nesie len vlajku a meno, plné
+ * údaje ukáže kartička pri prejdení myšou — nad ikonou AJ nad štítkom).
+ * @param {{entryId?: string}|null} hit výsledok hitTestWorldOverlay
+ * @returns {Array<{layerId: string, sourceId: string}>}
+ */
+export function hoverCandidatesFromOverlayHit(hit) {
+  const id = String(hit?.entryId || '');
+  if (id.startsWith('vessel:') && id.length > 7) {
+    const mmsi = id.slice(7);
+    return [{ layerId: 'ais-live-vessels', sourceId: mmsi }, { layerId: 'aishub-vessels', sourceId: mmsi }];
+  }
+  if (id.startsWith('aishub:') && id.length > 7) {
+    const mmsi = id.slice(7);
+    return [{ layerId: 'aishub-vessels', sourceId: mmsi }, { layerId: 'ais-live-vessels', sourceId: mmsi }];
   }
   return [];
 }
@@ -71,6 +96,7 @@ export function installDetectionHover(viewer, {
   handler = null,
   now = () => performance.now(),
   onHover = null,
+  overlayHitTest = null,
 } = {}) {
   if (_handler || !viewer?.scene?.canvas) return;
   _handler = handler || new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
@@ -85,7 +111,12 @@ export function installDetectionHover(viewer, {
     try {
       picked = viewer.scene.pick(position, DETECTION_HOVER_PICK_PX, DETECTION_HOVER_PICK_PX);
     } catch { /* pick can throw during scene teardown — treat as empty space */ }
-    const candidates = hoverCandidatesFromPick(picked);
+    let candidates = hoverCandidatesFromPick(picked);
+    // Nič pod kurzorom v scéne → možno štítok lode na plátne overlay (lacné: prechod
+    // obdĺžnikov poslednej snímky, žiadny ďalší pick).
+    if (!candidates.length && typeof overlayHitTest === 'function') {
+      try { candidates = hoverCandidatesFromOverlayHit(overlayHitTest(position.x, position.y)); } catch { candidates = []; }
+    }
     setDetectionHoverSubjects(candidates);
     // Druhý konzument toho istého picku: kartička pod kurzorom. Zámerne tu a
     // nie vlastným handlerom — dva nezávislé MOUSE_MOVE picky by zdvojili

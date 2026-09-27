@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   DETECTION_HOVER_THROTTLE_MS,
+  hoverCandidatesFromOverlayHit,
   hoverCandidatesFromPick,
 } from './detectionHover.js';
 
@@ -30,6 +31,29 @@ test('hoverCandidatesFromPick: string id → flights+military, mmsi objekt → v
   assert.deepEqual(hoverCandidatesFromPick({}), []);
   assert.deepEqual(hoverCandidatesFromPick({ id: { station: 'x' } }), []);
   assert.deepEqual(hoverCandidatesFromPick({ id: '' }), []);
+});
+
+test('lode: trup AISHub → vrstva AISHub; štítok na plátne overlay → kandidáti podľa id karty (2026-09-27)', () => {
+  // okolitá loď nesie len vlajku a meno — plné údaje dá kartička pod kurzorom, aj pre AISHub
+  assert.deepEqual(hoverCandidatesFromPick({ id: { mmsi: '470000001', aishub: true } }), [
+    { layerId: 'aishub-vessels', sourceId: '470000001' },
+    { layerId: 'ais-live-vessels', sourceId: '470000001' },
+  ]);
+  assert.deepEqual(hoverCandidatesFromOverlayHit({ entryId: 'vessel:353136000' }), [
+    { layerId: 'ais-live-vessels', sourceId: '353136000' },
+    { layerId: 'aishub-vessels', sourceId: '353136000' },
+  ]);
+  assert.deepEqual(hoverCandidatesFromOverlayHit({ entryId: 'aishub:470000001' }), [
+    { layerId: 'aishub-vessels', sourceId: '470000001' },
+    { layerId: 'ais-live-vessels', sourceId: '470000001' },
+  ]);
+  assert.deepEqual(hoverCandidatesFromOverlayHit(null), []);
+  assert.deepEqual(hoverCandidatesFromOverlayHit({ entryId: 'cctv:x' }), []);
+  assert.deepEqual(hoverCandidatesFromOverlayHit({ entryId: 'vessel:' }), []);
+  const src = fs.readFileSync(new URL('./detectionHover.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(!candidates\.length && typeof overlayHitTest === 'function'\) \{/, 'štítok až keď scéna pod kurzorom nič nemá');
+  const uiJs = fs.readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
+  assert.ok(uiJs.includes("overlayHitTest: (x, y) => hitTestWorldOverlay(x, y, { collisionGroup: 'ambient-card' }),"));
 });
 
 test('hover kontrakty: throttle, inštalácia v ui.js a bypass v paint slučke', () => {
