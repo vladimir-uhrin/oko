@@ -74,6 +74,7 @@ import {
 } from './focusDeemphasis.js';
 import { requestWorldFocus } from '../worldFocus.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
+import { SILHOUETTE_SCALE_BY_DISTANCE as SIL_SBD, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselViewFor } from './vesselSilhouettes.js';
 
 const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
 
@@ -959,6 +960,11 @@ const state = {
    * nepôsobil dobre; lode sú aj zblízka klasické ikony trupu. Kód modelov ostáva (zapnúť = true).
    */
   shipModels3d: false,
+  /**
+   * Siluety podľa uhla pohľadu (2026-09-27, vesselSilhouettes.js): zhora ikona trupu, šikmo/z boku/
+   * spredu silueta typu lode. `?lode=klasik` alebo localStorage `oko:lode=klasik` = len ikony zhora.
+   */
+  shipSilhouettes: shipSilhouettesEnabled(),
   /** @type {object|null} PrimitiveCollection s glTF trupmi. */
   modelCollection: null,
   /** @type {Map<string|object, object>} kľúč (MMSI alebo record) -> Cesium.Model. */
@@ -1612,7 +1618,40 @@ function vesselCourseDeg(record) {
  */
 function shipIcon(record, selected) {
   const cssColor = isLastKnownVessel(record) ? '#929ca5' : selected ? '#ffffff' : vesselTypeCss(record.type);
+  const view = record.view;
+  if (state.shipSilhouettes && view && view.kind !== 'top') {
+    return silhouetteDataUrl(vesselFamily(record.type), view.kind, cssColor, {
+      bowRight: view.bowRight,
+      moving: Number(record.speed) > 0.5,
+    });
+  }
   return shipIconDataUrl(cssColor, selected);
+}
+
+/** Siluety zmenšuje vzdialenosť (ikona zhora má pevnú veľkosť ako doteraz). */
+const SILHOUETTE_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(SIL_SBD.near, SIL_SBD.nearScale, SIL_SBD.far, SIL_SBD.farScale);
+
+/**
+ * Pohľad na loď (zhora / šikmo / z boku / spredu) pre pózu kamery — ukotvenie a mierku billboardu
+ * prispôsobí druhu: silueta stojí na hladine (spodok obrázka = hladina), ikona zhora je v strede.
+ * Obrázok priradí volajúci cez shipIcon (číta record.view).
+ * @returns {boolean} true = ikona zhora (volajúci ju natočí podľa kurzu)
+ */
+function applyVesselView(record, camView) {
+  const view = state.shipSilhouettes && camView
+    ? vesselViewFor(record.position, camView, vesselCourseDeg(record))
+    : null;
+  const top = !view || view.kind === 'top';
+  const prev = record.view;
+  record.view = top ? null : view;
+  const bb = record.billboard;
+  if (bb && (prev?.kind !== record.view?.kind || prev?.bowRight !== record.view?.bowRight)) {
+    bb.verticalOrigin = top ? Cesium.VerticalOrigin.CENTER : Cesium.VerticalOrigin.BOTTOM;
+    bb.scaleByDistance = top ? undefined : SILHOUETTE_SCALE_BY_DISTANCE;
+    if (!top) bb.rotation = 0;
+    bb.image = shipIcon(record, record === state.selectedRecord);
+  }
+  return top;
 }
 
 /**
@@ -1967,6 +2006,10 @@ function updateVisibility(force = false) {
     const poseSig = camera ? cameraPoseSignature(camera) : '';
     const doRotations = force || poseSig !== _lastCamPoseSig;
     if (doRotations) _lastCamPoseSig = poseSig;
+    // póza kamery pre siluety lodí (raz za prechod, nie na loď)
+    const camView = doRotations && camera && state.shipSilhouettes
+      ? { position: camera.positionWC, height: camera.positionCartographic?.height }
+      : null;
     const occluder = makeOccluder();
     const labelCandidates = [];
     state.visibleCount = 0;
@@ -1986,7 +2029,7 @@ function updateVisibility(force = false) {
         // druhé pravidlo). Labely aj tak berú `visible`, takže modelovaná loď
         // má stále štítok.
         record.billboard.show = visible && !shipModelOwnsVisual(record);
-        if (visible && doRotations && scene) {
+        if (visible && doRotations && scene && applyVesselView(record, camView)) {
           const rot = screenProjectedRotation(
             scene, record.position, vesselCourseDeg(record), record.billboard.rotation
           );

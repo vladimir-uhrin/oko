@@ -32,6 +32,10 @@ import {
   vesselTypeCss,
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
+import { SILHOUETTE_SCALE_BY_DISTANCE as SIL_SBD, shipSilhouettesEnabled, silhouetteDataUrl, vesselFamily, vesselViewFor } from './vesselSilhouettes.js';
+
+/** Siluety zmenšuje vzdialenosť (ako živé lode). */
+const AISHUB_SILHOUETTE_SCALE_BY_DISTANCE = new Cesium.NearFarScalar(SIL_SBD.near, SIL_SBD.nearScale, SIL_SBD.far, SIL_SBD.farScale);
 import { airIconTier } from './airIconLod.js';
 import { isMetric } from '../units.js';
 import { cameraPoseSignature, screenProjectedRotation } from './iconOrientation.js';
@@ -285,6 +289,8 @@ export function createAishubVesselsLayer({
   let _requestToken = 0;
   let _labelCount = 0;
   let _selectedKey = null;
+  // siluety podľa uhla pohľadu (vesselSilhouettes.js; `?lode=klasik` = len ikony zhora)
+  const _silhouettes = shipSilhouettesEnabled();
   const _scratchObjects = new Map();
   const _contextCarrier = new Map();
 
@@ -332,9 +338,21 @@ export function createAishubVesselsLayer({
         color: Cesium.Color.WHITE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       });
-      _byId.set(id.key, { row, billboard, course });
+      _byId.set(id.key, { row, billboard, course, view: null });
     }
     _poseSig = null; // vynúť prepočet natočenia v najbližšom preRender
+  }
+
+  /** Obrázok trupu: silueta pre pohľad šikmo/z boku/spredu, inak ikona zhora (ako živé lode). */
+  function iconFor(entry, selected) {
+    const color = vesselTypeCss(entry.row.type);
+    if (_silhouettes && entry.view) {
+      return silhouetteDataUrl(vesselFamily(entry.row.type), entry.view.kind, selected ? '#ffffff' : color, {
+        bowRight: entry.view.bowRight,
+        moving: Number(entry.row.sog) > 0.5,
+      });
+    }
+    return shipIconDataUrl(color, selected);
   }
 
   /**
@@ -345,8 +363,22 @@ export function createAishubVesselsLayer({
   function updateRotations() {
     const scene = _viewer?.scene;
     if (!scene) return;
-    for (const entry of _byId.values()) {
-      if (entry.course === null) continue;
+    const camera = _viewer?.camera;
+    const camView = _silhouettes && camera?.positionWC
+      ? { position: camera.positionWC, height: camera.positionCartographic?.height }
+      : null;
+    for (const [key, entry] of _byId.entries()) {
+      // siluety podľa uhla pohľadu (vesselSilhouettes.js); zhora ostáva natočená ikona
+      const view = camView ? vesselViewFor(entry.billboard.position, camView, entry.course ?? 0) : null;
+      const next = view && view.kind !== 'top' ? view : null;
+      if (next?.kind !== entry.view?.kind || next?.bowRight !== entry.view?.bowRight) {
+        entry.view = next;
+        entry.billboard.verticalOrigin = next ? Cesium.VerticalOrigin.BOTTOM : Cesium.VerticalOrigin.CENTER;
+        entry.billboard.scaleByDistance = next ? AISHUB_SILHOUETTE_SCALE_BY_DISTANCE : undefined;
+        if (next) entry.billboard.rotation = 0;
+        entry.billboard.image = iconFor(entry, key === _selectedKey);
+      }
+      if (next || entry.course === null) continue;
       const rot = screenProjectedRotation(scene, entry.billboard.position, entry.course, entry.billboard.rotation);
       if (rot !== null && Math.abs(rot - entry.billboard.rotation) > 0.002) entry.billboard.rotation = rot;
     }
@@ -354,10 +386,10 @@ export function createAishubVesselsLayer({
 
   /** Trup vybranej lode je väčší a s vybraným variantom ikony (ako živé lode). */
   function applySelectedVisual() {
-    for (const [key, { row, billboard }] of _byId.entries()) {
+    for (const [key, entry] of _byId.entries()) {
       const selected = key === _selectedKey;
-      billboard.scale = hullScaleFor(row.sog) * (selected ? 1.2 : 1);
-      billboard.image = shipIconDataUrl(vesselTypeCss(row.type), selected);
+      entry.billboard.scale = hullScaleFor(entry.row.sog) * (selected ? 1.2 : 1);
+      entry.billboard.image = iconFor(entry, selected);
     }
   }
 
