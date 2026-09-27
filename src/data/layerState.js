@@ -24,7 +24,19 @@ const TRACKING_ID_GRAMMAR = /^[0-9a-z~_-]{1,16}$/;
  */
 const MAX_ENABLED_LAYERS_CHARS = 64;
 const MAX_LAYER_OPTIONS_CHARS = 512;
-export const LAYER_STATE_STORAGE_KEY = 'gev:layer-state:v2';
+/**
+ * v3 (2026-09-27): nové predvolené vrstvy (STARTUP_DEFAULT_LAYER_IDS) — zmena kľúča, aby každý
+ * (aj vlastník s uloženými plynovodmi, prístavmi, koridormi…) raz začal od nich; ďalej sa voľby
+ * znova ukladajú. Starý záznam v2 ostáva v úložisku nepoužitý.
+ */
+export const LAYER_STATE_STORAGE_KEY = 'gev:layer-state:v3';
+/**
+ * Vrstvy zapnuté pri čerstvom štarte — bez odkazu a bez uloženého stavu (vlastník 2026-09-27:
+ * „lode a lietadlá nechaj implicitne zapnuté a ostatné vypnuté"). Zapína ich ui.js po štarte
+ * koordinátora ako voľbu používateľa, takže sa uložia; obnova stavu sa tým nemení (čerstvý štart
+ * stále nič neobnovuje — layerState.test).
+ */
+export const STARTUP_DEFAULT_LAYER_IDS = Object.freeze(['ais-live-vessels', 'aishub-vessels', 'flights']);
 export const LAYER_RESTORE_ORIGINS = Object.freeze({
   share: 'share-restore',
   local: 'local-restore',

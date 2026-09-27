@@ -12120,6 +12120,11 @@ body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
    (2026-09-26, vlastník ju zakrúžkoval a šípkou ukázal hore do ľavého stĺpca; kartaRailDock.js ju
    presúva a polohu mení inline). Dočasné do upratania panelov. */
 #left-panel-stack > .oko-rail-docked { order: 0; flex: 0 0 auto; }
+/* Od 2026-09-27 je lišta vľavo vždy: pruh s lištou sa zmestí do koridoru a posúva sa (inak by
+   rozbalené Zobrazenie vytlačilo panely pod okraj) a rozbalený panel pruhu nespadne na 0 px
+   (engine mu v plnom koridore nedal nič a hlavička ležala cez nadpis zóny). */
+#left-panel-stack.oko-lane-with-rail { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; scrollbar-width: thin; }
+#left-panel-stack.oko-lane-with-rail > [data-panel-id]:not(.collapsed) { min-height: min(30vh, 200px); }
 /* Zbalené pilulky vľavo ako ostatné v pruhu; rozbalený panel má strop a roluje sám (DÁTOVÉ VRSTVY ostanú). */
 #left-panel-stack > #right-context-rail.oko-rail-docked > [data-panel-id].collapsed { margin-left: 0; }
 #left-panel-stack > #right-context-rail.oko-rail-docked > [data-panel-id]:not(.collapsed) { max-height: min(46vh, 420px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }

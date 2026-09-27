@@ -2,9 +2,11 @@
 /**
  * @module kartaRailDock
  * @description Pravá lišta panelov (#right-context-rail: Zobrazenie, Kamery,
- * Kontext) v ráme KARTA do ľavého stĺpca panelov (2026-09-26, vlastník ju
- * zakrúžkoval a šípkou ukázal na ľavý stĺpec hore: „toto musí zmiznúť a dať do
- * tam, kde som dal šípku"; dočasne do upratania panelov).
+ * Kontext) na vrch ľavého stĺpca panelov. 2026-09-26 len v ráme KARTA (vlastník:
+ * „toto musí zmiznúť a dať tam, kde som dal šípku"), od 2026-09-27 VŽDY na počítači
+ * (vlastník v bežnom pohľade: „potrebujem to presunúť na druhú stranu") — zapína
+ * main.js hneď po StyleManageri. Ľavý pruh dostane triedu `oko-lane-with-rail`
+ * (style.css: pruh sa posúva, rozbalený panel má podlahu výšky).
  *
  * Presúva sa CELÁ lišta (jej panely si nechajú štýly `#right-context-rail > …`)
  * ako prvý prvok #left-panel-stack (poradie cez `.oko-rail-docked` v style.css).
@@ -56,6 +58,7 @@ export function createKartaRailDock(doc = globalThis.document, { setPanelCollaps
     }
     for (const [prop, value] of Object.entries(DOCKED_INLINE)) r.style.setProperty(prop, value);
     r.classList.add('oko-rail-docked');
+    l.classList.add('oko-lane-with-rail');
     l.insertBefore(r, l.firstChild);
     return true;
   }
@@ -71,6 +74,7 @@ export function createKartaRailDock(doc = globalThis.document, { setPanelCollaps
     }
     for (const prop of Object.keys(DOCKED_INLINE)) r.style.removeProperty(prop);
     r.classList.remove('oko-rail-docked');
+    lane()?.classList.remove('oko-lane-with-rail');
     for (const id of folded) {
       const panel = doc.getElementById(id);
       if (panel?.classList.contains('collapsed')) { try { setPanelCollapsed(id, false); } catch { /* */ } }

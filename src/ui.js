@@ -27,6 +27,7 @@ import { ShareLinkManager } from './sharelink.js';
 import {
   isExplicitLayerStateOrigin,
   LayerStateCoordinator,
+  STARTUP_DEFAULT_LAYER_IDS,
 } from './data/layerState.js';
 import { renderMapStackChips, renderMapStackVariants, syncMapStackChips } from './mapStackChips.js';
 import {
@@ -5170,6 +5171,13 @@ export class StyleManager {
         // including legacy and malformed-v2 layer payloads.
         allowLocalState: !this._initialShareState,
       });
+      // Čerstvý štart (žiadny odkaz ani uložený stav): lode a lietadlá zapnuté, ostatné vypnuté
+      // (vlastník 2026-09-27). Ako voľba používateľa → uloží sa a ďalší štart je už 'local'.
+      if (this._layerStateCoordinator.source === 'defaults') {
+        for (const id of STARTUP_DEFAULT_LAYER_IDS) {
+          try { this._dataManager.setEnabled(id, true, { origin: 'user' }); } catch { /* vrstva nemusí byť registrovaná */ }
+        }
+      }
       if (this._initialShareSelectionSuperseded) {
         this._layerStateCoordinator.cancelPendingShareTracking(
           'superseded-before-layer-coordinator-start',

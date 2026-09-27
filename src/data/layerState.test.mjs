@@ -1670,3 +1670,15 @@ test('potrubia (etapa 3): token 0 nesie voľby látok g/o; odkaz bez lo = plyn a
   // Nezmysel v hodnote sa ignoruje a padne na absentValue, nie na chybu.
   assert.deepEqual(decodeLayerStateParams(new URLSearchParams('v=2&l=0&lo=0.o.x')).options['gas-pipelines'], { gas: true, oil: true });
 });
+
+test('predvolené vrstvy pri čerstvom štarte: lode a lietadlá, ostatné vypnuté (vlastník 2026-09-27)', async () => {
+  const { STARTUP_DEFAULT_LAYER_IDS, LAYER_STATE_REGISTRY, LAYER_STATE_STORAGE_KEY: key } = await import('./layerState.js');
+  assert.deepEqual([...STARTUP_DEFAULT_LAYER_IDS], ['ais-live-vessels', 'aishub-vessels', 'flights']);
+  const ids = new Set(LAYER_STATE_REGISTRY.map((e) => e.id));
+  for (const id of STARTUP_DEFAULT_LAYER_IDS) assert.ok(ids.has(id), `${id} je registrovaná vrstva`);
+  assert.equal(key, 'gev:layer-state:v3', 'nový kľúč — každý raz začne od nových predvolieb');
+  const { readFile } = await import('node:fs/promises');
+  const ui = await readFile(new URL('../ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /if \(this\._layerStateCoordinator\.source === 'defaults'\) \{\n\s+for \(const id of STARTUP_DEFAULT_LAYER_IDS\) \{\n\s+try \{ this\._dataManager\.setEnabled\(id, true, \{ origin: 'user' \}\); \}/,
+    'len pri čerstvom štarte, ako voľba používateľa (uloží sa)');
+});

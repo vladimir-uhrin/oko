@@ -193,6 +193,7 @@ test('KARTA: pravá lišta sa v ráme zakotví na vrch ľavého stĺpca a po odc
   assert.equal(dock.setDocked(true), true);
   assert.equal(rail.parentNode, lane, 'lišta je v ľavom stĺpci');
   assert.equal(lane.firstChild, rail, 'na vrchu, nad DÁTOVÝMI VRSTVAMI');
+  assert.ok(lane.classList.contains('oko-lane-with-rail'), 'pruh vie, že nesie lištu (posúvanie, podlaha výšky)');
   assert.ok(rail.classList.contains('oko-rail-docked'));
   assert.equal(rail.props.get('position'), 'relative', 'poloha inline (creditAttribution.test stráži CSS lišty)');
   assert.equal(rail.props.get('top'), 'auto');
@@ -202,6 +203,7 @@ test('KARTA: pravá lišta sa v ráme zakotví na vrch ľavého stĺpca a po odc
   assert.equal(rail.parentNode, app);
   assert.equal(rail.nextSibling, after, 'vrátená presne na pôvodné miesto');
   assert.equal(rail.classList.contains('oko-rail-docked'), false);
+  assert.equal(lane.classList.contains('oko-lane-with-rail'), false);
   for (const k of Object.keys(DOCKED_INLINE)) assert.equal(rail.props.has(k), false, `inline ${k} zmazané`);
 
   bodyEl.classList.add('oko-mobile');
@@ -210,10 +212,14 @@ test('KARTA: pravá lišta sa v ráme zakotví na vrch ľavého stĺpca a po odc
   assert.equal(createKartaRailDock({ body: bodyEl, getElementById: () => null }).setDocked(true), false, 'bez prvkov nič');
 });
 
-test('KARTA: väzby zakotvenia — rám ho zapína/vypína, poradie v ľavom pruhu, rozloženie lišty ustúpi', () => {
+test('lišta vľavo VŽDY (vlastník 09-27: „presunúť na druhú stranu"): zapína ju main.js, rám KARTA ju už neriadi', () => {
   const ov = readFileSync(new URL('./ukraineKartaOverlay.js', import.meta.url), 'utf8');
-  assert.ok(ov.includes('railDock.setDocked(visible);'), 'rám KARTA zakotví / uvoľní');
-  assert.ok(ov.includes('railDock.setDocked(false);'), 'destroy lištu vráti');
+  assert.ok(!ov.includes('railDock'), 'rám KARTA lištu neukotvuje ani neuvoľňuje');
+  assert.ok(main.includes('const railDock = createKartaRailDock(document);'), 'main.js ju ukotví hneď po StyleManageri');
+  assert.ok(main.includes("railDock.setDocked(!document.body.classList.contains('oko-mobile'))"), 'na mobile nie (obe strany skryté, panely vo výsuve)');
+  assert.ok(!main.includes('setPanelCollapsed: (id, collapsed)'), 'Zobrazenie sa nezbaľuje — ostáva, ako ho má používateľ');
+  assert.match(css, /#left-panel-stack\.oko-lane-with-rail \{ max-height: calc\(100vh/, 'pruh s lištou sa zmestí do koridoru a posúva sa');
+  assert.match(css, /#left-panel-stack\.oko-lane-with-rail > \[data-panel-id\]:not\(\.collapsed\) \{ min-height: min\(30vh, 200px\); \}/, 'rozbalený panel nespadne na 0 px');
   assert.equal(prop('#left-panel-stack > .oko-rail-docked', 'order'), '0', 'nad #data-panel (order 10)');
   assert.ok(!css.includes('body.oko-karta-frame #right-context-rail'), 'staré pravidlo vľavo od náhľadu je preč');
   assert.ok(ui.includes("if (stack.classList.contains('oko-rail-docked')) {"), 'koridor pravej lišty sa pri zakotvení nepočíta');
@@ -243,6 +249,4 @@ test('KARTA: zakotvenie zbalí rozbalené panely lišty bez uloženia a po odcho
   dock.setDocked(false);
   assert.deepEqual(calls, [['pp-toggles', false], ['global-context-panel', false]]);
   assert.ok(cams.classList.contains('collapsed'), 'Kamery ostanú zbalené');
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.ok(main.includes("styleManager.setPanelCollapsed?.(id, collapsed, { persist: false, syncShare: false })"), 'bez uloženia preferencie');
 });

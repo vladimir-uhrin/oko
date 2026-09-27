@@ -14,7 +14,6 @@
 import { frontSceneLabel } from './ukraineFrontScenes.js';
 import { UKRAINE_OUTLINE_BBOX, UKRAINE_OUTLINE_RINGS } from './data/ukraineOutline.js';
 import { STALE_DIM } from './data/ukraineFreshness.js';
-import { createKartaRailDock } from './kartaRailDock.js';
 
 export const KARTA_OVERLAY_ID = 'oko-karta-overlay';
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -279,7 +278,6 @@ export function createUkraineKartaOverlay({
   getViewRect = () => null,
   onCleanChange = () => {},
   onExport = () => {},
-  setPanelCollapsed = null,
 } = {}) {
   const doc = documentRef;
   const inert = {
@@ -400,16 +398,12 @@ export function createUkraineKartaOverlay({
     drawInset();
   }
 
-  const railDock = createKartaRailDock(doc, { setPanelCollapsed });
-
   function applyVisibility() {
     const visible = _isKarta && _revealed;
     root.classList.toggle('is-visible', visible);
     // Rám karty na <body>: style.css podľa neho schová súradnicový roh HUD-u
     // (jeho miesto vľavo dole má legenda) — 2026-09-26, upratanie prekryvov.
     try { doc.body.classList.toggle('oko-karta-frame', visible); } catch { /* */ }
-    // Pravá lišta panelov v ráme na vrch ľavého stĺpca (vlastník 2026-09-26, šípka na snímke).
-    try { railDock.setDocked(visible); } catch { /* */ }
     if (visible) update();
   }
 
@@ -437,7 +431,6 @@ export function createUkraineKartaOverlay({
     for (const u of unsubs) { try { u(); } catch { /* */ } }
     if (_clean) { try { doc.body.classList.remove('oko-karta-clean'); } catch { /* */ } }
     try { doc.body.classList.remove('oko-karta-frame'); } catch { /* */ }
-    try { railDock.setDocked(false); } catch { /* */ }
     try { root.remove(); } catch { /* */ }
   }
 

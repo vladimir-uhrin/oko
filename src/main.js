@@ -56,6 +56,7 @@ import { createMideastControl } from './mideastControlLayer.js';
 import { createPortwatchCard } from './portwatchCard.js';
 import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
+import { createKartaRailDock } from './kartaRailDock.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
@@ -345,6 +346,13 @@ async function init() {
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController });
+    // Pravá lišta panelov (Zobrazenie, Kamery, Kontext) na vrchu ľavého stĺpca — vždy na počítači
+    // (vlastník 2026-09-27: „potrebujem to presunúť na druhú stranu"; predtým len v ráme KARTA).
+    // Na mobile sa nepresúva (obe strany sú skryté, panely nosí výsuv); pri prepnutí sa zosúladí.
+    const railDock = createKartaRailDock(document);
+    const syncRailDock = () => railDock.setDocked(!document.body.classList.contains('oko-mobile'));
+    syncRailDock();
+    new MutationObserver(syncRailDock).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     // Mobilný plášť (2026-09-14): na dotyku / úzkej obrazovke spodná lišta
     // a výsuvné panely namiesto bočných stĺpcov; širší výber prstom; bez
     // ambientných kariet na plátne (jedna vybraná karta naraz).
@@ -900,8 +908,6 @@ async function init() {
         return activeFrontScene?.rectDegrees || null;
       },
       onExport: () => { void exportConflict({ ratio: 'feed' }); },
-      // Zakotvená pravá lišta (kartaRailDock.js) zbalí svoje panely len na čas rámu — bez uloženia.
-      setPanelCollapsed: (id, collapsed) => styleManager.setPanelCollapsed?.(id, collapsed, { persist: false, syncShare: false }),
     });
     window.__godsEyeView.ukraineKartaOverlay = kartaOverlay;
     // Ostrovy rámu sú prekážky pruhov (ui.js *_STACK_OBSTACLE_SELECTOR): ľavý pruh
