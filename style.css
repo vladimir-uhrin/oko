@@ -12183,6 +12183,13 @@ body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
 #left-panel-stack > .lane-zone[data-lane-zone="settings"] { order: 50; }
 #left-panel-stack > #pp-toggles { order: 51; }
 #left-panel-stack.oko-lane-with-rail { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; pointer-events: auto; }
+/* Stĺpec len taký široký ako jeho najširší panel (09-27, vlastník: „nesmie byť prekrytý glóbus"):
+   pri pevných 360 px ležal posuvník aj prázdny pás vpravo od pilúl (pointer-events: auto) cez okraj
+   glóbusu. Posuvník tak sedí hneď pri paneloch; miesto preň je rezervované, nech sa šírka nemení. */
+@media (min-width: 721px) {
+  /* overflow-x: hidden — žiara panelov (.panel-glow, absolútna) by inak robila vodorovný posun */
+  #left-panel-stack.oko-lane-with-rail { width: fit-content; max-width: 360px; scrollbar-gutter: stable; overflow-x: hidden; }
+}
 /* Otvorený panel: v tesnom koridore (engine mu nemá čo prideliť) by spadol na pár px a hlavička by
    ležala cez nadpis zóny. Dostane preto svoju prirodzenú výšku (--lane-open-natural, zapíše ju
    leftLane.js fit()), najviac záber stĺpca mínus 56 px, aby vykukol ďalší riadok — a aspoň
@@ -12295,6 +12302,10 @@ body.oko-karta-clean > *:not(#cesiumContainer):not(#oko-karta-overlay):not([id="
   backdrop-filter: none;
 }
 #left-panel-stack > .lane-zone > .oko-conflicts-launch .material-symbols-outlined { font-size: 12px; line-height: 12px; letter-spacing: 0; }
+/* Hneď za nadpisom, čiara až za ním (09-27, vlastník: „kartičky sú mimo" — na konci riadku trčali
+   z stĺpca nad glóbus). */
+#left-panel-stack > .lane-zone > .oko-conflicts-launch { order: 1; }
+#left-panel-stack > .lane-zone > .panel-divider { order: 2; }
 #left-panel-stack > .lane-zone > .oko-conflicts-launch:hover { color: #eafaff; background: rgba(0, 212, 255, 0.18); }
 #left-panel-stack > .lane-zone > .oko-conflicts-launch[aria-expanded="true"] { color: #eafaff; background: rgba(0, 212, 255, 0.26); }
 

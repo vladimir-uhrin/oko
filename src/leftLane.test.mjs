@@ -161,6 +161,14 @@ test('poradie v zónach: Vrstvy · Konflikty · Energia · Nástroje (… Kamery
   assert.match(html, /<div class="lane-zone" data-lane-zone="settings">\s*<span class="lane-zone-text" data-i18n="lane\.zone\.settings">SETTINGS<\/span>/);
 });
 
+test('stĺpec neprekrýva glóbus: široký len ako najširší panel, posuvník pri paneloch; Kartičky hneď za nadpisom', () => {
+  // vlastník 09-27: „nesmie byť prekrytý glóbus a kartičky sú mimo" — pri pevných 360 px ležal posuvník
+  // aj prázdny pás (pointer-events: auto) cez okraj glóbusu, Kartičky trčali na konci riadku nadpisu
+  assert.match(css, /@media \(min-width: 721px\) \{[^{}]*#left-panel-stack\.oko-lane-with-rail \{ width: fit-content; max-width: 360px; scrollbar-gutter: stable; overflow-x: hidden; \}/);
+  assert.match(css, /#left-panel-stack > \.lane-zone > \.oko-conflicts-launch \{ order: 1; \}/);
+  assert.match(css, /#left-panel-stack > \.lane-zone > \.panel-divider \{ order: 2; \}/);
+});
+
 test('stĺpec neotáča mapu: keď sa posúva, prijíma myš; jeden posuvník vo vnútri panela; kokpit ich skrýva', () => {
   const lane = /#left-panel-stack\.oko-lane-with-rail \{([^}]*)\}/.exec(css);
   assert.ok(lane);
