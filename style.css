@@ -652,7 +652,8 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 }
 /* Titulok je pointer-events: none (klik ide na glóbus) — odznak si ho vezme kvôli bubline. */
 #title-bar .beta-badge { align-self: center; pointer-events: auto; cursor: help; }
-.loader-content h2 .beta-badge { margin-left: 4px; position: relative; top: -2px; }
+/* V preloaderi menší (09-27, vlastník: „beta menšie") — len značka pri názve, nie nadpis. */
+.loader-content h2 .beta-badge { margin-left: 2px; position: relative; top: -2px; font-size: 7px; letter-spacing: 1.5px; padding: 2px 2px 2px 3px; border-radius: 2px; }
 
 /* Podpis autora pod heslom — rovnaká reč ako .loader-credit v preloaderi, len v riadku. */
 #title-bar .title-credit {
@@ -1080,13 +1081,14 @@ html.oko-preloader-demo #loading-screen.hidden {
   animation: pulse 2s ease-in-out infinite;
 }
 /* Podpis autora v preloaderi (2026-09-07): tichý, mono, s tenkou azúrovou
-   linkou — rovnaká reč ako stavový riadok, ale bez pulzu. */
+   linkou — rovnaká reč ako stavový riadok, ale bez pulzu. Tesne pod stavom (09-27, vlastník:
+   „prázdne hluché miesto zruš, aby to nebolo také veľké" — voľný stred víru sa zmenší s ním). */
 .loader-credit {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  margin-top: 34px;
+  gap: 6px;
+  margin-top: 12px;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 3px;
