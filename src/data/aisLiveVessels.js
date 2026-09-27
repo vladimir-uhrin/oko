@@ -74,7 +74,7 @@ import {
 } from './focusDeemphasis.js';
 import { requestWorldFocus } from '../worldFocus.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
-import { SILHOUETTE_MAX_CAMERA_M, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
+import { SILHOUETTE_MAX_CAMERA_M, convoyBarges, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, topSilhouetteDataUrl, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
 import { loadRiverIndex, onRiverIndexReady, riverUpstreamBearing } from './riverDirection.js';
 
 const FOCUS_EVIDENCE_DEV = import.meta.env?.DEV === true;
@@ -832,7 +832,7 @@ const aisLiveVesselsLayer = {
           : undefined,
         metric: isLastKnownVessel(record) ? 'LAST KNOWN' : formatVesselSpeedKnots(record.speed),
         // silueta (šikmo / z boku / spredu) bez rohov zameriavača, kým na ňu nejde myš (detection.js)
-        quietBracket: Boolean(state.shipSilhouettes && record.view),
+        quietBracket: Boolean(state.shipSilhouettes && (record.view || Number.isFinite(record.realScale))),
       };
     };
     // Loď pod kurzorom a vybraná loď idú VŽDY (2026-09-12, „zameriavače ako
@@ -1642,11 +1642,16 @@ function shipIcon(record, selected) {
   const cssColor = isLastKnownVessel(record) ? '#929ca5' : selected ? '#ffffff' : vesselTypeCss(record.type);
   const view = record.view;
   if (state.shipSilhouettes && view && view.kind !== 'top') {
-    return silhouetteDataUrl(vesselFamily(record.type), view.kind, cssColor, {
+    return silhouetteDataUrl(vesselFamily(record.type, record.name), view.kind, cssColor, {
       bowRight: view.bowRight,
       moving: Number(record.speed) > 0.5,
       dim: record.dimmed === true,
+      barges: convoyBarges(record.name),
     });
+  }
+  // zblízka (skutočná veľkosť) aj zhora tvar podľa typu lode; zďaleka doterajšia ikona
+  if (state.shipSilhouettes && Number.isFinite(record.realScale)) {
+    return topSilhouetteDataUrl(vesselFamily(record.type, record.name), cssColor, { barges: convoyBarges(record.name) });
   }
   return shipIconDataUrl(cssColor, selected);
 }
@@ -1665,7 +1670,7 @@ function refreshSilhouetteOverlap(scene, camera) {
     if (!record.view || !bb?.show) continue;
     const screen = Cesium.SceneTransforms.worldToWindowCoordinates(scene, record.position, _scratchSilScreen);
     if (!screen) continue;
-    const size = silhouetteImageSize(vesselFamily(record.type), record.view.kind);
+    const size = silhouetteImageSize(vesselFamily(record.type, record.name), record.view.kind, convoyBarges(record.name));
     const w = size.width * bb.scale;
     const h = size.height * bb.scale;
     items.push({ key: record, x: screen.x - w / 2, y: screen.y - h, w, h, distance: Cesium.Cartesian3.distance(camera.positionWC, record.position) });
@@ -1690,7 +1695,6 @@ function applyVesselView(record, camView) {
     ? vesselViewFor(record.position, camView, vesselCourseDeg(record), record.viewKind ?? null)
     : null;
   const top = !view || view.kind === 'top';
-  const prev = record.view;
   record.view = top ? null : view;
   record.viewKind = view ? view.kind : null; // rezerva hraníc pohľadu (vesselViewKind)
   // Skutočná veľkosť (2026-09-27: „čo najrealistickejšie pri scrolovaní"): trup má na obrazovke
@@ -1699,9 +1703,10 @@ function applyVesselView(record, camView) {
   record.realScale = state.shipSilhouettes && camView && camView.height < SILHOUETTE_MAX_CAMERA_M
     ? vesselRealScale({
       kind: view?.kind || 'top',
-      family: vesselFamily(record.type),
+      family: vesselFamily(record.type, record.name),
       lengthM: record.lengthM,
       beamM: record.beamM,
+      barges: convoyBarges(record.name),
       distanceM: Cesium.Cartesian3.distance(camView.position, record.position),
       fovyRad: camView.fovy,
       viewportHeightPx: camView.viewportHeight,
@@ -1711,7 +1716,12 @@ function applyVesselView(record, camView) {
   if (!bb) return top;
   const scale = shipScale(record) * (record === state.selectedRecord ? 1.2 : 1);
   if (Math.abs(bb.scale - scale) > 1e-3) bb.scale = scale;
-  if (prev?.kind !== record.view?.kind || prev?.bowRight !== record.view?.bowRight) {
+  // obrázok sa mení len pri zmene štýlu: silueta (druh + strana prídi) / zhora podľa typu / klasická
+  const style = record.view
+    ? `${record.view.kind}:${record.view.bowRight ? 'r' : 'l'}`
+    : (Number.isFinite(record.realScale) ? 'top:family' : 'top:classic');
+  if (style !== record.iconStyle) {
+    record.iconStyle = style;
     bb.verticalOrigin = top ? Cesium.VerticalOrigin.CENTER : Cesium.VerticalOrigin.BOTTOM;
     if (!top) bb.rotation = 0;
     bb.image = shipIcon(record, record === state.selectedRecord);

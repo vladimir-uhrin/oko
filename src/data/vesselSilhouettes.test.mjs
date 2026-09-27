@@ -108,7 +108,7 @@ test('vrstvy: živé AIS aj AISHub kreslia siluety cez ten istý modul, silueta 
   assert.match(live, /if \(Number\.isFinite\(record\.realScale\)\) return record\.realScale;/, 'skutočná veľkosť v jednom mieste (shipScale)');
   assert.match(hub, /return Number\.isFinite\(entry\.realScale\) \? entry\.realScale : hullScaleFor\(entry\.row\.sog\);/);
   assert.doesNotMatch(live + hub, /scaleByDistance/, 'veľkosť dáva skutočná dĺžka, nie krivka podľa vzdialenosti');
-  assert.match(live, /if \(state\.shipSilhouettes && view && view\.kind !== 'top'\) \{\s*return silhouetteDataUrl\(vesselFamily\(record\.type\)/);
+  assert.match(live, /if \(state\.shipSilhouettes && view && view\.kind !== 'top'\) \{\s*return silhouetteDataUrl\(vesselFamily\(record\.type, record\.name\)/);
   assert.match(live, /bb\.verticalOrigin = top \? Cesium\.VerticalOrigin\.CENTER : Cesium\.VerticalOrigin\.BOTTOM;/);
   assert.match(live, /if \(visible && scene && \(doRotations \|\| record\.realScale === undefined\) && applyVesselView\(record, camView\)\) \{/, 'natočenie len pre ikonu zhora; nová loď dostane veľkosť hneď');
   assert.match(hub, /const _silhouettes = shipSilhouettesEnabled\(\);/);
@@ -137,8 +137,8 @@ test('skutočná veľkosť: trup má na obrazovke svoju dĺžku v metroch, zďal
   assert.ok(near(vesselRealScale({ kind: 'side', family: 'tug', distanceM: 5, ...cam }), vesselHullCapPx(25) / FAMILY_LENGTH_PX.tug));
   assert.equal(vesselHullCapPx(400), 90);
   assert.equal(vesselHullCapPx(5), 26);
-  // ikona zhora: trup 28 px v obrázku; remorkér menší ako výletná loď
-  assert.ok(near(vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 2000, ...cam }), px2 / 28));
+  // ikona zhora podľa typu (bod 5): trup výletnej lode 60 px v obrázku; remorkér menší ako výletná loď
+  assert.ok(near(vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 2000, ...cam }), px2 / 60));
   assert.ok(vesselRealScale({ kind: 'top', family: 'tug', distanceM: 1000, ...cam }) < vesselRealScale({ kind: 'top', family: 'passenger', distanceM: 1000, ...cam }));
   // spredu: šírka trupu
   assert.ok(near(vesselRealScale({ kind: 'end', family: 'passenger', distanceM: 1000, ...cam }), (11.4 * pxPerM) / 20));
@@ -214,7 +214,53 @@ test('lode bok po boku: siluetu za bližšou loďou stlmiť, bližšia ostane na
   assert.match(detection, /if \(drawBracket\) appendCornerBracket\(pathFor\(bracketPaths, color, bracketAlpha\), sx, sy, halfW, halfH\);/);
   const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
   const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
-  assert.match(live, /quietBracket: Boolean\(state\.shipSilhouettes && record\.view\),/);
-  assert.match(hub, /object\.quietBracket = Boolean\(_silhouettes && entry\.view\);/);
+  // bez rohov: silueta aj ikona zhora v skutočnej veľkosti (zblízka)
+  assert.match(live, /quietBracket: Boolean\(state\.shipSilhouettes && \(record\.view \|\| Number\.isFinite\(record\.realScale\)\)\),/);
+  assert.match(hub, /object\.quietBracket = Boolean\(_silhouettes && \(entry\.view \|\| Number\.isFinite\(entry\.realScale\)\)\);/);
   assert.match(live, /if \(doRotations && camView && scene && camera\) refreshSilhouetteOverlap\(scene, camera\);/);
+});
+
+test('tlačné zostavy z mena (bod 4): „MARIA+3BARGE" = tlačný čln + bárky; dĺžka z bárok, keď AIS hlási len čln', async () => {
+  const { convoyBarges, convoyColumns, convoyRows, sideHullPx } = await import('./vesselSilhouettes.js');
+  assert.equal(convoyBarges('MARIA+3BARGE'), 3);
+  assert.equal(convoyBarges('MICHAELA+1BARGE'), 1);
+  assert.equal(convoyBarges('DUNAJ + 2 BARGES'), 2);
+  assert.equal(convoyBarges('VIKING INGVI'), 0);
+  assert.equal(convoyBarges('A+B'), 0, 'bez čísla nie je zostava');
+  assert.equal(convoyBarges(null), 0);
+  assert.equal(vesselFamily('52', 'MARIA+3BARGE'), 'convoy', 'zostava má prednosť pred typom TUG');
+  assert.equal(vesselFamily('52', 'MUFLON7'), 'tug');
+  // formácia: 1 bárka pred člnom; od dvoch dve vedľa seba
+  assert.deepEqual([1, 2, 3, 4, 6].map((n) => [convoyColumns(n), convoyRows(n)]), [[1, 1], [1, 2], [2, 2], [2, 2], [3, 2]]);
+  assert.ok(sideHullPx('convoy', 3) > sideHullPx('convoy', 1), 'viac bárok za sebou = dlhšia silueta');
+  // dĺžka: AIS 165 m (celá zostava) platí; 23 m (len čln) → odhad z bárok 25 + 76,5 m
+  assert.equal(vesselSizeM('convoy', 165, null, 3).lengthM, 165);
+  assert.equal(vesselSizeM('convoy', 23, null, 1).lengthM, 101.5);
+  assert.equal(vesselSizeM('convoy', null, null, 3).beamM, 22.8, 'dve bárky vedľa seba');
+  const side = silhouetteSvg('convoy', 'side', '#f7f0a3', { barges: 3 });
+  assert.equal(side.width, sideHullPx('convoy', 3) + 16);
+  assert.ok((side.svg.match(/<path d="M/g) || []).length >= 3, 'dve bárky + čln');
+  assert.notEqual(silhouetteDataUrl('convoy', 'side', '#f7f0a3', { barges: 1 }), silhouetteDataUrl('convoy', 'side', '#f7f0a3', { barges: 3 }));
+  assert.ok(silhouetteSvg('convoy', 'end', '#f7f0a3', { barges: 3 }).svg.endsWith('</svg>'));
+});
+
+test('ikona zhora podľa typu (bod 5): tvar a dĺžka podľa lode, príď hore; zďaleka doterajšia ikona', async () => {
+  const { topSilhouetteSvg, topSilhouetteDataUrl, topHullPx } = await import('./vesselSilhouettes.js');
+  assert.ok(topHullPx('passenger') > topHullPx('tug'));
+  assert.equal(topHullPx('convoy', 3), 14 + 2 * 28);
+  for (const fam of ['passenger', 'cargo', 'tanker', 'tug', 'fishing', 'pleasure', 'generic']) {
+    const { svg, width, height } = topSilhouetteSvg(fam, '#39d5ff');
+    assert.ok(height > width, `${fam}: dlhšia ako širšia (príď hore)`);
+    assert.ok(svg.endsWith('</svg>') && svg.includes('viewBox="-'), `${fam}: stred obrázka = poloha lode (otáča sa okolo neho)`);
+  }
+  const convoy = topSilhouetteSvg('convoy', '#f7f0a3', { barges: 3 });
+  assert.equal((convoy.svg.match(/<rect /g) || []).length >= 8, true, '4 bárky (2 × 2) s nákladom + kormidlovňa');
+  assert.match(topSilhouetteSvg('tug', '#f7f0a3', { dim: true }).svg, /opacity=/);
+  assert.equal(topSilhouetteDataUrl('tug', '#f7f0a3'), topSilhouetteDataUrl('tug', '#f7f0a3'), 'cache');
+  const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
+  // zblízka (skutočná veľkosť) tvar podľa typu, zďaleka (nad 40 km) doterajšia ikona
+  assert.match(live, /if \(state\.shipSilhouettes && Number\.isFinite\(record\.realScale\)\) \{\s*return topSilhouetteDataUrl\(/);
+  assert.match(hub, /if \(_silhouettes && Number\.isFinite\(entry\.realScale\)\) \{\s*return topSilhouetteDataUrl\(/);
+  assert.match(live, /: \(Number\.isFinite\(record\.realScale\) \? 'top:family' : 'top:classic'\);/, 'obrázok sa mení len pri zmene štýlu');
 });

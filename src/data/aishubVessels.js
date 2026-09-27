@@ -32,7 +32,7 @@ import {
   vesselTypeCss,
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
-import { SILHOUETTE_MAX_CAMERA_M, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
+import { SILHOUETTE_MAX_CAMERA_M, convoyBarges, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, topSilhouetteDataUrl, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
 import { loadRiverIndex, onRiverIndexReady, riverUpstreamBearing } from './riverDirection.js';
 
 /** Smer trupu na zobrazenie: heading → v pohybe cog → stojaca pri rieke proti prúdu → cog (vesselSilhouettes). */
@@ -357,11 +357,16 @@ export function createAishubVesselsLayer({
   function iconFor(entry, selected) {
     const color = vesselTypeCss(entry.row.type);
     if (_silhouettes && entry.view) {
-      return silhouetteDataUrl(vesselFamily(entry.row.type), entry.view.kind, selected ? '#ffffff' : color, {
+      return silhouetteDataUrl(vesselFamily(entry.row.type, entry.row.name), entry.view.kind, selected ? '#ffffff' : color, {
         bowRight: entry.view.bowRight,
         moving: Number(entry.row.sog) > 0.5,
         dim: entry.dimmed === true && !selected,
+        barges: convoyBarges(entry.row.name),
       });
+    }
+    // zblízka aj zhora tvar podľa typu lode; zďaleka doterajšia ikona
+    if (_silhouettes && Number.isFinite(entry.realScale)) {
+      return topSilhouetteDataUrl(vesselFamily(entry.row.type, entry.row.name), selected ? '#ffffff' : color, { barges: convoyBarges(entry.row.name) });
     }
     return shipIconDataUrl(color, selected);
   }
@@ -393,7 +398,8 @@ export function createAishubVesselsLayer({
       entry.realScale = realSize
         ? vesselRealScale({
           kind: next?.kind || 'top',
-          family: vesselFamily(entry.row.type),
+          family: vesselFamily(entry.row.type, entry.row.name),
+          barges: convoyBarges(entry.row.name),
           distanceM: Cesium.Cartesian3.distance(camView.position, entry.billboard.position),
           fovyRad: camView.fovy,
           viewportHeightPx: camView.viewportHeight,
@@ -401,7 +407,9 @@ export function createAishubVesselsLayer({
         : null;
       const scale = entryScale(entry) * (key === _selectedKey ? 1.2 : 1);
       if (Math.abs(entry.billboard.scale - scale) > 1e-3) entry.billboard.scale = scale;
-      if (next?.kind !== entry.view?.kind || next?.bowRight !== entry.view?.bowRight) {
+      const style = next ? `${next.kind}:${next.bowRight ? 'r' : 'l'}` : (Number.isFinite(entry.realScale) ? 'top:family' : 'top:classic');
+      if (style !== entry.iconStyle) {
+        entry.iconStyle = style;
         entry.view = next;
         entry.billboard.verticalOrigin = next ? Cesium.VerticalOrigin.BOTTOM : Cesium.VerticalOrigin.CENTER;
         if (next) entry.billboard.rotation = 0;
@@ -418,7 +426,7 @@ export function createAishubVesselsLayer({
         if (!entry.view) continue;
         const screen = Cesium.SceneTransforms.worldToWindowCoordinates(scene, entry.billboard.position);
         if (!screen) continue;
-        const size = silhouetteImageSize(vesselFamily(entry.row.type), entry.view.kind);
+        const size = silhouetteImageSize(vesselFamily(entry.row.type, entry.row.name), entry.view.kind, convoyBarges(entry.row.name));
         const w = size.width * entry.billboard.scale;
         const h = size.height * entry.billboard.scale;
         items.push({ key: entry, x: screen.x - w / 2, y: screen.y - h, w, h, distance: Cesium.Cartesian3.distance(camView.position, entry.billboard.position) });
@@ -770,7 +778,7 @@ export function createAishubVesselsLayer({
         object.klass = row.type ? normalizeVesselType(row.type).toUpperCase().slice(0, 14) || undefined : undefined;
         object.metric = delayed;
         // silueta bez rohov zameriavača, kým na ňu nejde myš (detection.js, ako živé lode)
-        object.quietBracket = Boolean(_silhouettes && entry.view);
+        object.quietBracket = Boolean(_silhouettes && (entry.view || Number.isFinite(entry.realScale)));
         return object;
       };
       const result = [];
