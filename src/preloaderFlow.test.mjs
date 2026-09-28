@@ -134,6 +134,31 @@ test('ukážka pozastaví glóbus pod preloaderom (60 snímok/s + Google 3D dla�
   assert.match(src, /stopped = true;\n {4}resumeGlobe\(\);/, 'aj pri zastavení');
 });
 
+test('vír vo Workeri (2026-09-29, vlastník: „aj načítanie preloadera seká"): plátno cez OffscreenCanvas, atlas z hlavného vlákna, záloha na hlavné vlákno', () => {
+  const src = readFileSync(new URL('../public/preloaderFlow.js', import.meta.url), 'utf8');
+  // ten istý súbor je aj Worker — odtlačok ?v= z buildu ostáva, žiadny druhý súbor na cache
+  assert.match(src, /worker = new win\.Worker\(new URL\(import\.meta\.url\), \{ type: 'module' \}\);/);
+  assert.match(src, /offscreen = canvas\.transferControlToOffscreen\(\);/);
+  assert.match(src, /if \(typeof WorkerGlobalScope !== 'undefined' && globalThis instanceof WorkerGlobalScope\) \{\s*installFlowWorker\(globalThis\);/);
+  // písmo pozná len dokument: atlas sa kreslí na hlavnom vlákne a posiela ako ImageBitmap (transfer)
+  assert.match(src, /\.then\(\(\) => win\.createImageBitmap\(source\.atlasCanvas\)\)/);
+  assert.match(src, /const transfer = \[bitmap, source\.block\.data\.buffer\];/);
+  assert.match(src, /transfer\.push\(offscreen\);/);
+  // Worker má vlastnú slučku a tie isté hodiny víru ako hlavné vlákno
+  assert.match(src, /raf = self\.requestAnimationFrame\(frame\);/);
+  assert.equal((src.match(/= createFlowClock\(\{ calm/g) || []).length, 2, 'jedny hodiny víru pre obe vlákna');
+  assert.equal((src.match(/= gl \? createFlowRenderer\(gl\) : null;/g) || []).length, 2, 'jeden vykresľovač pre obe vlákna');
+  // záloha: bez OffscreenCanvas / module Workera, po zlyhaní Workera a pri ?preloaderflow=main
+  assert.match(src, /preloaderflow=main/);
+  assert.match(src, /const fallbackToMain = \(\) => \{/);
+  assert.match(src, /if \(m\.type === 'fail' \|\| m\.type === 'lost'\) fallbackToMain\(\);/);
+  assert.match(src, /worker\.onerror = \(\) => fallbackToMain\(\);/);
+  // nález 2026-09-29: `stop` je const pod startMain — priamy odkaz pri štarte na hlavnom vlákne = TDZ, vír sa nespustil
+  assert.match(src, /canvas\.addEventListener\('webglcontextlost', \(\) => stop\(\)\);/);
+  // domáce práce hlavného vlákna (stred, veľkosť, ukážka) bežia v oboch režimoch
+  assert.match(src, /housekeepingTimer = win\.setInterval\(\(\) => housekeeping\(/);
+});
+
 test('build pridá k odkazu na preloader odtlačok obsahu (?v=…) — Cloudflare by inak hodiny servoval starú verziu', () => {
   const cfg = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
   assert.match(cfg, /function preloaderCacheBustPlugin\(\)/);
