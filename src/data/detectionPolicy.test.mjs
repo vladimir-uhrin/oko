@@ -68,13 +68,40 @@ test('ambientné AIR/SEA assemblies sú range-gatované: retikle len pri priblí
   const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
   assert.match(detectionJs, /!isTracked && !hovered && !_rangeGateDisabledForTest && isRangeGatedDetectionType\(obj\.type\)/);
   assert.match(detectionJs, /detectionRangeAlpha\(camDistance\)/);
-  assert.match(detectionJs, /detectionBracketAlpha\(obj\.type, keyholeAlpha, keyholeOutsideOpacity\) \* rangeAlpha/);
+  // 2026-09-28: + _bracketPolicy (scopeMasked z isScopeMaskEnabled — mimo kruhu bez podlahy)
+  assert.match(detectionJs, /detectionBracketAlpha\(obj\.type, keyholeAlpha, keyholeOutsideOpacity, _bracketPolicy\) \* rangeAlpha/);
+  assert.match(detectionJs, /_bracketPolicy\.scopeMasked = isScopeMaskEnabled\(\);/);
   assert.match(detectionJs, /if \(rangeAlpha <= 0\) continue;/);
 
   // Karty lodí (vesselLabels, mimo detection overlay) zrkadlia OFF prah —
   // obe vrstvy dekorácií miznú v rovnakej vzdialenosti.
   const vesselLabelsJs = fs.readFileSync(new URL('./vesselLabels.js', import.meta.url), 'utf8');
   assert.match(vesselLabelsJs, /VESSEL_CARD_FADE_DISTANCE_M = 300_000;/);
+});
+
+test('kruhová maska zapnutá (vlastník 09-28: „lietadlá mimo glóbusu"): rámček lietadla mimo kruhu zhasne ako popisky', () => {
+  // mimo kruhu (keyhole alfa = vonkajšia 1 %) — s maskou žiadna 35 % podlaha
+  assert.equal(detectionBracketAlpha('AIR', 0.01, 0.01, { scopeMasked: true }), 0.01);
+  assert.equal(detectionBracketAlpha('AIR', 0, 0.01, { scopeMasked: true }), 0);
+  // vnútri kruhu bez zmeny
+  assert.equal(detectionBracketAlpha('AIR', 1, 0.01, { scopeMasked: true }), 1);
+  assert.equal(detectionBracketAlpha('AIR', 0.6, 0.01, { scopeMasked: true }), 0.6, 'prechod na okraji ostáva plynulý');
+  // bez masky (lietadlo je vidno aj mimo kruhu) — pôvodná podlaha platí
+  assert.equal(detectionBracketAlpha('AIR', 0.01, 0.01, { scopeMasked: false }), AIRCRAFT_BRACKET_ALPHA_FLOOR);
+  assert.equal(detectionBracketAlpha('AIR', 0.01, 0.01), AIRCRAFT_BRACKET_ALPHA_FLOOR, 'bez volieb = pôvodné správanie');
+  assert.equal(detectionBracketAlpha('SAT', 0.01, 0.01, { scopeMasked: true }), 0.01);
+  // pásma jasu sa zaokrúhľujú nahor — 1 % by bolo 25 %; pod 12,5 % sa rámček nekreslí
+  const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
+  assert.match(detectionJs, /export const BRACKET_MIN_PAINT_ALPHA = 0\.5 \/ BRACKET_ALPHA_STEPS;/);
+  assert.match(detectionJs, /if \(drawBracket && bracketAlpha >= BRACKET_MIN_PAINT_ALPHA\) \{\s*appendCornerBracket\(/);
+});
+
+test('loď so štítkom (vlajka + meno) nedostane ešte popisku detekcie — jedna menovka na loď (09-28)', () => {
+  const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
+  assert.match(detectionJs, /if \(shouldSolve && \(keyholeAlpha > 0 \|\| hovered\) && !\(obj\.type === 'SEA' && !hovered && _vesselCardShown\(obj\)\)\)/);
+  assert.match(detectionJs, /function _vesselCardShown\(obj\) \{[\s\S]*?isWorldOverlayLaneSuppressed\('ambient-card'\)[\s\S]*?overlayEntryPaintedRecently\(VESSEL_OVERLAY_SOURCE_ID, `vessel:\$\{obj\.sourceId\}`\)/);
+  const host = fs.readFileSync(new URL('../overlays/worldOverlay.js', import.meta.url), 'utf8');
+  assert.match(host, /export function overlayEntryPaintedRecently\(sourceId, entryId, frames = 2\)/);
 });
 
 test('the bracket floor anchor mirrors the real keyhole default it is calibrated to', () => {

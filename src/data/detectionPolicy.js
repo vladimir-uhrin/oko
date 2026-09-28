@@ -83,11 +83,16 @@ export function aircraftBracketAlphaFloor(outsideOpacity) {
  * @param {number} keyholeAlpha - Radial keyhole alpha for this contact.
  * @param {number} [outsideOpacity] - Live OUTSIDE slider value. Omitted means
  *   the default, so a caller that does not know it reproduces the shipped look.
+ * @param {{scopeMasked?: boolean}} [options] `scopeMasked` = kruhová maska je zapnutá.
  * @returns {number} Paint alpha, 0-1.
  */
-export function detectionBracketAlpha(type, keyholeAlpha, outsideOpacity = AIRCRAFT_BRACKET_FLOOR_ANCHOR) {
+export function detectionBracketAlpha(type, keyholeAlpha, outsideOpacity = AIRCRAFT_BRACKET_FLOOR_ANCHOR, { scopeMasked = false } = {}) {
   const alpha = Math.max(0, Math.min(1, Number(keyholeAlpha) || 0));
   if (String(type || '').toUpperCase() !== 'AIR' || alpha <= 0) return alpha;
+  // 2026-09-28 (vlastník: „aby sa lietadlá veľmi nezobrazovali mimo glóbusu"): pri zapnutej
+  // kruhovej maske je mimo kruhu čierna — ikonu lietadla maska zakryje a rámček s podlahou
+  // 35 % visel v prázdnom priestore. Podlaha ostáva len bez masky, kde lietadlo naozaj vidno.
+  if (scopeMasked) return alpha;
   return Math.max(aircraftBracketAlphaFloor(outsideOpacity), alpha);
 }
 

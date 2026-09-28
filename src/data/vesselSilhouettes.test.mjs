@@ -211,7 +211,8 @@ test('lode bok po boku: siluetu za bližšou loďou stlmiť, bližšia ostane na
   // detekcia: silueta bez rohov, kým na ňu nejde myš alebo nie je sledovaná; popisok ostáva
   const detection = readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
   assert.match(detection, /const drawBracket = !obj\.quietBracket \|\| hovered \|\| isTracked;/);
-  assert.match(detection, /if \(drawBracket\) appendCornerBracket\(pathFor\(bracketPaths, color, bracketAlpha\), sx, sy, halfW, halfH\);/);
+  // 09-28: + prah jasu (BRACKET_MIN_PAINT_ALPHA) — rámček pod 12,5 % sa nekreslí
+  assert.match(detection, /if \(drawBracket && bracketAlpha >= BRACKET_MIN_PAINT_ALPHA\) \{\s*appendCornerBracket\(pathFor\(bracketPaths, color, bracketAlpha\), sx, sy, halfW, halfH\);/);
   const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
   const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
   // bez rohov: silueta aj ikona zhora v skutočnej veľkosti (zblízka)

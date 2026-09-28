@@ -19,7 +19,9 @@ import {
   getKeyholeFadeTuning,
   keyholeLabelAlphaFromGeometry,
 } from '../celestialRing.js';
-import { registerWorldOverlayPaintLane } from '../overlays/worldOverlay.js';
+import { isWorldOverlayLaneSuppressed, overlayEntryPaintedRecently, registerWorldOverlayPaintLane } from '../overlays/worldOverlay.js';
+import { VESSEL_OVERLAY_SOURCE_ID } from './vesselLabels.js';
+import { isScopeMaskEnabled } from '../scopeMask.js';
 import {
   DETECTION_STYLE,
   DETECTION_THEME_MAP,
@@ -98,6 +100,10 @@ const SPARSE_ZONE_FRACTION = 0.5;
 const LABEL_SOLVE_INTERVAL_MS = 125;
 /** Alpha bands retain bracket batching while approximating a continuous radial fade. */
 const BRACKET_ALPHA_STEPS = 4;
+/** Rámček slabší než polovica najnižšieho pásma (1/4) sa nekreslí — inak by ho ceil vytiahol na 25 %. */
+export const BRACKET_MIN_PAINT_ALPHA = 0.5 / BRACKET_ALPHA_STEPS;
+/** Voľby pre detectionBracketAlpha — zdieľaný objekt, prepisuje sa raz za snímok. */
+const _bracketPolicy = { scopeMasked: false };
 /** Stable per-layer candidate safety cap; independent of density and camera bearing. */
 const LAYER_CANDIDATE_CAP = 2600;
 const LAYER_WEIGHTS = Object.freeze({
@@ -166,6 +172,18 @@ export function setDetectionHoverSubjects(candidates) {
 }
 
 /** Whether this paint-loop object is the hovered contact. */
+/**
+ * Má loď práve svoj štítok s vlajkou (ais-live-vessels, pruh ambient-card)? Potom popiska
+ * detekcie (meno · rýchlosť) nevzniká — obe naraz robili z každej lode dve menovky
+ * (2026-09-28, TWIN CITY LINER). Na mobile sú štítky vypnuté → popiska detekcie ostáva.
+ * Volá sa len pri výbere popisiek (shouldSolve), nie každý snímok.
+ */
+function _vesselCardShown(obj) {
+  if (obj?._layerId !== VESSEL_OVERLAY_SOURCE_ID || obj.sourceId == null) return false;
+  if (isWorldOverlayLaneSuppressed('ambient-card')) return false;
+  return overlayEntryPaintedRecently(VESSEL_OVERLAY_SOURCE_ID, `vessel:${obj.sourceId}`);
+}
+
 function _isHoveredObject(obj) {
   if (_hoverCandidates === null) return false;
   const layerId = String(obj._layerId || '');
@@ -1206,6 +1224,9 @@ function _drawOverlay(frame) {
   // host's own keyhole alpha comes from, so a bracket and its callout can never
   // disagree about the operator's setting within a frame.
   const keyholeOutsideOpacity = getKeyholeFadeTuning().outsideOpacity;
+  // Kruhová maska zapnutá = mimo kruhu je čierna → rámčeky lietadiel tam zhasnú ako popisky
+  // (2026-09-28, detectionBracketAlpha). Jeden objekt volieb na snímok, bez alokácie v cykle.
+  _bracketPolicy.scopeMasked = isScopeMaskEnabled();
   const viewProjection = frame.viewProjectionMatrix;
   const vp0 = viewProjection[0];
   const vp1 = viewProjection[1];
@@ -1309,13 +1330,18 @@ function _drawOverlay(frame) {
     // the pointer IS the operator's attention, keyhole dim included.
     const bracketAlpha = hovered
       ? 1
-      : detectionBracketAlpha(obj.type, keyholeAlpha, keyholeOutsideOpacity) * rangeAlpha;
+      : detectionBracketAlpha(obj.type, keyholeAlpha, keyholeOutsideOpacity, _bracketPolicy) * rangeAlpha;
     // Loď so siluetou (šikmo / z boku / spredu, vesselSilhouettes.js, 2026-09-27) je sama čitateľná
     // a rohy cez ňu robili z kotviacich lodí jednu škvrnu — rohy len pri hoveri alebo sledovaní;
     // popisok (meno · rýchlosť) aj poradie calloutov ostávajú.
     const drawBracket = !obj.quietBracket || hovered || isTracked;
     if (bracketAlpha > 0) {
-      if (drawBracket) appendCornerBracket(pathFor(bracketPaths, color, bracketAlpha), sx, sy, halfW, halfH);
+      // Pásma jasu sa zaokrúhľujú NAHOR (Math.ceil) — rámček mimo kruhu s 1 % by sa kreslil na
+      // 25 % a visel v čiernom (2026-09-28, „lietadlá mimo glóbusu"). Pod polovicou najnižšieho
+      // pásma sa nekreslí; počítadlá (diagnostika) ostávajú ako doteraz.
+      if (drawBracket && bracketAlpha >= BRACKET_MIN_PAINT_ALPHA) {
+        appendCornerBracket(pathFor(bracketPaths, color, bracketAlpha), sx, sy, halfW, halfH);
+      }
       visibleCount++;
       if (obj.type === 'AIR') aircraftBracketSectors[detectionHorizontalSector(sx, width)]++;
       if (bracketAlpha >= 1) bracketOpacityCounts.full++;
@@ -1359,7 +1385,7 @@ function _drawOverlay(frame) {
 
     // Hovered contacts enter the cohort even outside the keyhole — the
     // pointer, not the keyhole center, is where the operator is looking.
-    if (shouldSolve && (keyholeAlpha > 0 || hovered)) {
+    if (shouldSolve && (keyholeAlpha > 0 || hovered) && !(obj.type === 'SEA' && !hovered && _vesselCardShown(obj))) {
       demandByLayer.set(layerId, (demandByLayer.get(layerId) || 0) + 1);
       if (!cohortBuilders.has(layerId)) cohortBuilders.set(layerId, new BoundedCohort(256));
       const incumbent = selectedIdentities?.get(layerId)?.has(sourceId) || false;

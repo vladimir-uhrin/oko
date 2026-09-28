@@ -1066,6 +1066,21 @@ function updateEntryDiagnostics() {
  * @param {string} entryId
  * @returns {(OverlayRect & {sourceId:string,entryId:string})|null}
  */
+/**
+ * Bol záznam nakreslený v tomto alebo nedávnom snímku? Detekcia sa kreslí PRED kartami
+ * (poradie pruhov), takže v rovnakom snímku kartu ešte nevidí — výber je však stabilný
+ * (2026-09-28: popiska detekcie lode sa nezdvojuje so štítkom lode s vlajkou).
+ * @param {string} sourceId
+ * @param {string} entryId
+ * @param {number} [frames=2]
+ */
+export function overlayEntryPaintedRecently(sourceId, entryId, frames = 2) {
+  if (_destroyed) return false;
+  const key = entryKey(String(sourceId), String(entryId));
+  const rect = _paintRectByKey.get(key);
+  return Boolean(rect && rect.key === key && _frameStamp - rect.stamp <= frames);
+}
+
 export function getOverlayPaintRect(sourceId, entryId) {
   if (_destroyed) return null;
   const key = entryKey(String(sourceId), String(entryId));
