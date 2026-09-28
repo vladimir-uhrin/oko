@@ -20,10 +20,18 @@ test('obe letecké vrstvy filtrujú cez TÚ ISTÚ bránu ako horizont', () => {
   for (const [name, source] of SOURCES) {
     // 2026-09-04: do tej istej brány pribudol režim hustoty (flights.js) —
     // pin preto overuje, že filter je JEDNÝM z jej členov, nie že je prvý.
+    // 2026-09-28: brána žije v jednej funkcii `_fleetContactHidden`, ktorú
+    // číta tik dvakrát — pred dead reckoningom (pruhy skrytých strojov,
+    // fleetTickGate.js) aj ako `beyondHorizon` po ňom.
     assert.match(
       source,
-      /const beyondHorizon = [\s\S]{0,160}?!_categoryVisible\(.*\)\s*\n\s*\|\| !occluder\.isPointVisible/,
-      `${name}: skrytá kategória sa skladá do beyondHorizon`,
+      /function _fleetContactHidden\(info, position, occluder\) \{[\s\S]{0,160}?!_categoryVisible\(info\?\.klass\)\s*\n\s*\|\| !occluder\.isPointVisible\(info\?\.cullPosition \|\| position\)/,
+      `${name}: skrytá kategória sa skladá do brány _fleetContactHidden`,
+    );
+    assert.match(
+      source,
+      /const beyondHorizon = _fleetContactHidden\(info, bb\.position, occluder\);/,
+      `${name}: beyondHorizon je TÁ ISTÁ brána`,
     );
     assert.match(source, /function _categoryVisible\(klass\)/, `${name}: má bránu kategórie`);
   }

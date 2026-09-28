@@ -44,6 +44,7 @@ import { setMilitaryLayerActive, registerMilitaryIcaos } from './militaryRegistr
 import { formatFlightLevel } from './detectionDraw.js';
 import { parseSquawk, squawkAlert, verticalTrendGlyph } from './flightProgress.js';
 import { createGroundSnap } from './groundSnap.js';
+import { fleetContactSkipsTick, metersPerPixelPerMeter, pinBillboardBufferUsage, positionWriteThresholdM } from './fleetTickGate.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { pickRenderAltitudeM } from './renderAltitude.js';
 import { cachedGroundFloor, floorAltitudeM, warmGroundFloor, resolveGroundFloorCellsBounded, GROUND_FLOOR_LIFT_M } from './groundFloor.js';
@@ -622,6 +623,11 @@ const FLEET_DR_INTERVAL_MS = 80;
 const ROTATION_REFRESH_MS = 1000;
 /** @type {number} Epoch ms of the last fleet dead-reckoning pass */
 let _lastFleetTickMs = 0;
+/** @type {number} Epocha brány skrytia flotily (zrkadlo flights.js): rastie
+ *  pri pohybe kamery a zmene filtra kategórií. */
+let _fleetGateEpoch = 0;
+/** @type {string} Podpis pózy kamery pri poslednom zdvihnutí epochy brány. */
+let _lastGatePoseSig = '';
 /** @type {string} Camera pose signature at the last rotation pass */
 let _lastCamPoseSig = '';
 /** @type {number} Epoch ms of the last full rotation pass */
@@ -2017,6 +2023,31 @@ function _updateTrackedModel() {
  * degraded by other layers mutating camera.percentageChanged.
  * @returns {void}
  */
+/**
+ * Jediná brána skrytia stroja vo flotile (zrkadlo flights.js bez režimu
+ * hustoty): skrytá kategória a obzor sa skladajú do TEJ ISTEJ podmienky.
+ * Pred dead reckoningom dostane najnovší fix, po ňom zobrazenú polohu.
+ * @param {object|undefined} info - Záznam letu (`_flightData`).
+ * @param {Cesium.Cartesian3} position - Poloha, ktorú testuje obzor.
+ * @param {{isPointVisible: (p: Cesium.Cartesian3) => boolean}} occluder - Obzor kamery.
+ * @returns {boolean}
+ */
+function _fleetContactHidden(info, position, occluder) {
+  return !_categoryVisible(info?.klass)
+    || !occluder.isPointVisible(info?.cullPosition || position);
+}
+
+/**
+ * Najnovší fix z feedu pre bránu PRED dead reckoningom (zrkadlo flights.js,
+ * fleetTickGate.js).
+ * @param {string} icao24 - ICAO 24-bit adresa.
+ * @returns {{position: Cesium.Cartesian3, epochMs: number}|null}
+ */
+function _newestFix(icao24) {
+  const history = _positionHistory.get(icao24);
+  return history && history.length ? history[history.length - 1] : null;
+}
+
 function _fleetTick() {
   if (!_viewer || !_billboardCollection || !_billboardCollection.show) return;
   const scene = _viewer.scene;
@@ -2061,6 +2092,10 @@ function _fleetTick() {
     && Cesium.Cartesian3.distance(camera.positionWC, _trackedVisualCached() || camera.positionWC) <= STROBE_MAX_DIST_M,
   );
   const poseSig = cameraPoseSignature(camera);
+  if (poseSig !== _lastGatePoseSig) {
+    _lastGatePoseSig = poseSig;
+    _fleetGateEpoch++; // kamera sa pohla → skryté stroje sa znova otestujú
+  }
   // Only nearby Cockpit silhouettes need projected course; far dots remain
   // rotation-free through the per-contact gate below.
   const doRotations = (poseSig !== _lastCamPoseSig || (nowMs - _lastRotPassMs) >= ROTATION_REFRESH_MS);
@@ -2071,6 +2106,8 @@ function _fleetTick() {
 
   const occluder = horizonOccluder(camera);
   const focusTarget = getFocusTarget();
+  // Metre na pixel na meter vzdialenosti — prah zápisu polohy (pol pixela).
+  const mppPerM = metersPerPixelPerMeter(camera.frustum?.fovy, scene.drawingBufferHeight);
 
   // 3D model regime: only when enabled AND the camera is zoomed in past the altitude ceiling.
   // Drop all models the moment we leave it (toggled off / zoomed out) so billboards resume.
@@ -2103,6 +2140,9 @@ function _fleetTick() {
       // placement is handled by the one-shot ground snap in _modelDisplayPosition).
       const d2 = Cesium.Cartesian3.distanceSquared(camPos, bb.position);
       if (d2 > keepDistSq) continue; // beyond keep radius → never eligible
+      // Skrytá kategória neberie slot (zrkadlo flights.js: skrytý stroj sa
+      // neprepočítava, jeho `bb.position` môže byť stará).
+      if (!_categoryVisible(_flightData.get(icao)?.klass)) continue;
       Cesium.Cartesian3.clone(bb.position, _scratchModelBS.center);
       cand.push([icao, d2, cull.computeVisibility(_scratchModelBS) !== Cesium.Intersect.OUTSIDE]);
     }
@@ -2139,11 +2179,33 @@ function _fleetTick() {
   for (const [icao24, bb] of _billboards) {
     if (icao24 === _trackedIcao) continue; // tracked entity owns its own motion
 
+    const info = _flightData.get(icao24);
+
+    // Skrytý stroj podľa testu na najnovšom fixe sa neprepočítava vôbec;
+    // verdikt platí do pohybu kamery / zmeny filtra (_fleetGateEpoch) alebo
+    // nového fixu (fleetTickGate.js, zrkadlo flights.js).
+    if (!bb.show) {
+      const newest = _newestFix(icao24);
+      const fixMs = newest ? (newest.epochMs ?? -2) : -1;
+      if (bb._gevGateEpoch === _fleetGateEpoch && bb._gevGateFixMs === fixMs) continue;
+      if (fleetContactSkipsTick(bb.show, _fleetContactHidden(info, newest ? newest.position : bb.position, occluder))) {
+        bb._gevGateEpoch = _fleetGateEpoch;
+        bb._gevGateFixMs = fixMs;
+        if (_models.size) {
+          const m = _models.get(icao24);
+          if (m && m.show) m.show = false;
+        }
+        continue;
+      }
+    }
+
     const dr = _deadReckon(icao24, _scratchFleetPos);
     // Gate the write — assigning Billboard.position dirties the whole
-    // collection's vertex buffer, so skip sub-meter moves.
-    if (dr && Cesium.Cartesian3.distanceSquared(dr, bb.position) > 1.0) {
-      bb.position = dr;
+    // collection's vertex buffer, so write only a move of at least half a
+    // pixel at this distance, never under a metre (fleetTickGate.js).
+    if (dr) {
+      const writeM = positionWriteThresholdM(Cesium.Cartesian3.distance(camera.positionWC, bb.position), mppPerM);
+      if (Cesium.Cartesian3.distanceSquared(dr, bb.position) > writeM * writeM) bb.position = dr;
     }
 
     // Round 6: occlusion-test a LIFTED point for contacts at/below the
@@ -2152,15 +2214,17 @@ function _fleetTick() {
     // Kategóriový filter sa skladá do TEJ ISTEJ brány ako horizont (zrkadlo
     // flights.js): skrytá kategória sa správa ako kontakt za obzorom, takže
     // nepribúda druhé, konkurenčné pravidlo o `show`.
-    const beyondHorizon = !_categoryVisible(_flightData.get(icao24)?.klass)
-      || !occluder.isPointVisible(_flightData.get(icao24)?.cullPosition || bb.position);
+    const beyondHorizon = _fleetContactHidden(info, bb.position, occluder);
     // A billboard flipping INTO view (horizon reveal while the camera idles)
     // gets its rotation refreshed THIS tick even without a pose change —
     // otherwise it reappears wearing its stale (often creation-north) nose for
     // up to ROTATION_REFRESH_MS. (Model-handed-off planes also read show=false
-    // here; harmless — the model branch below `continue`s past the rotation.)
+    // here; the model branch below `continue`s past the rotation.)
     const revealed = !beyondHorizon && !bb.show;
-    if (bb.show === beyondHorizon) bb.show = !beyondHorizon;
+    // Stroj s vlastným 3D modelom má show=false zámerne — nezapínať a vzápätí
+    // vypínať (zrkadlo flights.js, 2026-09-28).
+    const ownsVisualNow = _modelOwnsVisual(icao24);
+    if (bb.show === beyondHorizon && !(ownsVisualNow && !beyondHorizon)) bb.show = !beyondHorizon;
     if (beyondHorizon) {
       // Also hide any 3D model — otherwise a model that crossed the limb would keep
       // rendering through the hidden globe at its last matrix.
@@ -2168,8 +2232,6 @@ function _fleetTick() {
       if (m && m.show) m.show = false;
       continue;
     }
-
-    const info = _flightData.get(icao24);
 
     // One sprite-owned write site composes freshness × focus × limb haze and
     // base class/ground scale × limb taper. The locked NearFarScalar remains
@@ -2289,7 +2351,9 @@ function _fleetTick() {
     // Kokpitovy pip je kruh; drobna silueta kurz nesie a rotaciu dostava.
     if (!bb._gevDot && (doRotations || revealed)) {
       const rot = screenProjectedRotation(scene, bb.position, course, bb.rotation);
-      if (rot !== null && Math.abs(rot - bb.rotation) > 0.002) {
+      // Pásmo necitlivosti 0,01 rad — zrkadlo flights.js (každý zápis rotácie
+      // je bufferSubData zvlášť).
+      if (rot !== null && Math.abs(rot - bb.rotation) > 0.01) {
         bb.rotation = rot;
       }
     }
@@ -2905,6 +2969,7 @@ const militaryFlightsLayer = {
     clearFocusTarget('militaryFlights');
     _viewer = viewer;
     _billboardCollection = new Cesium.BillboardCollection();
+    pinBillboardBufferUsage(_billboardCollection); // zrkadlo flights.js
     viewer.scene.primitives.add(_billboardCollection);
     registerSpriteCollection('military', _billboardCollection);
     _modelCollection = new Cesium.PrimitiveCollection();
@@ -3665,6 +3730,7 @@ const militaryFlightsLayer = {
       if (changed) {
         _hiddenCategories = next;
         _lastFleetTickMs = 0; // odkrytý kontakt nemá čakať na ďalší tik
+        _fleetGateEpoch++; // skryté stroje sa znova otestujú (fleetTickGate.js)
         _viewer?.scene?.requestRender?.();
       }
     }

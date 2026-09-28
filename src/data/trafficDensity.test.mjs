@@ -120,10 +120,18 @@ test('tripwire: hustota sa skladá do TEJ ISTEJ brány viditeľnosti', async () 
   // trieda chyby, ktorá stála commit 02965d0 pri strobe.
   const { readFileSync } = await import('node:fs');
   const source = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
+  // 2026-09-28: brána žije vo funkcii `_fleetContactHidden` (číta ju aj
+  // pruhová brána pred dead reckoningom, fleetTickGate.js); `beyondHorizon`
+  // je jej výsledok.
   assert.match(
     source,
-    /const beyondHorizon = _densityMode\s*\n\s*\|\| !_categoryVisible/,
-    'režim hustoty je člen brány beyondHorizon',
+    /function _fleetContactHidden\(info, position, occluder\) \{\s*\n\s*return _densityMode\s*\n\s*\|\| !_categoryVisible/,
+    'režim hustoty je člen brány _fleetContactHidden',
+  );
+  assert.match(
+    source,
+    /const beyondHorizon = _fleetContactHidden\(info, bb\.position, occluder\);/,
+    'beyondHorizon je TÁ ISTÁ brána',
   );
   // Prepočet nesmie bežať každý tik: 12 000 kontaktov pri pohľade, kde jeden
   // stroj urobí zlomok pixela, je zbytočná práca.

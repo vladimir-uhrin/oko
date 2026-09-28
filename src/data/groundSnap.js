@@ -130,6 +130,35 @@ const RETRY_MAX_MS = 30000;
 const SAMPLE_BUDGET_PER_WINDOW = 4;
 /** Budget window length (ms). */
 const SAMPLE_WINDOW_MS = 250;
+/** Podiel hlavného vlákna, ktorý smie vzorkovanie zjesť (0,05 = 5 %). Meranie
+ *  2026-09-28: nad fotorealistickými dlaždicami stojí jeden sampleHeight
+ *  ~116 ms (offscreen pick render celej scény, pri zásahu vlastnej ikony aj
+ *  dvakrát) a rozpočet 4 vzorky / 250 ms ho nijako nebrzdil — 5 vzoriek za
+ *  4 s = 15 % vlákna. Prestávka po vzorke sa ladí podľa jej skutočnej ceny. */
+const SAMPLE_TIME_SHARE = 0.05;
+/** Strop prestávky po jednej vzorke (ms). */
+const SAMPLE_COOLDOWN_MAX_MS = 5000;
+/** Vzorka lacnejšia než jedna snímka (ms) prestávku nedostane — stačí jej
+ *  okno 4 / 250 ms. Bez fotorealistických dlaždíc stojí vzorka jednotky ms;
+ *  aj testy s náhradným sampleHeight (mikrosekundy) tak ostávajú okamžité. */
+const SAMPLE_COOLDOWN_MIN_SAMPLE_MS = 16;
+
+/**
+ * Prestávka po vzorke, ktorá trvala `sampleMs`, aby vzorkovanie neprekročilo
+ * `share` času hlavného vlákna: 116 ms → 2,2 s; 16 ms → 304 ms; pod 16 ms nič.
+ * Cena sa meria tými istými hodinami ako rozpočty (`Date.now`, 1 ms): stačí
+ * na desiatky ms a v testoch s podstrčeným časom je deterministicky 0.
+ * @param {number} sampleMs - Trvanie poslednej vzorky (ms).
+ * @param {number} [share] - Povolený podiel (0–1).
+ * @returns {number} ms (celé)
+ */
+export function sampleCooldownMs(sampleMs, share = SAMPLE_TIME_SHARE) {
+  const ms = Number(sampleMs);
+  const s = Number(share);
+  if (!Number.isFinite(ms) || ms < SAMPLE_COOLDOWN_MIN_SAMPLE_MS || !Number.isFinite(s) || s <= 0) return 0;
+  if (s >= 1) return 0;
+  return Math.floor(Math.min(SAMPLE_COOLDOWN_MAX_MS, ms * (1 / s - 1)));
+}
 
 /**
  * True when the active photoreal tileset has finished streaming the tiles in
@@ -163,8 +192,12 @@ function _tilesReady(viewer) {
  *   forget: (icao: string) => void,
  *   clear: () => void,
  * }}
+ * @param {{now?: () => number}} [deps] - Hodiny (epocha ms) pre rozpočty,
+ *   backoff aj cenu vzorky — vstrekujú sa v testoch.
  */
-export function createGroundSnap() {
+// Neskoré viazanie: testy podstrkujú `Date.now`, odkaz uložený pri štarte
+// modulu by ich čas nevidel.
+export function createGroundSnap({ now: nowFn = () => Date.now() } = {}) {
   /** @type {Map<string, {h: number|null, samplePos: Cesium.Cartesian3|null,
    *  held: boolean, nextRetryMs: number, misses: number}>} Per-icao snap state:
    *  the sampled height and the surface point it was measured at, whether that
@@ -173,6 +206,11 @@ export function createGroundSnap() {
   const entries = new Map();
   let windowStartMs = 0;
   let windowCount = 0;
+  /** Posledná vzorka: kedy začala a akú prestávku si vyslúžila
+   *  (sampleCooldownMs). Relatívne, nie ako deadline: hodiny môžu skočiť
+   *  dozadu (testy si ich podstrkujú, NTP) a starý deadline by blokoval. */
+  let lastSampleAtMs = -Infinity;
+  let lastSampleCooldownMs = 0;
   const scratchCarto = new Cesium.Cartographic();
   const scratchSurfacePos = new Cesium.Cartesian3();
   /** Separate from `scratchCarto`: the held-evidence check runs on paths that
@@ -289,13 +327,16 @@ export function createGroundSnap() {
       cached.nextRetryMs = 0;
       cached.misses = 0;
     }
-    const now = Date.now();
+    const now = nowFn();
     const entry = entries.get(icao);
     if (entry && now < entry.nextRetryMs) return heldSnapM(entry, surfacePos); // backoff in force
     // Per-window budget: deny WITHOUT a retry stamp so the overflow simply
     // tries again next tick instead of waiting out a backoff it didn't earn.
     if (now - windowStartMs > SAMPLE_WINDOW_MS) { windowStartMs = now; windowCount = 0; }
     if (windowCount >= SAMPLE_BUDGET_PER_WINDOW) return heldSnapM(entry, surfacePos);
+    // Prestávka podľa ceny poslednej vzorky (SAMPLE_TIME_SHARE) — tiež bez
+    // retry pečiatky: kto sa nezmestil, skúsi to v ďalšom tiku.
+    if (now >= lastSampleAtMs && now - lastSampleAtMs < lastSampleCooldownMs) return heldSnapM(entry, surfacePos);
     const misses = entry ? entry.misses : 0;
     const miss = () => {
       // A held measurement survives the miss — only the retry schedule moves.
@@ -320,6 +361,8 @@ export function createGroundSnap() {
     } catch {
       sampled = undefined;
     }
+    lastSampleAtMs = now;
+    lastSampleCooldownMs = sampleCooldownMs(nowFn() - now);
     // Same sanity floor as cctv.js's sampleGroundHeight: a hit far below the
     // ellipsoid is pick garbage, not ground.
     if (!Number.isFinite(sampled) || sampled < -150) return miss();
