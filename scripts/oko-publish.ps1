@@ -9,17 +9,30 @@
 #      owns the live feeds), everything else -> the static build (localhost:4174); restarts the tunnel task
 # Re-run after every change you want on the public address. Dev on localhost:4173 is untouched.
 #
+# 2026-09-28 (user bought okolive.sk): several public hostnames. -Hostnames get /api + /s -> dev server and the
+# rest -> build; -Redirects ('host=https://origin') are routed whole to the static server, which answers 301
+# (scripts/oko-static-server.mjs --redirect). DNS for another Cloudflare zone is a manual CNAME to the tunnel
+# (see scripts/oko-tunnel-setup.ps1: cert.pem is bound to one zone).
+#
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/oko-publish.ps1 [-SkipBuild] [-DevPort 4173] [-StaticPort 4174]
+#        [-Hostnames oko.uhrin.digital,okolive.sk] [-Redirects www.okolive.sk=https://okolive.sk]
 param(
   [switch]$SkipBuild,
   [int]$DevPort = 4173,
   [int]$StaticPort = 4174,
-  [string]$Hostname = 'oko.uhrin.digital',
+  [string[]]$Hostnames = @('oko.uhrin.digital', 'okolive.sk'),
+  [string[]]$Redirects = @('www.okolive.sk=https://okolive.sk'),
   [string]$TunnelName = 'oko',
   [string]$TunnelTaskName = 'OKO Cloudflare Tunnel',
   [string]$StaticTaskName = 'OKO public static'
 )
 $ErrorActionPreference = 'Continue'
+# -File passes "a,b" as ONE string; split it here so both call styles work.
+$Hostnames = @($Hostnames | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$Redirects = @($Redirects | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+foreach ($h in $Hostnames) { if ($h -notmatch '^[a-z0-9.-]+$') { throw "bad hostname: $h" } }
+foreach ($r in $Redirects) { if ($r -notmatch '^[a-z0-9.-]+=https://[a-z0-9.-]+$') { throw "bad redirect (host=https://origin): $r" } }
+if ($Hostnames.Count -eq 0) { throw 'no hostname to publish' }
 $repo = Split-Path -Parent $PSScriptRoot
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $node) { throw 'node not found in PATH' }
@@ -40,7 +53,8 @@ if (-not (Test-Path (Join-Path $repo 'dist\index.html'))) { throw 'dist/index.ht
 
 # Static server task (at logon, current user, auto-restart); a restart picks up the fresh dist/.
 $serverScript = Join-Path $repo 'scripts\oko-static-server.mjs'
-$action = New-ScheduledTaskAction -Execute $node -Argument "`"$serverScript`" --port $StaticPort --dir dist" -WorkingDirectory $repo
+$redirectArgs = ($Redirects | ForEach-Object { " --redirect $_" }) -join ''
+$action = New-ScheduledTaskAction -Execute $node -Argument "`"$serverScript`" --port $StaticPort --dir dist$redirectArgs" -WorkingDirectory $repo
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 # -Priority 4 = Normal. Task Scheduler defaults to 7 (BelowNormal): with the machine busy (Docker, browser,
 # Defender) the origin got almost no CPU and /api answered in 80-100 s -> 502 through the tunnel (2026-09-14).
@@ -58,20 +72,30 @@ Write-Host "static task: " (Get-ScheduledTask -TaskName $StaticTaskName).State
 # Tunnel ingress: API to the dev server, the rest to the build. Keep tunnel id + credentials lines as they are.
 $lines = Get-Content $config
 $head = $lines | Where-Object { $_ -match '^(tunnel|credentials-file|logfile|loglevel):' }
-$ingress = @"
-
-ingress:
-  - hostname: $Hostname
+$rules = @()
+foreach ($h in $Hostnames) {
+  $rules += @"
+  - hostname: $h
     path: ^/(api|s)(/.*)?$
     service: http://localhost:$DevPort
     originRequest:
       connectTimeout: 30s
-  - hostname: $Hostname
+  - hostname: $h
     service: http://localhost:$StaticPort
     originRequest:
       connectTimeout: 30s
-  - service: http_status:404
 "@
+}
+foreach ($r in $Redirects) {
+  $redirectHost = ($r -split '=')[0]
+  $rules += @"
+  - hostname: $redirectHost
+    service: http://localhost:$StaticPort
+    originRequest:
+      connectTimeout: 30s
+"@
+}
+$ingress = "`ningress:`n" + ($rules -join "`n") + "`n  - service: http_status:404`n"
 [System.IO.File]::WriteAllText($config, (($head -join "`n") + "`n" + $ingress + "`n"), (New-Object System.Text.UTF8Encoding($false)))
 Write-Host "config rewritten: $config"
 Stop-ScheduledTask -TaskName $TunnelTaskName -ErrorAction SilentlyContinue
@@ -79,4 +103,5 @@ Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName $TunnelTaskName
 Start-Sleep -Seconds 6
 Write-Host "tunnel task: " (Get-ScheduledTask -TaskName $TunnelTaskName).State
-Write-Host "published: https://$Hostname/ (build) + /api -> localhost:$DevPort"
+Write-Host ("published: " + (($Hostnames | ForEach-Object { "https://$_/" }) -join ', ') + " (build) + /api -> localhost:$DevPort")
+if ($Redirects.Count) { Write-Host ("301: " + ($Redirects -join ', ')) }

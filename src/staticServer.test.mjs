@@ -10,6 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import http from 'node:http';
 
 const SCRIPT = new URL('../scripts/oko-static-server.mjs', import.meta.url);
 
@@ -90,4 +91,40 @@ test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, 
 test('oko-static-server: keep-alive dlhšie než pool cloudflared (120 s), headersTimeout väčší (2026-09-14)', () => {
   const src = readFileSync(SCRIPT, 'utf8');
   assert.match(src, /server\.keepAliveTimeout = 120_000;\n\s*server\.headersTimeout = 125_000;/);
+});
+
+// Doména okolive.sk (2026-09-28): www → holá doména, trvalo (301), s cestou a query;
+// zlá dvojica `--redirect` sa preskočí, iný hostiteľ dostane build ako doteraz.
+function getWithHost(port, host, pathAndQuery) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path: pathAndQuery, method: 'GET', headers: { host } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('oko-static-server: --redirect presmeruje celého hostiteľa (aj /api) na pevný pôvod s cestou a query', async () => {
+  const dist = mkdtempSync(path.join(tmpdir(), 'oko-dist-'));
+  writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>OKO</title>');
+  const port = await freePort();
+  const child = spawn(process.execPath, [SCRIPT.pathname.replace(/^\/([A-Za-z]:)/, '$1'), '--port', String(port), '--dir', dist,
+    '--redirect', 'www.okolive.test=https://okolive.test', '--redirect', 'evil.test=https://okolive.test/phish', '--redirect', 'bad'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await waitFor(`${base}/robots.txt`);
+    const moved = await getWithHost(port, 'www.okolive.test', '/?mideast=gaza#x');
+    assert.equal(moved.status, 301);
+    assert.equal(moved.headers.location, 'https://okolive.test/?mideast=gaza', 'cesta a query idú ďalej (fragment prehliadač neposiela)');
+    assert.equal(moved.headers['cache-control'], 'public, max-age=3600', 'trvalé, ale vrátiteľné do hodiny');
+    assert.equal((await getWithHost(port, 'WWW.OKOLIVE.TEST:443', '/api/situation-news?region=iran')).headers.location, 'https://okolive.test/api/situation-news?region=iran', 'veľkosť písmen a port v Host nerozhodujú, /api tiež');
+    assert.equal((await getWithHost(port, 'www.okolive.test', '//evil.example/x')).headers.location, 'https://okolive.test//evil.example/x', 'cieľ je vždy pevný pôvod — z požiadavky len cesta');
+    const plain = await getWithHost(port, 'okolive.test', '/');
+    assert.equal(plain.status, 200, 'holá doména dostane build');
+    assert.equal((await getWithHost(port, 'evil.test', '/')).status, 200, 'pôvod s cestou sa neprijme — žiadne presmerovanie');
+  } finally {
+    child.kill();
+  }
 });
