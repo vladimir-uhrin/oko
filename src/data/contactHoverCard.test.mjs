@@ -299,6 +299,50 @@ test('kartička sa sama obnoví, keď dobehne trasa, dopravca a logá — bez po
   _resetContactHoverCardForTest();
 });
 
+test('vybraný stroj (vlastník 09-28: „objaví sa ešte druhá karta"): kartička ho preskočí a po kliknutí zhasne sama', async () => {
+  const { withoutTrackedCandidate } = await import('./contactHoverCard.js');
+  const cands = [{ layerId: 'flights', sourceId: '471F68' }, { layerId: 'flights', sourceId: '4b1815' }];
+  assert.deepEqual(withoutTrackedCandidate(cands, 'flights:471f68'), [{ layerId: 'flights', sourceId: '4b1815' }], 'vybraný preč, susedný ostáva');
+  assert.deepEqual(withoutTrackedCandidate(cands, ''), cands, 'bez výberu nič');
+  assert.deepEqual(withoutTrackedCandidate(cands, 'military:471f68'), cands, 'iná vrstva = iný kontakt');
+  const ui = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /resolveSummary: \(candidates\) => \{[\s\S]{0,200}withoutTrackedCandidate\(candidates, viewer\.trackedEntity\?\.gevTrackedId\)/);
+
+  // kartička je zobrazená, potom sa na stroj klikne → ďalšie obnovenie ju zhasne bez pohybu myšou
+  _resetContactHoverCardForTest();
+  const makeEl = (tag) => ({
+    tagName: tag, children: [], style: {}, hidden: false, className: '', attrs: {}, listeners: {},
+    classList: { toggle() {}, contains() { return false; } },
+    get textContent() { return this._text ?? this.children.map((c) => (typeof c === 'string' ? c : c.textContent)).join(''); },
+    set textContent(v) { this._text = v; this.children = []; },
+    appendChild(c) { this.children.push(c); return c; },
+    remove() {}, setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {},
+    get offsetWidth() { return 200; }, get offsetHeight() { return 90; },
+    get childNodes() { return this.children; },
+    ownerDocument: null,
+  });
+  const doc = { createElement: (tag) => { const el = makeEl(tag); el.ownerDocument = doc; return el; }, createTextNode: (x) => x, defaultView: { innerWidth: 1000, innerHeight: 800 } };
+  const container = makeEl('body'); container.ownerDocument = doc;
+  let trackedId = '';
+  const timers = [];
+  installContactHoverCard({
+    container,
+    resolveSummary: (candidates) => (withoutTrackedCandidate(candidates, trackedId).length ? RICH : null),
+    lookupPhoto: async () => null,
+    setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    clearTimeoutImpl: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
+  });
+  const card = container.children[0];
+  updateContactHoverCard([{ layerId: 'flights', sourceId: '4b1815' }], { x: 100, y: 100 }, t);
+  assert.equal(card.hidden, false);
+  trackedId = 'flights:4b1815'; // klik → vybraný
+  timers.filter((x) => x.ms === HOVER_REFRESH_MS && x.fn).at(-1).fn();
+  assert.equal(card.hidden, true, 'druhá karta nad vybraným strojom nevisí');
+  updateContactHoverCard([{ layerId: 'flights', sourceId: '4b1815' }], { x: 120, y: 100 }, t);
+  assert.equal(card.hidden, true, 'ani pri ďalšom pohybe nad ním');
+  _resetContactHoverCardForTest();
+});
+
 test('lietadlá: súhrn pod kurzorom nesie čitateľné riadky, vietor a logá ako karta po kliknutí (flights.js)', () => {
   const src = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
   assert.ok(src.includes('...hoverExtras(icao24, info),'));

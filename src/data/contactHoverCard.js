@@ -244,6 +244,19 @@ export function hoverCardLines(summary, t, nowMs = Date.now()) {
   return { title: model.title, lines, military: model.military, flag: model.titleFlag };
 }
 
+/**
+ * Kandidáti bez práve vybraného (kliknutého) kontaktu (2026-09-28, vlastník: „karta je
+ * stále vidno a keď prejdem myšou po lietadle, objaví sa ešte druhá karta"): vybraný stroj
+ * už má svoju kartu — kartička pod kurzorom by ju len zdvojila. Pure.
+ * @param {Array<{layerId: string, sourceId: string}>} candidates
+ * @param {string} trackedId `gevTrackedId` vybranej entity, napr. „flights:4b1815"
+ */
+export function withoutTrackedCandidate(candidates, trackedId) {
+  const tracked = String(trackedId || '').trim().toLowerCase();
+  if (!tracked || !Array.isArray(candidates)) return candidates || [];
+  return candidates.filter((c) => `${c?.layerId}:${c?.sourceId}`.toLowerCase() !== tracked);
+}
+
 /** @type {HTMLElement|null} */
 let _card = null;
 /** @type {Function|null} */
@@ -490,7 +503,9 @@ function scheduleRefresh() {
     let summary = null;
     try { summary = _resolveSummary?.([_lastCandidate]) || null; } catch { summary = null; }
     const model = hoverCardModel(summary, _lastT);
-    if (!model) return; // kontakt zmizol — kartičku zhasne až pohyb myši, nech neblikne
+    // Kontakt zmizol alebo sa naň práve kliklo (vybraný má vlastnú kartu) — zhasnúť hneď,
+    // nie až pri ďalšom pohybe myši (inak by nad vybraným strojom viseli dve karty).
+    if (!model) { if (!_pointerOnPhoto) hideCard(); return; }
     const sig = modelSignature(model);
     if (sig !== _lastSig) {
       _lastSig = sig;

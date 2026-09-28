@@ -71,7 +71,7 @@ import {
   setDetectionTuning,
 } from './data/detection.js';
 import { installDetectionHover } from './data/detectionHover.js';
-import { installContactHoverCard, updateContactHoverCard } from './data/contactHoverCard.js';
+import { installContactHoverCard, updateContactHoverCard, withoutTrackedCandidate } from './data/contactHoverCard.js';
 import { isCoarsePointer } from './mobileShell.js';
 import { getContextStore, getSelectedEntityContext } from './data/contextStore.js';
 import {
@@ -3095,7 +3095,8 @@ export class StyleManager {
     installContactHoverCard({
       container: document.body,
       resolveSummary: (candidates) => {
-        for (const candidate of candidates) {
+        // Vybraný (kliknutý) stroj má vlastnú kartu — kartička pod kurzorom ho preskočí (09-28).
+        for (const candidate of withoutTrackedCandidate(candidates, viewer.trackedEntity?.gevTrackedId)) {
           const module = this._dataManager?.layers?.get(candidate.layerId)?.module;
           const summary = module?.getContactSummary?.(candidate.sourceId);
           if (summary) return summary;
