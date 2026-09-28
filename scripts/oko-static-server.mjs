@@ -13,6 +13,14 @@
 // the dev server's noIndexPlugin). No dependencies, no directory listing, no
 // path traversal (resolved paths must stay inside dist).
 //
+// Cache (2026-09-28, meranie štartu — Cesium 3,5 MB a modely lietadiel 2,1 MB sa
+// sťahovali každú návštevu znova, Cloudflare dával 4 h): URL s `?v=` (Cesium.js,
+// widgets.css, preloaderFlow.js — verzia alebo odtlačok obsahu z index.html) je
+// nemenná rok; /cesium/ (workery, textúry) a /models/ (GLB) 7 dní s ETag
+// revalidáciou (304). Po upgrade Cesia dostane Cesium.js novú verziu v URL hneď,
+// workery sa dorevalidujú do 7 dní — upgrade rob s vedomím, že týždeň môže mať
+// vracajúci sa návštevník starý worker (nemenné 1 rok by bolo horšie).
+//
 // Usage: node scripts/oko-static-server.mjs [--port 4174] [--dir dist]
 import fs from 'node:fs';
 import http from 'node:http';
@@ -38,6 +46,20 @@ const TYPES = {
   '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.webm': 'video/webm', '.pbf': 'application/x-protobuf', '.hdf': 'application/x-hdf',
 };
 
+/**
+ * Cache-Control podľa cesty (pure): hashované assety a URL s `?v=` nemenné rok; HTML
+ * vždy overiť; /cesium/ a /models/ 7 dní (ETag → 304); ostatné hodina.
+ * @param {string} pathname dekódovaná cesta bez query
+ * @param {string} ext prípona malými písmenami
+ * @param {string} url surové req.url (kvôli query)
+ */
+export function cacheControlFor(pathname, ext, url) {
+  if (ext === '.html') return 'no-cache';
+  if (pathname.startsWith('/assets/') || /[?&]v=[^&]+/.test(url)) return 'public, max-age=31536000, immutable';
+  if (pathname.startsWith('/cesium/') || pathname.startsWith('/models/')) return 'public, max-age=604800';
+  return 'public, max-age=3600';
+}
+
 function send(res, status, headers, body) {
   res.writeHead(status, { 'X-Robots-Tag': 'noindex, nofollow, noarchive', ...headers });
   res.end(body);
@@ -62,13 +84,12 @@ const server = http.createServer((req, res) => {
     }
     const ext = path.extname(target).toLowerCase();
     const type = TYPES[ext] || 'application/octet-stream';
-    const immutable = pathname.startsWith('/assets/');
     const etag = `"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
     const headers = {
       'Content-Type': type,
       'Content-Length': String(stat.size),
       ETag: etag,
-      'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : (ext === '.html' ? 'no-cache' : 'public, max-age=3600'),
+      'Cache-Control': cacheControlFor(pathname, ext, req.url || ''),
       ...(pathname === '/account.html' ? {
         'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'",

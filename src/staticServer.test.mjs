@@ -35,6 +35,11 @@ test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, 
   writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>OKO</title><script type="module" src="/assets/index-abc.js"></script>');
   writeFileSync(path.join(dist, 'assets', 'index-abc.js'), 'console.log("oko")');
   writeFileSync(path.join(dist, 'logo.svg'), '<svg></svg>');
+  mkdirSync(path.join(dist, 'cesium', 'Workers'), { recursive: true });
+  writeFileSync(path.join(dist, 'cesium', 'Cesium.js'), 'window.Cesium = {}');
+  writeFileSync(path.join(dist, 'cesium', 'Workers', 'w.js'), 'self.onmessage = () => {}');
+  mkdirSync(path.join(dist, 'models'));
+  writeFileSync(path.join(dist, 'models', 'c172.glb'), 'glTF');
   const port = await freePort();
   const child = spawn(process.execPath, [SCRIPT.pathname.replace(/^\/([A-Za-z]:)/, '$1'), '--port', String(port), '--dir', dist], { stdio: ['ignore', 'pipe', 'pipe'] });
   const base = `http://127.0.0.1:${port}`;
@@ -57,6 +62,15 @@ test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, 
     const svg = await fetch(base + '/logo.svg');
     assert.equal(svg.headers.get('content-type'), 'image/svg+xml');
     assert.equal(svg.headers.get('cache-control'), 'public, max-age=3600');
+    // 2026-09-28 (štart): Cesium a modely sa sťahovali každú návštevu (Cloudflare 4 h).
+    const cesiumVersioned = await fetch(base + '/cesium/Cesium.js?v=1.138.0');
+    assert.equal(cesiumVersioned.status, 200);
+    assert.equal(cesiumVersioned.headers.get('cache-control'), 'public, max-age=31536000, immutable', 'URL s verziou je nemenná rok');
+    assert.equal((await fetch(base + '/cesium/Workers/w.js')).headers.get('cache-control'), 'public, max-age=604800', 'workery bez verzie 7 dní + ETag');
+    const glb = await fetch(base + '/models/c172.glb');
+    assert.equal(glb.headers.get('content-type'), 'model/gltf-binary');
+    assert.equal(glb.headers.get('cache-control'), 'public, max-age=604800', 'modely lietadiel 7 dní');
+    assert.equal((await fetch(base + '/index.html?v=9')).headers.get('cache-control'), 'no-cache', 'HTML sa overuje vždy, aj s query');
     const robots = await fetch(base + '/robots.txt');
     assert.equal(await robots.text(), 'User-agent: *\nDisallow: /api/\nAllow: /\n', 'crawlery smú čítať stránky (náhľady sietí), nie /api/; neindexovanie drží noindex (2026-09-14)');
     assert.equal((await fetch(base + '/nope.js')).status, 404);

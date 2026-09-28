@@ -27,6 +27,7 @@
  */
 
 import fs from 'node:fs';
+import { versionedDeferredCesiumTags } from './scripts/lib/cesiumHtmlTags.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
@@ -10726,9 +10727,13 @@ export default defineConfig(({ mode }) => {
   // Recovery/profile entry must not load the Cesium engine or map resources.
   const cesiumGlobe = cesium();
   const cesiumHtml = cesiumGlobe.transformIndexHtml;
+  // Cesium.js s `defer` + verziou v URL (2026-09-28, štart: preloader čakal na 1,65 MB Cesia;
+  // verzia = rok cache na statickom serveri). Detaily v scripts/lib/cesiumHtmlTags.mjs.
+  let cesiumVersion = '';
+  try { cesiumVersion = JSON.parse(fs.readFileSync(path.join(__dirname, 'node_modules', 'cesium', 'package.json'), 'utf8')).version || ''; } catch { cesiumVersion = ''; }
   cesiumGlobe.transformIndexHtml = function (html, context) {
     if (context.path === '/account.html') return [];
-    return cesiumHtml.call(this, html, context);
+    return versionedDeferredCesiumTags(cesiumHtml.call(this, html, context), cesiumVersion);
   };
   return {
     plugins: [
