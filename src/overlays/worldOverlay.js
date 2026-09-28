@@ -3,17 +3,15 @@ import { t } from '../i18n.js';
 import {
   getKeyholeFadeTuning,
   getKeyholeGeometry,
-  keyholeLabelAlphaFromGeometry,
 } from '../celestialRing.js';
 import { BoundedCohort, stableIdentityHash } from '../data/detectionCohort.js';
 import { LabelArbiter, LABEL_ARBITER_TIMING } from '../data/labelArbiter.js';
 import {
   dockedPlacement,
   dockCoversAnchor,
+  getWorldOverlayTextMeasureGeneration,
   altitudeFade,
   destroyWorldOverlayDraw,
-  distanceFade,
-  distanceScale,
   measureOverlayEntry,
   paintOverlayEntry,
   placementVariants,
@@ -1668,6 +1666,10 @@ function getProjectionRecord(entry) {
       screen: { x: 0, y: 0 },
       layout: entry._overlayLayout,
       placements: [],
+      // Všetky objekty variantov, ktoré tento záznam kedy dostal (2026-09-28): vylúčenie
+      // variantov pod chránenými kartami skracuje `placements`, a bez poolu by ďalší
+      // snímok zahodené objekty vytváral nanovo — jedna chránená karta = +13 KB/snímok.
+      placementPool: [],
       candidate: null,
       distanceAlpha: 1,
       paintScale: 1,
@@ -1778,11 +1780,35 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   const rangeY = cameraPosition.y - record.position.y;
   const rangeZ = cameraPosition.z - record.position.z;
   const distance = Math.sqrt(rangeX * rangeX + rangeY * rangeY + rangeZ * rangeZ);
-  record.distanceAlpha = entry.maxDistance === Number.POSITIVE_INFINITY
-    ? (distance >= entry.minDistance ? 1 : 0)
-    : distanceFade(distance, record.distanceOptions);
+  if (entry.maxDistance === Number.POSITIVE_INFINITY) {
+    record.distanceAlpha = distance >= entry.minDistance ? 1 : 0;
+  } else {
+    // distanceFade na mieste (2026-09-28): volanie s double argumentom a návratom stálo
+    // pri každom kandidátovi s dosahom (lode, kamery) dve alokácie na snímok.
+    const minDistance = Number.isFinite(entry.minDistance) ? Math.max(0, entry.minDistance) : 0;
+    const maxDistance = Math.max(minDistance, entry.maxDistance);
+    let distanceAlpha = 0;
+    if (Number.isFinite(distance) && distance >= minDistance && distance < maxDistance) {
+      const ratio = Math.max(0, Math.min(1, Number(entry.distanceFadeStartRatio) || 0));
+      const fadeStart = minDistance + (maxDistance - minDistance) * ratio;
+      distanceAlpha = distance <= fadeStart || fadeStart >= maxDistance
+        ? 1
+        : 1 - (distance - fadeStart) / (maxDistance - fadeStart);
+    }
+    record.distanceAlpha = distanceAlpha;
+  }
   const cameraAltitude = _viewer.camera.positionCartographic?.height;
-  record.paintScale = entry.distanceScale ? distanceScale(distance, entry.distanceScale) : 1;
+  // distanceScale (Cesium NearFarScalar krivka) na mieste — ten istý dôvod ako vyššie.
+  const scaleCurve = entry.distanceScale;
+  if (scaleCurve && Number.isFinite(distance)) {
+    const near = Math.max(0, Number(scaleCurve.near) || 0);
+    const far = Math.max(near, Number(scaleCurve.far) || near);
+    const nearValue = Math.max(0, Number(scaleCurve.nearValue) || 0);
+    const farValue = Math.max(0, Number(scaleCurve.farValue) || 0);
+    record.paintScale = distance <= near || far === near
+      ? nearValue
+      : distance >= far ? farValue : nearValue + (farValue - nearValue) * ((distance - near) / (far - near));
+  } else record.paintScale = 1;
   // Keep the source-configurable piecewise curve local to the projection hot
   // path. Passing its five doubles through a non-inlined helper boxed them for
   // every thumbnail candidate and broke the shared 154 B/candidate gate.
@@ -1813,7 +1839,14 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   if (record.distanceAlpha <= 0 || record.paintScale <= 0
     || record.altitudeAlpha <= 0 || record.sourceAlpha <= 0) return null;
 
-  measureOverlayEntry(_ctx, entry, record.layout);
+  // Rozmery sa merajú raz na záznam a generáciu fontov (2026-09-28): záznam je nemenný
+  // (republikovanie = nový záznam s novým layoutom), tak načo merať text každý snímok.
+  const layout = record.layout;
+  const measureGeneration = getWorldOverlayTextMeasureGeneration();
+  if (layout.measuredGeneration !== measureGeneration) {
+    measureOverlayEntry(_ctx, entry, layout);
+    layout.measuredGeneration = measureGeneration;
+  }
   record.placementInput.anchorX = record.screen.x;
   record.placementInput.anchorY = record.screen.y;
   record.placementInput.width = record.layout.w * record.paintScale;
@@ -1821,9 +1854,17 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   record.placementInput.viewportWidth = _canvasWidth;
   record.placementInput.viewportHeight = _canvasHeight;
   if (entry.anchorRadiusPx > 0) {
-    const anchorScale = entry.anchorRadiusScale
-      ? distanceScale(distance, entry.anchorRadiusScale)
-      : 1;
+    let anchorScale = 1;
+    const anchorCurve = entry.anchorRadiusScale;
+    if (anchorCurve && Number.isFinite(distance)) {
+      const near = Math.max(0, Number(anchorCurve.near) || 0);
+      const far = Math.max(near, Number(anchorCurve.far) || near);
+      const nearValue = Math.max(0, Number(anchorCurve.nearValue) || 0);
+      const farValue = Math.max(0, Number(anchorCurve.farValue) || 0);
+      anchorScale = distance <= near || far === near
+        ? nearValue
+        : distance >= far ? farValue : nearValue + (farValue - nearValue) * ((distance - near) / (far - near));
+    }
     const anchorRadius = entry.anchorRadiusPx * anchorScale;
     record.placementInput.gap = anchorRadius + Math.max(
       entry.minAnchorGapPx,
@@ -1837,6 +1878,12 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   record.placementInput.preferred = entry.placement;
   record.placementInput.verticalOnly = entry.verticalOnly;
   record.placementInput.viewportMargin = entry.viewportMargin;
+  // Obnov pracovné pole z poolu: filtre nižšie a vylúčenie chránených obdĺžnikov (solveDomains)
+  // pole skracujú; objekty ostávajú v poole a writePlacement ich znova naplní bez alokácie.
+  const placementPool = record.placementPool;
+  const placements = record.placements;
+  for (let i = 0; i < placementPool.length; i++) placements[i] = placementPool[i];
+  placements.length = placementPool.length;
   if (entry.dock) {
     // Len dokovaná karta (jedna) — zápis do placementInput všetkých kandidátov by pri každom
     // snímku balil double (alokačný test „tracked readout live": +15 B/kandidáta).
@@ -1844,6 +1891,8 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
     record.placementInput.reserveBelowPx = entry.dockReserveBelowPx;
     dockedPlacement(record.placementInput, entry.dock, record.placements);
   } else placementVariants(record.placementInput, record.placements);
+  // Nové objekty (prvé snímky, alebo dokovaná karta s viac variantmi) do poolu.
+  for (let i = placementPool.length; i < placements.length; i++) placementPool[i] = placements[i];
   // UI exclusion is a PREFERENCE for chrome that composites ABOVE the host, and
   // a HARD VETO for chrome that composites below it.
   //
@@ -1899,13 +1948,21 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
     }
   }
   // Shared keyhole alpha is radial and monotonic, so the closest surviving
-  // placement is exactly the maximum-alpha placement. Evaluate the shared
-  // helper once, then evaluate the final chosen rectangle again at paint.
-  record.candidate.keyholeAlpha = entry.edgeFade === 'keyhole'
-    ? (centerDistance <= keyhole.radius
-      ? 1
-      : keyholeLabelAlphaFromGeometry(closestCenterX, closestCenterY, keyhole))
-    : 1;
+  // placement is exactly the maximum-alpha placement. Tá istá krivka ako
+  // keyholeLabelAlphaFromGeometry, ale na mieste (2026-09-28): volanie s tromi
+  // double a návratom sa pri stovkách kandidátov mimo kruhu boxovalo každý snímok.
+  let keyholeAlpha = 1;
+  if (entry.edgeFade === 'keyhole') {
+    const radius = keyhole.radius;
+    if (!(radius > 0)) keyholeAlpha = 0;
+    else if (centerDistance > radius) {
+      const feather = keyhole.featherPx;
+      const outside = keyhole.outsideOpacity;
+      if (!(feather > 0) || centerDistance >= radius + feather) keyholeAlpha = outside;
+      else keyholeAlpha = 1 - (1 - outside) * ((centerDistance - radius) / feather);
+    }
+  }
+  record.candidate.keyholeAlpha = keyholeAlpha;
   record.candidate.centerDistance = centerDistance;
   // Anchor separation is authored in unscaled CSS px; the shipped pass scaled it
   // with the card, so a zoomed-out (smaller) card needs proportionally less room.
@@ -2120,6 +2177,8 @@ function addPaintItem(record, placement, temporalAlpha, selected) {
   item.record = record;
   item.placement = placement;
   item.temporalAlpha = temporalAlpha;
+  item.finalAlpha = 1;
+  item.paintScale = 1;
   item.selected = selected;
   item.lane = paintLaneForOverlayEntry(record.entry);
   item.zIndex = record.entry.zIndex;
@@ -2195,8 +2254,11 @@ function solveDomains(timestamp) {
   _diagnostics.solveRevision = solveRevision;
 }
 
-function publishPaintRect(item, alpha = 1, paintScale = 1) {
+function publishPaintRect(item) {
   const { record, placement } = item;
+  // alfa a mierka prichádzajú v poliach položky (paintEntryItem), nie ako double argumenty
+  const alpha = item.finalAlpha;
+  const paintScale = item.paintScale;
   const rect = _paintRectPool[_paintRectCount] || (_paintRectPool[_paintRectCount] = {});
   _paintRectCount++;
   rect.x = placement.rect.x;
@@ -2301,9 +2363,17 @@ function paintEntryItem(item, keyhole) {
   if (entry.edgeFade === 'keyhole') {
     const keyholeX = placement.centerX - keyhole.centerX;
     const keyholeY = placement.centerY - keyhole.centerY;
-    keyholeAlpha = keyholeX * keyholeX + keyholeY * keyholeY <= keyhole.radius * keyhole.radius
-      ? 1
-      : keyholeLabelAlphaFromGeometry(placement.centerX, placement.centerY, keyhole);
+    const radius = keyhole.radius;
+    const squared = keyholeX * keyholeX + keyholeY * keyholeY;
+    // Krivka keyholeLabelAlphaFromGeometry na mieste (2026-09-28) — bez volania a boxingu.
+    if (!(radius > 0)) keyholeAlpha = 0;
+    else if (squared > radius * radius) {
+      const distance = Math.sqrt(squared);
+      const feather = keyhole.featherPx;
+      const outside = keyhole.outsideOpacity;
+      if (!(feather > 0) || distance >= radius + feather) keyholeAlpha = outside;
+      else keyholeAlpha = 1 - (1 - outside) * ((distance - radius) / feather);
+    }
   }
   // All five channels are normalized at their source. Keep the multiply on
   // the hot paint path so its intermediate doubles remain unboxed; the pure
@@ -2311,21 +2381,21 @@ function paintEntryItem(item, keyhole) {
   const finalAlpha = record.sourceAlpha * item.temporalAlpha
     * record.distanceAlpha * record.altitudeAlpha * keyholeAlpha;
   if (finalAlpha <= 0.001) return;
+  // Alfa a mierka idú ďalej cez polia zdieľanej položky (zápis double do poľa je zadarmo),
+  // nie ako argumenty — každý double argument neinlinovanej funkcie je jedna alokácia.
+  item.finalAlpha = finalAlpha;
+  item.paintScale = record.paintScale;
   if (record.paintScale === 1) {
     paintOverlayEntry(_ctx, entry, placement, finalAlpha);
   } else {
-    const scaled = localizeScaledPlacement(
-      placement,
-      record.paintScale,
-      record.scaledPaintPlacement,
-    );
+    const scaled = localizeScaledPlacement(placement, record, record.scaledPaintPlacement);
     _ctx.save();
     _ctx.translate(placement.rect.x, placement.rect.y);
     _ctx.scale(record.paintScale, record.paintScale);
     paintOverlayEntry(_ctx, entry, scaled, finalAlpha);
     _ctx.restore();
   }
-  publishPaintRect(item, finalAlpha, record.paintScale);
+  publishPaintRect(item);
   if (_paintedBySource[entry.source] === undefined) {
     _paintedBySource[entry.source] = 0;
     _paintedSourceKeys.push(entry.source);
@@ -2370,7 +2440,8 @@ function paintFrame(keyhole) {
     || activeCustomPaintLaneCount(PAINT_TARGET_SHARED) > 0;
 }
 
-function localizeScaledPlacement(placement, scale, out) {
+function localizeScaledPlacement(placement, record, out) {
+  const scale = record.paintScale;
   const x = placement.rect.x;
   const y = placement.rect.y;
   out.corner = placement.corner;

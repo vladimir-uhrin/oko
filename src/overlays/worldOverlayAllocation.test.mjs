@@ -94,6 +94,45 @@ import { isCalibratedAllocationRuntime } from '../../scripts/run-unit-tests.mjs'
  * B/candidate image-inclusive ceiling retain more than 10% headroom over the
  * measured Node 24 median/max (164,711 / 167,313 B/frame).
  *
+ * ── OKO 2026-09-28 (plynulosť, vlastník: „čo by si vylepšil? → 1") ──
+ * Tri riadky (Phase 5 pre-missions, Phase 5 final, all-live) prekročili rozpočty
+ * po zmenách forku (dokovaná karta s grafmi, štítky lodí…). Profil (V8 sampling
+ * heap profiler) ukázal, že merané bajty sú prevažne BOXOVANÉ DOUBLE na hraniciach
+ * neinlinovaných funkcií a zahodené zdieľané objekty. Opravy v hostiteľovi:
+ *   - rozmery záznamu sa merajú raz na generáciu fontov (layout.measuredGeneration),
+ *     nie každý snímok (2–3 návratové double na kandidáta);
+ *   - alfa kruhu, distanceFade, distanceScale a mierka kotvy sa počítajú na mieste
+ *     v snapshotAndProject / paintEntryItem (rovnaké krivky ako helpery — pin
+ *     v worldOverlay.test „inline kópie v hostiteľovi");
+ *   - pool objektov variantov (record.placementPool): vylúčenie variantov pod
+ *     chránenými kartami skracovalo pole a ďalší snímok objekty vytváral nanovo
+ *     (jedna chránená karta = +13 KB/snímok);
+ *   - finalAlpha/paintScale idú do publishPaintRect cez polia položky.
+ * Pasca: Math.hypot v keyholeLabelAlphaFromGeometry (celestialRing.js) OSTÁVA —
+ * náhrada za sqrt zdvihla detekčný riadok z 277 KB na 1,32 MB/snímok.
+ * Nové mediány (Node 24.20, medián z 10 chunkov, ±2 %) a rozpočty ≈ 1,5× medián:
+ *
+ *   profile              | painted | median B/frame | B/candidate | frame budget
+ *   ---------------------+---------+----------------+-------------+-------------
+ *   generic below cap    |      60 |           2696 |        44.9 |       4,100
+ *   generic above cap    |      96 |           9536 |        38.1 |      13,000
+ *   local infrastructure |     192 |          25475 |        79.6 |      38,000
+ *   Phase 3 + FIRMS      |     211 |          24449 |        72.3 |      37,000
+ *   Phase 3 + vessels    |     305 |          30491 |        67.6 |      46,000
+ *   Phase 3 + tracked    |     307 |          30715 |        68.1 |      46,000
+ *   Phase 4 + CCTV       |     309 |          36387 |        74.0 |      55,000
+ *   rocket missions      |      24 |           3440 |        71.7 |       6,000
+ *   Phase 5 pre-missions |     351 |          44136 |        74.7 |      66,000
+ *   Phase 5 final        |     351 |          43387 |        67.9 |      65,000
+ *   submarine cables     |      96 |           8859 |        55.4 |      13,500
+ *   all-live (w/ cables) |     400 |          54967 |        63.6 |      82,000
+ *   Phase 6 detection    |    2500 |         276791 |        55.4 |     415,000
+ *
+ * Spoločný strop klesol na 120 B/kandidáta (najvyšší riadok 79,6); obrazové
+ * výnimky 210/225 už netreba. Phase 6 kreslí 2 500 z 5 000 pozorovaní: rámčeky
+ * lietadiel mimo kruhu sa pri zapnutej maske nekreslia (detectionPolicy, 7502732).
+ * Historická tabuľka upstreamu nižšie ostáva pre porovnanie.
+ *
  * The Phase-6 row activates the production detection lane at Dense/100 over a
  * deterministic 5,000-observation, 2,500 km scene. All observations exercise
  * manual projection and batched bracket paint; the shipped global-view label
@@ -131,7 +170,7 @@ const WORKLOADS = [
     profile: 'local-infrastructure',
     entries: LOCAL_OVERLAY_COHORT_LIMIT * 2,
     candidates: LOCAL_OVERLAY_COHORT_LIMIT * 2,
-    maxBytesPerFrame: 49_000,
+    maxBytesPerFrame: 38_000,
     saturated: true,
   },
   {
@@ -139,7 +178,7 @@ const WORKLOADS = [
     profile: 'phase3-firms',
     entries: LOCAL_OVERLAY_COHORT_LIMIT * 2 + FIRMS_AMBIENT_COHORT_LIMIT,
     candidates: LOCAL_OVERLAY_COHORT_LIMIT * 2 + FIRMS_AMBIENT_COHORT_LIMIT,
-    maxBytesPerFrame: 53_600,
+    maxBytesPerFrame: 37_000,
     saturated: true,
     ambientCardCapacity: AMBIENT_CARD_COLLISION_CAPACITY,
   },
@@ -150,7 +189,7 @@ const WORKLOADS = [
       + vesselOverlayCohortLimit(1600, 900) + 1,
     candidates: LOCAL_OVERLAY_COHORT_LIMIT * 2 + FIRMS_AMBIENT_COHORT_LIMIT
       + vesselOverlayCohortLimit(1600, 900) + 1,
-    maxBytesPerFrame: 87_500,
+    maxBytesPerFrame: 46_000,
     saturated: true,
     ambientCardCapacity: AMBIENT_CARD_COLLISION_CAPACITY,
   },
@@ -161,7 +200,7 @@ const WORKLOADS = [
       + vesselOverlayCohortLimit(1600, 900) + 1,
     candidates: LOCAL_OVERLAY_COHORT_LIMIT * 2 + FIRMS_AMBIENT_COHORT_LIMIT
       + vesselOverlayCohortLimit(1600, 900) + 1,
-    maxBytesPerFrame: 86_700,
+    maxBytesPerFrame: 46_000,
     saturated: true,
     ambientCardCapacity: AMBIENT_CARD_COLLISION_CAPACITY,
   },
@@ -172,8 +211,7 @@ const WORKLOADS = [
       + vesselOverlayCohortLimit(1600, 900) + 1 + CCTV_AMBIENT_CARD_MAX + 1,
     candidates: LOCAL_OVERLAY_COHORT_LIMIT * 2 + FIRMS_AMBIENT_COHORT_LIMIT
       + vesselOverlayCohortLimit(1600, 900) + 1 + CCTV_AMBIENT_CARD_MAX + 1,
-    maxBytesPerFrame: 102_400,
-    maxBytesPerCandidatePerFrame: 210,
+    maxBytesPerFrame: 55_000,
     saturated: true,
     ambientCardCapacity: AMBIENT_CARD_COLLISION_CAPACITY,
   },
@@ -194,8 +232,7 @@ const WORKLOADS = [
     candidates: LOCAL_OVERLAY_COHORT_LIMIT * 2 + FIRMS_AMBIENT_COHORT_LIMIT
       + vesselOverlayCohortLimit(1600, 900) + 1 + CCTV_AMBIENT_CARD_MAX + 1
       + EARTHQUAKE_OVERLAY_COHORT_LIMIT + 3,
-    maxBytesPerFrame: 132_000,
-    maxBytesPerCandidatePerFrame: 225,
+    maxBytesPerFrame: 66_000,
     saturated: true,
     ambientCardCapacity: AMBIENT_CARD_COLLISION_CAPACITY,
   },
@@ -212,8 +249,7 @@ const WORKLOADS = [
       + ROCKET_MISSION_AMBIENT_OVERLAY_COHORT_LIMIT,
     // 142,000 deliberately carries ~6% headroom (vs the ~3.3% the previous
     // aggregate row ran at): a chosen margin correction, not drift.
-    maxBytesPerFrame: 142_000,
-    maxBytesPerCandidatePerFrame: 225,
+    maxBytesPerFrame: 65_000,
     saturated: true,
     ambientCardCapacity: AMBIENT_CARD_COLLISION_CAPACITY,
   },
@@ -238,8 +274,7 @@ const WORKLOADS = [
       + EARTHQUAKE_OVERLAY_COHORT_LIMIT + 3
       + ROCKET_MISSION_AMBIENT_OVERLAY_COHORT_LIMIT + RADIO_OVERLAY_COHORT_LIMIT + 1
       + CABLE_REFERENCE_LABEL_WINNER_CAP,
-    maxBytesPerFrame: 182_000,
-    maxBytesPerCandidatePerFrame: 225,
+    maxBytesPerFrame: 82_000,
     saturated: true,
     ambientCardCapacity: AMBIENT_CARD_COLLISION_CAPACITY,
   },
@@ -256,7 +291,7 @@ const WORKLOADS = [
     profile: 'submarine-cables',
     entries: CABLE_REFERENCE_LABEL_WINNER_CAP,
     candidates: CABLE_REFERENCE_LABEL_WINNER_CAP,
-    maxBytesPerFrame: 19_000,
+    maxBytesPerFrame: 13_500,
     saturated: true,
   },
   {
@@ -264,14 +299,14 @@ const WORKLOADS = [
     profile: 'phase6-detection',
     entries: 5_000,
     candidates: 5_000,
-    maxBytesPerFrame: 700_000,
+    maxBytesPerFrame: 415_000,
     detectionLabelBudget: 56,
     saturated: false,
   },
 ];
 
 /** Scale-invariant ceiling shared by every production-shape workload. */
-const MAX_BYTES_PER_CANDIDATE_PER_FRAME = 154;
+const MAX_BYTES_PER_CANDIDATE_PER_FRAME = 120;
 
 const WORKER_PATH = fileURLToPath(new URL('./worldOverlayAllocation.worker.mjs', import.meta.url));
 

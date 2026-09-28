@@ -8,7 +8,7 @@ import {
   setKeyholeFadeTuning,
 } from '../celestialRing.js';
 import { createCctvThumbnailOverlayEntry, createFrameSlot } from '../data/cctvCards.js';
-import { combinedOverlayAlpha } from './worldOverlayDraw.js';
+import { combinedOverlayAlpha, distanceFade, distanceScale } from './worldOverlayDraw.js';
 import {
   AMBIENT_CARD_COLLISION_CAPACITY,
   WORLD_OVERLAY_OCCLUDER_SELECTORS,
@@ -684,6 +684,81 @@ test('inlined host alpha binding matches combinedOverlayAlpha across channel ran
         Math.abs(paintedAlphas.at(-1) - expected) < 1e-12,
         `case ${index}: expected ${expected}, painted ${paintedAlphas.at(-1)}`,
       );
+    }
+  } finally {
+    env.cleanup();
+  }
+});
+
+test('inline kópie v hostiteľovi (2026-09-28, plynulosť) sedia s helpermi: alfa kruhu na okraji, distanceFade s fadeStartRatio, distanceScale, mierka kotvy', () => {
+  // Hostiteľ počíta krivky na mieste (double cez neinlinovanú hranicu = alokácia); tento test
+  // ich drží zhodné s čistými helpermi. Fixture: identitná projekcia (sx = (px/2 + 0,5)·400,
+  // sy = (0,5 − py/2)·300), kamera v (0, 0, 10 000 km), takže vzdialenosť = 10 000 km − pz.
+  const env = installMockEnvironment({ width: 400, height: 300, dpr: 1 });
+  const paintedAlphas = [];
+  Object.defineProperty(env.ctx, 'globalAlpha', {
+    configurable: true,
+    get() { return paintedAlphas.at(-1) ?? 1; },
+    set(value) { paintedAlphas.push(value); },
+  });
+  initWorldOverlay(env.viewer);
+  // Explicitné ladenie (skoršie testy v súbore ho menia): pásmo 16 % polomeru, vonku 5 %.
+  setKeyholeFadeTuning({ fadeRatio: 0.16, outsideOpacity: 0.05 });
+  const geometry = getKeyholeGeometry(400, 300);
+  assert.equal(geometry.outsideOpacity, 0.05, 'geometria nesie vonkajšiu nepriehľadnosť');
+  const base = { variant: 'label', title: 'EDGE', protected: true, horizonCull: false, maxDistance: Number.POSITIVE_INFINITY };
+  const paintOnce = (entry, options = {}) => {
+    setOverlayEntries('inline-copies', [entry], { cohortLimit: 1, collisionCapacity: 0, ...options });
+    paintedAlphas.length = 0;
+    env.postRender.raise();
+    return { alpha: paintedAlphas.at(-1), rect: getOverlayPaintRect('inline-copies', entry.id) };
+  };
+  try {
+    // 1. alfa kruhu: vnútri = 1, v pásme prechodu presne ako keyholeLabelAlphaFromGeometry, vonku = outsideOpacity.
+    // Režim sa určuje z NAMERANÉHO stredu štítka (štítok stojí nad kotvou, nie na nej).
+    const edge = (id, px, py) => {
+      const painted = paintOnce({ ...base, id, edgeFade: 'keyhole', position: new Cesium.Cartesian3(px, py, 0) });
+      assert.ok(painted.rect, `${id}: nakreslené`);
+      const dx = painted.rect.x + painted.rect.w / 2 - geometry.centerX;
+      const dy = painted.rect.y + painted.rect.h / 2 - geometry.centerY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const expected = keyholeLabelAlphaFromGeometry(geometry.centerX + dx, geometry.centerY + dy, geometry);
+      assert.ok(Math.abs(painted.alpha - expected) < 1e-9, `${id}: alfa ${painted.alpha} ≠ helper ${expected}`);
+      return { alpha: painted.alpha, distance };
+    };
+    const inside = edge('edge-inside', 0, 0.3);
+    assert.ok(inside.distance <= geometry.radius && inside.alpha === 1, 'stred = vnútri kruhu, alfa 1');
+    const outside = edge('edge-outside', 1, 1);
+    assert.ok(outside.distance >= geometry.radius + geometry.featherPx, 'roh obrazovky je za pásmom');
+    assert.equal(outside.alpha, geometry.outsideOpacity);
+    let ramp = null;
+    for (let step = 0; step <= 40 && !ramp; step += 1) {
+      const sx = geometry.centerX + geometry.radius + geometry.featherPx * (step / 40) - 20;
+      const probe = edge(`edge-ramp-${step}`, (sx / 400 - 0.5) * 2, 0.3);
+      if (probe.distance > geometry.radius && probe.distance < geometry.radius + geometry.featherPx) ramp = probe;
+    }
+    assert.ok(ramp, 'našiel sa bod v pásme prechodu');
+    assert.ok(ramp.alpha < 1 && ramp.alpha > geometry.outsideOpacity, `v pásme medzi 1 a vonkajškom: ${ramp.alpha}`);
+    // 2. distanceFade s fadeStartRatio 0,5 a minDistance: 40 % = 1, 75 % = 0,5, za maximom sa nekreslí
+    const fadeOptions = { minDistance: 1_000_000, maxDistance: 9_000_000, distanceFadeStartRatio: 0.5 };
+    for (const share of [0.4, 0.75, 0.9]) {
+      const pz = 10_000_000 - share * 10_000_000;
+      const painted = paintOnce({ ...base, id: `fade-${share}`, edgeFade: 'none', position: new Cesium.Cartesian3(0, 0, pz), ...fadeOptions });
+      const expected = distanceFade(share * 10_000_000, { minDistance: fadeOptions.minDistance, maxDistance: fadeOptions.maxDistance, fadeStartRatio: fadeOptions.distanceFadeStartRatio });
+      if (expected <= 0.001) assert.equal(painted.rect, null, `${share}: za maximom nič`);
+      else assert.ok(Math.abs(painted.alpha - expected) < 1e-9, `${share}: alfa ${painted.alpha} ≠ distanceFade ${expected}`);
+    }
+    assert.equal(paintOnce({ ...base, id: 'fade-near', edgeFade: 'none', position: new Cesium.Cartesian3(0, 0, 9_500_000), ...fadeOptions }).rect, null, 'pod minDistance nič');
+    // 3. distanceScale (NearFarScalar) → paintScale karty; 4. anchorRadiusScale → medzera kotvy (poloha karty)
+    const curve = { near: 2_000_000, nearValue: 1, far: 8_000_000, farValue: 0.25 };
+    for (const share of [0.1, 0.5, 0.95]) {
+      const distance = share * 10_000_000;
+      const painted = paintOnce({ ...base, id: `scale-${share}`, edgeFade: 'none', position: new Cesium.Cartesian3(0, 0, 10_000_000 - distance), distanceScale: curve, placement: 'above', anchorRadiusPx: 10, anchorRadiusScale: curve, minAnchorGapPx: 0, anchorGapPaddingPx: 0 });
+      const expectedScale = distanceScale(distance, curve);
+      assert.ok(Math.abs(painted.rect.paintScale - expectedScale) < 1e-9, `${share}: paintScale ${painted.rect.paintScale} ≠ ${expectedScale}`);
+      // karta nad kotvou (sy = 150): rect.y = round(150 − 2·r − h), r = 10 · distanceScale
+      const anchorRadius = 10 * expectedScale;
+      assert.ok(Math.abs(painted.rect.y - Math.round(150 - 2 * anchorRadius - painted.rect.h)) <= 1, `${share}: medzera kotvy ${painted.rect.y}`);
     }
   } finally {
     env.cleanup();

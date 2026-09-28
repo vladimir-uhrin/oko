@@ -83,8 +83,10 @@ export function getKeyholeFadeTuning() {
 export function getKeyholeGeometry(width, height) {
   const w = Number(width);
   const h = Number(height);
+  // `outsideOpacity` cestuje s geometriou (2026-09-28): hot cesty hostiteľa (projekcia, paint)
+  // počítajú alfu na mieste bez volania — každý double cez neinlinovanú hranicu sa boxuje.
   if (!(w > 0) || !(h > 0)) {
-    return { centerX: 0, centerY: 0, radius: 0, featherPx: 0 };
+    return { centerX: 0, centerY: 0, radius: 0, featherPx: 0, outsideOpacity: keyholeOutsideOpacity };
   }
   const radius = h * 0.5 * KEYHOLE_OUTER_RADIUS;
   return {
@@ -92,6 +94,7 @@ export function getKeyholeGeometry(width, height) {
     centerY: h * 0.5,
     radius,
     featherPx: radius * keyholeFadeRatio,
+    outsideOpacity: keyholeOutsideOpacity,
   };
 }
 
@@ -108,6 +111,10 @@ export function keyholeLabelAlpha(labelX, labelY, width, height) {
 export function keyholeLabelAlphaFromGeometry(labelX, labelY, geometry) {
   if (!geometry || !(geometry.radius > 0) || !Number.isFinite(labelX) || !Number.isFinite(labelY)) return 0;
   const feather = geometry.featherPx;
+  // POZOR (2026-09-28, alokačný test „Dense detection lane"): tu OSTÁVA Math.hypot. Náhrada
+  // za sqrt(dx²+dy²) zdvihla alokácie detekčnej slučky z 277 KB na 1,32 MB/snímok (5 000
+  // pozorovaní) — zrejme zmena inliningu v obrovskej paint slučke; hostiteľ prekrytia si
+  // preto tú istú krivku počíta na mieste (worldOverlay.js) a túto funkciu nevolá.
   const distance = Math.hypot(labelX - geometry.centerX, labelY - geometry.centerY);
   if (distance <= geometry.radius) return 1;
   if (!(feather > 0) || distance >= geometry.radius + feather) return keyholeOutsideOpacity;

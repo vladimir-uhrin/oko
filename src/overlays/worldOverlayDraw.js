@@ -42,11 +42,25 @@ function evictOldestTextMeasureEntry() {
   _textMeasureCacheSize--;
 }
 
+/**
+ * Generácia merania (2026-09-28, plynulosť): hostiteľ si pamätá, pri ktorej generácii zmeral
+ * rozmery záznamu (`layout.measuredGeneration`), a kým sa nezmení, nemeria znova — text
+ * záznamu je nemenný (nový záznam = nový layout objekt), mení sa len dostupnosť fontov.
+ * Meranie každý snímok stálo 2–3 návratové double na kandidáta (boxing) = ~19 KB/snímok.
+ */
+let _textMeasureGeneration = 1;
+
+/** Aktuálna generácia merania; mení sa len pri vyčistení cache (fonty, teardown). */
+export function getWorldOverlayTextMeasureGeneration() {
+  return _textMeasureGeneration;
+}
+
 /** Clear cached text widths after web-font availability changes. */
 export function clearWorldOverlayTextMeasureCache() {
   _textMeasureCache.clear();
   _textMeasureCacheSize = 0;
   _textMeasureClock = 0;
+  _textMeasureGeneration++;
 }
 
 /** Install the font-loading invalidation hooks once, when the API exists. */
