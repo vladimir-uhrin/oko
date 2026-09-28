@@ -1,4 +1,4 @@
-# scripts/install-meteo-bake-task.ps1 — zaregistruje pečenie meteo rezov
+﻿# scripts/install-meteo-bake-task.ps1 — zaregistruje pečenie meteo rezov
 # (scripts/meteo-bake.ps1) ako úlohu Plánovača pre TOHTO používateľa:
 # 4× denne po behoch GFS (00/06/12/18 UTC), s oneskorením ~45 min na dokončenie
 # modelu, beží skryto, bez admin práv (úloha pod prihláseným používateľom).

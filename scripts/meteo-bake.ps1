@@ -1,4 +1,4 @@
-# scripts/meteo-bake.ps1 — obal offline pečenia meteo rezov pre Plánovač úloh
+﻿# scripts/meteo-bake.ps1 — obal offline pečenia meteo rezov pre Plánovač úloh
 # (2026-09-17, fáza 1 krok 2). Spúšťa `node scripts/meteo-bake.mjs` z koreňa
 # repozitára a loguje do .gev-cache/logs/meteo-bake.log (rotácia nad 5 MB).
 #
