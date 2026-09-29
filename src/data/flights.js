@@ -97,6 +97,7 @@ import {
 } from './flightProgress.js';
 import { createGroundSnap } from './groundSnap.js';
 import { fleetContactSkipsTick, metersPerPixelPerMeter, pinBillboardBufferUsage, positionWriteThresholdM } from './fleetTickGate.js';
+import { isStartupReady } from '../startupGate.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { geoidSurfaceLastResortM, pickRenderAltitudeM } from './renderAltitude.js';
 import { allocateCorridorCells, cachedGroundFloor, cachedMeshFloor, coarseFloorCoord, corridorFloorCells, displayFloorHeightM, floorAltitudeM, neighborFloorM, stickyFloorCell, warmGroundFloor, resolveGroundFloorCellsBounded, GROUND_FLOOR_LIFT_M } from './groundFloor.js';
@@ -3126,6 +3127,12 @@ function _newestFix(icao24) {
 
 function _fleetTick() {
   _tickNowActive = false; // po výnimke v minulom tiku
+  // Pod preloaderom lietadlá nikto nevidí: tik flotily (dead reckoning, podlaha,
+  // natočenie, fokus pre 6–12 000 strojov) počká na koniec štartu (startupGate.js).
+  // Meranie 2026-09-29 (verejná stránka, len lietadlá): 1,4 s hlavného vlákna pred
+  // skrytím preloadera pod tikom flotily. Prvý tik po skrytí prejde flotilu celú
+  // (iná póza kamery = nová epocha brány skrytia).
+  if (!isStartupReady()) return;
   if (!_viewer || !_billboardCollection || !_billboardCollection.show) return;
   const scene = _viewer.scene;
   const camera = _viewer.camera;
