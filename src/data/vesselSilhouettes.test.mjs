@@ -216,7 +216,9 @@ test('lode bok po boku: siluetu za bližšou loďou stlmiť, bližšia ostane na
   const live = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
   const hub = readFileSync(new URL('./aishubVessels.js', import.meta.url), 'utf8');
   // bez rohov: silueta aj ikona zhora v skutočnej veľkosti (zblízka)
-  assert.match(live, /quietBracket: Boolean\(state\.shipSilhouettes && \(record\.view \|\| Number\.isFinite\(record\.realScale\)\)\),/);
+  // 2026-09-29: detekčný objekt lode sa kešuje na zázname (getDetectableObjects beží
+  // každú snímku) — tá istá podmienka, len priradenie ako pri aishub.
+  assert.match(live, /object\.quietBracket = Boolean\(state\.shipSilhouettes && \(record\.view \|\| Number\.isFinite\(record\.realScale\)\)\);/);
   assert.match(hub, /object\.quietBracket = Boolean\(_silhouettes && \(entry\.view \|\| Number\.isFinite\(entry\.realScale\)\)\);/);
   assert.match(live, /if \(doRotations && camView && scene && camera\) refreshSilhouetteOverlap\(scene, camera\);/);
 });

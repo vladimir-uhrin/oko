@@ -154,3 +154,56 @@ test('geoidHeight throws a clear error if called before the grid is ready', asyn
   const fresh = await import('./geoid.js?fresh-not-ready-check');
   assert.throws(() => fresh.geoidHeight(0, 0), /not ready|ensureGeoidReady/i);
 });
+
+// ── 2026-09-29: mriežka 30' bikubicky namiesto balíka egm96-universal (15') ──
+// Prenos pri štarte 1,85 MB → ~194 KB gzip. Presnosť sa overuje proti pôvodnej
+// plnej mriežke (balík ostáva v node_modules pre generátor a tento test).
+
+test('30\' bikubicky vs pôvodná 15\' mriežka: RMS < 8 cm, max < 1,1 m (Európa < 0,65 m)', async () => {
+  await ensureGeoidReady();
+  const { meanSeaLevel } = await import('egm96-universal');
+  const errs = []; const europe = [];
+  for (let lat = -89.875; lat <= 89.875; lat += 0.5) {
+    for (let lon = -179.875; lon < 180; lon += 0.5) {
+      const e = Math.abs(geoidHeight(lat, lon) - meanSeaLevel(lat, lon));
+      errs.push(e);
+      if (lat >= 34 && lat <= 72 && lon >= -25 && lon <= 45) europe.push(e);
+    }
+  }
+  const rms = Math.sqrt(errs.reduce((s, e) => s + e * e, 0) / errs.length);
+  // bez Math.max(...pole): 518 000 argumentov pretečie zásobník
+  const max = errs.reduce((m, e) => (e > m ? e : m), 0);
+  const maxEu = europe.reduce((m, e) => (e > m ? e : m), 0);
+  assert.ok(rms < 0.08, `RMS ${rms.toFixed(3)} m`);
+  assert.ok(max < 1.1, `max ${max.toFixed(2)} m`);
+  assert.ok(maxEu < 0.65, `Európa max ${maxEu.toFixed(2)} m`);
+  // Bratislava, Dunaj: N ≈ 44 m, rozdiel pod 10 cm
+  assert.ok(Math.abs(geoidHeight(48.14, 17.11) - meanSeaLevel(48.14, 17.11)) < 0.1);
+});
+
+test('uzly mriežky vracajú presne zbalenú hodnotu, póly a antimeridián bez skoku', async () => {
+  await ensureGeoidReady();
+  const { meanSeaLevel } = await import('egm96-universal');
+  for (const [lat, lon] of [[48, 17], [0, 0], [-35.5, 149], [60, -150.5]]) {
+    assert.ok(Math.abs(geoidHeight(lat, lon) - meanSeaLevel(lat, lon)) <= 0.051, `${lat},${lon} (kvantovanie po 10 cm)`);
+  }
+  assert.ok(Math.abs(geoidHeight(89.99, 10) - geoidHeight(89.99, 190)) < 0.05, 'severný pól');
+  assert.ok(Math.abs(geoidHeight(-90, 0) - geoidHeight(-90, 123)) < 0.05, 'južný pól');
+  assert.ok(Math.abs(geoidHeight(-17, 179.999) - geoidHeight(-17, -179.999)) < 0.01, 'antimeridián');
+  assert.ok(Number.isNaN(geoidHeight(Number.NaN, 10)), 'NaN ostáva NaN (volajúci kontrolujú Number.isFinite)');
+});
+
+test('zbalený modul je presne výstup generátora (nikto ho neupravil ručne ani nezastaral)', async () => {
+  const { meanSeaLevel } = await import('egm96-universal');
+  const { encodeGeoidGrid, sampleGeoidGrid, GEOID_GRID } = await import('../../scripts/lib/geoidGrid.mjs');
+  const packed = (await import('./local_data/geoid/egm96-30min.js')).default;
+  assert.deepEqual({ rows: packed.rows, cols: packed.cols, stepDeg: packed.stepDeg, scale: packed.scale }, { ...GEOID_GRID });
+  assert.equal(packed.data, encodeGeoidGrid(sampleGeoidGrid(meanSeaLevel)), 'spusti node scripts/build-geoid-grid.mjs');
+});
+
+test('geoid.js už neimportuje egm96-universal (2,7 MB mriežka nesmie ísť do prehliadača)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./geoid.js', import.meta.url), 'utf8');
+  assert.ok(!/import\(['"]egm96-universal['"]\)|from ['"]egm96-universal['"]/.test(src));
+  assert.match(src, /import\('\.\/local_data\/geoid\/egm96-30min\.js'\)/);
+});

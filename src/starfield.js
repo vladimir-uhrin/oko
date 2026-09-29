@@ -234,11 +234,11 @@ export async function loadTychoFaces(imageLoader = loadImageElement) {
  */
 export function installSharpStarfield(viewer, {
   doc = globalThis.document,
-  skyBoxFactory = (faces) => {
-    const sources = {};
-    for (const face of STARFIELD_FACES) sources[face] = faces[face].toDataURL('image/png');
-    return new Cesium.SkyBox({ sources });
-  },
+  // Plátna idú do Cesia priamo (SkyBox → CubeMap s UNPACK_FLIP_Y, tá istá
+  // orientácia ako URL cez ImageBitmap flipY). Predtým toDataURL('image/png'):
+  // meranie 2026-09-29 — 1 030 ms hlavného vlákna pri štarte, 20 MB PNG reťazcov
+  // v pamäti a ďalšie ~0,5 s, kým ich Cesium rozobral a dekódoval.
+  skyBoxFactory = (faces) => new Cesium.SkyBox({ sources: { ...faces } }),
   imageLoader = loadImageElement,
   background = true,
 } = {}) {
@@ -259,10 +259,38 @@ export function installSharpStarfield(viewer, {
     if (cancelled) return false;
     const faces = paintStarfieldFaces(doc, { backgrounds });
     previous = scene.skyBox;
-    scene.skyBox = skyBoxFactory(faces);
+    const box = skyBoxFactory(faces);
+    scene.skyBox = box;
     applied = true;
+    releaseFacesAfterUpload(scene, box, faces);
     scene.requestRender?.();
     return true;
   })();
   return revert;
+}
+
+/**
+ * Šesť plátien 2048 px drží ~100 MB. Cesium ich prečíta len raz — keď SkyBox
+ * v prvom update postaví CubeMap (nahrá do GPU) — a potom si pamätá len objekt
+ * `sources` (porovnáva ho identitou), takže po nahratí sa plátna môžu zmenšiť
+ * na 1 px. Ak sa CubeMap nedá overiť (iná verzia Cesia), plátna ostanú celé —
+ * radšej pamäť než rozbitá obloha.
+ * @param {object} scene
+ * @param {object} box SkyBox
+ * @param {Record<string, HTMLCanvasElement>} faces
+ */
+export function releaseFacesAfterUpload(scene, box, faces) {
+  const postRender = scene?.postRender;
+  if (!postRender?.addEventListener) return;
+  let frames = 0;
+  const remove = postRender.addEventListener(() => {
+    frames += 1;
+    if (scene.skyBox !== box || frames > 600) { remove(); return; }
+    if (!box?._cubeMap) return; // ešte nenahraté
+    remove();
+    for (const face of STARFIELD_FACES) {
+      const canvas = faces[face];
+      if (canvas) { canvas.width = 1; canvas.height = 1; }
+    }
+  });
 }

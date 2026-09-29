@@ -69,6 +69,10 @@ test('obe letecké vrstvy: brána stojí v _fleetTick PRED dead reckoningom, č�
     assert.match(tick, /Math\.abs\(rot - bb\.rotation\) > 0\.01\)/, `${file}: pásmo necitlivosti rotácie 0,01 rad`);
     assert.doesNotMatch(tick, /_fleetTickSerial|HIDDEN_DR_STRIDE|_fleetGatePosition/, `${file}: pruhy skrytých strojov sú preč (zápisy = drahá cesta Cesia)`);
   }
+  // Lode (2026-09-29): tá istá pasca — jedna zmenená loď = dve prestavby poľa 23 000 lodí.
+  const aisSrc = readFileSync(new URL('./aisLiveVessels.js', import.meta.url), 'utf8');
+  assert.match(aisSrc, /import \{ pinBillboardBufferUsage \} from '\.\/fleetTickGate\.js';/);
+  assert.match(aisSrc, /state\.billboardCollection = new Cesium\.BillboardCollection\(\{[\s\S]{0,120}?\}\);[\s\S]{0,400}?pinBillboardBufferUsage\(state\.billboardCollection\);/, 'lode: typ bufferov pripnutý');
   const flightsSrc = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
   assert.match(flightsSrc, /_densityMode = next;\s*_densityPoints\.show = next;\s*_fleetGateEpoch\+\+;/, 'flights: prepnutie hustoty zdvihne epochu brány');
   const flights = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');

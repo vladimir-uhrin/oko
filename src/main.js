@@ -40,6 +40,7 @@ import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
+import { armStartupGate, releaseStartupGate } from './startupGate.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
@@ -130,6 +131,9 @@ function describeError(error) {
 async function init() {
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
+  // Brána štartu (startupGate.js): ťažké živé dáta (lode) čakajú, kým je mapa
+  // zobrazená a štartová kamera na mieste; uvoľní ju skrytie preloadera nižšie.
+  armStartupGate();
 
   // Jazyk UI čo najskôr: statické data-i18n uzly sa preložia PRED prvým
   // vykreslením panelov a prepínač SK/EN sa aktivuje (persist + reload —
@@ -176,6 +180,11 @@ async function init() {
       selectionIndicator: false,
       infoBox: false,
       baseLayer: false,
+      // Bez predvolenej Tycho oblohy pri štarte (2026-09-29): jej šesť JPEG
+      // (867 KB) súperilo s 3D dlaždicami, hoci predvolený pohľad (kolmo dole)
+      // oblohu neukazuje. Ostrú oblohu nasadí startSharpStarfield po skrytí
+      // preloadera; Slnko a Mesiac (Cesium ich bez skyBoxu nevytvorí) nižšie.
+      skyBox: false,
       // Visible attribution container — Google Maps / 3D Tiles credits are
       // required by Google's Terms of Service, so they must be shown (styled
       // subtly via #cesium-credits). The credit line stays visible in
@@ -206,6 +215,11 @@ async function init() {
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
     viewer.targetFrameRate = 60;
 
+    // skyBox: false vynechá aj Slnko a Mesiac (CesiumWidget ich vytvára spolu
+    // s oblohou) — doplniť, nech sa nič okrem načasovania oblohy nemení.
+    viewer.scene.sun = new Cesium.Sun();
+    viewer.scene.moon = new Cesium.Moon();
+
     // Hodiny scény v reálnom čase + minútový tik pre terminátor (globeLighting.js):
     // Viewer inak zmrazí clock.currentTime na čase načítania a Slnko s ním.
     installDayNightClock(viewer, { requestRender: governorRequestRender });
@@ -214,12 +228,20 @@ async function init() {
     // (Mliečna dráha, hustota) + generované ostré body navrchu. Prvá verzia
     // bola len z bodov a pôsobila prázdne („tie hviezdy daj naspäť"), samotné
     // Tycho JPEG je rozmazané („oprav ostrosť hviezd") — toto je oboje.
-    // `?stars=cesium` vráti pôvodný skybox. Generuje sa po prvom snímku.
-    if (new URLSearchParams(window.location.search).get('stars') !== 'cesium') {
-      setTimeout(() => {
+    // `?stars=cesium` vráti pôvodný skybox (hneď). Ostrá obloha sa generuje až
+    // po skrytí preloadera, keď je vlákno voľné (2026-09-29: jej maľovanie
+    // a nahratie do GPU pri štarte zdržiavalo appku; pod preloaderom ju nikto
+    // nevidí).
+    const sharpStars = new URLSearchParams(window.location.search).get('stars') !== 'cesium';
+    if (!sharpStars) viewer.scene.skyBox = Cesium.SkyBox.createEarthSkyBox();
+    const startSharpStarfield = () => {
+      if (!sharpStars) return;
+      const run = () => {
         try { installSharpStarfield(viewer); } catch (error) { console.warn('[Init] sharp starfield unavailable:', error); }
-      }, 0);
-    }
+      };
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run, { timeout: 3000 });
+      else setTimeout(run, 500);
+    };
 
     // Diagnostika render pádov (2026-09-01): renderError Cesium render loop
     // NAVŽDY zastaví — dialóg ale ukazuje len message. Stack ide do konzoly,
@@ -465,6 +487,8 @@ async function init() {
       new Promise((resolve) => setTimeout(resolve, 1000)),
     ]).finally(() => {
       loadingScreen.classList.add('hidden');
+      releaseStartupGate();
+      startSharpStarfield();
       // Reveal only after the loading cover has yielded. transitionend can be
       // absent under reduced motion, so a bounded fallback makes this reliable.
       let firstRunRevealed = false;

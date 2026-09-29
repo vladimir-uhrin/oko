@@ -1133,6 +1133,11 @@ const _scratchCarto = new Cesium.Cartographic();
 const _scratchEnu = new Cesium.Matrix4();
 const _scratchArc = { east: 0, north: 0, endCourseDeg: 0 };
 const _scratchRenderTime = new Cesium.JulianDate();
+/** „Teraz" pre hlavnú slučku tiku flotily; mimo nej (sledovaný stroj, karty)
+ *  si _deadReckon pýta JulianDate.now() ako doteraz. */
+const _tickNowJulian = new Cesium.JulianDate();
+/** @type {boolean} Či práve beží hlavná slučka tiku (platí _tickNowJulian). */
+let _tickNowActive = false;
 const _scratchFleetPos = new Cesium.Cartesian3();
 const _scratchDrRaw = new Cesium.Cartesian3();
 const _scratchWarmupTime = new Cesium.JulianDate();
@@ -1550,7 +1555,7 @@ function _deadReckon(icao24, result) {
   // Render one poll interval behind real time so we interpolate between
   // two KNOWN fixes whenever possible (see RENDER_DELAY_SEC rationale).
   const renderTime = Cesium.JulianDate.addSeconds(
-    Cesium.JulianDate.now(), -RENDER_DELAY_SEC, _scratchRenderTime
+    _tickNowActive ? _tickNowJulian : Cesium.JulianDate.now(), -RENDER_DELAY_SEC, _scratchRenderTime
   );
 
   // Bracketing pair: interpolate — no extrapolation error, no snap-back.
@@ -3120,6 +3125,7 @@ function _newestFix(icao24) {
 }
 
 function _fleetTick() {
+  _tickNowActive = false; // po výnimke v minulom tiku
   if (!_viewer || !_billboardCollection || !_billboardCollection.show) return;
   const scene = _viewer.scene;
   const camera = _viewer.camera;
@@ -3265,6 +3271,10 @@ function _fleetTick() {
     for (const icao of toRelease) _releaseModel(icao);
   }
 
+  // Jeden „teraz" pre celý tik (2026-09-29): _deadReckon inak volal
+  // JulianDate.now() — new Date() + nový JulianDate — na každý stroj.
+  Cesium.JulianDate.now(_tickNowJulian);
+  _tickNowActive = true;
   for (const [icao24, bb] of _billboards) {
     if (icao24 === _trackedIcao) continue; // tracked entity owns its own motion
 
@@ -3298,7 +3308,9 @@ function _fleetTick() {
     // height, so a grounded contact's sprite ends up under the mesh it taxied
     // (or coasted) over. Re-floor at the DISPLAYED coordinate — read-only, and
     // never while a 3D model owns the visual (T7).
-    const ownsVisualNow = _modelOwnsVisual(icao24);
+    // Sledovaný stroj slučka preskakuje, takže stačí mapa modelov; pri prázdnej
+    // (pohľad na svet, 3D vypnuté) bez hľadania (2026-09-29).
+    const ownsVisualNow = _models.size ? _modelIsRendering(_models.get(icao24)) : false;
     const display = _floorGroundedDisplayPosition(icao24, info, dr, ownsVisualNow, nowMs);
     // Gate the write — assigning Billboard.position dirties the whole
     // collection's vertex buffer (pod 10 % špinavých robí Cesium bufferSubData
@@ -3482,6 +3494,7 @@ function _fleetTick() {
       }
     }
   }
+  _tickNowActive = false;
 }
 
 /**
@@ -5952,8 +5965,10 @@ const flightsLayer = {
       const isTracked = icao24 === _trackedIcao;
       // Keep planes rendered as a 3D model (billboard hidden) so the detection box
       // doesn't vanish on the 2D→3D handoff; bb.position stays current while hidden.
-      const model = _models.get(icao24);
-      const modelOwnsVisual = _modelOwnsVisual(icao24);
+      // Stroj bez modelu nemôže mať vizuál v modeli — bez druhého hľadania a pri
+      // prázdnej mape modelov (pohľad na svet) bez hľadania vôbec (2026-09-29).
+      const model = _models.size ? _models.get(icao24) : undefined;
+      const modelOwnsVisual = isTracked ? _modelOwnsVisual(icao24) : _modelIsRendering(model);
       if (!isTracked && !bb.show && !modelOwnsVisual) continue;
       const info = _flightData.get(icao24);
       let object = _detectionObjects.get(icao24);

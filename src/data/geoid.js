@@ -7,35 +7,89 @@
 // ellipsoid and the geoid (~mean sea level) surface, ranging roughly
 // -106..+85 m worldwide. See docs/CURRENT-STATE.md.
 //
-// The implementation uses `egm96-universal` (npm, MIT, embeds the NGA
-// EGM96 15' grid) as a lazy dynamic import so its ~2.7 MB grid data-chunk
-// never lands in the eager Vite bundle. Only fall back to vendoring the NGA
-// grid ourselves if the package fails tests, isn't browser-safe, or bloats
-// the eager bundle. It passed the browser-safety, accuracy, and bundle checks,
-// so this file is a thin wrapper around it — no vendored fallback is needed.
-//
-// egm96-universal's `meanSeaLevel(lat, lon)` already returns exactly N in
-// metres (relative to WGS84 ellipsoid) with internal longitude
-// normalization (wraps to [-180, 180) before the grid lookup), so no extra
-// wrap/interpolation logic is needed here.
+// Mriežka (2026-09-29, „rýchlejší štart"): EGM96 30' (361 × 720) zo zbaleného
+// modulu local_data/geoid/egm96-30min.js (generuje scripts/build-geoid-grid.mjs
+// z balíka egm96-universal, pôvod v SOURCE.md), čítaná bikubicky (Catmull-Rom).
+// Voči predošlej plnej 15' mriežke egm96-universal (bilineárne): RMS 5 cm,
+// max 1,0 m na svete, 0,57 m v Európe — pod presnosťou výšok, ktoré geoid
+// opravuje. Prenos klesol z 1,85 MB na ~194 KB gzip. Lazy dynamic import
+// ostáva: dáta sú v samostatnom chunku, nie v hlavnom balíku.
 
-let egm96Module = null;
+let grid = null;
 let readyPromise = null;
 
 /**
  * Lazily loads the EGM96 grid (dynamic import — code-split by Vite so the
- * ~2.7 MB grid data stays out of the eager main bundle). Safe to call many
- * times; the underlying import only happens once and subsequent calls
- * resolve immediately from the cached promise.
+ * grid stays out of the eager main bundle). Safe to call many times; the
+ * underlying import only happens once and subsequent calls resolve
+ * immediately from the cached promise.
  * @returns {Promise<void>}
  */
 export async function ensureGeoidReady() {
   if (!readyPromise) {
-    readyPromise = import('egm96-universal').then((mod) => {
-      egm96Module = mod;
+    readyPromise = import('./local_data/geoid/egm96-30min.js').then((mod) => {
+      grid = decodeGeoidGrid(mod.default);
     });
   }
   return readyPromise;
+}
+
+/**
+ * Dekóduje zbalenú mriežku (base64, decimetre, rozdiely v riadku, nízke
+ * a vysoké bajty v dvoch blokoch — scripts/lib/geoidGrid.mjs). Pure.
+ * @param {{rows: number, cols: number, stepDeg: number, scale: number, data: string}} packed
+ * @returns {{rows: number, cols: number, stepDeg: number, values: Float32Array}}
+ */
+export function decodeGeoidGrid({ rows, cols, stepDeg, scale, data }) {
+  const bin = atob(data);
+  const n = rows * cols;
+  if (bin.length !== n * 2) throw new Error(`geoid.js: mriežka má ${bin.length} B, čakám ${n * 2}`);
+  const values = new Float32Array(n);
+  for (let r = 0; r < rows; r++) {
+    let acc = 0;
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      let d = bin.charCodeAt(i) | (bin.charCodeAt(n + i) << 8);
+      if (d & 0x8000) d -= 0x10000;
+      acc = c === 0 ? d : acc + d;
+      values[i] = acc * scale;
+    }
+  }
+  return { rows, cols, stepDeg, values };
+}
+
+/** Catmull-Rom medzi p1 a p2 (t ∈ [0, 1]); v uzloch presne hodnota uzla. */
+function catmullRom(p0, p1, p2, p3, t) {
+  return 0.5 * ((2 * p1) + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * (p1 - p2) + p3 - p0) * t * t * t);
+}
+
+/**
+ * N v bode mriežky: bikubicky zo 4 × 4 susedov, riadky orezané na póloch,
+ * stĺpce dookola (dĺžka sa zabalí). Pure nad dekódovanou mriežkou.
+ * @param {{rows: number, cols: number, stepDeg: number, values: Float32Array}} g
+ * @param {number} latDeg
+ * @param {number} lonDeg
+ * @returns {number}
+ */
+export function sampleGeoidGrid(g, latDeg, lonDeg) {
+  const { rows, cols, stepDeg, values } = g;
+  let r = (90 - latDeg) / stepDeg;
+  if (r < 0) r = 0; else if (r > rows - 1) r = rows - 1;
+  let c = (lonDeg / stepDeg) % cols;
+  if (c < 0) c += cols;
+  let r0 = Math.floor(r);
+  if (r0 > rows - 2) r0 = rows - 2;
+  const c0 = Math.floor(c);
+  const fr = r - r0;
+  const fc = c - c0;
+  const rowVal = (rr) => {
+    const row = (rr < 0 ? 0 : rr > rows - 1 ? rows - 1 : rr) * cols;
+    const cm = c0 === 0 ? cols - 1 : c0 - 1;
+    const c1 = c0 + 1 >= cols ? c0 + 1 - cols : c0 + 1;
+    const c2 = c0 + 2 >= cols ? c0 + 2 - cols : c0 + 2;
+    return catmullRom(values[row + cm], values[row + c0], values[row + c1], values[row + c2], fc);
+  };
+  return catmullRom(rowVal(r0 - 1), rowVal(r0), rowVal(r0 + 1), rowVal(r0 + 2), fr);
 }
 
 /**
@@ -47,13 +101,13 @@ export async function ensureGeoidReady() {
  * @returns {number}
  */
 export function geoidHeight(latDeg, lonDeg) {
-  if (!egm96Module) {
+  if (!grid) {
     throw new Error(
       'geoid.js: geoidHeight() called before ensureGeoidReady() resolved — ' +
         'await ensureGeoidReady() first.'
     );
   }
-  return egm96Module.meanSeaLevel(latDeg, lonDeg);
+  return sampleGeoidGrid(grid, latDeg, lonDeg);
 }
 
 /**

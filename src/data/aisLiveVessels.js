@@ -26,6 +26,9 @@ import {
 } from './trafficDensity.js';
 import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { formatVesselSpeedKnots, isMetric } from '../units.js';
+import { createWindowProjector } from './windowProjector.js';
+import { pinBillboardBufferUsage } from './fleetTickGate.js';
+import { isStartupReady, whenStartupReady } from '../startupGate.js';
 import {
   isOwnedByOtherLayer,
   registerPickOwner,
@@ -84,6 +87,8 @@ let _lastCamPoseSig = '';
 const _scratchFocusScreen = new Cesium.Cartesian2();
 /** Scratch pre projekcie kariet (audit #10) — x/y sa vždy kopírujú hneď. */
 const _scratchCardScreen = new Cesium.Cartesian2();
+/** Premietanie pre výber štítkov (windowProjector.js). */
+const _labelProjector = createWindowProjector();
 
 const DEFAULT_API_URL = '/api/ais-live';
 const DEFAULT_RENDER_ROWS = 12000;
@@ -510,6 +515,18 @@ const aisLiveVesselsLayer = {
     // the registry resolver reduces it to the record's mmsi (a string key).
     registerPickOwner('ais-live-vessels', (pickedId) => state.vesselMap.has(pickedId));
     restoreSpriteOrderOnEnable('ais', activeViewer);
+    // Počas štartu (startupGate.js) prvé načítanie počká, kým je mapa zobrazená
+    // a štartová kamera na mieste: z vesmíru by išla požiadavka bez výrezu —
+    // všetkých ~27 000 lodí, 17,9 MB JSON — a obnova vrstiev (preloader) by na ňu
+    // čakala. Vrstva zatiaľ hlási „awaiting first AIS position…". Mimo štartu
+    // ako doteraz: zapnutie počká na prvé dáta.
+    if (!isStartupReady()) {
+      const sessionId = state.sessionId;
+      void whenStartupReady().then(() => {
+        if (state.enabled && state.sessionId === sessionId) void loadLivePositions(state.viewer || activeViewer);
+      });
+      return undefined;
+    }
     return loadLivePositions(activeViewer);
   },
 
@@ -532,7 +549,8 @@ const aisLiveVesselsLayer = {
   },
 
   update(viewer) {
-    if (!state.enabled) return Promise.resolve();
+    // Periodická obnova počas štartu čaká ako prvé načítanie (startupGate.js).
+    if (!state.enabled || !isStartupReady()) return Promise.resolve();
     return loadLivePositions(viewer || state.viewer);
   },
 
@@ -814,26 +832,48 @@ const aisLiveVesselsLayer = {
 
     const selected = state.selectedRecord;
     const result = [];
+    // Volá sa KAŽDÚ snímku (detekčná vrstva): objekt sa preto drží na zázname
+    // a texty sa prepočítajú len pri zmene vstupu — ako pri lietadlách
+    // (_detectionObjects). Meranie 2026-09-29, 27 000 lodí pri pohľade na
+    // Európu: čerstvé objekty s formátovaním textu stáli ~60 ms za sekundu.
+    const nowEpochMs = Date.now();
+    const metricUnits = isMetric();
     const toObject = (record) => {
       if (record.billboard && !record.billboard.show) return null;
       const position = record.billboard?.position || record.position;
       if (!position) return null;
-      return {
-        position,
-        sourceId: record.mmsi,
-        id: record.name || record.mmsi || 'VESSEL',
-        type: 'SEA',
-        skipLabel: record === selected,
-        // Normalizovaný typ (audit #9): karta ukazuje 'CARGO', callout tej
-        // istej lode nesmie ukazovať surové '70' — jedna normalizácia pre
-        // obe cesty (normalizeVesselType).
-        klass: record.type
+      let object = record._detection;
+      if (!object) {
+        object = {
+          position, sourceId: record.mmsi, id: '', type: 'SEA', skipLabel: false,
+          klass: undefined, metric: '', quietBracket: false,
+          _type: undefined, _speed: undefined, _lastKnown: undefined, _metricUnits: undefined,
+        };
+        record._detection = object;
+      }
+      object.position = position;
+      object.sourceId = record.mmsi;
+      object.id = record.name || record.mmsi || 'VESSEL';
+      object.skipLabel = record === selected;
+      // Normalizovaný typ (audit #9): karta ukazuje 'CARGO', callout tej
+      // istej lode nesmie ukazovať surové '70' — jedna normalizácia pre
+      // obe cesty (normalizeVesselType).
+      if (object._type !== record.type) {
+        object._type = record.type;
+        object.klass = record.type
           ? normalizeVesselType(record.type).toUpperCase().slice(0, 14) || undefined
-          : undefined,
-        metric: isLastKnownVessel(record) ? 'LAST KNOWN' : formatVesselSpeedKnots(record.speed),
-        // silueta (šikmo / z boku / spredu) bez rohov zameriavača, kým na ňu nejde myš (detection.js)
-        quietBracket: Boolean(state.shipSilhouettes && (record.view || Number.isFinite(record.realScale))),
-      };
+          : undefined;
+      }
+      const lastKnown = isLastKnownVessel(record, nowEpochMs);
+      if (object._speed !== record.speed || object._lastKnown !== lastKnown || object._metricUnits !== metricUnits) {
+        object._speed = record.speed;
+        object._lastKnown = lastKnown;
+        object._metricUnits = metricUnits;
+        object.metric = lastKnown ? 'LAST KNOWN' : formatVesselSpeedKnots(record.speed);
+      }
+      // silueta (šikmo / z boku / spredu) bez rohov zameriavača, kým na ňu nejde myš (detection.js)
+      object.quietBracket = Boolean(state.shipSilhouettes && (record.view || Number.isFinite(record.realScale)));
+      return object;
     };
     // Loď pod kurzorom a vybraná loď idú VŽDY (2026-09-12, „zameriavače ako
     // u lietadiel"): stride vyberá ~1 z 13 pri 33 000 lodiach, takže hovered
@@ -853,8 +893,8 @@ const aisLiveVesselsLayer = {
     }
     // Rozpočet maxCount platí pre vzorku; vynútené lode idú navyše (1–2 kusy).
     let sampled = 0;
-    for (let idx = 0; idx < records.length; idx += 1) {
-      if (((idx - start) % stride) !== 0) continue;
+    // Priamo po krokoch vzorky (start < stride), nie cez všetkých 27 000 s modulom.
+    for (let idx = start; idx < records.length; idx += stride) {
       const record = records[idx];
       if (forced.has(String(record.mmsi))) continue;
       const object = toObject(record);
@@ -875,7 +915,8 @@ const aisLiveVesselsLayer = {
 
   getStats() {
     const waitingForFirstPosition = state.firstConnectPhase === 'loading';
-    const fresh = state.vesselRecords.filter(record => !isLastKnownVessel(record)).length;
+    const nowEpochMs = Date.now(); // jeden čas pre 27 000 lodí
+    const fresh = state.vesselRecords.filter(record => !isLastKnownVessel(record, nowEpochMs)).length;
     const lastKnown = state.vesselRecords.length - fresh;
     return {
       count: state.coverage ? fresh : state.count,
@@ -1129,6 +1170,11 @@ async function loadLivePositions(viewer) {
 
   try {
     const url = liveApiUrl();
+    // Tento výrez je práve načítaný: prvá kontrola výrezu v preRender (prázdny →
+    // aktuálny) ho inak brala ako pohyb kamery a o 500 ms stiahla všetko znova
+    // (2026-09-29, dve rovnaké požiadavky pri každom štarte).
+    state.viewKey = vesselViewBounds();
+    state.viewRequestedAt = performance.now();
     // Combine the layer's teardown-abort with a hard timeout so a hung upstream
     // can't wedge the poll indefinitely (parity with the track fetch + flights).
     // Audit #12: bez AbortSignal.any pôvodne NEBOL žiadny timeout — visiaci
@@ -1307,6 +1353,10 @@ function ensureCollections(viewer) {
   state.billboardCollection = new Cesium.BillboardCollection({
     blendOption: Cesium.BlendOption.TRANSLUCENT,
   });
+  // Pasca Cesia (fleetTickGate.js pinBillboardBufferUsage): jedna zmenená loď
+  // prepla typ bufferu a celé pole 23 000 lodí sa prestavalo DVAKRÁT po sebe
+  // (tam a späť, 55 + 42 ms) — každých ~800 ms pri pohľade na Európu (2026-09-29).
+  pinBillboardBufferUsage(state.billboardCollection);
   state.billboardCollection.show = state.enabled;
   viewer.scene.primitives.add(state.billboardCollection);
   registerSpriteCollection('ais', state.billboardCollection);
@@ -1499,6 +1549,7 @@ function updateRecordInPlace(record, next) {
   record.surfacePosition = next.surfacePosition;
   record.normal = next.normal;
   record.missedRefreshes = 0;
+  record._labelScore = undefined; // meno / rýchlosť / typ sa mohli zmeniť (cachedLabelPriority)
 
   if (record.billboard) {
     record.billboard.position = record.position;
@@ -1638,8 +1689,8 @@ function vesselCourseDeg(record) {
  * @param {boolean} selected - True for the white/brighter selected variant.
  * @returns {string} SVG data URL.
  */
-function shipIcon(record, selected) {
-  const cssColor = isLastKnownVessel(record) ? '#929ca5' : selected ? '#ffffff' : vesselTypeCss(record.type);
+function shipIcon(record, selected, nowEpochMs = Date.now()) {
+  const cssColor = isLastKnownVessel(record, nowEpochMs) ? '#929ca5' : selected ? '#ffffff' : vesselTypeCss(record.type);
   const view = record.view;
   if (state.shipSilhouettes && view && view.kind !== 'top') {
     return silhouetteDataUrl(vesselFamily(record.type, record.name), view.kind, cssColor, {
@@ -1934,7 +1985,7 @@ function installRuntime(viewer) {
       if (viewKey !== state.viewKey) { state.viewKey = viewKey; state.viewChangedAt = now; }
     }
     if (state.viewChangedAt > state.viewRequestedAt && now - state.viewChangedAt > 500
-      && now - state.viewRequestedAt > 5000 && !state.loading && state.enabled) {
+      && now - state.viewRequestedAt > 5000 && !state.loading && state.enabled && isStartupReady()) {
       state.viewRequestedAt = now;
       void loadLivePositions(viewer);
     }
@@ -2095,15 +2146,20 @@ function updateVisibility(force = false) {
     state.visibleCount = 0;
     const regions = state.coverage?.regions;
     if (regions) for (const region of Object.values(regions)) region.horizonEligible = 0;
+    // Jeden čas pre celý prechod (27 000 lodí = 27 000 volaní Date.now()).
+    const nowEpochMs = Date.now();
     for (const record of state.vesselRecords) {
       // Režim hustoty sa skladá do TEJ ISTEJ brány ako horizont: v hustote
       // ostáva viditeľná len vybraná loď (ako sledovaný stroj pri lietadlách),
       // inak by tento pass rozsvietil flotilu hneď po tom, čo ju hustota zhasla.
-      const expired = Number.isFinite(record.lastPositionEpoch) && Date.now() - record.lastPositionEpoch * 1000 >= AIS_RETAIN_MS;
+      const expired = Number.isFinite(record.lastPositionEpoch) && nowEpochMs - record.lastPositionEpoch * 1000 >= AIS_RETAIN_MS;
       const visible = !expired && (!state.densityMode || record === state.selectedRecord)
         && isVisible(record.surfacePosition, occluder);
       if (record.billboard) {
-        record.billboard.image = shipIcon(record, record === state.selectedRecord);
+        // Rovnaký obrázok Cesium aj tak zahodí (BillboardTexture.loadImage:
+        // rovnaké id = návrat); porovnanie ušetrí rozbor URL na každú loď.
+        const icon = shipIcon(record, record === state.selectedRecord, nowEpochMs);
+        if (record.billboard.image !== icon) record.billboard.image = icon;
         // Ak vizuál drží 3D model, ikona ostáva skrytá aj keď je „visible" —
         // inak by ju tento pass rozsvietil pod modelom (rovnaká brána, nie
         // druhé pravidlo). Labely aj tak berú `visible`, takže modelovaná loď
@@ -2235,23 +2291,46 @@ function updateClusteredLabels(records) {
     return;
   }
 
+  // 2026-09-29 (27 000 lodí pri pohľade na Európu = 30–40 ms každých 800 ms,
+  // viditeľné trhnutie): v 3D s perspektívou premietanie jednou maticou
+  // (windowProjector.js, tie isté pixely ako Cesium), číselný kľúč bunky,
+  // skóre uložené na zázname a objekt kandidáta len pre bunku, nie pre loď.
+  const camera = viewer.camera;
+  const fastProjection = scene.mode === Cesium.SceneMode.SCENE3D
+    && camera?.frustum instanceof Cesium.PerspectiveFrustum;
+  if (fastProjection) {
+    _labelProjector.prepare(
+      camera.frustum.projectionMatrix, camera.viewMatrix,
+      scene.canvas.clientWidth, scene.canvas.clientHeight,
+    );
+  }
   const cells = new Map();
   for (const record of records) {
-    if (record === selected) continue;
+    if (record === selected || !record.position) continue;
     // Scratch výsledok (audit #10): bez neho tento prechod alokoval čerstvý
-    // Cartesian2 na KAŽDÝ viditeľný záznam — až 12k záznamov / 800 ms ≈
-    // 15 000 alokácií za sekundu čistého GC odpadu. Primitívne x/y sa hneď
-    // kopírujú do candidate, takže zdieľaný scratch je bezpečný (idiom
-    // _scratchFocusScreen o pár riadkov vyššie).
-    const screen = Cesium.SceneTransforms.worldToWindowCoordinates(
-      scene, record.position, _scratchCardScreen,
-    );
-    if (!screen) continue;
-    const key = `${Math.floor(screen.x / LABEL_GRID_PX)}:${Math.floor(screen.y / LABEL_GRID_PX)}`;
-    const candidate = { record, score: labelPriority(record, selected), x: screen.x, y: screen.y };
+    // Cartesian2 na KAŽDÝ viditeľný záznam. Primitívne x/y sa hneď kopírujú.
+    let x;
+    let y;
+    if (fastProjection) {
+      if (!_labelProjector.project(record.position, _scratchCardScreen)) continue;
+      x = _scratchCardScreen.x;
+      y = _scratchCardScreen.y;
+    } else {
+      const screen = Cesium.SceneTransforms.worldToWindowCoordinates(scene, record.position, _scratchCardScreen);
+      if (!screen) continue;
+      x = screen.x;
+      y = screen.y;
+    }
+    const key = vesselLabelCellKey(x, y);
+    const score = cachedLabelPriority(record);
     const existing = cells.get(key);
-    if (!existing || candidate.score > existing.score) {
-      cells.set(key, candidate);
+    if (!existing) {
+      cells.set(key, { record, score, x, y });
+    } else if (score > existing.score) {
+      existing.record = record;
+      existing.score = score;
+      existing.x = x;
+      existing.y = y;
     }
   }
 
@@ -2311,6 +2390,30 @@ function publishVesselOverlayEntries(entries) {
       moving: false,
     },
   );
+}
+
+/**
+ * Kľúč bunky mriežky štítkov: dve celé čísla v jednom double (presne do
+ * ±2^20 buniek, ±120 mil. px), inak reťazec ako predtým. Pure.
+ * @param {number} x Okno, CSS px.
+ * @param {number} y Okno, CSS px.
+ * @returns {number|string}
+ */
+export function vesselLabelCellKey(x, y) {
+  const cx = Math.floor(x / LABEL_GRID_PX);
+  const cy = Math.floor(y / LABEL_GRID_PX);
+  if (cx > -1048576 && cx < 1048576 && cy > -1048576 && cy < 1048576) return cx * 2097152 + cy;
+  return `${cx}:${cy}`;
+}
+
+/** Skóre štítku bez výberu, uložené na zázname do najbližšej zmeny (updateRecordInPlace ho zmaže). */
+function cachedLabelPriority(record) {
+  let score = record._labelScore;
+  if (score === undefined) {
+    score = labelPriority(record, null);
+    record._labelScore = score;
+  }
+  return score;
 }
 
 function labelPriority(record, selected) {
