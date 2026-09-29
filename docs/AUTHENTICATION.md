@@ -63,7 +63,7 @@ jednorazové tokeny, čakajúce doručenia a bezpečnostné udalosti. Existujúc
 Pre verejný HTTPS host nastav na serveri v `.env`:
 
 ```dotenv
-AUTH_ORIGINS=https://oko.uhrin.digital
+AUTH_ORIGINS=https://okolive.sk
 # Voliteľná cesta k trvalému súboru, nikdy do public/ alebo dist/:
 AUTH_DB_PATH=.auth-data/accounts.sqlite
 ```
@@ -91,7 +91,7 @@ dôveryhodného serverového mail endpointu. `/api/auth/session` vracia `capabil
 UI podľa nich zobrazuje dostupnosť a vysvetlenie, nie predstierané odoslanie.
 
 ```dotenv
-AUTH_PUBLIC_URL=https://oko.uhrin.digital
+AUTH_PUBLIC_URL=https://okolive.sk
 # Presný HTTPS endpoint tvojej mail služby/gateway; nie URL z browser požiadavky:
 AUTH_MAIL_ENDPOINT=https://mail.example.com/send
 AUTH_MAIL_FROM=accounts@example.com
@@ -289,7 +289,7 @@ obe hodnoty (`capabilities.oauth`).
   `user_version`; identity sú v `/api/account/security` aj v exporte.
 - Nastavenie: Google Cloud Console → APIs & Services → Credentials → OAuth client ID
   (Web application), redirect URI `http://localhost:4173/api/auth/oauth/google/callback`
-  a `https://oko.uhrin.digital/api/auth/oauth/google/callback`. GitHub → Settings →
+  a `https://okolive.sk/api/auth/oauth/google/callback`. GitHub → Settings →
   Developer settings → **GitHub Apps** (viac callback URL, na rozdiel od OAuth App),
   callback `…/api/auth/oauth/github/callback` pre oba pôvody, Account permission
   „Email addresses: Read-only". Oboje zadarmo.

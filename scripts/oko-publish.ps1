@@ -14,14 +14,20 @@
 # (scripts/oko-static-server.mjs --redirect). DNS for another Cloudflare zone is a manual CNAME to the tunnel
 # (see scripts/oko-tunnel-setup.ps1: cert.pem is bound to one zone).
 #
+#
+# 2026-09-29 (user: "chcel by som dnes premigrovat na druhu domenu"): okolive.sk is the main address, the old
+# oko.uhrin.digital answers 301 to it (same path + query, so old /s/<id> links keep working). A redirect is only
+# published once its target already serves this build through the tunnel (/robots.txt from our static server);
+# until then the source host keeps serving the app, so DNS and publishing can happen in any order.
+#
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/oko-publish.ps1 [-SkipBuild] [-DevPort 4173] [-StaticPort 4174]
-#        [-Hostnames oko.uhrin.digital,okolive.sk] [-Redirects www.okolive.sk=https://okolive.sk]
+#        [-Hostnames okolive.sk] [-Redirects www.okolive.sk=https://okolive.sk,oko.uhrin.digital=https://okolive.sk]
 param(
   [switch]$SkipBuild,
   [int]$DevPort = 4173,
   [int]$StaticPort = 4174,
-  [string[]]$Hostnames = @('oko.uhrin.digital', 'okolive.sk'),
-  [string[]]$Redirects = @('www.okolive.sk=https://okolive.sk'),
+  [string[]]$Hostnames = @('okolive.sk'),
+  [string[]]$Redirects = @('www.okolive.sk=https://okolive.sk', 'oko.uhrin.digital=https://okolive.sk'),
   [string]$TunnelName = 'oko',
   [string]$TunnelTaskName = 'OKO Cloudflare Tunnel',
   [string]$StaticTaskName = 'OKO public static'
@@ -33,6 +39,26 @@ $Redirects = @($Redirects | ForEach-Object { $_ -split ',' } | ForEach-Object { 
 foreach ($h in $Hostnames) { if ($h -notmatch '^[a-z0-9.-]+$') { throw "bad hostname: $h" } }
 foreach ($r in $Redirects) { if ($r -notmatch '^[a-z0-9.-]+=https://[a-z0-9.-]+$') { throw "bad redirect (host=https://origin): $r" } }
 if ($Hostnames.Count -eq 0) { throw 'no hostname to publish' }
+# A redirect to an origin that does not serve OKO yet would take the source host down (new domain before its DNS
+# or certificate is live). Probe the target through the currently running tunnel: our static server answers
+# /robots.txt with the noindex header and its own body. Not live -> keep serving the source host normally.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$liveRedirects = @()
+foreach ($r in $Redirects) {
+  $redirectHost, $target = $r -split '=', 2
+  $live = $false
+  try {
+    $probe = Invoke-WebRequest -Uri "$target/robots.txt" -UseBasicParsing -TimeoutSec 20 -MaximumRedirection 0 -ErrorAction Stop
+    $robotsTag = ($probe.Headers.GetEnumerator() | Where-Object { $_.Key -ieq 'X-Robots-Tag' } | Select-Object -First 1).Value
+    $live = ($probe.StatusCode -eq 200) -and ([string]$robotsTag -match 'noindex') -and ([string]$probe.Content -match 'Disallow: /api/')
+  } catch { $live = $false }
+  if ($live) { $liveRedirects += $r }
+  else {
+    Write-Host "redirect $redirectHost -> $target postponed: $target does not serve OKO yet, $redirectHost keeps serving the app"
+    if ($Hostnames -notcontains $redirectHost) { $Hostnames += $redirectHost }
+  }
+}
+$Redirects = $liveRedirects
 $repo = Split-Path -Parent $PSScriptRoot
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $node) { throw 'node not found in PATH' }

@@ -128,3 +128,40 @@ test('oko-static-server: --redirect presmeruje celého hostiteľa (aj /api) na p
     child.kill();
   }
 });
+
+// Presun na okolive.sk (2026-09-29, „chcel by som dnes premigrovať na druhú doménu"): stará adresa
+// presmeruje trvalo, ale publikovanie ju presmeruje až vtedy, keď cieľ naozaj obsluhuje tento build —
+// sonda v oko-publish.ps1 číta /robots.txt cieľa. Obe strany toho kontraktu sú tu.
+test('presun domény: staré odkazy /s/<id> vedú na okolive.sk; robots.txt hlavnej adresy spĺňa sondu publikovania', async () => {
+  const dist = mkdtempSync(path.join(tmpdir(), 'oko-dist-'));
+  writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>OKO</title>');
+  const port = await freePort();
+  const child = spawn(process.execPath, [SCRIPT.pathname.replace(/^\/([A-Za-z]:)/, '$1'), '--port', String(port), '--dir', dist,
+    '--redirect', 'www.okolive.sk=https://okolive.sk', '--redirect', 'oko.uhrin.digital=https://okolive.sk'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    await waitFor(`${base}/robots.txt`);
+    const oldShare = await getWithHost(port, 'oko.uhrin.digital', '/s/Ab12cd34EF');
+    assert.equal(oldShare.status, 301);
+    assert.equal(oldShare.headers.location, 'https://okolive.sk/s/Ab12cd34EF', 'odkaz zdieľaný na siete pred presunom funguje ďalej');
+    assert.equal((await getWithHost(port, 'oko.uhrin.digital', '/s/Ab12cd34EF.jpg')).headers.location, 'https://okolive.sk/s/Ab12cd34EF.jpg');
+    assert.equal((await getWithHost(port, 'oko.uhrin.digital', '/?front=lyman&win=7d')).headers.location, 'https://okolive.sk/?front=lyman&win=7d');
+    // To, čo sonda publikovania vyžaduje od živého cieľa (200 + noindex + vlastné telo).
+    const robots = await fetch(`${base}/robots.txt`, { headers: { host: 'okolive.sk' } });
+    assert.equal(robots.status, 200);
+    assert.match(robots.headers.get('x-robots-tag'), /noindex/);
+    assert.match(await robots.text(), /Disallow: \/api\//);
+  } finally {
+    child.kill();
+  }
+  const publish = readFileSync(new URL('../scripts/oko-publish.ps1', import.meta.url), 'utf8');
+  assert.match(publish, /\[string\[\]\]\$Hostnames = @\('okolive\.sk'\),/, 'hlavná adresa');
+  assert.match(publish, /\[string\[\]\]\$Redirects = @\('www\.okolive\.sk=https:\/\/okolive\.sk', 'oko\.uhrin\.digital=https:\/\/okolive\.sk'\),/, 'www a stará adresa → okolive.sk');
+  const probe = publish.indexOf('Invoke-WebRequest -Uri "$target/robots.txt"');
+  assert.ok(probe > 0, 'sonda cieľa presmerovania');
+  assert.ok(probe < publish.indexOf('$redirectArgs ='), 'sonda beží pred registráciou statického servera aj pred prepisom ingressu');
+  assert.match(publish, /-MaximumRedirection 0 -ErrorAction Stop/, 'presmerovaný alebo nedostupný cieľ nie je živý');
+  assert.match(publish, /\$live = \(\$probe\.StatusCode -eq 200\) -and \(\[string\]\$robotsTag -match 'noindex'\) -and \(\[string\]\$probe\.Content -match 'Disallow: \/api\/'\)/);
+  assert.match(publish, /if \(\$Hostnames -notcontains \$redirectHost\) \{ \$Hostnames \+= \$redirectHost \}/, 'neživý cieľ → zdroj obsluhuje appku ďalej');
+  assert.match(publish, /\$Redirects = \$liveRedirects/);
+});

@@ -32,7 +32,7 @@ const background = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="$
   <text x="330" y="292" font-family="Segoe UI, Arial, sans-serif" font-size="128" font-weight="700" letter-spacing="14" fill="#e6f6fc">OK<tspan fill="#39d0ff">O</tspan></text>
   <text x="334" y="352" font-family="Segoe UI, Arial, sans-serif" font-size="30" fill="rgba(223,243,251,0.88)">Živý 3D glóbus · lietadlá, lode, plyn, satelity</text>
   <text x="334" y="404" font-family="Segoe UI, Arial, sans-serif" font-size="30" fill="rgba(223,243,251,0.88)">Live 3D globe · aircraft, ships, gas, satellites</text>
-  <text x="334" y="470" font-family="Segoe UI, Arial, sans-serif" font-size="26" letter-spacing="4" fill="#39d0ff">oko.uhrin.digital</text>
+  <text x="334" y="470" font-family="Segoe UI, Arial, sans-serif" font-size="26" letter-spacing="4" fill="#39d0ff">okolive.sk</text>
 </svg>`);
 
 const logo = await sharp(path.join(root, 'public', 'logo.svg')).resize(200, 200, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();

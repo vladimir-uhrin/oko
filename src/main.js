@@ -1178,7 +1178,7 @@ async function init() {
       window.__godsEyeView.ukraineBulletin = ukraineBulletin;
     }
     window.__godsEyeView.frontScenes = { list: listFrontScenes, apply: runFrontScene };
-    // Zdieľateľný odkaz `?front=<smer>` (napr. oko.uhrin.digital/?front=lyman) —
+    // Zdieľateľný odkaz `?front=<smer>` (napr. okolive.sk/?front=lyman) —
     // po obnove stavu, aby scéna vyhrala nad predvoleným pohľadom ako klik.
     try {
       const requestedFront = new URLSearchParams(window.location?.search || '').get('front');
@@ -1245,7 +1245,7 @@ async function init() {
       list: listChokepointScenes,
       apply: runChokepointScene,
     };
-    // Shareable deep link `?chokepoint=<id>` (e.g. oko.uhrin.digital/?chokepoint=hormuz).
+    // Shareable deep link `?chokepoint=<id>` (e.g. okolive.sk/?chokepoint=hormuz).
     // Apply AFTER camera/layer restore settles so the scene wins over the
     // default/local layer state, the way an explicit click would.
     try {
@@ -1343,7 +1343,7 @@ async function init() {
       return applyMideastTheatre(id, theatreDeps);
     };
     window.__godsEyeView.mideastTheatres = { list: listMideastTheatres, apply: runMideastTheatre };
-    // Zdieľateľný odkaz `?mideast=<dejisko>` (napr. oko.uhrin.digital/?mideast=gaza):
+    // Zdieľateľný odkaz `?mideast=<dejisko>` (napr. okolive.sk/?mideast=gaza):
     // po obnove stavu ako `?front=`, aby scéna vyhrala nad predvoleným pohľadom.
     // Ak URL nesie aj PLATNÝ `?front=` alebo `?chokepoint=`, dejisko ustúpi — inak
     // by vyhrala náhoda poradia registrácie. Neplatná konkurenčná hodnota (preklep)

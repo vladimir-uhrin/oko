@@ -29,7 +29,7 @@ test('tunel: /s/ ide na dev server; robots.txt (statický aj dev server) púšť
   const staticServer = read('../scripts/oko-static-server.mjs');
   assert.match(staticServer, /const ROBOTS_TXT = 'User-agent: \*\\nDisallow: \/api\/\\nAllow: \/\\n';/);
   const html = read('../index.html');
-  assert.match(html, /<meta property="og:image" content="https:\/\/oko\.uhrin\.digital\/share-default\.jpg" \/>/, 'koreň má predvolený OG obrázok (dlhý odkaz / koreň zdieľaný priamo)');
+  assert.match(html, /<meta property="og:image" content="https:\/\/okolive\.sk\/share-default\.jpg" \/>/, 'koreň má predvolený OG obrázok (dlhý odkaz / koreň zdieľaný priamo); hlavná adresa od 2026-09-29 okolive.sk');
   assert.match(html, /<meta name="twitter:card" content="summary_large_image" \/>/);
   assert.match(html, /<meta name="robots" content="noindex, nofollow, noarchive" \/>/, 'noindex ostáva — náhľad nie je indexovanie');
 });
