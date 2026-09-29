@@ -129,23 +129,23 @@ test('oko-static-server: --redirect presmeruje celého hostiteľa (aj /api) na p
   }
 });
 
-// Presun na okolive.sk (2026-09-29, „chcel by som dnes premigrovať na druhú doménu"): stará adresa
-// presmeruje trvalo, ale publikovanie ju presmeruje až vtedy, keď cieľ naozaj obsluhuje tento build —
-// sonda v oko-publish.ps1 číta /robots.txt cieľa. Obe strany toho kontraktu sú tu.
-test('presun domény: staré odkazy /s/<id> vedú na okolive.sk; robots.txt hlavnej adresy spĺňa sondu publikovania', async () => {
+// Presun na okolive.sk (2026-09-29, „chcel by som dnes premigrovať na druhú doménu" → „nič nebolo zdieľané
+// ani publikované ani indexované"): jediná adresa je okolive.sk, stará oko.uhrin.digital sa nepublikuje vôbec
+// (tunel na ňu odpovie 404), www presmeruje na holú doménu. Publikovanie presmerovanie zverejní až vtedy, keď
+// cieľ naozaj obsluhuje tento build — sonda v oko-publish.ps1 číta /robots.txt cieľa. Obe strany sú tu.
+test('presun domény: www vedie na okolive.sk, http na https; robots.txt hlavnej adresy spĺňa sondu publikovania', async () => {
   const dist = mkdtempSync(path.join(tmpdir(), 'oko-dist-'));
   writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>OKO</title>');
   const port = await freePort();
   const child = spawn(process.execPath, [SCRIPT.pathname.replace(/^\/([A-Za-z]:)/, '$1'), '--port', String(port), '--dir', dist,
-    '--redirect', 'www.okolive.sk=https://okolive.sk', '--redirect', 'oko.uhrin.digital=https://okolive.sk'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    '--redirect', 'www.okolive.sk=https://okolive.sk'], { stdio: ['ignore', 'pipe', 'pipe'] });
   const base = `http://127.0.0.1:${port}`;
   try {
     await waitFor(`${base}/robots.txt`);
-    const oldShare = await getWithHost(port, 'oko.uhrin.digital', '/s/Ab12cd34EF');
-    assert.equal(oldShare.status, 301);
-    assert.equal(oldShare.headers.location, 'https://okolive.sk/s/Ab12cd34EF', 'odkaz zdieľaný na siete pred presunom funguje ďalej');
-    assert.equal((await getWithHost(port, 'oko.uhrin.digital', '/s/Ab12cd34EF.jpg')).headers.location, 'https://okolive.sk/s/Ab12cd34EF.jpg');
-    assert.equal((await getWithHost(port, 'oko.uhrin.digital', '/?front=lyman&win=7d')).headers.location, 'https://okolive.sk/?front=lyman&win=7d');
+    const www = await getWithHost(port, 'www.okolive.sk', '/s/Ab12cd34EF');
+    assert.equal(www.status, 301);
+    assert.equal(www.headers.location, 'https://okolive.sk/s/Ab12cd34EF', 'www → holá doména s cestou');
+    assert.equal((await getWithHost(port, 'www.okolive.sk', '/?front=lyman&win=7d')).headers.location, 'https://okolive.sk/?front=lyman&win=7d');
     // To, čo sonda publikovania vyžaduje od živého cieľa (200 + noindex + vlastné telo).
     const robots = await fetch(`${base}/robots.txt`, { headers: { host: 'okolive.sk' } });
     assert.equal(robots.status, 200);
@@ -156,7 +156,7 @@ test('presun domény: staré odkazy /s/<id> vedú na okolive.sk; robots.txt hlav
     assert.equal(viaHttp.status, 301);
     assert.equal(viaHttp.headers.location, 'https://okolive.sk/?front=lyman');
     assert.equal((await getWithHost(port, 'okolive.sk', '/robots.txt', { 'x-forwarded-proto': 'http' })).headers.location, 'https://okolive.sk/robots.txt');
-    assert.equal((await getWithHost(port, 'oko.uhrin.digital', '/s/Ab12cd34EF', { 'cf-visitor': '{"scheme":"http"}' })).headers.location, 'https://okolive.sk/s/Ab12cd34EF', 'stará adresa po http ide rovno na novú');
+    assert.equal((await getWithHost(port, 'www.okolive.sk', '/s/Ab12cd34EF', { 'cf-visitor': '{"scheme":"http"}' })).headers.location, 'https://okolive.sk/s/Ab12cd34EF', 'http://www ide rovno na https holej domény');
     assert.equal((await getWithHost(port, 'okolive.sk', '/', { 'cf-visitor': '{"scheme":"https"}', 'x-forwarded-proto': 'https' })).status, 200, 'https ostáva');
     assert.equal((await getWithHost(port, `127.0.0.1:${port}`, '/')).status, 200, 'priamy lokálny prístup bez hlavičiek Cloudflare sa nepresmeruje');
     assert.equal((await getWithHost(port, 'evil', '/', { 'cf-visitor': '{"scheme":"http"}' })).status, 200, 'hostiteľ bez domény sa nepresmeruje');
@@ -164,8 +164,9 @@ test('presun domény: staré odkazy /s/<id> vedú na okolive.sk; robots.txt hlav
     child.kill();
   }
   const publish = readFileSync(new URL('../scripts/oko-publish.ps1', import.meta.url), 'utf8');
-  assert.match(publish, /\[string\[\]\]\$Hostnames = @\('okolive\.sk'\),/, 'hlavná adresa');
-  assert.match(publish, /\[string\[\]\]\$Redirects = @\('www\.okolive\.sk=https:\/\/okolive\.sk', 'oko\.uhrin\.digital=https:\/\/okolive\.sk'\),/, 'www a stará adresa → okolive.sk');
+  assert.match(publish, /\[string\[\]\]\$Hostnames = @\('okolive\.sk'\),/, 'jediná adresa');
+  assert.match(publish, /\[string\[\]\]\$Redirects = @\('www\.okolive\.sk=https:\/\/okolive\.sk'\),/, 'www → okolive.sk');
+  assert.doesNotMatch(publish, /\$(Hostnames|Redirects) = @\([^)]*uhrin/, 'stará adresa sa nepublikuje (vlastník: nič nebolo zdieľané ani indexované)');
   const probe = publish.indexOf('Invoke-WebRequest -Uri "$target/robots.txt"');
   assert.ok(probe > 0, 'sonda cieľa presmerovania');
   assert.ok(probe < publish.indexOf('$redirectArgs ='), 'sonda beží pred registráciou statického servera aj pred prepisom ingressu');

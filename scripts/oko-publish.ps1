@@ -14,20 +14,20 @@
 # (scripts/oko-static-server.mjs --redirect). DNS for another Cloudflare zone is a manual CNAME to the tunnel
 # (see scripts/oko-tunnel-setup.ps1: cert.pem is bound to one zone).
 #
-#
-# 2026-09-29 (user: "chcel by som dnes premigrovat na druhu domenu"): okolive.sk is the main address, the old
-# oko.uhrin.digital answers 301 to it (same path + query, so old /s/<id> links keep working). A redirect is only
-# published once its target already serves this build through the tunnel (/robots.txt from our static server);
-# until then the source host keeps serving the app, so DNS and publishing can happen in any order.
+# 2026-09-29 (user: "chcel by som dnes premigrovat na druhu domenu", then "nic nebolo zdielane ani publikovane ani
+# indexovane"): okolive.sk is the only address. The old oko.uhrin.digital is not published at all (the tunnel's
+# catch-all answers 404); only www.okolive.sk answers 301 to the apex. A redirect is only published once its target
+# already serves this build through the tunnel (/robots.txt from our static server); until then the source host
+# keeps serving the app, so DNS and publishing can happen in any order.
 #
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/oko-publish.ps1 [-SkipBuild] [-DevPort 4173] [-StaticPort 4174]
-#        [-Hostnames okolive.sk] [-Redirects www.okolive.sk=https://okolive.sk,oko.uhrin.digital=https://okolive.sk]
+#        [-Hostnames okolive.sk] [-Redirects www.okolive.sk=https://okolive.sk]
 param(
   [switch]$SkipBuild,
   [int]$DevPort = 4173,
   [int]$StaticPort = 4174,
   [string[]]$Hostnames = @('okolive.sk'),
-  [string[]]$Redirects = @('www.okolive.sk=https://okolive.sk', 'oko.uhrin.digital=https://okolive.sk'),
+  [string[]]$Redirects = @('www.okolive.sk=https://okolive.sk'),
   [string]$TunnelName = 'oko',
   [string]$TunnelTaskName = 'OKO Cloudflare Tunnel',
   [string]$StaticTaskName = 'OKO public static'
