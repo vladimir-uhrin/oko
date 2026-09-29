@@ -72,6 +72,24 @@ export function hostRedirect(hostHeader, url, redirects) {
   return origin + (rest.startsWith('/') ? rest : '/');
 }
 
+/**
+ * Návšteva cez Cloudflare po http:// → trvalo na https:// s tou istou cestou a query, inak null
+ * (pure). Zóna uhrin.digital nemá „Always Use HTTPS" a nová zóna môže mať predvolené čokoľvek;
+ * po http Google kľúč (referrer https://…) aj bezpečný kontext prehliadača zlyhajú (2026-09-29,
+ * presun na okolive.sk). Bez hlavičiek Cloudflare (priamy prístup na 127.0.0.1) nič.
+ * @param {Record<string, string|string[]|undefined>} headers
+ * @param {string|undefined} url surové req.url
+ */
+export function httpsUpgrade(headers, url) {
+  const visitor = String(headers?.['cf-visitor'] || '');
+  const proto = String(headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (!/"scheme"\s*:\s*"http"/.test(visitor) && proto !== 'http') return null;
+  const host = String(headers?.host || '').toLowerCase().replace(/:\d+$/, '');
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return null;
+  const rest = String(url || '/').split('#')[0];
+  return `https://${host}${rest.startsWith('/') ? rest : '/'}`;
+}
+
 const REDIRECTS = parseRedirects(args);
 // robots.txt (2026-09-14, zdieľanie na siete): crawlery smú čítať stránky
 // (koreň s predvolenými OG značkami, /s/<id> cez ingress tunela), /api/ nie;
@@ -108,7 +126,7 @@ function send(res, status, headers, body) {
 }
 
 const server = http.createServer((req, res) => {
-  const redirect = hostRedirect(req.headers.host, req.url, REDIRECTS);
+  const redirect = hostRedirect(req.headers.host, req.url, REDIRECTS) || httpsUpgrade(req.headers, req.url);
   if (redirect) { send(res, 301, { Location: redirect, 'Cache-Control': 'public, max-age=3600', 'Content-Type': 'text/plain; charset=utf-8' }, `Moved to ${redirect}`); return; }
   const method = req.method || 'GET';
   if (method !== 'GET' && method !== 'HEAD') { send(res, 405, { 'Content-Type': 'text/plain' }, 'Method Not Allowed'); return; }

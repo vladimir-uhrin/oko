@@ -95,9 +95,9 @@ test('oko-static-server: keep-alive dlhšie než pool cloudflared (120 s), heade
 
 // Doména okolive.sk (2026-09-28): www → holá doména, trvalo (301), s cestou a query;
 // zlá dvojica `--redirect` sa preskočí, iný hostiteľ dostane build ako doteraz.
-function getWithHost(port, host, pathAndQuery) {
+function getWithHost(port, host, pathAndQuery, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, path: pathAndQuery, method: 'GET', headers: { host } }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port, path: pathAndQuery, method: 'GET', headers: { ...extraHeaders, host } }, (res) => {
       res.resume();
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers }));
     });
@@ -151,6 +151,15 @@ test('presun domény: staré odkazy /s/<id> vedú na okolive.sk; robots.txt hlav
     assert.equal(robots.status, 200);
     assert.match(robots.headers.get('x-robots-tag'), /noindex/);
     assert.match(await robots.text(), /Disallow: \/api\//);
+    // Návšteva po http:// cez Cloudflare → https (Google kľúč a bezpečný kontext chcú https).
+    const viaHttp = await getWithHost(port, 'okolive.sk', '/?front=lyman', { 'cf-visitor': '{"scheme":"http"}' });
+    assert.equal(viaHttp.status, 301);
+    assert.equal(viaHttp.headers.location, 'https://okolive.sk/?front=lyman');
+    assert.equal((await getWithHost(port, 'okolive.sk', '/robots.txt', { 'x-forwarded-proto': 'http' })).headers.location, 'https://okolive.sk/robots.txt');
+    assert.equal((await getWithHost(port, 'oko.uhrin.digital', '/s/Ab12cd34EF', { 'cf-visitor': '{"scheme":"http"}' })).headers.location, 'https://okolive.sk/s/Ab12cd34EF', 'stará adresa po http ide rovno na novú');
+    assert.equal((await getWithHost(port, 'okolive.sk', '/', { 'cf-visitor': '{"scheme":"https"}', 'x-forwarded-proto': 'https' })).status, 200, 'https ostáva');
+    assert.equal((await getWithHost(port, `127.0.0.1:${port}`, '/')).status, 200, 'priamy lokálny prístup bez hlavičiek Cloudflare sa nepresmeruje');
+    assert.equal((await getWithHost(port, 'evil', '/', { 'cf-visitor': '{"scheme":"http"}' })).status, 200, 'hostiteľ bez domény sa nepresmeruje');
   } finally {
     child.kill();
   }
