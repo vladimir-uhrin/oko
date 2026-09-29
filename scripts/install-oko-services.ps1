@@ -166,7 +166,8 @@ function Set-OkoService([string]$Name, [string]$Display, [string]$Description, [
   Invoke-Nssm @('set', $Name, 'AppRestartDelay', '5000')
   Invoke-Nssm @('set', $Name, 'AppThrottle', '30000')
   Invoke-Nssm @('set', $Name, 'AppStopMethodConsole', '10000')
-  Invoke-Nssm @('set', $Name, 'AppKillProcessTree', '1')
+  # NSSM 2.24 (the build on this machine) ends the whole process tree on stop by itself; the
+  # AppKillProcessTree switch exists only in later pre-releases and 2.24 rejects it.
   Invoke-Nssm @('set', $Name, 'AppStdout', $log)
   Invoke-Nssm @('set', $Name, 'AppStderr', $log)
   Invoke-Nssm @('set', $Name, 'AppStdoutCreationDisposition', '4')

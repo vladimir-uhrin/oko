@@ -26,13 +26,15 @@ test('tri služby: štart s Windows (dev server oneskorene), Normal priorita, re
     "'AppPriority', 'NORMAL_PRIORITY_CLASS'",
     "'AppExit', 'Default', 'Restart'",
     "'AppRestartDelay', '5000'",
-    "'AppKillProcessTree', '1'",
     "'AppRotateFiles', '1'",
     "'AppRotateOnline', '1'",
     "'AppRotateBytes', '10485760'",
     "'ObjectName', 'LocalSystem'",
   ]) assert.ok(install.includes(setting), `chýba nastavenie NSSM ${setting}`);
   assert.match(install, /sc\.exe failure \$Name reset= 86400 actions= restart\/10000\/restart\/10000\/restart\/60000/, 'poistka, keby padol samotný nssm.exe');
+  // NSSM 2.24 na tomto stroji parameter AppKillProcessTree nepozná (inštalácia 09-29 na ňom spadla);
+  // strom procesov pri zastavení zabíja sám („Killing process tree of process …" v logu udalostí).
+  assert.doesNotMatch(install, /Invoke-Nssm @\('set', \$Name, 'AppKillProcessTree'/);
 });
 
 test('dev server beží cez strážcu (pád aj zaseknutie), tunel so svojou konfiguráciou, statický server s rovnakými argumentmi ako pri publikovaní', () => {
