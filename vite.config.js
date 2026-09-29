@@ -10794,12 +10794,12 @@ export default defineConfig(({ mode }) => {
       host: env.HOST || 'localhost',
       port: parseInt(env.PORT, 10) || 5173,
       // When binding to all interfaces, allow any host; otherwise restrict to local names
-      // + the Cloudflare Tunnel hostnames (2026-09-13 oko.uhrin.digital, 2026-09-28
-      // okolive.sk): cloudflared on this machine forwards to localhost, the bind
-      // stays localhost-only.
+      // + the Cloudflare Tunnel hostname okolive.sk (2026-09-28; the older
+      // oko.uhrin.digital was retired 2026-09-29): cloudflared on this machine
+      // forwards to localhost, the bind stays localhost-only.
       allowedHosts: (env.HOST === '0.0.0.0' || env.HOST === '::')
         ? true
-        : ['localhost', '127.0.0.1', '.local', '.uhrin.digital', '.okolive.sk'],
+        : ['localhost', '127.0.0.1', '.local', '.okolive.sk'],
       watch: {
         // Runtime caches and QA output live inside the repo but are not
         // source: heavy or mid-write files there (radar PNGs, terrain
