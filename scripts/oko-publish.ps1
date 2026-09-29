@@ -77,9 +77,27 @@ if (-not $SkipBuild) {
 }
 if (-not (Test-Path (Join-Path $repo 'dist\index.html'))) { throw 'dist/index.html missing' }
 
-# Static server task (at logon, current user, auto-restart); a restart picks up the fresh dist/.
 $serverScript = Join-Path $repo 'scripts\oko-static-server.mjs'
 $redirectArgs = ($Redirects | ForEach-Object { " --redirect $_" }) -join ''
+# 2026-09-29: the three processes can run as Windows services (scripts/install-oko-services.ps1: start with
+# Windows, no window to close, restart after a crash). The static server reads dist/ on every request, so a
+# new build needs no restart; only changed arguments (redirects) do. Without the services: the logon task.
+$staticService = Get-Service -Name 'oko-static' -ErrorAction SilentlyContinue
+if ($staticService) {
+  $staticArgs = "$serverScript --port $StaticPort --dir dist$redirectArgs"
+  $current = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\oko-static\Parameters' -Name AppParameters -ErrorAction SilentlyContinue).AppParameters
+  if ($current -ne $staticArgs) {
+    $nssmExe = ((Get-CimInstance Win32_Service -Filter "Name='oko-static'").PathName).Trim('"')
+    & $nssmExe set oko-static AppParameters $staticArgs | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'changing the oko-static service arguments needs an elevated PowerShell (nssm set)' }
+    Restart-Service -Name 'oko-static'
+    Write-Host 'static service: arguments changed, restarted'
+  } elseif ((Get-Service -Name 'oko-static').Status -ne 'Running') {
+    Start-Service -Name 'oko-static'
+  }
+  Write-Host "static service: $((Get-Service -Name 'oko-static').Status) (serves the new dist/ without a restart)"
+} else {
+# Static server task (at logon, current user, auto-restart); a restart picks up the fresh dist/.
 $action = New-ScheduledTaskAction -Execute $node -Argument "`"$serverScript`" --port $StaticPort --dir dist$redirectArgs" -WorkingDirectory $repo
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 # -Priority 4 = Normal. Task Scheduler defaults to 7 (BelowNormal): with the machine busy (Docker, browser,
@@ -94,6 +112,7 @@ Register-ScheduledTask -TaskName $StaticTaskName -Action $action -Trigger $trigg
 Start-ScheduledTask -TaskName $StaticTaskName
 Start-Sleep -Seconds 3
 Write-Host "static task: " (Get-ScheduledTask -TaskName $StaticTaskName).State
+}
 
 # Tunnel ingress: API to the dev server, the rest to the build. Keep tunnel id + credentials lines as they are.
 $lines = Get-Content $config
@@ -122,12 +141,27 @@ foreach ($r in $Redirects) {
 "@
 }
 $ingress = "`ningress:`n" + ($rules -join "`n") + "`n  - service: http_status:404`n"
-[System.IO.File]::WriteAllText($config, (($head -join "`n") + "`n" + $ingress + "`n"), (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "config rewritten: $config"
-Stop-ScheduledTask -TaskName $TunnelTaskName -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
-Start-ScheduledTask -TaskName $TunnelTaskName
-Start-Sleep -Seconds 6
-Write-Host "tunnel task: " (Get-ScheduledTask -TaskName $TunnelTaskName).State
+$newConfig = ($head -join "`n") + "`n" + $ingress + "`n"
+# The tunnel is restarted only when its ingress changes: every reconnect meant a minute or two of stalled
+# page loads right after a publish (2026-09-29), and a new build does not need it.
+$tunnelService = Get-Service -Name 'oko-tunnel' -ErrorAction SilentlyContinue
+if ([System.IO.File]::ReadAllText($config) -ceq $newConfig) {
+  Write-Host 'ingress unchanged: the tunnel keeps running'
+  if ($tunnelService -and (Get-Service -Name 'oko-tunnel').Status -ne 'Running') { Start-Service -Name 'oko-tunnel' }
+} else {
+  [System.IO.File]::WriteAllText($config, $newConfig, (New-Object System.Text.UTF8Encoding($false)))
+  Write-Host "config rewritten: $config"
+  if ($tunnelService) {
+    Restart-Service -Name 'oko-tunnel'
+    Start-Sleep -Seconds 6
+    Write-Host "tunnel service: $((Get-Service -Name 'oko-tunnel').Status)"
+  } else {
+    Stop-ScheduledTask -TaskName $TunnelTaskName -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    Start-ScheduledTask -TaskName $TunnelTaskName
+    Start-Sleep -Seconds 6
+    Write-Host "tunnel task: " (Get-ScheduledTask -TaskName $TunnelTaskName).State
+  }
+}
 Write-Host ("published: " + (($Hostnames | ForEach-Object { "https://$_/" }) -join ', ') + " (build) + /api -> localhost:$DevPort")
 if ($Redirects.Count) { Write-Host ("301: " + ($Redirects -join ', ')) }
