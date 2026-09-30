@@ -51,3 +51,23 @@
   marks, 33 Lua-commented). Used ONLY by `src/data/wikiControl.test.mjs`
   (unquoted syntax on a real module, legend). © Wikipedia contributors,
   CC BY-SA 4.0.
+- `adsblol-trace-8965d1-20260930.json`, `adsblol-trace-a670b4-20260929.json`,
+  `adsblol-trace-a46cc1-20260928.json`, `adsblol-trace-a681e5-20260929.json`,
+  `adsblol-trace-300a95-20260930.json` — real readsb traces from adsb.lol
+  (`adsb.lol/data/traces/<xx>/trace_full_<hex>.json` for 2026-09-30,
+  `adsb.lol/globe_history/RRRR/MM/DD/traces/<xx>/trace_full_<hex>.json` for
+  earlier days), captured 2026-09-30 and trimmed to the windows the tests need
+  (the last row carrying a squawk before each window is kept so the carried
+  code parses the same as the full file — checked when trimming; `ownOp` and
+  `year` removed). 8965d1 = flydubai FZ1073 (A6-FKF), Dubai → Tel Aviv,
+  02:50–03:12 and 05:10–05:54 UTC: steep descent 05:22, squawk 7700 05:31:30
+  and 7500 05:36:18, U-turn ~05:42, data ends 05:53 (reported diverted to
+  Tabuk). The other four are aircraft for which the OKO archive (OpenSky)
+  logged squawk 7500 while adsb.lol saw a normal code at the same time
+  (5323, 3244, 1200, 7224) — noise the verification must reject. Used ONLY by
+  the Udalosti tests (`flightAnomalies`, `eventVerify`, `eventTimeline`,
+  `flightEventsService`) via `flightEventFixtures.mjs`, never served to the
+  app. The OpenSky side is not stored (redistributing OpenSky data in the
+  repository was not checked against their terms); tests derive it from the
+  same trace the way the archive recorded it. © adsb.lol contributors, ODbL 1.0
+  (https://opendatacommons.org/licenses/odbl/1-0/).

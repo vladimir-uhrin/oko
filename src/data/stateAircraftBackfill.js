@@ -74,6 +74,14 @@ export function advanceCursor(cursors, job) {
 export async function fetchGlobeTrace(hex, day, { fetchImpl = fetch, timeoutMs = 30_000 } = {}) {
   const url = globeHistoryUrl(hex, day);
   if (!url) return { status: 400 };
+  return fetchTraceFromUrl(url, { fetchImpl, timeoutMs });
+}
+
+/**
+ * Stiahni a prelož stopu readsb z adsb.lol (denný archív alebo živá stopa — liveTraceUrl).
+ * @returns {Promise<{status: number, flight?: object}>}
+ */
+export async function fetchTraceFromUrl(url, { fetchImpl = fetch, timeoutMs = 30_000 } = {}) {
   const res = await fetchImpl(url, {
     headers: { 'User-Agent': STATE_BACKFILL_UA, Accept: 'application/json' },
     signal: AbortSignal.timeout(timeoutMs),

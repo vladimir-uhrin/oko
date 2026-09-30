@@ -53,10 +53,22 @@ export function globeHistoryUrl(hex, day) {
   return `${GLOBE_HISTORY_BASE}/${y}/${m}/${d}/traces/${h.slice(-2)}/trace_full_${h}.json`;
 }
 
+export const LIVE_TRACE_BASE = 'https://adsb.lol/data/traces';
+
+/**
+ * URL živej stopy stroja (posledný deň, ešte pred zverejnením denného archívu — overené 2026-09-30:
+ * FZ1073 dostupný hneď, 47 kB gzip, denný súbor globe_history vtedy 404). Pure; zlý hex = null.
+ */
+export function liveTraceUrl(hex) {
+  const h = String(hex || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{6}$/.test(h)) return null;
+  return `${LIVE_TRACE_BASE}/${h.slice(-2)}/trace_full_${h}.json`;
+}
+
 /**
  * Stopa readsb (už rozbalená z gzip a JSON.parse) → stroj s chronologickými bodmi. Pure.
  * Adresy mimo ICAO (`~…`, TIS-B) sa vynechajú — nie sú jednoznačné.
- * @returns {{icao24: string, reg: string|null, acType: string|null, acDesc: string|null, points: object[]}|null}
+ * @returns {{icao24: string, reg: string|null, acType: string|null, acDesc: string|null, military: boolean, points: object[]}|null}
  */
 export function traceToFlight(json) {
   if (!json || typeof json !== 'object' || !Array.isArray(json.trace)) return null;
@@ -131,6 +143,8 @@ export function traceToFlight(json) {
     reg: cleanText(json.r),
     acType: cleanText(json.t),
     acDesc: cleanText(json.desc),
+    // readsb dbFlags, bit 1 = vojenské (overené 2026-09-30: T-38C ae00c3 dbFlags 1, A6-FKF 0).
+    military: (Number(json.dbFlags) & 1) === 1,
     points,
   };
 }

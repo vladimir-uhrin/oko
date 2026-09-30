@@ -92,6 +92,8 @@ export function openFlightHistoryWorker(dbPath, options = {}, {
     track: (icao24, opts) => call('track', [icao24, opts]),
     leg: (id) => call('leg', [id]),
     flightsOf: (icao24, opts) => call('flightsOf', [icao24, opts]),
+    /** Fixy so spúšťačmi udalostí (núdzový kód, strmhlavé klesanie) v čase [fromS, toS) — flightEventsService.js. */
+    triggersSince: (fromS, toS, opts) => call('triggersSince', [fromS, toS, opts]),
     get closed() { return closed; },
     close() {
       closed = true;

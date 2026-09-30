@@ -35,6 +35,7 @@ import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
+import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
@@ -5691,6 +5692,7 @@ function flightHistoryProxy() {
   let shutDown = false;
   let keeper = null;
   let stateAircraft = null;
+  let flightEvents = null;
   let diskGuard = null;
   let diskWarnedAt = 0;
 
@@ -5796,6 +5798,21 @@ function flightHistoryProxy() {
         else server.httpServer.once('listening', () => service.startBackfill());
         server.httpServer.once('close', () => service.stopBackfill());
       }
+      // Udalosti, etapa 1 (2026-09-30, vlastník: „automatizované aj s overením z nezávislého zdroja",
+      // „len overené, nie fake!"): spúšťače z archívu (núdzový kód, strmhlavé klesanie) overí druhá sieť
+      // (adsb.lol) — src/data/flightEventsService.js. Súkromné (API len z tohto počítača),
+      // FLIGHT_EVENTS=off vypne. Udalosti ako JSON vedľa databázy (<adresár DB>/events).
+      flightEvents = createFlightEventsService({
+        getStore,
+        eventsDir: path.join(path.dirname(cfg.dbPath), 'events'),
+        isLocal: isDirectLocalRequest,
+      });
+      if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
+        const events = flightEvents;
+        if (server.httpServer.listening) events.start();
+        else server.httpServer.once('listening', () => events.start());
+        server.httpServer.once('close', () => events.stop());
+      }
       if (cfg.enabled && cfg.keeper) {
         // Nepretržitý záznam (2026-09-30, používateľ: „čo najviac informácií ukladať"): keď nikto
         // nepozerá, strážca si tie isté lokálne /api pýta sám — prejde cache aj kreditovým
@@ -5827,6 +5844,7 @@ function flightHistoryProxy() {
         next();
       });
       server.middlewares.use('/api/state-aircraft', (req, res) => { void stateAircraft.handle(req, res); });
+      server.middlewares.use('/api/events', (req, res) => { void flightEvents.handle(req, res); });
       server.middlewares.use('/api/history', async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         const s = getStore();
@@ -5836,7 +5854,7 @@ function flightHistoryProxy() {
             // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
             const { path: dbFile, ...publicStatus } = await s.status();
             json(res, 200, isDirectLocalRequest(req)
-              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null, opensky: openSkyUpstreamStatus() }
+              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null, events: flightEvents?.status() ?? null, opensky: openSkyUpstreamStatus() }
               : publicStatus);
             return;
           }

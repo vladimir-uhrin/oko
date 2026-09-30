@@ -36,6 +36,7 @@
  * (readsb `ownOp`) sa zámerne NEUKLADÁ — etická čiara: sledujeme stroje, nie ľudí.
  */
 import { DatabaseSync } from 'node:sqlite';
+import { DIVE_MIN_ALT_M, DIVE_VR_MPS, EMERGENCY_CODES } from './flightAnomalies.js';
 
 export const FLIGHT_HISTORY_DEFAULT_RETENTION_DAYS = 7;
 /** Medzera medzi fixmi, po ktorej sa začne nový úsek (s). */
@@ -510,9 +511,15 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   // jednom agregáte na dopyt, preto dva dopyty.
   const oldestFix = db.prepare('SELECT MIN(t) AS v FROM fixes');
   const newestFix = db.prepare('SELECT MAX(t) AS v FROM fixes');
-  const trackStmt = db.prepare(`SELECT t, lat, lon, alt, gs, trk, vr, squawk, gnd, geo_alt, pos_src, x FROM fixes
+  const trackStmt = db.prepare(`SELECT t, lat, lon, alt, gs, trk, vr, squawk, gnd, geo_alt, pos_src, x, src FROM fixes
     WHERE icao24 = ? AND t >= ? AND t <= ? ORDER BY t ASC LIMIT ?`);
   const legById = db.prepare('SELECT * FROM legs WHERE id = ?');
+  // Spúšťače udalostí (flightEventsService.js): núdzový kód alebo strmhlavé klesanie vo vzduchu.
+  // Rozsah času ide cez index fixes_t; zvyšok podmienky sa overí na riadkoch toho rozsahu.
+  const triggerStmt = db.prepare(`SELECT icao24, t, lat, lon, alt, vr, squawk, src FROM fixes
+    WHERE t >= ? AND t < ? AND (gnd IS NULL OR gnd = 0)
+      AND (squawk IN (${Object.keys(EMERGENCY_CODES).map((c) => `'${c}'`).join(',')}) OR (vr <= ? AND alt >= ?))
+    ORDER BY t ASC LIMIT ?`);
 
   let lastSnapshotKey = null;
   let lastPruneMs = 0;
@@ -785,9 +792,10 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
      * Fixy stroja v časovom okne, chronologicky, kompaktne
      * `[t, lat, lon, alt, gs, trk, vr, squawk, gnd, geoAlt, posSrc, extras]`
      * (posledné tri pribudli 2026-09-30 na konci — staré indexy platia ďalej;
-     * extras = objekt doplnkov readsb alebo null).
+     * extras = objekt doplnkov readsb alebo null). `withSrc` pridá na koniec `[12] src` (zdroj fixu —
+     * overenie udalostí berie ako prvú sieť len OpenSky; body z adsb.lol by overovala sama sebou).
      */
-    track(icao24, { fromS = 0, toS = Number.MAX_SAFE_INTEGER, limit = 5000 } = {}) {
+    track(icao24, { fromS = 0, toS = Number.MAX_SAFE_INTEGER, limit = 5000, withSrc = false } = {}) {
       const hex = String(icao24 || '').trim().toLowerCase();
       if (!/^[0-9a-f]{6}$/.test(hex)) return [];
       const cap = Math.max(1, Math.min(TRACK_LIMIT_MAX, Math.floor(limit) || 5000));
@@ -798,7 +806,27 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
       };
       return trackStmt.all(hex, Math.floor(fromS), Math.floor(toS), cap)
         .map((r) => [r.t, r.lat / SCALE_DEG, r.lon / SCALE_DEG, r.alt, tenth(r.gs), tenth(r.trk), tenth(r.vr), r.squawk, r.gnd,
-          r.geo_alt ?? null, r.pos_src ?? null, extras(r.x)]);
+          r.geo_alt ?? null, r.pos_src ?? null, extras(r.x), ...(withSrc ? [r.src ?? null] : [])]);
+    },
+
+    /**
+     * Fixy, ktoré môžu byť začiatkom udalosti (núdzový kód 7500/7600/7700 alebo klesanie rýchlejšie
+     * než 8 000 ft/min nad 3 000 m), v čase [fromS, toS). Pre flightEventsService.js.
+     * @returns {Array<{icao24:string, t:number, lat:number, lon:number, alt:number|null, vr:number|null, squawk:string|null, src:string|null}>}
+     */
+    triggersSince(fromS, toS = Math.floor(now() / 1000) + 1, { limit = 5000 } = {}) {
+      const cap = Math.max(1, Math.min(20_000, Math.floor(limit) || 5000));
+      return triggerStmt.all(Math.floor(fromS), Math.ceil(toS), Math.round(DIVE_VR_MPS * SCALE_TENTH), DIVE_MIN_ALT_M, cap)
+        .map((r) => ({
+          icao24: r.icao24,
+          t: r.t,
+          lat: r.lat / SCALE_DEG,
+          lon: r.lon / SCALE_DEG,
+          alt: r.alt,
+          vr: r.vr === null ? null : r.vr / SCALE_TENTH,
+          squawk: r.squawk,
+          src: r.src,
+        }));
     },
 
     /** Stav úložiska — O(1): počty z `meta`, kraje cez index (žiadny COUNT(*)). */
