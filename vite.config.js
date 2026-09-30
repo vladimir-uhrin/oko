@@ -28,6 +28,7 @@
 
 import fs from 'node:fs';
 import { versionedDeferredCesiumTags } from './scripts/lib/cesiumHtmlTags.mjs';
+import { eventLoopWatchPlugin } from './scripts/lib/eventLoopWatch.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
@@ -10806,6 +10807,9 @@ export default defineConfig(({ mode }) => {
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
+      // Merač zablokovania vlákna (2026-09-30): zaseknutia pár minút po reštarte zatiaľ bez príčiny.
+      // Nemá middleware, takže miesto v zozname na nič nevplýva; začiatok aj koniec strážia testy.
+      eventLoopWatchPlugin(),
       // Odkaz na preloader víru s odtlačkom obsahu (Cloudflare cache) — na konci, poradie iných nemení.
       preloaderCacheBustPlugin(),
     ],
