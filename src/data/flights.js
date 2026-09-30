@@ -384,6 +384,9 @@ function _flightApiUrl(viewer) {
     lat: latitude.toFixed(4),
     lon: longitude.toFixed(4),
   });
+  // Výška kamery: pri priblížení proxy pýta od OpenSky len výrez (1 kredit namiesto 4) a zvyšok
+  // sveta dopĺňa z posledného snímku (src/data/openSkyRegion.js, 2026-09-30).
+  if (Number.isFinite(cartographic.height)) params.set('h', String(Math.round(cartographic.height)));
   return `${API_URL}?${params}`;
 }
 

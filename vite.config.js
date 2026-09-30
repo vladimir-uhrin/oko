@@ -35,6 +35,7 @@ import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
+import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
   AISHUB_USER_AGENT,
@@ -227,6 +228,21 @@ function openskyAdaptiveTtlMs(remaining) {
   if (remaining > 400) return 90_000;
   return 300_000;
 }
+// --- Výrez pri priblížení (2026-09-30, src/data/openSkyRegion.js) ------------
+// Priblížený pohľad dostane čerstvý výrez za 1 kredit + zvyšok sveta z posledného
+// celosvetového snímku (najviac 60 s starého). Celý svet sa pre neho berie najviac
+// raz za minútu namiesto pri každom dopyte po 9 s cache.
+/** @type {Map<string, {fetchedAt:number, body:string, parsed:{time:number, states:Array}, mergedFor:number, mergedBody:string|null}>} */
+const _openskyRegionCache = new Map();
+/** Jeden dopyt na výrez naraz (viac návštevníkov v tom istom okolí). */
+const _openskyRegionInFlight = new Map();
+const OPENSKY_REGION_CACHE_MAX = 40;
+/** Výrezy stiahnuté od posledného celosvetového snímku (strop REGION_FETCHES_PER_WORLD_MAX). */
+let _openskyRegionFetchesSinceWorld = 0;
+/** Rozparsovaný celosvetový snímok na spájanie s výrezmi — parsuje sa raz na snímok. */
+let _openskyWorldParsed = null;
+/** Dopyty na OpenSky od štartu servera a odhad minutých kreditov (lokálny /api/history/status). */
+const _openskyUpstreamStats = { since: Date.now(), world: 0, region: 0, credits: 0 };
 /** @type {boolean} Guards duplicate auth-failure warnings in logs. */
 let _openskyAuthWarned = false;
 /** @type {boolean} Guards duplicate invalid-auth-mode warnings. */
@@ -5721,7 +5737,11 @@ function flightHistoryProxy() {
     return store;
   }
 
-  /** Obal: po odoslaní 200 odpovede zapíš jej telo (asynchrónne k odpovedi). */
+  /**
+   * Obal: po odoslaní 200 odpovede zapíš jej telo (asynchrónne k odpovedi). Proxy môže určiť, čo
+   * sa zapíše, cez `res.okoHistoryRecord`: false = nič (telo už v histórii je), text = namiesto
+   * tela toto (výrez pri priblížení: odpoveď je svet + výrez, nové sú len stroje z výrezu).
+   */
   function tapResponse(res, record) {
     const originalEnd = res.end.bind(res);
     const chunks = [];
@@ -5730,8 +5750,9 @@ function flightHistoryProxy() {
     res.end = (chunk, ...rest) => {
       if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
       const result = originalEnd(chunk, ...rest);
-      if (res.statusCode === 200 && chunks.length) {
-        const body = Buffer.concat(chunks);
+      const override = res.okoHistoryRecord;
+      if (res.statusCode === 200 && chunks.length && override !== false) {
+        const body = typeof override === 'string' ? Buffer.from(override) : Buffer.concat(chunks);
         setImmediate(() => {
           try {
             const s = getStore();
@@ -5815,7 +5836,7 @@ function flightHistoryProxy() {
             // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
             const { path: dbFile, ...publicStatus } = await s.status();
             json(res, 200, isDirectLocalRequest(req)
-              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null }
+              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null, opensky: openSkyUpstreamStatus() }
               : publicStatus);
             return;
           }
@@ -5851,6 +5872,8 @@ function flightHistoryProxy() {
 
 /** Plugin histórie letov aj pre test so zdvojeným serverom (src/data/flightHistoryProxy.test.mjs). */
 export { flightHistoryProxy };
+/** Proxy OpenSky pre test výrezu so zdvojeným serverom (src/data/openSkyRegion.test.mjs). */
+export { openSkyProxy };
 
 function openSkyProxy() {
   return {
@@ -5958,6 +5981,10 @@ function openSkyProxy() {
               reason = 'missing_oauth_and_basic_creds';
             }
           }
+
+          // Priblížený pohľad (src/data/openSkyRegion.js): čerstvý výrez za 1 kredit + zvyšok sveta
+          // z posledného snímku, kým nie je starší než minúta. Inak (a pre strážcu histórie) celý svet.
+          if (await serveOpenSkyViewport(req, res, { headers, requestedMode, usedMode, now })) return;
 
           let upstream = await fetch('https://opensky-network.org/api/states/all?extended=1', { headers });
           // Auto-mode fallback: if OAuth was rejected, retry with Basic credentials
@@ -6099,6 +6126,10 @@ function openSkyProxy() {
             _openskyTtlMs = openskyAdaptiveTtlMs(remaining);
             if (upstream.headers.get('x-rate-limit-remaining') && Number.isFinite(remaining)) _openskyRemainingCredits = remaining;
             _openskyCooldownUntil = 0;
+            // Nový snímok sveta: výrezy sa znova smú (strop REGION_FETCHES_PER_WORLD_MAX).
+            _openskyRegionFetchesSinceWorld = 0;
+            _openskyUpstreamStats.world += 1;
+            _openskyUpstreamStats.credits += 4;
           }
 
           res.writeHead(
@@ -6147,6 +6178,149 @@ function openSkyProxy() {
       });
     },
   };
+}
+
+/** Rozparsovaný aktuálny snímok sveta (raz na snímok), alebo null. */
+function openSkyWorldParsed() {
+  if (!_openskyCacheBody) return null;
+  if (_openskyWorldParsed?.cacheTime !== _openskyCacheTime) {
+    try {
+      const json = JSON.parse(_openskyCacheBody);
+      _openskyWorldParsed = { cacheTime: _openskyCacheTime, json: { time: json?.time, states: Array.isArray(json?.states) ? json.states : [] } };
+    } catch {
+      _openskyWorldParsed = { cacheTime: _openskyCacheTime, json: null };
+    }
+  }
+  return _openskyWorldParsed.json;
+}
+
+/** Stiahni výrez (jeden dopyt na výrez naraz). Vracia { status, record?, retryAfterSec? }. */
+async function fetchOpenSkyRegion(region, headers) {
+  const request = coalesceProxyRequest(_openskyRegionInFlight, region.key, async () => {
+    const upstream = await fetch(openSkyRegionUrl(region), { headers, signal: AbortSignal.timeout(15_000) });
+    const remainingHeader = upstream.headers.get('x-rate-limit-remaining');
+    const remaining = Number(remainingHeader);
+    if (upstream.status === 429) {
+      return { status: 429, retryAfterSec: Number(upstream.headers.get('x-rate-limit-retry-after-seconds')) };
+    }
+    if (!upstream.ok) return { status: upstream.status };
+    const body = await upstream.text();
+    let json;
+    try { json = JSON.parse(body); } catch { return { status: 502 }; }
+    // Prázdny výrez OpenSky vracia ako "states": null.
+    if (!json || (json.states !== null && !Array.isArray(json.states))) return { status: 502 };
+    if (remainingHeader && Number.isFinite(remaining)) {
+      _openskyRemainingCredits = remaining;
+      _openskyTtlMs = openskyAdaptiveTtlMs(remaining);
+    }
+    _openskyUpstreamStats.region += 1;
+    _openskyUpstreamStats.credits += openSkyAreaCredits(region);
+    const record = { fetchedAt: Date.now(), body, parsed: { time: json.time, states: json.states || [] }, mergedFor: -1, mergedBody: null };
+    _openskyRegionCache.delete(region.key);
+    _openskyRegionCache.set(region.key, record);
+    while (_openskyRegionCache.size > OPENSKY_REGION_CACHE_MAX) {
+      _openskyRegionCache.delete(_openskyRegionCache.keys().next().value);
+    }
+    return { status: 200, record };
+  });
+  if (!request.shared) _openskyRegionFetchesSinceWorld += 1;
+  try {
+    return await request.promise;
+  } catch (error) {
+    if (error?.name !== 'TimeoutError' && error?.name !== 'AbortError') console.warn('[OpenSky Proxy] výrez:', error?.message || error);
+    return { status: 0 };
+  }
+}
+
+/**
+ * Priblížený pohľad: svet z posledného snímku + čerstvý výrez okolo kamery (src/data/openSkyRegion.js).
+ * Vracia true, keď odpovedal; false = pokračuj celosvetovým dopytom (bez výšky kamery, vysoko,
+ * málo kreditov, svet starší než minúta alebo žiadny).
+ * Do histórie letov ide len čerstvý výrez (`res.okoHistoryRecord`) — svet sa zapísal pri svojom stiahnutí.
+ */
+async function serveOpenSkyViewport(req, res, { headers, requestedMode, usedMode, now }) {
+  const region = openSkyRegionForView(new URL(req?.url || '', 'http://localhost').searchParams);
+  if (!region) return false;
+  const policy = regionPolicy(_openskyRemainingCredits);
+  if (!policy || !_openskyCacheBody || _openskyCacheStatus !== 200) return false;
+  const worldAge = now - _openskyCacheTime;
+  if (worldAge >= policy.worldMaxAgeMs || openSkySourceIsStale(_openskyCacheSourceEpochMs, now)) return false;
+  const send = (cacheStatus, why, body, extra = {}) => {
+    res.writeHead(200, {
+      ...buildOpenSkyHeaders({ cacheStatus, requestedMode, usedMode, reason: why, ...extra }),
+      'X-OpenSky-Region': `${region.lamin},${region.lomin},${region.lamax},${region.lomax}`,
+      'X-OpenSky-World-Age': String(Math.round(worldAge / 1000)),
+    });
+    res.end(body);
+    return true;
+  };
+  // Svet je čerstvejší, než by bol výrez — stačí on (už je v histórii).
+  if (worldAge < policy.regionTtlMs) {
+    res.okoHistoryRecord = false;
+    return send('HIT', 'viewport_world_fresh', _openskyCacheBody);
+  }
+  let record = _openskyRegionCache.get(region.key) || null;
+  const fresh = Boolean(record) && now - record.fetchedAt < policy.regionTtlMs;
+  let fetchedNow = false;
+  if (!fresh && _openskyRegionFetchesSinceWorld < REGION_FETCHES_PER_WORLD_MAX) {
+    const fetched = await fetchOpenSkyRegion(region, headers);
+    if (fetched.status === 429) {
+      // Rovnaký governor ako pri svete: cooldown podľa OpenSky, pripnutý regionálny režim, kredity 0.
+      const retryAfterSec = fetched.retryAfterSec;
+      const cooldownMs = Math.min(Math.max(Number.isFinite(retryAfterSec) ? retryAfterSec * 1000 : 120_000, 30_000), 30 * 60_000);
+      _openskyCooldownUntil = now + cooldownMs;
+      _openskyConstrainedUntil = now + OPENSKY_CONSTRAINED_REGIME_MS;
+      _openskyRemainingCredits = 0;
+      res.okoHistoryRecord = false;
+      return send('STALE', 'rate_limited_serving_stale', _openskyCacheBody, { staleSeconds: worldAge / 1000, retryAfterSeconds: cooldownMs / 1000 });
+    }
+    if (fetched.status === 200) {
+      record = fetched.record;
+      fetchedNow = true;
+    }
+  }
+  // Strop výrezov do ďalšieho snímku sveta alebo zlyhaný výrez: starší výrez, inak svet. Výrez starší
+  // než snímok sveta by prepísal novšie polohy staršími — vtedy len svet.
+  if (record && record.fetchedAt <= _openskyCacheTime) record = null;
+  if (!record) {
+    res.okoHistoryRecord = false;
+    return send('HIT', 'viewport_world_only', _openskyCacheBody);
+  }
+  if (record.mergedFor !== _openskyCacheTime) {
+    const world = openSkyWorldParsed();
+    if (!world) {
+      res.okoHistoryRecord = false;
+      return send('HIT', 'viewport_world_only', _openskyCacheBody);
+    }
+    record.mergedBody = JSON.stringify(mergeWorldAndRegion(world, record.parsed));
+    record.mergedFor = _openskyCacheTime;
+  }
+  // Čerstvo stiahnutý výrez do histórie; výrez z cache tam už je.
+  res.okoHistoryRecord = fetchedNow ? record.body : false;
+  return send(fetchedNow ? 'REGION' : (fresh ? 'REGION-HIT' : 'REGION-OLD'), 'viewport_refresh', record.mergedBody);
+}
+
+/** Testy: vyčisti stav OpenSky proxy (cache sveta a výrezov, governor, počítadlá). */
+export function _resetOpenSkyProxyForTest() {
+  _openskyCacheBody = null;
+  _openskyCacheStatus = 0;
+  _openskyCacheTime = 0;
+  _openskyCacheMeta = null;
+  _openskyCacheSourceEpochMs = null;
+  _openskyTtlMs = OPENSKY_CACHE_MS;
+  _openskyCooldownUntil = 0;
+  _openskyConstrainedUntil = 0;
+  _openskyRemainingCredits = null;
+  _openskyRegionCache.clear();
+  _openskyRegionInFlight.clear();
+  _openskyRegionFetchesSinceWorld = 0;
+  _openskyWorldParsed = null;
+  Object.assign(_openskyUpstreamStats, { since: Date.now(), world: 0, region: 0, credits: 0 });
+}
+
+/** Stav OpenSky pre lokálny /api/history/status: zostatok kreditov, dopyty a odhad minutých kreditov. */
+function openSkyUpstreamStatus() {
+  return { remainingCredits: _openskyRemainingCredits, ..._openskyUpstreamStats, regionsCached: _openskyRegionCache.size };
 }
 
 /**
