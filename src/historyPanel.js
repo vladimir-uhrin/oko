@@ -26,6 +26,8 @@ import {
 } from './data/flightHistory.js';
 import { drawFlightChart } from './flightHistoryChart.js';
 import { REPLAY_SPEEDS, createFlightReplay } from './flightReplay.js';
+import { fetchStateFlights, flightDateUtc, loadStateAircraftList, stateFlightRowModel } from './data/stateAircraftClient.js';
+import { currentLanguage } from './i18n.js';
 import { formatAltitude, formatSpeed, formatThousands, formatVerticalRateMagnitude, onUnitSystemChange } from './units.js';
 import { verticalTrendGlyph } from './data/flightProgress.js';
 
@@ -55,6 +57,15 @@ export function legRowModel(leg, t) {
   ].filter(Boolean).join(' · ');
   const alert = (leg.squawks || []).find((s) => ['7500', '7600', '7700'].includes(s)) || null;
   return { title, sub, alert };
+}
+
+/**
+ * Začiatok archívu do stavového riadku: dnes len čas UTC, staršie dátum (archív drží roky —
+ * „záznam od 14:07 UTC" pri dátach od 2023 klamal, 2026-09-30). Pure.
+ */
+export function archiveSinceLabel(oldestT, nowS, lang = 'sk') {
+  if (!Number.isFinite(oldestT)) return '--:--';
+  return nowS - oldestT < 86_400 ? `${formatClockUtc(oldestT)} UTC` : flightDateUtc(oldestT, lang);
 }
 
 /**
@@ -90,7 +101,14 @@ export function installHistoryPanel({
   viewer,
   doc = globalThis.document,
   t,
-  api = { search: searchFlightHistory, track: fetchFlightTrack, status: fetchHistoryStatus, resolveReg: resolveRegistrationHex },
+  api = {
+    search: searchFlightHistory,
+    track: fetchFlightTrack,
+    status: fetchHistoryStatus,
+    resolveReg: resolveRegistrationHex,
+    stateList: loadStateAircraftList,
+    stateFlights: (hex) => fetchStateFlights(hex, { limit: 200 }),
+  },
   replayFactory = createFlightReplay,
   onTrackLive = null,
   setCollapsed = null,
@@ -123,6 +141,13 @@ export function installHistoryPanel({
   const status = el(doc, 'div', 'history-status', '');
   const list = el(doc, 'ol', 'history-list');
   list.setAttribute('aria-live', 'polite');
+  // Štátne lietadlá SR (2026-09-30): stroje z overeného zoznamu — ich lety sa dajú prezerať
+  // spätne aj vtedy, keď práve nelietajú (na mape ich niet, pás nad kartou sa neukáže).
+  const stateRow = el(doc, 'div', 'history-state-row');
+  stateRow.hidden = true;
+  const stateLabel = el(doc, 'span', 'history-state-label', t('history.state-title'));
+  stateRow.appendChild(stateLabel);
+  let listMode = 'search';
 
   // ── detail ──────────────────────────────────────────────────────
   const detail = el(doc, 'section', 'history-detail');
@@ -159,7 +184,7 @@ export function installHistoryPanel({
   liveBtn.hidden = !onTrackLive;
   controls.append(playBtn, speedWrap, followBtn, liveBtn);
   detail.append(detailHead, stats, canvas, sampleRow, slider, controls);
-  body.append(searchRow, status, list, detail);
+  body.append(searchRow, stateRow, status, list, detail);
 
   // ── render ──────────────────────────────────────────────────────
   function drawChart(state) {
@@ -202,7 +227,10 @@ export function installHistoryPanel({
       return;
     }
     for (const leg of legs) {
-      const row = legRowModel(leg, t);
+      // Lety štátneho stroja idú cez roky — riadok nesie dátum a odvodenú trasu (odlet → prílet).
+      const row = listMode === 'state'
+        ? (({ route, sub, alert }) => ({ title: route, sub, alert }))(stateFlightRowModel(leg, currentLanguage()))
+        : legRowModel(leg, t);
       const li = el(doc, 'li', `history-leg${row.alert ? ' history-leg--alert' : ''}`);
       const btn = el(doc, 'button', 'history-leg-btn');
       btn.type = 'button';
@@ -218,7 +246,7 @@ export function installHistoryPanel({
     try {
       const st = await api.status();
       status.textContent = st?.fixes
-        ? t('history.status', { since: st.oldestT ? formatClockUtc(st.oldestT) : '--:--', legs: formatThousands(st.legs) })
+        ? t('history.status', { since: archiveSinceLabel(st.oldestT, Date.now() / 1000, currentLanguage()), legs: formatThousands(st.legs) })
         : t('history.status-empty');
       status.dataset.state = 'ok';
     } catch {
@@ -227,8 +255,41 @@ export function installHistoryPanel({
     }
   }
 
+  async function showStateAircraft(hex, reg = '') {
+    const token = ++searchToken;
+    closeLeg();
+    listMode = 'state';
+    status.textContent = t('history.searching');
+    try {
+      const flights = await api.stateFlights(hex);
+      if (token !== searchToken) return;
+      legs = flights;
+      renderList();
+      status.textContent = t('history.state-results', { reg: reg || String(hex).toUpperCase(), n: flights.length });
+    } catch {
+      if (token !== searchToken) return;
+      legs = [];
+      renderList();
+      status.textContent = t('history.unavailable');
+    }
+  }
+
+  async function renderStateRow() {
+    const stateList = await api.stateList();
+    const aircraft = stateList?.aircraft || [];
+    for (const node of [...stateRow.querySelectorAll?.('button') || []]) node.remove();
+    for (const a of aircraft) {
+      const btn = el(doc, 'button', 'scene-btn history-state-btn', [a.reg, a.typeCode].filter(Boolean).join(' · ') || a.hex.toUpperCase());
+      btn.type = 'button';
+      btn.addEventListener('click', () => { void showStateAircraft(a.hex, a.reg || ''); });
+      stateRow.appendChild(btn);
+    }
+    stateRow.hidden = !aircraft.length;
+  }
+
   async function runSearch() {
     const token = ++searchToken;
+    listMode = 'search';
     status.textContent = t('history.searching');
     try {
       // Značka (OM-BYK) sa najprv preloží na hex cez adsbdb, potom hľadá
@@ -321,6 +382,7 @@ export function installHistoryPanel({
   slider.addEventListener('input', () => replay.seekFraction(Number(slider.value) / 1000));
   onUnitSystemChange(() => renderState(replay.getState()));
   void refreshStatus();
+  if (typeof api.stateList === 'function') void renderStateRow().catch(() => { stateRow.hidden = true; });
 
   return {
     /** Otvor panel s dopytom (kontextové menu: „História tohto stroja"). */
@@ -329,6 +391,17 @@ export function installHistoryPanel({
       closeLeg();
       input.value = String(query || '');
       void runSearch();
+    },
+    /** Otvor konkrétny let (pás štátneho lietadla nad kartou): detail, graf a prehratie na glóbuse. */
+    showLeg(leg) {
+      if (!leg?.icao24) return;
+      setCollapsed?.(false);
+      void openLeg(leg);
+    },
+    /** Všetky lety štátneho stroja v zozname panelu (najnovšie prvé, s dátumom a trasou). */
+    showStateAircraft(hex, reg = '') {
+      setCollapsed?.(false);
+      void showStateAircraft(hex, reg);
     },
     refreshStatus,
     replay,

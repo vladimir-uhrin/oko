@@ -9,8 +9,8 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { openFlightHistory } from './flightHistoryStore.js';
 
-const METHODS = new Set(['recordOpenSkyBody', 'recordAdsbLolBody', 'status', 'search', 'track', 'leg']);
-const WRITE_METHODS = new Set(['recordOpenSkyBody', 'recordAdsbLolBody']);
+const METHODS = new Set(['recordOpenSkyBody', 'recordAdsbLolBody', 'importFlight', 'status', 'search', 'track', 'leg', 'flightsOf']);
+const WRITE_METHODS = new Set(['recordOpenSkyBody', 'recordAdsbLolBody', 'importFlight']);
 /**
  * Zápis dlhší než tretina odstupu strážcu (90 s) = databáza prerástla cache —
  * varovanie do logu služby (2026-09-30: archív má rásť roky, „miesta mám dosť").

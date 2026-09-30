@@ -1,0 +1,81 @@
+{
+  "country": "SK",
+  "updated": "2026-09-30",
+  "note": "Štátne lietadlá SR — len overené stroje, každý so zdrojmi (SOURCE.md). Etapa 1: vládna/VIP preprava (Letecký útvar MV SR). Hex kódy nie sú v úradnom registri (štátne lietadlá v ňom nie sú) — každý potvrdzujú štyri nezávislé verejné ADS-B databázy (Flightradar24, tar1090-db, hexdb.io, live-mobile-mode-s.eu) a archív OKO (lety s volacím znakom SSG… = SLOVAK GOVERNMENT, september 2026).",
+  "aircraft": [
+    {
+      "hex": "505c06",
+      "reg": "OM-BYA",
+      "typeCode": "A319",
+      "typeName": "Airbus A319CJ",
+      "operator": { "sk": "Letecký útvar MV SR", "en": "Air Unit of the Slovak Ministry of the Interior" },
+      "role": "government",
+      "since": "2016-06-14",
+      "until": null,
+      "verified": "2026-09-30",
+      "sources": [
+        "https://www.teraz.sk/slovensko/v-bratislave-pristal-vladny-airbus/201535-clanok.html",
+        "https://sk.wikipedia.org/wiki/Leteck%C3%BD_%C3%BAtvar_Ministerstva_vn%C3%BAtra_Slovenskej_republiky",
+        "https://www.horizon.mt/2026/09/11/slovak-government-airbus-a319-115xcj-om-bya/",
+        "https://www.flightradar24.com/data/aircraft/om-bya",
+        "https://hexdb.io/api/v1/aircraft/505c06",
+        "https://github.com/wiedehopf/tar1090-db"
+      ]
+    },
+    {
+      "hex": "505c09",
+      "reg": "OM-BYK",
+      "typeCode": "A319",
+      "typeName": "Airbus A319CJ",
+      "operator": { "sk": "Letecký útvar MV SR", "en": "Air Unit of the Slovak Ministry of the Interior" },
+      "role": "government",
+      "since": "2017-09-02",
+      "until": null,
+      "verified": "2026-09-30",
+      "sources": [
+        "https://www.teraz.sk/slovensko/vladny-special-prilet-bratislava/278318-clanok.html",
+        "https://www.pravda.sk/spravy/domace/clanok/779182-poskodeny-vladny-special-ostava-docasne-v-bruseli-ako-sa-fico-vrati-na-slovensko",
+        "https://www.flightradar24.com/data/aircraft/om-byk",
+        "https://hexdb.io/api/v1/aircraft/505c09",
+        "https://github.com/wiedehopf/tar1090-db"
+      ]
+    },
+    {
+      "hex": "505c07",
+      "reg": "OM-BYB",
+      "typeCode": "F100",
+      "typeName": "Fokker 100",
+      "operator": { "sk": "Letecký útvar MV SR", "en": "Air Unit of the Slovak Ministry of the Interior" },
+      "role": "government",
+      "since": "2017-01-29",
+      "until": null,
+      "verified": "2026-09-30",
+      "sources": [
+        "https://www.letectvosr.sk/posledny-let-vladne-lietadlo-fokker-100-om-byc-ukoncilo-svoju-sluzbu%E2%80%A8/",
+        "https://www.pravda.sk/spravy/domace/clanok/740801-rezort-vnutra-vyradil-z-vladnej-letky-prve-z-dvoch-lietadiel-fokker-100",
+        "https://www.flightradar24.com/data/aircraft/om-byb",
+        "https://hexdb.io/api/v1/aircraft/505c07",
+        "https://github.com/wiedehopf/tar1090-db"
+      ]
+    },
+    {
+      "hex": "505c08",
+      "reg": "OM-BYC",
+      "typeCode": "F100",
+      "typeName": "Fokker 100",
+      "operator": { "sk": "Letecký útvar MV SR", "en": "Air Unit of the Slovak Ministry of the Interior" },
+      "role": "government",
+      "since": "2016-09-26",
+      "until": "2025-02-11",
+      "verified": "2026-09-30",
+      "sources": [
+        "https://www.letectvosr.sk/posledny-let-vladne-lietadlo-fokker-100-om-byc-ukoncilo-svoju-sluzbu%E2%80%A8/",
+        "https://www.pravda.sk/spravy/domace/clanok/740801-rezort-vnutra-vyradil-z-vladnej-letky-prve-z-dvoch-lietadiel-fokker-100",
+        "https://www.pravda.sk/spravy/domace/clanok/2038801-u-koho-skoncil-vyradeny-vladny-special-ci-desiatky-aut-ministerstva-obrany",
+        "https://www.flightradar24.com/data/aircraft/om-byc",
+        "https://hexdb.io/api/v1/aircraft/505c08",
+        "https://github.com/wiedehopf/tar1090-db"
+      ]
+    }
+  ]
+}

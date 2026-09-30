@@ -47,6 +47,7 @@ export function parseAirportIndex(text) {
       lat: coords[1],
       lon: coords[0],
       elevFt: Number.isFinite(p.elevFt) ? p.elevFt : null,
+      type: typeof p.type === 'string' ? p.type : null, // large / medium / small (airportNearest.js)
     };
     // ICAO má prednosť: pri zhode IATA s cudzím ICAO (zriedkavé) vyhrá ICAO.
     if (record.icao && !index.has(record.icao)) index.set(record.icao, record);

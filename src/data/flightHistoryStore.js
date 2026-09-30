@@ -40,6 +40,12 @@ import { DatabaseSync } from 'node:sqlite';
 export const FLIGHT_HISTORY_DEFAULT_RETENTION_DAYS = 7;
 /** Medzera medzi fixmi, po ktorej sa začne nový úsek (s). */
 export const LEG_GAP_S = 30 * 60;
+/**
+ * Pri importe celých stôp readsb (adsblolTrace.js) nový let určuje hlavne príznak readsb
+ * „začiatok úseku" (readsb vie, či stroj pristál); medzera v pokrytí za letu (more, hory) nemá
+ * let rozdeliť — delí sa až pri medzere nad 2 h.
+ */
+export const TRACE_LEG_GAP_S = 2 * 3600;
 export const SEARCH_LIMIT_MAX = 200;
 export const TRACK_LIMIT_MAX = 20_000;
 /** Plný záznam (každý poll) sa drží toľkoto hodín; staršie sa preriedia. */
@@ -275,6 +281,36 @@ export function fixFromAdsbLolAircraft(ac, nowS) {
   };
 }
 
+/**
+ * Rozdeľ chronologické body stopy na úseky (lety): nový úsek pri príznaku readsb „začiatok
+ * úseku" (`newLeg`), medzere nad `gapS` alebo zmene volacieho znaku. Pure.
+ * @returns {{start: number, end: number, callsign: string, firstT: number, lastT: number,
+ *   maxAlt: number|null, maxGs: number|null, squawks: string[], cat: number|null}[]}
+ */
+export function splitLegs(points, gapS = LEG_GAP_S) {
+  const legs = [];
+  let cur = null;
+  for (let i = 0; i < points.length; i += 1) {
+    const p = points[i];
+    const split = !cur
+      || p.newLeg
+      || p.t - points[i - 1].t > gapS
+      || (p.callsign && cur.callsign && p.callsign !== cur.callsign);
+    if (split) {
+      cur = { start: i, end: i, callsign: p.callsign || '', firstT: p.t, lastT: p.t, maxAlt: null, maxGs: null, squawks: [], cat: null };
+      legs.push(cur);
+    }
+    cur.end = i;
+    cur.lastT = p.t;
+    if (!cur.callsign && p.callsign) cur.callsign = p.callsign;
+    if (p.alt !== null && p.alt !== undefined && (cur.maxAlt === null || p.alt > cur.maxAlt)) cur.maxAlt = p.alt;
+    if (p.gs !== null && p.gs !== undefined && (cur.maxGs === null || p.gs > cur.maxGs)) cur.maxGs = p.gs;
+    if (p.squawk && !cur.squawks.includes(p.squawk)) cur.squawks.push(p.squawk);
+    if (p.cat !== null && p.cat !== undefined && (cur.cat === null || cur.cat <= 1)) cur.cat = p.cat;
+  }
+  return legs;
+}
+
 /** Normalizuj dopyt: hex (6 hex znakov), inak volací znak / prefix. Pure. */
 export function normalizeSearchQuery(raw) {
   const q = String(raw ?? '').trim().toUpperCase();
@@ -295,6 +331,8 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   if (dbPath !== ':memory:') {
     db.exec('PRAGMA journal_mode = WAL;');
     db.exec('PRAGMA synchronous = NORMAL;');
+    // Iné spojenie (skript, osirelé vlákno) môže krátko držať zámok zápisu — radšej počkať, než zahodiť snímok.
+    db.exec('PRAGMA busy_timeout = 5000;');
   }
   // Stará schéma (REAL stĺpce, verzia 0/1) sa zahodí — je to dev cache,
   // nie zdroj; nová sa naplní z ďalšieho pollu. NOVŠIA verzia sa nezahadzuje
@@ -349,6 +387,15 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
     squawks = ?, callsign = CASE WHEN callsign = '' THEN ? ELSE callsign END,
     cat = CASE WHEN cat IS NULL OR cat <= 1 THEN COALESCE(?, cat) ELSE cat END,
     reg = COALESCE(reg, ?), ac_type = COALESCE(ac_type, ?), ac_desc = COALESCE(ac_desc, ?) WHERE id = ?`);
+  // Import celých stôp (adsblolTrace.js, 2026-09-30): úsek sa napojí na existujúci úsek toho istého
+  // stroja, ktorý sa s ním časovo prekrýva alebo naň nadväzuje (≤ LEG_GAP_S) a má zlučiteľný volací znak.
+  const overlapLegs = db.prepare(`SELECT id, callsign, first_t, last_t, fixes, max_alt, max_gs, squawks, cat, reg, ac_type, ac_desc
+    FROM legs WHERE icao24 = ? AND last_t >= ? AND first_t <= ? ORDER BY last_t DESC`);
+  const setLeg = db.prepare(`UPDATE legs SET first_t = ?, last_t = ?, fixes = ?, max_alt = ?, max_gs = ?, squawks = ?,
+    callsign = ?, cat = ?, reg = ?, ac_type = ?, ac_desc = ? WHERE id = ?`);
+  const insertLegCounted = db.prepare(`INSERT INTO legs (icao24, callsign, country, first_t, last_t, fixes, max_alt, max_gs, squawks, src, cat, reg, ac_type, ac_desc)
+    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const fixAt = db.prepare('SELECT t, lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t = ?');
   const pruneFixes = db.prepare('DELETE FROM fixes WHERE t < ?');
   const pruneLegs = db.prepare('DELETE FROM legs WHERE last_t < ?');
   // Preriedenie: zo starších fixov ostanú tie, ktorých čas padne do prvej
@@ -477,6 +524,99 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
         if (f) fixes.push(f);
       }
       return recordFixes(fixes, src);
+    },
+
+    /**
+     * Zapíš celú stopu jedného stroja (adsblolTrace.traceToFlight) v jednej transakcii.
+     * Lety sa rozdelia (splitLegs); let, ktorý už čiastočne zachytil živý záznam, sa predĺži —
+     * nevznikne druhý. Opakovaný import tej istej stopy nič nepridá (fixy aj počty ostanú).
+     * @returns {{inserted: number, legsInserted: number, legsExtended: number}}
+     */
+    importFlight(flight, src = 'adsb.lol/archive') {
+      const icao24 = String(flight?.icao24 || '').toLowerCase();
+      const result = { inserted: 0, legsInserted: 0, legsExtended: 0 };
+      if (!/^[0-9a-f]{6}$/.test(icao24) || !Array.isArray(flight.points) || !flight.points.length) return result;
+      const points = [...flight.points].sort((a, b) => a.t - b.t);
+      const legs = splitLegs(points, TRACE_LEG_GAP_S);
+      const reg = flight.reg ?? null;
+      const acType = flight.acType ?? null;
+      const acDesc = flight.acDesc ?? null;
+      const createdIds = new Set();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const leg of legs) {
+          // Vzlet, ktorý readsb označil ako nový úsek, sa napojí len na let, ktorý sa s ním naozaj
+          // prekrýva (nie na predošlý let do 30 min — to by zlialo dva lety po krátkom obrate).
+          const takeoff = points[leg.start].newLeg === true;
+          let legInserted = 0;
+          for (let i = leg.start; i <= leg.end; i += 1) {
+            const f = points[i];
+            const r = insertFix.run(
+              icao24, f.t, Math.round(f.lat * SCALE_DEG), Math.round(f.lon * SCALE_DEG),
+              f.alt == null ? null : Math.round(f.alt),
+              f.gs == null ? null : Math.round(f.gs * SCALE_TENTH),
+              f.trk == null ? null : Math.round(f.trk * SCALE_TENTH),
+              f.vr == null ? null : Math.round(f.vr * SCALE_TENTH),
+              f.squawk ?? null, f.gnd ? 1 : 0, src,
+              f.geoAlt == null ? null : Math.round(f.geoAlt),
+              f.posSrc ?? null, f.spi ? 1 : 0, f.x ?? null,
+            );
+            if (r.changes) legInserted += 1;
+          }
+          if (!legInserted) continue;
+          result.inserted += legInserted;
+          const match = overlapLegs.all(icao24, leg.firstT - LEG_GAP_S, leg.lastT + LEG_GAP_S)
+            .find((e) => !createdIds.has(e.id)
+              && (!takeoff || (e.last_t >= leg.firstT && e.first_t <= leg.lastT))
+              && (e.callsign === leg.callsign || e.callsign === '' || leg.callsign === ''));
+          const squawks = leg.squawks.join(',');
+          if (match) {
+            const oldAlt = match.max_alt !== null && match.max_alt > -1e8 ? match.max_alt : null;
+            const oldGs = match.max_gs !== null && match.max_gs >= 0 ? match.max_gs : null;
+            const maxOf = (a, b) => (a === null ? b : (b === null ? a : Math.max(a, b)));
+            const mergedSquawks = [...new Set([...(match.squawks || '').split(','), ...leg.squawks].filter(Boolean))].join(',');
+            setLeg.run(
+              Math.min(match.first_t, leg.firstT), Math.max(match.last_t, leg.lastT), match.fixes + legInserted,
+              maxOf(oldAlt, leg.maxAlt), maxOf(oldGs, leg.maxGs), mergedSquawks,
+              match.callsign || leg.callsign,
+              match.cat === null || match.cat <= 1 ? (leg.cat ?? match.cat) : match.cat,
+              match.reg ?? reg, match.ac_type ?? acType, match.ac_desc ?? acDesc,
+              match.id,
+            );
+            result.legsExtended += 1;
+          } else {
+            const created = insertLegCounted.run(icao24, leg.callsign, leg.firstT, leg.lastT, legInserted, leg.maxAlt, leg.maxGs, squawks, src,
+              leg.cat, reg, acType, acDesc);
+            createdIds.add(Number(created.lastInsertRowid));
+            result.legsInserted += 1;
+          }
+        }
+        if (result.inserted) metaAdd.run(result.inserted, 'fixes_count');
+        if (result.legsInserted) metaAdd.run(result.legsInserted, 'legs_count');
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+      return result;
+    },
+
+    /**
+     * Lety jedného stroja, najnovšie prvé, s prvou a poslednou polohou (na odvodenie letísk).
+     * @param {string} icao24
+     * @param {{beforeS?: number, limit?: number}} [options] stránkovanie do minulosti: `beforeS` = lastT posledného
+     */
+    flightsOf(icao24, { beforeS = Number.MAX_SAFE_INTEGER, limit = 50 } = {}) {
+      const hex = String(icao24 || '').trim().toLowerCase();
+      if (!/^[0-9a-f]{6}$/.test(hex)) return [];
+      const cap = Math.max(1, Math.min(SEARCH_LIMIT_MAX, Math.floor(limit) || 50));
+      const end = (t) => {
+        const r = fixAt.get(hex, t);
+        return r ? { t: r.t, lat: r.lat / SCALE_DEG, lon: r.lon / SCALE_DEG, altM: r.alt, gnd: r.gnd === 1 } : null;
+      };
+      return db.prepare('SELECT * FROM legs WHERE icao24 = ? AND last_t < ? ORDER BY last_t DESC LIMIT ?')
+        .all(hex, Math.floor(beforeS), cap)
+        .map((row) => ({ ...legToJson(row), first: end(row.first_t), last: end(row.last_t) }));
     },
 
     /**

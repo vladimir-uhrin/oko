@@ -10,6 +10,8 @@ import { Worker } from 'node:worker_threads';
 export const HISTORY_QUERY_TIMEOUT_MS = 30_000;
 /** Najviac toľko snímkov čaká na zápis; ďalšie sa zahodia (história je best effort, príde ďalší). */
 export const HISTORY_RECORD_QUEUE_MAX = 3;
+/** Import celej dennej stopy môže za veľkým zápisom snímku čakať dlhšie než bežný dopyt. */
+export const HISTORY_IMPORT_TIMEOUT_MS = 120_000;
 
 /**
  * @param {string} dbPath cesta k SQLite alebo ':memory:'
@@ -81,10 +83,13 @@ export function openFlightHistoryWorker(dbPath, options = {}, {
     ready,
     recordOpenSkyBody: (body, src) => record('recordOpenSkyBody', body, src),
     recordAdsbLolBody: (body, src) => record('recordAdsbLolBody', body, src),
+    /** Celá stopa jedného stroja (spätný import) — nečaká v rade so snímkami, import ide po jednom. */
+    importFlight: (flight, src) => call('importFlight', [flight, src], HISTORY_IMPORT_TIMEOUT_MS),
     status: () => call('status', []),
     search: (query, opts) => call('search', [query, opts]),
     track: (icao24, opts) => call('track', [icao24, opts]),
     leg: (id) => call('leg', [id]),
+    flightsOf: (icao24, opts) => call('flightsOf', [icao24, opts]),
     get closed() { return closed; },
     close() {
       closed = true;

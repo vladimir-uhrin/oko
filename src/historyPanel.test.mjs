@@ -117,3 +117,58 @@ test('panel: vyhľadanie naplní zoznam, klik na úsek načíta trasu a spustí 
   assert.equal(installHistoryPanel({ viewer: {}, doc: { getElementById: () => null }, t }), null, 'bez markupu null');
   panel.destroy();
 });
+
+test('panel: rad štátnych strojov — lety aj keď stroj nelieta, riadok s dátumom a trasou; showLeg otvorí let z pásu nad kartou', async () => {
+  const doc = fakeDoc();
+  const fixes = [{ t: T0, lat: 48, lon: 17, alt: 0, gs: 5, trk: 90, vr: 0, squawk: null, gnd: true }, { t: T0 + 600, lat: 48.5, lon: 18, alt: 9000, gs: 220, trk: 90, vr: 0, squawk: null, gnd: false }];
+  const flights = [
+    { id: 11, icao24: '505abc', callsign: 'SSG1', firstT: T0, lastT: T0 + 6780, durationS: 6780, fixes: 400, squawks: [], origin: { iata: 'BTS' }, destination: { iata: 'BRU' }, src: 'adsb.lol/archive' },
+  ];
+  const tracks = [];
+  const api = {
+    search: async () => [],
+    track: async (hex, range) => { tracks.push([hex, range]); return fixes; },
+    status: async () => ({ fixes: 1, legs: 1, oldestT: T0 }),
+    stateList: async () => ({ aircraft: [{ hex: '505abc', reg: 'OM-TST', typeCode: 'A319' }] }),
+    stateFlights: async (hex) => (hex === '505abc' ? flights : []),
+  };
+  const replay = {
+    loaded: null,
+    load(fx) { this.loaded = fx.length >= 2 ? fx : null; return !!this.loaded; },
+    frame() {}, pause() {}, toggle() {}, setSpeed() {}, setFollow() {}, seekFraction() {},
+    onChange() { return () => {}; },
+    getState() { return { loaded: !!this.loaded, playing: false, fraction: 0, speed: 10, follow: false, sample: null }; },
+    destroy() {},
+  };
+  const collapsed = [];
+  const panel = installHistoryPanel({ viewer: {}, doc, t, api, replayFactory: () => replay, setCollapsed: (c) => collapsed.push(c) });
+  await new Promise((r) => setTimeout(r, 0));
+  const row = doc.root.body.children.find((c) => c.className === 'history-state-row');
+  assert.equal(row.hidden, false, 'rad sa ukáže, keď zoznam nie je prázdny');
+  const btn = row.children.find((c) => c.className === 'scene-btn history-state-btn');
+  assert.equal(btn.textContent, 'OM-TST · A319');
+  btn.listeners.click[0]();
+  await new Promise((r) => setTimeout(r, 0));
+  const list = doc.root.body.children.find((c) => c.className === 'history-list');
+  const legBtn = list.children[0].children[0];
+  assert.equal(legBtn.children[0].textContent, 'BTS → BRU', 'titulok = odvodená trasa');
+  assert.match(legBtn.children[1].textContent, /^(\d{1,2}\. \d{1,2}\. \d{4}|\d{4}-\d{2}-\d{2}) · /, 'podtitul začína dátumom (lety cez roky; SK aj EN tvar)');
+  const status = doc.root.body.children.find((c) => c.className === 'history-status');
+  assert.match(status.textContent, /history\.state-results .*OM-TST/);
+  // Z pásu nad kartou: konkrétny let rovno do detailu a prehrávača.
+  panel.showLeg(flights[0]);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(panel._getStateForTest().detailOpen, true);
+  assert.deepEqual(tracks[0], ['505abc', { fromS: T0 - 60, toS: T0 + 6780 + 60 }]);
+  assert.ok(collapsed.includes(false), 'panel sa rozbalí');
+  panel.destroy();
+});
+
+test('stav archívu: dnešný začiatok ako čas UTC, starší dátumom (archív drží roky — „od 14:07 UTC" pri dátach od 2023 klamal)', async () => {
+  const { archiveSinceLabel } = await import('./historyPanel.js');
+  const now = Date.UTC(2026, 8, 30, 18, 0) / 1000;
+  assert.equal(archiveSinceLabel(now - 3600, now, 'sk'), '17:00 UTC');
+  assert.equal(archiveSinceLabel(Date.UTC(2023, 1, 20, 0, 5) / 1000, now, 'sk'), '20. 2. 2023');
+  assert.equal(archiveSinceLabel(Date.UTC(2023, 1, 20, 0, 5) / 1000, now, 'en'), '2023-02-20');
+  assert.equal(archiveSinceLabel(null, now), '--:--');
+});

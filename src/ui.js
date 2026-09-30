@@ -50,6 +50,7 @@ import {
 } from './celestialRing.js';
 import { destroyTrackedReadout, initTrackedReadout } from './data/trackedReadout.js';
 import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
+import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFlightsStrip.js';
 import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
 import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
@@ -3121,6 +3122,27 @@ export class StyleManager {
     // Fotka sledovaného lietadla pod kartou (Planespotters Photo API, len
     // klientsky — podmienky zdroja, viď trackedPhoto.js).
     installTrackedPhoto(viewer, { container: document.body });
+    // Štátne lietadlá SR (2026-09-30, stateFlightsStrip.js): nad kartou sledovaného štátneho stroja
+    // odznak a prepínač PREDCHÁDZAJÚCE LETY; let sa otvorí a prehrá v paneli História letov.
+    const revealHistoryPanel = () => {
+      // Na úzkej obrazovke žije História letov v hárku DÁTA — otvor ho rovno s ňou.
+      const shell = window.__okoMobileShell;
+      if (shell?.isMobile?.()) shell.open?.('data', { expand: 'history-panel' });
+    };
+    installStateFlightsStrip(viewer, {
+      container: document.body,
+      onOpenLeg: (flight) => {
+        // Prehrávanie preberá kameru: živé sledovanie končí, inak by karta zakryla pohľad na trasu.
+        this._dataManager?.layers?.get('flights')?.module?.stopTracking?.({ origin: 'user' });
+        this._dataManager?.layers?.get('military')?.module?.stopTracking?.({ origin: 'user' });
+        revealHistoryPanel();
+        this._historyPanel?.showLeg(flight);
+      },
+      onOpenAll: (hex) => {
+        revealHistoryPanel();
+        this._historyPanel?.showStateAircraft(hex);
+      },
+    });
     // Bohatá karta letiska po kliknutí (frekvencie, dráhy, METAR, živá
     // premávka z vrstvy letov, odkazy) — viď airportCard.js.
     installAirportCard(viewer, {
@@ -11590,6 +11612,7 @@ export class StyleManager {
     destroyVolcanoCard();
     destroyNaturalEventCard();
     destroyTrackedPhoto();
+    destroyStateFlightsStrip();
     destroyTrackedReadout();
     destroyDetection();
     destroyWorldOverlay();

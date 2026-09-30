@@ -34,6 +34,7 @@ import { authPlugin } from './src/auth/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
+import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
   AISHUB_USER_AGENT,
@@ -5673,6 +5674,7 @@ function flightHistoryProxy() {
   // v logu dve otvorenia na každý reštart).
   let shutDown = false;
   let keeper = null;
+  let stateAircraft = null;
   let diskGuard = null;
   let diskWarnedAt = 0;
 
@@ -5758,6 +5760,21 @@ function flightHistoryProxy() {
       server.httpServer?.once('close', () => { shutDown = true; });
       server.httpServer?.once('close', () => { store?.close(); store = null; });
       const cfg = config();
+      // Štátne lietadlá SR (2026-09-30, vlastník: „aby sa ich aj spätne dalo trackovať", verejne):
+      // overený zoznam, živé polohy z adsb.lol (zapisujú sa do histórie), lety s odvodenými letiskami
+      // a spätný import stôp po dňoch (STATE_AIRCRAFT_BACKFILL=off ho vypne).
+      stateAircraft = createStateAircraftService({
+        listFile: path.join(__dirname, 'src', 'data', 'local_data', 'state-aircraft', 'sk.json'),
+        airportsFile: path.join(__dirname, 'src', 'data', 'local_data', 'airports', 'airports.geojsonl'),
+        cursorFile: path.join(path.dirname(cfg.dbPath), 'state-aircraft-backfill.json'),
+        getStore,
+      });
+      if (cfg.enabled && String(process.env.STATE_AIRCRAFT_BACKFILL || 'on').toLowerCase() !== 'off' && server.httpServer) {
+        const service = stateAircraft;
+        if (server.httpServer.listening) service.startBackfill();
+        else server.httpServer.once('listening', () => service.startBackfill());
+        server.httpServer.once('close', () => service.stopBackfill());
+      }
       if (cfg.enabled && cfg.keeper) {
         // Nepretržitý záznam (2026-09-30, používateľ: „čo najviac informácií ukladať"): keď nikto
         // nepozerá, strážca si tie isté lokálne /api pýta sám — prejde cache aj kreditovým
@@ -5766,6 +5783,7 @@ function flightHistoryProxy() {
           streams: [
             { id: 'opensky', path: '/api/opensky', intervalMs: () => keeperOpenSkyIntervalMs(_openskyRemainingCredits), blockedUntilMs: () => Math.max(_openskyCooldownUntil, _openskyConstrainedUntil) },
             { id: 'mil', path: '/api/adsblol/mil', intervalMs: () => KEEPER_MIL_INTERVAL_MS },
+            { id: 'state', path: '/api/state-aircraft/live', intervalMs: () => KEEPER_MIL_INTERVAL_MS },
           ],
           openSkyCredits: () => _openskyRemainingCredits,
           canRecord: () => Boolean(getStore()) && diskOk(),
@@ -5782,6 +5800,12 @@ function flightHistoryProxy() {
         if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/mil'));
         next();
       });
+      server.middlewares.use('/api/state-aircraft/live', (req, res, next) => {
+        if (!isKeeperRequest(req)) keeper?.noteClient('state');
+        if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/watch'));
+        next();
+      });
+      server.middlewares.use('/api/state-aircraft', (req, res) => { void stateAircraft.handle(req, res); });
       server.middlewares.use('/api/history', async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         const s = getStore();
@@ -5791,7 +5815,7 @@ function flightHistoryProxy() {
             // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
             const { path: dbFile, ...publicStatus } = await s.status();
             json(res, 200, isDirectLocalRequest(req)
-              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null }
+              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null }
               : publicStatus);
             return;
           }

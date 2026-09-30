@@ -10538,6 +10538,223 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-primary);
 }
 
+/* Štátne lietadlo pri karte (2026-09-30, stateFlightsStrip.js): odznak, prevádzkovateľ, značka
+   a prepínač PREDCHÁDZAJÚCE LETY. Sadá pod kartu (a pod fotku) — nad kartou ho na úzkej
+   obrazovke zakryla horná lišta; zlatá linka ho oddeľuje ako ďalší riadok karty. */
+.state-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 59;
+  box-sizing: border-box;
+  max-width: min(560px, calc(100vw - 8px));
+  padding: 8px 10px 9px;
+  background: rgba(6, 12, 18, 0.9);
+  border-top: 1px solid rgba(232, 196, 106, 0.6);
+  border-radius: 0 0 5px 5px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  /* Výšku obmedzuje stateFlightsStrip.js (nad spodným dokom) — skracuje sa zoznam, hlavička a päta ostávajú. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.state-strip-head,
+.state-strip-foot,
+.state-strip-status {
+  flex: 0 0 auto;
+}
+.state-strip[hidden],
+.state-strip-list[hidden],
+.state-strip-foot[hidden],
+.state-strip-status[hidden],
+.state-strip-more[hidden] {
+  display: none;
+}
+.state-strip.is-above {
+  border-top: 0;
+  border-bottom: 1px solid rgba(232, 196, 106, 0.6);
+  border-radius: 5px 5px 0 0;
+}
+.state-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.state-strip-icon {
+  flex: 0 0 auto;
+  color: #e8c46a;
+  font-size: 18px;
+}
+.state-strip-title {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.state-strip-badge {
+  color: #e8c46a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.state-strip-meta {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.state-strip-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 220, 255, 0.45);
+  border-radius: 6px;
+  background: rgba(2, 12, 18, 0.9);
+  color: #dceeff;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  cursor: var(--cursor-pointer);
+}
+.state-strip-toggle .material-symbols-outlined {
+  color: #00dcff;
+  font-size: 16px;
+}
+.state-strip-switch {
+  position: relative;
+  width: 22px;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(220, 238, 255, 0.2);
+}
+.state-strip-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dceeff;
+  transition: left 120ms ease;
+}
+.state-strip-toggle:hover,
+.state-strip-toggle:focus-visible {
+  border-color: #00dcff;
+  color: #fff;
+  outline: none;
+}
+.state-strip-toggle[aria-pressed="true"] {
+  border-color: #00dcff;
+  background: rgba(0, 72, 92, 0.92);
+  color: #fff;
+}
+.state-strip-toggle[aria-pressed="true"] .state-strip-switch { background: #00dcff; }
+.state-strip-toggle[aria-pressed="true"] .state-strip-switch::after { left: 12px; background: #031018; }
+.state-strip-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(40vh, 300px);
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.state-strip-flight-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.state-strip-flight-btn:hover,
+.state-strip-flight-btn:focus-visible {
+  background: rgba(0, 220, 255, 0.1);
+  outline: none;
+}
+.state-strip-route {
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.state-strip-sub {
+  color: var(--text-secondary);
+  font-size: 9.5px;
+}
+.state-strip-alert {
+  color: #ff5a5a;
+  font-size: 9px;
+  font-weight: 700;
+}
+.state-strip-status {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.state-strip-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.state-strip-more,
+.state-strip-all {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 220, 255, 0.35);
+  border-radius: 5px;
+  background: transparent;
+  color: #dceeff;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  cursor: var(--cursor-pointer);
+}
+.state-strip-note {
+  flex: 1 1 100%;
+  color: var(--text-secondary);
+  font-size: 8.5px;
+  opacity: 0.8;
+}
+body.cockpit-mode .state-strip,
+body.ui-clean-view .state-strip,
+body.recording-mode .state-strip {
+  display: none !important;
+}
+
+/* História letov: rad štátnych strojov (2026-09-30) — lety aj keď práve nelietajú. */
+.history-state-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+.history-state-row[hidden] {
+  display: none;
+}
+.history-state-label {
+  color: #e8c46a;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 /* Toast s akciou (2026-09-03): núdzový squawk sa dá kliknúť a skočiť na
    stroj. Kurzor a jemný okraj sú jediný náznak, že sa dá kliknúť — bežné
    stavové hlásenia ostávajú nezmenené. */
