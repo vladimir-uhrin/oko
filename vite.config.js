@@ -33,6 +33,7 @@ import { startupProfilePlugin } from './scripts/lib/startupProfile.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
+import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
   AISHUB_USER_AGENT,
@@ -189,6 +190,13 @@ const OPENSKY_CACHE_MS = 9000;
 let _openskyTtlMs = OPENSKY_CACHE_MS;
 /** @type {number} Epoch-ms before which no upstream fetch is attempted. */
 let _openskyCooldownUntil = 0;
+/**
+ * Posledný známy zostatok denných kreditov OpenSky (X-Rate-Limit-Remaining;
+ * 0 po 429). Číta ho strážca histórie letov (flightHistoryKeeper.js), aby
+ * nebral kredity živej mape návštevníkov. null = zatiaľ neznámy.
+ * @type {number|null}
+ */
+let _openskyRemainingCredits = null;
 /**
  * Pripnutý regionálny režim po 429 (flap damper, 2026-09-02). Bez neho na
  * vyčerpaných kreditoch systém osciloval: globálny snapshot (11k+ strojov) →
@@ -4408,8 +4416,10 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  * Záznam: obal nad `res.end` pre /api/opensky a /api/adsblol/mil — telo,
  * ktoré proxy už posiela klientovi, sa zapíše do SQLite
  * (.gev-cache/flight-history.sqlite, flightHistoryStore.js). Žiadny nový
- * upstream dopyt, žiadny nový zdroj; ten istý snímok z cache sa nezapíše
- * dvakrát (kľúč time+počet). Musí byť zaregistrovaný PRED openSkyProxy a
+ * zdroj; ten istý snímok z cache sa nezapíše dvakrát (kľúč time+počet).
+ * Keď nikto nepozerá, strážca (flightHistoryKeeper.js, 2026-09-30) si tie
+ * isté dve lokálne adresy pýta sám — v rámci denných kreditov OpenSky
+ * s rezervou pre živú mapu — takže história nemá diery. Musí byť zaregistrovaný PRED openSkyProxy a
  * adsbLolProxy — connect volá middleware v poradí registrácie.
  *
  * Čítanie:
@@ -4417,7 +4427,8 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  *   GET /api/history/search?q=<callsign prefix|hex>&hours=24&limit=50
  *   GET /api/history/track?icao24=<hex>&from=<epoch s>&to=<epoch s>
  *   GET /api/history/leg?id=<n>
- * Retencia FLIGHT_HISTORY_RETENTION_DAYS (default 7). FLIGHT_HISTORY=off vypne.
+ * Retencia FLIGHT_HISTORY_RETENTION_DAYS (default 7). FLIGHT_HISTORY=off vypne,
+ * FLIGHT_HISTORY_KEEPER=off vypne len strážcu.
  */
 // ---------------------------------------------------------------------------
 // Gas prices proxy — ACER TERMINAL (daily, public CSV) + IMF via FRED (monthly)
@@ -5640,20 +5651,49 @@ function flightHistoryProxy() {
   //   FLIGHT_HISTORY_RETENTION_DAYS=30   (default 7)
   //   FLIGHT_HISTORY_RAW_HOURS=720       plný záznam bez riedenia (default 24;
   //                                      ≥ retencia = riedenie vypnuté)
+  //   FLIGHT_HISTORY_KEEPER=off          vypne strážcu (záznam aj bez návštevníkov)
+  //   FLIGHT_HISTORY_MIN_FREE_GB=25      pod týmto voľným miestom sa nezapisuje
   const config = () => {
     const days = Number(process.env.FLIGHT_HISTORY_RETENTION_DAYS);
     const raw = Number(process.env.FLIGHT_HISTORY_RAW_HOURS);
+    const minFreeGb = Number(process.env.FLIGHT_HISTORY_MIN_FREE_GB);
     return {
       enabled: String(process.env.FLIGHT_HISTORY || 'on').toLowerCase() !== 'off',
+      keeper: String(process.env.FLIGHT_HISTORY_KEEPER || 'on').toLowerCase() !== 'off',
       dbPath: String(process.env.FLIGHT_HISTORY_DB || '').trim() || path.join(process.cwd(), '.gev-cache', 'flight-history.sqlite'),
       retentionDays: days > 0 ? days : 7,
       rawHours: raw > 0 ? raw : 24,
+      minFreeBytes: (minFreeGb > 0 ? minFreeGb : 25) * 1024 ** 3,
     };
   };
   let store = null;
   let enabled = true;
+  // Server tejto inštancie pluginu sa zavrel (reštart Vite): oneskorený zápis z ešte bežiacej
+  // odpovede by inak databázu otvoril znova a to vlákno by už nikto nezavrel (2026-09-30:
+  // v logu dve otvorenia na každý reštart).
+  let shutDown = false;
+  let keeper = null;
+  let diskGuard = null;
+  let diskWarnedAt = 0;
+
+  /** Poistka voľného miesta (flightHistoryKeeper.js): pod hranicou sa nezapisuje. */
+  function diskOk() {
+    const cfg = config();
+    if (!diskGuard) diskGuard = createDiskGuard({ dir: path.dirname(cfg.dbPath), minFreeBytes: cfg.minFreeBytes });
+    const ok = diskGuard.ok();
+    if (!ok && Date.now() - diskWarnedAt > 60 * 60_000) {
+      diskWarnedAt = Date.now();
+      const free = diskGuard.status().freeBytes;
+      console.warn(`[flight-history] málo voľného miesta (${Math.round((free ?? 0) / 1024 ** 3)} GB) — história sa nezapisuje`);
+    }
+    return ok;
+  }
+
+  /** Vlastný dopyt strážcu histórie (nie návštevník) — len priamo z tohto počítača. */
+  const isKeeperRequest = (req) => req.headers?.[KEEPER_HEADER] === '1' && isDirectLocalRequest(req);
 
   function getStore() {
+    if (shutDown) return null;
     const cfg = config();
     enabled = cfg.enabled;
     if (store?.closed) store = null; // vlákno spadlo — ďalší dopyt ho otvorí znova
@@ -5693,7 +5733,7 @@ function flightHistoryProxy() {
         setImmediate(() => {
           try {
             const s = getStore();
-            if (s) {
+            if (s && diskOk()) {
               Promise.resolve(record(s, body))
                 .catch((error) => console.warn('[flight-history] record failed:', error?.message || error));
             }
@@ -5715,12 +5755,30 @@ function flightHistoryProxy() {
     name: 'flight-history',
     configureServer(server) {
       // Reštart Vite (zmena konfigurácie) vytvorí nový plugin — staré vlákno so SQLite sa musí zavrieť.
+      server.httpServer?.once('close', () => { shutDown = true; });
       server.httpServer?.once('close', () => { store?.close(); store = null; });
+      const cfg = config();
+      if (cfg.enabled && cfg.keeper) {
+        // Nepretržitý záznam (2026-09-30, používateľ: „čo najviac informácií ukladať"): keď nikto
+        // nepozerá, strážca si tie isté lokálne /api pýta sám — prejde cache aj kreditovým
+        // governorom a zapíše sa týmto istým obalom. Pod rezervou kreditov necháva OpenSky návštevníkom.
+        keeper = createHistoryKeeper({
+          streams: [
+            { id: 'opensky', path: '/api/opensky', intervalMs: () => keeperOpenSkyIntervalMs(_openskyRemainingCredits), blockedUntilMs: () => Math.max(_openskyCooldownUntil, _openskyConstrainedUntil) },
+            { id: 'mil', path: '/api/adsblol/mil', intervalMs: () => KEEPER_MIL_INTERVAL_MS },
+          ],
+          openSkyCredits: () => _openskyRemainingCredits,
+          canRecord: () => Boolean(getStore()) && diskOk(),
+        });
+        keeper.attach(server.httpServer);
+      }
       server.middlewares.use('/api/opensky', (req, res, next) => {
+        if (!isKeeperRequest(req)) keeper?.noteClient('opensky');
         if (enabled) tapResponse(res, (s, body) => s.recordOpenSkyBody(body, res.getHeader('X-Flight-Source') ? 'adsb.lol/regional' : 'opensky'));
         next();
       });
       server.middlewares.use('/api/adsblol/mil', (req, res, next) => {
+        if (!isKeeperRequest(req)) keeper?.noteClient('mil');
         if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/mil'));
         next();
       });
@@ -5732,7 +5790,9 @@ function flightHistoryProxy() {
           if (url.pathname === '/status') {
             // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
             const { path: dbFile, ...publicStatus } = await s.status();
-            json(res, 200, isDirectLocalRequest(req) ? { ...publicStatus, path: dbFile } : publicStatus);
+            json(res, 200, isDirectLocalRequest(req)
+              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null }
+              : publicStatus);
             return;
           }
           if (url.pathname === '/search') {
@@ -5764,6 +5824,9 @@ function flightHistoryProxy() {
     },
   };
 }
+
+/** Plugin histórie letov aj pre test so zdvojeným serverom (src/data/flightHistoryProxy.test.mjs). */
+export { flightHistoryProxy };
 
 function openSkyProxy() {
   return {
@@ -5923,6 +5986,7 @@ function openSkyProxy() {
             // Flap damper: každý 429 pripne vrstvu na regionálnu náhradu na
             // celé okno — stabilná 250nm flotila bez evikčného thrashu.
             _openskyConstrainedUntil = now + OPENSKY_CONSTRAINED_REGIME_MS;
+            _openskyRemainingCredits = 0;
             // Serve the last-good body instead of the 429 when we have one —
             // the layer keeps rendering (STALE-cued) instead of dying.
             if (_openskyCacheBody && _openskyCacheStatus === 200) {
@@ -6009,6 +6073,7 @@ function openSkyProxy() {
             // exhausting the quota mid-day. Success also clears any cooldown.
             const remaining = Number(upstream.headers.get('x-rate-limit-remaining'));
             _openskyTtlMs = openskyAdaptiveTtlMs(remaining);
+            if (upstream.headers.get('x-rate-limit-remaining') && Number.isFinite(remaining)) _openskyRemainingCredits = remaining;
             _openskyCooldownUntil = 0;
           }
 

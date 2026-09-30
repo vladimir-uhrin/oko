@@ -10,6 +10,14 @@ import { parentPort, workerData } from 'node:worker_threads';
 import { openFlightHistory } from './flightHistoryStore.js';
 
 const METHODS = new Set(['recordOpenSkyBody', 'recordAdsbLolBody', 'status', 'search', 'track', 'leg']);
+const WRITE_METHODS = new Set(['recordOpenSkyBody', 'recordAdsbLolBody']);
+/**
+ * Zápis dlhší než tretina odstupu strážcu (90 s) = databáza prerástla cache —
+ * varovanie do logu služby (2026-09-30: archív má rásť roky, „miesta mám dosť").
+ */
+const SLOW_WRITE_MS = 30_000;
+const writes = { count: 0, lastMs: null, maxMs: 0, maxAt: null, slow: 0 };
+let lastSlowWarnAt = 0;
 
 let store = null;
 try {
@@ -26,7 +34,23 @@ parentPort.on('message', (message) => {
     return;
   }
   try {
-    const result = store[method](...(Array.isArray(args) ? args : []));
+    const startedAt = performance.now();
+    let result = store[method](...(Array.isArray(args) ? args : []));
+    if (WRITE_METHODS.has(method)) {
+      const ms = Math.round(performance.now() - startedAt);
+      writes.count += 1;
+      writes.lastMs = ms;
+      if (ms > writes.maxMs) { writes.maxMs = ms; writes.maxAt = Date.now(); }
+      if (ms > SLOW_WRITE_MS) {
+        writes.slow += 1;
+        if (Date.now() - lastSlowWarnAt > 10 * 60_000) {
+          lastSlowWarnAt = Date.now();
+          console.warn(`[flight-history] pomalý zápis snímku: ${ms} ms (${result} nových polôh) — databáza prerástla cache SQLite`);
+        }
+      }
+    } else if (method === 'status') {
+      result = { ...result, writes: { ...writes } };
+    }
     parentPort.postMessage({ id, ok: true, result });
   } catch (error) {
     parentPort.postMessage({ id, ok: false, error: String(error?.message || error) });

@@ -73,6 +73,23 @@ test('preťaženie: čakajúce zápisy sú ohraničené, prebytočné snímky sa
   }
 });
 
+test('stav vlákna meria zápisy: počet, posledné a najdlhšie trvanie (rast archívu je vidieť skôr, než vzniknú diery)', async () => {
+  const history = openFlightHistoryWorker(':memory:');
+  try {
+    await history.ready;
+    assert.deepEqual((await history.status()).writes, { count: 0, lastMs: null, maxMs: 0, maxAt: null, slow: 0 });
+    await history.recordOpenSkyBody(openSkyBody(T0, [row('4b1805', 'SWR11H', T0, 17.2, 48.1, 10000)]), 'opensky');
+    await history.recordAdsbLolBody(JSON.stringify({ now: T0 * 1000, ac: [{ hex: 'ae0940', lat: 50, lon: 10, alt_baro: 30000 }] }), 'adsb.lol/mil');
+    const { writes } = await history.status();
+    assert.equal(writes.count, 2);
+    assert.ok(Number.isInteger(writes.lastMs) && writes.lastMs >= 0);
+    assert.ok(writes.maxMs >= writes.lastMs);
+    assert.equal(writes.slow, 0);
+  } finally {
+    await history.close();
+  }
+});
+
 test('vite.config.js: história letov ide cez vlákno, pri reštarte servera sa vlákno ukončí', () => {
   const vite = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
   assert.match(vite, /import \{ openFlightHistoryWorker \} from '\.\/src\/data\/flightHistoryClient\.js';/);
