@@ -109,7 +109,7 @@ test('rozdelenie na lety: nový vzlet, medzera, zmena volacieho znaku', () => {
 test('import: dva lety, identita stroja, počty sedia s COUNT(*), opakovaný import nič nepridá', () => {
   const store = openFlightHistory(':memory:', { now: () => (DAY0 + 86_400) * 1000 });
   const r1 = store.importFlight(traceToFlight(govDay()), TRACE_SRC);
-  assert.deepEqual(r1, { inserted: 7, legsInserted: 2, legsExtended: 0 });
+  assert.deepEqual(r1, { inserted: 7, legsInserted: 2, legsExtended: 0, legsMerged: 0 });
   const flights = store.flightsOf('505abc');
   assert.equal(flights.length, 2, 'dva lety — obrat 20 min ich nezlial');
   assert.equal(flights[0].firstT, DAY0 + 8400, 'najnovší prvý');
@@ -123,7 +123,7 @@ test('import: dva lety, identita stroja, počty sedia s COUNT(*), opakovaný imp
   assert.deepEqual(store.status().fixes, 7);
   assert.deepEqual(store.recount(), { fixes: 7, legs: 2 }, 'meta počítadlá = COUNT(*)');
   const again = store.importFlight(traceToFlight(govDay()), TRACE_SRC);
-  assert.deepEqual(again, { inserted: 0, legsInserted: 0, legsExtended: 0 }, 'opakovaný import nič nepridá');
+  assert.deepEqual(again, { inserted: 0, legsInserted: 0, legsExtended: 0, legsMerged: 0 }, 'opakovaný import nič nepridá');
   assert.deepEqual(store.recount(), { fixes: 7, legs: 2 });
   assert.equal(store.flightsOf('505abc', { beforeS: DAY0 + 8000 }).length, 1, 'stránkovanie do minulosti');
   store.close();

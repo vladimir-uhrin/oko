@@ -13,6 +13,7 @@
 // Majiteľ/prevádzkovateľ (`ownOp`) sa neukladá — etická čiara: stroje, nie ľudia.
 
 import {
+  ARCHIVE_SRC,
   LEG_GAP_S,
   openSkyCategoryFromReadsb,
   posSrcFromReadsbType,
@@ -20,7 +21,7 @@ import {
 } from './flightHistoryStore.js';
 // Delenie na lety (splitLegs) a zápis (importFlight) sú v flightHistoryStore.js.
 
-export const TRACE_SRC = 'adsb.lol/archive';
+export const TRACE_SRC = ARCHIVE_SRC;
 export const GLOBE_HISTORY_BASE = 'https://adsb.lol/globe_history';
 const FT_TO_M = 0.3048;
 const KT_TO_MPS = 0.514444;

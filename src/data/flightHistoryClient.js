@@ -85,6 +85,8 @@ export function openFlightHistoryWorker(dbPath, options = {}, {
     recordAdsbLolBody: (body, src) => record('recordAdsbLolBody', body, src),
     /** Celá stopa jedného stroja (spätný import) — nečaká v rade so snímkami, import ide po jednom. */
     importFlight: (flight, src) => call('importFlight', [flight, src], HISTORY_IMPORT_TIMEOUT_MS),
+    /** Spoj polovice letov stroja rozdelené dierou v pokrytí (oprava už uložených úsekov). */
+    mergeAirGaps: (icao24, opts) => call('mergeAirGaps', [icao24, opts], HISTORY_IMPORT_TIMEOUT_MS),
     status: () => call('status', []),
     search: (query, opts) => call('search', [query, opts]),
     track: (icao24, opts) => call('track', [icao24, opts]),

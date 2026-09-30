@@ -124,3 +124,32 @@ test('tripwire: značka používa siluetu a orientáciu flotily; panel je zapoje
   assert.match(css, /#left-panel-stack > #history-panel \{ order: 42; \}/);
   assert.match(css, /body\.cockpit-mode #left-panel-stack > #history-panel \{ display: none !important; \}/);
 });
+
+test('prehrávač cez dieru v pokrytí (oceán): trasa sa rozdelí na meranie (plná) a odhad (čiarkovaná), značka ide po veľkej kružnici, počty polôh len skutočné', async () => {
+  const { splitTrackRuns } = await import('./flightReplay.js');
+  const T = 1_790_000_000;
+  const ocean = [
+    { t: T, lat: 54.0, lon: -15.0, alt: 11_000, gs: 240, trk: 270, vr: 0, squawk: null, gnd: false },
+    { t: T + 4 * 3600, lat: 46.0, lon: -54.0, alt: 11_300, gs: 235, trk: 250, vr: 0, squawk: null, gnd: false },
+    { t: T + 4 * 3600 + 60, lat: 45.9, lon: -54.9, alt: 11_300, gs: 235, trk: 250, vr: 0, squawk: null, gnd: false },
+  ];
+  const viewer = fakeViewer();
+  let received = null;
+  const replay = createFlightReplay(viewer, {
+    trackFactory: (fx) => { received = fx; return { kind: 'track' }; },
+    requestFrame: () => 1,
+    cancelFrame: () => {},
+    now: () => 0,
+  });
+  assert.equal(replay.load(ocean), true);
+  const st = replay.getState();
+  assert.equal(st.estimatedGaps, 1, 'jedna diera doplnená odhadom');
+  assert.equal(st.fixes, 3, 'počet polôh = merania, nie odhad');
+  const runs = splitTrackRuns(received);
+  assert.deepEqual(runs.map((r) => r.estimated), [true, false], 'odhad cez oceán, potom meranie');
+  assert.equal(runs[0].fixes[0], received[0], 'odhad začína v poslednej meranej polohe (čiara bez medzery)');
+  replay.seekFraction(0.5);
+  assert.equal(replay.getState().sample.estimated, true, 'uprostred diery je poloha odhad');
+  assert.ok(replay.getState().sample.lat > 51, 'po veľkej kružnici (na sever od priamky v stupňoch)');
+  replay.destroy();
+});

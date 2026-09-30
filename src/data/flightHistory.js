@@ -125,9 +125,74 @@ export function interpolateFix(fixes, tS) {
     vr: mix(a.vr, b.vr),
     squawk: f < 0.5 ? a.squawk : b.squawk,
     gnd: f < 0.5 ? a.gnd : b.gnd,
+    // Úsek, ktorého aspoň jeden koniec je odhad (bridgeCoverageGaps), je odhad.
+    estimated: Boolean(a.estimated || b.estimated),
     index: lo,
     frac: (tS - fixes[0].t) / Math.max(1, last.t - fixes[0].t),
   };
+}
+
+/** Diera v pokrytí za letu, ktorú prehrávanie doplní odhadom (s). */
+export const GAP_BRIDGE_MIN_S = 10 * 60;
+/** Krok odhadnutých bodov po veľkej kružnici (km). */
+export const GAP_BRIDGE_STEP_KM = 50;
+
+/** Bod na veľkej kružnici medzi a a b v zlomku f (sférická interpolácia). Pure. */
+export function greatCirclePoint(a, b, f) {
+  const r = Math.PI / 180;
+  const [φ1, λ1, φ2, λ2] = [a.lat * r, a.lon * r, b.lat * r, b.lon * r];
+  const d = 2 * Math.asin(Math.min(1, Math.sqrt(Math.sin((φ2 - φ1) / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2)));
+  if (d < 1e-9) return { lat: a.lat, lon: a.lon };
+  const A = Math.sin((1 - f) * d) / Math.sin(d);
+  const B = Math.sin(f * d) / Math.sin(d);
+  const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+  const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+  const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+  return { lat: Math.atan2(z, Math.sqrt(x * x + y * y)) / r, lon: Math.atan2(y, x) / r };
+}
+
+/**
+ * Doplň diery v pokrytí za letu (oceán bez prijímačov, 2026-09-30: „transatlantické lety sa
+ * nedajú dopočítať?") ODHADOM — body po veľkej kružnici každých ~50 km medzi poslednou polohou
+ * pred dierou a prvou po nej, čas a výška lineárne. Každý odhadnutý bod nesie `estimated: true`
+ * (kreslí sa čiarkovane, v UI „odhad"); skutočné polohy sa nemenia a do archívu sa nič neukladá.
+ * Skutočná trasa sa môže líšiť aj o stovky km (vetry, oceánske koridory). Pure.
+ * @returns {{fixes: object[], gaps: number}}
+ */
+export function bridgeCoverageGaps(fixes, { minGapS = GAP_BRIDGE_MIN_S, stepKm = GAP_BRIDGE_STEP_KM } = {}) {
+  if (!Array.isArray(fixes) || fixes.length < 2) return { fixes: Array.isArray(fixes) ? fixes : [], gaps: 0 };
+  const out = [fixes[0]];
+  let gaps = 0;
+  for (let i = 1; i < fixes.length; i += 1) {
+    const a = fixes[i - 1];
+    const b = fixes[i];
+    const dt = b.t - a.t;
+    if (dt >= minGapS && !a.gnd && !b.gnd) {
+      const km = greatCircleKm(a.lat, a.lon, b.lat, b.lon) || 0;
+      const n = Math.max(1, Math.floor(km / stepKm));
+      gaps += 1;
+      for (let k = 1; k < n; k += 1) {
+        const f = k / n;
+        const p = greatCirclePoint(a, b, f);
+        const next = greatCirclePoint(a, b, Math.min(1, f + 0.5 / n));
+        const lerp = (x, y) => (x === null || x === undefined || y === null || y === undefined ? (x ?? y ?? null) : x + (y - x) * f);
+        out.push({
+          t: a.t + dt * f,
+          lat: p.lat,
+          lon: p.lon,
+          alt: lerp(a.alt, b.alt),
+          gs: lerp(a.gs, b.gs),
+          trk: bearingDeg(p.lat, p.lon, next.lat, next.lon),
+          vr: null,
+          squawk: a.squawk ?? null,
+          gnd: false,
+          estimated: true,
+        });
+      }
+    }
+    out.push(b);
+  }
+  return { fixes: out, gaps };
 }
 
 /**

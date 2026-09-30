@@ -137,3 +137,32 @@ test('koniec letu a letisko: na zemi alebo nízko pri letisku áno, vo výške n
   assert.equal(airportForEnd(airports, { lat: 48.17, lon: 17.21, gnd: false, altM: AIRPORT_END_MAX_ALT_M + 1 }), null);
   assert.equal(airportForEnd(airports, null), null);
 });
+
+test('štart spätného importu opraví lety štátnych strojov rozdelené dierou v pokrytí (raz pre každý stroj)', async () => {
+  const merged = [];
+  const service = createStateAircraftService({
+    listFile: 'neexistuje.json',
+    airportsFile: 'neexistuje.geojsonl',
+    cursorFile: path.join(tmpdir(), `oko-sas-${process.pid}.json`),
+    getStore: () => ({ mergeAirGaps: async (hex) => { merged.push(hex); return hex === '505abc' ? 2 : 0; } }),
+    log: () => {},
+  });
+  // Bez zoznamu nič; so zoznamom každý stroj raz.
+  assert.equal(await service.repairAirGaps(), 0);
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-sas-r-'));
+  try {
+    const listFile = path.join(dir, 'sk.json');
+    writeFileSync(listFile, LIST([{ hex: '505abd', reg: 'OM-TSU', role: 'government', sources: ['https://example.gov.sk/b'] }]));
+    const logs = [];
+    const s2 = createStateAircraftService({
+      listFile, airportsFile: 'x', cursorFile: path.join(dir, 'c.json'),
+      getStore: () => ({ mergeAirGaps: async (hex) => { merged.push(hex); return hex === '505abc' ? 2 : 0; } }),
+      log: (m) => logs.push(m),
+    });
+    assert.equal(await s2.repairAirGaps(), 2);
+    assert.deepEqual(merged, ['505abc', '505abd']);
+    assert.ok(logs.some((m) => m.includes('spojené lety')));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

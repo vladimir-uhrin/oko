@@ -46,6 +46,48 @@ export const LEG_GAP_S = 30 * 60;
  * let rozdeliť — delí sa až pri medzere nad 2 h.
  */
 export const TRACE_LEG_GAP_S = 2 * 3600;
+/** Import stôp adsb.lol (adsblolTrace.js) zapisuje fixy aj nové úseky s týmto zdrojom. */
+export const ARCHIVE_SRC = 'adsb.lol/archive';
+/**
+ * Spájanie letu cez dieru v pokrytí (2026-09-30: lety cez Atlantik sa rozpadli na „SNN → neznáme"
+ * a „neznáme → EWR"): najdlhšia diera, ktorú ešte spojíme …
+ */
+export const AIR_GAP_MAX_S = 12 * 3600;
+/** … oba konce musia byť v cestovnej výške (nie priblíženie, nie vzlet) … */
+export const AIR_GAP_MIN_ALT_M = 6000;
+/** … okrem krátkej medzery (polnoc UTC medzi dvoma dennými stopami), kde stačí „nie na zemi". */
+export const AIR_GAP_ADJACENT_S = 120;
+const EARTH_M = 6_371_000;
+
+function greatCircleM(aLat, aLon, bLat, bLon) {
+  const r = Math.PI / 180;
+  const dLat = (bLat - aLat) * r;
+  const dLon = (bLon - aLon) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Pokračuje ten istý let cez dieru v pokrytí? `a` = posledná poloha pred dierou, `b` = prvá po nej
+ * (`{t, lat, lon, alt, gs, gnd}` — s, stupne, m, m/s). Áno, keď ani jeden koniec nie je na zemi a
+ * buď ide o krátku medzeru, alebo sú oba v cestovnej výške a vzdialenosť cez dieru zodpovedá ich
+ * rýchlosti (medzipristátie by priemernú rýchlosť cez dieru výrazne znížilo). Pure.
+ */
+export function continuesInAir(a, b) {
+  if (!a || !b) return false;
+  const gap = b.t - a.t;
+  if (!(gap > 0) || gap > AIR_GAP_MAX_S) return false;
+  if (a.gnd || b.gnd) return false;
+  const distanceM = greatCircleM(a.lat, a.lon, b.lat, b.lon);
+  // Polnoc medzi dvoma dennými stopami: stačí, že stroj letí a za tú chvíľu sa nepresunul ďalej, než vie.
+  if (gap <= AIR_GAP_ADJACENT_S) return distanceM <= 350 * gap + 1000;
+  if (!(a.alt >= AIR_GAP_MIN_ALT_M && b.alt >= AIR_GAP_MIN_ALT_M)) return false;
+  const implied = distanceM / gap;
+  const speeds = [a.gs, b.gs].filter((v) => Number.isFinite(v) && v > 50);
+  const low = speeds.length ? 0.7 * Math.min(...speeds) : 150;
+  const high = speeds.length ? 1.3 * Math.max(...speeds) + 50 : 350;
+  return implied >= low && implied <= high;
+}
 export const SEARCH_LIMIT_MAX = 200;
 export const TRACK_LIMIT_MAX = 20_000;
 /** Plný záznam (každý poll) sa drží toľkoto hodín; staršie sa preriedia. */
@@ -294,7 +336,7 @@ export function splitLegs(points, gapS = LEG_GAP_S) {
     const p = points[i];
     const split = !cur
       || p.newLeg
-      || p.t - points[i - 1].t > gapS
+      || (p.t - points[i - 1].t > gapS && !continuesInAir(points[i - 1], p))
       || (p.callsign && cur.callsign && p.callsign !== cur.callsign);
     if (split) {
       cur = { start: i, end: i, callsign: p.callsign || '', firstT: p.t, lastT: p.t, maxAlt: null, maxGs: null, squawks: [], cat: null };
@@ -396,6 +438,67 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   const insertLegCounted = db.prepare(`INSERT INTO legs (icao24, callsign, country, first_t, last_t, fixes, max_alt, max_gs, squawks, src, cat, reg, ac_type, ac_desc)
     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const fixAt = db.prepare('SELECT t, lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t = ?');
+  const fixAtFull = db.prepare('SELECT t, lat, lon, alt, gs, gnd FROM fixes WHERE icao24 = ? AND t = ?');
+  /** Poloha stroja v čase t pre continuesInAir (stupne, m, m/s), inak null. */
+  const fixPoint = (icao24, t) => {
+    const r = fixAtFull.get(icao24, t);
+    return r ? { t: r.t, lat: r.lat / SCALE_DEG, lon: r.lon / SCALE_DEG, alt: r.alt, gs: r.gs === null ? null : r.gs / SCALE_TENTH, gnd: r.gnd === 1 } : null;
+  };
+  const legsInWindow = db.prepare(`SELECT id, callsign, first_t, last_t, fixes, max_alt, max_gs, squawks, cat, reg, ac_type, ac_desc
+    FROM legs WHERE icao24 = ? AND last_t >= ? AND first_t <= ? ORDER BY first_t ASC`);
+  const deleteLeg = db.prepare('DELETE FROM legs WHERE id = ?');
+
+  /**
+   * Spoj susedné úseky stroja v okne, ktoré sú jedným letom cez dieru v pokrytí (continuesInAir) —
+   * napr. dve polovice letu cez Atlantik alebo let cez polnoc UTC z dvoch denných stôp — a úseky,
+   * ktoré sa časovo prekrývajú: ten istý stroj nemôže letieť dva lety naraz. Prekryv vzniká, keď
+   * import predĺži jeden zo živých úsekov letu cez druhý (naživo OM-BYA 10. 9.: päťminútový
+   * „let ?→?" vnútri letu MLA→BTS). Počty fixov sa sčítajú — každý fix patrí práve jednému úseku.
+   * Volá sa v otvorenej transakcii. Vracia počet zlúčených úsekov.
+   */
+  function mergeAirGapsInTx(icao24, fromS, toS) {
+    const rows = legsInWindow.all(icao24, Math.floor(fromS), Math.ceil(toS));
+    let merged = 0;
+    let prev = rows[0] ? { ...rows[0] } : null;
+    for (let i = 1; i < rows.length; i += 1) {
+      const cur = rows[i];
+      const callsignOk = prev.callsign === cur.callsign || !prev.callsign || !cur.callsign;
+      const overlaps = cur.first_t <= prev.last_t;
+      if (callsignOk && (overlaps || continuesInAir(fixPoint(icao24, prev.last_t), fixPoint(icao24, cur.first_t)))) {
+        const alt = [prev.max_alt, cur.max_alt].filter((v) => v !== null && v > -1e8);
+        const gs = [prev.max_gs, cur.max_gs].filter((v) => v !== null && v >= 0);
+        prev = {
+          ...prev,
+          last_t: Math.max(prev.last_t, cur.last_t),
+          fixes: prev.fixes + cur.fixes,
+          max_alt: alt.length ? Math.max(...alt) : null,
+          max_gs: gs.length ? Math.max(...gs) : null,
+          squawks: [...new Set([...(prev.squawks || '').split(','), ...(cur.squawks || '').split(',')].filter(Boolean))].join(','),
+          callsign: prev.callsign || cur.callsign,
+          cat: prev.cat === null || prev.cat <= 1 ? (cur.cat ?? prev.cat) : prev.cat,
+          reg: prev.reg ?? cur.reg,
+          ac_type: prev.ac_type ?? cur.ac_type,
+          ac_desc: prev.ac_desc ?? cur.ac_desc,
+        };
+        setLeg.run(prev.first_t, prev.last_t, prev.fixes, prev.max_alt, prev.max_gs, prev.squawks,
+          prev.callsign, prev.cat, prev.reg, prev.ac_type, prev.ac_desc, prev.id);
+        deleteLeg.run(cur.id);
+        merged += 1;
+      } else {
+        prev = { ...cur };
+      }
+    }
+    if (merged) metaAdd.run(-merged, 'legs_count');
+    return merged;
+  }
+
+  // Začiatok ŽIVÉHO záznamu (bez spätného importu): stav archívu inak hlásil najstarší importovaný
+  // deň (2025, neskôr 2023), hoci celosvetový záznam beží od 2026-09-08. Raz sa dopočíta z úsekov.
+  let liveSince = metaGet.get('live_since')?.value ?? null;
+  if (liveSince === null) {
+    liveSince = db.prepare('SELECT MIN(first_t) AS v FROM legs WHERE src IS NULL OR src <> ?').get(ARCHIVE_SRC)?.v ?? null;
+    if (liveSince !== null) metaSet.run('live_since', liveSince);
+  }
   const pruneFixes = db.prepare('DELETE FROM fixes WHERE t < ?');
   const pruneLegs = db.prepare('DELETE FROM legs WHERE last_t < ?');
   // Preriedenie: zo starších fixov ostanú tie, ktorých čas padne do prvej
@@ -434,10 +537,16 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
         );
         if (!r.changes) continue;
         inserted += 1;
+        if (liveSince === null || f.t < liveSince) {
+          liveSince = f.t;
+          metaSet.run('live_since', liveSince);
+        }
         const leg = lastLeg.get(f.icao24);
-        const sameLeg = leg
-          && (leg.callsign === f.callsign || leg.callsign === '' || f.callsign === '')
-          && Math.abs(f.t - leg.last_t) <= LEG_GAP_S;
+        const callsignOk = leg && (leg.callsign === f.callsign || leg.callsign === '' || f.callsign === '');
+        // Dlhšia medzera (oceán bez prijímačov) nerozdelí let, keď stroj ostal v cestovnej výške
+        // a vzdialenosť zodpovedá rýchlosti — continuesInAir.
+        const sameLeg = callsignOk && (Math.abs(f.t - leg.last_t) <= LEG_GAP_S
+          || (f.t > leg.last_t && continuesInAir(fixPoint(f.icao24, leg.last_t), f)));
         if (sameLeg) {
           let squawks = leg.squawks || '';
           if (f.squawk && !squawks.split(',').includes(f.squawk)) squawks = squawks ? `${squawks},${f.squawk}` : f.squawk;
@@ -471,6 +580,10 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
     db.exec('BEGIN');
     try {
       const a = pruneFixes.run(cutoff).changes;
+      if (liveSince !== null && liveSince < cutoff) {
+        liveSince = cutoff;
+        metaSet.run('live_since', liveSince);
+      }
       const b = pruneLegs.run(cutoff).changes;
       // rawHours ≥ retencia = riedenie vypnuté (používateľ 2026-09-07: „veľmi
       // nezosekávaj dáta" — na prázdnom SSD sa drží plný záznam).
@@ -530,11 +643,11 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
      * Zapíš celú stopu jedného stroja (adsblolTrace.traceToFlight) v jednej transakcii.
      * Lety sa rozdelia (splitLegs); let, ktorý už čiastočne zachytil živý záznam, sa predĺži —
      * nevznikne druhý. Opakovaný import tej istej stopy nič nepridá (fixy aj počty ostanú).
-     * @returns {{inserted: number, legsInserted: number, legsExtended: number}}
+     * @returns {{inserted: number, legsInserted: number, legsExtended: number, legsMerged: number}}
      */
     importFlight(flight, src = 'adsb.lol/archive') {
       const icao24 = String(flight?.icao24 || '').toLowerCase();
-      const result = { inserted: 0, legsInserted: 0, legsExtended: 0 };
+      const result = { inserted: 0, legsInserted: 0, legsExtended: 0, legsMerged: 0 };
       if (!/^[0-9a-f]{6}$/.test(icao24) || !Array.isArray(flight.points) || !flight.points.length) return result;
       const points = [...flight.points].sort((a, b) => a.t - b.t);
       const legs = splitLegs(points, TRACE_LEG_GAP_S);
@@ -593,12 +706,36 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
         }
         if (result.inserted) metaAdd.run(result.inserted, 'fixes_count');
         if (result.legsInserted) metaAdd.run(result.legsInserted, 'legs_count');
+        // Stopa jedného dňa končí o polnoci UTC a let cez oceán má dieru v pokrytí — spoj ho so
+        // susedným úsekom (z predošlého/nasledujúceho dňa alebo zo živého záznamu), ak je to jeden let.
+        result.legsMerged = result.inserted
+          ? mergeAirGapsInTx(icao24, points[0].t - AIR_GAP_MAX_S, points[points.length - 1].t + AIR_GAP_MAX_S)
+          : 0;
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
         throw error;
       }
       return result;
+    },
+
+    /**
+     * Oprava už uložených úsekov stroja: spoj polovice letov rozdelené dierou v pokrytí
+     * (continuesInAir) a prekrývajúce sa úseky. Pre štátne lietadlá pri štarte spätného importu —
+     * úseky importované pred 2026-09-30 sa takto spoja aj bez nového importu. Vracia počet zlúčených úsekov.
+     */
+    mergeAirGaps(icao24, { fromS = 0, toS = Number.MAX_SAFE_INTEGER } = {}) {
+      const hex = String(icao24 || '').trim().toLowerCase();
+      if (!/^[0-9a-f]{6}$/.test(hex)) return 0;
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const merged = mergeAirGapsInTx(hex, fromS, toS);
+        db.exec('COMMIT');
+        return merged;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
     },
 
     /**
@@ -671,6 +808,8 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
         legs: metaGet.get('legs_count')?.value ?? 0,
         oldestT: oldestFix.get()?.v ?? null,
         newestT: newestFix.get()?.v ?? null,
+        // Začiatok živého záznamu; oldestT môže byť starší kvôli spätnému importu (štátne lietadlá).
+        liveSinceT: liveSince,
         retentionDays,
         rawHours,
         thinStepS: THIN_STEP_S,

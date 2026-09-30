@@ -32,6 +32,8 @@ import { formatAltitude, formatSpeed, formatThousands, formatVerticalRateMagnitu
 import { verticalTrendGlyph } from './data/flightProgress.js';
 
 export const HISTORY_PANEL_ID = 'history-panel';
+/** Lety štátneho stroja po stránkach (server dá najviac 200 naraz). */
+export const STATE_PANEL_PAGE = 200;
 export const HISTORY_CHART_HEIGHT_PX = 120;
 
 function el(doc, tag, className, text) {
@@ -69,6 +71,20 @@ export function archiveSinceLabel(oldestT, nowS, lang = 'sk') {
 }
 
 /**
+ * Stavový riadok archívu: začiatok ŽIVÉHO záznamu (`liveSinceT`) a počet letov; keď spätný
+ * import siaha hlbšie (štátne lietadlá od 2023), dodatok „spätne doplnené od …" — samotný
+ * najstarší fix by tvrdil, že celý archív beží od 2023 (2026-09-30). Pure.
+ */
+export function archiveStatusText(st, t, nowS, lang = 'sk') {
+  const liveSince = Number.isFinite(st?.liveSinceT) ? st.liveSinceT : st?.oldestT;
+  let text = t('history.status', { since: archiveSinceLabel(liveSince, nowS, lang), legs: formatThousands(st?.legs ?? 0) });
+  if (Number.isFinite(st?.oldestT) && Number.isFinite(liveSince) && st.oldestT < liveSince - 86_400) {
+    text += t('history.status-backfill', { since: flightDateUtc(st.oldestT, lang) });
+  }
+  return text;
+}
+
+/**
  * Riadok aktuálneho času prehrávania. Pure.
  * @param {object|null} sample interpolateFix výstup
  * @param {(k: string, v?: object) => string} t
@@ -84,6 +100,8 @@ export function sampleLine(sample, t) {
   if (Number.isFinite(sample.gs)) parts.push(formatSpeed(sample.gs));
   if (Number.isFinite(sample.trk)) parts.push(`${String(Math.round(sample.trk)).padStart(3, '0')}°`);
   if (sample.squawk && ['7500', '7600', '7700'].includes(sample.squawk)) parts.push(`SQUAWK ${sample.squawk}`);
+  // Nad dierou v pokrytí (oceán) je poloha odhad po veľkej kružnici, nie meranie.
+  if (sample.estimated) parts.push(t('history.gap-estimate'));
   return parts.join(' · ');
 }
 
@@ -107,7 +125,7 @@ export function installHistoryPanel({
     status: fetchHistoryStatus,
     resolveReg: resolveRegistrationHex,
     stateList: loadStateAircraftList,
-    stateFlights: (hex) => fetchStateFlights(hex, { limit: 200 }),
+    stateFlights: (hex, opts = {}) => fetchStateFlights(hex, { limit: STATE_PANEL_PAGE, ...opts }),
   },
   replayFactory = createFlightReplay,
   onTrackLive = null,
@@ -148,6 +166,8 @@ export function installHistoryPanel({
   const stateLabel = el(doc, 'span', 'history-state-label', t('history.state-title'));
   stateRow.appendChild(stateLabel);
   let listMode = 'search';
+  /** @type {{hex: string, reg: string, more: boolean, loading: boolean}|null} */
+  let stateQuery = null;
 
   // ── detail ──────────────────────────────────────────────────────
   const detail = el(doc, 'section', 'history-detail');
@@ -240,13 +260,42 @@ export function installHistoryPanel({
       li.appendChild(btn);
       list.appendChild(li);
     }
+    // Štátny stroj má lety za roky — ďalšia stránka do minulosti (predtým len posledných 200).
+    if (listMode === 'state' && stateQuery?.more) {
+      const li = el(doc, 'li', 'history-more-row');
+      const more = el(doc, 'button', 'scene-btn history-more', t(stateQuery.loading ? 'history.searching' : 'state.more'));
+      more.type = 'button';
+      more.addEventListener('click', () => { void loadMoreState(); });
+      li.appendChild(more);
+      list.appendChild(li);
+    }
+  }
+
+  async function loadMoreState() {
+    if (!stateQuery || stateQuery.loading || !stateQuery.more || !legs.length) return;
+    const query = stateQuery;
+    query.loading = true;
+    renderList();
+    try {
+      const page = await api.stateFlights(query.hex, { before: legs[legs.length - 1].lastT });
+      if (stateQuery !== query) return;
+      legs = legs.concat(page);
+      query.more = page.length >= STATE_PANEL_PAGE;
+      status.textContent = t('history.state-results', { reg: query.reg || String(query.hex).toUpperCase(), n: legs.length });
+    } catch {
+      if (stateQuery !== query) return;
+      status.textContent = t('history.unavailable');
+    } finally {
+      query.loading = false;
+      if (stateQuery === query) renderList();
+    }
   }
 
   async function refreshStatus() {
     try {
       const st = await api.status();
       status.textContent = st?.fixes
-        ? t('history.status', { since: archiveSinceLabel(st.oldestT, Date.now() / 1000, currentLanguage()), legs: formatThousands(st.legs) })
+        ? archiveStatusText(st, t, Date.now() / 1000, currentLanguage())
         : t('history.status-empty');
       status.dataset.state = 'ok';
     } catch {
@@ -259,11 +308,13 @@ export function installHistoryPanel({
     const token = ++searchToken;
     closeLeg();
     listMode = 'state';
+    stateQuery = { hex, reg, more: false, loading: false };
     status.textContent = t('history.searching');
     try {
       const flights = await api.stateFlights(hex);
       if (token !== searchToken) return;
       legs = flights;
+      stateQuery.more = flights.length >= STATE_PANEL_PAGE;
       renderList();
       status.textContent = t('history.state-results', { reg: reg || String(hex).toUpperCase(), n: flights.length });
     } catch {
@@ -350,6 +401,8 @@ export function installHistoryPanel({
         leg.src ? t('history.source', { src: leg.src }) : '',
       ].filter(Boolean).join(' · ');
       replay.load(fixes);
+      // Časť letu bez pokrytia (oceán) je na glóbuse čiarkovaný odhad — povedať to aj v súhrne.
+      if (replay.getState().estimatedGaps) stats.textContent += ` · ${t('history.gap-estimate')}`;
       replay.frame();
       renderState(replay.getState());
     } catch {

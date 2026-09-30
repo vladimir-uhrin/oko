@@ -169,10 +169,26 @@ export function createStateAircraftService({
     }
   }
 
+  /**
+   * Jednorazová oprava pri štarte: spoj polovice letov štátnych strojov rozdelené dierou v pokrytí
+   * (lety cez Atlantik importované pred 2026-09-30 ostali rozdelené na „… → neznáme" a „neznáme → …").
+   */
+  async function repairAirGaps() {
+    const store = getStore();
+    if (!store?.mergeAirGaps) return 0;
+    let merged = 0;
+    for (const a of currentList().aircraft) {
+      try { merged += await store.mergeAirGaps(a.hex); } catch (error) { log(`[state-aircraft] oprava letov ${a.hex}: ${error?.message || error}`); }
+    }
+    if (merged) log(`[state-aircraft] spojené lety cez diery v pokrytí: ${merged}`);
+    return merged;
+  }
+
   return {
     handle,
     hexes: () => currentList().aircraft.map((a) => a.hex),
-    startBackfill: () => backfill.start(),
+    repairAirGaps,
+    startBackfill: () => { void repairAirGaps(); backfill.start(); },
     stopBackfill: () => backfill.stop(),
     backfillTick: () => backfill.tick(),
     status: () => ({ aircraft: currentList().aircraft.length, backfill: backfill.status() }),
