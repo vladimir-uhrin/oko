@@ -38,6 +38,9 @@ test('oko-static-server: index no-cache a indexovateľný, účet noindex, asset
   writeFileSync(path.join(dist, 'account.html'), '<!doctype html><title>Účet</title>');
   writeFileSync(path.join(dist, 'google5f66f1e4a10096a1.html'), 'google-site-verification: google5f66f1e4a10096a1.html');
   writeFileSync(path.join(dist, 'sitemap.xml'), '<?xml version="1.0"?><urlset/>');
+  mkdirSync(path.join(dist, 'sk', 'tema'), { recursive: true });
+  writeFileSync(path.join(dist, 'sk', 'index.html'), '<!doctype html><title>Témy</title>');
+  writeFileSync(path.join(dist, 'sk', 'tema', 'index.html'), '<!doctype html><title>Téma</title>');
   writeFileSync(path.join(dist, 'assets', 'index-abc.js'), 'console.log("oko")');
   writeFileSync(path.join(dist, 'logo.svg'), '<svg></svg>');
   mkdirSync(path.join(dist, 'cesium', 'Workers'), { recursive: true });
@@ -63,6 +66,17 @@ test('oko-static-server: index no-cache a indexovateľný, účet noindex, asset
     const sitemap = await fetch(base + '/sitemap.xml');
     assert.equal(sitemap.headers.get('content-type'), 'application/xml');
     assert.equal(sitemap.headers.get('x-robots-tag'), null);
+    // Obsahové stránky v priečinkoch (2026-09-30): index priečinka, bez lomky → 301 s lomkou a query.
+    const topic = await fetch(base + '/sk/tema/');
+    assert.equal(topic.status, 200);
+    assert.equal(topic.headers.get('content-type'), 'text/html; charset=utf-8');
+    assert.match(await topic.text(), /<title>Téma<\/title>/);
+    assert.equal((await fetch(base + '/sk/')).status, 200, 'rozcestník jazyka');
+    const noSlash = await fetch(base + '/sk/tema?utm=x', { redirect: 'manual' });
+    assert.equal(noSlash.status, 301);
+    assert.equal(noSlash.headers.get('location'), '/sk/tema/?utm=x');
+    assert.equal((await fetch(base + '/sk', { redirect: 'manual' })).headers.get('location'), '/sk/');
+    assert.equal((await fetch(base + '/en/nie-je/')).status, 404);
     const asset = await fetch(base + '/assets/index-abc.js');
     assert.equal(asset.status, 200);
     assert.equal(asset.headers.get('cache-control'), 'public, max-age=31536000, immutable', 'hashované assety sú nemenné → Cloudflare ich drží na hrane');

@@ -34,9 +34,13 @@ test('štruktúrované dáta: WebSite, WebApplication zadarmo a autor sa dajú n
 
 test('sitemap.xml: koreň a ochrana súkromia; robots.txt statického servera na ňu ukazuje', () => {
   const sitemap = read('../public/sitemap.xml');
-  assert.match(sitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
+  assert.match(sitemap, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9"[ >]/);
   const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-  assert.deepEqual(locs, ['https://okolive.sk/', 'https://okolive.sk/privacy.html']);
+  // Od 2026-09-30 sitemap generuje scripts/build-content-pages.mjs (aj obsahové stránky —
+  // ich úplný zoznam stráži src/contentPages.test.mjs); tu len koreň na prvom mieste a súkromie.
+  assert.equal(locs[0], 'https://okolive.sk/');
+  assert.ok(locs.includes('https://okolive.sk/privacy.html'));
+  for (const loc of locs) assert.match(loc, /^https:\/\/okolive\.sk\//);
   for (const lastmod of sitemap.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)) assert.match(lastmod[1], /^\d{4}-\d{2}-\d{2}$/);
   const server = read('../scripts/oko-static-server.mjs');
   assert.match(server, /Sitemap: https:\/\/okolive\.sk\/sitemap\.xml/);

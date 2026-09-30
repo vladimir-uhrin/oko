@@ -148,9 +148,17 @@ const server = http.createServer((req, res) => {
   if (pathname === '/robots.txt') { send(res, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, ROBOTS_TXT); return; }
   if (pathname.startsWith('/api/')) { send(res, 502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, JSON.stringify({ error: 'api_not_routed', detail: 'cloudflared must route /api/* to the dev server' })); return; }
   if (pathname === '/' || pathname === '') pathname = '/index.html';
+  // Obsahové stránky (2026-09-30, SEO): /sk/<téma>/ → index.html v priečinku.
+  else if (pathname.endsWith('/')) pathname += 'index.html';
   const target = path.resolve(DIR, `.${pathname}`);
   if (!target.startsWith(DIR + path.sep) && target !== DIR) { send(res, 403, { 'Content-Type': 'text/plain' }, 'Forbidden'); return; }
   fs.stat(target, (error, stat) => {
+    if (!error && stat.isDirectory()) {
+      // /sk/tema → /sk/tema/ (jedna kanonická adresa; relatívne odkazy v stránke sedia).
+      const query = (req.url || '').includes('?') ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+      send(res, 301, { Location: `${encodeURI(pathname)}/${query}`, 'Cache-Control': 'public, max-age=3600', 'Content-Type': 'text/plain; charset=utf-8' }, 'Moved');
+      return;
+    }
     if (error || !stat.isFile()) {
       // Unknown path: the app is a single page; anything else is a 404 (no SPA
       // fallback needed — OKO has one route).

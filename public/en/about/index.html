@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About OKO — a live 3D globe built on open data</title>
+  <meta name="description" content="OKO is a free live 3D globe built on open data: aircraft, ships, conflicts, gas and satellites. Who makes it, which sources it uses and the rules it follows." />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <link rel="canonical" href="https://okolive.sk/en/about/" />
+  <link rel="alternate" hreflang="en" href="https://okolive.sk/en/about/" />
+  <link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/o-projekte/" />
+  <link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/o-projekte/" />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="OKO" />
+  <meta property="og:locale" content="en_GB" />
+  <meta property="og:locale:alternate" content="sk_SK" />
+  <meta property="og:title" content="About OKO — a live 3D globe built on open data" />
+  <meta property="og:description" content="OKO is a free live 3D globe built on open data: aircraft, ships, conflicts, gas and satellites. Who makes it, which sources it uses and the rules it follows." />
+  <meta property="og:url" content="https://okolive.sk/en/about/" />
+  <meta property="og:image" content="https://okolive.sk/share-default.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="OKO: Europe seen from orbit with live aircraft and ships" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="About OKO — a live 3D globe built on open data" />
+  <meta name="twitter:description" content="OKO is a free live 3D globe built on open data: aircraft, ships, conflicts, gas and satellites. Who makes it, which sources it uses and the rules it follows." />
+  <meta name="twitter:image" content="https://okolive.sk/share-default.jpg" />
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+  <meta name="theme-color" content="#040a10" />
+  <link rel="stylesheet" href="/content.css" />
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebPage","@id":"https://okolive.sk/en/about/#page","url":"https://okolive.sk/en/about/","name":"About OKO — a live 3D globe built on open data","description":"OKO is a free live 3D globe built on open data: aircraft, ships, conflicts, gas and satellites. Who makes it, which sources it uses and the rules it follows.","inLanguage":"en","dateModified":"2026-09-30","isPartOf":{"@id":"https://okolive.sk/#website"},"author":{"@id":"https://okolive.sk/#author"},"primaryImageOfPage":"https://okolive.sk/share-default.jpg"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"OKO","item":"https://okolive.sk/"},{"@type":"ListItem","position":2,"name":"Topics","item":"https://okolive.sk/en/"},{"@type":"ListItem","position":3,"name":"About","item":"https://okolive.sk/en/about/"}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is OKO free?","acceptedAnswer":{"@type":"Answer","text":"Yes. The globe and all layers are free and need no sign-up."}},{"@type":"Question","name":"Do I need an account?","acceptedAnswer":{"@type":"Answer","text":"No. An account is optional and is used to save followed flights."}},{"@type":"Question","name":"Does OKO work on a phone?","acceptedAnswer":{"@type":"Answer","text":"Yes, in a browser with WebGL. On slower phones 3D can be sluggish."}},{"@type":"Question","name":"Where do the maps come from?","acceptedAnswer":{"@type":"Answer","text":"Google photorealistic 3D tiles (directly or via Cesium ion), OpenStreetMap and, in Slovakia, the national orthophoto mosaic (© GKÚ Bratislava, NLC, CC BY 4.0)."}}]},{"@type":"Person","@id":"https://okolive.sk/#author","name":"Vladimír Uhrin"}]}</script>
+</head>
+<body>
+<header class="c-top">
+  <a class="c-brand" href="/"><img src="/logo.svg" alt="" width="30" height="30" /><span>OK<b>O</b></span></a>
+  <nav class="c-lang" aria-label="Language"><span aria-current="true">EN</span> · <a href="/sk/o-projekte/" hreflang="sk" lang="sk">SK</a></nav>
+</header>
+<main class="c-main">
+  <nav class="c-crumbs" aria-label="Breadcrumbs"><a href="/">OKO</a> › <a href="/en/">Topics</a> › <span>About</span></nav>
+  <h1>About OKO</h1>
+  <p class="c-lead">OKO is a free live 3D globe that brings open data on transport, energy, weather and conflicts together in one place. It is made by Vladimír Uhrin in Slovakia with a focus on Central European sources — while the whole world stays fully live.</p>
+  <p><a class="c-cta" href="/">Open the live 3D globe →</a></p>
+
+  <section>
+    <h2>How OKO came about</h2>
+    <p>OKO builds on the open gods-eye-view project by Bilawal Sidhu (MIT licence) and extends it with Slovak and Central European sources, a clean front map for Ukraine, and modules for gas, shipping chokepoints and the Middle East. It is built on CesiumJS and Google’s photorealistic 3D tiles, loaded directly or through Cesium ion. In Slovakia, Bratislava for example has photorealistic 3D buildings; where they are missing, the Slovak orthophoto map and OpenStreetMap help.</p>
+    <p>The project is in BETA — layers keep arriving and some things are still changing.</p>
+  </section>
+  <section>
+    <h2>The rules we follow</h2>
+
+    <ul>
+      <li>Every figure shows its source and licence; live, delayed and derived data are clearly separated.</li>
+      <li>We track objects, infrastructure and events — not people. No face recognition and no tracking of individuals.</li>
+      <li>Secret keys to data services stay on the server; only restricted keys for map tiles reach the browser.</li>
+      <li>We do not republish articles — only the headline with a link to the original publisher, and for some sources a preview image.</li>
+    </ul>
+  </section>
+  <section>
+    <h2>How OKO works</h2>
+    <p>The OKO server in Slovakia fetches data from open sources, keeps them briefly and passes them to your browser — this saves providers’ quotas and keeps secret keys off the web page. The globe and all layers are rendered right in your browser. Short share links are kept for 90 days.</p>
+  </section>
+  <section>
+    <h2>What you need</h2>
+    <p>A modern browser with WebGL is enough — on a computer or a phone. An account is optional and free and lets you save followed flights. You can share the view you are looking at with a short link that has a preview for social networks; front, chokepoint and Middle East scenes also as a card in landscape, portrait or square format.</p>
+  </section>
+  <section class="c-facts">
+    <h2>At a glance</h2>
+    <dl>
+      <div><dt>Price</dt><dd>free</dd></div>
+      <div><dt>Languages</dt><dd>Slovak and English</dd></div>
+      <div><dt>Technology</dt><dd>CesiumJS, Google photorealistic 3D tiles, OpenStreetMap</dd></div>
+      <div><dt>Status</dt><dd>BETA</dd></div>
+    </dl>
+  </section>
+  <section class="c-faq">
+    <h2>FAQ</h2>
+    <details><summary>Is OKO free?</summary><p>Yes. The globe and all layers are free and need no sign-up.</p></details>
+    <details><summary>Do I need an account?</summary><p>No. An account is optional and is used to save followed flights.</p></details>
+    <details><summary>Does OKO work on a phone?</summary><p>Yes, in a browser with WebGL. On slower phones 3D can be sluggish.</p></details>
+    <details><summary>Where do the maps come from?</summary><p>Google photorealistic 3D tiles (directly or via Cesium ion), OpenStreetMap and, in Slovakia, the national orthophoto mosaic (© GKÚ Bratislava, NLC, CC BY 4.0).</p></details>
+  </section>
+  <section class="c-sources">
+    <h2>Sources and licences</h2>
+    <ul>
+      <li><a href="https://github.com/bilawalsidhu/gods-eye-view" rel="noopener">gods-eye-view (upstream project, Bilawal Sidhu)</a> — MIT</li>
+      <li><a href="https://cesium.com/platform/cesiumjs/" rel="noopener">CesiumJS</a> — Apache 2.0</li>
+      <li><a href="https://developers.google.com/maps/documentation/tile/3d-tiles" rel="noopener">Google Photorealistic 3D Tiles (direct or via Cesium ion)</a></li>
+      <li><a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a> — ODbL</li>
+      <li><a href="https://www.gku.sk/" rel="noopener">Ortofotomozaika SR © GKÚ Bratislava, NLC</a> — CC BY 4.0</li>
+    </ul>
+    <p class="c-note">These are the main sources for this topic; the map itself also shows the source and licence of every layer.</p>
+  </section>
+  <nav class="c-related" aria-label="More topics">
+    <h2>More topics</h2>
+    <ul>
+      <li><a href="/en/ukraine-front-map/">Ukraine — front map</a> — The General Staff daily report by direction, places it names and a clean front map.</li>
+      <li><a href="/en/live-flight-tracker-3d/">Live flights</a> — Thousands of aircraft on a 3D globe, flight following with a trail, 3D models and a cockpit view.</li>
+      <li><a href="/en/live-ship-tracker/">Live ships</a> — Tens of thousands of AIS ships, silhouettes by type, destination and radar detections.</li>
+      <li><a href="/en/strait-of-hormuz-chokepoints/">Hormuz and chokepoints</a> — Live ships in 8 chokepoints, satellite radar detections, pipelines and the oil price.</li>
+      <li><a href="/en/middle-east-live-map/">Middle East</a> — News by theatre, reported strikes on the map and territorial control from Wikipedia.</li>
+      <li><a href="/en/european-gas-prices-and-flows/">Gas — prices and flows</a> — Gas flows through Slovakia and Europe, storage, LNG and a derived TTF price.</li>
+      <li><a href="/en/live-satellite-tracker/">Live satellites</a> — The ISS, GPS, Galileo, geostationary satellites and Starlink on a 3D globe.</li>
+      <li><a href="/en/traffic-cameras-3d-map/">Traffic cameras</a> — Images from public traffic cameras in London and Austin, right on the 3D map.</li>
+      <li><a href="/en/weather-radar-earthquakes/">Weather and natural events</a> — SHMÚ precipitation radar, wind and temperature forecast, earthquakes and volcanoes.</li>
+    </ul>
+  </nav>
+  <p class="c-bottom-cta"><a class="c-cta" href="/">Open the live 3D globe →</a></p>
+</main>
+<footer class="c-foot">
+  <p><a href="/">OKO — Live 3D globe</a> · <a href="/en/">Topics</a> · <a href="/privacy.html">Privacy</a></p>
+  <p>made by Vladimír Uhrin · okolive.sk</p>
+</footer>
+</body>
+</html>
