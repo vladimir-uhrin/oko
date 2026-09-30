@@ -97,7 +97,14 @@ export function newsQuery(identity) {
 
 const gdeltTime = (ms) => new Date(ms).toISOString().replace(/[-:T]/g, '').slice(0, 14);
 /** URL GDELT DOC API s pevným oknom (nie „posledné dni" — funguje aj pre staršie udalosti). Pure. */
-export function newsUrl(query, { fromMs, toMs, maxrecords = 75 }) {
+/**
+ * Najviac článkov na dopyt (dokumentácia GDELT DOC 2.0: predvolene 75, najviac 250). So zoradením
+ * od najstarších by pri 75 vypadli neskoršie správy dôveryhodných médií (FZ1073: ~100 článkov o
+ * flydubai za 2 dni) — práve tie, ktoré nesú overený priebeh.
+ */
+export const NEWS_MAX_RECORDS = 250;
+
+export function newsUrl(query, { fromMs, toMs, maxrecords = NEWS_MAX_RECORDS }) {
   const p = new URLSearchParams({
     query, mode: 'artlist', maxrecords: String(maxrecords), format: 'json', sort: 'dateasc',
     startdatetime: gdeltTime(fromMs), enddatetime: gdeltTime(toMs),

@@ -30,6 +30,7 @@ test('identita letu z adsbdb a dopyt: aerolinka aj bez medzier („Fly Dubai" / 
   assert.equal(url.searchParams.get('startdatetime'), '20260930042200');
   assert.equal(url.searchParams.get('enddatetime'), '20261002052200');
   assert.equal(url.searchParams.get('sort'), 'dateasc');
+  assert.equal(url.searchParams.get('maxrecords'), '250', 'najviac, čo GDELT dá — od najstarších by pri 75 vypadli neskoršie overené správy');
 });
 
 test('článok k TOMUTO letu: číslo letu alebo aerolinka s mestom či štátom trasy; iná aerolinka alebo iná trasa nie', () => {

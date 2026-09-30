@@ -300,7 +300,18 @@ export function installEventsPanel({
     if (published) {
       status.textContent = t('events.published-at', { url: published });
       const fb = button(doc, 'scene-btn events-share-fb', t('events.share-fb'));
-      fb.addEventListener('click', () => { if (post.facebook) openWindow(post.facebook); });
+      // Dialóg FB text príspevku neprevezme (pravidlá FB) — text ide do schránky, vlastník ho vloží.
+      // Zápis do schránky sa spustí ešte pred otvorením okna (nové okno berie fokus a zápis by zlyhal).
+      fb.addEventListener('click', () => {
+        if (!post.facebook) return;
+        let copying;
+        try { copying = Promise.resolve(clipboard(text.value)); } catch (error) { copying = Promise.reject(error); }
+        openWindow(post.facebook);
+        copying.then(
+          () => ownerMessage(t('events.fb-copied'), 'ok'),
+          () => ownerMessage(t('events.copy-failed'), 'error'),
+        );
+      });
       const copyLink = button(doc, 'scene-btn events-copy-link', t('events.copy-link'));
       copyLink.addEventListener('click', () => { void copy(published); });
       const image = el(doc, 'a', 'scene-btn events-download', t('events.download-image'));

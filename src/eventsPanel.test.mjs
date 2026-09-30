@@ -217,10 +217,13 @@ test('vlastník: zoznam na kontrolu, náhľad; ZVEREJNIŤ až druhým klikom do 
   assert.ok(one(owner2, 'events-owner-status').textContent.includes(url));
   one(owner2, 'events-share-fb').click();
   assert.deepEqual(s.calls.opened, [s.state.post.facebook], 'len dialóg FB s odkazom — príspevok odošle vlastník');
+  assert.deepEqual(s.calls.copied, [s.state.post.text], 'text príspevku do schránky ešte pred otvorením okna FB (to berie fokus)');
+  await flush();
+  assert.equal(one(owner2, 'events-owner-msg').textContent, 'events.fb-copied');
   one(owner2, 'events-copy-text').click();
   one(owner2, 'events-copy-link').click();
   await flush();
-  assert.deepEqual(s.calls.copied, [s.state.post.text, url]);
+  assert.deepEqual(s.calls.copied, [s.state.post.text, s.state.post.text, url]);
   const img = one(owner2, 'events-download');
   assert.deepEqual([img.href, img.download], [`/api/events/${ID}/card.jpg?format=feed`, `oko-udalost-${ID}.jpg`]);
   assert.equal(one(s.section, 'events-chip--published').textContent, 'events.published');
