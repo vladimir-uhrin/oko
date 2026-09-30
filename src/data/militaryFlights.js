@@ -885,13 +885,32 @@ function _buildTrackedLabel(info, icao24) {
 // preformátuje hneď, nie až pri ďalšom polle.
 onUnitSystemChange(() => { if (_trackedIcao) _updateTrackedLabelModel(_trackedIcao); });
 
+/**
+ * Model karty sledovaného vojenského stroja: textové riadky + grafy výšky a rýchlosti (2026-09-30,
+ * ako civilná karta po kliknutí; vojenská mala len text). Grafy sú null, kým nie je dosť vzoriek.
+ * @param {string} icao24
+ * @returns {object}
+ */
+function _trackedLabelModel(icao24) {
+  const info = _flightData.get(icao24);
+  const model = trackedLabelModelFromText(_buildTrackedLabel(info, icao24), '#ffd166');
+  const charts = info ? _hoverExtras(icao24, info).charts : null;
+  if (charts) model.charts = charts; // bez vzoriek ostáva textový model presne ako doteraz
+  return model;
+}
+
+/** TEST ONLY — model karty sledovaného stroja a pamäť vzoriek grafov. */
+export function _militaryTrackedCardForTest(icao24) {
+  return _trackedLabelModel(icao24);
+}
+export function _militaryProfileStoreForTest() {
+  return _profileStore;
+}
+
 /** Write the explicit tracked presentation model and refresh its host entry. */
 function _updateTrackedLabelModel(icao24) {
   if (!_trackedEntity || icao24 !== _trackedIcao) return;
-  _trackedEntity.gevLabelModel = trackedLabelModelFromText(
-    _buildTrackedLabel(_flightData.get(icao24), icao24),
-    '#ffd166',
-  );
+  _trackedEntity.gevLabelModel = _trackedLabelModel(icao24);
   refreshTrackedReadout(_trackedEntity);
   // The readout and the context slot describe the same contact — refresh them
   // together so voice never narrates a fix the card has already replaced.
@@ -2954,10 +2973,10 @@ function _trackFlight(icao24, { origin = 'programmatic' } = {}) {
   });
   _trackedEntity.gevSelectionOrigin = origin;
   _trackedEntity.gevTrackedId = `military:${icao24}`;
-  _trackedEntity.gevLabelModel = trackedLabelModelFromText(
-    _buildTrackedLabel(info, icao24),
-    '#ffd166',
-  );
+  _trackedEntity.gevLabelModel = _trackedLabelModel(icao24);
+  // História letu pre grafy karty (ten istý proxy a cache ako kartička pod kurzorom); po príchode
+  // sa karta prekreslí, ak je stroj stále sledovaný.
+  void requestTrackedHistory(icao24, { onDone: () => _updateTrackedLabelModel(icao24) });
 
   // A billboard has a ~zero bounding sphere, so Cesium's default follow distance is
   // far too tight (the user had to scroll out to read the plane). Give the entity a
