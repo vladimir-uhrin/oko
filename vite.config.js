@@ -29,9 +29,10 @@
 import fs from 'node:fs';
 import { versionedDeferredCesiumTags } from './scripts/lib/cesiumHtmlTags.mjs';
 import { eventLoopWatchPlugin } from './scripts/lib/eventLoopWatch.mjs';
+import { startupProfilePlugin } from './scripts/lib/startupProfile.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
-import { openFlightHistory } from './src/data/flightHistoryStore.js';
+import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
   AISHUB_USER_AGENT,
@@ -5655,12 +5656,22 @@ function flightHistoryProxy() {
   function getStore() {
     const cfg = config();
     enabled = cfg.enabled;
+    if (store?.closed) store = null; // vlákno spadlo — ďalší dopyt ho otvorí znova
     if (store || !enabled) return store;
     try {
       fs.mkdirSync(path.dirname(cfg.dbPath), { recursive: true });
-      store = openFlightHistory(cfg.dbPath, { retentionDays: cfg.retentionDays, rawHours: cfg.rawHours });
-      const st = store.status();
-      console.log(`[flight-history] SQLite ${cfg.dbPath}: ${st.fixes} fixes, ${st.legs} legs, retention ${cfg.retentionDays} d, raw ${cfg.rawHours} h`);
+      // SQLite v samostatnom vlákne (2026-09-30): zápis snímku OpenSky trval ~4,4 s a node:sqlite je
+      // synchrónne — hlavné vlákno aj verejné /api vtedy stáli (CPU profil + merač [event-loop]).
+      store = openFlightHistoryWorker(cfg.dbPath, { retentionDays: cfg.retentionDays, rawHours: cfg.rawHours });
+      const opened = store;
+      opened.ready
+        .then(() => opened.status())
+        .then((st) => console.log(`[flight-history] SQLite ${cfg.dbPath} (vlákno): ${st.fixes} fixes, ${st.legs} legs, retention ${cfg.retentionDays} d, raw ${cfg.rawHours} h`))
+        .catch((error) => {
+          console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
+          if (store === opened) store = null;
+          void opened.close();
+        });
     } catch (error) {
       console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
       store = null;
@@ -5682,7 +5693,10 @@ function flightHistoryProxy() {
         setImmediate(() => {
           try {
             const s = getStore();
-            if (s) record(s, body);
+            if (s) {
+              Promise.resolve(record(s, body))
+                .catch((error) => console.warn('[flight-history] record failed:', error?.message || error));
+            }
           } catch (error) {
             console.warn('[flight-history] record failed:', error?.message || error);
           }
@@ -5700,6 +5714,8 @@ function flightHistoryProxy() {
   return {
     name: 'flight-history',
     configureServer(server) {
+      // Reštart Vite (zmena konfigurácie) vytvorí nový plugin — staré vlákno so SQLite sa musí zavrieť.
+      server.httpServer?.once('close', () => { store?.close(); store = null; });
       server.middlewares.use('/api/opensky', (req, res, next) => {
         if (enabled) tapResponse(res, (s, body) => s.recordOpenSkyBody(body, res.getHeader('X-Flight-Source') ? 'adsb.lol/regional' : 'opensky'));
         next();
@@ -5708,14 +5724,14 @@ function flightHistoryProxy() {
         if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/mil'));
         next();
       });
-      server.middlewares.use('/api/history', (req, res) => {
+      server.middlewares.use('/api/history', async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         const s = getStore();
         if (!s) { json(res, 503, { error: enabled ? 'history_unavailable' : 'history_disabled' }); return; }
         try {
           if (url.pathname === '/status') {
             // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
-            const { path: dbFile, ...publicStatus } = s.status();
+            const { path: dbFile, ...publicStatus } = await s.status();
             json(res, 200, isDirectLocalRequest(req) ? { ...publicStatus, path: dbFile } : publicStatus);
             return;
           }
@@ -5723,18 +5739,18 @@ function flightHistoryProxy() {
             const hours = Math.min(24 * config().retentionDays, Math.max(1, Number(url.searchParams.get('hours')) || 24));
             const sinceS = Math.floor(Date.now() / 1000) - hours * 3600;
             const limit = Number(url.searchParams.get('limit')) || 50;
-            json(res, 200, { q: url.searchParams.get('q') || '', hours, legs: s.search(url.searchParams.get('q') || '', { sinceS, limit }) });
+            json(res, 200, { q: url.searchParams.get('q') || '', hours, legs: await s.search(url.searchParams.get('q') || '', { sinceS, limit }) });
             return;
           }
           if (url.pathname === '/track') {
             const icao24 = url.searchParams.get('icao24') || '';
             const fromS = Number(url.searchParams.get('from')) || 0;
             const toS = Number(url.searchParams.get('to')) || Number.MAX_SAFE_INTEGER;
-            json(res, 200, { icao24: icao24.toLowerCase(), fromS, toS, fixes: s.track(icao24, { fromS, toS }) });
+            json(res, 200, { icao24: icao24.toLowerCase(), fromS, toS, fixes: await s.track(icao24, { fromS, toS }) });
             return;
           }
           if (url.pathname === '/leg') {
-            const leg = s.leg(url.searchParams.get('id'));
+            const leg = await s.leg(url.searchParams.get('id'));
             if (!leg) { json(res, 404, { error: 'not_found' }); return; }
             json(res, 200, leg);
             return;
@@ -10810,6 +10826,8 @@ export default defineConfig(({ mode }) => {
       // Merač zablokovania vlákna (2026-09-30): zaseknutia pár minút po reštarte zatiaľ bez príčiny.
       // Nemá middleware, takže miesto v zozname na nič nevplýva; začiatok aj koniec strážia testy.
       eventLoopWatchPlugin(),
+      // Jednorazový CPU profil prvej minúty po štarte — len keď existuje .gev-cache/profile-next-start.
+      startupProfilePlugin({ root: __dirname }),
       // Odkaz na preloader víru s odtlačkom obsahu (Cloudflare cache) — na konci, poradie iných nemení.
       preloaderCacheBustPlugin(),
     ],
