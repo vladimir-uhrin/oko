@@ -64,6 +64,7 @@ import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
 import { carryRouteEnrichment, createRouteMemory } from './flightRouteMemory.js';
+import { createEnrichGate } from './enrichGate.js';
 import { buildFlightCharts } from './flightCharts.js';
 import {
   cachedTrackedHistory,
@@ -1214,12 +1215,21 @@ let _enrichLastDispatchMs = 0;
 /** @type {ReturnType<typeof setTimeout>|null} pending drip wake-up */
 let _enrichDripTimer = null;
 const _enrichQueue = [];
-const _enrichSeen = new Set();
+/**
+ * Brána doťahovania (2026-09-30, enrichGate.js): odpoveď (aj „nenájdené") je konečná, ZLYHANÝ dopyt
+ * (HTTP 500 z proxy, výpadok siete) sa smie zopakovať po 1, 2, 3 min — predtým ostal stroj bez typu,
+ * trasy a ETA až do obnovenia stránky.
+ */
+const _enrichGate = createEnrichGate();
+
+/** TEST ONLY — brána doťahovania vrstvy (správanie po zlyhanom dopyte). */
+export function _enrichGateForTest() {
+  return _enrichGate;
+}
 
 function _enqueueEnrich(key, url, onData, priority = false) {
-  if (_enrichSeen.has(key)) return;
-  _enrichSeen.add(key);
-  const job = { url, onData };
+  if (!_enrichGate.begin(key)) return;
+  const job = { key, url, onData };
   // Priority (tracked / model-eligible) goes to the FRONT so a deep ambient
   // backlog can never delay the plane the user just clicked or zoomed into.
   if (priority) _enrichQueue.unshift(job); else _enrichQueue.push(job);
@@ -1242,9 +1252,19 @@ function _drainEnrich() {
     const job = _enrichQueue.shift();
     _enrichActive += 1;
     fetch(job.url)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => { if (data && data.found) job.onData(data); })
-      .catch(() => { /* enrichment never surfaces errors */ })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        // Odpoveď prišla (aj { found: false }) — kľúč je vybavený. Chyba v spracovaní ho nezhodí.
+        _enrichGate.succeed(job.key);
+        if (data && data.found) {
+          try { job.onData(data); } catch (error) { console.warn('[flights] enrichment apply failed', error); }
+        }
+      })
+      // Zlyhaný dopyt (HTTP chyba, sieť, zlý JSON) — neviditeľne, ale s ďalším pokusom neskôr.
+      .catch(() => { _enrichGate.fail(job.key); })
       .finally(() => { _enrichActive -= 1; _drainEnrich(); });
   }
 }
@@ -1278,7 +1298,7 @@ function _requestTypeEnrichment(icao24, priority = false) {
 /**
  * Výsledky trasy z adsbdb podľa volacieho znaku (2026-09-30, vlastník: „v kartičkách chýba ETA").
  * Záznam stroja v `_flightData` sa vie vymeniť (vypadnutie z feedu a návrat, sledovanie a jeho
- * zrušenie) a `_enrichSeen` druhý dopyt na ten istý volací znak nepustí — trasa, dopravca a IATA
+ * zrušenie) a `_enrichGate` druhý dopyt na ten istý volací znak nepustí — trasa, dopravca a IATA
  * číslo tak z kartičky zmizli natrvalo. Pamäť ich vráti bez ďalšieho dopytu (flightRouteMemory.js).
  */
 const _routeMemory = createRouteMemory({ max: 4000 });
@@ -1385,7 +1405,7 @@ function _sweepAmbientEnrichment() {
     const cull = camera.frustum.computeCullingVolume(camPos, camera.directionWC, camera.upWC);
     const cand = [];
     for (const [icao24, bb] of _billboards) {
-      if (_enrichSeen.has(`t:${icao24}`)) continue; // answered / queued / negative this session
+      if (!_enrichGate.canBegin(`t:${icao24}`)) continue; // answered / queued / negative / waiting for retry
       if (!/^[0-9a-f]{6}$/i.test(icao24)) continue; // adsbdb keys are 6-char hex only
       const sweepMeta = _flightData.get(icao24);
       if (sweepMeta?.onGround) continue; // ground traffic never spends ambient budget (click-to-enrich still works)
@@ -5437,7 +5457,7 @@ const flightsLayer = {
           rawLon: lon,
         };
         // Stroj, ktorý sa vrátil do feedu (alebo zmenil volací znak na známy let), dostane trasu
-        // z cache — `_enrichSeen` by ju druhýkrát nevyžiadal.
+        // z pamäte — `_enrichGate` úspešný dopyt druhýkrát nepustí.
         if (!meta.route) _routeMemory.apply(meta);
         _flightData.set(icao24, meta);
 
@@ -5756,7 +5776,7 @@ const flightsLayer = {
     _groundSnap.clear();
     _displayFloorState.clear();
     _enrichQueue.length = 0;
-    _enrichSeen.clear();
+    _enrichGate.clear();
     _routeMemory.clear();
     if (_enrichDripTimer) { clearTimeout(_enrichDripTimer); _enrichDripTimer = null; }
     _missingPolls.clear();
