@@ -115,10 +115,15 @@ const TEXT = {
   },
 };
 
+/** Čo sa v momente stalo, bez času a sietí: „strmhlavé klesanie 21 319 ft/min vo výške …". Pure. */
+export function momentPhrase(m, lang = 'sk') {
+  const dict = TEXT[lang] || TEXT.sk;
+  return (dict[m.kind] || (() => m.kind))(m);
+}
+
 /** Jeden riadok časovej osi: „05:22:05 UTC — strmhlavé klesanie … (OpenSky, adsb.lol)". Pure. */
 export function describeMoment(m, { lang = 'sk', labels = {} } = {}) {
-  const dict = TEXT[lang] || TEXT.sk;
-  const what = (dict[m.kind] || (() => m.kind))(m);
+  const what = momentPhrase(m, lang);
   const who = (m.seenBy || []).map((id) => labels[id] || id).join(', ');
   return `${clockUtc(m.t)} UTC — ${what}${who ? ` (${who})` : ''}`;
 }

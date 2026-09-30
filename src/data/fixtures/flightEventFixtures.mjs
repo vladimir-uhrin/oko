@@ -52,3 +52,42 @@ export function noiseCase(c) {
 }
 
 export const T = (s) => iso(s);
+
+/** Skutočná odpoveď adsbdb /v0/callsign/FDB1073 (30. 9. 2026), len potrebné polia. */
+export const FDB1073_ROUTE = Object.freeze({
+  callsign: 'FDB1073', callsign_icao: 'FDB1073', callsign_iata: 'FZ1073',
+  airline: { name: 'Fly Dubai', icao: 'FDB', iata: 'FZ', country: 'United Arab Emirates' },
+  origin: { country_name: 'United Arab Emirates', iata_code: 'DXB', icao_code: 'OMDB', latitude: 25.2528, longitude: 55.3644, municipality: 'Dubai', name: 'Dubai International Airport' },
+  destination: { country_name: 'Israel', iata_code: 'TLV', icao_code: 'LLBG', latitude: 32.0114, longitude: 34.8867, municipality: 'Tel Aviv', name: 'Ben Gurion International Airport' },
+});
+
+/**
+ * Uložená udalosť FZ1073 tak, ako ju zloží služba: overenie dvoma sieťami (strana OKO odvodená),
+ * časová os, trasa z adsbdb a overenie správami (preformulované titulky, skutočné domény).
+ */
+export async function fz1073Event() {
+  const { normalizeTrack } = await import('../flightAnomalies.js');
+  const { verifyEvent } = await import('../eventVerify.js');
+  const { buildEventTimeline } = await import('../eventTimeline.js');
+  const { flightIdentity } = await import('../eventNews.js');
+  const { oko, adsblol } = fz1073();
+  const nets = [{ id: 'opensky', label: 'OpenSky', points: normalizeTrack(oko) }, { id: 'adsblol', label: 'adsb.lol', points: normalizeTrack(adsblol) }];
+  const v = verifyEvent(nets[0], nets[1]);
+  const tl = buildEventTimeline(nets, v.triggers);
+  const times = v.triggers.map((t) => t.startT ?? t.t);
+  return {
+    id: '8965d1-20260930T0521', icao24: '8965d1', callsign: 'FDB1073', reg: 'A6-FKF', typeCode: 'B38M',
+    status: v.status, firstT: Math.min(...times), lastT: Math.max(...v.triggers.map((t) => t.endT ?? t.t)),
+    triggers: v.triggers, timeline: tl.moments, coverage: tl.coverage,
+    route: flightIdentity('FDB1073', FDB1073_ROUTE),
+    news: {
+      status: 'verified', type: 'hijack', typeDomains: ['jta.org', 'jpost.com'], otherCount: 2,
+      trusted: [
+        { domain: 'jta.org', url: 'https://www.jta.org/2026/09/30/israel/example', title: 'Passengers from the attempted hijacking are back', publishedT: iso('2026-09-30T18:00:00Z') },
+        { domain: 'jpost.com', url: 'https://www.jpost.com/example', title: 'Why extra pilots were aboard', publishedT: iso('2026-09-30T19:00:00Z') },
+        { domain: 'theguardian.com', url: 'https://www.theguardian.com/example', title: 'How flight 1073 survived the plunge', publishedT: iso('2026-09-30T19:30:00Z') },
+        { domain: 'arabnews.com', url: 'https://www.arabnews.com/example', title: 'Passenger thanks Saudi Arabia', publishedT: iso('2026-09-30T20:30:00Z') },
+      ],
+    },
+  };
+}

@@ -4,26 +4,32 @@
 // prevzal z adsb.lol, sa neoverujú samy sebou; pri blokovaní adsb.lol pauza; API len z tohto počítača.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ANALYSIS_VERSION, EVENT_FETCH_GAP_MS, createFlightEventsService, eventId, parseTimeParam } from './flightEventsService.js';
 import { EMERGENCY_CODES, DIVE_VR_MPS } from './flightAnomalies.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS } from './stateAircraftBackfill.js';
-import { NOISE_CASES, T, fz1073, noiseCase } from './fixtures/flightEventFixtures.mjs';
+import { FDB1073_ROUTE, NOISE_CASES, T, fz1073, noiseCase } from './fixtures/flightEventFixtures.mjs';
 
 const fixtureText = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 const row = (p, src = 'opensky') => [p.t, p.lat, p.lon, p.alt, p.gs, p.trk, p.vr, p.squawk, p.gnd ? 1 : 0, null, null, null, src];
 const isTrigger = (p) => !p.gnd && (EMERGENCY_CODES[p.squawk] || (p.vr !== null && p.vr <= DIVE_VR_MPS && (p.alt ?? 0) >= 3000));
 const triggersOf = (hex, points, src = 'opensky') => points.filter(isTrigger).map((p) => ({ icao24: hex, t: p.t, lat: p.lat, lon: p.lon, alt: p.alt, vr: p.vr, squawk: p.squawk, src }));
 
-function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs }) {
+function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs, routes = {}, news = null, trusted = null }) {
   const dir = mkdtempSync(path.join(tmpdir(), 'oko-events-'));
   let nowMs = startMs;
   const fetched = [];
+  const aux = [];
   const waits = [];
   const logs = [];
   let httpStatus = 200;
+  let trustedFile = null;
+  if (trusted) {
+    trustedFile = path.join(dir, 'trusted-news.json');
+    writeFileSync(trustedFile, JSON.stringify({ domains: trusted }));
+  }
   const store = {
     async triggersSince(fromS, toS) { return triggers.filter((r) => r.t >= fromS && r.t < toS); },
     async track(hex, { fromS, toS, withSrc }) {
@@ -32,12 +38,24 @@ function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs }
     },
     async flightsOf(hex) { return legs[hex] || []; },
   };
+  const reply = (status, body = '') => ({ ok: status >= 200 && status < 300, status, arrayBuffer: async () => Buffer.from(body), text: async () => body });
   const fetchImpl = async (url) => {
-    fetched.push(url);
-    if (httpStatus !== 200) return { ok: false, status: httpStatus, arrayBuffer: async () => new ArrayBuffer(0) };
-    const body = traces[url];
-    if (!body) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
-    return { ok: true, status: 200, arrayBuffer: async () => Buffer.from(body) };
+    const u = String(url);
+    if (u.startsWith('https://api.adsbdb.com/')) {
+      aux.push(u);
+      const cs = decodeURIComponent(u.split('/').pop());
+      return routes[cs] ? reply(200, JSON.stringify({ response: { flightroute: routes[cs] } })) : reply(404, '{"response":"unknown callsign"}');
+    }
+    if (u.startsWith('https://api.gdeltproject.org/')) {
+      aux.push(u);
+      const r = news ? news(new URL(u), nowMs) : { status: 200, body: '{}' };
+      return reply(r.status, r.body);
+    }
+    fetched.push(u);
+    if (httpStatus !== 200) return reply(httpStatus);
+    const body = traces[u];
+    if (!body) return reply(404);
+    return reply(200, body);
   };
   const make = () => createFlightEventsService({
     getStore: () => store,
@@ -48,9 +66,10 @@ function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs }
     sleep: async (ms) => { waits.push(ms); nowMs += ms; },
     log: (m) => logs.push(m),
     tickMs: 3_600_000,
+    trustedFile,
   });
   return {
-    dir, fetched, waits, logs, make,
+    dir, fetched, aux, waits, logs, make,
     at: (iso) => { nowMs = Date.parse(iso); },
     setHttp: (s) => { httpStatus = s; },
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
@@ -273,6 +292,75 @@ test('reštart servera: zastavená služba rozbehnutý tik nedokončí (nič neu
     assert.deepEqual(await orphan.analyze('8965d1', T('2026-09-30T03:00:00Z'), T('2026-09-30T06:00:00Z')), { error: 'no_store' });
   } finally {
     service?.stop();
+    h.cleanup();
+  }
+});
+
+test('správy: dve dôveryhodné médiá → na zverejnenie (dáta + správy); skôr nič, bulvár nie; 429 = pauza; nové spracovanie správy nezmaže', async () => {
+  const { oko } = fz1073();
+  const gdelt = { status: 200, calls: [] };
+  const art = (domain, iso, title) => ({ url: `https://${domain}/x/${iso}`, title, seendate: iso.replace(/[-:]/g, '').replace('.000', ''), domain, language: 'English' });
+  const articles = [
+    art('mirror.co.uk', '2026-09-30T08:00:00Z', 'Terror on flydubai jet bound for Tel Aviv'),
+    art('jta.org', '2026-09-30T18:00:00Z', 'Passengers from the attempted flydubai hijacking are back in Israel'),
+    art('jpost.com', '2026-09-30T19:00:00Z', 'Why two extra pilots flew on the flydubai jet during the hijacking attempt over Israel-bound route'),
+  ];
+  const h = harness({
+    startMs: Date.parse('2026-09-30T05:26:00Z'),
+    tracks: { '8965d1': oko.map((p) => row(p)) },
+    triggers: triggersOf('8965d1', oko),
+    legs: { '8965d1': [{ callsign: 'FDB1073', firstT: T('2026-09-30T03:05:00Z'), lastT: T('2026-09-30T05:53:33Z') }] },
+    traces: { [LIVE_FZ]: fixtureText('adsblol-trace-8965d1-20260930.json') },
+    routes: { FDB1073: FDB1073_ROUTE },
+    trusted: ['jta.org', 'jpost.com', 'theguardian.com'],
+    news: (url, nowMs) => {
+      gdelt.calls.push(url);
+      if (gdelt.status !== 200) return { status: gdelt.status, body: 'Please limit requests' };
+      const to = url.searchParams.get('enddatetime');
+      const inWindow = articles.filter((a) => a.seendate.replace('T', '').replace('Z', '') <= to);
+      return { status: 200, body: JSON.stringify({ articles: inWindow }) };
+    },
+  });
+  try {
+    const service = h.make();
+    await service.tick();
+    let [e] = service.store.list();
+    assert.equal(e.status, 'confirmed');
+    assert.deepEqual([e.news, e.publishable], ['none', false], '05:26 — správy ešte nie sú');
+    assert.equal(gdelt.calls.length, 1);
+    assert.match(gdelt.calls[0].searchParams.get('query'), /"Fly Dubai" OR FlyDubai OR FZ1073/);
+    h.at('2026-09-30T06:00:00Z');
+    await service.tick();
+    assert.equal(service.store.get(e.id).final, true, 'konečné spracovanie údajov');
+    assert.equal(service.store.get(e.id).news.status, 'none', 'správy sa pri novom spracovaní nestratili');
+    h.at('2026-09-30T09:00:00Z');
+    await service.tick();
+    [e] = service.store.list();
+    assert.equal(e.news, 'reported', 'len bulvár — nie overené');
+    gdelt.status = 429;
+    h.at('2026-09-30T18:40:00Z');
+    await service.tick();
+    const blockedCalls = gdelt.calls.length;
+    h.at('2026-09-30T18:45:00Z');
+    await service.tick();
+    assert.equal(gdelt.calls.length, blockedCalls, 'po 429 pauza');
+    gdelt.status = 200;
+    h.at('2026-09-30T19:30:00Z');
+    await service.tick();
+    [e] = service.store.list();
+    assert.deepEqual([e.news, e.newsType, e.publishable], ['verified', 'hijack', true]);
+    const full = service.store.get(e.id);
+    assert.deepEqual(full.news.trusted.map((t) => t.domain), ['jta.org', 'jpost.com']);
+    assert.equal(full.route.flightIata, 'FZ1073');
+    const callsBefore = gdelt.calls.length;
+    h.at('2026-09-30T21:00:00Z');
+    await service.tick();
+    assert.equal(gdelt.calls.length, callsBefore, 'overené správy sa už nehľadajú');
+    // Ručné nové spracovanie údajov (napr. preverenie z denného archívu) správy zachová.
+    await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    assert.equal(service.store.get(e.id).news.status, 'verified');
+    assert.equal(h.aux.filter((u) => u.startsWith('https://api.adsbdb.com/')).length, 1, 'trasa z adsbdb raz, potom z udalosti');
+  } finally {
     h.cleanup();
   }
 });

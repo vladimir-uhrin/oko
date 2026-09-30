@@ -5805,6 +5805,8 @@ function flightHistoryProxy() {
       flightEvents = createFlightEventsService({
         getStore,
         eventsDir: path.join(path.dirname(cfg.dbPath), 'events'),
+        // Etapa 2: overenie správami — zoznam dôveryhodných médií (vlastník ho môže upraviť).
+        trustedFile: path.join(__dirname, 'src', 'data', 'local_data', 'events', 'trusted-news.json'),
         isLocal: isDirectLocalRequest,
       });
       if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {

@@ -7,8 +7,10 @@
 // archív prevzal z adsb.lol, by adsb.lol overovala sama sebou) + stopa toho istého lietadla z druhej,
 // nezávislej siete adsb.lol (živá stopa dňa alebo denný archív) → overenie (eventVerify.js) a časová
 // os (eventTimeline.js). Výsledok sa uloží ako JSON vedľa databázy — aj vyvrátený šum (aby bolo
-// vidno, čo filter zahodil). Etapa 1 je súkromná: API odpovedá len priamo z tohto počítača;
-// verejne nič (zverejnenie až po overení správami v etape 2).
+// vidno, čo filter zahodil). Etapa 1 je súkromná: API odpovedá len priamo z tohto počítača.
+// Etapa 2 (správy): pri udalostiach dopravných letov sa každých 30 min (do 48 h) hľadajú správy
+// v GDELT (eventNews.js) — overené, keď píšu aspoň 2 dôveryhodné médiá zo zoznamu vlastníka.
+// Udalosť je na zverejnenie (`publishable`) až keď sú overené DÁTA (dve siete) AJ SPRÁVY.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,7 +19,18 @@ import { EMERGENCY_CODES, normalizeTrack } from './flightAnomalies.js';
 import { fixFromCompact } from './flightHistory.js';
 import { verifyEvent } from './eventVerify.js';
 import { buildEventTimeline, describeMoment } from './eventTimeline.js';
-import { STATE_BACKFILL_BLOCK_PAUSE_MS, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
+import { NEWS_WINDOW_AFTER_S, NEWS_WINDOW_BEFORE_S, flightIdentity, newsQuery, newsUrl, newsVerdict, parseTrustedList } from './eventNews.js';
+import { parseGdeltArticles } from './situationNews.js';
+import { STATE_BACKFILL_BLOCK_PAUSE_MS, STATE_BACKFILL_UA, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
+
+/** Správy sa hľadajú každých 30 min, kým ich nepotvrdia 2 dôveryhodné médiá (najdlhšie 48 h). */
+export const NEWS_RECHECK_MS = 30 * 60_000;
+/** GDELT dovolí jeden dopyt za 5 s (zdieľaný s modulom Blízky východ) — my najviac jeden za 10 s. */
+export const NEWS_GAP_MS = 10_000;
+/** Po 429 alebo výpadku GDELT pauza. */
+export const NEWS_PAUSE_MS = 10 * 60_000;
+/** Najviac toľko overení správ za jeden tik. */
+export const NEWS_PER_TICK = 3;
 
 export const EVENTS_TICK_MS = 60_000;
 /** Kandidát sa spracuje 3 min po prvom spúšťači (epizóda sa rozvinie, druhá sieť ju má). */
@@ -86,6 +99,11 @@ export function eventSummary(e) {
     military: Boolean(e.military),
     recheckDay: e.recheckDay ?? null,
     version: e.version ?? 1,
+    news: e.news?.status ?? null,
+    newsType: e.news?.type ?? null,
+    newsFinal: Boolean(e.news?.final),
+    // Na zverejnenie až keď sú overené dáta (dve siete) AJ správy (dve dôveryhodné médiá).
+    publishable: e.status === 'confirmed' && e.news?.status === 'verified',
   };
 }
 
@@ -133,8 +151,28 @@ export function fileEventStore(dir) {
 }
 
 /**
+ * Zoznam dôveryhodných médií z JSON súboru; zmena súboru platí bez reštartu (mtime).
+ * @returns {() => string[]}
+ */
+export function trustedNewsLoader(file) {
+  let mtime = -1;
+  let list = [];
+  return () => {
+    try {
+      const m = fs.statSync(file).mtimeMs;
+      if (m !== mtime) {
+        list = parseTrustedList(JSON.parse(fs.readFileSync(file, 'utf8')));
+        mtime = m;
+      }
+    } catch { /* bez súboru nič nie je dôveryhodné */ }
+    return list;
+  };
+}
+
+/**
  * @param {{getStore:() => any, eventsDir:string, isLocal:(req:any) => boolean, fetchImpl?:typeof fetch,
- *   now?:() => number, sleep?:(ms:number) => Promise<void>, log?:(msg:string) => void, tickMs?:number}} opts
+ *   now?:() => number, sleep?:(ms:number) => Promise<void>, log?:(msg:string) => void, tickMs?:number,
+ *   trustedFile?:string}} opts
  */
 export function createFlightEventsService({
   getStore,
@@ -145,9 +183,13 @@ export function createFlightEventsService({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   log = (msg) => console.log(msg),
   tickMs = EVENTS_TICK_MS,
+  trustedFile = null,
 } = {}) {
   const store = fileEventStore(eventsDir);
   store.load();
+  const trustedNews = trustedFile ? trustedNewsLoader(trustedFile) : () => [];
+  let lastNewsMs = 0;
+  let newsBlockedUntil = 0;
   /** @type {Map<string, {icao24:string, firstT:number, lastT:number, count:number, processedAt:number|null, finalAt:number|null}>} */
   const candidates = new Map();
   let scannedUntilS = null;
@@ -330,8 +372,93 @@ export function createFlightEventsService({
       }
       if (stopped) break;
       if (!result.event) continue;
-      store.save({ ...result.event, recheckDay: null });
+      saveMerged({ ...result.event, recheckDay: null });
       log(`[events] ${full.id} ${full.callsign || ''} preverené z denného archívu → ${result.event.status}`);
+    }
+  }
+
+  /** Uloženie po analýze: overenie správami a trasa z predošlého záznamu sa nestratia. */
+  function saveMerged(event) {
+    const prev = store.get(event.id);
+    store.save({ ...event, route: event.route ?? prev?.route ?? null, news: event.news ?? prev?.news ?? null });
+  }
+
+  /** Trasa letu z adsbdb (aerolinka, číslo letu, mestá) — null = neznáma, 'retry' = skúsiť neskôr. */
+  async function lookupRoute(callsign) {
+    try {
+      const res = await fetchImpl(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(callsign)}`, {
+        headers: { 'User-Agent': STATE_BACKFILL_UA, Accept: 'application/json' },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) return 'retry';
+      const json = JSON.parse(await res.text());
+      return json?.response?.flightroute && typeof json.response.flightroute === 'object' ? json.response.flightroute : null;
+    } catch {
+      return 'retry';
+    }
+  }
+
+  /** Správy k jednej udalosti: { route, news } alebo { blocked } (GDELT/adsbdb neodpovedá — neskôr). */
+  async function newsFor(event) {
+    const nowMs = now();
+    const checkedT = Math.floor(nowMs / 1000);
+    let identity = event.route || null;
+    if (!identity) {
+      const fr = await lookupRoute(event.callsign);
+      if (fr === 'retry') return { blocked: true };
+      identity = fr ? flightIdentity(event.callsign, fr) : null;
+      if (!identity) {
+        return { route: null, news: { status: 'none', reason: 'no-route', trusted: [], otherCount: 0, type: null, typeDomains: [], checkedT, final: true } };
+      }
+    }
+    const fromMs = (event.firstT - NEWS_WINDOW_BEFORE_S) * 1000;
+    const endMs = (event.firstT + NEWS_WINDOW_AFTER_S) * 1000;
+    const toMs = Math.min(nowMs, endMs);
+    const query = newsQuery(identity);
+    let json = null;
+    // GDELT pri obmedzení (jeden dopyt za 5 s z tej istej adresy — pýta sa aj modul Blízky východ)
+    // vracia 429 alebo text namiesto JSON: jeden nový pokus po 15 s, potom pauza.
+    for (let attempt = 0; attempt < 2 && !json && !stopped; attempt += 1) {
+      const wait = lastNewsMs + (attempt ? 15_000 : NEWS_GAP_MS) - now();
+      if (wait > 0) await sleep(wait);
+      lastNewsMs = now();
+      try {
+        const res = await fetchImpl(newsUrl(query, { fromMs, toMs }), {
+          headers: { 'User-Agent': STATE_BACKFILL_UA, Accept: 'application/json' },
+          signal: AbortSignal.timeout(30_000),
+        });
+        const text = await res.text();
+        if (res.ok && text.trim().startsWith('{')) json = JSON.parse(text);
+      } catch { /* sieť — ďalší pokus alebo pauza */ }
+    }
+    if (!json) return { blocked: true };
+    const verdict = newsVerdict(parseGdeltArticles(json), identity, trustedNews(), { fromMs, toMs });
+    return { route: identity, news: { ...verdict, query, checkedT, final: verdict.status === 'verified' || nowMs >= endMs } };
+  }
+
+  /** Overenie správami pri udalostiach dopravných letov (každých 30 min do overenia, najdlhšie 48 h). */
+  async function checkNews() {
+    // Bez zoznamu dôveryhodných médií nemá čo overiť — správy sa ani nehľadajú.
+    if (!trustedFile) return;
+    let done = 0;
+    for (const e of store.summaries()) {
+      if (stopped || done >= NEWS_PER_TICK || now() < newsBlockedUntil) break;
+      if (!['confirmed', 'unverified'].includes(e.status) || e.newsFinal) continue;
+      if (!e.callsign || !AIRLINE_CALLSIGN.test(e.callsign)) continue;
+      const full = store.get(e.id);
+      if (!full || now() - (full.news?.checkedT ?? 0) * 1000 < NEWS_RECHECK_MS) continue;
+      done += 1;
+      const result = await newsFor(full);
+      if (result.blocked) {
+        newsBlockedUntil = now() + NEWS_PAUSE_MS;
+        if (!stopped) log(`[events] ${e.id} správy: GDELT alebo adsbdb teraz neodpovedá — znova o ${NEWS_PAUSE_MS / 60_000} min`);
+        break;
+      }
+      if (stopped) break;
+      const latest = store.get(e.id) || full; // medzičasom mohlo prebehnúť nové spracovanie údajov
+      store.save({ ...latest, route: result.route ?? latest.route ?? null, news: result.news });
+      log(`[events] ${e.id} ${e.callsign} správy → ${result.news.status}${result.news.type ? ` (${result.news.type})` : ''}: ${result.news.trusted.map((t) => t.domain).join(', ') || '—'}`);
     }
   }
 
@@ -353,7 +480,7 @@ export function createFlightEventsService({
       candidates.delete(key);
     }
     if (result.event.triggers.length) {
-      store.save(result.event);
+      saveMerged(result.event);
       log(`[events] ${result.event.id} ${result.event.callsign || ''} → ${result.event.status}${final ? ' (konečné)' : ''}`);
     }
     return true;
@@ -384,10 +511,12 @@ export function createFlightEventsService({
         if (!ok) break;
       }
       await recheckUnverified();
+      await checkNews();
       stats.lastError = null;
     } catch (error) {
       stats.lastError = error?.message || String(error);
-      log(`[events] chyba: ${stats.lastError}`);
+      // Zastavená inštancia (reštart Vite) dostane chybu zatvoreného archívu — to nie je chyba služby.
+      if (!stopped) log(`[events] chyba: ${stats.lastError}`);
     } finally {
       busy = false;
     }
@@ -418,7 +547,7 @@ export function createFlightEventsService({
         const result = await analyze(url.searchParams.get('hex'), fromS, toS, { final: toS * 1000 <= now() - EVENT_FINAL_MS });
         if (result.blocked) { json(res, 503, { error: 'adsblol_blocked' }); return; }
         if (!result.event) { json(res, 400, { error: result.error || 'bad_request' }); return; }
-        if (url.searchParams.get('save') === '1' && result.event.triggers.length) store.save(result.event);
+        if (url.searchParams.get('save') === '1' && result.event.triggers.length) saveMerged(result.event);
         json(res, 200, result.event);
         return;
       }
