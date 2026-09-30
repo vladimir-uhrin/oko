@@ -98,6 +98,12 @@ foreach ($p in @($Node, $Cloudflared)) {
   if ($p -match '\\AppData\\') { throw "per-user path is not safe for a service: $p" }
   if ((Get-Item -LiteralPath $p -Force).Target) { throw "redirected path (link): $p" }
 }
+# The services must run a Node that satisfies package.json engines (>=24.14 <25 or 26.x). On this
+# machine the system Node was 22.15 and the dev server ran on it unnoticed (2026-09-30); a copy of
+# Node 24 outside AppData lives in C:\AI\OKO\bin\node-v24\node.exe - pass it with -Node.
+$nodeVersion = [version]((& $Node --version).Trim().TrimStart('v'))
+$nodeOk = ($nodeVersion.Major -eq 24 -and $nodeVersion -ge [version]'24.14.0') -or ($nodeVersion.Major -eq 26)
+if (-not $nodeOk) { throw "Node $nodeVersion at $Node does not satisfy package.json engines (>=24.14 <25 or 26.x); pass -Node C:\AI\OKO\bin\node-v24\node.exe" }
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 # 1. The logon tasks go quiet (disabled, not deleted - rollback is -Uninstall).

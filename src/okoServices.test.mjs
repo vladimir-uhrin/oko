@@ -46,6 +46,16 @@ test('dev server beží cez strážcu (pád aj zaseknutie), tunel so svojou konf
   assert.match(publish, /\[string\[\]\]\$Redirects = @\('www\.okolive\.sk=https:\/\/okolive\.sk'\)/);
 });
 
+test('služby bežia na Node podľa package.json engines (2026-09-30: dev server bežal na 22.15)', () => {
+  const pkg = JSON.parse(read('../package.json'));
+  assert.equal(pkg.engines.node, '>=24.14.0 <25 || >=26 <27', 'ak sa engines zmení, uprav aj kontrolu v inštalátore');
+  assert.match(install, /\$nodeVersion = \[version\]\(\(& \$Node --version\)\.Trim\(\)\.TrimStart\('v'\)\)/);
+  assert.match(install, /\$nodeOk = \(\$nodeVersion\.Major -eq 24 -and \$nodeVersion -ge \[version\]'24\.14\.0'\) -or \(\$nodeVersion\.Major -eq 26\)/);
+  assert.match(install, /if \(-not \$nodeOk\) \{ throw/, 'starý Node službu nenastaví');
+  // Poradie: kontrola verzie až po overení, že cesta existuje a nie je v AppData.
+  assert.ok(install.indexOf('$nodeOk') > install.indexOf("per-user path is not safe for a service"));
+});
+
 test('bezpečnosť ciest a prechod z úloh: systémové cesty, úlohy len vypnuté, končia sa len naše procesy', () => {
   assert.match(install, /\[string\]\$Node = 'C:\\Program Files\\nodejs\\node\.exe'/, 'systémový Node, nie fnm v AppData');
   assert.match(install, /if \(\$p -match '\\\\AppData\\\\'\) \{ throw/, 'cesta v profile používateľa do služby nepatrí (MSIX presmerovanie)');
