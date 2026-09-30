@@ -152,7 +152,7 @@ test('panel: rad štátnych strojov — lety aj keď stroj nelieta, riadok s dá
   const list = doc.root.body.children.find((c) => c.className === 'history-list');
   const legBtn = list.children[0].children[0];
   assert.equal(legBtn.children[0].textContent, 'BTS → BRU', 'titulok = odvodená trasa');
-  assert.match(legBtn.children[1].textContent, /^(\d{1,2}\. \d{1,2}\. \d{4}|\d{4}-\d{2}-\d{2}) · /, 'podtitul začína dátumom (lety cez roky; SK aj EN tvar)');
+  assert.match(legBtn.children[1].textContent, /^BTS → BRU · (\d{1,2}\. \d{1,2}\. \d{4}|\d{4}-\d{2}-\d{2}) · /, 'podtitul: kódy letísk, potom dátum (lety cez roky; SK aj EN tvar)');
   const status = doc.root.body.children.find((c) => c.className === 'history-status');
   assert.match(status.textContent, /history\.state-results .*OM-TST/);
   // Z pásu nad kartou: konkrétny let rovno do detailu a prehrávača.

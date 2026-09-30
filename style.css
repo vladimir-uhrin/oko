@@ -10538,6 +10538,52 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-primary);
 }
 
+/* Krížik v rohu kartičky na glóbuse (2026-09-30, cardCloseButtons.js): sledovaný objekt a vybraná
+   loď sa dajú zavrieť priamo, nie len klikom vedľa. Karta je v plátne — krížik je DOM nad ňou. */
+.card-close {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(0, 220, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(2, 12, 18, 0.85);
+  color: #dceeff;
+  cursor: var(--cursor-pointer);
+}
+.card-close[hidden] {
+  display: none;
+}
+.card-close .material-symbols-outlined {
+  font-size: 16px;
+}
+.card-close:hover,
+.card-close:focus-visible {
+  border-color: #00dcff;
+  color: #fff;
+  outline: none;
+}
+/* Dotyk: väčší cieľ bez posunu kresby (neviditeľný okraj okolo). */
+@media (pointer: coarse) {
+  .card-close::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
+}
+body.cockpit-mode .card-close,
+body.ui-clean-view .card-close,
+body.recording-mode .card-close {
+  display: none !important;
+}
+
 /* Štátne lietadlo pri karte (2026-09-30, stateFlightsStrip.js): odznak, prevádzkovateľ, značka
    a prepínač PREDCHÁDZAJÚCE LETY. Sadá pod kartu (a pod fotku) — nad kartou ho na úzkej
    obrazovke zakryla horná lišta; zlatá linka ho oddeľuje ako ďalší riadok karty. */
@@ -10547,7 +10593,7 @@ body.scene-playback-mode #first-run-launcher {
   left: 0;
   z-index: 59;
   box-sizing: border-box;
-  max-width: min(560px, calc(100vw - 8px));
+  max-width: calc(100vw - 8px);
   padding: 8px 10px 9px;
   background: rgba(6, 12, 18, 0.9);
   border-top: 1px solid rgba(232, 196, 106, 0.6);
@@ -10753,6 +10799,11 @@ body.recording-mode .state-strip {
   font: 600 9px/1 var(--font-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+/* `.scene-btn` má flex: 1 1 0% — v rade by sa všetky stroje natlačili do jedného riadku
+   a popisy sa prekrývali (naživo 2026-09-30 na 702 px). Tu prirodzená šírka a zalomenie. */
+.history-state-row .history-state-btn {
+  flex: 0 0 auto;
 }
 
 /* Toast s akciou (2026-09-03): núdzový squawk sa dá kliknúť a skočiť na

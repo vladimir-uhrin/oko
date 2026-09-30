@@ -46,11 +46,12 @@ export const STATE_STRIP_BOTTOM_SAFE_NARROW_PX = 240;
 export const STATE_STRIP_NARROW_MAX_W = 1180;
 /** Pás sa nikdy neskráti pod túto výšku (hlavička + aspoň jeden let). */
 export const STATE_STRIP_MIN_HEIGHT_PX = 110;
+/** Najmenšia šírka pásu (úzka karta satelitu a pod.). */
+export const STATE_STRIP_MIN_WIDTH_PX = 300;
 
-/** Najväčšia výška pásu, ktorá sa zmestí nad spodný dok (a na úzkej obrazovke nad plávajúce tlačidlá). Pure. */
-export function stripMaxHeight(y, viewportH, viewportW = Infinity) {
-  const bottomSafe = viewportW <= STATE_STRIP_NARROW_MAX_W ? STATE_STRIP_BOTTOM_SAFE_NARROW_PX : STATE_STRIP_BOTTOM_SAFE_PX;
-  return Math.max(STATE_STRIP_MIN_HEIGHT_PX, Math.round(viewportH - y - bottomSafe));
+/** Voľný okraj nad spodkom okna podľa šírky (úzka = aj plávajúce SLEDOVAŤ/KOKPIT). Pure. */
+export function stripBottomSafe(viewportW) {
+  return viewportW <= STATE_STRIP_NARROW_MAX_W ? STATE_STRIP_BOTTOM_SAFE_NARROW_PX : STATE_STRIP_BOTTOM_SAFE_PX;
 }
 const TRACKED_PREFIXES = ['flights:', 'military:'];
 
@@ -64,19 +65,41 @@ export function trackedHexFromId(id) {
 }
 
 /**
- * Poloha pásu: pod kartou (a pod pásom s fotkou, `belowOffset`), zarovnaný s jej ľavým okrajom,
- * aspoň taký široký ako karta. Keď dole nie je miesto a hore je (mimo hornej lišty), ide nad
- * kartu; inak ostane dole a posunie sa do okna. Pure.
+ * Poloha a najväčšia výška pásu. `size.h` = prirodzená výška celého obsahu. Pás ide pod kartu
+ * (a pod fotku, `belowOffset`), ak sa tam zmestí alebo je tam aspoň toľko miesta ako nad kartou;
+ * inak nad kartu (pod hornú lištu). Výška sa obmedzí na miesto zvolenej strany — zoznam letov
+ * roluje (naživo 2026-09-30: vysoká karta v nízkom okne nechala zoznamu pod sebou 0 px). Pure.
+ * @returns {{x: number, y: number, w: number, above: boolean, maxH: number}}
  */
-export function stripPlacement(rect, size, viewport, { belowOffset = 0, overlap = STATE_STRIP_OVERLAP_PX, topSafe = STATE_STRIP_TOP_SAFE_PX } = {}) {
-  const w = Math.max(Math.round(rect.w), Math.min(size.w, Math.max(0, viewport.w - 8)));
+export function stripPlacement(rect, size, viewport, {
+  belowOffset = 0,
+  overlap = STATE_STRIP_OVERLAP_PX,
+  topSafe = STATE_STRIP_TOP_SAFE_PX,
+  bottomSafe = stripBottomSafe(viewport.w),
+} = {}) {
+  // Presne na šírku karty (naživo bol pás podľa obsahu širší a vyčnieval doľava), aspoň 300 px.
+  const w = Math.min(Math.max(Math.round(rect.w), STATE_STRIP_MIN_WIDTH_PX), Math.max(0, viewport.w - 8));
   let x = Math.round(rect.x);
   if (x + w > viewport.w - 4) x = Math.max(4, viewport.w - 4 - w);
   const belowY = rect.y + rect.h - overlap + belowOffset;
-  const aboveY = rect.y - size.h + overlap;
-  if (belowY + size.h <= viewport.h - 4) return { x, y: Math.round(belowY), w, above: false };
-  if (aboveY >= topSafe) return { x, y: Math.round(aboveY), w, above: true };
-  return { x, y: Math.round(Math.max(topSafe, viewport.h - 4 - size.h)), w, above: false };
+  const belowRoom = Math.round(viewport.h - bottomSafe - belowY);
+  const aboveRoom = Math.round(rect.y + overlap - topSafe);
+  if (size.h <= belowRoom || belowRoom >= aboveRoom) {
+    return { x, y: Math.round(belowY), w, above: false, maxH: Math.max(STATE_STRIP_MIN_HEIGHT_PX, belowRoom) };
+  }
+  const h = Math.min(size.h, aboveRoom);
+  return { x, y: Math.round(rect.y + overlap - h), w, above: true, maxH: Math.max(STATE_STRIP_MIN_HEIGHT_PX, aboveRoom) };
+}
+
+/** Prirodzená výška pásu z jeho častí (zoznam má v CSS strop min(40vh, 300 px)). */
+function naturalStripHeight(parts, viewportH) {
+  const { head, list, foot, status } = parts;
+  const listCap = Math.min(0.4 * viewportH, 300);
+  return (head.offsetHeight || 34)
+    + (status.hidden ? 0 : (status.offsetHeight || 16) + 8)
+    + (list.hidden ? 0 : Math.min(list.scrollHeight || 0, listCap) + 8)
+    + (foot.hidden ? 0 : (foot.offsetHeight || 30) + 6)
+    + 18; // výplň + linka
 }
 
 const state = {
@@ -192,13 +215,14 @@ function sync() {
   if (!visible) { hide(); return; }
   if (state.root.hidden) state.root.hidden = false;
   const view = state.root.ownerDocument.defaultView;
-  const size = { w: state.root.offsetWidth || 320, h: state.root.offsetHeight || 40 };
+  const viewport = { w: view?.innerWidth || 0, h: view?.innerHeight || 0 };
+  const size = { w: state.root.offsetWidth || 320, h: naturalStripHeight(state.parts, viewport.h) };
   const photo = state.root.ownerDocument.querySelector?.('.tracked-photo:not([hidden])');
-  const { x, y, w, above } = stripPlacement(visible, size, { w: view?.innerWidth || 0, h: view?.innerHeight || 0 }, {
+  const { x, y, w, above, maxH } = stripPlacement(visible, size, viewport, {
     belowOffset: photo ? Math.max(0, (photo.offsetHeight || 0) - STATE_STRIP_OVERLAP_PX) : 0,
   });
-  state.root.style.minWidth = `${w}px`;
-  state.root.style.maxHeight = above ? '' : `${stripMaxHeight(y, view?.innerHeight || 0, view?.innerWidth || 0)}px`;
+  state.root.style.width = `${w}px`;
+  state.root.style.maxHeight = `${maxH}px`;
   state.root.style.opacity = String(visible.opacity);
   state.root.style.transform = `translate(${x}px, ${y}px)`;
   state.root.classList?.toggle?.('is-above', above);
@@ -258,7 +282,7 @@ export function installStateFlightsStrip(viewer, { container, onOpenLeg, onOpenA
   root.append(head, status, list, foot);
   container.appendChild(root);
   state.root = root;
-  state.parts = { badge, meta, toggle, toggleText, list, foot, more, all, note, status };
+  state.parts = { head, badge, meta, toggle, toggleText, list, foot, more, all, note, status };
 
   toggle.addEventListener('click', () => {
     state.open = !state.open;

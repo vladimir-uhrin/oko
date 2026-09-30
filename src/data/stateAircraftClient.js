@@ -2,6 +2,7 @@
 // a ich lety z /api/state-aircraft (stateAircraftService.js). Pure okrem fetchu; texty cez `t`.
 
 import { formatDuration } from './flightHistory.js';
+import { regionDisplayName } from './trackedCardModel.js';
 
 /** Zoznam sa mení zriedka — v pamäti na 30 min. */
 export const STATE_LIST_TTL_MS = 30 * 60_000;
@@ -80,18 +81,37 @@ const clock = (epochS) => {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 };
 
+const UNKNOWN_PLACE = { sk: 'neznáme', en: 'unknown' };
+
 /**
- * Riadok letu: trasa „BTS → BRU" (odvodená; neznáme letisko = „?") a podriadok s dátumom,
- * časom UTC, trvaním a volacím znakom. Pure.
+ * Miesto letiska pre bežného čitateľa (vlastník 2026-09-30: „daj tam riadne názvy odkiaľ kam,
+ * lebo normálny človek to nevie"): mesto z údajov letiska, pri zahraničí aj štát v jazyku
+ * rozhrania — „Tel Aviv (Izrael)", doma len „Bratislava". Pure.
+ */
+export function airportPlace(airport, lang = 'sk') {
+  const l = lang === 'en' ? 'en' : 'sk';
+  if (!airport) return UNKNOWN_PLACE[l];
+  const city = String(airport.municipality || airport.name || airportCode(airport)).trim();
+  const country = airport.country && airport.country !== 'SK' ? regionDisplayName(airport.country, l) : '';
+  return country ? `${city} (${country})` : city;
+}
+
+/**
+ * Riadok letu: trasa menami miest „Bratislava → Brussels (Belgicko)" — mesto tak, ako ho vedie
+ * databáza letísk (OurAirports, rovnako ako trasa v karte letu), štát v jazyku rozhrania (odvodená z koncov stopy;
+ * neznáme letisko = „neznáme") a podriadok s kódmi letísk, dátumom, časom UTC, trvaním a
+ * volacím znakom. Pure.
  */
 export function stateFlightRowModel(flight, lang = 'sk') {
-  const route = `${airportCode(flight.origin)} → ${airportCode(flight.destination)}`;
+  const route = `${airportPlace(flight.origin, lang)} → ${airportPlace(flight.destination, lang)}`;
+  const codes = `${airportCode(flight.origin)} → ${airportCode(flight.destination)}`;
   const sub = [
+    codes,
     flightDateUtc(flight.firstT, lang),
     `${clock(flight.firstT)}–${clock(flight.lastT)} UTC`,
     Number.isFinite(flight.durationS) && flight.durationS > 0 ? formatDuration(flight.durationS) : '',
     String(flight.callsign || '').trim(),
   ].filter(Boolean).join(' · ');
   const alert = (flight.squawks || []).find((s) => ['7500', '7600', '7700'].includes(s)) || null;
-  return { route, sub, alert };
+  return { route, codes, sub, alert };
 }

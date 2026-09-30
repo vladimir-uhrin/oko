@@ -20,12 +20,13 @@ test('riadok letu: odvodená trasa (IATA, inak ICAO, neznáme ?), dátum UTC, č
     firstT: T, lastT: T + 6780, durationS: 6780, callsign: 'SSG1', squawks: ['1000'],
     origin: { iata: 'BTS', icao: 'LZIB' }, destination: { iata: null, icao: 'EBMB' },
   }, 'sk');
-  assert.equal(row.route, 'BTS → EBMB');
-  assert.equal(row.sub, '25. 9. 2026 · 10:12–12:05 UTC · 1 h 53 min · SSG1');
+  assert.equal(row.route, 'BTS → EBMB', 'bez mesta v údajoch letiska zostane kód');
+  assert.equal(row.codes, 'BTS → EBMB');
+  assert.equal(row.sub, 'BTS → EBMB · 25. 9. 2026 · 10:12–12:05 UTC · 1 h 53 min · SSG1');
   assert.equal(row.alert, null);
   const en = stateFlightRowModel({ firstT: T, lastT: T + 600, durationS: 600, callsign: '', squawks: ['7700'], origin: null, destination: null }, 'en');
-  assert.equal(en.route, '? → ?', 'neznáme letisko sa nevymýšľa');
-  assert.equal(en.sub, '2026-09-25 · 10:12–10:22 UTC · 10 min');
+  assert.equal(en.route, 'unknown → unknown', 'neznáme letisko sa nevymýšľa');
+  assert.equal(en.sub, '? → ? · 2026-09-25 · 10:12–10:22 UTC · 10 min');
   assert.equal(en.alert, '7700');
   assert.equal(airportCode({ ident: 'LZ01' }), 'LZ01');
   assert.equal(flightDateUtc(Date.UTC(2024, 0, 5, 23, 59) / 1000, 'sk'), '5. 1. 2024');
@@ -67,4 +68,18 @@ test('zoznam: jeden dopyt počas 30 min, pri chybe prázdny zoznam (odznak sa le
   const empty = await loadStateAircraftList({ fetcher: async () => { throw new Error('offline'); } });
   assert.equal(empty.aircraft.length, 0);
   _resetStateAircraftClientForTest();
+});
+
+test('miesto letiska pre bežného čitateľa: mesto, pri zahraničí aj štát v jazyku rozhrania, doma len mesto (vlastník: „normálny človek to nevie")', async () => {
+  const { airportPlace } = await import('./stateAircraftClient.js');
+  const otp = { iata: 'OTP', icao: 'LROP', municipality: 'Bucharest', country: 'RO' };
+  const bts = { iata: 'BTS', icao: 'LZIB', municipality: 'Bratislava', country: 'SK' };
+  assert.equal(airportPlace(otp, 'sk'), 'Bucharest (Rumunsko)');
+  assert.equal(airportPlace(otp, 'en'), 'Bucharest (Romania)');
+  assert.equal(airportPlace(bts, 'sk'), 'Bratislava', 'Slovensko sa pri domácom letisku nepíše');
+  assert.equal(airportPlace({ icao: 'XXXX', name: 'Some Field' }, 'sk'), 'Some Field', 'bez mesta názov letiska');
+  assert.equal(airportPlace(null, 'sk'), 'neznáme');
+  const row = stateFlightRowModel({ firstT: T, lastT: T + 3600, durationS: 3600, callsign: 'SQF901', squawks: [], origin: otp, destination: bts }, 'sk');
+  assert.equal(row.route, 'Bucharest (Rumunsko) → Bratislava');
+  assert.match(row.sub, /^OTP → BTS · 25\. 9\. 2026 · /, 'kódy ostanú drobným písmom v podriadku');
 });

@@ -9,15 +9,34 @@ import {
   STATE_STRIP_MIN_HEIGHT_PX,
   STATE_STRIP_OVERLAP_PX,
   STATE_STRIP_TOP_SAFE_PX,
-  stripMaxHeight,
+  stripBottomSafe,
   stripPlacement,
   trackedHexFromId,
 } from './stateFlightsStrip.js';
 
 test('výška pásu: zoznam sa skráti nad spodný dok (úzka obrazovka aj nad SLEDOVAŤ/KOKPIT), hlavička s jedným letom ostane vždy', () => {
-  assert.equal(stripMaxHeight(300, 900, 1600), 900 - 300 - STATE_STRIP_BOTTOM_SAFE_PX, 'široká obrazovka: nad dokom');
-  assert.equal(stripMaxHeight(384, 860, 702), 860 - 384 - STATE_STRIP_BOTTOM_SAFE_NARROW_PX, 'naživo 702×860: nad plávajúcimi tlačidlami');
-  assert.equal(stripMaxHeight(800, 860, 702), STATE_STRIP_MIN_HEIGHT_PX);
+  assert.equal(stripBottomSafe(1600), STATE_STRIP_BOTTOM_SAFE_PX);
+  assert.equal(stripBottomSafe(702), STATE_STRIP_BOTTOM_SAFE_NARROW_PX);
+  // naživo 702×860: karta prilepená hore, pás pod fotkou končí nad plávajúcimi tlačidlami
+  const docked = stripPlacement({ x: 142, y: 62, w: 536, h: 322 }, { w: 536, h: 900 }, { w: 702, h: 860 });
+  assert.equal(docked.above, false);
+  assert.equal(docked.maxH, 860 - STATE_STRIP_BOTTOM_SAFE_NARROW_PX - (62 + 322 - STATE_STRIP_OVERLAP_PX));
+  // málo miesta všade: aspoň hlavička s jedným letom
+  const cramped = stripPlacement({ x: 100, y: 70, w: 260, h: 700 }, { w: 320, h: 400 }, { w: 1600, h: 800 });
+  assert.equal(cramped.maxH, STATE_STRIP_MIN_HEIGHT_PX);
+});
+
+test('poloha pásu: vysoká karta v nízkom okne — otvorený zoznam ide nad kartu, kde je viac miesta (naživo: pod kartou ostalo 0 px)', () => {
+  const vp = { w: 1422, h: 802 };
+  const card = { x: 900, y: 281, w: 510, h: 250 };
+  const open = stripPlacement(card, { w: 510, h: 700 }, vp, { belowOffset: 45 });
+  assert.equal(open.above, true, 'nad kartou je viac miesta než pod ňou');
+  assert.equal(open.maxH, 281 + STATE_STRIP_OVERLAP_PX - STATE_STRIP_TOP_SAFE_PX);
+  assert.equal(open.y, STATE_STRIP_TOP_SAFE_PX, 'zoznam vyplní miesto po hornú lištu');
+  // Zatvorený pás (len hlavička) sa zmestí pod kartu — ostane pri nej dole.
+  const closed = stripPlacement(card, { w: 510, h: 52 }, vp, { belowOffset: 45 });
+  assert.equal(closed.above, false);
+  assert.equal(closed.y, 281 + 250 - STATE_STRIP_OVERLAP_PX + 45);
 });
 
 test('hex zo záznamu karty: lietadlá aj vojenské, iné vrstvy nie', () => {
@@ -28,20 +47,20 @@ test('hex zo záznamu karty: lietadlá aj vojenské, iné vrstvy nie', () => {
   assert.equal(trackedHexFromId(null), null);
 });
 
-test('poloha pásu: pod kartou a fotkou, aspoň šírka karty, v okne; hore len keď dole nie je miesto a nezakryje ho horná lišta', () => {
-  const vp = { w: 1000, h: 800 };
-  // Karta prilepená hore (úzka obrazovka): pás pod ňou a pod fotkou, nie pod ikonami hornej lišty.
+test('poloha pásu: pod kartou a fotkou, aspoň šírka karty, v okne; hore len keď je tam viac miesta a nezakryje ho horná lišta', () => {
+  const vp = { w: 1600, h: 800 };
+  // Karta prilepená hore: pás pod ňou a pod fotkou, nie pod ikonami hornej lišty.
   const docked = stripPlacement({ x: 100, y: 62, w: 260, h: 320 }, { w: 320, h: 50 }, vp, { belowOffset: 60 });
-  assert.deepEqual(docked, { x: 100, y: 62 + 320 - STATE_STRIP_OVERLAP_PX + 60, w: 320, above: false });
-  const clamped = stripPlacement({ x: 900, y: 300, w: 260, h: 90 }, { w: 320, h: 50 }, vp);
+  assert.equal(docked.above, false);
+  assert.equal(docked.y, 62 + 320 - STATE_STRIP_OVERLAP_PX + 60);
+  assert.equal(docked.w, 300, 'šírka karty, najmenej 300 px — nie podľa obsahu');
+  const clamped = stripPlacement({ x: 1500, y: 300, w: 260, h: 90 }, { w: 320, h: 50 }, vp);
   assert.equal(clamped.x + clamped.w <= vp.w - 4, true, 'nevyjde z okna');
   // Karta pri spodku obrazovky: pás ide nad ňu.
-  const low = stripPlacement({ x: 100, y: 650, w: 260, h: 120 }, { w: 320, h: 50 }, vp);
-  assert.deepEqual(low, { x: 100, y: 650 - 50 + STATE_STRIP_OVERLAP_PX, w: 320, above: true });
-  // Vysoká karta bez miesta hore aj dole: ostane dole v okne, nikdy nie pod hornou lištou.
-  const tall = stripPlacement({ x: 100, y: 70, w: 260, h: 700 }, { w: 320, h: 50 }, vp);
-  assert.equal(tall.above, false);
-  assert.ok(tall.y >= STATE_STRIP_TOP_SAFE_PX && tall.y + 50 <= vp.h - 4);
+  const low = stripPlacement({ x: 100, y: 600, w: 260, h: 120 }, { w: 320, h: 50 }, vp);
+  assert.equal(low.above, true);
+  assert.equal(low.y, 600 - 50 + STATE_STRIP_OVERLAP_PX);
+  assert.ok(low.y >= STATE_STRIP_TOP_SAFE_PX, 'nikdy pod hornou lištou');
 });
 
 function fakeDom() {

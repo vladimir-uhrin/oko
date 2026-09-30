@@ -48,7 +48,9 @@ import {
   isCelestialRingStyleSupported,
   setKeyholeFadeTuning,
 } from './celestialRing.js';
-import { destroyTrackedReadout, initTrackedReadout } from './data/trackedReadout.js';
+import { TRACKED_OVERLAY_SOURCE_ID, destroyTrackedReadout, getActiveTrackedReadoutId, initTrackedReadout } from './data/trackedReadout.js';
+import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
+import { installCardCloseButtons } from './cardCloseButtons.js';
 import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
 import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFlightsStrip.js';
 import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
@@ -3142,6 +3144,37 @@ export class StyleManager {
         revealHistoryPanel();
         this._historyPanel?.showStateAircraft(hex);
       },
+    });
+    // Krížik v rohu kartičiek (2026-09-30, vlastník: „kliknúť vedľa, aby sa karta zavrela, je
+    // amaterizmus — aspoň malé X do rohu“): sledovaný objekt a vybraná loď; zatvára tou istou cestou.
+    const trackedLayerByPrefix = { flights: 'flights', military: 'military', satellites: 'satellites', installations: 'military-installations' };
+    const vesselsModule = () => this._dataManager?.layers?.get('ais-live-vessels')?.module;
+    this._cardCloseButtons = installCardCloseButtons(viewer, {
+      container: document.body,
+      t,
+      providers: [
+        {
+          id: 'tracked',
+          active: () => {
+            const id = getActiveTrackedReadoutId();
+            return id ? { sourceId: TRACKED_OVERLAY_SOURCE_ID, entryId: id } : null;
+          },
+          close: () => {
+            const prefix = String(getActiveTrackedReadoutId() || '').split(':')[0];
+            const module = this._dataManager?.layers?.get(trackedLayerByPrefix[prefix])?.module;
+            if (typeof module?.stopTracking === 'function') module.stopTracking({ origin: 'user' });
+            else viewer.trackedEntity = undefined;
+          },
+        },
+        {
+          id: 'vessel',
+          active: () => {
+            const mmsi = String(vesselsModule()?.getSelectedInfo?.()?.mmsi || '').trim();
+            return mmsi ? { sourceId: VESSEL_OVERLAY_SOURCE_ID, entryId: `vessel:${mmsi}` } : null;
+          },
+          close: () => vesselsModule()?.clearSelection?.(),
+        },
+      ],
     });
     // Bohatá karta letiska po kliknutí (frekvencie, dráhy, METAR, živá
     // premávka z vrstvy letov, odkazy) — viď airportCard.js.
@@ -11613,6 +11646,7 @@ export class StyleManager {
     destroyNaturalEventCard();
     destroyTrackedPhoto();
     destroyStateFlightsStrip();
+    this._cardCloseButtons?.destroy();
     destroyTrackedReadout();
     destroyDetection();
     destroyWorldOverlay();
