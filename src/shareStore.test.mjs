@@ -119,3 +119,28 @@ test('createShareStore: uloží json + jpg, číta späť, nevalidné id null, r
   assert.equal(store.prune(nowMs + 100 * 86_400_000), 1, 'ručné mazanie vracia počet');
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('createShareStore: zverejnená udalosť (keep) retencia nemaže, verejný POST si keep nastaviť nevie', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-share-keep-'));
+  let nowMs = Date.UTC(2026, 8, 30, 12);
+  const ids = ['KEEPKEEP01', 'PLAINPLAIN'];
+  const store = createShareStore({ dir, now: () => nowMs, idFactory: () => ids.shift() || makeShareId() });
+  const value = validateSharePayload({ ...validBody(), keep: true }).value;
+  assert.equal(value.keep, undefined, 'verejné telo s keep: true neprejde — trvalé záznamy len zo servera');
+  const kept = store.save({ ...value, keep: true });
+  const plain = store.save(value);
+  assert.equal(kept.keep, true);
+  assert.equal(plain.keep, undefined);
+  nowMs += 400 * 86_400_000;
+  assert.equal(store.prune(nowMs), 1, 'zmazaný len obyčajný záznam');
+  assert.equal(store.read('PLAINPLAIN'), null);
+  assert.equal(store.read('KEEPKEEP01').keep, true, 'odkaz v príspevku ostáva platný aj po roku');
+  assert.ok(existsSync(path.join(dir, 'KEEPKEEP01.jpg')));
+  // Stiahnutie udalosti vlastníkom: záznam aj obrázok preč, /s/<id> potom 404.
+  assert.equal(store.remove('../KEEPKEEP01'), false, 'nevalidné id nič nemaže');
+  assert.equal(store.remove('KEEPKEEP01'), true);
+  assert.equal(store.read('KEEPKEEP01'), null);
+  assert.equal(existsSync(path.join(dir, 'KEEPKEEP01.jpg')), false);
+  assert.equal(store.remove('KEEPKEEP01'), false, 'druhé zmazanie nič nenájde');
+  rmSync(dir, { recursive: true, force: true });
+});

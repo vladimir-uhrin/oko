@@ -11,6 +11,9 @@
 // Etapa 2 (správy): pri udalostiach dopravných letov sa každých 30 min (do 48 h) hľadajú správy
 // v GDELT (eventNews.js) — overené, keď píšu aspoň 2 dôveryhodné médiá zo zoznamu vlastníka.
 // Udalosť je na zverejnenie (`publishable`) až keď sú overené DÁTA (dve siete) AJ SPRÁVY.
+// Etapa 2b (zverejnenie): vlastník si na tomto počítači pozrie obrázok a text príspevku a klikne
+// „Zverejniť" — vznikne trvalý odkaz /s/<id> s obrázkom (Open Graph pre FB) a verejný pohľad
+// /api/events/public/<id> (panel v OKO). Nič sa nezverejní samo a nič sa neposiela na FB.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,8 +23,11 @@ import { fixFromCompact } from './flightHistory.js';
 import { verifyEvent } from './eventVerify.js';
 import { buildEventTimeline, describeMoment } from './eventTimeline.js';
 import { NEWS_WINDOW_AFTER_S, NEWS_WINDOW_BEFORE_S, flightIdentity, newsQuery, newsUrl, newsVerdict, parseTrustedList } from './eventNews.js';
+import { simplifyTrack } from './eventCard.js';
+import { eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, isPublishable, postText, publicEventView } from './eventPost.js';
 import { parseGdeltArticles } from './situationNews.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS, STATE_BACKFILL_UA, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
+import { validateSharePayload } from '../shareStore.js';
 
 /** Správy sa hľadajú každých 30 min, kým ich nepotvrdia 2 dôveryhodné médiá (najdlhšie 48 h). */
 export const NEWS_RECHECK_MS = 30 * 60_000;
@@ -64,7 +70,28 @@ export const AIRLINE_CALLSIGN = /^[A-Z]{3}\d/;
  */
 export const ROUTINE_DIVE_CATEGORIES = new Set([2, 7, 8, 9, 10, 11, 12, 14]);
 export const NETWORK_LABELS = Object.freeze({ opensky: 'OpenSky', adsblol: 'adsb.lol' });
+/** Verejná adresa OKO pre odkazy v príspevkoch (nie adresa požiadavky — vlastník klikne na localhoste). */
+export const EVENTS_PUBLIC_ORIGIN = 'https://okolive.sk';
 const EVENT_ID = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
+const EVENT_ID_PART = '[0-9a-f]{6}-\\d{8}T\\d{4}';
+const PUBLIC_ROUTE = new RegExp(`^/public/(${EVENT_ID_PART})$`);
+const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|post|publish|unpublish))?$`);
+/** Stopa na obrázok: body sietí, ktoré sú v atribúcii (OpenSky + adsb.lol), aj z druhej siete. */
+const DRAWN_SRC = (src) => src === PRIMARY_SRC || String(src || '').startsWith('adsb.lol');
+
+/**
+ * Zapisovacie akcie (zverejniť / stiahnuť) len z vlastnej stránky OKO na localhoste: cudzia stránka
+ * otvorená v prehliadači vlastníka by inak vedela poslať POST na localhost (CSRF). Vyžaduje JSON
+ * telo (cudzí pôvod tak musí prejsť predletom CORS, ktorý tu neprejde). Pure.
+ */
+export function isOwnLocalPost(req) {
+  const h = req?.headers || {};
+  const site = String(h['sec-fetch-site'] || '');
+  if (site && site !== 'same-origin' && site !== 'none') return false;
+  const origin = String(h.origin || '');
+  if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)) return false;
+  return String(h['content-type'] || '').toLowerCase().startsWith('application/json');
+}
 
 const pad = (v) => String(v).padStart(2, '0');
 /** Id udalosti: `<hex>-RRRRMMDDTHHMM` (čas prvého spúšťača, UTC). Pure. */
@@ -103,7 +130,8 @@ export function eventSummary(e) {
     newsType: e.news?.type ?? null,
     newsFinal: Boolean(e.news?.final),
     // Na zverejnenie až keď sú overené dáta (dve siete) AJ správy (dve dôveryhodné médiá).
-    publishable: e.status === 'confirmed' && e.news?.status === 'verified',
+    publishable: isPublishable(e),
+    published: e.published?.url ?? null,
   };
 }
 
@@ -172,7 +200,8 @@ export function trustedNewsLoader(file) {
 /**
  * @param {{getStore:() => any, eventsDir:string, isLocal:(req:any) => boolean, fetchImpl?:typeof fetch,
  *   now?:() => number, sleep?:(ms:number) => Promise<void>, log?:(msg:string) => void, tickMs?:number,
- *   trustedFile?:string}} opts
+ *   trustedFile?:string, renderCard?:((event:object, format?:string) => Promise<{jpeg:Buffer, width:number, height:number}>)|null,
+ *   shareStore?:{save:Function, read:Function, remove:Function}|null, publicOrigin?:string}} opts
  */
 export function createFlightEventsService({
   getStore,
@@ -184,6 +213,9 @@ export function createFlightEventsService({
   log = (msg) => console.log(msg),
   tickMs = EVENTS_TICK_MS,
   trustedFile = null,
+  renderCard = null,
+  shareStore = null,
+  publicOrigin = EVENTS_PUBLIC_ORIGIN,
 } = {}) {
   const store = fileEventStore(eventsDir);
   store.load();
@@ -279,6 +311,8 @@ export function createFlightEventsService({
     const second = await secondNetwork(hex, fromS, toS);
     if (second.blocked) return { blocked: true };
     const theirs = normalizeTrack(second.points.filter((p) => p.t >= fromS && p.t <= toS));
+    // Stopa na obrázok a do verejného pohľadu: spojené body oboch sietí (overuje sa len z `ours`).
+    const drawn = normalizeTrack([...rows.filter((r) => DRAWN_SRC(r[12])).map(fixFromCompact).filter(Boolean), ...theirs]);
     const primary = { id: 'opensky', label: NETWORK_LABELS.opensky, points: ours };
     const secondary = { id: 'adsblol', label: NETWORK_LABELS.adsblol, points: theirs };
     const verification = verifyEvent(primary, secondary);
@@ -344,6 +378,7 @@ export function createFlightEventsService({
         en: timeline.moments.map((m) => describeMoment(m, { lang: 'en', labels })),
       },
       coverage: timeline.coverage,
+      track: simplifyTrack(drawn),
       secondNetwork: second.statuses,
       attribution: ['OpenSky Network', 'adsb.lol (ODbL 1.0)'],
       analyzedT: Math.floor(now() / 1000),
@@ -377,10 +412,87 @@ export function createFlightEventsService({
     }
   }
 
-  /** Uloženie po analýze: overenie správami a trasa z predošlého záznamu sa nestratia. */
+  /** Uloženie po analýze: overenie správami, trasa a zverejnenie z predošlého záznamu sa nestratia. */
   function saveMerged(event) {
     const prev = store.get(event.id);
-    store.save({ ...event, route: event.route ?? prev?.route ?? null, news: event.news ?? prev?.news ?? null });
+    store.save({
+      ...event,
+      route: event.route ?? prev?.route ?? null,
+      news: event.news ?? prev?.news ?? null,
+      published: event.published ?? prev?.published ?? null,
+    });
+  }
+
+  /**
+   * Udalosť so stopou na obrázok. Staršie záznamy (pred etapou 2b) stopu nemajú — doplní sa z archívu
+   * OKO (body OpenSky a adsb.lol v okne udalosti) bez nového overovania a uloží sa.
+   */
+  async function withTrack(event) {
+    if (Array.isArray(event.track) && event.track.length) return event;
+    const s = getStore();
+    if (!s || !event.window) return event;
+    const rows = await s.track(event.icao24, { fromS: event.window.fromT, toS: event.window.toT, limit: 20_000, withSrc: true });
+    const track = simplifyTrack(normalizeTrack(rows.filter((r) => DRAWN_SRC(r[12])).map(fixFromCompact).filter(Boolean)));
+    if (!track.length || stopped) return event;
+    const next = { ...(store.get(event.id) || event), track };
+    store.save(next);
+    return next;
+  }
+
+  /** Text príspevku a stav zverejnenia pre kontrolu vlastníkom. */
+  function postPayload(event) {
+    const url = event.published?.url || null;
+    return {
+      id: event.id,
+      publishable: isPublishable(event),
+      headline: eventHeadline(event),
+      text: postText(event, { url }),
+      published: event.published || null,
+      facebook: url ? facebookShareUrl(url) : null,
+    };
+  }
+
+  /**
+   * Zverejnenie (klik vlastníka): len udalosť overená DÁTAMI aj SPRÁVAMI. Obrázok og → trvalý odkaz
+   * /s/<id> (retencia ho nemaže) s adresou verejného OKO; opakované zverejnenie vráti ten istý odkaz.
+   */
+  async function publish(event) {
+    if (!isPublishable(event)) return { status: 409, body: { error: 'not_publishable' } };
+    if (event.published?.shareId && shareStore?.read(event.published.shareId)) return { status: 200, body: postPayload(event) };
+    if (!renderCard || !shareStore) return { status: 503, body: { error: 'publish_unavailable' } };
+    const full = await withTrack(event);
+    const hash = eventShareHash(full);
+    if (!hash) return { status: 409, body: { error: 'no_track' } };
+    const card = await renderCard(full, 'og');
+    const meta = eventShareMeta(full);
+    const checked = validateSharePayload({
+      hash,
+      title: meta.title,
+      description: meta.description,
+      image: `data:image/jpeg;base64,${card.jpeg.toString('base64')}`,
+      width: card.width,
+      height: card.height,
+    });
+    if (!checked.ok) return { status: 500, body: { error: `share_${checked.error}` } };
+    if (stopped) return { status: 503, body: { error: 'restarting' } };
+    const record = shareStore.save({ ...checked.value, keep: true });
+    const origin = String(publicOrigin || EVENTS_PUBLIC_ORIGIN).replace(/\/+$/, '');
+    const published = { t: Math.floor(now() / 1000), shareId: record.id, url: `${origin}/s/${record.id}`, image: `${origin}/s/${record.id}.jpg` };
+    const latest = store.get(event.id) || full;
+    const next = { ...latest, track: latest.track?.length ? latest.track : full.track, published };
+    store.save(next);
+    log(`[events] ${event.id} ${event.callsign || ''} zverejnené → ${published.url}`);
+    return { status: 200, body: postPayload(next) };
+  }
+
+  /** Stiahnutie zverejnenia (vlastník): odkaz /s/<id> aj verejný pohľad potom vrátia 404. */
+  function unpublish(event) {
+    if (!event.published) return { status: 200, body: postPayload(event) };
+    if (event.published.shareId) shareStore?.remove?.(event.published.shareId);
+    const next = { ...(store.get(event.id) || event), published: null, unpublishedT: Math.floor(now() / 1000) };
+    store.save(next);
+    log(`[events] ${event.id} ${event.callsign || ''} zverejnenie stiahnuté`);
+    return { status: 200, body: postPayload(next) };
   }
 
   /** Trasa letu z adsbdb (aerolinka, číslo letu, mestá) — null = neznáma, 'retry' = skúsiť neskôr. */
@@ -522,17 +634,32 @@ export function createFlightEventsService({
     }
   }
 
-  const json = (res, status, payload) => {
-    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  const json = (res, status, payload, cache = 'no-store') => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': cache });
     res.end(JSON.stringify(payload));
   };
 
   async function handle(req, res) {
-    // Etapa 1 je súkromná: bez dvoch overení (dáta + správy) nič von.
-    if (!isLocal?.(req)) { json(res, 404, { error: 'not_found' }); return; }
     const url = new URL(req.url || '/', 'http://localhost');
     const route = url.pathname.replace(/\/+$/, '') || '/';
+    const local = Boolean(isLocal?.(req));
+    const method = String(req.method || 'GET').toUpperCase();
     try {
+      // Verejný pohľad: len udalosť, ktorú vlastník zverejnil (po dvoch overeniach). Na tomto počítači
+      // aj náhľad udalosti pred zverejnením (vlastník vidí presne to, čo uvidí verejnosť).
+      const pub = PUBLIC_ROUTE.exec(route);
+      if (pub) {
+        if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
+        let event = store.get(pub[1]);
+        const preview = local && event && !event.published?.url && ['confirmed', 'unverified'].includes(event.status);
+        if (!event || (!event.published?.url && !preview)) { json(res, 404, { error: 'not_found' }); return; }
+        if (preview) event = await withTrack(event);
+        json(res, 200, { ...publicEventView(event), preview: Boolean(preview) }, preview ? 'no-store' : 'public, max-age=60');
+        return;
+      }
+      // Všetko ostatné je súkromné: odpovedá len priamo z tohto počítača.
+      if (!local) { json(res, 404, { error: 'not_found' }); return; }
+      if (method === 'POST' && !isOwnLocalPost(req)) { json(res, 403, { error: 'forbidden' }); return; }
       if (route === '/') {
         // Predvolene len udalosti (overené a neoverené); `status=all` aj šum a vojenský výcvik.
         const param = url.searchParams.get('status');
@@ -551,9 +678,24 @@ export function createFlightEventsService({
         json(res, 200, result.event);
         return;
       }
-      const event = store.get(route.slice(1));
+      const match = EVENT_ROUTE.exec(route);
+      const event = match ? store.get(match[1]) : null;
       if (!event) { json(res, 404, { error: 'not_found' }); return; }
-      json(res, 200, event);
+      const action = match[2] || null;
+      if (!action) { json(res, 200, event); return; }
+      if (action === 'card.jpg' || action === 'post') {
+        if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
+        if (action === 'post') { json(res, 200, postPayload(event)); return; }
+        if (!renderCard) { json(res, 503, { error: 'card_unavailable' }); return; }
+        const card = await renderCard(await withTrack(event), url.searchParams.get('format') === 'feed' ? 'feed' : 'og');
+        res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'Content-Length': String(card.jpeg.length) });
+        res.end(card.jpeg);
+        return;
+      }
+      // Zverejniť / stiahnuť: len POST z vlastnej stránky (overené vyššie).
+      if (method !== 'POST') { json(res, 405, { error: 'method_not_allowed' }); return; }
+      const result = action === 'publish' ? await publish(event) : unpublish(event);
+      json(res, result.status, result.body);
     } catch (error) {
       log(`[events] API: ${error?.message || error}`);
       json(res, 500, { error: 'events_error' });
@@ -569,6 +711,7 @@ export function createFlightEventsService({
       scannedUntilS,
       blockedUntil: blockedUntil > now() ? blockedUntil : null,
       events: counts,
+      publishing: Boolean(renderCard && shareStore),
       ...stats,
     };
   }

@@ -19,12 +19,25 @@ export const INCIDENT_TERMS = Object.freeze(['hijack', 'hijacked', 'hijacking', 
 /** Typy udalostí podľa titulkov; poradie = priorita pri zhode. */
 export const NEWS_TYPES = Object.freeze([
   { type: 'shootdown', terms: [/shot down/i, /\bdowned\b/i, /\bmissile\b/i] },
-  { type: 'hijack', terms: [/hijack/i, /unlawful interference/i, /\bterror/i] },
+  // „Kidnapping" = preklad hebrejského „chatifa" (únos lietadla aj ľudí) v izraelských a arabských médiách.
+  { type: 'hijack', terms: [/hijack/i, /unlawful interference/i, /\bterror/i, /\bkidnap/i] },
   { type: 'crash', terms: [/\bcrash(ed|es)?\b/i] },
   { type: 'emergency', terms: [/emergency/i, /\bdiverted\b/i, /\bmayday\b/i, /\bplunge/i] },
 ]);
 /** Titulky o falošných správach sa do typu nerátajú. */
 const HOAX = /\b(fake|hoax|false|debunk)/i;
+/**
+ * Titulok, ktorý typ popiera („Diverted flydubai flight not a kidnapping, Israeli PM confirms" — naživo
+ * 30. 9., Arab News). Dôveryhodné médium, ktoré typ popiera, ho vetuje: sporný typ nie je overený.
+ */
+const NEGATION = /\b(?:not|no|never|wasn'?t|isn'?t|denie[sd]|deny|rule[sd]? out)\b[\s\w'-]{0,24}?\b(hijack\w*|kidnap\w*|terror\w*|shot down|downed|missile\w*|crash\w*)/i;
+/** Typ, ktorý titulok popiera, alebo null. Pure. */
+export function negatedType(title) {
+  // „nevylúčili únos" (not ruled out) je opak popretia.
+  const text = String(title || '').replace(/\b(?:not|never|hasn'?t|haven'?t|didn'?t)\s+(?:yet\s+)?(?:been\s+)?rule[sd]?\s+out\b/gi, ' ');
+  const word = text.match(NEGATION)?.[1];
+  return word ? NEWS_TYPES.find(({ terms }) => terms.some((re) => re.test(word)))?.type ?? null : null;
+}
 
 const lower = (s) => String(s || '').toLowerCase();
 const squash = (s) => lower(s).replace(/[^a-z0-9]+/g, '');
@@ -128,17 +141,21 @@ export function newsVerdict(articles, identity, trusted, { fromMs = -Infinity, t
     if (!prev || (a.publishedAt ?? Infinity) < (prev.publishedAt ?? Infinity)) byDomain.set(dom, a);
   }
   const votes = new Map();
+  const contested = new Set();
   for (const a of matched) {
     const dom = trustedDomainOf(a.source, trusted);
     if (!dom || HOAX.test(a.title || '')) continue;
+    const denied = negatedType(a.title);
+    if (denied) contested.add(denied);
     for (const { type, terms } of NEWS_TYPES) {
+      if (type === denied) continue;
       if (terms.some((re) => re.test(a.title || ''))) {
         if (!votes.has(type)) votes.set(type, new Set());
         votes.get(type).add(dom);
       }
     }
   }
-  const agreed = NEWS_TYPES.find(({ type }) => (votes.get(type)?.size || 0) >= NEWS_MIN_TRUSTED) || null;
+  const agreed = NEWS_TYPES.find(({ type }) => !contested.has(type) && (votes.get(type)?.size || 0) >= NEWS_MIN_TRUSTED) || null;
   const trustedList = [...byDomain.entries()]
     .map(([domain, a]) => ({ domain, url: a.url, title: a.title, publishedT: a.publishedAt ? Math.floor(a.publishedAt / 1000) : null }))
     .sort((x, y) => (x.publishedT ?? Infinity) - (y.publishedT ?? Infinity));
@@ -148,6 +165,8 @@ export function newsVerdict(articles, identity, trusted, { fromMs = -Infinity, t
     otherCount,
     type: agreed ? agreed.type : null,
     typeDomains: agreed ? [...votes.get(agreed.type)] : [],
+    // Typy, ktoré niektoré dôveryhodné médium poprelo — do textu nejdú, ani keď ich iné tvrdia.
+    contested: [...contested],
     firstT: trustedList[0]?.publishedT ?? null,
   };
 }

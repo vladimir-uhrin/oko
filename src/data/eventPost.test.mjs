@@ -4,8 +4,13 @@
 // výška; bez overenia správami žiadna veta o médiách.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { eventHeadline, flightLabel, keyMoments, outletName, postText } from './eventPost.js';
-import { fz1073Event } from './fixtures/flightEventFixtures.mjs';
+import {
+  eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, flightLabel, flightLine, keyMoments, networksLead, outletName,
+  postText, publicEventView,
+} from './eventPost.js';
+import { simplifyTrack } from './eventCard.js';
+import { normalizeTrack } from './flightAnomalies.js';
+import { fz1073, fz1073Event } from './fixtures/flightEventFixtures.mjs';
 
 test('titulok: typ podľa zhody médií, inak podľa dát; let s aerolinkou a trasou', async () => {
   const e = await fz1073Event();
@@ -30,8 +35,53 @@ test('text príspevku: momenty udalosti s časom UTC, označené čo videla len 
   assert.ok(lines.includes('Médiá (JTA, The Jerusalem Post, The Guardian, Arab News) informujú o pokuse o únos lietadla.'));
   assert.equal(lines.filter((l) => l.startsWith('https://')).length, 3, 'najviac 3 odkazy na správy');
   assert.ok(lines.includes('Rekonštrukcia letu na mape: https://okolive.sk/s/abc123XYZ0'));
-  assert.equal(lines.at(-1), 'Údaje: OpenSky Network, adsb.lol (ODbL) · okolive.sk');
+  assert.equal(lines.at(-1), 'Údaje: OpenSky Network, adsb.lol (ODbL), plán letu adsbdb · okolive.sk', 'trasa letu je z adsbdb — uvedené');
+  assert.equal(postText({ ...e, route: null }).split('\n').at(-1), 'Údaje: OpenSky Network, adsb.lol (ODbL) · okolive.sk');
   const draft = postText({ ...e, news: { status: 'reported', trusted: [{ domain: 'jta.org', url: 'https://x' }] } });
   assert.ok(!draft.includes('Médiá'), 'bez overenia správami žiadna veta o médiách');
   assert.ok(!draft.includes('Rekonštrukcia'), 'bez odkazu na OKO bez riadku odkazu');
+});
+
+test('pravdivý úvod: „dve nezávislé siete" len keď obe majú údaje a udalosť je potvrdená (naživo FZ1073 pred denným archívom: len OpenSky)', async () => {
+  const e = await fz1073Event();
+  assert.equal(postText(e).split('\n')[2], 'Čo zachytili dve nezávislé siete prijímačov (OpenSky, adsb.lol), časy UTC:');
+  const onlyOpenSky = { ...e, status: 'unverified', coverage: e.coverage.map((c) => (c.id === 'adsblol' ? { ...c, points: 0, fromT: null, toT: null } : c)) };
+  assert.equal(networksLead(onlyOpenSky), 'Čo zachytila sieť prijímačov OpenSky (druhá sieť to zatiaľ nepotvrdila), časy UTC:');
+  assert.ok(!postText(onlyOpenSky).includes('dve nezávislé siete'));
+  assert.equal(networksLead({ ...e, status: 'unverified' }), 'Čo zachytili siete prijímačov (OpenSky, adsb.lol) — zatiaľ bez overenia druhou sieťou, časy UTC:');
+  assert.deepEqual(publicEventView(onlyOpenSky).networks, ['OpenSky']);
+});
+
+test('verejný pohľad: SK aj EN texty, momenty so súradnicami, médiá menom a len http(s) odkazom, bez interných polí; odkaz nad udalosťou; popis pre FB', async () => {
+  const e = await fz1073Event();
+  const { oko, adsblol } = fz1073();
+  e.track = simplifyTrack(normalizeTrack([...oko, ...adsblol]));
+  e.window = { fromT: e.firstT - 7200, toT: e.lastT + 3600 };
+  e.news = { ...e.news, query: 'tajný dopyt', trusted: [...e.news.trusted, { domain: 'bbc.com', url: 'javascript:alert(1)', title: 'x' }] };
+  e.secondNetwork = [{ url: 'https://adsb.lol/…', status: 200 }];
+  const v = publicEventView(e);
+  assert.equal(v.headline.sk, 'Nezákonný zásah na palube (únos): let FZ1073 (Fly Dubai) Dubai → Tel Aviv');
+  assert.equal(v.headline.en, 'Unlawful interference on board (hijacking): flight FZ1073 (Fly Dubai) Dubai → Tel Aviv');
+  assert.equal(v.flightLine.en, 'Flight FZ1073 · Fly Dubai · Dubai → Tel Aviv');
+  assert.equal(flightLine(e), 'Let FZ1073 · Fly Dubai · Dubai → Tel Aviv');
+  assert.equal(v.moments.length, 6);
+  assert.ok(v.moments.every((m) => Number.isFinite(m.lat) && Number.isFinite(m.lon) && m.text.sk && m.text.en));
+  assert.equal(v.moments.find((m) => m.kind === 'squawk').text.en, 'transponder squawks 7700 (emergency)');
+  assert.deepEqual(v.news.sources.map((s) => s.name), ['JTA', 'The Jerusalem Post', 'The Guardian', 'Arab News'], 'odkaz javascript: vypadne');
+  assert.equal(v.publishable, true);
+  assert.equal(v.published, null);
+  const json = JSON.stringify(v);
+  for (const secret of ['tajný dopyt', 'secondNetwork', 'adsb.lol/…', 'typeDomains']) assert.ok(!json.includes(secret), secret);
+  const hash = new URLSearchParams(eventShareHash(e));
+  assert.equal(hash.get('event'), '8965d1-20260930T0521');
+  assert.equal(hash.get('pitch'), '-90');
+  const lat = Number(hash.get('lat'));
+  const lon = Number(hash.get('lon'));
+  assert.ok(lat > 26 && lat < 31 && lon > 36 && lon < 42, `záber nad miestom udalosti (Saudská Arábia), nie nad Dubajom: ${lat}, ${lon}`);
+  assert.ok(Number(hash.get('alt')) >= 250_000 && Number(hash.get('alt')) <= 4_000_000);
+  assert.equal(eventShareHash({ ...e, track: [], timeline: [] }), null, 'bez polohy žiadny odkaz');
+  const meta = eventShareMeta(e);
+  assert.equal(meta.title, 'Nezákonný zásah na palube (únos): let FZ1073 (Fly Dubai) Dubai → Tel Aviv, 30. 9. 2026');
+  assert.equal(meta.description, 'Overené dvoma nezávislými sieťami prijímačov (OpenSky, adsb.lol) a médiami (JTA, The Jerusalem Post, The Guardian, Arab News). Rekonštrukcia letu na mape OKO.');
+  assert.equal(facebookShareUrl('https://okolive.sk/s/Ab12cd34EF'), 'https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fokolive.sk%2Fs%2FAb12cd34EF');
 });

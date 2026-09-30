@@ -4,13 +4,17 @@
 // prevzal z adsb.lol, sa neoverujú samy sebou; pri blokovaní adsb.lol pauza; API len z tohto počítača.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ANALYSIS_VERSION, EVENT_FETCH_GAP_MS, createFlightEventsService, eventId, parseTimeParam } from './flightEventsService.js';
+import { fileURLToPath } from 'node:url';
+import sharp from 'sharp';
+import { ANALYSIS_VERSION, EVENT_FETCH_GAP_MS, createFlightEventsService, eventId, isOwnLocalPost, parseTimeParam } from './flightEventsService.js';
 import { EMERGENCY_CODES, DIVE_VR_MPS } from './flightAnomalies.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS } from './stateAircraftBackfill.js';
-import { FDB1073_ROUTE, NOISE_CASES, T, fz1073, noiseCase } from './fixtures/flightEventFixtures.mjs';
+import { createEventCardRenderer } from './eventCardRender.js';
+import { createShareStore } from '../shareStore.js';
+import { FDB1073_ROUTE, NOISE_CASES, T, fz1073, fz1073Event, noiseCase } from './fixtures/flightEventFixtures.mjs';
 
 const fixtureText = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
 const row = (p, src = 'opensky') => [p.t, p.lat, p.lon, p.alt, p.gs, p.trk, p.vr, p.squawk, p.gnd ? 1 : 0, null, null, null, src];
@@ -57,7 +61,7 @@ function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs, 
     if (!body) return reply(404);
     return reply(200, body);
   };
-  const make = () => createFlightEventsService({
+  const make = (extra = {}) => createFlightEventsService({
     getStore: () => store,
     eventsDir: dir,
     isLocal: (req) => req.local === true,
@@ -67,6 +71,7 @@ function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs, 
     log: (m) => logs.push(m),
     tickMs: 3_600_000,
     trustedFile,
+    ...extra,
   });
   return {
     dir, fetched, aux, waits, logs, make,
@@ -76,11 +81,14 @@ function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs, 
   };
 }
 
-async function call(service, url, local = true) {
-  const res = { status: 0, body: '', writeHead(s) { this.status = s; }, end(b) { this.body = b; } };
-  await service.handle({ url, local }, res);
-  return { status: res.status, json: JSON.parse(res.body) };
+async function call(service, url, local = true, { method = 'GET', headers = {} } = {}) {
+  const res = { status: 0, body: '', headers: {}, writeHead(s, h = {}) { this.status = s; this.headers = h; }, end(b) { this.body = b; } };
+  await service.handle({ url, local, method, headers }, res);
+  const isJson = String(res.headers['Content-Type'] || '').startsWith('application/json');
+  return { status: res.status, headers: res.headers, json: isJson ? JSON.parse(res.body) : null, body: res.body };
 }
+/** POST z vlastnej stránky OKO na localhoste (tak, ako ho pošle prehliadač vlastníka). */
+const OWN_POST = { method: 'POST', headers: { origin: 'http://localhost:4173', 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' } };
 
 const LIVE_FZ = 'https://adsb.lol/data/traces/d1/trace_full_8965d1.json';
 
@@ -464,4 +472,123 @@ test('API len z tohto počítača: zoznam, detail, ručná analýza ľubovoľné
   } finally {
     h.cleanup();
   }
+});
+
+const LOCAL_DATA = fileURLToPath(new URL('./local_data', import.meta.url));
+
+test('zverejnenie celou cestou: bez overenia správami nie; cudzia stránka nie; klik vlastníka → trvalý odkaz okolive.sk/s/<id> s obrázkom, verejný pohľad, text pre FB; stiahnutie → 404', async () => {
+  const { oko } = fz1073();
+  const h = harness({
+    startMs: Date.parse('2026-09-30T08:00:00Z'),
+    tracks: { '8965d1': oko.map((p) => row(p)) },
+    legs: { '8965d1': [{ callsign: 'FDB1073', firstT: T('2026-09-30T03:05:00Z'), lastT: T('2026-09-30T05:53:33Z') }] },
+    traces: { [LIVE_FZ]: fixtureText('adsblol-trace-8965d1-20260930.json') },
+  });
+  const shareDir = path.join(h.dir, 'share');
+  const shares = createShareStore({ dir: shareDir, now: () => Date.parse('2026-09-30T20:00:00Z') });
+  try {
+    const service = h.make({ renderCard: createEventCardRenderer({ dataDir: LOCAL_DATA }), shareStore: shares });
+    const r = await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    const id = r.json.id;
+    assert.equal(r.json.status, 'confirmed');
+    assert.ok(r.json.track.length > 50 && r.json.track.length <= 420, `stopa na obrázok ${r.json.track.length} bodov`);
+    // Pred zverejnením: verejnosť nič, vlastník náhľad presne toho, čo uvidí verejnosť.
+    assert.equal((await call(service, `/public/${id}`, false)).status, 404, 'nezverejnené verejnosť nevidí');
+    const preview = await call(service, `/public/${id}`);
+    assert.deepEqual([preview.status, preview.json.preview, preview.json.publishable], [200, true, false]);
+    // Dáta overené, správy ešte nie → zverejniť sa nedá.
+    const early = await call(service, `/${id}/publish`, true, OWN_POST);
+    assert.deepEqual([early.status, early.json.error], [409, 'not_publishable']);
+    // Overené aj správami (2 dôveryhodné médiá — ako z GDELT v teste vyššie).
+    const verified = await fz1073Event();
+    service.store.save({ ...service.store.get(id), route: verified.route, news: verified.news });
+    // Cudzia stránka otvorená v prehliadači vlastníka (CSRF) ani „jednoduchý" formulár nič nezverejnia.
+    const evil = await call(service, `/${id}/publish`, true, { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' } });
+    assert.equal(evil.status, 403);
+    const form = await call(service, `/${id}/publish`, true, { method: 'POST', headers: { origin: 'http://localhost:4173', 'content-type': 'text/plain' } });
+    assert.equal(form.status, 403);
+    assert.equal((await call(service, `/${id}/publish`, false, OWN_POST)).status, 404, 'z verejnej adresy vôbec nie');
+    assert.equal(service.store.get(id).published ?? null, null, 'nič nezverejnené');
+    // Klik vlastníka.
+    const pub = await call(service, `/${id}/publish`, true, OWN_POST);
+    assert.equal(pub.status, 200, JSON.stringify(pub.json));
+    const url = pub.json.published.url;
+    assert.match(url, /^https:\/\/okolive\.sk\/s\/[A-Za-z0-9]{10}$/, 'verejná adresa, nie localhost');
+    assert.equal(pub.json.facebook, `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`);
+    assert.ok(pub.json.text.includes(`Rekonštrukcia letu na mape: ${url}`));
+    assert.ok(pub.json.text.startsWith('Nezákonný zásah na palube (únos): let FZ1073 (Fly Dubai) Dubai → Tel Aviv, 30. 9. 2026'), pub.json.text);
+    const record = shares.read(pub.json.published.shareId);
+    assert.equal(record.keep, true, 'odkaz z príspevku retencia nemaže');
+    assert.match(record.hash, /^lat=\d+\.\d{4}&lon=\d+\.\d{4}&alt=\d+&heading=0&pitch=-90&event=8965d1-20260930T0521$/);
+    assert.ok(record.title.startsWith('Nezákonný zásah na palube (únos): let FZ1073'));
+    assert.ok(record.description.includes('OpenSky, adsb.lol') && record.description.includes('JTA'));
+    const meta = await sharp(readFileSync(shares.imagePath(record.id))).metadata();
+    assert.deepEqual([meta.format, meta.width, meta.height], ['jpeg', 1200, 630], 'obrázok pre náhľad odkazu na FB');
+    // Verejný pohľad po zverejnení: bez interných polí, s médiami a momentmi.
+    const pubView = await call(service, `/public/${id}`, false);
+    assert.equal(pubView.status, 200);
+    assert.equal(pubView.headers['Cache-Control'], 'public, max-age=60');
+    assert.deepEqual([pubView.json.preview, pubView.json.publishable, pubView.json.published.url], [false, true, url]);
+    assert.equal(pubView.json.moments.length, 6);
+    assert.deepEqual(pubView.json.news.sources.map((s) => s.name), ['JTA', 'The Jerusalem Post', 'The Guardian', 'Arab News']);
+    for (const key of ['secondNetwork', 'query', 'routineReason', 'triggers', 'timelineText']) assert.ok(!(key in pubView.json), `bez ${key}`);
+    assert.ok(!JSON.stringify(pubView.json).includes('gdeltproject'), 'bez dopytu do GDELT');
+    // Opakované zverejnenie = ten istý odkaz; nové spracovanie údajov zverejnenie nezmaže.
+    const again = await call(service, `/${id}/publish`, true, OWN_POST);
+    assert.equal(again.json.published.url, url);
+    assert.equal(readdirSync(shareDir).length, 2, 'jeden záznam + jeden obrázok');
+    await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    assert.equal(service.store.get(id).published.url, url);
+    assert.equal(service.store.list({ statuses: null })[0].published, url, 'zoznam ukazuje odkaz');
+    // Obrázok do príspevku (1080×1350) a text na kontrolu.
+    const feed = await call(service, `/${id}/card.jpg?format=feed`);
+    assert.equal(feed.headers['Content-Type'], 'image/jpeg');
+    const feedMeta = await sharp(feed.body).metadata();
+    assert.deepEqual([feedMeta.width, feedMeta.height], [1080, 1350]);
+    assert.equal((await call(service, `/${id}/card.jpg`, false)).status, 404, 'obrázok na kontrolu len lokálne');
+    assert.equal((await call(service, `/${id}/post`)).json.text, pub.json.text);
+    // Stiahnutie: odkaz aj verejný pohľad preč.
+    const down = await call(service, `/${id}/unpublish`, true, OWN_POST);
+    assert.deepEqual([down.status, down.json.published], [200, null]);
+    assert.equal(shares.read(record.id), null, '/s/<id> potom 404');
+    assert.equal((await call(service, `/public/${id}`, false)).status, 404);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('staršia udalosť bez stopy: obrázok si stopu doplní z archívu OKO (len OpenSky a adsb.lol), bez nového dopytu a overovania', async () => {
+  const { oko } = fz1073();
+  const other = { t: T('2026-09-30T05:00:00Z') + 1, lat: 10, lon: 10, alt: 10000, gs: 200, trk: 0, vr: 0, squawk: null, gnd: false };
+  const h = harness({
+    startMs: Date.parse('2026-09-30T08:00:00Z'),
+    tracks: { '8965d1': [...oko.map((p) => row(p)), row(other, 'iny-zdroj')] },
+  });
+  try {
+    let drawn = null;
+    const service = h.make({ renderCard: async (event) => { drawn = event; return { jpeg: Buffer.from([0xff, 0xd8, 0xff, 0xd9]), width: 1200, height: 630 }; } });
+    const e = { ...(await fz1073Event()), window: { fromT: T('2026-09-30T03:00:00Z'), toT: T('2026-09-30T07:00:00Z') } };
+    delete e.track;
+    service.store.save(e);
+    const card = await call(service, `/${e.id}/card.jpg`);
+    assert.equal(card.status, 200);
+    assert.ok(drawn.track.length > 50, `${drawn.track.length}`);
+    assert.ok(!drawn.track.some((p) => p[1] === 10 && p[2] === 10), 'bod iného zdroja (mimo atribúcie) nie');
+    assert.deepEqual(h.fetched, [], 'žiadny dopyt na adsb.lol — overenie ostáva, ako bolo');
+    assert.ok(service.store.get(e.id).track.length > 50, 'stopa uložená k udalosti');
+    assert.equal(service.store.get(e.id).status, e.status);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('isOwnLocalPost: POST z vlastnej stránky / curl s JSON áno; cudzia stránka, iný web alebo bez JSON nie', () => {
+  const req = (headers) => ({ headers });
+  assert.equal(isOwnLocalPost(req({ origin: 'http://localhost:4173', 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' })), true);
+  assert.equal(isOwnLocalPost(req({ 'content-type': 'application/json; charset=utf-8' })), true, 'curl z tohto počítača');
+  assert.equal(isOwnLocalPost(req({ origin: 'http://127.0.0.1:4173', 'content-type': 'application/json' })), true);
+  assert.equal(isOwnLocalPost(req({ origin: 'https://okolive.sk', 'content-type': 'application/json' })), false);
+  assert.equal(isOwnLocalPost(req({ 'sec-fetch-site': 'cross-site', 'content-type': 'application/json' })), false);
+  assert.equal(isOwnLocalPost(req({ origin: 'http://localhost:4173', 'sec-fetch-site': 'same-origin', 'content-type': 'text/plain' })), false, 'formulár bez predletu');
+  assert.equal(isOwnLocalPost(req({ origin: 'http://localhost.evil.example', 'content-type': 'application/json' })), false);
 });

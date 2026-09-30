@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { CARD_FORMATS, buildEventCardSvg, cardBBox, clipRing, incidentWindow, simplifyTrack, wrapText } from './eventCard.js';
+import { createEventCardRenderer, parseBorderLines } from './eventCardRender.js';
 import { normalizeTrack } from './flightAnomalies.js';
 import { fz1073, fz1073Event } from './fixtures/flightEventFixtures.mjs';
 
@@ -55,13 +56,53 @@ test('obrázok FZ1073: titulok, let, OVERENÉ 2 siete + 4 médiá, 6 momentov, d
   assert.ok(/stroke-dasharray="7 6"/.test(svg), 'diera bez údajov čiarkovane');
   assert.ok(svg.includes('TLV Tel Aviv'));
   assert.ok(svg.includes('Médiá: JTA, The Jerusalem Post, The Guardian,'));
-  assert.ok(svg.includes('údaje OpenSky Network, adsb.lol (ODbL)'));
+  assert.ok(svg.includes('údaje OpenSky Network, adsb.lol (ODbL) · plán letu adsbdb'), 'trasa letu je z adsbdb — uvedené');
+  assert.ok(svg.includes('>okolive.sk · mapa Natural Earth<'));
   assert.ok(svg.includes('(len adsb.lol)'), 'kód videla len jedna sieť');
   const [from, to] = incidentWindow(e);
   assert.ok(from < e.firstT && to > e.lastT);
   const draft = buildEventCardSvg({ ...e, news: { status: 'reported', trusted: [] }, callsign: 'A<B' }, { format: 'og' });
   assert.ok(draft.includes('NÁHĽAD — ešte neoverené'), 'bez overenia správami nie je „overené"');
   assert.ok(!draft.includes('Médiá:'));
+});
+
+test('obrázok neoverenej udalosti s údajmi len z OpenSky (naživo FZ1073 pred denným archívom): netvrdí dve siete', async () => {
+  const e = await fzCardEvent();
+  assert.ok(buildEventCardSvg(e).includes('>Časy UTC · OpenSky + adsb.lol<'));
+  const one = { ...e, status: 'unverified', coverage: e.coverage.map((c) => (c.id === 'adsblol' ? { ...c, points: 0 } : c)) };
+  const svg = buildEventCardSvg(one, { format: 'og' });
+  assert.ok(svg.includes('>Časy UTC · OpenSky<'), 'len sieť, ktorá má údaje');
+  assert.ok(!svg.includes('adsb.lol<') && !svg.includes('OVERENÉ'));
+  assert.ok(svg.includes('NÁHĽAD — ešte neoverené'));
+});
+
+test('server: mapové podklady sa načítajú raz, sharp dynamicky; zlyhané načítanie sharp sa nepamätá; neznámy formát = og', async () => {
+  const e = await fzCardEvent();
+  const reads = [];
+  let loads = 0;
+  let fail = true;
+  const svgs = [];
+  const fakeSharp = (buf) => { svgs.push(String(buf)); return { jpeg: () => ({ toBuffer: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }) }; };
+  const render = createEventCardRenderer({
+    dataDir: 'D:/podklady',
+    readFile: (f) => {
+      reads.push(String(f).replace(/\\/g, '/'));
+      return f.endsWith('marine.json')
+        ? JSON.stringify({ features: [{ polygons: [[[30, 25], [40, 25], [40, 35], [30, 35]]] }] })
+        : '{"type":"Feature","geometry":{"type":"LineString","coordinates":[[35,29],[39,31]]}}\nnie json\n{"type":"Feature","geometry":{"type":"Point","coordinates":[1,2]}}\n';
+    },
+    sharpLoader: async () => { loads += 1; if (fail) { fail = false; throw new Error('sharp chýba'); } return fakeSharp; },
+  });
+  await assert.rejects(render(e, 'og'), /sharp chýba/);
+  const og = await render(e, 'og');
+  const feed = await render(e, 'feed');
+  const odd = await render(e, 'tiff');
+  assert.equal(loads, 2, 'po zlyhaní nový pokus, potom už z pamäte');
+  assert.deepEqual(reads, ['D:/podklady/natural_earth/marine.json', 'D:/podklady/boundaries/boundaries.geojsonl'], 'podklady raz');
+  assert.deepEqual([og.width, og.height, feed.width, feed.height, odd.format], [1200, 630, 1080, 1350, 'og']);
+  assert.ok(svgs[0].includes('fill="#0a1622"'), 'more z podkladov je v obrázku');
+  assert.ok(svgs[0].includes('stroke-dasharray="4 3"'), 'hranica z GeoJSONL je v obrázku');
+  assert.deepEqual(parseBorderLines('{"geometry":{"type":"LineString","coordinates":[[1,2],[3,4]]}}\n\n{"geometry":{"type":"LineString","coordinates":[[1,2]]}}'), [[[1, 2], [3, 4]]], 'čiara s jediným bodom nie');
 });
 
 test('JPEG cez sharp: og 1200×630 aj feed 1080×1350, pod limitom zdieľania 400 kB', async () => {

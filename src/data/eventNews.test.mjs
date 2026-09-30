@@ -72,3 +72,31 @@ test('verdikt: 4 dôveryhodné médiá → OVERENÉ, typ únos (zhoda 2 médií)
   assert.equal(hoax.type, 'emergency', 'núdza: The Guardian + Arab News');
   assert.equal(newsVerdict([], id, TRUSTED, window).status, 'none');
 });
+
+test('popretie: dôveryhodné médium typ popiera („not a kidnapping") → sporný typ sa nepoužije, ani keď ho dve iné tvrdia (naživo FZ1073, 30. 9.)', async () => {
+  const { negatedType } = await import('./eventNews.js');
+  const id = flightIdentity('FDB1073', FDB1073_ROUTE);
+  const window = { fromMs: at('2026-09-30T04:22:00Z'), toMs: at('2026-10-01T12:00:00Z') };
+  const trusted = parseTrustedList({ domains: ['arabnews.com', 'aljazeera.com', 'jta.org', 'jpost.com'] });
+  // Preformulované podľa skutočných titulkov z GDELT (30. 9. večer), nie kópie.
+  const live = [
+    A('arabnews.com', '2026-09-30T08:00:00Z', 'Diverted Flydubai flight was not a kidnapping, Israeli PM says'),
+    A('aljazeera.com', '2026-09-30T09:45:00Z', 'Flydubai flight to Israel diverted to Saudi Arabia after an emergency alert'),
+  ];
+  const v = newsVerdict(live, id, trusted, window);
+  assert.deepEqual([v.status, v.type, v.contested], ['verified', 'emergency', ['hijack']], 'odklonený let po núdzovom poplachu — nie únos');
+  const claims = [
+    A('jta.org', '2026-09-30T18:00:00Z', 'Passengers from the attempted flydubai hijacking are back in Israel'),
+    A('jpost.com', '2026-09-30T19:30:00Z', 'Why two extra pilots were aboard during the attempted flydubai hijacking of an Israel-bound jet'),
+  ];
+  const later = newsVerdict([...live, ...claims], id, trusted, window);
+  assert.notEqual(later.type, 'hijack', 'dve médiá tvrdia únos, jedno ho popiera → sporné, nie overené');
+  assert.equal(later.type, 'emergency');
+  const noVeto = newsVerdict(claims, id, trusted, window);
+  assert.deepEqual([noVeto.type, noVeto.contested], ['hijack', []], 'bez popretia zhoda dvoch médií platí');
+  assert.equal(negatedType('Airline denies hijacking claims on flight 1073'), 'hijack');
+  assert.equal(negatedType('No crash, says airline after Dubai emergency landing'), 'crash');
+  assert.equal(negatedType('Flydubai flight diverted after emergency alert'), null);
+  assert.equal(negatedType('Hijackers not identified yet'), null, 'popretie musí predchádzať slovu typu');
+  assert.equal(negatedType('Officials have not ruled out hijacking on flydubai flight'), null, '„nevylúčili" nie je popretie');
+});

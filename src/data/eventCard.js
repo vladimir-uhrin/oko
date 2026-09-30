@@ -6,8 +6,10 @@
 // (náhľad odkazu), feed 1080×1350 (príspevok s obrázkom). Pure — SVG reťazec; na JPEG ho prevedie
 // server (sharp). Mapové podklady dostane v parametroch (testy s malými tvarmi).
 
-import { eventWhat, flightLine, keyMoments, outletName } from './eventPost.js';
+import { NETWORK_NAMES, eventWhat, flightLine, incidentWindow, isPublishable, keyMoments, networksWithData, outletName, verifiedSources } from './eventPost.js';
 import { clockUtc, momentPhrase } from './eventTimeline.js';
+
+export { incidentWindow };
 
 export const CARD_FORMATS = Object.freeze({ og: { w: 1200, h: 630 }, feed: { w: 1080, h: 1350 } });
 /** Diera v stope, ktorá sa kreslí čiarkovane (rovnako ako na časovej osi). */
@@ -38,16 +40,6 @@ export function simplifyTrack(points, max = 400) {
     const p = pts[i];
     return [p.t, Math.round(p.lat * 1e4) / 1e4, Math.round(p.lon * 1e4) / 1e4, p.alt == null || p.gnd ? (p.gnd ? 0 : null) : Math.round(p.alt / 0.3048)];
   });
-}
-
-/**
- * Okno udalosti v čase: od 20 min pred prvým spúšťačom po posledný kľúčový moment + 20 min.
- * Mapa aj profil výšky sa zamerajú naň (cesta z letiska odletu len vbehne od okraja). Pure.
- */
-export function incidentWindow(event, moments = keyMoments(event)) {
-  const from = (event.firstT ?? 0) - 20 * 60;
-  const lastMoment = Math.max(event.lastT ?? event.firstT ?? 0, ...moments.map((m) => m.endT ?? m.t));
-  return [from, lastMoment + 20 * 60];
 }
 
 /** Výrez mapy: stopa v okne udalosti + letiská trasy do ~700 km, s okrajom a pomerom plochy. Pure. */
@@ -252,15 +244,15 @@ export function buildEventCardSvg(event, { format = 'og', marine = [], borders =
   const sub = [dateSk(event.firstT), event.reg, event.typeCode].filter(Boolean).join(' · ');
   out.push(`<text x="${panel.x}" y="${y + 4}" font-size="${feed ? 24 : 18}" fill="${COLORS.muted}">${esc(sub)}</text>`);
   y += feed ? 50 : 38;
-  const verified = event.status === 'confirmed' && event.news?.status === 'verified';
-  const media = verified ? event.news.trusted.length : 0;
+  const verified = isPublishable(event);
+  const media = verified ? verifiedSources(event).length : 0;
   const badge = verified ? `OVERENÉ: 2 siete prijímačov + ${media} ${media >= 5 ? 'médií' : 'médiá'}` : 'NÁHĽAD — ešte neoverené';
   out.push(`<rect x="${panel.x}" y="${y - (feed ? 26 : 20)}" width="${Math.min(panel.w, badge.length * (feed ? 13.5 : 10.4) + 24)}" height="${feed ? 38 : 30}" rx="6" fill="${verified ? COLORS.ok : COLORS.warn}" fill-opacity="0.16" stroke="${verified ? COLORS.ok : COLORS.warn}"/>`);
   out.push(`<text x="${panel.x + 12}" y="${y}" font-size="${feed ? 22 : 16}" font-weight="700" fill="${verified ? COLORS.ok : COLORS.warn}">${esc(badge)}</text>`);
   y += feed ? 56 : 42;
   const itemSize = feed ? 25 : 17;
   const itemChars = Math.floor((panel.w - 40) / (itemSize * 0.5));
-  out.push(`<text x="${panel.x}" y="${y}" font-size="${itemSize - 2}" fill="${COLORS.muted}">Časy UTC · ${esc('OpenSky + adsb.lol')}</text>`);
+  out.push(`<text x="${panel.x}" y="${y}" font-size="${itemSize - 2}" fill="${COLORS.muted}">Časy UTC · ${esc(networksWithData(event).map((id) => NETWORK_NAMES[id]).join(' + ') || '—')}</text>`);
   y += itemSize * 1.5;
   moments.forEach((m, i) => {
     const nets = (m.seenBy || []).filter((id) => id === 'opensky' || id === 'adsblol');
@@ -275,15 +267,22 @@ export function buildEventCardSvg(event, { format = 'og', marine = [], borders =
     y += itemSize * 0.25;
   });
   if (verified) {
-    const names = [...new Set(event.news.trusted.map((t) => outletName(t.domain)))];
+    const names = [...new Set(verifiedSources(event).map((t) => outletName(t.domain)))];
     y += itemSize * 0.4;
     for (const l of wrapText(`Médiá: ${names.join(', ')}`, itemChars + 4).slice(0, 3)) {
       out.push(`<text x="${panel.x}" y="${y}" font-size="${itemSize - 2}" fill="${COLORS.muted}">${esc(l)}</text>`);
       y += (itemSize - 2) * 1.3;
     }
   }
-  const foot = 'okolive.sk · údaje OpenSky Network, adsb.lol (ODbL) · mapa Natural Earth';
-  out.push(`<text x="${feed ? panel.x : panel.x}" y="${H - (feed ? 36 : 22)}" font-size="${feed ? 20 : 13}" fill="${COLORS.muted}">${esc(foot)}</text>`);
+  // Zdroje v dvoch riadkoch (s plánom letu z adsbdb by jeden riadok presiahol stĺpec textu).
+  const feet = [
+    `údaje OpenSky Network, adsb.lol (ODbL)${event.route ? ' · plán letu adsbdb' : ''}`,
+    'okolive.sk · mapa Natural Earth',
+  ];
+  feet.forEach((line, i) => {
+    const y = H - (feed ? 36 : 22) - (feet.length - 1 - i) * (feed ? 28 : 18);
+    out.push(`<text x="${panel.x}" y="${y}" font-size="${feed ? 20 : 13}" fill="${COLORS.muted}">${esc(line)}</text>`);
+  });
   out.push('</svg>');
   return out.join('');
 }

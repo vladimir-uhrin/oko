@@ -156,11 +156,14 @@ test('panel: rad štátnych strojov — lety aj keď stroj nelieta, riadok s dá
   const status = doc.root.body.children.find((c) => c.className === 'history-status');
   assert.match(status.textContent, /history\.state-results .*OM-TST/);
   // Z pásu nad kartou: konkrétny let rovno do detailu a prehrávača.
-  panel.showLeg(flights[0]);
-  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(panel.isShowing(flights[0]), false);
+  await panel.showLeg(flights[0]); // sľub sa splní po načítaní trasy (udalosť potom spustí prehrávanie)
   assert.equal(panel._getStateForTest().detailOpen, true);
   assert.deepEqual(tracks[0], ['505abc', { fromS: T0 - 60, toS: T0 + 6780 + 60 }]);
   assert.ok(collapsed.includes(false), 'panel sa rozbalí');
+  assert.equal(panel.isShowing(flights[0]), true, 'otvorený úsek — udalosť ho nenačíta znova');
+  assert.equal(panel.isShowing({ ...flights[0], lastT: T0 + 10 }), false, 'iný úsek toho istého stroja');
+  await panel.showLeg(null);
   panel.destroy();
 });
 

@@ -57,6 +57,9 @@ import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
 import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
 import { installHistoryPanel } from './historyPanel.js';
+import { eventIdFromHash, installEventsPanel } from './eventsPanel.js';
+import { createEventMarkers } from './eventMarkers.js';
+import { whenStartupReady } from './startupGate.js';
 import { installGasPanel } from './gasPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
@@ -3205,6 +3208,22 @@ export class StyleManager {
       },
       setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
     });
+    // Udalosti (2026-09-30, etapa 2b, eventsPanel.js): odkaz z príspevku (`event=<id>` v adrese)
+    // otvorí kartu udalosti navrchu Histórie letov — momenty, médiá, značky na glóbuse, prehratie.
+    // Na počítači vlastníka aj zoznam na kontrolu a zverejnenie (na FB zdieľa vlastník sám).
+    this._eventsPanel = installEventsPanel({
+      host: document.querySelector('#history-panel [data-history-body]'),
+      t,
+      history: this._historyPanel,
+      reveal: () => {
+        revealHistoryPanel();
+        this.setPanelCollapsed('history-panel', false, { persist: false, syncShare: false });
+      },
+      markers: createEventMarkers(viewer),
+    });
+    // Po štarte (mapa zobrazená, záber z odkazu obnovený) — inak by ho obnova panelov prekryla.
+    const sharedEventId = eventIdFromHash(window.location.hash);
+    if (sharedEventId) void whenStartupReady().then(() => this._eventsPanel?.open(sharedEventId));
     // Plyn (2026-09-13, gasPanel.js): karta CENY z /api/gas/prices (ACER +
     // IMF/FRED, bez kľúča); zásobníky (GIE) a toky (ENTSOG) pribudnú po etapách.
     this._gasPanel = installGasPanel({

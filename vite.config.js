@@ -36,6 +36,7 @@ import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
+import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
@@ -5808,6 +5809,10 @@ function flightHistoryProxy() {
         // Etapa 2: overenie správami — zoznam dôveryhodných médií (vlastník ho môže upraviť).
         trustedFile: path.join(__dirname, 'src', 'data', 'local_data', 'events', 'trusted-news.json'),
         isLocal: isDirectLocalRequest,
+        // Etapa 2b: obrázok udalosti (sharp + mapové podklady z repa) a zverejnenie klikom vlastníka
+        // ako trvalý odkaz /s/<id> v tom istom úložisku ako zdieľanie (retencia ho nemaže).
+        renderCard: createEventCardRenderer({ dataDir: path.join(__dirname, 'src', 'data', 'local_data') }),
+        shareStore: createShareStore({ dir: path.join(process.cwd(), '.gev-cache', 'share') }),
       });
       if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
         const events = flightEvents;

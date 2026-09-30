@@ -445,11 +445,19 @@ export function installHistoryPanel({
       input.value = String(query || '');
       void runSearch();
     },
-    /** Otvor konkrétny let (pás štátneho lietadla nad kartou): detail, graf a prehratie na glóbuse. */
+    /**
+     * Otvor konkrétny let (pás štátneho lietadla nad kartou, udalosť): detail, graf a prehratie na
+     * glóbuse. Sľub sa splní po načítaní trasy (udalosť potom spustí prehrávanie od svojho okna).
+     */
     showLeg(leg) {
-      if (!leg?.icao24) return;
+      if (!leg?.icao24) return Promise.resolve();
       setCollapsed?.(false);
-      void openLeg(leg);
+      return openLeg(leg);
+    },
+    /** Je tento úsek práve otvorený v detaile (udalosť ho potom nenačítava znova)? */
+    isShowing(leg) {
+      return Boolean(currentLeg && !detail.hidden && leg && currentLeg.icao24 === leg.icao24
+        && currentLeg.firstT === leg.firstT && currentLeg.lastT === leg.lastT && currentFixes.length);
     },
     /** Všetky lety štátneho stroja v zozname panelu (najnovšie prvé, s dátumom a trasou). */
     showStateAircraft(hex, reg = '') {
