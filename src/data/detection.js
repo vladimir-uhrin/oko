@@ -50,6 +50,7 @@ import {
   viewScaleForAltitude,
 } from './detectionPolicy.js';
 import { detectionBracketOpacity } from './detectionPresentation.js';
+import { aircraftLowCameraScale } from './aircraftRecession.js';
 
 /**
  * @module detection
@@ -1219,6 +1220,9 @@ function _drawOverlay(frame) {
   // every host lane. Detection retains the manual scalar projection below.
   const occluder = frame.occluder;
   const camPos = frame.cameraPosition;
+  // Výška kamery raz na snímok: pri nízkej kamere sa brána lietadiel zúži na 60/100 km a rámček
+  // sa zmenší s ikonou (2026-09-30, detectionRangeThresholds + aircraftLowCameraScale).
+  const camHeightM = _viewer?.camera?.positionCartographic?.height;
   const keyhole = frame.keyhole;
   // Read the OUTSIDE setting ONCE per paint, from the same module state the
   // host's own keyhole alpha comes from, so a bracket and its callout can never
@@ -1304,13 +1308,14 @@ function _drawOverlay(frame) {
     const hovered = _isHoveredObject(obj);
     const camDistance = Cesium.Cartesian3.distance(camPos, obj.position);
     const rangeAlpha = (!isTracked && !hovered && !_rangeGateDisabledForTest && isRangeGatedDetectionType(obj.type))
-      ? detectionRangeAlpha(camDistance)
+      ? detectionRangeAlpha(camDistance, obj.type === 'AIR' ? camHeightM : Number.NaN)
       : 1;
     if (obj.type === 'AIR') {
+      // Sledovaný stroj si drží veľký rámček; ostatné sa pri nízkej kamere zmenšia ako ich ikona.
       const bscale = nearFarScale(
         camDistance,
         BILL_NEAR, BILL_NEAR_SCALE, BILL_FAR, BILL_FAR_SCALE,
-      );
+      ) * (isTracked ? 1 : aircraftLowCameraScale(camDistance, camHeightM));
       halfW = _clamp((isTracked ? 14 : 9) * bscale, 7, 48);
       halfH = _clamp((isTracked ? 11 : 7) * bscale, 5, 38);
     } else {

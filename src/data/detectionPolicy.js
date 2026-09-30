@@ -127,22 +127,55 @@ export function isRangeGatedDetectionType(type) {
   return RANGE_GATED_DETECTION_TYPES.includes(String(type || '').toUpperCase());
 }
 
+// Nízka kamera (2026-09-30, vlastník): pri úvodnom pohľade z 1,5 km nad Bratislavou mali lietadlá
+// 100–300 km ďaleko pri Viedni rámčeky a popisky a na výšku (mobil) pôsobili ako roj nad mestom.
+// 120/300 km platí pre pohľad zhora na región; pri kamere pod `DETECTION_RANGE_LOW_CAMERA_M` sa pásmo
+// zúži na 60/100 km a medzi nízkou a vysokou kamerou sa prahy plynulo prelínajú (bez skoku pri zoome).
+/** Plné zobrazenie pri nízkej kamere. */
+export const DETECTION_RANGE_LOW_FULL_M = 60_000;
+/** Úplne skryté pri nízkej kamere. */
+export const DETECTION_RANGE_LOW_OFF_M = 100_000;
+/** Kamera pod touto výškou používa nízke prahy. */
+export const DETECTION_RANGE_LOW_CAMERA_M = 20_000;
+/** Kamera nad touto výškou používa pôvodné prahy 120/300 km. */
+export const DETECTION_RANGE_HIGH_CAMERA_M = 60_000;
+
+/**
+ * Prahy brány podľa výšky kamery (pure). Neznáma výška = pôvodné prahy 120/300 km.
+ * @param {number} [cameraHeightM]
+ * @returns {{fullM:number, offM:number}}
+ */
+export function detectionRangeThresholds(cameraHeightM) {
+  const h = Number(cameraHeightM);
+  if (!Number.isFinite(h)) return { fullM: DETECTION_RANGE_FULL_M, offM: DETECTION_RANGE_OFF_M };
+  const t = Math.min(1, Math.max(0,
+    (h - DETECTION_RANGE_LOW_CAMERA_M) / (DETECTION_RANGE_HIGH_CAMERA_M - DETECTION_RANGE_LOW_CAMERA_M)));
+  return {
+    fullM: DETECTION_RANGE_LOW_FULL_M + (DETECTION_RANGE_FULL_M - DETECTION_RANGE_LOW_FULL_M) * t,
+    offM: DETECTION_RANGE_LOW_OFF_M + (DETECTION_RANGE_OFF_M - DETECTION_RANGE_LOW_OFF_M) * t,
+  };
+}
+
 /**
  * Range-gate alpha for an ambient range-gated detection assembly.
  *
- * 1 inside `DETECTION_RANGE_FULL_M`, 0 beyond `DETECTION_RANGE_OFF_M`,
- * linear in between. A non-finite distance fails OPEN (returns 1): an
- * unreadable distance should reproduce the pre-gate look, never silently
- * blank the overlay (same philosophy as `aircraftBracketAlphaFloor`).
+ * 1 inside the full threshold, 0 beyond the off threshold, linear in between
+ * (`DETECTION_RANGE_FULL_M`/`DETECTION_RANGE_OFF_M`, or the tighter low-camera
+ * pair when `cameraHeightM` is given — see `detectionRangeThresholds`). A
+ * non-finite distance fails OPEN (returns 1): an unreadable distance should
+ * reproduce the pre-gate look, never silently blank the overlay (same
+ * philosophy as `aircraftBracketAlphaFloor`).
  * @param {number} distanceM - Camera-to-object distance in metres.
+ * @param {number} [cameraHeightM] - Camera height; omitted/NaN keeps 120/300 km.
  * @returns {number} Alpha in [0, 1].
  */
-export function detectionRangeAlpha(distanceM) {
+export function detectionRangeAlpha(distanceM, cameraHeightM) {
   const d = Number(distanceM);
   if (!Number.isFinite(d)) return 1;
-  if (d <= DETECTION_RANGE_FULL_M) return 1;
-  if (d >= DETECTION_RANGE_OFF_M) return 0;
-  return 1 - (d - DETECTION_RANGE_FULL_M) / (DETECTION_RANGE_OFF_M - DETECTION_RANGE_FULL_M);
+  const { fullM, offM } = detectionRangeThresholds(cameraHeightM);
+  if (d <= fullM) return 1;
+  if (d >= offM) return 0;
+  return 1 - (d - fullM) / (offM - fullM);
 }
 
 /** Stable left/front/right bucket for bracket coverage diagnostics and QA. */

@@ -67,7 +67,8 @@ test('ambientné AIR/SEA assemblies sú range-gatované: retikle len pri priblí
   // obchádza, a mimo dosahu nevzniká ani callout kandidát.
   const detectionJs = fs.readFileSync(new URL('./detection.js', import.meta.url), 'utf8');
   assert.match(detectionJs, /!isTracked && !hovered && !_rangeGateDisabledForTest && isRangeGatedDetectionType\(obj\.type\)/);
-  assert.match(detectionJs, /detectionRangeAlpha\(camDistance\)/);
+  // 2026-09-30: lietadlá dostávajú aj výšku kamery (nízka kamera = užšie pásmo), lode nie.
+  assert.match(detectionJs, /detectionRangeAlpha\(camDistance, obj\.type === 'AIR' \? camHeightM : Number\.NaN\)/);
   // 2026-09-28: + _bracketPolicy (scopeMasked z isScopeMaskEnabled — mimo kruhu bez podlahy)
   assert.match(detectionJs, /detectionBracketAlpha\(obj\.type, keyholeAlpha, keyholeOutsideOpacity, _bracketPolicy\) \* rangeAlpha/);
   assert.match(detectionJs, /_bracketPolicy\.scopeMasked = isScopeMaskEnabled\(\);/);
@@ -278,4 +279,28 @@ test('legacy state migration removes contradictory mode/density pairs', () => {
   assert.deepEqual(migrateDetectionState('OFF', 25, 50), {
     enabled: false, profile: 'SPARSE', densityPct: 25,
   });
+});
+
+test('nízka kamera (2026-09-30): brána lietadiel 60/100 km pri kamere pod 20 km, 120/300 km od 60 km, plynulo medzi', async () => {
+  const {
+    detectionRangeThresholds, DETECTION_RANGE_LOW_FULL_M, DETECTION_RANGE_LOW_OFF_M,
+  } = await import('./detectionPolicy.js');
+  assert.deepEqual(detectionRangeThresholds(1_488), { fullM: DETECTION_RANGE_LOW_FULL_M, offM: DETECTION_RANGE_LOW_OFF_M });
+  assert.deepEqual(detectionRangeThresholds(20_000), { fullM: 60_000, offM: 100_000 });
+  assert.deepEqual(detectionRangeThresholds(60_000), { fullM: DETECTION_RANGE_FULL_M, offM: DETECTION_RANGE_OFF_M });
+  assert.deepEqual(detectionRangeThresholds(40_000), { fullM: 90_000, offM: 200_000 }, 'stred prelínania');
+  assert.deepEqual(detectionRangeThresholds(undefined), { fullM: 120_000, offM: 300_000 }, 'bez výšky pôvodné prahy');
+  // úvodný pohľad z 1,5 km: stroje pri Viedni (45 km) ostanú, 107+ km už bez rámčeka a popisu
+  assert.equal(detectionRangeAlpha(45_000, 1_488), 1);
+  assert.equal(detectionRangeAlpha(80_000, 1_488), 0.5);
+  assert.equal(detectionRangeAlpha(107_000, 1_488), 0);
+  // pohľad zhora na región (kamera 150 km) sa nemení
+  assert.equal(detectionRangeAlpha(140_000, 150_000), detectionRangeAlpha(140_000));
+  // žiadny skok pri zoome: pri pevnej vzdialenosti sa alfa mení s výškou po malých krokoch
+  let prior = null;
+  for (let h = 0; h <= 80_000; h += 500) {
+    const a = detectionRangeAlpha(90_000, h);
+    if (prior !== null) assert.ok(Math.abs(a - prior) <= 0.05, `skok pri výške ${h}`);
+    prior = a;
+  }
 });
