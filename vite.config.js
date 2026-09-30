@@ -3629,7 +3629,7 @@ function airframesProxy() {
         };
         try {
           const url = new URL(String(req.url || '/'), 'http://localhost');
-          const local = isLoopbackAddress(req.socket?.remoteAddress);
+          const local = isDirectLocalRequest(req);
           const on = enabled();
           if (url.pathname === '/status') {
             return send(200, {
@@ -3884,6 +3884,20 @@ function meteoProxy() {
 export function isLoopbackAddress(address) {
   const a = String(address || '').trim().toLowerCase();
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1' || a.startsWith('127.');
+}
+
+/**
+ * Požiadavka naozaj z tohto počítača (2026-09-30). Loopback soket NESTAČÍ: cloudflared tunel
+ * doručuje aj verejných návštevníkov okolive.sk z 127.0.0.1 (ACARS tak bol verejný napriek
+ * „LEN LOKÁLNE"). Lokálna je len požiadavka bez hlavičiek Cloudflare/proxy a s hostiteľom
+ * localhost. Exportované pre testy.
+ */
+export function isDirectLocalRequest(req) {
+  if (!isLoopbackAddress(req?.socket?.remoteAddress)) return false;
+  const h = req?.headers || {};
+  if (h['cf-connecting-ip'] || h['cf-ray'] || h['cf-visitor'] || h['x-forwarded-for'] || h['x-forwarded-host']) return false;
+  const host = String(h.host || '').trim().toLowerCase().replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost');
 }
 
 /**
@@ -5698,7 +5712,12 @@ function flightHistoryProxy() {
         const s = getStore();
         if (!s) { json(res, 503, { error: enabled ? 'history_unavailable' : 'history_disabled' }); return; }
         try {
-          if (url.pathname === '/status') { json(res, 200, s.status()); return; }
+          if (url.pathname === '/status') {
+            // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
+            const { path: dbFile, ...publicStatus } = s.status();
+            json(res, 200, isDirectLocalRequest(req) ? { ...publicStatus, path: dbFile } : publicStatus);
+            return;
+          }
           if (url.pathname === '/search') {
             const hours = Math.min(24 * config().retentionDays, Math.max(1, Number(url.searchParams.get('hours')) || 24));
             const sinceS = Math.floor(Date.now() / 1000) - hours * 3600;
