@@ -63,6 +63,7 @@ import {
 import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
+import { carryRouteEnrichment, createRouteMemory } from './flightRouteMemory.js';
 import { buildFlightCharts } from './flightCharts.js';
 import {
   cachedTrackedHistory,
@@ -1274,10 +1275,29 @@ function _requestTypeEnrichment(icao24, priority = false) {
   }, priority);
 }
 
+/**
+ * Výsledky trasy z adsbdb podľa volacieho znaku (2026-09-30, vlastník: „v kartičkách chýba ETA").
+ * Záznam stroja v `_flightData` sa vie vymeniť (vypadnutie z feedu a návrat, sledovanie a jeho
+ * zrušenie) a `_enrichSeen` druhý dopyt na ten istý volací znak nepustí — trasa, dopravca a IATA
+ * číslo tak z kartičky zmizli natrvalo. Pamäť ich vráti bez ďalšieho dopytu (flightRouteMemory.js).
+ */
+const _routeMemory = createRouteMemory({ max: 4000 });
+
+/** TEST ONLY — pamäť trasy vrstvy (správanie kartičky po výmene záznamu stroja). */
+export function _routeMemoryForTest() {
+  return _routeMemory;
+}
+
 function _requestRouteEnrichment(icao24) {
-  const cs = String(_flightData.get(icao24)?.callsign || '').trim().toUpperCase();
+  const known = _flightData.get(icao24);
+  const cs = String(known?.callsign || '').trim().toUpperCase();
   if (!/^[A-Z]{3}\d/.test(cs)) return; // airline-style callsigns only (LLL + digit); GA tails won't resolve
+  if (_routeMemory.apply(known)) {
+    if (icao24 === _trackedIcao && _trackedEntity) _updateTrackedLabelModel(icao24);
+    return;
+  }
   _enqueueEnrich(`r:${cs}`, `/api/adsbdb/route/${encodeURIComponent(cs)}`, (data) => {
+    _routeMemory.remember(cs, data);
     const meta = _flightData.get(icao24);
     if (!meta) return;
     meta.airline = data.airline || meta.airline;
@@ -5406,8 +5426,9 @@ const flightsLayer = {
           // Operator is feed-only (adsbdb's airline arrives via the route
           // lookup as `airline`) — sticky like callsign.
           operator: feedOperator ?? prevMeta?.operator ?? null,
-          airline: prevMeta?.airline ?? null,
-          route: prevMeta?.route ?? null,
+          // Dopravca, trasa a IATA číslo letu (EK54J) z adsbdb — bez prenosu IATA číslo zmizlo
+          // z titulku karty po 30 s (flightRouteMemory.js, ROUTE_ENRICHMENT_FIELDS).
+          ...carryRouteEnrichment(prevMeta),
           // The RAW poll fix lat/lon (this tick's OpenSky state-vector
           // coords, pre-dead-reckon) — kept distinct from the continuously
           // dead-reckoned billboard position for any consumer that needs the
@@ -5415,6 +5436,9 @@ const flightsLayer = {
           rawLat: lat,
           rawLon: lon,
         };
+        // Stroj, ktorý sa vrátil do feedu (alebo zmenil volací znak na známy let), dostane trasu
+        // z cache — `_enrichSeen` by ju druhýkrát nevyžiadal.
+        if (!meta.route) _routeMemory.apply(meta);
         _flightData.set(icao24, meta);
 
         const isTracked = icao24 === _trackedIcao;
@@ -5733,6 +5757,7 @@ const flightsLayer = {
     _displayFloorState.clear();
     _enrichQueue.length = 0;
     _enrichSeen.clear();
+    _routeMemory.clear();
     if (_enrichDripTimer) { clearTimeout(_enrichDripTimer); _enrichDripTimer = null; }
     _missingPolls.clear();
     _focusEvidenceIds.clear();
