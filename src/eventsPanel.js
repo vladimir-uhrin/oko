@@ -165,6 +165,7 @@ export function installEventsPanel({
   clipboard = (text) => globalThis.navigator?.clipboard?.writeText?.(text),
   openWindow = (url) => globalThis.open?.(url, '_blank', 'noopener,noreferrer'),
   now = () => Date.now(),
+  setTimer = (fn, ms) => globalThis.setTimeout?.(fn, ms),
 } = {}) {
   if (!host || !doc) return null;
   const section = el(doc, 'section', 'events-section');
@@ -344,9 +345,17 @@ export function installEventsPanel({
   /** Zverejniť / stiahnuť: prvý klik len pýta potvrdenie (5 s), druhý koná. */
   async function confirmThen(kind, btn, labelKey, action) {
     if (now() > confirmUntil[kind]) {
-      confirmUntil[kind] = now() + EVENTS_CONFIRM_MS;
+      const until = now() + EVENTS_CONFIRM_MS;
+      confirmUntil[kind] = until;
       btn.textContent = t(`${labelKey}-confirm`);
       btn.dataset.confirm = '1';
+      // Po 5 s bez druhého kliku tlačidlo znova hovorí, čo urobí prvý klik.
+      setTimer(() => {
+        if (confirmUntil[kind] !== until) return;
+        confirmUntil[kind] = 0;
+        btn.textContent = t(labelKey);
+        btn.dataset.confirm = '0';
+      }, EVENTS_CONFIRM_MS);
       return;
     }
     confirmUntil[kind] = 0;
@@ -396,11 +405,14 @@ export function installEventsPanel({
     try {
       const res = await api.list();
       if (!res) { ownerAvailable = false; review.hidden = true; syncSection(); return; }
+      const wasOwner = ownerAvailable;
       ownerAvailable = true;
       summaries = Array.isArray(res.events) ? res.events : [];
       review.hidden = false;
       syncSection();
       renderReview();
+      // Karta z odkazu sa otvorila skôr, než prišiel zoznam — doplniť kontrolu vlastníka.
+      if (!wasOwner && current?.view) await renderOwner(current.id);
     } catch {
       review.hidden = true;
       syncSection();

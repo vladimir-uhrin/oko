@@ -56,7 +56,7 @@ const visible = (root, node) => {
   return walk(root) && path.every((n) => !n.hidden);
 };
 
-function setup({ ownerHost = false, list = null, view = null, post = null } = {}) {
+function setup({ ownerHost = false, list = null, view = null, post = null, listGate = null } = {}) {
   const doc = fakeDoc();
   const host = doc.createElement('div');
   const existing = doc.createElement('div');
@@ -66,7 +66,7 @@ function setup({ ownerHost = false, list = null, view = null, post = null } = {}
   const state = { view, list, post };
   const api = {
     publicEvent: async (id) => { calls.publicEvent.push(id); return typeof state.view === 'function' ? state.view(id) : state.view; },
-    list: async () => { calls.list += 1; return state.list; },
+    list: async () => { calls.list += 1; if (listGate) await listGate; return state.list; },
     post: async (id) => { calls.post.push(id); return state.post; },
     publish: async (id) => { calls.publish.push(id); return {}; },
     unpublish: async (id) => { calls.unpublish.push(id); return {}; },
@@ -84,14 +84,16 @@ function setup({ ownerHost = false, list = null, view = null, post = null } = {}
   };
   const markers = { show: (m) => calls.shown.push(m.length), clear: () => { calls.cleared += 1; }, flyTo: () => { calls.flown += 1; } };
   let nowMs = 1_000_000;
+  const timers = [];
   const panel = installEventsPanel({
     host, t, doc, lang: () => 'sk', history, markers, api, ownerHost,
     reveal: () => { calls.revealed += 1; },
     clipboard: async (text) => { calls.copied.push(text); },
     openWindow: (url) => calls.opened.push(url),
     now: () => nowMs,
+    setTimer: (fn, ms) => { timers.push({ fn, ms }); },
   });
-  return { doc, host, panel, calls, state, section: host.children[0], advance: (ms) => { nowMs += ms; } };
+  return { doc, host, panel, calls, state, timers, section: host.children[0], advance: (ms) => { nowMs += ms; } };
 }
 
 test('id z odkazu a úsek na prehratie: len platné id; celá stopa udalosti, inak okno', async () => {
@@ -246,4 +248,31 @@ test('verejná adresa aj na localhoste: zoznam vráti 404 → žiadna kontrola v
   await s.panel.open(ID);
   assert.equal(one(s.section, 'events-owner').hidden, true);
   assert.equal(s.calls.post.length, 0, 'text príspevku sa nepýta');
+});
+
+test('vlastník: karta z odkazu otvorená skôr, než prišiel zoznam — kontrola sa doplní; „NAOZAJ ZVEREJNIŤ?" sa po 5 s vráti', async () => {
+  const view = await fzView({ preview: true });
+  const summary = { id: ID, icao24: '8965d1', callsign: 'FDB1073', status: 'confirmed', firstT: view.firstT, kinds: ['dive'], news: 'verified', publishable: true, published: null };
+  let release;
+  const listGate = new Promise((resolve) => { release = resolve; });
+  const s = setup({ ownerHost: true, view, list: { events: [summary] }, post: { id: ID, publishable: true, headline: 'H', text: 'T', published: null, facebook: null }, listGate });
+  await s.panel.open(ID);
+  assert.equal(one(s.section, 'events-owner').hidden, true, 'zoznam ešte neprišiel — nevie sa, či je to vlastník');
+  release();
+  await flush();
+  const owner = one(s.section, 'events-owner');
+  assert.equal(owner.hidden, false, 'po príchode zoznamu sa kontrola doplní');
+  const pub = one(owner, 'events-publish');
+  pub.click();
+  await flush();
+  assert.equal(pub.textContent, 'events.publish-confirm');
+  const timer = s.timers.at(-1);
+  assert.equal(timer.ms, EVENTS_CONFIRM_MS);
+  s.advance(EVENTS_CONFIRM_MS + 1);
+  timer.fn();
+  assert.equal(pub.textContent, 'events.publish', 'po 5 s zase hovorí, čo urobí prvý klik');
+  pub.click();
+  await flush();
+  assert.equal(s.calls.publish.length, 0, 'klik po návrate len znova pýta potvrdenie');
+  assert.equal(pub.textContent, 'events.publish-confirm');
 });
