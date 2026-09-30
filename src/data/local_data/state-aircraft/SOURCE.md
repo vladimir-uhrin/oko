@@ -22,11 +22,21 @@ sily, polícia a záchranári).
   505C07 pod volacími znakmi SSG001/SSG004/SSG04A/SSG04B/SSG006 (SSG = SLOVAK
   GOVERNMENT); 505C08 od začiatku archívu (8. 9. 2026) nelietal, čo sedí s vyradením.
   Blok ICAO adries SR: 505C00–505FFF (ICAO Annex 10, zv. III, tab. 9-1).
+- **Etapa 2 (2026-09-30, vlastník: „dva Bombardier Global 5000 Vzdušných síl"):**
+  9513 (505FA0) a 9633 (505FA1), úloha `military`, prevádzkovateľ Vzdušné sily OS SR.
+  Kúpna zmluva MO SR 23. 12. 2024 (TASR) — to je `since` oboch (pred ňou slovenská
+  adresa týmto strojom patriť nemohla); 9513 ex C-FDIL, prelet Montreal → Bratislava
+  18. 2. 2025 (ch-aviation); 9633 ex 9H-AVA, vo februári 2025 ešte na Malte — dátum
+  príletu neoverený (Scramble blokuje prístup). Hex len z dvoch neúradných databáz
+  (tar1090-db, live-mobile-mode-s.eu), podložený archívom OKO (lety 14.–30. 9. 2026 pod
+  volacími znakmi SQF901/SQF911/SQF913 = SLOVAK AIRFORCE, štart a pristátie na letisku
+  Bratislava) a stopami adsb.lol (r 9513/9633, t GL5T, vojenský príznak dbFlags 1).
+  Úloha: doprava a medevac/evakuácie (ch-aviation); zákon 321/2002 § 4 ods. 4 písm. f)
+  umožňuje ozbrojeným silám aj leteckú prepravu ústavných činiteľov určených vládou
+  (slov-lex). Zoznam neuvádza, kto letí — len stroj.
 - **Ďalšie etapy (overené, zatiaľ mimo zoznamu):** vrtuľníky LÚ MV SR OM-BYW (AW189,
   505C17) a OM-BYD (Bell 429, 505C04) — hlavne polícia, hasenie a záchrana, preprava
-  ústavných činiteľov len ako vedľajšia úloha; Vzdušné sily OS SR Bombardier Global
-  5000 9513 (505FA0) a 9633 (505FA1) — doprava a medevac, jeden raz aj s premiérom
-  (MO SR: „výcvik"), hex len z dvoch neúradných zdrojov.
+  ústavných činiteľov len ako vedľajšia úloha.
 - **Pravidlo:** len overené fakty. Každé pole má zdroj; čo sa nedalo potvrdiť, v
   zozname nie je. Nič sa nedopĺňa odhadom ani z pamäti.
 - **Etická čiara:** zoznam opisuje štátne STROJE (majetok štátu) a ich lety z verejného

@@ -1,7 +1,7 @@
 {
   "country": "SK",
   "updated": "2026-09-30",
-  "note": "Štátne lietadlá SR — len overené stroje, každý so zdrojmi (SOURCE.md). Etapa 1: vládna/VIP preprava (Letecký útvar MV SR). Hex kódy nie sú v úradnom registri (štátne lietadlá v ňom nie sú) — každý potvrdzujú štyri nezávislé verejné ADS-B databázy (Flightradar24, tar1090-db, hexdb.io, live-mobile-mode-s.eu) a archív OKO (lety s volacím znakom SSG… = SLOVAK GOVERNMENT, september 2026).",
+  "note": "Štátne lietadlá SR — len overené stroje, každý so zdrojmi (SOURCE.md). Etapa 1: vládna/VIP preprava (Letecký útvar MV SR); etapa 2: Bombardier Global 5000 Vzdušných síl OS SR. Hex kódy nie sú v úradnom registri (štátne lietadlá v ňom nie sú). Vládne stroje: štyri nezávislé verejné ADS-B databázy (Flightradar24, tar1090-db, hexdb.io, live-mobile-mode-s.eu) a archív OKO (volací znak SSG… = SLOVAK GOVERNMENT). Global 5000: dve databázy (tar1090-db, live-mobile-mode-s.eu), archív OKO (volací znak SQF… = SLOVAK AIRFORCE, letisko Bratislava) a stopy adsb.lol (sériové číslo, typ, vojenský príznak). Všetky hexy sú v bloku SR 505C00–505FFF.",
   "aircraft": [
     {
       "hex": "505c06",
@@ -75,6 +75,42 @@
         "https://www.flightradar24.com/data/aircraft/om-byc",
         "https://hexdb.io/api/v1/aircraft/505c08",
         "https://github.com/wiedehopf/tar1090-db"
+      ]
+    },
+    {
+      "hex": "505fa0",
+      "reg": "9513",
+      "typeCode": "GL5T",
+      "typeName": "Bombardier Global 5000",
+      "operator": { "sk": "Vzdušné sily OS SR", "en": "Slovak Air Force" },
+      "role": "military",
+      "since": "2024-12-23",
+      "until": null,
+      "verified": "2026-09-30",
+      "note": "since = kúpna zmluva MO SR (TASR 23. 12. 2024); ex C-FDIL, prelet Montreal → Bratislava 18. 2. 2025 (ch-aviation). Hex z tar1090-db a live-mobile-mode-s; v archíve OKO lety 16.–30. 9. 2026 pod volacími znakmi SQF901/SQF911/SQF913 z letiska Bratislava.",
+      "sources": [
+        "https://www.teraz.sk/slovensko/rezort-obrany-kupil-dve-dopravne-lieta/845185-clanok.html",
+        "https://www.ch-aviation.com/news/150623-slovak-air-force-adds-first-global-5000-to-modernise-fleet",
+        "https://github.com/wiedehopf/tar1090-db",
+        "https://live-mobile-mode-s.eu/overviewall.php?DGCountry=SK"
+      ]
+    },
+    {
+      "hex": "505fa1",
+      "reg": "9633",
+      "typeCode": "GL5T",
+      "typeName": "Bombardier Global 5000",
+      "operator": { "sk": "Vzdušné sily OS SR", "en": "Slovak Air Force" },
+      "role": "military",
+      "since": "2024-12-23",
+      "until": null,
+      "verified": "2026-09-30",
+      "note": "since = kúpna zmluva MO SR (TASR 23. 12. 2024); ex 9H-AVA (ch-aviation, vo februári 2025 ešte na Malte) — dátum príletu do Bratislavy neoverený. Hex z tar1090-db a live-mobile-mode-s; v archíve OKO lety 14.–16. 9. 2026 pod volacím znakom SQF911 z letiska Bratislava.",
+      "sources": [
+        "https://www.teraz.sk/slovensko/rezort-obrany-kupil-dve-dopravne-lieta/845185-clanok.html",
+        "https://www.ch-aviation.com/news/150623-slovak-air-force-adds-first-global-5000-to-modernise-fleet",
+        "https://github.com/wiedehopf/tar1090-db",
+        "https://live-mobile-mode-s.eu/overviewall.php?DGCountry=SK"
       ]
     }
   ]
