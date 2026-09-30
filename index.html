@@ -1,11 +1,53 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sk">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <!-- Verejný tunel (2026-09-13): pracovný nástroj, nikdy do indexov vyhľadávačov. -->
-  <meta name="robots" content="noindex, nofollow, noarchive" />
-  <title>OKO</title>
+  <!-- SEO (2026-09-30, vlastník: „podmienka noindex už neplatí"): stránka sa indexuje.
+       noindex ostáva na /s/<id> (snímky), /account.html a /api (docs/drafts/seo-plan.md).
+       Jazyk: statický `sk` pre okolive.sk; appka si ho pri štarte prepíše (src/i18n.js). -->
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <title>OKO — lietadlá, lode a konflikty naživo na 3D glóbuse</title>
+  <meta name="description" content="Sledujte lietadlá, lode a konflikty naživo na 3D glóbuse: Ukrajina, Blízky východ, ceny a toky plynu, satelity a kamery. Zadarmo, po slovensky aj anglicky." />
+  <link rel="canonical" href="https://okolive.sk/" />
+  <meta name="theme-color" content="#040a10" />
+  <meta name="author" content="Vladimír Uhrin" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://okolive.sk/#website",
+        "url": "https://okolive.sk/",
+        "name": "OKO",
+        "alternateName": "okolive.sk",
+        "inLanguage": ["sk", "en"],
+        "publisher": { "@id": "https://okolive.sk/#author" }
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://okolive.sk/#app",
+        "name": "OKO",
+        "url": "https://okolive.sk/",
+        "description": "Živý 3D glóbus: sledovanie lietadiel, lodí a konfliktov naživo — Ukrajina, Blízky východ, plyn, satelity a kamery.",
+        "applicationCategory": "ReferenceApplication",
+        "operatingSystem": "Any (web browser with WebGL)",
+        "browserRequirements": "Requires WebGL",
+        "inLanguage": ["sk", "en"],
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "image": "https://okolive.sk/share-default.jpg",
+        "author": { "@id": "https://okolive.sk/#author" }
+      },
+      {
+        "@type": "Person",
+        "@id": "https://okolive.sk/#author",
+        "name": "Vladimír Uhrin"
+      }
+    ]
+  }
+  </script>
   <!-- Náhľad odkazu na sieťach (2026-09-14): koreň a dlhé odkazy s hashom
        (siete hash nevidia) dostanú tento predvolený obrázok; presná snímka
        pohľadu ide cez krátke odkazy /s/<id>. Open Graph vyžaduje absolútne

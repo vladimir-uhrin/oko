@@ -1,8 +1,9 @@
 // src/staticServer.test.mjs
 // Statický server pre produkčný build za verejným tunelom (2026-09-14):
 // spustí scripts/oko-static-server.mjs nad dočasným „dist", overí index
-// (no-cache + noindex), nemenné assety (immutable + ETag/304), robots.txt,
-// 404, zákaz path traversal, /api → 502 (patrí dev serveru), HEAD.
+// (no-cache; od 2026-09-30 indexovateľný), účet noindex, nemenné assety
+// (immutable + ETag/304), robots.txt so sitemap, 404, zákaz path traversal,
+// /api → 502 (patrí dev serveru), HEAD.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -30,10 +31,13 @@ async function waitFor(url, tries = 50) {
   throw new Error(`server did not start: ${url}`);
 }
 
-test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, robots, 404, traversal, /api = 502, HEAD', async () => {
+test('oko-static-server: index no-cache a indexovateľný, účet noindex, assets immutable + ETag/304, robots + sitemap, 404, traversal, /api = 502, HEAD', async () => {
   const dist = mkdtempSync(path.join(tmpdir(), 'oko-dist-'));
   mkdirSync(path.join(dist, 'assets'));
   writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>OKO</title><script type="module" src="/assets/index-abc.js"></script>');
+  writeFileSync(path.join(dist, 'account.html'), '<!doctype html><title>Účet</title>');
+  writeFileSync(path.join(dist, 'google5f66f1e4a10096a1.html'), 'google-site-verification: google5f66f1e4a10096a1.html');
+  writeFileSync(path.join(dist, 'sitemap.xml'), '<?xml version="1.0"?><urlset/>');
   writeFileSync(path.join(dist, 'assets', 'index-abc.js'), 'console.log("oko")');
   writeFileSync(path.join(dist, 'logo.svg'), '<svg></svg>');
   mkdirSync(path.join(dist, 'cesium', 'Workers'), { recursive: true });
@@ -50,8 +54,15 @@ test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, 
     assert.equal(index.status, 200);
     assert.equal(index.headers.get('content-type'), 'text/html; charset=utf-8');
     assert.equal(index.headers.get('cache-control'), 'no-cache', 'index sa vždy overuje — nový build musí byť vidieť hneď');
-    assert.equal(index.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
+    assert.equal(index.headers.get('x-robots-tag'), null, 'od 2026-09-30 sa koreň indexuje (rozhoduje <meta> stránky)');
     assert.match(await index.text(), /assets\/index-abc\.js/);
+    assert.equal((await fetch(base + '/account.html')).headers.get('x-robots-tag'), 'noindex, nofollow, noarchive', 'účet do výsledkov nepatrí');
+    const verification = await fetch(base + '/google5f66f1e4a10096a1.html');
+    assert.equal(verification.status, 200);
+    assert.equal(verification.headers.get('x-robots-tag'), 'noindex', 'overovací súbor Search Console do výsledkov nepatrí');
+    const sitemap = await fetch(base + '/sitemap.xml');
+    assert.equal(sitemap.headers.get('content-type'), 'application/xml');
+    assert.equal(sitemap.headers.get('x-robots-tag'), null);
     const asset = await fetch(base + '/assets/index-abc.js');
     assert.equal(asset.status, 200);
     assert.equal(asset.headers.get('cache-control'), 'public, max-age=31536000, immutable', 'hashované assety sú nemenné → Cloudflare ich drží na hrane');
@@ -73,7 +84,8 @@ test('oko-static-server: index no-cache + noindex, assets immutable + ETag/304, 
     assert.equal(glb.headers.get('cache-control'), 'public, max-age=604800', 'modely lietadiel 7 dní');
     assert.equal((await fetch(base + '/index.html?v=9')).headers.get('cache-control'), 'no-cache', 'HTML sa overuje vždy, aj s query');
     const robots = await fetch(base + '/robots.txt');
-    assert.equal(await robots.text(), 'User-agent: *\nDisallow: /api/\nAllow: /\n', 'crawlery smú čítať stránky (náhľady sietí), nie /api/; neindexovanie drží noindex (2026-09-14)');
+    assert.equal(await robots.text(), 'User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https://okolive.sk/sitemap.xml\n', 'crawlery smú čítať stránky, nie /api/; od 2026-09-30 robots ukazuje na sitemap');
+    assert.match(robots.headers.get('x-robots-tag'), /noindex/, 'sonda publikovania (oko-publish.ps1) čaká noindex na robots.txt');
     assert.equal((await fetch(base + '/nope.js')).status, 404);
     assert.equal((await fetch(base + '/assets/..%2F..%2Fpackage.json')).status, 403, 'zakódovaný traversal nevedie von z dist (Forbidden)');
     const api = await fetch(base + '/api/gas/status');

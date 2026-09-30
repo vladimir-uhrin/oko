@@ -41,7 +41,7 @@ test('index.html: titulok, popis s témami, popis obrázka a jazyk pre Open Grap
   assert.match(html, /<meta property="og:image:alt" content="[^"]{20,}" \/>/);
   assert.match(html, /<meta name="twitter:title" content="OKO — lietadlá, lode a konflikty naživo v 3D" \/>/);
   assert.match(html, /<meta name="twitter:image:alt" content="[^"]{20,}" \/>/);
-  assert.match(html, /<meta name="robots" content="noindex, nofollow, noarchive" \/>/, 'náhľad na sieťach nie je indexovanie — noindex ostáva');
+  assert.match(html, /<meta name="robots" content="index, follow, max-image-preview:large" \/>/, 'od 2026-09-30 sa koreň indexuje (vlastník: „podmienka noindex už neplatí")');
 });
 
 test('skladanie obrázka: krátky titulok, témy, doména, autor a atribúcia Google · Cesium ion', () => {

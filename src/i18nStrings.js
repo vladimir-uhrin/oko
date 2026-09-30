@@ -106,6 +106,12 @@ export const EN_STRINGS = Object.freeze({
 
   'loader.configuring': 'Configuring viewer...',
   'loader.made-by': 'made by',
+  // GA4 len so súhlasom (2026-09-30, src/analytics.js).
+  'consent.title': 'Analytics consent',
+  'consent.text': 'OKO would like to measure anonymous visit statistics with Google Analytics (cookies). Nothing is sent without your consent and ads stay off.',
+  'consent.more': 'Privacy',
+  'consent.accept': 'Allow statistics',
+  'consent.decline': 'Decline',
   'loader.start': 'Starting the photorealistic world…',
   'loader.google-tiles': 'Loading Google 3D Tiles...',
   'loader.google-tiles-fallback': 'Google 3D Tiles unavailable ({detail}). Continuing in fallback mode...',
@@ -2138,6 +2144,12 @@ export const SK_STRINGS = Object.freeze({
 
   'loader.configuring': 'Konfigurujem zobrazenie…',
   'loader.made-by': 'vytvoril',
+  // GA4 len so súhlasom (2026-09-30, src/analytics.js).
+  'consent.title': 'Súhlas so štatistikou',
+  'consent.text': 'OKO by rado meralo anonymnú štatistiku návštev cez Google Analytics (cookies). Bez tvojho súhlasu sa nič neodošle a reklamy sú vypnuté.',
+  'consent.more': 'Ochrana súkromia',
+  'consent.accept': 'Povoliť štatistiku',
+  'consent.decline': 'Odmietnuť',
   'loader.start': 'Štartujem fotorealistický svet…',
   'loader.google-tiles': 'Načítavam Google 3D dlaždice…',
   'loader.google-tiles-fallback': 'Google 3D dlaždice nedostupné ({detail}). Pokračujem v záložnom režime…',

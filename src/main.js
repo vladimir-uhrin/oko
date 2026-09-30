@@ -38,6 +38,8 @@ import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
+import { isCrawlerUserAgent } from './crawlerDetect.js';
+import { initAnalytics } from './analytics.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { armStartupGate, releaseStartupGate } from './startupGate.js';
@@ -295,8 +297,12 @@ async function init() {
     // MapStackController null tileset už rieši). Deň s desiatkami headless
     // overení tak nevyčerpá kvótu reálnym pozeraniam (429 na root.json).
     const qaBasemapOsm = new URLSearchParams(window.location.search).get('qaBasemap') === 'osm';
+    // SEO (2026-09-30): roboty vyhľadávačov si appku vykresľujú — tá istá ochrana kvóty ako
+    // pri QA, obsah stránky ostáva rovnaký (src/crawlerDetect.js).
+    const crawlerVisit = isCrawlerUserAgent(navigator.userAgent);
     try {
       if (qaBasemapOsm) throw new Error('qaBasemap=osm — Google tileset skipped to protect the daily root-request quota');
+      if (crawlerVisit) throw new Error('crawler — photorealistic tiles skipped to protect the quota');
       // Google Photorealistic 3D Tiles: najprv priamo Google kľúčom, pri EHP
       // 403 („not available for your account and region", od 2026-09-04) cez
       // Cesium ion asset 2275207 — tie isté dlaždice pod zmluvou Cesiumu
@@ -489,6 +495,8 @@ async function init() {
       loadingScreen.classList.add('hidden');
       releaseStartupGate();
       startSharpStarfield();
+      // GA4 len so súhlasom a až po štarte (src/analytics.js; vypnuté, kým nie je info@okolive.sk).
+      try { initAnalytics({ t, crawler: crawlerVisit }); } catch (error) { console.warn('[analytics]', error); }
       // Reveal only after the loading cover has yielded. transitionend can be
       // absent under reduced motion, so a bounded fallback makes this reliable.
       let firstRunRevealed = false;

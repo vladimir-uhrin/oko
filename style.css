@@ -12537,3 +12537,39 @@ body.oko-map-focus #command-dock:not(:hover):not(:focus-within) { opacity: 0.42;
 /* Šípka smeru útoku (KARTA, 2026-09-26): farba = ukraineAttackArrows.ARROW_CSS. */
 .oko-ukr-tl-ctl-item.is-rp-arrow .oko-ukr-tl-ctl-sw { width: 16px; height: 9px; border: 0; border-radius: 0; background: #ff3b30; clip-path: polygon(0 35%, 58% 35%, 58% 0, 100% 50%, 58% 100%, 58% 65%, 0 65%); }
 .oko-ukr-tl-rp[hidden] { display: none; }
+
+/* Súhlas so štatistikou GA4 (2026-09-30, src/analytics.js): dole v strede, obe voľby rovnocenné. */
+#oko-consent {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 10050;
+  width: min(560px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 14px 16px 12px;
+  border: 1px solid rgba(57, 208, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(6, 16, 26, 0.94);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  color: #dff3fb;
+  font: 14px/1.45 Inter, "Segoe UI", system-ui, sans-serif;
+  backdrop-filter: blur(6px);
+}
+#oko-consent p { margin: 0 0 10px; }
+#oko-consent a { color: #39d0ff; }
+#oko-consent .oko-consent-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+#oko-consent button {
+  min-width: 140px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(57, 208, 255, 0.55);
+  background: transparent;
+  color: #dff3fb;
+  font: 600 13px/1.2 Inter, "Segoe UI", system-ui, sans-serif;
+  cursor: var(--cursor-pointer);
+}
+#oko-consent button:last-child { background: rgba(57, 208, 255, 0.18); }
+#oko-consent button:hover, #oko-consent button:focus-visible { border-color: #39d0ff; outline: none; box-shadow: 0 0 0 2px rgba(57, 208, 255, 0.35); }
+/* Na mobile je dole lišta sekcií (#oko-appbar, 58 px) — súhlas sedí nad ňou. */
+body.oko-mobile #oko-consent { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
