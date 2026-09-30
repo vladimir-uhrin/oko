@@ -86,12 +86,20 @@ $staticService = Get-Service -Name 'oko-static' -ErrorAction SilentlyContinue
 if ($staticService) {
   $staticArgs = "$serverScript --port $StaticPort --dir dist$redirectArgs"
   $current = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\oko-static\Parameters' -Name AppParameters -ErrorAction SilentlyContinue).AppParameters
+  # The running server also has to be restarted when its own code is newer than the process (2026-09-30:
+  # robots.txt with the sitemap and the noindex headers live in scripts/oko-static-server.mjs).
+  $staticProc = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match 'oko-static-server\.mjs' } | Select-Object -First 1
+  $codeNewer = $staticProc -and ((Get-Item -LiteralPath $serverScript).LastWriteTime -gt $staticProc.CreationDate)
   if ($current -ne $staticArgs) {
     $nssmExe = ((Get-CimInstance Win32_Service -Filter "Name='oko-static'").PathName).Trim('"')
     & $nssmExe set oko-static AppParameters $staticArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'changing the oko-static service arguments needs an elevated PowerShell (nssm set)' }
     Restart-Service -Name 'oko-static'
     Write-Host 'static service: arguments changed, restarted'
+  } elseif ($codeNewer) {
+    Restart-Service -Name 'oko-static'
+    Write-Host 'static service: server code changed, restarted'
   } elseif ((Get-Service -Name 'oko-static').Status -ne 'Running') {
     Start-Service -Name 'oko-static'
   }

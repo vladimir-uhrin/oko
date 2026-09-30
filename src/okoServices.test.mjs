@@ -62,6 +62,9 @@ test('publikovanie so službami: statický server bez reštartu pri novom builde
   assert.match(publish, /\$staticService = Get-Service -Name 'oko-static' -ErrorAction SilentlyContinue/);
   assert.match(publish, /HKLM:\\SYSTEM\\CurrentControlSet\\Services\\oko-static\\Parameters/);
   assert.match(publish, /if \(\$current -ne \$staticArgs\) \{[\s\S]*?Restart-Service -Name 'oko-static'/);
+  // nový kód servera (robots.txt, hlavičky) sa bez reštartu procesu neprejaví (2026-09-30)
+  assert.match(publish, /\$codeNewer = \$staticProc -and \(\(Get-Item -LiteralPath \$serverScript\)\.LastWriteTime -gt \$staticProc\.CreationDate\)/);
+  assert.match(publish, /\} elseif \(\$codeNewer\) \{\s*\n\s*Restart-Service -Name 'oko-static'/);
   assert.match(publish, /if \(\[System\.IO\.File\]::ReadAllText\(\$config\) -ceq \$newConfig\) \{\s*\n\s*Write-Host 'ingress unchanged: the tunnel keeps running'/);
   assert.match(publish, /if \(\$tunnelService\) \{\s*\n\s*Restart-Service -Name 'oko-tunnel'/);
   // bez služieb ostáva pôvodná cesta cez úlohy Plánovača (s Normal prioritou)
