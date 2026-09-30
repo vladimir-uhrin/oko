@@ -75,7 +75,7 @@ const SRC = Object.freeze({
     url: 'https://datacatalog.worldbank.org/search/dataset/0037580/Global-Shipping-Traffic-Density',
   },
   portwatch: { name: 'IMF PortWatch', url: 'https://portwatch.imf.org/' },
-  yahoo: { name: { sk: 'Yahoo Finance (Brent, WTI — orientačne)', en: 'Yahoo Finance (Brent, WTI — indicative)' }, url: 'https://finance.yahoo.com/' },
+  yahoo: { name: { sk: 'Yahoo Finance (Brent, WTI — najbližší kontrakt, orientačne)', en: 'Yahoo Finance (Brent, WTI — front month, indicative)' }, url: 'https://finance.yahoo.com/' },
   gdelt: { name: 'The GDELT Project', url: 'https://www.gdeltproject.org/' },
   rss: { name: { sk: 'RSS kanály 12 médií (BBC, Al Jazeera, The Guardian, France 24, UN News, The Times of Israel, Haaretz a ďalšie)', en: 'RSS feeds of 12 publishers (BBC, Al Jazeera, The Guardian, France 24, UN News, The Times of Israel, Haaretz and others)' } },
   googleNews: { name: { sk: 'Google News (doplnok, keď je správ málo)', en: 'Google News (fallback when there is little news)' }, url: 'https://news.google.com/' },
@@ -114,14 +114,14 @@ export const PAGES = [
       title: 'Mapa frontu na Ukrajine — denné hlásenie po smeroch | OKO',
       description: 'Front na Ukrajine na 3D glóbuse a prehľadnej mape: útoky po smeroch z denného hlásenia Generálneho štábu, obce z hlásenia a vývoj za 7 a 30 dní.',
       h1: 'Mapa frontu na Ukrajine: čo hlási Generálny štáb, smer po smere',
-      lead: 'OKO berie denné hlásenie Generálneho štábu Ozbrojených síl Ukrajiny, rozloží ho po smeroch frontu a ukáže na mape: koľko útokov hlásili pri Pokrovsku, Kupiansku či Lymane, ktoré obce sa v hlásení spomínajú a ako sa situácia menila za posledné dni. Pri každom údaji je zdroj a zreteľne odlíšené, čo je hlásenie a čo výpočet OKO.',
+      lead: 'OKO berie denné hlásenie Generálneho štábu Ozbrojených síl Ukrajiny, rozloží ho po smeroch frontu a ukáže na mape: koľko útokov hlásili pri Pokrovsku, Kupiansku či Lymane, ktoré obce sa v hlásení spomínajú a ako sa situácia menila za posledné dni. Pri hlásení je vždy uvedený zdroj a upozornenie, že ide o jednostranné oficiálne hlásenie; čo OKO počíta samo, je označené ako odvodené.',
       cta: { label: 'Otvoriť mapu frontu', href: '/?front=front' },
       sections: [
         {
           h2: 'Čo na mape uvidíte',
           p: [
-            'Pri každom smere frontu je značka s počtom útokov, ktoré Generálny štáb v daný deň nahlásil. Po kliknutí sa otvorí karta smeru: stĺpce za posledných 30 dní, porovnanie priemeru posledného týždňa s predchádzajúcimi dňami a obce, ktoré sa v hláseniach za 14 dní spomínali najčastejšie. Archív hlásení v OKO siaha do 25. júla 2026.',
-            'Obce, ktoré hlásenie menuje, sa ukážu priamo na mape. Odkaz na front otvorí mapu v režime KARTA — prehľadnú mapu s tieňovaným reliéfom, titulkom, legendou s mierkou a malou mapkou polohy, ktorú si môžete stiahnuť aj ako obrázok.',
+            'Pri každom smere frontu je na mape značka s počtom útokov, ktoré Generálny štáb v hlásení uviedol. Pri prechode myšou ukáže čas hlásenia a jeho odsek v origináli, na požiadanie aj so strojovým prekladom. V paneli UKRAJINA sa po výbere smeru otvorí karta smeru: stĺpce za posledných 30 dní, priemer posledného týždňa proti zvyšku obdobia a obce, ktoré hlásenia za 14 dní menovali najčastejšie. Deň bez hlásenia ostane prázdny, nie nulový. Archív hlásení v OKO siaha do 25. júla 2026.',
+            'Obce, ktoré hlásenie menuje, sa ukážu priamo na mape — sú to miesta z hlásenia, nie línia frontu ani polohy jednotiek. Odkaz na front otvorí mapu v režime KARTA — prehľadnú mapu s tieňovaným reliéfom, titulkom, legendou s mierkou a malou mapkou polohy, ktorú si môžete stiahnuť aj ako obrázok.',
           ],
           list: [
             'Smery: [Sumy](/?front=sumy), [Vovčansk](/?front=vovchansk), [Kupiansk](/?front=kupiansk), [Lyman](/?front=lyman), [Sloviansk – Kramatorsk](/?front=sloviansk-kramatorsk), [Kosťantynivka](/?front=kostiantynivka), [Pokrovsk](/?front=pokrovsk), [Oleksandrivka](/?front=oleksandrivka), [Huliajpole](/?front=huliaipole), [Orichiv – Záporožie](/?front=orikhiv) a [Cherson](/?front=kherson).',
@@ -139,8 +139,8 @@ export const PAGES = [
         {
           h2: 'Čo je odvodené a kde je hranica',
           p: [
-            'Niektoré prvky mapy počíta OKO samo z otvorených zdrojov. Na mape sú vždy označené ako odvodené — nejde o merania ani o oficiálne údaje.',
-            'OKO zobrazuje miesta a udalosti, nie ľudí ani vojenské jednotky: kotvami mapy sú obce a jednotky nezobrazujeme.',
+            'Niektoré prvky mapy počíta OKO samo z otvorených zdrojov. Na mape sú označené ako odvodené — nejde o merania ani o oficiálne údaje.',
+            'Značky z hlásenia sú ukotvené na obciach, nikdy na polohách jednotiek. OKO zobrazuje miesta a udalosti, nie ľudí.',
           ],
         },
       ],
@@ -165,14 +165,14 @@ export const PAGES = [
       title: 'Ukraine front map — daily General Staff report | OKO',
       description: 'The war in Ukraine on a 3D globe and a clean map: attacks per front direction from the General Staff daily report, the places it names, 7- and 30-day trends.',
       h1: 'Ukraine front map: what the General Staff reports, direction by direction',
-      lead: 'OKO takes the daily report of the General Staff of the Armed Forces of Ukraine, splits it by front direction and puts it on the map: how many attacks were reported near Pokrovsk, Kupiansk or Lyman, which settlements the report names and how the picture changed over recent days. Every figure shows its source and clearly separates what is reported from what OKO derives.',
+      lead: 'OKO takes the daily report of the General Staff of the Armed Forces of Ukraine, splits it by front direction and puts it on the map: how many attacks were reported near Pokrovsk, Kupiansk or Lyman, which settlements the report names and how the picture changed over recent days. The report always shows its source and a note that it is a one-sided official report; whatever OKO computes itself is labelled as derived.',
       cta: { label: 'Open the front map', href: '/?front=front' },
       sections: [
         {
           h2: 'What you will see on the map',
           p: [
-            'Each front direction carries a marker with the number of attacks the General Staff reported that day. Click it to open the direction card: bars for the last 30 days, the average of the last week against the days before, and the settlements named most often in the reports over 14 days. The report archive in OKO starts on 25 July 2026.',
-            'Settlements named in the report appear right on the map. A front link opens the map in KARTA mode — a clean map with shaded relief, a title, a legend with a scale bar and a small locator map, which you can also download as an image.',
+            'Each front direction carries a marker with the number of attacks the General Staff listed in its report. Hover over it to see the report time and the paragraph in the original, with a machine translation on request. In the UKRAINE panel, choosing a direction opens its card: bars for the last 30 days, the average of the last week against the rest of the period, and the settlements the reports named most often over 14 days. A day without a report stays empty, not zero. The report archive in OKO starts on 25 July 2026.',
+            'Settlements named in the report appear right on the map — they are places from the report, not a front line or unit positions. A front link opens the map in KARTA mode — a clean map with shaded relief, a title, a legend with a scale bar and a small locator map, which you can also download as an image.',
           ],
           list: [
             'Directions: [Sumy](/?front=sumy), [Vovchansk](/?front=vovchansk), [Kupiansk](/?front=kupiansk), [Lyman](/?front=lyman), [Sloviansk–Kramatorsk](/?front=sloviansk-kramatorsk), [Kostiantynivka](/?front=kostiantynivka), [Pokrovsk](/?front=pokrovsk), [Oleksandrivka](/?front=oleksandrivka), [Huliaipole](/?front=huliaipole), [Orikhiv–Zaporizhzhia](/?front=orikhiv) and [Kherson](/?front=kherson).',
@@ -190,8 +190,8 @@ export const PAGES = [
         {
           h2: 'What is derived, and where the line is',
           p: [
-            'Some elements of the map are computed by OKO itself from open sources. They are always labelled as derived on the map — they are neither measurements nor official figures.',
-            'OKO shows places and events, not people or military units: the map is anchored on settlements, and units are not displayed.',
+            'Some elements of the map are computed by OKO itself from open sources. They are labelled as derived on the map — they are neither measurements nor official figures.',
+            'Report markers are anchored on settlements, never on unit positions. OKO shows places and events, not people.',
           ],
         },
       ],
@@ -221,7 +221,7 @@ export const PAGES = [
       title: 'Lietadlá naživo na 3D glóbuse — sledovanie letov | OKO',
       description: 'Sledujte lietadlá naživo na 3D glóbuse: približne 12 000 strojov nad celým svetom, sledovanie letu so stopou, 3D modely, pohľad z kokpitu a vojenské lety.',
       h1: 'Lietadlá naživo na 3D glóbuse: celý svet aj let nad vaším domom',
-      lead: 'OKO ukazuje polohy lietadiel z otvorených sietí prijímačov ADS-B — zvyčajne 11 až 13 tisíc strojov naraz. Kliknutím na lietadlo ho začnete sledovať: kamera ho drží v zábere, za ním sa kreslí stopa a karta ukáže typ, trasu, výšku aj rýchlosť.',
+      lead: 'OKO ukazuje polohy lietadiel z otvorených sietí prijímačov ADS-B — zvyčajne 11 až 13 tisíc strojov naraz. Kliknutím na lietadlo ho začnete sledovať: kamera ho drží v zábere, za ním sa kreslí stopa a karta ukáže typ, výšku, rýchlosť a pri linkových letoch aj trasu.',
       cta: { label: 'Otvoriť lietadlá naživo', href: LINKS.flights },
       sections: [
         {
@@ -271,7 +271,7 @@ export const PAGES = [
       title: 'Live flight tracker on a 3D globe | OKO',
       description: 'Track aircraft live on a 3D globe: about 12,000 aircraft worldwide, follow a flight with its trail, 3D models by type, a cockpit view and military flights.',
       h1: 'Live flights on a 3D globe: the whole world, or the plane above your house',
-      lead: 'OKO shows aircraft positions from open ADS-B receiver networks — usually 11 to 13 thousand aircraft at a time. Click an aircraft to follow it: the camera keeps it in view, a trail is drawn behind it and a card shows its type, route, altitude and speed.',
+      lead: 'OKO shows aircraft positions from open ADS-B receiver networks — usually 11 to 13 thousand aircraft at a time. Click an aircraft to follow it: the camera keeps it in view, a trail is drawn behind it and a card shows its type, altitude, speed and, for airline flights, the route.',
       cta: { label: 'Open live flights', href: LINKS.flights },
       sections: [
         {
@@ -437,8 +437,8 @@ export const PAGES = [
         {
           h2: 'Čo scéna úžiny ukáže',
           p: [
-            'Otvorenie scény zapne naraz všetko, čo k úžine patrí: lode naživo z AIS, radarové detekcie lodí zo satelitov Sentinel-1, plynovody a ropovody z OpenStreetMap, lodné trasy a prístavy. Kamera zaletí do šikmého pohľadu nad úžinu.',
-            'Karta faktov opisuje, čo úžinou prúdi, a počítadlo ukazuje, koľko lodí s AIS je práve v zábere — je to počet sledovaných lodí v pohľade, nie celková doprava. Pri Hormuze sa pridá karta s cenou ropy Brent a WTI a správy z Perzského zálivu.',
+            'Otvorenie scény zapne naraz všetko, čo k úžine patrí: lode naživo z AIS aj oneskorené z AISHub, radarové detekcie lodí zo satelitov Sentinel-1, plynovody a ropovody z OpenStreetMap, lodné trasy a prístavy. Kamera zaletí nad úžinu.',
+            'Karta faktov uvádza, čo úžinou prúdi, a počítadlo ukazuje, koľko lodí s AIS je práve v oblasti úžiny — je to počet sledovaných lodí, nie celková doprava. Ku každej scéne sa pridá karta s cenou ropy Brent a WTI; pri Hormuze aj správy z Perzského zálivu na mieste udalostí.',
           ],
           list: [
             '[Hormuz](/?chokepoint=hormuz), [Báb al-Mandab](/?chokepoint=bab-el-mandeb), [Suez](/?chokepoint=suez), [Bospor](/?chokepoint=bosphorus)',
@@ -449,14 +449,13 @@ export const PAGES = [
           h2: 'Odkiaľ sú údaje a ako sú čerstvé',
           p: [
             'Polohy lodí prichádzajú z AIS cez AISStream.io naživo a cez AISHub s oneskorením 1 až 6 minút. Radarové detekcie Global Fishing Watch zo satelitov Sentinel-1 sú staré približne tri dni a pokrývajú desaťdňové okno; loď v radare bez AIS ešte neznamená „temnú“ loď. Potrubia sú zo snímky OpenStreetMap.',
-            'Cena ropy je orientačná — najbližší futures kontrakt s oneskorením asi 15 minút. Odhady prejazdov z IMF PortWatch pre Hormuz, Báb al-Mandab, Suez a Mys dobrej nádeje nájdete v paneli Blízky východ; sú predbežné a aktualizujú sa približne raz týždenne.',
+            'Cena ropy je orientačná — najbližší futures kontrakt z Yahoo Finance, približne spotová cena. Odhady prejazdov z IMF PortWatch pre Hormuz, Báb al-Mandab, Suez a Mys dobrej nádeje nájdete v paneli Blízky východ; sú predbežné a aktualizujú sa približne raz týždenne.',
           ],
         },
         {
-          h2: 'Prečo na úžinách záleží',
+          h2: 'Čo úžinami prúdi',
           p: [
-            'Hormuzským prielivom prechádza významná časť svetovej ropy a skvapalneného plynu, Báb al-Mandab a Suez spájajú Európu s Áziou. Bosporom prechádza ropa z Čierneho mora, Panamským prieplavom obchod medzi Atlantikom a Tichým oceánom a Malackým prielivom veľká časť lodí medzi Indickým oceánom a východnou Áziou.',
-            'Keď sa niektorá úžina zablokuje, prejaví sa to na cenách energií aj v Európe. OKO ukazuje, čo sa v úžine deje práve teraz — len z otvorených dát a bez špekulácií.',
+            'Karta faktov v scéne uvádza pri každej úžine to podstatné: Hormuzom asi 21 miliónov barelov ropy denne a LNG z Kataru, Malackým prielivom asi štvrtina svetového obchodu s tovarom a ropa do východnej Ázie, Báb al-Mandabom ropa a tovar na suezskú trasu, Suezom asi 12 % svetového obchodu a 10 % námornej ropy, Bosporom ruská a kaspická ropa a obilie z Čierneho mora a Panamským prieplavom asi 5 % svetového námorného obchodu. Gibraltár je jedinou oceánskou bránou Stredomoria a Doverská úžina najrušnejšou trasou s asi 400 loďmi denne.',
           ],
         },
       ],
@@ -464,10 +463,10 @@ export const PAGES = [
         ['Úžiny', 'Hormuz, Malacca, Báb al-Mandab, Suez, Bospor, Panama, Gibraltár, Dover'],
         ['Lode', 'AIS naživo (AISStream.io), AISHub s oneskorením'],
         ['Radar', 'Global Fishing Watch, Sentinel-1, asi 3 dni staré'],
-        ['Počítadlo', 'lode s AIS v zábere, nie celková doprava'],
+        ['Počítadlo', 'lode s AIS v oblasti úžiny, nie celková doprava'],
       ],
       faq: [
-        { q: 'Je počet lodí celková doprava?', a: 'Nie. Počítadlo ukazuje lode s AIS, ktoré sú práve v zábere kamery. Odhady celkových prejazdov ukazuje karta IMF PortWatch v paneli Blízky východ.' },
+        { q: 'Je počet lodí celková doprava?', a: 'Nie. Počítadlo ukazuje lode s AIS, ktoré sú práve v oblasti úžiny. Odhady celkových prejazdov ukazuje karta IMF PortWatch v paneli Blízky východ.' },
         { q: 'Sú radarové detekcie naživo?', a: 'Nie, sú staré približne tri dni. Slúžia na doplnenie obrazu, nie na sledovanie v reálnom čase.' },
         { q: 'Ktoré úžiny OKO pozná?', a: 'Hormuz, Malacca, Báb al-Mandab, Suez, Bospor, Panamský prieplav, Gibraltár a Dover.' },
         { q: 'Dá sa poslať odkaz priamo na úžinu?', a: 'Áno, napríklad okolive.sk/?chokepoint=hormuz otvorí scénu Hormuzského prielivu.' },
@@ -487,8 +486,8 @@ export const PAGES = [
         {
           h2: 'What a chokepoint scene shows',
           p: [
-            'Opening a scene switches on everything that belongs to the strait at once: live AIS ships, ship detections from Sentinel-1 satellite radar, gas and oil pipelines from OpenStreetMap, shipping lanes and ports. The camera flies into an oblique view over the strait.',
-            'A fact card explains what flows through the strait, and a counter shows how many AIS ships are in view right now — tracked ships in the view, not total traffic. At Hormuz a card with the Brent and WTI oil price and news from the Persian Gulf is added.',
+            'Opening a scene switches on everything that belongs to the strait at once: live AIS ships and delayed ones from AISHub, ship detections from Sentinel-1 satellite radar, gas and oil pipelines from OpenStreetMap, shipping lanes and ports. The camera flies over the strait.',
+            'A fact card states what flows through the strait, and a counter shows how many AIS ships are in the strait area right now — tracked ships, not total traffic. Every scene adds a card with the Brent and WTI oil price; at Hormuz, news from the Persian Gulf also appears where events were reported.',
           ],
           list: [
             '[Hormuz](/?chokepoint=hormuz), [Bab el-Mandeb](/?chokepoint=bab-el-mandeb), [Suez](/?chokepoint=suez), [Bosphorus](/?chokepoint=bosphorus)',
@@ -499,14 +498,13 @@ export const PAGES = [
           h2: 'Where the data come from and how fresh they are',
           p: [
             'Ship positions come from AIS, live via AISStream.io and via AISHub with a delay of 1 to 6 minutes. Global Fishing Watch detections from Sentinel-1 radar are about three days old and cover a ten-day window; a radar detection without AIS does not prove a “dark” ship. Pipelines come from an OpenStreetMap snapshot.',
-            'The oil price is indicative — the front-month futures contract, about 15 minutes delayed. IMF PortWatch transit estimates for Hormuz, Bab el-Mandeb, Suez and the Cape of Good Hope are in the Middle East panel; they are preliminary and updated roughly once a week.',
+            'The oil price is indicative — the front-month futures contract from Yahoo Finance, roughly the spot price. IMF PortWatch transit estimates for Hormuz, Bab el-Mandeb, Suez and the Cape of Good Hope are in the Middle East panel; they are preliminary and updated roughly once a week.',
           ],
         },
         {
-          h2: 'Why chokepoints matter',
+          h2: 'What flows through the straits',
           p: [
-            'A significant share of the world’s oil and liquefied gas passes through the Strait of Hormuz, and Bab el-Mandeb and Suez link Europe with Asia. The Bosphorus carries oil from the Black Sea, the Panama Canal links Atlantic and Pacific trade, and the Strait of Malacca carries much of the shipping between the Indian Ocean and East Asia.',
-            'When one of them is blocked, energy prices move in Europe too. OKO shows what is happening in the strait right now — from open data only, without speculation.',
+            'The fact card in each scene sums up the essentials: through Hormuz about 21 million barrels of oil a day and LNG from Qatar, through the Strait of Malacca about a quarter of the world’s traded goods and Gulf oil to East Asia, through Bab el-Mandeb oil and goods on the way to Suez, through Suez about 12% of global trade and 10% of seaborne oil, through the Bosphorus Russian and Caspian oil and Black Sea grain, and through the Panama Canal about 5% of world maritime trade. Gibraltar is the Mediterranean’s only ocean gate, and the Dover Strait is the world’s busiest lane with about 400 ships a day.',
           ],
         },
       ],
@@ -514,10 +512,10 @@ export const PAGES = [
         ['Chokepoints', 'Hormuz, Malacca, Bab el-Mandeb, Suez, Bosphorus, Panama, Gibraltar, Dover'],
         ['Ships', 'live AIS (AISStream.io), AISHub delayed'],
         ['Radar', 'Global Fishing Watch, Sentinel-1, about 3 days old'],
-        ['Counter', 'AIS ships in view, not total traffic'],
+        ['Counter', 'AIS ships in the strait area, not total traffic'],
       ],
       faq: [
-        { q: 'Is the ship count total traffic?', a: 'No. The counter shows AIS ships currently in the camera view. Estimates of total transits are in the IMF PortWatch card in the Middle East panel.' },
+        { q: 'Is the ship count total traffic?', a: 'No. The counter shows AIS ships currently in the strait area. Estimates of total transits are in the IMF PortWatch card in the Middle East panel.' },
         { q: 'Are the radar detections live?', a: 'No, they are about three days old. They complement the picture rather than track ships in real time.' },
         { q: 'Which chokepoints does OKO know?', a: 'Hormuz, Malacca, Bab el-Mandeb, Suez, the Bosphorus, the Panama Canal, Gibraltar and Dover.' },
         { q: 'Can I link straight to a strait?', a: 'Yes, for example okolive.sk/?chokepoint=hormuz opens the Strait of Hormuz scene.' },
@@ -653,7 +651,7 @@ export const PAGES = [
           h2: 'Ceny, zásobníky a LNG',
           p: [
             'Cena TTF na najbližší mesiac je odvodená z denného hodnotenia ceny LNG, ktoré zverejňuje ACER — nie je to burzová kotácia a OKO ju tak aj označuje. Dlhodobú históriu dopĺňajú mesačné údaje MMF z databázy FRED: od roku 1992, v eurách od roku 1999.',
-            'Naplnenie zásobníkov a dodávky LNG pochádzajú z platforiem GIE AGSI+ a ALSI. Mesačný dovoz podľa partnerskej krajiny — často je to posledná tranzitná krajina, nie pôvod plynu — prichádza z Eurostatu s oneskorením dva až tri mesiace. Tankery LNG sú lode zo živého AIS: potvrdené podľa zoznamu z Wikidata, ostatné označené ako pravdepodobné podľa typu a rozmerov.',
+            'Naplnenie zásobníkov a dodávky LNG pochádzajú z platforiem GIE AGSI+ a ALSI. Mesačný dovoz podľa partnerskej krajiny — často je to posledná tranzitná krajina, nie pôvod plynu — prichádza z Eurostatu s oneskorením dva až tri mesiace. Tankery LNG sú lode zo živého AIS: potvrdené podľa zoznamu z Wikidata, ostatné označené ako pravdepodobné podľa názvu, typu a rozmerov.',
           ],
         },
         {
@@ -673,7 +671,7 @@ export const PAGES = [
         { q: 'Je cena TTF burzová?', a: 'Nie. OKO ju odvodzuje z denného hodnotenia ACER (cena LNG mínus referenčná hodnota). Je označená ako odvodená a vychádza v pracovné dni večer.' },
         { q: 'Vidím tok v každom plynovode?', a: 'Nie. Tok sa ukáže len pri sledovaných bodoch a pri potrubiach, ktoré k nim podľa názvu patria.' },
         { q: 'Ako aktuálne sú toky?', a: 'Toky sú za predchádzajúci deň a sú predbežné. OKO ich kontroluje každých 30 minút.' },
-        { q: 'Ukazuje OKO aj ceny pre domácnosti?', a: 'Nie. Len veľkoobchodnú cenu odvodenú z údajov ACER a dlhodobú históriu podľa MMF.' },
+        { q: 'Ukazuje OKO aj ceny pre domácnosti?', a: 'Nie. OKO ukazuje veľkoobchodné ceny — odvodenú cenu TTF z údajov ACER a dlhodobú históriu podľa MMF.' },
       ],
       sources: [SRC.entsog, SRC.acer, SRC.gie, SRC.eurostat, SRC.fred, SRC.osm, SRC.wikidata],
     },
@@ -698,7 +696,7 @@ export const PAGES = [
           h2: 'Prices, storage and LNG',
           p: [
             'The front-month TTF price is derived from the daily LNG price assessment published by ACER — it is not an exchange quote, and OKO labels it as derived. Monthly IMF data from FRED extend the history: from 1992, in euros from 1999.',
-            'Storage levels and LNG send-out come from the GIE AGSI+ and ALSI platforms. Monthly imports by partner country — often the last transit country rather than the origin of the gas — come from Eurostat with a delay of two to three months. LNG carriers are ships from live AIS: confirmed against a list from Wikidata, the rest marked as likely by type and size.',
+            'Storage levels and LNG send-out come from the GIE AGSI+ and ALSI platforms. Monthly imports by partner country — often the last transit country rather than the origin of the gas — come from Eurostat with a delay of two to three months. LNG carriers are ships from live AIS: confirmed against a list from Wikidata, the rest marked as likely by name, type and size.',
           ],
         },
         {
@@ -718,7 +716,7 @@ export const PAGES = [
         { q: 'Is the TTF price an exchange quote?', a: 'No. OKO derives it from the ACER daily assessment (LNG price minus benchmark). It is labelled as derived and published on weekday evenings.' },
         { q: 'Can I see the flow in every pipeline?', a: 'No. A flow appears only at tracked points and on pipelines linked to them by name.' },
         { q: 'How current are the flows?', a: 'Flows are for the previous day and provisional. OKO checks them every 30 minutes.' },
-        { q: 'Does OKO show household gas prices?', a: 'No. Only the wholesale price derived from ACER data and the long-term IMF history.' },
+        { q: 'Does OKO show household gas prices?', a: 'No. OKO shows wholesale prices — the TTF price derived from ACER data and the long-term IMF history.' },
       ],
       sources: [SRC.entsog, SRC.acer, SRC.gie, SRC.eurostat, SRC.fred, SRC.osm, SRC.wikidata],
     },
@@ -740,7 +738,7 @@ export const PAGES = [
         {
           h2: 'Čo uvidíte',
           p: [
-            'Každý satelit má značku podľa triedy. Kliknutím ho začnete sledovať a ukáže sa jeho dráha; Medzinárodná vesmírna stanica ISS je zvýraznená a jej dráha je na mape stále. Navigačné systémy GPS, GLONASS a Galileo ukazujú, prečo váš telefón vie, kde je, a geostacionárny prstenec nad rovníkom zas satelity pre televíziu a komunikáciu.',
+            'Každý satelit má značku podľa triedy. Kliknutím ho začnete sledovať: kamera sa k nemu presunie a jeho dráha sa vykreslí ako žltý prstenec. Medzinárodná vesmírna stanica ISS má červenú značku so stálym popiskom a jej dráha je na mape stále. Navigačné systémy GPS, GLONASS a Galileo ukazujú, prečo váš telefón vie, kde je, a geostacionárny prstenec nad rovníkom zas satelity pre televíziu a komunikáciu.',
             'Hustý režim pridá satelity Starlink — spolu približne 11 500 objektov. Vrstva vesmírnych misií z Launch Library 2 ukazuje štarty rakiet za posledných 30 dní.',
           ],
           list: [
@@ -757,7 +755,7 @@ export const PAGES = [
         {
           h2: 'Čo v OKO nenájdete',
           p: [
-            'OKO neukazuje úplný katalóg všetkých objektov na obežnej dráhe — len vybrané skupiny z CelesTrak. Chýba napríklad čínsky navigačný systém BeiDou a OKO neposiela upozornenia na prelety nad vaším miestom.',
+            'OKO neukazuje úplný katalóg všetkých objektov na obežnej dráhe — len vybrané skupiny z CelesTrak. Chýba napríklad čínsky navigačný systém BeiDou.',
           ],
         },
       ],
@@ -769,7 +767,6 @@ export const PAGES = [
       ],
       faq: [
         { q: 'Kde je práve ISS?', a: 'Otvorte odkaz „Sledovať ISS“ — kamera sa zameria na Medzinárodnú vesmírnu stanicu a ukáže jej dráhu.' },
-        { q: 'Uvidím ISS aj na oblohe?', a: 'OKO ukazuje, kde ISS práve je. Či ju uvidíte voľným okom, závisí od času a osvetlenia — predpovede preletov OKO neponúka.' },
         { q: 'Sú polohy presné?', a: 'Sú vypočítané z verejných dráhových prvkov modelom SGP4. Na orientáciu to stačí, no nejde o priame merania.' },
         { q: 'Prečo nevidím všetky satelity?', a: 'Bežný režim ukazuje približne 840 vybraných objektov zo skupín CelesTrak a hustý režim pridá Starlink. Úplný katalóg všetkých objektov na obežnej dráhe OKO nezobrazuje.' },
         { q: 'Čo znamená trieda satelitu?', a: 'Služba, ktorú satelit poskytuje: vesmírna stanica, navigácia, geostacionárna dráha, komunikácia — alebo ide o jeden z najjasnejších objektov viditeľných voľným okom, medzi ktorými sú aj vyhorené stupne rakiet.' },
@@ -789,7 +786,7 @@ export const PAGES = [
         {
           h2: 'What you will see',
           p: [
-            'Each satellite has a marker by class. Click it to follow it and see its orbit; the International Space Station is highlighted and its orbit is always shown. The GPS, GLONASS and Galileo navigation systems show why your phone knows where it is, and the geostationary ring above the equator holds television and communication satellites.',
+            'Each satellite has a marker by class. Click it to follow it: the camera moves to it and its orbit is drawn as a yellow ring. The International Space Station has a red marker with a permanent label, and its orbit is always shown. The GPS, GLONASS and Galileo navigation systems show why your phone knows where it is, and the geostationary ring above the equator holds television and communication satellites.',
             'Dense mode adds Starlink — about 11,500 objects in total. A space missions layer from Launch Library 2 shows rocket launches from the past 30 days.',
           ],
           list: [
@@ -806,7 +803,7 @@ export const PAGES = [
         {
           h2: 'What you will not find in OKO',
           p: [
-            'OKO does not show the complete catalogue of everything in orbit — only selected groups from CelesTrak. The Chinese BeiDou navigation system, for example, is missing, and OKO does not send pass alerts for your location.',
+            'OKO does not show the complete catalogue of everything in orbit — only selected groups from CelesTrak. The Chinese BeiDou navigation system, for example, is missing.',
           ],
         },
       ],
@@ -818,7 +815,6 @@ export const PAGES = [
       ],
       faq: [
         { q: 'Where is the ISS right now?', a: 'Open the “Track the ISS” link — the camera locks onto the International Space Station and shows its orbit.' },
-        { q: 'Can I see the ISS in the sky?', a: 'OKO shows where the ISS is right now. Whether you can see it with the naked eye depends on the time and lighting — OKO does not offer pass predictions.' },
         { q: 'Are the positions accurate?', a: 'They are computed from public orbital elements with the SGP4 model. That is enough for orientation, but they are not direct measurements.' },
         { q: 'Why can I not see every satellite?', a: 'The normal mode shows about 840 selected objects from CelesTrak groups, and dense mode adds Starlink. OKO does not show the complete catalogue of everything in orbit.' },
         { q: 'What does a satellite class mean?', a: 'The service the satellite provides: space station, navigation, geostationary orbit, communications — or one of the brightest objects visible to the naked eye, which include spent rocket stages.' },
@@ -1070,16 +1066,16 @@ export const PAGES = [
         {
           h2: 'Pravidlá, ktorých sa držíme',
           list: [
-            'Pri každom údaji je zdroj a licencia; živé, oneskorené a odvodené údaje sú zreteľne odlíšené.',
+            'Zdroje a licencie vrstiev uvádzame priamo v mape; oneskorené, odhadované a odvodené údaje označujeme.',
             'Sledujeme objekty, infraštruktúru a udalosti — nie ľudí. Žiadne rozpoznávanie tvárí ani sledovanie jednotlivcov.',
-            'Tajné kľúče k dátovým službám zostávajú na serveri; do prehliadača ide len obmedzený kľúč pre mapové dlaždice.',
-            'Z médií nepreberáme celé články — len titulok s odkazom na pôvodného vydavateľa, pri niektorých zdrojoch aj náhľadový obrázok.',
+            'Tajné kľúče k dátovým službám zostávajú na serveri; do prehliadača idú len kľúče pre mapové dlaždice Google a Cesium ion.',
+            'Z médií nepreberáme celé články — ukazujeme titulok a odkaz na pôvodného vydavateľa.',
           ],
         },
         {
           h2: 'Ako OKO funguje',
           p: [
-            'Server OKO na Slovensku sťahuje dáta z otvorených zdrojov, krátko si ich uchová a posiela ich prehliadaču — šetrí tak kvóty poskytovateľov a tajné kľúče nie sú na webovej stránke. Samotný glóbus a všetky vrstvy sa vykresľujú priamo vo vašom prehliadači. Krátke zdieľané odkazy sa uchovávajú 90 dní.',
+            'Väčšinu dát sťahuje server OKO na Slovensku z otvorených zdrojov, krátko si ich uchová a posiela ich prehliadaču — šetrí tak kvóty poskytovateľov a tajné kľúče nie sú na webovej stránke. Samotný glóbus a všetky vrstvy sa vykresľujú priamo vo vašom prehliadači. Krátke zdieľané odkazy sa uchovávajú 90 dní.',
           ],
         },
         {
@@ -1123,16 +1119,16 @@ export const PAGES = [
         {
           h2: 'The rules we follow',
           list: [
-            'Every figure shows its source and licence; live, delayed and derived data are clearly separated.',
+            'Layer sources and licences are shown right in the map; delayed, estimated and derived data are labelled.',
             'We track objects, infrastructure and events — not people. No face recognition and no tracking of individuals.',
-            'Secret keys to data services stay on the server; only restricted keys for map tiles reach the browser.',
-            'We do not republish articles — only the headline with a link to the original publisher, and for some sources a preview image.',
+            'Secret keys to data services stay on the server; only the Google and Cesium ion map tile keys reach the browser.',
+            'We do not republish articles — we show the headline and a link to the original publisher.',
           ],
         },
         {
           h2: 'How OKO works',
           p: [
-            'The OKO server in Slovakia fetches data from open sources, keeps them briefly and passes them to your browser — this saves providers’ quotas and keeps secret keys off the web page. The globe and all layers are rendered right in your browser. Short share links are kept for 90 days.',
+            'Most data are fetched by the OKO server in Slovakia from open sources, kept briefly and passed to your browser — this saves providers’ quotas and keeps secret keys off the web page. The globe and all layers are rendered right in your browser. Short share links are kept for 90 days.',
           ],
         },
         {

@@ -11,13 +11,13 @@ const LOCALE = Object.freeze({ sk: 'sk_SK', en: 'en_GB' });
 const UI = Object.freeze({
   sk: {
     home: 'OKO', topics: 'Témy', facts: 'V skratke', faq: 'Časté otázky', sources: 'Zdroje a licencie',
-    sourcesNote: 'Uvádzame hlavné zdroje témy; zdroj a licenciu každej vrstvy ukazuje aj samotná mapa.',
+    sourcesNote: 'Uvádzame hlavné zdroje témy; ďalšie zdroje a licencie uvádza priamo mapa.',
     related: 'Ďalšie témy', crumbs: 'Navigácia', madeBy: 'vytvoril', privacy: 'Ochrana súkromia',
     live: 'Živý 3D glóbus', langNav: 'Jazyk', open: 'Otvoriť',
   },
   en: {
     home: 'OKO', topics: 'Topics', facts: 'At a glance', faq: 'FAQ', sources: 'Sources and licences',
-    sourcesNote: 'These are the main sources for this topic; the map itself also shows the source and licence of every layer.',
+    sourcesNote: 'These are the main sources for this topic; further sources and licences are shown right in the map.',
     related: 'More topics', crumbs: 'Breadcrumbs', madeBy: 'made by', privacy: 'Privacy',
     live: 'Live 3D globe', langNav: 'Language', open: 'Open',
   },

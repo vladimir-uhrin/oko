@@ -28,7 +28,7 @@
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <meta name="theme-color" content="#040a10" />
   <link rel="stylesheet" href="/content.css" />
-  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebPage","@id":"https://okolive.sk/en/strait-of-hormuz-chokepoints/#page","url":"https://okolive.sk/en/strait-of-hormuz-chokepoints/","name":"Strait of Hormuz and shipping chokepoints live | OKO","description":"Hormuz, Bab el-Mandeb, Suez, the Bosphorus and more on a 3D globe: live AIS ships, Sentinel-1 radar detections, pipelines and the oil price.","inLanguage":"en","dateModified":"2026-09-30","isPartOf":{"@id":"https://okolive.sk/#website"},"author":{"@id":"https://okolive.sk/#author"},"primaryImageOfPage":"https://okolive.sk/share-default.jpg"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"OKO","item":"https://okolive.sk/"},{"@type":"ListItem","position":2,"name":"Topics","item":"https://okolive.sk/en/"},{"@type":"ListItem","position":3,"name":"Hormuz and chokepoints","item":"https://okolive.sk/en/strait-of-hormuz-chokepoints/"}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is the ship count total traffic?","acceptedAnswer":{"@type":"Answer","text":"No. The counter shows AIS ships currently in the camera view. Estimates of total transits are in the IMF PortWatch card in the Middle East panel."}},{"@type":"Question","name":"Are the radar detections live?","acceptedAnswer":{"@type":"Answer","text":"No, they are about three days old. They complement the picture rather than track ships in real time."}},{"@type":"Question","name":"Which chokepoints does OKO know?","acceptedAnswer":{"@type":"Answer","text":"Hormuz, Malacca, Bab el-Mandeb, Suez, the Bosphorus, the Panama Canal, Gibraltar and Dover."}},{"@type":"Question","name":"Can I link straight to a strait?","acceptedAnswer":{"@type":"Answer","text":"Yes, for example okolive.sk/?chokepoint=hormuz opens the Strait of Hormuz scene."}}]},{"@type":"Person","@id":"https://okolive.sk/#author","name":"Vladimír Uhrin"}]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebPage","@id":"https://okolive.sk/en/strait-of-hormuz-chokepoints/#page","url":"https://okolive.sk/en/strait-of-hormuz-chokepoints/","name":"Strait of Hormuz and shipping chokepoints live | OKO","description":"Hormuz, Bab el-Mandeb, Suez, the Bosphorus and more on a 3D globe: live AIS ships, Sentinel-1 radar detections, pipelines and the oil price.","inLanguage":"en","dateModified":"2026-09-30","isPartOf":{"@id":"https://okolive.sk/#website"},"author":{"@id":"https://okolive.sk/#author"},"primaryImageOfPage":"https://okolive.sk/share-default.jpg"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"OKO","item":"https://okolive.sk/"},{"@type":"ListItem","position":2,"name":"Topics","item":"https://okolive.sk/en/"},{"@type":"ListItem","position":3,"name":"Hormuz and chokepoints","item":"https://okolive.sk/en/strait-of-hormuz-chokepoints/"}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is the ship count total traffic?","acceptedAnswer":{"@type":"Answer","text":"No. The counter shows AIS ships currently in the strait area. Estimates of total transits are in the IMF PortWatch card in the Middle East panel."}},{"@type":"Question","name":"Are the radar detections live?","acceptedAnswer":{"@type":"Answer","text":"No, they are about three days old. They complement the picture rather than track ships in real time."}},{"@type":"Question","name":"Which chokepoints does OKO know?","acceptedAnswer":{"@type":"Answer","text":"Hormuz, Malacca, Bab el-Mandeb, Suez, the Bosphorus, the Panama Canal, Gibraltar and Dover."}},{"@type":"Question","name":"Can I link straight to a strait?","acceptedAnswer":{"@type":"Answer","text":"Yes, for example okolive.sk/?chokepoint=hormuz opens the Strait of Hormuz scene."}}]},{"@type":"Person","@id":"https://okolive.sk/#author","name":"Vladimír Uhrin"}]}</script>
 </head>
 <body>
 <header class="c-top">
@@ -43,8 +43,8 @@
 
   <section>
     <h2>What a chokepoint scene shows</h2>
-    <p>Opening a scene switches on everything that belongs to the strait at once: live AIS ships, ship detections from Sentinel-1 satellite radar, gas and oil pipelines from OpenStreetMap, shipping lanes and ports. The camera flies into an oblique view over the strait.</p>
-    <p>A fact card explains what flows through the strait, and a counter shows how many AIS ships are in view right now — tracked ships in the view, not total traffic. At Hormuz a card with the Brent and WTI oil price and news from the Persian Gulf is added.</p>
+    <p>Opening a scene switches on everything that belongs to the strait at once: live AIS ships and delayed ones from AISHub, ship detections from Sentinel-1 satellite radar, gas and oil pipelines from OpenStreetMap, shipping lanes and ports. The camera flies over the strait.</p>
+    <p>A fact card states what flows through the strait, and a counter shows how many AIS ships are in the strait area right now — tracked ships, not total traffic. Every scene adds a card with the Brent and WTI oil price; at Hormuz, news from the Persian Gulf also appears where events were reported.</p>
     <ul>
       <li><a href="/?chokepoint=hormuz">Hormuz</a>, <a href="/?chokepoint=bab-el-mandeb">Bab el-Mandeb</a>, <a href="/?chokepoint=suez">Suez</a>, <a href="/?chokepoint=bosphorus">Bosphorus</a></li>
       <li><a href="/?chokepoint=malacca">Malacca</a>, <a href="/?chokepoint=panama">Panama Canal</a>, <a href="/?chokepoint=gibraltar">Gibraltar</a>, <a href="/?chokepoint=dover">Dover</a></li>
@@ -53,12 +53,11 @@
   <section>
     <h2>Where the data come from and how fresh they are</h2>
     <p>Ship positions come from AIS, live via AISStream.io and via AISHub with a delay of 1 to 6 minutes. Global Fishing Watch detections from Sentinel-1 radar are about three days old and cover a ten-day window; a radar detection without AIS does not prove a “dark” ship. Pipelines come from an OpenStreetMap snapshot.</p>
-    <p>The oil price is indicative — the front-month futures contract, about 15 minutes delayed. IMF PortWatch transit estimates for Hormuz, Bab el-Mandeb, Suez and the Cape of Good Hope are in the Middle East panel; they are preliminary and updated roughly once a week.</p>
+    <p>The oil price is indicative — the front-month futures contract from Yahoo Finance, roughly the spot price. IMF PortWatch transit estimates for Hormuz, Bab el-Mandeb, Suez and the Cape of Good Hope are in the Middle East panel; they are preliminary and updated roughly once a week.</p>
   </section>
   <section>
-    <h2>Why chokepoints matter</h2>
-    <p>A significant share of the world’s oil and liquefied gas passes through the Strait of Hormuz, and Bab el-Mandeb and Suez link Europe with Asia. The Bosphorus carries oil from the Black Sea, the Panama Canal links Atlantic and Pacific trade, and the Strait of Malacca carries much of the shipping between the Indian Ocean and East Asia.</p>
-    <p>When one of them is blocked, energy prices move in Europe too. OKO shows what is happening in the strait right now — from open data only, without speculation.</p>
+    <h2>What flows through the straits</h2>
+    <p>The fact card in each scene sums up the essentials: through Hormuz about 21 million barrels of oil a day and LNG from Qatar, through the Strait of Malacca about a quarter of the world’s traded goods and Gulf oil to East Asia, through Bab el-Mandeb oil and goods on the way to Suez, through Suez about 12% of global trade and 10% of seaborne oil, through the Bosphorus Russian and Caspian oil and Black Sea grain, and through the Panama Canal about 5% of world maritime trade. Gibraltar is the Mediterranean’s only ocean gate, and the Dover Strait is the world’s busiest lane with about 400 ships a day.</p>
   </section>
   <section class="c-facts">
     <h2>At a glance</h2>
@@ -66,12 +65,12 @@
       <div><dt>Chokepoints</dt><dd>Hormuz, Malacca, Bab el-Mandeb, Suez, Bosphorus, Panama, Gibraltar, Dover</dd></div>
       <div><dt>Ships</dt><dd>live AIS (AISStream.io), AISHub delayed</dd></div>
       <div><dt>Radar</dt><dd>Global Fishing Watch, Sentinel-1, about 3 days old</dd></div>
-      <div><dt>Counter</dt><dd>AIS ships in view, not total traffic</dd></div>
+      <div><dt>Counter</dt><dd>AIS ships in the strait area, not total traffic</dd></div>
     </dl>
   </section>
   <section class="c-faq">
     <h2>FAQ</h2>
-    <details><summary>Is the ship count total traffic?</summary><p>No. The counter shows AIS ships currently in the camera view. Estimates of total transits are in the IMF PortWatch card in the Middle East panel.</p></details>
+    <details><summary>Is the ship count total traffic?</summary><p>No. The counter shows AIS ships currently in the strait area. Estimates of total transits are in the IMF PortWatch card in the Middle East panel.</p></details>
     <details><summary>Are the radar detections live?</summary><p>No, they are about three days old. They complement the picture rather than track ships in real time.</p></details>
     <details><summary>Which chokepoints does OKO know?</summary><p>Hormuz, Malacca, Bab el-Mandeb, Suez, the Bosphorus, the Panama Canal, Gibraltar and Dover.</p></details>
     <details><summary>Can I link straight to a strait?</summary><p>Yes, for example okolive.sk/?chokepoint=hormuz opens the Strait of Hormuz scene.</p></details>
@@ -84,9 +83,9 @@
       <li><a href="https://globalfishingwatch.org/" rel="noopener">Global Fishing Watch — Powered by Global Fishing Watch. Contains modified Copernicus Sentinel data 2026</a> — CC BY-NC 4.0</li>
       <li><a href="https://www.openstreetmap.org/copyright" rel="noopener">OpenStreetMap</a> — ODbL</li>
       <li><a href="https://portwatch.imf.org/" rel="noopener">IMF PortWatch</a></li>
-      <li><a href="https://finance.yahoo.com/" rel="noopener">Yahoo Finance (Brent, WTI — indicative)</a></li>
+      <li><a href="https://finance.yahoo.com/" rel="noopener">Yahoo Finance (Brent, WTI — front month, indicative)</a></li>
     </ul>
-    <p class="c-note">These are the main sources for this topic; the map itself also shows the source and licence of every layer.</p>
+    <p class="c-note">These are the main sources for this topic; further sources and licences are shown right in the map.</p>
   </section>
   <nav class="c-related" aria-label="More topics">
     <h2>More topics</h2>
