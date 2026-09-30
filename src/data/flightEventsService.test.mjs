@@ -246,6 +246,37 @@ test('nová verzia pravidiel: udalosť analyzovaná staršou verziou sa v okne s
   }
 });
 
+test('reštart servera: zastavená služba rozbehnutý tik nedokončí (nič neuloží, ďalej sa nepýta); bez archívu sa neanalyzuje', async () => {
+  const { oko } = fz1073();
+  const c = NOISE_CASES[0];
+  const noise = noiseCase(c);
+  let service = null;
+  const h = harness({
+    startMs: Date.parse('2026-09-30T06:00:00Z'),
+    tracks: { '8965d1': oko.map((p) => row(p)), [c.hex]: noise.oko.map((p) => row(p)) },
+    triggers: [...triggersOf('8965d1', oko), ...triggersOf(c.hex, noise.oko)],
+    traces: { [LIVE_FZ]: fixtureText('adsblol-trace-8965d1-20260930.json') },
+  });
+  try {
+    service = h.make();
+    const origFetchCount = () => h.fetched.length;
+    // Stop príde počas prvého dopytu (Vite reštartoval, nová inštancia už beží).
+    const tick = service.tick();
+    service.stop();
+    await tick;
+    assert.ok(origFetchCount() <= 1, `po zastavení žiadne ďalšie dopyty (${origFetchCount()})`);
+    assert.equal(service.store.list({ statuses: null }).length, 0, 'zastavená inštancia nič neuloží');
+    const orphan = createFlightEventsService({
+      getStore: () => null, eventsDir: h.dir, isLocal: () => true,
+      fetchImpl: async () => { throw new Error('bez archívu sa nepýta'); }, now: () => Date.parse('2026-09-30T06:00:00Z'), log: () => {},
+    });
+    assert.deepEqual(await orphan.analyze('8965d1', T('2026-09-30T03:00:00Z'), T('2026-09-30T06:00:00Z')), { error: 'no_store' });
+  } finally {
+    service?.stop();
+    h.cleanup();
+  }
+});
+
 test('adsb.lol blokuje (403): nič sa neuloží, 30 min pauza, potom znova; dopyty najviac raz za 10 s', async () => {
   const { oko } = fz1073();
   const h = harness({

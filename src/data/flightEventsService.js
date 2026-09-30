@@ -153,6 +153,9 @@ export function createFlightEventsService({
   let scannedUntilS = null;
   let timer = null;
   let busy = false;
+  // Zastavená služba (reštart Vite = nová inštancia) nesmie dokončiť rozbehnutý tik: stará inštancia
+  // už nemá archív (getStore → null) a ukladala by udalosti bez prvej siete (naživo 30. 9. večer).
+  let stopped = false;
   let lastFetchMs = 0;
   let blockedUntil = 0;
   const stats = { ticks: 0, triggers: 0, analyzed: 0, fetches: 0, lastTickAt: null, lastError: null };
@@ -227,7 +230,9 @@ export function createFlightEventsService({
     const hex = String(icao24 || '').trim().toLowerCase();
     if (!/^[0-9a-f]{6}$/.test(hex) || !(toS > fromS)) return { error: 'bad_request' };
     const s = getStore();
-    const rows = s ? await s.track(hex, { fromS, toS, limit: 20_000, withSrc: true }) : [];
+    // Bez archívu OKO (prvá sieť) nie je čo overovať — radšej nič než udalosť bez prvej siete.
+    if (!s) return { error: 'no_store' };
+    const rows = await s.track(hex, { fromS, toS, limit: 20_000, withSrc: true });
     const ours = normalizeTrack(rows.filter((r) => r[12] === PRIMARY_SRC).map(fixFromCompact).filter(Boolean));
     const second = await secondNetwork(hex, fromS, toS);
     if (second.blocked) return { blocked: true };
@@ -313,7 +318,7 @@ export function createFlightEventsService({
     const latest = latestCompleteDay(now());
     let done = 0;
     for (const e of store.summaries()) {
-      if (done >= 5 || now() < blockedUntil) break;
+      if (stopped || done >= 5 || now() < blockedUntil) break;
       if (e.status !== 'unverified' || !e.recheckDay || e.recheckDay > latest) continue;
       const full = store.get(e.id);
       if (!full?.window) continue;
@@ -323,6 +328,7 @@ export function createFlightEventsService({
         blockedUntil = now() + STATE_BACKFILL_BLOCK_PAUSE_MS;
         break;
       }
+      if (stopped) break;
       if (!result.event) continue;
       store.save({ ...result.event, recheckDay: null });
       log(`[events] ${full.id} ${full.callsign || ''} preverené z denného archívu → ${result.event.status}`);
@@ -339,6 +345,7 @@ export function createFlightEventsService({
       log(`[events] adsb.lol blokuje dopyty — pauza ${STATE_BACKFILL_BLOCK_PAUSE_MS / 60_000} min`);
       return false;
     }
+    if (stopped) return false;
     if (!result.event) return true;
     c.processedAt = nowMs;
     if (final) {
@@ -353,7 +360,7 @@ export function createFlightEventsService({
   }
 
   async function tick() {
-    if (busy) return;
+    if (busy || stopped) return;
     busy = true;
     stats.ticks += 1;
     stats.lastTickAt = now();
@@ -367,7 +374,7 @@ export function createFlightEventsService({
       stats.triggers += rows.length;
       for (const row of rows) upsert(row);
       for (const [key, c] of [...candidates]) {
-        if (now() < blockedUntil) break;
+        if (stopped || now() < blockedUntil) break;
         const nowMs = now();
         const due = c.processedAt === null
           ? nowMs - c.firstT * 1000 >= EVENT_SETTLE_MS
@@ -440,11 +447,13 @@ export function createFlightEventsService({
   return {
     start() {
       if (timer) return;
+      stopped = false;
       timer = setInterval(() => { void tick(); }, tickMs);
       timer.unref?.();
       void tick();
     },
     stop() {
+      stopped = true;
       if (timer) clearInterval(timer);
       timer = null;
     },
