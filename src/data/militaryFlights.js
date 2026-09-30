@@ -75,6 +75,12 @@ import {
 } from './contextStore.js';
 import { CONTACT_MATCH_TIER, contactMatchWins, rankContactMatch } from './contactMatch.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
+import { createSquawkWatch } from './squawkWatch.js';
+import { createProfileStore } from './flightProfile.js';
+import { buildFlightCharts } from './flightCharts.js';
+import { cachedTrackedHistory, requestTrackedHistory } from './trackedHistory.js';
+import { formatFlightLinesPlain, formatWindLines } from './trackedCardModel.js';
+import meteoLazy from './meteoLazy.js';
 
 /**
  * @module militaryFlights
@@ -326,6 +332,77 @@ let _cockpitModeListener = null;
 function _emitAwarenessEvent(type, detail) {
   if (typeof window === 'undefined' || !window.dispatchEvent || typeof CustomEvent === 'undefined') return;
   window.dispatchEvent(new CustomEvent(type, { detail }));
+}
+
+/**
+ * Núdzové squawky aj vo vojenskej vrstve (2026-09-30, vlastník: „sprav"): civilná vrstva hlásila
+ * 7500/7600/7700 cez squawkWatch, vojenská nie, hoci UI (`_announceSquawkAlert`) layerId 'military'
+ * už pozná. Rovnaké pravidlá: prvé načítanie mlčí, ten istý kód na stroji 15 min nehlási znova.
+ */
+const _squawkWatch = createSquawkWatch();
+
+/** Minútové vzorky výšky a rýchlosti pre grafy karty (ako civilná vrstva, 2026-09-30). */
+const _profileStore = createProfileStore();
+
+/** Výška kontaktu v metroch: barometrická (letová hladina) má prednosť, inak geometrická. */
+function _altitudeMeters(info) {
+  if (Number.isFinite(info?.altitudeFt)) return info.altitudeFt * 0.3048;
+  return Number.isFinite(info?.geoAltitudeM) ? info.geoAltitudeM : null;
+}
+
+/**
+ * Riadky letu, vietor vo výške letu a grafy výšky a rýchlosti pre kartičku pod kurzorom — tie isté
+ * stavebné kamene ako civilná vrstva (hoverExtras vo flights.js). Vojenský feed trasu nenesie,
+ * takže grafy idú po čase a budúca výška sa neodhaduje k letisku.
+ * @param {string} icao24
+ * @param {object} info záznam z _flightData
+ * @returns {{flightLines: string[], charts: object|null}}
+ */
+function _hoverExtras(icao24, info) {
+  const altitudeM = _altitudeMeters(info);
+  const flightState = {
+    altitudeM,
+    onGround: info.onGround === true,
+    verticalRateMps: info.verticalRateMps,
+    speedMps: info.speedMps,
+    trackDeg: info.track,
+  };
+  const flightLines = formatFlightLinesPlain(flightState);
+  if (!flightState.onGround) {
+    const wind = meteoLazy.flightWindAt(info.rawLat, info.rawLon, altitudeM, info.track);
+    for (const line of formatWindLines(wind)) flightLines.push(line);
+  }
+  const charts = buildFlightCharts({
+    fixes: cachedTrackedHistory(icao24),
+    samples: _profileStore.samples(icao24),
+    now: {
+      epochMs: Number.isFinite(info.lastContactEpochMs) ? info.lastContactEpochMs : Date.now(),
+      altitudeM,
+      speedMps: info.speedMps,
+      verticalRateMps: info.verticalRateMps,
+      lat: info.rawLat,
+      lon: info.rawLon,
+    },
+    route: null,
+    progress: null,
+    translate: t,
+  });
+  return { flightLines, charts };
+}
+
+function _publishSquawkAlerts() {
+  const rows = [];
+  for (const [icao24, info] of _flightData) {
+    if (!info?.squawk) continue;
+    rows.push({
+      id: icao24,
+      squawk: info.squawk,
+      label: info.callsign || info.registration || String(icao24).toUpperCase(),
+      filtered: false,
+    });
+  }
+  const alerts = _squawkWatch.observe(rows, { nowMs: Date.now() });
+  if (alerts.length) _emitAwarenessEvent('gev:squawk-alert', { layerId: 'military', alerts });
 }
 
 function _publishTrackedSelection(icao24, origin = 'programmatic') {
@@ -3009,6 +3086,7 @@ const militaryFlightsLayer = {
     _billboards = new Map();
     _detectionObjects = new Map();
     _flightData = new Map();
+    _profileStore.clear();
     _positionHistory = new Map();
     _displayCourse.clear();
     _groundSnap.clear();
@@ -3089,6 +3167,8 @@ const militaryFlightsLayer = {
   disable(viewer) {
     _abortActiveUpdates();
     _cancelPendingTrackingRestore();
+    _squawkWatch.reset(); // vrstva sa vypla — ďalší beh opäť prvým načítaním mlčí
+    _profileStore.clear();
     if (_billboardCollection) _billboardCollection.show = false;
     releaseContinuousRender('military');
     _releaseModels();
@@ -3424,6 +3504,8 @@ const militaryFlightsLayer = {
             velocity: meta.speedMps,
             track: meta.track,
           });
+          // Mini profil karty ako v civilnej vrstve: jedna vzorka za minútu pre grafy.
+          _profileStore.record(icao24, fixEpochMs, _altitudeMeters(meta), meta.speedMps);
           if (history.length > POSITION_HISTORY_LIMIT) {
             history.shift();
           }
@@ -3587,6 +3669,7 @@ const militaryFlightsLayer = {
         _billboards.delete(icao24);
         _releaseModel(icao24); // aged-out aircraft: drop its 3D model (no orphan / cap leak)
         _flightData.delete(icao24);
+        _profileStore.delete(icao24);
         _positionHistory.delete(icao24);
         _displayCourse.delete(icao24);
         _groundSnap.forget(icao24);
@@ -3601,6 +3684,7 @@ const militaryFlightsLayer = {
 
       _count = _billboards.size;
       _lastUpdate = Date.now();
+      _publishSquawkAlerts();
       _lastTrackingRefreshOutcome = {
         epoch: trackingRefreshEpoch,
         status: 'accepted',
@@ -3630,6 +3714,8 @@ const militaryFlightsLayer = {
    */
   destroy(viewer) {
     _abortActiveUpdates();
+    _squawkWatch.reset();
+    _profileStore.clear();
     releaseContinuousRender('military'); // direct-destroy path (perf wave 2 fix)
     _clearTracking();
     _destroyTrail();
@@ -3779,22 +3865,41 @@ const militaryFlightsLayer = {
     const icao24 = String(id || '').trim().toLowerCase();
     const info = _flightData.get(icao24);
     if (!info) return null;
+    // Polia vojenského záznamu sú `type`, `altitudeFt`, `speedMps`, `verticalRateMps`, `track`
+    // (2026-09-30: kartička čítala civilné mená typeName/altitude/velocity/verticalRate, ktoré tu
+    // neexistujú — vojenským strojom chýbal v kartičke typ, výška aj rýchlosť).
+    const altitudeM = _altitudeMeters(info);
     return {
       layerId: 'military',
       id: icao24,
       callsign: String(info.callsign || '').trim() || null,
       registration: String(info.registration || '').trim() || null,
-      type: String(info.typeName || info.typeCode || '').trim() || null,
+      type: String(info.type || '').trim() || null,
       operator: String(info.operator || '').trim() || null,
       category: categoryForClass(info.klass),
       military: true,
       onGround: info.onGround === true,
-      altitudeM: Number.isFinite(info.altitude) ? info.altitude : null,
-      speedMps: Number.isFinite(info.velocity) ? info.velocity : null,
-      verticalRateMps: Number.isFinite(info.verticalRate) ? info.verticalRate : null,
+      altitudeM: Number.isFinite(altitudeM) ? altitudeM : null,
+      speedMps: Number.isFinite(info.speedMps) ? info.speedMps : null,
+      verticalRateMps: Number.isFinite(info.verticalRateMps) ? info.verticalRateMps : null,
+      trackDeg: Number.isFinite(info.track) ? info.track : null,
+      lastContactEpochMs: Number.isFinite(info.lastContactEpochMs) ? info.lastContactEpochMs : null,
+      squawk: info.squawk ?? null,
       route: null, // vojenský feed trasy nenesie
       stale: _missingPolls.get(icao24) > 0,
+      ..._hoverExtras(icao24, info),
     };
+  },
+
+  /**
+   * Zotrvanie kurzora nad vojenským strojom: vyžiadaj históriu letu pre grafy kartičky (ten istý
+   * proxy a cache ako civilná vrstva; kartička sa obnovuje sama, grafy sa ukážu po príchode dát).
+   * @param {string} id ICAO24
+   */
+  prefetchContactDetails(id) {
+    const icao24 = String(id || '').trim().toLowerCase();
+    if (!_flightData.has(icao24)) return;
+    void requestTrackedHistory(icao24);
   },
 
   /** Filter kategórií ako čipy pod riadkom vrstvy. */

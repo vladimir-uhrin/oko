@@ -128,3 +128,17 @@ test('nezmyselné riadky sledovač nezhodia', () => {
   assert.deepEqual(hits.map((h) => h.id), ['a']);
   assert.deepEqual(watch.observe(null, { nowMs: T0 + 2000 }), []);
 });
+
+test('vojenská vrstva (2026-09-30): hlási núdzové kódy rovnako ako civilná a UI ich vie priradiť', async () => {
+  const { readFileSync } = await import('node:fs');
+  const military = readFileSync(new URL('./militaryFlights.js', import.meta.url), 'utf8');
+  const flights = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
+  const ui = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
+  for (const [name, src, layerId] of [['flights', flights, 'flights'], ['militaryFlights', military, 'military']]) {
+    assert.match(src, /createSquawkWatch\(\)/, `${name}: sledovač`);
+    assert.ok(src.includes(`_emitAwarenessEvent('gev:squawk-alert', { layerId: '${layerId}', alerts })`), `${name}: udalosť`);
+    assert.match(src, /_squawkWatch\.reset\(\)/, `${name}: vypnutie vrstvy vráti „prvé načítanie mlčí"`);
+  }
+  assert.match(military, /_lastUpdate = Date\.now\(\);\n\s*_publishSquawkAlerts\(\);/, 'po každom prijatom polle');
+  assert.match(ui, /detail\?\.layerId === 'military' \? 'military' : 'flights'/, 'toast skočí na správnu vrstvu');
+});
