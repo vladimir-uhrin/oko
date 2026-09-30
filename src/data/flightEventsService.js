@@ -54,6 +54,12 @@ export const EVENT_LOOKBACK_S = 3 * 3600;
 export const EVENT_SCAN_OVERLAP_S = 15 * 60;
 /** adsb.lol: najviac jeden dopyt za 10 s (spolu so spätným importom štátnych lietadiel ~1 / 3 s). */
 export const EVENT_FETCH_GAP_MS = 10_000;
+/**
+ * Denný archív adsb.lol môže vyjsť neskôr než 2 h po polnoci (dovtedy 404): preverenie sa zopakuje
+ * o 30 min, najviac 24× (12 h) — potom lietadlo v archíve naozaj nie je a udalosť ostane neoverená.
+ */
+export const RECHECK_RETRY_MS = 30 * 60_000;
+export const RECHECK_MAX_TRIES = 24;
 /** Prvá sieť = len fixy z OpenSky (nie náhrada ani vojenské z adsb.lol). */
 export const PRIMARY_SRC = 'opensky';
 /**
@@ -399,6 +405,7 @@ export function createFlightEventsService({
       if (e.status !== 'unverified' || !e.recheckDay || e.recheckDay > latest) continue;
       const full = store.get(e.id);
       if (!full?.window) continue;
+      if (full.recheckNotBefore && now() < full.recheckNotBefore) continue;
       done += 1;
       const result = await analyze(full.icao24, full.window.fromT, full.window.toT, { final: true, id: full.id });
       if (result.blocked) {
@@ -407,7 +414,16 @@ export function createFlightEventsService({
       }
       if (stopped) break;
       if (!result.event) continue;
-      saveMerged({ ...result.event, recheckDay: null });
+      const tries = (full.recheckTries || 0) + 1;
+      // Denný archív ešte nevyšiel (404) a druhá sieť nemá nič → nový pokus o 30 min, nie „navždy neoverené".
+      const archiveMissing = result.event.status === 'unverified'
+        && (result.event.secondNetwork || []).some((s) => s.status === 404 && s.url.includes('/globe_history/'));
+      if (archiveMissing && tries < RECHECK_MAX_TRIES) {
+        saveMerged({ ...result.event, recheckDay: full.recheckDay, recheckTries: tries, recheckNotBefore: now() + RECHECK_RETRY_MS });
+        log(`[events] ${full.id} ${full.callsign || ''} denný archív adsb.lol ešte nie je (404) — znova o ${RECHECK_RETRY_MS / 60_000} min (${tries}/${RECHECK_MAX_TRIES})`);
+        continue;
+      }
+      saveMerged({ ...result.event, recheckDay: null, recheckTries: tries, recheckNotBefore: null });
       log(`[events] ${full.id} ${full.callsign || ''} preverené z denného archívu → ${result.event.status}`);
     }
   }

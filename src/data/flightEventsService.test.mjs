@@ -434,6 +434,44 @@ test('neskoré overenie: živá stopa už zmizla (404) → NEOVERENÉ; keď vyjd
   }
 });
 
+test('denný archív adsb.lol vyjde neskôr než o 02:00 (404): udalosť NEostane navždy neoverená — nový pokus o 30 min, po vydaní OVERENÁ; bez archívu najviac 24 pokusov', async () => {
+  const { oko } = fz1073();
+  const DAY_FZ = 'https://adsb.lol/globe_history/2026/09/30/traces/d1/trace_full_8965d1.json';
+  const traces = {};
+  const h = harness({ startMs: Date.parse('2026-09-30T20:20:00Z'), tracks: { '8965d1': oko.map((p) => row(p)) }, traces });
+  try {
+    const service = h.make();
+    const r = await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    const id = r.json.id;
+    assert.deepEqual([r.json.status, r.json.recheckDay], ['unverified', '2026-09-30']);
+    h.at('2026-10-01T02:01:00Z');
+    await service.tick();
+    assert.deepEqual(h.fetched.slice(1), [DAY_FZ], 'o 02:01 pokus o denný archív');
+    let e = service.store.get(id);
+    assert.deepEqual([e.status, e.recheckDay, e.recheckTries], ['unverified', '2026-09-30', 1], 'archív ešte nie je — preverí sa znova');
+    h.at('2026-10-01T02:20:00Z');
+    await service.tick();
+    assert.equal(h.fetched.length, 2, 'nie každú minútu — až o 30 min');
+    traces[DAY_FZ] = fixtureText('adsblol-trace-8965d1-20260930.json');
+    h.at('2026-10-01T02:32:00Z');
+    await service.tick();
+    e = service.store.get(id);
+    assert.deepEqual([e.status, e.recheckDay], ['confirmed', null], 'po vydaní archívu overená');
+    assert.equal(h.fetched.length, 3);
+    // Lietadlo, ktoré v archíve naozaj nie je: po 24 pokusoch koniec (žiadne nekonečné dopyty).
+    const lone = { ...service.store.get(id), id: '8965d1-20260930T0600', status: 'unverified', recheckDay: '2026-09-30', recheckTries: 0, recheckNotBefore: null };
+    delete traces[DAY_FZ];
+    service.store.save(lone);
+    let t = Date.parse('2026-10-01T03:00:00Z');
+    for (let i = 0; i < 30; i += 1) { h.at(new Date(t).toISOString()); await service.tick(); t += 31 * 60_000; }
+    const gaveUp = service.store.get(lone.id);
+    assert.deepEqual([gaveUp.status, gaveUp.recheckDay, gaveUp.recheckTries], ['unverified', null, 24]);
+    assert.equal(h.fetched.length, 3 + 24, 'presne 24 pokusov');
+  } finally {
+    h.cleanup();
+  }
+});
+
 test('API len z tohto počítača: zoznam, detail, ručná analýza ľubovoľného letu; reštart načíta uložené a uzavreté nevracia', async () => {
   const { oko } = fz1073();
   const h = harness({
