@@ -17,7 +17,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { globeHistoryUrl, liveTraceUrl, shiftDay, utcDay } from './adsblolTrace.js';
+import { globeHistoryUrl, liveTraceUrl, shiftDay, traceToFlight, utcDay } from './adsblolTrace.js';
 import { EMERGENCY_CODES, normalizeTrack } from './flightAnomalies.js';
 import { fixFromCompact } from './flightHistory.js';
 import { verifyEvent } from './eventVerify.js';
@@ -60,6 +60,29 @@ export const EVENT_FETCH_GAP_MS = 10_000;
  */
 export const RECHECK_RETRY_MS = 30 * 60_000;
 export const RECHECK_MAX_TRIES = 24;
+/**
+ * Stopa druhej siete sa pri overení uloží k udalosti (2026-10-01): adsb.lol živú stopu po hodinách
+ * zmaže a do denného archívu nemusí lietadlo dať vôbec (naživo FZ1073 / A6-FKF: archív 30. 9. vyšiel,
+ * lietadlo v ňom chýba) — neskoršie preverenie by inak potvrdenú udalosť zhodilo na „neoverenú".
+ */
+export const STORED_TRACE_MAX_POINTS = 20_000;
+/** Ručne dodaná stopa (readsb JSON z adsb.lol) najviac 16 MB. */
+export const TRACE_IMPORT_MAX_BYTES = 16 * 1024 * 1024;
+
+const roundTo = (v, k) => (Number.isFinite(v) ? Math.round(v * k) / k : null);
+/** Body druhej siete na uloženie k udalosti — kompaktné riadky. Pure. */
+export function packTracePoints(points) {
+  return (points || []).slice(0, STORED_TRACE_MAX_POINTS).map((p) => [
+    p.t, roundTo(p.lat, 1e5), roundTo(p.lon, 1e5), roundTo(p.alt, 10), roundTo(p.gs, 10), roundTo(p.trk, 10),
+    roundTo(p.vr, 100), p.squawk ?? null, p.gnd ? 1 : 0, Number.isFinite(p.cat) ? p.cat : null, p.callsign || null,
+  ]);
+}
+/** Uložené riadky späť na body stopy. Pure. */
+export function unpackTracePoints(rows) {
+  return (Array.isArray(rows) ? rows : []).filter(Array.isArray).map((a) => ({
+    t: a[0], lat: a[1], lon: a[2], alt: a[3], gs: a[4], trk: a[5], vr: a[6], squawk: a[7], gnd: a[8] === 1, cat: a[9], callsign: a[10],
+  }));
+}
 /** Prvá sieť = len fixy z OpenSky (nie náhrada ani vojenské z adsb.lol). */
 export const PRIMARY_SRC = 'opensky';
 /**
@@ -81,9 +104,22 @@ export const EVENTS_PUBLIC_ORIGIN = 'https://okolive.sk';
 const EVENT_ID = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
 const EVENT_ID_PART = '[0-9a-f]{6}-\\d{8}T\\d{4}';
 const PUBLIC_ROUTE = new RegExp(`^/public/(${EVENT_ID_PART})$`);
-const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|post|publish|unpublish))?$`);
+const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|post|publish|unpublish|second-network))?$`);
 /** Stopa na obrázok: body sietí, ktoré sú v atribúcii (OpenSky + adsb.lol), aj z druhej siete. */
 const DRAWN_SRC = (src) => src === PRIMARY_SRC || String(src || '').startsWith('adsb.lol');
+
+/** Telo POST ako JSON so stropom veľkosti (BODY_TOO_LARGE nad strop). */
+async function readJsonBody(req, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > maxBytes) throw Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE' });
+    chunks.push(buf);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
 
 /**
  * Zapisovacie akcie (zverejniť / stiahnuť) len z vlastnej stránky OKO na localhoste: cudzia stránka
@@ -306,7 +342,7 @@ export function createFlightEventsService({
    * @param {number} fromS
    * @param {number} toS
    */
-  async function analyze(icao24, fromS, toS, { final = false, idT = null, id = null } = {}) {
+  async function analyze(icao24, fromS, toS, { final = false, idT = null, id = null, secondOverride = null } = {}) {
     const hex = String(icao24 || '').trim().toLowerCase();
     if (!/^[0-9a-f]{6}$/.test(hex) || !(toS > fromS)) return { error: 'bad_request' };
     const s = getStore();
@@ -314,9 +350,23 @@ export function createFlightEventsService({
     if (!s) return { error: 'no_store' };
     const rows = await s.track(hex, { fromS, toS, limit: 20_000, withSrc: true });
     const ours = normalizeTrack(rows.filter((r) => r[12] === PRIMARY_SRC).map(fixFromCompact).filter(Boolean));
-    const second = await secondNetwork(hex, fromS, toS);
+    let second = secondOverride || await secondNetwork(hex, fromS, toS);
     if (second.blocked) return { blocked: true };
-    const theirs = normalizeTrack(second.points.filter((p) => p.t >= fromS && p.t <= toS));
+    // Druhá sieť stopu už nemá (živá zmizla, denný archív bez lietadla) → stopa uložená pri overení.
+    const prior = storedTraceEvent(hex, fromS, toS, id);
+    let storedUsed = null;
+    if (!secondOverride && !second.points.length && prior?.secondNetworkTrace?.points?.length) {
+      storedUsed = prior.secondNetworkTrace;
+      second = {
+        ...second,
+        points: unpackTracePoints(storedUsed.points),
+        meta: second.meta || storedUsed.meta || null,
+        statuses: [...second.statuses, { url: storedUsed.url || 'stored', status: 'stored' }],
+        pendingDay: null,
+      };
+    }
+    const windowPoints = second.points.filter((p) => p.t >= fromS && p.t <= toS);
+    const theirs = normalizeTrack(windowPoints);
     // Stopa na obrázok a do verejného pohľadu: spojené body oboch sietí (overuje sa len z `ours`).
     const drawn = normalizeTrack([...rows.filter((r) => DRAWN_SRC(r[12])).map(fixFromCompact).filter(Boolean), ...theirs]);
     const primary = { id: 'opensky', label: NETWORK_LABELS.opensky, points: ours };
@@ -386,6 +436,20 @@ export function createFlightEventsService({
       coverage: timeline.coverage,
       track: simplifyTrack(drawn),
       secondNetwork: second.statuses,
+      // Uložená stopa: použitá záloha / ručne dodaná / čerstvo stiahnutá (úplnejšia než pri prvom
+      // spracovaní) — len pri udalostiach (nie šum ani výcvik); inak tá, ktorá už bola uložená.
+      secondNetworkTrace: storedUsed || secondOverride?.record
+        || (theirs.length && ['confirmed', 'unverified'].includes(verification.status) && !routineReason
+          ? {
+            source: 'adsb.lol',
+            origin: 'fetch',
+            url: second.statuses.find((x) => x.status === 200)?.url ?? null,
+            fetchedT: Math.floor(now() / 1000),
+            meta: second.meta ? { reg: second.meta.reg ?? null, acType: second.meta.acType ?? null, acDesc: second.meta.acDesc ?? null, military: Boolean(second.meta.military) } : null,
+            points: packTracePoints(windowPoints),
+          }
+          : null)
+        || prior?.secondNetworkTrace || null,
       attribution: ['OpenSky Network', 'adsb.lol (ODbL 1.0)'],
       analyzedT: Math.floor(now() / 1000),
       final,
@@ -428,7 +492,7 @@ export function createFlightEventsService({
     }
   }
 
-  /** Uloženie po analýze: overenie správami, trasa a zverejnenie z predošlého záznamu sa nestratia. */
+  /** Uloženie po analýze: overenie správami, trasa, zverejnenie a uložená stopa druhej siete sa nestratia. */
   function saveMerged(event) {
     const prev = store.get(event.id);
     store.save({
@@ -436,7 +500,50 @@ export function createFlightEventsService({
       route: event.route ?? prev?.route ?? null,
       news: event.news ?? prev?.news ?? null,
       published: event.published ?? prev?.published ?? null,
+      secondNetworkTrace: event.secondNetworkTrace ?? prev?.secondNetworkTrace ?? null,
     });
+  }
+
+  /** Predošlá udalosť toho istého lietadla v okne (podľa id, inak prekryvom okna) — kvôli uloženej stope. */
+  function storedTraceEvent(hex, fromS, toS, id) {
+    if (id) return store.get(id);
+    const hit = store.summaries().find((e) => e.icao24 === hex && e.firstT >= fromS && e.firstT <= toS);
+    return hit ? store.get(hit.id) : null;
+  }
+
+  /**
+   * Stopa druhej siete dodaná ručne (readsb JSON z adsb.lol, napr. živá stopa uložená skôr, než ju
+   * adsb.lol zmazal): udalosť sa overí znova s ňou a pôvod sa zapíše (odkiaľ a kedy bola stopa uložená).
+   */
+  async function importSecondNetwork(event, body) {
+    const flight = traceToFlight(body?.trace);
+    if (!flight) return { status: 400, body: { error: 'bad_trace' } };
+    if (flight.icao24 !== event.icao24) return { status: 400, body: { error: 'other_aircraft' } };
+    const capturedMs = Date.parse(String(body?.capturedAt || ''));
+    if (!Number.isFinite(capturedMs)) return { status: 400, body: { error: 'bad_captured_at' } };
+    const { fromT, toT } = event.window || {};
+    const inWindow = flight.points.filter((p) => p.t >= fromT && p.t <= toT);
+    if (!inWindow.length) return { status: 400, body: { error: 'no_points_in_window' } };
+    const record = {
+      source: 'adsb.lol',
+      origin: String(body.origin || 'import').slice(0, 200),
+      note: String(body.note || '').slice(0, 500),
+      capturedAt: new Date(capturedMs).toISOString(),
+      importedT: Math.floor(now() / 1000),
+      url: 'import',
+      meta: { reg: flight.reg ?? null, acType: flight.acType ?? null, acDesc: flight.acDesc ?? null, military: Boolean(flight.military) },
+      points: packTracePoints(inWindow),
+    };
+    const result = await analyze(event.icao24, fromT, toT, {
+      final: true,
+      id: event.id,
+      secondOverride: { blocked: false, points: flight.points, meta: flight, statuses: [{ url: 'import', status: 'stored' }], pendingDay: null, record },
+    });
+    if (!result.event) return { status: 400, body: { error: result.error || 'analysis_failed' } };
+    if (stopped) return { status: 503, body: { error: 'restarting' } };
+    saveMerged({ ...result.event, recheckDay: null, recheckNotBefore: null });
+    log(`[events] ${event.id} ${event.callsign || ''} druhá sieť z uloženej stopy (${record.origin}, ${record.capturedAt}) → ${result.event.status}`);
+    return { status: 200, body: eventSummary(store.get(event.id)) };
   }
 
   /**
@@ -708,8 +815,20 @@ export function createFlightEventsService({
         res.end(card.jpeg);
         return;
       }
-      // Zverejniť / stiahnuť: len POST z vlastnej stránky (overené vyššie).
+      // Zverejniť / stiahnuť / dodať stopu druhej siete: len POST z vlastnej stránky (overené vyššie).
       if (method !== 'POST') { json(res, 405, { error: 'method_not_allowed' }); return; }
+      if (action === 'second-network') {
+        let body;
+        try {
+          body = await readJsonBody(req, TRACE_IMPORT_MAX_BYTES);
+        } catch (error) {
+          json(res, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: error?.code === 'BODY_TOO_LARGE' ? 'too_large' : 'bad_json' });
+          return;
+        }
+        const imported = await importSecondNetwork(event, body);
+        json(res, imported.status, imported.body);
+        return;
+      }
       const result = action === 'publish' ? await publish(event) : unpublish(event);
       json(res, result.status, result.body);
     } catch (error) {

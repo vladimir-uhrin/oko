@@ -81,9 +81,14 @@ function harness({ tracks = {}, triggers = [], legs = {}, traces = {}, startMs, 
   };
 }
 
-async function call(service, url, local = true, { method = 'GET', headers = {} } = {}) {
+async function call(service, url, local = true, { method = 'GET', headers = {}, body = undefined } = {}) {
   const res = { status: 0, body: '', headers: {}, writeHead(s, h = {}) { this.status = s; this.headers = h; }, end(b) { this.body = b; } };
-  await service.handle({ url, local, method, headers }, res);
+  const req = { url, local, method, headers };
+  if (body !== undefined) {
+    const buf = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
+    req[Symbol.asyncIterator] = async function* stream() { yield buf; };
+  }
+  await service.handle(req, res);
   const isJson = String(res.headers['Content-Type'] || '').startsWith('application/json');
   return { status: res.status, headers: res.headers, json: isJson ? JSON.parse(res.body) : null, body: res.body };
 }
@@ -459,7 +464,8 @@ test('denný archív adsb.lol vyjde neskôr než o 02:00 (404): udalosť NEostan
     assert.deepEqual([e.status, e.recheckDay], ['confirmed', null], 'po vydaní archívu overená');
     assert.equal(h.fetched.length, 3);
     // Lietadlo, ktoré v archíve naozaj nie je: po 24 pokusoch koniec (žiadne nekonečné dopyty).
-    const lone = { ...service.store.get(id), id: '8965d1-20260930T0600', status: 'unverified', recheckDay: '2026-09-30', recheckTries: 0, recheckNotBefore: null };
+    // Bez uloženej stopy (tú by preverenie použilo — test nižšie): lietadlo v archíve naozaj nie je.
+    const lone = { ...service.store.get(id), id: '8965d1-20260930T0600', status: 'unverified', recheckDay: '2026-09-30', recheckTries: 0, recheckNotBefore: null, secondNetworkTrace: null };
     delete traces[DAY_FZ];
     service.store.save(lone);
     let t = Date.parse('2026-10-01T03:00:00Z');
@@ -629,4 +635,60 @@ test('isOwnLocalPost: POST z vlastnej stránky / curl s JSON áno; cudzia strán
   assert.equal(isOwnLocalPost(req({ 'sec-fetch-site': 'cross-site', 'content-type': 'application/json' })), false);
   assert.equal(isOwnLocalPost(req({ origin: 'http://localhost:4173', 'sec-fetch-site': 'same-origin', 'content-type': 'text/plain' })), false, 'formulár bez predletu');
   assert.equal(isOwnLocalPost(req({ origin: 'http://localhost.evil.example', 'content-type': 'application/json' })), false);
+});
+
+test('uložená stopa druhej siete: pri overení sa uloží; keď ju adsb.lol zmaže (živá zmizla, v dennom archíve lietadlo chýba), udalosť ostane OVERENÁ', async () => {
+  const { oko } = fz1073();
+  const traces = { [LIVE_FZ]: fixtureText('adsblol-trace-8965d1-20260930.json') };
+  const h = harness({ startMs: Date.parse('2026-09-30T08:00:00Z'), tracks: { '8965d1': oko.map((p) => row(p)) }, traces });
+  try {
+    const service = h.make();
+    const first = await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    assert.equal(first.json.status, 'confirmed');
+    const stored = service.store.get(first.json.id).secondNetworkTrace;
+    assert.deepEqual([stored.source, stored.origin, stored.url], ['adsb.lol', 'fetch', LIVE_FZ]);
+    assert.ok(stored.points.length > 300, `${stored.points.length} bodov v okne`);
+    // Naživo FZ1073: živá stopa o 20:20 zmizla a denný archív 30. 9. lietadlo nemá.
+    delete traces[LIVE_FZ];
+    h.at('2026-10-01T06:00:00Z');
+    const again = await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    assert.equal(again.json.status, 'confirmed', 'neskoršie spracovanie potvrdenú udalosť nezhodí');
+    assert.ok(again.json.secondNetwork.some((s) => s.status === 404), 'adsb.lol stopu už nemá');
+    assert.ok(again.json.secondNetwork.some((s) => s.status === 'stored'), 'priznané: overené uloženou stopou');
+    assert.ok(again.json.timelineText.sk.some((l) => l.includes('7500') && l.includes('adsb.lol')), 'kódy, ktoré videla len adsb.lol, ostanú');
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('dodaná stopa (ručne, napr. živá stopa uložená skôr): FZ1073 z NEOVERENEJ na OVERENÚ s pôvodom; cudzie lietadlo, zlý čas a cudzia stránka nie', async () => {
+  const { oko } = fz1073();
+  const h = harness({ startMs: Date.parse('2026-10-01T06:00:00Z'), tracks: { '8965d1': oko.map((p) => row(p)) }, traces: {} });
+  try {
+    const service = h.make();
+    const r = await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    const id = r.json.id;
+    assert.equal(r.json.status, 'unverified', 'adsb.lol stopu nemá — bez druhej siete nič nie je overené');
+    const trace = JSON.parse(fixtureText('adsblol-trace-8965d1-20260930.json'));
+    const body = { trace, capturedAt: '2026-09-30T20:00:00Z', origin: 'adsb.lol data/traces (živá stopa)', note: 'uložená pred zmazaním' };
+    assert.equal((await call(service, `/${id}/second-network`, true, { ...OWN_POST, body: { ...body, trace: { ...trace, icao: 'abc123' } } })).json.error, 'other_aircraft');
+    assert.equal((await call(service, `/${id}/second-network`, true, { ...OWN_POST, body: { ...body, capturedAt: 'včera' } })).json.error, 'bad_captured_at');
+    assert.equal((await call(service, `/${id}/second-network`, true, { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' }, body })).status, 403);
+    assert.equal((await call(service, `/${id}/second-network`, false, { ...OWN_POST, body })).status, 404, 'z verejnej adresy vôbec nie');
+    assert.equal(service.store.get(id).status, 'unverified', 'nič z toho udalosť nezmenilo');
+    const fetchedBefore = h.fetched.length;
+    const ok = await call(service, `/${id}/second-network`, true, { ...OWN_POST, body });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.deepEqual([ok.json.status, ok.json.recheckDay], ['confirmed', null]);
+    const e = service.store.get(id);
+    assert.deepEqual([e.secondNetworkTrace.origin, e.secondNetworkTrace.capturedAt, e.secondNetworkTrace.meta.reg], ['adsb.lol data/traces (živá stopa)', '2026-09-30T20:00:00.000Z', 'A6-FKF']);
+    assert.ok(e.timelineText.sk.includes('05:36:18 UTC — transpondér vysiela 7500 (nezákonný zásah) (adsb.lol)'));
+    assert.equal(h.fetched.length, fetchedBefore, 'dodaná stopa sa nepýta adsb.lol');
+    // Preverenie z denného archívu (aj keď lietadlo v ňom nie je) už potvrdenú udalosť nezhodí.
+    h.at('2026-10-01T07:00:00Z');
+    await service.tick();
+    assert.equal(service.store.get(id).status, 'confirmed');
+  } finally {
+    h.cleanup();
+  }
 });
