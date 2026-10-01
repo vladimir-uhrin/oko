@@ -31,6 +31,8 @@ export const bearingDeg = (p, q) => normDeg(toDeg(Math.atan2(toRad(q[2] - p[2]) 
 
 /** Nastavenia záberov (stupne, metre). */
 export const VIDEO_CAMERA = Object.freeze({
+  /** Otvorenie a koncová karta: Zem z obežnej dráhy ako obrázok okolive.sk, prílet a odlet. */
+  orbit: { pitch: -38, rangeM: 1_900_000, lookDown: -8 },
   follow: { pitch: -27, rangeM: 88_000 },
   wide: { pitch: -45, rangeFactor: 2.4, lookDownIntro: 9, lookDownOutro: 13 },
   dive: { pitch: -11, minRangeM: 40_000, perKmM: 3600, altShare: 0.55 },
@@ -127,8 +129,10 @@ export function eventVideoScene(event, plan) {
   }).filter(Boolean);
   const SPOT_IN_S = 1.4;
   const SPOT_OUT_S = 1.2;
-  const playStart = plan.pieces.find((p) => p.phase !== 'intro')?.start ?? 0;
-  const outroStart = plan.pieces[plan.pieces.length - 1].start;
+  const playStart = plan.pieces.find((p) => p.phase !== 'intro' && p.phase !== 'opening')?.start ?? 0;
+  const outroStart = (plan.pieces.find((p) => p.phase === 'outro') || plan.pieces[plan.pieces.length - 1]).start;
+  const opening = plan.pieces.find((p) => p.phase === 'opening') || null;
+  const endCard = plan.pieces.find((p) => p.phase === 'endcard') || null;
 
   /** Kamera snímky: vážený priemer záberov (uhly cez sin/cos). */
   function cameraAt(vt, plane) {
@@ -158,7 +162,19 @@ export function eventVideoScene(event, plan) {
     const blend = (k, f = (v) => v) => poses.reduce((s, [w, p]) => s + (w / sum) * f(p[k] ?? 0), 0);
     const hx = poses.reduce((s, [w, p]) => s + (w / sum) * Math.cos(toRad(p.heading)), 0);
     const hy = poses.reduce((s, [w, p]) => s + (w / sum) * Math.sin(toRad(p.heading)), 0);
-    return { lat: blend('lat'), lon: blend('lon'), altM: blend('altM'), heading: toDeg(Math.atan2(hy, hx)), pitch: blend('pitch'), range: Math.exp(blend('range', Math.log)), lookDown: blend('lookDown') };
+    const cam = { lat: blend('lat'), lon: blend('lon'), altM: blend('altM'), heading: toDeg(Math.atan2(hy, hx)), pitch: blend('pitch'), range: Math.exp(blend('range', Math.log)), lookDown: blend('lookDown') };
+    // Otvorenie: prílet z obežnej dráhy do širokého záberu; koncová karta: odlet späť.
+    let wOrbit = 0;
+    if (opening && vt < opening.start + opening.dur) wOrbit = 1 - smooth((vt - opening.start) / opening.dur);
+    if (endCard && vt >= endCard.start) wOrbit = smooth((vt - endCard.start) / endCard.dur);
+    if (wOrbit <= 0) return cam;
+    // Z obežnej dráhy kamera hľadí trochu vyššie (lookDown < 0): Zem dole, nad ňou vesmír pre nápisy.
+    const orbit = { lat: center.lat, lon: center.lon, altM: 0, pitch: C.orbit.pitch, range: Math.max(C.orbit.rangeM, extentKm * 1000 * 8), lookDown: C.orbit.lookDown };
+    const lerp = (a, b) => a + (b - a) * wOrbit;
+    return {
+      lat: lerp(cam.lat, orbit.lat), lon: lerp(cam.lon, orbit.lon), altM: lerp(cam.altM, orbit.altM), heading: cam.heading,
+      pitch: lerp(cam.pitch, orbit.pitch), range: Math.exp(lerp(Math.log(cam.range), Math.log(orbit.range))), lookDown: lerp(cam.lookDown, orbit.lookDown),
+    };
   }
 
   return {
@@ -170,6 +186,11 @@ export function eventVideoScene(event, plan) {
     gaps,
     spots,
     moments,
+    /** Otvorenie a koncová karta (kúsky plánu) — popisy podľa nich prelínajú značku a kartu letu. */
+    opening,
+    endCard,
+    playStart,
+    outroStart,
     /** Dáta pre scénu v prehliadači (src/eventVideoCapture.js): stopa v metroch, momenty na čiare stopy. */
     sceneData() {
       return {

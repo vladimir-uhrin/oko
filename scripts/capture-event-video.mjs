@@ -24,10 +24,9 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import sharp from 'sharp';
 import { videoPlan } from '../src/data/eventVideo.js';
 import { FT_M, eventVideoScene } from '../src/data/eventVideoScene.js';
-import { VIDEO_3D_FORMAT, VIDEO_LOGO, buildEventVideoHudSvg } from '../src/data/eventVideoHud.js';
+import { VIDEO_3D_FORMAT, buildEventVideoHudSvg, inlineLogoMarkup } from '../src/data/eventVideoHud.js';
 import { VIDEO_3D_ENCODE, ffmpegArgs } from '../src/data/eventVideoRender.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -57,12 +56,12 @@ const withTimeout = (promise, ms, what) => Promise.race([
 const res = await fetch(`${baseUrl}/api/events/${id}`);
 if (!res.ok) { console.error(`[event-video] udalosť ${id}: HTTP ${res.status}`); process.exit(1); }
 const event = await res.json();
-const plan = videoPlan(event);
+// Otvorenie a koncová karta so značkou OKO, okolive.sk a autorom (vlastník: „propagovať doménu aj moje meno").
+const plan = videoPlan(event, { openingS: 2.6, endCardS: 3 });
 const scene = eventVideoScene(event, plan);
 if (!scene) { console.error('[event-video] udalosť nemá stopu v okne'); process.exit(1); }
 console.log(`[event-video] ${id}: ${plan.durationS.toFixed(1)} s, ${plan.totalFrames} snímok`);
-const logo = await sharp(path.join(root, 'public', 'logo.svg'))
-  .resize(VIDEO_LOGO.size, VIDEO_LOGO.size, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+const logoMarkup = inlineLogoMarkup(fs.readFileSync(path.join(root, 'public', 'logo.svg'), 'utf8'));
 
 // Bez vrstiev (dnešná premávka sa nemieša s historickým letom), bez panelov a masky, fotoreál.
 const hash = `v=2&l=&lat=${scene.center.lat.toFixed(4)}&lon=${scene.center.lon.toFixed(4)}&alt=400000&heading=${scene.heading.toFixed(1)}&pitch=-40&roll=0`
@@ -105,6 +104,16 @@ async function openScene() {
     viewer.clock.shouldAnimate = false;
     const { installEventVideoScene } = await import('/src/eventVideoCapture.js');
     window.__okoEventVideo = installEventVideoScene(viewer, sceneData);
+    // Popisy kreslí táto stránka — písma webu (JetBrains Mono, Inter z Google Fonts), nie náhradné.
+    const hud = document.createElement('div');
+    hud.id = 'oko-video-hud';
+    hud.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:2147483647;pointer-events:none;visibility:visible;';
+    document.body.appendChild(hud);
+    const faces = ['300 40px "JetBrains Mono"', '400 40px "JetBrains Mono"', '500 40px "JetBrains Mono"', '600 40px "JetBrains Mono"', '700 40px "JetBrains Mono"', '400 40px Inter', '600 40px Inter'];
+    await Promise.all(faces.map((f) => document.fonts.load(f)));
+    await document.fonts.ready;
+    const missing = faces.filter((f) => !document.fonts.check(f));
+    if (missing.length) throw new Error(`písma webu sa nenačítali: ${missing.join(', ')}`);
   }, scene.sceneData());
 }
 
@@ -126,9 +135,8 @@ async function shoot(frame) {
   }
   await page.evaluate(() => window.__okoEventVideo.render());
   const anchors = await page.evaluate((l) => window.__okoEventVideo.project(l), anchorList);
-  const shot = await page.screenshot({ type: 'png' });
-  const hud = Buffer.from(buildEventVideoHudSvg(event, scene, st, anchors));
-  return sharp(shot).composite([{ input: hud }, { input: logo, left: VIDEO_LOGO.left, top: VIDEO_LOGO.top }]).jpeg({ quality: 90 }).toBuffer();
+  await page.evaluate((svg) => { document.getElementById('oko-video-hud').innerHTML = svg; }, buildEventVideoHudSvg(event, scene, st, anchors, { logoMarkup }));
+  return page.screenshot({ type: 'jpeg', quality: 92 });
 }
 /** Snímka s časovým limitom; po druhom zlyhaní nová stránka. */
 async function shootSafe(frame) {

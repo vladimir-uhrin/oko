@@ -11,7 +11,10 @@
 //               viac momentov v tej istej sekunde = zastavenie pre každý zvlášť),
 //   diera       úsek bez údajov ≥ 5 min prebehne rýchlo (lietadlo stojí na poslednej známej polohe);
 //               keď sa cez ňu výška zmenila o 5 000 ft a viac (pád bez údajov), trvá 2 s,
-//   záver       všetky momenty, médiá a zdroje ako na obrázku udalosti; hodiny a lietadlo ostávajú.
+//   záver       všetky momenty, médiá a zdroje ako na obrázku udalosti; hodiny a lietadlo ostávajú,
+//   otvorenie a koncová karta  (len 3D video, `openingS`/`endCardS`; vlastník 10-01: „potrebujem
+//               propagovať doménu aj moje meno ako na webe") — značka OKO, okolive.sk a autor
+//               na začiatku a na konci, čas udalosti stojí.
 // Snímky kreslí ten istý kód ako obrázok udalosti (eventCard.js s `frame`) alebo záber z OKO. Pure.
 
 import { CARD_GAP_S, cardTimeRange } from './eventCard.js';
@@ -29,6 +32,9 @@ export const VIDEO_DEFAULTS = Object.freeze({
   minSegmentS: 0.3,
   spotlightS: 3,
   outroS: 3.5,
+  /** Otvorenie (značka a názov udalosti) pred úvodom a koncová karta po závere; 0 = bez nich. */
+  openingS: 0,
+  endCardS: 0,
 });
 
 /** Okolie momentu, ktoré sa prehrá spomalene: [sekúnd pred, sekúnd po] v čase údajov. */
@@ -121,7 +127,9 @@ export function videoPlan(event, opts = {}) {
   const momentsAt = (t) => moments.flatMap((m, i) => (Math.abs(m.t - t) < 1e-6 ? [i] : []));
   const holds = (t) => momentsAt(t).map((i) => ({ kind: 'hold', phase: 'moment', dur: o.holdS, t, moment: i }));
 
-  const pieces = [{ kind: 'hold', phase: 'intro', dur: o.introS, t: t0, moment: null }, ...holds(t0)];
+  const pieces = [];
+  if (o.openingS > 0) pieces.push({ kind: 'hold', phase: 'opening', dur: o.openingS, t: t0, moment: null });
+  pieces.push({ kind: 'hold', phase: 'intro', dur: o.introS, t: t0, moment: null }, ...holds(t0));
   for (const s of segments) {
     let dur;
     let phase;
@@ -135,6 +143,7 @@ export function videoPlan(event, opts = {}) {
     pieces.push({ kind: 'move', phase, dur, from: s.from, to: s.to }, ...holds(s.to));
   }
   pieces.push({ kind: 'hold', phase: 'outro', dur: o.outroS, t: t1, moment: null });
+  if (o.endCardS > 0) pieces.push({ kind: 'hold', phase: 'endcard', dur: o.endCardS, t: t1, moment: null });
 
   let start = 0;
   for (const p of pieces) { p.start = start; start += p.dur; }
@@ -161,10 +170,11 @@ export function videoPlan(event, opts = {}) {
       for (const p of pieces) { if (vt < p.start + p.dur) { piece = p; break; } }
       const local = Math.min(1, Math.max(0, (vt - piece.start) / Math.max(1e-9, piece.dur)));
       const t = piece.kind === 'move' ? piece.from + (piece.to - piece.from) * local : piece.t;
-      const outro = piece.phase === 'outro';
+      // Záver a koncová karta: súhrn bez zvýraznenia; otvorenie: ešte nič nenastalo.
+      const outro = piece.phase === 'outro' || piece.phase === 'endcard';
       return {
         t,
-        current: piece.phase === 'moment' ? piece.moment : (outro ? null : currentAt(t)),
+        current: piece.phase === 'moment' ? piece.moment : (outro || piece.phase === 'opening' ? null : currentAt(t)),
         pop: piece.phase === 'moment' ? local : null,
         showAll: outro,
         phase: piece.phase,

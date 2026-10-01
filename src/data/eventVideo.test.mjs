@@ -284,3 +284,16 @@ test('podklad (raz) + vrstva snímky = celý obrázok tej istej snímky (pixely)
   for (let i = 0; i < whole.length; i += 1) diff += Math.abs(whole[i] - composed[i]);
   assert.ok(diff / whole.length < 0.5, `priemerný rozdiel ${(diff / whole.length).toFixed(3)}`);
 });
+
+test('otvorenie a koncová karta (3D video): na začiatku a na konci, čas udalosti stojí, nič nezvýraznené; bez nich ako doteraz', async () => {
+  const e = await fzCardEvent();
+  const plain = videoPlan(e);
+  const plan = videoPlan(e, { openingS: 2.6, endCardS: 3 });
+  assert.deepEqual([plan.pieces[0].phase, plan.pieces.at(-1).phase], ['opening', 'endcard']);
+  assert.ok(Math.abs(plan.durationS - (plain.durationS + 5.6)) < 1e-9);
+  assert.ok(!plain.pieces.some((p) => p.phase === 'opening' || p.phase === 'endcard'), 'predvolene bez nich (2D video)');
+  const o = plan.at(10);
+  assert.deepEqual([o.phase, o.t, o.current, o.showAll], ['opening', plan.t0, null, false]);
+  const end = plan.at(plan.totalFrames - 1);
+  assert.deepEqual([end.phase, end.t, end.current, end.showAll], ['endcard', plan.t1, null, true]);
+});

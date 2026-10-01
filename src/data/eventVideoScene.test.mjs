@@ -117,3 +117,25 @@ test('všeobecne: umelý let s klesaním a obratom bez dier — scéna, žiadna 
   assert.equal(scene.frame(plan.totalFrames - 1).plane.ended, true, 'koniec údajov na poslednom meraní');
   assert.equal(eventVideoScene(e, null), null);
 });
+
+test('otvorenie a koncová karta: prílet z obežnej dráhy do regiónu a odlet späť, plynulo (bez skokov)', async () => {
+  const { e } = await fzScene();
+  const plan = videoPlan(e, { openingS: 2.6, endCardS: 3 });
+  const scene = eventVideoScene(e, plan);
+  const first = scene.frame(0).camera;
+  const last = scene.frame(plan.totalFrames - 1).camera;
+  for (const c of [first, last]) {
+    assert.ok(c.range >= VIDEO_CAMERA.orbit.rangeM * 0.99, `z obežnej dráhy (${Math.round(c.range / 1000)} km)`);
+    assert.ok(Math.abs(c.pitch - VIDEO_CAMERA.orbit.pitch) < 0.5 && distKm(c, scene.center) < 1);
+  }
+  const arrived = scene.frame(Math.round((scene.opening.start + scene.opening.dur) * plan.fps)).camera;
+  assert.ok(arrived.range < scene.extentKm * 1000 * 3, 'po otvorení celý región');
+  const playing = scene.frame(Math.round((scene.playStart + 3) * plan.fps));
+  assert.equal(playing.ghost, 0);
+  let prev = first;
+  for (let i = 1; i < plan.totalFrames; i += 1) {
+    const c = scene.frame(i).camera;
+    assert.ok(Math.abs(Math.log(c.range / prev.range)) < 0.12 && Math.abs(c.pitch - prev.pitch) < 3 && distKm(c, prev) < 8, `snímka ${i}`);
+    prev = c;
+  }
+});

@@ -5,11 +5,12 @@
 // nikdy „overené", záver so všetkými momentmi a médiami, ktorý sa zmestí aj pri veľa momentoch.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { simplifyTrack } from './eventCard.js';
-import { keyMoments } from './eventPost.js';
+import { eventWhat, flightLine, keyMoments } from './eventPost.js';
 import { videoPlan } from './eventVideo.js';
 import { eventVideoScene } from './eventVideoScene.js';
-import { VIDEO_3D_FORMAT, buildEventVideoHudSvg, gapLabel, groupFt, keepNumbers, readoutFt } from './eventVideoHud.js';
+import { VIDEO_3D_FORMAT, buildEventVideoHudSvg, gapLabel, groupFt, hudLayers, inlineLogoMarkup, keepNumbers, readoutFt } from './eventVideoHud.js';
 import { normalizeTrack } from './flightAnomalies.js';
 import { fz1073, fz1073Event } from './fixtures/flightEventFixtures.mjs';
 
@@ -24,15 +25,50 @@ const framesOf = (plan, piece) => [Math.ceil(piece.start * plan.fps - 1e-9), Mat
 const hud = (e, scene, frame, anchors = { gap0: { x: 500, y: 600 } }) => buildEventVideoHudSvg(e, scene, scene.frame(frame), anchors);
 const texts = (svg) => [...svg.matchAll(/<text [^>]*>([^<]*(?:<tspan[^>]*>[^<]*<\/tspan>)?[^<]*)<\/text>/g)].map((m) => m[1].replace(/<[^>]+>/g, '').replace(/\u00a0/g, ' '));
 
-test('na každej snímke OKO, okolive.sk a zdroje (Google · Cesium ion, OpenSky, adsb.lol ODbL, plán letu adsbdb)', async () => {
-  const { e, plan, scene } = await fz();
-  for (const frame of [0, Math.round(plan.totalFrames / 3), Math.round((2 * plan.totalFrames) / 3), plan.totalFrames - 1]) {
-    const svg = hud(e, scene, frame);
+test('značka ako na webe na celom videu: otvorenie (logo, OKO, heslo, podpis, čo sa stalo, okolive.sk bez „naživo"), počas videa hlavička, koncová karta (NAŽIVO okolive.sk); zdroje na každej snímke', async () => {
+  const { e } = await fz();
+  const plan = videoPlan(e, { openingS: 2.6, endCardS: 3 });
+  const scene = eventVideoScene(e, plan);
+  const logoMarkup = inlineLogoMarkup(readFileSync(new URL('../../public/logo.svg', import.meta.url), 'utf8'));
+  const at = (frame) => {
+    const svg = buildEventVideoHudSvg(e, scene, scene.frame(frame), {}, { logoMarkup });
+    return { svg, t: texts(svg) };
+  };
+  for (let f = 0; f < plan.totalFrames; f += 37) {
+    const { svg, t } = at(f);
     assert.match(svg, new RegExp(`^<svg[^>]+width="${VIDEO_3D_FORMAT.w}" height="${VIDEO_3D_FORMAT.h}"`));
-    assert.ok(svg.includes('>OK<tspan fill="#39d0ff">O</tspan></text>'), `snímka ${frame}: nápis OKO`);
-    assert.ok(texts(svg).includes('okolive.sk'));
-    assert.ok(texts(svg).includes('© Google · Cesium ion · údaje OpenSky Network, adsb.lol (ODbL) · plán letu adsbdb'), `snímka ${frame}: zdroje`);
+    assert.ok(t.includes('© Google · Cesium ion · údaje OpenSky Network, adsb.lol (ODbL) · plán letu adsbdb'), `snímka ${f}: zdroje`);
+    assert.ok(svg.includes('OK<tspan fill="#00d4ff" font-weight="300">O</tspan>'), `snímka ${f}: nápis OKO ako na webe`);
+    assert.ok(t.includes('VYTVORIL UHRIN VLADIMÍR'), `snímka ${f}: podpis`);
+    assert.ok(t.some((x) => x.includes('okolive.sk')), `snímka ${f}: doména`);
+    assert.ok(svg.includes(`viewBox="${logoMarkup.viewBox}"`) && !svg.includes('<image'), `snímka ${f}: logo vložené`);
   }
+  const open = at(10).t;
+  assert.ok(open.includes('ŽIADNE MIESTO NEOSTANE BOKOM') && open.includes(eventWhat(e).toUpperCase()) && open.includes(flightLine(e)), 'čo sa stalo a ktorý let');
+  assert.ok(!open.includes('NAŽIVO'), 'pri historickej udalosti nie „naživo"');
+  assert.ok(!open.some((x) => /^\d\d:\d\d:\d\d UTC$/.test(x)), 'v otvorení ešte bez hodín');
+  const mid = at(Math.round(plan.totalFrames / 2)).t;
+  assert.ok(mid.includes('okolive.sk') && mid.some((x) => /^\d\d:\d\d:\d\d UTC$/.test(x)), 'počas videa hlavička a hodiny');
+  const end = at(plan.totalFrames - 1).t;
+  assert.ok(end.includes('NAŽIVO') && end.includes('okolive.sk') && end.includes('Lietadlá, lode a konflikty naživo v 3D'));
+  assert.ok(!end.some((x) => x.startsWith('Médiá:')), 'súhrn už dozneje');
+  // Prechody: otvorenie dozneje, kým nastúpi hlavička; súhrn dozneje pred koncovou kartou.
+  const L = (f) => hudLayers(scene, scene.frame(f));
+  assert.deepEqual([L(0).opening, L(0).main], [1, 0]);
+  const after = Math.round((scene.opening.start + scene.opening.dur + 0.4) * plan.fps);
+  assert.deepEqual([L(after).opening, L(after).main], [0, 1]);
+  const outro = Math.round((scene.outroStart + 0.5) * plan.fps);
+  assert.deepEqual([L(outro).summary, L(outro).endCard], [1, 0]);
+  assert.deepEqual([L(plan.totalFrames - 1).summary, L(plan.totalFrames - 1).endCard], [0, 1]);
+});
+
+test('logo vložené do popisov bez tried a štýlov — kreslí sa hneď so snímkou a nezasiahne stránku', () => {
+  const m = inlineLogoMarkup(readFileSync(new URL('../../public/logo.svg', import.meta.url), 'utf8'));
+  assert.equal(m.viewBox, '180 120 775 520');
+  for (const bad of ['class=', '<style', '<title', ' id=']) assert.ok(!m.body.includes(bad), bad);
+  assert.equal((m.body.match(/<path /g) || []).length, 4);
+  assert.ok(m.body.includes('fill: #00f6ff') && m.body.includes('stroke: #48b'), 'farby loga zachované');
+  assert.equal(inlineLogoMarkup('<p>nie svg</p>'), null);
 });
 
 test('štítky podľa fázy: BEZ ÚDAJOV v diere, SPOMALENÉ pri spomalení, KONIEC ÚDAJOV na poslednom meraní (nie v súhrne)', async () => {
@@ -71,12 +107,13 @@ test('nápis diery: „9 min bez údajov · kleslo o 12 925 ft" od začiatku die
   assert.equal(gapLabel({ fromT: 0, toT: 600, dFt: 200 }), '10 min bez údajov', 'malá zmena výšky sa neuvádza');
   assert.equal(gapLabel({ fromT: 0, toT: 360, dFt: 3000 }), '6 min bez údajov · stúplo o 3\u00a0000 ft');
   const gp = g.piece;
-  const has = (frame) => hud(e, scene, frame).includes(gapLabel(g));
+  const [head, drop] = gapLabel(g).replace(/\u00a0/g, ' ').split(' · ');
+  const has = (frame, anchors) => { const t = texts(hud(e, scene, frame, anchors)); return t.includes(head.toUpperCase()) && t.includes(drop); };
   assert.equal(has(framesOf(plan, gp)[0] - 2), false, 'pred dierou nie');
   assert.equal(has(framesOf(plan, gp)[0] + 1), true, 'počas diery');
   assert.equal(has(Math.round((gp.start + gp.dur + 2) * plan.fps)), true, 'krátko po nej');
   assert.equal(has(Math.round((gp.start + gp.dur + 3.5) * plan.fps)), false, 'potom zmizne');
-  assert.equal(hud(e, scene, framesOf(plan, gp)[0] + 1, {}).includes(gapLabel(g)), false, 'bez polohy na obrazovke nie');
+  assert.equal(has(framesOf(plan, gp)[0] + 1, {}), false, 'bez polohy na obrazovke nie');
 });
 
 test('neoverená udalosť nikdy „overené"; súhrn so všetkými momentmi a médiami, pri veľa momentoch „+ N ďalších" nad pätou', async () => {
@@ -101,4 +138,15 @@ test('neoverená udalosť nikdy „overené"; súhrn so všetkými momentmi a m�
   assert.ok(Math.max(...ys) < addressY - 20, 'zoznam nad adresou');
   assert.ok(texts(svg).some((t) => /^\+ \d+ ďalších momentov$/.test(t)));
   assert.equal(keepNumbers('klesanie 21 319 ft/min vo výške 32 325 ft'), 'klesanie 21\u00a0319\u00a0ft/min vo výške 32\u00a0325\u00a0ft');
+});
+
+test('prechody po sebe: otvorenie dozneje skôr, než nastúpi hlavička; súhrn skôr, než nastúpi koncová karta (texty sa neprekryjú)', async () => {
+  const { e } = await fz();
+  const plan = videoPlan(e, { openingS: 2.6, endCardS: 3 });
+  const scene = eventVideoScene(e, plan);
+  for (let f = 0; f < plan.totalFrames; f += 1) {
+    const L = hudLayers(scene, scene.frame(f));
+    assert.ok(!(L.opening > 0 && L.main > 0), `snímka ${f}: otvorenie ${L.opening} a hlavička ${L.main} naraz`);
+    assert.ok(!(L.summary > 0 && L.endCard > 0), `snímka ${f}: súhrn ${L.summary} a koncová karta ${L.endCard} naraz`);
+  }
 });
