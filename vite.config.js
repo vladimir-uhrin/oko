@@ -37,6 +37,7 @@ import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKe
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
+import { resolveServerRole, roleServerOverrides, runsApiPlugins } from './scripts/lib/serverRole.mjs';
 import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
@@ -11020,6 +11021,29 @@ function skTerrainProxy() {
  * Cloudflare ho drží hodiny v cache a nová verzia by sa u návštevníkov neprejavila. Odkaz v index.html
  * dostane ?v=<odtlačok obsahu>; index.html sám sa necachuje (no-cache), takže zmena sa prejaví hneď.
  */
+/**
+ * Verzia verejného API v hlavičke (2026-10-01): služba oko-api beží z kópie commitu (scripts/oko-api-release.ps1
+ * zapíše súbor RELEASE) — `X-Oko-Release` ukáže, ktorý kód práve odpovedá. Len v role api.
+ * @param {{role: string}} serverRole
+ * @returns {import('vite').Plugin}
+ */
+function releaseHeaderPlugin(serverRole) {
+  let release = null;
+  if (serverRole?.role === 'api') {
+    try {
+      const text = fs.readFileSync(path.join(__dirname, 'RELEASE'), 'utf8').trim();
+      release = /^[0-9a-f]{7,40}$/.test(text) ? text : null;
+    } catch { release = null; }
+  }
+  return {
+    name: 'oko-release-header',
+    configureServer(server) {
+      if (!release) return;
+      server.middlewares.use((req, res, next) => { res.setHeader('X-Oko-Release', release); next(); });
+    },
+  };
+}
+
 function preloaderCacheBustPlugin() {
   return {
     name: 'oko-preloader-cache-bust',
@@ -11048,6 +11072,10 @@ export default defineConfig(({ mode }) => {
     if (process.env[key] === undefined) process.env[key] = val;
   }
   const env = { ...process.env };
+  // Rola procesu (2026-10-01, scripts/lib/serverRole.mjs): api = služba oko-api (verejné /api a /s z kópie
+  // commitu), proxy = oko-dev bez API pluginov s preposielaním /api a /s, full = všetko ako doteraz.
+  const serverRole = resolveServerRole(process.env);
+  const apiPlugins = runsApiPlugins(serverRole);
   // Recovery/profile entry must not load the Cesium engine or map resources.
   const cesiumGlobe = cesium();
   const cesiumHtml = cesiumGlobe.transformIndexHtml;
@@ -11063,10 +11091,11 @@ export default defineConfig(({ mode }) => {
     plugins: [
       noIndexPlugin(),
       originKeepAlivePlugin(),
-      sharePlugin(),
-      flightHistoryProxy(),
-      authPlugin(env),
+      // V role proxy (oko-dev s OKO_API_UPSTREAM) sa API pluginy nespúšťajú: záznam histórie, strážca,
+      // udalosti a governor kreditov OpenSky bežia len v službe oko-api; /api a /s idú cez server.proxy.
+      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), sharePlugin(), flightHistoryProxy(), authPlugin(env)] : []),
       cesiumGlobe,
+      ...(apiPlugins ? [
       openSkyProxy(),
       celestrakProxy(),
       tomtomProxy(),
@@ -11111,6 +11140,7 @@ export default defineConfig(({ mode }) => {
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
+      ] : []),
       // Merač zablokovania vlákna (2026-09-30): zaseknutia pár minút po reštarte zatiaľ bez príčiny.
       // Nemá middleware, takže miesto v zozname na nič nevplýva; začiatok aj koniec strážia testy.
       eventLoopWatchPlugin(),
@@ -11136,7 +11166,11 @@ export default defineConfig(({ mode }) => {
         // downloader makes chokidar throw EBUSY, which KILLS the dev server.
         ignored: ['**/.gev-cache/**', '**/qa-shots/**'],
       },
+      // api = bez sledovania súborov a HMR (kópia commitu sa nemení), proxy = preposielanie /api a /s.
+      ...roleServerOverrides(serverRole),
     },
+    // Rola api neslúži stránky — bez prehľadávania a predprípravy závislostí pri štarte (bloky 20–45 s).
+    ...(serverRole.role === 'api' ? { optimizeDeps: { noDiscovery: true, include: [] } } : {}),
     // Expose selected API keys to the browser via import.meta.env.*
     define: {
       'import.meta.env.GOOGLE_MAPS_API_KEY': JSON.stringify(env.GOOGLE_MAPS_API_KEY),

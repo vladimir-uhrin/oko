@@ -20,12 +20,17 @@
 # already serves this build through the tunnel (/robots.txt from our static server); until then the source host
 # keeps serving the app, so DNS and publishing can happen in any order.
 #
-# Usage: powershell -ExecutionPolicy Bypass -File scripts/oko-publish.ps1 [-SkipBuild] [-DevPort 4173] [-StaticPort 4174]
+# 2026-10-01 (owner: "zacni zo vsetkym" - separate the public API from the dev server): when the service oko-api is
+# installed (scripts/install-oko-api-service.ps1), /api and /s go to its port (read from the service arguments) - the
+# API then runs from an immutable release (scripts/oko-api-release.ps1), not from the working tree. -ApiPort overrides.
+#
+# Usage: powershell -ExecutionPolicy Bypass -File scripts/oko-publish.ps1 [-SkipBuild] [-DevPort 4173] [-StaticPort 4174] [-ApiPort 0]
 #        [-Hostnames okolive.sk] [-Redirects www.okolive.sk=https://okolive.sk]
 param(
   [switch]$SkipBuild,
   [int]$DevPort = 4173,
   [int]$StaticPort = 4174,
+  [int]$ApiPort = 0,
   [string[]]$Hostnames = @('okolive.sk'),
   [string[]]$Redirects = @('www.okolive.sk=https://okolive.sk'),
   [string]$TunnelName = 'oko',
@@ -33,6 +38,11 @@ param(
   [string]$StaticTaskName = 'OKO public static'
 )
 $ErrorActionPreference = 'Continue'
+if ($ApiPort -le 0) {
+  $ApiPort = $DevPort
+  $apiParams = (Get-ItemProperty -Path 'HKLM:SYSTEMCurrentControlSetServicesoko-apiParameters' -Name AppParameters -ErrorAction SilentlyContinue).AppParameters
+  if ([string]$apiParams -match '--port (d+)') { $ApiPort = [int]$Matches[1] }
+}
 # -File passes "a,b" as ONE string; split it here so both call styles work.
 $Hostnames = @($Hostnames | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Redirects = @($Redirects | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -130,7 +140,7 @@ foreach ($h in $Hostnames) {
   $rules += @"
   - hostname: $h
     path: ^/(api|s)(/.*)?$
-    service: http://localhost:$DevPort
+    service: http://localhost:$ApiPort
     originRequest:
       connectTimeout: 30s
   - hostname: $h
@@ -171,5 +181,5 @@ if ([System.IO.File]::ReadAllText($config) -ceq $newConfig) {
     Write-Host "tunnel task: " (Get-ScheduledTask -TaskName $TunnelTaskName).State
   }
 }
-Write-Host ("published: " + (($Hostnames | ForEach-Object { "https://$_/" }) -join ', ') + " (build) + /api -> localhost:$DevPort")
+Write-Host ("published: " + (($Hostnames | ForEach-Object { "https://$_/" }) -join ', ') + " (build) + /api -> localhost:$ApiPort")
 if ($Redirects.Count) { Write-Host ("301: " + ($Redirects -join ', ')) }
