@@ -40,8 +40,8 @@ param(
 $ErrorActionPreference = 'Continue'
 if ($ApiPort -le 0) {
   $ApiPort = $DevPort
-  $apiParams = (Get-ItemProperty -Path 'HKLM:SYSTEMCurrentControlSetServicesoko-apiParameters' -Name AppParameters -ErrorAction SilentlyContinue).AppParameters
-  if ([string]$apiParams -match '--port (d+)') { $ApiPort = [int]$Matches[1] }
+  $apiParams = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\oko-api\Parameters' -Name AppParameters -ErrorAction SilentlyContinue).AppParameters
+  if ([string]$apiParams -match '--port (\d+)') { $ApiPort = [int]$Matches[1] }
 }
 # -File passes "a,b" as ONE string; split it here so both call styles work.
 $Hostnames = @($Hostnames | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
