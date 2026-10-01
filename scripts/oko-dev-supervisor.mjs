@@ -212,7 +212,21 @@ async function main() {
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(signal, () => { void stop(signal); });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+/**
+ * Je tento súbor spustený priamo (nie importovaný testom)? Porovnáva skutočné cesty: služba oko-api ho
+ * volá cez junction <Base>\current, Node cestu hlavného modulu rozbalí na skutočnú — priame porovnanie
+ * s argv[1] by zlyhalo a strážca by ticho skončil kódom 0 (naživo 2026-10-01).
+ */
+function isMainModule(argv1, metaUrl) {
+  if (!argv1) return false;
+  try {
+    return fs.realpathSync(path.resolve(argv1)) === fs.realpathSync(fileURLToPath(metaUrl));
+  } catch {
+    return metaUrl === pathToFileURL(path.resolve(argv1)).href;
+  }
+}
+
+if (isMainModule(process.argv[1], import.meta.url)) {
   main().catch((error) => {
     console.error(`[oko-dev] ${stamp()} ${error?.stack || error}`);
     process.exit(1);

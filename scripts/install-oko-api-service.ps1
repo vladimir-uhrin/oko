@@ -118,18 +118,29 @@ if ($sddl -notmatch [regex]::Escape(";;;$sid)")) {
 }
 Write-Host 'service ready: oko-api'
 
+# Any failure after oko-dev stopped: oko-api off, oko-dev back to running everything (the public tunnel still
+# points to it). 2026-10-01: a failed Start-Service threw before the old rollback and left the site without /api.
+function Restore-Dev([string]$Why) {
+  Write-Host "ROLLBACK: $Why"
+  Stop-Service -Name 'oko-api' -Force -ErrorAction SilentlyContinue
+  try { Invoke-Nssm @('reset', 'oko-dev', 'AppEnvironmentExtra') } catch { Write-Host "warning: $($_.Exception.Message)" }
+  try { Start-Service -Name 'oko-dev' } catch { Write-Host "warning: $($_.Exception.Message)" }
+  $back = Wait-Api $DevPort $WaitSeconds
+  Write-Host "oko-dev runs everything again: $(if ($back) { 'OK' } else { 'NO ANSWER (see .gev-cache\logs\svc-oko-dev.log)' })"
+  throw "switch-over failed: $Why (see $log)"
+}
+
 # Switch over without two recorders: stop dev -> start api -> dev in proxy mode.
 Stop-Service -Name 'oko-dev' -Force
 Start-Sleep -Seconds 3
-Start-Service -Name 'oko-api'
-if (-not (Wait-Api $ApiPort $WaitSeconds)) {
-  Stop-Service -Name 'oko-api' -Force -ErrorAction SilentlyContinue
-  Start-Service -Name 'oko-dev'
-  throw "oko-api did not answer within $WaitSeconds s - stopped it, oko-dev runs everything again (see $log)"
-}
+# NSSM may report a start failure while the program is still coming up; the API answer decides.
+try { Start-Service -Name 'oko-api' } catch { Write-Host "start reported: $($_.Exception.Message)" }
+if (-not (Wait-Api $ApiPort $WaitSeconds)) { Restore-Dev "oko-api did not answer within $WaitSeconds s" }
 Write-Host "oko-api answers on localhost:$ApiPort"
-Invoke-Nssm @('set', 'oko-dev', 'AppEnvironmentExtra', "OKO_API_UPSTREAM=http://localhost:$ApiPort")
-Start-Service -Name 'oko-dev'
-$devOk = Wait-Api $DevPort $WaitSeconds
-Write-Host "oko-dev (proxy to oko-api) on localhost:$DevPort -> $(if ($devOk) { 'OK' } else { 'NO ANSWER (see .gev-cache\logs\svc-oko-dev.log)' })"
+try {
+  Invoke-Nssm @('set', 'oko-dev', 'AppEnvironmentExtra', "OKO_API_UPSTREAM=http://localhost:$ApiPort")
+  Start-Service -Name 'oko-dev'
+} catch { Write-Host "start reported: $($_.Exception.Message)" }
+if (-not (Wait-Api $DevPort $WaitSeconds)) { Restore-Dev 'oko-dev in proxy mode did not answer' }
+Write-Host "oko-dev (proxy to oko-api) on localhost:$DevPort -> OK"
 Write-Host 'next: powershell -ExecutionPolicy Bypass -File scripts\oko-publish.ps1 -SkipBuild  (tunnel /api and /s -> oko-api)'

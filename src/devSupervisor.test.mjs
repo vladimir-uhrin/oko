@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
@@ -169,4 +169,20 @@ test('pád servera: strážca skončí s jeho kódom (služba ho spustí znova)'
   const run = runSupervisor(['--port', String(port), '--interval', '1000', '--', process.execPath, '-e', 'process.exit(7)']);
   assert.equal(await run.exited, 7, run.output());
   assert.match(run.output(), /Vite skončil \(kód 7/);
+});
+
+test('spustenie cez odkaz (služba oko-api volá <Base>/current/scripts/…, current = junction na vydanie): strážca naozaj beží', { timeout: 30_000 }, async () => {
+  // 2026-10-01 naživo: Node cestu hlavného modulu rozbalí cez junction, import.meta.url ≠ argv[1] → main()
+  // sa nespustil, proces hneď skončil kódom 0 a NSSM ho dookola spúšťal (služba „Paused").
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-sup-link-'));
+  const link = path.join(dir, 'current');
+  symlinkSync(path.dirname(SCRIPT), link, process.platform === 'win32' ? 'junction' : 'dir');
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(link, path.basename(SCRIPT)), '--port', String(port), '--interval', '1000', '--', process.execPath, '-e', 'process.exit(7)'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { out += d; });
+  const code = await new Promise((resolve) => child.on('exit', resolve));
+  assert.equal(code, 7, `strážca musí spustiť server a skončiť s jeho kódom: ${out}`);
+  assert.match(out, /spúšťam/);
 });

@@ -28,8 +28,17 @@ $repo = Split-Path -Parent $PSScriptRoot
 if (-not $Base) { $Base = Join-Path (Split-Path -Parent $repo) 'oko-api' }
 if ($Base -match ' ' -or $repo -match ' ') { throw "paths with spaces are not supported: $Base / $repo" }
 
-$hash = (& git -C $repo rev-parse --short $Commit).Trim()
-if ($LASTEXITCODE -ne 0 -or $hash -notmatch '^[0-9a-f]{7,40}$') { throw "unknown commit: $Commit" }
+# PowerShell 5.1 with ErrorActionPreference Stop turns any stderr line of a native program (git prints
+# "Preparing worktree" there) into a terminating error; judge git by its exit code instead.
+function Invoke-Git([string[]]$GitArgs) {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { $out = & git -C $repo @GitArgs 2>&1; $code = $LASTEXITCODE } finally { $ErrorActionPreference = $previous }
+  if ($code -ne 0) { throw "git $($GitArgs -join ' ') failed: $(($out | Out-String).Trim())" }
+  return (($out | Where-Object { $_ -is [string] }) -join "`n").Trim()
+}
+$hash = Invoke-Git @('rev-parse', '--short', $Commit)
+if ($hash -notmatch '^[0-9a-f]{7,40}$') { throw "unknown commit: $Commit" }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $releases = Join-Path $Base 'releases'
 $target = Join-Path $releases "$hash-$stamp"
@@ -38,14 +47,14 @@ New-Item -ItemType Directory -Force -Path $releases | Out-Null
 
 # 1. Clean copy of the commit (a worktree, then a copy without .git - the worktree is removed again).
 $tmp = Join-Path $env:TEMP "oko-api-$hash-$stamp"
-& git -C $repo worktree add --detach $tmp $hash 2>$null | Out-Null
+Invoke-Git @('worktree', 'add', '--detach', $tmp, $hash) | Out-Null
 if (-not (Test-Path (Join-Path $tmp 'vite.config.js'))) { throw "worktree not created: $tmp" }
 try {
   & robocopy $tmp $target /E /XD .git /XF .git /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
 } finally {
-  & git -C $repo worktree remove --force $tmp 2>$null | Out-Null
-  & git -C $repo worktree prune 2>$null | Out-Null
+  try { Invoke-Git @('worktree', 'remove', '--force', $tmp) | Out-Null } catch { Write-Host "warning: $($_.Exception.Message)" }
+  try { Invoke-Git @('worktree', 'prune') | Out-Null } catch { }
 }
 
 # 2. Shared runtime data of the main checkout (links, never copies - one history, one account store).
