@@ -4517,6 +4517,9 @@ function _routeIsPlausible(icao24, route) {
     lonDeg: Cesium.Math.toDegrees(carto.longitude),
     altitudeM: info.altitude ?? null,
     verticalRateMps: info.verticalRate ?? null,
+    // Kurz (2026-10-01): ďaleko od letísk musí byť cieľ pred lietadlom — inak je to iný úsek.
+    trackDeg: Number.isFinite(info.true_track) ? info.true_track : null,
+    onGround: info.onGround === true,
     origin: route.origin,
     destination: route.destination,
   });
