@@ -692,3 +692,45 @@ test('dodaná stopa (ručne, napr. živá stopa uložená skôr): FZ1073 z NEOVE
     h.cleanup();
   }
 });
+
+test('video do príspevku: len z tohto počítača, MP4 na stiahnutie zo stopy udalosti (doplnenej z archívu); bez ffmpeg „nedostupné", bez stopy 409', async () => {
+  const { oko } = fz1073();
+  const h = harness({ startMs: Date.parse('2026-09-30T08:00:00Z'), tracks: { '8965d1': oko.map((p) => row(p)) } });
+  try {
+    const got = [];
+    let failWith = null;
+    const file = path.join(h.dir, 'video.mp4');
+    const eventVideo = {
+      async get(event) {
+        got.push(event);
+        if (failWith) throw Object.assign(new Error('zlyhanie'), { code: failWith });
+        writeFileSync(file, 'MP4DATA');
+        return { file, cached: false };
+      },
+    };
+    const service = h.make({ eventVideo });
+    const e = { ...(await fz1073Event()), window: { fromT: T('2026-09-30T03:00:00Z'), toT: T('2026-09-30T07:00:00Z') } };
+    delete e.track;
+    service.store.save(e);
+    assert.equal((await call(service, `/${e.id}/video.mp4`, false)).status, 404, 'z verejnej adresy vôbec nie');
+    assert.equal(got.length, 0, 'verejnosť nič nespustí');
+    const r = await call(service, `/${e.id}/video.mp4`);
+    assert.equal(r.status, 200);
+    assert.deepEqual([r.headers['Content-Type'], r.headers['Content-Disposition'], r.headers['Content-Length']], ['video/mp4', `attachment; filename="oko-udalost-${e.id}.mp4"`, '7']);
+    assert.equal(Buffer.from(r.body).toString(), 'MP4DATA');
+    assert.ok(got[0].track.length > 50, 'video zo stopy doplnenej z archívu OKO');
+    const head = await call(service, `/${e.id}/video.mp4`, true, { method: 'HEAD' });
+    assert.deepEqual([head.status, head.body], [200, undefined]);
+    assert.equal((await call(service, `/${e.id}/video.mp4`, true, OWN_POST)).status, 405);
+    assert.equal((await call(service, `/${e.id}/post`)).json.video, true, 'panel vie, že video je k dispozícii');
+    failWith = 'FFMPEG_MISSING';
+    assert.deepEqual([(await call(service, `/${e.id}/video.mp4`)).status, (await call(service, `/${e.id}/video.mp4`)).json.error], [503, 'video_unavailable']);
+    failWith = 'NO_TRACK';
+    assert.deepEqual((await call(service, `/${e.id}/video.mp4`)).json, { error: 'no_track' });
+    const without = h.make();
+    assert.equal((await call(without, `/${e.id}/video.mp4`)).status, 503);
+    assert.equal((await call(without, `/${e.id}/post`)).json.video, false);
+  } finally {
+    h.cleanup();
+  }
+});

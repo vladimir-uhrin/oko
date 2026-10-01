@@ -14,6 +14,8 @@
 // Etapa 2b (zverejnenie): vlastník si na tomto počítači pozrie obrázok a text príspevku a klikne
 // „Zverejniť" — vznikne trvalý odkaz /s/<id> s obrázkom (Open Graph pre FB) a verejný pohľad
 // /api/events/public/<id> (panel v OKO). Nič sa nezverejní samo a nič sa neposiela na FB.
+// Video do príspevku (2026-10-01): /api/events/<id>/video.mp4 — len na tomto počítači, vlastník ho
+// stiahne a do príspevku na FB nahrá sám (eventVideo.js, eventVideoRender.js).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -104,7 +106,7 @@ export const EVENTS_PUBLIC_ORIGIN = 'https://okolive.sk';
 const EVENT_ID = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
 const EVENT_ID_PART = '[0-9a-f]{6}-\\d{8}T\\d{4}';
 const PUBLIC_ROUTE = new RegExp(`^/public/(${EVENT_ID_PART})$`);
-const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|post|publish|unpublish|second-network))?$`);
+const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|post|publish|unpublish|second-network))?$`);
 /** Stopa na obrázok: body sietí, ktoré sú v atribúcii (OpenSky + adsb.lol), aj z druhej siete. */
 const DRAWN_SRC = (src) => src === PRIMARY_SRC || String(src || '').startsWith('adsb.lol');
 
@@ -243,7 +245,9 @@ export function trustedNewsLoader(file) {
  * @param {{getStore:() => any, eventsDir:string, isLocal:(req:any) => boolean, fetchImpl?:typeof fetch,
  *   now?:() => number, sleep?:(ms:number) => Promise<void>, log?:(msg:string) => void, tickMs?:number,
  *   trustedFile?:string, renderCard?:((event:object, format?:string) => Promise<{jpeg:Buffer, width:number, height:number}>)|null,
- *   shareStore?:{save:Function, read:Function, remove:Function}|null, publicOrigin?:string}} opts
+ *   shareStore?:{save:Function, read:Function, remove:Function}|null, publicOrigin?:string,
+ *   eventVideo?:{get:(event:object) => Promise<{file:string, cached:boolean}>}|null}} opts
+ *   `eventVideo` = createEventVideoCache (video do príspevku; bez neho /video.mp4 odpovie 503)
  */
 export function createFlightEventsService({
   getStore,
@@ -258,6 +262,7 @@ export function createFlightEventsService({
   renderCard = null,
   shareStore = null,
   publicOrigin = EVENTS_PUBLIC_ORIGIN,
+  eventVideo = null,
 } = {}) {
   const store = fileEventStore(eventsDir);
   store.load();
@@ -572,6 +577,7 @@ export function createFlightEventsService({
       text: postText(event, { url }),
       published: event.published || null,
       facebook: url ? facebookShareUrl(url) : null,
+      video: Boolean(eventVideo),
     };
   }
 
@@ -813,6 +819,28 @@ export function createFlightEventsService({
         const card = await renderCard(await withTrack(event), url.searchParams.get('format') === 'feed' ? 'feed' : 'og');
         res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'Content-Length': String(card.jpeg.length) });
         res.end(card.jpeg);
+        return;
+      }
+      // Video do príspevku (1080×1350 MP4): prvý raz sa kreslí (~30 s), potom z disku.
+      if (action === 'video.mp4') {
+        if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
+        if (!eventVideo) { json(res, 503, { error: 'video_unavailable' }); return; }
+        let video;
+        try {
+          video = await eventVideo.get(await withTrack(event));
+        } catch (error) {
+          if (error?.code === 'NO_TRACK') { json(res, 409, { error: 'no_track' }); return; }
+          if (error?.code === 'FFMPEG_MISSING') { json(res, 503, { error: 'video_unavailable' }); return; }
+          throw error;
+        }
+        const mp4 = await fs.promises.readFile(video.file);
+        res.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Content-Length': String(mp4.length),
+          'Cache-Control': 'no-store',
+          'Content-Disposition': `attachment; filename="oko-udalost-${event.id}.mp4"`,
+        });
+        res.end(method === 'HEAD' ? undefined : mp4);
         return;
       }
       // Zverejniť / stiahnuť / dodať stopu druhej siete: len POST z vlastnej stránky (overené vyššie).

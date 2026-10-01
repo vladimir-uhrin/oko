@@ -24,17 +24,14 @@ export function parseBorderLines(text) {
 }
 
 /**
- * @param {{dataDir: string, sharpLoader?: () => Promise<any>, readFile?: (file: string) => string}} opts
- * @returns {(event: object, format?: 'og'|'feed') => Promise<{jpeg: Buffer, width: number, height: number, format: string}>}
+ * Mapové podklady z repa (more Natural Earth, hranice 1:50m) — načítané raz, pri prvom použití.
+ * Zdieľa ich obrázok aj video udalosti.
+ * @param {{dataDir: string, readFile?: (file: string) => string}} opts
+ * @returns {() => {marine: object[], borders: number[][][]}}
  */
-export function createEventCardRenderer({
-  dataDir,
-  sharpLoader = () => import('sharp').then((m) => m.default || m),
-  readFile = (file) => fs.readFileSync(file, 'utf8'),
-} = {}) {
+export function basemapLoader({ dataDir, readFile = (file) => fs.readFileSync(file, 'utf8') } = {}) {
   let basemap = null;
-  let sharpPromise = null;
-  const loadBasemap = () => {
+  return () => {
     if (basemap) return basemap;
     let marine = [];
     let borders = [];
@@ -43,13 +40,33 @@ export function createEventCardRenderer({
     basemap = { marine, borders };
     return basemap;
   };
+}
+
+/** sharp načítaný dynamicky; neúspešné načítanie sa nepamätá — ďalší pokus to skúsi znova. */
+export function sharpOnce(sharpLoader = () => import('sharp').then((m) => m.default || m)) {
+  let sharpPromise = null;
+  return () => {
+    if (!sharpPromise) sharpPromise = sharpLoader().catch((error) => { sharpPromise = null; throw error; });
+    return sharpPromise;
+  };
+}
+
+/**
+ * @param {{dataDir: string, sharpLoader?: () => Promise<any>, readFile?: (file: string) => string}} opts
+ * @returns {(event: object, format?: 'og'|'feed') => Promise<{jpeg: Buffer, width: number, height: number, format: string}>}
+ */
+export function createEventCardRenderer({
+  dataDir,
+  sharpLoader = () => import('sharp').then((m) => m.default || m),
+  readFile = (file) => fs.readFileSync(file, 'utf8'),
+} = {}) {
+  const loadBasemap = basemapLoader({ dataDir, readFile });
+  const getSharp = sharpOnce(sharpLoader);
   return async function render(event, format = 'og') {
     const fmt = CARD_FORMATS[format] ? format : 'og';
     const { marine, borders } = loadBasemap();
     const svg = buildEventCardSvg(event, { format: fmt, marine, borders });
-    // Neúspešné načítanie sharp sa nepamätá — ďalší obrázok to skúsi znova.
-    if (!sharpPromise) sharpPromise = sharpLoader().catch((error) => { sharpPromise = null; throw error; });
-    const sharp = await sharpPromise;
+    const sharp = await getSharp();
     const jpeg = await sharp(Buffer.from(svg)).jpeg({ quality: CARD_JPEG_QUALITY }).toBuffer();
     return { jpeg, width: CARD_FORMATS[fmt].w, height: CARD_FORMATS[fmt].h, format: fmt };
   };

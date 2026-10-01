@@ -37,6 +37,7 @@ import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKe
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
+import { createEventVideoCache, createEventVideoRenderer, videoCodeVersion } from './src/data/eventVideoRender.js';
 import { resolveServerRole, roleServerOverrides, runsApiPlugins } from './scripts/lib/serverRole.mjs';
 import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
@@ -5814,6 +5815,13 @@ function flightHistoryProxy() {
         // ako trvalý odkaz /s/<id> v tom istom úložisku ako zdieľanie (retencia ho nemaže).
         renderCard: createEventCardRenderer({ dataDir: path.join(__dirname, 'src', 'data', 'local_data') }),
         shareStore: createShareStore({ dir: path.join(process.cwd(), '.gev-cache', 'share') }),
+        // Video do príspevku (2026-10-01): kreslí ho ten istý kód ako obrázok, ffmpeg (FFMPEG_PATH alebo
+        // z PATH) ho zakóduje; videá vedľa databázy (<adresár DB>/event-video), jedno na udalosť.
+        eventVideo: createEventVideoCache({
+          dir: path.join(path.dirname(cfg.dbPath), 'event-video'),
+          codeVersion: videoCodeVersion(path.join(__dirname, 'src', 'data')),
+          render: createEventVideoRenderer({ dataDir: path.join(__dirname, 'src', 'data', 'local_data') }),
+        }),
       });
       if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
         const events = flightEvents;

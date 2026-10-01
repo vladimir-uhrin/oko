@@ -56,7 +56,7 @@ const visible = (root, node) => {
   return walk(root) && path.every((n) => !n.hidden);
 };
 
-function setup({ ownerHost = false, list = null, view = null, post = null, listGate = null } = {}) {
+function setup({ ownerHost = false, list = null, view = null, post = null, listGate = null, video = null, saveFile = null } = {}) {
   const doc = fakeDoc();
   const host = doc.createElement('div');
   const existing = doc.createElement('div');
@@ -71,6 +71,7 @@ function setup({ ownerHost = false, list = null, view = null, post = null, listG
     publish: async (id) => { calls.publish.push(id); return {}; },
     unpublish: async (id) => { calls.unpublish.push(id); return {}; },
     cardUrl: (id, format = 'og') => `/api/events/${id}/card.jpg?format=${format}`,
+    ...(video ? { video } : {}),
   };
   const replay = {
     setSpeed: (x) => calls.replay.push(['speed', x]),
@@ -92,6 +93,7 @@ function setup({ ownerHost = false, list = null, view = null, post = null, listG
     openWindow: (url) => calls.opened.push(url),
     now: () => nowMs,
     setTimer: (fn, ms) => { timers.push({ fn, ms }); },
+    ...(saveFile ? { saveFile } : {}),
   });
   return { doc, host, panel, calls, state, timers, section: host.children[0], advance: (ms) => { nowMs += ms; } };
 }
@@ -275,4 +277,62 @@ test('vlastník: karta z odkazu otvorená skôr, než prišiel zoznam — kontro
   await flush();
   assert.equal(s.calls.publish.length, 0, 'klik po návrate len znova pýta potvrdenie');
   assert.equal(pub.textContent, 'events.publish-confirm');
+});
+
+test('vlastník po zverejnení: VIDEO DO PRÍSPEVKU — počas kreslenia správa a tlačidlo nereaguje, potom súbor oko-udalost-<id>.mp4; chyba sa ukáže; bez videa na serveri tlačidlo nie je', async () => {
+  const view = await fzView({ preview: false });
+  const url = 'https://okolive.sk/s/Ab12cd34EF';
+  const summary = { id: ID, icao24: '8965d1', callsign: 'FDB1073', status: 'confirmed', firstT: view.firstT, kinds: ['dive'], news: 'verified', publishable: true, published: url };
+  const post = { id: ID, publishable: true, headline: 'H', text: `Text\n\n${url}`, published: { url, shareId: 'Ab12cd34EF', t: 1 }, facebook: 'https://www.facebook.com/sharer/sharer.php?u=x', video: true };
+  let release;
+  let requests = 0;
+  const saved = [];
+  const blob = { size: 484_100, type: 'video/mp4' };
+  const s = setup({
+    ownerHost: true, view, list: { events: [summary] }, post,
+    video: async (id) => { requests += 1; assert.equal(id, ID); await new Promise((r) => { release = r; }); return blob; },
+    saveFile: (b, name) => saved.push([b, name]),
+  });
+  await flush();
+  one(s.section, 'events-review-toggle').click();
+  await flush();
+  one(s.section, 'events-review-btn').click();
+  await flush();
+  const owner = one(s.section, 'events-owner');
+  const btn = one(owner, 'events-download-video');
+  assert.equal(btn.textContent, 'events.download-video');
+  btn.click();
+  await flush();
+  assert.equal(one(owner, 'events-owner-msg').textContent, 'events.video-preparing');
+  assert.equal(btn.disabled, true);
+  btn.click();
+  await flush();
+  assert.equal(requests, 1, 'druhý klik počas kreslenia nič nespustí');
+  release();
+  await flush();
+  assert.deepEqual(saved, [[blob, `oko-udalost-${ID}.mp4`]]);
+  assert.equal(one(owner, 'events-owner-msg').textContent, 'events.video-ready');
+  assert.equal(btn.disabled, false);
+  // Chyba servera (napr. ffmpeg chýba) — správa, tlačidlo znova použiteľné.
+  s.state.post = post;
+  const failing = setup({ ownerHost: true, view, list: { events: [summary] }, post, video: async () => { throw new Error('video_unavailable'); }, saveFile: () => saved.push('nie') });
+  await flush();
+  one(failing.section, 'events-review-toggle').click();
+  await flush();
+  one(failing.section, 'events-review-btn').click();
+  await flush();
+  const fOwner = one(failing.section, 'events-owner');
+  one(fOwner, 'events-download-video').click();
+  await flush();
+  assert.equal(one(fOwner, 'events-owner-msg').textContent, 'events.error {"error":"video_unavailable"}');
+  assert.equal(one(fOwner, 'events-download-video').disabled, false);
+  assert.equal(saved.length, 1);
+  // Server bez videa (post.video = false): tlačidlo nie je.
+  const none = setup({ ownerHost: true, view, list: { events: [summary] }, post: { ...post, video: false }, video: async () => blob });
+  await flush();
+  one(none.section, 'events-review-toggle').click();
+  await flush();
+  one(none.section, 'events-review-btn').click();
+  await flush();
+  assert.equal(one(one(none.section, 'events-owner'), 'events-download-video'), undefined);
 });

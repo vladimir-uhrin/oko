@@ -137,7 +137,30 @@ export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...ar
     publish: (id) => postJson(`/api/events/${enc(id)}/publish`),
     unpublish: (id) => postJson(`/api/events/${enc(id)}/unpublish`),
     cardUrl: (id, format = 'og') => `/api/events/${enc(id)}/card.jpg?format=${format === 'feed' ? 'feed' : 'og'}`,
+    /** Video do príspevku (MP4) — prvý raz ho server kreslí ~30 s. */
+    video: async (id) => {
+      const res = await fetchImpl(`/api/events/${enc(id)}/video.mp4`, { cache: 'no-store' });
+      if (!res.ok) {
+        let body = {};
+        try { body = await res.json(); } catch { body = {}; }
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
+      return res.blob();
+    },
   };
+}
+
+/** Uloženie stiahnutého súboru (video do príspevku) cez dočasný odkaz. */
+function saveBlobFile(doc, blob, name) {
+  const url = globalThis.URL.createObjectURL(blob);
+  const a = el(doc, 'a');
+  a.href = url;
+  a.download = name;
+  a.hidden = true;
+  doc.body.appendChild(a);
+  a.click();
+  a.remove();
+  globalThis.setTimeout?.(() => globalThis.URL.revokeObjectURL(url), 60_000);
 }
 
 /**
@@ -151,6 +174,7 @@ export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...ar
  * @param {{show: Function, clear: Function, flyTo?: Function}|null} [options.markers]
  * @param {object} [options.api] defaultEventsApi() (test seam)
  * @param {boolean} [options.ownerHost] zoznam na kontrolu sa pýta len na localhoste
+ * @param {(blob: Blob, name: string) => void} [options.saveFile] uloženie stiahnutého videa (test seam)
  */
 export function installEventsPanel({
   host,
@@ -166,6 +190,7 @@ export function installEventsPanel({
   openWindow = (url) => globalThis.open?.(url, '_blank', 'noopener,noreferrer'),
   now = () => Date.now(),
   setTimer = (fn, ms) => globalThis.setTimeout?.(fn, ms),
+  saveFile = (blob, name) => saveBlobFile(doc, blob, name),
 } = {}) {
   if (!host || !doc) return null;
   const section = el(doc, 'section', 'events-section');
@@ -318,9 +343,15 @@ export function installEventsPanel({
       const image = el(doc, 'a', 'scene-btn events-download', t('events.download-image'));
       image.href = api.cardUrl(id, 'feed');
       image.download = `oko-udalost-${id}.jpg`;
+      actions.append(fb, copyLink, image);
+      if (post.video && typeof api.video === 'function') {
+        const video = button(doc, 'scene-btn events-download-video', t('events.download-video'));
+        video.addEventListener('click', () => { void downloadVideo(id, video); });
+        actions.appendChild(video);
+      }
       const withdraw = button(doc, 'scene-btn events-unpublish', t('events.unpublish'));
       withdraw.addEventListener('click', () => { void confirmThen('unpublish', withdraw, 'events.unpublish', () => api.unpublish(id)); });
-      actions.append(fb, copyLink, image, withdraw);
+      actions.appendChild(withdraw);
     } else if (post?.publishable) {
       status.textContent = t('events.ready-note');
       const pub = button(doc, 'scene-btn events-publish', t('events.publish'));
@@ -339,6 +370,22 @@ export function installEventsPanel({
       ownerMessage(t('events.copied'), 'ok');
     } catch {
       ownerMessage(t('events.copy-failed'), 'error');
+    }
+  }
+
+  /** Video do príspevku: server ho prvý raz kreslí (~30 s) — tlačidlo dovtedy nereaguje, stav v správe. */
+  async function downloadVideo(id, btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    ownerMessage(t('events.video-preparing'), 'info');
+    try {
+      const blob = await api.video(id);
+      saveFile(blob, `oko-udalost-${id}.mp4`);
+      ownerMessage(t('events.video-ready'), 'ok');
+    } catch (error) {
+      ownerMessage(t('events.error', { error: error?.message || String(error) }), 'error');
+    } finally {
+      btn.disabled = false;
     }
   }
 
