@@ -17,7 +17,11 @@
 //
 // Spustenie (beží služba oko-dev na localhoste):
 //   node scripts/capture-event-video.mjs --event <id> [--url http://localhost:4173] [--out <mp4>]
-//     [--no-upload] [--frames 0,150,300 [--frames-dir <adresár>]]
+//     [--no-upload] [--frames 0,150,300 [--frames-dir <adresár>]] [--reported <fakty.json>]
+// `--reported`: fakty zo správ (telo pre POST /api/events/<id>/reported) sa overia tým istým kódom ako
+// v službe (src/data/eventReported.js — dôveryhodné médiá, citáty, letisko z OurAirports) a použijú sa
+// namiesto uložených — keď služba novú cestu ešte nemá (vydanie oko-api), video aj tak sedí na udalosť
+// s týmito faktami (rovnaký kľúč videa).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -28,6 +32,9 @@ import { videoPlan } from '../src/data/eventVideo.js';
 import { FT_M, eventVideoScene } from '../src/data/eventVideoScene.js';
 import { VIDEO_3D_FORMAT, buildEventVideoHudSvg, inlineLogoMarkup } from '../src/data/eventVideoHud.js';
 import { VIDEO_3D_ENCODE, ffmpegArgs } from '../src/data/eventVideoRender.js';
+import { normalizeReportedFacts } from '../src/data/eventReported.js';
+import { parseTrustedList } from '../src/data/eventNews.js';
+import { parseAirportIndex } from '../src/data/airportLookup.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(root, 'package.json'));
@@ -56,6 +63,17 @@ const withTimeout = (promise, ms, what) => Promise.race([
 const res = await fetch(`${baseUrl}/api/events/${id}`);
 if (!res.ok) { console.error(`[event-video] udalosť ${id}: HTTP ${res.status}`); process.exit(1); }
 const event = await res.json();
+if (flag('--reported')) {
+  const input = JSON.parse(fs.readFileSync(path.resolve(flag('--reported')), 'utf8'));
+  const result = normalizeReportedFacts(input, {
+    event,
+    trusted: parseTrustedList(JSON.parse(fs.readFileSync(path.join(root, 'src', 'data', 'local_data', 'events', 'trusted-news.json'), 'utf8'))),
+    airportIndex: parseAirportIndex(fs.readFileSync(path.join(root, 'src', 'data', 'local_data', 'airports', 'airports.geojsonl'), 'utf8')),
+  });
+  if (result.error) { console.error(`[event-video] fakty zo správ: ${result.error} (fakt ${result.index})`); process.exit(1); }
+  event.reported = result.facts.length ? result.facts : null;
+  console.log(`[event-video] zo správ: ${result.facts.map((f) => `${f.kind} (${f.domains.join(', ')})`).join('; ') || 'nič'}`);
+}
 // Otvorenie a koncová karta so značkou OKO, okolive.sk a autorom (vlastník: „propagovať doménu aj moje meno").
 const plan = videoPlan(event, { openingS: 2.6, endCardS: 3 });
 const scene = eventVideoScene(event, plan);
@@ -117,7 +135,8 @@ async function openScene() {
   }, scene.sceneData());
 }
 
-const anchorList = Object.fromEntries(scene.gaps.map((g, i) => [`gap${i}`, g.mid]));
+// Poloha popisov na obrazovke: stred diery, letisko pristátia zo správ.
+const anchorList = scene.anchorPoints();
 async function shoot(frame) {
   const st = scene.frame(frame);
   await page.evaluate((x) => window.__okoEventVideo.apply(x), {

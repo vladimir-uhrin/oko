@@ -41,10 +41,40 @@ export function numberedMarkerImage(n, doc = globalThis.document) {
 }
 
 /**
- * @param {object} viewer Cesium Viewer
- * @param {{image?: (n: number) => string}} [deps]
+ * PNG data URL prázdneho krúžku s číslom — moment zo správ (napr. pristátie, ktoré siete nevideli):
+ * tmavá výplň, prerušovaný obrys a číslo vo farbe značiek, nech sa nezamení s meraním.
  */
-export function createEventMarkers(viewer, { image = numberedMarkerImage } = {}) {
+export function reportedMarkerImage(n, doc = globalThis.document) {
+  const key = `r${n}`;
+  if (imageCache.has(key)) return imageCache.get(key);
+  const size = 48;
+  const canvas = doc.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const g = canvas.getContext('2d');
+  g.beginPath();
+  g.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(5,14,22,0.88)';
+  g.fill();
+  g.lineWidth = 3.5;
+  g.setLineDash?.([7, 4]);
+  g.strokeStyle = EVENT_MARKER_COLOR;
+  g.stroke();
+  g.fillStyle = EVENT_MARKER_COLOR;
+  g.font = "bold 26px 'Segoe UI', Arial, sans-serif";
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(String(n), size / 2, size / 2 + 1);
+  const url = canvas.toDataURL('image/png');
+  imageCache.set(key, url);
+  return url;
+}
+
+/**
+ * @param {object} viewer Cesium Viewer
+ * @param {{image?: (n: number) => string, reportedImage?: (n: number) => string}} [deps]
+ */
+export function createEventMarkers(viewer, { image = numberedMarkerImage, reportedImage = reportedMarkerImage } = {}) {
   let added = [];
   const api = {
     /** Značky momentov (čísla 1…N v poradí momentov); predošlé zmaže. */
@@ -56,7 +86,8 @@ export function createEventMarkers(viewer, { image = numberedMarkerImage } = {})
           id: `oko-event-moment:${i + 1}`,
           position: Cesium.Cartesian3.fromDegrees(m.lon, m.lat, Math.max(0, m.alt ?? 0)),
           billboard: {
-            image: image(i + 1),
+            // Zo správ (verejný pohľad: `reported`) prázdny krúžok — nevideli ho siete.
+            image: m.reported ? reportedImage(i + 1) : image(i + 1),
             width: EVENT_MARKER_PX,
             height: EVENT_MARKER_PX,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,

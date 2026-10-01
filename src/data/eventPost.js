@@ -5,6 +5,7 @@
 // Žiadne mená ľudí (etická čiara OKO). Pure.
 
 import { clockUtc, momentPhrase } from './eventTimeline.js';
+import { descentNote, reportedForGap, reportedLandingMoments } from './eventReported.js';
 
 /** Typ udalosti podľa zhody médií → slovenský názov. */
 export const NEWS_TYPE_SK = Object.freeze({
@@ -101,16 +102,33 @@ export function flightLine(event, lang = 'sk') {
 
 /**
  * Kľúčové momenty pre príspevok a obrázok: udalosť (klesanie, kódy, obrat), diery počas nej a koniec
- * (pristátie / koniec údajov) — nie cestovná výška ani dávne diery pred udalosťou. Pure.
+ * (pristátie / koniec údajov) — nie cestovná výška ani dávne diery pred udalosťou. K tomu chýbajúce
+ * údaje zo správ (eventReported.js): pokles v diere ako poznámka k nej (`reportedNotes`) a pristátie,
+ * ktoré siete nevideli, ako vlastný moment `reported-landing` (keď dáta pristátie majú, platia dáta). Pure.
  */
 export function keyMoments(event) {
   const from = (event.firstT ?? 0) - 15 * 60;
   const to = (event.lastT ?? event.firstT ?? 0) + 90 * 60;
-  return (event.timeline || []).filter((m) => {
+  const base = (event.timeline || []).filter((m) => {
     if (m.kind === 'cruise' || m.kind === 'takeoff') return false;
     if (m.kind === 'landing' || m.kind === 'last-contact') return true;
     return m.t >= from && m.t <= to;
+  }).map((m) => {
+    if (m.kind !== 'gap') return m;
+    const notes = reportedForGap(event, m);
+    return notes.length ? { ...m, reportedNotes: notes } : m;
   });
+  if (base.some((m) => m.kind === 'landing')) return base;
+  const landed = reportedLandingMoments(event).filter((m) => !base.length || m.t >= base[base.length - 1].t);
+  return [...base, ...landed];
+}
+
+/** Médiá, z ktorých je moment alebo jeho poznámka (pristátie, pokles v diere zo správ). Pure. */
+export function momentMedia(m) {
+  const facts = m?.reported ? [m.reported] : (Array.isArray(m?.reportedNotes) ? m.reportedNotes : []);
+  const seen = new Map();
+  for (const f of facts) for (const s of f.sources || []) if (!seen.has(s.domain)) seen.set(s.domain, { name: outletName(s.domain), domain: s.domain, url: s.url });
+  return [...seen.values()];
 }
 
 /**
@@ -177,6 +195,9 @@ export function publicEventView(event) {
       alt: finiteOr(m.alt),
       seenBy: (m.seenBy || []).filter((id) => NETWORK_NAMES[id]),
       text: { sk: momentPhrase(m, 'sk'), en: momentPhrase(m, 'en') },
+      // Zo správ (nie z dát sietí): médiá s odkazmi pri momente.
+      reported: Boolean(m.reported || m.reportedNotes?.length),
+      media: momentMedia(m),
     })),
     news: sources.length
       ? { type: event.news.type ?? null, sources: sources.map((s) => ({ name: outletName(s.domain), domain: s.domain, url: s.url })) }
@@ -243,7 +264,15 @@ export function postText(event, { url = null } = {}) {
   for (const m of keyMoments(event)) {
     const nets = (m.seenBy || []).filter((id) => NETWORK_NAMES[id]);
     const only = nets.length === 1 ? ` (len sieť ${NETWORK_NAMES[nets[0]]})` : '';
-    lines.push(`• ${clockUtc(m.t).slice(0, 5)} — ${momentPhrase(m, 'sk')}${only}`);
+    // Zo správ: pri každom tvrdení médiá, ktoré ho uvádzajú (odkazy sú nižšie pri médiách).
+    const names = (domains) => [...new Set(domains)].map(outletName).join(', ');
+    const notes = (m.reportedNotes || []).map((f) => ` — ${descentNote(f, 'sk', names(f.domains))}`).join('');
+    const by = m.reported ? ` (${names(m.reported.domains)})` : '';
+    lines.push(`• ${clockUtc(m.t).slice(0, 5)} — ${momentPhrase(m, 'sk', { notes: false })}${notes}${by}${only}`);
+  }
+  // Úvod hovorí o sieťach prijímačov — body zo správ nimi nie sú, povedať to rovno.
+  if (keyMoments(event).some((m) => m.reported || m.reportedNotes?.length)) {
+    lines.push('Údaje „podľa správ" siete prijímačov nezachytili — uvádzajú ich médiá pri každom bode.');
   }
   const trusted = verifiedSources(event);
   if (trusted.length) {
@@ -251,7 +280,9 @@ export function postText(event, { url = null } = {}) {
     const about = event.news.type ? ` ${NEWS_TYPE_SK_ABOUT[event.news.type]}` : '';
     lines.push('');
     lines.push(`Médiá (${names.join(', ')}) informujú${about}.`);
-    for (const t of trusted.slice(0, 3)) lines.push(t.url);
+    // Odkazy: overujúce články, potom články, z ktorých sú doplnené údaje (bez opakovania, najviac 3).
+    const links = [...new Set([...trusted.map((t) => t.url), ...keyMoments(event).flatMap((m) => momentMedia(m).map((s) => s.url))])];
+    for (const u of links.slice(0, 3)) lines.push(u);
   }
   lines.push('');
   if (url) lines.push(`Rekonštrukcia letu na mape: ${url}`);

@@ -150,3 +150,48 @@ test('prechody po sebe: otvorenie dozneje skôr, než nastúpi hlavička; súhrn
     assert.ok(!(L.summary > 0 && L.endCard > 0), `snímka ${f}: súhrn ${L.summary} a koncová karta ${L.endCard} naraz`);
   }
 });
+
+test('doplnené zo správ (FZ1073): pri diere „PODĽA SPRÁV · ÚDAJE FLIGHTRADAR24 / pod 17 000 ft už o 05:22 / médiá"; pri letisku čas zo správy, štítok PODĽA SPRÁV, žiadna nameraná výška; súhrn s prázdnym krúžkom', async () => {
+  const { fz1073ReportedEvent } = await import('./fixtures/flightEventFixtures.mjs');
+  const { e: base } = await fz();
+  const e = await fz1073ReportedEvent(base);
+  const plan = videoPlan(e);
+  const scene = eventVideoScene(e, plan);
+  const ms = keyMoments(e);
+  const idx = ms.findIndex((m) => m.kind === 'reported-landing');
+  const anchors = { gap0: { x: 500, y: 600 }, [`reported${idx}`]: { x: 420, y: 700 } };
+  // Diera: poznámka zo správ s tým, kto meral, a médiami — v ráme nad kartou letu.
+  const gapFrame = framesOf(plan, scene.gaps[0].piece)[0] + 3;
+  const gsvg = buildEventVideoHudSvg(e, scene, scene.frame(gapFrame), anchors);
+  const gt = texts(gsvg);
+  assert.ok(gt.includes('PODĽA SPRÁV · ÚDAJE FLIGHTRADAR24'), gt.join(' | '));
+  assert.ok(gt.includes('pod 17 000 ft už o 05:22'));
+  assert.ok(gt.includes('Al Jazeera, Arab News'));
+  const box = /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="(\d+)" rx="10" fill="rgba\(7,19,31,0.88\)"/.exec(gsvg);
+  const [x, y, w, h] = box.slice(1).map(Number);
+  assert.ok(x >= 20 && x + w <= VIDEO_3D_FORMAT.w - 20 && y >= 200 && y + h <= 930, `nápis diery v ráme nad kartou (${x}, ${y}, ${w}×${h})`);
+  // Zastavenie na pristátí zo správ.
+  const piece = plan.pieces.find((p) => p.phase === 'reported');
+  const f = scene.frame(framesOf(plan, piece)[0] + 20);
+  const svg = buildEventVideoHudSvg(e, scene, f, anchors);
+  const t = texts(svg);
+  assert.ok(t.includes('PODĽA SPRÁV'), 'štítok PODĽA SPRÁV');
+  assert.ok(!t.includes('KONIEC ÚDAJOV'), 'nie „koniec údajov" pri správe');
+  assert.ok(t.includes('06:45 UTC'), 'hodiny bez sekúnd (čas zo správy je na minúty)');
+  assert.ok(t.includes('06:45 UTC · PODĽA SPRÁV'));
+  assert.ok(t.includes('Núdzové pristátie na letisku Tabuk (TUU)'));
+  assert.ok(t.includes('Arab News, Al Jazeera'));
+  assert.equal(readoutFt(f, ms), null);
+  assert.ok(t.includes('—'), 'výška na karte nenameraná');
+  assert.ok(t.some((l) => l.startsWith('06:45 núdzové pristátie')), 'karta letu: aktuálny moment');
+  assert.ok(svg.includes(`stroke-dasharray="5 3"/><text x="420" y="1108" text-anchor="middle" font-size="20" font-weight="700" fill="#ffb020">${idx + 1}</text>`), 'číslo v prázdnom krúžku');
+  // Súhrn: pristátie zo správ s prázdnym krúžkom, diera bez poznámky (miesto).
+  const end = buildEventVideoHudSvg(e, scene, scene.frame(plan.totalFrames - 1), anchors);
+  const et = texts(end);
+  assert.ok(et.includes('06:45 núdzové pristátie na letisku Tabuk (TUU) — podľa správ'));
+  assert.ok(et.some((l) => /^05:22 9 min bez údajov$/.test(l)), et.join(' | '));
+  assert.ok(end.includes('stroke-dasharray="4 3"/><text x="66"'));
+  // Bez správ nikde „podľa správ".
+  const { e: pe, plan: pp, scene: ps } = await fz();
+  for (const fr of [0, Math.round(pp.totalFrames / 2), pp.totalFrames - 1]) assert.ok(!texts(hud(pe, ps, fr)).some((l) => /PODĽA SPRÁV|podľa správ/.test(l)));
+});

@@ -5824,6 +5824,8 @@ function flightHistoryProxy() {
         }),
         // 3D video v štýle OKO nahraté skriptom scripts/capture-event-video.mjs (tlačidlo VIDEO DO PRÍSPEVKU).
         videoStore: createEventVideoStore({ dir: path.join(path.dirname(cfg.dbPath), 'event-video', '3d') }),
+        // Pristátie zo správ (POST /api/events/<id>/reported): poloha letiska z OurAirports.
+        airportsFile: path.join(__dirname, 'src', 'data', 'local_data', 'airports', 'airports.geojsonl'),
       });
       if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
         const events = flightEvents;

@@ -240,3 +240,16 @@ test('3D video na disku: uloží sa len MP4, platí pre presne tie údaje, star�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('3D video: doplnené fakty zo správ menia kľúč (video ich ukazuje); bez faktov kľúč ako doteraz — staršie videá ostávajú platné', () => {
+  const e = { ...uturnEvent('aaaaaa-20260922T1320'), news: { status: 'verified', type: null, trusted: [{ domain: 'jta.org' }] } };
+  const k = videoEventKey(e);
+  assert.equal(videoEventKey({ ...e, reported: null }), k);
+  assert.equal(videoEventKey({ ...e, reported: [] }), k);
+  const landing = { kind: 'landing', t: 100, airport: { icao: 'OETB' }, domains: ['arabnews.com', 'aljazeera.com'], sources: [{ quote: 'a' }] };
+  const k1 = videoEventKey({ ...e, reported: [landing] });
+  assert.notEqual(k1, k, 'pristátie zo správ');
+  assert.notEqual(videoEventKey({ ...e, reported: [{ ...landing, t: 160 }] }), k1, 'iný čas zo správy');
+  assert.notEqual(videoEventKey({ ...e, reported: [{ ...landing, airport: { icao: 'OEJN' } }] }), k1, 'iné letisko');
+  assert.equal(videoEventKey({ ...e, reported: [{ ...landing, sources: [{ quote: 'b' }] }] }), k1, 'iný citát video nemení');
+});

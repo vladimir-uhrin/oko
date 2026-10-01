@@ -758,3 +758,38 @@ test('video do príspevku: 3D video nahrá skript len z tohto počítača (vlast
     h.cleanup();
   }
 });
+
+test('chýbajúce údaje zo správ (FZ1073 → Tabuk): zápis len z tohto počítača; neoverený zdroj sa odmietne celý; text príspevku ich ukáže; nové spracovanie ich nezmaže; prázdny zoznam ich zmaže', async () => {
+  const { FZ1073_REPORTED_INPUT } = await import('./fixtures/flightEventFixtures.mjs');
+  const { oko } = fz1073();
+  const trusted = ['arabnews.com', 'aljazeera.com', 'reuters.com'];
+  const h = harness({ startMs: Date.parse('2026-10-01T06:00:00Z'), tracks: { '8965d1': oko.map((p) => row(p)) }, trusted });
+  try {
+    const service = h.make({ airportsFile: fileURLToPath(new URL('./local_data/airports/airports.geojsonl', import.meta.url)) });
+    const id = (await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1')).json.id;
+    const body = JSON.parse(JSON.stringify(FZ1073_REPORTED_INPUT));
+    assert.equal((await call(service, `/${id}/reported`, false, { ...OWN_POST, body })).status, 404, 'z verejnej adresy vôbec nie');
+    assert.equal((await call(service, `/${id}/reported`, true, { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' }, body })).status, 403);
+    const blog = JSON.parse(JSON.stringify(body));
+    blog.facts[0].sources[1].url = 'https://blog.example.com/fz1073';
+    const refused = await call(service, `/${id}/reported`, true, { ...OWN_POST, body: blog });
+    assert.deepEqual([refused.status, refused.json.error, refused.json.index], [400, 'untrusted_source', 0]);
+    assert.equal(service.store.get(id).reported ?? null, null, 'odmietnuté sa neuložilo ani napoly');
+    const ok = await call(service, `/${id}/reported`, true, { ...OWN_POST, body });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.deepEqual(ok.json.reported.map((f) => f.kind), ['descent', 'landing']);
+    const saved = service.store.get(id);
+    assert.equal(saved.reported[1].airport.icao, 'OETB', 'letisko z OurAirports');
+    const post = await call(service, `/${id}/post`);
+    assert.ok(post.json.text.includes('— núdzové pristátie na letisku Tabuk (TUU) — podľa správ (Arab News, Al Jazeera)'), post.json.text);
+    // Nové spracovanie udalosti (ručná analýza s uložením) fakty zo správ nezmaže.
+    await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    assert.equal(service.store.get(id).reported.length, 2);
+    // Prázdny zoznam = zmazať.
+    assert.equal((await call(service, `/${id}/reported`, true, { ...OWN_POST, body: { facts: [] } })).status, 200);
+    assert.equal(service.store.get(id).reported, null);
+    assert.ok(h.logs.some((l) => l.includes('doplnené zo správ: descent (aljazeera.com, arabnews.com); landing (arabnews.com, aljazeera.com)')), h.logs.join('\n'));
+  } finally {
+    h.cleanup();
+  }
+});

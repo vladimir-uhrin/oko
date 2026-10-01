@@ -63,3 +63,11 @@ test('prelet: zvisle nadol nad momentmi udalosti; bez polohy žiadny prelet', ()
   assert.equal(markers.flyTo({ moments: [], track: [] }), false);
   assert.equal(viewer.flights.length, 1);
 });
+
+test('moment zo správ (verejný pohľad `reported`, napr. pristátie, ktoré siete nevideli): prázdna značka, rovnaké číslo', () => {
+  const viewer = fakeViewer();
+  const markers = createEventMarkers(viewer, { image: (n) => `img-${n}`, reportedImage: (n) => `news-${n}` });
+  markers.show([{ lat: 29.1, lon: 39.2, alt: 9853 }, { lat: 28.37, lon: 36.62, alt: null, reported: true }]);
+  assert.deepEqual(viewer.entities.list.map((e) => [e.id, e.billboard.image]), [['oko-event-moment:1', 'img-1'], ['oko-event-moment:2', 'news-2']]);
+  assert.ok(Math.abs(Cesium.Cartographic.fromCartesian(viewer.entities.list[1].position).height) < 1e-3, 'bez nameranej výšky na zemi');
+});

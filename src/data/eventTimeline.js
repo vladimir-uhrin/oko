@@ -7,6 +7,7 @@
 
 import { FPM_PER_MPS, dataGaps, flightPhases, uTurns } from './flightAnomalies.js';
 import { VERIFY_TOLERANCE_S } from './eventVerify.js';
+import { descentNote, landingPhrase } from './eventReported.js';
 
 const byTime = (a, b) => a.t - b.t;
 const overlaps = (a, b) => a.startT <= b.endT + VERIFY_TOLERANCE_S && b.startT <= a.endT + VERIFY_TOLERANCE_S;
@@ -99,9 +100,10 @@ const TEXT = {
     dive: (m) => `strmhlavé klesanie ${group(Math.abs(m.fpm), 'sk')} ft/min vo výške ${group(ft(m.alt), 'sk')} ft`,
     squawk: (m) => `transpondér vysiela ${m.code} (${{ hijack: 'nezákonný zásah', radio: 'strata spojenia', emergency: 'núdza' }[m.meaning] || 'núdzový kód'})`,
     uturn: (m) => `obrat o ${Math.round(Math.abs(m.turnDeg))}° ${m.turnDeg > 0 ? 'doprava' : 'doľava'}`,
-    gap: (m) => `${Math.round(m.s / 60)} min bez údajov`,
+    gap: (m, notes) => `${Math.round(m.s / 60)} min bez údajov${notes ? gapNotes(m, 'sk') : ''}`,
     landing: () => 'pristátie',
     'last-contact': (m) => (m.airborne ? `koniec údajov vo výške ${group(ft(m.alt), 'sk')} ft` : 'posledný záznam na zemi'),
+    'reported-landing': (m) => `${landingPhrase(m.reported, 'sk')} — podľa správ`,
   },
   en: {
     takeoff: () => 'takeoff',
@@ -109,16 +111,26 @@ const TEXT = {
     dive: (m) => `steep descent of ${group(Math.abs(m.fpm), 'en')} ft/min at ${group(ft(m.alt), 'en')} ft`,
     squawk: (m) => `transponder squawks ${m.code} (${{ hijack: 'unlawful interference', radio: 'radio failure', emergency: 'emergency' }[m.meaning] || 'emergency code'})`,
     uturn: (m) => `${Math.round(Math.abs(m.turnDeg))}° turn to the ${m.turnDeg > 0 ? 'right' : 'left'}`,
-    gap: (m) => `no data for ${Math.round(m.s / 60)} min`,
+    gap: (m, notes) => `no data for ${Math.round(m.s / 60)} min${notes ? gapNotes(m, 'en') : ''}`,
     landing: () => 'landing',
     'last-contact': (m) => (m.airborne ? `data ends at ${group(ft(m.alt), 'en')} ft` : 'last record on the ground'),
+    'reported-landing': (m) => `${landingPhrase(m.reported, 'en')} — per reports`,
   },
 };
 
-/** Čo sa v momente stalo, bez času a sietí: „strmhlavé klesanie 21 319 ft/min vo výške …". Pure. */
-export function momentPhrase(m, lang = 'sk') {
+/** Poznámky zo správ k diere (eventPost.keyMoments ich pripojí ako `reportedNotes`). */
+function gapNotes(m, lang) {
+  const list = Array.isArray(m.reportedNotes) ? m.reportedNotes : [];
+  return list.map((f) => ` — ${descentNote(f, lang)}`).join('');
+}
+
+/**
+ * Čo sa v momente stalo, bez času a sietí: „strmhlavé klesanie 21 319 ft/min vo výške …". Pure.
+ * @param {{notes?: boolean}} [opts] notes = poznámky zo správ k diere (vo videu má diera vlastný nápis)
+ */
+export function momentPhrase(m, lang = 'sk', { notes = true } = {}) {
   const dict = TEXT[lang] || TEXT.sk;
-  return (dict[m.kind] || (() => m.kind))(m);
+  return (dict[m.kind] || (() => m.kind))(m, notes);
 }
 
 /** Jeden riadok časovej osi: „05:22:05 UTC — strmhlavé klesanie … (OpenSky, adsb.lol)". Pure. */

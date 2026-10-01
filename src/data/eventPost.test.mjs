@@ -85,3 +85,39 @@ test('verejný pohľad: SK aj EN texty, momenty so súradnicami, médiá menom a
   assert.equal(meta.description, 'Overené dvoma nezávislými sieťami prijímačov (OpenSky, adsb.lol) a médiami (JTA, The Jerusalem Post, The Guardian, Arab News). Rekonštrukcia letu na mape OKO.');
   assert.equal(facebookShareUrl('https://okolive.sk/s/Ab12cd34EF'), 'https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fokolive.sk%2Fs%2FAb12cd34EF');
 });
+
+test('doplnené zo správ (FZ1073): pristátie v Tabuku ako posledný moment „podľa správ" s médiami, pokles podľa Flightradar24 pri diere; dáta sietí sa nemenia', async () => {
+  const { fz1073ReportedEvent } = await import('./fixtures/flightEventFixtures.mjs');
+  const plain = await fz1073Event();
+  const e = await fz1073ReportedEvent(plain);
+  const ms = keyMoments(e);
+  assert.deepEqual(ms.map((m) => m.kind), ['dive', 'gap', 'squawk', 'squawk', 'uturn', 'last-contact', 'reported-landing'], 'pristátie zo správ až po konci údajov');
+  const landing = ms.at(-1);
+  assert.deepEqual(landing.seenBy, [], 'pristátie žiadna sieť nevidela');
+  const gap = ms.find((m) => m.kind === 'gap');
+  assert.equal(gap.reportedNotes.length, 1, 'pokles 05:21–05:22 pri diere');
+  // Momenty z dát sú tie isté ako bez správ (nič sa nedopočítalo).
+  assert.deepEqual(ms.slice(0, 6).map(({ reportedNotes, ...m }) => m), keyMoments(plain));
+  const lines = postText(e).split('\n');
+  assert.ok(lines.includes('• 06:45 — núdzové pristátie na letisku Tabuk (TUU) — podľa správ (Arab News, Al Jazeera)'), lines.join('\n'));
+  assert.ok(lines.some((l) => l.startsWith('• 05:22 — 9 min bez údajov — podľa správ pod 17 000 ft už o 05:22 (údaje Flightradar24 podľa Al Jazeera, Arab News)')), lines.join('\n'));
+  assert.equal(lines.filter((l) => l.startsWith('https://')).length, 3, 'stále najviac 3 odkazy');
+  const honest = 'Údaje „podľa správ" siete prijímačov nezachytili — uvádzajú ich médiá pri každom bode.';
+  assert.equal(lines[lines.indexOf('• 06:45 — núdzové pristátie na letisku Tabuk (TUU) — podľa správ (Arab News, Al Jazeera)') + 1], honest, 'hneď za zoznamom');
+  assert.ok(!postText(plain).includes(honest), 'bez správ táto veta nie je');
+  // Pristátie, ktoré videli dáta, má prednosť pred správou.
+  const landed = { ...e, timeline: [...e.timeline.filter((m) => m.kind !== 'last-contact'), { kind: 'landing', t: e.lastT + 3000, lat: 28.37, lon: 36.62, seenBy: ['opensky'] }] };
+  assert.ok(!keyMoments(landed).some((m) => m.kind === 'reported-landing'));
+  // Verejný pohľad: moment zo správ označený, médiá s odkazmi; EN text.
+  const v = publicEventView(e);
+  const vl = v.moments.at(-1);
+  assert.equal(vl.reported, true);
+  assert.equal(vl.text.en, 'emergency landing at Tabuk (TUU) — per reports');
+  assert.deepEqual(vl.media.map((s) => s.name), ['Arab News', 'Al Jazeera']);
+  assert.ok(vl.media.every((s) => s.url.startsWith('https://')));
+  assert.equal(v.moments.find((m) => m.kind === 'dive').reported, false);
+  assert.ok(v.moments.find((m) => m.kind === 'gap').text.sk.includes('podľa správ pod 17 000 ft už o 05:22'));
+  // Záber odkazu zahrnie aj letisko pristátia.
+  const hash = new URLSearchParams(eventShareHash(e));
+  assert.ok(Number(hash.get('lat')) < 30.2, 'stred záberu posunutý k Tabuku');
+});

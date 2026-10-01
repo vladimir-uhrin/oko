@@ -91,3 +91,71 @@ export async function fz1073Event() {
     },
   };
 }
+
+/**
+ * Chýbajúce údaje FZ1073 zo správ (2026-10-01, vlastník: „vydolovať chýbajúce dáta"): telo pre
+ * POST /api/events/<id>/reported. Citáty sú presné vety článkov, overené na živých stránkach
+ * 2026-10-01 (Arab News: aktualizácia 30. 9. 23:01). Čas pristátia 9:45 miestneho času (UTC+3) = 06:45 UTC.
+ */
+export const FZ1073_REPORTED_INPUT = Object.freeze({
+  facts: [
+    {
+      kind: 'landing',
+      airport: 'OETB',
+      t: '2026-09-30T06:45:00Z',
+      emergency: true,
+      via: { sk: 'letisko Tabuk', en: 'Tabuk airport' },
+      sources: [
+        {
+          url: 'https://www.arabnews.com/middle-east/diverted-flydubai-flight-not-a-kidnapping-israeli-pm-confirms-3003843',
+          quote: 'Prince Sultan Bin Abdel Aziz Airport in Tabuk confirmed that the FlyDubai plane made an emergency landing this morning at 9:45 a.m. local time in Saudi Arabia.',
+          time: true,
+        },
+        {
+          url: 'https://www.aljazeera.com/news/2026/9/30/flydubai-flight-to-israel-diverted-to-saudi-arabia-after-emergency-alert',
+          quote: 'The plane transmitted an emergency alert shortly after takeoff on Wednesday, making an emergency landing in Saudi Arabia’s Tabuk airport with all passengers safe and accounted for, according to the airline.',
+        },
+      ],
+    },
+    {
+      kind: 'descent',
+      fromT: '2026-09-30T05:21:00Z',
+      t: '2026-09-30T05:22:00Z',
+      fromFt: 34000,
+      toFt: 17000,
+      fromNearly: true,
+      toBelow: true,
+      via: { sk: 'Flightradar24', en: 'Flightradar24' },
+      sources: [
+        {
+          url: 'https://www.aljazeera.com/news/2026/9/30/flydubai-flight-to-israel-diverted-to-saudi-arabia-after-emergency-alert',
+          quote: 'According to data from the Flightradar24 website, the aircraft suddenly lost altitude during the flight, dropping from nearly 34,000 feet (more than 10,000 metres) at 05:21 GMT to less than 17,000 feet (5,100 metres) at 05:22 GMT.',
+          time: true,
+        },
+        {
+          url: 'https://www.arabnews.com/middle-east/diverted-flydubai-flight-not-a-kidnapping-israeli-pm-confirms-3003843',
+          quote: 'According to Flightradar24, the Boeing 737 MAX 8 aircraft descended from around 10,000 meters to 5,100 meters in about the space of a minute, before making an erratic circle close to the Jordanian border.',
+        },
+      ],
+    },
+  ],
+});
+
+/** Dôveryhodné médiá a letiská OurAirports z repozitára (tie isté súbory ako služba). */
+export async function reportedContext() {
+  const { parseTrustedList } = await import('../eventNews.js');
+  const { parseAirportIndex } = await import('../airportLookup.js');
+  return {
+    trusted: parseTrustedList(JSON.parse(readFileSync(new URL('../local_data/events/trusted-news.json', import.meta.url), 'utf8'))),
+    airportIndex: parseAirportIndex(readFileSync(new URL('../local_data/airports/airports.geojsonl', import.meta.url), 'utf8')),
+  };
+}
+
+/** FZ1073 s doplnenými faktami zo správ (pristátie v Tabuku, pokles podľa Flightradar24). */
+export async function fz1073ReportedEvent(base = null) {
+  const { normalizeReportedFacts } = await import('../eventReported.js');
+  const event = base || await fz1073Event();
+  const result = normalizeReportedFacts(FZ1073_REPORTED_INPUT, { event, ...(await reportedContext()) });
+  if (result.error) throw new Error(`fixtúra faktov: ${result.error}`);
+  return { ...event, reported: result.facts };
+}

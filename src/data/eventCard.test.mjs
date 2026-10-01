@@ -114,3 +114,26 @@ test('JPEG cez sharp: og 1200×630 aj feed 1080×1350, pod limitom zdieľania 40
     assert.ok(jpg.length < 400 * 1024, `${format} ${jpg.length} B`);
   }
 });
+
+test('obrázok s pristátím zo správ (FZ1073 → Tabuk): letisko je na mape, značka prázdna (nevideli ju siete), bez čiary k stope; zoznam „podľa správ"', async () => {
+  const { fz1073ReportedEvent } = await import('./fixtures/flightEventFixtures.mjs');
+  const e = await fz1073ReportedEvent(await fzCardEvent());
+  for (const format of ['og', 'feed']) {
+    const svg = buildEventCardSvg(e, { format });
+    const hollow = [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="[\d.]+" fill="[^"]+" fill-opacity="0.85" stroke="[^"]+" stroke-width="2.5" stroke-dasharray="4 3"\/>/g)];
+    assert.equal(hollow.length, 1, `${format}: jedna prázdna značka zo správ`);
+    const [cx, cy] = [Number(hollow[0][1]), Number(hollow[0][2])];
+    const map = format === 'feed' ? { w: 1080, h: 640 - 30 } : { w: 720, h: 630 - 118 - 30 };
+    assert.ok(cx > 0 && cx < map.w && cy > 0 && cy < map.h, `${format}: značka Tabuku v mape nad grafom (${cx}, ${cy})`);
+    assert.ok(svg.includes('>7</text>'), `${format}: siedmy moment = pristátie zo správ`);
+    assert.ok(svg.includes('podľa správ'), `${format}: zoznam hovorí „podľa správ"`);
+    // Trasa sa nedokresľuje: stopa končí na poslednom meraní (žiadna čiara k Tabuku).
+    const paths = [...svg.matchAll(/<path d="([^"]+)" fill="none" stroke="[^"]+" stroke-width="3.2"/g)].map((m) => m[1]);
+    const ends = paths.join(' ').match(/[\d.]+ [\d.]+/g).map((p) => p.split(' ').map(Number));
+    assert.ok(!ends.some(([x, y]) => Math.hypot(x - cx, y - cy) < 6), `${format}: žiadna čiara stopy nekončí na letisku zo správ`);
+  }
+  // Bez faktov zo správ ostáva obrázok rovnaký ako doteraz (6 momentov, výrez len zo stopy a trasy).
+  const plain = buildEventCardSvg(await fzCardEvent(), { format: 'og' });
+  assert.ok(!plain.includes('>7</text>'));
+  assert.ok(!plain.includes('stroke-dasharray="4 3"/>'));
+});

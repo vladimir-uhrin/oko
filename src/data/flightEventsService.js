@@ -25,6 +25,8 @@ import { fixFromCompact } from './flightHistory.js';
 import { verifyEvent } from './eventVerify.js';
 import { buildEventTimeline, describeMoment } from './eventTimeline.js';
 import { NEWS_WINDOW_AFTER_S, NEWS_WINDOW_BEFORE_S, flightIdentity, newsQuery, newsUrl, newsVerdict, parseTrustedList } from './eventNews.js';
+import { normalizeReportedFacts } from './eventReported.js';
+import { parseAirportIndex } from './airportLookup.js';
 import { simplifyTrack } from './eventCard.js';
 import { VIDEO_UPLOAD_MAX_BYTES, isMp4 } from './eventVideoRender.js';
 import { eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, isPublishable, postText, publicEventView } from './eventPost.js';
@@ -71,6 +73,8 @@ export const RECHECK_MAX_TRIES = 24;
 export const STORED_TRACE_MAX_POINTS = 20_000;
 /** Ručne dodaná stopa (readsb JSON z adsb.lol) najviac 16 MB. */
 export const TRACE_IMPORT_MAX_BYTES = 16 * 1024 * 1024;
+/** Fakty zo správ (citáty a odkazy, eventReported.js) — malé telo. */
+export const REPORTED_MAX_BYTES = 64 * 1024;
 
 const roundTo = (v, k) => (Number.isFinite(v) ? Math.round(v * k) / k : null);
 /** Body druhej siete na uloženie k udalosti — kompaktné riadky. Pure. */
@@ -107,7 +111,7 @@ export const EVENTS_PUBLIC_ORIGIN = 'https://okolive.sk';
 const EVENT_ID = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
 const EVENT_ID_PART = '[0-9a-f]{6}-\\d{8}T\\d{4}';
 const PUBLIC_ROUTE = new RegExp(`^/public/(${EVENT_ID_PART})$`);
-const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|post|publish|unpublish|second-network))?$`);
+const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|post|publish|unpublish|second-network|reported))?$`);
 /** Stopa na obrázok: body sietí, ktoré sú v atribúcii (OpenSky + adsb.lol), aj z druhej siete. */
 const DRAWN_SRC = (src) => src === PRIMARY_SRC || String(src || '').startsWith('adsb.lol');
 
@@ -267,7 +271,8 @@ export function trustedNewsLoader(file) {
  *   trustedFile?:string, renderCard?:((event:object, format?:string) => Promise<{jpeg:Buffer, width:number, height:number}>)|null,
  *   shareStore?:{save:Function, read:Function, remove:Function}|null, publicOrigin?:string,
  *   eventVideo?:{get:(event:object) => Promise<{file:string, cached:boolean}>}|null,
- *   videoStore?:{find:(event:object) => {file:string}|null, save:(event:object, buf:Buffer) => {file:string, bytes:number}}|null}} opts
+ *   videoStore?:{find:(event:object) => {file:string}|null, save:(event:object, buf:Buffer) => {file:string, bytes:number}}|null,
+ *   airportsFile?:string|null}} opts `airportsFile` = airports.geojsonl (OurAirports) pre pristátie zo správ
  *   `videoStore` = createEventVideoStore (3D video v štýle OKO nahraté skriptom capture-event-video.mjs —
  *   to dostane vlastník tlačidlom); `eventVideo` = createEventVideoCache (2D video „karta" na požiadanie,
  *   `video.mp4?style=karta`)
@@ -287,10 +292,19 @@ export function createFlightEventsService({
   publicOrigin = EVENTS_PUBLIC_ORIGIN,
   eventVideo = null,
   videoStore = null,
+  airportsFile = null,
 } = {}) {
   const store = fileEventStore(eventsDir);
   store.load();
   const trustedNews = trustedFile ? trustedNewsLoader(trustedFile) : () => [];
+  /** Letiská OurAirports (kód → poloha) pre pristátie zo správ — načítajú sa až pri prvom zápise faktov. */
+  let airportIndex = null;
+  const airports = () => {
+    if (!airportIndex) {
+      try { airportIndex = airportsFile ? parseAirportIndex(fs.readFileSync(airportsFile, 'utf8')) : new Map(); } catch { airportIndex = new Map(); }
+    }
+    return airportIndex;
+  };
   let lastNewsMs = 0;
   let newsBlockedUntil = 0;
   /** @type {Map<string, {icao24:string, firstT:number, lastT:number, count:number, processedAt:number|null, finalAt:number|null}>} */
@@ -530,7 +544,20 @@ export function createFlightEventsService({
       news: event.news ?? prev?.news ?? null,
       published: event.published ?? prev?.published ?? null,
       secondNetworkTrace: event.secondNetworkTrace ?? prev?.secondNetworkTrace ?? null,
+      reported: event.reported ?? prev?.reported ?? null,
     });
+  }
+
+  /**
+   * Chýbajúce údaje zo správ (eventReported.js): fakty s citátmi z dôveryhodných médií nahradia
+   * predošlé (prázdny zoznam ich zmaže). Dáta sietí sa nemenia — fakty sú vždy označené „podľa správ".
+   */
+  function saveReported(event, body) {
+    const result = normalizeReportedFacts(body, { event, trusted: trustedNews(), airportIndex: airports() });
+    if (result.error) return { status: 400, body: { error: result.error, index: result.index ?? null } };
+    store.save({ ...event, reported: result.facts.length ? result.facts : null, reportedT: Math.floor(now() / 1000) });
+    log(`[events] ${event.id} ${event.callsign || ''} doplnené zo správ: ${result.facts.map((f) => `${f.kind} (${f.domains.join(', ')})`).join('; ') || 'nič'}`);
+    return { status: 200, body: { id: event.id, reported: result.facts } };
   }
 
   /** Predošlá udalosť toho istého lietadla v okne (podľa id, inak prekryvom okna) — kvôli uloženej stope. */
@@ -908,6 +935,18 @@ export function createFlightEventsService({
         }
         const imported = await importSecondNetwork(event, body);
         json(res, imported.status, imported.body);
+        return;
+      }
+      if (action === 'reported') {
+        let body;
+        try {
+          body = await readJsonBody(req, REPORTED_MAX_BYTES);
+        } catch (error) {
+          json(res, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: error?.code === 'BODY_TOO_LARGE' ? 'too_large' : 'bad_json' });
+          return;
+        }
+        const saved = saveReported(event, body);
+        json(res, saved.status, saved.body);
         return;
       }
       const result = action === 'publish' ? await publish(event) : unpublish(event);

@@ -297,3 +297,41 @@ test('otvorenie a koncová karta (3D video): na začiatku a na konci, čas udalo
   const end = plan.at(plan.totalFrames - 1);
   assert.deepEqual([end.phase, end.t, end.current, end.showAll], ['endcard', plan.t1, null, true]);
 });
+
+test('pristátie zo správ (FZ1073 → Tabuk): po konci údajov vlastné zastavenie s časom zo správy, potom záver; let sa nedopočíta, bez správ plán rovnaký', async () => {
+  const { fz1073ReportedEvent } = await import('./fixtures/flightEventFixtures.mjs');
+  const plainEvent = await fzCardEvent();
+  const e = await fz1073ReportedEvent(await fzCardEvent());
+  const plain = videoPlan(plainEvent);
+  const plan = videoPlan(e);
+  assert.ok(!plain.pieces.some((p) => p.phase === 'reported'), 'bez správ žiadne zastavenie zo správ');
+  const rep = plan.pieces.filter((p) => p.phase === 'reported');
+  assert.equal(rep.length, 1);
+  const ms = keyMoments(e);
+  const idx = ms.findIndex((m) => m.kind === 'reported-landing');
+  assert.equal(rep[0].moment, idx);
+  assert.equal(rep[0].t, Date.parse('2026-09-30T06:45:00Z') / 1000);
+  assert.equal(rep[0].dur, VIDEO_DEFAULTS.reportedS);
+  // Poradie: posledné meranie (koniec údajov) → zo správ → záver.
+  const order = plan.pieces.map((p) => p.phase);
+  const at = order.indexOf('reported');
+  assert.equal(order[at - 1], 'moment', 'pred ním zastavenie na konci údajov');
+  assert.equal(plan.pieces[at - 1].moment, ms.findIndex((m) => m.kind === 'last-contact'));
+  assert.equal(order[at + 1], 'outro');
+  assert.equal(plan.pieces[at + 1].t, rep[0].t, 'záver ukazuje čas zo správy (hodiny nejdú späť)');
+  // Rozsah videa (graf, prehrávanie) ostáva na meraniach: t1 = posledné meranie.
+  assert.equal(plan.t1, plain.t1);
+  assert.ok(Math.abs(plan.durationS - plain.durationS - VIDEO_DEFAULTS.reportedS) < 1e-9, 'video dlhšie presne o zastavenie zo správ');
+  // Snímky zastavenia: aktuálny moment = pristátie, značka nastúpi v prvej tretine a potom stojí.
+  const [f0, f1] = framesOf(plan, rep[0]);
+  const s0 = plan.at(f0);
+  const s1 = plan.at(f1);
+  assert.equal(s0.phase, 'reported');
+  assert.equal(s0.current, idx);
+  assert.ok(s0.pop < 0.1 && s1.pop === 1);
+  assert.equal(s0.t, rep[0].t);
+  assert.equal(plan.at(Math.ceil((rep[0].start + rep[0].dur / 3) * plan.fps) + 1).pop, 1);
+  // Časy snímok idú len dopredu.
+  let prev = -Infinity;
+  for (let f = 0; f < plan.totalFrames; f += 1) { const t = plan.at(f).t; assert.ok(t >= prev - 1e-9, `snímka ${f}`); prev = t; }
+});

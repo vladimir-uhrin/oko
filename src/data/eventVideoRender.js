@@ -118,6 +118,9 @@ export function videoEventKey(event) {
     id: e.id, callsign: e.callsign ?? null, reg: e.reg ?? null, typeCode: e.typeCode ?? null, firstT: e.firstT, lastT: e.lastT,
     status: e.status, track: e.track || [], timeline: e.timeline || [], route: e.route || null, coverage: e.coverage || [],
     news: { status: e.news?.status ?? null, type: e.news?.type ?? null, trusted: (e.news?.trusted || []).map((t) => t?.domain || null) },
+    // Doplnené zo správ (pristátie, pokles v diere) — video ich ukazuje, iné fakty = iné video. Bez faktov
+    // sa kľúč nemení (videá starších udalostí ostávajú platné).
+    ...(e.reported?.length ? { reported: e.reported.map((f) => ({ kind: f?.kind, t: f?.t, fromT: f?.fromT ?? null, airport: f?.airport?.icao ?? null, toFt: f?.toFt ?? null, domains: f?.domains || [] })) } : {}),
   };
   return createHash('sha1').update(JSON.stringify(pick)).digest('hex').slice(0, 16);
 }

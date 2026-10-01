@@ -139,3 +139,51 @@ test('otvorenie a koncová karta: prílet z obežnej dráhy do regiónu a odlet 
     prev = c;
   }
 });
+
+test('pristátie zo správ (FZ1073 → Tabuk): celok aj zastavenie majú v zábere posledný bod aj letisko, značka na zemi letiska, lietadlo ostáva bledé na poslednom meraní, kamera bez skokov', async () => {
+  const { fz1073ReportedEvent } = await import('./fixtures/flightEventFixtures.mjs');
+  const { e: base } = await fzScene();
+  const e = await fz1073ReportedEvent(base);
+  const plan = videoPlan(e, { openingS: 2.6, endCardS: 3 });
+  const scene = eventVideoScene(e, plan);
+  const ms = keyMoments(e);
+  const idx = ms.findIndex((m) => m.kind === 'reported-landing');
+  const tabuk = ms[idx];
+  const last = e.track.filter((p) => p[0] <= plan.t1).at(-1);
+  // Celok (úvod, záver) zahrnie letisko: je v dosahu záberu od stredu.
+  assert.ok(distKm(scene.center, tabuk) <= scene.extentKm + 1e-6);
+  assert.ok(distKm(scene.center, { lat: last[1], lon: last[2] }) <= scene.extentKm + 1e-6);
+  // Zastavenie: kamera mieri medzi posledný bod a letisko a je dosť ďaleko na oba.
+  assert.equal(scene.reported.length, 1);
+  const r = scene.reported[0];
+  const piece = plan.pieces.find((p) => p.phase === 'reported');
+  const fs = scene.frame(mid(plan, piece));
+  const half = { lat: (last[1] + tabuk.lat) / 2, lon: (last[2] + tabuk.lon) / 2 };
+  assert.ok(distKm(fs.camera, half) < 15, `cieľ kamery ${distKm(fs.camera, half).toFixed(1)} km od stredu medzi bodmi`);
+  const dKm = distKm({ lat: last[1], lon: last[2] }, tabuk);
+  assert.ok(fs.camera.range >= dKm * 1000 * 1.8, `vzdialenosť ${Math.round(fs.camera.range / 1000)} km na ${Math.round(dKm)} km medzi bodmi`);
+  // Lietadlo nikam neletí: bledé na poslednom meraní (pristátie je len bod zo správ).
+  assert.equal(fs.plane.dim, true);
+  assert.equal(fs.plane.lat, last[1]);
+  assert.equal(fs.plane.lon, last[2]);
+  assert.equal(fs.moments[idx].show, true, 'značka letiska nastúpi pri zastavení');
+  assert.equal(scene.frame(framesOf(plan, piece)[0] - 2).moments[idx].show, false, 'pred zastavením nie');
+  // Značka na zemi letiska (nadmorská výška OurAirports), nie vo výške poslednej stopy.
+  const marker = scene.sceneData().moments[idx];
+  assert.equal(marker.reported, true);
+  assert.ok(Math.abs(marker.altM - (tabuk.elevFt ?? 0) * FT_M) < 1e-6 && marker.altM < 1500);
+  assert.ok(scene.sceneData().moments.slice(0, idx).every((m) => !m.reported));
+  // Popisy dostanú polohu letiska na obrazovke.
+  const anchors = scene.anchorPoints();
+  assert.deepEqual(Object.keys(anchors).sort(), ['gap0', `reported${idx}`]);
+  assert.equal(anchors[`reported${idx}`].lat, tabuk.lat);
+  assert.equal(r.vStart, piece.start);
+  // Plynulo celé video (prechod k letisku a späť na celok).
+  let prev = scene.frame(0).camera;
+  for (let i = 1; i < plan.totalFrames; i += 1) {
+    const c = scene.frame(i).camera;
+    assert.ok(Math.abs(Math.log(c.range / prev.range)) < 0.12 && Math.abs(c.pitch - prev.pitch) < 3 && distKm(c, prev) < 8,
+      `snímka ${i}: ${Math.round(prev.range / 1000)} → ${Math.round(c.range / 1000)} km, posun ${distKm(c, prev).toFixed(1)} km`);
+    prev = c;
+  }
+});

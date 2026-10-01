@@ -11,7 +11,7 @@
 import * as Cesium from 'cesium';
 import { altitudeRgb } from './flightReplay.js';
 import { aircraftIcon } from './data/aircraftIcons.js';
-import { numberedMarkerImage } from './eventMarkers.js';
+import { numberedMarkerImage, reportedMarkerImage } from './eventMarkers.js';
 import { screenProjectedRotation } from './data/iconOrientation.js';
 
 const CYAN = [0.22, 0.82, 1.0];
@@ -73,7 +73,7 @@ export function installEventVideoScene(viewer, sc) {
 
   const bbs = prims.add(new Cesium.BillboardCollection());
   const marks = sc.moments.map((m, i) => (Number.isFinite(m.lat) && Number.isFinite(m.lon)
-    ? bbs.add({ position: Cesium.Cartesian3.fromDegrees(m.lon, m.lat, Math.max(0, m.altM)), image: numberedMarkerImage(i + 1), width: 36, height: 36, show: false, disableDepthTestDistance: Number.POSITIVE_INFINITY })
+    ? bbs.add({ position: Cesium.Cartesian3.fromDegrees(m.lon, m.lat, Math.max(0, m.altM)), image: m.reported ? reportedMarkerImage(i + 1) : numberedMarkerImage(i + 1), width: 36, height: 36, show: false, disableDepthTestDistance: Number.POSITIVE_INFINITY })
     : null));
   const plane = bbs.add({
     position: pos(sc.track[0]), image: aircraftIcon('airliner', 128, false, 'cyan'), width: 60, height: 60,

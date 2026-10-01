@@ -42,8 +42,11 @@ export function simplifyTrack(points, max = 400) {
   });
 }
 
-/** Výrez mapy: stopa v okne udalosti + letiská trasy do ~700 km, s okrajom a pomerom plochy. Pure. */
-export function cardBBox(track, route, aspect) {
+/**
+ * Výrez mapy: stopa v okne udalosti + letiská trasy do ~700 km, s okrajom a pomerom plochy. `extra` =
+ * miesta, ktoré musia byť vidieť vždy (pristátie zo správ). Pure.
+ */
+export function cardBBox(track, route, aspect, extra = []) {
   const lats = track.map((p) => p[1]);
   const lons = track.map((p) => p[2]);
   let [s, n, w, e] = [Math.min(...lats), Math.max(...lats), Math.min(...lons), Math.max(...lons)];
@@ -51,6 +54,10 @@ export function cardBBox(track, route, aspect) {
     && a.lat > s - 6.3 && a.lat < n + 6.3 && a.lon > w - 8 && a.lon < e + 8;
   for (const a of [route?.origin, route?.destination]) {
     if (!near(a)) continue;
+    s = Math.min(s, a.lat); n = Math.max(n, a.lat); w = Math.min(w, a.lon); e = Math.max(e, a.lon);
+  }
+  for (const a of extra) {
+    if (!a || !Number.isFinite(a.lat) || !Number.isFinite(a.lon)) continue;
     s = Math.min(s, a.lat); n = Math.max(n, a.lat); w = Math.min(w, a.lon); e = Math.max(e, a.lon);
   }
   const midLat = (s + n) / 2;
@@ -306,7 +313,8 @@ export function buildEventCardSvg(event, { format = 'og', marine = [], borders =
   if (track.length) {
     // Obsah mapy sa zmestí nad profil výšky (ten prekrýva spodok mapy); podklad ide ďalej pod neho.
     const fit = { x: map.x, y: map.y, w: map.w, h: chart.y - 30 - map.y };
-    const bbox = cardBBox(focus.length >= 2 ? focus : track, event.route, fit.w / fit.h);
+    // Pristátie zo správ musí byť na mape (značka „podľa správ" na letisku, bez čiary k stope).
+    const bbox = cardBBox(focus.length >= 2 ? focus : track, event.route, fit.w / fit.h, moments.filter((m) => m.reported));
     const P = projector(bbox, fit);
     if (drawBase) {
       out.push(`<g clip-path="url(#m)"><rect x="${map.x}" y="${map.y}" width="${map.w}" height="${map.h}" fill="${COLORS.land}"/>`);
@@ -389,6 +397,12 @@ export function buildEventCardSvg(event, { format = 'og', marine = [], borders =
         const scale = popping ? 1 + 0.45 * Math.sin(Math.PI * frame.pop) : 1;
         if (mk.x !== mk.ox || mk.y !== mk.oy) out.push(`<line x1="${fmt1(mk.ox)}" y1="${fmt1(mk.oy)}" x2="${fmt1(mk.x)}" y2="${fmt1(mk.y)}" stroke="${COLORS.marker}" stroke-width="1.5"/>`);
         if (popping) out.push(`<circle cx="${fmt1(mk.x)}" cy="${fmt1(mk.y)}" r="${fmt1(13 * k * (1 + 1.4 * frame.pop))}" fill="none" stroke="${COLORS.marker}" stroke-width="3" stroke-opacity="${fmt1(Math.max(0, 1 - frame.pop))}"/>`);
+        if (m.reported) {
+          // Zo správ: prázdny krúžok s číslom (nevideli ho siete) — odlíšené od meraní.
+          out.push(`<circle cx="${fmt1(mk.x)}" cy="${fmt1(mk.y)}" r="${fmt1(13 * k * scale)}" fill="${COLORS.bg}" fill-opacity="0.85" stroke="${COLORS.marker}" stroke-width="2.5" stroke-dasharray="4 3"/>`);
+          out.push(`<text x="${fmt1(mk.x)}" y="${fmt1(mk.y + 5 * k * scale)}" font-size="${fmt1(14 * k * scale)}" font-weight="700" text-anchor="middle" fill="${COLORS.marker}">${i + 1}</text>`);
+          return;
+        }
         out.push(`<circle cx="${fmt1(mk.x)}" cy="${fmt1(mk.y)}" r="${fmt1(13 * k * scale)}" fill="${COLORS.marker}" stroke="${COLORS.bg}" stroke-width="2"/>`);
         out.push(`<text x="${fmt1(mk.x)}" y="${fmt1(mk.y + 5 * k * scale)}" font-size="${fmt1(14 * k * scale)}" font-weight="700" text-anchor="middle" fill="${COLORS.markerText}">${i + 1}</text>`);
       });
@@ -512,8 +526,11 @@ export function buildEventCardSvg(event, { format = 'og', marine = [], borders =
     const current = frame && frame.current === i && visible;
     if (current) out.push(`<rect x="${panel.x - 10}" y="${fmt1(iy - itemSize * 1.05)}" width="${panel.w + 20}" height="${fmt1(lines.length * itemSize * 1.25 + itemSize * 0.35)}" rx="8" fill="${COLORS.marker}" fill-opacity="0.16"/>`);
     if (!visible) return;
-    out.push(`<circle cx="${panel.x + 11}" cy="${fmt1(iy - itemSize * 0.34)}" r="${fmt1(itemSize * 0.58)}" fill="${COLORS.marker}"/>`);
-    out.push(`<text x="${panel.x + 11}" y="${fmt1(iy)}" font-size="${fmt1(itemSize * 0.78)}" font-weight="700" text-anchor="middle" fill="${COLORS.markerText}">${i + 1}</text>`);
+    const fromNews = Boolean(moments[i].reported);
+    out.push(fromNews
+      ? `<circle cx="${panel.x + 11}" cy="${fmt1(iy - itemSize * 0.34)}" r="${fmt1(itemSize * 0.58)}" fill="none" stroke="${COLORS.marker}" stroke-width="2" stroke-dasharray="3 2"/>`
+      : `<circle cx="${panel.x + 11}" cy="${fmt1(iy - itemSize * 0.34)}" r="${fmt1(itemSize * 0.58)}" fill="${COLORS.marker}"/>`);
+    out.push(`<text x="${panel.x + 11}" y="${fmt1(iy)}" font-size="${fmt1(itemSize * 0.78)}" font-weight="700" text-anchor="middle" fill="${fromNews ? COLORS.marker : COLORS.markerText}">${i + 1}</text>`);
     lines.forEach((l, j) => {
       out.push(`<text x="${panel.x + 32}" y="${fmt1(iy + j * itemSize * 1.25)}" font-size="${itemSize}"${current ? ' font-weight="700"' : ''} fill="${COLORS.text}">${esc(l)}</text>`);
     });

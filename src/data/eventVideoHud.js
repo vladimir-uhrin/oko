@@ -8,12 +8,16 @@
 //                 UTC a dátum a stavové štítky (BEZ ÚDAJOV / KONIEC ÚDAJOV / SPOMALENÉ), dole karta letu
 //                 (čo sa stalo, let, overenie, výška, aktuálny moment, profil výšky s čiarkovanou dierou),
 //                 pri diere veľký nápis „9 MIN BEZ ÚDAJOV / kleslo o 12 925 ft",
+//   podľa správ   (eventReported.js) pri diere riadky „PODĽA SPRÁV · ÚDAJE FLIGHTRADAR24 / pod 17 000 ft
+//                 už o 05:22 / médiá"; pri pristátí zo správ štítok PODĽA SPRÁV, hodiny bez sekúnd, nápis pri
+//                 letisku s médiami, výška „—", prázdny krúžok s číslom (aj v súhrne),
 //   záver         súhrn všetkých momentov, overenie, médiá, „Celá rekonštrukcia: okolive.sk",
 //   koncová karta logo, OKO, heslo okolive.sk, NAŽIVO okolive.sk, podpis.
 // Zdroje (© Google · Cesium ion, OpenSky, adsb.lol ODbL, adsbdb) sú na každej snímke. Pure.
 
 import { CARD_GAP_S } from './eventCard.js';
 import { eventWhat, flightLine, isPublishable, outletName, verifiedSources } from './eventPost.js';
+import { descentCore, landingPhrase } from './eventReported.js';
 import { clockUtc, momentPhrase } from './eventTimeline.js';
 
 export const VIDEO_3D_FORMAT = Object.freeze({ w: 1080, h: 1350 });
@@ -60,11 +64,33 @@ export function gapLabel(g) {
   return `${min} min bez údajov${what}`;
 }
 
-/** Výška na karte: pri zastavení na momente jeho hodnota (zhodná s textom), inak posledné meranie (ft). Pure. */
+/**
+ * Výška na karte: pri zastavení na momente jeho hodnota (zhodná s textom), inak posledné meranie (ft);
+ * pri momente zo správ nič (výšku nik nenameral). Pure.
+ */
 export function readoutFt(fs, moments) {
   const cur = fs.s.current !== null && fs.s.current !== undefined ? moments[fs.s.current] : null;
+  if (fs.s.phase === 'reported' || cur?.reported) return null;
   if (fs.s.phase === 'moment' && cur && Number.isFinite(cur.alt)) return cur.alt / 0.3048;
   return fs.plane.measuredFt ?? null;
+}
+
+/** Mená médií faktu zo správ: „Arab News, Al Jazeera". Pure. */
+const mediaOf = (f) => [...new Set((f?.domains || []).map(outletName))].join(', ');
+
+/**
+ * Riadky nápisu pri diere: dĺžka, zmena výšky cez dieru a poznámky zo správ (pokles podľa údajov,
+ * ktoré citujú médiá — kto meral a ktoré médiá to uvádzajú). Pure.
+ * @returns {{head: string, drop: string|null, notes: Array<{title: string, text: string, media: string}>}}
+ */
+export function gapLabelLines(g) {
+  const [head, drop] = gapLabel(g).split(' · ');
+  const notes = (g.reported || []).map((f) => ({
+    title: `PODĽA SPRÁV${f.via?.sk ? ` · ÚDAJE ${f.via.sk.toUpperCase()}` : ''}`,
+    text: descentCore(f, 'sk'),
+    media: mediaOf(f),
+  }));
+  return { head, drop: drop || null, notes };
 }
 
 /**
@@ -193,14 +219,17 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     out.push(wordmark(132, 82, 56));
     out.push(`<text x="134" y="114" font-family="${MONO}" font-size="21" font-weight="500" letter-spacing="3" fill="${ACCENT}" ${shadow}>${VIDEO_BRAND.domain}</text>`);
     out.push(creditLine(34, 148, 14));
-    out.push(`<text x="${W - 36}" y="76" text-anchor="end" font-family="${MONO}" font-size="46" font-weight="700" fill="#f2fbff" ${shadow}>${clockUtc(s.t)} UTC</text>`);
+    // Čas zo správy má presnosť na minúty — hodiny bez sekúnd.
+    const newsTime = moments.some((m) => m.reported && Math.abs(m.t - s.t) < 1e-6);
+    out.push(`<text x="${W - 36}" y="76" text-anchor="end" font-family="${MONO}" font-size="46" font-weight="700" fill="#f2fbff" ${shadow}>${newsTime ? clockUtc(s.t).slice(0, 5) : clockUtc(s.t)} UTC</text>`);
     out.push(`<text x="${W - 36}" y="108" text-anchor="end" font-family="${MONO}" font-size="19" letter-spacing="2" fill="${DIM}" ${shadow}>${dateSk(s.t)}</text>`);
     const pill = (text, color, fill) => {
       const w = text.length * 11.5 + 40;
       out.push(`<rect x="${f1(W - 36 - w)}" y="124" width="${f1(w)}" height="34" rx="17" fill="${fill}" stroke="${color}"/>`);
       out.push(`<text x="${f1(W - 36 - w / 2)}" y="147" text-anchor="middle" font-family="${MONO}" font-size="16" font-weight="700" letter-spacing="2" fill="${color}">${text}</text>`);
     };
-    if (plane.gap) pill('BEZ ÚDAJOV', '#fde68a', 'rgba(251,191,36,0.16)');
+    if (s.phase === 'reported') pill('PODĽA SPRÁV', '#bfeeff', 'rgba(0,212,255,0.14)');
+    else if (plane.gap) pill('BEZ ÚDAJOV', '#fde68a', 'rgba(251,191,36,0.16)');
     else if (plane.ended && !s.showAll) pill('KONIEC ÚDAJOV', '#fde68a', 'rgba(251,191,36,0.16)');
     else if (s.phase === 'spotlight') pill('SPOMALENÉ', '#bfeeff', 'rgba(0,212,255,0.14)');
     out.push('</g>');
@@ -214,16 +243,51 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     const end = gp.start + gp.dur + 2.5;
     const alpha = Math.min(layers.main, vt < gp.start ? 0 : (vt < end ? 1 : Math.max(0, 1 - (vt - end) / FADE_S)));
     if (alpha <= 0) return;
-    const [head, drop] = gapLabel(g).split(' · ');
-    const w = Math.max(head.length * 14 + 40, drop ? drop.length * 15.5 + 40 : 0);
-    const h = drop ? 84 : 46;
+    const { head, drop, notes } = gapLabelLines(g);
+    // Poznámka zo správ pod čiarou: kto meral, čo uvádza, ktoré médiá (vlastník: „len overené").
+    const NOTE_H = 112;
+    const w = Math.max(head.length * 14 + 40, drop ? drop.length * 15.5 + 40 : 0,
+      ...notes.map((n) => Math.max(n.title.length * 10.6, n.text.length * 14.8, n.media.length * 10.2) + 40));
+    const top = drop ? 84 : 46;
+    const h = top + notes.length * NOTE_H;
     const x = Math.min(W - w - 20, Math.max(20, a.x - w / 2));
     const y = Math.min(930 - h, Math.max(200, a.y - h - 24));
     out.push(`<g opacity="${f1(alpha)}"><rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${h}" rx="10" fill="rgba(7,19,31,0.88)" stroke="rgba(251,191,36,0.9)" stroke-width="1.5"/>`);
     out.push(`<text x="${f1(x + 20)}" y="${f1(y + 31)}" font-family="${MONO}" font-size="20" font-weight="700" letter-spacing="2" fill="#fde68a">${esc(head.toUpperCase())}</text>`);
     if (drop) out.push(`<text x="${f1(x + 20)}" y="${f1(y + 68)}" font-size="28" font-weight="700" fill="#f2fbff">${esc(drop)}</text>`);
+    notes.forEach((n, j) => {
+      const ny = y + top + j * NOTE_H;
+      out.push(`<line x1="${f1(x + 20)}" y1="${f1(ny + 8)}" x2="${f1(x + w - 20)}" y2="${f1(ny + 8)}" stroke="rgba(0,212,255,0.4)" stroke-width="1.2"/>`);
+      out.push(`<text x="${f1(x + 20)}" y="${f1(ny + 36)}" font-family="${MONO}" font-size="15" font-weight="700" letter-spacing="1.5" fill="#bfeeff">${esc(n.title)}</text>`);
+      out.push(`<text x="${f1(x + 20)}" y="${f1(ny + 72)}" font-size="26" font-weight="700" fill="#f2fbff">${esc(keepNumbers(n.text))}</text>`);
+      out.push(`<text x="${f1(x + 20)}" y="${f1(ny + 100)}" font-size="19" fill="${DIM}">${esc(n.media)}</text>`);
+    });
     out.push('</g>');
   });
+
+  // ── pristátie zo správ: nápis pri letisku (zastavenie po konci údajov), potom dozneje ──
+  for (const r of scene.reported || []) {
+    const a = anchors[`reported${r.moment}`];
+    const f = moments[r.moment]?.reported;
+    if (!a || !f) continue;
+    const alpha = Math.min(layers.main, vt < r.vStart ? 0 : (vt < r.vEnd ? clamp01((vt - r.vStart) / 0.4) : Math.max(0, 1 - (vt - r.vEnd) / FADE_S)));
+    if (alpha <= 0) continue;
+    const l1 = `${clockUtc(f.t).slice(0, 5)} UTC · PODĽA SPRÁV`;
+    const l2 = landingPhrase(f, 'sk').replace(/^./, (c) => c.toUpperCase());
+    const l3 = mediaOf(f);
+    const w = Math.max(l1.length * 12.4 + 40, l2.length * 14.8 + 40, l3.length * 10.2 + 40);
+    const h = 128;
+    const x = Math.min(W - w - 20, Math.max(20, a.x - w / 2));
+    const y = Math.min(930 - h, Math.max(200, a.y - h - 40));
+    out.push(`<g opacity="${f1(alpha)}">`);
+    // Tenká čiara od nápisu k značke na letisku (nápis nesmie zakryť značku).
+    if (a.y > y + h + 6) out.push(`<line x1="${f1(Math.min(x + w - 24, Math.max(x + 24, a.x)))}" y1="${f1(y + h)}" x2="${f1(a.x)}" y2="${f1(a.y - 20)}" stroke="rgba(0,212,255,0.7)" stroke-width="1.6"/>`);
+    out.push(`<rect x="${f1(x)}" y="${f1(y)}" width="${f1(w)}" height="${h}" rx="10" fill="rgba(7,19,31,0.9)" stroke="rgba(0,212,255,0.85)" stroke-width="1.6" stroke-dasharray="7 5"/>`);
+    out.push(`<text x="${f1(x + 20)}" y="${f1(y + 34)}" font-family="${MONO}" font-size="19" font-weight="700" letter-spacing="2" fill="#bfeeff">${esc(l1)}</text>`);
+    out.push(`<text x="${f1(x + 20)}" y="${f1(y + 74)}" font-size="26" font-weight="700" fill="#f2fbff">${esc(l2)}</text>`);
+    out.push(`<text x="${f1(x + 20)}" y="${f1(y + 108)}" font-size="19" fill="${DIM}">${esc(l3)}</text>`);
+    out.push('</g>');
+  }
 
   // ── karta letu dole ──────────────────────────────────────────────
   if (layers.card > 0) {
@@ -241,8 +305,11 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     const cur = s.current !== null && s.current !== undefined ? moments[s.current] : null;
     if (cur) {
       const cx = 420;
-      out.push(`<circle cx="${cx}" cy="${y0 + 141}" r="18" fill="#ffb020"/><text x="${cx}" y="${y0 + 148}" text-anchor="middle" font-size="20" font-weight="700" fill="#1a1204">${s.current + 1}</text>`);
-      wrap(keepNumbers(`${clockUtc(cur.t).slice(0, 5)} ${momentPhrase(cur, 'sk')}`), 38).slice(0, 2)
+      // Moment zo správ: prázdny krúžok (ako značka na glóbuse); diera bez poznámky (tú nesie nápis pri diere).
+      out.push(cur.reported
+        ? `<circle cx="${cx}" cy="${y0 + 141}" r="18" fill="rgba(5,14,22,0.9)" stroke="#ffb020" stroke-width="2.5" stroke-dasharray="5 3"/><text x="${cx}" y="${y0 + 148}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffb020">${s.current + 1}</text>`
+        : `<circle cx="${cx}" cy="${y0 + 141}" r="18" fill="#ffb020"/><text x="${cx}" y="${y0 + 148}" text-anchor="middle" font-size="20" font-weight="700" fill="#1a1204">${s.current + 1}</text>`);
+      wrap(keepNumbers(`${clockUtc(cur.t).slice(0, 5)} ${momentPhrase(cur, 'sk', { notes: false })}`), 38).slice(0, 2)
         .forEach((l, j) => out.push(`<text x="${cx + 32}" y="${y0 + 150 + j * 33}" font-size="25" font-weight="${j ? 400 : 600}" fill="#f2fbff">${esc(l)}</text>`));
     }
     // Profil výšky (bočný pohľad celej udalosti): diera čiarkovane, os s najvyššou výškou a nulou.
@@ -270,8 +337,10 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
       if (!fs.gapsShown[i]) return;
       out.push(`<line x1="${f1(X(g.a[0]))}" y1="${f1(Y(g.a[3] ?? 0))}" x2="${f1(X(g.b[0]))}" y2="${f1(Y(g.b[3] ?? 0))}" stroke="${AMBER}" stroke-width="2.4" stroke-dasharray="7 6"/>`);
     });
-    out.push(`<line x1="${f1(X(s.t))}" y1="${c.y - 6}" x2="${f1(X(s.t))}" y2="${c.y + c.h + 2}" stroke="#f2fbff" stroke-width="1.6"/>`);
-    out.push(`<circle cx="${f1(X(s.t))}" cy="${f1(Y(plane.altFt ?? 0))}" r="6" fill="#f2fbff" stroke="${ACCENT}" stroke-width="2"/>`);
+    // Kurzor v rozsahu grafu (moment zo správ po konci údajov ho nesmie vysunúť z karty).
+    const tc = Math.min(scene.t1, Math.max(scene.t0, s.t));
+    out.push(`<line x1="${f1(X(tc))}" y1="${c.y - 6}" x2="${f1(X(tc))}" y2="${c.y + c.h + 2}" stroke="#f2fbff" stroke-width="1.6"/>`);
+    out.push(`<circle cx="${f1(X(tc))}" cy="${f1(Y(plane.altFt ?? 0))}" r="6" fill="#f2fbff" stroke="${ACCENT}" stroke-width="2"/>`);
     out.push('</g>');
   }
 
@@ -291,8 +360,10 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     const fit = Math.max(0, Math.floor((room - (verified ? step * 2 : 0)) / step));
     let y = y0 + 182;
     moments.slice(0, n > fit ? fit - 1 : n).forEach((m, i) => {
-      out.push(`<circle cx="66" cy="${f1(y - 8)}" r="${f1(size * 0.64)}" fill="#ffb020"/><text x="66" y="${f1(y - 1)}" text-anchor="middle" font-size="${Math.round(size * 0.76)}" font-weight="700" fill="#1a1204">${i + 1}</text>`);
-      out.push(`<text x="96" y="${f1(y)}" font-size="${size}" fill="#f2fbff">${esc(keepNumbers(`${clockUtc(m.t).slice(0, 5)} ${momentPhrase(m, 'sk')}`))}</text>`);
+      out.push(m.reported
+        ? `<circle cx="66" cy="${f1(y - 8)}" r="${f1(size * 0.64)}" fill="rgba(5,14,22,0.9)" stroke="#ffb020" stroke-width="2" stroke-dasharray="4 3"/><text x="66" y="${f1(y - 1)}" text-anchor="middle" font-size="${Math.round(size * 0.76)}" font-weight="700" fill="#ffb020">${i + 1}</text>`
+        : `<circle cx="66" cy="${f1(y - 8)}" r="${f1(size * 0.64)}" fill="#ffb020"/><text x="66" y="${f1(y - 1)}" text-anchor="middle" font-size="${Math.round(size * 0.76)}" font-weight="700" fill="#1a1204">${i + 1}</text>`);
+      out.push(`<text x="96" y="${f1(y)}" font-size="${size}" fill="#f2fbff">${esc(keepNumbers(`${clockUtc(m.t).slice(0, 5)} ${momentPhrase(m, 'sk', { notes: false })}`))}</text>`);
       y += step;
     });
     if (n > fit) {

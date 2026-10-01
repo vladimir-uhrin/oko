@@ -10,6 +10,8 @@
 //                 diery zboku — záber medzi stredom okolia a lietadlom (lietadlo je vždy v zábere),
 //   diera s pádom záber na celú čiarkovanú čiaru (oba konce) zboku; kamera prejde po nej, lietadlo
 //                 ostáva bledé na poslednej známej polohe (nič sa nedomýšľa),
+//   podľa správ   pristátie, ktoré siete nevideli (eventReported.js): záber na posledný bod aj letisko
+//                 (bez čiary medzi nimi), značka na zemi letiska; celok úvodu a záveru letisko zahrnie,
 //   prechody      plynulé (váhy záberov podľa času videa, nie času udalosti — kamera neskáče).
 // Pure — Cesium a prehliadač rieši src/eventVideoCapture.js, obraz skladá scripts/capture-event-video.mjs.
 
@@ -39,6 +41,8 @@ export const VIDEO_CAMERA = Object.freeze({
   uturn: { pitch: -55, minRangeM: 45_000, perKmM: 3400, altShare: 0.3 },
   gap: { pitch: -20, minRangeM: 45_000, perKmM: 3400, altShare: 0.5 },
   gapDrop: { pitch: -16, minRangeM: 60_000, perKmM: 1700, minDropFt: 5000 },
+  /** Pristátie zo správ po konci údajov: posledný bod aj letisko v zábere, nad kartou letu. */
+  reported: { pitch: -48, minRangeM: 150_000, rangeFactor: 2.2, lookDown: 8 },
 });
 
 /**
@@ -52,10 +56,10 @@ export function eventVideoScene(event, plan) {
   const moments = keyMoments(event);
   const [t0, t1] = cardTimeRange(track, incidentWindow(event, moments));
   const focus = track.filter((p) => p[0] >= t0 && p[0] <= t1);
-  const center = { lat: focus.reduce((s, p) => s + p[1], 0) / focus.length, lon: focus.reduce((s, p) => s + p[2], 0) / focus.length };
+  const mean = { lat: focus.reduce((s, p) => s + p[1], 0) / focus.length, lon: focus.reduce((s, p) => s + p[2], 0) / focus.length };
   // Hlavný smer stopy (hlavná os rozptylu) → kamera kolmo naň.
-  const kx = Math.cos(toRad(center.lat));
-  const xy = focus.map((p) => [toRad(p[2] - center.lon) * R_KM * kx, toRad(p[1] - center.lat) * R_KM]);
+  const kx = Math.cos(toRad(mean.lat));
+  const xy = focus.map((p) => [toRad(p[2] - mean.lon) * R_KM * kx, toRad(p[1] - mean.lat) * R_KM]);
   let sxx = 0;
   let syy = 0;
   let sxy = 0;
@@ -63,7 +67,17 @@ export function eventVideoScene(event, plan) {
   const axisBearing = 90 - toDeg(0.5 * Math.atan2(2 * sxy, sxx - syy));
   const sides = [normDeg(axisBearing + 90), normDeg(axisBearing - 90)];
   const heading = Math.abs(sides[0]) <= Math.abs(sides[1]) ? sides[0] : sides[1];
-  const extentKm = Math.max(1, ...xy.map(([x, y]) => Math.hypot(x, y)));
+  // Pristátie zo správ (eventReported.js) musí byť v zábere celku (úvod, záver) — stred na stred
+  // stopy aj letiska; bez neho stred stopy ako doteraz.
+  const places = moments.filter((m) => m.reported && Number.isFinite(m.lat) && Number.isFinite(m.lon));
+  let center = mean;
+  let extentKm = Math.max(1, ...xy.map(([x, y]) => Math.hypot(x, y)));
+  if (places.length) {
+    const lats = [...focus.map((p) => p[1]), ...places.map((m) => m.lat)];
+    const lons = [...focus.map((p) => p[2]), ...places.map((m) => m.lon)];
+    center = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lon: (Math.min(...lons) + Math.max(...lons)) / 2 };
+    extentKm = Math.max(1, ...focus.map((p) => distKm(center, { lat: p[1], lon: p[2] })), ...places.map((m) => distKm(center, m)));
+  }
   const sideOf = (bear) => {
     const c = [normDeg(bear + 90), normDeg(bear - 90)];
     return Math.abs(normDeg(c[0] - heading)) <= Math.abs(normDeg(c[1] - heading)) ? c[0] : c[1];
@@ -97,8 +111,10 @@ export function eventVideoScene(event, plan) {
     const b = track[i];
     if (b[0] - a[0] < CARD_GAP_S || b[0] <= t0 || a[0] >= t1) continue;
     const piece = plan.pieces.find((p) => p.phase === 'gap' && p.from >= a[0] - 1e-6 && p.to <= b[0] + 1e-6) || null;
+    // Poznámky zo správ k diere (pokles podľa údajov, ktoré citujú médiá) — nápis pri diere.
+    const noted = moments.find((m) => m.kind === 'gap' && (m.fromT ?? m.t) < b[0] && (m.toT ?? m.t) > a[0]);
     gaps.push({
-      i, fromT: a[0], toT: b[0], a, b, piece,
+      i, fromT: a[0], toT: b[0], a, b, piece, reported: noted?.reportedNotes || [],
       mid: { lat: (a[1] + b[1]) / 2, lon: (a[2] + b[2]) / 2, altM: (((a[3] ?? 0) + (b[3] ?? 0)) / 2) * FT_M },
       dFt: (b[3] ?? 0) - (a[3] ?? 0),
       lenKm: distKm({ lat: a[1], lon: a[2] }, { lat: b[1], lon: b[2] }),
@@ -127,6 +143,21 @@ export function eventVideoScene(event, plan) {
       },
     };
   }).filter(Boolean);
+  // Pristátie zo správ po konci údajov: záber na posledný bod aj letisko (bez čiary medzi nimi).
+  const lastPt = focus[focus.length - 1];
+  const reportedShots = plan.pieces.filter((p) => p.phase === 'reported').map((p) => {
+    const m = moments[p.moment];
+    if (!m || !Number.isFinite(m.lat) || !Number.isFinite(m.lon)) return null;
+    const a = { lat: lastPt[1], lon: lastPt[2] };
+    const dKm = distKm(a, m);
+    return {
+      moment: p.moment,
+      vStart: p.start,
+      vEnd: p.start + p.dur,
+      place: { lat: m.lat, lon: m.lon, altM: (m.elevFt ?? 0) * FT_M },
+      pose: { lat: (a.lat + m.lat) / 2, lon: (a.lon + m.lon) / 2, altM: 0, pitch: C.reported.pitch, range: Math.max(C.reported.minRangeM, dKm * 1000 * C.reported.rangeFactor), heading, lookDown: C.reported.lookDown },
+    };
+  }).filter(Boolean);
   const SPOT_IN_S = 1.4;
   const SPOT_OUT_S = 1.2;
   const playStart = plan.pieces.find((p) => p.phase !== 'intro' && p.phase !== 'opening')?.start ?? 0;
@@ -149,6 +180,7 @@ export function eventVideoScene(event, plan) {
     const wide = (lookDown) => ({ lat: center.lat, lon: center.lon, altM: 3000, pitch: C.wide.pitch, range: extentKm * 1000 * C.wide.rangeFactor, heading, lookDown });
     const poses = [[wIntro, wide(C.wide.lookDownIntro)], [wOutro, wide(C.wide.lookDownOutro)]];
     for (const s of spots) poses.push([ramp(vt, s.vStart, s.vEnd, SPOT_IN_S, SPOT_OUT_S) * (1 - wIntro) * (1 - wOutro), s.pose]);
+    for (const r of reportedShots) poses.push([ramp(vt, r.vStart, r.vEnd, 1.2, 1.4) * (1 - wIntro) * (1 - wOutro), r.pose]);
     for (const g of gaps) {
       if (!g.piece || Math.abs(g.dFt) < C.gapDrop.minDropFt) continue;
       poses.push([ramp(vt, g.piece.start, g.piece.start + g.piece.dur, 0.5, 0.8) * (1 - wOutro), {
@@ -185,7 +217,13 @@ export function eventVideoScene(event, plan) {
     extentKm,
     gaps,
     spots,
+    /** Zastavenia na pristátí zo správ (moment, čas videa, miesto na zemi). */
+    reported: reportedShots,
     moments,
+    /** Body, ktorých polohu na obrazovke potrebujú popisy (stred diery, letisko zo správ). */
+    anchorPoints() {
+      return Object.fromEntries([...gaps.map((g, i) => [`gap${i}`, g.mid]), ...reportedShots.map((r) => [`reported${r.moment}`, r.place])]);
+    },
     /** Otvorenie a koncová karta (kúsky plánu) — popisy podľa nich prelínajú značku a kartu letu. */
     opening,
     endCard,
@@ -198,7 +236,10 @@ export function eventVideoScene(event, plan) {
         focusFrom: t0,
         focusTo: t1,
         gapS: CARD_GAP_S,
-        moments: moments.map((m) => ({ lat: m.lat, lon: m.lon, altM: trackAltAt(m.t) * FT_M })),
+        // Momenty na čiare stopy; pristátie zo správ na zemi letiska (prázdna značka, bez čiary).
+        moments: moments.map((m) => (m.reported
+          ? { lat: m.lat, lon: m.lon, altM: (m.elevFt ?? 0) * FT_M, reported: true }
+          : { lat: m.lat, lon: m.lon, altM: trackAltAt(m.t) * FT_M })),
       };
     },
     /** Stav snímky `frame`. */
