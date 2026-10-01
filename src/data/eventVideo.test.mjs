@@ -78,7 +78,14 @@ test('plán FZ1073: začína prvým meraním v okne (nie dierou pred ním), kaž
   for (const h of holds) assert.equal(h.t, moments[h.moment].t);
   const gaps = plan.pieces.filter((p) => p.phase === 'gap');
   assert.ok(gaps.length >= 1, 'FZ1073 má 9 min bez údajov');
-  for (const g of gaps) assert.deepEqual([g.dur, g.to - g.from >= CARD_GAP_S], [VIDEO_DEFAULTS.gapS, true], 'diera prebehne rýchlo bez ohľadu na dĺžku');
+  for (const g of gaps) {
+    const a = e.track.filter((p) => p[0] <= g.from + 1e-6).at(-1);
+    const b = e.track.find((p) => p[0] >= g.to - 1e-6);
+    const drop = Math.abs((b[3] ?? 0) - (a[3] ?? 0));
+    assert.ok(g.to - g.from >= CARD_GAP_S);
+    assert.equal(g.dur, drop >= VIDEO_DEFAULTS.gapDropFt ? VIDEO_DEFAULTS.gapDropS : VIDEO_DEFAULTS.gapS, 'diera rýchlo bez ohľadu na dĺžku; s pádom ≥ 5 000 ft 2 s');
+  }
+  assert.equal(gaps[0].dur, VIDEO_DEFAULTS.gapDropS, 'FZ1073: cez 9 min bez údajov kleslo o 12 925 ft');
   const rates = plan.pieces.filter((p) => p.phase === 'play' && p.dur > VIDEO_DEFAULTS.minSegmentS).map((p) => p.dur / (p.to - p.from));
   assert.ok(rates.length >= 3 && rates.every((r) => Math.abs(r - rates[0]) < 1e-9), 'úseky s údajmi úmerne času');
   assert.ok(Math.abs(plan.durationS - plan.pieces.reduce((s, p) => s + p.dur, 0)) < 1e-9);
@@ -103,14 +110,37 @@ test('všeobecný vzorec: umelý let bez dier; dva momenty v tej istej sekunde =
   const e = uturnEvent();
   const plan = videoPlan(e);
   assert.deepEqual([plan.t0, plan.t1], [e.track[0][0], e.track.at(-1)[0]]);
-  assert.deepEqual(plan.pieces.map((p) => p.phase), ['intro', 'play', 'moment', 'play', 'moment', 'play', 'outro']);
+  // Klesanie (minúta pred ním) a obrat (1,5 min pred a po) spomalene.
+  assert.deepEqual(plan.pieces.map((p) => p.phase), ['intro', 'play', 'spotlight', 'moment', 'spotlight', 'play', 'spotlight', 'moment', 'spotlight', 'play', 'outro']);
   const twin = { ...e, timeline: [e.timeline[0], { ...e.timeline[0], kind: 'squawk', code: '7700', meaning: 'emergency' }, e.timeline[1]] };
   const holds = videoPlan(twin).pieces.filter((p) => p.phase === 'moment');
   assert.deepEqual(holds.map((p) => [p.t, p.moment]), [[e.track[2][0], 0], [e.track[2][0], 1], [e.track[4][0], 2]], 'čísla nastúpia po jednom');
   assert.equal(videoPlan({ ...e, track: [] }), null);
   assert.equal(videoPlan({ ...e, track: [e.track[0]] }), null);
-  const short = videoPlan(e, { playS: 3, holdS: 0.5, introS: 0.5, outroS: 1 });
-  assert.ok(Math.abs(short.durationS - (0.5 + 3 + 2 * 0.5 + 1)) < 1e-9, 'tempo sa dá prepísať');
+  const short = videoPlan(e, { playS: 3, holdS: 0.5, introS: 0.5, outroS: 1, spotlightS: 1 });
+  const sumOf = (phase) => short.pieces.filter((p) => p.phase === phase).reduce((s, p) => s + p.dur, 0);
+  assert.ok(Math.abs(sumOf('spotlight') - 2) < 1e-9 && Math.abs(sumOf('moment') - 1) < 1e-9 && sumOf('play') < 3.1, 'tempo sa dá prepísať');
+});
+
+test('spomalene: okolie pádu a obratu dostane svoj čas (FZ1073: minúta pádu 4,5 s namiesto zlomku sekundy), čas tam beží pomalšie než pri lete', async () => {
+  const e = await fzCardEvent();
+  const plan = videoPlan(e);
+  const ms = keyMoments(e);
+  const dive = ms.find((m) => m.kind === 'dive');
+  const hole = ms.find((m) => m.kind === 'gap');
+  const uturn = ms.find((m) => m.kind === 'uturn');
+  const spots = plan.pieces.filter((p) => p.phase === 'spotlight');
+  const fall = spots.filter((p) => p.to <= hole.t + 1e-6);
+  assert.ok(Math.abs(fall.reduce((s, p) => s + p.dur, 0) - VIDEO_DEFAULTS.spotlightS * 1.5) < 1e-9, 'klesanie + začiatok diery spolu 1,5 × 3 s');
+  assert.equal(fall[0].from, dive.t - 60, 'minúta pred strmhlavým klesaním');
+  assert.equal(fall.at(-1).to, hole.t, 'okolie končí na začiatku diery, nie v nej');
+  const turn = spots.filter((p) => p.from >= uturn.t - 90 - 1e-6);
+  assert.ok(Math.abs(turn.reduce((s, p) => s + p.dur, 0) - VIDEO_DEFAULTS.spotlightS) < 1e-9, 'obrat 3 s');
+  const rate = (p) => p.dur / (p.to - p.from);
+  const play = plan.pieces.filter((p) => p.phase === 'play' && p.dur > VIDEO_DEFAULTS.minSegmentS);
+  for (const s of spots) for (const p of play) assert.ok(rate(s) > rate(p) * 3, 'spomalene aspoň 3× pomalšie');
+  assert.deepEqual(plan.spotlights.map((w) => w.budgetS), [4.5, 3]);
+  assert.ok(plan.durationS > 20 && plan.durationS < 30, `${plan.durationS.toFixed(1)} s — na FB do pol minúty`);
 });
 
 test('snímka: len momenty, ktoré už nastali (mapa, graf, zoznam), aktuálny tučne; hodiny HH:MM:SS UTC; médiá až v závere', async () => {

@@ -28,15 +28,23 @@ export function videoCodeVersion(codeDir, readFile = (file) => fs.readFileSync(f
   return hash.digest('hex').slice(0, 12);
 }
 
-/** Argumenty ffmpeg: JPEG snímky zo stdin → MP4 H.264 pre siete. Pure. */
-export function ffmpegArgs(fps, outFile) {
+/**
+ * Argumenty ffmpeg: JPEG snímky zo stdin → MP4 H.264 pre siete. 3D video zo satelitných záberov má
+ * veľa detailov — crf 26 dá pri FZ1073 22 MB namiesto 48 MB pri crf 21 a na pohľad sa nelíši. Pure.
+ * @param {number} fps
+ * @param {string} outFile
+ * @param {{crf?: number, preset?: string}} [opts]
+ */
+export function ffmpegArgs(fps, outFile, { crf = 21, preset = 'veryfast' } = {}) {
   return [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', 'pipe:0',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+    '-c:v', 'libx264', '-preset', preset, '-crf', String(crf), '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
     outFile,
   ];
 }
+/** Kompresia 3D videa v štýle OKO (scripts/capture-event-video.mjs). */
+export const VIDEO_3D_ENCODE = Object.freeze({ crf: 26, preset: 'medium' });
 
 /**
  * @param {{dataDir: string, ffmpegPath?: string, sharpLoader?: () => Promise<any>, spawnImpl?: typeof spawn,
@@ -96,6 +104,61 @@ export function createEventVideoRenderer({
     }
     fs.renameSync(tmp, outFile);
     return { outFile, frames: plan.totalFrames, durationS: plan.durationS, width: w, height: h };
+  };
+}
+
+/**
+ * Kľúč nahratého 3D videa: len údaje, ktoré video ukazuje (stopa, momenty, let, trasa, siete, overenie
+ * a médiá) — nie časy kontrol správ ani stav zverejnenia. Zmena týchto údajov = video treba nahrať
+ * znova. Pure.
+ */
+export function videoEventKey(event) {
+  const e = event || {};
+  const pick = {
+    id: e.id, callsign: e.callsign ?? null, reg: e.reg ?? null, typeCode: e.typeCode ?? null, firstT: e.firstT, lastT: e.lastT,
+    status: e.status, track: e.track || [], timeline: e.timeline || [], route: e.route || null, coverage: e.coverage || [],
+    news: { status: e.news?.status ?? null, type: e.news?.type ?? null, trusted: (e.news?.trusted || []).map((t) => t?.domain || null) },
+  };
+  return createHash('sha1').update(JSON.stringify(pick)).digest('hex').slice(0, 16);
+}
+
+/** Je to MP4 (ISO BMFF s hlavičkou `ftyp` a obsahom `moov`)? Pure. */
+export function isMp4(buf) {
+  return Buffer.isBuffer(buf) && buf.length > 64 && buf.subarray(4, 8).toString('latin1') === 'ftyp' && buf.includes('moov');
+}
+
+/** Strop nahratého videa (FZ1073: 818 snímok 1080×1350 ≈ 25 MB). */
+export const VIDEO_UPLOAD_MAX_BYTES = 80 * 1024 * 1024;
+
+/**
+ * Nahraté 3D videá udalostí (scripts/capture-event-video.mjs) v `<dir>/<id>-<kľúč>.mp4`: jedno na
+ * udalosť, platí len pre tie isté údaje (videoEventKey); staršie video tej istej udalosti sa pri
+ * novom zmaže.
+ * @param {{dir: string}} opts
+ */
+export function createEventVideoStore({ dir }) {
+  const fileOf = (event) => path.join(dir, `${event.id}-${videoEventKey(event)}.mp4`);
+  return {
+    /** Video presne pre tieto údaje udalosti, inak null. */
+    find(event) {
+      const file = fileOf(event);
+      return fs.existsSync(file) ? { file } : null;
+    },
+    /** Uloží video (zápis cez dočasný súbor); vracia { file, bytes } alebo vyhodí BAD_VIDEO. */
+    save(event, buf) {
+      if (!isMp4(buf)) throw Object.assign(new Error('not an mp4 video'), { code: 'BAD_VIDEO' });
+      fs.mkdirSync(dir, { recursive: true });
+      const file = fileOf(event);
+      const tmp = `${file}.part`;
+      fs.writeFileSync(tmp, buf);
+      fs.renameSync(tmp, file);
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith(`${event.id}-`) && path.join(dir, name) !== file) {
+          try { fs.unlinkSync(path.join(dir, name)); } catch { /* ďalší pokus pri ďalšom nahratí */ }
+        }
+      }
+      return { file, bytes: buf.length };
+    },
   };
 }
 

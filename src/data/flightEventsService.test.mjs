@@ -13,6 +13,7 @@ import { ANALYSIS_VERSION, EVENT_FETCH_GAP_MS, createFlightEventsService, eventI
 import { EMERGENCY_CODES, DIVE_VR_MPS } from './flightAnomalies.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS } from './stateAircraftBackfill.js';
 import { createEventCardRenderer } from './eventCardRender.js';
+import { createEventVideoStore } from './eventVideoRender.js';
 import { createShareStore } from '../shareStore.js';
 import { FDB1073_ROUTE, NOISE_CASES, T, fz1073, fz1073Event, noiseCase } from './fixtures/flightEventFixtures.mjs';
 
@@ -85,7 +86,7 @@ async function call(service, url, local = true, { method = 'GET', headers = {}, 
   const res = { status: 0, body: '', headers: {}, writeHead(s, h = {}) { this.status = s; this.headers = h; }, end(b) { this.body = b; } };
   const req = { url, local, method, headers };
   if (body !== undefined) {
-    const buf = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
+    const buf = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body));
     req[Symbol.asyncIterator] = async function* stream() { yield buf; };
   }
   await service.handle(req, res);
@@ -693,43 +694,66 @@ test('dodaná stopa (ručne, napr. živá stopa uložená skôr): FZ1073 z NEOVE
   }
 });
 
-test('video do príspevku: len z tohto počítača, MP4 na stiahnutie zo stopy udalosti (doplnenej z archívu); bez ffmpeg „nedostupné", bez stopy 409', async () => {
+test('video do príspevku: 3D video nahrá skript len z tohto počítača (vlastná hlavička, MP4), vlastník ho stiahne; platí len pre tie isté údaje; „karta" na požiadanie', async () => {
   const { oko } = fz1073();
   const h = harness({ startMs: Date.parse('2026-09-30T08:00:00Z'), tracks: { '8965d1': oko.map((p) => row(p)) } });
   try {
     const got = [];
     let failWith = null;
-    const file = path.join(h.dir, 'video.mp4');
+    const file2d = path.join(h.dir, 'karta.mp4');
     const eventVideo = {
       async get(event) {
         got.push(event);
         if (failWith) throw Object.assign(new Error('zlyhanie'), { code: failWith });
-        writeFileSync(file, 'MP4DATA');
-        return { file, cached: false };
+        writeFileSync(file2d, 'KARTA');
+        return { file: file2d, cached: false };
       },
     };
-    const service = h.make({ eventVideo });
+    const videoStore = createEventVideoStore({ dir: path.join(h.dir, 'event-video', '3d') });
+    const service = h.make({ eventVideo, videoStore });
     const e = { ...(await fz1073Event()), window: { fromT: T('2026-09-30T03:00:00Z'), toT: T('2026-09-30T07:00:00Z') } };
     delete e.track;
     service.store.save(e);
-    assert.equal((await call(service, `/${e.id}/video.mp4`, false)).status, 404, 'z verejnej adresy vôbec nie');
-    assert.equal(got.length, 0, 'verejnosť nič nespustí');
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(12), Buffer.from('....moov'), Buffer.alloc(64, 7)]);
+    const UP = { method: 'POST', headers: { 'content-type': 'video/mp4', 'x-oko-video-upload': '1' } };
+    // Pred nahratím: tlačidlo nie je pripravené, stiahnutie nič nevráti.
+    const before = (await call(service, `/${e.id}/post`)).json;
+    assert.deepEqual([before.video, before.videoReady], [true, false]);
+    assert.deepEqual((await call(service, `/${e.id}/video.mp4`)).json, { error: 'video_not_captured' });
+    // Nahratie: len z tohto počítača, s vlastnou hlavičkou, len MP4.
+    assert.equal((await call(service, `/${e.id}/video.mp4`, false, { ...UP, body: mp4 })).status, 404, 'z verejnej adresy vôbec nie');
+    assert.equal((await call(service, `/${e.id}/video.mp4`, true, { method: 'POST', headers: { 'content-type': 'video/mp4' }, body: mp4 })).status, 403, 'bez vlastnej hlavičky nie');
+    assert.equal((await call(service, `/${e.id}/video.mp4`, true, { ...UP, headers: { ...UP.headers, origin: 'https://evil.example' }, body: mp4 })).status, 403, 'cudzia stránka nie');
+    assert.equal((await call(service, `/${e.id}/video.mp4`, true, { ...OWN_POST, body: {} })).status, 403, 'JSON zo stránky nie je nahratie');
+    assert.deepEqual((await call(service, `/${e.id}/video.mp4`, true, { ...UP, body: Buffer.from('<html>nie video</html>'.padEnd(120, ' ')) })).json, { error: 'not_mp4' });
+    assert.equal(videoStore.find(service.store.get(e.id)), null, 'nič neplatné sa neuložilo');
+    const up = await call(service, `/${e.id}/video.mp4`, true, { ...UP, body: mp4 });
+    assert.deepEqual([up.status, up.json.ok, up.json.bytes], [200, true, mp4.length]);
+    // Stiahnutie (vlastník): príloha s menom udalosti, presne nahraté bajty; verejnosť nie.
+    assert.equal((await call(service, `/${e.id}/post`)).json.videoReady, true);
     const r = await call(service, `/${e.id}/video.mp4`);
-    assert.equal(r.status, 200);
-    assert.deepEqual([r.headers['Content-Type'], r.headers['Content-Disposition'], r.headers['Content-Length']], ['video/mp4', `attachment; filename="oko-udalost-${e.id}.mp4"`, '7']);
-    assert.equal(Buffer.from(r.body).toString(), 'MP4DATA');
-    assert.ok(got[0].track.length > 50, 'video zo stopy doplnenej z archívu OKO');
-    const head = await call(service, `/${e.id}/video.mp4`, true, { method: 'HEAD' });
-    assert.deepEqual([head.status, head.body], [200, undefined]);
-    assert.equal((await call(service, `/${e.id}/video.mp4`, true, OWN_POST)).status, 405);
-    assert.equal((await call(service, `/${e.id}/post`)).json.video, true, 'panel vie, že video je k dispozícii');
+    assert.deepEqual([r.status, r.headers['Content-Type'], r.headers['Content-Disposition']], [200, 'video/mp4', `attachment; filename="oko-udalost-${e.id}.mp4"`]);
+    assert.deepEqual(Buffer.from(r.body), mp4);
+    assert.deepEqual([(await call(service, `/${e.id}/video.mp4`, true, { method: 'HEAD' })).status, (await call(service, `/${e.id}/video.mp4`, true, { method: 'HEAD' })).body], [200, undefined]);
+    assert.equal((await call(service, `/${e.id}/video.mp4`, false)).status, 404, 'verejnosť nie');
+    // Zmena údajov (iné momenty) — staré video už neplatí, treba nahrať nové.
+    const stored = service.store.get(e.id);
+    service.store.save({ ...stored, timeline: stored.timeline.slice(0, 3) });
+    assert.equal((await call(service, `/${e.id}/post`)).json.videoReady, false);
+    assert.equal((await call(service, `/${e.id}/video.mp4`)).status, 404);
+    // „Karta" (2D video, kreslí server) na požiadanie, zo stopy doplnenej z archívu OKO.
+    const k = await call(service, `/${e.id}/video.mp4?style=karta`);
+    assert.deepEqual([k.status, Buffer.from(k.body).toString()], [200, 'KARTA']);
+    assert.ok(got[0].track.length > 50, 'stopa doplnená z archívu OKO');
     failWith = 'FFMPEG_MISSING';
-    assert.deepEqual([(await call(service, `/${e.id}/video.mp4`)).status, (await call(service, `/${e.id}/video.mp4`)).json.error], [503, 'video_unavailable']);
+    assert.deepEqual((await call(service, `/${e.id}/video.mp4?style=karta`)).json, { error: 'video_unavailable' });
     failWith = 'NO_TRACK';
-    assert.deepEqual((await call(service, `/${e.id}/video.mp4`)).json, { error: 'no_track' });
+    assert.deepEqual((await call(service, `/${e.id}/video.mp4?style=karta`)).json, { error: 'no_track' });
+    // Služba bez úložiska videí: tlačidlo nie je.
     const without = h.make();
-    assert.equal((await call(without, `/${e.id}/video.mp4`)).status, 503);
     assert.equal((await call(without, `/${e.id}/post`)).json.video, false);
+    assert.equal((await call(without, `/${e.id}/video.mp4`)).status, 404);
+    assert.equal((await call(without, `/${e.id}/video.mp4`, true, { ...UP, body: mp4 })).status, 503);
   } finally {
     h.cleanup();
   }

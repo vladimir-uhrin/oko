@@ -344,10 +344,16 @@ export function installEventsPanel({
       image.href = api.cardUrl(id, 'feed');
       image.download = `oko-udalost-${id}.jpg`;
       actions.append(fb, copyLink, image);
+      // 3D video v štýle OKO (nahráva ho scripts/capture-event-video.mjs) — tlačidlo len keď je nahraté
+      // pre presne tieto údaje udalosti, inak poznámka.
       if (post.video && typeof api.video === 'function') {
-        const video = button(doc, 'scene-btn events-download-video', t('events.download-video'));
-        video.addEventListener('click', () => { void downloadVideo(id, video); });
-        actions.appendChild(video);
+        if (post.videoReady) {
+          const video = button(doc, 'scene-btn events-download-video', t('events.download-video'));
+          video.addEventListener('click', () => { void downloadVideo(id, video); });
+          actions.appendChild(video);
+        } else {
+          actions.appendChild(el(doc, 'span', 'events-video-note', t('events.video-not-captured')));
+        }
       }
       const withdraw = button(doc, 'scene-btn events-unpublish', t('events.unpublish'));
       withdraw.addEventListener('click', () => { void confirmThen('unpublish', withdraw, 'events.unpublish', () => api.unpublish(id)); });

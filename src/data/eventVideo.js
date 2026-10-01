@@ -3,12 +3,16 @@
 //   rozsah      ten istý ako graf výšky na obrázku: od prvého po posledné meranie v okne udalosti
 //               (okno = 20 min pred prvým spúšťačom až 20 min po poslednom momente),
 //   úvod        krátke zastavenie na prvom meraní,
-//   prehrávanie úseky s údajmi trvajú úmerne svojmu času (spolu ~9 s, každý aspoň 0,3 s),
+//   prehrávanie úseky s údajmi trvajú úmerne svojmu času (spolu ~7 s, každý aspoň 0,3 s),
+//   spomalene   okolie momentov, pri ktorých sa niečo deje v pohybe — strmhlavé klesanie (minúta pred
+//               ním), začiatok diery v údajoch, obrat — sa prehrá spomalene (vlastník 10-01: „nie je tam
+//               samotný pád"): 3 s na okolie, prekrývajúce sa okolia sa spoja,
 //   moment      pri každom kľúčovom momente sa čas na chvíľu zastaví (značka a riadok zoznamu nastúpia;
 //               viac momentov v tej istej sekunde = zastavenie pre každý zvlášť),
-//   diera       úsek bez údajov ≥ 5 min prebehne rýchlo (lietadlo stojí na poslednej známej polohe),
+//   diera       úsek bez údajov ≥ 5 min prebehne rýchlo (lietadlo stojí na poslednej známej polohe);
+//               keď sa cez ňu výška zmenila o 5 000 ft a viac (pád bez údajov), trvá 2 s,
 //   záver       všetky momenty, médiá a zdroje ako na obrázku udalosti; hodiny a lietadlo ostávajú.
-// Snímky kreslí ten istý kód ako obrázok udalosti (eventCard.js s `frame`). Pure.
+// Snímky kreslí ten istý kód ako obrázok udalosti (eventCard.js s `frame`) alebo záber z OKO. Pure.
 
 import { CARD_GAP_S, cardTimeRange } from './eventCard.js';
 import { incidentWindow, keyMoments } from './eventPost.js';
@@ -16,12 +20,19 @@ import { incidentWindow, keyMoments } from './eventPost.js';
 export const VIDEO_DEFAULTS = Object.freeze({
   fps: 30,
   introS: 1,
-  playS: 9,
+  playS: 7,
   holdS: 1,
   gapS: 0.6,
+  /** Diera, cez ktorú sa výška zmenila aspoň o gapDropFt (pád bez údajov), trvá gapDropS. */
+  gapDropS: 2,
+  gapDropFt: 5000,
   minSegmentS: 0.3,
+  spotlightS: 3,
   outroS: 3.5,
 });
+
+/** Okolie momentu, ktoré sa prehrá spomalene: [sekúnd pred, sekúnd po] v čase údajov. */
+export const VIDEO_SPOTLIGHT = Object.freeze({ dive: [60, 15], gap: [30, 0], uturn: [90, 90] });
 
 /** Leží úsek [a, b] celý v diere stopy (dva susedné body ďalej od seba než CARD_GAP_S)? Pure. */
 function insideGap(track, a, b) {
@@ -34,9 +45,31 @@ function insideGap(track, a, b) {
 }
 
 /**
- * Plán videa udalosti: kúsky (úvod, prehrávanie, diera, moment, záver) s dĺžkou v sekundách a
- * `at(snímka)` → stav snímky pre buildEventCardSvg (`{t, current, pop, showAll, phase}`). Null, keď
- * udalosť nemá stopu v okne. Pure.
+ * Okolia momentov na spomalené prehranie, orezané na rozsah videa a spojené, keď sa prekrývajú.
+ * Spojené okolie má čas spotlightS × (1 + 0,5 × počet ďalších momentov v ňom). Pure.
+ */
+export function spotlightWindows(moments, t0, t1, spotlightS = VIDEO_DEFAULTS.spotlightS) {
+  const raw = [];
+  for (const m of moments) {
+    const span = VIDEO_SPOTLIGHT[m.kind];
+    if (!span || !Number.isFinite(m.t)) continue;
+    const from = Math.max(t0, m.t - span[0]);
+    const to = Math.min(t1, m.t + span[1]);
+    if (to > from) raw.push({ from, to, count: 1 });
+  }
+  raw.sort((a, b) => a.from - b.from);
+  const merged = [];
+  for (const w of raw) {
+    const last = merged[merged.length - 1];
+    if (last && w.from <= last.to) { last.to = Math.max(last.to, w.to); last.count += 1; } else merged.push({ ...w });
+  }
+  return merged.map((w) => ({ from: w.from, to: w.to, budgetS: spotlightS * (1 + 0.5 * (w.count - 1)) }));
+}
+
+/**
+ * Plán videa udalosti: kúsky (úvod, prehrávanie, spomalene, diera, moment, záver) s dĺžkou v sekundách
+ * a `at(snímka)` → stav snímky (`{t, current, pop, showAll, phase}`). Null, keď udalosť nemá stopu
+ * v okne. Pure.
  * @param {object} event uložená udalosť (s `track` a `timeline`)
  * @param {Partial<typeof VIDEO_DEFAULTS>} [opts]
  */
@@ -47,9 +80,24 @@ export function videoPlan(event, opts = {}) {
   const moments = keyMoments(event);
   const [t0, t1] = cardTimeRange(track, incidentWindow(event, moments));
   if (!(t1 > t0)) return null;
+  // Okraj okolia v diere sa posunie na kraj diery (diera ostane jeden rýchly úsek).
+  const holes = [];
+  for (let i = 1; i < track.length; i += 1) {
+    if (track[i][0] - track[i - 1][0] >= CARD_GAP_S) holes.push([track[i - 1][0], track[i][0], Math.abs((track[i][3] ?? 0) - (track[i - 1][3] ?? 0))]);
+  }
+  const dropOf = (a, b) => holes.find(([p, q]) => p <= a + 1e-6 && q >= b - 1e-6)?.[2] ?? 0;
+  const spots = spotlightWindows(moments, t0, t1, o.spotlightS).map((w) => {
+    let { from, to } = w;
+    for (const [p, q] of holes) {
+      if (to > p && to < q) to = p;
+      if (from > p && from < q) from = q;
+    }
+    return { ...w, from, to };
+  }).filter((w) => w.to > w.from);
 
   const anchors = new Set([t0, t1]);
   for (const m of moments) if (m.t > t0 && m.t < t1) anchors.add(m.t);
+  for (const w of spots) { anchors.add(w.from); anchors.add(w.to); }
   for (let i = 1; i < track.length; i += 1) {
     const p = track[i - 1][0];
     const q = track[i][0];
@@ -59,17 +107,32 @@ export function videoPlan(event, opts = {}) {
     }
   }
   const times = [...anchors].sort((a, b) => a - b);
+  const spotOf = (a, b) => spots.find((w) => a >= w.from - 1e-6 && b <= w.to + 1e-6) || null;
   const segments = [];
-  for (let i = 1; i < times.length; i += 1) segments.push({ from: times[i - 1], to: times[i], gap: insideGap(track, times[i - 1], times[i]) });
-  const dataSeconds = segments.filter((s) => !s.gap).reduce((sum, s) => sum + (s.to - s.from), 0);
+  for (let i = 1; i < times.length; i += 1) {
+    const from = times[i - 1];
+    const to = times[i];
+    const gap = insideGap(track, from, to);
+    segments.push({ from, to, gap, spot: gap ? null : spotOf(from, to) });
+  }
+  const dataSeconds = segments.filter((s) => !s.gap && !s.spot).reduce((sum, s) => sum + (s.to - s.from), 0);
+  for (const w of spots) w.dataS = segments.filter((s) => s.spot === w).reduce((sum, s) => sum + (s.to - s.from), 0);
   // Momenty v danom čase (v poradí; v tej istej sekunde ich môže byť viac).
   const momentsAt = (t) => moments.flatMap((m, i) => (Math.abs(m.t - t) < 1e-6 ? [i] : []));
   const holds = (t) => momentsAt(t).map((i) => ({ kind: 'hold', phase: 'moment', dur: o.holdS, t, moment: i }));
 
   const pieces = [{ kind: 'hold', phase: 'intro', dur: o.introS, t: t0, moment: null }, ...holds(t0)];
   for (const s of segments) {
-    const dur = s.gap ? o.gapS : Math.max(o.minSegmentS, dataSeconds > 0 ? (o.playS * (s.to - s.from)) / dataSeconds : o.minSegmentS);
-    pieces.push({ kind: 'move', phase: s.gap ? 'gap' : 'play', dur, from: s.from, to: s.to }, ...holds(s.to));
+    let dur;
+    let phase;
+    if (s.gap) { dur = dropOf(s.from, s.to) >= o.gapDropFt ? o.gapDropS : o.gapS; phase = 'gap'; } else if (s.spot) {
+      dur = s.spot.dataS > 0 ? (s.spot.budgetS * (s.to - s.from)) / s.spot.dataS : o.minSegmentS;
+      phase = 'spotlight';
+    } else {
+      dur = Math.max(o.minSegmentS, dataSeconds > 0 ? (o.playS * (s.to - s.from)) / dataSeconds : o.minSegmentS);
+      phase = 'play';
+    }
+    pieces.push({ kind: 'move', phase, dur, from: s.from, to: s.to }, ...holds(s.to));
   }
   pieces.push({ kind: 'hold', phase: 'outro', dur: o.outroS, t: t1, moment: null });
 
@@ -90,6 +153,7 @@ export function videoPlan(event, opts = {}) {
     t0,
     t1,
     pieces,
+    spotlights: spots.map(({ from, to, budgetS }) => ({ from, to, budgetS })),
     /** Stav snímky `frame` (0 … totalFrames − 1). V závere nie je zvýraznený žiadny moment (súhrn). */
     at(frame) {
       const vt = Math.min(durationS, Math.max(0, frame / o.fps));
@@ -104,6 +168,7 @@ export function videoPlan(event, opts = {}) {
         pop: piece.phase === 'moment' ? local : null,
         showAll: outro,
         phase: piece.phase,
+        vt,
       };
     },
   };

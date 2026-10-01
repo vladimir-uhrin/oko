@@ -279,11 +279,11 @@ test('vlastník: karta z odkazu otvorená skôr, než prišiel zoznam — kontro
   assert.equal(pub.textContent, 'events.publish-confirm');
 });
 
-test('vlastník po zverejnení: VIDEO DO PRÍSPEVKU — počas kreslenia správa a tlačidlo nereaguje, potom súbor oko-udalost-<id>.mp4; chyba sa ukáže; bez videa na serveri tlačidlo nie je', async () => {
+test('vlastník po zverejnení: VIDEO DO PRÍSPEVKU (3D video nahraté) — počas sťahovania správa a tlačidlo nereaguje, potom súbor oko-udalost-<id>.mp4; chyba sa ukáže; nenahraté = poznámka; bez videa na serveri nič', async () => {
   const view = await fzView({ preview: false });
   const url = 'https://okolive.sk/s/Ab12cd34EF';
   const summary = { id: ID, icao24: '8965d1', callsign: 'FDB1073', status: 'confirmed', firstT: view.firstT, kinds: ['dive'], news: 'verified', publishable: true, published: url };
-  const post = { id: ID, publishable: true, headline: 'H', text: `Text\n\n${url}`, published: { url, shareId: 'Ab12cd34EF', t: 1 }, facebook: 'https://www.facebook.com/sharer/sharer.php?u=x', video: true };
+  const post = { id: ID, publishable: true, headline: 'H', text: `Text\n\n${url}`, published: { url, shareId: 'Ab12cd34EF', t: 1 }, facebook: 'https://www.facebook.com/sharer/sharer.php?u=x', video: true, videoReady: true };
   let release;
   let requests = 0;
   const saved = [];
@@ -335,4 +335,15 @@ test('vlastník po zverejnení: VIDEO DO PRÍSPEVKU — počas kreslenia správa
   one(none.section, 'events-review-btn').click();
   await flush();
   assert.equal(one(one(none.section, 'events-owner'), 'events-download-video'), undefined);
+  assert.equal(one(one(none.section, 'events-owner'), 'events-video-note'), undefined);
+  // Video ešte nenahraté: namiesto tlačidla poznámka.
+  const notYet = setup({ ownerHost: true, view, list: { events: [summary] }, post: { ...post, videoReady: false }, video: async () => blob });
+  await flush();
+  one(notYet.section, 'events-review-toggle').click();
+  await flush();
+  one(notYet.section, 'events-review-btn').click();
+  await flush();
+  const nOwner = one(notYet.section, 'events-owner');
+  assert.equal(one(nOwner, 'events-download-video'), undefined);
+  assert.equal(one(nOwner, 'events-video-note').textContent, 'events.video-not-captured');
 });

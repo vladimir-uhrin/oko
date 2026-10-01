@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { videoPlan } from './eventVideo.js';
-import { VIDEO_CODE_FILES, createEventVideoCache, createEventVideoRenderer, ffmpegArgs, videoCodeVersion } from './eventVideoRender.js';
+import { VIDEO_CODE_FILES, createEventVideoCache, createEventVideoRenderer, createEventVideoStore, ffmpegArgs, isMp4, videoCodeVersion, videoEventKey } from './eventVideoRender.js';
 
 const LOCAL_DATA = new URL('./local_data', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 const FAST = { introS: 0.1, playS: 0.6, holdS: 0.1, gapS: 0.1, minSegmentS: 0.05, outroS: 0.2 };
@@ -57,6 +57,8 @@ test('ffmpeg: JPEG zo vstupu → H.264 yuv420p s hlavičkou na začiatku (+fasts
   assert.deepEqual(args.slice(args.indexOf('-f'), args.indexOf('-f') + 8), ['-f', 'image2pipe', '-framerate', '30', '-c:v', 'mjpeg', '-i', 'pipe:0']);
   for (const [k, v] of [['-c:v', 'libx264'], ['-pix_fmt', 'yuv420p'], ['-movflags', '+faststart']]) assert.equal(args[args.lastIndexOf(k) + 1], v);
   assert.equal(args.at(-1), 'out.mp4');
+  const small = ffmpegArgs(30, 'o.mp4', { crf: 26, preset: 'medium' });
+  assert.deepEqual([small[small.indexOf('-crf') + 1], small[small.indexOf('-preset') + 1]], ['26', 'medium'], '3D video menšie');
 });
 
 test('každý snímok plánu ide do ffmpeg ako JPEG (snímky sa líšia); výsledok až po úspechu, bez dočasného súboru', async () => {
@@ -198,4 +200,43 @@ test('verzia kódu videa: odtlačok zdrojových súborov — zmena ktoréhokoľv
   files['eventCard.js'] += ' zmena kreslenia';
   assert.notEqual(videoCodeVersion('/src/data', read), v1);
   assert.match(videoCodeVersion(new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), /^[0-9a-f]{12}$/, 'skutočné súbory');
+});
+
+/** Najmenší súbor, ktorý vyzerá ako MP4: hlavička ftyp a obsah moov. */
+const fakeMp4 = (tag = 'x') => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(12), Buffer.from('....moov'), Buffer.from(tag.padEnd(48, '.'))]);
+
+test('3D video: kľúč len z údajov, ktoré video ukazuje (nie z kontroly správ ani zverejnenia)', () => {
+  const e = { ...uturnEvent('aaaaaa-20260922T1320'), news: { status: 'verified', type: null, trusted: [{ domain: 'jta.org' }], checkedT: 1 } };
+  const k = videoEventKey(e);
+  assert.match(k, /^[0-9a-f]{16}$/);
+  assert.equal(videoEventKey({ ...e, news: { ...e.news, checkedT: 999 } }), k, 'nová kontrola správ');
+  assert.equal(videoEventKey({ ...e, published: { url: 'https://okolive.sk/s/x' }, recheckNotBefore: 5, analyzedT: 7 }), k, 'zverejnenie, preverenie');
+  assert.notEqual(videoEventKey({ ...e, track: e.track.slice(1) }), k, 'iná stopa');
+  assert.notEqual(videoEventKey({ ...e, timeline: e.timeline.slice(0, 1) }), k, 'iné momenty');
+  assert.notEqual(videoEventKey({ ...e, news: { ...e.news, trusted: [...e.news.trusted, { domain: 'bbc.co.uk' }] } }), k, 'ďalšie médium');
+  assert.notEqual(videoEventKey({ ...e, status: 'confirmed' }), k, 'stav overenia');
+  assert.equal(isMp4(fakeMp4()), true);
+  assert.equal(isMp4(Buffer.from('<html>nie video</html>'.padEnd(80, ' '))), false);
+});
+
+test('3D video na disku: uloží sa len MP4, platí pre presne tie údaje, staršie video tej istej udalosti preč, iné udalosti ostanú', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-video3d-'));
+  try {
+    const store = createEventVideoStore({ dir: path.join(dir, '3d') });
+    const a = uturnEvent('aaaaaa-20260922T1320');
+    const b = uturnEvent('bbbbbb-20260922T1320');
+    assert.equal(store.find(a), null);
+    assert.throws(() => store.save(a, Buffer.from('nie video'.padEnd(100, '.'))), (err) => err.code === 'BAD_VIDEO');
+    const sa = store.save(a, fakeMp4('a1'));
+    store.save(b, fakeMp4('b1'));
+    assert.equal(store.find(a).file, sa.file);
+    assert.equal(readFileSync(sa.file).toString('latin1').includes('a1'), true);
+    const changed = { ...a, timeline: a.timeline.slice(0, 1) };
+    assert.equal(store.find(changed), null, 'iné údaje = iné video');
+    const sc = store.save(changed, fakeMp4('a2'));
+    assert.equal(existsSync(sa.file), false, 'staršie video tej istej udalosti preč');
+    assert.deepEqual(readdirSync(path.join(dir, '3d')).sort(), [path.basename(sc.file), path.basename(store.find(b).file)].sort(), 'iná udalosť ostáva, nič dočasné');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

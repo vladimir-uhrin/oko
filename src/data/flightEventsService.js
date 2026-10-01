@@ -14,8 +14,8 @@
 // Etapa 2b (zverejnenie): vlastník si na tomto počítači pozrie obrázok a text príspevku a klikne
 // „Zverejniť" — vznikne trvalý odkaz /s/<id> s obrázkom (Open Graph pre FB) a verejný pohľad
 // /api/events/public/<id> (panel v OKO). Nič sa nezverejní samo a nič sa neposiela na FB.
-// Video do príspevku (2026-10-01): /api/events/<id>/video.mp4 — len na tomto počítači, vlastník ho
-// stiahne a do príspevku na FB nahrá sám (eventVideo.js, eventVideoRender.js).
+// Video do príspevku (2026-10-01): /api/events/<id>/video.mp4 — len na tomto počítači. 3D video v štýle
+// OKO nahrá skript scripts/capture-event-video.mjs (POST), vlastník ho stiahne a na FB nahrá sám.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,6 +26,7 @@ import { verifyEvent } from './eventVerify.js';
 import { buildEventTimeline, describeMoment } from './eventTimeline.js';
 import { NEWS_WINDOW_AFTER_S, NEWS_WINDOW_BEFORE_S, flightIdentity, newsQuery, newsUrl, newsVerdict, parseTrustedList } from './eventNews.js';
 import { simplifyTrack } from './eventCard.js';
+import { VIDEO_UPLOAD_MAX_BYTES, isMp4 } from './eventVideoRender.js';
 import { eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, isPublishable, postText, publicEventView } from './eventPost.js';
 import { parseGdeltArticles } from './situationNews.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS, STATE_BACKFILL_UA, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
@@ -110,8 +111,8 @@ const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|
 /** Stopa na obrázok: body sietí, ktoré sú v atribúcii (OpenSky + adsb.lol), aj z druhej siete. */
 const DRAWN_SRC = (src) => src === PRIMARY_SRC || String(src || '').startsWith('adsb.lol');
 
-/** Telo POST ako JSON so stropom veľkosti (BODY_TOO_LARGE nad strop). */
-async function readJsonBody(req, maxBytes) {
+/** Telo POST so stropom veľkosti (BODY_TOO_LARGE nad strop). */
+async function readBody(req, maxBytes) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
@@ -120,7 +121,26 @@ async function readJsonBody(req, maxBytes) {
     if (size > maxBytes) throw Object.assign(new Error('body too large'), { code: 'BODY_TOO_LARGE' });
     chunks.push(buf);
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  return Buffer.concat(chunks);
+}
+/** Telo POST ako JSON so stropom veľkosti. */
+async function readJsonBody(req, maxBytes) {
+  return JSON.parse((await readBody(req, maxBytes)).toString('utf8'));
+}
+
+/**
+ * Nahratie videa (scripts/capture-event-video.mjs) len z tohto počítača: vlastná hlavička
+ * `X-OKO-Video-Upload: 1` (cudzia stránka ju bez predletu CORS, ktorý tu neprejde, nepošle),
+ * MP4 telo, žiadna cudzia stránka ani iný pôvod. Pure.
+ */
+export function isOwnLocalUpload(req) {
+  const h = req?.headers || {};
+  const site = String(h['sec-fetch-site'] || '');
+  if (site && site !== 'same-origin' && site !== 'none') return false;
+  const origin = String(h.origin || '');
+  if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)) return false;
+  if (String(h['x-oko-video-upload'] || '') !== '1') return false;
+  return String(h['content-type'] || '').toLowerCase().startsWith('video/mp4');
 }
 
 /**
@@ -246,8 +266,11 @@ export function trustedNewsLoader(file) {
  *   now?:() => number, sleep?:(ms:number) => Promise<void>, log?:(msg:string) => void, tickMs?:number,
  *   trustedFile?:string, renderCard?:((event:object, format?:string) => Promise<{jpeg:Buffer, width:number, height:number}>)|null,
  *   shareStore?:{save:Function, read:Function, remove:Function}|null, publicOrigin?:string,
- *   eventVideo?:{get:(event:object) => Promise<{file:string, cached:boolean}>}|null}} opts
- *   `eventVideo` = createEventVideoCache (video do príspevku; bez neho /video.mp4 odpovie 503)
+ *   eventVideo?:{get:(event:object) => Promise<{file:string, cached:boolean}>}|null,
+ *   videoStore?:{find:(event:object) => {file:string}|null, save:(event:object, buf:Buffer) => {file:string, bytes:number}}|null}} opts
+ *   `videoStore` = createEventVideoStore (3D video v štýle OKO nahraté skriptom capture-event-video.mjs —
+ *   to dostane vlastník tlačidlom); `eventVideo` = createEventVideoCache (2D video „karta" na požiadanie,
+ *   `video.mp4?style=karta`)
  */
 export function createFlightEventsService({
   getStore,
@@ -263,6 +286,7 @@ export function createFlightEventsService({
   shareStore = null,
   publicOrigin = EVENTS_PUBLIC_ORIGIN,
   eventVideo = null,
+  videoStore = null,
 } = {}) {
   const store = fileEventStore(eventsDir);
   store.load();
@@ -577,7 +601,7 @@ export function createFlightEventsService({
       text: postText(event, { url }),
       published: event.published || null,
       facebook: url ? facebookShareUrl(url) : null,
-      video: Boolean(eventVideo),
+      video: Boolean(videoStore),
     };
   }
 
@@ -788,7 +812,9 @@ export function createFlightEventsService({
       }
       // Všetko ostatné je súkromné: odpovedá len priamo z tohto počítača.
       if (!local) { json(res, 404, { error: 'not_found' }); return; }
-      if (method === 'POST' && !isOwnLocalPost(req)) { json(res, 403, { error: 'forbidden' }); return; }
+      // Zapisovacie akcie len z vlastnej stránky (JSON), nahratie videa len s vlastnou hlavičkou (MP4).
+      const videoUpload = method === 'POST' && /\/video\.mp4$/.test(route);
+      if (method === 'POST' && !(videoUpload ? isOwnLocalUpload(req) : isOwnLocalPost(req))) { json(res, 403, { error: 'forbidden' }); return; }
       if (route === '/') {
         // Predvolene len udalosti (overené a neoverené); `status=all` aj šum a vojenský výcvik.
         const param = url.searchParams.get('status');
@@ -814,24 +840,51 @@ export function createFlightEventsService({
       if (!action) { json(res, 200, event); return; }
       if (action === 'card.jpg' || action === 'post') {
         if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
-        if (action === 'post') { json(res, 200, postPayload(event)); return; }
+        if (action === 'post') {
+          // Je nahraté 3D video presne pre tieto údaje? (stopa sa pri starších udalostiach doplní)
+          const ready = videoStore ? Boolean(videoStore.find(await withTrack(event))) : false;
+          json(res, 200, { ...postPayload(event), videoReady: ready });
+          return;
+        }
         if (!renderCard) { json(res, 503, { error: 'card_unavailable' }); return; }
         const card = await renderCard(await withTrack(event), url.searchParams.get('format') === 'feed' ? 'feed' : 'og');
         res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'Content-Length': String(card.jpeg.length) });
         res.end(card.jpeg);
         return;
       }
-      // Video do príspevku (1080×1350 MP4): prvý raz sa kreslí (~30 s), potom z disku.
+      // Video do príspevku (1080×1350 MP4): 3D v štýle OKO nahraté skriptom capture-event-video.mjs;
+      // `?style=karta` = 2D video, ktoré server nakreslí sám (~30 s prvý raz, potom z disku).
       if (action === 'video.mp4') {
+        const full = await withTrack(event);
+        if (method === 'POST') {
+          if (!videoStore) { json(res, 503, { error: 'video_unavailable' }); return; }
+          let body;
+          try {
+            body = await readBody(req, VIDEO_UPLOAD_MAX_BYTES);
+          } catch (error) {
+            json(res, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: error?.code === 'BODY_TOO_LARGE' ? 'too_large' : 'bad_body' });
+            return;
+          }
+          if (!isMp4(body)) { json(res, 400, { error: 'not_mp4' }); return; }
+          const saved = videoStore.save(full, body);
+          log(`[events] ${event.id} ${event.callsign || ''} 3D video nahraté (${saved.bytes} B)`);
+          json(res, 200, { ok: true, bytes: saved.bytes });
+          return;
+        }
         if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
-        if (!eventVideo) { json(res, 503, { error: 'video_unavailable' }); return; }
         let video;
-        try {
-          video = await eventVideo.get(await withTrack(event));
-        } catch (error) {
-          if (error?.code === 'NO_TRACK') { json(res, 409, { error: 'no_track' }); return; }
-          if (error?.code === 'FFMPEG_MISSING') { json(res, 503, { error: 'video_unavailable' }); return; }
-          throw error;
+        if (url.searchParams.get('style') === 'karta') {
+          if (!eventVideo) { json(res, 503, { error: 'video_unavailable' }); return; }
+          try {
+            video = await eventVideo.get(full);
+          } catch (error) {
+            if (error?.code === 'NO_TRACK') { json(res, 409, { error: 'no_track' }); return; }
+            if (error?.code === 'FFMPEG_MISSING') { json(res, 503, { error: 'video_unavailable' }); return; }
+            throw error;
+          }
+        } else {
+          video = videoStore?.find(full) || null;
+          if (!video) { json(res, 404, { error: 'video_not_captured' }); return; }
         }
         const mp4 = await fs.promises.readFile(video.file);
         res.writeHead(200, {

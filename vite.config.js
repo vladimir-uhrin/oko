@@ -37,7 +37,7 @@ import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKe
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
-import { createEventVideoCache, createEventVideoRenderer, videoCodeVersion } from './src/data/eventVideoRender.js';
+import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
 import { resolveServerRole, roleServerOverrides, runsApiPlugins } from './scripts/lib/serverRole.mjs';
 import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
@@ -5822,6 +5822,8 @@ function flightHistoryProxy() {
           codeVersion: videoCodeVersion(path.join(__dirname, 'src', 'data')),
           render: createEventVideoRenderer({ dataDir: path.join(__dirname, 'src', 'data', 'local_data') }),
         }),
+        // 3D video v štýle OKO nahraté skriptom scripts/capture-event-video.mjs (tlačidlo VIDEO DO PRÍSPEVKU).
+        videoStore: createEventVideoStore({ dir: path.join(path.dirname(cfg.dbPath), 'event-video', '3d') }),
       });
       if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
         const events = flightEvents;
