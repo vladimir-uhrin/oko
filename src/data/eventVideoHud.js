@@ -30,6 +30,28 @@ export const VIDEO_BRAND = Object.freeze({
   claim: 'Lietadlá, lode a konflikty naživo v 3D',
   logoHref: '/logo.svg',
 });
+/**
+ * Háčik úvodnej karty (vlastník 10-02: „prvé 3–4 sekundy musia diváka chytiť… zmienka o únose a záchrana
+ * lietadla by mala byť na začiatku"): štítok, 1–3 krátke riadky výroku, voliteľný doplnok a POVINNÝ zdroj
+ * (kto to tvrdí, ktoré médiá) — overený výrok, nikdy bez uvedenia zdroja. Null bez háčika; zlý vstup
+ * vyhodí chybu s `code: 'BAD_HOOK'` (nahrávanie sa nezačne). Pure.
+ * @returns {{tag: string, lines: string[], sub: string|null, source: string}|null}
+ */
+export function normalizeVideoHook(input) {
+  if (input === null || input === undefined) return null;
+  const bad = (why) => Object.assign(new Error(`háčik: ${why}`), { code: 'BAD_HOOK' });
+  const str = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+  const tag = str(input.tag);
+  const lines = Array.isArray(input.lines) ? input.lines.map(str).filter(Boolean) : [];
+  const sub = str(input.sub) || null;
+  const source = str(input.source);
+  if (!tag || tag.length > 40) throw bad('štítok 1–40 znakov');
+  if (!lines.length || lines.length > 3 || lines.some((l) => l.length > 33)) throw bad('1–3 riadky výroku, každý najviac 33 znakov');
+  if (sub && sub.length > 48) throw bad('doplnok najviac 48 znakov');
+  if (source.length < 5 || source.length > 90) throw bad('zdroj (kto to tvrdí, médiá) je povinný, 5–90 znakov');
+  return { tag: tag.toUpperCase(), lines, sub, source };
+}
+
 const MONO = "'JetBrains Mono', 'SF Mono', 'Fira Code', monospace";
 const SANS = "'Inter', 'Segoe UI', Arial, sans-serif";
 const ACCENT = '#00d4ff';
@@ -176,9 +198,10 @@ function liveDomain(cx, y, size) {
  * @param {object} scene eventVideoScene(...)
  * @param {object} fs scene.frame(n)
  * @param {Record<string, {x: number, y: number}>} anchors poloha stredu diery na obrazovke (`gap<i>`)
- * @param {{logoMarkup?: {viewBox: string, body: string}|null}} [opts] logo vložené do SVG (inlineLogoMarkup)
+ * @param {{logoMarkup?: {viewBox: string, body: string}|null, hook?: object|null}} [opts] logo vložené do SVG
+ *   (inlineLogoMarkup); `hook` = háčik na úvodnej karte (normalizeVideoHook)
  */
-export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMarkup = null } = {}) {
+export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMarkup = null, hook = null } = {}) {
   const logo = logoAt(logoMarkup);
   const { w: W, h: H } = VIDEO_3D_FORMAT;
   const { s, plane, vt } = fs;
@@ -192,8 +215,28 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     + `<linearGradient id="card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.82"/><stop offset="0.62" stop-color="#000" stop-opacity="0.35"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient></defs>`);
   out.push(`<rect width="${W}" height="236" fill="url(#top)"/><rect y="${H - 440}" width="${W}" height="440" fill="url(#bot)"/>`);
 
+  // ── otvorenie s háčikom: overený výrok so zdrojom veľkým písmom, značka menšia ──
+  if (layers.opening > 0 && hook) {
+    out.push(`<g opacity="${f1(layers.opening)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.42"/><rect width="${W}" height="${H * 0.82}" fill="url(#card)"/>`);
+    out.push(logo(W / 2 - 52, 58, 104));
+    out.push(wordmark(W / 2 + 6, 232, 72, 'middle'));
+    out.push(creditLine(W / 2, 276, 15, 'middle'));
+    const top = 326;
+    const lineH = 66;
+    const panelH = 92 + hook.lines.length * lineH + (hook.sub ? 54 : 0) + 46;
+    out.push(`<rect x="44" y="${top}" width="${W - 88}" height="${panelH}" rx="18" fill="rgba(5,14,22,0.88)" stroke="rgba(255,90,90,0.75)" stroke-width="2"/>`);
+    out.push(`<text x="${W / 2}" y="${top + 52}" text-anchor="middle" font-family="${MONO}" font-size="23" font-weight="700" letter-spacing="5" fill="#ff8a8a">${esc(hook.tag)}</text>`);
+    hook.lines.forEach((l, j) => out.push(`<text x="${W / 2}" y="${top + 120 + j * lineH}" text-anchor="middle" font-size="54" font-weight="700" fill="#ffffff" ${shadow}>${esc(l)}</text>`));
+    let y = top + 120 + (hook.lines.length - 1) * lineH + 56;
+    if (hook.sub) { out.push(`<text x="${W / 2}" y="${y}" text-anchor="middle" font-size="33" font-weight="600" fill="#f2fbff">${esc(hook.sub)}</text>`); y += 46; }
+    out.push(`<text x="${W / 2}" y="${y}" text-anchor="middle" font-size="22" fill="${DIM}">${esc(hook.source)}</text>`);
+    out.push(`<text x="${W / 2}" y="${top + panelH + 50}" text-anchor="middle" font-size="27" font-weight="600" fill="rgba(232,234,237,0.9)" ${shadow}>${esc(`${flightLine(event)} · ${dateSk(event.firstT)}`)}</text>`);
+    out.push(`<text x="${W / 2}" y="${H - 104}" text-anchor="middle" font-family="${MONO}" font-size="46" font-weight="600" letter-spacing="5" fill="${ACCENT}" ${shadow}>${VIDEO_BRAND.domain}</text>`);
+    out.push('</g>');
+  }
+
   // ── otvorenie: značka a čo sa stalo ────────────────────────────
-  if (layers.opening > 0) {
+  if (layers.opening > 0 && !hook) {
     // Zem z obežnej dráhy je svetlá — stmavenie a panel, nech sa značka aj názov udalosti dajú prečítať.
     out.push(`<g opacity="${f1(layers.opening)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.38"/><rect width="${W}" height="${H * 0.78}" fill="url(#card)"/>`);
     out.push(logo(W / 2 - 75, 92, 150));

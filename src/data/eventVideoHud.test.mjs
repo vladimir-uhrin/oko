@@ -196,3 +196,27 @@ test('doplnené zo správ (FZ1073): pri diere „PODĽA SPRÁV / pod 17 000 ft u
   const { e: pe, plan: pp, scene: ps } = await fz();
   for (const fr of [0, Math.round(pp.totalFrames / 2), pp.totalFrames - 1]) assert.ok(!texts(hud(pe, ps, fr)).some((l) => /PODĽA SPRÁV|podľa správ/.test(l)));
 });
+
+test('háčik na úvodnej karte (vlastník 10-02: „prvé 3–4 sekundy musia diváka chytiť"): veľký overený výrok so zdrojom hneď na prvej snímke, značka ostáva; bez zdroja sa háčik neprijme', async () => {
+  const { normalizeVideoHook } = await import('./eventVideoHud.js');
+  const input = { tag: 'útok na palube', lines: ['Pilot pobodal kolegu', 'a pokúsil sa zrútiť lietadlo'], sub: 'Cestujúci ho zneškodnili', source: 'podľa izraelského premiéra · Al Jazeera, Arab News' };
+  const hook = normalizeVideoHook(input);
+  assert.equal(hook.tag, 'ÚTOK NA PALUBE');
+  assert.equal(normalizeVideoHook(null), null);
+  for (const bad of [{ ...input, source: '' }, { ...input, lines: [] }, { ...input, lines: ['x'.repeat(34)] }, { ...input, tag: '' }, { ...input, lines: ['a', 'b', 'c', 'd'] }]) {
+    assert.throws(() => normalizeVideoHook(bad), (e) => e.code === 'BAD_HOOK', JSON.stringify(bad));
+  }
+  const { e } = await fz();
+  const plan = videoPlan(e, { openingS: 7.9, endCardS: 3 });
+  const scene = eventVideoScene(e, plan);
+  const first = texts(buildEventVideoHudSvg(e, scene, scene.frame(0), {}, { hook }));
+  for (const t of ['ÚTOK NA PALUBE', 'Pilot pobodal kolegu', 'a pokúsil sa zrútiť lietadlo', 'Cestujúci ho zneškodnili', 'podľa izraelského premiéra · Al Jazeera, Arab News']) {
+    assert.ok(first.includes(t), `${t} na prvej snímke`);
+  }
+  assert.ok(first.includes('okolive.sk'), 'portál ostáva');
+  assert.ok(first.some((t) => t.startsWith('Let FZ1073')), 'let a dátum pod háčikom');
+  assert.ok(!first.includes(eventWhat(e).toUpperCase()), 'namiesto všeobecného „čo sa stalo" výrok');
+  // Na 3. sekunde (90. snímka) háčik stále celý viditeľný; bez háčika pôvodná karta.
+  assert.ok(texts(buildEventVideoHudSvg(e, scene, scene.frame(90), {}, { hook })).includes('Pilot pobodal kolegu'));
+  assert.ok(texts(buildEventVideoHudSvg(e, scene, scene.frame(0), {})).includes(eventWhat(e).toUpperCase()));
+});

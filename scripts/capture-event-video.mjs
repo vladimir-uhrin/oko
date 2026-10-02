@@ -17,7 +17,8 @@
 //
 // Spustenie (beží služba oko-dev na localhoste):
 //   node scripts/capture-event-video.mjs --event <id> [--url http://localhost:4173] [--out <mp4>]
-//     [--no-upload] [--frames 0,150,300 [--frames-dir <adresár>]] [--reported <fakty.json>]
+//     [--no-upload] [--frames 0,150,300 [--frames-dir <adresár>]] [--reported <fakty.json>] [--plan <voľby.json>]
+//     [--hook <háčik.json>]  — háčik úvodnej karty {tag, lines[1–3], sub?, source} (normalizeVideoHook, zdroj povinný)
 // `--plan <voľby.json>`: tempo videa (voľby videoPlan, napr. dlhšie otvorenie a zastavenia, keď má video
 // komentár — každá veta má zaznieť pri svojom zábere); prepíšu predvolené `{ openingS: 2.6, endCardS: 3 }`.
 // `--reported`: fakty zo správ (telo pre POST /api/events/<id>/reported) sa overia tým istým kódom ako
@@ -32,7 +33,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { videoPlan } from '../src/data/eventVideo.js';
 import { FT_M, eventVideoScene } from '../src/data/eventVideoScene.js';
-import { VIDEO_3D_FORMAT, buildEventVideoHudSvg, inlineLogoMarkup } from '../src/data/eventVideoHud.js';
+import { VIDEO_3D_FORMAT, buildEventVideoHudSvg, inlineLogoMarkup, normalizeVideoHook } from '../src/data/eventVideoHud.js';
 import { VIDEO_3D_ENCODE, ffmpegArgs } from '../src/data/eventVideoRender.js';
 import { normalizeReportedFacts } from '../src/data/eventReported.js';
 import { parseTrustedList } from '../src/data/eventNews.js';
@@ -83,6 +84,9 @@ const scene = eventVideoScene(event, plan);
 if (!scene) { console.error('[event-video] udalosť nemá stopu v okne'); process.exit(1); }
 console.log(`[event-video] ${id}: ${plan.durationS.toFixed(1)} s, ${plan.totalFrames} snímok`);
 const logoMarkup = inlineLogoMarkup(fs.readFileSync(path.join(root, 'public', 'logo.svg'), 'utf8'));
+// Háčik úvodnej karty (overený výrok so zdrojom) — prvé sekundy musia diváka chytiť (vlastník 10-02).
+const hook = flag('--hook') ? normalizeVideoHook(JSON.parse(fs.readFileSync(path.resolve(flag('--hook')), 'utf8'))) : null;
+if (hook) console.log(`[event-video] háčik: ${hook.tag} — ${hook.lines.join(' ')} (${hook.source})`);
 
 // Bez vrstiev (dnešná premávka sa nemieša s historickým letom), bez panelov a masky, fotoreál.
 const hash = `v=2&l=&lat=${scene.center.lat.toFixed(4)}&lon=${scene.center.lon.toFixed(4)}&alt=400000&heading=${scene.heading.toFixed(1)}&pitch=-40&roll=0`
@@ -167,7 +171,7 @@ async function shoot(frame) {
   }
   await page.evaluate(() => window.__okoEventVideo.render());
   const anchors = await page.evaluate((l) => window.__okoEventVideo.project(l), anchorList);
-  await page.evaluate((svg) => { document.getElementById('oko-video-hud').innerHTML = svg; }, buildEventVideoHudSvg(event, scene, st, anchors, { logoMarkup }));
+  await page.evaluate((svg) => { document.getElementById('oko-video-hud').innerHTML = svg; }, buildEventVideoHudSvg(event, scene, st, anchors, { logoMarkup, hook }));
   return page.screenshot({ type: 'jpeg', quality: 92 });
 }
 /** Snímka s časovým limitom; po druhom a treťom zlyhaní celý prehliadač nanovo (ffmpeg beží ďalej). */
