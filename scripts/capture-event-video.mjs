@@ -18,6 +18,8 @@
 // Spustenie (beží služba oko-dev na localhoste):
 //   node scripts/capture-event-video.mjs --event <id> [--url http://localhost:4173] [--out <mp4>]
 //     [--no-upload] [--frames 0,150,300 [--frames-dir <adresár>]] [--reported <fakty.json>]
+// `--plan <voľby.json>`: tempo videa (voľby videoPlan, napr. dlhšie otvorenie a zastavenia, keď má video
+// komentár — každá veta má zaznieť pri svojom zábere); prepíšu predvolené `{ openingS: 2.6, endCardS: 3 }`.
 // `--reported`: fakty zo správ (telo pre POST /api/events/<id>/reported) sa overia tým istým kódom ako
 // v službe (src/data/eventReported.js — dôveryhodné médiá, citáty, letisko z OurAirports) a použijú sa
 // namiesto uložených — keď služba novú cestu ešte nemá (vydanie oko-api), video aj tak sedí na udalosť
@@ -75,7 +77,8 @@ if (flag('--reported')) {
   console.log(`[event-video] zo správ: ${result.facts.map((f) => `${f.kind} (${f.domains.join(', ')})`).join('; ') || 'nič'}`);
 }
 // Otvorenie a koncová karta so značkou OKO, okolive.sk a autorom (vlastník: „propagovať doménu aj moje meno").
-const plan = videoPlan(event, { openingS: 2.6, endCardS: 3 });
+const planOpts = flag('--plan') ? JSON.parse(fs.readFileSync(path.resolve(flag('--plan')), 'utf8')) : {};
+const plan = videoPlan(event, { openingS: 2.6, endCardS: 3, ...planOpts });
 const scene = eventVideoScene(event, plan);
 if (!scene) { console.error('[event-video] udalosť nemá stopu v okne'); process.exit(1); }
 console.log(`[event-video] ${id}: ${plan.durationS.toFixed(1)} s, ${plan.totalFrames} snímok`);
