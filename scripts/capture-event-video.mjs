@@ -87,16 +87,26 @@ const logoMarkup = inlineLogoMarkup(fs.readFileSync(path.join(root, 'public', 'l
 // Bez vrstiev (dnešná premávka sa nemieša s historickým letom), bez panelov a masky, fotoreál.
 const hash = `v=2&l=&lat=${scene.center.lat.toFixed(4)}&lon=${scene.center.lon.toFixed(4)}&alt=400000&heading=${scene.heading.toFixed(1)}&pitch=-40&roll=0`
   + '&style=normal&bloom=0&sharpen=1&si=49&hud=tactical&hv=0&dm=OFF&sc=0&map=photoreal';
-const browser = await puppeteer.launch({
+/** Chrome s GPU; po zaseknutí sa spustí celý nanovo (zaseknutý GPU proces nová stránka neobíde). */
+const launchBrowser = () => puppeteer.launch({
   headless: true, pipe: true, protocolTimeout: 300_000,
   args: ['--no-sandbox', `--window-size=${W},${H}`, '--enable-gpu', '--use-angle=d3d11', '--ignore-gpu-blocklist'],
 });
+let browser = await launchBrowser();
 let tiles = 0;
 let page = null;
 
-/** Nová stránka OKO so scénou udalosti (aj po zaseknutí prehliadača). */
-async function openScene() {
+/**
+ * Nová stránka OKO so scénou udalosti. `fresh` = celý prehliadač nanovo (2026-10-02: po zaseknutí snímky
+ * sa v tom istom prehliadači OKO 3× za sebou nenačítalo, hoci dev server odpovedal — nahrávanie spadlo dvakrát).
+ */
+async function openScene({ fresh = false } = {}) {
   if (page) await page.close().catch(() => {});
+  page = null;
+  if (fresh) {
+    await browser.close().catch(() => {});
+    browser = await launchBrowser();
+  }
   page = await browser.newPage();
   await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
   page.on('requestfinished', (req) => { if (/3dtiles|assets\.ion|api\.cesium\.com|tile\.googleapis/.test(req.url())) tiles += 1; });
@@ -160,14 +170,16 @@ async function shoot(frame) {
   await page.evaluate((svg) => { document.getElementById('oko-video-hud').innerHTML = svg; }, buildEventVideoHudSvg(event, scene, st, anchors, { logoMarkup }));
   return page.screenshot({ type: 'jpeg', quality: 92 });
 }
-/** Snímka s časovým limitom; po druhom zlyhaní nová stránka. */
+/** Snímka s časovým limitom; po druhom a treťom zlyhaní celý prehliadač nanovo (ffmpeg beží ďalej). */
 async function shootSafe(frame) {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
     try {
       return await withTimeout(shoot(frame), FRAME_TIMEOUT_MS, `snímka ${frame}`);
     } catch (error) {
       console.log(`[event-video] snímka ${frame}, pokus ${attempt}: ${error.message}`);
-      if (attempt >= 2) await openScene();
+      if (attempt >= 2 && attempt < 4) {
+        try { await openScene({ fresh: true }); } catch (e) { console.log(`[event-video] nový prehliadač: ${e.message}`); }
+      }
     }
   }
   throw new Error(`snímka ${frame} sa nepodarila`);
