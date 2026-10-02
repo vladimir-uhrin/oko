@@ -100,7 +100,9 @@ test('doplnené zo správ (FZ1073): pristátie v Tabuku ako posledný moment „
   assert.deepEqual(ms.slice(0, 6).map(({ reportedNotes, ...m }) => m), keyMoments(plain));
   const lines = postText(e).split('\n');
   assert.ok(lines.includes('• 06:45 — núdzové pristátie na letisku Tabuk (TUU) — podľa správ (Arab News, Al Jazeera)'), lines.join('\n'));
-  assert.ok(lines.some((l) => l.startsWith('• 05:22 — 9 min bez údajov — podľa správ pod 17 000 ft už o 05:22 (údaje Flightradar24 podľa Al Jazeera, Arab News)')), lines.join('\n'));
+  assert.ok(lines.some((l) => l.startsWith('• 05:22 — 9 min bez údajov — podľa správ pod 17 000 ft už o 05:22 (Al Jazeera, Arab News)')), lines.join('\n'));
+  // Konkurencia sa nikde nemenuje (vlastník 10-02: „vždy spomínaj môj portál").
+  assert.ok(!/flight\s*radar/i.test(postText(e)) && !/flight\s*radar/i.test(JSON.stringify(publicEventView(e))), 'Flightradar24 ani v texte, ani na verejnej karte');
   assert.equal(lines.filter((l) => l.startsWith('https://')).length, 3, 'stále najviac 3 odkazy');
   const honest = 'Údaje „podľa správ" siete prijímačov nezachytili — uvádzajú ich médiá pri každom bode.';
   assert.equal(lines[lines.indexOf('• 06:45 — núdzové pristátie na letisku Tabuk (TUU) — podľa správ (Arab News, Al Jazeera)') + 1], honest, 'hneď za zoznamom');

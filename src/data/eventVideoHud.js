@@ -8,7 +8,7 @@
 //                 UTC a dátum a stavové štítky (BEZ ÚDAJOV / KONIEC ÚDAJOV / SPOMALENÉ), dole karta letu
 //                 (čo sa stalo, let, overenie, výška, aktuálny moment, profil výšky s čiarkovanou dierou),
 //                 pri diere veľký nápis „9 MIN BEZ ÚDAJOV / kleslo o 12 925 ft",
-//   podľa správ   (eventReported.js) pri diere riadky „PODĽA SPRÁV · ÚDAJE FLIGHTRADAR24 / pod 17 000 ft
+//   podľa správ   (eventReported.js) pri diere riadky „PODĽA SPRÁV / pod 17 000 ft
 //                 už o 05:22 / médiá"; pri pristátí zo správ štítok PODĽA SPRÁV, hodiny bez sekúnd, nápis pri
 //                 letisku s médiami, výška „—", prázdny krúžok s číslom (aj v súhrne),
 //   záver         súhrn všetkých momentov, overenie, médiá, „Celá rekonštrukcia: okolive.sk",
@@ -17,7 +17,7 @@
 
 import { CARD_GAP_S } from './eventCard.js';
 import { eventWhat, flightLine, isPublishable, outletName, verifiedSources } from './eventPost.js';
-import { descentCore, landingPhrase } from './eventReported.js';
+import { descentCore, landingPhrase, publicVia } from './eventReported.js';
 import { clockUtc, momentPhrase } from './eventTimeline.js';
 
 export const VIDEO_3D_FORMAT = Object.freeze({ w: 1080, h: 1350 });
@@ -86,7 +86,8 @@ const mediaOf = (f) => [...new Set((f?.domains || []).map(outletName))].join(', 
 export function gapLabelLines(g) {
   const [head, drop] = gapLabel(g).split(' · ');
   const notes = (g.reported || []).map((f) => ({
-    title: `PODĽA SPRÁV${f.via?.sk ? ` · ÚDAJE ${f.via.sk.toUpperCase()}` : ''}`,
+    // Konkurenčná služba sledovania letov sa nemenuje (eventReported.HIDDEN_VIA) — len „PODĽA SPRÁV" a médiá.
+    title: `PODĽA SPRÁV${publicVia(f, 'sk') ? ` · ÚDAJE ${publicVia(f, 'sk').toUpperCase()}` : ''}`,
     text: descentCore(f, 'sk'),
     media: mediaOf(f),
   }));

@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REPORTED_LIMITS, descentCore, descentNote, landingPhrase, normalizeReportedFacts, reportedFacts, reportedForGap, reportedLandingMoments,
+  REPORTED_LIMITS, descentCore, descentNote, landingPhrase, normalizeReportedFacts, publicVia, reportedFacts, reportedForGap, reportedLandingMoments,
 } from './eventReported.js';
 import { FZ1073_REPORTED_INPUT, fz1073Event, fz1073ReportedEvent, reportedContext } from './fixtures/flightEventFixtures.mjs';
 
@@ -112,7 +112,15 @@ test('texty: pristátie a pokles po slovensky aj anglicky, s menami médií a t�
   assert.equal(landingPhrase(landing, 'en'), 'emergency landing at Tabuk (TUU)');
   assert.equal(descentCore(descent, 'sk'), 'pod 17 000 ft už o 05:22');
   assert.equal(descentCore(descent, 'en'), 'below 17,000 ft by 05:22');
-  assert.equal(descentNote(descent, 'sk'), 'podľa správ pod 17 000 ft už o 05:22 (údaje Flightradar24)');
-  assert.equal(descentNote(descent, 'sk', 'Al Jazeera, Arab News'), 'podľa správ pod 17 000 ft už o 05:22 (údaje Flightradar24 podľa Al Jazeera, Arab News)');
-  assert.equal(descentNote(descent, 'en'), 'per reports below 17,000 ft by 05:22 (Flightradar24 data)');
+  // Konkurenčná služba (Flightradar24) sa nemenuje — vlastník 10-02: „to tam nespomínaj, vždy spomínaj môj portál".
+  assert.equal(descent.via.sk, 'Flightradar24', 'v uloženom fakte (audit) ostáva');
+  assert.equal(descentNote(descent, 'sk'), 'podľa správ pod 17 000 ft už o 05:22');
+  assert.equal(descentNote(descent, 'sk', 'Al Jazeera, Arab News'), 'podľa správ pod 17 000 ft už o 05:22 (Al Jazeera, Arab News)');
+  assert.equal(descentNote(descent, 'en'), 'per reports below 17,000 ft by 05:22');
+  for (const name of ['FlightRadar 24', 'flightaware', 'ADS-B Exchange', 'ADSBexchange', 'RadarBox', 'Plane Finder']) {
+    assert.equal(publicVia({ via: { sk: name } }, 'sk'), null, name);
+  }
+  // Iný zdroj merania (nie konkurencia) sa uvedie.
+  const official = { ...descent, via: { sk: 'saudský úrad pre letectvo', en: 'Saudi aviation authority' } };
+  assert.equal(descentNote(official, 'sk', 'Al Jazeera'), 'podľa správ pod 17 000 ft už o 05:22 (údaje saudský úrad pre letectvo podľa Al Jazeera)');
 });

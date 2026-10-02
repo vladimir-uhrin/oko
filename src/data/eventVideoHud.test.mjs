@@ -151,7 +151,7 @@ test('prechody po sebe: otvorenie dozneje skôr, než nastúpi hlavička; súhrn
   }
 });
 
-test('doplnené zo správ (FZ1073): pri diere „PODĽA SPRÁV · ÚDAJE FLIGHTRADAR24 / pod 17 000 ft už o 05:22 / médiá"; pri letisku čas zo správy, štítok PODĽA SPRÁV, žiadna nameraná výška; súhrn s prázdnym krúžkom', async () => {
+test('doplnené zo správ (FZ1073): pri diere „PODĽA SPRÁV / pod 17 000 ft už o 05:22 / médiá" (konkurenčnú službu nemenuje); pri letisku čas zo správy, štítok PODĽA SPRÁV, žiadna nameraná výška; súhrn s prázdnym krúžkom', async () => {
   const { fz1073ReportedEvent } = await import('./fixtures/flightEventFixtures.mjs');
   const { e: base } = await fz();
   const e = await fz1073ReportedEvent(base);
@@ -164,7 +164,8 @@ test('doplnené zo správ (FZ1073): pri diere „PODĽA SPRÁV · ÚDAJE FLIGHTR
   const gapFrame = framesOf(plan, scene.gaps[0].piece)[0] + 3;
   const gsvg = buildEventVideoHudSvg(e, scene, scene.frame(gapFrame), anchors);
   const gt = texts(gsvg);
-  assert.ok(gt.includes('PODĽA SPRÁV · ÚDAJE FLIGHTRADAR24'), gt.join(' | '));
+  assert.ok(gt.includes('PODĽA SPRÁV'), gt.join(' | '));
+  assert.ok(!/flight\s*radar/i.test(gsvg), 'konkurenčná služba sa vo videu nemenuje (vlastník 10-02)');
   assert.ok(gt.includes('pod 17 000 ft už o 05:22'));
   assert.ok(gt.includes('Al Jazeera, Arab News'));
   const box = /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="(\d+)" rx="10" fill="rgba\(7,19,31,0.88\)"/.exec(gsvg);

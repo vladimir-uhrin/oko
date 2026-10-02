@@ -145,13 +145,26 @@ export function reportedForGap(event, gap) {
 }
 
 /**
- * „podľa správ pod 17 000 ft už o 05:22 (údaje Flightradar24)" — poznámka k diere; s menami médií
- * „(údaje Flightradar24 podľa Al Jazeera, Arab News)". Pure.
+ * Konkurenčné služby sledovania letov sa vo výstupoch OKO nemenujú (vlastník 10-02: „to tam nespomínaj,
+ * vždy spomínaj môj portál") — fakt ostáva „podľa správ" s menami médií a odkazmi; kto meral, je len
+ * v uloženom citáte (audit).
+ */
+export const HIDDEN_VIA = /flight\s*-?\s*radar|flightaware|ads-?b\s*-?\s*exchange|radarbox|plane\s*finder/i;
+
+/** Kto meral (napr. „letisko Tabuk") na zobrazenie, alebo null (nič, konkurenčná služba). Pure. */
+export function publicVia(f, lang = 'sk') {
+  const v = f?.via?.[lang === 'en' ? 'en' : 'sk'] || f?.via?.sk || null;
+  return v && !HIDDEN_VIA.test(v) ? v : null;
+}
+
+/**
+ * „podľa správ pod 17 000 ft už o 05:22" — poznámka k diere; s menami médií „(Al Jazeera, Arab News)";
+ * so zobraziteľným zdrojom merania „(údaje … podľa Al Jazeera, Arab News)". Pure.
  * @param {string} [outlets] mená médií (text príspevku)
  */
 export function descentNote(f, lang = 'sk', outlets = '') {
   const en = lang === 'en';
-  const via = f.via?.[en ? 'en' : 'sk'] || f.via?.sk || null;
+  const via = publicVia(f, lang);
   let data = '';
   if (via) data = en ? ` (${via} data${outlets ? ` via ${outlets}` : ''})` : ` (údaje ${via}${outlets ? ` podľa ${outlets}` : ''})`;
   else if (outlets) data = ` (${outlets})`;
