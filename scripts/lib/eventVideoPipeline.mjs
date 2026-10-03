@@ -238,8 +238,12 @@ export function captureVideo({ eventFile, planFile, hookFile, out, capture = {},
   const args = [script, '--event-file', eventFile, '--no-upload', '--plan', planFile, '--out', out, ...(hookFile ? ['--hook', hookFile] : []), ...(capture.baseUrl ? ['--url', capture.baseUrl] : [])];
   return new Promise((resolve, reject) => {
     const child = spawn(node, args, { cwd: ROOT, env: { ...process.env, FFMPEG_PATH: ffmpeg }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Celý výpis nahrávania vedľa výstupu (obraz.mp4.log) — pod službou ho inak nikto nevidí.
+    const logFile = `${out}.log`;
+    try { fs.writeFileSync(logFile, `# ${new Date().toISOString()} ${node} ${args.join(' ')}\n`); } catch { /* bez záznamu */ }
     let tail = '';
     const onData = (d) => {
+      try { fs.appendFileSync(logFile, String(d)); } catch { /* bez záznamu */ }
       tail = (tail + d).slice(-4000);
       const m = /\[event-video\] (\d+)\/(\d+)/g;
       let last = null;
