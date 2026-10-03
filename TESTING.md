@@ -78,6 +78,23 @@ before publishing changes of the panel, the layers or the cards — one page loa
 (one 3D tiles session), never in a loop. Options: `--theatres hormuz,overview`,
 `--sizes 1600x900,1366x768`, `--settle 30000`.
 
+## Aircraft card — before every publish
+
+The owner's rule (2026-09-30): route, ETA and flight number of the aircraft card disappeared
+repeatedly, so the card is checked before each publish. The script opens the real app over
+Central Europe (OSM base map — no Google tiles), turns the flights layer on, picks a flight
+whose card data carry a flight number and a time to landing, hovers it and clicks it:
+
+```sh
+node scripts/qa-flight-card.mjs [--url http://localhost:4173] [--out qa-shots]
+```
+
+Exit 0 = the hover card shows the callsign, the flight number, the route „A → B", the landing
+time and both charts; 1 = something is missing (named in the output); 2 = could not be checked
+(no flight with a known route in view — run again). The card after the click is drawn into the
+canvas, so look at `qa-shots/flight-card-click.png`. What counts as a complete card is unit
+tested (`scripts/lib/qaFlightCard.test.mjs`).
+
 ## Setup
 
 - **URL:** http://localhost:4173 — auto-flies to Austin on load. Give photoreal tiles ~10s.
