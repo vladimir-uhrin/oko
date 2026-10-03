@@ -134,3 +134,22 @@ test('bez služby: chýbajúca nahrávka = chyba NO_VOICE s vetou; nahrávky z p
   assert.ok(ok.voiceFiles.m5);
   await assert.rejects(run([line('m2', 'Nová veta.')], null), (e) => e.code === 'NO_VOICE' && e.line === 'm2' && /Nová veta/.test(e.message));
 });
+
+test('zhrnutie zlyhania nahrávania: prvý riadok s chybou (Chrome v systémovom profile služby) + posledný riadok, bez zásobníka', async () => {
+  const { captureFailureSummary } = await import('./eventVideoPipeline.mjs');
+  const out = [
+    '[event-video] 8965d1: 67.8 s, 2033 snímok',
+    'C:/x/BrowserLauncher.js:334',
+    '                    throw new Error(`Could not find Chrome (ver. ${v}).`);',
+    'Error: Could not find Chrome (ver. 145.0.7632.77). This can occur if either',
+    ' 2. your cache path is incorrectly configured (which is: C:/Windows/System32/config/systemprofile/.cache/puppeteer).',
+    '    at async file:///C:/x/scripts/capture-event-video.mjs:102:15',
+    '',
+    'Node.js v24.20.0',
+  ].join('\r\n');
+  const s = captureFailureSummary(out);
+  assert.match(s, /^Error: Could not find Chrome/, 'riadok Error: má prednosť pred riadkom zdroja s throw');
+  assert.match(s, /Node\.js v24\.20\.0$/);
+  assert.doesNotMatch(s, /at async/);
+  assert.equal(captureFailureSummary(''), 'bez výpisu');
+});

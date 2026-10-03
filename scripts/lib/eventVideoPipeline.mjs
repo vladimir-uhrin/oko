@@ -218,6 +218,19 @@ export async function prepareEventVideo({ event, script = null, voice = null, ca
   return { lines, placement: fit.placement, planOpts: fit.planOpts, durationS: fit.durationS, review, cues, files: { clean: cleanFile, burned: burnedFile, srt: srtFile, audio: audioFile, raw: rawVideo } };
 }
 
+/**
+ * Zhrnutie zlyhania nahrávania z výpisu skriptu: prvý riadok s chybou (napr. „Could not find Chrome …
+ * cache path … systemprofile" — služba beží ako LocalSystem a puppeteer hľadá Chrome v systémovom profile,
+ * liek je PUPPETEER_CACHE_DIR v .env) a posledný neprázdny riadok bez riadkov zásobníka. Pure.
+ */
+export function captureFailureSummary(output) {
+  const lines = String(output || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('at '));
+  const first = lines.find((l) => /^\w*Error\b/.test(l)) || lines.find((l) => /error|chyba|zlyhal|cannot|could not|not found/i.test(l)) || '';
+  const last = lines.at(-1) || '';
+  const parts = [...new Set([first, last].filter(Boolean))];
+  return parts.join(' | ').slice(0, 600) || 'bez výpisu';
+}
+
 /** Nahrávanie obrazu skriptom capture-event-video.mjs (udalosť zo súboru, plán a háčik). */
 export function captureVideo({ eventFile, planFile, hookFile, out, capture = {}, ffmpeg, timeoutMs, onProgress = () => {} }) {
   const node = capture.node || process.execPath;
@@ -240,7 +253,7 @@ export function captureVideo({ eventFile, planFile, hookFile, out, capture = {},
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0 && fs.existsSync(out)) resolve(out);
-      else reject(Object.assign(new Error(`nahrávanie obrazu zlyhalo (kód ${code}): ${tail.trim().split('\n').slice(-3).join(' | ')}`), { code: 'CAPTURE_FAILED' }));
+      else reject(Object.assign(new Error(`nahrávanie obrazu zlyhalo (kód ${code}): ${captureFailureSummary(tail)}`), { code: 'CAPTURE_FAILED' }));
     });
   });
 }
