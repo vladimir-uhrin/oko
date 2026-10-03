@@ -3,7 +3,8 @@
 // Prečo: jednotkové testy čítajú text a stav, nie obrazovku. Po vydaní etapy 5 ukázala až snímka, že
 //   (1) bubliny nad bodmi sa orezávali na jeden riadok šírky 320 px,
 //   (2) v paneli sa správy kreslili CEZ prechody úžinami a zoznam správ mal výšku 0,
-//   (3) kartičky správ sedeli na logu, rozbalenom paneli a riadku atribúcie.
+//   (3) kartičky správ sedeli na logu, rozbalenom paneli a riadku atribúcie,
+//   (4) dlhý panel sa nedal dorolovať nadol — do pol sekundy skočil späť na začiatok.
 // Tento skript to meria: otvorí OKO, zapne dejisko, rozbalí panel a overí ČÍSLA z rozloženia
 // (obdĺžniky prvkov, nie texty v zdrojáku). Pri chybe vypíše, čo sa prekrýva, a skončí kódom 1.
 // Snímky uloží do --out, aby sa dalo pozrieť aj okom.
@@ -195,9 +196,26 @@ try {
       await page.mouse.move(Math.round(w / 2), 4);
       await sleep(300);
       await page.screenshot({ path: path.join(OUT, `${theatre}-${w}x${h}.png`) });
-      // spodok panela (prechody úžinami + správy) na snímke
-      await page.evaluate(() => document.querySelector('#mideast-panel [data-mideast-transits]')?.scrollIntoView({ block: 'start' }));
-      await sleep(500);
+      // 4. rolovanie panela drží: prechody úžinami sú pod okrajom; po dorolovaní musia ostať v zábere,
+      //    aj keď medzitým prebehne engine stĺpca (meria výšku panela pri každej zmene v ňom)
+      const scrolled = await page.evaluate(async () => {
+        const body = document.querySelector('#mideast-panel [data-mideast-body]');
+        const target = body?.querySelector('[data-mideast-transits]');
+        if (!body || !target) return null;
+        target.scrollIntoView({ block: 'start' });
+        const at = body.scrollTop;
+        const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        body.classList.add('oko-qa-probe'); // zmena triedy v stĺpci = istý prechod enginu
+        await frame();
+        body.classList.remove('oko-qa-probe');
+        await frame();
+        await new Promise((r) => setTimeout(r, 1800));
+        const b = body.getBoundingClientRect(); const t = target.getBoundingClientRect();
+        return { at, after: body.scrollTop, scrollable: body.scrollHeight > body.clientHeight + 1, inView: t.top >= b.top - 2 && t.top < b.bottom };
+      });
+      if (!scrolled) fail(where, 'telo panela alebo prechody úžinami nenájdené');
+      else if (!scrolled.scrollable) notes.push(`${where}: panel sa zmestí celý, rolovanie netreba`);
+      else check(scrolled.at > 0 && scrolled.after === scrolled.at && scrolled.inView, where, `rolovanie panela drží (${scrolled.after} px aj po 2 s)`, `po dorolovaní ${scrolled.at} px, po 2 s ${scrolled.after} px, prechody úžinami v zábere: ${scrolled.inView}`);
       await page.screenshot({ path: path.join(OUT, `${theatre}-${w}x${h}-panel-dole.png`) });
     }
   }

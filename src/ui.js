@@ -51,6 +51,7 @@ import {
 import { TRACKED_OVERLAY_SOURCE_ID, destroyTrackedReadout, getActiveTrackedReadoutId, initTrackedReadout } from './data/trackedReadout.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 import { installCardCloseButtons } from './cardCloseButtons.js';
+import { createScrollKeeper } from './scrollKeeper.js';
 import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
 import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFlightsStrip.js';
 import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
@@ -2632,6 +2633,8 @@ export class StyleManager {
     this._leftStackHudTransitionHandler = null;
     this._leftStackCollapsedHeights = new Map();
     this._leftStackPreferredPanelId = null;
+    // Poloha rolovania vnútri otvorených panelov cez meranie ich výšky (src/scrollKeeper.js).
+    this._leftStackScrollKeeper = createScrollKeeper();
     this._rightPanelStack = document.getElementById('right-context-rail');
     this._rightStackLayoutFrame = null;
     this._rightStackReconsiderAutoCollapse = false;
@@ -7810,6 +7813,12 @@ export class StyleManager {
     const stack = this._leftPanelStack;
     if (!stack) return;
 
+    // Udalosť scroll nebublá — v zachytávacej fáze ju stĺpec vidí od každého posuvníka vo svojich
+    // paneloch. Strážca si prvok len zapamätá; polohu číta až tesne pred meraním výšok.
+    stack.addEventListener('scroll', (event) => {
+      if (event.target !== stack) this._leftStackScrollKeeper.track(event.target);
+    }, { capture: true, passive: true });
+
     if (typeof ResizeObserver !== 'undefined') {
       this._leftStackResizeObserver = new ResizeObserver(() => {
         this._scheduleLeftPanelLayout();
@@ -8080,6 +8089,12 @@ export class StyleManager {
     // Clear the prior pass before reading intrinsic heights. The allocated
     // outer height and the inner scroller otherwise feed their constrained
     // size back into the next HUD-mode calculation.
+    // Without its allocated height an open panel stretches to its whole content for this
+    // one layout read, its inner scroller has nothing to scroll and the browser drops its
+    // position to 0 — a long panel could never be scrolled down, every pass (any change in
+    // any panel) threw it back to the top. The keeper reads the positions now and puts them
+    // back once the heights are allocated again (2026-10-03).
+    const scrollMemo = this._leftStackScrollKeeper.capture();
     for (const panel of expandedPanels) {
       panel.style.removeProperty('--left-panel-allocated-height');
     }
@@ -8181,6 +8196,8 @@ export class StyleManager {
         panel.classList.add('collapsed', 'layout-auto-collapsed');
         this._syncPanelCollapseButton(panel);
       }
+      // Heights are not allocated in this pass — the next one restores the scroll positions.
+      this._leftStackScrollKeeper.defer(scrollMemo);
       this._scheduleLeftPanelLayout();
       return;
     }
@@ -8214,6 +8231,9 @@ export class StyleManager {
     // Focus mode no longer hides collapsed siblings, so none of them is
     // aria-hidden any more; clear the attribute this pass used to set.
     for (const panel of panels) panel.removeAttribute('aria-hidden');
+    // Heights and the lane mode are committed — put back the scroll positions the
+    // measuring read above dropped to 0 (after the last write that changes layout).
+    this._leftStackScrollKeeper.restore(scrollMemo);
     // The right controls share this top baseline; update them after the left
     // accordion commits an HUD-variant or obstacle-driven position change.
     this._scheduleRightPanelLayout();

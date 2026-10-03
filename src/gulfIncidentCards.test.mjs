@@ -150,8 +150,9 @@ test('karty: jedna sedí nad svojím bodom; viac kariet jedného miesta sa sklad
   assert.deepEqual([one.cx, one.cy], [800 - 126, 500 - 14 - 110], 'vystredená nad bodom s odstupom 14 px');
   const stack = placeHotCards([card(800, 500), card(804, 502), card(798, 498)], view, []);
   const tops = stack.map((p) => p.cy).sort((a, b) => b - a);
-  assert.deepEqual(tops, [502 - 14 - 110, 502 - 14 - 110 - 116, 502 - 14 - 110 - 232], 'stĺpec nahor s medzerou 6 px — nie pod bodky');
+  assert.deepEqual(tops, [498 + 14, 502 - 14 - 110, 502 - 14 - 110 - 116], 'dve nad bodom s medzerou 6 px, tretia tesne pod ním — žiadna cez bodky');
   assert.ok(stack.every((p) => Math.abs(p.cx - (p.x - 126)) < 0.01), 'bez posunu do strán');
+  for (const p of stack) for (const q of stack) assert.equal(q.x >= p.cx && q.x <= p.cx + p.w && q.y >= p.cy && q.y <= p.cy + p.h, false, 'karta nezakrýva žiadnu z bodiek miesta');
   const [top] = placeHotCards([card(800, 60)], view, []);
   assert.equal(top.cy, 60 + 14, 'nad bodom nie je miesto → pod ním');
   // karta, ktorej miesto nad bodom zaberá panel, sa posunie najkratšou cestou vedľa neho
@@ -159,6 +160,10 @@ test('karty: jedna sedí nad svojím bodom; viac kariet jedného miesta sa sklad
   assert.equal(beside.cx, 52 + 350 + 6, 'tesne vpravo od panela');
   assert.equal(beside.cy, 400 - 14 - 110, 'výška ostáva nad bodom');
   assert.deepEqual(placeHotCards([], VIEW, UI), []);
+  // bod tesne pod hornou lištou: nad ním je lišta a stavový riadok → karta ide POD bod, nie naň ani ďaleko do strany
+  const zone = { x: VIEW.w / 2 - HOTCARD_STATUS_ZONE.width / 2, y: HOTCARD_STATUS_ZONE.top, w: HOTCARD_STATUS_ZONE.width, h: HOTCARD_STATUS_ZONE.height };
+  const [under] = placeHotCards([card(683, 190, 124)], VIEW, [...UI, zone]);
+  assert.deepEqual([under.cx, under.cy], [683 - 126, 190 + 14], 'vystredená pod bodom');
 });
 
 test('karty: nabité okno — šesť kariet okolo jedného miesta sa rozloží bez prekrytia a mimo rozhrania', () => {

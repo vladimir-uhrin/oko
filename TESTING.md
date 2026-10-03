@@ -65,8 +65,8 @@ settled and not applicable because no Google 3D tileset is active.
 Unit tests read text and state, not the screen. The layout of the BLÍZKY VÝCHOD module is
 checked by a script that opens OKO (GPU flags as the video capture), switches theatres,
 expands the panel and asserts numbers — panel sections do not overlap, the news list has
-height, no news card lies on the interface or on another card, the hover bubble wraps and
-stays inside the window:
+height, the panel keeps its scroll position across a layout pass, no news card lies on the
+interface or on another card, the hover bubble wraps and stays inside the window:
 
 ```sh
 node scripts/qa-mideast-panel.mjs --base http://localhost:4173

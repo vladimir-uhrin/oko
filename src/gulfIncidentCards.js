@@ -73,6 +73,8 @@ export function clipObstacleRect(rect, clip) {
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
 /** Posun karty NADOL od jej miesta sa počíta trojnásobne — karta pod svojím miestom zakrýva bodky. */
 const DOWN_COST = 3;
+/** Prirážka miesta, na ktorom by karta zakryla vlastnú bodku (väčšia než bežný posun o kartu). */
+const OWN_POINT_COST = 600;
 
 /** Leží obdĺžnik na prekážke rozhrania alebo (s medzerou) na niektorej z prvých `count` položených kariet? */
 function hotCardBlocked(points, count, obstacles, x, y, w, h) {
@@ -106,10 +108,11 @@ function besideY(points, obstacles, k, side, h) {
  * miesta mimo záberu tak ostane pri okraji mapy. Keď by ležala na paneli, lište, logu, atribúcii
  * alebo na už položenej karte, vezme NAJBLIŽŠIE voľné miesto: kandidáti sú všetky dvojice
  * „x tesne pri niektorom obdĺžniku alebo vlastné" × „y tesne pri niektorom obdĺžniku alebo
- * vlastné" (voľný roh medzi panelom a lištou potrebuje obe naraz). Posun nadol je trikrát
- * drahší než nahor a do strán, takže karty jedného miesta sa skladajú nahor ako doteraz
- * a nezakrývajú bodky. Bez voľného miesta ostane na svojom (prekrytie je menšie zlo než
- * skrytá správa). Ide sa od najnižšieho bodu.
+ * vlastné" (voľný roh medzi panelom a lištou potrebuje obe naraz), plus miesto tesne POD
+ * vlastným bodom. Posun nadol je trikrát drahší než nahor a do strán a karta na vlastnej bodke
+ * je posledná možnosť — karty jedného miesta sa tak skladajú nad bod a pod neho, nie cez bodky.
+ * Bez voľného miesta ostane na svojom (prekrytie je menšie zlo než skrytá správa). Ide sa od
+ * najnižšieho bodu.
  *
  * Zapisuje `cx`, `cy` (ľavý horný roh) priamo do položiek a nič nealokuje (beží každú snímku);
  * poradie položiek zmení (zoradí podľa `y` zostupne). Pure okrem zápisu do vstupu.
@@ -140,10 +143,14 @@ export function placeHotCards(points, viewport, obstacles = []) {
         const nx = a < 0 ? x0 : clamp(besideX(points, obstacles, a >> 1, a & 1, p.w), left, maxX);
         const costX = Math.abs(nx - x0);
         if (costX >= best) continue;
-        for (let b = -1; b < 2 * boxes; b += 1) {
-          if (a < 0 && b < 0) continue; // vlastné miesto je obsadené
-          const ny = b < 0 ? y0 : clamp(besideY(points, obstacles, b >> 1, b & 1, p.h), top, maxY);
-          const cost = costX + (ny > y0 ? (ny - y0) * DOWN_COST : y0 - ny);
+        for (let b = -2; b < 2 * boxes; b += 1) { // −2 = tesne POD vlastným bodom, −1 = vlastné y
+          if (a < 0 && b === -1) continue; // vlastné miesto je obsadené
+          const ny = b === -1 ? y0 : clamp(b === -2 ? p.y + ANCHOR_OFFSET_PX : besideY(points, obstacles, b >> 1, b & 1, p.h), top, maxY);
+          // Miesto pod vlastným bodom je rovnocenné posunu o rovnakú vzdialenosť (bodku nezakrýva);
+          // iný posun nadol je drahší a karta na vlastnej bodke je až posledná možnosť.
+          const down = ny > y0 ? (ny - y0) * (b === -2 ? 1 : DOWN_COST) : y0 - ny;
+          const onOwnPoint = p.x >= nx && p.x <= nx + p.w && p.y >= ny && p.y <= ny + p.h;
+          const cost = costX + down + (onOwnPoint ? OWN_POINT_COST : 0);
           if (cost < best && !hotCardBlocked(points, i, obstacles, nx, ny, p.w, p.h)) { best = cost; bestX = nx; bestY = ny; }
         }
       }
