@@ -110,7 +110,43 @@ test('hover: číslo varovania, druh, čas UTC, oblasť, plavidlo, citát varova
   assert.equal(layer.labels.vessel({ vesselType: null }), '');
 });
 
-test('výpadok servera: chyba v stave, staré body ostanú; obnova až po 15 min; súhrn pre legendu', async () => {
+test('priebežná obnova: kým je čip zapnutý a scéna aktívna, stránka si každých 5 min pýta nové varovania; mimo scény nie', async () => {
+  const { viewer, doc } = fakeViewer();
+  const timers = [];
+  const cleared = [];
+  let fetched = 0;
+  const fresh = { ...incidents[0], id: 'new-warning', ref: '150-26', t: NOW + 60_000 };
+  const layer = createUkmtoIncidents({
+    viewer, documentRef: doc, translate, now: () => NOW,
+    setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    clearTimer: (id) => cleared.push(id),
+    fetchImpl: async () => { fetched += 1; return fetched === 1 ? payload() : { ...payload(), incidents: [fresh, ...incidents] }; },
+  });
+  assert.equal(timers.length, 0, 'bez scény žiadny časovač');
+  await layer.setActive(true);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, UKMTO_RELOAD_MS);
+  assert.equal(UKMTO_RELOAD_MS, 5 * 60_000, 'vlastník: čo najaktuálnejšie');
+  await layer.hide();
+  await layer.show();
+  assert.equal(timers.length, 1, 'brána priblíženia časovač nezdvojí');
+  timers[0].fn(); // tik obnovy
+  await new Promise((r) => setImmediate(r));
+  assert.equal(fetched, 2, 'tik sťahuje aj keď od načítania neprešlo celých 5 min podľa hodín testu');
+  assert.equal(layer.getState().incidents[0].ref, '150-26', 'nové varovanie je v stave');
+  assert.equal(layer._getStateForTest().ds.entities.values.length, incidents.length + 1, 'a na mape');
+  await layer.setActive(false);
+  assert.deepEqual(cleared, [1], 'odchod zo scény časovač zruší');
+  timers[0].fn();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(fetched, 2, 'neaktívna vrstva nesťahuje ani keby tik ešte prišiel');
+  await layer.setActive(true);
+  assert.equal(timers.length, 2, 'nová scéna = nový časovač');
+  layer.destroy();
+  assert.deepEqual(cleared, [1, 2]);
+});
+
+test('výpadok servera: chyba v stave, staré body ostanú; návrat do scény sťahuje až po 5 min; súhrn pre legendu', async () => {
   const { viewer, doc } = fakeViewer();
   let t = NOW;
   let fail = false;
@@ -125,7 +161,7 @@ test('výpadok servera: chyba v stave, staré body ostanú; obnova až po 15 min
   assert.equal(st.fetchedAt, NOW - 600_000);
   await layer.setActive(false);
   await layer.setActive(true);
-  assert.equal(fetched, 1, 'návrat do scény do 15 min bez dopytu');
+  assert.equal(fetched, 1, 'návrat do scény do 5 min bez dopytu');
   t = NOW + UKMTO_RELOAD_MS + 1;
   fail = true;
   await layer.setActive(false);

@@ -171,7 +171,7 @@ test('časovače: štyri úlohy rozostúpené po minúte od 200 s, vypnutý arch
   assert.equal(AIRSPACE_FIRST_DELAY_MS, 500_000);
   assert.equal(AIRSPACE_TICK_MS, 6 * 60 * 60_000);
   assert.equal(UKMTO_FIRST_DELAY_MS, 560_000);
-  assert.equal(UKMTO_TICK_MS, 60 * 60_000, 'varovania pre lode sa pýtajú raz za hodinu');
+  assert.equal(UKMTO_TICK_MS, 15 * 60_000, 'varovania pre lode sa pýtajú raz za štvrťhodinu (vlastník: čo najaktuálnejšie)');
   assert.equal(GPS_FIRST_DELAY_MS, 620_000);
   assert.equal(GPS_TICK_MS, 15 * 60_000, 'snímka lietadiel raz za štvrťhodinu');
   // MIDEAST_GPS=off vypne len zber z adsb.lol, ostatné úlohy bežia
@@ -452,7 +452,7 @@ test('/ukmto (etapa 5c): 404 pred stiahnutím, úloha stiahne incidenty UKMTO, o
   assert.equal(decode(await call(plugin, '/ukmto?days=99999')).days, 400, 'orez na 400 dní');
   assert.equal(decode(await call(plugin, '/ukmto?days=abc')).days, 90, 'nečíslo = predvolených 90');
   await plugin._tick('ukmto');
-  assert.equal(plugin._state.last.ukmto.result.status, 'fresh', 'do hodiny bez ďalšieho dopytu');
+  assert.equal(plugin._state.last.ukmto.result.status, 'fresh', 'hneď po stiahnutí bez ďalšieho dopytu');
   assert.equal(calls.length, 1);
   assert.equal(decode(await call(plugin, '/status')).last.ukmto.ok, true);
 });

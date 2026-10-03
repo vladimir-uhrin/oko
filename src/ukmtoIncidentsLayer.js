@@ -18,8 +18,12 @@ import { UKMTO_DAYS_DEFAULT, UKMTO_TYPES, UKMTO_TYPE_OTHER, fetchUkmto, ukmtoAge
 import { currentLanguage, t } from './i18n.js';
 
 export const UKMTO_LAYER_ID = 'ukmto-incidents';
-/** Načítané dáta sa obnovia pri ďalšom dejisku, ak sú staršie (server sa pýta UKMTO raz za hodinu). */
-export const UKMTO_RELOAD_MS = 15 * 60_000;
+/**
+ * Ako často si otvorená stránka pýta nové varovania, kým je vrstva zapnutá pri aktívnej scéne
+ * (vlastník 2026-10-03: „žiadne oneskorovanie, skôr najaktuálnejšie"; server sa pýta UKMTO raz
+ * za 15 min a trasa má cache 2 min).
+ */
+export const UKMTO_RELOAD_MS = 5 * 60_000;
 export const UKMTO_POINT_SIZE = Object.freeze({ fresh: 11, recent: 8, old: 6 });
 export const UKMTO_POINT_ALPHA = Object.freeze({ fresh: 0.95, recent: 0.75, old: 0.45 });
 const HOVER_MS = 90;
@@ -49,6 +53,9 @@ export function createUkmtoIncidents({
   now = () => Date.now(),
   days = UKMTO_DAYS_DEFAULT,
   documentRef = null,
+  // `unref` (len Node): časovač obnovy nesmie držať proces testov nažive; v prehliadači je id číslo.
+  setTimer = (fn, ms) => { const id = setInterval(fn, ms); id?.unref?.(); return id; },
+  clearTimer = (id) => clearInterval(id),
 } = {}) {
   const doc = documentRef || viewer?.container?.ownerDocument;
   const scene = viewer?.scene;
@@ -76,6 +83,7 @@ export function createUkmtoIncidents({
   let _destroyed = false;
   let handler = null;
   let hoverTimer = null;
+  let refreshTimer = null; // beží len kým je čip zapnutý a scéna aktívna
   const listeners = new Set();
   const emit = () => { const s = getState(); for (const fn of listeners) { try { fn(s); } catch { /* */ } } };
 
@@ -147,9 +155,10 @@ export function createUkmtoIncidents({
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
   }
 
-  async function load() {
+  /** `force` = tik priebežnej obnovy (časovač už odmeral interval — bez druhej kontroly veku). */
+  async function load({ force = false } = {}) {
     if (_loading) return;
-    if (_payload && now() - _loadedAt < UKMTO_RELOAD_MS) return;
+    if (!force && _payload && now() - _loadedAt < UKMTO_RELOAD_MS) return;
     _loading = true; _error = null; emit();
     try {
       const payload = await fetchImpl({ days });
@@ -176,6 +185,13 @@ export function createUkmtoIncidents({
     ds.credit = shown && _incidents.length ? new Cesium.Credit(translate('mideast.ukmto.credit'), true) : undefined;
     if (!shown) tip.hidden = true;
     if (wanted) installHandler();
+    // Priebežná obnova: otvorená stránka pri scéne si sama pýta nové varovania; mimo scény nič.
+    if (wanted && refreshTimer === null) {
+      refreshTimer = setTimer(() => { if (_enabled && _active && !_destroyed) void load({ force: true }).then(() => { if (!_destroyed) requestRender(); }); }, UKMTO_RELOAD_MS);
+    } else if (!wanted && refreshTimer !== null) {
+      clearTimer(refreshTimer);
+      refreshTimer = null;
+    }
     requestRender();
     emit();
     if (wanted) {
@@ -210,6 +226,7 @@ export function createUkmtoIncidents({
     _destroyed = true;
     if (handler) { try { handler.destroy(); } catch { /* */ } handler = null; }
     if (hoverTimer) clearTimeout(hoverTimer);
+    if (refreshTimer !== null) { clearTimer(refreshTimer); refreshTimer = null; }
     try { viewer.dataSources.remove(ds, true); tip.remove(); } catch { /* */ }
     listeners.clear();
   }

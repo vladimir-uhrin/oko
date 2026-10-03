@@ -514,8 +514,12 @@ export async function airspacePayload(root, { nowMs = Date.now() } = {}) {
 }
 
 // ── ukmto/ — incidenty lodí z rozhrania UKMTO (etapa 5c, 2026-10-03) ────────────
-/** Rozhranie UKMTO sa pýta raz za hodinu (varovaní je pár do týždňa, v kríze denne). */
-export const UKMTO_FRESH_MS = 3_600_000;
+/**
+ * Rozhranie UKMTO sa pýta raz za štvrťhodinu (vlastník 2026-10-03: „žiadne oneskorovanie, skôr
+ * najaktuálnejšie" — pôvodne hodina). Čerstvosť je o minútu kratšia než tik úlohy, aby každý
+ * tik naozaj stiahol; jeden ľahký dopyt = 96 denne.
+ */
+export const UKMTO_FRESH_MS = 14 * 60_000;
 export const UKMTO_MAX_BYTES = 4 * 1024 * 1024;
 
 /**

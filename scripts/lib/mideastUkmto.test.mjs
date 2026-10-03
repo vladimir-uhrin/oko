@@ -20,7 +20,7 @@ async function withRoot(fn) {
   try { await fn(root); } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test('prvý beh uloží incidenty s licenciou; do hodiny sa znova nepýta', async () => {
+test('prvý beh uloží incidenty s licenciou; do 14 minút sa znova nepýta, tik úlohy (15 min) už áno', async () => {
   await withRoot(async (root) => {
     const net = fakeNet(all());
     const r = await ukmtoRefresh(root, { fetchImpl: net.fetchImpl, now: T0 });
@@ -36,6 +36,9 @@ test('prvý beh uloží incidenty s licenciou; do hodiny sa znova nepýta', asyn
     const again = fakeNet(all());
     assert.equal((await ukmtoRefresh(root, { fetchImpl: again.fetchImpl, now: T0 + UKMTO_FRESH_MS - 1 })).status, 'fresh');
     assert.equal(again.calls.length, 0);
+    assert.equal(UKMTO_FRESH_MS, 14 * 60_000, 'čerstvosť kratšia než tik úlohy, aby každý tik naozaj stiahol');
+    assert.equal((await ukmtoRefresh(root, { fetchImpl: again.fetchImpl, now: T0 + 15 * 60_000 })).status, 'updated', 'ďalší tik po 15 min sťahuje znova');
+    assert.equal(again.calls.length, 1);
   });
 });
 

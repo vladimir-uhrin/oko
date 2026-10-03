@@ -34,7 +34,7 @@
  *    len zmenených bulletinov s pauzou 1,2 s, hranice FIR raz za 7 dní.
  *  - `/ukmto?days=90` (etapa 5c, 2026-10-03): incidenty lodí z rozhrania UKMTO (OGL v3.0)
  *    za posledných `days` dní (1–400) z rastúceho archívu; 404 no_ukmto_snapshot; cache 10 min.
- *    Úloha `ukmto` (tik 1 h, prvá 560 s po štarte) — jeden dopyt, zlúčenie s archívom.
+ *    Úloha `ukmto` (tik 15 min, prvá 560 s po štarte) — jeden dopyt, zlúčenie s archívom.
  *  - `/gps?days=2` (etapa 5d, 2026-10-03): rušenie GPS odvodené z presnosti polohy lietadiel
  *    (adsb.lol, ODbL) po bunkách 0,5° za posledných `days` dní (1–7); 404 no_gps_snapshot;
  *    cache 5 min. Úloha `gps` (tik 15 min, prvá 620 s): šesť kruhov s pauzou 5 s; vypnutie
@@ -66,8 +66,8 @@ export const PORTWATCH_DAYS_DEFAULT = 400;
 /** Úloha VZDUŠNÝ PRIESTOR (EASA CZIB + hranice FIR): tik 6 h, prvý beh po PortWatch. */
 export const AIRSPACE_TICK_MS = 6 * 60 * MIN;
 export const AIRSPACE_FIRST_DELAY_MS = 500_000;
-/** Úloha INCIDENTY LODÍ (UKMTO): tik 1 h (varovania sú časovo citlivé), prvý beh po EASA. */
-export const UKMTO_TICK_MS = 60 * MIN;
+/** Úloha INCIDENTY LODÍ (UKMTO): tik 15 min (vlastník: „skôr najaktuálnejšie"; pôvodne 1 h), prvý beh po EASA. */
+export const UKMTO_TICK_MS = 15 * MIN;
 export const UKMTO_FIRST_DELAY_MS = 560_000;
 export const UKMTO_DAYS_DEFAULT = 90;
 /** Úloha RUŠENIE GPS: snímka šiestich kruhov adsb.lol raz za 15 min (576 dopytov denne). */

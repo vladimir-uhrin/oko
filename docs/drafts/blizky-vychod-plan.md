@@ -246,7 +246,7 @@ KLIENT
    naživo až vydaním služby oko-api). Popri tom: spoločná brána GDELT (179233e — 165 z 188 dopytov
    padalo na 429). **5c INCIDENTY LODÍ · UKMTO HOTOVÉ 2026-10-03** (oficiálne rozhranie webu UKMTO
    `sccd.royalnavy.mod.uk/api/ukmto/all` so súradnicami, licencia OGL v3.0 — nie PDF z mscio.eu;
-   archív rastie zlučovaním, tik 1 h; body vo všetkých dejiskách a v úžinách Hormuz/Báb
+   archív rastie zlučovaním, tik 15 min (pôvodne 1 h; vlastník: „skôr najaktuálnejšie"); body vo všetkých dejiskách a v úžinách Hormuz/Báb
    al-Mandab/Suez za bránou priblíženia, farba = druh, veľkosť = vek; čip + legenda v paneli;
    naživo 69 varovaní, Hormuz 7 za týždeň). **Rozhodnutie vlastníka 3. 10. („ser na zákazy"):
    zákazy v podmienkach zdrojov nie sú prekážka — zdroj sa použije a licencia sa poctivo zapíše.**
@@ -292,9 +292,15 @@ Kontrola z Wikipédie ide skoro, lebo parser už existuje a moduly Jemenu a Gazy
 2. **Panel**: nový „BLÍZKY VÝCHOD", ktorý pohltí dnešný ZÁLIV (odporúčam), alebo nechať vedľa?
 3. **Šablóna úderov na Irán** (Wikipédia, 294 bodov feb–júl, 72 % z textov ISW): použiť ako
    archív s pôvodom v každej karte? Odporúčam áno (fakty z textu, nie ISW geodáta).
+   **ODPOVEĎ 2026-10-03: áno** (vlastník na otázky 3 a 4 naraz: „áno a žiadne oneskorovanie").
 4. **Zásahy v Izraeli a Zálive**: oneskorenie ≥ 24 h a presnosť na sídlo? Odporúčam áno.
+   **ODPOVEĎ 2026-10-03: ŽIADNE oneskorovanie — „skôr najaktuálnejšie".** Udalosti sa ukazujú
+   hneď, ako ich zdroj zverejní; presnosť ostáva taká, akú dáva zdroj (OKO ju nespresňuje), a
+   etický filter platí ďalej (žiadne pozície jednotiek, žiadne osoby). Hneď uplatnené: varovania
+   UKMTO sa sťahujú raz za 15 min (nie hodinu) a otvorená stránka sa obnovuje každých 5 min.
 5. **Poplachy Izraela**: históriu z GitHub mirroru (dáta bez licencie, sú to úradné verejné
-   výstrahy) áno/nie? Polygóny oblastí (MIT) áno.
+   výstrahy) áno/nie? Polygóny oblastí (MIT) áno. **Od 2026-10-03 platí rozhodnutie „zákazy
+   v podmienkach zdrojov neriešime" → mirror histórie je použiteľný, licenčný stav zapísať.**
 6. **IRNA** ako „tvrdí Irán" (štátna, na zozname EÚ som ju nenašiel)? Press TV/Tasnim/Fars nie.
 7. **Liveuamap scraper**: odporúčam nie (komerčný produkt s ochranou, nie mirror dát).
 8. **Sporné územia v podklade** (Golany, Západný breh, Gaza): de facto Natural Earth
