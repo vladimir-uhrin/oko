@@ -18,7 +18,8 @@ a zapína sa až po výslovnom súhlase vlastníka (CLAUDE.md pravidlo 4).
 | Obrázky | existujúce snímky zdieľania (`/api/share`, `/s/<id>.jpg`) | — |
 | Video (reels) | headless Chromium + **ffmpeg (open source)** na vlastnom PC | — |
 | Mapový podklad vo videu | **bezplatné podklady** (OSM, ÚGKK ortofoto, terén) ako predvolené | Google 3D Tiles, len pre vybrané šablóny, s denným stropom renderov |
-| Hudba / hlas | bez hudby alebo voľná hudba (CC0) uložená v repozitári | hlasový komentár (OpenAI TTS) |
+| Hudba | voľná hudba (CC0 / bez poplatkov) uložená v repozitári s jej licenciou | — |
+| Hlasový komentár | **lokálne TTS so slovenským hlasom** (napr. Piper `sk_SK`, open source, beží na vlastnom PC) — licenciu hlasu overiť | OpenAI TTS (prirodzenejší hlas), denný strop |
 | Beh a plánovanie | vlastný server + existujúci tunel + Plánovač úloh | — |
 
 **Google 3D Tiles:** každý render s nimi čerpá dennú kvótu Map Tiles API (CLAUDE.md:
@@ -50,8 +51,14 @@ podklad má v admine vlastný strop renderov za deň (predvolene 0).
    - Instagram (Business/Creator účet prepojený so stránkou): kontajner média →
      `media_publish`. Video si stiahne z dočasnej podpísanej URL cez tunel.
    - Dlhodobý token stránky len na serveri; admin upozorní pred expiráciou.
-4. **Automatika (neskôr):** pravidlá typu „zemetrasenie M6+ → priprav návrh".
-   Bez schválenia človekom sa nič nezverejní.
+4. **Automatika — postupne až po úplnú:**
+   - krok 1: pravidlá len pripravujú návrhy, zverejní človek,
+   - krok 2: pre šablóny, ktoré prešli schválením bez zmien (napr. 10×), sa dá
+     zapnúť automatické zverejnenie,
+   - poistky: hlavný vypínač automatiky, max. počet príspevkov za deň, tichý čas
+     (napr. 22:00–7:00), **nezverejniť, ak sú dáta zastarané alebo modelované**
+     (pravidlo 2), kontrola, že render a text nie sú prázdne, audit každého zverejnenia,
+     okamžité stiahnutie príspevku z admina.
 
 ## Na čo si dať pozor
 
@@ -74,9 +81,22 @@ podklad má v admine vlastný strop renderov za deň (predvolene 0).
 | 3 | Plánovanie, kalendár, štatistiky príspevkov v admine | 0 € |
 | 4 | Voliteľné platené doplnky (AI text, Google podklad, hlas) — len so stropom a súhlasom | podľa stropu |
 
-## Otvorené otázky pre vlastníka
+## Rozhodnutia vlastníka (2026-10-03)
 
-1. Existuje FB stránka a prepojený Instagram Business/Creator účet?
-2. Schvaľovať každý príspevok, alebo časom aj automatika?
-3. Jazyk: SK, EN, alebo oboje?
-4. Reels bez hudby, alebo s voľnou hudbou (CC0)?
+1. **Automatika:** áno, časom úplná — postupne podľa krokov v bode 4 architektúry.
+2. **Jazyk:** slovenčina (texty, hashtagy, titulky aj hlas).
+3. **Reels:** s hudbou alebo hlasovým komentárom — zadarmo (CC0 hudba, lokálne TTS).
+4. **Účty:** vlastník potrebuje pomoc s nastavením FB stránky a Instagram
+   profesionálneho účtu — návod v sekcii nižšie.
+
+## Nastavenie účtov (Fáza 0, robí vlastník)
+
+Tajomstvá (App Secret, tokeny) **nikdy do chatu ani do repozitára** — len do `.env`
+na serveri.
+
+1. Zapnúť dvojfaktorové overenie na Facebooku aj Instagrame.
+2. Facebook stránka OKO (ak ešte nie je): kategória technológie/veda, logo, web okolive.sk.
+3. Instagram → profesionálny účet typu **Business** (Creator funguje tiež).
+4. Prepojiť Instagram so stránkou (nastavenia stránky → Prepojené účty → Instagram).
+5. Voliteľne Meta Business portfólio (business.facebook.com) so stránkou aj IG.
+6. Meta for Developers účet a aplikácia — spolu, keď začne Fáza 0.
