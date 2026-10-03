@@ -251,9 +251,14 @@ KLIENT
    naživo 69 varovaní, Hormuz 7 za týždeň). **Rozhodnutie vlastníka 3. 10. („ser na zákazy"):
    zákazy v podmienkach zdrojov nie sú prekážka — zdroj sa použije a licencia sa poctivo zapíše.**
    Preto je povolené doplniť históriu varovaní pred júlom 2026 z PDF na mscio.eu (poloha odvodená
-   z textu „30NM southwest of …") — spraviť s časovou osou (etapa 4). Ostáva zo stage 5: zberač
-   rušenia GPS z adsb.lol (6 kruhov po 10 min → bunky 0,5° za deň → densityDrape, prahy
-   2 %/10 %). Test: výpočet podielu.
+   z textu „30NM southwest of …") — spraviť s časovou osou (etapa 4). **5d RUŠENIE GPS · odvodené
+   HOTOVÉ 2026-10-03** (zberač adsb.lol: 6 kruhov po 250 NM raz za 15 min s pauzou 5 s — nie
+   10 min, adresa je spoločná s vojenskými letmi a vracia 429; bunky 0,5° po dňoch, rôzne
+   lietadlá, zhoršené = NACp < 8 alebo NIC < 7 pri priamom ADS-B verzie 2 vo vzduchu, odpočet
+   jedného lietadla za deň, prahy 2 %/10 %, pod 4 lietadlá sa nehodnotí; vrstva = obdĺžniky,
+   nie densityDrape — kvôli hoveru s počtami; čip predvolene vypnutý; prvé kolo naživo: Ammán –
+   Mŕtve more 7 z 11 lietadiel). Mapa sa naplní až súvislým zberom služby. **Etapa 5 je tým
+   celá hotová** (5a PortWatch, 5b EASA, 5c UKMTO, 5d GPS).
 6. **Poplachy, škody, súčty, internet** — 2–3 d. Poplachy HFC (polygóny z MIT mirroru +
    história z mirroru po otázke 5) ako denná/týždenná mapa, nikdy „živý alarm"; UNOSAT Gaza
    CDA statická; Tech for Palestine súčty v karte Gazy a Západného brehu; OONI (a IODA po

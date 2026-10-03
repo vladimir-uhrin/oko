@@ -10,7 +10,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promises as fsp } from 'node:fs';
 
-import { AIRSPACE_FIRST_DELAY_MS, AIRSPACE_TICK_MS, UKMTO_FIRST_DELAY_MS, UKMTO_TICK_MS, CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, PORTWATCH_FIRST_DELAY_MS, PORTWATCH_TICK_MS, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
+import { AIRSPACE_FIRST_DELAY_MS, AIRSPACE_TICK_MS, GPS_FIRST_DELAY_MS, GPS_TICK_MS, UKMTO_FIRST_DELAY_MS, UKMTO_TICK_MS, CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, PORTWATCH_FIRST_DELAY_MS, PORTWATCH_TICK_MS, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
 import { controlFile } from '../../scripts/lib/mideastArchive.mjs';
 
@@ -141,7 +141,7 @@ test('validácia: bad_module so zoznamom modulov, bad_day, 405 pre iné metódy,
   assert.equal((await call(plugin, '/status', { method: 'DELETE' })).out.status, 405);
   const other = await call(plugin, '/?from=2026-09-24');
   assert.equal(other.out.status, 404, 'udalosti prídu v ďalších etapách — kým nie, poctivé 404');
-  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N']);
+  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N']);
   const server = mount(plugin);
   const res = fakeRes();
   await server.handler({ method: 'GET', url: 'http://[zle', headers: {}, socket: {} }, res);
@@ -161,8 +161,8 @@ test('časovače: štyri úlohy rozostúpené po minúte od 200 s, vypnutý arch
   assert.equal((await call(off, '/control?module=lebanon&at=2026-09-24')).out.status, 404, 'trasa funguje aj s vypnutým archivárom');
   const on = mideastEventsProxy({ root, env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   on._start('http://127.0.0.1:4173');
-  assert.equal(timers.length, 7, 'jedna úloha na modul + PortWatch (etapa 5a) + vzdušný priestor (5b) + UKMTO (5c)');
-  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000, 560_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz), PortWatch, EASA a UKMTO po nich');
+  assert.equal(timers.length, 8, 'jedna úloha na modul + PortWatch (etapa 5a) + vzdušný priestor (5b) + UKMTO (5c) + rušenie GPS (5d)');
+  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000, 560_000, 620_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz), PortWatch, EASA, UKMTO a zber GPS po nich');
   assert.equal(CONTROL_FIRST_DELAY_MS, 200_000);
   assert.equal(CONTROL_STAGGER_MS, 60_000);
   assert.equal(CONTROL_TICK_MS, 6 * 60 * 60_000);
@@ -172,9 +172,17 @@ test('časovače: štyri úlohy rozostúpené po minúte od 200 s, vypnutý arch
   assert.equal(AIRSPACE_TICK_MS, 6 * 60 * 60_000);
   assert.equal(UKMTO_FIRST_DELAY_MS, 560_000);
   assert.equal(UKMTO_TICK_MS, 60 * 60_000, 'varovania pre lode sa pýtajú raz za hodinu');
+  assert.equal(GPS_FIRST_DELAY_MS, 620_000);
+  assert.equal(GPS_TICK_MS, 15 * 60_000, 'snímka lietadiel raz za štvrťhodinu');
+  // MIDEAST_GPS=off vypne len zber z adsb.lol, ostatné úlohy bežia
+  const gpsOffTimers = [];
+  const gpsOff = mideastEventsProxy({ root, env: { MIDEAST_GPS: 'off' }, fetchImpl: wikiFetch, now: () => NOW, setTimer: (fn, ms) => { gpsOffTimers.push(ms); return gpsOffTimers.length; }, clearTimer, log: () => {} });
+  gpsOff._start('http://127.0.0.1:4173');
+  assert.deepEqual(gpsOffTimers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000, 560_000]);
+  gpsOff._stop();
   assert.equal(on._state.base, 'http://127.0.0.1:4173');
   on._stop();
-  assert.ok(cleared.length >= 7, 'stop zruší všetky časovače');
+  assert.ok(cleared.length >= 8, 'stop zruší všetky časovače');
 });
 
 test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zatvorený server = žiadny zombie archivár); bez stopu sa preplánuje na 6 h; reštart nezdvojí', async () => {
@@ -187,7 +195,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const slowFetch = async (url) => { await gate; return wikiFetch(url); };
   const plugin = mideastEventsProxy({ root, env: {}, fetchImpl: slowFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   plugin._start('http://127.0.0.1:4173');
-  assert.equal(armed.length, 7, '4 moduly + PortWatch + vzdušný priestor + UKMTO');
+  assert.equal(armed.length, 8, '4 moduly + PortWatch + vzdušný priestor + UKMTO + GPS');
   assert.equal(armed[0].ms, CONTROL_FIRST_DELAY_MS);
   const inflight = armed[0].fn(); // časovač control:israel-palestine vystrelil, tik čaká na Wikipédiu
   await new Promise((r) => setImmediate(r));
@@ -195,7 +203,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   plugin._stop(); // server zavrel (reštart Vite) uprostred dopytu
   release();
   await inflight;
-  assert.equal(armed.length, 7, 'po stop() sa rozbehnutý tik NEpreplánuje');
+  assert.equal(armed.length, 8, 'po stop() sa rozbehnutý tik NEpreplánuje');
   assert.equal(plugin._state.running['control:israel-palestine'], false);
   assert.equal(plugin._state.last['control:israel-palestine'].result.status, 'updated', 'rozbehnutý tik poctivo dobehne a snímku uloží');
   // bez stopu: spätné volanie sa po tiku preplánuje presne na tik 6 h
@@ -203,9 +211,9 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const live = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer: (fn, ms) => { armed2.push({ fn, ms }); return armed2.length; }, clearTimer, log: () => {} });
   live._start('http://127.0.0.1:4173');
   await armed2[3].fn(); // control:lebanon
-  assert.equal(armed2.length, 8, 'jeden nový časovač');
-  assert.equal(armed2[7].ms, CONTROL_TICK_MS);
-  // reštart (stop + start) počas tiku: nová generácia si naplánuje svojich 7, starý tik nepridá ďalší
+  assert.equal(armed2.length, 9, 'jeden nový časovač');
+  assert.equal(armed2[8].ms, CONTROL_TICK_MS);
+  // reštart (stop + start) počas tiku: nová generácia si naplánuje svojich 8, starý tik nepridá ďalší
   const armed3 = [];
   let release3; const gate3 = new Promise((r) => { release3 = r; });
   const restart = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: async (url) => { await gate3; return wikiFetch(url); }, now: () => NOW, setTimer: (fn, ms) => { armed3.push({ fn, ms }); return armed3.length; }, clearTimer, log: () => {} });
@@ -214,10 +222,10 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   await new Promise((r) => setImmediate(r));
   restart._stop();
   restart._start('http://127.0.0.1:4173');
-  assert.equal(armed3.length, 14, 'nový štart naplánoval svojich 7');
+  assert.equal(armed3.length, 16, 'nový štart naplánoval svojich 8');
   release3();
   await old;
-  assert.equal(armed3.length, 14, 'starý tik z predošlej generácie nič nepridal');
+  assert.equal(armed3.length, 16, 'starý tik z predošlej generácie nič nepridal');
 });
 
 test('gzip len pri výslovnom tokene s q > 0, Vary: Accept-Encoding na každej stlačiteľnej 200, nie na malých ani chybových', async () => {
@@ -447,4 +455,43 @@ test('/ukmto (etapa 5c): 404 pred stiahnutím, úloha stiahne incidenty UKMTO, o
   assert.equal(plugin._state.last.ukmto.result.status, 'fresh', 'do hodiny bez ďalšieho dopytu');
   assert.equal(calls.length, 1);
   assert.equal(decode(await call(plugin, '/status')).last.ukmto.ok, true);
+});
+
+test('/gps (etapa 5d): 404 pred zberom, úloha zozbiera šesť kruhov adsb.lol, bunky so stupňom, orez dní, cache, stav', async () => {
+  const root = await tmpRoot();
+  const circles = JSON.parse(await fixtureText('adsblol-gps-circles-20261003.json'));
+  const idByUrl = { 'lat/33/lon/35.5': 'levant', 'lat/28.5/lon/49.5': 'gulf-north', 'lat/25.5/lon/55.5': 'hormuz' };
+  const calls = [];
+  const slept = [];
+  const NOW_GPS = Date.UTC(2026, 9, 3, 16);
+  const plugin = makePlugin(root, {
+    now: () => NOW_GPS,
+    sleep: async (ms) => { slept.push(ms); },
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      const key = Object.keys(idByUrl).find((k) => String(url).includes(k));
+      return response(JSON.stringify(key ? circles[idByUrl[key]] : { ac: [], total: 0 }));
+    },
+  });
+  const before = await call(plugin, '/gps');
+  assert.equal(before.out.status, 404);
+  assert.deepEqual(decode(before), { error: 'no_gps_snapshot' });
+  await plugin._tick('gps');
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every((u) => u.startsWith('https://api.adsb.lol/v2/lat/')));
+  assert.deepEqual(slept, [5000, 5000, 5000, 5000, 5000]);
+  assert.equal(plugin._state.last.gps.result.status, 'updated');
+  assert.equal(plugin._state.last.gps.result.count, 103);
+  const ok = await call(plugin, '/gps', { gzip: true });
+  assert.equal(ok.out.status, 200);
+  const json = decode(ok);
+  assert.deepEqual(json.days, ['2026-10-03']);
+  assert.equal(json.requestedDays, 2);
+  assert.equal(json.todayPartial, true);
+  assert.deepEqual(json.counts, { high: 1, medium: 0, none: 4, thin: 61 });
+  assert.deepEqual(json.cells.find((c) => c[5] === 'high'), [63, 71, 4, 4, 3, 'high']);
+  assert.match(json.attribution, /adsb\.lol contributors \(ODbL 1\.0\)/);
+  assert.equal(decode(await call(plugin, '/gps?days=99')).requestedDays, 7);
+  assert.equal(decode(await call(plugin, '/gps?days=x')).requestedDays, 2);
+  assert.equal(decode(await call(plugin, '/status')).last.gps.ok, true);
 });

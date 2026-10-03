@@ -16,6 +16,10 @@
 //   ukmto/incidents.json         incidenty lodí z rozhrania UKMTO (OGL v3.0; etapa 5c,
 //                                2026-10-03; src/data/ukmto.js) — archív rastie, rozhranie
 //                                drží len posledné tri mesiace
+//   gps/<deň>.json               rušenie GPS po bunkách 0,5° — počty lietadiel a lietadiel so
+//                                zhoršenou presnosťou polohy (adsb.lol, ODbL; etapa 5d,
+//                                2026-10-03; src/data/gpsInterference.js), bez adries lietadiel
+//   gps/<deň>.work.json          rozpracovaný deň (adresy kvôli jedinečnosti; po uzavretí sa maže)
 // Ďalšie druhy (GeoConfirmed × 4 konflikty, UCDP, UKMTO, správy) prídu v ďalších
 // etapách plánu vedľa tohto súboru v tom istom koreni.
 //
@@ -37,6 +41,10 @@ import {
   buildCzibBulletin, czibLapsed, indexFirBoundaries, parseCzibDetail, parseCzibExport, parseCzibFeed,
 } from '../../src/data/czib.js';
 import { UKMTO_API_URL, UKMTO_ATTRIBUTION, UKMTO_LICENSE, UKMTO_LICENSE_URL, UKMTO_SITE_URL, mergeUkmtoIncidents, parseUkmtoIncidents } from '../../src/data/ukmto.js';
+import {
+  GPS_ATTRIBUTION, GPS_CELL_DEG, GPS_CIRCLES, GPS_HIGH, GPS_LICENSE, GPS_LOW, GPS_MIN_AIRCRAFT,
+  gpsAddSnapshot, gpsCircleUrl, gpsEmptyDay, gpsFinalizeDay, gpsMergeDays,
+} from '../../src/data/gpsInterference.js';
 
 export { MIDEAST_CONTROL_MODULE_IDS };
 export const USER_AGENT = 'OKO-mideast/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
@@ -598,6 +606,116 @@ export async function ukmtoPayload(root, { days = 90, nowMs = Date.now() } = {})
     generatedAt: nowMs, fetchedAt: snap.fetchedAt ?? null, days: Math.max(1, Math.floor(days)),
     archived: snap.incidents.length, firstT: snap.incidents.length ? snap.incidents.at(-1).t : null,
     incidents: snap.incidents.filter((it) => it.t >= since),
+  };
+}
+
+// ── gps/ — rušenie GPS odvodené z presnosti polohy lietadiel (etapa 5d, 2026-10-03) ──
+/** Pauza medzi kruhmi: adsb.lol vracia 429 pri dávke a tú istú adresu používajú aj vojenské lety OKO. */
+export const GPS_CIRCLE_PAUSE_MS = 5_000;
+/** Po 429 jeden nový pokus o ten istý kruh po tomto čase; potom sa kruh v tomto kole vynechá. */
+export const GPS_RETRY_AFTER_429_MS = 12_000;
+export const GPS_MAX_BYTES = 6 * 1024 * 1024;
+/** Najviac toľko dní dozadu vracia trasa (okno mapy). */
+export const GPS_MAX_DAYS = 7;
+export const gpsDir = (root) => path.join(archiveDir(root), 'gps');
+/** Výsledok uzavretého dňa (bez adries lietadiel). */
+export const gpsDayFile = (root, day) => path.join(gpsDir(root), `${day}.json`);
+/** Rozpracovaný deň (adresy lietadiel po bunkách kvôli jedinečnosti; po uzavretí dňa sa maže). */
+export const gpsWorkFile = (root, day) => path.join(gpsDir(root), `${day}.work.json`);
+
+/** Uzavrie rozpracované dni staršie než `today`: zapíše výsledok bez adries a pracovný súbor zmaže. */
+async function gpsCloseOldDays(root, today, log) {
+  let names = [];
+  try { names = await fsp.readdir(gpsDir(root)); } catch { return 0; }
+  let closed = 0;
+  for (const name of names) {
+    const m = /^(\d{4}-\d{2}-\d{2})\.work\.json$/.exec(name);
+    if (!m || m[1] >= today) continue;
+    const work = await readJson(gpsWorkFile(root, m[1]));
+    if (work && work.cells) {
+      await writeJsonAtomic(gpsDayFile(root, m[1]), { ...gpsFinalizeDay({ ...work, day: m[1] }), kind: 'gps-day', attribution: GPS_ATTRIBUTION, license: GPS_LICENSE });
+      closed += 1;
+      log(`[mideast-events] gps: day ${m[1]} closed`);
+    }
+    try { await fsp.unlink(gpsWorkFile(root, m[1])); } catch { /* už zmazaný */ }
+  }
+  return closed;
+}
+
+/**
+ * Jedno kolo zberu: šesť kruhov adsb.lol postupne s pauzou, lietadlá sa pridajú do rozpracovaného
+ * dňa (UTC). Kruh, ktorý zlyhá (429 aj po jednom opakovaní, iná chyba, zlý JSON), sa v tomto kole
+ * vynechá — kolo sa zapíše, keď prešiel aspoň jeden. Staršie rozpracované dni sa uzavrú. Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'partial'|'error', day:string, circles:number, failed:string[], samples:number, degraded:number, snapshots:number}>}
+ */
+export async function gpsCollect(root, { fetchImpl = fetch, now = Date.now(), log = () => {}, sleep = defaultSleepMs, circles = GPS_CIRCLES } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', day: null, circles: 0, failed: ['bad now'], samples: 0, degraded: 0, snapshots: 0 };
+  const day = dayKey(nowMs);
+  const aircraft = [];
+  const failed = [];
+  let ok = 0;
+  for (const [i, circle] of circles.entries()) {
+    if (i) await sleep(GPS_CIRCLE_PAUSE_MS);
+    try {
+      const request = { timeoutMs: 30_000, maxBytes: GPS_MAX_BYTES, headers: { Accept: 'application/json' } };
+      let { res, body } = await fetchCapped(fetchImpl, gpsCircleUrl(circle), request);
+      if (res.status === 429) {
+        await sleep(GPS_RETRY_AFTER_429_MS);
+        ({ res, body } = await fetchCapped(fetchImpl, gpsCircleUrl(circle), request));
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let json;
+      try { json = JSON.parse(body); } catch { throw new Error('invalid JSON'); }
+      if (!Array.isArray(json?.ac)) throw new Error('no ac array');
+      aircraft.push(...json.ac);
+      ok += 1;
+    } catch (error) {
+      failed.push(`${circle.id}: ${String(error?.message || error)}`);
+    }
+  }
+  try { await gpsCloseOldDays(root, day, log); } catch (error) { log(`[mideast-events] gps close failed: ${error?.message || error}`); }
+  if (!ok) {
+    log(`[mideast-events] gps: no circle answered (${failed.join('; ')})`);
+    return { status: 'error', day, circles: 0, failed, samples: 0, degraded: 0, snapshots: 0 };
+  }
+  const prev = await readJson(gpsWorkFile(root, day));
+  const work = prev && prev.day === day && prev.cells && typeof prev.cells === 'object' ? prev : gpsEmptyDay(day);
+  const { samples, degraded } = gpsAddSnapshot(work, aircraft);
+  await writeJsonAtomic(gpsWorkFile(root, day), work);
+  log(`[mideast-events] gps ${day}: snapshot ${work.snapshots} · ${samples} aircraft, ${degraded} with degraded accuracy${failed.length ? ` · failed ${failed.length}/${circles.length}` : ''}`);
+  return { status: failed.length ? 'partial' : 'updated', day, circles: ok, failed, samples, degraded, snapshots: work.snapshots };
+}
+
+/**
+ * Telo `/api/mideast/events/gps`: bunky za posledných `days` dní (uzavreté dni + rozpracovaný
+ * dnešok prepočítaný bez adries) so stupňom, počty buniek podľa stupňa, obdobie, počet snímok.
+ * Bez jediného dňa null (volajúci vráti 404).
+ */
+export async function gpsPayload(root, { days = 2, nowMs = Date.now() } = {}) {
+  const n = Math.min(GPS_MAX_DAYS, Math.max(1, Math.floor(days)));
+  const today = dayKey(nowMs);
+  const list = [];
+  for (let back = 0; back < n; back += 1) {
+    const day = dayKey(nowMs - back * DAY_MS);
+    let data = await readJson(gpsDayFile(root, day));
+    if (!data) {
+      const work = await readJson(gpsWorkFile(root, day));
+      if (work && work.cells) data = { ...gpsFinalizeDay({ ...work, day }), partial: day === today };
+    }
+    if (data && Array.isArray(data.cells)) list.push(data);
+  }
+  if (!list.length) return null;
+  const merged = gpsMergeDays(list);
+  return {
+    source: 'https://api.adsb.lol', attribution: GPS_ATTRIBUTION, license: GPS_LICENSE,
+    generatedAt: nowMs, cellDeg: GPS_CELL_DEG, requestedDays: n,
+    days: merged.days, snapshots: merged.snapshots, aircraft: merged.aircraft,
+    todayPartial: list.some((d) => d.partial),
+    thresholds: { low: GPS_LOW, high: GPS_HIGH, minAircraft: GPS_MIN_AIRCRAFT },
+    circles: GPS_CIRCLES.map((c) => ({ id: c.id, lat: c.lat, lon: c.lon, nm: c.nm })),
+    counts: merged.counts,
+    cells: merged.cells.map((c) => [c.latIdx, c.lonIdx, c.total, c.bad, c.badAdjusted, c.level]),
   };
 }
 

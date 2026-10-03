@@ -59,6 +59,7 @@ import { createMideastPanel } from './mideastPanel.js';
 import { createMideastControl } from './mideastControlLayer.js';
 import { createAirspaceAdvisory } from './airspaceAdvisoryLayer.js';
 import { createUkmtoIncidents } from './ukmtoIncidentsLayer.js';
+import { createGpsInterference } from './gpsInterferenceLayer.js';
 import { UKMTO_CHOKEPOINT_SCENES } from './data/ukmto.js';
 import { createPortwatchCard } from './portwatchCard.js';
 import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
@@ -744,6 +745,11 @@ async function init() {
     // VÝCHODU alebo úžine v oblasti hlásení UKMTO (setActive nižšie) a schováva sa s bránou.
     ukmtoIncidents = createUkmtoIncidents({ viewer });
     window.__godsEyeView.ukmtoIncidents = ukmtoIncidents;
+    // RUŠENIE GPS · odvodené (2026-10-03, etapa 5d; src/gpsInterferenceLayer.js): bunky 0,5° podľa
+    // podielu lietadiel so zhoršenou presnosťou polohy (zber servera z adsb.lol). Predvolene
+    // vypnuté, sťahuje až po zapnutí čipu; bez väzby na dejisko (regionálna mapa ako EASA).
+    const gpsInterference = createGpsInterference({ viewer });
+    window.__godsEyeView.gpsInterference = gpsInterference;
     const mideastPanel = createMideastPanel({
       mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
       theatres: listMideastTheatres(),
@@ -751,6 +757,7 @@ async function init() {
       control: mideastControl,
       airspace: airspaceAdvisory,
       ukmto: ukmtoIncidents,
+      gps: gpsInterference,
     });
     window.__godsEyeView.mideastPanel = mideastPanel;
     // Situation from open sources: the merged bulletin (2026-09-18) now fills the

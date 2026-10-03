@@ -30,8 +30,14 @@
 // (src/ukmtoIncidentsLayer.js) pridá čip (predvolene zapnutý; bez aktívneho dejiska či úžiny
 // je vypnutý ako KONTROLA SÍDIEL bez modulov) a legendu: počty podľa druhu za 30 dní,
 // päť najnovších varovaní s časom a oblasťou, zdroj s licenciou OGL a odkaz na ukmto.org.
+//
+// Etapa 5d (RUŠENIE GPS · odvodené, 2026-10-03): voliteľný správca `gps`
+// (src/gpsInterferenceLayer.js) pridá čip (predvolene vypnutý) a legendu: počty buniek podľa
+// podielu lietadiel so zhoršenou presnosťou polohy (nad 10 %, 2–10 %, pod 2 %), obdobie,
+// počet snímok a lietadiel, zdroj adsb.lol a poznámku, že ide o odvodený ukazovateľ.
 
 import { currentLanguage, t } from './i18n.js';
+import { GPS_COLORS } from './data/gpsInterference.js';
 import { theatreLabel } from './data/mideastTheatres.js';
 import { UKMTO_SITE_URL, UKMTO_TYPES, UKMTO_TYPE_OTHER } from './data/ukmto.js';
 import { ageText } from './data/ukraineFreshness.js';
@@ -55,6 +61,7 @@ export function swatchColour(css, alpha) {
  * @param {object|null} [o.control] správca KONTROLY SÍDIEL (createMideastControl): getState/onChange/isEnabled/setEnabled
  * @param {object|null} [o.airspace] VZDUŠNÝ PRIESTOR · EASA (createAirspaceAdvisory): getState/onChange/isEnabled/setEnabled
  * @param {object|null} [o.ukmto] INCIDENTY LODÍ · UKMTO (createUkmtoIncidents): getState/onChange/isEnabled/setEnabled/labels
+ * @param {object|null} [o.gps] RUŠENIE GPS · odvodené (createGpsInterference): getState/onChange/isEnabled/setEnabled
  * @param {Function} [o.translate]
  * @param {string} [o.lang] jazyk pre formátovanie čísel a dátumov (počty v legende, „stav k")
  * @param {Document} [o.documentRef]
@@ -67,6 +74,7 @@ export function createMideastPanel({
   control = null,
   airspace = null,
   ukmto = null,
+  gps = null,
   translate = t,
   lang = currentLanguage(),
   documentRef = globalThis.document,
@@ -117,9 +125,10 @@ export function createMideastPanel({
   let chips = null; let legend = null; let controlChip = null;
   let airChip = null; let airLegend = null;
   let shipChip = null; let shipLegend = null;
+  let gpsChip = null; let gpsLegend = null;
   const dateFormat = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: 'UTC' });
   const numberFormat = new Intl.NumberFormat(lang === 'sk' ? 'sk-SK' : 'en-GB');
-  if (control || airspace || ukmto) {
+  if (control || airspace || ukmto || gps) {
     chips = el('div', 'mideast-chips');
     chips.setAttribute('role', 'group');
     // Skupina nesie viac čipov (KONTROLA SÍDIEL, VZDUŠNÝ PRIESTOR) — neutrálny názov, nie meno jedného z nich.
@@ -158,6 +167,17 @@ export function createMideastPanel({
     shipLegend = el('div', 'mideast-legend mideast-ukmto-legend');
     shipLegend.hidden = true;
   }
+  if (gps) {
+    gpsChip = button('data-toggle-chip mideast-chip mideast-chip-gps', translate('mideast.part.gps'), () => {
+      void gps.setEnabled?.(!gps.isEnabled?.());
+    });
+    gpsChip.dataset.part = 'gps';
+    gpsChip.setAttribute('aria-pressed', String(Boolean(gps.isEnabled?.())));
+    gpsChip.title = translate('mideast.gps.note');
+    chips.appendChild(gpsChip);
+    gpsLegend = el('div', 'mideast-legend mideast-gps-legend');
+    gpsLegend.hidden = true;
+  }
 
   // PRECHODY ÚŽINAMI (etapa 5a): telo plní karta PortWatch z main.js (portwatchCard.js);
   // mount je VNÚTRI panela, karta si vlastníka nájde cez closest('[data-panel-id]').
@@ -171,7 +191,7 @@ export function createMideastPanel({
   const news = el('div', 'mideast-news');
   news.dataset.mideastNews = '';
   const note = el('p', 'mideast-note', translate('mideast.note'));
-  mountTarget.replaceChildren(status, dirsTitle, dirs, ...[chips, legend, airLegend, shipLegend].filter(Boolean), transitsTitle, transits, newsTitle, news, note);
+  mountTarget.replaceChildren(status, dirsTitle, dirs, ...[chips, legend, airLegend, shipLegend, gpsLegend].filter(Boolean), transitsTitle, transits, newsTitle, news, note);
 
   // ── Legenda kontroly ──────────────────────────────────────────────────────
   // t() vracia pri chýbajúcom kľúči samotný kľúč → padá sa na anglický popis z konfigurácie
@@ -395,6 +415,56 @@ export function createMideastPanel({
   const unsubscribeUkmto = ukmto?.onChange?.(() => renderUkmto()) || null;
   renderUkmto();
 
+  // ── Legenda RUŠENIA GPS (etapa 5d) ────────────────────────────────────────
+  // Farby ako bunky na mape (GPS_COLORS z src/data/gpsInterference.js); počet = počet buniek 0,5°.
+  const GPS_SWATCH = GPS_COLORS;
+  function renderGps() {
+    if (!gps || !gpsChip) return;
+    const st = gps.getState?.() || {};
+    const enabled = Boolean(st.enabled);
+    gpsChip.classList?.toggle?.('active', enabled);
+    gpsChip.setAttribute('aria-pressed', String(enabled));
+    gpsChip.classList?.toggle?.('is-loading', Boolean(st.loading));
+    gpsLegend.hidden = !enabled;
+    if (!enabled) { gpsLegend.replaceChildren(); return; }
+    const parts = [el('div', 'mideast-legend-title', translate('mideast.gps.title'))];
+    if (!st.loaded) {
+      const kind = st.loading ? 'loading' : (st.error ? (st.error === 'no_gps_snapshot' ? 'missing' : 'error') : 'loading');
+      const state = el('div', 'mideast-legend-state', translate(`mideast.gps.${kind}`));
+      state.dataset.state = kind;
+      parts.push(state);
+    } else {
+      const counts = st.counts || {};
+      const items = el('div', 'mideast-legend-items');
+      items.setAttribute('aria-label', translate('mideast.gps.cells'));
+      for (const level of ['high', 'medium', 'none']) {
+        const item = el('span', `mideast-legend-item is-gps is-${level}`);
+        const sw = el('i', 'mideast-legend-swatch');
+        sw.setAttribute('style', `background: ${swatchColour(GPS_SWATCH[level], level === 'none' ? 0.25 : 0.6)}; border-color: ${GPS_SWATCH[level]}`);
+        item.appendChild(sw);
+        item.appendChild(el('span', 'mideast-legend-label', translate(`mideast.gps.${level}`)));
+        item.appendChild(el('span', 'mideast-legend-count', numberFormat.format(Number(counts[level]) || 0)));
+        items.appendChild(item);
+      }
+      parts.push(items);
+      if (!((Number(counts.high) || 0) + (Number(counts.medium) || 0) + (Number(counts.none) || 0))) {
+        parts.push(el('div', 'mideast-legend-state', translate('mideast.gps.empty')));
+      }
+      const src = el('div', 'mideast-legend-source');
+      src.title = st.attribution || '';
+      const stats = translate('mideast.gps.stats', { snapshots: numberFormat.format(st.snapshots || 0), aircraft: numberFormat.format(st.aircraft || 0) });
+      src.appendChild(el('span', 'mideast-legend-since', [st.period, stats].filter(Boolean).join(' · ')));
+      if (st.todayPartial) src.appendChild(el('span', 'mideast-legend-age', `· ${translate('mideast.gps.partial')}`));
+      src.appendChild(el('span', 'mideast-legend-age', `· ${translate('mideast.gps.source')}`));
+      if (st.error) src.appendChild(el('span', 'mideast-legend-age is-stale', translate('mideast.gps.error')));
+      parts.push(src);
+    }
+    parts.push(el('p', 'mideast-legend-note', translate('mideast.gps.note')));
+    gpsLegend.replaceChildren(...parts);
+  }
+  const unsubscribeGps = gps?.onChange?.(() => renderGps()) || null;
+  renderGps();
+
   // ── Aktívne dejisko ───────────────────────────────────────────────────────
   // Panel sa o aktívnom dejisku dozvie aj zvonka (main.js po ?mideast=, rozbaľovačke
   // SCÉNY alebo hlase volá setActiveTheatre), preto je zvýraznenie samostatná funkcia.
@@ -414,6 +484,6 @@ export function createMideastPanel({
     transitsMount: transits,
     setActiveTheatre,
     get activeTheatre() { return activeTheatre; },
-    destroy() { unsubscribeControl?.(); unsubscribeAirspace?.(); unsubscribeUkmto?.(); dirByTheatre.clear(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribeControl?.(); unsubscribeAirspace?.(); unsubscribeUkmto?.(); unsubscribeGps?.(); dirByTheatre.clear(); mountTarget.replaceChildren(); },
   };
 }

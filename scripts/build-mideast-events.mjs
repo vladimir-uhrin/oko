@@ -17,13 +17,14 @@
 //   node scripts/build-mideast-events.mjs --portwatch [--force]
 //   node scripts/build-mideast-events.mjs --airspace [--force]
 //   node scripts/build-mideast-events.mjs --ukmto [--force]
+//   node scripts/build-mideast-events.mjs --gps                       (jedno kolo zberu rušenia GPS z adsb.lol; nie je v --all)
 //
 // Etiketa Wikimedia: jeden dopyt naraz, pauza 1,2 s medzi dopytmi, popisný User-Agent
 // s kontaktom (scripts/lib/mideastArchive.mjs). Históriu (jeden dopyt na týždeň a
 // modul) spúšťa človek — `--all` ju zámerne vynecháva. PortWatch (verejný ArcGIS MMF):
 // úžiny postupne s pauzou 1,5 s; prvé stiahnutie = celá séria (3 strany na úžinu).
 import {
-  MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, czibRefresh, firBoundariesRefresh, isDay, portwatchRefresh,
+  MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, czibRefresh, firBoundariesRefresh, gpsCollect, isDay, portwatchRefresh,
   ukmtoRefresh, wikiControlSnapshot,
 } from './lib/mideastArchive.mjs';
 import { PORTWATCH_KEYS } from '../src/data/portwatch.js';
@@ -37,9 +38,9 @@ const now = Date.now();
 const log = (m) => console.log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PAUSE_MS = 1200;
-const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force] | --airspace [--force] | --ukmto [--force]\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
+const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force] | --airspace [--force] | --ukmto [--force] | --gps\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
 
-if (!all && !has('--control') && !has('--control-history') && !has('--portwatch') && !has('--airspace') && !has('--ukmto')) {
+if (!all && !has('--control') && !has('--control-history') && !has('--portwatch') && !has('--airspace') && !has('--ukmto') && !has('--gps')) {
   console.log(usage);
   process.exit(2);
 }
@@ -102,4 +103,11 @@ if (all || has('--airspace')) {
 if (all || has('--ukmto')) {
   const r = await ukmtoRefresh(root, { now, force: has('--force'), log });
   log(`UKMTO: ${r.status} · ${r.count} incidentov v archíve${r.added !== undefined ? ` · nových ${r.added}` : ''} · posledný ${r.day || '—'}${r.error ? ' — ' + r.error : ''}`);
+}
+
+// Rušenie GPS (adsb.lol, ODbL): JEDNO kolo zberu — šesť kruhov s pauzou 5 s. Mapu robí až súvislý
+// zber služby (raz za 15 min); `--all` ho preto nespúšťa, toto je len ručná skúška.
+if (has('--gps')) {
+  const r = await gpsCollect(root, { now, log, sleep });
+  log(`GPS ${r.day}: ${r.status} · kruhov ${r.circles}/6 · lietadiel ${r.samples}, so zhoršenou presnosťou ${r.degraded} · snímka dňa č. ${r.snapshots}${r.failed.length ? ` — ${r.failed.join('; ')}` : ''}`);
 }

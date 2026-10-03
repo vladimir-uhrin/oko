@@ -107,3 +107,13 @@
   `src/ukmtoIncidentsLayer.test.mjs` and `src/mideastPanel.test.mjs`, never
   served to the app. Contains public sector information licensed under the
   Open Government Licence v3.0 (ukmto.org terms §20).
+- `adsblol-gps-circles-20261003.json` — three real answers of the adsb.lol
+  point API (`api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/250`) captured
+  2026-10-03 for the Levant (19 aircraft), northern Gulf (42) and Hormuz/UAE
+  (101) circles, reduced to the fields the GPS-interference computation reads
+  (`hex`, `type`, `version`, `lat`, `lon`, `alt_baro`, `nic`, `nac_p`,
+  `seen_pos`) — callsigns and registrations removed. 103 usable samples, 11
+  with degraded accuracy, one 0.5° cell over 10 % (Amman – Dead Sea). Used ONLY
+  by `src/data/gpsInterference.test.mjs`, `scripts/lib/mideastGps.test.mjs`,
+  `src/data/mideastEventsProxy.test.mjs` and `src/gpsInterferenceLayer.test.mjs`,
+  never served to the app. © adsb.lol contributors, ODbL 1.0.
