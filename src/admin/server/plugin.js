@@ -6,6 +6,7 @@
 import path from 'node:path';
 import { openAdminStore } from './store.js';
 import { createAdminRuntime, secretValues } from './runtime.js';
+import { createStudio } from './studio/index.js';
 
 let current = null;
 /** Runtime bežiaceho servera (null pred štartom alebo v testoch bez pluginu). */
@@ -24,16 +25,23 @@ export function adminPlugin(env = process.env) {
       runtime = createAdminRuntime({ store, ownHosts, secrets: secretValues(env),
         port: () => server.httpServer?.address()?.port ?? null });
       runtime.start();
+      // Štúdio sociálnych sietí (2026-10-03): rovnaká admin DB, údaje cez loopback.
+      runtime.studio = createStudio({ store, env, port: () => server.httpServer?.address()?.port ?? null });
+      runtime.studio.start();
       current = runtime;
       return runtime;
     };
     try { ensure(); } catch (error) { console.warn('[admin] telemetry unavailable:', error?.message || error); }
     server.middlewares.use((req, res, next) => {
       if (!runtime) return next();
-      runtime.handlePublic(req, res, () => runtime.middleware(req, res, next)).catch(() => next());
+      runtime.handlePublic(req, res, () => runtime.middleware(req, res, () => {
+        if (runtime.studio && String(req.url || '').startsWith('/api/studio/')) return runtime.studio.handleMedia(req, res, next);
+        next();
+      })).catch(() => next());
     });
     server.httpServer?.once('close', () => {
       if (!runtime) return;
+      runtime.studio?.stop();
       runtime.stop();
       runtime.store.close();
       if (current === runtime) current = null;

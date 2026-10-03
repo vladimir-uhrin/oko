@@ -11,6 +11,7 @@
 import { analytics, clampInt, costs, dayRange, feedHistory, feedSettingsList, traffic, validateFeedUpdate,
   validateNotice } from '../../admin/server/api.js';
 import { localDay } from '../../admin/server/runtime.js';
+import { handleStudioAdmin } from '../../admin/server/studio/adminApi.js';
 
 const USER_ID = /^[a-f0-9-]{36}$/;
 const PAGE_SIZE = 50;
@@ -28,6 +29,11 @@ export function createAdminRoutes({ store, now, idleMs, sources = {} }) {
     if (ctx.session?.role !== 'owner') throw fail('not_found', 404);
     rate(ctx, 'admin', ctx.session.user_id, 600, 60_000);
     const actor = ctx.session.user_id;
+    // Štúdio sociálnych sietí (2026-10-03) — vlastná tabuľka ciest, rovnaká brána owner + CSRF.
+    if (pathname === '/api/admin/studio' || pathname.startsWith('/api/admin/studio/')) {
+      return handleStudioAdmin(pathname, req, res, ctx, { json, readJson, fail, active, rate, studio: sources.runtime?.()?.studio ?? null,
+        store, actor, now });
+    }
     const userRoute = /^\/api\/admin\/users\/([a-f0-9-]{36})(?:\/(revoke-sessions|disable|enable))?$/.exec(pathname);
     const feedRoute = /^\/api\/admin\/feeds\/([a-z0-9-]{1,40})$/.exec(pathname);
     const route = userRoute ? (userRoute[2] ? `/api/admin/users/:id/${userRoute[2]}` : '/api/admin/users/:id')

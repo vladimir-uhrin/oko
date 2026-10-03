@@ -12,6 +12,13 @@ import { randomBytes } from 'node:crypto';
 const DAY_MS = 86400_000;
 export const RETENTION = Object.freeze({ trafficDays: 90, pageviewDays: 400, errorDays: 30, sampleDays: 30 });
 
+function studioRow(row) {
+  const parse = (value, fallback) => { try { return JSON.parse(value); } catch { return fallback; } };
+  return { id: row.id, template: row.template, eventKey: row.event_key, origin: row.origin, title: row.title, text: row.text,
+    edited: row.text !== row.original_text, card: parse(row.card, {}), status: row.status, results: parse(row.results, {}),
+    createdAt: row.created_at, updatedAt: row.updated_at, approvedAt: row.approved_at, publishedAt: row.published_at };
+}
+
 export function openAdminStore(filename) {
   if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename);
@@ -41,6 +48,15 @@ export function openAdminStore(filename) {
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT
     );
+    -- Štúdio sociálnych sietí (2026-10-03): návrhy príspevkov. event_key = jedna udalosť → jeden návrh.
+    CREATE TABLE IF NOT EXISTS studio_drafts (
+      id TEXT PRIMARY KEY, template TEXT NOT NULL, event_key TEXT NOT NULL UNIQUE, origin TEXT NOT NULL,
+      title TEXT NOT NULL, text TEXT NOT NULL, original_text TEXT NOT NULL, card TEXT NOT NULL,
+      image BLOB, status TEXT NOT NULL CHECK (status IN ('draft','approved','published','failed','discarded')),
+      results TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      approved_at INTEGER, published_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS studio_drafts_time ON studio_drafts(created_at);
   `);
   if (filename !== ':memory:' && process.platform !== 'win32') { try { chmodSync(filename, 0o600); } catch { /* ok */ } }
 
@@ -102,6 +118,7 @@ export function openAdminStore(filename) {
       db.prepare('DELETE FROM errors WHERE last_at < ?').run(now - RETENTION.errorDays * DAY_MS);
       db.prepare('DELETE FROM errors WHERE sig NOT IN (SELECT sig FROM errors ORDER BY last_at DESC LIMIT 2000)').run();
       db.prepare('DELETE FROM feed_samples WHERE at < ?').run(now - RETENTION.sampleDays * DAY_MS);
+      this.studioPrune(now);
     },
 
     // ── čítanie pre admin ──
@@ -147,6 +164,43 @@ export function openAdminStore(filename) {
       else db.prepare(`INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
         .run(key, JSON.stringify(value), now, by || null);
+    },
+    // ── Štúdio ──
+    studioInsert(draft) {
+      const result = db.prepare(`INSERT INTO studio_drafts (id, template, event_key, origin, title, text, original_text, card, image,
+        status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?) ON CONFLICT(event_key) DO NOTHING`)
+        .run(draft.id, draft.template, draft.eventKey, draft.origin, draft.title, draft.text, draft.text, JSON.stringify(draft.card),
+          draft.image, draft.createdAt, draft.createdAt);
+      return result.changes > 0;
+    },
+    studioHasKey: key => Boolean(db.prepare('SELECT 1 FROM studio_drafts WHERE event_key = ?').get(key)),
+    studioGet(id) {
+      const row = db.prepare('SELECT * FROM studio_drafts WHERE id = ?').get(id);
+      return row ? studioRow(row) : null;
+    },
+    studioImage: id => db.prepare('SELECT image FROM studio_drafts WHERE id = ?').get(id)?.image ?? null,
+    studioList(limit = 100) {
+      return db.prepare(`SELECT id, template, event_key, origin, title, text, original_text, card, status, results, created_at,
+        updated_at, approved_at, published_at FROM studio_drafts ORDER BY created_at DESC LIMIT ?`).all(limit).map(studioRow);
+    },
+    studioUpdate(id, fields, now) {
+      const columns = { text: 'text', status: 'status', results: 'results', approvedAt: 'approved_at', publishedAt: 'published_at' };
+      for (const [key, column] of Object.entries(columns)) {
+        if (!(key in fields)) continue;
+        const value = key === 'results' ? JSON.stringify(fields[key]) : fields[key];
+        db.prepare(`UPDATE studio_drafts SET ${column} = ?, updated_at = ? WHERE id = ?`).run(value, now, id);
+      }
+      return this.studioGet(id);
+    },
+    /** Koľkokrát bola šablóna zverejnená bez úpravy textu (podmienka automatiky). */
+    studioUnchangedCount: template => db.prepare(`SELECT COUNT(*) AS n FROM studio_drafts WHERE template = ? AND status = 'published'
+      AND origin = 'auto' AND text = original_text`).get(template).n,
+    studioPublishedSince: (from, origin) => db.prepare(`SELECT COUNT(*) AS n FROM studio_drafts WHERE status = 'published'
+      AND published_at >= ?${origin ? ' AND origin = ?' : ''}`).get(...(origin ? [from, origin] : [from])).n,
+    /** Staré zahodené a nezverejnené návrhy (aj s obrázkom) po 30 dňoch preč; zverejnené ostávajú bez obrázka po 90 dňoch. */
+    studioPrune(now) {
+      db.prepare(`DELETE FROM studio_drafts WHERE status IN ('draft','discarded','failed') AND created_at < ?`).run(now - 30 * 86400_000);
+      db.prepare(`UPDATE studio_drafts SET image = NULL WHERE status = 'published' AND published_at < ?`).run(now - 90 * 86400_000);
     },
     /** Konzistentná kópia databázy (bez zastavenia servera). */
     backupTo(file) { db.exec(`VACUUM INTO '${String(file).replaceAll("'", "''")}'`); },

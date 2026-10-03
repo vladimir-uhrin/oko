@@ -7,6 +7,7 @@ range geometry with no network dependency.
 | File | Source dataset | Features |
 |------|----------------|----------|
 | `regions.json` | `ne_10m_geography_regions_polys` (ranges, deserts, plateaus, peninsulas, islands, …) | 1,046 named |
+| `land.json` | `ne_50m_land` (outer rings, DP 0.02°, 2 dp) — map on OKO Studio images; `scripts/build-land.mjs` | 553 rings |
 | `marine.json` | `ne_10m_geography_marine_polys` (seas, gulfs, straits, bays, …) | 292 named |
 
 **Source:** Natural Earth 10m physical vectors, via the canonical

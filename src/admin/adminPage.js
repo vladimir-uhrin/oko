@@ -22,6 +22,11 @@ const ERRORS = {
   cache_not_clearable: 'Tento priečinok nie je čistá cache — z panelu sa nemaže.',
   feed_not_found: 'Neznámy zdroj.',
   invalid_input: 'Neplatná hodnota.',
+  meta_not_configured: 'Facebook/Instagram nie je pripojený (META_* v .env).',
+  auto_publish_not_earned: 'Automatika sa odomkne po 10 zverejneniach bez úpravy textu.',
+  draft_not_publishable: 'Tento návrh už nejde zverejniť.',
+  invalid_text: 'Text musí mať 1–2200 znakov.',
+  studio_unavailable: 'Štúdio na serveri nebeží (pozri log).',
 };
 const EVENTS = {
   registered: 'vytvorenie účtu', registered_google: 'vytvorenie cez Google', registered_github: 'vytvorenie cez GitHub',
@@ -35,7 +40,8 @@ const EVENTS = {
 };
 const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user_enabled: 'odblokoval', sessions_revoked: 'odhlásil relácie',
   feed_updated: 'zmenil zdroj', notice_set: 'nastavil oznam', notice_cleared: 'zrušil oznam', errors_cleared: 'vymazal chyby',
-  backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache' };
+  backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache', studio_generated: 'vytvoril návrh', studio_settings: 'zmenil automatiku Štúdia',
+  studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne' };
 
 // ── pomocníci ──────────────────────────────────────────────────────────────
 function el(tag, className = '', text) {
@@ -325,6 +331,143 @@ async function renderUser(id, message) {
     section('Aktivita účtu', user.events.length ? events : el('p', 'admin-muted', 'Žiadna.')));
 }
 
+// ── Štúdio sociálnych sietí ────────────────────────────────────────────────
+const STUDIO_STATUS = { draft: ['návrh', 'muted'], approved: ['schválené', 'info'], published: ['zverejnené', 'ok'],
+  failed: ['zlyhalo', 'bad'], discarded: ['zahodené', 'muted'] };
+const STUDIO_REASONS = { nothing_to_post: 'Teraz nie je čo zverejniť (žiadna udalosť nad prahom).', exists: 'Návrh pre túto udalosť už existuje.',
+  stale: 'Dáta sú zastarané — nezverejňujeme (pravidlo 2).', feed_disabled: 'Zdroj je vypnutý vo Feedoch.',
+  source_unavailable: 'Zdroj dát je teraz nedostupný.', server_not_ready: 'Server ešte nebeží naplno, skúste o chvíľu.' };
+const studioState = { filter: 'open' };
+async function renderStudio(message) {
+  const data = await api('/api/admin/studio');
+  const meta = data.meta;
+  const connected = meta.facebook || meta.instagram;
+  // Stav pripojenia
+  const status = el('div', 'admin-facts');
+  status.append(badge(meta.facebook ? 'Facebook stránka pripojená' : 'Facebook nepripojený', meta.facebook ? 'ok' : 'muted'),
+    badge(meta.instagram ? 'Instagram pripojený' : 'Instagram nepripojený', meta.instagram ? 'ok' : 'muted'));
+  if (data.instagramLimit) status.append(el('span', 'admin-muted', `Instagram dnes ${data.instagramLimit.used} / ${data.instagramLimit.total}`));
+  const mode = el('p', 'admin-muted', connected
+    ? 'Zverejnenie ide priamo cez Meta Graph API (zadarmo). Nič sa nezverejní bez vášho kliknutia, kým nezapnete automatiku.'
+    : 'Režim ručného zdieľania: OKO pripraví obrázok a text, vy ich stiahnete a zverejníte sami (aj na osobný profil). Automatické zverejnenie potrebuje Facebook stránku a v .env META_PAGE_ID, META_PAGE_TOKEN, META_IG_USER_ID — postup v docs/SOCIAL-PLAN.md.');
+  // Vytvoriť návrh
+  const create = el('div', 'admin-actions');
+  for (const template of data.templates) {
+    create.append(button(`+ ${template.label}`, async event => {
+      event.target.disabled = true;
+      try {
+        const result = await api('/api/admin/studio/generate', { method: 'POST', body: { template: template.id } });
+        await renderStudio(notice(result.created ? `Návrh vytvorený: ${result.draft.title}` : STUDIO_REASONS[result.reason] || result.reason, result.created ? 'ok' : 'info'));
+      } catch (error) { await renderStudio(notice(error.message)); }
+    }, 'admin-btn admin-btn-sm'));
+  }
+  create.append(button('Skontrolovať zdroje teraz', async () => {
+    try { await api('/api/admin/studio/tick', { method: 'POST', body: {} }); await renderStudio(notice('Kontrola hotová.', 'ok')); }
+    catch (error) { await renderStudio(notice(error.message)); }
+  }, 'admin-btn admin-btn-sm'));
+
+  // Automatika
+  const auto = el('div', 'admin-studio-auto');
+  const autoDraft = el('label', 'admin-check');
+  const autoDraftBox = el('input'); autoDraftBox.type = 'checkbox'; autoDraftBox.checked = data.settings.autoDraft;
+  autoDraftBox.addEventListener('change', () => saveStudioSettings({ autoDraft: autoDraftBox.checked }));
+  autoDraft.append(autoDraftBox, document.createTextNode(' Automaticky pripravovať návrhy (každých 10 min, prehľad o 8:00) — zadarmo'));
+  auto.append(autoDraft);
+  const rows = data.templates.map(template => {
+    const box = el('input'); box.type = 'checkbox'; box.checked = template.autoPublish;
+    const earned = template.unchanged >= data.autoPublishMin;
+    box.disabled = !earned || !connected;
+    box.addEventListener('change', () => saveStudioSettings({ autoPublish: { [template.id]: box.checked } }));
+    const label = el('label', 'admin-check'); label.append(box, document.createTextNode(' zverejniť automaticky'));
+    const progress = earned ? badge('odomknuté', 'ok') : el('span', 'admin-muted', `${template.unchanged} / ${data.autoPublishMin} zverejnení bez úpravy`);
+    return row([template.label, template.auto === 'daily' ? 'denne o 8:00' : template.auto ? 'pri udalosti' : 'ručne', progress, label]);
+  });
+  auto.append(table(['Šablóna', 'Návrhy', 'Podmienka automatiky', ''], rows),
+    el('p', 'admin-muted', `Automatické zverejnenie sa pre šablónu odomkne po ${data.autoPublishMin} príspevkoch, ktoré ste zverejnili bez úpravy textu. Poistky: max ${data.settings.autoPublishPerDay} automatických príspevkov za 24 h, tichý čas ${data.settings.quietFrom}:00–${data.settings.quietTo}:00, zastarané dáta sa nezverejnia.`));
+
+  // Filter a zoznam návrhov
+  const filters = el('div', 'admin-range');
+  for (const [key, label] of [['open', 'Na spracovanie'], ['published', 'Zverejnené'], ['discarded', 'Zahodené'], ['all', 'Všetko']]) {
+    const b = button(label, () => { studioState.filter = key; void guarded(renderStudio); }, 'admin-chip');
+    if (studioState.filter === key) b.setAttribute('aria-pressed', 'true');
+    filters.append(b);
+  }
+  const shown = data.drafts.filter(d => studioState.filter === 'all' ? true : studioState.filter === 'open'
+    ? ['draft', 'approved', 'failed'].includes(d.status) : d.status === studioState.filter);
+  const grid = el('div', 'admin-studio-grid');
+  for (const draft of shown) grid.append(studioCard(draft, meta));
+  if (!shown.length) grid.append(el('p', 'admin-muted', 'Žiadne návrhy. Vytvorte ich tlačidlami vyššie, alebo počkajte na automatiku.'));
+
+  setView(...(message ? [message] : []),
+    section('Štúdio sociálnych sietí', status, mode, create),
+    section('Automatika', auto),
+    section('Príspevky', filters, grid));
+}
+
+async function saveStudioSettings(patch) {
+  try { await api('/api/admin/studio/settings', { method: 'POST', body: patch }); await renderStudio(notice('Nastavenie uložené.', 'ok')); }
+  catch (error) { await renderStudio(notice(error.message)); }
+}
+
+function studioCard(draft, meta) {
+  const card = el('article', 'admin-studio-card');
+  const img = el('img');
+  img.src = `/api/admin/studio/drafts/${draft.id}/image?v=${draft.updatedAt}`;
+  img.alt = draft.title; img.loading = 'lazy'; img.width = 270; img.height = 338;
+  const body = el('div', 'admin-studio-body');
+  const head = el('div', 'admin-badges');
+  const [statusText, tone] = STUDIO_STATUS[draft.status] || [draft.status, 'muted'];
+  head.append(badge(statusText, tone), badge(draft.origin === 'auto' ? 'automaticky' : 'ručne', 'muted'));
+  if (draft.edited) head.append(badge('upravené', 'muted'));
+  const text = el('textarea', 'admin-studio-text'); text.value = draft.text; text.rows = 9; text.maxLength = 2200;
+  text.setAttribute('aria-label', `Text príspevku: ${draft.title}`);
+  const editable = ['draft', 'approved', 'failed'].includes(draft.status);
+  text.readOnly = !editable;
+  const actions = el('div', 'admin-actions');
+  const act = (label, run, cls = 'admin-btn admin-btn-sm') => button(label, async event => {
+    event.target.disabled = true;
+    try { const msg = await run(); await renderStudio(msg ? notice(msg, 'ok') : undefined); }
+    catch (error) { await renderStudio(notice(error.message)); }
+  }, cls);
+  if (editable) {
+    actions.append(act('Uložiť text', async () => { await api(`/api/admin/studio/drafts/${draft.id}`, { method: 'POST', body: { text: text.value } }); return 'Text uložený.'; }));
+    if (draft.status === 'draft') actions.append(act('Schváliť', async () => { await api(`/api/admin/studio/drafts/${draft.id}/approve`, { method: 'POST', body: {} }); return 'Schválené.'; }));
+    const targets = ['facebook', 'instagram'].filter(t => meta[t]);
+    if (targets.length) {
+      actions.append(act(`Zverejniť (${targets.map(t => (t === 'facebook' ? 'FB' : 'IG')).join(' + ')})`, async () => {
+        if (text.value !== draft.text) await api(`/api/admin/studio/drafts/${draft.id}`, { method: 'POST', body: { text: text.value } });
+        if (!confirm(`Zverejniť „${draft.title}" na ${targets.join(' a ')}?`)) return '';
+        const result = await api(`/api/admin/studio/drafts/${draft.id}/publish`, { method: 'POST', body: { targets } });
+        return result.draft.status === 'published' ? 'Zverejnené.' : 'Časť zverejnenia zlyhala — pozri detail.';
+      }, 'admin-btn admin-btn-sm admin-btn-go'));
+    }
+  }
+  const download = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť obrázok');
+  download.href = `/api/admin/studio/drafts/${draft.id}/image`; download.download = `oko-${draft.id.slice(0, 8)}.jpg`;
+  actions.append(download, button('Kopírovať text', async event => {
+    try { await navigator.clipboard.writeText(text.value); event.target.textContent = 'Skopírované ✓'; }
+    catch { text.select(); event.target.textContent = 'Označené — Ctrl+C'; }
+  }, 'admin-btn admin-btn-sm'));
+  if (editable) {
+    actions.append(act('Zdieľal som ručne', async () => { await api(`/api/admin/studio/drafts/${draft.id}/shared`, { method: 'POST', body: {} }); return 'Označené ako zverejnené.'; }),
+      act('Zahodiť', async () => { await api(`/api/admin/studio/drafts/${draft.id}/discard`, { method: 'POST', body: {} }); return ''; }, 'admin-btn admin-btn-sm admin-btn-warn'));
+  }
+  if (draft.status === 'discarded') actions.append(act('Obnoviť', async () => { await api(`/api/admin/studio/drafts/${draft.id}/restore`, { method: 'POST', body: {} }); return ''; }));
+  const results = el('div', 'admin-studio-results');
+  for (const [target, result] of Object.entries(draft.results || {})) {
+    const line = el('div');
+    const name = { facebook: 'Facebook', instagram: 'Instagram', manual: 'Ručne' }[target] || target;
+    if (result.error) line.append(badge(`${name}: chyba`, 'bad'), document.createTextNode(` ${result.error}`));
+    else if (result.url) { const a = el('a', '', `${name}: otvoriť príspevok`); a.href = result.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; line.append(a); }
+    else line.append(document.createTextNode(`${name}: ${when(result.at)}`));
+    results.append(line);
+  }
+  body.append(head, el('h3', '', draft.title), el('p', 'admin-muted', `vytvorené ${when(draft.createdAt)}${draft.publishedAt ? ` · zverejnené ${when(draft.publishedAt)}` : ''}`),
+    text, actions, results);
+  card.append(img, body);
+  return card;
+}
+
 // ── Audit a log ────────────────────────────────────────────────────────────
 async function renderAudit() {
   const { audit } = await api('/api/admin/audit');
@@ -543,7 +686,7 @@ async function renderMaintenance() {
 // ── štart ──────────────────────────────────────────────────────────────────
 const RENDER = { overview: renderOverview, analytics: renderAnalytics, traffic: renderTraffic, errors: renderErrors,
   costs: renderCosts, feeds: renderFeeds, users: renderUsers, notice: renderNotice, maintenance: renderMaintenance,
-  audit: renderAudit, log: renderLog };
+  studio: renderStudio, audit: renderAudit, log: renderLog };
 function show(tab) {
   const current = RENDER[tab] ? tab : 'overview';
   for (const b of tabs.querySelectorAll('button')) {

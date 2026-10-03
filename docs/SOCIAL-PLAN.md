@@ -1,6 +1,6 @@
 # OKO — Štúdio sociálnych sietí (plán, PRIORITA)
 
-Stav: **schválený smer, neimplementované** (2026-10-03). Cieľ: z admin panelu
+Stav: **Fáza 1 implementovaná** (2026-10-03) — admin → Štúdio; Fázy 2–4 čakajú. Cieľ: z admin panelu
 vyrábať a zverejňovať príspevky, fotky, karusely a reels na Facebook a Instagram
 z toho, čo OKO naozaj ukazuje.
 
@@ -125,3 +125,40 @@ na serveri.
 4. Prepojiť Instagram so stránkou (nastavenia stránky → Prepojené účty → Instagram).
 5. Voliteľne Meta Business portfólio (business.facebook.com) so stránkou aj IG.
 6. Meta for Developers účet a aplikácia — spolu, keď začne Fáza 0.
+
+## Fáza 1 — čo je hotové (2026-10-03)
+
+Admin → záložka **Štúdio** (`src/admin/server/studio/`, UI v `src/admin/adminPage.js`).
+
+- **Šablóny** (`templates.js`, len fakty z dát, slovensky, s časom stavu a zdrojom):
+  zemetrasenie (prah: do 300 km od SK M ≥ 2,5, do 800 km M ≥ 4, inak M ≥ 6, posledných 6 h),
+  prehľad zemetrasení za 24 h (denne od 8:00), štart rakety (posledných 12 h).
+  Poloha = najbližšie väčšie mesto (Natural Earth) so svetovou stranou.
+- **Obrázok** 1080×1350 JPEG (`card.js`): SVG → sharp, vlastná mapa z Natural Earth
+  (pevnina + hranice), logo, zdroj a čas. Žiadny mapový podklad tretej strany, 0 €.
+- **Návrhy** v `.auth-data/admin.sqlite` (`studio_drafts`); jedna udalosť = jeden návrh.
+  Úprava textu, schválenie, zahodenie, obnovenie; stiahnutie obrázka a kopírovanie
+  textu; **„Zdieľal som ručne"** pre osobný profil.
+- **Auto-návrhy** každých 10 min (vypínateľné). Zastarané dáta (> 30 min) alebo vypnutý
+  zdroj = žiadny návrh.
+- **Zverejnenie** (`meta.js`): FB stránka `/{page}/photos` (multipart), Instagram
+  `/{ig}/media` → `media_publish` s podpísanou, 30-minútovou URL obrázka
+  `/api/studio/media/<id>.jpg` (len schválené návrhy). Čiastočné zlyhanie sa dá
+  zopakovať bez duplikátu. Zobrazuje sa denný limit Instagramu.
+- **Auto-zverejnenie** pre šablónu sa dá zapnúť až po 10 automatických návrhoch
+  zverejnených bez úpravy (vynútené serverom); max. N za 24 h, tichý čas 22–7.
+- Všetko ide do auditu admina.
+
+### Zapojenie Facebooku a Instagramu (.env na serveri)
+
+```dotenv
+META_PAGE_ID=…            # ID Facebook stránky
+META_PAGE_TOKEN=…         # dlhodobý token stránky (pages_manage_posts, pages_read_engagement, instagram_content_publish)
+META_IG_USER_ID=…         # ID Instagram profesionálneho účtu prepojeného so stránkou
+# voliteľné:
+# META_GRAPH_VERSION=v23.0
+# STUDIO_PUBLIC_URL=https://okolive.sk   # inak AUTH_PUBLIC_URL / prvý https v AUTH_ORIGINS
+```
+
+Bez týchto hodnôt Štúdio beží v režime ručného zdieľania. Token nikdy do chatu,
+klienta ani repozitára.

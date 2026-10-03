@@ -135,3 +135,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .strip-bad { background: #d03b3b; }
 .strip-off { background: #9085e9; }
 @media (max-width: 640px) { .admin-grid { grid-template-columns: 1fr; } .barlist-row { grid-template-columns: 34% 1fr auto; } }
+
+/* ── Štúdio sociálnych sietí (2026-10-03) ─────────────────────────────── */
+.admin-notice-info { color: #cfeefa; border-color: #00d4ff44; background: #07202c80; }
+.admin-check { display: inline-flex; align-items: center; gap: 6px; color: #c8d9e4; font-size: 13px; cursor: pointer; }
+.admin-check input { accent-color: #00d4ff; width: 16px; height: 16px; }
+.admin-check input:disabled + * , .admin-check:has(input:disabled) { opacity: .55; cursor: not-allowed; }
+.admin-studio-auto > .admin-check { margin-bottom: 14px; }
+.admin-btn-go { border-color: #3ddc9788; color: #c9f7e2; }
+.admin-btn-go:hover { border-color: var(--ok); background: #0f2a1f; }
+.admin-studio-grid { display: grid; gap: 18px; }
+.admin-studio-card { display: grid; grid-template-columns: 270px 1fr; gap: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #ffffff04; }
+.admin-studio-card img { width: 270px; height: auto; border-radius: 8px; border: 1px solid #ffffff14; background: #050a10; }
+.admin-studio-body { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.admin-studio-body h3 { margin: 4px 0 0; font-size: 16px; font-weight: 600; }
+.admin-studio-body .admin-muted { margin: 0; }
+.admin-studio-text { width: 100%; padding: 10px 12px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text);
+  font: 13px/1.5 var(--font-sans); resize: vertical; }
+.admin-studio-text[readonly] { color: #9fb6c5; }
+.admin-studio-body .admin-actions .admin-btn { margin-top: 0; }
+.admin-studio-results { font-size: 12.5px; color: var(--muted); display: grid; gap: 4px; }
+.admin-studio-results a { color: #90def0; }
+@media (max-width: 760px) { .admin-studio-card { grid-template-columns: 1fr; } .admin-studio-card img { width: 100%; max-width: 360px; } }

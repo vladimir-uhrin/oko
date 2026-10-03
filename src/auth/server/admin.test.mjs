@@ -223,3 +223,34 @@ test('chyby sa dajú vymazať; záloha vytvorí kópie oboch databáz', async t 
   assert.equal(reopened.errors().length, 1);
   reopened.close();
 });
+
+test('Štúdio cez admin API: člen 404, vlastník generuje, upraví, schváli; zápis bez CSRF neprejde', async t => {
+  const { createStudio } = await import('../../admin/server/studio/index.js');
+  const { admin, member, runtime } = await setupWithRuntime(t);
+  runtime.studio = createStudio({ store: runtime.store, env: {}, port: () => 1, timers: false, log: () => {},
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [{ id: 'q', sourceId: 'q', mag: 6.5, time: Date.now() - 60e3, lat: 37.6, lon: 23.1, depth: 10 }], fetchedAt: Date.now() } }),
+    renderCard: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    publisher: { status: () => ({ facebook: false, instagram: false }), instagramLimit: async () => null } });
+  assert.equal((await member.request('/api/admin/studio')).status, 404);
+  assert.equal((await member.post('/api/admin/studio/generate', { template: 'quake' })).status, 404);
+  const empty = await admin.request('/api/admin/studio');
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.data.meta, { facebook: false, instagram: false });
+  assert.equal((await admin.post('/api/admin/studio/generate', { template: 'quake' }, { headers: { 'X-CSRF-Token': '' } })).status, 403);
+  const generated = await admin.post('/api/admin/studio/generate', { template: 'quake' });
+  assert.equal(generated.data.created, true);
+  const id = generated.data.draft.id;
+  const image = await admin.request(`/api/admin/studio/drafts/${id}/image`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get('content-type'), 'image/jpeg');
+  assert.equal((await member.request(`/api/admin/studio/drafts/${id}/image`)).status, 404);
+  assert.equal((await admin.post(`/api/admin/studio/drafts/${id}`, { text: 'Upravený text' })).data.draft.edited, true);
+  assert.equal((await admin.post(`/api/admin/studio/drafts/${id}/approve`, {})).data.draft.status, 'approved');
+  const publish = await admin.post(`/api/admin/studio/drafts/${id}/publish`, { targets: ['facebook'] });
+  assert.equal(publish.status, 409);
+  assert.equal(publish.data.error, 'meta_not_configured');
+  assert.equal((await admin.post(`/api/admin/studio/drafts/${id}/shared`, {})).data.draft.status, 'published');
+  assert.equal((await admin.post('/api/admin/studio/settings', { autoPublish: { quake: true } })).data.error, 'auto_publish_not_earned');
+  const audit = (await admin.request('/api/admin/audit')).data.audit.map(entry => entry.action);
+  assert.ok(audit.includes('studio_generated') && audit.includes('studio_shared'));
+});

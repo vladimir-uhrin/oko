@@ -44,6 +44,7 @@ export const FEEDS = Object.freeze([
   { id: 'accounts', label: 'Účty', prefixes: ['/api/auth', '/api/account'] },
   { id: 'admin', label: 'Admin', prefixes: ['/api/admin'] },
   { id: 'telemetry', label: 'Telemetria a oznam', prefixes: ['/api/telemetry', '/api/notice'] },
+  { id: 'studio', label: 'Štúdio (obrázky pre Instagram)', prefixes: ['/api/studio'] },
   { id: 'debug', label: 'Realtime debug log', prefixes: ['/api/realtime/debug-log'] },
 ]);
 
