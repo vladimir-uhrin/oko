@@ -254,3 +254,33 @@ test('Štúdio cez admin API: člen 404, vlastník generuje, upraví, schváli; 
   const audit = (await admin.request('/api/admin/audit')).data.audit.map(entry => entry.action);
   assert.ok(audit.includes('studio_generated') && audit.includes('studio_shared'));
 });
+
+test('Štúdio: reel cez admin API — render, náhľad videa s Range, zverejnenie 202 na pozadí', async t => {
+  const { createStudio } = await import('../../admin/server/studio/index.js');
+  const { admin, runtime } = await setupWithRuntime(t);
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-admin-reel-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const calls = [];
+  runtime.studio = createStudio({ store: runtime.store, env: {}, port: () => 1, timers: false, log: () => {}, mediaDir: dir,
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [{ id: 'q', sourceId: 'q', mag: 6.5, time: Date.now() - 60e3, lat: 37.6, lon: 23.1, depth: 10 }], fetchedAt: Date.now() } }),
+    renderCard: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]), checkFfmpeg: async () => true,
+    renderReel: async (item, file) => { const { writeFileSync } = await import('node:fs'); writeFileSync(file, Buffer.alloc(500, 1)); return {}; },
+    publisher: { status: () => ({ facebook: true, instagram: false }), instagramLimit: async () => null,
+      facebookReel: async () => { calls.push('facebook-reel'); return { id: 'r1', url: 'u' }; } } });
+  const generated = await admin.post('/api/admin/studio/generate', { template: 'quake' });
+  const id = generated.data.draft.id;
+  assert.equal(generated.data.draft.videoStatus, 'queued');
+  assert.equal((await admin.request('/api/admin/studio')).data.capabilities.ffmpeg, true);
+  await runtime.studio.videosIdle();
+  const video = await admin.request(`/api/admin/studio/drafts/${id}/video`, { headers: { Range: 'bytes=0-99' } });
+  assert.equal(video.status, 206);
+  assert.equal(video.headers.get('content-type'), 'video/mp4');
+  const started = await admin.post(`/api/admin/studio/drafts/${id}/publish`, { targets: ['facebook-reel'] });
+  assert.equal(started.status, 202);
+  assert.equal(started.data.draft.results['facebook-reel'].pending, true);
+  for (let i = 0; i < 20 && !(await admin.request(`/api/admin/studio/drafts/${id}`)).data.draft.results['facebook-reel'].id; i++) await new Promise(r => setTimeout(r, 20));
+  const final = (await admin.request(`/api/admin/studio/drafts/${id}`)).data.draft;
+  assert.equal(final.status, 'published');
+  assert.deepEqual(calls, ['facebook-reel']);
+  assert.equal((await admin.post(`/api/admin/studio/drafts/${id}/render`, {})).data.draft.videoStatus, 'queued');
+});

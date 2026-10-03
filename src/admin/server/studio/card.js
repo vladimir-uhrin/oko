@@ -8,18 +8,18 @@ import sharp from 'sharp';
 
 export const CARD = Object.freeze({ width: 1080, height: 1350 });
 const MAP = { x: 60, y: 560, w: 960, h: 560 };
-const FONT = "'DejaVu Sans', 'Segoe UI', Arial, sans-serif";
-const MONO = "'DejaVu Sans Mono', Consolas, monospace";
+export const FONT = "'DejaVu Sans', 'Segoe UI', Arial, sans-serif";
+export const MONO = "'DejaVu Sans Mono', Consolas, monospace";
 
 let borders = null;
 let land = null;
-function loadLand() {
+export function loadLand() {
   if (land) return land;
   const file = fileURLToPath(new URL('../../../data/local_data/natural_earth/land.json', import.meta.url));
   land = JSON.parse(readFileSync(file, 'utf8')).rings;
   return land;
 }
-function loadBorders() {
+export function loadBorders() {
   if (borders) return borders;
   const file = fileURLToPath(new URL('../../../data/local_data/boundaries/boundaries.geojsonl', import.meta.url));
   borders = readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line).geometry.coordinates);
@@ -96,7 +96,7 @@ export function wrap(text, maxChars, maxLines) {
   return lines;
 }
 
-const stamp = at => new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(at));
+export const stamp = at => new Intl.DateTimeFormat('sk-SK', { timeZone: 'Europe/Bratislava', day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(at));
 
 export function cardSvg(card) {
   const headline = wrap(card.headline, 26, 2);

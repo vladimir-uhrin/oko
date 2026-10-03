@@ -27,6 +27,9 @@ const ERRORS = {
   draft_not_publishable: 'Tento návrh už nejde zverejniť.',
   invalid_text: 'Text musí mať 1–2200 znakov.',
   studio_unavailable: 'Štúdio na serveri nebeží (pozri log).',
+  video_not_ready: 'Reel ešte nie je hotový.',
+  publish_in_progress: 'Zverejňovanie už prebieha.',
+  nothing_to_publish: 'Na vybrané siete je už zverejnené.',
 };
 const EVENTS = {
   registered: 'vytvorenie účtu', registered_google: 'vytvorenie cez Google', registered_github: 'vytvorenie cez GitHub',
@@ -41,7 +44,7 @@ const EVENTS = {
 const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user_enabled: 'odblokoval', sessions_revoked: 'odhlásil relácie',
   feed_updated: 'zmenil zdroj', notice_set: 'nastavil oznam', notice_cleared: 'zrušil oznam', errors_cleared: 'vymazal chyby',
   backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache', studio_generated: 'vytvoril návrh', studio_settings: 'zmenil automatiku Štúdia',
-  studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne' };
+  studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne', studio_publish_started: 'spustil zverejnenie' };
 
 // ── pomocníci ──────────────────────────────────────────────────────────────
 function el(tag, className = '', text) {
@@ -337,7 +340,7 @@ const STUDIO_STATUS = { draft: ['návrh', 'muted'], approved: ['schválené', 'i
 const STUDIO_REASONS = { nothing_to_post: 'Teraz nie je čo zverejniť (žiadna udalosť nad prahom).', exists: 'Návrh pre túto udalosť už existuje.',
   stale: 'Dáta sú zastarané — nezverejňujeme (pravidlo 2).', feed_disabled: 'Zdroj je vypnutý vo Feedoch.',
   source_unavailable: 'Zdroj dát je teraz nedostupný.', server_not_ready: 'Server ešte nebeží naplno, skúste o chvíľu.' };
-const studioState = { filter: 'open' };
+const studioState = { filter: 'open', poll: null };
 async function renderStudio(message) {
   const data = await api('/api/admin/studio');
   const meta = data.meta;
@@ -373,6 +376,27 @@ async function renderStudio(message) {
   autoDraftBox.addEventListener('change', () => saveStudioSettings({ autoDraft: autoDraftBox.checked }));
   autoDraft.append(autoDraftBox, document.createTextNode(' Automaticky pripravovať návrhy (každých 10 min, prehľad o 8:00) — zadarmo'));
   auto.append(autoDraft);
+  // Reels (Fáza 2)
+  const caps = data.capabilities || {};
+  const reelBox = el('div', 'admin-studio-reel-settings');
+  const autoReel = el('label', 'admin-check');
+  const autoReelBox = el('input'); autoReelBox.type = 'checkbox'; autoReelBox.checked = data.settings.autoReel; autoReelBox.disabled = !caps.ffmpeg;
+  autoReelBox.addEventListener('change', () => saveStudioSettings({ autoReel: autoReelBox.checked }));
+  autoReel.append(autoReelBox, document.createTextNode(' Ku každému návrhu vyrobiť aj reel 9:16 (video ~12 s, zadarmo na vašom serveri)'));
+  const audio = el('select');
+  for (const [value, label, enabled] of [['ambient', 'Jemný zvukový podklad (generovaný, bez licencie)', true],
+    ['music', `Hudba z vlastného priečinka (${caps.music || 0} skladieb)`, caps.music > 0], ['none', 'Bez zvuku', true]]) {
+    const option = el('option', '', label); option.value = value; option.disabled = !enabled; if (data.settings.audio === value) option.selected = true; audio.append(option);
+  }
+  audio.addEventListener('change', () => saveStudioSettings({ audio: audio.value }));
+  const audioLabel = el('label', 'admin-check', 'Zvuk reelu '); audioLabel.append(audio);
+  const voice = el('label', 'admin-check');
+  const voiceBox = el('input'); voiceBox.type = 'checkbox'; voiceBox.checked = data.settings.voice; voiceBox.disabled = !caps.voice;
+  voiceBox.addEventListener('change', () => saveStudioSettings({ voice: voiceBox.checked }));
+  voice.append(voiceBox, document.createTextNode(caps.voice ? ' Slovenský hlasový komentár (Piper)' : ' Slovenský hlas — nastavte PIPER_PATH a PIPER_MODEL v .env'));
+  reelBox.append(autoReel, audioLabel, voice);
+  if (!caps.ffmpeg) reelBox.append(notice('Reels potrebujú ffmpeg na serveri (zadarmo): na Windows „winget install ffmpeg", alebo cesta vo FFMPEG_PATH v .env. Potom reštartujte server.', 'info'));
+  auto.append(reelBox);
   const rows = data.templates.map(template => {
     const box = el('input'); box.type = 'checkbox'; box.checked = template.autoPublish;
     const earned = template.unchanged >= data.autoPublishMin;
@@ -402,6 +426,15 @@ async function renderStudio(message) {
     section('Štúdio sociálnych sietí', status, mode, create),
     section('Automatika', auto),
     section('Príspevky', filters, grid));
+  // Kým sa renderuje video alebo zverejňuje, obnovovať každých 5 s (nie počas písania textu).
+  clearTimeout(studioState.poll);
+  const busy = data.drafts.some(d => ['queued', 'rendering'].includes(d.videoStatus) || Object.values(d.results || {}).some(r => r.pending));
+  if (busy) {
+    studioState.poll = setTimeout(() => {
+      if (location.hash !== '#studio' || document.activeElement?.tagName === 'TEXTAREA') return;
+      void guarded(() => renderStudio());
+    }, 5000);
+  }
 }
 
 async function saveStudioSettings(patch) {
@@ -411,9 +444,23 @@ async function saveStudioSettings(patch) {
 
 function studioCard(draft, meta) {
   const card = el('article', 'admin-studio-card');
+  const media = el('div', 'admin-studio-media');
   const img = el('img');
   img.src = `/api/admin/studio/drafts/${draft.id}/image?v=${draft.updatedAt}`;
   img.alt = draft.title; img.loading = 'lazy'; img.width = 270; img.height = 338;
+  media.append(img);
+  const videoReady = draft.videoStatus === 'ready';
+  if (videoReady) {
+    const video = el('video');
+    video.src = `/api/admin/studio/drafts/${draft.id}/video?v=${draft.updatedAt}`;
+    video.controls = true; video.preload = 'metadata'; video.playsInline = true; video.width = 270; video.height = 480; video.poster = img.src;
+    video.setAttribute('aria-label', `Reel: ${draft.title}`);
+    media.append(video);
+  } else if (['queued', 'rendering'].includes(draft.videoStatus)) {
+    media.append(el('p', 'admin-studio-video-state', draft.videoStatus === 'rendering' ? '🎬 Reel sa renderuje…' : '🎬 Reel čaká vo fronte…'));
+  } else if (draft.videoStatus === 'failed') {
+    media.append(el('p', 'admin-studio-video-state admin-studio-video-failed', `Reel zlyhal: ${draft.videoError || 'neznáma chyba'}`));
+  }
   const body = el('div', 'admin-studio-body');
   const head = el('div', 'admin-badges');
   const [statusText, tone] = STUDIO_STATUS[draft.status] || [draft.status, 'muted'];
@@ -432,19 +479,36 @@ function studioCard(draft, meta) {
   if (editable) {
     actions.append(act('Uložiť text', async () => { await api(`/api/admin/studio/drafts/${draft.id}`, { method: 'POST', body: { text: text.value } }); return 'Text uložený.'; }));
     if (draft.status === 'draft') actions.append(act('Schváliť', async () => { await api(`/api/admin/studio/drafts/${draft.id}/approve`, { method: 'POST', body: {} }); return 'Schválené.'; }));
-    const targets = ['facebook', 'instagram'].filter(t => meta[t]);
-    if (targets.length) {
-      actions.append(act(`Zverejniť (${targets.map(t => (t === 'facebook' ? 'FB' : 'IG')).join(' + ')})`, async () => {
-        if (text.value !== draft.text) await api(`/api/admin/studio/drafts/${draft.id}`, { method: 'POST', body: { text: text.value } });
-        if (!confirm(`Zverejniť „${draft.title}" na ${targets.join(' a ')}?`)) return '';
-        const result = await api(`/api/admin/studio/drafts/${draft.id}/publish`, { method: 'POST', body: { targets } });
-        return result.draft.status === 'published' ? 'Zverejnené.' : 'Časť zverejnenia zlyhala — pozri detail.';
-      }, 'admin-btn admin-btn-sm admin-btn-go'));
-    }
+  }
+  // Zverejnenie: fotka a reel samostatne (dá sa aj postupne, aj po zverejnení fotky).
+  if (draft.status !== 'discarded') {
+    const publishButton = (label, targets) => act(label, async () => {
+      if (editable && text.value !== draft.text) await api(`/api/admin/studio/drafts/${draft.id}`, { method: 'POST', body: { text: text.value } });
+      if (!confirm(`Zverejniť „${draft.title}" — ${label.toLowerCase()}?`)) return '';
+      await api(`/api/admin/studio/drafts/${draft.id}/publish`, { method: 'POST', body: { targets } });
+      return 'Zverejňuje sa na pozadí — stav sa obnoví sám (reel môže trvať niekoľko minút).';
+    }, 'admin-btn admin-btn-sm admin-btn-go');
+    const photoTargets = ['facebook', 'instagram'].filter(t => meta[t] && !draft.results?.[t]?.id);
+    const reelTargets = ['facebook-reel', 'instagram-reel'].filter(t => meta[t.replace('-reel', '')] && !draft.results?.[t]?.id);
+    const short = list => list.map(t => (t.startsWith('facebook') ? 'FB' : 'IG')).join(' + ');
+    if (photoTargets.length && (editable || draft.status === 'published')) actions.append(publishButton(`Zverejniť fotku (${short(photoTargets)})`, photoTargets));
+    if (reelTargets.length && videoReady) actions.append(publishButton(`Zverejniť reel (${short(reelTargets)})`, reelTargets));
   }
   const download = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť obrázok');
   download.href = `/api/admin/studio/drafts/${draft.id}/image`; download.download = `oko-${draft.id.slice(0, 8)}.jpg`;
-  actions.append(download, button('Kopírovať text', async event => {
+  actions.append(download);
+  if (videoReady) {
+    const downloadVideo = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť reel');
+    downloadVideo.href = `/api/admin/studio/drafts/${draft.id}/video`; downloadVideo.download = `oko-reel-${draft.id.slice(0, 8)}.mp4`;
+    actions.append(downloadVideo);
+  }
+  if (draft.status !== 'discarded' && !['queued', 'rendering'].includes(draft.videoStatus)) {
+    actions.append(act(videoReady ? 'Prerobiť reel' : draft.videoStatus === 'failed' ? 'Skúsiť reel znova' : 'Vyrobiť reel', async () => {
+      await api(`/api/admin/studio/drafts/${draft.id}/render`, { method: 'POST', body: {} });
+      return 'Reel je vo fronte — hotový bude o necelú minútu.';
+    }));
+  }
+  actions.append(button('Kopírovať text', async event => {
     try { await navigator.clipboard.writeText(text.value); event.target.textContent = 'Skopírované ✓'; }
     catch { text.select(); event.target.textContent = 'Označené — Ctrl+C'; }
   }, 'admin-btn admin-btn-sm'));
@@ -456,15 +520,16 @@ function studioCard(draft, meta) {
   const results = el('div', 'admin-studio-results');
   for (const [target, result] of Object.entries(draft.results || {})) {
     const line = el('div');
-    const name = { facebook: 'Facebook', instagram: 'Instagram', manual: 'Ručne' }[target] || target;
-    if (result.error) line.append(badge(`${name}: chyba`, 'bad'), document.createTextNode(` ${result.error}`));
+    const name = { facebook: 'Facebook', instagram: 'Instagram', 'facebook-reel': 'Facebook reel', 'instagram-reel': 'Instagram reel', manual: 'Ručne' }[target] || target;
+    if (result.pending) line.append(badge(`${name}: zverejňuje sa…`, 'info'));
+    else if (result.error) line.append(badge(`${name}: chyba`, 'bad'), document.createTextNode(` ${result.error}`));
     else if (result.url) { const a = el('a', '', `${name}: otvoriť príspevok`); a.href = result.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; line.append(a); }
     else line.append(document.createTextNode(`${name}: ${when(result.at)}`));
     results.append(line);
   }
   body.append(head, el('h3', '', draft.title), el('p', 'admin-muted', `vytvorené ${when(draft.createdAt)}${draft.publishedAt ? ` · zverejnené ${when(draft.publishedAt)}` : ''}`),
     text, actions, results);
-  card.append(img, body);
+  card.append(media, body);
   return card;
 }
 

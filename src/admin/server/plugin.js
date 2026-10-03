@@ -26,7 +26,8 @@ export function adminPlugin(env = process.env) {
         port: () => server.httpServer?.address()?.port ?? null });
       runtime.start();
       // Štúdio sociálnych sietí (2026-10-03): rovnaká admin DB, údaje cez loopback.
-      runtime.studio = createStudio({ store, env, port: () => server.httpServer?.address()?.port ?? null });
+      runtime.studio = createStudio({ store, env, port: () => server.httpServer?.address()?.port ?? null,
+        mediaDir: path.join(path.dirname(authDb), 'studio') });
       runtime.studio.start();
       current = runtime;
       return runtime;
@@ -35,7 +36,9 @@ export function adminPlugin(env = process.env) {
     server.middlewares.use((req, res, next) => {
       if (!runtime) return next();
       runtime.handlePublic(req, res, () => runtime.middleware(req, res, () => {
-        if (runtime.studio && String(req.url || '').startsWith('/api/studio/')) return runtime.studio.handleMedia(req, res, next);
+        if (runtime.studio && String(req.url || '').startsWith('/api/studio/')) {
+          return void runtime.studio.handleMedia(req, res, next).catch(() => { if (!res.headersSent) { res.statusCode = 500; res.end(); } });
+        }
         next();
       })).catch(() => next());
     });

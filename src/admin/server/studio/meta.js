@@ -77,6 +77,39 @@ export function createMetaPublisher({ env = process.env, fetchImpl = (...args) =
       try { url = (await call(published.id, { method: 'GET', params: { fields: 'permalink' } })).permalink || null; } catch { /* odkaz nie je nutný */ }
       return { id: published.id, url };
     },
+    /** Reel na Facebook stránku: start → upload na rupload.facebook.com → finish (zverejniť). Limit Mety: 30 reels / 24 h. */
+    async facebookReel({ video, text }) {
+      const c = config();
+      if (!c.facebook) throw new Error('Facebook nie je nastavený (META_PAGE_ID, META_PAGE_TOKEN).');
+      const start = await call(`${c.pageId}/video_reels`, { params: { upload_phase: 'start' } });
+      const uploadUrl = start.upload_url || `https://rupload.facebook.com/video-upload/${c.version}/${start.video_id}`;
+      if (!/^https:\/\/rupload\.facebook\.com\//.test(uploadUrl)) throw new Error('Neočakávaná adresa nahrávania.');
+      const upload = await fetchImpl(uploadUrl, { method: 'POST', body: video, redirect: 'error', signal: AbortSignal.timeout(5 * 60_000),
+        headers: { Authorization: `OAuth ${c.token}`, offset: '0', file_size: String(video.length), 'Content-Type': 'application/octet-stream' } });
+      let uploaded = null;
+      try { uploaded = await upload.json(); } catch { uploaded = null; }
+      if (!upload.ok || uploaded?.error || uploaded?.success === false) throw graphError(uploaded, upload.status);
+      await call(`${c.pageId}/video_reels`, { params: { video_id: start.video_id, upload_phase: 'finish', video_state: 'PUBLISHED', description: text } });
+      return { id: start.video_id, url: `https://www.facebook.com/reel/${start.video_id}` };
+    },
+    /** Reel na Instagram: kontajner REELS z verejnej URL videa → čakanie na spracovanie (až ~5 min) → zverejnenie. */
+    async instagramReel({ videoUrl, text, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+      const c = config();
+      if (!c.instagram) throw new Error('Instagram nie je nastavený (META_IG_USER_ID, META_PAGE_TOKEN).');
+      const container = await call(`${c.igUserId}/media`, { params: { media_type: 'REELS', video_url: videoUrl, caption: text.slice(0, 2200), share_to_feed: 'true' } });
+      let finished = false;
+      for (let i = 0; i < 60 && !finished; i++) {
+        const state = await call(container.id, { method: 'GET', params: { fields: 'status_code,status' } });
+        if (state.status_code === 'FINISHED') finished = true;
+        else if (state.status_code === 'ERROR' || state.status_code === 'EXPIRED') throw new Error(`Instagram reel: ${state.status_code} ${state.status || ''}`.trim());
+        else await wait(5000);
+      }
+      if (!finished) throw new Error('Instagram reel sa nespracoval do 5 minút.');
+      const published = await call(`${c.igUserId}/media_publish`, { params: { creation_id: container.id } });
+      let url = null;
+      try { url = (await call(published.id, { method: 'GET', params: { fields: 'permalink' } })).permalink || null; } catch { /* odkaz nie je nutný */ }
+      return { id: published.id, url };
+    },
     /** Zostávajúci denný limit Instagramu (100 príspevkov za 24 h). */
     async instagramLimit() {
       const c = config();

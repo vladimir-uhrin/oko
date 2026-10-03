@@ -26,7 +26,7 @@ ignorovať `Cache-Control: no-store` (rovnako ako `/account.html`).
 | Náklady | OpenAI hlas, OpenAI súhrn, Google Places — počet volaní po dňoch, dnes, 30 dní, **denný strop** (nad ním 429) a cena za jednotku → odhad €; TomTom a GFW aj s kvótou providera z ich `/status` |
 | Feedy | všetky dátové zdroje: aktuálny stav, pás dostupnosti 7 dní po hodinách (zo skutočných požiadaviek), výpadky z kontroly statusu každých 10 min, **Vypnúť / Zapnúť** |
 | Používatelia | hľadanie, detail (relácie, aktivita, prihlasovacie metódy, počet sledovaných letov) a akcie nižšie |
-| Štúdio | návrhy príspevkov pre Facebook a Instagram zo živých dát (zemetrasenia, štarty rakiet), obrázok + slovenský text, úprava, schválenie, zverejnenie cez Meta API alebo ručné zdieľanie; automatika — pozri `docs/SOCIAL-PLAN.md` |
+| Štúdio | návrhy príspevkov pre Facebook a Instagram zo živých dát (zemetrasenia, štarty rakiet), obrázok + slovenský text + reel 9:16 (ffmpeg), úprava, schválenie, zverejnenie cez Meta API alebo ručné zdieľanie; automatika — pozri `docs/SOCIAL-PLAN.md` |
 | Oznam | text 1–280 znakov, typ info/upozornenie, platnosť; náhľad, ako ho vidia návštevníci |
 | Údržba | záloha DB účtov aj admin DB (`VACUUM INTO`, ponechá 14), čistenie povolenej cache |
 | Audit | posledných 200 zásahov administrátora (aj zmeny feedov, oznamu, záloh, cache) |

@@ -16,7 +16,8 @@ function studioRow(row) {
   const parse = (value, fallback) => { try { return JSON.parse(value); } catch { return fallback; } };
   return { id: row.id, template: row.template, eventKey: row.event_key, origin: row.origin, title: row.title, text: row.text,
     edited: row.text !== row.original_text, card: parse(row.card, {}), status: row.status, results: parse(row.results, {}),
-    createdAt: row.created_at, updatedAt: row.updated_at, approvedAt: row.approved_at, publishedAt: row.published_at };
+    createdAt: row.created_at, updatedAt: row.updated_at, approvedAt: row.approved_at, publishedAt: row.published_at,
+    video: row.video ?? null, videoStatus: row.video_status ?? null, videoError: row.video_error ?? null };
 }
 
 export function openAdminStore(filename) {
@@ -58,6 +59,11 @@ export function openAdminStore(filename) {
     );
     CREATE INDEX IF NOT EXISTS studio_drafts_time ON studio_drafts(created_at);
   `);
+  // Fáza 2 (reels): stav videa — aditívne stĺpce.
+  const draftColumns = db.prepare('PRAGMA table_info(studio_drafts)').all().map(column => column.name);
+  if (!draftColumns.includes('video')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video TEXT');
+  if (!draftColumns.includes('video_status')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video_status TEXT');
+  if (!draftColumns.includes('video_error')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video_error TEXT');
   if (filename !== ':memory:' && process.platform !== 'win32') { try { chmodSync(filename, 0o600); } catch { /* ok */ } }
 
   const tx = fn => {
@@ -181,10 +187,11 @@ export function openAdminStore(filename) {
     studioImage: id => db.prepare('SELECT image FROM studio_drafts WHERE id = ?').get(id)?.image ?? null,
     studioList(limit = 100) {
       return db.prepare(`SELECT id, template, event_key, origin, title, text, original_text, card, status, results, created_at,
-        updated_at, approved_at, published_at FROM studio_drafts ORDER BY created_at DESC LIMIT ?`).all(limit).map(studioRow);
+        updated_at, approved_at, published_at, video, video_status, video_error FROM studio_drafts ORDER BY created_at DESC LIMIT ?`).all(limit).map(studioRow);
     },
     studioUpdate(id, fields, now) {
-      const columns = { text: 'text', status: 'status', results: 'results', approvedAt: 'approved_at', publishedAt: 'published_at' };
+      const columns = { text: 'text', status: 'status', results: 'results', approvedAt: 'approved_at', publishedAt: 'published_at',
+        video: 'video', videoStatus: 'video_status', videoError: 'video_error' };
       for (const [key, column] of Object.entries(columns)) {
         if (!(key in fields)) continue;
         const value = key === 'results' ? JSON.stringify(fields[key]) : fields[key];
@@ -198,6 +205,11 @@ export function openAdminStore(filename) {
     studioPublishedSince: (from, origin) => db.prepare(`SELECT COUNT(*) AS n FROM studio_drafts WHERE status = 'published'
       AND published_at >= ?${origin ? ' AND origin = ?' : ''}`).get(...(origin ? [from, origin] : [from])).n,
     /** Staré zahodené a nezverejnené návrhy (aj s obrázkom) po 30 dňoch preč; zverejnené ostávajú bez obrázka po 90 dňoch. */
+    /** Návrhy, ktorých video sa má zmazať z disku (staré, alebo zverejnené pred 90 dňami). */
+    studioExpiredVideos: now => db.prepare(`SELECT id, video FROM studio_drafts WHERE video IS NOT NULL AND (
+      (status IN ('draft','discarded','failed') AND created_at < ?) OR (status = 'published' AND published_at < ?))`)
+      .all(now - 30 * 86400_000, now - 90 * 86400_000),
+    studioQueuedVideos: () => db.prepare("SELECT id FROM studio_drafts WHERE video_status IN ('queued','rendering') ORDER BY created_at").all().map(row => row.id),
     studioPrune(now) {
       db.prepare(`DELETE FROM studio_drafts WHERE status IN ('draft','discarded','failed') AND created_at < ?`).run(now - 30 * 86400_000);
       db.prepare(`UPDATE studio_drafts SET image = NULL WHERE status = 'published' AND published_at < ?`).run(now - 90 * 86400_000);

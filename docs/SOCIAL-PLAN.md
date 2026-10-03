@@ -1,6 +1,6 @@
 # OKO — Štúdio sociálnych sietí (plán, PRIORITA)
 
-Stav: **Fáza 1 implementovaná** (2026-10-03) — admin → Štúdio; Fázy 2–4 čakajú. Cieľ: z admin panelu
+Stav: **Fázy 1 a 2 implementované** (2026-10-03) — admin → Štúdio; Fázy 3–4 čakajú. Cieľ: z admin panelu
 vyrábať a zverejňovať príspevky, fotky, karusely a reels na Facebook a Instagram
 z toho, čo OKO naozaj ukazuje.
 
@@ -162,3 +162,31 @@ META_IG_USER_ID=…         # ID Instagram profesionálneho účtu prepojeného 
 
 Bez týchto hodnôt Štúdio beží v režime ručného zdieľania. Token nikdy do chatu,
 klienta ani repozitára.
+
+## Fáza 2 — reels (hotové 2026-10-03)
+
+`src/admin/server/studio/reel.js` + fronta v `index.js`, UI v Štúdiu.
+
+- **Video 1080×1920, 30 fps, 12 s** (s hlasom do 30 s), H.264 + AAC 48 kHz, faststart —
+  spĺňa požiadavky Instagram Reels aj Facebook Reels. Renderuje sa bez prehliadača
+  a bez Google: vlastná mapa z Natural Earth (sharp), animované priblíženie k
+  udalosti, pulzujúci bod, odpočítanie čísla, bezpečné zóny reels; ffmpeg skladá
+  snímky a zvuk. Na vlastnom PC ~35 s na reel, jedno naraz, fronta prežije reštart.
+- **Zvuk:** generovaný ambient (sine + šum, bez licencie) — predvolené; hudba z
+  `STUDIO_MUSIC_DIR` (vlastné CC0 skladby, striedajú sa deterministicky); bez zvuku
+  (tichá stopa, Meta video bez zvukovej stopy občas odmietne).
+- **Hlas (voliteľné, zadarmo):** Piper TTS — `PIPER_PATH` a `PIPER_MODEL` (slovenský
+  model, napr. `sk_SK-lili-medium`; licenciu modelu overiť pred použitím). Text =
+  titulok + prvá veta; video sa predĺži podľa dĺžky reči.
+- **Súbory** v `.auth-data/studio/<id>.mp4` (gitignored, mimo public). Staré sa mažú
+  s návrhom (30 dní) alebo 90 dní po zverejnení; osirelé súbory upratuje tick.
+- **Zverejnenie:** FB reel `/{page}/video_reels` start → `rupload.facebook.com` →
+  finish (`video_state=PUBLISHED`); IG `media_type=REELS` z podpísanej URL
+  `/api/studio/media/<id>.mp4` (60 min, Range), čakanie na spracovanie až 5 min.
+  Beží na pozadí (API odpovie 202), admin sa obnovuje každých 5 s. Fotka a reel sa
+  zverejňujú nezávisle, aj postupne. Limity Mety: 30 FB reels / 24 h, 100 IG
+  príspevkov / 24 h.
+- **Automatika:** auto-návrh s videom čaká na render a potom sa zverejní fotka aj
+  reel podľa cieľov v nastavení (rovnaké poistky ako Fáza 1).
+- Požiadavka na server: **ffmpeg** (Windows: `winget install ffmpeg`, alebo
+  `FFMPEG_PATH` v `.env`). Bez neho Štúdio ďalej robí fotky; reel skončí s jasnou chybou.

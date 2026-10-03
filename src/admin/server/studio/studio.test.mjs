@@ -139,7 +139,10 @@ test('zverejnenie: FB + IG, podpísaná URL obrázka, čiastočné zlyhanie a op
   const publisher = fakePublisher(calls, { fail: 'facebook' });
   const { studio } = setup(t, { publisher });
   const { draft } = await studio.generate('quake');
-  const failed = await studio.publish(draft.id, ['facebook', 'instagram']);
+  const started = await studio.publish(draft.id, ['facebook', 'instagram']);
+  assert.equal(started.draft.results.facebook.pending, true, 'odpoveď hneď, zverejnenie na pozadí');
+  await assert.rejects(studio.publish(draft.id, ['facebook']), /publish_in_progress/);
+  const failed = await started.done;
   assert.equal(failed.draft.status, 'failed');
   assert.match(failed.draft.results.facebook.error, /Graph down/);
   assert.equal(failed.draft.results.instagram.id, '9');
@@ -147,10 +150,10 @@ test('zverejnenie: FB + IG, podpísaná URL obrázka, čiastočné zlyhanie a op
   assert.equal(igUrl.origin, 'https://okolive.sk');
   assert.match(igUrl.pathname, new RegExp(`/api/studio/media/${draft.id}\\.jpg`));
   publisher.facebookPhoto = async ({ image }) => { calls.push(['facebook-retry', image.length]); return { id: '1_3', url: 'u' }; };
-  const ok = await studio.publish(draft.id, ['facebook', 'instagram']);
+  const ok = await (await studio.publish(draft.id, ['facebook', 'instagram'])).done;
   assert.equal(ok.draft.status, 'published');
   assert.equal(calls.filter(c => c[0] === 'instagram').length, 1, 'Instagram sa nezverejní druhýkrát');
-  await assert.rejects(studio.publish(draft.id, ['facebook']), /draft_not_publishable/);
+  await assert.rejects(studio.publish(draft.id, ['facebook']), /nothing_to_publish/);
   const { studio: noMeta } = setup(t, { publisher: fakePublisher([], { facebook: false, instagram: false }) });
   const second = await noMeta.generate('quake');
   await assert.rejects(noMeta.publish(second.draft.id, ['facebook']), /meta_not_configured/);

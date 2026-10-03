@@ -157,3 +157,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .admin-studio-results { font-size: 12.5px; color: var(--muted); display: grid; gap: 4px; }
 .admin-studio-results a { color: #90def0; }
 @media (max-width: 760px) { .admin-studio-card { grid-template-columns: 1fr; } .admin-studio-card img { width: 100%; max-width: 360px; } }
+.admin-studio-media { display: grid; gap: 10px; align-content: start; }
+.admin-studio-media video { width: 270px; height: auto; aspect-ratio: 9 / 16; border-radius: 8px; border: 1px solid #ffffff14; background: #050a10; }
+.admin-studio-video-state { margin: 0; padding: 10px; border-radius: 8px; border: 1px dashed #00d4ff44; color: #bfe8f5; font-size: 12.5px; text-align: center; }
+.admin-studio-video-failed { border-color: #ff6b6b66; color: #ffc2c2; }
+.admin-studio-reel-settings { display: grid; gap: 10px; margin: 6px 0 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.admin-studio-reel-settings select { margin-left: 6px; padding: 5px 8px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text); font: inherit; }
+@media (max-width: 760px) { .admin-studio-media video { width: 100%; max-width: 360px; } }
+.admin-check { flex-wrap: wrap; max-width: 100%; }
+.admin-studio-reel-settings select { max-width: 100%; min-width: 0; }
+@media (max-width: 640px) {
+  .admin-studio-reel-settings .admin-check { display: flex; flex-direction: column; align-items: flex-start; }
+  .admin-studio-reel-settings select { width: 100%; margin-left: 0; }
+}
