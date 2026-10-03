@@ -25,9 +25,15 @@
 // východ — krajiny, výšky (všetky / pod FL), „časť FIR", výnimky, platnosť a odkaz na
 // bulletin; ostatné bulletiny sveta jedným riadkom. Poctivá poznámka: odporúčanie pre
 // prevádzkovateľov z EÚ, nie zákaz letov; hranice FIR približné (VATSpy).
+//
+// Etapa 5c (INCIDENTY LODÍ · UKMTO, 2026-10-03): voliteľný správca `ukmto`
+// (src/ukmtoIncidentsLayer.js) pridá čip (predvolene zapnutý; bez aktívneho dejiska či úžiny
+// je vypnutý ako KONTROLA SÍDIEL bez modulov) a legendu: počty podľa druhu za 30 dní,
+// päť najnovších varovaní s časom a oblasťou, zdroj s licenciou OGL a odkaz na ukmto.org.
 
 import { currentLanguage, t } from './i18n.js';
 import { theatreLabel } from './data/mideastTheatres.js';
+import { UKMTO_SITE_URL, UKMTO_TYPES, UKMTO_TYPE_OTHER } from './data/ukmto.js';
 import { ageText } from './data/ukraineFreshness.js';
 import { wikiControlModuleById } from './data/wikiControl.js';
 
@@ -48,6 +54,7 @@ export function swatchColour(css, alpha) {
  * @param {(scene: object, translate: Function) => string} [o.labelFor] popisok dejiska; predvolene theatreLabel
  * @param {object|null} [o.control] správca KONTROLY SÍDIEL (createMideastControl): getState/onChange/isEnabled/setEnabled
  * @param {object|null} [o.airspace] VZDUŠNÝ PRIESTOR · EASA (createAirspaceAdvisory): getState/onChange/isEnabled/setEnabled
+ * @param {object|null} [o.ukmto] INCIDENTY LODÍ · UKMTO (createUkmtoIncidents): getState/onChange/isEnabled/setEnabled/labels
  * @param {Function} [o.translate]
  * @param {string} [o.lang] jazyk pre formátovanie čísel a dátumov (počty v legende, „stav k")
  * @param {Document} [o.documentRef]
@@ -59,6 +66,7 @@ export function createMideastPanel({
   labelFor = theatreLabel,
   control = null,
   airspace = null,
+  ukmto = null,
   translate = t,
   lang = currentLanguage(),
   documentRef = globalThis.document,
@@ -108,9 +116,10 @@ export function createMideastPanel({
   // onChange, panel si nič nedomýšľa. Legenda sa skladá celá pri každej zmene.
   let chips = null; let legend = null; let controlChip = null;
   let airChip = null; let airLegend = null;
+  let shipChip = null; let shipLegend = null;
   const dateFormat = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: 'UTC' });
   const numberFormat = new Intl.NumberFormat(lang === 'sk' ? 'sk-SK' : 'en-GB');
-  if (control || airspace) {
+  if (control || airspace || ukmto) {
     chips = el('div', 'mideast-chips');
     chips.setAttribute('role', 'group');
     // Skupina nesie viac čipov (KONTROLA SÍDIEL, VZDUŠNÝ PRIESTOR) — neutrálny názov, nie meno jedného z nich.
@@ -138,6 +147,17 @@ export function createMideastPanel({
     airLegend = el('div', 'mideast-legend mideast-air-legend');
     airLegend.hidden = true;
   }
+  if (ukmto) {
+    shipChip = button('data-toggle-chip mideast-chip mideast-chip-ukmto', translate('mideast.part.ukmto'), () => {
+      void ukmto.setEnabled?.(!ukmto.isEnabled?.());
+    });
+    shipChip.dataset.part = 'ukmto';
+    shipChip.setAttribute('aria-pressed', String(Boolean(ukmto.isEnabled?.())));
+    shipChip.title = translate('mideast.ukmto.note');
+    chips.appendChild(shipChip);
+    shipLegend = el('div', 'mideast-legend mideast-ukmto-legend');
+    shipLegend.hidden = true;
+  }
 
   // PRECHODY ÚŽINAMI (etapa 5a): telo plní karta PortWatch z main.js (portwatchCard.js);
   // mount je VNÚTRI panela, karta si vlastníka nájde cez closest('[data-panel-id]').
@@ -151,7 +171,7 @@ export function createMideastPanel({
   const news = el('div', 'mideast-news');
   news.dataset.mideastNews = '';
   const note = el('p', 'mideast-note', translate('mideast.note'));
-  mountTarget.replaceChildren(status, dirsTitle, dirs, ...[chips, legend, airLegend].filter(Boolean), transitsTitle, transits, newsTitle, news, note);
+  mountTarget.replaceChildren(status, dirsTitle, dirs, ...[chips, legend, airLegend, shipLegend].filter(Boolean), transitsTitle, transits, newsTitle, news, note);
 
   // ── Legenda kontroly ──────────────────────────────────────────────────────
   // t() vracia pri chýbajúcom kľúči samotný kľúč → padá sa na anglický popis z konfigurácie
@@ -301,6 +321,80 @@ export function createMideastPanel({
   const unsubscribeAirspace = airspace?.onChange?.(() => renderAirspace()) || null;
   renderAirspace();
 
+  // ── Legenda INCIDENTOV LODÍ (etapa 5c) ────────────────────────────────────
+  // Bez aktívneho dejiska či úžiny vrstva nič nekreslí ani nesťahuje → čip je vypnutý
+  // (ako KONTROLA SÍDIEL bez modulov) a titulok hovorí, kedy sa body ukážu.
+  const dateTimeFormat = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
+  function renderUkmto() {
+    if (!ukmto || !shipChip) return;
+    const st = ukmto.getState?.() || {};
+    const enabled = Boolean(st.enabled);
+    const active = Boolean(st.active);
+    shipChip.classList?.toggle?.('active', enabled);
+    shipChip.setAttribute('aria-pressed', String(enabled));
+    shipChip.disabled = !active;
+    shipChip.title = translate(active ? 'mideast.ukmto.note' : 'mideast.ukmto.inactive');
+    shipChip.classList?.toggle?.('is-loading', Boolean(st.loading));
+    const visible = enabled && active;
+    shipLegend.hidden = !visible;
+    if (!visible) { shipLegend.replaceChildren(); return; }
+    const summary = st.summary || { days: 30, total: 0, byType: [], latest: [] };
+    const typeText = (id, fallback) => textOr(`mideast.ukmto.type.${id}`, fallback || id);
+    const parts = [el('div', 'mideast-legend-title', translate('mideast.ukmto.title', { days: numberFormat.format(summary.days) }))];
+    if (!st.loaded) {
+      const kind = st.loading ? 'loading' : (st.error ? (st.error === 'no_ukmto_snapshot' ? 'missing' : 'error') : 'loading');
+      const state = el('div', 'mideast-legend-state', translate(`mideast.ukmto.${kind}`));
+      state.dataset.state = kind;
+      parts.push(state);
+    } else {
+      if (!summary.total) {
+        parts.push(el('div', 'mideast-legend-state', translate('mideast.ukmto.none', { days: numberFormat.format(summary.days) })));
+      } else {
+        const items = el('div', 'mideast-legend-items');
+        for (const row of summary.byType) {
+          const item = el('span', `mideast-legend-item is-ukmto is-${row.type}`);
+          const sw = el('i', 'mideast-legend-swatch mideast-ukmto-swatch');
+          sw.setAttribute('style', `background: ${row.css}; border-color: ${row.css}`);
+          item.appendChild(sw);
+          item.appendChild(el('span', 'mideast-legend-label', typeText(row.type)));
+          item.appendChild(el('span', 'mideast-legend-count', numberFormat.format(row.count)));
+          items.appendChild(item);
+        }
+        parts.push(items);
+      }
+      if (summary.latest.length) {
+        const rows = el('div', 'mideast-ukmto-rows');
+        rows.setAttribute('aria-label', translate('mideast.ukmto.latest'));
+        for (const it of summary.latest) {
+          const row = el('div', 'mideast-ukmto-row');
+          row.dataset.ref = it.ref || it.id;
+          row.title = it.text || '';
+          const dot = el('i', 'mideast-legend-swatch mideast-ukmto-swatch');
+          dot.setAttribute('style', `background: ${(UKMTO_TYPES.find((x) => x.id === it.type) || UKMTO_TYPE_OTHER).css}`);
+          row.appendChild(dot);
+          row.appendChild(el('span', 'mideast-ukmto-when', `${dateTimeFormat.format(new Date(it.t))} UTC`));
+          row.appendChild(el('span', 'mideast-ukmto-type', ukmto.labels?.type?.(it) ?? typeText(it.type, it.typeName)));
+          row.appendChild(el('span', 'mideast-ukmto-place', ukmto.labels?.place?.(it) ?? it.place ?? ''));
+          rows.appendChild(row);
+        }
+        parts.push(rows);
+      }
+      const src = el('div', 'mideast-legend-source');
+      src.title = st.attribution || '';
+      const since = st.fetchedAt ? `${translate('mideast.ukmto.since', { date: dateFormat.format(new Date(st.fetchedAt)) })} · ` : '';
+      src.appendChild(el('span', 'mideast-legend-since', `${since}${translate('mideast.ukmto.source')}`));
+      const link = el('a', 'mideast-air-link', translate('mideast.ukmto.link'));
+      link.href = UKMTO_SITE_URL; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      src.appendChild(link);
+      if (st.error) src.appendChild(el('span', 'mideast-legend-age is-stale', translate('mideast.ukmto.error')));
+      parts.push(src);
+    }
+    parts.push(el('p', 'mideast-legend-note', translate('mideast.ukmto.note')));
+    shipLegend.replaceChildren(...parts);
+  }
+  const unsubscribeUkmto = ukmto?.onChange?.(() => renderUkmto()) || null;
+  renderUkmto();
+
   // ── Aktívne dejisko ───────────────────────────────────────────────────────
   // Panel sa o aktívnom dejisku dozvie aj zvonka (main.js po ?mideast=, rozbaľovačke
   // SCÉNY alebo hlase volá setActiveTheatre), preto je zvýraznenie samostatná funkcia.
@@ -320,6 +414,6 @@ export function createMideastPanel({
     transitsMount: transits,
     setActiveTheatre,
     get activeTheatre() { return activeTheatre; },
-    destroy() { unsubscribeControl?.(); unsubscribeAirspace?.(); dirByTheatre.clear(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribeControl?.(); unsubscribeAirspace?.(); unsubscribeUkmto?.(); dirByTheatre.clear(); mountTarget.replaceChildren(); },
   };
 }

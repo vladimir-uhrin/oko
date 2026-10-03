@@ -13,6 +13,9 @@
 //   airspace/czib.json           aktívne bulletiny EASA o konfliktných zónach (etapa 5b,
 //                                2026-10-03; src/data/czib.js)
 //   airspace/fir-boundaries.json hranice FIR z VATSpy (CC BY-SA 4.0), len základné FIR
+//   ukmto/incidents.json         incidenty lodí z rozhrania UKMTO (OGL v3.0; etapa 5c,
+//                                2026-10-03; src/data/ukmto.js) — archív rastie, rozhranie
+//                                drží len posledné tri mesiace
 // Ďalšie druhy (GeoConfirmed × 4 konflikty, UCDP, UKMTO, správy) prídu v ďalších
 // etapách plánu vedľa tohto súboru v tom istom koreni.
 //
@@ -20,6 +23,7 @@
 // Sieťový obal s User-Agentom je vlastný: Wikimedia etiketa chce popisný UA
 // s kontaktom, jeden dopyt naraz a pauzy medzi dopytmi (história po týždňoch).
 import { promises as fsp } from 'node:fs';
+import https from 'node:https';
 import path from 'node:path';
 
 import { dayKey, dayToMs, isDay, readJson, wikiRevisionUrl, writeJsonAtomic } from './ukraineArchive.mjs';
@@ -32,6 +36,7 @@ import {
   CZIB_ATTRIBUTION, CZIB_EXPORT_URL, CZIB_FEED_URL, CZIB_LIST_URL, FIR_ATTRIBUTION, FIR_LICENSE, VATSPY_BOUNDARIES_URL,
   buildCzibBulletin, czibLapsed, indexFirBoundaries, parseCzibDetail, parseCzibExport, parseCzibFeed,
 } from '../../src/data/czib.js';
+import { UKMTO_API_URL, UKMTO_ATTRIBUTION, UKMTO_LICENSE, UKMTO_LICENSE_URL, UKMTO_SITE_URL, mergeUkmtoIncidents, parseUkmtoIncidents } from '../../src/data/ukmto.js';
 
 export { MIDEAST_CONTROL_MODULE_IDS };
 export const USER_AGENT = 'OKO-mideast/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
@@ -497,6 +502,102 @@ export async function airspacePayload(root, { nowMs = Date.now() } = {}) {
     generatedAt: nowMs, fetchedAt: czib.fetchedAt ?? null, boundariesAt: fir?.fetchedAt ?? null,
     bulletins: czib.bulletins.map((b) => ({ ...b, lapsed: czibLapsed(b, nowMs) })),
     firs, missingFirs,
+  };
+}
+
+// ── ukmto/ — incidenty lodí z rozhrania UKMTO (etapa 5c, 2026-10-03) ────────────
+/** Rozhranie UKMTO sa pýta raz za hodinu (varovaní je pár do týždňa, v kríze denne). */
+export const UKMTO_FRESH_MS = 3_600_000;
+export const UKMTO_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Záložný prenos cez `node:https` s tým istým rozhraním ako `fetch` (stačí na `fetchCapped`).
+ * Rozhranie UKMTO stojí za Cloudflare a podľa odtlačku klienta vracia 403: zmerané 2026-10-03
+ * z toho istého stroja a s tou istou hlavičkou User-Agent — Node 24 `fetch` 403 a `https` 200,
+ * Node 22 naopak, curl 200. Preto sa pri 403 skúsi ešte tento druhý ŠTANDARDNÝ klient; nič sa
+ * nepredstiera (žiadny falošný prehliadač), User-Agent ostáva náš s kontaktom, a keď neprejde
+ * ani jeden, archív ostáva a skúsi sa o hodinu.
+ */
+export function httpsFetch(url, { headers = {}, signal = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers, signal: signal || undefined }, (res) => {
+      const chunks = [];
+      let total = 0;
+      res.on('data', (chunk) => {
+        total += chunk.length;
+        if (total > 16 * 1024 * 1024) { req.destroy(new Error('too large')); return; }
+        chunks.push(chunk);
+      });
+      res.on('end', () => {
+        const status = Number(res.statusCode) || 502;
+        // Response nepripúšťa telo pri 204/304 — tie tu nečakáme, pre istotu bez tela.
+        const body = status === 204 || status === 304 ? null : Buffer.concat(chunks, total);
+        resolve(new Response(body, { status, headers: { 'content-type': String(res.headers['content-type'] || '') } }));
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+  });
+}
+export const ukmtoDir = (root) => path.join(archiveDir(root), 'ukmto');
+export const ukmtoFile = (root) => path.join(ukmtoDir(root), 'incidents.json');
+
+/**
+ * Stiahne incidenty UKMTO a ZLÚČI ich s archívom: rozhranie drží len približne posledné tri
+ * mesiace, archív ich necháva všetky (rovnaké id = novší záznam vyhrá — UKMTO varovania dopĺňa).
+ * Prázdne pole je platná odpoveď (pokoj na mori) a archív nemaže. Pri chybe ostáva starý archív
+ * (`stale`), bez neho `error`. Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'fresh'|'stale'|'error', count:number, fetched?:number, added?:number, lastT?:number|null, day?:string|null, error?:string}>}
+ */
+export async function ukmtoRefresh(root, { fetchImpl = fetch, altFetchImpl = httpsFetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const prev = await readJson(ukmtoFile(root));
+  const prevList = Array.isArray(prev?.incidents) ? prev.incidents : [];
+  const lastOf = (list) => (list.length ? list[0].t : null);
+  if (!force && prev && nowMs - (Number(prev.fetchedAt) || 0) < UKMTO_FRESH_MS) {
+    return { status: 'fresh', count: prevList.length, lastT: lastOf(prevList), day: lastOf(prevList) ? dayKey(lastOf(prevList)) : null };
+  }
+  try {
+    const request = { maxBytes: UKMTO_MAX_BYTES, headers: { Accept: 'application/json' } };
+    let { res, body } = await fetchCapped(fetchImpl, UKMTO_API_URL, request);
+    // 403 od Cloudflare podľa odtlačku klienta → jeden pokus druhým štandardným klientom (httpsFetch).
+    if (res.status === 403 && typeof altFetchImpl === 'function') {
+      log('[mideast-events] ukmto: HTTP 403 — trying the second transport');
+      ({ res, body } = await fetchCapped(altFetchImpl, UKMTO_API_URL, request));
+    }
+    if (!res.ok) throw new Error(`UKMTO HTTP ${res.status}`);
+    let json;
+    try { json = JSON.parse(body); } catch { throw new Error('UKMTO: invalid JSON'); }
+    const fetched = parseUkmtoIncidents(json);
+    const incidents = mergeUkmtoIncidents(prevList, fetched);
+    const known = new Set(prevList.map((it) => it.id));
+    const added = fetched.filter((it) => !known.has(it.id)).length;
+    await writeJsonAtomic(ukmtoFile(root), {
+      kind: 'ukmto', fetchedAt: nowMs, source: UKMTO_SITE_URL, attribution: UKMTO_ATTRIBUTION, license: UKMTO_LICENSE, licenseUrl: UKMTO_LICENSE_URL, incidents,
+    });
+    log(`[mideast-events] ukmto: ${incidents.length} incidents in archive (${fetched.length} fetched, ${added} new)`);
+    return { status: 'updated', count: incidents.length, fetched: fetched.length, added, lastT: lastOf(incidents), day: lastOf(incidents) ? dayKey(lastOf(incidents)) : null };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] ukmto failed: ${message}`);
+    return { status: prev ? 'stale' : 'error', count: prevList.length, lastT: lastOf(prevList), error: message };
+  }
+}
+
+/**
+ * Telo `/api/mideast/events/ukmto`: incidenty za posledných `days` dní (najnovšie prvé) + počet
+ * a rozsah celého archívu. Bez archívu null (volajúci vráti 404).
+ */
+export async function ukmtoPayload(root, { days = 90, nowMs = Date.now() } = {}) {
+  const snap = await readJson(ukmtoFile(root));
+  if (!snap || !Array.isArray(snap.incidents)) return null;
+  const since = nowMs - Math.max(1, Math.floor(days)) * DAY_MS;
+  return {
+    source: UKMTO_SITE_URL, attribution: UKMTO_ATTRIBUTION, license: UKMTO_LICENSE, licenseUrl: UKMTO_LICENSE_URL,
+    generatedAt: nowMs, fetchedAt: snap.fetchedAt ?? null, days: Math.max(1, Math.floor(days)),
+    archived: snap.incidents.length, firstT: snap.incidents.length ? snap.incidents.at(-1).t : null,
+    incidents: snap.incidents.filter((it) => it.t >= since),
   };
 }
 

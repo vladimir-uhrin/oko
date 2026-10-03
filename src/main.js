@@ -58,6 +58,8 @@ import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, the
 import { createMideastPanel } from './mideastPanel.js';
 import { createMideastControl } from './mideastControlLayer.js';
 import { createAirspaceAdvisory } from './airspaceAdvisoryLayer.js';
+import { createUkmtoIncidents } from './ukmtoIncidentsLayer.js';
+import { UKMTO_CHOKEPOINT_SCENES } from './data/ukmto.js';
 import { createPortwatchCard } from './portwatchCard.js';
 import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
@@ -665,6 +667,7 @@ async function init() {
       });
     };
     let ukraineEvents = null; // vrstva udalostí UKRAJINA (etapa 3) — vzniká nižšie, brána ju už pozná
+    let ukmtoIncidents = null; // INCIDENTY LODÍ · UKMTO (BLÍZKY VÝCHOD etapa 5c) — vzniká nižšie, brána ju už pozná
     let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
     let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
     let activeChokepoint = null; // aktívna úžina (pre export kartičky konfliktu)
@@ -684,6 +687,8 @@ async function init() {
         kartaOverlay?.setRevealed(visible);
         // KONTROLA SÍDIEL Blízkeho východu: pri pohľade na planétu sa body aj raster schovajú, čip ostáva.
         if (visible) void mideastControl.show(); else mideastControl.hide();
+        // INCIDENTY LODÍ (UKMTO): body len pri pohľade na scénu, čip ostáva.
+        if (visible) void ukmtoIncidents?.show(); else void ukmtoIncidents?.hide();
         scenePinDs.show = visible;
         viewer.scene?.requestRender?.();
       },
@@ -734,12 +739,18 @@ async function init() {
     // štátov a pohľad z diaľky je práve ten užitočný.
     const airspaceAdvisory = createAirspaceAdvisory({ viewer });
     window.__godsEyeView.airspaceAdvisory = airspaceAdvisory;
+    // INCIDENTY LODÍ · UKMTO (2026-10-03, etapa 5c; src/ukmtoIncidentsLayer.js): varovania UKMTO
+    // ako body. Čip je predvolene zapnutý, no vrstva sťahuje a kreslí až pri dejisku BLÍZKEHO
+    // VÝCHODU alebo úžine v oblasti hlásení UKMTO (setActive nižšie) a schováva sa s bránou.
+    ukmtoIncidents = createUkmtoIncidents({ viewer });
+    window.__godsEyeView.ukmtoIncidents = ukmtoIncidents;
     const mideastPanel = createMideastPanel({
       mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
       theatres: listMideastTheatres(),
       applyTheatre: (id) => runMideastTheatre(id),
       control: mideastControl,
       airspace: airspaceAdvisory,
+      ukmto: ukmtoIncidents,
     });
     window.__godsEyeView.mideastPanel = mideastPanel;
     // Situation from open sources: the merged bulletin (2026-09-18) now fills the
@@ -941,6 +952,7 @@ async function init() {
         activeChokepoint = null; activeFrontScene = null; activeTheatre = null;
         mideastPanel?.setActiveTheatre?.(null);
         void mideastControl.setTheatre(null);
+        void ukmtoIncidents?.setActive(false);
         portwatchCard?.setActive?.(null);
         restoreAutoKarta();
         syncMapFocus();
@@ -1138,6 +1150,7 @@ async function init() {
       activeTheatre = null;
       mideastPanel?.setActiveTheatre?.(null);
       void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
+      void ukmtoIncidents?.setActive(false);
       portwatchCard?.setActive?.(null);
       kartaOverlay?.setScene(scene || null);
       ukrainePanel?.setActiveScene(scene?.id || null);
@@ -1238,6 +1251,8 @@ async function init() {
       void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
       // Scéna úžiny s údajmi PortWatch (hormuz, bab-el-mandeb, suez) zvýrazní svoj riadok karty.
       portwatchCard?.setActive?.(PORTWATCH_KEYS.includes(scene?.id) ? scene.id : null);
+      // Varovania UKMTO pri úžinách v jeho oblasti hlásení (Hormuz, Báb al-Mandab, Suez); inde nie.
+      void ukmtoIncidents?.setActive(UKMTO_CHOKEPOINT_SCENES.includes(scene?.id));
       const result = applyChokepointScene(id, chokepointSceneDeps);
       syncMapFocus();
       void oilPriceChip.refreshAndShow();
@@ -1336,6 +1351,8 @@ async function init() {
       // a raster zón prepočíta v rámci dejiska (+0,2°), nie nad celým modulom; bez
       // dejiska (null) vrstvy schová. Pred rámovaním, aby sa body natiahli počas letu.
       void mideastControl.setTheatre(scene || null);
+      // INCIDENTY LODÍ (etapa 5c): pri každom dejisku — body mimo záberu nič nestoja.
+      void ukmtoIncidents?.setActive(Boolean(scene));
       // Čip „premávka v úžine" patrí poslednej úžine a ďalej by pollval jej rámec;
       // brána presunutá na dejisko by ho po prílete znova odkryla (nález 2026-09-26).
       straitTrafficChip.hide();

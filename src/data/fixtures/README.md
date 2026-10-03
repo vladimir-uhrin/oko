@@ -95,3 +95,15 @@
   (5 bulletins, 10 FIR polygons, 4 missing FIR codes). Used by
   `src/airspaceAdvisoryLayer.test.mjs` and `src/mideastPanel.test.mjs`.
   Same licences (EASA with acknowledgement; FIR polygons CC BY-SA 4.0).
+- `ukmto-all-20261003.json` — 21 of the 69 incidents returned on 2026-10-03 by
+  the UKMTO incident feed `sccd.royalnavy.mod.uk/api/ukmto/all` (the data
+  behind the „Recent Incidents" map of ukmto.org), raw fields as received:
+  the three newest (Strait of Hormuz), every header shape of the warning text
+  („UKMTO WARNING 078-26 - …" with Report/Issue/Source lines,
+  „UKMTO_WARNING_81-26.", „UKMTO ADVISORY …", „UKMTO HIJACK …", no header),
+  every incident type and area present that day and the one vessel under
+  pirate control. Used ONLY by `src/data/ukmto.test.mjs`,
+  `scripts/lib/mideastUkmto.test.mjs`, `src/data/mideastEventsProxy.test.mjs`,
+  `src/ukmtoIncidentsLayer.test.mjs` and `src/mideastPanel.test.mjs`, never
+  served to the app. Contains public sector information licensed under the
+  Open Government Licence v3.0 (ukmto.org terms §20).

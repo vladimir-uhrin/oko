@@ -203,8 +203,8 @@ test('mini graf: plocha + čiara + prerušovaná čiara priemeru pred krízou; m
 
 test('drôty: sekcia v paneli pred správami, karta v main.js, zvýraznenie z dejísk a scén úžin, CSS, i18n EN/SK', () => {
   const panel = readFileSync(new URL('./mideastPanel.js', import.meta.url), 'utf8');
-  // Etapa 5b (2026-10-03): medzi čipmi a prechodmi pribudla legenda VZDUŠNÉHO PRIESTORU.
-  assert.match(panel, /mountTarget\.replaceChildren\(status, dirsTitle, dirs, \.\.\.\[chips, legend, airLegend\]\.filter\(Boolean\), transitsTitle, transits, newsTitle, news, note\);/);
+  // Prechody stoja za čipmi a legendami vrstiev (ich počet tento drôt nezaujíma) a PRED správami.
+  assert.match(panel, /mountTarget\.replaceChildren\(status, dirsTitle, dirs, [^;]*\.filter\(Boolean\), transitsTitle, transits, newsTitle, news, note\);/);
   assert.match(panel, /transitsMount: transits,/);
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /createPortwatchCard\(\{ mountTarget: mideastPanel\.transitsMount \}\)/);

@@ -333,8 +333,9 @@ test('tripwires main.js: správca pred panelom a v ňom, window API, setTheatre 
   const created = main.indexOf('const mideastControl = createMideastControl({ viewer });');
   const panel = main.indexOf('const mideastPanel = createMideastPanel({');
   assert.ok(created > 0 && panel > created, 'createMideastControl pred createMideastPanel');
-  // Etapa 5b (2026-10-03): za správcom kontroly ide do panela aj VZDUŠNÝ PRIESTOR · EASA.
-  assert.match(main, /createMideastPanel\(\{[\s\S]*?applyTheatre: \(id\) => runMideastTheatre\(id\),\s*control: mideastControl,\s*airspace: airspaceAdvisory,\s*\}\)/);
+  // Správca kontroly ide do panela hneď za applyTheatre; ďalšie vrstvy (5b EASA, 5c UKMTO…)
+  // za ním tento drôt nezaujímajú — pinuje len to, čo patrí kontrole sídiel.
+  assert.match(main, /createMideastPanel\(\{[\s\S]*?applyTheatre: \(id\) => runMideastTheatre\(id\),\s*control: mideastControl,/);
 
   // Dejisko prepne moduly (po stave, pred rámovaním); smer frontu, úžina a všeobecná vetva
   // frameConflict ho nulujú — štyri miesta, presne štyri volania setTheatre.

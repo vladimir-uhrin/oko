@@ -11744,6 +11744,19 @@ body.recording-mode .state-strip {
 .mideast-air-link:hover, .mideast-air-link:focus-visible { text-decoration: underline; }
 .mideast-air-more { font-size: 8px; line-height: 1.4; color: var(--text-dim); }
 /*
+ * BLÍZKY VÝCHOD etapa 5c (INCIDENTY LODÍ · UKMTO, 2026-10-03): legenda varovaní UKMTO
+ * (src/mideastPanel.js renderUkmto) — okrúhle vzorky ako body na mape (farba = druh
+ * incidentu), pod nimi päť najnovších varovaní: čas UTC, druh, oblasť; text varovania
+ * je v titulku riadka.
+ */
+.mideast-ukmto-swatch { border-radius: 50%; }
+.mideast-ukmto-rows { display: flex; flex-direction: column; gap: 2px; }
+.mideast-ukmto-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; cursor: help; }
+.mideast-ukmto-row .mideast-ukmto-swatch { align-self: center; width: 7px; height: 7px; border-color: rgba(0, 0, 0, 0.5); }
+.mideast-ukmto-when { color: #8aa0b6; font-variant-numeric: tabular-nums; }
+.mideast-ukmto-type { color: #cfe3f5; }
+.mideast-ukmto-place { color: var(--text-dim); }
+/*
  * BLÍZKY VÝCHOD etapa 5a (PRECHODY ÚŽINAMI, 2026-09-26): karta IMF PortWatch
  * (src/portwatchCard.js) — riadok na úžinu: meno, Ø 7 dní, zmena voči obdobiu pred
  * krízou (pokles červeno, nárast jantárovo — obchádzka okolo Afriky nie je „dobrá

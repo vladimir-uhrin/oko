@@ -12,6 +12,7 @@ import { listMideastTheatres } from './data/mideastTheatres.js';
 import { MIDEAST_CONTROL_MODULES } from './data/wikiControl.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 import { airspaceModels } from './airspaceAdvisoryLayer.js';
+import { parseUkmtoIncidents, ukmtoSummary } from './data/ukmto.js';
 
 function fakeDocument() {
   const makeEl = (tag) => {
@@ -581,9 +582,113 @@ test('etapa 5b — legenda bulletinov: Blízky východ po riadkoch (krajiny SK, 
 test('etapa 5b — main.js: vrstva vzniká pred panelom a ide do neho; CSS legendy', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ createAirspaceAdvisory \} from '\.\/airspaceAdvisoryLayer\.js';/);
-  assert.match(main, /const airspaceAdvisory = createAirspaceAdvisory\(\{ viewer \}\);\n\s+window\.__godsEyeView\.airspaceAdvisory = airspaceAdvisory;\n\s+const mideastPanel = createMideastPanel\(\{/);
-  assert.match(main, /control: mideastControl,\n\s+airspace: airspaceAdvisory,\n\s+\}\);/);
+  // Vrstva musí existovať skôr, než ju panel dostane (poradie v súbore, nie presný tvar riadkov).
+  const created = main.indexOf('const airspaceAdvisory = createAirspaceAdvisory({ viewer });');
+  const panelAt = main.indexOf('const mideastPanel = createMideastPanel({');
+  assert.ok(created > 0 && panelAt > created, 'vrstva vzniká pred panelom');
+  assert.match(main, /window\.__godsEyeView\.airspaceAdvisory = airspaceAdvisory;/);
+  assert.match(main, /createMideastPanel\(\{[\s\S]*?airspace: airspaceAdvisory,[\s\S]*?\}\);/);
   const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
   for (const cls of ['.mideast-air-row', '.mideast-air-swatch', '.mideast-air-badge.is-partial', '.mideast-air-until.is-stale', '.mideast-air-link', '.mideast-air-more']) assert.ok(css.includes(cls), cls);
   assert.match(css, /\.mideast-air-row\.is-partial \.mideast-air-swatch \{ background: transparent; border-style: dashed; \}/, 'časť FIR = bez výplne ako na mape');
+});
+
+// ── Etapa 5c: INCIDENTY LODÍ · UKMTO (2026-10-03) ────────────────────────────
+// Incidenty zo skutočnej odpovede UKMTO (fixtúra) cez parser archívu; súhrn cez ukmtoSummary.
+const ukmtoIncidents = parseUkmtoIncidents(JSON.parse(readFileSync(new URL('./data/fixtures/ukmto-all-20261003.json', import.meta.url), 'utf8')));
+const UKMTO_NOW = Date.parse('2026-10-03T16:00:00Z');
+function fakeUkmto(initial = {}) {
+  let state = { enabled: true, active: false, visible: true, loading: false, error: null, loaded: false, fetchedAt: null, incidents: [], summary: { days: 30, total: 0, byType: [], latest: [] }, ...initial };
+  const listeners = new Set();
+  const calls = [];
+  const api = {
+    calls,
+    getState: () => state,
+    isEnabled: () => state.enabled,
+    setEnabled(on) { calls.push(['setEnabled', on]); api.emit({ enabled: Boolean(on) }); return Promise.resolve(); },
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit(patch) { state = { ...state, ...patch }; for (const fn of listeners) fn(state); },
+    labels: {
+      type: (it) => SK_STRINGS[`mideast.ukmto.type.${it.type}`] ?? it.typeName,
+      place: (it) => SK_STRINGS[`mideast.ukmto.p.${String(it.place).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`] ?? it.place,
+    },
+    get listenerCount() { return listeners.size; },
+  };
+  return api;
+}
+const loadedUkmto = () => ({ active: true, loaded: true, fetchedAt: UKMTO_NOW, incidents: ukmtoIncidents, attribution: 'Source: UKMTO … Open Government Licence v3.0', summary: ukmtoSummary(ukmtoIncidents, { nowMs: UKMTO_NOW, days: 30, latest: 5 }) });
+
+test('etapa 5c — čip INCIDENTY LODÍ: tretí v rade, predvolene zapnutý, bez dejiska či úžiny vypnutý a legenda skrytá; destroy odhlási', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const ukmto = fakeUkmto();
+  const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace: fakeAirspace(), ukmto, translate: tKey, lang: 'sk', documentRef: doc });
+  assert.deepEqual(byClass(mount, 'mideast-chips')[0].children.map((c) => c.dataset.part), ['control', 'airspace', 'ukmto']);
+  const classes = mount.children.map((c) => c.className);
+  assert.deepEqual(classes.slice(3, 7), ['mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-legend mideast-ukmto-legend']);
+  assert.equal(classes[7], 'mideast-section-title gas-card-title', 'legendy vrstiev stoja pred prechodmi úžinami');
+  const chip = byClass(mount, 'mideast-chip-ukmto')[0];
+  assert.equal(chip.textContent, 'mideast.part.ukmto');
+  assert.equal(chip.attrs['aria-pressed'], 'true', 'čip je predvolene zapnutý');
+  assert.equal(chip.disabled, true, 'bez aktívnej scény nie je čo kresliť');
+  assert.equal(chip.title, 'mideast.ukmto.inactive', 'titulok hovorí, kedy sa body ukážu');
+  const legend = byClass(mount, 'mideast-ukmto-legend')[0];
+  assert.equal(legend.hidden, true);
+  ukmto.emit({ active: true, loading: true });
+  assert.equal(chip.disabled, false);
+  assert.equal(chip.title, 'mideast.ukmto.note');
+  assert.equal(legend.hidden, false);
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'loading');
+  ukmto.emit({ loading: false, error: 'no_ukmto_snapshot' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'missing');
+  ukmto.emit({ error: 'HTTP 500' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'error');
+  chip.click();
+  assert.deepEqual(ukmto.calls, [['setEnabled', false]]);
+  assert.equal(chip.attrs['aria-pressed'], 'false');
+  assert.equal(legend.hidden, true);
+  assert.equal(legend.children.length, 0);
+  assert.equal(ukmto.listenerCount, 1);
+  panel.destroy();
+  assert.equal(ukmto.listenerCount, 0);
+});
+
+test('etapa 5c — legenda varovaní: počty podľa druhu za 30 dní, päť najnovších (čas UTC, druh, oblasť, text v titulku), zdroj s OGL a odkaz', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const ukmto = fakeUkmto();
+  createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, ukmto, translate: tSk, lang: 'sk', documentRef: doc });
+  ukmto.emit(loadedUkmto());
+  const legend = byClass(mount, 'mideast-ukmto-legend')[0];
+  assert.equal(byClass(legend, 'mideast-legend-title')[0].textContent, 'Varovania UKMTO pre lode · posledných 30 dní');
+  const items = byClass(legend, 'mideast-legend-item');
+  assert.deepEqual(items.map((i) => [byClass(i, 'mideast-legend-label')[0].textContent, byClass(i, 'mideast-legend-count')[0].textContent]), [['útok', '4'], ['upozornenie', '1']]);
+  assert.match(byClass(items[0], 'mideast-ukmto-swatch')[0].attrs.style, /background: #ff5a5f/, 'vzorka farbou bodu na mape');
+  const rows = byClass(legend, 'mideast-ukmto-row');
+  assert.deepEqual(rows.map((r) => r.dataset.ref), ['149-26', '148-26', '147-26', '130-26', '127-26']);
+  const cells = (row) => ['mideast-ukmto-when', 'mideast-ukmto-type', 'mideast-ukmto-place'].map((c) => byClass(row, c)[0].textContent);
+  assert.deepEqual(cells(rows[0]).slice(1), ['útok', 'Hormuzský prieliv']);
+  assert.match(cells(rows[0])[0], /^2\. 10\.,? 23:11 UTC$/, 'čas incidentu v UTC (oddeľovač podľa verzie ICU)');
+  assert.deepEqual(cells(rows[4]).slice(1), ['upozornenie', 'oblasť hlásení UKMTO']);
+  assert.match(rows[0].title, /^UKMTO has received a report of an incident 4nm east of Oman\./, 'text varovania v titulku riadka');
+  assert.match(byClass(rows[4], 'mideast-ukmto-swatch')[0].attrs.style, /background: #8fb8d8/, 'farba druhu aj pri riadku');
+  const src = byClass(legend, 'mideast-legend-source')[0];
+  assert.equal(byClass(src, 'mideast-legend-since')[0].textContent, `stav k ${skDate('2026-10-03T16:00:00Z')} · UKMTO · Open Government Licence v3.0`);
+  assert.match(src.title, /Open Government Licence v3\.0/);
+  const link = byClass(src, 'mideast-air-link')[0];
+  assert.equal(link.href, 'https://www.ukmto.org/recent-incidents');
+  assert.equal(link.rel, 'noopener noreferrer');
+  assert.match(byClass(legend, 'mideast-legend-note')[0].textContent, /hlásené udalosti, poloha podľa varovania/);
+  // pokoj na mori: žiadne varovanie za 30 dní, staršie v zozname ostanú
+  const calm = ukmtoIncidents.filter((x) => x.t < UKMTO_NOW - 40 * 86_400_000);
+  ukmto.emit({ incidents: calm, summary: ukmtoSummary(calm, { nowMs: UKMTO_NOW, days: 30, latest: 5 }), error: 'HTTP 502' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].textContent, 'za posledných 30 dní žiadne varovania');
+  assert.equal(byClass(legend, 'mideast-ukmto-row').length, 5, 'najnovšie staršie varovania sú stále vypísané');
+  assert.equal(byClass(byClass(legend, 'mideast-legend-source')[0], 'is-stale')[0].textContent, 'varovania UKMTO sú nedostupné (chyba servera)');
+});
+
+test('etapa 5c — CSS legendy varovaní', () => {
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  for (const cls of ['.mideast-ukmto-swatch', '.mideast-ukmto-rows', '.mideast-ukmto-row', '.mideast-ukmto-when', '.mideast-ukmto-type', '.mideast-ukmto-place']) assert.ok(css.includes(cls), cls);
+  assert.match(css, /\.mideast-ukmto-swatch \{ border-radius: 50%; \}/, 'okrúhla vzorka ako bod na mape');
 });
