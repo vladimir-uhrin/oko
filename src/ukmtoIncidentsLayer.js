@@ -1,0 +1,236 @@
+// src/ukmtoIncidentsLayer.js
+//
+// INCIDENTY LODÍ modulu BLÍZKY VÝCHOD (etapa 5c, 2026-10-03): varovania UKMTO ako body na
+// mape — útoky, únosy, podozrivé priblíženia, upozornenia. Dáta dodáva archív servera
+// (`/api/mideast/events/ukmto`, src/data/ukmto.js + scripts/lib/mideastArchive.mjs), vrstva ich
+// kreslí: farba = druh incidentu, veľkosť a sýtosť = vek (do 7 dní / do 30 dní / starší).
+//
+// Kedy je vidieť: čip je zapnutý (predvolene áno) A je aktívne dejisko BLÍZKEHO VÝCHODU alebo
+// úžina v oblasti hlásení UKMTO (Hormuz, Báb al-Mandab, Suez) A brána priblíženia je otvorená —
+// rovnako ako kontrola sídiel. Sťahuje sa až pri prvom dejisku, nie pri štarte stránky.
+//
+// Poctivosť: varovanie je HLÁSENÁ udalosť z oficiálneho zdroja („UKMTO has received a report"),
+// poloha je tá z varovania; mená plavidiel sa neukazujú, osoby nikdy. Hover cituje varovanie
+// a menuje zdroj a licenciu (Open Government Licence v3.0).
+
+import * as Cesium from 'cesium';
+import { UKMTO_DAYS_DEFAULT, UKMTO_TYPES, UKMTO_TYPE_OTHER, fetchUkmto, ukmtoAge, ukmtoSummary } from './data/ukmto.js';
+import { currentLanguage, t } from './i18n.js';
+import { createMapHoverTip } from './mapHoverTip.js';
+
+export const UKMTO_LAYER_ID = 'ukmto-incidents';
+/**
+ * Ako často si otvorená stránka pýta nové varovania, kým je vrstva zapnutá pri aktívnej scéne
+ * (vlastník 2026-10-03: „žiadne oneskorovanie, skôr najaktuálnejšie"; server sa pýta UKMTO raz
+ * za 15 min a trasa má cache 2 min).
+ */
+export const UKMTO_RELOAD_MS = 5 * 60_000;
+export const UKMTO_POINT_SIZE = Object.freeze({ fresh: 11, recent: 8, old: 6 });
+export const UKMTO_POINT_ALPHA = Object.freeze({ fresh: 0.95, recent: 0.75, old: 0.45 });
+/** Okno hľadania bodu pod kurzorom (px) — bod má 6–11 px, kurzor nemusí sedieť presne. */
+const PICK_PX = 8;
+
+const INERT = {
+  id: UKMTO_LAYER_ID, setEnabled() {}, isEnabled: () => false, setActive: async () => {}, show() {}, hide() {},
+  getState: () => ({ enabled: false, active: false, visible: false, loading: false, error: null, fetchedAt: null, incidents: [], summary: { days: 30, total: 0, byType: [], latest: [] } }),
+  onChange() { return () => {}; }, destroy() {},
+};
+
+/** Farba druhu incidentu (pure). */
+export const ukmtoColour = (typeId) => (UKMTO_TYPES.find((x) => x.id === typeId) || UKMTO_TYPE_OTHER).css;
+
+/** „Strait of Hormuz" → „strait-of-hormuz" (kľúč i18n miesta a druhu plavidla). Pure. */
+export const ukmtoSlug = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/**
+ * @param {object} o
+ * @param {import('cesium').Viewer} o.viewer
+ * @param {typeof fetchUkmto} [o.fetchImpl]
+ */
+export function createUkmtoIncidents({
+  viewer,
+  fetchImpl = fetchUkmto,
+  translate = t,
+  lang = currentLanguage(),
+  now = () => Date.now(),
+  days = UKMTO_DAYS_DEFAULT,
+  documentRef = null,
+  // `unref` (len Node): časovač obnovy nesmie držať proces testov nažive; v prehliadači je id číslo.
+  setTimer = (fn, ms) => { const id = setInterval(fn, ms); id?.unref?.(); return id; },
+  clearTimer = (id) => clearInterval(id),
+  createHoverTip = createMapHoverTip,
+} = {}) {
+  const doc = documentRef || viewer?.container?.ownerDocument;
+  const scene = viewer?.scene;
+  if (!scene || !doc?.createElement) return INERT;
+
+  const ds = new Cesium.CustomDataSource(UKMTO_LAYER_ID);
+  viewer.dataSources.add(ds);
+  ds.show = false;
+  // Bublina nad bodom (src/mapHoverTip.js): zalamuje sa, drží sa v okne, mizne pri odchode kurzora.
+  const hover = createHoverTip({
+    viewer,
+    doc,
+    className: 'oko-ukmto-tip',
+    isActive: () => ds.show,
+    resolve: (pos) => {
+      const id = scene.pick(new Cesium.Cartesian2(pos.x, pos.y), PICK_PX, PICK_PX)?.id?.properties?.ukmtoId?.getValue?.() ?? null;
+      const text = id ? tipText(id) : '';
+      return text ? { text, accent: ukmtoColour(_incidents.find((x) => x.id === id)?.type) } : null;
+    },
+  });
+  const dateTime = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
+  const requestRender = () => { try { scene.requestRender?.(); } catch { /* */ } };
+  const textOr = (key, fallback) => { const s = translate(key); return s === key ? fallback : s; };
+
+  let _enabled = true;
+  let _active = false;
+  let _visible = true;
+  let _payload = null;
+  let _incidents = [];
+  let _loadedAt = 0;
+  let _loading = false;
+  let _error = null;
+  let _destroyed = false;
+  let refreshTimer = null; // beží len kým je čip zapnutý a scéna aktívna
+  const listeners = new Set();
+  const emit = () => { const s = getState(); for (const fn of listeners) { try { fn(s); } catch { /* */ } } };
+
+  const typeLabel = (it) => textOr(`mideast.ukmto.type.${it.type}`, it.typeName || it.type);
+  const placeLabel = (it) => textOr(`mideast.ukmto.p.${ukmtoSlug(it.place)}`, it.place || '');
+  const vesselLabel = (it) => (it.vesselType ? textOr(`mideast.ukmto.v.${ukmtoSlug(it.vesselType)}`, it.vesselType) : '');
+  const whenLabel = (it) => `${dateTime.format(new Date(it.t))} UTC`;
+
+  function draw() {
+    ds.entities.removeAll();
+    if (!_incidents.length) { requestRender(); return; }
+    const nowMs = now();
+    ds.entities.suspendEvents();
+    try {
+      // Staršie najprv, aby čerstvé body ležali navrchu.
+      for (const it of [..._incidents].reverse()) {
+        const age = ukmtoAge(it.t, nowMs);
+        const colour = Cesium.Color.fromCssColorString(ukmtoColour(it.type));
+        ds.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(it.lon, it.lat),
+          point: {
+            pixelSize: UKMTO_POINT_SIZE[age],
+            color: colour.withAlpha(UKMTO_POINT_ALPHA[age]),
+            outlineColor: Cesium.Color.BLACK.withAlpha(age === 'old' ? 0.45 : 0.8),
+            outlineWidth: 1,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          properties: { ukmtoId: it.id },
+        });
+      }
+    } finally { ds.entities.resumeEvents(); }
+    requestRender();
+  }
+
+  /** Text bubliny: číslo, druh, čas, oblasť, plavidlo, citát varovania, zdroj. */
+  function tipText(id) {
+    const it = _incidents.find((x) => x.id === id);
+    if (!it) return '';
+    const parts = [
+      it.ref ? `UKMTO ${it.ref}` : 'UKMTO',
+      typeLabel(it),
+      whenLabel(it),
+      placeLabel(it),
+      vesselLabel(it),
+    ];
+    if (it.text) parts.push(`„${it.text.slice(0, 220)}${it.text.length > 220 ? '…' : ''}“`);
+    parts.push(translate('mideast.ukmto.tip-source'));
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  /** `force` = tik priebežnej obnovy (časovač už odmeral interval — bez druhej kontroly veku). */
+  async function load({ force = false } = {}) {
+    if (_loading) return;
+    if (!force && _payload && now() - _loadedAt < UKMTO_RELOAD_MS) return;
+    _loading = true; _error = null; emit();
+    try {
+      const payload = await fetchImpl({ days });
+      if (_destroyed) return;
+      _payload = payload;
+      _incidents = Array.isArray(payload.incidents) ? payload.incidents.filter((it) => it && Number.isFinite(it.lat) && Number.isFinite(it.lon) && Number.isFinite(it.t)) : [];
+      _loadedAt = now();
+      draw();
+    } catch (error) {
+      // Staré body (ak sú) ostávajú; legenda ukáže chybu.
+      _error = error?.status === 404 ? 'no_ukmto_snapshot' : (error?.message || String(error));
+    } finally {
+      _loading = false;
+      if (!_destroyed) emit();
+    }
+  }
+
+  /** Zosúladí viditeľnosť a prípadne načíta dáta (len pri zapnutom čipe a aktívnej scéne). */
+  async function sync() {
+    if (_destroyed) return;
+    const wanted = _enabled && _active;
+    const shown = wanted && _visible;
+    ds.show = shown;
+    ds.credit = shown && _incidents.length ? new Cesium.Credit(translate('mideast.ukmto.credit'), true) : undefined;
+    if (!shown) hover.hide();
+    if (wanted) hover.install();
+    // Priebežná obnova: otvorená stránka pri scéne si sama pýta nové varovania; mimo scény nič.
+    if (wanted && refreshTimer === null) {
+      refreshTimer = setTimer(() => { if (_enabled && _active && !_destroyed) void load({ force: true }).then(() => { if (!_destroyed) requestRender(); }); }, UKMTO_RELOAD_MS);
+    } else if (!wanted && refreshTimer !== null) {
+      clearTimer(refreshTimer);
+      refreshTimer = null;
+    }
+    requestRender();
+    emit();
+    if (wanted) {
+      await load();
+      if (!_destroyed) {
+        ds.show = _enabled && _active && _visible;
+        ds.credit = ds.show && _incidents.length ? new Cesium.Credit(translate('mideast.ukmto.credit'), true) : undefined;
+        requestRender();
+      }
+    }
+  }
+
+  function getState() {
+    return {
+      enabled: _enabled,
+      active: _active,
+      visible: _visible,
+      loading: _loading,
+      error: _error,
+      fetchedAt: _payload?.fetchedAt ?? null,
+      archived: _payload?.archived ?? null,
+      days,
+      attribution: _payload?.attribution || null,
+      licenseUrl: _payload?.licenseUrl || null,
+      source: _payload?.source || null,
+      loaded: Boolean(_payload),
+      incidents: _incidents,
+      summary: ukmtoSummary(_incidents, { nowMs: now(), days: 30, latest: 5 }),
+    };
+  }
+  function destroy() {
+    _destroyed = true;
+    hover.destroy();
+    if (refreshTimer !== null) { clearTimer(refreshTimer); refreshTimer = null; }
+    try { viewer.dataSources.remove(ds, true); } catch { /* */ }
+    listeners.clear();
+  }
+  return {
+    id: UKMTO_LAYER_ID,
+    /** Čip v paneli (predvolene zapnuté). */
+    setEnabled(on) { _enabled = Boolean(on); return sync(); },
+    isEnabled: () => _enabled,
+    /** Aktívna scéna v oblasti UKMTO (dejisko Blízkeho východu alebo úžina Hormuz/Báb al-Mandab/Suez). */
+    setActive(on) { _active = Boolean(on); return sync(); },
+    /** Brána priblíženia. */
+    show() { _visible = true; return sync(); },
+    hide() { _visible = false; return sync(); },
+    getState,
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    destroy,
+    labels: { type: typeLabel, place: placeLabel, vessel: vesselLabel, when: whenLabel },
+    _getStateForTest: () => ({ ds, tip: hover.el, tipText }),
+  };
+}

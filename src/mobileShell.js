@@ -196,7 +196,12 @@ export function createMobileShell({
     return true;
   }
 
-  function open(sectionId) {
+  /**
+   * @param {string} sectionId
+   * @param {{expand?: string}} [options] panel, ktorý sa má rozbaliť namiesto predvoleného
+   *   (napr. História letov z pásu štátneho lietadla, 2026-09-30)
+   */
+  function open(sectionId, { expand = null } = {}) {
     const section = sectionById.get(sectionId);
     if (!section || !mode.mobile || destroyed) return false;
     if (active) close();
@@ -227,7 +232,8 @@ export function createMobileShell({
       el.classList?.add?.('oko-in-sheet');
     }
     if (!moved.length) return false;
-    for (const { el } of moved) setCollapsed(el.id, el.id !== section.expand);
+    const expandId = expand && section.panelIds.includes(expand) ? expand : section.expand;
+    for (const { el } of moved) setCollapsed(el.id, el.id !== expandId);
     active = sectionId;
     if (sheetTitle) sheetTitle.textContent = buttonLabel(sectionId) || sectionId;
     sheet.hidden = false;

@@ -109,9 +109,11 @@ async function readJson(req) {
 /** Framework-free controllers plus reusable authentication / CSRF middleware. */
 export function createAuthService({ store, origins = [], trustProxy = false, now = Date.now,
   passwords = { hash: hashPassword, verify: verifyPassword }, mailer = unavailableMailer,
-  oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args), adminSources = {} }) {
+  oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args), adminSources = {}, ownerEmails = [] }) {
   let lastPrune = 0;
-  const handleAdmin = createAdminRoutes({ store, now, idleMs: SESSION_IDLE_MS, sources: adminSources });
+  // Jedno vlastníctvo (2026-10-03): admin pustí rolu `owner` z DB AJ účty z OKO_OWNER_EMAILS (udalosti).
+  const isOwnerSession = session => Boolean(session?.user_id && (session.role === 'owner' || ownerEmails.includes(String(session.email || '').toLowerCase())));
+  const handleAdmin = createAdminRoutes({ store, now, idleMs: SESSION_IDLE_MS, sources: adminSources, isOwnerSession });
   const pendingRecovery = new Set();
   const oauthStates = createOAuthStateStore({ now });
   const mailConfigured = mailer.configured === true && typeof mailer.send === 'function' && Boolean(mailer.publicUrl);
@@ -601,5 +603,21 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       json(res, register ? 201 : 200, result);
     } catch (error) { sendError(res, error); }
   }
-  return { middleware, requireAuthenticated, close: async () => { await Promise.allSettled([...pendingRecovery]); } };
+  /**
+   * Kto je prihlásený (pre iné služby, napr. udalosti len pre vlastníka — 2026-10-03): rovnaké
+   * kontroly ako účet (pôvod, cookie relácie, pri zápise CSRF), ale bez odpovede klientovi —
+   * vráti `{ id, email }` alebo null; nikdy nevyhodí chybu.
+   */
+  function identify(req, res, { mutation = false } = {}) {
+    try {
+      const ctx = context(req, res, { required: true, mutation });
+      return { id: ctx.session.user_id, email: String(ctx.session.email || '').toLowerCase(), role: ctx.session.role || 'member' };
+    } catch { return null; }
+  }
+  return { middleware, requireAuthenticated, identify, close: async () => { await Promise.allSettled([...pendingRecovery]); } };
+}
+
+/** E-maily vlastníka z `OKO_OWNER_EMAILS` (čiarkou oddelené, malé písmená); prázdne = nikto. Pure. */
+export function parseOwnerEmails(raw = '') {
+  return [...new Set(String(raw || '').split(/[,\s;]+/).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)))];
 }

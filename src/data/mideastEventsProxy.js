@@ -28,6 +28,17 @@
  *    z IMF PortWatch — posledných `days` riadkov (30–1 000, predvolene 400) + priemer okna
  *    „pred krízou" z celej série; 400 bad_keys, 404 no_portwatch_snapshot; cache 10 min.
  *    Úloha `portwatch` (tik 6 h, prvá 440 s po štarte) obnovuje štyri úžiny postupne.
+ *  - `/airspace` (etapa 5b, 2026-10-03): aktívne bulletiny EASA o konfliktných zónach
+ *    (CZIB) + polygóny FIR, ktoré menujú (VATSpy, CC BY-SA 4.0); 404 no_airspace_snapshot;
+ *    cache 10 min. Úloha `airspace` (tik 6 h, prvá 500 s po štarte): zoznam EASA, stránky
+ *    len zmenených bulletinov s pauzou 1,2 s, hranice FIR raz za 7 dní.
+ *  - `/ukmto?days=90` (etapa 5c, 2026-10-03): incidenty lodí z rozhrania UKMTO (OGL v3.0)
+ *    za posledných `days` dní (1–400) z rastúceho archívu; 404 no_ukmto_snapshot; cache 10 min.
+ *    Úloha `ukmto` (tik 15 min, prvá 560 s po štarte) — jeden dopyt, zlúčenie s archívom.
+ *  - `/gps?days=2` (etapa 5d, 2026-10-03): rušenie GPS odvodené z presnosti polohy lietadiel
+ *    (adsb.lol, ODbL) po bunkách 0,5° za posledných `days` dní (1–7); 404 no_gps_snapshot;
+ *    cache 5 min. Úloha `gps` (tik 15 min, prvá 620 s): šesť kruhov s pauzou 5 s; vypnutie
+ *    samotného zberu `MIDEAST_GPS=off` (trasa ďalej číta, čo je na disku).
  * Bezpečnosť handlera: každý `await` aj `new URL` v try/catch — odmietnutý Promise
  * z async connect middleware zhodí dev server.
  */
@@ -35,7 +46,7 @@ import zlib from 'node:zlib';
 
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
 import { PORTWATCH_KEYS } from './portwatch.js';
-import { controlDays, controlFor, controlIndex, dayKey, isDay, portwatchPayload, portwatchRefresh, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
+import { airspacePayload, controlDays, controlFor, controlIndex, czibRefresh, dayKey, firBoundariesRefresh, gpsCollect, gpsPayload, isDay, portwatchPayload, portwatchRefresh, ukmtoPayload, ukmtoRefresh, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
 
 const MIN = 60_000;
 /** Tik úlohy kontroly (moduly Wikipédie sa menia po hodinách; história cez CLI). */
@@ -52,6 +63,18 @@ export const PORTWATCH_FIRST_DELAY_MS = 440_000;
 /** Pauza medzi úžinami v jednom tiku (verejný ArcGIS, bez kľúča — nezahlcovať). */
 export const PORTWATCH_PAUSE_MS = 1_500;
 export const PORTWATCH_DAYS_DEFAULT = 400;
+/** Úloha VZDUŠNÝ PRIESTOR (EASA CZIB + hranice FIR): tik 6 h, prvý beh po PortWatch. */
+export const AIRSPACE_TICK_MS = 6 * 60 * MIN;
+export const AIRSPACE_FIRST_DELAY_MS = 500_000;
+/** Úloha INCIDENTY LODÍ (UKMTO): tik 15 min (vlastník: „skôr najaktuálnejšie"; pôvodne 1 h), prvý beh po EASA. */
+export const UKMTO_TICK_MS = 15 * MIN;
+export const UKMTO_FIRST_DELAY_MS = 560_000;
+export const UKMTO_DAYS_DEFAULT = 90;
+/** Úloha RUŠENIE GPS: snímka šiestich kruhov adsb.lol raz za 15 min (576 dopytov denne). */
+export const GPS_TICK_MS = 15 * MIN;
+export const GPS_FIRST_DELAY_MS = 620_000;
+export const GPS_DAYS_DEFAULT = 2;
+export const GPS_CACHE_TTL_MS = 5 * MIN;
 
 function simpleLimiter({ windowMs, max }) {
   const hits = new Map();
@@ -97,11 +120,14 @@ export function acceptsGzip(acceptEncoding) {
  *   `now` je FUNKCIA (plugin volá `now()`); do knižnice ide číslo `now()`.
  * @returns {import('vite').Plugin & {_tick: (name: string) => Promise<void>, _state: object, _start: (base: string) => void, _stop: () => void}}
  */
-export function mideastEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+export function mideastEventsProxy({ root = process.cwd(), env = process.env, fetchImpl = (...a) => fetch(...a), altFetchImpl = null, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, log = (m) => console.log(m), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   const enabled = env.MIDEAST_ARCHIVE !== 'off';
   const limiter = simpleLimiter({ windowMs: MIN, max: 40 });
   const controlCache = new Map(); // `${module}:${at}` -> { at, json }
   const portwatchCache = new Map(); // `${keys}:${days}` -> { at, json }
+  const airspaceCache = new Map(); // 'all' -> { at, json }
+  const ukmtoCache = new Map(); // days -> { at, json }
+  const gpsCache = new Map(); // days -> { at, json }
   const timers = new Map();
   const state = { enabled, base: null, running: {}, last: {}, errors: [] };
   const note = (name, error) => { const msg = `${name}: ${error?.message || error}`; state.errors = [{ at: now(), msg }, ...state.errors].slice(0, 20); log(`[mideast-events] ${msg}`); };
@@ -137,6 +163,37 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   };
   tickMs.portwatch = PORTWATCH_TICK_MS;
   firstDelayMs.portwatch = PORTWATCH_FIRST_DELAY_MS;
+  // VZDUŠNÝ PRIESTOR (etapa 5b): bulletiny EASA a hranice FIR; čerstvosť drží knižnica.
+  jobs.airspace = async () => {
+    const czib = await czibRefresh(root, { fetchImpl, now: now(), log, sleep });
+    const fir = await firBoundariesRefresh(root, { fetchImpl, now: now(), log });
+    if (czib.status === 'updated' || czib.status === 'partial' || fir.status === 'updated') airspaceCache.clear();
+    const status = czib.status === 'error' || fir.status === 'error' ? 'error'
+      : (czib.status === 'stale' || fir.status === 'stale' || czib.status === 'partial' ? 'partial'
+        : (czib.status === 'updated' || fir.status === 'updated' ? 'updated' : 'fresh'));
+    return { status, day: czib.day || null, count: czib.count };
+  };
+  tickMs.airspace = AIRSPACE_TICK_MS;
+  firstDelayMs.airspace = AIRSPACE_FIRST_DELAY_MS;
+  // INCIDENTY LODÍ (etapa 5c): jedno volanie rozhrania UKMTO, zlúčenie s archívom.
+  jobs.ukmto = async () => {
+    // `altFetchImpl` (voliteľné, testy): druhý prenos pri 403 od Cloudflare; bez neho predvolený knižnice (node:https).
+    const r = await ukmtoRefresh(root, { fetchImpl, ...(altFetchImpl ? { altFetchImpl } : {}), now: now(), log });
+    if (r.status === 'updated') ukmtoCache.clear();
+    return { status: r.status === 'stale' ? 'partial' : r.status, day: r.day || null, count: r.count };
+  };
+  tickMs.ukmto = UKMTO_TICK_MS;
+  firstDelayMs.ukmto = UKMTO_FIRST_DELAY_MS;
+  // RUŠENIE GPS (etapa 5d): zber z adsb.lol; `MIDEAST_GPS=off` ho vypne (komunitné rozhranie).
+  if (env.MIDEAST_GPS !== 'off') {
+    jobs.gps = async () => {
+      const r = await gpsCollect(root, { fetchImpl, now: now(), log, sleep });
+      if (r.status !== 'error') gpsCache.clear();
+      return { status: r.status, day: r.day || null, count: r.samples };
+    };
+    tickMs.gps = GPS_TICK_MS;
+    firstDelayMs.gps = GPS_FIRST_DELAY_MS;
+  }
 
   async function tick(name) {
     if (!jobs[name] || state.running[name]) return;
@@ -251,8 +308,49 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
       } catch (error) { note('portwatch', error); send(res, 500, { error: 'archive_read_failed' }, req); }
       return;
     }
+    if (sub === '/airspace') {
+      // VZDUŠNÝ PRIESTOR (etapa 5b): bulletiny EASA + polygóny dotknutých FIR, jedna odpoveď pre všetkých.
+      const hit = airspaceCache.get('all');
+      if (hit && now() - hit.at < CONTROL_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = await airspacePayload(root, { nowMs: now() });
+        if (!json) { send(res, 404, { error: 'no_airspace_snapshot' }, req); return; }
+        airspaceCache.set('all', { at: now(), json });
+        send(res, 200, json, req);
+      } catch (error) { note('airspace', error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
+    if (sub === '/ukmto') {
+      // INCIDENTY LODÍ (etapa 5c): varovania UKMTO za posledných `days` dní z archívu.
+      const daysRaw = Number(url.searchParams.get('days') || UKMTO_DAYS_DEFAULT);
+      const days = Number.isFinite(daysRaw) ? Math.min(400, Math.max(1, Math.floor(daysRaw))) : UKMTO_DAYS_DEFAULT;
+      const hit = ukmtoCache.get(days);
+      if (hit && now() - hit.at < CONTROL_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = await ukmtoPayload(root, { days, nowMs: now() });
+        if (!json) { send(res, 404, { error: 'no_ukmto_snapshot' }, req); return; }
+        ukmtoCache.set(days, { at: now(), json });
+        if (ukmtoCache.size > CONTROL_CACHE_MAX) ukmtoCache.delete(ukmtoCache.keys().next().value);
+        send(res, 200, json, req);
+      } catch (error) { note('ukmto', error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
+    if (sub === '/gps') {
+      // RUŠENIE GPS (etapa 5d): bunky 0,5° za posledných `days` dní (uzavreté dni + rozpracovaný dnešok).
+      const daysRaw = Number(url.searchParams.get('days') || GPS_DAYS_DEFAULT);
+      const days = Number.isFinite(daysRaw) ? Math.min(7, Math.max(1, Math.floor(daysRaw))) : GPS_DAYS_DEFAULT;
+      const hit = gpsCache.get(days);
+      if (hit && now() - hit.at < GPS_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = await gpsPayload(root, { days, nowMs: now() });
+        if (!json) { send(res, 404, { error: 'no_gps_snapshot' }, req); return; }
+        gpsCache.set(days, { at: now(), json });
+        send(res, 200, json, req);
+      } catch (error) { note('gps', error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
     // Udalosti (`/?from&to`) prídu v ďalších etapách plánu; kým nie sú, poctivé 404.
-    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
+    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
   }
   async function handler(req, res) {
     try { await route(req, res); } catch (error) {

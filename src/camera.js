@@ -60,6 +60,31 @@ export const HOME_VIEW = Object.freeze({
 });
 
 /**
+ * Sklon úvodného pohľadu na výšku (mobil, 2026-09-30, vlastník: „daj −20°"). Cesium dáva 60° zorné
+ * pole na DLHŠIU stranu, takže na výšku je nad obzorom ~18° oblohy (na šírku ~6°) a lietadlá
+ * 50–300 km ďaleko pri Viedni pôsobili ako roj nad mestom. Strmší pohľad nechá obrazovku mestu.
+ */
+export const HOME_PORTRAIT_PITCH_DEG = -20;
+
+/**
+ * Sklon úvodného pohľadu podľa tvaru plátna (pure): na výšku HOME_PORTRAIT_PITCH_DEG,
+ * inak (aj pri neznámej veľkosti) HOME_VIEW.pitchDeg.
+ * @param {number} width
+ * @param {number} height
+ * @returns {number}
+ */
+export function homePitchDeg(width, height) {
+  const w = Number(width);
+  const h = Number(height);
+  return w > 0 && h > w ? HOME_PORTRAIT_PITCH_DEG : HOME_VIEW.pitchDeg;
+}
+
+function homePitchFor(viewer) {
+  const canvas = viewer?.canvas;
+  return homePitchDeg(canvas?.clientWidth, canvas?.clientHeight);
+}
+
+/**
  * Prelet na úvodný pohľad (HOME_VIEW). Tvar volieb ako flyToGlobeView v locations.js.
  * @param {Cesium.Viewer} viewer
  * @param {{duration?: number, onComplete?: Function, onCancel?: Function}} [options]
@@ -71,7 +96,7 @@ export function flyToHomeView(viewer, options = {}) {
     destination: Cesium.Cartesian3.fromDegrees(HOME_VIEW.longitude, HOME_VIEW.latitude, HOME_VIEW.heightM),
     orientation: {
       heading: Cesium.Math.toRadians(HOME_VIEW.headingDeg),
-      pitch: Cesium.Math.toRadians(HOME_VIEW.pitchDeg),
+      pitch: Cesium.Math.toRadians(homePitchFor(viewer)),
       roll: 0.0,
     },
     duration: Number.isFinite(options.duration) && options.duration > 0 ? options.duration : 3.0,
@@ -116,7 +141,7 @@ export function flyToBratislava(viewer) {
       destination: Cesium.Cartesian3.fromDegrees(HOME_VIEW.longitude, HOME_VIEW.latitude, HOME_VIEW.heightM),
       orientation: {
         heading: Cesium.Math.toRadians(HOME_VIEW.headingDeg),
-        pitch: Cesium.Math.toRadians(HOME_VIEW.pitchDeg),
+        pitch: Cesium.Math.toRadians(homePitchFor(viewer)),
         roll: 0.0,
       },
       duration: 4.0,

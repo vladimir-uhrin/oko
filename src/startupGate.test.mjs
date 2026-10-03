@@ -57,3 +57,13 @@ test('zapojenie: main.js bránu zapne na začiatku init a uvoľní pri skrytí p
   // načítaný výrez sa zapíše, nech prvá kontrola výrezu nespustí druhé stiahnutie
   assert.match(ais, /const url = liveApiUrl\(\);[\s\S]{0,300}?state\.viewKey = vesselViewBounds\(\);\s*state\.viewRequestedAt = performance\.now\(\);/);
 });
+
+test('lietadlá: tik flotily pod preloaderom nebeží (1,4 s hlavného vlákna pri štarte, nikto ich nevidí)', () => {
+  for (const file of ['flights.js', 'militaryFlights.js']) {
+    const src = readFileSync(new URL(`./data/${file}`, import.meta.url), 'utf8');
+    assert.match(src, /import \{ isStartupReady \} from '\.\.\/startupGate\.js';/, file);
+    const tick = src.slice(src.indexOf('function _fleetTick() {'));
+    // brána hneď na začiatku tiku, pred akoukoľvek prácou nad flotilou
+    assert.match(tick, /^function _fleetTick\(\) \{\s*_tickNowActive = false;[^\n]*\n(\s*\/\/[^\n]*\n)*\s*if \(!isStartupReady\(\)\) return;/, file);
+  }
+});

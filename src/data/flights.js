@@ -63,6 +63,8 @@ import {
 import { densityGlowSprite, densityGlowDiameterPx } from './densityGlow.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore, profileRowFromSamples } from './flightProfile.js';
+import { carryRouteEnrichment, createRouteMemory } from './flightRouteMemory.js';
+import { createEnrichGate } from './enrichGate.js';
 import { buildFlightCharts } from './flightCharts.js';
 import {
   cachedTrackedHistory,
@@ -97,6 +99,7 @@ import {
 } from './flightProgress.js';
 import { createGroundSnap } from './groundSnap.js';
 import { fleetContactSkipsTick, metersPerPixelPerMeter, pinBillboardBufferUsage, positionWriteThresholdM } from './fleetTickGate.js';
+import { isStartupReady } from '../startupGate.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { geoidSurfaceLastResortM, pickRenderAltitudeM } from './renderAltitude.js';
 import { allocateCorridorCells, cachedGroundFloor, cachedMeshFloor, coarseFloorCoord, corridorFloorCells, displayFloorHeightM, floorAltitudeM, neighborFloorM, stickyFloorCell, warmGroundFloor, resolveGroundFloorCellsBounded, GROUND_FLOOR_LIFT_M } from './groundFloor.js';
@@ -381,6 +384,9 @@ function _flightApiUrl(viewer) {
     lat: latitude.toFixed(4),
     lon: longitude.toFixed(4),
   });
+  // Výška kamery: pri priblížení proxy pýta od OpenSky len výrez (1 kredit namiesto 4) a zvyšok
+  // sveta dopĺňa z posledného snímku (src/data/openSkyRegion.js, 2026-09-30).
+  if (Number.isFinite(cartographic.height)) params.set('h', String(Math.round(cartographic.height)));
   return `${API_URL}?${params}`;
 }
 
@@ -1212,12 +1218,21 @@ let _enrichLastDispatchMs = 0;
 /** @type {ReturnType<typeof setTimeout>|null} pending drip wake-up */
 let _enrichDripTimer = null;
 const _enrichQueue = [];
-const _enrichSeen = new Set();
+/**
+ * Brána doťahovania (2026-09-30, enrichGate.js): odpoveď (aj „nenájdené") je konečná, ZLYHANÝ dopyt
+ * (HTTP 500 z proxy, výpadok siete) sa smie zopakovať po 1, 2, 3 min — predtým ostal stroj bez typu,
+ * trasy a ETA až do obnovenia stránky.
+ */
+const _enrichGate = createEnrichGate();
+
+/** TEST ONLY — brána doťahovania vrstvy (správanie po zlyhanom dopyte). */
+export function _enrichGateForTest() {
+  return _enrichGate;
+}
 
 function _enqueueEnrich(key, url, onData, priority = false) {
-  if (_enrichSeen.has(key)) return;
-  _enrichSeen.add(key);
-  const job = { url, onData };
+  if (!_enrichGate.begin(key)) return;
+  const job = { key, url, onData };
   // Priority (tracked / model-eligible) goes to the FRONT so a deep ambient
   // backlog can never delay the plane the user just clicked or zoomed into.
   if (priority) _enrichQueue.unshift(job); else _enrichQueue.push(job);
@@ -1240,9 +1255,19 @@ function _drainEnrich() {
     const job = _enrichQueue.shift();
     _enrichActive += 1;
     fetch(job.url)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => { if (data && data.found) job.onData(data); })
-      .catch(() => { /* enrichment never surfaces errors */ })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        // Odpoveď prišla (aj { found: false }) — kľúč je vybavený. Chyba v spracovaní ho nezhodí.
+        _enrichGate.succeed(job.key);
+        if (data && data.found) {
+          try { job.onData(data); } catch (error) { console.warn('[flights] enrichment apply failed', error); }
+        }
+      })
+      // Zlyhaný dopyt (HTTP chyba, sieť, zlý JSON) — neviditeľne, ale s ďalším pokusom neskôr.
+      .catch(() => { _enrichGate.fail(job.key); })
       .finally(() => { _enrichActive -= 1; _drainEnrich(); });
   }
 }
@@ -1273,10 +1298,29 @@ function _requestTypeEnrichment(icao24, priority = false) {
   }, priority);
 }
 
+/**
+ * Výsledky trasy z adsbdb podľa volacieho znaku (2026-09-30, vlastník: „v kartičkách chýba ETA").
+ * Záznam stroja v `_flightData` sa vie vymeniť (vypadnutie z feedu a návrat, sledovanie a jeho
+ * zrušenie) a `_enrichGate` druhý dopyt na ten istý volací znak nepustí — trasa, dopravca a IATA
+ * číslo tak z kartičky zmizli natrvalo. Pamäť ich vráti bez ďalšieho dopytu (flightRouteMemory.js).
+ */
+const _routeMemory = createRouteMemory({ max: 4000 });
+
+/** TEST ONLY — pamäť trasy vrstvy (správanie kartičky po výmene záznamu stroja). */
+export function _routeMemoryForTest() {
+  return _routeMemory;
+}
+
 function _requestRouteEnrichment(icao24) {
-  const cs = String(_flightData.get(icao24)?.callsign || '').trim().toUpperCase();
+  const known = _flightData.get(icao24);
+  const cs = String(known?.callsign || '').trim().toUpperCase();
   if (!/^[A-Z]{3}\d/.test(cs)) return; // airline-style callsigns only (LLL + digit); GA tails won't resolve
+  if (_routeMemory.apply(known)) {
+    if (icao24 === _trackedIcao && _trackedEntity) _updateTrackedLabelModel(icao24);
+    return;
+  }
   _enqueueEnrich(`r:${cs}`, `/api/adsbdb/route/${encodeURIComponent(cs)}`, (data) => {
+    _routeMemory.remember(cs, data);
     const meta = _flightData.get(icao24);
     if (!meta) return;
     meta.airline = data.airline || meta.airline;
@@ -1364,7 +1408,7 @@ function _sweepAmbientEnrichment() {
     const cull = camera.frustum.computeCullingVolume(camPos, camera.directionWC, camera.upWC);
     const cand = [];
     for (const [icao24, bb] of _billboards) {
-      if (_enrichSeen.has(`t:${icao24}`)) continue; // answered / queued / negative this session
+      if (!_enrichGate.canBegin(`t:${icao24}`)) continue; // answered / queued / negative / waiting for retry
       if (!/^[0-9a-f]{6}$/i.test(icao24)) continue; // adsbdb keys are 6-char hex only
       const sweepMeta = _flightData.get(icao24);
       if (sweepMeta?.onGround) continue; // ground traffic never spends ambient budget (click-to-enrich still works)
@@ -3126,6 +3170,12 @@ function _newestFix(icao24) {
 
 function _fleetTick() {
   _tickNowActive = false; // po výnimke v minulom tiku
+  // Pod preloaderom lietadlá nikto nevidí: tik flotily (dead reckoning, podlaha,
+  // natočenie, fokus pre 6–12 000 strojov) počká na koniec štartu (startupGate.js).
+  // Meranie 2026-09-29 (verejná stránka, len lietadlá): 1,4 s hlavného vlákna pred
+  // skrytím preloadera pod tikom flotily. Prvý tik po skrytí prejde flotilu celú
+  // (iná póza kamery = nová epocha brány skrytia).
+  if (!isStartupReady()) return;
   if (!_viewer || !_billboardCollection || !_billboardCollection.show) return;
   const scene = _viewer.scene;
   const camera = _viewer.camera;
@@ -4467,6 +4517,9 @@ function _routeIsPlausible(icao24, route) {
     lonDeg: Cesium.Math.toDegrees(carto.longitude),
     altitudeM: info.altitude ?? null,
     verticalRateMps: info.verticalRate ?? null,
+    // Kurz (2026-10-01): ďaleko od letísk musí byť cieľ pred lietadlom — inak je to iný úsek.
+    trackDeg: Number.isFinite(info.true_track) ? info.true_track : null,
+    onGround: info.onGround === true,
     origin: route.origin,
     destination: route.destination,
   });
@@ -5399,8 +5452,9 @@ const flightsLayer = {
           // Operator is feed-only (adsbdb's airline arrives via the route
           // lookup as `airline`) — sticky like callsign.
           operator: feedOperator ?? prevMeta?.operator ?? null,
-          airline: prevMeta?.airline ?? null,
-          route: prevMeta?.route ?? null,
+          // Dopravca, trasa a IATA číslo letu (EK54J) z adsbdb — bez prenosu IATA číslo zmizlo
+          // z titulku karty po 30 s (flightRouteMemory.js, ROUTE_ENRICHMENT_FIELDS).
+          ...carryRouteEnrichment(prevMeta),
           // The RAW poll fix lat/lon (this tick's OpenSky state-vector
           // coords, pre-dead-reckon) — kept distinct from the continuously
           // dead-reckoned billboard position for any consumer that needs the
@@ -5408,6 +5462,9 @@ const flightsLayer = {
           rawLat: lat,
           rawLon: lon,
         };
+        // Stroj, ktorý sa vrátil do feedu (alebo zmenil volací znak na známy let), dostane trasu
+        // z pamäte — `_enrichGate` úspešný dopyt druhýkrát nepustí.
+        if (!meta.route) _routeMemory.apply(meta);
         _flightData.set(icao24, meta);
 
         const isTracked = icao24 === _trackedIcao;
@@ -5725,7 +5782,8 @@ const flightsLayer = {
     _groundSnap.clear();
     _displayFloorState.clear();
     _enrichQueue.length = 0;
-    _enrichSeen.clear();
+    _enrichGate.clear();
+    _routeMemory.clear();
     if (_enrichDripTimer) { clearTimeout(_enrichDripTimer); _enrichDripTimer = null; }
     _missingPolls.clear();
     _focusEvidenceIds.clear();

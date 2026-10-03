@@ -1,0 +1,17 @@
+{
+  "updated": "2026-09-30",
+  "note": "Dôveryhodné médiá pre overenie udalostí (Udalosti, etapa 2). Počítajú sa len domény z tohto zoznamu (aj ich subdomény); udalosť je overená správami, keď o nej píšu aspoň 2 rôzne. Bulvár, anonymné weby a sankcionované médiá sem nepatria. Zoznam môže vlastník upraviť — zmena platí bez reštartu.",
+  "domains": [
+    "reuters.com", "apnews.com", "afp.com", "bbc.com", "bbc.co.uk", "npr.org", "cnn.com", "nbcnews.com", "cbsnews.com",
+    "abcnews.go.com", "pbs.org", "news.sky.com", "dw.com", "france24.com", "euronews.com", "aljazeera.com",
+    "nytimes.com", "washingtonpost.com", "wsj.com", "theguardian.com", "ft.com", "bloomberg.com", "politico.eu",
+    "lemonde.fr", "spiegel.de", "zeit.de", "faz.net", "sueddeutsche.de", "derstandard.at", "diepresse.com", "orf.at",
+    "nzz.ch", "elpais.com", "corriere.it",
+    "timesofisrael.com", "haaretz.com", "jpost.com", "ynetnews.com", "jta.org",
+    "arabnews.com", "thenationalnews.com", "gulfnews.com", "khaleejtimes.com",
+    "scmp.com", "straitstimes.com", "japantimes.co.jp",
+    "avherald.com", "aviation-safety.net", "flightglobal.com", "aerotelegraph.com",
+    "tasr.sk", "sme.sk", "dennikn.sk", "aktuality.sk", "pravda.sk", "hnonline.sk", "ta3.com", "stvr.sk", "rtvs.sk",
+    "ceskatelevize.cz", "irozhlas.cz", "idnes.cz", "seznamzpravy.cz", "denikn.cz", "ctk.cz"
+  ]
+}

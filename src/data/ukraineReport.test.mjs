@@ -206,3 +206,43 @@ test('bez času publikovania niet s čím porovnávať — značka platí', () =
   assert.equal(r.stampDrifted, false);
   assert.equal(r.reportedAtText, '08:00 11.8.');
 });
+
+test('počet útokov: „… разів намагався покращити свої позиції", počet za slovesom, „один марний штурм" (2026-10-03: Kupiansk a Orichiv boli väčšinu dní „neznáme")', () => {
+  const n = (p) => attacksInParagraph(p);
+  assert.equal(n("На Куп'янському напрямку ворог вісім разів намагався покращити свої позиції проводячи штурмові дії в бік Радьківки, Куп'янська-Вузлового та Курилівки."), 8);
+  assert.equal(n("На Куп'янському напрямку ворог двічі намагався покращити свої позиції проводячи штурмові дії в районах Курилівки та Ківшарівки."), 2);
+  assert.equal(n('На Оріхівському напрямку ворог один раз намагався покращити свої позиції атакуючи в бік Павлівки.'), 1);
+  assert.equal(n('На Оріхівському напрямку ворог чотири рази намагався покращити свої позиції атакуючи в бік Зарічного, Павлівки.'), 4);
+  assert.equal(n('На Оріхівському напрямку , за уточненою інформацією, ворог тричі намагався покращити свої позиції в бік Павлівки.'), 3);
+  assert.equal(n('На Гуляйпільському напрямку окупанти атакували сім разів. Ворог намагався просунутися в бік населених пунктів Різдвянка, Воздвижівка, Копані.'), 7);
+  assert.equal(n('На Олександрівському напрямку ворог атакував двічі, в районах Олександрограда та Березового.'), 2);
+  assert.equal(n('На Придніпровському напрямку окупанти здійснили один марний штурм у районі Антонівського мосту.'), 1);
+  // Bez počtu ostáva poctivo „neznáme" (aspoň jeden útok, ale číslo hlásenie nedáva).
+  assert.equal(n('На Олександрівському напрямку ворог штурмував в бік Мирного.'), null);
+  assert.equal(n('На Краматорському напрямку противник атакував у бік Юрківки.'), null);
+  // Doterajšie vzory platia ďalej.
+  assert.equal(n('На Костянтинівському напрямку зафіксовано 21 атаку. Загарбники вели штурмові дії у районах населених пунктів Костянтинівка.'), 21);
+  assert.equal(n("Дев'ятнадцять атак здійснив ворог на Покровському напрямку . Окупанти намагалися просунутися у бік населених пунктів Добропілля."), 19);
+  assert.equal(n('На Краматорському напрямку противник штурмових дій не проводив.'), 0);
+});
+
+test('odsek s viacerými smermi po sebe sa číta po častiach — každý smer má svoj počet; dva smery v jednej vete ostávajú spoločné; recap staršieho hlásenia neprebije počet z vlastného odseku', async () => {
+  const { directionSegments, parseGeneralStaffReport } = await import('./ukraineReport.js');
+  const two = "На Південно-Слобожанському напрямку загарбники тричі намагалися прорвати оборону у бік населених пунктів Гоптівка, Нестерне та Анискине. Два боєзіткнення досі тривають. На Куп'янському напрямку ворог здійснив одну наступальну дію в бік Ківшарівки.";
+  assert.deepEqual(directionSegments(two), [
+    'На Південно-Слобожанському напрямку загарбники тричі намагалися прорвати оборону у бік населених пунктів Гоптівка, Нестерне та Анискине. Два боєзіткнення досі тривають.',
+    "На Куп'янському напрямку ворог здійснив одну наступальну дію в бік Ківшарівки.",
+  ]);
+  const r = parseGeneralStaffReport([two]);
+  assert.deepEqual(r.directions.map((d) => [d.gs, d.attacks, d.shared]), [['Південно-Слобожанський', 3, false], ["Куп'янський", 1, false]]);
+  assert.equal(r.directions[1].text, "На Куп'янському напрямку ворог здійснив одну наступальну дію в бік Ківшарівки.");
+  // Dva smery v tej istej vete: jeden spoločný odsek ako doteraz.
+  const joint = 'Найбільше атак за добу ворог здійснив на Костянтинівському та Покровському напрямках.';
+  assert.deepEqual(directionSegments(joint), [joint]);
+  assert.equal(parseGeneralStaffReport([joint]).directions.every((d) => d.shared), true);
+  assert.deepEqual(directionSegments('Бойових дій не зафіксовано.'), ['Бойових дій не зафіксовано.']);
+  // 1. 8. 2026: vlastný odsek smeru (9) a ďalej recap staršieho hlásenia (17) — platí vlastný odsek.
+  const own = "На Південно-Слобожанському напрямку загарбники дев'ять разів намагалися прорвати оборону в районах Стариці, Ізбицького та Іващиного, одне боєзіткнення триває.";
+  const recap = 'Як повідомляла АрміяInform, ворог 17 разів атакував на Південно-Слобожанському напрямку.';
+  assert.equal(parseGeneralStaffReport([own, recap]).directions[0].attacks, 9);
+});

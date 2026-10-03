@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://okolive.sk/</loc>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/mapa-frontu-ukrajina/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/mapa-frontu-ukrajina/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/ukraine-front-map/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/mapa-frontu-ukrajina/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/ukraine-front-map/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/mapa-frontu-ukrajina/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/ukraine-front-map/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/mapa-frontu-ukrajina/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/lietadla-nazivo/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/lietadla-nazivo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/live-flight-tracker-3d/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/lietadla-nazivo/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/live-flight-tracker-3d/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/lietadla-nazivo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/live-flight-tracker-3d/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/lietadla-nazivo/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/lode-nazivo/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/lode-nazivo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/live-ship-tracker/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/lode-nazivo/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/live-ship-tracker/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/lode-nazivo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/live-ship-tracker/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/lode-nazivo/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/hormuzsky-prieliv-a-uziny/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/hormuzsky-prieliv-a-uziny/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/strait-of-hormuz-chokepoints/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/hormuzsky-prieliv-a-uziny/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/strait-of-hormuz-chokepoints/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/hormuzsky-prieliv-a-uziny/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/strait-of-hormuz-chokepoints/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/hormuzsky-prieliv-a-uziny/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/blizky-vychod/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/blizky-vychod/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/middle-east-live-map/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/blizky-vychod/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/middle-east-live-map/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/blizky-vychod/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/middle-east-live-map/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/blizky-vychod/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/ceny-a-toky-plynu/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/ceny-a-toky-plynu/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/european-gas-prices-and-flows/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/ceny-a-toky-plynu/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/european-gas-prices-and-flows/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/ceny-a-toky-plynu/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/european-gas-prices-and-flows/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/ceny-a-toky-plynu/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/satelity-nazivo/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/satelity-nazivo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/live-satellite-tracker/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/satelity-nazivo/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/live-satellite-tracker/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/satelity-nazivo/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/live-satellite-tracker/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/satelity-nazivo/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/dopravne-kamery/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/dopravne-kamery/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/traffic-cameras-3d-map/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/dopravne-kamery/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/traffic-cameras-3d-map/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/dopravne-kamery/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/traffic-cameras-3d-map/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/dopravne-kamery/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/pocasie-radar-zemetrasenia/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/pocasie-radar-zemetrasenia/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/weather-radar-earthquakes/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/pocasie-radar-zemetrasenia/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/weather-radar-earthquakes/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/pocasie-radar-zemetrasenia/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/weather-radar-earthquakes/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/pocasie-radar-zemetrasenia/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/sk/o-projekte/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/o-projekte/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/about/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/o-projekte/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/en/about/</loc>
+    <xhtml:link rel="alternate" hreflang="sk" href="https://okolive.sk/sk/o-projekte/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://okolive.sk/en/about/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://okolive.sk/sk/o-projekte/"/>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://okolive.sk/privacy.html</loc>
+    <lastmod>2026-09-30</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.2</priority>
+  </url>
+</urlset>

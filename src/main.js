@@ -42,6 +42,8 @@ import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
+import { isCrawlerUserAgent } from './crawlerDetect.js';
+import { initAnalytics } from './analytics.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { armStartupGate, releaseStartupGate } from './startupGate.js';
@@ -59,6 +61,10 @@ import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, li
 import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
 import { createMideastPanel } from './mideastPanel.js';
 import { createMideastControl } from './mideastControlLayer.js';
+import { createAirspaceAdvisory } from './airspaceAdvisoryLayer.js';
+import { createUkmtoIncidents } from './ukmtoIncidentsLayer.js';
+import { createGpsInterference } from './gpsInterferenceLayer.js';
+import { UKMTO_CHOKEPOINT_SCENES } from './data/ukmto.js';
 import { createPortwatchCard } from './portwatchCard.js';
 import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
@@ -299,8 +305,12 @@ async function init() {
     // MapStackController null tileset už rieši). Deň s desiatkami headless
     // overení tak nevyčerpá kvótu reálnym pozeraniam (429 na root.json).
     const qaBasemapOsm = new URLSearchParams(window.location.search).get('qaBasemap') === 'osm';
+    // SEO (2026-09-30): roboty vyhľadávačov si appku vykresľujú — tá istá ochrana kvóty ako
+    // pri QA, obsah stránky ostáva rovnaký (src/crawlerDetect.js).
+    const crawlerVisit = isCrawlerUserAgent(navigator.userAgent);
     try {
       if (qaBasemapOsm) throw new Error('qaBasemap=osm — Google tileset skipped to protect the daily root-request quota');
+      if (crawlerVisit) throw new Error('crawler — photorealistic tiles skipped to protect the quota');
       // Google Photorealistic 3D Tiles: najprv priamo Google kľúčom, pri EHP
       // 403 („not available for your account and region", od 2026-09-04) cez
       // Cesium ion asset 2275207 — tie isté dlaždice pod zmluvou Cesiumu
@@ -372,7 +382,7 @@ async function init() {
     });
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
-    const styleManager = new StyleManager(viewer, { mapStackController });
+    const styleManager = new StyleManager(viewer, { mapStackController, account: accountCenter });
     // Ľavý stĺpec v logickom poriadku (vlastník 2026-09-27; src/leftLane.js): Zobrazenie, Kamery
     // a Kontext sú panely ľavého pruhu v zónach, naraz je otvorený jeden panel, celá hlavička
     // otvára. Na mobile sa nepresúva (obe strany skryté, panely nosí výsuv); pri prepnutí sa zosúladí.
@@ -493,6 +503,8 @@ async function init() {
       loadingScreen.classList.add('hidden');
       releaseStartupGate();
       startSharpStarfield();
+      // GA4 len so súhlasom a až po štarte (src/analytics.js; vypnuté, kým nie je info@okolive.sk).
+      try { initAnalytics({ t, crawler: crawlerVisit }); } catch (error) { console.warn('[analytics]', error); }
       // Reveal only after the loading cover has yielded. transitionend can be
       // absent under reduced motion, so a bounded fallback makes this reliable.
       let firstRunRevealed = false;
@@ -660,6 +672,7 @@ async function init() {
       });
     };
     let ukraineEvents = null; // vrstva udalostí UKRAJINA (etapa 3) — vzniká nižšie, brána ju už pozná
+    let ukmtoIncidents = null; // INCIDENTY LODÍ · UKMTO (BLÍZKY VÝCHOD etapa 5c) — vzniká nižšie, brána ju už pozná
     let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
     let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
     let activeChokepoint = null; // aktívna úžina (pre export kartičky konfliktu)
@@ -679,6 +692,8 @@ async function init() {
         kartaOverlay?.setRevealed(visible);
         // KONTROLA SÍDIEL Blízkeho východu: pri pohľade na planétu sa body aj raster schovajú, čip ostáva.
         if (visible) void mideastControl.show(); else mideastControl.hide();
+        // INCIDENTY LODÍ (UKMTO): body len pri pohľade na scénu, čip ostáva.
+        if (visible) void ukmtoIncidents?.show(); else void ukmtoIncidents?.hide();
         scenePinDs.show = visible;
         viewer.scene?.requestRender?.();
       },
@@ -723,11 +738,30 @@ async function init() {
     const applyMideastControlStyle = (stack) => mideastControl.setStyle(stack?.kind === 'hillshade' ? 'karta' : 'default');
     applyMideastControlStyle(getActiveMapStack());
     onActiveMapStackChange(applyMideastControlStyle);
+    // VZDUŠNÝ PRIESTOR · EASA (2026-10-03, etapa 5b; src/airspaceAdvisoryLayer.js): bulletiny
+    // EASA o konfliktných zónach na hraniciach FIR. Čip v paneli ju zapína; dáta sa stiahnu
+    // až pri prvom zapnutí. Nie je viazaná na bránu priblíženia dejiska — zóny majú veľkosť
+    // štátov a pohľad z diaľky je práve ten užitočný.
+    const airspaceAdvisory = createAirspaceAdvisory({ viewer });
+    window.__godsEyeView.airspaceAdvisory = airspaceAdvisory;
+    // INCIDENTY LODÍ · UKMTO (2026-10-03, etapa 5c; src/ukmtoIncidentsLayer.js): varovania UKMTO
+    // ako body. Čip je predvolene zapnutý, no vrstva sťahuje a kreslí až pri dejisku BLÍZKEHO
+    // VÝCHODU alebo úžine v oblasti hlásení UKMTO (setActive nižšie) a schováva sa s bránou.
+    ukmtoIncidents = createUkmtoIncidents({ viewer });
+    window.__godsEyeView.ukmtoIncidents = ukmtoIncidents;
+    // RUŠENIE GPS · odvodené (2026-10-03, etapa 5d; src/gpsInterferenceLayer.js): bunky 0,5° podľa
+    // podielu lietadiel so zhoršenou presnosťou polohy (zber servera z adsb.lol). Predvolene
+    // vypnuté, sťahuje až po zapnutí čipu; bez väzby na dejisko (regionálna mapa ako EASA).
+    const gpsInterference = createGpsInterference({ viewer });
+    window.__godsEyeView.gpsInterference = gpsInterference;
     const mideastPanel = createMideastPanel({
       mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
       theatres: listMideastTheatres(),
       applyTheatre: (id) => runMideastTheatre(id),
       control: mideastControl,
+      airspace: airspaceAdvisory,
+      ukmto: ukmtoIncidents,
+      gps: gpsInterference,
     });
     window.__godsEyeView.mideastPanel = mideastPanel;
     // Situation from open sources: the merged bulletin (2026-09-18) now fills the
@@ -929,6 +963,7 @@ async function init() {
         activeChokepoint = null; activeFrontScene = null; activeTheatre = null;
         mideastPanel?.setActiveTheatre?.(null);
         void mideastControl.setTheatre(null);
+        void ukmtoIncidents?.setActive(false);
         portwatchCard?.setActive?.(null);
         restoreAutoKarta();
         syncMapFocus();
@@ -1126,6 +1161,7 @@ async function init() {
       activeTheatre = null;
       mideastPanel?.setActiveTheatre?.(null);
       void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
+      void ukmtoIncidents?.setActive(false);
       portwatchCard?.setActive?.(null);
       kartaOverlay?.setScene(scene || null);
       ukrainePanel?.setActiveScene(scene?.id || null);
@@ -1182,7 +1218,7 @@ async function init() {
       window.__godsEyeView.ukraineBulletin = ukraineBulletin;
     }
     window.__godsEyeView.frontScenes = { list: listFrontScenes, apply: runFrontScene };
-    // Zdieľateľný odkaz `?front=<smer>` (napr. oko.uhrin.digital/?front=lyman) —
+    // Zdieľateľný odkaz `?front=<smer>` (napr. okolive.sk/?front=lyman) —
     // po obnove stavu, aby scéna vyhrala nad predvoleným pohľadom ako klik.
     try {
       const requestedFront = new URLSearchParams(window.location?.search || '').get('front');
@@ -1226,6 +1262,8 @@ async function init() {
       void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
       // Scéna úžiny s údajmi PortWatch (hormuz, bab-el-mandeb, suez) zvýrazní svoj riadok karty.
       portwatchCard?.setActive?.(PORTWATCH_KEYS.includes(scene?.id) ? scene.id : null);
+      // Varovania UKMTO pri úžinách v jeho oblasti hlásení (Hormuz, Báb al-Mandab, Suez); inde nie.
+      void ukmtoIncidents?.setActive(UKMTO_CHOKEPOINT_SCENES.includes(scene?.id));
       const result = applyChokepointScene(id, chokepointSceneDeps);
       syncMapFocus();
       void oilPriceChip.refreshAndShow();
@@ -1249,7 +1287,7 @@ async function init() {
       list: listChokepointScenes,
       apply: runChokepointScene,
     };
-    // Shareable deep link `?chokepoint=<id>` (e.g. oko.uhrin.digital/?chokepoint=hormuz).
+    // Shareable deep link `?chokepoint=<id>` (e.g. okolive.sk/?chokepoint=hormuz).
     // Apply AFTER camera/layer restore settles so the scene wins over the
     // default/local layer state, the way an explicit click would.
     try {
@@ -1324,6 +1362,8 @@ async function init() {
       // a raster zón prepočíta v rámci dejiska (+0,2°), nie nad celým modulom; bez
       // dejiska (null) vrstvy schová. Pred rámovaním, aby sa body natiahli počas letu.
       void mideastControl.setTheatre(scene || null);
+      // INCIDENTY LODÍ (etapa 5c): pri každom dejisku — body mimo záberu nič nestoja.
+      void ukmtoIncidents?.setActive(Boolean(scene));
       // Čip „premávka v úžine" patrí poslednej úžine a ďalej by pollval jej rámec;
       // brána presunutá na dejisko by ho po prílete znova odkryla (nález 2026-09-26).
       straitTrafficChip.hide();
@@ -1347,7 +1387,7 @@ async function init() {
       return applyMideastTheatre(id, theatreDeps);
     };
     window.__godsEyeView.mideastTheatres = { list: listMideastTheatres, apply: runMideastTheatre };
-    // Zdieľateľný odkaz `?mideast=<dejisko>` (napr. oko.uhrin.digital/?mideast=gaza):
+    // Zdieľateľný odkaz `?mideast=<dejisko>` (napr. okolive.sk/?mideast=gaza):
     // po obnove stavu ako `?front=`, aby scéna vyhrala nad predvoleným pohľadom.
     // Ak URL nesie aj PLATNÝ `?front=` alebo `?chokepoint=`, dejisko ustúpi — inak
     // by vyhrala náhoda poradia registrácie. Neplatná konkurenčná hodnota (preklep)

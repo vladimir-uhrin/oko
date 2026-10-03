@@ -10,6 +10,16 @@
 //                                nemiešali (israel-palestine, yemen, syria, lebanon)
 //   portwatch/<úžina>.json       denné prechody úžinou z IMF PortWatch od 1. 1. 2019
 //                                (etapa 5a, 2026-09-26; kompaktné riadky, src/data/portwatch.js)
+//   airspace/czib.json           aktívne bulletiny EASA o konfliktných zónach (etapa 5b,
+//                                2026-10-03; src/data/czib.js)
+//   airspace/fir-boundaries.json hranice FIR z VATSpy (CC BY-SA 4.0), len základné FIR
+//   ukmto/incidents.json         incidenty lodí z rozhrania UKMTO (OGL v3.0; etapa 5c,
+//                                2026-10-03; src/data/ukmto.js) — archív rastie, rozhranie
+//                                drží len posledné tri mesiace
+//   gps/<deň>.json               rušenie GPS po bunkách 0,5° — počty lietadiel a lietadiel so
+//                                zhoršenou presnosťou polohy (adsb.lol, ODbL; etapa 5d,
+//                                2026-10-03; src/data/gpsInterference.js), bez adries lietadiel
+//   gps/<deň>.work.json          rozpracovaný deň (adresy kvôli jedinečnosti; po uzavretí sa maže)
 // Ďalšie druhy (GeoConfirmed × 4 konflikty, UCDP, UKMTO, správy) prídu v ďalších
 // etapách plánu vedľa tohto súboru v tom istom koreni.
 //
@@ -17,6 +27,7 @@
 // Sieťový obal s User-Agentom je vlastný: Wikimedia etiketa chce popisný UA
 // s kontaktom, jeden dopyt naraz a pauzy medzi dopytmi (história po týždňoch).
 import { promises as fsp } from 'node:fs';
+import https from 'node:https';
 import path from 'node:path';
 
 import { dayKey, dayToMs, isDay, readJson, wikiRevisionUrl, writeJsonAtomic } from './ukraineArchive.mjs';
@@ -25,6 +36,15 @@ import {
   PORTWATCH_ATTRIBUTION, PORTWATCH_DATASET_URL, PORTWATCH_FIRST_DAY, PORTWATCH_KEYS, PORTWATCH_LICENSE, PORTWATCH_PAGE_SIZE, PW,
   meanOver, mergePortwatchRows, parsePortwatchFeatures, portwatchChokepoint, portwatchQueryUrl,
 } from '../../src/data/portwatch.js';
+import {
+  CZIB_ATTRIBUTION, CZIB_EXPORT_URL, CZIB_FEED_URL, CZIB_LIST_URL, FIR_ATTRIBUTION, FIR_LICENSE, VATSPY_BOUNDARIES_URL,
+  buildCzibBulletin, czibLapsed, indexFirBoundaries, parseCzibDetail, parseCzibExport, parseCzibFeed,
+} from '../../src/data/czib.js';
+import { UKMTO_API_URL, UKMTO_ATTRIBUTION, UKMTO_LICENSE, UKMTO_LICENSE_URL, UKMTO_SITE_URL, mergeUkmtoIncidents, parseUkmtoIncidents } from '../../src/data/ukmto.js';
+import {
+  GPS_ATTRIBUTION, GPS_CELL_DEG, GPS_CIRCLES, GPS_HIGH, GPS_LICENSE, GPS_LOW, GPS_MIN_AIRCRAFT,
+  gpsAddSnapshot, gpsCircleUrl, gpsEmptyDay, gpsFinalizeDay, gpsMergeDays,
+} from '../../src/data/gpsInterference.js';
 
 export { MIDEAST_CONTROL_MODULE_IDS };
 export const USER_AGENT = 'OKO-mideast/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
@@ -355,6 +375,352 @@ export async function portwatchPayload(root, keys, { days = 400, nowMs = Date.no
     });
   }
   return { source: PORTWATCH_DATASET_URL, attribution: PORTWATCH_ATTRIBUTION, license: PORTWATCH_LICENSE, generatedAt: nowMs, chokepoints };
+}
+
+// ── airspace/ — EASA CZIB + hranice FIR z VATSpy (etapa 5b, 2026-10-03) ─────────
+/** Zoznam bulletinov sa pýta raz za 6 h; stránka bulletinu len pri zmene `updated`. */
+export const AIRSPACE_FRESH_MS = 6 * 3_600_000;
+/** Hranice FIR (VATSpy, mení sa po týždňoch) raz za 7 dní. */
+export const FIR_FRESH_MS = 7 * DAY_MS;
+/** Pauza medzi stránkami bulletinov EASA (zdvorilosť; ~16 aktívnych). */
+export const CZIB_DETAIL_PAUSE_MS = 1_200;
+export const CZIB_LIST_MAX_BYTES = 2 * 1024 * 1024;
+/** Stránka bulletinu má ~280 kB HTML (menu webu EASA). */
+export const CZIB_PAGE_MAX_BYTES = 4 * 1024 * 1024;
+/** Boundaries.geojson VATSpy má 2,2 MB (1 220 prvkov, 2026-10-03). */
+export const FIR_BOUNDARIES_MAX_BYTES = 12 * 1024 * 1024;
+export const airspaceDir = (root) => path.join(archiveDir(root), 'airspace');
+export const czibFile = (root) => path.join(airspaceDir(root), 'czib.json');
+export const firFile = (root) => path.join(airspaceDir(root), 'fir-boundaries.json');
+const defaultSleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Obnoví snímku aktívnych bulletinov EASA: export (stav, platnosť, krajiny) + RSS (odkaz)
+ * + stránka bulletinu (číslo, dotknutý priestor, odporúčania) — stránka sa sťahuje len pre
+ * nový bulletin alebo pri zmenenom `updated`, inak sa prevezme z predošlej snímky. Stiahnutý
+ * (Withdrawn) bulletin zo snímky vypadne. Pri chybe zoznamu ostáva stará snímka (`stale`).
+ * Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'partial'|'fresh'|'stale'|'error', count:number, fetched?:number, day?:string, errors?:string[], error?:string}>}
+ */
+export async function czibRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {}, sleep = defaultSleepMs } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const prev = await readJson(czibFile(root));
+  const prevList = Array.isArray(prev?.bulletins) ? prev.bulletins : [];
+  if (!force && prev && nowMs - (Number(prev.fetchedAt) || 0) < AIRSPACE_FRESH_MS) {
+    return { status: 'fresh', count: prevList.length, day: dayKey(Number(prev.fetchedAt)) };
+  }
+  try {
+    const list = await fetchCapped(fetchImpl, CZIB_EXPORT_URL, { maxBytes: CZIB_LIST_MAX_BYTES, headers: { Accept: 'application/json' } });
+    if (!list.res.ok) throw new Error(`EASA export HTTP ${list.res.status}`);
+    let exported;
+    try { exported = JSON.parse(list.body); } catch { throw new Error('EASA export: invalid JSON'); }
+    const rows = parseCzibExport(exported);
+    if (!rows.length) throw new Error('EASA export: no bulletins');
+    let links = new Map();
+    try {
+      const feed = await fetchCapped(fetchImpl, CZIB_FEED_URL, { maxBytes: CZIB_LIST_MAX_BYTES, headers: { Accept: 'application/rss+xml,application/xml' } });
+      if (feed.res.ok) links = parseCzibFeed(feed.body);
+    } catch (error) { log(`[mideast-events] czib feed failed: ${error?.message || error}`); }
+    const prevByNid = new Map(prevList.map((b) => [b.nid, b]));
+    const bulletins = [];
+    const errors = [];
+    let fetched = 0;
+    for (const row of rows.filter((r) => r.active)) {
+      const old = prevByNid.get(row.nid);
+      const url = links.get(row.nid) || old?.url || null;
+      if (!force && old?.czib && old.updatedAt === row.updatedAt) {
+        bulletins.push({ ...old, status: row.status, active: row.active });
+        continue;
+      }
+      if (!url) { errors.push(`${row.nid}: no link`); bulletins.push(old ? { ...old } : buildCzibBulletin(row, null, null)); continue; }
+      if (fetched) await sleep(CZIB_DETAIL_PAUSE_MS);
+      fetched += 1;
+      try {
+        const page = await fetchCapped(fetchImpl, url, { maxBytes: CZIB_PAGE_MAX_BYTES, headers: { Accept: 'text/html' } });
+        if (!page.res.ok) throw new Error(`HTTP ${page.res.status}`);
+        bulletins.push(buildCzibBulletin(row, parseCzibDetail(page.body), url));
+      } catch (error) {
+        errors.push(`${row.nid}: ${error?.message || error}`);
+        bulletins.push(old ? { ...old } : buildCzibBulletin(row, null, url));
+      }
+    }
+    await writeJsonAtomic(czibFile(root), {
+      kind: 'czib', fetchedAt: nowMs, source: CZIB_LIST_URL, attribution: CZIB_ATTRIBUTION, bulletins,
+    });
+    log(`[mideast-events] czib: ${bulletins.length} active bulletins (${fetched} pages fetched${errors.length ? `, ${errors.length} errors` : ''})`);
+    return { status: errors.length ? 'partial' : 'updated', count: bulletins.length, fetched, day: dayKey(nowMs), errors };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] czib failed: ${message}`);
+    return { status: prev ? 'stale' : 'error', count: prevList.length, error: message };
+  }
+}
+
+/**
+ * Hranice FIR z VATSpy (CC BY-SA 4.0) → `fir-boundaries.json` = { kód: polygóny } len základných
+ * FIR (bez sektorov), súradnice na 0,001°. Raz za 7 dní; pri chybe ostáva starý súbor. Nikdy nehádže.
+ */
+export async function firBoundariesRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const prev = await readJson(firFile(root));
+  const prevCount = prev?.firs ? Object.keys(prev.firs).length : 0;
+  if (!force && prevCount && nowMs - (Number(prev.fetchedAt) || 0) < FIR_FRESH_MS) return { status: 'fresh', count: prevCount };
+  try {
+    const { res, body } = await fetchCapped(fetchImpl, VATSPY_BOUNDARIES_URL, { timeoutMs: 90_000, maxBytes: FIR_BOUNDARIES_MAX_BYTES, headers: { Accept: 'application/geo+json,application/json' } });
+    if (!res.ok) throw new Error(`VATSpy HTTP ${res.status}`);
+    let geojson;
+    try { geojson = JSON.parse(body); } catch { throw new Error('VATSpy: invalid JSON'); }
+    const index = indexFirBoundaries(geojson);
+    // Poistka proti orezanému či inému súboru: svet má stovky FIR, nie desiatky.
+    if (index.size < 100) throw new Error(`VATSpy: only ${index.size} FIRs`);
+    await writeJsonAtomic(firFile(root), {
+      kind: 'fir-boundaries', fetchedAt: nowMs, source: VATSPY_BOUNDARIES_URL, attribution: FIR_ATTRIBUTION, license: FIR_LICENSE,
+      firs: Object.fromEntries(index),
+    });
+    log(`[mideast-events] fir boundaries: ${index.size} FIRs`);
+    return { status: 'updated', count: index.size };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] fir boundaries failed: ${message}`);
+    return { status: prevCount ? 'stale' : 'error', count: prevCount, error: message };
+  }
+}
+
+/**
+ * Telo `/api/mideast/events/airspace`: aktívne bulletiny (s príznakom `lapsed`, keď uplynul
+ * dátum platnosti) + polygóny len tých FIR, ktoré bulletiny menujú (každý kód raz) + kódy
+ * bez hranice v VATSpy (`missingFirs` — napr. UIR Kyjev). Bez snímky bulletinov null.
+ */
+export async function airspacePayload(root, { nowMs = Date.now() } = {}) {
+  const czib = await readJson(czibFile(root));
+  if (!czib || !Array.isArray(czib.bulletins)) return null;
+  const fir = await readJson(firFile(root));
+  const firs = {};
+  const missingFirs = [];
+  for (const b of czib.bulletins) {
+    for (const code of Array.isArray(b.firs) ? b.firs : []) {
+      if (firs[code] || missingFirs.includes(code)) continue;
+      if (fir?.firs?.[code]) firs[code] = fir.firs[code]; else missingFirs.push(code);
+    }
+  }
+  return {
+    source: CZIB_LIST_URL, attribution: CZIB_ATTRIBUTION, firAttribution: FIR_ATTRIBUTION, firLicense: FIR_LICENSE,
+    generatedAt: nowMs, fetchedAt: czib.fetchedAt ?? null, boundariesAt: fir?.fetchedAt ?? null,
+    bulletins: czib.bulletins.map((b) => ({ ...b, lapsed: czibLapsed(b, nowMs) })),
+    firs, missingFirs,
+  };
+}
+
+// ── ukmto/ — incidenty lodí z rozhrania UKMTO (etapa 5c, 2026-10-03) ────────────
+/**
+ * Rozhranie UKMTO sa pýta raz za štvrťhodinu (vlastník 2026-10-03: „žiadne oneskorovanie, skôr
+ * najaktuálnejšie" — pôvodne hodina). Čerstvosť je o minútu kratšia než tik úlohy, aby každý
+ * tik naozaj stiahol; jeden ľahký dopyt = 96 denne.
+ */
+export const UKMTO_FRESH_MS = 14 * 60_000;
+export const UKMTO_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Záložný prenos cez `node:https` s tým istým rozhraním ako `fetch` (stačí na `fetchCapped`).
+ * Rozhranie UKMTO stojí za Cloudflare a podľa odtlačku klienta vracia 403: zmerané 2026-10-03
+ * z toho istého stroja a s tou istou hlavičkou User-Agent — Node 24 `fetch` 403 a `https` 200,
+ * Node 22 naopak, curl 200. Preto sa pri 403 skúsi ešte tento druhý ŠTANDARDNÝ klient; nič sa
+ * nepredstiera (žiadny falošný prehliadač), User-Agent ostáva náš s kontaktom, a keď neprejde
+ * ani jeden, archív ostáva a skúsi sa o hodinu.
+ */
+export function httpsFetch(url, { headers = {}, signal = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers, signal: signal || undefined }, (res) => {
+      const chunks = [];
+      let total = 0;
+      res.on('data', (chunk) => {
+        total += chunk.length;
+        if (total > 16 * 1024 * 1024) { req.destroy(new Error('too large')); return; }
+        chunks.push(chunk);
+      });
+      res.on('end', () => {
+        const status = Number(res.statusCode) || 502;
+        // Response nepripúšťa telo pri 204/304 — tie tu nečakáme, pre istotu bez tela.
+        const body = status === 204 || status === 304 ? null : Buffer.concat(chunks, total);
+        resolve(new Response(body, { status, headers: { 'content-type': String(res.headers['content-type'] || '') } }));
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+  });
+}
+export const ukmtoDir = (root) => path.join(archiveDir(root), 'ukmto');
+export const ukmtoFile = (root) => path.join(ukmtoDir(root), 'incidents.json');
+
+/**
+ * Stiahne incidenty UKMTO a ZLÚČI ich s archívom: rozhranie drží len približne posledné tri
+ * mesiace, archív ich necháva všetky (rovnaké id = novší záznam vyhrá — UKMTO varovania dopĺňa).
+ * Prázdne pole je platná odpoveď (pokoj na mori) a archív nemaže. Pri chybe ostáva starý archív
+ * (`stale`), bez neho `error`. Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'fresh'|'stale'|'error', count:number, fetched?:number, added?:number, lastT?:number|null, day?:string|null, error?:string}>}
+ */
+export async function ukmtoRefresh(root, { fetchImpl = fetch, altFetchImpl = httpsFetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const prev = await readJson(ukmtoFile(root));
+  const prevList = Array.isArray(prev?.incidents) ? prev.incidents : [];
+  const lastOf = (list) => (list.length ? list[0].t : null);
+  if (!force && prev && nowMs - (Number(prev.fetchedAt) || 0) < UKMTO_FRESH_MS) {
+    return { status: 'fresh', count: prevList.length, lastT: lastOf(prevList), day: lastOf(prevList) ? dayKey(lastOf(prevList)) : null };
+  }
+  try {
+    const request = { maxBytes: UKMTO_MAX_BYTES, headers: { Accept: 'application/json' } };
+    let { res, body } = await fetchCapped(fetchImpl, UKMTO_API_URL, request);
+    // 403 od Cloudflare podľa odtlačku klienta → jeden pokus druhým štandardným klientom (httpsFetch).
+    if (res.status === 403 && typeof altFetchImpl === 'function') {
+      log('[mideast-events] ukmto: HTTP 403 — trying the second transport');
+      ({ res, body } = await fetchCapped(altFetchImpl, UKMTO_API_URL, request));
+    }
+    if (!res.ok) throw new Error(`UKMTO HTTP ${res.status}`);
+    let json;
+    try { json = JSON.parse(body); } catch { throw new Error('UKMTO: invalid JSON'); }
+    const fetched = parseUkmtoIncidents(json);
+    const incidents = mergeUkmtoIncidents(prevList, fetched);
+    const known = new Set(prevList.map((it) => it.id));
+    const added = fetched.filter((it) => !known.has(it.id)).length;
+    await writeJsonAtomic(ukmtoFile(root), {
+      kind: 'ukmto', fetchedAt: nowMs, source: UKMTO_SITE_URL, attribution: UKMTO_ATTRIBUTION, license: UKMTO_LICENSE, licenseUrl: UKMTO_LICENSE_URL, incidents,
+    });
+    log(`[mideast-events] ukmto: ${incidents.length} incidents in archive (${fetched.length} fetched, ${added} new)`);
+    return { status: 'updated', count: incidents.length, fetched: fetched.length, added, lastT: lastOf(incidents), day: lastOf(incidents) ? dayKey(lastOf(incidents)) : null };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] ukmto failed: ${message}`);
+    return { status: prev ? 'stale' : 'error', count: prevList.length, lastT: lastOf(prevList), error: message };
+  }
+}
+
+/**
+ * Telo `/api/mideast/events/ukmto`: incidenty za posledných `days` dní (najnovšie prvé) + počet
+ * a rozsah celého archívu. Bez archívu null (volajúci vráti 404).
+ */
+export async function ukmtoPayload(root, { days = 90, nowMs = Date.now() } = {}) {
+  const snap = await readJson(ukmtoFile(root));
+  if (!snap || !Array.isArray(snap.incidents)) return null;
+  const since = nowMs - Math.max(1, Math.floor(days)) * DAY_MS;
+  return {
+    source: UKMTO_SITE_URL, attribution: UKMTO_ATTRIBUTION, license: UKMTO_LICENSE, licenseUrl: UKMTO_LICENSE_URL,
+    generatedAt: nowMs, fetchedAt: snap.fetchedAt ?? null, days: Math.max(1, Math.floor(days)),
+    archived: snap.incidents.length, firstT: snap.incidents.length ? snap.incidents.at(-1).t : null,
+    incidents: snap.incidents.filter((it) => it.t >= since),
+  };
+}
+
+// ── gps/ — rušenie GPS odvodené z presnosti polohy lietadiel (etapa 5d, 2026-10-03) ──
+/** Pauza medzi kruhmi: adsb.lol vracia 429 pri dávke a tú istú adresu používajú aj vojenské lety OKO. */
+export const GPS_CIRCLE_PAUSE_MS = 5_000;
+/** Po 429 jeden nový pokus o ten istý kruh po tomto čase; potom sa kruh v tomto kole vynechá. */
+export const GPS_RETRY_AFTER_429_MS = 12_000;
+export const GPS_MAX_BYTES = 6 * 1024 * 1024;
+/** Najviac toľko dní dozadu vracia trasa (okno mapy). */
+export const GPS_MAX_DAYS = 7;
+export const gpsDir = (root) => path.join(archiveDir(root), 'gps');
+/** Výsledok uzavretého dňa (bez adries lietadiel). */
+export const gpsDayFile = (root, day) => path.join(gpsDir(root), `${day}.json`);
+/** Rozpracovaný deň (adresy lietadiel po bunkách kvôli jedinečnosti; po uzavretí dňa sa maže). */
+export const gpsWorkFile = (root, day) => path.join(gpsDir(root), `${day}.work.json`);
+
+/** Uzavrie rozpracované dni staršie než `today`: zapíše výsledok bez adries a pracovný súbor zmaže. */
+async function gpsCloseOldDays(root, today, log) {
+  let names = [];
+  try { names = await fsp.readdir(gpsDir(root)); } catch { return 0; }
+  let closed = 0;
+  for (const name of names) {
+    const m = /^(\d{4}-\d{2}-\d{2})\.work\.json$/.exec(name);
+    if (!m || m[1] >= today) continue;
+    const work = await readJson(gpsWorkFile(root, m[1]));
+    if (work && work.cells) {
+      await writeJsonAtomic(gpsDayFile(root, m[1]), { ...gpsFinalizeDay({ ...work, day: m[1] }), kind: 'gps-day', attribution: GPS_ATTRIBUTION, license: GPS_LICENSE });
+      closed += 1;
+      log(`[mideast-events] gps: day ${m[1]} closed`);
+    }
+    try { await fsp.unlink(gpsWorkFile(root, m[1])); } catch { /* už zmazaný */ }
+  }
+  return closed;
+}
+
+/**
+ * Jedno kolo zberu: šesť kruhov adsb.lol postupne s pauzou, lietadlá sa pridajú do rozpracovaného
+ * dňa (UTC). Kruh, ktorý zlyhá (429 aj po jednom opakovaní, iná chyba, zlý JSON), sa v tomto kole
+ * vynechá — kolo sa zapíše, keď prešiel aspoň jeden. Staršie rozpracované dni sa uzavrú. Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'partial'|'error', day:string, circles:number, failed:string[], samples:number, degraded:number, snapshots:number}>}
+ */
+export async function gpsCollect(root, { fetchImpl = fetch, now = Date.now(), log = () => {}, sleep = defaultSleepMs, circles = GPS_CIRCLES } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', day: null, circles: 0, failed: ['bad now'], samples: 0, degraded: 0, snapshots: 0 };
+  const day = dayKey(nowMs);
+  const aircraft = [];
+  const failed = [];
+  let ok = 0;
+  for (const [i, circle] of circles.entries()) {
+    if (i) await sleep(GPS_CIRCLE_PAUSE_MS);
+    try {
+      const request = { timeoutMs: 30_000, maxBytes: GPS_MAX_BYTES, headers: { Accept: 'application/json' } };
+      let { res, body } = await fetchCapped(fetchImpl, gpsCircleUrl(circle), request);
+      if (res.status === 429) {
+        await sleep(GPS_RETRY_AFTER_429_MS);
+        ({ res, body } = await fetchCapped(fetchImpl, gpsCircleUrl(circle), request));
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let json;
+      try { json = JSON.parse(body); } catch { throw new Error('invalid JSON'); }
+      if (!Array.isArray(json?.ac)) throw new Error('no ac array');
+      aircraft.push(...json.ac);
+      ok += 1;
+    } catch (error) {
+      failed.push(`${circle.id}: ${String(error?.message || error)}`);
+    }
+  }
+  try { await gpsCloseOldDays(root, day, log); } catch (error) { log(`[mideast-events] gps close failed: ${error?.message || error}`); }
+  if (!ok) {
+    log(`[mideast-events] gps: no circle answered (${failed.join('; ')})`);
+    return { status: 'error', day, circles: 0, failed, samples: 0, degraded: 0, snapshots: 0 };
+  }
+  const prev = await readJson(gpsWorkFile(root, day));
+  const work = prev && prev.day === day && prev.cells && typeof prev.cells === 'object' ? prev : gpsEmptyDay(day);
+  const { samples, degraded } = gpsAddSnapshot(work, aircraft);
+  await writeJsonAtomic(gpsWorkFile(root, day), work);
+  log(`[mideast-events] gps ${day}: snapshot ${work.snapshots} · ${samples} aircraft, ${degraded} with degraded accuracy${failed.length ? ` · failed ${failed.length}/${circles.length}` : ''}`);
+  return { status: failed.length ? 'partial' : 'updated', day, circles: ok, failed, samples, degraded, snapshots: work.snapshots };
+}
+
+/**
+ * Telo `/api/mideast/events/gps`: bunky za posledných `days` dní (uzavreté dni + rozpracovaný
+ * dnešok prepočítaný bez adries) so stupňom, počty buniek podľa stupňa, obdobie, počet snímok.
+ * Bez jediného dňa null (volajúci vráti 404).
+ */
+export async function gpsPayload(root, { days = 2, nowMs = Date.now() } = {}) {
+  const n = Math.min(GPS_MAX_DAYS, Math.max(1, Math.floor(days)));
+  const today = dayKey(nowMs);
+  const list = [];
+  for (let back = 0; back < n; back += 1) {
+    const day = dayKey(nowMs - back * DAY_MS);
+    let data = await readJson(gpsDayFile(root, day));
+    if (!data) {
+      const work = await readJson(gpsWorkFile(root, day));
+      if (work && work.cells) data = { ...gpsFinalizeDay({ ...work, day }), partial: day === today };
+    }
+    if (data && Array.isArray(data.cells)) list.push(data);
+  }
+  if (!list.length) return null;
+  const merged = gpsMergeDays(list);
+  return {
+    source: 'https://api.adsb.lol', attribution: GPS_ATTRIBUTION, license: GPS_LICENSE,
+    generatedAt: nowMs, cellDeg: GPS_CELL_DEG, requestedDays: n,
+    days: merged.days, snapshots: merged.snapshots, aircraft: merged.aircraft,
+    todayPartial: list.some((d) => d.partial),
+    thresholds: { low: GPS_LOW, high: GPS_HIGH, minAircraft: GPS_MIN_AIRCRAFT },
+    circles: GPS_CIRCLES.map((c) => ({ id: c.id, lat: c.lat, lon: c.lon, nm: c.nm })),
+    counts: merged.counts,
+    cells: merged.cells.map((c) => [c.latIdx, c.lonIdx, c.total, c.bad, c.badAdjusted, c.level]),
+  };
 }
 
 export { dayKey, dayToMs, isDay } from './ukraineArchive.mjs';

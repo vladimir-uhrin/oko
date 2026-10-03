@@ -139,5 +139,7 @@ export function createAuthClient({ fetchImpl = (...args) => fetch(...args) } = {
     follows: () => request('/api/account/follows'),
     follow: data => write('/api/account/follows', 'POST', data),
     unfollow: key => write('/api/account/follows', 'DELETE', { key }),
+    /** Zápis inej služby pod účtom (udalosti vlastníka, 2026-10-03): CSRF, JSON, bez globálneho busy. */
+    send: (path, method, body) => write(path, method, body ?? {}),
   };
 }

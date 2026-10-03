@@ -1,25 +1,73 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sk">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <!-- Verejný tunel (2026-09-13): pracovný nástroj, nikdy do indexov vyhľadávačov. -->
-  <meta name="robots" content="noindex, nofollow, noarchive" />
-  <title>OKO</title>
+  <!-- SEO (2026-09-30, vlastník: „podmienka noindex už neplatí"): stránka sa indexuje.
+       noindex ostáva na /s/<id> (snímky), /account.html a /api (docs/drafts/seo-plan.md).
+       Jazyk: statický `sk` pre okolive.sk; appka si ho pri štarte prepíše (src/i18n.js). -->
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <title>OKO — lietadlá, lode a konflikty naživo na 3D glóbuse</title>
+  <meta name="description" content="Sledujte lietadlá, lode a konflikty naživo na 3D glóbuse: Ukrajina, Blízky východ, ceny a toky plynu, satelity a kamery. Zadarmo, po slovensky aj anglicky." />
+  <link rel="canonical" href="https://okolive.sk/" />
+  <meta name="theme-color" content="#040a10" />
+  <meta name="author" content="Vladimír Uhrin" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://okolive.sk/#website",
+        "url": "https://okolive.sk/",
+        "name": "OKO",
+        "alternateName": "okolive.sk",
+        "inLanguage": ["sk", "en"],
+        "publisher": { "@id": "https://okolive.sk/#author" }
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://okolive.sk/#app",
+        "name": "OKO",
+        "url": "https://okolive.sk/",
+        "description": "Živý 3D glóbus: sledovanie lietadiel, lodí a konfliktov naživo — Ukrajina, Blízky východ, plyn, satelity a kamery.",
+        "applicationCategory": "ReferenceApplication",
+        "operatingSystem": "Any (web browser with WebGL)",
+        "browserRequirements": "Requires WebGL",
+        "inLanguage": ["sk", "en"],
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "image": "https://okolive.sk/share-default.jpg",
+        "author": { "@id": "https://okolive.sk/#author" }
+      },
+      {
+        "@type": "Person",
+        "@id": "https://okolive.sk/#author",
+        "name": "Vladimír Uhrin"
+      }
+    ]
+  }
+  </script>
   <!-- Náhľad odkazu na sieťach (2026-09-14): koreň a dlhé odkazy s hashom
        (siete hash nevidia) dostanú tento predvolený obrázok; presná snímka
        pohľadu ide cez krátke odkazy /s/<id>. Open Graph vyžaduje absolútne
        URL — verejná adresa je jediná, na ktorej náhľady vznikajú. -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="OKO" />
-  <meta property="og:title" content="OKO" />
-  <meta property="og:description" content="Živý 3D glóbus: lietadlá, lode, plyn, satelity. Live 3D globe: aircraft, ships, gas, satellites." />
-  <meta property="og:url" content="https://oko.uhrin.digital/" />
-  <meta property="og:image" content="https://oko.uhrin.digital/share-default.jpg" />
+  <!-- 2026-09-29 (obrázok B9): na obrázku len krátky titulok; zoznam tém a „čoskoro" sú tu v popise. -->
+  <meta property="og:locale" content="sk_SK" />
+  <meta property="og:title" content="OKO — lietadlá, lode a konflikty naživo v 3D" />
+  <meta property="og:description" content="Sledovanie lietadiel a lodí, Ukrajina, Blízky východ, plyn, satelity a kamery na živom 3D glóbuse. Čoskoro aj satelitné snímky parciel." />
+  <meta property="og:url" content="https://okolive.sk/" />
+  <meta property="og:image" content="https://okolive.sk/share-default.jpg" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="OKO: Európa z obežnej dráhy so živými lietadlami a loďami, logo OKO a adresa okolive.sk" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://oko.uhrin.digital/share-default.jpg" />
+  <meta name="twitter:title" content="OKO — lietadlá, lode a konflikty naživo v 3D" />
+  <meta name="twitter:description" content="Sledovanie lietadiel a lodí, Ukrajina, Blízky východ, plyn, satelity a kamery na živom 3D glóbuse." />
+  <meta name="twitter:image" content="https://okolive.sk/share-default.jpg" />
+  <meta name="twitter:image:alt" content="OKO: Európa z obežnej dráhy so živými lietadlami a loďami, logo OKO a adresa okolive.sk" />
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="stylesheet" href="/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />

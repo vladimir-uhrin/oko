@@ -15,7 +15,7 @@
 export const AISHUB_MAX_AREA_SQ_DEG = 90;
 
 /** aiscast čítanie je bez tokenu; poctivá identita klienta pri dopyte. */
-export const AISHUB_USER_AGENT = 'OKO/1.0 (+https://oko.uhrin.digital; non-commercial)';
+export const AISHUB_USER_AGENT = 'OKO/1.0 (+https://okolive.sk; non-commercial)';
 
 /**
  * `"w,s,e,n"` → `{west,south,east,north}` alebo `null`. Pure.

@@ -51,3 +51,69 @@
   marks, 33 Lua-commented). Used ONLY by `src/data/wikiControl.test.mjs`
   (unquoted syntax on a real module, legend). © Wikipedia contributors,
   CC BY-SA 4.0.
+- `adsblol-trace-8965d1-20260930.json`, `adsblol-trace-a670b4-20260929.json`,
+  `adsblol-trace-a46cc1-20260928.json`, `adsblol-trace-a681e5-20260929.json`,
+  `adsblol-trace-300a95-20260930.json` — real readsb traces from adsb.lol
+  (`adsb.lol/data/traces/<xx>/trace_full_<hex>.json` for 2026-09-30,
+  `adsb.lol/globe_history/RRRR/MM/DD/traces/<xx>/trace_full_<hex>.json` for
+  earlier days), captured 2026-09-30 and trimmed to the windows the tests need
+  (the last row carrying a squawk before each window is kept so the carried
+  code parses the same as the full file — checked when trimming; `ownOp` and
+  `year` removed). 8965d1 = flydubai FZ1073 (A6-FKF), Dubai → Tel Aviv,
+  02:50–03:12 and 05:10–05:54 UTC: steep descent 05:22, squawk 7700 05:31:30
+  and 7500 05:36:18, U-turn ~05:42, data ends 05:53 (reported diverted to
+  Tabuk). The other four are aircraft for which the OKO archive (OpenSky)
+  logged squawk 7500 while adsb.lol saw a normal code at the same time
+  (5323, 3244, 1200, 7224) — noise the verification must reject. Used ONLY by
+  the Udalosti tests (`flightAnomalies`, `eventVerify`, `eventTimeline`,
+  `flightEventsService`) via `flightEventFixtures.mjs`, never served to the
+  app. The OpenSky side is not stored (redistributing OpenSky data in the
+  repository was not checked against their terms); tests derive it from the
+  same trace the way the archive recorded it. © adsb.lol contributors, ODbL 1.0
+  (https://opendatacommons.org/licenses/odbl/1-0/).
+- `easa-czib-export-20261003.json`, `easa-czib-feed-20261003.xml` — the EASA
+  Conflict Zone Information Bulletins list export
+  (`easa.europa.eu/en/domains/air-operations/czibs/export-json?page&_format=json`,
+  34 bulletins, 16 active) and RSS feed (`…/czibs/feed.xml`), captured
+  2026-10-03. `easa-czib-{iraq,gulf,ukraine,libya,syria}-20261003.html` — the
+  `<main>` element only of five bulletin pages (CZIB-2026-05-R2, CZIB-2026-07R3,
+  CZIB-2022-01R14, CZIB-2017-02R20, CZIB-2017-03R20; the site menus and the
+  e-mail sign-up form removed, ~15–19 kB each instead of ~285 kB). Used ONLY by
+  `src/data/czib.test.mjs`, `scripts/lib/mideastAirspace.test.mjs` and
+  `src/data/mideastEventsProxy.test.mjs`, never served to the app. © European
+  Union Aviation Safety Agency — „Reproduction is authorised, provided the
+  source is acknowledged" (easa.europa.eu/copyright-disclaimer).
+- `vatspy-boundaries-sample-20261003.geojson` — 11 real features of the VATSpy
+  `Boundaries.geojson` (ORBB with its sector ORBB-N, OBBB, OKAC, OTDF, OMAE,
+  OOMM, UKBV, UKLV, HLLL, OSTT), captured 2026-10-03 from
+  `raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson`,
+  plus 120 synthetic 1° squares (ids `Z??Q`) so the „at least 100 FIRs" guard
+  can be tested with a small file. Used by the same tests. VATSpy Data Project
+  (VATSIM), CC BY-SA 4.0 — approximate, not official boundaries.
+- `airspace-payload-20261003.json` — the body of `/api/mideast/events/airspace`
+  produced by `scripts/lib/mideastArchive.mjs` from the two fixtures above
+  (5 bulletins, 10 FIR polygons, 4 missing FIR codes). Used by
+  `src/airspaceAdvisoryLayer.test.mjs` and `src/mideastPanel.test.mjs`.
+  Same licences (EASA with acknowledgement; FIR polygons CC BY-SA 4.0).
+- `ukmto-all-20261003.json` — 21 of the 69 incidents returned on 2026-10-03 by
+  the UKMTO incident feed `sccd.royalnavy.mod.uk/api/ukmto/all` (the data
+  behind the „Recent Incidents" map of ukmto.org), raw fields as received:
+  the three newest (Strait of Hormuz), every header shape of the warning text
+  („UKMTO WARNING 078-26 - …" with Report/Issue/Source lines,
+  „UKMTO_WARNING_81-26.", „UKMTO ADVISORY …", „UKMTO HIJACK …", no header),
+  every incident type and area present that day and the one vessel under
+  pirate control. Used ONLY by `src/data/ukmto.test.mjs`,
+  `scripts/lib/mideastUkmto.test.mjs`, `src/data/mideastEventsProxy.test.mjs`,
+  `src/ukmtoIncidentsLayer.test.mjs` and `src/mideastPanel.test.mjs`, never
+  served to the app. Contains public sector information licensed under the
+  Open Government Licence v3.0 (ukmto.org terms §20).
+- `adsblol-gps-circles-20261003.json` — three real answers of the adsb.lol
+  point API (`api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/250`) captured
+  2026-10-03 for the Levant (19 aircraft), northern Gulf (42) and Hormuz/UAE
+  (101) circles, reduced to the fields the GPS-interference computation reads
+  (`hex`, `type`, `version`, `lat`, `lon`, `alt_baro`, `nic`, `nac_p`,
+  `seen_pos`) — callsigns and registrations removed. 103 usable samples, 11
+  with degraded accuracy, one 0.5° cell over 10 % (Amman – Dead Sea). Used ONLY
+  by `src/data/gpsInterference.test.mjs`, `scripts/lib/mideastGps.test.mjs`,
+  `src/data/mideastEventsProxy.test.mjs` and `src/gpsInterferenceLayer.test.mjs`,
+  never served to the app. © adsb.lol contributors, ODbL 1.0.

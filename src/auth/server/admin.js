@@ -23,10 +23,10 @@ const PAGE_SIZE = 50;
  * @param {number} deps.idleMs SESSION_IDLE_MS
  * @param {{feeds?: () => Promise<object[]>, server?: () => Promise<object>|object, log?: () => Promise<string>}} [deps.sources]
  */
-export function createAdminRoutes({ store, now, idleMs, sources = {} }) {
+export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSession = session => session?.role === 'owner' }) {
   return async function handleAdmin(pathname, req, res, ctx, { json, readJson, fail, fields, active, rate }) {
     // Neprihlásený, member aj zablokovaný účet dostanú rovnaké 404.
-    if (ctx.session?.role !== 'owner') throw fail('not_found', 404);
+    if (!isOwnerSession(ctx.session)) throw fail('not_found', 404);
     rate(ctx, 'admin', ctx.session.user_id, 600, 60_000);
     const actor = ctx.session.user_id;
     // Štúdio sociálnych sietí (2026-10-03) — vlastná tabuľka ciest, rovnaká brána owner + CSRF.

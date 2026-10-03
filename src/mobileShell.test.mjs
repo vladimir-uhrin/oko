@@ -303,3 +303,17 @@ test('dok na mobile: pod ikonou krátky popis Poloha / Štýl (vlastník 09-27: 
   assert.match(i18n, /'panel\.visual-presets\.short': 'Štýl',/);
   assert.match(i18n, /'panel\.location\.short': 'Poloha',/);
 });
+
+test('plášť: sekcia sa dá otvoriť s iným rozbaleným panelom (História letov z pásu štátneho lietadla, 2026-09-30)', () => {
+  const { doc, byId, sheet } = buildDom();
+  const win = makeWindow({ width: 390, height: 844, coarse: true });
+  const shell = createMobileShell({ document: doc, window: win, styleManager: makeStyleManager(doc) });
+  shell.sync();
+  assert.equal(shell.open('data', { expand: 'history-panel' }), true);
+  assert.equal(byId.get('history-panel').classList.contains('collapsed'), false, 'História rozbalená');
+  assert.equal(byId.get('gas-panel').classList.contains('collapsed'), true, 'predvolený panel sekcie zbalený');
+  shell.close();
+  assert.equal(shell.open('data', { expand: 'nie-je-v-sekcii' }), true);
+  assert.equal(byId.get('gas-panel').classList.contains('collapsed'), false, 'neznámy panel = predvolené správanie');
+  assert.equal(sheet.hidden, false);
+});

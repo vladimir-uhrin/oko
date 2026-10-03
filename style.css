@@ -10538,6 +10538,274 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-primary);
 }
 
+/* Krížik v rohu kartičky na glóbuse (2026-09-30, cardCloseButtons.js): sledovaný objekt a vybraná
+   loď sa dajú zavrieť priamo, nie len klikom vedľa. Karta je v plátne — krížik je DOM nad ňou. */
+.card-close {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(0, 220, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(2, 12, 18, 0.85);
+  color: #dceeff;
+  cursor: var(--cursor-pointer);
+}
+.card-close[hidden] {
+  display: none;
+}
+.card-close .material-symbols-outlined {
+  font-size: 16px;
+}
+.card-close:hover,
+.card-close:focus-visible {
+  border-color: #00dcff;
+  color: #fff;
+  outline: none;
+}
+/* Dotyk: väčší cieľ bez posunu kresby (neviditeľný okraj okolo). */
+@media (pointer: coarse) {
+  .card-close::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
+}
+body.cockpit-mode .card-close,
+body.ui-clean-view .card-close,
+body.recording-mode .card-close {
+  display: none !important;
+}
+
+/* Štátne lietadlo pri karte (2026-09-30, stateFlightsStrip.js): odznak, prevádzkovateľ, značka
+   a prepínač PREDCHÁDZAJÚCE LETY. Sadá pod kartu (a pod fotku) — nad kartou ho na úzkej
+   obrazovke zakryla horná lišta; zlatá linka ho oddeľuje ako ďalší riadok karty. */
+.state-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 59;
+  box-sizing: border-box;
+  max-width: calc(100vw - 8px);
+  padding: 8px 10px 9px;
+  background: rgba(6, 12, 18, 0.9);
+  border-top: 1px solid rgba(232, 196, 106, 0.6);
+  border-radius: 0 0 5px 5px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  /* Výšku obmedzuje stateFlightsStrip.js (nad spodným dokom) — skracuje sa zoznam, hlavička a päta ostávajú. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.state-strip-head,
+.state-strip-foot,
+.state-strip-status {
+  flex: 0 0 auto;
+}
+.state-strip[hidden],
+.state-strip-list[hidden],
+.state-strip-foot[hidden],
+.state-strip-status[hidden],
+.state-strip-more[hidden] {
+  display: none;
+}
+.state-strip.is-above {
+  border-top: 0;
+  border-bottom: 1px solid rgba(232, 196, 106, 0.6);
+  border-radius: 5px 5px 0 0;
+}
+.state-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.state-strip-icon {
+  flex: 0 0 auto;
+  color: #e8c46a;
+  font-size: 18px;
+}
+.state-strip-title {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.state-strip-badge {
+  color: #e8c46a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.state-strip-meta {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.state-strip-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 220, 255, 0.45);
+  border-radius: 6px;
+  background: rgba(2, 12, 18, 0.9);
+  color: #dceeff;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  cursor: var(--cursor-pointer);
+}
+.state-strip-toggle .material-symbols-outlined {
+  color: #00dcff;
+  font-size: 16px;
+}
+.state-strip-switch {
+  position: relative;
+  width: 22px;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(220, 238, 255, 0.2);
+}
+.state-strip-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dceeff;
+  transition: left 120ms ease;
+}
+.state-strip-toggle:hover,
+.state-strip-toggle:focus-visible {
+  border-color: #00dcff;
+  color: #fff;
+  outline: none;
+}
+.state-strip-toggle[aria-pressed="true"] {
+  border-color: #00dcff;
+  background: rgba(0, 72, 92, 0.92);
+  color: #fff;
+}
+.state-strip-toggle[aria-pressed="true"] .state-strip-switch { background: #00dcff; }
+.state-strip-toggle[aria-pressed="true"] .state-strip-switch::after { left: 12px; background: #031018; }
+.state-strip-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(40vh, 300px);
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.state-strip-flight-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: var(--cursor-pointer);
+}
+.state-strip-flight-btn:hover,
+.state-strip-flight-btn:focus-visible {
+  background: rgba(0, 220, 255, 0.1);
+  outline: none;
+}
+.state-strip-route {
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.state-strip-sub {
+  color: var(--text-secondary);
+  font-size: 9.5px;
+}
+.state-strip-alert {
+  color: #ff5a5a;
+  font-size: 9px;
+  font-weight: 700;
+}
+.state-strip-status {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+.state-strip-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.state-strip-more,
+.state-strip-all {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 220, 255, 0.35);
+  border-radius: 5px;
+  background: transparent;
+  color: #dceeff;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  cursor: var(--cursor-pointer);
+}
+.state-strip-note {
+  flex: 1 1 100%;
+  color: var(--text-secondary);
+  font-size: 8.5px;
+  opacity: 0.8;
+}
+body.cockpit-mode .state-strip,
+body.ui-clean-view .state-strip,
+body.recording-mode .state-strip {
+  display: none !important;
+}
+
+/* História letov: rad štátnych strojov (2026-09-30) — lety aj keď práve nelietajú. */
+.history-state-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+.history-state-row[hidden] {
+  display: none;
+}
+.history-state-label {
+  color: #e8c46a;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+/* `.scene-btn` má flex: 1 1 0% — v rade by sa všetky stroje natlačili do jedného riadku
+   a popisy sa prekrývali (naživo 2026-09-30 na 702 px). Tu prirodzená šírka a zalomenie. */
+.history-state-row .history-state-btn {
+  flex: 0 0 auto;
+}
+
 /* Toast s akciou (2026-09-03): núdzový squawk sa dá kliknúť a skočiť na
    stroj. Kurzor a jemný okraj sú jediný náznak, že sa dá kliknúť — bežné
    stavové hlásenia ostávajú nezmenené. */
@@ -11036,6 +11304,140 @@ body.scene-playback-mode #first-run-launcher {
 }
 .history-speed.active { border-color: rgba(57, 208, 255, 0.7); color: #d6f3fa; background: rgba(57, 208, 255, 0.12); }
 
+/* Udalosti (2026-09-30, etapa 2b, eventsPanel.js): karta udalosti navrchu Histórie letov a zoznam
+   na kontrolu (len vlastník). Farba momentov = značky na glóbuse aj obrázok udalosti (#ffb020). */
+.events-section { display: flex; flex-direction: column; gap: 8px; }
+.events-section[hidden] { display: none; }
+.events-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 176, 32, 0.05);
+  border: 1px solid rgba(255, 176, 32, 0.35);
+}
+.events-card[hidden], .events-review[hidden], .events-owner[hidden], .events-review-list[hidden], .events-sources[hidden], .events-play[hidden], .events-via[hidden] { display: none; }
+.events-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.events-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; color: #ffb020; }
+.events-close {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: var(--cursor-pointer);
+}
+.events-close:hover { color: #d6f3fa; border-color: rgba(57, 208, 255, 0.55); }
+.events-headline { font-size: 14px; line-height: 1.3; color: #eaf6fb; font-weight: 700; }
+.events-flight { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: #39d0ff; }
+.events-meta, .events-times, .events-note {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.events-note { opacity: 0.85; }
+.events-badge {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
+  border-radius: 5px;
+  border: 1px solid rgba(251, 191, 36, 0.7);
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+}
+.events-badge:empty { display: none; }
+.events-badge[data-state="ok"] { border-color: rgba(74, 222, 128, 0.7); color: #4ade80; background: rgba(74, 222, 128, 0.1); }
+.events-moments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.events-moment { display: grid; grid-template-columns: 18px 38px 1fr; gap: 6px; align-items: baseline; font-size: 11.5px; line-height: 1.35; color: #e7f3f9; }
+.events-moment-n {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #ffb020;
+  color: #1a1204;
+  font-size: 10px;
+  font-weight: 700;
+}
+.events-moment-time { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-secondary); }
+.events-sources { font-size: 11px; line-height: 1.4; color: var(--text-secondary); }
+.events-source { color: #39d0ff; text-decoration: none; }
+.events-source:hover { text-decoration: underline; }
+.events-play { align-self: flex-start; min-width: 0; }
+.events-owner { display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.14); padding-top: 8px; }
+.events-preview-link { display: block; }
+.events-preview { display: block; width: 100%; border-radius: 6px; border: 1px solid rgba(64, 200, 230, 0.2); }
+.events-owner-status { font-size: 11px; line-height: 1.4; color: #d6f3fa; word-break: break-all; }
+.events-post {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  background: rgba(4, 12, 16, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  padding: 6px;
+}
+.events-owner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.events-owner-actions .scene-btn { flex: 0 0 auto; min-width: 0; text-decoration: none; }
+.events-publish, .events-share-fb { border-color: rgba(74, 222, 128, 0.6); color: #4ade80; }
+.events-publish[data-confirm="1"], .events-unpublish[data-confirm="1"] { border-color: rgba(251, 191, 36, 0.8); color: #fbbf24; }
+.events-owner-msg { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-secondary); min-height: 1.2em; }
+.events-owner-msg[data-state="error"] { color: #ffb14d; }
+.events-owner-msg[data-state="ok"] { color: #4ade80; }
+.events-review { display: flex; flex-direction: column; gap: 4px; }
+.events-review-toggle {
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  padding: 5px 8px;
+  cursor: var(--cursor-pointer);
+}
+.events-review-toggle[data-ready="1"] { color: #4ade80; border-color: rgba(74, 222, 128, 0.45); }
+.events-review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 32vh; overflow-y: auto; }
+.events-review-empty { padding: 6px 4px; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+.events-review-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 2px solid rgba(255, 176, 32, 0.6);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  cursor: var(--cursor-pointer);
+}
+.events-review-btn:hover { background: rgba(255, 176, 32, 0.08); }
+.events-review-row--ready .events-review-btn { border-left-color: #4ade80; }
+.events-review-row--published .events-review-btn { border-left-color: #39d0ff; }
+.events-review-title { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; }
+.events-review-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-secondary); }
+.events-review-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.events-chip { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.04em; color: var(--text-secondary); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 4px; padding: 1px 4px; }
+.events-chip--ready { color: #4ade80; border-color: rgba(74, 222, 128, 0.5); }
+.events-chip--published { color: #39d0ff; border-color: rgba(57, 208, 255, 0.5); }
+
 /* Panel PLYN (2026-09-13, gasPanel.js): ceny ACER + IMF/FRED, neskôr zásobníky GIE a toky ENTSOG. */
 #gas-panel {
   --panel-expanded-width: 360px;
@@ -11250,6 +11652,11 @@ body.scene-playback-mode #first-run-launcher {
   min-height: 0;
   overflow: hidden auto;
 }
+/* Deti tela sa NEZMENŠUJÚ (2026-10-03, nález zo snímky po vydaní etapy 5): telo je stĺpcový flex
+   s vlastným rolovaním a `min-height: 0` na .mideast-transits a .mideast-news im dovolilo scvrknúť
+   sa pod svoj obsah, keď legendy vrstiev (EASA, UKMTO, GPS) natiahli panel nad pridelenú výšku —
+   zoznam správ mal výšku 0 a čipy regiónov sa kreslili CEZ prechody úžinami. Roluje telo, nie sekcia. */
+.mideast-body > * { flex-shrink: 0; }
 .mideast-section-title { margin-top: 4px; }
 .mideast-dirs { display: flex; flex-direction: column; gap: 3px; }
 .mideast-dir {
@@ -11322,6 +11729,38 @@ body.scene-playback-mode #first-run-launcher {
 .mideast-legend-age { color: #8aa0b6; }
 .mideast-legend-age.is-stale { color: #ffb547; font-weight: 700; letter-spacing: 0.04em; border: 1px solid rgba(255, 181, 71, 0.55); border-radius: 3px; padding: 0 4px; background: rgba(255, 181, 71, 0.1); }
 .mideast-legend-note { margin: 0; font-size: 8px; line-height: 1.4; letter-spacing: 0.02em; color: var(--text-dim); }
+/*
+ * BLÍZKY VÝCHOD etapa 5b (VZDUŠNÝ PRIESTOR · EASA, 2026-10-03): legenda bulletinov EASA
+ * (src/mideastPanel.js renderAirspace) — riadok na bulletin: vzorka ako na mape (červená =
+ * všetky výšky, jantárová = pod FL, prerušovaný okraj bez výplne = len časť FIR), krajiny,
+ * odznaky rozsahu, platnosť (uplynutá jantárovo), odkaz na bulletin EASA.
+ */
+.mideast-air-rows { display: flex; flex-direction: column; gap: 3px; }
+.mideast-air-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; }
+.mideast-air-swatch { align-self: center; background: rgba(255, 90, 95, 0.3); border-color: rgba(255, 90, 95, 0.85); }
+.mideast-air-row.is-below .mideast-air-swatch { background: rgba(255, 181, 71, 0.25); border-color: rgba(255, 181, 71, 0.85); }
+.mideast-air-row.is-partial .mideast-air-swatch { background: transparent; border-style: dashed; }
+.mideast-air-name { color: #cfe3f5; }
+.mideast-air-badge { color: #8aa0b6; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 3px; padding: 0 4px; }
+.mideast-air-badge.is-partial { color: #ffb547; border-color: rgba(255, 181, 71, 0.45); cursor: help; }
+.mideast-air-until { color: var(--text-dim); }
+.mideast-air-until.is-stale { color: #ffb547; }
+.mideast-air-link { color: var(--accent); text-decoration: none; }
+.mideast-air-link:hover, .mideast-air-link:focus-visible { text-decoration: underline; }
+.mideast-air-more { font-size: 8px; line-height: 1.4; color: var(--text-dim); }
+/*
+ * BLÍZKY VÝCHOD etapa 5c (INCIDENTY LODÍ · UKMTO, 2026-10-03): legenda varovaní UKMTO
+ * (src/mideastPanel.js renderUkmto) — okrúhle vzorky ako body na mape (farba = druh
+ * incidentu), pod nimi päť najnovších varovaní: čas UTC, druh, oblasť; text varovania
+ * je v titulku riadka.
+ */
+.mideast-ukmto-swatch { border-radius: 50%; }
+.mideast-ukmto-rows { display: flex; flex-direction: column; gap: 2px; }
+.mideast-ukmto-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; cursor: help; }
+.mideast-ukmto-row .mideast-ukmto-swatch { align-self: center; width: 7px; height: 7px; border-color: rgba(0, 0, 0, 0.5); }
+.mideast-ukmto-when { color: #8aa0b6; font-variant-numeric: tabular-nums; }
+.mideast-ukmto-type { color: #cfe3f5; }
+.mideast-ukmto-place { color: var(--text-dim); }
 /*
  * BLÍZKY VÝCHOD etapa 5a (PRECHODY ÚŽINAMI, 2026-09-26): karta IMF PortWatch
  * (src/portwatchCard.js) — riadok na úžinu: meno, Ø 7 dní, zmena voči obdobiu pred
@@ -12162,6 +12601,14 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
   color: #dbeafe; font: 500 10px 'IBM Plex Mono', ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .oko-ukr-ctl-tip[hidden] { display: none; }
+/* Bublina vrstiev BLÍZKEHO VÝCHODU (src/mapHoverTip.js, 2026-10-03): nesie vetu zo zdroja —
+   varovanie UKMTO, odporúčanie EASA, počty v bunke GPS — nie pár slov ako bublina kontroly.
+   Zalamuje sa; na jednom riadku z nej ostalo prvých 320 px a tri bodky (nález zo snímky po
+   vydaní). Polohu v okne mapy stráži hoverTipPlacement. Dve triedy = nezávisí od poradia pravidiel. */
+.oko-ukr-ctl-tip.oko-map-tip {
+  max-width: min(340px, calc(100vw - 16px)); padding: 5px 9px; line-height: 1.45;
+  white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+}
 .oko-ukr-tl-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-basis: 100%; font-size: 9px; color: #8aa0b6; }
 /* `display: flex` vyššie by prebilo atribút hidden — riadok DeepState sa skrýva,
    keď ho server na verejnej doméne odmietne (451), a musí naozaj zmiznúť. */
@@ -12537,3 +12984,39 @@ body.oko-map-focus #command-dock:not(:hover):not(:focus-within) { opacity: 0.42;
 /* Šípka smeru útoku (KARTA, 2026-09-26): farba = ukraineAttackArrows.ARROW_CSS. */
 .oko-ukr-tl-ctl-item.is-rp-arrow .oko-ukr-tl-ctl-sw { width: 16px; height: 9px; border: 0; border-radius: 0; background: #ff3b30; clip-path: polygon(0 35%, 58% 35%, 58% 0, 100% 50%, 58% 100%, 58% 65%, 0 65%); }
 .oko-ukr-tl-rp[hidden] { display: none; }
+
+/* Súhlas so štatistikou GA4 (2026-09-30, src/analytics.js): dole v strede, obe voľby rovnocenné. */
+#oko-consent {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 10050;
+  width: min(560px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 14px 16px 12px;
+  border: 1px solid rgba(57, 208, 255, 0.35);
+  border-radius: 12px;
+  background: rgba(6, 16, 26, 0.94);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  color: #dff3fb;
+  font: 14px/1.45 Inter, "Segoe UI", system-ui, sans-serif;
+  backdrop-filter: blur(6px);
+}
+#oko-consent p { margin: 0 0 10px; }
+#oko-consent a { color: #39d0ff; }
+#oko-consent .oko-consent-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+#oko-consent button {
+  min-width: 140px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(57, 208, 255, 0.55);
+  background: transparent;
+  color: #dff3fb;
+  font: 600 13px/1.2 Inter, "Segoe UI", system-ui, sans-serif;
+  cursor: var(--cursor-pointer);
+}
+#oko-consent button:last-child { background: rgba(57, 208, 255, 0.18); }
+#oko-consent button:hover, #oko-consent button:focus-visible { border-color: #39d0ff; outline: none; box-shadow: 0 0 0 2px rgba(57, 208, 255, 0.35); }
+/* Na mobile je dole lišta sekcií (#oko-appbar, 58 px) — súhlas sedí nad ňou. */
+body.oko-mobile #oko-consent { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }

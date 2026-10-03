@@ -44,6 +44,45 @@ const FULL_INFO = {
   operator: 'United States Air Force',
 };
 
+test('kartička pod kurzorom (2026-09-30): vojenský stroj má typ, výšku, rýchlosť, riadky letu a miesto pre grafy', () => {
+  _addMilitaryTrackingCandidateForTest({
+    icao24: 'ae0c17',
+    billboard: { show: true, position: Cesium.Cartesian3.fromDegrees(-97.03, 31.05, 8_534) },
+    meta: { ...FULL_INFO, type: 'C17', squawk: '7700', lastContactEpochMs: 1_790_000_000_000 },
+    history: [],
+  });
+  const s = militaryFlightsLayer.getContactSummary('ae0c17');
+  assert.equal(s.layerId, 'military');
+  assert.equal(s.type, 'C17', 'typ z poľa `type` (nie civilné typeName/typeCode)');
+  assert.ok(Math.abs(s.altitudeM - 28000 * 0.3048) < 1e-6, 'výška z altitudeFt');
+  assert.equal(s.speedMps, 231.5, 'rýchlosť z speedMps');
+  assert.equal(s.verticalRateMps, 5.08);
+  assert.equal(s.trackDeg, 92.1);
+  assert.equal(s.squawk, '7700');
+  assert.ok(Array.isArray(s.flightLines) && s.flightLines.length > 0, 'riadky letu ako civilná kartička');
+  assert.ok('charts' in s, 'grafy (null, kým nie je dosť vzoriek)');
+  assert.equal(typeof militaryFlightsLayer.prefetchContactDetails, 'function', 'zotrvanie kurzora vyžiada históriu letu');
+});
+
+test('karta po kliknutí (2026-09-30): vojenský stroj má grafy výšky a rýchlosti ako civilný', async () => {
+  const { _militaryTrackedCardForTest, _militaryProfileStoreForTest } = await import('./militaryFlights.js');
+  const t = 1_790_000_000_000;
+  _addMilitaryTrackingCandidateForTest({
+    icao24: 'ae0c18',
+    billboard: { show: true, position: Cesium.Cartesian3.fromDegrees(-97.03, 31.05, 8_534) },
+    meta: { ...FULL_INFO, type: 'C17', lastContactEpochMs: t },
+    history: [],
+  });
+  const store = _militaryProfileStoreForTest();
+  store.record('ae0c18', t - 180_000, 7_600, 215);
+  store.record('ae0c18', t - 90_000, 8_200, 225);
+  const card = _militaryTrackedCardForTest('ae0c18');
+  assert.match(card.title, /RCH451/);
+  assert.ok(card.charts, 'grafy v karte po kliknutí');
+  assert.ok(card.charts.altitude && card.charts.speed, 'výška aj rýchlosť');
+  store.delete('ae0c18');
+});
+
 test('military stats identify adsb.lol as the primary feed, not a fallback', () => {
   const stats = militaryFlightsLayer.getStats();
   assert.equal(stats.source, 'adsb.lol');

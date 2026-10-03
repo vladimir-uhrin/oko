@@ -239,11 +239,26 @@ KLIENT
 5. **More a vzduch** — 3 d. **5a PortWatch HOTOVÉ 2026-09-26** (karta PRECHODY ÚŽINAMI v paneli:
    Hormuz, Báb al-Mandab, Suez + Mys dobrej nádeje ako obchádzka; okno pred krízou po úžine —
    Hormuz rok pred vojnou s Iránom Ø 84,8, Červené more 1. 1.–15. 11. 2023; archív celej série
-   od 2019 na D:, prírastok 45 dní; 20. 9.: −96 % / −67 % / −43 % / +81 %). Ostáva zo stage 5:
-   UKMTO body v scénach
-   Hormuz/Červené more; EASA CZIB na FIR z VATSpy (vlastný CC BY-SA súbor); zberač rušenia GPS
-   z adsb.lol (6 kruhov po 10 min → bunky 0,5° za deň → densityDrape, prahy 2 %/10 %). Test:
-   parsery, výpočet podielu, mapovanie CZIB → FIR.
+   od 2019 na D:, prírastok 45 dní; 20. 9.: −96 % / −67 % / −43 % / +81 %). **5b VZDUŠNÝ PRIESTOR
+   · EASA HOTOVÉ 2026-10-03** (bulletiny CZIB z exportu + RSS + stránky bulletinu, kódy FIR len zo
+   zátvoriek „Affected Airspace", hranice VATSpy CC BY-SA raz za 7 dní; celý FIR výplň, „časť FIR"
+   len prerušovaný obrys; čip + legenda v paneli, 16 aktívnych bulletinov / 30 FIR naživo 3. 10.;
+   naživo až vydaním služby oko-api). Popri tom: spoločná brána GDELT (179233e — 165 z 188 dopytov
+   padalo na 429). **5c INCIDENTY LODÍ · UKMTO HOTOVÉ 2026-10-03** (oficiálne rozhranie webu UKMTO
+   `sccd.royalnavy.mod.uk/api/ukmto/all` so súradnicami, licencia OGL v3.0 — nie PDF z mscio.eu;
+   archív rastie zlučovaním, tik 15 min (pôvodne 1 h; vlastník: „skôr najaktuálnejšie"); body vo všetkých dejiskách a v úžinách Hormuz/Báb
+   al-Mandab/Suez za bránou priblíženia, farba = druh, veľkosť = vek; čip + legenda v paneli;
+   naživo 69 varovaní, Hormuz 7 za týždeň). **Rozhodnutie vlastníka 3. 10. („ser na zákazy"):
+   zákazy v podmienkach zdrojov nie sú prekážka — zdroj sa použije a licencia sa poctivo zapíše.**
+   Preto je povolené doplniť históriu varovaní pred júlom 2026 z PDF na mscio.eu (poloha odvodená
+   z textu „30NM southwest of …") — spraviť s časovou osou (etapa 4). **5d RUŠENIE GPS · odvodené
+   HOTOVÉ 2026-10-03** (zberač adsb.lol: 6 kruhov po 250 NM raz za 15 min s pauzou 5 s — nie
+   10 min, adresa je spoločná s vojenskými letmi a vracia 429; bunky 0,5° po dňoch, rôzne
+   lietadlá, zhoršené = NACp < 8 alebo NIC < 7 pri priamom ADS-B verzie 2 vo vzduchu, odpočet
+   jedného lietadla za deň, prahy 2 %/10 %, pod 4 lietadlá sa nehodnotí; vrstva = obdĺžniky,
+   nie densityDrape — kvôli hoveru s počtami; čip predvolene vypnutý; prvé kolo naživo: Ammán –
+   Mŕtve more 7 z 11 lietadiel). Mapa sa naplní až súvislým zberom služby. **Etapa 5 je tým
+   celá hotová** (5a PortWatch, 5b EASA, 5c UKMTO, 5d GPS).
 6. **Poplachy, škody, súčty, internet** — 2–3 d. Poplachy HFC (polygóny z MIT mirroru +
    história z mirroru po otázke 5) ako denná/týždenná mapa, nikdy „živý alarm"; UNOSAT Gaza
    CDA statická; Tech for Palestine súčty v karte Gazy a Západného brehu; OONI (a IODA po
@@ -277,9 +292,15 @@ Kontrola z Wikipédie ide skoro, lebo parser už existuje a moduly Jemenu a Gazy
 2. **Panel**: nový „BLÍZKY VÝCHOD", ktorý pohltí dnešný ZÁLIV (odporúčam), alebo nechať vedľa?
 3. **Šablóna úderov na Irán** (Wikipédia, 294 bodov feb–júl, 72 % z textov ISW): použiť ako
    archív s pôvodom v každej karte? Odporúčam áno (fakty z textu, nie ISW geodáta).
+   **ODPOVEĎ 2026-10-03: áno** (vlastník na otázky 3 a 4 naraz: „áno a žiadne oneskorovanie").
 4. **Zásahy v Izraeli a Zálive**: oneskorenie ≥ 24 h a presnosť na sídlo? Odporúčam áno.
+   **ODPOVEĎ 2026-10-03: ŽIADNE oneskorovanie — „skôr najaktuálnejšie".** Udalosti sa ukazujú
+   hneď, ako ich zdroj zverejní; presnosť ostáva taká, akú dáva zdroj (OKO ju nespresňuje), a
+   etický filter platí ďalej (žiadne pozície jednotiek, žiadne osoby). Hneď uplatnené: varovania
+   UKMTO sa sťahujú raz za 15 min (nie hodinu) a otvorená stránka sa obnovuje každých 5 min.
 5. **Poplachy Izraela**: históriu z GitHub mirroru (dáta bez licencie, sú to úradné verejné
-   výstrahy) áno/nie? Polygóny oblastí (MIT) áno.
+   výstrahy) áno/nie? Polygóny oblastí (MIT) áno. **Od 2026-10-03 platí rozhodnutie „zákazy
+   v podmienkach zdrojov neriešime" → mirror histórie je použiteľný, licenčný stav zapísať.**
 6. **IRNA** ako „tvrdí Irán" (štátna, na zozname EÚ som ju nenašiel)? Press TV/Tasnim/Fars nie.
 7. **Liveuamap scraper**: odporúčam nie (komerčný produkt s ochranou, nie mirror dát).
 8. **Sporné územia v podklade** (Golany, Západný breh, Gaza): de facto Natural Earth

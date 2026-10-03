@@ -19,9 +19,27 @@
 // tá istá ikona je v každom module iná strana, spoločná legenda by klamala), sporné a
 // zmiešané, riadok zdroja „stav k … · Wikipédia · CC BY-SA 4.0 · vek" so značkou
 // ZASTARANÉ nad prahom modulu a poznámka, že zóny sú odvodené, nie línia frontu.
+//
+// Etapa 5b (VZDUŠNÝ PRIESTOR · EASA, 2026-10-03): voliteľný správca `airspace`
+// (src/airspaceAdvisoryLayer.js) pridá do radu čip a legendu bulletinov EASA pre Blízky
+// východ — krajiny, výšky (všetky / pod FL), „časť FIR", výnimky, platnosť a odkaz na
+// bulletin; ostatné bulletiny sveta jedným riadkom. Poctivá poznámka: odporúčanie pre
+// prevádzkovateľov z EÚ, nie zákaz letov; hranice FIR približné (VATSpy).
+//
+// Etapa 5c (INCIDENTY LODÍ · UKMTO, 2026-10-03): voliteľný správca `ukmto`
+// (src/ukmtoIncidentsLayer.js) pridá čip (predvolene zapnutý; bez aktívneho dejiska či úžiny
+// je vypnutý ako KONTROLA SÍDIEL bez modulov) a legendu: počty podľa druhu za 30 dní,
+// päť najnovších varovaní s časom a oblasťou, zdroj s licenciou OGL a odkaz na ukmto.org.
+//
+// Etapa 5d (RUŠENIE GPS · odvodené, 2026-10-03): voliteľný správca `gps`
+// (src/gpsInterferenceLayer.js) pridá čip (predvolene vypnutý) a legendu: počty buniek podľa
+// podielu lietadiel so zhoršenou presnosťou polohy (nad 10 %, 2–10 %, pod 2 %), obdobie,
+// počet snímok a lietadiel, zdroj adsb.lol a poznámku, že ide o odvodený ukazovateľ.
 
 import { currentLanguage, t } from './i18n.js';
+import { GPS_COLORS } from './data/gpsInterference.js';
 import { theatreLabel } from './data/mideastTheatres.js';
+import { UKMTO_SITE_URL, UKMTO_TYPES, UKMTO_TYPE_OTHER } from './data/ukmto.js';
 import { ageText } from './data/ukraineFreshness.js';
 import { wikiControlModuleById } from './data/wikiControl.js';
 
@@ -41,6 +59,9 @@ export function swatchColour(css, alpha) {
  * @param {(id: string) => any} [o.applyTheatre] spustí dejisko (main.js)
  * @param {(scene: object, translate: Function) => string} [o.labelFor] popisok dejiska; predvolene theatreLabel
  * @param {object|null} [o.control] správca KONTROLY SÍDIEL (createMideastControl): getState/onChange/isEnabled/setEnabled
+ * @param {object|null} [o.airspace] VZDUŠNÝ PRIESTOR · EASA (createAirspaceAdvisory): getState/onChange/isEnabled/setEnabled
+ * @param {object|null} [o.ukmto] INCIDENTY LODÍ · UKMTO (createUkmtoIncidents): getState/onChange/isEnabled/setEnabled/labels
+ * @param {object|null} [o.gps] RUŠENIE GPS · odvodené (createGpsInterference): getState/onChange/isEnabled/setEnabled
  * @param {Function} [o.translate]
  * @param {string} [o.lang] jazyk pre formátovanie čísel a dátumov (počty v legende, „stav k")
  * @param {Document} [o.documentRef]
@@ -51,6 +72,9 @@ export function createMideastPanel({
   applyTheatre = null,
   labelFor = theatreLabel,
   control = null,
+  airspace = null,
+  ukmto = null,
+  gps = null,
   translate = t,
   lang = currentLanguage(),
   documentRef = globalThis.document,
@@ -99,12 +123,18 @@ export function createMideastPanel({
   // Čip prepína správcu; stav (zapnuté, moduly dejiska, snímky) sa vracia cez
   // onChange, panel si nič nedomýšľa. Legenda sa skladá celá pri každej zmene.
   let chips = null; let legend = null; let controlChip = null;
+  let airChip = null; let airLegend = null;
+  let shipChip = null; let shipLegend = null;
+  let gpsChip = null; let gpsLegend = null;
   const dateFormat = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: 'UTC' });
   const numberFormat = new Intl.NumberFormat(lang === 'sk' ? 'sk-SK' : 'en-GB');
-  if (control) {
+  if (control || airspace || ukmto || gps) {
     chips = el('div', 'mideast-chips');
     chips.setAttribute('role', 'group');
-    chips.setAttribute('aria-label', translate('mideast.part.control'));
+    // Skupina nesie viac čipov (KONTROLA SÍDIEL, VZDUŠNÝ PRIESTOR) — neutrálny názov, nie meno jedného z nich.
+    chips.setAttribute('aria-label', translate('mideast.part.layers'));
+  }
+  if (control) {
     controlChip = button('data-toggle-chip mideast-chip mideast-chip-control', translate('mideast.part.control'), () => {
       void control.setEnabled?.(!control.isEnabled?.());
     });
@@ -114,6 +144,39 @@ export function createMideastPanel({
     chips.appendChild(controlChip);
     legend = el('div', 'mideast-legend');
     legend.hidden = true;
+  }
+  if (airspace) {
+    airChip = button('data-toggle-chip mideast-chip mideast-chip-airspace', translate('mideast.part.airspace'), () => {
+      void airspace.setEnabled?.(!airspace.isEnabled?.());
+    });
+    airChip.dataset.part = 'airspace';
+    airChip.setAttribute('aria-pressed', String(Boolean(airspace.isEnabled?.())));
+    airChip.title = translate('mideast.air.note');
+    chips.appendChild(airChip);
+    airLegend = el('div', 'mideast-legend mideast-air-legend');
+    airLegend.hidden = true;
+  }
+  if (ukmto) {
+    shipChip = button('data-toggle-chip mideast-chip mideast-chip-ukmto', translate('mideast.part.ukmto'), () => {
+      void ukmto.setEnabled?.(!ukmto.isEnabled?.());
+    });
+    shipChip.dataset.part = 'ukmto';
+    shipChip.setAttribute('aria-pressed', String(Boolean(ukmto.isEnabled?.())));
+    shipChip.title = translate('mideast.ukmto.note');
+    chips.appendChild(shipChip);
+    shipLegend = el('div', 'mideast-legend mideast-ukmto-legend');
+    shipLegend.hidden = true;
+  }
+  if (gps) {
+    gpsChip = button('data-toggle-chip mideast-chip mideast-chip-gps', translate('mideast.part.gps'), () => {
+      void gps.setEnabled?.(!gps.isEnabled?.());
+    });
+    gpsChip.dataset.part = 'gps';
+    gpsChip.setAttribute('aria-pressed', String(Boolean(gps.isEnabled?.())));
+    gpsChip.title = translate('mideast.gps.note');
+    chips.appendChild(gpsChip);
+    gpsLegend = el('div', 'mideast-legend mideast-gps-legend');
+    gpsLegend.hidden = true;
   }
 
   // PRECHODY ÚŽINAMI (etapa 5a): telo plní karta PortWatch z main.js (portwatchCard.js);
@@ -128,7 +191,7 @@ export function createMideastPanel({
   const news = el('div', 'mideast-news');
   news.dataset.mideastNews = '';
   const note = el('p', 'mideast-note', translate('mideast.note'));
-  mountTarget.replaceChildren(status, dirsTitle, dirs, ...(chips ? [chips, legend] : []), transitsTitle, transits, newsTitle, news, note);
+  mountTarget.replaceChildren(status, dirsTitle, dirs, ...[chips, legend, airLegend, shipLegend, gpsLegend].filter(Boolean), transitsTitle, transits, newsTitle, news, note);
 
   // ── Legenda kontroly ──────────────────────────────────────────────────────
   // t() vracia pri chýbajúcom kľúči samotný kľúč → padá sa na anglický popis z konfigurácie
@@ -205,6 +268,203 @@ export function createMideastPanel({
   const unsubscribeControl = control?.onChange?.(() => renderControl()) || null;
   renderControl();
 
+  // ── Legenda VZDUŠNÉHO PRIESTORU (etapa 5b) ────────────────────────────────
+  // Bulletiny Blízkeho východu po jednom riadku; ostatné vo svete jedným riadkom (vrstva
+  // ich kreslí tiež). Názvy krajín z i18n, inak anglický názov EASA.
+  const countryName = (c) => textOr(`mideast.air.c.${String(c).toLowerCase().replace(/\s+/g, '-')}`, c);
+  const fmtDay = (iso) => { const ms = Date.parse(`${iso}T00:00:00Z`); return Number.isFinite(ms) ? dateFormat.format(new Date(ms)) : String(iso || ''); };
+  function airRow(b) {
+    const row = el('div', 'mideast-air-row');
+    row.dataset.czib = b.czib || b.nid;
+    row.classList.toggle('is-partial', Boolean(b.scope?.partial));
+    row.classList.toggle('is-below', b.scope?.altitude === 'below');
+    const sw = el('i', 'mideast-legend-swatch mideast-air-swatch');
+    row.appendChild(sw);
+    const name = el('span', 'mideast-air-name', b.countries.map(countryName).join(', ') || b.title);
+    name.title = b.title;
+    row.appendChild(name);
+    row.appendChild(el('span', 'mideast-air-badge', b.scope?.altitude === 'below' ? translate('mideast.air.below', { fl: b.scope.fl }) : translate('mideast.air.all')));
+    if (b.scope?.partial) {
+      const p = el('span', 'mideast-air-badge is-partial', translate('mideast.air.partial'));
+      p.title = translate('mideast.air.partial-tip');
+      row.appendChild(p);
+    }
+    if (b.scope?.exceptions) row.appendChild(el('span', 'mideast-air-badge', translate('mideast.air.exceptions')));
+    if (b.validUntil) {
+      const until = el('span', `mideast-air-until${b.lapsed ? ' is-stale' : ''}`, translate(b.lapsed ? 'mideast.air.lapsed' : 'mideast.air.until', { date: fmtDay(b.validUntil) }));
+      row.appendChild(until);
+    }
+    if (b.url) {
+      const a = el('a', 'mideast-air-link', translate('mideast.air.link'));
+      a.href = b.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      if (b.czib) a.title = b.czib;
+      row.appendChild(a);
+    }
+    return row;
+  }
+  function renderAirspace() {
+    if (!airspace || !airChip) return;
+    const st = airspace.getState?.() || {};
+    const enabled = Boolean(st.enabled);
+    airChip.classList?.toggle?.('active', enabled);
+    airChip.setAttribute('aria-pressed', String(enabled));
+    airChip.classList?.toggle?.('is-loading', Boolean(st.loading));
+    airLegend.hidden = !enabled;
+    if (!enabled) { airLegend.replaceChildren(); return; }
+    const bulletins = Array.isArray(st.bulletins) ? st.bulletins : [];
+    const parts = [el('div', 'mideast-legend-title', translate('mideast.air.title'))];
+    if (!bulletins.length) {
+      const kind = st.loading ? 'loading' : (st.error ? (st.error === 'no_airspace_snapshot' ? 'missing' : 'error') : 'loading');
+      const state = el('div', 'mideast-legend-state', translate(`mideast.air.${kind}`));
+      state.dataset.state = kind;
+      parts.push(state);
+    } else {
+      const mine = bulletins.filter((b) => b.mideast);
+      const rest = bulletins.filter((b) => !b.mideast);
+      const rows = el('div', 'mideast-air-rows');
+      for (const b of mine) rows.appendChild(airRow(b));
+      parts.push(rows);
+      if (rest.length) {
+        const names = [...new Set(rest.flatMap((b) => b.countries).map(countryName))];
+        parts.push(el('div', 'mideast-air-more', translate('mideast.air.more', { n: numberFormat.format(rest.length), list: names.join(', ') })));
+      }
+      const src = el('div', 'mideast-legend-source');
+      src.title = [st.attribution, st.firAttribution].filter(Boolean).join(' · ');
+      const since = st.fetchedAt ? `${translate('mideast.air.since', { date: dateFormat.format(new Date(st.fetchedAt)) })} · ` : '';
+      src.appendChild(el('span', 'mideast-legend-since', `${since}${translate('mideast.air.source')}`));
+      if (st.error) src.appendChild(el('span', 'mideast-legend-age is-stale', translate('mideast.air.error')));
+      parts.push(src);
+    }
+    parts.push(el('p', 'mideast-legend-note', translate('mideast.air.note')));
+    airLegend.replaceChildren(...parts);
+  }
+  const unsubscribeAirspace = airspace?.onChange?.(() => renderAirspace()) || null;
+  renderAirspace();
+
+  // ── Legenda INCIDENTOV LODÍ (etapa 5c) ────────────────────────────────────
+  // Bez aktívneho dejiska či úžiny vrstva nič nekreslí ani nesťahuje → čip je vypnutý
+  // (ako KONTROLA SÍDIEL bez modulov) a titulok hovorí, kedy sa body ukážu.
+  const dateTimeFormat = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
+  function renderUkmto() {
+    if (!ukmto || !shipChip) return;
+    const st = ukmto.getState?.() || {};
+    const enabled = Boolean(st.enabled);
+    const active = Boolean(st.active);
+    shipChip.classList?.toggle?.('active', enabled);
+    shipChip.setAttribute('aria-pressed', String(enabled));
+    shipChip.disabled = !active;
+    shipChip.title = translate(active ? 'mideast.ukmto.note' : 'mideast.ukmto.inactive');
+    shipChip.classList?.toggle?.('is-loading', Boolean(st.loading));
+    const visible = enabled && active;
+    shipLegend.hidden = !visible;
+    if (!visible) { shipLegend.replaceChildren(); return; }
+    const summary = st.summary || { days: 30, total: 0, byType: [], latest: [] };
+    const typeText = (id, fallback) => textOr(`mideast.ukmto.type.${id}`, fallback || id);
+    const parts = [el('div', 'mideast-legend-title', translate('mideast.ukmto.title', { days: numberFormat.format(summary.days) }))];
+    if (!st.loaded) {
+      const kind = st.loading ? 'loading' : (st.error ? (st.error === 'no_ukmto_snapshot' ? 'missing' : 'error') : 'loading');
+      const state = el('div', 'mideast-legend-state', translate(`mideast.ukmto.${kind}`));
+      state.dataset.state = kind;
+      parts.push(state);
+    } else {
+      if (!summary.total) {
+        parts.push(el('div', 'mideast-legend-state', translate('mideast.ukmto.none', { days: numberFormat.format(summary.days) })));
+      } else {
+        const items = el('div', 'mideast-legend-items');
+        for (const row of summary.byType) {
+          const item = el('span', `mideast-legend-item is-ukmto is-${row.type}`);
+          const sw = el('i', 'mideast-legend-swatch mideast-ukmto-swatch');
+          sw.setAttribute('style', `background: ${row.css}; border-color: ${row.css}`);
+          item.appendChild(sw);
+          item.appendChild(el('span', 'mideast-legend-label', typeText(row.type)));
+          item.appendChild(el('span', 'mideast-legend-count', numberFormat.format(row.count)));
+          items.appendChild(item);
+        }
+        parts.push(items);
+      }
+      if (summary.latest.length) {
+        const rows = el('div', 'mideast-ukmto-rows');
+        rows.setAttribute('aria-label', translate('mideast.ukmto.latest'));
+        for (const it of summary.latest) {
+          const row = el('div', 'mideast-ukmto-row');
+          row.dataset.ref = it.ref || it.id;
+          row.title = it.text || '';
+          const dot = el('i', 'mideast-legend-swatch mideast-ukmto-swatch');
+          dot.setAttribute('style', `background: ${(UKMTO_TYPES.find((x) => x.id === it.type) || UKMTO_TYPE_OTHER).css}`);
+          row.appendChild(dot);
+          row.appendChild(el('span', 'mideast-ukmto-when', `${dateTimeFormat.format(new Date(it.t))} UTC`));
+          row.appendChild(el('span', 'mideast-ukmto-type', ukmto.labels?.type?.(it) ?? typeText(it.type, it.typeName)));
+          row.appendChild(el('span', 'mideast-ukmto-place', ukmto.labels?.place?.(it) ?? it.place ?? ''));
+          rows.appendChild(row);
+        }
+        parts.push(rows);
+      }
+      const src = el('div', 'mideast-legend-source');
+      src.title = st.attribution || '';
+      const since = st.fetchedAt ? `${translate('mideast.ukmto.since', { date: dateFormat.format(new Date(st.fetchedAt)) })} · ` : '';
+      src.appendChild(el('span', 'mideast-legend-since', `${since}${translate('mideast.ukmto.source')}`));
+      const link = el('a', 'mideast-air-link', translate('mideast.ukmto.link'));
+      link.href = UKMTO_SITE_URL; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      src.appendChild(link);
+      if (st.error) src.appendChild(el('span', 'mideast-legend-age is-stale', translate('mideast.ukmto.error')));
+      parts.push(src);
+    }
+    parts.push(el('p', 'mideast-legend-note', translate('mideast.ukmto.note')));
+    shipLegend.replaceChildren(...parts);
+  }
+  const unsubscribeUkmto = ukmto?.onChange?.(() => renderUkmto()) || null;
+  renderUkmto();
+
+  // ── Legenda RUŠENIA GPS (etapa 5d) ────────────────────────────────────────
+  // Farby ako bunky na mape (GPS_COLORS z src/data/gpsInterference.js); počet = počet buniek 0,5°.
+  const GPS_SWATCH = GPS_COLORS;
+  function renderGps() {
+    if (!gps || !gpsChip) return;
+    const st = gps.getState?.() || {};
+    const enabled = Boolean(st.enabled);
+    gpsChip.classList?.toggle?.('active', enabled);
+    gpsChip.setAttribute('aria-pressed', String(enabled));
+    gpsChip.classList?.toggle?.('is-loading', Boolean(st.loading));
+    gpsLegend.hidden = !enabled;
+    if (!enabled) { gpsLegend.replaceChildren(); return; }
+    const parts = [el('div', 'mideast-legend-title', translate('mideast.gps.title'))];
+    if (!st.loaded) {
+      const kind = st.loading ? 'loading' : (st.error ? (st.error === 'no_gps_snapshot' ? 'missing' : 'error') : 'loading');
+      const state = el('div', 'mideast-legend-state', translate(`mideast.gps.${kind}`));
+      state.dataset.state = kind;
+      parts.push(state);
+    } else {
+      const counts = st.counts || {};
+      const items = el('div', 'mideast-legend-items');
+      items.setAttribute('aria-label', translate('mideast.gps.cells'));
+      for (const level of ['high', 'medium', 'none']) {
+        const item = el('span', `mideast-legend-item is-gps is-${level}`);
+        const sw = el('i', 'mideast-legend-swatch');
+        sw.setAttribute('style', `background: ${swatchColour(GPS_SWATCH[level], level === 'none' ? 0.25 : 0.6)}; border-color: ${GPS_SWATCH[level]}`);
+        item.appendChild(sw);
+        item.appendChild(el('span', 'mideast-legend-label', translate(`mideast.gps.${level}`)));
+        item.appendChild(el('span', 'mideast-legend-count', numberFormat.format(Number(counts[level]) || 0)));
+        items.appendChild(item);
+      }
+      parts.push(items);
+      if (!((Number(counts.high) || 0) + (Number(counts.medium) || 0) + (Number(counts.none) || 0))) {
+        parts.push(el('div', 'mideast-legend-state', translate('mideast.gps.empty')));
+      }
+      const src = el('div', 'mideast-legend-source');
+      src.title = st.attribution || '';
+      const stats = translate('mideast.gps.stats', { snapshots: numberFormat.format(st.snapshots || 0), aircraft: numberFormat.format(st.aircraft || 0) });
+      src.appendChild(el('span', 'mideast-legend-since', [st.period, stats].filter(Boolean).join(' · ')));
+      if (st.todayPartial) src.appendChild(el('span', 'mideast-legend-age', `· ${translate('mideast.gps.partial')}`));
+      src.appendChild(el('span', 'mideast-legend-age', `· ${translate('mideast.gps.source')}`));
+      if (st.error) src.appendChild(el('span', 'mideast-legend-age is-stale', translate('mideast.gps.error')));
+      parts.push(src);
+    }
+    parts.push(el('p', 'mideast-legend-note', translate('mideast.gps.note')));
+    gpsLegend.replaceChildren(...parts);
+  }
+  const unsubscribeGps = gps?.onChange?.(() => renderGps()) || null;
+  renderGps();
+
   // ── Aktívne dejisko ───────────────────────────────────────────────────────
   // Panel sa o aktívnom dejisku dozvie aj zvonka (main.js po ?mideast=, rozbaľovačke
   // SCÉNY alebo hlase volá setActiveTheatre), preto je zvýraznenie samostatná funkcia.
@@ -224,6 +484,6 @@ export function createMideastPanel({
     transitsMount: transits,
     setActiveTheatre,
     get activeTheatre() { return activeTheatre; },
-    destroy() { unsubscribeControl?.(); dirByTheatre.clear(); mountTarget.replaceChildren(); },
+    destroy() { unsubscribeControl?.(); unsubscribeAirspace?.(); unsubscribeUkmto?.(); unsubscribeGps?.(); dirByTheatre.clear(); mountTarget.replaceChildren(); },
   };
 }

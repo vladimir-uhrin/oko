@@ -48,12 +48,19 @@ import {
   isCelestialRingStyleSupported,
   setKeyholeFadeTuning,
 } from './celestialRing.js';
-import { destroyTrackedReadout, initTrackedReadout } from './data/trackedReadout.js';
+import { TRACKED_OVERLAY_SOURCE_ID, destroyTrackedReadout, getActiveTrackedReadoutId, initTrackedReadout } from './data/trackedReadout.js';
+import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
+import { installCardCloseButtons } from './cardCloseButtons.js';
+import { createScrollKeeper } from './scrollKeeper.js';
 import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
+import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFlightsStrip.js';
 import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
 import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
 import { installHistoryPanel } from './historyPanel.js';
+import { eventIdFromHash, installEventsPanel } from './eventsPanel.js';
+import { createEventMarkers } from './eventMarkers.js';
+import { whenStartupReady } from './startupGate.js';
 import { installGasPanel } from './gasPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
@@ -2553,7 +2560,9 @@ export class StyleManager {
    * @param {Cesium.Viewer} viewer - The CesiumJS viewer instance.
    * @param {object} [options]
    */
-  constructor(viewer, { mapStackController = null } = {}) {
+  constructor(viewer, { mapStackController = null, account = null } = {}) {
+    // Účet (initAuthPanel) — udalosti vlastníka po prihlásení aj mimo tohto počítača (2026-10-03).
+    this._account = account;
     this.viewer = viewer;
     this.mapStackController = mapStackController;
     this.stages = {};
@@ -2624,6 +2633,8 @@ export class StyleManager {
     this._leftStackHudTransitionHandler = null;
     this._leftStackCollapsedHeights = new Map();
     this._leftStackPreferredPanelId = null;
+    // Poloha rolovania vnútri otvorených panelov cez meranie ich výšky (src/scrollKeeper.js).
+    this._leftStackScrollKeeper = createScrollKeeper();
     this._rightPanelStack = document.getElementById('right-context-rail');
     this._rightStackLayoutFrame = null;
     this._rightStackReconsiderAutoCollapse = false;
@@ -3121,6 +3132,58 @@ export class StyleManager {
     // Fotka sledovaného lietadla pod kartou (Planespotters Photo API, len
     // klientsky — podmienky zdroja, viď trackedPhoto.js).
     installTrackedPhoto(viewer, { container: document.body });
+    // Štátne lietadlá SR (2026-09-30, stateFlightsStrip.js): nad kartou sledovaného štátneho stroja
+    // odznak a prepínač PREDCHÁDZAJÚCE LETY; let sa otvorí a prehrá v paneli História letov.
+    const revealHistoryPanel = () => {
+      // Na úzkej obrazovke žije História letov v hárku DÁTA — otvor ho rovno s ňou.
+      const shell = window.__okoMobileShell;
+      if (shell?.isMobile?.()) shell.open?.('data', { expand: 'history-panel' });
+    };
+    installStateFlightsStrip(viewer, {
+      container: document.body,
+      onOpenLeg: (flight) => {
+        // Prehrávanie preberá kameru: živé sledovanie končí, inak by karta zakryla pohľad na trasu.
+        this._dataManager?.layers?.get('flights')?.module?.stopTracking?.({ origin: 'user' });
+        this._dataManager?.layers?.get('military')?.module?.stopTracking?.({ origin: 'user' });
+        revealHistoryPanel();
+        this._historyPanel?.showLeg(flight);
+      },
+      onOpenAll: (hex) => {
+        revealHistoryPanel();
+        this._historyPanel?.showStateAircraft(hex);
+      },
+    });
+    // Krížik v rohu kartičiek (2026-09-30, vlastník: „kliknúť vedľa, aby sa karta zavrela, je
+    // amaterizmus — aspoň malé X do rohu“): sledovaný objekt a vybraná loď; zatvára tou istou cestou.
+    const trackedLayerByPrefix = { flights: 'flights', military: 'military', satellites: 'satellites', installations: 'military-installations' };
+    const vesselsModule = () => this._dataManager?.layers?.get('ais-live-vessels')?.module;
+    this._cardCloseButtons = installCardCloseButtons(viewer, {
+      container: document.body,
+      t,
+      providers: [
+        {
+          id: 'tracked',
+          active: () => {
+            const id = getActiveTrackedReadoutId();
+            return id ? { sourceId: TRACKED_OVERLAY_SOURCE_ID, entryId: id } : null;
+          },
+          close: () => {
+            const prefix = String(getActiveTrackedReadoutId() || '').split(':')[0];
+            const module = this._dataManager?.layers?.get(trackedLayerByPrefix[prefix])?.module;
+            if (typeof module?.stopTracking === 'function') module.stopTracking({ origin: 'user' });
+            else viewer.trackedEntity = undefined;
+          },
+        },
+        {
+          id: 'vessel',
+          active: () => {
+            const mmsi = String(vesselsModule()?.getSelectedInfo?.()?.mmsi || '').trim();
+            return mmsi ? { sourceId: VESSEL_OVERLAY_SOURCE_ID, entryId: `vessel:${mmsi}` } : null;
+          },
+          close: () => vesselsModule()?.clearSelection?.(),
+        },
+      ],
+    });
     // Bohatá karta letiska po kliknutí (frekvencie, dráhy, METAR, živá
     // premávka z vrstvy letov, odkazy) — viď airportCard.js.
     installAirportCard(viewer, {
@@ -3150,6 +3213,23 @@ export class StyleManager {
       },
       setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
     });
+    // Udalosti (2026-09-30, etapa 2b, eventsPanel.js): odkaz z príspevku (`event=<id>` v adrese)
+    // otvorí kartu udalosti navrchu Histórie letov — momenty, médiá, značky na glóbuse, prehratie.
+    // Na počítači vlastníka aj zoznam na kontrolu a zverejnenie (na FB zdieľa vlastník sám).
+    this._eventsPanel = installEventsPanel({
+      host: document.querySelector('#history-panel [data-history-body]'),
+      t,
+      account: this._account?.client || null,
+      history: this._historyPanel,
+      reveal: () => {
+        revealHistoryPanel();
+        this.setPanelCollapsed('history-panel', false, { persist: false, syncShare: false });
+      },
+      markers: createEventMarkers(viewer),
+    });
+    // Po štarte (mapa zobrazená, záber z odkazu obnovený) — inak by ho obnova panelov prekryla.
+    const sharedEventId = eventIdFromHash(window.location.hash);
+    if (sharedEventId) void whenStartupReady().then(() => this._eventsPanel?.open(sharedEventId));
     // Plyn (2026-09-13, gasPanel.js): karta CENY z /api/gas/prices (ACER +
     // IMF/FRED, bez kľúča); zásobníky (GIE) a toky (ENTSOG) pribudnú po etapách.
     this._gasPanel = installGasPanel({
@@ -7733,6 +7813,12 @@ export class StyleManager {
     const stack = this._leftPanelStack;
     if (!stack) return;
 
+    // Udalosť scroll nebublá — v zachytávacej fáze ju stĺpec vidí od každého posuvníka vo svojich
+    // paneloch. Strážca si prvok len zapamätá; polohu číta až tesne pred meraním výšok.
+    stack.addEventListener('scroll', (event) => {
+      if (event.target !== stack) this._leftStackScrollKeeper.track(event.target);
+    }, { capture: true, passive: true });
+
     if (typeof ResizeObserver !== 'undefined') {
       this._leftStackResizeObserver = new ResizeObserver(() => {
         this._scheduleLeftPanelLayout();
@@ -8003,6 +8089,12 @@ export class StyleManager {
     // Clear the prior pass before reading intrinsic heights. The allocated
     // outer height and the inner scroller otherwise feed their constrained
     // size back into the next HUD-mode calculation.
+    // Without its allocated height an open panel stretches to its whole content for this
+    // one layout read, its inner scroller has nothing to scroll and the browser drops its
+    // position to 0 — a long panel could never be scrolled down, every pass (any change in
+    // any panel) threw it back to the top. The keeper reads the positions now and puts them
+    // back once the heights are allocated again (2026-10-03).
+    const scrollMemo = this._leftStackScrollKeeper.capture();
     for (const panel of expandedPanels) {
       panel.style.removeProperty('--left-panel-allocated-height');
     }
@@ -8104,6 +8196,8 @@ export class StyleManager {
         panel.classList.add('collapsed', 'layout-auto-collapsed');
         this._syncPanelCollapseButton(panel);
       }
+      // Heights are not allocated in this pass — the next one restores the scroll positions.
+      this._leftStackScrollKeeper.defer(scrollMemo);
       this._scheduleLeftPanelLayout();
       return;
     }
@@ -8137,6 +8231,9 @@ export class StyleManager {
     // Focus mode no longer hides collapsed siblings, so none of them is
     // aria-hidden any more; clear the attribute this pass used to set.
     for (const panel of panels) panel.removeAttribute('aria-hidden');
+    // Heights and the lane mode are committed — put back the scroll positions the
+    // measuring read above dropped to 0 (after the last write that changes layout).
+    this._leftStackScrollKeeper.restore(scrollMemo);
     // The right controls share this top baseline; update them after the left
     // accordion commits an HUD-variant or obstacle-driven position change.
     this._scheduleRightPanelLayout();
@@ -11590,6 +11687,8 @@ export class StyleManager {
     destroyVolcanoCard();
     destroyNaturalEventCard();
     destroyTrackedPhoto();
+    destroyStateFlightsStrip();
+    this._cardCloseButtons?.destroy();
     destroyTrackedReadout();
     destroyDetection();
     destroyWorldOverlay();
