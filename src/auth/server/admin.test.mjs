@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openAuthStore } from './store.js';
-import { createAdminSources, redactStatus } from './adminSources.js';
+import { createAdminSources, redactStatus, createBackup, listBackups } from './adminSources.js';
+import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { openAdminStore } from '../../admin/server/store.js';
+import { createAdminRuntime } from '../../admin/server/runtime.js';
 import { credentials, fixture } from './account-test-helpers.mjs';
 
 const owner = { email: 'owner@oko.test', password: 'owner password phrase long', displayName: 'Owner' };
@@ -147,4 +152,74 @@ test('stĺpec disabled_at sa pridá aditívne a opätovné otvorenie DB prejde',
   const store = openAuthStore(':memory:');
   assert.equal(store.adminStats(Date.now(), 86400_000).disabled, 0);
   store.close();
+});
+
+// ── Rozšírenie 2026-10-03: telemetria, vypínače, oznam, údržba ──
+
+async function setupWithRuntime(t) {
+  const adminStore = openAdminStore(':memory:');
+  const runtime = createAdminRuntime({ store: adminStore, timers: false });
+  const directory = mkdtempSync(path.join(tmpdir(), 'oko-admin-backup-'));
+  const dbFile = path.join(directory, 'accounts.sqlite');
+  t.after(() => { runtime.stop(); adminStore.close(); rmSync(directory, { recursive: true, force: true }); });
+  const env = await setup(t, { adminSources: {
+    runtime: () => runtime, quotaStatus: async () => ({ tomtom: { dailyCount: 7, budget: 100, hasKey: true } }),
+    backups: () => listBackups(dbFile), backup: targets => createBackup(dbFile, targets),
+    cacheDirs: async () => [], clearCache: async () => ({ removed: 0, freed: 0 }),
+  } });
+  return { ...env, runtime, adminStore, directory };
+}
+
+test('nové admin cesty sú pre člena 404 a vlastník ich dostane', async t => {
+  const { admin, member } = await setupWithRuntime(t);
+  for (const route of ['/api/admin/analytics', '/api/admin/traffic', '/api/admin/errors', '/api/admin/costs',
+    '/api/admin/feed-history', '/api/admin/notice', '/api/admin/maintenance', '/api/admin/accounts-chart']) {
+    assert.equal((await member.request(route)).status, 404, route);
+    const response = await admin.request(route);
+    assert.equal(response.status, 200, route);
+  }
+  const chart = await admin.request('/api/admin/accounts-chart?days=7');
+  assert.equal(chart.data.series.length, 7);
+  assert.equal(chart.data.series.at(-1).registrations, 2);
+  const costs = await admin.request('/api/admin/costs');
+  assert.equal(costs.data.feeds.find(feed => feed.id === 'tomtom').provider.dailyCount, 7);
+});
+
+test('vypínač feedu a oznam cez API: CSRF, validácia, audit', async t => {
+  const { admin, member, runtime } = await setupWithRuntime(t);
+  assert.equal((await member.post('/api/admin/feeds/tomtom', { enabled: false })).status, 404);
+  assert.equal((await admin.post('/api/admin/feeds/tomtom', { enabled: false }, { headers: { 'X-CSRF-Token': '' } })).status, 403);
+  assert.equal((await admin.post('/api/admin/feeds/tomtom', { enabled: 'no' })).status, 400);
+  assert.equal((await admin.post('/api/admin/feeds/nope', { enabled: false })).status, 404);
+  const off = await admin.post('/api/admin/feeds/tomtom', { enabled: false });
+  assert.equal(off.status, 200);
+  assert.equal(runtime.feedSetting('tomtom').enabled, false);
+  const cap = await admin.post('/api/admin/feeds/openai-voice', { dailyCap: 50, unitPrice: 0.06 });
+  assert.equal(cap.data.setting.dailyCap, 50);
+  assert.equal((await admin.post('/api/admin/notice', { text: 'Údržba', level: 'warn', hours: 2 })).status, 200);
+  assert.equal(runtime.notice().notice.text, 'Údržba');
+  assert.deepEqual(runtime.notice().disabled, ['TomTom doprava']);
+  assert.equal((await admin.post('/api/admin/notice', { text: 'x'.repeat(300) })).status, 400);
+  assert.equal((await admin.post('/api/admin/notice', { text: '' })).status, 200);
+  assert.equal(runtime.notice().notice, null);
+  const audit = (await admin.request('/api/admin/audit')).data.audit.map(entry => entry.action);
+  assert.deepEqual(audit.slice(0, 4), ['notice_cleared', 'notice_set', 'feed_updated', 'feed_updated']);
+});
+
+test('chyby sa dajú vymazať; záloha vytvorí kópie oboch databáz', async t => {
+  const { admin, runtime, directory } = await setupWithRuntime(t);
+  runtime.recordError('client', 'Boom');
+  runtime.recordError('server', 'Upstream down');
+  assert.equal((await admin.request('/api/admin/errors')).data.errors.length, 2);
+  assert.equal((await admin.request('/api/admin/errors?kind=client')).data.errors.length, 1);
+  const cleared = await admin.request('/api/admin/errors', { method: 'DELETE', body: { kind: 'client' } });
+  assert.equal(cleared.data.cleared, 1);
+  assert.equal((await admin.request('/api/admin/errors')).data.errors.length, 1);
+  const backup = await admin.post('/api/admin/maintenance/backup', {});
+  assert.equal(backup.status, 200, JSON.stringify(backup.data));
+  assert.equal(backup.data.made.length, 2);
+  assert.deepEqual(readdirSync(path.join(directory, 'backups')).map(name => name.split('-')[0]).sort(), ['accounts', 'admin']);
+  const reopened = openAdminStore(path.join(directory, 'backups', backup.data.made.find(name => name.startsWith('admin'))));
+  assert.equal(reopened.errors().length, 1);
+  reopened.close();
 });

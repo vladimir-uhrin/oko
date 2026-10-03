@@ -2,6 +2,10 @@ import * as Cesium from 'cesium';
 import { initAuthPanel } from './auth/panel.js';
 import { createFollowedFlights, installFollowButton } from './followedFlights.js';
 import './auth/panel.css';
+// Admin (2026-10-03): anonymná štatistika návštev a oznam prevádzkovateľa.
+import { initSiteTelemetry } from './siteTelemetry.js';
+import { initNoticeBanner } from './noticeBanner.js';
+import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { StyleManager } from './ui.js';
 import { flyToBratislava } from './camera.js';
@@ -1388,4 +1392,5 @@ async function init() {
 // Inštancia ide aj sledovaným letom (init → createFollowedFlights): prihlásenie, zoznam k účtu.
 let accountCenter = null;
 try { accountCenter = initAuthPanel(); } catch { console.warn('[Account] Account panel could not initialize.'); }
+try { initSiteTelemetry(); initNoticeBanner(); } catch { /* voliteľné, glóbus beží aj bez nich */ }
 init();

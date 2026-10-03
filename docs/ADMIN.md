@@ -17,13 +17,53 @@ ignorovať `Cache-Control: no-store` (rovnako ako `/account.html`).
 
 ## Sekcie
 
-| Sekcia | Čo ukazuje |
+| Sekcia | Čo ukazuje / robí |
 | --- | --- |
-| Prehľad | počty účtov (overené, nové 24 h / 7 d, prihlásení, zablokovaní), sledované lety; server: beží od, commit, Node, pamäť, veľkosť DB a `.gev-cache` |
-| Feedy | stav TomTom, FIRMS, GFW, Meteo, Plyn, archív letov, ACARS, SK terén, CCTV z ich existujúcich `/status` / `/health` endpointov (loopback, 30 s cache). Polia s kľúčom/tokenom sa odstraňujú, ostáva len `hasKey`. |
-| Používatelia | hľadanie podľa e-mailu/mena, detail (relácie, aktivita, prihlasovacie metódy, počet sledovaných letov) a akcie |
-| Audit | posledných 200 zásahov administrátora |
+| Prehľad | práve na stránke, návštevníci dnes, požiadavky a chyby 5xx za 24 h; účty (overené, nové, prihlásení, zablokovaní); graf registrácií a prihlásení za 30 dní; server (beží od, commit, Node, pamäť, DB, `.gev-cache`) |
+| Analytika | návštevníci, zobrazenia, aktívny čas, boti za 7/30/90/365 dní; vývoj po dňoch, hodina dňa; odkiaľ prišli, krajiny, stránky, zapnuté vrstvy, zariadenia, prehliadače, systémy, šírka okna, jazyk |
+| Prevádzka | požiadavky na API, chyby 5xx a priemerná odozva po hodinách (24 h – 30 dní); tabuľka podľa zdroja (počet, 5xx, 4xx, blokované, odozva ø/max, prenos) |
+| Chyby | zlúčené chyby: `console.error`/`console.warn` servera, HTTP 5xx, JS chyby z prehliadačov návštevníkov; filter, detail (stack), vymazanie |
+| Náklady | OpenAI hlas, OpenAI súhrn, Google Places — počet volaní po dňoch, dnes, 30 dní, **denný strop** (nad ním 429) a cena za jednotku → odhad €; TomTom a GFW aj s kvótou providera z ich `/status` |
+| Feedy | všetky dátové zdroje: aktuálny stav, pás dostupnosti 7 dní po hodinách (zo skutočných požiadaviek), výpadky z kontroly statusu každých 10 min, **Vypnúť / Zapnúť** |
+| Používatelia | hľadanie, detail (relácie, aktivita, prihlasovacie metódy, počet sledovaných letov) a akcie nižšie |
+| Oznam | text 1–280 znakov, typ info/upozornenie, platnosť; náhľad, ako ho vidia návštevníci |
+| Údržba | záloha DB účtov aj admin DB (`VACUUM INTO`, ponechá 14), čistenie povolenej cache |
+| Audit | posledných 200 zásahov administrátora (aj zmeny feedov, oznamu, záloh, cache) |
 | Log | posledných ~48 kB z `.gev-cache/logs/oko-server.log` |
+
+## Telemetria a súkromie
+
+`src/admin/server/` (plugin `adminPlugin`, `enforce: 'pre'` — middleware stojí pred
+všetkými proxy). Dáta sú v `.auth-data/admin.sqlite` (gitignored, blokované vo Vite).
+
+- **Požiadavky na API:** len hodinové súčty po zdroji (`src/admin/server/feeds.js`
+  mapuje URL → zdroj; neznáme cesty idú do jednej skupiny `api-other`). Uchováva sa 90 dní.
+- **Návštevy:** glóbus (`src/siteTelemetry.js`) pošle pri načítaní `view` (cesta,
+  referer, šírka okna, jazyk), každú minútu viditeľnej karty `ping`, ID vrstvy, ktorú
+  človek zapne (nie predvolené v prvých 10 s), a najviac 5 JS chýb. Bez cookie a
+  localStorage. Server ukladá len denné súčty; krajina z `CF-IPCountry`, prehliadač/
+  systém/zariadenie z User-Agentu. **IP ani User-Agent sa neukladajú.** Unikátny
+  návštevník = SHA-256 z dennej náhodnej soli + IP + UA; soľ sa každý deň mení a
+  hashe sa po polnoci zrolujú do jedného čísla a zmažú. Do Not Track / GPC = nič sa
+  neposiela (a server to odmietne aj sám). Boti sa len počítajú. 60 záznamov/min na IP.
+  Denné súčty 400 dní. Žiadna poloha ani pohyb po glóbuse (CLAUDE.md pravidlo 6).
+- **Chyby:** zlúčené podľa podpisu (čísla ignorované), 30 dní, max 2000. Pred uložením
+  sa nahradia `***` všetky hodnoty z `.env`, ktorých názov obsahuje KEY/TOKEN/SECRET/
+  PASSWORD/AUTH, parametre `key=`/`token=`/… v URL, `Bearer …` a `sk-…`.
+
+Pred zverejnením štatistiky v spoločnosti doplň zmienku do zásad ochrany súkromia.
+
+## Vypínače feedov, stropy a oznam
+
+- **Vypnúť** zdroj: jeho `/api/...` vracia `503 {error:'disabled_by_admin'}` (status a
+  health endpointy idú ďalej, aby admin videl stav). Glóbus to oznámi bannerom
+  „Dočasne vypnuté: …" (`src/noticeBanner.js`, pravidlo 2: vrstva bez dát nesmie
+  vyzerať živo). Systémové cesty (účty, zdieľanie, admin) sa vypnúť nedajú.
+- **Denný strop** (len platené: OpenAI, Google): počíta sa po miestnom dni (Bratislava),
+  prežije reštart (dopočíta sa zo štatistiky). Nad strop `429 {error:'budget',
+  scope:'admin_daily_cap'}`. Strop z panelu je navyše k limitom v `.env`, nenahrádza ich.
+- **Oznam:** `/api/notice` (verejné, cache 30 s); glóbus ho načíta pri štarte a každých
+  5 min. Zavretie platí pre daný text do zatvorenia karty.
 
 ## Akcie nad účtom
 
@@ -56,6 +96,15 @@ ho používateľ vidí vo svojom Centre účtu.
 ```text
 admin.html                       stránka (CSP bez inline skriptov)
 src/admin/adminPage.js/.css      UI, len textContent
+src/admin/charts.js              SVG grafy (paleta overená pre tmavý povrch, tooltip, tabuľka)
+src/admin/server/plugin.js       Vite plugin telemetrie (enforce: 'pre')
+src/admin/server/runtime.js      middleware, vypínače, stropy, návštevy, chyby, oznam
+src/admin/server/store.js        admin.sqlite (agregáty, chyby, vzorky, nastavenia)
+src/admin/server/feeds.js        register zdrojov (URL → zdroj, platené, status)
+src/admin/server/api.js          výpočty pre analytiku, prevádzku, náklady, históriu
+src/admin/server/runtime.test.mjs testy telemetrie, stropov, súkromia, redakcie
+src/siteTelemetry.js             anonymná štatistika z glóbusu
+src/noticeBanner.js/.css         banner oznamu na glóbuse
 src/auth/server/admin.js         /api/admin/* (rola, akcie, audit)
 src/auth/server/adminSources.js  stav feedov, info o serveri, log
 src/auth/server/admin.test.mjs   API testy (404 brána, CSRF, blokovanie, mazanie, redakcia)

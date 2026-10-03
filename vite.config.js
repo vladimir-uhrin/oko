@@ -29,6 +29,7 @@
 import fs from 'node:fs';
 import { versionedDeferredCesiumTags } from './scripts/lib/cesiumHtmlTags.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
+import { adminPlugin } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistory } from './src/data/flightHistoryStore.js';
 import {
@@ -10742,6 +10743,9 @@ export default defineConfig(({ mode }) => {
       sharePlugin(),
       flightHistoryProxy(),
       authPlugin(env),
+      // Admin (2026-10-03): štatistika, vypínače feedov a oznam. `enforce: 'pre'` ho spustí pred
+      // všetkými proxy bez zmeny poradia ostatných pluginov (to strážia testy).
+      adminPlugin(env),
       cesiumGlobe,
       openSkyProxy(),
       celestrakProxy(),

@@ -4,6 +4,7 @@ import { createAuthService, parseOrigins } from './http.js';
 import { createWebhookMailer } from './mail.js';
 import { oauthProvidersFromEnv } from './oauth.js';
 import { createAdminSources } from './adminSources.js';
+import { getAdminRuntime } from '../../admin/server/plugin.js';
 
 export const AUTH_FILE_DENY = ['**/.auth-data/**', '**/*.sqlite*', '**/*.db', '**/*.db-*'];
 
@@ -43,7 +44,7 @@ export function authPlugin(env = process.env) {
       // Defense in depth for Vite /@fs, ?raw and databases with custom names.
       if (decoded.includes('/.auth-data/') || /\.(sqlite[^/]*|db(?:-[^/]*)?)$/i.test(decoded)
         || decoded.toLowerCase().includes(filename.replaceAll('\\', '/').toLowerCase())
-        || decoded.startsWith('/src/auth/server/')) {
+        || decoded.startsWith('/src/auth/server/') || decoded.startsWith('/src/admin/server/')) {
         res.statusCode = 403; res.end('Forbidden'); return;
       }
       if (!(decoded === '/api/account' || decoded.startsWith('/api/account/') || decoded === '/api/auth' || decoded.startsWith('/api/auth/')
@@ -54,7 +55,8 @@ export function authPlugin(env = process.env) {
         if (!auth) {
           store = openAuthStore(filename);
           // Admin panel (2026-10-03): stav feedov sa číta z /status endpointov tohto istého servera.
-          const adminSources = createAdminSources({ root, dbFile: filename, port: () => server.httpServer?.address()?.port ?? null });
+          const adminSources = createAdminSources({ root, dbFile: filename, port: () => server.httpServer?.address()?.port ?? null,
+            runtime: getAdminRuntime });
           auth = createAuthService({ store, origins, mailer, oauthProviders, adminSources, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
         }
         void auth.middleware(req, res, next);

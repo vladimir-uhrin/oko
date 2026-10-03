@@ -365,6 +365,15 @@ export function openAuthStore(filename) {
       db.prepare('INSERT INTO admin_audit (id, actor_id, action, target_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(randomUUID(), actorId, action, targetId, String(detail || '').slice(0, 200), now);
     },
+    /** Konzistentná kópia DB (admin → Údržba). Cesta ide len zo servera, nie od klienta. */
+    backupTo(file) { db.exec(`VACUUM INTO '${String(file).replaceAll("'", "''")}'`); },
+    /** Registrácie a prihlásenia pre grafy účtov (časy; deň sa určí v miestnom čase). */
+    accountActivity(from) {
+      return {
+        registrations: db.prepare('SELECT created_at AS at FROM users WHERE created_at >= ?').all(from).map(row => row.at),
+        logins: db.prepare("SELECT created_at AS at FROM security_events WHERE created_at >= ? AND type LIKE 'login%'").all(from).map(row => row.at),
+      };
+    },
     auditLog: limit => db.prepare(`SELECT a.action, a.target_id AS targetId, a.detail, a.created_at AS createdAt,
       actor.email AS actorEmail FROM admin_audit a LEFT JOIN users actor ON actor.id = a.actor_id
       ORDER BY a.created_at DESC, a.rowid DESC LIMIT ?`).all(limit),

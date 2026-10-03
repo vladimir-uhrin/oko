@@ -16,6 +16,17 @@ drops the user's sessions/tokens and makes login answer `account_disabled`
 only after a correct password. Admin actions go to the additive `admin_audit`
 table and to the affected user's own activity list. Details: `docs/ADMIN.md`.
 
+Extension (same day): `adminPlugin` (`src/admin/server/`, `enforce: 'pre'`, before
+every proxy) keeps hourly per-source API stats, captures server `console.error/warn`
+and HTTP 5xx (secrets redacted), and serves `/api/telemetry/hit` (anonymous visits
+from `src/siteTelemetry.js`: daily aggregates only, no IP/UA stored, daily-salted
+visitor hash rolled up at midnight, DNT/GPC honoured) and `/api/notice`. Admin can
+**disable any data source** (503 `disabled_by_admin`; the globe shows a banner via
+`src/noticeBanner.js`), set **daily caps** on paid OpenAI/Google endpoints (429),
+publish a notice, back up both DBs and clear whitelisted cache folders. New tabs:
+Analytika, Prevádzka, Chyby, Náklady, Oznam, Údržba; feeds show 7-day availability.
+Data: `.auth-data/admin.sqlite`.
+
 ### OKO optional account center and profiles (2026-09-26)
 
 `src/auth/` adds a Vanilla JS account center with a visible avatar/name/signed-in

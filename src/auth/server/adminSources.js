@@ -21,7 +21,7 @@ export const ADMIN_FEEDS = Object.freeze([
   { id: 'gas', label: 'Plyn (ACER / GIE)', path: '/api/gas/status' },
   { id: 'history', label: 'Archív letov', path: '/api/history/status' },
   { id: 'acars', label: 'ACARS', path: '/api/acars/status' },
-  { id: 'sk-terrain', label: 'SK terén (DMR 5.0)', path: '/api/sk-terrain/status' },
+  { id: 'terrain', label: 'SK terén (DMR 5.0)', path: '/api/sk-terrain/status' },
   { id: 'cctv', label: 'CCTV kamery', path: '/api/cctv/health' },
 ]);
 
@@ -110,11 +110,28 @@ async function cacheSize(directory) {
  * @param {string} options.dbFile cesta k accounts.sqlite
  * @param {() => number|null} options.port port bežiaceho servera
  */
-export function createAdminSources({ root, dbFile, port, fetchFeed = loopbackGet, startedAt = Date.now() }) {
+export function createAdminSources({ root, dbFile, port, fetchFeed = loopbackGet, startedAt = Date.now(), runtime = () => null }) {
   let feedCache = null;
   let commit;
   const logFile = path.join(root, '.gev-cache', 'logs', 'oko-server.log');
   return {
+    runtime,
+    /** Dnešná spotreba kvóty providera z /status (TomTom, GFW) pre sekciu Náklady. */
+    async quotaStatus() {
+      const p = port();
+      const out = {};
+      if (!p) return out;
+      for (const [id, statusPath] of [['tomtom', '/api/tomtom/status'], ['gfw', '/api/gfw/status']]) {
+        const result = await fetchFeed(p, statusPath, FEED_TIMEOUT_MS);
+        const body = result.body || {};
+        if (Number.isFinite(body.dailyCount)) out[id] = { dailyCount: body.dailyCount, budget: body.budget ?? null, hasKey: Boolean(body.hasKey) };
+      }
+      return out;
+    },
+    cacheDirs: () => cacheDirectories(root),
+    clearCache: name => clearCacheDirectory(root, name),
+    backups: () => listBackups(dbFile),
+    backup: targets => createBackup(dbFile, targets),
     async feeds() {
       if (feedCache && Date.now() - feedCache.at < CACHE_MS) return feedCache.feeds;
       const p = port();
@@ -153,4 +170,83 @@ export function createAdminSources({ root, dbFile, port, fetchFeed = loopbackGet
       finally { await handle?.close(); }
     },
   };
+}
+
+// ── Údržba (2026-10-03) ─────────────────────────────────────────────────────
+/** Priečinky .gev-cache, ktoré sú čistou cache — dajú sa znova stiahnuť bez straty. */
+export const CLEARABLE_CACHE = Object.freeze(['img', 'linkimg', 'logos', 'overpass', 'translate', 'situation',
+  'military-installations', 'relief-normal', 'tomtom']);
+const BACKUPS_KEEP = 14;
+
+/** Zoznam priečinkov .gev-cache s veľkosťou; mazať sa smú len CLEARABLE_CACHE. */
+export async function cacheDirectories(root) {
+  const base = path.join(root, '.gev-cache');
+  let entries = [];
+  try { entries = await fsp.readdir(base, { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const budget = { files: 20000 };
+    const bytes = await directorySize(path.join(base, entry.name), budget);
+    out.push({ name: entry.name, bytes, partial: budget.files < 0, clearable: CLEARABLE_CACHE.includes(entry.name) });
+  }
+  return out.sort((a, b) => b.bytes - a.bytes);
+}
+
+/** Vymaže obsah povoleného priečinka cache; počítadlá rozpočtu (budget*.json) nechá. */
+export async function clearCacheDirectory(root, name) {
+  if (!CLEARABLE_CACHE.includes(name)) throw Object.assign(new Error('cache_not_clearable'), { status: 400 });
+  const directory = path.join(root, '.gev-cache', name);
+  let removed = 0;
+  let freed = 0;
+  const walk = async dir => {
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+        await fsp.rmdir(full).catch(() => {});
+      } else if (entry.isFile() && !/^budget.*\.json$/i.test(entry.name)) {
+        try { freed += (await fsp.stat(full)).size; await fsp.unlink(full); removed++; } catch { /* zamknutý súbor */ }
+      }
+    }
+  };
+  await walk(directory);
+  return { removed, freed };
+}
+
+/** Zálohy v .auth-data/backups (najnovšie prvé). */
+export async function listBackups(dbFile) {
+  const directory = path.join(path.dirname(dbFile), 'backups');
+  let names = [];
+  try { names = (await fsp.readdir(directory)).filter(name => /^(accounts|admin)-[\dT-]+\.sqlite$/.test(name)); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    try { const stat = await fsp.stat(path.join(directory, name)); out.push({ name, bytes: stat.size, createdAt: stat.mtimeMs }); } catch { /* zmazaný */ }
+  }
+  return out.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Záloha DB účtov aj admin DB cez VACUUM INTO; ponechá BACKUPS_KEEP najnovších z každej. */
+export async function createBackup(dbFile, targets, now = Date.now()) {
+  const directory = path.join(path.dirname(dbFile), 'backups');
+  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
+  const stamp = new Date(now).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const made = [];
+  for (const [prefix, store] of Object.entries(targets)) {
+    if (!store?.backupTo) continue;
+    const file = path.join(directory, `${prefix}-${stamp}.sqlite`);
+    await fsp.rm(file, { force: true });
+    store.backupTo(file);
+    if (process.platform !== 'win32') await fsp.chmod(file, 0o600).catch(() => {});
+    made.push(path.basename(file));
+  }
+  const all = await listBackups(dbFile);
+  for (const prefix of Object.keys(targets)) {
+    for (const old of all.filter(backup => backup.name.startsWith(`${prefix}-`)).slice(BACKUPS_KEEP)) {
+      await fsp.rm(path.join(directory, old.name), { force: true });
+    }
+  }
+  return made;
 }

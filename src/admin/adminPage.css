@@ -21,7 +21,7 @@ body.admin { margin: 0; min-height: 100dvh; color: var(--text); background: radi
 .admin-section h2 { margin: 0 0 14px; font-size: 17px; font-weight: 500; }
 .admin-muted { color: var(--muted); font-size: 13px; }
 
-.admin-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.admin-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
 .admin-tile { display: flex; flex-direction: column; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff05; }
 .admin-tile-value { font: 500 28px var(--font-mono); color: var(--text); }
 .admin-tile-label { color: var(--muted); font-size: 12px; }
@@ -44,7 +44,7 @@ body.admin { margin: 0; min-height: 100dvh; color: var(--text); background: radi
 .admin-badge-info { color: var(--accent); }
 .admin-badge-muted { color: var(--muted); }
 
-.admin-btn { display: inline-block; margin-top: 12px; padding: 8px 14px; border: 1px solid #00d4ff55; border-radius: 8px; background: #0c1a25; color: #e2f7ff;
+.admin-btn { display: inline-block; white-space: nowrap; margin-top: 12px; padding: 8px 14px; border: 1px solid #00d4ff55; border-radius: 8px; background: #0c1a25; color: #e2f7ff;
   font: 600 13px var(--font-sans); text-decoration: none; cursor: pointer; }
 .admin-btn:hover { border-color: #00d4ffaa; background: #102533; }
 .admin-btn-warn { border-color: #ffb84d66; color: #ffd9a3; }
@@ -76,3 +76,62 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   .admin-main { padding: 16px; }
   .admin-section { padding: 14px; }
 }
+
+/* ── Rozšírenie 2026-10-03: grafy, filtre, formuláre ───────────────────── */
+.admin-tile-bad .admin-tile-value { color: #ff8a8a; }
+.admin-btn-sm { margin-top: 0; padding: 5px 10px; font-size: 12px; }
+.admin-range { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.admin-chip { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: 12px var(--font-sans); cursor: pointer; }
+.admin-chip:hover { color: var(--text); border-color: #ffffff30; }
+.admin-chip[aria-pressed="true"] { color: var(--text); border-color: #00d4ff66; background: #00d4ff14; }
+.admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-bottom: 28px; }
+.admin-cell { margin-bottom: 0; }
+.admin-facts { display: flex; flex-wrap: wrap; gap: 8px 22px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.admin-inline-form { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.admin-inline-form input, .admin-notice-form textarea, .admin-notice-form select { padding: 6px 10px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text); font: inherit; }
+.admin-inline-form input { width: 130px; margin-left: 6px; }
+.admin-notice-form textarea { width: 100%; resize: vertical; margin-bottom: 10px; }
+.admin-notice-form select { margin-left: 6px; }
+.admin-notice-form label { color: var(--muted); font-size: 13px; }
+.admin-notice-form .admin-btn { margin-top: 0; }
+.admin-preview { padding: 18px; border-radius: 10px; background: #050a10; border: 1px dashed var(--line); }
+.admin-preview-bar { max-width: 640px; margin: 0 auto; padding: 9px 14px; border-radius: 10px; border: 1px solid #00d4ff55; background: #07121b; color: #dff6ff; font-size: 13px; }
+.admin-preview-bar.warn { border-color: #ffb84d88; color: #ffe6c2; background: #1d1407; }
+.admin-err-msg { font: 12px/1.45 var(--font-mono); color: #d8e6ee; }
+
+.chart-block { margin-top: 4px; }
+.chart { position: relative; }
+.chart svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+.chart-grid { stroke: #ffffff12; stroke-width: 1; }
+.chart-base { stroke: #ffffff33; stroke-width: 1; }
+.chart-cross { stroke: #ffffff40; stroke-width: 1; }
+.chart-marker { stroke: #fab219; stroke-width: 1; stroke-dasharray: 4 3; }
+.chart-axis { fill: var(--muted); font: 10.5px var(--font-sans); }
+.chart-tip { position: absolute; z-index: 3; pointer-events: none; padding: 7px 10px; border-radius: 8px; background: #050a10f2; border: 1px solid #ffffff22;
+  font-size: 12px; color: var(--text); white-space: nowrap; box-shadow: 0 6px 24px #000a; }
+.chart-tip-row { display: flex; align-items: center; gap: 6px; }
+.chart-tip-row:first-child { color: var(--muted); }
+.chart-key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.chart-legend-item { display: flex; align-items: center; gap: 6px; }
+.chart-table summary { margin-top: 6px; color: var(--muted); font-size: 11.5px; cursor: pointer; }
+.chart-table table { margin-top: 6px; border-collapse: collapse; font-size: 12px; }
+.chart-table th, .chart-table td { padding: 3px 12px 3px 0; text-align: left; color: #c8d9e4; border-bottom: 1px solid #ffffff0a; }
+
+.barlist { display: grid; gap: 6px; }
+.barlist-row { display: grid; grid-template-columns: minmax(80px, 38%) 1fr auto; gap: 10px; align-items: center; font-size: 12.5px; }
+.barlist-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c8d9e4; }
+.barlist-track { height: 8px; border-radius: 4px; background: #ffffff0a; overflow: hidden; }
+.barlist-fill { height: 100%; border-radius: 4px; background: #3987e5; min-width: 2px; }
+.barlist-value { color: var(--muted); font: 11.5px var(--font-mono); white-space: nowrap; }
+.barlist-empty { color: var(--muted); font-size: 12px; }
+
+/* 168 hodín bez medzier (s medzerou 1 px by mriežka mala min. 335 px a pretiekla do susedného stĺpca). */
+.strip { display: grid; grid-template-columns: repeat(168, minmax(0, 1fr)); width: 252px; height: 18px; border-radius: 3px; overflow: hidden; }
+.strip-cell { min-width: 0; }
+.strip-idle { background: #ffffff10; }
+.strip-ok { background: #0ca30c; }
+.strip-warn { background: #fab219; }
+.strip-bad { background: #d03b3b; }
+.strip-off { background: #9085e9; }
+@media (max-width: 640px) { .admin-grid { grid-template-columns: 1fr; } .barlist-row { grid-template-columns: 34% 1fr auto; } }

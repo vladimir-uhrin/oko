@@ -2,6 +2,8 @@
 // Všetky údaje idú cez /api/admin/* (server pustí len rolu owner); texty sa vkladajú
 // výhradne cez textContent. Oprávnenie rozhoduje server, táto stránka je len zobrazenie.
 
+import { STATUS, barChart, barList, lineChart, number, statusStrip } from './charts.js';
+
 const main = document.getElementById('admin-main');
 const tabs = document.getElementById('admin-tabs');
 const who = document.getElementById('admin-who');
@@ -15,6 +17,11 @@ const ERRORS = {
   csrf_failed: 'Relácia sa zmenila. Obnovte stránku.',
   origin_denied: 'Požiadavka z nepovoleného pôvodu.',
   not_found: 'Prístup zamietnutý alebo relácia vypršala.',
+  telemetry_unavailable: 'Telemetria na serveri nebeží (pozri log).',
+  invalid_notice: 'Oznam má 1–280 znakov a platnosť 1 h až 30 dní.',
+  cache_not_clearable: 'Tento priečinok nie je čistá cache — z panelu sa nemaže.',
+  feed_not_found: 'Neznámy zdroj.',
+  invalid_input: 'Neplatná hodnota.',
 };
 const EVENTS = {
   registered: 'vytvorenie účtu', registered_google: 'vytvorenie cez Google', registered_github: 'vytvorenie cez GitHub',
@@ -26,7 +33,9 @@ const EVENTS = {
   verification_requested: 'žiadosť o overenie', google_linked: 'prepojenie Google', github_linked: 'prepojenie GitHub',
   admin_sessions_revoked: 'admin odhlásil relácie', account_disabled: 'admin zablokoval účet', account_enabled: 'admin odblokoval účet',
 };
-const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user_enabled: 'odblokoval', sessions_revoked: 'odhlásil relácie' };
+const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user_enabled: 'odblokoval', sessions_revoked: 'odhlásil relácie',
+  feed_updated: 'zmenil zdroj', notice_set: 'nastavil oznam', notice_cleared: 'zrušil oznam', errors_cleared: 'vymazal chyby',
+  backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache' };
 
 // ── pomocníci ──────────────────────────────────────────────────────────────
 function el(tag, className = '', text) {
@@ -112,7 +121,9 @@ async function guarded(render) {
 
 // ── Prehľad ────────────────────────────────────────────────────────────────
 async function renderOverview() {
-  const { stats, server } = await api('/api/admin/overview');
+  const [{ stats, server }, live, traffic24, chart] = await Promise.all([api('/api/admin/overview'),
+    api('/api/admin/analytics?days=1').catch(() => null), api('/api/admin/traffic?hours=24').catch(() => null),
+    api('/api/admin/accounts-chart?days=30').catch(() => null)]);
   const tiles = el('div', 'admin-tiles');
   const tile = (label, value, hint) => {
     const t = el('div', 'admin-tile');
@@ -126,7 +137,34 @@ async function renderOverview() {
   tile('prihlásení za 24 h', stats.logins24h);
   tile('zablokovaných', stats.disabled);
   tile('sledovaných letov', stats.follows);
-  const nodes = [section('Účty', tiles)];
+  const nodes = [];
+  if (live || traffic24) {
+    const now = el('div', 'admin-tiles');
+    const add = (label, value, hint, tone) => {
+      const t = el('div', `admin-tile${tone ? ` admin-tile-${tone}` : ''}`);
+      t.append(el('span', 'admin-tile-value', value), el('span', 'admin-tile-label', label));
+      if (hint) t.append(el('span', 'admin-tile-hint', hint));
+      now.append(t);
+    };
+    if (live) {
+      const today = live.series[live.series.length - 1] || { visitors: 0, views: 0 };
+      add('práve na stránke', live.liveNow, 'aktívni za 2,5 min');
+      add('návštevníci dnes', today.visitors, `${today.views} zobrazení`);
+    }
+    if (traffic24) {
+      const sum = traffic24.series.reduce((a, s) => ({ n: a.n + s.n, e5: a.e5 + s.e5 }), { n: 0, e5: 0 });
+      add('požiadavky na API · 24 h', number(sum.n));
+      add('chyby 5xx · 24 h', number(sum.e5), sum.n ? `${((sum.e5 / sum.n) * 100).toFixed(2)} %` : '', sum.e5 ? 'bad' : '');
+    }
+    nodes.push(section('Teraz', now));
+  }
+  nodes.push(section('Účty', tiles));
+  if (chart) {
+    const box = section('Registrácie a prihlásenia · 30 dní');
+    lineChart(box, { labels: chart.series.map(d => shortDay(d.day)),
+      series: [{ name: 'Prihlásenia', values: chart.series.map(d => d.logins) }, { name: 'Registrácie', values: chart.series.map(d => d.registrations) }] });
+    nodes.push(box);
+  }
   if (server) {
     const commit = server.commit ? `${server.commit.hash} · ${when(server.commit.date)} · ${server.commit.subject}` : 'neznámy';
     nodes.push(section('Server', table(['', ''], [
@@ -160,16 +198,45 @@ function feedSummary(data) {
 }
 async function renderFeeds() {
   setView(el('p', 'admin-muted', 'Zisťujem stav feedov…'));
-  const { feeds } = await api('/api/admin/feeds');
-  const rows = feeds.map(feed => {
-    const details = el('details', 'admin-details');
-    details.append(el('summary', '', 'detail'), el('pre', '', JSON.stringify(feed.data, null, 2)));
-    const state = feed.ok ? badge('OK', 'ok') : badge(feed.error || `HTTP ${feed.status}`, 'bad');
-    return row([feed.label, state, `${feed.ms} ms`, feedSummary(feed.data), details]);
+  const [{ feeds: statuses }, { history, settings }] = await Promise.all([api('/api/admin/feeds'), api('/api/admin/feed-history?hours=168')]);
+  const statusById = new Map(statuses.map(feed => [feed.id, feed]));
+  const now = Date.now();
+  const rows = settings.map(setting => {
+    const status = statusById.get(setting.id);
+    const h = history[setting.id] || { hourly: [], outages: [], samples: 0, failed: 0 };
+    // Pás 7 dní po hodinách z reálnych požiadaviek: vypnuté / chyby / OK / ticho.
+    const byHour = new Map(h.hourly.map(entry => [entry.at, entry]));
+    const cells = [];
+    for (let at = Math.floor(now / 3600_000) * 3600_000 - 167 * 3600_000; at <= now; at += 3600_000) {
+      const entry = byHour.get(at);
+      const state = !entry?.n ? 'idle' : entry.blocked >= entry.n ? 'off' : entry.e5 / entry.n > 0.2 ? 'bad' : entry.e5 ? 'warn' : 'ok';
+      const text = { idle: 'bez požiadaviek', off: 'vypnuté', bad: 'veľa chýb', warn: 'občasné chyby', ok: 'OK' }[state];
+      cells.push({ state, title: `${when(at)} · ${text}${entry ? ` · ${entry.n} pož., ${entry.e5} chýb 5xx` : ''}` });
+    }
+    const strip = el('div');
+    statusStrip(strip, cells);
+    const state = setting.enabled === false ? badge('vypnuté', 'bad')
+      : status ? (status.ok ? badge('OK', 'ok') : badge(status.error || `HTTP ${status.status}`, 'bad')) : badge('bez statusu', 'muted');
+    const outages = h.outages.length
+      ? h.outages.slice(-3).map(o => `${when(o.from)}${o.ongoing ? ' – trvá' : ` – ${when(o.to)}`}`).join('; ')
+      : (h.samples ? `0 výpadkov (${h.samples} kontrol)` : '—');
+    const toggle = button(setting.enabled === false ? 'Zapnúť' : 'Vypnúť', async () => {
+      if (setting.enabled !== false && !confirm(`Vypnúť „${setting.label}"? Glóbus ukáže, že zdroj je vypnutý.`)) return;
+      try { await api(`/api/admin/feeds/${setting.id}`, { method: 'POST', body: { enabled: setting.enabled === false } }); await renderFeeds(); }
+      catch (error) { main.prepend(notice(error.message)); }
+    }, setting.enabled === false ? 'admin-btn admin-btn-sm' : 'admin-btn admin-btn-sm admin-btn-warn');
+    const summary = el('div');
+    summary.append(el('div', '', status ? feedSummary(status.data) : ''));
+    if (status?.data) {
+      const details = el('details', 'admin-details');
+      details.append(el('summary', '', 'detail'), el('pre', '', JSON.stringify(status.data, null, 2)));
+      summary.append(details);
+    }
+    return row([setting.label, state, strip, outages, summary, toggle]);
   });
-  setView(section('Stav feedov',
-    el('p', 'admin-muted', 'Z existujúcich /status endpointov. Hodnota sa drží 30 s; kľúče sa nikdy nezobrazujú.'),
-    table(['Feed', 'Stav', 'Odozva', 'Súhrn', ''], rows),
+  setView(section('Zdroje dát',
+    el('p', 'admin-muted', 'Pás = posledných 7 dní po hodinách podľa skutočných požiadaviek (sivá = ticho, zelená = OK, žltá = občasné 5xx, červená = veľa 5xx, fialová = vypnuté). Výpadky z kontroly statusu každých 10 min. Vypnutý zdroj vracia 503 a glóbus to oznámi.'),
+    table(['Zdroj', 'Stav', 'Dostupnosť 7 dní', 'Posledné výpadky', 'Súhrn', ''], rows),
     button('Obnoviť', () => guarded(renderFeeds), 'admin-btn')));
 }
 
@@ -272,8 +339,211 @@ async function renderLog() {
   pre.scrollTop = pre.scrollHeight;
 }
 
+// ── Analytika ──────────────────────────────────────────────────────────────
+const shortDay = day => { const [, m, d] = day.split('-'); return `${Number(d)}. ${Number(m)}.`; };
+const DIM_TITLES = { path: 'Stránky', ref: 'Odkiaľ prišli', country: 'Krajiny', browser: 'Prehliadače', os: 'Systémy',
+  device: 'Zariadenia', screen: 'Šírka okna (px)', lang: 'Jazyk prehliadača', hour: 'Hodina dňa (Bratislava)', layer: 'Zapnuté vrstvy' };
+const countryName = (() => { try { const names = new Intl.DisplayNames(['sk'], { type: 'region' }); return code => (code === '??' ? 'neznáma' : names.of(code) || code); } catch { return code => code; } })();
+const analyticsState = { days: 30 };
+function rangePicker(state, options, onChange) {
+  const wrap = el('div', 'admin-range');
+  for (const [value, label] of options) {
+    const b = button(label, () => { state.days = value; onChange(); }, 'admin-chip');
+    if (state.days === value) b.setAttribute('aria-pressed', 'true');
+    wrap.append(b);
+  }
+  return wrap;
+}
+async function renderAnalytics() {
+  const data = await api(`/api/admin/analytics?days=${analyticsState.days}`);
+  const tiles = el('div', 'admin-tiles');
+  const tile = (label, value, hint) => {
+    const t = el('div', 'admin-tile');
+    t.append(el('span', 'admin-tile-value', value), el('span', 'admin-tile-label', label));
+    if (hint) t.append(el('span', 'admin-tile-hint', hint));
+    tiles.append(t);
+  };
+  const today = data.series[data.series.length - 1] || { views: 0, visitors: 0 };
+  tile('práve na stránke', data.liveNow, 'aktívni za 2,5 min');
+  tile('návštevníci dnes', today.visitors, `${today.views} zobrazení`);
+  tile(`návštevníci · ${data.days} d`, number(data.totals.visitors), 'súčet denných unikátov');
+  tile(`zobrazenia · ${data.days} d`, number(data.totals.views), data.totals.visitors ? `${(data.totals.views / data.totals.visitors).toFixed(1)} na návštevníka` : '');
+  tile('aktívny čas', `${number(Math.round(data.totals.minutes / 60))} h`, data.totals.views ? `${(data.totals.minutes / data.totals.views).toFixed(1)} min na zobrazenie` : '');
+  tile('boti', number(data.totals.bots), 'nezapočítaní');
+  const trend = el('div');
+  const picker = rangePicker(analyticsState, [[7, '7 dní'], [30, '30 dní'], [90, '90 dní'], [365, 'rok']], () => guarded(renderAnalytics));
+  setView(section('Návštevnosť', picker, tiles), section('Vývoj', trend));
+  lineChart(trend, { labels: data.series.map(d => shortDay(d.day)),
+    series: [{ name: 'Návštevníci', values: data.series.map(d => d.visitors) }, { name: 'Zobrazenia', values: data.series.map(d => d.views) }] });
+  const grid = el('div', 'admin-grid');
+  for (const dim of ['ref', 'country', 'path', 'layer', 'device', 'browser', 'os', 'screen', 'lang']) {
+    const box = el('section', 'admin-section admin-cell');
+    box.append(el('h2', '', DIM_TITLES[dim]));
+    barList(box, data.dims[dim] || [], { labelOf: dim === 'country' ? r => countryName(r.val) : r => r.val });
+    grid.append(box);
+  }
+  const hours = new Map((data.dims.hour || []).map(r => [r.val, r.n]));
+  const hourBox = section(DIM_TITLES.hour);
+  barChart(hourBox, { labels: Array.from({ length: 24 }, (_, h) => `${h}`), values: Array.from({ length: 24 }, (_, h) => hours.get(String(h).padStart(2, '0')) || 0), name: 'Zobrazenia' });
+  main.append(hourBox, grid,
+    el('p', 'admin-muted', 'Anonymne: bez cookie a bez IP v databáze. Návštevník = hash s dennou soľou, ktorý po polnoci zanikne (ostane len počet). Do Not Track / GPC sa rešpektuje.'));
+}
+
+const percent = (part, whole) => { const p = (part / whole) * 100; return p > 0 && p < 0.1 ? '< 0,1 %' : `${p.toFixed(1).replace('.', ',')} %`; };
+
+// ── Prevádzka (požiadavky na API) ──────────────────────────────────────────
+const trafficState = { days: 2 };
+async function renderTraffic() {
+  const hours = trafficState.days * 24;
+  const data = await api(`/api/admin/traffic?hours=${hours}`);
+  const picker = rangePicker(trafficState, [[1, '24 h'], [2, '48 h'], [7, '7 dní'], [30, '30 dní']], () => guarded(renderTraffic));
+  const label = at => { const d = new Date(at); return trafficState.days > 2 ? `${d.getDate()}. ${d.getMonth() + 1}.` : `${d.getHours()}:00`; };
+  const req = el('div'); const errs = el('div'); const lat = el('div');
+  setView(section('Požiadavky na API za hodinu', picker, req), section('Chyby servera (5xx) za hodinu', errs), section('Priemerná odozva (ms)', lat));
+  barChart(req, { labels: data.series.map(s => label(s.at)), values: data.series.map(s => s.n), name: 'Požiadavky' });
+  barChart(errs, { labels: data.series.map(s => label(s.at)), values: data.series.map(s => s.e5), name: 'Chyby 5xx', color: STATUS.critical,
+    notes: data.series.map(s => (s.blocked ? `zablokované adminom: ${s.blocked}` : '')) });
+  barChart(lat, { labels: data.series.map(s => label(s.at)), values: data.series.map(s => s.avgMs), name: 'Odozva ms' });
+  const rows = data.routes.map(r => row([r.label, number(r.n), r.e5 ? badge(`${r.e5} (${percent(r.e5, r.n)})`, 'bad') : '0',
+    number(r.e4), r.blocked ? number(r.blocked) : '—', `${r.avgMs} / ${r.maxMs}`, bytes(r.bytes)]));
+  main.append(section('Podľa zdroja', table(['Zdroj', 'Požiadavky', '5xx', '4xx', 'Blokované', 'Odozva ø / max ms', 'Prenos'], rows)));
+}
+
+// ── Chyby ──────────────────────────────────────────────────────────────────
+const KINDS = { '': 'Všetky', server: 'Server (error)', http: 'HTTP 5xx', client: 'Prehliadač (JS)', warn: 'Server (warning)' };
+const errorState = { kind: '' };
+async function renderErrors() {
+  const { errors } = await api(`/api/admin/errors${errorState.kind ? `?kind=${errorState.kind}` : ''}`);
+  const filters = el('div', 'admin-range');
+  for (const [kind, label] of Object.entries(KINDS)) {
+    const b = button(label, () => { errorState.kind = kind; void guarded(renderErrors); }, 'admin-chip');
+    if (errorState.kind === kind) b.setAttribute('aria-pressed', 'true');
+    filters.append(b);
+  }
+  const rows = errors.map(e => {
+    const message = el('div');
+    message.append(el('div', 'admin-err-msg', e.message));
+    if (e.detail) { const d = el('details', 'admin-details'); d.append(el('summary', '', 'detail'), el('pre', '', e.detail)); message.append(d); }
+    const tone = e.kind === 'warn' ? 'muted' : 'bad';
+    return row([badge(KINDS[e.kind] || e.kind, tone), message, number(e.count), when(e.lastAt), when(e.firstAt)]);
+  });
+  const clear = button('Vymazať zobrazené', async () => {
+    if (!confirm('Vymazať tieto záznamy chýb?')) return;
+    try { await api('/api/admin/errors', { method: 'DELETE', body: errorState.kind ? { kind: errorState.kind } : {} }); await renderErrors(); }
+    catch (error) { main.prepend(notice(error.message)); }
+  }, 'admin-btn admin-btn-danger');
+  setView(section('Chyby a varovania', filters,
+    el('p', 'admin-muted', 'Rovnaké chyby sú zlúčené (čísla sa ignorujú). Kľúče z .env a parametre key/token v URL sú nahradené ***. Uchováva sa 30 dní.'),
+    errors.length ? table(['Druh', 'Správa', 'Počet', 'Naposledy', 'Prvýkrát'], rows) : el('p', 'admin-muted', 'Žiadne chyby. 🎉'), clear));
+}
+
+// ── Náklady a limity ───────────────────────────────────────────────────────
+async function renderCosts() {
+  const data = await api('/api/admin/costs?days=30');
+  setView(section('Náklady a limity',
+    el('p', 'admin-muted', 'Platené zdroje (OpenAI, Google) sa počítajú po požiadavkách na náš server; denný strop ich nad limit odmietne (429). Cenu za jednotku zadáte vy — odhad je len násobok. TomTom a GFW ukazujú aj spotrebu kvóty z ich vlastného počítadla.')));
+  for (const feed of data.feeds) {
+    const box = section(feed.label);
+    const facts = el('div', 'admin-facts');
+    const fact = (label, value) => { const f = el('div'); f.append(el('span', 'admin-muted', `${label} `), el('strong', '', value)); facts.append(f); };
+    fact('dnes', `${number(feed.today)} ${feed.unit}`);
+    fact('30 dní', number(feed.total));
+    if (feed.estimate !== null) fact('odhad 30 dní', `${number(feed.estimate)} €`);
+    if (feed.provider) fact('kvóta providera dnes', `${number(feed.provider.dailyCount)}${feed.provider.budget ? ` / ${number(feed.provider.budget)}` : ''}`);
+    if (feed.dailyCap !== null) fact('denný strop', number(feed.dailyCap));
+    if (!feed.enabled) facts.append(badge('vypnuté', 'bad'));
+    if (feed.dailyCap && feed.today >= feed.dailyCap * 0.8) facts.append(badge(feed.today >= feed.dailyCap ? 'strop dosiahnutý' : 'blízko stropu', 'bad'));
+    box.append(facts);
+    if (feed.total || feed.series.some(d => d.blocked)) {
+      barChart(box, { labels: feed.series.map(d => shortDay(d.day)), values: feed.series.map(d => d.n), name: feed.unit, marker: feed.dailyCap,
+        notes: feed.series.map(d => (d.blocked ? `odmietnuté stropom/vypnutím: ${d.blocked}` : '')) });
+    } else box.append(el('p', 'admin-muted', 'Za 30 dní žiadne požiadavky.'));
+    if (feed.paid) {
+      const form = el('form', 'admin-inline-form');
+      const cap = el('input'); Object.assign(cap, { type: 'number', min: 0, step: 1, placeholder: 'bez stropu', value: feed.dailyCap ?? '' });
+      const price = el('input'); Object.assign(price, { type: 'number', min: 0, step: 0.0001, placeholder: '€ / jednotka', value: feed.unitPrice ?? '' });
+      const capLabel = el('label', '', 'Denný strop '); capLabel.append(cap);
+      const priceLabel = el('label', '', 'Cena € za jednotku '); priceLabel.append(price);
+      form.append(capLabel, priceLabel, el('button', 'admin-btn admin-btn-sm', 'Uložiť'));
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const body = { dailyCap: cap.value === '' ? null : Number(cap.value), unitPrice: price.value === '' ? null : Number(price.value) };
+        try { await api(`/api/admin/feeds/${feed.id}`, { method: 'POST', body }); await renderCosts(); main.prepend(notice(`${feed.label}: uložené.`, 'ok')); }
+        catch (error) { main.prepend(notice(error.message)); }
+      });
+      box.append(form);
+    }
+    main.append(box);
+  }
+}
+
+// ── Oznam ──────────────────────────────────────────────────────────────────
+async function renderNotice() {
+  const data = await api('/api/admin/notice');
+  const current = data.notice?.value;
+  const form = el('form', 'admin-notice-form');
+  const text = el('textarea'); Object.assign(text, { maxLength: 280, rows: 3, placeholder: 'Napr. Dnes o 20:00 krátka údržba servera.', value: current?.text || '' });
+  text.setAttribute('aria-label', 'Text oznamu');
+  const level = el('select');
+  for (const [value, label] of [['info', 'Informácia'], ['warn', 'Upozornenie']]) {
+    const option = el('option', '', label); option.value = value; if (current?.level === value) option.selected = true; level.append(option);
+  }
+  const hours = el('select');
+  for (const [value, label] of [['', 'kým ho nezruším'], ['1', '1 hodinu'], ['6', '6 hodín'], ['24', '1 deň'], ['72', '3 dni'], ['168', '7 dní']]) {
+    const option = el('option', '', label); option.value = value; hours.append(option);
+  }
+  const lLevel = el('label', '', 'Typ '); lLevel.append(level);
+  const lHours = el('label', '', 'Platnosť '); lHours.append(hours);
+  const save = el('button', 'admin-btn', 'Zverejniť');
+  const clear = button('Zrušiť oznam', async () => {
+    try { await api('/api/admin/notice', { method: 'POST', body: { text: '' } }); await renderNotice(); main.prepend(notice('Oznam zrušený.', 'ok')); }
+    catch (error) { main.prepend(notice(error.message)); }
+  }, 'admin-btn admin-btn-warn');
+  const controls = el('div', 'admin-actions'); controls.append(lLevel, lHours, save, clear);
+  form.append(text, controls);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const body = { text: text.value, level: level.value, ...(hours.value ? { hours: Number(hours.value) } : {}) };
+    try { await api('/api/admin/notice', { method: 'POST', body }); await renderNotice(); main.prepend(notice('Oznam je na glóbuse (do 5 min u otvorených kariet).', 'ok')); }
+    catch (error) { main.prepend(notice(error.message)); }
+  });
+  const preview = el('div', 'admin-preview');
+  const shown = data.public;
+  const parts = [shown.notice?.text, shown.disabled.length ? `Dočasne vypnuté: ${shown.disabled.join(', ')}.` : ''].filter(Boolean);
+  preview.append(el('div', `admin-preview-bar${shown.notice?.level === 'warn' || (!shown.notice && shown.disabled.length) ? ' warn' : ''}`, parts.join(' ') || 'Nič — banner sa neukazuje.'));
+  setView(section('Oznam na glóbuse', form,
+    el('p', 'admin-muted', current?.until ? `Platí do ${when(current.until)}.` : current ? 'Platí, kým ho nezrušíte.' : 'Žiadny oznam nie je nastavený.')),
+    section('Ako to teraz vidia návštevníci', preview,
+      el('p', 'admin-muted', 'Vypnuté zdroje (Feedy) sa do banneru pridávajú automaticky.')));
+}
+
+// ── Údržba ─────────────────────────────────────────────────────────────────
+async function renderMaintenance() {
+  const data = await api('/api/admin/maintenance');
+  const backup = button('Zálohovať databázy teraz', async event => {
+    event.target.disabled = true;
+    try { const result = await api('/api/admin/maintenance/backup', { method: 'POST', body: {} }); await renderMaintenance(); main.prepend(notice(`Záloha: ${result.made.join(', ')}`, 'ok')); }
+    catch (error) { main.prepend(notice(error.message)); event.target.disabled = false; }
+  }, 'admin-btn');
+  const backups = data.backups.length ? table(['Súbor', 'Veľkosť', 'Vytvorená'], data.backups.map(b => row([b.name, bytes(b.bytes), when(b.createdAt)])))
+    : el('p', 'admin-muted', 'Zatiaľ žiadna záloha.');
+  const cacheRows = data.cache.map(dir => {
+    const action = dir.clearable ? button('Vyčistiť', async () => {
+      if (!confirm(`Vymazať cache „${dir.name}"? Stiahne sa znova pri ďalšom použití.`)) return;
+      try { const result = await api('/api/admin/maintenance/cache', { method: 'POST', body: { name: dir.name } }); await renderMaintenance(); main.prepend(notice(`${dir.name}: zmazaných ${result.removed} súborov (${bytes(result.freed)}).`, 'ok')); }
+      catch (error) { main.prepend(notice(error.message)); }
+    }, 'admin-btn admin-btn-sm admin-btn-warn') : el('span', 'admin-muted', 'dáta, nie cache');
+    return row([dir.name, `${dir.partial ? '> ' : ''}${bytes(dir.bytes)}`, action]);
+  });
+  setView(section('Záloha', el('p', 'admin-muted', 'Konzistentná kópia DB účtov aj admin DB do .auth-data/backups (ponechá 14 najnovších). Zálohy obsahujú hashe hesiel — zostávajú len na serveri.'), backup, backups),
+    section('Cache (.gev-cache)', data.cache.length ? table(['Priečinok', 'Veľkosť', ''], cacheRows) : el('p', 'admin-muted', 'Cache je prázdna.'),
+      el('p', 'admin-muted', 'Mazať sa dá len čistá cache (obrázky, logá, Overpass, preklady, TomTom dlaždice…). Archív letov, zdieľané odkazy, terén a meteo bake sú dáta. Počítadlá rozpočtu (budget.json) sa nemažú.')));
+}
+
 // ── štart ──────────────────────────────────────────────────────────────────
-const RENDER = { overview: renderOverview, feeds: renderFeeds, users: renderUsers, audit: renderAudit, log: renderLog };
+const RENDER = { overview: renderOverview, analytics: renderAnalytics, traffic: renderTraffic, errors: renderErrors,
+  costs: renderCosts, feeds: renderFeeds, users: renderUsers, notice: renderNotice, maintenance: renderMaintenance,
+  audit: renderAudit, log: renderLog };
 function show(tab) {
   const current = RENDER[tab] ? tab : 'overview';
   for (const b of tabs.querySelectorAll('button')) {
