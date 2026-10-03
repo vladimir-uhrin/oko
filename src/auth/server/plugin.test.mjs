@@ -65,3 +65,35 @@ test('actual Vite plugin leaves public routes open and denies DB/WAL/raw/file-sy
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('isOwnerRequest uzná rolu owner z DB aj bez OKO_OWNER_EMAILS', async () => {
+  const { openAuthStore } = await import('./store.js');
+  const { hashPassword } = await import('./passwords.js');
+  const directory = mkdtempSync(path.join(tmpdir(), 'oko-owner-role-'));
+  const database = path.join(directory, 'accounts.sqlite');
+  const pw = 'owner password phrase long enough';
+  const store = openAuthStore(database);
+  store.createOwner('owner@oko.test', 'Owner', await hashPassword(pw), Date.now());
+  store.close();
+  const plugin = authPlugin({ AUTH_DB_PATH: database });
+  let owner = null;
+  const server = await createServer({ configFile: false, envFile: false, cacheDir: path.join(directory, 'vite'),
+    plugins: [plugin, { name: 'owner-probe', configureServer(s) { s.middlewares.use('/api/owner-probe', (req, res) => { owner = plugin.isOwnerRequest(req, res); res.end(String(owner)); }); } }],
+    server: { host: '127.0.0.1', port: 0, watch: null }, optimizeDeps: { noDiscovery: true, include: [] }, logLevel: 'silent' });
+  try {
+    await server.listen();
+    const base = `http://127.0.0.1:${server.httpServer.address().port}`;
+    assert.equal(await (await fetch(base + '/api/owner-probe')).text(), 'false');
+    const csrf = await fetch(base + '/api/auth/csrf');
+    const cookie = csrf.headers.get('set-cookie').split(';')[0];
+    const { csrfToken } = await csrf.json();
+    const login = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken, Cookie: cookie, Origin: base },
+      body: JSON.stringify({ email: 'owner@oko.test', password: pw }) });
+    assert.equal(login.status, 200);
+    const session = login.headers.get('set-cookie').split(';')[0];
+    assert.equal(await (await fetch(base + '/api/owner-probe', { headers: { Cookie: session } })).text(), 'true');
+  } finally {
+    await server.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

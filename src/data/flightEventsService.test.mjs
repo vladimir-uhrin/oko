@@ -793,3 +793,39 @@ test('chýbajúce údaje zo správ (FZ1073 → Tabuk): zápis len z tohto počí
     h.cleanup();
   }
 });
+
+test('DO ŠTÚDIA (2026-10-03): udalosť → návrh v Štúdiu s obrázkom feed, textom a hotovým 3D videom; bez Štúdia 503; verejná adresa 404', async () => {
+  const { oko } = fz1073();
+  const h = harness({
+    startMs: Date.parse('2026-09-30T08:00:00Z'),
+    tracks: { '8965d1': oko.map((p) => row(p)) },
+    legs: { '8965d1': [{ callsign: 'FDB1073', firstT: T('2026-09-30T03:05:00Z'), lastT: T('2026-09-30T05:53:33Z') }] },
+    traces: { [LIVE_FZ]: fixtureText('adsblol-trace-8965d1-20260930.json') },
+  });
+  try {
+    const imports = [];
+    const videoStore = createEventVideoStore({ dir: path.join(h.dir, '3d') });
+    const service = h.make({ renderCard: createEventCardRenderer({ dataDir: LOCAL_DATA }), videoStore,
+      studioImport: async (input) => { imports.push(input); return { created: imports.length === 1, reason: imports.length === 1 ? null : 'exists', draft: { id: 'd1' } }; } });
+    const r = await call(service, '/analyze?hex=8965d1&from=2026-09-30T03:00:00Z&to=2026-09-30T07:00:00Z&save=1');
+    const id = r.json.id;
+    assert.equal((await call(service, `/${id}/studio`, false, OWN_POST)).status, 404, 'z verejnej adresy nie');
+    assert.equal((await call(service, `/${id}/post`)).json.studio, true, 'panel vie, že Štúdio je');
+    const first = await call(service, `/${id}/studio`, true, OWN_POST);
+    assert.deepEqual([first.status, first.json.created, first.json.draftId, first.json.video], [200, true, 'd1', false]);
+    assert.equal(imports[0].template, 'event');
+    assert.equal(imports[0].eventKey, `event:${id}`);
+    assert.ok(imports[0].title.length > 3 && imports[0].text.includes('OpenSky'));
+    const meta = await sharp(imports[0].image).metadata();
+    assert.deepEqual([meta.width, meta.height, meta.format], [1080, 1350, 'jpeg'], 'obrázok feed');
+    // S hotovým 3D videom ide aj cesta k súboru.
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(16), Buffer.from('moov'), Buffer.alloc(64)]);
+    videoStore.save(service.store.get(id), mp4);
+    const second = await call(service, `/${id}/studio`, true, OWN_POST);
+    assert.deepEqual([second.json.created, second.json.reason, second.json.video], [false, 'exists', true]);
+    assert.ok(existsSync(imports[1].videoFile));
+    const none = h.make({ renderCard: createEventCardRenderer({ dataDir: LOCAL_DATA }) });
+    assert.equal((await call(none, `/${id}/post`)).json.studio, false);
+    assert.equal((await call(none, `/${id}/studio`, true, OWN_POST)).status, 503);
+  } finally { h.cleanup(); }
+});

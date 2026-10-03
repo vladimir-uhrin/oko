@@ -2,7 +2,7 @@
 // až po kontrole roly owner a limitu; zápisy prešli Origin + CSRF kontrolou v context().
 import { sendVideo } from './index.js';
 
-const DRAFT = /^\/api\/admin\/studio\/drafts\/([a-f0-9-]{36})(?:\/(image|video|render|approve|discard|restore|publish|shared|schedule))?$/;
+const DRAFT = /^\/api\/admin\/studio\/drafts\/([a-f0-9-]{36})(?:\/(image|video|source|render|approve|discard|restore|publish|shared|schedule))?$/;
 
 export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJson, fail, active, rate, studio, store, actor, now }) {
   if (!studio) throw fail('studio_unavailable', 503);
@@ -11,7 +11,8 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
   const methods = { '/': ['GET'], '/generate': ['POST'], '/settings': ['POST'], '/tick': ['POST'], '/drafts/:id': ['GET', 'POST'],
     '/drafts/:id/image': ['GET'], '/drafts/:id/video': ['GET'], '/drafts/:id/render': ['POST'], '/drafts/:id/approve': ['POST'], '/drafts/:id/discard': ['POST'], '/drafts/:id/restore': ['POST'],
     '/drafts/:id/publish': ['POST'], '/drafts/:id/shared': ['POST'], '/drafts/:id/schedule': ['POST'],
-    '/calendar': ['GET'], '/insights': ['GET'], '/insights/refresh': ['POST'] }[route];
+    '/drafts/:id/source': ['GET'], '/calendar': ['GET'], '/insights': ['GET'], '/insights/refresh': ['POST'],
+    '/front-week': ['GET', 'POST'] }[route];
   if (!methods) throw fail('not_found', 404);
   if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
   const id = draftRoute?.[1];
@@ -25,6 +26,13 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
         capabilities: await studio.capabilities() });
     }
     if (route === '/calendar') return json(res, 200, { items: studio.calendar(14) });
+    if (route === '/front-week') return json(res, 200, { status: studio.frontWeekStatus(), settings: studio.settings().frontWeek });
+    if (route === '/drafts/:id/source') {
+      const file = studio.sourceVideoPath(id);
+      if (!file) throw fail('video_not_ready', 404);
+      return sendVideo(req, res, file, { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': `attachment; filename="oko-video-${id.slice(0, 8)}.mp4"` });
+    }
     if (route === '/insights') return json(res, 200, { posts: studio.insights(), meta: studio.publisherStatus() });
     if (route === '/drafts/:id/image') {
       const image = studio.image(id);
@@ -62,6 +70,14 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
   if (route === '/drafts/:id') {
     if (Object.keys(body).some(key => key !== 'text')) throw fail('invalid_input');
     return json(res, 200, { draft: studio.edit(id, body.text) });
+  }
+  if (route === '/front-week') {
+    if (Object.keys(body).some(key => key !== 'day')) throw fail('invalid_input');
+    if (body.day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(body.day))) throw fail('invalid_input');
+    audit('studio_front_week', body.day || 'posledný týždeň');
+    // Beží na pozadí (až hodinu) — odpoveď hneď, stav cez GET /front-week.
+    studio.runFrontWeek({ day: body.day || null, trigger: 'manual' }).catch(() => {});
+    return json(res, 202, { status: studio.frontWeekStatus() });
   }
   if (route === '/insights/refresh') return json(res, 200, { ...(await studio.refreshInsights(true)), posts: studio.insights() });
   if (route === '/drafts/:id/schedule') {

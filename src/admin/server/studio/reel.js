@@ -185,6 +185,31 @@ async function run(bin, args, { input = null, timeoutMs = 120_000 } = {}) {
   if (code !== 0) throw new Error(`${path.basename(bin)} skončil s kódom ${code}: ${stderr.split('\n').filter(Boolean).slice(-2).join(' | ')}`);
 }
 
+/**
+ * Reel 9:16 z hotového videa iného pomeru (4:5 z Udalostí / Týždňa na fronte): rozmazané pozadie
+ * z toho istého záberu, obraz v strede v plnej šírke, zvuk a dĺžka bez zmeny. Žiadny nový render.
+ */
+export async function padToReel(inFile, outFile, { env = process.env } = {}) {
+  const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
+  const filter = `[0:v]split=2[bg][fg];[bg]scale=${REEL.width}:${REEL.height}:force_original_aspect_ratio=increase,crop=${REEL.width}:${REEL.height},gblur=sigma=30,eq=brightness=-0.12[bgb];`
+    + `[fg]scale=${REEL.width}:-2:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p[v]`;
+  await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', inFile, '-filter_complex', filter, '-map', '[v]', '-map', '0:a?',
+    '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-g', String(REEL.fps * 2), '-r', String(REEL.fps),
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', outFile], { timeoutMs: 10 * 60_000 });
+  return { bytes: (await stat(outFile)).size };
+}
+
+/** Prvá snímka videa ako JPEG (obrázok príspevku k importovanému videu). */
+export async function posterFrame(inFile, { env = process.env, at = 1 } = {}) {
+  const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
+  const work = await mkdtemp(path.join(tmpdir(), 'oko-poster-'));
+  try {
+    const out = path.join(work, 'poster.jpg');
+    await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(at), '-i', inFile, '-frames:v', '1', '-q:v', '3', out], { timeoutMs: 60_000 });
+    return await readFile(out);
+  } finally { await rm(work, { recursive: true, force: true }); }
+}
+
 /** Je ffmpeg dostupný? (cesta z FFMPEG_PATH alebo PATH) */
 export async function ffmpegAvailable(bin = process.env.FFMPEG_PATH || 'ffmpeg') {
   try { await run(bin, ['-hide_banner', '-version'], { timeoutMs: 10_000 }); return true; } catch { return false; }
@@ -206,15 +231,21 @@ async function pickMusic(dir, seed) {
  * @param {object} options { audio: 'ambient'|'music'|'none', voice: boolean, env, site, onProgress }
  */
 export async function renderReel(item, outFile, { audio = 'ambient', voice = false, env = process.env, site = 'okolive.sk', onProgress = () => {},
-  seconds: baseSeconds = REEL.seconds, fps = REEL.fps } = {}) {
+  seconds: baseSeconds = REEL.seconds, fps = REEL.fps, voiceProvider = null } = {}) {
   const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
   const work = await mkdtemp(path.join(tmpdir(), 'oko-reel-'));
   try {
     // 1) hlas (voliteľný) určí dĺžku
     let voiceFile = null; let seconds = baseSeconds;
-    if (voice && env.PIPER_PATH && env.PIPER_MODEL) {
+    if (voice && voiceProvider) {
+      // Hlas vlastníka (ai-translators cez pamäť nahrávok Udalostí); null = poskytovateľ nedostupný → bez hlasu.
+      const wav = await voiceProvider(narration(item));
+      if (wav) { voiceFile = path.join(work, 'voice.wav'); await writeFile(voiceFile, await readFile(wav)); }
+    } else if (voice && env.PIPER_PATH && env.PIPER_MODEL) {
       voiceFile = path.join(work, 'voice.wav');
       await run(env.PIPER_PATH, ['--model', env.PIPER_MODEL, '--output_file', voiceFile], { input: narration(item), timeoutMs: 60_000 });
+    }
+    if (voiceFile) {
       const length = wavSeconds(await readFile(voiceFile));
       seconds = Math.min(30, Math.max(baseSeconds, Math.ceil(length + 3)));
     }

@@ -32,6 +32,7 @@ const ERRORS = {
   nothing_to_publish: 'Na vybrané siete je už zverejnené.',
   invalid_schedule: 'Čas musí byť v budúcnosti, najviac 30 dní dopredu.',
   no_target: 'Vyberte aspoň jednu sieť.',
+  front_week_running: 'Týždeň na fronte sa práve vyrába.',
 };
 const EVENTS = {
   registered: 'vytvorenie účtu', registered_google: 'vytvorenie cez Google', registered_github: 'vytvorenie cez GitHub',
@@ -47,7 +48,7 @@ const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user
   feed_updated: 'zmenil zdroj', notice_set: 'nastavil oznam', notice_cleared: 'zrušil oznam', errors_cleared: 'vymazal chyby',
   backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache', studio_generated: 'vytvoril návrh', studio_settings: 'zmenil automatiku Štúdia',
   studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne', studio_publish_started: 'spustil zverejnenie',
-  studio_scheduled: 'naplánoval príspevok', studio_unscheduled: 'zrušil plán' };
+  studio_scheduled: 'naplánoval príspevok', studio_unscheduled: 'zrušil plán', studio_front_week: 'spustil Týždeň na fronte' };
 
 // ── pomocníci ──────────────────────────────────────────────────────────────
 function el(tag, className = '', text) {
@@ -345,8 +346,10 @@ const STUDIO_REASONS = { nothing_to_post: 'Teraz nie je čo zverejniť (žiadna 
   source_unavailable: 'Zdroj dát je teraz nedostupný.', server_not_ready: 'Server ešte nebeží naplno, skúste o chvíľu.' };
 const studioState = { filter: 'open', poll: null };
 async function renderStudio(message) {
-  const [data, calendarData] = await Promise.all([api('/api/admin/studio'), api('/api/admin/studio/calendar').catch(() => ({ items: [] }))]);
+  const [data, calendarData, frontWeekData] = await Promise.all([api('/api/admin/studio'), api('/api/admin/studio/calendar').catch(() => ({ items: [] })),
+    api('/api/admin/studio/front-week').catch(() => null)]);
   data.calendar = calendarData.items;
+  data.frontWeek = frontWeekData;
   const meta = data.meta;
   const connected = meta.facebook || meta.instagram;
   // Stav pripojenia
@@ -398,6 +401,8 @@ async function renderStudio(message) {
   const voiceBox = el('input'); voiceBox.type = 'checkbox'; voiceBox.checked = data.settings.voice; voiceBox.disabled = !caps.voice;
   voiceBox.addEventListener('change', () => saveStudioSettings({ voice: voiceBox.checked }));
   voice.append(voiceBox, document.createTextNode(caps.voice ? ' Slovenský hlasový komentár (Piper)' : ' Slovenský hlas — nastavte PIPER_PATH a PIPER_MODEL v .env'));
+  voice.replaceChildren(voiceBox, document.createTextNode(caps.ownerVoice ? ' Hlasový komentár vaším hlasom (ai-translators)'
+    : caps.voice ? ' Slovenský hlasový komentár (Piper)' : ' Hlasový komentár — nastavte AI_TRANSLATORS_MCP_KEY (váš hlas) alebo PIPER_PATH v .env'));
   reelBox.append(autoReel, audioLabel, voice);
   if (!caps.ffmpeg) reelBox.append(notice('Reels potrebujú ffmpeg na serveri (zadarmo): na Windows „winget install ffmpeg", alebo cesta vo FFMPEG_PATH v .env. Potom reštartujte server.', 'info'));
   auto.append(reelBox);
@@ -426,14 +431,35 @@ async function renderStudio(message) {
   for (const draft of shown) grid.append(studioCard(draft, meta));
   if (!shown.length) grid.append(el('p', 'admin-muted', 'Žiadne návrhy. Vytvorte ich tlačidlami vyššie, alebo počkajte na automatiku.'));
 
+  // Týždeň na fronte (video z scripts/make-front-week-video.mjs → návrh v Štúdiu)
+  const fw = data.frontWeek || { status: {}, settings: data.settings.frontWeek };
+  const fwBox = el('div');
+  const fwAuto = el('label', 'admin-check');
+  const fwBoxInput = el('input'); fwBoxInput.type = 'checkbox'; fwBoxInput.checked = Boolean(fw.settings?.enabled); fwBoxInput.disabled = !caps.frontWeek;
+  fwBoxInput.addEventListener('change', () => saveStudioSettings({ frontWeek: { enabled: fwBoxInput.checked } }));
+  const dayNames = ['nedeľu', 'pondelok', 'utorok', 'stredu', 'štvrtok', 'piatok', 'sobotu'];
+  fwAuto.append(fwBoxInput, document.createTextNode(` Každú ${dayNames[fw.settings?.weekday ?? 6]} o ${fw.settings?.hour ?? 7}:00 vyrobiť video „Týždeň na fronte" a dať ho sem ako návrh`));
+  const fwActions = el('div', 'admin-actions');
+  const fwStatus = fw.status || {};
+  fwActions.append(button(fwStatus.running ? 'Vyrába sa…' : 'Vyrobiť Týždeň na fronte teraz', async event => {
+    event.target.disabled = true;
+    try { await api('/api/admin/studio/front-week', { method: 'POST', body: {} }); await renderStudio(notice('Video sa vyrába na pozadí (10–60 min). Stav sa obnoví sám.', 'ok')); }
+    catch (error) { await renderStudio(notice(error.message)); }
+  }, 'admin-btn admin-btn-sm'));
+  if (fwStatus.running) fwActions.append(el('span', 'admin-muted', `beží od ${when(fwStatus.startedAt)}`));
+  else if (fwStatus.error) fwActions.append(badge(`posledný beh zlyhal: ${fwStatus.error}`, 'bad'));
+  else if (fwStatus.finishedAt) fwActions.append(el('span', 'admin-muted', `posledný beh ${when(fwStatus.finishedAt)}`));
+  fwBox.append(fwAuto, fwActions, el('p', 'admin-muted', 'Potrebuje bežiaci dev server s Cesiom (EVENT_VIDEO_PAGE_URL, inak localhost:4173), ffmpeg a hlas (ai-translators alebo nahrávky z pamäte). Výstup: video 4:5 s titulkami, text príspevku; reel 9:16 vznikne doplnením.'));
+  if (fwStatus.log) { const d = el('details', 'admin-details'); d.append(el('summary', '', 'výpis posledného behu'), el('pre', '', fwStatus.log)); fwBox.append(d); }
   setView(...(message ? [message] : []),
     section('Štúdio sociálnych sietí', status, mode, create),
     section('Automatika', auto),
+    section('Týždeň na fronte', fwBox),
     section('Kalendár (7 dní dozadu, 14 dopredu)', studioCalendar(data.calendar || [])),
     section('Príspevky', filters, grid));
   // Kým sa renderuje video alebo zverejňuje, obnovovať každých 5 s (nie počas písania textu).
   clearTimeout(studioState.poll);
-  const busy = data.drafts.some(d => ['queued', 'rendering'].includes(d.videoStatus) || Object.values(d.results || {}).some(r => r.pending));
+  const busy = data.drafts.some(d => ['queued', 'rendering'].includes(d.videoStatus) || Object.values(d.results || {}).some(r => r.pending)) || Boolean(data.frontWeek?.status?.running);
   if (busy) {
     studioState.poll = setTimeout(() => {
       if (location.hash !== '#studio' || document.activeElement?.tagName === 'TEXTAREA') return;
@@ -530,6 +556,8 @@ function studioCard(draft, meta) {
   head.append(badge(statusText, tone), badge(draft.origin === 'auto' ? 'automaticky' : 'ručne', 'muted'));
   if (draft.edited) head.append(badge('upravené', 'muted'));
   if (draft.scheduledAt) head.append(badge(`naplánované ${when(draft.scheduledAt)}`, 'info'));
+  if (draft.template === 'event') head.append(badge('z Udalostí', 'muted'));
+  if (draft.template === 'front-week') head.append(badge('Týždeň na fronte', 'muted'));
   const text = el('textarea', 'admin-studio-text'); text.value = draft.text; text.rows = 9; text.maxLength = 2200;
   text.setAttribute('aria-label', `Text príspevku: ${draft.title}`);
   const editable = ['draft', 'approved', 'failed'].includes(draft.status);
@@ -585,6 +613,11 @@ function studioCard(draft, meta) {
   const download = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť obrázok');
   download.href = `/api/admin/studio/drafts/${draft.id}/image`; download.download = `oko-${draft.id.slice(0, 8)}.jpg`;
   actions.append(download);
+  if (draft.card?.kind === 'import' && draft.card.sourceVideo) {
+    const src = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť video 4:5');
+    src.href = `/api/admin/studio/drafts/${draft.id}/source`; src.download = `oko-video-${draft.id.slice(0, 8)}.mp4`;
+    actions.append(src);
+  }
   if (videoReady) {
     const downloadVideo = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť reel');
     downloadVideo.href = `/api/admin/studio/drafts/${draft.id}/video`; downloadVideo.download = `oko-reel-${draft.id.slice(0, 8)}.mp4`;

@@ -189,3 +189,60 @@ test('Meta: FB reel (start → rupload → finish) a IG reel s čakaním na spra
   const bad = createMetaPublisher({ env, fetchImpl: async () => Response.json({ video_id: 'v1', upload_url: 'https://evil.example/upload' }) });
   await assert.rejects(bad.facebookReel({ video: Buffer.alloc(1), text: 't' }), /Neočakávaná adresa/);
 });
+
+test('import z Udalostí: návrh s obrázkom a videom, reel vznikne doplnením 4:5 → 9:16, pôvodné video ostáva', async t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-studio-import-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, 'event.mp4');
+  writeFileSync(src, Buffer.alloc(3000, 2));
+  const pads = [];
+  const studio = createStudio({ store: fakeStore(t), env: {}, port: () => 1, now: () => NOW, timers: false, mediaDir: dir, log: () => {},
+    renderCard: async () => Buffer.from('card'), checkFfmpeg: async () => true,
+    renderReel: async () => { throw new Error('nemá sa renderovať'); },
+    padToReel: async (input, output) => { pads.push([path.basename(input), path.basename(output)]); writeFileSync(output, Buffer.alloc(100)); return {}; },
+    publisher: { status: () => ({ facebook: false, instagram: false }) } });
+  const first = await studio.importDraft({ template: 'event', eventKey: 'event:abc', title: 'Núdzová situácia FZ1073', text: 'Text príspevku', image: Buffer.from('jpg'), videoFile: src });
+  assert.equal(first.created, true);
+  assert.equal(first.draft.card.kind, 'import');
+  assert.equal(first.draft.videoStatus, 'queued');
+  await studio.videosIdle();
+  assert.deepEqual(pads, [[`${first.draft.id}.src.mp4`, `${first.draft.id}.mp4`]]);
+  assert.equal(studio.get(first.draft.id).videoStatus, 'ready');
+  assert.ok(existsSync(studio.sourceVideoPath(first.draft.id)));
+  assert.equal((await studio.importDraft({ template: 'event', eventKey: 'event:abc', title: 'x', text: 'y' })).reason, 'exists');
+  await assert.rejects(studio.importDraft({ template: 'event', eventKey: 'event:z', title: ' ', text: 'y' }), /draft_incomplete/);
+  // Bez obrázka: poster z videa; bez videa: karta.
+  const second = await studio.importDraft({ template: 'front-week', eventKey: 'fw:1', title: 'Týždeň', text: 'T', image: null, videoFile: null });
+  assert.equal(Buffer.from(studio.image(second.draft.id)).toString(), 'card');
+});
+
+test('padToReel (ffmpeg): z 4:5 videa vznikne 1080×1920 so zvukom', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {
+  const { padToReel, posterFrame } = await import('./reel.js');
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-pad-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, 'in.mp4');
+  const made = spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=540x676:rate=10', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', src]);
+  assert.equal(made.status, 0, String(made.stderr));
+  const out = path.join(dir, 'out.mp4');
+  await padToReel(src, out);
+  const probe = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', out]).stdout);
+  const video = probe.streams.find(s => s.codec_type === 'video');
+  assert.deepEqual([video.width, video.height, video.codec_name], [1080, 1920, 'h264']);
+  assert.ok(probe.streams.some(s => s.codec_type === 'audio'));
+  const poster = await posterFrame(src, { at: 0.2 });
+  assert.equal(poster[0], 0xff);
+});
+
+test('hlas vlastníka: voiceProvider má prednosť pred Piperom a predĺži video', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-voice-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const wav = path.join(dir, 'own.wav');
+  spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=22050', '-t', '3', wav]);
+  const asked = [];
+  const result = await renderReel({ card: quakeCard, title: 'Titulok', text: 'x\n\nVeta.' }, path.join(dir, 'v.mp4'),
+    { seconds: 2, fps: 4, voice: true, env: { ...process.env, PIPER_PATH: '/nonexistent' }, voiceProvider: async text => { asked.push(text); return wav; } });
+  assert.deepEqual(asked, ['Titulok. Veta.']);
+  assert.deepEqual([result.voice, result.seconds], [true, 6]);
+  const none = await renderReel({ card: quakeCard, title: 'T', text: 't' }, path.join(dir, 'n.mp4'), { seconds: 1, fps: 4, voice: true, env: { PATH: process.env.PATH }, voiceProvider: async () => null });
+  assert.equal(none.voice, false, 'poskytovateľ bez nahrávky = bez hlasu, nie chyba');
+});

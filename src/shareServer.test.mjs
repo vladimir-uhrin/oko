@@ -12,7 +12,7 @@ test('vite.config.js: sharePlugin za keep-alive pluginom, routes /api/share (POS
   const vite = read('../vite.config.js');
   assert.match(vite, /function sharePlugin\(\)/);
   // 2026-10-01: API pluginy sú v podmienke roly (scripts/lib/serverRole.mjs) — poradie ostáva.
-  assert.match(vite, /originKeepAlivePlugin\(\),\n[\s\S]{0,400}?sharePlugin\(\), flightHistoryProxy\(\),/, 'poradie pluginov');
+  assert.match(vite, /originKeepAlivePlugin\(\),\n[\s\S]{0,400}?sharePlugin\(\), flightHistoryProxy\(\), accountAuth, adminPlugin\(env\)\]/, 'poradie pluginov');
   assert.match(vite, /middlewares\.use\('\/api\/share', async \(req, res\) => \{\n\s+if \(req\.method !== 'POST'\)/);
   assert.match(vite, /makeRateLimiter\(\{ windowMs: 3600_000, max: 30, globalMax: 300 \}\)/, 'limit 30/h na IP, 300/h celkovo');
   assert.match(vite, /limiter\(clientKeyFromRequest\(req\)\)/, 'kľúč cez CF-Connecting-IP (tunel), nie socket');

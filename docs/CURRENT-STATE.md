@@ -27,6 +27,15 @@ publish a notice, back up both DBs and clear whitelisted cache folders. New tabs
 Analytika, Prevádzka, Chyby, Náklady, Oznam, Údržba; feeds show 7-day availability.
 Data: `.auth-data/admin.sqlite`.
 
+Štúdio (same day, `src/admin/server/studio/`, plan in `docs/SOCIAL-PLAN.md`): FB/IG
+drafts from live data (quakes, launches) and from Udalosti (`POST /api/events/<id>/studio`
+-> `studio.importDraft`; the owner's 4:5 event video is padded to a 9:16 reel with
+ffmpeg instead of re-rendered), rendered reels with the owner's voice via
+ai-translators when `AI_TRANSLATORS_MCP_KEY` is set (Piper, then music-only fallback),
+scheduling, calendar, Meta Insights, and a weekly „Týždeň na fronte" run (Saturday
+7:00 when enabled; `scripts/make-front-week-video.mjs` against `EVENT_VIDEO_PAGE_URL`).
+Owner = DB role `owner` or `OKO_OWNER_EMAILS`, shared by admin and Udalosti.
+
 ### OKO optional account center and profiles (2026-09-26)
 
 `src/auth/` adds a Vanilla JS account center with a visible avatar/name/signed-in

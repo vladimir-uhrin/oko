@@ -310,3 +310,51 @@ test('Meta insights: FB reactions/komentáre/zdieľania + reach, IG views/reach/
   assert.deepEqual(await meta.insights('facebook', '1_55'), { views: null, reach: 250, likes: 12, comments: 3, shares: 4, saved: null });
   assert.deepEqual(await meta.insights('instagram', 'm1'), { views: 900, reach: 700, likes: 9, comments: 2, shares: 6, saved: 5 });
 });
+
+test('Týždeň na fronte: ručný beh dá video a text do Štúdia; automatika v sobotu o 7:00 len raz za deň; nastavenia', async t => {
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-fw-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const clock = { time: Date.UTC(2026, 9, 3, 5, 30) }; // sobota 3. 10. 2026, 7:30 v Bratislave
+  const runs = [];
+  const store = openAdminStore(':memory:');
+  t.after(() => store.close());
+  const studio = createStudio({ store, env: {}, port: () => 1, now: () => clock.time, timers: false, mediaDir: dir, log: () => {},
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [], results: [] } }),
+    renderCard: async () => Buffer.from('card'), checkFfmpeg: async () => true,
+    padToReel: async (input, output) => { writeFileSync(output, Buffer.alloc(10)); return {}; },
+    posterFrame: async () => Buffer.from('poster'),
+    frontWeekRunner: async ({ outDir, day }) => {
+      runs.push(day);
+      const { mkdirSync } = await import('node:fs');
+      mkdirSync(outDir, { recursive: true });
+      const video = path.join(outDir, 'tyzden-na-fronte-2026-10-02-titulky.mp4'); const post = path.join(outDir, 'tyzden-na-fronte-2026-10-02.txt');
+      writeFileSync(video, Buffer.alloc(500)); writeFileSync(post, 'Text týždňa\nMapa frontu: https://okolive.sk/?front=front');
+      return { video, post, srt: null };
+    },
+    publisher: { status: () => ({ facebook: false, instagram: false }) } });
+  assert.equal(studio.frontWeekStatus().due, false, 'automatika vypnutá');
+  const manual = await studio.runFrontWeek({ day: '2026-10-02' });
+  assert.equal(manual.created, true);
+  assert.equal(manual.draft.template, 'front-week');
+  assert.equal(manual.draft.eventKey, 'front-week:2026-10-02');
+  assert.match(manual.draft.text, /Mapa frontu/);
+  assert.equal(Buffer.from(studio.image(manual.draft.id)).toString(), 'poster', 'obrázok = snímka z videa');
+  await studio.videosIdle();
+  assert.equal(studio.get(manual.draft.id).videoStatus, 'ready', 'reel doplnením 4:5 → 9:16');
+  assert.deepEqual(runs, ['2026-10-02']);
+  // automatika
+  studio.setSettings({ frontWeek: { enabled: true } });
+  assert.throws(() => studio.setSettings({ frontWeek: { hour: 25 } }), /invalid_input/);
+  assert.equal(studio.frontWeekStatus().due, false, 'dnes už bežal');
+  clock.time += 7 * 86400_000; // ďalšia sobota 7:30
+  assert.equal(studio.frontWeekStatus().due, true);
+  await studio.tick();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(runs.length, 2);
+  assert.equal(studio.frontWeekStatus().due, false, 'raz za deň');
+  clock.time += 86400_000; // nedeľa
+  assert.equal(studio.frontWeekStatus().due, false);
+});

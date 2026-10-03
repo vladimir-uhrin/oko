@@ -7,6 +7,29 @@ import path from 'node:path';
 import { openAdminStore } from './store.js';
 import { createAdminRuntime, secretValues } from './runtime.js';
 import { createStudio } from './studio/index.js';
+import { aiTranslatorsConfig, createAiTranslatorsClient } from '../../data/aiTranslatorsClient.js';
+import { createVoiceCache } from '../../../scripts/lib/eventVideoPipeline.mjs';
+
+/**
+ * Hlas vlastníka pre reely Štúdia (2026-10-03): ai-translators (vlastná služba, kľúč v .env) cez tú istú
+ * pamäť nahrávok ako video udalostí (<adresár DB letov>/event-video/voice). null = nenastavené.
+ */
+function ownerVoiceProvider(env, root) {
+  const cfg = aiTranslatorsConfig(env);
+  if (!cfg.token) return null;
+  let client = null;
+  try { client = createAiTranslatorsClient(cfg); } catch { return null; }
+  const dbDir = path.dirname(String(env.FLIGHT_HISTORY_DB || '').trim() || path.join(root, '.gev-cache', 'flight-history.sqlite'));
+  const cache = createVoiceCache(path.join(dbDir, 'event-video', 'voice'));
+  return async text => {
+    const hit = cache.get('own', text);
+    if (hit?.wav) return hit.wav;
+    const r = await client.readAloud(text, { voice: 'own', lang: 'sk' });
+    const res = await fetch(r.url, { signal: AbortSignal.timeout(60_000) });
+    if (!res.ok) throw new Error(`stiahnutie hlasu zlyhalo: HTTP ${res.status}`);
+    return cache.put('own', text, Buffer.from(await res.arrayBuffer()), { url: r.url, seconds: r.seconds, engine: r.engine, savedAt: new Date().toISOString() }).wav;
+  };
+}
 
 let current = null;
 /** Runtime bežiaceho servera (null pred štartom alebo v testoch bez pluginu). */
@@ -27,7 +50,7 @@ export function adminPlugin(env = process.env) {
       runtime.start();
       // Štúdio sociálnych sietí (2026-10-03): rovnaká admin DB, údaje cez loopback.
       runtime.studio = createStudio({ store, env, port: () => server.httpServer?.address()?.port ?? null,
-        mediaDir: path.join(path.dirname(authDb), 'studio') });
+        mediaDir: path.join(path.dirname(authDb), 'studio'), root, voiceProvider: ownerVoiceProvider(env, root) });
       runtime.studio.start();
       current = runtime;
       return runtime;

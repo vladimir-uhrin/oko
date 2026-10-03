@@ -118,7 +118,7 @@ export const EVENTS_PUBLIC_ORIGIN = 'https://okolive.sk';
 const EVENT_ID = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
 const EVENT_ID_PART = '[0-9a-f]{6}-\\d{8}T\\d{4}';
 const PUBLIC_ROUTE = new RegExp(`^/public/(${EVENT_ID_PART})$`);
-const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|video\\.srt|video-script|video/prepare|video/status|post|publish|unpublish|second-network|reported))?$`);
+const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|video\\.srt|video-script|video/prepare|video/status|post|publish|unpublish|second-network|reported|studio))?$`);
 /** Stopa na obrázok: body sietí, ktoré sú v atribúcii (OpenSky + adsb.lol), aj z druhej siete. */
 const DRAWN_SRC = (src) => src === PRIMARY_SRC || String(src || '').startsWith('adsb.lol');
 
@@ -302,6 +302,8 @@ export function createFlightEventsService({
   videoStore = null,
   airportsFile = null,
   videoPipeline = null,
+  // Štúdio sociálnych sietí (2026-10-03): udalosť → návrh v admine (obrázok feed, text, hotové 3D video).
+  studioImport = null,
   videoDailyMax = 3,
 } = {}) {
   const store = fileEventStore(eventsDir);
@@ -688,6 +690,7 @@ export function createFlightEventsService({
       published: event.published || null,
       facebook: url ? facebookShareUrl(url) : null,
       video: Boolean(videoStore),
+      studio: Boolean(studioImport),
       // Scenár a stav prípravy videa (2026-10-03): formulár a tlačidlo PRIPRAVIŤ VIDEO v paneli.
       videoScript: event.videoScript || null,
       videoJob: videoJobs.status(event.id),
@@ -727,6 +730,30 @@ export function createFlightEventsService({
     store.save(next);
     log(`[events] ${event.id} ${event.callsign || ''} zverejnené → ${published.url}`);
     return { status: 200, body: postPayload(next) };
+  }
+
+  /**
+   * Do Štúdia (2026-10-03): návrh príspevku v admine s obrázkom (feed 1080×1350), textom (s odkazom na
+   * zverejnenú rekonštrukciu, ak je) a hotovým 3D videom (ak je); Štúdio ho zverejní cez Meta API,
+   * naplánuje alebo spraví reel. Udalosť sa tým nezverejňuje — to ostáva na ZVEREJNIŤ.
+   */
+  async function toStudio(event) {
+    if (!studioImport) return { status: 503, body: { error: 'studio_unavailable' } };
+    if (!renderCard) return { status: 503, body: { error: 'card_unavailable' } };
+    const full = await withTrack(event);
+    const card = await renderCard(full, 'feed');
+    const videoFile = videoStore?.find(full)?.file || null;
+    try {
+      const result = await studioImport({
+        template: 'event', eventKey: `event:${event.id}`, title: eventHeadline(full), text: postText(full, { url: event.published?.url || null }),
+        image: card.jpeg, videoFile, origin: 'manual', meta: { source: 'OpenSky Network, adsb.lol', eventId: event.id, publishedUrl: event.published?.url || null },
+      });
+      log(`[events] ${event.id} ${event.callsign || ''} → Štúdio (${result.created ? 'nový návrh' : result.reason})`);
+      return { status: 200, body: { id: event.id, created: Boolean(result.created), reason: result.reason || null, draftId: result.draft?.id || null, video: Boolean(videoFile) } };
+    } catch (error) {
+      log(`[events] ${event.id} do Štúdia zlyhalo: ${error?.message || error}`);
+      return { status: error?.status || 500, body: { error: error?.status ? error.message : 'studio_error' } };
+    }
   }
 
   /** Stiahnutie zverejnenia (vlastník): odkaz /s/<id> aj verejný pohľad potom vrátia 404. */
@@ -1056,7 +1083,7 @@ export function createFlightEventsService({
         json(res, saved.status, saved.body);
         return;
       }
-      const result = action === 'publish' ? await publish(event) : unpublish(event);
+      const result = action === 'publish' ? await publish(event) : action === 'studio' ? await toStudio(event) : unpublish(event);
       json(res, result.status, result.body);
     } catch (error) {
       log(`[events] API: ${error?.message || error}`);

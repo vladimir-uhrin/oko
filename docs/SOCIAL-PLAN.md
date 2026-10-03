@@ -205,3 +205,37 @@ klienta ani repozitára.
   `like_count`, `comments_count` + `/insights?metric=views,reach,saved,shares`. Názvy
   metrík Meta mení — chýbajúce ostanú „—". Ručne zdieľané príspevky API nevidí.
 - Tabuľka `studio_insights`, stĺpce `scheduled_at`, `scheduled_targets` (aditívne).
+
+## Spojenie s Udalosťami a Týždňom na fronte (hotové 2026-10-03)
+
+Po zlúčení s `main` (vetvy vlastníka: video „Týždeň na fronte", poistky nahrávania,
+`qa-flight-card`) je **Štúdio jediné miesto zverejňovania** na FB/IG. Ručné zdieľanie
+cez `sharer.php` v Udalostiach ostáva ako záloha bez tokenu.
+
+- **Udalosti → Štúdio:** v paneli Udalostí má zverejniteľná udalosť tlačidlo
+  „DO ŠTÚDIA" (`POST /api/events/<id>/studio`). Služba udalostí odovzdá Štúdiu kartu
+  (feed card ako obrázok), text, prípadne hotové 3D video (4:5) a metadáta;
+  vznikne návrh so šablónou `event` (kľúč `event:<id>`, druhý pokus vráti
+  `studio-exists`). Importované návrhy nesú odznak „z Udalostí".
+- **Reel z videa 4:5:** importované video sa nerenderuje odznova — `padToReel`
+  (ffmpeg) ho vloží do 9:16 nad rozmazané pozadie, zvuk ostáva. Obrázok návrhu
+  bez karty vznikne z prvej snímky videa (`posterFrame`). Pôvodné 4:5 sa dá
+  stiahnuť z karty návrhu (`/api/admin/studio/drafts/<id>/source`).
+- **Hlas vlastníka:** keď je v `.env` `AI_TRANSLATORS_MCP_KEY` (rovnaká pamäť
+  nahrávok ako video z Udalostí: `<adresár DB>/event-video/voice`), renderované
+  reely hovoria hlasom vlastníka; bez kľúča Piper, bez Pipera len hudba. V
+  Automatike je pri hlase vidno, ktorý zdroj je k dispozícii (`caps.ownerVoice`).
+- **Týždeň na fronte:** sekcia v Štúdiu s vypínačom (predvolene vypnuté) a
+  tlačidlom „Spustiť teraz". Zapnuté = raz za týždeň (sobota 7:00, `frontWeek`
+  v nastaveniach) Štúdio spustí `scripts/make-front-week-video.mjs` proti
+  stránke z `EVENT_VIDEO_PAGE_URL` (inak `http://localhost:4173`), výstup
+  `tyzden-na-fronte-<dátum>-titulky.mp4` + text importuje ako návrh šablóny
+  `front-week` (kľúč `front-week:<nedeľa>`, jeden beh za deň aj pri chybe).
+  Stav a posledný log: `GET /api/admin/studio/front-week`, spustenie `POST` (202,
+  409 keď už beží). Automatické zverejnenie podlieha rovnakým pravidlám ako iné
+  návrhy (schválenie, tiché hodiny, denný strop).
+- **Jedno vlastníctvo:** rola `owner` v DB (`scripts/create-owner.mjs`) a
+  `OKO_OWNER_EMAILS` platia rovnako pre admin aj pre Udalosti
+  (`isOwnerRequest`).
+- Nič z toho nestojí peniaze: ffmpeg, vlastná služba hlasu vlastníka, bezplatný
+  podklad videa. Google 3D podklad vo videu ostáva vypnutý podľa pravidla rozpočtu.

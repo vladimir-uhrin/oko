@@ -312,3 +312,13 @@ test('Štúdio Fáza 3 cez admin API: naplánovať, kalendár, zrušiť, výkon'
   const audit = (await admin.request('/api/admin/audit')).data.audit.map(e => e.action);
   assert.ok(audit.includes('studio_scheduled') && audit.includes('studio_unscheduled'));
 });
+
+test('jedno vlastníctvo: účet z OKO_OWNER_EMAILS dostane admin aj bez roly owner', async t => {
+  const env = await fixture(t, { ownerEmails: [credentials.email] });
+  const member = env.client();
+  assert.equal((await member.register()).status, 201);
+  assert.equal((await member.request('/api/admin/overview')).status, 200);
+  const stranger = env.client();
+  assert.equal((await stranger.register({ email: 'other@example.com', password: 'another long password phrase', displayName: 'Other' })).status, 201);
+  assert.equal((await stranger.request('/api/admin/overview')).status, 404);
+});

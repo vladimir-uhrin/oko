@@ -144,6 +144,7 @@ export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...ar
     list: () => getJson(`/api/events?limit=${EVENTS_REVIEW_LIMIT}`),
     post: (id) => getJson(`/api/events/${enc(id)}/post`),
     publish: (id) => postJson(`/api/events/${enc(id)}/publish`),
+    toStudio: (id) => postJson(`/api/events/${enc(id)}/studio`),
     unpublish: (id) => postJson(`/api/events/${enc(id)}/unpublish`),
     cardUrl: (id, format = 'og') => `/api/events/${enc(id)}/card.jpg?format=${format === 'feed' ? 'feed' : 'og'}`,
     // Video automaticky (2026-10-03): scenár, príprava na pozadí, stav, výstupy.
@@ -410,6 +411,20 @@ export function installEventsPanel({
     const copyText = button(doc, 'scene-btn events-copy-text', t('events.copy-text'));
     copyText.addEventListener('click', () => { void copy(text.value); });
     actions.appendChild(copyText);
+    // Do Štúdia (2026-10-03): návrh v admine (obrázok, text, hotové video) → Meta API / plán / reel.
+    if (post?.studio) {
+      const studio = button(doc, 'scene-btn events-to-studio', t('events.to-studio'));
+      studio.addEventListener('click', async () => {
+        studio.disabled = true;
+        try {
+          const r = await api.toStudio(id);
+          ownerMessage(t(r.created ? 'events.studio-created' : 'events.studio-exists'), 'ok');
+          openWindow('/admin.html#studio');
+        } catch (error) { ownerMessage(t('events.error', { error: error?.message || error }), 'error'); }
+        finally { studio.disabled = false; }
+      });
+      actions.appendChild(studio);
+    }
     const published = post?.published?.url || null;
     if (published) {
       status.textContent = t('events.published-at', { url: published });
