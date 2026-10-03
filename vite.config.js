@@ -38,6 +38,8 @@ import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
+import { createAiTranslatorsClient } from './src/data/aiTranslatorsClient.js';
+import { createVoiceCache, prepareEventVideo } from './scripts/lib/eventVideoPipeline.mjs';
 import { resolveServerRole, roleServerOverrides, runsApiPlugins } from './scripts/lib/serverRole.mjs';
 import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
@@ -5831,6 +5833,11 @@ function flightHistoryProxy() {
         videoStore: createEventVideoStore({ dir: path.join(path.dirname(cfg.dbPath), 'event-video', '3d') }),
         // Pristátie zo správ (POST /api/events/<id>/reported): poloha letiska z OurAirports.
         airportsFile: path.join(__dirname, 'src', 'data', 'local_data', 'airports', 'airports.geojsonl'),
+        // Video automaticky (2026-10-03, scripts/lib/eventVideoPipeline.mjs): hlas vlastníka z ai-translators
+        // (AI_TRANSLATORS_TOKEN) alebo z pamäte nahrávok, hudba z EVENT_VIDEO_MUSIC_DIR, obraz z OKO na
+        // EVENT_VIDEO_PAGE_URL (dev server s Cesiom), najviac EVENT_VIDEO_DAILY_MAX videí za deň (dlaždice).
+        videoPipeline: createEventVideoPipeline({ dbDir: path.dirname(cfg.dbPath) }),
+        videoDailyMax: Math.max(1, Number(process.env.EVENT_VIDEO_DAILY_MAX) || 3),
       });
       if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
         const events = flightEvents;
@@ -5917,6 +5924,38 @@ function flightHistoryProxy() {
 export { flightHistoryProxy };
 /** Proxy OpenSky pre test výrezu so zdvojeným serverom (src/data/openSkyRegion.test.mjs). */
 export { openSkyProxy };
+
+/**
+ * Linka „priprav video" pre službu udalostí (2026-10-03): hlas (ai-translators, token z .env — bez tokenu
+ * len pamäť nahrávok), hudba (tracks.json v EVENT_VIDEO_MUSIC_DIR, inak .gev-cache/event-video-capture/music),
+ * obraz z OKO (EVENT_VIDEO_PAGE_URL, inak http://localhost:4173), pracovné súbory <adresár DB>/event-video/work.
+ */
+function createEventVideoPipeline({ dbDir }) {
+  const token = String(process.env.AI_TRANSLATORS_TOKEN || '').trim();
+  let voice = null;
+  if (token) {
+    try { voice = createAiTranslatorsClient({ token }); } catch (error) { console.warn('[events] ai-translators:', error?.message || error); }
+  }
+  const cache = createVoiceCache(path.join(dbDir, 'event-video', 'voice'));
+  const musicDir = process.env.EVENT_VIDEO_MUSIC_DIR || path.join(process.cwd(), '.gev-cache', 'event-video-capture', 'music');
+  const music = () => {
+    try {
+      const lib = JSON.parse(fs.readFileSync(path.join(musicDir, 'tracks.json'), 'utf8'));
+      const t = lib.tracks?.[0];
+      return t ? { ...t, file: path.join(musicDir, t.file) } : null;
+    } catch { return null; }
+  };
+  return {
+    voiceReady: Boolean(voice),
+    run: (event, script, onProgress) => prepareEventVideo({
+      event, script, voice, cache, music: music(),
+      workDir: path.join(dbDir, 'event-video', 'work', event.id),
+      capture: { node: process.execPath, baseUrl: process.env.EVENT_VIDEO_PAGE_URL || 'http://localhost:4173' },
+      tools: { ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg' },
+      onProgress,
+    }),
+  };
+}
 
 function openSkyProxy() {
   return {

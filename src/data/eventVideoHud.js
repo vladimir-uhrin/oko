@@ -25,6 +25,8 @@ export const VIDEO_3D_FORMAT = Object.freeze({ w: 1080, h: 1350 });
 export const VIDEO_BRAND = Object.freeze({
   domain: 'okolive.sk',
   author: 'UHRIN VLADIMÍR',
+  /** Meno v komentári hlasom („Video pripravil …"). */
+  authorName: 'Vladimír Uhrin',
   credit: 'VYTVORIL',
   tagline: 'ŽIADNE MIESTO NEOSTANE BOKOM',
   claim: 'Lietadlá, lode a konflikty naživo v 3D',

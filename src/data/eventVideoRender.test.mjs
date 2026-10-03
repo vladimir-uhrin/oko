@@ -253,3 +253,28 @@ test('3D video: doplnené fakty zo správ menia kľúč (video ich ukazuje); bez
   assert.notEqual(videoEventKey({ ...e, reported: [{ ...landing, airport: { icao: 'OEJN' } }] }), k1, 'iné letisko');
   assert.equal(videoEventKey({ ...e, reported: [{ ...landing, sources: [{ quote: 'b' }] }] }), k1, 'iný citát video nemení');
 });
+
+test('3D video: vedľajšie súbory (bez titulkov, SRT) k tým istým údajom; nové údaje ich zmažú spolu s videom; scenár mení kľúč', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-video-extra-'));
+  try {
+    const store = createEventVideoStore({ dir });
+    const e = uturnEvent('aaaaaa-20260922T1320');
+    store.save(e, fakeMp4());
+    store.saveExtra(e, 'clean.mp4', fakeMp4());
+    store.saveExtra(e, 'sk_SK.srt', Buffer.from('1\n00:00:00,000 --> 00:00:01,000\nx\n'));
+    assert.ok(store.findExtra(e, 'clean.mp4') && store.findExtra(e, 'sk_SK.srt'));
+    assert.equal(store.findExtra(e, 'nie.txt'), null);
+    assert.throws(() => store.saveExtra(e, '../x.srt', Buffer.from('x')));
+    const changed = { ...e, track: e.track.slice(1) };
+    store.save(changed, fakeMp4());
+    assert.equal(store.findExtra(e, 'clean.mp4'), null, 'staré vedľajšie súbory preč');
+    assert.equal(store.find(e), null);
+    assert.ok(store.find(changed));
+    const k = videoEventKey(e);
+    const withScript = { ...e, videoScript: { hook: { tag: 'X', lines: ['a'], sub: null, source: 's', spoken: ['a'], captions: ['a'] }, extras: [], lines: {} } };
+    assert.notEqual(videoEventKey(withScript), k, 'scenár (háčik) mení video');
+    assert.notEqual(videoEventKey({ ...withScript, videoScript: { ...withScript.videoScript, lines: { m0: { spoken: 'iné' } } } }), videoEventKey(withScript), 'náhrada vety mení video');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

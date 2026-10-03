@@ -25,6 +25,8 @@ export const EVENT_ID_RE = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
 export const EVENTS_REVIEW_LIMIT = 50;
 /** Druhý klik na ZVEREJNIŤ / STIAHNUŤ platí 5 s. */
 export const EVENTS_CONFIRM_MS = 5000;
+/** Stav prípravy videa sa pýta každých 5 s. */
+export const EVENTS_VIDEO_POLL_MS = 5000;
 /** Prehrávanie udalosti: rýchlosť 60× (pol hodiny udalosti za pol minúty). */
 export const EVENTS_REPLAY_SPEED = 60;
 const NET_NAMES = Object.freeze({ opensky: 'OpenSky', adsblol: 'adsb.lol' });
@@ -132,7 +134,7 @@ export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...ar
     const res = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
     let body = {};
     try { body = await res.json(); } catch { body = {}; }
-    if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+    if (!res.ok) throw Object.assign(new Error(body?.error || `HTTP ${res.status}`), { why: body?.why, checks: body?.checks });
     return body;
   };
   const enc = encodeURIComponent;
@@ -143,6 +145,12 @@ export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...ar
     publish: (id) => postJson(`/api/events/${enc(id)}/publish`),
     unpublish: (id) => postJson(`/api/events/${enc(id)}/unpublish`),
     cardUrl: (id, format = 'og') => `/api/events/${enc(id)}/card.jpg?format=${format === 'feed' ? 'feed' : 'og'}`,
+    // Video automaticky (2026-10-03): scenár, príprava na pozadí, stav, výstupy.
+    saveScript: (id, script) => postJson(`/api/events/${enc(id)}/video-script`, { script }),
+    prepareVideo: (id) => postJson(`/api/events/${enc(id)}/video/prepare`),
+    videoStatus: (id) => getJson(`/api/events/${enc(id)}/video/status`),
+    videoUrl: (id, variant = null) => `/api/events/${enc(id)}/video.mp4${variant === 'clean' ? '?variant=clean' : ''}`,
+    srtUrl: (id) => `/api/events/${enc(id)}/video.srt`,
     /** Video do príspevku (MP4) — prvý raz ho server kreslí ~30 s. */
     video: async (id) => {
       const res = await fetchImpl(`/api/events/${enc(id)}/video.mp4`, { cache: 'no-store' });
@@ -154,6 +162,49 @@ export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...ar
       return res.blob();
     },
   };
+}
+
+/** Riadok „odkaz | citát" → časti. Pure. */
+const splitBar = (line) => String(line).split('|').map((x) => x.trim());
+/**
+ * Formulár scenára → vstup pre POST video-script (server overí dôveryhodné médium a citát v článku).
+ * Prázdny formulár = null (bez scenára). Pure.
+ * @param {{tag?: string, lines?: string, sub?: string, attributed?: string, spoken?: string, sources?: string, extras?: string, overrides?: Record<string, string>}} form
+ */
+export function scriptFormToInput(form) {
+  const linesOf = (v) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
+  const hookLines = linesOf(form.lines);
+  const spoken = linesOf(form.spoken);
+  const sources = linesOf(form.sources).map((l) => { const [url, ...rest] = splitBar(l); return { url, quote: rest.join(' | ') }; });
+  const hook = hookLines.length || spoken.length || sources.length ? {
+    tag: String(form.tag || '').trim(), lines: hookLines, sub: String(form.sub || '').trim() || null, attributed: String(form.attributed || '').trim() || null, spoken, sources,
+  } : null;
+  const extras = linesOf(form.extras).map((l) => { const [spokenLine, url, ...rest] = splitBar(l); return { spoken: spokenLine, sources: [{ url, quote: rest.join(' | ') }] }; });
+  const lines = {};
+  for (const [id, text] of Object.entries(form.overrides || {})) if (String(text || '').trim()) lines[id] = { spoken: String(text).trim() };
+  if (!hook && !extras.length && !Object.keys(lines).length) return null;
+  return { hook, extras, lines };
+}
+/** Uložený scenár → polia formulára (predvyplnenie). Pure. */
+export function scriptToForm(script) {
+  const h = script?.hook || null;
+  return {
+    tag: h?.tag ? h.tag.toLowerCase() : '',
+    lines: (h?.lines || []).join('\n'),
+    sub: h?.sub || '',
+    attributed: h?.attributed || '',
+    spoken: (h?.spoken || []).join('\n'),
+    sources: (h?.sources || []).map((x) => `${x.url} | ${x.quote}`).join('\n'),
+    extras: (script?.extras || []).map((x) => `${x.spoken} | ${x.sources?.[0]?.url || ''} | ${x.sources?.[0]?.quote || ''}`).join('\n'),
+  };
+}
+/** Stav prípravy videa → text pre vlastníka. Pure. */
+export function videoJobMessage(job, t) {
+  if (!job || job.state === 'idle') return '';
+  if (job.state === 'error') return t('events.video-job-error', { error: job.error || '?' });
+  if (job.state === 'done') return t('events.video-job-done', { s: job.durationS ? job.durationS.toFixed(0) : '?' });
+  if (job.stage === 'capture' && job.detail?.frames) return t('events.video-stage-capture', { frame: job.detail.frame ?? 0, frames: job.detail.frames });
+  return t('events.video-stage', { stage: job.stage || job.state });
 }
 
 /** Uloženie stiahnutého súboru (video do príspevku) cez dočasný odkaz. */
@@ -352,17 +403,6 @@ export function installEventsPanel({
       image.href = api.cardUrl(id, 'feed');
       image.download = `oko-udalost-${id}.jpg`;
       actions.append(fb, copyLink, image);
-      // 3D video v štýle OKO (nahráva ho scripts/capture-event-video.mjs) — tlačidlo len keď je nahraté
-      // pre presne tieto údaje udalosti, inak poznámka.
-      if (post.video && typeof api.video === 'function') {
-        if (post.videoReady) {
-          const video = button(doc, 'scene-btn events-download-video', t('events.download-video'));
-          video.addEventListener('click', () => { void downloadVideo(id, video); });
-          actions.appendChild(video);
-        } else {
-          actions.appendChild(el(doc, 'span', 'events-video-note', t('events.video-not-captured')));
-        }
-      }
       const withdraw = button(doc, 'scene-btn events-unpublish', t('events.unpublish'));
       withdraw.addEventListener('click', () => { void confirmThen('unpublish', withdraw, 'events.unpublish', () => api.unpublish(id)); });
       actions.appendChild(withdraw);
@@ -375,7 +415,122 @@ export function installEventsPanel({
       status.textContent = t('events.not-publishable');
     }
     ownerMsg = el(doc, 'div', 'events-owner-msg', post ? '' : t('events.unavailable'));
-    owner.append(imgLink, status, text, actions, ownerMsg);
+    owner.append(imgLink, status, text, actions, renderVideo(id, post), ownerMsg);
+  }
+
+  /**
+   * Video automaticky (2026-10-03, vlastník: „sprav" k automatizácii): scenár (háčik, zdroje, doplnky) →
+   * ULOŽIŤ SCENÁR → PRIPRAVIŤ VIDEO (linka na serveri, stav sa obnovuje každých 5 s) → stiahnuť video
+   * s titulkami / bez titulkov / SRT. Video sa ponúka aj pred zverejnením — vlastník si ho vypočuje skôr,
+   * než klikne ZVEREJNIŤ.
+   */
+  let videoPollToken = 0;
+  function renderVideo(id, post) {
+    const box = el(doc, 'div', 'events-video');
+    if (!post || !post.video) { box.hidden = true; return box; }
+    if (post.videoPrepare) {
+      const form = scriptToForm(post.videoScript);
+      box.appendChild(el(doc, 'div', 'events-label events-script-title', t('events.script-title')));
+      box.appendChild(el(doc, 'div', 'events-note', t('events.script-hint')));
+      const fields = {};
+      const field = (key, labelKey, multiline = false, rows = 2) => {
+        const label = el(doc, 'label', 'events-field');
+        label.appendChild(el(doc, 'span', 'events-field-label', t(labelKey)));
+        const input = el(doc, multiline ? 'textarea' : 'input', `events-script-${key}`);
+        if (multiline) input.rows = rows; else input.type = 'text';
+        input.value = form[key] || '';
+        label.appendChild(input);
+        fields[key] = input;
+        box.appendChild(label);
+      };
+      field('tag', 'events.script-hook-tag');
+      field('lines', 'events.script-hook-lines', true, 2);
+      field('sub', 'events.script-hook-sub');
+      field('attributed', 'events.script-attributed');
+      field('spoken', 'events.script-spoken', true, 2);
+      field('sources', 'events.script-sources', true, 2);
+      field('extras', 'events.script-extras', true, 2);
+      const row = el(doc, 'div', 'events-owner-actions');
+      const save = button(doc, 'scene-btn events-script-save', t('events.script-save'));
+      save.addEventListener('click', () => { void saveScript(id, fields, save); });
+      const prepare = button(doc, 'scene-btn events-video-prepare', t('events.video-prepare'));
+      prepare.disabled = ['queued', 'running'].includes(post.videoJob?.state);
+      prepare.addEventListener('click', () => { void prepareVideo(id, prepare); });
+      row.append(save, prepare);
+      box.appendChild(row);
+      box.appendChild(el(doc, 'div', 'events-note', t('events.video-prepare-hint')));
+      if (!post.voiceReady) box.appendChild(el(doc, 'div', 'events-note events-video-no-voice', t('events.video-no-voice')));
+      const jobLine = el(doc, 'div', 'events-video-job', videoJobMessage(post.videoJob, t));
+      jobLine.dataset.state = post.videoJob?.state || 'idle';
+      box.appendChild(jobLine);
+      if (post.videoJob?.review?.length) {
+        const rev = el(doc, 'div', 'events-video-review', t('events.video-review'));
+        const ul = el(doc, 'ul', 'events-video-review-list');
+        for (const r of post.videoJob.review) ul.appendChild(el(doc, 'li', '', `„${r.spoken}" — ${r.heard || '?'}`));
+        rev.appendChild(ul);
+        box.appendChild(rev);
+      }
+      if (['queued', 'running'].includes(post.videoJob?.state)) pollVideo(id, jobLine);
+    }
+    if (post.videoReady) {
+      const dl = el(doc, 'div', 'events-owner-actions');
+      const video = button(doc, 'scene-btn events-download-video', t('events.download-video'));
+      video.addEventListener('click', () => { void downloadVideo(id, video); });
+      const clean = el(doc, 'a', 'scene-btn events-download-video-clean', t('events.download-video-clean'));
+      clean.href = api.videoUrl?.(id, 'clean') || '#';
+      clean.download = `oko-udalost-${id}-bez-titulkov.mp4`;
+      const srtLink = el(doc, 'a', 'scene-btn events-download-srt', t('events.download-srt'));
+      srtLink.href = api.srtUrl?.(id) || '#';
+      srtLink.download = `${id}.sk_SK.srt`;
+      dl.append(video, clean, srtLink);
+      box.appendChild(dl);
+    } else if (!post.videoPrepare) {
+      box.appendChild(el(doc, 'span', 'events-video-note', t('events.video-not-captured')));
+    }
+    return box;
+  }
+
+  async function saveScript(id, fields, btn) {
+    const form = Object.fromEntries(Object.entries(fields).map(([k, input]) => [k, input.value]));
+    btn.disabled = true;
+    try {
+      const res = await api.saveScript(id, scriptFormToInput(form));
+      const checks = (res?.videoScript?.quoteChecks || []).map((c) => `${c.domain}: ${c.state}`).join(', ');
+      ownerMessage(res?.videoScript ? t('events.script-saved', { checks: checks || '—' }) : t('events.script-removed'), 'ok');
+      await refresh(id);
+    } catch (error) {
+      const msg = String(error?.message || error);
+      const missing = (error?.checks || []).filter((c) => c.state === 'not_found').map((c) => c.domain).join(', ');
+      ownerMessage(msg === 'quote_not_found' ? t('events.script-quote-missing', { domains: missing }) : t('events.script-bad', { why: error?.why || msg }), 'error');
+      btn.disabled = false;
+    }
+  }
+
+  async function prepareVideo(id, btn) {
+    btn.disabled = true;
+    try {
+      await api.prepareVideo(id);
+      ownerMessage(t('events.video-stage', { stage: 'queued' }), 'info');
+      await refresh(id);
+    } catch (error) {
+      const msg = String(error?.message || error);
+      ownerMessage(msg === 'busy' || msg === 'already_running' ? t('events.video-job-busy') : (msg === 'daily_limit' ? t('events.video-job-limit') : t('events.video-job-error', { error: msg })), 'error');
+      btn.disabled = false;
+    }
+  }
+
+  /** Stav prípravy každých 5 s; po skončení sa blok vlastníka prekreslí (tlačidlá na stiahnutie). */
+  function pollVideo(id, jobLine) {
+    const my = ++videoPollToken;
+    setTimer(async () => {
+      if (my !== videoPollToken || current?.id !== id) return;
+      let job = null;
+      try { job = await api.videoStatus(id); } catch { job = null; }
+      if (my !== videoPollToken || current?.id !== id) return;
+      if (job) { jobLine.textContent = videoJobMessage(job, t); jobLine.dataset.state = job.state; }
+      if (job && ['queued', 'running'].includes(job.state)) pollVideo(id, jobLine);
+      else await renderOwner(id);
+    }, EVENTS_VIDEO_POLL_MS);
   }
 
   async function copy(text) {

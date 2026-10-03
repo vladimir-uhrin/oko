@@ -1,0 +1,105 @@
+// src/data/aiTranslatorsClient.js — hlas vlastníka a rozpoznávanie reči zo služby ai-translators.com
+// (vlastníkova služba) pre server OKO (2026-10-03, vlastník: „sprav" k automatizácii bez môjho konektora).
+// Služba nemá verejné REST API, ale jej MCP rozhranie (Streamable HTTP, JSON-RPC 2.0) má známe nástroje:
+//   ai_translators_read_aloud(text, lang, voice 'own') → podpísaný odkaz na WAV (24 h),
+//   ai_translators_subtitle_video(url) → úloha → ai_translators_job_status → history_id →
+//   ai_translators_get_history → cues[].source_text (čo rozpoznávač počul).
+// Token `AI_TRANSLATORS_TOKEN` (.env, nikdy do prehliadača) ide v hlavičke Authorization. Odpoveď
+// môže byť JSON alebo SSE (text/event-stream) — oboje sa parsuje. Volania sú po jednom (služba pri
+// viac než ~5 súbežných úlohách vracia 429).
+
+export const AI_TRANSLATORS_URL = 'https://www.ai-translators.com/mcp';
+const PROTOCOL = '2025-06-18';
+
+/** JSON-RPC správa z tela odpovede (JSON alebo SSE `data:` riadky). Pure. */
+export function parseMcpBody(contentType, text) {
+  const ct = String(contentType || '');
+  if (ct.includes('text/event-stream')) {
+    const messages = [];
+    for (const block of String(text || '').split(/\n\n+/)) {
+      const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('\n');
+      if (!data) continue;
+      try { messages.push(JSON.parse(data)); } catch { /* iný rámec */ }
+    }
+    return messages.find((m) => m && Object.hasOwn(m, 'result')) || messages.find((m) => m && m.error) || messages[0] || null;
+  }
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+/** Obsah výsledku nástroja: `structuredContent`, inak prvý textový obsah ako JSON/text. Pure. */
+export function toolResultValue(result) {
+  if (!result) return null;
+  if (result.structuredContent !== undefined) return result.structuredContent;
+  const text = (result.content || []).find((c) => c?.type === 'text')?.text;
+  if (text === undefined) return result;
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+/**
+ * @param {{url?: string, token: string, fetchImpl?: typeof fetch, sleep?: (ms:number)=>Promise<void>, now?: () => number,
+ *   timeoutMs?: number, pollMs?: number, jobTimeoutMs?: number}} opts
+ */
+export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, fetchImpl = (...a) => globalThis.fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), timeoutMs = 60_000, pollMs = 3_000, jobTimeoutMs = 10 * 60_000 } = {}) {
+  if (!token) throw Object.assign(new Error('AI_TRANSLATORS_TOKEN chýba'), { code: 'NO_TOKEN' });
+  let session = null;
+  let nextId = 1;
+  let initialized = false;
+
+  async function rpc(method, params, { notify = false } = {}) {
+    const id = notify ? undefined : nextId++;
+    const res = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${token}`, ...(session ? { 'Mcp-Session-Id': session } : {}) },
+      body: JSON.stringify({ jsonrpc: '2.0', ...(notify ? {} : { id }), method, params }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const sid = res.headers.get('mcp-session-id');
+    if (sid) session = sid;
+    if (res.status === 401 || res.status === 403) throw Object.assign(new Error('ai-translators: token neplatí'), { code: 'AUTH', status: res.status });
+    if (res.status === 429) throw Object.assign(new Error('ai-translators: priveľa požiadaviek (429)'), { code: 'RATE', status: 429 });
+    if (notify) return null;
+    const text = await res.text();
+    const msg = parseMcpBody(res.headers.get('content-type'), text);
+    if (!res.ok) throw Object.assign(new Error(`ai-translators: HTTP ${res.status}`), { code: 'HTTP', status: res.status, body: text.slice(0, 300) });
+    if (!msg) throw Object.assign(new Error('ai-translators: nečitateľná odpoveď'), { code: 'BAD_BODY' });
+    if (msg.error) throw Object.assign(new Error(`ai-translators: ${msg.error.message || 'chyba'}`), { code: 'RPC', rpc: msg.error });
+    return msg.result;
+  }
+  async function ensureInit() {
+    if (initialized) return;
+    await rpc('initialize', { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: 'oko-event-video', version: '1' } });
+    await rpc('notifications/initialized', {}, { notify: true }).catch(() => {});
+    initialized = true;
+  }
+  async function call(name, args) {
+    await ensureInit();
+    const result = await rpc('tools/call', { name, arguments: args });
+    if (result?.isError) throw Object.assign(new Error(`ai-translators ${name}: ${toolResultValue(result)}`), { code: 'TOOL' });
+    return toolResultValue(result);
+  }
+
+  return {
+    call,
+    /** Veta hlasom vlastníka → `{url, seconds}` (podpísaný odkaz na WAV, 24 h). */
+    async readAloud(text, { voice = 'own', lang = 'sk' } = {}) {
+      const r = await call('ai_translators_read_aloud', { params: { text, lang, voice } });
+      if (!r?.url) throw Object.assign(new Error('ai-translators: bez odkazu na zvuk'), { code: 'NO_URL' });
+      return { url: r.url, seconds: Number(r.seconds) || null, engine: r.engine || null };
+    },
+    /** Prepis nahrávky (odkaz na WAV) → text, ktorý rozpoznávač počul (čaká na úlohu). */
+    async transcribe(wavUrl, { lang = 'sk' } = {}) {
+      const job = await call('ai_translators_subtitle_video', { params: { url: wavUrl, source: lang, target: lang } });
+      const started = now();
+      let status = job;
+      while (status && !['completed', 'error', 'cancelled'].includes(status.status)) {
+        if (now() - started > jobTimeoutMs) throw Object.assign(new Error('ai-translators: prepis trvá pridlho'), { code: 'TIMEOUT' });
+        await sleep(pollMs);
+        status = await call('ai_translators_job_status', { job_id: job.job_id });
+      }
+      if (!status || status.status !== 'completed' || !status.history_id) throw Object.assign(new Error(`ai-translators: prepis zlyhal (${status?.message || status?.status || '?'})`), { code: 'ASR_FAILED' });
+      const item = await call('ai_translators_get_history', { history_id: status.history_id });
+      return (item?.cues || []).map((c) => String(c.source_text || '').trim()).filter(Boolean).join(' ');
+    },
+    async health() { return call('ai_translators_health', {}); },
+  };
+}

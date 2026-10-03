@@ -16,7 +16,7 @@
 // FZ1073) rieši časový limit snímky, nový pokus a pri opakovaní nové načítanie stránky.
 //
 // Spustenie (beží služba oko-dev na localhoste):
-//   node scripts/capture-event-video.mjs --event <id> [--url http://localhost:4173] [--out <mp4>]
+//   node scripts/capture-event-video.mjs --event <id> | --event-file <udalosť.json> [--url http://localhost:4173] [--out <mp4>]
 //     [--no-upload] [--frames 0,150,300 [--frames-dir <adresár>]] [--reported <fakty.json>] [--plan <voľby.json>]
 //     [--hook <háčik.json>]  — háčik úvodnej karty {tag, lines[1–3], sub?, source} (normalizeVideoHook, zdroj povinný)
 // `--plan <voľby.json>`: tempo videa (voľby videoPlan, napr. dlhšie otvorenie a zastavenia, keď má video
@@ -45,9 +45,12 @@ const puppeteer = require('puppeteer');
 
 const args = process.argv.slice(2);
 const flag = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] ? args[i + 1] : fallback; };
-const id = flag('--event');
+// Udalosť z API (--event <id>) alebo zo súboru (--event-file, linka eventVideoPipeline — nezávisí od vydania služby).
+const eventFile = flag('--event-file');
+const fileEvent = eventFile ? JSON.parse(fs.readFileSync(path.resolve(eventFile), 'utf8')) : null;
+const id = fileEvent?.id || flag('--event');
 if (!id || !/^[0-9a-f]{6}-\d{8}T\d{4}$/.test(id)) {
-  console.error('[event-video] chýba --event <hex>-RRRRMMDDTHHMM');
+  console.error('[event-video] chýba --event <hex>-RRRRMMDDTHHMM alebo --event-file <json>');
   process.exit(2);
 }
 const baseUrl = flag('--url', 'http://localhost:4173').replace(/\/+$/, '');
@@ -63,9 +66,9 @@ const withTimeout = (promise, ms, what) => Promise.race([
   new Promise((_, reject) => setTimeout(() => reject(new Error(`časový limit: ${what}`)), ms).unref?.()),
 ]);
 
-const res = await fetch(`${baseUrl}/api/events/${id}`);
-if (!res.ok) { console.error(`[event-video] udalosť ${id}: HTTP ${res.status}`); process.exit(1); }
-const event = await res.json();
+const res = fileEvent ? null : await fetch(`${baseUrl}/api/events/${id}`);
+if (res && !res.ok) { console.error(`[event-video] udalosť ${id}: HTTP ${res.status}`); process.exit(1); }
+const event = fileEvent || await res.json();
 if (flag('--reported')) {
   const input = JSON.parse(fs.readFileSync(path.resolve(flag('--reported')), 'utf8'));
   const result = normalizeReportedFacts(input, {

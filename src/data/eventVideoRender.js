@@ -121,6 +121,8 @@ export function videoEventKey(event) {
     // Doplnené zo správ (pristátie, pokles v diere) — video ich ukazuje, iné fakty = iné video. Bez faktov
     // sa kľúč nemení (videá starších udalostí ostávajú platné).
     ...(e.reported?.length ? { reported: e.reported.map((f) => ({ kind: f?.kind, t: f?.t, fromT: f?.fromT ?? null, airport: f?.airport?.icao ?? null, toFt: f?.toFt ?? null, domains: f?.domains || [] })) } : {}),
+    // Scenár vlastníka (háčik, doplnky, náhrady viet) — iný komentár = iné video.
+    ...(e.videoScript ? { script: { hook: e.videoScript.hook ? { tag: e.videoScript.hook.tag, lines: e.videoScript.hook.lines, sub: e.videoScript.hook.sub, source: e.videoScript.hook.source, spoken: e.videoScript.hook.spoken, captions: e.videoScript.hook.captions } : null, extras: (e.videoScript.extras || []).map((x) => ({ spoken: x.spoken, caption: x.caption })), lines: e.videoScript.lines || {} } } : {}),
   };
   return createHash('sha1').update(JSON.stringify(pick)).digest('hex').slice(0, 16);
 }
@@ -147,7 +149,7 @@ export function createEventVideoStore({ dir }) {
       const file = fileOf(event);
       return fs.existsSync(file) ? { file } : null;
     },
-    /** Uloží video (zápis cez dočasný súbor); vracia { file, bytes } alebo vyhodí BAD_VIDEO. */
+    /** Uloží video (zápis cez dočasný súbor); vracia { file, bytes } alebo vyhodí BAD_VIDEO. Staršie súbory udalosti preč. */
     save(event, buf) {
       if (!isMp4(buf)) throw Object.assign(new Error('not an mp4 video'), { code: 'BAD_VIDEO' });
       fs.mkdirSync(dir, { recursive: true });
@@ -155,12 +157,29 @@ export function createEventVideoStore({ dir }) {
       const tmp = `${file}.part`;
       fs.writeFileSync(tmp, buf);
       fs.renameSync(tmp, file);
+      const keep = `${event.id}-${videoEventKey(event)}`;
       for (const name of fs.readdirSync(dir)) {
-        if (name.startsWith(`${event.id}-`) && path.join(dir, name) !== file) {
+        if (name.startsWith(`${event.id}-`) && !name.startsWith(keep)) {
           try { fs.unlinkSync(path.join(dir, name)); } catch { /* ďalší pokus pri ďalšom nahratí */ }
         }
       }
       return { file, bytes: buf.length };
+    },
+    /**
+     * Vedľajší súbor k videu tých istých údajov (2026-10-03: verzia bez titulkov `clean.mp4`, titulky
+     * `sk_SK.srt`): `<id>-<kľúč>.<názov>`; mažú sa spolu s videom pri nových údajoch.
+     */
+    saveExtra(event, name, buf) {
+      if (!/^[a-z_]+\.[a-z0-9]+$/i.test(name)) throw new Error('bad extra name');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = `${fileOf(event).replace(/\.mp4$/, '')}.${name}`;
+      fs.writeFileSync(`${file}.part`, buf);
+      fs.renameSync(`${file}.part`, file);
+      return { file, bytes: buf.length };
+    },
+    findExtra(event, name) {
+      const file = `${fileOf(event).replace(/\.mp4$/, '')}.${name}`;
+      return fs.existsSync(file) ? { file } : null;
     },
   };
 }

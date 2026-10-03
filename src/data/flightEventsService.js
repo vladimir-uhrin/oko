@@ -29,6 +29,8 @@ import { normalizeReportedFacts } from './eventReported.js';
 import { parseAirportIndex } from './airportLookup.js';
 import { simplifyTrack } from './eventCard.js';
 import { VIDEO_UPLOAD_MAX_BYTES, isMp4 } from './eventVideoRender.js';
+import { normalizeVideoScript, quoteFoundIn, scriptSources } from './eventVideoScript.js';
+import { createEventVideoJobs } from './eventVideoJobs.js';
 import { eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, isPublishable, postText, publicEventView } from './eventPost.js';
 import { parseGdeltArticles } from './situationNews.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS, STATE_BACKFILL_UA, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
@@ -75,6 +77,11 @@ export const STORED_TRACE_MAX_POINTS = 20_000;
 export const TRACE_IMPORT_MAX_BYTES = 16 * 1024 * 1024;
 /** Fakty zo správ (citáty a odkazy, eventReported.js) — malé telo. */
 export const REPORTED_MAX_BYTES = 64 * 1024;
+/** Scenár videa (háčik, doplnky, náhrady viet) — malé telo. */
+export const SCRIPT_MAX_BYTES = 64 * 1024;
+/** Overenie citátu v článku: prehliadačový User-Agent (Arab News bez neho vracia 403), 12 s, 2 MB. */
+export const QUOTE_FETCH_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36';
+export const QUOTE_FETCH_MAX_BYTES = 2 * 1024 * 1024;
 
 const roundTo = (v, k) => (Number.isFinite(v) ? Math.round(v * k) / k : null);
 /** Body druhej siete na uloženie k udalosti — kompaktné riadky. Pure. */
@@ -111,7 +118,7 @@ export const EVENTS_PUBLIC_ORIGIN = 'https://okolive.sk';
 const EVENT_ID = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
 const EVENT_ID_PART = '[0-9a-f]{6}-\\d{8}T\\d{4}';
 const PUBLIC_ROUTE = new RegExp(`^/public/(${EVENT_ID_PART})$`);
-const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|post|publish|unpublish|second-network|reported))?$`);
+const EVENT_ROUTE = new RegExp(`^/(${EVENT_ID_PART})(?:/(card\\.jpg|video\\.mp4|video\\.srt|video-script|video/prepare|video/status|post|publish|unpublish|second-network|reported))?$`);
 /** Stopa na obrázok: body sietí, ktoré sú v atribúcii (OpenSky + adsb.lol), aj z druhej siete. */
 const DRAWN_SRC = (src) => src === PRIMARY_SRC || String(src || '').startsWith('adsb.lol');
 
@@ -294,6 +301,8 @@ export function createFlightEventsService({
   eventVideo = null,
   videoStore = null,
   airportsFile = null,
+  videoPipeline = null,
+  videoDailyMax = 3,
 } = {}) {
   const store = fileEventStore(eventsDir);
   store.load();
@@ -546,8 +555,57 @@ export function createFlightEventsService({
       published: event.published ?? prev?.published ?? null,
       secondNetworkTrace: event.secondNetworkTrace ?? prev?.secondNetworkTrace ?? null,
       reported: event.reported ?? prev?.reported ?? null,
+      videoScript: event.videoScript ?? prev?.videoScript ?? null,
     });
   }
+
+  /**
+   * Scenár videa od vlastníka (2026-10-03, eventVideoScript.js): háčik, doplnky, náhrady viet. Každý
+   * citát sa overí v článku (stiahne sa s prehliadačovým UA): nenájdený = odmietnuté celé; nedostupný
+   * článok (403, sieť) = prijaté s poznámkou `unavailable` (vlastník vidí, že sa nedal overiť).
+   */
+  async function saveVideoScript(event, body) {
+    let script;
+    try {
+      script = normalizeVideoScript(body, { trusted: trustedNews() });
+    } catch (error) {
+      if (error?.code === 'BAD_SCRIPT') return { status: 400, body: { error: 'bad_script', why: error.why, index: error.index ?? null } };
+      throw error;
+    }
+    const checks = [];
+    for (const src of scriptSources(script)) {
+      let state = 'unavailable';
+      try {
+        const res = await fetchImpl(src.url, { headers: { 'User-Agent': QUOTE_FETCH_UA, Accept: 'text/html,*/*' }, signal: AbortSignal.timeout(12_000) });
+        if (res.ok) {
+          const text = (await res.text()).slice(0, QUOTE_FETCH_MAX_BYTES);
+          state = quoteFoundIn(text, src.quote) ? 'found' : 'not_found';
+        }
+      } catch { state = 'unavailable'; }
+      checks.push({ where: src.where, url: src.url, domain: src.domain, state });
+    }
+    const notFound = checks.filter((c) => c.state === 'not_found');
+    if (notFound.length) return { status: 400, body: { error: 'quote_not_found', checks } };
+    const saved = script ? { ...script, checkedT: Math.floor(now() / 1000), quoteChecks: checks } : null;
+    store.save({ ...event, videoScript: saved });
+    log(`[events] ${event.id} ${event.callsign || ''} scenár videa ${saved ? `uložený (háčik ${saved.hook ? 'áno' : 'nie'}, doplnky ${saved.extras.length}, citáty: ${checks.map((c) => c.state).join(', ') || '—'})` : 'zmazaný'}`);
+    return { status: 200, body: { id: event.id, videoScript: saved } };
+  }
+
+  // Príprava videa (2026-10-03): úloha na pozadí — hlas, tempo, obraz, zvuk, titulky (scripts/lib/
+  // eventVideoPipeline.mjs cez `videoPipeline.run`); hotové súbory do úložiska videí pre tie isté údaje.
+  const videoJobs = createEventVideoJobs({
+    run: (event, script, onProgress) => videoPipeline.run(event, script, onProgress),
+    onDone: async (event, result) => {
+      if (!videoStore || !result?.files) return;
+      videoStore.save(event, fs.readFileSync(result.files.burned));
+      videoStore.saveExtra(event, 'clean.mp4', fs.readFileSync(result.files.clean));
+      videoStore.saveExtra(event, 'sk_SK.srt', fs.readFileSync(result.files.srt));
+    },
+    now,
+    log,
+    dailyMax: videoDailyMax,
+  });
 
   /**
    * Chýbajúce údaje zo správ (eventReported.js): fakty s citátmi z dôveryhodných médií nahradia
@@ -630,6 +688,11 @@ export function createFlightEventsService({
       published: event.published || null,
       facebook: url ? facebookShareUrl(url) : null,
       video: Boolean(videoStore),
+      // Scenár a stav prípravy videa (2026-10-03): formulár a tlačidlo PRIPRAVIŤ VIDEO v paneli.
+      videoScript: event.videoScript || null,
+      videoJob: videoJobs.status(event.id),
+      videoPrepare: Boolean(videoPipeline),
+      voiceReady: Boolean(videoPipeline?.voiceReady),
     };
   }
 
@@ -915,6 +978,10 @@ export function createFlightEventsService({
             if (error?.code === 'FFMPEG_MISSING') { json(res, 503, { error: 'video_unavailable' }); return; }
             throw error;
           }
+        } else if (url.searchParams.get('variant') === 'clean') {
+          // Verzia bez vpálených titulkov (k nej patrí video.srt) — pripravené linkou (2026-10-03).
+          video = videoStore?.findExtra(full, 'clean.mp4') || null;
+          if (!video) { json(res, 404, { error: 'video_not_captured' }); return; }
         } else {
           video = videoStore?.find(full) || null;
           if (!video) { json(res, 404, { error: 'video_not_captured' }); return; }
@@ -924,9 +991,24 @@ export function createFlightEventsService({
           'Content-Type': 'video/mp4',
           'Content-Length': String(mp4.length),
           'Cache-Control': 'no-store',
-          'Content-Disposition': `attachment; filename="oko-udalost-${event.id}.mp4"`,
+          'Content-Disposition': `attachment; filename="oko-udalost-${event.id}${url.searchParams.get('variant') === 'clean' ? '-bez-titulkov' : ''}.mp4"`,
         });
         res.end(method === 'HEAD' ? undefined : mp4);
+        return;
+      }
+      // Stav prípravy videa a titulky (SRT pre FB) — len čítanie (2026-10-03).
+      if (action === 'video/status') {
+        if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
+        json(res, 200, videoJobs.status(event.id), 'no-store');
+        return;
+      }
+      if (action === 'video.srt') {
+        if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
+        const extra = videoStore?.findExtra(await withTrack(event), 'sk_SK.srt') || null;
+        if (!extra) { json(res, 404, { error: 'video_not_captured' }); return; }
+        const text = await fs.promises.readFile(extra.file);
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': String(text.length), 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${event.id}.sk_SK.srt"` });
+        res.end(method === 'HEAD' ? undefined : text);
         return;
       }
       // Zverejniť / stiahnuť / dodať stopu druhej siete: len POST z vlastnej stránky (overené vyššie).
@@ -941,6 +1023,25 @@ export function createFlightEventsService({
         }
         const imported = await importSecondNetwork(event, body);
         json(res, imported.status, imported.body);
+        return;
+      }
+      if (action === 'video-script') {
+        let body;
+        try {
+          body = await readJsonBody(req, SCRIPT_MAX_BYTES);
+        } catch (error) {
+          json(res, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: error?.code === 'BODY_TOO_LARGE' ? 'too_large' : 'bad_json' });
+          return;
+        }
+        const saved = await saveVideoScript(event, body?.script === null ? null : (body?.script ?? body));
+        json(res, saved.status, saved.body);
+        return;
+      }
+      if (action === 'video/prepare') {
+        if (!videoPipeline) { json(res, 503, { error: 'video_prepare_unavailable' }); return; }
+        const full = await withTrack(event);
+        const started = videoJobs.start(full, full.videoScript || null);
+        json(res, started.ok ? 202 : 409, started.ok ? { ok: true, status: started.status } : { error: started.error, status: started.status, activeId: started.activeId ?? null, dailyMax: started.dailyMax ?? null });
         return;
       }
       if (action === 'reported') {

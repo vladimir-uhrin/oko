@@ -95,7 +95,7 @@ function setup({ ownerHost = false, list = null, view = null, post = null, listG
     setTimer: (fn, ms) => { timers.push({ fn, ms }); },
     ...(saveFile ? { saveFile } : {}),
   });
-  return { doc, host, panel, calls, state, timers, section: host.children[0], advance: (ms) => { nowMs += ms; } };
+  return { doc, host, panel, calls, state, timers, api, section: host.children[0], advance: (ms) => { nowMs += ms; } };
 }
 
 test('id z odkazu a úsek na prehratie: len platné id; celá stopa udalosti, inak okno', async () => {
@@ -346,4 +346,95 @@ test('vlastník po zverejnení: VIDEO DO PRÍSPEVKU (3D video nahraté) — poč
   const nOwner = one(notYet.section, 'events-owner');
   assert.equal(one(nOwner, 'events-download-video'), undefined);
   assert.equal(one(nOwner, 'events-video-note').textContent, 'events.video-not-captured');
+});
+
+test('video automaticky (2026-10-03): formulár scenára → ULOŽIŤ SCENÁR (server overí citáty), PRIPRAVIŤ VIDEO → stav každých 5 s → po dokončení tlačidlá na stiahnutie (aj pred zverejnením); chyby zrozumiteľne; bez linky len poznámka', async () => {
+  const { scriptFormToInput, scriptToForm, videoJobMessage } = await import('./eventsPanel.js');
+  // Čisté: formulár ↔ scenár.
+  const input = scriptFormToInput({ tag: 'útok na palube', lines: 'Pilot pobodal kolegu\na pokúsil sa zrútiť lietadlo', sub: 'Cestujúci ho zneškodnili', attributed: 'izraelského premiéra', spoken: 'Veta jeden.\nVeta dva.', sources: 'https://www.aljazeera.com/x | one of the pilots stabbed | the other\nhttps://www.arabnews.com/y | subdue the attacker', extras: 'Náhradné lietadlo. | https://www.arabnews.com/y | A flight to retrieve' });
+  assert.deepEqual(input.hook.lines, ['Pilot pobodal kolegu', 'a pokúsil sa zrútiť lietadlo']);
+  assert.deepEqual(input.hook.spoken, ['Veta jeden.', 'Veta dva.']);
+  assert.deepEqual(input.hook.sources, [{ url: 'https://www.aljazeera.com/x', quote: 'one of the pilots stabbed | the other' }, { url: 'https://www.arabnews.com/y', quote: 'subdue the attacker' }], 'zvislá čiara v citáte prežije');
+  assert.deepEqual(input.extras, [{ spoken: 'Náhradné lietadlo.', sources: [{ url: 'https://www.arabnews.com/y', quote: 'A flight to retrieve' }] }]);
+  assert.equal(scriptFormToInput({ tag: '', lines: '', spoken: '', sources: '', extras: '' }), null, 'prázdny formulár = bez scenára');
+  const saved = { hook: { tag: 'ÚTOK NA PALUBE', lines: ['A', 'B'], sub: null, attributed: 'premiéra', spoken: ['V.'], sources: [{ url: 'https://u', quote: 'q' }] }, extras: [{ spoken: 'E.', sources: [{ url: 'https://e', quote: 'eq' }] }] };
+  assert.deepEqual(scriptToForm(saved), { tag: 'útok na palube', lines: 'A\nB', sub: '', attributed: 'premiéra', spoken: 'V.', sources: 'https://u | q', extras: 'E. | https://e | eq' });
+  assert.equal(videoJobMessage({ state: 'running', stage: 'capture', detail: { frame: 120, frames: 2033 } }, t), 'events.video-stage-capture {"frame":120,"frames":2033}');
+  assert.equal(videoJobMessage({ state: 'done', durationS: 67.8 }, t), 'events.video-job-done {"s":"68"}');
+  assert.equal(videoJobMessage({ state: 'idle' }, t), '');
+  // DOM: vlastník, udalosť na zverejnenie (ešte nezverejnená), linka k dispozícii.
+  const view = await fzView({ preview: true });
+  const summary = { id: ID, icao24: '8965d1', callsign: 'FDB1073', status: 'confirmed', firstT: view.firstT, kinds: ['dive'], news: 'verified', publishable: true, published: null };
+  const post = { id: ID, publishable: true, headline: 'H', text: 'Text', published: null, facebook: null, video: true, videoReady: false, videoPrepare: true, voiceReady: false, videoScript: null, videoJob: { state: 'idle' } };
+  const calls = { scripts: [], prepare: 0, status: 0 };
+  const statuses = [{ state: 'running', stage: 'capture', detail: { frame: 10, frames: 100 } }, { state: 'done', stage: 'done', durationS: 67.8, review: [{ line: 'signoff', spoken: 'Video pripravil Vladimír Uhrin.', heard: 'Video pripravil Vladimír Úrin.' }] }];
+  const s = setup({ ownerHost: true, view, list: { events: [summary] }, post, video: async () => ({ size: 1, type: 'video/mp4' }) });
+  s.state.post = post;
+  Object.assign(s.api, {
+    saveScript: async (id, script) => { calls.scripts.push(script); if (script?.hook?.sources?.[0]?.quote === 'zlý citát') throw Object.assign(new Error('quote_not_found'), { checks: [{ domain: 'aljazeera.com', state: 'not_found' }] }); s.state.post = { ...s.state.post, videoScript: { ...script, hook: { ...script.hook, tag: script.hook.tag.toUpperCase(), source: 'podľa premiéra · Al Jazeera' }, quoteChecks: [{ domain: 'aljazeera.com', state: 'found' }] } }; return { videoScript: s.state.post.videoScript }; },
+    prepareVideo: async () => { calls.prepare += 1; s.state.post = { ...s.state.post, videoJob: { state: 'queued', stage: 'queued' } }; return { ok: true }; },
+    videoStatus: async () => { calls.status += 1; const st = statuses.shift() || statuses[0]; if (st.state === 'done') s.state.post = { ...s.state.post, videoReady: true, videoJob: st }; return st; },
+    videoUrl: (id, v) => `/v/${id}${v ? `?${v}` : ''}`,
+    srtUrl: (id) => `/srt/${id}`,
+  });
+  await flush();
+  one(s.section, 'events-review-toggle').click();
+  await flush();
+  one(s.section, 'events-review-btn').click();
+  await flush();
+  let owner = one(s.section, 'events-owner');
+  assert.ok(one(owner, 'events-script-title'), 'formulár scenára je tam');
+  assert.ok(one(owner, 'events-video-no-voice'), 'bez hlasovej služby poznámka');
+  assert.equal(one(owner, 'events-download-video'), undefined, 'video ešte nie je');
+  // Scenár: zlý citát → správa, nič sa neuloží; dobrý → uložený, formulár predvyplnený.
+  one(owner, 'events-script-tag').value = 'útok na palube';
+  one(owner, 'events-script-lines').value = 'Pilot pobodal kolegu\na pokúsil sa zrútiť lietadlo';
+  one(owner, 'events-script-spoken').value = 'Pilot pobodal kolegu, tvrdí premiér.';
+  one(owner, 'events-script-sources').value = 'https://www.aljazeera.com/x | zlý citát';
+  one(owner, 'events-script-save').click();
+  await flush();
+  assert.equal(one(owner, 'events-owner-msg').textContent, 'events.script-quote-missing {"domains":"aljazeera.com"}');
+  assert.equal(calls.scripts.length, 1);
+  one(owner, 'events-script-sources').value = 'https://www.aljazeera.com/x | one of the pilots stabbed';
+  one(owner, 'events-script-save').click();
+  await flush();
+  owner = one(s.section, 'events-owner');
+  assert.equal(one(owner, 'events-script-tag').value, 'útok na palube', 'po uložení predvyplnené');
+  assert.deepEqual(calls.scripts[1].hook.lines, ['Pilot pobodal kolegu', 'a pokúsil sa zrútiť lietadlo']);
+  // PRIPRAVIŤ VIDEO → stav každých 5 s → hotové → tlačidlá (pred zverejnením).
+  one(owner, 'events-video-prepare').click();
+  await flush();
+  assert.equal(calls.prepare, 1);
+  owner = one(s.section, 'events-owner');
+  assert.equal(one(owner, 'events-video-prepare').disabled, true, 'počas prípravy nereaguje');
+  const poll = s.timers.filter((x) => x.ms === 5000);
+  assert.equal(poll.length, 1, 'stav sa pýta o 5 s');
+  await poll[0].fn();
+  await flush();
+  assert.equal(one(owner, 'events-video-job').textContent, 'events.video-stage-capture {"frame":10,"frames":100}');
+  const poll2 = s.timers.filter((x) => x.ms === 5000);
+  assert.equal(poll2.length, 2, 'ďalší dopyt o 5 s');
+  await poll2[1].fn();
+  await flush();
+  owner = one(s.section, 'events-owner');
+  assert.equal(one(owner, 'events-video-job').textContent, 'events.video-job-done {"s":"68"}');
+  assert.ok(one(owner, 'events-video-review-list'), 'vety na vypočutie');
+  assert.ok(one(owner, 'events-download-video') && one(owner, 'events-download-video-clean') && one(owner, 'events-download-srt'), 'tri výstupy na stiahnutie');
+  assert.equal(one(owner, 'events-download-srt').href, `/srt/${ID}`);
+  assert.equal(one(owner, 'events-download-video-clean').href, `/v/${ID}?clean`);
+  assert.equal(one(owner, 'events-publish')?.textContent, 'events.publish', 'zverejniť stále len klikom vlastníka');
+  // Zaneprázdnená linka → správa.
+  s.api.prepareVideo = async () => { throw new Error('busy'); };
+  one(owner, 'events-video-prepare').click();
+  await flush();
+  assert.equal(one(owner, 'events-owner-msg').textContent, 'events.video-job-busy');
+  // Bez linky (staršie vydanie servera): len poznámka, žiadny formulár.
+  const none = setup({ ownerHost: true, view, list: { events: [summary] }, post: { ...post, videoPrepare: false }, video: async () => ({}) });
+  await flush();
+  one(none.section, 'events-review-toggle').click();
+  await flush();
+  one(none.section, 'events-review-btn').click();
+  await flush();
+  assert.equal(one(one(none.section, 'events-owner'), 'events-script-title'), undefined);
+  assert.ok(one(one(none.section, 'events-owner'), 'events-video-note'));
 });
