@@ -4,6 +4,11 @@ Stav: **schválený smer, neimplementované** (2026-10-03). Cieľ: z admin panel
 vyrábať a zverejňovať príspevky, fotky, karusely a reels na Facebook a Instagram
 z toho, čo OKO naozaj ukazuje.
 
+**Zameranie (vlastník, 2026-10-03):** OKO je pomocný spravodajský portál —
+pálčivé informácie všetkého druhu z domova a zo sveta. Sociálne siete sú preto
+hlavne **rýchle správy o udalostiach**, ktoré OKO vidí v živých dátach, doplnené
+pravidelnými prehľadmi. Rýchlosť je kľúčová, preto je cieľom automatika.
+
 ## Hlavné pravidlo: nulový rozpočet
 
 Portál zatiaľ nezarába. **Všetko musí fungovať zadarmo.** Platená vec je len
@@ -37,8 +42,13 @@ podklad má v admine vlastný strop renderov za deň (predvolene 0).
 
 1. **Admin → záložka Štúdio:** šablóny obsahu, náhľad, úprava textu, **Schváliť**,
    naplánovať alebo zverejniť, kalendár, história, štatistiky príspevkov.
-   - Šablóny: lietadlá nad SK teraz, lode na Dunaji, zemetrasenie dňa,
-     satelity nad Bratislavou, radar SHMÚ, týždeň v číslach.
+   - **Správy (spúšťa udalosť v dátach):** zemetrasenie (prah magnitúdy, bližšie
+     k SK nižší prah), požiare z FIRMS, výstraha a radar SHMÚ, hladiny Dunaja a Váhu,
+     núdzový kód lietadla (7700) alebo odklon letu, zápchy na diaľniciach,
+     udalosti v konflikte (Ukrajina, Blízky východ) z existujúcich vrstiev,
+     úžiny a lodná doprava, štart rakety, výkyv cien plynu a ropy.
+   - **Prehľady (podľa času):** ranný prehľad „čo sa deje", lietadlá nad SK teraz,
+     lode na Dunaji, satelity nad Bratislavou, týždeň v číslach.
    - Formáty: fotka, karusel, reel 9:16 (15–60 s), story.
 2. **Renderer (server):** Chromium otvorí glóbus v režime nahrávania 9:16, spustí
    recept režiséra, zachytáva snímku po snímke, ffmpeg spraví MP4 1080×1920 / 30 fps.
@@ -60,8 +70,24 @@ podklad má v admine vlastný strop renderov za deň (predvolene 0).
      (pravidlo 2), kontrola, že render a text nie sú prázdne, audit každého zverejnenia,
      okamžité stiahnutie príspevku z admina.
 
+## Redakčné pravidlá (spravodajstvo)
+
+- Každý príspevok: **čas stavu** („stav k 14:32"), **zdroj dát** (USGS, SHMÚ, NASA…)
+  a odkaz na OKO s miestom na glóbuse.
+- Len fakty z dát, žiadne domnienky ani hodnotenia. Neoverené alebo modelované
+  údaje výslovne označiť (pravidlo 2); keď údaje nesedia alebo sú staré, nezverejniť.
+- Pri nešťastiach a konfliktoch vecný tón, bez senzácie a bez záberov obetí.
+- OKO ukazuje objekty, javy a infraštruktúru — **nie ľudí** (pravidlo 6). Správy
+  o konkrétnych osobách (kriminalita, politici, celebrity) mimo záber.
+- Oprava chyby: príspevok sa upraví alebo stiahne a oprava sa zverejní.
+
 ## Na čo si dať pozor
 
+0. **Zákon č. 265/2022 Z. z. (vydavatelia publikácií):** vzťahuje sa aj na
+   *spravodajské webové portály* (pravidelné publikovanie aspoň raz týždenne) a môže
+   z neho vyplývať evidencia u Ministerstva kultúry a povinné údaje o prevádzkovateľovi.
+   Treba overiť, či OKO spadá pod definíciu a čo presne z toho plynie (dotaz na MK SR
+   je zadarmo). Rovnako GDPR/zásady súkromia a tiráž na webe.
 1. **Licencie podkladu:** pred prvým videom overiť podmienky Google Maps Platform
    (EHP od 7/2025) pre záznamy na sociálne siete; s bezplatnými podkladmi overiť
    ich atribúciu (OSM ODbL, ÚGKK).
@@ -95,8 +121,9 @@ Tajomstvá (App Secret, tokeny) **nikdy do chatu ani do repozitára** — len do
 na serveri.
 
 1. Zapnúť dvojfaktorové overenie na Facebooku aj Instagrame.
-2. Facebook stránka OKO (ak ešte nie je): kategória technológie/veda, logo, web okolive.sk.
-3. Instagram → profesionálny účet typu **Business** (Creator funguje tiež).
+2. Facebook stránka OKO (ak ešte nie je): kategória **Spravodajský a mediálny web**
+   (News & media website), logo, web okolive.sk.
+3. Instagram → profesionálny účet typu **Business**, kategória **Spravodajstvo a médiá**.
 4. Prepojiť Instagram so stránkou (nastavenia stránky → Prepojené účty → Instagram).
 5. Voliteľne Meta Business portfólio (business.facebook.com) so stránkou aj IG.
 6. Meta for Developers účet a aplikácia — spolu, keď začne Fáza 0.
