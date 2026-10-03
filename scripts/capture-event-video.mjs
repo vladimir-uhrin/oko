@@ -12,8 +12,12 @@
 // PRÍSPEVKU a do príspevku na FB ho nahrá sám.
 //
 // Dlaždice: jedno video stiahne ~2–3 tisíc dlaždíc fotorealistickej vrstvy cez Cesium ion — spúšťať
-// ručne pre konkrétnu udalosť, nikdy v slučke (CLAUDE.md). Zaseknutý prehliadač (raz naživo pri
-// FZ1073) rieši časový limit snímky, nový pokus a pri opakovaní nové načítanie stránky.
+// ručne pre konkrétnu udalosť, nikdy v slučke (CLAUDE.md).
+//
+// Poistky (scripts/lib/captureGuards.mjs, 2026-10-03): (1) znovunačítanie stránky počas nahrávania — dev
+// server po úprave zdrojáka pošle „full-reload" (v tom istom strome pracuje aj iný agent) — sa zruší, stránka
+// dobehne s modulmi, s ktorými začala; (2) zaseknutá snímka (naživo pri FZ1073 aj pri videu frontu: fotka sa
+// nevráti) → po časovom limite hneď celý prehliadač nanovo a tá istá snímka znova, ffmpeg beží ďalej.
 //
 // Spustenie (beží služba oko-dev na localhoste):
 //   node scripts/capture-event-video.mjs --event <id> | --event-file <udalosť.json> [--url http://localhost:4173] [--out <mp4>]
@@ -38,6 +42,7 @@ import { VIDEO_3D_ENCODE, ffmpegArgs } from '../src/data/eventVideoRender.js';
 import { normalizeReportedFacts } from '../src/data/eventReported.js';
 import { parseTrustedList } from '../src/data/eventNews.js';
 import { parseAirportIndex } from '../src/data/airportLookup.js';
+import { blockPageReloads, shootWithRecovery } from './lib/captureGuards.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(root, 'package.json'));
@@ -59,12 +64,9 @@ const sampleFrames = flag('--frames') ? flag('--frames').split(',').map(Number).
 const framesDir = path.resolve(flag('--frames-dir', path.dirname(out)));
 const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
 const { w: W, h: H } = VIDEO_3D_FORMAT;
+/** Snímka s dočítaním fotorealistických dlaždíc trvá najviac desiatky sekúnd; dlhšie = zaseknutá stránka. */
 const FRAME_TIMEOUT_MS = 90_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const withTimeout = (promise, ms, what) => Promise.race([
-  promise,
-  new Promise((_, reject) => setTimeout(() => reject(new Error(`časový limit: ${what}`)), ms).unref?.()),
-]);
 
 const res = fileEvent ? null : await fetch(`${baseUrl}/api/events/${id}`);
 if (res && !res.ok) { console.error(`[event-video] udalosť ${id}: HTTP ${res.status}`); process.exit(1); }
@@ -102,6 +104,12 @@ const launchBrowser = () => puppeteer.launch({
 let browser = await launchBrowser();
 let tiles = 0;
 let page = null;
+/** Zrušené znovunačítania za celé nahrávanie (aj cez obnovy prehliadača); hlási sa prvé tri a každé dvadsiate. */
+let blockedReloads = 0;
+const reportBlockedReload = () => {
+  blockedReloads += 1;
+  if (blockedReloads <= 3 || blockedReloads % 20 === 0) console.log(`[event-video] zrušené nové načítanie stránky (${blockedReloads}×) — zdroják sa zmenil počas nahrávania`);
+};
 
 /**
  * Nová stránka OKO so scénou udalosti. `fresh` = celý prehliadač nanovo (2026-10-02: po zaseknutí snímky
@@ -127,6 +135,8 @@ async function openScene({ fresh = false } = {}) {
     }
   }
   if (!ready) throw new Error('OKO sa nenačítalo (beží oko-dev na localhoste?)');
+  // Od tejto chvíle sa stránka nesmie načítať znova (stratila by scénu aj stiahnuté dlaždice).
+  await blockPageReloads(page, { onBlocked: reportBlockedReload });
   await sleep(2000);
   await page.evaluate(async (sceneData) => {
     const viewer = window.__godsEyeView.viewer;
@@ -157,8 +167,11 @@ async function openScene({ fresh = false } = {}) {
 
 // Poloha popisov na obrazovke: stred diery, letisko pristátia zo správ.
 const anchorList = scene.anchorPoints();
+/** Krok rozrobenej snímky — pri zaseknutí ho nesie hlásenie (scéna, dlaždice, popisy, fotka). */
+let shootStep = '';
 async function shoot(frame) {
   const st = scene.frame(frame);
+  shootStep = 'scéna';
   await page.evaluate((x) => window.__okoEventVideo.apply(x), {
     t: st.s.t,
     ghost: st.ghost,
@@ -167,30 +180,32 @@ async function shoot(frame) {
     moments: st.moments,
     camera: st.camera,
   });
+  shootStep = 'dlaždice';
   for (let k = 0; k < 80; k += 1) {
     await page.evaluate(() => window.__okoEventVideo.render());
     if (k >= 1 && await page.evaluate(() => window.__okoEventVideo.loaded())) break;
     await sleep(80);
   }
   await page.evaluate(() => window.__okoEventVideo.render());
+  shootStep = 'popisy';
   const anchors = await page.evaluate((l) => window.__okoEventVideo.project(l), anchorList);
   await page.evaluate((svg) => { document.getElementById('oko-video-hud').innerHTML = svg; }, buildEventVideoHudSvg(event, scene, st, anchors, { logoMarkup, hook }));
+  shootStep = 'fotka';
   return page.screenshot({ type: 'jpeg', quality: 92 });
 }
-/** Snímka s časovým limitom; po druhom a treťom zlyhaní celý prehliadač nanovo (ffmpeg beží ďalej). */
-async function shootSafe(frame) {
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    try {
-      return await withTimeout(shoot(frame), FRAME_TIMEOUT_MS, `snímka ${frame}`);
-    } catch (error) {
-      console.log(`[event-video] snímka ${frame}, pokus ${attempt}: ${error.message}`);
-      if (attempt >= 2 && attempt < 4) {
-        try { await openScene({ fresh: true }); } catch (e) { console.log(`[event-video] nový prehliadač: ${e.message}`); }
-      }
-    }
-  }
-  throw new Error(`snímka ${frame} sa nepodarila`);
-}
+/**
+ * Snímka s časovým limitom a obnovou (lib/captureGuards.mjs): zaseknutá stránka sa sama nespamätá — po
+ * časovom limite sa hneď otvorí celý prehliadač nanovo (scéna sa postaví znova, dlaždice záberu sa dočítajú
+ * v slučke snímky) a pokračuje sa tou istou snímkou; iná chyba sa raz skúsi na tej istej stránke.
+ */
+const shootSafe = (frame) => shootWithRecovery({
+  shoot: () => shoot(frame),
+  reopen: () => openScene({ fresh: true }),
+  timeoutMs: FRAME_TIMEOUT_MS,
+  label: `snímka ${frame}`,
+  step: () => shootStep,
+  log: (m) => console.log(`[event-video] ${m}`),
+});
 
 try {
   await openScene();

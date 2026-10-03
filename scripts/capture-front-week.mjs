@@ -21,6 +21,7 @@ import { VIDEO_3D_FORMAT, inlineLogoMarkup, normalizeVideoHook } from '../src/da
 import { VIDEO_3D_ENCODE, ffmpegArgs } from '../src/data/eventVideoRender.js';
 import { buildFrontWeekHudSvg, changeCallouts } from '../src/data/frontWeekHud.js';
 import { frontWeekPlan } from '../src/data/frontWeekVideo.js';
+import { blockPageReloads, shootWithRecovery } from './lib/captureGuards.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(root, 'package.json'));
@@ -40,10 +41,6 @@ const { w: W, h: H } = VIDEO_3D_FORMAT;
 /** Snímka bežne trvá pod sekundu; zaseknutá stránka sa po tomto čase vymení za nový prehliadač. */
 const FRAME_TIMEOUT_MS = 45_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const withTimeout = (promise, ms, what) => Promise.race([
-  promise,
-  new Promise((_, reject) => setTimeout(() => reject(new Error(`časový limit: ${what}`)), ms).unref?.()),
-]);
 
 const plan = frontWeekPlan(job.model, job.lines, job.durations, job.planOpts || {});
 if (!plan) { console.error('[front-week] úloha nemá vety — nie je čo nahrávať'); process.exit(1); }
@@ -64,7 +61,12 @@ const launchBrowser = () => puppeteer.launch({
 let browser = await launchBrowser();
 let page = null;
 let info = null;
+/** Zrušené znovunačítania sa rátajú za celé nahrávanie (aj cez obnovy prehliadača); hlási sa prvé tri a každé dvadsiate. */
 let blockedReloads = 0;
+const reportBlockedReload = () => {
+  blockedReloads += 1;
+  if (blockedReloads <= 3 || blockedReloads % 20 === 0) console.log(`[front-week] zrušené nové načítanie stránky (${blockedReloads}×) — zdroják sa zmenil počas nahrávania`);
+};
 
 async function openScene({ fresh = false, frame = 0 } = {}) {
   if (page) await page.close().catch(() => {});
@@ -85,16 +87,9 @@ async function openScene({ fresh = false, frame = 0 } = {}) {
     }
   }
   if (!ready) throw new Error('OKO sa nenačítalo (beží oko-dev na localhoste?)');
-  // Stránka sa počas nahrávania nesmie načítať znova: dev server po úprave zdrojáka (v tom istom strome
-  // pracuje aj iný agent) pošle „full-reload" a rozrobená snímka by padla. Nové načítanie dokumentu sa
-  // preto zruší — stránka dobehne s modulmi, s ktorými začala. Platí len pre dokumenty, nie pre dáta.
-  const cdp = await page.createCDPSession();
-  await cdp.send('Fetch.enable', { patterns: [{ resourceType: 'Document' }] });
-  cdp.on('Fetch.requestPaused', (e) => {
-    blockedReloads += 1;
-    if (blockedReloads <= 3 || blockedReloads % 20 === 0) console.log(`[front-week] zrušené nové načítanie stránky (${blockedReloads}×) — zdroják sa zmenil počas nahrávania`);
-    cdp.send('Fetch.failRequest', { requestId: e.requestId, errorReason: 'Aborted' }).catch(() => {});
-  });
+  // Stránka sa počas nahrávania nesmie načítať znova (dev server po úprave zdrojáka pošle „full-reload" —
+  // v tom istom strome pracuje aj iný agent): nové načítanie dokumentu sa zruší (lib/captureGuards.mjs).
+  await blockPageReloads(page, { onBlocked: reportBlockedReload });
   await sleep(1500);
   info = await page.evaluate(async () => {
     const gev = window.__godsEyeView;
@@ -163,24 +158,17 @@ async function shoot(frame) {
   return page.screenshot({ type: 'jpeg', quality: 92 });
 }
 /**
- * Snímka s časovým limitom. Zaseknutá stránka sa sama nespamätá — po prvom časovom limite sa hneď otvorí
- * celý prehliadač nanovo (ffmpeg beží ďalej, scéna sa zahreje na kamere tej istej snímky); iná chyba sa raz
- * skúsi na tej istej stránke.
+ * Snímka s časovým limitom a obnovou (lib/captureGuards.mjs): po zaseknutí sa hneď otvorí celý prehliadač
+ * nanovo a scéna sa zahreje na kamere tej istej snímky; ffmpeg beží ďalej.
  */
-async function shootSafe(frame) {
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    try {
-      return await withTimeout(shoot(frame), FRAME_TIMEOUT_MS, `snímka ${frame}`);
-    } catch (error) {
-      const hung = /^časový limit/.test(error.message);
-      console.log(`[front-week] snímka ${frame}, pokus ${attempt}: ${error.message}${hung ? ` (krok: ${shootStep})` : ''}`);
-      if (attempt < 4 && (hung || attempt >= 2)) {
-        try { await openScene({ fresh: true, frame }); } catch (e) { console.log(`[front-week] nový prehliadač: ${e.message}`); }
-      }
-    }
-  }
-  throw new Error(`snímka ${frame} sa nepodarila`);
-}
+const shootSafe = (frame) => shootWithRecovery({
+  shoot: () => shoot(frame),
+  reopen: () => openScene({ fresh: true, frame }),
+  timeoutMs: FRAME_TIMEOUT_MS,
+  label: `snímka ${frame}`,
+  step: () => shootStep,
+  log: (m) => console.log(`[front-week] ${m}`),
+});
 
 try {
   await openScene();
