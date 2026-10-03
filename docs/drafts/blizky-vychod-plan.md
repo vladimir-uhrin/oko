@@ -239,11 +239,14 @@ KLIENT
 5. **More a vzduch** — 3 d. **5a PortWatch HOTOVÉ 2026-09-26** (karta PRECHODY ÚŽINAMI v paneli:
    Hormuz, Báb al-Mandab, Suez + Mys dobrej nádeje ako obchádzka; okno pred krízou po úžine —
    Hormuz rok pred vojnou s Iránom Ø 84,8, Červené more 1. 1.–15. 11. 2023; archív celej série
-   od 2019 na D:, prírastok 45 dní; 20. 9.: −96 % / −67 % / −43 % / +81 %). Ostáva zo stage 5:
-   UKMTO body v scénach
-   Hormuz/Červené more; EASA CZIB na FIR z VATSpy (vlastný CC BY-SA súbor); zberač rušenia GPS
+   od 2019 na D:, prírastok 45 dní; 20. 9.: −96 % / −67 % / −43 % / +81 %). **5b VZDUŠNÝ PRIESTOR
+   · EASA HOTOVÉ 2026-10-03** (bulletiny CZIB z exportu + RSS + stránky bulletinu, kódy FIR len zo
+   zátvoriek „Affected Airspace", hranice VATSpy CC BY-SA raz za 7 dní; celý FIR výplň, „časť FIR"
+   len prerušovaný obrys; čip + legenda v paneli, 16 aktívnych bulletinov / 30 FIR naživo 3. 10.;
+   naživo až vydaním služby oko-api). Popri tom: spoločná brána GDELT (179233e — 165 z 188 dopytov
+   padalo na 429). Ostáva zo stage 5: UKMTO body v scénach Hormuz/Červené more; zberač rušenia GPS
    z adsb.lol (6 kruhov po 10 min → bunky 0,5° za deň → densityDrape, prahy 2 %/10 %). Test:
-   parsery, výpočet podielu, mapovanie CZIB → FIR.
+   parsery, výpočet podielu.
 6. **Poplachy, škody, súčty, internet** — 2–3 d. Poplachy HFC (polygóny z MIT mirroru +
    história z mirroru po otázke 5) ako denná/týždenná mapa, nikdy „živý alarm"; UNOSAT Gaza
    CDA statická; Tech for Palestine súčty v karte Gazy a Západného brehu; OONI (a IODA po

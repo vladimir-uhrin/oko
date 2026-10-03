@@ -11725,6 +11725,25 @@ body.recording-mode .state-strip {
 .mideast-legend-age.is-stale { color: #ffb547; font-weight: 700; letter-spacing: 0.04em; border: 1px solid rgba(255, 181, 71, 0.55); border-radius: 3px; padding: 0 4px; background: rgba(255, 181, 71, 0.1); }
 .mideast-legend-note { margin: 0; font-size: 8px; line-height: 1.4; letter-spacing: 0.02em; color: var(--text-dim); }
 /*
+ * BLÍZKY VÝCHOD etapa 5b (VZDUŠNÝ PRIESTOR · EASA, 2026-10-03): legenda bulletinov EASA
+ * (src/mideastPanel.js renderAirspace) — riadok na bulletin: vzorka ako na mape (červená =
+ * všetky výšky, jantárová = pod FL, prerušovaný okraj bez výplne = len časť FIR), krajiny,
+ * odznaky rozsahu, platnosť (uplynutá jantárovo), odkaz na bulletin EASA.
+ */
+.mideast-air-rows { display: flex; flex-direction: column; gap: 3px; }
+.mideast-air-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; }
+.mideast-air-swatch { align-self: center; background: rgba(255, 90, 95, 0.3); border-color: rgba(255, 90, 95, 0.85); }
+.mideast-air-row.is-below .mideast-air-swatch { background: rgba(255, 181, 71, 0.25); border-color: rgba(255, 181, 71, 0.85); }
+.mideast-air-row.is-partial .mideast-air-swatch { background: transparent; border-style: dashed; }
+.mideast-air-name { color: #cfe3f5; }
+.mideast-air-badge { color: #8aa0b6; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 3px; padding: 0 4px; }
+.mideast-air-badge.is-partial { color: #ffb547; border-color: rgba(255, 181, 71, 0.45); cursor: help; }
+.mideast-air-until { color: var(--text-dim); }
+.mideast-air-until.is-stale { color: #ffb547; }
+.mideast-air-link { color: var(--accent); text-decoration: none; }
+.mideast-air-link:hover, .mideast-air-link:focus-visible { text-decoration: underline; }
+.mideast-air-more { font-size: 8px; line-height: 1.4; color: var(--text-dim); }
+/*
  * BLÍZKY VÝCHOD etapa 5a (PRECHODY ÚŽINAMI, 2026-09-26): karta IMF PortWatch
  * (src/portwatchCard.js) — riadok na úžinu: meno, Ø 7 dní, zmena voči obdobiu pred
  * krízou (pokles červeno, nárast jantárovo — obchádzka okolo Afriky nie je „dobrá

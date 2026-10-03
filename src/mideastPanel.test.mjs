@@ -11,6 +11,7 @@ import { createMideastPanel, swatchColour } from './mideastPanel.js';
 import { listMideastTheatres } from './data/mideastTheatres.js';
 import { MIDEAST_CONTROL_MODULES } from './data/wikiControl.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
+import { airspaceModels } from './airspaceAdvisoryLayer.js';
 
 function fakeDocument() {
   const makeEl = (tag) => {
@@ -335,7 +336,7 @@ test('etapa 2 — čip KONTROLA SÍDIEL: rad čipov za dejiskami, prepína sprá
   assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
   const chips = byClass(mount, 'mideast-chips')[0];
   assert.equal(chips.attrs.role, 'group');
-  assert.equal(chips.attrs['aria-label'], 'mideast.part.control');
+  assert.equal(chips.attrs['aria-label'], 'mideast.part.layers', 'skupina čipov má neutrálny názov (od etapy 5b nesie aj VZDUŠNÝ PRIESTOR)');
   const chip = byClass(mount, 'mideast-chip-control')[0];
   assert.ok(chip.classList.contains('data-toggle-chip') && chip.classList.contains('mideast-chip'), 'štýl čipov riadkov DÁTA');
   assert.equal(chip.type, 'button');
@@ -486,4 +487,103 @@ test('etapa 2 — i18n: čip, stavy, druhy, titulok a KAŽDÁ strana každého m
   assert.match(css, /\.mideast-legend-age\.is-stale \{[^}]*#ffb547/, 'jantárová značka ZASTARANÉ');
   assert.match(css, /\.mideast-legend\[hidden\] \{ display: none; \}/);
   assert.match(css, /\.mideast-chip:disabled \{[^}]*var\(--cursor-arrow\)/, 'vypnutý čip nie je „čaká sa"');
+});
+
+// ── Etapa 5b: VZDUŠNÝ PRIESTOR · EASA (2026-10-03) ────────────────────────────
+// Modely zo skutočnej odpovede archívu (fixtúra) cez tú istú funkciu, ktorou ich robí vrstva.
+const airPayload = JSON.parse(readFileSync(new URL('./data/fixtures/airspace-payload-20261003.json', import.meta.url), 'utf8'));
+function fakeAirspace(initial = {}) {
+  let state = { enabled: false, loading: false, error: null, fetchedAt: null, bulletins: [], missingFirs: [], ...initial };
+  const listeners = new Set();
+  const calls = [];
+  const api = {
+    calls,
+    getState: () => state,
+    isEnabled: () => state.enabled,
+    setEnabled(on) { calls.push(['setEnabled', on]); api.emit({ enabled: Boolean(on) }); return Promise.resolve(); },
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit(patch) { state = { ...state, ...patch }; for (const fn of listeners) fn(state); },
+    get listenerCount() { return listeners.size; },
+  };
+  return api;
+}
+
+test('etapa 5b — čip VZDUŠNÝ PRIESTOR vedľa KONTROLY SÍDIEL, legenda za ňou, vypnutý čip = skrytá legenda; destroy odhlási', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const airspace = fakeAirspace();
+  const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace, translate: tKey, lang: 'sk', documentRef: doc });
+  assert.deepEqual(mount.children.map((c) => c.className), ['mideast-status gas-status', 'mideast-section-title gas-card-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-section-title gas-card-title', 'mideast-transits', 'mideast-section-title gas-card-title', 'mideast-news', 'mideast-note']);
+  const chips = byClass(mount, 'mideast-chips')[0];
+  assert.deepEqual(chips.children.map((c) => c.dataset.part), ['control', 'airspace']);
+  const chip = byClass(mount, 'mideast-chip-airspace')[0];
+  assert.equal(chip.textContent, 'mideast.part.airspace');
+  assert.equal(chip.attrs['aria-pressed'], 'false', 'predvolene vypnuté — nič sa nesťahuje');
+  assert.equal(chip.title, 'mideast.air.note');
+  const legend = byClass(mount, 'mideast-air-legend')[0];
+  assert.equal(legend.hidden, true);
+  chip.click();
+  assert.deepEqual(airspace.calls, [['setEnabled', true]]);
+  assert.equal(chip.attrs['aria-pressed'], 'true');
+  assert.equal(legend.hidden, false);
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'loading', 'zapnuté bez dát = načítava sa');
+  airspace.emit({ error: 'no_airspace_snapshot' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'missing');
+  airspace.emit({ error: 'HTTP 500' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'error');
+  chip.click();
+  assert.equal(legend.hidden, true);
+  assert.equal(legend.children.length, 0);
+  // len vzdušný priestor (bez správcu kontroly): rad čipov aj tak vznikne
+  const solo = doc.createElement('div');
+  createMideastPanel({ mountTarget: solo, theatres: THEATRES, labelFor, airspace: fakeAirspace(), translate: tKey, documentRef: doc });
+  assert.deepEqual(byClass(solo, 'mideast-chips')[0].children.map((c) => c.dataset.part), ['airspace']);
+  assert.equal(airspace.listenerCount, 1);
+  panel.destroy();
+  assert.equal(airspace.listenerCount, 0);
+});
+
+test('etapa 5b — legenda bulletinov: Blízky východ po riadkoch (krajiny SK, výšky, časť FIR, výnimky, platnosť, odkaz), zvyšok sveta jedným riadkom, zdroj a poznámka', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const airspace = fakeAirspace();
+  createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, airspace, translate: tSk, lang: 'sk', documentRef: doc });
+  airspace.emit({ enabled: true, fetchedAt: Date.parse('2026-10-03T12:00:00Z'), bulletins: airspaceModels(airPayload), attribution: 'Source: EASA', firAttribution: 'FIR boundaries: VATSpy' });
+  const legend = byClass(mount, 'mideast-air-legend')[0];
+  assert.equal(byClass(legend, 'mideast-legend-title')[0].textContent, 'Odporúčania EASA pre konfliktné zóny (CZIB)');
+  const rows = byClass(legend, 'mideast-air-row');
+  assert.deepEqual(rows.map((r) => r.dataset.czib), ['CZIB-2026-05-R2', 'CZIB-2026-07R3', 'CZIB-2017-03R20'], 'len Blízky východ, v poradí platnosti');
+  const text = (row, cls) => byClass(row, cls).map((n) => n.textContent);
+  const [iraq, gulf, syria] = rows;
+  assert.deepEqual(text(iraq, 'mideast-air-name'), ['Irak']);
+  assert.deepEqual(text(iraq, 'mideast-air-badge'), ['všetky výšky']);
+  assert.deepEqual(text(iraq, 'mideast-air-until'), [`platí do ${skDate('2026-11-16T00:00:00Z')}`]);
+  assert.equal(byClass(iraq, 'mideast-air-link')[0].href, 'https://www.easa.europa.eu/domains/air-operations/czibs/czib-2026-05-r2');
+  assert.equal(byClass(iraq, 'mideast-air-link')[0].rel, 'noopener noreferrer');
+  assert.equal(syria.classList.contains('is-partial'), true, 'Sýria: západne od čiary cez body');
+  assert.deepEqual(text(gulf, 'mideast-air-name'), ['Bahrajn, Kuvajt, Katar, Omán, SAE']);
+  assert.deepEqual(text(gulf, 'mideast-air-badge'), ['všetky výšky', 'časť FIR', 's výnimkami']);
+  assert.match(byClass(gulf, 'mideast-air-badge')[1].title, /presná hranica je v texte bulletinu/);
+  assert.equal(byClass(gulf, 'mideast-air-name')[0].title, 'Airspace of the Persian Gulf and Gulf of Oman', 'oficiálny názov EASA v titulku');
+  assert.equal(byClass(legend, 'mideast-air-more')[0].textContent, '+ 2 ďalších vo svete: Líbya, Ukrajina');
+  const src = byClass(legend, 'mideast-legend-source')[0];
+  assert.equal(byClass(src, 'mideast-legend-since')[0].textContent, `stav k ${skDate('2026-10-03T12:00:00Z')} · EASA · hranice FIR približné (VATSpy, CC BY-SA 4.0)`);
+  assert.equal(src.title, 'Source: EASA · FIR boundaries: VATSpy');
+  assert.match(byClass(legend, 'mideast-legend-note')[0].textContent, /nie zákaz letov/);
+  // uplynutá platnosť jantárovo, výpadok servera pri starých dátach = značka chyby
+  airspace.emit({ bulletins: airspaceModels({ ...airPayload, bulletins: airPayload.bulletins.map((b) => ({ ...b, lapsed: b.nid === '143862' })) }), error: 'HTTP 502' });
+  const iraq2 = byClass(legend, 'mideast-air-row').find((r) => r.dataset.czib === 'CZIB-2026-05-R2');
+  assert.equal(byClass(iraq2, 'mideast-air-until')[0].classList.contains('is-stale'), true);
+  assert.match(byClass(iraq2, 'mideast-air-until')[0].textContent, /^platnosť uplynula/);
+  assert.equal(byClass(byClass(legend, 'mideast-legend-source')[0], 'is-stale')[0].textContent, 'bulletiny EASA sú nedostupné (chyba servera)');
+});
+
+test('etapa 5b — main.js: vrstva vzniká pred panelom a ide do neho; CSS legendy', () => {
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /import \{ createAirspaceAdvisory \} from '\.\/airspaceAdvisoryLayer\.js';/);
+  assert.match(main, /const airspaceAdvisory = createAirspaceAdvisory\(\{ viewer \}\);\n\s+window\.__godsEyeView\.airspaceAdvisory = airspaceAdvisory;\n\s+const mideastPanel = createMideastPanel\(\{/);
+  assert.match(main, /control: mideastControl,\n\s+airspace: airspaceAdvisory,\n\s+\}\);/);
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  for (const cls of ['.mideast-air-row', '.mideast-air-swatch', '.mideast-air-badge.is-partial', '.mideast-air-until.is-stale', '.mideast-air-link', '.mideast-air-more']) assert.ok(css.includes(cls), cls);
+  assert.match(css, /\.mideast-air-row\.is-partial \.mideast-air-swatch \{ background: transparent; border-style: dashed; \}/, 'časť FIR = bez výplne ako na mape');
 });

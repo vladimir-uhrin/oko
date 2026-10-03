@@ -10,6 +10,9 @@
 //                                nemiešali (israel-palestine, yemen, syria, lebanon)
 //   portwatch/<úžina>.json       denné prechody úžinou z IMF PortWatch od 1. 1. 2019
 //                                (etapa 5a, 2026-09-26; kompaktné riadky, src/data/portwatch.js)
+//   airspace/czib.json           aktívne bulletiny EASA o konfliktných zónach (etapa 5b,
+//                                2026-10-03; src/data/czib.js)
+//   airspace/fir-boundaries.json hranice FIR z VATSpy (CC BY-SA 4.0), len základné FIR
 // Ďalšie druhy (GeoConfirmed × 4 konflikty, UCDP, UKMTO, správy) prídu v ďalších
 // etapách plánu vedľa tohto súboru v tom istom koreni.
 //
@@ -25,6 +28,10 @@ import {
   PORTWATCH_ATTRIBUTION, PORTWATCH_DATASET_URL, PORTWATCH_FIRST_DAY, PORTWATCH_KEYS, PORTWATCH_LICENSE, PORTWATCH_PAGE_SIZE, PW,
   meanOver, mergePortwatchRows, parsePortwatchFeatures, portwatchChokepoint, portwatchQueryUrl,
 } from '../../src/data/portwatch.js';
+import {
+  CZIB_ATTRIBUTION, CZIB_EXPORT_URL, CZIB_FEED_URL, CZIB_LIST_URL, FIR_ATTRIBUTION, FIR_LICENSE, VATSPY_BOUNDARIES_URL,
+  buildCzibBulletin, czibLapsed, indexFirBoundaries, parseCzibDetail, parseCzibExport, parseCzibFeed,
+} from '../../src/data/czib.js';
 
 export { MIDEAST_CONTROL_MODULE_IDS };
 export const USER_AGENT = 'OKO-mideast/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
@@ -355,6 +362,142 @@ export async function portwatchPayload(root, keys, { days = 400, nowMs = Date.no
     });
   }
   return { source: PORTWATCH_DATASET_URL, attribution: PORTWATCH_ATTRIBUTION, license: PORTWATCH_LICENSE, generatedAt: nowMs, chokepoints };
+}
+
+// ── airspace/ — EASA CZIB + hranice FIR z VATSpy (etapa 5b, 2026-10-03) ─────────
+/** Zoznam bulletinov sa pýta raz za 6 h; stránka bulletinu len pri zmene `updated`. */
+export const AIRSPACE_FRESH_MS = 6 * 3_600_000;
+/** Hranice FIR (VATSpy, mení sa po týždňoch) raz za 7 dní. */
+export const FIR_FRESH_MS = 7 * DAY_MS;
+/** Pauza medzi stránkami bulletinov EASA (zdvorilosť; ~16 aktívnych). */
+export const CZIB_DETAIL_PAUSE_MS = 1_200;
+export const CZIB_LIST_MAX_BYTES = 2 * 1024 * 1024;
+/** Stránka bulletinu má ~280 kB HTML (menu webu EASA). */
+export const CZIB_PAGE_MAX_BYTES = 4 * 1024 * 1024;
+/** Boundaries.geojson VATSpy má 2,2 MB (1 220 prvkov, 2026-10-03). */
+export const FIR_BOUNDARIES_MAX_BYTES = 12 * 1024 * 1024;
+export const airspaceDir = (root) => path.join(archiveDir(root), 'airspace');
+export const czibFile = (root) => path.join(airspaceDir(root), 'czib.json');
+export const firFile = (root) => path.join(airspaceDir(root), 'fir-boundaries.json');
+const defaultSleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Obnoví snímku aktívnych bulletinov EASA: export (stav, platnosť, krajiny) + RSS (odkaz)
+ * + stránka bulletinu (číslo, dotknutý priestor, odporúčania) — stránka sa sťahuje len pre
+ * nový bulletin alebo pri zmenenom `updated`, inak sa prevezme z predošlej snímky. Stiahnutý
+ * (Withdrawn) bulletin zo snímky vypadne. Pri chybe zoznamu ostáva stará snímka (`stale`).
+ * Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'partial'|'fresh'|'stale'|'error', count:number, fetched?:number, day?:string, errors?:string[], error?:string}>}
+ */
+export async function czibRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {}, sleep = defaultSleepMs } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const prev = await readJson(czibFile(root));
+  const prevList = Array.isArray(prev?.bulletins) ? prev.bulletins : [];
+  if (!force && prev && nowMs - (Number(prev.fetchedAt) || 0) < AIRSPACE_FRESH_MS) {
+    return { status: 'fresh', count: prevList.length, day: dayKey(Number(prev.fetchedAt)) };
+  }
+  try {
+    const list = await fetchCapped(fetchImpl, CZIB_EXPORT_URL, { maxBytes: CZIB_LIST_MAX_BYTES, headers: { Accept: 'application/json' } });
+    if (!list.res.ok) throw new Error(`EASA export HTTP ${list.res.status}`);
+    let exported;
+    try { exported = JSON.parse(list.body); } catch { throw new Error('EASA export: invalid JSON'); }
+    const rows = parseCzibExport(exported);
+    if (!rows.length) throw new Error('EASA export: no bulletins');
+    let links = new Map();
+    try {
+      const feed = await fetchCapped(fetchImpl, CZIB_FEED_URL, { maxBytes: CZIB_LIST_MAX_BYTES, headers: { Accept: 'application/rss+xml,application/xml' } });
+      if (feed.res.ok) links = parseCzibFeed(feed.body);
+    } catch (error) { log(`[mideast-events] czib feed failed: ${error?.message || error}`); }
+    const prevByNid = new Map(prevList.map((b) => [b.nid, b]));
+    const bulletins = [];
+    const errors = [];
+    let fetched = 0;
+    for (const row of rows.filter((r) => r.active)) {
+      const old = prevByNid.get(row.nid);
+      const url = links.get(row.nid) || old?.url || null;
+      if (!force && old?.czib && old.updatedAt === row.updatedAt) {
+        bulletins.push({ ...old, status: row.status, active: row.active });
+        continue;
+      }
+      if (!url) { errors.push(`${row.nid}: no link`); bulletins.push(old ? { ...old } : buildCzibBulletin(row, null, null)); continue; }
+      if (fetched) await sleep(CZIB_DETAIL_PAUSE_MS);
+      fetched += 1;
+      try {
+        const page = await fetchCapped(fetchImpl, url, { maxBytes: CZIB_PAGE_MAX_BYTES, headers: { Accept: 'text/html' } });
+        if (!page.res.ok) throw new Error(`HTTP ${page.res.status}`);
+        bulletins.push(buildCzibBulletin(row, parseCzibDetail(page.body), url));
+      } catch (error) {
+        errors.push(`${row.nid}: ${error?.message || error}`);
+        bulletins.push(old ? { ...old } : buildCzibBulletin(row, null, url));
+      }
+    }
+    await writeJsonAtomic(czibFile(root), {
+      kind: 'czib', fetchedAt: nowMs, source: CZIB_LIST_URL, attribution: CZIB_ATTRIBUTION, bulletins,
+    });
+    log(`[mideast-events] czib: ${bulletins.length} active bulletins (${fetched} pages fetched${errors.length ? `, ${errors.length} errors` : ''})`);
+    return { status: errors.length ? 'partial' : 'updated', count: bulletins.length, fetched, day: dayKey(nowMs), errors };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] czib failed: ${message}`);
+    return { status: prev ? 'stale' : 'error', count: prevList.length, error: message };
+  }
+}
+
+/**
+ * Hranice FIR z VATSpy (CC BY-SA 4.0) → `fir-boundaries.json` = { kód: polygóny } len základných
+ * FIR (bez sektorov), súradnice na 0,001°. Raz za 7 dní; pri chybe ostáva starý súbor. Nikdy nehádže.
+ */
+export async function firBoundariesRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const prev = await readJson(firFile(root));
+  const prevCount = prev?.firs ? Object.keys(prev.firs).length : 0;
+  if (!force && prevCount && nowMs - (Number(prev.fetchedAt) || 0) < FIR_FRESH_MS) return { status: 'fresh', count: prevCount };
+  try {
+    const { res, body } = await fetchCapped(fetchImpl, VATSPY_BOUNDARIES_URL, { timeoutMs: 90_000, maxBytes: FIR_BOUNDARIES_MAX_BYTES, headers: { Accept: 'application/geo+json,application/json' } });
+    if (!res.ok) throw new Error(`VATSpy HTTP ${res.status}`);
+    let geojson;
+    try { geojson = JSON.parse(body); } catch { throw new Error('VATSpy: invalid JSON'); }
+    const index = indexFirBoundaries(geojson);
+    // Poistka proti orezanému či inému súboru: svet má stovky FIR, nie desiatky.
+    if (index.size < 100) throw new Error(`VATSpy: only ${index.size} FIRs`);
+    await writeJsonAtomic(firFile(root), {
+      kind: 'fir-boundaries', fetchedAt: nowMs, source: VATSPY_BOUNDARIES_URL, attribution: FIR_ATTRIBUTION, license: FIR_LICENSE,
+      firs: Object.fromEntries(index),
+    });
+    log(`[mideast-events] fir boundaries: ${index.size} FIRs`);
+    return { status: 'updated', count: index.size };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] fir boundaries failed: ${message}`);
+    return { status: prevCount ? 'stale' : 'error', count: prevCount, error: message };
+  }
+}
+
+/**
+ * Telo `/api/mideast/events/airspace`: aktívne bulletiny (s príznakom `lapsed`, keď uplynul
+ * dátum platnosti) + polygóny len tých FIR, ktoré bulletiny menujú (každý kód raz) + kódy
+ * bez hranice v VATSpy (`missingFirs` — napr. UIR Kyjev). Bez snímky bulletinov null.
+ */
+export async function airspacePayload(root, { nowMs = Date.now() } = {}) {
+  const czib = await readJson(czibFile(root));
+  if (!czib || !Array.isArray(czib.bulletins)) return null;
+  const fir = await readJson(firFile(root));
+  const firs = {};
+  const missingFirs = [];
+  for (const b of czib.bulletins) {
+    for (const code of Array.isArray(b.firs) ? b.firs : []) {
+      if (firs[code] || missingFirs.includes(code)) continue;
+      if (fir?.firs?.[code]) firs[code] = fir.firs[code]; else missingFirs.push(code);
+    }
+  }
+  return {
+    source: CZIB_LIST_URL, attribution: CZIB_ATTRIBUTION, firAttribution: FIR_ATTRIBUTION, firLicense: FIR_LICENSE,
+    generatedAt: nowMs, fetchedAt: czib.fetchedAt ?? null, boundariesAt: fir?.fetchedAt ?? null,
+    bulletins: czib.bulletins.map((b) => ({ ...b, lapsed: czibLapsed(b, nowMs) })),
+    firs, missingFirs,
+  };
 }
 
 export { dayKey, dayToMs, isDay } from './ukraineArchive.mjs';

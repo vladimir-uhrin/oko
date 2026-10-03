@@ -71,3 +71,27 @@
   repository was not checked against their terms); tests derive it from the
   same trace the way the archive recorded it. © adsb.lol contributors, ODbL 1.0
   (https://opendatacommons.org/licenses/odbl/1-0/).
+- `easa-czib-export-20261003.json`, `easa-czib-feed-20261003.xml` — the EASA
+  Conflict Zone Information Bulletins list export
+  (`easa.europa.eu/en/domains/air-operations/czibs/export-json?page&_format=json`,
+  34 bulletins, 16 active) and RSS feed (`…/czibs/feed.xml`), captured
+  2026-10-03. `easa-czib-{iraq,gulf,ukraine,libya,syria}-20261003.html` — the
+  `<main>` element only of five bulletin pages (CZIB-2026-05-R2, CZIB-2026-07R3,
+  CZIB-2022-01R14, CZIB-2017-02R20, CZIB-2017-03R20; the site menus and the
+  e-mail sign-up form removed, ~15–19 kB each instead of ~285 kB). Used ONLY by
+  `src/data/czib.test.mjs`, `scripts/lib/mideastAirspace.test.mjs` and
+  `src/data/mideastEventsProxy.test.mjs`, never served to the app. © European
+  Union Aviation Safety Agency — „Reproduction is authorised, provided the
+  source is acknowledged" (easa.europa.eu/copyright-disclaimer).
+- `vatspy-boundaries-sample-20261003.geojson` — 11 real features of the VATSpy
+  `Boundaries.geojson` (ORBB with its sector ORBB-N, OBBB, OKAC, OTDF, OMAE,
+  OOMM, UKBV, UKLV, HLLL, OSTT), captured 2026-10-03 from
+  `raw.githubusercontent.com/vatsimnetwork/vatspy-data-project/master/Boundaries.geojson`,
+  plus 120 synthetic 1° squares (ids `Z??Q`) so the „at least 100 FIRs" guard
+  can be tested with a small file. Used by the same tests. VATSpy Data Project
+  (VATSIM), CC BY-SA 4.0 — approximate, not official boundaries.
+- `airspace-payload-20261003.json` — the body of `/api/mideast/events/airspace`
+  produced by `scripts/lib/mideastArchive.mjs` from the two fixtures above
+  (5 bulletins, 10 FIR polygons, 4 missing FIR codes). Used by
+  `src/airspaceAdvisoryLayer.test.mjs` and `src/mideastPanel.test.mjs`.
+  Same licences (EASA with acknowledgement; FIR polygons CC BY-SA 4.0).

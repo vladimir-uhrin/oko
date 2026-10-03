@@ -28,6 +28,10 @@
  *    z IMF PortWatch — posledných `days` riadkov (30–1 000, predvolene 400) + priemer okna
  *    „pred krízou" z celej série; 400 bad_keys, 404 no_portwatch_snapshot; cache 10 min.
  *    Úloha `portwatch` (tik 6 h, prvá 440 s po štarte) obnovuje štyri úžiny postupne.
+ *  - `/airspace` (etapa 5b, 2026-10-03): aktívne bulletiny EASA o konfliktných zónach
+ *    (CZIB) + polygóny FIR, ktoré menujú (VATSpy, CC BY-SA 4.0); 404 no_airspace_snapshot;
+ *    cache 10 min. Úloha `airspace` (tik 6 h, prvá 500 s po štarte): zoznam EASA, stránky
+ *    len zmenených bulletinov s pauzou 1,2 s, hranice FIR raz za 7 dní.
  * Bezpečnosť handlera: každý `await` aj `new URL` v try/catch — odmietnutý Promise
  * z async connect middleware zhodí dev server.
  */
@@ -35,7 +39,7 @@ import zlib from 'node:zlib';
 
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
 import { PORTWATCH_KEYS } from './portwatch.js';
-import { controlDays, controlFor, controlIndex, dayKey, isDay, portwatchPayload, portwatchRefresh, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
+import { airspacePayload, controlDays, controlFor, controlIndex, czibRefresh, dayKey, firBoundariesRefresh, isDay, portwatchPayload, portwatchRefresh, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
 
 const MIN = 60_000;
 /** Tik úlohy kontroly (moduly Wikipédie sa menia po hodinách; história cez CLI). */
@@ -52,6 +56,9 @@ export const PORTWATCH_FIRST_DELAY_MS = 440_000;
 /** Pauza medzi úžinami v jednom tiku (verejný ArcGIS, bez kľúča — nezahlcovať). */
 export const PORTWATCH_PAUSE_MS = 1_500;
 export const PORTWATCH_DAYS_DEFAULT = 400;
+/** Úloha VZDUŠNÝ PRIESTOR (EASA CZIB + hranice FIR): tik 6 h, prvý beh po PortWatch. */
+export const AIRSPACE_TICK_MS = 6 * 60 * MIN;
+export const AIRSPACE_FIRST_DELAY_MS = 500_000;
 
 function simpleLimiter({ windowMs, max }) {
   const hits = new Map();
@@ -102,6 +109,7 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   const limiter = simpleLimiter({ windowMs: MIN, max: 40 });
   const controlCache = new Map(); // `${module}:${at}` -> { at, json }
   const portwatchCache = new Map(); // `${keys}:${days}` -> { at, json }
+  const airspaceCache = new Map(); // 'all' -> { at, json }
   const timers = new Map();
   const state = { enabled, base: null, running: {}, last: {}, errors: [] };
   const note = (name, error) => { const msg = `${name}: ${error?.message || error}`; state.errors = [{ at: now(), msg }, ...state.errors].slice(0, 20); log(`[mideast-events] ${msg}`); };
@@ -137,6 +145,18 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   };
   tickMs.portwatch = PORTWATCH_TICK_MS;
   firstDelayMs.portwatch = PORTWATCH_FIRST_DELAY_MS;
+  // VZDUŠNÝ PRIESTOR (etapa 5b): bulletiny EASA a hranice FIR; čerstvosť drží knižnica.
+  jobs.airspace = async () => {
+    const czib = await czibRefresh(root, { fetchImpl, now: now(), log, sleep });
+    const fir = await firBoundariesRefresh(root, { fetchImpl, now: now(), log });
+    if (czib.status === 'updated' || czib.status === 'partial' || fir.status === 'updated') airspaceCache.clear();
+    const status = czib.status === 'error' || fir.status === 'error' ? 'error'
+      : (czib.status === 'stale' || fir.status === 'stale' || czib.status === 'partial' ? 'partial'
+        : (czib.status === 'updated' || fir.status === 'updated' ? 'updated' : 'fresh'));
+    return { status, day: czib.day || null, count: czib.count };
+  };
+  tickMs.airspace = AIRSPACE_TICK_MS;
+  firstDelayMs.airspace = AIRSPACE_FIRST_DELAY_MS;
 
   async function tick(name) {
     if (!jobs[name] || state.running[name]) return;
@@ -251,8 +271,20 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
       } catch (error) { note('portwatch', error); send(res, 500, { error: 'archive_read_failed' }, req); }
       return;
     }
+    if (sub === '/airspace') {
+      // VZDUŠNÝ PRIESTOR (etapa 5b): bulletiny EASA + polygóny dotknutých FIR, jedna odpoveď pre všetkých.
+      const hit = airspaceCache.get('all');
+      if (hit && now() - hit.at < CONTROL_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = await airspacePayload(root, { nowMs: now() });
+        if (!json) { send(res, 404, { error: 'no_airspace_snapshot' }, req); return; }
+        airspaceCache.set('all', { at: now(), json });
+        send(res, 200, json, req);
+      } catch (error) { note('airspace', error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
     // Udalosti (`/?from&to`) prídu v ďalších etapách plánu; kým nie sú, poctivé 404.
-    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
+    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
   }
   async function handler(req, res) {
     try { await route(req, res); } catch (error) {

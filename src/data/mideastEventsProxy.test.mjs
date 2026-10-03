@@ -10,7 +10,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promises as fsp } from 'node:fs';
 
-import { CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, PORTWATCH_FIRST_DELAY_MS, PORTWATCH_TICK_MS, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
+import { AIRSPACE_FIRST_DELAY_MS, AIRSPACE_TICK_MS, CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, PORTWATCH_FIRST_DELAY_MS, PORTWATCH_TICK_MS, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
 import { controlFile } from '../../scripts/lib/mideastArchive.mjs';
 
@@ -141,7 +141,7 @@ test('validácia: bad_module so zoznamom modulov, bad_day, 405 pre iné metódy,
   assert.equal((await call(plugin, '/status', { method: 'DELETE' })).out.status, 405);
   const other = await call(plugin, '/?from=2026-09-24');
   assert.equal(other.out.status, 404, 'udalosti prídu v ďalších etapách — kým nie, poctivé 404');
-  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N']);
+  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace']);
   const server = mount(plugin);
   const res = fakeRes();
   await server.handler({ method: 'GET', url: 'http://[zle', headers: {}, socket: {} }, res);
@@ -161,16 +161,18 @@ test('časovače: štyri úlohy rozostúpené po minúte od 200 s, vypnutý arch
   assert.equal((await call(off, '/control?module=lebanon&at=2026-09-24')).out.status, 404, 'trasa funguje aj s vypnutým archivárom');
   const on = mideastEventsProxy({ root, env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   on._start('http://127.0.0.1:4173');
-  assert.equal(timers.length, 5, 'jedna úloha na modul + PortWatch (etapa 5a)');
-  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000, 440_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz), PortWatch po nich');
+  assert.equal(timers.length, 6, 'jedna úloha na modul + PortWatch (etapa 5a) + vzdušný priestor (etapa 5b)');
+  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz), PortWatch a EASA po nich');
   assert.equal(CONTROL_FIRST_DELAY_MS, 200_000);
   assert.equal(CONTROL_STAGGER_MS, 60_000);
   assert.equal(CONTROL_TICK_MS, 6 * 60 * 60_000);
   assert.equal(PORTWATCH_FIRST_DELAY_MS, 440_000);
   assert.equal(PORTWATCH_TICK_MS, 6 * 60 * 60_000);
+  assert.equal(AIRSPACE_FIRST_DELAY_MS, 500_000);
+  assert.equal(AIRSPACE_TICK_MS, 6 * 60 * 60_000);
   assert.equal(on._state.base, 'http://127.0.0.1:4173');
   on._stop();
-  assert.ok(cleared.length >= 5, 'stop zruší všetky časovače');
+  assert.ok(cleared.length >= 6, 'stop zruší všetky časovače');
 });
 
 test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zatvorený server = žiadny zombie archivár); bez stopu sa preplánuje na 6 h; reštart nezdvojí', async () => {
@@ -183,7 +185,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const slowFetch = async (url) => { await gate; return wikiFetch(url); };
   const plugin = mideastEventsProxy({ root, env: {}, fetchImpl: slowFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   plugin._start('http://127.0.0.1:4173');
-  assert.equal(armed.length, 5, '4 moduly + PortWatch');
+  assert.equal(armed.length, 6, '4 moduly + PortWatch + vzdušný priestor');
   assert.equal(armed[0].ms, CONTROL_FIRST_DELAY_MS);
   const inflight = armed[0].fn(); // časovač control:israel-palestine vystrelil, tik čaká na Wikipédiu
   await new Promise((r) => setImmediate(r));
@@ -191,7 +193,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   plugin._stop(); // server zavrel (reštart Vite) uprostred dopytu
   release();
   await inflight;
-  assert.equal(armed.length, 5, 'po stop() sa rozbehnutý tik NEpreplánuje');
+  assert.equal(armed.length, 6, 'po stop() sa rozbehnutý tik NEpreplánuje');
   assert.equal(plugin._state.running['control:israel-palestine'], false);
   assert.equal(plugin._state.last['control:israel-palestine'].result.status, 'updated', 'rozbehnutý tik poctivo dobehne a snímku uloží');
   // bez stopu: spätné volanie sa po tiku preplánuje presne na tik 6 h
@@ -199,9 +201,9 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const live = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer: (fn, ms) => { armed2.push({ fn, ms }); return armed2.length; }, clearTimer, log: () => {} });
   live._start('http://127.0.0.1:4173');
   await armed2[3].fn(); // control:lebanon
-  assert.equal(armed2.length, 6, 'jeden nový časovač');
-  assert.equal(armed2[5].ms, CONTROL_TICK_MS);
-  // reštart (stop + start) počas tiku: nová generácia si naplánuje svojich 5, starý tik nepridá ďalší
+  assert.equal(armed2.length, 7, 'jeden nový časovač');
+  assert.equal(armed2[6].ms, CONTROL_TICK_MS);
+  // reštart (stop + start) počas tiku: nová generácia si naplánuje svojich 6, starý tik nepridá ďalší
   const armed3 = [];
   let release3; const gate3 = new Promise((r) => { release3 = r; });
   const restart = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: async (url) => { await gate3; return wikiFetch(url); }, now: () => NOW, setTimer: (fn, ms) => { armed3.push({ fn, ms }); return armed3.length; }, clearTimer, log: () => {} });
@@ -210,10 +212,10 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   await new Promise((r) => setImmediate(r));
   restart._stop();
   restart._start('http://127.0.0.1:4173');
-  assert.equal(armed3.length, 10, 'nový štart naplánoval svojich 5');
+  assert.equal(armed3.length, 12, 'nový štart naplánoval svojich 6');
   release3();
   await old;
-  assert.equal(armed3.length, 10, 'starý tik z predošlej generácie nič nepridal');
+  assert.equal(armed3.length, 12, 'starý tik z predošlej generácie nič nepridal');
 });
 
 test('gzip len pri výslovnom tokene s q > 0, Vary: Accept-Encoding na každej stlačiteľnej 200, nie na malých ani chybových', async () => {
@@ -367,4 +369,51 @@ test('/portwatch (etapa 5a): 404 pred sťahovaním, úloha stiahne štyri úžin
   const s = decode(await call(plugin, '/status'));
   assert.equal(s.last.portwatch.ok, true);
   assert.equal(s.last.portwatch.count, 240);
+});
+
+// VZDUŠNÝ PRIESTOR (etapa 5b, 2026-10-03): skutočné odpovede EASA a výrez VATSpy z fixtúr.
+const fixtureText = (name) => fsp.readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
+async function airspaceFetch(calls) {
+  const exportAll = JSON.parse(await fixtureText('easa-czib-export-20261003.json')).conflict_zones;
+  const exportBody = JSON.stringify({ conflict_zones: exportAll.filter((r) => ['143862', '143899'].includes(r.Nid)) });
+  const feed = await fixtureText('easa-czib-feed-20261003.xml');
+  const pages = { 'czib-2026-05-r2': await fixtureText('easa-czib-iraq-20261003.html'), 'czib-2026-07r3': await fixtureText('easa-czib-gulf-20261003.html') };
+  const boundaries = await fixtureText('vatspy-boundaries-sample-20261003.geojson');
+  return async (url) => {
+    calls.push(String(url));
+    if (String(url).includes('export-json')) return response(exportBody);
+    if (String(url).endsWith('feed.xml')) return response(feed);
+    if (String(url).includes('vatspy-data-project')) return response(boundaries);
+    const slug = String(url).split('/').pop();
+    return pages[slug] ? response(pages[slug]) : response('nope', { status: 404 });
+  };
+}
+
+test('/airspace (etapa 5b): 404 pred stiahnutím, úloha stiahne bulletiny EASA a hranice FIR, telo s polygónmi, cache', async () => {
+  const root = await tmpRoot();
+  const calls = [];
+  const slept = [];
+  const plugin = makePlugin(root, { fetchImpl: await airspaceFetch(calls), sleep: async (ms) => { slept.push(ms); } });
+  const before = await call(plugin, '/airspace');
+  assert.equal(before.out.status, 404);
+  assert.deepEqual(decode(before), { error: 'no_airspace_snapshot' });
+  await plugin._tick('airspace');
+  assert.equal(plugin._state.last.airspace.result.status, 'updated');
+  assert.equal(plugin._state.last.airspace.result.count, 2);
+  assert.equal(calls.length, 5, 'export + RSS + 2 stránky + hranice FIR');
+  assert.deepEqual(slept, [1200], 'pauza len medzi stránkami');
+  const ok = await call(plugin, '/airspace', { gzip: true });
+  assert.equal(ok.out.status, 200);
+  const json = decode(ok);
+  assert.deepEqual(json.bulletins.map((b) => b.czib).sort(), ['CZIB-2026-05-R2', 'CZIB-2026-07R3']);
+  assert.deepEqual(Object.keys(json.firs).sort(), ['OBBB', 'OKAC', 'OMAE', 'OOMM', 'ORBB', 'OTDF']);
+  assert.match(json.attribution, /European Union Aviation Safety Agency/);
+  assert.match(json.firAttribution, /VATSpy.*CC BY-SA 4\.0.*approximate/);
+  // druhý dopyt z cache, druhý tik je čerstvý (žiadna sieť)
+  assert.equal((await call(plugin, '/airspace')).out.status, 200);
+  await plugin._tick('airspace');
+  assert.equal(plugin._state.last.airspace.result.status, 'fresh');
+  assert.equal(calls.length, 5);
+  const s = decode(await call(plugin, '/status'));
+  assert.equal(s.last.airspace.ok, true);
 });

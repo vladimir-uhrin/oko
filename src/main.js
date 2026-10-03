@@ -57,6 +57,7 @@ import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, li
 import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
 import { createMideastPanel } from './mideastPanel.js';
 import { createMideastControl } from './mideastControlLayer.js';
+import { createAirspaceAdvisory } from './airspaceAdvisoryLayer.js';
 import { createPortwatchCard } from './portwatchCard.js';
 import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
@@ -727,11 +728,18 @@ async function init() {
     const applyMideastControlStyle = (stack) => mideastControl.setStyle(stack?.kind === 'hillshade' ? 'karta' : 'default');
     applyMideastControlStyle(getActiveMapStack());
     onActiveMapStackChange(applyMideastControlStyle);
+    // VZDUŠNÝ PRIESTOR · EASA (2026-10-03, etapa 5b; src/airspaceAdvisoryLayer.js): bulletiny
+    // EASA o konfliktných zónach na hraniciach FIR. Čip v paneli ju zapína; dáta sa stiahnu
+    // až pri prvom zapnutí. Nie je viazaná na bránu priblíženia dejiska — zóny majú veľkosť
+    // štátov a pohľad z diaľky je práve ten užitočný.
+    const airspaceAdvisory = createAirspaceAdvisory({ viewer });
+    window.__godsEyeView.airspaceAdvisory = airspaceAdvisory;
     const mideastPanel = createMideastPanel({
       mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
       theatres: listMideastTheatres(),
       applyTheatre: (id) => runMideastTheatre(id),
       control: mideastControl,
+      airspace: airspaceAdvisory,
     });
     window.__godsEyeView.mideastPanel = mideastPanel;
     // Situation from open sources: the merged bulletin (2026-09-18) now fills the
