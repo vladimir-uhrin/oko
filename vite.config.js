@@ -91,6 +91,7 @@ import {
 } from './src/data/gasPrices.js';
 import { YAHOO_SYMBOLS, parseYahooChart, yahooChartUrl } from './src/data/oilPrices.js';
 import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, normalizeDirectFeed, parseGdeltArticles } from './src/data/situationNews.js';
+import { sharedGdeltGate } from './src/data/gdeltGate.js';
 import { filterSanctionedNews } from './src/data/sanctionedMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from './src/data/ukraineReport.js';
 import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
@@ -5064,7 +5065,7 @@ function ukraineReportProxy() {
  * najviac raz za TTL na región. Bez kľúča. Agregujeme a ODKAZUJEME, netvoríme text.
  * @returns {import('vite').Plugin}
  */
-function situationNewsProxy() {
+export function situationNewsProxy() {
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'situation');
   const TTL_MS = 15 * 60_000;
   const STALE_MAX_MS = 6 * 60 * 60_000;
@@ -5096,7 +5097,12 @@ function situationNewsProxy() {
     const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'application/json,text/plain;q=0.9,*/*;q=0.5' } });
     const text = await readResponseTextCapped(upstream, MAX_BYTES);
     if (!upstream.ok) { const error = new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')'); error.upstreamStatus = upstream.status; throw error; }
-    try { return JSON.parse(text); } catch { throw new Error('GDELT returned non-JSON (rate limit?)'); }
+    try { return JSON.parse(text); } catch {
+      // „Please limit requests…" chodí niekedy s HTTP 200 — brána ho musí poznať ako 429.
+      const error = new Error('GDELT returned non-JSON: ' + text.slice(0, 80).replace(/\s+/g, ' '));
+      if (/limit requests/i.test(text)) error.upstreamStatus = 429;
+      throw error;
+    }
   }
   // Fallback: Google News RSS (open, far less rate-limited than GDELT). Reuses the
   // shared RSS parser; maps to the situation item shape (ISO date → epoch ms).
@@ -5203,8 +5209,13 @@ function situationNewsProxy() {
     const started = Date.now();
     const cfg = SITUATION_REGIONS[region];
     let gdelt = [];
-    try { gdelt = parseGdeltArticles(await fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 }))); }
-    catch (error) { console.warn('[situation-proxy] ' + region + ' GDELT failed (' + (error?.message || error) + ')'); }
+    // Spoločná brána GDELT na proces (2026-10-03): 1 dopyt za 5,5 s, po 429 minúta ticha,
+    // radšej preskočiť než čakať > 12 s — Google News nižšie pokryje výpadok.
+    try {
+      const gated = await sharedGdeltGate().run(() => fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 })));
+      if (gated.skipped) console.log('[situation-proxy] ' + region + ' GDELT skipped (' + gated.skipped + ')');
+      else gdelt = parseGdeltArticles(gated.value);
+    } catch (error) { console.warn('[situation-proxy] ' + region + ' GDELT failed (' + (error?.message || error) + ')'); }
     const direct = await fetchDirectRss(cfg).catch(() => []);
     // Google News RSS adds broad coverage; fetch it unless GDELT already returned plenty.
     let google = [];
@@ -10653,10 +10664,13 @@ async function fetchRegionalNews(place) {
     timespan: '48h',
   });
   try {
-    const payload = await fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, {
+    // Tá istá brána GDELT ako situačné správy (2026-10-03) — inak sa zrážali na limite 1/5 s.
+    const gated = await sharedGdeltGate().run(() => fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, {
       headers: { 'User-Agent': 'GodsEyeView/0.1' },
       timeoutMs: 12_000,
-    });
+    }));
+    if (gated.skipped) return { status: 'unavailable', query, articles: [], source: null };
+    const payload = gated.value;
     const articles = normalizeRegionalArticles(payload, 5);
     return { status: articles.length ? 'ready' : 'empty', query, articles, source: 'GDELT fallback' };
   } catch {
