@@ -14,3 +14,9 @@
 - Kľúče a tajomstvá nikdy do klientskeho prehliadača (okrem obmedzených Google Maps a Cesium ion).
 - Každá nová vrstva vyžaduje testy (`npm test`).
 - Zmeny držať v tematických vetvách s ohľadom na rebase na upstream.
+
+## Vlastník a priority (2026-10-03)
+- OKO je pomocný spravodajský portál (pálčivé informácie z domova aj zo sveta), ktorý vlastník prevádzkuje **ako súkromná osoba na svojom osobnom profile**. Zákon č. 265/2022 Z. z. plán nemení — rozhodnuté, neotvárať znova.
+- **Nulový rozpočet:** portál zatiaľ nezarába. Všetko musí fungovať zadarmo; platené doplnky len predvolene vypnuté, so stropom v admine a po výslovnom súhlase vlastníka.
+- **Priorita:** Štúdio sociálnych sietí v admine (posty, karusely, reels na FB/IG, časom úplná automatika, jazyk SK, hudba/hlas zadarmo). Plán: `docs/SOCIAL-PLAN.md`.
+- Technické obmedzenie Meta: cez API sa nedá publikovať na osobný Facebook profil (len na Facebook stránku); Instagram musí byť profesionálny účet (Creator alebo Business). Pre osobný profil OKO len pripraví obsah na ručné zdieľanie.
