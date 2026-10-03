@@ -30,6 +30,9 @@ const STALE_MS = 30 * 60_000;
 const MEDIA_TTL_MS = 2 * 3600_000;
 export const AUTO_PUBLISH_MIN_UNCHANGED = 10;
 const DIGEST_HOUR = 8;
+const INSIGHTS_REFRESH_MS = 6 * 3600_000;
+const INSIGHTS_WINDOW_MS = 30 * 86400_000;
+const SCHEDULE_MAX_MS = 30 * 86400_000;
 const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Bratislava', hour: '2-digit', hourCycle: 'h23' });
 const localHour = at => Number(hourFmt.format(new Date(at)));
 const fail = (code, status = 400) => Object.assign(new Error(code), { status });
@@ -78,6 +81,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   let ffmpegOk = null;
   const inFlight = new Map(); // id → zverejňovanie na pozadí
   const autoAfterVideo = new Set(); // auto-návrhy čakajúce na video pred auto-zverejnením
+  let lastInsights = 0;
 
   function secret() {
     let value = store.getSetting('studio:secret')?.value;
@@ -199,12 +203,52 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     try { await (await publish(draft.id, targets, 'auto')).done; } catch (error) { log(`[studio] auto-publish: ${error?.message || error}`); }
   }
 
+  /** Naplánované príspevky, ktorých čas nastal — zverejniť (každý tick). */
+  async function publishDue() {
+    const published = [];
+    for (const id of store.studioDue(now())) {
+      const draft = store.studioGet(id);
+      const targets = (draft.scheduledTargets || []).filter(t => !draft.results?.[t]?.id);
+      store.studioUpdate(id, { scheduledAt: null, scheduledTargets: null }, now());
+      if (!targets.length) continue;
+      try {
+        const { done } = await publish(id, targets, 'scheduled');
+        published.push({ id, draft: (await done).draft });
+      } catch (error) {
+        log(`[studio] scheduled ${id}: ${error?.message || error}`);
+        store.studioUpdate(id, { status: 'failed', results: { ...draft.results, scheduled: { error: String(error?.message || error).slice(0, 200), at: now() } } }, now());
+      }
+    }
+    return published;
+  }
+
+  /** Štatistiky dosahu zverejnených príspevkov za 30 dní, najviac raz za 6 h. */
+  async function refreshInsights(force = false) {
+    if (!force && now() - lastInsights < INSIGHTS_REFRESH_MS) return { skipped: 'fresh' };
+    const status = publisher.status();
+    if (!status.facebook && !status.instagram) return { skipped: 'meta_not_configured' };
+    if (typeof publisher.insights !== 'function') return { skipped: 'unsupported' };
+    lastInsights = now();
+    let fetched = 0; let failed = 0;
+    for (const draft of store.studioPublished(60)) {
+      if (!draft.publishedAt || now() - draft.publishedAt > INSIGHTS_WINDOW_MS) continue;
+      for (const [target, result] of Object.entries(draft.results)) {
+        if (!result?.id || !TARGETS.includes(target) || !status[baseTarget(target)]) continue;
+        try { store.insightsSet(draft.id, target, await publisher.insights(target, result.id), now()); fetched++; }
+        catch (error) { failed++; log(`[studio] insights ${target} ${draft.id}: ${error?.message || error}`); }
+      }
+    }
+    return { fetched, failed };
+  }
+
   async function tick() {
     if (running) return { skipped: 'running' };
     running = true;
     const out = [];
     try {
       await cleanupVideos().catch(error => log(`[studio] cleanup: ${error?.message || error}`));
+      await publishDue().catch(error => log(`[studio] due: ${error?.message || error}`));
+      refreshInsights().catch(error => log(`[studio] insights: ${error?.message || error}`));
       if (!settings().autoDraft) return { skipped: 'auto_draft_off' };
       for (const template of TEMPLATES.filter(t => t.auto)) {
         if (template.auto === 'daily' && localHour(now()) < DIGEST_HOUR) continue;
@@ -247,7 +291,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     const time = now();
     const pending = { ...draft.results };
     for (const target of todo) pending[target] = { pending: true, at: time };
-    store.studioUpdate(id, { results: pending, ...(draft.status === 'published' ? {} : { status: 'approved', approvedAt: draft.approvedAt ?? time }) }, time);
+    store.studioUpdate(id, { results: pending, scheduledAt: null, scheduledTargets: null,
+      ...(draft.status === 'published' ? {} : { status: 'approved', approvedAt: draft.approvedAt ?? time }) }, time);
     const done = (async () => {
       const results = { ...pending };
       for (const target of todo) {
@@ -286,6 +331,38 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     /** Promise, ktorý sa splní, keď sa dorenderujú videá vo fronte (testy, údržba). */
     videosIdle: () => videoChain,
     list: limit => store.studioList(limit),
+    publishDue,
+    refreshInsights,
+    /** Kalendár: naplánované + zverejnené podľa miestneho dňa. */
+    calendar(days = 14) {
+      const from = now() - 7 * 86400_000;
+      const to = now() + days * 86400_000;
+      const items = store.studioList(500).filter(d => (d.scheduledAt && d.scheduledAt <= to) || (d.publishedAt && d.publishedAt >= from))
+        .map(d => ({ id: d.id, title: d.title, template: d.template, status: d.status, at: d.scheduledAt ?? d.publishedAt,
+          kind: d.scheduledAt ? 'scheduled' : 'published', targets: d.scheduledAt ? d.scheduledTargets : Object.keys(d.results || {}).filter(t => d.results[t]?.id) }))
+        .sort((a, b) => a.at - b.at);
+      return items;
+    },
+    insights() {
+      const all = store.insightsAll();
+      return store.studioPublished(100).map(d => ({ id: d.id, title: d.title, template: d.template, publishedAt: d.publishedAt,
+        targets: Object.fromEntries(Object.entries(d.results).filter(([t, r]) => r?.id && TARGETS.includes(t)).map(([t, r]) => [t, { url: r.url || null, ...(all[d.id]?.[t] || {}) }])) }))
+        .filter(d => Object.keys(d.targets).length);
+    },
+    /** Naplánuje zverejnenie na čas (do 30 dní); null zruší plán. */
+    schedule(id, at, targets) {
+      const draft = requireDraft(id);
+      if (at === null) return store.studioUpdate(id, { scheduledAt: null, scheduledTargets: null }, now());
+      if (draft.status === 'discarded' || draft.status === 'published' && !targets?.length) throw fail('draft_not_publishable', 409);
+      if (!Number.isFinite(at) || at < now() - 60_000 || at > now() + SCHEDULE_MAX_MS) throw fail('invalid_schedule');
+      const wanted = [...new Set(targets || [])].filter(t => TARGETS.includes(t));
+      if (!wanted.length) throw fail('no_target');
+      const status = publisher.status();
+      if (wanted.some(t => !status[baseTarget(t)])) throw fail('meta_not_configured', 409);
+      if (!draft.text.trim()) throw fail('draft_incomplete', 409);
+      return store.studioUpdate(id, { scheduledAt: Math.round(at), scheduledTargets: wanted,
+        ...(draft.status === 'published' ? {} : { status: 'approved', approvedAt: draft.approvedAt ?? now() }) }, now());
+    },
     get: requireDraft,
     image: id => store.studioImage(id),
     videoPath: id => { const draft = requireDraft(id); return draft.videoStatus === 'ready' ? videoFile(draft) : null; },

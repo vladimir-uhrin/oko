@@ -17,7 +17,8 @@ function studioRow(row) {
   return { id: row.id, template: row.template, eventKey: row.event_key, origin: row.origin, title: row.title, text: row.text,
     edited: row.text !== row.original_text, card: parse(row.card, {}), status: row.status, results: parse(row.results, {}),
     createdAt: row.created_at, updatedAt: row.updated_at, approvedAt: row.approved_at, publishedAt: row.published_at,
-    video: row.video ?? null, videoStatus: row.video_status ?? null, videoError: row.video_error ?? null };
+    video: row.video ?? null, videoStatus: row.video_status ?? null, videoError: row.video_error ?? null,
+    scheduledAt: row.scheduled_at ?? null, scheduledTargets: parse(row.scheduled_targets, null) };
 }
 
 export function openAdminStore(filename) {
@@ -64,6 +65,12 @@ export function openAdminStore(filename) {
   if (!draftColumns.includes('video')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video TEXT');
   if (!draftColumns.includes('video_status')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video_status TEXT');
   if (!draftColumns.includes('video_error')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video_error TEXT');
+  // Fáza 3 (plánovanie + štatistiky): aditívne.
+  if (!draftColumns.includes('scheduled_at')) db.exec('ALTER TABLE studio_drafts ADD COLUMN scheduled_at INTEGER');
+  if (!draftColumns.includes('scheduled_targets')) db.exec('ALTER TABLE studio_drafts ADD COLUMN scheduled_targets TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS studio_insights (
+    draft_id TEXT NOT NULL, target TEXT NOT NULL, fetched_at INTEGER NOT NULL, metrics TEXT NOT NULL, PRIMARY KEY (draft_id, target)
+  )`);
   if (filename !== ':memory:' && process.platform !== 'win32') { try { chmodSync(filename, 0o600); } catch { /* ok */ } }
 
   const tx = fn => {
@@ -187,14 +194,15 @@ export function openAdminStore(filename) {
     studioImage: id => db.prepare('SELECT image FROM studio_drafts WHERE id = ?').get(id)?.image ?? null,
     studioList(limit = 100) {
       return db.prepare(`SELECT id, template, event_key, origin, title, text, original_text, card, status, results, created_at,
-        updated_at, approved_at, published_at, video, video_status, video_error FROM studio_drafts ORDER BY created_at DESC LIMIT ?`).all(limit).map(studioRow);
+        updated_at, approved_at, published_at, video, video_status, video_error, scheduled_at, scheduled_targets
+        FROM studio_drafts ORDER BY created_at DESC LIMIT ?`).all(limit).map(studioRow);
     },
     studioUpdate(id, fields, now) {
       const columns = { text: 'text', status: 'status', results: 'results', approvedAt: 'approved_at', publishedAt: 'published_at',
-        video: 'video', videoStatus: 'video_status', videoError: 'video_error' };
+        video: 'video', videoStatus: 'video_status', videoError: 'video_error', scheduledAt: 'scheduled_at', scheduledTargets: 'scheduled_targets' };
       for (const [key, column] of Object.entries(columns)) {
         if (!(key in fields)) continue;
-        const value = key === 'results' ? JSON.stringify(fields[key]) : fields[key];
+        const value = ['results', 'scheduledTargets'].includes(key) && fields[key] !== null ? JSON.stringify(fields[key]) : fields[key];
         db.prepare(`UPDATE studio_drafts SET ${column} = ?, updated_at = ? WHERE id = ?`).run(value, now, id);
       }
       return this.studioGet(id);
@@ -209,9 +217,29 @@ export function openAdminStore(filename) {
     studioExpiredVideos: now => db.prepare(`SELECT id, video FROM studio_drafts WHERE video IS NOT NULL AND (
       (status IN ('draft','discarded','failed') AND created_at < ?) OR (status = 'published' AND published_at < ?))`)
       .all(now - 30 * 86400_000, now - 90 * 86400_000),
+    /** Naplánované návrhy, ktorých čas už nastal (status approved + scheduled_at). */
+    studioDue: now => db.prepare(`SELECT id FROM studio_drafts WHERE scheduled_at IS NOT NULL AND scheduled_at <= ? AND status IN ('approved','failed')
+      ORDER BY scheduled_at`).all(now).map(row => row.id),
+    /** Zverejnené návrhy s ID príspevkov (pre štatistiky), najnovšie prvé. */
+    studioPublished: (limit = 60) => db.prepare(`SELECT id, template, title, results, published_at FROM studio_drafts WHERE status = 'published'
+      ORDER BY published_at DESC LIMIT ?`).all(limit).map(row => ({ id: row.id, template: row.template, title: row.title, publishedAt: row.published_at,
+      results: (() => { try { return JSON.parse(row.results); } catch { return {}; } })() })),
+    insightsSet(draftId, target, metrics, now) {
+      db.prepare(`INSERT INTO studio_insights (draft_id, target, fetched_at, metrics) VALUES (?, ?, ?, ?)
+        ON CONFLICT(draft_id, target) DO UPDATE SET fetched_at = excluded.fetched_at, metrics = excluded.metrics`).run(draftId, target, now, JSON.stringify(metrics));
+    },
+    insightsAll() {
+      const out = {};
+      for (const row of db.prepare('SELECT draft_id, target, fetched_at, metrics FROM studio_insights').all()) {
+        let metrics = {}; try { metrics = JSON.parse(row.metrics); } catch { /* ignoruj */ }
+        (out[row.draft_id] ||= {})[row.target] = { fetchedAt: row.fetched_at, ...metrics };
+      }
+      return out;
+    },
     studioQueuedVideos: () => db.prepare("SELECT id FROM studio_drafts WHERE video_status IN ('queued','rendering') ORDER BY created_at").all().map(row => row.id),
     studioPrune(now) {
       db.prepare(`DELETE FROM studio_drafts WHERE status IN ('draft','discarded','failed') AND created_at < ?`).run(now - 30 * 86400_000);
+      db.prepare('DELETE FROM studio_insights WHERE draft_id NOT IN (SELECT id FROM studio_drafts)').run();
       db.prepare(`UPDATE studio_drafts SET image = NULL WHERE status = 'published' AND published_at < ?`).run(now - 90 * 86400_000);
     },
     /** Konzistentná kópia databázy (bez zastavenia servera). */

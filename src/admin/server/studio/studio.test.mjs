@@ -241,3 +241,72 @@ test('Meta publisher: správne volania Graph API, token nikdy v chybe', async t 
   await assert.rejects(broken.facebookPhoto({ image: Buffer.from('j'), text: 't' }), error => !error.message.includes('SECRET123') && /access_token=\*\*\*/.test(error.message));
   await assert.rejects(createMetaPublisher({ env: {} }).facebookPhoto({ image: Buffer.from('j'), text: 't' }), /nie je nastavený/);
 });
+
+// ── Fáza 3: plánovanie, kalendár, štatistiky ──
+test('plánovanie: zverejní sa v ticku po čase, ručné zverejnenie plán zruší, validácia', async t => {
+  const calls = [];
+  const clock = { time: Date.UTC(2026, 9, 3, 10, 0) };
+  const feeds = { '/api/earthquakes/usgs': { records: [quake({ time: clock.time - 60e3 })], fetchedAt: clock.time }, '/api/launches': { results: [] } };
+  const { studio, store } = setup(t, { feeds, publisher: fakePublisher(calls), clock });
+  const { draft } = await studio.generate('quake');
+  assert.throws(() => studio.schedule(draft.id, clock.time + 40 * 86400_000, ['facebook']), /invalid_schedule/);
+  assert.throws(() => studio.schedule(draft.id, clock.time + 3600e3, []), /no_target/);
+  assert.throws(() => studio.schedule(draft.id, clock.time + 3600e3, ['tiktok']), /no_target/);
+  const planned = studio.schedule(draft.id, clock.time + 3600e3, ['facebook', 'instagram']);
+  assert.equal(planned.status, 'approved');
+  assert.equal(planned.scheduledAt, clock.time + 3600e3);
+  assert.deepEqual(planned.scheduledTargets, ['facebook', 'instagram']);
+  assert.deepEqual(studio.calendar().map(i => [i.kind, i.targets]), [['scheduled', ['facebook', 'instagram']]]);
+  await studio.tick();
+  assert.equal(calls.length, 0, 'ešte nie je čas');
+  clock.time += 3600e3 + 1;
+  feeds['/api/earthquakes/usgs'].fetchedAt = clock.time;
+  await studio.tick();
+  assert.deepEqual(calls.map(c => c[0]), ['facebook', 'instagram']);
+  const done = studio.get(draft.id);
+  assert.equal(done.status, 'published');
+  assert.equal(done.scheduledAt, null);
+  assert.equal(studio.calendar()[0].kind, 'published');
+  // zrušenie plánu a plán, ktorý ručné zverejnenie zruší
+  const other = `00000000-0000-4000-8000-${String(clock.time).slice(-12).padStart(12, '0')}`;
+  store.studioInsert({ id: other, template: 'quake', eventKey: `quake:manual-${clock.time}`, origin: 'manual', title: 'Ručný', text: 'text', card: {}, image: Buffer.from('j'), createdAt: clock.time });
+  studio.schedule(other, clock.time + 7200e3, ['facebook']);
+  assert.equal(studio.schedule(other, null).scheduledAt, null);
+  studio.schedule(other, clock.time + 7200e3, ['facebook']);
+  await (await studio.publish(other, ['facebook'])).done;
+  assert.equal(studio.get(other).scheduledAt, null, 'ručné zverejnenie plán zruší');
+});
+
+test('štatistiky: načítajú sa raz za 6 h pre zverejnené, zoznam výkonu s odkazmi', async t => {
+  const calls = [];
+  const clock = { time: NOW };
+  const publisher = { ...fakePublisher(calls), insights: async (target, id) => { calls.push(['insights', target, id]); return { views: 120, reach: 100, likes: 7, comments: 1, shares: 2, saved: null }; } };
+  const { studio } = setup(t, { publisher, clock });
+  const { draft } = await studio.generate('quake');
+  await (await studio.publish(draft.id, ['facebook', 'instagram'])).done;
+  assert.deepEqual(await studio.refreshInsights(), { fetched: 2, failed: 0 });
+  assert.deepEqual(await studio.refreshInsights(), { skipped: 'fresh' });
+  clock.time += 7 * 3600e3;
+  assert.equal((await studio.refreshInsights()).fetched, 2);
+  const posts = studio.insights();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].targets.facebook.reach, 100);
+  assert.equal(posts[0].targets.facebook.url, 'https://www.facebook.com/1_2');
+  assert.equal(posts[0].targets.instagram.likes, 7);
+  assert.equal(calls.filter(c => c[0] === 'insights').length, 4);
+});
+
+test('Meta insights: FB reactions/komentáre/zdieľania + reach, IG views/reach/saved', async () => {
+  const env = { META_PAGE_ID: '111111', META_PAGE_TOKEN: 'T'.repeat(40), META_IG_USER_ID: '222222' };
+  const fetchImpl = async url => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/1_55')) return Response.json({ reactions: { summary: { total_count: 12 } }, comments: { summary: { total_count: 3 } }, shares: { count: 4 } });
+    if (u.pathname.endsWith('/1_55/insights')) return Response.json({ data: [{ name: 'post_impressions_unique', values: [{ value: 250 }] }] });
+    if (u.pathname.endsWith('/m1')) return Response.json({ like_count: 9, comments_count: 2 });
+    if (u.pathname.endsWith('/m1/insights')) return Response.json({ data: [{ name: 'views', values: [{ value: 900 }] }, { name: 'reach', values: [{ value: 700 }] }, { name: 'saved', values: [{ value: 5 }] }, { name: 'shares', values: [{ value: 6 }] }] });
+    return Response.json({ error: { message: 'nope' } }, { status: 400 });
+  };
+  const meta = createMetaPublisher({ env, fetchImpl });
+  assert.deepEqual(await meta.insights('facebook', '1_55'), { views: null, reach: 250, likes: 12, comments: 3, shares: 4, saved: null });
+  assert.deepEqual(await meta.insights('instagram', 'm1'), { views: 900, reach: 700, likes: 9, comments: 2, shares: 6, saved: 5 });
+});

@@ -1,6 +1,6 @@
 # OKO — Štúdio sociálnych sietí (plán, PRIORITA)
 
-Stav: **Fázy 1 a 2 implementované** (2026-10-03) — admin → Štúdio; Fázy 3–4 čakajú. Cieľ: z admin panelu
+Stav: **Fázy 1–3 implementované** (2026-10-03) — admin → Štúdio a Výkon; Fáza 4 (platené doplnky) čaká. Cieľ: z admin panelu
 vyrábať a zverejňovať príspevky, fotky, karusely a reels na Facebook a Instagram
 z toho, čo OKO naozaj ukazuje.
 
@@ -190,3 +190,18 @@ klienta ani repozitára.
   reel podľa cieľov v nastavení (rovnaké poistky ako Fáza 1).
 - Požiadavka na server: **ffmpeg** (Windows: `winget install ffmpeg`, alebo
   `FFMPEG_PATH` v `.env`). Bez neho Štúdio ďalej robí fotky; reel skončí s jasnou chybou.
+
+## Fáza 3 — plánovanie, kalendár, výkon (hotové 2026-10-03)
+
+- **Naplánovať:** v karte návrhu dátum a čas (do 30 dní) + ciele (fotka/reel, FB/IG podľa
+  pripojenia). Návrh sa označí ako schválený; plánovač (tick každých 10 min) ho zverejní
+  v prvom ticku po čase. Ručné zverejnenie plán zruší; „Zrušiť plán" tiež. Chyba
+  plánovaného zverejnenia sa zapíše do výsledkov návrhu (status `failed`).
+- **Kalendár** v Štúdiu: 7 dní dozadu (zverejnené) a 14 dopredu (naplánované), po dňoch.
+- **Výkon** (nová záložka): Meta Insights pre príspevky zverejnené cez Štúdio za 30 dní —
+  zobrazenia, dosah, reakcie, komentáre, zdieľania, uloženia; súčty v dlaždiciach, odkazy
+  na príspevky. Obnova automaticky každých 6 h a ručne. FB: polia objektu + `/insights`
+  (`post_impressions_unique` / `post_total_media_view_unique`, pri reels `views`); IG:
+  `like_count`, `comments_count` + `/insights?metric=views,reach,saved,shares`. Názvy
+  metrík Meta mení — chýbajúce ostanú „—". Ručne zdieľané príspevky API nevidí.
+- Tabuľka `studio_insights`, stĺpce `scheduled_at`, `scheduled_targets` (aditívne).

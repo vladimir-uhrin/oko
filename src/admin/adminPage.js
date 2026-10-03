@@ -30,6 +30,8 @@ const ERRORS = {
   video_not_ready: 'Reel ešte nie je hotový.',
   publish_in_progress: 'Zverejňovanie už prebieha.',
   nothing_to_publish: 'Na vybrané siete je už zverejnené.',
+  invalid_schedule: 'Čas musí byť v budúcnosti, najviac 30 dní dopredu.',
+  no_target: 'Vyberte aspoň jednu sieť.',
 };
 const EVENTS = {
   registered: 'vytvorenie účtu', registered_google: 'vytvorenie cez Google', registered_github: 'vytvorenie cez GitHub',
@@ -44,7 +46,8 @@ const EVENTS = {
 const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user_enabled: 'odblokoval', sessions_revoked: 'odhlásil relácie',
   feed_updated: 'zmenil zdroj', notice_set: 'nastavil oznam', notice_cleared: 'zrušil oznam', errors_cleared: 'vymazal chyby',
   backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache', studio_generated: 'vytvoril návrh', studio_settings: 'zmenil automatiku Štúdia',
-  studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne', studio_publish_started: 'spustil zverejnenie' };
+  studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne', studio_publish_started: 'spustil zverejnenie',
+  studio_scheduled: 'naplánoval príspevok', studio_unscheduled: 'zrušil plán' };
 
 // ── pomocníci ──────────────────────────────────────────────────────────────
 function el(tag, className = '', text) {
@@ -342,7 +345,8 @@ const STUDIO_REASONS = { nothing_to_post: 'Teraz nie je čo zverejniť (žiadna 
   source_unavailable: 'Zdroj dát je teraz nedostupný.', server_not_ready: 'Server ešte nebeží naplno, skúste o chvíľu.' };
 const studioState = { filter: 'open', poll: null };
 async function renderStudio(message) {
-  const data = await api('/api/admin/studio');
+  const [data, calendarData] = await Promise.all([api('/api/admin/studio'), api('/api/admin/studio/calendar').catch(() => ({ items: [] }))]);
+  data.calendar = calendarData.items;
   const meta = data.meta;
   const connected = meta.facebook || meta.instagram;
   // Stav pripojenia
@@ -425,6 +429,7 @@ async function renderStudio(message) {
   setView(...(message ? [message] : []),
     section('Štúdio sociálnych sietí', status, mode, create),
     section('Automatika', auto),
+    section('Kalendár (7 dní dozadu, 14 dopredu)', studioCalendar(data.calendar || [])),
     section('Príspevky', filters, grid));
   // Kým sa renderuje video alebo zverejňuje, obnovovať každých 5 s (nie počas písania textu).
   clearTimeout(studioState.poll);
@@ -435,6 +440,64 @@ async function renderStudio(message) {
       void guarded(() => renderStudio());
     }, 5000);
   }
+}
+
+function studioCalendar(items) {
+  if (!items.length) return el('p', 'admin-muted', 'Nič naplánované ani zverejnené.');
+  const byDay = new Map();
+  for (const item of items) {
+    const d = new Date(item.at);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    (byDay.get(key) || byDay.set(key, []).get(key)).push(item);
+  }
+  const wrap = el('div', 'admin-calendar');
+  const dayFmt = new Intl.DateTimeFormat('sk-SK', { weekday: 'short', day: 'numeric', month: 'numeric' });
+  const timeFmt = new Intl.DateTimeFormat('sk-SK', { hour: '2-digit', minute: '2-digit' });
+  for (const [key, list] of [...byDay].sort()) {
+    const day = el('div', 'admin-calendar-day');
+    const isToday = key === new Date().toISOString().slice(0, 10) || new Date(list[0].at).toDateString() === new Date().toDateString();
+    day.append(el('h4', isToday ? 'today' : '', dayFmt.format(new Date(list[0].at))));
+    for (const item of list) {
+      const row = el('div', `admin-calendar-item ${item.kind}`);
+      const short = (item.targets || []).map(t => ({ facebook: 'FB', instagram: 'IG', 'facebook-reel': 'FB reel', 'instagram-reel': 'IG reel' }[t] || t)).join(', ');
+      row.append(el('span', 'admin-calendar-time', timeFmt.format(new Date(item.at))), el('span', '', item.title),
+        el('span', 'admin-muted', ` ${item.kind === 'scheduled' ? '⏰' : '✓'} ${short}`));
+      day.append(row);
+    }
+    wrap.append(day);
+  }
+  return wrap;
+}
+
+// ── Výkon príspevkov (Meta Insights) ──────────────────────────────────────
+async function renderPerformance(message) {
+  const data = await api('/api/admin/studio/insights');
+  const connected = data.meta.facebook || data.meta.instagram;
+  const refresh = button('Obnoviť štatistiky z Mety', async event => {
+    event.target.disabled = true;
+    try { const r = await api('/api/admin/studio/insights/refresh', { method: 'POST', body: {} }); await renderPerformance(notice(r.skipped ? `Preskočené: ${r.skipped}` : `Načítané ${r.fetched}, zlyhalo ${r.failed}.`, r.failed ? 'error' : 'ok')); }
+    catch (error) { await renderPerformance(notice(error.message)); }
+  }, 'admin-btn');
+  const names = { facebook: 'Facebook', instagram: 'Instagram', 'facebook-reel': 'FB reel', 'instagram-reel': 'IG reel' };
+  const rows = [];
+  const totals = { views: 0, reach: 0, likes: 0, comments: 0, shares: 0, saved: 0 };
+  for (const post of data.posts) {
+    for (const [target, m] of Object.entries(post.targets)) {
+      for (const key of Object.keys(totals)) totals[key] += m[key] || 0;
+      const link = m.url ? (() => { const a = el('a', '', post.title); a.href = m.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a; })() : post.title;
+      const fmt = v => (v === null || v === undefined ? '—' : number(v));
+      rows.push(row([link, names[target] || target, when(post.publishedAt), fmt(m.views), fmt(m.reach), fmt(m.likes), fmt(m.comments), fmt(m.shares), fmt(m.saved), m.fetchedAt ? when(m.fetchedAt) : 'ešte nie']));
+    }
+  }
+  const tiles = el('div', 'admin-tiles');
+  for (const [label, value] of [['zobrazenia', totals.views], ['dosah', totals.reach], ['reakcie', totals.likes], ['komentáre', totals.comments], ['zdieľania', totals.shares], ['uloženia', totals.saved]]) {
+    const t = el('div', 'admin-tile'); t.append(el('span', 'admin-tile-value', number(value)), el('span', 'admin-tile-label', `${label} · 30 d`)); tiles.append(t);
+  }
+  setView(...(message ? [message] : []),
+    section('Výkon príspevkov', connected ? tiles : notice('Facebook/Instagram nie je pripojený — štatistiky dosahu sa dajú čítať až cez Meta API (META_* v .env).', 'info'),
+      el('p', 'admin-muted', 'Údaje z Meta Insights pre príspevky zverejnené cez Štúdio za posledných 30 dní; obnovujú sa automaticky každých 6 h. Ručne zdieľané príspevky Meta API nevidí.'),
+      rows.length ? table(['Príspevok', 'Sieť', 'Zverejnené', 'Zobrazenia', 'Dosah', 'Reakcie', 'Komentáre', 'Zdieľania', 'Uloženia', 'Stav k'], rows) : el('p', 'admin-muted', 'Zatiaľ žiadne zverejnené príspevky cez Meta API.'),
+      refresh));
 }
 
 async function saveStudioSettings(patch) {
@@ -466,6 +529,7 @@ function studioCard(draft, meta) {
   const [statusText, tone] = STUDIO_STATUS[draft.status] || [draft.status, 'muted'];
   head.append(badge(statusText, tone), badge(draft.origin === 'auto' ? 'automaticky' : 'ručne', 'muted'));
   if (draft.edited) head.append(badge('upravené', 'muted'));
+  if (draft.scheduledAt) head.append(badge(`naplánované ${when(draft.scheduledAt)}`, 'info'));
   const text = el('textarea', 'admin-studio-text'); text.value = draft.text; text.rows = 9; text.maxLength = 2200;
   text.setAttribute('aria-label', `Text príspevku: ${draft.title}`);
   const editable = ['draft', 'approved', 'failed'].includes(draft.status);
@@ -493,6 +557,30 @@ function studioCard(draft, meta) {
     const short = list => list.map(t => (t.startsWith('facebook') ? 'FB' : 'IG')).join(' + ');
     if (photoTargets.length && (editable || draft.status === 'published')) actions.append(publishButton(`Zverejniť fotku (${short(photoTargets)})`, photoTargets));
     if (reelTargets.length && videoReady) actions.append(publishButton(`Zverejniť reel (${short(reelTargets)})`, reelTargets));
+    // Naplánovať: dátum a čas (miestny), ciele = všetko ešte nezverejnené, čo je pripojené.
+    const scheduleTargets = [...photoTargets, ...reelTargets];
+    if (scheduleTargets.length) {
+      const form = el('form', 'admin-schedule');
+      const input = el('input'); input.type = 'datetime-local'; input.required = true; input.setAttribute('aria-label', 'Čas zverejnenia');
+      const pad = n => String(n).padStart(2, '0');
+      const toLocal = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+      input.value = toLocal(draft.scheduledAt || Date.now() + 3600e3);
+      input.min = toLocal(Date.now()); input.max = toLocal(Date.now() + 30 * 86400e3);
+      const submit = el('button', 'admin-btn admin-btn-sm', draft.scheduledAt ? 'Preplánovať' : `Naplánovať (${short(scheduleTargets)})`);
+      form.append(input, submit);
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const at = new Date(input.value).getTime();
+        if (!Number.isFinite(at)) return;
+        try {
+          if (editable && text.value !== draft.text) await api(`/api/admin/studio/drafts/${draft.id}`, { method: 'POST', body: { text: text.value } });
+          await api(`/api/admin/studio/drafts/${draft.id}/schedule`, { method: 'POST', body: { at, targets: scheduleTargets } });
+          await renderStudio(notice(`Naplánované na ${when(at)}.`, 'ok'));
+        } catch (error) { await renderStudio(notice(error.message)); }
+      });
+      actions.append(form);
+      if (draft.scheduledAt) actions.append(act('Zrušiť plán', async () => { await api(`/api/admin/studio/drafts/${draft.id}/schedule`, { method: 'POST', body: { at: null } }); return 'Plán zrušený.'; }, 'admin-btn admin-btn-sm admin-btn-warn'));
+    }
   }
   const download = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť obrázok');
   download.href = `/api/admin/studio/drafts/${draft.id}/image`; download.download = `oko-${draft.id.slice(0, 8)}.jpg`;
@@ -521,6 +609,7 @@ function studioCard(draft, meta) {
   for (const [target, result] of Object.entries(draft.results || {})) {
     const line = el('div');
     const name = { facebook: 'Facebook', instagram: 'Instagram', 'facebook-reel': 'Facebook reel', 'instagram-reel': 'Instagram reel', manual: 'Ručne' }[target] || target;
+    if (target === 'scheduled') { line.append(badge('plán: chyba', 'bad'), document.createTextNode(` ${result.error}`)); results.append(line); continue; }
     if (result.pending) line.append(badge(`${name}: zverejňuje sa…`, 'info'));
     else if (result.error) line.append(badge(`${name}: chyba`, 'bad'), document.createTextNode(` ${result.error}`));
     else if (result.url) { const a = el('a', '', `${name}: otvoriť príspevok`); a.href = result.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; line.append(a); }
@@ -751,7 +840,7 @@ async function renderMaintenance() {
 // ── štart ──────────────────────────────────────────────────────────────────
 const RENDER = { overview: renderOverview, analytics: renderAnalytics, traffic: renderTraffic, errors: renderErrors,
   costs: renderCosts, feeds: renderFeeds, users: renderUsers, notice: renderNotice, maintenance: renderMaintenance,
-  studio: renderStudio, audit: renderAudit, log: renderLog };
+  studio: renderStudio, performance: renderPerformance, audit: renderAudit, log: renderLog };
 function show(tab) {
   const current = RENDER[tab] ? tab : 'overview';
   for (const b of tabs.querySelectorAll('button')) {

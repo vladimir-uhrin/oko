@@ -284,3 +284,31 @@ test('Štúdio: reel cez admin API — render, náhľad videa s Range, zverejnen
   assert.deepEqual(calls, ['facebook-reel']);
   assert.equal((await admin.post(`/api/admin/studio/drafts/${id}/render`, {})).data.draft.videoStatus, 'queued');
 });
+
+test('Štúdio Fáza 3 cez admin API: naplánovať, kalendár, zrušiť, výkon', async t => {
+  const { createStudio } = await import('../../admin/server/studio/index.js');
+  const { admin, member, runtime } = await setupWithRuntime(t);
+  runtime.studio = createStudio({ store: runtime.store, env: {}, port: () => 1, timers: false, log: () => {},
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [{ id: 'q', sourceId: 'q', mag: 6.5, time: Date.now() - 60e3, lat: 37.6, lon: 23.1, depth: 10 }], fetchedAt: Date.now() } }),
+    renderCard: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]),
+    publisher: { status: () => ({ facebook: true, instagram: false }), instagramLimit: async () => null,
+      facebookPhoto: async () => ({ id: 'p1', url: 'https://www.facebook.com/p1' }), insights: async () => ({ views: 1, reach: 2, likes: 3, comments: 0, shares: 0, saved: null }) } });
+  const id = (await admin.post('/api/admin/studio/generate', { template: 'quake' })).data.draft.id;
+  const at = Date.now() + 3600e3;
+  assert.equal((await member.post(`/api/admin/studio/drafts/${id}/schedule`, { at, targets: ['facebook'] })).status, 404);
+  assert.equal((await admin.post(`/api/admin/studio/drafts/${id}/schedule`, { at, targets: ['instagram'] })).data.error, 'meta_not_configured');
+  assert.equal((await admin.post(`/api/admin/studio/drafts/${id}/schedule`, { at: Date.now() - 86400e3, targets: ['facebook'] })).data.error, 'invalid_schedule');
+  const planned = await admin.post(`/api/admin/studio/drafts/${id}/schedule`, { at, targets: ['facebook'] });
+  assert.equal(planned.status, 200);
+  assert.equal(planned.data.draft.scheduledAt, at);
+  const calendar = await admin.request('/api/admin/studio/calendar');
+  assert.deepEqual(calendar.data.items.map(i => i.kind), ['scheduled']);
+  assert.equal((await admin.post(`/api/admin/studio/drafts/${id}/schedule`, { at: null })).data.draft.scheduledAt, null);
+  assert.equal((await admin.request('/api/admin/studio/insights')).data.posts.length, 0);
+  await (await runtime.studio.publish(id, ['facebook'])).done;
+  const refreshed = await admin.post('/api/admin/studio/insights/refresh', {});
+  assert.equal(refreshed.data.fetched, 1);
+  assert.equal(refreshed.data.posts[0].targets.facebook.reach, 2);
+  const audit = (await admin.request('/api/admin/audit')).data.audit.map(e => e.action);
+  assert.ok(audit.includes('studio_scheduled') && audit.includes('studio_unscheduled'));
+});

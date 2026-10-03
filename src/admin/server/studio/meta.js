@@ -110,6 +110,48 @@ export function createMetaPublisher({ env = process.env, fetchImpl = (...args) =
       try { url = (await call(published.id, { method: 'GET', params: { fields: 'permalink' } })).permalink || null; } catch { /* odkaz nie je nutný */ }
       return { id: published.id, url };
     },
+    /**
+     * Štatistiky príspevku (Fáza 3). FB: polia objektu + post insights (názvy metrík sa u Mety
+     * menia — čo nepríde, ostane null). IG: /insights s metrikami pre feed/reels.
+     * Vracia { views, reach, likes, comments, shares, saved } alebo hodí chybu.
+     */
+    async insights(target, id) {
+      const c = config();
+      const num = v => (Number.isFinite(Number(v)) ? Number(v) : null);
+      if (target === 'facebook' || target === 'facebook-reel') {
+        if (!c.facebook) throw new Error('Facebook nie je nastavený.');
+        const out = { views: null, reach: null, likes: null, comments: null, shares: null, saved: null };
+        const isReel = target === 'facebook-reel';
+        const fields = isReel ? 'views,likes.summary(true).limit(0),comments.summary(true).limit(0)'
+          : 'reactions.summary(true).limit(0),comments.summary(true).limit(0),shares';
+        const node = await call(id, { method: 'GET', params: { fields } });
+        out.likes = num(node.reactions?.summary?.total_count ?? node.likes?.summary?.total_count);
+        out.comments = num(node.comments?.summary?.total_count);
+        out.shares = num(node.shares?.count);
+        if (isReel) out.views = num(node.views);
+        try {
+          const metric = isReel ? 'post_impressions_unique,post_video_views' : 'post_impressions_unique,post_total_media_view_unique';
+          const ins = await call(`${id}/insights`, { method: 'GET', params: { metric } });
+          for (const row of ins.data || []) {
+            const value = num(Array.isArray(row.values) ? row.values[0]?.value : row.value);
+            if (row.name === 'post_impressions_unique' || row.name === 'post_total_media_view_unique') out.reach = out.reach ?? value;
+            if (row.name === 'post_video_views') out.views = out.views ?? value;
+          }
+        } catch { /* insights vyžadujú pages_read_engagement; základné čísla už máme */ }
+        return out;
+      }
+      if (!c.instagram) throw new Error('Instagram nie je nastavený.');
+      const node = await call(id, { method: 'GET', params: { fields: 'like_count,comments_count,media_type,media_product_type' } });
+      const out = { views: null, reach: null, likes: num(node.like_count), comments: num(node.comments_count), shares: null, saved: null };
+      try {
+        const ins = await call(`${id}/insights`, { method: 'GET', params: { metric: 'views,reach,saved,shares' } });
+        for (const row of ins.data || []) {
+          const value = num(Array.isArray(row.values) ? row.values[0]?.value : row.value);
+          if (row.name in out) out[row.name] = value;
+        }
+      } catch { /* staršie médiá niektoré metriky nemajú */ }
+      return out;
+    },
     /** Zostávajúci denný limit Instagramu (100 príspevkov za 24 h). */
     async instagramLimit() {
       const c = config();

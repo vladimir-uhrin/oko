@@ -2,7 +2,7 @@
 // až po kontrole roly owner a limitu; zápisy prešli Origin + CSRF kontrolou v context().
 import { sendVideo } from './index.js';
 
-const DRAFT = /^\/api\/admin\/studio\/drafts\/([a-f0-9-]{36})(?:\/(image|video|render|approve|discard|restore|publish|shared))?$/;
+const DRAFT = /^\/api\/admin\/studio\/drafts\/([a-f0-9-]{36})(?:\/(image|video|render|approve|discard|restore|publish|shared|schedule))?$/;
 
 export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJson, fail, active, rate, studio, store, actor, now }) {
   if (!studio) throw fail('studio_unavailable', 503);
@@ -10,7 +10,8 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
   const route = draftRoute ? `/drafts/:id${draftRoute[2] ? `/${draftRoute[2]}` : ''}` : pathname.slice('/api/admin/studio'.length) || '/';
   const methods = { '/': ['GET'], '/generate': ['POST'], '/settings': ['POST'], '/tick': ['POST'], '/drafts/:id': ['GET', 'POST'],
     '/drafts/:id/image': ['GET'], '/drafts/:id/video': ['GET'], '/drafts/:id/render': ['POST'], '/drafts/:id/approve': ['POST'], '/drafts/:id/discard': ['POST'], '/drafts/:id/restore': ['POST'],
-    '/drafts/:id/publish': ['POST'], '/drafts/:id/shared': ['POST'] }[route];
+    '/drafts/:id/publish': ['POST'], '/drafts/:id/shared': ['POST'], '/drafts/:id/schedule': ['POST'],
+    '/calendar': ['GET'], '/insights': ['GET'], '/insights/refresh': ['POST'] }[route];
   if (!methods) throw fail('not_found', 404);
   if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
   const id = draftRoute?.[1];
@@ -23,6 +24,8 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
         meta: studio.publisherStatus(), instagramLimit, publicUrl: studio.publicUrl, autoPublishMin: 10,
         capabilities: await studio.capabilities() });
     }
+    if (route === '/calendar') return json(res, 200, { items: studio.calendar(14) });
+    if (route === '/insights') return json(res, 200, { posts: studio.insights(), meta: studio.publisherStatus() });
     if (route === '/drafts/:id/image') {
       const image = studio.image(id);
       if (!image) throw fail('draft_not_found', 404);
@@ -59,6 +62,14 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
   if (route === '/drafts/:id') {
     if (Object.keys(body).some(key => key !== 'text')) throw fail('invalid_input');
     return json(res, 200, { draft: studio.edit(id, body.text) });
+  }
+  if (route === '/insights/refresh') return json(res, 200, { ...(await studio.refreshInsights(true)), posts: studio.insights() });
+  if (route === '/drafts/:id/schedule') {
+    if (Object.keys(body).some(key => !['at', 'targets'].includes(key))) throw fail('invalid_input');
+    const at = body.at === null ? null : Number(body.at);
+    const draft = studio.schedule(id, at, body.targets);
+    audit(at === null ? 'studio_unscheduled' : 'studio_scheduled', `${draft.title}${at === null ? '' : ` → ${new Date(at).toISOString()} ${(body.targets || []).join(', ')}`}`);
+    return json(res, 200, { draft });
   }
   if (route === '/drafts/:id/render') return json(res, 200, { draft: studio.queueVideo(id) });
   if (route === '/drafts/:id/approve') return json(res, 200, { draft: studio.setStatus(id, 'approved') });

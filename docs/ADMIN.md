@@ -27,6 +27,7 @@ ignorovať `Cache-Control: no-store` (rovnako ako `/account.html`).
 | Feedy | všetky dátové zdroje: aktuálny stav, pás dostupnosti 7 dní po hodinách (zo skutočných požiadaviek), výpadky z kontroly statusu každých 10 min, **Vypnúť / Zapnúť** |
 | Používatelia | hľadanie, detail (relácie, aktivita, prihlasovacie metódy, počet sledovaných letov) a akcie nižšie |
 | Štúdio | návrhy príspevkov pre Facebook a Instagram zo živých dát (zemetrasenia, štarty rakiet), obrázok + slovenský text + reel 9:16 (ffmpeg), úprava, schválenie, zverejnenie cez Meta API alebo ručné zdieľanie; automatika — pozri `docs/SOCIAL-PLAN.md` |
+| Výkon | štatistiky dosahu príspevkov zo Štúdia (Meta Insights, 30 dní) |
 | Oznam | text 1–280 znakov, typ info/upozornenie, platnosť; náhľad, ako ho vidia návštevníci |
 | Údržba | záloha DB účtov aj admin DB (`VACUUM INTO`, ponechá 14), čistenie povolenej cache |
 | Audit | posledných 200 zásahov administrátora (aj zmeny feedov, oznamu, záloh, cache) |

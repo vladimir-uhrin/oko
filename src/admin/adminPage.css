@@ -170,3 +170,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
   .admin-studio-reel-settings .admin-check { display: flex; flex-direction: column; align-items: flex-start; }
   .admin-studio-reel-settings select { width: 100%; margin-left: 0; }
 }
+/* ── Fáza 3: plánovanie, kalendár, výkon ── */
+.admin-schedule { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.admin-schedule input { padding: 5px 8px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text); font: 12.5px var(--font-sans); color-scheme: dark; }
+.admin-schedule .admin-btn { margin-top: 0; }
+.admin-calendar { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.admin-calendar-day { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff04; }
+.admin-calendar-day h4 { margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: capitalize; }
+.admin-calendar-day h4.today { color: var(--accent); }
+.admin-calendar-item { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; padding: 4px 0; font-size: 12.5px; border-top: 1px solid #ffffff0a; }
+.admin-calendar-item.scheduled { color: #cfeefa; }
+.admin-calendar-item.published { color: #c9f7e2; }
+.admin-calendar-time { font: 11.5px var(--font-mono); color: var(--muted); }
