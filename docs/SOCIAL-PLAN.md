@@ -83,11 +83,8 @@ podklad má v admine vlastný strop renderov za deň (predvolene 0).
 
 ## Na čo si dať pozor
 
-0. **Zákon č. 265/2022 Z. z. (vydavatelia publikácií):** vzťahuje sa aj na
-   *spravodajské webové portály* (pravidelné publikovanie aspoň raz týždenne) a môže
-   z neho vyplývať evidencia u Ministerstva kultúry a povinné údaje o prevádzkovateľovi.
-   Treba overiť, či OKO spadá pod definíciu a čo presne z toho plynie (dotaz na MK SR
-   je zadarmo). Rovnako GDPR/zásady súkromia a tiráž na webe.
+0. **Zákon č. 265/2022 Z. z.:** vlastník prevádzkuje OKO ako súkromná osoba na
+   osobnom profile; rozhodol, že to plán nemení (2026-10-03). Uzavreté.
 1. **Licencie podkladu:** pred prvým videom overiť podmienky Google Maps Platform
    (EHP od 7/2025) pre záznamy na sociálne siete; s bezplatnými podkladmi overiť
    ich atribúciu (OSM ODbL, ÚGKK).
@@ -112,7 +109,8 @@ podklad má v admine vlastný strop renderov za deň (predvolene 0).
 1. **Automatika:** áno, časom úplná — postupne podľa krokov v bode 4 architektúry.
 2. **Jazyk:** slovenčina (texty, hashtagy, titulky aj hlas).
 3. **Reels:** s hudbou alebo hlasovým komentárom — zadarmo (CC0 hudba, lokálne TTS).
-4. **Účty:** vlastník potrebuje pomoc s nastavením FB stránky a Instagram
+4. **Prevádzka ako súkromná osoba, osobný profil;** zákon 265/2022 plán nemení.
+5. **Účty:** vlastník potrebuje pomoc s nastavením FB stránky a Instagram
    profesionálneho účtu — návod v sekcii nižšie.
 
 ## Nastavenie účtov (Fáza 0, robí vlastník)
