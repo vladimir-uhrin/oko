@@ -105,16 +105,16 @@ test('stále zle: po troch nahrávkach ostáva posledná a veta ide na vypočuti
   assert.equal(retry.review.length, 1);
 });
 
-test('schválená veta (portál, podpis) sa nekontroluje; nahrávka z pamäte bez odkazu alebo s vypršaným odkazom sa pred kontrolou nahrá znova', async (t) => {
+test('schválená veta (portál) sa nekontroluje; nahrávka z pamäte bez odkazu alebo s vypršaným odkazom sa pred kontrolou nahrá znova', async (t) => {
   const { cache, run } = setup(t);
   const voice = fakeVoice({ 'Potom deväť minút bez údajov.': ['Potom 9 minút bez údajov.'] });
   voice.byUrl.set('http://192.168.2.43:9110/api/tts/download/cerstvy.wav?t=y', 'Cestujúcich odviezlo náhradné lietadlo.');
-  cache.put('own', 'Video pripravil Vladimír Uhrin.', Buffer.from([1]), { approved: true });
+  cache.put('own', 'Celú rekonštrukciu nájdete na okolajv bodka es ká.', Buffer.from([1]), { approved: true });
   cache.put('own', 'Kód núdze.', Buffer.from([1]), { heardOk: null });
   cache.put('own', 'Potom deväť minút bez údajov.', Buffer.from([1]), { url: 'http://192.168.2.43:9110/api/tts/download/stary.wav?t=x', savedAt: new Date(T0 - VOICE_LINK_MAX_AGE_MS - 60_000).toISOString() });
   cache.put('own', 'Cestujúcich odviezlo náhradné lietadlo.', Buffer.from([1]), { url: 'http://192.168.2.43:9110/api/tts/download/cerstvy.wav?t=y', savedAt: new Date(T0 - 60_000).toISOString() });
   const r = await run([
-    line('p1', 'Video pripravil Vladimír Uhrin.', 'Video pripravil Vladimír Uhrin.', true),
+    line('portal', 'Celú rekonštrukciu nájdete na okolajv bodka es ká.', 'Celú rekonštrukciu nájdete na okolive.sk.', true),
     line('m5', 'Kód núdze.'),
     line('m1', 'Potom deväť minút bez údajov.', 'Potom 9 minút bez údajov.'),
     line('m9', 'Cestujúcich odviezlo náhradné lietadlo.'),
@@ -123,7 +123,7 @@ test('schválená veta (portál, podpis) sa nekontroluje; nahrávka z pamäte be
   assert.deepEqual(voice.calls.readAloud, ['Kód núdze.', 'Potom deväť minút bez údajov.'], 'bez odkazu a s vypršaným odkazom = nová nahrávka; čerstvá sa len prepíše');
   assert.equal(voice.calls.transcribe.length, 3, 'schválená veta bez prepisu');
   assert.ok(voice.calls.transcribe.some((u) => u.includes('cerstvy')), 'čerstvý odkaz ide na prepis bez novej nahrávky');
-  assert.equal(cache.get('own', 'Video pripravil Vladimír Uhrin.').meta.approved, true);
+  assert.equal(cache.get('own', 'Celú rekonštrukciu nájdete na okolajv bodka es ká.').meta.approved, true);
 });
 
 test('bez služby: chýbajúca nahrávka = chyba NO_VOICE s vetou; nahrávky z pamäte sa použijú bez kontroly', async (t) => {

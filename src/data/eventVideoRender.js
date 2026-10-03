@@ -122,7 +122,7 @@ export function videoEventKey(event) {
     // sa kľúč nemení (videá starších udalostí ostávajú platné).
     ...(e.reported?.length ? { reported: e.reported.map((f) => ({ kind: f?.kind, t: f?.t, fromT: f?.fromT ?? null, airport: f?.airport?.icao ?? null, toFt: f?.toFt ?? null, domains: f?.domains || [] })) } : {}),
     // Scenár vlastníka (háčik, doplnky, náhrady viet) — iný komentár = iné video.
-    ...(e.videoScript ? { script: { hook: e.videoScript.hook ? { tag: e.videoScript.hook.tag, lines: e.videoScript.hook.lines, sub: e.videoScript.hook.sub, source: e.videoScript.hook.source, spoken: e.videoScript.hook.spoken, captions: e.videoScript.hook.captions } : null, extras: (e.videoScript.extras || []).map((x) => ({ spoken: x.spoken, caption: x.caption })), lines: e.videoScript.lines || {} } } : {}),
+    ...(e.videoScript ? { script: { hook: e.videoScript.hook ? { tag: e.videoScript.hook.tag, lines: e.videoScript.hook.lines, sub: e.videoScript.hook.sub, source: e.videoScript.hook.source, spoken: e.videoScript.hook.spoken, captions: e.videoScript.hook.captions } : null, extras: (e.videoScript.extras || []).map((x) => ({ spoken: x.spoken, caption: x.caption, ...(x.after && x.after !== 'end' ? { after: x.after } : {}) })), lines: e.videoScript.lines || {} } } : {}),
   };
   return createHash('sha1').update(JSON.stringify(pick)).digest('hex').slice(0, 16);
 }

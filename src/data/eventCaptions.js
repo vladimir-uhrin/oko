@@ -1,12 +1,12 @@
 // src/data/eventCaptions.js — titulky videa udalosti (2026-10-03): z presného textu viet a časov reči
 // (eventNarration.fitNarration + pauzy v nahrávke), nie z prepisu. Dlhá veta sa rozdelí na dva titulky
-// pri čiarke, ak hlas tam urobil pauzu; inak ostane celá. SRT pre FB (názov.jazyk_KRAJINA.srt) a HTML
+// na konci vety, pri pomlčke alebo čiarke, ak hlas tam urobil pauzu; inak ostane celá. SRT pre FB (názov.jazyk_KRAJINA.srt) a HTML
 // titulkov v štýle OKO (Inter, tmavý podklad) tesne nad kartou letu, v súhrne nad súhrnom. Pure.
 
 export const CAPTION_STYLE = Object.freeze({ fontPx: 38, maxChars: 48, bottomPx: 940, outroBottomPx: 640, fadeS: 0.12, tailS: 0.15, minS: 0.8, splitMinPauseS: 0.12 });
 
 /**
- * Titulky z viet a ich umiestnenia. Delenie: pri čiarke / spojke „a" uprostred, keď má nahrávka pauzu
+ * Titulky z viet a ich umiestnenia. Delenie: na konci vety, pri pomlčke alebo čiarke uprostred, keď má nahrávka pauzu
  * (≥ splitMinPauseS) a titulok by bol dlhší než maxChars; čas delenia = pauza. Pure.
  * @param {Array<{id: string, caption: string}>} lines
  * @param {Array<{id: string, start: number, speechStart: number, speechEnd: number}>} placement
@@ -20,14 +20,20 @@ export function captionCues(lines, placement, bounds = {}, style = CAPTION_STYLE
     if (!p) continue;
     const text = line.caption.trim();
     const pauses = (bounds[line.id]?.pauses || []).filter((z) => z.to - z.from >= style.splitMinPauseS);
-    // Čiarka najbližšie k stredu vety; pauza nahrávky, ktorá jej časovo zodpovedá (podiel znakov ≈ podiel času).
-    const commas = [...text.matchAll(/, /g)].map((m) => m.index).filter((i) => i > 8 && i < text.length - 8);
-    const comma = commas.length ? commas.reduce((a, b) => (Math.abs(b / text.length - 0.5) < Math.abs(a / text.length - 0.5) ? b : a)) : -1;
+    // Miesto delenia najbližšie k stredu: koniec vety (prednosť), pomlčka, čiarka; pauza nahrávky, ktorá mu
+    // časovo zodpovedá (podiel znakov ≈ podiel času). `cut` = koniec prvej časti, `next` = začiatok druhej.
+    const marks = [
+      ...[...text.matchAll(/[.!?…] /g)].map((m) => ({ cut: m.index + 1, next: m.index + 2, bonus: 0.2 })),
+      ...[...text.matchAll(/ — /g)].map((m) => ({ cut: m.index + 2, next: m.index + 3, bonus: 0.12 })),
+      ...[...text.matchAll(/, /g)].map((m) => ({ cut: m.index + 1, next: m.index + 2, bonus: 0 })),
+    ].filter((k) => k.cut > 8 && k.cut < text.length - 8);
+    const score = (k) => Math.abs(k.cut / text.length - 0.5) - k.bonus;
+    const mark = marks.length ? marks.reduce((a, b) => (score(b) < score(a) ? b : a)) : null;
     const speechLen = Math.max(0.1, p.speechEnd - p.speechStart);
-    const split = comma >= 0 ? pauses.map((z) => ({ z, off: Math.abs(((p.start + (z.from + z.to) / 2) - p.speechStart) / speechLen - (comma + 1) / text.length) })).filter((x) => x.off <= 0.2).sort((a, b) => a.off - b.off)[0]?.z || null : null;
+    const split = mark ? pauses.map((z) => ({ z, off: Math.abs(((p.start + (z.from + z.to) / 2) - p.speechStart) / speechLen - mark.cut / text.length) })).filter((x) => x.off <= 0.2).sort((a, b) => a.off - b.off)[0]?.z || null : null;
     if (text.length > style.maxChars && split) {
-      cues.push({ id: `${line.id}a`, from: p.speechStart, to: p.start + split.from, text: text.slice(0, comma + 1) });
-      cues.push({ id: `${line.id}b`, from: p.start + split.to, to: p.speechEnd, text: text.slice(comma + 2) });
+      cues.push({ id: `${line.id}a`, from: p.speechStart, to: p.start + split.from, text: text.slice(0, mark.cut) });
+      cues.push({ id: `${line.id}b`, from: p.start + split.to, to: p.speechEnd, text: text.slice(mark.next) });
     } else {
       cues.push({ id: line.id, from: p.speechStart, to: p.speechEnd, text });
     }

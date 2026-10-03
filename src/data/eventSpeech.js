@@ -37,6 +37,50 @@ export function spokenMinutes(n) {
   return `${spokenNumber(v)} minút`;
 }
 
+/** Akuzatív po „o … neskôr": „minútu", „dve minúty", „päť minút". Pure. */
+export function spokenMinutesAcc(n) {
+  const v = Math.max(1, Math.round(n));
+  if (v === 1) return 'minútu';
+  if (v === 2) return 'dve minúty';
+  if (v <= 4) return `${spokenNumber(v)} minúty`;
+  return `${spokenNumber(v)} minút`;
+}
+
+const HOURS_NOM = ['', 'hodinu', 'dve hodiny', 'tri hodiny', 'štyri hodiny', 'päť hodín', 'šesť hodín', 'sedem hodín', 'osem hodín', 'deväť hodín', 'desať hodín', 'jedenásť hodín', 'dvanásť hodín'];
+/** Genitív po „vyše": „vyše hodiny", „vyše dvoch hodín". */
+const HOURS_GEN = ['', 'hodiny', 'dvoch hodín', 'troch hodín', 'štyroch hodín', 'piatich hodín', 'šiestich hodín', 'siedmich hodín', 'ôsmich hodín', 'deviatich hodín', 'desiatich hodín', 'jedenástich hodín', 'dvanástich hodín'];
+const hoursCaption = (h, gen) => (h === 1 ? (gen ? 'hodiny' : 'hodinu') : `${h} ${gen ? 'hodín' : (h <= 4 ? 'hodiny' : 'hodín')}`);
+
+/**
+ * Čas letu pre vetu kontextu („Lietadlo je … vo vzduchu"): „štyridsať minút", „dve hodiny", „vyše dvoch
+ * hodín", „takmer tri hodiny"; pod 5 minút a nad 12 hodín null. `{spoken, caption}`. Pure.
+ */
+export function spokenFlightTime(seconds) {
+  const min = Math.round((Number(seconds) || 0) / 60);
+  if (min < 5) return null;
+  if (min < 90) {
+    const m = Math.max(5, Math.round(min / 5) * 5);
+    return { spoken: spokenMinutes(m), caption: `${m} minút` };
+  }
+  let h = Math.floor(min / 60);
+  const rem = min - h * 60;
+  if (rem >= 50) {
+    h += 1;
+    if (h > 12) return null;
+    return { spoken: `takmer ${HOURS_NOM[h]}`, caption: `takmer ${hoursCaption(h, false)}` };
+  }
+  if (h > 12) return null;
+  if (rem < 10) return { spoken: HOURS_NOM[h], caption: hoursCaption(h, false) };
+  return { spoken: `vyše ${HOURS_GEN[h]}`, caption: `vyše ${hoursCaption(h, true)}` };
+}
+
+/** Vzdialenosť zaokrúhlená (do 100 km na desiatky, inak na päťdesiatky): „štyristo kilometrov" / „400 km". Pure. */
+export function spokenKm(km) {
+  const raw = Math.max(0, Number(km) || 0);
+  const v = raw < 100 ? Math.round(raw / 10) * 10 : Math.round(raw / 50) * 50;
+  return { value: v, spoken: `${spokenNumber(v)} kilometrov`, caption: `${String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} km` };
+}
+
 /** „dvesto šesť stupňov", „jeden stupeň", „tri stupne". Pure. */
 export function spokenDegrees(n) {
   const v = Math.max(0, Math.round(n));
@@ -71,6 +115,39 @@ export function spokenDomain(domain) {
   const parts = d.split('.');
   const tld = parts.pop() || '';
   return `${parts.join(' bodka ')} bodka ${tld.split('').map((c) => LETTERS[c] || c).join(' ')}`;
+}
+
+/** Predložky, po ktorých číslovka mení tvar vždy (pád), a tie, po ktorých ho menia len čísla bez „tisíc". */
+const OBLIQUE_ALWAYS = new Set(['po', 'pri', 's', 'so', 'k', 'ku']);
+const OBLIQUE_SMALL = new Set(['od', 'do', 'z', 'zo', 'bez', 'okolo', 'u', 'počas', 'pred', 'pod', 'nad', 'medzi']);
+
+/**
+ * Číslice vo vete, ktorú napísal vlastník (háčik, doplnky, náhrady viet), → slová pre hlas (vlastník 10-03:
+ * „sprav ale tak, aby sa čísla dobre vyslovovali"). Prepíše sa len to, čo má istý tvar: kód letu (FZ1073 →
+ * hláskovane), celé číslo od 5 v základnom tvare („bolo 167 ľudí", „kleslo o 14 000 stôp", „za 30 sekúnd"),
+ * po predložke s iným pádom len tisícky („z 34 000 stôp", „pod 17 000 stôp"). Neisté tvary kód neháda —
+ * vráti `problem` a vlastník číslo napíše slovom: 1–4 (rod: dva/dve/dvaja), čas „9:45", desatinné číslo,
+ * radová číslovka („30. septembra"), malé číslo po predložke („do 5 minút" = „do piatich minút"). Pure.
+ * @returns {{text: string, problem: string|null}}
+ */
+export function spokenDigits(input) {
+  const text = String(input ?? '');
+  if (!/\d/.test(text)) return { text, problem: null };
+  let problem = null;
+  const fail = (why) => { if (!problem) problem = why; return ''; };
+  let out = text.replace(/(?<![\p{L}\d])([A-Z]{1,3})(\d{1,4})([A-Z]{0,2})(?![\p{L}\d])/gu, (m) => spokenFlightNumber(m));
+  out = out.replace(/(?<![\p{L}\d])(\d{1,3}(?:[  .]\d{3})+|\d+)([:,.]\d+)?(\.)?(?![\p{L}\d])/gu, (m, digits, frac, dot, offset, whole) => {
+    if (frac) return fail(frac.startsWith(':') ? `čas „${digits}${frac}" napíš slovom` : `desatinné číslo „${digits}${frac}" napíš slovom`);
+    // Bodka za číslom a ďalej malé písmeno = radová číslovka („30. septembra"); na konci vety je to bodka vety.
+    if (dot && /^\s+\p{Ll}/u.test(whole.slice(offset + m.length))) return fail(`radovú číslovku „${digits}." napíš slovom`);
+    const n = Number(digits.replace(/[  .]/g, ''));
+    if (!Number.isFinite(n) || n >= 1_000_000) return fail(`číslo „${digits}" napíš slovom`);
+    if (n < 5) return fail(`číslo „${digits}" napíš slovom (rod: dva/dve/dvaja…)`);
+    const before = (whole.slice(0, offset).trimEnd().split(/\s+/).pop() || '').toLowerCase().replace(/[^\p{L}]/gu, '');
+    if (OBLIQUE_ALWAYS.has(before) || (OBLIQUE_SMALL.has(before) && n < 1000)) return fail(`číslo „${digits}" po „${before}" napíš slovom v správnom tvare`);
+    return spokenNumber(n) + (dot || '');
+  });
+  return problem ? { text, problem } : { text: out, problem: null };
 }
 
 /** Hodina UTC v reči: „krátko po piatej hodine" (do 29. minúty), inak „pred šiestou hodinou". Pure. */

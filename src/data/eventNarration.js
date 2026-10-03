@@ -2,11 +2,11 @@
 // automatizoval… sprav"; „čísla zle vyslovuje a anglické názvy tiež" → výslovnosť; „prvé 3–4 sekundy
 // musia diváka chytiť" → háčik na začiatku; „vždy spomínaj môj portál"). Čisté:
 //   vety      z kľúčových momentov udalosti (eventPost.keyMoments) + háčik a doplnky zo scenára vlastníka
-//             (eventVideoScript.js) + pevné vety na záver (portál, podpis — nahraté raz, schválené uchom),
+//             (eventVideoScript.js) + pevná veta na záver (portál — nahratá raz, schválená uchom; meno autora sa nehovorí),
 //   dve podoby každej vety: `spoken` (čo číta hlas: čísla slovami, cudzie názvy foneticky — eventSpeech)
 //             a `caption` (titulok: číslice, správny pravopis),
 //   kotva     kedy má veta zaznieť (fáza/moment plánu videa),
-//   tempo     fitNarration: voľby videoPlan sa predlžujú, kým každá veta nezačne pri svojom zábere
+//   tempo     fitNarration: kúsky plánu videa sa predlžujú (stretch), kým každá veta nezačne pri svojom zábere
 //             (najviac `tolS` za kotvou) a posledná skončí pred koncom videa.
 // Pure; hlas, nahrávanie a zvuk rieši scripts/lib/eventVideoPipeline.mjs.
 
@@ -14,7 +14,7 @@ import { keyMoments } from './eventPost.js';
 import { videoPlan } from './eventVideo.js';
 import { VIDEO_BRAND } from './eventVideoHud.js';
 import { landingPhrase } from './eventReported.js';
-import { spokenNumber, spokenMinutes, spokenDegrees, spokenFeet, spokenFlightNumber, spokenDomain, spokenHour } from './eventSpeech.js';
+import { spokenNumber, spokenMinutes, spokenMinutesAcc, spokenDegrees, spokenFeet, spokenFlightNumber, spokenDomain, spokenFlightTime, spokenKm } from './eventSpeech.js';
 
 export const NARRATION_DEFAULTS = Object.freeze({
   /** Medzera medzi vetami (s), tolerancia oneskorenia za kotvou (s), rezerva na konci videa (s). */
@@ -34,11 +34,13 @@ export function roundFeet(ft) {
   return n >= 10_000 ? Math.round(n / 1000) * 1000 : Math.round(n / 100) * 100;
 }
 
-/** Pevné vety na záver (portál, podpis) — nahraté raz, schválené vlastníkom (bez kontroly výslovnosti). */
+/**
+ * Pevná veta na záver (portál) — nahratá raz, schválená vlastníkom (bez kontroly výslovnosti).
+ * Meno autora sa v komentári NEHOVORÍ (vlastník 10-03: „moje meno nespomínaj"); podpis ostáva len v obraze.
+ */
 export function fixedLines() {
   return [
     { id: 'portal', kind: 'fixed', spoken: `Celú rekonštrukciu nájdete na ${spokenDomain(VIDEO_BRAND.domain)}.`, caption: `Celú rekonštrukciu nájdete na ${VIDEO_BRAND.domain}.`, anchor: { at: 'endcard', offset: 0.4 }, approved: true },
-    { id: 'signoff', kind: 'fixed', spoken: `Video pripravil ${VIDEO_BRAND.authorName}.`, caption: `Video pripravil ${VIDEO_BRAND.authorName}.`, anchor: null, approved: true },
   ];
 }
 
@@ -49,30 +51,44 @@ export function momentSentence(m, { nextSquawks = [] } = {}) {
       const fpm = Math.abs(m.fpm || 0);
       const floor = Math.floor(fpm / 1000) * 1000;
       const more = fpm > floor && floor > 0;
-      const when = spokenHour(m.t);
+      // Dramaticky, ale podľa čísla: nad 10 000 stôp za minútu „rúti sa dolu" (bežné klesanie je okolo 2 000).
+      // Hodina sa nehovorí — čas beží v obraze; veta je krátka, aby stihla samotný pád.
+      const verb = fpm >= 10_000 ? 'Zrazu sa lietadlo rúti dolu' : 'Zrazu lietadlo prudko klesá';
       return {
-        spoken: `${cap(when.spoken)} svetového času prudko klesá, ${more ? 'vyše ' : ''}${spokenFeet(floor || fpm)} za minútu.`,
-        caption: `${cap(when.caption)} svetového času prudko klesá, ${more ? 'vyše ' : ''}${groupDigits(floor || fpm)}${NBSP}stôp za minútu.`,
+        spoken: `${verb} — ${more ? 'vyše ' : ''}${spokenFeet(floor || fpm)} za minútu.`,
+        caption: `${verb} — ${more ? 'vyše ' : ''}${groupDigits(floor || fpm)}${NBSP}stôp za minútu.`,
       };
     }
     case 'gap': {
       const min = Math.max(1, Math.round((m.s ?? ((m.toT ?? m.t) - (m.fromT ?? m.t))) / 60));
-      return { spoken: `Potom ${spokenMinutes(min)} bez údajov.`, caption: `Potom ${min} ${min === 1 ? 'minúta' : (min <= 4 ? 'minúty' : 'minút')} bez údajov.` };
+      return { spoken: `Potom ${spokenMinutes(min)} ticho. Žiadne údaje.`, caption: `Potom ${min} ${min === 1 ? 'minúta' : (min <= 4 ? 'minúty' : 'minút')} ticho. Žiadne údaje.` };
     }
     case 'squawk': {
-      const codes = [m, ...nextSquawks].map((s) => SQUAWK_SK[s.meaning] || 'núdzový kód');
-      if (codes.length === 1) return { spoken: `Transpondér hlási ${codes[0]}.`, caption: `Transpondér hlási ${codes[0]}.` };
-      const text = `${cap(codes[0])}, potom ${codes.slice(1).join(', potom ')}.`;
-      return { spoken: text, caption: text };
+      const all = [m, ...nextSquawks];
+      const codes = all.map((x) => SQUAWK_SK[x.meaning] || 'núdzový kód');
+      const spoken = [`Lietadlo vysiela ${codes[0]}.`];
+      const caption = [`Lietadlo vysiela ${codes[0]}.`];
+      // Ďalší kód s odstupom z údajov: „O päť minút neskôr kód nezákonného zásahu."
+      for (let k = 1; k < all.length; k += 1) {
+        const dMin = Number.isFinite(all[k].t) && Number.isFinite(all[k - 1].t) ? Math.round((all[k].t - all[k - 1].t) / 60) : 0;
+        if (dMin >= 1) {
+          spoken.push(`O ${spokenMinutesAcc(dMin)} neskôr ${codes[k]}.`);
+          caption.push(`O ${dMin === 1 ? 'minútu' : `${dMin} ${dMin <= 4 ? 'minúty' : 'minút'}`} neskôr ${codes[k]}.`);
+        } else {
+          spoken.push(`Vzápätí ${codes[k]}.`);
+          caption.push(`Vzápätí ${codes[k]}.`);
+        }
+      }
+      return { spoken: spoken.join(' '), caption: caption.join(' ') };
     }
     case 'uturn': {
       const deg = Math.round(Math.abs(m.turnDeg || 0));
-      return { spoken: `Obrat o ${spokenDegrees(deg)}.`, caption: `Obrat o ${deg} ${deg === 1 ? 'stupeň' : (deg <= 4 ? 'stupne' : 'stupňov')}.` };
+      return { spoken: `Stroj sa otáča späť — obrat o ${spokenDegrees(deg)}.`, caption: `Stroj sa otáča späť — obrat o ${deg} ${deg === 1 ? 'stupeň' : (deg <= 4 ? 'stupne' : 'stupňov')}.` };
     }
     case 'last-contact': {
       if (!m.airborne) return { spoken: 'Posledný záznam je na zemi.', caption: 'Posledný záznam je na zemi.' };
       const ft = roundFeet((m.alt ?? 0) / 0.3048);
-      return { spoken: `Údaje končia vo výške ${spokenFeet(ft)}.`, caption: `Údaje končia vo výške ${groupDigits(ft)}${NBSP}stôp.` };
+      return { spoken: `Údaje končia vo výške ${spokenFeet(ft)} — lietadlo je stále vo vzduchu.`, caption: `Údaje končia vo výške ${groupDigits(ft)}${NBSP}stôp — lietadlo je stále vo vzduchu.` };
     }
     case 'landing': return { spoken: 'Lietadlo pristáva.', caption: 'Lietadlo pristáva.' };
     case 'reported-landing': {
@@ -87,16 +103,77 @@ export function momentSentence(m, { nextSquawks = [] } = {}) {
 /** Poznámka zo správ k diere (pokles): „Podľa správ kleslo za minútu pod 17 000 stôp." Pure. */
 export function descentSentence(f) {
   const dur = Math.max(0, (f.t ?? 0) - (f.fromT ?? f.t ?? 0));
-  const during = dur <= 75 ? 'za minútu' : `za ${spokenMinutes(Math.round(dur / 60))}`;
-  const duringCap = dur <= 75 ? 'za minútu' : `za ${Math.round(dur / 60)} ${Math.round(dur / 60) <= 4 ? 'minúty' : 'minút'}`;
+  const during = dur <= 75 ? 'za jedinú minútu' : `za ${spokenMinutes(Math.round(dur / 60))}`;
+  const duringCap = dur <= 75 ? 'za jedinú minútu' : `za ${Math.round(dur / 60)} ${Math.round(dur / 60) <= 4 ? 'minúty' : 'minút'}`;
   const ft = roundFeet(f.toFt);
   const under = f.toBelow ? 'pod ' : 'na ';
   return { spoken: `Podľa správ kleslo ${during} ${under}${spokenFeet(ft)}.`, caption: `Podľa správ kleslo ${duringCap} ${under}${groupDigits(ft)}${NBSP}stôp.` };
 }
 
 /**
- * Vety komentára v poradí: háčik (scenár) → momenty z dát → doplnky zo správ (scenár) → portál, podpis.
- * Riadok scenára `lines[id]` (`{spoken, caption}`) nahradí vygenerovanú vetu (napr. skloňované mesto).
+ * Keď sa lietadlo po diere znova ozve výrazne inde (≥ 5 000 stôp): „Keď sa stroj znova ozve, je
+ * o 13 000 stôp nižšie." — z výšok na okrajoch diery (tie isté ako nápis „kleslo o …" v obraze). Pure.
+ */
+export function gapAftermathSentence(m) {
+  if (!Number.isFinite(m?.fromAlt) || !Number.isFinite(m?.toAlt)) return null;
+  const dFt = (m.fromAlt - m.toAlt) / 0.3048;
+  if (Math.abs(dFt) < 5000) return null;
+  const ft = roundFeet(Math.abs(dFt));
+  const dir = dFt > 0 ? 'nižšie' : 'vyššie';
+  return { spoken: `Keď sa stroj znova ozve, je o ${spokenFeet(ft)} ${dir}.`, caption: `Keď sa stroj znova ozve, je o ${groupDigits(ft)}${NBSP}stôp ${dir}.` };
+}
+
+const RAD = Math.PI / 180;
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const a = Math.sin(((lat2 - lat1) * RAD) / 2) ** 2 + Math.cos(lat1 * RAD) * Math.cos(lat2 * RAD) * Math.sin(((lon2 - lon1) * RAD) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const y = Math.sin((lon2 - lon1) * RAD) * Math.cos(lat2 * RAD);
+  const x = Math.cos(lat1 * RAD) * Math.sin(lat2 * RAD) - Math.sin(lat1 * RAD) * Math.cos(lat2 * RAD) * Math.cos((lon2 - lon1) * RAD);
+  return (Math.atan2(y, x) / RAD + 360) % 360;
+}
+
+/**
+ * Veta kontextu pred prvým momentom (viac informácií z dát, vlastník 10-03): „Lietadlo je vyše 2 hodín vo
+ * vzduchu, 400 km pred cieľom." — dve z trojice čas letu, vzdialenosť do cieľa, výška — len to, čo údaje nesú: štart z časovej osi, cieľ z trasy (iba keď lietadlo letí
+ * k nemu, ±60° od kurzu), cestovná výška z posledného úseku pred momentom. Menej než dve časti = null. Pure.
+ */
+export function contextSentence(event, moments = keyMoments(event)) {
+  const first = moments.find((m) => Number.isFinite(m.t) && !['landing', 'reported-landing', 'last-contact'].includes(m.kind));
+  if (!first) return null;
+  const timeline = event.timeline || [];
+  const parts = [];
+  const takeoff = timeline.find((m) => m.kind === 'takeoff' && m.t < first.t);
+  const flown = takeoff ? spokenFlightTime(first.t - takeoff.t) : null;
+  if (flown) parts.push({ spoken: `${flown.spoken} vo vzduchu`, caption: `${flown.caption} vo vzduchu` });
+  const cruise = [...timeline].reverse().find((m) => m.kind === 'cruise' && m.t <= first.t);
+  const dest = event.route?.destination;
+  if (dest && [dest.lat, dest.lon, first.lat, first.lon].every(Number.isFinite) && Number.isFinite(cruise?.trk)) {
+    const off = Math.abs(((bearingDeg(first.lat, first.lon, dest.lat, dest.lon) - cruise.trk + 540) % 360) - 180);
+    const km = haversineKm(first.lat, first.lon, dest.lat, dest.lon);
+    if (off <= 60 && km >= 50) {
+      const d = spokenKm(km);
+      parts.push({ spoken: `${d.spoken} pred cieľom`, caption: `${d.caption} pred cieľom` });
+    }
+  }
+  if (Number.isFinite(cruise?.alt) && cruise.alt / 0.3048 >= 5000) {
+    const ft = roundFeet(cruise.alt / 0.3048);
+    parts.push({ spoken: `vo výške ${spokenFeet(ft)}`, caption: `vo výške ${groupDigits(ft)}${NBSP}stôp` });
+  }
+  if (parts.length < 2) return null;
+  // Najviac dve časti (krátka veta): čas letu a vzdialenosť; výška (je aj v obraze) len keď jedna z nich chýba.
+  const two = parts.slice(0, 2);
+  return { spoken: `Lietadlo je ${two.map((p) => p.spoken).join(', ')}.`, caption: `Lietadlo je ${two.map((p) => p.caption).join(', ')}.` };
+}
+
+/** Kam sa doplnok zo správ (scenár, `after`) zaradí: za poslednú vetu prvého momentu daného druhu. */
+const AFTER_KINDS = { dive: ['dive'], gap: ['gap', 'descent', 'aftermath'], squawk: ['squawk'], uturn: ['uturn'], 'last-contact': ['last-contact'], landing: ['landing', 'reported-landing'] };
+
+/**
+ * Vety komentára v poradí: háčik (scenár) → kontext z dát → momenty z dát (s doplnkami zo správ pripnutými
+ * k momentu, `extras[].after`) → doplnky na záver → portál. Riadok scenára `lines[id]` (`{spoken, caption}`)
+ * nahradí vygenerovanú vetu (napr. skloňované mesto).
  * @param {object} event uložená udalosť
  * @param {object|null} script eventVideoScript.normalizeVideoScript(...) alebo null
  * @returns {Array<{id: string, kind: string, spoken: string, caption: string, anchor: object|null, approved?: boolean, source?: object}>}
@@ -115,6 +192,9 @@ export function narrationLines(event, script = null) {
       out.push({ id: 'flight', kind: 'flight', spoken: `Let ${spokenFlightNumber(flight)}${route}.`, caption: `Let ${flight}${route}.`, anchor: { at: 'opening', offset: 0.3 } });
     }
   }
+  // Kontext z dát počas prehrávania stopy pred prvým momentom.
+  const context = contextSentence(event, moments);
+  if (context) out.push({ id: 'ctx', kind: 'context', ...context, anchor: { at: 'play' } });
   for (let i = 0; i < moments.length; i += 1) {
     const m = moments[i];
     if (m.kind === 'squawk' && i > 0 && moments[i - 1].kind === 'squawk') continue; // spojené do jednej vety
@@ -126,20 +206,44 @@ export function narrationLines(event, script = null) {
       dive: { spotlightBefore: i },
       gap: { hold: i },
       squawk: { hold: i },
-      uturn: { hold: i, offset: -1.0 },
+      uturn: { spotlightBefore: i },
       'last-contact': { hold: i, offset: -2.0 },
       landing: { hold: i, offset: -1.0 },
-      'reported-landing': { piece: 'reported', moment: i },
+      // Pristátie zo správ smie začať až 2 s po nástupe záberu (predošlá veta doznie nad presunom kamery)
+      // — inak by sa kvôli nemu predlžovali všetky zastavenia.
+      'reported-landing': { piece: 'reported', moment: i, late: 2 },
     }[m.kind] || { hold: i };
     out.push({ id: `m${i}`, kind: m.kind, ...sentence, anchor, moment: i });
     if (m.kind === 'gap') {
-      (m.reportedNotes || []).forEach((f, k) => out.push({ id: `m${i}n${k}`, kind: 'descent', ...descentSentence(f), anchor: { gapOf: i }, moment: i, source: { domains: f.domains } }));
+      (m.reportedNotes || []).forEach((f, k) => out.push({ id: `m${i}n${k}`, kind: 'descent', ...descentSentence(f), anchor: { gapOf: i, late: 2.5 }, moment: i, source: { domains: f.domains } }));
+      const aftermath = gapAftermathSentence(m);
+      // Znie počas diery (hodiny bežia, lietadlo je bledé), nie nad zastaveným obrazom pred ňou: kotva na
+      // dieru s voľným oneskorením — tempo potom predĺži dieru, nie zastavenie.
+      if (aftermath) out.push({ id: `m${i}a`, kind: 'aftermath', ...aftermath, anchor: { gapOf: i, late: 30 }, moment: i });
     }
   }
-  (script?.extras || []).forEach((x, i) => out.push({ id: `extra${i + 1}`, kind: 'extra', spoken: x.spoken, caption: x.caption, anchor: i === 0 ? { at: 'outro', offset: 0.2 } : null, source: x.source }));
+  // Doplnky zo správ: pripnuté k momentu (`after`) idú hneď za jeho vety (bez vlastnej kotvy — tempo ich
+  // tam udrží), ostatné na záver nad súhrn. Id podľa poradia v scenári (extra1…), nie podľa miesta.
+  let endExtras = 0;
+  (script?.extras || []).forEach((x, i) => {
+    const line = { id: `extra${i + 1}`, kind: 'extra', spoken: x.spoken, caption: x.caption, anchor: null, source: x.source };
+    const kinds = AFTER_KINDS[x.after] || null;
+    let at = -1;
+    if (x.after === 'intro') {
+      at = out.findLastIndex((l) => ['hook', 'flight', 'context'].includes(l.kind) || (l.kind === 'extra' && l.after === 'intro'));
+    } else if (kinds) {
+      const first = out.find((l) => kinds.includes(l.kind) && l.moment !== undefined);
+      if (first) at = out.findLastIndex((l) => (l.moment === first.moment && kinds.includes(l.kind)) || (l.kind === 'extra' && l.after === x.after));
+    }
+    if (at >= 0) { out.splice(at + 1, 0, { ...line, after: x.after }); return; }
+    out.push({ ...line, anchor: endExtras === 0 ? { at: 'outro', offset: 0.2 } : null });
+    endExtras += 1;
+  });
   out.push(...fixedLines());
-  // Vlastníkove náhrady viet (scenár) — tá istá kotva, iný text.
-  return out.map((line) => (script?.lines?.[line.id] ? { ...line, ...script.lines[line.id], edited: true } : line));
+  // Vlastníkove náhrady viet (scenár) — tá istá kotva, iný text; `skip` vetu vynechá (portál sa vynechať nedá).
+  return out
+    .filter((line) => !(script?.lines?.[line.id]?.skip && line.kind !== 'fixed'))
+    .map((line) => (script?.lines?.[line.id] && !script.lines[line.id].skip ? { ...line, ...script.lines[line.id], edited: true } : line));
 }
 
 /** Kotva vety v čase videa podľa plánu. Pure. */
@@ -149,7 +253,8 @@ export function anchorTime(anchor, plan, moments) {
   const first = (phase) => pieces.find((p) => p.phase === phase) || null;
   const hold = (i) => pieces.find((p) => p.phase === 'moment' && p.moment === i) || null;
   let t = null;
-  if (anchor.at) t = first(anchor.at)?.start ?? null;
+  if (anchor.at === 'play') t = leadPlayPiece(plan)?.start ?? null; // kontext len pred prvým momentom, inak za predošlou vetou
+  else if (anchor.at) t = first(anchor.at)?.start ?? null;
   else if (anchor.hold !== undefined) t = hold(anchor.hold)?.start ?? null;
   else if (anchor.spotlightBefore !== undefined) {
     const h = hold(anchor.spotlightBefore);
@@ -168,15 +273,17 @@ export function anchorTime(anchor, plan, moments) {
   return t === null ? null : t + (anchor.offset || 0);
 }
 
-/** Fáza plánu v čase videa → voľba videoPlan, ktorá ju predlžuje. Pure. */
-export function knobForPhase(phase, piece) {
-  if (phase === 'gap') return piece?.dur >= 1.5 ? 'gapDropS' : 'gapS';
-  return { opening: 'openingS', intro: 'introS', play: 'playS', spotlight: 'spotlightS', moment: 'holdS', reported: 'reportedS', outro: 'outroS', endcard: 'endCardS' }[phase] || null;
+/** Prvý prelet plánu, ak pred ním nie je žiadne okolie ani moment (inak null). Pure. */
+export function leadPlayPiece(plan) {
+  const i = plan.pieces.findIndex((p) => p.phase === 'play');
+  return i >= 0 && plan.pieces.slice(0, i).every((p) => p.phase === 'opening' || p.phase === 'intro') ? plan.pieces[i] : null;
 }
 
 /**
- * Umiestnenie viet a tempo videa: predlžuje voľby plánu, kým každá veta nezačne najneskôr `tolS` po
- * svojej kotve a posledná neskončí pred koncom videa. Vety bez kotvy nasledujú po predošlej.
+ * Umiestnenie viet a tempo videa: predlžuje jednotlivé kúsky plánu (`planOpts.stretch`: index kúska →
+ * sekundy navyše), kým každá veta nezačne najneskôr `tolS` (+ `anchor.late`) po svojej kotve a posledná
+ * neskončí pred koncom videa. Predlžuje sa len záber, pri ktorom veta znie — spoločné voľby (holdS, playS,
+ * spotlightS) by natiahli aj ostatné zábery a medzi vetami by vzniklo ticho. Vety bez kotvy nasledujú po predošlej.
  * @param {object} event
  * @param {Array} lines narrationLines(...)
  * @param {Record<string, {lead: number, speechEnd: number}>} durations ticho na začiatku a koniec reči (s) podľa id vety
@@ -200,7 +307,7 @@ export function fitNarration(event, lines, durations, opts = {}) {
       const start = Math.max(anchor === null ? earliest : anchor - d.lead, earliest);
       const speechStart = start + d.lead;
       const speechEnd = start + d.speechEnd;
-      placement.push({ id: line.id, start, speechStart, speechEnd, anchor, lag: anchor === null ? 0 : speechStart - anchor });
+      placement.push({ id: line.id, start, speechStart, speechEnd, anchor, lag: anchor === null ? 0 : speechStart - anchor, late: line.anchor?.late || 0, offset: line.anchor?.offset || 0 });
       prevEnd = speechEnd;
     }
     return { plan, placement };
@@ -209,38 +316,43 @@ export function fitNarration(event, lines, durations, opts = {}) {
   if (!result) return null;
   for (let iter = 0; iter < o.maxIterations; iter += 1) {
     const { plan, placement } = result;
-    const lagging = placement.find((p) => p.lag > o.tolS);
+    const lagging = placement.find((p) => p.lag - p.late > o.tolS);
     if (lagging) {
       // Predošlé vety presahujú cez kotvu tejto — predĺžiť kúsok plánu MEDZI začiatkom predošlej
       // ukotvenej vety a kotvou (prednostne ten, v ktorom tá veta začína, inak najdlhší v medzere).
       const k = placement.indexOf(lagging);
       let j = k - 1;
       while (j > 0 && placement[j].anchor === null) j -= 1;
-      const prevStart = j >= 0 ? placement[j].speechStart : 0;
-      const between = plan.pieces.filter((p) => p.start < lagging.anchor && p.start + p.dur > prevStart && knobForPhase(p.phase, p));
-      if (!between.length) break;
-      const piece = between.find((p) => prevStart >= p.start && prevStart < p.start + p.dur) || between.reduce((a, b) => (b.dur > a.dur ? b : a));
-      const knob = knobForPhase(piece.phase, piece);
-      planOpts[knob] = (planOpts[knob] ?? defaultKnob(knob)) + lagging.lag - o.tolS / 2 + 0.05;
+      const prev = j >= 0 ? placement[j] : null;
+      // Od kúska, ku ktorému je predošlá veta pripnutá: veta so záporným posunom (začína pred svojím
+      // zastavením) sa s kúskami pred ním posúva tiež — ich predĺženie by nepomohlo.
+      const prevStart = prev ? Math.max(prev.speechStart, prev.anchor === null ? prev.speechStart : prev.anchor - prev.offset) : 0;
+      const between = plan.pieces.map((p, idx) => ({ p, idx })).filter(({ p }) => p.start < lagging.anchor && p.start + p.dur > prevStart);
+      // Predošlá veta s voľným oneskorením (`late`) má znieť vo svojom zábere — predĺži sa ten, aj keď veta
+      // začala až za ním; inak kúsok, v ktorom predošlá veta začína, inak najdlhší v medzere.
+      const anchorIdx = prev && prev.late > 0 && prev.anchor !== null ? plan.pieces.findIndex((p) => prev.anchor - prev.offset >= p.start - 1e-9 && prev.anchor - prev.offset < p.start + p.dur) : -1;
+      const own = anchorIdx >= 0 && plan.pieces[anchorIdx].start < lagging.anchor ? { p: plan.pieces[anchorIdx], idx: anchorIdx } : null;
+      if (!own && !between.length) break;
+      const pick = own || between.find(({ p }) => prevStart >= p.start && prevStart < p.start + p.dur) || between.reduce((a, b) => (b.p.dur > a.p.dur ? b : a));
+      planOpts.stretch = { ...(planOpts.stretch || {}), [pick.idx]: (planOpts.stretch?.[pick.idx] || 0) + lagging.lag - lagging.late - o.tolS / 2 + 0.05 };
       result = place();
+      // Poistka: predĺženie, ktoré oneskorenie nezmenší, sa neopakuje (inak by video rástlo do stropu iterácií).
+      const again = result.placement.find((p) => p.id === lagging.id);
+      if (again && again.lag >= lagging.lag - 1e-6) break;
       continue;
     }
     const last = placement[placement.length - 1];
     const over = last ? last.speechEnd - (plan.durationS - o.endMarginS) : 0;
     if (over > 0) {
-      planOpts.endCardS = (planOpts.endCardS ?? defaultKnob('endCardS')) + over + 0.05;
+      const lastIdx = plan.pieces.length - 1;
+      planOpts.stretch = { ...(planOpts.stretch || {}), [lastIdx]: (planOpts.stretch?.[lastIdx] || 0) + over + 0.05 };
       result = place();
       continue;
     }
-    return { planOpts, durationS: plan.durationS, placement, maxLag: Math.max(0, ...placement.map((p) => p.lag)), converged: true };
+    return { planOpts, durationS: plan.durationS, placement, maxLag: Math.max(0, ...placement.map((p) => p.lag - p.late)), converged: true };
   }
   const { plan, placement } = result;
-  return { planOpts, durationS: plan.durationS, placement, maxLag: Math.max(0, ...placement.map((p) => p.lag)), converged: false };
-}
-
-/** Predvolená hodnota voľby plánu (eventVideo.VIDEO_DEFAULTS), keď ju solver ešte nemenil. */
-function defaultKnob(knob) {
-  return { openingS: 2.6, introS: 1, playS: 7, holdS: 1, gapS: 0.6, gapDropS: 2, spotlightS: 3, reportedS: 3, outroS: 3.5, endCardS: 3 }[knob] ?? 1;
+  return { planOpts, durationS: plan.durationS, placement, maxLag: Math.max(0, ...placement.map((p) => p.lag - p.late)), converged: false };
 }
 
 /**
@@ -250,11 +362,11 @@ function defaultKnob(knob) {
  */
 export function narrationHeardMatches(caption, heard) {
   const norm = (s) => String(s || '').toLowerCase()
-    .replace(/ /g, ' ').replace(/°c?/g, ' stupňov ').replace(/(\d)[\s-]*(?:tisíc|tis\.)/g, (_, d) => `${d}000`)
+    .replace(/ /g, ' ').replace(/°c?/g, ' stupňov ').replace(/(\d)\s*km(?![\p{L}])/gu, '$1 kilometrov').replace(/(\d)[\s-]*(?:tisíc|tis\.)/g, (_, d) => `${d}000`)
     .replace(/(\d)\s+(?=\d{3}\b)/g, '$1').replace(/\b(\d{1,2})\.\s*(?=hodin)/g, (_, h) => `${ORDINAL_F[Number(h)] || h} `)
     .replace(/[.,;:!?„“"'()–—-]/g, ' ').replace(/\s+/g, ' ').trim();
   // Prvé písmeno slova bez dĺžňa (rozpoznávač píše „Udaje"); koncovky ostávajú prísne (katastrofé ≠ katastrofe).
-  const words = (s) => norm(s).split(' ').filter(Boolean).map((w) => w[0].normalize('NFD').replace(/[̀-ͯ]/g, '') + w.slice(1));
+  const words = (s) => norm(s).split(' ').filter(Boolean).map((w) => NUM_WORDS[w] || w).map((w) => w[0].normalize('NFD').replace(/[̀-ͯ]/g, '') + w.slice(1));
   const a = words(caption);
   const b = words(heard).map((w) => HEARD_ALIASES[w] || w);
   const bag = new Map();
@@ -270,6 +382,8 @@ export function narrationHeardMatches(caption, heard) {
   return { ok: (missing.length === 0 && extra.length === 0) || spaceless, missing, extra };
 }
 const ORDINAL_F = ['', 'prvej', 'druhej', 'tretej', 'štvrtej', 'piatej', 'šiestej', 'siedmej', 'ôsmej', 'deviatej', 'desiatej', 'jedenástej', 'dvanástej', 'trinástej', 'štrnástej', 'pätnástej', 'šestnástej', 'sedemnástej', 'osemnástej', 'devätnástej', 'dvadsiatej', 'dvadsiatej prvej', 'dvadsiatej druhej', 'dvadsiatej tretej'];
+/** Malé číslovky slovom aj číslicou sú to isté („dvoch hodín" = „2 hodín", „päť minút" = „5 minút"). */
+const NUM_WORDS = { jeden: '1', jedna: '1', jedno: '1', jednu: '1', jednej: '1', dva: '2', dve: '2', dvoch: '2', tri: '3', troch: '3', štyri: '4', štyroch: '4', päť: '5', piatich: '5', šesť: '6', šiestich: '6', sedem: '7', siedmich: '7', osem: '8', ôsmich: '8', deväť: '9', deviatich: '9', desať: '10', desiatich: '10' };
 /** Rozpoznávač známo píše inak (nie chyba výslovnosti): „Let" pred samohláskou ako „LED". */
 const HEARD_ALIASES = { led: 'let' };
 

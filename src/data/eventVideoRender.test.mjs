@@ -274,6 +274,11 @@ test('3D video: vedľajšie súbory (bez titulkov, SRT) k tým istým údajom; n
     const withScript = { ...e, videoScript: { hook: { tag: 'X', lines: ['a'], sub: null, source: 's', spoken: ['a'], captions: ['a'] }, extras: [], lines: {} } };
     assert.notEqual(videoEventKey(withScript), k, 'scenár (háčik) mení video');
     assert.notEqual(videoEventKey({ ...withScript, videoScript: { ...withScript.videoScript, lines: { m0: { spoken: 'iné' } } } }), videoEventKey(withScript), 'náhrada vety mení video');
+    // Miesto doplnku (pri páde / na záver) mení poradie viet = iné video; „end" je to isté ako bez miesta.
+    const extra = { spoken: 'Doplnok.', caption: 'Doplnok.' };
+    const atEnd = { ...withScript, videoScript: { ...withScript.videoScript, extras: [extra] } };
+    assert.equal(videoEventKey({ ...atEnd, videoScript: { ...atEnd.videoScript, extras: [{ ...extra, after: 'end' }] } }), videoEventKey(atEnd));
+    assert.notEqual(videoEventKey({ ...atEnd, videoScript: { ...atEnd.videoScript, extras: [{ ...extra, after: 'dive' }] } }), videoEventKey(atEnd), 'doplnok pri momente mení video');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

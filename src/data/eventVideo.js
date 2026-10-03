@@ -27,6 +27,11 @@ export const VIDEO_DEFAULTS = Object.freeze({
   fps: 30,
   introS: 1,
   playS: 7,
+  /**
+   * Predĺženie jednotlivých kúskov plánu: index kúska → sekundy navyše (komentár: eventNarration.fitNarration
+   * predĺži len záber, pri ktorom veta znie — spoločné voľby by natiahli aj ostatné a vzniklo by ticho).
+   */
+  stretch: null,
   holdS: 1,
   gapS: 0.6,
   /** Diera, cez ktorú sa výška zmenila aspoň o gapDropFt (pád bez údajov), trvá gapDropS. */
@@ -154,6 +159,12 @@ export function videoPlan(event, opts = {}) {
   pieces.push({ kind: 'hold', phase: 'outro', dur: o.outroS, t: endT, moment: null });
   if (o.endCardS > 0) pieces.push({ kind: 'hold', phase: 'endcard', dur: o.endCardS, t: endT, moment: null });
 
+  if (o.stretch) {
+    for (const [i, extra] of Object.entries(o.stretch)) {
+      const p = pieces[Number(i)];
+      if (p && Number(extra) > 0) p.dur += Number(extra);
+    }
+  }
   let start = 0;
   for (const p of pieces) { p.start = start; start += p.dur; }
   const durationS = start;

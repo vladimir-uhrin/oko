@@ -96,3 +96,26 @@ test('MCP odpovede ai-translators: JSON aj SSE, výsledok nástroja ako JSON z t
   assert.equal(toolResultValue({ content: [{ type: 'text', text: 'plain' }] }), 'plain');
   assert.equal(parseMcpBody('application/json', 'nie json'), null);
 });
+
+test('titulky: dlhá veta sa delí prednostne na konci vety alebo pri pomlčke (pauza nahrávky tam), nie pri skoršej čiarke', () => {
+  const lines = [
+    { id: 'q', caption: 'Prečo sa to stalo, zatiaľ nie je známe. Prebieha vyšetrovanie.' },
+    { id: 'd', caption: 'Údaje končia vo výške 15 000 stôp — lietadlo je stále vo vzduchu.' },
+    { id: 's', caption: 'Potom 9 minút ticho. Žiadne údaje.' },
+  ];
+  const placement = [
+    { id: 'q', start: 10, speechStart: 10.2, speechEnd: 14.6 },
+    { id: 'd', start: 20, speechStart: 20.2, speechEnd: 25.2 },
+    { id: 's', start: 30, speechStart: 30.2, speechEnd: 32.9 },
+  ];
+  // q: pauza pri čiarke (1,2 s od začiatku súboru) aj na konci prvej vety (3,0 s) — delí sa na konci vety.
+  const bounds = { q: { pauses: [{ from: 1.2, to: 1.4 }, { from: 3.0, to: 3.45 }] }, d: { pauses: [{ from: 2.75, to: 3.1 }] }, s: { pauses: [{ from: 1.6, to: 2.0 }] } };
+  const cues = captionCues(lines, placement, bounds);
+  assert.deepEqual(cues.map((c) => c.id), ['qa', 'qb', 'da', 'db', 's']);
+  assert.equal(cues[0].text, 'Prečo sa to stalo, zatiaľ nie je známe.');
+  assert.equal(cues[1].text, 'Prebieha vyšetrovanie.');
+  assert.ok(Math.abs(cues[0].to - 13.0) < 1e-9 && Math.abs(cues[1].from - 13.45) < 1e-9);
+  assert.equal(cues[2].text, 'Údaje končia vo výške 15 000 stôp —');
+  assert.equal(cues[3].text, 'lietadlo je stále vo vzduchu.');
+  assert.equal(cues[4].text, 'Potom 9 minút ticho. Žiadne údaje.', 'krátka veta sa nedelí, hoci má pauzu');
+});

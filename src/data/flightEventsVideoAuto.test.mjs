@@ -59,7 +59,7 @@ test('scenár so zdrojmi → overenie citátov → príprava videa na pozadí �
       onProgress('voice', { line: 'hook1' });
       onProgress('capture', { frame: 10, frames: 100 });
       await gate;
-      return { durationS: 67.8, review: [{ line: 'signoff', spoken: 'Video pripravil Vladimír Uhrin.', heard: 'Video pripravil Vladimír Úrin.' }], files: files() };
+      return { durationS: 67.8, review: [{ line: 'm5', spoken: 'Údaje končia vo výške pätnásťtisíc stôp — lietadlo je stále vo vzduchu.', heard: 'Údaje končia vo výške päťtisíc stôp, lietadlo je stále vo vzduchu.' }], files: files() };
     },
   };
   const logs = [];
@@ -130,7 +130,7 @@ test('scenár so zdrojmi → overenie citátov → príprava videa na pozadí �
     const done = await call(service, `/${id}/video/status`);
     assert.equal(done.json.state, 'done', JSON.stringify(done.json));
     assert.equal(done.json.durationS, 67.8);
-    assert.deepEqual(done.json.review.map((r) => r.line), ['signoff'], 'veta na vypočutie');
+    assert.deepEqual(done.json.review.map((r) => r.line), ['m5'], 'veta na vypočutie');
     assert.deepEqual(runs, [{ id, hook: 'ÚTOK NA PALUBE', reported: 2 }], 'linka dostala udalosť s faktami aj scenár');
     assert.equal((await call(service, `/${id}/post`)).json.videoReady, true, 'video pre tieto údaje je hotové');
     assert.equal((await call(service, `/${id}/video.mp4`)).status, 200);

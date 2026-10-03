@@ -16,6 +16,7 @@
  *
  * DOM sa skladá z literálov (ako historyPanel.js); modely kariet sú čisté a testované.
  */
+import { spokenDigits } from './data/eventSpeech.js';
 import { formatClockUtc } from './data/flightHistory.js';
 import { flightDateUtc } from './data/stateAircraftClient.js';
 import { currentLanguage } from './i18n.js';
@@ -166,6 +167,10 @@ export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...ar
 
 /** Riadok „odkaz | citát" → časti. Pure. */
 const splitBar = (line) => String(line).split('|').map((x) => x.trim());
+/** Slovo vo formulári → miesto doplnku v komentári (eventVideoScript.EXTRA_AFTER). */
+const EXTRA_AFTER = ['intro', 'dive', 'gap', 'squawk', 'uturn', 'last-contact', 'landing', 'end'];
+const EXTRA_PLACE = { úvod: 'intro', pád: 'dive', ticho: 'gap', kód: 'squawk', obrat: 'uturn', koniec: 'last-contact', pristátie: 'landing' };
+const EXTRA_PLACE_BACK = Object.fromEntries(Object.entries(EXTRA_PLACE).map(([k, v]) => [v, k]));
 /**
  * Formulár scenára → vstup pre POST video-script (server overí dôveryhodné médium a citát v článku).
  * Prázdny formulár = null (bez scenára). Pure.
@@ -179,12 +184,32 @@ export function scriptFormToInput(form) {
   const hook = hookLines.length || spoken.length || sources.length ? {
     tag: String(form.tag || '').trim(), lines: hookLines, sub: String(form.sub || '').trim() || null, attributed: String(form.attributed || '').trim() || null, spoken, sources,
   } : null;
-  const extras = linesOf(form.extras).map((l) => { const [spokenLine, url, ...rest] = splitBar(l); return { spoken: spokenLine, sources: [{ url, quote: rest.join(' | ') }] }; });
+  // Doplnok: „[miesto:] veta | odkaz | citát [|| odkaz | citát]" — miesto (pád, ticho, kód, obrat, koniec,
+  // pristátie, úvod) ho pripne k momentu, bez miesta ide na koniec; „||" pridá ďalší zdroj.
+  const extras = linesOf(form.extras).map((l) => {
+    const groups = String(l).split('||');
+    const [first, url, ...rest] = splitBar(groups[0]);
+    const m = /^([\p{L}-]+):\s*(.+)$/u.exec(first);
+    const word = m ? m[1].toLowerCase() : '';
+    const after = m ? (EXTRA_PLACE[word] || (EXTRA_AFTER.includes(word) ? word : null)) : null;
+    const sources = [{ url, quote: rest.join(' | ') }, ...groups.slice(1).map((g) => { const [u, ...q] = splitBar(g); return { url: u, quote: q.join(' | ') }; })];
+    return { spoken: after ? m[2].trim() : first, sources, ...(after ? { after } : {}) };
+  });
   const lines = {};
-  for (const [id, text] of Object.entries(form.overrides || {})) if (String(text || '').trim()) lines[id] = { spoken: String(text).trim() };
+  // Náhrada vety; samotná pomlčka „-" vetu vynechá.
+  for (const [id, text] of Object.entries(form.overrides || {})) {
+    const v = String(text || '').trim();
+    if (v) lines[id] = /^[-–—]$/.test(v) ? { skip: true } : { spoken: v };
+  }
   if (!hook && !extras.length && !Object.keys(lines).length) return null;
   return { hook, extras, lines };
 }
+/**
+ * Veta do formulára: titulok (s číslicami), ak je len číslicovou podobou vety hlasu — inak by sa pri ďalšom
+ * uložení číslice z titulku stratili; inak veta hlasu. Pure.
+ */
+const formSentence = (spoken, caption) => (caption && caption !== spoken && spokenDigits(caption).text === spoken ? caption : spoken);
+
 /** Uložený scenár → polia formulára (predvyplnenie). Pure. */
 export function scriptToForm(script) {
   const h = script?.hook || null;
@@ -193,9 +218,13 @@ export function scriptToForm(script) {
     lines: (h?.lines || []).join('\n'),
     sub: h?.sub || '',
     attributed: h?.attributed || '',
-    spoken: (h?.spoken || []).join('\n'),
+    spoken: (h?.spoken || []).map((x, i) => formSentence(x, h?.captions?.[i])).join('\n'),
     sources: (h?.sources || []).map((x) => `${x.url} | ${x.quote}`).join('\n'),
-    extras: (script?.extras || []).map((x) => `${x.spoken} | ${x.sources?.[0]?.url || ''} | ${x.sources?.[0]?.quote || ''}`).join('\n'),
+    extras: (script?.extras || []).map((x) => {
+      const place = x.after && x.after !== 'end' ? `${EXTRA_PLACE_BACK[x.after] || x.after}: ` : '';
+      const sources = (x.sources?.length ? x.sources : [{ url: '', quote: '' }]).map((s) => `${s.url || ''} | ${s.quote || ''}`).join(' || ');
+      return `${place}${formSentence(x.spoken, x.caption)} | ${sources}`;
+    }).join('\n'),
   };
 }
 /** Stav prípravy videa → text pre vlastníka. Pure. */

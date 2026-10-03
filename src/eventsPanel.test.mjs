@@ -359,6 +359,26 @@ test('video automaticky (2026-10-03): formulár scenára → ULOŽIŤ SCENÁR (s
   assert.equal(scriptFormToInput({ tag: '', lines: '', spoken: '', sources: '', extras: '' }), null, 'prázdny formulár = bez scenára');
   const saved = { hook: { tag: 'ÚTOK NA PALUBE', lines: ['A', 'B'], sub: null, attributed: 'premiéra', spoken: ['V.'], sources: [{ url: 'https://u', quote: 'q' }] }, extras: [{ spoken: 'E.', sources: [{ url: 'https://e', quote: 'eq' }] }] };
   assert.deepEqual(scriptToForm(saved), { tag: 'útok na palube', lines: 'A\nB', sub: '', attributed: 'premiéra', spoken: 'V.', sources: 'https://u | q', extras: 'E. | https://e | eq' });
+  // Veta, ktorú server prepísal z číslic na slová, sa do formulára vráti s číslicami (z titulku); iný titulok
+  // (napr. s úvodzovkami citátu) vetu hlasu nenahrádza.
+  const numbered = scriptToForm({
+    hook: { tag: 'X', lines: ['A'], sub: null, attributed: null, spoken: ['Na palube bolo sto šesťdesiatsedem ľudí.'], captions: ['Na palube bolo 167 ľudí.'], sources: [{ url: 'https://u', quote: 'q' }] },
+    extras: [
+      { spoken: 'Kleslo o štrnásťtisíc stôp.', caption: 'Kleslo o 14 000 stôp.', sources: [{ url: 'https://e', quote: 'eq' }] },
+      { spoken: 'Boli sme si istí, povedal cestujúci.', caption: '„Boli sme si istí,“ povedal cestujúci.', sources: [{ url: 'https://e', quote: 'eq' }] },
+    ],
+  });
+  assert.equal(numbered.spoken, 'Na palube bolo 167 ľudí.');
+  assert.equal(numbered.extras, 'Kleslo o 14 000 stôp. | https://e | eq\nBoli sme si istí, povedal cestujúci. | https://e | eq');
+  // Doplnok pri momente („pád:", „pristátie:"…) a viac zdrojov („||") — tam aj späť bez straty.
+  const placed = scriptFormToInput({ tag: '', lines: '', spoken: '', sources: '', extras: 'pád: Z kokpitu sa ozýva krik. | https://www.arabnews.com/y | Screams were heard || https://www.aljazeera.com/x | they heard shouts\nPristátie: Pilotov odviezli do nemocnice. | https://www.aljazeera.com/x | admitted to hospital\nPoznámka: nie je miesto. | https://www.arabnews.com/y | a quote' });
+  assert.deepEqual(placed.extras, [
+    { spoken: 'Z kokpitu sa ozýva krik.', sources: [{ url: 'https://www.arabnews.com/y', quote: 'Screams were heard' }, { url: 'https://www.aljazeera.com/x', quote: 'they heard shouts' }], after: 'dive' },
+    { spoken: 'Pilotov odviezli do nemocnice.', sources: [{ url: 'https://www.aljazeera.com/x', quote: 'admitted to hospital' }], after: 'landing' },
+    { spoken: 'Poznámka: nie je miesto.', sources: [{ url: 'https://www.arabnews.com/y', quote: 'a quote' }] },
+  ], 'neznáme slovo pred dvojbodkou ostáva súčasťou vety');
+  assert.equal(scriptToForm({ extras: [{ ...placed.extras[0] }, { ...placed.extras[1] }, { spoken: 'Na záver.', after: 'end', sources: [{ url: 'https://e', quote: 'eq' }] }] }).extras,
+    'pád: Z kokpitu sa ozýva krik. | https://www.arabnews.com/y | Screams were heard || https://www.aljazeera.com/x | they heard shouts\npristátie: Pilotov odviezli do nemocnice. | https://www.aljazeera.com/x | admitted to hospital\nNa záver. | https://e | eq');
   assert.equal(videoJobMessage({ state: 'running', stage: 'capture', detail: { frame: 120, frames: 2033 } }, t), 'events.video-stage-capture {"frame":120,"frames":2033}');
   assert.equal(videoJobMessage({ state: 'done', durationS: 67.8 }, t), 'events.video-job-done {"s":"68"}');
   assert.equal(videoJobMessage({ state: 'idle' }, t), '');

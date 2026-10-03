@@ -335,3 +335,21 @@ test('pristátie zo správ (FZ1073 → Tabuk): po konci údajov vlastné zastave
   let prev = -Infinity;
   for (let f = 0; f < plan.totalFrames; f += 1) { const t = plan.at(f).t; assert.ok(t >= prev - 1e-9, `snímka ${f}`); prev = t; }
 });
+
+test('predĺženie jednotlivých kúskov (stretch): dlhší je len vybraný kúsok, ostatné ostávajú, čas údajov v ňom beží pomalšie; neznámy index sa ignoruje', async () => {
+  const e = await fzCardEvent();
+  const base = videoPlan(e, { openingS: 2.6, endCardS: 3 });
+  const lead = base.pieces.findIndex((p) => p.phase === 'play');
+  const hold = base.pieces.findIndex((p) => p.phase === 'moment');
+  const plan = videoPlan(e, { openingS: 2.6, endCardS: 3, stretch: { [lead]: 4.5, [hold]: 2, 999: 5 } });
+  assert.equal(plan.pieces.length, base.pieces.length, 'štruktúra plánu sa nemení — indexy kúskov platia');
+  plan.pieces.forEach((p, i) => {
+    const extra = i === lead ? 4.5 : (i === hold ? 2 : 0);
+    assert.ok(Math.abs(p.dur - (base.pieces[i].dur + extra)) < 1e-9, `kúsok ${i} (${p.phase})`);
+  });
+  assert.ok(Math.abs(plan.durationS - (base.durationS + 6.5)) < 1e-9);
+  assert.equal(plan.totalFrames, Math.round(plan.durationS * VIDEO_DEFAULTS.fps));
+  // V predĺženom prelete čas údajov stále dôjde na koniec úseku — len pomalšie.
+  const p = plan.pieces[lead];
+  assert.ok(Math.abs(plan.at(Math.round((p.start + p.dur) * VIDEO_DEFAULTS.fps) - 1).t - p.to) < (p.to - p.from) / (p.dur * VIDEO_DEFAULTS.fps) + 1e-6);
+});
