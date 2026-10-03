@@ -4,11 +4,21 @@
 //   ai_translators_read_aloud(text, lang, voice 'own') → podpísaný odkaz na WAV (24 h),
 //   ai_translators_subtitle_video(url) → úloha → ai_translators_job_status → history_id →
 //   ai_translators_get_history → cues[].source_text (čo rozpoznávač počul).
-// Token `AI_TRANSLATORS_TOKEN` (.env, nikdy do prehliadača) ide v hlavičke Authorization. Odpoveď
+// Kľúč `AI_TRANSLATORS_MCP_KEY` (.env, nikdy do prehliadača; rovnaké meno ako v Codexe vlastníka) ide v hlavičke
+// Authorization; adresa `AI_TRANSLATORS_MCP_URL` (domáca sieť http://192.168.2.43:9140/mcp alebo verejná). Odpoveď
 // môže byť JSON alebo SSE (text/event-stream) — oboje sa parsuje. Volania sú po jednom (služba pri
-// viac než ~5 súbežných úlohách vracia 429).
+// viac než ~5 súbežných úlohách vracia 429). Časový limit volania 300 s ako `tool_timeout_sec` v Codexe
+// vlastníka; keď služba reláciu zabudne (404 na Mcp-Session-Id, napr. po reštarte), klient sa raz
+// znova predstaví a volanie zopakuje.
 
 export const AI_TRANSLATORS_URL = 'https://www.ai-translators.com/mcp';
+
+/** Nastavenie z prostredia: adresa a kľúč (aj staršie meno AI_TRANSLATORS_TOKEN). Pure. */
+export function aiTranslatorsConfig(env = {}) {
+  const token = String(env.AI_TRANSLATORS_MCP_KEY || env.AI_TRANSLATORS_TOKEN || '').trim();
+  const url = String(env.AI_TRANSLATORS_MCP_URL || '').trim() || AI_TRANSLATORS_URL;
+  return { url, token };
+}
 const PROTOCOL = '2025-06-18';
 
 /** JSON-RPC správa z tela odpovede (JSON alebo SSE `data:` riadky). Pure. */
@@ -39,8 +49,8 @@ export function toolResultValue(result) {
  * @param {{url?: string, token: string, fetchImpl?: typeof fetch, sleep?: (ms:number)=>Promise<void>, now?: () => number,
  *   timeoutMs?: number, pollMs?: number, jobTimeoutMs?: number}} opts
  */
-export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, fetchImpl = (...a) => globalThis.fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), timeoutMs = 60_000, pollMs = 3_000, jobTimeoutMs = 10 * 60_000 } = {}) {
-  if (!token) throw Object.assign(new Error('AI_TRANSLATORS_TOKEN chýba'), { code: 'NO_TOKEN' });
+export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, fetchImpl = (...a) => globalThis.fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), timeoutMs = 300_000, pollMs = 3_000, jobTimeoutMs = 10 * 60_000 } = {}) {
+  if (!token) throw Object.assign(new Error('AI_TRANSLATORS_MCP_KEY chýba'), { code: 'NO_TOKEN' });
   let session = null;
   let nextId = 1;
   let initialized = false;
@@ -71,9 +81,15 @@ export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, fet
     await rpc('notifications/initialized', {}, { notify: true }).catch(() => {});
     initialized = true;
   }
-  async function call(name, args) {
+  async function call(name, args, { retried = false } = {}) {
     await ensureInit();
-    const result = await rpc('tools/call', { name, arguments: args });
+    let result;
+    try {
+      result = await rpc('tools/call', { name, arguments: args });
+    } catch (error) {
+      if (!retried && error?.code === 'HTTP' && error.status === 404 && session) { session = null; initialized = false; return call(name, args, { retried: true }); }
+      throw error;
+    }
     if (result?.isError) throw Object.assign(new Error(`ai-translators ${name}: ${toolResultValue(result)}`), { code: 'TOOL' });
     return toolResultValue(result);
   }

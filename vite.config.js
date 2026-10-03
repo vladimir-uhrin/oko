@@ -38,7 +38,7 @@ import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
-import { createAiTranslatorsClient } from './src/data/aiTranslatorsClient.js';
+import { aiTranslatorsConfig, createAiTranslatorsClient } from './src/data/aiTranslatorsClient.js';
 import { createVoiceCache, prepareEventVideo } from './scripts/lib/eventVideoPipeline.mjs';
 import { resolveServerRole, roleServerOverrides, runsApiPlugins } from './scripts/lib/serverRole.mjs';
 import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
@@ -5834,7 +5834,7 @@ function flightHistoryProxy() {
         // Pristátie zo správ (POST /api/events/<id>/reported): poloha letiska z OurAirports.
         airportsFile: path.join(__dirname, 'src', 'data', 'local_data', 'airports', 'airports.geojsonl'),
         // Video automaticky (2026-10-03, scripts/lib/eventVideoPipeline.mjs): hlas vlastníka z ai-translators
-        // (AI_TRANSLATORS_TOKEN) alebo z pamäte nahrávok, hudba z EVENT_VIDEO_MUSIC_DIR, obraz z OKO na
+        // (AI_TRANSLATORS_MCP_URL + AI_TRANSLATORS_MCP_KEY) alebo z pamäte nahrávok, hudba z EVENT_VIDEO_MUSIC_DIR, obraz z OKO na
         // EVENT_VIDEO_PAGE_URL (dev server s Cesiom), najviac EVENT_VIDEO_DAILY_MAX videí za deň (dlaždice).
         videoPipeline: createEventVideoPipeline({ dbDir: path.dirname(cfg.dbPath) }),
         videoDailyMax: Math.max(1, Number(process.env.EVENT_VIDEO_DAILY_MAX) || 3),
@@ -5931,10 +5931,10 @@ export { openSkyProxy };
  * obraz z OKO (EVENT_VIDEO_PAGE_URL, inak http://localhost:4173), pracovné súbory <adresár DB>/event-video/work.
  */
 function createEventVideoPipeline({ dbDir }) {
-  const token = String(process.env.AI_TRANSLATORS_TOKEN || '').trim();
+  const { url, token } = aiTranslatorsConfig(process.env);
   let voice = null;
   if (token) {
-    try { voice = createAiTranslatorsClient({ token }); } catch (error) { console.warn('[events] ai-translators:', error?.message || error); }
+    try { voice = createAiTranslatorsClient({ url, token }); } catch (error) { console.warn('[events] ai-translators:', error?.message || error); }
   }
   const cache = createVoiceCache(path.join(dbDir, 'event-video', 'voice'));
   const musicDir = process.env.EVENT_VIDEO_MUSIC_DIR || path.join(process.cwd(), '.gev-cache', 'event-video-capture', 'music');

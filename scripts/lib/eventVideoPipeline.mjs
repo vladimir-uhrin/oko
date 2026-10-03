@@ -111,7 +111,7 @@ export async function prepareEventVideo({ event, script = null, voice = null, ca
     let attempts = 0;
     while (true) {
       if (!hit) {
-        if (!voice) throw Object.assign(new Error(`chýba nahrávka vety „${line.spoken}" a hlas nie je nastavený (AI_TRANSLATORS_TOKEN)`), { code: 'NO_VOICE', line: line.id });
+        if (!voice) throw Object.assign(new Error(`chýba nahrávka vety „${line.spoken}" a hlas nie je nastavený (AI_TRANSLATORS_MCP_KEY)`), { code: 'NO_VOICE', line: line.id });
         progress('voice', { line: line.id, attempt: attempts + 1 });
         const r = await voice.readAloud(line.spoken, { voice: o.voice, lang: o.lang });
         const res = await fetchImpl(r.url);

@@ -2,14 +2,14 @@
 // čo robí tlačidlo PRIPRAVIŤ VIDEO v paneli udalosti (služba udalostí → scripts/lib/eventVideoPipeline.mjs),
 // z príkazového riadka: udalosť zo služby (--event <id>) alebo zo súboru (--event-file), scenár vlastníka
 // (--script <json>: háčik so zdrojmi, doplnky, náhrady viet), hlas z pamäte nahrávok alebo z ai-translators
-// (AI_TRANSLATORS_TOKEN v .env), hudba z knižnice (EVENT_VIDEO_MUSIC_DIR/tracks.json), výstupy do --out-dir.
+// (AI_TRANSLATORS_MCP_URL + AI_TRANSLATORS_MCP_KEY v .env), hudba z knižnice (EVENT_VIDEO_MUSIC_DIR/tracks.json), výstupy do --out-dir.
 //
 //   node scripts/make-event-video.mjs --event <id> [--event-file <json>] [--script <json>] [--out-dir <dir>]
 //     [--url http://localhost:4173] [--seed-voice <map.json>] [--no-music]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAiTranslatorsClient } from '../src/data/aiTranslatorsClient.js';
+import { aiTranslatorsConfig, createAiTranslatorsClient } from '../src/data/aiTranslatorsClient.js';
 import { normalizeVideoScript } from '../src/data/eventVideoScript.js';
 import { parseTrustedList } from '../src/data/eventNews.js';
 import { createVoiceCache, prepareEventVideo } from './lib/eventVideoPipeline.mjs';
@@ -46,8 +46,10 @@ if (flag('--seed-voice')) {
   }
   console.log(`[make-video] pamäť hlasu: vložených ${seed.items.length} nahrávok`);
 }
-const voice = env.AI_TRANSLATORS_TOKEN ? createAiTranslatorsClient({ token: env.AI_TRANSLATORS_TOKEN }) : null;
-if (!voice) console.log('[make-video] AI_TRANSLATORS_TOKEN nie je — len nahrávky z pamäte, bez kontroly výslovnosti');
+const voiceCfg = aiTranslatorsConfig(env);
+const voice = voiceCfg.token ? createAiTranslatorsClient(voiceCfg) : null;
+if (!voice) console.log('[make-video] AI_TRANSLATORS_MCP_KEY nie je — len nahrávky z pamäte, bez kontroly výslovnosti');
+else console.log(`[make-video] hlas: ${voiceCfg.url}`);
 const musicDir = env.EVENT_VIDEO_MUSIC_DIR || path.join(root, '.gev-cache', 'event-video-capture', 'music');
 let music = null;
 if (!args.includes('--no-music')) {

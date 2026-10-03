@@ -9,6 +9,8 @@ import { createAiTranslatorsClient } from './aiTranslatorsClient.js';
 async function fakeServer(t, { token = 'tajny-token', sse = false } = {}) {
   const calls = [];
   let polls = 0;
+  let sessions = 0;
+  const state = { forgetSession: false };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
@@ -16,7 +18,8 @@ async function fakeServer(t, { token = 'tajny-token', sse = false } = {}) {
       if (req.headers.authorization !== `Bearer ${token}`) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end('{"error":"invalid_token"}'); return; }
       const msg = JSON.parse(body);
       calls.push({ method: msg.method, name: msg.params?.name, args: msg.params?.arguments, session: req.headers['mcp-session-id'] || null, auth: req.headers.authorization });
-      if (msg.method === 'initialize') { res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': 'sess-1' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } } })); return; }
+      if (state.forgetSession && req.headers['mcp-session-id']) { state.forgetSession = false; res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32001, message: 'Session not found' } })); return; }
+      if (msg.method === 'initialize') { sessions += 1; res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': `sess-${sessions}` }); res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } } })); return; }
       if (msg.method === 'notifications/initialized') { res.writeHead(202); res.end(); return; }
       const reply = (value, isError = false) => {
         const result = { content: [{ type: 'text', text: JSON.stringify(value) }], isError };
@@ -36,8 +39,20 @@ async function fakeServer(t, { token = 'tajny-token', sse = false } = {}) {
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => new Promise((r) => server.close(r)));
-  return { url: `http://127.0.0.1:${server.address().port}/mcp`, calls };
+  return { url: `http://127.0.0.1:${server.address().port}/mcp`, calls, state };
 }
+
+test('zabudnutá relácia (404 na Mcp-Session-Id, napr. po reštarte služby): klient sa raz znova predstaví a volanie zopakuje', async (t) => {
+  const { url, calls, state } = await fakeServer(t);
+  const client = createAiTranslatorsClient({ url, token: 'tajny-token' });
+  await client.readAloud('prvá');
+  state.forgetSession = true;
+  const r = await client.readAloud('druhá');
+  assert.equal(r.url, 'https://fake/tts/druh%C3%A1.wav');
+  assert.deepEqual(calls.map((c) => c.method), ['initialize', 'notifications/initialized', 'tools/call', 'tools/call', 'initialize', 'notifications/initialized', 'tools/call']);
+  assert.equal(calls.at(-1).session, 'sess-2', 'po novom predstavení ide nová relácia');
+  assert.equal(calls.at(-1).args.params.text, 'druhá');
+});
 
 test('hlas vlastníka: initialize s reláciou, read_aloud s voice own a lang sk → odkaz na WAV; token len v hlavičke', async (t) => {
   const { url, calls } = await fakeServer(t);
@@ -70,4 +85,12 @@ test('chyby: bez tokenu sa klient nevytvorí, zlý token = AUTH, 429 = RATE, chy
   const client = createAiTranslatorsClient({ url, token: 'tajny-token' });
   await assert.rejects(client.readAloud('text 429'), (e) => e.code === 'RATE');
   await assert.rejects(client.readAloud('zlyhaj'), (e) => e.code === 'TOOL' && /voice service down/.test(e.message));
+});
+
+test('nastavenie z prostredia: kľúč AI_TRANSLATORS_MCP_KEY (ako v Codexe vlastníka) alebo staršie AI_TRANSLATORS_TOKEN, adresa domácej siete alebo verejná', async () => {
+  const { aiTranslatorsConfig, AI_TRANSLATORS_URL } = await import('./aiTranslatorsClient.js');
+  assert.deepEqual(aiTranslatorsConfig({}), { url: AI_TRANSLATORS_URL, token: '' });
+  assert.deepEqual(aiTranslatorsConfig({ AI_TRANSLATORS_MCP_URL: 'http://192.168.2.43:9140/mcp', AI_TRANSLATORS_MCP_KEY: ' k1 ' }), { url: 'http://192.168.2.43:9140/mcp', token: 'k1' });
+  assert.equal(aiTranslatorsConfig({ AI_TRANSLATORS_TOKEN: 't', AI_TRANSLATORS_MCP_KEY: 'k' }).token, 'k', 'kľúč má prednosť');
+  assert.equal(aiTranslatorsConfig({ AI_TRANSLATORS_TOKEN: 't' }).token, 't');
 });
