@@ -14,6 +14,7 @@
 import * as Cesium from 'cesium';
 import { fetchAirspace, isMideastBulletin } from './data/czib.js';
 import { currentLanguage, t } from './i18n.js';
+import { createMapHoverTip } from './mapHoverTip.js';
 
 export const AIRSPACE_LAYER_ID = 'airspace-advisory';
 export const AIRSPACE_COLOR_ALL = '#ff5a5f';
@@ -23,7 +24,8 @@ export const AIRSPACE_OUTLINE_ALPHA = 0.85;
 export const AIRSPACE_OUTLINE_WIDTH = 1.8;
 /** Načítané dáta sa obnovia pri zapnutí, ak sú staršie (server ich ťahá raz za 6 h). */
 export const AIRSPACE_RELOAD_MS = 30 * 60_000;
-const HOVER_MS = 90;
+/** Okno hľadania plochy pod kurzorom (px). */
+const PICK_PX = 6;
 
 const INERT = {
   id: AIRSPACE_LAYER_ID, setEnabled: async () => false, isEnabled: () => false,
@@ -68,6 +70,7 @@ export function createAirspaceAdvisory({
   lang = currentLanguage(),
   now = () => Date.now(),
   documentRef = null,
+  createHoverTip = createMapHoverTip,
 } = {}) {
   const doc = documentRef || viewer?.container?.ownerDocument;
   const scene = viewer?.scene;
@@ -76,10 +79,19 @@ export function createAirspaceAdvisory({
   const ds = new Cesium.CustomDataSource(AIRSPACE_LAYER_ID);
   viewer.dataSources.add(ds);
   ds.show = false;
-  const tip = doc.createElement('div');
-  tip.className = 'oko-ukr-ctl-tip oko-air-tip';
-  tip.hidden = true;
-  viewer.container.appendChild(tip);
+  // Bublina nad plochou FIR (src/mapHoverTip.js): zalamuje sa, drží sa v okne, mizne pri odchode kurzora.
+  const hover = createHoverTip({
+    viewer,
+    doc,
+    className: 'oko-air-tip',
+    isActive: () => _enabled,
+    resolve: (pos) => {
+      const props = scene.pick(new Cesium.Cartesian2(pos.x, pos.y), PICK_PX, PICK_PX)?.id?.properties;
+      const nid = props?.czibNid?.getValue?.() ?? null;
+      const text = nid ? tipText(nid, props?.firCode?.getValue?.() ?? null) : '';
+      return text ? { text, accent: airspaceColour(_models.find((x) => x.nid === nid)?.scope) } : null;
+    },
+  });
   const dateFormat = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: 'UTC' });
   const fmtDay = (iso) => { const ms = Date.parse(`${iso}T00:00:00Z`); return Number.isFinite(ms) ? dateFormat.format(new Date(ms)) : String(iso || ''); };
   const requestRender = () => { try { scene.requestRender?.(); } catch { /* */ } };
@@ -92,8 +104,6 @@ export function createAirspaceAdvisory({
   let _error = null;
   let _drawn = false;
   let _destroyed = false;
-  let handler = null;
-  let hoverTimer = null;
   const listeners = new Set();
   const emit = () => { const s = getState(); for (const fn of listeners) { try { fn(s); } catch { /* */ } } };
 
@@ -157,31 +167,6 @@ export function createAirspaceAdvisory({
     parts.push(translate('mideast.air.tip-source'));
     return parts.filter(Boolean).join(' · ');
   }
-  function installHandler() {
-    if (handler || !scene.canvas) return;
-    handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
-    handler.setInputAction((e) => {
-      if (!_enabled || hoverTimer) return;
-      const pos = Cesium.Cartesian2.clone(e.endPosition);
-      hoverTimer = setTimeout(() => {
-        hoverTimer = null;
-        let nid = null; let fir = null;
-        try {
-          const props = scene.pick(pos, 6, 6)?.id?.properties;
-          nid = props?.czibNid?.getValue?.() ?? null;
-          fir = props?.firCode?.getValue?.() ?? null;
-        } catch { nid = null; }
-        const text = nid ? tipText(nid, fir) : '';
-        if (text) {
-          const m = _models.find((x) => x.nid === nid);
-          tip.textContent = text;
-          tip.style.setProperty('--ukr-accent', airspaceColour(m?.scope));
-          tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
-          tip.hidden = false;
-        } else tip.hidden = true;
-      }, HOVER_MS);
-    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-  }
 
   async function load() {
     if (_loading) return;
@@ -208,14 +193,14 @@ export function createAirspaceAdvisory({
     _enabled = Boolean(on);
     ds.show = _enabled;
     if (!_enabled) {
-      tip.hidden = true;
+      hover.hide();
       ds.entities.removeAll(); _drawn = false;
       ds.credit = undefined;
       requestRender();
       emit();
       return false;
     }
-    installHandler();
+    hover.install();
     if (_payload && !_drawn) draw();
     emit();
     await load();
@@ -237,9 +222,8 @@ export function createAirspaceAdvisory({
   }
   function destroy() {
     _destroyed = true;
-    if (handler) { try { handler.destroy(); } catch { /* */ } handler = null; }
-    if (hoverTimer) clearTimeout(hoverTimer);
-    try { viewer.dataSources.remove(ds, true); tip.remove(); } catch { /* */ }
+    hover.destroy();
+    try { viewer.dataSources.remove(ds, true); } catch { /* */ }
     listeners.clear();
   }
   return {
@@ -249,6 +233,6 @@ export function createAirspaceAdvisory({
     getState,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ ds, tip, tipText, drawn: () => _drawn }),
+    _getStateForTest: () => ({ ds, tip: hover.el, tipText, drawn: () => _drawn }),
   };
 }

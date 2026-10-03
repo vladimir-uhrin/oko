@@ -11652,6 +11652,11 @@ body.recording-mode .state-strip {
   min-height: 0;
   overflow: hidden auto;
 }
+/* Deti tela sa NEZMENŠUJÚ (2026-10-03, nález zo snímky po vydaní etapy 5): telo je stĺpcový flex
+   s vlastným rolovaním a `min-height: 0` na .mideast-transits a .mideast-news im dovolilo scvrknúť
+   sa pod svoj obsah, keď legendy vrstiev (EASA, UKMTO, GPS) natiahli panel nad pridelenú výšku —
+   zoznam správ mal výšku 0 a čipy regiónov sa kreslili CEZ prechody úžinami. Roluje telo, nie sekcia. */
+.mideast-body > * { flex-shrink: 0; }
 .mideast-section-title { margin-top: 4px; }
 .mideast-dirs { display: flex; flex-direction: column; gap: 3px; }
 .mideast-dir {
@@ -12596,6 +12601,14 @@ body.oko-ukr-tl-open #intel-hud .hud-bottom-right { margin-bottom: var(--oko-ukr
   color: #dbeafe; font: 500 10px 'IBM Plex Mono', ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .oko-ukr-ctl-tip[hidden] { display: none; }
+/* Bublina vrstiev BLÍZKEHO VÝCHODU (src/mapHoverTip.js, 2026-10-03): nesie vetu zo zdroja —
+   varovanie UKMTO, odporúčanie EASA, počty v bunke GPS — nie pár slov ako bublina kontroly.
+   Zalamuje sa; na jednom riadku z nej ostalo prvých 320 px a tri bodky (nález zo snímky po
+   vydaní). Polohu v okne mapy stráži hoverTipPlacement. Dve triedy = nezávisí od poradia pravidiel. */
+.oko-ukr-ctl-tip.oko-map-tip {
+  max-width: min(340px, calc(100vw - 16px)); padding: 5px 9px; line-height: 1.45;
+  white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+}
 .oko-ukr-tl-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-basis: 100%; font-size: 9px; color: #8aa0b6; }
 /* `display: flex` vyššie by prebilo atribút hidden — riadok DeepState sa skrýva,
    keď ho server na verejnej doméne odmietne (451), a musí naozaj zmiznúť. */

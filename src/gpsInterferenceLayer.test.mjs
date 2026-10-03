@@ -132,3 +132,35 @@ test('texty v oboch jazykoch a zapojenie v main.js', () => {
   assert.ok(created > 0 && main.indexOf('const mideastPanel = createMideastPanel({') > created, 'vrstva vzniká pred panelom');
   assert.match(main, /createMideastPanel\(\{[\s\S]*?gps: gpsInterference,[\s\S]*?\}\);/);
 });
+
+test('hover zapojenie: bunka pod kurzorom → počty s farbou stupňa; vypnutá vrstva nehľadá', async () => {
+  const { viewer, doc } = fakeViewer();
+  const picks = [];
+  let under = '63:71';
+  viewer.scene.pick = (pos, w, h) => { picks.push({ x: pos.x, y: pos.y, w, h }); return under ? { id: { properties: { gpsCell: { getValue: () => under } } } } : undefined; };
+  let cfg = null;
+  const calls = [];
+  const layer = createGpsInterference({
+    viewer, documentRef: doc, translate: tSk, lang: 'sk', fetchImpl: async () => payload(),
+    createHoverTip: (o) => { cfg = o; return { el: {}, install() { calls.push('install'); }, hide() { calls.push('hide'); }, destroy() { calls.push('destroy'); } }; },
+  });
+  assert.equal(cfg.className, 'oko-gps-tip');
+  assert.equal(cfg.isActive(), false, 'vrstva je predvolene vypnutá');
+  await layer.setEnabled(true);
+  assert.ok(calls.includes('install'));
+  assert.equal(cfg.isActive(), true);
+  const hit = cfg.resolve({ x: 700, y: 410 });
+  assert.match(hit.text, /^Rušenie GPS \(odvodené\) · šírka 31,5–32°, dĺžka 35,5–36° · /);
+  assert.equal(hit.accent, GPS_COLORS.high);
+  assert.deepEqual(picks.at(-1), { x: 700, y: 410, w: 4, h: 4 });
+  under = '52:112';
+  assert.equal(cfg.resolve({ x: 1, y: 1 }).accent, GPS_COLORS.medium);
+  under = null;
+  assert.equal(cfg.resolve({ x: 1, y: 1 }), null);
+  calls.length = 0;
+  await layer.setEnabled(false);
+  assert.equal(cfg.isActive(), false);
+  assert.ok(calls.includes('hide'), 'vypnutie bublinu zhasne');
+  layer.destroy();
+  assert.ok(calls.includes('destroy'));
+});

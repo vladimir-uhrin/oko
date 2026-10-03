@@ -14,12 +14,14 @@
 import * as Cesium from 'cesium';
 import { GPS_COLORS, GPS_DAYS_DEFAULT, fetchGpsInterference, gpsCellBounds } from './data/gpsInterference.js';
 import { currentLanguage, t } from './i18n.js';
+import { createMapHoverTip } from './mapHoverTip.js';
 
 export const GPS_LAYER_ID = 'gps-interference';
 export const GPS_FILL_ALPHA = Object.freeze({ high: 0.42, medium: 0.34, none: 0.07 });
 /** Načítané dáta sa obnovia pri ďalšom zapnutí, ak sú staršie (server zbiera raz za 15 min). */
 export const GPS_RELOAD_MS = 10 * 60_000;
-const HOVER_MS = 90;
+/** Okno hľadania bunky pod kurzorom (px). */
+const PICK_PX = 4;
 
 const INERT = {
   id: GPS_LAYER_ID, setEnabled: async () => false, isEnabled: () => false,
@@ -53,6 +55,7 @@ export function createGpsInterference({
   now = () => Date.now(),
   days = GPS_DAYS_DEFAULT,
   documentRef = null,
+  createHoverTip = createMapHoverTip,
 } = {}) {
   const doc = documentRef || viewer?.container?.ownerDocument;
   const scene = viewer?.scene;
@@ -61,10 +64,18 @@ export function createGpsInterference({
   const ds = new Cesium.CustomDataSource(GPS_LAYER_ID);
   viewer.dataSources.add(ds);
   ds.show = false;
-  const tip = doc.createElement('div');
-  tip.className = 'oko-ukr-ctl-tip oko-gps-tip';
-  tip.hidden = true;
-  viewer.container.appendChild(tip);
+  // Bublina nad bunkou (src/mapHoverTip.js): zalamuje sa, drží sa v okne, mizne pri odchode kurzora.
+  const hover = createHoverTip({
+    viewer,
+    doc,
+    className: 'oko-gps-tip',
+    isActive: () => _enabled,
+    resolve: (pos) => {
+      const key = scene.pick(new Cesium.Cartesian2(pos.x, pos.y), PICK_PX, PICK_PX)?.id?.properties?.gpsCell?.getValue?.() ?? null;
+      const text = key ? tipText(key) : '';
+      return text ? { text, accent: GPS_COLORS[_cells.find((c) => c.key === key)?.level] || GPS_COLORS.medium } : null;
+    },
+  });
   const locale = lang === 'sk' ? 'sk-SK' : 'en-GB';
   const numberFormat = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
   const dateFormat = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: 'UTC' });
@@ -79,8 +90,6 @@ export function createGpsInterference({
   let _error = null;
   let _drawn = false;
   let _destroyed = false;
-  let handler = null;
-  let hoverTimer = null;
   const listeners = new Set();
   const emit = () => { const s = getState(); for (const fn of listeners) { try { fn(s); } catch { /* */ } } };
 
@@ -126,27 +135,6 @@ export function createGpsInterference({
       translate('mideast.gps.tip-source'),
     ].filter(Boolean).join(' · ');
   }
-  function installHandler() {
-    if (handler || !scene.canvas) return;
-    handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
-    handler.setInputAction((e) => {
-      if (!_enabled || hoverTimer) return;
-      const pos = Cesium.Cartesian2.clone(e.endPosition);
-      hoverTimer = setTimeout(() => {
-        hoverTimer = null;
-        let key = null;
-        try { key = scene.pick(pos, 4, 4)?.id?.properties?.gpsCell?.getValue?.() ?? null; } catch { key = null; }
-        const text = key ? tipText(key) : '';
-        if (text) {
-          const cell = _cells.find((c) => c.key === key);
-          tip.textContent = text;
-          tip.style.setProperty('--ukr-accent', GPS_COLORS[cell?.level] || GPS_COLORS.medium);
-          tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
-          tip.hidden = false;
-        } else tip.hidden = true;
-      }, HOVER_MS);
-    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-  }
 
   async function load() {
     if (_loading) return;
@@ -173,14 +161,14 @@ export function createGpsInterference({
     _enabled = Boolean(on);
     ds.show = _enabled;
     if (!_enabled) {
-      tip.hidden = true;
+      hover.hide();
       ds.entities.removeAll(); _drawn = false;
       ds.credit = undefined;
       requestRender();
       emit();
       return false;
     }
-    installHandler();
+    hover.install();
     if (_payload && !_drawn) draw();
     emit();
     await load();
@@ -205,9 +193,8 @@ export function createGpsInterference({
   }
   function destroy() {
     _destroyed = true;
-    if (handler) { try { handler.destroy(); } catch { /* */ } handler = null; }
-    if (hoverTimer) clearTimeout(hoverTimer);
-    try { viewer.dataSources.remove(ds, true); tip.remove(); } catch { /* */ }
+    hover.destroy();
+    try { viewer.dataSources.remove(ds, true); } catch { /* */ }
     listeners.clear();
   }
   return {
@@ -217,6 +204,6 @@ export function createGpsInterference({
     getState,
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
-    _getStateForTest: () => ({ ds, tip, tipText, cells: () => _cells }),
+    _getStateForTest: () => ({ ds, tip: hover.el, tipText, cells: () => _cells }),
   };
 }

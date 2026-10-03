@@ -24,14 +24,144 @@ import { filterSanctionedNews } from './data/sanctionedMedia.js';
 import { fetchSituationNews, relativeAge } from './data/situationNews.js';
 import { translateText } from './translate.js';
 import { currentLanguage, t } from './i18n.js';
+import { CARD_OBSTACLE_SELECTOR, obstacleBoxes } from './ukraineEventsLayer.js';
 
 const LINK_IMAGE_API = '/api/link-image';
 
 const SEV_COLOR = Object.freeze({ critical: '#f87171', major: '#ffb547', minor: '#39d0ff' });
 const ANCHOR_OFFSET_PX = 14;
 const CARD_GAP_PX = 6;
+const EDGE_MARGIN_PX = 8;
 const REFETCH_TTL_MS = 15 * 60_000;
 const MAX_CARDS = 6;
+/** Ako často sa nanovo merajú panely a lišty, ktorým sa karty vyhýbajú (ms). */
+const OBSTACLE_TTL_MS = 400;
+
+/**
+ * Čomu sa hot karty vyhýbajú (2026-10-03, nález zo snímky po vydaní etapy 5: karta miesta mimo
+ * záberu sedela v rohu okna CEZ logo, rozbalený panel BLÍZKY VÝCHOD a riadok atribúcie): panely
+ * a lišty ako pri kartách UKRAJINY, navyše riadok atribúcie (Google a Cesium musia ostať čitateľné),
+ * rohy HUD so súradnicami a štýlom.
+ */
+export const HOTCARD_OBSTACLE_SELECTOR = `${CARD_OBSTACLE_SELECTOR}, #cesium-credits .cesium-widget-credits, .hud-top-right, .hud-bottom-left, #global-loading-status`;
+/**
+ * Miesto stavového riadka pod hornou lištou („OBNOVUJEM ŽIVÉ DÁTA…", #global-loading-status:
+ * top 74 px, vystredený, najviac ~400 px). Riadok sa objavuje len na chvíľu pri každej obnove
+ * dát; jeho miesto je preto vyhradené STÁLE, inak by karta pod lištou pri každej obnove poskočila.
+ */
+export const HOTCARD_STATUS_ZONE = Object.freeze({ top: 74, width: 420, height: 28 });
+/** Kontajnery, ktoré svoj obsah orezávajú a rolujú — z panela v nich je prekážkou len viditeľná časť. */
+export const HOTCARD_CLIP_SELECTOR = '#left-panel-stack, #right-context-rail';
+
+/**
+ * Viditeľná časť obdĺžnika v orezávajúcom kontajneri (prienik); bez kontajnera celý obdĺžnik,
+ * bez prieniku null. Stĺpec panelov roluje: panel odrolovaný pod jeho okraj má stále svoj
+ * obdĺžnik v okne, ale nie je ho vidieť — karta sa mu vyhýbať nemá. Pure.
+ * @param {{left: number, top: number, width: number, height: number}} rect
+ * @param {{left: number, top: number, width: number, height: number}|null} clip
+ */
+export function clipObstacleRect(rect, clip) {
+  if (!rect) return null;
+  if (!clip) return rect;
+  const left = Math.max(rect.left, clip.left);
+  const top = Math.max(rect.top, clip.top);
+  const right = Math.min(rect.left + rect.width, clip.left + clip.width);
+  const bottom = Math.min(rect.top + rect.height, clip.top + clip.height);
+  return right > left && bottom > top ? { left, top, width: right - left, height: bottom - top } : null;
+}
+
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+/** Posun karty NADOL od jej miesta sa počíta trojnásobne — karta pod svojím miestom zakrýva bodky. */
+const DOWN_COST = 3;
+
+/** Leží obdĺžnik na prekážke rozhrania alebo (s medzerou) na niektorej z prvých `count` položených kariet? */
+function hotCardBlocked(points, count, obstacles, x, y, w, h) {
+  for (let k = 0; k < obstacles.length; k += 1) {
+    const o = obstacles[k];
+    if (!(x + w <= o.x || o.x + o.w <= x || y + h <= o.y || o.y + o.h <= y)) return true;
+  }
+  for (let j = 0; j < count; j += 1) {
+    const q = points[j];
+    if (!(x + w + CARD_GAP_PX <= q.cx || q.cx + q.w + CARD_GAP_PX <= x || y + h + CARD_GAP_PX <= q.cy || q.cy + q.h + CARD_GAP_PX <= y)) return true;
+  }
+  return false;
+}
+/** Súradnica kandidáta tesne pri k-tom obdĺžniku (prekážky, potom položené karty): `side` 0 = za ním, 1 = pred ním. */
+function besideX(points, obstacles, k, side, w) {
+  const n = obstacles.length;
+  const bx = k < n ? obstacles[k].x : points[k - n].cx;
+  const bw = k < n ? obstacles[k].w : points[k - n].w;
+  return side === 0 ? bx + bw + CARD_GAP_PX : bx - CARD_GAP_PX - w;
+}
+function besideY(points, obstacles, k, side, h) {
+  const n = obstacles.length;
+  const by = k < n ? obstacles[k].y : points[k - n].cy;
+  const bh = k < n ? obstacles[k].h : points[k - n].h;
+  return side === 0 ? by - CARD_GAP_PX - h : by + bh + CARD_GAP_PX;
+}
+
+/**
+ * Rozmiestnenie hot kariet v okne mapy mimo rozhrania (2026-10-03). Karta sedí vystredená nad
+ * svojím bodom (keď nad ním v okne nie je miesto, pod ním) a pritiahne sa dovnútra okna — karta
+ * miesta mimo záberu tak ostane pri okraji mapy. Keď by ležala na paneli, lište, logu, atribúcii
+ * alebo na už položenej karte, vezme NAJBLIŽŠIE voľné miesto: kandidáti sú všetky dvojice
+ * „x tesne pri niektorom obdĺžniku alebo vlastné" × „y tesne pri niektorom obdĺžniku alebo
+ * vlastné" (voľný roh medzi panelom a lištou potrebuje obe naraz). Posun nadol je trikrát
+ * drahší než nahor a do strán, takže karty jedného miesta sa skladajú nahor ako doteraz
+ * a nezakrývajú bodky. Bez voľného miesta ostane na svojom (prekrytie je menšie zlo než
+ * skrytá správa). Ide sa od najnižšieho bodu.
+ *
+ * Zapisuje `cx`, `cy` (ľavý horný roh) priamo do položiek a nič nealokuje (beží každú snímku);
+ * poradie položiek zmení (zoradí podľa `y` zostupne). Pure okrem zápisu do vstupu.
+ * @param {Array<{x: number, y: number, w: number, h: number, cx?: number, cy?: number}>} points body v okne s rozmermi ich kariet
+ * @param {{w: number, h: number}} viewport
+ * @param {ReadonlyArray<{x: number, y: number, w: number, h: number}>} [obstacles] viditeľné časti rozhrania
+ */
+export function placeHotCards(points, viewport, obstacles = []) {
+  const left = EDGE_MARGIN_PX;
+  const top = EDGE_MARGIN_PX;
+  const right = Math.max(left, (viewport?.w || 0) - EDGE_MARGIN_PX);
+  const bottom = Math.max(top, (viewport?.h || 0) - EDGE_MARGIN_PX);
+  points.sort((a, b) => b.y - a.y);
+  for (let i = 0; i < points.length; i += 1) {
+    const p = points[i];
+    const maxX = Math.max(left, right - p.w);
+    const maxY = Math.max(top, bottom - p.h);
+    const x0 = clamp(p.x - p.w / 2, left, maxX);
+    let y0 = p.y - ANCHOR_OFFSET_PX - p.h; // nad bodom
+    if (y0 < top) y0 = p.y + ANCHOR_OFFSET_PX; // nad bodom nie je miesto → pod ním
+    y0 = clamp(y0, top, maxY);
+    let bestX = x0;
+    let bestY = y0;
+    if (hotCardBlocked(points, i, obstacles, x0, y0, p.w, p.h)) {
+      const boxes = obstacles.length + i;
+      let best = Infinity;
+      for (let a = -1; a < 2 * boxes; a += 1) { // −1 = vlastné x; inak tesne pri obdĺžniku (a >> 1), strana (a & 1)
+        const nx = a < 0 ? x0 : clamp(besideX(points, obstacles, a >> 1, a & 1, p.w), left, maxX);
+        const costX = Math.abs(nx - x0);
+        if (costX >= best) continue;
+        for (let b = -1; b < 2 * boxes; b += 1) {
+          if (a < 0 && b < 0) continue; // vlastné miesto je obsadené
+          const ny = b < 0 ? y0 : clamp(besideY(points, obstacles, b >> 1, b & 1, p.h), top, maxY);
+          const cost = costX + (ny > y0 ? (ny - y0) * DOWN_COST : y0 - ny);
+          if (cost < best && !hotCardBlocked(points, i, obstacles, nx, ny, p.w, p.h)) { best = cost; bestX = nx; bestY = ny; }
+        }
+      }
+    }
+    p.cx = bestX;
+    p.cy = bestY;
+  }
+  return points;
+}
+
+/** Bod leží v okne mapy a nie je pod panelom — len vtedy má zmysel jeho bodka a vodiaca čiara. Pure. */
+export function hotCardAnchorShown(x, y, viewport, obstacles) {
+  if (!(x >= 0 && y >= 0 && x <= (viewport?.w || 0) && y <= (viewport?.h || 0))) return false;
+  for (const o of obstacles || []) {
+    if (x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h) return false;
+  }
+  return true;
+}
 
 export function createIncidentCards({
   viewer,
@@ -178,9 +308,10 @@ export function createIncidentCards({
   }
 
   // Each card is anchored to its place: a pin dot sits exactly on the projected
-  // point and the card floats beside it (flipping to the other side near an edge).
-  // Cards are culled behind the horizon / off-screen, and the rare case of two
-  // places overlapping on screen is de-overlapped vertically.
+  // point and the card floats above it (below it when there is no room above).
+  // Cards behind the horizon are culled; a place outside the window keeps its card
+  // at the edge of the free map area, without the dot and the leader line; cards
+  // stack upward from the lowest point so they do not cover each other.
   function place() {
     // display:none (not visibility:hidden) — a card sets its own visibility:visible
     // for occlusion culling, which would otherwise override a hidden parent and
@@ -206,36 +337,71 @@ export function createIncidentCards({
         if (!win || !Number.isFinite(win.x) || !Number.isFinite(win.y)) ok = false;
       }
       if (!ok) { c.el.style.visibility = 'hidden'; c.dot.style.visibility = 'hidden'; c.line.style.visibility = 'hidden'; continue; }
-      visible.push({ c, x: win.x, y: win.y });
+      c.el.style.visibility = 'visible';
+      visible.push({ c, x: win.x, y: win.y, w: c.el.offsetWidth || 252, h: c.el.offsetHeight || 90, cx: 0, cy: 0 });
     }
     // Card floats ABOVE its ground dot with a leader line dropping to it (like the
-    // upstream reveal). Process the lowest points first and stack upward so several
-    // cards near one spot don't overlap.
-    visible.sort((a, b) => b.y - a.y);
-    let lastTop = Infinity;
+    // upstream reveal). Lowest points first, stacked upward, and every card is kept
+    // inside the free map area — clear of the logo, the panel columns, the top bar,
+    // the dock and the attribution line (placeHotCards).
+    const viewport = { w: vw, h: vh };
+    const obstacles = currentObstacles(viewport);
+    placeHotCards(visible, viewport, obstacles);
     for (const p of visible) {
+      p.c.el.style.transform = `translate(${Math.round(p.cx)}px, ${Math.round(p.cy)}px)`;
+      // Bodka a vodiaca čiara len keď je miesto naozaj vidieť: bod mimo okna alebo pod panelom
+      // by ťahal čiaru cez rozhranie (karta pri okraji mapy ostáva — „aj tam sa niečo deje").
+      if (!hotCardAnchorShown(p.x, p.y, viewport, obstacles)) {
+        p.c.dot.style.visibility = 'hidden';
+        p.c.line.style.visibility = 'hidden';
+        continue;
+      }
       p.c.dot.style.visibility = 'visible';
       p.c.dot.style.transform = `translate(${Math.round(p.x - 6)}px, ${Math.round(p.y - 6)}px)`;
-      p.c.el.style.visibility = 'visible';
-      const w = p.c.el.offsetWidth || 252;
-      const h = p.c.el.offsetHeight || 90;
-      const cx = Math.max(8, Math.min(p.x - w / 2, Math.max(8, vw - w - 8)));
-      let cy = p.y - ANCHOR_OFFSET_PX - h; // above the point
-      let below = false;
-      if (cy < 8) { cy = p.y + ANCHOR_OFFSET_PX; below = true; } // no room above → below
-      if (!below && cy + h > lastTop - CARD_GAP_PX) cy = lastTop - CARD_GAP_PX - h; // stack upward
-      cy = Math.max(8, Math.min(cy, Math.max(8, vh - h - 8)));
-      lastTop = cy;
-      p.c.el.style.transform = `translate(${Math.round(cx)}px, ${Math.round(cy)}px)`;
       // leader line: ground dot → the card's near-edge centre
-      const ax = cx + w / 2;
-      const ay = cy > p.y ? cy : cy + h;
+      const ax = p.cx + p.w / 2;
+      const ay = p.cy > p.y ? p.cy : p.cy + p.h;
       const dxl = ax - p.x;
       const dyl = ay - p.y;
       p.c.line.style.visibility = 'visible';
       p.c.line.style.width = `${Math.round(Math.hypot(dxl, dyl))}px`;
       p.c.line.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) rotate(${(Math.atan2(dyl, dxl) * 180 / Math.PI).toFixed(1)}deg)`;
     }
+  }
+
+  // Panely a lišty, ktorým sa karty vyhýbajú, v súradniciach okna mapy. Meria sa najviac raz za
+  // OBSTACLE_TTL_MS (place() beží každú snímku; getBoundingClientRect núti prepočet rozloženia).
+  let obstacleCache = { at: -Infinity, key: '', boxes: [] };
+  function currentObstacles(viewport) {
+    const at = now();
+    const key = `${viewport.w}x${viewport.h}`;
+    if (at - obstacleCache.at < OBSTACLE_TTL_MS && obstacleCache.key === key) return obstacleCache.boxes;
+    let rects = [];
+    try {
+      const clips = new Map(); // orezávajúci kontajner → jeho obdĺžnik (null, keď neorezáva)
+      const clipOf = (n) => {
+        const box = n.closest?.(HOTCARD_CLIP_SELECTOR);
+        if (!box || box === n) return null;
+        if (!clips.has(box)) {
+          const cs = doc.defaultView?.getComputedStyle?.(box);
+          clips.set(box, cs && (cs.overflowY !== 'visible' || cs.overflowX !== 'visible') ? box.getBoundingClientRect() : null);
+        }
+        return clips.get(box);
+      };
+      for (const n of doc.querySelectorAll?.(HOTCARD_OBSTACLE_SELECTOR) || []) {
+        if (n === layer || layer.contains?.(n)) continue;
+        if (n.checkVisibility && !n.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
+        const rect = clipObstacleRect(n.getBoundingClientRect(), clipOf(n));
+        if (rect) rects.push(rect);
+      }
+      if (doc.getElementById?.('global-loading-status')) {
+        rects.push({ left: viewport.w / 2 - HOTCARD_STATUS_ZONE.width / 2, top: HOTCARD_STATUS_ZONE.top, width: HOTCARD_STATUS_ZONE.width, height: HOTCARD_STATUS_ZONE.height });
+      }
+    } catch { rects = []; }
+    let origin = { left: 0, top: 0 };
+    try { const r = viewer.container.getBoundingClientRect(); origin = { left: r.left, top: r.top }; } catch { /* falošný DOM */ }
+    obstacleCache = { at, key, boxes: obstacleBoxes(rects, origin, viewport) };
+    return obstacleCache.boxes;
   }
 
   function setRevealed(next) {

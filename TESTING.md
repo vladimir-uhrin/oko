@@ -60,6 +60,24 @@ settled and not applicable because no Google 3D tileset is active.
 > Do not use a screenshot for visual judgment unless its report frame records
 > `tilesSettled: true`.
 
+## Middle East panel, layers and news cards — layout in a real browser
+
+Unit tests read text and state, not the screen. The layout of the BLÍZKY VÝCHOD module is
+checked by a script that opens OKO (GPU flags as the video capture), switches theatres,
+expands the panel and asserts numbers — panel sections do not overlap, the news list has
+height, no news card lies on the interface or on another card, the hover bubble wraps and
+stays inside the window:
+
+```sh
+node scripts/qa-mideast-panel.mjs --base http://localhost:4173
+node scripts/qa-mideast-panel.mjs --base https://okolive.sk   # after publishing
+```
+
+It exits 1 and names what overlaps; screenshots go to `output/qa-mideast/`. Run it by hand
+before publishing changes of the panel, the layers or the cards — one page load per run
+(one 3D tiles session), never in a loop. Options: `--theatres hormuz,overview`,
+`--sizes 1600x900,1366x768`, `--settle 30000`.
+
 ## Setup
 
 - **URL:** http://localhost:4173 — auto-flies to Austin on load. Give photoreal tiles ~10s.

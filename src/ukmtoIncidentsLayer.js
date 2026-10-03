@@ -16,6 +16,7 @@
 import * as Cesium from 'cesium';
 import { UKMTO_DAYS_DEFAULT, UKMTO_TYPES, UKMTO_TYPE_OTHER, fetchUkmto, ukmtoAge, ukmtoSummary } from './data/ukmto.js';
 import { currentLanguage, t } from './i18n.js';
+import { createMapHoverTip } from './mapHoverTip.js';
 
 export const UKMTO_LAYER_ID = 'ukmto-incidents';
 /**
@@ -26,7 +27,8 @@ export const UKMTO_LAYER_ID = 'ukmto-incidents';
 export const UKMTO_RELOAD_MS = 5 * 60_000;
 export const UKMTO_POINT_SIZE = Object.freeze({ fresh: 11, recent: 8, old: 6 });
 export const UKMTO_POINT_ALPHA = Object.freeze({ fresh: 0.95, recent: 0.75, old: 0.45 });
-const HOVER_MS = 90;
+/** Okno hľadania bodu pod kurzorom (px) — bod má 6–11 px, kurzor nemusí sedieť presne. */
+const PICK_PX = 8;
 
 const INERT = {
   id: UKMTO_LAYER_ID, setEnabled() {}, isEnabled: () => false, setActive: async () => {}, show() {}, hide() {},
@@ -56,6 +58,7 @@ export function createUkmtoIncidents({
   // `unref` (len Node): časovač obnovy nesmie držať proces testov nažive; v prehliadači je id číslo.
   setTimer = (fn, ms) => { const id = setInterval(fn, ms); id?.unref?.(); return id; },
   clearTimer = (id) => clearInterval(id),
+  createHoverTip = createMapHoverTip,
 } = {}) {
   const doc = documentRef || viewer?.container?.ownerDocument;
   const scene = viewer?.scene;
@@ -64,10 +67,18 @@ export function createUkmtoIncidents({
   const ds = new Cesium.CustomDataSource(UKMTO_LAYER_ID);
   viewer.dataSources.add(ds);
   ds.show = false;
-  const tip = doc.createElement('div');
-  tip.className = 'oko-ukr-ctl-tip oko-ukmto-tip';
-  tip.hidden = true;
-  viewer.container.appendChild(tip);
+  // Bublina nad bodom (src/mapHoverTip.js): zalamuje sa, drží sa v okne, mizne pri odchode kurzora.
+  const hover = createHoverTip({
+    viewer,
+    doc,
+    className: 'oko-ukmto-tip',
+    isActive: () => ds.show,
+    resolve: (pos) => {
+      const id = scene.pick(new Cesium.Cartesian2(pos.x, pos.y), PICK_PX, PICK_PX)?.id?.properties?.ukmtoId?.getValue?.() ?? null;
+      const text = id ? tipText(id) : '';
+      return text ? { text, accent: ukmtoColour(_incidents.find((x) => x.id === id)?.type) } : null;
+    },
+  });
   const dateTime = new Intl.DateTimeFormat(lang === 'sk' ? 'sk-SK' : 'en-GB', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
   const requestRender = () => { try { scene.requestRender?.(); } catch { /* */ } };
   const textOr = (key, fallback) => { const s = translate(key); return s === key ? fallback : s; };
@@ -81,8 +92,6 @@ export function createUkmtoIncidents({
   let _loading = false;
   let _error = null;
   let _destroyed = false;
-  let handler = null;
-  let hoverTimer = null;
   let refreshTimer = null; // beží len kým je čip zapnutý a scéna aktívna
   const listeners = new Set();
   const emit = () => { const s = getState(); for (const fn of listeners) { try { fn(s); } catch { /* */ } } };
@@ -133,27 +142,6 @@ export function createUkmtoIncidents({
     parts.push(translate('mideast.ukmto.tip-source'));
     return parts.filter(Boolean).join(' · ');
   }
-  function installHandler() {
-    if (handler || !scene.canvas) return;
-    handler = new Cesium.ScreenSpaceEventHandler(scene.canvas);
-    handler.setInputAction((e) => {
-      if (!ds.show || hoverTimer) return;
-      const pos = Cesium.Cartesian2.clone(e.endPosition);
-      hoverTimer = setTimeout(() => {
-        hoverTimer = null;
-        let id = null;
-        try { id = scene.pick(pos, 8, 8)?.id?.properties?.ukmtoId?.getValue?.() ?? null; } catch { id = null; }
-        const text = id ? tipText(id) : '';
-        if (text) {
-          const it = _incidents.find((x) => x.id === id);
-          tip.textContent = text;
-          tip.style.setProperty('--ukr-accent', ukmtoColour(it?.type));
-          tip.style.transform = `translate(${Math.round(pos.x + 14)}px, ${Math.round(pos.y + 14)}px)`;
-          tip.hidden = false;
-        } else tip.hidden = true;
-      }, HOVER_MS);
-    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-  }
 
   /** `force` = tik priebežnej obnovy (časovač už odmeral interval — bez druhej kontroly veku). */
   async function load({ force = false } = {}) {
@@ -183,8 +171,8 @@ export function createUkmtoIncidents({
     const shown = wanted && _visible;
     ds.show = shown;
     ds.credit = shown && _incidents.length ? new Cesium.Credit(translate('mideast.ukmto.credit'), true) : undefined;
-    if (!shown) tip.hidden = true;
-    if (wanted) installHandler();
+    if (!shown) hover.hide();
+    if (wanted) hover.install();
     // Priebežná obnova: otvorená stránka pri scéne si sama pýta nové varovania; mimo scény nič.
     if (wanted && refreshTimer === null) {
       refreshTimer = setTimer(() => { if (_enabled && _active && !_destroyed) void load({ force: true }).then(() => { if (!_destroyed) requestRender(); }); }, UKMTO_RELOAD_MS);
@@ -224,10 +212,9 @@ export function createUkmtoIncidents({
   }
   function destroy() {
     _destroyed = true;
-    if (handler) { try { handler.destroy(); } catch { /* */ } handler = null; }
-    if (hoverTimer) clearTimeout(hoverTimer);
+    hover.destroy();
     if (refreshTimer !== null) { clearTimer(refreshTimer); refreshTimer = null; }
-    try { viewer.dataSources.remove(ds, true); tip.remove(); } catch { /* */ }
+    try { viewer.dataSources.remove(ds, true); } catch { /* */ }
     listeners.clear();
   }
   return {
@@ -244,6 +231,6 @@ export function createUkmtoIncidents({
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     destroy,
     labels: { type: typeLabel, place: placeLabel, vessel: vesselLabel, when: whenLabel },
-    _getStateForTest: () => ({ ds, tip, tipText }),
+    _getStateForTest: () => ({ ds, tip: hover.el, tipText }),
   };
 }

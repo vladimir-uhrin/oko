@@ -197,3 +197,35 @@ test('main.js: vrstva pozná bránu priblíženia, ide do panela a prepína sa p
   assert.match(main, /void ukmtoIncidents\?\.setActive\(UKMTO_CHOKEPOINT_SCENES\.includes\(scene\?\.id\)\);/, 'úžiny len v oblasti UKMTO');
   assert.match(main, /void ukmtoIncidents\?\.setActive\(Boolean\(scene\)\);/, 'každé dejisko Blízkeho východu');
 });
+
+test('hover zapojenie: bod pod kurzorom → varovanie s farbou druhu; schovaná vrstva nehľadá a bublinu zhasne', async () => {
+  const { viewer, doc } = fakeViewer();
+  const picks = [];
+  let under = incidents[0].id;
+  viewer.scene.pick = (pos, w, h) => { picks.push({ x: pos.x, y: pos.y, w, h }); return under ? { id: { properties: { ukmtoId: { getValue: () => under } } } } : undefined; };
+  let cfg = null;
+  const calls = [];
+  const layer = createUkmtoIncidents({
+    viewer, documentRef: doc, translate: tSk, lang: 'sk', now: () => NOW, fetchImpl: async () => payload(),
+    createHoverTip: (o) => { cfg = o; return { el: {}, install() { calls.push('install'); }, hide() { calls.push('hide'); }, destroy() { calls.push('destroy'); } }; },
+  });
+  assert.equal(cfg.className, 'oko-ukmto-tip');
+  assert.equal(cfg.isActive(), false, 'bez scény sa nehľadá');
+  await layer.setActive(true);
+  assert.ok(calls.includes('install'), 'myš sa začne počúvať až pri scéne');
+  assert.equal(cfg.isActive(), true);
+  const hit = cfg.resolve({ x: 640.4, y: 360.2 });
+  assert.match(hit.text, /^UKMTO 149-26 · útok · /);
+  assert.equal(hit.accent, ukmtoColour('attack'));
+  assert.deepEqual(picks.at(-1), { x: 640.4, y: 360.2, w: 8, h: 8 }, 'hľadá sa presne pod kurzorom, v okne 8 px');
+  under = null;
+  assert.equal(cfg.resolve({ x: 10, y: 10 }), null, 'mimo bodu žiadna bublina');
+  under = 'cudzí-objekt';
+  assert.equal(cfg.resolve({ x: 10, y: 10 }), null, 'objekt inej vrstvy žiadna bublina');
+  calls.length = 0;
+  await layer.hide();
+  assert.equal(cfg.isActive(), false, 'pohľad na planétu');
+  assert.ok(calls.includes('hide'), 'schovaná vrstva bublinu zhasne');
+  layer.destroy();
+  assert.ok(calls.includes('destroy'));
+});

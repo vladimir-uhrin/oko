@@ -115,3 +115,38 @@ test('texty vrstvy a legendy v oboch jazykoch', () => {
   assert.match(SK_STRINGS['mideast.air.note'], /nie zákaz/);
   assert.match(EN_STRINGS['mideast.air.source'], /VATSpy.*CC BY-SA 4\.0/);
 });
+
+test('hover zapojenie: plocha FIR pod kurzorom → bulletin s farbou podľa výšok; vypnutá vrstva nehľadá', async () => {
+  const { viewer, doc } = fakeViewer();
+  const picks = [];
+  let under = { nid: '143899', fir: 'OBBB' };
+  viewer.scene.pick = (pos, w, h) => {
+    picks.push({ x: pos.x, y: pos.y, w, h });
+    return under ? { id: { properties: { czibNid: { getValue: () => under.nid }, firCode: { getValue: () => under.fir } } } } : undefined;
+  };
+  let cfg = null;
+  const calls = [];
+  const layer = createAirspaceAdvisory({
+    viewer, documentRef: doc, translate, fetchImpl: async () => payload, lang: 'sk',
+    createHoverTip: (o) => { cfg = o; return { el: {}, install() { calls.push('install'); }, hide() { calls.push('hide'); }, destroy() { calls.push('destroy'); } }; },
+  });
+  assert.equal(cfg.className, 'oko-air-tip');
+  assert.equal(cfg.isActive(), false, 'vrstva je predvolene vypnutá');
+  await layer.setEnabled(true);
+  assert.ok(calls.includes('install'));
+  assert.equal(cfg.isActive(), true);
+  const hit = cfg.resolve({ x: 512, y: 300 });
+  assert.match(hit.text, /^CZIB-2026-07R3 · FIR OBBB · /);
+  assert.equal(hit.accent, AIRSPACE_COLOR_ALL, 'všetky výšky = červená');
+  assert.deepEqual(picks.at(-1), { x: 512, y: 300, w: 6, h: 6 });
+  under = { nid: '20582', fir: 'HLLL' };
+  assert.equal(cfg.resolve({ x: 1, y: 1 }).accent, AIRSPACE_COLOR_BELOW, 'pod letovou hladinou = jantárová');
+  under = null;
+  assert.equal(cfg.resolve({ x: 1, y: 1 }), null);
+  calls.length = 0;
+  await layer.setEnabled(false);
+  assert.equal(cfg.isActive(), false);
+  assert.ok(calls.includes('hide'), 'vypnutie bublinu zhasne');
+  layer.destroy();
+  assert.ok(calls.includes('destroy'));
+});
