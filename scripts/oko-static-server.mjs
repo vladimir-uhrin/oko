@@ -134,7 +134,7 @@ const server = http.createServer((req, res) => {
       'Content-Length': String(stat.size),
       ETag: etag,
       'Cache-Control': cacheControlFor(pathname, ext, req.url || ''),
-      ...(pathname === '/account.html' ? {
+      ...(pathname === '/account.html' || pathname === '/admin.html' ? {
         'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'",
       } : {}),

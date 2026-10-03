@@ -8,6 +8,7 @@ import { FOLLOW_MAX, sanitizeFollow, validFollowKey } from '../follows.js';
 import {
   OAUTH_STATE_TTL_MS, authorizeUrl, createOAuthStateStore, fetchOAuthIdentity, safeReturnPath, withQueryParam,
 } from './oauth.js';
+import { createAdminRoutes } from './admin.js';
 
 export const SESSION_TTL_MS = 7 * 86400_000;
 export const SESSION_IDLE_MS = 86400_000;
@@ -108,8 +109,9 @@ async function readJson(req) {
 /** Framework-free controllers plus reusable authentication / CSRF middleware. */
 export function createAuthService({ store, origins = [], trustProxy = false, now = Date.now,
   passwords = { hash: hashPassword, verify: verifyPassword }, mailer = unavailableMailer,
-  oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args) }) {
+  oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args), adminSources = {} }) {
   let lastPrune = 0;
+  const handleAdmin = createAdminRoutes({ store, now, idleMs: SESSION_IDLE_MS, sources: adminSources });
   const pendingRecovery = new Set();
   const oauthStates = createOAuthStateStore({ now });
   const mailConfigured = mailer.configured === true && typeof mailer.send === 'function' && Boolean(mailer.publicUrl);
@@ -307,6 +309,7 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
           return { marker: `${providerId}-linked` };
         }
         if (existing) {
+          if (store.userById(existing.user_id)?.disabled_at) throw fail('account_disabled', 403);
           store.recordLogin(existing.user_id, now());
           store.event(existing.user_id, `login_${identity.provider}`, now());
           rotate(ctx, existing.user_id);
@@ -343,8 +346,13 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
   async function middleware(req, res, next) {
     const requestedPath = (req.url || '').split('?')[0];
     const pathname = Object.hasOwn(ROUTE_ALIASES, requestedPath) ? ROUTE_ALIASES[requestedPath] : requestedPath;
-    if (!(pathname === '/api/account' || pathname.startsWith('/api/account/') || pathname === '/api/auth' || pathname.startsWith('/api/auth/'))) return next();
+    const adminRoute = pathname === '/api/admin' || pathname.startsWith('/api/admin/');
+    if (!(adminRoute || pathname === '/api/account' || pathname.startsWith('/api/account/') || pathname === '/api/auth' || pathname.startsWith('/api/auth/'))) return next();
     try {
+      if (adminRoute) {
+        const ctx = context(req, res, { mutation: !['GET', 'HEAD'].includes(req.method) });
+        return await handleAdmin(pathname, req, res, ctx, { json, readJson, fail, fields, active, rate });
+      }
       const oauthRoute = /^\/api\/auth\/oauth\/(google|github)\/(start|callback)$/.exec(pathname);
       if (oauthRoute) {
         if (req.method !== 'GET') { res.setHeader('Allow', 'GET'); throw fail('method_not_allowed', 405); }
@@ -581,6 +589,8 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       } else {
         const user = store.userByEmail(email);
         if (!await passwords.verify(body.password, user?.password_hash)) throw fail('invalid_credentials', 401);
+        // Až po overení hesla: zablokovanie neprezradí nikomu, kto heslo nepozná.
+        if (user.disabled_at) throw fail('account_disabled', 403);
         result = store.transaction(() => {
           active(ctx); unchanged(user);
           store.recordLogin(user.id, now());

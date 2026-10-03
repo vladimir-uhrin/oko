@@ -10732,7 +10732,7 @@ export default defineConfig(({ mode }) => {
   let cesiumVersion = '';
   try { cesiumVersion = JSON.parse(fs.readFileSync(path.join(__dirname, 'node_modules', 'cesium', 'package.json'), 'utf8')).version || ''; } catch { cesiumVersion = ''; }
   cesiumGlobe.transformIndexHtml = function (html, context) {
-    if (context.path === '/account.html') return [];
+    if (context.path === '/account.html' || context.path === '/admin.html') return [];
     return versionedDeferredCesiumTags(cesiumHtml.call(this, html, context), cesiumVersion);
   };
   return {
@@ -10814,7 +10814,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.CESIUM_ION_TOKEN': JSON.stringify(env.CESIUM_ION_TOKEN),
     },
     build: {
-      rollupOptions: { input: { globe: path.resolve(__dirname, 'index.html'), account: path.resolve(__dirname, 'account.html') } },
+      rollupOptions: { input: { globe: path.resolve(__dirname, 'index.html'), account: path.resolve(__dirname, 'account.html'), admin: path.resolve(__dirname, 'admin.html') } },
       // The Cesium engine bundle is inherently large; raise the warning ceiling
       // so the build log isn't dominated by an expected chunk-size notice.
       chunkSizeWarningLimit: 1500,

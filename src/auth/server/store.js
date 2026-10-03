@@ -46,6 +46,10 @@ export function openAuthStore(filename) {
       }
     }
     if (version < 5) db.exec('ALTER TABLE users ADD COLUMN photo_version TEXT');
+    // Zablokovanie účtu adminom (2026-10-03): aditívny stĺpec bez zvýšenia user_version.
+    if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'disabled_at')) {
+      db.exec('ALTER TABLE users ADD COLUMN disabled_at INTEGER');
+    }
     db.exec(`
       CREATE TABLE IF NOT EXISTS profile_photos (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -89,6 +93,13 @@ export function openAuthStore(filename) {
         PRIMARY KEY (provider, subject),
         UNIQUE (user_id, provider)
       );
+      -- Admin panel (2026-10-03): záznam zásahov vlastníka. Aditívna tabuľka bez zvýšenia
+      -- user_version; target_id nemá cudzí kľúč, záznam prežije zmazanie účtu.
+      CREATE TABLE IF NOT EXISTS admin_audit (
+        id TEXT PRIMARY KEY, actor_id TEXT, action TEXT NOT NULL, target_id TEXT,
+        detail TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS admin_audit_time ON admin_audit(created_at);
       PRAGMA user_version = 5; COMMIT;
     `);
   } catch (error) {
@@ -154,7 +165,7 @@ export function openAuthStore(filename) {
       return db.prepare(`SELECT s.*, u.id, u.email, u.display_name, u.role, u.bio, u.avatar, u.avatar_color,
         u.last_login_at, u.password_changed_at, u.email_verified, u.photo_version, u.created_at AS user_created_at
         FROM sessions s LEFT JOIN users u ON u.id = s.user_id
-        WHERE s.token_hash = ? AND s.expires_at > ? AND s.last_seen > ?`).get(hash, now, now - idleMs);
+        WHERE s.token_hash = ? AND s.expires_at > ? AND s.last_seen > ? AND u.disabled_at IS NULL`).get(hash, now, now - idleMs);
     },
     touchSession(hash, now) {
       db.prepare('UPDATE sessions SET last_seen = ? WHERE token_hash = ? AND last_seen < ?').run(now, hash, now - 60_000);
@@ -294,6 +305,69 @@ export function openAuthStore(filename) {
         return 0;
       });
     },
+    // ── Admin panel (2026-10-03) — volá ho iba /api/admin/* po kontrole roly owner. ──
+    adminStats(now, idleMs) {
+      const count = (sql, ...args) => db.prepare(sql).get(...args).n;
+      return {
+        users: count('SELECT COUNT(*) AS n FROM users'),
+        disabled: count('SELECT COUNT(*) AS n FROM users WHERE disabled_at IS NOT NULL'),
+        verified: count('SELECT COUNT(*) AS n FROM users WHERE email_verified = 1'),
+        new24h: count('SELECT COUNT(*) AS n FROM users WHERE created_at > ?', now - 86400_000),
+        new7d: count('SELECT COUNT(*) AS n FROM users WHERE created_at > ?', now - 7 * 86400_000),
+        activeSessions: count(`SELECT COUNT(*) AS n FROM sessions WHERE user_id IS NOT NULL
+          AND expires_at > ? AND last_seen > ?`, now, now - idleMs),
+        activeUsers: count(`SELECT COUNT(DISTINCT user_id) AS n FROM sessions WHERE user_id IS NOT NULL
+          AND expires_at > ? AND last_seen > ?`, now, now - idleMs),
+        logins24h: count("SELECT COUNT(*) AS n FROM security_events WHERE type LIKE 'login%' AND created_at > ?", now - 86400_000),
+        follows: count('SELECT COUNT(*) AS n FROM followed_flights'),
+      };
+    },
+    adminUsers(query, limit, offset, now, idleMs) {
+      const like = `%${String(query).replace(/[\\%_]/g, char => `\\${char}`)}%`;
+      const where = "WHERE u.email LIKE ? ESCAPE '\\' OR u.display_name LIKE ? ESCAPE '\\'";
+      const total = db.prepare(`SELECT COUNT(*) AS n FROM users u ${where}`).get(like, like).n;
+      const users = db.prepare(`SELECT u.id, u.email, u.display_name AS displayName, u.role, u.created_at AS createdAt,
+        u.last_login_at AS lastLoginAt, u.email_verified AS emailVerified, u.disabled_at AS disabledAt,
+        (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id AND s.expires_at > ? AND s.last_seen > ?) AS sessions,
+        (SELECT group_concat(provider) FROM oauth_identities o WHERE o.user_id = u.id) AS providers
+        FROM users u ${where} ORDER BY u.created_at DESC, u.rowid DESC LIMIT ? OFFSET ?`)
+        .all(now, now - idleMs, like, like, limit, offset)
+        .map(user => ({ ...user, emailVerified: Boolean(user.emailVerified), providers: user.providers ? user.providers.split(',') : [] }));
+      return { total, users };
+    },
+    adminUser(id, now, idleMs) {
+      const user = db.prepare(`SELECT id, email, display_name AS displayName, role, bio, created_at AS createdAt,
+        last_login_at AS lastLoginAt, password_changed_at AS passwordChangedAt, email_verified AS emailVerified,
+        disabled_at AS disabledAt, password_hash = '!oauth' AS oauthOnly FROM users WHERE id = ?`).get(id);
+      if (!user) return null;
+      const sessions = db.prepare(`SELECT label, created_at AS createdAt, last_seen AS lastSeen, expires_at AS expiresAt
+        FROM sessions WHERE user_id = ? AND expires_at > ? AND last_seen > ? ORDER BY last_seen DESC`).all(id, now, now - idleMs);
+      const events = db.prepare(`SELECT type, created_at AS createdAt FROM security_events WHERE user_id = ?
+        ORDER BY created_at DESC, rowid DESC LIMIT 30`).all(id);
+      const follows = db.prepare('SELECT COUNT(*) AS n FROM followed_flights WHERE user_id = ?').get(id).n;
+      return { ...user, emailVerified: Boolean(user.emailVerified), oauthOnly: Boolean(user.oauthOnly),
+        identities: this.identities(id), sessions, events, follows };
+    },
+    setDisabled(id, at) {
+      return transaction(() => {
+        const changed = db.prepare('UPDATE users SET disabled_at = ? WHERE id = ?').run(at, id).changes;
+        if (changed && at) {
+          db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+          db.prepare('DELETE FROM account_token_deliveries WHERE user_id = ?').run(id);
+          db.prepare('DELETE FROM account_tokens WHERE user_id = ?').run(id);
+        }
+        return changed;
+      });
+    },
+    /** Zmaže účet; ON DELETE CASCADE odstráni relácie, fotku, tokeny, udalosti, lety, identity. */
+    deleteUser: id => db.prepare('DELETE FROM users WHERE id = ?').run(id).changes,
+    audit(actorId, action, targetId, detail, now) {
+      db.prepare('INSERT INTO admin_audit (id, actor_id, action, target_id, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(randomUUID(), actorId, action, targetId, String(detail || '').slice(0, 200), now);
+    },
+    auditLog: limit => db.prepare(`SELECT a.action, a.target_id AS targetId, a.detail, a.created_at AS createdAt,
+      actor.email AS actorEmail FROM admin_audit a LEFT JOIN users actor ON actor.id = a.actor_id
+      ORDER BY a.created_at DESC, a.rowid DESC LIMIT ?`).all(limit),
     prune(now, idleMs) {
       db.prepare('DELETE FROM sessions WHERE expires_at <= ? OR last_seen <= ?').run(now, now - idleMs);
       db.prepare('DELETE FROM auth_limits WHERE expires_at <= ?').run(now);

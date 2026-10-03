@@ -3,6 +3,7 @@ import { openAuthStore } from './store.js';
 import { createAuthService, parseOrigins } from './http.js';
 import { createWebhookMailer } from './mail.js';
 import { oauthProvidersFromEnv } from './oauth.js';
+import { createAdminSources } from './adminSources.js';
 
 export const AUTH_FILE_DENY = ['**/.auth-data/**', '**/*.sqlite*', '**/*.db', '**/*.db-*'];
 
@@ -21,7 +22,7 @@ export function authPlugin(env = process.env) {
       let decoded;
       try { decoded = decodeURIComponent((req.url || '').split('?')[0]).replaceAll('\\', '/'); }
       catch { res.statusCode = 400; res.end(); return; }
-      if (decoded === '/account.html') {
+      if (decoded === '/account.html' || decoded === '/admin.html') {
         // Vite's HTML middleware sets its own Cache-Control later. Keep the
         // standalone token-confirmation page's protections on the final response.
         const locked = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
@@ -45,13 +46,16 @@ export function authPlugin(env = process.env) {
         || decoded.startsWith('/src/auth/server/')) {
         res.statusCode = 403; res.end('Forbidden'); return;
       }
-      if (!(decoded === '/api/account' || decoded.startsWith('/api/account/') || decoded === '/api/auth' || decoded.startsWith('/api/auth/'))) return next();
+      if (!(decoded === '/api/account' || decoded.startsWith('/api/account/') || decoded === '/api/auth' || decoded.startsWith('/api/auth/')
+        || decoded === '/api/admin' || decoded.startsWith('/api/admin/'))) return next();
       // Do not let encoded aliases reach a later middleware without the guard.
       if (decoded !== (req.url || '').split('?')[0]) { res.statusCode = 400; res.end(); return; }
       try {
         if (!auth) {
           store = openAuthStore(filename);
-          auth = createAuthService({ store, origins, mailer, oauthProviders, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
+          // Admin panel (2026-10-03): stav feedov sa číta z /status endpointov tohto istého servera.
+          const adminSources = createAdminSources({ root, dbFile: filename, port: () => server.httpServer?.address()?.port ?? null });
+          auth = createAuthService({ store, origins, mailer, oauthProviders, adminSources, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
         }
         void auth.middleware(req, res, next);
       } catch {

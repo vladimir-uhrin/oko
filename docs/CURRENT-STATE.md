@@ -1,5 +1,21 @@
 # God's Eye View Current State
 
+### OKO admin panel (2026-10-03)
+
+Standalone `/admin.html` (no Cesium, same CSP/no-store/DENY headers as
+`/account.html`) backed by `/api/admin/*` in the auth service
+(`src/auth/server/admin.js`). **Only the `owner` role gets in; everyone else,
+signed in or not, gets 404.** Sections: overview (account counts, server
+uptime/commit/memory/DB and cache size), feeds (reads the existing proxy
+`/status`/`health` endpoints over loopback, 30 s cache, key fields redacted —
+no proxy code changed), users (search, detail, sign out all sessions, block /
+unblock, delete with e-mail confirmation), audit and the tail of
+`oko-server.log`. The owner cannot act on itself or another owner. Blocking
+adds a nullable `users.disabled_at` column (additive, `user_version` stays 5),
+drops the user's sessions/tokens and makes login answer `account_disabled`
+only after a correct password. Admin actions go to the additive `admin_audit`
+table and to the affected user's own activity list. Details: `docs/ADMIN.md`.
+
 ### OKO optional account center and profiles (2026-09-26)
 
 `src/auth/` adds a Vanilla JS account center with a visible avatar/name/signed-in

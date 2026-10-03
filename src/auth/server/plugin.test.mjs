@@ -41,6 +41,17 @@ test('actual Vite plugin leaves public routes open and denies DB/WAL/raw/file-sy
     assert.equal(standalone.headers.get('referrer-policy'), 'no-referrer');
     assert.equal(standalone.headers.get('x-frame-options'), 'DENY');
     assert.match(standalone.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    // Admin panel (2026-10-03): stránka s rovnakými ochranami, API neprihlásenému neexistuje.
+    const adminPage = await fetch(base + '/admin.html');
+    assert.equal(adminPage.status, 200);
+    assert.equal(adminPage.headers.get('cache-control'), 'no-store');
+    assert.equal(adminPage.headers.get('x-frame-options'), 'DENY');
+    assert.doesNotMatch(await adminPage.text(), /cesium/i);
+    for (const route of ['/api/admin/overview', '/api/admin/feeds', '/api/admin/users']) {
+      assert.equal((await fetch(base + route)).status, 404, route);
+    }
+    assert.ok([400, 403].includes((await fetch(base + '/src/auth/server/admin.js')).status));
+    assert.ok([400, 403].includes((await fetch(base + '/api/%61dmin/overview')).status));
     for (const target of ['/.auth-data/accounts.sqlite', '/.auth-data/accounts.sqlite-wal?raw',
       '/@fs/' + database.replaceAll('\\', '/'), '/src/auth/server/store.js?raw', '/%2eauth-data/accounts.sqlite',
       '/api/%61ccount', '/api/%61ccount/security', '/api/account/%65xport']) {
