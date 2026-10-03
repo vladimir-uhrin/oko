@@ -192,6 +192,9 @@ function liveDomain(cx, y, size) {
     + `<text x="${f1(x0 + pillW + 18)}" y="${f1(y + size * 0.06)}" font-family="${MONO}" font-size="${size}" font-weight="600" letter-spacing="${f1(size * 0.1)}" fill="${ACCENT}" ${shadow}>${VIDEO_BRAND.domain}</text>`;
 }
 
+/** Stavebné prvky značky a písma pre ďalšie videá v štýle OKO (frontWeekHud.js) — tá istá reč ako tu. */
+export const VIDEO_SVG = Object.freeze({ MONO, SANS, ACCENT, TEXT, DIM, AMBER, shadow, esc, f1, wrap, wordmark, logoAt, creditLine, liveDomain });
+
 /**
  * SVG popisov jednej snímky.
  * @param {object} event

@@ -358,11 +358,15 @@ export function fitNarration(event, lines, durations, opts = {}) {
 /**
  * Porovnanie prepisu rozpoznávania reči s titulkom vety (kontrola výslovnosti bez počúvania):
  * slová po normalizácii (malé písmená, bez interpunkcie, čísla ako číslice, „21 tisíc" = 21000,
- * „5." = „piatej", stupne) sa musia zhodovať; vracia `{ok, missing, extra}`. Pure.
+ * „5." = „piatej", stupne, „km²" = „kilometrov štvorcových" = „km štvorcových") sa musia zhodovať; vracia `{ok, missing, extra}`.
+ * `names`: vlastné mená v titulku (veľké písmeno mimo začiatku vety — „Pokrovsku", „DeepState") smie
+ * rozpoznávač zapísať inak („Pokrovsko", „Deep State"): stačí podobnosť (vzdialenosť úprav do tretiny dĺžky),
+ * ostatné slová a čísla ostávajú prísne. Pure.
  */
-export function narrationHeardMatches(caption, heard) {
+export function narrationHeardMatches(caption, heard, { names = false } = {}) {
   const norm = (s) => String(s || '').toLowerCase()
-    .replace(/ /g, ' ').replace(/°c?/g, ' stupňov ').replace(/(\d)\s*km(?![\p{L}])/gu, '$1 kilometrov').replace(/(\d)[\s-]*(?:tisíc|tis\.)/g, (_, d) => `${d}000`)
+    .replace(/ /g, ' ').replace(/(\d)\s*km\s*[²2](?![\p{L}\d])/gu, '$1 kmq').replace(/kilomet\p{L}*\s+štvorcov\p{L}*/gu, 'kmq').replace(/(\d)\s*km\s+štvorcov\p{L}*/gu, '$1 kmq')
+    .replace(/°c?/g, ' stupňov ').replace(/(\d)\s*km(?![\p{L}])/gu, '$1 kilometrov').replace(/(\d)[\s-]*(?:tisíc|tis\.)/g, (_, d) => `${d}000`)
     .replace(/(\d)\s+(?=\d{3}\b)/g, '$1').replace(/\b(\d{1,2})\.\s*(?=hodin)/g, (_, h) => `${ORDINAL_F[Number(h)] || h} `)
     .replace(/[.,;:!?„“"'()–—-]/g, ' ').replace(/\s+/g, ' ').trim();
   // Prvé písmeno slova bez dĺžňa (rozpoznávač píše „Udaje"); koncovky ostávajú prísne (katastrofé ≠ katastrofe).
@@ -371,11 +375,45 @@ export function narrationHeardMatches(caption, heard) {
   const b = words(heard).map((w) => HEARD_ALIASES[w] || w);
   const bag = new Map();
   for (const w of b) bag.set(w, (bag.get(w) || 0) + 1);
-  const missing = [];
+  let missing = [];
   for (const w of a) {
     if (bag.get(w)) bag.set(w, bag.get(w) - 1); else missing.push(w);
   }
-  const extra = [...bag.entries()].filter(([, n]) => n > 0).map(([w]) => w);
+  let extra = [...bag.entries()].flatMap(([w, n]) => Array.from({ length: Math.max(0, n) }, () => w));
+  if (names && missing.length && extra.length) {
+    // Vlastné mená titulku: veľké začiatočné písmeno a nie prvé slovo vety.
+    const tokens = String(caption || '').split(/\s+/).filter(Boolean);
+    const nameSet = new Set();
+    tokens.forEach((tok, k) => {
+      const clean = tok.replace(/^[„“"'(]+/, '');
+      const starts = k === 0 || /[.!?:]$/.test(tokens[k - 1]);
+      if (!starts && /^\p{Lu}/u.test(clean)) for (const w of words(clean)) nameSet.add(w);
+    });
+    const plain = (w) => w.normalize('NFD').replace(/\p{M}/gu, '');
+    const dist = (x, y) => {
+      const row = Array.from({ length: y.length + 1 }, (_, k) => k);
+      for (let p = 1; p <= x.length; p += 1) {
+        let prev = row[0]; row[0] = p;
+        for (let q = 1; q <= y.length; q += 1) { const tmp = row[q]; row[q] = Math.min(row[q] + 1, row[q - 1] + 1, prev + (x[p - 1] === y[q - 1] ? 0 : 1)); prev = tmp; }
+      }
+      return row[y.length];
+    };
+    const left = [];
+    for (const m of missing) {
+      if (!nameSet.has(m)) { left.push(m); continue; }
+      const target = plain(m);
+      const limit = Math.max(2, Math.floor(target.length / 3));
+      // Jedno počuté slovo, alebo dve spojené („Deep" + „State").
+      let hit = extra.findIndex((e) => dist(target, plain(e)) <= limit);
+      if (hit >= 0) { extra.splice(hit, 1); continue; }
+      let pair = null;
+      for (let p = 0; p < extra.length && !pair; p += 1) for (let q = 0; q < extra.length && !pair; q += 1) if (p !== q && dist(target, plain(extra[p] + extra[q])) <= limit) pair = [p, q];
+      if (pair) { extra = extra.filter((_, k) => !pair.includes(k)); continue; }
+      left.push(m);
+    }
+    missing = left;
+  }
+  extra = [...new Set(extra)];
   // Rozpoznávač niekedy spojí alebo rozdelí slová („Obrat o" → „Obrato", „FZ1073" → „FZ 1073") —
   // bez medzier sa text musí zhodovať úplne; iné písmeno (katastrofé) neprejde.
   const spaceless = a.join('') === b.join('');

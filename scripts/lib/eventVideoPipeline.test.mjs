@@ -135,6 +135,30 @@ test('bez služby: chýbajúca nahrávka = chyba NO_VOICE s vetou; nahrávky z p
   await assert.rejects(run([line('m2', 'Nová veta.')], null), (e) => e.code === 'NO_VOICE' && e.line === 'm2' && /Nová veta/.test(e.message));
 });
 
+test('nahrávka, ktorá predtým neprešla, sa pred zahodením posúdi znova: keď uložený prepis dnes sedí, ostáva (aj bez služby)', async (t) => {
+  const { cache, run } = setup(t);
+  const spoken = 'Pri Lymane sa front pohol opačným smerom: Ukrajina tu získala späť tridsaťšesť kilometrov štvorcových.';
+  const caption = 'Pri Lymane sa front pohol opačným smerom: Ukrajina tu získala späť 36 km².';
+  // Stav po behu so staršími pravidlami: prepis rozpoznávača („36 km štvorcových", meno po svojom) vtedy neprešiel.
+  cache.put('own', spoken, Buffer.from([1]), { url: 'http://192.168.2.43:9110/x.wav', savedAt: new Date(T0).toISOString(), heard: 'Pri Limane sa front pohol opačným smerom. Ukrajina tu získala späť 36 km štvorcových.', heardOk: false });
+  const voice = fakeVoice({});
+  const lines = [{ id: 'lyman-a', spoken, caption, names: true }];
+  const r = await run(lines, voice);
+  assert.deepEqual(r.review, []);
+  assert.equal(voice.calls.readAloud.length, 0, 'nahrávka sa nezahodí');
+  assert.equal(voice.calls.transcribe.length, 0, 'ani sa neprepisuje znova');
+  assert.equal(cache.get('own', spoken).meta.heardOk, true);
+  // Bez tolerancie mien (veta ju nežiada) prepis nesedí ani dnes → nová nahrávka.
+  cache.update('own', spoken, { heardOk: false });
+  const strict = await run([{ id: 'lyman-a', spoken, caption }], fakeVoice({ [spoken]: ['Pri Lymane sa front pohol opačným smerom. Ukrajina tu získala späť 36 km štvorcových.'] }));
+  assert.deepEqual(strict.review, []);
+  assert.equal(cache.get('own', spoken).meta.heard, 'Pri Lymane sa front pohol opačným smerom. Ukrajina tu získala späť 36 km štvorcových.');
+  // Bez služby: uložený prepis, ktorý nesedí ani dnes, ide ďalej na vypočutie.
+  cache.update('own', spoken, { heardOk: false, heard: 'Pri Lymane sa front pohol opačným smerom. Ukrajina tu získala späť 35 km štvorcových.' });
+  const offline = await run(lines, null);
+  assert.equal(offline.review.length, 1);
+});
+
 test('zhrnutie zlyhania nahrávania: prvý riadok s chybou (Chrome v systémovom profile služby) + posledný riadok, bez zásobníka', async () => {
   const { captureFailureSummary } = await import('./eventVideoPipeline.mjs');
   const out = [

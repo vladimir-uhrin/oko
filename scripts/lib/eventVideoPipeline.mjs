@@ -121,6 +121,14 @@ export async function prepareVoice({ lines, voice = null, cache, measure, fetchI
     while (true) {
       if (!hit) hit = await record(line, swaps + 1);
       if (line.approved || hit.meta.approved || hit.meta.heardOk === true) break;
+      if (hit.meta.heardOk === false && typeof hit.meta.heard === 'string') {
+        // Zvuk je ten istý, pravidlá porovnania sa však mohli zmeniť (nový zvyk rozpoznávača, napr. „km štvorcových")
+        // — uložený prepis sa posúdi znova, kým sa nahrávka zahodí.
+        if (narrationHeardMatches(line.caption, hit.meta.heard, { names: line.names === true }).ok) {
+          hit.meta = cache.update(o.voice, line.spoken, { heardOk: true, checkedAt: new Date(now()).toISOString() });
+          break;
+        }
+      }
       if (!voice) {
         // bez služby sa kontrola nedá urobiť — nahrávka z pamäte sa použije
         if (hit.meta.heardOk === false) review.push({ line: line.id, spoken: line.spoken, heard: hit.meta.heard ?? null });
@@ -134,7 +142,7 @@ export async function prepareVoice({ lines, voice = null, cache, measure, fetchI
       }
       onProgress('asr', { line: line.id, attempt: swaps + 1 });
       const heard = await voice.transcribe(hit.meta.url, { lang: o.lang });
-      const check = narrationHeardMatches(line.caption, heard);
+      const check = narrationHeardMatches(line.caption, heard, { names: line.names === true });
       hit.meta = cache.update(o.voice, line.spoken, { heard, heardOk: check.ok, checkedAt: new Date(now()).toISOString() });
       if (check.ok) break;
       if (swaps >= o.asrRetries) { review.push({ line: line.id, spoken: line.spoken, heard, missing: check.missing, extra: check.extra }); break; }

@@ -271,6 +271,32 @@ test('kontrola výslovnosti z prepisu: zvyklosti rozpoznávača prejdú (čísla
   assert.equal(fixedLines().every((l) => l.approved), true);
 });
 
+test('kontrola výslovnosti: km² = kilometrov štvorcových; vlastné mená smie rozpoznávač zapísať inak len na požiadanie, čísla nikdy', () => {
+  const check = (c, h, opts) => narrationHeardMatches(c, h, opts);
+  // Plocha: titulok s „km²", hlas „kilometrov štvorcových" (aj „kilometre štvorcové"); iné číslo neprejde.
+  assert.equal(check(`Ukrajina získala späť 36${NB}km².`, 'Ukrajina získala späť 36 kilometrov štvorcových.').ok, true);
+  assert.equal(check(`Ruská kontrola sa tu rozšírila o 3${NB}km².`, 'Ruská kontrola sa tu rozšírila o tri kilometre štvorcové.').ok, true);
+  // Rozpoznávač píše aj „36 km štvorcových" (prepis hlasu vlastníka, 2026-10-03) — s menom zapísaným po svojom.
+  assert.equal(check(`Pri Lymane sa front pohol opačným smerom: Ukrajina tu získala späť 36${NB}km².`, 'Pri Limane sa front pohol opačným smerom. Ukrajina tu získala späť 36 km štvorcových.', { names: true }).ok, true);
+  assert.equal(check(`Ukrajina získala späť 36${NB}km².`, 'Ukrajina získala späť 35 kilometrov štvorcových.').ok, false);
+  assert.equal(check(`Ukrajina získala späť 36${NB}km².`, 'Ukrajina získala späť 36 kilometrov.').ok, false, 'kilometer nie je kilometer štvorcový');
+  // Vlastné mená: bez `names` prísne, s `names` stačí podobnosť (aj dve slová spojené do mena).
+  const pokrovsk = ['Najviac útokov je pri Pokrovsku: 169 za týždeň.', 'Najviac útokov je pri Pokrovsko, 169 za týždeň.'];
+  assert.equal(check(...pokrovsk).ok, false);
+  assert.equal(check(...pokrovsk, { names: true }).ok, true);
+  const deep = ['Ukazuje to porovnanie dvoch snímok mapy DeepState s odstupom siedmich dní.', 'Ukazuje to porovnanie dvoch snímok mapy Deep State s odstupom siedmich dní.'];
+  assert.equal(check(...deep, { names: true }).ok, true);
+  assert.equal(check(deep[0], 'Ukazuje to porovnanie dvoch snímok mapy Dipstate s odstupom siedmich dní.', { names: true }).ok, true);
+  assert.equal(check(deep[0], 'Ukazuje to porovnanie dvoch snímok mapy Dípstejt s odstupom siedmich dní.', { names: true }).ok, false, 'príliš vzdialený zápis ide na vypočutie');
+  // Tolerancia mien nie je tolerancia čísel ani obyčajných slov.
+  assert.equal(check(pokrovsk[0], 'Najviac útokov je pri Pokrovsku, 168 za týždeň.', { names: true }).ok, false);
+  assert.equal(check(pokrovsk[0], 'Najviac útokov bolo pri Pokrovsku, 169 za týždeň.', { names: true }).ok, false);
+  // Úplne iné meno neprejde ani s toleranciou.
+  assert.equal(check('Pri Lymane sa front pohol opačným smerom.', 'Pri Kupiansku sa front pohol opačným smerom.', { names: true }).ok, false);
+  // Prvé slovo vety nie je „meno" len preto, že má veľké písmeno.
+  assert.equal(check('Útokov tu bolo 56.', 'Úrokov tu bolo 56.', { names: true }).ok, false);
+});
+
 test('číslice vo vete vlastníka: hlas dostane slová, titulok ostáva s číslicami; neistý tvar sa vráti s radou; generované vety číslice nemajú nikdy', async () => {
   const { spokenDigits } = await import('./eventSpeech.js');
   const say = (t) => spokenDigits(t);
