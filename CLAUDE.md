@@ -81,6 +81,20 @@ než sa pustíš do zmien v `src/`.
    použitia. Slovenské kamerové zdroje väčšinou **nie sú** deklarované otvorené dáta —
    pred integráciou overíme ToS. Pozri skill `sk-data-source`.
 
+## Priorita: Štúdio sociálnych sietí (FB/IG)
+
+Ďalšia veľká práca po admin paneli: z admina vyrábať a zverejňovať posty, karusely
+a reels na Facebook a Instagram. Plán, fázy a obmedzenia sú v `docs/SOCIAL-PLAN.md`.
+
+**Nulový rozpočet** — portál zatiaľ nezarába. Všetko musí fungovať zadarmo
+(Meta Graph API, ffmpeg, šablónové texty, bezplatné mapové podklady). Platené
+doplnky (AI text, Google 3D podklad vo videu, hlas) sú predvolene vypnuté, majú
+strop v admine a zapínajú sa len po mojom výslovnom súhlase.
+
+OKO je pomocný spravodajský portál (pálčivé informácie z domova aj zo sveta),
+ktorý prevádzkujem **ako súkromná osoba na svojom osobnom profile**. Zákon
+č. 265/2022 Z. z. plán nemení — rozhodol som (2026-10-03). Neotváraj to znova.
+
 ## SK roadmapa
 
 Poradie je zámerné — začíname tým, čo overí, či má zmysel pokračovať.

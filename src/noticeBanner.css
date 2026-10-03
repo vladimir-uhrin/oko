@@ -1,0 +1,9 @@
+/* Oznam prevádzkovateľa (admin → Oznam), 2026-10-03. Nad mapou, mimo HUD. */
+.oko-notice { position: fixed; z-index: 10050; top: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: flex-start; gap: 10px;
+  max-width: min(640px, calc(100vw - 32px)); padding: 9px 10px 9px 14px; border-radius: 10px; border: 1px solid #00d4ff55;
+  background: #07121bf0; color: #dff6ff; font: 500 13px/1.45 Inter, system-ui, sans-serif; box-shadow: 0 10px 40px #000a; backdrop-filter: blur(8px); }
+.oko-notice[data-level="warn"] { border-color: #ffb84d88; color: #ffe6c2; background: #1d1407f0; }
+.oko-notice-text { flex: 1; overflow-wrap: anywhere; }
+.oko-notice-close { flex: none; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; }
+.oko-notice-close:hover { background: #ffffff14; }
+.oko-notice-close:focus-visible { outline: 2px solid #00d4ff; outline-offset: 1px; }

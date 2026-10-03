@@ -53,6 +53,8 @@ správcu hesiel; neposielaj výstup do verejných logov. Do DB sa ukladá iba sc
 hash. Existujúci e-mail ani existujúci owner sa neprepisuje; opakované spustenie
 skončí chybou. `owner@oko.test` je lokálny prihlasovací identifikátor, nie schránka.
 
+Vlastník má prístup do admin panelu `/admin.html` — pozri `docs/ADMIN.md`.
+
 Rolu `owner` prideľuje iba tento serverový postup. Verejná registrácia vždy
 vytvára `member`, úprava profilu rolu nemení. Vlastník vidí označenie v profile;
 rola zatiaľ neaktivuje platené funkcie a glóbus zostáva verejný. Migrácia DB v2

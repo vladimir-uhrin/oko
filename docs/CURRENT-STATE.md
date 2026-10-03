@@ -1,5 +1,41 @@
 # God's Eye View Current State
 
+### OKO admin panel (2026-10-03)
+
+Standalone `/admin.html` (no Cesium, same CSP/no-store/DENY headers as
+`/account.html`) backed by `/api/admin/*` in the auth service
+(`src/auth/server/admin.js`). **Only the `owner` role gets in; everyone else,
+signed in or not, gets 404.** Sections: overview (account counts, server
+uptime/commit/memory/DB and cache size), feeds (reads the existing proxy
+`/status`/`health` endpoints over loopback, 30 s cache, key fields redacted —
+no proxy code changed), users (search, detail, sign out all sessions, block /
+unblock, delete with e-mail confirmation), audit and the tail of
+`oko-server.log`. The owner cannot act on itself or another owner. Blocking
+adds a nullable `users.disabled_at` column (additive, `user_version` stays 5),
+drops the user's sessions/tokens and makes login answer `account_disabled`
+only after a correct password. Admin actions go to the additive `admin_audit`
+table and to the affected user's own activity list. Details: `docs/ADMIN.md`.
+
+Extension (same day): `adminPlugin` (`src/admin/server/`, `enforce: 'pre'`, before
+every proxy) keeps hourly per-source API stats, captures server `console.error/warn`
+and HTTP 5xx (secrets redacted), and serves `/api/telemetry/hit` (anonymous visits
+from `src/siteTelemetry.js`: daily aggregates only, no IP/UA stored, daily-salted
+visitor hash rolled up at midnight, DNT/GPC honoured) and `/api/notice`. Admin can
+**disable any data source** (503 `disabled_by_admin`; the globe shows a banner via
+`src/noticeBanner.js`), set **daily caps** on paid OpenAI/Google endpoints (429),
+publish a notice, back up both DBs and clear whitelisted cache folders. New tabs:
+Analytika, Prevádzka, Chyby, Náklady, Oznam, Údržba; feeds show 7-day availability.
+Data: `.auth-data/admin.sqlite`.
+
+Štúdio (same day, `src/admin/server/studio/`, plan in `docs/SOCIAL-PLAN.md`): FB/IG
+drafts from live data (quakes, launches) and from Udalosti (`POST /api/events/<id>/studio`
+-> `studio.importDraft`; the owner's 4:5 event video is padded to a 9:16 reel with
+ffmpeg instead of re-rendered), rendered reels with the owner's voice via
+ai-translators when `AI_TRANSLATORS_MCP_KEY` is set (Piper, then music-only fallback),
+scheduling, calendar, Meta Insights, and a weekly „Týždeň na fronte" run (Saturday
+7:00 when enabled; `scripts/make-front-week-video.mjs` against `EVENT_VIDEO_PAGE_URL`).
+Owner = DB role `owner` or `OKO_OWNER_EMAILS`, shared by admin and Udalosti.
+
 ### OKO optional account center and profiles (2026-09-26)
 
 `src/auth/` adds a Vanilla JS account center with a visible avatar/name/signed-in

@@ -114,6 +114,10 @@ export const AUTH_EN = {
   'auth.error.oauth_failed': 'The provider did not respond as expected. Please try again.',
   'auth.event.login_google': 'Signed in with Google', 'auth.event.login_github': 'Signed in with GitHub',
   'auth.event.registered_google': 'Account created with Google', 'auth.event.registered_github': 'Account created with GitHub',
+  // Admin panel (2026-10-03): zásahy vlastníka sú viditeľné aj v aktivite dotknutého účtu.
+  'auth.event.admin_sessions_revoked': 'Signed out by administrator', 'auth.event.account_disabled': 'Account blocked by administrator',
+  'auth.event.account_enabled': 'Account unblocked by administrator',
+  'auth.error.account_disabled': 'This account has been blocked. Contact the OKO operator.',
   'auth.event.google_linked': 'Google connected', 'auth.event.github_linked': 'GitHub connected',
 };
 export const AUTH_SK = {
@@ -228,5 +232,9 @@ export const AUTH_SK = {
   'auth.error.oauth_failed': 'Poskytovateľ neodpovedal podľa očakávania. Skúste to znova.',
   'auth.event.login_google': 'Prihlásenie cez Google', 'auth.event.login_github': 'Prihlásenie cez GitHub',
   'auth.event.registered_google': 'Vytvorenie účtu cez Google', 'auth.event.registered_github': 'Vytvorenie účtu cez GitHub',
+  // Admin panel (2026-10-03): zásahy vlastníka sú viditeľné aj v aktivite dotknutého účtu.
+  'auth.event.admin_sessions_revoked': 'Odhlásenie administrátorom', 'auth.event.account_disabled': 'Zablokovanie účtu administrátorom',
+  'auth.event.account_enabled': 'Odblokovanie účtu administrátorom',
+  'auth.error.account_disabled': 'Tento účet je zablokovaný. Kontaktujte prevádzkovateľa OKO.',
   'auth.event.google_linked': 'Pripojený Google', 'auth.event.github_linked': 'Pripojený GitHub',
 };
