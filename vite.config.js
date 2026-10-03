@@ -168,6 +168,8 @@ let _openskyToken = null;
 let _openskyTokenExpiry = 0;
 /** @type {Promise<string|null>|null} In-flight token refresh promise (coalesces concurrent callers). */
 let _openskyTokenPromise = null;
+/** Udalosti pod účtom vlastníka (2026-10-03): kontrola z authPlugin, nastaví sa v configu. */
+let _eventsOwnerCheck = null;
 /** @type {string|null} Cached upstream response body (JSON text). */
 let _openskyCacheBody = null;
 /** @type {number} HTTP status of the cached response. */
@@ -5811,6 +5813,9 @@ function flightHistoryProxy() {
         // Etapa 2: overenie správami — zoznam dôveryhodných médií (vlastník ho môže upraviť).
         trustedFile: path.join(__dirname, 'src', 'data', 'local_data', 'events', 'trusted-news.json'),
         isLocal: isDirectLocalRequest,
+        // Vlastník prihlásený účtom (OKO_OWNER_EMAILS) — súkromné časti aj mimo tohto počítača (2026-10-03).
+        // Vlastník prihlásený účtom (authPlugin.isOwnerRequest, nastavené v configu pred stavbou pluginov).
+        isOwner: _eventsOwnerCheck,
         // Etapa 2b: obrázok udalosti (sharp + mapové podklady z repa) a zverejnenie klikom vlastníka
         // ako trvalý odkaz /s/<id> v tom istom úložisku ako zdieľanie (retencia ho nemaže).
         renderCard: createEventCardRenderer({ dataDir: path.join(__dirname, 'src', 'data', 'local_data') }),
@@ -11088,6 +11093,9 @@ export default defineConfig(({ mode }) => {
   // commitu), proxy = oko-dev bez API pluginov s preposielaním /api a /s, full = všetko ako doteraz.
   const serverRole = resolveServerRole(process.env);
   const apiPlugins = runsApiPlugins(serverRole);
+  // Účet (authPlugin) aj kontrola vlastníka pre súkromné časti udalostí — jedna inštancia.
+  const accountAuth = apiPlugins ? authPlugin(env) : null;
+  _eventsOwnerCheck = accountAuth ? (req, res, opts) => accountAuth.isOwnerRequest(req, res, opts) : null;
   // Recovery/profile entry must not load the Cesium engine or map resources.
   const cesiumGlobe = cesium();
   const cesiumHtml = cesiumGlobe.transformIndexHtml;
@@ -11105,7 +11113,7 @@ export default defineConfig(({ mode }) => {
       originKeepAlivePlugin(),
       // V role proxy (oko-dev s OKO_API_UPSTREAM) sa API pluginy nespúšťajú: záznam histórie, strážca,
       // udalosti a governor kreditov OpenSky bežia len v službe oko-api; /api a /s idú cez server.proxy.
-      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), sharePlugin(), flightHistoryProxy(), authPlugin(env)] : []),
+      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), sharePlugin(), flightHistoryProxy(), accountAuth] : []),
       cesiumGlobe,
       ...(apiPlugins ? [
       openSkyProxy(),

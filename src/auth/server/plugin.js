@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { openAuthStore } from './store.js';
-import { createAuthService, parseOrigins } from './http.js';
+import { createAuthService, parseOrigins, parseOwnerEmails } from './http.js';
 import { createWebhookMailer } from './mail.js';
 import { oauthProvidersFromEnv } from './oauth.js';
 
@@ -14,9 +14,20 @@ export function authPlugin(env = process.env) {
   const mailer = createWebhookMailer(env, { origins });
   // Google/GitHub (2026-09-27): ID a tajomstvo len z .env servera, nikdy do prehliadača.
   const oauthProviders = oauthProvidersFromEnv(env);
+  // Vlastník (2026-10-03, „táto funkcia je len pre mňa … mala by byť pod mojím účtom"): účty z
+  // OKO_OWNER_EMAILS smú na súkromné časti (udalosti na kontrolu, zverejnenie, video) aj mimo
+  // tohto počítača. Prázdne = len lokálne ako doteraz.
+  const ownerEmails = parseOwnerEmails(env.OKO_OWNER_EMAILS);
+  let store;
+  let auth;
+  const ensure = () => {
+    if (!auth) {
+      store = openAuthStore(filename);
+      auth = createAuthService({ store, origins, mailer, oauthProviders, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
+    }
+    return auth;
+  };
   const install = server => {
-    let store;
-    let auth;
     server.middlewares.use((req, res, next) => {
       let decoded;
       try { decoded = decodeURIComponent((req.url || '').split('?')[0]).replaceAll('\\', '/'); }
@@ -49,11 +60,7 @@ export function authPlugin(env = process.env) {
       // Do not let encoded aliases reach a later middleware without the guard.
       if (decoded !== (req.url || '').split('?')[0]) { res.statusCode = 400; res.end(); return; }
       try {
-        if (!auth) {
-          store = openAuthStore(filename);
-          auth = createAuthService({ store, origins, mailer, oauthProviders, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
-        }
-        void auth.middleware(req, res, next);
+        void ensure().middleware(req, res, next);
       } catch {
         res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify({ error: 'auth_unavailable' }));
@@ -66,6 +73,18 @@ export function authPlugin(env = process.env) {
   };
   return {
     name: 'account-auth',
+    /**
+     * Je požiadavka od prihláseného vlastníka? (pre iné služby) — pôvod, relácia, pri zápise CSRF;
+     * bez účtov v OKO_OWNER_EMAILS vždy false. Nikdy nevyhodí chybu.
+     */
+    isOwnerRequest(req, res, { mutation = false } = {}) {
+      if (!ownerEmails.length || !filename) return false;
+      try {
+        const user = ensure().identify(req, res, { mutation });
+        return Boolean(user && ownerEmails.includes(user.email));
+      } catch { return false; }
+    },
+    ownerEmails: () => [...ownerEmails],
     config(config) {
       root = config.root || process.cwd();
       filename = path.resolve(root, env.AUTH_DB_PATH || '.auth-data/accounts.sqlite');

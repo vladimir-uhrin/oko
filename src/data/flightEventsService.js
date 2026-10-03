@@ -281,6 +281,7 @@ export function createFlightEventsService({
   getStore,
   eventsDir,
   isLocal,
+  isOwner = null,
   fetchImpl = fetch,
   now = () => Date.now(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -824,6 +825,10 @@ export function createFlightEventsService({
     const route = url.pathname.replace(/\/+$/, '') || '/';
     const local = Boolean(isLocal?.(req));
     const method = String(req.method || 'GET').toUpperCase();
+    // Vlastník prihlásený účtom (2026-10-03): rovnaké práva ako lokálna požiadavka — pôvod, reláciu
+    // a pri zápise CSRF kontroluje služba účtu (isOwner); bez účtov len tento počítač ako doteraz.
+    const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+    const owner = local || Boolean(isOwner && await Promise.resolve(isOwner(req, res, { mutation })).catch(() => false));
     try {
       // Verejný pohľad: len udalosť, ktorú vlastník zverejnil (po dvoch overeniach). Na tomto počítači
       // aj náhľad udalosti pred zverejnením (vlastník vidí presne to, čo uvidí verejnosť).
@@ -831,17 +836,18 @@ export function createFlightEventsService({
       if (pub) {
         if (method !== 'GET' && method !== 'HEAD') { json(res, 405, { error: 'method_not_allowed' }); return; }
         let event = store.get(pub[1]);
-        const preview = local && event && !event.published?.url && ['confirmed', 'unverified'].includes(event.status);
+        const preview = owner && event && !event.published?.url && ['confirmed', 'unverified'].includes(event.status);
         if (!event || (!event.published?.url && !preview)) { json(res, 404, { error: 'not_found' }); return; }
         if (preview) event = await withTrack(event);
         json(res, 200, { ...publicEventView(event), preview: Boolean(preview) }, preview ? 'no-store' : 'public, max-age=60');
         return;
       }
-      // Všetko ostatné je súkromné: odpovedá len priamo z tohto počítača.
-      if (!local) { json(res, 404, { error: 'not_found' }); return; }
-      // Zapisovacie akcie len z vlastnej stránky (JSON), nahratie videa len s vlastnou hlavičkou (MP4).
+      // Všetko ostatné je súkromné: tento počítač alebo prihlásený vlastník (inak 404 — nič neprezradí).
+      if (!owner) { json(res, 404, { error: 'not_found' }); return; }
+      // Lokálne POSTy: vlastná stránka (JSON) alebo skript (MP4 s hlavičkou); cez účet už prešli CSRF
+      // v isOwner. Nahratie videa skriptom ostáva len lokálne.
       const videoUpload = method === 'POST' && /\/video\.mp4$/.test(route);
-      if (method === 'POST' && !(videoUpload ? isOwnLocalUpload(req) : isOwnLocalPost(req))) { json(res, 403, { error: 'forbidden' }); return; }
+      if (method === 'POST' && (videoUpload ? !(local && isOwnLocalUpload(req)) : (local ? !isOwnLocalPost(req) : !owner))) { json(res, 403, { error: 'forbidden' }); return; }
       if (route === '/') {
         // Predvolene len udalosti (overené a neoverené); `status=all` aj šum a vojenský výcvik.
         const param = url.searchParams.get('status');

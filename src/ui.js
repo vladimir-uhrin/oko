@@ -2559,7 +2559,9 @@ export class StyleManager {
    * @param {Cesium.Viewer} viewer - The CesiumJS viewer instance.
    * @param {object} [options]
    */
-  constructor(viewer, { mapStackController = null } = {}) {
+  constructor(viewer, { mapStackController = null, account = null } = {}) {
+    // Účet (initAuthPanel) — udalosti vlastníka po prihlásení aj mimo tohto počítača (2026-10-03).
+    this._account = account;
     this.viewer = viewer;
     this.mapStackController = mapStackController;
     this.stages = {};
@@ -3214,6 +3216,7 @@ export class StyleManager {
     this._eventsPanel = installEventsPanel({
       host: document.querySelector('#history-panel [data-history-body]'),
       t,
+      account: this._account?.client || null,
       history: this._historyPanel,
       reveal: () => {
         revealHistoryPanel();

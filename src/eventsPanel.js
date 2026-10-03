@@ -8,7 +8,8 @@
  * kľúčové momenty s časom UTC (čo videla len jedna sieť, je označené), médiá, ktoré udalosť overili
  * (meno + odkaz), očíslované značky na glóbuse a PREHRAŤ LET (prehrávač Histórie letov).
  *
- * Súkromná časť (len na počítači vlastníka — /api/events odpovedá len tam): zoznam udalostí na
+ * Súkromná časť (počítač vlastníka alebo vlastník prihlásený účtom, 2026-10-03 „táto funkcia je len
+ * pre mňa … mala by byť pod mojím účtom" — /api/events odpovedá len im): zoznam udalostí na
  * kontrolu, náhľad obrázka, text príspevku, ZVEREJNIŤ / STIAHNUŤ (dvojklik na potvrdenie) a po
  * zverejnení ZDIEĽAŤ NA FACEBOOKU (dialóg FB — príspevok odošle vlastník sám), kopírovanie textu
  * a odkazu, obrázok do príspevku. Nič sa nezverejní ani neodošle samo.
@@ -114,16 +115,21 @@ export function reviewRowModel(summary, t, lang = 'sk') {
   };
 }
 
-/** API udalostí (rovnaký pôvod). Zapisovacie akcie posielajú JSON — server iné neprijme. */
-export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...args)) {
+/**
+ * API udalostí (rovnaký pôvod). Zapisovacie akcie posielajú JSON — server iné neprijme; pod účtom idú
+ * cez klienta účtu (CSRF), inak priamo (lokálne, len tento počítač).
+ * @param {{account?: {getState: Function, send: Function}|null}} [opts]
+ */
+export function defaultEventsApi(fetchImpl = (...args) => globalThis.fetch(...args), { account = null } = {}) {
   const getJson = async (url) => {
     const res = await fetchImpl(url, { headers: { Accept: 'application/json' }, cache: 'no-store' });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   };
-  const postJson = async (url) => {
-    const res = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' });
+  const postJson = async (url, payload = {}) => {
+    if (account?.getState?.().user && typeof account.send === 'function') return account.send(url, 'POST', payload);
+    const res = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
     let body = {};
     try { body = await res.json(); } catch { body = {}; }
     if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
@@ -173,7 +179,8 @@ function saveBlobFile(doc, blob, name) {
  * @param {(() => void)|null} [options.reveal] otvor panel História letov (na mobile hárok DÁTA)
  * @param {{show: Function, clear: Function, flyTo?: Function}|null} [options.markers]
  * @param {object} [options.api] defaultEventsApi() (test seam)
- * @param {boolean} [options.ownerHost] zoznam na kontrolu sa pýta len na localhoste
+ * @param {boolean} [options.ownerHost] zoznam na kontrolu sa pýta na localhoste (a po prihlásení účtom)
+ * @param {{getState: Function, subscribe: Function, send: Function}|null} [options.account] klient účtu
  * @param {(blob: Blob, name: string) => void} [options.saveFile] uloženie stiahnutého videa (test seam)
  */
 export function installEventsPanel({
@@ -184,7 +191,8 @@ export function installEventsPanel({
   history = null,
   reveal = null,
   markers = null,
-  api = defaultEventsApi(),
+  account = null,
+  api = defaultEventsApi(undefined, { account }),
   ownerHost = OWNER_HOST.test(String(globalThis.location?.hostname || '')),
   clipboard = (text) => globalThis.navigator?.clipboard?.writeText?.(text),
   openWindow = (url) => globalThis.open?.(url, '_blank', 'noopener,noreferrer'),
@@ -453,8 +461,10 @@ export function installEventsPanel({
     }
   }
 
+  /** Kontrola vlastníka: tento počítač alebo prihlásený účet (server rozhodne, či je to vlastník). */
+  const ownerPossible = () => ownerHost || Boolean(account?.getState?.().user);
   async function loadReview() {
-    if (!ownerHost) return;
+    if (!ownerPossible()) { ownerAvailable = false; review.hidden = true; syncSection(); return; }
     try {
       const res = await api.list();
       if (!res) { ownerAvailable = false; review.hidden = true; syncSection(); return; }
@@ -551,6 +561,14 @@ export function installEventsPanel({
     if (expanded) void loadReview();
   });
   void loadReview();
+  // Prihlásenie / odhlásenie: zoznam na kontrolu sa objaví alebo zmizne (len zmena používateľa).
+  let lastUser = account?.getState?.().user?.id ?? null;
+  account?.subscribe?.((state) => {
+    const user = state?.user?.id ?? null;
+    if (user === lastUser) return;
+    lastUser = user;
+    void loadReview().then(() => { if (current?.view) return renderOwner(current.id); return undefined; });
+  });
 
   return {
     open,

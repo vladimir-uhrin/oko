@@ -374,7 +374,7 @@ async function init() {
     });
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
-    const styleManager = new StyleManager(viewer, { mapStackController });
+    const styleManager = new StyleManager(viewer, { mapStackController, account: accountCenter });
     // Ľavý stĺpec v logickom poriadku (vlastník 2026-09-27; src/leftLane.js): Zobrazenie, Kamery
     // a Kontext sú panely ľavého pruhu v zónach, naraz je otvorený jeden panel, celá hlavička
     // otvára. Na mobile sa nepresúva (obe strany skryté, panely nosí výsuv); pri prepnutí sa zosúladí.
