@@ -2,7 +2,7 @@
 // (AI_TRANSLATORS_MCP_URL, AI_TRANSLATORS_MCP_KEY), zavolá health, prečíta krátku vetu hlasom
 // vlastníka a nechá ju rozpoznať — vypíše len výsledky (nikdy kľúč ani podpísané odkazy).
 //
-//   node scripts/check-voice-service.mjs [--no-speech] [--text "veta"]
+//   node scripts/check-voice-service.mjs [--no-speech] [--text "hovorená veta" --caption "titulok s číslicami"]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,12 +35,13 @@ try {
   process.exit(1);
 }
 if (args.includes('--no-speech')) process.exit(0);
-const text = flag('--text', 'Sledujte živú premávku na okolajv bodka es ká.');
+const text = flag('--text', 'Potom deväť minút bez údajov.');
+const caption = flag('--caption', flag('--text') ? text : 'Potom 9 minút bez údajov.');
 try {
   const r = await client.readAloud(text);
   console.log(`[hlas] read_aloud (${since()}): ${r.seconds ?? '?'} s zvuku, odkaz ${r.url ? 'áno' : 'nie'}, engine ${r.engine || '?'}`);
   const heard = await client.transcribe(r.url);
-  const check = narrationHeardMatches(text, heard);
+  const check = narrationHeardMatches(caption, heard);
   console.log(`[hlas] prepis (${since()}): „${heard}" → ${check.ok ? 'sedí' : `nesedí (chýba: ${check.missing.join(', ')})`}`);
 } catch (error) {
   console.log(`[hlas] reč zlyhala (${since()}): ${error.code || ''} ${error.message}`);

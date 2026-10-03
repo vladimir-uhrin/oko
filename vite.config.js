@@ -5931,10 +5931,10 @@ export { openSkyProxy };
  * obraz z OKO (EVENT_VIDEO_PAGE_URL, inak http://localhost:4173), pracovné súbory <adresár DB>/event-video/work.
  */
 function createEventVideoPipeline({ dbDir }) {
-  const { url, token } = aiTranslatorsConfig(process.env);
+  const voiceCfg = aiTranslatorsConfig(process.env);
   let voice = null;
-  if (token) {
-    try { voice = createAiTranslatorsClient({ url, token }); } catch (error) { console.warn('[events] ai-translators:', error?.message || error); }
+  if (voiceCfg.token) {
+    try { voice = createAiTranslatorsClient(voiceCfg); } catch (error) { console.warn('[events] ai-translators:', error?.message || error); }
   }
   const cache = createVoiceCache(path.join(dbDir, 'event-video', 'voice'));
   const musicDir = process.env.EVENT_VIDEO_MUSIC_DIR || path.join(process.cwd(), '.gev-cache', 'event-video-capture', 'music');

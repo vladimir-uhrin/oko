@@ -8,9 +8,9 @@ import { createAiTranslatorsClient } from './aiTranslatorsClient.js';
 
 async function fakeServer(t, { token = 'tajny-token', sse = false } = {}) {
   const calls = [];
-  let polls = 0;
+  const jobs = new Map();
   let sessions = 0;
-  const state = { forgetSession: false };
+  const state = { forgetSession: false, allowHosts: null };
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
@@ -31,9 +31,17 @@ async function fakeServer(t, { token = 'tajny-token', sse = false } = {}) {
         if (a.params.text.includes('429')) { res.writeHead(429); res.end(''); return; }
         if (a.params.text.includes('zlyhaj')) { reply('voice service down', true); return; }
         reply({ path: null, bytes: 100, seconds: 2.5, url: `https://fake/tts/${encodeURIComponent(a.params.text)}.wav`, engine: 'omnivoice-clone' });
-      } else if (name === 'ai_translators_subtitle_video') reply({ job_id: 'job-1', status: 'queued', progress: 0 });
-      else if (name === 'ai_translators_job_status') { polls += 1; reply(polls < 2 ? { job_id: 'job-1', status: 'running', progress: 40 } : { job_id: 'job-1', status: 'completed', progress: 100, history_id: 'hist-1' }); }
-      else if (name === 'ai_translators_get_history') reply({ id: 'hist-1', cues: [{ start: 0.2, end: 2.1, source_text: 'Potom deväť minút bez údajov.', translated: 'x' }] });
+      } else if (name === 'ai_translators_subtitle_video') {
+        // ako skutočná služba: úloha sa prijme vždy, odmietnutie hostiteľa odkazu príde až v stave úlohy
+        const id = `job-${jobs.size + 1}`;
+        jobs.set(id, { host: new URL(a.params.url).host, polls: 0 });
+        reply({ job_id: id, status: 'queued', progress: 0, message: '', history_id: null, kind: 'subtitles' });
+      } else if (name === 'ai_translators_job_status') {
+        const job = jobs.get(a.job_id);
+        job.polls += 1;
+        if (state.allowHosts && !state.allowHosts.includes(job.host)) reply({ job_id: a.job_id, status: 'error', progress: 0, message: 'URL host is not allowed', history_id: null });
+        else reply(job.polls < 2 ? { job_id: a.job_id, status: 'running', progress: 40 } : { job_id: a.job_id, status: 'completed', progress: 100, history_id: 'hist-1' });
+      } else if (name === 'ai_translators_get_history') reply({ id: 'hist-1', cues: [{ start: 0.2, end: 2.1, source_text: 'Potom deväť minút bez údajov.', translated: 'x' }] });
       else reply({ error: 'unknown tool' }, true);
     });
   });
@@ -88,9 +96,42 @@ test('chyby: bez tokenu sa klient nevytvorí, zlý token = AUTH, 429 = RATE, chy
 });
 
 test('nastavenie z prostredia: kľúč AI_TRANSLATORS_MCP_KEY (ako v Codexe vlastníka) alebo staršie AI_TRANSLATORS_TOKEN, adresa domácej siete alebo verejná', async () => {
-  const { aiTranslatorsConfig, AI_TRANSLATORS_URL } = await import('./aiTranslatorsClient.js');
-  assert.deepEqual(aiTranslatorsConfig({}), { url: AI_TRANSLATORS_URL, token: '' });
-  assert.deepEqual(aiTranslatorsConfig({ AI_TRANSLATORS_MCP_URL: 'http://192.168.2.43:9140/mcp', AI_TRANSLATORS_MCP_KEY: ' k1 ' }), { url: 'http://192.168.2.43:9140/mcp', token: 'k1' });
+  const { aiTranslatorsConfig, AI_TRANSLATORS_URL, AI_TRANSLATORS_MEDIA_ORIGIN } = await import('./aiTranslatorsClient.js');
+  assert.deepEqual(aiTranslatorsConfig({}), { url: AI_TRANSLATORS_URL, token: '', mediaOrigin: AI_TRANSLATORS_MEDIA_ORIGIN });
+  assert.deepEqual(aiTranslatorsConfig({ AI_TRANSLATORS_MCP_URL: 'http://192.168.2.43:9140/mcp', AI_TRANSLATORS_MCP_KEY: ' k1 ', AI_TRANSLATORS_MEDIA_ORIGIN: 'https://public.example' }), { url: 'http://192.168.2.43:9140/mcp', token: 'k1', mediaOrigin: 'https://public.example' });
   assert.equal(aiTranslatorsConfig({ AI_TRANSLATORS_TOKEN: 't', AI_TRANSLATORS_MCP_KEY: 'k' }).token, 'k', 'kľúč má prednosť');
   assert.equal(aiTranslatorsConfig({ AI_TRANSLATORS_TOKEN: 't' }).token, 't');
+});
+
+test('odkaz z domácej siete: do prepisu ide cez verejnú doménu (cesta a podpis ostávajú); verejný odkaz sa nemení', async () => {
+  const { publicMediaUrl, isPrivateHost } = await import('./aiTranslatorsClient.js');
+  assert.equal(publicMediaUrl('http://192.168.2.43:9110/api/tts/download/tts_1.wav?t=abc', 'https://public.example'), 'https://public.example/api/tts/download/tts_1.wav?t=abc');
+  assert.equal(publicMediaUrl('https://www.ai-translators.com/api/tts/download/tts_1.wav?t=abc', 'https://public.example'), 'https://www.ai-translators.com/api/tts/download/tts_1.wav?t=abc');
+  assert.equal(publicMediaUrl('nie-odkaz', 'https://public.example'), 'nie-odkaz');
+  assert.equal(publicMediaUrl('http://10.0.0.5/x.wav', ''), 'http://10.0.0.5/x.wav', 'bez verejnej domény sa nemení');
+  for (const h of ['localhost', '127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.9.9', '192.168.2.43', '169.254.1.1', 'nas.local', '::1']) assert.ok(isPrivateHost(h), h);
+  for (const h of ['www.ai-translators.com', '172.32.0.1', '8.8.8.8', '192.169.0.1', '']) assert.ok(!isPrivateHost(h), h);
+});
+
+test('prepis: služba odmieta domáce adresy („URL host is not allowed") → odkaz ide hneď cez verejnú doménu, jediná úloha', async (t) => {
+  const { url, calls, state } = await fakeServer(t);
+  state.allowHosts = ['public.example'];
+  const client = createAiTranslatorsClient({ url, token: 'tajny-token', mediaOrigin: 'https://public.example', sleep: async () => {}, pollMs: 1 });
+  const heard = await client.transcribe('http://192.168.2.43:9110/api/tts/download/tts_1.wav?t=abc');
+  assert.equal(heard, 'Potom deväť minút bez údajov.');
+  const submitted = calls.filter((c) => c.name === 'ai_translators_subtitle_video').map((c) => c.args.params.url);
+  assert.deepEqual(submitted, ['https://public.example/api/tts/download/tts_1.wav?t=abc']);
+});
+
+test('prepis: keď verejnú doménu odmietne, skúsi sa pôvodný odkaz; iná chyba úlohy sa neopakuje', async (t) => {
+  const { url, calls, state } = await fakeServer(t);
+  state.allowHosts = ['192.168.2.43:9110'];
+  const client = createAiTranslatorsClient({ url, token: 'tajny-token', mediaOrigin: 'https://public.example', sleep: async () => {}, pollMs: 1 });
+  const heard = await client.transcribe('http://192.168.2.43:9110/api/tts/download/tts_1.wav?t=abc');
+  assert.equal(heard, 'Potom deväť minút bez údajov.');
+  const submitted = calls.filter((c) => c.name === 'ai_translators_subtitle_video').map((c) => c.args.params.url);
+  assert.deepEqual(submitted, ['https://public.example/api/tts/download/tts_1.wav?t=abc', 'http://192.168.2.43:9110/api/tts/download/tts_1.wav?t=abc']);
+  state.allowHosts = [];
+  await assert.rejects(client.transcribe('http://192.168.2.43:9110/api/tts/download/tts_2.wav?t=x'), (e) => e.code === 'ASR_FAILED' && /host is not allowed/.test(e.message));
+  assert.equal(calls.filter((c) => c.name === 'ai_translators_subtitle_video').length, 4, 'obe cesty odmietnuté = koniec, bez ďalších pokusov');
 });

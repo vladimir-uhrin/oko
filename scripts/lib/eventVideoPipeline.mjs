@@ -77,6 +77,79 @@ export function measureSpeech(wav, { ffmpeg = 'ffmpeg', ffprobe = 'ffprobe' } = 
   return { durationS: dur, ...speechBounds(log, dur) };
 }
 
+/** Podpísaný odkaz na nahrávku platí 24 h — na prepis sa posiela len mladší (inak nová nahrávka). */
+export const VOICE_LINK_MAX_AGE_MS = 20 * 60 * 60_000;
+const linkUsable = (meta, nowMs) => Boolean(meta?.url) && Number.isFinite(Date.parse(meta.savedAt || '')) && nowMs - Date.parse(meta.savedAt) < VOICE_LINK_MAX_AGE_MS;
+
+/**
+ * Kroky 2 + 3: nahrávka každej vety a kontrola výslovnosti.
+ *   • nahrávka z pamäte (podľa textu), inak `voice.readAloud` → stiahnuť → do pamäte;
+ *   • schválená alebo už overená nahrávka sa nekontroluje; bez služby sa použije, čo je v pamäti
+ *     (predtým neúspešná kontrola = veta na vypočutie);
+ *   • kontrola: prepis odkazu na nahrávku proti titulku vety; nahrávka, ktorá už raz neprešla, alebo ktorej
+ *     odkaz je starý (podpis 24 h), sa nahráva znova namiesto prepisu; po `asrRetries` výmenách ostáva
+ *     posledná nahrávka a veta ide na vypočutie.
+ * @param {object} p
+ * @param {ReturnType<typeof import('../../src/data/eventNarration.js').narrationLines>} p.lines
+ * @param {{readAloud: Function, transcribe: Function}|null} p.voice
+ * @param {ReturnType<typeof createVoiceCache>} p.cache
+ * @param {(wav: string) => {lead: number, speechEnd: number, pauses: Array}} p.measure
+ * @param {typeof fetch} [p.fetchImpl]
+ * @param {object} [p.options] PIPELINE_DEFAULTS
+ * @param {(stage: string, detail?: object) => void} [p.onProgress]
+ * @param {() => number} [p.now]
+ * @returns {Promise<{durations: object, bounds: object, voiceFiles: object, review: Array}>}
+ */
+export async function prepareVoice({ lines, voice = null, cache, measure, fetchImpl = (...a) => globalThis.fetch(...a), options = {}, onProgress = () => {}, now = () => Date.now() }) {
+  const o = { ...PIPELINE_DEFAULTS, ...options };
+  const durations = {};
+  const bounds = {};
+  const voiceFiles = {};
+  const review = [];
+  const record = async (line, attempt) => {
+    if (!voice) throw Object.assign(new Error(`chýba nahrávka vety „${line.spoken}" a hlas nie je nastavený (AI_TRANSLATORS_MCP_KEY)`), { code: 'NO_VOICE', line: line.id });
+    onProgress('voice', { line: line.id, attempt });
+    const r = await voice.readAloud(line.spoken, { voice: o.voice, lang: o.lang });
+    const res = await fetchImpl(r.url);
+    if (!res.ok) throw Object.assign(new Error(`stiahnutie hlasu zlyhalo: HTTP ${res.status}`), { code: 'VOICE_DOWNLOAD' });
+    // predošlú nahrávku tej istej vety prepíše nová (put) — pamäť drží poslednú
+    return cache.put(o.voice, line.spoken, Buffer.from(await res.arrayBuffer()), { url: r.url, seconds: r.seconds, engine: r.engine, caption: line.caption, savedAt: new Date(now()).toISOString() });
+  };
+  for (const line of lines) {
+    let hit = cache.get(o.voice, line.spoken);
+    let swaps = 0; // koľkokrát sa nahrávka vymenila za novú
+    while (true) {
+      if (!hit) hit = await record(line, swaps + 1);
+      if (line.approved || hit.meta.approved || hit.meta.heardOk === true) break;
+      if (!voice) {
+        // bez služby sa kontrola nedá urobiť — nahrávka z pamäte sa použije
+        if (hit.meta.heardOk === false) review.push({ line: line.id, spoken: line.spoken, heard: hit.meta.heard ?? null });
+        break;
+      }
+      if (hit.meta.heardOk === false || !linkUsable(hit.meta, now())) {
+        // už raz neprešla (rovnaký zvuk = rovnaký výsledok) alebo odkaz vypršal — namiesto prepisu nová nahrávka
+        if (hit.meta.heardOk === false && swaps >= o.asrRetries) { review.push({ line: line.id, spoken: line.spoken, heard: hit.meta.heard ?? null }); break; }
+        swaps += 1;
+        hit = await record(line, swaps + 1);
+      }
+      onProgress('asr', { line: line.id, attempt: swaps + 1 });
+      const heard = await voice.transcribe(hit.meta.url, { lang: o.lang });
+      const check = narrationHeardMatches(line.caption, heard);
+      hit.meta = cache.update(o.voice, line.spoken, { heard, heardOk: check.ok, checkedAt: new Date(now()).toISOString() });
+      if (check.ok) break;
+      if (swaps >= o.asrRetries) { review.push({ line: line.id, spoken: line.spoken, heard, missing: check.missing, extra: check.extra }); break; }
+      swaps += 1;
+      hit = await record(line, swaps + 1);
+    }
+    const m = measure(hit.wav);
+    durations[line.id] = { lead: m.lead, speechEnd: m.speechEnd };
+    bounds[line.id] = { pauses: m.pauses };
+    voiceFiles[line.id] = hit.wav;
+  }
+  onProgress('voice-done', { review: review.length });
+  return { durations, bounds, voiceFiles, review };
+}
+
 /**
  * @param {object} p
  * @param {object} p.event uložená udalosť (s `track`, `timeline`, `reported`)
@@ -102,46 +175,10 @@ export async function prepareEventVideo({ event, script = null, voice = null, ca
   progress('lines', { count: lines.length });
 
   // 2. + 3. hlas a výslovnosť
-  const durations = {};
-  const bounds = {};
-  const voiceFiles = {};
-  const review = [];
-  for (const line of lines) {
-    let hit = cache.get(o.voice, line.spoken);
-    let attempts = 0;
-    while (true) {
-      if (!hit) {
-        if (!voice) throw Object.assign(new Error(`chýba nahrávka vety „${line.spoken}" a hlas nie je nastavený (AI_TRANSLATORS_MCP_KEY)`), { code: 'NO_VOICE', line: line.id });
-        progress('voice', { line: line.id, attempt: attempts + 1 });
-        const r = await voice.readAloud(line.spoken, { voice: o.voice, lang: o.lang });
-        const res = await fetchImpl(r.url);
-        if (!res.ok) throw Object.assign(new Error(`stiahnutie hlasu zlyhalo: HTTP ${res.status}`), { code: 'VOICE_DOWNLOAD' });
-        hit = cache.put(o.voice, line.spoken, Buffer.from(await res.arrayBuffer()), { url: r.url, seconds: r.seconds, engine: r.engine, caption: line.caption });
-      }
-      if (line.approved || hit.meta.approved || hit.meta.heardOk === true) break;
-      if (hit.meta.heardOk === false && !voice) { review.push({ line: line.id, spoken: line.spoken, heard: hit.meta.heard }); break; }
-      if (!voice) break; // bez služby sa kontrola nedá urobiť — nahrávka z pamäte sa použije
-      progress('asr', { line: line.id, attempt: attempts + 1 });
-      const heard = await voice.transcribe(hit.meta.url, { lang: o.lang });
-      const check = narrationHeardMatches(line.caption, heard);
-      cache.update(o.voice, line.spoken, { heard, heardOk: check.ok, checkedAt: new Date().toISOString() });
-      if (check.ok) break;
-      attempts += 1;
-      if (attempts > o.asrRetries) { review.push({ line: line.id, spoken: line.spoken, heard, missing: check.missing, extra: check.extra }); break; }
-      hit = null; // nová nahrávka tej istej vety (iný výstup hlasu)
-      cache.update(o.voice, line.spoken, { heardOk: false });
-      // predošlú nahrávku prepíše nová (put), pamäť drží poslednú
-      const r = await voice.readAloud(line.spoken, { voice: o.voice, lang: o.lang });
-      const res = await fetchImpl(r.url);
-      if (!res.ok) throw Object.assign(new Error(`stiahnutie hlasu zlyhalo: HTTP ${res.status}`), { code: 'VOICE_DOWNLOAD' });
-      hit = cache.put(o.voice, line.spoken, Buffer.from(await res.arrayBuffer()), { url: r.url, seconds: r.seconds, engine: r.engine, caption: line.caption });
-    }
-    const m = measureSpeech(hit.wav, { ffmpeg, ffprobe });
-    durations[line.id] = { lead: m.lead, speechEnd: m.speechEnd };
-    bounds[line.id] = { pauses: m.pauses };
-    voiceFiles[line.id] = hit.wav;
-  }
-  progress('voice-done', { review: review.length });
+  const { durations, bounds, voiceFiles, review } = await prepareVoice({
+    lines, voice, cache, fetchImpl, options: o, onProgress: progress,
+    measure: (wav) => measureSpeech(wav, { ffmpeg, ffprobe }),
+  });
 
   // 4. tempo
   const fit = fitNarration(event, lines, durations);

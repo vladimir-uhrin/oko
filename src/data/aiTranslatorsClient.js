@@ -13,12 +13,41 @@
 
 export const AI_TRANSLATORS_URL = 'https://www.ai-translators.com/mcp';
 
-/** Nastavenie z prostredia: adresa a kľúč (aj staršie meno AI_TRANSLATORS_TOKEN). Pure. */
+/** Verejná doména služby — cez ňu ide podpísaný odkaz na nahrávku do prepisu, keď ukazuje do domácej siete. */
+export const AI_TRANSLATORS_MEDIA_ORIGIN = 'https://www.ai-translators.com';
+const HOST_REFUSED = /host is not allowed/i;
+
+/** Nastavenie z prostredia: adresa, kľúč (aj staršie meno AI_TRANSLATORS_TOKEN), verejná doména pre odkazy. Pure. */
 export function aiTranslatorsConfig(env = {}) {
   const token = String(env.AI_TRANSLATORS_MCP_KEY || env.AI_TRANSLATORS_TOKEN || '').trim();
   const url = String(env.AI_TRANSLATORS_MCP_URL || '').trim() || AI_TRANSLATORS_URL;
-  return { url, token };
+  const mediaOrigin = String(env.AI_TRANSLATORS_MEDIA_ORIGIN || '').trim() || AI_TRANSLATORS_MEDIA_ORIGIN;
+  return { url, token, mediaOrigin };
 }
+
+/** Adresa v domácej sieti alebo na tomto počítači (localhost, 10/8, 172.16/12, 192.168/16, ::1). Pure. */
+export function isPrivateHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '::1' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
+  const m = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(h);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
+}
+
+/** Podpísaný odkaz z domácej siete prepísaný na verejnú doménu (cesta aj podpis ostávajú); iný odkaz nemenený. Pure. */
+export function publicMediaUrl(url, mediaOrigin = AI_TRANSLATORS_MEDIA_ORIGIN) {
+  if (!mediaOrigin) return url;
+  try {
+    const u = new URL(url);
+    if (!isPrivateHost(u.hostname)) return url;
+    return new URL(u.pathname + u.search, mediaOrigin).href;
+  } catch {
+    return url;
+  }
+}
+
 const PROTOCOL = '2025-06-18';
 
 /** JSON-RPC správa z tela odpovede (JSON alebo SSE `data:` riadky). Pure. */
@@ -46,10 +75,10 @@ export function toolResultValue(result) {
 }
 
 /**
- * @param {{url?: string, token: string, fetchImpl?: typeof fetch, sleep?: (ms:number)=>Promise<void>, now?: () => number,
+ * @param {{url?: string, token: string, mediaOrigin?: string, fetchImpl?: typeof fetch, sleep?: (ms:number)=>Promise<void>, now?: () => number,
  *   timeoutMs?: number, pollMs?: number, jobTimeoutMs?: number}} opts
  */
-export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, fetchImpl = (...a) => globalThis.fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), timeoutMs = 300_000, pollMs = 3_000, jobTimeoutMs = 10 * 60_000 } = {}) {
+export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, mediaOrigin = AI_TRANSLATORS_MEDIA_ORIGIN, fetchImpl = (...a) => globalThis.fetch(...a), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), timeoutMs = 300_000, pollMs = 3_000, jobTimeoutMs = 10 * 60_000 } = {}) {
   if (!token) throw Object.assign(new Error('AI_TRANSLATORS_MCP_KEY chýba'), { code: 'NO_TOKEN' });
   let session = null;
   let nextId = 1;
@@ -102,19 +131,33 @@ export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, fet
       if (!r?.url) throw Object.assign(new Error('ai-translators: bez odkazu na zvuk'), { code: 'NO_URL' });
       return { url: r.url, seconds: Number(r.seconds) || null, engine: r.engine || null };
     },
-    /** Prepis nahrávky (odkaz na WAV) → text, ktorý rozpoznávač počul (čaká na úlohu). */
+    /**
+     * Prepis nahrávky (odkaz na WAV) → text, ktorý rozpoznávač počul (čaká na úlohu). Odkaz z domácej
+     * inštancie ukazuje na adresu v domácej sieti, ktorú služba pri sťahovaní odmieta („URL host is not
+     * allowed") — ten istý podpísaný odkaz ide preto cez verejnú doménu (`mediaOrigin`); keby odmietla
+     * aj tú, skúsi sa pôvodný odkaz.
+     */
     async transcribe(wavUrl, { lang = 'sk' } = {}) {
-      const job = await call('ai_translators_subtitle_video', { params: { url: wavUrl, source: lang, target: lang } });
-      const started = now();
-      let status = job;
-      while (status && !['completed', 'error', 'cancelled'].includes(status.status)) {
-        if (now() - started > jobTimeoutMs) throw Object.assign(new Error('ai-translators: prepis trvá pridlho'), { code: 'TIMEOUT' });
-        await sleep(pollMs);
-        status = await call('ai_translators_job_status', { job_id: job.job_id });
+      const run = async (url) => {
+        const job = await call('ai_translators_subtitle_video', { params: { url, source: lang, target: lang } });
+        const started = now();
+        let status = job;
+        while (status && !['completed', 'error', 'cancelled', 'failed'].includes(status.status)) {
+          if (now() - started > jobTimeoutMs) throw Object.assign(new Error('ai-translators: prepis trvá pridlho'), { code: 'TIMEOUT' });
+          await sleep(pollMs);
+          status = await call('ai_translators_job_status', { job_id: job.job_id });
+        }
+        if (!status || status.status !== 'completed' || !status.history_id) throw Object.assign(new Error(`ai-translators: prepis zlyhal (${status?.message || status?.status || '?'})`), { code: 'ASR_FAILED', detail: status?.message || '' });
+        const item = await call('ai_translators_get_history', { history_id: status.history_id });
+        return (item?.cues || []).map((c) => String(c.source_text || '').trim()).filter(Boolean).join(' ');
+      };
+      const first = publicMediaUrl(wavUrl, mediaOrigin);
+      try {
+        return await run(first);
+      } catch (error) {
+        if (error?.code === 'ASR_FAILED' && HOST_REFUSED.test(error.detail) && first !== wavUrl) return run(wavUrl);
+        throw error;
       }
-      if (!status || status.status !== 'completed' || !status.history_id) throw Object.assign(new Error(`ai-translators: prepis zlyhal (${status?.message || status?.status || '?'})`), { code: 'ASR_FAILED' });
-      const item = await call('ai_translators_get_history', { history_id: status.history_id });
-      return (item?.cues || []).map((c) => String(c.source_text || '').trim()).filter(Boolean).join(' ');
     },
     async health() { return call('ai_translators_health', {}); },
   };
