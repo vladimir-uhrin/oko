@@ -20,12 +20,23 @@ import fsp from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { TEMPLATES, templateById } from './templates.js';
-import { renderCard as defaultRenderCard } from './card.js';
+import { TEMPLATES as BASE_TEMPLATES } from './templates.js';
+import { AIR_MIN_OBLASTS_DEFAULT, MEDIA_PER_DAY_DEFAULT, UA_TEMPLATES, mediaHostAllowed } from './ukraine.js';
+import { renderCard as defaultRenderCard, renderPhotoCard as defaultRenderPhotoCard } from './card.js';
 import { createMetaPublisher, isRetryableError } from './meta.js';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import { ffmpegAvailable, padToReel as defaultPadToReel, posterFrame as defaultPosterFrame, renderReel as defaultRenderReel } from './reel.js';
+
+/** Všetky šablóny: svetové udalosti (templates.js) + Ukrajina (ukraine.js, 2026-10-04). */
+export const TEMPLATES = Object.freeze([...BASE_TEMPLATES, ...UA_TEMPLATES]);
+export const templateById = id => TEMPLATES.find(template => template.id === id) || null;
+/** Šablóna, ktorú nesmie zverejniť automatika (zábery z vojny — vždy schvaľuje človek). */
+const autoPublishForbidden = template => template?.autoPublish === false;
+/** Týždenná šablóna (karusel Týždňa na fronte): sobota od 9:00, po videu o 7:00. */
+const WEEKLY = { weekday: 6, hour: 9 };
+/** Najväčšie médium zo vzdialeného zdroja (fotka / video ArmyInform). */
+const REMOTE_MAX = { image: 12 * 1024 * 1024, video: 150 * 1024 * 1024 };
 
 const TICK_MS = 10 * 60_000;
 const STALE_MS = 30 * 60_000;
@@ -50,7 +61,9 @@ const baseTarget = target => target.replace(/-reel$/, '');
 export const DEFAULT_SETTINGS = Object.freeze({ autoDraft: true, autoReel: true, audio: 'ambient', voice: false, autoPublish: {},
   autoPublishPerDay: 5, quietFrom: 22, quietTo: 7, targets: [...TARGETS],
   // Týždeň na fronte (2026-10-03): sobota 7:00 spustí scripts/make-front-week-video.mjs a výsledok dá do Štúdia.
-  frontWeek: { enabled: false, weekday: 6, hour: 7 } });
+  frontWeek: { enabled: false, weekday: 6, hour: 7 },
+  // Ukrajina (2026-10-04): prah vzdušného útoku (počet oblastí), fotky/videá oficiálnych kanálov a ich denný strop.
+  ua: { airMinOblasts: AIR_MIN_OBLASTS_DEFAULT, media: true, mediaPerDay: MEDIA_PER_DAY_DEFAULT } });
 const weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Bratislava', weekday: 'short' });
 const WEEKDAYS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 const localWeekday = at => WEEKDAYS[weekdayFmt.format(new Date(at))] ?? 0;
@@ -73,6 +86,25 @@ function loopbackJson(port, path, timeoutMs = 20_000) {
   });
 }
 
+/**
+ * Stiahne médium z povoleného hostiteľa (CDN Telegramu, ArmyInform) so stropom veľkosti.
+ * @returns {Promise<Buffer>}
+ */
+export async function fetchRemoteMedia(url, { maxBytes, kind = 'image', fetchImpl = globalThis.fetch, timeoutMs = 120_000 } = {}) {
+  if (!mediaHostAllowed(url)) throw new Error('nepovolený zdroj média');
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error', headers: { 'User-Agent': 'OKO-Studio/1.0 (+https://okolive.sk)' } });
+  if (!res.ok) throw new Error(`médium: HTTP ${res.status}`);
+  const type = String(res.headers?.get?.('content-type') || '');
+  if (kind === 'image' && type && !/^image\//i.test(type)) throw new Error(`médium nie je obrázok (${type})`);
+  if (kind === 'video' && type && !/^video\/|octet-stream/i.test(type)) throw new Error(`médium nie je video (${type})`);
+  const declared = Number(res.headers?.get?.('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error('médium je príliš veľké');
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > maxBytes) throw new Error('médium je príliš veľké');
+  if (!buf.length) throw new Error('médium je prázdne');
+  return buf;
+}
+
 /** Verejná adresa portálu pre odkazy v príspevkoch a pre Instagram (stiahne si obrázok). */
 export function publicUrlFrom(env = process.env) {
   for (const candidate of [env.STUDIO_PUBLIC_URL, env.AUTH_PUBLIC_URL, ...String(env.AUTH_ORIGINS || '').split(',')]) {
@@ -85,7 +117,7 @@ export function publicUrlFrom(env = process.env) {
 }
 
 export function createStudio({ store, env = process.env, port = () => null, now = Date.now, fetchJson = loopbackJson,
-  renderCard = defaultRenderCard, renderReel = defaultRenderReel, padToReel = defaultPadToReel, posterFrame = defaultPosterFrame, checkFfmpeg = () => ffmpegAvailable(env.FFMPEG_PATH || 'ffmpeg'),
+  renderCard = defaultRenderCard, renderPhotoCard = defaultRenderPhotoCard, fetchMedia = fetchRemoteMedia, renderReel = defaultRenderReel, padToReel = defaultPadToReel, posterFrame = defaultPosterFrame, checkFfmpeg = () => ffmpegAvailable(env.FFMPEG_PATH || 'ffmpeg'),
   mediaDir = null, publisher = createMetaPublisher({ env }), timers = true, log = message => console.warn(message),
   voiceProvider = null, frontWeekRunner = null, root = process.cwd(), onAlert = null } = {}) {
   const alert = (kind, detail) => { try { onAlert?.({ kind, ...detail }); } catch { /* upozornenie nesmie zhodiť Štúdio */ } };
@@ -98,6 +130,10 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   const inFlight = new Map(); // id → zverejňovanie na pozadí
   const autoAfterVideo = new Set(); // auto-návrhy čakajúce na video pred auto-zverejnením
   let lastInsights = 0;
+  let tickLoads = null; // Map load → Promise počas jedného ticku
+  // Zábery, ktoré sa nepodarilo stiahnuť: 6 h sa preskočia, aby jeden pokazený príspevok nezablokoval ďalšie.
+  const mediaFailed = new Map(); // kľúč → čas zlyhania
+  const MEDIA_RETRY_MS = 6 * 3600_000;
 
   function secret() {
     let value = store.getSetting('studio:secret')?.value;
@@ -108,23 +144,38 @@ export function createStudio({ store, env = process.env, port = () => null, now 
 
   function settings() {
     const stored = store.getSetting('studio:settings')?.value || {};
-    return { ...DEFAULT_SETTINGS, ...stored, autoPublish: { ...(stored.autoPublish || {}) }, frontWeek: { ...DEFAULT_SETTINGS.frontWeek, ...(stored.frontWeek || {}) } };
+    return { ...DEFAULT_SETTINGS, ...stored, autoPublish: { ...(stored.autoPublish || {}) }, frontWeek: { ...DEFAULT_SETTINGS.frontWeek, ...(stored.frontWeek || {}) },
+      ua: { ...DEFAULT_SETTINGS.ua, ...(stored.ua || {}) } };
   }
 
   function templateStats() {
     return TEMPLATES.map(template => ({ id: template.id, label: template.label, auto: template.auto,
-      unchanged: store.studioUnchangedCount(template.id), autoPublish: Boolean(settings().autoPublish[template.id]) }));
+      unchanged: store.studioUnchangedCount(template.id), autoPublish: Boolean(settings().autoPublish[template.id]),
+      autoPublishAllowed: !autoPublishForbidden(template) }));
   }
 
   /** Načíta dáta šablóny; null + dôvod, ak sú nedostupné alebo staré. */
   async function loadData(template) {
     const p = port();
     if (!p) return { reason: 'server_not_ready' };
+    // Šablóny s viacerými zdrojmi (Ukrajina) si dáta skladajú samy a samy strážia ich čerstvosť.
+    if (typeof template.load === 'function') {
+      // V jednom ticku sa rovnaký zdroj (napr. médiá pre poplachy aj zábery) načíta raz.
+      const cached = tickLoads?.get(template.load);
+      if (cached) return cached;
+      const loading = (async () => {
+        try { return await template.load({ get: path_ => fetchJson(p, path_), now: now(), root }); }
+        catch (error) { log(`[studio] ${template.id} load: ${error?.message || error}`); return { reason: 'source_unavailable' }; }
+      })();
+      tickLoads?.set(template.load, loading);
+      return loading;
+    }
     const result = await fetchJson(p, template.path);
     if (result.status === 503 && result.body?.error === 'disabled_by_admin') return { reason: 'feed_disabled' };
     if (result.status !== 200 || !result.body) return { reason: 'source_unavailable' };
     const cache = String(result.headers?.['x-gev-cache'] || '').toUpperCase();
-    if (cache === 'STALE') return { reason: 'stale' };
+    // STALE, STALE-ERROR, STALE-RATELIMIT: proxy vrátila starú kópiu, lebo zdroj zlyhal.
+    if (cache.startsWith('STALE')) return { reason: 'stale' };
     if (Number.isFinite(result.body.fetchedAt) && now() - result.body.fetchedAt > STALE_MS) return { reason: 'stale' };
     return { data: result.body };
   }
@@ -195,16 +246,64 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     if (!template) throw fail('template_not_found', 404);
     const loaded = await loadData(template);
     if (!loaded.data) return { created: false, reason: loaded.reason };
-    const item = template.build(loaded.data, { now: now(), url: publicUrl });
+    const s = settings();
+    for (const [key, at] of mediaFailed) if (now() - at > MEDIA_RETRY_MS) mediaFailed.delete(key);
+    const item = template.build(loaded.data, { now: now(), url: publicUrl, settings: s.ua, has: key => store.studioHasKey(key) || mediaFailed.has(key),
+      countToday: id_ => store.studioList(500).filter(d => d.template === id_ && localDayKey(d.createdAt) === localDayKey(now())).length });
     if (!item) return { created: false, reason: 'nothing_to_post' };
     if (store.studioHasKey(item.key)) return { created: false, reason: 'exists', key: item.key };
+    if (item.media) return generateFromMedia(template, item, origin);
     const image = await renderCard({ ...item.card, site });
     const id = randomUUID();
     const created = store.studioInsert({ id, template: template.id, eventKey: item.key, origin, title: item.title, text: item.text,
       card: item.card, image, createdAt: now() });
     if (!created) return { created: false, reason: 'exists', key: item.key };
-    if (settings().autoReel && mediaDir) queueVideo(id);
+    // Karusel (Týždeň na fronte): ďalšie snímky za hlavnou kartou.
+    const slides = (item.slides || []).slice(0, CAROUSEL_MAX - 1);
+    if (slides.length) store.studioImagesSet(id, await Promise.all(slides.map(card => renderCard({ ...card, site }))));
+    if (s.autoReel && mediaDir) queueVideo(id);
     return { created: true, draft: store.studioGet(id) };
+  }
+
+  /**
+   * Návrh z cudzích záberov (Ukrajina: oficiálne kanály UA, CC BY 4.0): fotky v ráme OKO ako karusel,
+   * video ArmyInform ako zdroj reelu. Médiá sa sťahujú len z povolených hostiteľov so stropom veľkosti.
+   */
+  async function generateFromMedia(template, item, origin) {
+    const { media } = item;
+    const frame = { kicker: item.card.kicker, headline: item.title, source: media.license ? `${media.source} · ${media.license}` : media.source, at: media.at, site };
+    const photos = [];
+    for (const url of media.photos || []) {
+      try { photos.push(await fetchMedia(url, { maxBytes: REMOTE_MAX.image, kind: 'image' })); }
+      catch (error) { log(`[studio] ${template.id} foto: ${error?.message || error}`); }
+    }
+    let videoFile = null;
+    if (media.video && mediaDir) {
+      try {
+        await fsp.mkdir(mediaDir, { recursive: true, mode: 0o700 });
+        videoFile = path.join(mediaDir, `dl-${randomUUID()}.mp4`);
+        await fsp.writeFile(videoFile, await fetchMedia(media.video, { maxBytes: REMOTE_MAX.video, kind: 'video' }));
+      } catch (error) {
+        log(`[studio] ${template.id} video: ${error?.message || error}`);
+        if (videoFile) await fsp.rm(videoFile, { force: true });
+        videoFile = null;
+      }
+    }
+    if (!photos.length && !videoFile) { mediaFailed.set(item.key, now()); return { created: false, reason: 'source_unavailable', key: item.key }; }
+    const framed = [];
+    for (const [i, photo] of photos.entries()) {
+      try { framed.push(await renderPhotoCard(photo, { ...frame, index: i, count: photos.length })); }
+      catch (error) { log(`[studio] ${template.id} rám: ${error?.message || error}`); }
+    }
+    if (!framed.length && !videoFile) { mediaFailed.set(item.key, now()); return { created: false, reason: 'source_unavailable', key: item.key }; }
+    try {
+      const result = await api.importDraft({ template: template.id, eventKey: item.key, title: item.title, text: item.text,
+        image: framed[0] || null, images: framed.slice(1), videoFile, origin,
+        meta: { source: media.source, sourceUrl: media.url, review: media.review, kicker: item.card.kicker } });
+      return result.created ? { created: true, draft: result.draft } : { created: false, reason: 'exists', key: item.key };
+    } finally {
+      if (videoFile) await fsp.rm(videoFile, { force: true });
+    }
   }
 
   function quiet(at = now()) {
@@ -215,7 +314,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
 
   async function maybeAutoPublish(draft) {
     const s = settings();
-    if (!draft || draft.origin !== 'auto' || !s.autoPublish[draft.template]) return;
+    if (!draft || draft.origin !== 'auto' || !s.autoPublish[draft.template] || autoPublishForbidden(templateById(draft.template))) return;
     if (store.studioUnchangedCount(draft.template) < AUTO_PUBLISH_MIN_UNCHANGED) return;
     if (quiet()) return;
     if (store.studioPublishedSince(now() - 86400_000, 'auto') >= s.autoPublishPerDay) return;
@@ -313,6 +412,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       if (draft.videoSeconds > IG_LIMITS.reelMaxSeconds) out.push({ level: 'warn', target: 'instagram', text: `Reel má ${Math.round(draft.videoSeconds)} s; Instagram Reels cez API najviac ${IG_LIMITS.reelMaxSeconds} s.` });
     }
     if (draft.slides > CAROUSEL_MAX) out.push({ level: 'warn', target: 'all', text: `Karusel má ${draft.slides} snímok, odošle sa prvých ${CAROUSEL_MAX}.` });
+    if (draft.card?.review) out.push({ level: 'warn', target: 'all', text: draft.card.review });
     return out;
   }
 
@@ -377,6 +477,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   async function tick() {
     if (running) return { skipped: 'running' };
     running = true;
+    tickLoads = new Map();
     const out = [];
     try {
       await cleanupVideos().catch(error => log(`[studio] cleanup: ${error?.message || error}`));
@@ -387,6 +488,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       if (!settings().autoDraft) return { skipped: 'auto_draft_off' };
       for (const template of TEMPLATES.filter(t => t.auto)) {
         if (template.auto === 'daily' && localHour(now()) < DIGEST_HOUR) continue;
+        if (template.auto === 'weekly' && (localWeekday(now()) !== WEEKLY.weekday || localHour(now()) < WEEKLY.hour)) continue;
         try {
           const result = await generate(template.id, 'auto');
           out.push({ template: template.id, ...result, draft: undefined, id: result.draft?.id });
@@ -397,7 +499,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         } catch (error) { log(`[studio] ${template.id}: ${error?.message || error}`); }
       }
       return { results: out };
-    } finally { running = false; }
+    } finally { running = false; tickLoads = null; }
   }
 
   function mediaUrl(id, ttl = MEDIA_TTL_MS, ext = 'jpg', idx = 0) {
@@ -617,10 +719,20 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         if ('hour' in fw) { if (!Number.isInteger(fw.hour) || fw.hour < 0 || fw.hour > 23) throw fail('invalid_input'); next_.hour = fw.hour; }
         next.frontWeek = next_;
       }
+      if ('ua' in patch) {
+        const ua = patch.ua;
+        if (!ua || typeof ua !== 'object') throw fail('invalid_input');
+        const nextUa = { ...current.ua };
+        if ('airMinOblasts' in ua) { if (!Number.isInteger(ua.airMinOblasts) || ua.airMinOblasts < 2 || ua.airMinOblasts > 25) throw fail('invalid_input'); nextUa.airMinOblasts = ua.airMinOblasts; }
+        if ('mediaPerDay' in ua) { if (!Number.isInteger(ua.mediaPerDay) || ua.mediaPerDay < 0 || ua.mediaPerDay > 30) throw fail('invalid_input'); nextUa.mediaPerDay = ua.mediaPerDay; }
+        if ('media' in ua) nextUa.media = Boolean(ua.media);
+        next.ua = nextUa;
+      }
       if ('autoPublish' in patch) {
         if (!patch.autoPublish || typeof patch.autoPublish !== 'object') throw fail('invalid_input');
         for (const [templateId, enabled] of Object.entries(patch.autoPublish)) {
           if (!templateById(templateId) || typeof enabled !== 'boolean') throw fail('invalid_input');
+          if (enabled && autoPublishForbidden(templateById(templateId))) throw fail('auto_publish_forbidden', 409);
           // Server vynúti podmienku: najprv 10 zverejnení bez úpravy textu.
           if (enabled && store.studioUnchangedCount(templateId) < AUTO_PUBLISH_MIN_UNCHANGED) throw fail('auto_publish_not_earned', 409);
           next.autoPublish[templateId] = enabled;

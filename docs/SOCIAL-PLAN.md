@@ -283,6 +283,38 @@ Admin → Údržba → Upozornenia (`src/admin/server/alerts.js`). Predvolene vy
 - Ten istý problém najviac raz za 6 h, najviac 12 e-mailov za 24 h. Skúšobný e-mail
   ignoruje strop.
 
+## Ukrajina v Štúdiu (hotové 2026-10-04)
+
+Vlastník: „Ukrajina" + „mám tam aj feedy z YT, telegram a iné … aj to by som chcel naviac spracovať, by to
+bolo aktuálne". Päť nových šablón v `src/admin/server/studio/ukraine.js`, všetko z dát, ktoré OKO už zbiera,
+0 €. Každý návrh nesie čas stavu, zdroj a odkaz na mapu frontu `https://okolive.sk/?front=front`.
+
+| Šablóna | Kedy | Z čoho | Obsah |
+| --- | --- | --- | --- |
+| `ua-report` Denné hlásenie GŠ | denne od 8:00 (ranné súhrnné hlásenie, do 30 h, nie popoludňajšie) | `/api/ukraine/report` + `/api/ukraine/events/directions` (7 dní) | strety za deň vs. 7-dňový priemer, 3 smery s najviac ruskými útokmi, údery (KAB, drony, ostreľovanie); „údaje jednej strany"; priamy odkaz na ArmyInform |
+| `ua-front` Zmena frontu za deň | pri novej snímke mapy | `/api/ukraine/events/deepstate?at=` dnes a deň predtým | km² obsadené ruským agresorom / oslobodené Ukrajinou po smeroch, prechod do sivej zóny zvlášť (nie je ukrajinský zisk); karta s okupovaným územím a bodmi zmien |
+| `ua-air` Veľký vzdušný útok | pri udalosti | príspevky Vzdušných síl ZSU (`mediaToAlert`) za 3 h | počet ohrozených oblastí (prah v admine, predvolene 8), druh hrozby (drony, rakety, riadené bomby); „hlásená hrozba, nie mapa sirén"; jedna vlna = jeden návrh |
+| `ua-media` Zábery oficiálnych kanálov | pri udalosti, max. 6 za deň (admin) | fotky GŠ, MO, DSNS z Telegramu; video ArmyInform | fotky v ráme OKO ako karusel (video → reel); len príspevky o udalosti so **správnou stranou** (úder ukrajinských síl ≠ ruský útok, nejasná strana = žiadny návrh); počty obetí/zranených len ako čísla z príspevku |
+| `ua-week` Týždeň na fronte ako karusel | sobota od 9:00 | `loadFrontWeek` (ten istý model ako video) | hlavná karta + snímky: smery, zmena územia (len pri odstupe presne 7 dní), údery |
+
+Poistky a rozhodnutia:
+
+- **Zábery z vojny nikdy automaticky** (`autoPublish: false`, vynútené serverom): obete a osoby (pravidlo 6)
+  kontroluje človek; karta návrhu to pripomenie.
+- **Licencia záberov:** CC BY 4.0 je doložená len pri Ministerstve obrany a ArmyInform. Pri GŠ a DSNS nie —
+  text licenciu netvrdí a návrh upozorní „zverejni len so súhlasom vlastníka" (CLAUDE.md pravidlo 7).
+- **YouTube sa nepreberá:** podmienky YouTube nedovoľujú video stiahnuť a nahrať inde; OKO ho len vkladá.
+  Video z Telegramu sa zo stránky náhľadu stiahnuť nedá (len embed) — preto z Telegramu len fotky.
+- Médiá sa sťahujú len z `*.telesco.pe`, `*.cdn-telegram.org`, `armyinform.com.ua` (https, bez presmerovania,
+  fotka ≤ 12 MB, video ≤ 150 MB). Adresy fotiek na CDN Telegramu expirujú — zlyhaný záber sa 6 h preskočí
+  a príde na rad ďalší príspevok.
+- Redakčné pravidlá vlastníka z Týždňa na fronte platia aj tu: „ruský agresor", „ruské útoky", počty stretov
+  vždy s „podľa ukrajinského generálneho štábu", poskytovateľ mapy frontu sa nemenuje (zdroj = mapa frontu
+  okolive.sk).
+- Karta (`card.js`) vie nové výrezy (`view`), plochy (`polygons`), farebné body s popiskami bez prekrývania
+  a rám pre cudziu fotku (`renderPhotoCard`).
+- Admin → Štúdio → **Ukrajina**: prah vzdušného útoku, vypínač záberov, denný strop záberov.
+
 ## TODO (čo sa nedá spraviť z kódu)
 
 - **Týždeň na fronte na inom stroji.** Dnes beží na tom istom počítači ako portál, len
@@ -297,3 +329,4 @@ Admin → Údržba → Upozornenia (`src/admin/server/alerts.js`). Predvolene vy
 - **Hlas vlastníka v reeloch.** Čaká na `AI_TRANSLATORS_MCP_URL` a `AI_TRANSLATORS_MCP_KEY`
   v `.env` servera.
 - **Najlepší čas** začne radiť až po 5 príspevkoch zverejnených cez Meta API.
+- **Licencia záberov GŠ a DSNS.** Pred zverejnením ich fotiek overiť podmienky (MO a ArmyInform majú CC BY 4.0).

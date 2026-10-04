@@ -205,3 +205,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .admin-alerts-form .admin-check input[type=email], .admin-alerts-form .admin-check input[type=number] { height: auto; width: 260px; margin-left: 6px; padding: 5px 8px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text); font: inherit; max-width: 100%; }
 .admin-alerts-form .admin-check input[type=number] { width: 90px; }
 @media (max-width: 760px) { .admin-studio-slides { max-width: 100%; } .admin-alerts-form .admin-check input[type=email] { width: 100%; margin: 4px 0 0; } }
+
+/* Štúdio · Ukrajina: krátke číselné polia v texte nastavenia */
+.admin-check .admin-input-sm { height: auto; width: 70px; margin: 0 6px; padding: 5px 8px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text); font: inherit; }
