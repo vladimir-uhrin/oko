@@ -75,6 +75,7 @@ import {
   selectTrackedSubjectContext,
 } from './contextStore.js';
 import { CONTACT_MATCH_TIER, contactMatchWins, rankContactMatch } from './contactMatch.js';
+import { searchAircraft } from './aircraftSearch.js';
 import { holdContinuousRender, releaseContinuousRender } from '../renderGovernor.js';
 import { createSquawkWatch } from './squawkWatch.js';
 import { createProfileStore } from './flightProfile.js';
@@ -4121,6 +4122,34 @@ const militaryFlightsLayer = {
    * @returns {{icao24: string, callsign: string|null, position: Cesium.Cartesian3, latitude: number, longitude: number, altitudeM: number, velocityMps: number|null, track: number|null}|null}
    *   Best match with a cloned, dead-reckoned position, or null if none.
    */
+  /**
+   * Jednotné hľadanie (2026-10-04): všetky živé lietadlá tejto vrstvy, ktoré sedia na typ, prevádzkovateľa,
+   * registráciu, volací znak alebo hex (aircraftSearch.js) — zoznam pre paletu, nie jeden „najlepší".
+   * @param {string} query
+   * @returns {{hex: string, callsign: string|null, registration: string|null, typeCode: string|null, typeName: string|null,
+   *   operator: string|null, lat: number|null, lon: number|null, onGround: boolean, score: number}[]}
+   */
+  searchContacts(query, { limit = 20 } = {}) {
+    if (!_flightData || _flightData.size === 0) return [];
+    function* records() {
+      for (const [icao24, info] of _flightData) {
+        yield {
+          hex: icao24,
+          callsign: String(info?.callsign || '').trim() || null,
+          registration: info?.registration || null,
+          typeCode: info?.type || null,
+          typeName: info?.desc || null,
+          operator: info?.operator || null,
+          military: true,
+          lat: Number.isFinite(info?.rawLat) ? info.rawLat : null,
+          lon: Number.isFinite(info?.rawLon) ? info.rawLon : null,
+          onGround: info?.onGround === true,
+        };
+      }
+    }
+    return searchAircraft(records(), query, { limit });
+  },
+
   findByQuery(query) {
     if (!_flightData || _flightData.size === 0) return null;
     const q = String(query || '').trim().toLowerCase();

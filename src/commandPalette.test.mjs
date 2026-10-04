@@ -110,7 +110,47 @@ test('prázdne hľadanie nezačína Ukrajinou: zobrazenie (úvodný pohľad) →
   const { readFileSync } = await import('node:fs');
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   // 09-27: sledované lety prihláseného sú úplne navrchu (followedFlights.js)
-  assert.ok(main.includes("groupOrder: ['follows', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],"));
+  // 10-04: lietadlá (živé, potom celý svet) hneď za sledovanými letmi — jednotné hľadanie lietadla
+  assert.ok(main.includes("groupOrder: ['follows', 'aircraft', 'aircraft-world', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],"));
   assert.match(main, /cmds\.push\(\{ id: 'view:home', label: t\('cmd\.action\.home'\)[^\n]*resetToGlobeView\(\{ home: true \}\)/);
   assert.ok(main.indexOf("id: 'view:home'") < main.indexOf("id: 'view:world'"), 'úvodný pohľad je prvý riadok zobrazenia');
+});
+
+test('jednotné hľadanie: lietadlá podľa dopytu hneď, svet neskôr bez preskočenia výberu, miesto vždy posledné', async () => {
+  const doc = fakeDoc();
+  const geo = []; const ran = [];
+  let resolveWorld;
+  const asked = [];
+  const p = createCommandPalette({
+    documentRef: doc, translate: (k, v) => (v ? `${k}:${v.q ?? ''}` : k),
+    getCommands: () => [{ id: 'l', label: 'Lietadlá', group: 'layer', run() {} }],
+    getQueryCommands: (q) => (q === 'ruslan' ? [{ id: 'ac:508035', label: 'ADB3017 · An-124', group: 'aircraft', run: () => ran.push('live') }] : []),
+    getAsyncResults: (q) => { asked.push(q); return new Promise((r) => { resolveWorld = r; }); },
+    asyncGroup: 'aircraft-world', asyncDelayMs: 0,
+    groupOrder: ['aircraft', 'aircraft-world', 'layer'],
+    onGeocode: (q) => geo.push(q),
+  });
+  const st = p._getStateForTest();
+  p.open('ruslan');
+  assert.equal(st.input.value, 'ruslan', 'open(dopyt) predvyplní pole');
+  let rows = rowsOf(st.results);
+  assert.equal(rows[0].children[0].textContent, 'ADB3017 · An-124', 'živé lietadlo navrchu');
+  assert.ok(st.results.children.some((c) => c.className.includes('oko-cmd-pending')), 'ukazuje „hľadám vo svete"');
+  assert.equal(rows.at(-1).children[0].textContent, 'cmd.geocode:ruslan', 'miesto na mape je posledné');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(asked, ['ruslan']);
+  st.input.dispatch('keydown', { key: 'ArrowDown' }); // používateľ stojí na „miesto"
+  resolveWorld([
+    { id: 'ac:508035', label: 'duplicita', group: 'aircraft-world', run() {} },
+    { id: 'ac:50803a', label: 'ADB4022 · An-124', group: 'aircraft-world', run: () => ran.push('world') },
+    { id: 'n', kind: 'note', group: 'aircraft-world', label: 'zdroj adsb.lol' },
+  ]);
+  await new Promise((r) => setTimeout(r, 5));
+  rows = rowsOf(st.results);
+  assert.deepEqual(rows.map((r) => r.children[0].textContent), ['ADB3017 · An-124', 'ADB4022 · An-124', 'cmd.geocode:ruslan'], 'duplicita zo sveta vypadne');
+  assert.ok(!st.results.children.some((c) => c.className.includes('oko-cmd-pending')));
+  assert.ok(st.results.children.some((c) => c.textContent === 'zdroj adsb.lol'), 'poznámka je text, nie riadok');
+  assert.equal(st.sel(), 2, 'výber ostal na mieste, kde stál');
+  st.input.dispatch('keydown', { key: 'Enter' });
+  assert.deepEqual(geo, ['ruslan']);
 });

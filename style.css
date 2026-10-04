@@ -13054,6 +13054,13 @@ body.oko-karta-clean .oko-conflicts-launch, body.oko-karta-clean .oko-conflicts-
 .oko-cmd-label { font-family: var(--font-sans); font-size: 14px; color: #eaf4fb; }
 .oko-cmd-hint { font-family: var(--font-mono); font-size: 11px; color: #7f93a6; margin-left: auto; white-space: nowrap; }
 .oko-cmd-empty { padding: 16px; text-align: center; color: #7f93a6; font-family: var(--font-mono); font-size: 12px; }
+/* Jednotné hľadanie lietadla (2026-10-04): poznámky skupiny (hľadám, zdroj, nelieta) a dlhé hinty bez pretečenia. */
+.oko-cmd-note { padding: 6px 10px 8px; color: #7f93a6; font-family: var(--font-mono); font-size: 11px; line-height: 1.45; }
+.oko-cmd-pending::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--accent, #00d4ff);
+  vertical-align: 1px; animation: oko-cmd-pulse 1s ease-in-out infinite; }
+@keyframes oko-cmd-pulse { 50% { opacity: 0.25; } }
+.oko-cmd-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oko-cmd-hint { min-width: 0; max-width: 48%; overflow: hidden; text-overflow: ellipsis; }
 
 /* =====================================================================
    REŽIM MAPY (2026-09-24, vlastník: „prehľadnosť ako špičkové portály"):

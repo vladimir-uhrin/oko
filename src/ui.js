@@ -1,3 +1,4 @@
+import { looksLikeAircraftQuery } from './data/aircraftSearch.js';
 import * as Cesium from 'cesium';
 import { t } from './i18n.js';
 import { applyGlobeLighting } from './globeLighting.js';
@@ -10301,6 +10302,15 @@ export class StyleManager {
       if (e.key === 'Enter') {
         const query = this._locationSearch.value.trim();
         if (!query) return;
+        // Jednotné hľadanie (2026-10-04): typ, registrácia, volací znak či hex lietadla otvorí paletu
+        // s lietadlami (miesto na mape ostáva jej posledným riadkom).
+        const palette = window.__godsEyeView?.commandPalette;
+        if (!this._disposed && palette?.open && looksLikeAircraftQuery(query)) {
+          // Fokus si vezme pole palety (open), takže toto pole sa uvoľní samo.
+          this._locationSearch.value = '';
+          palette.open(query);
+          return;
+        }
         const generation = this._beginDeferredNavigation('location');
         if (generation === false) {
           this._locationSearch.classList.remove('searching');

@@ -36,6 +36,7 @@ import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
+import { createAircraftSearchService } from './src/data/aircraftSearchService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
@@ -7953,6 +7954,21 @@ function cctvProxy() {
  *
  * @returns {import('vite').Plugin}
  */
+/**
+ * Jednotné hľadanie lietadla (2026-10-04): GET /api/aircraft-search?q= — celosvetovo cez adsb.lol
+ * (typ, registrácia, volací znak, hex). Fronta, cache a pauza po 429 sú v aircraftSearchService.js.
+ * @returns {import('vite').Plugin}
+ */
+function aircraftSearchPlugin() {
+  const service = createAircraftSearchService();
+  return {
+    name: 'oko-aircraft-search',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => { void service.middleware(req, res, next); });
+    },
+  };
+}
+
 function adsbLolProxy() {
   /** @type {string|null} Cached upstream JSON body. */
   let _cache = null;
@@ -11271,6 +11287,7 @@ export default defineConfig(({ mode }) => {
       radioBrowserProxy(),
       gbfsProxy(),
       adsbLolProxy(),
+      aircraftSearchPlugin(),
       aisLiveProxy(),
       aiscastVesselsProxy(),
       gfwPresenceProxy(),

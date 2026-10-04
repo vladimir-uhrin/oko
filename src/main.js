@@ -75,6 +75,7 @@ import { createConflictsPanel } from './conflictsPanel.js';
 import { createCommandPalette } from './commandPalette.js';
 import { LAYER_GROUP_ORDER, isCatalogLayer, layerGroup, layerKeywords } from './layerCategories.js';
 import { flyToGlobeView, searchAndFlyTo } from './locations.js';
+import { createAircraftSearchCommands } from './aircraftSearchCommands.js';
 import { buildConflictDigest } from './conflictSummary.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
@@ -1108,13 +1109,22 @@ async function init() {
       cmds.push({ id: 'view:conflicts', label: t('cmd.action.conflicts'), group: 'view', keywords: ['kartičky', 'export', 'cards'], run: () => { conflictsPanel?.open(); } });
       return cmds;
     };
+    // Jednotné hľadanie lietadla (2026-10-04): živé lietadlá z pamäte + celý svet zo servera.
+    const aircraftSearch = createAircraftSearchCommands({
+      flights: flightsLayer, military: militaryFlightsLayer, dataManager, viewer, Cesium, translate: t,
+      notify: (text) => styleManager._showToast(text, { durationMs: 4500 }),
+    });
     const commandPalette = createCommandPalette({
       translate: t,
       getCommands: buildCommands,
+      getQueryCommands: (q) => aircraftSearch.queryCommands(q),
+      getAsyncResults: (q) => aircraftSearch.asyncResults(q),
+      asyncGroup: 'aircraft-world',
       // Poradie (2026-09-27, vlastník o lupe: „toto tlačidlo patrí Ukrajine" — prázdne hľadanie
       // začínalo 12 smermi frontu): zobrazenie → vrstvy (podľa témy) → konflikty (podľa regiónu).
       // Sledované lety prihláseného (09-27) úplne navrchu — sú to jeho vlastné položky.
-      groupOrder: ['follows', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
+      // Lietadlá (živé, potom celý svet) idú hneď za sledované lety — to je to, čo človek píše najčastejšie.
+      groupOrder: ['follows', 'aircraft', 'aircraft-world', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
       onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
     });
     window.__godsEyeView.commandPalette = commandPalette;

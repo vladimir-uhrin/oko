@@ -6,6 +6,11 @@
  * žiadne odborné výrazy. Otvára sa klávesou „/" alebo tlačidlom; píšeš, ono
  * skočí alebo prepne. Štýl a jednoduchosť ako zvyšok OKO. Samostatný ostrov —
  * geometria je v style.css (test overlayIslands).
+ *
+ * Jednotné hľadanie (2026-10-04): okrem statických príkazov aj výsledky podľa dopytu
+ * (`getQueryCommands` — živé lietadlá v pamäti, už vybrané, bez ďalšieho skóre) a neskoršie
+ * výsledky zo servera (`getAsyncResults` — lietadlo kdekoľvek na svete). Miesto na mape je
+ * vždy posledný riadok, takže jedno pole nájde lietadlo, vrstvu, konflikt aj adresu.
  */
 export const COMMAND_PALETTE_ID = 'oko-cmd';
 /** Poradie skupín vo výsledkoch (ľudské názvy dodá i18n `cmd.group.<key>`). */
@@ -55,6 +60,10 @@ function el(doc, tag, cls, text) {
  * @param {(query: string) => any} [o.onGeocode] núdzové „hľadať na mape", keď nič nesadne
  * @param {ReadonlyArray<string>} [o.groupOrder] poradie skupín vo výsledkoch (ľudské názvy dodá i18n)
  * @param {number} [o.limit] koľko výsledkov naraz (prázdny dopyt = listovanie katalógu, treba vyšší strop)
+ * @param {(query: string) => ReadonlyArray<object>} [o.getQueryCommands] príkazy pre konkrétny dopyt (už vybrané)
+ * @param {(query: string) => Promise<ReadonlyArray<object>>} [o.getAsyncResults] neskoršie výsledky (server); `kind: 'note'` = len text
+ * @param {string} [o.asyncGroup] skupina, v ktorej sa ukáže „hľadám…"
+ * @param {number} [o.asyncDelayMs] odstup od posledného písmena pred dopytom na server
  */
 export function createCommandPalette({
   documentRef = globalThis.document,
@@ -63,6 +72,11 @@ export function createCommandPalette({
   onGeocode = null,
   groupOrder = COMMAND_GROUP_ORDER,
   limit = 80,
+  getQueryCommands = null,
+  getAsyncResults = null,
+  asyncGroup = 'async',
+  asyncDelayMs = 450,
+  minAsyncLength = 2,
 } = {}) {
   const doc = documentRef;
   const inert = { id: COMMAND_PALETTE_ID, open() {}, close() {}, toggle() {}, isOpen: () => false, destroy() {}, _getStateForTest: () => ({}) };
@@ -72,6 +86,8 @@ export function createCommandPalette({
   let _rows = []; // [{ node, run }]
   let _sel = -1;
   let _destroyed = false;
+  const _asyncCache = new Map(); // dopyt → príkazy (alebo null = práve beží)
+  let _asyncTimer = null;
 
   const root = el(doc, 'div', 'oko-cmd');
   root.id = COMMAND_PALETTE_ID;
@@ -96,19 +112,48 @@ export function createCommandPalette({
     _rows.forEach((r, idx) => r.node.classList.toggle('is-sel', idx === _sel));
     try { _rows[_sel].node.scrollIntoView({ block: 'nearest' }); } catch { /* */ }
   }
+  function scheduleAsync(q) {
+    clearTimeout(_asyncTimer);
+    if (typeof getAsyncResults !== 'function' || q.length < minAsyncLength || _asyncCache.has(q)) return;
+    _asyncTimer = setTimeout(() => {
+      _asyncCache.set(q, null);
+      Promise.resolve().then(() => getAsyncResults(q)).then(
+        (cmds) => { _asyncCache.set(q, Array.isArray(cmds) ? cmds : []); },
+        () => { _asyncCache.delete(q); },
+      ).finally(() => {
+        if (_asyncCache.size > 50) _asyncCache.delete(_asyncCache.keys().next().value);
+        if (_open && input.value.trim() === q) render();
+      });
+    }, asyncDelayMs);
+  }
   function render() {
     const q = input.value;
+    const qt = q.trim();
+    const keep = _rows[_sel]?.id ?? null;
     const found = searchCommands(getCommands(), q, { limit });
+    let dynamic = [];
+    if (qt.length >= minAsyncLength && typeof getQueryCommands === 'function') {
+      try { dynamic = [...(getQueryCommands(qt) || [])]; } catch { dynamic = []; }
+    }
+    const seen = new Set(dynamic.map((c) => c.id));
+    const later = _asyncCache.get(qt);
+    // Beží (null) alebo sa práve naplánuje (undefined pri dostatočne dlhom dopyte).
+    const pending = later === null || (later === undefined && qt.length >= minAsyncLength && typeof getAsyncResults === 'function');
+    const asyncCmds = (later || []).filter((c) => c.kind === 'note' || !seen.has(c.id));
+    scheduleAsync(qt);
     results.replaceChildren();
     _rows = [];
     const groups = new Map();
-    for (const c of found) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
+    for (const c of [...dynamic, ...asyncCmds, ...found]) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
+    if (pending && !groups.has(asyncGroup)) groups.set(asyncGroup, []);
     const order = [...groupOrder, ...[...groups.keys()].filter((g) => !groupOrder.includes(g))];
     for (const g of order) {
       const items = groups.get(g);
-      if (!items || !items.length) continue;
+      if (!items || (!items.length && !(pending && g === asyncGroup))) continue;
       results.append(el(doc, 'div', 'oko-cmd-group', translate(`cmd.group.${g}`)));
+      if (pending && g === asyncGroup) results.append(el(doc, 'div', 'oko-cmd-note oko-cmd-pending', translate('cmd.searching')));
       for (const c of items) {
+        if (c.kind === 'note') { results.append(el(doc, 'div', 'oko-cmd-note', c.label)); continue; }
         const row = el(doc, 'button', 'oko-cmd-row');
         row.type = 'button';
         row.append(el(doc, 'span', 'oko-cmd-label', c.label));
@@ -116,27 +161,30 @@ export function createCommandPalette({
         row.addEventListener('click', () => runCommand(c));
         row.addEventListener('mousemove', () => select(_rows.findIndex((r) => r.node === row)));
         results.append(row);
-        _rows.push({ node: row, run: () => runCommand(c) });
+        _rows.push({ id: c.id, node: row, run: () => runCommand(c) });
       }
     }
-    // Núdzové hľadanie miesta na mape, keď nič nesadne a máme geokóder.
-    if (!found.length && q.trim() && typeof onGeocode === 'function') {
+    // Miesto na mape: vždy posledný riadok (jednotné hľadanie), skupina „Miesto".
+    if (qt && typeof onGeocode === 'function') {
+      if (found.length || dynamic.length || asyncCmds.length || pending) results.append(el(doc, 'div', 'oko-cmd-group', translate('cmd.group.place')));
       const row = el(doc, 'button', 'oko-cmd-row');
       row.type = 'button';
       row.append(el(doc, 'span', 'oko-cmd-label', translate('cmd.geocode', { q: q.trim() })));
       const q2 = q.trim();
       row.addEventListener('click', () => { close(); try { onGeocode(q2); } catch { /* */ } });
       results.append(row);
-      _rows.push({ node: row, run: () => { close(); try { onGeocode(q2); } catch { /* */ } } });
+      _rows.push({ id: 'geocode', node: row, run: () => { close(); try { onGeocode(q2); } catch { /* */ } } });
     }
-    if (!_rows.length) results.append(el(doc, 'div', 'oko-cmd-empty', translate('cmd.empty')));
-    select(_rows.length ? 0 : -1);
+    if (!_rows.length && !pending) results.append(el(doc, 'div', 'oko-cmd-empty', translate('cmd.empty')));
+    // Neskorší výsledok nesmie preskočiť výber, na ktorom už používateľ stojí.
+    const kept = keep ? _rows.findIndex((r) => r.id === keep) : -1;
+    select(kept >= 0 ? kept : _rows.length ? 0 : -1);
   }
 
-  function open() {
+  function open(initial = '') {
     if (_open) return;
     _open = true; root.hidden = false;
-    input.value = '';
+    input.value = typeof initial === 'string' ? initial : '';
     render();
     try { input.focus(); } catch { /* */ }
   }
@@ -144,6 +192,7 @@ export function createCommandPalette({
     if (!_open) return;
     _open = false; root.hidden = true;
     _rows = []; _sel = -1;
+    clearTimeout(_asyncTimer);
   }
   function toggle() { if (_open) close(); else open(); }
 
@@ -168,6 +217,7 @@ export function createCommandPalette({
 
   function destroy() {
     _destroyed = true;
+    clearTimeout(_asyncTimer);
     try { doc.removeEventListener('keydown', onDocKey); } catch { /* */ }
     try { root.remove(); } catch { /* */ }
   }
