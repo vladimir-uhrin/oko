@@ -193,6 +193,10 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     item.setAttribute('role', 'menuitem'); item.dataset.page = key; item.append(el('span', '', navIcons[key]), el('span', '', t(label)));
     menu.append(item); menuItems.push(item);
   }
+  // Len vlastníkovi (rola owner): admin je samostatná stránka v novej karte; server ho aj tak púšťa len vlastníkovi.
+  const menuAdmin = btn('auth-menu-item', '', () => { closeMenu(); window.open('/admin.html', '_blank', 'noopener'); });
+  menuAdmin.setAttribute('role', 'menuitem'); menuAdmin.hidden = true; menuAdmin.append(el('span', '', '⚙︎'), el('span', '', t('auth.admin')));
+  menu.append(menuAdmin); menuItems.push(menuAdmin);
   menu.append(el('hr', 'auth-menu-sep'));
   const menuLogout = btn('auth-menu-item auth-menu-logout', '', () => { closeMenu(); if (!client.getState().busy) void action(() => client.logout(), 'auth.logged-out'); });
   menuLogout.setAttribute('role', 'menuitem'); menuLogout.append(el('span', '', '⏻'), el('span', '', t('auth.logout'))); menu.append(menuLogout); menuItems.push(menuLogout);
@@ -469,7 +473,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     opener.setAttribute('aria-label', opener.title); opener.setAttribute('aria-expanded', String(dialog.open || menuOpen));
     opener.setAttribute('aria-haspopup', loggedIn ? 'menu' : 'dialog'); opener.setAttribute('aria-controls', loggedIn ? menu.id : dialog.id);
     if (!loggedIn) closeMenu();
-    menuName.textContent = user?.displayName || ''; menuEmail.textContent = user?.email || ''; menuBadge.hidden = user?.role !== 'owner'; menuLogout.disabled = state.busy;
+    menuName.textContent = user?.displayName || ''; menuEmail.textContent = user?.email || ''; menuBadge.hidden = user?.role !== 'owner'; menuAdmin.hidden = user?.role !== 'owner'; menuLogout.disabled = state.busy;
     dialog.dataset.authenticated = String(showAccount);
     // Guest layout: hero column only for the plain sign-in/registration view.
     const plainGuest = !showAccount && !linkMode && !unavailable && !checking;
