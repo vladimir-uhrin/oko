@@ -106,7 +106,12 @@ for (const [W, H] of SIZES) {
     // Zmena len za # stránku nenačíta — predmet (subj=) sa obnovuje iba pri štarte.
     await page.goto('about:blank');
     await page.goto(`${BASE}/?qaBasemap=osm${hash}`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    await page.waitForFunction(() => document.getElementById('loading-screen')?.classList.contains('hidden'), { timeout: 180_000, polling: 1000 });
+    // Trieda hidden príde hneď, preloader však ešte sekundy doznieva — merať až po úplnom zmiznutí
+    // (naživo 390 px raz zmerali kartu uprostred prechodu).
+    await page.waitForFunction(() => {
+      const el = document.getElementById('loading-screen');
+      return el?.classList.contains('hidden') && (getComputedStyle(el).display === 'none' || Number(getComputedStyle(el).opacity) === 0);
+    }, { timeout: 180_000, polling: 500 });
     await sleep(4000);
     // Naživo (okolive.sk) prvá návšteva ukáže lištu súhlasu cez spodok — odmietni ako človek
     // (voľba ostane v prehliadači pre ďalšie veľkosti).
