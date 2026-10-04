@@ -90,7 +90,8 @@ export function authPlugin(env = process.env) {
       try {
         const user = ensure().identify(req, res, { mutation });
         // Jedno vlastníctvo (2026-10-03): rola `owner` z DB (scripts/create-owner.mjs) platí rovnako ako OKO_OWNER_EMAILS.
-        return Boolean(user && (user.role === 'owner' || ownerEmails.includes(user.email)));
+        // E-mail z OKO_OWNER_EMAILS len pre overený účet (registrácia e-mail neoveruje).
+        return Boolean(user && (user.role === 'owner' || (user.emailVerified && ownerEmails.includes(user.email))));
       } catch { return false; }
     },
     ownerEmails: () => [...ownerEmails],

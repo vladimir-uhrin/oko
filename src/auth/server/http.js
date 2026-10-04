@@ -112,7 +112,10 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
   oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args), adminSources = {}, ownerEmails = [] }) {
   let lastPrune = 0;
   // Jedno vlastníctvo (2026-10-03): admin pustí rolu `owner` z DB AJ účty z OKO_OWNER_EMAILS (udalosti).
-  const isOwnerSession = session => Boolean(session?.user_id && (session.role === 'owner' || ownerEmails.includes(String(session.email || '').toLowerCase())));
+  // 2026-10-04: e-mail z OKO_OWNER_EMAILS platí len pre OVERENÝ účet — registrácia e-mail neoveruje, takže
+  // neobsadenú adresu vlastníka by si inak mohol zaregistrovať ktokoľvek a dostať admin.
+  const isOwnerSession = session => Boolean(session?.user_id && (session.role === 'owner'
+    || (session.email_verified && ownerEmails.includes(String(session.email || '').toLowerCase()))));
   const handleAdmin = createAdminRoutes({ store, now, idleMs: SESSION_IDLE_MS, sources: adminSources, isOwnerSession });
   const pendingRecovery = new Set();
   const oauthStates = createOAuthStateStore({ now });
@@ -611,7 +614,8 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
   function identify(req, res, { mutation = false } = {}) {
     try {
       const ctx = context(req, res, { required: true, mutation });
-      return { id: ctx.session.user_id, email: String(ctx.session.email || '').toLowerCase(), role: ctx.session.role || 'member' };
+      return { id: ctx.session.user_id, email: String(ctx.session.email || '').toLowerCase(), role: ctx.session.role || 'member',
+        emailVerified: Boolean(ctx.session.email_verified) };
     } catch { return null; }
   }
   return { middleware, requireAuthenticated, identify, close: async () => { await Promise.allSettled([...pendingRecovery]); } };

@@ -314,10 +314,14 @@ test('Štúdio Fáza 3 cez admin API: naplánovať, kalendár, zrušiť, výkon'
   assert.ok(audit.includes('studio_scheduled') && audit.includes('studio_unscheduled'));
 });
 
-test('jedno vlastníctvo: účet z OKO_OWNER_EMAILS dostane admin aj bez roly owner', async t => {
+test('jedno vlastníctvo: OVERENÝ účet z OKO_OWNER_EMAILS dostane admin aj bez roly owner', async t => {
   const env = await fixture(t, { ownerEmails: [credentials.email] });
   const member = env.client();
-  assert.equal((await member.register()).status, 201);
+  const registered = await member.register();
+  assert.equal(registered.status, 201);
+  // Registrácia e-mail neoveruje: kto si zaregistruje neobsadenú adresu vlastníka, admin nedostane.
+  assert.equal((await member.request('/api/admin/overview')).status, 404, 'neoverený e-mail vlastníka');
+  env.store.verifyEmail(registered.data.user.id);
   assert.equal((await member.request('/api/admin/overview')).status, 200);
   const stranger = env.client();
   assert.equal((await stranger.register({ email: 'other@example.com', password: 'another long password phrase', displayName: 'Other' })).status, 201);
