@@ -37,6 +37,11 @@ const header = (req, name) => {
 function cleanText(raw, max = 60) {
   let text = raw;
   try { text = decodeURIComponent(raw); } catch { /* nechať tak */ }
+  // Cloudflare posiela UTF-8 bajty, Node hlavičku číta ako Latin-1 („IÅ¾a" → „Iža").
+  if (/[\u0080-\u00ff]/.test(text)) {
+    const utf8 = Buffer.from(text, 'latin1').toString('utf8');
+    if (!utf8.includes('\ufffd')) text = utf8;
+  }
   text = text.replace(/[\u0000-\u001f<>]/g, '').trim();
   return text.slice(0, max);
 }

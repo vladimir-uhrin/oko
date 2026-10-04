@@ -293,3 +293,11 @@ test('záznam návštev: IP, poloha, čas na stránke z pingu, hľadanie, DNT ni
   store.prune(clock.time + 31 * 86400_000);
   assert.equal(store.visitLog({ from: 0 }).total, 0, 'po 30 dňoch zmizne');
 });
+
+test('mesto z Cloudflare: UTF-8 bajty v hlavičke (Node ich číta ako Latin-1) aj percent-kódovanie dajú diakritiku', async () => {
+  const { geoFromRequest } = await import('./liveGeo.js');
+  const raw = Buffer.from('Iža', 'utf8').toString('latin1');
+  assert.equal(geoFromRequest({ headers: { 'cf-ipcountry': 'SK', 'cf-ipcity': raw } }).city, 'Iža');
+  assert.equal(geoFromRequest({ headers: { 'cf-ipcountry': 'SK', 'cf-ipcity': 'Ko%C5%A1ice' } }).city, 'Košice');
+  assert.equal(geoFromRequest({ headers: { 'cf-ipcountry': 'DE', 'cf-ipcity': 'München' } }).city, 'München', 'skutočný Latin-1 text ostane');
+});
