@@ -3,6 +3,8 @@ import { openAuthStore } from './store.js';
 import { createAuthService, parseOrigins, parseOwnerEmails } from './http.js';
 import { createWebhookMailer } from './mail.js';
 import { oauthProvidersFromEnv } from './oauth.js';
+import { createAdminSources } from './adminSources.js';
+import { getAdminRuntime } from '../../admin/server/plugin.js';
 
 export const AUTH_FILE_DENY = ['**/.auth-data/**', '**/*.sqlite*', '**/*.db', '**/*.db-*'];
 
@@ -23,16 +25,21 @@ export function authPlugin(env = process.env) {
   const ensure = () => {
     if (!auth) {
       store = openAuthStore(filename);
-      auth = createAuthService({ store, origins, mailer, oauthProviders, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
+      // Admin panel (2026-10-03): stav feedov sa číta z /status endpointov tohto istého servera.
+      const adminSources = createAdminSources({ root, dbFile: filename, port: () => currentServer?.httpServer?.address()?.port ?? null,
+        runtime: getAdminRuntime });
+      auth = createAuthService({ store, origins, mailer, oauthProviders, adminSources, ownerEmails, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
     }
     return auth;
   };
+  let currentServer = null;
   const install = server => {
+    currentServer = server;
     server.middlewares.use((req, res, next) => {
       let decoded;
       try { decoded = decodeURIComponent((req.url || '').split('?')[0]).replaceAll('\\', '/'); }
       catch { res.statusCode = 400; res.end(); return; }
-      if (decoded === '/account.html') {
+      if (decoded === '/account.html' || decoded === '/admin.html') {
         // Vite's HTML middleware sets its own Cache-Control later. Keep the
         // standalone token-confirmation page's protections on the final response.
         const locked = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
@@ -53,10 +60,11 @@ export function authPlugin(env = process.env) {
       // Defense in depth for Vite /@fs, ?raw and databases with custom names.
       if (decoded.includes('/.auth-data/') || /\.(sqlite[^/]*|db(?:-[^/]*)?)$/i.test(decoded)
         || decoded.toLowerCase().includes(filename.replaceAll('\\', '/').toLowerCase())
-        || decoded.startsWith('/src/auth/server/')) {
+        || decoded.startsWith('/src/auth/server/') || decoded.startsWith('/src/admin/server/')) {
         res.statusCode = 403; res.end('Forbidden'); return;
       }
-      if (!(decoded === '/api/account' || decoded.startsWith('/api/account/') || decoded === '/api/auth' || decoded.startsWith('/api/auth/'))) return next();
+      if (!(decoded === '/api/account' || decoded.startsWith('/api/account/') || decoded === '/api/auth' || decoded.startsWith('/api/auth/')
+        || decoded === '/api/admin' || decoded.startsWith('/api/admin/'))) return next();
       // Do not let encoded aliases reach a later middleware without the guard.
       if (decoded !== (req.url || '').split('?')[0]) { res.statusCode = 400; res.end(); return; }
       try {
@@ -78,10 +86,11 @@ export function authPlugin(env = process.env) {
      * bez účtov v OKO_OWNER_EMAILS vždy false. Nikdy nevyhodí chybu.
      */
     isOwnerRequest(req, res, { mutation = false } = {}) {
-      if (!ownerEmails.length || !filename) return false;
+      if (!filename) return false;
       try {
         const user = ensure().identify(req, res, { mutation });
-        return Boolean(user && ownerEmails.includes(user.email));
+        // Jedno vlastníctvo (2026-10-03): rola `owner` z DB (scripts/create-owner.mjs) platí rovnako ako OKO_OWNER_EMAILS.
+        return Boolean(user && (user.role === 'owner' || ownerEmails.includes(user.email)));
       } catch { return false; }
     },
     ownerEmails: () => [...ownerEmails],

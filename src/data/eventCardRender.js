@@ -62,10 +62,11 @@ export function createEventCardRenderer({
 } = {}) {
   const loadBasemap = basemapLoader({ dataDir, readFile });
   const getSharp = sharpOnce(sharpLoader);
-  return async function render(event, format = 'og') {
+  return async function render(event, format = 'og', { frame = null } = {}) {
     const fmt = CARD_FORMATS[format] ? format : 'og';
     const { marine, borders } = loadBasemap();
-    const svg = buildEventCardSvg(event, { format: fmt, marine, borders });
+    // `frame` (2026-10-04, karusel do Štúdia): snímka v čase momentu — stopa po t, aktuálny moment zvýraznený.
+    const svg = buildEventCardSvg(event, { format: fmt, marine, borders, frame });
     const sharp = await getSharp();
     const jpeg = await sharp(Buffer.from(svg)).jpeg({ quality: CARD_JPEG_QUALITY }).toBuffer();
     return { jpeg, width: CARD_FORMATS[fmt].w, height: CARD_FORMATS[fmt].h, format: fmt };

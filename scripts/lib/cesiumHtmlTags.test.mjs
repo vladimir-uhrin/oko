@@ -31,6 +31,6 @@ test('bez verzie len defer; verzia sa zakóduje; prázdny vstup = prázdne pole'
 test('vite.config.js obaľuje transformIndexHtml pluginu touto funkciou s verziou z node_modules/cesium', () => {
   const config = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
   assert.match(config, /import \{ versionedDeferredCesiumTags \} from '\.\/scripts\/lib\/cesiumHtmlTags\.mjs';/);
-  assert.match(config, /cesiumGlobe\.transformIndexHtml = function \(html, context\) \{\s*if \(context\.path === '\/account\.html'\) return \[\];\s*return versionedDeferredCesiumTags\(cesiumHtml\.call\(this, html, context\), cesiumVersion\);/);
+  assert.match(config, /cesiumGlobe\.transformIndexHtml = function \(html, context\) \{\s*if \(context\.path === '\/account\.html' \|\| context\.path === '\/admin\.html'\) return \[\];\s*return versionedDeferredCesiumTags\(cesiumHtml\.call\(this, html, context\), cesiumVersion\);/);
   assert.match(config, /node_modules', 'cesium', 'package\.json'/);
 });
