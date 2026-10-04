@@ -2,8 +2,8 @@
 /**
  * @module flightReplay
  * @description Prehrávanie historického letu na glóbuse (2026-09-07):
- * trasa ako čiara zafarbená podľa výšky (nízko jantárová → cestovná
- * azúrová → vysoko biela), značka lietadla (rovnaká silueta a orientácia
+ * trasa ako čiara zafarbená podľa výšky (od 2026-10-04 tá istá stupnica ako živá
+ * trajektória: pri zemi oranžovo-červená → žltá → zelená → modrá → fialová), značka lietadla (rovnaká silueta a orientácia
  * ako živá flotila — iconOrientation.js) a hodiny prehrávania s rýchlosťou
  * 1×–300×. Jeden prehrávač na scénu; `load()` nahradí predošlý let.
  *
@@ -14,32 +14,17 @@ import * as Cesium from 'cesium';
 import { bridgeCoverageGaps, interpolateFix } from './data/flightHistory.js';
 import { aircraftIcon } from './data/aircraftIcons.js';
 import { screenProjectedRotation, stabilizeScreenRotation } from './data/iconOrientation.js';
+import { trailAltitudeRgb } from './data/trailStyle.js';
 
 export const REPLAY_SPEEDS = Object.freeze([1, 10, 60, 300]);
 export const REPLAY_TRACK_WIDTH_PX = 3;
-/** Farebná škála výšky (m): jantárová pri zemi, azúrová v cestovnej hladine, biela nad ňou. */
-export const REPLAY_ALTITUDE_STOPS = Object.freeze([
-  [0, [1.0, 0.70, 0.28]],
-  [6_000, [0.55, 0.85, 0.75]],
-  [11_000, [0.22, 0.82, 1.0]],
-  [14_000, [0.95, 0.98, 1.0]],
-]);
-
-/** RGB 0..1 pre výšku (lineárne medzi zastávkami). Pure. */
+/**
+ * RGB 0..1 pre výšku (m). Pure. 2026-10-04 (vlastník: „zjednotiť"): tá istá stupnica ako živá
+ * trajektória sledovaného lietadla (data/trailStyle.js) — História letov aj video udalosti
+ * (eventVideoCapture.js) tak čítajú výšku rovnakými farbami ako glóbus.
+ */
 export function altitudeRgb(altM) {
-  const a = Number.isFinite(altM) ? Math.max(0, altM) : 0;
-  const stops = REPLAY_ALTITUDE_STOPS;
-  if (a <= stops[0][0]) return [...stops[0][1]];
-  for (let i = 1; i < stops.length; i += 1) {
-    if (a === stops[i][0]) return [...stops[i][1]];
-    if (a < stops[i][0]) {
-      const [a0, c0] = stops[i - 1];
-      const [a1, c1] = stops[i];
-      const f = (a - a0) / (a1 - a0);
-      return c0.map((v, k) => v + (c1[k] - v) * f);
-    }
-  }
-  return [...stops[stops.length - 1][1]];
+  return trailAltitudeRgb(altM);
 }
 
 /**

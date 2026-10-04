@@ -122,3 +122,12 @@ test('tripwire: flights.js čiaru synchronizuje pri obnove sledovaného labelu a
   assert.match(source, /_trackedRouteLine\?\.clear\(\)/, 'untrack čiaru vyprázdni');
   assert.match(source, /_routeIsPlausible/, 'čiara zdieľa gate s kartou — implauzibilná trasa sa nekreslí');
 });
+
+test('plán k cieľu je nenápadne sivý — neprebíja farby výšky trajektórie (2026-10-04)', async () => {
+  const { ROUTE_LINE_COLOR } = await import('./routeLine.js');
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(ROUTE_LINE_COLOR.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  assert.ok((max - min) / max < 0.2, `nízka sýtosť (${ROUTE_LINE_COLOR})`);
+  assert.ok(max > 0.6, 'svetlá, čitateľná na mape');
+});

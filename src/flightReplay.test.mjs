@@ -4,12 +4,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  REPLAY_ALTITUDE_STOPS,
   REPLAY_SPEEDS,
   ReplayClock,
   altitudeRgb,
   createFlightReplay,
 } from './flightReplay.js';
+import { trailAltitudeRgb } from './data/trailStyle.js';
 
 const T0 = 1_757_000_000;
 const fixes = [
@@ -41,14 +41,10 @@ test('hodiny: rýchlosť × reálny čas, zastavia na konci, play od konca začn
   assert.deepEqual([...REPLAY_SPEEDS], [1, 10, 60, 300]);
 });
 
-test('farba podľa výšky: jantár pri zemi → azúr v cestovnej hladine → biela vysoko, spojito', () => {
-  assert.deepEqual(altitudeRgb(0), REPLAY_ALTITUDE_STOPS[0][1]);
-  assert.deepEqual(altitudeRgb(11_000), REPLAY_ALTITUDE_STOPS[2][1]);
-  assert.deepEqual(altitudeRgb(99_999), REPLAY_ALTITUDE_STOPS[3][1]);
-  const mid = altitudeRgb(3000);
-  const [a, b] = [REPLAY_ALTITUDE_STOPS[0][1], REPLAY_ALTITUDE_STOPS[1][1]];
-  for (let k = 0; k < 3; k += 1) assert.ok(Math.abs(mid[k] - (a[k] + (b[k] - a[k]) * 0.5)) < 1e-9);
-  assert.deepEqual(altitudeRgb(NaN), REPLAY_ALTITUDE_STOPS[0][1]);
+test('farba podľa výšky = tá istá stupnica ako živá trajektória (2026-10-04)', () => {
+  for (const altM of [0, 300, 1500, 3000, 6000, 9000, 11_000, 14_000, 99_999, Number.NaN]) {
+    assert.deepEqual(altitudeRgb(altM), trailAltitudeRgb(altM), `výška ${altM} m`);
+  }
 });
 
 function fakeViewer() {
