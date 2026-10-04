@@ -11,7 +11,7 @@
  * (čas, rýchlosť, koniec, follow) testuje v Node bez WebGL.
  */
 import * as Cesium from 'cesium';
-import { interpolateFix } from './data/flightHistory.js';
+import { bridgeCoverageGaps, interpolateFix } from './data/flightHistory.js';
 import { aircraftIcon } from './data/aircraftIcons.js';
 import { screenProjectedRotation, stabilizeScreenRotation } from './data/iconOrientation.js';
 
@@ -89,28 +89,65 @@ export class ReplayClock {
   }
 }
 
-function defaultTrackFactory(fixes) {
-  const positions = [];
-  const colors = [];
-  for (const f of fixes) {
-    positions.push(Cesium.Cartesian3.fromDegrees(f.lon, f.lat, Math.max(0, f.alt ?? 0)));
-    const [r, g, b] = altitudeRgb(f.alt ?? 0);
-    colors.push(new Cesium.Color(r, g, b, 0.95));
+/**
+ * Rozdeľ trasu na súvislé behy skutočných polôh a odhadu (bridgeCoverageGaps) — úsek medzi dvoma
+ * polohami je odhad, keď je odhadom aspoň jeden jeho koniec; susedné behy zdieľajú koncový bod,
+ * aby čiara nemala medzeru. Pure.
+ * @returns {{estimated: boolean, fixes: object[]}[]}
+ */
+export function splitTrackRuns(fixes) {
+  const runs = [];
+  for (let i = 1; i < (fixes?.length ?? 0); i += 1) {
+    const estimated = Boolean(fixes[i - 1].estimated || fixes[i].estimated);
+    const last = runs[runs.length - 1];
+    if (last && last.estimated === estimated) last.fixes.push(fixes[i]);
+    else runs.push({ estimated, fixes: [fixes[i - 1], fixes[i]] });
   }
-  if (positions.length < 2) return null;
-  return new Cesium.Primitive({
-    geometryInstances: new Cesium.GeometryInstance({
-      geometry: new Cesium.PolylineGeometry({
-        positions,
-        colors,
-        colorsPerVertex: true,
-        width: REPLAY_TRACK_WIDTH_PX,
-        arcType: Cesium.ArcType.NONE,
-      }),
+  return runs;
+}
+
+const positionsOf = (run) => run.fixes.map((f) => Cesium.Cartesian3.fromDegrees(f.lon, f.lat, Math.max(0, f.alt ?? 0)));
+
+function defaultTrackFactory(fixes) {
+  const runs = splitTrackRuns(fixes);
+  if (!runs.length) return null;
+  const collection = new Cesium.PrimitiveCollection();
+  // Skutočné polohy: plná čiara zafarbená podľa výšky.
+  const solid = runs.filter((r) => !r.estimated).map((run) => new Cesium.GeometryInstance({
+    geometry: new Cesium.PolylineGeometry({
+      positions: positionsOf(run),
+      colors: run.fixes.map((f) => { const [r, g, b] = altitudeRgb(f.alt ?? 0); return new Cesium.Color(r, g, b, 0.95); }),
+      colorsPerVertex: true,
+      width: REPLAY_TRACK_WIDTH_PX,
+      arcType: Cesium.ArcType.NONE,
     }),
-    appearance: new Cesium.PolylineColorAppearance({ translucent: true }),
-    asynchronous: false,
-  });
+  }));
+  if (solid.length) {
+    collection.add(new Cesium.Primitive({
+      geometryInstances: solid,
+      appearance: new Cesium.PolylineColorAppearance({ translucent: true }),
+      asynchronous: false,
+    }));
+  }
+  // Odhad cez dieru v pokrytí (oceán): čiarkovane, bledo — nie je to nameraná trasa.
+  const dashed = runs.filter((r) => r.estimated).map((run) => new Cesium.GeometryInstance({
+    geometry: new Cesium.PolylineGeometry({
+      positions: positionsOf(run),
+      width: REPLAY_TRACK_WIDTH_PX - 1,
+      vertexFormat: Cesium.PolylineMaterialAppearance.VERTEX_FORMAT,
+      arcType: Cesium.ArcType.NONE,
+    }),
+  }));
+  if (dashed.length) {
+    collection.add(new Cesium.Primitive({
+      geometryInstances: dashed,
+      appearance: new Cesium.PolylineMaterialAppearance({
+        material: Cesium.Material.fromType('PolylineDash', { color: new Cesium.Color(0.86, 0.93, 1.0, 0.75), dashLength: 14 }),
+      }),
+      asynchronous: false,
+    }));
+  }
+  return collection;
 }
 
 /**
@@ -128,6 +165,7 @@ export function createFlightReplay(viewer, {
   now = () => performance.now(),
 } = {}) {
   let fixes = [];
+  let estimatedGaps = 0;
   let clock = null;
   let trackPrimitive = null;
   let marker = null;
@@ -177,6 +215,7 @@ export function createFlightReplay(viewer, {
       marker = null;
     }
     fixes = [];
+    estimatedGaps = 0;
     clock = null;
     currentPos = null;
     lastRotation = null;
@@ -191,7 +230,11 @@ export function createFlightReplay(viewer, {
     load(nextFixes, { kind = 'airliner' } = {}) {
       clear();
       if (!Array.isArray(nextFixes) || nextFixes.length < 2) return false;
-      fixes = nextFixes;
+      // Diery v pokrytí za letu (oceán) doplní odhad po veľkej kružnici — značka aj čiara idú po
+      // nej, nie priamkou cez Zem; odhad sa kreslí čiarkovane a vzorka nesie `estimated`.
+      const bridged = bridgeCoverageGaps(nextFixes);
+      fixes = bridged.fixes;
+      estimatedGaps = bridged.gaps;
       clock = new ReplayClock(fixes[0].t, fixes[fixes.length - 1].t);
       trackPrimitive = trackFactory(fixes);
       if (trackPrimitive) viewer?.scene?.primitives?.add?.(trackPrimitive);
@@ -294,7 +337,8 @@ export function createFlightReplay(viewer, {
         speed: clock.speed,
         follow,
         sample: at?.p ?? null,
-        fixes: fixes.length,
+        fixes: fixes.filter((f) => !f.estimated).length,
+        estimatedGaps,
       };
     },
 

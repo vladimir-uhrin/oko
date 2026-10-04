@@ -202,3 +202,26 @@ test('modelAutoCap: strop rastie s počtom strojov na obrazovke od základu po t
   assert.equal(modelAutoCap(NaN, 150, 600), 150);
   assert.equal(modelAutoCap(500, 350, 300), 350, 'strop nikdy pod základ');
 });
+
+test('nízka kamera (2026-09-30): ikona sa zmenšuje podľa vzdialenosti, pri vysokej kamere nič', async () => {
+  const { aircraftLowCameraScale } = await import('./aircraftRecession.js');
+  const floor = DEFAULT_AIRCRAFT_RECESSION_PARAMS.scaleFloor;
+  assert.equal(aircraftLowCameraScale(5_000, 1_488), 1, 'blízko plná veľkosť');
+  assert.ok(Math.abs(aircraftLowCameraScale(60_000, 1_488) - floor) < 1e-12, 'od 60 km na podlahe');
+  assert.ok(Math.abs(aircraftLowCameraScale(300_000, 1_488) - floor) < 1e-12);
+  const mid = aircraftLowCameraScale(35_000, 1_488);
+  assert.ok(mid < 1 && mid > floor, `35 km medzi: ${mid}`);
+  assert.equal(aircraftLowCameraScale(60_000, 60_000), 1, 'kamera nad 60 km bez zmeny');
+  assert.equal(aircraftLowCameraScale(NaN, 1_488), 1);
+  assert.equal(aircraftLowCameraScale(60_000, undefined), 1);
+  // úvodný pohľad: stroj 45 km ďaleko je pod limbovým pásmom (pomer ~0,33), napriek tomu menší
+  const f = aircraftRecessionFactors({ cameraDistanceM: 45_000, cameraHeightM: 1_488 });
+  assert.ok(f.limbRatio < DEFAULT_AIRCRAFT_RECESSION_PARAMS.startLimbRatio);
+  assert.ok(f.scale < 0.65, `45 km pri nízkej kamere: ${f.scale}`);
+  assert.equal(f.alpha, 1, 'priehľadnosť sa nemení');
+  // vysoká kamera: pôvodné správanie bez zmeny
+  assert.deepEqual(
+    aircraftRecessionFactors({ cameraDistanceM: limb * 0.49, cameraHeightM }, params),
+    { scale: 1, alpha: 1, limbRatio: 0.49 },
+  );
+});

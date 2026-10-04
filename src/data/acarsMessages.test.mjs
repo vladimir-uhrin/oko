@@ -139,7 +139,7 @@ test('tripwire: proxy /api/acars je LEN LOKÁLNA (ACARS_MESSAGES + loopback), be
   const vite = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
   assert.match(vite, /function airframesProxy\(\)/);
   assert.match(vite, /process\.env\.ACARS_MESSAGES/);
-  assert.match(vite, /const local = isGenuineLocalRequest\(req\);/, 'loopback socket A bez CF hlavičiek — tunel nie je lokálny');
+  assert.match(vite, /const local = isDirectLocalRequest\(req\);/, 'loopback soket nestačí — tunel doručuje verejnosť z 127.0.0.1 (2026-09-30)');
   assert.match(vite, /if \(!local\) return send\(403/);
   assert.match(vite, /if \(!on\) return send\(200, \{ enabled: false/);
   assert.match(vite, /api\.airframes\.io\/v1\/messages/);

@@ -6,16 +6,15 @@
  * arrives on a loopback socket. The socket address alone therefore tells us
  * neither who the visitor is (all of them would share one rate-limit bucket)
  * nor whether the request is genuinely local (loopback-only features would be
- * open to the world). This module answers both questions the same way the
- * account backend does (src/auth/server/http.js `context()`):
+ * open to the world). The client IP is resolved the same way the account
+ * backend does (src/auth/server/http.js `context()`):
  *
  *   - client IP: `CF-Connecting-IP`, honoured ONLY when
  *     AUTH_TRUST_CLOUDFLARE_PROXY=true AND the socket is loopback (i.e. the
  *     header can only have come from the local cloudflared), else the socket.
- *   - genuine local: loopback socket AND no Cloudflare header
- *     (`CF-Connecting-IP` / `CF-Ray`). Cloudflare's edge always sets both, a
- *     tunnel visitor cannot strip them, so their presence means "internet".
- *     This holds regardless of the trust flag — failing closed.
+ *   - genuine local: `isDirectLocalRequest` in vite.config.js (loopback
+ *     socket, no Cloudflare/proxy header, localhost Host) — the gate for
+ *     ACARS, events and the Realtime debug log. It ignores the trust flag.
  *
  * It also holds the persistent daily budget counter used for the OpenAI cost
  * endpoints (same shape as the TomTom/GFW governors: `{date, count}` keyed by
@@ -38,19 +37,6 @@ export function isLoopbackAddress(address) {
 function header(req, name) {
   const value = req?.headers?.[name];
   return Array.isArray(value) ? value[0] : value;
-}
-
-/** True when the request came through Cloudflare (carries CF-Connecting-IP or CF-Ray). */
-export function isTunnelRequest(req) {
-  return Boolean(header(req, 'cf-connecting-ip') || header(req, 'cf-ray'));
-}
-
-/**
- * True only for a request from this machine that did NOT come through the
- * tunnel — the gate for loopback-only features (ACARS, the Realtime debug log).
- */
-export function isGenuineLocalRequest(req) {
-  return isLoopbackAddress(req?.socket?.remoteAddress) && !isTunnelRequest(req);
 }
 
 /** Whether CF-Connecting-IP may be trusted (same switch as the account backend). */

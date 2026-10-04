@@ -6,19 +6,26 @@
 //       Wikipédie (CC BY-SA 4.0, Wikipedia contributors) — israel-palestine, yemen, syria, lebanon
 //   .gev-cache/mideast/events/portwatch/<úžina>.json       denné prechody úžinou z IMF PortWatch
 //       (od 1. 1. 2019; hormuz, bab-el-mandeb, suez, cape; atribúcia MMF)
+//   .gev-cache/mideast/events/airspace/{czib,fir-boundaries}.json   bulletiny EASA o konfliktných
+//       zónach + hranice FIR z VATSpy (CC BY-SA 4.0)
+//   .gev-cache/mideast/events/ukmto/incidents.json         incidenty lodí z rozhrania UKMTO (OGL v3.0)
 //
 // Usage:
-//   node scripts/build-mideast-events.mjs --all                       (= --control + --portwatch)
+//   node scripts/build-mideast-events.mjs --all                       (= --control + --portwatch + --airspace + --ukmto)
 //   node scripts/build-mideast-events.mjs --control [--module <id>] [--force]
 //   node scripts/build-mideast-events.mjs --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N]
 //   node scripts/build-mideast-events.mjs --portwatch [--force]
+//   node scripts/build-mideast-events.mjs --airspace [--force]
+//   node scripts/build-mideast-events.mjs --ukmto [--force]
+//   node scripts/build-mideast-events.mjs --gps                       (jedno kolo zberu rušenia GPS z adsb.lol; nie je v --all)
 //
 // Etiketa Wikimedia: jeden dopyt naraz, pauza 1,2 s medzi dopytmi, popisný User-Agent
 // s kontaktom (scripts/lib/mideastArchive.mjs). Históriu (jeden dopyt na týždeň a
 // modul) spúšťa človek — `--all` ju zámerne vynecháva. PortWatch (verejný ArcGIS MMF):
 // úžiny postupne s pauzou 1,5 s; prvé stiahnutie = celá séria (3 strany na úžinu).
 import {
-  MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, isDay, portwatchRefresh, wikiControlSnapshot,
+  MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, czibRefresh, firBoundariesRefresh, gpsCollect, isDay, portwatchRefresh,
+  ukmtoRefresh, wikiControlSnapshot,
 } from './lib/mideastArchive.mjs';
 import { PORTWATCH_KEYS } from '../src/data/portwatch.js';
 
@@ -31,9 +38,9 @@ const now = Date.now();
 const log = (m) => console.log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PAUSE_MS = 1200;
-const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force]\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
+const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force] | --airspace [--force] | --ukmto [--force] | --gps\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
 
-if (!all && !has('--control') && !has('--control-history') && !has('--portwatch')) {
+if (!all && !has('--control') && !has('--control-history') && !has('--portwatch') && !has('--airspace') && !has('--ukmto') && !has('--gps')) {
   console.log(usage);
   process.exit(2);
 }
@@ -82,4 +89,25 @@ if (all || has('--portwatch')) {
     const r = await portwatchRefresh(root, key, { now, force: has('--force'), log });
     log(`PortWatch ${key}: ${r.status} · ${r.count} dní · posledný ${r.lastDay || '—'}${r.fetched !== undefined ? ` · stiahnutých ${r.fetched}` : ''}${r.error ? ' — ' + r.error : ''}`);
   }
+}
+
+// Vzdušný priestor (EASA CZIB + hranice FIR z VATSpy): zoznam, stránky zmenených bulletinov s pauzou 1,2 s.
+if (all || has('--airspace')) {
+  const czib = await czibRefresh(root, { now, force: has('--force'), log, sleep });
+  log(`EASA CZIB: ${czib.status} · ${czib.count} aktívnych bulletinov${czib.fetched !== undefined ? ` · stiahnutých stránok ${czib.fetched}` : ''}${czib.errors?.length ? ` · chyby: ${czib.errors.join('; ')}` : ''}${czib.error ? ' — ' + czib.error : ''}`);
+  const fir = await firBoundariesRefresh(root, { now, force: has('--force'), log });
+  log(`Hranice FIR (VATSpy): ${fir.status} · ${fir.count} FIR${fir.error ? ' — ' + fir.error : ''}`);
+}
+
+// Incidenty lodí (UKMTO, OGL v3.0): jeden dopyt, zlúčenie s archívom.
+if (all || has('--ukmto')) {
+  const r = await ukmtoRefresh(root, { now, force: has('--force'), log });
+  log(`UKMTO: ${r.status} · ${r.count} incidentov v archíve${r.added !== undefined ? ` · nových ${r.added}` : ''} · posledný ${r.day || '—'}${r.error ? ' — ' + r.error : ''}`);
+}
+
+// Rušenie GPS (adsb.lol, ODbL): JEDNO kolo zberu — šesť kruhov s pauzou 5 s. Mapu robí až súvislý
+// zber služby (raz za 15 min); `--all` ho preto nespúšťa, toto je len ručná skúška.
+if (has('--gps')) {
+  const r = await gpsCollect(root, { now, log, sleep });
+  log(`GPS ${r.day}: ${r.status} · kruhov ${r.circles}/6 · lietadiel ${r.samples}, so zhoršenou presnosťou ${r.degraded} · snímka dňa č. ${r.snapshots}${r.failed.length ? ` — ${r.failed.join('; ')}` : ''}`);
 }

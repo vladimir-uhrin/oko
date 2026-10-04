@@ -11,6 +11,8 @@ import { createMideastPanel, swatchColour } from './mideastPanel.js';
 import { listMideastTheatres } from './data/mideastTheatres.js';
 import { MIDEAST_CONTROL_MODULES } from './data/wikiControl.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
+import { airspaceModels } from './airspaceAdvisoryLayer.js';
+import { parseUkmtoIncidents, ukmtoSummary } from './data/ukmto.js';
 
 function fakeDocument() {
   const makeEl = (tag) => {
@@ -335,7 +337,7 @@ test('etapa 2 — čip KONTROLA SÍDIEL: rad čipov za dejiskami, prepína sprá
   assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
   const chips = byClass(mount, 'mideast-chips')[0];
   assert.equal(chips.attrs.role, 'group');
-  assert.equal(chips.attrs['aria-label'], 'mideast.part.control');
+  assert.equal(chips.attrs['aria-label'], 'mideast.part.layers', 'skupina čipov má neutrálny názov (od etapy 5b nesie aj VZDUŠNÝ PRIESTOR)');
   const chip = byClass(mount, 'mideast-chip-control')[0];
   assert.ok(chip.classList.contains('data-toggle-chip') && chip.classList.contains('mideast-chip'), 'štýl čipov riadkov DÁTA');
   assert.equal(chip.type, 'button');
@@ -486,4 +488,278 @@ test('etapa 2 — i18n: čip, stavy, druhy, titulok a KAŽDÁ strana každého m
   assert.match(css, /\.mideast-legend-age\.is-stale \{[^}]*#ffb547/, 'jantárová značka ZASTARANÉ');
   assert.match(css, /\.mideast-legend\[hidden\] \{ display: none; \}/);
   assert.match(css, /\.mideast-chip:disabled \{[^}]*var\(--cursor-arrow\)/, 'vypnutý čip nie je „čaká sa"');
+});
+
+// ── Etapa 5b: VZDUŠNÝ PRIESTOR · EASA (2026-10-03) ────────────────────────────
+// Modely zo skutočnej odpovede archívu (fixtúra) cez tú istú funkciu, ktorou ich robí vrstva.
+const airPayload = JSON.parse(readFileSync(new URL('./data/fixtures/airspace-payload-20261003.json', import.meta.url), 'utf8'));
+function fakeAirspace(initial = {}) {
+  let state = { enabled: false, loading: false, error: null, fetchedAt: null, bulletins: [], missingFirs: [], ...initial };
+  const listeners = new Set();
+  const calls = [];
+  const api = {
+    calls,
+    getState: () => state,
+    isEnabled: () => state.enabled,
+    setEnabled(on) { calls.push(['setEnabled', on]); api.emit({ enabled: Boolean(on) }); return Promise.resolve(); },
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit(patch) { state = { ...state, ...patch }; for (const fn of listeners) fn(state); },
+    get listenerCount() { return listeners.size; },
+  };
+  return api;
+}
+
+test('etapa 5b — čip VZDUŠNÝ PRIESTOR vedľa KONTROLY SÍDIEL, legenda za ňou, vypnutý čip = skrytá legenda; destroy odhlási', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const airspace = fakeAirspace();
+  const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace, translate: tKey, lang: 'sk', documentRef: doc });
+  assert.deepEqual(mount.children.map((c) => c.className), ['mideast-status gas-status', 'mideast-section-title gas-card-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-section-title gas-card-title', 'mideast-transits', 'mideast-section-title gas-card-title', 'mideast-news', 'mideast-note']);
+  const chips = byClass(mount, 'mideast-chips')[0];
+  assert.deepEqual(chips.children.map((c) => c.dataset.part), ['control', 'airspace']);
+  const chip = byClass(mount, 'mideast-chip-airspace')[0];
+  assert.equal(chip.textContent, 'mideast.part.airspace');
+  assert.equal(chip.attrs['aria-pressed'], 'false', 'predvolene vypnuté — nič sa nesťahuje');
+  assert.equal(chip.title, 'mideast.air.note');
+  const legend = byClass(mount, 'mideast-air-legend')[0];
+  assert.equal(legend.hidden, true);
+  chip.click();
+  assert.deepEqual(airspace.calls, [['setEnabled', true]]);
+  assert.equal(chip.attrs['aria-pressed'], 'true');
+  assert.equal(legend.hidden, false);
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'loading', 'zapnuté bez dát = načítava sa');
+  airspace.emit({ error: 'no_airspace_snapshot' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'missing');
+  airspace.emit({ error: 'HTTP 500' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'error');
+  chip.click();
+  assert.equal(legend.hidden, true);
+  assert.equal(legend.children.length, 0);
+  // len vzdušný priestor (bez správcu kontroly): rad čipov aj tak vznikne
+  const solo = doc.createElement('div');
+  createMideastPanel({ mountTarget: solo, theatres: THEATRES, labelFor, airspace: fakeAirspace(), translate: tKey, documentRef: doc });
+  assert.deepEqual(byClass(solo, 'mideast-chips')[0].children.map((c) => c.dataset.part), ['airspace']);
+  assert.equal(airspace.listenerCount, 1);
+  panel.destroy();
+  assert.equal(airspace.listenerCount, 0);
+});
+
+test('etapa 5b — legenda bulletinov: Blízky východ po riadkoch (krajiny SK, výšky, časť FIR, výnimky, platnosť, odkaz), zvyšok sveta jedným riadkom, zdroj a poznámka', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const airspace = fakeAirspace();
+  createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, airspace, translate: tSk, lang: 'sk', documentRef: doc });
+  airspace.emit({ enabled: true, fetchedAt: Date.parse('2026-10-03T12:00:00Z'), bulletins: airspaceModels(airPayload), attribution: 'Source: EASA', firAttribution: 'FIR boundaries: VATSpy' });
+  const legend = byClass(mount, 'mideast-air-legend')[0];
+  assert.equal(byClass(legend, 'mideast-legend-title')[0].textContent, 'Odporúčania EASA pre konfliktné zóny (CZIB)');
+  const rows = byClass(legend, 'mideast-air-row');
+  assert.deepEqual(rows.map((r) => r.dataset.czib), ['CZIB-2026-05-R2', 'CZIB-2026-07R3', 'CZIB-2017-03R20'], 'len Blízky východ, v poradí platnosti');
+  const text = (row, cls) => byClass(row, cls).map((n) => n.textContent);
+  const [iraq, gulf, syria] = rows;
+  assert.deepEqual(text(iraq, 'mideast-air-name'), ['Irak']);
+  assert.deepEqual(text(iraq, 'mideast-air-badge'), ['všetky výšky']);
+  assert.deepEqual(text(iraq, 'mideast-air-until'), [`platí do ${skDate('2026-11-16T00:00:00Z')}`]);
+  assert.equal(byClass(iraq, 'mideast-air-link')[0].href, 'https://www.easa.europa.eu/domains/air-operations/czibs/czib-2026-05-r2');
+  assert.equal(byClass(iraq, 'mideast-air-link')[0].rel, 'noopener noreferrer');
+  assert.equal(syria.classList.contains('is-partial'), true, 'Sýria: západne od čiary cez body');
+  assert.deepEqual(text(gulf, 'mideast-air-name'), ['Bahrajn, Kuvajt, Katar, Omán, SAE']);
+  assert.deepEqual(text(gulf, 'mideast-air-badge'), ['všetky výšky', 'časť FIR', 's výnimkami']);
+  assert.match(byClass(gulf, 'mideast-air-badge')[1].title, /presná hranica je v texte bulletinu/);
+  assert.equal(byClass(gulf, 'mideast-air-name')[0].title, 'Airspace of the Persian Gulf and Gulf of Oman', 'oficiálny názov EASA v titulku');
+  assert.equal(byClass(legend, 'mideast-air-more')[0].textContent, '+ 2 ďalších vo svete: Líbya, Ukrajina');
+  const src = byClass(legend, 'mideast-legend-source')[0];
+  assert.equal(byClass(src, 'mideast-legend-since')[0].textContent, `stav k ${skDate('2026-10-03T12:00:00Z')} · EASA · hranice FIR približné (VATSpy, CC BY-SA 4.0)`);
+  assert.equal(src.title, 'Source: EASA · FIR boundaries: VATSpy');
+  assert.match(byClass(legend, 'mideast-legend-note')[0].textContent, /nie zákaz letov/);
+  // uplynutá platnosť jantárovo, výpadok servera pri starých dátach = značka chyby
+  airspace.emit({ bulletins: airspaceModels({ ...airPayload, bulletins: airPayload.bulletins.map((b) => ({ ...b, lapsed: b.nid === '143862' })) }), error: 'HTTP 502' });
+  const iraq2 = byClass(legend, 'mideast-air-row').find((r) => r.dataset.czib === 'CZIB-2026-05-R2');
+  assert.equal(byClass(iraq2, 'mideast-air-until')[0].classList.contains('is-stale'), true);
+  assert.match(byClass(iraq2, 'mideast-air-until')[0].textContent, /^platnosť uplynula/);
+  assert.equal(byClass(byClass(legend, 'mideast-legend-source')[0], 'is-stale')[0].textContent, 'bulletiny EASA sú nedostupné (chyba servera)');
+});
+
+test('etapa 5b — main.js: vrstva vzniká pred panelom a ide do neho; CSS legendy', () => {
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /import \{ createAirspaceAdvisory \} from '\.\/airspaceAdvisoryLayer\.js';/);
+  // Vrstva musí existovať skôr, než ju panel dostane (poradie v súbore, nie presný tvar riadkov).
+  const created = main.indexOf('const airspaceAdvisory = createAirspaceAdvisory({ viewer });');
+  const panelAt = main.indexOf('const mideastPanel = createMideastPanel({');
+  assert.ok(created > 0 && panelAt > created, 'vrstva vzniká pred panelom');
+  assert.match(main, /window\.__godsEyeView\.airspaceAdvisory = airspaceAdvisory;/);
+  assert.match(main, /createMideastPanel\(\{[\s\S]*?airspace: airspaceAdvisory,[\s\S]*?\}\);/);
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  for (const cls of ['.mideast-air-row', '.mideast-air-swatch', '.mideast-air-badge.is-partial', '.mideast-air-until.is-stale', '.mideast-air-link', '.mideast-air-more']) assert.ok(css.includes(cls), cls);
+  assert.match(css, /\.mideast-air-row\.is-partial \.mideast-air-swatch \{ background: transparent; border-style: dashed; \}/, 'časť FIR = bez výplne ako na mape');
+});
+
+// ── Etapa 5c: INCIDENTY LODÍ · UKMTO (2026-10-03) ────────────────────────────
+// Incidenty zo skutočnej odpovede UKMTO (fixtúra) cez parser archívu; súhrn cez ukmtoSummary.
+const ukmtoIncidents = parseUkmtoIncidents(JSON.parse(readFileSync(new URL('./data/fixtures/ukmto-all-20261003.json', import.meta.url), 'utf8')));
+const UKMTO_NOW = Date.parse('2026-10-03T16:00:00Z');
+function fakeUkmto(initial = {}) {
+  let state = { enabled: true, active: false, visible: true, loading: false, error: null, loaded: false, fetchedAt: null, incidents: [], summary: { days: 30, total: 0, byType: [], latest: [] }, ...initial };
+  const listeners = new Set();
+  const calls = [];
+  const api = {
+    calls,
+    getState: () => state,
+    isEnabled: () => state.enabled,
+    setEnabled(on) { calls.push(['setEnabled', on]); api.emit({ enabled: Boolean(on) }); return Promise.resolve(); },
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit(patch) { state = { ...state, ...patch }; for (const fn of listeners) fn(state); },
+    labels: {
+      type: (it) => SK_STRINGS[`mideast.ukmto.type.${it.type}`] ?? it.typeName,
+      place: (it) => SK_STRINGS[`mideast.ukmto.p.${String(it.place).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`] ?? it.place,
+    },
+    get listenerCount() { return listeners.size; },
+  };
+  return api;
+}
+const loadedUkmto = () => ({ active: true, loaded: true, fetchedAt: UKMTO_NOW, incidents: ukmtoIncidents, attribution: 'Source: UKMTO … Open Government Licence v3.0', summary: ukmtoSummary(ukmtoIncidents, { nowMs: UKMTO_NOW, days: 30, latest: 5 }) });
+
+test('etapa 5c — čip INCIDENTY LODÍ: tretí v rade, predvolene zapnutý, bez dejiska či úžiny vypnutý a legenda skrytá; destroy odhlási', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const ukmto = fakeUkmto();
+  const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace: fakeAirspace(), ukmto, translate: tKey, lang: 'sk', documentRef: doc });
+  assert.deepEqual(byClass(mount, 'mideast-chips')[0].children.map((c) => c.dataset.part), ['control', 'airspace', 'ukmto']);
+  const classes = mount.children.map((c) => c.className);
+  assert.deepEqual(classes.slice(3, 7), ['mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-legend mideast-ukmto-legend']);
+  assert.equal(classes[7], 'mideast-section-title gas-card-title', 'legendy vrstiev stoja pred prechodmi úžinami');
+  const chip = byClass(mount, 'mideast-chip-ukmto')[0];
+  assert.equal(chip.textContent, 'mideast.part.ukmto');
+  assert.equal(chip.attrs['aria-pressed'], 'true', 'čip je predvolene zapnutý');
+  assert.equal(chip.disabled, true, 'bez aktívnej scény nie je čo kresliť');
+  assert.equal(chip.title, 'mideast.ukmto.inactive', 'titulok hovorí, kedy sa body ukážu');
+  const legend = byClass(mount, 'mideast-ukmto-legend')[0];
+  assert.equal(legend.hidden, true);
+  ukmto.emit({ active: true, loading: true });
+  assert.equal(chip.disabled, false);
+  assert.equal(chip.title, 'mideast.ukmto.note');
+  assert.equal(legend.hidden, false);
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'loading');
+  ukmto.emit({ loading: false, error: 'no_ukmto_snapshot' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'missing');
+  ukmto.emit({ error: 'HTTP 500' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'error');
+  chip.click();
+  assert.deepEqual(ukmto.calls, [['setEnabled', false]]);
+  assert.equal(chip.attrs['aria-pressed'], 'false');
+  assert.equal(legend.hidden, true);
+  assert.equal(legend.children.length, 0);
+  assert.equal(ukmto.listenerCount, 1);
+  panel.destroy();
+  assert.equal(ukmto.listenerCount, 0);
+});
+
+test('etapa 5c — legenda varovaní: počty podľa druhu za 30 dní, päť najnovších (čas UTC, druh, oblasť, text v titulku), zdroj s OGL a odkaz', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const ukmto = fakeUkmto();
+  createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, ukmto, translate: tSk, lang: 'sk', documentRef: doc });
+  ukmto.emit(loadedUkmto());
+  const legend = byClass(mount, 'mideast-ukmto-legend')[0];
+  assert.equal(byClass(legend, 'mideast-legend-title')[0].textContent, 'Varovania UKMTO pre lode · posledných 30 dní');
+  const items = byClass(legend, 'mideast-legend-item');
+  assert.deepEqual(items.map((i) => [byClass(i, 'mideast-legend-label')[0].textContent, byClass(i, 'mideast-legend-count')[0].textContent]), [['útok', '4'], ['upozornenie', '1']]);
+  assert.match(byClass(items[0], 'mideast-ukmto-swatch')[0].attrs.style, /background: #ff5a5f/, 'vzorka farbou bodu na mape');
+  const rows = byClass(legend, 'mideast-ukmto-row');
+  assert.deepEqual(rows.map((r) => r.dataset.ref), ['149-26', '148-26', '147-26', '130-26', '127-26']);
+  const cells = (row) => ['mideast-ukmto-when', 'mideast-ukmto-type', 'mideast-ukmto-place'].map((c) => byClass(row, c)[0].textContent);
+  assert.deepEqual(cells(rows[0]).slice(1), ['útok', 'Hormuzský prieliv']);
+  assert.match(cells(rows[0])[0], /^2\. 10\.,? 23:11 UTC$/, 'čas incidentu v UTC (oddeľovač podľa verzie ICU)');
+  assert.deepEqual(cells(rows[4]).slice(1), ['upozornenie', 'oblasť hlásení UKMTO']);
+  assert.match(rows[0].title, /^UKMTO has received a report of an incident 4nm east of Oman\./, 'text varovania v titulku riadka');
+  assert.match(byClass(rows[4], 'mideast-ukmto-swatch')[0].attrs.style, /background: #8fb8d8/, 'farba druhu aj pri riadku');
+  const src = byClass(legend, 'mideast-legend-source')[0];
+  assert.equal(byClass(src, 'mideast-legend-since')[0].textContent, `stav k ${skDate('2026-10-03T16:00:00Z')} · UKMTO · Open Government Licence v3.0`);
+  assert.match(src.title, /Open Government Licence v3\.0/);
+  const link = byClass(src, 'mideast-air-link')[0];
+  assert.equal(link.href, 'https://www.ukmto.org/recent-incidents');
+  assert.equal(link.rel, 'noopener noreferrer');
+  assert.match(byClass(legend, 'mideast-legend-note')[0].textContent, /hlásené udalosti, poloha podľa varovania/);
+  // pokoj na mori: žiadne varovanie za 30 dní, staršie v zozname ostanú
+  const calm = ukmtoIncidents.filter((x) => x.t < UKMTO_NOW - 40 * 86_400_000);
+  ukmto.emit({ incidents: calm, summary: ukmtoSummary(calm, { nowMs: UKMTO_NOW, days: 30, latest: 5 }), error: 'HTTP 502' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].textContent, 'za posledných 30 dní žiadne varovania');
+  assert.equal(byClass(legend, 'mideast-ukmto-row').length, 5, 'najnovšie staršie varovania sú stále vypísané');
+  assert.equal(byClass(byClass(legend, 'mideast-legend-source')[0], 'is-stale')[0].textContent, 'varovania UKMTO sú nedostupné (chyba servera)');
+});
+
+test('etapa 5c — CSS legendy varovaní', () => {
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  for (const cls of ['.mideast-ukmto-swatch', '.mideast-ukmto-rows', '.mideast-ukmto-row', '.mideast-ukmto-when', '.mideast-ukmto-type', '.mideast-ukmto-place']) assert.ok(css.includes(cls), cls);
+  assert.match(css, /\.mideast-ukmto-swatch \{ border-radius: 50%; \}/, 'okrúhla vzorka ako bod na mape');
+});
+
+// ── Etapa 5d: RUŠENIE GPS · odvodené (2026-10-03) ────────────────────────────
+function fakeGps(initial = {}) {
+  let state = { enabled: false, loading: false, error: null, loaded: false, days: [], period: '', snapshots: 0, aircraft: 0, counts: { high: 0, medium: 0, none: 0, thin: 0 }, todayPartial: false, ...initial };
+  const listeners = new Set();
+  const calls = [];
+  const api = {
+    calls,
+    getState: () => state,
+    isEnabled: () => state.enabled,
+    setEnabled(on) { calls.push(['setEnabled', on]); api.emit({ enabled: Boolean(on) }); return Promise.resolve(); },
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit(patch) { state = { ...state, ...patch }; for (const fn of listeners) fn(state); },
+    get listenerCount() { return listeners.size; },
+  };
+  return api;
+}
+
+test('etapa 5d — čip RUŠENIE GPS: štvrtý v rade, predvolene vypnutý, legenda len po zapnutí; stavy načítania; destroy odhlási', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const gps = fakeGps();
+  const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace: fakeAirspace(), ukmto: fakeUkmto(), gps, translate: tKey, lang: 'sk', documentRef: doc });
+  assert.deepEqual(byClass(mount, 'mideast-chips')[0].children.map((c) => c.dataset.part), ['control', 'airspace', 'ukmto', 'gps']);
+  assert.deepEqual(mount.children.map((c) => c.className).slice(3, 8), ['mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-legend mideast-ukmto-legend', 'mideast-legend mideast-gps-legend']);
+  const chip = byClass(mount, 'mideast-chip-gps')[0];
+  assert.equal(chip.textContent, 'mideast.part.gps');
+  assert.equal(chip.attrs['aria-pressed'], 'false', 'predvolene vypnuté — odvodená vrstva sa nezapína sama');
+  assert.equal(chip.title, 'mideast.gps.note');
+  const legend = byClass(mount, 'mideast-gps-legend')[0];
+  assert.equal(legend.hidden, true);
+  chip.click();
+  assert.deepEqual(gps.calls, [['setEnabled', true]]);
+  assert.equal(legend.hidden, false);
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'loading');
+  gps.emit({ error: 'no_gps_snapshot' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'missing');
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].textContent, 'mideast.gps.missing');
+  gps.emit({ error: 'HTTP 500' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].dataset.state, 'error');
+  assert.equal(byClass(legend, 'mideast-legend-note')[0].textContent, 'mideast.gps.note', 'poznámka o odvodenom ukazovateli je vidieť aj bez dát');
+  chip.click();
+  assert.equal(legend.hidden, true);
+  assert.equal(gps.listenerCount, 1);
+  panel.destroy();
+  assert.equal(gps.listenerCount, 0);
+});
+
+test('etapa 5d — legenda rušenia GPS: počty buniek podľa stupňa vo farbách mapy, obdobie, snímky a lietadlá, zdroj, poctivá poznámka', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const gps = fakeGps();
+  createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, gps, translate: tSk, lang: 'sk', documentRef: doc });
+  gps.emit({ enabled: true, loaded: true, days: ['2026-10-02', '2026-10-03'], period: '2. 10. 2026 – 3. 10. 2026', snapshots: 137, aircraft: 1240, counts: { high: 3, medium: 7, none: 41, thin: 120 }, todayPartial: true, attribution: 'Aircraft data: adsb.lol contributors (ODbL 1.0)' });
+  const legend = byClass(mount, 'mideast-gps-legend')[0];
+  assert.equal(byClass(legend, 'mideast-legend-title')[0].textContent, 'Lietadlá so zhoršenou presnosťou polohy');
+  const items = byClass(legend, 'mideast-legend-item');
+  assert.deepEqual(items.map((i) => [byClass(i, 'mideast-legend-label')[0].textContent, byClass(i, 'mideast-legend-count')[0].textContent]), [['nad 10 %', '3'], ['2–10 %', '7'], ['pod 2 %', '41']]);
+  assert.match(byClass(items[0], 'mideast-legend-swatch')[0].attrs.style, /border-color: #ff5a5f/);
+  assert.match(byClass(items[2], 'mideast-legend-swatch')[0].attrs.style, /border-color: #52d68a/);
+  assert.equal(byClass(legend, 'mideast-legend-items')[0].attrs['aria-label'], 'bunky 0,5°');
+  const src = byClass(legend, 'mideast-legend-source')[0];
+  assert.equal(byClass(src, 'mideast-legend-since')[0].textContent, `2. 10. 2026 – 3. 10. 2026 · snímky: 137 · lietadlá: ${new Intl.NumberFormat('sk-SK').format(1240)}`);
+  assert.deepEqual(byClass(src, 'mideast-legend-age').map((n) => n.textContent), ['· dnešok sa ešte zbiera', '· adsb.lol (ODbL) · výpočet OKO']);
+  assert.match(src.title, /adsb\.lol/);
+  assert.match(byClass(legend, 'mideast-legend-note')[0].textContent, /nie meranie rušičiek/);
+  // okno bez bunky s dosť lietadlami + výpadok servera
+  gps.emit({ counts: { high: 0, medium: 0, none: 0, thin: 12 }, todayPartial: false, error: 'HTTP 502' });
+  assert.equal(byClass(legend, 'mideast-legend-state')[0].textContent, 'v tomto období nie je bunka s dosť lietadlami');
+  assert.equal(byClass(byClass(legend, 'mideast-legend-source')[0], 'is-stale')[0].textContent, 'mapa rušenia GPS je nedostupná (chyba servera)');
 });

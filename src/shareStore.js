@@ -222,7 +222,14 @@ export function createShareStore({
       if (!name.endsWith('.json')) continue;
       const full = path.join(dir, name);
       let createdAt = null;
-      try { createdAt = Number(JSON.parse(fsImpl.readFileSync(full, 'utf8')).createdAt); } catch { createdAt = null; }
+      let keep = false;
+      try {
+        const rec = JSON.parse(fsImpl.readFileSync(full, 'utf8'));
+        createdAt = Number(rec.createdAt);
+        keep = rec.keep === true;
+      } catch { createdAt = null; }
+      // Zverejnené udalosti (Udalosti, 2026-09-30) sa nemažú — odkaz v príspevku na FB musí ostať platný.
+      if (keep) continue;
       if (!Number.isFinite(createdAt)) {
         try { createdAt = fsImpl.statSync(full).mtimeMs; } catch { continue; }
       }
@@ -257,10 +264,19 @@ export function createShareStore({
         width: value.width,
         height: value.height,
         imageBytes: value.image.length,
+        ...(value.keep === true ? { keep: true } : {}),
       };
       fsImpl.writeFileSync(imagePath(id), value.image);
       fsImpl.writeFileSync(jsonPath(id), JSON.stringify(record), 'utf8');
       return record;
+    },
+    /** Zmaž záznam aj obrázok (vlastník stiahol zverejnenú udalosť); true, ak záznam bol. */
+    remove(id) {
+      if (!isValidShareId(id)) return false;
+      let removed = false;
+      try { fsImpl.unlinkSync(jsonPath(id)); removed = true; } catch { /* nebol */ }
+      try { fsImpl.unlinkSync(imagePath(id)); } catch { /* bez obrázka */ }
+      return removed;
     },
     /** Záznam podľa id alebo null (aj pre nevalidné id). */
     read(id) {

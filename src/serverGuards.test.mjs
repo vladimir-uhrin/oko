@@ -6,8 +6,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   isLoopbackAddress,
-  isTunnelRequest,
-  isGenuineLocalRequest,
   trustCloudflareProxy,
   resolveClientIp,
   positiveIntEnv,
@@ -21,18 +19,6 @@ const req = (remoteAddress, headers = {}) => ({ socket: { remoteAddress }, heade
 test('isLoopbackAddress: IPv4 127/8, ::1, IPv4-mapped; LAN a prázdne nie', () => {
   for (const a of ['127.0.0.1', '127.0.1.1', '::1', '::ffff:127.0.0.1', ' 127.0.0.1 ']) assert.equal(isLoopbackAddress(a), true, a);
   for (const a of ['192.168.1.10', '10.0.0.1', '::ffff:192.168.1.2', '', null, undefined]) assert.equal(isLoopbackAddress(a), false, String(a));
-});
-
-test('tunel: CF-Connecting-IP alebo CF-Ray znamená internet, aj z loopback socketu', () => {
-  assert.equal(isTunnelRequest(req('127.0.0.1')), false);
-  assert.equal(isTunnelRequest(req('127.0.0.1', { 'cf-connecting-ip': '203.0.113.7' })), true);
-  assert.equal(isTunnelRequest(req('127.0.0.1', { 'cf-ray': '8abc-VIE' })), true);
-  assert.equal(isGenuineLocalRequest(req('127.0.0.1')), true, 'lokálny prehliadač');
-  assert.equal(isGenuineLocalRequest(req('::1')), true);
-  assert.equal(isGenuineLocalRequest(req('127.0.0.1', { 'cf-connecting-ip': '203.0.113.7' })), false, 'návštevník cez tunel');
-  assert.equal(isGenuineLocalRequest(req('127.0.0.1', { 'cf-ray': 'x' })), false, 'CF-Ray bez IP — stále tunel');
-  assert.equal(isGenuineLocalRequest(req('192.168.1.5')), false, 'LAN nie je lokálne');
-  assert.equal(isGenuineLocalRequest({ headers: {} }), false, 'bez socketu fail-closed');
 });
 
 test('resolveClientIp: CF-Connecting-IP len so zapnutou dôverou A z loopback socketu A ak je to IP', () => {
@@ -116,6 +102,6 @@ test('tripwire: vite.config.js zapája stráže do OpenAI a debug-log endpointov
   assert.ok(token.indexOf('enforceDailyBudget(realtimeBudget') > 0 && token.indexOf('enforceDailyBudget(realtimeBudget') < token.indexOf('api.openai.com'));
   assert.match(proxy, /JSON\.stringify\(\{ error: 'budget'/);
   const log = proxy.slice(proxy.indexOf("middlewares.use('/api/realtime/debug-log'"), proxy.indexOf("middlewares.use('/api/realtime/token'"));
-  assert.ok(log.indexOf('isGenuineLocalRequest(req)') > 0 && log.indexOf('isGenuineLocalRequest(req)') < log.indexOf('readRequestBody'), 'tunel nezapisuje na disk');
+  assert.ok(log.indexOf('isDirectLocalRequest(req)') > 0 && log.indexOf('isDirectLocalRequest(req)') < log.indexOf('readRequestBody'), 'tunel nezapisuje na disk');
   assert.ok(log.indexOf('exceedsFileCap(') < log.indexOf('appendFileSync'), 'celkový strop súboru pred zápisom');
 });

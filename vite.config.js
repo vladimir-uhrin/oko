@@ -28,9 +28,20 @@
 
 import fs from 'node:fs';
 import { versionedDeferredCesiumTags } from './scripts/lib/cesiumHtmlTags.mjs';
+import { eventLoopWatchPlugin } from './scripts/lib/eventLoopWatch.mjs';
+import { startupProfilePlugin } from './scripts/lib/startupProfile.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
-import { openFlightHistory } from './src/data/flightHistoryStore.js';
+import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
+import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
+import { createStateAircraftService } from './src/data/stateAircraftService.js';
+import { createFlightEventsService } from './src/data/flightEventsService.js';
+import { createEventCardRenderer } from './src/data/eventCardRender.js';
+import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
+import { aiTranslatorsConfig, createAiTranslatorsClient } from './src/data/aiTranslatorsClient.js';
+import { createVoiceCache, prepareEventVideo } from './scripts/lib/eventVideoPipeline.mjs';
+import { resolveServerRole, roleServerOverrides, runsApiPlugins } from './scripts/lib/serverRole.mjs';
+import { REGION_FETCHES_PER_WORLD_MAX, mergeWorldAndRegion, openSkyAreaCredits, openSkyRegionForView, openSkyRegionUrl, regionPolicy } from './src/data/openSkyRegion.js';
 import {
   AISHUB_MAX_AREA_SQ_DEG,
   AISHUB_USER_AGENT,
@@ -80,6 +91,7 @@ import {
 } from './src/data/gasPrices.js';
 import { YAHOO_SYMBOLS, parseYahooChart, yahooChartUrl } from './src/data/oilPrices.js';
 import { SITUATION_REGIONS, gdeltDocUrl, mergeNewsItems, normalizeDirectFeed, parseGdeltArticles } from './src/data/situationNews.js';
+import { sharedGdeltGate } from './src/data/gdeltGate.js';
 import { filterSanctionedNews } from './src/data/sanctionedMedia.js';
 import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport } from './src/data/ukraineReport.js';
 import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
@@ -109,7 +121,6 @@ import {
 import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
 import {
   isLoopbackAddress,
-  isGenuineLocalRequest,
   resolveClientIp,
   positiveIntEnv,
   createDailyBudget,
@@ -167,6 +178,8 @@ let _openskyToken = null;
 let _openskyTokenExpiry = 0;
 /** @type {Promise<string|null>|null} In-flight token refresh promise (coalesces concurrent callers). */
 let _openskyTokenPromise = null;
+/** Udalosti pod účtom vlastníka (2026-10-03): kontrola z authPlugin, nastaví sa v configu. */
+let _eventsOwnerCheck = null;
 /** @type {string|null} Cached upstream response body (JSON text). */
 let _openskyCacheBody = null;
 /** @type {number} HTTP status of the cached response. */
@@ -196,6 +209,13 @@ let _openskyTtlMs = OPENSKY_CACHE_MS;
 /** @type {number} Epoch-ms before which no upstream fetch is attempted. */
 let _openskyCooldownUntil = 0;
 /**
+ * Posledný známy zostatok denných kreditov OpenSky (X-Rate-Limit-Remaining;
+ * 0 po 429). Číta ho strážca histórie letov (flightHistoryKeeper.js), aby
+ * nebral kredity živej mape návštevníkov. null = zatiaľ neznámy.
+ * @type {number|null}
+ */
+let _openskyRemainingCredits = null;
+/**
  * Pripnutý regionálny režim po 429 (flap damper, 2026-09-02). Bez neho na
  * vyčerpaných kreditoch systém osciloval: globálny snapshot (11k+ strojov) →
  * 429 → cooldown → cache zostarne → regionálna náhrada → cooldown vyprší →
@@ -224,6 +244,21 @@ function openskyAdaptiveTtlMs(remaining) {
   if (remaining > 400) return 90_000;
   return 300_000;
 }
+// --- Výrez pri priblížení (2026-09-30, src/data/openSkyRegion.js) ------------
+// Priblížený pohľad dostane čerstvý výrez za 1 kredit + zvyšok sveta z posledného
+// celosvetového snímku (najviac 60 s starého). Celý svet sa pre neho berie najviac
+// raz za minútu namiesto pri každom dopyte po 9 s cache.
+/** @type {Map<string, {fetchedAt:number, body:string, parsed:{time:number, states:Array}, mergedFor:number, mergedBody:string|null}>} */
+const _openskyRegionCache = new Map();
+/** Jeden dopyt na výrez naraz (viac návštevníkov v tom istom okolí). */
+const _openskyRegionInFlight = new Map();
+const OPENSKY_REGION_CACHE_MAX = 40;
+/** Výrezy stiahnuté od posledného celosvetového snímku (strop REGION_FETCHES_PER_WORLD_MAX). */
+let _openskyRegionFetchesSinceWorld = 0;
+/** Rozparsovaný celosvetový snímok na spájanie s výrezmi — parsuje sa raz na snímok. */
+let _openskyWorldParsed = null;
+/** Dopyty na OpenSky od štartu servera a odhad minutých kreditov (lokálny /api/history/status). */
+const _openskyUpstreamStats = { since: Date.now(), world: 0, region: 0, credits: 0 };
 /** @type {boolean} Guards duplicate auth-failure warnings in logs. */
 let _openskyAuthWarned = false;
 /** @type {boolean} Guards duplicate invalid-auth-mode warnings. */
@@ -3653,8 +3688,7 @@ function airframesProxy() {
         };
         try {
           const url = new URL(String(req.url || '/'), 'http://localhost');
-          // Loopback socket AND no CF-Connecting-IP/CF-Ray: tunnel traffic is never local.
-          const local = isGenuineLocalRequest(req);
+          const local = isDirectLocalRequest(req);
           const on = enabled();
           if (url.pathname === '/status') {
             return send(200, {
@@ -3907,6 +3941,20 @@ function meteoProxy() {
 
 /** Loopback test pre „iba lokálne" proxy (airframes) — žije v src/serverGuards.js. Exportované pre testy. */
 export { isLoopbackAddress };
+
+/**
+ * Požiadavka naozaj z tohto počítača (2026-09-30). Loopback soket NESTAČÍ: cloudflared tunel
+ * doručuje aj verejných návštevníkov okolive.sk z 127.0.0.1 (ACARS tak bol verejný napriek
+ * „LEN LOKÁLNE"). Lokálna je len požiadavka bez hlavičiek Cloudflare/proxy a s hostiteľom
+ * localhost. Exportované pre testy.
+ */
+export function isDirectLocalRequest(req) {
+  if (!isLoopbackAddress(req?.socket?.remoteAddress)) return false;
+  const h = req?.headers || {};
+  if (h['cf-connecting-ip'] || h['cf-ray'] || h['cf-visitor'] || h['x-forwarded-for'] || h['x-forwarded-host']) return false;
+  const host = String(h.host || '').trim().toLowerCase().replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost');
+}
 
 /**
  * Detect whether an Overpass API response body indicates rate-limiting.
@@ -4414,8 +4462,10 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  * Záznam: obal nad `res.end` pre /api/opensky a /api/adsblol/mil — telo,
  * ktoré proxy už posiela klientovi, sa zapíše do SQLite
  * (.gev-cache/flight-history.sqlite, flightHistoryStore.js). Žiadny nový
- * upstream dopyt, žiadny nový zdroj; ten istý snímok z cache sa nezapíše
- * dvakrát (kľúč time+počet). Musí byť zaregistrovaný PRED openSkyProxy a
+ * zdroj; ten istý snímok z cache sa nezapíše dvakrát (kľúč time+počet).
+ * Keď nikto nepozerá, strážca (flightHistoryKeeper.js, 2026-09-30) si tie
+ * isté dve lokálne adresy pýta sám — v rámci denných kreditov OpenSky
+ * s rezervou pre živú mapu — takže história nemá diery. Musí byť zaregistrovaný PRED openSkyProxy a
  * adsbLolProxy — connect volá middleware v poradí registrácie.
  *
  * Čítanie:
@@ -4423,7 +4473,8 @@ function openSkySourceIsStale(sourceEpochMs, now = Date.now()) {
  *   GET /api/history/search?q=<callsign prefix|hex>&hours=24&limit=50
  *   GET /api/history/track?icao24=<hex>&from=<epoch s>&to=<epoch s>
  *   GET /api/history/leg?id=<n>
- * Retencia FLIGHT_HISTORY_RETENTION_DAYS (default 7). FLIGHT_HISTORY=off vypne.
+ * Retencia FLIGHT_HISTORY_RETENTION_DAYS (default 7). FLIGHT_HISTORY=off vypne,
+ * FLIGHT_HISTORY_KEEPER=off vypne len strážcu.
  */
 // ---------------------------------------------------------------------------
 // Gas prices proxy — ACER TERMINAL (daily, public CSV) + IMF via FRED (monthly)
@@ -5034,7 +5085,7 @@ function ukraineReportProxy() {
  * najviac raz za TTL na región. Bez kľúča. Agregujeme a ODKAZUJEME, netvoríme text.
  * @returns {import('vite').Plugin}
  */
-function situationNewsProxy() {
+export function situationNewsProxy() {
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'situation');
   const TTL_MS = 15 * 60_000;
   const STALE_MAX_MS = 6 * 60 * 60_000;
@@ -5066,7 +5117,12 @@ function situationNewsProxy() {
     const upstream = await fetch(url, { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), headers: { 'User-Agent': USER_AGENT, Accept: 'application/json,text/plain;q=0.9,*/*;q=0.5' } });
     const text = await readResponseTextCapped(upstream, MAX_BYTES);
     if (!upstream.ok) { const error = new Error('upstream HTTP ' + upstream.status + ' (' + new URL(url).host + ')'); error.upstreamStatus = upstream.status; throw error; }
-    try { return JSON.parse(text); } catch { throw new Error('GDELT returned non-JSON (rate limit?)'); }
+    try { return JSON.parse(text); } catch {
+      // „Please limit requests…" chodí niekedy s HTTP 200 — brána ho musí poznať ako 429.
+      const error = new Error('GDELT returned non-JSON: ' + text.slice(0, 80).replace(/\s+/g, ' '));
+      if (/limit requests/i.test(text)) error.upstreamStatus = 429;
+      throw error;
+    }
   }
   // Fallback: Google News RSS (open, far less rate-limited than GDELT). Reuses the
   // shared RSS parser; maps to the situation item shape (ISO date → epoch ms).
@@ -5173,8 +5229,13 @@ function situationNewsProxy() {
     const started = Date.now();
     const cfg = SITUATION_REGIONS[region];
     let gdelt = [];
-    try { gdelt = parseGdeltArticles(await fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 }))); }
-    catch (error) { console.warn('[situation-proxy] ' + region + ' GDELT failed (' + (error?.message || error) + ')'); }
+    // Spoločná brána GDELT na proces (2026-10-03): 1 dopyt za 5,5 s, po 429 minúta ticha,
+    // radšej preskočiť než čakať > 12 s — Google News nižšie pokryje výpadok.
+    try {
+      const gated = await sharedGdeltGate().run(() => fetchGdelt(gdeltDocUrl(cfg.query, { timespan: cfg.timespan, maxrecords: 40 })));
+      if (gated.skipped) console.log('[situation-proxy] ' + region + ' GDELT skipped (' + gated.skipped + ')');
+      else gdelt = parseGdeltArticles(gated.value);
+    } catch (error) { console.warn('[situation-proxy] ' + region + ' GDELT failed (' + (error?.message || error) + ')'); }
     const direct = await fetchDirectRss(cfg).catch(() => []);
     // Google News RSS adds broad coverage; fetch it unless GDELT already returned plenty.
     let google = [];
@@ -5646,28 +5707,69 @@ function flightHistoryProxy() {
   //   FLIGHT_HISTORY_RETENTION_DAYS=30   (default 7)
   //   FLIGHT_HISTORY_RAW_HOURS=720       plný záznam bez riedenia (default 24;
   //                                      ≥ retencia = riedenie vypnuté)
+  //   FLIGHT_HISTORY_KEEPER=off          vypne strážcu (záznam aj bez návštevníkov)
+  //   FLIGHT_HISTORY_MIN_FREE_GB=25      pod týmto voľným miestom sa nezapisuje
   const config = () => {
     const days = Number(process.env.FLIGHT_HISTORY_RETENTION_DAYS);
     const raw = Number(process.env.FLIGHT_HISTORY_RAW_HOURS);
+    const minFreeGb = Number(process.env.FLIGHT_HISTORY_MIN_FREE_GB);
     return {
       enabled: String(process.env.FLIGHT_HISTORY || 'on').toLowerCase() !== 'off',
+      keeper: String(process.env.FLIGHT_HISTORY_KEEPER || 'on').toLowerCase() !== 'off',
       dbPath: String(process.env.FLIGHT_HISTORY_DB || '').trim() || path.join(process.cwd(), '.gev-cache', 'flight-history.sqlite'),
       retentionDays: days > 0 ? days : 7,
       rawHours: raw > 0 ? raw : 24,
+      minFreeBytes: (minFreeGb > 0 ? minFreeGb : 25) * 1024 ** 3,
     };
   };
   let store = null;
   let enabled = true;
+  // Server tejto inštancie pluginu sa zavrel (reštart Vite): oneskorený zápis z ešte bežiacej
+  // odpovede by inak databázu otvoril znova a to vlákno by už nikto nezavrel (2026-09-30:
+  // v logu dve otvorenia na každý reštart).
+  let shutDown = false;
+  let keeper = null;
+  let stateAircraft = null;
+  let flightEvents = null;
+  let diskGuard = null;
+  let diskWarnedAt = 0;
+
+  /** Poistka voľného miesta (flightHistoryKeeper.js): pod hranicou sa nezapisuje. */
+  function diskOk() {
+    const cfg = config();
+    if (!diskGuard) diskGuard = createDiskGuard({ dir: path.dirname(cfg.dbPath), minFreeBytes: cfg.minFreeBytes });
+    const ok = diskGuard.ok();
+    if (!ok && Date.now() - diskWarnedAt > 60 * 60_000) {
+      diskWarnedAt = Date.now();
+      const free = diskGuard.status().freeBytes;
+      console.warn(`[flight-history] málo voľného miesta (${Math.round((free ?? 0) / 1024 ** 3)} GB) — história sa nezapisuje`);
+    }
+    return ok;
+  }
+
+  /** Vlastný dopyt strážcu histórie (nie návštevník) — len priamo z tohto počítača. */
+  const isKeeperRequest = (req) => req.headers?.[KEEPER_HEADER] === '1' && isDirectLocalRequest(req);
 
   function getStore() {
+    if (shutDown) return null;
     const cfg = config();
     enabled = cfg.enabled;
+    if (store?.closed) store = null; // vlákno spadlo — ďalší dopyt ho otvorí znova
     if (store || !enabled) return store;
     try {
       fs.mkdirSync(path.dirname(cfg.dbPath), { recursive: true });
-      store = openFlightHistory(cfg.dbPath, { retentionDays: cfg.retentionDays, rawHours: cfg.rawHours });
-      const st = store.status();
-      console.log(`[flight-history] SQLite ${cfg.dbPath}: ${st.fixes} fixes, ${st.legs} legs, retention ${cfg.retentionDays} d, raw ${cfg.rawHours} h`);
+      // SQLite v samostatnom vlákne (2026-09-30): zápis snímku OpenSky trval ~4,4 s a node:sqlite je
+      // synchrónne — hlavné vlákno aj verejné /api vtedy stáli (CPU profil + merač [event-loop]).
+      store = openFlightHistoryWorker(cfg.dbPath, { retentionDays: cfg.retentionDays, rawHours: cfg.rawHours });
+      const opened = store;
+      opened.ready
+        .then(() => opened.status())
+        .then((st) => console.log(`[flight-history] SQLite ${cfg.dbPath} (vlákno): ${st.fixes} fixes, ${st.legs} legs, retention ${cfg.retentionDays} d, raw ${cfg.rawHours} h`))
+        .catch((error) => {
+          console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
+          if (store === opened) store = null;
+          void opened.close();
+        });
     } catch (error) {
       console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
       store = null;
@@ -5675,7 +5777,11 @@ function flightHistoryProxy() {
     return store;
   }
 
-  /** Obal: po odoslaní 200 odpovede zapíš jej telo (asynchrónne k odpovedi). */
+  /**
+   * Obal: po odoslaní 200 odpovede zapíš jej telo (asynchrónne k odpovedi). Proxy môže určiť, čo
+   * sa zapíše, cez `res.okoHistoryRecord`: false = nič (telo už v histórii je), text = namiesto
+   * tela toto (výrez pri priblížení: odpoveď je svet + výrez, nové sú len stroje z výrezu).
+   */
   function tapResponse(res, record) {
     const originalEnd = res.end.bind(res);
     const chunks = [];
@@ -5684,12 +5790,16 @@ function flightHistoryProxy() {
     res.end = (chunk, ...rest) => {
       if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
       const result = originalEnd(chunk, ...rest);
-      if (res.statusCode === 200 && chunks.length) {
-        const body = Buffer.concat(chunks);
+      const override = res.okoHistoryRecord;
+      if (res.statusCode === 200 && chunks.length && override !== false) {
+        const body = typeof override === 'string' ? Buffer.from(override) : Buffer.concat(chunks);
         setImmediate(() => {
           try {
             const s = getStore();
-            if (s) record(s, body);
+            if (s && diskOk()) {
+              Promise.resolve(record(s, body))
+                .catch((error) => console.warn('[flight-history] record failed:', error?.message || error));
+            }
           } catch (error) {
             console.warn('[flight-history] record failed:', error?.message || error);
           }
@@ -5707,36 +5817,126 @@ function flightHistoryProxy() {
   return {
     name: 'flight-history',
     configureServer(server) {
+      // Reštart Vite (zmena konfigurácie) vytvorí nový plugin — staré vlákno so SQLite sa musí zavrieť.
+      server.httpServer?.once('close', () => { shutDown = true; });
+      server.httpServer?.once('close', () => { store?.close(); store = null; });
+      const cfg = config();
+      // Štátne lietadlá SR (2026-09-30, vlastník: „aby sa ich aj spätne dalo trackovať", verejne):
+      // overený zoznam, živé polohy z adsb.lol (zapisujú sa do histórie), lety s odvodenými letiskami
+      // a spätný import stôp po dňoch (STATE_AIRCRAFT_BACKFILL=off ho vypne).
+      stateAircraft = createStateAircraftService({
+        listFile: path.join(__dirname, 'src', 'data', 'local_data', 'state-aircraft', 'sk.json'),
+        airportsFile: path.join(__dirname, 'src', 'data', 'local_data', 'airports', 'airports.geojsonl'),
+        cursorFile: path.join(path.dirname(cfg.dbPath), 'state-aircraft-backfill.json'),
+        getStore,
+      });
+      if (cfg.enabled && String(process.env.STATE_AIRCRAFT_BACKFILL || 'on').toLowerCase() !== 'off' && server.httpServer) {
+        const service = stateAircraft;
+        if (server.httpServer.listening) service.startBackfill();
+        else server.httpServer.once('listening', () => service.startBackfill());
+        server.httpServer.once('close', () => service.stopBackfill());
+      }
+      // Udalosti, etapa 1 (2026-09-30, vlastník: „automatizované aj s overením z nezávislého zdroja",
+      // „len overené, nie fake!"): spúšťače z archívu (núdzový kód, strmhlavé klesanie) overí druhá sieť
+      // (adsb.lol) — src/data/flightEventsService.js. Súkromné (API len z tohto počítača),
+      // FLIGHT_EVENTS=off vypne. Udalosti ako JSON vedľa databázy (<adresár DB>/events).
+      flightEvents = createFlightEventsService({
+        getStore,
+        eventsDir: path.join(path.dirname(cfg.dbPath), 'events'),
+        // Etapa 2: overenie správami — zoznam dôveryhodných médií (vlastník ho môže upraviť).
+        trustedFile: path.join(__dirname, 'src', 'data', 'local_data', 'events', 'trusted-news.json'),
+        isLocal: isDirectLocalRequest,
+        // Vlastník prihlásený účtom (OKO_OWNER_EMAILS) — súkromné časti aj mimo tohto počítača (2026-10-03).
+        // Vlastník prihlásený účtom (authPlugin.isOwnerRequest, nastavené v configu pred stavbou pluginov).
+        isOwner: _eventsOwnerCheck,
+        // Etapa 2b: obrázok udalosti (sharp + mapové podklady z repa) a zverejnenie klikom vlastníka
+        // ako trvalý odkaz /s/<id> v tom istom úložisku ako zdieľanie (retencia ho nemaže).
+        renderCard: createEventCardRenderer({ dataDir: path.join(__dirname, 'src', 'data', 'local_data') }),
+        shareStore: createShareStore({ dir: path.join(process.cwd(), '.gev-cache', 'share') }),
+        // Video do príspevku (2026-10-01): kreslí ho ten istý kód ako obrázok, ffmpeg (FFMPEG_PATH alebo
+        // z PATH) ho zakóduje; videá vedľa databázy (<adresár DB>/event-video), jedno na udalosť.
+        eventVideo: createEventVideoCache({
+          dir: path.join(path.dirname(cfg.dbPath), 'event-video'),
+          codeVersion: videoCodeVersion(path.join(__dirname, 'src', 'data')),
+          render: createEventVideoRenderer({ dataDir: path.join(__dirname, 'src', 'data', 'local_data') }),
+        }),
+        // 3D video v štýle OKO nahraté skriptom scripts/capture-event-video.mjs (tlačidlo VIDEO DO PRÍSPEVKU).
+        videoStore: createEventVideoStore({ dir: path.join(path.dirname(cfg.dbPath), 'event-video', '3d') }),
+        // Pristátie zo správ (POST /api/events/<id>/reported): poloha letiska z OurAirports.
+        airportsFile: path.join(__dirname, 'src', 'data', 'local_data', 'airports', 'airports.geojsonl'),
+        // Video automaticky (2026-10-03, scripts/lib/eventVideoPipeline.mjs): hlas vlastníka z ai-translators
+        // (AI_TRANSLATORS_MCP_URL + AI_TRANSLATORS_MCP_KEY) alebo z pamäte nahrávok, hudba z EVENT_VIDEO_MUSIC_DIR, obraz z OKO na
+        // EVENT_VIDEO_PAGE_URL (dev server s Cesiom), najviac EVENT_VIDEO_DAILY_MAX videí za deň (dlaždice).
+        videoPipeline: createEventVideoPipeline({ dbDir: path.dirname(cfg.dbPath) }),
+        videoDailyMax: Math.max(1, Number(process.env.EVENT_VIDEO_DAILY_MAX) || 3),
+      });
+      if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
+        const events = flightEvents;
+        if (server.httpServer.listening) events.start();
+        else server.httpServer.once('listening', () => events.start());
+        server.httpServer.once('close', () => events.stop());
+      }
+      if (cfg.enabled && cfg.keeper) {
+        // Nepretržitý záznam (2026-09-30, používateľ: „čo najviac informácií ukladať"): keď nikto
+        // nepozerá, strážca si tie isté lokálne /api pýta sám — prejde cache aj kreditovým
+        // governorom a zapíše sa týmto istým obalom. Pod rezervou kreditov necháva OpenSky návštevníkom.
+        keeper = createHistoryKeeper({
+          streams: [
+            { id: 'opensky', path: '/api/opensky', intervalMs: () => keeperOpenSkyIntervalMs(_openskyRemainingCredits), blockedUntilMs: () => Math.max(_openskyCooldownUntil, _openskyConstrainedUntil) },
+            { id: 'mil', path: '/api/adsblol/mil', intervalMs: () => KEEPER_MIL_INTERVAL_MS },
+            { id: 'state', path: '/api/state-aircraft/live', intervalMs: () => KEEPER_MIL_INTERVAL_MS },
+          ],
+          openSkyCredits: () => _openskyRemainingCredits,
+          canRecord: () => Boolean(getStore()) && diskOk(),
+        });
+        keeper.attach(server.httpServer);
+      }
       server.middlewares.use('/api/opensky', (req, res, next) => {
+        if (!isKeeperRequest(req)) keeper?.noteClient('opensky');
         if (enabled) tapResponse(res, (s, body) => s.recordOpenSkyBody(body, res.getHeader('X-Flight-Source') ? 'adsb.lol/regional' : 'opensky'));
         next();
       });
       server.middlewares.use('/api/adsblol/mil', (req, res, next) => {
+        if (!isKeeperRequest(req)) keeper?.noteClient('mil');
         if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/mil'));
         next();
       });
-      server.middlewares.use('/api/history', (req, res) => {
+      server.middlewares.use('/api/state-aircraft/live', (req, res, next) => {
+        if (!isKeeperRequest(req)) keeper?.noteClient('state');
+        if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/watch'));
+        next();
+      });
+      server.middlewares.use('/api/state-aircraft', (req, res) => { void stateAircraft.handle(req, res); });
+      server.middlewares.use('/api/events', (req, res) => { void flightEvents.handle(req, res); });
+      server.middlewares.use('/api/history', async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         const s = getStore();
         if (!s) { json(res, 503, { error: enabled ? 'history_unavailable' : 'history_disabled' }); return; }
         try {
-          if (url.pathname === '/status') { json(res, 200, s.status()); return; }
+          if (url.pathname === '/status') {
+            // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
+            const { path: dbFile, ...publicStatus } = await s.status();
+            json(res, 200, isDirectLocalRequest(req)
+              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null, events: flightEvents?.status() ?? null, opensky: openSkyUpstreamStatus() }
+              : publicStatus);
+            return;
+          }
           if (url.pathname === '/search') {
             const hours = Math.min(24 * config().retentionDays, Math.max(1, Number(url.searchParams.get('hours')) || 24));
             const sinceS = Math.floor(Date.now() / 1000) - hours * 3600;
             const limit = Number(url.searchParams.get('limit')) || 50;
-            json(res, 200, { q: url.searchParams.get('q') || '', hours, legs: s.search(url.searchParams.get('q') || '', { sinceS, limit }) });
+            json(res, 200, { q: url.searchParams.get('q') || '', hours, legs: await s.search(url.searchParams.get('q') || '', { sinceS, limit }) });
             return;
           }
           if (url.pathname === '/track') {
             const icao24 = url.searchParams.get('icao24') || '';
             const fromS = Number(url.searchParams.get('from')) || 0;
             const toS = Number(url.searchParams.get('to')) || Number.MAX_SAFE_INTEGER;
-            json(res, 200, { icao24: icao24.toLowerCase(), fromS, toS, fixes: s.track(icao24, { fromS, toS }) });
+            json(res, 200, { icao24: icao24.toLowerCase(), fromS, toS, fixes: await s.track(icao24, { fromS, toS }) });
             return;
           }
           if (url.pathname === '/leg') {
-            const leg = s.leg(url.searchParams.get('id'));
+            const leg = await s.leg(url.searchParams.get('id'));
             if (!leg) { json(res, 404, { error: 'not_found' }); return; }
             json(res, 200, leg);
             return;
@@ -5748,6 +5948,43 @@ function flightHistoryProxy() {
         }
       });
     },
+  };
+}
+
+/** Plugin histórie letov aj pre test so zdvojeným serverom (src/data/flightHistoryProxy.test.mjs). */
+export { flightHistoryProxy };
+/** Proxy OpenSky pre test výrezu so zdvojeným serverom (src/data/openSkyRegion.test.mjs). */
+export { openSkyProxy };
+
+/**
+ * Linka „priprav video" pre službu udalostí (2026-10-03): hlas (ai-translators, token z .env — bez tokenu
+ * len pamäť nahrávok), hudba (tracks.json v EVENT_VIDEO_MUSIC_DIR, inak .gev-cache/event-video-capture/music),
+ * obraz z OKO (EVENT_VIDEO_PAGE_URL, inak http://localhost:4173), pracovné súbory <adresár DB>/event-video/work.
+ */
+function createEventVideoPipeline({ dbDir }) {
+  const voiceCfg = aiTranslatorsConfig(process.env);
+  let voice = null;
+  if (voiceCfg.token) {
+    try { voice = createAiTranslatorsClient(voiceCfg); } catch (error) { console.warn('[events] ai-translators:', error?.message || error); }
+  }
+  const cache = createVoiceCache(path.join(dbDir, 'event-video', 'voice'));
+  const musicDir = process.env.EVENT_VIDEO_MUSIC_DIR || path.join(process.cwd(), '.gev-cache', 'event-video-capture', 'music');
+  const music = () => {
+    try {
+      const lib = JSON.parse(fs.readFileSync(path.join(musicDir, 'tracks.json'), 'utf8'));
+      const t = lib.tracks?.[0];
+      return t ? { ...t, file: path.join(musicDir, t.file) } : null;
+    } catch { return null; }
+  };
+  return {
+    voiceReady: Boolean(voice),
+    run: (event, script, onProgress) => prepareEventVideo({
+      event, script, voice, cache, music: music(),
+      workDir: path.join(dbDir, 'event-video', 'work', event.id),
+      capture: { node: process.execPath, baseUrl: process.env.EVENT_VIDEO_PAGE_URL || 'http://localhost:4173' },
+      tools: { ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg' },
+      onProgress,
+    }),
   };
 }
 
@@ -5858,6 +6095,10 @@ function openSkyProxy() {
             }
           }
 
+          // Priblížený pohľad (src/data/openSkyRegion.js): čerstvý výrez za 1 kredit + zvyšok sveta
+          // z posledného snímku, kým nie je starší než minúta. Inak (a pre strážcu histórie) celý svet.
+          if (await serveOpenSkyViewport(req, res, { headers, requestedMode, usedMode, now })) return;
+
           let upstream = await fetch('https://opensky-network.org/api/states/all?extended=1', { headers });
           // Auto-mode fallback: if OAuth was rejected, retry with Basic credentials
           if (
@@ -5909,6 +6150,7 @@ function openSkyProxy() {
             // Flap damper: každý 429 pripne vrstvu na regionálnu náhradu na
             // celé okno — stabilná 250nm flotila bez evikčného thrashu.
             _openskyConstrainedUntil = now + OPENSKY_CONSTRAINED_REGIME_MS;
+            _openskyRemainingCredits = 0;
             // Serve the last-good body instead of the 429 when we have one —
             // the layer keeps rendering (STALE-cued) instead of dying.
             if (_openskyCacheBody && _openskyCacheStatus === 200) {
@@ -5995,7 +6237,12 @@ function openSkyProxy() {
             // exhausting the quota mid-day. Success also clears any cooldown.
             const remaining = Number(upstream.headers.get('x-rate-limit-remaining'));
             _openskyTtlMs = openskyAdaptiveTtlMs(remaining);
+            if (upstream.headers.get('x-rate-limit-remaining') && Number.isFinite(remaining)) _openskyRemainingCredits = remaining;
             _openskyCooldownUntil = 0;
+            // Nový snímok sveta: výrezy sa znova smú (strop REGION_FETCHES_PER_WORLD_MAX).
+            _openskyRegionFetchesSinceWorld = 0;
+            _openskyUpstreamStats.world += 1;
+            _openskyUpstreamStats.credits += 4;
           }
 
           res.writeHead(
@@ -6044,6 +6291,149 @@ function openSkyProxy() {
       });
     },
   };
+}
+
+/** Rozparsovaný aktuálny snímok sveta (raz na snímok), alebo null. */
+function openSkyWorldParsed() {
+  if (!_openskyCacheBody) return null;
+  if (_openskyWorldParsed?.cacheTime !== _openskyCacheTime) {
+    try {
+      const json = JSON.parse(_openskyCacheBody);
+      _openskyWorldParsed = { cacheTime: _openskyCacheTime, json: { time: json?.time, states: Array.isArray(json?.states) ? json.states : [] } };
+    } catch {
+      _openskyWorldParsed = { cacheTime: _openskyCacheTime, json: null };
+    }
+  }
+  return _openskyWorldParsed.json;
+}
+
+/** Stiahni výrez (jeden dopyt na výrez naraz). Vracia { status, record?, retryAfterSec? }. */
+async function fetchOpenSkyRegion(region, headers) {
+  const request = coalesceProxyRequest(_openskyRegionInFlight, region.key, async () => {
+    const upstream = await fetch(openSkyRegionUrl(region), { headers, signal: AbortSignal.timeout(15_000) });
+    const remainingHeader = upstream.headers.get('x-rate-limit-remaining');
+    const remaining = Number(remainingHeader);
+    if (upstream.status === 429) {
+      return { status: 429, retryAfterSec: Number(upstream.headers.get('x-rate-limit-retry-after-seconds')) };
+    }
+    if (!upstream.ok) return { status: upstream.status };
+    const body = await upstream.text();
+    let json;
+    try { json = JSON.parse(body); } catch { return { status: 502 }; }
+    // Prázdny výrez OpenSky vracia ako "states": null.
+    if (!json || (json.states !== null && !Array.isArray(json.states))) return { status: 502 };
+    if (remainingHeader && Number.isFinite(remaining)) {
+      _openskyRemainingCredits = remaining;
+      _openskyTtlMs = openskyAdaptiveTtlMs(remaining);
+    }
+    _openskyUpstreamStats.region += 1;
+    _openskyUpstreamStats.credits += openSkyAreaCredits(region);
+    const record = { fetchedAt: Date.now(), body, parsed: { time: json.time, states: json.states || [] }, mergedFor: -1, mergedBody: null };
+    _openskyRegionCache.delete(region.key);
+    _openskyRegionCache.set(region.key, record);
+    while (_openskyRegionCache.size > OPENSKY_REGION_CACHE_MAX) {
+      _openskyRegionCache.delete(_openskyRegionCache.keys().next().value);
+    }
+    return { status: 200, record };
+  });
+  if (!request.shared) _openskyRegionFetchesSinceWorld += 1;
+  try {
+    return await request.promise;
+  } catch (error) {
+    if (error?.name !== 'TimeoutError' && error?.name !== 'AbortError') console.warn('[OpenSky Proxy] výrez:', error?.message || error);
+    return { status: 0 };
+  }
+}
+
+/**
+ * Priblížený pohľad: svet z posledného snímku + čerstvý výrez okolo kamery (src/data/openSkyRegion.js).
+ * Vracia true, keď odpovedal; false = pokračuj celosvetovým dopytom (bez výšky kamery, vysoko,
+ * málo kreditov, svet starší než minúta alebo žiadny).
+ * Do histórie letov ide len čerstvý výrez (`res.okoHistoryRecord`) — svet sa zapísal pri svojom stiahnutí.
+ */
+async function serveOpenSkyViewport(req, res, { headers, requestedMode, usedMode, now }) {
+  const region = openSkyRegionForView(new URL(req?.url || '', 'http://localhost').searchParams);
+  if (!region) return false;
+  const policy = regionPolicy(_openskyRemainingCredits);
+  if (!policy || !_openskyCacheBody || _openskyCacheStatus !== 200) return false;
+  const worldAge = now - _openskyCacheTime;
+  if (worldAge >= policy.worldMaxAgeMs || openSkySourceIsStale(_openskyCacheSourceEpochMs, now)) return false;
+  const send = (cacheStatus, why, body, extra = {}) => {
+    res.writeHead(200, {
+      ...buildOpenSkyHeaders({ cacheStatus, requestedMode, usedMode, reason: why, ...extra }),
+      'X-OpenSky-Region': `${region.lamin},${region.lomin},${region.lamax},${region.lomax}`,
+      'X-OpenSky-World-Age': String(Math.round(worldAge / 1000)),
+    });
+    res.end(body);
+    return true;
+  };
+  // Svet je čerstvejší, než by bol výrez — stačí on (už je v histórii).
+  if (worldAge < policy.regionTtlMs) {
+    res.okoHistoryRecord = false;
+    return send('HIT', 'viewport_world_fresh', _openskyCacheBody);
+  }
+  let record = _openskyRegionCache.get(region.key) || null;
+  const fresh = Boolean(record) && now - record.fetchedAt < policy.regionTtlMs;
+  let fetchedNow = false;
+  if (!fresh && _openskyRegionFetchesSinceWorld < REGION_FETCHES_PER_WORLD_MAX) {
+    const fetched = await fetchOpenSkyRegion(region, headers);
+    if (fetched.status === 429) {
+      // Rovnaký governor ako pri svete: cooldown podľa OpenSky, pripnutý regionálny režim, kredity 0.
+      const retryAfterSec = fetched.retryAfterSec;
+      const cooldownMs = Math.min(Math.max(Number.isFinite(retryAfterSec) ? retryAfterSec * 1000 : 120_000, 30_000), 30 * 60_000);
+      _openskyCooldownUntil = now + cooldownMs;
+      _openskyConstrainedUntil = now + OPENSKY_CONSTRAINED_REGIME_MS;
+      _openskyRemainingCredits = 0;
+      res.okoHistoryRecord = false;
+      return send('STALE', 'rate_limited_serving_stale', _openskyCacheBody, { staleSeconds: worldAge / 1000, retryAfterSeconds: cooldownMs / 1000 });
+    }
+    if (fetched.status === 200) {
+      record = fetched.record;
+      fetchedNow = true;
+    }
+  }
+  // Strop výrezov do ďalšieho snímku sveta alebo zlyhaný výrez: starší výrez, inak svet. Výrez starší
+  // než snímok sveta by prepísal novšie polohy staršími — vtedy len svet.
+  if (record && record.fetchedAt <= _openskyCacheTime) record = null;
+  if (!record) {
+    res.okoHistoryRecord = false;
+    return send('HIT', 'viewport_world_only', _openskyCacheBody);
+  }
+  if (record.mergedFor !== _openskyCacheTime) {
+    const world = openSkyWorldParsed();
+    if (!world) {
+      res.okoHistoryRecord = false;
+      return send('HIT', 'viewport_world_only', _openskyCacheBody);
+    }
+    record.mergedBody = JSON.stringify(mergeWorldAndRegion(world, record.parsed));
+    record.mergedFor = _openskyCacheTime;
+  }
+  // Čerstvo stiahnutý výrez do histórie; výrez z cache tam už je.
+  res.okoHistoryRecord = fetchedNow ? record.body : false;
+  return send(fetchedNow ? 'REGION' : (fresh ? 'REGION-HIT' : 'REGION-OLD'), 'viewport_refresh', record.mergedBody);
+}
+
+/** Testy: vyčisti stav OpenSky proxy (cache sveta a výrezov, governor, počítadlá). */
+export function _resetOpenSkyProxyForTest() {
+  _openskyCacheBody = null;
+  _openskyCacheStatus = 0;
+  _openskyCacheTime = 0;
+  _openskyCacheMeta = null;
+  _openskyCacheSourceEpochMs = null;
+  _openskyTtlMs = OPENSKY_CACHE_MS;
+  _openskyCooldownUntil = 0;
+  _openskyConstrainedUntil = 0;
+  _openskyRemainingCredits = null;
+  _openskyRegionCache.clear();
+  _openskyRegionInFlight.clear();
+  _openskyRegionFetchesSinceWorld = 0;
+  _openskyWorldParsed = null;
+  Object.assign(_openskyUpstreamStats, { since: Date.now(), world: 0, region: 0, credits: 0 });
+}
+
+/** Stav OpenSky pre lokálny /api/history/status: zostatok kreditov, dopyty a odhad minutých kreditov. */
+function openSkyUpstreamStatus() {
+  return { remainingCredits: _openskyRemainingCredits, ..._openskyUpstreamStats, regionsCached: _openskyRegionCache.size };
 }
 
 /**
@@ -8139,7 +8529,7 @@ function openAiRealtimeProxy() {
 
       // Developer diagnostics only: a public (tunnel) visitor must not be able
       // to write to this machine's disk. Silent 204 keeps the client quiet.
-      if (!isGenuineLocalRequest(req)) {
+      if (!isDirectLocalRequest(req)) {
         res.statusCode = 204;
         res.end();
         return;
@@ -10351,10 +10741,13 @@ async function fetchRegionalNews(place) {
     timespan: '48h',
   });
   try {
-    const payload = await fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, {
+    // Tá istá brána GDELT ako situačné správy (2026-10-03) — inak sa zrážali na limite 1/5 s.
+    const gated = await sharedGdeltGate().run(() => fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, {
       headers: { 'User-Agent': 'GodsEyeView/0.1' },
       timeoutMs: 12_000,
-    });
+    }));
+    if (gated.skipped) return { status: 'unavailable', query, articles: [], source: null };
+    const payload = gated.value;
     const articles = normalizeRegionalArticles(payload, 5);
     return { status: articles.length ? 'ready' : 'empty', query, articles, source: 'GDELT fallback' };
   } catch {
@@ -10775,6 +11168,29 @@ function skTerrainProxy() {
  * Cloudflare ho drží hodiny v cache a nová verzia by sa u návštevníkov neprejavila. Odkaz v index.html
  * dostane ?v=<odtlačok obsahu>; index.html sám sa necachuje (no-cache), takže zmena sa prejaví hneď.
  */
+/**
+ * Verzia verejného API v hlavičke (2026-10-01): služba oko-api beží z kópie commitu (scripts/oko-api-release.ps1
+ * zapíše súbor RELEASE) — `X-Oko-Release` ukáže, ktorý kód práve odpovedá. Len v role api.
+ * @param {{role: string}} serverRole
+ * @returns {import('vite').Plugin}
+ */
+function releaseHeaderPlugin(serverRole) {
+  let release = null;
+  if (serverRole?.role === 'api') {
+    try {
+      const text = fs.readFileSync(path.join(__dirname, 'RELEASE'), 'utf8').trim();
+      release = /^[0-9a-f]{7,40}$/.test(text) ? text : null;
+    } catch { release = null; }
+  }
+  return {
+    name: 'oko-release-header',
+    configureServer(server) {
+      if (!release) return;
+      server.middlewares.use((req, res, next) => { res.setHeader('X-Oko-Release', release); next(); });
+    },
+  };
+}
+
 function preloaderCacheBustPlugin() {
   return {
     name: 'oko-preloader-cache-bust',
@@ -10803,6 +11219,13 @@ export default defineConfig(({ mode }) => {
     if (process.env[key] === undefined) process.env[key] = val;
   }
   const env = { ...process.env };
+  // Rola procesu (2026-10-01, scripts/lib/serverRole.mjs): api = služba oko-api (verejné /api a /s z kópie
+  // commitu), proxy = oko-dev bez API pluginov s preposielaním /api a /s, full = všetko ako doteraz.
+  const serverRole = resolveServerRole(process.env);
+  const apiPlugins = runsApiPlugins(serverRole);
+  // Účet (authPlugin) aj kontrola vlastníka pre súkromné časti udalostí — jedna inštancia.
+  const accountAuth = apiPlugins ? authPlugin(env) : null;
+  _eventsOwnerCheck = accountAuth ? (req, res, opts) => accountAuth.isOwnerRequest(req, res, opts) : null;
   // Recovery/profile entry must not load the Cesium engine or map resources.
   const cesiumGlobe = cesium();
   const cesiumHtml = cesiumGlobe.transformIndexHtml;
@@ -10818,10 +11241,11 @@ export default defineConfig(({ mode }) => {
     plugins: [
       noIndexPlugin(),
       originKeepAlivePlugin(),
-      sharePlugin(),
-      flightHistoryProxy(),
-      authPlugin(env),
+      // V role proxy (oko-dev s OKO_API_UPSTREAM) sa API pluginy nespúšťajú: záznam histórie, strážca,
+      // udalosti a governor kreditov OpenSky bežia len v službe oko-api; /api a /s idú cez server.proxy.
+      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), sharePlugin(), flightHistoryProxy(), accountAuth] : []),
       cesiumGlobe,
+      ...(apiPlugins ? [
       openSkyProxy(),
       celestrakProxy(),
       tomtomProxy(),
@@ -10866,6 +11290,12 @@ export default defineConfig(({ mode }) => {
       trackBackfillProxies(),
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
+      ] : []),
+      // Merač zablokovania vlákna (2026-09-30): zaseknutia pár minút po reštarte zatiaľ bez príčiny.
+      // Nemá middleware, takže miesto v zozname na nič nevplýva; začiatok aj koniec strážia testy.
+      eventLoopWatchPlugin(),
+      // Jednorazový CPU profil prvej minúty po štarte — len keď existuje .gev-cache/profile-next-start.
+      startupProfilePlugin({ root: __dirname }),
       // Odkaz na preloader víru s odtlačkom obsahu (Cloudflare cache) — na konci, poradie iných nemení.
       preloaderCacheBustPlugin(),
     ],
@@ -10873,12 +11303,12 @@ export default defineConfig(({ mode }) => {
       host: env.HOST || 'localhost',
       port: parseInt(env.PORT, 10) || 5173,
       // When binding to all interfaces, allow any host; otherwise restrict to local names
-      // + the Cloudflare Tunnel hostnames (2026-09-13 oko.uhrin.digital, 2026-09-28
-      // okolive.sk): cloudflared on this machine forwards to localhost, the bind
-      // stays localhost-only.
+      // + the Cloudflare Tunnel hostname okolive.sk (2026-09-28; the older
+      // oko.uhrin.digital was retired 2026-09-29): cloudflared on this machine
+      // forwards to localhost, the bind stays localhost-only.
       allowedHosts: (env.HOST === '0.0.0.0' || env.HOST === '::')
         ? true
-        : ['localhost', '127.0.0.1', '.local', '.uhrin.digital', '.okolive.sk'],
+        : ['localhost', '127.0.0.1', '.local', '.okolive.sk'],
       watch: {
         // Runtime caches and QA output live inside the repo but are not
         // source: heavy or mid-write files there (radar PNGs, terrain
@@ -10886,7 +11316,11 @@ export default defineConfig(({ mode }) => {
         // downloader makes chokidar throw EBUSY, which KILLS the dev server.
         ignored: ['**/.gev-cache/**', '**/qa-shots/**'],
       },
+      // api = bez sledovania súborov a HMR (kópia commitu sa nemení), proxy = preposielanie /api a /s.
+      ...roleServerOverrides(serverRole),
     },
+    // Rola api neslúži stránky — bez prehľadávania a predprípravy závislostí pri štarte (bloky 20–45 s).
+    ...(serverRole.role === 'api' ? { optimizeDeps: { noDiscovery: true, include: [] } } : {}),
     // Expose selected API keys to the browser via import.meta.env.*
     define: {
       'import.meta.env.GOOGLE_MAPS_API_KEY': JSON.stringify(env.GOOGLE_MAPS_API_KEY),

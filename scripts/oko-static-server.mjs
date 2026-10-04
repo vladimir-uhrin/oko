@@ -8,9 +8,10 @@
 // Why not the dev server: hundreds of unbundled modules over the tunnel.
 //
 // Behaviour: hashed assets under /assets/ are immutable for a year (Cloudflare
-// caches them at the edge), index.html is always revalidated, every response
-// carries X-Robots-Tag noindex and /robots.txt disallows everything (same as
-// the dev server's noIndexPlugin). No dependencies, no directory listing, no
+// caches them at the edge), index.html is always revalidated. Since 2026-09-30 the
+// site is indexed: X-Robots-Tag noindex only on pages that do not belong in search
+// results (robotsTagFor) and on non-content answers (404, 301, robots.txt), and
+// /robots.txt points to the sitemap. No dependencies, no directory listing, no
 // path traversal (resolved paths must stay inside dist).
 //
 // Cache (2026-09-28, meranie štartu — Cesium 3,5 MB a modely lietadiel 2,1 MB sa
@@ -72,12 +73,42 @@ export function hostRedirect(hostHeader, url, redirects) {
   return origin + (rest.startsWith('/') ? rest : '/');
 }
 
+/**
+ * Návšteva cez Cloudflare po http:// → trvalo na https:// s tou istou cestou a query, inak null
+ * (pure). Zóna uhrin.digital nemá „Always Use HTTPS" a nová zóna môže mať predvolené čokoľvek;
+ * po http Google kľúč (referrer https://…) aj bezpečný kontext prehliadača zlyhajú (2026-09-29,
+ * presun na okolive.sk). Bez hlavičiek Cloudflare (priamy prístup na 127.0.0.1) nič.
+ * @param {Record<string, string|string[]|undefined>} headers
+ * @param {string|undefined} url surové req.url
+ */
+export function httpsUpgrade(headers, url) {
+  const visitor = String(headers?.['cf-visitor'] || '');
+  const proto = String(headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (!/"scheme"\s*:\s*"http"/.test(visitor) && proto !== 'http') return null;
+  const host = String(headers?.host || '').toLowerCase().replace(/:\d+$/, '');
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return null;
+  const rest = String(url || '/').split('#')[0];
+  return `https://${host}${rest.startsWith('/') ? rest : '/'}`;
+}
+
 const REDIRECTS = parseRedirects(args);
 // robots.txt (2026-09-14, zdieľanie na siete): crawlery smú čítať stránky
-// (koreň s predvolenými OG značkami, /s/<id> cez ingress tunela), /api/ nie;
-// neindexovanie drží noindex v <meta> + X-Robots-Tag (zákaz v robots.txt by
-// ich crawlerom zatajil a siete by nemali z čoho spraviť náhľad).
-const ROBOTS_TXT = 'User-agent: *\nDisallow: /api/\nAllow: /\n';
+// (koreň s predvolenými OG značkami, /s/<id> cez ingress tunela), /api/ nie.
+// 2026-09-30 (vlastník: „podmienka noindex už neplatí"): koreň sa indexuje, robots.txt
+// ukazuje na sitemap; noindex ostáva len na stránkach, ktoré do výsledkov nepatria
+// (robotsTagFor), a na /s/<id> v <meta> (renderSharePage).
+const ROBOTS_TXT = 'User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https://okolive.sk/sitemap.xml\n';
+
+/**
+ * X-Robots-Tag pre súbor z buildu, alebo null (pure): účet a overovací súbor Search
+ * Console do výsledkov nepatria; všetko ostatné sa indexuje podľa <meta> stránky.
+ * @param {string} pathname
+ */
+export function robotsTagFor(pathname) {
+  if (pathname === '/account.html') return 'noindex, nofollow, noarchive';
+  if (/^\/google[0-9a-f]{8,}\.html$/.test(pathname)) return 'noindex';
+  return null;
+}
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.geojson': 'application/geo+json',
@@ -108,7 +139,7 @@ function send(res, status, headers, body) {
 }
 
 const server = http.createServer((req, res) => {
-  const redirect = hostRedirect(req.headers.host, req.url, REDIRECTS);
+  const redirect = hostRedirect(req.headers.host, req.url, REDIRECTS) || httpsUpgrade(req.headers, req.url);
   if (redirect) { send(res, 301, { Location: redirect, 'Cache-Control': 'public, max-age=3600', 'Content-Type': 'text/plain; charset=utf-8' }, `Moved to ${redirect}`); return; }
   const method = req.method || 'GET';
   if (method !== 'GET' && method !== 'HEAD') { send(res, 405, { 'Content-Type': 'text/plain' }, 'Method Not Allowed'); return; }
@@ -117,9 +148,17 @@ const server = http.createServer((req, res) => {
   if (pathname === '/robots.txt') { send(res, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, ROBOTS_TXT); return; }
   if (pathname.startsWith('/api/')) { send(res, 502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, JSON.stringify({ error: 'api_not_routed', detail: 'cloudflared must route /api/* to the dev server' })); return; }
   if (pathname === '/' || pathname === '') pathname = '/index.html';
+  // Obsahové stránky (2026-09-30, SEO): /sk/<téma>/ → index.html v priečinku.
+  else if (pathname.endsWith('/')) pathname += 'index.html';
   const target = path.resolve(DIR, `.${pathname}`);
   if (!target.startsWith(DIR + path.sep) && target !== DIR) { send(res, 403, { 'Content-Type': 'text/plain' }, 'Forbidden'); return; }
   fs.stat(target, (error, stat) => {
+    if (!error && stat.isDirectory()) {
+      // /sk/tema → /sk/tema/ (jedna kanonická adresa; relatívne odkazy v stránke sedia).
+      const query = (req.url || '').includes('?') ? (req.url || '').slice((req.url || '').indexOf('?')) : '';
+      send(res, 301, { Location: `${encodeURI(pathname)}/${query}`, 'Cache-Control': 'public, max-age=3600', 'Content-Type': 'text/plain; charset=utf-8' }, 'Moved');
+      return;
+    }
     if (error || !stat.isFile()) {
       // Unknown path: the app is a single page; anything else is a 404 (no SPA
       // fallback needed — OKO has one route).
@@ -140,7 +179,8 @@ const server = http.createServer((req, res) => {
       } : {}),
     };
     if (req.headers['if-none-match'] === etag) { send(res, 304, { ETag: etag, 'Cache-Control': headers['Cache-Control'] }, ''); return; }
-    res.writeHead(200, { 'X-Robots-Tag': 'noindex, nofollow, noarchive', ...headers });
+    const robotsTag = robotsTagFor(pathname);
+    res.writeHead(200, { ...(robotsTag ? { 'X-Robots-Tag': robotsTag } : {}), ...headers });
     if (method === 'HEAD') { res.end(); return; }
     const stream = fs.createReadStream(target);
     stream.on('error', () => { try { res.destroy(); } catch { /* closed */ } });
@@ -157,5 +197,5 @@ server.headersTimeout = 125_000;
 
 server.listen(PORT, HOST, () => {
   const moved = [...REDIRECTS].map(([host, origin]) => `${host} -> ${origin}`).join(', ');
-  console.log(`[oko-static] serving ${DIR} on http://${HOST}:${PORT}/ (noindex; /api/* is the dev server's job)${moved ? `; 301 ${moved}` : ''}`);
+  console.log(`[oko-static] serving ${DIR} on http://${HOST}:${PORT}/ (/api/* is the dev server's job)${moved ? `; 301 ${moved}` : ''}`);
 });

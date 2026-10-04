@@ -15,6 +15,14 @@ export const DEFAULT_AIRCRAFT_RECESSION_PARAMS = Object.freeze({
   globeViewBlendEndM: 4_500_000,
   earthRadiusM: 6_378_137,
   writeEpsilon: 0.005,
+  // Nízka kamera (2026-09-30, vlastník: „lietadlo 50 km ďaleko nech nemá veľkú ikonu"): pri kamere
+  // ~1,5 km je obzor ~140 km, takže limbová recesia začína až za ~70 km a stroje pri Viedni mali
+  // plných ~60 px. Pod `lowCameraFullHeightM` sa ikona zmenšuje aj podľa absolútnej vzdialenosti
+  // (plná do `lowCameraNearM`, na `scaleFloor` od `lowCameraFarM`); nad `lowCameraOffHeightM` nič.
+  lowCameraFullHeightM: 20_000,
+  lowCameraOffHeightM: 60_000,
+  lowCameraNearM: 10_000,
+  lowCameraFarM: 60_000,
 });
 
 let _params = { ...DEFAULT_AIRCRAFT_RECESSION_PARAMS };
@@ -36,6 +44,38 @@ function resolvedParams(overrides) {
   return { ..._params, ...overrides };
 }
 
+function smoothstep01(value) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function lowCameraScaleResolved(cameraDistanceM, cameraHeightM, tuning) {
+  if (!Number.isFinite(cameraDistanceM) || cameraDistanceM < 0
+    || !Number.isFinite(cameraHeightM) || cameraHeightM <= 0
+    || !(tuning.lowCameraOffHeightM > tuning.lowCameraFullHeightM)
+    || !(tuning.lowCameraFarM > tuning.lowCameraNearM)) return 1;
+  const strength = 1 - smoothstep01(
+    (cameraHeightM - tuning.lowCameraFullHeightM) / (tuning.lowCameraOffHeightM - tuning.lowCameraFullHeightM),
+  );
+  if (strength <= 0) return 1;
+  const ease = smoothstep01(
+    (cameraDistanceM - tuning.lowCameraNearM) / (tuning.lowCameraFarM - tuning.lowCameraNearM),
+  );
+  return 1 + (tuning.scaleFloor - 1) * ease * strength;
+}
+
+/**
+ * Zmenšenie ikony pri NÍZKEJ kamere podľa absolútnej vzdialenosti (pure, 2026-09-30). Mimo nízkej
+ * kamery (a pri neplatnom vstupe) vracia 1. Používa ho aj rámček detekcie, aby sedel na ikonu.
+ * @param {number} cameraDistanceM
+ * @param {number} cameraHeightM
+ * @param {Partial<typeof DEFAULT_AIRCRAFT_RECESSION_PARAMS>} [params]
+ * @returns {number} činiteľ škály v [scaleFloor, 1]
+ */
+export function aircraftLowCameraScale(cameraDistanceM, cameraHeightM, params) {
+  return lowCameraScaleResolved(cameraDistanceM, cameraHeightM, resolvedParams(params));
+}
+
 function aircraftRecessionFactorsResolved(cameraDistanceM, cameraHeightM, tuning, result) {
   if (!Number.isFinite(cameraDistanceM) || cameraDistanceM < 0
     || !Number.isFinite(cameraHeightM) || cameraHeightM <= 0
@@ -54,7 +94,8 @@ function aircraftRecessionFactorsResolved(cameraDistanceM, cameraHeightM, tuning
   }
   const limbRatio = cameraDistanceM / limbDistance;
   if (limbRatio <= tuning.startLimbRatio) {
-    result.scale = 1;
+    // Pod limbovým pásmom môže škálu znížiť už len nízka kamera (alfa ostáva plná).
+    result.scale = lowCameraScaleResolved(cameraDistanceM, cameraHeightM, tuning);
     result.alpha = 1;
     result.limbRatio = limbRatio;
     return result;
@@ -68,7 +109,10 @@ function aircraftRecessionFactorsResolved(cameraDistanceM, cameraHeightM, tuning
   const globeT = clamp(globeRawT, 0, 1);
   const globeEase = globeT * globeT * (3 - 2 * globeT);
   const strength = 1 - globeEase;
-  result.scale = 1 + (tuning.scaleFloor - 1) * limbEase * strength;
+  result.scale = Math.min(
+    1 + (tuning.scaleFloor - 1) * limbEase * strength,
+    lowCameraScaleResolved(cameraDistanceM, cameraHeightM, tuning),
+  );
   result.alpha = 1 + (tuning.alphaFloor - 1) * limbEase * strength;
   result.limbRatio = limbRatio;
   return result;
@@ -111,6 +155,9 @@ export function setAircraftRecessionParams(patch = {}) {
   }
   if (Number.isFinite(patch.earthRadiusM)) next.earthRadiusM = Math.max(1, patch.earthRadiusM);
   if (Number.isFinite(patch.writeEpsilon)) next.writeEpsilon = Math.max(0, patch.writeEpsilon);
+  for (const key of ['lowCameraFullHeightM', 'lowCameraOffHeightM', 'lowCameraNearM', 'lowCameraFarM']) {
+    if (Number.isFinite(patch[key])) next[key] = Math.max(0, patch[key]);
+  }
   _params = next;
   return { ..._params };
 }

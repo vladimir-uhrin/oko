@@ -31,7 +31,7 @@ const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'rivers');
 const RAW_FILE = path.join(CACHE_DIR, 'danube-raw.json');
 const OUT_DIR = path.join(process.cwd(), 'src', 'data', 'local_data', 'rivers');
 const OUT_FILE = path.join(OUT_DIR, 'danube.json');
-const USER_AGENT = 'OKO-river-build/0.1 (https://oko.uhrin.digital) one-off manual snapshot';
+const USER_AGENT = 'OKO-river-build/0.1 (https://okolive.sk) one-off manual snapshot';
 /** ~30 m v stupňoch (zemepisná šírka); na 48° s. š. je dĺžka o tretinu presnejšia — stačí. */
 const SIMPLIFY_DEG = 0.00027;
 

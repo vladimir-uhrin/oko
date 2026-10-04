@@ -60,6 +60,41 @@ settled and not applicable because no Google 3D tileset is active.
 > Do not use a screenshot for visual judgment unless its report frame records
 > `tilesSettled: true`.
 
+## Middle East panel, layers and news cards — layout in a real browser
+
+Unit tests read text and state, not the screen. The layout of the BLÍZKY VÝCHOD module is
+checked by a script that opens OKO (GPU flags as the video capture), switches theatres,
+expands the panel and asserts numbers — panel sections do not overlap, the news list has
+height, the panel keeps its scroll position across a layout pass, no news card lies on the
+interface or on another card, the hover bubble wraps and stays inside the window:
+
+```sh
+node scripts/qa-mideast-panel.mjs --base http://localhost:4173
+node scripts/qa-mideast-panel.mjs --base https://okolive.sk   # after publishing
+```
+
+It exits 1 and names what overlaps; screenshots go to `output/qa-mideast/`. Run it by hand
+before publishing changes of the panel, the layers or the cards — one page load per run
+(one 3D tiles session), never in a loop. Options: `--theatres hormuz,overview`,
+`--sizes 1600x900,1366x768`, `--settle 30000`.
+
+## Aircraft card — before every publish
+
+The owner's rule (2026-09-30): route, ETA and flight number of the aircraft card disappeared
+repeatedly, so the card is checked before each publish. The script opens the real app over
+Central Europe (OSM base map — no Google tiles), turns the flights layer on, picks a flight
+whose card data carry a flight number and a time to landing, hovers it and clicks it:
+
+```sh
+node scripts/qa-flight-card.mjs [--url http://localhost:4173] [--out qa-shots]
+```
+
+Exit 0 = the hover card shows the callsign, the flight number, the route „A → B", the landing
+time and both charts; 1 = something is missing (named in the output); 2 = could not be checked
+(no flight with a known route in view — run again). The card after the click is drawn into the
+canvas, so look at `qa-shots/flight-card-click.png`. What counts as a complete card is unit
+tested (`scripts/lib/qaFlightCard.test.mjs`).
+
 ## Setup
 
 - **URL:** http://localhost:4173 — auto-flies to Austin on load. Give photoreal tiles ~10s.

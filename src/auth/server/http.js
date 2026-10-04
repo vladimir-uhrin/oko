@@ -591,5 +591,21 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       json(res, register ? 201 : 200, result);
     } catch (error) { sendError(res, error); }
   }
-  return { middleware, requireAuthenticated, close: async () => { await Promise.allSettled([...pendingRecovery]); } };
+  /**
+   * Kto je prihlásený (pre iné služby, napr. udalosti len pre vlastníka — 2026-10-03): rovnaké
+   * kontroly ako účet (pôvod, cookie relácie, pri zápise CSRF), ale bez odpovede klientovi —
+   * vráti `{ id, email }` alebo null; nikdy nevyhodí chybu.
+   */
+  function identify(req, res, { mutation = false } = {}) {
+    try {
+      const ctx = context(req, res, { required: true, mutation });
+      return { id: ctx.session.user_id, email: String(ctx.session.email || '').toLowerCase() };
+    } catch { return null; }
+  }
+  return { middleware, requireAuthenticated, identify, close: async () => { await Promise.allSettled([...pendingRecovery]); } };
+}
+
+/** E-maily vlastníka z `OKO_OWNER_EMAILS` (čiarkou oddelené, malé písmená); prázdne = nikto. Pure. */
+export function parseOwnerEmails(raw = '') {
+  return [...new Set(String(raw || '').split(/[,\s;]+/).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)))];
 }
