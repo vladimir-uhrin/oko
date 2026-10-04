@@ -12,7 +12,8 @@ map"; one draft per wave — the key is the wave start, a pause of ≥ 2 h start
 attack stays one draft; Russian oblasts are never counted as a neighbouring Ukrainian one), `ua-media` (official Telegram photos of GS/MoD/DSNS and ArmyInform mp4 → framed photo
 carousel / reel; only posts with a recognised event AND an unambiguous side — `mediaWhat` keeps a Ukrainian hit
 on a Russian Buk from being called a Russian attack; never auto-published; licence claimed only for MoD and
-ArmyInform; YouTube never re-uploaded) and `ua-week` (Saturday 9:00 carousel from `loadFrontWeek`).
+ArmyInform — GS and DSNS photos are drafted the same way without a licence claim or warning, owner decision
+2026-10-04 „chcem zverejňovať, licenciu nerieš"; YouTube never re-uploaded) and `ua-week` (Saturday 9:00 carousel from `loadFrontWeek`).
 Studio plumbing (`index.js`): templates may define `load(ctx)` (several endpoints, own freshness, shared per
 tick), `slides` for carousels, `media` for downloaded footage (`fetchRemoteMedia`: host allow-list, size caps,
 6-hour skip after a failure), `autoPublish: false`; `X-GEV-Cache: STALE-*` now counts as stale (was only exact

@@ -301,8 +301,9 @@ Poistky a rozhodnutia:
 
 - **Zábery z vojny nikdy automaticky** (`autoPublish: false`, vynútené serverom): obete a osoby (pravidlo 6)
   kontroluje človek; karta návrhu to pripomenie.
-- **Licencia záberov:** CC BY 4.0 je doložená len pri Ministerstve obrany a ArmyInform. Pri GŠ a DSNS nie —
-  text licenciu netvrdí a návrh upozorní „zverejni len so súhlasom vlastníka" (CLAUDE.md pravidlo 7).
+- **Licencia záberov — rozhodnutie vlastníka (2026-10-04, „chcem zverejňovať, licenciu nerieš"):** zábery
+  GŠ a DSNS sa navrhujú rovnako ako zábery MO a ArmyInform, bez varovania o licencii. Vždy s menom kanála
+  a odkazom na pôvodný príspevok; licenciu text uvádza len tam, kde je doložená (MO, ArmyInform: CC BY 4.0).
 - **YouTube sa nepreberá:** podmienky YouTube nedovoľujú video stiahnuť a nahrať inde; OKO ho len vkladá.
   Video z Telegramu sa zo stránky náhľadu stiahnuť nedá (len embed) — preto z Telegramu len fotky.
 - Médiá sa sťahujú len z `*.telesco.pe`, `*.cdn-telegram.org`, `armyinform.com.ua` (https, bez presmerovania,
@@ -329,4 +330,3 @@ Poistky a rozhodnutia:
 - **Hlas vlastníka v reeloch.** Čaká na `AI_TRANSLATORS_MCP_URL` a `AI_TRANSLATORS_MCP_KEY`
   v `.env` servera.
 - **Najlepší čas** začne radiť až po 5 príspevkoch zverejnených cez Meta API.
-- **Licencia záberov GŠ a DSNS.** Pred zverejnením ich fotiek overiť podmienky (MO a ArmyInform majú CC BY 4.0).
