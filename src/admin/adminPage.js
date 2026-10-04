@@ -54,7 +54,7 @@ const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user
   backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache', studio_generated: 'vytvoril návrh', studio_settings: 'zmenil automatiku Štúdia',
   studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne', studio_publish_started: 'spustil zverejnenie',
   studio_scheduled: 'naplánoval príspevok', studio_unscheduled: 'zrušil plán', studio_front_week: 'spustil Týždeň na fronte',
-  alerts_settings: 'zmenil upozornenia', alerts_test: 'poslal skúšobné upozornenie' };
+  alerts_settings: 'zmenil upozornenia', ignored_ips: 'zmenil vylúčené IP', alerts_test: 'poslal skúšobné upozornenie' };
 
 // ── pomocníci ──────────────────────────────────────────────────────────────
 function el(tag, className = '', text) {
@@ -1152,11 +1152,25 @@ async function renderVisitLog(box) {
     facts.append(el('span', '', `${number(data.total)} návštev`), el('span', 'admin-muted', `${number(data.ips)} rôznych IP`),
       el('span', 'admin-muted', `uchováva sa ${data.retentionDays} dní`));
     if (data.q) facts.append(button(`zrušiť filter „${data.q}"`, filterBy(''), 'admin-link'));
+    // Vylúčené IP: nezapisujú sa nikam (záznam, štatistika, mapa); pridanie zmaže aj ich doterajšie návštevy.
+    const setIgnored = async ips => {
+      try { await api('/api/admin/ignored-ips', { method: 'POST', body: { ips } }); } catch (error) { body.prepend(notice(error.message)); return; }
+      void draw();
+    };
+    const ignored = el('div', 'admin-facts live-ignored');
+    const yours = data.yourIp && !data.ignoredIps.includes(data.yourIp);
+    ignored.append(el('span', 'admin-muted', `tvoja IP: ${data.yourIp || 'neznáma'}`));
+    if (yours) ignored.append(button('Nezapisovať moju IP', () => setIgnored([...data.ignoredIps, data.yourIp]), 'admin-btn admin-btn-sm'));
+    for (const ip of data.ignoredIps) {
+      const chip = el('span', 'admin-badge admin-badge-muted', `nezapisuje sa: ${ip}${ip === data.yourIp ? ' (ty)' : ''} `);
+      chip.append(button('×', () => setIgnored(data.ignoredIps.filter(other => other !== ip)), 'admin-link'));
+      ignored.append(chip);
+    }
     const pager = el('div', 'admin-pager');
     if (visitState.page > 0) pager.append(button('← novšie', () => { visitState.page--; void draw(); }, 'admin-btn admin-btn-sm'));
     if (data.offset + data.rows.length < data.total) pager.append(button('staršie →', () => { visitState.page++; void draw(); }, 'admin-btn admin-btn-sm'));
     pager.append(el('span', 'admin-muted', data.total ? `${data.offset + 1}–${data.offset + data.rows.length} z ${number(data.total)}` : ''));
-    body.replaceChildren(picker, search, facts, rows.length
+    body.replaceChildren(picker, search, facts, ignored, rows.length
       ? table(['Čas', 'IP', 'Miesto', 'Stránka', 'Odkiaľ', 'Zariadenie', 'Na stránke'], rows)
       : el('p', 'admin-muted', 'Žiadne návštevy v tomto rozsahu.'), pager);
   };

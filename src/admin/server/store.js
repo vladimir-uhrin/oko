@@ -188,6 +188,11 @@ export function openAdminStore(filename) {
       return db.prepare('SELECT day, dim, val, n FROM pageviews WHERE day >= ? ORDER BY day').all(fromDay);
     },
     visitorsToday: day => db.prepare('SELECT COUNT(*) AS n FROM visitors WHERE day = ?').get(day).n,
+    /** Zmaže záznam návštev z daných IP (vylúčené adresy vlastníka). */
+    deleteVisitsByIp(ips) {
+      if (!ips.length) return 0;
+      return db.prepare(`DELETE FROM visit_log WHERE ip IN (${ips.map(() => '?').join(', ')})`).run(...ips).changes;
+    },
     /**
      * Záznam návštev od `from`, najnovšie prvé. `q` hľadá v IP, meste, krajine, stránke, referri a prehliadači.
      * @returns {{rows: object[], total: number, ips: number}}

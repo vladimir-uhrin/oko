@@ -10,7 +10,7 @@
 
 import { analytics, clampInt, costs, dayRange, feedHistory, feedSettingsList, traffic, validateFeedUpdate,
   validateNotice } from '../../admin/server/api.js';
-import { localDay } from '../../admin/server/runtime.js';
+import { clientIp, localDay, normalizeIp } from '../../admin/server/runtime.js';
 import { handleStudioAdmin } from '../../admin/server/studio/adminApi.js';
 
 const USER_ID = /^[a-f0-9-]{36}$/;
@@ -54,6 +54,7 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
       '/api/admin/live': ['GET'],
       // Záznam návštev s IP (2026-10-04, 30 dní): vyhľadávanie a stránkovanie.
       '/api/admin/visits': ['GET'],
+      '/api/admin/ignored-ips': ['POST'],
     }[route];
     if (!methods) throw fail('not_found', 404);
     if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
@@ -70,7 +71,8 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
         const q = String(url.searchParams.get('q') || '').trim().slice(0, 80);
         const limit = 100;
         const offset = clampInt(url.searchParams.get('page'), 0, 10_000, 0) * limit;
-        return json(res, 200, { days, q, limit, offset, retentionDays: 30, ...runtime.store.visitLog({ from: now() - days * 86400_000, q, limit, offset }) });
+        return json(res, 200, { days, q, limit, offset, retentionDays: 30, yourIp: normalizeIp(clientIp(req)), ignoredIps: runtime.ignoredIps(),
+          ...runtime.store.visitLog({ from: now() - days * 86400_000, q, limit, offset }) });
       }
       if (route === '/api/admin/traffic') return json(res, 200, traffic(needRuntime(), now(), clampInt(url.searchParams.get('hours'), 1, 24 * 90, 48)));
       if (route === '/api/admin/errors') {
@@ -145,6 +147,13 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
         const settings = alerts.setSettings(body, actor);
         store.audit(actor, 'alerts_settings', null, `${settings.enabled ? 'zapnuté' : 'vypnuté'} · ${settings.feedDownMinutes} min`, time);
         return json(res, 200, { status: alerts.status(), history: alerts.history() });
+      }
+      if (route === '/api/admin/ignored-ips') {
+        fields(body, ['ips']);
+        if (!Array.isArray(body.ips) || body.ips.length > 50 || body.ips.some(ip => typeof ip !== 'string' || !normalizeIp(ip))) throw fail('invalid_input');
+        const removed = needRuntime().setIgnoredIps(body.ips, actor);
+        store.audit(actor, 'ignored_ips', null, `${runtime.ignoredIps().length} IP, zmazaných ${removed}`, time);
+        return json(res, 200, { ignoredIps: runtime.ignoredIps(), removed });
       }
       if (route === '/api/admin/notice') {
         const error = validateNotice(body);

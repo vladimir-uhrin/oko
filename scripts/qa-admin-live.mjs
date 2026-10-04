@@ -43,7 +43,7 @@ try {
         const json = body => request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
         if (url.pathname === '/api/auth/session') return json({ user: { email: 'qa@okolive.sk', role: 'owner' }, csrfToken: 'x' });
         if (url.pathname === '/api/admin/live') return json(snapshot(visitors));
-        if (url.pathname === '/api/admin/visits') return json({ days: 1, q: '', limit: 100, offset: 0, retentionDays: 30, total: visitors.length, ips: visitors.length,
+        if (url.pathname === '/api/admin/visits') return json({ days: 1, q: '', limit: 100, offset: 0, retentionDays: 30, yourIp: '95.102.1.2', ignoredIps: ['198.51.100.9'], total: visitors.length, ips: visitors.length,
           rows: visitors.map((x, i) => ({ id: String(i), at: now - i * 600_000, lastAt: now - i * 600_000 + x.activeS * 1000, ip: x.ip, country: x.country, region: '', city: x.city,
             lat: x.lat, lon: x.lon, path: x.path, ref: i % 2 ? 'google.com' : 'priamo', browser: 'Chrome', os: x.device === 'mobil' ? 'Android' : 'Windows', device: x.device,
             screen: '1440–1919', lang: 'sk', ua: 'Mozilla/5.0 (QA)' })) });

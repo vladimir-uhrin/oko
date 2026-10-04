@@ -94,7 +94,14 @@ const signature = (kind, message, where = '') => createHash('sha256')
   .update(`${kind}\n${String(message).replace(/\d+/g, '#').replace(/[0-9a-f]{8,}/gi, '~').slice(0, 300)}\n${where}`)
   .digest('hex').slice(0, 32);
 
-function clientIp(req) {
+/** Jednotný tvar IP na porovnanie (IPv4 mapovaná v IPv6 → IPv4, malé písmená). */
+export function normalizeIp(raw) {
+  const ip = String(raw || '').trim().toLowerCase().replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/, '$1');
+  return isIP(ip) ? ip : '';
+}
+const MAX_IGNORED_IPS = 50;
+
+export function clientIp(req) {
   const socket = req.socket?.remoteAddress || '';
   const forwarded = req.headers['cf-connecting-ip'];
   // Len pre štatistiku: za tunelom je socket vždy loopback, skutočnú adresu dáva Cloudflare.
@@ -126,6 +133,9 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
   const limiter = new Map(); // ip → { minute, hits, errors } (len v pamäti)
   const caps = { day: localDay(now()), counts: new Map() };
   let settingsCache = null;
+  let ignoredCache = null;
+  // Vylúčené IP (2026-10-04, vlastník: „moju IP vyfiltruj"): nezapíšu sa do záznamu, štatistiky ani mapy.
+  const ignoredIps = () => (ignoredCache ??= new Set((store.getSetting('ignore:ips')?.value || []).map(normalizeIp).filter(Boolean)));
   const dimValues = { day: '', sets: new Map() }; // deň → dim → videné hodnoty (len v pamäti)
 
   // Dnešné počty pre stropy prežijú reštart: dopočítajú sa z uloženej štatistiky.
@@ -284,6 +294,7 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
     if (!hit || typeof hit !== 'object') return sendJson(res, 400, { error: 'invalid' });
     const ip = clientIp(req);
     const kind = hit.t === 'error' ? 'errors' : 'hits';
+    if (kind === 'hits' && ignoredIps().has(normalizeIp(ip))) return sendJson(res, 204, null);
     if (!allow(ip, kind)) return sendJson(res, 429, { error: 'rate_limited' });
     const ua = parseUserAgent(req.headers['user-agent']);
     const time = now();
@@ -430,6 +441,18 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
       return feedSetting(id);
     },
     setNotice(value, by) { store.setSetting('notice', value, now(), by); },
+    ignoredIps: () => [...ignoredIps()],
+    /** Nastaví vylúčené IP; ich doterajšie návštevy zmizne zo záznamu aj z mapy. Vráti počet zmazaných riadkov. */
+    setIgnoredIps(list, by) {
+      const clean = [...new Set(list.map(normalizeIp).filter(Boolean))].slice(0, MAX_IGNORED_IPS);
+      store.setSetting('ignore:ips', clean.length ? clean : null, now(), by);
+      ignoredCache = null;
+      const set = ignoredIps();
+      for (const [hash, entry] of live) if (set.has(normalizeIp(entry.ip))) live.delete(hash);
+      for (let i = recent.length - 1; i >= 0; i--) if (set.has(normalizeIp(recent[i].ip))) recent.splice(i, 1);
+      for (const [id, visit] of visitLog) if (set.has(normalizeIp(visit.ip))) visitLog.delete(id);
+      return store.deleteVisitsByIp(clean);
+    },
     getNotice: () => store.getSetting('notice'),
   };
 }

@@ -301,3 +301,30 @@ test('mesto z Cloudflare: UTF-8 bajty v hlavičke (Node ich číta ako Latin-1) 
   assert.equal(geoFromRequest({ headers: { 'cf-ipcountry': 'SK', 'cf-ipcity': 'Ko%C5%A1ice' } }).city, 'Košice');
   assert.equal(geoFromRequest({ headers: { 'cf-ipcountry': 'DE', 'cf-ipcity': 'München' } }).city, 'München', 'skutočný Latin-1 text ostane');
 });
+
+test('vylúčená IP vlastníka: nezapíše sa do záznamu, štatistiky ani mapy; staré záznamy sa zmažú', async t => {
+  const { runtime, store, clock } = setup(t);
+  const { hit } = await serve(t, runtime);
+  const owner = { 'CF-Connecting-IP': '95.102.1.2', 'CF-IPCountry': 'SK' };
+  await hit({ t: 'view', p: '/' }, owner);
+  await hit({ t: 'view', p: '/en/' }, { 'CF-Connecting-IP': '198.51.100.7', 'CF-IPCountry': 'CZ' });
+  runtime.flush();
+  assert.equal(store.visitLog({ from: 0 }).total, 2);
+  assert.equal(runtime.setIgnoredIps(['95.102.1.2', '::ffff:95.102.1.2', 'nie-ip'], 'owner'), 1, 'zmaže jeho starú návštevu');
+  assert.deepEqual(runtime.ignoredIps(), ['95.102.1.2']);
+  assert.equal(runtime.liveSnapshot().liveNow, 1, 'zmizne aj z mapy');
+  assert.ok(runtime.liveSnapshot().recent.every(view => view.ip !== '95.102.1.2'));
+  assert.equal((await hit({ t: 'view', p: '/' }, owner)).status, 204);
+  await hit({ t: 'ping' }, owner);
+  runtime.flush();
+  const log = store.visitLog({ from: 0 });
+  assert.deepEqual(log.rows.map(row => row.ip), ['198.51.100.7']);
+  const today = analytics(runtime, clock.time, 1).series.at(-1);
+  assert.equal(today.views, 2, 'nové zobrazenie vlastníka sa nezapočíta (2 = pred vylúčením)');
+  assert.equal(today.minutes, 0);
+  // Po zrušení sa znova zapisuje.
+  runtime.setIgnoredIps([], 'owner');
+  await hit({ t: 'view', p: '/' }, owner);
+  runtime.flush();
+  assert.equal(store.visitLog({ from: 0 }).total, 2);
+});
