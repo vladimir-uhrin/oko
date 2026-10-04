@@ -37,6 +37,10 @@ test('šablóna zemetrasenia: fakty, zdroj, čas stavu, odkaz, stabilný kľúč
   const item = earthquakeEvent({ records: [quake(), quake({ id: 'us2', sourceId: 'us2', mag: 6.0 })], fetchedAt: NOW - 5 * 60e3 }, { now: NOW, url: URL_OKO });
   assert.equal(item.key, 'quake:us1', 'najsilnejšie');
   assert.match(item.title, /^Zemetrasenie M 6,3 – Grécko$/);
+  // Vlastník 2026-10-04: bez emoji, text začína nadpisom.
+  for (const t of [item, earthquakeDigest({ records: [quake()] }, { now: NOW, url: URL_OKO })]) {
+    assert.ok(t.text.startsWith(t.title) && !/[\p{Extended_Pictographic}\u{FE0F}]/u.test(t.text), t.text.slice(0, 60));
+  }
   assert.match(item.text, /dnes o 13:20/i);
   assert.match(item.text, /Zdroj: USGS · stav k 13:55/);
   assert.match(item.text, /https:\/\/okolive\.sk/);

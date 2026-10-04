@@ -45,9 +45,11 @@ export const TAGS = ['#Ukrajina', '#vojna', '#OKO'];
 const RU_COLOR = '#ff5a3c';
 const UA_COLOR = '#ffd23c';
 
+// Texty bez emoji, tónom spravodajskej agentúry (vlastník 2026-10-04: „nepoužívaj emoji, text nech je
+// profesionálny a kritický voči agresorovi").
 function footer({ source, at, now, tags = TAGS }) {
-  return [`📡 Zdroj: ${source} · stav k ${when(at ?? now, now).replace(/^dnes o /, '')}`,
-    `🗺️ Mapa frontu deň po dni: ${FRONT_URL}`, '', tags.join(' ')].join('\n');
+  return [`Zdroj: ${source} · stav k ${when(at ?? now, now).replace(/^dnes o /, '')}`,
+    `Mapa frontu deň po dni: ${FRONT_URL}`, '', tags.join(' ')].join('\n');
 }
 
 const sceneById = id => FRONT_SCENES.find(scene => scene.id === id) || null;
@@ -104,8 +106,8 @@ export function uaReport({ report, days = {} }, { now }) {
     ? ` To je približne 7-dňový priemer (${fmt(avg)}).`
     : ` To je ${total > avg ? 'viac' : 'menej'} ako 7-dňový priemer (${fmt(avg)}).`;
   const title = `Front za deň: ${fmt(total)} ${plural(total, 'bojový stret', 'bojové strety', 'bojových stretov')}`;
-  const text = [`⚔️ ${title}`, '',
-    `Ukrajinský generálny štáb hlási za uplynulý deň ${fmt(total)} ${plural(total, 'bojový stret', 'bojové strety', 'bojových stretov')} s ruskými jednotkami.${cmp}`,
+  const text = [title, '',
+    `Ukrajinský generálny štáb hlási za uplynulý deň ${fmt(total)} ${plural(total, 'bojový stret', 'bojové strety', 'bojových stretov')} s ruskými okupačnými jednotkami.${cmp}`,
     ...(top.length ? ['', 'Najviac ruských útokov:', ...top.map(d => `• ${d.name} – ${d.attacks}`)] : []),
     ...(strikes.length ? ['', `Ruské údery podľa hlásenia: ${strikes.join(', ')}.`] : []),
     '', 'Údaje jednej strany (oficiálne hlásenie Generálneho štábu Ukrajiny), nezávisle neoverené.',
@@ -165,7 +167,7 @@ export function uaFront({ now: snapNow, before }, { now }) {
     ? `Ruský agresor za deň obsadil ${km2(change.ruKm2)} ukrajinského územia${change.uaKm2 >= 0.1 ? `, Ukrajina oslobodila ${km2(change.uaKm2)}` : ''}.`
     : `Ukrajina za deň oslobodila ${km2(change.uaKm2)}${change.ruKm2 >= 0.1 ? `, ruský agresor obsadil ${km2(change.ruKm2)}` : ''}.`;
   const title = change.ruKm2 >= change.uaKm2 ? `Front za deň: ruský agresor obsadil ${km2(change.ruKm2)}` : `Front za deň: Ukrajina oslobodila ${km2(change.uaKm2)}`;
-  const text = [`🗺️ ${title}`, '',
+  const text = [title, '',
     `Mapa frontu k ${date(Date.parse(`${day}T12:00:00Z`))} oproti predchádzajúcemu dňu: ${lead}`,
     ...(lines.length ? ['', ...lines] : []),
     ...(change.toGreyKm2 >= 0.1 ? ['', `Ďalších ${km2(change.toGreyKm2)} prešlo z ruskej kontroly do sivej zóny (nie je to ukrajinský zisk).`] : []),
@@ -274,9 +276,9 @@ export function uaAir({ media }, { now, settings = {} }) {
   const city = names.includes('mesto Kyjev');
   const kinds = [...wave.kinds].map(k => KIND_SK[k]);
   const n = wave.oblasts.size;
-  const title = `Rozsiahly vzdušný útok: hrozba pre ${n} ${plural(n, 'oblasť', 'oblasti', 'oblastí')} Ukrajiny`;
-  const text = [`🚨 ${title}`, '',
-    `Vzdušné sily Ukrajiny od ${when(wave.first, now).replace(/^dnes o /, '')} hlásia hrozbu ${kinds.length ? listSk(kinds) : 'ruských vzdušných útokov'} pre ${regions.length ? `${listSk(regions.map(r => r.replace(/á$/, 'ú')))} oblasť` : ''}${city ? `${regions.length ? ' a ' : ''}hlavné mesto Kyjev` : ''}.`,
+  const title = `Hrozba ruského vzdušného útoku pre ${n} ${plural(n, 'oblasť', 'oblasti', 'oblastí')} Ukrajiny`;
+  const text = [title, '',
+    `Vzdušné sily Ukrajiny od ${when(wave.first, now).replace(/^dnes o /, '')} hlásia hrozbu ${kinds.length ? `ruských ${listSk(kinds)}` : 'ruských vzdušných útokov'} pre ${regions.length ? `${listSk(regions.map(r => r.replace(/á$/, 'ú')))} oblasť` : ''}${city ? `${regions.length ? ' a ' : ''}hlavné mesto Kyjev` : ''}.`,
     '', 'Ide o hrozbu hlásenú oficiálnym kanálom Vzdušných síl, nie o oficiálnu mapu protileteckých sirén. Zásahy a škody zatiaľ nie sú potvrdené.',
     '', footer({ source: 'Vzdušné sily Ozbrojených síl Ukrajiny (Telegram, CC BY 4.0)', at: wave.last, now, tags: ['#Ukrajina', '#útok', '#vojna', '#OKO'] })].join('\n');
   return {
@@ -286,7 +288,7 @@ export function uaAir({ media }, { now, settings = {} }) {
     text,
     card: { kind: 'ua-air', kicker: 'VZDUŠNÁ HROZBA', big: String(n), headline: `${plural(n, 'oblasť', 'oblasti', 'oblastí')} Ukrajiny v ohrození`,
       // Hlásená HROZBA, nie potvrdený útok — háčik to nesmie zveličiť.
-      hook: { text: `${n} ${plural(n, 'OBLASŤ', 'OBLASTI', 'OBLASTÍ')}: HROZBA ${wave.kinds.has('missiles') ? 'RAKIET' : wave.kinds.has('drones') ? 'ÚTOČNÝCH DRONOV' : wave.kinds.has('bombs') ? 'RIADENÝCH BÔMB' : 'Z NEBA'}`, accent: String(n) },
+      hook: { text: `${n} ${plural(n, 'OBLASŤ', 'OBLASTI', 'OBLASTÍ')}: HROZBA ${wave.kinds.has('missiles') ? 'RUSKÝCH RAKIET' : wave.kinds.has('drones') ? 'RUSKÝCH DRONOV' : wave.kinds.has('bombs') ? 'RUSKÝCH BÔMB' : 'RUSKÉHO ÚTOKU'}`, accent: String(n) },
       lines: [wave.kinds.size ? `hrozba: ${listSk([...wave.kinds].map(k => KIND_NOM[k]))}` : 'hrozba z neba', 'hlásená hrozba, nie mapa sirén'],
       view: UA_VIEW, points: [...wave.oblasts.values()].map(c => ({ lat: c.lat, lon: c.lon, r: 16 })),
       source: 'Vzdušné sily ZSU', at: wave.last },
@@ -376,7 +378,7 @@ export function uaMedia({ media }, { now, has = () => false, settings = {}, coun
     if (!what) continue;
     const kind = src.video ? 'video' : src.photos.length > 1 ? 'fotografie' : 'fotografiu';
     const title = `${src.sk}: ${cap(what)}${place ? ` – ${place}` : ''}`.slice(0, 180);
-    const text = [`${src.video ? '🎥' : '📸'} ${title}`, '',
+    const text = [title, '',
       `${src.sk} ${when(item.publishedAt, now)} ${src.verb} ${kind} (${what}${place ? `, ${place}` : ''}).${casualtiesSk(ukCasualties(raw))}`,
       '', `Pôvodný príspevok (ukrajinsky): ${item.url}`,
       '', footer({ source: `${src.sk} — oficiálny kanál${src.license ? `, ${src.license}` : ''}`, at: item.publishedAt, now })].join('\n');
@@ -445,7 +447,7 @@ export function uaWeek({ model, occupied = [], text }, { now }) {
   return {
     key: `ua-week:${model.week.to}`,
     title,
-    text: `🗓️ ${text}\n\n${TAGS.join(' ')}`,
+    text: `${text}\n\n${TAGS.join(' ')}`,
     card: { kind: 'ua-week', kicker: 'TÝŽDEŇ NA FRONTE', big: fmt(model.total.week), headline: 'bojových stretov za týždeň',
       hook: { text: `${fmt(model.total.week)} ${plural(model.total.week, 'BOJOVÝ STRET', 'BOJOVÉ STRETY', 'BOJOVÝCH STRETOV')} ZA TÝŽDEŇ`, accent: fmt(model.total.week) },
       lines: [range, ...(trend ? [trend] : []), 'údaje jednej strany'], view: FRONT_VIEW, points: pts, source, at: now },

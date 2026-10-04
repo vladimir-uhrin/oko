@@ -341,7 +341,8 @@ function captionChunkAt(caption, t) {
   return { text: chunks.at(-1), index: chunks.length - 1 };
 }
 
-const cleanSpoken = text => text.replace(/[#🌋📊🚀📡🌍]/gu, '').replace(/[ \t\r\n]+/g, ' ').trim().slice(0, 300);
+// Staršie návrhy ešte nesú emoji — do hlasu ani titulkov nepatria.
+const cleanSpoken = text => text.replace(/[#\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, '').replace(/[ \t\r\n]+/g, ' ').trim().slice(0, 300);
 /** Prvá veta textu príspevku (bez nadpisu). */
 function firstSentence(item) {
   const sentence = String(item.text || '').split('\n').map(s => s.trim()).filter(Boolean)[1] || '';

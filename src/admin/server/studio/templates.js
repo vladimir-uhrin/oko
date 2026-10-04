@@ -83,8 +83,9 @@ export function describeLocation(point, maxKm = 600) {
 const SK = { lat: 48.7, lon: 19.5 };
 const hashtag = value => `#${String(value || '').replace(/[^\p{L}\p{N}]+/gu, '')}`;
 function footer({ source, at, now, url, tags }) {
-  return [`📡 Zdroj: ${source} · stav k ${when(at ?? now, now).replace(/^dnes o /, '')}`,
-    `🌍 Naživo na glóbuse OKO: ${url}`, '', tags.filter(tag => tag.length > 1).join(' ')].join('\n');
+  // Bez emoji, tónom spravodajskej agentúry (vlastník 2026-10-04).
+  return [`Zdroj: ${source} · stav k ${when(at ?? now, now).replace(/^dnes o /, '')}`,
+    `Naživo na glóbuse OKO: ${url}`, '', tags.filter(tag => tag.length > 1).join(' ')].join('\n');
 }
 
 // ── Zemetrasenie (udalosť) ────────────────────────────────────────────────
@@ -106,7 +107,7 @@ export function earthquakeEvent({ records = [], fetchedAt }, { now, url }) {
   const depth = Number.isFinite(quake.depth) ? ` Ohnisko v hĺbke ${Math.round(quake.depth)} km.` : '';
   const strength = quake.mag >= 7 ? 'Silné zemetrasenie' : quake.mag >= 6 ? 'Zemetrasenie' : 'Otrasy';
   const title = `${strength} M ${mag}${where?.country ? ` – ${where.country}` : ''}`;
-  const text = [`🌋 ${title}`, '',
+  const text = [title, '',
     `${when(quake.time, now).replace(/^./, c => c.toUpperCase())} zaznamenali seizmografy zemetrasenie s magnitúdou ${mag} — ${place}.${depth}`,
     ...(near ? ['', 'Udalosť je v blízkosti Slovenska; slabšie otrasy mohli byť cítiť aj u nás.'] : []),
     '', footer({ source: 'USGS', at: fetchedAt, now, url, tags: ['#zemetrasenie', hashtag(where?.country), '#OKO'] })].join('\n');
@@ -132,7 +133,7 @@ export function earthquakeDigest({ records = [], fetchedAt }, { now, url }) {
   });
   const nearSk = day.filter(q => distanceKm(SK, q) <= 300).length;
   const title = `Zemetrasenia za 24 hodín: ${day.length}`;
-  const text = [`📊 ${title}`, '',
+  const text = [title, '',
     `Za posledných 24 hodín zaznamenali seizmografy ${day.length} ${plural(day.length, 'zemetrasenie', 'zemetrasenia', 'zemetrasení')}, z toho ${strong.length} s magnitúdou 4,5 a viac.`,
     ...(top.length ? ['', 'Najsilnejšie:', ...top] : []),
     '', nearSk ? `Do 300 km od Slovenska: ${nearSk}.` : 'Do 300 km od Slovenska žiadne.',
@@ -168,7 +169,7 @@ export function launchEvent({ results = [] }, { now, url }) {
   const status = STATUS[launch.status.abbrev];
   const lat = Number(launch.pad?.latitude); const lon = Number(launch.pad?.longitude);
   const title = `Štart ${rocket}: ${status}`;
-  const text = [`🚀 ${title}`, '',
+  const text = [title, '',
     `${when(at, now).replace(/^./, c => c.toUpperCase())} odštartovala raketa ${rocket}${provider ? ` (${provider})` : ''} s misiou ${mission}${orbit}. Štart bol ${status}.`,
     ...(pad ? [`Miesto štartu: ${pad}${country(iso2) ? ` (${country(iso2)})` : ''}.`] : []),
     '', footer({ source: 'Launch Library 2 — The Space Devs', at: now, now, url, tags: ['#vesmír', '#raketa', hashtag(provider.split(' ')[0]), '#OKO'] })].join('\n');

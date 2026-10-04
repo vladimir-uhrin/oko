@@ -511,7 +511,7 @@ function studioCalendar(items) {
       const row = el('div', `admin-calendar-item ${item.kind}`);
       const short = (item.targets || []).map(t => ({ facebook: 'FB', instagram: 'IG', 'facebook-reel': 'FB reel', 'instagram-reel': 'IG reel' }[t] || t)).join(', ');
       row.append(el('span', 'admin-calendar-time', timeFmt.format(new Date(item.at))), el('span', '', item.title),
-        el('span', 'admin-muted', ` ${item.kind === 'scheduled' ? '⏰' : '✓'} ${short}`));
+        el('span', 'admin-muted', ` ${item.kind === 'scheduled' ? 'naplánované' : 'zverejnené'}${short ? ` · ${short}` : ''}`));
       day.append(row);
     }
     wrap.append(day);
@@ -613,7 +613,7 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
     video.setAttribute('aria-label', `Reel: ${draft.title}`);
     media.append(video);
   } else if (['queued', 'rendering'].includes(draft.videoStatus)) {
-    media.append(el('p', 'admin-studio-video-state', draft.videoStatus === 'rendering' ? '🎬 Reel sa renderuje…' : '🎬 Reel čaká vo fronte…'));
+    media.append(el('p', 'admin-studio-video-state', draft.videoStatus === 'rendering' ? 'Reel sa renderuje…' : 'Reel čaká vo fronte…'));
   } else if (draft.videoStatus === 'failed') {
     media.append(el('p', 'admin-studio-video-state admin-studio-video-failed', `Reel zlyhal: ${draft.videoError || 'neznáma chyba'}`));
   }
@@ -708,7 +708,7 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
     }));
   }
   actions.append(button('Kopírovať text', async event => {
-    try { await navigator.clipboard.writeText(text.value); event.target.textContent = 'Skopírované ✓'; }
+    try { await navigator.clipboard.writeText(text.value); event.target.textContent = 'Skopírované'; }
     catch { text.select(); event.target.textContent = 'Označené — Ctrl+C'; }
   }, 'admin-btn admin-btn-sm'));
   if (editable) {
@@ -862,7 +862,7 @@ async function renderErrors() {
   }, 'admin-btn admin-btn-danger');
   setView(section('Chyby a varovania', filters,
     el('p', 'admin-muted', 'Rovnaké chyby sú zlúčené (čísla sa ignorujú). Kľúče z .env a parametre key/token v URL sú nahradené ***. Uchováva sa 30 dní.'),
-    errors.length ? table(['Druh', 'Správa', 'Počet', 'Naposledy', 'Prvýkrát'], rows) : el('p', 'admin-muted', 'Žiadne chyby. 🎉'), clear));
+    errors.length ? table(['Druh', 'Správa', 'Počet', 'Naposledy', 'Prvýkrát'], rows) : el('p', 'admin-muted', 'Žiadne chyby.'), clear));
 }
 
 // ── Náklady a limity ───────────────────────────────────────────────────────
