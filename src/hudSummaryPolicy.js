@@ -21,5 +21,8 @@ export function classifySummaryFailure({ status = null, error = null } = {}) {
     : (error && typeof error === 'object' && 'message' in error ? String(error.message ?? '') : '');
   if (status === 503 && SUMMARY_UNCONFIGURED_RE.test(text)) return 'disabled';
   if (status === 403 || status === 401) return 'disabled';
+  // Denný strop OpenAI na serveri (429 {error:'budget'}, 2026-10-03): do
+  // polnoci UTC sa nič nezmení — netĺcť každých 15 s, ostať pri lokálnom súhrne.
+  if (status === 429 && text === 'budget') return 'disabled';
   return 'retry';
 }

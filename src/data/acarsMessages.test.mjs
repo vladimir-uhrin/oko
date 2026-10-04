@@ -143,7 +143,7 @@ test('tripwire: proxy /api/acars je LEN LOKÁLNA (ACARS_MESSAGES + loopback), be
   assert.match(vite, /if \(!local\) return send\(403/);
   assert.match(vite, /if \(!on\) return send\(200, \{ enabled: false/);
   assert.match(vite, /api\.airframes\.io\/v1\/messages/);
-  const proxyText = vite.slice(vite.indexOf('function airframesProxy()'), vite.indexOf('export function isLoopbackAddress'));
+  const proxyText = vite.slice(vite.indexOf('function airframesProxy()'), vite.indexOf('export { isLoopbackAddress };'));
   assert.ok(proxyText.length > 1000 && !/Bearer|X-API-KEY|AIRFRAMES_API_KEY/i.test(proxyText), 'žiadny kľúč — verejný endpoint, nič tajné nemá čo uniknúť');
   const ui = readFileSync(new URL('../ui.js', import.meta.url), 'utf8');
   assert.match(ui, /this\.updateAcars\(info\);/, 'kokpit volá z updateRoute');
