@@ -1,16 +1,23 @@
 // Admin panel OKO (2026-10-03) — prevádzková databáza `.auth-data/admin.sqlite`.
 //
 // Oddelená od účtov: telemetria sa zapisuje často a nesmie zdržiavať prihlásenie.
-// Ukladajú sa IBA agregáty (počty za hodinu/deň), nikdy IP adresa, cookie ani
-// celý User-Agent. Jediný údaj na úrovni návštevníka je hash s denne rotovanou
-// soľou, ktorý po skončení dňa zmizne (zostane len počet) — CLAUDE.md pravidlo 6.
+// Štatistika sú agregáty (počty za hodinu/deň) a hash návštevníka s denne rotovanou
+// soľou, ktorý po skončení dňa zmizne (zostane len počet).
+// Výnimka (2026-10-04, na pokyn vlastníka): záznam návštev visit_log — IP, čas, stránka,
+// poloha podľa Cloudflare, prehliadač — vidí ho len vlastník v admine, maže sa po 30 dňoch
+// (RETENTION.visitLogDays) a je uvedený v zásadách súkromia. Do Not Track / GPC = nič.
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 const DAY_MS = 86400_000;
-export const RETENTION = Object.freeze({ trafficDays: 90, pageviewDays: 400, errorDays: 30, sampleDays: 30 });
+export const RETENTION = Object.freeze({ trafficDays: 90, pageviewDays: 400, errorDays: 30, sampleDays: 30, visitLogDays: 30 });
+
+const VISIT_COLUMNS = 'id, at, last_at, ip, country, region, city, lat, lon, path, ref, browser, os, device, screen, lang, ua';
+const visitRow = row => ({ id: row.id, at: row.at, lastAt: row.last_at, ip: row.ip, country: row.country, region: row.region,
+  city: row.city, lat: row.lat, lon: row.lon, path: row.path, ref: row.ref, browser: row.browser, os: row.os, device: row.device,
+  screen: row.screen, lang: row.lang, ua: row.ua });
 
 function studioRow(row) {
   const parse = (value, fallback) => { try { return JSON.parse(value); } catch { return fallback; } };
@@ -84,6 +91,13 @@ export function openAdminStore(filename) {
   if (!draftColumns.includes('retry_at')) db.exec('ALTER TABLE studio_drafts ADD COLUMN retry_at INTEGER');
   if (!draftColumns.includes('retry_n')) db.exec('ALTER TABLE studio_drafts ADD COLUMN retry_n INTEGER NOT NULL DEFAULT 0');
   if (!draftColumns.includes('video_seconds')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video_seconds REAL');
+  // Záznam návštev (2026-10-04): jeden riadok na zobrazenie stránky, last_at posúva ping.
+  db.exec(`CREATE TABLE IF NOT EXISTS visit_log (
+    id TEXT PRIMARY KEY, at INTEGER NOT NULL, last_at INTEGER NOT NULL, ip TEXT NOT NULL, country TEXT NOT NULL,
+    region TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', lat REAL, lon REAL, path TEXT NOT NULL, ref TEXT NOT NULL,
+    browser TEXT NOT NULL, os TEXT NOT NULL, device TEXT NOT NULL, screen TEXT NOT NULL, lang TEXT NOT NULL, ua TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS visit_log_at ON visit_log(at);`);
   if (filename !== ':memory:' && process.platform !== 'win32') { try { chmodSync(filename, 0o600); } catch { /* ok */ } }
 
   const tx = fn => {
@@ -103,8 +117,8 @@ export function openAdminStore(filename) {
   return {
     close: () => db.close(),
     /** Zapíše buffer z pamäte jednou transakciou. */
-    flush({ traffic = [], pageviews = [], visitors = [], errors = [], samples = [] }) {
-      if (!traffic.length && !pageviews.length && !visitors.length && !errors.length && !samples.length) return;
+    flush({ traffic = [], pageviews = [], visitors = [], errors = [], samples = [], visits = [] }) {
+      if (!traffic.length && !pageviews.length && !visitors.length && !errors.length && !samples.length && !visits.length) return;
       tx(() => {
         for (const t of traffic) upsertTraffic.run(t.hour, t.route, t.n, t.e4, t.e5, t.blocked, t.msSum, t.msMax, t.bytes);
         for (const p of pageviews) upsertPv.run(p.day, p.dim, p.val, p.n);
@@ -113,6 +127,12 @@ export function openAdminStore(filename) {
         for (const e of errors) upsertError.run(e.sig, e.kind, e.message, e.detail, e.count, e.firstAt, e.lastAt);
         const sample = db.prepare('INSERT INTO feed_samples (at, feed, ok, status, ms) VALUES (?, ?, ?, ?, ?)');
         for (const s of samples) sample.run(s.at, s.feed, s.ok ? 1 : 0, s.status, s.ms);
+        const visit = db.prepare(`INSERT INTO visit_log (${VISIT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET last_at = max(last_at, excluded.last_at)`);
+        for (const v of visits) {
+          visit.run(v.id, v.at, v.lastAt, v.ip, v.country, v.region || '', v.city || '', v.lat ?? null, v.lon ?? null, v.path, v.ref,
+            v.browser, v.os, v.device, v.screen, v.lang, v.ua);
+        }
       });
     },
     /** Denná soľ pre hash návštevníka; staršie sa mažú, takže hash nejde spojiť cez dni. */
@@ -144,6 +164,7 @@ export function openAdminStore(filename) {
       db.prepare('DELETE FROM errors WHERE last_at < ?').run(now - RETENTION.errorDays * DAY_MS);
       db.prepare('DELETE FROM errors WHERE sig NOT IN (SELECT sig FROM errors ORDER BY last_at DESC LIMIT 2000)').run();
       db.prepare('DELETE FROM feed_samples WHERE at < ?').run(now - RETENTION.sampleDays * DAY_MS);
+      db.prepare('DELETE FROM visit_log WHERE at < ?').run(now - RETENTION.visitLogDays * DAY_MS);
       this.studioPrune(now);
     },
 
@@ -167,6 +188,19 @@ export function openAdminStore(filename) {
       return db.prepare('SELECT day, dim, val, n FROM pageviews WHERE day >= ? ORDER BY day').all(fromDay);
     },
     visitorsToday: day => db.prepare('SELECT COUNT(*) AS n FROM visitors WHERE day = ?').get(day).n,
+    /**
+     * Záznam návštev od `from`, najnovšie prvé. `q` hľadá v IP, meste, krajine, stránke, referri a prehliadači.
+     * @returns {{rows: object[], total: number, ips: number}}
+     */
+    visitLog({ from, q = '', limit = 100, offset = 0 }) {
+      const like = `%${String(q).replace(/[\\%_]/g, char => `\\${char}`)}%`;
+      const where = q ? `at >= ? AND (ip LIKE ? ESCAPE '\\' OR city LIKE ? ESCAPE '\\' OR country LIKE ? ESCAPE '\\'
+        OR path LIKE ? ESCAPE '\\' OR ref LIKE ? ESCAPE '\\' OR browser LIKE ? ESCAPE '\\' OR os LIKE ? ESCAPE '\\')` : 'at >= ?';
+      const params = q ? [from, like, like, like, like, like, like, like] : [from];
+      const rows = db.prepare(`SELECT ${VISIT_COLUMNS} FROM visit_log WHERE ${where} ORDER BY at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+      const { total, ips } = db.prepare(`SELECT COUNT(*) AS total, COUNT(DISTINCT ip) AS ips FROM visit_log WHERE ${where}`).get(...params);
+      return { rows: rows.map(visitRow), total, ips };
+    },
     errors(kind, limit = 200) {
       const where = kind ? 'WHERE kind = ?' : '';
       return db.prepare(`SELECT sig, kind, message, detail, count, first_at AS firstAt, last_at AS lastAt FROM errors ${where}

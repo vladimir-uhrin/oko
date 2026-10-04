@@ -52,6 +52,8 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
       '/api/admin/alerts': ['GET', 'POST'], '/api/admin/alerts/test': ['POST'],
       // Naživo (2026-10-04): živí návštevníci s polohou na mapu (len pamäť servera).
       '/api/admin/live': ['GET'],
+      // Záznam návštev s IP (2026-10-04, 30 dní): vyhľadávanie a stránkovanie.
+      '/api/admin/visits': ['GET'],
     }[route];
     if (!methods) throw fail('not_found', 404);
     if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
@@ -62,6 +64,14 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
     if (req.method === 'GET') {
       if (route === '/api/admin/analytics') return json(res, 200, analytics(needRuntime(), now(), clampInt(url.searchParams.get('days'), 1, 400, 30)));
       if (route === '/api/admin/live') return json(res, 200, needRuntime().liveSnapshot());
+      if (route === '/api/admin/visits') {
+        needRuntime().flush();
+        const days = clampInt(url.searchParams.get('days'), 1, 30, 1);
+        const q = String(url.searchParams.get('q') || '').trim().slice(0, 80);
+        const limit = 100;
+        const offset = clampInt(url.searchParams.get('page'), 0, 10_000, 0) * limit;
+        return json(res, 200, { days, q, limit, offset, retentionDays: 30, ...runtime.store.visitLog({ from: now() - days * 86400_000, q, limit, offset }) });
+      }
       if (route === '/api/admin/traffic') return json(res, 200, traffic(needRuntime(), now(), clampInt(url.searchParams.get('hours'), 1, 24 * 90, 48)));
       if (route === '/api/admin/errors') {
         const kind = ['server', 'warn', 'http', 'client'].includes(url.searchParams.get('kind')) ? url.searchParams.get('kind') : null;

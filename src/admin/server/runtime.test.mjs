@@ -236,7 +236,7 @@ test('dimenzia návštev má strop rôznych hodnôt za deň (vymyslené referery
   assert.equal(refs.find(row => row.val === 'iné').n, 5);
 });
 
-test('naživo: poloha z Cloudflare (mesto na 0,1°), inak hlavné mesto krajiny; bez IP, vypadnutie po 2,5 min', async t => {
+test('naživo: poloha z Cloudflare (mesto na 0,1°), inak hlavné mesto krajiny; IP pre vlastníka, vypadnutie po 2,5 min', async t => {
   const { runtime, clock } = setup(t);
   const { hit } = await serve(t, runtime);
   await hit({ t: 'view', p: '/?front=front', r: 'https://www.google.com/' }, { 'CF-Connecting-IP': '203.0.113.5', 'CF-IPCountry': 'SK',
@@ -255,8 +255,8 @@ test('naživo: poloha z Cloudflare (mesto na 0,1°), inak hlavné mesto krajiny;
   assert.equal(unknown.lat, null);
   assert.equal(snap.cityPrecision, true);
   assert.equal(snap.recent[2].ref, 'google.com');
-  const dump = JSON.stringify(snap);
-  assert.ok(!dump.includes('203.0.113.5') && !dump.includes('198.51.100.7') && !dump.includes('iPhone'), 'žiadna IP ani UA');
+  assert.equal(kosice.ip, '203.0.113.5');
+  assert.ok(!JSON.stringify(snap).includes('iPhone'), 'celý User-Agent nejde do snímky');
   // Ping drží návštevníka naživo, ticho ho po 2,5 min vyradí.
   clock.time += 120_000;
   await hit({ t: 'ping' }, { 'CF-Connecting-IP': '203.0.113.5', 'CF-IPCountry': 'SK' });
@@ -267,4 +267,29 @@ test('naživo: poloha z Cloudflare (mesto na 0,1°), inak hlavné mesto krajiny;
   assert.equal(later.visitors[0].activeS, 180);
   runtime.sampleLive();
   assert.deepEqual(runtime.liveSnapshot().history.map(h => h.n), [1, 1]);
+});
+
+test('záznam návštev: IP, poloha, čas na stránke z pingu, hľadanie, DNT nič, mazanie po 30 dňoch', async t => {
+  const { runtime, store, clock } = setup(t);
+  const { hit } = await serve(t, runtime);
+  await hit({ t: 'view', p: '/?front=front', r: 'https://www.google.com/', w: 1280, l: 'sk-SK' }, { 'CF-Connecting-IP': '203.0.113.5', 'CF-IPCountry': 'SK',
+    'CF-IPCity': 'Ko%C5%A1ice', 'CF-IPLatitude': '48.71634', 'CF-IPLongitude': '21.26111' });
+  await hit({ t: 'view', p: '/en/' }, { 'CF-Connecting-IP': '198.51.100.7', 'CF-IPCountry': 'CZ' });
+  await hit({ t: 'view', p: '/' }, { 'CF-Connecting-IP': '192.0.2.1', DNT: '1' });
+  runtime.flush();
+  clock.time += 90_000;
+  await hit({ t: 'ping' }, { 'CF-Connecting-IP': '203.0.113.5' });
+  runtime.flush();
+  const all = store.visitLog({ from: 0 });
+  assert.equal(all.total, 2, 'DNT sa nezapíše');
+  assert.equal(all.ips, 2);
+  const kosice = all.rows.find(row => row.ip === '203.0.113.5');
+  assert.deepEqual([kosice.city, kosice.country, kosice.path, kosice.ref, kosice.browser, kosice.lang, kosice.lat], ['Košice', 'SK', '/', 'google.com', 'Chrome', 'sk', 48.7]);
+  assert.equal(kosice.lastAt - kosice.at, 90_000, 'ping posunie koniec návštevy, nevytvorí nový riadok');
+  assert.ok(kosice.ua.includes('Chrome/140'));
+  assert.equal(store.visitLog({ from: 0, q: 'Košice' }).total, 1);
+  assert.equal(store.visitLog({ from: 0, q: '198.51' }).rows[0].country, 'CZ');
+  assert.equal(store.visitLog({ from: 0, q: '%' }).total, 0, 'zástupné znaky LIKE sa hľadajú doslovne');
+  store.prune(clock.time + 31 * 86400_000);
+  assert.equal(store.visitLog({ from: 0 }).total, 0, 'po 30 dňoch zmizne');
 });

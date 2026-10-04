@@ -817,7 +817,7 @@ async function renderAnalytics() {
   const hourBox = section(DIM_TITLES.hour);
   barChart(hourBox, { labels: Array.from({ length: 24 }, (_, h) => `${h}`), values: Array.from({ length: 24 }, (_, h) => hours.get(String(h).padStart(2, '0')) || 0), name: 'Zobrazenia' });
   main.append(hourBox, grid,
-    el('p', 'admin-muted', 'Anonymne: bez cookie a bez IP v databáze. Návštevník = hash s dennou soľou, ktorý po polnoci zanikne (ostane len počet). Do Not Track / GPC sa rešpektuje.'));
+    el('p', 'admin-muted', 'Štatistika je bez cookie: návštevník = hash s dennou soľou, ktorý po polnoci zanikne (ostane len počet). Jednotlivé návštevy s IP sú v záložke Naživo → Záznam návštev (30 dní). Do Not Track / GPC sa rešpektuje.'));
 }
 
 const percent = (part, whole) => { const p = (part / whole) * 100; return p > 0 && p < 0.1 ? '< 0,1 %' : `${p.toFixed(1).replace('.', ',')} %`; };
@@ -1030,7 +1030,7 @@ function describeCluster(cluster) {
   const head = n === 1 ? placeText(cluster.items[0]) : `${n} návštevníci · ${[...new Set(cluster.items.map(placeText))].slice(0, 3).join(' · ')}`;
   const lines = [head];
   for (const v of cluster.items.slice(0, 6)) {
-    lines.push(`${DEVICES[v.device] || v.device} · ${v.path} · na stránke ${duration(v.activeS)}${v.precision === 'country' ? ' · len krajina' : ''}`);
+    lines.push(`${v.ip ? `${v.ip} · ` : ''}${DEVICES[v.device] || v.device} · ${v.path} · na stránke ${duration(v.activeS)}${v.precision === 'country' ? ' · len krajina' : ''}`);
   }
   if (n > 6) lines.push(`… a ďalší ${n - 6}`);
   return lines;
@@ -1056,7 +1056,9 @@ async function renderLive() {
   const feedBox = el('section', 'admin-section admin-cell'); feedBox.append(el('h2', '', 'Posledné zobrazenia'), feed);
   grid.append(countriesBox, feedBox);
   const trendBox = section('Počet naživo · posledné 2 h', trend);
-  main.append(trendBox, el('p', 'admin-muted', 'Poloha žije len v pamäti servera počas aktivity návštevníka (2,5 min po poslednom signáli) — do databázy sa neukladá. Mesto je zaokrúhlené na 0,1°, IP adresa sa neukladá nikde. Do Not Track / GPC sa rešpektuje.'));
+  const logBox = section('Záznam návštev');
+  main.append(trendBox, logBox, el('p', 'admin-muted', 'Záznam návštev (IP, čas, stránka, poloha podľa Cloudflare, prehliadač) vidí len vlastník a server ho maže po 30 dňoch; je uvedený v zásadách súkromia. Prehliadač s Do Not Track / GPC sa nezapíše vôbec. Mesto je zaokrúhlené na 0,1°.'));
+  void renderVisitLog(logBox);
 
   liveState.map = createLiveMap(mapBox, { ...base, describe: describeCluster });
   const viewButtons = new Map();
@@ -1101,7 +1103,7 @@ async function renderLive() {
     feed.replaceChildren(...d.recent.slice(0, 15).map(r => {
       const li = el('li', r.at > lastRecentAt && lastRecentAt ? 'live-feed-new' : '');
       li.append(el('span', 'live-feed-time', agoText(r.agoS)), el('span', 'live-feed-place', placeText(r) || 'neznáme miesto'),
-        el('span', 'live-feed-meta', `${r.path} · ${DEVICES[r.device] || r.device}${r.ref && r.ref !== 'priamo' ? ` · z ${r.ref}` : ''}`));
+        el('span', 'live-feed-meta', `${r.ip ? `${r.ip} · ` : ''}${r.path} · ${DEVICES[r.device] || r.device}${r.ref && r.ref !== 'priamo' ? ` · z ${r.ref}` : ''}`));
       return li;
     }));
     if (!d.recent.length) feed.append(el('li', 'admin-muted', 'Zatiaľ nič — zoznam sa plní od reštartu servera.'));
@@ -1118,6 +1120,47 @@ async function renderLive() {
   };
   liveState.timer = setInterval(tick, 10_000);
   leaveTab = () => { clearInterval(liveState.timer); liveState.map?.stop(); liveState.map = null; };
+}
+
+// Záznam návštev s IP (30 dní) — tabuľka pod mapou, hľadanie v IP / meste / stránke / referri.
+const visitState = { days: 1, q: '', page: 0 };
+const timeFmt = new Intl.DateTimeFormat('sk-SK', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+async function renderVisitLog(box) {
+  const body = el('div');
+  box.replaceChildren(box.firstChild, body);
+  const draw = async () => {
+    let data;
+    try { data = await api(`/api/admin/visits?days=${visitState.days}&page=${visitState.page}&q=${encodeURIComponent(visitState.q)}`); }
+    catch (error) { body.replaceChildren(notice(error.message)); return; }
+    const picker = rangePicker(visitState, [[1, '24 h'], [7, '7 dní'], [30, '30 dní']], () => { visitState.page = 0; void draw(); });
+    const search = el('form', 'admin-search');
+    const input = el('input');
+    input.type = 'search'; input.placeholder = 'IP, mesto, krajina (SK), stránka, odkiaľ, prehliadač…'; input.value = visitState.q;
+    const go = el('button', 'admin-btn', 'Hľadať'); go.type = 'submit';
+    search.append(input, go);
+    search.addEventListener('submit', event => { event.preventDefault(); visitState.q = input.value.trim(); visitState.page = 0; void draw(); });
+    const filterBy = value => () => { visitState.q = value; visitState.page = 0; void draw(); };
+    const rows = data.rows.map(v => {
+      const ipLink = button(v.ip, filterBy(v.ip), 'admin-link live-ip');
+      const place = [v.city, v.region && v.region !== v.city ? v.region : '', countryName(v.country)].filter(Boolean).join(', ');
+      const stay = Math.max(0, Math.round((v.lastAt - v.at) / 1000));
+      const device = el('span', '', `${DEVICES[v.device] || v.device} · ${v.browser} · ${v.os}`);
+      device.title = v.ua;
+      return row([timeFmt.format(new Date(v.at)), ipLink, place || '—', v.path, v.ref, device, stay >= 60 ? duration(stay) : '< 1 min']);
+    });
+    const facts = el('div', 'admin-facts');
+    facts.append(el('span', '', `${number(data.total)} návštev`), el('span', 'admin-muted', `${number(data.ips)} rôznych IP`),
+      el('span', 'admin-muted', `uchováva sa ${data.retentionDays} dní`));
+    if (data.q) facts.append(button(`zrušiť filter „${data.q}"`, filterBy(''), 'admin-link'));
+    const pager = el('div', 'admin-pager');
+    if (visitState.page > 0) pager.append(button('← novšie', () => { visitState.page--; void draw(); }, 'admin-btn admin-btn-sm'));
+    if (data.offset + data.rows.length < data.total) pager.append(button('staršie →', () => { visitState.page++; void draw(); }, 'admin-btn admin-btn-sm'));
+    pager.append(el('span', 'admin-muted', data.total ? `${data.offset + 1}–${data.offset + data.rows.length} z ${number(data.total)}` : ''));
+    body.replaceChildren(picker, search, facts, rows.length
+      ? table(['Čas', 'IP', 'Miesto', 'Stránka', 'Odkiaľ', 'Zariadenie', 'Na stránke'], rows)
+      : el('p', 'admin-muted', 'Žiadne návštevy v tomto rozsahu.'), pager);
+  };
+  await draw();
 }
 
 // ── štart ──────────────────────────────────────────────────────────────────

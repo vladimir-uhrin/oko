@@ -13,7 +13,7 @@ const OUT = path.resolve(opt('out', 'output/qa-live'));
 mkdirSync(OUT, { recursive: true });
 
 const now = Date.now();
-const v = (city, country, lat, lon, precision, device, path, activeS) => ({ city, country, region: '', lat, lon, precision, device, path, views: 1, activeS, idleS: 20 });
+const v = (city, country, lat, lon, precision, device, path, activeS) => ({ city, country, region: '', lat, lon, precision, device, path, views: 1, activeS, idleS: 20, ip: '203.0.113.' + Math.round(activeS % 250) });
 const SCENES = {
   slovensko: [v('Bratislava', 'SK', 48.1, 17.1, 'city', 'desktop', '/', 640), v('Bratislava', 'SK', 48.2, 17.2, 'city', 'mobil', '/sk/', 90),
     v('Košice', 'SK', 48.7, 21.3, 'city', 'mobil', '/', 1500), v('Žilina', 'SK', 49.2, 18.7, 'city', 'desktop', '/s/*', 30),
@@ -43,6 +43,10 @@ try {
         const json = body => request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
         if (url.pathname === '/api/auth/session') return json({ user: { email: 'qa@okolive.sk', role: 'owner' }, csrfToken: 'x' });
         if (url.pathname === '/api/admin/live') return json(snapshot(visitors));
+        if (url.pathname === '/api/admin/visits') return json({ days: 1, q: '', limit: 100, offset: 0, retentionDays: 30, total: visitors.length, ips: visitors.length,
+          rows: visitors.map((x, i) => ({ id: String(i), at: now - i * 600_000, lastAt: now - i * 600_000 + x.activeS * 1000, ip: x.ip, country: x.country, region: '', city: x.city,
+            lat: x.lat, lon: x.lon, path: x.path, ref: i % 2 ? 'google.com' : 'priamo', browser: 'Chrome', os: x.device === 'mobil' ? 'Android' : 'Windows', device: x.device,
+            screen: '1440–1919', lang: 'sk', ua: 'Mozilla/5.0 (QA)' })) });
         if (url.pathname.startsWith('/api/')) return request.respond({ status: 404, contentType: 'application/json', body: '{"error":"not_found"}' });
         return request.continue();
       });
@@ -53,15 +57,19 @@ try {
         count: document.querySelector('.live-count-value')?.textContent,
         overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
         feed: document.querySelectorAll('.live-feed li').length,
+        logRows: document.querySelectorAll('.admin-table tbody tr').length,
         canvasW: document.querySelector('.live-map canvas').clientWidth,
         pressed: document.querySelector('.admin-range [aria-pressed="true"]:not(:first-child)')?.textContent,
       }));
+      if (check.logRows !== visitors.length) failures.push(`${name}/${label}: záznam má ${check.logRows} riadkov`);
       if (check.overflow) failures.push(`${name}/${label}: vodorovné pretečenie stránky`);
       if (String(check.count) !== String(visitors.length)) failures.push(`${name}/${label}: počet ${check.count}`);
       // Najbližší bod: prejsť myšou nad Bratislavu a ukázať bublinu.
       const box = await page.$eval('.live-map canvas', c => { const r = c.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
       console.log(name, label, JSON.stringify(check), JSON.stringify(box));
       await page.screenshot({ path: path.join(OUT, `${name}-${label}.png`), fullPage: true });
+      const log = (await page.$$('.admin-section')).at(-1);
+      await log.screenshot({ path: path.join(OUT, `${name}-${label}-zaznam.png`) });
       await page.close();
     }
   }

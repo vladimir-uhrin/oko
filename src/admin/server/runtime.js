@@ -2,16 +2,16 @@
 //
 // • middleware pred všetkými proxy: hodinové štatistiky /api/* po feedoch
 //   (počet, 4xx, 5xx, latencia, bajty), vypnutý feed → 503, denný strop → 429
-// • /api/telemetry/hit: anonymné návštevy z glóbusu (bez cookie, bez IP v DB;
-//   hash návštevníka s dennou soľou zmizne po skončení dňa), aktívne minúty,
-//   zapnuté vrstvy, JS chyby prehliadača
+// • /api/telemetry/hit: návštevy z glóbusu bez cookie (agregáty; hash návštevníka s dennou
+//   soľou zmizne po skončení dňa), aktívne minúty, zapnuté vrstvy, JS chyby prehliadača;
+//   od 2026-10-04 aj záznam návštev s IP pre vlastníka (visit_log, 30 dní — store.js)
 // • /api/notice: verejný oznam a zoznam vypnutých zdrojov (pravidlo 2: glóbus
 //   musí ukázať, že vrstva nie je živá)
 // • zachytenie console.error/warn servera a HTTP 5xx do tabuľky chýb, s
 //   redakciou kľúčov (hodnoty z .env sa nahradia ***)
 //
 // Zápis do SQLite ide raz za minútu z pamäte, takže požiadavka nečaká na disk.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import http from 'node:http';
 import { FEEDS, feedById, feedForPath, isStatusPath, routeKey } from './feeds.js';
@@ -118,7 +118,8 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
   let visitors = new Map();
   let errors = new Map();
   let samples = [];
-  // hash → { at, since, geo, path, device, views } (len v pamäti; IP ani UA sa nedrží)
+  let visitLog = new Map(); // id → riadok záznamu návštev na zápis (nový alebo posunutý last_at)
+  // hash → { at, since, geo, path, device, views, ip, visit } (len v pamäti)
   const live = new Map();
   const recent = []; // posledné zobrazenia bez hashu: { at, country, city, path, device, ref }
   const liveHistory = []; // { at, n } raz za minútu
@@ -193,8 +194,8 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
 
   function flush() {
     const batch = { traffic: [...traffic.values()], pageviews: [...pageviews.values()],
-      visitors: [...visitors.values()], errors: [...errors.values()], samples };
-    traffic = new Map(); pageviews = new Map(); visitors = new Map(); errors = new Map(); samples = [];
+      visitors: [...visitors.values()], errors: [...errors.values()], samples, visits: [...visitLog.values()] };
+    traffic = new Map(); pageviews = new Map(); visitors = new Map(); errors = new Map(); samples = []; visitLog = new Map();
     try { store.flush(batch); } catch (error) { originalConsole.warn?.('[admin] telemetry flush failed:', error?.message); }
   }
   let lastMaintenance = 0;
@@ -299,24 +300,31 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
       const geo = geoFromRequest(req);
       const path = pagePath(hit.p);
       const prev = live.get(hash);
-      live.set(hash, { at: time, since: prev?.since ?? time, geo, path, device: ua.device, views: (prev?.views || 0) + 1 });
-      recent.unshift({ at: time, country: geo.country, city: geo.city, path, device: ua.device, ref: referrerHost(hit.r, ownHosts) });
+      const ref = referrerHost(hit.r, ownHosts);
+      const lang = String(hit.l || '').toLowerCase().split('-')[0];
+      const visit = { id: randomUUID(), at: time, lastAt: time, ip, country: geo.country, region: geo.region, city: geo.city,
+        lat: geo.lat, lon: geo.lon, path, ref, browser: ua.browser, os: ua.os, device: ua.device, screen: screenBucket(hit.w),
+        lang: /^[a-z]{2,3}$/.test(lang) ? lang : '??', ua: String(req.headers['user-agent'] || '').slice(0, 300) };
+      visitLog.set(visit.id, visit);
+      live.set(hash, { at: time, since: prev?.since ?? time, geo, path, device: ua.device, views: (prev?.views || 0) + 1, ip, visit });
+      recent.unshift({ at: time, ip, country: geo.country, city: geo.city, path, device: ua.device, ref });
       if (recent.length > RECENT_MAX) recent.length = RECENT_MAX;
       addPv(day, 'views', '');
       addPv(day, 'path', path);
-      addPv(day, 'ref', referrerHost(hit.r, ownHosts));
+      addPv(day, 'ref', ref);
       addPv(day, 'country', geo.country);
       addPv(day, 'browser', ua.browser);
       addPv(day, 'os', ua.os);
       addPv(day, 'device', ua.device);
-      addPv(day, 'screen', screenBucket(hit.w));
-      const lang = String(hit.l || '').toLowerCase().split('-')[0];
-      addPv(day, 'lang', /^[a-z]{2,3}$/.test(lang) ? lang : '??');
+      addPv(day, 'screen', visit.screen);
+      addPv(day, 'lang', visit.lang);
       addPv(day, 'hour', localHour(time));
     } else if (hit.t === 'ping') {
       // Ping bez predchádzajúceho zobrazenia (reštart servera) — poloha z tejto požiadavky.
       const prev = live.get(hash);
-      live.set(hash, prev ? { ...prev, at: time } : { at: time, since: time, geo: geoFromRequest(req), path: '/', device: ua.device, views: 0 });
+      live.set(hash, prev ? { ...prev, at: time } : { at: time, since: time, geo: geoFromRequest(req), path: '/', device: ua.device, views: 0, ip });
+      // Ping posúva čas posledného signálu zobrazenia — z neho je „na stránke" v zázname.
+      if (prev?.visit) { prev.visit.lastAt = time; visitLog.set(prev.visit.id, prev.visit); }
       addPv(day, 'minutes', '');
     } else if (hit.t === 'layer') {
       const layer = String(hit.layer || '');
@@ -374,7 +382,7 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
     const n = liveCount();
     const visitorsNow = [...live.values()].sort((a, b) => b.at - a.at).map(entry => ({
       lat: entry.geo.lat, lon: entry.geo.lon, precision: entry.geo.precision, country: entry.geo.country,
-      city: entry.geo.city, region: entry.geo.region, path: entry.path, device: entry.device, views: entry.views,
+      city: entry.geo.city, region: entry.geo.region, path: entry.path, device: entry.device, views: entry.views, ip: entry.ip || '',
       activeS: Math.round((time - entry.since) / 1000), idleS: Math.round((time - entry.at) / 1000),
     }));
     const recentViews = recent.filter(view => time - view.at < 24 * 3600_000)

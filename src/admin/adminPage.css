@@ -237,3 +237,4 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .live-feed-new { animation: live-new 2.4s ease-out; }
 @keyframes live-new { from { background: #00d4ff22; } to { background: transparent; } }
 @media (max-width: 640px) { .live-count-value { font-size: 36px; } .live-feed li { grid-template-columns: 70px 1fr; } }
+.live-ip { font: 12px var(--font-mono); white-space: nowrap; }
