@@ -21,6 +21,7 @@
  */
 import * as Cesium from 'cesium';
 import { registerPickOwner } from './pickRegistry.js';
+import { altitudeBand, bandRgb, smoothTrail, splitByBand } from './trailStyle.js';
 
 // Round 6: trail ENTITIES are pickable (the old Primitive had
 // allowPicking:false). A trail hugs its aircraft, so an unclaimed pick would
@@ -47,12 +48,17 @@ const MIN_SEGMENT_DISTANCE_SQ = 0.01;
  * @param {object} options - Trail options.
  * @param {string} options.color - CSS color string for the trail hue.
  * @param {number} [options.width=1.3] - Polyline width in pixels.
+ * @param {boolean} [options.altitudeColors=false] - Lietadlá (2026-10-04): farba podľa výšky —
+ *   čiara sa delí na úseky výškových pásiem (trailStyle.js), každý úsek je vlastná entita
+ *   s depthFailMaterial, takže pravidlo „vždy viditeľná" platí ďalej. `color` sa vtedy nepoužije.
+ * @param {boolean} [options.smooth=false] - Zaoblené zákruty (centripetálny Catmull-Rom cez body).
  * @returns {{setPositions: function(Cesium.Cartesian3[]): void, setVisible: function(boolean): void, clear: function(): void, destroy: function(): void}}
  *   Trail handle: setPositions replaces the geometry, setVisible temporarily
  *   hides it without discarding history, clear empties it, and destroy removes
  *   the entity permanently.
  */
-export function createTrail(viewer, { color, width = 1.3 }) {
+export function createTrail(viewer, { color, width = 1.3, altitudeColors = false, smooth = false }) {
+  if (altitudeColors) return createAltitudeTrail(viewer, { width, smooth });
   const baseColor = Cesium.Color.fromCssColorString(color);
   /** @type {Cesium.Cartesian3[]} Current deduped positions (owned copy). */
   let current = [];
@@ -124,6 +130,99 @@ export function createTrail(viewer, { color, width = 1.3 }) {
         try { viewer.entities.remove(entity); } catch { /* torn down */ }
       }
       entity = null;
+    },
+  };
+}
+
+/** Bez zbytočných dvojbodov: rovnaké pravidlo ako jednofarebná čiara. */
+function dedupePositions(cartesians) {
+  const positions = [];
+  for (const position of Array.isArray(cartesians) ? cartesians : []) {
+    if (!position) continue;
+    const last = positions[positions.length - 1];
+    if (last && Cesium.Cartesian3.distanceSquared(last, position) < MIN_SEGMENT_DISTANCE_SQ) continue;
+    positions.push(position);
+  }
+  return positions;
+}
+
+/**
+ * Trajektória lietadla farbená podľa výšky (2026-10-04). Pool entít — jedna na úsek výškového
+ * pásma; prebytočné sa skryjú, nemažú (ďalšia poloha ich zvyčajne znova použije). Prepočet beží
+ * len pri setPositions (nová poloha z dotazu / doplnenie histórie), nikdy pri každom snímku.
+ */
+function createAltitudeTrail(viewer, { width, smooth }) {
+  const seq = ++_trailSeq;
+  /** @type {Cesium.Entity[]} */
+  const pool = [];
+  let used = 0;
+  let destroyed = false;
+  let visible = true;
+  const scratchCarto = new Cesium.Cartographic();
+
+  function entityAt(i) {
+    if (pool[i]) return pool[i];
+    const entity = viewer.entities.add({
+      id: i === 0 ? `gev-trail:${seq}` : `gev-trail:${seq}:${i}`,
+      show: false,
+      polyline: { positions: [], width, arcType: Cesium.ArcType.GEODESIC },
+    });
+    pool[i] = entity;
+    return entity;
+  }
+
+  function hideFrom(index) {
+    for (let i = index; i < pool.length; i += 1) pool[i].show = false;
+  }
+
+  return {
+    setPositions(cartesians) {
+      if (destroyed || !viewer || viewer.isDestroyed()) return;
+      let positions = dedupePositions(cartesians);
+      if (positions.length < 2) {
+        used = 0;
+        hideFrom(0);
+        return;
+      }
+      if (smooth) positions = smoothTrail(positions).map((p) => (p instanceof Cesium.Cartesian3 ? p : new Cesium.Cartesian3(p.x, p.y, p.z)));
+      const bands = positions.map((p) => {
+        const carto = Cesium.Cartographic.fromCartesian(p, Cesium.Ellipsoid.WGS84, scratchCarto);
+        return altitudeBand(carto ? carto.height : 0);
+      });
+      const runs = splitByBand(bands);
+      runs.forEach((run, i) => {
+        const entity = entityAt(i);
+        const [r, g, b] = bandRgb(run.band);
+        const color = new Cesium.Color(r, g, b, TRAIL_ALPHA);
+        entity.polyline.positions = positions.slice(run.start, run.end + 1);
+        entity.polyline.material = color;
+        // Pravidlo z kola 6: úsek pod fotoreálnym mestom sa kreslí stlmene, nikdy nezmizne.
+        entity.polyline.depthFailMaterial = new Cesium.Color(r, g, b, TRAIL_OCCLUDED_ALPHA);
+        entity.show = visible;
+      });
+      used = runs.length;
+      hideFrom(used);
+    },
+
+    setVisible(nextVisible) {
+      visible = nextVisible !== false;
+      for (let i = 0; i < used; i += 1) pool[i].show = visible;
+    },
+
+    clear() {
+      used = 0;
+      hideFrom(0);
+    },
+
+    destroy() {
+      destroyed = true;
+      if (viewer && !viewer.isDestroyed()) {
+        for (const entity of pool) {
+          try { viewer.entities.remove(entity); } catch { /* torn down */ }
+        }
+      }
+      pool.length = 0;
+      used = 0;
     },
   };
 }

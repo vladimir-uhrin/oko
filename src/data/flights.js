@@ -33,6 +33,7 @@ import {
   isTrackingSelectionGesture,
 } from './trackingClickGesture.js';
 import { createTrail } from './trailRenderer.js';
+import { trailAltitudeRgb } from './trailStyle.js';
 import { createTrackedRouteLine, routeLinePositionsDeg } from './routeLine.js';
 import { isExplicitLayerStateOrigin } from './layerState.js';
 import {
@@ -3631,6 +3632,19 @@ function _appendTrailFix(position) {
   _refreshTrailDisplay();
 }
 
+/** Farba hlavy trajektórie (posledný úsek k lietadlu) podľa výšky — mení sa na mieste, bez alokácie. */
+const _trailHeadColor = Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.9);
+const _trailHeadColorDim = Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.45);
+const _scratchTrailHeadCarto = new Cesium.Cartographic();
+function _updateTrailHeadColor() {
+  const last = _trailPositions.length > 1 ? _trailPositions[_trailPositions.length - 2] : _trailPositions[0];
+  if (!last) return;
+  const carto = Cesium.Cartographic.fromCartesian(last, Cesium.Ellipsoid.WGS84, _scratchTrailHeadCarto);
+  const [r, g, b] = trailAltitudeRgb(carto ? carto.height : 0);
+  _trailHeadColor.red = r; _trailHeadColor.green = g; _trailHeadColor.blue = b;
+  _trailHeadColorDim.red = r; _trailHeadColorDim.green = g; _trailHeadColorDim.blue = b;
+}
+
 /**
  * Renders the trail with its head clamped to the render-behind display
  * position. Raw newest fixes run up to RENDER_DELAY_SEC ahead of the
@@ -3647,6 +3661,7 @@ function _refreshTrailDisplay() {
   // (poll cadence), never at motion cadence.
   if (!_trail) return;
   _trail.setPositions(_trailPositions.length > 1 ? _trailPositions.slice(0, -1) : _trailPositions);
+  _updateTrailHeadColor();
 }
 
 /**
@@ -3672,7 +3687,8 @@ function _startTrail(icao24) {
     }
   }
   if (!_trail && _viewer) {
-    _trail = createTrail(_viewer, { color: TRAIL_COLOR, width: 1.3 });
+    // 2026-10-04: farba podľa výšky a zaoblené zákruty (trailStyle.js) namiesto jednej fialovej.
+    _trail = createTrail(_viewer, { color: TRAIL_COLOR, width: 2.4, altitudeColors: true, smooth: true });
   }
   _trail?.setVisible(!_cockpitContactMode);
   // Live head segment: last fix → current dead-reckoned icon, updated every frame via
@@ -3711,11 +3727,13 @@ function _startTrail(icao24) {
           if (!from) return [];
           return [from, Cesium.Cartesian3.clone(head)];
         }, false),
-        width: 1.3,
-        material: Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.9),
+        width: 2.4,
+        // 2026-10-04: farba podľa výšky posledného bodu čiary (nadväzuje na telo trajektórie);
+        // prepočíta sa v _refreshTrailDisplay pri novej polohe, CallbackProperty len vráti objekt.
+        material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => _trailHeadColor, false)),
         // Round 4: the head must never vanish into the mesh either (dimmed
         // when occluded so depth still reads).
-        depthFailMaterial: Cesium.Color.fromCssColorString(TRAIL_COLOR).withAlpha(0.45),
+        depthFailMaterial: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => _trailHeadColorDim, false)),
         arcType: Cesium.ArcType.GEODESIC, // round 8: consistent with the trail body (no chords)
       },
     });
