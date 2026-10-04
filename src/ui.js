@@ -51,6 +51,7 @@ import {
 import { TRACKED_OVERLAY_SOURCE_ID, destroyTrackedReadout, getActiveTrackedReadoutId, initTrackedReadout } from './data/trackedReadout.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 import { installCardCloseButtons } from './cardCloseButtons.js';
+import { installCardActionBar } from './cardActionBar.js';
 import { createScrollKeeper } from './scrollKeeper.js';
 import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
 import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFlightsStrip.js';
@@ -3184,6 +3185,8 @@ export class StyleManager {
         },
       ],
     });
+    // SLEDOVAŤ a KOKPIT na mobile pod kartou lietadla (2026-10-04, cardActionBar.js).
+    this._cardActionBar = installCardActionBar(viewer);
     // Bohatá karta letiska po kliknutí (frekvencie, dráhy, METAR, živá
     // premávka z vrstvy letov, odkazy) — viď airportCard.js.
     installAirportCard(viewer, {
@@ -11689,6 +11692,7 @@ export class StyleManager {
     destroyTrackedPhoto();
     destroyStateFlightsStrip();
     this._cardCloseButtons?.destroy();
+    this._cardActionBar?.destroy();
     destroyTrackedReadout();
     destroyDetection();
     destroyWorldOverlay();

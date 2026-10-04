@@ -1416,6 +1416,9 @@ function refreshUiOccluders(timestamp, force = false) {
     for (const element of matches) {
       if (seen.has(element) || !elementIsVisible(element)) continue;
       seen.add(element);
+      // Lišta akcií pod kartou (mobil, cardActionBar.js) ide ZA kartou — ako prekážka by kartu
+      // odtláčala a lišta by ju naháňala (karta skákala, ťuknutie na krížik netrafilo; 2026-10-04).
+      if (element.classList?.contains?.('oko-card-action')) continue;
       if (_resizeObserver && !_observedOccluderElements.has(element)) {
         _resizeObserver.observe(element);
         _mutationObserver?.observe?.(element, OCCLUDER_ATTRIBUTE_OBSERVATION);
