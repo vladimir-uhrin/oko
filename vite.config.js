@@ -11318,7 +11318,10 @@ export default defineConfig(({ mode }) => {
         // source: heavy or mid-write files there (radar PNGs, terrain
         // builds, screenshots) must never feed HMR — a file locked by a
         // downloader makes chokidar throw EBUSY, which KILLS the dev server.
-        ignored: ['**/.gev-cache/**', '**/qa-shots/**'],
+        // .auth-data (2026-10-04): oko-api writes Studio videos there (.auth-data/studio/*.mp4) — a
+        // locked mp4 killed oko-dev with EBUSY; the account/admin SQLite and its WAL change constantly.
+        // .gev-logs: Realtime debug log appends.
+        ignored: ['**/.gev-cache/**', '**/qa-shots/**', '**/.auth-data/**', '**/.gev-logs/**'],
       },
       // api = bez sledovania súborov a HMR (kópia commitu sa nemení), proxy = preposielanie /api a /s.
       ...roleServerOverrides(serverRole),

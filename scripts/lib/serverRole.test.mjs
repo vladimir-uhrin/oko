@@ -64,6 +64,7 @@ test('vite.config.js v role api: všetky API pluginy, bez sledovania súborov a 
   assert.deepEqual(api.optimizeDeps, { noDiscovery: true, include: [] });
   const full = await configFor({});
   assert.ok(full.pluginNames.includes('flight-history') && full.pluginNames.includes('opensky-proxy'));
-  assert.deepEqual(full.server.watch, { ignored: ['**/.gev-cache/**', '**/qa-shots/**'] });
+  // .auth-data: oko-api tam zapisuje videá Štúdia — zamknuté mp4 zabilo oko-dev cez EBUSY (2026-10-04).
+  assert.deepEqual(full.server.watch, { ignored: ['**/.gev-cache/**', '**/qa-shots/**', '**/.auth-data/**', '**/.gev-logs/**'] });
   assert.equal(full.server.proxy, undefined);
 });

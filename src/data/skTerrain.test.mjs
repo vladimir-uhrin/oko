@@ -173,7 +173,7 @@ test('kontraktové piny: proxy registrácia, klientský merge hook, watcher igno
   assert.match(viteConfig, /mergeTerrainAvailability\(JSON\.parse\(body\.toString\('utf8'\)\), JSON\.parse\(overlayRaw\)\)/);
   // LEKCIA (2026-08-31): chokidar nad .gev-cache zabil dev server (EBUSY na
   // súbore zamknutom downloaderom) — watcher ich musí ignorovať.
-  assert.match(viteConfig, /ignored: \['\*\*\/\.gev-cache\/\*\*', '\*\*\/qa-shots\/\*\*'\]/);
+  assert.match(viteConfig, /ignored: \['\*\*\/\.gev-cache\/\*\*', '\*\*\/qa-shots\/\*\*'[,\]]/);
 
   const controller = fs.readFileSync(path.join(ROOT, 'src', 'mapStackController.js'), 'utf8');
   assert.match(controller, /resolveKeylessTerrainUrl\(\{ upstreamUrl: REEARTH_TERRAIN_URL \}\)/);
