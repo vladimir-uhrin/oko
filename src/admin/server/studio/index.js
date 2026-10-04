@@ -210,7 +210,9 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       let made;
       if (draft.card?.kind === 'import' && draft.card.sourceVideo) {
         // Importované video (Udalosti, Týždeň na fronte): 9:16 doplnením, bez nového renderu.
-        made = await padToReel(path.join(mediaDir, path.basename(draft.card.sourceVideo)), path.join(mediaDir, name), { env });
+        // Rám s háčikom (veta z karty importu), titulkom a zdrojom; pás prvých 3 s pre admin.
+        made = await padToReel(path.join(mediaDir, path.basename(draft.card.sourceVideo)), path.join(mediaDir, name),
+          { env, card: { ...draft.card, at: draft.card.at ?? draft.createdAt }, title: draft.title, site, hookSheet: hookFile(id) });
       } else {
         made = await renderReel({ card: draft.card, title: draft.title, text: draft.text }, path.join(mediaDir, name),
           { audio: s.audio, voice: s.voice, env, site, voiceProvider, hookSheet: hookFile(id) });
@@ -440,6 +442,20 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   }
 
   // ── Týždeň na fronte ──────────────────────────────────────────────────
+  /**
+   * Rám reelu (2026-10-04, háčik): výrok týždňa má video vo vlastnej úvodnej karte — rám nad videom ukáže
+   * 0–2,8 s rámec (TÝŽDEŇ NA FRONTE + rozsah dní), potom prvú vetu príspevku (háčik) ako titulok. Pure.
+   */
+  function frontWeekReelMeta(text, weekTo) {
+    const lines = String(text || '').split('\n').map(line => line.trim()).filter(Boolean);
+    const range = /Týždeň na fronte \(([^)]+)\)/.exec(text || '')?.[1] || null;
+    return {
+      kicker: 'TÝŽDEŇ NA FRONTE',
+      hook: { text: `TÝŽDEŇ NA FRONTE${range ? ` · ${range.toUpperCase()}` : ''}`, accent: '' },
+      headline: (lines[0] || '').replace(/\.$/, ''),
+      ...(Number.isFinite(Date.parse(weekTo)) ? { at: Date.parse(`${weekTo}T12:00:00Z`) } : {}),
+    };
+  }
   const frontWeek = { running: false, startedAt: null, finishedAt: null, error: null, log: '', lastKey: null };
   /**
    * Spustí scripts/make-front-week-video.mjs (vlastný proces, až hodinu) a výsledok dá do Štúdia
@@ -457,7 +473,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       const text = await fsp.readFile(result.post, 'utf8');
       const weekTo = /tyzden-na-fronte-(\d{4}-\d{2}-\d{2})/.exec(path.basename(result.video))?.[1] || day || localDayKey(now());
       const imported = await api.importDraft({ template: 'front-week', eventKey: `front-week:${weekTo}`, title: `Týždeň na fronte · do ${weekTo}`,
-        text, image: null, videoFile: result.video, origin: trigger === 'auto' ? 'auto' : 'manual', meta: { source: 'okolive.sk · Generálny štáb Ukrajiny', weekTo, srt: result.srt || null } });
+        text, image: null, videoFile: result.video, origin: trigger === 'auto' ? 'auto' : 'manual',
+        meta: { source: 'okolive.sk · Generálny štáb Ukrajiny', weekTo, srt: result.srt || null, ...frontWeekReelMeta(text, weekTo) } });
       frontWeek.lastKey = `front-week:${weekTo}`;
       return imported;
     } catch (error) {

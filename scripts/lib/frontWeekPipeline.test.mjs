@@ -126,7 +126,7 @@ test('text príspevku: háčik, čísla, zdroje, odkaz na mapu frontu', () => {
   assert.match(text, /Týždeň na fronte \(27\. 9\. – 3\. 10\. 2026\):/);
   assert.match(text, /• 1 494 bojových stretov podľa ukrajinského generálneho štábu/);
   assert.match(text, /• najviac ruských útokov: Pokrovský smer 169, Kosťantynivský smer 165, Vovčansk 61/);
-  assert.match(text, /• zmena územia 25\. 9\. – 2\. 10\. 2026: Rusko obsadilo 39 km², Ukrajina oslobodila 36 km²/);
+  assert.match(text, /• zmena územia 25\. 9\. – 2\. 10\. 2026: ruský agresor obsadil 39 km², Ukrajina oslobodila 36 km²/);
   assert.match(text, /vypočítaná z porovnania dvoch snímok mapy frontu na okolive\.sk s odstupom 7 dní/);
   // Pravidlo vlastníka: zdroj mapy je okolive.sk — poskytovateľ dát sa vo výstupoch nemenuje.
   assert.doesNotMatch(text, /deep\s*state/i);

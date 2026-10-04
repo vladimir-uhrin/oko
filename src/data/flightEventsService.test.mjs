@@ -816,6 +816,14 @@ test('DO ŠTÚDIA (2026-10-03): udalosť → návrh v Štúdiu s obrázkom feed,
     assert.equal(imports[0].template, 'event');
     assert.equal(imports[0].eventKey, `event:${id}`);
     assert.ok(imports[0].title.length > 3 && imports[0].text.includes('OpenSky'));
+    // Rám reelu (2026-10-04, háčik): „čo sa stalo + ktorý let" nad videom, potom riadok letu; čas = začiatok udalosti.
+    const m = imports[0].meta;
+    // Let = číslo IATA z trasy, inak volací znak (táto fixtúra trasu nemá → FDB1073).
+    assert.match(m.hook.text, /^[A-ZÁČĎÉÍĽĹŇÓÔŔŠŤÚÝŽ0-9 ()]+: LET (FZ|FDB)1073$/, m.hook.text);
+    assert.ok(m.hook.text.endsWith(m.hook.accent), 'let farebne');
+    assert.equal(m.kicker, 'LETECKÁ UDALOSŤ');
+    assert.ok(m.headline.startsWith(`Let ${m.hook.accent}`), m.headline);
+    assert.ok(Number.isFinite(m.at) && m.at > Date.parse('2026-09-29') && m.at < Date.parse('2026-10-01'), 'čas udalosti v ms');
     const meta = await sharp(imports[0].image).metadata();
     assert.deepEqual([meta.width, meta.height, meta.format], [1080, 1350, 'jpeg'], 'obrázok feed');
     // Karusel (2026-10-04): snímky kľúčových momentov, každá iná (stopa po moment), najviac 4, rovnaký formát.

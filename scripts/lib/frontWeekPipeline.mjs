@@ -73,7 +73,7 @@ export function frontWeekPostText(model) {
   lines.push(`• ${String(model.total.week).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} bojových stretov podľa ukrajinského generálneho štábu`);
   if (top.length) lines.push(`• najviac ruských útokov: ${top.map((d) => `${directionSk(d.id).name} ${d.week}`).join(', ')}`);
   const weekly = Boolean(model.change?.weekly);
-  if (weekly) lines.push(`• zmena územia ${rangeLabel(model.change.fromDay, model.change.toDay)}: Rusko obsadilo ${Math.round(model.change.ruKm2)} km², Ukrajina oslobodila ${Math.round(model.change.uaKm2)} km²`);
+  if (weekly) lines.push(`• zmena územia ${rangeLabel(model.change.fromDay, model.change.toDay)}: ruský agresor obsadil ${Math.round(model.change.ruKm2)} km², Ukrajina oslobodila ${Math.round(model.change.uaKm2)} km²`);
   lines.push('');
   lines.push(`${weekly ? `Zmena územia je vypočítaná z porovnania dvoch snímok mapy frontu na ${MAP_SOURCE.site} s odstupom 7 dní (mapa zachytáva stav s oneskorením 2–3 dni). ` : ''}Počty stretov sú z denných hlásení Generálneho štábu Ukrajiny — údaje jednej strany.`);
   lines.push('');

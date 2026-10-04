@@ -31,7 +31,7 @@ import { simplifyTrack } from './eventCard.js';
 import { VIDEO_UPLOAD_MAX_BYTES, isMp4 } from './eventVideoRender.js';
 import { normalizeVideoScript, quoteFoundIn, scriptSources } from './eventVideoScript.js';
 import { createEventVideoJobs } from './eventVideoJobs.js';
-import { eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, isPublishable, keyMoments, postText, publicEventView } from './eventPost.js';
+import { eventHeadline, eventShareHash, eventShareMeta, eventWhat, facebookShareUrl, flightLine, isPublishable, keyMoments, postText, publicEventView } from './eventPost.js';
 import { parseGdeltArticles } from './situationNews.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS, STATE_BACKFILL_UA, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
 import { validateSharePayload } from '../shareStore.js';
@@ -737,6 +737,20 @@ export function createFlightEventsService({
    * zverejnenú rekonštrukciu, ak je) a hotovým 3D videom (ak je); Štúdio ho zverejní cez Meta API,
    * naplánuje alebo spraví reel. Udalosť sa tým nezverejňuje — to ostáva na ZVEREJNIŤ.
    */
+  /**
+   * Rám reelu v Štúdiu (2026-10-04, háčik): nad videom 0–2,8 s „čo sa stalo + ktorý let" (výrok háčika
+   * má video vo vlastnej úvodnej karte — rám ho neopakuje), potom riadok letu. Pure voči udalosti.
+   */
+  function studioReelMeta(full) {
+    const flight = full.route?.flightIata || full.callsign || full.icao24;
+    return {
+      kicker: 'LETECKÁ UDALOSŤ',
+      hook: { text: `${eventWhat(full).toUpperCase()}: LET ${flight}`, accent: String(flight) },
+      headline: flightLine(full),
+      ...(Number.isFinite(full.firstT) ? { at: full.firstT * 1000 } : {}),
+    };
+  }
+
   async function toStudio(event) {
     if (!studioImport) return { status: 503, body: { error: 'studio_unavailable' } };
     if (!renderCard) return { status: 503, body: { error: 'card_unavailable' } };
@@ -758,7 +772,8 @@ export function createFlightEventsService({
     try {
       const result = await studioImport({
         template: 'event', eventKey: `event:${event.id}`, title: eventHeadline(full), text: postText(full, { url: event.published?.url || null }),
-        image: card.jpeg, images, videoFile, origin: 'manual', meta: { source: 'OpenSky Network, adsb.lol', eventId: event.id, publishedUrl: event.published?.url || null, slides: 1 + images.length },
+        image: card.jpeg, images, videoFile, origin: 'manual',
+        meta: { source: 'OpenSky Network, adsb.lol', eventId: event.id, publishedUrl: event.published?.url || null, slides: 1 + images.length, ...studioReelMeta(full) },
       });
       log(`[events] ${event.id} ${event.callsign || ''} → Štúdio (${result.created ? 'nový návrh' : result.reason})`);
       return { status: 200, body: { id: event.id, created: Boolean(result.created), reason: result.reason || null, draftId: result.draft?.id || null, video: Boolean(videoFile), slides: 1 + images.length } };

@@ -293,14 +293,15 @@ export function reelHook(card) {
   return { text, accent: keepNumbersTogether(String(card?.hook?.accent ?? card?.big ?? '').trim()) };
 }
 
-/** Horný riadok háčika: čas stavu · zdroj, verzálkami, najviac ~44 znakov (dlhší zdroj sa skráti po „·"). Pure. */
+/** Horný riadok háčika: čas stavu · zdroj, verzálkami, najviac ~44 znakov (dlhší zdroj sa skráti o celé zdroje za „·" či „,"). Pure. */
 export function hookBadge(card) {
-  const parts = String(card?.source || '').split(' · ').filter(Boolean);
+  const source = String(card?.source || '');
+  const parts = source.split(/( · |, )/).filter(Boolean); // [zdroj, oddeľovač, zdroj, …]
   let badge = '';
   while (parts.length) {
-    badge = `${stamp(card.at)} · ${parts.join(' · ')}`.toUpperCase();
+    badge = `${stamp(card.at)} · ${parts.join('')}`.toUpperCase();
     if (badge.length <= 44 || parts.length === 1) break;
-    parts.pop();
+    parts.splice(-2, 2); // posledný zdroj aj s oddeľovačom
   }
   return badge.length > 44 ? `${badge.slice(0, 43).trimEnd()}…` : badge || stamp(card.at);
 }
@@ -418,14 +419,102 @@ async function run(bin, args, { input = null, timeoutMs = 120_000 } = {}) {
  * Reel 9:16 z hotového videa iného pomeru (4:5 z Udalostí / Týždňa na fronte): rozmazané pozadie
  * z toho istého záberu, obraz v strede v plnej šírke, zvuk a dĺžka bez zmeny. Žiadny nový render.
  */
-export async function padToReel(inFile, outFile, { env = process.env } = {}) {
+// ── importované video (Udalosti, Týždeň na fronte) v ráme reelu ─────────────
+/**
+ * Rám pre importované video 4:5 (2026-10-04, háčik): video 960×1200 v bezpečnej zóne reelu (y 400–1600 —
+ * horných ~220 px a spodok prekrýva rozhranie Instagramu/Facebooku, titulky videa sa tak neschovajú),
+ * nad ním 0–2,8 s veta háčika, potom titulok; pod ním zdroj a výzva. Pozadie = rozmazané video.
+ */
+export const PAD = Object.freeze({ x: 60, y: 400, w: 960, h: 1200 });
+
+/** Veta háčika v ráme: najväčšie písmo, pri ktorom sa zmestí na 2 riadky bez skrátenia. Pure. */
+function padHookRows(text) {
+  for (const size of [64, 56, 48, 42]) {
+    // 0,64 em na znak: tučné verzálky (DejaVu Sans Bold) sú širšie než bežný text.
+    const rows = wrapWords(text, Math.floor(PAD.w / (size * 0.64)), 2);
+    if (!rows.at(-1)?.endsWith('…') || size === 42) return { size, rows };
+  }
+  return { size: 42, rows: [] };
+}
+
+/**
+ * SVG vrstvy rámu (1080×1920, priehľadné): 'hook' (0 – HOOK_END), 'title' (potom), 'bottom' (stále). Pure.
+ * card: { hook?: {text, accent}, kicker?, headline?, source?, at? }, title = nadpis návrhu (záloha).
+ */
+export function padOverlaySvg(card, layer, { title = '', site = 'okolive.sk' } = {}) {
+  const parts = [];
+  const top = PAD.y;
+  if (layer === 'hook') {
+    const hook = reelHook({ ...card, big: card?.big || '', headline: card?.headline || title });
+    const accent = new Set(String(hook.accent || '').split(/ +/).filter(Boolean));
+    const { size, rows } = padHookRows(hook.text);
+    parts.push(`<rect x="0" y="200" width="${REEL.width}" height="${top - 200}" fill="#070d14" fill-opacity="0.55"/>`);
+    parts.push(`<text x="${PAD.x}" y="242" font-family="${MONO}" font-size="26" letter-spacing="1" fill="#9fdcef">${escapeXml(hookBadge({ at: card?.at ?? Date.now(), source: card?.source || 'OKO' }))}</text>`);
+    rows.forEach((row, i) => parts.push(`<text x="${PAD.x}" y="${top - 22 - (rows.length - 1 - i) * (size + 8)}" font-family="${FONT}" font-size="${size}" font-weight="800" fill="#ffffff" stroke="#061019" stroke-width="8" paint-order="stroke">${
+      row.split(' ').map(word => `<tspan${accent.has(word) ? ' fill="#ff7a5c"' : ''}>${escapeXml(word)}</tspan>`).join(' ')}</text>`));
+  } else if (layer === 'title') {
+    const headline = wrapWords(keepNumbersTogether(card?.headline || title), 38, 2);
+    parts.push(`<rect x="0" y="200" width="${REEL.width}" height="${top - 200}" fill="#070d14" fill-opacity="0.45"/>`,
+      `<circle cx="${PAD.x + 14}" cy="245" r="14" fill="none" stroke="#00d4ff" stroke-width="4"/><circle cx="${PAD.x + 14}" cy="245" r="5" fill="#00d4ff"/>`,
+      `<text x="${PAD.x + 40}" y="255" font-family="${MONO}" font-size="28" font-weight="700" letter-spacing="6" fill="#e8f1f7">OKO</text>`,
+      `<text x="${PAD.x + PAD.w}" y="255" text-anchor="end" font-family="${MONO}" font-size="24" letter-spacing="3" fill="#00d4ff">${escapeXml(card?.kicker || '')}</text>`);
+    headline.forEach((row, i) => parts.push(`<text x="${PAD.x}" y="${top - 30 - (headline.length - 1 - i) * 52}" font-family="${FONT}" font-size="44" font-weight="700" fill="#e8f1f7" stroke="#061019" stroke-width="6" paint-order="stroke">${escapeXml(row)}</text>`));
+  } else {
+    const bottom = PAD.y + PAD.h;
+    parts.push(`<text x="${PAD.x}" y="${bottom + 48}" font-family="${FONT}" font-size="26" fill="#a9c2d2" stroke="#061019" stroke-width="5" paint-order="stroke">Zdroj: ${escapeXml(card?.source || 'OKO')}</text>`,
+      `<rect x="${PAD.x}" y="${bottom + 72}" width="${Math.min(PAD.w, 60 + site.length * 24 + 240)}" height="60" rx="30" fill="#070d14" fill-opacity="0.7" stroke="#00d4ff88" stroke-width="2"/>`,
+      `<text x="${PAD.x + 30}" y="${bottom + 112}" font-family="${MONO}" font-size="28" fill="#bff2ff">Naživo na ${escapeXml(site)}</text>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${REEL.width}" height="${REEL.height}">${parts.join('')}</svg>`;
+}
+
+/**
+ * Importované video → reel 9:16. S kartou: rám s háčikom, titulkom a zdrojom (padOverlaySvg); bez karty
+ * (staršie volania) ako predtým: video na celú šírku nad rozmazaným pozadím. Vracia { bytes, seconds }.
+ */
+export async function padToReel(inFile, outFile, { env = process.env, card = null, title = '', site = 'okolive.sk', hookSheet = null } = {}) {
   const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
-  const filter = `[0:v]split=2[bg][fg];[bg]scale=${REEL.width}:${REEL.height}:force_original_aspect_ratio=increase,crop=${REEL.width}:${REEL.height},gblur=sigma=30,eq=brightness=-0.12[bgb];`
-    + `[fg]scale=${REEL.width}:-2:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p[v]`;
-  await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', inFile, '-filter_complex', filter, '-map', '[v]', '-map', '0:a?',
-    '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-g', String(REEL.fps * 2), '-r', String(REEL.fps),
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', outFile], { timeoutMs: 10 * 60_000 });
+  const background = `[0:v]split=2[bg][fg];[bg]scale=${REEL.width}:${REEL.height}:force_original_aspect_ratio=increase,crop=${REEL.width}:${REEL.height},gblur=sigma=30,eq=brightness=${card ? -0.2 : -0.12}[bgb];`;
+  const encode = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-g', String(REEL.fps * 2), '-r', String(REEL.fps),
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', outFile];
+  if (!card) {
+    const filter = `${background}[fg]scale=${REEL.width}:-2:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p[v]`;
+    await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', inFile, '-filter_complex', filter, '-map', '[v]', '-map', '0:a?', ...encode], { timeoutMs: 10 * 60_000 });
+  } else {
+    const work = await mkdtemp(path.join(tmpdir(), 'oko-pad-'));
+    try {
+      const layers = {};
+      for (const layer of ['hook', 'title', 'bottom']) {
+        layers[layer] = path.join(work, `${layer}.png`);
+        await sharp(Buffer.from(padOverlaySvg(card, layer, { title, site }))).png().toFile(layers[layer]);
+      }
+      const filter = `${background}[fg]scale=${PAD.w}:${PAD.h}:force_original_aspect_ratio=decrease[fgs];`
+        + `[bgb][fgs]overlay=${PAD.x}+(${PAD.w}-w)/2:${PAD.y}+(${PAD.h}-h)/2[base];`
+        + `[base][1:v]overlay=0:0:enable='lt(t,${HOOK_END})'[h];[h][2:v]overlay=0:0:enable='gte(t,${HOOK_END})'[t];[t][3:v]overlay=0:0,format=yuv420p[v]`;
+      await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', inFile, '-i', layers.hook, '-i', layers.title, '-i', layers.bottom,
+        '-filter_complex', filter, '-map', '[v]', '-map', '0:a?', ...encode], { timeoutMs: 10 * 60_000 });
+    } finally { await rm(work, { recursive: true, force: true }); }
+  }
+  if (hookSheet) await videoHookSheet(outFile, hookSheet, { env });
   return { bytes: (await stat(outFile)).size, seconds: await probeSeconds(outFile, { env }) };
+}
+
+/** Pás háčika z hotového videa (snímky 0, 1, 2, 3 s) — pre importované reely. */
+export async function videoHookSheet(videoFile, outFile, { env = process.env } = {}) {
+  const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
+  const work = await mkdtemp(path.join(tmpdir(), 'oko-hook-'));
+  try {
+    const frames = [];
+    for (const at of [0, 1, 2, 3]) {
+      const file = path.join(work, `${at}.png`);
+      await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(at), '-i', videoFile, '-frames:v', '1', '-vf', `scale=${HOOK_SHEET.w}:${HOOK_SHEET.h}`, file], { timeoutMs: 60_000 });
+      try { frames.push(await readFile(file)); } catch { /* video kratšie než `at` */ }
+    }
+    if (!frames.length) return false;
+    await sharp({ create: { width: HOOK_SHEET.w * frames.length + HOOK_SHEET.gap * (frames.length - 1), height: HOOK_SHEET.h, channels: 3, background: '#070d14' } })
+      .composite(frames.map((input, i) => ({ input, left: i * (HOOK_SHEET.w + HOOK_SHEET.gap), top: 0 }))).jpeg({ quality: 82 }).toFile(outFile);
+    return true;
+  } finally { await rm(work, { recursive: true, force: true }); }
 }
 
 /** Prvá snímka videa ako JPEG (obrázok príspevku k importovanému videu). */

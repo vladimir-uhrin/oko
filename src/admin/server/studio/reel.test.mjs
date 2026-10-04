@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { HOOK_END, HOOK_SHEET, REEL, captionChunks, captionsFor, hookBadge, keepNumbersTogether, narration, overlaySvg, probeSeconds,
+import { HOOK_END, HOOK_SHEET, PAD, REEL, captionChunks, captionsFor, hookBadge, keepNumbersTogether, narration, overlaySvg, padOverlaySvg, probeSeconds,
   reelFocus, reelHook, reelView, renderReel, silentCaptionText, wavSeconds } from './reel.js';
 import { createStudio } from './index.js';
 import { createMetaPublisher, isRetryableError } from './meta.js';
@@ -295,6 +295,52 @@ test('padToReel (ffmpeg): z 4:5 videa vznikne 1080×1920 so zvukom', { skip: !ha
   assert.ok(probe.streams.some(s => s.codec_type === 'audio'));
   const poster = await posterFrame(src, { at: 0.2 });
   assert.equal(poster[0], 0xff);
+});
+
+// Rám importovaného videa (2026-10-04, háčik): video v bezpečnej zóne, háčik → titulok nad ním, zdroj pod ním.
+test('rám importu: háčik 0–2,8 s, potom titulok, zdroj a výzva; texty mimo prekrytia Instagramu', () => {
+  const card = { kicker: 'LETECKÁ UDALOSŤ', hook: { text: 'NÚDZOVÝ KÓD 7700: LET FZ1073', accent: 'FZ1073' }, headline: 'Let FZ1073 · Fly Dubai · Dubai → Tel Aviv',
+    source: 'OpenSky Network, adsb.lol', at: NOW };
+  const hook = padOverlaySvg(card, 'hook');
+  assert.ok(hook.includes('>NÚDZOVÝ<') && /<tspan fill="#ff7a5c">FZ1073<\/tspan>/.test(hook), 'veta háčika, let farebne');
+  assert.ok(hook.includes('OPENSKY NETWORK<'), 'čas a zdroj hore; dlhý zdroj sa skráti o celý zdroj za čiarkou, nie v polovici slova');
+  const title = padOverlaySvg(card, 'title');
+  assert.ok(title.includes('Let FZ1073 · Fly Dubai') && title.includes('LETECKÁ UDALOSŤ') && !title.includes('NÚDZOVÝ'));
+  const bottom = padOverlaySvg(card, 'bottom');
+  assert.ok(bottom.includes('Zdroj: OpenSky Network, adsb.lol') && bottom.includes('Naživo na okolive.sk'));
+  // Všetky texty v bezpečnej zóne y 220–1760 (hore je hlavička aplikácie), video 400–1600.
+  for (const svg of [hook, title, bottom]) {
+    for (const y of [...svg.matchAll(/<text[^>]* y="([\d.]+)"/g)].map(m => Number(m[1]))) assert.ok(y >= 230 && y <= 1760, `y=${y}`);
+  }
+  for (const y of [...hook.matchAll(/<text[^>]* y="([\d.]+)"/g)].map(m => Number(m[1]))) assert.ok(y < PAD.y, 'háčik nad videom');
+  // Dlhá veta háčika sa zmenší, neoreže.
+  // Najdlhší skutočný háčik udalosti sa zmenší, neoreže.
+  const long = padOverlaySvg({ ...card, hook: { text: 'NEZÁKONNÝ ZÁSAH NA PALUBE (ÚNOS): LET FZ1073', accent: 'FZ1073' } }, 'hook');
+  const hookRows = [...long.matchAll(/font-weight="800"[^>]*>(.*?)<\/text>/g)].map(m => m[1].replace(/<[^>]+>/g, '')).join(' ');
+  assert.equal(hookRows, 'NEZÁKONNÝ ZÁSAH NA PALUBE (ÚNOS): LET FZ1073', 'nič sa nestratí');
+  assert.ok(Number(/font-size="(\d+)" font-weight="800"/.exec(long)[1]) < 64, 'menšie písmo');
+});
+
+test('padToReel s kartou (ffmpeg): rám 1080×1920 a pás prvých 3 sekúnd', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {
+  const { padToReel } = await import('./reel.js');
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-pad-card-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, 'in.mp4');
+  assert.equal(spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=540x676:rate=10', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+    '-t', '4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', src]).status, 0);
+  const out = path.join(dir, 'out.mp4'); const sheet = path.join(dir, 'out.hook.jpg');
+  const made = await padToReel(src, out, { card: { hook: { text: 'NÚDZOVÝ KÓD 7700: LET FZ1073', accent: 'FZ1073' }, headline: 'Let FZ1073', source: 'OpenSky', at: NOW }, hookSheet: sheet });
+  assert.ok(Math.abs(made.seconds - 4) < 0.3, `dĺžka ${made.seconds}`);
+  const probe = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', out]).stdout);
+  assert.deepEqual(probe.streams.filter(s => s.codec_type === 'video').map(s => [s.width, s.height]), [[1080, 1920]]);
+  const { default: sharp } = await import('sharp');
+  const meta = await sharp(sheet).metadata();
+  assert.deepEqual([meta.width, meta.height], [HOOK_SHEET.w * 4 + HOOK_SHEET.gap * 3, HOOK_SHEET.h]);
+  // Horný pás v 1. a 3,5. sekunde je iný (háčik → titulok) — overené na skutočných snímkach.
+  const top = async at => sharp(spawnSync('ffmpeg', ['-v', 'error', '-ss', String(at), '-i', out, '-frames:v', '1', '-vf', 'crop=1080:180:0:220', '-f', 'image2pipe', '-vcodec', 'png', '-']).stdout).raw().toBuffer();
+  const [a, b] = [await top(1), await top(3.5)];
+  let diff = 0; for (let i = 0; i < a.length; i += 3) diff += Math.abs(a[i] - b[i]);
+  assert.ok(diff / (a.length / 3) > 3, `horný pás sa zmenil (rozdiel ${(diff / (a.length / 3)).toFixed(1)})`);
 });
 
 test('hlas vlastníka: voiceProvider má prednosť pred Piperom a predĺži video', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {
