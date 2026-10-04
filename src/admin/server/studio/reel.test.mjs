@@ -259,8 +259,11 @@ test('titulky: vety narácie v čase úmerne dĺžke, v bezpečnej zóne, escapo
   const svg = overlaySvg(quakeCard, rows[0].from + 0.5, { captions: [{ from: 0, to: 5, text: '<b>Veta & veta</b>' }] });
   assert.match(svg, /&lt;b&gt;Veta &amp; veta&lt;\/b&gt;/);
   assert.ok(!overlaySvg(quakeCard, 6, { captions: [{ from: 0, to: 5, text: 'Koniec' }] }).includes('Koniec'), 'mimo času sa nekreslí');
-  const y = Number(/<rect x="50" y="(\d+)"/.exec(svg)[1]);
-  assert.ok(y > 1300 && y < 1580, `titulok v bezpečnej zóne (y=${y})`);
+  const [, y, h] = /<rect x="50" y="(\d+)" width="980" height="(\d+)"/.exec(svg).map(Number);
+  assert.ok(y > 1100 && y + h <= 1440, `titulok nad spodkom mapy, neprekrýva riadky pod ňou (y=${y}, h=${h})`);
+  const long = captionsFor('Toto je veľmi dlhá veta, ktorá by sa do troch riadkov titulku nikdy nezmestila, a preto sa musí rozdeliť na viac častí po slovách bez orezania.', { length: 9 });
+  assert.ok(long.length >= 2 && long.every(row => row.text.length <= 90), 'dlhá veta sa delí');
+  assert.equal(long.map(row => row.text).join(' ').endsWith('orezania.'), true, 'nič sa nestratí');
 });
 
 test('render s titulkami a zistenie dĺžky videa', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {

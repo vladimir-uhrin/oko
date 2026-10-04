@@ -148,9 +148,10 @@ export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk
   // titulky (2026-10-04): väčšina ľudí pozerá bez zvuku — veta narácie v bezpečnej zóne dole
   const caption = captions.find(c => t >= c.from && t < c.to);
   if (caption) {
-    const rows = wrap(caption.text, 34, 2);
+    const rows = wrap(caption.text, 34, 3);
     const boxH = 28 + rows.length * 50;
-    const y = 1580 - boxH; // spodná hrana v bezpečnej zóne
+    // Nad spodným okrajom mapy (riadky pod mapou ostanú čitateľné), stred mapy so značkou voľný.
+    const y = MAP.y + MAP.h - 24 - boxH;
     const op = Math.min(fade(t, caption.from, 0.25), fade(caption.to, t, 0.25)).toFixed(2);
     parts.push(`<g opacity="${op}"><rect x="50" y="${y}" width="980" height="${boxH}" rx="14" fill="#070d14" fill-opacity="0.78"/>`
       + rows.map((row, i) => `<text x="540" y="${y + 50 + i * 50}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="600" fill="#ffffff">${escapeXml(row)}</text>`).join('')
@@ -192,7 +193,16 @@ export function narration(item) {
  */
 export function captionsFor(item, { start = 1.2, length = 8 } = {}) {
   const text = typeof item === 'string' ? item : narration(item);
-  const sentences = text.split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
+  // Dlhé vety sa delia po slovách na kúsky do ~90 znakov (3 riadky titulku), nič sa neoreže.
+  const sentences = text.split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean).flatMap(sentence => {
+    if (sentence.length <= 90) return [sentence];
+    const parts = []; let part = '';
+    for (const word of sentence.split(/\s+/)) {
+      if (part && (part + ' ' + word).length > 90) { parts.push(part); part = word; } else part = part ? `${part} ${word}` : word;
+    }
+    if (part) parts.push(part);
+    return parts;
+  });
   if (!sentences.length || length <= 0) return [];
   const total = sentences.reduce((sum, sentence) => sum + sentence.length, 0) || 1;
   let at = start;
