@@ -998,9 +998,15 @@ async function start() {
     setView(section('Admin', el('p', '', 'Najprv sa prihláste účtom vlastníka, potom sa sem vráťte.'), link));
     return;
   }
+  // O prístupe rozhoduje server (rola owner ALEBO overený e-mail z OKO_OWNER_EMAILS); ostatným dá 404.
   if (session.user.role !== 'owner') {
-    setView(section('Admin', el('p', '', 'Tento účet nemá prístup do administrácie.')));
-    return;
+    let allowed = false;
+    try { await api('/api/admin/overview'); allowed = true; }
+    catch (error) { if (error.status !== 404) { setView(notice(error.message)); return; } }
+    if (!allowed) {
+      setView(section('Admin', el('p', '', 'Tento účet nemá prístup do administrácie.')));
+      return;
+    }
   }
   csrf = session.csrfToken || '';
   who.textContent = session.user.email;
