@@ -503,7 +503,7 @@ async function init() {
       loadingScreen.classList.add('hidden');
       releaseStartupGate();
       startSharpStarfield();
-      // GA4 len so súhlasom a až po štarte (src/analytics.js; vypnuté, kým nie je info@okolive.sk).
+      // Súhlas s cookies + GA4 až po štarte (src/analytics.js; bez súhlasu GA bez cookies).
       try { initAnalytics({ t, crawler: crawlerVisit }); } catch (error) { console.warn('[analytics]', error); }
       // Reveal only after the loading cover has yielded. transitionend can be
       // absent under reduced motion, so a bounded fallback makes this reliable.

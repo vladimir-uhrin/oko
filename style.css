@@ -12985,38 +12985,387 @@ body.oko-map-focus #command-dock:not(:hover):not(:focus-within) { opacity: 0.42;
 .oko-ukr-tl-ctl-item.is-rp-arrow .oko-ukr-tl-ctl-sw { width: 16px; height: 9px; border: 0; border-radius: 0; background: #ff3b30; clip-path: polygon(0 35%, 58% 35%, 58% 0, 100% 50%, 58% 100%, 58% 65%, 0 65%); }
 .oko-ukr-tl-rp[hidden] { display: none; }
 
-/* Súhlas so štatistikou GA4 (2026-09-30, src/analytics.js): dole v strede, obe voľby rovnocenné. */
+/* Súhlas s cookies (CMP) — src/analytics.js. 2026-09-30 lišta GA4; 2026-10-04 plná správa súhlasu
+   v reči OKO („mission control" ako #first-run-launcher): pás s logom a stavom, skenovacia linka,
+   dlaždice kategórií, číslované riadky, mono tlačidlá. Odmietnuť a prijať vyzerajú rovnako
+   (EDPB: odmietnutie nesmie byť ťažšie ani menej viditeľné). */
+#oko-consent,
+#oko-consent-dialog {
+  --cc-accent: #36dcff;
+  --cc-line: rgba(54, 220, 255, 0.42);
+  --cc-soft: rgba(54, 220, 255, 0.14);
+  --cc-text: #e3f6fc;
+  --cc-dim: rgba(171, 210, 220, 0.72);
+  --cc-faint: rgba(171, 210, 220, 0.45);
+  --cc-ok: #5cf2a6;
+  --cc-warn: #ffc247;
+  --cc-no: #ff6b6b;
+  color: var(--cc-text);
+  font: 14px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+#oko-consent[hidden], #consent-open[hidden] { display: none; }
+
+/* Spoločná „karta" HUD. */
+#oko-consent,
+.oko-consent-panel {
+  box-sizing: border-box;
+  border: 1px solid var(--cc-line);
+  border-radius: 0.65rem;
+  background:
+    linear-gradient(145deg, rgba(10, 27, 37, 0.97), rgba(7, 13, 22, 0.96)),
+    rgba(7, 17, 25, 0.96);
+  box-shadow:
+    0 1.4rem 4.5rem rgba(0, 0, 0, 0.72),
+    0 0 2.5rem rgba(0, 212, 255, 0.09),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(28px) saturate(1.25);
+  -webkit-backdrop-filter: blur(28px) saturate(1.25);
+  overflow: hidden;
+}
 #oko-consent {
   position: fixed;
   left: 50%;
-  bottom: 18px;
+  bottom: 24px;
   transform: translateX(-50%);
   z-index: 10050;
-  width: min(560px, calc(100vw - 24px));
-  box-sizing: border-box;
-  padding: 14px 16px 12px;
-  border: 1px solid rgba(57, 208, 255, 0.35);
-  border-radius: 12px;
-  background: rgba(6, 16, 26, 0.94);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
-  color: #dff3fb;
-  font: 14px/1.45 Inter, "Segoe UI", system-ui, sans-serif;
-  backdrop-filter: blur(6px);
+  width: min(760px, calc(100vw - 24px));
+  animation: oko-consent-in 380ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-#oko-consent p { margin: 0 0 10px; }
-#oko-consent a { color: #39d0ff; }
-#oko-consent .oko-consent-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
-#oko-consent button {
-  min-width: 140px;
-  padding: 8px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(57, 208, 255, 0.55);
+@keyframes oko-consent-in {
+  from { opacity: 0; transform: translate(-50%, 16px) scale(0.985); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+.oko-consent-scan {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(54, 220, 255, 0.85), transparent);
+  box-shadow: 0 0 1rem rgba(54, 220, 255, 0.45);
+  pointer-events: none;
+}
+
+/* Pás hlavičky: logo · OKO · sekcia … stav. */
+.oko-consent-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(54, 220, 255, 0.16);
+  background: linear-gradient(90deg, rgba(54, 220, 255, 0.07), transparent 70%);
+}
+.oko-consent-brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.oko-consent-logo { width: 26px; height: 18px; object-fit: contain; filter: drop-shadow(0 0 6px rgba(0, 246, 255, 0.45)); }
+.oko-consent-mark {
+  font: 700 15px/1 var(--font-mono);
+  letter-spacing: 3px;
+  color: #fff;
+}
+.oko-consent-mark b { color: var(--cc-accent); font-weight: 700; text-shadow: 0 0 12px rgba(54, 220, 255, 0.6); }
+.oko-consent-section {
+  padding-left: 10px;
+  border-left: 1px solid rgba(54, 220, 255, 0.25);
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cc-accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oko-consent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cc-dim);
+}
+.oko-consent-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.oko-consent-status.is-pending { color: var(--cc-warn); }
+.oko-consent-status.is-pending i { animation: oko-consent-blink 1.6s ease-in-out infinite; }
+.oko-consent-status.is-ok { color: var(--cc-ok); }
+.oko-consent-status.is-no { color: var(--cc-dim); }
+@keyframes oko-consent-blink { 50% { opacity: 0.25; } }
+
+/* Telo lišty: text vľavo, dlaždice vpravo. */
+.oko-consent-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 16px 18px 14px;
+}
+.oko-consent-title {
+  margin: 0 0 6px;
+  font: 600 19px/1.25 var(--font-mono);
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+.oko-consent-text { margin: 0; color: var(--cc-dim); font-size: 13.5px; }
+.oko-consent-tiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 92px);
+  gap: 8px;
+}
+.oko-consent-tile {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 10px 6px 9px;
+  border: 1px solid rgba(171, 210, 220, 0.14);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.025);
+  text-align: center;
+}
+.oko-consent-icon { font-size: 20px; line-height: 1; }
+.oko-consent-tile .oko-consent-icon { margin-bottom: 3px; }
+.oko-consent-tile-name { font: 500 9px/1.2 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--cc-dim); }
+.oko-consent-tile-value { font: 700 11px/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.oko-consent-tile.is-ok { border-color: rgba(92, 242, 166, 0.28); }
+.oko-consent-tile.is-ok .oko-consent-icon, .oko-consent-tile.is-ok .oko-consent-tile-value { color: var(--cc-ok); }
+.oko-consent-tile.is-ask { border-color: rgba(54, 220, 255, 0.45); background: rgba(54, 220, 255, 0.07); box-shadow: inset 0 0 18px rgba(54, 220, 255, 0.08); }
+.oko-consent-tile.is-ask .oko-consent-icon, .oko-consent-tile.is-ask .oko-consent-tile-value { color: var(--cc-accent); }
+.oko-consent-tile.is-no .oko-consent-icon, .oko-consent-tile.is-no .oko-consent-tile-value { color: var(--cc-no); }
+
+/* Päta: odkaz na zásady vľavo, akcie vpravo. */
+.oko-consent-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px 14px;
+  border-top: 1px solid rgba(54, 220, 255, 0.12);
+  background: rgba(0, 0, 0, 0.18);
+}
+.oko-consent-policy {
+  flex: none;
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cc-dim) !important;
+  text-decoration: none !important;
+}
+.oko-consent-policy:hover { color: var(--cc-accent) !important; }
+.oko-consent-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.oko-consent-btn {
+  min-height: 40px;
+  min-width: 150px;
+  padding: 0 16px;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(54, 220, 255, 0.62);
+  background: linear-gradient(180deg, rgba(54, 220, 255, 0.2), rgba(54, 220, 255, 0.09));
+  color: #fff;
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: var(--cursor-pointer);
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast);
+}
+.oko-consent-btn:hover { border-color: var(--cc-accent); background: linear-gradient(180deg, rgba(54, 220, 255, 0.32), rgba(54, 220, 255, 0.14)); box-shadow: 0 0 18px rgba(54, 220, 255, 0.25); }
+.oko-consent-btn.is-ghost { min-width: 0; background: transparent; border-color: rgba(171, 210, 220, 0.28); color: var(--cc-text); }
+.oko-consent-btn.is-ghost:hover { border-color: rgba(171, 210, 220, 0.6); background: rgba(171, 210, 220, 0.07); box-shadow: none; }
+#oko-consent a:not(.oko-consent-policy),
+#oko-consent-dialog a { color: var(--cc-accent); text-decoration: underline; text-decoration-color: rgba(54, 220, 255, 0.4); text-underline-offset: 3px; }
+#oko-consent button:focus-visible,
+#oko-consent-dialog button:focus-visible,
+#oko-consent a:focus-visible,
+#oko-consent-dialog a:focus-visible {
+  outline: 2px solid var(--cc-accent);
+  outline-offset: 2px;
+}
+
+/* Druhá vrstva: nastavenia (modálny dialóg). */
+#oko-consent-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.oko-consent-backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(2, 8, 14, 0.55), rgba(2, 6, 10, 0.82));
+  backdrop-filter: blur(4px);
+  animation: oko-consent-fade 240ms ease both;
+}
+@keyframes oko-consent-fade { from { opacity: 0; } to { opacity: 1; } }
+.oko-consent-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
+  max-height: min(88vh, 820px);
+  outline: none;
+  animation: oko-consent-pop 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes oko-consent-pop {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.oko-consent-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -4px -6px -4px 4px;
+  border-radius: 0.4rem;
+  border: 1px solid transparent;
   background: transparent;
-  color: #dff3fb;
-  font: 600 13px/1.2 Inter, "Segoe UI", system-ui, sans-serif;
+  color: var(--cc-dim);
   cursor: var(--cursor-pointer);
 }
-#oko-consent button:last-child { background: rgba(57, 208, 255, 0.18); }
-#oko-consent button:hover, #oko-consent button:focus-visible { border-color: #39d0ff; outline: none; box-shadow: 0 0 0 2px rgba(57, 208, 255, 0.35); }
-/* Na mobile je dole lišta sekcií (#oko-appbar, 58 px) — súhlas sedí nad ňou. */
+.oko-consent-close:hover { color: #fff; border-color: rgba(171, 210, 220, 0.25); }
+.oko-consent-panel-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 18px 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(54, 220, 255, 0.35) transparent;
+}
+.oko-consent-panel-scroll .oko-consent-copy { margin-bottom: 14px; }
+.oko-consent-cats { display: grid; gap: 8px; margin-bottom: 10px; }
+.oko-consent-cat {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 4px;
+  padding: 12px 14px 12px 10px;
+  border: 1px solid rgba(171, 210, 220, 0.12);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.022);
+  transition: border-color var(--transition-fast);
+}
+.oko-consent-cat.is-toggle { border-color: rgba(54, 220, 255, 0.35); background: rgba(54, 220, 255, 0.045); }
+.oko-consent-cat-index {
+  padding-top: 2px;
+  font: 600 12px/1.4 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--cc-faint);
+}
+.oko-consent-cat.is-toggle .oko-consent-cat-index { color: var(--cc-accent); }
+.oko-consent-cat-head { display: flex; align-items: center; gap: 9px; }
+.oko-consent-cat-head .oko-consent-icon { font-size: 18px; color: var(--cc-dim); }
+.oko-consent-cat.is-always .oko-consent-cat-head .oko-consent-icon { color: var(--cc-ok); }
+.oko-consent-cat.is-toggle .oko-consent-cat-head .oko-consent-icon { color: var(--cc-accent); }
+.oko-consent-cat.is-unused .oko-consent-cat-head .oko-consent-icon { color: var(--cc-no); }
+.oko-consent-cat h3 {
+  flex: 1;
+  margin: 0;
+  font: 600 12px/1.3 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+}
+.oko-consent-cat p { margin: 6px 0 0; font-size: 13px; color: var(--cc-dim); }
+.oko-consent-badge {
+  flex: none;
+  padding: 5px 9px;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(171, 210, 220, 0.22);
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cc-dim);
+  white-space: nowrap;
+}
+.oko-consent-badge.is-always { color: var(--cc-ok); border-color: rgba(92, 242, 166, 0.4); background: rgba(92, 242, 166, 0.06); }
+.oko-consent-badge.is-unused { color: var(--cc-no); border-color: rgba(255, 107, 107, 0.35); background: rgba(255, 107, 107, 0.05); }
+/* Prepínač: skutočný checkbox (role=switch), len prekrytý. */
+.oko-consent-switch { position: relative; flex: none; display: inline-block; width: 46px; height: 24px; cursor: var(--cursor-pointer); }
+.oko-consent-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; z-index: 1; }
+.oko-consent-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(171, 210, 220, 0.32);
+  background: rgba(171, 210, 220, 0.08);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.oko-consent-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 0.2rem;
+  background: rgba(171, 210, 220, 0.75);
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.oko-consent-switch input:checked + .oko-consent-switch-track { background: rgba(54, 220, 255, 0.28); border-color: var(--cc-accent); }
+.oko-consent-switch input:checked + .oko-consent-switch-track::after { transform: translateX(22px); background: #fff; box-shadow: 0 0 10px rgba(54, 220, 255, 0.9); }
+.oko-consent-switch input:focus-visible + .oko-consent-switch-track { outline: 2px solid var(--cc-accent); outline-offset: 2px; }
+.oko-consent-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: 500 10px/1.4 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cc-accent);
+  cursor: var(--cursor-pointer);
+}
+.oko-consent-caret { display: inline-block; transition: transform var(--transition-fast); }
+.oko-consent-more[aria-expanded="true"] .oko-consent-caret { transform: rotate(90deg); }
+.oko-consent-table-wrap { margin-top: 8px; overflow-x: auto; border: 1px solid rgba(171, 210, 220, 0.1); border-radius: 0.4rem; }
+.oko-consent-table-wrap[hidden] { display: none; }
+.oko-consent-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.oko-consent-table th {
+  text-align: left;
+  padding: 7px 10px;
+  font: 500 9px/1.4 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cc-faint);
+  background: rgba(0, 0, 0, 0.22);
+}
+.oko-consent-table td { padding: 6px 10px; vertical-align: top; color: var(--cc-text); border-top: 1px solid rgba(171, 210, 220, 0.07); }
+.oko-consent-table code { font: 11px var(--font-mono); color: #bfeeff; white-space: nowrap; }
+.oko-consent-foot.is-dialog { flex-direction: column; align-items: stretch; gap: 10px; }
+.oko-consent-foot.is-dialog .oko-consent-actions { justify-content: stretch; }
+.oko-consent-foot.is-dialog .oko-consent-btn { flex: 1; }
+.oko-consent-meta { margin: 0; font: 9.5px/1.6 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--cc-faint); }
+
+/* Odkaz SÚKROMIE pod prepínačom jazyka. */
+#lang-switch #consent-open {
+  display: block;
+  margin: 6px 0 0 auto;
+  font-size: 10px;
+}
+#lang-switch #consent-open[hidden] { display: none; }
+
+/* Užšie okno: dlaždice pod text. */
+@media (max-width: 700px) {
+  .oko-consent-body { grid-template-columns: 1fr; gap: 12px; }
+  .oko-consent-tiles { grid-template-columns: repeat(3, 1fr); }
+  .oko-consent-foot { flex-direction: column-reverse; align-items: stretch; }
+  .oko-consent-policy { text-align: center; }
+}
+/* Mobil: spodný list, tlačidlá na celú šírku. */
+@media (max-width: 560px) {
+  #oko-consent { bottom: 12px; }
+  .oko-consent-strip .oko-consent-status { display: none; }
+  .oko-consent-title { font-size: 17px; }
+  .oko-consent-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .oko-consent-actions .oko-consent-btn { min-width: 0; padding: 0 8px; letter-spacing: 0.06em; }
+  .oko-consent-actions .is-ghost { grid-column: 1 / -1; order: 3; }
+  #oko-consent-dialog { place-items: end center; padding: 0; }
+  .oko-consent-panel { max-height: 90vh; border-radius: 0.8rem 0.8rem 0 0; }
+  .oko-consent-foot.is-dialog { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+}
 body.oko-mobile #oko-consent { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+@media (prefers-reduced-motion: reduce) {
+  #oko-consent, .oko-consent-panel, .oko-consent-backdrop, .oko-consent-status.is-pending i { animation: none; }
+}

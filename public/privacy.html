@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ochrana súkromia — OKO (okolive.sk)</title>
-  <meta name="description" content="Aké údaje OKO (okolive.sk) spracúva, prečo, ako dlho a aké máte práva. Google Analytics len so súhlasom." />
+  <meta name="description" content="Aké údaje OKO (okolive.sk) spracúva, prečo, ako dlho a aké máte práva. Cookies Google Analytics len so súhlasom." />
   <link rel="canonical" href="https://okolive.sk/privacy.html" />
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <meta name="theme-color" content="#040a10" />
@@ -19,6 +19,8 @@
     .muted { color: rgba(223, 243, 251, 0.7); font-size: 14px; }
     .card { border: 1px solid rgba(57, 208, 255, 0.3); border-radius: 10px; padding: 12px 14px; background: rgba(6, 16, 26, 0.7); }
     button { padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(57, 208, 255, 0.55); background: rgba(57, 208, 255, 0.15); color: #dff3fb; font: 600 14px/1.2 Inter, "Segoe UI", system-ui, sans-serif; cursor: pointer; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    button[aria-pressed="true"] { border-color: #39d0ff; background: rgba(57, 208, 255, 0.32); }
     hr { border: 0; border-top: 1px solid rgba(57, 208, 255, 0.2); margin: 40px 0; }
     ul { padding-left: 20px; }
   </style>
@@ -29,10 +31,10 @@
 
   <section lang="sk">
     <h1>Ochrana súkromia</h1>
-    <p class="muted">Platí od 30. 9. 2026 · okolive.sk</p>
+    <p class="muted">Platí od 30. 9. 2026 · aktualizované 4. 10. 2026 · okolive.sk</p>
 
     <h2>Kto za OKO zodpovedá</h2>
-    <p>Prevádzkovateľ: <strong>Vladimír Uhrin</strong>, Slovensko. Kontakt: <a href="mailto:info@okolive.sk">info@okolive.sk</a>.</p>
+    <p>Prevádzkovateľ: <strong>Vladimír Uhrin</strong>, Slovensko. Kontakt: <a href="mailto:vladimir_uhrin@yahoo.com">vladimir_uhrin@yahoo.com</a>.</p>
 
     <h2>Čo spracúvame a prečo</h2>
     <h3>1. Prevádzka stránky</h3>
@@ -40,30 +42,30 @@
     <h3>2. Mapy a živé dáta</h3>
     <p>Prehliadač si mapové dlaždice a 3D podklady sťahuje priamo od ich poskytovateľov (Google Maps Platform, Cesium ion, OpenStreetMap a ďalší, ktorí sú uvedení pri mape). Tí pritom vidia vašu IP adresu ako pri každom obrázku z internetu. Živé dáta o lietadlách a lodiach ide cez server OKO a o vás nič neobsahujú.</p>
     <h3>3. Účet (len ak si ho vytvoríte)</h3>
-    <p>E-mail, zobrazované meno, heslo (len ako bezpečnostný odtlačok, nie čitateľne), prihlásenia (relácie), vaše nastavenia a sledované lety. Pri prihlásení cez Google alebo GitHub aj identifikátor a e-mail z tejto služby. Bezpečnostné udalosti účtu (napr. zmena hesla) mažeme po 90 dňoch. Účel: poskytnutie účtu, právny základ: plnenie zmluvy (poskytnutie účtu). Údaje si môžete stiahnuť v Centre účtu; zmazanie účtu vybavíme na požiadanie cez <a href="mailto:info@okolive.sk">info@okolive.sk</a>.</p>
+    <p>E-mail, zobrazované meno, heslo (len ako bezpečnostný odtlačok, nie čitateľne), prihlásenia (relácie), vaše nastavenia a sledované lety. Pri prihlásení cez Google alebo GitHub aj identifikátor a e-mail z tejto služby. Prihlásenie drží nevyhnutná cookie <code>__Host-oko_session</code> (20 min – 7 dní), pri prihlásení cez Google alebo GitHub aj <code>__Host-oko_oauth</code> (10 min). Bezpečnostné udalosti účtu (napr. zmena hesla) mažeme po 90 dňoch. Účel: poskytnutie účtu, právny základ: plnenie zmluvy (poskytnutie účtu). Údaje si môžete stiahnuť v Centre účtu; zmazanie účtu vybavíme na požiadanie cez <a href="mailto:vladimir_uhrin@yahoo.com">vladimir_uhrin@yahoo.com</a>.</p>
     <h3>4. Nastavenia v prehliadači</h3>
     <p>Jazyk, zapnuté vrstvy, pohľad a vašu voľbu o štatistike si OKO pamätá v úložisku prehliadača (localStorage). Tieto údaje neopúšťajú váš počítač a sú nevyhnutné na to, aby stránka fungovala tak, ako ste ju nastavili.</p>
-    <h3>5. Štatistika návštev — Google Analytics 4 (len so súhlasom)</h3>
-    <p>Ak to povolíte v lište, meriame anonymnú štatistiku: ktoré stránky, z akého typu zariadenia, približne odkiaľ (krajina/mesto) a ako dlho. Používajú sa cookies <code>_ga</code> a <code>_ga_*</code> (najviac 2 roky). Google Analytics v EÚ neukladá IP adresy. Reklamné funkcie a Google signals sú vypnuté. Údaje sa uchovávajú 2 mesiace. Spracovateľ: Google Ireland Limited; prípadný prenos do USA prebieha podľa rámca EÚ – USA pre ochranu údajov (Data Privacy Framework). Právny základ: váš súhlas. Bez súhlasu sa Google Analytics vôbec nenačíta.</p>
+    <h3>5. Štatistika návštev — Google Analytics 4 (cookies len so súhlasom)</h3>
+    <p>Meriame štatistiku návštev: ktoré stránky, z akého typu zariadenia, približne odkiaľ (krajina/mesto) a ako dlho. Bez súhlasu Google Analytics neukladá žiadne cookies a dostáva len anonymné signály bez identifikátora (Google Consent Mode v2, rozšírený režim), z ktorých odhaduje návštevnosť. Ak to povolíte v lište, používajú sa aj cookies <code>_ga</code> a <code>_ga_*</code> (najviac 2 roky). Google Analytics v EÚ neukladá IP adresy. Reklamné funkcie a Google signals sú vypnuté. Údaje sa uchovávajú 2 mesiace. Spracovateľ: Google Ireland Limited; prípadný prenos do USA prebieha podľa rámca EÚ – USA pre ochranu údajov (Data Privacy Framework). Právny základ: pre cookies váš súhlas, pre signály bez cookies oprávnený záujem na meraní návštevnosti. Reklamné úložisko a signály (ad_storage, ad_user_data, ad_personalization) sú vždy zamietnuté. Voľba platí 12 mesiacov; signál Global Privacy Control rešpektujeme ako odmietnutie.</p>
     <div class="card">
       <p id="consent-state-sk">Vaša voľba: …</p>
-      <button type="button" data-reset-consent>Zmeniť voľbu o štatistike</button>
+      <div class="actions"><button type="button" data-consent-set="denied">Odmietnuť štatistiku</button><button type="button" data-consent-set="granted">Povoliť štatistiku</button></div>
     </div>
     <h3>6. Zdieľané snímky</h3>
     <p>Keď vytvoríte krátky odkaz na zdieľanie (/s/…), uloží sa obrázok pohľadu a jeho nastavenia. Neobsahujú údaje o vás.</p>
 
     <h2>Vaše práva</h2>
-    <p>Máte právo na prístup k údajom, opravu, vymazanie, obmedzenie spracúvania, prenosnosť a námietku, a súhlas so štatistikou môžete kedykoľvek odvolať (tlačidlo vyššie). Napíšte na <a href="mailto:info@okolive.sk">info@okolive.sk</a>. Máte aj právo podať sťažnosť na <a href="https://dataprotection.gov.sk/">Úrad na ochranu osobných údajov SR</a>.</p>
+    <p>Máte právo na prístup k údajom, opravu, vymazanie, obmedzenie spracúvania, prenosnosť a námietku, a súhlas so štatistikou môžete kedykoľvek odvolať (tlačidlá vyššie alebo SÚKROMIE vpravo hore v OKU). Napíšte na <a href="mailto:vladimir_uhrin@yahoo.com">vladimir_uhrin@yahoo.com</a>. Máte aj právo podať sťažnosť na <a href="https://dataprotection.gov.sk/">Úrad na ochranu osobných údajov SR</a>.</p>
   </section>
 
   <hr />
 
   <section lang="en">
     <h1>Privacy</h1>
-    <p class="muted">Effective 30 Sep 2026 · okolive.sk</p>
+    <p class="muted">Effective 30 Sep 2026 · updated 4 Oct 2026 · okolive.sk</p>
 
     <h2>Who is responsible</h2>
-    <p>Controller: <strong>Vladimír Uhrin</strong>, Slovakia. Contact: <a href="mailto:info@okolive.sk">info@okolive.sk</a>.</p>
+    <p>Controller: <strong>Vladimír Uhrin</strong>, Slovakia. Contact: <a href="mailto:vladimir_uhrin@yahoo.com">vladimir_uhrin@yahoo.com</a>.</p>
 
     <h2>What we process and why</h2>
     <h3>1. Running the site</h3>
@@ -71,39 +73,71 @@
     <h3>2. Maps and live data</h3>
     <p>Your browser downloads map tiles and 3D imagery directly from their providers (Google Maps Platform, Cesium ion, OpenStreetMap and others credited on the map), who see your IP address as with any image on the web. Live aircraft and ship data come through the OKO server and contain nothing about you.</p>
     <h3>3. Account (only if you create one)</h3>
-    <p>E-mail, display name, password (stored only as a secure hash), sign-in sessions, your settings and followed flights; with Google or GitHub sign-in also the identifier and e-mail from that service. Account security events (e.g. password change) are deleted after 90 days. Purpose: providing the account; legal basis: contract. You can export your data in the Account centre; to delete the account, write to <a href="mailto:info@okolive.sk">info@okolive.sk</a>.</p>
+    <p>E-mail, display name, password (stored only as a secure hash), sign-in sessions, your settings and followed flights; with Google or GitHub sign-in also the identifier and e-mail from that service. Sign-in uses the strictly necessary cookie <code>__Host-oko_session</code> (20 min – 7 days), with Google or GitHub sign-in also <code>__Host-oko_oauth</code> (10 min). Account security events (e.g. password change) are deleted after 90 days. Purpose: providing the account; legal basis: contract. You can export your data in the Account centre; to delete the account, write to <a href="mailto:vladimir_uhrin@yahoo.com">vladimir_uhrin@yahoo.com</a>.</p>
     <h3>4. Settings in your browser</h3>
     <p>Language, enabled layers, the view and your statistics choice are remembered in your browser's storage (localStorage). They never leave your computer and are necessary for the site to work as you set it up.</p>
-    <h3>5. Visit statistics — Google Analytics 4 (consent only)</h3>
-    <p>If you allow it in the banner, we measure anonymous statistics: which pages, what type of device, approximately where from (country/city) and for how long. Cookies <code>_ga</code> and <code>_ga_*</code> (up to 2 years). Google Analytics does not store IP addresses in the EU; advertising features and Google signals are off; data are kept for 2 months. Processor: Google Ireland Limited; any transfer to the USA follows the EU–US Data Privacy Framework. Legal basis: your consent. Without consent Google Analytics is not loaded at all.</p>
+    <h3>5. Visit statistics — Google Analytics 4 (cookies only with consent)</h3>
+    <p>We measure visit statistics: which pages, what type of device, approximately where from (country/city) and for how long. Without consent Google Analytics stores no cookies and receives only anonymous pings without an identifier (Google Consent Mode v2, advanced mode) from which it estimates traffic. If you allow it in the banner, the cookies <code>_ga</code> and <code>_ga_*</code> are also used (up to 2 years). Google Analytics does not store IP addresses in the EU; advertising features and Google signals are off; data are kept for 2 months. Processor: Google Ireland Limited; any transfer to the USA follows the EU–US Data Privacy Framework. Legal basis: your consent for cookies, legitimate interest in measuring traffic for cookieless pings. Advertising storage and signals (ad_storage, ad_user_data, ad_personalization) are always denied. Your choice is valid for 12 months; a Global Privacy Control signal is treated as declining.</p>
     <div class="card">
       <p id="consent-state-en">Your choice: …</p>
-      <button type="button" data-reset-consent>Change statistics choice</button>
+      <div class="actions"><button type="button" data-consent-set="denied">Decline statistics</button><button type="button" data-consent-set="granted">Allow statistics</button></div>
     </div>
     <h3>6. Shared snapshots</h3>
     <p>When you create a short share link (/s/…), an image of the view and its settings are stored. They contain nothing about you.</p>
 
     <h2>Your rights</h2>
-    <p>You have the right of access, rectification, erasure, restriction, portability and objection, and you can withdraw consent to statistics at any time (button above). Write to <a href="mailto:info@okolive.sk">info@okolive.sk</a>. You may also lodge a complaint with the <a href="https://dataprotection.gov.sk/">Office for Personal Data Protection of the Slovak Republic</a>.</p>
+    <p>You have the right of access, rectification, erasure, restriction, portability and objection, and you can withdraw consent to statistics at any time (buttons above or PRIVACY in the top right corner of OKO). Write to <a href="mailto:vladimir_uhrin@yahoo.com">vladimir_uhrin@yahoo.com</a>. You may also lodge a complaint with the <a href="https://dataprotection.gov.sk/">Office for Personal Data Protection of the Slovak Republic</a>.</p>
   </section>
 </main>
 <script>
-  // Tá istá voľba ako lišta v appke (src/analytics.js, kľúč oko.consent.v1).
+  // Tá istá voľba ako lišta v appke (src/analytics.js: kľúč oko.consent.v2, verzia zásad, 12 mesiacov).
   (function () {
-    var KEY = 'oko.consent.v1';
-    function read() { try { var v = JSON.parse(localStorage.getItem(KEY) || 'null'); return v && v.analytics; } catch (e) { return null; } }
+    var KEY = 'oko.consent.v2';
+    var LEGACY = 'oko.consent.v1';
+    var POLICY = '2026-10-04';
+    var MAX_AGE = 365 * 86400000;
+    function parse(raw, legacy) {
+      try {
+        var v = JSON.parse(raw || 'null');
+        if (!v || (v.analytics !== 'granted' && v.analytics !== 'denied')) return null;
+        var age = Date.now() - Date.parse(v.at);
+        if (!(age > -86400000 && age <= MAX_AGE)) return null;
+        if (!legacy && v.policy !== POLICY) return null;
+        return v.analytics;
+      } catch (e) { return null; }
+    }
+    function read() {
+      try { return parse(localStorage.getItem(KEY), false) || parse(localStorage.getItem(LEGACY), true); } catch (e) { return null; }
+    }
+    function dropGaCookies() {
+      var labels = location.hostname.split('.');
+      document.cookie.split(';').forEach(function (part) {
+        var name = part.split('=')[0].trim();
+        if (!/^_ga$|^_ga_[A-Za-z0-9]+$|^_gid$|^_gat(_.*)?$/.test(name)) return;
+        var dead = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+        document.cookie = dead;
+        for (var i = 0; i < labels.length - 1; i++) document.cookie = dead + '; domain=.' + labels.slice(i).join('.');
+      });
+    }
     function render() {
       var c = read();
       var sk = c === 'granted' ? 'štatistika povolená' : c === 'denied' ? 'štatistika odmietnutá' : 'zatiaľ bez voľby';
       var en = c === 'granted' ? 'statistics allowed' : c === 'denied' ? 'statistics declined' : 'no choice yet';
       document.getElementById('consent-state-sk').textContent = 'Vaša voľba: ' + sk + '.';
       document.getElementById('consent-state-en').textContent = 'Your choice: ' + en + '.';
+      document.querySelectorAll('[data-consent-set]').forEach(function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-consent-set') === c));
+      });
     }
-    document.querySelectorAll('[data-reset-consent]').forEach(function (b) {
+    document.querySelectorAll('[data-consent-set]').forEach(function (b) {
       b.addEventListener('click', function () {
-        try { localStorage.removeItem(KEY); } catch (e) { /* súkromné okno */ }
+        var choice = b.getAttribute('data-consent-set');
+        try {
+          localStorage.setItem(KEY, JSON.stringify({ v: 2, analytics: choice, ads: 'denied', at: new Date().toISOString(), policy: POLICY }));
+          localStorage.removeItem(LEGACY);
+        } catch (e) { /* súkromné okno */ }
+        if (choice === 'denied') dropGaCookies();
         render();
-        alert('Voľba je zrušená — pri ďalšej návšteve OKO sa znova spýtame. / Choice cleared — OKO will ask again on your next visit.');
       });
     });
     render();
