@@ -12027,8 +12027,41 @@ body.oko-mobile #title-bar .title-logo { width: 30px; }
    heslo je skryté, podpis ostáva drobne pod OKO BETA. */
 body.oko-mobile #title-bar .title-credit { margin-top: 3px; gap: 6px; font-size: 7.5px; line-height: 10px; letter-spacing: 2px; }
 body.oko-mobile #title-bar .title-credit-rule { width: 14px; }
-body.oko-mobile #top-center-actions { top: 10px; }
-body.oko-mobile #lang-switch { top: 14px; right: 12px; }
+/* Horná lišta (2026-10-04): tmavý pás ako spodná lišta sekcií, v ňom všetko, čo predtým plávalo
+   nad mapou. 1. riadok: logo + podpis vľavo, SK · EN vpravo. 2. riadok: ikony akcií vľavo,
+   TÉMY a SÚKROMIE vpravo. Výška = --oko-topbar-h (karty a lišta akcií pod kartou sa jej vyhýbajú). */
+#oko-topbar { display: none; }
+body.oko-mobile { --oko-topbar-h: 96px; }
+body.oko-mobile #oko-topbar {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--oko-topbar-h) + env(safe-area-inset-top, 0px));
+  z-index: 99;
+  pointer-events: none;
+  background: rgba(6, 12, 18, 0.94);
+  border-bottom: 1px solid rgba(64, 200, 230, 0.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+body.oko-mobile #title-bar .title-glow { display: none; }
+body.oko-mobile #top-center-actions { top: 52px; left: 12px; right: auto; transform: none; }
+body.oko-mobile #lang-switch { top: 10px; right: 12px; }
+body.oko-mobile #lang-switch #topics-link,
+body.oko-mobile #lang-switch #consent-open {
+  position: fixed;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  top: 52px;
+  text-shadow: none;
+}
+body.oko-mobile #lang-switch #consent-open { right: 12px; padding: 0 2px; }
+body.oko-mobile #lang-switch #topics-link { right: 106px; }
+body.oko-mobile #global-loading-status { top: calc(var(--oko-topbar-h) + 8px); }
 /* Mobil na výšku (2026-10-04, vlastník: „prekontroluj mobil friendly"): atribúcia Cesium/Google
    má na jednom riadku ~440 px — na telefóne 360–390 px vytŕčala a „Data attribution" bol mimo
    obrazovky. Zalamovať nesmie (rozloženie doku počíta s 18 px), tak sa drží v šírke okna
@@ -12058,12 +12091,6 @@ body.oko-mobile #cesium-credits .cesium-widget-credits {
   }
 }
 body.oko-mobile #lang-switch button { min-width: 30px; min-height: 30px; }
-/* Úzky telefón: ikony akcií v strede by ležali cez OKO BETA a podpis autora (tie siahajú po ~181 px,
-   ikony začínajú pri w/2 − 98) — idú do druhého riadku, stav načítania pod ne. */
-@media (max-width: 579px) {
-  body.oko-mobile #top-center-actions { top: 52px; }
-  body.oko-mobile #global-loading-status { top: 96px; }
-}
 
 /* --- dok, toast, kokpit nad spodnou lištou ------------------------------ */
 /* Zdvih doku a kreditov Cesium nad lištu nastavuje mobileShell.js inline

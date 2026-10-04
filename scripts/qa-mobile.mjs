@@ -73,6 +73,12 @@ function measurePage() {
     swipe: box(document.querySelector('.card-swipe-zone')),
     topics: box(document.getElementById('topics-link')),
     topicsHref: document.getElementById('topics-link')?.getAttribute('href') ?? null,
+    topbar: box(document.getElementById('oko-topbar')),
+    title: box(document.querySelector('#title-bar h1')),
+    titleCredit: box(document.querySelector('#title-bar .title-credit')),
+    actions: box(document.getElementById('top-center-actions')),
+    langOptions: box(document.querySelector('#lang-switch .lang-switch-options')),
+    consentOpen: box(document.getElementById('consent-open')),
   };
 }
 
@@ -119,6 +125,20 @@ for (const [W, H] of SIZES) {
   if (!m.topics || !inView(m.topics, m)) fail(`odkaz Témy chýba alebo je mimo okna ${JSON.stringify(m.topics)}`);
   if (!['/sk/', '/en/'].includes(m.topicsHref)) fail(`odkaz Témy vedie na ${m.topicsHref}`);
   if (m.dockLabelsClipped.length) fail(`orezané popisy doku: ${m.dockLabelsClipped.join(', ')}`);
+  // Horná lišta: všetko, čo predtým plávalo nad mapou, je celé v nej a nič sa neprekrýva.
+  const topItems = ['title', 'titleCredit', 'actions', 'langOptions', 'topics', 'consentOpen'];
+  if (!m.topbar) fail('chýba horná lišta');
+  else {
+    for (const key of topItems) {
+      if (!m[key]) fail(`v hornej lište chýba ${key}`);
+      else if (m[key].t < m.topbar.t || m[key].b > m.topbar.b || !inView(m[key], m)) fail(`${key} mimo hornej lišty ${JSON.stringify(m[key])} (lišta ${m.topbar.t}–${m.topbar.b})`);
+    }
+    for (let i = 0; i < topItems.length; i += 1) {
+      for (let j = i + 1; j < topItems.length; j += 1) {
+        if (overlap(m[topItems[i]], m[topItems[j]])) fail(`v hornej lište sa prekrýva ${topItems[i]} a ${topItems[j]}`);
+      }
+    }
+  }
   console.log(`  dok: hlas ${m.voice ? m.voice.r - m.voice.l : '-'} px (${m.voiceStatus}), atribúcia ${m.credit ? `${m.credit.t}–${m.credit.b}` : '-'}`);
 
   // 2. karta lietadla
@@ -158,15 +178,29 @@ for (const [W, H] of SIZES) {
     m = await page.evaluate(measurePage);
     if (!m.swipe) fail('nad kartou chýba plocha na potiahnutie');
     else {
-      const x = Math.round((m.swipe.l + m.swipe.r) / 2);
-      let y = m.swipe.t + 30;
-      const touch = await page.touchscreen.touchStart(x, y);
-      for (let i = 0; i < 6; i += 1) { y += 20; await touch.move(x, y); await sleep(16); }
-      await touch.end();
-      await sleep(2500);
-      const after = await page.evaluate(measurePage);
-      await page.screenshot({ path: `${OUT}/po-potiahnuti-${tag}.png` });
-      if (after.close || after.subj) fail('potiahnutie nadol kartu nezavrelo');
+      // Plocha sa hýbe s kartou — zmeraj ju tesne pred dotykom a zisti, čo leží pod prstom.
+      const probe = await page.evaluate(() => {
+        const z = document.querySelector('.card-swipe-zone');
+        const r = z?.getBoundingClientRect();
+        if (!r || z.hidden) return null;
+        const x = Math.round(r.left + r.width / 2);
+        const y = Math.round(r.top + Math.min(30, r.height / 3));
+        const hit = document.elementFromPoint(x, y);
+        return { x, y, hit: hit?.className || hit?.id || hit?.tagName };
+      });
+      if (!probe) fail('plocha na potiahnutie zmizla pred dotykom');
+      else {
+        if (probe.hit !== 'card-swipe-zone' && probe.hit !== 'card-swipe-grabber') console.log(`  pod prstom je ${probe.hit}`);
+        const x = probe.x;
+        let y = probe.y;
+        const touch = await page.touchscreen.touchStart(x, y);
+        for (let i = 0; i < 6; i += 1) { y += 20; await touch.move(x, y); await sleep(16); }
+        await touch.end();
+        await sleep(2500);
+        const after = await page.evaluate(measurePage);
+        await page.screenshot({ path: `${OUT}/po-potiahnuti-${tag}.png` });
+        if (after.close || after.subj) fail('potiahnutie nadol kartu nezavrelo');
+      }
     }
   }
   await page.close();

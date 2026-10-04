@@ -87,7 +87,10 @@ export function installCardActionBar(viewer, {
         .map((el) => el.getBoundingClientRect())
         .filter((r) => r.height > 0 && r.width > 0)
       : [];
-    const placed = card ? cardActionBarPlacement(card, attached, { w: view?.innerWidth || 0, h: view?.innerHeight || 0 }) : null;
+    // Nad kartu len pod hornú lištu (mobil, #oko-topbar), inak pod logo a ikony.
+    const topbar = card ? doc.getElementById('oko-topbar')?.getBoundingClientRect?.() : null;
+    const topSafe = topbar && topbar.height > 0 ? Math.max(CARD_ACTION_TOP_SAFE_PX, Math.round(topbar.bottom) + CARD_ACTION_GAP_PX) : CARD_ACTION_TOP_SAFE_PX;
+    const placed = card ? cardActionBarPlacement(card, attached, { w: view?.innerWidth || 0, h: view?.innerHeight || 0 }, { topSafe }) : null;
     if (!placed) {
       for (const b of buttons) clearInline(b);
       return;

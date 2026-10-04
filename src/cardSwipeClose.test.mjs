@@ -73,10 +73,24 @@ test('ťah nadol o 80 px (alebo rýchly krátky) kartu zavrie, krátky pomalý n
   fire(zone, 'touchend', 240);
   assert.equal(closed, 2, '40 px za 60 ms (rýchly švih) = zavrieť');
 
+  // Karta počas ťahu na chvíľu zmizne (preskok na iné miesto) — gesto sa nesmie zrušiť.
+  let flicker = true;
+  const ui2 = installCardSwipeClose({}, { doc, cardRect: () => (flicker ? null : { x: 24, y: 180, w: 342, h: 130 }), onClose: () => { closed += 1; }, now: () => clock });
+  flicker = false;
+  ui2.sync();
+  clock = 0;
+  fire(ui2.element, 'touchstart', 200);
+  flicker = true;
+  ui2.sync();
+  assert.equal(ui2.element.hidden, false, 'počas ťahu plocha ostáva');
+  clock = 300;
+  fire(ui2.element, 'touchend', 300);
+  assert.equal(closed, 3, 'ťah dokončený aj cez preskok karty');
+
   ui.sync();
   fire(zone, 'touchstart', 300);
   fire(zone, 'touchend', 200);
-  assert.equal(closed, 2, 'ťah nahor nezatvára');
+  assert.equal(closed, 3, 'ťah nahor nezatvára');
   ui.destroy();
   assert.equal(zone.removed, true);
 });

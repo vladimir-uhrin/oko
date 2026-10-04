@@ -114,6 +114,8 @@ export function isWorldOverlayLaneSuppressed(laneId) {
  * backdrop-filled cockpit windows survive as exclusions.
  */
 export const WORLD_OVERLAY_OCCLUDER_SELECTORS = Object.freeze([
+  // Horná lišta na mobile (2026-10-04): pás 96 px — karty pod ňu nepatria (na počítači display: none).
+  '#oko-topbar',
   '#title-bar',
   '#style-indicator',
   '#top-center-actions',

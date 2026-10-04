@@ -42,11 +42,13 @@ export function installCardSwipeClose(viewer, {
   }
 
   function sync() {
+    // Počas ťahu plochu nehýbať ani neskrývať: vysoká karta pri preskoku na iné miesto na chvíľu
+    // zbledne (rect null) — skrytie by gesto zrušilo (qa:mobile 412 px, 2026-10-04).
+    if (start) return;
     let rect = null;
     try { rect = isMobile() ? cardRect() : null; } catch { rect = null; }
     if (!rect) {
       if (!zone.hidden) zone.hidden = true;
-      start = null;
       return;
     }
     if (zone.hidden) zone.hidden = false;
