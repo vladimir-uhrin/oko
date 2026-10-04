@@ -27,6 +27,11 @@ export const DEFAULT_APPBAR_HEIGHT_PX = 58;
 export const DOCK_LIFT_GAP_PX = 8;
 /** Výška zbaleného doku (záloha, keď sa nedá zmerať). */
 export const DEFAULT_DOCK_HEIGHT_PX = 62;
+/**
+ * Hlasová pilulka presahuje nad dok (style.css: margin-top −0.97rem ≈ 15,5 px). Atribúcia sa ráta
+ * od vrchu doku, tak sa o presah dotýkala pilulky (naživo 2026-10-04, scripts/qa-mobile.mjs).
+ */
+export const VOICE_OVERHANG_PX = 16;
 
 /**
  * Sekcie spodnej lišty. `panelIds` sa presunú do výsuvu v tomto poradí,
@@ -273,7 +278,7 @@ export function createMobileShell({
     const credits = doc.getElementById?.('cesium-credits');
     if (credits?.style) {
       const dockHeight = Number(dock?.offsetHeight) || DEFAULT_DOCK_HEIGHT_PX;
-      credits.style.bottom = lift > 0 ? `${lift + dockHeight + DOCK_LIFT_GAP_PX}px` : '';
+      credits.style.bottom = lift > 0 ? `${lift + dockHeight + VOICE_OVERHANG_PX + DOCK_LIFT_GAP_PX}px` : '';
     }
     if (!mode.mobile && active) close();
     try { suppressLane?.('ambient-card', mode.mobile); } catch { /* overlay host nie je pripravený */ }

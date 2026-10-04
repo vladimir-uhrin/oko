@@ -12057,6 +12057,10 @@ body.oko-mobile #command-dock .location-toolbar-label { gap: 0; }
 .dock-label-short { display: none; }
 body.oko-mobile #command-dock .panel-title,
 body.oko-mobile #command-dock .location-toolbar-label { flex-direction: column; align-items: center; }
+/* „Poloha“ (38 px) sa v 28 px štítku orezávala na „OLOH/“ (scripts/qa-mobile.mjs, 2026-10-04) — krátky
+   popis smie presahovať štítok, dlhé názvy sú na mobile skryté (display: none vyššie). */
+body.oko-mobile #command-dock .panel-title,
+body.oko-mobile #command-dock .location-toolbar-label { overflow: visible; }
 body.oko-mobile #command-dock .dock-label-short {
   display: block;
   margin-top: 4px;
@@ -12068,6 +12072,16 @@ body.oko-mobile #command-dock .dock-label-short {
   white-space: nowrap;
   color: var(--text-dim);
 }
+/* Hlas na mobile (2026-10-04, návrh „hlasová pilulka je najväčší prvok dole, väčšina ju nepoužije"):
+   kým je hlas vypnutý (data-status idle), ostane z pilulky len okrúhly mikrofón — nápis, STD,
+   cena, vizualizér a stav sa ukážu po ťuknutí (connecting/listening/executing/error). Dok sa
+   zúži cez --dock-voice-width, takže Poloha a Štýl majú celé popisy. */
+body.oko-mobile #command-dock:has(> #gev-voice-control[data-status='idle']) { --dock-voice-width: 4.4rem; }
+body.oko-mobile #command-dock > #gev-voice-control[data-status='idle'] { grid-template-columns: 1fr; }
+body.oko-mobile #command-dock > #gev-voice-control[data-status='idle'] .gev-voice-heading,
+body.oko-mobile #command-dock > #gev-voice-control[data-status='idle'] .gev-voice-visualizer,
+body.oko-mobile #command-dock > #gev-voice-control[data-status='idle'] .gev-voice-readout { display: none; }
+body.oko-mobile #command-dock > #gev-voice-control[data-status='idle'] #gev-voice-button { grid-column: 1; justify-self: center; }
 body.oko-mobile #toast { bottom: calc(var(--oko-dock-lift) + 76px); }
 body.oko-mobile #view-switcher { bottom: calc(var(--oko-dock-lift) + 4px); }
 body.oko-mobile #cockpit-entry { bottom: calc(var(--oko-dock-lift) + 76px); }
