@@ -130,6 +130,48 @@ export function cookieDeletionStrings(name, host = '') {
   return out;
 }
 
+/**
+ * Udalosti, ktoré OKO meria (2026-10-04, vlastník: „merať, čo ľudia používajú"). Len názvy funkcií
+ * a ich id — nikdy poloha na glóbuse, volací znak ani nič o človeku. Iný názov sa neodošle.
+ */
+export const TRACKED_EVENTS = Object.freeze({
+  layer_toggle: ['layer_id', 'enabled'],
+  card_open: ['kind'],
+  share_create: ['short_link'],
+  scene_open: ['scene_type', 'scene_id'],
+  mobile_section: ['section'],
+});
+
+/** Udalosť → bezpečné parametre (pure): len povolené kľúče, krátke reťazce/čísla/bool, inak null. */
+export function eventPayload(name, params = {}) {
+  const allowed = TRACKED_EVENTS[name];
+  if (!allowed) return null;
+  const out = {};
+  for (const key of allowed) {
+    const value = params?.[key];
+    if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) out[key] = value;
+    else if (typeof value === 'string' && value) out[key] = value.slice(0, 64);
+  }
+  return out;
+}
+
+/**
+ * Pošli udalosť do GA4. Nič nerobí, kým gtag.js nie je načítaný (pred štartom, mimo okolive.sk,
+ * roboty) — preto sa nepočíta ani obnova stavu z odkazu pri štarte. Bez súhlasu ide v Consent Mode
+ * bez cookies, ako zobrazenie stránky.
+ */
+export function trackEvent(name, params, win = globalThis.window) {
+  try {
+    if (!win?.__okoGtagLoaded || typeof win.gtag !== 'function') return false;
+    const payload = eventPayload(name, params);
+    if (!payload) return false;
+    win.gtag('event', name, payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Je v adrese `consent=preview`? (pure) */
 export function isConsentPreview(search = '') {
   return /(?:^|[?&])consent=preview(?:&|$)/.test(String(search));

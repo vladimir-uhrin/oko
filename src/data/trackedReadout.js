@@ -4,6 +4,7 @@ import {
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
 import { WORLD_OVERLAY_STYLE } from '../overlays/worldOverlayTokens.js';
+import { trackEvent } from '../analytics.js';
 
 /**
  * @module trackedReadout
@@ -184,6 +185,9 @@ function publishEntity(entity) {
     clearTrackedSource();
     return;
   }
+  // Štatistika (2026-10-04): otvorenie karty = zmena id, nie každé obnovenie textu; len druh
+  // (flights/military/satellites/installations), nikdy hex ani volací znak.
+  if (entry.id !== _activeEntryId) trackEvent('card_open', { kind: String(entry.id).split(':')[0] });
   _activeEntryId = entry.id;
   _overlayHost.setEntries(
     TRACKED_OVERLAY_SOURCE_ID,

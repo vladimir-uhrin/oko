@@ -57,6 +57,12 @@ function clearInline(button) {
   for (const prop of ['left', 'top', 'right', 'bottom', 'width']) button.style[prop] = '';
 }
 
+/** Obdĺžnik viditeľnej karty sledovaného objektu (v mierke kresby) alebo null. */
+export function trackedCardRect() {
+  const id = getActiveTrackedReadoutId();
+  return id ? closeButtonVisibility(getOverlayPaintRect(TRACKED_OVERLAY_SOURCE_ID, id)) : null;
+}
+
 /**
  * Nainštaluj lištu. Bez mobilu, bez karty alebo bez miesta vráti tlačidlá na pôvodné miesto.
  * @param {object} viewer Cesium viewer (postRender, trackedEntityChanged)
@@ -65,10 +71,7 @@ function clearInline(button) {
 export function installCardActionBar(viewer, {
   doc = document,
   isMobile = () => doc.body?.classList.contains('oko-mobile'),
-  cardRect = () => {
-    const id = getActiveTrackedReadoutId();
-    return id ? closeButtonVisibility(getOverlayPaintRect(TRACKED_OVERLAY_SOURCE_ID, id)) : null;
-  },
+  cardRect = trackedCardRect,
 } = {}) {
   const ids = ['follow-flight', 'cockpit-entry'];
 

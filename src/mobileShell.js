@@ -16,6 +16,8 @@
 // a plátnové „ambientné" karty (variant card) sa na mobile nekreslia — ostáva
 // vybraná a sledovaná karta (jedna naraz), inak si karty staníc prekrývali mapu.
 
+import { trackEvent } from './analytics.js';
+
 export const MOBILE_MAX_WIDTH_PX = 900;
 export const COARSE_MAX_WIDTH_PX = 1180;
 export const SHORT_HEIGHT_PX = 520;
@@ -250,7 +252,11 @@ export function createMobileShell({
   }
 
   function toggle(sectionId) {
-    return active === sectionId ? close() : open(sectionId);
+    if (active === sectionId) return close();
+    const opened = open(sectionId);
+    // Štatistika (2026-10-04): len ťuknutie na spodnú lištu, nie programové otvorenie.
+    if (opened) trackEvent('mobile_section', { section: sectionId });
+    return opened;
   }
 
   function sync() {

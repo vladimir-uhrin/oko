@@ -12,6 +12,7 @@
 // DOM sa stavia len cez createElement/appendChild (bez innerHTML), aby sa dal
 // pokryť testom s falošným dokumentom.
 import { t } from './i18n.js';
+import { trackEvent } from './analytics.js';
 import { buildShareTargets } from './shareTargets.js';
 
 export const SHARE_API_URL = '/api/share';
@@ -213,6 +214,7 @@ export async function openSharePanel({
     if (!shortLink) console.warn('[share] short link unavailable — /api/share failed, falling back to the long link');
   }
   const session = { url: shortLink?.url || built.href, longUrl: built.href, shortLink, snapshot, copy };
+  trackEvent('share_create', { short_link: Boolean(shortLink) });
   ui.render(session);
   if (!snapshot) toast(translate('share.image-failed'));
   else if (!shortLink) toast(translate('share.upload-failed'));

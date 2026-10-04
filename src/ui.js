@@ -51,7 +51,8 @@ import {
 import { TRACKED_OVERLAY_SOURCE_ID, destroyTrackedReadout, getActiveTrackedReadoutId, initTrackedReadout } from './data/trackedReadout.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 import { installCardCloseButtons } from './cardCloseButtons.js';
-import { installCardActionBar } from './cardActionBar.js';
+import { installCardActionBar, trackedCardRect } from './cardActionBar.js';
+import { installCardSwipeClose } from './cardSwipeClose.js';
 import { createScrollKeeper } from './scrollKeeper.js';
 import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
 import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFlightsStrip.js';
@@ -3158,6 +3159,12 @@ export class StyleManager {
     // amaterizmus — aspoň malé X do rohu“): sledovaný objekt a vybraná loď; zatvára tou istou cestou.
     const trackedLayerByPrefix = { flights: 'flights', military: 'military', satellites: 'satellites', installations: 'military-installations' };
     const vesselsModule = () => this._dataManager?.layers?.get('ais-live-vessels')?.module;
+    const closeTrackedCard = () => {
+      const prefix = String(getActiveTrackedReadoutId() || '').split(':')[0];
+      const module = this._dataManager?.layers?.get(trackedLayerByPrefix[prefix])?.module;
+      if (typeof module?.stopTracking === 'function') module.stopTracking({ origin: 'user' });
+      else viewer.trackedEntity = undefined;
+    };
     this._cardCloseButtons = installCardCloseButtons(viewer, {
       container: document.body,
       t,
@@ -3168,12 +3175,7 @@ export class StyleManager {
             const id = getActiveTrackedReadoutId();
             return id ? { sourceId: TRACKED_OVERLAY_SOURCE_ID, entryId: id } : null;
           },
-          close: () => {
-            const prefix = String(getActiveTrackedReadoutId() || '').split(':')[0];
-            const module = this._dataManager?.layers?.get(trackedLayerByPrefix[prefix])?.module;
-            if (typeof module?.stopTracking === 'function') module.stopTracking({ origin: 'user' });
-            else viewer.trackedEntity = undefined;
-          },
+          close: () => closeTrackedCard(),
         },
         {
           id: 'vessel',
@@ -3187,6 +3189,8 @@ export class StyleManager {
     });
     // SLEDOVAŤ a KOKPIT na mobile pod kartou lietadla (2026-10-04, cardActionBar.js).
     this._cardActionBar = installCardActionBar(viewer);
+    // Potiahnutie karty nadol ju na mobile zavrie (2026-10-04, cardSwipeClose.js) — tou istou cestou.
+    this._cardSwipeClose = installCardSwipeClose(viewer, { cardRect: trackedCardRect, onClose: closeTrackedCard });
     // Bohatá karta letiska po kliknutí (frekvencie, dráhy, METAR, živá
     // premávka z vrstvy letov, odkazy) — viď airportCard.js.
     installAirportCard(viewer, {
@@ -11693,6 +11697,7 @@ export class StyleManager {
     destroyStateFlightsStrip();
     this._cardCloseButtons?.destroy();
     this._cardActionBar?.destroy();
+    this._cardSwipeClose?.destroy();
     destroyTrackedReadout();
     destroyDetection();
     destroyWorldOverlay();

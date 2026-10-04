@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import {
   ANALYTICS_ENABLED, CONSENT_CATEGORIES, CONSENT_MAX_AGE_DAYS, CONSENT_POLICY_VERSION, CONSENT_STORAGE_KEY,
   GA4_MEASUREMENT_ID, LEGACY_CONSENT_STORAGE_KEY, analyticsDecision, consentDefaults, cookieDeletionStrings,
-  gaCookieNames, gtagCommands, gtagLoads, isConsentPreview, parseConsentRecord, readConsent, serializeConsent,
+  gaCookieNames, gtagCommands, gtagLoads, TRACKED_EVENTS, eventPayload, trackEvent, isConsentPreview, parseConsentRecord, readConsent, serializeConsent,
 } from './analytics.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 
@@ -136,7 +136,7 @@ test('kategórie: nevyhnutné vždy, štatistika prepínač, reklamy nepoužíva
 
 test('zapojenie: main.js spúšťa súhlas až po skrytí preloadera, v HUD je odkaz Súkromie', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.match(main, /import \{ initAnalytics \} from '\.\/analytics\.js';/);
+  assert.match(main, /import \{ initAnalytics, trackEvent \} from '\.\/analytics\.js';/);
   assert.match(main, /startSharpStarfield\(\);\n[^\n]*\n\s+try \{ initAnalytics\(\{ t, crawler: crawlerVisit \}\); \}/);
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /<button id="consent-open" type="button" data-i18n="consent\.open" hidden>/);
@@ -158,4 +158,22 @@ test('ochrana súkromia: kontakt, cookies GA4 len so súhlasom, tlačidlá menia
   assert.match(page, /__Host-oko_session/);
   assert.match(page, /dataprotection\.gov\.sk/);
   assert.doesNotMatch(page, /účet zmazať v Centre účtu/, 'samoobslužné zmazanie účtu zatiaľ neexistuje');
+});
+
+test('udalosti (2026-10-04): len známe názvy a povolené parametre, nič pred načítaním GA', () => {
+  assert.deepEqual(Object.keys(TRACKED_EVENTS), ['layer_toggle', 'card_open', 'share_create', 'scene_open', 'mobile_section']);
+  assert.deepEqual(eventPayload('layer_toggle', { layer_id: 'flights', enabled: true, lat: 48.1, callsign: 'AUA1' }), { layer_id: 'flights', enabled: true }, 'poloha ani volací znak neodídu');
+  assert.deepEqual(eventPayload('card_open', { kind: 'x'.repeat(200) }), { kind: 'x'.repeat(64) }, 'dlhý reťazec sa skráti');
+  assert.equal(eventPayload('neznama', { a: 1 }), null);
+  const sent = [];
+  const win = { __okoGtagLoaded: true, gtag: (...a) => sent.push(a) };
+  assert.equal(trackEvent('card_open', { kind: 'flights' }, win), true);
+  assert.deepEqual(sent, [['event', 'card_open', { kind: 'flights' }]]);
+  assert.equal(trackEvent('card_open', { kind: 'flights' }, { gtag: () => sent.push('x') }), false, 'pred načítaním GA (štart, localhost) nič');
+  assert.equal(trackEvent('card_open', { kind: 'flights' }, undefined), false, 'Node / bez okna nič');
+  assert.equal(trackEvent('hack', {}, win), false);
+  assert.equal(sent.length, 1);
+  const page = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
+  assert.match(page, /ktoré funkcie OKA sa používajú/, 'zásady opisujú meranie funkcií');
+  assert.match(page, /which OKO features are used/);
 });

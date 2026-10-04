@@ -7,7 +7,8 @@
 //      hlas vypnutý = len mikrofón (dok úzky);
 //   2. s kartou skutočného lietadla nad BA: krížik je v okne, karta 3 s stojí, SLEDOVAŤ a KOKPIT
 //      sú lišta pod kartou (pod fotkou), v okne a nad spodnou lištou;
-//   3. ťuknutie na krížik kartu zavrie.
+//   3. ťuknutie na krížik kartu zavrie; potiahnutie karty nadol ju zavrie tiež;
+//   4. odkaz Témy vpravo hore vedie na obsahové stránky (/sk/ alebo /en/) a je v okne.
 // Snímky ukladá do --out. Pri chybe vypíše čo a skončí kódom 1.
 //
 // Usage: node scripts/qa-mobile.mjs [--base http://localhost:4173] [--out output/qa-mobile]
@@ -69,6 +70,9 @@ function measurePage() {
       return false;
     }).map((el) => el.textContent.trim()),
     subj: location.hash.includes('subj='),
+    swipe: box(document.querySelector('.card-swipe-zone')),
+    topics: box(document.getElementById('topics-link')),
+    topicsHref: document.getElementById('topics-link')?.getAttribute('href') ?? null,
   };
 }
 
@@ -108,6 +112,8 @@ for (const [W, H] of SIZES) {
   for (const key of ['voice', 'location', 'style', 'credit']) if (!inView(m[key], m)) fail(`${key} mimo okna ${JSON.stringify(m[key])}`);
   if (m.voiceStatus === 'idle' && m.voice && m.voice.r - m.voice.l > 90) fail(`vypnutý hlas zaberá ${m.voice.r - m.voice.l} px (čaká sa len mikrofón)`);
   if (overlap(m.credit, m.voice)) fail('atribúcia mapy sa prekrýva s hlasom');
+  if (!m.topics || !inView(m.topics, m)) fail(`odkaz Témy chýba alebo je mimo okna ${JSON.stringify(m.topics)}`);
+  if (!['/sk/', '/en/'].includes(m.topicsHref)) fail(`odkaz Témy vedie na ${m.topicsHref}`);
   if (m.dockLabelsClipped.length) fail(`orezané popisy doku: ${m.dockLabelsClipped.join(', ')}`);
   console.log(`  dok: hlas ${m.voice ? m.voice.r - m.voice.l : '-'} px (${m.voiceStatus}), atribúcia ${m.credit ? `${m.credit.t}–${m.credit.b}` : '-'}`);
 
@@ -139,6 +145,24 @@ for (const [W, H] of SIZES) {
       await page.screenshot({ path: `${OUT}/po-zavreti-${tag}.png` });
       if (after.close || after.subj) fail('ťuknutie na krížik kartu nezavrelo');
       if (after.follow?.t === m.follow?.t && after.follow) fail('lišta akcií ostala po zatvorení karty');
+    }
+
+    // 4. potiahnutie nadol
+    await open(`${VIEW}&subj=flights.t.${hex}`);
+    for (let i = 0; i < 40 && !(m = await page.evaluate(measurePage)).swipe; i += 1) await sleep(1000);
+    await sleep(2500);
+    m = await page.evaluate(measurePage);
+    if (!m.swipe) fail('nad kartou chýba plocha na potiahnutie');
+    else {
+      const x = Math.round((m.swipe.l + m.swipe.r) / 2);
+      let y = m.swipe.t + 30;
+      const touch = await page.touchscreen.touchStart(x, y);
+      for (let i = 0; i < 6; i += 1) { y += 20; await touch.move(x, y); await sleep(16); }
+      await touch.end();
+      await sleep(2500);
+      const after = await page.evaluate(measurePage);
+      await page.screenshot({ path: `${OUT}/po-potiahnuti-${tag}.png` });
+      if (after.close || after.subj) fail('potiahnutie nadol kartu nezavrelo');
     }
   }
   await page.close();

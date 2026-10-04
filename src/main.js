@@ -43,7 +43,7 @@ import { initGevVoiceCommands } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
 import { isCrawlerUserAgent } from './crawlerDetect.js';
-import { initAnalytics } from './analytics.js';
+import { initAnalytics, trackEvent } from './analytics.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { armStartupGate, releaseStartupGate } from './startupGate.js';
@@ -149,6 +149,8 @@ async function init() {
   // vykreslením panelov a prepínač SK/EN sa aktivuje (persist + reload —
   // stav pohľadu prežije v share-hashi, viď src/i18n.js).
   applyDomTranslations();
+  // Odkaz na obsahové stránky v jazyku UI (/sk/ alebo /en/).
+  document.getElementById('topics-link')?.setAttribute('href', currentLanguage() === 'sk' ? '/sk/' : '/en/');
   for (const button of document.querySelectorAll('#lang-switch button[data-lang]')) {
     const lang = button.getAttribute('data-lang');
     button.dataset.active = String(lang === currentLanguage());
@@ -431,6 +433,11 @@ async function init() {
     const dataManager = new DataLayerManager(viewer, {
       allowQaRegistration: import.meta.env.DEV,
       mapStackController,
+    });
+    // Štatistika (2026-10-04): len prepnutie vrstvy používateľom (origin user) — obnova z odkazu
+    // a lokálneho stavu má iný origin; pred štartom GA aj tak nič neodíde (trackEvent).
+    dataManager.subscribe?.((change) => {
+      if (change?.type === 'visibility' && change.origin === 'user') trackEvent('layer_toggle', { layer_id: change.layerId, enabled: Boolean(change.enabled) });
     });
     dataManager.register(flightsLayer);
     dataManager.register(militaryFlightsLayer);
@@ -1152,6 +1159,7 @@ async function init() {
     ukraineTimeline.onChange((st) => { if (!st?.shown && autoKartaPrev) restoreAutoKarta(); });
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);
+      if (scene) trackEvent('scene_open', { scene_type: 'front', scene_id: String(id) });
       if (scene && mapStackController.getActiveId() !== 'karta') {
         autoKartaPrev = mapStackController.getActiveId();
         try { void Promise.resolve(styleManager._setMapStack('karta')).catch(() => {}); } catch { /* */ }
@@ -1255,6 +1263,7 @@ async function init() {
     const runChokepointScene = (id) => {
       restoreAutoKarta();
       const scene = chokepointSceneById(id);
+      if (scene) trackEvent('scene_open', { scene_type: 'chokepoint', scene_id: String(id) });
       activeChokepoint = scene || null;
       activeFrontScene = null;
       activeTheatre = null;
@@ -1350,6 +1359,7 @@ async function init() {
     const runMideastTheatre = (id) => {
       restoreAutoKarta(); // odchod z KARTY frontu, rovnako ako pri úžinách
       const scene = theatreById(id);
+      if (scene) trackEvent('scene_open', { scene_type: 'mideast', scene_id: String(id) });
       activeTheatre = scene || null;
       activeFrontScene = null;
       activeChokepoint = null;

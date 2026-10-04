@@ -108,6 +108,8 @@ export const EN_STRINGS = Object.freeze({
   'loader.configuring': 'Configuring viewer...',
   'loader.made-by': 'made by',
   // Súhlas s cookies + GA4 (2026-09-30, CMP 2026-10-04, src/analytics.js).
+  'topics.link': 'Topics',
+  'topics.title': 'Topics: aircraft, ships, Ukraine, Middle East, gas',
   'consent.kicker': 'Privacy // Cookies',
   'consent.title': 'Your data. Your call.',
   'consent.text': 'Google Analytics counts visits without cookies and without identifying you. Statistics cookies are stored only with your consent — declining is as easy as accepting.',
@@ -2388,6 +2390,8 @@ export const SK_STRINGS = Object.freeze({
   'loader.configuring': 'Konfigurujem zobrazenie…',
   'loader.made-by': 'vytvoril',
   // Súhlas s cookies + GA4 (2026-09-30, CMP 2026-10-04, src/analytics.js).
+  'topics.link': 'Témy',
+  'topics.title': 'Témy: lietadlá, lode, Ukrajina, Blízky východ, plyn',
   'consent.kicker': 'Súkromie // Cookies',
   'consent.title': 'Tvoje dáta. Tvoja voľba.',
   'consent.text': 'Google Analytics počíta návštevy bez cookies a bez toho, aby ťa rozpoznal. Cookies štatistiky uloží len s tvojím súhlasom — odmietnuť je rovnako ľahké ako prijať.',
