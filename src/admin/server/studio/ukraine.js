@@ -4,7 +4,7 @@
 //   ua-report     denné hlásenie Generálneho štábu ZSU: strety, smery, údery, porovnanie s 7-dňovým priemerom,
 //   ua-front      zmena frontu za deň z dvoch denných snímok mapy frontu (ten istý výpočet ako vrstva a video),
 //   ua-air        veľký vzdušný útok: hrozba hlásená Vzdušnými silami ZSU pre veľa oblastí naraz,
-//   ua-media      fotky a videá oficiálnych kanálov UA (GŠ, MO, DSNS; licencia doložená len pri MO a ArmyInform),
+//   ua-media      fotky a videá oficiálnych kanálov UA (GŠ, MO, DSNS, ArmyInform),
 //   ua-week       Týždeň na fronte ako karusel obrázkov (bez Chromu, popri videu).
 //
 // Redakčné pravidlá vlastníka (docs/CURRENT-STATE.md, Týždeň na fronte): kritický voči agresorovi („ruský
@@ -287,9 +287,10 @@ export function uaAir({ media }, { now, settings = {} }) {
 
 // ── 4. Fotky a videá oficiálnych kanálov ──────────────────────────────────
 /**
- * Oficiálne kanály, ktorých zábery Štúdio navrhuje (kpszsu sú len texty poplachov). `license` = doložená licencia
- * (DATA_SOURCES.md: obsah MO „CC BY 4.0, ak nie je uvedené inak"; ArmyInform CC BY 4.0). Pri GŠ a DSNS licencia
- * doložená nie je — text ju netvrdí a návrh pred schválením upozorní (pravidlo 7).
+ * Oficiálne kanály, ktorých zábery Štúdio navrhuje (kpszsu sú len texty poplachov). `license` = licencia, ktorú
+ * text uvedie, len ak je doložená (DATA_SOURCES.md: obsah MO „CC BY 4.0, ak nie je uvedené inak"; ArmyInform
+ * CC BY 4.0). GŠ a DSNS: vlastník rozhodol zverejňovať (2026-10-04, „chcem zverejňovať, licenciu nerieš") —
+ * vždy s menom kanála a odkazom na pôvodný príspevok, licencia sa neuvádza.
  */
 export const MEDIA_CHANNELS = Object.freeze({
   GeneralStaffZSU: { sk: 'Generálny štáb Ozbrojených síl Ukrajiny', verb: 'zverejnil', license: null },
@@ -298,7 +299,6 @@ export const MEDIA_CHANNELS = Object.freeze({
 });
 const ARMYINFORM = { sk: 'ArmyInform (Ministerstvo obrany Ukrajiny)', verb: 'zverejnil', license: 'CC BY 4.0' };
 const REVIEW = 'Pred schválením skontroluj zábery: žiadne obete, žiadne rozpoznateľné osoby ako cieľ (pravidlo 6).';
-const REVIEW_LICENSE = ' Licencia záberov tohto kanála nie je overená (DATA_SOURCES.md) — zverejni len so súhlasom vlastníka.';
 export const MEDIA_MAX_AGE_MS = 12 * 3600_000;
 export const MEDIA_PER_DAY_DEFAULT = 6;
 /** Hostitelia, z ktorých Štúdio sťahuje médiá (CDN Telegramu, ArmyInform). */
@@ -378,7 +378,7 @@ export function uaMedia({ media }, { now, has = () => false, settings = {}, coun
       text,
       card: { kind: 'ua-media', kicker: src.video ? 'UKRAJINA · VIDEO' : 'UKRAJINA · FOTO', big: '', headline: title, lines: [], source: src.sk, at: item.publishedAt },
       media: { photos: src.photos, video: src.video, source: src.sk, license: src.license, url: item.url, at: item.publishedAt,
-        review: src.license ? REVIEW : REVIEW + REVIEW_LICENSE },
+        review: REVIEW },
     };
   }
   return null;

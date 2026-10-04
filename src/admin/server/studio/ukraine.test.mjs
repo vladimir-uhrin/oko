@@ -151,13 +151,13 @@ test('zábery: najnovší nezverejnený, denný strop, vypínač, text po sloven
   assert.match(item.title, /^Štátna záchranná služba Ukrajiny: Následky ruského útoku – Kharkiv$/);
   assert.match(item.text, /zverejnila fotografie \(následky ruského útoku, Kharkiv\)\./);
   assert.match(item.text, /Pôvodný príspevok \(ukrajinsky\): https:\/\/t\.me\/dsns_telegram\/21/);
-  assert.ok(!/CC BY/.test(item.text), 'licencia DSNS nie je doložená — text ju netvrdí');
+  assert.ok(!/CC BY/.test(item.text), 'licencia DSNS nie je doložená — text ju neuvádza');
   assert.equal(item.media.photos.length, 2);
   assert.match(item.media.review, /obete/);
-  assert.match(item.media.review, /Licencia záberov tohto kanála nie je overená/);
+  assert.ok(!/licenci/i.test(item.media.review), 'vlastník rozhodol zverejňovať GŠ a DSNS — bez varovania o licencii');
   const mod = uaMedia({ media: [tg('ministry_of_defense_ua', 23)] }, { now: NOW });
   assert.match(mod.text, /oficiálny kanál, CC BY 4\.0/);
-  assert.ok(!/nie je overená/.test(mod.media.review));
+  assert.equal(mod.media.review, item.media.review, 'rovnaká kontrola pre všetky kanály');
   const next = uaMedia({ media }, { now: NOW, has: key => key === item.key });
   assert.equal(next.key, 'ua-media:tg:GeneralStaffZSU/20', 'starší, ak novší už je');
   assert.equal(uaMedia({ media }, { now: NOW, countToday: () => 6 }), null, 'denný strop');
