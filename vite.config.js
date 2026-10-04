@@ -120,6 +120,13 @@ import {
   isOverBudget as isTomTomOverBudget,
 } from './src/data/tomtomTiles.js';
 import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
+import {
+  isLoopbackAddress,
+  resolveClientIp,
+  positiveIntEnv,
+  createDailyBudget,
+  exceedsFileCap,
+} from './src/serverGuards.js';
 import zlib from 'node:zlib';
 import {
   normalizeOdimComposite,
@@ -561,22 +568,33 @@ const _militaryInstallationsRateLimiter = makeRateLimiter({ windowMs: 60_000, ma
 const _routeRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 60, globalMax: 200 });
 
 /**
- * Opt-in per-IP rate limiter for the cost-bearing API proxies (OpenAI / Google).
- * DEFAULT IS UNLIMITED: when the env var is unset, `0`, or non-numeric, this
- * returns `null` and the caller skips the check entirely — a runtime no-op that
- * preserves the original behavior. Only a positive integer N enables a fixed
- * 60s window of N requests/IP (built lazily once, then reused so its per-IP
- * window state persists across requests). The global backstop is set to a
- * generous multiple of the per-IP cap so a single host can't starve the rest.
+ * Per-IP rate limiter for the cost-bearing API proxies (OpenAI / Google).
+ * When the env var is unset, `0`, or non-numeric, `defaultMax` applies; with
+ * `defaultMax` 0 (Google) the limiter stays OFF (`null`, a runtime no-op).
+ * A positive integer N enables a fixed 60s window of N requests/IP (built
+ * lazily once, then reused so its per-IP window state persists across
+ * requests). The global backstop is a generous multiple of the per-IP cap so
+ * a single host can't starve the rest.
  *
  * @param {string|undefined} envValue - Raw env value (requests/min/IP).
+ * @param {number} [defaultMax=0] - Cap when the env is unset; 0 = unlimited.
  * @returns {((key:string)=>boolean)|null} An `allow(key)` fn, or null when unlimited.
  */
-function makeOptInRateLimiter(envValue) {
-  const max = Number(envValue);
-  if (!Number.isFinite(max) || max <= 0) return null; // unset/0/garbage -> unlimited
-  return makeRateLimiter({ windowMs: 60_000, max: Math.floor(max), globalMax: Math.floor(max) * 20 });
+function makeOptInRateLimiter(envValue, defaultMax = 0) {
+  const max = positiveIntEnv(envValue, defaultMax);
+  if (!max) return null; // no env and no default -> unlimited
+  return makeRateLimiter({ windowMs: 60_000, max, globalMax: max * 20 });
 }
+/**
+ * Default per-IP cap for the OpenAI endpoints (owner's choice 2026-10-03): the
+ * HUD asks every 15 s (4/min per tab), so 10/min leaves room for a second tab
+ * and a few voice reconnects. Override with GEV_RATELIMIT_OPENAI_PER_MIN.
+ */
+const OPENAI_RATELIMIT_PER_MIN_DEFAULT = 10;
+/** Daily cap on minted Realtime voice sessions (OPENAI_REALTIME_DAILY_SESSION_BUDGET). */
+const OPENAI_REALTIME_DAILY_SESSION_BUDGET_DEFAULT = 50;
+/** Daily cap on HUD AI summaries (OPENAI_HUD_SUMMARY_DAILY_BUDGET). */
+const OPENAI_HUD_SUMMARY_DAILY_BUDGET_DEFAULT = 5000;
 // Built LAZILY on first request, NOT at module load: `.env` values are applied to process.env later
 // (the plugin config hook calls loadEnv → process.env, AFTER this module is imported), so reading
 // process.env here at import time would always see them unset and silently stay unlimited even when
@@ -584,9 +602,11 @@ function makeOptInRateLimiter(envValue) {
 // the result is cached so the limiter's per-IP window state persists. `null` = unlimited (default).
 let _openAiRateLimiter; // undefined = not built yet; null = unlimited; fn = active limiter
 let _googleRateLimiter;
-/** OpenAI cost endpoints (realtime/token + hud-summary). Null = unlimited (default). */
+/** OpenAI cost endpoints (realtime/token + hud-summary). Default 10/min/IP. */
 function openAiRateLimiter() {
-  if (_openAiRateLimiter === undefined) _openAiRateLimiter = makeOptInRateLimiter(process.env.GEV_RATELIMIT_OPENAI_PER_MIN);
+  if (_openAiRateLimiter === undefined) {
+    _openAiRateLimiter = makeOptInRateLimiter(process.env.GEV_RATELIMIT_OPENAI_PER_MIN, OPENAI_RATELIMIT_PER_MIN_DEFAULT);
+  }
   return _openAiRateLimiter;
 }
 /** Google cost endpoint (nearby-places). Null = unlimited (default). */
@@ -616,13 +636,14 @@ function enforceOptInRateLimit(limiter, req, res) {
 }
 
 /**
- * Client key for rate limiting. Uses the real socket peer address only — we do
- * NOT trust X-Forwarded-For (client-controlled; a rotating value would mint fresh
- * quota and grow the limiter map). This is a localhost dev proxy, so the socket
- * address is the real client.
+ * Client key for rate limiting. Never X-Forwarded-For (client-controlled; a
+ * rotating value would mint fresh quota and grow the limiter map). Behind
+ * cloudflared every socket is 127.0.0.1, so with AUTH_TRUST_CLOUDFLARE_PROXY=true
+ * the CF-Connecting-IP of a loopback-socket request is the visitor — the same
+ * rule as the account backend (src/serverGuards.js `resolveClientIp`).
  */
 function clientKey(req) {
-  return String(req.socket?.remoteAddress || 'local');
+  return resolveClientIp(req);
 }
 
 /** Server-side timeout ceiling (seconds) we allow inside an Overpass QL query. */
@@ -1499,6 +1520,8 @@ const OPENAI_HUD_SUMMARY_MODEL_DEFAULT = 'gpt-5-nano';
 const REALTIME_DEBUG_LOG_DIR = path.join(__dirname, '.gev-logs');
 const REALTIME_DEBUG_LOG_FILE = path.join(REALTIME_DEBUG_LOG_DIR, 'realtime-conversations.jsonl');
 const REALTIME_DEBUG_LOG_MAX_BYTES = 8 * 1024 * 1024;
+/** Total size cap of the debug log file (REALTIME_DEBUG_LOG_MAX_TOTAL_MB, default 64 MB). */
+const REALTIME_DEBUG_LOG_MAX_TOTAL_MB_DEFAULT = 64;
 
 /**
  * @type {ReturnType<typeof createAisStreamAdapter>|null}
@@ -3917,11 +3940,8 @@ function meteoProxy() {
   };
 }
 
-/** Loopback test pre „iba lokálne" proxy (airframes). Exportované pre testy. */
-export function isLoopbackAddress(address) {
-  const a = String(address || '').trim().toLowerCase();
-  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1' || a.startsWith('127.');
-}
+/** Loopback test pre „iba lokálne" proxy (airframes) — žije v src/serverGuards.js. Exportované pre testy. */
+export { isLoopbackAddress };
 
 /**
  * Požiadavka naozaj z tohto počítača (2026-09-30). Loopback soket NESTAČÍ: cloudflared tunel
@@ -8407,7 +8427,40 @@ function trackBackfillProxies() {
  * Realtime API over WebRTC with a short-lived secret.
  */
 function openAiRealtimeProxy() {
+  // Daily budget governors (TomTom/GFW pattern): persistent UTC-day counters
+  // under .gev-cache/openai/, env caps read lazily (loadEnv runs after import).
+  // One unit = one upstream OpenAI call; over the cap → 429 {error:'budget'}.
+  const BUDGET_DIR = path.join(process.cwd(), '.gev-cache', 'openai');
+  const realtimeBudget = createDailyBudget({
+    filePath: path.join(BUDGET_DIR, 'realtime-budget.json'),
+    limit: () => positiveIntEnv(process.env.OPENAI_REALTIME_DAILY_SESSION_BUDGET, OPENAI_REALTIME_DAILY_SESSION_BUDGET_DEFAULT),
+    label: 'openai-realtime',
+  });
+  const hudSummaryBudget = createDailyBudget({
+    filePath: path.join(BUDGET_DIR, 'hud-summary-budget.json'),
+    limit: () => positiveIntEnv(process.env.OPENAI_HUD_SUMMARY_DAILY_BUDGET, OPENAI_HUD_SUMMARY_DAILY_BUDGET_DEFAULT),
+    label: 'openai-hud-summary',
+  });
+  /** Reserve one unit; on exhaustion write 429 {error:'budget'} and return false. */
+  async function enforceDailyBudget(governor, res) {
+    const b = await governor.tryConsume();
+    if (b.ok) return true;
+    res.statusCode = 429;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(JSON.stringify({ error: 'budget', dailyCount: b.count, budget: b.limit, date: b.date }));
+    return false;
+  }
+
   function install(middlewares) {
+    middlewares.use('/api/openai/status', async (req, res) => {
+      const [realtime, hudSummary] = await Promise.all([realtimeBudget.snapshot(), hudSummaryBudget.snapshot()]);
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end(JSON.stringify({ hasKey: Boolean(process.env.OPENAI_API_KEY), realtime, hudSummary }));
+    });
+
     middlewares.use('/api/openai/hud-summary', async (req, res) => {
       if (req.method !== 'POST') {
         res.statusCode = 405;
@@ -8416,7 +8469,7 @@ function openAiRealtimeProxy() {
         return;
       }
 
-      // Opt-in per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
+      // Per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN, default 10/min).
       if (!enforceOptInRateLimit(openAiRateLimiter(), req, res)) return;
 
       const apiKey = process.env.OPENAI_API_KEY;
@@ -8426,6 +8479,9 @@ function openAiRealtimeProxy() {
         res.end(JSON.stringify({ error: 'OPENAI_API_KEY is not set' }));
         return;
       }
+
+      // Daily cap (OPENAI_HUD_SUMMARY_DAILY_BUDGET, default 5000).
+      if (!await enforceDailyBudget(hudSummaryBudget, res)) return;
 
       try {
         const body = await readRequestBody(req, 64 * 1024);
@@ -8474,14 +8530,32 @@ function openAiRealtimeProxy() {
         return;
       }
 
+      // Developer diagnostics only: a public (tunnel) visitor must not be able
+      // to write to this machine's disk. Silent 204 keeps the client quiet.
+      if (!isDirectLocalRequest(req)) {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+
       try {
         const body = await readRequestBody(req, REALTIME_DEBUG_LOG_MAX_BYTES);
         const record = JSON.parse(body || '{}');
-        fs.mkdirSync(REALTIME_DEBUG_LOG_DIR, { recursive: true });
-        fs.appendFileSync(REALTIME_DEBUG_LOG_FILE, `${JSON.stringify({
+        const line = `${JSON.stringify({
           loggedAt: new Date().toISOString(),
           ...record,
-        })}\n`);
+        })}\n`;
+        const capBytes = positiveIntEnv(process.env.REALTIME_DEBUG_LOG_MAX_TOTAL_MB, REALTIME_DEBUG_LOG_MAX_TOTAL_MB_DEFAULT) * 1024 * 1024;
+        let currentBytes = 0;
+        try { currentBytes = fs.statSync(REALTIME_DEBUG_LOG_FILE).size; } catch { /* no file yet */ }
+        if (exceedsFileCap(currentBytes, Buffer.byteLength(line), capBytes)) {
+          res.statusCode = 507;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'debug log full', capBytes }));
+          return;
+        }
+        fs.mkdirSync(REALTIME_DEBUG_LOG_DIR, { recursive: true });
+        fs.appendFileSync(REALTIME_DEBUG_LOG_FILE, line);
         res.statusCode = 204;
         res.end();
       } catch (error) {
@@ -8499,7 +8573,7 @@ function openAiRealtimeProxy() {
         return;
       }
 
-      // Opt-in per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN). No-op when unset.
+      // Per-IP throttle (GEV_RATELIMIT_OPENAI_PER_MIN, default 10/min).
       if (!enforceOptInRateLimit(openAiRateLimiter(), req, res)) return;
 
       const apiKey = process.env.OPENAI_API_KEY;
@@ -8509,6 +8583,9 @@ function openAiRealtimeProxy() {
         res.end(JSON.stringify({ error: 'OPENAI_API_KEY is not set' }));
         return;
       }
+
+      // Daily cap on minted sessions (OPENAI_REALTIME_DAILY_SESSION_BUDGET, default 50).
+      if (!await enforceDailyBudget(realtimeBudget, res)) return;
 
       // Voice model tier, requested by the client as ?tier=standard|mini.
       // resolveVoiceModel is total: an unknown, empty, or hostile value

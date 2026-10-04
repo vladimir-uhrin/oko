@@ -3261,3 +3261,9 @@ test('hlas: chýbajúci kľúč (503 „OPENAI_API_KEY is not set") a zákaz na 
   assert.equal(voiceErrorHintKey({ code: null, message: 'ICE candidate failed' }), 'voice.error-hint');
   assert.equal(voiceErrorHintKey(null), 'voice.error-hint');
 });
+
+test('hlas: denný strop relácií na serveri (429 {error:"budget"}) dostane vlastnú radu, per-IP 429 nie (2026-10-03)', () => {
+  assert.equal(classifyTokenFailure(429, 'budget'), 'voice-budget');
+  assert.equal(classifyTokenFailure(429, 'Rate limit exceeded'), null);
+  assert.equal(voiceErrorHintKey({ code: 'voice-budget', message: 'budget' }), 'voice.error-hint-budget');
+});

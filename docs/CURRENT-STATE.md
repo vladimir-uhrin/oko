@@ -47,6 +47,49 @@ priority. Owner alerts (`src/admin/server/alerts.js`, admin → Údržba, off by
 feed down for N min, new server/5xx error signatures, failed publish after retries; sent
 through the accounts webhook mailer (`AUTH_MAIL_*`), deduped 6 h, max 12 mails/day.
 
+### OKO public-tunnel hardening of the OpenAI and loopback-only proxies (2026-10-03)
+
+The public addresses (okolive.sk, oko.uhrin.digital) reach the dev server
+through cloudflared → `localhost:4173` (`/api/*`, `scripts/oko-publish.ps1`),
+so every request arrives on a 127.0.0.1 socket. Three consequences fixed in
+`vite.config.js` with a new Node-only module `src/serverGuards.js`
+(tests `src/serverGuards.test.mjs`):
+
+- **Per-visitor rate limiting.** `clientKey(req)` → `resolveClientIp(req)`:
+  `CF-Connecting-IP` is used only with `AUTH_TRUST_CLOUDFLARE_PROXY=true`, from
+  a loopback socket, and when it parses as an IP — the same rule as the account
+  backend (`src/auth/server/http.js` `context()`). Without the switch all
+  tunnel visitors still share the 127.0.0.1 bucket. X-Forwarded-For is never
+  trusted. Applies to every limiter that uses `clientKey` (Overpass, route,
+  military installations, OpenAI, Google).
+- **Loopback-only means non-tunnel.** Merged with `main`'s stricter
+  `isDirectLocalRequest(req)` in `vite.config.js` (2026-09-30: loopback socket,
+  no `CF-Connecting-IP`/`CF-Ray`/`CF-Visitor`/`X-Forwarded-*`, localhost Host).
+  Independent of the trust switch — fails closed. ACARS already used it on
+  `main`; the Realtime debug log now uses it too.
+- **OpenAI spend.** `/api/realtime/token` and `/api/openai/hud-summary` now
+  have a **default** per-IP limit of 10/min (`GEV_RATELIMIT_OPENAI_PER_MIN`
+  overrides; Google `GEV_RATELIMIT_GOOGLE_PER_MIN` stays opt-in) and daily
+  budget governors in the TomTom/GFW shape — persistent UTC-day counters in
+  `.gev-cache/openai/realtime-budget.json` and `hud-summary-budget.json`,
+  caps `OPENAI_REALTIME_DAILY_SESSION_BUDGET` (default 50 minted sessions) and
+  `OPENAI_HUD_SUMMARY_DAILY_BUDGET` (default 5000 summaries). Defaults chosen
+  by the owner. A unit is counted after the key check and before the upstream
+  call; over the cap → 429 `{error:'budget', dailyCount, budget, date}` and
+  nothing is counted. `GET /api/openai/status` → `{hasKey, realtime, hudSummary}`.
+  Client: the HUD treats 429 `budget` as "off for this session" (local summary,
+  `src/hudSummaryPolicy.js`); voice maps it to code `voice-budget` with the
+  hint `voice.error-hint-budget` (SK/EN) instead of "check your microphone".
+- **Debug log disk-fill.** `POST /api/realtime/debug-log` writes only for
+  genuine local requests (tunnel requests get a silent 204, nothing written)
+  and refuses with 507 once `.gev-logs/realtime-conversations.jsonl` would pass
+  `REALTIME_DEBUG_LOG_MAX_TOTAL_MB` (default 64 MB). The 8 MB per-request cap
+  stays.
+
+**Deploy note:** the server `.env` already has `AUTH_TRUST_CLOUDFLARE_PROXY=true`
+(set 2026-09-26 for the account backend), so per-visitor limits take effect on
+the next dev-server restart. Budget counters start at zero on first request.
+
 ### OKO optional account center and profiles (2026-09-26)
 
 `src/auth/` adds a Vanilla JS account center with a visible avatar/name/signed-in
@@ -2655,7 +2698,8 @@ Google 3D root tiles returned HTTP 403; live visual acceptance remains unverifie
 - `/api/military-installations` uses an independent limiter with the same 90-per-client/300-global one-minute bounds, so viewport installation refreshes never consume `/api/overpass` annotation/traffic capacity.
 - `/api/route` proxies bounded OSRM route requests for annotation routes, with profile allowlisting, distance caps, response caps, caching, and sanitized "no route found" errors.
 - Track endpoints: `/api/ais-live/track?mmsi=` (server-accumulated ring buffers; sub-route handled before the rows snapshot), `/api/opensky-track?icao24=` (OAuth, 60s cache, sanitized errors, independent OpenSky credit bucket), `/api/adsblol/trace?hex=` (60s cache, 5MB cap, ODbL attribution required in UI).
-- Realtime debug logs redact API keys, bearer tokens, client secrets, and image data URLs before writing to disk; request bodies are size-capped.
+- Realtime debug logs redact API keys, bearer tokens, client secrets, and image data URLs before writing to disk; request bodies are size-capped; only genuine local (non-tunnel) requests write, and the file is capped at `REALTIME_DEBUG_LOG_MAX_TOTAL_MB` (default 64).
+- OpenAI cost endpoints: default 10/min per client IP plus daily budgets (50 voice sessions, 5000 HUD summaries; `.gev-cache/openai/`), 429 `{error:'budget'}` over the cap. Client IP behind cloudflared = `CF-Connecting-IP` with `AUTH_TRUST_CLOUDFLARE_PROXY=true` on a loopback socket; loopback-only features (ACARS, events, debug log) go through `isDirectLocalRequest` (`vite.config.js`), which rejects Cloudflare/proxy headers and non-localhost Host.
 
 ## UI/UX Runtime Defaults
 

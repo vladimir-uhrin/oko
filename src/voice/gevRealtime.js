@@ -2324,11 +2324,13 @@ function isNearlyBlackFrame(ctx, width, height) {
  * kontrolovať mikrofón a sieť. Pure.
  * @param {number|null|undefined} status HTTP stav odpovede /api/realtime/token
  * @param {string|null|undefined} reason text chyby zo servera
- * @returns {'voice-unconfigured'|'voice-forbidden'|null}
+ * 429 {error:'budget'} = denný strop hlasových relácií na serveri (2026-10-03).
+ * @returns {'voice-unconfigured'|'voice-forbidden'|'voice-budget'|null}
  */
 export function classifyTokenFailure(status, reason) {
   if (status === 503 && /OPENAI_API_KEY is not set|not configured/i.test(String(reason || ''))) return 'voice-unconfigured';
   if (status === 403) return 'voice-forbidden';
+  if (status === 429 && String(reason || '') === 'budget') return 'voice-budget';
   return null;
 }
 
@@ -2336,13 +2338,14 @@ export function classifyTokenFailure(status, reason) {
  * i18n kľúč rady pod chybou hlasu podľa záznamu chyby (kód z tokenu má
  * prednosť, text servera je záloha pre záznamy bez kódu). Pure.
  * @param {{ code?: string|null, message?: string|null }|null} record
- * @returns {'voice.error-hint'|'voice.error-hint-unconfigured'|'voice.error-hint-forbidden'}
+ * @returns {'voice.error-hint'|'voice.error-hint-unconfigured'|'voice.error-hint-forbidden'|'voice.error-hint-budget'}
  */
 export function voiceErrorHintKey(record) {
   const code = record?.code
     || (/OPENAI_API_KEY is not set/i.test(String(record?.message || '')) ? 'voice-unconfigured' : null);
   if (code === 'voice-unconfigured') return 'voice.error-hint-unconfigured';
   if (code === 'voice-forbidden') return 'voice.error-hint-forbidden';
+  if (code === 'voice-budget') return 'voice.error-hint-budget';
   return 'voice.error-hint';
 }
 
