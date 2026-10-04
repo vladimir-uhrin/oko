@@ -235,3 +235,36 @@ test('dimenzia návštev má strop rôznych hodnôt za deň (vymyslené referery
   assert.equal(refs.length, 301);
   assert.equal(refs.find(row => row.val === 'iné').n, 5);
 });
+
+test('naživo: poloha z Cloudflare (mesto na 0,1°), inak hlavné mesto krajiny; bez IP, vypadnutie po 2,5 min', async t => {
+  const { runtime, clock } = setup(t);
+  const { hit } = await serve(t, runtime);
+  await hit({ t: 'view', p: '/?front=front', r: 'https://www.google.com/' }, { 'CF-Connecting-IP': '203.0.113.5', 'CF-IPCountry': 'SK',
+    'CF-IPCity': 'Ko%C5%A1ice', 'CF-IPLatitude': '48.71634', 'CF-IPLongitude': '21.26111' });
+  await hit({ t: 'view', p: '/en/' }, { 'CF-Connecting-IP': '198.51.100.7', 'CF-IPCountry': 'CZ', 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Mobile Safari/604.1' });
+  await hit({ t: 'view', p: '/' }, { 'CF-Connecting-IP': '192.0.2.44', 'CF-IPCountry': 'XX' });
+  const snap = runtime.liveSnapshot();
+  assert.equal(snap.liveNow, 3);
+  const kosice = snap.visitors.find(v => v.country === 'SK');
+  assert.deepEqual([kosice.city, kosice.lat, kosice.lon, kosice.precision, kosice.path], ['Košice', 48.7, 21.3, 'city', '/']);
+  const prague = snap.visitors.find(v => v.country === 'CZ');
+  assert.equal(prague.precision, 'country');
+  assert.ok(Math.abs(prague.lat - 50.08) < 0.2 && Math.abs(prague.lon - 14.43) < 0.2, 'záložný bod = Praha');
+  assert.equal(prague.device, 'mobil');
+  const unknown = snap.visitors.find(v => v.country === '??');
+  assert.equal(unknown.lat, null);
+  assert.equal(snap.cityPrecision, true);
+  assert.equal(snap.recent[2].ref, 'google.com');
+  const dump = JSON.stringify(snap);
+  assert.ok(!dump.includes('203.0.113.5') && !dump.includes('198.51.100.7') && !dump.includes('iPhone'), 'žiadna IP ani UA');
+  // Ping drží návštevníka naživo, ticho ho po 2,5 min vyradí.
+  clock.time += 120_000;
+  await hit({ t: 'ping' }, { 'CF-Connecting-IP': '203.0.113.5', 'CF-IPCountry': 'SK' });
+  clock.time += 60_000;
+  const later = runtime.liveSnapshot();
+  assert.equal(later.liveNow, 1);
+  assert.equal(later.visitors[0].city, 'Košice', 'ping nezmaže polohu zo zobrazenia');
+  assert.equal(later.visitors[0].activeS, 180);
+  runtime.sampleLive();
+  assert.deepEqual(runtime.liveSnapshot().history.map(h => h.n), [1, 1]);
+});

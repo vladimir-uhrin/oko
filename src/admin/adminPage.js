@@ -3,11 +3,14 @@
 // výhradne cez textContent. Oprávnenie rozhoduje server, táto stránka je len zobrazenie.
 
 import { STATUS, barChart, barList, lineChart, number, statusStrip } from './charts.js';
+import { VIEWS, autoView, createLiveMap } from './liveMap.js';
 
 const main = document.getElementById('admin-main');
 const tabs = document.getElementById('admin-tabs');
 const who = document.getElementById('admin-who');
 let csrf = '';
+/** Úklid aktívnej záložky (časovač, animácia) pri prepnutí — nastavuje ho napr. Naživo. */
+let leaveTab = null;
 
 const ERRORS = {
   owner_protected: 'Vlastníka ani vlastný účet tu nemožno meniť.',
@@ -165,7 +168,7 @@ async function renderOverview() {
     };
     if (live) {
       const today = live.series[live.series.length - 1] || { visitors: 0, views: 0 };
-      add('práve na stránke', live.liveNow, 'aktívni za 2,5 min');
+      add('práve na stránke', live.liveNow, 'mapa v záložke Naživo');
       add('návštevníci dnes', today.visitors, `${today.views} zobrazení`);
     }
     if (traffic24) {
@@ -1007,8 +1010,118 @@ async function renderMaintenance(message) {
       el('p', 'admin-muted', 'Mazať sa dá len čistá cache (obrázky, logá, Overpass, preklady, TomTom dlaždice…). Archív letov, zdieľané odkazy, terén a meteo bake sú dáta. Počítadlá rozpočtu (budget.json) sa nemažú.')));
 }
 
+// ── Naživo: mapa návštevníkov ─────────────────────────────────────────────
+const DEVICES = { mobil: 'mobil', tablet: 'tablet', desktop: 'počítač' };
+const liveState = { view: null, timer: 0, map: null };
+const agoText = seconds => (seconds < 60 ? `pred ${seconds} s` : seconds < 3600 ? `pred ${Math.floor(seconds / 60)} min` : `pred ${Math.floor(seconds / 3600)} h`);
+const placeText = v => [v.city, countryName(v.country)].filter(Boolean).join(', ');
+let mapData = null;
+/** Podklad mapy Naživo (Natural Earth) — samostatné chunky, načítajú sa až pri otvorení záložky. */
+async function loadMapData() {
+  if (!mapData) {
+    const [land, borders, places] = await Promise.all([import('../data/local_data/natural_earth/land.json'),
+      import('../data/local_data/natural_earth/borders.json'), import('../data/local_data/natural_earth/places.json')]);
+    mapData = { rings: land.default.rings, borders: borders.default.lines, places: places.default.places };
+  }
+  return mapData;
+}
+function describeCluster(cluster) {
+  const n = cluster.items.length;
+  const head = n === 1 ? placeText(cluster.items[0]) : `${n} návštevníci · ${[...new Set(cluster.items.map(placeText))].slice(0, 3).join(' · ')}`;
+  const lines = [head];
+  for (const v of cluster.items.slice(0, 6)) {
+    lines.push(`${DEVICES[v.device] || v.device} · ${v.path} · na stránke ${duration(v.activeS)}${v.precision === 'country' ? ' · len krajina' : ''}`);
+  }
+  if (n > 6) lines.push(`… a ďalší ${n - 6}`);
+  return lines;
+}
+async function renderLive() {
+  const [base, data] = await Promise.all([loadMapData(), api('/api/admin/live')]);
+  const count = el('span', 'live-count-value', data.liveNow);
+  const countBox = el('div', 'live-count');
+  countBox.append(el('span', 'live-dot'), count, el('span', 'live-count-label', 'práve na okolive.sk'));
+  const stats = el('div', 'live-stats');
+  const viewBar = el('div', 'admin-range');
+  const mapBox = el('div');
+  const trend = el('div');
+  const countries = el('div');
+  const feed = el('ol', 'live-feed');
+  const precisionNote = el('p', 'admin-muted');
+  setView(
+    section('', countBox, stats, viewBar, mapBox, precisionNote),
+    el('div', 'admin-grid'),
+  );
+  const grid = main.lastElementChild;
+  const countriesBox = el('section', 'admin-section admin-cell'); countriesBox.append(el('h2', '', 'Krajiny teraz'), countries);
+  const feedBox = el('section', 'admin-section admin-cell'); feedBox.append(el('h2', '', 'Posledné zobrazenia'), feed);
+  grid.append(countriesBox, feedBox);
+  const trendBox = section('Počet naživo · posledné 2 h', trend);
+  main.append(trendBox, el('p', 'admin-muted', 'Poloha žije len v pamäti servera počas aktivity návštevníka (2,5 min po poslednom signáli) — do databázy sa neukladá. Mesto je zaokrúhlené na 0,1°, IP adresa sa neukladá nikde. Do Not Track / GPC sa rešpektuje.'));
+
+  liveState.map = createLiveMap(mapBox, { ...base, describe: describeCluster });
+  const viewButtons = new Map();
+  let manual = liveState.view;
+  for (const [key, view] of Object.entries(VIEWS)) {
+    const b = button(view.label, () => { manual = liveState.view = key; liveState.map.setView(key); markView(); }, 'admin-chip');
+    viewButtons.set(key, b);
+    viewBar.append(b);
+  }
+  const autoButton = button('Automaticky', () => { manual = liveState.view = null; update(lastData); }, 'admin-chip');
+  viewBar.prepend(autoButton);
+  const markView = () => {
+    autoButton.setAttribute('aria-pressed', String(!manual));
+    for (const [key, b] of viewButtons) b.setAttribute('aria-pressed', String(key === liveState.map.view));
+  };
+
+  let lastData = data;
+  let lastRecentAt = 0;
+  function update(d) {
+    lastData = d;
+    count.textContent = String(d.liveNow);
+    const located = d.visitors.filter(v => Number.isFinite(v.lat));
+    const countryCount = new Set(d.visitors.map(v => v.country).filter(c => c !== '??')).size;
+    const mobile = d.visitors.filter(v => v.device === 'mobil' || v.device === 'tablet').length;
+    stats.replaceChildren(...[
+      [`${countryCount}`, countryCount === 1 ? 'krajina' : countryCount >= 2 && countryCount <= 4 ? 'krajiny' : 'krajín'],
+      [`${new Set(d.visitors.filter(v => v.city).map(v => `${v.city}|${v.country}`)).size}`, 'miest'],
+      [d.liveNow ? `${Math.round((mobile / d.liveNow) * 100)} %` : '—', 'z mobilu'],
+      [`${d.recent.filter(r => r.agoS < 3600).length}`, 'zobrazení za hodinu'],
+    ].map(([value, label]) => { const s = el('span', 'live-stat'); s.append(el('b', '', value), el('span', '', label)); return s; }));
+    if (!manual) liveState.map.setView(autoView(d.visitors));
+    markView();
+    liveState.map.setData(located, { note: d.cityPrecision ? 'poloha: mesto' : 'poloha: krajina' });
+    precisionNote.textContent = d.liveNow && !d.cityPrecision
+      ? 'Body stoja v hlavnom meste krajiny (prerušovaný krúžok). Presnosť na mesto zapne v Cloudflare: Rules → Settings → Managed Transforms → „Add visitor location headers".'
+      : located.length < d.visitors.length ? `${d.visitors.length - located.length} bez známej polohy.` : '';
+    const byCountry = new Map();
+    for (const v of d.visitors) byCountry.set(v.country, (byCountry.get(v.country) || 0) + 1);
+    countries.replaceChildren();
+    barList(countries, [...byCountry].map(([val, n]) => ({ val, n })).sort((a, b) => b.n - a.n), { labelOf: r => countryName(r.val) });
+    const newest = d.recent[0]?.at || 0;
+    feed.replaceChildren(...d.recent.slice(0, 15).map(r => {
+      const li = el('li', r.at > lastRecentAt && lastRecentAt ? 'live-feed-new' : '');
+      li.append(el('span', 'live-feed-time', agoText(r.agoS)), el('span', 'live-feed-place', placeText(r) || 'neznáme miesto'),
+        el('span', 'live-feed-meta', `${r.path} · ${DEVICES[r.device] || r.device}${r.ref && r.ref !== 'priamo' ? ` · z ${r.ref}` : ''}`));
+      return li;
+    }));
+    if (!d.recent.length) feed.append(el('li', 'admin-muted', 'Zatiaľ nič — zoznam sa plní od reštartu servera.'));
+    lastRecentAt = newest;
+    trend.replaceChildren();
+    const t = el('div'); trend.append(t);
+    lineChart(t, { labels: d.history.map(h => { const x = new Date(h.at); return `${x.getHours()}:${String(x.getMinutes()).padStart(2, '0')}`; }),
+      series: [{ name: 'Naživo', values: d.history.map(h => h.n) }], height: 160 });
+  }
+  update(data);
+  const tick = async () => {
+    if (document.hidden) return;
+    try { update(await api('/api/admin/live')); } catch { /* ďalší pokus o 10 s */ }
+  };
+  liveState.timer = setInterval(tick, 10_000);
+  leaveTab = () => { clearInterval(liveState.timer); liveState.map?.stop(); liveState.map = null; };
+}
+
 // ── štart ──────────────────────────────────────────────────────────────────
-const RENDER = { overview: renderOverview, analytics: renderAnalytics, traffic: renderTraffic, errors: renderErrors,
+const RENDER = { overview: renderOverview, live: renderLive, analytics: renderAnalytics, traffic: renderTraffic, errors: renderErrors,
   costs: renderCosts, feeds: renderFeeds, users: renderUsers, notice: renderNotice, maintenance: renderMaintenance,
   studio: renderStudio, performance: renderPerformance, audit: renderAudit, log: renderLog };
 function show(tab) {
@@ -1017,6 +1130,7 @@ function show(tab) {
     if (b.dataset.tab === current) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   }
   if (location.hash !== `#${current}`) history.replaceState(null, '', `#${current}`);
+  if (leaveTab) { leaveTab(); leaveTab = null; }
   void guarded(RENDER[current]);
 }
 

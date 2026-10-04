@@ -16,11 +16,15 @@ import { isIP } from 'node:net';
 import http from 'node:http';
 import { FEEDS, feedById, feedForPath, isStatusPath, routeKey } from './feeds.js';
 import { LOOPBACK_HOST } from './loopback.js';
+import { geoFromRequest } from './liveGeo.js';
 
 export const TIME_ZONE = 'Europe/Bratislava';
 const FLUSH_MS = 60_000;
 const SAMPLE_MS = 10 * 60_000;
 const LIVE_MS = 2.5 * 60_000;
+/** Záložka Naživo: posledné zobrazenia a minútová krivka (len v pamäti). */
+const RECENT_MAX = 40;
+const LIVE_HISTORY_MIN = 120;
 const HIT_MAX_BYTES = 4096;
 const HITS_PER_MIN = 60;
 const ERRORS_PER_MIN = 10;
@@ -114,7 +118,10 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
   let visitors = new Map();
   let errors = new Map();
   let samples = [];
-  const live = new Map(); // hash → posledný ping (len v pamäti)
+  // hash → { at, since, geo, path, device, views } (len v pamäti; IP ani UA sa nedrží)
+  const live = new Map();
+  const recent = []; // posledné zobrazenia bez hashu: { at, country, city, path, device, ref }
+  const liveHistory = []; // { at, n } raz za minútu
   const limiter = new Map(); // ip → { minute, hits, errors } (len v pamäti)
   const caps = { day: localDay(now()), counts: new Map() };
   let settingsCache = null;
@@ -289,12 +296,16 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
     const hash = createHash('sha256').update(`${store.salt(day)}|${ip}|${String(req.headers['user-agent'] || '').slice(0, 512)}`).digest('base64url').slice(0, 22);
     if (hit.t === 'view') {
       visitors.set(`${day}|${hash}`, { day, hash });
-      live.set(hash, time);
+      const geo = geoFromRequest(req);
+      const path = pagePath(hit.p);
+      const prev = live.get(hash);
+      live.set(hash, { at: time, since: prev?.since ?? time, geo, path, device: ua.device, views: (prev?.views || 0) + 1 });
+      recent.unshift({ at: time, country: geo.country, city: geo.city, path, device: ua.device, ref: referrerHost(hit.r, ownHosts) });
+      if (recent.length > RECENT_MAX) recent.length = RECENT_MAX;
       addPv(day, 'views', '');
-      addPv(day, 'path', pagePath(hit.p));
+      addPv(day, 'path', path);
       addPv(day, 'ref', referrerHost(hit.r, ownHosts));
-      const country = String(req.headers['cf-ipcountry'] || '').toUpperCase();
-      addPv(day, 'country', /^[A-Z]{2}$/.test(country) && country !== 'XX' ? country : '??');
+      addPv(day, 'country', geo.country);
       addPv(day, 'browser', ua.browser);
       addPv(day, 'os', ua.os);
       addPv(day, 'device', ua.device);
@@ -303,7 +314,9 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
       addPv(day, 'lang', /^[a-z]{2,3}$/.test(lang) ? lang : '??');
       addPv(day, 'hour', localHour(time));
     } else if (hit.t === 'ping') {
-      live.set(hash, time);
+      // Ping bez predchádzajúceho zobrazenia (reštart servera) — poloha z tejto požiadavky.
+      const prev = live.get(hash);
+      live.set(hash, prev ? { ...prev, at: time } : { at: time, since: time, geo: geoFromRequest(req), path: '/', device: ua.device, views: 0 });
       addPv(day, 'minutes', '');
     } else if (hit.t === 'layer') {
       const layer = String(hit.layer || '');
@@ -346,12 +359,36 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
     process.on('uncaughtExceptionMonitor', error => recordError('server', `Uncaught: ${error?.message || error}`, error?.stack || ''));
   }
 
+  function liveCount() {
+    const cut = now() - LIVE_MS;
+    for (const [hash, entry] of live) if (entry.at < cut) live.delete(hash);
+    return live.size;
+  }
+  function sampleLive() {
+    liveHistory.push({ at: now(), n: liveCount() });
+    if (liveHistory.length > LIVE_HISTORY_MIN) liveHistory.splice(0, liveHistory.length - LIVE_HISTORY_MIN);
+  }
+  /** Snímka pre záložku Naživo: body na mapu, posledné zobrazenia, krivka za 2 h. */
+  function liveSnapshot() {
+    const time = now();
+    const n = liveCount();
+    const visitorsNow = [...live.values()].sort((a, b) => b.at - a.at).map(entry => ({
+      lat: entry.geo.lat, lon: entry.geo.lon, precision: entry.geo.precision, country: entry.geo.country,
+      city: entry.geo.city, region: entry.geo.region, path: entry.path, device: entry.device, views: entry.views,
+      activeS: Math.round((time - entry.since) / 1000), idleS: Math.round((time - entry.at) / 1000),
+    }));
+    const recentViews = recent.filter(view => time - view.at < 24 * 3600_000)
+      .map(view => ({ ...view, agoS: Math.round((time - view.at) / 1000) }));
+    return { at: time, liveNow: n, windowS: LIVE_MS / 1000, visitors: visitorsNow, recent: recentViews,
+      history: [...liveHistory, { at: time, n }], cityPrecision: visitorsNow.some(v => v.precision === 'city') };
+  }
+
   let flushTimer = null;
   let sampleTimer = null;
   function start() {
     installConsoleCapture();
     if (!timers || flushTimer) return;
-    flushTimer = setInterval(() => { flush(); maintenance(); }, FLUSH_MS);
+    flushTimer = setInterval(() => { flush(); maintenance(); sampleLive(); }, FLUSH_MS);
     flushTimer.unref?.();
     sampleTimer = setInterval(() => { void sampleFeeds().catch(() => {}); }, SAMPLE_MS);
     sampleTimer.unref?.();
@@ -367,11 +404,9 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
   return {
     middleware, handlePublic, recordError, flush, maintenance, sampleFeeds, start, stop, notice,
     store, feedSetting,
-    liveVisitors() {
-      const cut = now() - LIVE_MS;
-      for (const [hash, at] of live) if (at < cut) live.delete(hash);
-      return live.size;
-    },
+    liveVisitors: liveCount,
+    liveSnapshot,
+    sampleLive,
     capCount,
     setFeedSetting(id, value, by) {
       const feed = feedById(id);

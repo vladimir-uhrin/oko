@@ -211,3 +211,29 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 
 /* Štúdio · Ukrajina: krátke číselné polia v texte nastavenia */
 .admin-check .admin-input-sm { height: auto; width: 70px; margin: 0 6px; padding: 5px 8px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text); font: inherit; }
+
+/* ── Naživo: mapa návštevníkov (2026-10-04) ─────────────────────────────── */
+.live-count { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.live-dot { width: 10px; height: 10px; border-radius: 50%; background: #ff4d4d; box-shadow: 0 0 0 0 #ff4d4d88; animation: live-pulse 1.6s infinite; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 #ff4d4d88; } 70% { box-shadow: 0 0 0 10px #ff4d4d00; } 100% { box-shadow: 0 0 0 0 #ff4d4d00; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.live-count-value { font: 500 44px/1 var(--font-mono); color: var(--text); letter-spacing: .02em; }
+.live-count-label { color: var(--muted); font: 12px var(--font-mono); letter-spacing: .14em; text-transform: uppercase; }
+.live-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0 0 14px; }
+.live-stat { display: inline-flex; align-items: baseline; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.live-stat b { color: var(--accent); font: 500 15px var(--font-mono); }
+.live-map { position: relative; border: 1px solid #00d4ff2e; border-radius: 12px; overflow: hidden; background: #04080d; }
+.live-map canvas { display: block; touch-action: pan-y; }
+.live-map-tip { position: absolute; z-index: 3; pointer-events: none; max-width: min(340px, 80%); padding: 8px 11px; border-radius: 8px;
+  background: #050a10f2; border: 1px solid #00d4ff44; box-shadow: 0 6px 24px #000a; font-size: 12px; color: var(--text); }
+.live-map-tip-head { margin-bottom: 4px; font-weight: 600; }
+.live-map-tip-row { color: var(--muted); font: 11.5px/1.5 var(--font-mono); }
+.live-feed { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.live-feed li { display: grid; grid-template-columns: 82px 1fr; gap: 0 10px; padding: 6px 0; border-bottom: 1px solid #ffffff0a; font-size: 12.5px; }
+.live-feed li:last-child { border-bottom: 0; }
+.live-feed-time { grid-row: span 2; color: var(--muted); font: 11.5px var(--font-mono); }
+.live-feed-place { color: var(--text); }
+.live-feed-meta { color: #6f8797; font: 11px var(--font-mono); overflow-wrap: anywhere; }
+.live-feed-new { animation: live-new 2.4s ease-out; }
+@keyframes live-new { from { background: #00d4ff22; } to { background: transparent; } }
+@media (max-width: 640px) { .live-count-value { font-size: 36px; } .live-feed li { grid-template-columns: 70px 1fr; } }
