@@ -200,7 +200,8 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
     hex: summary.layerId === 'flights' || summary.layerId === 'military' ? summary.id : '',
   });
   if (meta) footer.push(meta);
-  if (summary.stale) footer.push(t('hover.stale'));
+  if (summary.estimated) footer.push(t('hover.estimated'));
+  else if (summary.stale) footer.push(t('hover.stale'));
   if (summary.logoCredit) footer.push(String(summary.logoCredit));
 
   const hex = String(summary.id || '').trim().toLowerCase();

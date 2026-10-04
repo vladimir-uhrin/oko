@@ -88,6 +88,7 @@ import {
   COURSE_HOLD_SPEED_MPS,
 } from './motionModel.js';
 import { routePlausible } from './routePlausible.js';
+import { estimatePosition, qualifiesForEstimate } from './flightEstimate.js';
 import { isMilitaryIcao, isMilitaryLayerActive, refreshMilitaryRegistryIfStale, onMilitaryLayerActiveChange } from './militaryRegistry.js';
 import { formatFlightLevel } from './detectionDraw.js';
 import {
@@ -1053,6 +1054,24 @@ const GROUND_FLOOR_WARM_MAX_ALT_M = 4500;
 const GROUND_FLOOR_CLAMP_RADIUS_KM = 150;
 /** @type {Map<string, number>} icao24 -> consecutive missed polls */
 let _missingPolls = new Map();
+/**
+ * Odhadovaná poloha bez signálu (2026-10-04, flightEstimate.js; vlastník: „hluché miesta cez
+ * oceány… aj všade, kde to chýba"). icao24 → { fix, route, source: 'local'|'server', est }.
+ * Lietadlo, ktoré zmizne vo vzduchu, sa nevyradí, ale do každého snímku dostane riadok s odhadom
+ * (rovnaká ikona, karta, sledovanie); návrat signálu odhad zruší. Do histórie nič nejde.
+ */
+const _estimates = new Map();
+/** Odhad skončil (pristálo / 2 h bez cieľa) — znova ho nevyrábať, kým sa signál nevráti. */
+const _estimateEnded = new Set();
+/** Počítadlá pre kontrolu (vývojový server, __okoEstimates.stats). */
+const _estimateStats = { evicted: 0, noFix: 0, notQualified: 0, local: 0 };
+const SERVER_ESTIMATES_URL = '/api/flights/estimated';
+const SERVER_ESTIMATES_INTERVAL_MS = 60_000;
+let _serverEstimatesAt = 0;
+let _serverEstimatesInflight = false;
+/** Čiarkovaný úsek trajektórie sledovaného lietadla (indexy v _trailPositions; to null = po koniec). */
+let _trailEstimated = { from: null, to: null };
+let _estimateRingEntity = null;
 
 /**
  * Cheap equirectangular distance (km) — plenty accurate for the ~150 km
@@ -3441,7 +3460,7 @@ function _fleetTick() {
     const treatment = applyAircraftBillboardTreatment({
       billboard: bb,
       baseScale: isDot ? 1 : _fleetBillboardScale(icao24, info?.klass),
-      baseAlpha: _missingPolls.get(icao24) ? 0.45 : 1,
+      baseAlpha: (_missingPolls.get(icao24) || _estimates.has(icao24)) ? 0.45 : 1,
       baseColor,
       focusFactor: focus.factor,
       cameraDistanceM,
@@ -3597,7 +3616,7 @@ function _describeFlight(icao24) {
     verticalRateMps: Number.isFinite(info?.verticalRate) ? info.verticalRate : null,
     velocityMps: displayed.speedMps,
     track: displayed.trackDeg,
-    stale: Boolean(_missingPolls.get(icao24) || _backoff),
+    stale: Boolean(_missingPolls.get(icao24) || _backoff || _estimates.has(icao24)),
     airline: info?.airline ?? null,
     // CLASS label follows the TR-3B conversion so every downstream card
     // (cockpit, Contacts, analyst) agrees with the triangle on screen.
@@ -3628,9 +3647,131 @@ function _describeFlight(icao24) {
  * @param {Cesium.Cartesian3} position - New fix position, appended at the head.
  */
 function _appendTrailFix(position) {
+  // Odhad (2026-10-04): úsek od posledného skutočného fixu po návrat signálu je čiarkovaný.
+  const estimated = Boolean(_trackedIcao && _estimates.has(_trackedIcao));
+  if (estimated && _trailEstimated.from == null && _trailPositions.length) {
+    _trailEstimated = { from: _trailPositions.length - 1, to: null };
+  } else if (!estimated && _trailEstimated.from != null && _trailEstimated.to == null) {
+    _trailEstimated.to = _trailPositions.length; // aj skok z odhadu na skutočnú polohu je neistý
+  }
   _trailPositions.push(position);
-  if (_trailPositions.length > TRAIL_MAX_POINTS) _trailPositions.shift();
+  if (_trailPositions.length > TRAIL_MAX_POINTS) {
+    _trailPositions.shift();
+    if (_trailEstimated.from != null) {
+      _trailEstimated.from = Math.max(0, _trailEstimated.from - 1);
+      if (_trailEstimated.to != null) {
+        _trailEstimated.to -= 1;
+        if (_trailEstimated.to <= 0) _trailEstimated = { from: null, to: null };
+      }
+    }
+  }
   _refreshTrailDisplay();
+}
+
+/** Posledný skutočný fix lietadla pre lokálny odhad (formát flightEstimate.fixFromState). */
+function _localEstimateFix(icao24) {
+  const info = _flightData.get(icao24);
+  if (!info || !Number.isFinite(info.rawLat) || !Number.isFinite(info.rawLon)) return null;
+  const history = _positionHistory.get(icao24);
+  const lastFix = history && history.length ? history[history.length - 1] : null;
+  const tMs = Number.isFinite(lastFix?.epochMs) ? lastFix.epochMs : (Number.isFinite(info.lastContactEpochMs) ? info.lastContactEpochMs : Date.now());
+  return {
+    hex: icao24,
+    cs: String(info.callsign || '').trim().toUpperCase(),
+    tMs,
+    lat: info.rawLat,
+    lon: info.rawLon,
+    altM: Number.isFinite(info.altitude) ? info.altitude : null,
+    gsMps: Number.isFinite(info.velocity) ? info.velocity : null,
+    trkDeg: Number.isFinite(info.true_track) ? info.true_track : null,
+    vrMps: Number.isFinite(info.verticalRate) ? info.verticalRate : null,
+    onGround: info.onGround === true,
+    category: Number.isFinite(info.category) ? info.category : null,
+    country: info.originCountry || '',
+  };
+}
+
+/**
+ * Riadky snímku (formát OpenSky) pre lietadlá s odhadom, ktoré v živom snímku nie sú. Živé lietadlo
+ * odhad zruší; skončený odhad sa vyradí a už sa nevyrobí, kým sa signál nevráti.
+ */
+function _estimateRows(liveStates, nowMs) {
+  if (!_estimates.size) return [];
+  const live = new Set();
+  for (const state of liveStates) live.add(_normalizeTrackedIcao(state[0]));
+  for (const hex of _estimateEnded) if (live.has(hex)) _estimateEnded.delete(hex);
+  const rows = [];
+  const nowSec = Math.floor(nowMs / 1000);
+  for (const [hex, entry] of _estimates) {
+    if (live.has(hex)) {
+      _estimates.delete(hex);
+      continue;
+    }
+    if (!entry.route) {
+      const known = _flightData.get(hex)?.route;
+      if (known?.destination) entry.route = known;
+    }
+    const est = estimatePosition(entry.fix, entry.route, nowMs);
+    if (est.ended) {
+      _estimates.delete(hex);
+      _estimateEnded.add(hex);
+      continue;
+    }
+    entry.est = est;
+    const vr = est.method === 'route' && est.altM < entry.fix.altM ? -6 : 0;
+    rows.push([hex, entry.fix.cs, entry.fix.country || '', nowSec, entry.fix.tMs / 1000, est.lon, est.lat, est.altM, false,
+      est.gsMps, est.trackDeg, vr, null, est.altM, null, false, 0, entry.fix.category ?? null]);
+  }
+  return rows;
+}
+
+/** Zoznam odhadov zo servera (lietadlá, ktoré zmizli skôr, než sa stránka otvorila). Bez servera ticho nič. */
+async function _refreshServerEstimates() {
+  const nowMs = Date.now();
+  if (_serverEstimatesInflight || nowMs - _serverEstimatesAt < SERVER_ESTIMATES_INTERVAL_MS) return;
+  _serverEstimatesInflight = true;
+  _serverEstimatesAt = nowMs;
+  try {
+    const res = await fetch(SERVER_ESTIMATES_URL, { headers: { Accept: 'application/json' } });
+    if (!res.ok || !String(res.headers.get('content-type') || '').includes('json')) return;
+    const data = await res.json();
+    for (const f of Array.isArray(data?.flights) ? data.flights : []) {
+      const hex = _normalizeTrackedIcao(f?.hex);
+      if (!hex || _estimateEnded.has(hex)) continue;
+      const existing = _estimates.get(hex);
+      if (existing && (existing.route || !f.route)) continue; // lokálny odhad s trasou má prednosť
+      if (!existing && _billboards.has(hex) && !_missingPolls.get(hex)) continue; // je živé
+      if (!qualifiesForEstimate(f)) continue;
+      _estimates.set(hex, { fix: f, route: f.route || null, source: 'server', est: existing?.est ?? null });
+      if (f.route) {
+        const info = _flightData.get(hex);
+        if (info && !info.route) info.route = f.route;
+      }
+    }
+  } catch {
+    /* bez servera alebo bez endpointu (starší server) — len lokálne odhady */
+  } finally {
+    _serverEstimatesInflight = false;
+  }
+}
+
+/** Kruh neistoty okolo sledovaného lietadla s odhadom (rastie s časom bez signálu). */
+function _syncEstimateRing() {
+  if (_estimateRingEntity || !_viewer) return;
+  const active = () => Boolean(_trackedIcao && _estimates.get(_trackedIcao)?.est);
+  _estimateRingEntity = _viewer.entities.add({
+    id: `gev-trail:estimate-ring-${++_trailHeadSeq}`,
+    position: new Cesium.CallbackProperty(() => (active() ? (_trackedTrailCached() || _trackedDisplayPosition(_trackedIcao)) : undefined), false),
+    ellipse: {
+      show: new Cesium.CallbackProperty(active, false),
+      semiMajorAxis: new Cesium.CallbackProperty(() => Math.max(5000, (_estimates.get(_trackedIcao)?.est?.uncertaintyKm || 5) * 1000), false),
+      semiMinorAxis: new Cesium.CallbackProperty(() => Math.max(5000, (_estimates.get(_trackedIcao)?.est?.uncertaintyKm || 5) * 1000), false),
+      height: new Cesium.CallbackProperty(() => _estimates.get(_trackedIcao)?.est?.altM ?? 10000, false),
+      material: new Cesium.Color(0.86, 0.93, 1.0, 0.07),
+      outline: true,
+      outlineColor: new Cesium.Color(0.86, 0.93, 1.0, 0.55),
+    },
+  });
 }
 
 /** Farba hlavy trajektórie (posledný úsek k lietadlu) podľa výšky — mení sa na mieste, bez alokácie. */
@@ -3661,8 +3802,9 @@ function _refreshTrailDisplay() {
   // delayed dead-reckoned head, so the body primitive only rebuilds on a real fix
   // (poll cadence), never at motion cadence.
   if (!_trail) return;
-  _trail.setPositions(_trailPositions.length > 1 ? _trailPositions.slice(0, -1) : _trailPositions);
+  _trail.setPositions(_trailPositions.length > 1 ? _trailPositions.slice(0, -1) : _trailPositions, { dashed: _trailEstimated.from == null ? null : [_trailEstimated.from, _trailEstimated.to] });
   _updateTrailHeadColor();
+  _syncEstimateRing();
 }
 
 /**
@@ -3674,6 +3816,7 @@ function _refreshTrailDisplay() {
 function _startTrail(icao24) {
   _trailBackfillToken += 1;
   _trailPositions = [];
+  _trailEstimated = { from: null, to: null };
   const history = _positionHistory.get(icao24) || [];
   // Seed only fixes at/behind the DELAYED display time (now − RENDER_DELAY_SEC). The
   // newest ~RENDER_DELAY_SEC of fixes are AHEAD of the displayed icon; including them
@@ -3682,11 +3825,15 @@ function _startTrail(icao24) {
   const seedRenderTime = Cesium.JulianDate.addSeconds(
     Cesium.JulianDate.now(), -RENDER_DELAY_SEC, _scratchWarmupTime
   );
+  const estimatedFix = _estimates.get(icao24)?.fix ?? null;
   for (const fix of history) {
     if (Cesium.JulianDate.lessThanOrEquals(fix.time, seedRenderTime)) {
+      // Odhad (2026-10-04): posledný skutočný bod je začiatok čiarkovaného úseku.
+      if (estimatedFix && Number.isFinite(fix.epochMs) && fix.epochMs <= estimatedFix.tMs) _trailEstimated.from = _trailPositions.length;
       _trailPositions.push(Cesium.Cartesian3.clone(fix.position));
     }
   }
+  if (estimatedFix && _trailEstimated.from == null && _trailPositions.length) _trailEstimated.from = 0;
   if (!_trail && _viewer) {
     // 2026-10-04: farba podľa výšky a zaoblené zákruty (trailStyle.js) namiesto jednej fialovej.
     _trail = createTrail(_viewer, { color: TRAIL_COLOR, width: 2.4, altitudeColors: true, smooth: true });
@@ -3830,8 +3977,15 @@ async function _backfillTrail(icao24, token, oldestFixEpochSec) {
   }
 
   _trailPositions = older.concat(_trailPositions);
+  let shift = older.length;
   if (_trailPositions.length > TRAIL_MAX_POINTS) {
-    _trailPositions = _trailPositions.slice(_trailPositions.length - TRAIL_MAX_POINTS);
+    const cut = _trailPositions.length - TRAIL_MAX_POINTS;
+    _trailPositions = _trailPositions.slice(cut);
+    shift -= cut;
+  }
+  if (_trailEstimated.from != null) {
+    _trailEstimated.from = Math.max(0, _trailEstimated.from + shift);
+    if (_trailEstimated.to != null) _trailEstimated.to += shift;
   }
   _refreshTrailDisplay();
 }
@@ -4007,7 +4161,7 @@ function _cancelPendingTrackingRestore() {
 function _trackedLabelText(icao24) {
   const parts = _trackedLabelParts(icao24);
   if (!parts) return icao24;
-  const lines = [[parts.callsign, parts.flightLine, parts.stale ? 'STALE' : ''].filter(Boolean).join(' · ')];
+  const lines = [[parts.callsign, parts.flightLine, parts.estimated ? t('card.estimated-cue') : (parts.stale ? 'STALE' : '')].filter(Boolean).join(' · ')];
   if (parts.identLine) lines.push(parts.identLine);
   if (parts.route) {
     lines.push(formatRouteLine(parts.route) || `${parts.route.origin.code} → ${parts.route.destination.code}`);
@@ -4033,6 +4187,7 @@ function _trackedCardModel(icao24) {
     flightLine: parts.flightLine,
     flightLines: parts.flightLines,
     stale: parts.stale,
+    estimated: parts.estimated,
     identLine: parts.identLine,
     route: parts.route,
     progress: parts.progress,
@@ -4117,7 +4272,8 @@ function _trackedLabelParts(icao24) {
   // the ICAO hex, so a callsign-less enriched contact heads its readout with
   // the tail number rather than raw hex.
   const cs = _contactLabel(icao24, info);
-  const stale = Boolean(_missingPolls.get(icao24) || _backoff);
+  const estimated = _estimates.has(icao24);
+  const stale = !estimated && Boolean(_missingPolls.get(icao24) || _backoff);
   // Hladina s trendom a stúpaním v ft/min, rýchlosť, kurz — trendový glyf
   // ↑/↓ z existujúcej rodiny, prah v flightProgress (±2,5 m/s ≈ 500 ft/min).
   const flightState = {
@@ -4167,13 +4323,19 @@ function _trackedLabelParts(icao24) {
   // Riadok o dátach: odkiaľ fix je, aký je starý, squawk a hex — poctivosť
   // o pôvode (pravidlo 2) priamo na karte. Bežný squawk tu, núdzový nižšie.
   const nowMs = Date.now();
-  const metaLine = formatMetaLine({
+  const plainMeta = formatMetaLine({
     source: _lastSource,
     lastContactEpochMs: info.lastContactEpochMs,
     nowMs,
     squawk: alert ? '' : info.squawk,
     hex: icao24,
   });
+  // Odhad (2026-10-04): poctivo hneď na začiatku riadku — odhadovaná poloha a jej neistota;
+  // „poloha pred X" za ním ukazuje, ako dlho lietadlo nemá signál.
+  const estimate = estimated ? _estimates.get(icao24)?.est : null;
+  const metaLine = estimate
+    ? [t('card.estimated', { km: Math.max(5, Math.round(estimate.uncertaintyKm / 5) * 5) }), plainMeta].filter(Boolean).join(' · ')
+    : plainMeta;
   // Grafy celého letu (2026-09-12): história z proxy + živý rad + aktuálny
   // fix; s trasou aj odhad výšky po pristátie. Mini profil ostáva len ako
   // záloha, kým graf nemá 2 body.
@@ -4204,6 +4366,7 @@ function _trackedLabelParts(icao24) {
     flightLine,
     flightLines,
     stale,
+    estimated,
     identLine: ident || '',
     route,
     progress,
@@ -4517,6 +4680,13 @@ export function _driveFleetModelHandoffForTest({ icao24, position, course = 0 })
 }
 
 /** Exercise the exact asynchronous fleet loader and return its admitted model. */
+/** Kontrola v prehliadači / testy: lietadlá s odhadovanou polohou (2026-10-04). */
+export function _estimatesForDebug() {
+  return [..._estimates].map(([hex, e]) => ({ hex, cs: e.fix.cs, source: e.source, method: e.est?.method ?? null, uncertaintyKm: e.est ? Math.round(e.est.uncertaintyKm) : null, noSignalMin: Math.round((Date.now() - e.fix.tMs) / 60000), dest: e.route?.destination?.code ?? null, lat: e.est?.lat ?? null, lon: e.est?.lon ?? null }));
+}
+// Len vývojový server: tá istá inštancia modulu pre kontrolu v prehliadači (dynamický import dá inú).
+if (import.meta.env?.DEV && typeof globalThis !== 'undefined') globalThis.__okoEstimates = { stats: _estimateStats, list: _estimatesForDebug, track: (hex) => flightsLayer.trackById(hex, { origin: 'user' }) };
+
 export async function _ensureFleetModelForTest(icao24) {
   await _ensureModel(icao24);
   return _models.get(icao24) || null;
@@ -5220,6 +5390,10 @@ const flightsLayer = {
         : null;
       _lastSource = responseSource || 'OpenSky Network';
       _lastCoverage = responseCoverage || 'worldwide upstream snapshot';
+      // Odhady (2026-10-04): živé lietadlo odhad ruší; ostatné dostanú riadok s odhadovanou polohou.
+      // Server pridá lietadlá, ktoré zmizli skôr, než sa stránka otvorila (načíta sa na ďalší snímok).
+      void _refreshServerEstimates();
+      usableStates.push(..._estimateRows(usableStates, Date.now()));
       const currentIcaos = new Set();
       const acceptedSnapshotIcaos = new Set();
       const now = Cesium.JulianDate.now();
@@ -5634,6 +5808,21 @@ const flightsLayer = {
         }
         _missingPolls.delete(icao24);
 
+        // Zmizlo vo vzduchu (nie pristátie) → odhadovaná poloha namiesto vyradenia (2026-10-04).
+        _estimateStats.evicted += 1;
+        if (!_likelyLanded(icao24) && !_estimateEnded.has(icao24) && !_estimates.has(icao24)) {
+          const fix = _localEstimateFix(icao24);
+          if (!fix) _estimateStats.noFix += 1;
+          else if (!qualifiesForEstimate(fix)) _estimateStats.notQualified += 1;
+          if (fix && qualifiesForEstimate(fix)) {
+            _estimateStats.local += 1;
+            const info = _flightData.get(icao24);
+            const route = info?.route && _routeIsPlausible(icao24, info.route) ? info.route : null;
+            _estimates.set(icao24, { fix, route, source: 'local', est: null });
+            continue;
+          }
+        }
+
         // If the tracked flight is truly gone, clear tracking BEFORE deleting
         // its state (M3 ordering, keep it): teardown reads the maps this loop
         // is about to delete (billboard restore, DR cache reset), and we must
@@ -5972,6 +6161,7 @@ const flightsLayer = {
       // fallback meno štátu z OpenSky).
       countryIso: resolveFlagIso2(info.countryIso, info.originCountry),
       stale: _missingPolls.get(icao24) > 0,
+      estimated: _estimates.has(icao24),
       // Kartička pod kurzorom ako karta po kliknutí (2026-09-27, vlastník: „keď prejdem myšou na
       // lietadlo, nezobrazí sa mi všetko, čo má"): dva čitateľné riadky letu + vietor vo výške
       // letu (rovnaké ako _trackedLabelParts), logá dopravcu a výrobcu z cache. Grafy celého letu

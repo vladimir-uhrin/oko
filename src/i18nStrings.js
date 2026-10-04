@@ -108,6 +108,10 @@ export const EN_STRINGS = Object.freeze({
   'loader.configuring': 'Configuring viewer...',
   'loader.made-by': 'made by',
   // Súhlas s cookies + GA4 (2026-09-30, CMP 2026-10-04, src/analytics.js).
+  // Odhadovaná poloha bez signálu (2026-10-04, flightEstimate.js).
+  'card.estimated-cue': 'ESTIMATE',
+  'card.estimated': 'estimated position ±{km} km',
+  'hover.estimated': 'estimated position — aircraft out of coverage',
   'topics.link': 'Topics',
   'topics.title': 'Topics: aircraft, ships, Ukraine, Middle East, gas',
   'consent.kicker': 'Privacy // Cookies',
@@ -2401,6 +2405,10 @@ export const SK_STRINGS = Object.freeze({
   'loader.configuring': 'Konfigurujem zobrazenie…',
   'loader.made-by': 'vytvoril',
   // Súhlas s cookies + GA4 (2026-09-30, CMP 2026-10-04, src/analytics.js).
+  // Odhadovaná poloha bez signálu (2026-10-04, flightEstimate.js).
+  'card.estimated-cue': 'ODHAD',
+  'card.estimated': 'odhadovaná poloha ±{km} km',
+  'hover.estimated': 'odhadovaná poloha — lietadlo je mimo pokrytia',
   'topics.link': 'Témy',
   'topics.title': 'Témy: lietadlá, lode, Ukrajina, Blízky východ, plyn',
   'consent.kicker': 'Súkromie // Cookies',

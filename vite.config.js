@@ -34,6 +34,7 @@ import { authPlugin } from './src/auth/server/plugin.js';
 import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
+import { createEstimateTracker } from './src/data/flightEstimate.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createAircraftSearchService } from './src/data/aircraftSearchService.js';
@@ -182,6 +183,13 @@ let _openskyTokenExpiry = 0;
 let _openskyTokenPromise = null;
 /** Udalosti pod účtom vlastníka (2026-10-03): kontrola z authPlugin, nastaví sa v configu. */
 let _eventsOwnerCheck = null;
+/** Trasa podľa volacieho znaku z adsbdb proxy (jej cache) — nastaví adsbdbProxy. */
+let _adsbdbRouteLookup = null;
+/**
+ * Odhadovaná poloha lietadiel bez signálu (2026-10-04, src/data/flightEstimate.js): kŕmi ho LEN
+ * čerstvý svetový snímok OpenSky (nie výrez okolo kamery, nie regionálna záloha), do histórie nejde.
+ */
+const _estimateTracker = createEstimateTracker({ lookupRoute: (cs) => (_adsbdbRouteLookup ? _adsbdbRouteLookup(cs) : Promise.resolve(null)) });
 /** @type {string|null} Cached upstream response body (JSON text). */
 let _openskyCacheBody = null;
 /** @type {number} HTTP status of the cached response. */
@@ -3546,6 +3554,7 @@ function adsbdbProxy() {
     return inflight.get(ik);
   }
 
+  _adsbdbRouteLookup = async (cs) => { await loadOnce(); return lookup('route', String(cs || '').toUpperCase()); };
   return {
     name: 'adsbdb-proxy',
     configureServer(server) {
@@ -5895,6 +5904,19 @@ function flightHistoryProxy() {
         });
         keeper.attach(server.httpServer);
       }
+      // Odhadované lietadlá bez signálu (2026-10-04): posledný fix + overený cieľ, polohu počíta
+      // klient (src/data/flightEstimate.js estimatePosition). Krátka cache — zoznam sa mení s každým snímkom.
+      server.middlewares.use('/api/flights/estimated', (req, res) => {
+        try {
+          const flights = _estimateTracker.list(Date.now());
+          const body = JSON.stringify({ now: Date.now(), count: flights.length, flights });
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=30' });
+          res.end(body);
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: String(error?.message || error) }));
+        }
+      });
       server.middlewares.use('/api/opensky', (req, res, next) => {
         if (!isKeeperRequest(req)) keeper?.noteClient('opensky');
         if (enabled) tapResponse(res, (s, body) => s.recordOpenSkyBody(body, res.getHeader('X-Flight-Source') ? 'adsb.lol/regional' : 'opensky'));
@@ -6231,6 +6253,10 @@ function openSkyProxy() {
             _openskyCacheStatus = upstream.status;
             _openskyCacheTime = now;
             _openskyCacheSourceEpochMs = sourceEpochMs;
+            // Nový svetový snímok → sledovač odhadov (mimo cesty odpovede).
+            setImmediate(() => {
+              try { const world = openSkyWorldParsed(); if (world) _estimateTracker.ingest(world); } catch (error) { console.warn('[estimates] ingest failed:', error?.message || error); }
+            });
             _openskyCacheMeta = {
               requestedMode,
               usedMode,

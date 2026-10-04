@@ -134,18 +134,6 @@ export function createTrail(viewer, { color, width = 1.3, altitudeColors = false
   };
 }
 
-/** Bez zbytočných dvojbodov: rovnaké pravidlo ako jednofarebná čiara. */
-function dedupePositions(cartesians) {
-  const positions = [];
-  for (const position of Array.isArray(cartesians) ? cartesians : []) {
-    if (!position) continue;
-    const last = positions[positions.length - 1];
-    if (last && Cesium.Cartesian3.distanceSquared(last, position) < MIN_SEGMENT_DISTANCE_SQ) continue;
-    positions.push(position);
-  }
-  return positions;
-}
-
 /**
  * Trajektória lietadla farbená podľa výšky (2026-10-04). Pool entít — jedna na úsek výškového
  * pásma; prebytočné sa skryjú, nemažú (ďalšia poloha ich zvyčajne znova použije). Prepočet beží
@@ -175,32 +163,72 @@ function createAltitudeTrail(viewer, { width, smooth }) {
     for (let i = index; i < pool.length; i += 1) pool[i].show = false;
   }
 
+  /** Jedna časť čiary (plná alebo čiarkovaná) → úseky pásiem od indexu `next` v poole. */
+  function drawPart(points, dashed, next) {
+    if (points.length < 2) return next;
+    const positions = smooth
+      ? smoothTrail(points).map((p) => (p instanceof Cesium.Cartesian3 ? p : new Cesium.Cartesian3(p.x, p.y, p.z)))
+      : points;
+    const bands = positions.map((p) => {
+      const carto = Cesium.Cartographic.fromCartesian(p, Cesium.Ellipsoid.WGS84, scratchCarto);
+      return altitudeBand(carto ? carto.height : 0);
+    });
+    for (const run of splitByBand(bands)) {
+      const entity = entityAt(next);
+      next += 1;
+      const [r, g, b] = bandRgb(run.band);
+      const color = new Cesium.Color(r, g, b, TRAIL_ALPHA);
+      const dim = new Cesium.Color(r, g, b, TRAIL_OCCLUDED_ALPHA);
+      entity.polyline.positions = positions.slice(run.start, run.end + 1);
+      // Odhad bez signálu (2026-10-04) čiarkovane — nie je to nameraná trasa.
+      entity.polyline.material = dashed ? new Cesium.PolylineDashMaterialProperty({ color, dashLength: 14 }) : color;
+      // Pravidlo z kola 6: úsek pod fotoreálnym mestom sa kreslí stlmene, nikdy nezmizne.
+      entity.polyline.depthFailMaterial = dashed ? new Cesium.PolylineDashMaterialProperty({ color: dim, dashLength: 14 }) : dim;
+      entity.show = visible;
+    }
+    return next;
+  }
+
   return {
-    setPositions(cartesians) {
+    /**
+     * @param {Cesium.Cartesian3[]} cartesians
+     * @param {{dashed?: [number, number|null]|null}} [options] čiarkovaný úsek (indexy vo vstupe,
+     *   koniec null = po koniec) — odhadovaná poloha bez signálu.
+     */
+    setPositions(cartesians, { dashed = null } = {}) {
       if (destroyed || !viewer || viewer.isDestroyed()) return;
-      let positions = dedupePositions(cartesians);
+      const input = Array.isArray(cartesians) ? cartesians : [];
+      // Bez dvojbodov, ale s pamäťou pôvodného indexu (čiarkovaný úsek je v pôvodných indexoch).
+      const positions = [];
+      const origin = [];
+      input.forEach((position, index) => {
+        if (!position) return;
+        const last = positions[positions.length - 1];
+        if (last && Cesium.Cartesian3.distanceSquared(last, position) < MIN_SEGMENT_DISTANCE_SQ) return;
+        positions.push(position);
+        origin.push(index);
+      });
       if (positions.length < 2) {
         used = 0;
         hideFrom(0);
         return;
       }
-      if (smooth) positions = smoothTrail(positions).map((p) => (p instanceof Cesium.Cartesian3 ? p : new Cesium.Cartesian3(p.x, p.y, p.z)));
-      const bands = positions.map((p) => {
-        const carto = Cesium.Cartographic.fromCartesian(p, Cesium.Ellipsoid.WGS84, scratchCarto);
-        return altitudeBand(carto ? carto.height : 0);
-      });
-      const runs = splitByBand(bands);
-      runs.forEach((run, i) => {
-        const entity = entityAt(i);
-        const [r, g, b] = bandRgb(run.band);
-        const color = new Cesium.Color(r, g, b, TRAIL_ALPHA);
-        entity.polyline.positions = positions.slice(run.start, run.end + 1);
-        entity.polyline.material = color;
-        // Pravidlo z kola 6: úsek pod fotoreálnym mestom sa kreslí stlmene, nikdy nezmizne.
-        entity.polyline.depthFailMaterial = new Cesium.Color(r, g, b, TRAIL_OCCLUDED_ALPHA);
-        entity.show = visible;
-      });
-      used = runs.length;
+      let next = 0;
+      const from = Array.isArray(dashed) && Number.isFinite(dashed[0]) ? origin.findIndex((o) => o >= dashed[0]) : -1;
+      if (from < 0) {
+        next = drawPart(positions, false, next);
+      } else {
+        const toOrig = dashed[1];
+        let to = positions.length - 1;
+        if (Number.isFinite(toOrig)) {
+          for (let i = origin.length - 1; i >= 0; i -= 1) if (origin[i] <= toOrig) { to = i; break; }
+        }
+        to = Math.max(from, to);
+        next = drawPart(positions.slice(0, from + 1), false, next);
+        next = drawPart(positions.slice(from, to + 1), true, next);
+        next = drawPart(positions.slice(to), false, next);
+      }
+      used = next;
       hideFrom(used);
     },
 

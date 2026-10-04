@@ -290,6 +290,7 @@ export function buildTrackedCardModel({
   flightLine = '',
   flightLines = null,
   stale = false,
+  estimated = false,
   identLine = '',
   route = null,
   progress = null,
@@ -307,7 +308,7 @@ export function buildTrackedCardModel({
 } = {}) {
   const cs = String(callsign || '').trim();
   const iata = String(flightIata || '').trim().toUpperCase();
-  const title = [cs, iata && iata !== cs.toUpperCase() ? iata : '', stale ? 'STALE' : ''].filter(Boolean).join(' · ');
+  const title = [cs, iata && iata !== cs.toUpperCase() ? iata : '', estimated ? t('card.estimated-cue') : (stale ? 'STALE' : '')].filter(Boolean).join(' · ');
   const flightPart = Array.isArray(flightLines) && flightLines.length ? flightLines : [flightLine];
   const details = [...flightPart, identLine].map((s) => String(s || '').trim()).filter(Boolean);
   // ACARS riadok (2026-09-08, airframes.io, len lokálne) ide do päty PRED
