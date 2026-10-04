@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openAdminStore } from '../../admin/server/store.js';
 import { createAdminRuntime } from '../../admin/server/runtime.js';
+import { createAlerts } from '../../admin/server/alerts.js';
 import { credentials, fixture } from './account-test-helpers.mjs';
 
 const owner = { email: 'owner@oko.test', password: 'owner password phrase long', displayName: 'Owner' };
@@ -321,4 +322,22 @@ test('jedno vlastníctvo: účet z OKO_OWNER_EMAILS dostane admin aj bez roly ow
   const stranger = env.client();
   assert.equal((await stranger.register({ email: 'other@example.com', password: 'another long password phrase', displayName: 'Other' })).status, 201);
   assert.equal((await stranger.request('/api/admin/overview')).status, 404);
+});
+
+test('upozornenia cez admin API: člen 404, vlastník nastaví, skúška bez mailera ostane v zozname, audit', async t => {
+  const { admin, member, runtime } = await setupWithRuntime(t);
+  runtime.alerts = createAlerts({ store: runtime.store, mailer: { configured: false }, timers: false, log: () => {}, defaultEmail: 'owner@oko.test' });
+  assert.equal((await member.request('/api/admin/alerts')).status, 404);
+  assert.equal((await member.post('/api/admin/alerts', { enabled: true })).status, 404);
+  const initial = await admin.request('/api/admin/alerts');
+  assert.deepEqual([initial.status, initial.data.status.enabled, initial.data.status.email, initial.data.status.mailer], [200, false, 'owner@oko.test', false]);
+  assert.equal((await admin.post('/api/admin/alerts', { enabled: true }, { headers: { 'X-CSRF-Token': '' } })).status, 403);
+  assert.equal((await admin.post('/api/admin/alerts', { email: 'zle' })).status, 400);
+  assert.equal((await admin.post('/api/admin/alerts', { hacker: 1 })).status, 400, 'neznáme pole');
+  const saved = await admin.post('/api/admin/alerts', { enabled: true, feedDownMinutes: 90, email: 'iny@okolive.sk' });
+  assert.deepEqual([saved.data.status.enabled, saved.data.status.feedDownMinutes, saved.data.status.email], [true, 90, 'iny@okolive.sk']);
+  const tested = await admin.post('/api/admin/alerts/test', {});
+  assert.deepEqual([tested.status, tested.data.entry.mailed, tested.data.history.length], [200, false, 1]);
+  const audit = (await admin.request('/api/admin/audit')).data.audit.map(entry => entry.action);
+  assert.deepEqual(audit.slice(0, 2), ['alerts_test', 'alerts_settings']);
 });

@@ -818,6 +818,12 @@ test('DO ŠTÚDIA (2026-10-03): udalosť → návrh v Štúdiu s obrázkom feed,
     assert.ok(imports[0].title.length > 3 && imports[0].text.includes('OpenSky'));
     const meta = await sharp(imports[0].image).metadata();
     assert.deepEqual([meta.width, meta.height, meta.format], [1080, 1350, 'jpeg'], 'obrázok feed');
+    // Karusel (2026-10-04): snímky kľúčových momentov, každá iná (stopa po moment), najviac 4, rovnaký formát.
+    assert.ok(imports[0].images.length >= 1 && imports[0].images.length <= 4, `snímok karuselu: ${imports[0].images.length}`);
+    assert.equal(first.json.slides, 1 + imports[0].images.length);
+    const slide = await sharp(imports[0].images[0]).metadata();
+    assert.deepEqual([slide.width, slide.height], [1080, 1350]);
+    assert.ok(!imports[0].images[0].equals(imports[0].image), 'snímka momentu sa líši od hlavnej karty');
     // S hotovým 3D videom ide aj cesta k súboru.
     const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(16), Buffer.from('moov'), Buffer.alloc(64)]);
     videoStore.save(service.store.get(id), mp4);

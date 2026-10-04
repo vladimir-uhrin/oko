@@ -31,7 +31,7 @@ import { simplifyTrack } from './eventCard.js';
 import { VIDEO_UPLOAD_MAX_BYTES, isMp4 } from './eventVideoRender.js';
 import { normalizeVideoScript, quoteFoundIn, scriptSources } from './eventVideoScript.js';
 import { createEventVideoJobs } from './eventVideoJobs.js';
-import { eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, isPublishable, postText, publicEventView } from './eventPost.js';
+import { eventHeadline, eventShareHash, eventShareMeta, facebookShareUrl, isPublishable, keyMoments, postText, publicEventView } from './eventPost.js';
 import { parseGdeltArticles } from './situationNews.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS, STATE_BACKFILL_UA, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
 import { validateSharePayload } from '../shareStore.js';
@@ -743,13 +743,25 @@ export function createFlightEventsService({
     const full = await withTrack(event);
     const card = await renderCard(full, 'feed');
     const videoFile = videoStore?.find(full)?.file || null;
+    // Karusel (2026-10-04): po hlavnej karte snímky kľúčových momentov (stopa po moment, moment zvýraznený),
+    // najviac 4 — rovnomerne vybrané, aby príbeh išiel v čase. Jedna snímka = jeden moment.
+    const images = [];
+    try {
+      const moments = keyMoments(full).filter((m) => Number.isFinite(m.t) && m.kind !== 'last-contact');
+      const step = Math.max(1, Math.ceil(moments.length / 4));
+      const picked = moments.filter((_, i) => i % step === 0).slice(0, 4);
+      for (const m of picked) {
+        const i = moments.indexOf(m);
+        images.push((await renderCard(full, 'feed', { frame: { t: m.endT ?? m.t, current: i, pop: 1 } })).jpeg);
+      }
+    } catch (error) { log(`[events] ${event.id} karusel: ${error?.message || error}`); }
     try {
       const result = await studioImport({
         template: 'event', eventKey: `event:${event.id}`, title: eventHeadline(full), text: postText(full, { url: event.published?.url || null }),
-        image: card.jpeg, videoFile, origin: 'manual', meta: { source: 'OpenSky Network, adsb.lol', eventId: event.id, publishedUrl: event.published?.url || null },
+        image: card.jpeg, images, videoFile, origin: 'manual', meta: { source: 'OpenSky Network, adsb.lol', eventId: event.id, publishedUrl: event.published?.url || null, slides: 1 + images.length },
       });
       log(`[events] ${event.id} ${event.callsign || ''} → Štúdio (${result.created ? 'nový návrh' : result.reason})`);
-      return { status: 200, body: { id: event.id, created: Boolean(result.created), reason: result.reason || null, draftId: result.draft?.id || null, video: Boolean(videoFile) } };
+      return { status: 200, body: { id: event.id, created: Boolean(result.created), reason: result.reason || null, draftId: result.draft?.id || null, video: Boolean(videoFile), slides: 1 + images.length } };
     } catch (error) {
       log(`[events] ${event.id} do Štúdia zlyhalo: ${error?.message || error}`);
       return { status: error?.status || 500, body: { error: error?.status ? error.message : 'studio_error' } };

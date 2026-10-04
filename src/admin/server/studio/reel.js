@@ -95,7 +95,7 @@ function backgroundSvg() {
 }
 
 /** Popredie: texty, značky, prechody. */
-export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk' } = {}) {
+export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk', captions = [] } = {}) {
   const view = reelView(card, t);
   const project = projector(view);
   const parts = [];
@@ -145,6 +145,17 @@ export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk
   lines.forEach((line, i) => parts.push(`<text x="70" y="${MAP.y + MAP.h + 20 + i * 46}" font-family="${FONT}" font-size="36" fill="#cfe0ea" opacity="${fade(t, 3.2 + i * 0.25).toFixed(2)}">${escapeXml(line)}</text>`));
   const footY = MAP.y + MAP.h + 20 + lines.length * 46 + 26;
   parts.push(`<text x="70" y="${footY}" font-family="${FONT}" font-size="26" fill="#7f99aa" opacity="${fade(t, 4).toFixed(2)}">Zdroj: ${escapeXml(card.source)} · ${escapeXml(stamp(card.at))} · mapa: Natural Earth</text>`);
+  // titulky (2026-10-04): väčšina ľudí pozerá bez zvuku — veta narácie v bezpečnej zóne dole
+  const caption = captions.find(c => t >= c.from && t < c.to);
+  if (caption) {
+    const rows = wrap(caption.text, 34, 2);
+    const boxH = 28 + rows.length * 50;
+    const y = 1580 - boxH; // spodná hrana v bezpečnej zóne
+    const op = Math.min(fade(t, caption.from, 0.25), fade(caption.to, t, 0.25)).toFixed(2);
+    parts.push(`<g opacity="${op}"><rect x="50" y="${y}" width="980" height="${boxH}" rx="14" fill="#070d14" fill-opacity="0.78"/>`
+      + rows.map((row, i) => `<text x="540" y="${y + 50 + i * 50}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="600" fill="#ffffff">${escapeXml(row)}</text>`).join('')
+      + '</g>');
+  }
   // výzva na konci
   const cta = fade(t, seconds - 3.2, 0.7);
   parts.push(`<g opacity="${cta.toFixed(2)}"><rect x="70" y="${footY + 34}" width="${Math.min(940, 60 + site.length * 24 + 240)}" height="64" rx="32" fill="#00d4ff1f" stroke="#00d4ff88" stroke-width="2"/>
@@ -175,6 +186,46 @@ export function narration(item) {
   return `${item.title}. ${sentence.split(/(?<=\.)\s/)[0] || ''}`.replace(/[#🌋📊🚀📡🌍]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
+/**
+ * Titulky z narácie: vety rozložené v čase úmerne dĺžke textu v okne [start, start + length]
+ * (s hlasom = dĺžka nahrávky, bez hlasu = trvanie reelu bez úvodu a výzvy). Pure.
+ */
+export function captionsFor(item, { start = 1.2, length = 8 } = {}) {
+  const text = typeof item === 'string' ? item : narration(item);
+  const sentences = text.split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(Boolean);
+  if (!sentences.length || length <= 0) return [];
+  const total = sentences.reduce((sum, sentence) => sum + sentence.length, 0) || 1;
+  let at = start;
+  return sentences.map(sentence => {
+    const span = Math.max(1.2, length * sentence.length / total);
+    const row = { from: Number(at.toFixed(2)), to: Number((at + span).toFixed(2)), text: sentence };
+    at += span;
+    return row;
+  });
+}
+
+/** Dĺžka videa v sekundách (ffprobe; bez neho z výpisu ffmpeg -i). null = nezistené. */
+export async function probeSeconds(file, { env = process.env } = {}) {
+  const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
+  const ffprobe = env.FFPROBE_PATH || (env.FFMPEG_PATH ? path.join(path.dirname(env.FFMPEG_PATH), path.basename(env.FFMPEG_PATH).replace(/ffmpeg/i, 'ffprobe')) : 'ffprobe');
+  const capture = (bin, args) => new Promise(resolve => {
+    let out = '';
+    let child;
+    try { child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); } catch { return resolve(null); }
+    child.on('error', () => resolve(null));
+    child.stdout.on('data', chunk => { out += chunk; });
+    child.stderr.on('data', chunk => { out = (out + chunk).slice(-4000); });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 20_000);
+    child.on('close', () => { clearTimeout(timer); resolve(out); });
+  });
+  const probed = await capture(ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]);
+  const direct = Number(String(probed || '').trim());
+  if (Number.isFinite(direct) && direct > 0) return Math.round(direct * 100) / 100;
+  const dump = await capture(ffmpeg, ['-hide_banner', '-i', file]);
+  const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(String(dump || ''));
+  return m ? Math.round((Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])) * 100) / 100 : null;
+}
+
 async function run(bin, args, { input = null, timeoutMs = 120_000 } = {}) {
   const child = spawn(bin, args, { stdio: [input === null ? 'ignore' : 'pipe', 'ignore', 'pipe'], windowsHide: true });
   let stderr = '';
@@ -196,7 +247,7 @@ export async function padToReel(inFile, outFile, { env = process.env } = {}) {
   await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', inFile, '-filter_complex', filter, '-map', '[v]', '-map', '0:a?',
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-g', String(REEL.fps * 2), '-r', String(REEL.fps),
     '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', outFile], { timeoutMs: 10 * 60_000 });
-  return { bytes: (await stat(outFile)).size };
+  return { bytes: (await stat(outFile)).size, seconds: await probeSeconds(outFile, { env }) };
 }
 
 /** Prvá snímka videa ako JPEG (obrázok príspevku k importovanému videu). */
@@ -231,7 +282,7 @@ async function pickMusic(dir, seed) {
  * @param {object} options { audio: 'ambient'|'music'|'none', voice: boolean, env, site, onProgress }
  */
 export async function renderReel(item, outFile, { audio = 'ambient', voice = false, env = process.env, site = 'okolive.sk', onProgress = () => {},
-  seconds: baseSeconds = REEL.seconds, fps = REEL.fps, voiceProvider = null } = {}) {
+  seconds: baseSeconds = REEL.seconds, fps = REEL.fps, voiceProvider = null, captions: wantCaptions = true } = {}) {
   const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
   const work = await mkdtemp(path.join(tmpdir(), 'oko-reel-'));
   try {
@@ -245,10 +296,13 @@ export async function renderReel(item, outFile, { audio = 'ambient', voice = fal
       voiceFile = path.join(work, 'voice.wav');
       await run(env.PIPER_PATH, ['--model', env.PIPER_MODEL, '--output_file', voiceFile], { input: narration(item), timeoutMs: 60_000 });
     }
+    let speech = 0;
     if (voiceFile) {
-      const length = wavSeconds(await readFile(voiceFile));
-      seconds = Math.min(30, Math.max(baseSeconds, Math.ceil(length + 3)));
+      speech = wavSeconds(await readFile(voiceFile));
+      seconds = Math.min(30, Math.max(baseSeconds, Math.ceil(speech + 3)));
     }
+    // Titulky: s hlasom kopírujú nahrávku (začína po 1,2 s), bez hlasu vyplnia čas medzi úvodom a výzvou.
+    const captions = wantCaptions ? captionsFor(item, speech ? { start: 1.2, length: speech } : { start: 1.0, length: Math.max(3, seconds - 4.5) }) : [];
     // 2) snímky → ffmpeg stdin (raw RGB)
     const frames = seconds * fps;
     const background = await sharp(Buffer.from(backgroundSvg())).png().toBuffer();
@@ -285,7 +339,7 @@ export async function renderReel(item, outFile, { audio = 'ambient', voice = fal
         if (key !== lastMapKey) { staticMap = await sharp(Buffer.from(mapLayerSvg(view))).png({ compressionLevel: 1 }).toBuffer(); lastMapKey = key; }
       }
       const frame = await sharp(background).composite([{ input: staticMap, left: MAP.x, top: MAP.y },
-        { input: Buffer.from(overlaySvg(item.card, t, { seconds, site })), left: 0, top: 0 }]).removeAlpha().raw().toBuffer();
+        { input: Buffer.from(overlaySvg(item.card, t, { seconds, site, captions })), left: 0, top: 0 }]).removeAlpha().raw().toBuffer();
       if (!encoder.stdin.write(frame)) await once(encoder.stdin, 'drain');
       if (f % fps === 0) onProgress(f / frames);
     }
@@ -328,7 +382,7 @@ export async function renderReel(item, outFile, { audio = 'ambient', voice = fal
     await writeFile(outFile, await readFile(out));
     onProgress(1);
     return { seconds, audio: filters.length ? (audio === 'music' && mixInputs === 2 ? 'music' : mixInputs ? 'ambient' : 'none') : 'none',
-      voice: Boolean(voiceFile), bytes: (await stat(outFile)).size };
+      voice: Boolean(voiceFile), captions: captions.length, bytes: (await stat(outFile)).size };
   } finally {
     await rm(work, { recursive: true, force: true });
   }

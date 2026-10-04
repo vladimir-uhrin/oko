@@ -36,6 +36,17 @@ scheduling, calendar, Meta Insights, and a weekly „Týždeň na fronte" run (S
 7:00 when enabled; `scripts/make-front-week-video.mjs` against `EVENT_VIDEO_PAGE_URL`).
 Owner = DB role `owner` or `OKO_OWNER_EMAILS`, shared by admin and Udalosti.
 
+2026-10-04 additions (all free): Udalosti send a carousel (main card + up to 4 key-moment
+frames, `studio_images` table; FB unpublished photos + `/feed` `attached_media`, IG
+`CAROUSEL`), rendered reels burn in narration captions, transient Meta errors retry at
+10/30/90 min (`retry_at`, `retry_n`), Instagram limits are checked before sending
+(text 2 200, 30 hashtags, reel 3–90 s from ffprobe `video_seconds`; 409 `limits_exceeded`
+blocks only Instagram), a FB/IG-style preview in the draft card, best posting time from
+insights (`/api/admin/studio/best-times`), and the front-week child runs at lower CPU
+priority. Owner alerts (`src/admin/server/alerts.js`, admin → Údržba, off by default):
+feed down for N min, new server/5xx error signatures, failed publish after retries; sent
+through the accounts webhook mailer (`AUTH_MAIL_*`), deduped 6 h, max 12 mails/day.
+
 ### OKO optional account center and profiles (2026-09-26)
 
 `src/auth/` adds a Vanilla JS account center with a visible avatar/name/signed-in

@@ -239,3 +239,61 @@ cez `sharer.php` v Udalostiach ostáva ako záloha bez tokenu.
   (`isOwnerRequest`).
 - Nič z toho nestojí peniaze: ffmpeg, vlastná služba hlasu vlastníka, bezplatný
   podklad videa. Google 3D podklad vo videu ostáva vypnutý podľa pravidla rozpočtu.
+
+## Vylepšenia Štúdia (hotové 2026-10-04)
+
+Všetko zadarmo, nič nové neplatené.
+
+- **Karusel z Udalostí.** DO ŠTÚDIA pošle hlavnú kartu a k nej až 4 snímky kľúčových
+  momentov (stopa po moment, moment zvýraznený; `renderCard(event, 'feed', { frame })`).
+  Facebook: každá snímka ako nezverejnená fotka, potom jeden príspevok na `/feed`
+  s `attached_media`. Instagram: kontajnery `is_carousel_item` → kontajner `CAROUSEL`
+  → `media_publish`. Najviac 10 snímok. Snímky sú v tabuľke `studio_images` (aditívne),
+  podpísané URL `…/media/<id>-<n>.jpg`. V karte návrhu miniatúry, klik zobrazí snímku.
+- **Titulky v reeloch.** Generované reely (zemetrasenia, štarty) majú vpálené vety
+  narácie v bezpečnej zóne dole. S hlasom kopírujú nahrávku, bez hlasu vyplnia čas
+  medzi úvodom a výzvou. Importované videá titulky už majú zo svojej linky.
+- **Opakovanie zverejnenia.** Dočasná chyba Mety (sieť, timeout, HTTP 5xx/429, kódy
+  1/2/4/17/32/613) → ďalší pokus o 10, 30 a 90 min (`retry_at`, `retry_n`). Trvalá chyba
+  (token 190, parameter 100, oprávnenia) alebo 4. zlyhanie → `failed` a upozornenie.
+- **Kontroly pred odoslaním.** Instagram: text ≤ 2 200 znakov, ≤ 30 hashtagov, reel
+  3–90 s (dĺžka sa zistí ffprobe pri renderi, stĺpec `video_seconds`). Chyba zablokuje
+  len Instagram (409 `limits_exceeded` s dôvodom), Facebook ide. Upozornenia a tipy
+  (dlhý prvý riadok nad ~125 znakov, bez hashtagov, bez odkazu) nič neblokujú.
+- **Náhľad príspevku.** V karte rozbaľovací náhľad v tvare FB/IG: hlavička, prvých
+  ~125 znakov pred „viac", obrázok 4:5, počet snímok, počítadlo znakov a hashtagov
+  (živé pri písaní).
+- **Najlepší čas.** Po aspoň 5 príspevkoch so štatistikami Štúdio spočíta priemerný
+  dosah podľa dňa v týždni a hodiny (Bratislava). V plánovaní je tlačidlo „Dobrý čas:
+  pi 18:00", ktoré doplní najbližší taký termín mimo tichých hodín.
+  API `GET /api/admin/studio/best-times`.
+- **Týždeň na fronte s nižšou prioritou.** Detský proces nahrávania beží s
+  `os.setPriority(10)`, aby portál počas 20–60 min behu neodpovedal pomaly.
+
+## Upozornenia vlastníkovi (hotové 2026-10-04)
+
+Admin → Údržba → Upozornenia (`src/admin/server/alerts.js`). Predvolene vypnuté.
+
+- Feed nedostupný dlhšie ako N minút (predvolene 60, zo vzoriek `/status` každých 10 min).
+- Nové chyby servera a HTTP 5xx (nový podpis chyby od poslednej kontroly).
+- Zlyhané zverejnenie zo Štúdia po vyčerpaní opakovaní.
+- Kanál: existujúci webhook mailer účtov (`AUTH_MAIL_ENDPOINT`, `AUTH_MAIL_TOKEN`,
+  `AUTH_MAIL_FROM`, `AUTH_PUBLIC_URL`). Bez neho sa upozornenia len zapíšu do zoznamu.
+- Príjemca: e-mail z nastavenia, inak prvý z `OKO_OWNER_EMAILS`.
+- Ten istý problém najviac raz za 6 h, najviac 12 e-mailov za 24 h. Skúšobný e-mail
+  ignoruje strop.
+
+## TODO (čo sa nedá spraviť z kódu)
+
+- **Týždeň na fronte na inom stroji.** Dnes beží na tom istom počítači ako portál, len
+  s nižšou prioritou. Úplné oddelenie = plánovaná úloha Windows mimo oko-api, ktorá
+  zavolá `POST /api/admin/studio/front-week` alebo importuje výstup. Potrebuje
+  rozhodnutie vlastníka o stroji.
+- **Overenie s ostrým Meta účtom.** Karusel, reels aj insights sú overené testami so
+  simulovanými odpoveďami Graph API. Prvé skutočné zverejnenie ukáže, či Meta nemení
+  názvy polí (`attached_media`, `is_carousel_item`).
+- **E-mail upozornení.** Treba nastaviť webhook mailer v `.env` (`AUTH_MAIL_*`) — bez
+  neho sa upozornenia len zapisujú do admina.
+- **Hlas vlastníka v reeloch.** Čaká na `AI_TRANSLATORS_MCP_URL` a `AI_TRANSLATORS_MCP_KEY`
+  v `.env` servera.
+- **Najlepší čas** začne radiť až po 5 príspevkoch zverejnených cez Meta API.

@@ -5,9 +5,9 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { REEL, narration, overlaySvg, reelView, renderReel, wavSeconds } from './reel.js';
+import { REEL, captionsFor, narration, overlaySvg, probeSeconds, reelView, renderReel, wavSeconds } from './reel.js';
 import { createStudio } from './index.js';
-import { createMetaPublisher } from './meta.js';
+import { createMetaPublisher, isRetryableError } from './meta.js';
 import { openAdminStore } from '../store.js';
 
 const NOW = Date.UTC(2026, 9, 3, 12, 0);
@@ -245,4 +245,76 @@ test('hlas vlastníka: voiceProvider má prednosť pred Piperom a predĺži vide
   assert.deepEqual([result.voice, result.seconds], [true, 6]);
   const none = await renderReel({ card: quakeCard, title: 'T', text: 't' }, path.join(dir, 'n.mp4'), { seconds: 1, fps: 4, voice: true, env: { PATH: process.env.PATH }, voiceProvider: async () => null });
   assert.equal(none.voice, false, 'poskytovateľ bez nahrávky = bez hlasu, nie chyba');
+});
+
+// ── 2026-10-04: titulky v reeloch, dĺžka videa, karusel cez Meta, dočasné chyby ──
+test('titulky: vety narácie v čase úmerne dĺžke, v bezpečnej zóne, escapované', () => {
+  const item = { title: 'Zemetrasenie M 6,3 – Grécko', text: 'x\nDnes o 13:20 zasiahlo zemetrasenie oblasť 70 km JZ od Atén. Hĺbka 12 km.' };
+  const rows = captionsFor(item, { start: 1.2, length: 9 });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].from, 1.2);
+  assert.equal(rows[1].from, rows[0].to, 'nadväzujú');
+  assert.ok(rows[1].to - rows[1].from > rows[0].to - rows[0].from, 'dlhšia veta = dlhší titulok');
+  assert.deepEqual(captionsFor('', { length: 5 }), []);
+  const svg = overlaySvg(quakeCard, rows[0].from + 0.5, { captions: [{ from: 0, to: 5, text: '<b>Veta & veta</b>' }] });
+  assert.match(svg, /&lt;b&gt;Veta &amp; veta&lt;\/b&gt;/);
+  assert.ok(!overlaySvg(quakeCard, 6, { captions: [{ from: 0, to: 5, text: 'Koniec' }] }).includes('Koniec'), 'mimo času sa nekreslí');
+  const y = Number(/<rect x="50" y="(\d+)"/.exec(svg)[1]);
+  assert.ok(y > 1300 && y < 1580, `titulok v bezpečnej zóne (y=${y})`);
+});
+
+test('render s titulkami a zistenie dĺžky videa', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-reel-cap-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'r.mp4');
+  const made = await renderReel({ card: quakeCard, title: 'Grécko', text: 'x\nVeta jedna. Veta dva.' }, file, { audio: 'none', seconds: 4, fps: 10 });
+  assert.equal(made.captions, 2);
+  const seconds = await probeSeconds(file);
+  assert.ok(Math.abs(seconds - 4) < 0.3, `dĺžka ${seconds}`);
+  assert.equal(await probeSeconds(path.join(dir, 'nie.mp4')), null);
+});
+
+test('Meta karusel: FB nezverejnené fotky + /feed attached_media, IG kontajnery + CAROUSEL; dočasné vs. trvalé chyby', async () => {
+  const requests = [];
+  const env = { META_PAGE_ID: '111111', META_PAGE_TOKEN: 'T'.repeat(40), META_IG_USER_ID: '222222' };
+  let photo = 0; let child = 0;
+  const fetchImpl = async (url, init) => {
+    const u = new URL(url);
+    const form = init.body instanceof FormData ? init.body : null;
+    const params = init.body instanceof URLSearchParams ? init.body : new URLSearchParams();
+    requests.push({ path: u.pathname, form, params });
+    if (u.pathname.endsWith('/photos')) return Response.json({ id: `ph${++photo}` });
+    if (u.pathname.endsWith('/feed')) return Response.json({ id: '111111_99' });
+    if (u.pathname.endsWith('/222222/media')) return Response.json({ id: params.get('media_type') === 'CAROUSEL' ? 'car' : `ch${++child}` });
+    if (/\/(ch\d|car)$/.test(u.pathname)) return Response.json({ status_code: 'FINISHED' });
+    if (u.pathname.endsWith('/media_publish')) return Response.json({ id: 'igpost' });
+    if (u.pathname.endsWith('/igpost')) return Response.json({ permalink: 'https://www.instagram.com/p/car/' });
+    return Response.json({ error: { message: 'x' } }, { status: 400 });
+  };
+  const meta = createMetaPublisher({ env, fetchImpl });
+  const fb = await meta.facebookCarousel({ images: [Buffer.from('a'), Buffer.from('b'), Buffer.from('c')], text: 'Popis' });
+  assert.deepEqual(fb, { id: '111111_99', url: 'https://www.facebook.com/111111_99', slides: 3 });
+  const photos = requests.filter(r => r.path.endsWith('/photos'));
+  assert.equal(photos.length, 3);
+  assert.ok(photos.every(r => r.form.get('published') === 'false'), 'snímky nezverejnené samostatne');
+  const feed = requests.find(r => r.path.endsWith('/feed')).params;
+  assert.equal(feed.get('message'), 'Popis');
+  assert.deepEqual([0, 1, 2].map(i => JSON.parse(feed.get(`attached_media[${i}]`)).media_fbid), ['ph1', 'ph2', 'ph3']);
+  const ig = await meta.instagramCarousel({ imageUrls: ['https://okolive.sk/1.jpg', 'https://okolive.sk/2.jpg'], text: 'IG', wait: async () => {} });
+  assert.deepEqual(ig, { id: 'igpost', url: 'https://www.instagram.com/p/car/', slides: 2 });
+  const children = requests.filter(r => r.path.endsWith('/222222/media') && r.params.get('is_carousel_item') === 'true');
+  assert.equal(children.length, 2);
+  const carousel = requests.find(r => r.params.get('media_type') === 'CAROUSEL').params;
+  assert.deepEqual([carousel.get('children'), carousel.get('caption')], ['ch1,ch2', 'IG']);
+  // Jedna snímka = obyčajná fotka.
+  photo = 0;
+  const single = await meta.facebookCarousel({ images: [Buffer.from('a')], text: 'Jedna' });
+  assert.ok(single.id);
+  // Dočasné chyby sa opakujú, chybná konfigurácia nie.
+  assert.equal(isRetryableError(Object.assign(new Error('x'), { code: 2, status: 400 })), true);
+  assert.equal(isRetryableError(Object.assign(new Error('x'), { status: 503 })), true);
+  assert.equal(isRetryableError(new Error('The operation was aborted due to timeout')), true);
+  assert.equal(isRetryableError(Object.assign(new Error('Invalid OAuth'), { code: 190, status: 400 })), false);
+  assert.equal(isRetryableError(Object.assign(new Error('Bad param'), { status: 400 })), false);
+  assert.equal(isRetryableError(null), false);
 });

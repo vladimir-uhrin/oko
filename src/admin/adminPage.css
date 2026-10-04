@@ -182,3 +182,26 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 .admin-calendar-item.scheduled { color: #cfeefa; }
 .admin-calendar-item.published { color: #c9f7e2; }
 .admin-calendar-time { font: 11.5px var(--font-mono); color: var(--muted); }
+
+/* Karusel, náhľad, kontroly limitov (2026-10-04) */
+.admin-studio-slides { display: flex; flex-wrap: wrap; gap: 6px; max-width: 270px; }
+.admin-studio-slides img { width: 48px; height: 60px; object-fit: cover; border-radius: 4px; border: 1px solid #ffffff22; cursor: pointer; }
+.admin-studio-slides img:hover, .admin-studio-slides img:focus { border-color: var(--accent); }
+.admin-studio-checks { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.admin-preview { max-width: 360px; padding: 12px; border-radius: 10px; background: #f4f6f8; color: #1c1e21; font: 13px/1.4 var(--font-sans); display: grid; gap: 8px; }
+.admin-preview-head { display: flex; gap: 8px; align-items: center; }
+.admin-preview-head .admin-muted { color: #65676b; font-size: 11.5px; }
+.admin-preview-avatar { width: 30px; height: 30px; border-radius: 50%; background: #07131f; color: #00d4ff; display: grid; place-items: center; font: 700 9px var(--font-mono); }
+.admin-preview-name { font-weight: 600; }
+.admin-preview-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-preview-text .admin-muted { color: #65676b; }
+.admin-preview-pic { position: relative; aspect-ratio: 4 / 5; overflow: hidden; border-radius: 6px; background: #07131f; }
+.admin-preview-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.admin-preview-slides { position: absolute; top: 8px; right: 8px; padding: 2px 8px; border-radius: 10px; background: #000a; color: #fff; font-size: 11px; }
+.admin-preview-count { font-size: 11.5px; color: #65676b; }
+.admin-preview-count.bad { color: #c0392b; font-weight: 600; }
+.admin-studio-preview > summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.admin-alerts-form { display: grid; gap: 10px; margin-bottom: 14px; }
+.admin-alerts-form .admin-check input[type=email], .admin-alerts-form .admin-check input[type=number] { height: auto; width: 260px; margin-left: 6px; padding: 5px 8px; border: 1px solid #ffffff22; border-radius: 8px; background: #050a10; color: var(--text); font: inherit; max-width: 100%; }
+.admin-alerts-form .admin-check input[type=number] { width: 90px; }
+@media (max-width: 760px) { .admin-studio-slides { max-width: 100%; } .admin-alerts-form .admin-check input[type=email] { width: 100%; margin: 4px 0 0; } }

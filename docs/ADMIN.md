@@ -26,10 +26,10 @@ ignorovať `Cache-Control: no-store` (rovnako ako `/account.html`).
 | Náklady | OpenAI hlas, OpenAI súhrn, Google Places — počet volaní po dňoch, dnes, 30 dní, **denný strop** (nad ním 429) a cena za jednotku → odhad €; TomTom a GFW aj s kvótou providera z ich `/status` |
 | Feedy | všetky dátové zdroje: aktuálny stav, pás dostupnosti 7 dní po hodinách (zo skutočných požiadaviek), výpadky z kontroly statusu každých 10 min, **Vypnúť / Zapnúť** |
 | Používatelia | hľadanie, detail (relácie, aktivita, prihlasovacie metódy, počet sledovaných letov) a akcie nižšie |
-| Štúdio | návrhy príspevkov pre Facebook a Instagram zo živých dát (zemetrasenia, štarty rakiet) a z Udalostí (tlačidlo „DO ŠTÚDIA", video 4:5 vložené do reelu 9:16), obrázok + slovenský text + reel 9:16 (ffmpeg, hlas vlastníka cez ai-translators alebo Piper), kalendár, plánovanie, úprava, schválenie, zverejnenie cez Meta API alebo ručné zdieľanie; „Týždeň na fronte" raz týždenne (sobota); automatika — pozri `docs/SOCIAL-PLAN.md` |
+| Štúdio | návrhy príspevkov pre Facebook a Instagram zo živých dát (zemetrasenia, štarty rakiet) a z Udalostí (tlačidlo „DO ŠTÚDIA", video 4:5 vložené do reelu 9:16), obrázok + slovenský text + reel 9:16 (ffmpeg, hlas vlastníka cez ai-translators alebo Piper), kalendár, plánovanie, úprava, schválenie, zverejnenie cez Meta API alebo ručné zdieľanie; „Týždeň na fronte" raz týždenne (sobota); karusel z Udalostí, titulky v reeloch, opakovanie zlyhaného zverejnenia, kontroly limitov Instagramu, náhľad príspevku, najlepší čas z Výkonu; automatika — pozri `docs/SOCIAL-PLAN.md` |
 | Výkon | štatistiky dosahu príspevkov zo Štúdia (Meta Insights, 30 dní) |
 | Oznam | text 1–280 znakov, typ info/upozornenie, platnosť; náhľad, ako ho vidia návštevníci |
-| Údržba | záloha DB účtov aj admin DB (`VACUUM INTO`, ponechá 14), čistenie povolenej cache |
+| Údržba | upozornenia e-mailom (feed nedostupný, nové chyby 5xx, zlyhané zverejnenie; webhook `AUTH_MAIL_*`), záloha DB účtov aj admin DB (`VACUUM INTO`, ponechá 14), čistenie povolenej cache |
 | Audit | posledných 200 zásahov administrátora (aj zmeny feedov, oznamu, záloh, cache) |
 | Log | posledných ~48 kB z `.gev-cache/logs/oko-server.log` |
 
@@ -109,6 +109,7 @@ src/siteTelemetry.js             anonymná štatistika z glóbusu
 src/noticeBanner.js/.css         banner oznamu na glóbuse
 src/auth/server/admin.js         /api/admin/* (rola, akcie, audit)
 src/admin/server/studio/         Štúdio: návrhy, reel.js (ffmpeg), meta.js (Graph API), adminApi.js
+src/admin/server/alerts.js       upozornenia vlastníkovi (e-mail cez webhook mailer, dedupe 6 h, strop 12/deň)
 src/auth/server/adminSources.js  stav feedov, info o serveri, log
 src/auth/server/admin.test.mjs   API testy (404 brána, CSRF, blokovanie, mazanie, redakcia)
 ```

@@ -7,6 +7,10 @@ import path from 'node:path';
 import { openAdminStore } from './store.js';
 import { createAdminRuntime, secretValues } from './runtime.js';
 import { createStudio } from './studio/index.js';
+import { createAlerts } from './alerts.js';
+import { FEEDS } from './feeds.js';
+import { createWebhookMailer } from '../../auth/server/mail.js';
+import { parseOrigins, parseOwnerEmails } from '../../auth/server/http.js';
 import { aiTranslatorsConfig, createAiTranslatorsClient } from '../../data/aiTranslatorsClient.js';
 import { createVoiceCache } from '../../../scripts/lib/eventVideoPipeline.mjs';
 
@@ -48,9 +52,14 @@ export function adminPlugin(env = process.env) {
       runtime = createAdminRuntime({ store, ownHosts, secrets: secretValues(env),
         port: () => server.httpServer?.address()?.port ?? null });
       runtime.start();
+      // Upozornenia (2026-10-04): webhook mailer účtov (AUTH_MAIL_*), príjemca = prvý OKO_OWNER_EMAILS alebo nastavenie v admine.
+      const mailer = createWebhookMailer(env, { origins: parseOrigins(env.AUTH_ORIGINS || '') });
+      runtime.alerts = createAlerts({ store, mailer, feeds: FEEDS, defaultEmail: parseOwnerEmails(env.OKO_OWNER_EMAILS)[0] || null });
+      runtime.alerts.start();
       // Štúdio sociálnych sietí (2026-10-03): rovnaká admin DB, údaje cez loopback.
       runtime.studio = createStudio({ store, env, port: () => server.httpServer?.address()?.port ?? null,
-        mediaDir: path.join(path.dirname(authDb), 'studio'), root, voiceProvider: ownerVoiceProvider(env, root) });
+        mediaDir: path.join(path.dirname(authDb), 'studio'), root, voiceProvider: ownerVoiceProvider(env, root),
+        onAlert: event => runtime.alerts?.onStudioAlert(event) });
       runtime.studio.start();
       current = runtime;
       return runtime;
@@ -68,6 +77,7 @@ export function adminPlugin(env = process.env) {
     server.httpServer?.once('close', () => {
       if (!runtime) return;
       runtime.studio?.stop();
+      runtime.alerts?.stop();
       runtime.stop();
       runtime.store.close();
       if (current === runtime) current = null;

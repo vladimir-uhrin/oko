@@ -22,8 +22,9 @@ import path from 'node:path';
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { TEMPLATES, templateById } from './templates.js';
 import { renderCard as defaultRenderCard } from './card.js';
-import { createMetaPublisher } from './meta.js';
+import { createMetaPublisher, isRetryableError } from './meta.js';
 import { spawn } from 'node:child_process';
+import os from 'node:os';
 import { ffmpegAvailable, padToReel as defaultPadToReel, posterFrame as defaultPosterFrame, renderReel as defaultRenderReel } from './reel.js';
 
 const TICK_MS = 10 * 60_000;
@@ -34,6 +35,11 @@ const DIGEST_HOUR = 8;
 const INSIGHTS_REFRESH_MS = 6 * 3600_000;
 const INSIGHTS_WINDOW_MS = 30 * 86400_000;
 const SCHEDULE_MAX_MS = 30 * 86400_000;
+// Opakovanie zlyhaného zverejnenia (2026-10-04): dočasná chyba Mety → 3 pokusy s odstupom.
+export const RETRY_DELAYS_MS = Object.freeze([10 * 60_000, 30 * 60_000, 90 * 60_000]);
+export const CAROUSEL_MAX = 10;
+// Obmedzenia Instagramu (kontrola pred odoslaním): text, hashtagy, dĺžka reelu.
+export const IG_LIMITS = Object.freeze({ text: 2200, hashtags: 30, reelMinSeconds: 3, reelMaxSeconds: 90, captionFold: 125 });
 const hourFmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Bratislava', hour: '2-digit', hourCycle: 'h23' });
 const localHour = at => Number(hourFmt.format(new Date(at)));
 const fail = (code, status = 400) => Object.assign(new Error(code), { status });
@@ -81,7 +87,8 @@ export function publicUrlFrom(env = process.env) {
 export function createStudio({ store, env = process.env, port = () => null, now = Date.now, fetchJson = loopbackJson,
   renderCard = defaultRenderCard, renderReel = defaultRenderReel, padToReel = defaultPadToReel, posterFrame = defaultPosterFrame, checkFfmpeg = () => ffmpegAvailable(env.FFMPEG_PATH || 'ffmpeg'),
   mediaDir = null, publisher = createMetaPublisher({ env }), timers = true, log = message => console.warn(message),
-  voiceProvider = null, frontWeekRunner = null, root = process.cwd() } = {}) {
+  voiceProvider = null, frontWeekRunner = null, root = process.cwd(), onAlert = null } = {}) {
+  const alert = (kind, detail) => { try { onAlert?.({ kind, ...detail }); } catch { /* upozornenie nesmie zhodiť Štúdio */ } };
   const publicUrl = publicUrlFrom(env);
   const site = new URL(publicUrl).host;
   let running = false;
@@ -146,14 +153,15 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       await fsp.mkdir(mediaDir, { recursive: true, mode: 0o700 });
       const name = `${id}.mp4`;
       const s = settings();
+      let made;
       if (draft.card?.kind === 'import' && draft.card.sourceVideo) {
         // Importované video (Udalosti, Týždeň na fronte): 9:16 doplnením, bez nového renderu.
-        await padToReel(path.join(mediaDir, path.basename(draft.card.sourceVideo)), path.join(mediaDir, name), { env });
+        made = await padToReel(path.join(mediaDir, path.basename(draft.card.sourceVideo)), path.join(mediaDir, name), { env });
       } else {
-        await renderReel({ card: draft.card, title: draft.title, text: draft.text }, path.join(mediaDir, name),
+        made = await renderReel({ card: draft.card, title: draft.title, text: draft.text }, path.join(mediaDir, name),
           { audio: s.audio, voice: s.voice, env, site, voiceProvider });
       }
-      store.studioUpdate(id, { video: name, videoStatus: 'ready', videoError: null }, now());
+      store.studioUpdate(id, { video: name, videoStatus: 'ready', videoError: null, videoSeconds: Number.isFinite(made?.seconds) ? made.seconds : null }, now());
     } catch (error) {
       store.studioUpdate(id, { videoStatus: 'failed', videoError: String(error?.message || error).slice(0, 300) }, now());
       log(`[studio] video ${id}: ${error?.message || error}`);
@@ -237,6 +245,77 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     return published;
   }
 
+  /** Opakovanie zverejnenia po dočasnej chybe (každý tick): ciele s chybou a bez ID. */
+  async function publishRetryDue() {
+    const retried = [];
+    for (const id of store.studioRetryDue(now())) {
+      const draft = store.studioGet(id);
+      const targets = Object.entries(draft.results || {}).filter(([t, r]) => TARGETS.includes(t) && r?.error && !r.id).map(([t]) => t);
+      store.studioUpdate(id, { retryAt: null }, now());
+      if (!targets.length) continue;
+      try { retried.push({ id, draft: (await (await publish(id, targets, 'retry')).done).draft }); }
+      catch (error) { log(`[studio] retry ${id}: ${error?.message || error}`); }
+    }
+    return retried;
+  }
+
+  /**
+   * Najlepší čas zverejnenia (2026-10-04) z Výkonu: priemerný dosah (inak zobrazenia, inak reakcie)
+   * podľa dňa v týždni a hodiny (Bratislava) za zverejnené príspevky; návrh = najbližší termín
+   * najlepšieho slotu mimo tichých hodín. Len agregácia nad tým, čo už ukladáme — 0 €.
+   */
+  function bestTimes() {
+    const all = store.insightsAll();
+    const slots = new Map();
+    let posts = 0;
+    for (const draft of store.studioPublished(200)) {
+      if (!draft.publishedAt) continue;
+      const metrics = Object.values(all[draft.id] || {});
+      if (!metrics.length) continue;
+      const score = metrics.reduce((sum, m) => sum + (m.reach ?? m.views ?? m.likes ?? 0), 0);
+      const key = `${localWeekday(draft.publishedAt)}-${localHour(draft.publishedAt)}`;
+      const slot = slots.get(key) || slots.set(key, { weekday: localWeekday(draft.publishedAt), hour: localHour(draft.publishedAt), sum: 0, n: 0 }).get(key);
+      slot.sum += score; slot.n++; posts++;
+    }
+    const ranked = [...slots.values()].map(slot => ({ weekday: slot.weekday, hour: slot.hour, n: slot.n, score: Math.round(slot.sum / slot.n) }))
+      .sort((a, b) => b.score - a.score || b.n - a.n);
+    const enough = posts >= 5 && ranked.length > 0;
+    let suggestion = null;
+    if (enough) {
+      const best = ranked[0];
+      // Najbližší výskyt dňa+hodiny od teraz (+30 min rezerva), v rámci 7 dní, mimo tichých hodín.
+      for (let i = 0; i < 7 * 24 && !suggestion; i++) {
+        const at = Math.ceil((now() + 30 * 60_000) / 3600_000) * 3600_000 + i * 3600_000;
+        if (localWeekday(at) === best.weekday && localHour(at) === best.hour && !quiet(at)) suggestion = at;
+      }
+    }
+    return { enough, posts, slots: ranked.slice(0, 10), suggestion };
+  }
+
+  /**
+   * Kontroly obmedzení pred odoslaním (2026-10-04): Instagram odmietne text nad 2 200 znakov,
+   * viac než 30 hashtagov a reel kratší než 3 s (dlhší než 90 s); prvých ~125 znakov vidno bez „viac".
+   * Vracia zoznam { level: 'error'|'warn'|'info', target: 'instagram'|'facebook'|'all', text }.
+   */
+  function checks(draft) {
+    const out = [];
+    const text = String(draft.text || '');
+    const chars = [...text].length;
+    const hashtags = (text.match(/(^|\s)#[\p{L}\p{N}_]+/gu) || []).length;
+    if (chars > IG_LIMITS.text) out.push({ level: 'error', target: 'instagram', text: `Text má ${chars} znakov, Instagram povolí ${IG_LIMITS.text}.` });
+    if (hashtags > IG_LIMITS.hashtags) out.push({ level: 'error', target: 'instagram', text: `${hashtags} hashtagov, Instagram povolí ${IG_LIMITS.hashtags}.` });
+    if (hashtags === 0) out.push({ level: 'info', target: 'all', text: 'Bez hashtagov — zvážte 3–5 (#OKO a téma).' });
+    const firstLine = text.split('\n').find(line => line.trim()) || '';
+    if ([...firstLine].length > IG_LIMITS.captionFold) out.push({ level: 'warn', target: 'all', text: `Prvý riadok má ${[...firstLine].length} znakov; v prehľade vidno ~${IG_LIMITS.captionFold}, zvyšok až po „viac".` });
+    if (!/https?:\/\//.test(text) && !text.includes(site)) out.push({ level: 'info', target: 'facebook', text: 'Text nemá odkaz na portál.' });
+    if (draft.videoStatus === 'ready' && Number.isFinite(draft.videoSeconds)) {
+      if (draft.videoSeconds < IG_LIMITS.reelMinSeconds) out.push({ level: 'error', target: 'instagram', text: `Reel má ${draft.videoSeconds} s, Instagram chce aspoň ${IG_LIMITS.reelMinSeconds} s.` });
+      if (draft.videoSeconds > IG_LIMITS.reelMaxSeconds) out.push({ level: 'warn', target: 'instagram', text: `Reel má ${Math.round(draft.videoSeconds)} s; Instagram Reels cez API najviac ${IG_LIMITS.reelMaxSeconds} s.` });
+    }
+    if (draft.slides > CAROUSEL_MAX) out.push({ level: 'warn', target: 'all', text: `Karusel má ${draft.slides} snímok, odošle sa prvých ${CAROUSEL_MAX}.` });
+    return out;
+  }
+
   /** Štatistiky dosahu zverejnených príspevkov za 30 dní, najviac raz za 6 h. */
   async function refreshInsights(force = false) {
     if (!force && now() - lastInsights < INSIGHTS_REFRESH_MS) return { skipped: 'fresh' };
@@ -302,6 +381,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     try {
       await cleanupVideos().catch(error => log(`[studio] cleanup: ${error?.message || error}`));
       await publishDue().catch(error => log(`[studio] due: ${error?.message || error}`));
+      await publishRetryDue().catch(error => log(`[studio] retry: ${error?.message || error}`));
       refreshInsights().catch(error => log(`[studio] insights: ${error?.message || error}`));
       if (frontWeekDue()) runFrontWeek({ trigger: 'auto' }).catch(() => {});
       if (!settings().autoDraft) return { skipped: 'auto_draft_off' };
@@ -320,9 +400,9 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     } finally { running = false; }
   }
 
-  function mediaUrl(id, ttl = MEDIA_TTL_MS, ext = 'jpg') {
+  function mediaUrl(id, ttl = MEDIA_TTL_MS, ext = 'jpg', idx = 0) {
     const exp = now() + ttl;
-    const name = `${id}.${ext}`;
+    const name = `${id}${idx ? `-${idx}` : ''}.${ext}`;
     return `${publicUrl}/api/studio/media/${name}?exp=${exp}&sig=${sign(name, exp)}`;
   }
 
@@ -343,31 +423,50 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     if (todo.some(target => REEL_TARGETS.has(target)) && !(await videoReady(draft))) throw fail('video_not_ready', 409);
     const image = store.studioImage(id);
     if (!image || !draft.text.trim()) throw fail('draft_incomplete', 409);
+    // Instagram odmietne, čo nespĺňa limity — povedať to pred odoslaním, nie z chyby API.
+    const blocking = checks(draft).filter(c => c.level === 'error' && todo.some(t => c.target === 'all' || baseTarget(t) === c.target));
+    if (blocking.length) throw Object.assign(fail('limits_exceeded', 409), { details: blocking.map(c => c.text) });
     const time = now();
     const pending = { ...draft.results };
     for (const target of todo) pending[target] = { pending: true, at: time };
-    store.studioUpdate(id, { results: pending, scheduledAt: null, scheduledTargets: null,
+    store.studioUpdate(id, { results: pending, scheduledAt: null, scheduledTargets: null, retryAt: null,
       ...(draft.status === 'published' ? {} : { status: 'approved', approvedAt: draft.approvedAt ?? time }) }, time);
+    const images = store.studioImages(id).slice(0, CAROUSEL_MAX);
+    const carousel = images.length > 1;
     const done = (async () => {
       const results = { ...pending };
+      const failures = [];
       for (const target of todo) {
         try {
           let result;
-          if (target === 'facebook') result = await publisher.facebookPhoto({ image, text: draft.text });
-          else if (target === 'instagram') result = await publisher.instagramImage({ imageUrl: mediaUrl(id, 30 * 60_000), text: draft.text });
-          else if (target === 'facebook-reel') result = await publisher.facebookReel({ video: await fsp.readFile(videoFile(draft)), text: draft.text });
+          if (target === 'facebook') {
+            result = carousel && typeof publisher.facebookCarousel === 'function' ? await publisher.facebookCarousel({ images, text: draft.text })
+              : await publisher.facebookPhoto({ image, text: draft.text });
+          } else if (target === 'instagram') {
+            result = carousel && typeof publisher.instagramCarousel === 'function'
+              ? await publisher.instagramCarousel({ imageUrls: images.map((_, i) => mediaUrl(id, 30 * 60_000, 'jpg', i)), text: draft.text })
+              : await publisher.instagramImage({ imageUrl: mediaUrl(id, 30 * 60_000), text: draft.text });
+          } else if (target === 'facebook-reel') result = await publisher.facebookReel({ video: await fsp.readFile(videoFile(draft)), text: draft.text });
           else result = await publisher.instagramReel({ videoUrl: mediaUrl(id, 60 * 60_000, 'mp4'), text: draft.text });
           results[target] = { ...result, at: now() };
         } catch (error) {
-          results[target] = { error: String(error?.message || error).slice(0, 300), at: now() };
+          results[target] = { error: String(error?.message || error).slice(0, 300), at: now(), retryable: isRetryableError(error) };
+          failures.push({ target, error });
           log(`[studio] publish ${target} failed: ${results[target].error}`);
         }
         store.studioUpdate(id, { results }, now());
       }
       const ok = todo.every(target => results[target]?.id);
       const wasPublished = draft.status === 'published';
-      return { draft: store.studioUpdate(id, { results, status: ok || wasPublished ? 'published' : 'failed',
-        ...((ok && !wasPublished) ? { publishedAt: now() } : {}) }, now()), origin };
+      // Dočasná chyba → ďalší pokus o 10 / 30 / 90 min; trvalá alebo 4. zlyhanie → failed + upozornenie.
+      const attempt = origin === 'retry' ? (draft.retryN || 0) : 0;
+      const retry = !ok && failures.some(f => isRetryableError(f.error)) && attempt < RETRY_DELAYS_MS.length;
+      const fields = { results, status: ok || wasPublished ? 'published' : retry ? 'approved' : 'failed',
+        retryAt: retry ? now() + RETRY_DELAYS_MS[attempt] : null, retryN: retry ? attempt + 1 : attempt,
+        ...((ok && !wasPublished) ? { publishedAt: now() } : {}) };
+      const updated = store.studioUpdate(id, fields, now());
+      if (!ok && !retry) alert('publish_failed', { title: draft.title, id, targets: failures.map(f => f.target), error: failures.map(f => String(f.error?.message || f.error).slice(0, 200)).join(' | '), attempts: attempt + 1 });
+      return { draft: updated, origin, retry };
     })().finally(() => inFlight.delete(id));
     inFlight.set(id, done);
     return { draft: store.studioGet(id), done };
@@ -376,6 +475,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   const api = {
     templates: TEMPLATES,
     publicUrl,
+    limits: IG_LIMITS,
     runFrontWeek,
     frontWeekStatus: () => ({ ...frontWeek, due: frontWeekDue() }),
     settings,
@@ -393,7 +493,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
      * voliteľne video 4:5 (skopíruje sa k Štúdiu; reel vznikne doplnením na 9:16).
      * @param {{template:string, eventKey:string, title:string, text:string, image?:Buffer|null, videoFile?:string|null, origin?:string, meta?:object}} input
      */
-    async importDraft({ template, eventKey, title, text, image = null, videoFile = null, origin = 'import', meta = {} }) {
+    async importDraft({ template, eventKey, title, text, image = null, images = [], videoFile = null, origin = 'import', meta = {} }) {
       if (!/^[a-z0-9-]{1,40}$/.test(String(template || '')) || typeof eventKey !== 'string' || !eventKey) throw fail('invalid_input');
       if (typeof title !== 'string' || !title.trim() || typeof text !== 'string' || !text.trim()) throw fail('draft_incomplete');
       const existing = store.studioList(500).find(d => d.eventKey === eventKey);
@@ -412,6 +512,9 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       const created = store.studioInsert({ id, template, eventKey, origin, title: title.trim().slice(0, 200), text: text.replace(/\r\n/g, '\n').slice(0, 2200),
         card, image: picture, createdAt: now() });
       if (!created) return { created: false, reason: 'exists' };
+      // Karusel: ďalšie snímky (max 9 navyše k hlavnej) — Udalosti dodajú kľúčové momenty.
+      const extras = (Array.isArray(images) ? images : []).filter(buf => Buffer.isBuffer(buf) && buf.length).slice(0, CAROUSEL_MAX - 1);
+      if (extras.length) store.studioImagesSet(id, extras);
       if (sourceVideo && settings().autoReel) queueVideo(id);
       return { created: true, draft: store.studioGet(id) };
     },
@@ -421,7 +524,10 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       return mediaDir && draft.card?.sourceVideo ? path.join(mediaDir, path.basename(draft.card.sourceVideo)) : null;
     },
     publishDue,
+    publishRetryDue,
     refreshInsights,
+    bestTimes,
+    checks,
     /** Kalendár: naplánované + zverejnené podľa miestneho dňa. */
     calendar(days = 14) {
       const from = now() - 7 * 86400_000;
@@ -453,7 +559,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         ...(draft.status === 'published' ? {} : { status: 'approved', approvedAt: draft.approvedAt ?? now() }) }, now());
     },
     get: requireDraft,
-    image: id => store.studioImage(id),
+    image: (id, idx = 0) => store.studioImageAt(id, idx),
     videoPath: id => { const draft = requireDraft(id); return draft.videoStatus === 'ready' ? videoFile(draft) : null; },
     publisherStatus: () => publisher.status(),
     instagramLimit: () => publisher.instagramLimit(),
@@ -529,21 +635,22 @@ export function createStudio({ store, env = process.env, port = () => null, now 
      */
     async handleMedia(req, res, next) {
       const url = new URL(req.url || '/', 'http://localhost');
-      const match = /^\/api\/studio\/media\/([a-f0-9-]{36})\.(jpg|mp4)$/.exec(url.pathname);
+      const match = /^\/api\/studio\/media\/([a-f0-9-]{36})(?:-(\d))?\.(jpg|mp4)$/.exec(url.pathname);
       if (!match) return next();
       const deny = () => { res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' }); res.end('Not found'); };
       if (req.method !== 'GET' && req.method !== 'HEAD') return deny();
-      const [, id, ext] = match;
+      const [, id, idxRaw, ext] = match;
+      const idx = Number(idxRaw || 0);
       const exp = Number(url.searchParams.get('exp'));
       const sig = String(url.searchParams.get('sig') || '');
       if (!Number.isFinite(exp) || exp < now() || exp > now() + MEDIA_TTL_MS + 60_000) return deny();
-      const expected = sign(`${id}.${ext}`, exp);
+      const expected = sign(`${id}${idx ? `-${idx}` : ''}.${ext}`, exp);
       if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return deny();
       const draft = store.studioGet(id);
       if (!draft || !['approved', 'published', 'failed'].includes(draft.status)) return deny();
       const common = { 'Cache-Control': 'private, max-age=600', 'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex' };
       if (ext === 'jpg') {
-        const image = store.studioImage(id);
+        const image = store.studioImageAt(id, idx);
         if (!image) return deny();
         res.writeHead(200, { ...common, 'Content-Type': 'image/jpeg', 'Content-Length': image.length });
         return res.end(req.method === 'HEAD' ? undefined : Buffer.from(image));
@@ -573,6 +680,8 @@ export function defaultFrontWeekRunner({ root, env, outDir, day, onLog = () => {
     const args = [path.join(root, 'scripts', 'make-front-week-video.mjs'), '--out-dir', outDir, '--url', env.EVENT_VIDEO_PAGE_URL || 'http://localhost:4173'];
     if (day) args.push('--day', day);
     const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    // Beží na tom istom stroji ako portál: nižšia priorita CPU, aby návštevníci nečakali (Windows aj Linux).
+    try { os.setPriority(child.pid, 10); } catch { /* bez priority */ }
     let out = '';
     const take = chunk => { const text = String(chunk); out = (out + text).slice(-8000); onLog(text); };
     child.stdout.on('data', take); child.stderr.on('data', take);

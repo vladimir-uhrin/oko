@@ -6,6 +6,9 @@
 //   META_GRAPH_VERSION              — voliteľné, predvolene v23.0
 // Cez API sa nedá publikovať na osobný Facebook profil — len na stránku. Bez
 // konfigurácie Štúdio funguje v režime „ručné zdieľanie" (stiahnuť obrázok + text).
+// Karusel (2026-10-04): FB = nezverejnené fotky + /feed attached_media; IG = kontajnery
+// is_carousel_item + kontajner CAROUSEL. Chyby Graph API s kódom 1/2/4/17/32/613 (dočasné,
+// limit) sú „retryable" — Štúdio ich skúsi znova (isRetryableError).
 
 const DEFAULT_VERSION = 'v23.0';
 const TIMEOUT_MS = 30_000;
@@ -16,6 +19,22 @@ export function metaConfig(env = process.env) {
   const igUserId = /^\d{5,30}$/.test(env.META_IG_USER_ID || '') ? env.META_IG_USER_ID : null;
   const token = typeof env.META_PAGE_TOKEN === 'string' && env.META_PAGE_TOKEN.length > 20 ? env.META_PAGE_TOKEN : null;
   return { version, pageId, igUserId, token, facebook: Boolean(pageId && token), instagram: Boolean(igUserId && token) };
+}
+
+/**
+ * Dočasná chyba (oplatí sa skúsiť znova): sieť/timeout, HTTP 5xx, 429, alebo kódy Graph API
+ * 1 (unknown), 2 (service), 4/17/32/613 (limity). Chybná konfigurácia (190 token, 100 param,
+ * 10/200 oprávnenia) sa opakovaním nevyrieši.
+ */
+export function isRetryableError(error) {
+  if (!error) return false;
+  const code = Number(error.code);
+  if ([1, 2, 4, 17, 32, 613].includes(code)) return true;
+  if ([190, 100, 10, 200, 803].includes(code)) return false;
+  const status = Number(error.status);
+  if (status >= 500 || status === 429 || status === 408) return true;
+  if (status >= 400) return false;
+  return /timeout|abort|network|fetch failed|ECONN|ETIMEDOUT|EAI_AGAIN|socket|nespracoval/i.test(String(error.message || ''));
 }
 
 /** Chyba Graph API bez tokenu v texte. */
@@ -76,6 +95,53 @@ export function createMetaPublisher({ env = process.env, fetchImpl = (...args) =
       let url = null;
       try { url = (await call(published.id, { method: 'GET', params: { fields: 'permalink' } })).permalink || null; } catch { /* odkaz nie je nutný */ }
       return { id: published.id, url };
+    },
+    /**
+     * Karusel na Facebook stránku (2026-10-04): každá snímka ako nezverejnená fotka → jeden príspevok
+     * na /feed s attached_media (2–10 snímok). Rovnako bezplatné ako fotka.
+     */
+    async facebookCarousel({ images, text }) {
+      const c = config();
+      if (!c.facebook) throw new Error('Facebook nie je nastavený (META_PAGE_ID, META_PAGE_TOKEN).');
+      if (!Array.isArray(images) || images.length < 2) return this.facebookPhoto({ image: images?.[0], text });
+      const ids = [];
+      for (const image of images.slice(0, 10)) {
+        const form = new FormData();
+        form.append('source', new Blob([image], { type: 'image/jpeg' }), 'oko.jpg');
+        form.append('published', 'false');
+        form.append('temporary', 'true');
+        ids.push((await call(`${c.pageId}/photos`, { form })).id);
+      }
+      const params = { message: text };
+      ids.forEach((id, i) => { params[`attached_media[${i}]`] = JSON.stringify({ media_fbid: id }); });
+      const result = await call(`${c.pageId}/feed`, { params });
+      return { id: result.id, url: `https://www.facebook.com/${result.id}`, slides: ids.length };
+    },
+    /** Karusel na Instagram: kontajnery snímok (is_carousel_item) → kontajner CAROUSEL → zverejnenie. */
+    async instagramCarousel({ imageUrls, text, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+      const c = config();
+      if (!c.instagram) throw new Error('Instagram nie je nastavený (META_IG_USER_ID, META_PAGE_TOKEN).');
+      if (!Array.isArray(imageUrls) || imageUrls.length < 2) return this.instagramImage({ imageUrl: imageUrls?.[0], text });
+      const waitFinished = async (id, label, tries) => {
+        for (let i = 0; i < tries; i++) {
+          const state = await call(id, { method: 'GET', params: { fields: 'status_code' } });
+          if (state.status_code === 'FINISHED') return;
+          if (state.status_code === 'ERROR' || state.status_code === 'EXPIRED') throw new Error(`Instagram ${label}: ${state.status_code}`);
+          await wait(2000);
+        }
+      };
+      const children = [];
+      for (const imageUrl of imageUrls.slice(0, 10)) {
+        const child = await call(`${c.igUserId}/media`, { params: { image_url: imageUrl, is_carousel_item: 'true' } });
+        await waitFinished(child.id, 'snímka karuselu', 10);
+        children.push(child.id);
+      }
+      const container = await call(`${c.igUserId}/media`, { params: { media_type: 'CAROUSEL', children: children.join(','), caption: text.slice(0, 2200) } });
+      await waitFinished(container.id, 'karusel', 15);
+      const published = await call(`${c.igUserId}/media_publish`, { params: { creation_id: container.id } });
+      let url = null;
+      try { url = (await call(published.id, { method: 'GET', params: { fields: 'permalink' } })).permalink || null; } catch { /* odkaz nie je nutný */ }
+      return { id: published.id, url, slides: children.length };
     },
     /** Reel na Facebook stránku: start → upload na rupload.facebook.com → finish (zverejniť). Limit Mety: 30 reels / 24 h. */
     async facebookReel({ video, text }) {

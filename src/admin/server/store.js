@@ -18,8 +18,13 @@ function studioRow(row) {
     edited: row.text !== row.original_text, card: parse(row.card, {}), status: row.status, results: parse(row.results, {}),
     createdAt: row.created_at, updatedAt: row.updated_at, approvedAt: row.approved_at, publishedAt: row.published_at,
     video: row.video ?? null, videoStatus: row.video_status ?? null, videoError: row.video_error ?? null,
-    scheduledAt: row.scheduled_at ?? null, scheduledTargets: parse(row.scheduled_targets, null) };
+    scheduledAt: row.scheduled_at ?? null, scheduledTargets: parse(row.scheduled_targets, null),
+    retryAt: row.retry_at ?? null, retryN: row.retry_n ?? 0, videoSeconds: row.video_seconds ?? null,
+    slides: 1 + (row.extra_images ?? 0) };
 }
+const DRAFT_COLUMNS = `id, template, event_key, origin, title, text, original_text, card, status, results, created_at,
+        updated_at, approved_at, published_at, video, video_status, video_error, scheduled_at, scheduled_targets, retry_at, retry_n, video_seconds,
+        (SELECT COUNT(*) FROM studio_images WHERE studio_images.draft_id = studio_drafts.id) AS extra_images`;
 
 export function openAdminStore(filename) {
   if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
@@ -71,6 +76,14 @@ export function openAdminStore(filename) {
   db.exec(`CREATE TABLE IF NOT EXISTS studio_insights (
     draft_id TEXT NOT NULL, target TEXT NOT NULL, fetched_at INTEGER NOT NULL, metrics TEXT NOT NULL, PRIMARY KEY (draft_id, target)
   )`);
+  // Karusel (2026-10-04): ďalšie snímky návrhu (hlavný obrázok ostáva v studio_drafts.image). Aditívne.
+  db.exec(`CREATE TABLE IF NOT EXISTS studio_images (
+    draft_id TEXT NOT NULL, idx INTEGER NOT NULL, image BLOB NOT NULL, PRIMARY KEY (draft_id, idx)
+  )`);
+  // Opakovanie zlyhaného zverejnenia a dĺžka reelu (2026-10-04): aditívne.
+  if (!draftColumns.includes('retry_at')) db.exec('ALTER TABLE studio_drafts ADD COLUMN retry_at INTEGER');
+  if (!draftColumns.includes('retry_n')) db.exec('ALTER TABLE studio_drafts ADD COLUMN retry_n INTEGER NOT NULL DEFAULT 0');
+  if (!draftColumns.includes('video_seconds')) db.exec('ALTER TABLE studio_drafts ADD COLUMN video_seconds REAL');
   if (filename !== ':memory:' && process.platform !== 'win32') { try { chmodSync(filename, 0o600); } catch { /* ok */ } }
 
   const tx = fn => {
@@ -188,18 +201,35 @@ export function openAdminStore(filename) {
     },
     studioHasKey: key => Boolean(db.prepare('SELECT 1 FROM studio_drafts WHERE event_key = ?').get(key)),
     studioGet(id) {
-      const row = db.prepare('SELECT * FROM studio_drafts WHERE id = ?').get(id);
+      const row = db.prepare(`SELECT ${DRAFT_COLUMNS} FROM studio_drafts WHERE id = ?`).get(id);
       return row ? studioRow(row) : null;
     },
     studioImage: id => db.prepare('SELECT image FROM studio_drafts WHERE id = ?').get(id)?.image ?? null,
+    /** Ďalšie snímky karuselu (idx 1…); idx 0 = hlavný obrázok. */
+    studioImageAt(id, idx) {
+      if (!idx) return this.studioImage(id);
+      return db.prepare('SELECT image FROM studio_images WHERE draft_id = ? AND idx = ?').get(id, idx)?.image ?? null;
+    },
+    studioImagesSet(id, images) {
+      db.prepare('DELETE FROM studio_images WHERE draft_id = ?').run(id);
+      images.forEach((image, i) => db.prepare('INSERT INTO studio_images (draft_id, idx, image) VALUES (?, ?, ?)').run(id, i + 1, image));
+    },
+    /** Všetky snímky v poradí (hlavná + ďalšie). */
+    studioImages(id) {
+      const main = this.studioImage(id);
+      if (!main) return [];
+      return [main, ...db.prepare('SELECT image FROM studio_images WHERE draft_id = ? ORDER BY idx').all(id).map(row => row.image)];
+    },
+    /** Návrhy s naplánovaným opakovaním zverejnenia, ktorých čas nastal. */
+    studioRetryDue: now => db.prepare(`SELECT id FROM studio_drafts WHERE retry_at IS NOT NULL AND retry_at <= ? AND status IN ('approved','failed')
+      ORDER BY retry_at`).all(now).map(row => row.id),
     studioList(limit = 100) {
-      return db.prepare(`SELECT id, template, event_key, origin, title, text, original_text, card, status, results, created_at,
-        updated_at, approved_at, published_at, video, video_status, video_error, scheduled_at, scheduled_targets
-        FROM studio_drafts ORDER BY created_at DESC LIMIT ?`).all(limit).map(studioRow);
+      return db.prepare(`SELECT ${DRAFT_COLUMNS} FROM studio_drafts ORDER BY created_at DESC LIMIT ?`).all(limit).map(studioRow);
     },
     studioUpdate(id, fields, now) {
       const columns = { text: 'text', status: 'status', results: 'results', approvedAt: 'approved_at', publishedAt: 'published_at',
-        video: 'video', videoStatus: 'video_status', videoError: 'video_error', scheduledAt: 'scheduled_at', scheduledTargets: 'scheduled_targets' };
+        video: 'video', videoStatus: 'video_status', videoError: 'video_error', scheduledAt: 'scheduled_at', scheduledTargets: 'scheduled_targets',
+        retryAt: 'retry_at', retryN: 'retry_n', videoSeconds: 'video_seconds' };
       for (const [key, column] of Object.entries(columns)) {
         if (!(key in fields)) continue;
         const value = ['results', 'scheduledTargets'].includes(key) && fields[key] !== null ? JSON.stringify(fields[key]) : fields[key];
@@ -241,6 +271,7 @@ export function openAdminStore(filename) {
       db.prepare(`DELETE FROM studio_drafts WHERE status IN ('draft','discarded','failed') AND created_at < ?`).run(now - 30 * 86400_000);
       db.prepare('DELETE FROM studio_insights WHERE draft_id NOT IN (SELECT id FROM studio_drafts)').run();
       db.prepare(`UPDATE studio_drafts SET image = NULL WHERE status = 'published' AND published_at < ?`).run(now - 90 * 86400_000);
+      db.prepare('DELETE FROM studio_images WHERE draft_id NOT IN (SELECT id FROM studio_drafts WHERE image IS NOT NULL)').run();
     },
     /** Konzistentná kópia databázy (bez zastavenia servera). */
     backupTo(file) { db.exec(`VACUUM INTO '${String(file).replaceAll("'", "''")}'`); },

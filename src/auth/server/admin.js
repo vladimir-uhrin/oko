@@ -48,6 +48,8 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
       '/api/admin/costs': ['GET'], '/api/admin/feed-history': ['GET'], '/api/admin/feeds/:id': ['POST'],
       '/api/admin/notice': ['GET', 'POST'], '/api/admin/maintenance': ['GET'], '/api/admin/maintenance/backup': ['POST'],
       '/api/admin/maintenance/cache': ['POST'], '/api/admin/accounts-chart': ['GET'],
+      // Upozornenia (2026-10-04): nastavenie, zoznam, skúška.
+      '/api/admin/alerts': ['GET', 'POST'], '/api/admin/alerts/test': ['POST'],
     }[route];
     if (!methods) throw fail('not_found', 404);
     if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
@@ -72,6 +74,11 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
           settings: feedSettingsList(runtime) });
       }
       if (route === '/api/admin/notice') return json(res, 200, { notice: needRuntime().getNotice(), public: runtime.notice() });
+      if (route === '/api/admin/alerts') {
+        const alerts = needRuntime().alerts;
+        if (!alerts) throw fail('telemetry_unavailable', 503);
+        return json(res, 200, { status: alerts.status(), history: alerts.history() });
+      }
       if (route === '/api/admin/maintenance') {
         return json(res, 200, { backups: await (sources.backups?.() ?? []), cache: await (sources.cacheDirs?.() ?? []) });
       }
@@ -111,6 +118,20 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
         const setting = needRuntime().setFeedSetting(feedRoute[1], body, actor);
         store.audit(actor, 'feed_updated', null, `${feedRoute[1]}: ${JSON.stringify(setting)}`, time);
         return json(res, 200, { setting, settings: feedSettingsList(runtime) });
+      }
+      if (route === '/api/admin/alerts' || route === '/api/admin/alerts/test') {
+        const alerts = needRuntime().alerts;
+        if (!alerts) throw fail('telemetry_unavailable', 503);
+        if (route === '/api/admin/alerts/test') {
+          fields(body, []);
+          const entry = await alerts.test();
+          store.audit(actor, 'alerts_test', null, entry?.mailed ? 'odoslané' : (entry?.mailError || 'neodoslané'), time);
+          return json(res, 200, { entry, status: alerts.status(), history: alerts.history() });
+        }
+        fields(body, ['enabled', 'email', 'feedDownMinutes', 'errors', 'publish']);
+        const settings = alerts.setSettings(body, actor);
+        store.audit(actor, 'alerts_settings', null, `${settings.enabled ? 'zapnuté' : 'vypnuté'} · ${settings.feedDownMinutes} min`, time);
+        return json(res, 200, { status: alerts.status(), history: alerts.history() });
       }
       if (route === '/api/admin/notice') {
         const error = validateNotice(body);

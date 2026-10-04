@@ -33,6 +33,7 @@ const ERRORS = {
   invalid_schedule: 'Čas musí byť v budúcnosti, najviac 30 dní dopredu.',
   no_target: 'Vyberte aspoň jednu sieť.',
   front_week_running: 'Týždeň na fronte sa práve vyrába.',
+  limits_exceeded: 'Príspevok nespĺňa limity siete:',
 };
 const EVENTS = {
   registered: 'vytvorenie účtu', registered_google: 'vytvorenie cez Google', registered_github: 'vytvorenie cez GitHub',
@@ -48,7 +49,8 @@ const AUDIT = { user_deleted: 'zmazal účet', user_disabled: 'zablokoval', user
   feed_updated: 'zmenil zdroj', notice_set: 'nastavil oznam', notice_cleared: 'zrušil oznam', errors_cleared: 'vymazal chyby',
   backup_created: 'zálohoval DB', cache_cleared: 'vyčistil cache', studio_generated: 'vytvoril návrh', studio_settings: 'zmenil automatiku Štúdia',
   studio_published: 'zverejnil príspevok', studio_shared: 'zdieľal ručne', studio_publish_started: 'spustil zverejnenie',
-  studio_scheduled: 'naplánoval príspevok', studio_unscheduled: 'zrušil plán', studio_front_week: 'spustil Týždeň na fronte' };
+  studio_scheduled: 'naplánoval príspevok', studio_unscheduled: 'zrušil plán', studio_front_week: 'spustil Týždeň na fronte',
+  alerts_settings: 'zmenil upozornenia', alerts_test: 'poslal skúšobné upozornenie' };
 
 // ── pomocníci ──────────────────────────────────────────────────────────────
 function el(tag, className = '', text) {
@@ -121,7 +123,8 @@ async function api(path, { method = 'GET', body } = {}) {
   try { data = await response.json(); } catch { data = null; }
   if (!response.ok) {
     const code = data?.error || `http_${response.status}`;
-    throw Object.assign(new Error(ERRORS[code] || `Chyba: ${code}`), { code, status: response.status });
+    const details = Array.isArray(data?.details) && data.details.length ? ` ${data.details.join(' ')}` : '';
+    throw Object.assign(new Error(`${ERRORS[code] || `Chyba: ${code}`}${details}`), { code, status: response.status });
   }
   return data;
 }
@@ -428,7 +431,7 @@ async function renderStudio(message) {
   const shown = data.drafts.filter(d => studioState.filter === 'all' ? true : studioState.filter === 'open'
     ? ['draft', 'approved', 'failed'].includes(d.status) : d.status === studioState.filter);
   const grid = el('div', 'admin-studio-grid');
-  for (const draft of shown) grid.append(studioCard(draft, meta));
+  for (const draft of shown) grid.append(studioCard(draft, meta, data.bestTimes, data.limits));
   if (!shown.length) grid.append(el('p', 'admin-muted', 'Žiadne návrhy. Vytvorte ich tlačidlami vyššie, alebo počkajte na automatiku.'));
 
   // Týždeň na fronte (video z scripts/make-front-week-video.mjs → návrh v Štúdiu)
@@ -531,13 +534,56 @@ async function saveStudioSettings(patch) {
   catch (error) { await renderStudio(notice(error.message)); }
 }
 
-function studioCard(draft, meta) {
+const WEEKDAY_SHORT = ['ne', 'po', 'ut', 'st', 'št', 'pi', 'so'];
+const CHECK_TONE = { error: 'bad', warn: 'info', info: 'muted' };
+const CHECK_TARGET = { instagram: 'IG', facebook: 'FB', all: '' };
+
+/** Náhľad v tvare príspevku: hlavička stránky, prvé riadky textu pred „viac", obrázok s orezom 4:5, počet snímok. */
+function studioPreview(draft, text, limits) {
+  const box = el('div', 'admin-preview');
+  const head = el('div', 'admin-preview-head');
+  head.append(el('span', 'admin-preview-avatar', 'OKO'), el('span', 'admin-preview-name', 'OKO · okolive.sk'), el('span', 'admin-muted', 'práve teraz'));
+  const body = el('p', 'admin-preview-text');
+  const fold = limits?.captionFold || 125;
+  const update = () => {
+    const value = text.value;
+    const chars = [...value];
+    body.replaceChildren(document.createTextNode(chars.slice(0, fold).join('')));
+    if (chars.length > fold) body.append(el('span', 'admin-muted', '… viac'));
+    counter.textContent = `${chars.length} / ${limits?.text || 2200} znakov · ${(value.match(/(^|\s)#[\p{L}\p{N}_]+/gu) || []).length} / ${limits?.hashtags || 30} hashtagov`;
+    counter.className = chars.length > (limits?.text || 2200) ? 'admin-preview-count bad' : 'admin-preview-count';
+  };
+  const counter = el('span', 'admin-preview-count');
+  const pic = el('div', 'admin-preview-pic');
+  const img = el('img'); img.src = `/api/admin/studio/drafts/${draft.id}/image?v=${draft.updatedAt}`; img.alt = ''; img.loading = 'lazy';
+  pic.append(img);
+  if (draft.slides > 1) pic.append(el('span', 'admin-preview-slides', `1 / ${draft.slides}`));
+  text.addEventListener('input', update);
+  update();
+  box.append(head, body, pic, counter);
+  return box;
+}
+
+function studioCard(draft, meta, bestTimes = null, limits = null) {
   const card = el('article', 'admin-studio-card');
   const media = el('div', 'admin-studio-media');
   const img = el('img');
   img.src = `/api/admin/studio/drafts/${draft.id}/image?v=${draft.updatedAt}`;
   img.alt = draft.title; img.loading = 'lazy'; img.width = 270; img.height = 338;
   media.append(img);
+  // Karusel: miniatúry ďalších snímok (klik = zobraziť vo veľkom).
+  if (draft.slides > 1) {
+    const strip = el('div', 'admin-studio-slides');
+    strip.setAttribute('aria-label', `Karusel: ${draft.slides} snímok`);
+    for (let i = 0; i < Math.min(draft.slides, 10); i++) {
+      const thumb = el('img');
+      thumb.src = `/api/admin/studio/drafts/${draft.id}/image?i=${i}&v=${draft.updatedAt}`;
+      thumb.alt = `snímka ${i + 1}`; thumb.width = 48; thumb.height = 60;
+      thumb.addEventListener('click', () => { img.src = thumb.src; });
+      strip.append(thumb);
+    }
+    media.append(strip);
+  }
   const videoReady = draft.videoStatus === 'ready';
   if (videoReady) {
     const video = el('video');
@@ -558,6 +604,8 @@ function studioCard(draft, meta) {
   if (draft.scheduledAt) head.append(badge(`naplánované ${when(draft.scheduledAt)}`, 'info'));
   if (draft.template === 'event') head.append(badge('z Udalostí', 'muted'));
   if (draft.template === 'front-week') head.append(badge('Týždeň na fronte', 'muted'));
+  if (draft.slides > 1) head.append(badge(`karusel · ${draft.slides} ${draft.slides < 5 ? 'snímky' : 'snímok'}`, 'info'));
+  if (draft.retryAt) head.append(badge(`ďalší pokus ${when(draft.retryAt)} (${draft.retryN}/3)`, 'info'));
   const text = el('textarea', 'admin-studio-text'); text.value = draft.text; text.rows = 9; text.maxLength = 2200;
   text.setAttribute('aria-label', `Text príspevku: ${draft.title}`);
   const editable = ['draft', 'approved', 'failed'].includes(draft.status);
@@ -596,6 +644,15 @@ function studioCard(draft, meta) {
       input.min = toLocal(Date.now()); input.max = toLocal(Date.now() + 30 * 86400e3);
       const submit = el('button', 'admin-btn admin-btn-sm', draft.scheduledAt ? 'Preplánovať' : `Naplánovať (${short(scheduleTargets)})`);
       form.append(input, submit);
+      // Najlepší čas z Výkonu (po aspoň 5 príspevkoch so štatistikami).
+      if (bestTimes?.enough && bestTimes.suggestion) {
+        const best = bestTimes.slots[0];
+        const pick = el('button', 'admin-btn admin-btn-sm', `Dobrý čas: ${WEEKDAY_SHORT[best.weekday]} ${best.hour}:00`);
+        pick.type = 'button';
+        pick.title = `Najvyšší priemerný dosah (${best.score}) z ${bestTimes.posts} príspevkov; najbližší termín ${when(bestTimes.suggestion)}.`;
+        pick.addEventListener('click', () => { input.value = toLocal(bestTimes.suggestion); input.focus(); });
+        form.append(pick);
+      }
       form.addEventListener('submit', async event => {
         event.preventDefault();
         const at = new Date(input.value).getTime();
@@ -649,8 +706,17 @@ function studioCard(draft, meta) {
     else line.append(document.createTextNode(`${name}: ${when(result.at)}`));
     results.append(line);
   }
-  body.append(head, el('h3', '', draft.title), el('p', 'admin-muted', `vytvorené ${when(draft.createdAt)}${draft.publishedAt ? ` · zverejnené ${when(draft.publishedAt)}` : ''}`),
-    text, actions, results);
+  const checks = el('ul', 'admin-studio-checks');
+  for (const check of draft.checks || []) {
+    const item = el('li');
+    item.append(badge(`${CHECK_TARGET[check.target] ? `${CHECK_TARGET[check.target]} · ` : ''}${check.level === 'error' ? 'nepôjde' : check.level === 'warn' ? 'pozor' : 'tip'}`, CHECK_TONE[check.level] || 'muted'),
+      document.createTextNode(` ${check.text}`));
+    checks.append(item);
+  }
+  const preview = el('details', 'admin-details admin-studio-preview');
+  preview.append(el('summary', '', 'Náhľad príspevku (ako ho uvidia na FB/IG)'), studioPreview(draft, text, limits));
+  body.append(head, el('h3', '', draft.title), el('p', 'admin-muted', `vytvorené ${when(draft.createdAt)}${draft.publishedAt ? ` · zverejnené ${when(draft.publishedAt)}` : ''}${draft.videoSeconds ? ` · reel ${String(draft.videoSeconds).replace('.', ',')} s` : ''}`),
+    text, ...(draft.checks?.length ? [checks] : []), preview, actions, results);
   card.append(media, body);
   return card;
 }
@@ -848,8 +914,46 @@ async function renderNotice() {
 }
 
 // ── Údržba ─────────────────────────────────────────────────────────────────
-async function renderMaintenance() {
-  const data = await api('/api/admin/maintenance');
+function alertsSection(alerts) {
+  if (!alerts) return section('Upozornenia', el('p', 'admin-muted', 'Upozornenia na serveri nebežia.'));
+  const { status, history } = alerts;
+  const form = el('form', 'admin-alerts-form');
+  const enabled = el('input'); enabled.type = 'checkbox'; enabled.checked = status.enabled;
+  const enabledLabel = el('label', 'admin-check'); enabledLabel.append(enabled, document.createTextNode(' Posielať upozornenia e-mailom'));
+  const email = el('input'); email.type = 'email'; email.value = status.email || ''; email.placeholder = 'vas@email.sk'; email.setAttribute('aria-label', 'E-mail pre upozornenia');
+  const minutes = el('input'); minutes.type = 'number'; minutes.min = '20'; minutes.max = '1440'; minutes.step = '10'; minutes.value = String(status.feedDownMinutes);
+  minutes.setAttribute('aria-label', 'Feed nedostupný dlhšie ako (min)');
+  const errors = el('input'); errors.type = 'checkbox'; errors.checked = status.errors;
+  const errorsLabel = el('label', 'admin-check'); errorsLabel.append(errors, document.createTextNode(' nové chyby servera a HTTP 5xx'));
+  const publish = el('input'); publish.type = 'checkbox'; publish.checked = status.publish;
+  const publishLabel = el('label', 'admin-check'); publishLabel.append(publish, document.createTextNode(' zlyhané zverejnenie zo Štúdia (po 3 pokusoch)'));
+  const emailLabel = el('label', 'admin-check', 'E-mail '); emailLabel.append(email);
+  const minutesLabel = el('label', 'admin-check', 'Feed nedostupný dlhšie ako '); minutesLabel.append(minutes, document.createTextNode(' min'));
+  const save = el('button', 'admin-btn admin-btn-sm', 'Uložiť');
+  const test = button('Poslať skúšobný e-mail', async event => {
+    event.target.disabled = true;
+    try { const r = await api('/api/admin/alerts/test', { method: 'POST', body: {} }); await renderMaintenance(notice(r.entry?.mailed ? 'Skúšobný e-mail odoslaný.' : `Neodoslané: ${r.entry?.mailError || (r.status.mailer ? 'upozornenia sú vypnuté alebo chýba e-mail' : 'e-mail na serveri nie je nastavený (AUTH_MAIL_*)')}.`, r.entry?.mailed ? 'ok' : 'info')); }
+    catch (error) { await renderMaintenance(notice(error.message)); }
+  }, 'admin-btn admin-btn-sm');
+  form.append(enabledLabel, emailLabel, minutesLabel, errorsLabel, publishLabel, el('div', 'admin-actions'));
+  form.lastChild.append(save, test);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    try {
+      await api('/api/admin/alerts', { method: 'POST', body: { enabled: enabled.checked, email: email.value.trim() || null, feedDownMinutes: Number(minutes.value), errors: errors.checked, publish: publish.checked } });
+      await renderMaintenance(notice('Upozornenia uložené.', 'ok'));
+    } catch (error) { await renderMaintenance(notice(error.message)); }
+  });
+  const KIND = { feed_down: 'feed', errors: 'chyby', publish_failed: 'zverejnenie', test: 'skúška' };
+  const rows = history.map(item => row([when(item.at), KIND[item.kind] || item.kind, item.subject, item.mailed ? badge('e-mail', 'ok') : badge(item.mailError ? 'chyba e-mailu' : 'len v admine', 'muted')]));
+  return section('Upozornenia',
+    el('p', 'admin-muted', status.mailer ? 'E-maily idú cez webhook účtov (AUTH_MAIL_*). Ten istý problém najviac raz za 6 h, najviac 12 e-mailov denne.'
+      : 'E-mail na serveri nie je nastavený (AUTH_MAIL_ENDPOINT, AUTH_MAIL_TOKEN, AUTH_MAIL_FROM v .env) — upozornenia sa zatiaľ len zapisujú sem.'),
+    form, rows.length ? table(['Čas', 'Druh', 'Upozornenie', 'Doručenie'], rows) : el('p', 'admin-muted', 'Zatiaľ žiadne upozornenia.'));
+}
+
+async function renderMaintenance(message) {
+  const [data, alerts] = await Promise.all([api('/api/admin/maintenance'), api('/api/admin/alerts').catch(() => null)]);
   const backup = button('Zálohovať databázy teraz', async event => {
     event.target.disabled = true;
     try { const result = await api('/api/admin/maintenance/backup', { method: 'POST', body: {} }); await renderMaintenance(); main.prepend(notice(`Záloha: ${result.made.join(', ')}`, 'ok')); }
@@ -865,7 +969,8 @@ async function renderMaintenance() {
     }, 'admin-btn admin-btn-sm admin-btn-warn') : el('span', 'admin-muted', 'dáta, nie cache');
     return row([dir.name, `${dir.partial ? '> ' : ''}${bytes(dir.bytes)}`, action]);
   });
-  setView(section('Záloha', el('p', 'admin-muted', 'Konzistentná kópia DB účtov aj admin DB do .auth-data/backups (ponechá 14 najnovších). Zálohy obsahujú hashe hesiel — zostávajú len na serveri.'), backup, backups),
+  setView(...(message ? [message] : []), alertsSection(alerts),
+    section('Záloha', el('p', 'admin-muted', 'Konzistentná kópia DB účtov aj admin DB do .auth-data/backups (ponechá 14 najnovších). Zálohy obsahujú hashe hesiel — zostávajú len na serveri.'), backup, backups),
     section('Cache (.gev-cache)', data.cache.length ? table(['Priečinok', 'Veľkosť', ''], cacheRows) : el('p', 'admin-muted', 'Cache je prázdna.'),
       el('p', 'admin-muted', 'Mazať sa dá len čistá cache (obrázky, logá, Overpass, preklady, TomTom dlaždice…). Archív letov, zdieľané odkazy, terén a meteo bake sú dáta. Počítadlá rozpočtu (budget.json) sa nemažú.')));
 }

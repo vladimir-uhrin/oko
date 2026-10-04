@@ -12,7 +12,7 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     '/drafts/:id/image': ['GET'], '/drafts/:id/video': ['GET'], '/drafts/:id/render': ['POST'], '/drafts/:id/approve': ['POST'], '/drafts/:id/discard': ['POST'], '/drafts/:id/restore': ['POST'],
     '/drafts/:id/publish': ['POST'], '/drafts/:id/shared': ['POST'], '/drafts/:id/schedule': ['POST'],
     '/drafts/:id/source': ['GET'], '/calendar': ['GET'], '/insights': ['GET'], '/insights/refresh': ['POST'],
-    '/front-week': ['GET', 'POST'] }[route];
+    '/front-week': ['GET', 'POST'], '/best-times': ['GET'] }[route];
   if (!methods) throw fail('not_found', 404);
   if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
   const id = draftRoute?.[1];
@@ -21,10 +21,12 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     if (route === '/') {
       let instagramLimit = null;
       try { instagramLimit = await studio.instagramLimit(); } catch { instagramLimit = null; }
-      return json(res, 200, { drafts: studio.list(100), templates: studio.templateStats(), settings: studio.settings(),
+      // Každý návrh nesie aj kontroly limitov (IG text/hashtagy/dĺžka reelu) — UI ich ukáže pred odoslaním.
+      return json(res, 200, { drafts: studio.list(100).map(draft => ({ ...draft, checks: studio.checks(draft) })), templates: studio.templateStats(), settings: studio.settings(),
         meta: studio.publisherStatus(), instagramLimit, publicUrl: studio.publicUrl, autoPublishMin: 10,
-        capabilities: await studio.capabilities() });
+        capabilities: await studio.capabilities(), bestTimes: studio.bestTimes(), limits: studio.limits });
     }
+    if (route === '/best-times') return json(res, 200, studio.bestTimes());
     if (route === '/calendar') return json(res, 200, { items: studio.calendar(14) });
     if (route === '/front-week') return json(res, 200, { status: studio.frontWeekStatus(), settings: studio.settings().frontWeek });
     if (route === '/drafts/:id/source') {
@@ -35,10 +37,12 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     }
     if (route === '/insights') return json(res, 200, { posts: studio.insights(), meta: studio.publisherStatus() });
     if (route === '/drafts/:id/image') {
-      const image = studio.image(id);
+      // ?i=N: N-tá snímka karuselu (0 = hlavná).
+      const idx = Math.max(0, Math.min(9, Number(new URL(req.url || '/', 'http://localhost').searchParams.get('i')) || 0));
+      const image = studio.image(id, idx);
       if (!image) throw fail('draft_not_found', 404);
       res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': image.length, 'Cache-Control': 'private, no-store',
-        'X-Content-Type-Options': 'nosniff', 'Content-Disposition': `inline; filename="oko-${id.slice(0, 8)}.jpg"` });
+        'X-Content-Type-Options': 'nosniff', 'Content-Disposition': `inline; filename="oko-${id.slice(0, 8)}${idx ? `-${idx}` : ''}.jpg"` });
       return res.end(Buffer.from(image));
     }
     if (route === '/drafts/:id/video') {
@@ -99,7 +103,13 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
   // publish
   if (!Array.isArray(body.targets)) throw fail('invalid_input');
   // Zverejnenie beží na pozadí (video spracúva Meta minúty) — odpoveď hneď, stav cez GET.
-  const { draft, done } = await studio.publish(id, body.targets);
+  let started;
+  try { started = await studio.publish(id, body.targets); }
+  catch (error) {
+    if (error?.message === 'limits_exceeded') return json(res, 409, { error: 'limits_exceeded', details: error.details || [] });
+    throw error;
+  }
+  const { draft, done } = started;
   audit('studio_publish_started', `${draft.title} → ${body.targets.join(', ')}`);
   done.then(result => store.audit(actor, 'studio_published', null, `${result.draft.title} (${result.draft.status})`.slice(0, 200), now()))
     .catch(() => {});

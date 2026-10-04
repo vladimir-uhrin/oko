@@ -358,3 +358,129 @@ test('Týždeň na fronte: ručný beh dá video a text do Štúdia; automatika 
   clock.time += 86400_000; // nedeľa
   assert.equal(studio.frontWeekStatus().due, false);
 });
+
+// ── 2026-10-04: karusel, opakovanie, kontroly limitov, najlepší čas ─────────────
+test('karusel: import so snímkami → FB attached_media aj IG CAROUSEL, podpísané URL každej snímky', async t => {
+  const calls = [];
+  const publisher = {
+    status: () => ({ facebook: true, instagram: true, version: 'v23.0' }),
+    async facebookCarousel({ images, text }) { calls.push(['fb', images.map(b => Buffer.from(b).toString()), text]); return { id: 'p_1', url: 'https://www.facebook.com/p_1', slides: images.length }; },
+    async instagramCarousel({ imageUrls }) { calls.push(['ig', imageUrls]); return { id: 'ig1', url: 'https://instagram.com/p/c', slides: imageUrls.length }; },
+    async facebookPhoto() { throw new Error('nemalo sa volať'); }, async instagramImage() { throw new Error('nemalo sa volať'); },
+    instagramLimit: async () => null,
+  };
+  const { studio } = setup(t, { publisher });
+  const { draft } = await studio.importDraft({ template: 'event', eventKey: 'event:x', title: 'Udalosť', text: 'Text #OKO https://okolive.sk',
+    image: Buffer.from('main'), images: [Buffer.from('m1'), Buffer.from('m2'), Buffer.from(''), 'nie buffer'] });
+  assert.equal(draft.slides, 3, 'prázdne a neplatné snímky sa vynechajú');
+  assert.equal(Buffer.from(studio.image(draft.id, 2)).toString(), 'm2');
+  assert.equal(studio.image(draft.id, 5), null);
+  const { done } = await studio.publish(draft.id, ['facebook', 'instagram']);
+  const result = await done;
+  assert.equal(result.draft.status, 'published');
+  assert.deepEqual(calls[0].slice(0, 2), ['fb', ['main', 'm1', 'm2']]);
+  assert.equal(calls[1][1].length, 3);
+  assert.match(calls[1][1][0], /\/api\/studio\/media\/[a-f0-9-]{36}\.jpg\?exp=/);
+  assert.match(calls[1][1][2], /\/api\/studio\/media\/[a-f0-9-]{36}-2\.jpg\?exp=/);
+  // Podpísaná URL snímky karuselu sa dá stiahnuť, podpis je viazaný na číslo snímky.
+  const server = http.createServer((req, res) => { void studio.handleMedia(req, res, () => { res.statusCode = 418; res.end(); }); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const local = url => `http://127.0.0.1:${server.address().port}${new URL(url).pathname}${new URL(url).search}`;
+  const second = studio.mediaUrl(draft.id, 600e3, 'jpg', 2);
+  const got = await fetch(local(second));
+  assert.equal(got.status, 200);
+  assert.equal(Buffer.from(await got.arrayBuffer()).toString(), 'm2');
+  assert.equal((await fetch(local(second.replace(`${draft.id}-2.jpg`, `${draft.id}-1.jpg`)))).status, 404, 'podpis na inú snímku neplatí');
+});
+
+test('opakovanie: dočasná chyba Mety → pokusy o 10/30/90 min, potom failed a upozornenie; trvalá chyba hneď', async t => {
+  const alerts = [];
+  let mode = 'temporary';
+  let attempts = 0;
+  const publisher = {
+    status: () => ({ facebook: true, instagram: false, version: 'v23.0' }),
+    async facebookPhoto() {
+      attempts++;
+      if (mode === 'ok') return { id: 'ok_1', url: 'https://www.facebook.com/ok_1' };
+      if (mode === 'token') throw Object.assign(new Error('Invalid OAuth access token'), { code: 190, status: 400 });
+      throw Object.assign(new Error('Service temporarily unavailable'), { code: 2, status: 503 });
+    },
+    instagramLimit: async () => null,
+  };
+  const clock = { time: NOW };
+  const store = openAdminStore(':memory:');
+  t.after(() => store.close());
+  const studio = createStudio({ store, env: { AUTH_ORIGINS: 'https://okolive.sk' }, port: () => 1, now: () => clock.time, timers: false,
+    fetchJson: fakeFeeds({ '/api/earthquakes/usgs': { records: [quake()], fetchedAt: NOW - 60e3 } }),
+    renderCard: async card => Buffer.from(`jpeg:${card.kind}`), publisher, log: () => {}, onAlert: event => alerts.push(event) });
+  const { draft } = await studio.generate('quake');
+  let r = await (await studio.publish(draft.id, ['facebook'])).done;
+  assert.equal(r.retry, true);
+  assert.equal(r.draft.status, 'approved', 'čaká na ďalší pokus, nie failed');
+  assert.equal(r.draft.retryAt, NOW + 10 * 60_000);
+  assert.equal(r.draft.results.facebook.retryable, true);
+  assert.deepEqual(await studio.publishRetryDue(), [], 'čas ešte nenastal');
+  for (const [i, delay] of [[2, 30], [3, 90]]) {
+    clock.time = studio.get(draft.id).retryAt;
+    await studio.publishRetryDue();
+    assert.equal(studio.get(draft.id).retryN, i);
+    assert.equal(studio.get(draft.id).retryAt, clock.time + delay * 60_000);
+  }
+  clock.time = studio.get(draft.id).retryAt;
+  await studio.publishRetryDue();
+  const last = studio.get(draft.id);
+  assert.equal(last.status, 'failed');
+  assert.equal(last.retryAt, null);
+  assert.equal(attempts, 4, '1 + 3 opakovania');
+  assert.equal(alerts.length, 1);
+  assert.deepEqual([alerts[0].kind, alerts[0].attempts, alerts[0].targets], ['publish_failed', 4, ['facebook']]);
+  // Ručné zverejnenie po oprave prejde; trvalá chyba (token) sa neopakuje.
+  mode = 'ok';
+  assert.equal((await (await studio.publish(draft.id, ['facebook'])).done).draft.status, 'published');
+  const second = (await studio.importDraft({ template: 'event', eventKey: 'event:t', title: 'T', text: 'Text', image: Buffer.from('x') })).draft;
+  mode = 'token';
+  r = await (await studio.publish(second.id, ['facebook'])).done;
+  assert.deepEqual([r.retry, r.draft.status, r.draft.retryAt], [false, 'failed', null]);
+  assert.equal(alerts.length, 2);
+});
+
+test('kontroly limitov: IG text/hashtagy/krátky reel blokujú Instagram, nie Facebook; tipy nič neblokujú', async t => {
+  const calls = [];
+  const { studio, store } = setup(t, { publisher: fakePublisher(calls) });
+  const { draft } = await studio.generate('quake');
+  assert.ok(!studio.checks(store.studioGet(draft.id)).some(c => c.level === 'error'), 'šablóna spĺňa limity');
+  const tags = Array.from({ length: 31 }, (_, i) => `#tag${i}`).join(' ');
+  studio.edit(draft.id, `Prvý riadok.\n${tags}`);
+  const checks = studio.checks(store.studioGet(draft.id));
+  assert.ok(checks.some(c => c.level === 'error' && c.target === 'instagram' && /31 hashtagov/.test(c.text)));
+  assert.ok(checks.some(c => c.level === 'info' && /odkaz/.test(c.text)));
+  await assert.rejects(studio.publish(draft.id, ['instagram']), err => err.message === 'limits_exceeded' && /31 hashtagov/.test(err.details[0]));
+  assert.equal((await (await studio.publish(draft.id, ['facebook'])).done).draft.results.facebook.id, '1_2', 'Facebook limit hashtagov nemá');
+  const long = 'Veľmi dlhý prvý riadok '.repeat(8);
+  const reel = store.studioUpdate(draft.id, { text: `${long}\n#OKO`, videoStatus: 'ready', videoSeconds: 2.4 }, NOW);
+  const reelChecks = studio.checks(reel);
+  assert.ok(reelChecks.some(c => c.level === 'error' && /Reel má 2.4 s/.test(c.text)));
+  assert.ok(reelChecks.some(c => c.level === 'warn' && /Prvý riadok má/.test(c.text)));
+  assert.equal(calls.length, 1, 'na Instagram sa nič neposlalo');
+});
+
+test('najlepší čas: priemerný dosah podľa dňa a hodiny, návrh najbližšieho termínu mimo tichých hodín', async t => {
+  const clock = { time: NOW }; // sobota 3. 10. 2026 14:00 Bratislava
+  const { studio, store } = setup(t, { clock });
+  assert.deepEqual(studio.bestTimes(), { enough: false, posts: 0, slots: [], suggestion: null });
+  // 6 príspevkov: piatky 18:00 majú dosah 900–1100, ostatné 100–200.
+  const posts = [[Date.UTC(2026, 8, 25, 16), 900], [Date.UTC(2026, 8, 18, 16), 1100], [Date.UTC(2026, 8, 26, 7), 150],
+    [Date.UTC(2026, 8, 27, 10), 200], [Date.UTC(2026, 8, 28, 10), 100], [Date.UTC(2026, 8, 29, 12), 120]];
+  posts.forEach(([at, reach], i) => {
+    const id = `00000000-0000-0000-0000-00000000000${i}`;
+    store.studioInsert({ id, template: 'quake', eventKey: `q:${i}`, origin: 'manual', title: `P${i}`, text: 't', card: {}, image: Buffer.from('x'), createdAt: at });
+    store.studioUpdate(id, { status: 'published', publishedAt: at, results: { facebook: { id: `f${i}` } } }, at);
+    store.insightsSet(id, 'facebook', { reach, views: reach * 2, likes: 1 }, at);
+  });
+  const best = studio.bestTimes();
+  assert.equal(best.enough, true);
+  assert.equal(best.posts, 6);
+  assert.deepEqual([best.slots[0].weekday, best.slots[0].hour, best.slots[0].n, best.slots[0].score], [5, 18, 2, 1000]);
+  assert.equal(best.suggestion, Date.UTC(2026, 9, 9, 16), 'najbližší piatok 18:00 (Bratislava)');
+});
