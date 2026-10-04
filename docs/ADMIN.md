@@ -10,6 +10,12 @@ odpovedajú `/api/admin/*` kódom 404, takže admin navonok neexistuje.
 1. Prihlás sa účtom vlastníka (`/account.html` alebo tlačidlo účtu na glóbuse).
 2. Otvor `https://okolive.sk/admin.html` (lokálne `http://localhost:4173/admin.html`).
 
+**Automatika** (časovače Štúdia a upozornení, plánované zverejnenia, opakovania, Týždeň na fronte,
+dorábanie videí po reštarte) beží len vo vydanej službe oko-api — spozná ju podľa súboru `RELEASE`
+(`src/admin/server/scheduler.js`). oko-dev nad tou istou `admin.sqlite` ju nespúšťa, inak by sa pri
+súbehu zverejňovalo dvakrát; ručné akcie v admine fungujú v oboch. `STUDIO_SCHEDULER=on|off` v `.env`
+rozhodnutie prebije. Log pri štarte: `[admin] automatika Štúdia a upozornení: zapnutá (release)`.
+
 Nasadenie: `scripts/oko-publish.ps1` ako vždy — `admin.html` je vstup buildu,
 `/api/admin/*` ide tunelom na dev server spolu s ostatným `/api/*`. Tunel netreba
 meniť. Ak má Cloudflare pravidlá cache, `/admin.html` a `/api/admin/*` nesmú

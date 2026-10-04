@@ -9,6 +9,7 @@ import { createAdminRuntime, secretValues } from './runtime.js';
 import { createStudio } from './studio/index.js';
 import { createAlerts } from './alerts.js';
 import { FEEDS } from './feeds.js';
+import { adminScheduler } from './scheduler.js';
 import { createWebhookMailer } from '../../auth/server/mail.js';
 import { parseOrigins, parseOwnerEmails } from '../../auth/server/http.js';
 import { aiTranslatorsConfig, createAiTranslatorsClient } from '../../data/aiTranslatorsClient.js';
@@ -52,15 +53,21 @@ export function adminPlugin(env = process.env) {
       runtime = createAdminRuntime({ store, ownHosts, secrets: secretValues(env),
         port: () => server.httpServer?.address()?.port ?? null });
       runtime.start();
+      // Automatiku (časovače Štúdia a upozornení, dorábanie videí po reštarte) spúšťa len vydaná služba
+      // oko-api — oko-dev nad tou istou DB by ju zdvojil (scheduler.js).
+      const scheduler = adminScheduler({ root, env });
+      console.info(`[admin] automatika Štúdia a upozornení: ${scheduler.enabled ? 'zapnutá' : 'vypnutá'} (${scheduler.reason})`);
       // Upozornenia (2026-10-04): webhook mailer účtov (AUTH_MAIL_*), príjemca = prvý OKO_OWNER_EMAILS alebo nastavenie v admine.
       const mailer = createWebhookMailer(env, { origins: parseOrigins(env.AUTH_ORIGINS || '') });
-      runtime.alerts = createAlerts({ store, mailer, feeds: FEEDS, defaultEmail: parseOwnerEmails(env.OKO_OWNER_EMAILS)[0] || null });
+      runtime.alerts = createAlerts({ store, mailer, feeds: FEEDS, defaultEmail: parseOwnerEmails(env.OKO_OWNER_EMAILS)[0] || null,
+        timers: scheduler.enabled });
       runtime.alerts.start();
       // Štúdio sociálnych sietí (2026-10-03): rovnaká admin DB, údaje cez loopback.
       runtime.studio = createStudio({ store, env, port: () => server.httpServer?.address()?.port ?? null,
         mediaDir: path.join(path.dirname(authDb), 'studio'), root, voiceProvider: ownerVoiceProvider(env, root),
-        onAlert: event => runtime.alerts?.onStudioAlert(event) });
-      runtime.studio.start();
+        onAlert: event => runtime.alerts?.onStudioAlert(event), timers: scheduler.enabled });
+      // start() dorába aj videá rozrenderované pred reštartom — to patrí tiež len jednému procesu.
+      if (scheduler.enabled) runtime.studio.start();
       current = runtime;
       return runtime;
     };
