@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; base-uri 'none'; form-action 'self'">
+  <title>OKO · Admin</title>
+  <link rel="icon" type="image/svg+xml" href="/logo.svg">
+  <link rel="stylesheet" href="/src/admin/adminPage.css">
+  <script type="module" src="/src/admin/adminPage.js"></script>
+</head>
+<body class="admin">
+  <header class="admin-top">
+    <a class="admin-brand" href="/"><img src="/logo.svg" width="28" height="28" alt="">OKO <span>admin</span></a>
+    <nav class="admin-tabs" id="admin-tabs" aria-label="Sekcie" hidden>
+      <button type="button" data-tab="overview" aria-current="page">Prehľad</button>
+      <button type="button" data-tab="analytics">Analytika</button>
+      <button type="button" data-tab="traffic">Prevádzka</button>
+      <button type="button" data-tab="errors">Chyby</button>
+      <button type="button" data-tab="costs">Náklady</button>
+      <button type="button" data-tab="feeds">Feedy</button>
+      <button type="button" data-tab="users">Používatelia</button>
+      <button type="button" data-tab="studio">Štúdio</button>
+      <button type="button" data-tab="performance">Výkon</button>
+      <button type="button" data-tab="notice">Oznam</button>
+      <button type="button" data-tab="maintenance">Údržba</button>
+      <button type="button" data-tab="audit">Audit</button>
+      <button type="button" data-tab="log">Log</button>
+    </nav>
+    <span class="admin-who" id="admin-who"></span>
+  </header>
+  <main class="admin-main" id="admin-main">
+    <p class="admin-muted">Načítavam…</p>
+  </main>
+</body>
+</html>

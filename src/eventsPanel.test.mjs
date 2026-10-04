@@ -62,7 +62,7 @@ function setup({ ownerHost = false, list = null, view = null, post = null, listG
   const existing = doc.createElement('div');
   existing.className = 'history-row';
   host.appendChild(existing);
-  const calls = { publicEvent: [], list: 0, post: [], publish: [], unpublish: [], shown: [], cleared: 0, flown: 0, legs: [], replay: [], opened: [], copied: [], revealed: 0 };
+  const calls = { publicEvent: [], list: 0, post: [], publish: [], unpublish: [], studio: [], shown: [], cleared: 0, flown: 0, legs: [], replay: [], opened: [], copied: [], revealed: 0 };
   const state = { view, list, post };
   const api = {
     publicEvent: async (id) => { calls.publicEvent.push(id); return typeof state.view === 'function' ? state.view(id) : state.view; },
@@ -70,6 +70,7 @@ function setup({ ownerHost = false, list = null, view = null, post = null, listG
     post: async (id) => { calls.post.push(id); return state.post; },
     publish: async (id) => { calls.publish.push(id); return {}; },
     unpublish: async (id) => { calls.unpublish.push(id); return {}; },
+    toStudio: async (id) => { calls.studio.push(id); return { created: true }; },
     cardUrl: (id, format = 'og') => `/api/events/${id}/card.jpg?format=${format}`,
     ...(video ? { video } : {}),
   };
@@ -457,4 +458,24 @@ test('video automaticky (2026-10-03): formulár scenára → ULOŽIŤ SCENÁR (s
   await flush();
   assert.equal(one(one(none.section, 'events-owner'), 'events-script-title'), undefined);
   assert.ok(one(one(none.section, 'events-owner'), 'events-video-note'));
+});
+
+test('DO ŠTÚDIA (2026-10-03): tlačidlo len keď server Štúdio má; klik pošle udalosť a otvorí admin', async () => {
+  const view = await fzView({ preview: true });
+  const summary = { id: ID, icao24: '8965d1', callsign: 'FDB1073', status: 'confirmed', firstT: view.firstT, kinds: ['dive'], news: 'verified', publishable: true, published: null };
+  const without = setup({ ownerHost: true, view, list: { events: [summary] }, post: { id: ID, publishable: true, headline: 'H', text: 'T', published: null, facebook: null, studio: false } });
+  await flush();
+  one(without.section, 'events-review-toggle').click(); await flush();
+  one(without.section, 'events-review-btn').click(); await flush();
+  assert.equal(one(one(without.section, 'events-owner'), 'events-to-studio'), undefined, 'bez Štúdia žiadne tlačidlo');
+  const s = setup({ ownerHost: true, view, list: { events: [summary] }, post: { id: ID, publishable: true, headline: 'H', text: 'T', published: null, facebook: null, studio: true } });
+  await flush();
+  one(s.section, 'events-review-toggle').click(); await flush();
+  one(s.section, 'events-review-btn').click(); await flush();
+  const owner = one(s.section, 'events-owner');
+  one(owner, 'events-to-studio').click();
+  await flush();
+  assert.deepEqual(s.calls.studio, [ID]);
+  assert.deepEqual(s.calls.opened, ['/admin.html#studio']);
+  assert.equal(one(owner, 'events-owner-msg').textContent, 'events.studio-created');
 });

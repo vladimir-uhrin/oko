@@ -31,6 +31,7 @@ import { versionedDeferredCesiumTags } from './scripts/lib/cesiumHtmlTags.mjs';
 import { eventLoopWatchPlugin } from './scripts/lib/eventLoopWatch.mjs';
 import { startupProfilePlugin } from './scripts/lib/startupProfile.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
+import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
@@ -5869,6 +5870,8 @@ function flightHistoryProxy() {
         // EVENT_VIDEO_PAGE_URL (dev server s Cesiom), najviac EVENT_VIDEO_DAILY_MAX videí za deň (dlaždice).
         videoPipeline: createEventVideoPipeline({ dbDir: path.dirname(cfg.dbPath) }),
         videoDailyMax: Math.max(1, Number(process.env.EVENT_VIDEO_DAILY_MAX) || 3),
+        // Do Štúdia (2026-10-03): návrh v admine; Štúdio beží v tom istom procese (adminPlugin).
+        studioImport: input => { const studio = getAdminRuntime()?.studio; if (!studio) throw Object.assign(new Error('studio_unavailable'), { status: 503 }); return studio.importDraft(input); },
       });
       if (cfg.enabled && String(process.env.FLIGHT_EVENTS || 'on').toLowerCase() !== 'off' && server.httpServer) {
         const events = flightEvents;
@@ -11234,7 +11237,7 @@ export default defineConfig(({ mode }) => {
   let cesiumVersion = '';
   try { cesiumVersion = JSON.parse(fs.readFileSync(path.join(__dirname, 'node_modules', 'cesium', 'package.json'), 'utf8')).version || ''; } catch { cesiumVersion = ''; }
   cesiumGlobe.transformIndexHtml = function (html, context) {
-    if (context.path === '/account.html') return [];
+    if (context.path === '/account.html' || context.path === '/admin.html') return [];
     return versionedDeferredCesiumTags(cesiumHtml.call(this, html, context), cesiumVersion);
   };
   return {
@@ -11243,7 +11246,8 @@ export default defineConfig(({ mode }) => {
       originKeepAlivePlugin(),
       // V role proxy (oko-dev s OKO_API_UPSTREAM) sa API pluginy nespúšťajú: záznam histórie, strážca,
       // udalosti a governor kreditov OpenSky bežia len v službe oko-api; /api a /s idú cez server.proxy.
-      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), sharePlugin(), flightHistoryProxy(), accountAuth] : []),
+      // adminPlugin (2026-10-03): admin, telemetria, Štúdio — len s API pluginmi; `enforce: 'pre'` = pred proxy.
+      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), sharePlugin(), flightHistoryProxy(), accountAuth, adminPlugin(env)] : []),
       cesiumGlobe,
       ...(apiPlugins ? [
       openSkyProxy(),
@@ -11327,7 +11331,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.CESIUM_ION_TOKEN': JSON.stringify(env.CESIUM_ION_TOKEN),
     },
     build: {
-      rollupOptions: { input: { globe: path.resolve(__dirname, 'index.html'), account: path.resolve(__dirname, 'account.html') } },
+      rollupOptions: { input: { globe: path.resolve(__dirname, 'index.html'), account: path.resolve(__dirname, 'account.html'), admin: path.resolve(__dirname, 'admin.html') } },
       // The Cesium engine bundle is inherently large; raise the warning ceiling
       // so the build log isn't dominated by an expected chunk-size notice.
       chunkSizeWarningLimit: 1500,
