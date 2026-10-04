@@ -1,5 +1,26 @@
 # God's Eye View Current State
 
+### OKO Štúdio: Ukrajina — päť šablón zo živých dát (2026-10-04)
+
+Owner: „Ukrajina" + "I also have YT, Telegram and other feeds, videos and photos — process those too so it is
+current". `src/admin/server/studio/ukraine.js` adds `ua-report` (daily General Staff report: clashes vs 7-day
+average, top directions in Slovak, strikes, "one-sided data", ArmyInform link), `ua-front` (daily territory
+change from two consecutive front-map snapshots — `occupiedChangeRaster` + `changeBreakdown`, same maths as the
+layer and the video; grey zone separate; provider not named), `ua-air` (Air Force threat posts via
+`mediaToAlert` → distinct Ukrainian oblasts in 3 h ≥ threshold, default 8; "reported threat, not the siren
+map"; one draft per wave — the key is the wave start, a pause of ≥ 2 h starts a new wave, so a 10-hour night
+attack stays one draft; Russian oblasts are never counted as a neighbouring Ukrainian one), `ua-media` (official Telegram photos of GS/MoD/DSNS and ArmyInform mp4 → framed photo
+carousel / reel; only posts with a recognised event AND an unambiguous side — `mediaWhat` keeps a Ukrainian hit
+on a Russian Buk from being called a Russian attack; never auto-published; licence claimed only for MoD and
+ArmyInform; YouTube never re-uploaded) and `ua-week` (Saturday 9:00 carousel from `loadFrontWeek`).
+Studio plumbing (`index.js`): templates may define `load(ctx)` (several endpoints, own freshness, shared per
+tick), `slides` for carousels, `media` for downloaded footage (`fetchRemoteMedia`: host allow-list, size caps,
+6-hour skip after a failure), `autoPublish: false`; `X-GEV-Cache: STALE-*` now counts as stale (was only exact
+`STALE`). Settings `ua: {airMinOblasts, media, mediaPerDay}` with an admin section „Ukrajina". `card.js`:
+`view`, `polygons`, coloured labelled points with collision-free labels, `mapCredit`, `renderPhotoCard`.
+Verified against the live dev server (report 204 clashes, Pokrovsk +9.1 km², a 10-oblast threat wave, a DSNS
+Sumy post with 7 injured). Tests: `src/admin/server/studio/ukraine.test.mjs`. Plan: `docs/SOCIAL-PLAN.md`.
+
 ### OKO admin panel (2026-10-03)
 
 Standalone `/admin.html` (no Cesium, same CSP/no-store/DENY headers as

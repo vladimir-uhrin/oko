@@ -185,7 +185,7 @@ test('automatika: auto-návrhy, denný prehľad až od 8:00, auto-zverejnenie a�
   const feeds = { '/api/earthquakes/usgs': { records: [quake({ time: clock.time - 60e3 })], fetchedAt: clock.time }, '/api/launches': { results: [] } };
   const { studio, store } = setup(t, { feeds, publisher: fakePublisher(calls), clock });
   const early = await studio.tick();
-  assert.deepEqual(early.results.map(r => [r.template, r.created || r.reason]), [['quake', true], ['launch', 'nothing_to_post']]);
+  assert.deepEqual(early.results.filter(r => !r.template.startsWith('ua-')).map(r => [r.template, r.created || r.reason]), [['quake', true], ['launch', 'nothing_to_post']]);
   assert.equal(studio.list().find(d => d.template === 'quake').origin, 'auto');
   clock.time += 3 * 3600e3; // 9:00
   feeds['/api/earthquakes/usgs'].fetchedAt = clock.time;

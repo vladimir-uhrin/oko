@@ -24,6 +24,7 @@ const ERRORS = {
   invalid_input: 'Neplatná hodnota.',
   meta_not_configured: 'Facebook/Instagram nie je pripojený (META_* v .env).',
   auto_publish_not_earned: 'Automatika sa odomkne po 10 zverejneniach bez úpravy textu.',
+  auto_publish_forbidden: 'Zábery z vojny sa nezverejňujú automaticky — vždy ich schvaľuje človek.',
   draft_not_publishable: 'Tento návrh už nejde zverejniť.',
   invalid_text: 'Text musí mať 1–2200 znakov.',
   studio_unavailable: 'Štúdio na serveri nebeží (pozri log).',
@@ -412,14 +413,33 @@ async function renderStudio(message) {
   const rows = data.templates.map(template => {
     const box = el('input'); box.type = 'checkbox'; box.checked = template.autoPublish;
     const earned = template.unchanged >= data.autoPublishMin;
-    box.disabled = !earned || !connected;
+    const allowed = template.autoPublishAllowed !== false;
+    box.disabled = !allowed || !earned || !connected;
     box.addEventListener('change', () => saveStudioSettings({ autoPublish: { [template.id]: box.checked } }));
     const label = el('label', 'admin-check'); label.append(box, document.createTextNode(' zverejniť automaticky'));
-    const progress = earned ? badge('odomknuté', 'ok') : el('span', 'admin-muted', `${template.unchanged} / ${data.autoPublishMin} zverejnení bez úpravy`);
-    return row([template.label, template.auto === 'daily' ? 'denne o 8:00' : template.auto ? 'pri udalosti' : 'ručne', progress, label]);
+    const progress = !allowed ? el('span', 'admin-muted', 'vždy schvaľuje človek')
+      : earned ? badge('odomknuté', 'ok') : el('span', 'admin-muted', `${template.unchanged} / ${data.autoPublishMin} zverejnení bez úpravy`);
+    const when_ = template.auto === 'daily' ? 'denne o 8:00' : template.auto === 'weekly' ? 'v sobotu o 9:00' : template.auto ? 'pri udalosti' : 'ručne';
+    return row([template.label, when_, progress, label]);
   });
   auto.append(table(['Šablóna', 'Návrhy', 'Podmienka automatiky', ''], rows),
     el('p', 'admin-muted', `Automatické zverejnenie sa pre šablónu odomkne po ${data.autoPublishMin} príspevkoch, ktoré ste zverejnili bez úpravy textu. Poistky: max ${data.settings.autoPublishPerDay} automatických príspevkov za 24 h, tichý čas ${data.settings.quietFrom}:00–${data.settings.quietTo}:00, zastarané dáta sa nezverejnia.`));
+
+  // Ukrajina (2026-10-04): prah vzdušného útoku, fotky a videá oficiálnych kanálov.
+  const ua = data.settings.ua || {};
+  const uaBox = el('div');
+  const airInput = el('input'); airInput.type = 'number'; airInput.min = '2'; airInput.max = '25'; airInput.value = String(ua.airMinOblasts ?? 8); airInput.className = 'admin-input-sm';
+  airInput.addEventListener('change', () => saveStudioSettings({ ua: { airMinOblasts: Number(airInput.value) } }));
+  const airLabel = el('label', 'admin-check', 'Veľký vzdušný útok = hrozba pre aspoň '); airLabel.append(airInput, document.createTextNode(' oblastí za 3 hodiny'));
+  const mediaLabel = el('label', 'admin-check');
+  const mediaBox = el('input'); mediaBox.type = 'checkbox'; mediaBox.checked = ua.media !== false;
+  mediaBox.addEventListener('change', () => saveStudioSettings({ ua: { media: mediaBox.checked } }));
+  mediaLabel.append(mediaBox, document.createTextNode(' Návrhy z fotiek a videí oficiálnych kanálov UA (Generálny štáb, Ministerstvo obrany, DSNS, ArmyInform)'));
+  const perDay = el('input'); perDay.type = 'number'; perDay.min = '0'; perDay.max = '30'; perDay.value = String(ua.mediaPerDay ?? 6); perDay.className = 'admin-input-sm';
+  perDay.addEventListener('change', () => saveStudioSettings({ ua: { mediaPerDay: Number(perDay.value) } }));
+  const perDayLabel = el('label', 'admin-check', 'Najviac '); perDayLabel.append(perDay, document.createTextNode(' návrhov zo záberov za deň'));
+  uaBox.append(airLabel, mediaLabel, perDayLabel,
+    el('p', 'admin-muted', 'Zábery z vojny idú vždy len ako návrh — pred schválením skontrolujte, že na nich nie sú obete ani rozpoznateľné osoby. Videá z YouTube sa nepreberajú (podmienky YouTube to nedovoľujú).'));
 
   // Filter a zoznam návrhov
   const filters = el('div', 'admin-range');
@@ -457,6 +477,7 @@ async function renderStudio(message) {
   setView(...(message ? [message] : []),
     section('Štúdio sociálnych sietí', status, mode, create),
     section('Automatika', auto),
+    section('Ukrajina', uaBox),
     section('Týždeň na fronte', fwBox),
     section('Kalendár (7 dní dozadu, 14 dopredu)', studioCalendar(data.calendar || [])),
     section('Príspevky', filters, grid));
