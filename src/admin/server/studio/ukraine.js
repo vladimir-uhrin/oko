@@ -162,7 +162,7 @@ export function uaFront({ now: snapNow, before }, { now }) {
   const lead = change.ruKm2 >= change.uaKm2
     ? `Ruský agresor za deň obsadil ${km2(change.ruKm2)} ukrajinského územia${change.uaKm2 >= 0.1 ? `, Ukrajina oslobodila ${km2(change.uaKm2)}` : ''}.`
     : `Ukrajina za deň oslobodila ${km2(change.uaKm2)}${change.ruKm2 >= 0.1 ? `, ruský agresor obsadil ${km2(change.ruKm2)}` : ''}.`;
-  const title = change.ruKm2 >= change.uaKm2 ? `Front za deň: Rusko obsadilo ${km2(change.ruKm2)}` : `Front za deň: Ukrajina oslobodila ${km2(change.uaKm2)}`;
+  const title = change.ruKm2 >= change.uaKm2 ? `Front za deň: ruský agresor obsadil ${km2(change.ruKm2)}` : `Front za deň: Ukrajina oslobodila ${km2(change.uaKm2)}`;
   const text = [`🗺️ ${title}`, '',
     `Mapa frontu k ${date(Date.parse(`${day}T12:00:00Z`))} oproti predchádzajúcemu dňu: ${lead}`,
     ...(lines.length ? ['', ...lines] : []),

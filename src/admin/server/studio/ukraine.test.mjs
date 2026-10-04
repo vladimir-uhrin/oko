@@ -61,7 +61,7 @@ test('zmena frontu za deň: km² po smeroch, kritický jazyk, zdroj okolive.sk b
   assert.ok(change.ruKm2 > 50, `ruský postup ${change.ruKm2}`);
   const item = uaFront({ now: after, before }, { now: NOW });
   assert.equal(item.key, 'ua-front:2026-10-03');
-  assert.match(item.title, /^Front za deň: Rusko obsadilo \d/);
+  assert.match(item.title, /^Front za deň: ruský agresor obsadil \d/, 'pravidlo vlastníka: „ruský agresor obsadil"');
   assert.match(item.text, /Ruský agresor za deň obsadil/);
   assert.match(item.text, /mapy frontu na okolive\.sk/);
   assert.ok(!/deepstate/i.test(item.text + JSON.stringify(item.card)), 'poskytovateľ mapy sa nemenuje');
