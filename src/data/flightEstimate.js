@@ -166,7 +166,7 @@ export const ROUTE_CALLSIGN_RE = /^[A-Z]{3}\d[A-Z0-9]{0,4}$/;
  * Trasa sa dohľadá cez lookupRoute(callsign) (adsbdb cache servera), radom, šetrne.
  * @param {{lookupRoute?: (cs: string) => Promise<object|null>, now?: () => number, maxEntries?: number}} [options]
  */
-export function createEstimateTracker({ lookupRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 3000, maxQueue = 300 } = {}) {
+export function createEstimateTracker({ lookupRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 3000, maxQueue = 3000, cacheHitMs = 50 } = {}) {
   const last = new Map(); // hex → fix (videné v poslednom snímku)
   const estimates = new Map(); // hex → { fix, route, routeState }
   let lastSnapshotSec = 0;
@@ -183,6 +183,7 @@ export function createEstimateTracker({ lookupRoute = null, now = () => Date.now
         const hex = queue.shift();
         const entry = estimates.get(hex);
         if (!entry || entry.routeState !== 'queued') continue;
+        const started = Date.now();
         try {
           entry.route = await lookupRoute(entry.fix.cs);
         } catch {
@@ -190,7 +191,8 @@ export function createEstimateTracker({ lookupRoute = null, now = () => Date.now
         }
         entry.routeState = 'done';
         if (entry.route && nearDestination(entry.fix, entry.route)) estimates.delete(hex); // pristáva
-        await new Promise((r) => setTimeout(r, lookupGapMs));
+        // Šetrné tempo len pre skutočný dopyt na adsbdb; odpoveď z cache servera (rýchla) nečaká.
+        if (Date.now() - started >= cacheHitMs) await new Promise((r) => setTimeout(r, lookupGapMs));
       }
     } finally {
       pumping = false;
@@ -230,6 +232,26 @@ export function createEstimateTracker({ lookupRoute = null, now = () => Date.now
         const wantsRoute = Boolean(lookupRoute) && ROUTE_CALLSIGN_RE.test(fix.cs) && queue.length < maxQueue;
         estimates.set(hex, { fix, route: null, routeState: wantsRoute ? 'queued' : 'none' });
         if (wantsRoute) queue.push(hex);
+        added += 1;
+      }
+      if (queue.length) void pump();
+      return added;
+    },
+
+    /**
+     * Naplň odhady zo záznamu histórie (posledné polohy letov) — po štarte servera, PRED prvým
+     * snímkom: kto je v snímku živý, ten pri ingest() vypadne. Vráti počet pridaných.
+     */
+    seed(fixes, nowMs = now()) {
+      let added = 0;
+      for (const fix of Array.isArray(fixes) ? fixes : []) {
+        if (!fix?.hex || estimates.has(fix.hex) || last.has(fix.hex) || estimates.size >= maxEntries) continue;
+        if (!qualifiesForEstimate(fix)) continue;
+        // Bez cieľa by aj tak skončil: neplniť, čo je staršie než strop letu bez cieľa a nedá sa dohľadať.
+        const wantsRoute = Boolean(lookupRoute) && ROUTE_CALLSIGN_RE.test(fix.cs) && queue.length < maxQueue;
+        if (!wantsRoute && nowMs - fix.tMs > ESTIMATE_NO_ROUTE_MAX_S * 1000) continue;
+        estimates.set(fix.hex, { fix, route: null, routeState: wantsRoute ? 'queued' : 'none' });
+        if (wantsRoute) queue.push(fix.hex);
         added += 1;
       }
       if (queue.length) void pump();

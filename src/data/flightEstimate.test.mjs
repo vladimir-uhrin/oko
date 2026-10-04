@@ -98,3 +98,18 @@ test('sledovač: trasu dohľadá pre volací znak dopravcu; pri cieli vyradí, i
   assert.deepEqual(list.map((e) => e.hex), ['3c6444'], 'EIN105 má cieľ 2 km od poslednej polohy = pristáva, vyradený');
   assert.equal(list[0].route.destination.code, 'JFK');
 });
+
+test('naplnenie zo záznamu po štarte: vo vzduchu áno, živé v snímku vypadne, staré bez cieľa nie', () => {
+  const tracker = createEstimateTracker();
+  const nowMs = (T0 + 600) * 1000;
+  const seeded = tracker.seed([
+    fixFromState(state('3c6444', -20, 52, { t: T0 }), T0),
+    fixFromState(state('4b1805', 17, 48, { t: T0 }), T0), // o chvíľu živé
+    fixFromState(state('aaaaaa', -30, 50, { t: T0 - 3 * 3600 }), T0 - 3 * 3600), // 3 h bez cieľa = už neplatí
+    { ...fixFromState(state('bbbbbb', -25, 51, { t: T0 }), T0), onGround: true },
+  ], nowMs);
+  assert.equal(seeded, 2);
+  const snap = { time: T0 + 600, states: [state('4b1805', 17.1, 48.1, { t: T0 + 600 }), ...Array.from({ length: 20 }, (_, i) => state(`c${String(i).padStart(5, '0')}`, 5, 45, { t: T0 + 600 }))] };
+  tracker.ingest(snap);
+  assert.deepEqual(tracker.list(nowMs).map((f) => f.hex), ['3c6444'], 'živé lietadlo zo záznamu vypadne');
+});

@@ -440,6 +440,7 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const fixAt = db.prepare('SELECT t, lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t = ?');
   const fixAtFull = db.prepare('SELECT t, lat, lon, alt, gs, gnd FROM fixes WHERE icao24 = ? AND t = ?');
+  const fixAtEnd = db.prepare('SELECT t, lat, lon, alt, gs, trk, vr, gnd FROM fixes WHERE icao24 = ? AND t = ?');
   /** Poloha stroja v čase t pre continuesInAir (stupne, m, m/s), inak null. */
   const fixPoint = (icao24, t) => {
     const r = fixAtFull.get(icao24, t);
@@ -750,6 +751,41 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
      * @param {string} icao24
      * @param {{beforeS?: number, limit?: number}} [options] stránkovanie do minulosti: `beforeS` = lastT posledného
      */
+    /**
+     * Posledná poloha každého letu, ktorý skončil v okne [sinceS, untilS] (2026-10-05, odhady bez
+     * signálu: server po štarte vie, kto je práve nad oceánom). Cez index legs_last + primárny kľúč
+     * fixu — žiadny prechod tabuľky fixov. Len vo vzduchu (gnd = 0).
+     * @returns {{hex:string, cs:string, tMs:number, lat:number, lon:number, altM:number|null,
+     *   gsMps:number|null, trkDeg:number|null, vrMps:number|null, onGround:false, country:string}[]}
+     */
+    lastAirborneFixes({ sinceS, untilS, limit = 120000 } = {}) {
+      const rows = db.prepare('SELECT icao24, callsign, country, last_t FROM legs WHERE last_t BETWEEN ? AND ? ORDER BY last_t DESC LIMIT ?')
+        .all(Math.floor(sinceS), Math.floor(untilS), Math.max(1, Math.min(150000, Math.floor(limit) || 120000)));
+      const out = [];
+      const seen = new Set();
+      for (const row of rows) {
+        if (seen.has(row.icao24)) continue; // len najnovší let lietadla
+        seen.add(row.icao24);
+        const f = fixAtEnd.get(row.icao24, row.last_t);
+        if (!f || f.gnd === 1) continue;
+        out.push({
+          hex: row.icao24,
+          cs: String(row.callsign || '').trim().toUpperCase(),
+          tMs: f.t * 1000,
+          lat: f.lat / SCALE_DEG,
+          lon: f.lon / SCALE_DEG,
+          altM: f.alt,
+          gsMps: f.gs == null ? null : f.gs / SCALE_TENTH,
+          trkDeg: f.trk == null ? null : f.trk / SCALE_TENTH,
+          vrMps: f.vr == null ? null : f.vr / SCALE_TENTH,
+          onGround: false,
+          country: row.country || '',
+          category: null,
+        });
+      }
+      return out;
+    },
+
     flightsOf(icao24, { beforeS = Number.MAX_SAFE_INTEGER, limit = 50 } = {}) {
       const hex = String(icao24 || '').trim().toLowerCase();
       if (!/^[0-9a-f]{6}$/.test(hex)) return [];

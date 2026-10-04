@@ -189,6 +189,9 @@ let _adsbdbRouteLookup = null;
  * Odhadovaná poloha lietadiel bez signálu (2026-10-04, src/data/flightEstimate.js): kŕmi ho LEN
  * čerstvý svetový snímok OpenSky (nie výrez okolo kamery, nie regionálna záloha), do histórie nejde.
  */
+/** Úložisko histórie pre naplnenie odhadov po štarte (nastaví flightHistoryProxy). */
+let _historyStoreForEstimates = null;
+let _estimatesSeeded = false;
 const _estimateTracker = createEstimateTracker({ lookupRoute: (cs) => (_adsbdbRouteLookup ? _adsbdbRouteLookup(cs) : Promise.resolve(null)) });
 /** @type {string|null} Cached upstream response body (JSON text). */
 let _openskyCacheBody = null;
@@ -5761,6 +5764,7 @@ function flightHistoryProxy() {
   /** Vlastný dopyt strážcu histórie (nie návštevník) — len priamo z tohto počítača. */
   const isKeeperRequest = (req) => req.headers?.[KEEPER_HEADER] === '1' && isDirectLocalRequest(req);
 
+  _historyStoreForEstimates = () => getStore();
   function getStore() {
     if (shutDown) return null;
     const cfg = config();
@@ -6254,8 +6258,21 @@ function openSkyProxy() {
             _openskyCacheTime = now;
             _openskyCacheSourceEpochMs = sourceEpochMs;
             // Nový svetový snímok → sledovač odhadov (mimo cesty odpovede).
-            setImmediate(() => {
-              try { const world = openSkyWorldParsed(); if (world) _estimateTracker.ingest(world); } catch (error) { console.warn('[estimates] ingest failed:', error?.message || error); }
+            setImmediate(async () => {
+              try {
+                // Po štarte najprv posledné polohy letov za 14 h z histórie — inak by sledovač poznal
+                // len lietadlá, ktoré zmizli od reštartu (Atlantik prázdny ešte hodiny).
+                if (!_estimatesSeeded && _historyStoreForEstimates) {
+                  _estimatesSeeded = true;
+                  const store = _historyStoreForEstimates();
+                  const nowS = Math.floor(Date.now() / 1000);
+                  const fixes = store ? await store.lastAirborneFixes({ sinceS: nowS - 14 * 3600, untilS: nowS - 120 }) : [];
+                  const seeded = _estimateTracker.seed(fixes);
+                  console.log(`[estimates] seeded ${seeded} of ${fixes.length} recent airborne flight ends`);
+                }
+                const world = openSkyWorldParsed();
+                if (world) _estimateTracker.ingest(world);
+              } catch (error) { console.warn('[estimates] ingest failed:', error?.message || error); }
             });
             _openskyCacheMeta = {
               requestedMode,
