@@ -102,6 +102,10 @@ for (const [W, H] of SIZES) {
     await page.goto(`${BASE}/?qaBasemap=osm${hash}`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     await page.waitForFunction(() => document.getElementById('loading-screen')?.classList.contains('hidden'), { timeout: 180_000, polling: 1000 });
     await sleep(4000);
+    // Naživo (okolive.sk) prvá návšteva ukáže lištu súhlasu cez spodok — odmietni ako človek
+    // (voľba ostane v prehliadači pre ďalšie veľkosti).
+    await page.evaluate(() => document.querySelector('#oko-consent [data-consent="reject"]')?.click());
+    await sleep(500);
   };
 
   // 1. bez karty
