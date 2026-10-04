@@ -125,9 +125,6 @@ export class IntelHUD {
       }
     };
 
-    // Session-consistent pseudorandom identifiers (generated once at construction)
-    this._missionId = `KH11-${4000 + Math.floor(Math.random() * 200)}`;
-
     this._buildDOM();
     this.viewer.camera.moveEnd.addEventListener(this._onCameraMoveEnd);
     this._startTimers();
@@ -143,12 +140,6 @@ export class IntelHUD {
     if (!this._el) return;
 
     this._el.innerHTML = `
-      <div class="hud-top-bar">
-        <span class="hud-top-bar-left">TOP SECRET // SI-TK // NOFORN</span>
-        <span class="hud-top-bar-center">${this._missionId}</span>
-        <span class="hud-top-bar-right">PAGE 1/1</span>
-      </div>
-
       <div class="hud-corner hud-top-left">
         <div class="hud-bracket">┌</div>
         <div class="hud-content">
@@ -205,7 +196,7 @@ export class IntelHUD {
    * cadences and are cleaned up in {@link destroy}.
    */
   _startTimers() {
-    // Riadky TOP SECRET / KH11 / REC / ORB-PASS v rohoch boli len efekt bez dát — vlastník ich
+    // Horný pás a riadky TOP SECRET / KH11 / REC / ORB-PASS v rohoch boli len efekt bez dát — vlastník ich
     // 2026-10-04 odstránil („ak nedávajú zmysel, sú len efekty"), s nimi aj ich časovače.
 
     // Camera-derived data — 4 updates/second (250ms)
