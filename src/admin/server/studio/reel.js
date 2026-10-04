@@ -17,7 +17,14 @@ import { FONT, MONO, escapeXml, loadBorders, loadLand, stamp, wrap } from './car
 
 export const REEL = Object.freeze({ width: 1080, height: 1920, fps: 30, seconds: 12 });
 const MAP = { x: 0, y: 640, w: 1080, h: 800 };
-const ZOOM_FROM = 0.3; const ZOOM_TO = 4.6; // s
+// Háčik (vlastník 2026-10-04: „prvé 3 sekundy musia upútať diváka, väčšina má vypnutý zvuk"): od prvej snímky
+// celé číslo + veta háčika (žiadne odpočítavanie od nuly), mapa priblížená priamo na mieste udalosti; po HOOK_END
+// sa kamera odtiahne na celý výrez (úder → odhalenie) a nastúpia veľké titulky po frázach.
+export const HOOK_END = 2.8; // s
+const HOOK_SWAP = 0.15; // s — háčik zmizne, až potom nastúpi hlavička
+/** Pás háčika (snímky 0–3 s) pre admin: 4 × 270×480 s medzerou. */
+export const HOOK_SHEET = Object.freeze({ w: 270, h: 480, gap: 8 });
+const ZOOM_OUT_FROM = 2.6; const ZOOM_OUT_TO = 4.4; // s
 
 const clamp01 = v => Math.max(0, Math.min(1, v));
 /** Výrez karty (bbox), ak ho šablóna dala — rovnaké pravidlo ako statická karta (card.js mapView). */
@@ -25,29 +32,51 @@ const viewBox = card => (card?.view && ['west', 'east', 'south', 'north'].every(
   && card.view.east > card.view.west && card.view.north > card.view.south ? card.view : null);
 const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const fade = (t, from, len = 0.6) => clamp01((t - from) / len);
-const num1 = v => v.toFixed(1).replace('.', ',');
 
 // ── mapa ──────────────────────────────────────────────────────────────────
 /** Výrez mapy v čase t: lon/lat stred + rozpätie v stupňoch dĺžky. */
+/**
+ * Miesto, na ktoré reel „udrie" v prvých sekundách: bod udalosti, inak prvý (najdôležitejší) bod karty.
+ * Pri prehľade s mnohými bodmi (vzdušný útok, 24 h zemetrasení) null — ukáže sa celok naraz.
+ */
+export function reelFocus(card) {
+  if (card?.focus === false) return null; // šablóna chce celok (napr. hlásenie GŠ: všetky smery naraz)
+  if (card?.point && Number.isFinite(card.point.lat) && Number.isFinite(card.point.lon)) return card.point;
+  const points = (card?.points || []).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  if (!points.length || points.length > 4) return null;
+  return points.find(p => p.label) || points[0];
+}
+
+const lerp = (a, b, k) => a + (b - a) * k;
+const logLerp = (a, b, k) => Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * k);
+const clampLat = (lat, span, aspect) => Math.max(-60 + span * aspect / 2, Math.min(80 - span * aspect / 2, lat));
+
 export function reelView(card, t) {
   const aspect = MAP.h / MAP.w;
-  // Výrez (Ukrajina 2026-10-04: celá krajina / front): priblíženie z okolia na celý výrez, ktorý sa zmestí do okna.
+  const focus = reelFocus(card);
+  const out = ease(clamp01((t - ZOOM_OUT_FROM) / (ZOOM_OUT_TO - ZOOM_OUT_FROM)));
+  const push = 1 - 0.07 * clamp01(t / ZOOM_OUT_FROM); // jemný nájazd počas háčika — obraz nikdy nestojí
+  // Výrez (Ukrajina: celá krajina / front): úder na miesto zmeny, potom odhalenie celého výrezu.
   const box = viewBox(card);
   if (box) {
-    const k = ease(clamp01((t - ZOOM_FROM) / (ZOOM_TO - ZOOM_FROM)));
     const lon = (box.west + box.east) / 2; const lat = (box.south + box.north) / 2;
     const fit = Math.max(box.east - box.west, (box.north - box.south) / aspect) * 1.04;
-    const from = Math.min(150, fit * 3.2);
-    const span = Math.exp(Math.log(from) + (Math.log(fit) - Math.log(from)) * k);
-    return { lon, lat: Math.max(-60 + span * aspect / 2, Math.min(80 - span * aspect / 2, lat)), span };
+    if (!focus) {
+      const span = fit * logLerp(1.22, 1, ease(clamp01(t / ZOOM_OUT_TO)));
+      // Počas háčika je horná časť mapy pod vetou háčika — obsah posunúť nižšie (stred výrezu severnejšie).
+      const shift = span * aspect * 0.16 * (1 - out);
+      return { lon, lat: clampLat(lat + shift, span, aspect), span };
+    }
+    const tight = Math.min(fit * 0.34, 6) * push;
+    const span = logLerp(tight, fit, out);
+    return { lon: lerp(focus.lon, lon, out), lat: clampLat(lerp(focus.lat, lat, out), span, aspect), span };
   }
-  if (card.point) {
-    const k = ease(clamp01((t - ZOOM_FROM) / (ZOOM_TO - ZOOM_FROM)));
-    const span = Math.exp(Math.log(150) + (Math.log(26) - Math.log(150)) * k);
-    const lat = card.point.lat * (0.55 + 0.45 * k);
-    return { lon: card.point.lon, lat: Math.max(-60 + span * aspect / 2, Math.min(80 - span * aspect / 2, lat)), span };
+  if (focus) {
+    // Bod (zemetrasenie, štart): zblízka, potom okolie so štátmi.
+    const span = logLerp(10 * push, 26, out);
+    return { lon: focus.lon, lat: clampLat(focus.lat, span, aspect), span };
   }
-  // Prehľad: pomalý posun cez svet.
+  // Prehľad bez výrezu: pomalý posun cez svet.
   const span = 210;
   return { lon: -40 + 150 * (t / REEL.seconds), lat: 12, span };
 }
@@ -124,28 +153,32 @@ export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk
     out.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${base}" fill="#ff5a3c" stroke="#0a0f16" stroke-width="4"/>`);
     return out.join('');
   };
-  if (card.point && t > 0.4) {
+  // Háčik: miesto udalosti pulzuje od prvej snímky.
+  if (card.point) {
     const [x, y] = project(card.point.lon, card.point.lat);
-    parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${fade(t, 0.4, 0.5).toFixed(2)}">${pulse(x, y, 0)}</g>`);
+    parts.push(`<g transform="translate(${MAP.x},${MAP.y})">${pulse(x, y, 0, 18)}</g>`);
   }
   const boxed = Boolean(viewBox(card));
-  // Plochy (okupované územie z mapy frontu) — pod bodmi, nábeh počas priblíženia.
+  const focus = reelFocus(card);
+  // Plochy (okupované územie z mapy frontu) — od prvej snímky, pod bodmi.
   for (const poly of card.polygons || []) {
     const d = (poly.rings || []).filter(ring => ring?.length >= 3)
       .map(ring => ring.map(([lon, lat], i) => { const [x, y] = project(lon, lat); return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join('') + 'Z').join('');
-    if (d) parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${fade(t, 1.2, 1.2).toFixed(2)}"><path d="${d}" fill="${escapeXml(poly.fill || '#ff5a3c')}" fill-opacity="${Number(poly.opacity ?? 0.35)}" stroke="${escapeXml(poly.stroke || poly.fill || '#ff5a3c')}" stroke-width="2.5" fill-rule="evenodd" stroke-linejoin="round"/></g>`);
+    if (d) parts.push(`<g transform="translate(${MAP.x},${MAP.y})"><path d="${d}" fill="${escapeXml(poly.fill || '#ff5a3c')}" fill-opacity="${Number(poly.opacity ?? 0.35)}" stroke="${escapeXml(poly.stroke || poly.fill || '#ff5a3c')}" stroke-width="2.5" fill-rule="evenodd" stroke-linejoin="round"/></g>`);
   }
   const placed = []; // obdĺžniky popisov, aby sa neprekrývali (ako na karte)
+  const count = (card.points || []).length;
   (card.points || []).forEach((p, i) => {
-    // Pri výreze body nabehnú až pri konci priblíženia, aby neskákali po mape.
-    const appear = boxed ? ZOOM_TO - 0.8 + i * 0.35 : 1 + i * (5 / Math.max(1, card.points.length));
+    // Bod háčika je tam od prvej snímky; ostatné pri odhalení (výrez), pri prehľade rýchlo za sebou.
+    // Prehľad (bez bodu háčika): všetky body hneď na prvej snímke — háčik potrebuje celok.
+    const appear = p === focus || !focus ? 0 : boxed ? ZOOM_OUT_TO - 0.6 + i * 0.3 : 0.15 + i * Math.min(0.12, 2.4 / Math.max(1, count));
     if (t < appear) return;
     const [x, y] = project(p.lon, p.lat);
     if (x < -40 || x > MAP.w + 40) return;
     // `r` = priamy polomer (Ukrajina, škálovaný z karty 960 px na reel 1080 px), inak magnitúda zemetrasenia.
     const r = Number.isFinite(p.r) ? Math.max(6, Math.min(44, p.r * 1.1)) : Math.max(6, Math.min(18, (p.size - 3.5) * 5));
     const color = escapeXml(p.color || '#ff5a3c');
-    const mark = i < 3 && !Number.isFinite(p.r) ? pulse(x, y, i * 0.3, r)
+    const mark = p === focus || (i < 3 && !Number.isFinite(p.r)) ? pulse(x, y, i * 0.3, Math.max(r, p === focus ? 16 : r))
       : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="${color}" fill-opacity="0.8" stroke="#0a0f16" stroke-width="2.5"/>`;
     let label = '';
     if (p.label) {
@@ -162,40 +195,53 @@ export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk
         ? `<path d="M${(right ? x + r : x - r).toFixed(1)},${y.toFixed(1)}L${(right ? lx : lx + w).toFixed(1)},${(ly + h / 2).toFixed(1)}" stroke="#a9c2d2" stroke-width="2"/>` : '';
       label = `${leader}<text x="${lx.toFixed(1)}" y="${(ly + h / 2 + 11).toFixed(1)}" font-family="${FONT}" font-size="32" font-weight="600" fill="#e8f1f7" stroke="#061019" stroke-width="6" paint-order="stroke">${escapeXml(p.label)}</text>`;
     }
-    parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${fade(t, appear, 0.4).toFixed(2)}">${mark}${label}</g>`);
+    parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${(appear ? fade(t, appear, 0.3) : 1).toFixed(2)}">${mark}${label}</g>`);
   });
-  // hlavička
-  const head = fade(t, 0, 0.6);
-  parts.push(`<g opacity="${head.toFixed(2)}" font-family="${FONT}">
+  // hlavička — od prvej snímky
+  parts.push(`<g font-family="${FONT}">
     <circle cx="96" cy="250" r="24" fill="none" stroke="#00d4ff" stroke-width="5"/><circle cx="96" cy="250" r="9" fill="#00d4ff"/>
     <text x="136" y="263" font-family="${MONO}" font-size="38" font-weight="700" letter-spacing="9" fill="#e8f1f7">OKO</text>
     <text x="1010" y="262" text-anchor="end" font-family="${MONO}" font-size="28" letter-spacing="5" fill="#00d4ff">${escapeXml(card.kicker)}</text></g>`);
-  // veľké číslo: odpočítanie
-  const countT = ease(clamp01((t - 0.9) / 1.4));
-  let big = card.big;
-  const magnitude = /^M (\d+,\d)$/.exec(card.big);
-  if (magnitude) big = `M ${num1(Number(magnitude[1].replace(',', '.')) * countT)}`;
-  else if (/^\d+$/.test(card.big)) big = String(Math.round(Number(card.big) * countT));
-  const bigSize = String(card.big).length > 8 ? 110 : 170;
-  parts.push(`<text x="70" y="${330 + bigSize * 0.8}" font-family="${FONT}" font-size="${bigSize}" font-weight="700" fill="#ff7a5c" opacity="${fade(t, 0.8, 0.5).toFixed(2)}">${escapeXml(big)}</text>`);
-  const headline = wrap(card.headline, 24, 2);
-  const headY = 395 + bigSize * 0.8;
-  headline.forEach((line, i) => parts.push(`<text x="70" y="${headY + i * 64}" font-family="${FONT}" font-size="58" font-weight="600" fill="#e8f1f7" opacity="${fade(t, 2.2 + i * 0.15).toFixed(2)}">${escapeXml(line)}</text>`));
+  // HÁČIK (0 – HOOK_END): celá veta s číslom od prvej snímky, kľúčové slová farebne, krátky „úder" (zväčšenie 108 → 100 %).
+  // Prechod za sebou, nie naraz (dva texty cez seba sú nečitateľné): háčik zmizne, až potom nastúpi hlavička.
+  const hookOut = fade(t, HOOK_END, HOOK_SWAP);
+  if (hookOut < 1) {
+    const hook = reelHook(card);
+    const pop = 1 + 0.08 * (1 - ease(clamp01(t / 0.3)));
+    const rows = wrapWords(hook.text, 17, 3);
+    const accent = new Set(String(hook.accent || '').split(/ +/).filter(Boolean));
+    parts.push(`<g opacity="${(1 - hookOut).toFixed(2)}">
+    <rect x="0" y="290" width="${REEL.width}" height="${rows.length * 100 + 170}" fill="url(#hs)"/>
+    <text x="72" y="342" font-family="${MONO}" font-size="28" letter-spacing="1" fill="#9fdcef">${escapeXml(hookBadge(card))}</text>
+    <g transform="translate(70 ${440}) scale(${pop.toFixed(3)})">${rows.map((row, i) => `<text x="0" y="${i * 100}" font-family="${FONT}" font-size="88" font-weight="800" fill="#ffffff" stroke="#061019" stroke-width="10" paint-order="stroke">${
+      row.split(' ').map(word => `<tspan${accent.has(word) ? ' fill="#ff7a5c"' : ''}>${escapeXml(word)}</tspan>`).join(' ')}</text>`).join('')}</g></g>`);
+  }
+  // Po háčiku: číslo a nadpis v hlavičke (bez odpočítavania — číslo je vždy celé).
+  const headIn = fade(t, HOOK_END + HOOK_SWAP, 0.25);
+  if (headIn > 0) {
+    const bigSize = String(card.big).length > 8 ? 110 : 170;
+    parts.push(`<text x="70" y="${330 + bigSize * 0.8}" font-family="${FONT}" font-size="${bigSize}" font-weight="700" fill="#ff7a5c" opacity="${headIn.toFixed(2)}">${escapeXml(card.big)}</text>`);
+    const headline = wrap(card.headline, 24, 2);
+    const headY = 395 + bigSize * 0.8;
+    headline.forEach((line, i) => parts.push(`<text x="70" y="${headY + i * 64}" font-family="${FONT}" font-size="58" font-weight="600" fill="#e8f1f7" opacity="${headIn.toFixed(2)}">${escapeXml(line)}</text>`));
+  }
   // riadky pod mapou (bezpečná zóna)
   const lines = (card.lines || []).flatMap(line => wrap(line, 40, 2)).slice(0, 3);
-  lines.forEach((line, i) => parts.push(`<text x="70" y="${MAP.y + MAP.h + 20 + i * 46}" font-family="${FONT}" font-size="36" fill="#cfe0ea" opacity="${fade(t, 3.2 + i * 0.25).toFixed(2)}">${escapeXml(line)}</text>`));
+  lines.forEach((line, i) => parts.push(`<text x="70" y="${MAP.y + MAP.h + 20 + i * 46}" font-family="${FONT}" font-size="36" fill="#cfe0ea" opacity="${fade(t, HOOK_END + 0.2 + i * 0.2, 0.3).toFixed(2)}">${escapeXml(line)}</text>`));
   const footY = MAP.y + MAP.h + 20 + lines.length * 46 + 26;
-  parts.push(`<text x="70" y="${footY}" font-family="${FONT}" font-size="26" fill="#7f99aa" opacity="${fade(t, 4).toFixed(2)}">Zdroj: ${escapeXml(card.source)} · ${escapeXml(stamp(card.at))} · mapa: Natural Earth</text>`);
-  // titulky (2026-10-04): väčšina ľudí pozerá bez zvuku — veta narácie v bezpečnej zóne dole
-  const caption = captions.find(c => t >= c.from && t < c.to);
+  parts.push(`<text x="70" y="${footY}" font-family="${FONT}" font-size="26" fill="#7f99aa" opacity="${fade(t, HOOK_END + 0.4, 0.3).toFixed(2)}">Zdroj: ${escapeXml(card.source)} · ${escapeXml(stamp(card.at))} · mapa: Natural Earth</text>`);
+  // Titulky pre vypnutý zvuk: po háčiku, po krátkych frázach veľkým písmom, čísla farebne.
+  const caption = t >= HOOK_END ? captions.find(c => t >= c.from && t < c.to) : null;
   if (caption) {
-    const rows = wrap(caption.text, 34, 3);
-    const boxH = 28 + rows.length * 50;
+    const chunk = captionChunkAt(caption, t);
+    const rows = wrapWords(chunk.text, 20, 2);
+    const boxH = 40 + rows.length * 74;
     // Nad spodným okrajom mapy (riadky pod mapou ostanú čitateľné), stred mapy so značkou voľný.
-    const y = MAP.y + MAP.h - 24 - boxH;
-    const op = Math.min(fade(t, caption.from, 0.25), fade(caption.to, t, 0.25)).toFixed(2);
-    parts.push(`<g opacity="${op}"><rect x="50" y="${y}" width="980" height="${boxH}" rx="14" fill="#070d14" fill-opacity="0.78"/>`
-      + rows.map((row, i) => `<text x="540" y="${y + 50 + i * 50}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="600" fill="#ffffff">${escapeXml(row)}</text>`).join('')
+    const y = MAP.y + MAP.h - 30 - boxH;
+    const op = Math.min(fade(t, Math.max(caption.from, HOOK_END), 0.15), fade(caption.to, t, 0.15)).toFixed(2);
+    parts.push(`<g opacity="${op}"><rect x="50" y="${y}" width="980" height="${boxH}" rx="18" fill="#070d14" fill-opacity="0.82"/>`
+      + rows.map((row, i) => `<text x="540" y="${y + 74 + i * 74}" text-anchor="middle" font-family="${FONT}" font-size="64" font-weight="800" fill="#ffffff">${
+        row.split(' ').map(word => `<tspan${/\d/.test(word) ? ' fill="#ffd23c"' : ''}>${escapeXml(word)}</tspan>`).join(' ')}</text>`).join('')
       + '</g>');
   }
   // výzva na konci
@@ -204,7 +250,8 @@ export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk
     <text x="100" y="${footY + 77}" font-family="${MONO}" font-size="30" fill="#bff2ff">Naživo na ${escapeXml(site)}</text></g>`);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${REEL.width}" height="${REEL.height}">
   <defs><linearGradient id="ft" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b2433"/><stop offset="1" stop-color="#0b2433" stop-opacity="0"/></linearGradient>
-  <linearGradient id="fb" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#070d14"/><stop offset="1" stop-color="#070d14" stop-opacity="0"/></linearGradient></defs>
+  <linearGradient id="fb" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#070d14"/><stop offset="1" stop-color="#070d14" stop-opacity="0"/></linearGradient>
+  <linearGradient id="hs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#070d14" stop-opacity="0.92"/><stop offset="0.7" stop-color="#070d14" stop-opacity="0.75"/><stop offset="1" stop-color="#070d14" stop-opacity="0"/></linearGradient></defs>
   ${parts.join('\n  ')}</svg>`;
 }
 
@@ -222,10 +269,90 @@ export function wavSeconds(buffer) {
   return 0;
 }
 
+/**
+ * Zalomenie len na obyčajných medzerách — pevná medzera drží čísla pokope („1 186 km²" sa nerozdelí
+ * na dva riadky, zvýrazní sa celé). Inak ako card.js wrap. Pure.
+ */
+export function wrapWords(text, maxChars, maxLines) {
+  const words = String(text || '').split(/ +/).filter(Boolean);
+  const lines = []; let line = '';
+  for (const word of words) {
+    if (line && `${line} ${word}`.length > maxChars) { lines.push(line); line = word; } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(line);
+  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] = lines[maxLines - 1].replace(/ *[^ ]*$/, '') + '…'; }
+  return lines;
+}
+
+/**
+ * Veta háčika: z karty šablóny (`hook: { text, accent }` — najsilnejší overený fakt, max ~6 slov),
+ * inak číslo + nadpis. `accent` = slová, ktoré sa zvýraznia farebne. Pure.
+ */
+export function reelHook(card) {
+  const text = keepNumbersTogether(String(card?.hook?.text || [card?.big, card?.headline].filter(Boolean).join(' ')).replace(/[ \t\r\n]+/g, ' ').trim());
+  return { text, accent: keepNumbersTogether(String(card?.hook?.accent ?? card?.big ?? '').trim()) };
+}
+
+/** Horný riadok háčika: čas stavu · zdroj, verzálkami, najviac ~44 znakov (dlhší zdroj sa skráti po „·"). Pure. */
+export function hookBadge(card) {
+  const parts = String(card?.source || '').split(' · ').filter(Boolean);
+  let badge = '';
+  while (parts.length) {
+    badge = `${stamp(card.at)} · ${parts.join(' · ')}`.toUpperCase();
+    if (badge.length <= 44 || parts.length === 1) break;
+    parts.pop();
+  }
+  return badge.length > 44 ? `${badge.slice(0, 43).trimEnd()}…` : badge || stamp(card.at);
+}
+
+/**
+ * Číslo drží pokope: skupiny tisícok („1 186") a číslo s jednotkou („8,3 km²") sa spoja pevnou medzerou,
+ * aby ich zalomenie ani delenie titulkov nerozdelilo (šablóny dávajú obyčajnú medzeru). Pure.
+ */
+export function keepNumbersTogether(text) {
+  return String(text || '')
+    .replace(/(\d) (?=\d{3}(?!\d))/g, (_, digit) => `${digit} `)
+    .replace(/(\d\.) (?=\d)/g, (_, part) => `${part} `) // dátum „2. 10. 2026"
+    .replace(/(\d) (?=(?:km²|km|%|°C)(?![\p{L}\d]))/gu, (_, digit) => `${digit} `);
+}
+
+/**
+ * Fráza titulku v čase t: veta sa delí na kúsky do 4 slov / ~24 znakov, čas úmerne dĺžke —
+ * na mobile bez zvuku sa číta fráza naraz, nie dlhý riadok. Pure.
+ */
+export function captionChunks(text) {
+  const words = keepNumbersTogether(text).split(/ +/).filter(Boolean);
+  const chunks = []; let current = [];
+  for (const word of words) {
+    if (current.length && (current.length >= 4 || [...current, word].join(' ').length > 24)) { chunks.push(current.join(' ')); current = []; }
+    current.push(word);
+  }
+  if (current.length) chunks.push(current.join(' '));
+  return chunks;
+}
+function captionChunkAt(caption, t) {
+  const chunks = captionChunks(caption.text);
+  if (chunks.length <= 1) return { text: chunks[0] || '', index: 0 };
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length + 4, 0);
+  const at = clamp01((t - caption.from) / Math.max(0.01, caption.to - caption.from)) * total;
+  let acc = 0;
+  for (const [index, chunk] of chunks.entries()) { acc += chunk.length + 4; if (at < acc) return { text: chunk, index }; }
+  return { text: chunks.at(-1), index: chunks.length - 1 };
+}
+
+const cleanSpoken = text => text.replace(/[#🌋📊🚀📡🌍]/gu, '').replace(/[ \t\r\n]+/g, ' ').trim().slice(0, 300);
+/** Prvá veta textu príspevku (bez nadpisu). */
+function firstSentence(item) {
+  const sentence = String(item.text || '').split('\n').map(s => s.trim()).filter(Boolean)[1] || '';
+  return sentence.split(/(?<=\.)\s/)[0] || '';
+}
 /** Krátky text na nahovorenie (titulok + prvá veta). */
 export function narration(item) {
-  const sentence = String(item.text || '').split('\n').map(s => s.trim()).filter(Boolean)[1] || '';
-  return `${item.title}. ${sentence.split(/(?<=\.)\s/)[0] || ''}`.replace(/[#🌋📊🚀📡🌍]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  return cleanSpoken(`${item.title}. ${firstSentence(item)}`);
+}
+/** Titulky bez hlasu: len prvá veta — nadpis už povedal háčik, opakovať ho je strata času. */
+export function silentCaptionText(item) {
+  return cleanSpoken(firstSentence(item)) || narration(item);
 }
 
 /**
@@ -333,7 +460,7 @@ async function pickMusic(dir, seed) {
  * @param {object} options { audio: 'ambient'|'music'|'none', voice: boolean, env, site, onProgress }
  */
 export async function renderReel(item, outFile, { audio = 'ambient', voice = false, env = process.env, site = 'okolive.sk', onProgress = () => {},
-  seconds: baseSeconds = REEL.seconds, fps = REEL.fps, voiceProvider = null, captions: wantCaptions = true } = {}) {
+  seconds: baseSeconds = REEL.seconds, fps = REEL.fps, voiceProvider = null, captions: wantCaptions = true, hookSheet = null } = {}) {
   const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
   const work = await mkdtemp(path.join(tmpdir(), 'oko-reel-'));
   try {
@@ -353,7 +480,9 @@ export async function renderReel(item, outFile, { audio = 'ambient', voice = fal
       seconds = Math.min(30, Math.max(baseSeconds, Math.ceil(speech + 3)));
     }
     // Titulky: s hlasom kopírujú nahrávku (začína po 1,2 s), bez hlasu vyplnia čas medzi úvodom a výzvou.
-    const captions = wantCaptions ? captionsFor(item, speech ? { start: 1.2, length: speech } : { start: 1.0, length: Math.max(3, seconds - 4.5) }) : [];
+    // Bez hlasu začnú titulky až po háčiku (počas neho je veta háčika na obrazovke).
+    const captions = !wantCaptions ? [] : speech ? captionsFor(item, { start: 1.2, length: speech })
+      : captionsFor(silentCaptionText(item), { start: HOOK_END + HOOK_SWAP, length: Math.max(3, seconds - HOOK_END - 3.2) });
     // 2) snímky → ffmpeg stdin (raw RGB)
     const frames = seconds * fps;
     const background = await sharp(Buffer.from(backgroundSvg())).png().toBuffer();
@@ -366,6 +495,7 @@ export async function renderReel(item, outFile, { audio = 'ambient', voice = fal
     encoder.stderr.on('data', chunk => { encoderError = (encoderError + chunk).slice(-4000); });
     const encoderDone = once(encoder, 'close');
     let staticMap = null; let lastMapKey = '';
+    const hookFrames = [];
     // Posun bez priblíženia (prehľad): mapa sa vyrenderuje raz ako panoráma a len sa oreže.
     let panorama = null;
     const first = reelView(item.card, 0); const last = reelView(item.card, seconds);
@@ -391,6 +521,10 @@ export async function renderReel(item, outFile, { audio = 'ambient', voice = fal
       }
       const frame = await sharp(background).composite([{ input: staticMap, left: MAP.x, top: MAP.y },
         { input: Buffer.from(overlaySvg(item.card, t, { seconds, site, captions })), left: 0, top: 0 }]).removeAlpha().raw().toBuffer();
+      // Pás háčika: snímky 0, 1, 2, 3 s — v admine pred schválením (čo divák uvidí ako prvé).
+      if (hookSheet && f % fps === 0 && f / fps <= 3) {
+        hookFrames.push(await sharp(frame, { raw: { width: REEL.width, height: REEL.height, channels: 3 } }).resize(HOOK_SHEET.w, HOOK_SHEET.h).png().toBuffer());
+      }
       if (!encoder.stdin.write(frame)) await once(encoder.stdin, 'drain');
       if (f % fps === 0) onProgress(f / frames);
     }
@@ -431,6 +565,10 @@ export async function renderReel(item, outFile, { audio = 'ambient', voice = fal
         '-i', 'anullsrc=r=48000:cl=stereo', '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', '-movflags', '+faststart', out]);
     }
     await writeFile(outFile, await readFile(out));
+    if (hookSheet && hookFrames.length) {
+      await sharp({ create: { width: HOOK_SHEET.w * hookFrames.length + HOOK_SHEET.gap * (hookFrames.length - 1), height: HOOK_SHEET.h, channels: 3, background: '#070d14' } })
+        .composite(hookFrames.map((input, i) => ({ input, left: i * (HOOK_SHEET.w + HOOK_SHEET.gap), top: 0 }))).jpeg({ quality: 82 }).toFile(hookSheet);
+    }
     onProgress(1);
     return { seconds, audio: filters.length ? (audio === 'music' && mixInputs === 2 ? 'music' : mixInputs ? 'ambient' : 'none') : 'none',
       voice: Boolean(voiceFile), captions: captions.length, bytes: (await stat(outFile)).size };

@@ -116,7 +116,9 @@ export function uaReport({ report, days = {} }, { now }) {
     key: `ua-report:${day}`,
     title,
     text,
-    card: { kind: 'ua-report', kicker: 'FRONT · DENNÉ HLÁSENIE', big: fmt(total), headline: 'bojových stretov za deň',
+    // Reel: celok (všetky smery s počtami naraz), nie úder na jeden bod — samotné číslo smeru nič nepovie.
+    card: { kind: 'ua-report', kicker: 'FRONT · DENNÉ HLÁSENIE', big: fmt(total), headline: 'bojových stretov za deň', focus: false,
+      hook: { text: `${fmt(total)} ${plural(total, 'BOJOVÝ STRET', 'BOJOVÉ STRETY', 'BOJOVÝCH STRETOV')} ZA DEŇ`, accent: fmt(total) },
       lines: [top[0] ? `najviac útokov: ${top[0].name} (${top[0].attacks})` : 'podľa Generálneho štábu Ukrajiny',
         ...(avg !== null ? [`7-dňový priemer: ${fmt(avg)}`] : []), 'údaje jednej strany'],
       view: FRONT_VIEW, points: top.filter(d => d.center).map(d => ({ lat: d.center.lat, lon: d.center.lon, r: 10 + 26 * d.attacks / maxAttacks, label: String(d.attacks) })),
@@ -180,6 +182,10 @@ export function uaFront({ now: snapNow, before }, { now }) {
     text,
     card: { kind: 'ua-front', kicker: 'FRONT · ZMENA ZA DEŇ', big: km2(change.ruKm2 >= change.uaKm2 ? change.ruKm2 : change.uaKm2),
       headline: change.ruKm2 >= change.uaKm2 ? 'obsadil ruský agresor za deň' : 'oslobodila Ukrajina za deň',
+      // Háčik podľa pravidla vlastníka: „ruský agresor obsadil" / „Ukrajina oslobodila".
+      hook: change.ruKm2 >= change.uaKm2
+        ? { text: `RUSKÝ AGRESOR OBSADIL ${km2(change.ruKm2)} ZA DEŇ`, accent: km2(change.ruKm2) }
+        : { text: `UKRAJINA OSLOBODILA ${km2(change.uaKm2)} ZA DEŇ`, accent: km2(change.uaKm2) },
       lines: [change.directions[0] ? `najviac: ${change.directions[0].name}` : '', `mapa frontu k ${date(Date.parse(`${day}T12:00:00Z`))}`, 'oneskorenie mapy 2–3 dni'].filter(Boolean),
       view: FRONT_VIEW, polygons: [{ rings: insetOccupiedRings(snapNow, { maxPoints: 400, minSpanDeg: 0.05 }), fill: RU_COLOR, opacity: 0.28 }], points,
       mapCredit: `Mapa frontu: ${MAP_SOURCE.site} · Natural Earth`, source: `mapa frontu ${MAP_SOURCE.site}`, at: now },
@@ -279,6 +285,8 @@ export function uaAir({ media }, { now, settings = {} }) {
     title,
     text,
     card: { kind: 'ua-air', kicker: 'VZDUŠNÁ HROZBA', big: String(n), headline: `${plural(n, 'oblasť', 'oblasti', 'oblastí')} Ukrajiny v ohrození`,
+      // Hlásená HROZBA, nie potvrdený útok — háčik to nesmie zveličiť.
+      hook: { text: `${n} ${plural(n, 'OBLASŤ', 'OBLASTI', 'OBLASTÍ')}: HROZBA ${wave.kinds.has('missiles') ? 'RAKIET' : wave.kinds.has('drones') ? 'ÚTOČNÝCH DRONOV' : wave.kinds.has('bombs') ? 'RIADENÝCH BÔMB' : 'Z NEBA'}`, accent: String(n) },
       lines: [wave.kinds.size ? `hrozba: ${listSk([...wave.kinds].map(k => KIND_NOM[k]))}` : 'hrozba z neba', 'hlásená hrozba, nie mapa sirén'],
       view: UA_VIEW, points: [...wave.oblasts.values()].map(c => ({ lat: c.lat, lon: c.lon, r: 16 })),
       source: 'Vzdušné sily ZSU', at: wave.last },
@@ -439,6 +447,7 @@ export function uaWeek({ model, occupied = [], text }, { now }) {
     title,
     text: `🗓️ ${text}\n\n${TAGS.join(' ')}`,
     card: { kind: 'ua-week', kicker: 'TÝŽDEŇ NA FRONTE', big: fmt(model.total.week), headline: 'bojových stretov za týždeň',
+      hook: { text: `${fmt(model.total.week)} ${plural(model.total.week, 'BOJOVÝ STRET', 'BOJOVÉ STRETY', 'BOJOVÝCH STRETOV')} ZA TÝŽDEŇ`, accent: fmt(model.total.week) },
       lines: [range, ...(trend ? [trend] : []), 'údaje jednej strany'], view: FRONT_VIEW, points: pts, source, at: now },
     slides,
   };

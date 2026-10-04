@@ -159,6 +159,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 @media (max-width: 760px) { .admin-studio-card { grid-template-columns: 1fr; } .admin-studio-card img { width: 100%; max-width: 360px; } }
 .admin-studio-media { display: grid; gap: 10px; align-content: start; }
 .admin-studio-media video { width: 270px; height: auto; aspect-ratio: 9 / 16; border-radius: 8px; border: 1px solid #ffffff14; background: #050a10; }
+.admin-studio-hook { margin: 0 0 10px; }
+.admin-studio-hook figcaption { font-size: 12.5px; margin-bottom: 6px; }
+.admin-studio-hook img { display: block; width: 100%; max-width: 560px; height: auto; border-radius: 8px; border: 1px solid #1d3a4d; }
 .admin-studio-video-state { margin: 0; padding: 10px; border-radius: 8px; border: 1px dashed #00d4ff44; color: #bfe8f5; font-size: 12.5px; text-align: center; }
 .admin-studio-video-failed { border-color: #ff6b6b66; color: #ffc2c2; }
 .admin-studio-reel-settings { display: grid; gap: 10px; margin: 6px 0 16px; padding-top: 12px; border-top: 1px solid var(--line); }

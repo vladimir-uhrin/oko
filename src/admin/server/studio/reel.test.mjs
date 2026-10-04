@@ -5,7 +5,8 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { REEL, captionsFor, narration, overlaySvg, probeSeconds, reelView, renderReel, wavSeconds } from './reel.js';
+import { HOOK_END, HOOK_SHEET, REEL, captionChunks, captionsFor, hookBadge, keepNumbersTogether, narration, overlaySvg, probeSeconds,
+  reelFocus, reelHook, reelView, renderReel, silentCaptionText, wavSeconds } from './reel.js';
 import { createStudio } from './index.js';
 import { createMetaPublisher, isRetryableError } from './meta.js';
 import { openAdminStore } from '../store.js';
@@ -14,11 +15,11 @@ const NOW = Date.UTC(2026, 9, 3, 12, 0);
 const quakeCard = { kind: 'quake', kicker: 'ZEMETRASENIE', big: 'M 6,3', headline: 'Grécko', lines: ['70 km JZ od Atén'], point: { lat: 37.6, lon: 23.1 }, source: 'USGS', at: NOW };
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 
-test('reel: priblíženie k udalosti, posun pri prehľade', () => {
+test('reel: úder na miesto udalosti, potom okolie; posun pri prehľade', () => {
   const start = reelView(quakeCard, 0); const end = reelView(quakeCard, 6);
-  assert.ok(Math.abs(start.span - 150) < 1e-9);
-  assert.ok(Math.abs(end.span - 26) < 1e-9);
-  assert.equal(end.lon, 23.1);
+  assert.ok(Math.abs(start.span - 10) < 1e-9, 'háčik: zblízka od prvej snímky');
+  assert.ok(Math.abs(end.span - 26) < 1e-9, 'potom okolie so štátmi');
+  assert.deepEqual([start.lon, end.lon], [23.1, 23.1]);
   const digest = { ...quakeCard, point: undefined, points: [] };
   assert.ok(reelView(digest, 10).lon > reelView(digest, 0).lon);
   assert.equal(reelView(digest, 10).span, reelView(digest, 0).span);
@@ -31,16 +32,18 @@ const frontCard = { kind: 'ua-front', kicker: 'FRONT · ZMENA ZA DEŇ', big: '8,
   points: [{ lat: 47.6, lon: 36.3, r: 12, color: '#ff5a3c', label: '+8,3 km²' }, { lat: 48.5, lon: 37.6, r: 12, color: '#ffd23c', label: '−1 km²' }],
   source: 'mapa frontu okolive.sk', at: NOW };
 
-test('reel s výrezom: priblíženie z okolia na celý výrez, potom plochy a body s popismi', () => {
+test('reel s výrezom: úder na miesto zmeny, potom celý výrez s plochami a bodmi', () => {
   const start = reelView(frontCard, 0); const end = reelView(frontCard, 6);
-  assert.ok(start.span > end.span * 2, 'začína oddialený');
+  assert.ok(end.span > start.span * 2, 'začína priblížený na mieste zmeny');
+  assert.deepEqual([start.lon, start.lat], [36.3, 47.6], 'stred = bod háčika (prvý bod s popisom)');
   // Na konci sa celý výrez zmestí do okna mapy (1080 × 800) a stred je stred výrezu.
   const spanLat = end.span * 800 / 1080;
   assert.ok(end.lon - end.span / 2 <= 27.2 && end.lon + end.span / 2 >= 42, `dĺžka ${end.lon} ± ${end.span / 2}`);
   assert.ok(end.lat - spanLat / 2 <= 44.9 && end.lat + spanLat / 2 >= 50.7, `šírka ${end.lat} ± ${spanLat / 2}`);
   assert.ok(end.span < 25, 'nie mapa sveta');
   const early = overlaySvg(frontCard, 1);
-  assert.ok(!early.includes('+8,3 km²'), 'body až po priblížení');
+  assert.ok(early.includes('+8,3 km²'), 'bod háčika je tam od začiatku');
+  assert.ok(!early.includes('−1 km²'), 'ostatné body až pri odhalení');
   const done = overlaySvg(frontCard, 7);
   assert.match(done, /<path d="M[^"]+Z" fill="#ff5a3c" fill-opacity="0\.28"/, 'okupované územie');
   assert.ok(done.includes('+8,3 km²') && done.includes('−1 km²'), 'popisy bodov');
@@ -49,8 +52,44 @@ test('reel s výrezom: priblíženie z okolia na celý výrez, potom plochy a bo
   assert.ok(Math.abs(reelView(quakeCard, 6).span - 26) < 1e-9);
 });
 
-test('reel: odpočítanie čísla, escapovanie, výzva až na konci', () => {
-  assert.match(overlaySvg(quakeCard, 0.95), />M 0,[0-9]</);
+// Háčik (vlastník 2026-10-04: „prvé 3 sekundy musia upútať, väčšina má vypnutý zvuk").
+test('háčik: prvá snímka má celú vetu s číslom farebne, žiadne odpočítavanie od nuly', () => {
+  const card = { ...frontCard, hook: { text: 'RUSKÝ AGRESOR OBSADIL 8,3 km² ZA DEŇ', accent: '8,3 km²' } };
+  const first = overlaySvg(card, 0);
+  for (const word of ['RUSKÝ', 'AGRESOR', 'OBSADIL', 'ZA', 'DEŇ']) assert.ok(first.includes(`>${word}<`), word);
+  assert.match(first, /<tspan fill="#ff7a5c">8,3 km²<\/tspan>/, 'číslo s jednotkou farebne, pokope');
+  assert.match(first, /MAPA FRONTU OKOLIVE\.SK/, 'zdroj a čas hneď hore');
+  assert.ok(!/font-size="170"/.test(first), 'veľké číslo hlavičky až po háčiku');
+  const after = overlaySvg(card, HOOK_END + 0.5);
+  assert.ok(!after.includes('>RUSKÝ<'), 'háčik zmizne');
+  assert.match(after, /font-size="170"[^>]*>8,3 km²</, 'potom číslo v hlavičke, celé');
+  // Bez vety háčika v karte: číslo + nadpis, číslo nikdy od nuly.
+  assert.deepEqual(reelHook({ big: '204', headline: 'bojových stretov za deň' }), { text: '204 bojových stretov za deň', accent: '204' });
+  for (const t of [0, 0.3, 0.95, 1.5]) assert.match(overlaySvg({ ...quakeCard, big: '204' }, t), /<tspan fill="#ff7a5c">204<\/tspan>/, `t=${t}`);
+});
+
+test('háčik: prechod za sebou, horný riadok sa zmestí, prehľad ukáže celok hneď', () => {
+  const card = { ...frontCard, hook: { text: 'RUSKÝ AGRESOR OBSADIL 8,3 km² ZA DEŇ', accent: '8,3 km²' } };
+  // Nikdy dva texty cez seba: kým háčik mizne, hlavička ešte nie je.
+  for (const t of [HOOK_END, HOOK_END + 0.05, HOOK_END + 0.1, HOOK_END + 0.14]) {
+    assert.ok(!/font-size="170"[^>]*opacity="(?!0\.00)/.test(overlaySvg(card, t)), `t=${t}: hlavička ešte nie`);
+  }
+  assert.ok(!overlaySvg(card, HOOK_END + 0.2).includes('>RUSKÝ<'), 'háčik už preč, keď nastupuje hlavička');
+  const badge = hookBadge({ at: NOW, source: 'Generálny štáb Ukrajiny · ArmyInform' });
+  assert.ok(badge.length <= 44 && badge.includes('GENERÁLNY ŠTÁB UKRAJINY') && !badge.includes('ARMYINFORM'), badge);
+  // Hlásenie GŠ (focus: false) a prehľady: celok s bodmi hneď na prvej snímke.
+  const report = { ...frontCard, focus: false, polygons: [], points: [{ lat: 48.3, lon: 37.2, r: 30, label: '31' }, { lat: 48.6, lon: 37.8, r: 20, label: '16' }] };
+  assert.equal(reelFocus(report), null);
+  const first = overlaySvg(report, 0);
+  assert.ok(first.includes('>31<') && first.includes('>16<'), 'všetky smery od prvej snímky');
+  assert.ok(reelView(report, 0).span > reelView(report, 6).span, 'jemný nájazd, nie úder');
+  const many = { ...quakeCard, point: undefined, points: Array.from({ length: 12 }, (_, i) => ({ lat: 40 + i, lon: 20 + i, size: 5 })) };
+  assert.equal((overlaySvg(many, 0).match(/<circle[^>]*fill="#ff5a3c"/g) || []).length >= 12, true, 'všetky body na prvej snímke');
+  assert.equal(silentCaptionText({ title: 'Nadpis', text: '⚔️ Nadpis\nPrvá veta. Druhá veta.' }), 'Prvá veta.');
+});
+
+test('reel: číslo celé, escapovanie, výzva až na konci', () => {
+  assert.match(overlaySvg(quakeCard, 0.95), /<tspan fill="#ff7a5c">M<\/tspan> <tspan fill="#ff7a5c">6,3<\/tspan>/);
   assert.match(overlaySvg(quakeCard, 5), />M 6,3</);
   assert.match(overlaySvg({ ...quakeCard, big: '42' }, 5), />42</);
   const evil = overlaySvg({ ...quakeCard, headline: '<script>x</script>' }, 5);
@@ -281,22 +320,47 @@ test('titulky: vety narácie v čase úmerne dĺžke, v bezpečnej zóne, escapo
   assert.equal(rows[1].from, rows[0].to, 'nadväzujú');
   assert.ok(rows[1].to - rows[1].from > rows[0].to - rows[0].from, 'dlhšia veta = dlhší titulok');
   assert.deepEqual(captionsFor('', { length: 5 }), []);
-  const svg = overlaySvg(quakeCard, rows[0].from + 0.5, { captions: [{ from: 0, to: 5, text: '<b>Veta & veta</b>' }] });
-  assert.match(svg, /&lt;b&gt;Veta &amp; veta&lt;\/b&gt;/);
+  const svg = overlaySvg(quakeCard, HOOK_END + 0.2, { captions: [{ from: 0, to: 5, text: '<b>Veta & veta</b>' }] });
+  assert.ok(svg.includes('&lt;b&gt;Veta') && svg.includes('&amp;') && !svg.includes('<b>'), 'escapované');
   assert.ok(!overlaySvg(quakeCard, 6, { captions: [{ from: 0, to: 5, text: 'Koniec' }] }).includes('Koniec'), 'mimo času sa nekreslí');
+  assert.ok(!overlaySvg(quakeCard, 1.5, { captions: [{ from: 0, to: 5, text: 'Skoro' }] }).includes('Skoro'), 'počas háčika titulok nie');
   const [, y, h] = /<rect x="50" y="(\d+)" width="980" height="(\d+)"/.exec(svg).map(Number);
   assert.ok(y > 1100 && y + h <= 1440, `titulok nad spodkom mapy, neprekrýva riadky pod ňou (y=${y}, h=${h})`);
   const long = captionsFor('Toto je veľmi dlhá veta, ktorá by sa do troch riadkov titulku nikdy nezmestila, a preto sa musí rozdeliť na viac častí po slovách bez orezania.', { length: 9 });
   assert.ok(long.length >= 2 && long.every(row => row.text.length <= 90), 'dlhá veta sa delí');
   assert.equal(long.map(row => row.text).join(' ').endsWith('orezania.'), true, 'nič sa nestratí');
+  // Krátke frázy pre mobil bez zvuku: do 4 slov, nič sa nestratí, čísla farebne.
+  const sentence = 'Ukrajinský generálny štáb hlási za uplynulý deň 204 bojových stretov s ruskými jednotkami.';
+  const chunks = captionChunks(sentence);
+  assert.ok(chunks.length >= 3 && chunks.every(c => c.split(' ').length <= 4), chunks.join(' | '));
+  assert.equal(chunks.join(' '), sentence);
+  const timed = [{ from: HOOK_END, to: HOOK_END + 6, text: sentence }];
+  const firstChunk = overlaySvg(quakeCard, HOOK_END + 0.1, { captions: timed });
+  const lastChunk = overlaySvg(quakeCard, HOOK_END + 5.9, { captions: timed });
+  assert.ok(firstChunk.includes('>Ukrajinský<') && !firstChunk.includes('>jednotkami.<'), 'na začiatku prvá fráza');
+  assert.ok(lastChunk.includes('>jednotkami.<') && !lastChunk.includes('>Ukrajinský<'), 'na konci posledná fráza');
+  const frames = Array.from({ length: 60 }, (_, i) => overlaySvg(quakeCard, HOOK_END + i * 0.1, { captions: timed }));
+  assert.ok(frames.some(svg => /<tspan fill="#ffd23c">204<\/tspan>/.test(svg)), 'číslo v titulku farebne');
+  // Číslo drží pokope (šablóny dávajú obyčajnú medzeru tisícok): v háčiku jedno zvýraznené slovo, v titulku jedna fráza.
+  const big = overlaySvg({ ...quakeCard, hook: { text: 'RUSKÝ AGRESOR OBSADIL 1 186 km² ZA DEŇ', accent: '1 186 km²' } }, 0);
+  assert.match(big, /<tspan fill="#ff7a5c">1 186 km²<\/tspan>/);
+  assert.ok(!/<tspan[^>]*>186</.test(big), '„186" nie je samostatné slovo');
+  assert.deepEqual(captionChunks('ruský agresor obsadil 1 186 km² územia za týždeň').map(c => c.includes('1 186 km²')).filter(Boolean).length, 1);
+  assert.equal(keepNumbersTogether('o 8,3 km a 12 %, rok 2026 bol'), 'o 8,3 km a 12 %, rok 2026 bol');
+  assert.ok(captionChunks('Mapa frontu k 2. 10. 2026 oproti predchádzajúcemu dňu').some(c => c.includes('2. 10. 2026')), 'dátum sa nerozdelí');
 });
 
 test('render s titulkami a zistenie dĺžky videa', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {
   const dir = mkdtempSync(path.join(tmpdir(), 'oko-reel-cap-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'r.mp4');
-  const made = await renderReel({ card: quakeCard, title: 'Grécko', text: 'x\nVeta jedna. Veta dva.' }, file, { audio: 'none', seconds: 4, fps: 10 });
-  assert.equal(made.captions, 2);
+  const sheet = path.join(dir, 'r.hook.jpg');
+  const made = await renderReel({ card: quakeCard, title: 'Grécko', text: 'x\nVeta jedna. Veta dva.' }, file, { audio: 'none', seconds: 4, fps: 10, hookSheet: sheet });
+  assert.equal(made.captions, 1, 'bez hlasu len prvá veta — nadpis povedal háčik');
+  // Pás háčika: 4 snímky (0, 1, 2, 3 s) vedľa seba.
+  const { default: sharp } = await import('sharp');
+  const meta = await sharp(sheet).metadata();
+  assert.deepEqual([meta.format, meta.width, meta.height], ['jpeg', HOOK_SHEET.w * 4 + HOOK_SHEET.gap * 3, HOOK_SHEET.h]);
   const seconds = await probeSeconds(file);
   assert.ok(Math.abs(seconds - 4) < 0.3, `dĺžka ${seconds}`);
   assert.equal(await probeSeconds(path.join(dir, 'nie.mp4')), null);

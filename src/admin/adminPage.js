@@ -736,8 +736,19 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
   }
   const preview = el('details', 'admin-details admin-studio-preview');
   preview.append(el('summary', '', 'Náhľad príspevku (ako ho uvidia na FB/IG)'), studioPreview(draft, text, limits));
+  // Háčik (2026-10-04): prvé 3 sekundy reelu — čo divák uvidí ako prvé (väčšina pozerá bez zvuku).
+  const hook = [];
+  if (videoReady) {
+    const figure = el('figure', 'admin-studio-hook');
+    const strip = el('img');
+    strip.src = `/api/admin/studio/drafts/${draft.id}/hook?v=${draft.updatedAt}`;
+    strip.alt = `Prvé 3 sekundy reelu: ${draft.title}`; strip.loading = 'lazy';
+    strip.addEventListener('error', () => figure.remove()); // importované reely pás nemajú
+    figure.append(el('figcaption', 'admin-muted', 'Prvé 3 sekundy reelu (0 · 1 · 2 · 3 s) — upúta háčik aj bez zvuku?'), strip);
+    hook.push(figure);
+  }
   body.append(head, el('h3', '', draft.title), el('p', 'admin-muted', `vytvorené ${when(draft.createdAt)}${draft.publishedAt ? ` · zverejnené ${when(draft.publishedAt)}` : ''}${draft.videoSeconds ? ` · reel ${String(draft.videoSeconds).replace('.', ',')} s` : ''}`),
-    text, ...(draft.checks?.length ? [checks] : []), preview, actions, results);
+    ...hook, text, ...(draft.checks?.length ? [checks] : []), preview, actions, results);
   card.append(media, body);
   return card;
 }

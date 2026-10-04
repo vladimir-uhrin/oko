@@ -115,6 +115,7 @@ export function earthquakeEvent({ records = [], fetchedAt }, { now, url }) {
     title,
     text,
     card: { kind: 'quake', kicker: 'ZEMETRASENIE', big: `M ${mag}`, headline: where?.country || 'Zemetrasenie',
+      hook: { text: `${strength.toUpperCase()} M ${mag}${where?.country ? ` – ${where.country.toUpperCase()}` : ''}`, accent: `M ${mag}` },
       lines: [place, `${when(quake.time, now)}${Number.isFinite(quake.depth) ? ` · hĺbka ${Math.round(quake.depth)} km` : ''}`],
       point: { lat: quake.lat, lon: quake.lon }, source: 'USGS', at: fetchedAt ?? now },
   };
@@ -141,6 +142,7 @@ export function earthquakeDigest({ records = [], fetchedAt }, { now, url }) {
     title,
     text,
     card: { kind: 'digest', kicker: 'PREHĽAD 24 H', big: String(day.length), headline: `${plural(day.length, 'zemetrasenie', 'zemetrasenia', 'zemetrasení')} za 24 hodín`,
+      hook: { text: `${day.length} ${plural(day.length, 'ZEMETRASENIE', 'ZEMETRASENIA', 'ZEMETRASENÍ')} ZA 24 HODÍN`, accent: String(day.length) },
       lines: [`${strong.length} s magnitúdou ≥ 4,5`, ...(strong[0] ? [`najsilnejšie M ${num1(strong[0].mag)}`] : [])],
       points: strong.slice(0, 30).map(q => ({ lat: q.lat, lon: q.lon, size: q.mag })), source: 'USGS', at: fetchedAt ?? now },
   };
@@ -175,6 +177,7 @@ export function launchEvent({ results = [] }, { now, url }) {
     title,
     text,
     card: { kind: 'launch', kicker: 'ŠTART RAKETY', big: status.toUpperCase(), headline: rocket,
+      hook: { text: `${rocket.toUpperCase()}: ŠTART ${status.toUpperCase()}`, accent: status.toUpperCase() },
       lines: [mission, `${when(at, now)}${pad ? ` · ${pad}` : ''}`],
       ...(Number.isFinite(lat) && Number.isFinite(lon) ? { point: { lat, lon } } : {}), source: 'The Space Devs', at: now },
   };

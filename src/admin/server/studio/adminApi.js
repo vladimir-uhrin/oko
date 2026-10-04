@@ -2,14 +2,14 @@
 // až po kontrole roly owner a limitu; zápisy prešli Origin + CSRF kontrolou v context().
 import { sendVideo } from './index.js';
 
-const DRAFT = /^\/api\/admin\/studio\/drafts\/([a-f0-9-]{36})(?:\/(image|video|source|render|approve|discard|restore|publish|shared|schedule))?$/;
+const DRAFT = /^\/api\/admin\/studio\/drafts\/([a-f0-9-]{36})(?:\/(image|video|hook|source|render|approve|discard|restore|publish|shared|schedule))?$/;
 
 export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJson, fail, active, rate, studio, store, actor, now }) {
   if (!studio) throw fail('studio_unavailable', 503);
   const draftRoute = DRAFT.exec(pathname);
   const route = draftRoute ? `/drafts/:id${draftRoute[2] ? `/${draftRoute[2]}` : ''}` : pathname.slice('/api/admin/studio'.length) || '/';
   const methods = { '/': ['GET'], '/generate': ['POST'], '/settings': ['POST'], '/tick': ['POST'], '/drafts/:id': ['GET', 'POST'],
-    '/drafts/:id/image': ['GET'], '/drafts/:id/video': ['GET'], '/drafts/:id/render': ['POST'], '/drafts/:id/approve': ['POST'], '/drafts/:id/discard': ['POST'], '/drafts/:id/restore': ['POST'],
+    '/drafts/:id/image': ['GET'], '/drafts/:id/video': ['GET'], '/drafts/:id/hook': ['GET'], '/drafts/:id/render': ['POST'], '/drafts/:id/approve': ['POST'], '/drafts/:id/discard': ['POST'], '/drafts/:id/restore': ['POST'],
     '/drafts/:id/publish': ['POST'], '/drafts/:id/shared': ['POST'], '/drafts/:id/schedule': ['POST'],
     '/drafts/:id/source': ['GET'], '/calendar': ['GET'], '/insights': ['GET'], '/insights/refresh': ['POST'],
     '/front-week': ['GET', 'POST'], '/best-times': ['GET'] }[route];
@@ -44,6 +44,14 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
       res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': image.length, 'Cache-Control': 'private, no-store',
         'X-Content-Type-Options': 'nosniff', 'Content-Disposition': `inline; filename="oko-${id.slice(0, 8)}${idx ? `-${idx}` : ''}.jpg"` });
       return res.end(Buffer.from(image));
+    }
+    if (route === '/drafts/:id/hook') {
+      // Pás háčika reelu: snímky 0, 1, 2, 3 s — čo divák uvidí ako prvé.
+      const sheet = await studio.hookSheet(id);
+      if (!sheet) throw fail('hook_not_ready', 404);
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': sheet.length, 'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff', 'Content-Disposition': `inline; filename="oko-hacik-${id.slice(0, 8)}.jpg"` });
+      return res.end(sheet);
     }
     if (route === '/drafts/:id/video') {
       const file = studio.videoPath(id);

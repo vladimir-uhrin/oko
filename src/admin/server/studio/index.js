@@ -189,6 +189,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
 
   // ── video ──────────────────────────────────────────────────────────────
   const videoFile = draft => (mediaDir && draft.video ? path.join(mediaDir, path.basename(draft.video)) : null);
+  /** Pás háčika reelu (snímky 0–3 s) — vedľa videa, maže sa s ním. */
+  const hookFile = id => (mediaDir ? path.join(mediaDir, `${path.basename(id)}.hook.jpg`) : null);
   async function videoReady(draft) {
     const file = videoFile(draft);
     if (draft.videoStatus !== 'ready' || !file) return false;
@@ -211,7 +213,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         made = await padToReel(path.join(mediaDir, path.basename(draft.card.sourceVideo)), path.join(mediaDir, name), { env });
       } else {
         made = await renderReel({ card: draft.card, title: draft.title, text: draft.text }, path.join(mediaDir, name),
-          { audio: s.audio, voice: s.voice, env, site, voiceProvider });
+          { audio: s.audio, voice: s.voice, env, site, voiceProvider, hookSheet: hookFile(id) });
       }
       store.studioUpdate(id, { video: name, videoStatus: 'ready', videoError: null, videoSeconds: Number.isFinite(made?.seconds) ? made.seconds : null }, now());
     } catch (error) {
@@ -232,12 +234,13 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     for (const row of store.studioExpiredVideos(now())) {
       await fsp.rm(path.join(mediaDir, path.basename(row.video)), { force: true });
       await fsp.rm(path.join(mediaDir, `${row.id}.src.mp4`), { force: true });
+      await fsp.rm(hookFile(row.id), { force: true });
       store.studioUpdate(row.id, { video: null, videoStatus: null }, now());
     }
     let names = [];
     try { names = await fsp.readdir(mediaDir); } catch { return; }
     for (const name of names) {
-      const match = /^([a-f0-9-]{36})(?:\.src)?\.mp4$/.exec(name);
+      const match = /^([a-f0-9-]{36})(?:\.src\.mp4|\.mp4|\.hook\.jpg)$/.exec(name);
       if (match && !store.studioGet(match[1])) await fsp.rm(path.join(mediaDir, name), { force: true });
     }
   }
@@ -664,6 +667,12 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     get: requireDraft,
     image: (id, idx = 0) => store.studioImageAt(id, idx),
     videoPath: id => { const draft = requireDraft(id); return draft.videoStatus === 'ready' ? videoFile(draft) : null; },
+    /** Pás háčika (JPEG) alebo null, ak reel ešte nie je, je importovaný alebo pás chýba. */
+    async hookSheet(id) {
+      const draft = requireDraft(id);
+      if (draft.videoStatus !== 'ready' || !hookFile(id)) return null;
+      try { return await fsp.readFile(hookFile(id)); } catch { return null; }
+    },
     publisherStatus: () => publisher.status(),
     instagramLimit: () => publisher.instagramLimit(),
     async capabilities() {

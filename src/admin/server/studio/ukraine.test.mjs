@@ -31,6 +31,7 @@ test('hlásenie GŠ: smery po slovensky, údery, priemer, „údaje jednej stran
   const item = uaReport({ report: report(), days }, { now: NOW });
   assert.equal(item.key, `ua-report:${utcDay(NOW - 2 * H)}`);
   assert.equal(item.title, 'Front za deň: 182 bojových stretov');
+  assert.deepEqual(item.card.hook, { text: '182 BOJOVÝCH STRETOV ZA DEŇ', accent: '182' }, 'háčik reelu: najsilnejšie číslo');
   assert.match(item.text, /Ukrajinský generálny štáb hlási za uplynulý deň 182 bojových stretov s ruskými jednotkami\. To je viac ako 7-dňový priemer \(150\)\./);
   assert.match(item.text, /• Pokrovský smer – 51/);
   assert.match(item.text, /Ruské údery podľa hlásenia: 120 riadených leteckých bômb, 4 100 dronov-kamikadze, 3 900 ostreľovaní\./);
@@ -62,6 +63,8 @@ test('zmena frontu za deň: km² po smeroch, kritický jazyk, zdroj okolive.sk b
   const item = uaFront({ now: after, before }, { now: NOW });
   assert.equal(item.key, 'ua-front:2026-10-03');
   assert.match(item.title, /^Front za deň: ruský agresor obsadil \d/, 'pravidlo vlastníka: „ruský agresor obsadil"');
+  assert.match(item.card.hook.text, /^RUSKÝ AGRESOR OBSADIL [\d ,]+ km² ZA DEŇ$/, 'háčik reelu podľa pravidla vlastníka');
+  assert.ok(item.card.hook.text.includes(item.card.hook.accent));
   assert.match(item.text, /Ruský agresor za deň obsadil/);
   assert.match(item.text, /mapy frontu na okolive\.sk/);
   assert.ok(!/deepstate/i.test(item.text + JSON.stringify(item.card)), 'poskytovateľ mapy sa nemenuje');
@@ -87,6 +90,7 @@ test('veľký vzdušný útok: oblasti z hlásení Vzdušných síl, prah, druh 
   assert.deepEqual([...wave.kinds].sort(), ['drones', 'missiles']);
   const item = uaAir({ media: WAVE }, { now: NOW, settings: { airMinOblasts: 8 } });
   assert.equal(item.title, 'Rozsiahly vzdušný útok: hrozba pre 9 oblastí Ukrajiny');
+  assert.deepEqual(item.card.hook, { text: '9 OBLASTÍ: HROZBA RAKIET', accent: '9' }, 'háčik = hlásená hrozba, nie potvrdený útok');
   assert.match(item.text, /hlásia hrozbu útočných dronov a rakiet pre Čerkaskú, Černihivskú, .* a Žytomyrskú oblasť\./);
   assert.match(item.text, /nie o oficiálnu mapu protileteckých sirén/);
   assert.ok(!/Ľvov/.test(item.text), 'staré hlásenie mimo okna');
