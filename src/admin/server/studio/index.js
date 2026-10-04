@@ -27,6 +27,7 @@ import { createMetaPublisher, isRetryableError } from './meta.js';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import { ffmpegAvailable, padToReel as defaultPadToReel, posterFrame as defaultPosterFrame, renderReel as defaultRenderReel } from './reel.js';
+import { LOOPBACK_HOST } from '../loopback.js';
 
 /** Všetky šablóny: svetové udalosti (templates.js) + Ukrajina (ukraine.js, 2026-10-04). */
 export const TEMPLATES = Object.freeze([...BASE_TEMPLATES, ...UA_TEMPLATES]);
@@ -70,9 +71,9 @@ const localWeekday = at => WEEKDAYS[weekdayFmt.format(new Date(at))] ?? 0;
 const dayKeyFmt = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bratislava', year: 'numeric', month: '2-digit', day: '2-digit' });
 const localDayKey = at => dayKeyFmt.format(new Date(at));
 
-function loopbackJson(port, path, timeoutMs = 20_000) {
+export function loopbackJson(port, path, timeoutMs = 20_000) {
   return new Promise(resolve => {
-    const req = http.get({ host: '127.0.0.1', port, path, headers: { Host: `localhost:${port}`, Accept: 'application/json', 'X-OKO-Studio': '1' } }, res => {
+    const req = http.get({ host: LOOPBACK_HOST, port, path, headers: { Host: `localhost:${port}`, Accept: 'application/json', 'X-OKO-Studio': '1' } }, res => {
       const chunks = []; let size = 0;
       res.on('data', chunk => { size += chunk.length; if (size <= 32 * 1024 * 1024) chunks.push(chunk); });
       res.on('end', () => {

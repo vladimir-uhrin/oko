@@ -11,6 +11,7 @@ import http from 'node:http';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { LOOPBACK_HOST } from '../../admin/server/loopback.js';
 
 /** Feedy s vlastným status endpointom. Poradie = poradie v paneli. */
 export const ADMIN_FEEDS = Object.freeze([
@@ -55,10 +56,10 @@ function summarizeFeed(id, body) {
   return body;
 }
 
-function loopbackGet(port, pathname, timeoutMs) {
+export function loopbackGet(port, pathname, timeoutMs) {
   return new Promise(resolve => {
     const started = Date.now();
-    const req = http.get({ host: '127.0.0.1', port, path: pathname, headers: { Host: `localhost:${port}`, Accept: 'application/json' } }, res => {
+    const req = http.get({ host: LOOPBACK_HOST, port, path: pathname, headers: { Host: `localhost:${port}`, Accept: 'application/json' } }, res => {
       const chunks = [];
       let size = 0;
       res.on('data', chunk => { size += chunk.length; if (size <= 512 * 1024) chunks.push(chunk); });

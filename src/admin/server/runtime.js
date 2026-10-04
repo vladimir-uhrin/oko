@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import http from 'node:http';
 import { FEEDS, feedById, feedForPath, isStatusPath, routeKey } from './feeds.js';
+import { LOOPBACK_HOST } from './loopback.js';
 
 export const TIME_ZONE = 'Europe/Bratislava';
 const FLUSH_MS = 60_000;
@@ -390,10 +391,10 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
   };
 }
 
-function loopbackStatus(port, pathname, timeoutMs = 8000) {
+export function loopbackStatus(port, pathname, timeoutMs = 8000) {
   return new Promise(resolve => {
     const started = Date.now();
-    const req = http.get({ host: '127.0.0.1', port, path: pathname, headers: { Host: `localhost:${port}` } }, res => {
+    const req = http.get({ host: LOOPBACK_HOST, port, path: pathname, headers: { Host: `localhost:${port}` } }, res => {
       res.resume();
       res.on('end', () => resolve({ status: res.statusCode, ms: Date.now() - started }));
     });
