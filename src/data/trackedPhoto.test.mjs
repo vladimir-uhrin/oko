@@ -73,11 +73,11 @@ test('foto: pás sedí na spodku karty — rovnaká šírka, prekrýva zaoblenie
   assert.equal(photoPlacement({ x: 10, y: 10, w: 180.4, h: 40 }, size, view).w, 180, 'šírka = šírka karty, celé px');
 });
 
-test('foto: viditeľnosť podľa hostiteľa — bledá alebo zmenšená karta (pohľad na svet) pás skryje, inak škálovaný rect + opacity', () => {
+test('foto: viditeľnosť podľa hostiteľa — bledá alebo zmenšená karta (pohľad na svet) pás skryje, inak rect hostiteľa + opacity', () => {
   assert.equal(photoVisibility(null), null);
   assert.equal(photoVisibility({ x: 0, y: 0, w: 200, h: 80, alpha: PHOTO_MIN_CARD_ALPHA - 0.01, paintScale: 1 }), null, 'karta takmer neviditeľná → bez pásu');
   assert.equal(photoVisibility({ x: 0, y: 0, w: 200, h: 80, alpha: 1, paintScale: PHOTO_MIN_CARD_SCALE - 0.01 }), null, 'karta zmenšená na diaľku → bez pásu');
-  assert.deepEqual(photoVisibility({ x: 10, y: 20, w: 200, h: 80, alpha: 0.8, paintScale: 0.9 }), { x: 10, y: 20, w: 180, h: 72, opacity: 0.8 }, 'škálovaný rect, opacity karty');
+  assert.deepEqual(photoVisibility({ x: 10, y: 20, w: 180, h: 72, alpha: 0.8, paintScale: 0.9 }), { x: 10, y: 20, w: 180, h: 72, opacity: 0.8 }, 'rect hostiteľa je už v mierke kresby — nenásobiť druhýkrát; opacity karty');
   assert.deepEqual(photoVisibility({ x: 10, y: 20, w: 200, h: 80 }), { x: 10, y: 20, w: 200, h: 80, opacity: 1 }, 'hostiteľ bez polí = plná karta');
 });
 

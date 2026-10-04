@@ -28,6 +28,30 @@ test('krížik: pravý horný roh viditeľnej karty', () => {
   assert.deepEqual(closeButtonPlacement({ x: 100, y: 50, w: 400, h: 300 }), { x: 100 + 400 - CARD_CLOSE_SIZE_PX - CARD_CLOSE_INSET_PX, y: 50 + CARD_CLOSE_INSET_PX });
 });
 
+test('krížik na mobile (2026-10-04): karta širšia než okno → krížik ostane v okne; zmenšená karta ho má tiež', async () => {
+  // Telefón 390 px na výšku, karta s grafmi 430 px od x = 24 — krížik bol na x = 421, mimo obrazovky.
+  const viewport = { w: 390, h: 844 };
+  const placed = closeButtonPlacement({ x: 24, y: 100, w: 430, h: 220 }, CARD_CLOSE_SIZE_PX, CARD_CLOSE_INSET_PX, viewport);
+  assert.ok(placed.x + CARD_CLOSE_SIZE_PX <= viewport.w, `krížik celý v okne (x = ${placed.x})`);
+  assert.equal(placed.x, 390 - CARD_CLOSE_SIZE_PX - CARD_CLOSE_INSET_PX);
+  assert.deepEqual(closeButtonPlacement({ x: 10, y: 5, w: 300, h: 100 }, CARD_CLOSE_SIZE_PX, CARD_CLOSE_INSET_PX, viewport),
+    { x: 10 + 300 - CARD_CLOSE_SIZE_PX - CARD_CLOSE_INSET_PX, y: 5 + CARD_CLOSE_INSET_PX }, 'karta v okne = roh karty');
+  const { closeButtonVisibility } = await import('./cardCloseButtons.js');
+  assert.ok(closeButtonVisibility({ x: 6, y: 100, w: 378, h: 190, alpha: 1, paintScale: 0.6 }), 'zmenšená karta (mobil) sa zavrieť dá');
+  assert.equal(closeButtonVisibility({ x: 6, y: 100, w: 378, h: 190, alpha: 0.1, paintScale: 1 }), null, 'takmer neviditeľná karta bez krížika');
+  assert.equal(closeButtonVisibility(null), null);
+});
+
+test('karta lietadla na úzkom okne: hostiteľ zmenší dokovanú kartu do šírky okna (worldOverlay)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./overlays/worldOverlay.js', import.meta.url), 'utf8');
+  // Správanie overené v prehliadači (390×844): karta 430 px → zmestí sa; toto stráži, že
+  // prispôsobenie ostane pred výpočtom šírky umiestnenia.
+  const fit = src.indexOf('if (entry.dock) {\n    const roomW = _canvasWidth - 2 * DOCK_MARGIN_PX;');
+  const width = src.indexOf('record.placementInput.width = record.layout.w * record.paintScale;');
+  assert.ok(fit > 0 && width > fit, 'prispôsobenie mierky pred šírkou umiestnenia');
+});
+
 test('krížik: len pri nakreslenej karte, klik zavrie kartu cestou jej vrstvy a skryje sa; bledá/malá karta bez krížika', () => {
   const body = fakeDom();
   const listeners = [];

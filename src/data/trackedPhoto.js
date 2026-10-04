@@ -107,9 +107,10 @@ export function photoPlacement(rect, size, viewport, overlap = PHOTO_OVERLAP_PX)
 }
 
 /**
- * Viditeľnosť a skutočný (škálovaný) obdĺžnik karty z hostiteľského rectu.
- * Hostiteľ publikuje neškálovaný rect + `paintScale` + `alpha` (kartu kreslí
- * zmenšenú a vyblednutú na diaľku); pás musí sedieť na tom, čo vidno. Pure.
+ * Viditeľnosť a obdĺžnik karty z hostiteľského rectu. Hostiteľ (worldOverlay) publikuje
+ * obdĺžnik UŽ V MIERKE KRESBY — umiestnenie sa počíta zo šírky × paintScale — plus
+ * `paintScale` a `alpha`; druhé násobenie mierkou (pôvodne) zmenšilo pás pod kartu, keď sa
+ * karta na mobile zmenší do šírky okna (2026-10-04). Príliš zmenšená alebo bledá karta = bez pásu. Pure.
  * @param {?{x:number,y:number,w:number,h:number,alpha?:number,paintScale?:number}} rect
  * @returns {?{x:number,y:number,w:number,h:number,opacity:number}} null = pás skryť
  */
@@ -118,7 +119,7 @@ export function photoVisibility(rect) {
   const alpha = Number.isFinite(rect.alpha) ? rect.alpha : 1;
   const scale = Number.isFinite(rect.paintScale) ? rect.paintScale : 1;
   if (alpha < PHOTO_MIN_CARD_ALPHA || scale < PHOTO_MIN_CARD_SCALE) return null;
-  return { x: rect.x, y: rect.y, w: rect.w * scale, h: rect.h * scale, opacity: Math.min(1, alpha) };
+  return { x: rect.x, y: rect.y, w: rect.w, h: rect.h, opacity: Math.min(1, alpha) };
 }
 
 const state = {

@@ -8,16 +8,35 @@
 // alebo výber). Kartičky letiska a prírodnej udalosti majú vlastný krížik už predtým.
 
 import { getOverlayPaintRect } from './overlays/worldOverlay.js';
-import { photoVisibility } from './data/trackedPhoto.js';
+import { PHOTO_MIN_CARD_ALPHA } from './data/trackedPhoto.js';
 import { governorRequestRender } from './renderGovernor.js';
 
 /** Veľkosť tlačidla (px) a odstup od rohu karty. */
 export const CARD_CLOSE_SIZE_PX = 26;
 export const CARD_CLOSE_INSET_PX = 6;
 
-/** Poloha krížika: vnútri pravého horného rohu viditeľnej karty. Pure. */
-export function closeButtonPlacement(rect, size = CARD_CLOSE_SIZE_PX, inset = CARD_CLOSE_INSET_PX) {
-  return { x: Math.round(rect.x + rect.w - size - inset), y: Math.round(rect.y + inset) };
+/**
+ * Poloha krížika: vnútri pravého horného rohu viditeľnej karty, no vždy v okne. Pure.
+ * 2026-10-04 (mobil na výšku): karta širšia než okno mala krížik mimo obrazovky — kartu sa
+ * nedalo zavrieť. Hostiteľ ju teraz zmenší do šírky okna; poistka tu drží krížik v okne aj tak.
+ */
+export function closeButtonPlacement(rect, size = CARD_CLOSE_SIZE_PX, inset = CARD_CLOSE_INSET_PX, viewport = null) {
+  let x = rect.x + rect.w - size - inset;
+  let y = rect.y + inset;
+  if (viewport && viewport.w > 0) x = Math.min(x, viewport.w - size - inset);
+  if (viewport && viewport.h > 0) y = Math.min(y, viewport.h - size - inset);
+  return { x: Math.round(Math.max(inset, x)), y: Math.round(Math.max(inset, y)) };
+}
+
+/**
+ * Je karta viditeľná dosť na krížik? Na rozdiel od pásu s fotkou nezáleží na mierke — zmenšená
+ * karta na mobile sa zavrieť dať musí. Pure.
+ */
+export function closeButtonVisibility(rect) {
+  if (!rect) return null;
+  const alpha = Number.isFinite(rect.alpha) ? rect.alpha : 1;
+  if (alpha < PHOTO_MIN_CARD_ALPHA) return null;
+  return { x: rect.x, y: rect.y, w: rect.w, h: rect.h, opacity: Math.min(1, alpha) };
 }
 
 /**
@@ -59,12 +78,13 @@ export function installCardCloseButtons(viewer, { container, providers, t, paint
     for (const { provider, button } of buttons.values()) {
       let card = null;
       try { card = provider.active(); } catch { card = null; }
-      const visible = card ? photoVisibility(paintRect(card.sourceId, card.entryId)) : null;
+      const visible = card ? closeButtonVisibility(paintRect(card.sourceId, card.entryId)) : null;
       if (!visible) {
         if (!button.hidden) button.hidden = true;
         continue;
       }
-      const { x, y } = closeButtonPlacement(visible);
+      const view = doc.defaultView;
+      const { x, y } = closeButtonPlacement(visible, CARD_CLOSE_SIZE_PX, CARD_CLOSE_INSET_PX, { w: view?.innerWidth || 0, h: view?.innerHeight || 0 });
       if (button.hidden) button.hidden = false;
       button.style.opacity = String(visible.opacity);
       button.style.transform = `translate(${x}px, ${y}px)`;

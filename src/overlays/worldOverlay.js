@@ -8,6 +8,7 @@ import { BoundedCohort, stableIdentityHash } from '../data/detectionCohort.js';
 import { LabelArbiter, LABEL_ARBITER_TIMING } from '../data/labelArbiter.js';
 import {
   dockedPlacement,
+  DOCK_MARGIN_PX,
   dockCoversAnchor,
   getWorldOverlayTextMeasureGeneration,
   altitudeFade,
@@ -1846,6 +1847,17 @@ function snapshotAndProject(entry, source, viewProjection, keyhole) {
   if (layout.measuredGeneration !== measureGeneration) {
     measureOverlayEntry(_ctx, entry, layout);
     layout.measuredGeneration = measureGeneration;
+  }
+  // Úzke okno (mobil na výšku, 2026-10-04, vlastník: „pri kartách lietadiel ich neviem zavrieť,
+  // nie je tam X"): karta s grafmi má ~430 px, telefón 360–390 px — pretiekla vpravo a krížik
+  // v jej rohu (cardCloseButtons.js) bol mimo obrazovky. Dokovaná karta sa preto zmenší tak,
+  // aby sa zmestila medzi okraje doku (dockedPlacement) aj do 70 % výšky.
+  if (entry.dock) {
+    const roomW = _canvasWidth - 2 * DOCK_MARGIN_PX;
+    const roomH = _canvasHeight * 0.7;
+    const fitW = roomW > 0 && layout.w * record.paintScale > roomW ? roomW / (layout.w * record.paintScale) : 1;
+    const fitH = roomH > 0 && layout.h * record.paintScale > roomH ? roomH / (layout.h * record.paintScale) : 1;
+    record.paintScale *= Math.min(fitW, fitH);
   }
   record.placementInput.anchorX = record.screen.x;
   record.placementInput.anchorY = record.screen.y;

@@ -11993,6 +11993,34 @@ body.oko-mobile #title-bar .title-credit { margin-top: 3px; gap: 6px; font-size:
 body.oko-mobile #title-bar .title-credit-rule { width: 14px; }
 body.oko-mobile #top-center-actions { top: 10px; }
 body.oko-mobile #lang-switch { top: 14px; right: 12px; }
+/* Mobil na výšku (2026-10-04, vlastník: „prekontroluj mobil friendly"): atribúcia Cesium/Google
+   má na jednom riadku ~440 px — na telefóne 360–390 px vytŕčala a „Data attribution" bol mimo
+   obrazovky. Zalamovať nesmie (rozloženie doku počíta s 18 px), tak sa drží v šírke okna
+   a posúva prstom; nič sa neskrýva (podmienky Cesium ion a Google). Posúva sa vnútorný blok
+   Cesia (inak absolútny — v orezanom kontajneri by zmizol); šírku vonkajšieho #cesium-credits
+   riadia pravidlá rozloženia (width: auto !important). */
+body.oko-mobile #cesium-credits .cesium-widget-credits {
+  position: static;
+  display: block;
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+/* Dotyk: drobné prepínače a čipy (ZAP/VYP vrstiev 43×20, filtre 16 px, tlačidlá scén 26 px,
+   rozsahy plynu 18 px, režim 3D modelov 22 px, STD hlasu 12 px) dostanú neviditeľný väčší
+   cieľ — vzhľad ostáva, prst sa trafí (rovnako ako krížik karty). */
+@media (pointer: coarse) {
+  .data-toggle-btn, .data-toggle-chip, .scene-btn, .scene-shot-btn, .gas-range, .pp-mode-btn, .gev-voice-tier-btn {
+    position: relative;
+  }
+  .data-toggle-btn::before, .data-toggle-chip::before, .scene-btn::before, .scene-shot-btn::before,
+  .gas-range::before, .pp-mode-btn::before, .gev-voice-tier-btn::before {
+    content: '';
+    position: absolute;
+    inset: -8px -4px;
+  }
+}
 body.oko-mobile #lang-switch button { min-width: 30px; min-height: 30px; }
 /* Úzky telefón: ikony akcií v strede by ležali cez OKO BETA a podpis autora (tie siahajú po ~181 px,
    ikony začínajú pri w/2 − 98) — idú do druhého riadku, stav načítania pod ne. */
