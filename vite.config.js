@@ -191,7 +191,48 @@ let _adsbdbRouteLookup = null;
  */
 /** Úložisko histórie pre naplnenie odhadov po štarte (nastaví flightHistoryProxy). */
 let _historyStoreForEstimates = null;
-let _estimatesSeeded = false;
+const _estimatesSeed = { done: false, running: false, attempts: 0, snapshots: 0 };
+/**
+ * Naplň odhady z Histórie letov (posledné polohy za 14 h) — po hodinových kúskoch, aby sa medzi ne
+ * zmestili iné dopyty na vlákno databázy (celé okno naraz ~7 s by blokovalo kontrolu otvorenia
+ * a zhodilo vlákno). Až od druhého svetového snímku (po reštarte sa databáza otvára pomaly),
+ * pri chybe znova pri ďalšom snímku, najviac 5 pokusov.
+ */
+async function seedEstimatesFromHistory() {
+  const st = _estimatesSeed;
+  if (st.done || st.running || st.attempts >= 5 || !_historyStoreForEstimates) return;
+  st.snapshots += 1;
+  if (st.snapshots < 2) return;
+  const store = _historyStoreForEstimates();
+  if (!store || store.closed) return;
+  st.running = true;
+  st.attempts += 1;
+  try {
+    await store.ready;
+    const nowS = Math.floor(Date.now() / 1000);
+    const seen = new Set();
+    let found = 0;
+    let seeded = 0;
+    for (let h = 0; h < 14; h += 1) {
+      const untilS = nowS - 120 - h * 3600;
+      const ends = await store.lastAirborneFixes({ sinceS: untilS - 3600, untilS });
+      const airborne = [];
+      for (const fix of ends) {
+        if (seen.has(fix.hex)) continue; // novší let toho istého lietadla už bol (aj pristátie)
+        seen.add(fix.hex);
+        if (!fix.onGround) airborne.push(fix);
+      }
+      found += airborne.length;
+      seeded += _estimateTracker.seed(airborne);
+    }
+    st.done = true;
+    console.log(`[estimates] seeded ${seeded} of ${found} airborne flight ends from history (attempt ${st.attempts})`);
+  } catch (error) {
+    console.warn(`[estimates] seed failed (attempt ${st.attempts}):`, error?.message || error);
+  } finally {
+    st.running = false;
+  }
+}
 const _estimateTracker = createEstimateTracker({ lookupRoute: (cs) => (_adsbdbRouteLookup ? _adsbdbRouteLookup(cs) : Promise.resolve(null)) });
 /** @type {string|null} Cached upstream response body (JSON text). */
 let _openskyCacheBody = null;
@@ -6260,19 +6301,13 @@ function openSkyProxy() {
             // Nový svetový snímok → sledovač odhadov (mimo cesty odpovede).
             setImmediate(async () => {
               try {
-                // Po štarte najprv posledné polohy letov za 14 h z histórie — inak by sledovač poznal
-                // len lietadlá, ktoré zmizli od reštartu (Atlantik prázdny ešte hodiny).
-                if (!_estimatesSeeded && _historyStoreForEstimates) {
-                  _estimatesSeeded = true;
-                  const store = _historyStoreForEstimates();
-                  const nowS = Math.floor(Date.now() / 1000);
-                  const fixes = store ? await store.lastAirborneFixes({ sinceS: nowS - 14 * 3600, untilS: nowS - 120 }) : [];
-                  const seeded = _estimateTracker.seed(fixes);
-                  console.log(`[estimates] seeded ${seeded} of ${fixes.length} recent airborne flight ends`);
-                }
                 const world = openSkyWorldParsed();
                 if (world) _estimateTracker.ingest(world);
               } catch (error) { console.warn('[estimates] ingest failed:', error?.message || error); }
+              // Po štarte posledné polohy letov za 14 h z histórie — inak by sledovač poznal len
+              // lietadlá, ktoré zmizli od reštartu (Atlantik prázdny ešte hodiny). Živé v snímku
+              // sledovač preskočí (pozná ich z ingest).
+              void seedEstimatesFromHistory();
             });
             _openskyCacheMeta = {
               requestedMode,

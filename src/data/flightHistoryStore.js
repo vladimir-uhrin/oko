@@ -754,9 +754,10 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
     /**
      * Posledná poloha každého letu, ktorý skončil v okne [sinceS, untilS] (2026-10-05, odhady bez
      * signálu: server po štarte vie, kto je práve nad oceánom). Cez index legs_last + primárny kľúč
-     * fixu — žiadny prechod tabuľky fixov. Len vo vzduchu (gnd = 0).
+     * fixu — žiadny prechod tabuľky fixov. Aj lety končiace na zemi (onGround: true) — volajúci po
+     * kúskoch tak vie, že lietadlo naposledy pristálo, a staršiu polohu vo vzduchu nepoužije.
      * @returns {{hex:string, cs:string, tMs:number, lat:number, lon:number, altM:number|null,
-     *   gsMps:number|null, trkDeg:number|null, vrMps:number|null, onGround:false, country:string}[]}
+     *   gsMps:number|null, trkDeg:number|null, vrMps:number|null, onGround:boolean, country:string}[]}
      */
     lastAirborneFixes({ sinceS, untilS, limit = 120000 } = {}) {
       const rows = db.prepare('SELECT icao24, callsign, country, last_t FROM legs WHERE last_t BETWEEN ? AND ? ORDER BY last_t DESC LIMIT ?')
@@ -767,7 +768,7 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
         if (seen.has(row.icao24)) continue; // len najnovší let lietadla
         seen.add(row.icao24);
         const f = fixAtEnd.get(row.icao24, row.last_t);
-        if (!f || f.gnd === 1) continue;
+        if (!f) continue;
         out.push({
           hex: row.icao24,
           cs: String(row.callsign || '').trim().toUpperCase(),
@@ -778,7 +779,7 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
           gsMps: f.gs == null ? null : f.gs / SCALE_TENTH,
           trkDeg: f.trk == null ? null : f.trk / SCALE_TENTH,
           vrMps: f.vr == null ? null : f.vr / SCALE_TENTH,
-          onGround: false,
+          onGround: f.gnd === 1,
           country: row.country || '',
           category: null,
         });
