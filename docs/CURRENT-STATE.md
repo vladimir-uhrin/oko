@@ -7,8 +7,9 @@ current". `src/admin/server/studio/ukraine.js` adds `ua-report` (daily General S
 average, top directions in Slovak, strikes, "one-sided data", ArmyInform link), `ua-front` (daily territory
 change from two consecutive front-map snapshots — `occupiedChangeRaster` + `changeBreakdown`, same maths as the
 layer and the video; grey zone separate; provider not named), `ua-air` (Air Force threat posts via
-`mediaToAlert` → distinct oblasts in 3 h ≥ threshold, default 8; "reported threat, not the siren map"; one
-key per 6-hour wave), `ua-media` (official Telegram photos of GS/MoD/DSNS and ArmyInform mp4 → framed photo
+`mediaToAlert` → distinct Ukrainian oblasts in 3 h ≥ threshold, default 8; "reported threat, not the siren
+map"; one draft per wave — the key is the wave start, a pause of ≥ 2 h starts a new wave, so a 10-hour night
+attack stays one draft; Russian oblasts are never counted as a neighbouring Ukrainian one), `ua-media` (official Telegram photos of GS/MoD/DSNS and ArmyInform mp4 → framed photo
 carousel / reel; only posts with a recognised event AND an unambiguous side — `mediaWhat` keeps a Ukrainian hit
 on a Russian Buk from being called a Russian attack; never auto-published; licence claimed only for MoD and
 ArmyInform; YouTube never re-uploaded) and `ua-week` (Saturday 9:00 carousel from `loadFrontWeek`).

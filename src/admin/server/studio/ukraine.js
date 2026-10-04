@@ -54,17 +54,20 @@ const sceneById = id => FRONT_SCENES.find(scene => scene.id === id) || null;
 const dirName = id => DIRECTION_SK[id]?.name || null;
 
 // ── 1. Denné hlásenie Generálneho štábu ───────────────────────────────────
+// Tvary pre zoznam za dvojbodkou („Ruské údery podľa hlásenia: 120 riadených leteckých bômb, …").
 const STRIKES = [
-  ['guidedBombs', 'riadenú leteckú bombu', 'riadené letecké bomby', 'riadených leteckých bômb'],
+  ['guidedBombs', 'riadená letecká bomba', 'riadené letecké bomby', 'riadených leteckých bômb'],
   ['kamikazeDrones', 'dron-kamikadze', 'drony-kamikadze', 'dronov-kamikadze'],
   ['shellings', 'ostreľovanie', 'ostreľovania', 'ostreľovaní'],
   ['airStrikes', 'letecký úder', 'letecké údery', 'leteckých úderov'],
   ['missileStrikes', 'raketový úder', 'raketové údery', 'raketových úderov'],
 ];
-export function strikesSk(strikes = {}) {
+/** Údery ako položky { n, label } (číslo a slovo zvlášť — číslo má medzeru tisícok, „5 600"). */
+export function strikeItems(strikes = {}) {
   return STRIKES.filter(([k]) => Number.isFinite(strikes?.[k]) && strikes[k] > 0)
-    .map(([k, one, few, many]) => `${fmt(strikes[k])} ${plural(strikes[k], one, few, many)}`);
+    .map(([k, one, few, many]) => ({ key: k, n: strikes[k], label: plural(strikes[k], one, few, many) }));
 }
+export const strikesSk = (strikes = {}) => strikeItems(strikes).map(item => `${fmt(item.n)} ${item.label}`);
 
 /** Útoky hlásenia po smeroch OKO (jeden smer môže zbierať dva smery GŠ); smery mimo OKO sa vynechajú. */
 export function reportDirections(report) {
@@ -104,7 +107,7 @@ export function uaReport({ report, days = {} }, { now }) {
   const text = [`⚔️ ${title}`, '',
     `Ukrajinský generálny štáb hlási za uplynulý deň ${fmt(total)} ${plural(total, 'bojový stret', 'bojové strety', 'bojových stretov')} s ruskými jednotkami.${cmp}`,
     ...(top.length ? ['', 'Najviac ruských útokov:', ...top.map(d => `• ${d.name} – ${d.attacks}`)] : []),
-    ...(strikes.length ? ['', `Ruský agresor podľa hlásenia použil ${strikes.join(', ')}.`] : []),
+    ...(strikes.length ? ['', `Ruské údery podľa hlásenia: ${strikes.join(', ')}.`] : []),
     '', 'Údaje jednej strany (oficiálne hlásenie Generálneho štábu Ukrajiny), nezávisle neoverené.',
     ...(report.url ? [`Hlásenie: ${report.url}`] : []),
     '', footer({ source: 'Generálny štáb Ukrajiny cez ArmyInform (CC BY 4.0)', at: published, now, tags: ['#Ukrajina', '#front', '#vojna', '#OKO'] })].join('\n');
@@ -204,15 +207,19 @@ function centres() {
   return oblastCentres;
 }
 const kmApprox = (a, b) => Math.hypot((a.lat - b.lat) * 111, (a.lon - b.lon) * 111 * Math.cos(a.lat * Math.PI / 180));
-/** Cieľ poplachu → oblasť (sídlo k najbližšiemu ťažisku oblasti do 160 km, Kyjev ako mesto). */
+/** Cieľ poplachu → oblasť Ukrajiny (sídlo k najbližšiemu ťažisku oblasti do 160 km, Kyjev ako mesto). */
 export function targetOblast(target) {
   if (OBLAST_SK[target.name]) return target.name;
+  // Oblasť mimo zoznamu (Belgorodská, Kurská…) nie je ukrajinská oblasť — nepriradiť ju susednej.
+  if (target.kind === 'oblast') return null;
   let best = null;
   for (const c of centres()) { const km = kmApprox(target, c); if (km <= 160 && (!best || km < best.km)) best = { name: c.name, km }; }
   return best?.name || null;
 }
-/** Okno, v ktorom sa hrozby sčítajú do jednej vlny. */
+/** Okno, v ktorom sa sčítajú ohrozené oblasti (prah). */
 export const AIR_WINDOW_MS = 3 * 3600_000;
+/** Pauza bez hlásení, po ktorej začína nová vlna (nočný útok trvá aj 10 h — stále jedna vlna, jeden návrh). */
+export const AIR_GAP_MS = 2 * 3600_000;
 export const AIR_MIN_OBLASTS_DEFAULT = 8;
 
 /** Médiá archívu za včera a dnes (UTC) — pre poplachy aj fotky/videá. */
@@ -224,7 +231,14 @@ export async function loadMedia({ get, now }) {
 }
 
 export function airWave(media, now) {
-  const alerts = media.map(item => mediaToAlert(item)).filter(a => a && a.t <= now + 60_000 && now - a.t <= AIR_WINDOW_MS).sort((a, b) => a.t - b.t);
+  const all = media.map(item => mediaToAlert(item)).filter(a => a && a.t <= now + 60_000).sort((a, b) => a.t - b.t);
+  const alerts = all.filter(a => now - a.t <= AIR_WINDOW_MS);
+  // Začiatok vlny: od posledného hlásenia späť, kým medzi hláseniami nie je pauza ≥ AIR_GAP_MS.
+  let start = alerts[0]?.t ?? null;
+  for (let i = all.length - 1; i > 0 && alerts.length; i--) {
+    if (all[i].t - all[i - 1].t >= AIR_GAP_MS) { start = all[i].t; break; }
+    start = all[i - 1].t;
+  }
   const oblasts = new Map();
   const kinds = new Set();
   for (const a of alerts) {
@@ -236,7 +250,7 @@ export function airWave(media, now) {
     if (/ракет|балісти|крилат|швидкісн/iu.test(a.text)) kinds.add('missiles');
     if (/КАБ|авіаційн[а-яіїєґ]* бомб|авіабомб/iu.test(a.text)) kinds.add('bombs');
   }
-  return { alerts, oblasts, kinds, first: alerts[0]?.t ?? null, last: alerts.at(-1)?.t ?? null };
+  return { alerts, oblasts, kinds, start, first: alerts[0]?.t ?? null, last: alerts.at(-1)?.t ?? null };
 }
 
 const KIND_SK = { drones: 'útočných dronov', missiles: 'rakiet', bombs: 'riadených leteckých bômb' };
@@ -260,8 +274,8 @@ export function uaAir({ media }, { now, settings = {} }) {
     '', 'Ide o hrozbu hlásenú oficiálnym kanálom Vzdušných síl, nie o oficiálnu mapu protileteckých sirén. Zásahy a škody zatiaľ nie sú potvrdené.',
     '', footer({ source: 'Vzdušné sily Ozbrojených síl Ukrajiny (Telegram, CC BY 4.0)', at: wave.last, now, tags: ['#Ukrajina', '#útok', '#vojna', '#OKO'] })].join('\n');
   return {
-    // Jedna vlna = jeden návrh: kľúč podľa 6-hodinového okna, v ktorom vlna začala.
-    key: `ua-air:${Math.floor(wave.first / (6 * 3600_000))}`,
+    // Jedna vlna = jeden návrh: kľúč = začiatok vlny (minúta), stály počas celého útoku.
+    key: `ua-air:${Math.floor(wave.start / 60_000)}`,
     title,
     text,
     card: { kind: 'ua-air', kicker: 'VZDUŠNÁ HROZBA', big: String(n), headline: `${plural(n, 'oblasť', 'oblasti', 'oblastí')} Ukrajiny v ohrození`,
@@ -414,10 +428,10 @@ export function uaWeek({ model, occupied = [], text }, { now }) {
       view: FRONT_VIEW, polygons: occupied.length ? [{ rings: occupied, fill: RU_COLOR, opacity: 0.28 }] : [], points: marks.slice(0, 8),
       mapCredit: `Mapa frontu: ${MAP_SOURCE.site} · Natural Earth`, source: `mapa frontu ${MAP_SOURCE.site}`, at: now });
   }
-  const strikes = strikesSk(Object.fromEntries(Object.entries(model.strikes || {}).map(([k, v]) => [k, v.sum])));
+  const strikes = strikeItems(Object.fromEntries(Object.entries(model.strikes || {}).map(([k, v]) => [k, v.sum])));
   if (strikes.length) {
-    slides.push({ kind: 'ua-week', kicker: 'RUSKÉ ÚDERY ZA TÝŽDEŇ', big: strikes[0].split(' ')[0], headline: strikes[0].split(' ').slice(1).join(' '),
-      lines: [...strikes.slice(1, 4), 'podľa Generálneho štábu Ukrajiny'], view: UA_VIEW, source, at: now });
+    slides.push({ kind: 'ua-week', kicker: 'RUSKÉ ÚDERY ZA TÝŽDEŇ', big: fmt(strikes[0].n), headline: strikes[0].label,
+      lines: [...strikes.slice(1, 4).map(item => `${fmt(item.n)} ${item.label}`), 'podľa Generálneho štábu Ukrajiny'], view: UA_VIEW, source, at: now });
   }
   const title = `Týždeň na fronte (${range}): ${fmt(model.total.week)} bojových stretov`;
   return {

@@ -33,7 +33,8 @@ test('hlásenie GŠ: smery po slovensky, údery, priemer, „údaje jednej stran
   assert.equal(item.title, 'Front za deň: 182 bojových stretov');
   assert.match(item.text, /Ukrajinský generálny štáb hlási za uplynulý deň 182 bojových stretov s ruskými jednotkami\. To je viac ako 7-dňový priemer \(150\)\./);
   assert.match(item.text, /• Pokrovský smer – 51/);
-  assert.match(item.text, /Ruský agresor podľa hlásenia použil 120 riadených leteckých bômb, 4 100 dronov-kamikadze, 3 900 ostreľovaní\./);
+  assert.match(item.text, /Ruské údery podľa hlásenia: 120 riadených leteckých bômb, 4 100 dronov-kamikadze, 3 900 ostreľovaní\./);
+  assert.deepEqual(strikesSk({ guidedBombs: 1, kamikazeDrones: 3 }), ['1 riadená letecká bomba', '3 drony-kamikadze'], 'tvary pre zoznam za dvojbodkou');
   assert.match(item.text, /Údaje jednej strany/);
   assert.match(item.text, /armyinform\.com\.ua/);
   assert.ok(item.text.includes(FRONT_URL));
@@ -80,6 +81,7 @@ const WAVE = [
 test('veľký vzdušný útok: oblasti z hlásení Vzdušných síl, prah, druh hrozby, jedna vlna = jeden kľúč', () => {
   assert.equal(targetOblast({ name: 'Kyiv Oblast', lat: 50.4, lon: 30.5 }), 'Kyiv Oblast');
   assert.equal(targetOblast({ name: 'Bila Tserkva', lat: 49.8, lon: 30.1 }), 'Kyiv Oblast', 'sídlo → najbližšia oblasť');
+  assert.equal(targetOblast({ name: 'Belgorod Oblast', kind: 'oblast', lat: 50.6, lon: 36.6 }), null, 'ruská oblasť sa nepriradí Charkivskej');
   const wave = airWave(WAVE, NOW);
   assert.equal(wave.oblasts.size, 9);
   assert.deepEqual([...wave.kinds].sort(), ['drones', 'missiles']);
@@ -92,6 +94,25 @@ test('veľký vzdušný útok: oblasti z hlásení Vzdušných síl, prah, druh 
   const later = uaAir({ media: [...WAVE, air(5, 5, 'БпЛА на Полтавщину')] }, { now: NOW, settings: { airMinOblasts: 8 } });
   assert.equal(later.key, item.key, 'pokračujúca vlna nevytvorí druhý návrh');
   for (const name of Object.values(OBLAST_SK)) assert.ok(!/undefined/.test(name));
+});
+
+test('veľký vzdušný útok: 10-hodinová nočná vlna = jeden návrh, nová vlna po pauze = nový návrh', () => {
+  const oblasts = 'Київщини, Чернігівщини, Сумщини, Полтавщини, Харківщини, Черкащини, Житомирщини, Вінниччини, Одещини';
+  const start = NOW - 12 * H;
+  const posts = Array.from({ length: 20 }, (_, i) => ({ id: `tg:kpszsu/${100 + i}`, provider: 'telegram', publishedAt: start + i * 30 * 60_000,
+    text: `Ударні БпЛА у напрямку ${oblasts}.` }));
+  const keysAt = list => {
+    const keys = new Set();
+    for (let t = start + H; t <= start + 10 * H; t += 10 * 60_000) {
+      const item = uaAir({ media: list.filter(m => m.publishedAt <= t) }, { now: t, settings: { airMinOblasts: 8 } });
+      if (item) keys.add(item.key);
+    }
+    return keys;
+  };
+  assert.equal(keysAt(posts).size, 1, 'jedna súvislá vlna');
+  // Po hláseniach 0–4,5 h pauza 3 h, potom nová vlna od 7,5 h.
+  const twoWaves = posts.filter(m => m.publishedAt < start + 5 * H || m.publishedAt >= start + 7.5 * H);
+  assert.equal(keysAt(twoWaves).size, 2, 'po pauze ≥ 2 h nová vlna');
 });
 
 const tg = (channel, id, over = {}) => ({ id: `tg:${channel}/${id}`, provider: 'telegram', kind: 'photo', publishedAt: NOW - H, url: `https://t.me/${channel}/${id}`,
@@ -151,12 +172,13 @@ test('týždeň ako karusel: hlavná karta + snímky smerov, územia a úderov',
     directions: [{ id: 'pokrovsk', week: 400, center: { lat: 48.3, lon: 37.2 }, ruKm2: 30, ruAt: { lat: 48.3, lon: 37.3 }, uaKm2: 0 },
       { id: 'kostiantynivka', week: 200, center: { lat: 48.5, lon: 37.7 }, ruKm2: 0, uaKm2: 2, uaAt: { lat: 48.5, lon: 37.6 } }],
     change: { weekly: true, ruKm2: 30, uaKm2: 2, toGreyKm2: 1, fromDay: '2026-09-26', toDay: '2026-10-03' },
-    strikes: { guidedBombs: { sum: 800, days: 7 }, kamikazeDrones: { sum: 25000, days: 7 } },
+    strikes: { guidedBombs: { sum: 5600, days: 7 }, kamikazeDrones: { sum: 25000, days: 7 } },
   };
   const item = uaWeek({ model, occupied: [square(36, 47, 38, 48)], text: 'Text týždňa' }, { now: NOW });
   assert.equal(item.key, 'ua-week:2026-10-03');
   assert.equal(item.slides.length, 3);
   assert.deepEqual(item.slides.map(s => s.kicker), ['NAJVIAC RUSKÝCH ÚTOKOV', 'ZMENA ÚZEMIA ZA TÝŽDEŇ', 'RUSKÉ ÚDERY ZA TÝŽDEŇ']);
+  assert.deepEqual([item.slides[2].big, item.slides[2].headline, item.slides[2].lines[0]], ['5 600', 'riadených leteckých bômb', '25 000 dronov-kamikadze'], 'číslo s medzerou tisícok sa nerozdelí');
   assert.match(item.text, /#Ukrajina/);
   assert.equal(uaWeek({ model: { ...model, change: { ...model.change, weekly: false } }, text: 'x' }, { now: NOW }).slides.length, 2, 'územie len pri odstupe 7 dní');
   assert.equal(uaWeek({ model, text: 'x' }, { now: NOW + 5 * 86400_000 }), null, 'starý týždeň');
