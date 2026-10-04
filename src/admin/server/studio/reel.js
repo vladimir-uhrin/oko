@@ -20,6 +20,9 @@ const MAP = { x: 0, y: 640, w: 1080, h: 800 };
 const ZOOM_FROM = 0.3; const ZOOM_TO = 4.6; // s
 
 const clamp01 = v => Math.max(0, Math.min(1, v));
+/** Výrez karty (bbox), ak ho šablóna dala — rovnaké pravidlo ako statická karta (card.js mapView). */
+const viewBox = card => (card?.view && ['west', 'east', 'south', 'north'].every(k => Number.isFinite(card.view[k]))
+  && card.view.east > card.view.west && card.view.north > card.view.south ? card.view : null);
 const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const fade = (t, from, len = 0.6) => clamp01((t - from) / len);
 const num1 = v => v.toFixed(1).replace('.', ',');
@@ -28,6 +31,16 @@ const num1 = v => v.toFixed(1).replace('.', ',');
 /** Výrez mapy v čase t: lon/lat stred + rozpätie v stupňoch dĺžky. */
 export function reelView(card, t) {
   const aspect = MAP.h / MAP.w;
+  // Výrez (Ukrajina 2026-10-04: celá krajina / front): priblíženie z okolia na celý výrez, ktorý sa zmestí do okna.
+  const box = viewBox(card);
+  if (box) {
+    const k = ease(clamp01((t - ZOOM_FROM) / (ZOOM_TO - ZOOM_FROM)));
+    const lon = (box.west + box.east) / 2; const lat = (box.south + box.north) / 2;
+    const fit = Math.max(box.east - box.west, (box.north - box.south) / aspect) * 1.04;
+    const from = Math.min(150, fit * 3.2);
+    const span = Math.exp(Math.log(from) + (Math.log(fit) - Math.log(from)) * k);
+    return { lon, lat: Math.max(-60 + span * aspect / 2, Math.min(80 - span * aspect / 2, lat)), span };
+  }
   if (card.point) {
     const k = ease(clamp01((t - ZOOM_FROM) / (ZOOM_TO - ZOOM_FROM)));
     const span = Math.exp(Math.log(150) + (Math.log(26) - Math.log(150)) * k);
@@ -115,13 +128,41 @@ export function overlaySvg(card, t, { seconds = REEL.seconds, site = 'okolive.sk
     const [x, y] = project(card.point.lon, card.point.lat);
     parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${fade(t, 0.4, 0.5).toFixed(2)}">${pulse(x, y, 0)}</g>`);
   }
+  const boxed = Boolean(viewBox(card));
+  // Plochy (okupované územie z mapy frontu) — pod bodmi, nábeh počas priblíženia.
+  for (const poly of card.polygons || []) {
+    const d = (poly.rings || []).filter(ring => ring?.length >= 3)
+      .map(ring => ring.map(([lon, lat], i) => { const [x, y] = project(lon, lat); return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`; }).join('') + 'Z').join('');
+    if (d) parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${fade(t, 1.2, 1.2).toFixed(2)}"><path d="${d}" fill="${escapeXml(poly.fill || '#ff5a3c')}" fill-opacity="${Number(poly.opacity ?? 0.35)}" stroke="${escapeXml(poly.stroke || poly.fill || '#ff5a3c')}" stroke-width="2.5" fill-rule="evenodd" stroke-linejoin="round"/></g>`);
+  }
+  const placed = []; // obdĺžniky popisov, aby sa neprekrývali (ako na karte)
   (card.points || []).forEach((p, i) => {
-    const appear = 1 + i * (5 / Math.max(1, card.points.length));
+    // Pri výreze body nabehnú až pri konci priblíženia, aby neskákali po mape.
+    const appear = boxed ? ZOOM_TO - 0.8 + i * 0.35 : 1 + i * (5 / Math.max(1, card.points.length));
     if (t < appear) return;
     const [x, y] = project(p.lon, p.lat);
     if (x < -40 || x > MAP.w + 40) return;
-    const r = Math.max(6, Math.min(18, (p.size - 3.5) * 5));
-    parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${fade(t, appear, 0.4).toFixed(2)}">${i < 3 ? pulse(x, y, i * 0.3, r) : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="#ff5a3c" fill-opacity="0.8" stroke="#0a0f16" stroke-width="2"/>`}</g>`);
+    // `r` = priamy polomer (Ukrajina, škálovaný z karty 960 px na reel 1080 px), inak magnitúda zemetrasenia.
+    const r = Number.isFinite(p.r) ? Math.max(6, Math.min(44, p.r * 1.1)) : Math.max(6, Math.min(18, (p.size - 3.5) * 5));
+    const color = escapeXml(p.color || '#ff5a3c');
+    const mark = i < 3 && !Number.isFinite(p.r) ? pulse(x, y, i * 0.3, r)
+      : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="${color}" fill-opacity="0.8" stroke="#0a0f16" stroke-width="2.5"/>`;
+    let label = '';
+    if (p.label) {
+      const w = String(p.label).length * 19 + 8; const h = 36;
+      const right = x + r + 10 + w <= MAP.w - 8;
+      const lx = right ? x + r + 10 : x - r - 10 - w;
+      let ly = y - h / 2;
+      for (const dy of [0, 40, -40, 80, -80, 120, -120]) {
+        const b = { x: lx, y: y - h / 2 + dy, w, h };
+        if (!placed.some(o => b.x < o.x + o.w && o.x < b.x + b.w && b.y < o.y + o.h && o.y < b.y + b.h)) { ly = b.y; break; }
+      }
+      placed.push({ x: lx, y: ly, w, h });
+      const leader = Math.abs(ly + h / 2 - y) > 4
+        ? `<path d="M${(right ? x + r : x - r).toFixed(1)},${y.toFixed(1)}L${(right ? lx : lx + w).toFixed(1)},${(ly + h / 2).toFixed(1)}" stroke="#a9c2d2" stroke-width="2"/>` : '';
+      label = `${leader}<text x="${lx.toFixed(1)}" y="${(ly + h / 2 + 11).toFixed(1)}" font-family="${FONT}" font-size="32" font-weight="600" fill="#e8f1f7" stroke="#061019" stroke-width="6" paint-order="stroke">${escapeXml(p.label)}</text>`;
+    }
+    parts.push(`<g transform="translate(${MAP.x},${MAP.y})" opacity="${fade(t, appear, 0.4).toFixed(2)}">${mark}${label}</g>`);
   });
   // hlavička
   const head = fade(t, 0, 0.6);

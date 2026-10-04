@@ -24,6 +24,31 @@ test('reel: priblíženie k udalosti, posun pri prehľade', () => {
   assert.equal(reelView(digest, 10).span, reelView(digest, 0).span);
 });
 
+// Ukrajinské karty (2026-10-04) nesú výrez `view`, plochy a body s polomerom — reel predtým ukazoval 12 s mapu sveta.
+const frontCard = { kind: 'ua-front', kicker: 'FRONT · ZMENA ZA DEŇ', big: '8,3 km²', headline: 'obsadil ruský agresor za deň', lines: [],
+  view: { west: 27.2, east: 42, south: 44.9, north: 50.7 },
+  polygons: [{ rings: [[[36, 47], [38, 47], [38, 48], [36, 48]]], fill: '#ff5a3c', opacity: 0.28 }],
+  points: [{ lat: 47.6, lon: 36.3, r: 12, color: '#ff5a3c', label: '+8,3 km²' }, { lat: 48.5, lon: 37.6, r: 12, color: '#ffd23c', label: '−1 km²' }],
+  source: 'mapa frontu okolive.sk', at: NOW };
+
+test('reel s výrezom: priblíženie z okolia na celý výrez, potom plochy a body s popismi', () => {
+  const start = reelView(frontCard, 0); const end = reelView(frontCard, 6);
+  assert.ok(start.span > end.span * 2, 'začína oddialený');
+  // Na konci sa celý výrez zmestí do okna mapy (1080 × 800) a stred je stred výrezu.
+  const spanLat = end.span * 800 / 1080;
+  assert.ok(end.lon - end.span / 2 <= 27.2 && end.lon + end.span / 2 >= 42, `dĺžka ${end.lon} ± ${end.span / 2}`);
+  assert.ok(end.lat - spanLat / 2 <= 44.9 && end.lat + spanLat / 2 >= 50.7, `šírka ${end.lat} ± ${spanLat / 2}`);
+  assert.ok(end.span < 25, 'nie mapa sveta');
+  const early = overlaySvg(frontCard, 1);
+  assert.ok(!early.includes('+8,3 km²'), 'body až po priblížení');
+  const done = overlaySvg(frontCard, 7);
+  assert.match(done, /<path d="M[^"]+Z" fill="#ff5a3c" fill-opacity="0\.28"/, 'okupované územie');
+  assert.ok(done.includes('+8,3 km²') && done.includes('−1 km²'), 'popisy bodov');
+  assert.match(done, /fill="#ffd23c"/, 'farba bodu z karty');
+  // Zemetrasenie a prehľad sa nezmenili.
+  assert.ok(Math.abs(reelView(quakeCard, 6).span - 26) < 1e-9);
+});
+
 test('reel: odpočítanie čísla, escapovanie, výzva až na konci', () => {
   assert.match(overlaySvg(quakeCard, 0.95), />M 0,[0-9]</);
   assert.match(overlaySvg(quakeCard, 5), />M 6,3</);
