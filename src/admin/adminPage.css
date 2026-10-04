@@ -1,5 +1,14 @@
 /* Admin panel OKO (2026-10-03) — tmavý OKO vzhľad ako centrum účtu, bez Cesia. */
-:root { color-scheme: dark; --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif; --font-mono: ui-monospace, Consolas, monospace;
+/* Písma webu OKO lokálne (public/fonts, OFL) — CSP admina nepustí Google Fonts. */
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: swap; src: url('/fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: swap; src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+:root { color-scheme: dark; --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   --accent: #00d4ff; --text: #e8f1f7; --muted: #8fa6b6; --line: #ffffff14; --panel: #0c111a; --ok: #3ddc97; --bad: #ff6b6b; --warn: #ffb84d; }
 * { box-sizing: border-box; }
 body.admin { margin: 0; min-height: 100dvh; color: var(--text); background: radial-gradient(ellipse at 50% 0, #10364a, transparent 60%), #070d14;
@@ -238,3 +247,86 @@ button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visibl
 @keyframes live-new { from { background: #00d4ff22; } to { background: transparent; } }
 @media (max-width: 640px) { .live-count-value { font-size: 36px; } .live-feed li { grid-template-columns: 70px 1fr; } }
 .live-ip { font: 12px var(--font-mono); white-space: nowrap; }
+
+/* ── Navigácia v skupinách, značka OKO, čo horí, karty na mobile (2026-10-04) ── */
+.admin-top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px 22px; padding: 10px 24px 0; }
+.admin-brand { gap: 10px; letter-spacing: 0; }
+.admin-logo { position: relative; width: 30px; height: 30px; flex: none; }
+.admin-logo img { display: block; width: 100%; height: 100%; }
+/* Zrenica loga dýcha ako na webe (červená rgb 255 46 46). */
+.admin-logo-eye { position: absolute; left: 50%; top: 50%; width: 42%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, #ff2e2ef2 0%, #ff2e2e8c 30%, #ff2e2e1f 58%, #ff2e2e00 74%); mix-blend-mode: screen; animation: admin-eye 3.4s ease-in-out infinite; }
+@keyframes admin-eye { 0%, 100% { opacity: .4; transform: translate(-50%, -50%) scale(.92); } 50% { opacity: .8; transform: translate(-50%, -50%) scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .admin-logo-eye { animation-duration: 6s; } }
+.admin-wordmark { font: 500 20px/1 var(--font-sans); letter-spacing: .12em; color: var(--text); }
+.admin-wordmark span { color: var(--accent); font-weight: 300; }
+.admin-badge-tag { padding: 3px 6px 3px 7px; border: 1px solid #00d4ff66; border-radius: 3px; color: var(--accent); font: 600 9px/1 var(--font-mono); letter-spacing: .2em; text-transform: uppercase; }
+.admin-groups, .admin-subtabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.admin-groups::-webkit-scrollbar, .admin-subtabs::-webkit-scrollbar { display: none; }
+.admin-groups button { flex: none; padding: 8px 14px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted);
+  font: 500 14px var(--font-sans); cursor: pointer; }
+.admin-groups button:hover { color: var(--text); background: #ffffff08; }
+.admin-groups button[aria-current="page"] { color: var(--text); border-color: #00d4ff40; background: #00d4ff12; }
+.admin-subtabs { grid-column: 1 / -1; margin: 0 -24px; padding: 8px 24px; border-top: 1px solid var(--line); }
+.admin-subtabs button { flex: none; padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted);
+  font: 500 12px var(--font-mono); letter-spacing: .04em; cursor: pointer; }
+.admin-subtabs button:hover { color: var(--text); border-color: #ffffff30; }
+.admin-subtabs button[aria-current="page"] { color: #04121a; border-color: var(--accent); background: var(--accent); }
+.admin-top:not(:has(.admin-subtabs:not([hidden]))) { padding-bottom: 10px; }
+.admin-who { margin-left: 0; }
+.admin-section h2 { font-family: var(--font-sans); font-weight: 600; letter-spacing: .01em; }
+.admin-tile-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+
+.attention { border-color: #00d4ff33; }
+.attention-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.attention-head h2 { margin: 0; }
+.attention-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.attention-dot-ok { background: var(--ok); box-shadow: 0 0 10px #3ddc9788; }
+.attention-dot-warn { background: var(--warn); box-shadow: 0 0 10px #ffb84d88; }
+.attention-dot-bad { background: var(--bad); box-shadow: 0 0 10px #ff6b6b88; animation: live-pulse 1.6s infinite; }
+.attention-live { margin-left: auto; padding: 4px 10px; border: 1px solid #00d4ff44; border-radius: 999px; background: transparent; color: var(--accent);
+  font: 500 12px var(--font-mono); cursor: pointer; }
+.attention-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.attention-go { display: flex; width: 100%; align-items: center; gap: 12px; padding: 9px 12px; border: 1px solid var(--line); border-left: 3px solid var(--muted);
+  border-radius: 8px; background: #ffffff04; color: var(--text); font: 13.5px var(--font-sans); text-align: left; cursor: pointer; }
+.attention-go:hover { background: #ffffff0a; }
+.attention-bad .attention-go { border-left-color: var(--bad); }
+.attention-warn .attention-go { border-left-color: var(--warn); }
+.attention-info .attention-go { border-left-color: var(--accent); }
+.attention-tag { flex: none; width: 46px; font: 600 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.attention-bad .attention-tag { color: #ff8a8a; }
+.attention-warn .attention-tag { color: var(--warn); }
+.attention-info .attention-tag { color: var(--accent); }
+.attention-text { flex: 1; min-width: 0; }
+.attention-arrow { color: var(--muted); }
+.attention-calm { color: #bff5dc; font-size: 13px; }
+
+.admin-delta { margin-top: 4px; font: 500 11.5px var(--font-mono); }
+.admin-delta-up { color: var(--ok); }
+.admin-delta-down { color: #ff8a8a; }
+.admin-delta-flat { color: var(--muted); }
+.chart-event { stroke: #fab219; stroke-width: 1; stroke-dasharray: 3 3; opacity: .8; }
+.chart-event-flag { fill: #fab219; }
+
+/* Mobil: tabuľky ako karty (meno stĺpca pri hodnote), hlavička v jednom riadku s rolovaním. */
+@media (max-width: 640px) {
+  .admin-top { grid-template-columns: auto 1fr; padding: 8px 16px 0; gap: 6px 12px; }
+  .admin-groups { grid-column: 1 / -1; grid-row: 2; margin: 0 -16px; padding: 0 16px 6px; }
+  .admin-groups button { padding: 7px 11px; font-size: 13.5px; }
+  .admin-who { grid-column: 2; grid-row: 1; justify-self: end; width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 52vw; }
+  .admin-subtabs { margin: 0 -16px; padding: 8px 16px; }
+  .admin-table:not(.admin-kv) { min-width: 0; }
+  .admin-table:not(.admin-kv) thead { display: none; }
+  .admin-table:not(.admin-kv) tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .admin-table:not(.admin-kv) tr:last-child { border-bottom: 0; }
+  .admin-table:not(.admin-kv) td { display: grid; grid-template-columns: 34% 1fr; gap: 10px; padding: 3px 0; border: 0; }
+  .admin-table:not(.admin-kv) td[data-label]::before { content: attr(data-label); color: var(--muted); font: 11px var(--font-mono); letter-spacing: .04em; padding-top: 1px; }
+  .admin-table:not(.admin-kv) td:not([data-label]) { grid-template-columns: 1fr; }
+  .attention-tag { width: 38px; }
+}
+/* Starý `.admin-brand span` (malé azúrové písmo) nesmie zasiahnuť nové časti značky. */
+.admin-brand .admin-wordmark { font: 500 20px/1 var(--font-sans); letter-spacing: .12em; color: var(--text); text-transform: none; }
+.admin-brand .admin-wordmark span { font: inherit; font-weight: 300; letter-spacing: inherit; color: var(--accent); }
+.admin-brand .admin-badge-tag { font: 600 9px/1 var(--font-mono); letter-spacing: .2em; }
+.admin-brand .admin-logo-eye { font-size: 0; }
+@media (max-width: 640px) { .admin-groups { gap: 0; } .admin-groups button { padding: 7px 8px; font-size: 13px; } }

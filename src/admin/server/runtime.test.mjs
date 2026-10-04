@@ -328,3 +328,40 @@ test('vylúčená IP vlastníka: nezapíše sa do záznamu, štatistiky ani mapy
   runtime.flush();
   assert.equal(store.visitLog({ from: 0 }).total, 2);
 });
+
+test('analytika: predchádzajúce obdobie rovnakej dĺžky a zverejnené príspevky Štúdia ako značky', async t => {
+  const { runtime, store, clock } = setup(t);
+  const { hit } = await serve(t, runtime);
+  // Pred týždňom 1 zobrazenie, dnes 2.
+  clock.time -= 7 * 86400_000;
+  await hit({ t: 'view', p: '/' }, { 'CF-Connecting-IP': '203.0.113.5' });
+  runtime.flush();
+  clock.time += 7 * 86400_000;
+  await hit({ t: 'view', p: '/' }, { 'CF-Connecting-IP': '203.0.113.6' });
+  await hit({ t: 'view', p: '/' }, { 'CF-Connecting-IP': '203.0.113.7' });
+  runtime.flush();
+  const report = analytics(runtime, clock.time, 7);
+  assert.equal(report.totals.views, 2);
+  assert.equal(report.previous.views, 1);
+  assert.deepEqual(report.published, []);
+});
+
+test('čo horí: výpadok zdroja, chyby 5xx, strop plateného zdroja, Štúdio; zoradené od najhoršieho', async t => {
+  const { runtime, store, clock } = setup(t);
+  const { base } = await serve(t, runtime);
+  const { attention } = await import('./api.js');
+  assert.deepEqual(attention(runtime, clock.time), [], 'pokoj = prázdny zoznam');
+  for (let i = 0; i < 3; i++) await fetch(base + '/api/fail/x');
+  runtime.setFeedSetting('google-places', { dailyCap: 2 }, 'test');
+  await fetch(base + '/api/google/nearby-places');
+  await fetch(base + '/api/google/nearby-places');
+  store.flush({ samples: [{ at: clock.time - 30 * 60_000, feed: 'tomtom', ok: false, status: 502, ms: 10 }] });
+  runtime.flush();
+  const items = attention(runtime, clock.time, { studioCounts: { draft: 2, approved: 0, failed: 0, scheduled: 0, rendering: 0 } });
+  assert.deepEqual(items.map(item => item.level), [...items.map(item => item.level)].sort((a, b) => ['bad', 'warn', 'info'].indexOf(a) - ['bad', 'warn', 'info'].indexOf(b)));
+  assert.ok(items.some(item => item.tab === 'feeds' && item.level === 'bad' && item.text.includes('30 min')));
+  assert.ok(items.some(item => item.tab === 'traffic' && item.text.startsWith('3 chýb 5xx')));
+  assert.ok(items.some(item => item.tab === 'costs' && item.level === 'bad' && item.text.includes('2 / 2')));
+  assert.ok(items.some(item => item.tab === 'errors'));
+  assert.equal(items.at(-1).text, 'Štúdio: 2 návrhov čaká na schválenie');
+});

@@ -345,3 +345,39 @@ test('upozornenia cez admin API: člen 404, vlastník nastaví, skúška bez mai
   const audit = (await admin.request('/api/admin/audit')).data.audit.map(entry => entry.action);
   assert.deepEqual(audit.slice(0, 2), ['alerts_test', 'alerts_settings']);
 });
+
+test('záznam návštev cez API: člen 404, zoskupenie podľa IP, CSV bez vzorcov, vylúčenie IP s CSRF, čo horí', async t => {
+  const { admin, member, runtime, adminStore } = await setupWithRuntime(t);
+  for (const route of ['/api/admin/visits', '/api/admin/visits.csv', '/api/admin/attention', '/api/admin/live']) {
+    assert.equal((await member.request(route)).status, 404, route);
+  }
+  const now = Date.now();
+  const visit = (id, ip, at, path, ua = 'Mozilla/5.0 Chrome/140') => ({ id, at, lastAt: at + 120_000, ip, country: 'SK', region: '', city: 'Košice',
+    lat: 48.7, lon: 21.3, path, ref: 'priamo', browser: 'Chrome', os: 'Windows', device: 'desktop', screen: '≥ 1920', lang: 'sk', ua });
+  adminStore.flush({ visits: [visit('a', '203.0.113.5', now - 60_000, '/'), visit('b', '203.0.113.5', now - 30_000, '/en/'),
+    visit('c', '198.51.100.7', now - 10_000, '/', '=HYPERLINK("http://evil")')] });
+  const grouped = await admin.request('/api/admin/visits?group=ip');
+  assert.equal(grouped.status, 200);
+  assert.equal(grouped.data.ips, 2);
+  const kosice = grouped.data.groups.find(group => group.ip === '203.0.113.5');
+  assert.deepEqual([kosice.views, kosice.pages, kosice.ms], [2, 2, 240_000]);
+  const csv = await admin.request('/api/admin/visits.csv?days=7');
+  assert.equal(csv.status, 200);
+  assert.match(csv.headers.get('content-type'), /text\/csv/);
+  assert.match(csv.headers.get('content-disposition'), /attachment; filename="okolive-navstevy-/);
+  assert.ok(csv.text.replace(/^﻿/, '').startsWith('cas_utc;'), 'hlavička; BOM pre Excel odstráni už text() prehliadača');
+  assert.equal(csv.text.split('\r\n').length, 4);
+  assert.ok(csv.text.includes(`"'=HYPERLINK(""http://evil"")"`), 'vzorec z User-Agenta je zneškodnený');
+  assert.ok(csv.text.includes(';203.0.113.5;'), 'IP (číslice) ostáva bez apostrofu');
+  // Vylúčenie IP: bez CSRF nie, zlá IP 400, platná zmaže jej návštevy.
+  assert.equal((await admin.post('/api/admin/ignored-ips', { ips: ['203.0.113.5'] }, { headers: { 'X-CSRF-Token': '' } })).status, 403);
+  assert.equal((await admin.post('/api/admin/ignored-ips', { ips: ['nie-ip'] })).status, 400);
+  const ignored = await admin.post('/api/admin/ignored-ips', { ips: ['203.0.113.5'] });
+  assert.deepEqual([ignored.status, ignored.data.removed, ignored.data.ignoredIps], [200, 2, ['203.0.113.5']]);
+  assert.deepEqual((await admin.request('/api/admin/visits')).data.ignoredIps, ['203.0.113.5']);
+  // Čo horí: vypnutý zdroj je varovanie a vedie do Feedov.
+  runtime.setFeedSetting('tomtom', { enabled: false }, 'test');
+  const attention = await admin.request('/api/admin/attention');
+  assert.equal(attention.status, 200);
+  assert.ok(attention.data.items.some(item => item.level === 'warn' && item.tab === 'feeds' && item.text.includes('vypnutý')));
+});

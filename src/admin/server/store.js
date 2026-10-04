@@ -97,7 +97,10 @@ export function openAdminStore(filename) {
     region TEXT NOT NULL DEFAULT '', city TEXT NOT NULL DEFAULT '', lat REAL, lon REAL, path TEXT NOT NULL, ref TEXT NOT NULL,
     browser TEXT NOT NULL, os TEXT NOT NULL, device TEXT NOT NULL, screen TEXT NOT NULL, lang TEXT NOT NULL, ua TEXT NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS visit_log_at ON visit_log(at);`);
+  CREATE INDEX IF NOT EXISTS visit_log_at ON visit_log(at);
+  CREATE INDEX IF NOT EXISTS visit_log_ip ON visit_log(ip, at);
+  -- Počet naživo raz za minútu (krivka v Naživo prežije vydanie), 2 dni.
+  CREATE TABLE IF NOT EXISTS live_history (at INTEGER PRIMARY KEY, n INTEGER NOT NULL);`);
   if (filename !== ':memory:' && process.platform !== 'win32') { try { chmodSync(filename, 0o600); } catch { /* ok */ } }
 
   const tx = fn => {
@@ -165,6 +168,7 @@ export function openAdminStore(filename) {
       db.prepare('DELETE FROM errors WHERE sig NOT IN (SELECT sig FROM errors ORDER BY last_at DESC LIMIT 2000)').run();
       db.prepare('DELETE FROM feed_samples WHERE at < ?').run(now - RETENTION.sampleDays * DAY_MS);
       db.prepare('DELETE FROM visit_log WHERE at < ?').run(now - RETENTION.visitLogDays * DAY_MS);
+      db.prepare('DELETE FROM live_history WHERE at < ?').run(now - 2 * DAY_MS);
       this.studioPrune(now);
     },
 
@@ -188,6 +192,22 @@ export function openAdminStore(filename) {
       return db.prepare('SELECT day, dim, val, n FROM pageviews WHERE day >= ? ORDER BY day').all(fromDay);
     },
     visitorsToday: day => db.prepare('SELECT COUNT(*) AS n FROM visitors WHERE day = ?').get(day).n,
+    addLiveSample: (at, n) => { db.prepare('INSERT OR REPLACE INTO live_history (at, n) VALUES (?, ?)').run(at, n); },
+    liveHistory: fromAt => db.prepare('SELECT at, n FROM live_history WHERE at >= ? ORDER BY at').all(fromAt),
+    /** Zverejnené príspevky Štúdia od `fromAt` — značky v grafe analytiky. */
+    studioPublished: fromAt => db.prepare(`SELECT published_at AS at, title FROM studio_drafts
+      WHERE status = 'published' AND published_at >= ? ORDER BY published_at`).all(fromAt),
+    /** Počty návrhov Štúdia podľa stavu (prehľad „čo horí"). */
+    studioCounts() {
+      const out = { draft: 0, approved: 0, failed: 0, scheduled: 0, rendering: 0 };
+      for (const row of db.prepare(`SELECT status, COUNT(*) AS n, SUM(scheduled_at IS NOT NULL AND status != 'published') AS scheduled,
+        SUM(video_status IN ('queued', 'rendering')) AS rendering FROM studio_drafts GROUP BY status`).all()) {
+        if (row.status in out) out[row.status] = row.n;
+        out.scheduled += row.scheduled || 0;
+        out.rendering += row.rendering || 0;
+      }
+      return out;
+    },
     /** Zmaže záznam návštev z daných IP (vylúčené adresy vlastníka). */
     deleteVisitsByIp(ips) {
       if (!ips.length) return 0;
@@ -197,11 +217,21 @@ export function openAdminStore(filename) {
      * Záznam návštev od `from`, najnovšie prvé. `q` hľadá v IP, meste, krajine, stránke, referri a prehliadači.
      * @returns {{rows: object[], total: number, ips: number}}
      */
-    visitLog({ from, q = '', limit = 100, offset = 0 }) {
+    visitLog({ from, q = '', limit = 100, offset = 0, byIp = false }) {
       const like = `%${String(q).replace(/[\\%_]/g, char => `\\${char}`)}%`;
       const where = q ? `at >= ? AND (ip LIKE ? ESCAPE '\\' OR city LIKE ? ESCAPE '\\' OR country LIKE ? ESCAPE '\\'
         OR path LIKE ? ESCAPE '\\' OR ref LIKE ? ESCAPE '\\' OR browser LIKE ? ESCAPE '\\' OR os LIKE ? ESCAPE '\\')` : 'at >= ?';
       const params = q ? [from, like, like, like, like, like, like, like] : [from];
+      if (byIp) {
+        // Jeden riadok na IP: počet zobrazení, rôzne stránky, celkový čas, posledné miesto a zariadenie.
+        const groups = db.prepare(`SELECT ip, COUNT(*) AS views, COUNT(DISTINCT path) AS pages, MIN(at) AS first, MAX(last_at) AS last,
+          SUM(last_at - at) AS ms, (SELECT city FROM visit_log v2 WHERE v2.ip = visit_log.ip ORDER BY at DESC LIMIT 1) AS city,
+          (SELECT country FROM visit_log v2 WHERE v2.ip = visit_log.ip ORDER BY at DESC LIMIT 1) AS country,
+          (SELECT device || ' · ' || browser || ' · ' || os FROM visit_log v2 WHERE v2.ip = visit_log.ip ORDER BY at DESC LIMIT 1) AS device,
+          group_concat(DISTINCT path) AS paths FROM visit_log WHERE ${where} GROUP BY ip ORDER BY last DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+        const { total, ips } = db.prepare(`SELECT COUNT(*) AS total, COUNT(DISTINCT ip) AS ips FROM visit_log WHERE ${where}`).get(...params);
+        return { groups: groups.map(g => ({ ...g, paths: String(g.paths || '').split(',').slice(0, 8) })), total, ips };
+      }
       const rows = db.prepare(`SELECT ${VISIT_COLUMNS} FROM visit_log WHERE ${where} ORDER BY at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
       const { total, ips } = db.prepare(`SELECT COUNT(*) AS total, COUNT(DISTINCT ip) AS ips FROM visit_log WHERE ${where}`).get(...params);
       return { rows: rows.map(visitRow), total, ips };

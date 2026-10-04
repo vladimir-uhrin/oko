@@ -7,10 +7,22 @@ import { VIEWS, autoView, createLiveMap } from './liveMap.js';
 
 const main = document.getElementById('admin-main');
 const tabs = document.getElementById('admin-tabs');
+const subtabs = document.getElementById('admin-subtabs');
+/** Navigácia (2026-10-04): 5 skupín namiesto 14 záložiek; hash ostáva menom záložky (#studio, #live…). */
+const GROUPS = [
+  { id: 'overview', label: 'Prehľad', tabs: [['overview', 'Prehľad']] },
+  { id: 'visits', label: 'Návštevnosť', tabs: [['live', 'Naživo'], ['analytics', 'Analytika']] },
+  { id: 'ops', label: 'Prevádzka', tabs: [['traffic', 'Požiadavky'], ['feeds', 'Feedy'], ['errors', 'Chyby'], ['costs', 'Náklady']] },
+  { id: 'content', label: 'Obsah', tabs: [['studio', 'Štúdio'], ['performance', 'Výkon príspevkov'], ['notice', 'Oznam']] },
+  { id: 'system', label: 'Systém', tabs: [['users', 'Používatelia'], ['maintenance', 'Údržba'], ['audit', 'Audit'], ['log', 'Log']] },
+];
+const groupOf = tab => GROUPS.find(group => group.tabs.some(([id]) => id === tab)) || GROUPS[0];
 const who = document.getElementById('admin-who');
 let csrf = '';
 /** Úklid aktívnej záložky (časovač, animácia) pri prepnutí — nastavuje ho napr. Naživo. */
 let leaveTab = null;
+let currentTab = '';
+const lastTab = new Map();
 
 const ERRORS = {
   owner_protected: 'Vlastníka ani vlastný účet tu nemožno meniť.',
@@ -94,7 +106,11 @@ function table(headers, rows) {
     t.append(thead);
   }
   const body = el('tbody');
-  for (const row of rows) body.append(row);
+  for (const row of rows) {
+    // Na mobile sa riadok zobrazí ako karta s menom stĺpca pri hodnote (CSS ::before).
+    [...row.children].forEach((cell, i) => { if (headers[i]) cell.dataset.label = headers[i]; });
+    body.append(row);
+  }
   t.append(body);
   wrap.append(t);
   return wrap;
@@ -140,10 +156,33 @@ async function guarded(render) {
 }
 
 // ── Prehľad ────────────────────────────────────────────────────────────────
+/** Pás „čo horí": čo treba riešiť, najhoršie prvé; klik otvorí záložku, kde sa to rieši. */
+const ATTENTION_LABEL = { bad: 'rieš', warn: 'pozor', info: 'info' };
+function attentionStrip(data) {
+  const box = el('section', 'admin-section attention');
+  const head = el('div', 'attention-head');
+  const worst = data.items[0]?.level;
+  head.append(el('span', `attention-dot attention-dot-${worst === 'bad' ? 'bad' : worst === 'warn' ? 'warn' : 'ok'}`),
+    el('h2', '', worst === 'bad' ? 'Treba riešiť' : worst === 'warn' ? 'Na pozornosť' : 'Všetko beží'),
+    button(`${data.liveNow} naživo →`, () => show('live'), 'attention-live'));
+  box.append(head);
+  const list = el('ul', 'attention-list');
+  for (const item of data.items) {
+    const li = el('li', `attention-item attention-${item.level}`);
+    const go = button('', () => show(item.tab), 'attention-go');
+    go.append(el('span', 'attention-tag', ATTENTION_LABEL[item.level]), el('span', 'attention-text', item.text), el('span', 'attention-arrow', '→'));
+    li.append(go);
+    list.append(li);
+  }
+  if (!data.items.length) list.append(el('li', 'attention-calm', 'Zdroje odpovedajú, bez chýb 5xx, stropy v norme, Štúdio nič nečaká.'));
+  box.append(list);
+  return box;
+}
+
 async function renderOverview() {
-  const [{ stats, server }, live, traffic24, chart] = await Promise.all([api('/api/admin/overview'),
+  const [{ stats, server }, live, traffic24, chart, attention] = await Promise.all([api('/api/admin/overview'),
     api('/api/admin/analytics?days=1').catch(() => null), api('/api/admin/traffic?hours=24').catch(() => null),
-    api('/api/admin/accounts-chart?days=30').catch(() => null)]);
+    api('/api/admin/accounts-chart?days=30').catch(() => null), api('/api/admin/attention').catch(() => null)]);
   const tiles = el('div', 'admin-tiles');
   const tile = (label, value, hint) => {
     const t = el('div', 'admin-tile');
@@ -158,6 +197,7 @@ async function renderOverview() {
   tile('zablokovaných', stats.disabled);
   tile('sledovaných letov', stats.follows);
   const nodes = [];
+  if (attention) nodes.push(attentionStrip(attention));
   if (live || traffic24) {
     const now = el('div', 'admin-tiles');
     const add = (label, value, hint, tone) => {
@@ -795,17 +835,32 @@ async function renderAnalytics() {
     tiles.append(t);
   };
   const today = data.series[data.series.length - 1] || { views: 0, visitors: 0 };
+  // Zmena oproti predchádzajúcemu obdobiu rovnakej dĺžky (zelená hore, červená dole).
+  const delta = key => {
+    const now = data.totals[key]; const before = data.previous?.[key] ?? 0;
+    if (!before) return now ? { text: 'nové oproti predtým', tone: 'up' } : null;
+    const change = Math.round(((now - before) / before) * 100);
+    return { text: `${change > 0 ? '+' : ''}${change} % oproti predtým`, tone: change > 0 ? 'up' : change < 0 ? 'down' : '' };
+  };
+  const withDelta = (label, value, hint, key) => {
+    tile(label, value, hint);
+    const d = delta(key);
+    if (d) tiles.lastChild.append(el('span', `admin-delta admin-delta-${d.tone || 'flat'}`, d.text));
+  };
   tile('práve na stránke', data.liveNow, 'aktívni za 2,5 min');
   tile('návštevníci dnes', today.visitors, `${today.views} zobrazení`);
-  tile(`návštevníci · ${data.days} d`, number(data.totals.visitors), 'súčet denných unikátov');
-  tile(`zobrazenia · ${data.days} d`, number(data.totals.views), data.totals.visitors ? `${(data.totals.views / data.totals.visitors).toFixed(1)} na návštevníka` : '');
-  tile('aktívny čas', `${number(Math.round(data.totals.minutes / 60))} h`, data.totals.views ? `${(data.totals.minutes / data.totals.views).toFixed(1)} min na zobrazenie` : '');
+  withDelta(`návštevníci · ${data.days} d`, number(data.totals.visitors), 'súčet denných unikátov', 'visitors');
+  withDelta(`zobrazenia · ${data.days} d`, number(data.totals.views), data.totals.visitors ? `${(data.totals.views / data.totals.visitors).toFixed(1)} na návštevníka` : '', 'views');
+  withDelta('aktívny čas', `${number(Math.round(data.totals.minutes / 60))} h`, data.totals.views ? `${(data.totals.minutes / data.totals.views).toFixed(1)} min na zobrazenie` : '', 'minutes');
   tile('boti', number(data.totals.bots), 'nezapočítaní');
   const trend = el('div');
   const picker = rangePicker(analyticsState, [[7, '7 dní'], [30, '30 dní'], [90, '90 dní'], [365, 'rok']], () => guarded(renderAnalytics));
   setView(section('Návštevnosť', picker, tiles), section('Vývoj', trend));
-  lineChart(trend, { labels: data.series.map(d => shortDay(d.day)),
+  const dayIndex = new Map(data.series.map((d, i) => [d.day, i]));
+  const events = (data.published || []).flatMap(p => p.titles.map(title => ({ index: dayIndex.get(p.day), text: `zverejnené: ${title}` })));
+  lineChart(trend, { labels: data.series.map(d => shortDay(d.day)), events,
     series: [{ name: 'Návštevníci', values: data.series.map(d => d.visitors) }, { name: 'Zobrazenia', values: data.series.map(d => d.views) }] });
+  if (events.length) trend.append(el('p', 'admin-muted', '▼ žltá značka = deň, keď vyšiel príspevok zo Štúdia (názov v bubline).'));
   const grid = el('div', 'admin-grid');
   for (const dim of ['ref', 'country', 'path', 'layer', 'device', 'browser', 'os', 'screen', 'lang']) {
     const box = el('section', 'admin-section admin-cell');
@@ -1012,7 +1067,7 @@ async function renderMaintenance(message) {
 
 // ── Naživo: mapa návštevníkov ─────────────────────────────────────────────
 const DEVICES = { mobil: 'mobil', tablet: 'tablet', desktop: 'počítač' };
-const liveState = { view: null, timer: 0, map: null };
+const liveState = { view: null, timer: 0, logTimer: 0, map: null };
 const agoText = seconds => (seconds < 60 ? `pred ${seconds} s` : seconds < 3600 ? `pred ${Math.floor(seconds / 60)} min` : `pred ${Math.floor(seconds / 3600)} h`);
 const placeText = v => [v.city, countryName(v.country)].filter(Boolean).join(', ');
 let mapData = null;
@@ -1119,38 +1174,63 @@ async function renderLive() {
     try { update(await api('/api/admin/live')); } catch { /* ďalší pokus o 10 s */ }
   };
   liveState.timer = setInterval(tick, 10_000);
-  leaveTab = () => { clearInterval(liveState.timer); liveState.map?.stop(); liveState.map = null; };
+  leaveTab = () => { clearInterval(liveState.timer); clearInterval(liveState.logTimer); liveState.map?.stop(); liveState.map = null; };
 }
 
 // Záznam návštev s IP (30 dní) — tabuľka pod mapou, hľadanie v IP / meste / stránke / referri.
-const visitState = { days: 1, q: '', page: 0 };
+const visitState = { days: 1, q: '', page: 0, group: false };
 const timeFmt = new Intl.DateTimeFormat('sk-SK', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const stayText = seconds => (seconds >= 60 ? duration(seconds) : '< 1 min');
 async function renderVisitLog(box) {
   const body = el('div');
   box.replaceChildren(box.firstChild, body);
+  let input = null;
   const draw = async () => {
     let data;
-    try { data = await api(`/api/admin/visits?days=${visitState.days}&page=${visitState.page}&q=${encodeURIComponent(visitState.q)}`); }
+    const query = `days=${visitState.days}&q=${encodeURIComponent(visitState.q)}`;
+    try { data = await api(`/api/admin/visits?${query}&page=${visitState.page}${visitState.group ? '&group=ip' : ''}`); }
     catch (error) { body.replaceChildren(notice(error.message)); return; }
     const picker = rangePicker(visitState, [[1, '24 h'], [7, '7 dní'], [30, '30 dní']], () => { visitState.page = 0; void draw(); });
+    // Režim: každé zobrazenie zvlášť, alebo jeden riadok na IP (človeka).
+    const mode = el('div', 'admin-range');
+    for (const [group, label] of [[false, 'Každá návšteva'], [true, 'Podľa IP']]) {
+      const b = button(label, () => { visitState.group = group; visitState.page = 0; void draw(); }, 'admin-chip');
+      b.setAttribute('aria-pressed', String(visitState.group === group));
+      mode.append(b);
+    }
+    const csv = el('a', 'admin-btn admin-btn-sm', 'Stiahnuť CSV');
+    csv.href = `/api/admin/visits.csv?${query}`;
+    csv.title = 'Celý výber (aj ďalšie strany) pre Excel';
+    mode.append(csv);
     const search = el('form', 'admin-search');
-    const input = el('input');
+    input = el('input');
     input.type = 'search'; input.placeholder = 'IP, mesto, krajina (SK), stránka, odkiaľ, prehliadač…'; input.value = visitState.q;
     const go = el('button', 'admin-btn', 'Hľadať'); go.type = 'submit';
     search.append(input, go);
     search.addEventListener('submit', event => { event.preventDefault(); visitState.q = input.value.trim(); visitState.page = 0; void draw(); });
-    const filterBy = value => () => { visitState.q = value; visitState.page = 0; void draw(); };
-    const rows = data.rows.map(v => {
-      const ipLink = button(v.ip, filterBy(v.ip), 'admin-link live-ip');
-      const place = [v.city, v.region && v.region !== v.city ? v.region : '', countryName(v.country)].filter(Boolean).join(', ');
-      const stay = Math.max(0, Math.round((v.lastAt - v.at) / 1000));
-      const device = el('span', '', `${DEVICES[v.device] || v.device} · ${v.browser} · ${v.os}`);
-      device.title = v.ua;
-      return row([timeFmt.format(new Date(v.at)), ipLink, place || '—', v.path, v.ref, device, stay >= 60 ? duration(stay) : '< 1 min']);
-    });
+    const filterBy = value => () => { visitState.q = value; visitState.group = false; visitState.page = 0; void draw(); };
+    const placeOf = v => [v.city, v.region && v.region !== v.city ? v.region : '', countryName(v.country)].filter(Boolean).join(', ');
+    let content;
+    const count = visitState.group ? data.groups.length : data.rows.length;
+    if (visitState.group) {
+      const rows = data.groups.map(g => {
+        const paths = el('span', '', g.paths.join(' · '));
+        return row([button(g.ip, filterBy(g.ip), 'admin-link live-ip'), placeOf(g) || '—', number(g.views), paths, stayText(Math.round(g.ms / 1000)),
+          timeFmt.format(new Date(g.first)), timeFmt.format(new Date(g.last)), g.device.split(' · ').map((part, i) => (i ? part : DEVICES[part] || part)).join(' · ')]);
+      });
+      content = rows.length ? table(['IP', 'Miesto', 'Zobrazení', 'Stránky', 'Spolu na stránke', 'Prvá', 'Posledná', 'Zariadenie'], rows) : null;
+    } else {
+      const rows = data.rows.map(v => {
+        const device = el('span', '', `${DEVICES[v.device] || v.device} · ${v.browser} · ${v.os}`);
+        device.title = v.ua;
+        return row([timeFmt.format(new Date(v.at)), button(v.ip, filterBy(v.ip), 'admin-link live-ip'), placeOf(v) || '—', v.path, v.ref, device,
+          stayText(Math.max(0, Math.round((v.lastAt - v.at) / 1000)))]);
+      });
+      content = rows.length ? table(['Čas', 'IP', 'Miesto', 'Stránka', 'Odkiaľ', 'Zariadenie', 'Na stránke'], rows) : null;
+    }
     const facts = el('div', 'admin-facts');
     facts.append(el('span', '', `${number(data.total)} návštev`), el('span', 'admin-muted', `${number(data.ips)} rôznych IP`),
-      el('span', 'admin-muted', `uchováva sa ${data.retentionDays} dní`));
+      el('span', 'admin-muted', `uchováva sa ${data.retentionDays} dní · obnova každých 30 s`));
     if (data.q) facts.append(button(`zrušiť filter „${data.q}"`, filterBy(''), 'admin-link'));
     // Vylúčené IP: nezapisujú sa nikam (záznam, štatistika, mapa); pridanie zmaže aj ich doterajšie návštevy.
     const setIgnored = async ips => {
@@ -1166,15 +1246,19 @@ async function renderVisitLog(box) {
       chip.append(button('×', () => setIgnored(data.ignoredIps.filter(other => other !== ip)), 'admin-link'));
       ignored.append(chip);
     }
+    const total = visitState.group ? data.ips : data.total;
     const pager = el('div', 'admin-pager');
     if (visitState.page > 0) pager.append(button('← novšie', () => { visitState.page--; void draw(); }, 'admin-btn admin-btn-sm'));
-    if (data.offset + data.rows.length < data.total) pager.append(button('staršie →', () => { visitState.page++; void draw(); }, 'admin-btn admin-btn-sm'));
-    pager.append(el('span', 'admin-muted', data.total ? `${data.offset + 1}–${data.offset + data.rows.length} z ${number(data.total)}` : ''));
-    body.replaceChildren(picker, search, facts, ignored, rows.length
-      ? table(['Čas', 'IP', 'Miesto', 'Stránka', 'Odkiaľ', 'Zariadenie', 'Na stránke'], rows)
-      : el('p', 'admin-muted', 'Žiadne návštevy v tomto rozsahu.'), pager);
+    if (data.offset + count < total) pager.append(button('staršie →', () => { visitState.page++; void draw(); }, 'admin-btn admin-btn-sm'));
+    pager.append(el('span', 'admin-muted', total ? `${data.offset + 1}–${data.offset + count} z ${number(total)}` : ''));
+    body.replaceChildren(picker, mode, search, facts, ignored, content || el('p', 'admin-muted', 'Žiadne návštevy v tomto rozsahu.'), pager);
   };
   await draw();
+  // Samočinná obnova len na prvej strane a keď nepíšeš do hľadania.
+  liveState.logTimer = setInterval(() => {
+    if (document.hidden || visitState.page > 0 || document.activeElement === input || !box.isConnected) return;
+    void draw();
+  }, 30_000);
 }
 
 // ── štart ──────────────────────────────────────────────────────────────────
@@ -1183,10 +1267,22 @@ const RENDER = { overview: renderOverview, live: renderLive, analytics: renderAn
   studio: renderStudio, performance: renderPerformance, audit: renderAudit, log: renderLog };
 function show(tab) {
   const current = RENDER[tab] ? tab : 'overview';
+  const group = groupOf(current);
   for (const b of tabs.querySelectorAll('button')) {
-    if (b.dataset.tab === current) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    if (b.dataset.group === group.id) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   }
+  // Podzáložky len pri skupine s viac ako jednou.
+  subtabs.hidden = group.tabs.length < 2;
+  subtabs.replaceChildren(...group.tabs.map(([id, label]) => {
+    const b = button(label, () => show(id));
+    b.dataset.tab = id;
+    if (id === current) b.setAttribute('aria-current', 'page');
+    return b;
+  }));
+  window.scrollTo({ top: 0 });
   if (location.hash !== `#${current}`) history.replaceState(null, '', `#${current}`);
+  currentTab = current;
+  lastTab.set(group.id, current);
   if (leaveTab) { leaveTab(); leaveTab = null; }
   void guarded(RENDER[current]);
 }
@@ -1214,10 +1310,13 @@ async function start() {
   csrf = session.csrfToken || '';
   who.textContent = session.user.email;
   tabs.hidden = false;
-  tabs.addEventListener('click', event => {
-    const tab = event.target.closest('button')?.dataset.tab;
-    if (tab) show(tab);
-  });
+  tabs.replaceChildren(...GROUPS.map(group => {
+    // Skupina otvorí naposledy použitú podzáložku (prvú, ak žiadnu).
+    const b = button(group.label, () => show(lastTab.get(group.id) || group.tabs[0][0]));
+    b.dataset.group = group.id;
+    return b;
+  }));
+  addEventListener('hashchange', () => { if (location.hash.slice(1) !== currentTab) show(location.hash.slice(1)); });
   show(location.hash.slice(1));
 }
 

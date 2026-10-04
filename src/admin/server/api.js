@@ -51,9 +51,30 @@ export function analytics(runtime, now, days) {
   }
   // Dnešní návštevníci sú ešte hashe (zrolujú sa až po polnoci).
   if (byDay.has(today)) byDay.get(today).visitors = runtime.store.visitorsToday(today);
-  const totals = series.reduce((sum, d) => ({ views: sum.views + d.views, visitors: sum.visitors + d.visitors,
-    minutes: sum.minutes + d.minutes, bots: sum.bots + d.bots }), { views: 0, visitors: 0, minutes: 0, bots: 0 });
-  return { days: range.length, liveNow: runtime.liveVisitors(), series, totals,
+  const sum = list => list.reduce((acc, d) => ({ views: acc.views + d.views, visitors: acc.visitors + d.visitors,
+    minutes: acc.minutes + d.minutes, bots: acc.bots + d.bots }), { views: 0, visitors: 0, minutes: 0, bots: 0 });
+  const totals = sum(series);
+  // Predchádzajúce obdobie rovnakej dĺžky (napr. 7 dní pred týmito 7 dňami) — percentá zmeny v dlaždiciach.
+  const prevRange = dayRange(now - range.length * DAY, range.length);
+  const prevDays = new Set(prevRange);
+  const prev = new Map(prevRange.map(day => [day, { day, views: 0, visitors: 0, minutes: 0, bots: 0 }]));
+  for (const row of runtime.store.pageviewDims(prevRange[0])) {
+    if (!prevDays.has(row.day)) continue;
+    const entry = prev.get(row.day);
+    if (row.dim === 'views') entry.views += row.n;
+    else if (row.dim === 'visitors') entry.visitors = row.n;
+    else if (row.dim === 'minutes') entry.minutes += row.n;
+    else if (row.dim === 'bots') entry.bots += row.n;
+  }
+  // Zverejnené príspevky Štúdia ako značky v grafe (deň → názvy).
+  const published = new Map();
+  for (const post of runtime.store.studioPublished?.(now - range.length * DAY) ?? []) {
+    const day = localDay(post.at);
+    if (!byDay.has(day)) continue;
+    published.set(day, [...(published.get(day) || []), post.title]);
+  }
+  return { days: range.length, liveNow: runtime.liveVisitors(), series, totals, previous: sum([...prev.values()]),
+    published: [...published].map(([day, titles]) => ({ day, titles })),
     dims: topDims(rows, ['views', 'visitors', 'minutes', 'bots']) };
 }
 
@@ -125,6 +146,48 @@ export function feedHistory(runtime, now, hours) {
     };
   }
   return out;
+}
+
+/**
+ * Prehľad „čo horí": zoznam vecí na riešenie, najzávažnejšie prvé. Každá položka vedie do záložky.
+ * @param {object} studioCounts store.studioCounts() alebo null
+ * @returns {{level: 'bad'|'warn'|'info', tab: string, text: string}[]}
+ */
+export function attention(runtime, now, { studioCounts = null } = {}) {
+  const items = [];
+  // Zdroje: prebiehajúci výpadok zo vzoriek (posledných 6 h) a ručne vypnuté.
+  const history = feedHistory(runtime, now, 6);
+  for (const feed of FEEDS.filter(f => f.toggle)) {
+    const ongoing = history[feed.id]?.outages.find(outage => outage.ongoing);
+    if (ongoing) items.push({ level: 'bad', tab: 'feeds', text: `${feed.label} neodpovedá (${Math.max(1, Math.round((now - ongoing.from) / 60_000))} min, HTTP ${ongoing.status || 'bez odpovede'})` });
+    if (runtime.feedSetting(feed.id).enabled === false) items.push({ level: 'warn', tab: 'feeds', text: `${feed.label} je vypnutý v admine` });
+  }
+  // Chyby servera za posledné 2 h.
+  const lastHour = traffic(runtime, now, 2).series.reduce((acc, s) => ({ n: acc.n + s.n, e5: acc.e5 + s.e5 }), { n: 0, e5: 0 });
+  if (lastHour.e5) {
+    const share = lastHour.n ? lastHour.e5 / lastHour.n : 1;
+    items.push({ level: share >= 0.05 ? 'bad' : 'warn', tab: 'traffic', text: `${lastHour.e5} chýb 5xx za 2 h (${(share * 100).toFixed(1).replace('.', ',')} % požiadaviek)` });
+  }
+  // Platené zdroje pri dennom strope.
+  for (const feed of costs(runtime, now, 1).feeds) {
+    if (!feed.paid || !Number.isFinite(feed.dailyCap) || feed.dailyCap <= 0) continue;
+    const share = feed.today / feed.dailyCap;
+    if (share >= 1) items.push({ level: 'bad', tab: 'costs', text: `${feed.label}: denný strop vyčerpaný (${feed.today} / ${feed.dailyCap})` });
+    else if (share >= 0.8) items.push({ level: 'warn', tab: 'costs', text: `${feed.label}: ${Math.round(share * 100)} % denného stropu` });
+  }
+  // Nové chyby za 24 h (prvý výskyt v tomto okne).
+  runtime.flush();
+  const fresh = runtime.store.errors(null, 300).filter(error => error.firstAt >= now - DAY && error.kind !== 'warn');
+  if (fresh.length) items.push({ level: 'warn', tab: 'errors', text: `${fresh.length} ${fresh.length === 1 ? 'nová chyba' : fresh.length < 5 ? 'nové chyby' : 'nových chýb'} za 24 h` });
+  // Štúdio.
+  if (studioCounts) {
+    if (studioCounts.failed) items.push({ level: 'bad', tab: 'studio', text: `Štúdio: ${studioCounts.failed} zlyhaných zverejnení` });
+    if (studioCounts.draft) items.push({ level: 'info', tab: 'studio', text: `Štúdio: ${studioCounts.draft} ${studioCounts.draft === 1 ? 'návrh čaká' : 'návrhov čaká'} na schválenie` });
+    if (studioCounts.scheduled) items.push({ level: 'info', tab: 'studio', text: `Štúdio: ${studioCounts.scheduled} naplánovaných` });
+    if (studioCounts.rendering) items.push({ level: 'info', tab: 'studio', text: `Štúdio: ${studioCounts.rendering} videí sa vyrába` });
+  }
+  const order = { bad: 0, warn: 1, info: 2 };
+  return items.sort((a, b) => order[a.level] - order[b.level]);
 }
 
 export function feedSettingsList(runtime) {

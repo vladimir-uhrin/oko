@@ -111,9 +111,11 @@ function legend(series) {
 /**
  * Čiarový graf, 1–3 série na jednej osi, crosshair + tooltip.
  * @param {HTMLElement} container
- * @param {{labels: string[], series: {name: string, values: number[]}[], height?: number, format?: (n:number)=>string}} spec
+ * `events`: zvislé značky udalostí (napr. zverejnený príspevok) — { index, text } s textom v tooltipe.
+ * @param {{labels: string[], series: {name: string, values: number[]}[], height?: number, format?: (n:number)=>string,
+ *   events?: {index: number, text: string}[]}} spec
  */
-export function lineChart(container, { labels, series, height = 200, format = number }) {
+export function lineChart(container, { labels, series, height = 200, format = number, events = [] }) {
   const colored = series.map((s, i) => ({ ...s, color: SERIES[i] }));
   const { wrap, svg, tip, width } = frame(container, height);
   const left = 44; const right = 12; const top = 10; const bottom = 24;
@@ -123,6 +125,16 @@ export function lineChart(container, { labels, series, height = 200, format = nu
   const yAt = v => top + plotH - (v / max) * plotH;
   axes(svg, { left, top, plotW, plotH, max, format });
   xLabels(svg, labels, xAt, height - 6);
+  const eventsAt = new Map();
+  for (const event of events) {
+    if (!(event.index >= 0 && event.index < labels.length)) continue;
+    eventsAt.set(event.index, [...(eventsAt.get(event.index) || []), event.text]);
+  }
+  for (const index of eventsAt.keys()) {
+    const x = xAt(index);
+    svg.append(svgEl('line', { x1: x, x2: x, y1: top, y2: top + plotH, class: 'chart-event' }),
+      svgEl('path', { d: `M${x - 4},${top - 2}L${x + 4},${top - 2}L${x},${top + 4}Z`, class: 'chart-event-flag' }));
+  }
   for (const s of colored) {
     const d = s.values.map((v, i) => `${i ? 'L' : 'M'}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join('');
     svg.append(svgEl('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
@@ -139,7 +151,8 @@ export function lineChart(container, { labels, series, height = 200, format = nu
     const x = xAt(index);
     cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.setAttribute('visibility', 'visible');
     colored.forEach((s, k) => { dots[k].setAttribute('cx', x); dots[k].setAttribute('cy', yAt(s.values[index])); dots[k].setAttribute('visibility', 'visible'); });
-    showTip(tip, wrap, x, top + 10, [[labels[index]], ...colored.map(s => [`${s.name}: ${format(s.values[index])}`, s.color])]);
+    showTip(tip, wrap, x, top + 10, [[labels[index]], ...colored.map(s => [`${s.name}: ${format(s.values[index])}`, s.color]),
+      ...(eventsAt.get(index) || []).map(text => [`▼ ${text}`, '#fab219'])]);
   });
   hit.addEventListener('pointerleave', () => {
     tip.hidden = true; cross.setAttribute('visibility', 'hidden'); for (const d of dots) d.setAttribute('visibility', 'hidden');

@@ -22,9 +22,9 @@ export const TIME_ZONE = 'Europe/Bratislava';
 const FLUSH_MS = 60_000;
 const SAMPLE_MS = 10 * 60_000;
 const LIVE_MS = 2.5 * 60_000;
-/** Záložka Naživo: posledné zobrazenia a minútová krivka (len v pamäti). */
+/** Záložka Naživo: posledné zobrazenia a krivka za 2 h — obe z DB, prežijú vydanie. */
 const RECENT_MAX = 40;
-const LIVE_HISTORY_MIN = 120;
+const LIVE_HISTORY_MS = 2 * 3600_000;
 const HIT_MAX_BYTES = 4096;
 const HITS_PER_MIN = 60;
 const ERRORS_PER_MIN = 10;
@@ -128,8 +128,6 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
   let visitLog = new Map(); // id → riadok záznamu návštev na zápis (nový alebo posunutý last_at)
   // hash → { at, since, geo, path, device, views, ip, visit } (len v pamäti)
   const live = new Map();
-  const recent = []; // posledné zobrazenia bez hashu: { at, country, city, path, device, ref }
-  const liveHistory = []; // { at, n } raz za minútu
   const limiter = new Map(); // ip → { minute, hits, errors } (len v pamäti)
   const caps = { day: localDay(now()), counts: new Map() };
   let settingsCache = null;
@@ -318,8 +316,6 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
         lang: /^[a-z]{2,3}$/.test(lang) ? lang : '??', ua: String(req.headers['user-agent'] || '').slice(0, 300) };
       visitLog.set(visit.id, visit);
       live.set(hash, { at: time, since: prev?.since ?? time, geo, path, device: ua.device, views: (prev?.views || 0) + 1, ip, visit });
-      recent.unshift({ at: time, ip, country: geo.country, city: geo.city, path, device: ua.device, ref });
-      if (recent.length > RECENT_MAX) recent.length = RECENT_MAX;
       addPv(day, 'views', '');
       addPv(day, 'path', path);
       addPv(day, 'ref', ref);
@@ -384,8 +380,7 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
     return live.size;
   }
   function sampleLive() {
-    liveHistory.push({ at: now(), n: liveCount() });
-    if (liveHistory.length > LIVE_HISTORY_MIN) liveHistory.splice(0, liveHistory.length - LIVE_HISTORY_MIN);
+    try { store.addLiveSample(now(), liveCount()); } catch { /* ďalšia vzorka o minútu */ }
   }
   /** Snímka pre záložku Naživo: body na mapu, posledné zobrazenia, krivka za 2 h. */
   function liveSnapshot() {
@@ -396,10 +391,11 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
       city: entry.geo.city, region: entry.geo.region, path: entry.path, device: entry.device, views: entry.views, ip: entry.ip || '',
       activeS: Math.round((time - entry.since) / 1000), idleS: Math.round((time - entry.at) / 1000),
     }));
-    const recentViews = recent.filter(view => time - view.at < 24 * 3600_000)
-      .map(view => ({ ...view, agoS: Math.round((time - view.at) / 1000) }));
+    flush();
+    const recentViews = store.visitLog({ from: time - 24 * 3600_000, limit: RECENT_MAX }).rows.map(view => ({ at: view.at, ip: view.ip,
+      country: view.country, city: view.city, path: view.path, device: view.device, ref: view.ref, agoS: Math.round((time - view.at) / 1000) }));
     return { at: time, liveNow: n, windowS: LIVE_MS / 1000, visitors: visitorsNow, recent: recentViews,
-      history: [...liveHistory, { at: time, n }], cityPrecision: visitorsNow.some(v => v.precision === 'city') };
+      history: [...store.liveHistory(time - LIVE_HISTORY_MS), { at: time, n }], cityPrecision: visitorsNow.some(v => v.precision === 'city') };
   }
 
   let flushTimer = null;
@@ -449,7 +445,6 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
       ignoredCache = null;
       const set = ignoredIps();
       for (const [hash, entry] of live) if (set.has(normalizeIp(entry.ip))) live.delete(hash);
-      for (let i = recent.length - 1; i >= 0; i--) if (set.has(normalizeIp(recent[i].ip))) recent.splice(i, 1);
       for (const [id, visit] of visitLog) if (set.has(normalizeIp(visit.ip))) visitLog.delete(id);
       return store.deleteVisitsByIp(clean);
     },

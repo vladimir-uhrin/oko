@@ -8,7 +8,7 @@
 // Admin vidí účty a prevádzku, nie pohyb ľudí po glóbuse (CLAUDE.md pravidlo 6):
 // sledované lety iba ako počet, relácie iba s orientačným názvom prehliadača.
 
-import { analytics, clampInt, costs, dayRange, feedHistory, feedSettingsList, traffic, validateFeedUpdate,
+import { analytics, attention, clampInt, costs, dayRange, feedHistory, feedSettingsList, traffic, validateFeedUpdate,
   validateNotice } from '../../admin/server/api.js';
 import { clientIp, localDay, normalizeIp } from '../../admin/server/runtime.js';
 import { handleStudioAdmin } from '../../admin/server/studio/adminApi.js';
@@ -53,7 +53,7 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
       // Naživo (2026-10-04): živí návštevníci s polohou na mapu (len pamäť servera).
       '/api/admin/live': ['GET'],
       // Záznam návštev s IP (2026-10-04, 30 dní): vyhľadávanie a stránkovanie.
-      '/api/admin/visits': ['GET'],
+      '/api/admin/visits': ['GET'], '/api/admin/visits.csv': ['GET'], '/api/admin/attention': ['GET'],
       '/api/admin/ignored-ips': ['POST'],
     }[route];
     if (!methods) throw fail('not_found', 404);
@@ -65,14 +65,38 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
     if (req.method === 'GET') {
       if (route === '/api/admin/analytics') return json(res, 200, analytics(needRuntime(), now(), clampInt(url.searchParams.get('days'), 1, 400, 30)));
       if (route === '/api/admin/live') return json(res, 200, needRuntime().liveSnapshot());
-      if (route === '/api/admin/visits') {
+      if (route === '/api/admin/attention') {
+        const r = needRuntime();
+        return json(res, 200, { items: attention(r, now(), { studioCounts: r.store.studioCounts() }), liveNow: r.liveVisitors() });
+      }
+      if (route === '/api/admin/visits' || route === '/api/admin/visits.csv') {
         needRuntime().flush();
         const days = clampInt(url.searchParams.get('days'), 1, 30, 1);
         const q = String(url.searchParams.get('q') || '').trim().slice(0, 80);
+        const from = now() - days * 86400_000;
+        if (route === '/api/admin/visits.csv') {
+          // Celý výber (najviac 50 000 riadkov) ako CSV pre Excel: UTF-8 s BOM, oddeľovač bodkočiarka.
+          const { rows } = runtime.store.visitLog({ from, q, limit: 50_000, offset: 0 });
+          // Bunka začínajúca =, +, -, @ by bola v Exceli vzorec (User-Agent posiela návštevník) → apostrof pred ňou.
+          const cell = value => {
+            let text = String(value ?? '');
+            if (/^[=+\-@\t]/.test(text)) text = `'${text}`;
+            return /[";\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+          };
+          const iso = at => new Date(at).toISOString().replace('T', ' ').slice(0, 19);
+          const lines = [['cas_utc', 'koniec_utc', 'sekund', 'ip', 'krajina', 'kraj', 'mesto', 'lat', 'lon', 'stranka', 'odkial', 'zariadenie', 'prehliadac', 'system', 'obrazovka', 'jazyk', 'user_agent'].join(';'),
+            ...rows.map(v => [iso(v.at), iso(v.lastAt), Math.round((v.lastAt - v.at) / 1000), v.ip, v.country, v.region, v.city, v.lat ?? '', v.lon ?? '',
+              v.path, v.ref, v.device, v.browser, v.os, v.screen, v.lang, v.ua].map(cell).join(';'))];
+          res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow, noarchive',
+            'Content-Disposition': `attachment; filename="okolive-navstevy-${localDay(now())}-${days}d.csv"` });
+          res.end('\ufeff' + lines.join('\r\n'));
+          return;
+        }
+        const byIp = url.searchParams.get('group') === 'ip';
         const limit = 100;
         const offset = clampInt(url.searchParams.get('page'), 0, 10_000, 0) * limit;
-        return json(res, 200, { days, q, limit, offset, retentionDays: 30, yourIp: normalizeIp(clientIp(req)), ignoredIps: runtime.ignoredIps(),
-          ...runtime.store.visitLog({ from: now() - days * 86400_000, q, limit, offset }) });
+        return json(res, 200, { days, q, limit, offset, byIp, retentionDays: 30, yourIp: normalizeIp(clientIp(req)), ignoredIps: runtime.ignoredIps(),
+          ...runtime.store.visitLog({ from, q, limit, offset, byIp }) });
       }
       if (route === '/api/admin/traffic') return json(res, 200, traffic(needRuntime(), now(), clampInt(url.searchParams.get('hours'), 1, 24 * 90, 48)));
       if (route === '/api/admin/errors') {
