@@ -76,5 +76,7 @@ test('obe letecké vrstvy: brána stojí v _fleetTick PRED dead reckoningom, č�
   const flightsSrc = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
   assert.match(flightsSrc, /_densityMode = next;\s*_densityPoints\.show = next;\s*_fleetGateEpoch\+\+;/, 'flights: prepnutie hustoty zdvihne epochu brány');
   const flights = readFileSync(new URL('./flights.js', import.meta.url), 'utf8');
-  assert.match(flights, /function _fleetContactHidden\(info, position, occluder\) \{\s*return _densityMode\s*\|\| !_categoryVisible/, 'flights: hustota je člen tej istej brány');
+  // 2026-10-05: do brány pribudol vypínač odhadov (čip ODHADY, `info.estOff`) — ďalší člen tej istej brány.
+  assert.match(flights, /function _fleetContactHidden\(info, position, occluder\) \{\s*return _densityMode\s*\|\| info\?\.estOff\s*\|\| !_categoryVisible/, 'flights: hustota aj skryté odhady sú členmi tej istej brány');
+  assert.match(flights, /info\.estOff = !_estimatesVisible;[\s\S]{0,400}?_lastFleetTickMs = 0;\s*_fleetGateEpoch\+\+;/, 'flights: vypínač odhadov zdvihne epochu brány');
 });

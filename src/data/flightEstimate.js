@@ -15,7 +15,7 @@
 // Čisté funkcie + sledovač pre server (createEstimateTracker), testy bez Cesia.
 
 import { greatCircleKm, routePlausible } from './routePlausible.js';
-import { buildEstimatePath, natTrackFor, pointAlongPath } from './flightPath.js';
+import { buildEstimatePath, destinationPoint, natTrackFor, pointAlongPath } from './flightPath.js';
 import { effectiveGroundSpeed } from './windAloft.js';
 
 export const ESTIMATE_MIN_ALT_M = 3000;
@@ -87,6 +87,17 @@ export function uncertaintyKm(distanceKm) {
   return 5 + 0.08 * Math.max(0, distanceKm);
 }
 
+/** Za toľko sekúnd vietor na trase plne nahradí vietor pri poslednom fixe. */
+export const WIND_RAMP_S = 45 * 60;
+/**
+ * Prechod z posledného kurzu na trasu k cieľu (spätný test na 756 letoch z Histórie, 2026-10-05,
+ * output/qa-estimates/backtest.mjs — medián chyby v km pri +10/+30/+60/+120 min: len kurz
+ * 2/23/80/196, priamo k cieľu 26/70/94/155, tento prechod 2/23/72/141): prvých 45 min drží
+ * posledný kurz, do 150. minúty plynule prejde na trasu.
+ */
+export const ROUTE_BLEND_START_S = 45 * 60;
+export const ROUTE_BLEND_END_S = 150 * 60;
+
 /** Pásma času bez signálu pre meranie presnosti (min). */
 export const ACCURACY_BUCKETS_MIN = Object.freeze([30, 60, 120, 240, Infinity]);
 /** Najmenej meraní v pásme, aby sa kalibrácia použila namiesto modelu. */
@@ -120,13 +131,24 @@ export function calibratedUncertaintyKm(elapsedS, distanceKm, calibration = null
 export function estimatePosition(fix, route, nowMs, model = null, calibration = null) {
   const elapsedS = Math.max(0, (nowMs - fix.tMs) / 1000);
   const wind = Number.isFinite(model?.gsEffMps);
-  const gs = wind ? model.gsEffMps : fix.gsMps;
-  const flownKm = (gs * elapsedS) / 1000;
+  // Vietor nabieha postupne (2026-10-05, merania 0–30 min: odhad s vetrom 17,5 km vs. 13,1 km bez):
+  // hneď po strate signálu fúka to isté ako pri poslednom fixe, iný vietor príde až s cestou.
+  const windDelta = wind ? model.gsEffMps - fix.gsMps : 0;
+  const ramp = Math.min(elapsedS, WIND_RAMP_S);
+  const flownKm = (fix.gsMps * elapsedS + windDelta * ((ramp * ramp) / (2 * WIND_RAMP_S) + Math.max(0, elapsedS - WIND_RAMP_S))) / 1000;
+  const gs = fix.gsMps + windDelta * (ramp / WIND_RAMP_S);
   const dest = usableDestination(fix, route);
   const path = Array.isArray(model?.path) && model.path.length >= 2
     ? { points: model.path, toDestination: Boolean(dest) && model.toDestination !== false, nat: model.nat ?? null }
     : buildEstimatePath(fix, dest, null);
-  const at = pointAlongPath(path.points, flownKm);
+  let at = pointAlongPath(path.points, flownKm);
+  // Smer k cieľu nabieha postupne (ROUTE_BLEND_*): lietadlo letí po letovej ceste, nie hneď
+  // priamo na cieľ.
+  if ((path.toDestination || path.nat) && elapsedS < ROUTE_BLEND_END_S && Number.isFinite(fix.trkDeg)) {
+    const straight = destinationPoint(fix.lat, fix.lon, fix.trkDeg, flownKm);
+    const w = Math.max(0, (elapsedS - ROUTE_BLEND_START_S) / (ROUTE_BLEND_END_S - ROUTE_BLEND_START_S));
+    at = { ...at, lat: straight.lat + (at.lat - straight.lat) * w, lon: straight.lon + (at.lon - straight.lon) * w, trackDeg: w < 0.5 ? fix.trkDeg : at.trackDeg };
+  }
   const unc = calibratedUncertaintyKm(elapsedS, flownKm, calibration);
   if (path.toDestination && dest) {
     const remainingKm = at.remainingKm;
@@ -218,7 +240,7 @@ export const ROUTE_CALLSIGN_RE = /^[A-Z]{3}\d[A-Z0-9]{0,4}$/;
  * @param {{lookupRoute?: (cs: string) => Promise<object|null>, now?: () => number, maxEntries?: number}} [options]
  */
 export function createEstimateTracker({
-  lookupRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 3000, maxQueue = 3000, cacheHitMs = 50,
+  lookupRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 250, limitedWaitMs = 30_000, maxQueue = 3000,
   natTracks = () => [], windSamplerFor = null, onAccuracy = null, modelMaxAgeMs = 30 * 60_000,
 } = {}) {
   const last = new Map(); // hex → fix (videné v poslednom snímku)
@@ -237,16 +259,26 @@ export function createEstimateTracker({
         const hex = queue.shift();
         const entry = estimates.get(hex);
         if (!entry || entry.routeState !== 'queued') continue;
-        const started = Date.now();
+        // Tempo voči adsbdb stráži lookupRoute (adsbdbGuard: pauza po 429, prídel pre pozadie).
+        // 2026-10-05: pôvodná skratka „rýchla odpoveď = cache" brala za cache aj rýchle odmietnutia —
+        // dopyty sa hrnuli bez prestávky, adsbdb nás blokoval a karty lietadiel ostali bez trasy a ETA.
+        // Odložené dohľadanie ({ limited: true }) preto NIE JE „cieľ neexistuje": lietadlo ostáva
+        // vo fronte a skúsi sa neskôr.
+        let result = null;
         try {
-          entry.route = await lookupRoute(entry.fix.cs);
+          result = await lookupRoute(entry.fix.cs);
         } catch {
-          entry.route = null;
+          result = null;
         }
+        if (result && result.limited === true) {
+          queue.push(hex);
+          await new Promise((r) => setTimeout(r, limitedWaitMs));
+          continue;
+        }
+        entry.route = result;
         entry.routeState = 'done';
         if (entry.route && nearDestination(entry.fix, entry.route)) estimates.delete(hex); // pristáva
-        // Šetrné tempo len pre skutočný dopyt na adsbdb; odpoveď z cache servera (rýchla) nečaká.
-        if (Date.now() - started >= cacheHitMs) await new Promise((r) => setTimeout(r, lookupGapMs));
+        await new Promise((r) => setTimeout(r, lookupGapMs));
       }
     } finally {
       pumping = false;
@@ -272,7 +304,12 @@ export function createEstimateTracker({
         if (back) {
           estimates.delete(fix.hex); // signál je späť
           // Presnosť (2026-10-05): kde sme lietadlo odhadovali v čase nového fixu vs. kde naozaj je.
-          if (onAccuracy && fix.tMs - back.fix.tMs > 60_000 && !fix.onGround) {
+          // Len ten istý let v cestovnej výške (2026-10-05, prvých 9 581 meraní): lietadlo, ktoré
+          // medzitým pristálo a znova odletelo (iný volací znak, nízko po štarte), nie je „návrat
+          // signálu" — také merania dávali chyby stoviek až tisícov km a skresľovali kalibráciu.
+          const sameFlight = !back.fix.cs || !fix.cs || back.fix.cs === fix.cs;
+          const cruising = Number.isFinite(fix.altM) && fix.altM >= ESTIMATE_MIN_ALT_M;
+          if (onAccuracy && fix.tMs - back.fix.tMs > 60_000 && !fix.onGround && sameFlight && cruising) {
             try {
               const est = estimatePosition(back.fix, back.route, fix.tMs, back.model);
               const base = estimatePosition(back.fix, back.route, fix.tMs, null);

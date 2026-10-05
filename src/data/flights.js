@@ -703,6 +703,16 @@ function _categoryChips() {
       params: { hiddenAircraftCategories: [...next] },
     });
   }
+  // Odhadované polohy bez signálu: počet + vypínač (za kategóriami, nie je to kategória stroja).
+  if (_estimates.size > 0 || !_estimatesVisible) {
+    chips.push({
+      id: 'estimates',
+      label: _estimatesVisible ? `${t('aircraft.estimates')} ${_estimates.size}` : `${t('aircraft.estimates')} ${t('aircraft.estimates-off')}`,
+      active: _estimatesVisible,
+      title: t(_estimatesVisible ? 'aircraft.estimates.hide' : 'aircraft.estimates.show', { n: _estimates.size }),
+      params: { showEstimates: !_estimatesVisible },
+    });
+  }
   return { chips };
 }
 
@@ -1074,6 +1084,12 @@ let _estimateCalibration = null;
 /** Čiarkovaný úsek trajektórie sledovaného lietadla (indexy v _trailPositions; to null = po koniec). */
 let _trailEstimated = { from: null, to: null };
 let _estimateRingEntity = null;
+/**
+ * Čip ODHADY v riadku Živých letov (2026-10-05): počet odhadovaných lietadiel a vypínač — kto chce
+ * len živé dáta, odhady skryje. ZÁMERNE sa neukladá (ako skryté kategórie, _hiddenCategories):
+ * vypínač, ktorý prežije reštart, je pasca „otvorím appku a chýbajú lietadlá" — F5 vracia plnú oblohu.
+ */
+let _estimatesVisible = true;
 
 /**
  * Cheap equirectangular distance (km) — plenty accurate for the ~150 km
@@ -3175,6 +3191,7 @@ function _updateTrackedModel() {
  */
 function _fleetContactHidden(info, position, occluder) {
   return _densityMode
+    || info?.estOff
     || !_categoryVisible(info?.klass)
     || !occluder.isPointVisible(info?.cullPosition || position);
 }
@@ -3699,6 +3716,11 @@ function _localEstimateFix(icao24) {
  */
 function _estimateRows(liveStates, nowMs) {
   if (!_estimates.size) return [];
+  if (!_estimatesVisible) {
+    // Skryté: riadky sa nevyrábajú; živé lietadlo odhad stále ruší, aby počet na čipe sedel.
+    for (const state of liveStates) _estimates.delete(_normalizeTrackedIcao(state[0]));
+    return [];
+  }
   const live = new Set();
   for (const state of liveStates) live.add(_normalizeTrackedIcao(state[0]));
   for (const hex of _estimateEnded) if (live.has(hex)) _estimateEnded.delete(hex);
@@ -4693,7 +4715,7 @@ export function _driveFleetModelHandoffForTest({ icao24, position, course = 0 })
 /** Exercise the exact asynchronous fleet loader and return its admitted model. */
 /** Kontrola v prehliadači / testy: lietadlá s odhadovanou polohou (2026-10-04). */
 export function _estimatesForDebug() {
-  return [..._estimates].map(([hex, e]) => ({ hex, cs: e.fix.cs, source: e.source, method: e.est?.method ?? null, uncertaintyKm: e.est ? Math.round(e.est.uncertaintyKm) : null, noSignalMin: Math.round((Date.now() - e.fix.tMs) / 60000), dest: e.route?.destination?.code ?? null, lat: e.est?.lat ?? null, lon: e.est?.lon ?? null, nat: e.est?.nat ?? null, wind: e.est?.wind ?? false }));
+  return [..._estimates].map(([hex, e]) => ({ hex, cs: e.fix.cs, source: e.source, method: e.est?.method ?? null, uncertaintyKm: e.est ? Math.round(e.est.uncertaintyKm) : null, noSignalMin: Math.round((Date.now() - e.fix.tMs) / 60000), dest: e.route?.destination?.code ?? null, lat: e.est?.lat ?? null, lon: e.est?.lon ?? null, nat: e.est?.nat ?? null, wind: e.est?.wind ?? false, drawn: _billboards.has(hex), shown: _billboards.get(hex)?.show === true || _models.has(hex) }));
 }
 // Len vývojový server: tá istá inštancia modulu pre kontrolu v prehliadači (dynamický import dá inú).
 if (import.meta.env?.DEV && typeof globalThis !== 'undefined') globalThis.__okoEstimates = { stats: _estimateStats, list: _estimatesForDebug, track: (hex) => flightsLayer.trackById(hex, { origin: 'user' }) };
@@ -5821,7 +5843,7 @@ const flightsLayer = {
 
         // Zmizlo vo vzduchu (nie pristátie) → odhadovaná poloha namiesto vyradenia (2026-10-04).
         _estimateStats.evicted += 1;
-        if (!_likelyLanded(icao24) && !_estimateEnded.has(icao24) && !_estimates.has(icao24)) {
+        if (_estimatesVisible && !_likelyLanded(icao24) && !_estimateEnded.has(icao24) && !_estimates.has(icao24)) {
           const fix = _localEstimateFix(icao24);
           if (!fix) _estimateStats.noFix += 1;
           else if (!qualifiesForEstimate(fix)) _estimateStats.notQualified += 1;
@@ -6064,6 +6086,19 @@ const flightsLayer = {
       // cold and thermal-reactive variants directly. Bounded by the operator's
       // own conversions, so this never touches the ordinary fleet.
       _refreshTr3bForStyle();
+    }
+    if (typeof params.showEstimates === 'boolean' && params.showEstimates !== _estimatesVisible) {
+      _estimatesVisible = params.showEstimates;
+      // Hneď (brána flotily, ako pri kategóriách): odhadované stroje sa skryjú v najbližšom tiku
+      // a pri najbližšom snímku sa vyradia (nie až po troch vynechaných); zapnutie skrytie zruší.
+      for (const hex of _estimates.keys()) {
+        const info = _flightData.get(hex);
+        if (info) info.estOff = !_estimatesVisible; // číta brána _fleetContactHidden
+        if (!_estimatesVisible && _billboards.has(hex)) _missingPolls.set(hex, MISSING_POLL_LIMIT);
+      }
+      _lastFleetTickMs = 0;
+      _fleetGateEpoch++;
+      _viewer?.scene?.requestRender?.();
     }
     if (Object.hasOwn(params, 'hiddenAircraftCategories')) {
       const next = normalizeHiddenCategories(params.hiddenAircraftCategories);

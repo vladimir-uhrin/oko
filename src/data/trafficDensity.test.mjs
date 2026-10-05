@@ -125,7 +125,8 @@ test('tripwire: hustota sa skladá do TEJ ISTEJ brány viditeľnosti', async () 
   // je jej výsledok.
   assert.match(
     source,
-    /function _fleetContactHidden\(info, position, occluder\) \{\s*\n\s*return _densityMode\s*\n\s*\|\| !_categoryVisible/,
+    // 2026-10-05: medzi hustotu a kategórie pribudol vypínač odhadov (`info.estOff`).
+    /function _fleetContactHidden\(info, position, occluder\) \{\s*\n\s*return _densityMode\s*\n\s*(?:\|\| info\?\.estOff\s*\n\s*)?\|\| !_categoryVisible/,
     'režim hustoty je člen brány _fleetContactHidden',
   );
   assert.match(

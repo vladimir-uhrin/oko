@@ -109,6 +109,10 @@ export const EN_STRINGS = Object.freeze({
   'loader.made-by': 'made by',
   // Súhlas s cookies + GA4 (2026-09-30, CMP 2026-10-04, src/analytics.js).
   // Odhadovaná poloha bez signálu (2026-10-04, flightEstimate.js).
+  'aircraft.estimates': 'ESTIMATES',
+  'aircraft.estimates-off': 'OFF',
+  'aircraft.estimates.hide': 'Hide {n} aircraft shown at an estimated position (out of coverage)',
+  'aircraft.estimates.show': 'Show aircraft at an estimated position (out of coverage)',
   'card.estimated-cue': 'ESTIMATE',
   'card.estimated': 'estimated position ±{km} km',
   'card.estimated-nat': 'NAT track {id}',
@@ -2455,6 +2459,10 @@ export const SK_STRINGS = Object.freeze({
   'loader.made-by': 'vytvoril',
   // Súhlas s cookies + GA4 (2026-09-30, CMP 2026-10-04, src/analytics.js).
   // Odhadovaná poloha bez signálu (2026-10-04, flightEstimate.js).
+  'aircraft.estimates': 'ODHADY',
+  'aircraft.estimates-off': 'VYP',
+  'aircraft.estimates.hide': 'Skryť {n} lietadiel s odhadovanou polohou (mimo pokrytia)',
+  'aircraft.estimates.show': 'Zobraziť lietadlá s odhadovanou polohou (mimo pokrytia)',
   'card.estimated-cue': 'ODHAD',
   'card.estimated': 'odhadovaná poloha ±{km} km',
   'card.estimated-nat': 'trať NAT {id}',

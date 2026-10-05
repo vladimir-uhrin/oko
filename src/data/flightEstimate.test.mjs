@@ -31,8 +31,14 @@ test('so známym cieľom letí po veľkej kružnici k cieľu poslednou rýchlos�
   const oneHour = estimatePosition(fix, ROUTE, (T0 + 3600) * 1000);
   assert.equal(oneHour.method, 'route');
   assert.ok(Math.abs(oneHour.distanceKm - 864) < 1, 'za hodinu 240 m/s = 864 km');
-  const leftKm = greatCircleKm(oneHour.lat, oneHour.lon, JFK.lat, JFK.lon);
-  assert.ok(Math.abs(leftKm - (totalKm - 864)) < 2, 'leží na kružnici k cieľu');
+  // Prechod z posledného kurzu na trasu (45 → 150 min): po 30 min ešte presne v poslednom kurze,
+  // po 3 h už na kružnici k cieľu.
+  const halfHour = estimatePosition(fix, ROUTE, (T0 + 1800) * 1000);
+  const straight = estimatePosition(fix, null, (T0 + 1800) * 1000);
+  assert.ok(greatCircleKm(halfHour.lat, halfHour.lon, straight.lat, straight.lon) < 0.5, 'prvých 45 min drží posledný kurz');
+  const threeHours = estimatePosition(fix, ROUTE, (T0 + 3 * 3600) * 1000);
+  const leftKm = greatCircleKm(threeHours.lat, threeHours.lon, JFK.lat, JFK.lon);
+  assert.ok(Math.abs(leftKm - (totalKm - 3 * 864)) < 2, 'po prechode leží na kružnici k cieľu');
   assert.ok(oneHour.lon < -10 && oneHour.lon > -40, 'nad Atlantikom smerom na západ');
   assert.equal(oneHour.ended, false);
   assert.ok(oneHour.uncertaintyKm > 60 && oneHour.uncertaintyKm < 80, 'neistota rastie so vzdialenosťou');
@@ -136,4 +142,56 @@ test('bez cieľa a pri strate signálu klesalo: odhad najviac 20 min (pristáva 
   assert.equal(estimatePosition(descending, null, (T0 + 21 * 60) * 1000).ended, true, 'po 20 min koniec');
   assert.equal(estimatePosition({ ...base, vrMps: -1 }, null, (T0 + 60 * 60) * 1000).ended, false, 'mierne klesanie = let pokračuje');
   assert.equal(estimatePosition(base, null, (T0 + 60 * 60) * 1000).ended, false, 'vo výške 2 h');
+});
+
+test('fronta cieľov: odložené dohľadanie ({ limited }) nie je „cieľ neexistuje" — skúsi sa znova, bez záplavy dopytov', async () => {
+  const calls = [];
+  let limited = true;
+  const tracker = createEstimateTracker({
+    lookupGapMs: 0, limitedWaitMs: 15,
+    lookupRoute: async (cs) => { calls.push(cs); return limited ? { limited: true } : ROUTE; },
+  });
+  tracker.seed([fixFromState(state('3c6444', -10, 53), T0)], (T0 + 600) * 1000);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(calls.length >= 2 && calls.length <= 5, `počas odkladu len občasný pokus (${calls.length})`);
+  assert.equal(tracker.status().queue + 1 >= 1, true);
+  assert.equal(tracker.list((T0 + 600) * 1000)[0].route, null, 'zatiaľ bez cieľa, ale stále čaká');
+  limited = false;
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(tracker.list((T0 + 600) * 1000)[0].route.destination.code, 'JFK', 'po uvoľnení cieľ dostane');
+  const settled = calls.length;
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(calls.length, settled, 'po vybavení sa už nepýta');
+});
+
+test('meranie presnosti: len ten istý let v cestovnej výške (nie nový let po pristátí)', () => {
+  const samples = [];
+  const tracker = createEstimateTracker({ onAccuracy: (x) => samples.push(x) });
+  const crowd = (t) => Array.from({ length: 30 }, (_, i) => state(`d${String(i).padStart(5, '0')}`, 5, 45 + i * 0.01, { t, cs: 'N1' }));
+  const lose = (hex, cs) => {
+    tracker.ingest({ time: T0, states: [...crowd(T0), state(hex, -10, 53, { cs })] });
+    tracker.ingest({ time: T0 + 300, states: crowd(T0 + 300) });
+  };
+  lose('aaa111', 'DLH400');
+  tracker.ingest({ time: T0 + 5400, states: [...crowd(T0 + 5400), state('aaa111', 8, 50, { t: T0 + 5400, cs: 'DLH401' })] });
+  assert.equal(samples.length, 0, 'iný volací znak = nový let');
+  const t2 = createEstimateTracker({ onAccuracy: (x) => samples.push(x) });
+  t2.ingest({ time: T0, states: [...crowd(T0), state('bbb222', -10, 53)] });
+  t2.ingest({ time: T0 + 300, states: crowd(T0 + 300) });
+  t2.ingest({ time: T0 + 5400, states: [...crowd(T0 + 5400), state('bbb222', -9, 53, { t: T0 + 5400, alt: 900 })] });
+  assert.equal(samples.length, 0, 'nízko po štarte = nový let');
+  const t3 = createEstimateTracker({ onAccuracy: (x) => samples.push(x) });
+  t3.ingest({ time: T0, states: [...crowd(T0), state('ccc333', -10, 53)] });
+  t3.ingest({ time: T0 + 300, states: crowd(T0 + 300) });
+  t3.ingest({ time: T0 + 1800, states: [...crowd(T0 + 1800), state('ccc333', -16, 53, { t: T0 + 1800 })] });
+  assert.equal(samples.length, 1, 'ten istý let v cestovnej výške sa meria');
+});
+
+test('vietor nabieha postupne: po 10 min takmer bez vplyvu, po 3 h naplno', () => {
+  const fix = fixFromState(state('3c6444', -10, 53), T0);
+  const model = { gsEffMps: 280, path: null, toDestination: false, nat: null };
+  const at = (min) => estimatePosition(fix, null, (T0 + min * 60) * 1000, model).distanceKm;
+  const plain = (min) => estimatePosition(fix, null, (T0 + min * 60) * 1000).distanceKm;
+  assert.ok(at(10) - plain(10) < 3, 'po 10 min rozdiel pár km');
+  assert.ok(at(180) - plain(180) > 300, 'po 3 h +40 m/s takmer naplno');
 });
