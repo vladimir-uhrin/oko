@@ -100,7 +100,10 @@ export function openAdminStore(filename) {
   CREATE INDEX IF NOT EXISTS visit_log_at ON visit_log(at);
   CREATE INDEX IF NOT EXISTS visit_log_ip ON visit_log(ip, at);
   -- Počet naživo raz za minútu (krivka v Naživo prežije vydanie), 2 dni.
-  CREATE TABLE IF NOT EXISTS live_history (at INTEGER PRIMARY KEY, n INTEGER NOT NULL);`);
+  CREATE TABLE IF NOT EXISTS live_history (at INTEGER PRIMARY KEY, n INTEGER NOT NULL);
+  -- Zdravie kariet lietadiel z prehliadačov (2026-10-05): koľko kontrol a koľko malo trasu / typ / dopravcu.
+  CREATE TABLE IF NOT EXISTS card_health (hour INTEGER PRIMARY KEY, n INTEGER NOT NULL, route INTEGER NOT NULL,
+    type INTEGER NOT NULL, airline INTEGER NOT NULL);`);
   if (filename !== ':memory:' && process.platform !== 'win32') { try { chmodSync(filename, 0o600); } catch { /* ok */ } }
 
   const tx = fn => {
@@ -120,8 +123,8 @@ export function openAdminStore(filename) {
   return {
     close: () => db.close(),
     /** Zapíše buffer z pamäte jednou transakciou. */
-    flush({ traffic = [], pageviews = [], visitors = [], errors = [], samples = [], visits = [] }) {
-      if (!traffic.length && !pageviews.length && !visitors.length && !errors.length && !samples.length && !visits.length) return;
+    flush({ traffic = [], pageviews = [], visitors = [], errors = [], samples = [], visits = [], cards = [] }) {
+      if (!traffic.length && !pageviews.length && !visitors.length && !errors.length && !samples.length && !visits.length && !cards.length) return;
       tx(() => {
         for (const t of traffic) upsertTraffic.run(t.hour, t.route, t.n, t.e4, t.e5, t.blocked, t.msSum, t.msMax, t.bytes);
         for (const p of pageviews) upsertPv.run(p.day, p.dim, p.val, p.n);
@@ -132,6 +135,9 @@ export function openAdminStore(filename) {
         for (const s of samples) sample.run(s.at, s.feed, s.ok ? 1 : 0, s.status, s.ms);
         const visit = db.prepare(`INSERT INTO visit_log (${VISIT_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET last_at = max(last_at, excluded.last_at)`);
+        const card = db.prepare(`INSERT INTO card_health (hour, n, route, type, airline) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(hour) DO UPDATE SET n = n + excluded.n, route = route + excluded.route, type = type + excluded.type, airline = airline + excluded.airline`);
+        for (const c of cards) card.run(c.hour, c.n, c.route, c.type, c.airline);
         for (const v of visits) {
           visit.run(v.id, v.at, v.lastAt, v.ip, v.country, v.region || '', v.city || '', v.lat ?? null, v.lon ?? null, v.path, v.ref,
             v.browser, v.os, v.device, v.screen, v.lang, v.ua);
@@ -169,6 +175,7 @@ export function openAdminStore(filename) {
       db.prepare('DELETE FROM feed_samples WHERE at < ?').run(now - RETENTION.sampleDays * DAY_MS);
       db.prepare('DELETE FROM visit_log WHERE at < ?').run(now - RETENTION.visitLogDays * DAY_MS);
       db.prepare('DELETE FROM live_history WHERE at < ?').run(now - 2 * DAY_MS);
+      db.prepare('DELETE FROM card_health WHERE hour < ?').run(Math.floor((now - 30 * DAY_MS) / 3600_000));
       this.studioPrune(now);
     },
 
@@ -192,6 +199,7 @@ export function openAdminStore(filename) {
       return db.prepare('SELECT day, dim, val, n FROM pageviews WHERE day >= ? ORDER BY day').all(fromDay);
     },
     visitorsToday: day => db.prepare('SELECT COUNT(*) AS n FROM visitors WHERE day = ?').get(day).n,
+    cardHealth: fromHour => db.prepare('SELECT hour, n, route, type, airline FROM card_health WHERE hour >= ? ORDER BY hour').all(fromHour),
     addLiveSample: (at, n) => { db.prepare('INSERT OR REPLACE INTO live_history (at, n) VALUES (?, ?)').run(at, n); },
     liveHistory: fromAt => db.prepare('SELECT at, n FROM live_history WHERE at >= ? ORDER BY at').all(fromAt),
     /** Zverejnené príspevky Štúdia od `fromAt` — značky v grafe analytiky. */

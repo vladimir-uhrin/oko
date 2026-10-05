@@ -365,3 +365,33 @@ test('čo horí: výpadok zdroja, chyby 5xx, strop plateného zdroja, Štúdio; 
   assert.ok(items.some(item => item.tab === 'errors'));
   assert.equal(items.at(-1).text, 'Štúdio: 2 návrhov čaká na schválenie');
 });
+
+test('zdravie kariet lietadiel: vzorky z prehliadača po hodinách; bez trasy pod 30 % = „čo horí"; zablokovaný zdroj tiež', async t => {
+  const { runtime, store, clock } = setup(t);
+  const { hit } = await serve(t, runtime);
+  const { attention, cardHealthSeries } = await import('./api.js');
+  assert.equal((await hit({ t: 'card', route: true, type: true, airline: true })).status, 204);
+  assert.equal((await hit({ t: 'card', route: 'yes', type: true, airline: true })).status, 400, 'len áno/nie');
+  assert.equal((await hit({ t: 'card', route: true, type: true, airline: true }, { 'User-Agent': 'Googlebot/2.1' })).status, 400);
+  runtime.flush();
+  assert.deepEqual(attention(runtime, clock.time), [], 'jedna dobrá karta = pokoj');
+  // Výpadok: 4 karty bez trasy (z jednej IP je limit 10/min, stačí).
+  for (let i = 0; i < 4; i++) await hit({ t: 'card', route: false, type: false, airline: false });
+  const items = attention(runtime, clock.time);
+  assert.ok(items.some(item => item.level === 'bad' && item.text === 'Karty lietadiel bez trasy a ETA: 4 z 5 za 2 h'));
+  assert.ok(items.some(item => item.level === 'warn' && item.text.startsWith('Karty lietadiel bez typu: 4 z 5')));
+  const series = cardHealthSeries(runtime, clock.time, 24);
+  assert.equal(series.length, 24);
+  assert.deepEqual([series.at(-1).n, series.at(-1).route], [5, 1]);
+  // Vylúčená IP vlastníka sa ako návšteva nezapisuje, ale zdravie karty hlási.
+  runtime.setIgnoredIps(['203.0.113.77'], 'owner');
+  assert.equal((await hit({ t: 'card', route: true, type: true, airline: true }, { 'CF-Connecting-IP': '203.0.113.77' })).status, 204);
+  assert.equal(cardHealthSeries(runtime, clock.time, 1)[0].n, 6);
+  // Zablokovaný externý zdroj.
+  const blocked = attention(runtime, clock.time, { upstream: [{ name: 'adsbdb', pausedUntil: clock.time + 300_000, lastHour: { n: 9, limited: 1, errors: 0 } },
+    { name: 'adsb.lol', pausedUntil: null, lastHour: { n: 50, limited: 4, errors: 0 } }] });
+  assert.ok(blocked.some(item => item.level === 'bad' && item.text.startsWith('adsbdb nás zablokoval — pauza do ')));
+  assert.ok(blocked.some(item => item.level === 'warn' && item.text === 'adsb.lol: 4× obmedzenie (429) za hodinu'));
+  store.prune(clock.time + 31 * 86400_000);
+  assert.equal(store.cardHealth(0).length, 0, 'po 30 dňoch preč');
+});

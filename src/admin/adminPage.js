@@ -918,7 +918,7 @@ const percent = (part, whole) => { const p = (part / whole) * 100; return p > 0 
 const trafficState = { days: 2 };
 async function renderTraffic() {
   const hours = trafficState.days * 24;
-  const data = await api(`/api/admin/traffic?hours=${hours}`);
+  const [data, health] = await Promise.all([api(`/api/admin/traffic?hours=${hours}`), api('/api/admin/health').catch(() => null)]);
   const picker = rangePicker(trafficState, [[1, '24 h'], [2, '48 h'], [7, '7 dní'], [30, '30 dní']], () => guarded(renderTraffic));
   const label = at => { const d = new Date(at); return trafficState.days > 2 ? `${d.getDate()}. ${d.getMonth() + 1}.` : `${d.getHours()}:00`; };
   const req = el('div'); const errs = el('div'); const lat = el('div');
@@ -930,6 +930,37 @@ async function renderTraffic() {
   const rows = data.routes.map(r => row([r.label, number(r.n), r.e5 ? badge(`${r.e5} (${percent(r.e5, r.n)})`, 'bad') : '0',
     number(r.e4), r.blocked ? number(r.blocked) : '—', `${r.avgMs} / ${r.maxMs}`, bytes(r.bytes)]));
   main.append(section('Podľa zdroja', table(['Zdroj', 'Požiadavky', '5xx', '4xx', 'Blokované', 'Odozva ø / max ms', 'Prenos'], rows)));
+  if (health) main.prepend(...healthSections(health));
+}
+
+/** Externé zdroje (spoločný register servera) a zdravie kariet lietadiel z prehliadačov — 2026-10-05. */
+function healthSections(health) {
+  const hhmm = at => new Date(at).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' });
+  const sourceRows = health.upstream.map(u => row([
+    u.name,
+    u.pausedUntil ? badge(`zablokovaný do ${hhmm(u.pausedUntil)}`, 'bad') : badge('odpovedá', 'ok'),
+    number(u.lastHour.n), u.lastHour.limited ? badge(String(u.lastHour.limited), 'bad') : '0',
+    number(u.last24h.n), u.last24h.limited ? badge(String(u.last24h.limited), 'bad') : '0', number(u.last24h.errors),
+    u.lastLimitedAt ? when(u.lastLimitedAt) : '—',
+  ]));
+  const sources = section('Externé zdroje',
+    sourceRows.length ? table(['Zdroj', 'Stav', 'Dopyty · 1 h', '429 · 1 h', 'Dopyty · 24 h', '429 · 24 h', 'Chyby · 24 h', 'Posledné obmedzenie'], sourceRows)
+      : el('p', 'admin-muted', 'Od štartu servera zatiaľ žiadne volanie.'),
+    el('p', 'admin-muted', 'Bezplatné zdroje (adsbdb, adsb.lol, Nominatim) nás pri priveľa dopytoch na pár minút zablokujú (429). Počty sú od štartu servera; po vydaní začínajú od nuly.'));
+  const total = health.cards.reduce((a, c) => ({ n: a.n + c.n, route: a.route + c.route, type: a.type + c.type, airline: a.airline + c.airline }), { n: 0, route: 0, type: 0, airline: 0 });
+  const share = part => (total.n ? `${Math.round((part / total.n) * 100)} %` : '—');
+  const facts = el('div', 'admin-facts');
+  facts.append(el('span', '', `${number(total.n)} kontrol za 24 h`), el('span', 'admin-muted', `s trasou a ETA ${share(total.route)}`),
+    el('span', 'admin-muted', `s typom ${share(total.type)}`), el('span', 'admin-muted', `s dopravcom ${share(total.airline)}`));
+  const cards = section('Karty lietadiel', facts);
+  if (total.n) {
+    const chart = el('div');
+    cards.append(chart);
+    barChart(chart, { labels: health.cards.map(c => `${new Date(c.at).getHours()}:00`), values: health.cards.map(c => (c.n ? Math.round((c.route / c.n) * 100) : 0)),
+      name: 'Karty s trasou a ETA (%)', format: v => `${Math.round(v)} %`, notes: health.cards.map(c => (c.n ? `${c.route} z ${c.n} kontrol` : 'bez kontrol')) });
+  }
+  cards.append(el('p', 'admin-muted', 'Prehliadač po 45 s sledovania dopravného lietadla nahlási, či karta má trasu, typ a dopravcu (len áno/nie). Časť letov trasu nemá ani normálne (chartre, presuny); pod 30 % za 2 h sa to ukáže v Prehľade.'));
+  return [sources, cards];
 }
 
 // ── Chyby ──────────────────────────────────────────────────────────────────

@@ -9,6 +9,25 @@ const ENDPOINT = '/api/telemetry/hit';
 const PING_MS = 60_000;
 const MAX_ERRORS = 5;
 const BOOT_GRACE_MS = 10_000;
+/** Zdravie karty lietadla (2026-10-05): po 45 s sledovania dopravného lietadla — má trasu, typ, dopravcu? */
+const CARD_CHECK_MS = 45_000;
+const MAX_CARD_CHECKS = 20;
+
+/**
+ * Výsledok kontroly karty sledovaného lietadla, alebo null (ešte nie / netreba). Pure.
+ * Len dopravné volacie znaky (LLL + číslica) vo vzduchu — iné lety trasu v adsbdb nemajú.
+ * @param {object|null} info getTrackedInfo() vrstvy lietadiel
+ */
+export function cardHealthSample(info) {
+  if (!info?.icao24 || info.onGround) return null;
+  if (!/^[A-Z]{3}\d/.test(String(info.callsign || '').trim().toUpperCase())) return null;
+  return {
+    t: 'card',
+    route: Boolean(info.route?.origin && info.route?.destination),
+    type: Boolean(info.typeCode || info.typeName),
+    airline: Boolean(info.airline),
+  };
+}
 
 /** @returns {boolean} true, ak prehliadač žiada nesledovať. */
 export function telemetryOptOut(nav = globalThis.navigator) {
@@ -66,8 +85,25 @@ export function initSiteTelemetry({ win = window, doc = document } = {}) {
     });
   }, 2000);
 
+  // Karta lietadla: po 45 s sledovania jedného stroja jedna vzorka (áno/nie, žiadny volací znak ani poloha).
+  const cardChecked = new Set();
+  let tracked = { hex: null, at: 0 };
+  const cardWatch = setInterval(() => {
+    if (cardChecked.size >= MAX_CARD_CHECKS) return;
+    let info = null;
+    try { info = win.__godsEyeView?.dataManager?.layers?.get?.('flights')?.module?.getTrackedInfo?.() || null; } catch { info = null; }
+    if (!info?.icao24) { tracked = { hex: null, at: 0 }; return; }
+    if (tracked.hex !== info.icao24) { tracked = { hex: info.icao24, at: Date.now() }; return; }
+    if (Date.now() - tracked.at < CARD_CHECK_MS || cardChecked.has(info.icao24)) return;
+    const sample = cardHealthSample(info);
+    if (!sample) return;
+    cardChecked.add(info.icao24);
+    send(sample);
+  }, 5000);
+
   return {
     stop() {
+      clearInterval(cardWatch);
       clearInterval(ping); clearInterval(waitForManager); unsubscribe?.();
       win.removeEventListener('error', onError); win.removeEventListener('unhandledrejection', onRejection);
     },

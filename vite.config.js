@@ -43,6 +43,7 @@ import { createAircraftSearchService } from './src/data/aircraftSearchService.js
 import { createGeocodeService } from './src/data/geocodeService.js';
 import { LIMITED as ADSBDB_LIMITED, createAdsbdbGuard } from './src/data/adsbdbGuard.js';
 import { createAdsbLolTypeFallback } from './src/data/adsbLolTypeFallback.js';
+import { upstream as upstreamRegistry } from './src/data/upstreamStatus.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
@@ -3670,6 +3671,8 @@ function adsbdbProxy() {
             ? `https://api.adsbdb.com/v0/callsign/${encodeURIComponent(key)}`
             : `https://api.adsbdb.com/v0/aircraft/${encodeURIComponent(key)}`;
           const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+          // Spoločný register zdrojov (admin: „adsbdb zablokovaný do …"); pauzu po 429 dopočíta guard nižšie.
+          if (res.status !== 429) upstreamRegistry.record('adsbdb', { status: res.status });
           if (res.ok) {
             const data = kind === 'route' ? parseRoute(await res.json()) : parseAircraft(await res.json());
             store[key] = { at: Date.now(), data }; // data may be null — negative cache
@@ -3683,6 +3686,7 @@ function adsbdbProxy() {
           }
           if (res.status === 429) {
             guard.onRateLimited(await res.text().catch(() => ''));
+            upstreamRegistry.record('adsbdb', { status: 429, pauseMs: guard.pausedUntil() - Date.now() });
             if (Date.now() - lastLimitLog > 10 * 60_000) {
               lastLimitLog = Date.now();
               console.warn(`[adsbdb] rate limited — pauza do ${new Date(guard.pausedUntil()).toISOString()}`);
@@ -3691,6 +3695,7 @@ function adsbdbProxy() {
           // other statuses: leave uncached so we retry later (karta dostane 503, nie „nenájdené")
           return store[key] ? store[key].data : ADSBDB_LIMITED;
         } catch {
+          upstreamRegistry.record('adsbdb', { error: true });
           return store[key] ? store[key].data : ADSBDB_LIMITED; // network error → stale if any
         } finally {
           inflight.delete(ik);
@@ -3704,7 +3709,8 @@ function adsbdbProxy() {
   _adsbdbRouteLookup = async (cs) => {
     await loadOnce();
     const data = await lookup('route', String(cs || '').toUpperCase(), { background: true });
-    return data === ADSBDB_LIMITED ? null : data;
+    // Odložené (pauza po 429 / prídel) nie je „trasa neexistuje" — sledovač odhadov skúsi neskôr.
+    return data === ADSBDB_LIMITED ? { limited: true } : data;
   };
   return {
     name: 'adsbdb-proxy',
@@ -8220,6 +8226,7 @@ function adsbLolProxy() {
           const upstream = await fetch('https://api.adsb.lol/v2/mil', {
             headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
           });
+          upstreamRegistry.record('adsb.lol', { status: upstream.status, pauseMs: upstream.status === 429 ? 60_000 : 0 });
           const body = await upstream.text();
           if (upstream.ok) {
             _cache = body;

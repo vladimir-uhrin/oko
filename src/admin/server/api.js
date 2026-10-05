@@ -153,8 +153,21 @@ export function feedHistory(runtime, now, hours) {
  * @param {object} studioCounts store.studioCounts() alebo null
  * @returns {{level: 'bad'|'warn'|'info', tab: string, text: string}[]}
  */
-export function attention(runtime, now, { studioCounts = null } = {}) {
+export function attention(runtime, now, { studioCounts = null, upstream = [] } = {}) {
   const items = [];
+  // Karty lietadiel (2026-10-05): z kontrol prehliadačov za 2 h. Dopravca/trasa chýba aj normálne
+  // (charter, presun bez čísla letu), preto až pod 30 % a pri aspoň 3 kontrolách.
+  runtime.flush();
+  const cardRows = runtime.store.cardHealth?.(Math.floor(now / HOUR) - 1) || [];
+  const card = cardRows.reduce((a, r) => ({ n: a.n + r.n, route: a.route + r.route, type: a.type + r.type }), { n: 0, route: 0, type: 0 });
+  if (card.n >= 3 && card.route / card.n < 0.3) items.push({ level: 'bad', tab: 'traffic', text: `Karty lietadiel bez trasy a ETA: ${card.n - card.route} z ${card.n} za 2 h` });
+  if (card.n >= 3 && card.type / card.n < 0.3) items.push({ level: 'warn', tab: 'traffic', text: `Karty lietadiel bez typu: ${card.n - card.type} z ${card.n} za 2 h` });
+  // Externé zdroje: zablokovaný teraz = rieš; opakované 429 za hodinu = pozor.
+  const hhmm = at => new Date(at).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Bratislava' });
+  for (const source of upstream) {
+    if (source.pausedUntil) items.push({ level: 'bad', tab: 'traffic', text: `${source.name} nás zablokoval — pauza do ${hhmm(source.pausedUntil)}` });
+    else if (source.lastHour.limited >= 3) items.push({ level: 'warn', tab: 'traffic', text: `${source.name}: ${source.lastHour.limited}× obmedzenie (429) za hodinu` });
+  }
   // Zdroje: prebiehajúci výpadok zo vzoriek (posledných 6 h) a ručne vypnuté.
   const history = feedHistory(runtime, now, 6);
   for (const feed of FEEDS.filter(f => f.toggle)) {
@@ -188,6 +201,19 @@ export function attention(runtime, now, { studioCounts = null } = {}) {
   }
   const order = { bad: 0, warn: 1, info: 2 };
   return items.sort((a, b) => order[a.level] - order[b.level]);
+}
+
+/** Zdravie kariet lietadiel po hodinách (posledných `hours`), pre Prevádzku. */
+export function cardHealthSeries(runtime, now, hours = 24) {
+  runtime.flush();
+  const from = Math.floor(now / HOUR) - hours + 1;
+  const byHour = new Map((runtime.store.cardHealth?.(from) || []).map(r => [r.hour, r]));
+  const series = [];
+  for (let hour = from; hour <= Math.floor(now / HOUR); hour++) {
+    const r = byHour.get(hour) || { n: 0, route: 0, type: 0, airline: 0 };
+    series.push({ at: hour * HOUR, n: r.n, route: r.route, type: r.type, airline: r.airline });
+  }
+  return series;
 }
 
 export function feedSettingsList(runtime) {

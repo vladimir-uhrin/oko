@@ -125,6 +125,7 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
   let visitors = new Map();
   let errors = new Map();
   let samples = [];
+  let cards = new Map(); // hodina → { hour, n, route, type, airline } — zdravie kariet lietadiel (2026-10-05)
   let visitLog = new Map(); // id → riadok záznamu návštev na zápis (nový alebo posunutý last_at)
   // hash → { at, since, geo, path, device, views, ip, visit } (len v pamäti)
   const live = new Map();
@@ -202,8 +203,8 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
 
   function flush() {
     const batch = { traffic: [...traffic.values()], pageviews: [...pageviews.values()],
-      visitors: [...visitors.values()], errors: [...errors.values()], samples, visits: [...visitLog.values()] };
-    traffic = new Map(); pageviews = new Map(); visitors = new Map(); errors = new Map(); samples = []; visitLog = new Map();
+      visitors: [...visitors.values()], errors: [...errors.values()], samples, visits: [...visitLog.values()], cards: [...cards.values()] };
+    traffic = new Map(); pageviews = new Map(); visitors = new Map(); errors = new Map(); samples = []; visitLog = new Map(); cards = new Map();
     try { store.flush(batch); } catch (error) { originalConsole.warn?.('[admin] telemetry flush failed:', error?.message); }
   }
   let lastMaintenance = 0;
@@ -291,7 +292,8 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
     try { hit = JSON.parse(raw); } catch { return sendJson(res, 400, { error: 'invalid' }); }
     if (!hit || typeof hit !== 'object') return sendJson(res, 400, { error: 'invalid' });
     const ip = clientIp(req);
-    const kind = hit.t === 'error' ? 'errors' : 'hits';
+    // Chyby a zdravie karty sa počítajú aj z vylúčených IP (vlastník) — sú to signály prevádzky, nie návšteva.
+    const kind = hit.t === 'error' || hit.t === 'card' ? 'errors' : 'hits';
     if (kind === 'hits' && ignoredIps().has(normalizeIp(ip))) return sendJson(res, 204, null);
     if (!allow(ip, kind)) return sendJson(res, 429, { error: 'rate_limited' });
     const ua = parseUserAgent(req.headers['user-agent']);
@@ -300,6 +302,14 @@ export function createAdminRuntime({ store, now = Date.now, ownHosts = [], secre
     if (hit.t === 'error') {
       const where = `${String(hit.src || '').split('?')[0].slice(0, 200)}:${Number(hit.line) || 0}`;
       recordError('client', String(hit.msg || 'Neznáma chyba'), `${where}\n${ua.browser} · ${ua.os}\n${String(hit.stack || '').slice(0, 1000)}`);
+      return sendJson(res, 204, null);
+    }
+    if (hit.t === 'card') {
+      if (ua.bot || ![hit.route, hit.type, hit.airline].every(v => typeof v === 'boolean')) return sendJson(res, 400, { error: 'invalid' });
+      const hour = Math.floor(time / 3600_000);
+      const c = cards.get(hour) || { hour, n: 0, route: 0, type: 0, airline: 0 };
+      c.n++; c.route += hit.route ? 1 : 0; c.type += hit.type ? 1 : 0; c.airline += hit.airline ? 1 : 0;
+      cards.set(hour, c);
       return sendJson(res, 204, null);
     }
     if (ua.bot) { addPv(day, 'bots', ''); return sendJson(res, 204, null); }

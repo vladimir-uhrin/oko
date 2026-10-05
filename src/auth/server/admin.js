@@ -8,7 +8,8 @@
 // Admin vidí účty a prevádzku, nie pohyb ľudí po glóbuse (CLAUDE.md pravidlo 6):
 // sledované lety iba ako počet, relácie iba s orientačným názvom prehliadača.
 
-import { analytics, attention, clampInt, costs, dayRange, feedHistory, feedSettingsList, traffic, validateFeedUpdate,
+import { upstream as upstreamRegistry } from '../../data/upstreamStatus.js';
+import { analytics, attention, cardHealthSeries, clampInt, costs, dayRange, feedHistory, feedSettingsList, traffic, validateFeedUpdate,
   validateNotice } from '../../admin/server/api.js';
 import { clientIp, localDay, normalizeIp } from '../../admin/server/runtime.js';
 import { handleStudioAdmin } from '../../admin/server/studio/adminApi.js';
@@ -53,7 +54,7 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
       // Naživo (2026-10-04): živí návštevníci s polohou na mapu (len pamäť servera).
       '/api/admin/live': ['GET'],
       // Záznam návštev s IP (2026-10-04, 30 dní): vyhľadávanie a stránkovanie.
-      '/api/admin/visits': ['GET'], '/api/admin/visits.csv': ['GET'], '/api/admin/attention': ['GET'],
+      '/api/admin/visits': ['GET'], '/api/admin/visits.csv': ['GET'], '/api/admin/attention': ['GET'], '/api/admin/health': ['GET'],
       '/api/admin/ignored-ips': ['POST'],
     }[route];
     if (!methods) throw fail('not_found', 404);
@@ -67,7 +68,11 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
       if (route === '/api/admin/live') return json(res, 200, needRuntime().liveSnapshot());
       if (route === '/api/admin/attention') {
         const r = needRuntime();
-        return json(res, 200, { items: attention(r, now(), { studioCounts: r.store.studioCounts() }), liveNow: r.liveVisitors() });
+        return json(res, 200, { items: attention(r, now(), { studioCounts: r.store.studioCounts(), upstream: upstreamRegistry.snapshot() }), liveNow: r.liveVisitors() });
+      }
+      if (route === '/api/admin/health') {
+        // Externé zdroje (spoločný register) a zdravie kariet lietadiel za 24 h (2026-10-05).
+        return json(res, 200, { upstream: upstreamRegistry.snapshot(), cards: cardHealthSeries(needRuntime(), now(), 24) });
       }
       if (route === '/api/admin/visits' || route === '/api/admin/visits.csv') {
         needRuntime().flush();

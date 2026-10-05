@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAdsbLolTypeFallback, typeFromReadsb } from './adsbLolTypeFallback.js';
+import { createUpstreamRegistry } from './upstreamStatus.js';
 
 test('záznam readsb → typ pre kartu (ľudský názov zo slovníka, inak desc)', () => {
   assert.deepEqual(typeFromReadsb({ t: 'A321', r: 'HA-LTL', flight: 'WZZ6771 ' }, '471F05'),
@@ -16,7 +17,7 @@ test('šetrne: po jednom s odstupom, cache (nenájdené kratšie), po 429 pauza,
   const calls = [];
   let status = 200;
   const service = createAdsbLolTypeFallback({
-    now: () => clock, sleep: async ms => { clock += ms; }, maxPending: 2,
+    now: () => clock, sleep: async ms => { clock += ms; }, maxPending: 2, registry: createUpstreamRegistry({ now: () => clock }),
     fetchImpl: async url => { calls.push({ url, at: clock }); return { ok: status === 200, status, json: async () => ({ ac: url.endsWith('471f05') ? [{ t: 'A321', r: 'HA-LTL' }] : [] }) }; },
   });
   const [a, b] = await Promise.all([service.lookup('471f05'), service.lookup('4400f8')]);

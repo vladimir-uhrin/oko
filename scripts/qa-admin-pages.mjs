@@ -27,6 +27,14 @@ const MOCK = {
   '/api/admin/analytics': { days: 30, liveNow: 4, series, totals: { views: 3200, visitors: 820, minutes: 5400, bots: 90 }, previous: { views: 2500, visitors: 900, minutes: 5400, bots: 70 },
     published: [{ day: day(20), titles: ['FZ1073: núdzové pristátie'] }, { day: day(6), titles: ['Týždeň na fronte'] }],
     dims: { ref: [{ val: 'google.com', n: 300 }, { val: 'facebook.com', n: 120 }], country: [{ val: 'SK', n: 2400 }, { val: 'CZ', n: 300 }], path: [{ val: '/', n: 2800 }] } },
+  '/api/admin/health': {
+    upstream: [
+      { name: 'adsb.lol', lastHour: { n: 61, limited: 0, errors: 0 }, last24h: { n: 1310, limited: 2, errors: 1 }, pausedUntil: null, lastLimitedAt: now - 5 * 3600_000 },
+      { name: 'adsbdb', lastHour: { n: 140, limited: 3, errors: 0 }, last24h: { n: 2600, limited: 41, errors: 4 }, pausedUntil: now + 240_000, lastLimitedAt: now - 60_000 },
+      { name: 'nominatim', lastHour: { n: 4, limited: 0, errors: 0 }, last24h: { n: 37, limited: 0, errors: 0 }, pausedUntil: null, lastLimitedAt: null },
+    ],
+    cards: Array.from({ length: 24 }, (_, i) => ({ at: now - (23 - i) * 3600_000, n: i % 3 ? 4 : 0, route: i > 18 ? 0 : (i % 3 ? 3 : 0), type: i % 3 ? 4 : 0, airline: i % 3 ? 3 : 0 })),
+  },
   '/api/admin/traffic': { hours: 24, series: [{ at: now, n: 100, e5: 0, e4: 1, blocked: 0, avgMs: 40, bytes: 1000 }], routes: [] },
   '/api/admin/accounts-chart': { series: series.map(d => ({ day: d.day, registrations: 0, logins: 1 })) },
   '/api/admin/users': { total: 2, users: [
@@ -77,6 +85,9 @@ try {
     if (analytics.events !== 2) failures.push(`${label}: značiek príspevkov ${analytics.events}`);
     if (!analytics.deltas.includes('+28 % oproti predtým')) failures.push(`${label}: delty ${analytics.deltas}`);
     await shot('users', 'pouzivatelia');
+    const ops = await shot('traffic', 'prevadzka', () => ({ sources: [...document.querySelectorAll('.admin-section')].find(x => x.querySelector('h2')?.textContent === 'Externé zdroje')?.querySelectorAll('tbody tr').length ?? 0,
+      blocked: [...document.querySelectorAll('.admin-badge-bad')].some(b => b.textContent.startsWith('zablokovaný do ')), cards: Boolean([...document.querySelectorAll('h2')].find(h => h.textContent === 'Karty lietadiel')) }));
+    if (ops.sources !== 3 || !ops.blocked || !ops.cards) failures.push(`${label}: prevádzka ${JSON.stringify(ops)}`);
     await page.close();
   }
 } finally {

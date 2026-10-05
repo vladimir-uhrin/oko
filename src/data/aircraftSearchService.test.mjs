@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createAircraftSearchService, normalizeReadsb, upstreamPaths } from './aircraftSearchService.js';
 import { parseAircraftQuery } from './aircraftSearch.js';
+import { createUpstreamRegistry } from './upstreamStatus.js';
 
 const RUSLAN = { hex: '508035', flight: 'ADB3017 ', r: 'UR-82072', t: 'A124', desc: 'ANTONOV An-124 Ruslan', ownOp: 'Antonov Airlines',
   lat: 48.17, lon: 17.21, alt_baro: 'ground', gs: 0, track: 220, seen_pos: 2, dbFlags: 0 };
@@ -39,7 +40,7 @@ test('readsb záznam → OKO: meno typu zo slovníka, na zemi, prevádzkovateľ'
 test('fronta: po jednej požiadavke s odstupom ≥ 1,1 s, cache 20 s, po 429 pauza 60 s', async () => {
   const clock = { time: 1_000_000 };
   const up = fakeUpstream(clock);
-  const service = createAircraftSearchService({ fetchImpl: up.fetchImpl, now: () => clock.time, sleep: async ms => { clock.time += ms; } });
+  const service = createAircraftSearchService({ fetchImpl: up.fetchImpl, now: () => clock.time, sleep: async ms => { clock.time += ms; }, registry: createUpstreamRegistry({ now: () => clock.time }) });
   const found = await service.search('Antonov');
   assert.equal(up.calls.length, 4);
   for (let i = 1; i < up.calls.length; i++) assert.ok(up.calls[i].at - up.calls[i - 1].at >= 1100, 'odstup');
@@ -63,7 +64,7 @@ test('fronta: po jednej požiadavke s odstupom ≥ 1,1 s, cache 20 s, po 429 pau
 test('HTTP: krátky dopyt 400, limit dopytov z jednej IP, miesto bez volania upstreamu', async t => {
   const clock = { time: 0 };
   const up = fakeUpstream(clock);
-  const service = createAircraftSearchService({ fetchImpl: up.fetchImpl, now: () => clock.time, sleep: async () => {}, perIpPerMin: 3 });
+  const service = createAircraftSearchService({ fetchImpl: up.fetchImpl, now: () => clock.time, sleep: async () => {}, perIpPerMin: 3, registry: createUpstreamRegistry({ now: () => clock.time }) });
   const server = http.createServer((req, res) => service.middleware(req, res, () => { res.writeHead(404); res.end(); }));
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   t.after(() => new Promise(r => server.close(r)));

@@ -8,6 +8,8 @@
  * preto ide cez server so spoločnou frontou (tú istú používa reverzné geokódovanie kokpitu) a cache 24 h.
  * Odpoveď má tvar výsledku Google Geocoding, aby searchAndFlyTo rámovalo miesto rovnako.
  */
+import { upstream } from './upstreamStatus.js';
+
 export const GEOCODE_PATH = '/api/geocode';
 const UPSTREAM = 'https://nominatim.openstreetmap.org/search';
 const USER_AGENT = 'OKO-okolive.sk/1.0 (+https://okolive.sk)';
@@ -70,7 +72,7 @@ export function nominativeGuesses(query) {
  * @param {(task: () => Promise<any>) => Promise<any>} [o.schedule] spoločná fronta Nominatimu (≥ 1,1 s odstup)
  */
 export function createGeocodeService({ fetchImpl = globalThis.fetch, schedule = task => task(), now = Date.now,
-  cacheMs = 24 * 3600_000, perIpPerMin = 20 } = {}) {
+  cacheMs = 24 * 3600_000, perIpPerMin = 20, registry = upstream } = {}) {
   const cache = new Map(); // kľúč → { at, result }
   const limiter = new Map();
 
@@ -88,6 +90,7 @@ export function createGeocodeService({ fetchImpl = globalThis.fetch, schedule = 
       }
       const res = await fetchImpl(`${UPSTREAM}?${params}`, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000) });
+      registry.record('nominatim', { status: res.status, pauseMs: res.status === 429 ? 60_000 : 0 });
       if (!res.ok) throw Object.assign(new Error(`nominatim ${res.status}`), { status: res.status });
       const list = await res.json();
       return Array.isArray(list) && list.length ? toGoogleResult(list[0]) : null;
