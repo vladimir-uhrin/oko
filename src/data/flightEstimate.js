@@ -336,6 +336,9 @@ export function createEstimateTracker({
         }
         const est = estimatePosition(entry.fix, entry.route, nowMs, entry.model);
         if (est.ended) {
+          // Cieľ ešte čaká v rade (2026-10-05, naživo ~2 900 po naplnení z histórie): dlhý prelet bez
+          // cieľa by po 2 h skončil skôr, než sa cieľ dohľadá — nezobraziť, ale ani nezahodiť.
+          if (entry.routeState === 'queued' && !est.destination) continue;
           estimates.delete(hex);
           continue;
         }

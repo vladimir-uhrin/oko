@@ -113,3 +113,18 @@ test('naplnenie zo záznamu po štarte: vo vzduchu áno, živé v snímku vypadn
   tracker.ingest(snap);
   assert.deepEqual(tracker.list(nowMs).map((f) => f.hex), ['3c6444'], 'živé lietadlo zo záznamu vypadne');
 });
+
+test('dlhý prelet bez cieľa: kým cieľ čaká v rade, nezobrazí sa, ale ani nezahodí; po dohľadaní letí k cieľu', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const tracker = createEstimateTracker({ lookupGapMs: 0, lookupRoute: async () => { await gate; return ROUTE; } });
+  const nowMs = (T0 + 3 * 3600) * 1000; // 3 h bez signálu — bez cieľa by už skončil
+  tracker.seed([fixFromState(state('3c6444', -10, 53), T0)], nowMs);
+  assert.equal(tracker.list(nowMs).length, 0, 'bez cieľa sa po 2 h nezobrazuje');
+  assert.equal(tracker.status().estimated, 1, 'ale čaká na cieľ');
+  release();
+  await new Promise((r) => setTimeout(r, 10));
+  const list = tracker.list(nowMs);
+  assert.equal(list.length, 1, 'po dohľadaní cieľa letí ďalej');
+  assert.equal(list[0].route.destination.code, 'JFK');
+});
