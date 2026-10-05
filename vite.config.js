@@ -42,6 +42,7 @@ import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createAircraftSearchService } from './src/data/aircraftSearchService.js';
 import { createGeocodeService } from './src/data/geocodeService.js';
 import { LIMITED as ADSBDB_LIMITED, createAdsbdbGuard } from './src/data/adsbdbGuard.js';
+import { createAdsbLolTypeFallback } from './src/data/adsbLolTypeFallback.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
@@ -3654,6 +3655,8 @@ function adsbdbProxy() {
   // Ochrana adsbdb (2026-10-05, adsbdbGuard.js): po 429 pauza, pozaďové dopyty s prídelom,
   // zablokovanie = ADSBDB_LIMITED (karta dostane 503 a skúsi neskôr), nie „nenájdené".
   const guard = createAdsbdbGuard();
+  // Typ a registrácia z adsb.lol, keď ich adsbdb nemá (404) alebo je práve zablokovaný (2026-10-05).
+  const lolType = createAdsbLolTypeFallback();
   let lastLimitLog = 0;
   function lookup(kind, key, { background = false } = {}) {
     const store = kind === 'route' ? cache.routes : cache.aircraft;
@@ -3730,7 +3733,11 @@ function adsbdbProxy() {
           if (kind === 'type') {
             const hex = String(rawKey || '').toLowerCase();
             if (!/^[0-9a-f]{6}$/.test(hex)) return send(400, { error: 'invalid hex' });
-            const data = await lookup('aircraft', hex);
+            let data = await lookup('aircraft', hex);
+            if (!data || data === ADSBDB_LIMITED) {
+              const fallback = await lolType.lookup(hex);
+              if (fallback) data = fallback;
+            }
             if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
             return send(200, data ? { found: true, ...data } : { found: false });
           }
