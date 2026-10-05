@@ -128,3 +128,12 @@ test('dlhý prelet bez cieľa: kým cieľ čaká v rade, nezobrazí sa, ale ani 
   assert.equal(list.length, 1, 'po dohľadaní cieľa letí ďalej');
   assert.equal(list[0].route.destination.code, 'JFK');
 });
+
+test('bez cieľa a pri strate signálu klesalo: odhad najviac 20 min (pristáva mimo pokrytia); s cieľom ako predtým', () => {
+  const base = fixFromState(state('3c6444', 20, 5, { cs: 'N123AB' }), T0); // nad Afrikou, bez cieľa
+  const descending = { ...base, vrMps: -6 };
+  assert.equal(estimatePosition(descending, null, (T0 + 15 * 60) * 1000).ended, false);
+  assert.equal(estimatePosition(descending, null, (T0 + 21 * 60) * 1000).ended, true, 'po 20 min koniec');
+  assert.equal(estimatePosition({ ...base, vrMps: -1 }, null, (T0 + 60 * 60) * 1000).ended, false, 'mierne klesanie = let pokračuje');
+  assert.equal(estimatePosition(base, null, (T0 + 60 * 60) * 1000).ended, false, 'vo výške 2 h');
+});

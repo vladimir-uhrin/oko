@@ -21,6 +21,13 @@ import { effectiveGroundSpeed } from './windAloft.js';
 export const ESTIMATE_MIN_ALT_M = 3000;
 export const ESTIMATE_MIN_SPEED_MPS = 90;
 export const ESTIMATE_NO_ROUTE_MAX_S = 2 * 3600;
+/**
+ * Bez cieľa a pri strate signálu klesalo (2026-10-05, vlastník: lietadlá nad pevninou mimo dosahu):
+ * pravdepodobne pristáva na letisku bez pokrytia — odhad najviac 20 min, nie 2 h (žiadne duchy).
+ */
+export const ESTIMATE_DESCENDING_NO_ROUTE_MAX_S = 20 * 60;
+/** Klesanie aspoň toľko (m/s, ≈ 800 ft/min) = pristávanie, nie vyrovnanie letu. */
+export const ESTIMATE_DESCENDING_VR_MPS = -4;
 export const ESTIMATE_ROUTE_MAX_S = 14 * 3600;
 /** Bližšie k cieľu = pristáva, nie odlietava do diery. */
 export const ESTIMATE_LANDING_NEAR_KM = 60;
@@ -131,7 +138,8 @@ export function estimatePosition(fix, route, nowMs, model = null, calibration = 
       destination: dest, remainingKm, nat: path.nat, wind,
     };
   }
-  const ended = elapsedS > ESTIMATE_NO_ROUTE_MAX_S;
+  const descending = Number.isFinite(fix.vrMps) && fix.vrMps <= ESTIMATE_DESCENDING_VR_MPS;
+  const ended = elapsedS > (descending ? ESTIMATE_DESCENDING_NO_ROUTE_MAX_S : ESTIMATE_NO_ROUTE_MAX_S);
   return {
     lat: at.lat, lon: at.lon, altM: fix.altM, trackDeg: at.trackDeg, gsMps: gs, elapsedS, distanceKm: flownKm,
     uncertaintyKm: unc, method: path.nat ? 'nat' : 'track', ended, reason: ended ? 'expired' : null,
