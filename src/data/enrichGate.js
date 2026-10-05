@@ -8,7 +8,9 @@
 // Čistý modul s vloženými hodinami — testovateľný bez prehliadača.
 
 export const ENRICH_RETRY_MS = 60_000;
-export const ENRICH_MAX_ATTEMPTS = 3;
+// 6 pokusov (2026-10-05): po 1, 2, 3, 4, 5 min = ~15 min. adsbdb pri preťažení blokuje na 5 min a
+// server vtedy odpovie 503 — 3 pokusy (6 min) sa minuli skôr, než blokovanie skončilo.
+export const ENRICH_MAX_ATTEMPTS = 6;
 
 /**
  * @param {{retryMs?: number, maxAttempts?: number, now?: () => number}} [options]

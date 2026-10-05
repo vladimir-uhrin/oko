@@ -32,7 +32,14 @@ test('zlyhaný dopyt sa zopakuje po 1, potom 2 minútach, najviac trikrát', () 
   t = 60_000 + 120_000;
   assert.equal(gate.begin('t:44029f'), true, 'tretí pokus');
   gate.fail('t:44029f');
-  t = 10 * 60_000;
+  // Ďalšie pokusy s čakaním „minúta × pokus" až po ENRICH_MAX_ATTEMPTS (6 = ~15 min, dlhšie než 5 min blokovanie adsbdb).
+  for (let attempt = 4; attempt <= ENRICH_MAX_ATTEMPTS; attempt++) {
+    t += 60_000 * (attempt - 1);
+    assert.equal(gate.begin('t:44029f'), true, `${attempt}. pokus`);
+    gate.fail('t:44029f');
+  }
+  assert.ok(t >= 10 * 60_000, 'pokusy pokryjú viac ako 5 min blokovania adsbdb');
+  t += 60 * 60_000;
   assert.equal(gate.begin('t:44029f'), false, `po ${ENRICH_MAX_ATTEMPTS} pokusoch koniec`);
   assert.equal(gate.status('t:44029f').attempts, ENRICH_MAX_ATTEMPTS);
 });

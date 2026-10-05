@@ -41,6 +41,7 @@ import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKe
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createAircraftSearchService } from './src/data/aircraftSearchService.js';
 import { createGeocodeService } from './src/data/geocodeService.js';
+import { LIMITED as ADSBDB_LIMITED, createAdsbdbGuard } from './src/data/adsbdbGuard.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
@@ -3650,9 +3651,14 @@ function adsbdbProxy() {
     };
   }
 
-  function lookup(kind, key) {
+  // Ochrana adsbdb (2026-10-05, adsbdbGuard.js): po 429 pauza, pozaďové dopyty s prídelom,
+  // zablokovanie = ADSBDB_LIMITED (karta dostane 503 a skúsi neskôr), nie „nenájdené".
+  const guard = createAdsbdbGuard();
+  let lastLimitLog = 0;
+  function lookup(kind, key, { background = false } = {}) {
     const store = kind === 'route' ? cache.routes : cache.aircraft;
     if (fresh(store[key])) return Promise.resolve(store[key].data);
+    if (guard.paused() || (background && !guard.takeBackground())) return Promise.resolve(store[key] ? store[key].data : ADSBDB_LIMITED);
     const ik = `${kind}:${key}`;
     if (!inflight.has(ik)) {
       inflight.set(ik, (async () => {
@@ -3670,11 +3676,19 @@ function adsbdbProxy() {
           if (res.status === 404) {
             store[key] = { at: Date.now(), data: null }; // known-missing — cache the miss
             dirty = true;
+            return null;
           }
-          // other statuses: leave uncached so we retry later
-          return fresh(store[key]) ? store[key].data : null;
+          if (res.status === 429) {
+            guard.onRateLimited(await res.text().catch(() => ''));
+            if (Date.now() - lastLimitLog > 10 * 60_000) {
+              lastLimitLog = Date.now();
+              console.warn(`[adsbdb] rate limited — pauza do ${new Date(guard.pausedUntil()).toISOString()}`);
+            }
+          }
+          // other statuses: leave uncached so we retry later (karta dostane 503, nie „nenájdené")
+          return store[key] ? store[key].data : ADSBDB_LIMITED;
         } catch {
-          return fresh(store[key]) ? store[key].data : null; // network error → stale if any
+          return store[key] ? store[key].data : ADSBDB_LIMITED; // network error → stale if any
         } finally {
           inflight.delete(ik);
         }
@@ -3683,13 +3697,24 @@ function adsbdbProxy() {
     return inflight.get(ik);
   }
 
-  _adsbdbRouteLookup = async (cs) => { await loadOnce(); return lookup('route', String(cs || '').toUpperCase()); };
+  // Pozaďové dohľadanie cieľa pre odhady polôh — s prídelom, aby nezablokovalo karty lietadiel.
+  _adsbdbRouteLookup = async (cs) => {
+    await loadOnce();
+    const data = await lookup('route', String(cs || '').toUpperCase(), { background: true });
+    return data === ADSBDB_LIMITED ? null : data;
+  };
   return {
     name: 'adsbdb-proxy',
     configureServer(server) {
       server.middlewares.use('/api/adsbdb', async (req, res) => {
         await loadOnce();
         const send = (status, obj) => {
+          if (obj === ADSBDB_LIMITED) {
+            const retry = Math.max(30, Math.ceil((guard.pausedUntil() - Date.now()) / 1000));
+            res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': String(retry), 'Cache-Control': 'no-store' });
+            res.end(JSON.stringify({ error: 'upstream_limited', retryAfterS: retry }));
+            return;
+          }
           res.writeHead(status, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(obj));
         };
@@ -3699,12 +3724,14 @@ function adsbdbProxy() {
             const cs = String(rawKey || '').toUpperCase();
             if (!/^[A-Z0-9]{2,8}$/.test(cs)) return send(400, { error: 'invalid callsign' });
             const data = await lookup('route', cs);
+            if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
             return send(200, data ? { found: true, ...data } : { found: false });
           }
           if (kind === 'type') {
             const hex = String(rawKey || '').toLowerCase();
             if (!/^[0-9a-f]{6}$/.test(hex)) return send(400, { error: 'invalid hex' });
             const data = await lookup('aircraft', hex);
+            if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
             return send(200, data ? { found: true, ...data } : { found: false });
           }
           if (kind === 'reg') {
@@ -3715,6 +3742,7 @@ function adsbdbProxy() {
             const reg = String(rawKey || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
             if (!/^[A-Z0-9-]{2,10}$/.test(reg) || !/[A-Z]/.test(reg)) return send(400, { error: 'invalid registration' });
             const data = await lookup('aircraft', reg);
+            if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
             return send(200, data ? { found: true, ...data } : { found: false });
           }
           return send(404, { error: 'unknown endpoint' });
