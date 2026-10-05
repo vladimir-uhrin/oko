@@ -44,7 +44,7 @@ import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
 import { isCrawlerUserAgent } from './crawlerDetect.js';
 import { initAnalytics, trackEvent } from './analytics.js';
-import { AUTO_BASEMAP_STORAGE_KEY, createLayerBasemapPolicy, parseAutoBasemapSetting } from './layerBasemap.js';
+import { AUTO_BASEMAP_STORAGE_KEY, createLayerBasemapPolicy, meteoBasemapForHost, parseAutoBasemapSetting } from './layerBasemap.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { armStartupGate, releaseStartupGate } from './startupGate.js';
@@ -381,6 +381,8 @@ async function init() {
     // vlastníkom prepínania — vrstvy len prosia udalosťou.
     window.addEventListener('gev:request-map-stack', (event) => {
       const id = String(event?.detail?.id || '');
+      // Meteo riadi mapa podľa vrstvy (layerBasemap.js, 2026-10-05): jedny pravidlá, hláška, štítok AUTO.
+      if (String(event?.detail?.reason || '').startsWith('meteo')) return;
       if (!id || !mapStackController.getStack(id) || mapStackController.getActiveId() === id) return;
       void mapStackController.setStack(id);
     });
@@ -450,13 +452,16 @@ async function init() {
       hasStack: (id) => Boolean(mapStackController.getStack(id)),
       setStack: (id) => { void styleManager._setMapStack(id); },
       isOn: () => (autoBasemapToggle ? autoBasemapToggle.checked : readAutoBasemap()),
+      resolveMap: (layerId) => (layerId === 'meteo-gfs' ? meteoBasemapForHost(window.location.hostname) : null),
+      // Štítok AUTO na aktívnom čipe mapy (style.css): mapu práve drží vrstva, nie ručná voľba.
+      onState: ({ auto }) => { if (auto) document.body.dataset.autoBasemap = 'on'; else delete document.body.dataset.autoBasemap; },
       notify: ({ layerId, mapId, undo }) => {
         // Zrozumiteľne (2026-10-05): „na reliéf kvôli vrstve Zemetrasenia", nie technické mená máp.
         const mapKey = `basemap.name.${mapId}`;
         const mapName = t(mapKey) === mapKey ? (mapStackController.getStack(mapId)?.label || mapId) : t(mapKey);
         const layerKey = `layer.${layerId}.name`;
-        // Bez dovetku v zátvorke: „Zemetrasenia (24 h)" → „Zemetrasenia".
-        const layerName = (t(layerKey) === layerKey ? layerId : t(layerKey)).split(' (')[0];
+        // Bez dovetku: „Zemetrasenia (24 h)" → „Zemetrasenia", „Meteorológia · vietor a teplota" → „Meteorológia".
+        const layerName = (t(layerKey) === layerKey ? layerId : t(layerKey)).split(' (')[0].split(' · ')[0];
         styleManager._showToast?.(t('basemap.auto-toast', { map: mapName, layer: layerName }), { durationMs: 7000, onClick: undo, tone: 'info' });
       },
     });

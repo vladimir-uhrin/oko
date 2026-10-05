@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { LAYER_BASEMAPS, createLayerBasemapPolicy, parseAutoBasemapSetting } from './layerBasemap.js';
+import { LAYER_BASEMAPS, createLayerBasemapPolicy, meteoBasemapForHost, parseAutoBasemapSetting } from './layerBasemap.js';
+import { basemapForHost } from './data/meteoLayer.js';
 import { MAP_STACKS } from './mapStackController.js';
 
 function harness({ active = 'photoreal', on = true, stacks = MAP_STACKS.map((s) => s.id) } = {}) {
@@ -160,4 +161,65 @@ test('hláška: zrozumiteľné mená mapy a vrstvy v SK aj EN', () => {
     assert.equal(strings.split(`'basemap.name.${map}':`).length - 1, 2, `meno mapy ${map} v oboch jazykoch`);
   }
   for (const layer of Object.keys(LAYER_BASEMAPS)) assert.ok(strings.includes(`'layer.${layer}.name':`), `meno vrstvy ${layer}`);
+});
+
+// ── meteo pod rovnakými pravidlami + štítok AUTO (2026-10-05) ───────────────
+function meteoHarness({ active = 'photoreal', host = 'okolive.sk' } = {}) {
+  const h = { active, states: [], notes: [] };
+  h.policy = createLayerBasemapPolicy({
+    getActiveId: () => h.active,
+    hasStack: () => true,
+    setStack: (id) => { h.active = id; h.policy.onMapChange(id); },
+    notify: (info) => h.notes.push(info),
+    resolveMap: (layerId) => (layerId === 'meteo-gfs' ? meteoBasemapForHost(host) : null),
+    onState: (state) => h.states.push(state),
+  });
+  return h;
+}
+
+test('meteo: mapa podľa hostiteľa — rovnaké pravidlo ako meteoLayer.basemapForHost', () => {
+  for (const host of ['localhost', '127.0.0.1', 'okolive.sk', 'www.okolive.sk', '', 'app.localhost']) {
+    assert.equal(meteoBasemapForHost(host), basemapForHost(host), host);
+  }
+});
+
+test('meteo: prepne aj pri obnove z odkazu, len z fotomapy, zblízka mapu nevracia', () => {
+  const h = meteoHarness();
+  h.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'restore' });
+  assert.equal(h.active, 'gibs-blue-marble', 'pole je na fotomape nečitateľné aj pri obnove');
+  assert.equal(h.notes.length, 0, 'bez hlášky — používateľ nič nekliklal');
+  h.policy.onCameraHeight(50_000);
+  assert.equal(h.active, 'gibs-blue-marble', 'meteo zblízka ostáva na svojej mape');
+  h.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: false, origin: 'user' });
+  assert.equal(h.active, 'photoreal');
+
+  const osm = meteoHarness({ active: 'osm' });
+  osm.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'user' });
+  assert.equal(osm.active, 'osm', 'na inej než fotomape meteo mapu nemení');
+
+  const local = meteoHarness({ host: 'localhost' });
+  local.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'user' });
+  assert.equal(local.active, 'stadia-dark');
+  assert.equal(local.notes.length, 1, 'klik používateľa = hláška s návratom');
+});
+
+test('štítok AUTO: svieti, kým mapu drží vrstva; zhasne pri ručnej voľbe, priblížení aj vypnutí', () => {
+  const h = meteoHarness({ active: 'osm' });
+  h.policy.onLayerChange({ layerId: 'earthquakes', enabled: true, origin: 'user' });
+  assert.deepEqual(h.states.at(-1), { auto: true, layerId: 'earthquakes' });
+  h.policy.onCameraHeight(50_000);
+  assert.deepEqual(h.states.at(-1), { auto: false, layerId: null }, 'zblízka je späť pôvodná mapa');
+  h.policy.onCameraHeight(900_000);
+  assert.equal(h.states.at(-1).auto, true);
+  h.policy.onManualChoice();
+  assert.equal(h.states.at(-1).auto, false);
+  const count = h.states.length;
+  h.policy.onMapChange('osm');
+  assert.equal(h.states.length, count, 'bez zmeny stavu sa nič neposiela');
+});
+
+test('main.js: žiadosti meteo o mapu rieši politika, nie priamy prepínač', () => {
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.ok(main.includes(".startsWith('meteo')) return;"));
+  assert.ok(main.includes('resolveMap:'));
 });

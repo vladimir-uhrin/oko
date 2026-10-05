@@ -1580,6 +1580,19 @@ html.oko-preloader-demo #loading-screen.hidden {
   letter-spacing: 0.4px;
 }
 
+/* Mapu práve drží vrstva (layerBasemap.js): aktívny čip nesie štítok AUTO. */
+body[data-auto-basemap] .map-stack-chip.active:not(.map-stack-chip--variant)::after {
+  content: 'AUTO';
+  margin-left: 4px;
+  padding: 0 3px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font-size: 6px;
+  letter-spacing: 0.5px;
+  opacity: 0.75;
+  vertical-align: middle;
+}
+
 .map-stack-chip-req {
   font-size: 7px;
   letter-spacing: 0.3px;
