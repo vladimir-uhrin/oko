@@ -111,6 +111,8 @@ export const EN_STRINGS = Object.freeze({
   // Odhadovaná poloha bez signálu (2026-10-04, flightEstimate.js).
   'card.estimated-cue': 'ESTIMATE',
   'card.estimated': 'estimated position ±{km} km',
+  'card.estimated-nat': 'NAT track {id}',
+  'card.estimated-wind': 'wind {kmh} km/h',
   'hover.estimated': 'estimated position — aircraft out of coverage',
   'topics.link': 'Topics',
   'topics.title': 'Topics: aircraft, ships, Ukraine, Middle East, gas',
@@ -2408,6 +2410,8 @@ export const SK_STRINGS = Object.freeze({
   // Odhadovaná poloha bez signálu (2026-10-04, flightEstimate.js).
   'card.estimated-cue': 'ODHAD',
   'card.estimated': 'odhadovaná poloha ±{km} km',
+  'card.estimated-nat': 'trať NAT {id}',
+  'card.estimated-wind': 'vietor {kmh} km/h',
   'hover.estimated': 'odhadovaná poloha — lietadlo je mimo pokrytia',
   'topics.link': 'Témy',
   'topics.title': 'Témy: lietadlá, lode, Ukrajina, Blízky východ, plyn',

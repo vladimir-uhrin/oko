@@ -34,7 +34,9 @@ import { authPlugin } from './src/auth/server/plugin.js';
 import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
-import { createEstimateTracker } from './src/data/flightEstimate.js';
+import { accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
+import { parseNatTracks } from './src/data/flightPath.js';
+import { createWindGridCache } from './src/data/windAloft.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createAircraftSearchService } from './src/data/aircraftSearchService.js';
@@ -233,7 +235,85 @@ async function seedEstimatesFromHistory() {
     st.running = false;
   }
 }
-const _estimateTracker = createEstimateTracker({ lookupRoute: (cs) => (_adsbdbRouteLookup ? _adsbdbRouteLookup(cs) : Promise.resolve(null)) });
+/** Rez meteo poľa z meteo proxy (jej cache) — nastaví meteoProxy. */
+let _meteoGetSlice = null;
+/**
+ * Vietor vo výške letu pre odhady (2026-10-05, src/data/windAloft.js): mriežky GFS z meteo proxy,
+ * dekódované raz za krok predpovede (sharp). Bez proxy alebo bez sharp odhad letí poslednou rýchlosťou.
+ */
+const _windGrids = createWindGridCache({
+  getSlice: (fieldId, iso) => (_meteoGetSlice ? _meteoGetSlice(fieldId, iso) : Promise.reject(new Error('meteo proxy not ready'))),
+  decodePng: async (png) => {
+    const sharp = (await import('sharp')).default;
+    const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    return { data, width: info.width, height: info.height };
+  },
+});
+/**
+ * Severoatlantické trate (NAT OTS) z FAA — verejný JSON, dielo vlády USA (2026-10-05). Raz za 30 min,
+ * posledná dobrá kópia na disku; bez nich odhad letí po kružnici.
+ */
+const NAT_URL = 'https://nms.aim.faa.gov/datanat/nat.json';
+const ESTIMATES_DIR = path.join(__dirname, '.gev-cache', 'estimates');
+let _natTracks = [];
+let _natFetchedAt = 0;
+async function refreshNatTracks() {
+  if (Date.now() - _natFetchedAt < 30 * 60_000) return;
+  _natFetchedAt = Date.now();
+  const diskFile = path.join(ESTIMATES_DIR, 'nat.json');
+  try {
+    const res = await fetch(NAT_URL, { headers: { 'User-Agent': 'OKO okolive.sk (flight estimates)', Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const tracks = parseNatTracks(JSON.parse(text));
+    if (!tracks.length) throw new Error('no tracks');
+    _natTracks = tracks;
+    await fsp.mkdir(ESTIMATES_DIR, { recursive: true });
+    await fsp.writeFile(diskFile, text);
+  } catch (error) {
+    if (!_natTracks.length) {
+      try { _natTracks = parseNatTracks(JSON.parse(await fsp.readFile(diskFile, 'utf8'))); } catch { /* nič na disku */ }
+    }
+    console.warn('[estimates] NAT tracks:', error?.message || error, `(using ${_natTracks.length} cached)`);
+  }
+}
+/**
+ * Presnosť odhadov (2026-10-05): pri návrate signálu chyba odhadu a jednoduchého odhadu (bez vetra
+ * a tratí). V pamäti posledných 20 000, na disku JSONL (prežije reštart a vydanie).
+ */
+const ACCURACY_FILE = path.join(ESTIMATES_DIR, 'accuracy.jsonl');
+const _accuracySamples = [];
+let _accuracyLoaded = false;
+let _calibrationCache = { at: 0, value: null };
+function loadAccuracyOnce() {
+  if (_accuracyLoaded) return;
+  _accuracyLoaded = true;
+  try {
+    const lines = fs.readFileSync(ACCURACY_FILE, 'utf8').trim().split('\n').slice(-20_000);
+    for (const line of lines) { try { _accuracySamples.push(JSON.parse(line)); } catch { /* poškodený riadok */ } }
+  } catch { /* prvé spustenie */ }
+}
+function recordAccuracy(sample) {
+  loadAccuracyOnce();
+  _accuracySamples.push(sample);
+  if (_accuracySamples.length > 20_000) _accuracySamples.splice(0, _accuracySamples.length - 20_000);
+  fsp.mkdir(ESTIMATES_DIR, { recursive: true }).then(() => fsp.appendFile(ACCURACY_FILE, JSON.stringify(sample) + '\n')).catch(() => {});
+}
+/** Posledných 7 dní meraní → pásma (kalibrácia kruhu neistoty pre klienta), obnova raz za 5 min. */
+function estimateCalibration() {
+  loadAccuracyOnce();
+  if (Date.now() - _calibrationCache.at < 5 * 60_000 && _calibrationCache.value) return _calibrationCache.value;
+  const since = Date.now() / 1000 - 7 * 86400;
+  const stats = accuracyStats(_accuracySamples.filter((x) => x.t >= since));
+  _calibrationCache = { at: Date.now(), value: stats.map((b) => ({ maxMin: Number.isFinite(b.maxMin) ? b.maxMin : null, n: b.n, p80Km: b.p80Km })) };
+  return _calibrationCache.value;
+}
+const _estimateTracker = createEstimateTracker({
+  lookupRoute: (cs) => (_adsbdbRouteLookup ? _adsbdbRouteLookup(cs) : Promise.resolve(null)),
+  natTracks: () => { void refreshNatTracks(); return _natTracks; },
+  windSamplerFor: (altitudeM) => _windGrids.samplerFor(altitudeM),
+  onAccuracy: recordAccuracy,
+});
 /** @type {string|null} Cached upstream response body (JSON text). */
 let _openskyCacheBody = null;
 /** @type {number} HTTP status of the cached response. */
@@ -3940,6 +4020,7 @@ function meteoProxy() {
     return job;
   }
 
+  _meteoGetSlice = getSlice;
   return {
     name: 'meteo-proxy',
     configureServer(server) {
@@ -5951,10 +6032,26 @@ function flightHistoryProxy() {
       }
       // Odhadované lietadlá bez signálu (2026-10-04): posledný fix + overený cieľ, polohu počíta
       // klient (src/data/flightEstimate.js estimatePosition). Krátka cache — zoznam sa mení s každým snímkom.
+      // Presnosť odhadov (2026-10-05): pásma času bez signálu, medián/80. percentil chyby, porovnanie
+      // s jednoduchým odhadom, trate NAT a stav vetra — pre admin (Prevádzka → Odhady polôh).
+      server.middlewares.use('/api/flights/estimated/accuracy', (req, res) => {
+        loadAccuracyOnce();
+        const days = Math.max(1, Math.min(30, Number(new URL(req.url, 'http://x').searchParams.get('days')) || 7));
+        const since = Date.now() / 1000 - days * 86400;
+        const samples = _accuracySamples.filter((x) => x.t >= since);
+        const body = JSON.stringify({
+          now: Date.now(), days, samples: samples.length, buckets: accuracyStats(samples),
+          estimator: _estimateTracker.status(),
+          nat: { tracks: _natTracks.map((t) => ({ id: t.id, dir: t.dir, from: t.fromMs, to: t.toMs, points: t.points.length })), fetchedAt: _natFetchedAt || null },
+          wind: _windGrids.status(),
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
       server.middlewares.use('/api/flights/estimated', (req, res) => {
         try {
           const flights = _estimateTracker.list(Date.now());
-          const body = JSON.stringify({ now: Date.now(), count: flights.length, flights });
+          const body = JSON.stringify({ now: Date.now(), count: flights.length, calibration: estimateCalibration(), flights });
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=30' });
           res.end(body);
         } catch (error) {

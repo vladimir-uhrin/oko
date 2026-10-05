@@ -1069,6 +1069,8 @@ const SERVER_ESTIMATES_URL = '/api/flights/estimated';
 const SERVER_ESTIMATES_INTERVAL_MS = 60_000;
 let _serverEstimatesAt = 0;
 let _serverEstimatesInflight = false;
+/** Kalibrácia kruhu neistoty z nameraných chýb servera (2026-10-05). */
+let _estimateCalibration = null;
 /** Čiarkovaný úsek trajektórie sledovaného lietadla (indexy v _trailPositions; to null = po koniec). */
 let _trailEstimated = { from: null, to: null };
 let _estimateRingEntity = null;
@@ -3711,7 +3713,7 @@ function _estimateRows(liveStates, nowMs) {
       const known = _flightData.get(hex)?.route;
       if (known?.destination) entry.route = known;
     }
-    const est = estimatePosition(entry.fix, entry.route, nowMs);
+    const est = estimatePosition(entry.fix, entry.route, nowMs, entry.model ?? null, _estimateCalibration);
     if (est.ended) {
       _estimates.delete(hex);
       _estimateEnded.add(hex);
@@ -3735,14 +3737,15 @@ async function _refreshServerEstimates() {
     const res = await fetch(SERVER_ESTIMATES_URL, { headers: { Accept: 'application/json' } });
     if (!res.ok || !String(res.headers.get('content-type') || '').includes('json')) return;
     const data = await res.json();
+    if (Array.isArray(data?.calibration)) _estimateCalibration = data.calibration;
     for (const f of Array.isArray(data?.flights) ? data.flights : []) {
       const hex = _normalizeTrackedIcao(f?.hex);
       if (!hex || _estimateEnded.has(hex)) continue;
       const existing = _estimates.get(hex);
-      if (existing && (existing.route || !f.route)) continue; // lokálny odhad s trasou má prednosť
       if (!existing && _billboards.has(hex) && !_missingPolls.get(hex)) continue; // je živé
       if (!qualifiesForEstimate(f)) continue;
-      _estimates.set(hex, { fix: f, route: f.route || null, source: 'server', est: existing?.est ?? null });
+      // Server má model (trať NAT, vietor) — prednosť pred lokálnym odhadom; cieľ z karty sa zachová.
+      _estimates.set(hex, { fix: f, route: f.route || existing?.route || null, model: f.model || null, source: 'server', est: existing?.est ?? null });
       if (f.route) {
         const info = _flightData.get(hex);
         if (info && !info.route) info.route = f.route;
@@ -4334,7 +4337,15 @@ function _trackedLabelParts(icao24) {
   // „poloha pred X" za ním ukazuje, ako dlho lietadlo nemá signál.
   const estimate = estimated ? _estimates.get(icao24)?.est : null;
   const metaLine = estimate
-    ? [t('card.estimated', { km: Math.max(5, Math.round(estimate.uncertaintyKm / 5) * 5) }), plainMeta].filter(Boolean).join(' · ')
+    ? [
+      t('card.estimated', { km: Math.max(5, Math.round(estimate.uncertaintyKm / 5) * 5) }),
+      // Z čoho odhad vychádza (2026-10-05): trať NAT a vietor na trase (model GFS).
+      estimate.nat ? t('card.estimated-nat', { id: estimate.nat }) : '',
+      estimate.wind && Number.isFinite(_estimates.get(icao24)?.model?.windAheadMps)
+        ? t('card.estimated-wind', { kmh: `${_estimates.get(icao24).model.windAheadMps >= 0 ? '+' : '−'}${Math.abs(Math.round(_estimates.get(icao24).model.windAheadMps * 3.6))}` })
+        : '',
+      plainMeta,
+    ].filter(Boolean).join(' · ')
     : plainMeta;
   // Grafy celého letu (2026-09-12): história z proxy + živý rad + aktuálny
   // fix; s trasou aj odhad výšky po pristátie. Mini profil ostáva len ako
@@ -4682,7 +4693,7 @@ export function _driveFleetModelHandoffForTest({ icao24, position, course = 0 })
 /** Exercise the exact asynchronous fleet loader and return its admitted model. */
 /** Kontrola v prehliadači / testy: lietadlá s odhadovanou polohou (2026-10-04). */
 export function _estimatesForDebug() {
-  return [..._estimates].map(([hex, e]) => ({ hex, cs: e.fix.cs, source: e.source, method: e.est?.method ?? null, uncertaintyKm: e.est ? Math.round(e.est.uncertaintyKm) : null, noSignalMin: Math.round((Date.now() - e.fix.tMs) / 60000), dest: e.route?.destination?.code ?? null, lat: e.est?.lat ?? null, lon: e.est?.lon ?? null }));
+  return [..._estimates].map(([hex, e]) => ({ hex, cs: e.fix.cs, source: e.source, method: e.est?.method ?? null, uncertaintyKm: e.est ? Math.round(e.est.uncertaintyKm) : null, noSignalMin: Math.round((Date.now() - e.fix.tMs) / 60000), dest: e.route?.destination?.code ?? null, lat: e.est?.lat ?? null, lon: e.est?.lon ?? null, nat: e.est?.nat ?? null, wind: e.est?.wind ?? false }));
 }
 // Len vývojový server: tá istá inštancia modulu pre kontrolu v prehliadači (dynamický import dá inú).
 if (import.meta.env?.DEV && typeof globalThis !== 'undefined') globalThis.__okoEstimates = { stats: _estimateStats, list: _estimatesForDebug, track: (hex) => flightsLayer.trackById(hex, { origin: 'user' }) };

@@ -12,7 +12,7 @@ const subtabs = document.getElementById('admin-subtabs');
 const GROUPS = [
   { id: 'overview', label: 'Prehľad', tabs: [['overview', 'Prehľad']] },
   { id: 'visits', label: 'Návštevnosť', tabs: [['live', 'Naživo'], ['analytics', 'Analytika']] },
-  { id: 'ops', label: 'Prevádzka', tabs: [['traffic', 'Požiadavky'], ['feeds', 'Feedy'], ['errors', 'Chyby'], ['costs', 'Náklady']] },
+  { id: 'ops', label: 'Prevádzka', tabs: [['traffic', 'Požiadavky'], ['feeds', 'Feedy'], ['estimates', 'Odhady polôh'], ['errors', 'Chyby'], ['costs', 'Náklady']] },
   { id: 'content', label: 'Obsah', tabs: [['studio', 'Štúdio'], ['performance', 'Výkon príspevkov'], ['notice', 'Oznam']] },
   { id: 'system', label: 'Systém', tabs: [['users', 'Používatelia'], ['maintenance', 'Údržba'], ['audit', 'Audit'], ['log', 'Log']] },
 ];
@@ -256,6 +256,43 @@ function feedSummary(data) {
   if (data.stale) parts.push('ZASTARANÉ');
   return parts.join(' · ') || 'OK';
 }
+/**
+ * Odhady polôh bez signálu (2026-10-05, src/data/flightEstimate.js): ako presne OKO odhaduje lietadlá
+ * mimo pokrytia. Meria sa pri návrate signálu — chyba odhadu (trate NAT + vietor GFS) a pre porovnanie
+ * jednoduchého odhadu (najkratšia trasa, posledná rýchlosť). Verejné súhrnné API, žiadne osobné údaje.
+ */
+async function renderEstimates(days = 7) {
+  setView(el('p', 'admin-muted', 'Načítavam presnosť odhadov…'));
+  const data = await api(`/api/flights/estimated/accuracy?days=${days}`);
+  const km = (v) => (Number.isFinite(v) ? `${number(Math.round(v))} km` : '—');
+  const label = (b) => (Number.isFinite(b.maxMin) ? `${b.minMin}–${b.maxMin} min` : `nad ${b.minMin / 60} h`);
+  const rows = data.buckets.map((b) => {
+    const gain = Number.isFinite(b.medianKm) && Number.isFinite(b.baselineMedianKm) && b.baselineMedianKm > 0
+      ? Math.round((1 - b.medianKm / b.baselineMedianKm) * 100) : null;
+    const methods = ['nat', 'route', 'track'].map((m) => (b.byMethod[m].n ? `${{ nat: 'trať NAT', route: 'k cieľu', track: 'v smere' }[m]} ${b.byMethod[m].n}× ${km(b.byMethod[m].medianKm)}` : '')).filter(Boolean).join(' · ');
+    return row([label(b), number(b.n), km(b.medianKm), km(b.p80Km), km(b.baselineMedianKm),
+      gain == null ? '—' : badge(`${gain > 0 ? '−' : '+'}${Math.abs(gain)} %`, gain > 0 ? 'ok' : 'warn'), methods || '—']);
+  });
+  const est = data.estimator || {};
+  const natText = data.nat?.tracks?.length
+    ? data.nat.tracks.map((t) => `${t.id}${t.dir === 'east' ? '→' : t.dir === 'west' ? '←' : ''}`).join(' ')
+    : 'žiadne (odhad ide po najkratšej trase)';
+  const daysSelect = el('select', 'admin-input');
+  for (const d of [1, 7, 30]) {
+    const opt = el('option', '', `${d} ${d === 1 ? 'deň' : 'dní'}`);
+    opt.value = String(d);
+    if (d === days) opt.selected = true;
+    daysSelect.append(opt);
+  }
+  daysSelect.addEventListener('change', () => guarded(() => renderEstimates(Number(daysSelect.value))));
+  setView(section('Odhady polôh bez signálu',
+    el('p', 'admin-muted', 'Lietadlo, ktoré stratí signál vo vzduchu, letí na mape ďalej ako odhad. Keď sa signál vráti, server porovná odhad so skutočnou polohou. „Jednoduchý odhad" = najkratšia trasa a posledná rýchlosť (bez tratí NAT a vetra) — stĺpec Zlepšenie ukazuje, o koľko je dnešný odhad presnejší. 80 % = v 80 % prípadov bola chyba menšia; podľa toho sa kreslí kruh neistoty.'),
+    el('p', '', `Teraz odhadovaných: ${number(est.estimated ?? 0)} · čaká na cieľ: ${number(est.queue ?? 0)} · meraní za obdobie: ${number(data.samples)} · trate NAT: ${natText} · vietor GFS: ${(data.wind?.grids || []).length ? data.wind.grids.map((g) => g.split('|')[0].replace('wind', '')).join(', ') + ' hPa' : 'nenačítaný'}`),
+    daysSelect,
+    table(['Bez signálu', 'Meraní', 'Chyba (medián)', 'Chyba (80 %)', 'Jednoduchý odhad', 'Zlepšenie', 'Podľa spôsobu'], rows),
+    button('Obnoviť', () => guarded(() => renderEstimates(days)), 'admin-btn')));
+}
+
 async function renderFeeds() {
   setView(el('p', 'admin-muted', 'Zisťujem stav feedov…'));
   const [{ feeds: statuses }, { history, settings }] = await Promise.all([api('/api/admin/feeds'), api('/api/admin/feed-history?hours=168')]);
@@ -1263,7 +1300,7 @@ async function renderVisitLog(box) {
 
 // ── štart ──────────────────────────────────────────────────────────────────
 const RENDER = { overview: renderOverview, live: renderLive, analytics: renderAnalytics, traffic: renderTraffic, errors: renderErrors,
-  costs: renderCosts, feeds: renderFeeds, users: renderUsers, notice: renderNotice, maintenance: renderMaintenance,
+  costs: renderCosts, feeds: renderFeeds, estimates: renderEstimates, users: renderUsers, notice: renderNotice, maintenance: renderMaintenance,
   studio: renderStudio, performance: renderPerformance, audit: renderAudit, log: renderLog };
 function show(tab) {
   const current = RENDER[tab] ? tab : 'overview';

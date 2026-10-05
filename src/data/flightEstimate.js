@@ -15,6 +15,8 @@
 // Čisté funkcie + sledovač pre server (createEstimateTracker), testy bez Cesia.
 
 import { greatCircleKm, routePlausible } from './routePlausible.js';
+import { buildEstimatePath, natTrackFor, pointAlongPath } from './flightPath.js';
+import { effectiveGroundSpeed } from './windAloft.js';
 
 export const ESTIMATE_MIN_ALT_M = 3000;
 export const ESTIMATE_MIN_SPEED_MPS = 90;
@@ -26,8 +28,6 @@ export const ESTIMATE_LANDING_NEAR_KM = 60;
 export const ESTIMATE_DESCENT_KM = 200;
 /** Lietadlo musí v snímkoch chýbať aspoň toľko, aby bolo „bez signálu". */
 export const ESTIMATE_MISSING_AFTER_S = 120;
-const EARTH_RADIUS_KM = 6371.0088;
-const D2R = Math.PI / 180;
 
 /** Posledný fix z riadku OpenSky (pure); null bez polohy. */
 export function fixFromState(state, snapshotSec) {
@@ -73,81 +73,124 @@ export function usableDestination(fix, route) {
   return plausible ? d : null;
 }
 
-function bearingDeg(lat1, lon1, lat2, lon2) {
-  const p1 = lat1 * D2R;
-  const p2 = lat2 * D2R;
-  const dl = (lon2 - lon1) * D2R;
-  const y = Math.sin(dl) * Math.cos(p2);
-  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
-  return ((Math.atan2(y, x) / D2R) + 360) % 360;
-}
 
-/** Bod vo vzdialenosti `km` v smere `brgDeg` (veľká kružnica). */
-function destinationPoint(lat, lon, brgDeg, km) {
-  const d = km / EARTH_RADIUS_KM;
-  const b = brgDeg * D2R;
-  const p1 = lat * D2R;
-  const l1 = lon * D2R;
-  const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
-  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
-  return { lat: p2 / D2R, lon: ((((l2 / D2R) + 540) % 360) - 180) };
-}
 
 /** Neistota (km) po preletenej vzdialenosti bez signálu (pure): 5 km + 8 %. */
 export function uncertaintyKm(distanceKm) {
   return 5 + 0.08 * Math.max(0, distanceKm);
 }
 
+/** Pásma času bez signálu pre meranie presnosti (min). */
+export const ACCURACY_BUCKETS_MIN = Object.freeze([30, 60, 120, 240, Infinity]);
+/** Najmenej meraní v pásme, aby sa kalibrácia použila namiesto modelu. */
+export const CALIBRATION_MIN_SAMPLES = 20;
+
 /**
- * Odhad polohy v čase nowMs (pure).
- * @returns {{lat:number, lon:number, altM:number, trackDeg:number, gsMps:number, elapsedS:number,
- *   distanceKm:number, uncertaintyKm:number, method:'route'|'track', ended:boolean, reason:string|null,
- *   destination:object|null, remainingKm:number|null}}
+ * Neistota s kalibráciou (pure): keď server nameral dosť návratov signálu v danom pásme času,
+ * kruh = 80. percentil skutočnej chyby; inak model 5 km + 8 %. Nikdy menej než model pri malej
+ * vzdialenosti (5 km).
+ * @param {{maxMin:number, n:number, p80Km:number}[]|null} calibration
  */
-export function estimatePosition(fix, route, nowMs) {
+export function calibratedUncertaintyKm(elapsedS, distanceKm, calibration = null) {
+  const model = uncertaintyKm(distanceKm);
+  if (!Array.isArray(calibration)) return model;
+  const min = elapsedS / 60;
+  const bucket = calibration.find((c) => min < (c.maxMin ?? Infinity));
+  if (!bucket || !(bucket.n >= CALIBRATION_MIN_SAMPLES) || !Number.isFinite(bucket.p80Km)) return model;
+  return Math.max(5, bucket.p80Km);
+}
+
+/**
+ * Odhad polohy v čase nowMs (pure). Letí po trase odhadu (flightPath.js): trať NAT, ak ju server
+ * priradil (model.path), inak po kružnici k overenému cieľu, inak v poslednom smere. Rýchlosť
+ * podľa vetra vo výške letu (model.gsEffMps), inak posledná nameraná.
+ * @param {object|null} [model] { path, toDestination, nat, gsEffMps } zo servera
+ * @param {object[]|null} [calibration] namerané chyby (calibratedUncertaintyKm)
+ * @returns {{lat:number, lon:number, altM:number, trackDeg:number, gsMps:number, elapsedS:number,
+ *   distanceKm:number, uncertaintyKm:number, method:'nat'|'route'|'track', ended:boolean, reason:string|null,
+ *   destination:object|null, remainingKm:number|null, nat:string|null, wind:boolean}}
+ */
+export function estimatePosition(fix, route, nowMs, model = null, calibration = null) {
   const elapsedS = Math.max(0, (nowMs - fix.tMs) / 1000);
-  const gs = fix.gsMps;
+  const wind = Number.isFinite(model?.gsEffMps);
+  const gs = wind ? model.gsEffMps : fix.gsMps;
   const flownKm = (gs * elapsedS) / 1000;
   const dest = usableDestination(fix, route);
-  if (dest) {
-    const totalKm = greatCircleKm(fix.lat, fix.lon, dest.lat, dest.lon);
-    const remainingKm = Math.max(0, totalKm - flownKm);
+  const path = Array.isArray(model?.path) && model.path.length >= 2
+    ? { points: model.path, toDestination: Boolean(dest) && model.toDestination !== false, nat: model.nat ?? null }
+    : buildEstimatePath(fix, dest, null);
+  const at = pointAlongPath(path.points, flownKm);
+  const unc = calibratedUncertaintyKm(elapsedS, flownKm, calibration);
+  if (path.toDestination && dest) {
+    const remainingKm = at.remainingKm;
     const ended = remainingKm <= 0 || elapsedS > ESTIMATE_ROUTE_MAX_S;
-    const brg = bearingDeg(fix.lat, fix.lon, dest.lat, dest.lon);
-    // Po veľkej kružnici k cieľu: posun o preletenú vzdialenosť pozdĺž počiatočného kurzu by sa
-    // od kružnice odchyľoval — preto interpolácia medzi fixom a cieľom.
-    const f = totalKm > 0 ? Math.min(1, flownKm / totalKm) : 1;
-    const p = greatCircleInterpolate(fix.lat, fix.lon, dest.lat, dest.lon, f);
     const altM = remainingKm < ESTIMATE_DESCENT_KM ? fix.altM * (remainingKm / ESTIMATE_DESCENT_KM) : fix.altM;
-    const track = f < 1 ? bearingDeg(p.lat, p.lon, dest.lat, dest.lon) : brg;
     return {
-      lat: p.lat, lon: p.lon, altM, trackDeg: track, gsMps: gs, elapsedS, distanceKm: flownKm,
-      uncertaintyKm: uncertaintyKm(flownKm), method: 'route', ended, reason: ended ? 'arrived' : null,
-      destination: dest, remainingKm,
+      lat: at.lat, lon: at.lon, altM, trackDeg: at.trackDeg, gsMps: gs, elapsedS, distanceKm: flownKm,
+      uncertaintyKm: unc, method: path.nat ? 'nat' : 'route', ended, reason: ended ? 'arrived' : null,
+      destination: dest, remainingKm, nat: path.nat, wind,
     };
   }
   const ended = elapsedS > ESTIMATE_NO_ROUTE_MAX_S;
-  const p = destinationPoint(fix.lat, fix.lon, fix.trkDeg, flownKm);
   return {
-    lat: p.lat, lon: p.lon, altM: fix.altM, trackDeg: fix.trkDeg, gsMps: gs, elapsedS, distanceKm: flownKm,
-    uncertaintyKm: uncertaintyKm(flownKm), method: 'track', ended, reason: ended ? 'expired' : null,
-    destination: null, remainingKm: null,
+    lat: at.lat, lon: at.lon, altM: fix.altM, trackDeg: at.trackDeg, gsMps: gs, elapsedS, distanceKm: flownKm,
+    uncertaintyKm: unc, method: path.nat ? 'nat' : 'track', ended, reason: ended ? 'expired' : null,
+    destination: null, remainingKm: null, nat: path.nat, wind,
   };
 }
 
-function greatCircleInterpolate(lat1, lon1, lat2, lon2, f) {
-  const p1 = lat1 * D2R;
-  const l1 = lon1 * D2R;
-  const p2 = lat2 * D2R;
-  const l2 = lon2 * D2R;
-  const d = 2 * Math.asin(Math.sqrt(Math.sin((p2 - p1) / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin((l2 - l1) / 2) ** 2));
-  if (d === 0) return { lat: lat1, lon: lon1 };
-  const a = Math.sin((1 - f) * d) / Math.sin(d);
-  const b = Math.sin(f * d) / Math.sin(d);
-  const x = a * Math.cos(p1) * Math.cos(l1) + b * Math.cos(p2) * Math.cos(l2);
-  const y = a * Math.cos(p1) * Math.sin(l1) + b * Math.cos(p2) * Math.sin(l2);
-  const z = a * Math.sin(p1) + b * Math.sin(p2);
-  return { lat: Math.atan2(z, Math.hypot(x, y)) / D2R, lon: Math.atan2(y, x) / D2R };
+/**
+ * Model odhadu pre lietadlo (pure, pre server): trať NAT, trasa, rýchlosť podľa vetra.
+ * @param {(altitudeM:number) => ((lat:number, lon:number) => {u:number, v:number}|null)|null} [windSamplerFor]
+ */
+export function buildEstimateModel(fix, route, { natTracks = [], windSamplerFor = null, nowMs = Date.now() } = {}) {
+  const dest = usableDestination(fix, route);
+  const nat = natTrackFor(fix, dest, natTracks, nowMs);
+  const path = buildEstimatePath(fix, dest, nat);
+  const sampler = windSamplerFor ? windSamplerFor(fix.altM) : null;
+  const w = sampler ? effectiveGroundSpeed(fix, path.points, sampler) : null;
+  const round = (p) => ({ lat: Math.round(p.lat * 1000) / 1000, lon: Math.round(p.lon * 1000) / 1000 });
+  return {
+    // Trasu posielame len pri trati (inak si ju klient postaví sám z fixu a cieľa — menšia odpoveď).
+    path: nat ? path.points.map(round) : null,
+    toDestination: path.toDestination,
+    nat: path.nat,
+    gsEffMps: w ? Math.round(w.gsEffMps * 10) / 10 : null,
+    windAheadMps: w ? Math.round(w.windAheadMps * 10) / 10 : null,
+    builtAtMs: nowMs,
+    hadWind: Boolean(sampler),
+  };
+}
+
+/**
+ * Štatistika presnosti (pure): pre pásma času bez signálu medián a 80. percentil chyby odhadu
+ * a toho istého pre jednoduchý odhad (bez vetra a tratí) — nech je vidno, čo vylepšenie prinieslo.
+ * @param {{elapsedMin:number, errorKm:number, baselineKm:number, method:string}[]} samples
+ */
+export function accuracyStats(samples) {
+  const q = (arr, p) => {
+    if (!arr.length) return null;
+    const s = [...arr].sort((a, b) => a - b);
+    return Math.round(s[Math.min(s.length - 1, Math.floor(p * (s.length - 1) + 0.5))] * 10) / 10;
+  };
+  let lo = 0;
+  return ACCURACY_BUCKETS_MIN.map((maxMin) => {
+    const inBucket = samples.filter((x) => x.elapsedMin >= lo && x.elapsedMin < maxMin);
+    const row = {
+      minMin: lo,
+      maxMin,
+      n: inBucket.length,
+      medianKm: q(inBucket.map((x) => x.errorKm), 0.5),
+      p80Km: q(inBucket.map((x) => x.errorKm), 0.8),
+      baselineMedianKm: q(inBucket.map((x) => x.baselineKm), 0.5),
+      byMethod: Object.fromEntries(['nat', 'route', 'track'].map((m) => {
+        const xs = inBucket.filter((x) => x.method === m).map((x) => x.errorKm);
+        return [m, { n: xs.length, medianKm: q(xs, 0.5) }];
+      })),
+    };
+    lo = maxMin;
+    return row;
+  });
 }
 
 /** Je lietadlo pri cieli (pristáva)? (pure) */
@@ -166,7 +209,10 @@ export const ROUTE_CALLSIGN_RE = /^[A-Z]{3}\d[A-Z0-9]{0,4}$/;
  * Trasa sa dohľadá cez lookupRoute(callsign) (adsbdb cache servera), radom, šetrne.
  * @param {{lookupRoute?: (cs: string) => Promise<object|null>, now?: () => number, maxEntries?: number}} [options]
  */
-export function createEstimateTracker({ lookupRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 3000, maxQueue = 3000, cacheHitMs = 50 } = {}) {
+export function createEstimateTracker({
+  lookupRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 3000, maxQueue = 3000, cacheHitMs = 50,
+  natTracks = () => [], windSamplerFor = null, onAccuracy = null, modelMaxAgeMs = 30 * 60_000,
+} = {}) {
   const last = new Map(); // hex → fix (videné v poslednom snímku)
   const estimates = new Map(); // hex → { fix, route, routeState }
   let lastSnapshotSec = 0;
@@ -214,7 +260,26 @@ export function createEstimateTracker({ lookupRoute = null, now = () => Date.now
         if (!fix || !fix.hex) continue;
         present.add(fix.hex);
         last.set(fix.hex, fix);
-        estimates.delete(fix.hex); // signál je späť
+        const back = estimates.get(fix.hex);
+        if (back) {
+          estimates.delete(fix.hex); // signál je späť
+          // Presnosť (2026-10-05): kde sme lietadlo odhadovali v čase nového fixu vs. kde naozaj je.
+          if (onAccuracy && fix.tMs - back.fix.tMs > 60_000 && !fix.onGround) {
+            try {
+              const est = estimatePosition(back.fix, back.route, fix.tMs, back.model);
+              const base = estimatePosition(back.fix, back.route, fix.tMs, null);
+              onAccuracy({
+                t: Math.round(fix.tMs / 1000),
+                hex: fix.hex,
+                elapsedMin: Math.round((fix.tMs - back.fix.tMs) / 6000) / 10,
+                errorKm: Math.round(greatCircleKm(est.lat, est.lon, fix.lat, fix.lon) * 10) / 10,
+                baselineKm: Math.round(greatCircleKm(base.lat, base.lon, fix.lat, fix.lon) * 10) / 10,
+                method: est.method,
+                wind: est.wind,
+              });
+            } catch { /* meranie je doplnok */ }
+          }
+        }
       }
       if (partial) {
         skipped += 1;
@@ -261,18 +326,27 @@ export function createEstimateTracker({ lookupRoute = null, now = () => Date.now
     /** Aktuálne odhady (skončené vyradí). Pre API: posledný fix + cieľ, polohu počíta klient. */
     list(nowMs = now()) {
       const out = [];
+      const tracks = natTracks() || [];
       for (const [hex, entry] of estimates) {
-        const est = estimatePosition(entry.fix, entry.route, nowMs);
+        // Model (trať, vietor) sa prepočíta, keď príde cieľ, vietor alebo po modelMaxAgeMs.
+        const routeKey = entry.route?.destination?.code || '';
+        const m = entry.model;
+        if (!m || m.routeKey !== routeKey || nowMs - m.builtAtMs > modelMaxAgeMs || (!m.hadWind && windSamplerFor)) {
+          entry.model = { ...buildEstimateModel(entry.fix, entry.route, { natTracks: tracks, windSamplerFor, nowMs }), routeKey };
+        }
+        const est = estimatePosition(entry.fix, entry.route, nowMs, entry.model);
         if (est.ended) {
           estimates.delete(hex);
           continue;
         }
         const r = entry.route;
+        const { routeKey: _k, builtAtMs: _b, hadWind: _w, ...model } = entry.model;
         out.push({
           ...entry.fix,
-          route: r && est.method === 'route'
+          route: r && est.destination
             ? { origin: pickAirport(r.origin), destination: pickAirport(r.destination), airline: r.airline ?? null, callsignIata: r.callsignIata ?? null }
             : null,
+          model,
         });
       }
       return out;
