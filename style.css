@@ -2558,6 +2558,19 @@ body.ui-clean-view #scene-runtime.active {
   #follow-flight { bottom: 140px; }
 }
 body.oko-mobile #follow-flight { bottom: calc(var(--oko-dock-lift) + 128px); }
+/* Vypínač „Mapa podľa vrstvy" pod čipmi máp (2026-10-05, layerBasemap.js). */
+.map-auto-basemap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font: 500 10px/1.4 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  cursor: var(--cursor-pointer);
+}
+.map-auto-basemap input { accent-color: var(--accent); margin: 0; }
 /* Mobil (2026-10-04, cardSwipeClose.js): priehľadná plocha nad kartou lietadla s úchytom hore —
    potiahnutie nadol kartu zavrie. Leží pod krížikom (.card-close z60). Pri ťahu úchyt klesne
    a plocha mierne stmavne (--swipe 0…1), aby bolo vidno, že gesto zaberá. */
@@ -10848,7 +10861,13 @@ body.recording-mode .state-strip {
 #toast.actionable {
   cursor: var(--cursor-pointer);
   border-color: rgba(255, 77, 79, 0.55);
+  /* #toast má pointer-events: none — bez tohto sa klikateľná hláška nikdy nedala kliknúť
+     (2026-10-05: „ťukni pre návrat" pri mape podľa vrstvy; platilo aj pre núdzový squawk). */
+  pointer-events: auto;
 }
+/* Informačná akcia (mapa podľa vrstvy) — azúrová, nie poplašná červená. */
+#toast.actionable.info,
+#toast.actionable.info:hover { border-color: var(--accent); }
 
 #toast.actionable:hover {
   border-color: rgba(255, 77, 79, 0.9);

@@ -10867,10 +10867,11 @@ export class StyleManager {
    *   kontakt). Defaulty držia ~20 existujúcich volaní nedotknutých.
    * @returns {void}
    */
-  _showToast(message, { durationMs = 2000, onClick = null } = {}) {
+  _showToast(message, { durationMs = 2000, onClick = null, tone = null } = {}) {
     this._toast.textContent = message;
     this._toast.classList.add('visible');
     this._toast.classList.toggle('actionable', typeof onClick === 'function');
+    this._toast.classList.toggle('info', tone === 'info');
     // Predchádzajúca akcia sa musí odviazať, inak by klik na nové hlásenie
     // skočil na kontakt zo starého.
     if (this._toastClickHandler) {
@@ -10886,7 +10887,7 @@ export class StyleManager {
     }
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => {
-      this._toast.classList.remove('visible', 'actionable');
+      this._toast.classList.remove('visible', 'actionable', 'info');
     }, durationMs);
   }
 

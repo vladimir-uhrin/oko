@@ -114,6 +114,9 @@ export const EN_STRINGS = Object.freeze({
   'card.estimated-nat': 'NAT track {id}',
   'card.estimated-wind': 'wind {kmh} km/h',
   'hover.estimated': 'estimated position — aircraft out of coverage',
+  // Mapa podľa vrstvy (2026-10-05, layerBasemap.js).
+  'presets.auto-basemap': 'Map follows the layer',
+  'basemap.auto-toast': 'Map switched to {map} for this layer · tap to go back',
   'topics.link': 'Topics',
   'topics.title': 'Topics: aircraft, ships, Ukraine, Middle East, gas',
   'consent.kicker': 'Privacy // Cookies',
@@ -2413,6 +2416,9 @@ export const SK_STRINGS = Object.freeze({
   'card.estimated-nat': 'trať NAT {id}',
   'card.estimated-wind': 'vietor {kmh} km/h',
   'hover.estimated': 'odhadovaná poloha — lietadlo je mimo pokrytia',
+  // Mapa podľa vrstvy (2026-10-05, layerBasemap.js).
+  'presets.auto-basemap': 'Mapa podľa vrstvy',
+  'basemap.auto-toast': 'Mapa prepnutá na {map} kvôli tejto vrstve · ťukni pre návrat',
   'topics.link': 'Témy',
   'topics.title': 'Témy: lietadlá, lode, Ukrajina, Blízky východ, plyn',
   'consent.kicker': 'Súkromie // Cookies',

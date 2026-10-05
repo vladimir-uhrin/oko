@@ -237,6 +237,15 @@ export function mapStackVariantModels(stacks, activeId) {
  * @param {object} [options]
  * @returns {Array<object>} vykreslené modely (prázdne = skryté)
  */
+/**
+ * Klik na čip mapy = ručná voľba (2026-10-05): mapa podľa vrstvy (layerBasemap.js) ju do konca
+ * návštevy neprepíše. Programové prepnutia (scény, meteo, automatika) touto cestou nejdú.
+ */
+function announceManualChoice(doc, stackId) {
+  const win = doc?.defaultView;
+  try { win?.dispatchEvent?.(new win.CustomEvent('gev:map-stack-manual', { detail: { id: stackId } })); } catch { /* testovací DOM bez udalostí */ }
+}
+
 export function renderMapStackVariants(container, stacks, activeId, { onSelect = null, doc } = {}) {
   if (!container) return [];
   const ownerDoc = doc || container.ownerDocument || globalThis.document;
@@ -261,6 +270,7 @@ export function renderMapStackVariants(container, stacks, activeId, { onSelect =
     chip.appendChild(label);
     chip.addEventListener('click', () => {
       if (!model.available) return;
+      announceManualChoice(ownerDoc, model.id);
       onSelect?.(model.id);
     });
     container.appendChild(chip);
@@ -323,6 +333,7 @@ export function renderMapStackChips(container, stacks, { activeId = null, onSele
       if (!model.available) return;
       // Čip rodiny: cieľ sa číta z datasetu, ktorý sync prepisuje na
       // skutočne aktívneho člena — klik na zapnutú rodinu je no-op.
+      announceManualChoice(ownerDoc, chip.dataset.stackId || model.id);
       onSelect?.(chip.dataset.stackId || model.id);
     });
     container.appendChild(chip);

@@ -44,6 +44,7 @@ import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
 import { isCrawlerUserAgent } from './crawlerDetect.js';
 import { initAnalytics, trackEvent } from './analytics.js';
+import { AUTO_BASEMAP_STORAGE_KEY, createLayerBasemapPolicy, parseAutoBasemapSetting } from './layerBasemap.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { armStartupGate, releaseStartupGate } from './startupGate.js';
@@ -437,6 +438,32 @@ async function init() {
     });
     // Štatistika (2026-10-04): len prepnutie vrstvy používateľom (origin user) — obnova z odkazu
     // a lokálneho stavu má iný origin; pred štartom GA aj tak nič neodíde (trackEvent).
+    // Len vývojový server: prepínanie vrstiev a máp pre kontrolné snímky (scripts/qa-*.mjs).
+    if (import.meta.env.DEV) window.__okoQa = { setLayer: (id, on, origin = 'user') => dataManager.setEnabled(id, on, { origin }), setMap: (id) => styleManager._setMapStack(id), map: () => mapStackController.getActiveId(), layers: () => [...dataManager.layers.keys()] };
+    // Mapa podľa vrstvy (2026-10-05, src/layerBasemap.js): pri kliknutí na vrstvu vhodnejší podklad
+    // s hláškou a návratom; ručná voľba mapy má prednosť; vypínač v Zobrazení.
+    const autoBasemapToggle = document.getElementById('map-auto-basemap');
+    const readAutoBasemap = () => { try { return parseAutoBasemapSetting(localStorage.getItem(AUTO_BASEMAP_STORAGE_KEY)); } catch { return true; } };
+    if (autoBasemapToggle) autoBasemapToggle.checked = readAutoBasemap();
+    const layerBasemap = createLayerBasemapPolicy({
+      getActiveId: () => mapStackController.getActiveId(),
+      hasStack: (id) => Boolean(mapStackController.getStack(id)),
+      setStack: (id) => { void styleManager._setMapStack(id); },
+      isOn: () => (autoBasemapToggle ? autoBasemapToggle.checked : readAutoBasemap()),
+      notify: ({ mapId, undo }) => {
+        const label = mapStackController.getStack(mapId)?.label || mapId;
+        styleManager._showToast?.(t('basemap.auto-toast', { map: label }), { durationMs: 7000, onClick: undo, tone: 'info' });
+      },
+    });
+    onActiveMapStackChange((stack) => layerBasemap.onMapChange(stack?.id ?? null));
+    window.addEventListener('gev:map-stack-manual', () => layerBasemap.onManualChoice());
+    autoBasemapToggle?.addEventListener('change', () => {
+      try { localStorage.setItem(AUTO_BASEMAP_STORAGE_KEY, autoBasemapToggle.checked ? 'on' : 'off'); } catch { /* súkromné okno */ }
+      layerBasemap.onSettingChange(autoBasemapToggle.checked);
+    });
+    dataManager.subscribe?.((change) => {
+      if (change?.type === 'visibility') layerBasemap.onLayerChange({ layerId: change.layerId, enabled: Boolean(change.enabled), origin: change.origin });
+    });
     dataManager.subscribe?.((change) => {
       if (change?.type === 'visibility' && change.origin === 'user') trackEvent('layer_toggle', { layer_id: change.layerId, enabled: Boolean(change.enabled) });
     });
