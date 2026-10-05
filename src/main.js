@@ -1170,7 +1170,8 @@ async function init() {
         aircraft: (q) => aircraftSearch.queryCommands(q),
         aircraftWorld: (q) => aircraftSearch.asyncResults(q),
         trackedInfo: () => flightsLayer.getTrackedInfo?.() || militaryFlightsLayer.getTrackedInfo?.() || null,
-        geocode: async (q) => { const found = await searchAndFlyTo(viewer, q); return Boolean(found && !found.cancelled); },
+        // Vráti nájdený názov (odpoveď „Letím: Košice"), alebo false.
+        geocode: async (q) => { const found = await searchAndFlyTo(viewer, q); return found && !found.cancelled ? (found.label || q) : false; },
       });
     } catch { /* hlas je voliteľný */ }
     try {

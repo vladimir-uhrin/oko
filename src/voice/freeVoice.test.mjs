@@ -73,7 +73,7 @@ test('vykonanie: vrstva, kamera, sledovanie (aj po skloňovaní), scéna z palet
     commands: () => [{ id: 'layer:ais-live-vessels', label: 'Živé plavidlá AIS', run() {} }, { id: 'scene:hormuz', label: 'Hormuzský prieliv', run: () => ran.push('hormuz') }],
     aircraft: (q) => (q === 'Ruslan' ? [{ id: 'ac:508035', label: 'ADB3017 · Antonov An-124 Ruslan', run: () => ran.push('ruslan') }] : []),
     aircraftWorld: async () => [],
-    geocode: async (q) => { geocoded.push(q); return q !== 'Xyzzy'; },
+    geocode: async (q) => { geocoded.push(q); return q === 'Xyzzy' ? false : 'Košice, Košický kraj, Slovensko'; },
   } });
   assert.equal(await v.handleText('zapni lode'), 'voice.free.layer-on:Živé plavidlá AIS');
   assert.equal(enabled.get('ais-live-vessels'), true);
@@ -82,7 +82,7 @@ test('vykonanie: vrstva, kamera, sledovanie (aj po skloňovaní), scéna z palet
   assert.deepEqual(calls.at(-1), ['adjust_camera_zoom', { direction: 'in', amount: 'medium' }]);
   assert.equal(await v.handleText('sleduj Ruslana'), 'voice.free.tracking:ADB3017 · Antonov An-124 Ruslan');
   assert.equal(await v.handleText('Hormuz'), 'voice.free.done:Hormuzský prieliv');
-  assert.equal(await v.handleText('choď do Košíc'), 'voice.free.flying:Košíc');
+  assert.equal(await v.handleText('choď do Košíc'), 'voice.free.flying:Košice', 'odpoveď nesie nájdený názov, nie tvar z vety');
   assert.deepEqual(geocoded, ['Košíc']);
   assert.equal(await v.handleText('choď na Xyzzy'), 'voice.free.not-found:Xyzzy');
   assert.deepEqual(ran, ['ruslan', 'hormuz']);

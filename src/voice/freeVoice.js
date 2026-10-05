@@ -285,7 +285,8 @@ export function createFreeVoice({ ui, run, dataManager = null, translate = (k) =
         if (aircraft && foldSpeech(aircraft.label).startsWith(foldSpeech(query))) { aircraft.run(); reply = translate('voice.free.tracking', { name: aircraft.label }); break; }
         if (resolvers.geocode) {
           const found = await resolvers.geocode(query).catch(() => null);
-          reply = found === false || found === null ? translate('voice.free.not-found', { q: query }) : translate('voice.free.flying', { q: query });
+          const name = typeof found === 'string' ? found.split(',')[0].trim() : query;
+          reply = found === false || found === null ? translate('voice.free.not-found', { q: query }) : translate('voice.free.flying', { q: name || query });
         } else reply = translate('voice.free.not-understood');
       }
     }
