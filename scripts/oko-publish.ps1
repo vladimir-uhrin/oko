@@ -24,10 +24,17 @@
 # installed (scripts/install-oko-api-service.ps1), /api and /s go to its port (read from the service arguments) - the
 # API then runs from an immutable release (scripts/oko-api-release.ps1), not from the working tree. -ApiPort overrides.
 #
-# Usage: powershell -ExecutionPolicy Bypass -File scripts/oko-publish.ps1 [-SkipBuild] [-DevPort 4173] [-StaticPort 4174] [-ApiPort 0]
+# 2026-10-05 (two agents edit the same working tree; a half-finished file of the other agent went public for a few
+# minutes): the web is built from a CLEAN COPY OF A COMMIT (-Commit, default HEAD) in a temporary git worktree, like
+# the API release does - uncommitted work never reaches okolive.sk. dist/release.txt carries the commit hash.
+# -WorkingTree restores the old behaviour (build whatever is on disk).
+#
+# Usage: powershell -ExecutionPolicy Bypass -File scripts/oko-publish.ps1 [-SkipBuild] [-Commit HEAD] [-WorkingTree] [-DevPort 4173] [-StaticPort 4174] [-ApiPort 0]
 #        [-Hostnames okolive.sk] [-Redirects www.okolive.sk=https://okolive.sk]
 param(
   [switch]$SkipBuild,
+  [string]$Commit = 'HEAD',
+  [switch]$WorkingTree,
   [int]$DevPort = 4173,
   [int]$StaticPort = 4174,
   [int]$ApiPort = 0,
@@ -76,14 +83,57 @@ $cfDir = Join-Path $env:USERPROFILE '.cloudflared'
 $config = Join-Path $cfDir "config-$TunnelName.yml"
 if (-not (Test-Path $config)) { throw "tunnel config missing: $config (run scripts/oko-tunnel-setup.ps1 first)" }
 
-if (-not $SkipBuild) {
-  Write-Host 'building dist/ ...'
+if (-not $SkipBuild -and $WorkingTree) {
+  Write-Host 'building dist/ from the WORKING TREE (uncommitted changes included) ...'
   Push-Location $repo
   $buildOut = cmd /c "npm run build 2>&1"
   $buildCode = $LASTEXITCODE
   Pop-Location
   $buildOut | Select-Object -Last 8 | ForEach-Object { Write-Host "  $_" }
   if ($buildCode -ne 0) { throw "vite build failed (exit $buildCode)" }
+  Set-Content -LiteralPath (Join-Path $repo 'dist\release.txt') -Value 'working-tree' -Encoding ascii -NoNewline
+}
+elseif (-not $SkipBuild) {
+  # Clean copy of the commit: temporary worktree + link to the shared node_modules + copy of .env (Google/Cesium keys
+  # are baked into the client at build time). The link is removed BEFORE the worktree - never a recursive delete
+  # through a link (it would empty the real node_modules).
+  $hash = (& git -C $repo rev-parse --short $Commit 2>$null | Select-Object -First 1)
+  if ([string]$hash -notmatch '^[0-9a-f]{7,40}$') { throw "unknown commit: $Commit" }
+  $dirty = @(& git -C $repo status --porcelain --untracked-files=no 2>$null)
+  if ($dirty.Count -gt 0) { Write-Host "note: $($dirty.Count) uncommitted file(s) in the working tree are NOT published (building commit $hash)" }
+  $tmp = Join-Path $env:TEMP "oko-web-$hash-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  Write-Host "building dist/ from commit $hash ..."
+  & git -C $repo worktree add --detach $tmp $hash 2>&1 | Out-Null
+  if (-not (Test-Path (Join-Path $tmp 'vite.config.js'))) { throw "worktree not created: $tmp" }
+  $link = Join-Path $tmp 'node_modules'
+  try {
+    if (Test-Path -LiteralPath $link) { throw "unexpected node_modules in the commit copy: $link" }
+    $modules = Get-Item -LiteralPath (Join-Path $repo 'node_modules') -Force
+    $modulesTarget = if ($modules.Target) { [string]($modules.Target | Select-Object -First 1) } else { $modules.FullName }
+    New-Item -ItemType Junction -Path $link -Target $modulesTarget | Out-Null
+    $envFile = Join-Path $repo '.env'
+    if (Test-Path -LiteralPath $envFile) { Copy-Item -LiteralPath $envFile -Destination (Join-Path $tmp '.env') -Force }
+    Push-Location $tmp
+    $buildOut = cmd /c "npm run build 2>&1"
+    $buildCode = $LASTEXITCODE
+    Pop-Location
+    $buildOut | Select-Object -Last 8 | ForEach-Object { Write-Host "  $_" }
+    if ($buildCode -ne 0) { throw "vite build failed (exit $buildCode)" }
+    if (-not (Test-Path (Join-Path $tmp 'dist\index.html'))) { throw 'build produced no dist/index.html' }
+    Set-Content -LiteralPath (Join-Path $tmp 'dist\release.txt') -Value $hash -Encoding ascii -NoNewline
+    # The static server reads dist/ on every request: mirror the finished build over it in one pass.
+    & robocopy (Join-Path $tmp 'dist') (Join-Path $repo 'dist') /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy of dist failed ($LASTEXITCODE)" }
+    Write-Host "dist/ = commit $hash"
+  } finally {
+    $linkItem = Get-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+    if ($linkItem -and $linkItem.Target) { $linkItem.Delete() }
+    if (Test-Path -LiteralPath $link) { Write-Host "warning: $link is still there - the temporary copy $tmp is kept (remove the link by hand, never recursively)" }
+    else {
+      & git -C $repo worktree remove --force $tmp 2>&1 | Out-Null
+      & git -C $repo worktree prune 2>&1 | Out-Null
+    }
+  }
 }
 if (-not (Test-Path (Join-Path $repo 'dist\index.html'))) { throw 'dist/index.html missing' }
 
