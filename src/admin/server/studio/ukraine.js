@@ -254,11 +254,18 @@ export function airWave(media, now) {
       const name = targetOblast(target);
       if (name && !oblasts.has(name)) oblasts.set(name, centres().find(c => c.name === name) || target);
     }
-    if (/Бр?пЛА|безпілотн|шахед|ударн[а-яіїєґ]* дрон/iu.test(a.text)) kinds.add('drones');
-    if (/ракет|балісти|крилат|швидкісн/iu.test(a.text)) kinds.add('missiles');
-    if (/КАБ|авіаційн[а-яіїєґ]* бомб|авіабомб/iu.test(a.text)) kinds.add('bombs');
+    for (const kind of airKindsOf(a.text)) kinds.add(kind);
   }
   return { alerts, oblasts, kinds, start, first: alerts[0]?.t ?? null, last: alerts.at(-1)?.t ?? null };
+}
+
+/** Druh hrozby v hlásení Vzdušných síl: 'drones' | 'missiles' | 'bombs' (aj viac naraz). Pure. */
+export function airKindsOf(text) {
+  const kinds = [];
+  if (/Бр?пЛА|безпілотн|шахед|ударн[а-яіїєґ]* дрон/iu.test(text)) kinds.push('drones');
+  if (/ракет|балісти|крилат|швидкісн/iu.test(text)) kinds.push('missiles');
+  if (/КАБ|авіаційн[а-яіїєґ]* бомб|авіабомб/iu.test(text)) kinds.push('bombs');
+  return kinds;
 }
 
 const KIND_SK = { drones: 'útočných dronov', missiles: 'rakiet', bombs: 'riadených leteckých bômb' };
@@ -308,7 +315,9 @@ export const MEDIA_CHANNELS = Object.freeze({
   dsns_telegram: { sk: 'Štátna záchranná služba Ukrajiny', verb: 'zverejnila', license: null },
 });
 const ARMYINFORM = { sk: 'ArmyInform (Ministerstvo obrany Ukrajiny)', verb: 'zverejnil', license: 'CC BY 4.0' };
-const REVIEW = 'Pred schválením skontroluj zábery: žiadne obete, žiadne rozpoznateľné osoby ako cieľ (pravidlo 6).';
+// Vlastník 2026-10-05 („pravidlo o ľuďoch zruš"): ľudia ako cieľ v záberoch sú povolení; kontroluje sa drastickosť —
+// Facebook drastické zábery (telá, zranenia zblízka) skryje za varovanie a neodporučí.
+const REVIEW = 'Pred schválením skontroluj, či záber nie je drastický (telá, zranenia zblízka) — Facebook by ho skryl za varovanie a neodporučil.';
 export const MEDIA_MAX_AGE_MS = 12 * 3600_000;
 export const MEDIA_PER_DAY_DEFAULT = 6;
 /** Hostitelia, z ktorých Štúdio sťahuje médiá (CDN Telegramu, ArmyInform). */

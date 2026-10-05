@@ -169,7 +169,8 @@ test('zábery: najnovší nezverejnený, denný strop, vypínač, text po sloven
   assert.match(item.text, /Pôvodný príspevok \(ukrajinsky\): https:\/\/t\.me\/dsns_telegram\/21/);
   assert.ok(!/CC BY/.test(item.text), 'licencia DSNS nie je doložená — text ju neuvádza');
   assert.equal(item.media.photos.length, 2);
-  assert.match(item.media.review, /obete/);
+  // Vlastník 2026-10-05: ľudia v záberoch povolení — kontroluje sa drastickosť (FB by záber skryl).
+  assert.match(item.media.review, /drastický/);
   assert.ok(!/licenci/i.test(item.media.review), 'vlastník rozhodol zverejňovať GŠ a DSNS — bez varovania o licencii');
   const mod = uaMedia({ media: [tg('ministry_of_defense_ua', 23)] }, { now: NOW });
   assert.match(mod.text, /oficiálny kanál, CC BY 4\.0/);
@@ -258,7 +259,7 @@ test('Štúdio: zábery → karusel fotiek v ráme, kontrola obetí, auto-zverej
   const draft = result.draft;
   assert.equal(draft.template, 'ua-media');
   assert.equal(draft.slides, 2, 'dve fotky = karusel');
-  assert.ok(studio.checks(draft).some(c => c.level === 'warn' && /obete/.test(c.text)));
+  assert.ok(studio.checks(draft).some(c => c.level === 'warn' && /drastický/.test(c.text)));
   assert.throws(() => studio.setSettings({ autoPublish: { 'ua-media': true } }), /auto_publish_forbidden/);
   assert.equal(studio.templateStats().find(x => x.id === 'ua-media').autoPublishAllowed, false);
 });
