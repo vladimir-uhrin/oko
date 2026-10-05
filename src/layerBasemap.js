@@ -20,6 +20,12 @@ export const LAYER_BASEMAPS = Object.freeze({
   volcanoes: 'aster-relief',
 });
 export const AUTO_BASEMAP_STORAGE_KEY = 'oko.autoBasemap';
+/**
+ * Reliéf aj satelitná mozaika sú pekné z diaľky, zblízka rozmazané (2026-10-05): pod NEAR sa
+ * vráti pôvodná mapa (spravidla Google 3D), nad FAR znova mapa vrstvy. Dva prahy = bez kmitania.
+ */
+export const AUTO_BASEMAP_NEAR_M = 150_000;
+export const AUTO_BASEMAP_FAR_M = 220_000;
 
 /** Uložené nastavenie → zapnuté? (pure) Predvolene áno. */
 export function parseAutoBasemapSetting(raw) {
@@ -43,11 +49,16 @@ export function createLayerBasemapPolicy({ getActiveId, hasStack, setStack, noti
   /** Mapa, ktorú sme naposledy nastavili my — zmena na inú je cudzia. */
   let expected = null;
   let manualLock = false;
+  /** Kamera je blízko — mapa vrstvy je dočasne vystriedaná pôvodnou. */
+  let near = false;
+  /** Hláška čaká na prvé skutočné prepnutie (vrstva zapnutá zblízka). */
+  let pendingNote = null;
 
   function reset() {
     owners = [];
     baseId = null;
     expected = null;
+    pendingNote = null;
   }
 
   function switchTo(mapId) {
@@ -74,6 +85,12 @@ export function createLayerBasemapPolicy({ getActiveId, hasStack, setStack, noti
         if (!owners.length) baseId = active === mapId ? null : active;
         owners.push({ layerId, mapId });
         if (active === mapId) { expected = mapId; return false; }
+        if (near && baseId) {
+          // Zblízka ostáva pôvodná mapa; prepne sa (s hláškou) až pri oddialení.
+          expected = baseId;
+          pendingNote = { layerId, mapId };
+          return false;
+        }
         switchTo(mapId);
         notify?.({ layerId, mapId, undo });
         return true;
@@ -84,6 +101,7 @@ export function createLayerBasemapPolicy({ getActiveId, hasStack, setStack, noti
       owners = owners.filter((o) => o.layerId !== layerId);
       if (getActiveId() !== expected) { reset(); return false; } // mapu medzitým zmenil niekto iný
       if (owners.length) {
+        if (near && baseId) return false; // zblízka je už pôvodná mapa
         switchTo(owners[owners.length - 1].mapId);
         return true;
       }
@@ -91,6 +109,24 @@ export function createLayerBasemapPolicy({ getActiveId, hasStack, setStack, noti
       reset();
       if (back && getActiveId() !== back) { setStack(back); return true; }
       return false;
+    },
+
+    /**
+     * Výška kamery nad zemou (m). Pod NEAR pôvodná mapa, nad FAR mapa vrstvy (hysteréza).
+     * @returns {boolean} či sa mapa prepla
+     */
+    onCameraHeight(heightM) {
+      if (!Number.isFinite(heightM)) return false;
+      const wasNear = near;
+      if (heightM < AUTO_BASEMAP_NEAR_M) near = true;
+      else if (heightM > AUTO_BASEMAP_FAR_M) near = false;
+      if (near === wasNear || !owners.length || !baseId) return false;
+      if (getActiveId() !== expected) { reset(); return false; }
+      if (near) { switchTo(baseId); return true; }
+      const top = owners[owners.length - 1];
+      switchTo(top.mapId);
+      if (pendingNote) { const note = pendingNote; pendingNote = null; notify?.({ ...note, undo }); }
+      return true;
     },
 
     /** Mapa sa zmenila (akokoľvek). Cudzia zmena (scéna frontu, meteo) = už ju neriadime. */
@@ -111,7 +147,7 @@ export function createLayerBasemapPolicy({ getActiveId, hasStack, setStack, noti
     },
 
     state() {
-      return { owners: owners.map((o) => o.layerId), baseId, expected, manualLock };
+      return { owners: owners.map((o) => o.layerId), baseId, expected, manualLock, near };
     },
   };
 }

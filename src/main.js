@@ -450,11 +450,19 @@ async function init() {
       hasStack: (id) => Boolean(mapStackController.getStack(id)),
       setStack: (id) => { void styleManager._setMapStack(id); },
       isOn: () => (autoBasemapToggle ? autoBasemapToggle.checked : readAutoBasemap()),
-      notify: ({ mapId, undo }) => {
-        const label = mapStackController.getStack(mapId)?.label || mapId;
-        styleManager._showToast?.(t('basemap.auto-toast', { map: label }), { durationMs: 7000, onClick: undo, tone: 'info' });
+      notify: ({ layerId, mapId, undo }) => {
+        // Zrozumiteľne (2026-10-05): „na reliéf kvôli vrstve Zemetrasenia", nie technické mená máp.
+        const mapKey = `basemap.name.${mapId}`;
+        const mapName = t(mapKey) === mapKey ? (mapStackController.getStack(mapId)?.label || mapId) : t(mapKey);
+        const layerKey = `layer.${layerId}.name`;
+        // Bez dovetku v zátvorke: „Zemetrasenia (24 h)" → „Zemetrasenia".
+        const layerName = (t(layerKey) === layerKey ? layerId : t(layerKey)).split(' (')[0];
+        styleManager._showToast?.(t('basemap.auto-toast', { map: mapName, layer: layerName }), { durationMs: 7000, onClick: undo, tone: 'info' });
       },
     });
+    // Zblízka pôvodná mapa (Google 3D), z diaľky mapa vrstvy — po dokončení pohybu kamery.
+    viewer.camera.moveEnd.addEventListener(() => layerBasemap.onCameraHeight(viewer.camera.positionCartographic?.height));
+    layerBasemap.onCameraHeight(viewer.camera.positionCartographic?.height);
     onActiveMapStackChange((stack) => layerBasemap.onMapChange(stack?.id ?? null));
     window.addEventListener('gev:map-stack-manual', () => layerBasemap.onManualChoice());
     autoBasemapToggle?.addEventListener('change', () => {

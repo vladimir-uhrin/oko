@@ -115,3 +115,49 @@ test('nastavenie a zapojenie: predvolene zapnuté, vypínač v Zobrazení, ručn
   const strings = readFileSync(new URL('./i18nStrings.js', import.meta.url), 'utf8');
   for (const key of ['presets.auto-basemap', 'basemap.auto-toast']) assert.equal((strings.match(new RegExp(`'${key.replace('.', '\\.')}':`, 'g')) || []).length, 2, key);
 });
+
+test('priblíženie: zblízka pôvodná mapa, z diaľky mapa vrstvy, medzi prahmi sa nič nemení', async () => {
+  const { AUTO_BASEMAP_FAR_M, AUTO_BASEMAP_NEAR_M } = await import('./layerBasemap.js');
+  const h = harness();
+  h.policy.onCameraHeight(9_000_000);
+  h.policy.onLayerChange(user('earthquakes', true));
+  assert.equal(h.active, 'aster-relief');
+  assert.equal(h.policy.onCameraHeight(AUTO_BASEMAP_NEAR_M - 1), true);
+  assert.equal(h.active, 'photoreal', 'zblízka Google 3D');
+  assert.equal(h.policy.onCameraHeight((AUTO_BASEMAP_NEAR_M + AUTO_BASEMAP_FAR_M) / 2), false, 'medzi prahmi bez kmitania');
+  assert.equal(h.active, 'photoreal');
+  assert.equal(h.policy.onCameraHeight(AUTO_BASEMAP_FAR_M + 1), true);
+  assert.equal(h.active, 'aster-relief', 'z diaľky znova reliéf');
+  assert.equal(h.notes.length, 1, 'hláška len raz');
+  // Vypnutie zblízka: ostáva pôvodná mapa a po oddialení sa už nič neprepne.
+  h.policy.onCameraHeight(50_000);
+  h.policy.onLayerChange(user('earthquakes', false));
+  h.policy.onCameraHeight(9_000_000);
+  assert.equal(h.active, 'photoreal');
+});
+
+test('priblíženie: vrstva zapnutá zblízka prepne mapu (s hláškou) až pri oddialení; ručná voľba to zruší', () => {
+  const h = harness();
+  h.policy.onCameraHeight(20_000);
+  assert.equal(h.policy.onLayerChange(user('natural-events', true)), false);
+  assert.equal(h.active, 'photoreal');
+  assert.equal(h.notes.length, 0);
+  h.policy.onCameraHeight(5_000_000);
+  assert.equal(h.active, 'gibs-truecolor');
+  assert.equal(h.notes.length, 1);
+  assert.equal(h.notes[0].layerId, 'natural-events');
+  h.policy.onCameraHeight(20_000);
+  h.active = 'osm';
+  h.policy.onManualChoice();
+  h.policy.onCameraHeight(5_000_000);
+  assert.equal(h.active, 'osm', 'po ručnej voľbe sa pri oddialení nič neprepne');
+});
+
+test('hláška: zrozumiteľné mená mapy a vrstvy v SK aj EN', () => {
+  const strings = readFileSync(new URL('./i18nStrings.js', import.meta.url), 'utf8');
+  assert.match(strings, /'basemap\.auto-toast': 'Mapa prepnutá na \{map\} kvôli vrstve \{layer\} · ťukni pre návrat'/);
+  for (const map of new Set(Object.values(LAYER_BASEMAPS))) {
+    assert.equal(strings.split(`'basemap.name.${map}':`).length - 1, 2, `meno mapy ${map} v oboch jazykoch`);
+  }
+  for (const layer of Object.keys(LAYER_BASEMAPS)) assert.ok(strings.includes(`'layer.${layer}.name':`), `meno vrstvy ${layer}`);
+});
