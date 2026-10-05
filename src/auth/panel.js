@@ -353,7 +353,15 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
       message(t('auth.exported'), 'success');
     } catch (error) { message(errorText(error.message), 'error'); }
     finally { exportButton.disabled = false; }
-  }); exportCard.append(exportButton); pages.security.append(passwordCard, emailCard, exportCard);
+  }); exportCard.append(exportButton);
+  // Zmazanie účtu (2026-10-05): samoobslužne, potvrdenie e-mailom účtu + heslom; nevratné.
+  const deleteCard = card('auth.delete', 'auth.delete-note'); deleteCard.classList.add('auth-delete-card');
+  const deleteForm = form('auth-delete-form', 'auth.delete-submit'); deleteForm.submit.classList.add('auth-danger');
+  const deleteEmail = field('auth-delete-email', 'auth.delete-confirm', 'email', 'off', 254);
+  const deletePassword = field('auth-delete-password', 'auth.current-password', 'password', 'current-password', 256);
+  deleteForm.fields.append(deleteEmail.wrapper, deletePassword.wrapper, note('auth.delete-oauth-hint'), deleteForm.submit);
+  deleteCard.append(deleteForm.node);
+  pages.security.append(passwordCard, emailCard, exportCard, deleteCard);
 
   const securityLoading = el('p', 'auth-hint'); const securityRetry = btn('auth-secondary', t('auth.refresh'), () => void client.loadSecurity());
   const activityLoading = el('p', 'auth-hint');
@@ -504,6 +512,7 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     verify.hidden = Boolean(user?.emailVerified); verify.disabled = state.busy || !state.capabilities.emailVerification;
     emailUnavailable.hidden = Boolean(state.capabilities.emailVerification && state.capabilities.emailChange);
     emailForm.fields.disabled = state.busy || !state.capabilities.emailChange;
+    deleteForm.fields.disabled = state.busy; deleteCard.hidden = state.user?.role === 'owner';
     for (const [key, section] of Object.entries(pages)) { section.hidden = page !== key; navButtons[key].setAttribute('aria-current', page === key ? 'page' : 'false'); }
     if (user) {
       displayName.textContent = user.displayName; profileEmail.textContent = user.email; ownerBadge.hidden = user.role !== 'owner';
@@ -592,6 +601,13 @@ export function initAuthPanel({ client = createAuthClient(), mount, linkAction =
     event.preventDefault(); if (client.getState().busy || !client.getState().capabilities.emailChange) return;
     if (!newEmail.input.validity.valid || !newEmail.input.value) return invalid('invalid_email', newEmail.input);
     void action(() => client.requestEmailChange({ email: newEmail.input.value, currentPassword: emailPassword.input.value }), 'auth.email-change-sent').finally(clearPasswords);
+  });
+  deleteForm.node.addEventListener('submit', event => {
+    event.preventDefault(); const user = client.getState().user; if (client.getState().busy || !user) return;
+    if (deleteEmail.input.value.trim().toLowerCase() !== String(user.email).toLowerCase()) return invalid('confirm_mismatch', deleteEmail.input);
+    const data = { confirm: deleteEmail.input.value.trim() };
+    if (deletePassword.input.value) data.currentPassword = deletePassword.input.value;
+    void action(() => client.deleteAccount(data), 'auth.deleted').finally(() => { clearPasswords(); deleteEmail.input.value = ''; });
   });
   const unsubscribe = client.subscribe(render);
   async function open(target = null, { reason = null } = {}) {

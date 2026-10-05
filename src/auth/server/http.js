@@ -365,7 +365,7 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       }
       let sessionId = /^\/api\/account\/sessions\/([a-f0-9-]{36})$/.exec(pathname)?.[1];
       const routes = { '/api/auth/session': ['GET'], '/api/auth/csrf': ['GET'], '/api/auth/register': ['POST'],
-        '/api/auth/login': ['POST'], '/api/auth/logout': ['POST'], '/api/account': ['GET', 'PATCH'],
+        '/api/auth/login': ['POST'], '/api/auth/logout': ['POST'], '/api/account': ['GET', 'PATCH', 'DELETE'],
         '/api/account/password': ['POST'], '/api/account/security': ['GET'], '/api/account/export': ['GET'],
         '/api/account/photo': ['GET', 'PUT', 'DELETE'], '/api/account/follows': ['GET', 'POST', 'DELETE'],
         '/api/account/sessions/revoke-others': ['POST'], '/api/account/sessions/revoke': ['POST'], '/api/account/email/verification': ['POST'],
@@ -463,6 +463,21 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
         });
         clearCookie(ctx);
         return json(res, 200, { user: null, csrfToken: null });
+      }
+      if (pathname === '/api/account' && req.method === 'DELETE') {
+        // Zmazanie vlastného účtu (2026-10-05, právo na vymazanie): potvrdenie e-mailom účtu
+        // a heslom (účet len cez Google/GitHub heslo nemá). Riadok users strhne kaskádou relácie,
+        // tokeny, fotku, sledované lety, prepojené prihlásenia aj udalosti účtu — nič neostáva.
+        fields(body, ['confirm', 'currentPassword']);
+        rate(ctx, 'account-delete', ctx.session.user_id, 5, 3600_000);
+        let user = store.userById(ctx.session.user_id);
+        // Vlastník sa nemaže sám: admin by ostal bez správcu.
+        if (user.role === 'owner') throw fail('owner_protected', 409);
+        if (typeof body.confirm !== 'string' || body.confirm.trim().toLowerCase() !== String(user.email).toLowerCase()) throw fail('confirm_mismatch');
+        if (user.password_hash !== '!oauth') user = await reauthenticate(ctx, body.currentPassword);
+        store.transaction(() => { active(ctx); unchanged(user); store.deleteUser(user.id); });
+        clearCookie(ctx);
+        return json(res, 200, { user: null, csrfToken: null, deleted: true });
       }
       if (pathname === '/api/account') {
         rate(ctx, 'profile', ctx.session.user_id, 30);

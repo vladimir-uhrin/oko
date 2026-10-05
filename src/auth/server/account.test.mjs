@@ -364,3 +364,46 @@ test('owner retains role through password/reset/profile changes and activity is 
   assert.equal(f.store.security(user.id, '', f.clock.time + 110, SESSION_IDLE_MS).events.length, 100);
   assert.equal(f.store.security(user.id, '', f.clock.time + 91 * 86400_000, SESSION_IDLE_MS).events.length, 0);
 });
+
+test('account deletion needs own e-mail and password, removes every trace and signs out everywhere', async t => {
+  const f = await fixture(t), guest = f.client(), client = f.client(), other = f.client();
+  assert.equal((await guest.request('/api/account', { method: 'DELETE', body: { confirm: credentials.email } })).status, 401);
+  const user = (await client.register()).data.user;
+  await other.login();
+  assert.equal((await client.post('/api/account/follows', { hex: '44003a' })).status, 200);
+  const wrongMail = await client.request('/api/account', { method: 'DELETE', body: { confirm: 'someone@example.com', currentPassword: credentials.password } });
+  assert.equal(wrongMail.data.error, 'confirm_mismatch');
+  const noPassword = await client.request('/api/account', { method: 'DELETE', body: { confirm: credentials.email } });
+  assert.equal(noPassword.status, 401);
+  const wrongPassword = await client.request('/api/account', { method: 'DELETE', body: { confirm: credentials.email, currentPassword: 'not the password at all' } });
+  assert.equal(wrongPassword.data.error, 'invalid_current_password');
+  assert.equal((await client.request('/api/account', { method: 'DELETE', body: { confirm: credentials.email, currentPassword: credentials.password, userId: 'x' } })).status, 400);
+  assert.ok(f.store.userById(user.id), 'failed attempts delete nothing');
+
+  const done = await client.request('/api/account', { method: 'DELETE', body: { confirm: ` ${credentials.email.toUpperCase()} `, currentPassword: credentials.password } });
+  assert.equal(done.status, 200);
+  assert.deepEqual(done.data, { user: null, csrfToken: null, deleted: true });
+  assert.equal(f.store.userById(user.id), undefined);
+  assert.deepEqual(f.store.follows(user.id), []);
+  assert.equal((await other.request('/api/account')).status, 401, 'other devices are signed out');
+  assert.equal((await f.client().login()).status, 401, 'the credentials no longer work');
+  assert.equal((await f.client().register()).status, 201, 'the e-mail is free again');
+});
+
+test('account deletion: OAuth-only account confirms by e-mail alone; the owner account is protected', async t => {
+  const f = await fixture(t);
+  const owner = f.store.createOwner('owner@example.com', 'Owner', await fastPasswords.hash(credentials.password), f.clock.time);
+  const ownerClient = f.client();
+  await ownerClient.login({ email: 'owner@example.com', password: credentials.password });
+  const refused = await ownerClient.request('/api/account', { method: 'DELETE', body: { confirm: 'owner@example.com', currentPassword: credentials.password } });
+  assert.equal(refused.status, 409); assert.equal(refused.data.error, 'owner_protected');
+  assert.ok(f.store.userById(owner.id));
+
+  const client = f.client();
+  const user = (await client.register()).data.user;
+  f.store.changePassword(user.id, '!oauth', f.clock.time);
+  // changePassword bumps the credential version — sign in state is what matters here, so reuse the session.
+  const gone = await client.request('/api/account', { method: 'DELETE', body: { confirm: credentials.email } });
+  assert.equal(gone.status, 200, JSON.stringify(gone.data));
+  assert.equal(f.store.userById(user.id), undefined);
+});

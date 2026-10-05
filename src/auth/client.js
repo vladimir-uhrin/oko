@@ -135,6 +135,7 @@ export function createAuthClient({ fetchImpl = (...args) => fetch(...args) } = {
     resetPassword: data => mutate('/api/auth/reset-password', 'POST', data),
     verifyEmail: token => mutate('/api/auth/verify-email', 'POST', { token }),
     confirmEmailChange: token => mutate('/api/auth/confirm-email', 'POST', { token }),
+    deleteAccount: data => mutate('/api/account', 'DELETE', data),
     exportAccount,
     follows: () => request('/api/account/follows'),
     follow: data => write('/api/account/follows', 'POST', data),
