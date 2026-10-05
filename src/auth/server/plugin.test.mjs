@@ -78,12 +78,15 @@ test('isOwnerRequest uzná rolu owner z DB aj bez OKO_OWNER_EMAILS', async () =>
   const plugin = authPlugin({ AUTH_DB_PATH: database });
   let owner = null;
   const server = await createServer({ configFile: false, envFile: false, cacheDir: path.join(directory, 'vite'),
-    plugins: [plugin, { name: 'owner-probe', configureServer(s) { s.middlewares.use('/api/owner-probe', (req, res) => { owner = plugin.isOwnerRequest(req, res); res.end(String(owner)); }); } }],
+    plugins: [plugin, { name: 'owner-probe', configureServer(s) { s.middlewares.use('/api/owner-probe', (req, res) => { owner = plugin.isOwnerRequest(req, res); res.end(String(owner)); });
+      // Hlas len pre prihlásených (2026-10-05): akýkoľvek prihlásený účet.
+      s.middlewares.use('/api/signed-probe', (req, res) => { res.end(String(plugin.isSignedInRequest(req, res))); }); } }],
     server: { host: '127.0.0.1', port: 0, watch: null }, optimizeDeps: { noDiscovery: true, include: [] }, logLevel: 'silent' });
   try {
     await server.listen();
     const base = `http://127.0.0.1:${server.httpServer.address().port}`;
     assert.equal(await (await fetch(base + '/api/owner-probe')).text(), 'false');
+    assert.equal(await (await fetch(base + '/api/signed-probe')).text(), 'false', 'anonym nie je prihlásený');
     const csrf = await fetch(base + '/api/auth/csrf');
     const cookie = csrf.headers.get('set-cookie').split(';')[0];
     const { csrfToken } = await csrf.json();
@@ -92,6 +95,8 @@ test('isOwnerRequest uzná rolu owner z DB aj bez OKO_OWNER_EMAILS', async () =>
     assert.equal(login.status, 200);
     const session = login.headers.get('set-cookie').split(';')[0];
     assert.equal(await (await fetch(base + '/api/owner-probe', { headers: { Cookie: session } })).text(), 'true');
+    assert.equal(await (await fetch(base + '/api/signed-probe', { headers: { Cookie: session } })).text(), 'true');
+    assert.equal(await (await fetch(base + '/api/signed-probe', { headers: { Cookie: 'oko_session=forged' } })).text(), 'false', 'vymyslená cookie neprejde');
   } finally {
     await server.close();
     rmSync(directory, { recursive: true, force: true });

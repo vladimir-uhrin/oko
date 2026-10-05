@@ -185,6 +185,10 @@ let _openskyTokenExpiry = 0;
 let _openskyTokenPromise = null;
 /** Udalosti pod účtom vlastníka (2026-10-03): kontrola z authPlugin, nastaví sa v configu. */
 let _eventsOwnerCheck = null;
+/** Hlas (OpenAI Realtime) len pre prihlásených (2026-10-05) — nastaví defineConfig z authPlugin; null = nikto. */
+let _voiceUserCheck = null;
+/** Testy: kontrola prihláseného bez celej služby účtov. */
+export function _setVoiceUserCheckForTest(check) { _voiceUserCheck = check; }
 /** Trasa podľa volacieho znaku z adsbdb proxy (jej cache) — nastaví adsbdbProxy. */
 let _adsbdbRouteLookup = null;
 /**
@@ -8617,7 +8621,7 @@ function trackBackfillProxies() {
  * Keeps OPENAI_API_KEY server-side while the browser connects to the
  * Realtime API over WebRTC with a short-lived secret.
  */
-function openAiRealtimeProxy() {
+export function openAiRealtimeProxy() {
   // Daily budget governors (TomTom/GFW pattern): persistent UTC-day counters
   // under .gev-cache/openai/, env caps read lazily (loadEnv runs after import).
   // One unit = one upstream OpenAI call; over the cap → 429 {error:'budget'}.
@@ -8761,6 +8765,16 @@ function openAiRealtimeProxy() {
         res.statusCode = 405;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ error: 'Method not allowed' }));
+        return;
+      }
+
+      // Hlas len pre prihlásených (2026-10-05, vlastník: „sprav najprv pre prihlásených"): bez platnej
+      // relácie účtu sa token nevydá — OpenAI nič neúčtuje, ani keď niekto obíde tlačidlo. Bez služby účtov = nikto.
+      if (!(typeof _voiceUserCheck === 'function' && _voiceUserCheck(req, res))) {
+        res.statusCode = 401;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store');
+        res.end(JSON.stringify({ error: 'login_required' }));
         return;
       }
 
@@ -11420,6 +11434,7 @@ export default defineConfig(({ mode }) => {
   // Účet (authPlugin) aj kontrola vlastníka pre súkromné časti udalostí — jedna inštancia.
   const accountAuth = apiPlugins ? authPlugin(env) : null;
   _eventsOwnerCheck = accountAuth ? (req, res, opts) => accountAuth.isOwnerRequest(req, res, opts) : null;
+  _voiceUserCheck = accountAuth ? (req, res) => accountAuth.isSignedInRequest(req, res) : null;
   // Recovery/profile entry must not load the Cesium engine or map resources.
   const cesiumGlobe = cesium();
   const cesiumHtml = cesiumGlobe.transformIndexHtml;

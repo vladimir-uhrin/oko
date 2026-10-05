@@ -94,6 +94,11 @@ export function authPlugin(env = process.env) {
         return Boolean(user && (user.role === 'owner' || (user.emailVerified && ownerEmails.includes(user.email))));
       } catch { return false; }
     },
+    /** Prihlásený účet (akákoľvek rola, nie zablokovaný) — hlasové ovládanie (2026-10-05). */
+    isSignedInRequest(req, res) {
+      if (!filename) return false;
+      try { return Boolean(ensure().identify(req, res, { mutation: false })); } catch { return false; }
+    },
     ownerEmails: () => [...ownerEmails],
     config(config) {
       root = config.root || process.cwd();

@@ -196,6 +196,19 @@ export function silenceRadioForVoice({ duckRadio, pauseRadio } = {}) {
  */
 const SUPERSEDED_RESPONSE_MEMORY = 8;
 
+/**
+ * Brána prístupu k hlasu (2026-10-05: len pre prihlásených). Funkcia vráti true = smie; inak sama ponúkne
+ * prihlásenie a vráti false. Bez brány rozhoduje server (token bez prihlásenia = 401).
+ * @type {((info?: {denied?: boolean}) => boolean)|null}
+ */
+let voiceAccessGate = null;
+export function setVoiceAccessGate(gate) { voiceAccessGate = typeof gate === 'function' ? gate : null; }
+/** Smie sa začať hlasová relácia? Chyba brány hlas nezablokuje (server je posledná kontrola). */
+export function voiceAccessAllowed(info) {
+  if (!voiceAccessGate) return true;
+  try { return voiceAccessGate(info) !== false; } catch { return true; }
+}
+
 export function initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector = null, annotations = null }) {
   if (window.__gevVoiceCommands && typeof window.__gevVoiceCommands.stop === 'function') {
     window.__gevVoiceCommands.stop({ removeUi: true });
@@ -215,7 +228,7 @@ export function initGevVoiceCommands({ viewer, styleManager, dataManager, sceneD
   controller.buttonHandler = () => {
     if (shouldIgnoreVoiceButtonClick(controller.spaceKeyHeld)) return;
     if (controller.isActive()) controller.stop();
-    else controller.start({ pushToTalk: false });
+    else if (voiceAccessAllowed()) controller.start({ pushToTalk: false });
   };
   ui.button.addEventListener('click', controller.buttonHandler);
   if (ui.tierButton) {
@@ -510,6 +523,8 @@ export class GevRealtimeController {
       const diagnostics = this.connectionDiagnostics();
       this.stop({ preserveStatus: true });
       this.reportError('Realtime connection', error, diagnostics);
+      // Prihlásenie medzičasom vypršalo (server 401) — ponúknuť ho znova, ako pri prvom kliku.
+      if (error?.code === 'voice-login') voiceAccessAllowed({ denied: true });
     }
   }
 
@@ -592,6 +607,8 @@ export class GevRealtimeController {
       // idle session (or a session it already started) so releasing the key can
       // never surprise the user by muting a click-started conversation.
       if (this.isActive() && !this.pushToTalkMode) return;
+      // Neprihlásený: medzerník hlas nezapne (brána ponúkne prihlásenie raz, nie pri každom stlačení).
+      if (!this.isActive() && !voiceAccessAllowed()) return;
       this.pushToTalkKeyHeld = true;
       this.ui.root.dataset.pushToTalk = 'held';
       if (this.isActive()) {
@@ -2329,6 +2346,7 @@ function isNearlyBlackFrame(ctx, width, height) {
  */
 export function classifyTokenFailure(status, reason) {
   if (status === 503 && /OPENAI_API_KEY is not set|not configured/i.test(String(reason || ''))) return 'voice-unconfigured';
+  if (status === 401) return 'voice-login';
   if (status === 403) return 'voice-forbidden';
   if (status === 429 && String(reason || '') === 'budget') return 'voice-budget';
   return null;
@@ -2338,13 +2356,14 @@ export function classifyTokenFailure(status, reason) {
  * i18n kľúč rady pod chybou hlasu podľa záznamu chyby (kód z tokenu má
  * prednosť, text servera je záloha pre záznamy bez kódu). Pure.
  * @param {{ code?: string|null, message?: string|null }|null} record
- * @returns {'voice.error-hint'|'voice.error-hint-unconfigured'|'voice.error-hint-forbidden'|'voice.error-hint-budget'}
+ * @returns {'voice.error-hint'|'voice.error-hint-unconfigured'|'voice.error-hint-forbidden'|'voice.error-hint-budget'|'voice.error-hint-login'}
  */
 export function voiceErrorHintKey(record) {
   const code = record?.code
     || (/OPENAI_API_KEY is not set/i.test(String(record?.message || '')) ? 'voice-unconfigured' : null);
   if (code === 'voice-unconfigured') return 'voice.error-hint-unconfigured';
   if (code === 'voice-forbidden') return 'voice.error-hint-forbidden';
+  if (code === 'voice-login') return 'voice.error-hint-login';
   if (code === 'voice-budget') return 'voice.error-hint-budget';
   return 'voice.error-hint';
 }

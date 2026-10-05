@@ -584,6 +584,7 @@ export const EN_STRINGS = Object.freeze({
   'voice.error-hint': 'Check microphone permission and network access, then try again.',
   'voice.error-hint-unconfigured': 'Voice is not configured on this server (no OpenAI key). Your microphone and network are not the problem.',
   'voice.error-hint-forbidden': 'Voice is switched off on this public address; it works only on the local server.',
+  'voice.error-hint-login': 'Voice control is for signed-in users — sign in and press the microphone again.',
   'voice.error-hint-budget': 'Today\'s voice budget on this server is used up; voice comes back after midnight UTC.',
   'voice.error-start': 'Voice session could not be started.',
 
@@ -2886,6 +2887,7 @@ export const SK_STRINGS = Object.freeze({
   'voice.error-hint': 'Skontroluj povolenie mikrofónu a pripojenie na sieť, potom skús znova.',
   'voice.error-hint-unconfigured': 'Hlas nie je na tomto serveri nastavený (chýba kľúč OpenAI). Mikrofón ani sieť s tým nesúvisia.',
   'voice.error-hint-forbidden': 'Hlas je na tejto verejnej adrese vypnutý, funguje len na lokálnom serveri.',
+  'voice.error-hint-login': 'Hlasové ovládanie je pre prihlásených — prihláste sa a znova stlačte mikrofón.',
   'voice.error-hint-budget': 'Dnešný rozpočet hlasu na tomto serveri je vyčerpaný; hlas sa vráti po polnoci UTC.',
   'voice.error-start': 'Hlasovú reláciu sa nepodarilo spustiť.',
 

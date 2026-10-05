@@ -39,7 +39,7 @@ import { bindActiveMapStackToEvents, getActiveMapStack, onActiveMapStackChange }
 import { LAYER_STATE_REGISTRY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
-import { initGevVoiceCommands } from './voice/gevRealtime.js';
+import { initGevVoiceCommands, setVoiceAccessGate } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
 import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
 import { isCrawlerUserAgent } from './crawlerDetect.js';
@@ -1479,5 +1479,14 @@ async function init() {
 // Inštancia ide aj sledovaným letom (init → createFollowedFlights): prihlásenie, zoznam k účtu.
 let accountCenter = null;
 try { accountCenter = initAuthPanel(); } catch { console.warn('[Account] Account panel could not initialize.'); }
+// Hlas len pre prihlásených (2026-10-05): neprihlásenému mikrofón otvorí prihlásenie s dôvodom (ako SLEDOVAŤ).
+// Bez panela účtu rozhoduje server (token → 401).
+setVoiceAccessGate((info) => {
+  if (!accountCenter) return true;
+  // denied = server tokenu odmietol (relácia vypršala) — ponúknuť prihlásenie aj „prihlásenému" klientovi.
+  if (accountCenter.client?.getState?.().user && !info?.denied) return true;
+  try { void accountCenter.open?.(null, { reason: 'voice.login-reason' }); } catch { /* panel je voliteľný */ }
+  return false;
+});
 try { initSiteTelemetry(); initNoticeBanner(); } catch { /* voliteľné, glóbus beží aj bez nich */ }
 init();

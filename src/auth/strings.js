@@ -94,6 +94,7 @@ export const AUTH_EN = {
   'auth.field-error': 'Check this field',
   'auth.hero-4': 'Followed flights — saved to your account, at the top of Search',
   'follow.login-reason': 'Following flights needs an account. Sign in or create one — the selected flight is then added automatically.',
+  'voice.login-reason': 'Voice control is for signed-in users. Sign in or create an account, then press the microphone again.',
   // Google / GitHub (2026-09-27)
   'auth.oauth-continue': 'Continue with {provider}',
   'auth.oauth-or': 'or with e-mail',
@@ -212,6 +213,7 @@ export const AUTH_SK = {
   'auth.field-error': 'Skontrolujte toto pole',
   'auth.hero-4': 'Sledované lety — uložené k účtu, navrchu v hľadaní',
   'follow.login-reason': 'Sledovanie letov je pre prihlásených. Prihláste sa alebo si vytvorte účet — vybraný let sa potom pridá sám.',
+  'voice.login-reason': 'Hlasové ovládanie je pre prihlásených. Prihláste sa alebo si vytvorte účet a potom znova stlačte mikrofón.',
   // Google / GitHub (2026-09-27)
   'auth.oauth-continue': 'Pokračovať cez {provider}',
   'auth.oauth-or': 'alebo e-mailom',
