@@ -43,6 +43,7 @@ export function toGoogleResult(hit) {
     formatted_address: String(hit?.display_name || '').split(',').slice(0, 3).join(',').trim() || null,
     geometry: { location: { lat, lng }, ...(viewport ? { viewport } : {}) },
     types: googleTypesFor(hit),
+    importance: Number.isFinite(Number(hit?.importance)) ? Number(hit.importance) : 0,
     source: 'nominatim',
   };
 }
@@ -96,6 +97,19 @@ export function createGeocodeService({ fetchImpl = globalThis.fetch, schedule = 
     return result;
   }
 
+  /**
+   * Najlepší výsledok pre pôvodný tvar aj odhady 1. pádu: vyhrá najvýznamnejšie miesto (importance).
+   * „Košíc" samo nájde dedinku Kosice (0,27), „Košice" krajské mesto (0,66) → mesto.
+   */
+  async function lookupBest(query, options = {}) {
+    let best = null;
+    for (const variant of nominativeGuesses(query)) {
+      const result = await lookup(variant, options);
+      if (result && (!best || result.importance > best.importance)) best = result;
+    }
+    return best;
+  }
+
   function allow(ip) {
     const minute = Math.floor(now() / 60_000);
     const entry = limiter.get(ip);
@@ -119,12 +133,12 @@ export function createGeocodeService({ fetchImpl = globalThis.fetch, schedule = 
     const lon = Number(url.searchParams.get('lon'));
     const lang = url.searchParams.get('lang') === 'en' ? 'en' : 'sk';
     try {
-      const result = await lookup(q, { lat: Math.abs(lat) <= 90 ? lat : null, lon: Math.abs(lon) <= 180 ? lon : null, lang });
+      const result = await lookupBest(q, { lat: Math.abs(lat) <= 90 ? lat : null, lon: Math.abs(lon) <= 180 ? lon : null, lang });
       return send(200, { status: result ? 'OK' : 'ZERO_RESULTS', results: result ? [result] : [], source: 'nominatim' });
     } catch (error) {
       return send(502, { status: 'UNAVAILABLE', results: [], error: error?.status === 429 ? 'upstream_rate_limited' : 'upstream' });
     }
   }
 
-  return { lookup, middleware, _cacheForTest: cache };
+  return { lookup, lookupBest, middleware, _cacheForTest: cache };
 }

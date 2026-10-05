@@ -32,7 +32,7 @@ test('služba: spoločná fronta, cache 24 h, jazyk, viewbox okolo kamery; HTTP 
   let scheduled = 0;
   let clock = 0;
   const service = createGeocodeService({
-    fetchImpl: async (url, opts) => { calls.push({ url, ua: opts.headers['User-Agent'] }); return { ok: true, json: async () => (url.includes('Xyzzy') ? [] : [KOSICE]) }; },
+    fetchImpl: async (url, opts) => { calls.push({ url, ua: opts.headers['User-Agent'] }); return { ok: true, json: async () => (url.includes('Xyzz') ? [] : [KOSICE]) }; },
     schedule: task => { scheduled++; return task(); }, now: () => clock, perIpPerMin: 4,
   });
   const first = await service.lookup('Košice', { lat: 48.1, lon: 17.1 });
@@ -59,4 +59,18 @@ test('služba: spoločná fronta, cache 24 h, jazyk, viewbox okolo kamery; HTTP 
   assert.equal((await (await fetch(`${base}/api/geocode?q=Xyzzy`)).json()).status, 'ZERO_RESULTS');
   for (let i = 0; i < 2; i++) await fetch(`${base}/api/geocode?q=Ko%C5%A1ice`);
   assert.equal((await fetch(`${base}/api/geocode?q=Ko%C5%A1ice`)).status, 429, 'piaty dopyt za minútu z jednej IP');
+});
+
+test('pád: z pôvodného tvaru aj odhadov 1. pádu vyhrá najvýznamnejšie miesto (Košíc → Košice, nie dedinka)', async () => {
+  const hits = {
+    'Košíc': { ...KOSICE, lat: '50.77', lon: '18.26', display_name: 'Kosice, Radawie, gmina Zębowice', addresstype: 'village', importance: 0.27 },
+    'Košice': { ...KOSICE, importance: 0.66 },
+  };
+  const asked = [];
+  const service = createGeocodeService({ fetchImpl: async url => { const q = new URL(url).searchParams.get('q'); asked.push(q); return { ok: true, json: async () => (hits[q] ? [hits[q]] : []) }; } });
+  const best = await service.lookupBest('Košíc');
+  assert.equal(best.formatted_address, 'Košice, okres Košice I, Košický kraj');
+  assert.equal(best.importance, 0.66);
+  assert.deepEqual(asked.slice(0, 2), ['Košíc', 'Košice']);
+  assert.equal((await service.lookupBest('Praha')), null, 'nič nenájdené = null');
 });

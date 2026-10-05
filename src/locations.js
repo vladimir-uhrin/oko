@@ -1,4 +1,3 @@
-import { nominativeGuesses } from './data/geocodeService.js';
 import * as Cesium from 'cesium';
 import { viewportBias, placesNearViewRecovery } from './annotations/annotationResolver.js';
 
@@ -343,8 +342,7 @@ export function findPoiByName(query) {
 let _googleGeocodeDenied = false;
 
 /**
- * Bezplatné hľadanie miesta (Nominatim cez /api/geocode). Skúsi pôvodný tvar a najviac dva odhady
- * 1. pádu; prvý nájdený vráti v tvare výsledku Google Geocoding, inak null.
+ * Bezplatné hľadanie miesta (Nominatim cez /api/geocode) — výsledok v tvare Google Geocoding, inak null.
  */
 async function geocodeFallback(viewer, query) {
   let center = null;
@@ -353,19 +351,17 @@ async function geocodeFallback(viewer, query) {
     if (c) center = { lat: c.latitude * 180 / Math.PI, lon: c.longitude * 180 / Math.PI };
   } catch { center = null; }
   const lang = String(globalThis.document?.documentElement?.lang || 'sk').startsWith('en') ? 'en' : 'sk';
-  for (const variant of nominativeGuesses(query)) {
-    const params = new URLSearchParams({ q: variant, lang });
-    if (center && Number.isFinite(center.lat) && Number.isFinite(center.lon)) {
-      params.set('lat', center.lat.toFixed(3)); params.set('lon', center.lon.toFixed(3));
-    }
-    try {
-      const response = await fetch(`/api/geocode?${params}`, { headers: { Accept: 'application/json' } });
-      if (!response.ok) return null; // limit alebo výpadok — ďalšie odhady by len zaťažili frontu
-      const data = await response.json();
-      if (data.status === 'OK' && data.results?.length) return data.results[0];
-    } catch { return null; }
+  // Odhady 1. pádu („Košíc" → „Košice") skúša server a vyberie najvýznamnejšie miesto.
+  const params = new URLSearchParams({ q: query, lang });
+  if (center && Number.isFinite(center.lat) && Number.isFinite(center.lon)) {
+    params.set('lat', center.lat.toFixed(3)); params.set('lon', center.lon.toFixed(3));
   }
-  return null;
+  try {
+    const response = await fetch(`/api/geocode?${params}`, { headers: { Accept: 'application/json' } });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.status === 'OK' && data.results?.length ? data.results[0] : null;
+  } catch { return null; }
 }
 
 /** Distinguishes an authority veto from a genuine not-found result. */
