@@ -101,7 +101,9 @@ test('vrstva DeepState: zmena sa načíta po snímke, kreslí sa ako obdĺžnik 
   const src = readFileSync(new URL('../ukraineDeepStateLayer.js', import.meta.url), 'utf8');
   assert.match(src, /change: Object\.freeze\(\{ gainedCss: '#ff2d55'/, 'štýl default');
   assert.match(src, /change: Object\.freeze\(\{ mode: 'vector', lostCss: '#8fd3ff'/, 'štýl karta: vektorové plochy s jasnou hranou (2026-09-26)');
-  assert.match(src, /const wantDay = shiftDay\(day, -CHANGE_DAYS\);/);
+  // Odstup je nastaviteľný (denné video 2026-10-05), predvolene CHANGE_DAYS = 7.
+  assert.match(src, /let _changeDays = CHANGE_DAYS;/);
+  assert.match(src, /const wantDay = shiftDay\(day, -_changeDays\);/);
   assert.match(src, /snap\.day < day/, 'staršia snímka musí byť naozaj staršia (fallback proxy ide len dozadu)');
   assert.match(src, /if \(_destroyed \|\| _snapshot\?\.day !== day\) return;/, 'výsledok pre iný deň sa zahodí');
   assert.match(src, /id: `\$\{UKRAINE_DEEPSTATE_ID\}:change`,\s*rectangle: \{[^}]*zIndex: 8 \}/, 'obdĺžnik zmeny nad pásmom');

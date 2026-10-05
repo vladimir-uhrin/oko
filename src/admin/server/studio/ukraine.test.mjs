@@ -137,6 +137,8 @@ const tg = (channel, id, over = {}) => ({ id: `tg:${channel}/${id}`, provider: '
 test('zábery: len oficiálne kanály s povolenou licenciou, nie YouTube, nie poplachy, nie cudzie hosty', () => {
   assert.equal(mediaHostAllowed('https://cdn4.telesco.pe/file/x.jpg'), true);
   assert.equal(mediaHostAllowed('https://armyinform.com.ua/wp-content/v.mp4'), true);
+  assert.equal(mediaHostAllowed('https://armyinform.stream/~/share/95c983b39b53/video/x.mp4'), true, 'videoserver ArmyInform (prílohy RSS)');
+  assert.equal(mediaHostAllowed('https://armyinform.stream.evil.example/x.mp4'), false);
   assert.equal(mediaHostAllowed('http://cdn4.telesco.pe/file/x.jpg'), false, 'len https');
   assert.equal(mediaHostAllowed('https://evil.example/telesco.pe.jpg'), false);
   assert.ok(mediaSource(tg('GeneralStaffZSU', 10)));

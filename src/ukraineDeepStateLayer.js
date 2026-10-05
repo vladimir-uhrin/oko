@@ -333,6 +333,8 @@ export function createUkraineDeepStateLayer({
   let _prev = null; // staršia snímka pre zmenu za týždeň: { day, forDay, index }
   let _change = null; // raster rozdielu (occupiedChangeRaster) + fromDay/toDay
   let _changeTask = null; // bežiaci dopyt staršej snímky
+  // Odstup snímok zmeny v dňoch: appka 7 (zmena za týždeň); denné video „Deň na fronte" (2026-10-05) 1.
+  let _changeDays = CHANGE_DAYS;
   let _style = 'default';
   let _loading = false;
   let _error = null;
@@ -418,14 +420,14 @@ export function createUkraineDeepStateLayer({
   async function loadChange() {
     const day = _snapshot?.day;
     if (!day || !_snapshot?.features?.length) { _prev = null; _change = null; return; }
-    const wantDay = shiftDay(day, -CHANGE_DAYS);
-    if (!wantDay || (_prev?.forDay === day && _change?.toDay === day)) return;
+    const wantDay = shiftDay(day, -_changeDays);
+    if (!wantDay || (_prev?.forDay === day && _prev?.days === _changeDays && _change?.toDay === day)) return;
     const task = (async () => {
       let snap = null;
       try { snap = await fetchDeepState(wantDay); } catch { snap = null; }
       if (_destroyed || _snapshot?.day !== day) return;
       const usable = snap && Array.isArray(snap.features) && snap.day && snap.day < day;
-      _prev = { day: usable ? snap.day : null, forDay: day, index: usable ? buildPolyIndex(snap.features) : [] };
+      _prev = { day: usable ? snap.day : null, forDay: day, days: _changeDays, index: usable ? buildPolyIndex(snap.features) : [] };
       let change = null;
       try { change = _prev.index.length ? occupiedChangeRaster(_polyIndex, _prev.index) : null; } catch { change = null; }
       if (change) { change.fromDay = _prev.day; change.toDay = day; change.days = daysBetween(_prev.day, day); }
@@ -789,6 +791,17 @@ export function createUkraineDeepStateLayer({
   return {
     id: UKRAINE_DEEPSTATE_ID,
     show, hide, isShown: () => _shown, setSnapshot, loadLatest, getState,
+    /**
+     * Odstup snímok pre zmenu územia (dni). Appka ho nemení (7); nastavuje ho nahrávanie denného videa
+     * (src/frontWeekCapture.js `changeDays`), aby mapa ukázala zmenu za deň, nie za týždeň. Vráti promise prepočtu.
+     */
+    setChangeDays(days) {
+      const n = Math.max(1, Math.round(Number(days) || CHANGE_DAYS));
+      if (n === _changeDays) return Promise.resolve();
+      _changeDays = n;
+      return loadChange();
+    },
+    getChangeDays: () => _changeDays,
     setStyle, getStyle: () => _style, sideAt, frontKm, nearestContactPoint,
     /** Hrubý obrys ruskej kontroly pre prehľadovú mapku (prázdne bez snímky). */
     occupiedOutline: () => { if (!_snapshot?.features?.length) return []; if (!_insetRings) _insetRings = coarseOccupiedRings(_snapshot.features); return _insetRings; },

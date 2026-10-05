@@ -4,7 +4,8 @@
 // z archívu médií (/api/ukraine/events). Bez hlásenia alebo pri zastaranej mape → { reason } a video sa nerobí.
 
 import { airKindsOf, frontChange, loadFront, loadMedia, loadReport, reportDirections, targetOblast, utcDay } from '../../src/admin/server/studio/ukraine.js';
-import { mediaToAlert } from '../../src/data/ukraineMedia.js';
+import { UK_OBLAST_HINTS, mediaToAlert } from '../../src/data/ukraineMedia.js';
+import { UKRAINE_GAZETTEER } from '../../src/data/ukraineIncidents.js';
 import { isPartialReport } from '../../src/data/ukraineDirectionTrend.js';
 import { pickActionClips } from '../../src/data/frontDayClips.js';
 
@@ -22,7 +23,12 @@ export function nightAir(media, now, windowMs = NIGHT_WINDOW_MS) {
     for (const target of a.targets) { const o = targetOblast(target); if (o) oblasts.add(o); }
     for (const k of airKindsOf(a.text)) kinds.add(k);
   }
-  return alerts.length ? { count: oblasts.size, oblasts: [...oblasts], kinds: ['missiles', 'drones', 'bombs'].filter(k => kinds.has(k)),
+  // Poloha oblasti na mapu videa: ťažisko z náznakov oblastí, inak zo zoznamu miest (ako Štúdio).
+  const points = [...oblasts].map((name) => {
+    const c = UK_OBLAST_HINTS[name] || UKRAINE_GAZETTEER.find((p) => p.name === name);
+    return c ? { name, lat: c.lat, lon: c.lon } : null;
+  }).filter(Boolean);
+  return alerts.length ? { count: oblasts.size, oblasts: [...oblasts], points, kinds: ['missiles', 'drones', 'bombs'].filter(k => kinds.has(k)),
     first: alerts[0]?.t ?? null } : null;
 }
 
@@ -76,7 +82,8 @@ export async function loadFrontDay({ baseUrl, now = Date.now(), fetchImpl = glob
       strikes: report.strikes || {},
       change,
       air: nightAir(media, now),
-      clips: pickActionClips(media, { now, max: 2, focusDirections: focus }),
+      // Kandidáti: linka nechá najviac 2 použiteľné (záber na výšku alebo nestiahnuteľný vypadne).
+      clips: pickActionClips(media, { now, max: 4, focusDirections: focus }),
       frontStale: front.reason || null,
     },
   };

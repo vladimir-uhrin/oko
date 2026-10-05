@@ -321,7 +321,8 @@ const REVIEW = 'Pred schválením skontroluj, či záber nie je drastický (tel�
 export const MEDIA_MAX_AGE_MS = 12 * 3600_000;
 export const MEDIA_PER_DAY_DEFAULT = 6;
 /** Hostitelia, z ktorých Štúdio sťahuje médiá (CDN Telegramu, ArmyInform). */
-export const MEDIA_HOSTS = [/(^|\.)telesco\.pe$/i, /(^|\.)cdn-telegram\.org$/i, /(^|\.)armyinform\.com\.ua$/i];
+// armyinform.stream = videoserver ArmyInform (prílohy MP4 v RSS — bez neho by sa video nikdy nestiahlo, 2026-10-05).
+export const MEDIA_HOSTS = [/(^|\.)telesco\.pe$/i, /(^|\.)cdn-telegram\.org$/i, /(^|\.)armyinform\.com\.ua$/i, /(^|\.)armyinform\.stream$/i];
 export function mediaHostAllowed(url) {
   try { const u = new URL(url); return u.protocol === 'https:' && MEDIA_HOSTS.some(re => re.test(u.hostname)); } catch { return false; }
 }

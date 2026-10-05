@@ -288,20 +288,21 @@ export function mixAudio({ placement, voiceFiles, totalS, music, out, ffmpeg }) 
 }
 
 /** Titulky ako PNG (Chrome, písmo Inter) vpálené do videa so zvukom. */
-export async function burnCaptions({ cues, outroWindow, rawVideo, audioFile, out, workDir, ffmpeg }) {
+export async function burnCaptions({ cues, outroWindow, rawVideo, audioFile, out, workDir, ffmpeg, format = VIDEO_3D_FORMAT, style = CAPTION_STYLE }) {
   const puppeteer = require('puppeteer');
-  const { w: W, h: H } = VIDEO_3D_FORMAT;
+  // `format`/`style`: denné video „Deň na fronte" je 9:16 s väčšími titulkami (frontDayHud DAY_CAPTION_STYLE).
+  const { w: W, h: H } = format;
   const dir = path.join(workDir, 'titulky');
   fs.mkdirSync(dir, { recursive: true });
   const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: W, height: H, deviceScaleFactor: 1 });
-    await page.setContent(captionPageHtml(W, H), { waitUntil: 'networkidle0' });
-    await page.evaluate(async (px) => { await document.fonts.load(`600 ${px}px Inter`); await document.fonts.ready; }, CAPTION_STYLE.fontPx);
-    if (!(await page.evaluate((px) => document.fonts.check(`600 ${px}px Inter`), CAPTION_STYLE.fontPx))) throw Object.assign(new Error('písmo Inter sa nenačítalo (titulky)'), { code: 'FONT' });
+    await page.setContent(captionPageHtml(W, H, style), { waitUntil: 'networkidle0' });
+    await page.evaluate(async (px) => { await document.fonts.load(`600 ${px}px Inter`); await document.fonts.ready; }, style.fontPx);
+    if (!(await page.evaluate((px) => document.fonts.check(`600 ${px}px Inter`), style.fontPx))) throw Object.assign(new Error('písmo Inter sa nenačítalo (titulky)'), { code: 'FONT' });
     for (const [i, c] of cues.entries()) {
-      const bottom = captionBottom(c, outroWindow);
+      const bottom = captionBottom(c, outroWindow, style);
       await page.evaluate((text, b) => {
         const el = document.getElementById('cap');
         el.textContent = text;
@@ -315,7 +316,7 @@ export async function burnCaptions({ cues, outroWindow, rawVideo, audioFile, out
   } finally {
     await browser.close();
   }
-  const g = overlayGraph(cues);
+  const g = overlayGraph(cues, style);
   const r = run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', rawVideo, '-i', audioFile, ...g.inputs, '-filter_complex', g.filter, '-map', `[${g.out}]`, '-map', '1:a', '-c:v', 'libx264', '-preset', 'medium', '-crf', '26', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart', '-shortest', out], { timeoutMs: 30 * 60_000 });
   if (r.status !== 0) throw Object.assign(new Error(`titulky: ${r.stderr.slice(-400)}`), { code: 'BURN_FAILED' });
   return out;

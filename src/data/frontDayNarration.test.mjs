@@ -24,19 +24,26 @@ test('háčik: veľká mapa > nočná hrozba > malá mapa > strety', () => {
 
 test('vety: prvá = háčik, strety s porovnaním, smer, záber, údery, záver; titulok a hlas sa líšia len zápisom čísel', () => {
   const lines = frontDayLines({ ...base(), change: { ...base().change, ruKm2: 14, directions: [{ id: 'huliaipole', ruKm2: 14, uaKm2: 0 }] } });
-  assert.deepEqual(lines.map(l => l.id), ['hook', 'clashes', 'top', 'clip0', 'change', 'air', 'strikes', 'portal']);
+  assert.deepEqual(lines.map(l => l.id), ['hook', 'clashes', 'top', 'clip0', 'change', 'air', 'portal'], 'údery ustúpia nočnej hrozbe (ten istý záber)');
   assert.equal(lines[0].caption, 'Ruský agresor za uplynulý deň obsadil ďalších 14 km² Ukrajiny.');
   assert.equal(lines[0].spoken, 'Ruský agresor za uplynulý deň obsadil ďalších štrnásť kilometrov štvorcových Ukrajiny.');
-  assert.match(lines[1].caption, /hlási za uplynulý deň 177 bojových stretov s ruskými okupačnými jednotkami\. To je menej ako v priemere za posledný týždeň\.$/);
-  assert.equal(lines[2].caption, 'Najťažšie boje sú pri Pokrovsku, kde generálny štáb hlási 24 ruských útokov.');
+  assert.match(lines[1].caption, /^Generálny štáb hlási 177\sbojových stretov, menej ako týždenný priemer\.$/);
+  assert.match(lines[2].caption, /^Najťažšie boje sú pri Pokrovsku: 24\sruských útokov\.$/);
   assert.equal(lines[2].shot, 'dir:pokrovsk');
-  assert.equal(lines[3].caption, 'Na záberoch ministerstva obrany ukrajinské sily zničili ruskú samohybnú húfnicu pri Huliajpoli.');
+  assert.equal(lines[3].caption, 'Ukrajinské sily zničili ruskú samohybnú húfnicu pri Huliajpoli.');
   assert.equal(lines[3].shot, 'clip:0');
   assert.equal(lines[4].caption, 'Ruská okupácia sa rozšírila najmä pri Huliajpoli.');
-  assert.match(lines[5].caption, /hrozbu ruských rakiet, dronov a riadených bômb pre 18 oblastí Ukrajiny\.$/, 'hrozba, nie potvrdený útok');
-  assert.equal(lines[6].caption, 'Ruský agresor podľa hlásenia použil 4 100 dronov-kamikadze a 120 riadených leteckých bômb.');
-  assert.equal(lines.at(-1).spoken, 'Počty stretov sú údaje jednej strany. Denný prehľad frontu na okolajv bodka es ká.');
+  assert.match(lines[5].caption, /^V noci platila hrozba ruského útoku pre 18\soblastí\.$/, 'hrozba, nie potvrdený útok');
+  const quiet = frontDayLines({ ...base(), air: { count: 3, kinds: [] } });
+  assert.match(quiet.find(l => l.id === 'strikes').caption, /^Ruský agresor použil 4\s100\sdronov-kamikadze a 120\sriadených leteckých bômb\.$/);
+  const airDay = frontDayLines(base());
+  assert.match(airDay[0].caption, /^V noci platila hrozba ruského útoku pre 18\soblastí: rakety, drony a riadené bomby\.$/, 'háčik o noci s druhmi zbraní');
+  assert.equal(lines.at(-1).spoken, 'Počty sú údaje jednej strany. Mapa frontu denne na okolajv bodka es ká.');
   for (const l of lines) assert.ok(!EMOJI.test(l.caption + l.spoken), l.caption);
+  // Video 30–45 s: hlas vlastníka ~1,8 slova/s, s pauzami a zábermi → komentár do ~75 slov.
+  const words = lines.reduce((n, l) => n + l.spoken.split(/\s+/).length, 0);
+  assert.ok(words <= 75, `komentár má ${words} slov`);
+  assert.ok(!lines.some(l => l.id !== 'strikes' && /bômb/.test(l.spoken)), 'hrozba bez „bômb" (rozpoznávanie reči píše „bomb")');
 });
 
 test('gramatika čísel: ďalší 1 / ďalšie 3 / ďalších 8 km²; dva dni odstupu sa povedia', () => {

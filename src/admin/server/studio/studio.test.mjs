@@ -363,6 +363,66 @@ test('Týždeň na fronte: ručný beh dá video a text do Štúdia; automatika 
   assert.equal(studio.frontWeekStatus().due, false);
 });
 
+test('Deň na fronte: denne od 8:00, video 9:16 bez doplnenia, bez hlásenia znova o 30 min (do 11:00)', async t => {
+  const { mkdtempSync, rmSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-fd-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const clock = { time: Date.UTC(2026, 9, 5, 5, 30) }; // pondelok 5. 10. 2026, 7:30 v Bratislave
+  let noData = 1;
+  const runs = [];
+  const pads = [];
+  const store = openAdminStore(':memory:');
+  t.after(() => store.close());
+  const studio = createStudio({ store, env: {}, port: () => 1, now: () => clock.time, timers: false, mediaDir: dir, log: () => {},
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [], results: [] } }),
+    renderCard: async () => Buffer.from('card'), checkFfmpeg: async () => true,
+    padToReel: async (input, output, opts) => { pads.push(opts.card); writeFileSync(output, Buffer.alloc(10)); return {}; },
+    posterFrame: async () => Buffer.from('poster'),
+    frontDayRunner: async ({ outDir }) => {
+      runs.push(outDir);
+      if (noData-- > 0) throw Object.assign(new Error('hlásenie ešte nie je'), { code: 'NO_DATA' });
+      mkdirSync(outDir, { recursive: true });
+      const video = path.join(outDir, 'den-na-fronte-2026-10-05-titulky.mp4'); const post = path.join(outDir, 'den-na-fronte-2026-10-05.txt');
+      writeFileSync(video, Buffer.alloc(500)); writeFileSync(post, 'V noci Vzdušné sily Ukrajiny hlásili hrozbu.\nMapa frontu: https://okolive.sk/?front=front');
+      return { video, post, srt: null };
+    },
+    publisher: { status: () => ({ facebook: false, instagram: false }) } });
+  assert.equal(studio.frontDayStatus().due, false, 'automatika vypnutá');
+  studio.setSettings({ frontDay: { enabled: true } });
+  assert.throws(() => studio.setSettings({ frontDay: { hour: 3 } }), /invalid_input/);
+  assert.throws(() => studio.setSettings({ frontDay: { weekday: 1 } }), /invalid_input/);
+  assert.equal(studio.frontDayStatus().due, false, 'pred 8:00 nie');
+  clock.time += 45 * 60_000; // 8:15
+  assert.equal(studio.frontDayStatus().due, true);
+  await assert.rejects(studio.runFrontDay({ trigger: 'auto' }), /hlásenie/);
+  assert.equal(studio.frontDayStatus().errorCode, 'NO_DATA');
+  assert.equal(studio.frontDayStatus().due, false, 'hneď znova nie');
+  clock.time += 31 * 60_000; // 8:46
+  assert.equal(studio.frontDayStatus().due, true, 'hlásenie ešte nebolo → znova o 30 min');
+  await studio.tick();
+  for (let i = 0; i < 100 && (studio.frontDayStatus().running || !studio.frontDayStatus().finishedAt || runs.length < 2); i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(runs.length, 2);
+  assert.equal(studio.frontDayStatus().error, null);
+  const draft = studio.list(10).find(d => d.template === 'front-day');
+  assert.equal(draft.eventKey, 'front-day:2026-10-05');
+  assert.equal(draft.card.vertical, true, 'video je už 9:16');
+  await studio.videosIdle();
+  assert.equal(pads.at(-1)?.vertical, true, 'reel bez doplnenia (padToReel s card.vertical)');
+  clock.time += 3600_000;
+  assert.equal(studio.frontDayStatus().due, false, 'raz za deň');
+  clock.time += 23 * 3600_000; // ďalší deň 9:46
+  assert.equal(studio.frontDayStatus().due, true);
+  // Chyba iná než NO_DATA: v ten deň už nie.
+  const other = createStudio({ store: openAdminStore(':memory:'), env: {}, port: () => 1, now: () => clock.time, timers: false, mediaDir: dir, log: () => {},
+    frontDayRunner: async () => { throw new Error('nahrávanie zlyhalo'); }, publisher: { status: () => ({ facebook: false, instagram: false }) } });
+  other.setSettings({ frontDay: { enabled: true } });
+  await assert.rejects(other.runFrontDay(), /nahrávanie/);
+  clock.time += 40 * 60_000;
+  assert.equal(other.frontDayStatus().due, false);
+});
+
 // ── 2026-10-04: karusel, opakovanie, kontroly limitov, najlepší čas ─────────────
 test('karusel: import so snímkami → FB attached_media aj IG CAROUSEL, podpísané URL každej snímky', async t => {
   const calls = [];

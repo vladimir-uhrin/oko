@@ -9,7 +9,7 @@
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -475,6 +475,12 @@ export function padOverlaySvg(card, layer, { title = '', site = 'okolive.sk' } =
  */
 export async function padToReel(inFile, outFile, { env = process.env, card = null, title = '', site = 'okolive.sk', hookSheet = null } = {}) {
   const ffmpeg = env.FFMPEG_PATH || 'ffmpeg';
+  // Video už vyrobené na 9:16 so svojím rámom a háčikom (Deň na fronte): bez doplnenia, len kópia a pás háčika.
+  if (card?.vertical) {
+    await copyFile(inFile, outFile);
+    if (hookSheet) await videoHookSheet(outFile, hookSheet, { env });
+    return { bytes: (await stat(outFile)).size, seconds: await probeSeconds(outFile, { env }) };
+  }
   const background = `[0:v]split=2[bg][fg];[bg]scale=${REEL.width}:${REEL.height}:force_original_aspect_ratio=increase,crop=${REEL.width}:${REEL.height},gblur=sigma=30,eq=brightness=${card ? -0.2 : -0.12}[bgb];`;
   const encode = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-profile:v', 'high', '-g', String(REEL.fps * 2), '-r', String(REEL.fps),
     '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', outFile];

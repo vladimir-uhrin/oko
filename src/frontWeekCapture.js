@@ -23,9 +23,10 @@ const OVERVIEW_LABELS_MIN_M = 300_000;
 
 /**
  * @param {object} viewer Cesium Viewer
- * @param {{sceneId?: string, timeoutMs?: number}} [opts]
+ * @param {{sceneId?: string, timeoutMs?: number, townFarM?: number, changeDays?: number|null}} [opts]
+ *   `changeDays`: odstup snímok zmeny územia (denné video 1; bez neho ako v appke 7)
  */
-export async function installFrontWeekScene(viewer, { sceneId = 'front', timeoutMs = 120_000, townFarM = 420_000 } = {}) {
+export async function installFrontWeekScene(viewer, { sceneId = 'front', timeoutMs = 120_000, townFarM = 420_000, changeDays = null } = {}) {
   const gev = globalThis.__godsEyeView || {};
   // Každá snímka sa naozaj nakreslí (úsporný režim pri nehybnej kamere nekreslí — pasca z videa udalostí).
   viewer.scene.requestRenderMode = false;
@@ -40,9 +41,17 @@ export async function installFrontWeekScene(viewer, { sceneId = 'front', timeout
   const ready = (s) => s.stack === 'karta' && s.base.loaded && !s.base.loading
     && s.deep.shown && !s.deep.loading && !s.deep.changeLoading && Boolean(s.deep.day)
     && s.report.shown && !s.report.loading;
-  while (!ready(state())) {
-    if (Date.now() - started > timeoutMs) throw new Error(`front scéna sa nenačítala: ${JSON.stringify({ stack: state().stack, deep: { shown: state().deep.shown, loading: state().deep.loading, day: state().deep.day, error: state().deep.error }, report: { shown: state().report.shown, loading: state().report.loading, error: state().report.error } })}`);
-    await sleep(250);
+  const waitReady = async () => {
+    while (!ready(state())) {
+      if (Date.now() - started > timeoutMs) throw new Error(`front scéna sa nenačítala: ${JSON.stringify({ stack: state().stack, deep: { shown: state().deep.shown, loading: state().deep.loading, day: state().deep.day, error: state().deep.error }, report: { shown: state().report.shown, loading: state().report.loading, error: state().report.error } })}`);
+      await sleep(250);
+    }
+  };
+  await waitReady();
+  // Denné video (2026-10-05): zmena územia za `changeDays` (1), nie za týždeň — vrstva prepočíta raster zmeny.
+  if (Number.isFinite(changeDays) && gev.ukraineDeepState?.setChangeDays) {
+    await gev.ukraineDeepState.setChangeDays(changeDays);
+    await waitReady();
   }
   // Prehľad celého frontu bez stoviek bodiek mestečiek: ich body a šesťuholníky sa kreslia len do
   // `townFarM` (v zábere smeru ostávajú); mestá a popisy sa nemenia. Len v tejto stránke nahrávania.

@@ -430,10 +430,11 @@ const STUDIO_REASONS = { nothing_to_post: 'Teraz nie je čo zverejniť (žiadna 
   source_unavailable: 'Zdroj dát je teraz nedostupný.', server_not_ready: 'Server ešte nebeží naplno, skúste o chvíľu.' };
 const studioState = { filter: 'open', poll: null };
 async function renderStudio(message) {
-  const [data, calendarData, frontWeekData] = await Promise.all([api('/api/admin/studio'), api('/api/admin/studio/calendar').catch(() => ({ items: [] })),
-    api('/api/admin/studio/front-week').catch(() => null)]);
+  const [data, calendarData, frontWeekData, frontDayData] = await Promise.all([api('/api/admin/studio'), api('/api/admin/studio/calendar').catch(() => ({ items: [] })),
+    api('/api/admin/studio/front-week').catch(() => null), api('/api/admin/studio/front-day').catch(() => null)]);
   data.calendar = calendarData.items;
   data.frontWeek = frontWeekData;
+  data.frontDay = frontDayData;
   const meta = data.meta;
   const connected = meta.facebook || meta.instagram;
   // Stav pripojenia
@@ -554,16 +555,38 @@ async function renderStudio(message) {
   else if (fwStatus.finishedAt) fwActions.append(el('span', 'admin-muted', `posledný beh ${when(fwStatus.finishedAt)}`));
   fwBox.append(fwAuto, fwActions, el('p', 'admin-muted', 'Potrebuje bežiaci dev server s Cesiom (EVENT_VIDEO_PAGE_URL, inak localhost:4173), ffmpeg a hlas (ai-translators alebo nahrávky z pamäte). Výstup: video 4:5 s titulkami, text príspevku; reel 9:16 vznikne doplnením.'));
   if (fwStatus.log) { const d = el('details', 'admin-details'); d.append(el('summary', '', 'výpis posledného behu'), el('pre', '', fwStatus.log)); fwBox.append(d); }
+
+  // Deň na fronte (denné video 9:16 z scripts/make-front-day-video.mjs → návrh v Štúdiu)
+  const fd = data.frontDay || { status: {}, settings: data.settings.frontDay };
+  const fdBox = el('div');
+  const fdAuto = el('label', 'admin-check');
+  const fdInput = el('input'); fdInput.type = 'checkbox'; fdInput.checked = Boolean(fd.settings?.enabled); fdInput.disabled = !caps.frontDay;
+  fdInput.addEventListener('change', () => saveStudioSettings({ frontDay: { enabled: fdInput.checked } }));
+  fdAuto.append(fdInput, document.createTextNode(` Každé ráno od ${fd.settings?.hour ?? 8}:00 (po rannom hlásení GŠ) vyrobiť video „Deň na fronte" a dať ho sem ako návrh — hotové do ~9:30`));
+  const fdActions = el('div', 'admin-actions');
+  const fdStatus = fd.status || {};
+  fdActions.append(button(fdStatus.running ? 'Vyrába sa…' : 'Vyrobiť Deň na fronte teraz', async event => {
+    event.target.disabled = true;
+    try { await api('/api/admin/studio/front-day', { method: 'POST', body: {} }); await renderStudio(notice('Video sa vyrába na pozadí (20–30 min). Stav sa obnoví sám.', 'ok')); }
+    catch (error) { await renderStudio(notice(error.message)); }
+  }, 'admin-btn admin-btn-sm'));
+  if (fdStatus.running) fdActions.append(el('span', 'admin-muted', `beží od ${when(fdStatus.startedAt)}`));
+  else if (fdStatus.errorCode === 'NO_DATA') fdActions.append(badge('ranné hlásenie ešte nie je — skúsi znova o 30 min (do 11:00)', 'muted'));
+  else if (fdStatus.error) fdActions.append(badge(`posledný beh zlyhal: ${fdStatus.error}`, 'bad'));
+  else if (fdStatus.finishedAt) fdActions.append(el('span', 'admin-muted', `posledný beh ${when(fdStatus.finishedAt)}`));
+  fdBox.append(fdAuto, fdActions, el('p', 'admin-muted', 'Hlásenie GŠ, zmena mapy za deň, nočná hrozba a 2 akčné zábery ArmyInform; hlas vlastníka a titulky, 30–45 s, rovno 9:16. Potrebuje dev server s Cesiom (EVENT_VIDEO_PAGE_URL), službu API, ffmpeg a hlas.'));
+  if (fdStatus.log) { const d = el('details', 'admin-details'); d.append(el('summary', '', 'výpis posledného behu'), el('pre', '', fdStatus.log)); fdBox.append(d); }
   setView(...(message ? [message] : []),
     section('Štúdio sociálnych sietí', status, mode, create),
     section('Automatika', auto),
     section('Ukrajina', uaBox),
+    section('Deň na fronte', fdBox),
     section('Týždeň na fronte', fwBox),
     section('Kalendár (7 dní dozadu, 14 dopredu)', studioCalendar(data.calendar || [])),
     section('Príspevky', filters, grid));
   // Kým sa renderuje video alebo zverejňuje, obnovovať každých 5 s (nie počas písania textu).
   clearTimeout(studioState.poll);
-  const busy = data.drafts.some(d => ['queued', 'rendering'].includes(d.videoStatus) || Object.values(d.results || {}).some(r => r.pending)) || Boolean(data.frontWeek?.status?.running);
+  const busy = data.drafts.some(d => ['queued', 'rendering'].includes(d.videoStatus) || Object.values(d.results || {}).some(r => r.pending)) || Boolean(data.frontWeek?.status?.running) || Boolean(data.frontDay?.status?.running);
   if (busy) {
     studioState.poll = setTimeout(() => {
       if (location.hash !== '#studio' || document.activeElement?.tagName === 'TEXTAREA') return;
@@ -705,6 +728,7 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
   if (draft.scheduledAt) head.append(badge(`naplánované ${when(draft.scheduledAt)}`, 'info'));
   if (draft.template === 'event') head.append(badge('z Udalostí', 'muted'));
   if (draft.template === 'front-week') head.append(badge('Týždeň na fronte', 'muted'));
+  if (draft.template === 'front-day') head.append(badge('Deň na fronte', 'muted'));
   if (draft.slides > 1) head.append(badge(`karusel · ${draft.slides} ${draft.slides < 5 ? 'snímky' : 'snímok'}`, 'info'));
   if (draft.retryAt) head.append(badge(`ďalší pokus ${when(draft.retryAt)} (${draft.retryN}/3)`, 'info'));
   const text = el('textarea', 'admin-studio-text'); text.value = draft.text; text.rows = 9; text.maxLength = 2200;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { HOOK_END, HOOK_SHEET, PAD, REEL, captionChunks, captionsFor, hookBadge, keepNumbersTogether, narration, overlaySvg, padOverlaySvg, probeSeconds,
@@ -295,6 +295,20 @@ test('padToReel (ffmpeg): z 4:5 videa vznikne 1080×1920 so zvukom', { skip: !ha
   assert.ok(probe.streams.some(s => s.codec_type === 'audio'));
   const poster = await posterFrame(src, { at: 0.2 });
   assert.equal(poster[0], 0xff);
+});
+
+test('padToReel s card.vertical (ffmpeg): hotové 9:16 sa neprerába, len pás háčika', { skip: !hasFfmpeg && 'ffmpeg nie je nainštalovaný' }, async t => {
+  const { padToReel } = await import('./reel.js');
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-vert-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const src = path.join(dir, 'in.mp4');
+  const made = spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=size=540x960:rate=10', '-t', '1.5', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', src]);
+  assert.equal(made.status, 0, String(made.stderr));
+  const out = path.join(dir, 'out.mp4'); const sheet = path.join(dir, 'hook.jpg');
+  const result = await padToReel(src, out, { card: { vertical: true, hook: { text: 'DEŇ NA FRONTE', accent: '' } }, hookSheet: sheet });
+  assert.deepEqual(readFileSync(out), readFileSync(src), 'rovnaké video, bez nového kódovania');
+  assert.ok(result.seconds > 1 && result.seconds < 2);
+  assert.ok(statSync(sheet).size > 0, 'pás háčika pre admin');
 });
 
 // Rám importovaného videa (2026-10-04, háčik): video v bezpečnej zóne, háčik → titulok nad ním, zdroj pod ním.

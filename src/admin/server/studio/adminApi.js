@@ -12,7 +12,7 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     '/drafts/:id/image': ['GET'], '/drafts/:id/video': ['GET'], '/drafts/:id/hook': ['GET'], '/drafts/:id/render': ['POST'], '/drafts/:id/approve': ['POST'], '/drafts/:id/discard': ['POST'], '/drafts/:id/restore': ['POST'],
     '/drafts/:id/publish': ['POST'], '/drafts/:id/shared': ['POST'], '/drafts/:id/schedule': ['POST'],
     '/drafts/:id/source': ['GET'], '/calendar': ['GET'], '/insights': ['GET'], '/insights/refresh': ['POST'],
-    '/front-week': ['GET', 'POST'], '/best-times': ['GET'] }[route];
+    '/front-week': ['GET', 'POST'], '/front-day': ['GET', 'POST'], '/best-times': ['GET'] }[route];
   if (!methods) throw fail('not_found', 404);
   if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
   const id = draftRoute?.[1];
@@ -29,6 +29,7 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     if (route === '/best-times') return json(res, 200, studio.bestTimes());
     if (route === '/calendar') return json(res, 200, { items: studio.calendar(14) });
     if (route === '/front-week') return json(res, 200, { status: studio.frontWeekStatus(), settings: studio.settings().frontWeek });
+    if (route === '/front-day') return json(res, 200, { status: studio.frontDayStatus(), settings: studio.settings().frontDay });
     if (route === '/drafts/:id/source') {
       const file = studio.sourceVideoPath(id);
       if (!file) throw fail('video_not_ready', 404);
@@ -90,6 +91,15 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     // Beží na pozadí (až hodinu) — odpoveď hneď, stav cez GET /front-week.
     studio.runFrontWeek({ day: body.day || null, trigger: 'manual' }).catch(() => {});
     return json(res, 202, { status: studio.frontWeekStatus() });
+  }
+  if (route === '/front-day') {
+    if (Object.keys(body).length) throw fail('invalid_input');
+    audit('studio_front_day', 'dnešný deň');
+    // Beží na pozadí (~20–30 min) — odpoveď hneď, stav cez GET /front-day. Súbeh (409) sa ohlási hneď.
+    const status = studio.frontDayStatus();
+    if (status.running) throw fail('front_day_running', 409);
+    studio.runFrontDay({ trigger: 'manual' }).catch(() => {});
+    return json(res, 202, { status: studio.frontDayStatus() });
   }
   if (route === '/insights/refresh') return json(res, 200, { ...(await studio.refreshInsights(true)), posts: studio.insights() });
   if (route === '/drafts/:id/schedule') {

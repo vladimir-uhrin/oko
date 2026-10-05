@@ -63,6 +63,9 @@ export const DEFAULT_SETTINGS = Object.freeze({ autoDraft: true, autoReel: true,
   autoPublishPerDay: 5, quietFrom: 22, quietTo: 7, targets: [...TARGETS],
   // Týždeň na fronte (2026-10-03): sobota 7:00 spustí scripts/make-front-week-video.mjs a výsledok dá do Štúdia.
   frontWeek: { enabled: false, weekday: 6, hour: 7 },
+  // Deň na fronte (2026-10-05): každé ráno po rannom hlásení GŠ (~7:00) spustí scripts/make-front-day-video.mjs;
+  // beh trvá ~20–30 min, návrh je v Štúdiu pred 9:30.
+  frontDay: { enabled: false, hour: 8 },
   // Ukrajina (2026-10-04): prah vzdušného útoku (počet oblastí), fotky/videá oficiálnych kanálov a ich denný strop.
   ua: { airMinOblasts: AIR_MIN_OBLASTS_DEFAULT, media: true, mediaPerDay: MEDIA_PER_DAY_DEFAULT } });
 const weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Bratislava', weekday: 'short' });
@@ -120,7 +123,7 @@ export function publicUrlFrom(env = process.env) {
 export function createStudio({ store, env = process.env, port = () => null, now = Date.now, fetchJson = loopbackJson,
   renderCard = defaultRenderCard, renderPhotoCard = defaultRenderPhotoCard, fetchMedia = fetchRemoteMedia, renderReel = defaultRenderReel, padToReel = defaultPadToReel, posterFrame = defaultPosterFrame, checkFfmpeg = () => ffmpegAvailable(env.FFMPEG_PATH || 'ffmpeg'),
   mediaDir = null, publisher = createMetaPublisher({ env }), timers = true, log = message => console.warn(message),
-  voiceProvider = null, frontWeekRunner = null, root = process.cwd(), onAlert = null } = {}) {
+  voiceProvider = null, frontWeekRunner = null, frontDayRunner = null, root = process.cwd(), onAlert = null } = {}) {
   const alert = (kind, detail) => { try { onAlert?.({ kind, ...detail }); } catch { /* upozornenie nesmie zhodiť Štúdio */ } };
   const publicUrl = publicUrlFrom(env);
   const site = new URL(publicUrl).host;
@@ -146,6 +149,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   function settings() {
     const stored = store.getSetting('studio:settings')?.value || {};
     return { ...DEFAULT_SETTINGS, ...stored, autoPublish: { ...(stored.autoPublish || {}) }, frontWeek: { ...DEFAULT_SETTINGS.frontWeek, ...(stored.frontWeek || {}) },
+      frontDay: { ...DEFAULT_SETTINGS.frontDay, ...(stored.frontDay || {}) },
       ua: { ...DEFAULT_SETTINGS.ua, ...(stored.ua || {}) } };
   }
 
@@ -485,13 +489,71 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   }
   function frontWeekDue() {
     const cfg = settings().frontWeek;
-    if (!cfg?.enabled || frontWeek.running) return false;
+    if (!cfg?.enabled || frontWeek.running || frontDay.running) return false;
     const at = now();
     if (localWeekday(at) !== cfg.weekday || localHour(at) < cfg.hour) return false;
     // Raz za týždeň: ak už dnešný/tento týždeň má návrh, nič.
     const key = `front-week:${localDayKey(at)}`;
     if (store.studioHasKey(key) || frontWeek.lastKey === key) return false;
     if (frontWeek.finishedAt && localDayKey(frontWeek.finishedAt) === localDayKey(at)) return false; // dnes už bežal (aj neúspešne)
+    return true;
+  }
+
+  // ── Deň na fronte ─────────────────────────────────────────────────────
+  /** Rám reelu: video je už 9:16 s vlastnou úvodnou kartou (háčik) — bez doplnenia (card.vertical). Pure. */
+  function frontDayReelMeta(text, day) {
+    const first = String(text || '').split('\n').map(line => line.trim()).find(Boolean) || '';
+    return {
+      vertical: true,
+      kicker: 'DEŇ NA FRONTE',
+      hook: { text: 'DEŇ NA FRONTE', accent: '' },
+      headline: first.replace(/\.$/, ''),
+      ...(Number.isFinite(Date.parse(day)) ? { at: Date.parse(`${day}T12:00:00Z`) } : {}),
+    };
+  }
+  const frontDay = { running: false, startedAt: null, finishedAt: null, error: null, errorCode: null, log: '', lastKey: null };
+  /** Ranné hlásenie ešte nevyšlo (NO_DATA): skúsi znova o 30 min, najneskôr do 11:00. */
+  const FRONT_DAY_RETRY_MS = 30 * 60_000;
+  const FRONT_DAY_LAST_HOUR = 11;
+  /**
+   * Spustí scripts/make-front-day-video.mjs (vlastný proces, ~20–30 min) a výsledok (9:16, titulky, text
+   * príspevku) dá do Štúdia ako návrh. Stránka z dev servera s Cesiom (EVENT_VIDEO_PAGE_URL), dáta zo služby API.
+   */
+  async function runFrontDay({ trigger = 'manual' } = {}) {
+    if (frontDay.running) throw fail('front_day_running', 409);
+    if (frontWeek.running) throw fail('front_week_running', 409);
+    if (!mediaDir) throw fail('studio_unavailable', 503);
+    frontDay.running = true; frontDay.startedAt = now(); frontDay.finishedAt = null; frontDay.error = null; frontDay.errorCode = null; frontDay.log = '';
+    const outDir = path.join(mediaDir, 'front-day', localDayKey(now()));
+    try {
+      const run = frontDayRunner || defaultFrontDayRunner;
+      const result = await run({ root, env, outDir, onLog: line => { frontDay.log = (frontDay.log + line).slice(-4000); } });
+      const text = await fsp.readFile(result.post, 'utf8');
+      const day = /den-na-fronte-(\d{4}-\d{2}-\d{2})/.exec(path.basename(result.video))?.[1] || localDayKey(now());
+      const imported = await api.importDraft({ template: 'front-day', eventKey: `front-day:${day}`, title: `Deň na fronte · ${day}`,
+        text, image: null, videoFile: result.video, origin: trigger === 'auto' ? 'auto' : 'manual',
+        meta: { source: 'okolive.sk · Generálny štáb Ukrajiny · ArmyInform', day, srt: result.srt || null, ...frontDayReelMeta(text, day) } });
+      frontDay.lastKey = `front-day:${localDayKey(now())}`;
+      return imported;
+    } catch (error) {
+      frontDay.error = String(error?.message || error).slice(0, 400);
+      frontDay.errorCode = error?.code || null;
+      log(`[studio] front-day: ${frontDay.error}`);
+      throw error;
+    } finally { frontDay.running = false; frontDay.finishedAt = now(); }
+  }
+  function frontDayDue() {
+    const cfg = settings().frontDay;
+    if (!cfg?.enabled || frontDay.running || frontWeek.running) return false;
+    const at = now();
+    if (localHour(at) < cfg.hour) return false;
+    const key = `front-day:${localDayKey(at)}`;
+    if (store.studioHasKey(key) || frontDay.lastKey === key) return false;
+    if (frontDay.finishedAt && localDayKey(frontDay.finishedAt) === localDayKey(at)) {
+      // Dnes už bežal: znova len keď hlásenie ešte nebolo (a nie donekonečna).
+      const waiting = frontDay.errorCode === 'NO_DATA' && at - frontDay.finishedAt >= FRONT_DAY_RETRY_MS && localHour(at) < FRONT_DAY_LAST_HOUR;
+      if (!waiting) return false;
+    }
     return true;
   }
 
@@ -506,6 +568,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       await publishRetryDue().catch(error => log(`[studio] retry: ${error?.message || error}`));
       refreshInsights().catch(error => log(`[studio] insights: ${error?.message || error}`));
       if (frontWeekDue()) runFrontWeek({ trigger: 'auto' }).catch(() => {});
+      else if (frontDayDue()) runFrontDay({ trigger: 'auto' }).catch(() => {});
       if (!settings().autoDraft) return { skipped: 'auto_draft_off' };
       for (const template of TEMPLATES.filter(t => t.auto)) {
         if (template.auto === 'daily' && localHour(now()) < DIGEST_HOUR) continue;
@@ -601,6 +664,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     limits: IG_LIMITS,
     runFrontWeek,
     frontWeekStatus: () => ({ ...frontWeek, due: frontWeekDue() }),
+    runFrontDay,
+    frontDayStatus: () => ({ ...frontDay, due: frontDayDue() }),
     settings,
     templateStats,
     generate,
@@ -697,7 +762,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       let music = 0;
       try { music = env.STUDIO_MUSIC_DIR ? (await fsp.readdir(env.STUDIO_MUSIC_DIR)).filter(n => /\.(mp3|wav|ogg|m4a|flac)$/i.test(n)).length : 0; } catch { music = 0; }
       return { ffmpeg: ffmpegOk, voice: Boolean(voiceProvider) || Boolean(env.PIPER_PATH && env.PIPER_MODEL), ownerVoice: Boolean(voiceProvider),
-        music, mediaDir: Boolean(mediaDir), frontWeek: Boolean(frontWeekRunner || mediaDir) };
+        music, mediaDir: Boolean(mediaDir), frontWeek: Boolean(frontWeekRunner || mediaDir), frontDay: Boolean(frontDayRunner || mediaDir) };
     },
     edit(id, text) {
       const draft = requireDraft(id);
@@ -745,6 +810,14 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         if ('weekday' in fw) { if (!Number.isInteger(fw.weekday) || fw.weekday < 0 || fw.weekday > 6) throw fail('invalid_input'); next_.weekday = fw.weekday; }
         if ('hour' in fw) { if (!Number.isInteger(fw.hour) || fw.hour < 0 || fw.hour > 23) throw fail('invalid_input'); next_.hour = fw.hour; }
         next.frontWeek = next_;
+      }
+      if ('frontDay' in patch) {
+        const fd = patch.frontDay;
+        if (!fd || typeof fd !== 'object' || Object.keys(fd).some(key => !['enabled', 'hour'].includes(key))) throw fail('invalid_input');
+        const nextFd = { ...current.frontDay };
+        if ('enabled' in fd) nextFd.enabled = Boolean(fd.enabled);
+        if ('hour' in fd) { if (!Number.isInteger(fd.hour) || fd.hour < 5 || fd.hour > 12) throw fail('invalid_input'); nextFd.hour = fd.hour; }
+        next.frontDay = nextFd;
       }
       if ('ua' in patch) {
         const ua = patch.ua;
@@ -833,6 +906,39 @@ export function defaultFrontWeekRunner({ root, env, outDir, day, onLog = () => {
         const names = await fsp.readdir(outDir);
         const burned = names.find(n => /^tyzden-na-fronte-\d{4}-\d{2}-\d{2}-titulky\.mp4$/.test(n));
         const post = names.find(n => /^tyzden-na-fronte-\d{4}-\d{2}-\d{2}\.txt$/.test(n));
+        const srt = names.find(n => /\.srt$/.test(n));
+        if (!burned || !post) return reject(new Error('výstup videa alebo textu chýba'));
+        resolve({ video: path.join(outDir, burned), post: path.join(outDir, post), srt: srt ? path.join(outDir, srt) : null });
+      } catch (error) { reject(error); }
+    });
+  });
+}
+
+/**
+ * Spustí make-front-day-video.mjs ako vlastný proces; vráti cesty k výstupom. Kód 3 = ranné hlásenie ešte
+ * nie je (chyba s code NO_DATA — Štúdio skúsi znova neskôr).
+ */
+export function defaultFrontDayRunner({ root, env, outDir, onLog = () => {} }) {
+  return new Promise((resolve, reject) => {
+    const args = [path.join(root, 'scripts', 'make-front-day-video.mjs'), '--out-dir', outDir, '--url', env.EVENT_VIDEO_PAGE_URL || 'http://localhost:4173'];
+    if (env.FRONT_DAY_API_URL) args.push('--api', env.FRONT_DAY_API_URL);
+    const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    // Beží na tom istom stroji ako portál: nižšia priorita CPU, aby návštevníci nečakali.
+    try { os.setPriority(child.pid, 10); } catch { /* bez priority */ }
+    let out = '';
+    const take = chunk => { const text = String(chunk); out = (out + text).slice(-8000); onLog(text); };
+    child.stdout.on('data', take); child.stderr.on('data', take);
+    const timer = setTimeout(() => child.kill('SIGKILL'), 75 * 60_000);
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('close', async code => {
+      clearTimeout(timer);
+      const tail = out.trim().split('\n').slice(-3).join(' | ');
+      if (code === 3) return reject(Object.assign(new Error(`denné video dnes zatiaľ nie: ${tail}`), { code: 'NO_DATA' }));
+      if (code !== 0) return reject(new Error(`make-front-day-video skončil s kódom ${code}: ${tail}`));
+      try {
+        const names = await fsp.readdir(outDir);
+        const burned = names.find(n => /^den-na-fronte-\d{4}-\d{2}-\d{2}-titulky\.mp4$/.test(n));
+        const post = names.find(n => /^den-na-fronte-\d{4}-\d{2}-\d{2}\.txt$/.test(n));
         const srt = names.find(n => /\.srt$/.test(n));
         if (!burned || !post) return reject(new Error('výstup videa alebo textu chýba'));
         resolve({ video: path.join(outDir, burned), post: path.join(outDir, post), srt: srt ? path.join(outDir, srt) : null });

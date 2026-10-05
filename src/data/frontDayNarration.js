@@ -46,6 +46,8 @@ const STRIKES = Object.freeze({
   missileStrikes: ['raketový úder', 'raketové údery', 'raketových úderov'],
 });
 const KIND_GEN = { drones: 'dronov', missiles: 'rakiet', bombs: 'riadených bômb' };
+/** Druhy v nominatíve pre hovorenú vetu („bômb" rozpoznávanie reči píše „bomb" → veta by šla na vypočutie). */
+const KIND_NOM = { drones: 'drony', missiles: 'rakety', bombs: 'riadené bomby' };
 const listSk = (items) => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} a ${items.at(-1)}`);
 const dayMonth = (day) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || '')); return m ? `${Number(m[3])}.${NBSP}${Number(m[2])}.` : ''; };
 const dayMonthYear = (day) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || '')); return m ? `${Number(m[3])}.${NBSP}${Number(m[2])}.${NBSP}${m[1]}` : ''; };
@@ -78,16 +80,25 @@ const further = (n) => (n === 1 ? 'ďalší' : n >= 2 && n <= 4 ? 'ďalšie' : '
 /** Porovnanie stretov so 7-dňovým priemerom ako samostatná veta; null bez histórie. */
 function averageWord(total, avg) {
   if (!Number.isFinite(avg) || !Number.isFinite(total)) return null;
-  if (Math.abs(total - avg) < Math.max(5, avg * 0.07)) return 'približne toľko ako v priemere za posledný týždeň';
+  if (Math.abs(total - avg) < Math.max(5, avg * 0.07)) return 'približne ako týždenný priemer';
   const strong = Math.abs(total - avg) >= avg * 0.3;
-  return `${strong ? 'výrazne ' : ''}${total > avg ? 'viac' : 'menej'} ako v priemere za posledný týždeň`;
+  return `${strong ? 'výrazne ' : ''}${total > avg ? 'viac' : 'menej'} ako týždenný priemer`;
 }
 
+/** Plná veta o nočnej hrozbe (text príspevku). */
 function airSentence(air) {
   const n = counted(air.count, OBLASTS);
   const kinds = (air.kinds || []).map(k => KIND_GEN[k]).filter(Boolean);
   const what = kinds.length ? `ruských ${listSk(kinds)}` : 'ruského vzdušného útoku';
   const text = (num) => `V noci Vzdušné sily Ukrajiny hlásili hrozbu ${what} pre ${num} Ukrajiny.`;
+  return { spoken: text(n.spoken), caption: text(n.caption) };
+}
+
+/** Krátka hovorená veta o nočnej hrozbe (video 30–45 s): hrozba, nie potvrdený útok. */
+function airLine(air, { withKinds = true } = {}) {
+  const n = counted(air.count, OBLASTS);
+  const kinds = withKinds ? (air.kinds || []).map(k => KIND_NOM[k]).filter(Boolean) : [];
+  const text = (num) => `V noci platila hrozba ruského útoku pre ${num}${kinds.length ? `: ${listSk(kinds)}` : ''}.`;
   return { spoken: text(n.spoken), caption: text(n.caption) };
 }
 
@@ -131,15 +142,15 @@ export function frontDayLines(model) {
       : (num, sp) => `Ukrajina ${sp} oslobodila ${num} svojho územia.`;
     lines.push({ id: 'hook', shot: 'opening', spoken: s(k.spoken, span.spoken), caption: s(k.caption, span.caption) });
   } else if (story === 'air') {
-    lines.push({ id: 'hook', shot: 'opening', ...airSentence(model.air) });
+    lines.push({ id: 'hook', shot: 'opening', ...airLine(model.air) });
   } else {
-    const s = (num) => `Generálny štáb Ukrajiny hlási za uplynulý deň ${num} s ruskými okupačnými jednotkami.`;
+    const s = (num) => `Za uplynulý deň ${num} s ruskými okupačnými jednotkami.`;
     lines.push({ id: 'hook', shot: 'opening', spoken: s(total.spoken), caption: s(total.caption) });
   }
 
   // 2. Strety (alebo pri háčiku o stretoch ich porovnanie).
   if (story !== 'clashes') {
-    const s = (num) => `Generálny štáb Ukrajiny hlási za uplynulý deň ${num} s ruskými okupačnými jednotkami.${avg ? ` To je ${avg}.` : ''}`;
+    const s = (num) => `Generálny štáb hlási ${num}${avg ? `, ${avg}` : ''}.`;
     lines.push({ id: 'clashes', shot: 'overview', spoken: s(total.spoken), caption: s(total.caption) });
   } else if (avg) {
     lines.push({ id: 'clashes', shot: 'overview', spoken: `To je ${avg}.`, caption: `To je ${avg}.` });
@@ -148,7 +159,7 @@ export function frontDayLines(model) {
   // 3. Kde sa bojuje najviac.
   if (top) {
     const a = counted(top.attacks, ATTACKS);
-    const s = (num) => `Najťažšie boje sú ${directionSk(top.id).at}, kde generálny štáb hlási ${num}.`;
+    const s = (num) => `Najťažšie boje sú ${directionSk(top.id).at}: ${num}.`;
     lines.push({ id: 'top', shot: `dir:${top.id}`, spoken: s(a.spoken), caption: s(a.caption), names: true });
   }
 
@@ -157,7 +168,7 @@ export function frontDayLines(model) {
     const c = model.clips?.[i];
     if (!c) return;
     const where = c.direction ? ` ${directionSk(c.direction).at}` : '';
-    const text = `Na záberoch ministerstva obrany ${c.captionSk.replace(/^Ukrajinské sily /, 'ukrajinské sily ')}${where}.`;
+    const text = `${c.captionSk}${where}.`;
     lines.push({ id: `clip${i}`, shot: `clip:${i}`, spoken: text, caption: text, names: Boolean(where) });
   };
   clip(0);
@@ -174,14 +185,14 @@ export function frontDayLines(model) {
   }
 
   // 6. Nočná hrozba z neba (ak nebola háčikom).
-  if (story !== 'air' && model.air?.count >= AIR_LINE_OBLASTS) lines.push({ id: 'air', shot: 'air', ...airSentence(model.air) });
+  if (story !== 'air' && model.air?.count >= AIR_LINE_OBLASTS) lines.push({ id: 'air', shot: 'air', ...airLine(model.air, { withKinds: false }) });
 
-  // 7. Údery z hlásenia (dva najväčšie).
+  // 7. Údery z hlásenia (dva najväčšie) — len keď nočná hrozba nemá vlastnú vetu (rovnaký záber, video 30–45 s).
   const strikes = Object.entries(STRIKES).map(([key, forms]) => ({ key, forms, n: model.strikes?.[key] })).filter(s => Number.isFinite(s.n) && s.n > 0)
     .sort((a, b) => b.n - a.n).slice(0, 2);
-  if (strikes.length) {
+  if (strikes.length && !lines.some(l => l.id === 'air')) {
     const parts = strikes.map(s => counted(s.n, s.forms));
-    const s = (key) => `Ruský agresor podľa hlásenia použil ${listSk(parts.map(p => p[key]))}.`;
+    const s = (key) => `Ruský agresor použil ${listSk(parts.map(p => p[key]))}.`;
     lines.push({ id: 'strikes', shot: 'air', spoken: s('spoken'), caption: s('caption') });
   }
 
@@ -190,8 +201,8 @@ export function frontDayLines(model) {
 
   // 9. Záver: zdroj a portál (pevná, schválená veta).
   lines.push({ id: 'portal', shot: 'closing', approved: true,
-    spoken: `Počty stretov sú údaje jednej strany. Denný prehľad frontu na ${MAP_SOURCE.spokenSite}.`,
-    caption: `Počty stretov sú údaje jednej strany. Denný prehľad frontu na ${MAP_SOURCE.site}.` });
+    spoken: `Počty sú údaje jednej strany. Mapa frontu denne na ${MAP_SOURCE.spokenSite}.`,
+    caption: `Počty sú údaje jednej strany. Mapa frontu denne na ${MAP_SOURCE.site}.` });
   return lines;
 }
 
@@ -201,7 +212,8 @@ export function frontDayLines(model) {
  */
 export function frontDayPostText(model) {
   const story = dayStory(model);
-  const hook = frontDayLines(model)[0].caption;
+  // Príspevok nesie plnú vetu so zdrojom (vo videu ho nesie karta).
+  const hook = story === 'air' ? airSentence(model.air).caption : frontDayLines(model)[0].caption;
   // Háčik o hrozbe z neba hneď spresní, že nejde o potvrdené zásahy (a odsek o noci sa už neopakuje).
   const out = [story === 'air' ? `${hook} Ide o hlásenú hrozbu, nie o potvrdené zásahy.` : hook, ''];
   const avg = Number.isFinite(model.avg7) ? ` (7-dňový priemer: ${group(model.avg7)})` : '';
