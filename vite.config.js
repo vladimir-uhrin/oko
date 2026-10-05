@@ -40,6 +40,7 @@ import { createWindGridCache } from './src/data/windAloft.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createAircraftSearchService } from './src/data/aircraftSearchService.js';
+import { createGeocodeService } from './src/data/geocodeService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
@@ -8138,6 +8139,21 @@ function cctvProxy() {
  * (typ, registrácia, volací znak, hex). Fronta, cache a pauza po 429 sú v aircraftSearchService.js.
  * @returns {import('vite').Plugin}
  */
+/**
+ * Hľadanie miesta zadarmo (2026-10-05): GET /api/geocode?q= cez Nominatim (OpenStreetMap), keď
+ * Google Geocoding nie je zapnuté alebo nič nenájde. Fronta a cache v geocodeService.js.
+ * @returns {import('vite').Plugin}
+ */
+function geocodePlugin() {
+  const service = createGeocodeService({ schedule: scheduleNominatim });
+  return {
+    name: 'oko-geocode',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => { void service.middleware(req, res, next); });
+    },
+  };
+}
+
 function aircraftSearchPlugin() {
   const service = createAircraftSearchService();
   return {
@@ -10766,6 +10782,20 @@ const _weatherEffectsInFlight = new Map();
 const _weatherEffectsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 45, globalMax: 120 });
 let _nominatimQueue = Promise.resolve();
 let _nominatimLastRequestAt = 0;
+/**
+ * Spoločná fronta Nominatimu (pravidlá: najviac 1 dopyt za sekundu z celej aplikácie) — reverzné
+ * geokódovanie kokpitu aj hľadanie miesta /api/geocode (2026-10-05) idú za sebou s odstupom ≥ 1,1 s.
+ */
+function scheduleNominatim(task) {
+  const run = _nominatimQueue.then(async () => {
+    const waitMs = Math.max(0, 1100 - (Date.now() - _nominatimLastRequestAt));
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    _nominatimLastRequestAt = Date.now();
+    return task();
+  });
+  _nominatimQueue = run.catch(() => null);
+  return run;
+}
 
 export function requiredFiniteQueryNumber(params, key) {
   const value = params.get(key);
@@ -11478,6 +11508,7 @@ export default defineConfig(({ mode }) => {
       gbfsProxy(),
       adsbLolProxy(),
       aircraftSearchPlugin(),
+      geocodePlugin(),
       aisLiveProxy(),
       aiscastVesselsProxy(),
       gfwPresenceProxy(),

@@ -1163,6 +1163,16 @@ async function init() {
       onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
     });
     window.__godsEyeView.commandPalette = commandPalette;
+    // Bezplatný hlas (2026-10-05): rovnaké zdroje ako jednotné hľadanie — lietadlá, paleta, miesto na mape.
+    try {
+      window.__godsEyeView.voiceCommands?.freeVoice?.setResolvers({
+        commands: buildCommands,
+        aircraft: (q) => aircraftSearch.queryCommands(q),
+        aircraftWorld: (q) => aircraftSearch.asyncResults(q),
+        trackedInfo: () => flightsLayer.getTrackedInfo?.() || militaryFlightsLayer.getTrackedInfo?.() || null,
+        geocode: async (q) => { const found = await searchAndFlyTo(viewer, q); return Boolean(found && !found.cancelled); },
+      });
+    } catch { /* hlas je voliteľný */ }
     try {
       const cmdLaunch = document.createElement('button');
       cmdLaunch.type = 'button';

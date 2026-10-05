@@ -1,3 +1,4 @@
+import { nominativeGuesses } from './data/geocodeService.js';
 import * as Cesium from 'cesium';
 import { viewportBias, placesNearViewRecovery } from './annotations/annotationResolver.js';
 
@@ -338,6 +339,35 @@ export function findPoiByName(query) {
   return best ? { cityId: best.cityId, index: best.index } : null;
 }
 
+/** Google Geocoding odmietlo kľúč (API nezapnuté) — ďalšie dopyty idú rovno na Nominatim. */
+let _googleGeocodeDenied = false;
+
+/**
+ * Bezplatné hľadanie miesta (Nominatim cez /api/geocode). Skúsi pôvodný tvar a najviac dva odhady
+ * 1. pádu; prvý nájdený vráti v tvare výsledku Google Geocoding, inak null.
+ */
+async function geocodeFallback(viewer, query) {
+  let center = null;
+  try {
+    const c = viewer?.camera?.positionCartographic;
+    if (c) center = { lat: c.latitude * 180 / Math.PI, lon: c.longitude * 180 / Math.PI };
+  } catch { center = null; }
+  const lang = String(globalThis.document?.documentElement?.lang || 'sk').startsWith('en') ? 'en' : 'sk';
+  for (const variant of nominativeGuesses(query)) {
+    const params = new URLSearchParams({ q: variant, lang });
+    if (center && Number.isFinite(center.lat) && Number.isFinite(center.lon)) {
+      params.set('lat', center.lat.toFixed(3)); params.set('lon', center.lon.toFixed(3));
+    }
+    try {
+      const response = await fetch(`/api/geocode?${params}`, { headers: { Accept: 'application/json' } });
+      if (!response.ok) return null; // limit alebo výpadok — ďalšie odhady by len zaťažili frontu
+      const data = await response.json();
+      if (data.status === 'OK' && data.results?.length) return data.results[0];
+    } catch { return null; }
+  }
+  return null;
+}
+
 /** Distinguishes an authority veto from a genuine not-found result. */
 export const CANCELLED_SEARCH = Object.freeze({ cancelled: true });
 
@@ -348,7 +378,6 @@ export const CANCELLED_SEARCH = Object.freeze({ cancelled: true });
  */
 export async function searchAndFlyTo(viewer, query, options = {}) {
   const apiKey = window.__GOOGLE_MAPS_API_KEY__ || import.meta.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) throw new Error('No Google Maps API key available for geocoding');
 
   const beforeFly = typeof options.beforeFly === 'function' ? options.beforeFly : null;
   const mayFly = () => beforeFly === null || beforeFly() !== false;
@@ -356,13 +385,20 @@ export async function searchAndFlyTo(viewer, query, options = {}) {
   // Viewport-biased geocode — the same bias annotationResolver's geocodePlace uses:
   // "Sixth Street" spoken over Austin must prefer the Sixth Street on screen, not a
   // same-named road in another city (or the wrong end of town — the W 6th vs E 6th bug).
-  let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${apiKey}`;
-  const bias = viewportBias(viewer);
-  if (bias) url += `&bounds=${bias}`;
-  const response = await fetch(url);
-  const data = await response.json();
-
-  const result = (data.status === 'OK' && data.results?.length) ? data.results[0] : null;
+  let result = null;
+  if (apiKey && !_googleGeocodeDenied) {
+    let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${apiKey}`;
+    const bias = viewportBias(viewer);
+    if (bias) url += `&bounds=${bias}`;
+    try {
+      const data = await (await fetch(url)).json();
+      // REQUEST_DENIED = API nie je v projekte zapnuté — do konca relácie Google nevolať.
+      if (data.status === 'REQUEST_DENIED') _googleGeocodeDenied = true;
+      result = (data.status === 'OK' && data.results?.length) ? data.results[0] : null;
+    } catch { result = null; }
+  }
+  // Zadarmo (2026-10-05): Nominatim cez /api/geocode, aj s odhadom 1. pádu („Košíc" → „Košice").
+  if (!result) result = await geocodeFallback(viewer, query);
   let lat = result?.geometry.location.lat;
   let lng = result?.geometry.location.lng;
   let label = result ? result.formatted_address : null;

@@ -1,3 +1,4 @@
+import { createFreeVoice } from './freeVoice.js';
 import { t } from '../i18n.js';
 import { createGevActionRunner, readLayerLifecycleSummary } from './gevActions.js';
 import {
@@ -197,6 +198,16 @@ export function silenceRadioForVoice({ duckRadio, pauseRadio } = {}) {
 const SUPERSEDED_RESPONSE_MEMORY = 8;
 
 /**
+ * Hlasový motor (2026-10-05, vlastník: „nechce sa mi platiť … sprav zatiaľ zadarmo"): predvolene
+ * bezplatný hlas prehliadača (freeVoice.js). Platený OpenAI Realtime len po ručnom prepnutí
+ * `localStorage['oko.voice.engine'] = 'openai'` (a s kľúčom na serveri).
+ * @returns {'free'|'openai'}
+ */
+export function voiceEngine() {
+  try { return globalThis.localStorage?.getItem('oko.voice.engine') === 'openai' ? 'openai' : 'free'; } catch { return 'free'; }
+}
+
+/**
  * Brána prístupu k hlasu (2026-10-05: len pre prihlásených). Funkcia vráti true = smie; inak sama ponúkne
  * prihlásenie a vráti false. Bez brány rozhoduje server (token bez prihlásenia = 401).
  * @type {((info?: {denied?: boolean}) => boolean)|null}
@@ -213,10 +224,14 @@ export function initGevVoiceCommands({ viewer, styleManager, dataManager, sceneD
   if (window.__gevVoiceCommands && typeof window.__gevVoiceCommands.stop === 'function') {
     window.__gevVoiceCommands.stop({ removeUi: true });
   }
+  window.__gevVoiceCommands?.freeVoice?.stop?.();
   const runner = createGevActionRunner({ viewer, styleManager, dataManager, sceneDirector, annotations });
   const ui = createVoiceControl({ reset: true });
+  // Bezplatný hlas používa tú istú pilulku a akcie; zdroje hľadania (lietadlá, paleta, miesta) dodá main.js.
+  const freeVoice = createFreeVoice({ ui, run: runner, dataManager, translate: t });
   const radioLayer = dataManager?.layers?.get('radio')?.module || null;
   const controller = new GevRealtimeController({ runner, ui, radioLayer, dataManager });
+  controller.freeVoice = freeVoice;
   // Deferred annotation outlines finish AFTER their tool result returned. Feed the
   // final outcome (resolved / failed) into the conversation so the model can honestly
   // confirm — or correct — what it narrated about a boundary it never saw land.
@@ -227,6 +242,8 @@ export function initGevVoiceCommands({ viewer, styleManager, dataManager, sceneD
   }
   controller.buttonHandler = () => {
     if (shouldIgnoreVoiceButtonClick(controller.spaceKeyHeld)) return;
+    // Bezplatný hlas nič nestojí — bez brány prihlásenia.
+    if (voiceEngine() === 'free') { freeVoice.toggle(); return; }
     if (controller.isActive()) controller.stop();
     else if (voiceAccessAllowed()) controller.start({ pushToTalk: false });
   };
@@ -236,6 +253,7 @@ export function initGevVoiceCommands({ viewer, styleManager, dataManager, sceneD
     ui.tierButton.addEventListener('click', controller.tierHandler);
   }
   controller.syncCostUi();
+  if (voiceEngine() === 'free') freeVoice.applyUi();
   controller.bindPushToTalkShortcut();
   window.__gevVoiceCommands = controller;
   return controller;
@@ -598,6 +616,12 @@ export class GevRealtimeController {
         if (this.spaceKeyHeld) event.preventDefault();
         return;
       }
+      if (voiceEngine() === 'free' && this.freeVoice) {
+        this.spaceKeyHeld = true;
+        event.preventDefault();
+        this.freeVoice.pushStart();
+        return;
+      }
       this.spaceKeyHeld = true;
       // Space must not generate the focused mic button's native click on keyup.
       event.preventDefault();
@@ -620,6 +644,10 @@ export class GevRealtimeController {
     };
     this.shortcutKeyUpHandler = (event) => {
       if (!isPushToTalkKey(event)) return;
+      if (voiceEngine() === 'free' && this.freeVoice) {
+        if (this.spaceKeyHeld) { event.preventDefault(); this.spaceKeyHeld = false; this.freeVoice.pushEnd(); }
+        return;
+      }
       const wasHoldingSpace = this.spaceKeyHeld;
       this.spaceKeyHeld = false;
       if (!this.pushToTalkKeyHeld) {
@@ -630,6 +658,7 @@ export class GevRealtimeController {
       this.releasePushToTalkKey();
     };
     this.shortcutBlurHandler = () => {
+      this.freeVoice?.pushEnd?.();
       this.spaceKeyHeld = false;
       this.releasePushToTalkKey();
     };
