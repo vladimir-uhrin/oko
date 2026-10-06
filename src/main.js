@@ -105,6 +105,7 @@ import {
 } from './renderGovernor.js';
 import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
+import { installEmbedMode, isEmbedMode } from './embedMode.js';
 import { initMobileShell } from './mobileShell.js';
 import { setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
 
@@ -390,6 +391,10 @@ async function init() {
 
     // Initialize the style manager (post-processing, HUD, locations, share links)
     const styleManager = new StyleManager(viewer, { mapStackController, account: accountCenter });
+    // Živý rámček (2026-10-06, src/embedMode.js): /?embed=1 = len mapa so živými vrstvami, karty
+    // a lišta OKO; bez panelov, súhlasu a privítania (rámček býva na stránke odkazu alebo na cudzom webe).
+    const embedView = isEmbedMode(window.location.search);
+    if (embedView) installEmbedMode({ document, window, styleManager, translate: t });
     // Ľavý stĺpec v logickom poriadku (vlastník 2026-09-27; src/leftLane.js): Zobrazenie, Kamery
     // a Kontext sú panely ľavého pruhu v zónach, naraz je otvorený jeden panel, celá hlavička
     // otvára. Na mobile sa nepresúva (obe strany skryté, panely nosí výsuv); pri prepnutí sa zosúladí.
@@ -421,6 +426,7 @@ async function init() {
       styleManager,
       scene: viewer.scene,
       suppressLane: setWorldOverlayLaneSuppressed,
+      embed: embedView,
     });
     // The previous multi-canvas weather compositor remains disabled. Cockpit
     // clouds use a separate, capped low-resolution GPU pass that never attaches
@@ -554,8 +560,8 @@ async function init() {
       loadingScreen.classList.add('hidden');
       releaseStartupGate();
       startSharpStarfield();
-      // Súhlas s cookies + GA4 až po štarte (src/analytics.js; bez súhlasu GA bez cookies).
-      try { initAnalytics({ t, crawler: crawlerVisit }); } catch (error) { console.warn('[analytics]', error); }
+      // Súhlas s cookies + GA4 až po štarte (src/analytics.js; bez súhlasu GA bez cookies); v živom rámčeku nič nezbierame a na súhlas sa nepýtame (lišta by rámček zakryla).
+      try { if (!embedView) initAnalytics({ t, crawler: crawlerVisit }); } catch (error) { console.warn('[analytics]', error); }
       // Reveal only after the loading cover has yielded. transitionend can be
       // absent under reduced motion, so a bounded fallback makes this reliable.
       let firstRunRevealed = false;
@@ -565,7 +571,7 @@ async function init() {
         // dataManager is passed explicitly: the globe missions enable bundled
         // keyless layers through it, and reaching for styleManager._dataManager
         // would make a private field part of this feature's contract.
-        initFirstRunExperience({ styleManager, dataManager });
+        if (!embedView) initFirstRunExperience({ styleManager, dataManager });
       };
       loadingScreen.addEventListener('transitionend', revealFirstRun, { once: true });
       setTimeout(revealFirstRun, 900);

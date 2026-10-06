@@ -59,6 +59,12 @@ test('oko-static-server: index no-cache a indexovateľný, účet noindex, asset
     assert.equal(index.headers.get('cache-control'), 'no-cache', 'index sa vždy overuje — nový build musí byť vidieť hneď');
     assert.equal(index.headers.get('x-robots-tag'), null, 'od 2026-09-30 sa koreň indexuje (rozhoduje <meta> stránky)');
     assert.match(await index.text(), /assets\/index-abc\.js/);
+    // Živý rámček (2026-10-06): tá istá appka na /?embed=1 sa neindexuje (duplicita koreňa bez ovládania).
+    const embed = await fetch(base + '/?embed=1&t=OKO#v=2&lat=48.1');
+    assert.equal(embed.status, 200);
+    assert.equal(embed.headers.get('x-robots-tag'), 'noindex', 'rámček do výsledkov nepatrí');
+    assert.equal((await fetch(base + '/index.html?embed=1')).headers.get('x-robots-tag'), 'noindex');
+    assert.equal((await fetch(base + '/?embed=0')).headers.get('x-robots-tag'), null, 'iná hodnota nie je rámček');
     assert.equal((await fetch(base + '/account.html')).headers.get('x-robots-tag'), 'noindex, nofollow, noarchive', 'účet do výsledkov nepatrí');
     const verification = await fetch(base + '/google5f66f1e4a10096a1.html');
     assert.equal(verification.status, 200);

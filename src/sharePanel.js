@@ -14,6 +14,7 @@
 import { t } from './i18n.js';
 import { trackEvent } from './analytics.js';
 import { buildShareTargets } from './shareTargets.js';
+import { embedSnippet, embedUrlFromAppUrl } from './embedMode.js';
 
 export const SHARE_API_URL = '/api/share';
 const PANEL_STATE_KEY = '__okoSharePanel';
@@ -71,7 +72,9 @@ function ensurePanel(doc, win, nav, translate, toast) {
   const native = el(doc, 'button', { text: translate('share.native'), attrs: { type: 'button' } });
   const download = el(doc, 'a', { text: translate('share.download'), attrs: { download: 'oko.jpg', href: '#' } });
   const retry = el(doc, 'button', { text: translate('share.retry'), attrs: { type: 'button' } });
-  const actions = el(doc, 'div', { className: 'oko-share-actions' }, [copyLink, copyImage, native, download, retry]);
+  // Kód na vloženie (2026-10-06): živý rámček /?embed=1 s tým istým stavom pre cudzí web (src/embedMode.js).
+  const embedCode = el(doc, 'button', { text: translate('share.embed-code'), attrs: { type: 'button' } });
+  const actions = el(doc, 'div', { className: 'oko-share-actions' }, [copyLink, copyImage, native, download, embedCode, retry]);
   const networksLabel = el(doc, 'div', { className: 'oko-share-networks-label', text: translate('share.networks') });
   const networks = el(doc, 'div', { className: 'oko-share-networks' });
   const root = el(doc, 'section', { attrs: { id: 'oko-share', role: 'dialog', 'aria-modal': 'true', 'aria-label': translate('share.title') } }, [
@@ -104,6 +107,15 @@ function ensurePanel(doc, win, nav, translate, toast) {
       toast(translate('share.image-copied'));
     } catch { toast(translate('toast.copy-failed')); }
   });
+  embedCode.addEventListener('click', async () => {
+    // Z dlhého odkazu (stav v hashi), nie z krátkeho: rámček potrebuje stav priamo v adrese.
+    const longUrl = ui.session?.longUrl;
+    if (!longUrl) return;
+    let code = '';
+    try { code = embedSnippet(embedUrlFromAppUrl(longUrl, { title: ui.session?.copy?.title || '' })); } catch { code = ''; }
+    if (!code) { toast(translate('toast.copy-failed')); return; }
+    try { await nav.clipboard.writeText(code); toast(translate('share.embed-copied')); trackEvent('share_embed_copy'); } catch { toast(translate('toast.copy-failed')); }
+  });
   retry.addEventListener('click', () => {
     // Bez krátkeho odkazu (snímka alebo server zlyhali) skús celý tok znova.
     if (ui.lastOptions) void openSharePanel(ui.lastOptions);
@@ -123,7 +135,7 @@ function ensurePanel(doc, win, nav, translate, toast) {
   });
 
   Object.assign(ui, {
-    root, backdrop, preview, status, urlBox, note, copyLink, copyImage, native, download, retry, networks, show, hide,
+    root, backdrop, preview, status, urlBox, note, copyLink, copyImage, native, download, embedCode, retry, networks, show, hide,
     lastOptions: null,
     reset() {
       ui.session = null;

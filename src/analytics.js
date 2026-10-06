@@ -140,6 +140,8 @@ export const TRACKED_EVENTS = Object.freeze({
   share_create: ['short_link'],
   scene_open: ['scene_type', 'scene_id'],
   mobile_section: ['section'],
+  // Kód na vloženie živého rámčeka (2026-10-06, sharePanel.js) — bez parametrov.
+  share_embed_copy: [],
 });
 
 /** Udalosť → bezpečné parametre (pure): len povolené kľúče, krátke reťazce/čísla/bool, inak null. */

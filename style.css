@@ -13575,3 +13575,125 @@ body.oko-mobile #oko-consent { bottom: calc(70px + env(safe-area-inset-bottom, 0
 @media (prefers-reduced-motion: reduce) {
   #oko-consent, .oko-consent-panel, .oko-consent-backdrop, .oko-consent-status.is-pending i { animation: none; }
 }
+
+/* ── Živý rámček (2026-10-06, src/embedMode.js) ──────────────────────────────
+   /?embed=1 = appka bez ovládania na stránke odkazu /s/<id> alebo na cudzom webe: len mapa so živými
+   vrstvami, karty objektov, kredity podkladu (podmienky Google/ion) a úzka lišta OKO. Beží nad režimom
+   nahrávania (recording-mode skryje panely, HUD vypnutý); tu sa skryje zvyšok ovládania vrátane
+   mobilného plášťa (rámček 640 px široký je pod hranicou 900 px) a rámu bezpečného výrezu. */
+body.embed-mode #safe-frame-overlay,
+body.embed-mode #oko-topbar,
+body.embed-mode #oko-appbar,
+body.embed-mode #oko-sheet,
+body.embed-mode #oko-sheet-backdrop,
+body.embed-mode .card-swipe-zone,
+body.embed-mode #left-panel-stack,
+body.embed-mode .lane-zone,
+body.embed-mode #ukraine-panel,
+body.embed-mode #mideast-panel,
+body.embed-mode #gas-panel,
+body.embed-mode #oil-panel,
+body.embed-mode #history-panel,
+body.embed-mode #right-context-rail,
+body.embed-mode #first-run-launcher,
+body.embed-mode #intel-hud,
+body.embed-mode #cockpit-entry,
+body.embed-mode #view-switcher,
+body.embed-mode #consent-open,
+body.embed-mode #oko-consent,
+body.embed-mode #oko-share,
+body.embed-mode #oko-share-backdrop,
+body.embed-mode #orbit-indicator,
+body.embed-mode #military-awareness-panel,
+body.embed-mode #scene-runtime,
+body.embed-mode #command-dock,
+body.embed-mode #lang-switch,
+body.embed-mode #gev-voice-control,
+body.embed-mode .oko-cmd {
+  display: none !important;
+}
+/* Kredity podkladu drží v rohu inline installEmbedMode (model v creditAttribution.test.mjs pozná len svoje
+   selektory); zdvih dokovaných kariet bez lišty rieši mobilný plášť (embed: lift = medzera 8 px). */
+body.embed-mode #toast { bottom: 24px !important; }
+#oko-embed-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  z-index: 55; /* pod kartami objektov (60) a hláškami (200), nad plátnom */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 10px 0 12px;
+  background: linear-gradient(180deg, rgba(4, 10, 16, 0.84) 0%, rgba(4, 10, 16, 0.55) 70%, rgba(4, 10, 16, 0) 100%);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+#oko-embed-bar > * { pointer-events: auto; }
+.oko-embed-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  color: inherit;
+  text-decoration: none;
+}
+.oko-embed-wordmark {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 5px;
+  text-shadow: 0 0 18px var(--accent-glow);
+}
+.oko-embed-o { color: var(--accent); font-weight: 300; }
+.oko-embed-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #ff6a6a;
+}
+.oko-embed-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff3b3b;
+  box-shadow: 0 0 8px #ff3b3b;
+  animation: oko-embed-pulse 1.6s ease-in-out infinite;
+}
+@keyframes oko-embed-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.oko-embed-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.oko-embed-title:empty { display: none; }
+.oko-embed-open {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--accent);
+  border: 1px solid rgba(0, 212, 255, 0.45);
+  border-radius: 6px;
+  padding: 5px 9px;
+  background: rgba(0, 212, 255, 0.08);
+  white-space: nowrap;
+}
+.oko-embed-open:hover { background: rgba(0, 212, 255, 0.18); }
+@media (max-width: 420px) {
+  .oko-embed-title { display: none; }
+  .oko-embed-wordmark { letter-spacing: 3px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .oko-embed-dot { animation: none; }
+}

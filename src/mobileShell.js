@@ -130,6 +130,7 @@ export function createMobileShell({
   window: win = globalThis.window,
   styleManager = null,
   suppressLane = null,
+  embed = false,
 } = {}) {
   const body = doc?.body;
   const appbar = doc?.getElementById?.('oko-appbar');
@@ -210,7 +211,8 @@ export function createMobileShell({
    */
   function open(sectionId, { expand = null } = {}) {
     const section = sectionById.get(sectionId);
-    if (!section || !mode.mobile || destroyed) return false;
+    // V živom rámčeku výsuv nie je (lišta skrytá) — presun panela do neho by nič neukázal.
+    if (!section || !mode.mobile || destroyed || embed) return false;
     if (active) close();
     if (section.action === 'location') {
       // Lišta polohy žije v doku (nie vo výsuve): otvor ju a daj fokus poľu.
@@ -264,25 +266,28 @@ export function createMobileShell({
     mode = resolveShellMode({ width: win?.innerWidth, height: win?.innerHeight, coarse: isCoarsePointer(win) });
     body.classList?.toggle?.('oko-mobile', mode.mobile);
     body.classList?.toggle?.('oko-mobile-landscape', mode.landscape);
-    appbar.hidden = !mode.mobile;
+    appbar.hidden = !mode.mobile || embed;
     // Zdvih nad lištu = zmeraná výška lišty (so safe-area vložkou na výrezoch)
     // + 8 px; CSS má predvolených 66 px pre prvé vykreslenie. Dok sa dvíha
     // inline (style.bottom): je to prvok modelovaný v creditAttribution.test.mjs,
     // ktorý pozná len desktopové selektory — výsuv, toast a kokpit idú cez
     // premennú --oko-dock-lift v style.css.
-    const lift = mode.mobile ? Math.round((Number(appbar.offsetHeight) || DEFAULT_APPBAR_HEIGHT_PX) + DOCK_LIFT_GAP_PX) : 0;
+    // Živý rámček (2026-10-06, src/embedMode.js): plášť bez spodnej lišty — zdvih je len
+    // medzera (dokované karty rátajú lift − 8 px = okraj rámčeka); dok je skrytý a kredity
+    // drží v rohu installEmbedMode, tak sa inline nedvíhajú.
+    const lift = mode.mobile ? (embed ? DOCK_LIFT_GAP_PX : Math.round((Number(appbar.offsetHeight) || DEFAULT_APPBAR_HEIGHT_PX) + DOCK_LIFT_GAP_PX)) : 0;
     const rootStyle = doc.documentElement?.style;
     if (rootStyle?.setProperty) {
       if (lift > 0) rootStyle.setProperty('--oko-dock-lift', `${lift}px`);
       else rootStyle.removeProperty?.('--oko-dock-lift');
     }
     const dock = doc.getElementById?.('command-dock');
-    if (dock?.style) dock.style.bottom = lift > 0 ? `${lift}px` : '';
+    if (dock?.style) dock.style.bottom = lift > 0 && !embed ? `${lift}px` : '';
     // Kredity Cesium/Google (vľavo dole) nad dok, nie cez neho: na 827 px
     // ležali v jednom páse s dokom a text „Upgrade for commercial…" mizol
     // pod lištou Poloha (používateľ: „toto sa prekrýva").
     const credits = doc.getElementById?.('cesium-credits');
-    if (credits?.style) {
+    if (credits?.style && !embed) {
       const dockHeight = Number(dock?.offsetHeight) || DEFAULT_DOCK_HEIGHT_PX;
       credits.style.bottom = lift > 0 ? `${lift + dockHeight + VOICE_OVERHANG_PX + DOCK_LIFT_GAP_PX}px` : '';
     }
@@ -345,8 +350,8 @@ export function createMobileShell({
 /**
  * Štart z main.js: plášť + širší výber na dotyku. Vracia plášť (na diagnostiku).
  */
-export function initMobileShell({ styleManager = null, scene = null, suppressLane = null, document: doc, window: win } = {}) {
-  const shell = createMobileShell({ document: doc, window: win, styleManager, suppressLane });
+export function initMobileShell({ styleManager = null, scene = null, suppressLane = null, embed = false, document: doc, window: win } = {}) {
+  const shell = createMobileShell({ document: doc, window: win, styleManager, suppressLane, embed });
   installCoarsePickBox(scene, { coarse: isCoarsePointer(win) });
   shell.sync();
   return shell;

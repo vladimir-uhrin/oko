@@ -218,6 +218,24 @@ test('plášť: desktop nič nemení; na telefóne skryje stĺpce a otvorí sekc
   assert.equal(body.dataset.okoSection, undefined);
 });
 
+test('živý rámček (2026-10-06): úzky rámček = plášť bez spodnej lišty — lišta skrytá, zdvih len medzera, dok a kredity bez inline zdvihu, ambientné karty vypnuté', () => {
+  const { doc, byId, body, appbar } = buildDom();
+  const win = makeWindow({ width: 640, height: 400, coarse: false });
+  const suppressed = [];
+  const shell = createMobileShell({ document: doc, window: win, styleManager: makeStyleManager(doc), suppressLane: (lane, on) => suppressed.push([lane, on]), embed: true });
+  shell.sync();
+  assert.equal(body.classList.contains('oko-mobile'), true, '640 px je pod hranicou mobilu — dokované karty aj na cudzom webe');
+  assert.equal(appbar.hidden, true, 'v rámčeku lišta sekcií nie je');
+  assert.equal(doc.documentElement.style.props['--oko-dock-lift'], '8px', 'dokované karty rátajú lift − 8 px = okraj');
+  assert.equal(byId.get('command-dock').style.bottom, '', 'dok sa nedvíha (je skrytý)');
+  assert.ok(!byId.get('cesium-credits').style.bottom, 'kredity drží v rohu rámček, nie plášť');
+  assert.deepEqual(suppressed.at(-1), ['ambient-card', true]);
+  assert.equal(shell.open('layers'), false, 'bez lišty sa výsuv neotvára');
+  win.resize(1440, 900);
+  assert.equal(appbar.hidden, true);
+  assert.equal(doc.documentElement.style.props['--oko-dock-lift'], undefined);
+});
+
 test('plášť: jedna sekcia naraz, viac panelov v sekcii (rozbalený len prvý), prepnutie vráti predošlé; hľadanie otvorí lištu polohy bez výsuvu', () => {
   const { doc, byId, sheet, leftStack, rail } = buildDom();
   const win = makeWindow({ width: 390, height: 844, coarse: true });

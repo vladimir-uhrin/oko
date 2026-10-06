@@ -76,7 +76,7 @@ test('originFromRequest / clientKeyFromRequest: tunel (Host + X-Forwarded-Proto 
   assert.equal(clientKeyFromRequest({ headers: { 'cf-connecting-ip': 'not an ip' }, socket: { remoteAddress: '10.0.0.5' } }), '10.0.0.5');
 });
 
-test('renderSharePage: OG + Twitter značky s absolútnymi URL, presmerovanie do aplikácie, escapovanie', () => {
+test('renderSharePage: OG + Twitter značky s absolútnymi URL, živý rámček aplikácie, escapovanie', () => {
   const record = { id: 'Ab12cd34EF', hash: 'v=2&lat=48.15&lon=17.11', title: 'OKO · <SWR11H> & "Bratislava"', description: 'Lietadlá · 14. 9.', width: 1200, height: 630 };
   const html = renderSharePage({ record, origin: 'https://oko.uhrin.digital/' });
   assert.match(html, /<meta property="og:image" content="https:\/\/oko\.uhrin\.digital\/s\/Ab12cd34EF\.jpg" \/>/);
@@ -86,8 +86,10 @@ test('renderSharePage: OG + Twitter značky s absolútnymi URL, presmerovanie do
   assert.match(html, /<meta property="og:image:width" content="1200" \/>/);
   assert.match(html, /<meta name="robots" content="noindex" \/>/);
   assert.doesNotMatch(html, /http-equiv="refresh"/, 'crawler Facebooku nasleduje meta refresh a skončil by na koreni bez OG značiek');
-  assert.match(html, /location\.replace\("https:\/\/oko\.uhrin\.digital\/#v=2&lat=48\.15&lon=17\.11"\)/, 'človek s JS ide do aplikácie');
-  assert.match(html, /<a href="https:\/\/oko\.uhrin\.digital\/#v=2&amp;lat=48\.15&amp;lon=17\.11">/, 'bez JS ostáva odkaz');
+  // 2026-10-06 živý rámček: človek ostáva na stránke odkazu, appka beží v rámčeku v tom istom stave a s názvom v lište.
+  assert.match(html, /<iframe class="oko-live" src="https:\/\/oko\.uhrin\.digital\/\?embed=1&amp;t=OKO\+%C2%B7\+%3CSWR11H%3E\+%26\+%22Bratislava%22#v=2&amp;lat=48\.15&amp;lon=17\.11" title="OKO · &lt;SWR11H&gt; &amp; &quot;Bratislava&quot;" allow="fullscreen" allowfullscreen><\/iframe>/, 'živý rámček so stavom odkazu');
+  assert.doesNotMatch(html, /location\.replace/, 'bez presmerovania — rámček je stránka odkazu');
+  assert.match(html, /<a href="https:\/\/oko\.uhrin\.digital\/#v=2&amp;lat=48\.15&amp;lon=17\.11">/, 'pod rámčekom ostáva odkaz do plnej appky (keď sa rámček nenačíta)');
   assert.doesNotMatch(html, /<SWR11H>/);
   assert.equal(escapeHtml(`<a href='x'>&</a>`), '&lt;a href=&#39;x&#39;&gt;&amp;&lt;/a&gt;');
 });

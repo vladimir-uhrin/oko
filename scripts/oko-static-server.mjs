@@ -102,11 +102,15 @@ const ROBOTS_TXT = 'User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https:/
 /**
  * X-Robots-Tag pre súbor z buildu, alebo null (pure): účet a overovací súbor Search
  * Console do výsledkov nepatria; všetko ostatné sa indexuje podľa <meta> stránky.
+ * Živý rámček `/?embed=1` (2026-10-06, src/embedMode.js) je tá istá appka bez ovládania
+ * vložená na stránke odkazu alebo na cudzom webe — do výsledkov patrí koreň, nie rámček.
  * @param {string} pathname
+ * @param {string} [search] query adresy (`?embed=1`)
  */
-export function robotsTagFor(pathname) {
+export function robotsTagFor(pathname, search = '') {
   if (pathname === '/account.html') return 'noindex, nofollow, noarchive';
   if (/^\/google[0-9a-f]{8,}\.html$/.test(pathname)) return 'noindex';
+  if ((pathname === '/index.html' || pathname === '/' || pathname === '') && new URLSearchParams(String(search || '')).get('embed') === '1') return 'noindex';
   return null;
 }
 const TYPES = {
@@ -144,7 +148,12 @@ const server = http.createServer((req, res) => {
   const method = req.method || 'GET';
   if (method !== 'GET' && method !== 'HEAD') { send(res, 405, { 'Content-Type': 'text/plain' }, 'Method Not Allowed'); return; }
   let pathname = '/';
-  try { pathname = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname); } catch { send(res, 400, { 'Content-Type': 'text/plain' }, 'Bad Request'); return; }
+  let search = '';
+  try {
+    const parsed = new URL(req.url || '/', 'http://localhost');
+    pathname = decodeURIComponent(parsed.pathname);
+    search = parsed.search;
+  } catch { send(res, 400, { 'Content-Type': 'text/plain' }, 'Bad Request'); return; }
   if (pathname === '/robots.txt') { send(res, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }, ROBOTS_TXT); return; }
   if (pathname.startsWith('/api/')) { send(res, 502, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, JSON.stringify({ error: 'api_not_routed', detail: 'cloudflared must route /api/* to the dev server' })); return; }
   if (pathname === '/' || pathname === '') pathname = '/index.html';
@@ -179,7 +188,7 @@ const server = http.createServer((req, res) => {
       } : {}),
     };
     if (req.headers['if-none-match'] === etag) { send(res, 304, { ETag: etag, 'Cache-Control': headers['Cache-Control'] }, ''); return; }
-    const robotsTag = robotsTagFor(pathname);
+    const robotsTag = robotsTagFor(pathname, search);
     res.writeHead(200, { ...(robotsTag ? { 'X-Robots-Tag': robotsTag } : {}), ...headers });
     if (method === 'HEAD') { res.end(); return; }
     const stream = fs.createReadStream(target);

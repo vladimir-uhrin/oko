@@ -15,6 +15,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { embedUrlFromAppUrl } from './embedMode.js';
 
 export const SHARE_ID_LENGTH = 10;
 export const SHARE_IMAGE_MAX_BYTES = 400 * 1024;
@@ -151,12 +152,14 @@ export function renderSharePage({ record, origin }) {
   const imageUrl = `${base}/s/${id}.jpg`;
   const appUrl = `${base}/#${record.hash}`;
   const appUrlAttr = escapeHtml(appUrl);
-  const appUrlJs = JSON.stringify(appUrl);
+  // Živý rámček (2026-10-06, vlastník: „aby to nebol obrázok, ale live"): človek ostáva na stránke
+  // odkazu a vidí živú appku v tom istom stave (src/embedMode.js); siete čítajú OG obrázok ako doteraz.
+  const embedUrlAttr = escapeHtml(embedUrlFromAppUrl(appUrl, { title: record.title }));
   return `<!DOCTYPE html>
 <html lang="sk">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="robots" content="noindex" />
 <title>${title}</title>
 <meta name="description" content="${description}" />
@@ -176,7 +179,7 @@ export function renderSharePage({ record, origin }) {
 <meta name="twitter:description" content="${description}" />
 <meta name="twitter:image" content="${escapeHtml(imageUrl)}" />
 <link rel="canonical" href="${escapeHtml(pageUrl)}" />
-<style>body{margin:0;background:#06101a;color:#dff3fb;font:14px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}a{color:#39d0ff}main{text-align:center;padding:24px}img{max-width:min(92vw,720px);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.5)}</style>
+<style>html,body{height:100%}body{margin:0;background:#06101a;color:#dff3fb;font:14px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}a{color:#39d0ff}main{text-align:center;padding:24px}img{max-width:min(92vw,720px);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.5)}iframe.oko-live{position:fixed;inset:0;width:100%;height:100%;border:0;background:#06101a}</style>
 </head>
 <body>
 <main>
@@ -184,7 +187,7 @@ export function renderSharePage({ record, origin }) {
 <img src="${escapeHtml(imageUrl)}" alt="${title}" />
 <p>${description}</p>
 </main>
-<script>location.replace(${appUrlJs});</script>
+<iframe class="oko-live" src="${embedUrlAttr}" title="${title}" allow="fullscreen" allowfullscreen></iframe>
 </body>
 </html>
 `;

@@ -125,6 +125,33 @@ test('Skúsiť znova: po neúspechu servera zopakuje celý tok s tými istými v
   assert.equal(ui.note.className, 'oko-share-note');
 });
 
+test('Kód na vloženie (2026-10-06): iframe so živým rámčekom z dlhého odkazu a názvom, do schránky; bez schránky hláška', async () => {
+  const doc = makeDocument();
+  const written = [];
+  const toasts = [];
+  let clipboardDenied = false;
+  const nav = { clipboard: { writeText: async (text) => { if (clipboardDenied) throw new Error('denied'); written.push(text); } } };
+  await openSharePanel({
+    document: doc, window: {}, navigator: nav, translate, toast: (m) => toasts.push(m),
+    buildLink: () => ({ href: 'https://okolive.sk/?front=front#v=2&lat=48.1&lon=17.1&subj=flights.t.4b1805', hash: 'v=2&lat=48.1&lon=17.1&subj=flights.t.4b1805' }),
+    captureSnapshot: async () => snapshot(),
+    publish: async () => ({ id: 'Ab12cd34EF', url: 'https://okolive.sk/s/Ab12cd34EF', image: null }),
+    copy: { title: 'OKO · SWR11H', description: 'Lietadlá', text: 'OKO · SWR11H — Lietadlá' },
+  });
+  const ui = _getSharePanelForTest(doc);
+  assert.equal(ui.embedCode.hidden, false, 'tlačidlo je vždy (rámček ide z dlhého odkazu, server netreba)');
+  assert.equal(ui.embedCode.textContent, 'share.embed-code');
+  await ui.embedCode.click();
+  assert.equal(written.length, 1);
+  assert.equal(written[0], '<iframe src="https://okolive.sk/?embed=1&amp;t=OKO+%C2%B7+SWR11H#v=2&amp;lat=48.1&amp;lon=17.1&amp;subj=flights.t.4b1805" width="640" height="400" style="border:0;max-width:100%" loading="lazy" allow="fullscreen" allowfullscreen title="OKO naživo"></iframe>', 'stav z hashu, query appky (front=) sa do rámčeka neberie, názov z textov zdieľania');
+  assert.equal(toasts.at(-1), 'share.embed-copied');
+  // Okno si navigator drží od prvého otvorenia; zlyhanie schránky = hláška, nie výnimka.
+  clipboardDenied = true;
+  await ui.embedCode.click();
+  assert.equal(toasts.at(-1), 'toast.copy-failed');
+  assert.equal(written.length, 1);
+});
+
 test('publishShareSnapshot: POST JSON na /api/share, {url} späť; chyby a odmietnutia = null', async () => {
   const calls = [];
   const okFetch = async (url, init) => { calls.push([url, init]); return { ok: true, json: async () => ({ id: 'A', url: 'https://x/s/A', image: 'https://x/s/A.jpg' }) }; };

@@ -137,7 +137,8 @@ test('kategórie: nevyhnutné vždy, štatistika prepínač, reklamy nepoužíva
 test('zapojenie: main.js spúšťa súhlas až po skrytí preloadera, v HUD je odkaz Súkromie', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ initAnalytics, trackEvent \} from '\.\/analytics\.js';/);
-  assert.match(main, /startSharpStarfield\(\);\n[^\n]*\n\s+try \{ initAnalytics\(\{ t, crawler: crawlerVisit \}\); \}/);
+  // Živý rámček (2026-10-06, src/embedMode.js): v rámčeku sa súhlas ani GA nespúšťa (lišta by ho zakryla, nič nezbierame).
+  assert.match(main, /startSharpStarfield\(\);\n[^\n]*\n\s+try \{ if \(!embedView\) initAnalytics\(\{ t, crawler: crawlerVisit \}\); \}/);
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /<button id="consent-open" type="button" data-i18n="consent\.open" hidden>/);
 });
@@ -161,7 +162,8 @@ test('ochrana súkromia: kontakt, cookies GA4 len so súhlasom, tlačidlá menia
 });
 
 test('udalosti (2026-10-04): len známe názvy a povolené parametre, nič pred načítaním GA', () => {
-  assert.deepEqual(Object.keys(TRACKED_EVENTS), ['layer_toggle', 'card_open', 'share_create', 'scene_open', 'mobile_section']);
+  assert.deepEqual(Object.keys(TRACKED_EVENTS), ['layer_toggle', 'card_open', 'share_create', 'scene_open', 'mobile_section', 'share_embed_copy']);
+  assert.deepEqual(eventPayload('share_embed_copy', { url: 'https://x' }), {}, 'kód na vloženie: udalosť bez parametrov, adresa neodíde');
   assert.deepEqual(eventPayload('layer_toggle', { layer_id: 'flights', enabled: true, lat: 48.1, callsign: 'AUA1' }), { layer_id: 'flights', enabled: true }, 'poloha ani volací znak neodídu');
   assert.deepEqual(eventPayload('card_open', { kind: 'x'.repeat(200) }), { kind: 'x'.repeat(64) }, 'dlhý reťazec sa skráti');
   assert.equal(eventPayload('neznama', { a: 1 }), null);
