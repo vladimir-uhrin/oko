@@ -389,7 +389,11 @@ test('Deň na fronte: denne od 8:00, video 9:16 bez doplnenia, bez hlásenia zno
       return { video, post, srt: null };
     },
     publisher: { status: () => ({ facebook: false, instagram: false }) } });
-  assert.equal(studio.frontDayStatus().due, false, 'automatika vypnutá');
+  assert.equal(studio.settings().frontDay.enabled, true, 'predvolene zapnuté');
+  studio.setSettings({ frontDay: { enabled: false } });
+  clock.time += 45 * 60_000;
+  assert.equal(studio.frontDayStatus().due, false, 'vypnuté v admine → nebeží');
+  clock.time -= 45 * 60_000;
   studio.setSettings({ frontDay: { enabled: true } });
   assert.throws(() => studio.setSettings({ frontDay: { hour: 3 } }), /invalid_input/);
   assert.throws(() => studio.setSettings({ frontDay: { weekday: 1 } }), /invalid_input/);

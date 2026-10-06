@@ -64,8 +64,8 @@ export const DEFAULT_SETTINGS = Object.freeze({ autoDraft: true, autoReel: true,
   // Týždeň na fronte (2026-10-03): sobota 7:00 spustí scripts/make-front-week-video.mjs a výsledok dá do Štúdia.
   frontWeek: { enabled: false, weekday: 6, hour: 7 },
   // Deň na fronte (2026-10-05): každé ráno po rannom hlásení GŠ (~7:00) spustí scripts/make-front-day-video.mjs;
-  // beh trvá ~20–30 min, návrh je v Štúdiu pred 9:30.
-  frontDay: { enabled: false, hour: 8 },
+  // beh trvá ~20–30 min, návrh je v Štúdiu pred 9:30. Predvolene zapnuté (vlastník 2026-10-06).
+  frontDay: { enabled: true, hour: 8 },
   // Ukrajina (2026-10-04): prah vzdušného útoku (počet oblastí), fotky/videá oficiálnych kanálov a ich denný strop.
   ua: { airMinOblasts: AIR_MIN_OBLASTS_DEFAULT, media: true, mediaPerDay: MEDIA_PER_DAY_DEFAULT } });
 const weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Bratislava', weekday: 'short' });
