@@ -269,7 +269,11 @@ test('podklad podľa hostiteľa: Stadia bez kľúča len na localhoste, inde bez
   assert.equal(basemapForHost('localhost'), METEO_BASEMAP_ID);
   assert.equal(basemapForHost('127.0.0.1'), METEO_BASEMAP_ID);
   assert.equal(basemapForHost('oko.localhost'), METEO_BASEMAP_ID, 'poddomény localhostu tiež');
-  assert.equal(basemapForHost('oko.uhrin.digital'), METEO_BASEMAP_FALLBACK_ID, 'doména → bezkľúčový podklad');
+  assert.equal(basemapForHost('oko.uhrin.digital'), METEO_BASEMAP_FALLBACK_ID, 'cudzia doména → bezkľúčový podklad');
+  // 2026-10-06: doména *.okolive.sk autorizovaná v účte Stadia (overené: dlaždica s Referer okolive.sk = 200).
+  assert.equal(basemapForHost('okolive.sk'), METEO_BASEMAP_ID, 'autorizovaná doména → Stadia');
+  assert.equal(basemapForHost('www.okolive.sk'), METEO_BASEMAP_ID, 'aj poddomény');
+  assert.equal(basemapForHost('okolive.sk.evil.example'), METEO_BASEMAP_FALLBACK_ID, 'nie prípona iného hostiteľa');
   assert.equal(basemapForHost('OKO.UHRIN.DIGITAL'), METEO_BASEMAP_FALLBACK_ID, 'bez ohľadu na veľkosť písmen');
   assert.equal(basemapForHost(''), METEO_BASEMAP_ID, 'neznáme prostredie → primárny, správanie sa nemení');
   assert.equal(basemapForHost(null), METEO_BASEMAP_ID);

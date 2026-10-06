@@ -20,6 +20,8 @@
  * Pravidlá vrstiev. `map` null = určí `resolveMap` (meteo podľa hostiteľa). `anyOrigin` = aj obnova
  * z odkazu; `keepNear` = pri priblížení mapu nevracať; `onlyFrom` = prepnúť len z týchto máp.
  */
+import { stadiaAuthorizedHost } from './stadiaHosts.js';
+
 export const LAYER_BASEMAP_RULES = Object.freeze({
   'natural-events': Object.freeze({ map: 'gibs-truecolor' }),
   earthquakes: Object.freeze({ map: 'aster-relief' }),
@@ -39,13 +41,13 @@ export const AUTO_BASEMAP_NEAR_M = 150_000;
 export const AUTO_BASEMAP_FAR_M = 220_000;
 
 /**
- * Podklad pre meteo podľa hostiteľa (pure): Stadia Dark bez kľúča obslúži len lokálny vývoj
- * (na okolive.sk 401), inde bezkľúčová Blue Marble. Rovnaké pravidlo ako meteoLayer.basemapForHost
+ * Podklad pre meteo podľa hostiteľa (pure): Stadia Dark na localhoste (bez kľúča) a na doménach
+ * autorizovaných v účte Stadia (okolive.sk od 2026-10-06), inde bezkľúčová Blue Marble. Rovnaké pravidlo ako meteoLayer.basemapForHost
  * (test stráži zhodu) — tu, aby main.js nemusel načítať celú meteo vrstvu.
  */
 export function meteoBasemapForHost(hostname) {
   const h = String(hostname || '').trim().toLowerCase();
-  if (!h || ['localhost', '127.0.0.1', '[::1]', '::1'].includes(h) || h.endsWith('.localhost')) return 'stadia-dark';
+  if (!h || stadiaAuthorizedHost(h)) return 'stadia-dark';
   return 'gibs-blue-marble';
 }
 

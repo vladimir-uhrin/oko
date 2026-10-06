@@ -24,7 +24,7 @@ test('dvojice: len existujúce mapy; lietadlá, lode, Ukrajina ani meteo mapu ne
   for (const [layer, map] of Object.entries(LAYER_BASEMAPS)) assert.ok(ids.has(map), `${layer} → ${map} existuje`);
   for (const layer of ['flights', 'military', 'ais-live-vessels', 'satellites', 'ukraine', 'meteo-gfs']) assert.equal(LAYER_BASEMAPS[layer], undefined, layer);
   assert.notEqual(LAYER_BASEMAPS.earthquakes, 'karta', 'KARTA je mapa frontu, nie reliéf sveta');
-  assert.ok(!Object.values(LAYER_BASEMAPS).some((m) => m.startsWith('stadia')), 'Stadia na okolive.sk nefunguje (401)');
+  assert.ok(!Object.values(LAYER_BASEMAPS).some((m) => m.startsWith('stadia')), 'pevné dvojice bez Stadie (mimo autorizovaných domén 401; meteo ju volí podľa hostiteľa)');
 });
 
 test('zapnutie vrstvy prepne mapu s hláškou, vypnutie vráti pôvodnú', () => {
@@ -164,7 +164,7 @@ test('hláška: zrozumiteľné mená mapy a vrstvy v SK aj EN', () => {
 });
 
 // ── meteo pod rovnakými pravidlami + štítok AUTO (2026-10-05) ───────────────
-function meteoHarness({ active = 'photoreal', host = 'okolive.sk' } = {}) {
+function meteoHarness({ active = 'photoreal', host = 'example.com' } = {}) {
   const h = { active, states: [], notes: [] };
   h.policy = createLayerBasemapPolicy({
     getActiveId: () => h.active,
@@ -196,6 +196,10 @@ test('meteo: prepne aj pri obnove z odkazu, len z fotomapy, zblízka mapu nevrac
   const osm = meteoHarness({ active: 'osm' });
   osm.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'user' });
   assert.equal(osm.active, 'osm', 'na inej než fotomape meteo mapu nemení');
+
+  const web = meteoHarness({ host: 'okolive.sk' });
+  web.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'user' });
+  assert.equal(web.active, 'stadia-dark', 'okolive.sk je v účte Stadia autorizovaná (2026-10-06)');
 
   const local = meteoHarness({ host: 'localhost' });
   local.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'user' });

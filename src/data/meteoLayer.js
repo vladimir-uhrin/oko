@@ -55,12 +55,13 @@ export const METEO_BASEMAP_ID = 'stadia-dark';
  * Preto sa podklad volí podľa hostiteľa a mimo localhostu padá na bezkľúčové
  * NASA GIBS (ten istý podklad, s akým prototyp začínal).
  *
- * Keď si v bezplatnom Stadia účte autorizuješ doménu, stačí ju pridať do
- * STADIA_KEYLESS_HOSTS — inak sa nič meniť nemusí (Stadia autorizuje Origin,
- * nie api_key v URL).
+ * Doména autorizovaná v účte Stadia sa pridáva do STADIA_AUTHORIZED_DOMAINS
+ * (src/stadiaHosts.js; okolive.sk od 2026-10-06) — inak sa nič meniť nemusí
+ * (Stadia autorizuje Origin, nie api_key v URL).
  */
 export const METEO_BASEMAP_FALLBACK_ID = 'gibs-blue-marble';
-export const STADIA_KEYLESS_HOSTS = Object.freeze(['localhost', '127.0.0.1', '[::1]', '::1']);
+import { stadiaAuthorizedHost } from '../stadiaHosts.js';
+export { STADIA_KEYLESS_HOSTS } from '../stadiaHosts.js';
 
 /**
  * Ktorý podklad má meteo pýtať pre daného hostiteľa. Prázdny/neznámy hostiteľ
@@ -71,8 +72,7 @@ export const STADIA_KEYLESS_HOSTS = Object.freeze(['localhost', '127.0.0.1', '[:
 export function basemapForHost(hostname) {
   const h = String(hostname || '').trim().toLowerCase();
   if (!h) return METEO_BASEMAP_ID;
-  if (STADIA_KEYLESS_HOSTS.includes(h) || h.endsWith('.localhost')) return METEO_BASEMAP_ID;
-  return METEO_BASEMAP_FALLBACK_ID;
+  return stadiaAuthorizedHost(h) ? METEO_BASEMAP_ID : METEO_BASEMAP_FALLBACK_ID;
 }
 /** Koľko krokov dopredu prednačítať. */
 export const METEO_PREFETCH_STEPS = 2;
