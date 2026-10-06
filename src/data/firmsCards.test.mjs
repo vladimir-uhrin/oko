@@ -65,7 +65,7 @@ test('buildSelectedFireCard: full detail card with coords, selected flag, no fad
   assert.equal(card.title, 'FIRE · 1520 MW');
   assert.equal(card.selected, true);
   assert.equal(card.details[0], 'high conf · 2h ago · VIIRS N20');
-  assert.equal(card.details[1], '61.914°N 122.944°W');
+  assert.equal(card.details[1], '61.914°N 122.944°W · DAY');
 });
 
 test('buildSelectedFireCard: night detections are tagged', () => {

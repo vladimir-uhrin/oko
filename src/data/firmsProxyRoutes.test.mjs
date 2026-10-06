@@ -1,0 +1,40 @@
+// src/data/firmsProxyRoutes.test.mjs — trasy /api/firms/history a /api/firms/news (2026-10-06).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oko-fires-route-'));
+process.env.FIRE_HISTORY_DIR = dir;
+const { firmsProxy } = await import('../../vite.config.js');
+const { createFireHistoryStore } = await import('./fireHistoryStore.js');
+
+function handlerOf(plugin) {
+  let h = null;
+  plugin.configureServer({ middlewares: { use: (p, fn) => { if (p === '/api/firms') h = fn; } } });
+  return h;
+}
+async function call(h, url) {
+  return new Promise((resolve) => {
+    const res = { headersSent: false, status: 0, body: '', writeHead(s) { this.status = s; this.headersSent = true; return this; }, setHeader() {}, end(b) { this.body = String(b || ''); resolve(this); } };
+    void h({ url, headers: {}, socket: { remoteAddress: '127.0.0.1' } }, res);
+  });
+}
+
+test('/history: detekcie z disku v okruhu + štatistika; zlé súradnice 400', async () => {
+  const d = new Date().toISOString().slice(0, 10);
+  await createFireHistoryStore({ dir }).append([
+    { lat: 44.7356, lon: 37.8093, frp: 3, confidence: 'n', brightness: 330, daynight: 'N', acqDate: d, acqTime: '3', satellite: 'N21' },
+    { lat: 44.7357, lon: 37.8094, frp: 5.5, confidence: 'n', brightness: 330, daynight: 'D', acqDate: d, acqTime: '1104', satellite: 'N20' },
+  ]);
+  const h = handlerOf(firmsProxy());
+  const r = await call(h, '/history?lat=44.7356&lon=37.8093&km=5&days=3');
+  assert.equal(r.status, 200);
+  const j = JSON.parse(r.body);
+  assert.equal(j.stats.count, 2); assert.equal(j.stats.passes, 2); assert.equal(j.stats.maxFrp, 5.5);
+  assert.equal(j.detections.length, 2);
+  assert.match(j.source, /OKO fire history/);
+  assert.equal((await call(h, '/history?lat=x&lon=1')).status, 400);
+  assert.equal((await call(h, '/news?lat=100&lon=1')).status, 400);
+});

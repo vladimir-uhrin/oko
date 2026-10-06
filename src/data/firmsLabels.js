@@ -35,11 +35,37 @@ export function accentForSeverity(stopName) {
   return ACCENT_RGB[stopName] || ACCENT_RGB.yellow;
 }
 
+/** Kód družice → celé meno pre vybranú kartu (2026-10-06). */
+export function satelliteFullName(satellite) {
+  const s = String(satellite || '').trim().toUpperCase().replace(/FRP$/, '');
+  if (s === 'N20' || s === 'NOAA-20') return 'NOAA-20';
+  if (s === 'N21' || s === 'NOAA-21') return 'NOAA-21';
+  if (s === 'N' || s === 'NPP' || s === 'SUOMI NPP') return 'Suomi NPP';
+  if (s === 'AQUA' || s === 'TERRA') return s[0] + s.slice(1).toLowerCase();
+  const m = /^(G|MET|HIM)(\d+)$/.exec(s);
+  if (m) return m[1] === 'G' ? `GOES-${m[2]}` : m[1] === 'HIM' ? `Himawari-${m[2]}` : `Meteosat-${m[2]}`;
+  return s;
+}
+
+/**
+ * Vek detekcie → stupeň tlmenia ikony (2026-10-06, „farba podľa času“): čerstvé (< 3 h) plné,
+ * do 12 h mierne, staršie výrazne tlmené — na glóbuse vidno, čo horí teraz a čo je včerajšok.
+ * @returns {'fresh'|'recent'|'old'}
+ */
+export function ageBucket(nowMs, acqMs) {
+  if (!(acqMs > 0) || !Number.isFinite(nowMs)) return 'old';
+  const h = (nowMs - acqMs) / 3600_000;
+  if (h < 3) return 'fresh';
+  if (h < 12) return 'recent';
+  return 'old';
+}
+export const AGE_ALPHA = Object.freeze({ fresh: 1, recent: 0.8, old: 0.5 });
+
 /** Raw FIRMS satellite code → short display name (N = Suomi NPP). */
 export function satelliteShortName(satellite) {
   const s = String(satellite || '').trim().toUpperCase();
   if (s === 'N20' || s === 'NOAA-20') return 'N20';
   if (s === 'N21' || s === 'NOAA-21') return 'N21';
   if (s === 'N' || s === 'NPP' || s === 'SUOMI NPP') return 'SNPP';
-  return s ? s.slice(0, 6) : '';
+  return s ? s.replace(/FRP$/, '').slice(0, 6) : '';
 }

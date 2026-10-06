@@ -70,6 +70,7 @@ import { createPortwatchCard } from './portwatchCard.js';
 import { PORTWATCH_KEYS, portwatchKeyForTheatre } from './data/portwatch.js';
 import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { createLeftLane } from './leftLane.js';
+import { createFireNewsCard } from './fireNewsCard.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
@@ -392,6 +393,8 @@ async function init() {
     // Ľavý stĺpec v logickom poriadku (vlastník 2026-09-27; src/leftLane.js): Zobrazenie, Kamery
     // a Kontext sú panely ľavého pruhu v zónach, naraz je otvorený jeden panel, celá hlavička
     // otvára. Na mobile sa nepresúva (obe strany skryté, panely nosí výsuv); pri prepnutí sa zosúladí.
+    // Správy a história k ohnisku FIRMS (2026-10-06): karta vpravo dole po kliknutí na ohnisko.
+    createFireNewsCard({ doc: document, win: window });
     const leftLane = createLeftLane({
       doc: document,
       setPanelCollapsed: (id, collapsed, opts) => styleManager.setPanelCollapsed?.(id, collapsed, opts),

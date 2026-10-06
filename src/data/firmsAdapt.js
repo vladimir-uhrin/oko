@@ -33,6 +33,13 @@ export function adaptFirmsRecords(records) {
       acqMs: parseAcquisitionMs(record.acqDate, record.acqTime, acqCache),
       sensor: normalizeSensor(record.instrument),
       satellite: typeof record.satellite === 'string' ? record.satellite : '',
+      // 2026-10-06: geostacionárne potvrdenie (firmsGeo.js) a veľkosť pixla pre kartu.
+      geo: record.geo === true,
+      geoSeenMs: finiteNumber(record.geoSeenMs),
+      geoSat: typeof record.geoSat === 'string' ? record.geoSat : '',
+      repeats: finiteNumber(record.repeats),
+      scanKm: finiteNumber(record.scan),
+      trackKm: finiteNumber(record.track),
       contextEntity: null,
       position: null,
     });
@@ -53,10 +60,11 @@ export function normalizeConfidence(value) {
     if (text === 'nominal' || text === 'n') return 0.6;
     if (text === 'high' || text === 'h') return 0.9;
     const numeric = Number(text);
-    return Number.isFinite(numeric) ? clamp01(numeric / 100) : 0;
+    return Number.isFinite(numeric) ? clamp01(numeric > 1 ? numeric / 100 : numeric) : 0;
   }
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? clamp01(numeric / 100) : 0;
+  // Meteosat-12 (MTG) hlási 0..1, MODIS a GOES 0..100 (2026-10-06).
+  return Number.isFinite(numeric) ? clamp01(numeric > 1 ? numeric / 100 : numeric) : 0;
 }
 
 /**

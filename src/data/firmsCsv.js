@@ -76,6 +76,8 @@ export function parseFirmsCsv(text) {
   const iAcqTime = col.get('acq_time');
   const iSatellite = col.get('satellite');
   const iInstrument = col.get('instrument');
+  const iScan = col.get('scan');
+  const iTrack = col.get('track');
 
   const records = [];
   for (let i = headerIndex + 1; i < lines.length; i += 1) {
@@ -101,6 +103,9 @@ export function parseFirmsCsv(text) {
       acqTime: cell(parts, iAcqTime), // NOT zero-padded — kept verbatim
       satellite: cell(parts, iSatellite),
       instrument: cell(parts, iInstrument),
+      // Veľkosť pixla (km) — na karte „pixel ~0,4 × 0,5 km“; GOES/Met12 hlásia 0 alebo nezmysly.
+      scan: finiteOrZero(parts[iScan]),
+      track: finiteOrZero(parts[iTrack]),
     });
   }
   return records;

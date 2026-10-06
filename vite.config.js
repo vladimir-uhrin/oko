@@ -128,6 +128,10 @@ import {
   isOverBudget as isTomTomOverBudget,
 } from './src/data/tomtomTiles.js';
 import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
+import { collapseGeoDetections, mergeGeoIntoFires } from './src/data/firmsGeo.js';
+import { fireNewsQuery, fireNewsCellKey, fireNewsVerdict, nearestPlace, parseBingNewsRss, bingNewsUrl, fireHistoryStats } from './src/data/fireNews.js';
+import { createFireHistoryStore, slimFire, FIRE_HISTORY_MAX_DAYS } from './src/data/fireHistoryStore.js';
+import { parseTrustedList } from './src/data/eventNews.js';
 import {
   isLoopbackAddress,
   resolveClientIp,
@@ -3214,12 +3218,119 @@ function shmuRadarProxy() {
   };
 }
 
-function firmsProxy() {
+export function firmsProxy() {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
   const SOURCES = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT'];
+  // Geostacionárne (GOES, Himawari, Meteosat — každých 10–15 min; src/data/firmsGeo.js), 2026-10-06:
+  // „čo horí práve teraz“ — posledné 3 h, opakovania zlúčené, do 4 km od VIIRS len potvrdenie.
+  const GEO_SOURCE = 'GOES_NRT';
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
   const CACHE_PATH = path.join(CACHE_DIR, 'firms.json');
+  // História požiarov na disku (2026-10-06, vlastník: „ukladať históriu požiarov na disk, mám dosť
+  // priestoru“): denné NDJSON súbory <FIRE_HISTORY_DIR>/YYYY-MM-DD.ndjson (deň = deň detekcie UTC),
+  // riadok = štíhla detekcia, bez duplicít (kľúč poloha+čas+družica; VIIRS ~140 000/deň ≈ 15 MB,
+  // gzip by bol 2 MB — ostáva čitateľné). Predvolene vedľa Histórie letov (D:\oko-history\fires).
+  const HISTORY_DIR = String(process.env.FIRE_HISTORY_DIR || '').trim()
+    || (String(process.env.FLIGHT_HISTORY_DB || '').trim() ? path.join(path.dirname(String(process.env.FLIGHT_HISTORY_DB).trim()), 'fires') : path.join(CACHE_DIR, 'fires'));
+  const history = createFireHistoryStore({ dir: HISTORY_DIR });
+  let historyReady = false;
+  const NEWS_DIR = path.join(CACHE_DIR, 'firms-news');
+  const NEWS_TTL_MS = 15 * 60_000;
+  /** @type {Map<string, {at:number, body:string}>} */
+  const newsCache = new Map();
+  const newsInflight = new Map();
+  const TRUSTED_FILE = path.join(__dirname, 'src', 'data', 'local_data', 'events', 'trusted-news.json');
+  let trustedCache = { at: 0, list: [] };
+  const newsLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 120 });
+  /** @type {?Array<Array>} mestá Natural Earth (lenivo) */
+  let placesCache = null;
+
+  /** Prvý štart s prázdnym adresárom: naplní posledných 5 dní z API (3 dopyty, DAY_RANGE 5). */
+  async function backfillHistory(key) {
+    try {
+      if (!(await history.isEmpty())) return;
+      let total = 0;
+      for (const source of SOURCES) {
+        try { total += await history.append(await fetchSource(key, source, 5)); }
+        catch (err) { console.warn(`[firms-history] backfill ${source} failed:`, err?.message || err); }
+      }
+      console.log(`[firms-history] backfill: ${total} detections (5 days) → ${HISTORY_DIR}`);
+    } catch (err) {
+      console.warn('[firms-history] backfill failed:', err?.message || err);
+    }
+  }
+  async function trustedDomains() {
+    if (Date.now() - trustedCache.at < 60_000) return trustedCache.list;
+    try { trustedCache = { at: Date.now(), list: parseTrustedList(JSON.parse(await fsp.readFile(TRUSTED_FILE, 'utf8'))) }; }
+    catch { trustedCache = { at: Date.now(), list: trustedCache.list }; }
+    return trustedCache.list;
+  }
+  /** Správy k miestu: Nominatim (mesto) → GDELT DOC (články s obrázkom) → sankčný filter → verdikt. */
+  async function buildFireNews(lat, lon) {
+    let place = await fetchRegionalPlace({ latitude: lat, longitude: lon }).catch(() => null);
+    let nearby = false;
+    if (!place?.locality) {
+      // More / mimo obce: najbližšie mesto zo zoznamu Natural Earth (do 80 km).
+      if (!placesCache) {
+        try { placesCache = JSON.parse(await fsp.readFile(path.join(__dirname, 'src', 'data', 'local_data', 'natural_earth', 'places.json'), 'utf8')).places || []; } catch { placesCache = []; }
+      }
+      const near = nearestPlace(placesCache, lat, lon);
+      if (near) { place = { ...(place || {}), locality: near.name, label: `${near.name} (${near.km} km)` }; nearby = true; }
+    }
+    const query = fireNewsQuery(place);
+    const base = { place: place ? { locality: place.locality, region: place.region, country: place.country, label: place.label, nearby } : null, query, source: 'GDELT DOC 2.0', fetchedAt: Date.now() };
+    if (!query) return { ...base, status: 'no_place', items: [], trustedDomains: [], confirmed: false };
+    // Tri zdroje (2026-10-06): GDELT (obrázky, všetky jazyky; z tejto IP často 429), Bing News RSS
+    // (priame odkazy + náhľady — fotka k udalosti) a pri výpadku GDELT Google News RSS (šírka,
+    // dôveryhodné médiá; len presmerovania bez obrázka). mergeNewsItems zlúči ten istý príbeh a
+    // ponechá verziu s obrázkom a priamym odkazom.
+    const lists = [];
+    const sources = [];
+    try {
+      const gated = await sharedGdeltGate().run(() => fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${new URLSearchParams({ query, mode: 'artlist', format: 'json', maxrecords: '40', sort: 'hybridrel', timespan: '3d' })}`, { headers: { 'User-Agent': 'GodsEyeView/0.1' }, timeoutMs: 12_000 }));
+      if (!gated.skipped) { const a = parseGdeltArticles(gated.value); if (a.length) { lists.push(a); sources.push('GDELT'); } }
+    } catch (err) {
+      console.warn('[firms-news] GDELT failed:', err?.message || err);
+    }
+    try {
+      const a = parseBingNewsRss(await fetchRegionalText(bingNewsUrl(query), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OKO/0.1)' }, timeoutMs: 12_000 }));
+      if (a.length) { lists.push(a); sources.push('Bing News'); }
+    } catch (err) {
+      console.warn('[firms-news] Bing News RSS failed:', err?.message || err);
+    }
+    if (!sources.includes('GDELT')) {
+      try {
+        const xml = await fetchRegionalText(`https://news.google.com/rss/search?${new URLSearchParams({ q: query, hl: 'en-US', gl: 'US', ceid: 'US:en' })}`, { headers: { 'User-Agent': 'GodsEyeView/0.1' }, timeoutMs: 12_000 });
+        const a = normalizeRssArticles(xml, 30).map((x) => ({ title: x.title, url: x.url, source: x.sourceHost || x.domain, sourceHost: x.sourceHost, publishedAt: x.publishedAt ? Date.parse(x.publishedAt) : null, image: x.image, lang: null, country: null }));
+        if (a.length) { lists.push(a); sources.push('Google News'); }
+      } catch (err) {
+        console.warn('[firms-news] Google News RSS failed:', err?.message || err);
+      }
+    }
+    if (!lists.length) return { ...base, status: 'unavailable', items: [], trustedDomains: [], confirmed: false };
+    const source = sources.join(' + ');
+    const filtered = filterSanctionedNews(mergeNewsItems(lists));
+    const verdict = fireNewsVerdict(filtered.items, await trustedDomains(), Date.now(), place?.locality || place?.region || null);
+    return { ...base, source, status: verdict.items.length ? 'ready' : 'empty', items: verdict.items.slice(0, 12), trustedDomains: verdict.trustedDomains, confirmed: verdict.confirmed, dropped: filtered.dropped };
+  }
+  async function fireNewsFor(lat, lon) {
+    const cell = fireNewsCellKey(lat, lon);
+    const now = Date.now();
+    let mem = newsCache.get(cell);
+    if (!mem) {
+      try { const p = JSON.parse(await fsp.readFile(path.join(NEWS_DIR, cell + '.json'), 'utf8')); if (Number.isFinite(p?.at) && typeof p?.body === 'string') { mem = p; newsCache.set(cell, p); } } catch { /* miss */ }
+    }
+    if (mem && now - mem.at < NEWS_TTL_MS) return mem.body;
+    const request = coalesceProxyRequest(newsInflight, 'firms-news:' + cell, async () => {
+      const body = JSON.stringify(await buildFireNews(lat, lon));
+      const entry = { at: Date.now(), body };
+      newsCache.set(cell, entry);
+      try { await fsp.mkdir(NEWS_DIR, { recursive: true }); await fsp.writeFile(path.join(NEWS_DIR, cell + '.json'), JSON.stringify(entry), 'utf8'); } catch { /* cache only */ }
+      return body;
+    });
+    try { return await request.promise; } catch (err) { if (mem) return mem.body; throw err; }
+  }
 
   /** @type {?{at: number, sources: Array<object>, fires: Array<object>}} */
   let mem = null;
@@ -3258,8 +3369,8 @@ function firmsProxy() {
    * (FIRMS reports errors as HTML/plain text, never CSV). Never log the URL —
    * it embeds the MAP_KEY.
    */
-  async function fetchSource(key, source) {
-    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(key)}/${source}/world/2`;
+  async function fetchSource(key, source, days = 2) {
+    const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(key)}/${source}/world/${days}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const records = parseFirmsCsv(await res.text());
@@ -3288,6 +3399,17 @@ function firmsProxy() {
       }
     }
     if (!sources.some((s) => s.ok)) throw new Error('all FIRMS sources failed');
+    // Geostacionárne: deň 1 = „dnešný deň UTC“ — tesne po polnoci by 3 h okno siahalo do včera.
+    try {
+      const days = new Date(now).getUTCHours() < 3 ? 2 : 1;
+      const geo = collapseGeoDetections(await fetchSource(key, GEO_SOURCE, days), now);
+      const merged = mergeGeoIntoFires(fires, geo);
+      sources.push({ source: GEO_SOURCE, count: geo.length, attached: merged.attached, standalone: merged.standalone, ok: true });
+      return { at: now, sources, fires: merged.fires };
+    } catch (err) {
+      console.warn(`[firms-proxy] ${GEO_SOURCE} fetch failed:`, err?.message || err);
+      sources.push({ source: GEO_SOURCE, count: 0, ok: false });
+    }
     return { at: now, sources, fires };
   }
 
@@ -3296,7 +3418,9 @@ function firmsProxy() {
    * 24 h at serve time so a stale cache never serves >24h-old detections.
    */
   function buildPayload(entry, stale) {
-    const fires = filterTrailing24h(entry.fires, Date.now());
+    // Štíhly riadok (2026-10-06): klient číta len tieto polia (firmsAdapt.js); druhý jas, instrument
+    // a verzia nie. Súradnice na 4 desatinné (≈ 11 m, pixel VIIRS má 375 m) — ~20 % menej bytov.
+    const fires = filterTrailing24h(entry.fires, Date.now()).map(slimFire);
     return {
       fetchedAt: entry.at,
       stale,
@@ -3368,6 +3492,24 @@ function firmsProxy() {
             return;
           }
 
+          if (subPath === '/news' || subPath === '/history') {
+            // Správy (GDELT) a história (disk) k ohnisku — poloha v dopyte, bez kľúča FIRMS.
+            const q = new URL(req.url || '/', 'http://localhost').searchParams;
+            const lat = Number(q.get('lat')); const lon = Number(q.get('lon'));
+            if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) { sendJson(400, { error: 'lat and lon query params required' }); return; }
+            if (subPath === '/history') {
+              const km = Math.min(50, Math.max(0.5, Number(q.get('km')) || 5));
+              const days = Math.min(FIRE_HISTORY_MAX_DAYS, Math.max(1, Math.floor(Number(q.get('days')) || 30)));
+              const detections = await history.around(lat, lon, km, days);
+              sendJson(200, { lat, lon, km, days, source: 'OKO fire history (NASA FIRMS, stored on disk)', stats: fireHistoryStats(detections), detections: detections.slice(0, 2000) });
+              return;
+            }
+            if (!newsLimiter(clientKey(req))) { sendJson(429, { error: 'rate_limited' }); return; }
+            try { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' }); res.end(await fireNewsFor(lat, lon)); }
+            catch (err) { sendJson(502, { error: 'news_unavailable', detail: String(err?.message || err) }); }
+            return;
+          }
+
           if (!key) {
             sendJson(503, { error: 'no_key' });
             return;
@@ -3386,6 +3528,15 @@ function firmsProxy() {
               .then(async (fresh) => {
                 mem = fresh;
                 await writeDisk(fresh);
+                // História na disk (nové detekcie; geo samostatné tiež — nesú geo: true).
+                // Prvý štart: najprv naplnenie 5 dní (kým je adresár prázdny), potom bežný zápis.
+                const first = !historyReady;
+                historyReady = true;
+                void (async () => {
+                  if (first) await backfillHistory(key);
+                  const n = await history.append(fresh.fires);
+                  if (n) console.log(`[firms-history] +${n} detections → ${HISTORY_DIR}`);
+                })().catch((err) => console.warn('[firms-history] write failed:', err?.message || err));
                 return fresh;
               })
               .catch((err) => {

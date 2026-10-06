@@ -23,6 +23,9 @@ import { fireAnchorHeight, warmFireAnchorFloors } from './fireAnchors.js';
 import { horizonOccluder } from './iconOrientation.js';
 import {
   accentForSeverity,
+  AGE_ALPHA,
+  ageBucket,
+  satelliteFullName,
   fireDetectionKey,
   FIRMS_AMBIENT_COHORT_LIMIT,
   FIRMS_OVERLAY_SOURCE_ID,
@@ -683,7 +686,7 @@ export function createFirmsHeatmapLayer({
       _billboards.add({
         id: pickId,
         position,
-        image: glowSprite(detectionColorStop(fire), sizeBucket(coreSize)),
+        image: glowSprite(detectionColorStop(fire), sizeBucket(coreSize), ageBucket(Date.now(), fire.geoSeenMs > fire.acqMs ? fire.geoSeenMs : fire.acqMs)),
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -1294,8 +1297,9 @@ function sizeBucket(coreSize) {
  * @param {number} corePx - Bucketed core size in pixels.
  * @returns {string} PNG data URL.
  */
-function glowSprite(stop, corePx) {
-  const key = `${stop.name}:${corePx}`;
+function glowSprite(stop, corePx, age = 'fresh') {
+  const key = `${stop.name}:${corePx}:${age}`;
+  const alpha = AGE_ALPHA[age] ?? 1;
   const cached = glowSpriteCache.get(key);
   if (cached) return cached;
 
@@ -1312,9 +1316,9 @@ function glowSprite(stop, corePx) {
     Math.round(stop.color.blue * 255),
   ].join(',');
   const gradient = context.createRadialGradient(radius, radius, 0, radius, radius, radius);
-  gradient.addColorStop(0, 'rgba(255,255,235,0.95)');
-  gradient.addColorStop(0.25, `rgba(${rgb},0.9)`);
-  gradient.addColorStop(0.55, `rgba(${rgb},0.35)`);
+  gradient.addColorStop(0, `rgba(255,255,235,${0.95 * alpha})`);
+  gradient.addColorStop(0.25, `rgba(${rgb},${0.9 * alpha})`);
+  gradient.addColorStop(0.55, `rgba(${rgb},${0.35 * alpha})`);
   gradient.addColorStop(1, `rgba(${rgb},0)`);
   context.fillStyle = gradient;
   context.fillRect(0, 0, dimension, dimension);
@@ -1448,7 +1452,15 @@ export function buildSelectedFireCard(fire, nowMs) {
     if (age) meta.push(`${age} ago`);
   }
   const sat = satelliteShortName(fire.satellite);
-  meta.push(sat ? `${fire.sensor || 'VIIRS'} ${sat}` : (fire.sensor || 'sensor n/a'));
+  meta.push(sat ? `${fire.sensor || (fire.geo ? 'GEO' : 'VIIRS')} ${sat}` : (fire.sensor || 'sensor n/a'));
+  // 2026-10-06: tretí riadok — kto a kedy videl (celé meno družice, minúty), deň/noc, veľkosť
+  // pixla; geostacionárne potvrdenie („aj Meteosat-12 pred 8 min“) alebo opakovania geo zdroja.
+  const seen = [];
+  if (fire.acqMs > 0) seen.push(`${satelliteFullName(fire.satellite) || fire.sensor || '?'} ${formatAgoMinutes(nowMs - fire.acqMs)}`);
+  if (fire.geoSeenMs > 0) seen.push(`+ ${satelliteFullName(fire.geoSat)} ${formatAgoMinutes(nowMs - fire.geoSeenMs)}`);
+  else if (fire.geo && fire.repeats > 1) seen.push(`${fire.repeats}× in 3h`);
+  if (fire.scanKm > 0 && fire.trackKm > 0 && fire.scanKm < 10) seen.push(`pixel ${fire.scanKm.toFixed(1)}×${fire.trackKm.toFixed(1)} km`);
+  else if (fire.geo) seen.push('pixel ~2–4 km');
   return {
     id: `selected-fire:${fireDetectionKey(fire)}`,
     actionable: true,
@@ -1460,7 +1472,8 @@ export function buildSelectedFireCard(fire, nowMs) {
     title: `FIRE · ${formatFrp(fire.frp)} MW`,
     details: [
       meta.join(' · '),
-      formatLatLon(fire.lat, fire.lon) + (fire.night ? ' · NIGHT' : ''),
+      formatLatLon(fire.lat, fire.lon) + (fire.night ? ' · NIGHT' : ' · DAY'),
+      ...(seen.length ? [seen.join(' · ')] : []),
     ],
     selected: true,
     priority: Number.MAX_SAFE_INTEGER,
@@ -1485,6 +1498,7 @@ export function buildFireCard(candidate, nowMs) {
   }
   const sat = satelliteShortName(fire.satellite) || fire.sensor;
   if (sat) meta.push(sat);
+  if (fire.geoSeenMs > 0) meta.push(`geo ${formatAge(nowMs - fire.geoSeenMs) || '<1h'}`);
   return {
     id: `fire:${fireDetectionKey(fire)}`,
     actionable: true,
