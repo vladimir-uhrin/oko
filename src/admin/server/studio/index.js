@@ -544,6 +544,9 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   }
   function frontDayDue() {
     const cfg = settings().frontDay;
+    // Predvolene zapnuté → skutočnú výrobu (Puppeteer, hlas) spúšťa sama len služba s časovačom; Štúdio bez
+    // časovača (testy, nástroje) len s podstrčeným runnerom (2026-10-06: testy s tick() spúšťali ozajstné video).
+    if (!frontDayRunner && !timers) return false;
     if (!cfg?.enabled || frontDay.running || frontWeek.running) return false;
     const at = now();
     if (localHour(at) < cfg.hour) return false;

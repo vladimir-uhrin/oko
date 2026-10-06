@@ -418,6 +418,11 @@ test('Deň na fronte: denne od 8:00, video 9:16 bez doplnenia, bez hlásenia zno
   assert.equal(studio.frontDayStatus().due, false, 'raz za deň');
   clock.time += 23 * 3600_000; // ďalší deň 9:46
   assert.equal(studio.frontDayStatus().due, true);
+  // Bez časovača a bez runnera (testy, nástroje) sa skutočná výroba sama nespustí, aj keď je predvolene zapnutá.
+  const bare = createStudio({ store: openAdminStore(':memory:'), env: {}, port: () => 1, now: () => clock.time, timers: false, mediaDir: dir, log: () => {},
+    publisher: { status: () => ({ facebook: false, instagram: false }) } });
+  assert.equal(bare.settings().frontDay.enabled, true);
+  assert.equal(bare.frontDayStatus().due, false, 'bez časovača nič nespustí');
   // Chyba iná než NO_DATA: v ten deň už nie.
   const other = createStudio({ store: openAdminStore(':memory:'), env: {}, port: () => 1, now: () => clock.time, timers: false, mediaDir: dir, log: () => {},
     frontDayRunner: async () => { throw new Error('nahrávanie zlyhalo'); }, publisher: { status: () => ({ facebook: false, instagram: false }) } });

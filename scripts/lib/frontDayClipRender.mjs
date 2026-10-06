@@ -19,11 +19,11 @@ export const CLIP_MAX_BYTES = 150 * 1024 * 1024;
 /** Úvod videí ArmyInform býva titulková karta / logo — okno začína najskôr tu (s). */
 export const CLIP_SKIP_START_S = 2.5;
 
-const runCapture = (cmd, args, timeoutMs = 5 * 60_000) => new Promise((resolve, reject) => {
+const runCapture = (cmd, args, timeoutMs = 5 * 60_000, maxErr = 200_000) => new Promise((resolve, reject) => {
   const child = spawn(cmd, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = ''; let err = '';
   child.stdout.on('data', (d) => { out += d; });
-  child.stderr.on('data', (d) => { err = (err + d).slice(-200_000); });
+  child.stderr.on('data', (d) => { err = (err + d).slice(-maxErr); });
   const timer = setTimeout(() => child.kill(), timeoutMs);
   child.on('error', (e) => { clearTimeout(timer); reject(e); });
   child.on('close', (code) => { clearTimeout(timer); resolve({ code, out, err }); });
@@ -66,37 +66,85 @@ export const CUT_SCORE = 0.3;
 /**
  * Najdynamickejšie okno dĺžky `dur` (s) podľa POHYBU v obraze (priemerný rozdiel susedných snímok bez strihov).
  * Počet strihov rozhodoval zle: rozhovor prestrihaný ilustračnými zábermi ich má veľa, a pritom je to
- * hovoriaca hlava (2026-10-05). Strih v okne pridá len trochu, pri zhode bližšie k tretine videa.
- * Bez úvodu (`skip`) a posledná sekunda mimo. Pure.
+ * hovoriaca hlava (2026-10-05). Strih v okne pridá len trochu.
+ * Videá ArmyInform idú od prípravy (ruky na ovládači, štart) k zásahu pred koncom, potom grafika a logo
+ * (2026-10-06: vyhrali ruky na ovládači v 7. s, zásah bol v 40.–47. s) → statický koniec sa odreže a
+ * neskoršie okno má prednosť (váha 0,5 na začiatku → 1,5 na konci obsahu). Bez úvodu (`skip`). Pure.
  * @param {Array<[number, number]>} frames [čas s, rozdiel snímky 0–1] (ffmpeg scene_score)
  * @param {number} total dĺžka videa (s)
  */
 export function bestWindow(frames, total, dur, { skip = CLIP_SKIP_START_S, step = 0.25 } = {}) {
-  const last = Math.max(0, total - dur - 1);
+  const contentEnd = contentEndOf(frames, total);
+  const last = Math.max(0, Math.min(total - dur - 1, contentEnd - dur));
   const first = Math.min(skip, last);
   let best = { start: first, score: -Infinity };
   for (let s = first; s <= last + 1e-9; s += step) {
     const w = frames.filter(([t]) => t >= s && t < s + dur);
-    const motion = w.filter(([, v]) => v <= CUT_SCORE);
-    const mean = motion.length ? motion.reduce((a, [, v]) => a + v, 0) / motion.length : 0;
-    const cuts = w.length - motion.length;
-    const score = mean + 0.004 * Math.min(cuts, 3) - Math.abs(s + dur / 2 - total / 3) / Math.max(1, total) * 0.002;
-    if (score > best.score) best = { start: s, score };
+    const mean = w.length ? w.reduce((a, f) => a + actionScore(f), 0) / w.length : 0;
+    const pos = Math.min(1, (s + dur / 2) / Math.max(1, contentEnd));
+    const score = mean * (0.5 + pos);
+    if (score > best.score + 1e-12) best = { start: s, score };
   }
   return { start: Math.round(best.start * 100) / 100, dur: Math.min(dur, Math.max(0.5, total - best.start)) };
+}
+
+/** Strop pohybu snímky: trasúca sa ručná kamera (ruky, operátori) inak prebije plynulý záber z dronu. */
+export const MOTION_CAP = 0.05;
+/**
+ * „Akčnosť" snímky [čas, pohyb, sýtosť?, jas?] (2026-10-06, merané na záberoch ArmyInform): pohyb so stropom;
+ * strih = len trochu; farebné snímky (ruky na ovládači, ľudia, grafika značky — sýtosť nad 7) menej, termovízia
+ * a záber z dronu sú takmer bez farby; tmavé (čierna, šum po zásahu, záverečná karta) skoro nič. Pure.
+ */
+export function actionScore([, v, sat, y]) {
+  const motion = v > CUT_SCORE ? 0.02 : Math.min(v, MOTION_CAP);
+  const color = !Number.isFinite(sat) || sat <= 7 ? 1 : sat <= 12 ? 0.55 : 0.25;
+  const light = !Number.isFinite(y) || y >= 40 ? 1 : 0.15;
+  return motion * color * light;
+}
+
+/** Pohyb pod týmto prahom = statický obraz (logo, titulková karta na konci). */
+export const STILL_SCORE = 0.02;
+/**
+ * Koniec obsahu: po poslednej snímke s pohybom (statické logo / záverečná karta sa nepočíta). Bez pohybu
+ * v celom videu = celá dĺžka. Pure.
+ */
+export function contentEndOf(frames, total) {
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const [t, v] = frames[i];
+    if (v > STILL_SCORE && v <= CUT_SCORE) return Math.min(total, t + 0.2);
+  }
+  return total;
 }
 
 /** Záber na výšku (rozhovor, sociálny formát) do akčného okna na šírku nepatrí — vypadne. Pure. */
 export const clipUsable = ({ width, height }) => Number(width) > 0 && Number(height) > 0 && width >= height;
 
-/** Dĺžka, rozmer a pohyb po snímkach (5 snímok/s, ffmpeg scene_score). */
+/**
+ * Výpis ffmpeg `metadata=print` → snímky [čas, pohyb, sýtosť, jas]. Pure.
+ * @param {string} log stderr ffmpeg
+ */
+export function parseFrameStats(log) {
+  const frames = []; let cur = null;
+  for (const line of String(log).split('\n')) {
+    const t = /pts_time:(\d+(?:\.\d+)?)/.exec(line);
+    // Každý filter metadata=print píše vlastnú hlavičku snímky — tá istá snímka = ten istý čas.
+    if (t) { if (!cur || cur[0] !== Number(t[1])) { cur = [Number(t[1]), 0, NaN, NaN]; frames.push(cur); } continue; }
+    const m = /lavfi\.(scene_score|signalstats\.SATAVG|signalstats\.YAVG)=(\d+(?:\.\d+)?)/.exec(line);
+    if (!m || !cur) continue;
+    cur[m[1] === 'scene_score' ? 1 : m[1].endsWith('SATAVG') ? 2 : 3] = Number(m[2]);
+  }
+  return frames;
+}
+
+/** Dĺžka, rozmer a po snímkach pohyb, sýtosť a jas (5 snímok/s, ffmpeg scene_score + signalstats). */
 export async function probeClip(file, { ffmpeg = 'ffmpeg', fps = 5 } = {}) {
+  const print = (key) => `metadata=print:key=lavfi.${key}`;
   const r = await runCapture(ffmpeg, ['-hide_banner', '-nostats', '-i', file, '-an', '-vf',
-    `fps=${fps},scale=320:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score`, '-f', 'null', '-'], 10 * 60_000);
+    `fps=${fps},scale=320:-2,signalstats,select='gte(scene,0)',${print('scene_score')},${print('signalstats.SATAVG')},${print('signalstats.YAVG')}`,
+    '-f', 'null', '-'], 10 * 60_000, 20_000_000);
   const total = (() => { const m = /Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/.exec(r.err); return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : 0; })();
   const size = /Stream #\d+:\d+[^\n]*Video:[^\n]*?\b(\d{2,5})x(\d{2,5})\b/.exec(r.err);
-  const frames = [...r.err.matchAll(/pts_time:(\d+(?:\.\d+)?)[^\n]*\n[^\n]*lavfi\.scene_score=(\d+(?:\.\d+)?)/g)].map((m) => [Number(m[1]), Number(m[2])]);
-  return { total, width: size ? Number(size[1]) : 0, height: size ? Number(size[2]) : 0, frames };
+  return { total, width: size ? Number(size[1]) : 0, height: size ? Number(size[2]) : 0, frames: parseFrameStats(r.err) };
 }
 
 /**

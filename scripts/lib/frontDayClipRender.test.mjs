@@ -2,7 +2,7 @@
 // záber na výšku (rozhovor) do videa nejde.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CLIP_SKIP_START_S, bestWindow, clipUsable } from './frontDayClipRender.mjs';
+import { CLIP_SKIP_START_S, actionScore, bestWindow, clipUsable, contentEndOf, parseFrameStats } from './frontDayClipRender.mjs';
 
 /** Snímky 5/s: pokojný základ, v zadaných úsekoch iný rozdiel snímok. */
 function frames(total, spans = []) {
@@ -27,9 +27,40 @@ test('rozhovor prestrihaný zábermi: strihy (hovoriaca hlava) neprebijú súvis
   assert.ok(w.start >= 19.5 && w.start <= 20.5, `začiatok ${w.start}`);
 });
 
-test('bez pohybu: okno po úvode okolo tretiny videa; krátke video sa zmestí', () => {
+test('zásah pred koncom, nie ruky na ovládači na začiatku; statické logo na konci sa nepočíta (ArmyInform, 2026-10-06)', () => {
+  // 52,5 s: ruky na ovládači 6–9 s (pohyb 0,08), záber z dronu a zásah 40–47 s (0,06), logo 50–52,5 s (statické).
+  const radar = frames(52.5, [[6, 9, 0.08], [40, 47, 0.06], [50, 52.6, 0.004]]);
+  assert.ok(Math.abs(contentEndOf(radar, 52.5) - 47) < 0.5, `koniec obsahu = posledný pohyb, ${contentEndOf(radar, 52.5)}`);
+  const w = bestWindow(radar, 52.5, 6.2);
+  assert.ok(w.start >= 39 && w.start + w.dur <= 47.5, `okno ${w.start}–${w.start + w.dur}`);
+});
+
+test('akcia, nie ruky: farebný detail ovládača a tmavá karta prehrajú so záberom z dronu bez farby', () => {
+  // [čas, pohyb, sýtosť, jas]: ruky (silný pohyb, farba 12), termovízia (menší pohyb, bez farby), čierna karta.
+  const hands = [7, 0.2, 12, 100];
+  const thermal = [40, 0.04, 1, 110];
+  const dark = [48, 0.12, 1, 23];
+  assert.ok(actionScore(thermal) > actionScore(hands), `${actionScore(thermal)} vs ${actionScore(hands)}`);
+  assert.ok(actionScore(thermal) > actionScore(dark));
+  assert.ok(actionScore([1, 0.6, 3, 90]) < actionScore(thermal), 'strih nie je akcia');
+  assert.equal(actionScore([1, 0.03]), 0.03, 'bez sýtosti a jasu = len pohyb');
+});
+
+test('výpis ffmpeg: tri metadata=print tej istej snímky = jedna snímka', () => {
+  const log = [
+    'frame:0    pts:0       pts_time:0', 'lavfi.scene_score=0.000000',
+    'frame:0    pts:0       pts_time:0', 'lavfi.signalstats.SATAVG=4.25',
+    'frame:0    pts:0       pts_time:0', 'lavfi.signalstats.YAVG=96.1',
+    'frame:1    pts:1       pts_time:0.2', 'lavfi.scene_score=0.081',
+    'frame:1    pts:1       pts_time:0.2', 'lavfi.signalstats.SATAVG=12',
+    'frame:1    pts:1       pts_time:0.2', 'lavfi.signalstats.YAVG=40',
+  ].join('\n');
+  assert.deepEqual(parseFrameStats(log), [[0, 0, 4.25, 96.1], [0.2, 0.081, 12, 40]]);
+});
+
+test('bez pohybu: okno v hraniciach videa po úvode; krátke video sa zmestí', () => {
   const w = bestWindow(frames(30), 30, 4);
-  assert.ok(w.start >= CLIP_SKIP_START_S && w.start <= 10, `začiatok ${w.start}`);
+  assert.ok(w.start >= CLIP_SKIP_START_S && w.start + w.dur <= 30, `začiatok ${w.start}`);
   const short = bestWindow(frames(5), 5, 4);
   assert.ok(short.start >= 0 && short.start + short.dur <= 5, JSON.stringify(short));
 });
