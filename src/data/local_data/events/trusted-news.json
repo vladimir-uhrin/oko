@@ -1,6 +1,6 @@
 {
-  "updated": "2026-09-30",
-  "note": "Dôveryhodné médiá pre overenie udalostí (Udalosti, etapa 2). Počítajú sa len domény z tohto zoznamu (aj ich subdomény); udalosť je overená správami, keď o nej píšu aspoň 2 rôzne. Bulvár, anonymné weby a sankcionované médiá sem nepatria. Zoznam môže vlastník upraviť — zmena platí bez reštartu.",
+  "updated": "2026-10-07",
+  "note": "Dôveryhodné médiá pre overenie udalostí (Udalosti, etapa 2) a správ k ohnisku požiaru (fireNewsCard). Počítajú sa len domény z tohto zoznamu (aj ich subdomény); udalosť je overená správami, keď o nej píšu aspoň 2 rôzne. Bulvár, anonymné weby a sankcionované médiá sem nepatria. Zoznam môže vlastník upraviť — zmena platí bez reštartu. 2026-10-07 (vlastník: „doplniť dôveryhodné médiá“): tlačové agentúry (Anadolu, Ukrinform, ANSA, EFE), námorná tlač (Maritime Executive, Lloyd's List, Splash247, TradeWinds, gCaptain), Ukrajina a nezávislé ruské médiá v exile (Kyiv Independent, Ukrainska Pravda, Meduza, Novaja gazeta Európa), Blízky východ (Al Arabiya), ďalšie veľké redakcie (Politico, Axios, The Independent, Le Figaro). Médiá vydávané v Rusku sem nepatria (vojnová cenzúra); sankcionované vylučuje aj filter sanctionedMedia.js.",
   "domains": [
     "reuters.com", "apnews.com", "afp.com", "bbc.com", "bbc.co.uk", "npr.org", "cnn.com", "nbcnews.com", "cbsnews.com",
     "abcnews.go.com", "pbs.org", "news.sky.com", "dw.com", "france24.com", "euronews.com", "aljazeera.com",
@@ -12,6 +12,11 @@
     "scmp.com", "straitstimes.com", "japantimes.co.jp",
     "avherald.com", "aviation-safety.net", "flightglobal.com", "aerotelegraph.com",
     "tasr.sk", "sme.sk", "dennikn.sk", "aktuality.sk", "pravda.sk", "hnonline.sk", "ta3.com", "stvr.sk", "rtvs.sk",
-    "ceskatelevize.cz", "irozhlas.cz", "idnes.cz", "seznamzpravy.cz", "denikn.cz", "ctk.cz"
+    "ceskatelevize.cz", "irozhlas.cz", "idnes.cz", "seznamzpravy.cz", "denikn.cz", "ctk.cz",
+    "aa.com.tr", "ukrinform.net", "ukrinform.ua", "ansa.it", "efe.com",
+    "maritime-executive.com", "lloydslist.com", "splash247.com", "tradewindsnews.com", "gcaptain.com",
+    "kyivindependent.com", "pravda.com.ua", "meduza.io", "novayagazeta.eu",
+    "alarabiya.net",
+    "politico.com", "axios.com", "independent.co.uk", "lefigaro.fr"
   ]
 }
