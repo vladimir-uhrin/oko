@@ -43,6 +43,39 @@ const STRIKE_LABEL = {
   missileStrikes: ['raketový úder', 'raketové údery', 'raketových úderov'],
 };
 
+/** Najviac toľko miest útoku na karte aj na mape. */
+export const HIT_MAX = 3;
+
+/**
+ * Rozmiestnenie štítkov miest útoku bez prekrytia (výška 44 px): poradie = dôležitosť; každý skúsi vpravo, vľavo,
+ * potom posun hore/dole o 54 px; štítok nezakryje ani značku iného miesta. Pure.
+ * @param {Array<{x: number, y: number, w: number}>} items
+ * @returns {Array<{x: number, y: number, w: number}>} ľavý horný roh štítku
+ */
+export function placeHitLabels(items, { minX = 0, maxX = 1080, h = 44, gap = 30 } = {}) {
+  const placed = [];
+  const hit = (a, b) => a.x < b.x + b.w + 6 && b.x < a.x + a.w + 6 && a.y < b.y + b.h + 6 && b.y < a.y + a.h + 6;
+  const marks = items.map((m) => ({ x: m.x - 24, y: m.y - 24, w: 48, h: 48 }));
+  return items.map((m, k) => {
+    const tries = [];
+    for (const dy of [0, -54, 54, -108, 108]) {
+      tries.push({ x: m.x + gap, y: m.y - h / 2 + dy }, { x: m.x - gap - m.w, y: m.y - h / 2 + dy });
+    }
+    const ok = tries.map((t) => ({ ...t, w: m.w, h })).filter((t) => t.x >= minX && t.x + t.w <= maxX);
+    const best = ok.find((t) => !placed.some((p) => hit(t, p)) && !marks.some((mk, j) => j !== k && hit(t, mk))) || ok[0] || { x: m.x + gap, y: m.y - h / 2, w: m.w, h };
+    placed.push(best);
+    return { x: best.x, y: best.y, w: m.w };
+  });
+}
+
+/** Riadok miesta útoku na karte: „20 mŕtvych, z toho 5 detí" / „2 mŕtvi · 47 zranených". Pure. */
+export function hitSummary(p) {
+  const parts = [];
+  if (p?.killed) parts.push(`${group(p.killed)} ${plural(p.killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}${p.children ? `, z toho ${group(p.children)} ${plural(p.children, 'dieťa', 'deti', 'detí')}` : ''}`);
+  if (p?.injured) parts.push(`${group(p.injured)} zranených`);
+  return parts.join(' · ');
+}
+
 /**
  * Body na mape, ktoré nahrávanie premieta na obrazovku: zmena územia za deň po smeroch (`chg:<smer>:ru|ua`)
  * a ohrozené oblasti (`air:<i>`). Pure.
@@ -54,6 +87,10 @@ export function dayAnchorPoints(model) {
     if ((d.uaKm2 ?? 0) >= 1 && d.uaAt) out[`chg:${d.id}:ua`] = { lon: d.uaAt.lon, lat: d.uaAt.lat };
   }
   (model?.air?.points || []).forEach((p, i) => { if (Number.isFinite(p?.lon) && Number.isFinite(p?.lat)) out[`air:${i}`] = { lon: p.lon, lat: p.lat }; });
+  (model?.pins || []).forEach((p, i) => { if (Number.isFinite(p?.lon) && Number.isFinite(p?.lat)) out[`pin:${i}`] = { lon: p.lon, lat: p.lat }; });
+  (model?.route?.points || []).forEach((p, i) => { out[`route:${i}`] = { lon: p.lon, lat: p.lat }; });
+  // Miesta ruského útoku s obeťami (`hit:<i>`, poradie ako model.casualties.places).
+  (model?.casualties?.places || []).slice(0, HIT_MAX).forEach((p, i) => { if (Number.isFinite(p?.lon) && Number.isFinite(p?.lat)) out[`hit:${i}`] = { lon: p.lon, lat: p.lat }; });
   return out;
 }
 
@@ -104,7 +141,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     out.push(`<text x="${W / 2}" y="${top + 60}" text-anchor="middle" font-family="${MONO}" font-size="28" font-weight="700" letter-spacing="6" fill="#ff8a8a">${esc(hook.tag)}</text>`);
     hook.lines.forEach((l, j) => out.push(`<text x="${W / 2}" y="${top + 150 + j * lineH}" text-anchor="middle" font-size="${hookLineSize(l)}" font-weight="800" fill="#ffffff" ${shadow}>${accentLine(l, hook.accent)}</text>`));
     if (hook.sub) out.push(`<text x="${W / 2}" y="${top + 150 + (hook.lines.length - 1) * lineH + 72}" text-anchor="middle" font-size="36" font-weight="600" fill="#f2fbff">${esc(hook.sub)}</text>`);
-    const pill = `Ukrajina · ${dateText}`;
+    const pill = `${model.placeLabel || 'Ukrajina'} · ${dateText}`;
     const pw = pill.length * 15.5 + 48;
     out.push(`<rect x="${f1(W / 2 - pw / 2)}" y="${top + panelH + 26}" width="${f1(pw)}" height="52" rx="26" fill="rgba(5,14,22,0.84)"/>`);
     out.push(`<text x="${W / 2}" y="${top + panelH + 62}" text-anchor="middle" font-size="29" font-weight="600" fill="rgba(232,234,237,0.92)">${esc(pill)}</text>`);
@@ -120,7 +157,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     out.push(logo(40, hy + 14, 76));
     out.push(wordmark(128, hy + 62, 44));
     out.push(`<text x="130" y="${hy + 90}" font-family="${MONO}" font-size="17" font-weight="500" letter-spacing="2.5" fill="${ACCENT}" ${shadow}>${VIDEO_BRAND.domain}</text>`);
-    out.push(`<text x="${W - 46}" y="${hy + 42}" text-anchor="end" font-family="${MONO}" font-size="22" font-weight="700" letter-spacing="4" fill="${ACCENT}" ${shadow}>DEŇ NA FRONTE</text>`);
+    out.push(`<text x="${W - 46}" y="${hy + 42}" text-anchor="end" font-family="${MONO}" font-size="22" font-weight="700" letter-spacing="4" fill="${ACCENT}" ${shadow}>${esc(model.header || 'DEŇ NA FRONTE')}</text>`);
     out.push(`<text x="${W - 46}" y="${hy + 80}" text-anchor="end" font-size="34" font-weight="700" fill="#f2fbff" ${shadow}>${esc(dateText)}</text>`);
     if (mapDay) out.push(`<text x="${W - 46}" y="${hy + 100}" text-anchor="end" font-family="${MONO}" font-size="14" letter-spacing="1" fill="${DIM}">mapa: stav k ${esc(daySk(mapDay))}</text>`);
 
@@ -169,6 +206,29 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
           + `<text x="${52 + String(group(s.n)).length * 18 + 16}" y="${y0 + 186 + i * 38}" font-size="23" fill="#f2fbff">${esc(plural(s.n, ...s.f))} (ruské údery, hlásenie GŠ)</text>`;
       });
       card(strikes.length ? 170 + strikes.length * 38 : 158, body);
+    } else if (kind === 'spot') {
+      // Vlastné miesto zo scenára (napr. tanker pri Soči): štítok, veľké číslo alebo titulok, riadky.
+      const spot = model.spots?.[fs.shot.sceneId] || {};
+      let body = `<text x="52" y="${y0 + 40}" font-family="${MONO}" font-size="19" font-weight="700" letter-spacing="3" fill="${spot.tagColor || '#ff8a8a'}">${esc(spot.tag || '')}</text>`;
+      body += `<text x="52" y="${y0 + 100}" font-size="${spot.title && spot.title.length > 26 ? 38 : 46}" font-weight="800" fill="#ffffff">${accentLine(spot.title || '', spot.accent || '')}</text>`;
+      const rows = (spot.rows || []).slice(0, 4);
+      rows.forEach((r, i) => { body += `<text x="52" y="${y0 + 150 + i * 38}" font-size="25" fill="${i === 0 ? '#f2fbff' : '#d6e7ef'}">${esc(r)}</text>`; });
+      card(rows.length ? 132 + rows.length * 38 : 124, body);
+    } else if (kind === 'strike') {
+      const cas = model.casualties;
+      const killed = cas?.total?.killed;
+      let body = `<text x="52" y="${y0 + 40}" font-family="${MONO}" font-size="19" font-weight="700" letter-spacing="3" fill="#ff8a8a">RUSKÝ ÚTOK · OBETE</text>`;
+      if (killed) {
+        body += `<text x="52" y="${y0 + 112}" font-family="${MONO}" font-size="68" font-weight="700" fill="#ff6b78">${group(killed)}</text>`
+          + `<text x="${52 + String(group(killed)).length * 42 + 18}" y="${y0 + 102}" font-size="28" font-weight="700" fill="#f2fbff">${plural(killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}${cas.total.injured ? ` · ${group(cas.total.injured)} zranených` : ''}</text>`
+          + `<text x="${52 + String(group(killed)).length * 42 + 18}" y="${y0 + 134}" font-size="21" fill="${DIM}">najmenej · čísla potvrdené aspoň dvoma médiami</text>`;
+      }
+      const rows = (cas?.places || []).slice(0, HIT_MAX);
+      rows.forEach((p, i) => {
+        body += `<text x="52" y="${y0 + 190 + i * 40}" font-size="26" font-weight="800" fill="#f2fbff">${esc(p.sk)}</text>`
+          + `<text x="${52 + Math.round(p.sk.length * 15.5) + 18}" y="${y0 + 190 + i * 40}" font-size="24" fill="#ffb4b4">${esc(hitSummary(p))}</text>`;
+      });
+      card(rows.length ? 172 + rows.length * 40 : 158, body);
     }
 
     // Na mape: zmena územia za deň (kruh + číslo) v prehľade a pri smere.
@@ -193,6 +253,50 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
       }
     }
     // Ohrozené oblasti: pulzujúce body (pri hrozbe z neba a v úvodnej karte o nej).
+    // Miesta útoku: biely kruh so zameriavačom + meno a počet obetí (pod kartou, nad titulkami).
+    if (anchors && kind === 'strike') {
+      const hits = model.casualties?.places || [];
+      const pts = Object.entries(anchors).filter(([id]) => id.startsWith('hit:'))
+        .map(([id, p]) => ({ i: Number(id.slice(4)), p })).filter(({ i, p }) => p && hits[i] && p.y >= y0 + 330 && p.y <= DAY_LABEL_FLOOR_Y)
+        .map(({ i, p }) => ({ i, p, label: `${hits[i].sk}${hits[i].killed ? ` · ${group(hits[i].killed)} ${plural(hits[i].killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}` : ''}` }));
+      // Štítky bez prekrytia (Kyjev a Pryluky sú 130 km od seba — pri celej Ukrajine takmer na jednom mieste).
+      const boxes = placeHitLabels(pts.map(({ p, label }) => ({ x: p.x, y: p.y, w: Math.round(label.length * 12.5) + 28 })), { minX: 24, maxX: W - 24 });
+      pts.forEach(({ i, p, label }, k) => {
+        const a = fade01((fs.localS - 0.4 - i * 0.25) / 0.3);
+        if (a <= 0) return;
+        const r = 16 + 5 * wave(i * 0.9); const b = boxes[k];
+        out.push(`<g opacity="${f1(a)}"><circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(r + 12)}" fill="#ff3b3b" fill-opacity="0.2"/>`
+          + `<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(r)}" fill="none" stroke="#ffffff" stroke-width="3"/><circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="6" fill="#ff3b3b" stroke="#ffffff" stroke-width="2"/>`
+          + (Math.abs(b.y + 22 - p.y) > 4 ? `<line x1="${f1(p.x)}" y1="${f1(p.y)}" x2="${f1(b.x < p.x ? b.x + b.w : b.x)}" y2="${f1(b.y + 22)}" stroke="#ff6b78" stroke-width="2"/>` : '')
+          + `<rect x="${f1(b.x)}" y="${f1(b.y)}" width="${b.w}" height="44" rx="10" fill="rgba(5,14,22,0.92)" stroke="#ff6b78" stroke-width="2"/>`
+          + `<text x="${f1(b.x + 14)}" y="${f1(b.y + 30)}" font-size="22" font-weight="700" fill="#f2fbff">${esc(label)}</text></g>`);
+      });
+    }
+    // Body scenára (`pin:<i>`) — len v záberoch, ktoré ich vymenujú (model.pins[i].shots).
+    if (anchors && kind === 'spot') {
+      const pins = model.pins || [];
+      const vis = Object.entries(anchors).filter(([id]) => id.startsWith('pin:')).map(([id, p]) => ({ i: Number(id.slice(4)), p }))
+        .filter(({ i, p }) => p && pins[i] && (!pins[i].shots || pins[i].shots.includes(fs.shot.sceneId)) && p.y >= y0 + 300 && p.y <= DAY_LABEL_FLOOR_Y);
+      const boxes = placeHitLabels(vis.map(({ i, p }) => ({ x: p.x, y: p.y, w: Math.round(String(pins[i].label).length * 12.5) + 28 })), { minX: 24, maxX: W - 24 });
+      vis.forEach(({ i, p }, k) => {
+        const pin = pins[i]; const b = boxes[k];
+        const a = fade01((fs.localS - 0.4 - k * 0.2) / 0.3);
+        if (a <= 0) return;
+        const color = pin.color || '#ff3b3b';
+        const r = (pin.kind === 'fire' ? 10 : 14) + 4 * wave(k * 0.8);
+        out.push(`<g opacity="${f1(a)}"><circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(r + 12)}" fill="${color}" fill-opacity="0.22"/>`
+          + `<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(pin.kind === 'fire' ? 7 : 6)}" fill="${color}" stroke="#ffffff" stroke-width="2"/>`
+          + (pin.label ? `<rect x="${f1(b.x)}" y="${f1(b.y)}" width="${b.w}" height="44" rx="10" fill="rgba(5,14,22,0.92)" stroke="${color}" stroke-width="2"/>`
+            + `<text x="${f1(b.x + 14)}" y="${f1(b.y + 30)}" font-size="22" font-weight="700" fill="#f2fbff">${esc(pin.label)}</text>` : '') + '</g>');
+      });
+      // Čiara trasy (napr. Novorossijsk → Bospor) — body `route:<i>`.
+      const route = Object.entries(anchors).filter(([id]) => id.startsWith('route:')).sort((x, y) => Number(x[0].slice(6)) - Number(y[0].slice(6))).map(([, p]) => p).filter(Boolean);
+      if (route.length >= 2 && (model.route?.shots || []).includes(fs.shot.sceneId)) {
+        const prog = fade01((fs.localS - 0.3) / 1.6);
+        const pts = route.slice(0, Math.max(2, Math.ceil(route.length * prog)));
+        out.push(`<polyline points="${pts.map((q) => `${f1(q.x)},${f1(q.y)}`).join(' ')}" fill="none" stroke="#ffb020" stroke-width="4" stroke-dasharray="14 10" opacity="${f1(Math.min(1, prog * 2))}"/>`);
+      }
+    }
     if (anchors && kind === 'air') {
       Object.entries(anchors).filter(([id]) => id.startsWith('air:')).forEach(([, p], i) => {
         const a = fade01((fs.localS - 0.3 - i * 0.05) / 0.25);
@@ -209,7 +313,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     out.push(`<g opacity="${f1(layers.endCard)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.6"/>`);
     out.push(logo(W / 2 - 90, 420, 180));
     out.push(wordmark(W / 2 + 9, 730, 124, 'middle'));
-    out.push(`<text x="${W / 2}" y="806" text-anchor="middle" font-size="40" font-weight="700" fill="#f2fbff" ${shadow}>Denný prehľad frontu každé ráno</text>`);
+    out.push(`<text x="${W / 2}" y="806" text-anchor="middle" font-size="40" font-weight="700" fill="#f2fbff" ${shadow}>${esc(model.endLine || 'Denný prehľad frontu každé ráno')}</text>`);
     out.push(`<text x="${W / 2}" y="856" text-anchor="middle" font-family="${MONO}" font-size="19" letter-spacing="6" fill="rgba(232,234,237,0.8)" ${shadow}>${VIDEO_BRAND.tagline}</text>`);
     out.push(liveDomain(W / 2, 990, 56));
     out.push(creditLine(W / 2, 1070, 20, 'middle'));
@@ -218,7 +322,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
 
   // Zdroje na každej snímke (na tmavom páse — inak sa bijú s popismi miest na mape).
   out.push(sourcesBand());
-  FRONT_DAY_SOURCES.forEach((line, i) => out.push(`<text x="${W / 2}" y="${1606 + i * 22}" text-anchor="middle" font-size="15" fill="rgba(223,243,251,0.82)" ${shadow}>${esc(line)}</text>`));
+  (model.sources || FRONT_DAY_SOURCES).forEach((line, i) => out.push(`<text x="${W / 2}" y="${1606 + i * 22}" text-anchor="middle" font-size="15" fill="rgba(223,243,251,0.82)" ${shadow}>${esc(line)}</text>`));
   out.push('</svg>');
   return out.join('');
 }

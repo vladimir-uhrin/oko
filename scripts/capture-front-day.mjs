@@ -39,7 +39,7 @@ const { w: W, h: H } = FRONT_DAY_FORMAT;
 const FRAME_TIMEOUT_MS = 45_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const plan = frontDayPlan({ story: job.story, focusSceneId: job.focusSceneId }, job.lines, job.durations, job.planOpts || {});
+const plan = frontDayPlan({ story: job.story, focusSceneId: job.focusSceneId, cameras: job.cameras || null }, job.lines, job.durations, job.planOpts || {});
 if (!plan) { console.error('[front-day] úloha nemá vety — nie je čo nahrávať'); process.exit(1); }
 const logoMarkup = inlineLogoMarkup(fs.readFileSync(path.join(root, 'public', 'logo.svg'), 'utf8'));
 const anchorPoints = dayAnchorPoints(job.model);
@@ -128,7 +128,7 @@ async function shoot(frame) {
     await sleep(60);
   }
   shootStep = 'popisy';
-  const anchors = hasAnchors && ['dir', 'overview', 'air'].includes(st.shot.kind)
+  const anchors = hasAnchors && ['dir', 'overview', 'air', 'strike', 'spot'].includes(st.shot.kind)
     ? await page.evaluate((pts) => window.__okoFrontDay.project(pts), anchorPoints) : null;
   const svg = buildFrontDayHudSvg(job.model, st, { logoMarkup, hook: job.hook, story: job.story, mapDay: job.mapDay || info?.day || null, anchors });
   await page.evaluate((s) => { document.getElementById('oko-video-hud').innerHTML = s; }, svg);

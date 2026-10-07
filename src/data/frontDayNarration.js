@@ -23,6 +23,47 @@ export const DAY_HOOK_KM2 = 10;
 export const AIR_HOOK_OBLASTS = 10;
 export const AIR_LINE_OBLASTS = 5;
 export const FRONT_URL = 'https://okolive.sk/?front=front';
+/** Od koľkých obetí ruského útoku (potvrdených dvoma médiami) je útok háčikom dňa. */
+export const STRIKE_HOOK_KILLED = 5;
+
+/** „zahynulo dvadsať ľudí" / „zahynuli traja ľudia" / „zahynul jeden človek" — hlas aj titulok. Pure. */
+function diedPhrase(n) {
+  const v = Math.round(n);
+  const words = { 2: 'dvaja', 3: 'traja', 4: 'štyria' };
+  if (v === 1) return { spoken: 'zahynul jeden človek', caption: 'zahynul 1 človek' };
+  if (v >= 2 && v <= 4) return { spoken: `zahynuli ${words[v]} ľudia`, caption: `zahynuli ${v} ľudia` };
+  return { spoken: `zahynulo ${spokenNumber(v)} ľudí`, caption: `zahynulo ${group(v)}${NBSP}ľudí` };
+}
+/** „päť detí" / „dve deti" / „jedno dieťa". Pure. */
+function childrenPhrase(n) {
+  const v = Math.round(n);
+  const words = { 1: 'jedno dieťa', 2: 'dve deti', 3: 'tri deti', 4: 'štyri deti' };
+  if (words[v]) return { spoken: words[v], caption: v === 1 ? '1 dieťa' : `${v}${NBSP}deti` };
+  return { spoken: `${spokenNumber(v)} detí`, caption: `${group(v)}${NBSP}detí` };
+}
+/** Najviac detí medzi obeťami (potvrdené na mieste alebo v celku). */
+const childrenOf = (cas) => Math.max(cas?.total?.children || 0, ...(cas?.places || []).map(p => p.children || 0)) || null;
+
+/** Veta háčika o útoku: „Pri ruskom útoku zahynulo podľa médií najmenej 25 ľudí, medzi nimi 5 detí." */
+function strikeHookLine(cas) {
+  const d = diedPhrase(cas.total.killed); const ch = childrenOf(cas);
+  const c = ch ? childrenPhrase(ch) : null;
+  const text = (k) => `Pri ruskom útoku ${d[k].replace(/^(zahynul\w*) /, '$1 podľa médií najmenej ')}${c ? `, medzi nimi ${c[k]}` : ''}.`;
+  return { spoken: text('spoken'), caption: text('caption') };
+}
+/** Veta o miestach (najviac dve): „V meste Pryluky zahynulo najmenej 20 ľudí, z toho 5 detí. V meste Kremenčuk…" */
+function strikePlacesLine(cas) {
+  const parts = { spoken: [], caption: [] };
+  for (const p of (cas.places || []).filter(x => x.killed || x.injured).slice(0, 2)) {
+    for (const k of ['spoken', 'caption']) {
+      const died = p.killed ? diedPhrase(p.killed)[k].replace(/^(zahynul\w*) /, '$1 najmenej ') : null;
+      const kids = p.killed && p.children ? `, z toho ${childrenPhrase(p.children)[k]}` : '';
+      const hurt = p.injured ? `${died ? ', ' : ' '}zranených je ${k === 'spoken' ? spokenNumber(p.injured) : group(p.injured)}` : '';
+      parts[k].push(`V meste ${p.sk}${died ? ` ${died}` : ''}${kids}${hurt}.`);
+    }
+  }
+  return parts.spoken.length ? { spoken: parts.spoken.join(' '), caption: parts.caption.join(' ') } : null;
+}
 
 /** Číslo + tvar podstatného mena v hlase aj titulku: { spoken: 'tridsaťjeden ruských útokov', caption: '31 ruských útokov' }. */
 function counted(n, forms) {
@@ -64,6 +105,9 @@ function spanPhrase(spanDays) {
  * 'air' (nočná hrozba z neba pre ≥ 10 oblastí), inak 'clashes' (počet stretov). Pure.
  */
 export function dayStory(model) {
+  // Obete ruského útoku (zo správ, ≥ 2 médiá) sú najsilnejší fakt dňa (2026-10-07: 25 mŕtvych, video hovorilo
+  // o „hlásenej hrozbe").
+  if (model?.casualties?.total?.killed >= STRIKE_HOOK_KILLED) return 'strike';
   const c = model?.change;
   const bigAir = model?.air?.count >= AIR_HOOK_OBLASTS;
   // Malá zmena mapy (3–10 km²) ustúpi veľkej nočnej hrozbe z neba — háčik má byť najsilnejší fakt dňa.
@@ -106,6 +150,11 @@ function airLine(air, { withKinds = true } = {}) {
 export function frontDayHook(model) {
   const story = dayStory(model);
   const tag = `DEŇ NA FRONTE · ${dayMonth(model.day)}`;
+  if (story === 'strike') {
+    const n = model.casualties.total.killed; const ch = childrenOf(model.casualties);
+    return { tag, lines: [`${group(n)} ${plural(n, 'MŔTVY', 'MŔTVI', 'MŔTVYCH')}`, 'PO RUSKOM ÚTOKU'], accent: group(n),
+      sub: `${ch ? `medzi nimi ${childrenPhrase(ch).caption} · ` : ''}najmenej, podľa médií` };
+  }
   if (story === 'ru' || story === 'ua') {
     const k = km2(story === 'ru' ? model.change.ruKm2 : model.change.uaKm2);
     const top = model.change.directions?.find(d => (story === 'ru' ? d.ruKm2 : d.uaKm2) >= 1);
@@ -135,7 +184,11 @@ export function frontDayLines(model) {
   const changeDir = model.change?.directions?.find(d => (story === 'ua' ? d.uaKm2 : d.ruKm2) >= 1) || null;
 
   // 1. Háčik — najsilnejší fakt dňa.
-  if (story === 'ru' || story === 'ua') {
+  if (story === 'strike') {
+    lines.push({ id: 'hook', shot: 'opening', ...strikeHookLine(model.casualties) });
+    const places = strikePlacesLine(model.casualties);
+    if (places) lines.push({ id: 'strike', shot: 'strike', ...places, names: true });
+  } else if (story === 'ru' || story === 'ua') {
     const k = km2(story === 'ru' ? model.change.ruKm2 : model.change.uaKm2);
     const s = story === 'ru'
       ? (num, sp) => `Ruský agresor ${sp} obsadil ${further(k.value)} ${num} Ukrajiny.`
@@ -156,8 +209,8 @@ export function frontDayLines(model) {
     lines.push({ id: 'clashes', shot: 'overview', spoken: `To je ${avg}.`, caption: `To je ${avg}.` });
   }
 
-  // 3. Kde sa bojuje najviac.
-  if (top) {
+  // 3. Kde sa bojuje najviac (v deň útoku s obeťami nie — video 30–45 s, útok má dve vety).
+  if (top && story !== 'strike') {
     const a = counted(top.attacks, ATTACKS);
     const s = (num) => `Najťažšie boje sú ${directionSk(top.id).at}: ${num}.`;
     lines.push({ id: 'top', shot: `dir:${top.id}`, spoken: s(a.spoken), caption: s(a.caption), names: true });
@@ -171,7 +224,8 @@ export function frontDayLines(model) {
     const text = `${c.captionSk}${where}.`;
     lines.push({ id: `clip${i}`, shot: `clip:${i}`, spoken: text, caption: text, names: Boolean(where) });
   };
-  clip(0);
+  // V deň útoku s obeťami bez bojových záberov — video je o zabitých civilistoch (2026-10-07: záber z auta).
+  if (story !== 'strike') clip(0);
 
   // 5. Zmena mapy pri smere (háčik povedal koľko, tu kde; alebo zmena, ktorá nebola háčikom).
   if (changeDir && (story === 'ru' || story === 'ua')) {
@@ -185,19 +239,20 @@ export function frontDayLines(model) {
   }
 
   // 6. Nočná hrozba z neba (ak nebola háčikom).
-  if (story !== 'air' && model.air?.count >= AIR_LINE_OBLASTS) lines.push({ id: 'air', shot: 'air', ...airLine(model.air, { withKinds: false }) });
+  // Pri útoku s obeťami už háčik aj záber útoku stoja nad celou Ukrajinou — hrozba a údery by video natiahli.
+  if (story !== 'air' && story !== 'strike' && model.air?.count >= AIR_LINE_OBLASTS) lines.push({ id: 'air', shot: 'air', ...airLine(model.air, { withKinds: false }) });
 
   // 7. Údery z hlásenia (dva najväčšie) — len keď nočná hrozba nemá vlastnú vetu (rovnaký záber, video 30–45 s).
   const strikes = Object.entries(STRIKES).map(([key, forms]) => ({ key, forms, n: model.strikes?.[key] })).filter(s => Number.isFinite(s.n) && s.n > 0)
     .sort((a, b) => b.n - a.n).slice(0, 2);
-  if (strikes.length && !lines.some(l => l.id === 'air')) {
+  if (strikes.length && story !== 'strike' && !lines.some(l => l.id === 'air')) {
     const parts = strikes.map(s => counted(s.n, s.forms));
     const s = (key) => `Ruský agresor použil ${listSk(parts.map(p => p[key]))}.`;
     lines.push({ id: 'strikes', shot: 'air', spoken: s('spoken'), caption: s('caption') });
   }
 
   // 8. Druhý akčný záber.
-  clip(1);
+  if (story !== 'strike') clip(1);
 
   // 9. Záver: zdroj a portál (pevná, schválená veta).
   lines.push({ id: 'portal', shot: 'closing', approved: true,
@@ -216,6 +271,14 @@ export function frontDayPostText(model) {
   const hook = story === 'air' ? airSentence(model.air).caption : frontDayLines(model)[0].caption;
   // Háčik o hrozbe z neba hneď spresní, že nejde o potvrdené zásahy (a odsek o noci sa už neopakuje).
   const out = [story === 'air' ? `${hook} Ide o hlásenú hrozbu, nie o potvrdené zásahy.` : hook, ''];
+  if (story === 'strike') {
+    // Obete po miestach a zdroje (čísla potvrdené aspoň dvoma médiami; počas dňa môžu rásť).
+    const cas = model.casualties;
+    const rows = (cas.places || []).slice(0, 4).map(p => `${p.sk}: ${[p.killed ? `najmenej ${group(p.killed)} ${plural(p.killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}${p.children ? `, z toho ${childrenPhrase(p.children).caption}` : ''}` : null,
+      p.injured ? `${group(p.injured)} zranených` : null].filter(Boolean).join(', ')}.`);
+    const names = [...new Set([...(cas.total?.sources || []), ...(cas.places || []).flatMap(p => p.sources)].map(s => s.name))].slice(0, 5);
+    out.push(...rows, `Celkovo podľa médií najmenej ${group(cas.total.killed)} mŕtvych${cas.total.injured ? ` a ${group(cas.total.injured)} zranených` : ''}. Čísla uvádzame, len ak ich potvrdili aspoň dve médiá; počas dňa sa môžu zvýšiť. Zdroje: ${names.join(', ')}.`, '');
+  }
   const avg = Number.isFinite(model.avg7) ? ` (7-dňový priemer: ${group(model.avg7)})` : '';
   const top = (model.directions || []).filter(d => d.attacks > 0).slice(0, 3);
   // Ranné hlásenie GŠ pokrýva uplynulých 24 hodín — nie kalendárny deň hlásenia.
@@ -231,8 +294,9 @@ export function frontDayPostText(model) {
       + (c.toGreyKm2 >= 1 ? ` Ďalších ${group(c.toGreyKm2)} km² prešlo z ruskej kontroly do sivej zóny (nie je to ukrajinský zisk).` : '')
       + ' Zmena je vypočítaná z porovnania dvoch denných snímok mapy frontu; mapa zachytáva stav s oneskorením 2–3 dni.');
   }
-  if (story !== 'air' && model.air?.count >= AIR_LINE_OBLASTS) out.push('', `${airSentence(model.air).caption} Ide o hlásenú hrozbu, nie o potvrdené zásahy.`);
-  const used = (model.clips || []).filter(Boolean);
+  // V deň útoku s obeťami by „nejde o potvrdené zásahy" mýlilo — zásahy potvrdené sú.
+  if (story !== 'air' && model.air?.count >= AIR_LINE_OBLASTS) out.push('', story === 'strike' ? airSentence(model.air).caption : `${airSentence(model.air).caption} Ide o hlásenú hrozbu, nie o potvrdené zásahy.`);
+  const used = story === 'strike' ? [] : (model.clips || []).filter(Boolean);
   if (used.length) out.push('', ...used.map(clip => `Záber: ${clip.captionSk}${clip.direction ? ` ${directionSk(clip.direction).at}` : ''} — ArmyInform, Ministerstvo obrany Ukrajiny (CC BY 4.0): ${clip.url}`));
   out.push('', 'Počty stretov a úderov sú údaje jednej strany (Generálny štáb Ukrajiny), nezávisle neoverené.'
     + (model.report.url ? ` Hlásenie: ${model.report.url}` : ''));

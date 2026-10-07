@@ -54,6 +54,41 @@ test('gramatika čísel: ďalší 1 / ďalšie 3 / ďalších 8 km²; dva dni od
   assert.deepEqual(frontDayHook({ ...base(), air: null, change: { ...base().change, ruKm2: 3 } }).lines, ['RUSKÝ AGRESOR OBSADIL', 'ĎALŠIE 3 km²']);
 });
 
+test('útok s obeťami (7. 10.): háčik o obetiach, nie o hrozbe; miesta s deťmi a zraneniami; príspevok so zdrojmi', () => {
+  const casualties = {
+    total: { killed: 25, children: null, injured: 100, sources: [{ name: 'Ukrinform' }, { name: 'Al Jazeera' }] },
+    places: [
+      { en: 'Pryluky', sk: 'Pryluky', killed: 20, children: 5, injured: null, sources: [{ name: 'Ukrainska Pravda' }, { name: 'The Kyiv Independent' }] },
+      { en: 'Kremenchuk', sk: 'Kremenčuk', killed: 2, children: null, injured: 47, sources: [{ name: 'Ukrinform' }, { name: 'Ukrainska Pravda' }] },
+      { en: 'Kyiv', sk: 'Kyjev', killed: 2, children: null, injured: null, sources: [] },
+    ],
+  };
+  const m = { ...base(), casualties };
+  assert.equal(dayStory(m), 'strike', 'obete prebijú hrozbu aj mapu');
+  assert.equal(dayStory({ ...m, casualties: { ...casualties, total: { ...casualties.total, killed: 3 } } }), 'air', 'pod 5 obetí nie');
+  const hook = frontDayHook(m);
+  assert.deepEqual(hook.lines, ['25 MŔTVYCH', 'PO RUSKOM ÚTOKU']);
+  assert.match(hook.sub, /medzi nimi 5\sdetí · najmenej, podľa médií/);
+  const lines = frontDayLines(m);
+  assert.deepEqual(lines.map(l => l.id).slice(0, 2), ['hook', 'strike']);
+  assert.ok(!lines.some(l => l.id === 'air' || l.id === 'strikes'), 'hrozba a údery v deň útoku nenaťahujú video');
+  assert.ok(!lines.some(l => l.shot.startsWith('clip:')), 'v deň útoku s obeťami bez bojových záberov');
+  assert.ok(!frontDayPostText(m).includes('Záber:'), 'ani v príspevku');
+  assert.match(lines[0].caption, /^Pri ruskom útoku zahynulo podľa médií najmenej 25\sľudí, medzi nimi 5\sdetí\.$/);
+  assert.equal(lines[0].spoken, 'Pri ruskom útoku zahynulo podľa médií najmenej dvadsaťpäť ľudí, medzi nimi päť detí.');
+  assert.match(lines[1].caption, /^V meste Pryluky zahynulo najmenej 20\sľudí, z toho 5\sdetí\. V meste Kremenčuk zahynuli najmenej 2 ľudia, zranených je 47\.$/);
+  assert.equal(lines[1].spoken, 'V meste Pryluky zahynulo najmenej dvadsať ľudí, z toho päť detí. V meste Kremenčuk zahynuli najmenej dvaja ľudia, zranených je štyridsaťsedem.');
+  assert.equal(lines[1].shot, 'strike');
+  const post = frontDayPostText(m);
+  assert.ok(post.startsWith('Pri ruskom útoku zahynulo podľa médií najmenej 25'));
+  assert.match(post, /Pryluky: najmenej 20\smŕtvych, z toho 5\sdetí\./);
+  assert.match(post, /Kremenčuk: najmenej 2 mŕtvi, 47 zranených\./);
+  assert.match(post, /aspoň dve médiá/);
+  assert.ok(!/nie o potvrdené zásahy/.test(post), 'v deň útoku nepíšeme, že nejde o zásahy');
+  const words = lines.reduce((n, l) => n + l.spoken.split(/\s+/).length, 0);
+  assert.ok(words <= 80, `komentár má ${words} slov`);
+});
+
 test('text príspevku pre Facebook: háčik v prvom riadku, hlásenie za 24 h, zdroje, mapa, bez emoji a vyzývania', () => {
   const text = frontDayPostText(base());
   const [first] = text.split('\n');

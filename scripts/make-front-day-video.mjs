@@ -43,6 +43,8 @@ if (args.includes('--dry')) {
   console.log(`  smery: ${model.directions.map(d => `${d.id} ${d.attacks}`).join(', ') || '—'}`);
   console.log(`  mapa: ${model.change ? `${model.change.fromDay} → ${model.change.toDay} (${model.change.spanDays} d): RU +${model.change.ruKm2.toFixed(1)} km², UA +${model.change.uaKm2.toFixed(1)} km²` : `bez zmeny (${model.frontStale || 'nedostupná'})`}`);
   console.log(`  noc: ${model.air ? `${model.air.count} oblastí, ${model.air.kinds.join('+') || '—'}` : '—'}`);
+  const cas = model.casualties;
+  console.log(`  obete zo správ: ${cas?.total ? `celok ${cas.total.killed ?? '—'} mŕtvych / ${cas.total.injured ?? '—'} zranených` : '—'}${(cas?.places || []).map(p => ` | ${p.sk} ${p.killed ?? '—'}${p.children ? ` (${p.children} detí)` : ''}${p.injured ? ` +${p.injured} zr.` : ''}`).join('')}`);
   console.log(`  zábery: ${model.clips.map(c => `${c.captionSk}${c.direction ? ` [${c.direction}]` : ''}${c.sensitive ? ' (citlivé)' : ''}`).join(' | ') || '—'}`);
   console.log(`\nHÁČIK (karta): ${hook.tag} | ${hook.lines.join(' / ')}${hook.sub ? ` | ${hook.sub}` : ''}`);
   console.log('\nKOMENTÁR (titulok · záber):');
@@ -69,10 +71,12 @@ if (!args.includes('--no-music')) {
 const started = Date.now();
 const workDir = path.resolve(flag('--out-dir', path.join(dbDir, 'front-day', new Date().toISOString().slice(0, 10))));
 const sampleFrames = flag('--frames') ? flag('--frames').split(',').map(Number).filter(Number.isFinite) : null;
+// `--scenario <súbor.json>`: správa mimo denného prehľadu ({ name, story, model, lines, hook, cameras, post }).
+const scenario = flag('--scenario') ? JSON.parse(fs.readFileSync(path.resolve(flag('--scenario')), 'utf8')) : null;
 let result;
 try {
   result = await prepareFrontDayVideo({
-    baseUrl, apiUrl, voice, cache, workDir, music, sampleFrames,
+    baseUrl, apiUrl, voice, cache, workDir, music, sampleFrames, scenario,
     capture: { node: process.execPath, baseUrl },
     tools: { ffmpeg: env.FFMPEG_PATH || 'ffmpeg' },
     onProgress: (stage, detail) => console.log(`[front-day] ${((Date.now() - started) / 1000).toFixed(0).padStart(4)} s  ${stage} ${Object.keys(detail || {}).length ? JSON.stringify(detail) : ''}`),

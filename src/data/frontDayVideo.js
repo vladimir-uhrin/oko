@@ -15,9 +15,9 @@ export const FRONT_DAY_VIDEO = Object.freeze({
   fps: 30,
   gapS: 0.3,
   /** Nábeh reči od začiatku záberu (s) — háčik začína takmer hneď (prvé 3 sekundy). */
-  leadS: Object.freeze({ opening: 0.15, overview: 0.45, dir: 0.85, clip: 0.3, air: 0.6, closing: 0.35 }),
+  leadS: Object.freeze({ opening: 0.15, overview: 0.45, dir: 0.85, clip: 0.3, air: 0.6, strike: 0.5, spot: 0.6, closing: 0.35 }),
   tailS: 0.35,
-  minS: Object.freeze({ opening: 2.8, overview: 2.6, dir: 3.2, clip: 3.6, air: 3.0, closing: 3.0 }),
+  minS: Object.freeze({ opening: 2.8, overview: 2.6, dir: 3.2, clip: 3.6, air: 3.0, strike: 3.4, spot: 3.2, closing: 3.0 }),
   flyS: 1.4,
   endMarginS: 0.6,
   fadeS: 0.35,
@@ -38,13 +38,13 @@ export function dayDirectionCamera(sceneId, opts = FRONT_DAY_VIDEO) {
 
 /** Kamera úvodnej karty: miesto príbehu dňa (smer zmeny), pri hrozbe z neba celá Ukrajina, inak front. Pure. */
 export function openingCamera(story, focusSceneId, opts = FRONT_DAY_VIDEO) {
-  if (story === 'air') return DAY_UKRAINE_CAMERA;
+  if (story === 'air' || story === 'strike') return DAY_UKRAINE_CAMERA;
   if ((story === 'ru' || story === 'ua') && focusSceneId) return dayDirectionCamera(focusSceneId, opts) || DAY_OVERVIEW_CAMERA;
   return DAY_OVERVIEW_CAMERA;
 }
 
 const push = (cam, local, amount) => ({ ...cam, heightM: cam.heightM * (1 - amount * Math.min(1, Math.max(0, local))) });
-const kindOf = (shot) => (shot.startsWith('dir:') ? 'dir' : shot.startsWith('clip:') ? 'clip' : shot);
+const kindOf = (shot) => (shot.startsWith('dir:') ? 'dir' : shot.startsWith('clip:') ? 'clip' : shot.startsWith('spot:') ? 'spot' : shot);
 
 /**
  * @param {{story: string, focusSceneId?: string|null}} ctx príbeh dňa (dayStory) a smer zmeny pre úvodnú kartu
@@ -61,14 +61,16 @@ export function frontDayPlan(ctx, lines, durations, opts = {}) {
   const shots = [];
   const placement = [];
   let t = 0;
-  let prevCam = openingCamera(ctx?.story, ctx?.focusSceneId, o);
+  // Scenár (vlastné miesto) môže dať kameru úvodu aj každého záberu `spot:<id>` (ctx.cameras).
+  let prevCam = ctx?.cameras?.opening || openingCamera(ctx?.story, ctx?.focusSceneId, o);
   for (const id of order) {
     const kind = kindOf(id);
-    const sceneId = kind === 'dir' ? id.slice(4) : null;
+    const sceneId = kind === 'dir' ? id.slice(4) : kind === 'spot' ? id.slice(5) : null;
     const clipIndex = kind === 'clip' ? Number(id.slice(5)) : null;
     const cam = kind === 'dir' ? (dayDirectionCamera(sceneId, o) || DAY_OVERVIEW_CAMERA)
-      : kind === 'air' ? DAY_UKRAINE_CAMERA
-        : kind === 'opening' ? openingCamera(ctx?.story, ctx?.focusSceneId, o)
+      : kind === 'air' || kind === 'strike' ? DAY_UKRAINE_CAMERA
+      : kind === 'spot' ? (ctx?.cameras?.[sceneId] || DAY_UKRAINE_CAMERA)
+        : kind === 'opening' ? (ctx?.cameras?.opening || openingCamera(ctx?.story, ctx?.focusSceneId, o))
           : kind === 'clip' ? prevCam
             : DAY_OVERVIEW_CAMERA;
     const lead = o.leadS[kind] ?? 0.5;

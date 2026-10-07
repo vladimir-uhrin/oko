@@ -139,6 +139,8 @@ test('zábery: len oficiálne kanály s povolenou licenciou, nie YouTube, nie po
   assert.equal(mediaHostAllowed('https://armyinform.com.ua/wp-content/v.mp4'), true);
   assert.equal(mediaHostAllowed('https://armyinform.stream/~/share/95c983b39b53/video/x.mp4'), true, 'videoserver ArmyInform (prílohy RSS)');
   assert.equal(mediaHostAllowed('https://armyinform.stream.evil.example/x.mp4'), false);
+  assert.equal(mediaHostAllowed('https://ai-videos.cdn.express/~/share/7a411efb615f/IMG_5719.MOV'), true, 'videoserver ArmyInform (.MOV v RSS, 2026-10-07)');
+  assert.equal(mediaHostAllowed('https://other.cdn.express/x.mp4'), false, 'nie celé cdn.express');
   assert.equal(mediaHostAllowed('http://cdn4.telesco.pe/file/x.jpg'), false, 'len https');
   assert.equal(mediaHostAllowed('https://evil.example/telesco.pe.jpg'), false);
   assert.ok(mediaSource(tg('GeneralStaffZSU', 10)));

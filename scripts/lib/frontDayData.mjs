@@ -8,6 +8,7 @@ import { UK_OBLAST_HINTS, mediaToAlert } from '../../src/data/ukraineMedia.js';
 import { UKRAINE_GAZETTEER } from '../../src/data/ukraineIncidents.js';
 import { isPartialReport } from '../../src/data/ukraineDirectionTrend.js';
 import { pickActionClips } from '../../src/data/frontDayClips.js';
+import { attackCasualties, placeIndex } from '../../src/data/strikeCasualties.js';
 
 const DAY_MS = 86_400_000;
 /** Hlásenie GŠ staršie než toto už nie je „ranné hlásenie dňa". */
@@ -69,6 +70,15 @@ export async function loadFrontDay({ baseUrl, now = Date.now(), fetchImpl = glob
     }
   }
 
+  // Obete ruských útokov zo správ (titulky Ukrinform, Ukrainska Pravda, Kyiv Independent…; čísla od ≥ 2 médií)
+  // a sídla mapy KARTA na priradenie miesta. Bez správ video beží ďalej bez útoku.
+  let casualties = null;
+  const [newsRes, placesRes] = await Promise.all([get('/api/situation-news?region=ukraine'), get('/api/ukraine/base/places')]);
+  if (Array.isArray(newsRes.body?.items)) {
+    const c = attackCasualties(newsRes.body.items, { now, places: placeIndex(placesRes.body?.features) });
+    if (c.total || c.places.length) casualties = { total: c.total, places: c.places.slice(0, 3) };
+  }
+
   const mediaRes = await loadMedia({ get, now });
   const media = mediaRes.data?.media || [];
   const directions = reportDirections(report).filter(d => d.attacks > 0).slice(0, 3);
@@ -82,6 +92,7 @@ export async function loadFrontDay({ baseUrl, now = Date.now(), fetchImpl = glob
       strikes: report.strikes || {},
       change,
       air: nightAir(media, now),
+      casualties,
       // Kandidáti: linka nechá najviac 2 použiteľné (záber na výšku alebo nestiahnuteľný vypadne).
       clips: pickActionClips(media, { now, max: 4, focusDirections: focus }),
       frontStale: front.reason || null,

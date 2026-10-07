@@ -26,6 +26,12 @@ test('cieľ = predmet za slovesom; slovo od začiatku (rozbitá ≠ zostrelená)
     'Ukrajinské sily zničili ruskú techniku', '„розбита" nie je „збит" (zostrelenie)');
 });
 
+test('názov brigády nie je cieľ: „Третьої штурмової" ≠ útok; vozidlo nie vojaci (2026-10-07)', () => {
+  assert.equal(caption('Її знищили вперше: бійці Третьої штурмової уразили рідкісну машину забезпечення окупантів для БУК-М3'),
+    'Ukrajinské sily zničili ruské vozidlo');
+  assert.match(caption('Захисники відбили штурм окупантів') || '', /^Ukrajinské sily odrazili ruský útok/, 'podstatné meno „штурм" ostáva cieľom');
+});
+
 test('rozhovory, príbehy a návštevy nie sú akčný záber; zásah ľudí je povolený, ale citlivý', () => {
   for (const title of ['«Вони реально хапнули там»: боєць «Лакі» про спробу окупантів контратакувати в районі Карпівки',
     'Підірвався на ОЗМ-72 і заново вчився ходити: історія оператора ССО «Якута»',

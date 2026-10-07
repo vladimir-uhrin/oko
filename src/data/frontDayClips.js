@@ -30,6 +30,7 @@ const TARGETS = [
   [/РСЗВ|Град|Ураган|Торнадо/i, 'ruský raketomet'],
   [/гармат|артилер/i, 'ruské delostrelectvo'],
   [/БМП|БТР|МТ-ЛБ|бронетехн|бронемашин/i, 'ruské obrnené vozidlá'],
+  [/машин|автомобіл|вантажівк/i, 'ruské vozidlo'],
   [/НПЗ|нафтопереробн/i, 'ruskú rafinériu'],
   [/аеродром/i, 'ruské letisko'],
   [/Іскандер/i, 'ruské komplety Iskander'],
@@ -39,7 +40,9 @@ const TARGETS = [
   [/склад|\bБК\b|боєприпас/i, 'ruský sklad munície'],
   [/катер|корабл/i, 'ruské plavidlo'],
   [/техні/i, 'ruskú techniku'],
-  [/штурм/i, 'ruský útok'],
+  // Len podstatné meno („відбили штурм"), nie „штурмової/штурмовики" — názov brigády (2026-10-07: „бійці Третьої
+  // штурмової уразили машину" → „zničili ruský útok").
+  [/штурм(?!ов)/i, 'ruský útok'],
   [/піхот|окупант|росіян|ворог/i, 'ruských vojakov'],
   [/територ|км²/i, 'územie'],
 ];

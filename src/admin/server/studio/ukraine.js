@@ -322,7 +322,9 @@ export const MEDIA_MAX_AGE_MS = 12 * 3600_000;
 export const MEDIA_PER_DAY_DEFAULT = 6;
 /** Hostitelia, z ktorých Štúdio sťahuje médiá (CDN Telegramu, ArmyInform). */
 // armyinform.stream = videoserver ArmyInform (prílohy MP4 v RSS — bez neho by sa video nikdy nestiahlo, 2026-10-05).
-export const MEDIA_HOSTS = [/(^|\.)telesco\.pe$/i, /(^|\.)cdn-telegram\.org$/i, /(^|\.)armyinform\.com\.ua$/i, /(^|\.)armyinform\.stream$/i];
+// ai-videos.cdn.express = ďalší videoserver ArmyInform (prílohy .MOV v ich RSS od 2026-10-07); len tento hostiteľ,
+// nie celé cdn.express.
+export const MEDIA_HOSTS = [/(^|\.)telesco\.pe$/i, /(^|\.)cdn-telegram\.org$/i, /(^|\.)armyinform\.com\.ua$/i, /(^|\.)armyinform\.stream$/i, /^ai-videos\.cdn\.express$/i];
 export function mediaHostAllowed(url) {
   try { const u = new URL(url); return u.protocol === 'https:' && MEDIA_HOSTS.some(re => re.test(u.hostname)); } catch { return false; }
 }

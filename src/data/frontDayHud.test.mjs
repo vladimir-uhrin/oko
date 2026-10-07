@@ -1,7 +1,7 @@
 // Popisy denného videa: štýl OKO, bezpečná zóna Reels, zdroje na každej snímke, rám akčného záberu.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CLIP_BOX, DAY_SAFE, FRONT_DAY_SOURCES, buildClipOverlaySvg, buildFrontDayHudSvg, calloutWidth, dayAnchorPoints, hookLineSize } from './frontDayHud.js';
+import { CLIP_BOX, DAY_SAFE, FRONT_DAY_SOURCES, buildClipOverlaySvg, buildFrontDayHudSvg, calloutWidth, dayAnchorPoints, hookLineSize, placeHitLabels } from './frontDayHud.js';
 import { frontDayPlan } from './frontDayVideo.js';
 
 const model = {
@@ -52,6 +52,15 @@ test('rám akčného záberu: kto zverejnil, celý popis s miestom, zdroj CC BY,
   assert.equal(text, 'Ukrajinské sily zničili ruskú samohybnú húfnicu pri Huliajpoli', 'popis sa neoreže');
   assert.ok(svg.includes('CC BY 4.0') && svg.includes('Huliajpiľský smer'));
   for (const y of ys(svg)) assert.ok(y >= DAY_SAFE.top && (y < CLIP_BOX.y || y > CLIP_BOX.y + CLIP_BOX.h), `text mimo okna videa (y=${y})`);
+});
+
+test('štítky miest útoku sa neprekrývajú ani nezakryjú značku (Kyjev a Pryluky pri celej Ukrajine, 7. 10.)', () => {
+  const items = [{ x: 290, y: 415, w: 230 }, { x: 260, y: 420, w: 160 }, { x: 325, y: 478, w: 210 }]; // Pryluky, Kyjev, Kremenčuk
+  const boxes = placeHitLabels(items, { minX: 24, maxX: 1056 });
+  const over = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + 44 && b.y < a.y + 44;
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!over(boxes[i], boxes[j]), `štítky ${i} a ${j} sa prekrývajú`);
+  boxes.forEach((b, i) => items.forEach((m, j) => { if (i !== j) assert.ok(!over(b, { x: m.x - 18, y: m.y - 22, w: 36 }), `štítok ${i} zakrýva značku ${j}`); }));
+  assert.ok(boxes.every((b) => b.x >= 24 && b.x + b.w <= 1056));
 });
 
 test('háčik a bublina zmeny sa zmestia: dlhý riadok menším písmom, bublina podľa popisu', () => {

@@ -24,6 +24,15 @@ test('nahrávka s dlhším tichom na začiatku než úvod záberu nezačne pred 
   assert.ok(plan.placement[0].speechStart <= 0.3);
 });
 
+test('scenár (tanker pri Soči): kamera úvodu a záberov spot:<id> zo scenára', () => {
+  const cameras = { opening: { lon: 38.2, lat: 44.1, heightM: 1_300_000, pitchDeg: -88, headingDeg: 0 }, fire: { lon: 39.56, lat: 43.56, heightM: 150_000, pitchDeg: -89, headingDeg: 0 } };
+  const plan = frontDayPlan({ story: 'spot', cameras }, [{ id: 'hook', shot: 'opening' }, { id: 'fire', shot: 'spot:fire' }, { id: 'portal', shot: 'closing' }],
+    { hook: dur(3), fire: dur(4), portal: dur(3) });
+  const [opening, fire] = plan.shots;
+  assert.equal(opening.to.lon, 38.2, 'úvod nad Čiernym morom, nie nad Ukrajinou');
+  assert.deepEqual([fire.kind, fire.sceneId, fire.to.heightM], ['spot', 'fire', 150_000]);
+});
+
 test('vety jedného záberu idú za sebou s medzerou; záber trvá aspoň minimum', () => {
   const plan = frontDayPlan({ story: 'air' }, lines, durations);
   const air = plan.placement.filter((p) => p.shot === 'air');

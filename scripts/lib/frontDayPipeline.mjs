@@ -79,16 +79,18 @@ export function focusSceneOf(model) {
  * @param {object|null} [p.music]
  * @param {number[]|null} [p.sampleFrames] len vzorové snímky (kontrola rozloženia), bez videa
  */
-export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = null, cache, workDir, music = null, capture = {}, tools = {}, onProgress = () => {}, options = {}, now = Date.now(), sampleFrames = null }) {
+export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = null, cache, workDir, music = null, capture = {}, tools = {}, onProgress = () => {}, options = {}, now = Date.now(), sampleFrames = null, scenario = null }) {
   const ffmpeg = tools.ffmpeg || process.env.FFMPEG_PATH || 'ffmpeg';
   const ffprobe = tools.ffprobe || process.env.FFPROBE_PATH || ffmpeg.replace(/ffmpeg(\.exe)?$/i, (m, ext) => `ffprobe${ext || ''}`);
   fs.mkdirSync(workDir, { recursive: true });
 
-  // 1. dáta
-  // Dáta priamo zo služby API (apiUrl), stránka na nahrávanie z dev servera (baseUrl).
-  const { model, reason } = await loadFrontDay({ baseUrl: apiUrl, now, fetchImpl: tools.fetchImpl });
+  // 1. dáta — alebo hotový scenár (správa mimo denného prehľadu, napr. tanker pri Soči, 2026-10-07):
+  // { model, lines, hook, story, cameras, post, name } — rovnaký rám OKO, hlas, titulky a mapa.
+  let model; let reason = null;
+  if (scenario) model = { clips: [], ...scenario.model };
+  else ({ model, reason } = await loadFrontDay({ baseUrl: apiUrl, now, fetchImpl: tools.fetchImpl }));
   if (!model) throw Object.assign(new Error(`denné video sa dnes nerobí: ${reason}`), { code: 'NO_DATA', reason });
-  onProgress('model', { day: model.day, story: dayStory(model), clashes: model.report.total, clips: model.clips.length });
+  onProgress('model', { day: model.day, story: scenario ? scenario.story : dayStory(model), clashes: model.report?.total ?? null, clips: model.clips.length });
 
   // 5a. zábery (pred hlasom: záber, ktorý sa nestiahne alebo je na výšku — rozhovor —, vypadne aj so svojou
   // vetou a nastúpi ďalší kandidát; vo videu najviac FRONT_DAY_CLIPS)
@@ -106,10 +108,11 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   model.clips = clipSources.map((c) => c.clip);
 
   // 2. vety a háčik
-  const lines = frontDayLines(model);
-  const hook = frontDayHook(model);
-  const story = dayStory(model);
-  const focusSceneId = focusSceneOf(model);
+  const lines = scenario ? scenario.lines : frontDayLines(model);
+  const hook = scenario ? scenario.hook : frontDayHook(model);
+  const story = scenario ? scenario.story || 'spot' : dayStory(model);
+  const focusSceneId = scenario ? null : focusSceneOf(model);
+  const cameras = scenario?.cameras || null;
   onProgress('lines', { count: lines.length });
 
   // 3. hlas
@@ -119,11 +122,11 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   });
 
   // 4. plán
-  const plan = frontDayPlan({ story, focusSceneId }, lines, durations);
+  const plan = frontDayPlan({ story, focusSceneId, cameras }, lines, durations);
   if (!plan) throw Object.assign(new Error('deň nemá vety na video'), { code: 'NO_LINES' });
   onProgress('fit', { durationS: Math.round(plan.durationS * 10) / 10, shots: plan.shots.map((s) => ({ id: s.id, dur: Math.round(s.dur * 10) / 10 })) });
   const jobFile = path.join(workDir, 'uloha.json');
-  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1 }));
+  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, cameras, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1 }));
 
   if (sampleFrames) {
     await captureFrontDay({ jobFile, out: path.join(workDir, 'vzorky.mp4'), capture, ffmpeg, onProgress, frames: sampleFrames, framesDir: workDir });
@@ -158,7 +161,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   onProgress('captions');
   // Pri akčnom zábere je veta už veľkým popisom nad videom — titulok by ju zdvojil a prekryl zdroj záberu.
   const cues = captionCues(lines.filter((l) => !String(l.shot).startsWith('clip:')), plan.placement, bounds, DAY_CAPTION_STYLE);
-  const name = `den-na-fronte-${model.day}`;
+  const name = scenario?.name || `den-na-fronte-${model.day}`;
   const srtFile = path.join(workDir, `${name}.sk_SK.srt`);
   fs.writeFileSync(srtFile, srt(cues), 'utf8');
   const cleanFile = path.join(workDir, `${name}.mp4`);
@@ -166,7 +169,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   const burnedFile = path.join(workDir, `${name}-titulky.mp4`);
   await burnCaptions({ cues, outroWindow: null, rawVideo, audioFile, out: burnedFile, workDir, ffmpeg, format: FRONT_DAY_FORMAT, style: DAY_CAPTION_STYLE });
   const postFile = path.join(workDir, `${name}.txt`);
-  fs.writeFileSync(postFile, frontDayPostText(model), 'utf8');
+  fs.writeFileSync(postFile, scenario ? scenario.post : frontDayPostText(model), 'utf8');
   onProgress('done');
   return { model, lines, hook, plan: { durationS: plan.durationS, shots: plan.shots, placement: plan.placement }, review, cues, files: { burned: burnedFile, clean: cleanFile, srt: srtFile, post: postFile, audio: audioFile, raw: rawVideo } };
 }
