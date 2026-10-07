@@ -19,7 +19,9 @@ export const FIRE_NEWS_MIN_TRUSTED = 2;
 /** Mriežka cache dopytov (°): to isté mesto pre všetky ohniská v okolí. */
 export const FIRE_NEWS_CELL_DEG = 0.1;
 
-const clean = (s) => String(s || '').replace(/["\\()]/g, ' ').replace(/\s+/g, ' ').trim();
+const clean = (s) => String(s || '').replace(/["\\()]/g, ' ').replace(/\s+/g, ' ').trim()
+  // Nominatim vracia správne celky („Staromlynivka Rural Hromada“, „… Municipality“) — médiá píšu len meno.
+  .replace(/\s+(?:(?:rural|urban|settlement|city)\s+)?(?:hromada|municipality|community|council|district|raion|rayon|county)$/i, '').trim();
 
 /**
  * Dopyt GDELT DOC pre miesto (Nominatim: locality/region/country): „"Sochi" (fire OR …)“.

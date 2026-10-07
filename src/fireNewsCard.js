@@ -52,7 +52,8 @@ export function createFireNewsCard({ doc, win, fetchJson = async (url) => { cons
     el('fire-news-title').textContent = t('firms.news.title');
     const place = news?.place;
     const label = place ? (place.label || [place.locality, place.region, place.country].filter(Boolean).join(', ')) : '';
-    el('fire-news-place').textContent = place ? (place.nearby ? t('firms.news.near', { place: label }) : label) : t('firms.news.no-place');
+    const where = place ? (place.nearby ? t('firms.news.near', { place: label }) : label) : t('firms.news.no-place');
+    el('fire-news-place').textContent = place?.nearCity ? `${where} · ${t('firms.news.near-city', { city: place.nearCity, km: place.nearCityKm })}` : where;
     const verdict = el('fire-news-verdict');
     const status = news?.status;
     if (status === 'ready') {

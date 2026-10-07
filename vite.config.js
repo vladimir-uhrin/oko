@@ -3283,52 +3283,73 @@ export function firmsProxy() {
     return trustedCache.list;
   }
   /** Správy k miestu: Nominatim (mesto) → GDELT DOC (články s obrázkom) → sankčný filter → verdikt. */
-  async function buildFireNews(lat, lon) {
-    let place = await fetchRegionalPlace({ latitude: lat, longitude: lon }).catch(() => null);
-    let nearby = false;
-    if (!place?.locality) {
-      // More / mimo obce: najbližšie mesto zo zoznamu Natural Earth (do 80 km).
-      if (!placesCache) {
-        try { placesCache = JSON.parse(await fsp.readFile(path.join(__dirname, 'src', 'data', 'local_data', 'natural_earth', 'places.json'), 'utf8')).places || []; } catch { placesCache = []; }
-      }
-      const near = nearestPlace(placesCache, lat, lon);
-      if (near) { place = { ...(place || {}), locality: near.name, label: `${near.name} (${near.km} km)` }; nearby = true; }
+  async function loadPlaces() {
+    if (!placesCache) {
+      try { placesCache = JSON.parse(await fsp.readFile(path.join(__dirname, 'src', 'data', 'local_data', 'natural_earth', 'places.json'), 'utf8')).places || []; } catch { placesCache = []; }
     }
-    const query = fireNewsQuery(place);
-    const base = { place: place ? { locality: place.locality, region: place.region, country: place.country, label: place.label, nearby } : null, query, source: 'GDELT DOC 2.0', fetchedAt: Date.now() };
-    if (!query) return { ...base, status: 'no_place', items: [], trustedDomains: [], confirmed: false };
-    // Tri zdroje (2026-10-06): GDELT (obrázky, všetky jazyky; z tejto IP často 429), Bing News RSS
-    // (priame odkazy + náhľady — fotka k udalosti) a pri výpadku GDELT Google News RSS (šírka,
-    // dôveryhodné médiá; len presmerovania bez obrázka). mergeNewsItems zlúči ten istý príbeh a
-    // ponechá verziu s obrázkom a priamym odkazom.
+    return placesCache;
+  }
+  /**
+   * Články k dopytu z troch zdrojov (2026-10-06): GDELT (obrázky, všetky jazyky; z tejto IP často 429),
+   * Bing News RSS (priame odkazy + náhľady — fotka k udalosti) a pri výpadku GDELT Google News RSS
+   * (šírka, dôveryhodné médiá; len presmerovania bez obrázka). mergeNewsItems zlúči ten istý príbeh a
+   * ponechá verziu s obrázkom a priamym odkazom.
+   */
+  async function fetchFireArticles(query) {
     const lists = [];
     const sources = [];
     try {
       const gated = await sharedGdeltGate().run(() => fetchRegionalJson(`https://api.gdeltproject.org/api/v2/doc/doc?${new URLSearchParams({ query, mode: 'artlist', format: 'json', maxrecords: '40', sort: 'hybridrel', timespan: '3d' })}`, { headers: { 'User-Agent': 'GodsEyeView/0.1' }, timeoutMs: 12_000 }));
-      if (!gated.skipped) { const a = parseGdeltArticles(gated.value); if (a.length) { lists.push(a); sources.push('GDELT'); } }
+      if (!gated.skipped) { const x = parseGdeltArticles(gated.value); if (x.length) { lists.push(x); sources.push('GDELT'); } }
     } catch (err) {
       console.warn('[firms-news] GDELT failed:', err?.message || err);
     }
     try {
-      const a = parseBingNewsRss(await fetchRegionalText(bingNewsUrl(query), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OKO/0.1)' }, timeoutMs: 12_000 }));
-      if (a.length) { lists.push(a); sources.push('Bing News'); }
+      const x = parseBingNewsRss(await fetchRegionalText(bingNewsUrl(query), { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; OKO/0.1)' }, timeoutMs: 12_000 }));
+      if (x.length) { lists.push(x); sources.push('Bing News'); }
     } catch (err) {
       console.warn('[firms-news] Bing News RSS failed:', err?.message || err);
     }
     if (!sources.includes('GDELT')) {
       try {
         const xml = await fetchRegionalText(`https://news.google.com/rss/search?${new URLSearchParams({ q: query, hl: 'en-US', gl: 'US', ceid: 'US:en' })}`, { headers: { 'User-Agent': 'GodsEyeView/0.1' }, timeoutMs: 12_000 });
-        const a = normalizeRssArticles(xml, 30).map((x) => ({ title: x.title, url: x.url, source: x.sourceHost || x.domain, sourceHost: x.sourceHost, publishedAt: x.publishedAt ? Date.parse(x.publishedAt) : null, image: x.image, lang: null, country: null }));
-        if (a.length) { lists.push(a); sources.push('Google News'); }
+        const x = normalizeRssArticles(xml, 30).map((y) => ({ title: y.title, url: y.url, source: y.sourceHost || y.domain, sourceHost: y.sourceHost, publishedAt: y.publishedAt ? Date.parse(y.publishedAt) : null, image: y.image, lang: null, country: null }));
+        if (x.length) { lists.push(x); sources.push('Google News'); }
       } catch (err) {
         console.warn('[firms-news] Google News RSS failed:', err?.message || err);
       }
     }
+    return { lists, sources };
+  }
+  async function buildFireNews(lat, lon) {
+    let place = await fetchRegionalPlace({ latitude: lat, longitude: lon }).catch(() => null);
+    let nearby = false;
+    const near = nearestPlace(await loadPlaces(), lat, lon);
+    if (!place?.locality && near) {
+      // More / mimo obce: najbližšie mesto zo zoznamu Natural Earth (do 80 km).
+      place = { ...(place || {}), locality: near.name, label: `${near.name} (${near.km} km)` }; nearby = true;
+    }
+    let query = fireNewsQuery(place);
+    const base = { place: place ? { locality: place.locality, region: place.region, country: place.country, label: place.label, nearby } : null, query, source: 'GDELT DOC 2.0', fetchedAt: Date.now() };
+    if (!query) return { ...base, status: 'no_place', items: [], trustedDomains: [], confirmed: false };
+    let placeName = place?.locality || place?.region || null;
+    let { lists, sources } = await fetchFireArticles(query);
+    let verdict = fireNewsVerdict(filterSanctionedNews(mergeNewsItems(lists)).items, await trustedDomains(), Date.now(), placeName);
+    if (!verdict.items.some((i) => i.local) && near && !nearby && near.name !== place?.locality) {
+      // Malá obec bez správ (2026-10-07: požiar pri Staromlynivke, okupovaná časť Doneckej oblasti —
+      // k obci nič): druhý pokus s najbližším väčším mestom (Natural Earth, ≥ 100 000 obyv., do 80 km).
+      const cityQuery = fireNewsQuery({ locality: near.name, country: place?.country });
+      const second = await fetchFireArticles(cityQuery);
+      const v2 = fireNewsVerdict(filterSanctionedNews(mergeNewsItems(second.lists)).items, await trustedDomains(), Date.now(), near.name);
+      if (v2.items.some((i) => i.local)) {
+        ({ lists, sources } = second); verdict = v2; query = cityQuery; placeName = near.name;
+        base.query = cityQuery;
+        base.place = { ...base.place, nearCity: near.name, nearCityKm: near.km };
+      }
+    }
     if (!lists.length) return { ...base, status: 'unavailable', items: [], trustedDomains: [], confirmed: false };
-    const source = sources.join(' + ');
     const filtered = filterSanctionedNews(mergeNewsItems(lists));
-    const verdict = fireNewsVerdict(filtered.items, await trustedDomains(), Date.now(), place?.locality || place?.region || null);
-    return { ...base, source, status: verdict.items.length ? 'ready' : 'empty', items: verdict.items.slice(0, 12), trustedDomains: verdict.trustedDomains, confirmed: verdict.confirmed, dropped: filtered.dropped };
+    return { ...base, source: sources.join(' + '), status: verdict.items.length ? 'ready' : 'empty', items: verdict.items.slice(0, 12), trustedDomains: verdict.trustedDomains, confirmed: verdict.confirmed, dropped: filtered.dropped };
   }
   async function fireNewsFor(lat, lon) {
     const cell = fireNewsCellKey(lat, lon);
