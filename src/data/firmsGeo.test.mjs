@@ -69,3 +69,21 @@ test('okno geo detekcií sa počíta od najnovšej dostupnej detekcie (FIRMS me�
   assert.deepEqual(geo.map((g) => g.lat).sort(), [40, 41]);
   assert.deepEqual(collapseGeoDetections([], NOW), []);
 });
+
+test('ďalšie družice: MODIS (Aqua/Terra, spoľahlivosť 0..100), Landsat (bez FRP, M), senzor podľa kódu', async () => {
+  const { parseFirmsCsv } = await import('./firmsCsv.js');
+  const { sensorFromSatellite } = await import('./firmsAdapt.js');
+  const modis = parseFirmsCsv('latitude,longitude,brightness,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_t31,frp,daynight\n43.5361,39.58831,330.1,1.1,1,2026-10-06,1656,Terra,MODIS,82,6.1NRT,290,77.47,D\n');
+  assert.equal(modis[0].frp, 77.47); assert.equal(modis[0].satellite, 'Terra'); assert.equal(modis[0].brightness, 330.1);
+  const landsat = parseFirmsCsv('latitude,longitude,path,row,scan,track,acq_date,acq_time,satellite,confidence,daynight\n40.722322,-73.206394,108,212,756,2664,2026-10-06,232,L9,M,D\n');
+  assert.equal(landsat.length, 1, 'Landsat bez stĺpca frp sa načíta');
+  assert.equal(landsat[0].frp, 0);
+  const [f] = adaptFirmsRecords(landsat);
+  assert.equal(f.sensor, 'OLI'); assert.equal(f.confidence, 0.6);
+  assert.equal(adaptFirmsRecords(modis)[0].confidence, 0.82);
+  assert.deepEqual(['N', 'N20', 'N21', 'Aqua', 'Terra', 'L8', 'L9', 'Met12', 'G19FRP', 'Him9', 'X'].map(sensorFromSatellite), ['VIIRS', 'VIIRS', 'VIIRS', 'MODIS', 'MODIS', 'OLI', 'OLI', 'GEO', 'GEO', 'GEO', '']);
+  assert.equal(satelliteFullName('L9'), 'Landsat 9'); assert.equal(satelliteFullName('Terra'), 'Terra');
+  // karta: MODIS Terra
+  const card = buildSelectedFireCard({ ...adaptFirmsRecords(modis)[0], contextEntity: null, position: null }, Date.UTC(2026, 9, 6, 18, 0));
+  assert.match(card.details[0], /MODIS TERRA/); assert.equal(card.details[2], 'Terra 64m ago · pixel 1.1×1.0 km');
+});

@@ -31,7 +31,7 @@ export function adaptFirmsRecords(records) {
       brightness: finiteNumber(record.brightness),
       night: record.daynight === 'N',
       acqMs: parseAcquisitionMs(record.acqDate, record.acqTime, acqCache),
-      sensor: normalizeSensor(record.instrument),
+      sensor: normalizeSensor(record.instrument) || sensorFromSatellite(record.satellite),
       satellite: typeof record.satellite === 'string' ? record.satellite : '',
       // 2026-10-06: geostacionárne potvrdenie (firmsGeo.js) a veľkosť pixla pre kartu.
       geo: record.geo === true,
@@ -57,7 +57,7 @@ export function normalizeConfidence(value) {
   if (typeof value === 'string') {
     const text = value.trim().toLowerCase();
     if (text === 'low' || text === 'l') return 0.3;
-    if (text === 'nominal' || text === 'n') return 0.6;
+    if (text === 'nominal' || text === 'n' || text === 'medium' || text === 'm') return 0.6; // M = Landsat
     if (text === 'high' || text === 'h') return 0.9;
     const numeric = Number(text);
     return Number.isFinite(numeric) ? clamp01(numeric > 1 ? numeric / 100 : numeric) : 0;
@@ -104,6 +104,21 @@ export function normalizeSensor(value) {
   if (text.includes('VIIRS')) return 'VIIRS';
   if (text.includes('MODIS')) return 'MODIS';
   return text ? text.slice(0, 12) : '';
+}
+
+/**
+ * Senzor podľa kódu družice (2026-10-06): štíhly riadok /api/firms nenesie `instrument`.
+ * N/N20/N21 → VIIRS, Aqua/Terra → MODIS, L8/L9 → OLI (Landsat), Meteosat/GOES/Himawari → GEO.
+ * @param {*} satellite
+ * @returns {string}
+ */
+export function sensorFromSatellite(satellite) {
+  const s = String(satellite || '').trim().toUpperCase();
+  if (/^(N|N20|N21|NPP|NOAA-2[01])$/.test(s)) return 'VIIRS';
+  if (s === 'AQUA' || s === 'TERRA') return 'MODIS';
+  if (/^L\d$/.test(s)) return 'OLI';
+  if (/^(MET|G|HIM)\d/.test(s)) return 'GEO';
+  return '';
 }
 
 function clamp01(value) {

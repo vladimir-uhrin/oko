@@ -3221,7 +3221,10 @@ function shmuRadarProxy() {
 export function firmsProxy() {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
-  const SOURCES = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT'];
+  // 2026-10-06 (vlastník: „pridaj ďalší satelit, a keď aj viac“): + MODIS Terra/Aqua (1 km, celý svet;
+  // tanker pri Soči zachytil ako prvý — 1,5 h po vzplanutí) a Landsat 8/9 (30 m; FIRMS ho dáva len pre
+  // USA a Kanadu, bez FRP). S GOES_NRT (GOES, Himawari, Meteosat) je to celý katalóg FIRMS NRT.
+  const SOURCES = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT', 'MODIS_NRT', 'LANDSAT_NRT'];
   // Geostacionárne (GOES, Himawari, Meteosat — každých 10–15 min; src/data/firmsGeo.js), 2026-10-06:
   // „čo horí práve teraz“ — posledné 3 h, opakovania zlúčené, do 4 km od VIIRS len potvrdenie.
   const GEO_SOURCE = 'GOES_NRT';

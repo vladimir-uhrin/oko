@@ -114,7 +114,7 @@ const fires = createFirmsHeatmapLayer({
   id: 'local-firms',
   name: 'FIRMS Active Fires',
   icon: '▲',
-  source: 'NASA FIRMS · VIIRS + Meteosat/GOES · LIVE',
+  source: 'NASA FIRMS · VIIRS, MODIS, Landsat, Meteosat/GOES · LIVE',
 });
 
 export default [

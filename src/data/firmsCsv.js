@@ -17,7 +17,8 @@
  */
 
 /** Header fields that must all be present for a payload to count as FIRMS CSV. */
-const REQUIRED_HEADER_FIELDS = ['latitude', 'longitude', 'acq_date', 'acq_time', 'confidence', 'frp'];
+// `frp` nie je povinné (2026-10-06): LANDSAT_NRT ho nemá (30 m pixel, FRP sa nepočíta) — chýbajúce = 0.
+const REQUIRED_HEADER_FIELDS = ['latitude', 'longitude', 'acq_date', 'acq_time', 'confidence'];
 
 const HOUR_MS = 3600_000;
 /** Trailing window size for {@link filterTrailing24h}. */
