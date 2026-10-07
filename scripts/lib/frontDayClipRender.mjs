@@ -190,9 +190,11 @@ export async function photoZoomVideo(photo, { out, dur, ffmpeg = 'ffmpeg', fps =
   // Výrez v pomere okna záberu (CLIP_BOX), stred na bode priblíženia.
   const ratio = CLIP_BOX.w / CLIP_BOX.h;
   const cw = Math.min(W, Math.round(H * ratio)); const ch = Math.round(cw / ratio);
-  const f = photoPixel(photo.bbox, photo.focus.lon, photo.focus.lat, W, H);
+  // Bod priblíženia: súradnice (fotka zo satelitu s bbox) alebo podiel šírky a výšky (obyčajná fotka, {x: 0.5, y: 0.4}).
+  const focus = photo.focus || { x: 0.5, y: 0.5 };
+  const f = Number.isFinite(focus.lon) && photo.bbox ? photoPixel(photo.bbox, focus.lon, focus.lat, W, H) : { x: (focus.x ?? 0.5) * W, y: (focus.y ?? 0.5) * H };
   const cx = Math.round(Math.min(W - cw, Math.max(0, f.x - cw / 2))); const cy = Math.round(Math.min(H - ch, Math.max(0, f.y - ch / 2)));
-  const marks = (photo.marks || []).map((m) => ({ ...m, ...photoPixel(photo.bbox, m.lon, m.lat, W, H) }));
+  const marks = (photo.bbox ? photo.marks || [] : []).map((m) => ({ ...m, ...photoPixel(photo.bbox, m.lon, m.lat, W, H) }));
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const k = W / 2500; // veľkosť značiek podľa rozlíšenia
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${marks.map((m) => {

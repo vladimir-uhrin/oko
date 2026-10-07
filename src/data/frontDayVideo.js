@@ -18,7 +18,8 @@ export const FRONT_DAY_VIDEO = Object.freeze({
   leadS: Object.freeze({ opening: 0.15, overview: 0.45, dir: 0.85, clip: 0.3, air: 0.6, strike: 0.5, spot: 0.6, closing: 0.35 }),
   tailS: 0.35,
   minS: Object.freeze({ opening: 2.8, overview: 2.6, dir: 3.2, clip: 3.6, air: 3.0, strike: 3.4, spot: 3.2, closing: 3.0 }),
-  flyS: 1.4,
+  // Dosah (2026-10-07): kratšie prelety a výraznejší dolet kamery v každom zábere — pohyb drží dopozeranie.
+  flyS: 1.1,
   endMarginS: 0.6,
   fadeS: 0.35,
   /** Zvislý záber: výrez smeru je užší → kamera o toľko vyššie než rámovanie KARTY. */
@@ -105,14 +106,14 @@ export function frontDayPlan(ctx, lines, durations, opts = {}) {
       const shot = shots[i];
       const localS = vt - shot.start;
       const local = Math.min(1, Math.max(0, localS / Math.max(1e-9, shot.dur)));
-      const moves = shot.kind === 'dir' || shot.kind === 'air' || shot.kind === 'overview' || shot.kind === 'closing';
+      const moves = ['dir', 'air', 'overview', 'closing', 'strike', 'spot'].includes(shot.kind);
       const differs = shot.from.lon !== shot.to.lon || shot.from.lat !== shot.to.lat || shot.from.heightM !== shot.to.heightM;
       const flying = moves && differs && localS < o.flyS;
       let camera;
-      if (shot.kind === 'opening') camera = push(shot.to, local, 0.06);
+      if (shot.kind === 'opening') camera = push(shot.to, local, 0.16);
       else if (shot.kind === 'clip') camera = shot.to;
       else if (flying) camera = flyCamera(shot.from, shot.to, localS / o.flyS);
-      else camera = push(shot.to, (localS - (differs ? o.flyS : 0)) / Math.max(1e-9, shot.dur - (differs ? o.flyS : 0)), shot.kind === 'dir' ? 0.08 : 0.04);
+      else camera = push(shot.to, (localS - (differs ? o.flyS : 0)) / Math.max(1e-9, shot.dur - (differs ? o.flyS : 0)), shot.kind === 'dir' || shot.kind === 'spot' ? 0.14 : 0.1);
       const opening = shot.kind === 'opening' ? 1 - fade(localS - (shot.dur - o.fadeS)) : 0;
       const endCard = shot.kind === 'closing' ? fade(localS - 0.2) : 0;
       const main = shot.kind === 'opening' ? fade(localS - (shot.dur - o.fadeS)) : shot.kind === 'closing' ? 1 - fade(localS) : 1;

@@ -64,8 +64,8 @@ let music = null;
 if (!args.includes('--no-music')) {
   try {
     const lib = JSON.parse(fs.readFileSync(path.join(musicDir, 'tracks.json'), 'utf8'));
-    const t = lib.tracks[0];
-    music = { ...t, file: path.join(musicDir, t.file) };
+    // Celá knižnica — skladbu podľa nálady príbehu vyberie linka (pickTrack).
+    music = { library: lib.tracks.map((t) => ({ ...t, file: path.join(musicDir, t.file) })) };
   } catch { console.log('[front-day] hudba: tracks.json nie je — video bez hudby'); }
 }
 const started = Date.now();

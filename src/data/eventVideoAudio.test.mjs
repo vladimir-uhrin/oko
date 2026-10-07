@@ -119,3 +119,13 @@ test('titulky: dlhá veta sa delí prednostne na konci vety alebo pri pomlčke (
   assert.equal(cues[3].text, 'lietadlo je stále vo vzduchu.');
   assert.equal(cues[4].text, 'Potom 9 minút ticho. Žiadne údaje.', 'krátka veta sa nedelí, hoci má pauzu');
 });
+
+test('hudba podľa nálady príbehu, striedanie po dňoch, bez zhody ktorákoľvek', async () => {
+  const { pickTrack } = await import('./eventVideoAudio.js');
+  const tracks = [{ id: 'a', moods: ['tense'] }, { id: 'b', moods: ['tense'] }, { id: 'c', moods: ['somber'] }, { id: 'n', moods: ['news'] }];
+  assert.equal(pickTrack(tracks, { story: 'strike', day: '2026-10-07' }).id, 'c', 'útok s obeťami = vážna hudba');
+  const days = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05'].map((day) => pickTrack(tracks, { story: 'ru', day }).id);
+  assert.ok(days.every((id) => id === 'a' || id === 'b') && new Set(days).size === 2, `striedanie: ${days}`);
+  assert.equal(pickTrack([{ id: 'x' }], { story: 'strike' }).id, 'x');
+  assert.equal(pickTrack([], {}), null);
+});

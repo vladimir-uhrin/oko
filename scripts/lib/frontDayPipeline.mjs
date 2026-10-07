@@ -19,6 +19,7 @@ import { frontDayPlan, FRONT_DAY_FORMAT } from '../../src/data/frontDayVideo.js'
 import { DAY_CAPTION_STYLE } from '../../src/data/frontDayHud.js';
 import { burnCaptions, captureFailureSummary, measureSpeech, mixAudio, prepareVoice } from './eventVideoPipeline.mjs';
 import { loadFrontDay } from './frontDayData.mjs';
+import { pickTrack } from '../../src/data/eventVideoAudio.js';
 import { clipUsable, downloadClip, overlayClips, photoZoomVideo, probeClip, renderClipSegment } from './frontDayClipRender.mjs';
 
 /** Akčné zábery vo videu (vlastník: „max 2–3 krátke"); kandidátov z dát je viac, nepoužiteľné vypadnú. */
@@ -167,7 +168,10 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   // 8. zvuk
   onProgress('audio');
   const audioFile = path.join(workDir, 'zvuk.wav');
-  mixAudio({ placement: plan.placement, voiceFiles, totalS: plan.durationS, music, out: audioFile, ffmpeg });
+  // Knižnica skladieb → jedna podľa nálady príbehu, striedanie po dňoch.
+  const track = music?.library ? pickTrack(music.library, { story, day: model.day }) : music;
+  if (track) onProgress('music', { id: track.id || null });
+  mixAudio({ placement: plan.placement, voiceFiles, totalS: plan.durationS, music: track, out: audioFile, ffmpeg });
 
   // 9. titulky a výstupy
   onProgress('captions');

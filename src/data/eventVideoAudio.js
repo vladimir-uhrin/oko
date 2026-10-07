@@ -82,3 +82,21 @@ export function speechBounds(silenceLog, durationS, { minLeadS = 0.05 } = {}) {
   const pauses = spans.filter((s) => s[0] > lead && (!last || s !== last)).map(([a, b]) => ({ from: a, to: b }));
   return { lead, speechEnd, pauses };
 }
+
+/** Nálada hudby podľa príbehu videa (2026-10-07, vlastník: „hudba musí byť dobrá"). */
+export const STORY_MOOD = Object.freeze({ strike: 'somber', ru: 'tense', ua: 'tense', air: 'tense', spot: 'tense', clashes: 'news' });
+
+/**
+ * Výber skladby: zhodná nálada (`moods` v tracks.json), medzi nimi striedanie podľa dňa (nie stále tá istá);
+ * bez zhody ktorákoľvek. Pure.
+ * @param {Array<{id: string, moods?: string[]}>} tracks
+ */
+export function pickTrack(tracks, { story = 'clashes', day = '' } = {}) {
+  const list = (tracks || []).filter(Boolean);
+  if (!list.length) return null;
+  const mood = STORY_MOOD[story] || 'news';
+  const match = list.filter((tr) => (tr.moods || []).includes(mood));
+  const pool = match.length ? match : list;
+  const seed = [...String(day)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return pool[seed % pool.length];
+}
