@@ -63,6 +63,31 @@ export function ageBucket(nowMs, acqMs) {
 }
 export const AGE_ALPHA = Object.freeze({ fresh: 1, recent: 0.8, old: 0.5 });
 
+/** Zdroj proxy → skupina družíc pre stav vrstvy (2026-10-07). */
+const SOURCE_GROUP = Object.freeze({
+  VIIRS_NOAA20_NRT: 'VIIRS', VIIRS_NOAA21_NRT: 'VIIRS', VIIRS_SNPP_NRT: 'VIIRS',
+  MODIS_NRT: 'MODIS', LANDSAT_NRT: 'Landsat', GOES_NRT: 'Meteosat/GOES', SENTINEL3_SLSTR_FRP: 'Sentinel-3',
+});
+
+/**
+ * Ktoré skupiny družíc práve chýbajú (`sources` z /api/firms; ok: false). Skupina chýba, len keď
+ * zlyhali VŠETKY jej zdroje; `reused` = ukazujú sa posledné úspešné ohniská (staršie). Pure.
+ * @param {Array<{source: string, ok: boolean, reused?: boolean}>} sources
+ * @returns {Array<{group: string, reused: boolean}>}
+ */
+export function downSourceGroups(sources) {
+  const groups = new Map();
+  for (const s of Array.isArray(sources) ? sources : []) {
+    const group = SOURCE_GROUP[s?.source];
+    if (!group) continue;
+    const g = groups.get(group) || { ok: false, reused: false };
+    if (s.ok) g.ok = true;
+    if (s.reused) g.reused = true;
+    groups.set(group, g);
+  }
+  return [...groups].filter(([, g]) => !g.ok).map(([group, g]) => ({ group, reused: g.reused }));
+}
+
 /** Raw FIRMS satellite code → short display name (N = Suomi NPP). */
 export function satelliteShortName(satellite) {
   const s = String(satellite || '').trim().toUpperCase();

@@ -49,11 +49,26 @@ let _tileWatch = null;
 // unref: v Node (testy) nesmie interval držať proces nažive; v prehliadači je id číslo bez unref.
 const defaultTimers = () => ({ setInterval: (fn, ms) => { const id = setInterval(fn, ms); id?.unref?.(); return id; }, clearInterval: (id) => clearInterval(id) });
 let _timers = defaultTimers();
+/**
+ * Dobeh po načítaní (2026-10-07): keď sa glóbus práve dotiahol (tilesLoaded false → true), ostával na
+ * obrazovke posledný snímok SPRED dotiahnutia — čierny glóbus s hviezdami, kým sa nepohla kamera
+ * (zmerané: tilesLoaded true, mapa Stadia pripravená, obraz čierny; jeden requestRender ju ukázal).
+ * Po dotiahnutí sa preto vyžiadajú ešte TILE_SETTLE_FRAMES snímky.
+ */
+export const TILE_SETTLE_FRAMES = 2;
+let _settleLeft = 0;
 function tileWatchTick() {
   const scene = _viewer?.scene;
   if (!scene || !scene.requestRenderMode) return;
   const globe = scene.globe;
-  if (globe?.show && globe.tilesLoaded === false) scene.requestRender?.();
+  if (!globe?.show) return;
+  if (globe.tilesLoaded === false) {
+    _settleLeft = TILE_SETTLE_FRAMES;
+    scene.requestRender?.();
+  } else if (_settleLeft > 0) {
+    _settleLeft -= 1;
+    scene.requestRender?.();
+  }
 }
 function syncTileWatch(idle) {
   if (idle && !_tileWatch) _tileWatch = _timers.setInterval(tileWatchTick, TILE_WATCH_MS);
@@ -163,6 +178,7 @@ export function _resetRenderGovernorForTest() {
   _installed = false;
   _holds.clear();
   _recentRequests.length = 0;
+  _settleLeft = 0;
 }
 /** Test seam: je strážca dlaždíc aktívny? */
 export function _isTileWatchArmedForTest() { return _tileWatch !== null; }

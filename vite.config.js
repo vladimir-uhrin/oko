@@ -3228,6 +3228,10 @@ export function firmsProxy() {
   const STATUS_TTL_MS = 5 * 60_000;
   const REFRESH_RETRY_MS = 5 * 60_000;
   let lastRefreshFailAt = 0;
+  /** Limit jedného zdroja NASA (zdroje idú naraz, takže celá obnova trvá najviac toľko). */
+  const SOURCE_TIMEOUT_MS = 120_000;
+  /** @type {Map<string, {at: number, records: Array<object>}>} posledné úspešné ohniská zdroja */
+  const lastGood = new Map();
   // 2026-10-06 (vlastník: „pridaj ďalší satelit, a keď aj viac“): + MODIS Terra/Aqua (1 km, celý svet;
   // tanker pri Soči zachytil ako prvý — 1,5 h po vzplanutí) a Landsat 8/9 (30 m; FIRMS ho dáva len pre
   // USA a Kanadu, bez FRP). S GOES_NRT (GOES, Himawari, Meteosat) je to celý katalóg FIRMS NRT.
@@ -3409,9 +3413,9 @@ export function firmsProxy() {
    * (FIRMS reports errors as HTML/plain text, never CSV). Never log the URL —
    * it embeds the MAP_KEY.
    */
-  async function fetchSource(key, source, days = 2) {
+  async function fetchSource(key, source, days = 2, timeoutMs = SOURCE_TIMEOUT_MS) {
     const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(key)}/${source}/world/${days}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const records = parseFirmsCsv(await res.text());
     if (records === null) throw new Error('non-CSV upstream response');
@@ -3424,39 +3428,55 @@ export function firmsProxy() {
    * failed sources marked ok:false; total failure throws so the caller can
    * serve stale.
    */
+  /**
+   * Všetky zdroje NARAZ (2026-10-07: NASA odpovedala ~90 s na dopyt; za sebou to bolo 6 × 90 s a pri
+   * výpadku nič). Každý zdroj obstojí alebo zlyhá sám; zlyhaný zdroj dostane posledné úspešné ohniská
+   * (`reused`, kým nie sú staršie než 24 h — filtrované pri výdaji), ok: false ostane, aby klient
+   * vedel povedať, čo chýba. Sentinel-3 (Copernicus) od NASA nezávisí — snímok bez NASA nie je chyba.
+   */
   async function refreshUpstream(key) {
     const now = Date.now();
     const sources = [];
     const fires = [];
-    for (const source of SOURCES) {
-      try {
-        const records = filterTrailing24h(await fetchSource(key, source), now);
+    const geoDays = new Date(now).getUTCHours() < 3 ? 2 : 1; // deň 1 = „dnešný deň UTC“
+    if (sentinel3.enabled()) void sentinel3.sync(); // na pozadí; tento snímok dostane už stiahnuté granuly
+    const [results, geoResult] = await Promise.all([
+      Promise.allSettled(SOURCES.map((source) => fetchSource(key, source))),
+      fetchSource(key, GEO_SOURCE, geoDays).then((r) => ({ ok: true, r }), (err) => ({ ok: false, err })),
+    ]);
+    SOURCES.forEach((source, i) => {
+      const res = results[i];
+      if (res.status === 'fulfilled') {
+        const records = filterTrailing24h(res.value, now);
+        lastGood.set(source, { at: now, records });
         sources.push({ source, count: records.length, ok: true });
         fires.push(...records);
-      } catch (err) {
-        console.warn(`[firms-proxy] ${source} fetch failed:`, err?.message || err);
-        sources.push({ source, count: 0, ok: false });
+        return;
       }
-    }
-    if (!sources.some((s) => s.ok)) throw new Error('all FIRMS sources failed');
+      console.warn(`[firms-proxy] ${source} fetch failed:`, res.reason?.message || res.reason);
+      const prev = lastGood.get(source);
+      const reused = prev ? filterTrailing24h(prev.records, now) : [];
+      sources.push({ source, count: reused.length, ok: false, ...(reused.length ? { reused: true, reusedAt: prev.at } : {}) });
+      fires.push(...reused);
+    });
+    let s3Count = 0;
     if (sentinel3.enabled()) {
-      void sentinel3.sync(); // na pozadí; tento snímok dostane už stiahnuté granuly
       await sentinel3.loadDisk();
       const s3 = filterTrailing24h(sentinel3.fires(), now);
+      s3Count = s3.length;
       fires.push(...s3);
-      sources.push({ source: 'SENTINEL3_SLSTR_FRP', count: s3.length, ok: true, granules: sentinel3.status().granules });
+      sources.push({ source: 'SENTINEL3_SLSTR_FRP', count: s3.length, ok: s3.length > 0 || !sentinel3.status().error, granules: sentinel3.status().granules });
     }
-    // Geostacionárne: deň 1 = „dnešný deň UTC“ — tesne po polnoci by 3 h okno siahalo do včera.
-    try {
-      const days = new Date(now).getUTCHours() < 3 ? 2 : 1;
-      const geo = collapseGeoDetections(await fetchSource(key, GEO_SOURCE, days), now);
+    const nasaOk = sources.some((s) => s.ok && s.source !== 'SENTINEL3_SLSTR_FRP') || geoResult.ok;
+    if (!nasaOk && !s3Count && !fires.length) throw new Error('all FIRMS sources failed');
+    if (geoResult.ok) {
+      const geo = collapseGeoDetections(geoResult.r, now);
       const merged = mergeGeoIntoFires(fires, geo);
       sources.push({ source: GEO_SOURCE, count: geo.length, attached: merged.attached, standalone: merged.standalone, ok: true });
       return { at: now, sources, fires: merged.fires };
-    } catch (err) {
-      console.warn(`[firms-proxy] ${GEO_SOURCE} fetch failed:`, err?.message || err);
-      sources.push({ source: GEO_SOURCE, count: 0, ok: false });
     }
+    console.warn(`[firms-proxy] ${GEO_SOURCE} fetch failed:`, geoResult.err?.message || geoResult.err);
+    sources.push({ source: GEO_SOURCE, count: 0, ok: false });
     return { at: now, sources, fires };
   }
 

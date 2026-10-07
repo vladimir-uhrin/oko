@@ -9,6 +9,7 @@ import {
   _resetRenderGovernorForTest,
   _isTileWatchArmedForTest,
   TILE_WATCH_MS,
+  TILE_SETTLE_FRAMES,
 } from './renderGovernor.js';
 
 function makeViewer() {
@@ -113,11 +114,15 @@ test('strážca dlaždíc: v idle pýta snímok, kým glóbus nemá dlaždice; p
   intervals[0].fn();
   assert.equal(calls.requestRender, before + 1, 'nenačítané dlaždice → snímok');
   scene.globe.tilesLoaded = true;
+  // 2026-10-07: po dotiahnutí ešte TILE_SETTLE_FRAMES snímky — inak ostal posledný snímok spred
+  // dotiahnutia (čierny glóbus s hviezdami pri zapnutých požiaroch), kým sa nepohla kamera.
+  intervals[0].fn(); intervals[0].fn();
+  assert.equal(calls.requestRender, before + 1 + TILE_SETTLE_FRAMES, 'práve dotiahnuté → ešte 2 snímky');
   intervals[0].fn();
-  assert.equal(calls.requestRender, before + 1, 'načítané → nič');
+  assert.equal(calls.requestRender, before + 1 + TILE_SETTLE_FRAMES, 'potom → nič');
   scene.globe.tilesLoaded = false; scene.globe.show = false;
   intervals[0].fn();
-  assert.equal(calls.requestRender, before + 1, 'skrytý glóbus (fotoreál) → nič');
+  assert.equal(calls.requestRender, before + 1 + TILE_SETTLE_FRAMES, 'skrytý glóbus (fotoreál) → nič');
   holdContinuousRender('flights');
   assert.equal(_isTileWatchArmedForTest(), false, 'súvislý režim = strážca netreba');
   assert.equal(intervals[0].cleared, true);
@@ -127,5 +132,5 @@ test('strážca dlaždíc: v idle pýta snímok, kým glóbus nemá dlaždice; p
   scene.requestRenderMode = false; // niekto prepol mimo governora — tick nesmie pýtať snímky
   scene.globe.show = true;
   intervals[1].fn();
-  assert.equal(calls.requestRender, before + 2, 'len settling frame z release, tick v continuous mlčí');
+  assert.equal(calls.requestRender, before + 2 + TILE_SETTLE_FRAMES, 'len settling frame z release, tick v continuous mlčí');
 });

@@ -21,7 +21,9 @@ import {
 import { adaptFirmsRecords } from './firmsAdapt.js';
 import { fireAnchorHeight, warmFireAnchorFloors } from './fireAnchors.js';
 import { horizonOccluder } from './iconOrientation.js';
+import { clusterBadge, clusterFires, flamePath } from './firmsCluster.js';
 import {
+  downSourceGroups,
   accentForSeverity,
   AGE_ALPHA,
   ageBucket,
@@ -54,7 +56,10 @@ const REFRESH_INTERVAL_MS = 600_000;
 const LOD_LEVELS = [
   { id: 'global', minHeight: 9000000, mode: 'cells', gridDegrees: 2.0, maxCells: 1800, labelDistance: 12000000 },
   { id: 'regional', minHeight: 3000000, mode: 'cells', gridDegrees: 1.0, maxCells: 3600, labelDistance: 8500000 },
-  { id: 'local', minHeight: 750000, mode: 'detections', maxDetections: 2500, labelDistance: 4500000 },
+  // 2026-10-07 („vyzerá to ako hviezdna obloha“): zhluky s počtom — 750–3000 km mriežka 0,6°, 250–750 km
+  // 0,2°; jednotlivé ohniská až pod 250 km. Predtým jednotlivé už od 750 km — stovky svietiacich bodov.
+  { id: 'local', minHeight: 750000, mode: 'detections', cluster: 0.6, maxDetections: 1500, labelDistance: 4500000 },
+  { id: 'near', minHeight: 250000, mode: 'detections', cluster: 0.2, maxDetections: 2500, labelDistance: 2500000 },
   { id: 'close', minHeight: 0, mode: 'detections', maxDetections: 3000, labelDistance: 1800000 },
 ];
 const LOD_CHECK_MS = 650;
@@ -147,6 +152,8 @@ export function createFirmsHeatmapLayer({
   let _keyRequired = false;
   /** True when the proxy served a cached payload past TTL (upstream failing). */
   let _stale = false;
+  /** Skupiny družíc, ktoré pri poslednom snímku chýbali (downSourceGroups). */
+  let _down = [];
   /** Surfaced error string when the live fetch failed outright. */
   let _error = null;
   let _fires = [];
@@ -318,12 +325,17 @@ export function createFirmsHeatmapLayer({
       } else if (_lastUpdate) {
         loadingLabel = `LIVE · updated ${formatAgoMinutes(now - _lastUpdate)}`;
       }
+      // Poctivo, čo chýba (2026-10-07: NASA výpadok — Sentinel-3 ide ďalej): „· bez VIIRS (staršie)“.
+      if (_down.length && !_loading && !_keyRequired) {
+        loadingLabel += ` · ${t('firms.sources-down', { list: _down.map((d) => (d.reused ? `${d.group} ${t('firms.sources-older')}` : d.group)).join(', ') })}`;
+      }
       return {
         count: _count,
         cells: _cellCount,
         lastUpdate: _lastUpdate,
         loading: _loading,
         stale: _stale,
+        downSources: _down.map((d) => d.group),
         keyRequired: _keyRequired,
         error: _keyRequired ? t('firms.key-required') : (_stale ? staleText : _error),
         loadingLabel,
@@ -445,6 +457,7 @@ export function createFirmsHeatmapLayer({
       _keyRequired = false;
       _error = null;
       _stale = Boolean(payload?.stale);
+      _down = downSourceGroups(payload?.sources);
       const previousSelection = _selectedFire;
       _selectedFire = null;
       _fires = adaptFirmsRecords(payload?.fires);
@@ -672,10 +685,42 @@ export function createFirmsHeatmapLayer({
       candidates = _firesByFrp.slice(0, lod.maxDetections);
     }
 
-    _cellCount = candidates.length;
     _labelCandidates = [];
     _labelLodDistance = lod.labelDistance;
 
+    if (lod.cluster) {
+      // Zhluky: z celého výrezu (nie len prvých maxDetections ohnísk), najviac maxDetections značiek.
+      const inView = bounds ? _firesByFrp.filter((fire) => boundsContainPoint(bounds, fire.lat, fire.lon)) : _firesByFrp;
+      const clusters = clusterFires(inView, lod.cluster, lod.maxDetections);
+      _cellCount = clusters.length;
+      const nowMs = Date.now();
+      for (const c of clusters) {
+        const fire = c.strongest;
+        const position = firePosition(fire);
+        const cullPosition = fireCullPosition(fire);
+        const pickId = `firms-${fire.index}`; // klik na zhluk = jeho najsilnejšie ohnisko
+        _pickIndexById.set(pickId, fire);
+        _cullPositions.push(cullPosition);
+        const px = Math.min(30, frpPixelSize(c.maxFrp) + Math.min(8, Math.round(Math.log2(c.count) * 2)));
+        _billboards.add({
+          id: pickId,
+          position,
+          image: flameSprite(detectionColorStop(fire), sizeBucket(px), ageBucket(nowMs, c.newestMs), clusterBadge(c.count)),
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        });
+        _labelCandidates.push(c.count > 1
+          ? { position, cullPosition, fire: null, cell: { latCell: fire.lat, lonCell: fire.lon, count: c.count, maxFrp: c.maxFrp, newestAcqMs: c.newestMs, night: c.night }, accent: accentForSeverity(detectionColorStop(fire).name) }
+          : { position, cullPosition, fire, cell: null });
+      }
+      refreshHorizonCulling();
+      rebuildAmbientLabels();
+      refreshContextRegistrations(candidates.slice(0, CONTEXT_TOP_N));
+      return;
+    }
+
+    _cellCount = candidates.length;
     for (const fire of candidates) {
       const coreSize = frpPixelSize(fire.frp);
       const position = firePosition(fire);
@@ -686,7 +731,7 @@ export function createFirmsHeatmapLayer({
       _billboards.add({
         id: pickId,
         position,
-        image: glowSprite(detectionColorStop(fire), sizeBucket(coreSize), ageBucket(Date.now(), fire.geoSeenMs > fire.acqMs ? fire.geoSeenMs : fire.acqMs)),
+        image: flameSprite(detectionColorStop(fire), sizeBucket(coreSize), ageBucket(Date.now(), fire.geoSeenMs > fire.acqMs ? fire.geoSeenMs : fire.acqMs), ''),
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -1297,6 +1342,66 @@ function sizeBucket(coreSize) {
  * @param {number} corePx - Bucketed core size in pixels.
  * @returns {string} PNG data URL.
  */
+/**
+ * Plameň (2026-10-07, namiesto rozmazaného kruhu): obrys z firmsCluster.flamePath, výplň od farby
+ * sily (dole) po žltobielu (hore), svetlé jadro, tmavý okraj kvôli svetlým mapám, slabá žiara;
+ * sýtosť podľa veku (AGE_ALPHA); pri zhluku odznak s počtom vpravo hore. Cache podľa kľúča.
+ */
+function flameSprite(stop, corePx, age = 'fresh', badge = '') {
+  const key = `flame:${stop.name}:${corePx}:${age}:${badge}`;
+  const cached = glowSpriteCache.get(key);
+  if (cached) return cached;
+  const flame = Math.round(corePx * 1.5);
+  const pad = Math.round(corePx * 0.35);
+  const badgeW = badge ? Math.max(15, 6 * badge.length + 7) : 0;
+  const badgeH = 13;
+  const width = Math.max(flame + pad * 2, badge ? Math.round(flame * 0.55) + pad + badgeW : 0);
+  const height = flame + pad * 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+  // Testovacie plátna (bez kreslenia ciest) dostanú pôvodný kruh — správanie vrstvy je rovnaké.
+  if (typeof ctx.beginPath !== 'function' || typeof ctx.quadraticCurveTo !== 'function') return glowSprite(stop, corePx, age);
+  const alpha = AGE_ALPHA[age] ?? 1;
+  const rgb = [stop.color.red, stop.color.green, stop.color.blue].map((v) => Math.round(v * 255)).join(',');
+  const ox = pad; const oy = pad;
+  // slabá žiara pod plameňom
+  const glow = ctx.createRadialGradient(ox + flame / 2, oy + flame * 0.7, 0, ox + flame / 2, oy + flame * 0.7, flame * 0.75);
+  glow.addColorStop(0, `rgba(${rgb},${0.35 * alpha})`);
+  glow.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
+  const trace = (scale, dx, dy) => {
+    ctx.beginPath();
+    for (const [op, ...a] of flamePath(flame * scale)) {
+      if (op === 'M') ctx.moveTo(dx + a[0], dy + a[1]);
+      else ctx.quadraticCurveTo(dx + a[0], dy + a[1], dx + a[2], dy + a[3]);
+    }
+    ctx.closePath();
+  };
+  trace(1, ox, oy);
+  const fill = ctx.createLinearGradient(0, oy + flame, 0, oy);
+  fill.addColorStop(0, `rgba(${rgb},${alpha})`);
+  fill.addColorStop(1, `rgba(255,236,150,${alpha})`);
+  ctx.fillStyle = fill; ctx.fill();
+  ctx.lineWidth = 1; ctx.strokeStyle = `rgba(40,12,0,${0.75 * alpha})`; ctx.stroke();
+  // jadro
+  trace(0.45, ox + flame * 0.275, oy + flame * 0.5);
+  ctx.fillStyle = `rgba(255,250,220,${0.9 * alpha})`; ctx.fill();
+  if (badge) {
+    // odznak sedí na pravom dolnom boku plameňa (nie vedľa — z diaľky by sa od plameňa oddelil)
+    const bx = ox + Math.round(flame * 0.55); const by = oy + flame - badgeH; const bh = badgeH;
+    ctx.fillStyle = 'rgba(11,22,34,0.92)';
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, badgeW, bh, 6) : ctx.rect(bx, by, badgeW, bh); ctx.fill();
+    ctx.strokeStyle = `rgba(${rgb},0.9)`; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(badge, bx + badgeW / 2, by + bh / 2 + 0.5);
+  }
+  const url = canvas.toDataURL('image/png');
+  glowSpriteCache.set(key, url);
+  return url;
+}
+
 function glowSprite(stop, corePx, age = 'fresh') {
   const key = `${stop.name}:${corePx}:${age}`;
   const alpha = AGE_ALPHA[age] ?? 1;

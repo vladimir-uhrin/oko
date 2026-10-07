@@ -67,3 +67,55 @@ test('/api/firms: zastaraná cache sa vráti hneď (NASA visí), obnova beží n
     delete process.env.FIRMS_CACHE_DIR; delete process.env.FIRMS_MAP_KEY;
   }
 });
+
+test('obnova: zdroje NASA naraz; zlyhaný zdroj dostane posledné úspešné ohniská (reused); výpadok všetkého s cache nie je chyba', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oko-firms-par-'));
+  process.env.FIRMS_CACHE_DIR = cacheDir;
+  process.env.FIRMS_MAP_KEY = 'test-key';
+  const realFetch = globalThis.fetch; const realNow = Date.now;
+  let offset = 0;
+  Date.now = () => realNow() + offset;
+  const t = new Date(realNow());
+  const d = t.toISOString().slice(0, 10); const hhmm = t.toISOString().slice(11, 16).replace(':', '');
+  const csv = 'latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,bright_ti5,frp,daynight\n' + `10,20,300,0.4,0.4,${d},${hhmm},N,VIIRS,n,2.0NRT,290,5,D\n`;
+  let viirsUp = true; const starts = [];
+  globalThis.fetch = (url) => {
+    const u = String(url);
+    if (u.includes('mapkey_status')) return Promise.resolve(new Response('{}'));
+    starts.push(realNow());
+    if (viirsUp && u.includes('/VIIRS_SNPP_NRT/')) return new Promise((r) => setTimeout(() => r(new Response(csv)), 60));
+    return new Promise((r) => setTimeout(() => r(new Response('Invalid MAP_KEY', { status: 500 })), 60));
+  };
+  try {
+    const h = handlerOf(firmsProxy());
+    let j = JSON.parse((await call(h, '/')).body);
+    assert.equal(j.count, 1, 'prvá obnova: VIIRS SNPP prišiel');
+    assert.ok(Math.max(...starts) - Math.min(...starts) < 50, 'všetky zdroje sa pýtali naraz, nie za sebou');
+    const snpp = j.sources.find((s) => s.source === 'VIIRS_SNPP_NRT');
+    assert.equal(snpp.ok, true);
+    // o 31 min: cache zastaraná → vráti sa hneď, obnova na pozadí; NASA celá dole
+    viirsUp = false; offset = 31 * 60_000;
+    j = JSON.parse((await call(h, '/')).body);
+    assert.equal(j.stale, true); assert.equal(j.count, 1);
+    await new Promise((r) => setTimeout(r, 300)); // obnova na pozadí dobehne
+    j = JSON.parse((await call(h, '/')).body);
+    assert.equal(j.stale, false, 'obnova bez NASA prešla — nie je to chyba, máme posledné ohniská');
+    assert.equal(j.count, 1);
+    const again = j.sources.find((s) => s.source === 'VIIRS_SNPP_NRT');
+    assert.equal(again.ok, false); assert.equal(again.reused, true); assert.equal(again.count, 1);
+  } finally {
+    globalThis.fetch = realFetch; Date.now = realNow;
+    delete process.env.FIRMS_CACHE_DIR; delete process.env.FIRMS_MAP_KEY;
+  }
+});
+
+test('stav vrstvy: chýbajúce skupiny družíc (skupina chýba až keď zlyhajú všetky jej zdroje)', async () => {
+  const { downSourceGroups } = await import('./firmsLabels.js');
+  assert.deepEqual(downSourceGroups([
+    { source: 'VIIRS_NOAA20_NRT', ok: false, reused: true }, { source: 'VIIRS_SNPP_NRT', ok: false },
+    { source: 'MODIS_NRT', ok: false }, { source: 'LANDSAT_NRT', ok: true },
+    { source: 'GOES_NRT', ok: false }, { source: 'SENTINEL3_SLSTR_FRP', ok: true }, { source: 'X', ok: false },
+  ]), [{ group: 'VIIRS', reused: true }, { group: 'MODIS', reused: false }, { group: 'Meteosat/GOES', reused: false }]);
+  assert.deepEqual(downSourceGroups([{ source: 'VIIRS_NOAA20_NRT', ok: false }, { source: 'VIIRS_SNPP_NRT', ok: true }]), []);
+  assert.deepEqual(downSourceGroups(null), []);
+});
