@@ -60,7 +60,8 @@ export async function loadMeteoMapData(doFetch) {
 }
 
 /**
- * Pobrežia, hranice a mená miest ako jedna PrimitiveCollection.
+ * Pobrežia a hranice ako jedna PrimitiveCollection. Mená miest a dedín kreslí meteoPlaceLabels.js
+ * (pribúdajú s priblížením a neprekrývajú sa); cityLabelPlan ostáva ako spoločné pravidlo pre veľké mestá.
  * @param {{coast: Array, borders: Array, places: Array}} data places = normalizované mestá (loadPlaces)
  */
 export function createMeteoMapOverlay({ coast = [], borders = [], places = [] } = {}) {
@@ -76,24 +77,7 @@ export function createMeteoMapOverlay({ coast = [], borders = [], places = [] } 
     const flat = ringToFlat(line, METEO_OVERLAY_HEIGHT_M, false);
     if (flat.length >= 6) lines.add({ positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat), width: BORDER_STYLE.width, material: borderMaterial });
   }
-  const labels = new Cesium.LabelCollection();
-  for (const city of cityLabelPlan(places)) {
-    labels.add({
-      position: Cesium.Cartesian3.fromDegrees(city.lon, city.lat, PLACE_POINT_HEIGHT_M),
-      text: city.name,
-      font: '500 12px Inter, "Segoe UI", system-ui, sans-serif',
-      fillColor: Cesium.Color.WHITE,
-      outlineColor: Cesium.Color.fromCssColorString('rgba(0,0,0,0.78)'),
-      outlineWidth: 3,
-      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-      horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
-      verticalOrigin: Cesium.VerticalOrigin.CENTER,
-      pixelOffset: new Cesium.Cartesian2(7, 0),
-      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, city.maxDistance),
-    });
-  }
   root.add(lines);
-  root.add(labels);
   root.show = true;
   return root;
 }

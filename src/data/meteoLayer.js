@@ -31,6 +31,7 @@ import { PLACE_POINT_HEIGHT_M, createPlaceHoverCard, createPlacePoints, loadPlac
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
 import { createMeteoMapOverlay, loadMeteoMapData } from './meteoMapOverlay.js';
+import { createPlaceLabelManager } from './meteoPlaceLabels.js';
 
 export { METEO_LAYER_ID };
 export const METEO_CATALOG_URL = '/api/meteo/catalog';
@@ -313,6 +314,7 @@ export function createMeteoLayer({
   hoverFactory = createPlaceHoverCard,
   mapOverlayFactory = createMeteoMapOverlay,
   mapDataLoader = loadMeteoMapData,
+  placeLabelsFactory = createPlaceLabelManager,
   doc = globalThis.document,
   win = globalThis.window,
   requestFrame = (cb) => globalThis.requestAnimationFrame(cb),
@@ -347,7 +349,8 @@ export function createMeteoLayer({
   let _placesSettled = false; // načítanie miest skončilo (aj chybou)
   let _placePoints = null; // Cesium.PointPrimitiveCollection
   let _mapData = null; // { coast, borders } (null = nenačítané) — mapa nad poľom ako na Windy
-  let _mapOverlay = null; // Cesium.PrimitiveCollection: pobrežia, hranice, mená miest
+  let _mapOverlay = null; // Cesium.PrimitiveCollection: pobrežia, hranice
+  let _placeLabels = null; // mená miest a dedín, pribúdajú s priblížením (meteoPlaceLabels.js)
   let _hover = null; // DOM karta mesta (meteoPlaces.js)
   let _hoverTimer = null;
   let _leaveTimer = null;
@@ -382,6 +385,8 @@ export function createMeteoLayer({
   function clearMapOverlay() {
     if (_mapOverlay && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_mapOverlay);
     _mapOverlay = null;
+    try { _placeLabels?.destroy(); } catch { /* scéna už zanikla */ }
+    _placeLabels = null;
   }
 
   /**
@@ -402,6 +407,8 @@ export function createMeteoLayer({
       _mapOverlay = mapOverlayFactory({ coast: _mapData.coast, borders: _mapData.borders, places: _places || [] });
       _mapOverlay.show = _heightFade > 0.02;
       _viewer.scene.primitives.add(_mapOverlay);
+      _placeLabels = placeLabelsFactory({ viewer: _viewer, doFetch, bigPlaces: _places || [], bigVisibleUntilM: placeVisibleUntilM, requestRender: () => governorRequestRender('meteo') });
+      _placeLabels?.setVisible(_heightFade > 0.02);
       governorRequestRender('meteo');
     } catch (error) {
       console.warn('[Data:Meteo] map overlay failed:', error?.message || error);
@@ -743,6 +750,7 @@ export function createMeteoLayer({
     if (_drape) { _drape.material.uniforms.alpha = fieldAlphaNow(); _drape.primitive.show = _enabled && fade > 0.02; }
     if (_isolines) _isolines.show = fade > 0.02;
     if (_mapOverlay) _mapOverlay.show = fade > 0.02;
+    _placeLabels?.setVisible(fade > 0.02);
     _particles?.setVisible(fade > 0.05);
   }
 
