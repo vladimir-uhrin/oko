@@ -15,6 +15,7 @@ import { t } from './i18n.js';
 import { trackEvent } from './analytics.js';
 import { buildShareTargets } from './shareTargets.js';
 import { embedSnippet, embedUrlFromAppUrl } from './embedMode.js';
+import { uploadShareVideo } from './shareVideo.js';
 
 export const SHARE_API_URL = '/api/share';
 const PANEL_STATE_KEY = '__okoSharePanel';
@@ -67,6 +68,9 @@ function ensurePanel(doc, win, nav, translate, toast) {
   const status = el(doc, 'div', { className: 'oko-share-status', text: translate('share.preparing') });
   const urlBox = el(doc, 'div', { className: 'oko-share-url' });
   const note = el(doc, 'p', { className: 'oko-share-note' });
+  // Video do náhľadu (2026-10-07, shareVideo.js): stav po nahrávaní 6 s klipu — má ho odkaz, alebo ostal obrázok.
+  const videoNote = el(doc, 'p', { className: 'oko-share-note oko-share-video-note' });
+  videoNote.hidden = true;
   const copyLink = el(doc, 'button', { text: translate('share.copy-link'), attrs: { type: 'button' } });
   const copyImage = el(doc, 'button', { text: translate('share.copy-image'), attrs: { type: 'button' } });
   const native = el(doc, 'button', { text: translate('share.native'), attrs: { type: 'button' } });
@@ -79,7 +83,7 @@ function ensurePanel(doc, win, nav, translate, toast) {
   const networks = el(doc, 'div', { className: 'oko-share-networks' });
   const root = el(doc, 'section', { attrs: { id: 'oko-share', role: 'dialog', 'aria-modal': 'true', 'aria-label': translate('share.title') } }, [
     el(doc, 'div', { className: 'oko-share-head' }, [title, closeButton]),
-    preview, status, urlBox, note, actions, networksLabel, networks,
+    preview, status, urlBox, note, videoNote, actions, networksLabel, networks,
   ]);
   root.hidden = true;
   const host = doc.body || doc.documentElement;
@@ -135,8 +139,20 @@ function ensurePanel(doc, win, nav, translate, toast) {
   });
 
   Object.assign(ui, {
-    root, backdrop, preview, status, urlBox, note, copyLink, copyImage, native, download, embedCode, retry, networks, show, hide,
+    root, backdrop, preview, status, urlBox, note, videoNote, copyLink, copyImage, native, download, embedCode, retry, networks, show, hide,
     lastOptions: null,
+    /** Krok toku pod náhľadom (nahrávam video, posielam…). */
+    setStatus(text) {
+      status.hidden = false;
+      status.textContent = text;
+    },
+    /** Náhľad hneď po snímke — nahrávanie videa trvá sekundy a človek nech vidí, čo zdieľa. */
+    showPreview(snapshot) {
+      if (!snapshot?.jpegDataUrl) return;
+      preview.setAttribute('src', snapshot.jpegDataUrl);
+      preview.src = snapshot.jpegDataUrl;
+      preview.hidden = false;
+    },
     reset() {
       ui.session = null;
       preview.hidden = true;
@@ -145,6 +161,8 @@ function ensurePanel(doc, win, nav, translate, toast) {
       urlBox.textContent = '';
       note.textContent = '';
       note.className = 'oko-share-note';
+      videoNote.textContent = '';
+      videoNote.hidden = true;
       copyImage.hidden = true;
       native.hidden = true;
       download.hidden = true;
@@ -168,6 +186,9 @@ function ensurePanel(doc, win, nav, translate, toast) {
       note.textContent = translate(session.shortLink ? 'share.short-link' : 'share.long-link');
       // Dlhý odkaz nemá obrázok v náhľade sietí — zvýrazni a ponúkni nový pokus.
       note.className = session.shortLink ? 'oko-share-note' : 'oko-share-note oko-share-note-warn';
+      const videoText = session.video ? translate('share.video-ready') : (session.videoTried ? translate('share.video-failed') : '');
+      videoNote.textContent = videoText;
+      videoNote.hidden = !videoText;
       retry.hidden = Boolean(session.shortLink);
       for (const target of buildShareTargets({ url: session.url, text: session.copy.text, title: session.copy.title })) {
         networks.appendChild(el(doc, 'a', { text: target.label, attrs: { href: target.href, target: '_blank', rel: 'noopener noreferrer', 'data-network': target.id } }));
@@ -184,9 +205,12 @@ function ensurePanel(doc, win, nav, translate, toast) {
  * @param {() => ({ href: string, hash: string }|null)} options.buildLink
  * @param {(() => Promise<object|null>)|null} [options.captureSnapshot]
  * @param {typeof publishShareSnapshot} [options.publish]
+ * @param {(() => Promise<{ blob: Blob, type: string, width: number, height: number, durationMs: number }|null>)|null} [options.recordVideo]
+ *   krátke živé video do náhľadu (shareVideo.js); null = prehliadač nenahráva, odkaz ostáva s obrázkom
+ * @param {typeof uploadShareVideo} [options.uploadVideo]
  * @param {{ title: string, description: string, text: string }} [options.copy]
  * @param {(message: string) => void} [options.toast]
- * @returns {Promise<{ url: string, longUrl: string, shortLink: object|null, snapshot: object|null, copy: object }|null>}
+ * @returns {Promise<{ url: string, longUrl: string, shortLink: object|null, snapshot: object|null, copy: object, video: object|null, videoTried: boolean }|null>}
  */
 export async function openSharePanel({
   document: doc = globalThis.document,
@@ -195,6 +219,8 @@ export async function openSharePanel({
   buildLink,
   captureSnapshot = null,
   publish = publishShareSnapshot,
+  recordVideo = null,
+  uploadVideo = uploadShareVideo,
   copy = { title: 'OKO', description: '', text: 'OKO' },
   toast = () => {},
   translate = t,
@@ -205,7 +231,7 @@ export async function openSharePanel({
     return null;
   }
   const ui = ensurePanel(doc, win, nav, translate, toast);
-  ui.lastOptions = { document: doc, window: win, navigator: nav, buildLink, captureSnapshot, publish, copy, toast, translate };
+  ui.lastOptions = { document: doc, window: win, navigator: nav, buildLink, captureSnapshot, publish, recordVideo, uploadVideo, copy, toast, translate };
   ui.reset();
   ui.show();
   let snapshot = null;
@@ -225,8 +251,28 @@ export async function openSharePanel({
     });
     if (!shortLink) console.warn('[share] short link unavailable — /api/share failed, falling back to the long link');
   }
-  const session = { url: shortLink?.url || built.href, longUrl: built.href, shortLink, snapshot, copy };
-  trackEvent('share_create', { short_link: Boolean(shortLink) });
+  // Video do náhľadu až PO krátkom odkaze a PRED ukázaním odkazu: Facebook si stránku odkazu
+  // pri prvom vložení uloží do cache — keby človek odkaz vložil skôr, náhľad by ostal bez videa.
+  let video = null;
+  let videoTried = false;
+  if (shortLink?.id && typeof recordVideo === 'function') {
+    videoTried = true;
+    ui.showPreview(snapshot);
+    ui.setStatus(translate('share.video-recording'));
+    try {
+      const clip = await recordVideo();
+      if (clip?.blob) {
+        ui.setStatus(translate('share.video-uploading'));
+        video = await uploadVideo({ id: shortLink.id, ...clip });
+      }
+    } catch (error) {
+      console.warn('[share] preview video failed:', error?.message || error);
+      video = null;
+    }
+    if (!video) console.warn('[share] preview video unavailable — the link keeps the picture');
+  }
+  const session = { url: shortLink?.url || built.href, longUrl: built.href, shortLink, snapshot, copy, video, videoTried };
+  trackEvent('share_create', { short_link: Boolean(shortLink), video: Boolean(video) });
   ui.render(session);
   if (!snapshot) toast(translate('share.image-failed'));
   else if (!shortLink) toast(translate('share.upload-failed'));

@@ -155,6 +155,19 @@ export function renderSharePage({ record, origin }) {
   // Živý rámček (2026-10-06, vlastník: „aby to nebol obrázok, ale live"): človek ostáva na stránke
   // odkazu a vidí živú appku v tom istom stave (src/embedMode.js); siete čítajú OG obrázok ako doteraz.
   const embedUrlAttr = escapeHtml(embedUrlFromAppUrl(appUrl, { title: record.title }));
+  // Video do náhľadu (2026-10-07): og:video s MP4 cez https + rozmery = podľa dokumentácie Facebooku
+  // „spôsobilé na prehrávanie priamo vo feede" (nie zaručené); Discord a Telegram MP4 prehrajú.
+  // X zostáva pri obrázku (player card chce schválenie domény). Typ stránky je potom video.other.
+  const video = record.video && record.video.type === 'video/mp4' ? record.video : null;
+  const videoUrl = escapeHtml(`${base}/s/${id}.mp4`);
+  const videoTags = video ? `
+<meta property="og:video" content="${videoUrl}" />
+<meta property="og:video:url" content="${videoUrl}" />
+<meta property="og:video:secure_url" content="${videoUrl}" />
+<meta property="og:video:type" content="video/mp4" />
+<meta property="og:video:width" content="${Number(video.width) || 1200}" />
+<meta property="og:video:height" content="${Number(video.height) || 630}" />
+<meta property="video:duration" content="${Math.max(1, Math.round((Number(video.durationMs) || 0) / 1000))}" />` : '';
   return `<!DOCTYPE html>
 <html lang="sk">
 <head>
@@ -163,7 +176,7 @@ export function renderSharePage({ record, origin }) {
 <meta name="robots" content="noindex" />
 <title>${title}</title>
 <meta name="description" content="${description}" />
-<meta property="og:type" content="website" />
+<meta property="og:type" content="${video ? 'video.other' : 'website'}" />
 <meta property="og:site_name" content="OKO" />
 <meta property="og:title" content="${title}" />
 <meta property="og:description" content="${description}" />
@@ -173,7 +186,7 @@ export function renderSharePage({ record, origin }) {
 <meta property="og:image:type" content="image/jpeg" />
 <meta property="og:image:width" content="${Number(record.width) || 1200}" />
 <meta property="og:image:height" content="${Number(record.height) || 630}" />
-<meta property="og:image:alt" content="${title}" />
+<meta property="og:image:alt" content="${title}" />${videoTags}
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="${title}" />
 <meta name="twitter:description" content="${description}" />
@@ -193,8 +206,54 @@ export function renderSharePage({ record, origin }) {
 `;
 }
 
+// ── Video do náhľadu odkazu (2026-10-07, src/shareVideo.js) ───────────────────────────────────────
+/** Najväčšia nahrávka z prehliadača (6 s pri 2,5 Mb/s ≈ 2 MB; rezerva pre VP8 a vyššie DPR). */
+export const SHARE_VIDEO_MAX_BYTES = 6 * 1024 * 1024;
+export const SHARE_VIDEO_MIN_BYTES = 2_000;
+export const SHARE_VIDEO_MIN_MS = 500;
+export const SHARE_VIDEO_MAX_MS = 10_000;
+/** Video sa dá pripojiť len k čerstvému zdieľaniu — id nie je tajné, okno zatvára zneužitie starých odkazov. */
+export const SHARE_VIDEO_ATTACH_WINDOW_MS = 15 * 60_000;
+/** Rozpracované nahrávky (`<id>.upload.*`) staršie než hodina sú po páde prevodu na zmazanie. */
+export const SHARE_UPLOAD_STALE_MS = 60 * 60_000;
+
+/** Typ videa z prvých bajtov (pure): WebM/Matroska (EBML) alebo MP4 (ftyp); inak null. */
+export function sniffVideoType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) return 'video/webm';
+  if (buffer.toString('latin1', 4, 8) === 'ftyp') return 'video/mp4';
+  return null;
+}
+
 /**
- * Súborové úložisko zdieľaní: `<dir>/<id>.json` (záznam) + `<dir>/<id>.jpg`.
+ * Over nahrávku (pure): veľkosť, skutočný typ podľa bajtov zhodný s deklarovaným, rozmery a dĺžka v medziach.
+ * @returns {{ ok: true, value: { type: string, ext: string, width: number, height: number, durationMs: number, bytes: number } } | { ok: false, error: string }}
+ */
+export function validateVideoUpload({ buffer, contentType, width, height, durationMs } = {}) {
+  const bytes = buffer?.length || 0;
+  if (bytes < SHARE_VIDEO_MIN_BYTES) return { ok: false, error: 'video_too_small' };
+  if (bytes > SHARE_VIDEO_MAX_BYTES) return { ok: false, error: 'too_large' };
+  const sniffed = sniffVideoType(buffer);
+  if (!sniffed) return { ok: false, error: 'video_type' };
+  const declared = String(contentType || '').split(';')[0].trim().toLowerCase();
+  if (declared && declared !== 'application/octet-stream' && declared !== sniffed) return { ok: false, error: 'video_type' };
+  const w = Number(width);
+  const h = Number(height);
+  const ms = Number(durationMs);
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 200 || h < 200 || w > 1920 || h > 1920) return { ok: false, error: 'video_size' };
+  if (!Number.isFinite(ms) || ms < SHARE_VIDEO_MIN_MS || ms > SHARE_VIDEO_MAX_MS) return { ok: false, error: 'video_duration' };
+  return { ok: true, value: { type: sniffed, ext: sniffed === 'video/mp4' ? 'mp4' : 'webm', width: w, height: h, durationMs: Math.round(ms), bytes } };
+}
+
+/** Smie sa k záznamu pripojiť video? Len bez videa a do 15 min od vzniku (pure). */
+export function canAttachVideo(record, nowMs = Date.now()) {
+  if (!record || record.video) return false;
+  const createdAt = Number(record.createdAt);
+  return Number.isFinite(createdAt) && nowMs - createdAt <= SHARE_VIDEO_ATTACH_WINDOW_MS && nowMs >= createdAt - 60_000;
+}
+
+/**
+ * Súborové úložisko zdieľaní: `<dir>/<id>.json` (záznam) + `<dir>/<id>.jpg` (+ `<id>.mp4` video do náhľadu).
  * @param {{ dir: string, now?: () => number, fsImpl?: typeof fs, retentionDays?: number, idFactory?: () => string }} options
  */
 export function createShareStore({
@@ -213,6 +272,8 @@ export function createShareStore({
 
   function jsonPath(id) { return path.join(dir, `${id}.json`); }
   function imagePath(id) { return path.join(dir, `${id}.jpg`); }
+  function videoPath(id) { return path.join(dir, `${id}.mp4`); }
+  function uploadPath(id, ext = 'webm') { return path.join(dir, `${id}.upload.${ext === 'mp4' ? 'mp4' : 'webm'}`); }
 
   /** Zmaž záznamy staršie než retencia; vracia počet zmazaných záznamov. */
   function prune(nowMs = now()) {
@@ -222,8 +283,13 @@ export function createShareStore({
     try { names = fsImpl.readdirSync(dir); } catch { return 0; }
     const cutoff = nowMs - retentionDays * 86_400_000;
     for (const name of names) {
-      if (!name.endsWith('.json')) continue;
       const full = path.join(dir, name);
+      // Rozpracovaná nahrávka po páde prevodu (video do náhľadu): po hodine preč.
+      if (/\.upload\.(webm|mp4)$/.test(name)) {
+        try { if (nowMs - fsImpl.statSync(full).mtimeMs > SHARE_UPLOAD_STALE_MS) fsImpl.unlinkSync(full); } catch { /* už preč */ }
+        continue;
+      }
+      if (!name.endsWith('.json')) continue;
       let createdAt = null;
       let keep = false;
       try {
@@ -239,6 +305,7 @@ export function createShareStore({
       if (createdAt >= cutoff) continue;
       try { fsImpl.unlinkSync(full); } catch { /* už preč */ }
       try { fsImpl.unlinkSync(path.join(dir, name.replace(/\.json$/, '.jpg'))); } catch { /* bez obrázka */ }
+      try { fsImpl.unlinkSync(path.join(dir, name.replace(/\.json$/, '.mp4'))); } catch { /* bez videa */ }
       removed += 1;
     }
     return removed;
@@ -247,7 +314,20 @@ export function createShareStore({
   return {
     dir,
     imagePath,
+    videoPath,
+    uploadPath,
     prune,
+    /**
+     * Pripoj k záznamu video do náhľadu (po prevode na MP4 do videoPath(id)); vráti nový záznam,
+     * alebo null, keď záznam nie je alebo video pripojiť nesmie (canAttachVideo).
+     */
+    attachVideo(id, { width, height, durationMs, bytes } = {}) {
+      const record = this.read(id);
+      if (!record || !canAttachVideo(record, now())) return null;
+      const updated = { ...record, video: { type: 'video/mp4', width: Number(width) || 0, height: Number(height) || 0, durationMs: Number(durationMs) || 0, bytes: Number(bytes) || 0, attachedAt: now() } };
+      fsImpl.writeFileSync(jsonPath(id), JSON.stringify(updated), 'utf8');
+      return updated;
+    },
     /**
      * Ulož overenú hodnotu z validateSharePayload; vráti záznam (bez obrázka).
      */
@@ -279,6 +359,7 @@ export function createShareStore({
       let removed = false;
       try { fsImpl.unlinkSync(jsonPath(id)); removed = true; } catch { /* nebol */ }
       try { fsImpl.unlinkSync(imagePath(id)); } catch { /* bez obrázka */ }
+      try { fsImpl.unlinkSync(videoPath(id)); } catch { /* bez videa */ }
       return removed;
     },
     /** Záznam podľa id alebo null (aj pre nevalidné id). */

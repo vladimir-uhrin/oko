@@ -137,7 +137,7 @@ export function cookieDeletionStrings(name, host = '') {
 export const TRACKED_EVENTS = Object.freeze({
   layer_toggle: ['layer_id', 'enabled'],
   card_open: ['kind'],
-  share_create: ['short_link'],
+  share_create: ['short_link', 'video'],
   scene_open: ['scene_type', 'scene_id'],
   mobile_section: ['section'],
   // Kód na vloženie živého rámčeka (2026-10-06, sharePanel.js) — bez parametrov.

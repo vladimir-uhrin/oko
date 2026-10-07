@@ -61,12 +61,16 @@ import {
 } from './src/data/aishubVesselsCore.js';
 import {
   SHARE_BODY_MAX_BYTES,
+  SHARE_VIDEO_MAX_BYTES,
+  canAttachVideo,
   clientKeyFromRequest,
   createShareStore,
   originFromRequest,
   renderSharePage,
   validateSharePayload,
+  validateVideoUpload,
 } from './src/shareStore.js';
+import { convertShareVideo, resolveFfmpegPath, sendVideoFile } from './src/shareVideoServer.js';
 import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAirframesMessage } from './src/data/acarsMessages.js';
 import { parseNetcdf3 } from './src/data/netcdf3.js';
 import { METEO_FIELDS, forecastSteps } from './src/data/meteoField.js';
@@ -5911,6 +5915,10 @@ function imageProxy() {
  */
 function sharePlugin() {
   const limiter = makeRateLimiter({ windowMs: 3600_000, max: 30, globalMax: 300 });
+  // Video do náhľadu odkazu (2026-10-07, src/shareVideo.js + shareVideoServer.js): vlastný limit
+  // a najviac dva prevody ffmpeg naraz — jeden prevod 6 s klipu trvá pár sekúnd procesora.
+  const videoLimiter = makeRateLimiter({ windowMs: 3600_000, max: 30, globalMax: 300 });
+  let converting = 0;
   let store = null;
   const getStore = () => {
     if (!store) store = createShareStore({ dir: path.join(process.cwd(), '.gev-cache', 'share') });
@@ -5921,9 +5929,65 @@ function sharePlugin() {
     res.end(body);
   };
   const sendJson = (res, status, payload, extra = {}) => send(res, status, 'application/json; charset=utf-8', JSON.stringify(payload), { 'Cache-Control': 'no-store', ...extra });
+  /**
+   * POST /api/share/<id>/video?w=&h=&ms= — nahrávka z prehliadača (WebM alebo MP4, do 6 MB) k čerstvému
+   * zdieľaniu (do 15 min od vzniku, bez videa): ffmpeg → <id>.mp4, záznam dostane `video` a stránka
+   * odkazu og:video. Bez ffmpeg 503, nepodarený prevod 502 — odkaz ostáva s obrázkom.
+   */
+  async function handleVideoUpload(req, res, id, query) {
+    if (!videoLimiter(clientKeyFromRequest(req))) { sendJson(res, 429, { error: 'rate_limited' }, { 'Retry-After': '60' }); return; }
+    const videoStore = getStore();
+    const record = videoStore.read(id);
+    if (!record) { sendJson(res, 404, { error: 'not_found' }); return; }
+    if (!canAttachVideo(record)) { sendJson(res, 409, { error: 'video_closed' }); return; }
+    let buffer;
+    try {
+      buffer = await readRequestBodyCapped(req, SHARE_VIDEO_MAX_BYTES);
+    } catch (error) {
+      const tooLarge = error?.code === 'BODY_TOO_LARGE';
+      sendJson(res, tooLarge ? 413 : 400, { error: tooLarge ? 'too_large' : 'bad_body' });
+      return;
+    }
+    const checked = validateVideoUpload({ buffer, contentType: req.headers['content-type'], width: query.get('w'), height: query.get('h'), durationMs: query.get('ms') });
+    if (!checked.ok) { sendJson(res, 400, { error: checked.error }); return; }
+    if (converting >= 2) { sendJson(res, 503, { error: 'busy' }, { 'Retry-After': '10' }); return; }
+    converting += 1;
+    const uploadPath = videoStore.uploadPath(id, checked.value.ext);
+    const outputPath = videoStore.videoPath(id);
+    try {
+      fs.writeFileSync(uploadPath, buffer);
+      const result = await convertShareVideo({
+        ffmpegPath: resolveFfmpegPath(process.env),
+        inputPath: uploadPath,
+        outputPath,
+        width: checked.value.width,
+        height: checked.value.height,
+        maxSeconds: Math.ceil(checked.value.durationMs / 1000) + 1,
+      });
+      if (!result.ok) {
+        try { fs.unlinkSync(outputPath); } catch { /* nevznikol */ }
+        console.warn(`[share] ${id} video ${result.error}: ${result.detail || ''}`);
+        sendJson(res, result.error === 'ffmpeg_missing' ? 503 : 502, { error: result.error });
+        return;
+      }
+      const updated = videoStore.attachVideo(id, { width: checked.value.width, height: checked.value.height, durationMs: checked.value.durationMs, bytes: result.bytes });
+      if (!updated) { sendJson(res, 409, { error: 'video_closed' }); return; }
+      const origin = originFromRequest(req);
+      console.log(`[share] ${id} video ${buffer.length} B → mp4 ${result.bytes} B`);
+      sendJson(res, 200, { id, video: `${origin}/s/${id}.mp4`, width: checked.value.width, height: checked.value.height, durationMs: checked.value.durationMs });
+    } catch (error) {
+      console.warn('[share] video failed:', error?.message || error);
+      sendJson(res, 500, { error: 'store_failed' });
+    } finally {
+      converting -= 1;
+      try { fs.unlinkSync(uploadPath); } catch { /* nebol */ }
+    }
+  }
   function install(middlewares) {
     middlewares.use('/api/share', async (req, res) => {
       if (req.method !== 'POST') { sendJson(res, 405, { error: 'method_not_allowed' }); return; }
+      const videoRoute = /^\/([A-Za-z0-9]{6,32})\/video(?:\?(.*))?$/.exec(req.url || '');
+      if (videoRoute) { await handleVideoUpload(req, res, videoRoute[1], new URLSearchParams(videoRoute[2] || '')); return; }
       if (!limiter(clientKeyFromRequest(req))) { sendJson(res, 429, { error: 'rate_limited' }, { 'Retry-After': '60' }); return; }
       let body;
       try {
@@ -5948,6 +6012,14 @@ function sharePlugin() {
     middlewares.use('/s', (req, res, next) => {
       let pathname = '/';
       try { pathname = new URL(req.url || '/', 'http://localhost').pathname; } catch { next(); return; }
+      // Video do náhľadu: /s/<id>.mp4 s Range (prehrávače aj crawler Facebooku žiadajú rozsahy), nemenné ako obrázok.
+      const videoMatch = /^\/([A-Za-z0-9]{6,32})\.mp4$/.exec(pathname);
+      if (videoMatch) {
+        const videoRecord = getStore().read(videoMatch[1]);
+        if (!videoRecord?.video) { send(res, 404, 'text/plain; charset=utf-8', 'Not Found', { 'Cache-Control': 'no-store' }); return; }
+        sendVideoFile({ req, res, filePath: getStore().videoPath(videoMatch[1]) });
+        return;
+      }
       const match = /^\/([A-Za-z0-9]{6,32})(\.jpg)?$/.exec(pathname);
       if (!match) { next(); return; }
       const [, id, wantsImage] = match;

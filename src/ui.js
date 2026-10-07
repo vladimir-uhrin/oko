@@ -93,6 +93,7 @@ import {
 } from './shareSubject.js';
 import { openSharePanel } from './sharePanel.js';
 import { captureShareSnapshot, snapshotStamp } from './shareSnapshot.js';
+import { canRecordShareVideo, recordShareVideo } from './shareVideo.js';
 import { buildAttributionLine, buildShareCopy } from './shareTargets.js';
 import { currentLanguage } from './i18n.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
@@ -10819,13 +10820,14 @@ export class StyleManager {
       whenMs,
       lang,
     });
+    const stamp = snapshotStamp(whenMs, lang);
+    const attribution = buildAttributionLine(document.getElementById('cesium-credits')?.textContent);
     await openSharePanel({
       buildLink: () => this.shareLinkManager.buildShareUrl({ nowMs: whenMs }),
-      captureSnapshot: () => captureShareSnapshot({
-        viewer: this.viewer,
-        stamp: snapshotStamp(whenMs, lang),
-        attribution: buildAttributionLine(document.getElementById('cesium-credits')?.textContent),
-      }),
+      captureSnapshot: () => captureShareSnapshot({ viewer: this.viewer, stamp, attribution }),
+      // Krátke živé video do náhľadu odkazu (2026-10-07, shareVideo.js): len kde prehliadač nahráva
+      // plátno (MediaRecorder + captureStream); inak ostáva obrázok.
+      recordVideo: canRecordShareVideo() ? () => recordShareVideo({ viewer: this.viewer, stamp, attribution }) : null,
       copy,
       toast: (message) => this._showToast(message),
     });

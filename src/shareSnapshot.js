@@ -12,10 +12,10 @@ import {
   SHARE_IMAGE_MAX_BYTES,
   SHARE_IMAGE_WIDTH,
   dataUrlByteLength,
-  fitCover,
 } from './shareTargets.js';
+// Skladanie snímku (plátna, rám, pás) je v shareFrame.js — to isté kreslí aj krátke video (shareVideo.js).
+import { collectShareSources, drawShareFrame } from './shareFrame.js';
 
-const STRIP_HEIGHT_PX = 36;
 const JPEG_QUALITIES = [0.82, 0.7, 0.58, 0.45];
 
 /**
@@ -38,13 +38,10 @@ export async function captureShareSnapshot({
   decorate = null,
 } = {}) {
   if (!doc?.createElement) return null;
-  const sources = [];
-  const cesiumCanvas = viewer?.canvas || viewer?.scene?.canvas || null;
-  if (cesiumCanvas) {
+  const sources = collectShareSources({ viewer, document: doc });
+  if (viewer?.canvas || viewer?.scene?.canvas) {
     try { await renderFreshCesiumFrame(viewer); } catch { /* starší snímok je stále obrázok */ }
-    sources.push(cesiumCanvas);
   }
-  for (const overlay of doc.querySelectorAll?.('#world-overlay-root canvas') || []) sources.push(overlay);
   if (!sources.length) return null;
 
   const target = doc.createElement('canvas');
@@ -52,33 +49,7 @@ export async function captureShareSnapshot({
   target.height = height;
   const ctx = target.getContext('2d');
   if (!ctx) return null;
-  ctx.fillStyle = '#06101a';
-  ctx.fillRect(0, 0, width, height);
-  for (const source of sources) {
-    const sw = Number(source.width) || 0;
-    const sh = Number(source.height) || 0;
-    if (!sw || !sh) continue;
-    const crop = fitCover(sw, sh, width, height);
-    try { ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, height); } catch { /* prázdne alebo cudzie plátno */ }
-  }
-
-  // Voliteľný rám (KARTA K5: titulok, legenda, mapka) sa zapečie nad pás atribúcie.
-  if (typeof decorate === 'function') {
-    try { decorate(ctx, width, height - STRIP_HEIGHT_PX); } catch { /* rám je najlepšia snaha */ }
-  }
-
-  // Pás s pečiatkou a atribúciou.
-  ctx.fillStyle = 'rgba(4, 10, 16, 0.72)';
-  ctx.fillRect(0, height - STRIP_HEIGHT_PX, width, STRIP_HEIGHT_PX);
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#dff3fb';
-  ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
-  if (stamp) ctx.fillText(stamp, 16, height - STRIP_HEIGHT_PX / 2);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(223, 243, 251, 0.88)';
-  ctx.font = '13px system-ui, "Segoe UI", sans-serif';
-  if (attribution) ctx.fillText(attribution, width - 16, height - STRIP_HEIGHT_PX / 2);
+  drawShareFrame(ctx, { sources, width, height, stamp, attribution, decorate });
 
   let jpegDataUrl = '';
   for (const quality of JPEG_QUALITIES) {
