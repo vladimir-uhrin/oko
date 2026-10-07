@@ -108,7 +108,7 @@ test('čipy: TEPLOTA prepne pole (kanál R, rez temp), ČASTICE vypne častice; 
   await new Promise((r) => setTimeout(r, 10));
   assert.ok(calls.images.some((u) => u.includes('var=temp&time=2026-09-08T18')));
   assert.equal(calls.primitives[0].material.uniforms.channel, 0);
-  assert.equal(layer.getRowControls().legend[0].label, '-40 °C');
+  assert.equal(layer.getRowControls().legend[0].label, '-55 °C', 'škála teploty ako Windy od −55 °C');
   assert.ok(!layer.getRowControls().chips.some((c) => c.id.startsWith('level-')),
     'pri teplote sa výber hladiny neponúka — hladiny sú rozmer vetra, nie samostatné polia');
   layer.setParams({ particles: false });

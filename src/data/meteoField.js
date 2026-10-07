@@ -46,7 +46,7 @@ export const METEO_FIELDS = Object.freeze({
     vertCoord: 2,
     unit: '°C',
     convert: { scale: 1, offset: -273.15 },
-    rampRange: [-40, 45],
+    rampRange: [-55, 47],
     channel: 0,
     decode: [TEMP_RANGE[0], TEMP_RANGE[1]],
     alpha: 0.82,
@@ -143,6 +143,7 @@ export function isWindField(fieldId) {
  */
 export function rampStopsFor(fieldId) {
   if (METEO_RAMPS[fieldId]) return METEO_RAMPS[fieldId];
+  if (fieldId === 'gust') return METEO_RAMPS.wind; // nárazy = škála vetra (Windy)
   if (!isWindField(fieldId)) return null;
   // Zastávky vetra sú v m/s (0…45). Na výškovej hladine treba tú istú paletu
   // ROZTIAHNUŤ na jej rozsah — inak by všetko nad 45 m/s spadlo na poslednú
@@ -182,38 +183,36 @@ function isobaricWind(id, levelPa, speedMax) {
 }
 
 /**
- * Rampy v identite OKO: tmavá noc → azúrová (--accent #39d0ff) → jantárová → červená.
- * Zastávky [hodnota, hex]. Vietor v m/s, teplota v °C.
+ * Rampy ako na Windy (2026-10-07, vlastník: „chcem to ako na štýl Windy"; predtým identita OKO
+ * azúrová → jantárová). Sýta viacfarebná škála, aby sa sila javu dala prečítať na prvý pohľad;
+ * celý svet je zafarbený a orientáciu dávajú pobrežia, hranice a mená miest NAD poľom
+ * (meteoMapOverlay.js) — bez nich (09-20) taká výplň zaliala planétu jednou farbou.
+ * Zastávky [hodnota, hex, alfa?]; alfa default 1 (zrážky a oblačnosť sú bez javu priehľadné).
+ * Vietor v m/s, teplota v °C, tlak v hPa, zrážky v mm/h, oblačnosť v %.
  */
 export const METEO_RAMPS = Object.freeze({
-  // Vietor v identite OKO: modrá → azúrová (--accent #39d0ff) → jantárová → biela.
-  // TRETÍ prvok je ALFA — v pokoji takmer priehľadná, aby bolo vidieť podklad
-  // (pobrežia, popisy miest), pri búrke plná. Rovnaký princíp ako zrážky nižšie.
   wind: Object.freeze([
-    [0, '#155e86', 0.18], [3, '#1a8ab0', 0.38], [6, '#25b6dc', 0.55], [10, '#39d0ff', 0.70],
-    [14, '#9be6ff', 0.80], [19, '#ffd15c', 0.88], [24, '#ff9a2b', 0.94], [30, '#ff4a3b', 1],
-    [37, '#ff2f6b', 1], [45, '#ffffff', 1],
+    [0, '#6271b7'], [1, '#39619f'], [3, '#4a94a9'], [5, '#4d8d7b'],
+    [7, '#53a553'], [9, '#359f35'], [11, '#a79d51'], [13, '#9f7f3a'],
+    [15, '#a16c5c'], [17, '#813a4e'], [19, '#af5088'], [21, '#754a93'],
+    [24, '#6d61a3'], [27, '#44698d'], [29, '#5c9098'], [36, '#7d44a5'],
+    [45, '#e7d7d7'],
   ]),
   temp: Object.freeze([
-    [-40, '#3b1c6e'], [-25, '#2c4aa8'], [-12, '#1f8fc4'], [-4, '#39d0ff'], [4, '#7fe2c8'],
-    [12, '#e8e77a'], [20, '#ffc04a'], [28, '#ff7a2b'], [36, '#ff3b3b'], [45, '#8a0c1e'],
+    [-55, '#caacc3'], [-40, '#a24691'], [-25, '#8f59a9'], [-15, '#9ddbd9'],
+    [-8, '#6abfb5'], [-4, '#64a6bd'], [0, '#5d85c6'], [1, '#447d63'],
+    [10, '#809318'], [21, '#f3b704'], [30, '#e85319'], [47, '#470e00'],
   ]),
-  // Tlak: tlakové níže fialovo-modré, výše jantárovo-červené, 1013 tyrkysová.
   pressure: Object.freeze([
-    [960, '#3b1c6e'], [980, '#2c4aa8'], [995, '#1f8fc4'], [1005, '#39d0ff'], [1013, '#7fe2c8'],
-    [1020, '#e8e77a'], [1030, '#ffc04a'], [1040, '#ff7a2b'], [1050, '#ff3b3b'],
+    [960, '#003492'], [980, '#005a94'], [1000, '#007592'], [1010, '#1a8c93'],
+    [1020, '#67a29b'], [1030, '#9bb7ac'], [1040, '#b6b6b6'], [1050, '#b0ae98'],
   ]),
-  // Zrážky a oblačnosť majú ALFU (tretí prvok): bez zrážok je mapa priehľadná.
   precip: Object.freeze([
-    [0, '#0a1622', 0], [0.2, '#12708f', 0.35], [1, '#1fb0d8', 0.7], [3, '#39d0ff', 0.85],
-    [6, '#9be6ff', 0.9], [10, '#ffd15c', 0.95], [15, '#ff9a2b', 1], [20, '#ff4a3b', 1],
+    [0, '#6f6f6f', 0], [0.2, '#3c74a0', 0.55], [0.6, '#3c74a0', 0.85], [2, '#3ba1a1', 0.9],
+    [6, '#3ba13d', 0.95], [10, '#82a13b', 1], [15, '#a1a13b', 1], [20, '#a13b3b', 1],
   ]),
   clouds: Object.freeze([
-    [0, '#0a1622', 0], [20, '#5d7383', 0.25], [50, '#9fb1bd', 0.55], [80, '#dbe4ea', 0.8], [100, '#ffffff', 0.92],
-  ]),
-  gust: Object.freeze([
-    [0, '#123c5a'], [5, '#155e86'], [10, '#1a8ab0'], [15, '#25b6dc'], [20, '#39d0ff'],
-    [25, '#9be6ff'], [30, '#ffd15c'], [36, '#ff9a2b'], [42, '#ff4a3b'], [45, '#ffffff'],
+    [0, '#2a2f36', 0], [20, '#6d757d', 0.35], [50, '#a3aab1', 0.6], [80, '#d6dade', 0.82], [100, '#f4f5f6', 0.92],
   ]),
 });
 

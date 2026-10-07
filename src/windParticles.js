@@ -223,10 +223,9 @@ out vec4 o;
 void main() {
   if (v_vis < 0.5) discard;
   vec4 c = texture(u_ramp, vec2(v_speed_t, 0.5));
-  // Sýta farba rampy (takmer žiadne bielenie), alfa rastie s vetrom: bezvetrie
-  // sotva vidno, búrka svieti. Pole pod čiarami je v pokoji priehľadné, takže
-  // sa neprebíjajú s výplňou — preto smú byť jasné.
-  o = vec4(mix(c.rgb, vec3(1.0), 0.05), 0.35 + 0.65 * v_speed_t);
+  // Biele prúdnice ako na Windy (2026-10-07): pole pod nimi je plne zafarbené tou istou
+  // škálou, farebná čiara by v ňom zanikla. Alfa rastie s vetrom — bezvetrie jemne, búrka jasne.
+  o = vec4(mix(c.rgb, vec3(1.0), 0.88), 0.4 + 0.5 * v_speed_t);
 }`;
 
 function compile(gl, type, src) {

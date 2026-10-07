@@ -48,7 +48,7 @@ test('shadery: WGS84 ECEF, zahodenie odvrátenej pologule, GFS mriežka 0..360°
   // Plynulosť: RK2 (vietor v strede kroku), zrod vo výreze, jas podľa vetra, rýchlosť podľa výšky.
   assert.match(src, /vec2 mid = advance\(pos, w1, u_dt \* 0\.5\);\s*vec2 w = windAt\(mid\);/, 'RK2');
   assert.match(src, /uniform vec4 u_spawn;/);
-  assert.match(src, /o = vec4\(mix\(c\.rgb, vec3\(1\.0\), 0\.05\), 0\.35 \+ 0\.65 \* v_speed_t\);/, 'Windy pass: sýta rampa, alfa 0,35 + 0,65 × rýchlosť');
+  assert.match(src, /o = vec4\(mix\(c\.rgb, vec3\(1\.0\), 0\.88\), 0\.4 \+ 0\.5 \* v_speed_t\);/, '2026-10-07 ako Windy: biele prúdnice nad plne zafarbeným poľom, alfa 0,4 + 0,5 × rýchlosť');
   assert.match(src, /simSecondsPerFrame\(cam\.height\)/);
   assert.match(src, /gl\.drawArrays\(gl\.LINES, 0, active \* 2\);/);
   // Plátno (2D) aj Columbus: projekcia (0, lon·R, lat·R) resp. Mercator, bez okluzie; morph = prázdne plátno.

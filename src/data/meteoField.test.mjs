@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  METEO_FIELDS, METEO_RAMPS, TEMP_RANGE, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE,
+  METEO_FIELDS, METEO_RAMPS, rampStopsFor, TEMP_RANGE, WIND_COMPONENT_RANGE, WIND_SPEED_RANGE,
   dequantize, forecastSteps, hexToRgb, nearestStepIndex, normalizeCatalog, quantize,
   rampCss, rampLegend, rampRgbaTable, runLabel, sliceUrl, stepLabel,
   METEO_FIELD_ORDER, WIND_LEVELS, isWindField, windLevelOf,
@@ -18,18 +18,25 @@ test('kvantizácia: 0..255 nad rozsahom, NaN → 0, späť s presnosťou rozsahu
   assert.ok(Math.abs(dequantize(quantize(12.3, WIND_SPEED_RANGE), WIND_SPEED_RANGE) - 12.3) < 0.15);
 });
 
-test('rampy OKO: azúrová v strede vetra, tabuľka 256×4, CSS gradient, legenda každou druhou zastávkou', () => {
-  assert.deepEqual(hexToRgb('#39d0ff'), [57, 208, 255]);
+test('rampy ako Windy (2026-10-07): sýta viacfarebná škála vetra, nárazy = vietor, tabuľka 256×4, CSS gradient, legenda', () => {
   const table = rampRgbaTable(METEO_RAMPS.wind, METEO_FIELDS.wind.rampRange);
   assert.equal(table.length, 256 * 4);
-  assert.deepEqual(Array.from(table.subarray(0, 3)), hexToRgb('#155e86'), 'začiatok = prvá zastávka (Windy pass: bezvetrie modré, čitateľné na tmavom podklade)');
-  assert.deepEqual(Array.from(table.subarray(255 * 4, 255 * 4 + 3)), [255, 255, 255], 'koniec = biela');
-  const mid = Math.round((10 / 45) * 255);
-  assert.deepEqual(Array.from(table.subarray(mid * 4, mid * 4 + 3)).map((v) => Math.round(v / 8)), hexToRgb('#39d0ff').map((v) => Math.round(v / 8)), '10 m/s ≈ azúrová --accent');
-  assert.match(rampCss(METEO_RAMPS.temp, METEO_FIELDS.temp.rampRange), /^linear-gradient\(90deg, #3b1c6e 0\.0%, .*#8a0c1e 100\.0%\)$/);
+  assert.deepEqual(Array.from(table.subarray(0, 3)), [98, 113, 183], 'bezvetrie = modrofialová ako na Windy');
+  assert.equal(table[3], 255, 'vietor bez alfy v rampe — celý svet zafarbený, orientáciu dáva mapa nad poľom');
+  const at = (ms) => Array.from(table.subarray(Math.round((ms / 45) * 255) * 4, Math.round((ms / 45) * 255) * 4 + 3));
+  const [r9, g9, b9] = at(9);
+  assert.ok(g9 > r9 + 60 && g9 > b9 + 60, `9 m/s je zelená (${r9},${g9},${b9})`);
+  const [r17, g17, b17] = at(17);
+  assert.ok(r17 > g17 + 40, `17 m/s je do červena (${r17},${g17},${b17})`);
+  assert.deepEqual(Array.from(table.subarray(255 * 4, 255 * 4 + 3)), [231, 215, 215], 'búrka do svetla');
+  assert.equal(rampStopsFor('gust'), METEO_RAMPS.wind, 'nárazy majú škálu vetra');
+  assert.match(rampCss(METEO_RAMPS.temp, METEO_FIELDS.temp.rampRange), /^linear-gradient\(90deg, #caacc3 0\.0%, .*#470e00 100\.0%\)$/);
+  const temp = rampRgbaTable(METEO_RAMPS.temp, METEO_FIELDS.temp.rampRange);
+  const t21 = Math.round(((21 + 55) / 102) * 255) * 4;
+  assert.ok(temp[t21] > 200 && temp[t21 + 2] < 60, '21 °C je žltá');
   const legend = rampLegend(METEO_RAMPS.wind, 'm/s');
-  assert.equal(legend.length, 5);
-  assert.deepEqual(legend[0], { color: '#155e86', label: '0 m/s', count: '' });
+  assert.deepEqual(legend[0], { color: '#6271b7', label: '0 m/s', count: '' });
+  assert.equal(METEO_RAMPS.precip[0][2], 0, 'bez zrážok priehľadné');
 });
 
 test('kroky predpovede: od teraz zaokrúhleného na 3 h, 25 krokov po +72 h; najbližší krok; URL rezu', () => {

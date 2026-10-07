@@ -30,6 +30,7 @@ import { levelForAltitude, windRelativeToTrack } from './flightWind.js';
 import { PLACE_POINT_HEIGHT_M, createPlaceHoverCard, createPlacePoints, loadPlaces, nearestWithinRadius, placeVisibleUntilM, sampleGrid } from './meteoPlaces.js';
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
+import { createMeteoMapOverlay, loadMeteoMapData } from './meteoMapOverlay.js';
 
 export { METEO_LAYER_ID };
 export const METEO_CATALOG_URL = '/api/meteo/catalog';
@@ -310,6 +311,8 @@ export function createMeteoLayer({
   timelineFactory = createMeteoTimeline,
   pointsFactory = createPlacePoints,
   hoverFactory = createPlaceHoverCard,
+  mapOverlayFactory = createMeteoMapOverlay,
+  mapDataLoader = loadMeteoMapData,
   doc = globalThis.document,
   win = globalThis.window,
   requestFrame = (cb) => globalThis.requestAnimationFrame(cb),
@@ -341,7 +344,10 @@ export function createMeteoLayer({
   let _isolines = null; // Cesium.PrimitiveCollection alebo null
   let _grid = null; // mriežka aktuálneho poľa (izočiary + hodnoty pri mestách)
   let _places = null; // zoznam miest (null = nenačítané)
+  let _placesSettled = false; // načítanie miest skončilo (aj chybou)
   let _placePoints = null; // Cesium.PointPrimitiveCollection
+  let _mapData = null; // { coast, borders } (null = nenačítané) — mapa nad poľom ako na Windy
+  let _mapOverlay = null; // Cesium.PrimitiveCollection: pobrežia, hranice, mená miest
   let _hover = null; // DOM karta mesta (meteoPlaces.js)
   let _hoverTimer = null;
   let _leaveTimer = null;
@@ -370,6 +376,37 @@ export function createMeteoLayer({
   function clearPlaces() {
     if (_placePoints && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_placePoints);
     _placePoints = null;
+    clearMapOverlay();
+  }
+
+  function clearMapOverlay() {
+    if (_mapOverlay && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_mapOverlay);
+    _mapOverlay = null;
+  }
+
+  /**
+   * Pobrežia, hranice a mená miest NAD poľom (meteoMapOverlay.js, 2026-10-07 „ako Windy“) —
+   * drapéria podklad prekryje, bez nich by plne zafarbený svet nemal orientáciu. Dáta raz, lenivo;
+   * stavia sa až s miestami, aby mená sedeli pri bodkách.
+   */
+  function ensureMapOverlay() {
+    if (!_viewer || !_enabled || _mapOverlay) return;
+    if (_mapData === null) {
+      _mapData = false; // načítava sa
+      Promise.resolve(mapDataLoader(doFetch)).then((data) => { _mapData = data || { coast: [], borders: [] }; if (_enabled) ensureMapOverlay(); })
+        .catch((error) => { _mapData = { coast: [], borders: [] }; console.warn('[Data:Meteo] map overlay failed:', error?.message || error); });
+      return;
+    }
+    if (!_mapData || _places === null || (Array.isArray(_places) && !_places.length && !_placesSettled)) return;
+    try {
+      _mapOverlay = mapOverlayFactory({ coast: _mapData.coast, borders: _mapData.borders, places: _places || [] });
+      _mapOverlay.show = _heightFade > 0.02;
+      _viewer.scene.primitives.add(_mapOverlay);
+      governorRequestRender('meteo');
+    } catch (error) {
+      console.warn('[Data:Meteo] map overlay failed:', error?.message || error);
+      _mapOverlay = null;
+    }
   }
 
   /** Body miest nad polom (Windy má popisky; my body + karta pri myši). Načítanie miest raz. */
@@ -377,9 +414,10 @@ export function createMeteoLayer({
     if (!_viewer || !_enabled) return;
     if (_places === null) {
       _places = [];
-      loadPlaces(doFetch).then((list) => { _places = list; if (_enabled) updatePlaces(); }).catch((error) => { console.warn('[Data:Meteo] places failed:', error?.message || error); });
+      loadPlaces(doFetch).then((list) => { _places = list; _placesSettled = true; if (_enabled) updatePlaces(); }).catch((error) => { _placesSettled = true; if (_enabled) ensureMapOverlay(); console.warn('[Data:Meteo] places failed:', error?.message || error); });
       return;
     }
+    ensureMapOverlay();
     if (!_places.length || _placePoints) return;
     _placePoints = pointsFactory(_places);
     _viewer.scene.primitives.add(_placePoints);
@@ -704,6 +742,7 @@ export function createMeteoLayer({
     _heightFade = fade;
     if (_drape) { _drape.material.uniforms.alpha = fieldAlphaNow(); _drape.primitive.show = _enabled && fade > 0.02; }
     if (_isolines) _isolines.show = fade > 0.02;
+    if (_mapOverlay) _mapOverlay.show = fade > 0.02;
     _particles?.setVisible(fade > 0.05);
   }
 
