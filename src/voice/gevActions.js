@@ -2251,7 +2251,9 @@ function normalizeCockpitAction(value) {
 }
 
 function focusDataLayerRow(layerId) {
-  const row = document.querySelector(`#data-toggles [data-layer-id="${CSS.escape(layerId)}"]`);
+  // Glóbus GFS a radar SHMÚ majú riadky v sekcii POČASIE (2026-10-07).
+  const id = CSS.escape(layerId);
+  const row = document.querySelector(`#data-toggles [data-layer-id="${id}"], #weather-panel [data-layer-id="${id}"]`);
   if (!row) return null;
   row.scrollIntoView({ block: 'center', behavior: 'smooth' });
   row.classList.remove('gev-voice-focus');

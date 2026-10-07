@@ -151,6 +151,7 @@ test('poradie v zónach: Vrstvy · Konflikty · Energia · Nástroje (… Kamery
   };
   const seq = [
     '#left-panel-stack > #data-panel',
+    '#left-panel-stack > .lane-zone[data-lane-zone="weather"]', '#left-panel-stack > #weather-panel',
     '#left-panel-stack > #ukraine-panel', '#left-panel-stack > #mideast-panel',
     '#left-panel-stack > #gas-panel', '#left-panel-stack > #oil-panel',
     '#left-panel-stack > #scene-panel', '#left-panel-stack > #history-panel',

@@ -7140,6 +7140,9 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
   order: 43;
 }
 
+/* POČASIE (2026-10-07) hneď pod Dátovými vrstvami — glóbus GFS a radar SHMÚ. */
+#left-panel-stack > .lane-zone[data-lane-zone="weather"] { order: 12; }
+#left-panel-stack > #weather-panel { order: 13; }
 #left-panel-stack > #ukraine-panel { order: 21; }
 #left-panel-stack > #mideast-panel { order: 22; }
 #left-panel-stack > #gas-panel { order: 31; }
@@ -7272,7 +7275,8 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
 #left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
-#left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner {
+#left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner,
+#left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner {
   height: 100%;
   max-height: 100%;
 }
@@ -7285,7 +7289,8 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
 #left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
-#left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner {
+#left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner,
+#left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner {
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -11585,6 +11590,14 @@ body.recording-mode .state-strip {
 /* BLÍZKY VÝCHOD (2026-09-26) zdedil riadok po ZÁLIV-e (#gulf-panel zanikol). */
 #mideast-panel.collapsed .mideast-body { display: none; }
 #ukraine-panel.collapsed .ukraine-body { display: none; }
+#weather-panel.collapsed .weather-body { display: none; }
+
+/* POČASIE (2026-10-07, src/data/weatherSection.js): súhrn a veta o zdrojoch nad riadkami vrstiev. */
+.weather-intro { margin: 2px 0 8px; }
+.weather-intro p { margin: 0 0 4px; font-size: 11px; line-height: 1.45; }
+.weather-intro .weather-summary { color: var(--text-primary); letter-spacing: 0.04em; }
+.weather-intro .weather-note { color: var(--text-dim); }
+.weather-body .data-toggle-row + .data-toggle-row { margin-top: 6px; }
 
 /*
  * UKRAJINA (2026-09-19, etapa 1): telo panela podkladu frontu. Stav a titulky

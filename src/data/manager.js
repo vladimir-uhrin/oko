@@ -1,6 +1,7 @@
 import { governorRequestRender } from '../renderGovernor.js';
 import { createMaritimeHistoryPanel, createMaritimeHistorySession } from './maritimeHistoryPanel.js';
 import { createNaturalHazardsPanel, hazardsSummary, isNaturalHazardLayer } from './naturalHazardsPanel.js';
+import { WEATHER_LAYER_IDS, createWeatherIntro, isWeatherLayer, weatherSummary } from './weatherSection.js';
 import { createGibsOverlayPanel, gibsOverlaySummary, isGibsOverlayLayer } from './gibsOverlayPanel.js';
 import { t } from '../i18n.js';
 import { markDetectionSourcesChanged } from './detection.js';
@@ -2037,6 +2038,22 @@ export class DataLayerManager {
     this._renderToggles();
   }
 
+  /**
+   * Sekcia POČASIE (2026-10-07, weatherSection.js): riadky glóbusu GFS a radaru SHMÚ sa
+   * vyrábajú tým istým kódom ako v Dátových vrstvách, len sa vkladajú do tela #weather-panel.
+   * @param {HTMLElement|null} container telo panela ([data-weather-body])
+   */
+  buildWeatherPanel(container) {
+    this._weatherContainer = container || null;
+    this._renderToggles();
+  }
+
+  /** Riadok vrstvy v ktoromkoľvek kontajneri (Dátové vrstvy alebo POČASIE). */
+  _findToggleRow(layerId) {
+    const selector = `[data-layer-id="${layerId}"]`;
+    return this._toggleContainer?.querySelector(selector) || this._weatherContainer?.querySelector?.(selector) || null;
+  }
+
   _renderToggles() {
     if (!this._toggleContainer) return;
     if (!this._maritimeHistorySession) {
@@ -2052,6 +2069,12 @@ export class DataLayerManager {
     this._toggleContainer.innerHTML = '';
     let hazardsPanel = null;
     let gibsPanel = null;
+    const weather = this._weatherContainer || null;
+    const weatherRows = [];
+    if (weather) {
+      weather.innerHTML = '';
+      weather.appendChild(createWeatherIntro(document, this.getAll()));
+    }
 
     for (const layer of this.getAll()) {
       if (!layer.showInTogglePanel) continue;
@@ -2132,7 +2155,9 @@ export class DataLayerManager {
         row.appendChild(maritime);
       }
 
-      if (isNaturalHazardLayer(layer.id)) {
+      if (weather && isWeatherLayer(layer.id)) {
+        weatherRows.push(row);
+      } else if (isNaturalHazardLayer(layer.id)) {
         if (!hazardsPanel) {
           hazardsPanel = createNaturalHazardsPanel(document, this.getAll());
           this._toggleContainer.appendChild(hazardsPanel);
@@ -2147,6 +2172,9 @@ export class DataLayerManager {
         gibsPanel.appendChild(row);
       } else this._toggleContainer.appendChild(row);
     }
+    // POČASIE: pevné poradie (predpoveď pre svet, potom meranie nad Slovenskom), nie poradie registrácie.
+    weatherRows.sort((a, b) => WEATHER_LAYER_IDS.indexOf(a.dataset.layerId) - WEATHER_LAYER_IDS.indexOf(b.dataset.layerId));
+    for (const row of weatherRows) weather.appendChild(row);
   }
 
   /**
@@ -2238,7 +2266,7 @@ export class DataLayerManager {
       return;
     }
     for (const layer of this.getAll()) {
-      const row = this._toggleContainer.querySelector(`[data-layer-id="${layer.id}"]`);
+      const row = this._findToggleRow(layer.id);
       if (!row) continue;
 
       const btn = row.querySelector('.data-toggle-btn');
@@ -2275,6 +2303,11 @@ export class DataLayerManager {
     if (gibsLine) {
       const text = gibsOverlaySummary(this.getAll());
       if (gibsLine.textContent !== text) gibsLine.textContent = text;
+    }
+    const weatherLine = this._weatherContainer?.querySelector?.('.weather-summary');
+    if (weatherLine) {
+      const text = weatherSummary(this.getAll());
+      if (weatherLine.textContent !== text) weatherLine.textContent = text;
     }
   }
 

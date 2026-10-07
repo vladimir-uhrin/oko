@@ -13,8 +13,9 @@
 import { t } from '../i18n.js';
 
 /** Vrstvy patriace do skupiny, v poradí riadkov panelu. */
+// Radar SHMÚ odišiel 2026-10-07 do sekcie POČASIE (weatherSection.js) spolu s glóbusom GFS.
 export const NATURAL_HAZARD_LAYER_IDS = Object.freeze([
-  'earthquakes', 'volcanoes', 'natural-events', 'local-firms', 'shmu-radar',
+  'earthquakes', 'volcanoes', 'natural-events', 'local-firms',
 ]);
 
 export function isNaturalHazardLayer(id) { return NATURAL_HAZARD_LAYER_IDS.includes(id); }
@@ -33,7 +34,6 @@ export function hazardsSummary(layers, translate = t) {
     const layer = byId.get(id);
     if (!layer?.enabled) continue;
     const count = Number(layer.stats?.count);
-    if (id === 'shmu-radar') { parts.push(translate('hazards.radar-on')); continue; }
     parts.push(translate(`hazards.count.${id}`, { n: Number.isFinite(count) ? count : 0 }));
   }
   return parts.length ? parts.join(' · ') : translate('hazards.none-enabled');

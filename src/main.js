@@ -545,6 +545,9 @@ async function init() {
         return dataManager.unregisterForQa(layerId);
       };
     }
+    // Sekcia POČASIE (2026-10-07, src/data/weatherSection.js): riadky glóbusu GFS a radaru SHMÚ
+    // idú do #weather-panel — kontajner sa nastaví pred prvým vykreslením Dátových vrstiev.
+    dataManager.buildWeatherPanel(document.querySelector('#weather-panel [data-weather-body]'));
     dataManager.buildTogglePanel(document.getElementById('data-toggles'));
     styleManager.attachDataManager(dataManager);
 

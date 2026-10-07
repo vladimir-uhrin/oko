@@ -119,6 +119,8 @@ test('every left-lane panel survives a shared link', () => {
  *  lišty, ich poradie stráži leftLane.test). */
 const LANE_ZONES = [
   { zone: null, panels: ['data-panel'] },
+  // POČASIE (2026-10-07): glóbus GFS + radar SHMÚ hneď pod Vrstvami.
+  { zone: 'weather', panels: ['weather-panel'] },
   { zone: 'conflicts', panels: ['ukraine-panel', 'mideast-panel'] },
   { zone: 'energy', panels: ['gas-panel', 'oil-panel'] },
   { zone: 'tools', panels: ['scene-panel', 'history-panel', 'cctv-panel'] },

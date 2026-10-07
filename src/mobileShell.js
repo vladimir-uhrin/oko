@@ -42,7 +42,8 @@ export const VOICE_OVERHANG_PX = 16;
  * otvorí lištu polohy v doku a dá jej fokus.
  */
 export const MOBILE_SECTIONS = Object.freeze([
-  Object.freeze({ id: 'layers', labelKey: 'mobile.layers', panelIds: Object.freeze(['data-panel']), expand: 'data-panel' }),
+  // POČASIE (2026-10-07) má riadky vrstiev (glóbus GFS, radar SHMÚ) — patrí k Vrstvám.
+  Object.freeze({ id: 'layers', labelKey: 'mobile.layers', panelIds: Object.freeze(['data-panel', 'weather-panel']), expand: 'data-panel' }),
   Object.freeze({ id: 'scenes', labelKey: 'mobile.scenes', panelIds: Object.freeze(['scene-panel']), expand: 'scene-panel' }),
   Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'oil-panel', 'mideast-panel', 'ukraine-panel', 'history-panel']), expand: 'gas-panel' }),
   Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['pp-toggles', 'cctv-panel', 'global-context-panel']), expand: 'pp-toggles' }),

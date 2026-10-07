@@ -8,13 +8,13 @@ import { EN_STRINGS, SK_STRINGS } from '../i18nStrings.js';
 
 const tr = (strings) => (k, vars) => { let s = strings[k] || k; for (const [a, b] of Object.entries(vars || {})) s = s.replaceAll(`{${a}}`, String(b)); return s; };
 
-test('hrozby: členovia skupiny — zemetrasenia, vulkány, EONET udalosti, FIRMS, radar', () => {
-  assert.deepEqual([...NATURAL_HAZARD_LAYER_IDS], ['earthquakes', 'volcanoes', 'natural-events', 'local-firms', 'shmu-radar']);
-  assert.equal(isNaturalHazardLayer('shmu-radar'), true);
+test('hrozby: členovia skupiny — zemetrasenia, vulkány, EONET udalosti, FIRMS (radar je v sekcii POČASIE)', () => {
+  assert.deepEqual([...NATURAL_HAZARD_LAYER_IDS], ['earthquakes', 'volcanoes', 'natural-events', 'local-firms']);
+  assert.equal(isNaturalHazardLayer('shmu-radar'), false, '2026-10-07: radar SHMÚ patrí k počasiu');
   assert.equal(isNaturalHazardLayer('flights'), false);
 });
 
-test('hrozby: živý súhrn počíta len zapnuté vrstvy, radar slovom, nič zapnuté = veta', () => {
+test('hrozby: živý súhrn počíta len zapnuté vrstvy, radar už nie, nič zapnuté = veta', () => {
   const layers = [
     { id: 'earthquakes', enabled: true, stats: { count: 176 } },
     { id: 'volcanoes', enabled: false, stats: { count: 32 } },
@@ -22,8 +22,8 @@ test('hrozby: živý súhrn počíta len zapnuté vrstvy, radar slovom, nič zap
     { id: 'local-firms', enabled: true, stats: { count: 0 } },
     { id: 'shmu-radar', enabled: true, stats: {} },
   ];
-  assert.equal(hazardsSummary(layers, tr(SK_STRINGS)), '176 zemetrasení · 6 udalostí EONET · 0 požiarov FIRMS · radar zapnutý');
-  assert.equal(hazardsSummary(layers, tr(EN_STRINGS)), '176 earthquakes · 6 EONET events · 0 FIRMS fires · radar on');
+  assert.equal(hazardsSummary(layers, tr(SK_STRINGS)), '176 zemetrasení · 6 udalostí EONET · 0 požiarov FIRMS');
+  assert.equal(hazardsSummary(layers, tr(EN_STRINGS)), '176 earthquakes · 6 EONET events · 0 FIRMS fires');
   assert.equal(hazardsSummary([], tr(SK_STRINGS)), SK_STRINGS['hazards.none-enabled']);
   assert.equal(hazardsSummary(null, tr(EN_STRINGS)), EN_STRINGS['hazards.none-enabled']);
 });

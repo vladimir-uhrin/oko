@@ -278,6 +278,7 @@ const SHARE_PANEL_STATE_SPECS = Object.freeze([
   { id: 'oil-panel' },
   { id: 'mideast-panel' },
   { id: 'ukraine-panel' },
+  { id: 'weather-panel' },
   { id: 'global-context-panel' },
   { id: 'pp-toggles' },
   { id: 'param-slider-panel' },
@@ -292,6 +293,7 @@ const COCKPIT_ENTRY_COLLAPSE_PANEL_IDS = Object.freeze([
   'oil-panel',
   'mideast-panel',
   'ukraine-panel',
+  'weather-panel',
   'pp-toggles',
   'global-context-panel',
   'radio-panel',
@@ -11073,13 +11075,15 @@ export class StyleManager {
       if (document.body.classList.contains('cockpit-mode')) return;
       this._openGlobeContextMenu(event);
     });
-    const toggles = document.getElementById('data-toggles');
-    toggles?.addEventListener('contextmenu', (event) => {
-      const row = event.target?.closest?.('.data-toggle-row[data-layer-id]');
-      if (!row) return;
-      event.preventDefault();
-      this._openLayerContextMenu(row.dataset.layerId, event);
-    });
+    // Riadky vrstiev sú v Dátových vrstvách aj v sekcii POČASIE (2026-10-07).
+    for (const toggles of [document.getElementById('data-toggles'), document.querySelector('#weather-panel [data-weather-body]')]) {
+      toggles?.addEventListener('contextmenu', (event) => {
+        const row = event.target?.closest?.('.data-toggle-row[data-layer-id]');
+        if (!row) return;
+        event.preventDefault();
+        this._openLayerContextMenu(row.dataset.layerId, event);
+      });
+    }
   }
 
   _openGlobeContextMenu(event) {

@@ -194,6 +194,13 @@ export const EN_STRINGS = Object.freeze({
   // panel and deliberately carries no heading.
   'lane.zone.conflicts': 'Conflicts',
   'lane.zone.energy': 'Energy',
+  'lane.zone.weather': 'Weather',
+  'panel.weather': 'WEATHER',
+  'weather.on': 'on',
+  'weather.off': 'off',
+  'weather.summary-globe': 'Globe (GFS) {state}',
+  'weather.summary-radar': 'SHMÚ radar {state}',
+  'weather.note': 'Globe = NOAA GFS model forecast for the whole world (wind, temperature, pressure, rain, clouds, gusts). SHMÚ radar = measured rain over Slovakia every 5 minutes.',
   'lane.zone.tools': 'Tools',
   'lane.zone.settings': 'Settings',
   // Mobile shell (2026-09-14): bottom app bar + sheet on touch / narrow screens.
@@ -2570,6 +2577,13 @@ export const SK_STRINGS = Object.freeze({
   // nadpis zámerne nemá (nebil by sa s názvom „Dátové vrstvy").
   'lane.zone.conflicts': 'Konflikty',
   'lane.zone.energy': 'Energia',
+  'lane.zone.weather': 'Počasie',
+  'panel.weather': 'POČASIE',
+  'weather.on': 'zapnutý',
+  'weather.off': 'vypnutý',
+  'weather.summary-globe': 'Glóbus (GFS) {state}',
+  'weather.summary-radar': 'radar SHMÚ {state}',
+  'weather.note': 'Glóbus = predpoveď modelu NOAA GFS pre celý svet (vietor, teplota, tlak, zrážky, oblačnosť, nárazy). Radar SHMÚ = namerané zrážky nad Slovenskom každých 5 minút.',
   'lane.zone.tools': 'Nástroje',
   'lane.zone.settings': 'Nastavenia',
   // Mobilný plášť (2026-09-14): spodná lišta + výsuv na dotyku / úzkej obrazovke.

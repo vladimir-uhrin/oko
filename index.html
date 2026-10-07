@@ -855,6 +855,25 @@
     </div>
   </div>
 
+  <!-- POČASIE (2026-10-07): glóbus GFS (predpoveď pre celý svet) a radar SHMÚ (meranie nad
+       Slovenskom) v jednej sekcii. Riadky vrstiev do [data-weather-body] vkladá správca vrstiev
+       (manager.buildWeatherPanel, src/data/weatherSection.js) — ten istý kód ako Dátové vrstvy. -->
+  <div class="lane-zone" data-lane-zone="weather">
+    <span class="lane-zone-text" data-i18n="lane.zone.weather">WEATHER</span>
+    <span class="panel-divider" aria-hidden="true"></span>
+  </div>
+  <div id="weather-panel" class="panel-collapsible collapsed" data-panel-id="weather-panel">
+    <div class="panel-glow"></div>
+    <div class="weather-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.weather" class="panel-title">WEATHER</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="weather-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="weather-body" data-weather-body></div>
+    </div>
+  </div>
+
   <!-- Nadpisy zón (2026-09-20). Plochý súrodenec panelov, NIKDY obal: lane
        membership stojí na `#left-panel-stack > [data-panel-id]`. Preto tu nie je
        ani data-panel-id (inak by nadpis chcel share token a 96px podlahu v
