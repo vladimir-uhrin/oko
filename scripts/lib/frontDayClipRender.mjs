@@ -155,7 +155,8 @@ export async function renderClipSegment({ src, out, dur, clip, day, ffmpeg = 'ff
   const sharp = require('sharp');
   const { total, frames } = probe || await probeClip(src, { ffmpeg });
   if (!total) throw Object.assign(new Error('záber: nedá sa zistiť dĺžka videa'), { code: 'CLIP_PROBE' });
-  const win = bestWindow(frames, total, dur);
+  // Fotka s priblížením zo scenára: vlastné video presne na dĺžku záberu, od začiatku.
+  const win = Number.isFinite(clip?.fixedStart) ? { start: clip.fixedStart, dur } : bestWindow(frames, total, dur);
   const cuts = frames.filter(([, v]) => v > CUT_SCORE);
   const logoSvg = fs.readFileSync(path.join(ROOT, 'public', 'logo.svg'), 'utf8');
   const { inlineLogoMarkup } = await import('../../src/data/eventVideoHud.js');
@@ -170,6 +171,48 @@ export async function renderClipSegment({ src, out, dur, clip, day, ffmpeg = 'ff
   try { fs.rmSync(overlay, { force: true }); } catch { /* */ }
   if (r.code !== 0 || !fs.existsSync(out)) throw Object.assign(new Error(`záber: ffmpeg ${r.err.trim().slice(-300)}`), { code: 'CLIP_RENDER' });
   return { file: out, start: win.start, dur, cuts: cuts.length };
+}
+
+/** Bod [lon, lat] → pixel fotky s ohraničením bbox [w, s, e, n] (lineárne, malé územie). Pure. */
+export function photoPixel(bbox, lon, lat, width, height) {
+  const [w, s, e, n] = bbox;
+  return { x: ((lon - w) / (e - w)) * width, y: ((n - lat) / (n - s)) * height };
+}
+
+/**
+ * Fotka (napr. satelit Copernicus) → video s pomalým priblížením k bodu (Ken Burns), so značkami.
+ * @param {{image: string, bbox: number[], focus: {lon, lat}, zoom?: number, marks?: Array<{lon, lat, label, color?}>}} photo
+ */
+export async function photoZoomVideo(photo, { out, dur, ffmpeg = 'ffmpeg', fps = 30 }) {
+  const sharp = require('sharp');
+  const meta = await sharp(photo.image).metadata();
+  const W = meta.width; const H = meta.height;
+  // Výrez v pomere okna záberu (CLIP_BOX), stred na bode priblíženia.
+  const ratio = CLIP_BOX.w / CLIP_BOX.h;
+  const cw = Math.min(W, Math.round(H * ratio)); const ch = Math.round(cw / ratio);
+  const f = photoPixel(photo.bbox, photo.focus.lon, photo.focus.lat, W, H);
+  const cx = Math.round(Math.min(W - cw, Math.max(0, f.x - cw / 2))); const cy = Math.round(Math.min(H - ch, Math.max(0, f.y - ch / 2)));
+  const marks = (photo.marks || []).map((m) => ({ ...m, ...photoPixel(photo.bbox, m.lon, m.lat, W, H) }));
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const k = W / 2500; // veľkosť značiek podľa rozlíšenia
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${marks.map((m) => {
+    const c = m.color || '#ff7a1a';
+    return `<circle cx="${m.x}" cy="${m.y}" r="${34 * k}" fill="none" stroke="${c}" stroke-width="${5 * k}"/><circle cx="${m.x}" cy="${m.y}" r="${9 * k}" fill="${c}" stroke="#fff" stroke-width="${3 * k}"/>`
+      + (m.label ? `<rect x="${m.x + 48 * k}" y="${m.y - 26 * k}" width="${(String(m.label).length * 19 + 34) * k}" height="${52 * k}" rx="${10 * k}" fill="rgba(5,14,22,0.88)" stroke="${c}" stroke-width="${3 * k}"/>`
+        + `<text x="${m.x + 64 * k}" y="${m.y + 11 * k}" font-family="Inter, Arial, sans-serif" font-weight="700" font-size="${32 * k}" fill="#fff">${esc(m.label)}</text>` : '');
+  }).join('')}</svg>`;
+  const still = `${out}.still.png`;
+  // Najprv značky na celú fotku, potom výrez (sharp by inak orezal pred kreslením).
+  const marked = await sharp(photo.image).composite([{ input: Buffer.from(svg) }]).png().toBuffer();
+  await sharp(marked).extract({ left: cx, top: cy, width: cw, height: ch }).png().toFile(still);
+  // Priblíženie k bodu: zoompan nad zväčšeným obrazom (menej trasenia pri zaokrúhľovaní).
+  const N = Math.max(2, Math.round(dur * fps)); const Z = photo.zoom || 2.2;
+  const fx = (f.x - cx) / cw; const fy = (f.y - cy) / ch;
+  const vf = `scale=${CLIP_BOX.w * 4}:-2,zoompan=z='1+(${Z}-1)*on/${N}':x='max(0,min(iw-iw/zoom,${fx.toFixed(4)}*iw-iw/zoom/2))':y='max(0,min(ih-ih/zoom,${fy.toFixed(4)}*ih-ih/zoom/2))':d=${N}:s=${CLIP_BOX.w}x${CLIP_BOX.h}:fps=${fps},format=yuv420p`;
+  const r = await runCapture(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-loop', '1', '-i', still, '-vf', vf, '-frames:v', String(N), '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', out], 10 * 60_000);
+  try { fs.rmSync(still, { force: true }); } catch { /* */ }
+  if (r.code !== 0 || !fs.existsSync(out)) throw Object.assign(new Error(`fotka: ffmpeg ${r.err.trim().slice(-300)}`), { code: 'PHOTO_RENDER' });
+  return out;
 }
 
 /**

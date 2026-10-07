@@ -2,7 +2,7 @@
 // záber na výšku (rozhovor) do videa nejde.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CLIP_SKIP_START_S, actionScore, bestWindow, clipUsable, contentEndOf, parseFrameStats } from './frontDayClipRender.mjs';
+import { CLIP_SKIP_START_S, actionScore, bestWindow, clipUsable, contentEndOf, parseFrameStats, photoPixel } from './frontDayClipRender.mjs';
 
 /** Snímky 5/s: pokojný základ, v zadaných úsekoch iný rozdiel snímok. */
 function frames(total, spans = []) {
@@ -63,6 +63,14 @@ test('bez pohybu: okno v hraniciach videa po úvode; krátke video sa zmestí', 
   assert.ok(w.start >= CLIP_SKIP_START_S && w.start + w.dur <= 30, `začiatok ${w.start}`);
   const short = bestWindow(frames(5), 5, 4);
   assert.ok(short.start >= 0 && short.start + short.dur <= 5, JSON.stringify(short));
+});
+
+test('fotka zo satelitu: bod požiaru a Soči na správnom mieste snímky (bbox Copernicus)', () => {
+  const bbox = [39.25, 43.52, 39.75, 43.75];
+  const fire = photoPixel(bbox, 39.4675, 43.6362, 2500, 1600);
+  assert.ok(Math.abs(fire.x - 1087.5) < 1 && Math.abs(fire.y - 791.2) < 1, JSON.stringify(fire));
+  const corner = photoPixel(bbox, 39.25, 43.75, 2500, 1600);
+  assert.deepEqual([corner.x, corner.y], [0, 0], 'severozápadný roh = ľavý horný');
 });
 
 test('záber na výšku (rozhovor, 464×824) vypadne, na šírku ostane', () => {

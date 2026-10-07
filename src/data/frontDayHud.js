@@ -346,7 +346,7 @@ export function buildClipOverlaySvg(clip, { logoMarkup = null, day = null } = {}
   out.push(logo(40, hy + 14, 76));
   out.push(wordmark(128, hy + 62, 44));
   out.push(`<text x="130" y="${hy + 90}" font-family="${MONO}" font-size="17" font-weight="500" letter-spacing="2.5" fill="${ACCENT}" ${shadow}>${VIDEO_BRAND.domain}</text>`);
-  out.push(`<text x="${W - 46}" y="${hy + 42}" text-anchor="end" font-family="${MONO}" font-size="22" font-weight="700" letter-spacing="4" fill="${ACCENT}" ${shadow}>DEŇ NA FRONTE</text>`);
+  out.push(`<text x="${W - 46}" y="${hy + 42}" text-anchor="end" font-family="${MONO}" font-size="22" font-weight="700" letter-spacing="4" fill="${ACCENT}" ${shadow}>${esc(clip.header || 'DEŇ NA FRONTE')}</text>`);
   if (day) out.push(`<text x="${W - 46}" y="${hy + 80}" text-anchor="end" font-size="34" font-weight="700" fill="#f2fbff" ${shadow}>${esc(daySk(day))}</text>`);
   // Nad videom: kto záber zverejnil a čo ukazuje.
   const where = clip.direction ? directionSk(clip.direction) : null;
@@ -355,7 +355,7 @@ export function buildClipOverlaySvg(clip, { logoMarkup = null, day = null } = {}
   const words = caption.split(' '); const rows = ['']; for (const w of words) { const next = rows[rows.length - 1] ? `${rows[rows.length - 1]} ${w}` : w; if (next.length > 32 && rows[rows.length - 1]) rows.push(w); else rows[rows.length - 1] = next; }
   const rowH = 50; const capSize = rows.length > 2 ? 40 : 44;
   const firstRow = CLIP_BOX.y - 28 - (rows.length - 1) * rowH;
-  out.push(`<text x="48" y="${firstRow - 56}" font-family="${MONO}" font-size="21" font-weight="700" letter-spacing="3" fill="#ffb020" ${shadow}>ZÁBERY · MINISTERSTVO OBRANY UKRAJINY</text>`);
+  out.push(`<text x="48" y="${firstRow - 56}" font-family="${MONO}" font-size="21" font-weight="700" letter-spacing="3" fill="#ffb020" ${shadow}>${esc(clip.kicker || 'ZÁBERY · MINISTERSTVO OBRANY UKRAJINY')}</text>`);
   rows.slice(0, 3).forEach((r, i) => out.push(`<text x="48" y="${firstRow + i * rowH}" font-size="${capSize}" font-weight="800" fill="#ffffff" ${shadow}>${esc(r)}</text>`));
   out.push(`<rect x="${CLIP_BOX.x}" y="${CLIP_BOX.y}" width="${CLIP_BOX.w}" height="${CLIP_BOX.h}" fill="none" stroke="rgba(0,212,255,0.55)" stroke-width="3"/>`);
   // Pod videom: mapka Ukrajiny s miestom a zdroj.
@@ -365,17 +365,20 @@ export function buildClipOverlaySvg(clip, { logoMarkup = null, day = null } = {}
   const sc = Math.min((box.w - 16) / ((E0 - W0) * kx), (box.h - 16) / (N0 - S0));
   const ox = box.x + 8 + (box.w - 16 - (E0 - W0) * kx * sc) / 2; const oy = box.y + 8 + (box.h - 16 - (N0 - S0) * sc) / 2;
   const project = (lon, lat) => ({ x: ox + (lon - W0) * kx * sc, y: oy + (N0 - lat) * sc });
-  out.push(`<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="12" fill="rgba(5,14,22,0.86)" stroke="rgba(255,255,255,0.28)"/>`);
-  for (const ring of UKRAINE_OUTLINE_RINGS) out.push(`<path d="${ring.map(([lon, lat], i) => { const p = project(lon, lat); return `${i ? 'L' : 'M'}${f1(p.x)} ${f1(p.y)}`; }).join('')}Z" fill="${FRONT_COLORS.ua}" fill-opacity="0.75" stroke="rgba(255,255,255,0.55)" stroke-width="1"/>`);
+  // Fotka zo scenára (napr. satelit nad Soči): bez mapky Ukrajiny, miesto a zdroj vľavo.
+  const inset = clip.inset !== false;
+  if (!inset) { box.w = -18; }
+  if (inset) out.push(`<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="12" fill="rgba(5,14,22,0.86)" stroke="rgba(255,255,255,0.28)"/>`);
+  if (inset) for (const ring of UKRAINE_OUTLINE_RINGS) out.push(`<path d="${ring.map(([lon, lat], i) => { const p = project(lon, lat); return `${i ? 'L' : 'M'}${f1(p.x)} ${f1(p.y)}`; }).join('')}Z" fill="${FRONT_COLORS.ua}" fill-opacity="0.75" stroke="rgba(255,255,255,0.55)" stroke-width="1"/>`);
   const scene = clip.direction ? FRONT_SCENES.find((s) => s.id === clip.direction) : null;
   if (scene?.center) {
     const p = project(scene.center.lon ?? scene.center[0], scene.center.lat ?? scene.center[1]);
     out.push(`<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="15" fill="#ff3b3b" fill-opacity="0.25" stroke="#ff3b3b" stroke-width="2.5"/><circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="5" fill="#ffffff"/>`);
   }
-  out.push(`<text x="${box.x + box.w + 26}" y="${box.y + 52}" font-size="30" font-weight="700" fill="#f2fbff" ${shadow}>${esc(where ? where.name : 'Ukrajina')}</text>`);
-  out.push(`<text x="${box.x + box.w + 26}" y="${box.y + 92}" font-size="21" fill="rgba(232,234,237,0.88)" ${shadow}>Zdroj: ArmyInform (Ministerstvo obrany</text>`);
-  out.push(`<text x="${box.x + box.w + 26}" y="${box.y + 120}" font-size="21" fill="rgba(232,234,237,0.88)" ${shadow}>Ukrajiny) · CC BY 4.0</text>`);
-  FRONT_DAY_SOURCES.forEach((line, i) => out.push(`<text x="${W / 2}" y="${1606 + i * 22}" text-anchor="middle" font-size="15" fill="rgba(223,243,251,0.82)" ${shadow}>${esc(line)}</text>`));
+  out.push(`<text x="${box.x + box.w + 26}" y="${box.y + 52}" font-size="30" font-weight="700" fill="#f2fbff" ${shadow}>${esc(clip.placeName ?? (where ? where.name : 'Ukrajina'))}</text>`);
+  (clip.sourceLines || ['Zdroj: ArmyInform (Ministerstvo obrany', 'Ukrajiny) · CC BY 4.0']).slice(0, 3).forEach((line, i) =>
+    out.push(`<text x="${box.x + box.w + 26}" y="${box.y + 92 + i * 28}" font-size="21" fill="rgba(232,234,237,0.88)" ${shadow}>${esc(line)}</text>`));
+  (clip.sources || FRONT_DAY_SOURCES).forEach((line, i) => out.push(`<text x="${W / 2}" y="${1606 + i * 22}" text-anchor="middle" font-size="15" fill="rgba(223,243,251,0.82)" ${shadow}>${esc(line)}</text>`));
   out.push('</svg>');
   return out.join('');
 }

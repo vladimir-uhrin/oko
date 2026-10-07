@@ -54,6 +54,14 @@ test('rám akčného záberu: kto zverejnil, celý popis s miestom, zdroj CC BY,
   for (const y of ys(svg)) assert.ok(y >= DAY_SAFE.top && (y < CLIP_BOX.y || y > CLIP_BOX.y + CLIP_BOX.h), `text mimo okna videa (y=${y})`);
 });
 
+test('rám fotky zo scenára: vlastný štítok, hlavička a zdroje, bez mapky Ukrajiny a bez „Ukrajina"', () => {
+  const svg = buildClipOverlaySvg({ captionSk: 'Miesto, kde tanker horel', kicker: 'SATELIT COPERNICUS · 6. 10. RÁNO, PRED ÚTOKOM', header: 'ČIERNE MORE',
+    placeName: '', sourceLines: [], sources: ['snímka: Copernicus Sentinel-2'], inset: false }, { day: '2026-10-07' });
+  assert.ok(svg.includes('SATELIT COPERNICUS') && svg.includes('ČIERNE MORE') && svg.includes('snímka: Copernicus Sentinel-2'));
+  assert.ok(!svg.includes('ArmyInform') && !svg.includes('MINISTERSTVO OBRANY') && !svg.includes('>Ukrajina<'), 'nič z rámu ArmyInform');
+  assert.ok(buildClipOverlaySvg({ captionSk: 'Ukrajinské sily zničili ruský tank' }).includes('ArmyInform'), 'záber ArmyInform ostáva ako bol');
+});
+
 test('štítky miest útoku sa neprekrývajú ani nezakryjú značku (Kyjev a Pryluky pri celej Ukrajine, 7. 10.)', () => {
   const items = [{ x: 290, y: 415, w: 230 }, { x: 260, y: 420, w: 160 }, { x: 325, y: 478, w: 210 }]; // Pryluky, Kyjev, Kremenčuk
   const boxes = placeHitLabels(items, { minX: 24, maxX: 1056 });

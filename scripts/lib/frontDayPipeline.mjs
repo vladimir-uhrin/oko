@@ -19,7 +19,7 @@ import { frontDayPlan, FRONT_DAY_FORMAT } from '../../src/data/frontDayVideo.js'
 import { DAY_CAPTION_STYLE } from '../../src/data/frontDayHud.js';
 import { burnCaptions, captureFailureSummary, measureSpeech, mixAudio, prepareVoice } from './eventVideoPipeline.mjs';
 import { loadFrontDay } from './frontDayData.mjs';
-import { clipUsable, downloadClip, overlayClips, probeClip, renderClipSegment } from './frontDayClipRender.mjs';
+import { clipUsable, downloadClip, overlayClips, photoZoomVideo, probeClip, renderClipSegment } from './frontDayClipRender.mjs';
 
 /** Akčné zábery vo videu (vlastník: „max 2–3 krátke"); kandidátov z dát je viac, nepoužiteľné vypadnú. */
 export const FRONT_DAY_CLIPS = 2;
@@ -106,6 +106,14 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
     } catch (e) { onProgress('clip-skip', { i, error: e.message }); }
   }
   model.clips = clipSources.map((c) => c.clip);
+  // Fotky zo scenára (napr. satelit Copernicus nad Soči) sú zábery `clip:<i>` s priblížením k bodu;
+  // video sa vyrobí až s dĺžkou záberu (5b).
+  for (const photo of scenario?.photos || []) {
+    const clip = { captionSk: photo.caption, kicker: photo.kicker, header: scenario.model?.header, placeName: photo.placeName || '',
+      sourceLines: photo.sourceLines || [], sources: scenario.model?.sources, inset: false, fixedStart: 0, keepCaptions: true };
+    clipSources.push({ clip, photo });
+    model.clips.push(clip);
+  }
 
   // 2. vety a háčik
   const lines = scenario ? scenario.lines : frontDayLines(model);
@@ -138,6 +146,10 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   for (const shot of plan.shots.filter((s) => s.kind === 'clip')) {
     const source = clipSources[shot.clipIndex];
     if (!source) continue;
+    if (source.photo) {
+      source.src = await photoZoomVideo({ ...source.photo, image: path.resolve(source.photo.image) }, { out: path.join(workDir, `fotka-${shot.clipIndex}.mp4`), dur: shot.dur + 0.2, ffmpeg });
+      source.probe = { total: shot.dur + 0.2, frames: [] };
+    }
     const seg = await renderClipSegment({ src: source.src, out: path.join(workDir, `zaber-${shot.clipIndex}.mp4`), dur: shot.dur, clip: source.clip, day: model.day, ffmpeg, probe: source.probe });
     segments.push({ file: seg.file, start: shot.start, dur: shot.dur });
     onProgress('clip', { i: shot.clipIndex, window: seg.start, cuts: seg.cuts });
@@ -160,7 +172,9 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   // 9. titulky a výstupy
   onProgress('captions');
   // Pri akčnom zábere je veta už veľkým popisom nad videom — titulok by ju zdvojil a prekryl zdroj záberu.
-  const cues = captionCues(lines.filter((l) => !String(l.shot).startsWith('clip:')), plan.placement, bounds, DAY_CAPTION_STYLE);
+  // Fotka zo scenára titulky má (jej popis je len štítok miesta, veta hlasu je iná).
+  const clipLine = (l) => { const m = /^clip:(\d+)$/.exec(String(l.shot)); return m && !model.clips[Number(m[1])]?.keepCaptions; };
+  const cues = captionCues(lines.filter((l) => !clipLine(l)), plan.placement, bounds, DAY_CAPTION_STYLE);
   const name = scenario?.name || `den-na-fronte-${model.day}`;
   const srtFile = path.join(workDir, `${name}.sk_SK.srt`);
   fs.writeFileSync(srtFile, srt(cues), 'utf8');
