@@ -3226,6 +3226,8 @@ function shmuRadarProxy() {
 export function firmsProxy() {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
+  const REFRESH_RETRY_MS = 5 * 60_000;
+  let lastRefreshFailAt = 0;
   // 2026-10-06 (vlastník: „pridaj ďalší satelit, a keď aj viac“): + MODIS Terra/Aqua (1 km, celý svet;
   // tanker pri Soči zachytil ako prvý — 1,5 h po vzplanutí) a Landsat 8/9 (30 m; FIRMS ho dáva len pre
   // USA a Kanadu, bez FRP). S GOES_NRT (GOES, Himawari, Meteosat) je to celý katalóg FIRMS NRT.
@@ -3233,7 +3235,8 @@ export function firmsProxy() {
   // Geostacionárne (GOES, Himawari, Meteosat — každých 10–15 min; src/data/firmsGeo.js), 2026-10-06:
   // „čo horí práve teraz“ — posledné 3 h, opakovania zlúčené, do 4 km od VIIRS len potvrdenie.
   const GEO_SOURCE = 'GOES_NRT';
-  const CACHE_DIR = path.join(process.cwd(), '.gev-cache');
+  // FIRMS_CACHE_DIR len pre testy (firmsProxyRoutes.test.mjs) — prevádzka používa .gev-cache.
+  const CACHE_DIR = String(process.env.FIRMS_CACHE_DIR || '').trim() || path.join(process.cwd(), '.gev-cache');
   const CACHE_PATH = path.join(CACHE_DIR, 'firms.json');
   // História požiarov na disku (2026-10-06, vlastník: „ukladať históriu požiarov na disk, mám dosť
   // priestoru“): denné NDJSON súbory <FIRE_HISTORY_DIR>/YYYY-MM-DD.ndjson (deň = deň detekcie UTC),
@@ -3568,7 +3571,9 @@ export function firmsProxy() {
           // Stale or missing → refresh, single-flight (concurrent requests
           // share one upstream pass). Capture the promise locally BEFORE
           // awaiting: the .finally() nulls `inflight` the moment it settles.
-          if (!inflight) {
+          // Po zlyhaní 5 min pauza (2026-10-07: NASA odpovedala 90 s na dopyt, každý klient by spúšťal
+          // nový 3–6-minútový pokus).
+          if (!inflight && Date.now() - lastRefreshFailAt >= REFRESH_RETRY_MS) {
             inflight = refreshUpstream(key)
               .then(async (fresh) => {
                 mem = fresh;
@@ -3585,10 +3590,22 @@ export function firmsProxy() {
                 return fresh;
               })
               .catch((err) => {
+                lastRefreshFailAt = Date.now();
                 console.warn(`[firms-proxy] refresh failed (${err?.message || err}) — serving cache if any`);
                 return null;
               })
               .finally(() => { inflight = null; });
+          }
+          // Stale-while-revalidate (2026-10-07): keď je čo ukázať, odpoveď NEčaká na NASA — obnova beží
+          // na pozadí a klient ju dostane pri ďalšom dopyte (10 min). Naživo: NASA 90 s na jeden zdroj,
+          // odkaz so zapnutými požiarmi držal preloader minúty (štart čaká na vrstvy z odkazu).
+          if (entry) {
+            sendJson(200, buildPayload(entry, true));
+            return;
+          }
+          if (!inflight) {
+            sendJson(502, { error: 'firms fetch failed and no cache available' });
+            return;
           }
           const pending = inflight;
           const fresh = await pending;

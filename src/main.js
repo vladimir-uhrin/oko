@@ -142,6 +142,9 @@ function describeError(error) {
  * Initializes CesiumJS with Google Photorealistic 3D Tiles,
  * style system, intelligence HUD, location presets, and share links.
  */
+/** Najdlhšie, čo preloader čaká na obnovu odkazu (vrstvy, kamera), kým uvoľní glóbus. */
+const STARTUP_RESTORE_CAP_MS = 12_000;
+
 async function init() {
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
@@ -553,8 +556,10 @@ async function init() {
 
     // Keep startup chrome truthful: a share is not restored until camera,
     // visual/map/panel lanes, and every requested layer have terminated.
+    // Strop 12 s (2026-10-07): odkaz so zapnutými požiarmi držal preloader minúty, kým NASA FIRMS
+    // odpovedala — pomalá vrstva sa dotiahne už za glóbusom (jej riadok ukazuje načítavanie).
     void Promise.all([
-      styleManager.initialRestorePromise,
+      Promise.race([styleManager.initialRestorePromise, new Promise((resolve) => setTimeout(resolve, STARTUP_RESTORE_CAP_MS))]),
       new Promise((resolve) => setTimeout(resolve, 1000)),
     ]).finally(() => {
       loadingScreen.classList.add('hidden');

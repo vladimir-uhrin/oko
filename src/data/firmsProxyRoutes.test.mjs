@@ -38,3 +38,32 @@ test('/history: detekcie z disku v okruhu + štatistika; zlé súradnice 400', a
   assert.equal((await call(h, '/history?lat=x&lon=1')).status, 400);
   assert.equal((await call(h, '/news?lat=100&lon=1')).status, 400);
 });
+
+test('/api/firms: zastaraná cache sa vráti hneď (NASA visí), obnova beží na pozadí; po zlyhaní 5 min pauza', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oko-firms-cache-'));
+  const now = Date.now();
+  const d = new Date(now - 3600_000).toISOString().slice(0, 10);
+  const hh = new Date(now - 3600_000).toISOString().slice(11, 13);
+  fs.writeFileSync(path.join(cacheDir, 'firms.json'), JSON.stringify({ at: now - 2 * 3600_000, sources: [{ source: 'VIIRS_SNPP_NRT', count: 1, ok: true }], fires: [{ lat: 1, lon: 2, frp: 3, confidence: 'n', brightness: 300, daynight: 'D', acqDate: d, acqTime: `${hh}00`, satellite: 'N' }] }));
+  process.env.FIRMS_CACHE_DIR = cacheDir;
+  process.env.FIRMS_MAP_KEY = 'test-key';
+  const realFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = (url, opts = {}) => { upstreamCalls += 1; return new Promise((_, reject) => opts.signal?.addEventListener('abort', () => reject(new Error('aborted')))); };
+  try {
+    const h = handlerOf(firmsProxy());
+    const t0 = Date.now();
+    const r = await call(h, '/');
+    assert.equal(r.status, 200);
+    assert.ok(Date.now() - t0 < 2000, `odpoveď do 2 s, nie po timeoute NASA (${Date.now() - t0} ms)`);
+    const j = JSON.parse(r.body);
+    assert.equal(j.stale, true); assert.equal(j.count, 1);
+    assert.ok(upstreamCalls >= 1, 'obnova sa na pozadí spustila');
+    const before = upstreamCalls;
+    await call(h, '/');
+    assert.equal(upstreamCalls, before, 'kým beží obnova, ďalší dopyt nespúšťa novú');
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.FIRMS_CACHE_DIR; delete process.env.FIRMS_MAP_KEY;
+  }
+});
