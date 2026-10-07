@@ -108,7 +108,8 @@ export function normalizeSensor(value) {
 
 /**
  * Senzor podľa kódu družice (2026-10-06): štíhly riadok /api/firms nenesie `instrument`.
- * N/N20/N21 → VIIRS, Aqua/Terra → MODIS, L8/L9 → OLI (Landsat), Meteosat/GOES/Himawari → GEO.
+ * N/N20/N21 → VIIRS, Aqua/Terra → MODIS, L8/L9 → OLI (Landsat), S3A/S3B → SLSTR (Sentinel-3),
+ * Meteosat/GOES/Himawari → GEO.
  * @param {*} satellite
  * @returns {string}
  */
@@ -116,6 +117,7 @@ export function sensorFromSatellite(satellite) {
   const s = String(satellite || '').trim().toUpperCase();
   if (/^(N|N20|N21|NPP|NOAA-2[01])$/.test(s)) return 'VIIRS';
   if (s === 'AQUA' || s === 'TERRA') return 'MODIS';
+  if (/^S3[AB]?$/.test(s)) return 'SLSTR';
   if (/^L\d$/.test(s)) return 'OLI';
   if (/^(MET|G|HIM)\d/.test(s)) return 'GEO';
   return '';

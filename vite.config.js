@@ -135,6 +135,7 @@ import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
 import { collapseGeoDetections, mergeGeoIntoFires } from './src/data/firmsGeo.js';
 import { fireNewsQuery, fireNewsCellKey, fireNewsVerdict, nearestPlace, parseBingNewsRss, bingNewsUrl, fireHistoryStats } from './src/data/fireNews.js';
 import { createFireHistoryStore, slimFire, FIRE_HISTORY_MAX_DAYS } from './src/data/fireHistoryStore.js';
+import { createSentinel3FrpService } from './src/data/sentinel3FrpService.js';
 import { parseTrustedList } from './src/data/eventNews.js';
 import {
   isLoopbackAddress,
@@ -3241,6 +3242,14 @@ export function firmsProxy() {
   const HISTORY_DIR = String(process.env.FIRE_HISTORY_DIR || '').trim()
     || (String(process.env.FLIGHT_HISTORY_DB || '').trim() ? path.join(path.dirname(String(process.env.FLIGHT_HISTORY_DB).trim()), 'fires') : path.join(CACHE_DIR, 'fires'));
   const history = createFireHistoryStore({ dir: HISTORY_DIR });
+  // Sentinel-3 SLSTR (Copernicus, 2026-10-07): granuly sa sťahujú na pozadí (src/data/sentinel3FrpService.js),
+  // /api/firms pridá to, čo je už stiahnuté. Bez CDSE_CLIENT_ID/SECRET vypnuté.
+  const sentinel3 = createSentinel3FrpService({
+    clientId: String(process.env.CDSE_CLIENT_ID || '').trim(),
+    clientSecret: String(process.env.CDSE_CLIENT_SECRET || '').trim(),
+    cacheDir: path.join(CACHE_DIR, 'sentinel3-frp'),
+    log: (msg) => console.log(msg),
+  });
   let historyReady = false;
   const NEWS_DIR = path.join(CACHE_DIR, 'firms-news');
   const NEWS_TTL_MS = 15 * 60_000;
@@ -3406,6 +3415,13 @@ export function firmsProxy() {
       }
     }
     if (!sources.some((s) => s.ok)) throw new Error('all FIRMS sources failed');
+    if (sentinel3.enabled()) {
+      void sentinel3.sync(); // na pozadí; tento snímok dostane už stiahnuté granuly
+      await sentinel3.loadDisk();
+      const s3 = filterTrailing24h(sentinel3.fires(), now);
+      fires.push(...s3);
+      sources.push({ source: 'SENTINEL3_SLSTR_FRP', count: s3.length, ok: true, granules: sentinel3.status().granules });
+    }
     // Geostacionárne: deň 1 = „dnešný deň UTC“ — tesne po polnoci by 3 h okno siahalo do včera.
     try {
       const days = new Date(now).getUTCHours() < 3 ? 2 : 1;
@@ -3490,6 +3506,7 @@ export function firmsProxy() {
             const transactions = await getTransactions(key);
             sendJson(200, {
               hasKey: true,
+              sentinel3: sentinel3.status(),
               lastFetch: mem ? mem.at : null,
               count: mem ? mem.fires.length : null,
               stale: mem ? Date.now() - mem.at >= TTL_MS : false,

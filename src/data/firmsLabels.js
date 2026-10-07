@@ -43,6 +43,7 @@ export function satelliteFullName(satellite) {
   if (s === 'N' || s === 'NPP' || s === 'SUOMI NPP') return 'Suomi NPP';
   if (s === 'AQUA' || s === 'TERRA') return s[0] + s.slice(1).toLowerCase();
   if (/^L\d$/.test(s)) return `Landsat ${s.slice(1)}`;
+  if (/^S3[AB]$/.test(s)) return `Sentinel-3${s.slice(2)}`;
   const m = /^(G|MET|HIM)(\d+)$/.exec(s);
   if (m) return m[1] === 'G' ? `GOES-${m[2]}` : m[1] === 'HIM' ? `Himawari-${m[2]}` : `Meteosat-${m[2]}`;
   return s;
