@@ -62,3 +62,17 @@ test('dáta v public/meteo-towns: vrstva 15–100 tis. a dlaždice; Slovensko ce
   for (let i = 1; i < cell.length; i += 1) assert.ok(cell[i - 1][3] >= cell[i][3], 'zoradené od najväčšieho');
   assert.match(readFileSync(new URL('SOURCE.md', base), 'utf8'), /GeoNames.*CC BY 4\.0/s);
 });
+
+test('teplota pod menom ako na Windy: dva riadky, väčší rámček, bez hodnoty len meno', async () => {
+  const { labelText } = await import('./meteoPlaceLabels.js');
+  assert.equal(labelText('Trnava', '14°'), 'Trnava\n14°');
+  assert.equal(labelText('Trnava', null), 'Trnava');
+  const one = labelBox(0, 0, 'Trnava');
+  const two = labelBox(0, 0, 'Trnava', true);
+  assert.ok(two.y1 - two.y0 > one.y1 - one.y0, 'meno s hodnotou zaberie viac miesta');
+  const keep = declutterLabels([
+    { id: 'a', x: 100, y: 100, name: 'Trnava', value: '14°', priority: 2 },
+    { id: 'b', x: 100, y: 122, name: 'Zeleneč', value: '15°', priority: 1 },
+  ]);
+  assert.ok(keep.has('a') && !keep.has('b'), 'druhý riadok s teplotou sa počíta do prekryvu');
+});

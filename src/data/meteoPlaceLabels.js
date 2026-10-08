@@ -59,10 +59,16 @@ export function townVisibleUntilM(pop) {
   return 70_000;
 }
 
-/** Odhad rámčeka popisku na obrazovke (12 px písmo, odsadenie 7 px vpravo od bodu). Pure. */
-export function labelBox(x, y, name) {
-  const w = 8 + String(name).length * 6.6;
-  return { x0: x + 5, y0: y - 9, x1: x + 9 + w, y1: y + 9 };
+/** Odhad rámčeka popisku na obrazovke (12 px tučné písmo, odsadenie 7 px vpravo od bodu; s hodnotou dva riadky). Pure. */
+export function labelBox(x, y, name, twoLines = false) {
+  const w = 8 + String(name).length * 7.2;
+  return twoLines ? { x0: x + 5, y0: y - 17, x1: x + 9 + w, y1: y + 17 } : { x0: x + 5, y0: y - 9, x1: x + 9 + w, y1: y + 9 };
+}
+
+/** Text popisku: meno, pod ním hodnota (teplota) ako na Windy. Pure. */
+export function labelText(name, value) {
+  return value ? `${name}
+${value}` : String(name);
 }
 
 /**
@@ -76,7 +82,7 @@ export function declutterLabels(items, max = LABEL_MAX) {
   const out = new Set();
   for (const item of [...items].sort((a, b) => b.priority - a.priority)) {
     if (out.size >= max) break;
-    const box = labelBox(item.x, item.y, item.name);
+    const box = labelBox(item.x, item.y, item.name, Boolean(item.value));
     if (kept.some((k) => box.x0 < k.x1 && box.x1 > k.x0 && box.y0 < k.y1 && box.y1 > k.y0)) continue;
     kept.push(box);
     out.add(item.id);
@@ -88,7 +94,7 @@ export function declutterLabels(items, max = LABEL_MAX) {
  * Správca popiskov nad poľom. Prepočíta sa po pohybe kamery (najviac raz za 250 ms).
  * @param {{ viewer: object, doFetch: Function, bigPlaces?: Array<{id: string, name: string, lat: number, lon: number, pop: number, capital?: boolean}>, bigVisibleUntilM: Function, requestRender?: Function, baseUrl?: string }} input
  */
-export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVisibleUntilM, requestRender = () => {}, baseUrl = TOWNS_BASE_URL }) {
+export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVisibleUntilM, requestRender = () => {}, baseUrl = TOWNS_BASE_URL, valueAt = () => null }) {
   const scene = viewer.scene;
   const labels = new Cesium.LabelCollection();
   scene.primitives.add(labels);
@@ -155,7 +161,9 @@ export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVi
         if (!occluder.isPointVisible(p.pos)) continue;
         const win = Cesium.SceneTransforms.worldToWindowCoordinates?.(scene, p.pos) || Cesium.SceneTransforms.wgs84ToWindowCoordinates?.(scene, p.pos);
         if (!win || win.x < -50 || win.y < -20 || win.x > scene.canvas.clientWidth + 10 || win.y > scene.canvas.clientHeight + 20) continue;
-        candidates.push({ id: p.id, x: win.x, y: win.y, name: p.name, priority: p.pop, place: p });
+        let value = null;
+        try { value = valueAt(p.lat, p.lon); } catch { value = null; }
+        candidates.push({ id: p.id, x: win.x, y: win.y, name: p.name, value, priority: p.pop, place: p });
       }
     }
     const keep = declutterLabels(candidates);
@@ -163,13 +171,17 @@ export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVi
       if (!keep.has(id)) { labels.remove(label); shown.delete(id); }
     }
     for (const c of candidates) {
-      if (!keep.has(c.id) || shown.has(c.id)) continue;
+      if (!keep.has(c.id)) continue;
+      const text = labelText(c.name, c.value);
+      const existing = shown.get(c.id);
+      if (existing) { if (existing.text !== text) existing.text = text; continue; }
       const big = c.place.pop >= 100_000;
       shown.set(c.id, labels.add({
         position: c.place.pos,
-        text: c.name,
-        font: big ? '600 12px Inter, "Segoe UI", system-ui, sans-serif' : '500 11px Inter, "Segoe UI", system-ui, sans-serif',
-        fillColor: big ? Cesium.Color.WHITE : Cesium.Color.fromCssColorString('rgba(255,255,255,0.88)'),
+        text,
+        // Tučné biele ako na Windy; veľké mestá o bod väčšie.
+        font: big ? '700 13px Inter, "Segoe UI", system-ui, sans-serif' : '700 12px Inter, "Segoe UI", system-ui, sans-serif',
+        fillColor: Cesium.Color.WHITE,
         outlineColor: Cesium.Color.fromCssColorString('rgba(0,0,0,0.78)'),
         outlineWidth: 3,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,

@@ -351,6 +351,7 @@ export function createMeteoLayer({
   let _mapData = null; // { coast, borders } (null = nenačítané) — mapa nad poľom ako na Windy
   let _mapOverlay = null; // Cesium.PrimitiveCollection: pobrežia, hranice
   let _placeLabels = null; // mená miest a dedín, pribúdajú s priblížením (meteoPlaceLabels.js)
+  let _labelTempGrid = null; // teplota pod menami (ako Windy) — drží sa, kým nepríde mriežka ďalšieho kroku
   let _hover = null; // DOM karta mesta (meteoPlaces.js)
   let _hoverTimer = null;
   let _leaveTimer = null;
@@ -382,6 +383,12 @@ export function createMeteoLayer({
     clearMapOverlay();
   }
 
+  /** Teplota pod menom miesta ako na Windy („14°“); null, kým mriežka nie je. */
+  function labelTempAt(lat, lon) {
+    const v = sampleGrid(_labelTempGrid, lat, lon);
+    return Number.isFinite(v) ? `${Math.round(v)}°` : null;
+  }
+
   function clearMapOverlay() {
     if (_mapOverlay && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_mapOverlay);
     _mapOverlay = null;
@@ -407,7 +414,8 @@ export function createMeteoLayer({
       _mapOverlay = mapOverlayFactory({ coast: _mapData.coast, borders: _mapData.borders, places: _places || [] });
       _mapOverlay.show = _heightFade > 0.02;
       _viewer.scene.primitives.add(_mapOverlay);
-      _placeLabels = placeLabelsFactory({ viewer: _viewer, doFetch, bigPlaces: _places || [], bigVisibleUntilM: placeVisibleUntilM, requestRender: () => governorRequestRender('meteo') });
+      _placeLabels = placeLabelsFactory({ viewer: _viewer, doFetch, bigPlaces: _places || [], bigVisibleUntilM: placeVisibleUntilM, requestRender: () => governorRequestRender('meteo'), valueAt: labelTempAt });
+      gridFor('temp');
       _placeLabels?.setVisible(_heightFade > 0.02);
       governorRequestRender('meteo');
     } catch (error) {
@@ -441,6 +449,7 @@ export function createMeteoLayer({
       if (!img || _catalog?.steps[_index] !== iso) return;
       const field = METEO_FIELDS[fieldId];
       _fieldGrids[fieldId] = gridReader(img, doc, field.channel, field.decode);
+      if (fieldId === 'temp') { _labelTempGrid = _fieldGrids.temp; _placeLabels?.refresh(); }
       if (_hoverPlace) _hover?.update(placeValues(_hoverPlace));
     }).catch(() => { _gridLoads.delete(fieldId); });
     return null;
@@ -687,6 +696,7 @@ export function createMeteoLayer({
     if (_hoverPlace) _hover?.update(placeValues(_hoverPlace));
     updateIsolines(field, fieldImg);
     updatePlaces();
+    if (_placeLabels) gridFor('temp');
     if (_particles && _particlesOn) {
       // Rozsah dekódovania patrí hladine: na 250 hPa presahuje |u| hodnotu 60,
       // takže pevné ±60 by častice hnalo nesprávnou rýchlosťou.
