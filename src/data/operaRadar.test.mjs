@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import zlib from 'node:zlib';
-import { laeaForward, operaBounds, operaCandidateTimes, operaFileUrl, operaGrid, parseLaeaProjdef, reprojectOpera } from './operaRadar.js';
+import { smoothDbzColor, laeaForward, operaBounds, operaCandidateTimes, operaFileUrl, operaGrid, parseLaeaProjdef, reprojectOpera } from './operaRadar.js';
 import { encodePngRgba } from './operaRadarWorker.js';
 import { createOperaRadarService, OPERA_CHECK_EVERY_MS } from './operaRadarService.js';
 import { createOperaRadarLayer, OPERA_RADAR_LAYER_ID } from './operaRadarLayer.js';
@@ -62,6 +62,29 @@ test('prepočet: búrka sa prenesie na správne miesto (Bratislava), nodata osta
   assert.ok(found, 'ozvena pri Bratislave');
   assert.ok(out.echoPixels >= 1 && out.echoPixels <= 6, `ozvena len pri búrke (${out.echoPixels})`);
   assert.equal(at(r + 20, c + 20), 0);
+});
+
+test('vyhladenie: plynulá farba medzi zastávkami palety, mäkký okraj zrážok', () => {
+  assert.equal(smoothDbzColor(5), null);
+  assert.deepEqual(smoothDbzColor(8), [96, 208, 130, 150]);
+  const mid = smoothDbzColor(17.5); // medzi 15 (zelená) a 20 (žltá)
+  assert.ok(mid[0] > 46 && mid[0] < 250, 'farba je medzi zastávkami, nie skok');
+  assert.deepEqual(smoothDbzColor(70), [255, 255, 255, 255]);
+  // okraj búrky: výstupné body na okraji majú nižšiu priehľadnosť než stred
+  const g = operaGrid(WHERE);
+  const values = new Float64Array(g.xsize * g.ysize).fill(-8888000);
+  const top = g.yll + g.ysize * g.yscale;
+  const [bx, by] = g.forward(48.15, 17.11);
+  const col = Math.floor((bx - g.xll) / 1000);
+  const row = Math.floor((top - by) / 1000);
+  for (let dr = -20; dr <= 20; dr += 1) for (let dc = -20; dc <= 20; dc += 1) values[(row + dr) * g.xsize + col + dc] = 40;
+  const out = reprojectOpera(values, WHERE, { gain: 1, offset: 0, nodata: -9999000, undetect: -8888000 }, { deg: 0.01 });
+  const c = Math.floor((17.11 - out.bounds.west) / 0.01);
+  const r = Math.floor((out.bounds.north - 48.15) / 0.01);
+  const alpha = (rr, cc) => out.rgba[(rr * out.width + cc) * 4 + 3];
+  let edge = c;
+  while (alpha(r, edge + 1) > 0) edge += 1;
+  assert.ok(alpha(r, edge) < alpha(r, c), `okraj (${alpha(r, edge)}) je priehľadnejší než stred (${alpha(r, c)})`);
 });
 
 test('PNG z vlákna má správnu hlavičku a rozmery', () => {

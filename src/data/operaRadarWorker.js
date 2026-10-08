@@ -39,8 +39,23 @@ export function encodePngRgba(rgba, width, height) {
   ]);
 }
 
+/**
+ * Obrázok snímky: WebP (kvalita 80) — po vyhladení má PNG ~2 MB, WebP ~330 kB (6 snímok = 2 MB namiesto 14 MB
+ * pre každého návštevníka, overené 2026-10-08). Bez knižnice sharp ostane PNG.
+ */
+async function encodeFrame(rgba, width, height) {
+  try {
+    const sharp = createRequire(import.meta.url)('sharp');
+    const buf = await sharp(Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength), { raw: { width, height, channels: 4 } })
+      .webp({ quality: 80, alphaQuality: 80, effort: 4 }).toBuffer();
+    return { image: buf, mime: 'image/webp' };
+  } catch {
+    return { image: encodePngRgba(rgba, width, height), mime: 'image/png' };
+  }
+}
+
 /** Dekódovanie v tomto vlákne (worker aj testy). */
-export function decodeOperaBuffer(arrayBuffer) {
+export async function decodeOperaBuffer(arrayBuffer) {
   const hdf5 = createRequire(import.meta.url)('jsfive');
   const f = new hdf5.File(arrayBuffer);
   const where = strip(f.get('where').attrs);
@@ -52,7 +67,8 @@ export function decodeOperaBuffer(arrayBuffer) {
   const iso = /^\d{8}$/.test(what.date) && /^\d{6}$/.test(what.time)
     ? `${what.date.slice(0, 4)}-${what.date.slice(4, 6)}-${what.date.slice(6, 8)}T${what.time.slice(0, 2)}:${what.time.slice(2, 4)}:00.000Z`
     : null;
-  return { png: encodePngRgba(out.rgba, out.width, out.height), width: out.width, height: out.height, bounds: out.bounds, echoPixels: out.echoPixels, iso };
+  const { image, mime } = await encodeFrame(out.rgba, out.width, out.height);
+  return { png: image, mime, width: out.width, height: out.height, bounds: out.bounds, echoPixels: out.echoPixels, iso };
 }
 
 /** Server: dekódovanie v samostatnom vlákne, timeout 60 s. */
@@ -72,9 +88,10 @@ export function decodeOperaInWorker(arrayBuffer, { timeoutMs = 60_000 } = {}) {
 
 if (!isMainThread && workerData?.buffer && parentPort) {
   try {
-    const out = decodeOperaBuffer(workerData.buffer);
-    const png = new Uint8Array(out.png); // vlastná kópia — Buffer môže ležať v zdieľanom bloku pamäte
-    parentPort.postMessage({ ok: true, ...out, png }, [png.buffer]);
+    decodeOperaBuffer(workerData.buffer).then((out) => {
+      const png = new Uint8Array(out.png); // vlastná kópia — Buffer môže ležať v zdieľanom bloku pamäte
+      parentPort.postMessage({ ok: true, ...out, png }, [png.buffer]);
+    }, (error) => parentPort.postMessage({ ok: false, error: String(error?.message || error) }));
   } catch (error) {
     parentPort.postMessage({ ok: false, error: String(error?.message || error) });
   }

@@ -59,7 +59,7 @@ export function createOperaRadarService({ fetchBuffer, decode, store = null, now
       if (res.status === 404 || res.status === 403) { misses.set(c.iso, now()); continue; }
       if (res.status !== 200 || !res.buffer) throw new Error(`OPERA HTTP ${res.status}`);
       const frame = await decode(res.buffer);
-      const entry = { iso: c.iso, png: frame.png, bounds: frame.bounds, echoPixels: frame.echoPixels };
+      const entry = { iso: c.iso, png: frame.png, mime: frame.mime || 'image/png', bounds: frame.bounds, echoPixels: frame.echoPixels };
       frames = [...frames.filter((f) => f.iso !== c.iso), entry].sort((a, b) => a.iso.localeCompare(b.iso)).slice(-ringSize);
       have.add(c.iso);
       wakeWaiters();

@@ -25,6 +25,13 @@ export const WARN_ELEVATED_HEIGHT_M = 11_500;
 export const WARN_GROUND_BELOW_M = 30_000;
 const FILL_ALPHA_ACTIVE = 0.42;
 const FILL_ALPHA_UPCOMING = 0.2;
+/**
+ * Pri zemi (pod 30 km, 3D dlaždice) slabšia výplň — plná zaliala celý sklopený pohľad žltou a mapa zanikla;
+ * 0,14 bola na tmavých dlaždiciach skoro neviditeľná (snímky 2026-10-08). Obrys na teréne (GroundPolylinePrimitive)
+ * sa na fotoreálnych dlaždiciach nevykreslil — hranicu okresu ukazuje okraj výplne.
+ */
+const GROUND_ALPHA_ACTIVE = 0.24;
+const GROUND_ALPHA_UPCOMING = 0.13;
 
 /**
  * Model karty okresu pre DOM. Pure.
@@ -164,7 +171,7 @@ export function buildWarningPrimitives(entries) {
       }));
       groundFill.push(new Cesium.GeometryInstance({
         geometry: new Cesium.PolygonGeometry({ polygonHierarchy: hierarchy(ring) }),
-        attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(color) },
+        attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(rgba(e.color, e.active ? GROUND_ALPHA_ACTIVE : GROUND_ALPHA_UPCOMING)) },
         id,
       }));
       outlines.add({

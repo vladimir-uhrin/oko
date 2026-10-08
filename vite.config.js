@@ -11486,7 +11486,8 @@ const _shmuStationsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, gl
 const _operaRadarRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 60, globalMax: 600 });
 function operaRadarProxy() {
   const MAX_BYTES = 12 * 1024 * 1024;
-  const dir = path.join(process.cwd(), '.gev-cache', 'opera-radar');
+  // v2 (2026-10-08): vyhladené snímky vo WebP — staré nevyhladené PNG sa po štarte nenačítajú.
+  const dir = path.join(process.cwd(), '.gev-cache', 'opera-radar-v2');
   const fetchBuffer = (url) => new Promise((resolve, reject) => {
     const req = https.get(url, { headers: { 'user-agent': 'OKO opera-radar (okolive.sk; 1 file / 10 min)' } }, (res) => {
       if (res.statusCode !== 200) { res.resume(); resolve({ status: res.statusCode }); return; }
@@ -11510,7 +11511,7 @@ function operaRadarProxy() {
     async save(frame, ring) {
       await fsp.mkdir(dir, { recursive: true });
       await fsp.writeFile(fileOf(frame.iso), frame.png);
-      await fsp.writeFile(path.join(dir, 'ring.json'), JSON.stringify(ring.map(({ iso, bounds, echoPixels }) => ({ iso, bounds, echoPixels }))));
+      await fsp.writeFile(path.join(dir, 'ring.json'), JSON.stringify(ring.map(({ iso, mime, bounds, echoPixels }) => ({ iso, mime, bounds, echoPixels }))));
       const keep = new Set(ring.map((f) => path.basename(fileOf(f.iso))));
       for (const name of await fsp.readdir(dir)) if (name.endsWith('.png') && !keep.has(name)) await fsp.unlink(path.join(dir, name)).catch(() => {});
     },
@@ -11529,7 +11530,7 @@ function operaRadarProxy() {
         if (subPath.startsWith('/frame/') && subPath.endsWith('.png')) {
           const frame = service.frame(decodeURIComponent(subPath.slice('/frame/'.length, -'.png'.length)));
           if (!frame) return sendJson(404, { ok: false, error: 'frame_gone' });
-          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400, immutable' });
+          res.writeHead(200, { 'Content-Type': frame.mime || 'image/png', 'Cache-Control': 'public, max-age=86400, immutable' });
           return res.end(frame.png);
         }
         const meta = service.meta();

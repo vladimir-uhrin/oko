@@ -8,7 +8,7 @@
 // ODIM HDF5, „OPERA CIRRUS maximum reflectivity composite", 3800 × 4400 px po 1 km, každých 10 min (overené
 // 2026-10-08: posledný súbor ~15 min za reálnym časom, ~3,4 MB).
 
-import { dbzColor, ZMAX_MIN_DISPLAY_DBZ } from './shmuRadarGrid.js';
+import { ZMAX_DBZ_PALETTE, ZMAX_MIN_DISPLAY_DBZ, softenRgba } from './shmuRadarGrid.js';
 
 export const OPERA_BASE = 'https://s3.waw3-1.cloudferro.com/openradar-24h';
 export const OPERA_STEP_MIN = 10;
@@ -96,18 +96,37 @@ export function operaBounds(where) {
 }
 
 /**
- * Prepočet kompozitu do zemepisnej mriežky (riadok 0 = sever) a farbenie dBZ: každý výstupný bod vezme
- * MAXIMUM zo zdrojových bodov okolo (±radius), aby sa malé búrkové bunky pri zmenšení nestratili.
- * nodata / undetect / slabé ozveny sú priehľadné. Pure.
+ * Plynulá farba pre dBZ (2026-10-08, vlastník: „vyhladiť, nech je to pekné"): lineárne medzi zastávkami tej istej
+ * palety ako radar SHMÚ (aj alfa), pod prahom null. Pure.
+ * @returns {[number, number, number, number]|null}
+ */
+export function smoothDbzColor(dbz, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ) {
+  if (!Number.isFinite(dbz) || dbz < minDisplayDbz) return null;
+  const p = ZMAX_DBZ_PALETTE;
+  if (dbz >= p[p.length - 1].min) return [...p[p.length - 1].rgba];
+  let k = 0;
+  while (k < p.length - 2 && dbz >= p[k + 1].min) k += 1;
+  const a = p[k];
+  const b = p[k + 1];
+  const f = Math.max(0, Math.min(1, (dbz - a.min) / (b.min - a.min)));
+  return a.rgba.map((c, i) => Math.round(c + (b.rgba[i] - c) * f));
+}
+
+/**
+ * Prepočet kompozitu do zemepisnej mriežky (riadok 0 = sever) a farbenie, VYHLADENÉ: každý výstupný bod (~2,5 km)
+ * zoberie zdrojové body okolo (±radius, po 1 km) — hodnota = polovica priemeru a polovica maxima ozveny (jadrá
+ * búrok sa nestratia, okraje nie sú zubaté), priehľadnosť podľa podielu bodov s ozvenou (mäkký okraj zrážok),
+ * farba plynulo medzi zastávkami palety a nakoniec jemné rozmazanie (softenRgba). nodata / undetect / slabé
+ * ozveny sú priehľadné. Pure.
  * @param {Float64Array|number[]} values riadky zhora (ODIM), stĺpce zľava
  */
-export function reprojectOpera(values, where, dataWhat, { deg = OPERA_OUT_DEG, radius = 1, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ } = {}) {
+export function reprojectOpera(values, where, dataWhat, { deg = OPERA_OUT_DEG, radius = 1, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ, soften = true } = {}) {
   const g = operaGrid(where);
   if (!g) throw new Error('OPERA: neznáma projekcia');
   const bounds = operaBounds(where);
   const width = Math.round((bounds.east - bounds.west) / deg);
   const height = Math.round((bounds.north - bounds.south) / deg);
-  const rgba = new Uint8ClampedArray(width * height * 4);
+  let rgba = new Uint8ClampedArray(width * height * 4);
   const gain = Number(dataWhat?.gain ?? 1);
   const offset = Number(dataWhat?.offset ?? 0);
   const nodata = Number(dataWhat?.nodata);
@@ -122,6 +141,9 @@ export function reprojectOpera(values, where, dataWhat, { deg = OPERA_OUT_DEG, r
       const col = Math.floor((x - g.xll) / g.xscale);
       const row = Math.floor((top - y) / g.yscale);
       if (col < 0 || row < 0 || col >= g.xsize || row >= g.ysize) continue;
+      let seen = 0;
+      let echoes = 0;
+      let sum = 0;
       let best = -Infinity;
       for (let dr = -radius; dr <= radius; dr += 1) {
         const rr = row + dr;
@@ -130,18 +152,26 @@ export function reprojectOpera(values, where, dataWhat, { deg = OPERA_OUT_DEG, r
           const cc = col + dc;
           if (cc < 0 || cc >= g.xsize) continue;
           const raw = values[rr * g.xsize + cc];
-          if (raw === nodata || raw === undetect || !Number.isFinite(raw)) continue;
+          if (raw === nodata || !Number.isFinite(raw)) continue;
+          seen += 1;
+          if (raw === undetect) continue;
           const dbz = raw * gain + offset;
+          if (dbz < minDisplayDbz) continue;
+          echoes += 1;
+          sum += dbz;
           if (dbz > best) best = dbz;
         }
       }
-      if (best === -Infinity) continue;
-      const color = dbzColor(best, minDisplayDbz);
+      if (!echoes) continue;
+      const color = smoothDbzColor(0.5 * (sum / echoes) + 0.5 * best, minDisplayDbz);
       if (!color) continue;
+      const cover = echoes / seen; // 1 = celé okolie prší, málo = okraj zrážok
       const o = (r * width + c) * 4;
-      rgba[o] = color[0]; rgba[o + 1] = color[1]; rgba[o + 2] = color[2]; rgba[o + 3] = color[3];
+      rgba[o] = color[0]; rgba[o + 1] = color[1]; rgba[o + 2] = color[2];
+      rgba[o + 3] = Math.round(color[3] * Math.min(1, 0.35 + 0.9 * cover));
       echoPixels += 1;
     }
   }
+  if (soften) rgba = softenRgba(rgba, width, height, { dilate: 0, blurRadius: 1, passes: 1 });
   return { rgba, width, height, bounds, echoPixels };
 }
