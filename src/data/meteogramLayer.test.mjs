@@ -26,6 +26,7 @@ function fakeDoc() {
 
 function harness({ pick = () => undefined, pointOk = true } = {}) {
   const fetches = [];
+  const drapes = [];
   const gram = { calls: [], open: false };
   const panel = {
     showLoading(name) { gram.calls.push(['loading', name]); gram.open = true; },
@@ -63,7 +64,7 @@ function harness({ pick = () => undefined, pointOk = true } = {}) {
       return { ok: true, json: async () => CATALOG };
     },
     imageLoader: async (url) => ({ src: url }),
-    primitiveFactory: ({ image, field }) => ({ primitive: { show: false }, material: { uniforms: { image, channel: field.channel } } }),
+    primitiveFactory: ({ image, field }) => { const d = { primitive: { show: false }, material: { uniforms: { image, channel: field.channel } } }; drapes.push(d); return d; },
     particlesFactory: () => ({ isSupported: () => true, setWind() {}, setMix() {}, setRamp() {}, start() {}, stop() {}, destroy() {} }),
     timelineFactory: () => timeline,
     pointsFactory: () => ({ fake: 'points' }),
@@ -77,7 +78,7 @@ function harness({ pick = () => undefined, pointOk = true } = {}) {
   });
   const fire = (type, x, y, extra = {}) => { for (const fn of listeners[type] || []) fn({ clientX: x, clientY: y, button: 0, pointerType: 'mouse', ...extra }); };
   const click = (x = 100, y = 100, moveTo = null) => { fire('pointerdown', x, y); const [ux, uy] = moveTo || [x, y]; fire('pointerup', ux, uy); };
-  return { layer, viewer, fetches, gram, timeline, click, primitives, factoryArgs: () => factoryArgs };
+  return { layer, viewer, fetches, gram, timeline, click, primitives, drapes, factoryArgs: () => factoryArgs };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 15));
@@ -153,4 +154,24 @@ test('chyba servera ukáže v páse „nedostupné", nie prázdnu tabuľku', asy
   } finally { console.warn = warn; }
   assert.equal(h.gram.calls[0][0], 'loading');
   assert.equal(h.gram.calls[1][0], 'error');
+});
+
+test('zapnutý radar nahradí farebné pole (ako Windy), po vypnutí sa pole vráti; radar sa hlási sám', async () => {
+  const { anyRadarActive, _resetRadarPresenceForTest } = await import('./radarPresence.js');
+  const { createShmuRadarLayer } = await import('./shmuRadar.js');
+  _resetRadarPresenceForTest(); // pred init meteo vrstvy — tá sa v init prihlási za poslucháča
+  const h = await enabled();
+  const drape = h.drapes.at(-1);
+  assert.ok(drape, 'pole je nakreslené');
+  assert.equal(drape.primitive.show, true);
+  const radar = createShmuRadarLayer({ id: 'opera-radar', fetchImpl: async () => ({ ok: false, status: 503 }) });
+  radar.init({ scene: { primitives: { add() {}, remove() {} } } });
+  radar.enable();
+  assert.equal(anyRadarActive(), true);
+  assert.equal(drape.primitive.show, false, 'radar pole skryl');
+  radar.disable();
+  assert.equal(anyRadarActive(), false);
+  assert.equal(drape.primitive.show, true, 'po vypnutí radaru sa pole vráti');
+  radar.destroy();
+  h.layer.disable();
 });

@@ -3511,13 +3511,78 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .weather-warn-headline { margin: 0 0 3px; color: #fff; }
 .weather-warn-text { margin: 4px 0 0; color: rgba(224, 247, 255, 0.85); white-space: pre-line; font-size: 10px; line-height: 1.45; }
 .weather-warn-text.instruction { color: #ffd98a; }
+/* Výber vrstiev počasia ako na Windy (2026-10-08; weatherDock.js): vpravo zvislo, na mobile vodorovne. */
+.weather-dock {
+  position: fixed;
+  z-index: 139;
+  top: 190px;
+  right: 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 136px;
+  max-height: calc(100vh - 190px - 2vh - 7.4rem - 70px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  pointer-events: auto;
+}
+.weather-dock[hidden] { display: none; }
+.weather-dock-group { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 6px; background: rgba(3, 12, 18, 0.78); backdrop-filter: blur(6px); }
+.weather-dock-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(224, 247, 255, 0.82);
+  font: 700 10px/1.2 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: var(--cursor-pointer);
+}
+.weather-dock-btn .material-symbols-outlined { font-size: 18px; color: var(--accent); }
+.weather-dock-btn:hover { background: rgba(57, 208, 255, 0.12); color: #fff; }
+.weather-dock-btn.active { background: color-mix(in srgb, var(--accent) 26%, transparent); color: #fff; box-shadow: inset 2px 0 0 var(--accent); }
+.weather-dock-btn.active .material-symbols-outlined { color: #fff; }
+.weather-dock-btn[hidden] { display: none; }
+.weather-dock-levels { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; border-radius: 6px; background: rgba(3, 12, 18, 0.78); }
+.weather-dock-levels[hidden] { display: none; }
+.weather-dock-level { flex: 1 1 40%; padding: 2px 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: rgba(224, 247, 255, 0.7); font: 9px var(--font-mono); cursor: var(--cursor-pointer); }
+.weather-dock-level.active { border-color: var(--accent); color: #fff; }
+.weather-dock-legend { padding: 5px 6px; border-radius: 6px; background: rgba(3, 12, 18, 0.78); }
+.weather-dock-legend[hidden] { display: none; }
+.weather-dock-legend-bar { height: 8px; border-radius: 2px; }
+.weather-dock-legend-labels { display: flex; justify-content: space-between; margin-top: 2px; color: rgba(224, 247, 255, 0.75); font: 9px var(--font-mono); }
+@media (max-width: 620px) {
+  .weather-dock {
+    top: auto;
+    right: 8px;
+    left: 8px;
+    bottom: calc(2vh + 7.4rem + 86px);
+    flex-direction: row;
+    width: auto;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .weather-dock-group { flex-direction: row; flex: none; }
+  .weather-dock-btn { width: auto; flex-direction: column; gap: 1px; min-height: 0; padding: 3px 6px; font-size: 8px; }
+  .weather-dock-btn.active { box-shadow: inset 0 -2px 0 var(--accent); }
+  .weather-dock-levels, .weather-dock-legend { display: none; }
+}
 /* Meteogram — predpoveď pre miesto po kliknutí (2026-10-08, „ako Windy"; meteogramPanel.js). */
 .meteogram {
   position: fixed;
   z-index: 141;
   left: 50%;
   bottom: calc(2vh + 7.4rem + 62px);
-  width: min(1100px, calc(100vw - 32px));
+  /* Vpravo je výber vrstiev počasia (weatherDock, 136 px + 44 px okraj) — pás predpovede ho nesmie prekryť. */
+  width: min(1100px, calc(100vw - 32px), calc(100vw - 400px));
   padding: 8px 10px 6px;
   transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);

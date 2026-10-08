@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
 import { radarLegendStops } from './shmuRadarGrid.js';
 import { awaitImageDecode } from './imageDecode.js';
+import { setRadarActive } from './radarPresence.js';
 
 /**
  * SHMÚ precipitation radar overlay — Slovak 5-minute zmax composite (OKO).
@@ -233,6 +234,7 @@ export function createShmuRadarLayer({
 
     enable() {
       _enabled = true;
+      setRadarActive(id, true);
       // The loop starts at the oldest frame right away — the last ~30 min
       // replay is the whole point of enabling a radar.
       _currentIso = null;
@@ -241,6 +243,7 @@ export function createShmuRadarLayer({
 
     disable() {
       _enabled = false;
+      setRadarActive(id, false);
       animator.stop();
       setFrameVisible(_currentIso, false);
       governorRequestRender(id);
@@ -330,6 +333,7 @@ export function createShmuRadarLayer({
 
     destroy(viewer) {
       _enabled = false;
+      setRadarActive(id, false);
       animator.stop();
       for (const primitive of _primitives.values()) {
         (viewer || _viewer)?.scene?.primitives?.remove?.(primitive);

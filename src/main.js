@@ -19,6 +19,7 @@ import shmuRadarLayer from './data/shmuRadar.js';
 import shmuWarningsLayer from './data/shmuWarningsLayer.js';
 import shmuStationsLayer from './data/shmuStationsLayer.js';
 import operaRadarLayer from './data/operaRadarLayer.js';
+import { createWeatherDock } from './weatherDock.js';
 // Lenivý zástupca: skutočný meteoLayer.js sa dotiahne až pri otvorení vrstvy
 // (obmedzenie zadania — news stránky nesmú ťahať weather kód). Viď meteoLazy.js.
 import meteoLayer from './data/meteoLazy.js';
@@ -543,6 +544,8 @@ async function init() {
     }
     // Restoration starts only after the complete production registry is sealed.
     dataManager.finalizeRegistrations(LAYER_STATE_REGISTRY);
+    // Výber vrstiev počasia ako na Windy (2026-10-08) — ukáže sa len pri zapnutej meteo vrstve.
+    try { createWeatherDock(document, { dataManager, t }); } catch (error) { console.warn('[WeatherDock] failed:', error?.message || error); }
     if (import.meta.env.DEV) {
       window.Cesium = Cesium; // dev-only debug aid (namespace, not a secret)
       window.__gevQaRegisterLayer = (targetManager, layerModule) => {

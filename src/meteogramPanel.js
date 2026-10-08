@@ -50,9 +50,22 @@ export function bottomAboveAnchor(anchorRect, viewportHeight, gap = 8) {
   return Math.max(gap, Math.round(viewportHeight - anchorRect.top + gap));
 }
 
+/**
+ * Nad čím pás stojí: na mobile nad vodorovným pásom vrstiev počasia (weatherDock.js), inak nad časovou osou.
+ * Zvislý dock vpravo (počítač) sa neberie.
+ */
+export function meteogramAnchor(doc) {
+  const dock = doc.getElementById?.('weather-dock');
+  if (dock && !dock.hidden) {
+    const r = dock.getBoundingClientRect();
+    if (r.width > r.height * 2) return dock;
+  }
+  return doc.getElementById?.('meteo-timeline');
+}
+
 export function createMeteogramPanel(doc, {
   t, lang = () => 'sk', onClose = () => {}, onPickTime = () => {}, parent = doc.body,
-  anchor = () => doc.getElementById('meteo-timeline'),
+  anchor = () => meteogramAnchor(doc),
   warningsFor = createPointWarningsLookup(),
   stationFor = createNearestStationLookup(),
   now = () => Date.now(),
