@@ -245,6 +245,14 @@ export const DATA_CREDITS = [
       '(CC BY 4.0)',
   },
   {
+    key: 'shmu-stations',
+    html:
+      'Merania staníc: ' +
+      '<a href="https://opendata.shmu.sk" target="_blank" rel="noopener">SHMÚ — opendata.shmu.sk</a> (CC BY 4.0) · polohy ' +
+      '<a href="https://oscar.wmo.int/surface" target="_blank" rel="noopener">WMO OSCAR</a> a ' +
+      '<a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a> (CC BY 4.0)',
+  },
+  {
     key: 'shmu-warnings',
     html:
       'Výstrahy: ' +

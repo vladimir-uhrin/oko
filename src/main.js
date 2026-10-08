@@ -17,6 +17,7 @@ import volcanoesLayer from './data/volcanoes.js';
 import naturalEventsLayer from './data/naturalEvents.js';
 import shmuRadarLayer from './data/shmuRadar.js';
 import shmuWarningsLayer from './data/shmuWarningsLayer.js';
+import shmuStationsLayer from './data/shmuStationsLayer.js';
 // Lenivý zástupca: skutočný meteoLayer.js sa dotiahne až pri otvorení vrstvy
 // (obmedzenie zadania — news stránky nesmú ťahať weather kód). Viď meteoLazy.js.
 import meteoLayer from './data/meteoLazy.js';
@@ -501,6 +502,8 @@ async function init() {
     dataManager.register(shmuRadarLayer);
     // Výstrahy SHMÚ po okresoch (2026-10-08, sekcia POČASIE).
     dataManager.register(shmuWarningsLayer);
+    // Merania automatických staníc SHMÚ (2026-10-08, sekcia POČASIE).
+    dataManager.register(shmuStationsLayer);
     // Meteorológia sveta (2026-09-08, prototyp GFS: pole + GPU častice + os).
     dataManager.register(meteoLayer);
     dataManager.register(satellitesLayer);

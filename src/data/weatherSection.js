@@ -12,7 +12,7 @@
 import { t } from '../i18n.js';
 
 /** Vrstvy sekcie v poradí riadkov: predpoveď pre celý svet, potom meranie nad Slovenskom. */
-export const WEATHER_LAYER_IDS = Object.freeze(['meteo-gfs', 'shmu-warnings', 'shmu-radar']);
+export const WEATHER_LAYER_IDS = Object.freeze(['meteo-gfs', 'shmu-warnings', 'shmu-stations', 'shmu-radar']);
 
 export function isWeatherLayer(id) { return WEATHER_LAYER_IDS.includes(id); }
 
@@ -27,6 +27,7 @@ export function weatherSummary(layers, translate = t) {
   return [
     translate('weather.summary-globe', { state: state('meteo-gfs') }),
     translate('weather.summary-warnings', { state: translate(byId.get('shmu-warnings')?.enabled ? 'weather.on-pl' : 'weather.off-pl') }),
+    translate('weather.summary-stations', { state: translate(byId.get('shmu-stations')?.enabled ? 'weather.on-pl' : 'weather.off-pl') }),
     translate('weather.summary-radar', { state: state('shmu-radar') }),
   ].join(' · ');
 }

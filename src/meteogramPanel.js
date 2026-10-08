@@ -10,6 +10,7 @@ import {
 } from './data/meteogram.js';
 import { columnWarningLevels, createPointWarningsLookup, isActiveAt } from './data/meteogramWarnings.js';
 import { WARNING_LEVELS, warningTimeLabel } from './data/weatherWarnings.js';
+import { createNearestStationLookup, observedSummary } from './data/shmuStations.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const METEOGRAM_COL_PX = 42;
@@ -53,6 +54,7 @@ export function createMeteogramPanel(doc, {
   t, lang = () => 'sk', onClose = () => {}, onPickTime = () => {}, parent = doc.body,
   anchor = () => doc.getElementById('meteo-timeline'),
   warningsFor = createPointWarningsLookup(),
+  stationFor = createNearestStationLookup(),
   now = () => Date.now(),
 } = {}) {
   const root = doc.createElement('section');
@@ -92,9 +94,14 @@ export function createMeteogramPanel(doc, {
   warn.className = 'meteogram-warn';
   warn.hidden = true;
 
+  // Namerané teraz na najbližšej stanici SHMÚ (do 20 km) — porovnanie s predpoveďou.
+  const observed = doc.createElement('p');
+  observed.className = 'meteogram-observed';
+  observed.hidden = true;
+
   const status = doc.createElement('p');
   status.className = 'meteogram-status';
-  root.append(head, warn, body, status);
+  root.append(head, warn, observed, body, status);
   let warnToken = 0;
   parent.append(root);
 
@@ -150,12 +157,25 @@ export function createMeteogramPanel(doc, {
     doc.defaultView && place();
   }
 
+  function renderObserved(hit) {
+    const s = hit?.station;
+    const values = s ? observedSummary(s, lang(), t('st.wind').toLowerCase(), t('meteo.gram.row-gust').split(' ')[0].toLowerCase()) : '';
+    observed.hidden = !values;
+    if (!values) { observed.textContent = ''; return; }
+    const dist = hit.km >= 1 ? ` (${Math.round(hit.km)} km)` : '';
+    observed.textContent = t('meteo.gram.observed', { name: s.name, dist, values, at: warningTimeLabel(new Date(s.at).toISOString(), lang()) });
+    observed.title = t('st.source');
+    if (doc.defaultView) place();
+  }
+
   function render(model) {
     const { series, columns: cols, name, coords } = model;
     const token = ++warnToken;
     renderWarnings(null);
+    renderObserved(null);
     if (Number.isFinite(model.lat) && Number.isFinite(model.lon)) {
       Promise.resolve(warningsFor(model.lat, model.lon)).then((r) => { if (token === warnToken && !root.hidden) renderWarnings(r); }).catch(() => {});
+      Promise.resolve(stationFor(model.lat, model.lon)).then((r) => { if (token === warnToken && !root.hidden) renderObserved(r); }).catch(() => {});
     }
     columns = cols;
     const offset = series.utcOffsetSec || 0;
@@ -266,6 +286,7 @@ export function createMeteogramPanel(doc, {
     showLoading(name) {
       warnToken += 1;
       renderWarnings(null);
+      renderObserved(null);
       title.textContent = name;
       sub.textContent = '';
       labels.replaceChildren();

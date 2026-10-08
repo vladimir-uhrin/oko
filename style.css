@@ -3594,6 +3594,8 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .meteogram-warn-source { margin: 0; color: rgba(224, 247, 255, 0.55); font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; }
 .meteogram-cell.hour.warned { box-shadow: inset 0 3px 0 var(--warn, #ffd200); color: #fff; }
 .meteogram-cell.hour.warned.active { box-shadow: inset 0 3px 0 var(--warn, #ffd200), inset 0 0 0 1px var(--accent); }
+.meteogram-observed { margin: 0 0 6px; padding: 3px 6px; border-left: 3px solid #7fe08a; background: rgba(127, 224, 138, 0.1); color: #e8fff0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meteogram-observed[hidden] { display: none; }
 .meteogram-status { margin: 5px 0 0; color: #ffb347; font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; }
 .meteogram-status.error { color: #ff6b6b; }
 @media (max-width: 620px) {

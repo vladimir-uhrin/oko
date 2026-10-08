@@ -77,6 +77,7 @@ import { METEO_FIELDS, forecastSteps } from './src/data/meteoField.js';
 import { rasterizeMeteoField, runIsoOf } from './src/data/meteoRasterize.js';
 import { createMeteoPointService } from './src/data/meteoPointService.js';
 import { createWeatherWarningsService } from './src/data/weatherWarningsService.js';
+import { createShmuStationsService } from './src/data/shmuStationsService.js';
 import {
   GFW_API_BASE as GFW_PRESENCE_API_BASE,
   GFW_DAY_STEP_BACK_MAX,
@@ -11468,6 +11469,55 @@ function regionalBriefProxy() {
  */
 const _weatherWarningsService = createWeatherWarningsService();
 const _weatherWarningsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 240 });
+/**
+ * Merania automatických staníc SHMÚ (2026-10-08): GET /api/shmu-stations → { stations[], observedAt, fetchedAt, stale? }.
+ * opendata.shmu.sk climate/now (CC BY 4.0) cez rovnaký TLS medzičlánok ako radar (config/ca/), cache 5 min
+ * a spojené dopyty v src/data/shmuStationsService.js, per-IP strop.
+ */
+const _shmuStationsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 240 });
+function shmuStationsProxy() {
+  let extraCa = null;
+  try { extraCa = fs.readFileSync(path.join(__dirname, 'config', 'ca', 'sectigo-public-server-authentication-ca-dv-r36.pem'), 'utf8'); } catch { /* len systémové korene */ }
+  const agent = new https.Agent({ keepAlive: true, ca: extraCa ? [...tls.rootCertificates, extraCa] : undefined });
+  const MAX_BYTES = 4 * 1024 * 1024;
+  const fetchText = (url) => new Promise((resolve, reject) => {
+    const req = https.get(url, { agent, headers: { 'user-agent': 'OKO shmu-stations (okolive.sk; cached 5 min)' } }, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) { res.resume(); reject(new Error(`SHMÚ HTTP ${res.statusCode}`)); return; }
+      const chunks = [];
+      let n = 0;
+      res.on('data', (c) => { n += c.length; if (n > MAX_BYTES) { req.destroy(new Error('SHMÚ: oversized')); return; } chunks.push(c); });
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      res.on('error', reject);
+    });
+    req.setTimeout(20_000, () => req.destroy(new Error('SHMÚ: timeout')));
+    req.on('error', reject);
+  });
+  let meta = null;
+  const loadMeta = () => {
+    if (!meta) meta = JSON.parse(fs.readFileSync(path.join(__dirname, 'public', 'meteo-stations', 'shmu-aws.json'), 'utf8'));
+    return meta;
+  };
+  const service = createShmuStationsService({ fetchText, meta: loadMeta });
+  function install(middlewares) {
+    middlewares.use('/api/shmu-stations', async (req, res) => {
+      const send = (status, obj, headers = {}) => {
+        res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+        res.end(JSON.stringify(obj));
+      };
+      if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
+      if (!_shmuStationsRateLimiter(clientKey(req))) return send(429, { error: 'Rate limit exceeded' }, { 'Retry-After': '10' });
+      const result = await service.get();
+      if (result.status !== 200) return send(result.status, { error: result.error }, { 'Cache-Control': 'no-store' });
+      return send(200, result.payload, { 'Cache-Control': 'public, max-age=120', 'X-Shmu-Stations': result.cache || '' });
+    });
+  }
+  return {
+    name: 'shmu-stations-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function weatherWarningsProxy() {
   function install(middlewares) {
     middlewares.use('/api/weather-warnings', async (req, res) => {
@@ -11889,6 +11939,7 @@ export default defineConfig(({ mode }) => {
       regionalBriefProxy(),
       weatherEffectsProxy(),
       weatherWarningsProxy(),
+      shmuStationsProxy(),
       cctvProxy(),
       radioBrowserProxy(),
       gbfsProxy(),
