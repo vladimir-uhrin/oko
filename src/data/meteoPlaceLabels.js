@@ -59,6 +59,14 @@ export function townVisibleUntilM(pop) {
   return 70_000;
 }
 
+/** Slovenské mestá majú pri prekrývaní prednosť (Bratislava pred väčšou Viedňou) — OKO je zo Slovenska. */
+export const HOME_COUNTRY = 'SK';
+export const HOME_PRIORITY_FACTOR = 10;
+/** Priorita mena pri prekrývaní: počet obyvateľov, domáce mestá ×10. Pure. */
+export function labelPriority(place) {
+  return (Number(place?.pop) || 0) * (place?.home ? HOME_PRIORITY_FACTOR : 1);
+}
+
 /** Odhad rámčeka popisku na obrazovke (12 px tučné písmo, odsadenie 7 px vpravo od bodu; s hodnotou dva riadky). Pure. */
 export function labelBox(x, y, name, twoLines = false) {
   const w = 8 + String(name).length * 7.2;
@@ -94,7 +102,7 @@ export function declutterLabels(items, max = LABEL_MAX) {
  * Správca popiskov nad poľom. Prepočíta sa po pohybe kamery (najviac raz za 250 ms).
  * @param {{ viewer: object, doFetch: Function, bigPlaces?: Array<{id: string, name: string, lat: number, lon: number, pop: number, capital?: boolean}>, bigVisibleUntilM: Function, requestRender?: Function, baseUrl?: string }} input
  */
-export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVisibleUntilM, requestRender = () => {}, baseUrl = TOWNS_BASE_URL, valueAt = () => null }) {
+export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVisibleUntilM, requestRender = () => {}, baseUrl = TOWNS_BASE_URL, valueAt = () => null, lang = () => 'sk' }) {
   const scene = viewer.scene;
   const labels = new Cesium.LabelCollection();
   scene.primitives.add(labels);
@@ -103,10 +111,29 @@ export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVi
   try { viewer.creditDisplay?.addStaticCredit?.(credit); } catch { /* bez kreditov (testy) */ }
   const shown = new Map(); // id → Label
   const places = []; // { id, name, lat, lon, pop, until, pos }
-  const addPlace = (id, name, lat, lon, pop, until) => {
-    places.push({ id, name, lat, lon, pop, until, pos: Cesium.Cartesian3.fromDegrees(lon, lat, LABEL_HEIGHT_M) });
+  // Meno v jazyku používateľa ako na Windy: slovenský tvar (Praha, Viedeň), keď ho GeoNames má.
+  const addPlace = (id, name, lat, lon, pop, until, nameSk = null) => {
+    places.push({ id, name, nameSk, lat, lon, pop, until, pos: Cesium.Cartesian3.fromDegrees(lon, lat, LABEL_HEIGHT_M) });
   };
-  for (const p of bigPlaces) addPlace(p.id, p.name, p.lat, p.lon, (Number(p.pop) || 0) * 1000, bigVisibleUntilM(Number(p.pop) || 0, p.capital === true));
+  const nameOf = (p) => (lang() === 'sk' && p.nameSk ? p.nameSk : p.name);
+  for (const p of bigPlaces) {
+    addPlace(p.id, p.name, p.lat, p.lon, (Number(p.pop) || 0) * 1000, bigVisibleUntilM(Number(p.pop) || 0, p.capital === true));
+    places[places.length - 1].home = p.iso2 === HOME_COUNTRY;
+  }
+  // Slovenské mená veľkých miest (Natural Earth má len anglické) — index riadku places.json = číslo v id „place:N".
+  void (async () => {
+    try {
+      const response = await doFetch(`${baseUrl}/ne-sk.json`);
+      if (!response?.ok) return;
+      const map = await response.json();
+      if (destroyed || !map) return;
+      for (const p of places) {
+        const m = /^place:(\d+)$/.exec(p.id);
+        if (m && map[m[1]]) p.nameSk = map[m[1]];
+      }
+      refresh(true);
+    } catch { /* ostanú pôvodné mená */ }
+  })();
   let tierA = 'none'; // none | loading | done
   const cells = new Map(); // key → 'loading' | 'done'
   let visible = true;
@@ -121,7 +148,7 @@ export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVi
       if (!response?.ok) return;
       const rows = await response.json();
       if (destroyed || !Array.isArray(rows)) return;
-      rows.forEach(([name, lat, lon, pop], i) => { if (name && Number.isFinite(lat) && Number.isFinite(lon)) addPlace(`${prefix}${i}`, name, lat, lon, Number(pop) || 0, townVisibleUntilM(Number(pop) || 0)); });
+      rows.forEach(([name, lat, lon, pop, nameSk], i) => { if (name && Number.isFinite(lat) && Number.isFinite(lon)) addPlace(`${prefix}${i}`, name, lat, lon, Number(pop) || 0, townVisibleUntilM(Number(pop) || 0), nameSk || null); });
       refresh(true);
     } catch { /* bez menších sídiel ostanú veľké mestá */ }
   };
@@ -163,7 +190,7 @@ export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVi
         if (!win || win.x < -50 || win.y < -20 || win.x > scene.canvas.clientWidth + 10 || win.y > scene.canvas.clientHeight + 20) continue;
         let value = null;
         try { value = valueAt(p.lat, p.lon); } catch { value = null; }
-        candidates.push({ id: p.id, x: win.x, y: win.y, name: p.name, value, priority: p.pop, place: p });
+        candidates.push({ id: p.id, x: win.x, y: win.y, name: nameOf(p), value, priority: labelPriority(p), place: p });
       }
     }
     const keep = declutterLabels(candidates);

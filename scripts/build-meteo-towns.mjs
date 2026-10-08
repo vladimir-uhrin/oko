@@ -6,7 +6,7 @@
 // Výstup do public/meteo-towns/ (servíruje dev aj statický server, do prehliadača ide len to, čo je v zábere):
 //   a.json            — sídla 15 000 – 99 999 obyvateľov celého sveta (načíta sa raz pod 2 500 km),
 //   b/<lat>_<lon>.json — menšie sídla v dlaždiciach 2° × 2° (načítajú sa len viditeľné, pod 400 km).
-// Riadok = [meno, lat, lon, obyvatelia]. Sídla nad 100 000 a tie do 8 km od mesta z places.json
+// Riadok = [meno, lat, lon, obyvatelia, slovenské meno?] (slovenské tvary: GeoNames alternateNamesV2, jazyk sk, scripts/build-sk-place-names.mjs); ne-sk.json = slovenské mená miest z places.json podľa indexu riadku. Sídla nad 100 000 a tie do 8 km od mesta z places.json
 // (Natural Earth, bodky s kartou) sa vynechajú — tie majú meno už pri bodke.
 //
 // Spustenie (súbory stiahnuť z https://download.geonames.org/export/dump/ a rozbaliť):
@@ -17,7 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { PLACE_CELL_DEG, PLACE_TIER_A_MIN, PLACE_TIER_A_MAX, placeCellKey } from '../src/data/meteoPlaceLabels.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const [citiesPath, skPath] = process.argv.slice(2);
+const [citiesPath, skPath, skNamesPath] = process.argv.slice(2);
+// Voliteľne slovenské tvary mien (scripts/build-sk-place-names.mjs) — piaty prvok riadku, len ak sa líši.
+const skNames = skNamesPath ? JSON.parse(fs.readFileSync(skNamesPath, 'utf8')) : {};
 if (!citiesPath || !skPath) { console.error('použitie: node scripts/build-meteo-towns.mjs cities500.txt SK.txt'); process.exit(2); }
 
 const SK_CODES = new Set(['PPL', 'PPLA', 'PPLA2', 'PPLA3', 'PPLA4', 'PPLC']);
@@ -44,7 +46,10 @@ function take(file, accept) {
     const lat = Number(latS);
     const lon = Number(lonS);
     if (!name || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    byId.set(id, [name, Math.round(lat * 1000) / 1000, Math.round(lon * 1000) / 1000, pop]);
+    const row = [name, Math.round(lat * 1000) / 1000, Math.round(lon * 1000) / 1000, pop];
+    const sk = skNames[id];
+    if (sk && sk !== name) row.push(sk);
+    byId.set(id, row);
   }
 }
 take(citiesPath, () => true);
@@ -66,6 +71,26 @@ const outDir = path.join(root, 'public', 'meteo-towns');
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(path.join(outDir, 'b'), { recursive: true });
 fs.writeFileSync(path.join(outDir, 'a.json'), JSON.stringify(tierA.sort(byPop)));
+// Slovenské mená veľkých miest z places.json (Natural Earth má len anglické): najväčšie sídlo
+// GeoNames do 20 km od mesta; { index riadku places.json: meno }.
+const neSk = {};
+const all = [...byId.values()];
+ne.forEach(([name, lat, lon], index) => {
+  let best = null;
+  for (const row of all) {
+    const dLat = (row[1] - lat) * 111;
+    if (Math.abs(dLat) > 20) continue;
+    const dLon = (row[2] - lon) * 111 * Math.cos((lat * Math.PI) / 180);
+    if (dLat * dLat + dLon * dLon > 400) continue;
+    if (!best || row[3] > best[3]) best = row;
+  }
+  // Slovenský tvar, inak meno GeoNames, ak je to to isté meno s diakritikou („Kosice" → „Košice").
+  const plain = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const pick = best && (best[4] || (plain(best[0]) === plain(name) ? best[0] : null));
+  if (pick && pick !== name) neSk[index] = pick;
+});
+fs.writeFileSync(path.join(outDir, 'ne-sk.json'), JSON.stringify(neSk));
+console.log(`ne-sk.json: ${Object.keys(neSk).length} slovenských mien veľkých miest`);
 let bBytes = 0;
 for (const [key, rows] of cells) {
   const text = JSON.stringify(rows.sort(byPop));

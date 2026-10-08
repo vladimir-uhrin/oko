@@ -414,7 +414,7 @@ export function createMeteoLayer({
       _mapOverlay = mapOverlayFactory({ coast: _mapData.coast, borders: _mapData.borders, places: _places || [] });
       _mapOverlay.show = _heightFade > 0.02;
       _viewer.scene.primitives.add(_mapOverlay);
-      _placeLabels = placeLabelsFactory({ viewer: _viewer, doFetch, bigPlaces: _places || [], bigVisibleUntilM: placeVisibleUntilM, requestRender: () => governorRequestRender('meteo'), valueAt: labelTempAt });
+      _placeLabels = placeLabelsFactory({ viewer: _viewer, doFetch, bigPlaces: _places || [], bigVisibleUntilM: placeVisibleUntilM, requestRender: () => governorRequestRender('meteo'), valueAt: labelTempAt, lang });
       gridFor('temp');
       _placeLabels?.setVisible(_heightFade > 0.02);
       governorRequestRender('meteo');

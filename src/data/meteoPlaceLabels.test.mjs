@@ -76,3 +76,32 @@ test('teplota pod menom ako na Windy: dva riadky, väčší rámček, bez hodnot
   ]);
   assert.ok(keep.has('a') && !keep.has('b'), 'druhý riadok s teplotou sa počíta do prekryvu');
 });
+
+test('slovenské mená ako Windy v jazyku používateľa: veľké mestá Praha, Viedeň; sídla nesú slovenský tvar piatym prvkom', () => {
+  const base = new URL('../../public/meteo-towns/', import.meta.url);
+  const neSk = JSON.parse(readFileSync(new URL('ne-sk.json', base), 'utf8'));
+  const places = JSON.parse(readFileSync(new URL('./local_data/natural_earth/places.json', import.meta.url), 'utf8')).places;
+  const sk = (en) => neSk[places.findIndex((r) => r[0] === en)];
+  assert.equal(sk('Prague'), 'Praha');
+  assert.equal(sk('Vienna'), 'Viedeň');
+  assert.equal(sk('Warsaw'), 'Varšava');
+  assert.equal(sk('Munich'), 'Mníchov');
+  const a = JSON.parse(readFileSync(new URL('a.json', base), 'utf8'));
+  const withSk = a.filter((r) => typeof r[4] === 'string');
+  assert.ok(withSk.length > 50, 'aj menšie mestá majú slovenský tvar, kde ho GeoNames pozná');
+  assert.ok(withSk.every((r) => r[4] !== r[0]), 'piaty prvok len keď sa líši');
+  const src = readFileSync(new URL('./meteoPlaceLabels.js', import.meta.url), 'utf8');
+  assert.match(src, /const nameOf = \(p\) => \(lang\(\) === 'sk' && p\.nameSk \? p\.nameSk : p\.name\);/, 'po anglicky ostáva pôvodné meno');
+});
+
+test('slovenské mesto vyhrá prekryv nad väčším zahraničným (Bratislava pred Viedňou)', async () => {
+  const { labelPriority } = await import('./meteoPlaceLabels.js');
+  const vienna = { pop: 1_900_000, home: false };
+  const bratislava = { pop: 423_000, home: true };
+  assert.ok(labelPriority(bratislava) > labelPriority(vienna));
+  const keep = declutterLabels([
+    { id: 'wien', x: 100, y: 100, name: 'Viedeň', priority: labelPriority(vienna) },
+    { id: 'ba', x: 110, y: 104, name: 'Bratislava', priority: labelPriority(bratislava) },
+  ]);
+  assert.ok(keep.has('ba') && !keep.has('wien'));
+});
