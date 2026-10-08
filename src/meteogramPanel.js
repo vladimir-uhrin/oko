@@ -8,6 +8,8 @@
 import {
   columnIndexForTime, meteogramDays, meteogramHour, rampCssColor, utcOffsetLabel, windArrowRotation,
 } from './data/meteogram.js';
+import { columnWarningLevels, createPointWarningsLookup, isActiveAt } from './data/meteogramWarnings.js';
+import { WARNING_LEVELS, warningTimeLabel } from './data/weatherWarnings.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 export const METEOGRAM_COL_PX = 42;
@@ -50,6 +52,8 @@ export function bottomAboveAnchor(anchorRect, viewportHeight, gap = 8) {
 export function createMeteogramPanel(doc, {
   t, lang = () => 'sk', onClose = () => {}, onPickTime = () => {}, parent = doc.body,
   anchor = () => doc.getElementById('meteo-timeline'),
+  warningsFor = createPointWarningsLookup(),
+  now = () => Date.now(),
 } = {}) {
   const root = doc.createElement('section');
   root.id = 'meteogram';
@@ -83,9 +87,15 @@ export function createMeteogramPanel(doc, {
   scroller.append(grid);
   body.append(labels, scroller);
 
+  // Výstraha SHMÚ pre okres miesta (meteogramWarnings.js) — pásik nad tabuľkou, len keď nejaká je.
+  const warn = doc.createElement('div');
+  warn.className = 'meteogram-warn';
+  warn.hidden = true;
+
   const status = doc.createElement('p');
   status.className = 'meteogram-status';
-  root.append(head, body, status);
+  root.append(head, warn, body, status);
+  let warnToken = 0;
   parent.append(root);
 
   let columns = [];
@@ -115,8 +125,38 @@ export function createMeteogramPanel(doc, {
     for (const cell of grid.querySelectorAll('[data-col]')) cell.classList.toggle('active', Number(cell.dataset.col) === i);
   }
 
+  /** Pásik výstrah + farebný okraj hodín, keď výstraha platí. Prázdny zoznam pásik skryje. */
+  function renderWarnings(result) {
+    const list = result?.warnings || [];
+    warn.hidden = !list.length;
+    if (!list.length) { warn.replaceChildren(); return; }
+    const lang0 = lang();
+    warn.replaceChildren(...list.map((w) => {
+      const item = el('p', 'meteogram-warn-item');
+      const color = WARNING_LEVELS[w.level]?.color || '#ffd200';
+      item.style.setProperty('--warn', color);
+      const chip = el('span', 'meteogram-warn-chip', `${t('warn.degree', { n: WARNING_LEVELS[w.level]?.degree ?? '?' })} · ${t(`warn.type.${w.type}`)}`);
+      const text = el('span', 'meteogram-warn-text', `${(lang0 === 'en' && w.eventEn) || w.event} · ${warningTimeLabel(w.onset, lang0)} – ${warningTimeLabel(w.expires, lang0)} · ${t(isActiveAt(w, now()) ? 'warn.active' : 'warn.upcoming')}`);
+      text.title = (lang0 === 'en' && w.headlineEn) || w.headline || '';
+      item.append(chip, text);
+      return item;
+    }), el('p', 'meteogram-warn-source', t('meteo.gram.warn-source', { name: result.district.name })));
+    const levels = columnWarningLevels(columns, list);
+    for (const cell of grid.querySelectorAll('.meteogram-cell.hour')) {
+      const lv = levels[Number(cell.dataset.col)];
+      cell.classList.toggle('warned', Boolean(lv?.level));
+      if (lv?.color) cell.style.setProperty('--warn', lv.color); else cell.style.removeProperty('--warn');
+    }
+    doc.defaultView && place();
+  }
+
   function render(model) {
     const { series, columns: cols, name, coords } = model;
+    const token = ++warnToken;
+    renderWarnings(null);
+    if (Number.isFinite(model.lat) && Number.isFinite(model.lon)) {
+      Promise.resolve(warningsFor(model.lat, model.lon)).then((r) => { if (token === warnToken && !root.hidden) renderWarnings(r); }).catch(() => {});
+    }
     columns = cols;
     const offset = series.utcOffsetSec || 0;
     title.textContent = name || coords;
@@ -224,6 +264,8 @@ export function createMeteogramPanel(doc, {
   return {
     element: root,
     showLoading(name) {
+      warnToken += 1;
+      renderWarnings(null);
       title.textContent = name;
       sub.textContent = '';
       labels.replaceChildren();

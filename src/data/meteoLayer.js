@@ -658,7 +658,7 @@ export function createMeteoLayer({
       if (token !== _gramToken) return;
       const columns = meteogramColumns(series, { nowMs: now() });
       if (!columns.length) throw new Error('empty forecast');
-      _meteogram.showModel({ series, columns, name, coords });
+      _meteogram.showModel({ series, columns, name, coords, lat, lon });
     } catch (error) {
       if (token !== _gramToken) return;
       console.warn('[Data:Meteo] meteogram failed:', error?.message || error);

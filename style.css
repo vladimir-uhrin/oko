@@ -3586,6 +3586,14 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .meteogram-cell.active { box-shadow: inset 0 0 0 1px var(--accent); }
 .meteogram-cell.hour.active { color: var(--accent); font-weight: 700; }
 .meteogram-cell:hover { outline: 1px solid rgba(255, 255, 255, 0.35); outline-offset: -1px; }
+.meteogram-warn { display: grid; gap: 3px; margin: 0 0 6px; }
+.meteogram-warn[hidden] { display: none; }
+.meteogram-warn-item { display: flex; align-items: baseline; gap: 8px; margin: 0; padding: 3px 6px; border-left: 3px solid var(--warn, #ffd200); background: color-mix(in srgb, var(--warn, #ffd200) 14%, transparent); min-width: 0; }
+.meteogram-warn-chip { flex: none; padding: 1px 6px; border-radius: 3px; background: var(--warn, #ffd200); color: #111; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.meteogram-warn-text { color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meteogram-warn-source { margin: 0; color: rgba(224, 247, 255, 0.55); font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; }
+.meteogram-cell.hour.warned { box-shadow: inset 0 3px 0 var(--warn, #ffd200); color: #fff; }
+.meteogram-cell.hour.warned.active { box-shadow: inset 0 3px 0 var(--warn, #ffd200), inset 0 0 0 1px var(--accent); }
 .meteogram-status { margin: 5px 0 0; color: #ffb347; font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; }
 .meteogram-status.error { color: #ff6b6b; }
 @media (max-width: 620px) {
