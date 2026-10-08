@@ -3499,6 +3499,87 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .meteo-timeline-label { color: #fff; font-weight: 700; }
 .meteo-timeline-run { color: rgba(224, 247, 255, 0.7); font-size: 8px; }
 .meteo-timeline-status { color: #ffb347; font-size: 8px; letter-spacing: 0.12em; }
+/* Meteogram — predpoveď pre miesto po kliknutí (2026-10-08, „ako Windy"; meteogramPanel.js). */
+.meteogram {
+  position: fixed;
+  z-index: 141;
+  left: 50%;
+  bottom: calc(2vh + 7.4rem + 62px);
+  width: min(1100px, calc(100vw - 32px));
+  padding: 8px 10px 6px;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 6px;
+  background: rgba(3, 12, 18, 0.9);
+  color: var(--text);
+  font: 10px/1.3 var(--font-mono);
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+.meteogram[hidden] { display: none; }
+.meteogram-head { display: flex; align-items: baseline; gap: 10px; margin: 0 26px 6px 0; min-width: 0; }
+.meteogram-title { margin: 0; color: #fff; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meteogram-sub { margin: 0; color: rgba(224, 247, 255, 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meteogram-close {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  border: 0;
+  background: transparent;
+  color: rgba(224, 247, 255, 0.75);
+  font: 18px var(--font-mono);
+  cursor: var(--cursor-pointer);
+}
+.meteogram-close:hover { color: #fff; }
+.meteogram-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px; }
+.meteogram-labels { display: grid; grid-auto-rows: 22px; grid-template-rows: 16px 16px 34px; align-items: center; color: color-mix(in srgb, var(--accent) 75%, white); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+.meteogram-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.meteogram-grid { display: grid; grid-auto-rows: 22px; grid-template-rows: 16px 16px 34px; width: max-content; }
+.meteogram-row { display: grid; align-items: stretch; }
+.meteogram-row.days, .meteogram-row.hours { color: rgba(224, 247, 255, 0.7); }
+.meteogram-day { padding-left: 4px; border-left: 1px solid rgba(57, 208, 255, 0.35); color: #fff; font-weight: 700; white-space: nowrap; overflow: hidden; line-height: 16px; }
+.meteogram-row.curve svg { display: block; }
+.meteogram-curve { fill: none; stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; }
+.meteogram-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: var(--cursor-pointer);
+}
+.meteogram-cell.hour { color: rgba(224, 247, 255, 0.7); }
+.meteogram-cell.value { font-weight: 700; text-shadow: 0 0 3px rgba(0, 0, 0, 0.85); }
+.meteogram-cell.precip::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: var(--bar, 0%);
+  background: rgba(57, 150, 255, 0.55);
+}
+.meteogram-cell.precip { color: #cfe9ff; z-index: 0; }
+.meteogram-cell.clouds { background: rgba(200, 210, 220, calc(var(--cover, 0) * 0.45)); color: rgba(255, 255, 255, 0.85); }
+.meteogram-arrow { display: inline-block; color: #fff; font-size: 13px; line-height: 1; }
+.meteogram-cell.active { box-shadow: inset 0 0 0 1px var(--accent); }
+.meteogram-cell.hour.active { color: var(--accent); font-weight: 700; }
+.meteogram-cell:hover { outline: 1px solid rgba(255, 255, 255, 0.35); outline-offset: -1px; }
+.meteogram-status { margin: 5px 0 0; color: #ffb347; font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; }
+.meteogram-status.error { color: #ff6b6b; }
+@media (max-width: 620px) {
+  .meteogram { width: calc(100vw - 16px); padding: 6px 6px 4px; }
+  .meteogram-labels { font-size: 8px; letter-spacing: 0.02em; }
+}
 /* Karta mesta pri myši (meteorológia, 2026-09-08 noc; vzor earthquake-hover-card). */
 .meteo-place-card {
   position: fixed;

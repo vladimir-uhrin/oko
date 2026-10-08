@@ -14,6 +14,7 @@
  * je naraz najviac LABEL_MAX — LabelCollection drží len to, čo je práve vidieť.
  */
 import * as Cesium from 'cesium';
+import { nearestPlaceName } from './meteogram.js';
 
 export const PLACE_CELL_DEG = 2;
 export const PLACE_TIER_A_MIN = 15_000;
@@ -239,6 +240,10 @@ export function createPlaceLabelManager({ viewer, doFetch, bigPlaces = [], bigVi
       refresh(true);
     },
     refresh: () => refresh(true),
+    /** Meno sídla pri bode (meteogram po kliknutí) z už načítaných miest, v jazyku používateľa. */
+    nearestName(lat, lon) {
+      return nearestPlaceName(places.map((p) => ({ lat: p.lat, lon: p.lon, pop: p.pop, name: nameOf(p) })), lat, lon);
+    },
     get count() { return shown.size; },
     get loadedPlaces() { return places.length; },
     destroy() {

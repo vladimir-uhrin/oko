@@ -75,6 +75,7 @@ import { ACARS_ATTRIBUTION, ACARS_ATTRIBUTION_URL, ACARS_NOISE_LABELS, compactAi
 import { parseNetcdf3 } from './src/data/netcdf3.js';
 import { METEO_FIELDS, forecastSteps } from './src/data/meteoField.js';
 import { rasterizeMeteoField, runIsoOf } from './src/data/meteoRasterize.js';
+import { createMeteoPointService } from './src/data/meteoPointService.js';
 import {
   GFW_API_BASE as GFW_PRESENCE_API_BASE,
   GFW_DAY_STEP_BACK_MAX,
@@ -4156,11 +4157,15 @@ function airframesProxy() {
  *   GET /api/meteo/slice?var=&time=    → PNG 1440×721 (wind: R=u, G=v, B=rýchlosť; temp: R=°C),
  *                                        stĺpce posunuté tak, že stĺpec 0 = −180° (Cesium obdĺžnik)
  *   GET /api/meteo/status
+ *   GET /api/meteo/point?lat=&lon=     → hodinová predpoveď GFS pre bod (Open-Meteo, meteogram po kliknutí;
+ *                                        cache 30 min v bunke 0,1°, strop dopytov, src/data/meteoPointService.js)
  * Rozpočet: disk cache `.gev-cache/meteo/<var>/<iso>.png` (+ .json s behom), TTL 3 h
  * (GFS beží každých 6 h), jeden dopyt naraz na (var, čas), strop 60 upstream
  * dopytov za hodinu, timeout 90 s, strop 40 MB; chyba → stale PNG ak je.
  * PNG kóduje devDependency `sharp` (lenivý import; bez neho 503).
  */
+const _meteoPointService = createMeteoPointService();
+const _meteoPointRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 240 });
 function meteoProxy() {
   const NCSS = 'https://thredds.ucar.edu/thredds/ncss/grid/grib/NCEP/GFS/Global_0p25deg/Best';
   const TTL_MS = 3 * 3600_000;
@@ -4331,6 +4336,14 @@ function meteoProxy() {
               run: lastRun || cached?.run || null, cacheDir: cacheDir(),
               sharp: Boolean(await getSharp()), lastBake: cached?.fetchedAt || null,
             });
+          }
+          if (url.pathname === '/point') {
+            // Meteogram po kliknutí na mapu (2026-10-08): per-IP strop + služba s cache a stropom upstreamu.
+            if (!_meteoPointRateLimiter(clientKey(req))) return send(429, { error: 'Rate limit exceeded' });
+            const result = await _meteoPointService.get(url.searchParams.get('lat'), url.searchParams.get('lon'));
+            if (result.status !== 200) return send(result.status, { error: result.error });
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600', 'X-Meteo-Point': result.cache || '' });
+            return res.end(JSON.stringify(result.payload));
           }
           if (url.pathname !== '/slice') return send(404, { error: 'unknown endpoint' });
           const fieldId = String(url.searchParams.get('var') || '');

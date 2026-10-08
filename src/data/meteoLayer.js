@@ -27,11 +27,14 @@ import {
 import { decodeChannel, downsample, isolines } from './meteoIsolines.js';
 import { awaitImageDecode } from './imageDecode.js';
 import { levelForAltitude, windRelativeToTrack } from './flightWind.js';
-import { PLACE_POINT_HEIGHT_M, createPlaceHoverCard, createPlacePoints, loadPlaces, nearestWithinRadius, placeVisibleUntilM, sampleGrid } from './meteoPlaces.js';
+import { PLACE_ID_PREFIX, PLACE_POINT_HEIGHT_M, createPlaceHoverCard, createPlacePoints, loadPlaces, nearestWithinRadius, placeVisibleUntilM, sampleGrid } from './meteoPlaces.js';
 import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
 import { createMeteoMapOverlay, loadMeteoMapData } from './meteoMapOverlay.js';
 import { createPlaceLabelManager } from './meteoPlaceLabels.js';
+import { METEOGRAM_URL, coordinateLabel, meteogramColumns } from './meteogram.js';
+import { createMeteogramPanel } from '../meteogramPanel.js';
+import { resolvePickId } from './pickRegistry.js';
 
 export { METEO_LAYER_ID };
 export const METEO_CATALOG_URL = '/api/meteo/catalog';
@@ -299,6 +302,22 @@ export function isolineLabelIndices(length, stride = ISOLINE_LABEL_STRIDE_POINTS
   return out;
 }
 
+/** Okolie zásahu pri kliknutí (px), v ktorom objekt inej vrstvy prednostne berie klik. */
+export const METEOGRAM_PICK_PX = 9;
+
+/** Značka kliknutého miesta (meteogram): biely bod s azúrovým okrajom nad poľom aj menami. */
+export function createMeteogramMarker(lat, lon) {
+  const points = new Cesium.PointPrimitiveCollection();
+  points.add({
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, PLACE_POINT_HEIGHT_M + 500),
+    pixelSize: 10,
+    color: Cesium.Color.WHITE,
+    outlineColor: Cesium.Color.fromCssColorString('#39d0ff'),
+    outlineWidth: 3,
+  });
+  return points;
+}
+
 /**
  * @param {object} [options] test seams
  */
@@ -315,6 +334,9 @@ export function createMeteoLayer({
   mapOverlayFactory = createMeteoMapOverlay,
   mapDataLoader = loadMeteoMapData,
   placeLabelsFactory = createPlaceLabelManager,
+  meteogramFactory = createMeteogramPanel,
+  markerFactory = createMeteogramMarker,
+  now = () => Date.now(),
   doc = globalThis.document,
   win = globalThis.window,
   requestFrame = (cb) => globalThis.requestAnimationFrame(cb),
@@ -368,6 +390,11 @@ export function createMeteoLayer({
   let _playLastMs = 0;
   let _stepPending = false; // krok sa načítava po prekročení 1,0
   let _currentImages = { wind: null, windNext: null, field: null, fieldNext: null };
+  let _meteogram = null; // pás s predpoveďou pre miesto po kliknutí (meteogramPanel.js)
+  let _marker = null; // značka kliknutého miesta na mape
+  let _gramToken = 0;
+  let _gramPoint = null; // { lat, lon } otvoreného meteogramu
+  let _pressAt = null; // pointerdown na plátne — klik bez ťahania otvorí meteogram
 
   const lang = () => (currentLanguage?.() === 'en' ? 'en' : 'sk');
 
@@ -574,6 +601,93 @@ export function createMeteoLayer({
     _leaveTimer = setTimeout(() => { if (!_hover?.isHovered()) clearHover(); }, 220);
   }
 
+  // ---- meteogram: klik na mapu = predpoveď pre miesto (2026-10-08, „ako Windy“) ----
+  function clearMarker() {
+    if (_marker && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_marker);
+    _marker = null;
+    _gramPoint = null;
+    governorRequestRender('meteo');
+  }
+
+  function closeMeteogram() {
+    _gramToken += 1;
+    _meteogram?.hide();
+    clearMarker();
+  }
+
+  /** Klik na stĺpec meteogramu → mapa ukáže ten krok, ak ho časová os má. */
+  function pickTime(ms) {
+    if (!_catalog) return;
+    const i = _catalog.steps.findIndex((iso) => Date.parse(iso) === ms);
+    if (i < 0) return;
+    stopPlay();
+    _index = i;
+    _timeline?.setIndex(i);
+    void applyStep();
+  }
+
+  async function openMeteogram(lat, lon) {
+    if (!_enabled) return;
+    if (!_meteogram && doc?.body) {
+      _meteogram = meteogramFactory(doc, { t, lang, onClose: clearMarker, onPickTime: pickTime });
+    }
+    if (!_meteogram) return;
+    clearMarker();
+    _gramPoint = { lat, lon };
+    try {
+      _marker = markerFactory(lat, lon);
+      if (_marker) _viewer.scene.primitives.add(_marker);
+    } catch { _marker = null; }
+    governorRequestRender('meteo');
+    const coords = coordinateLabel(lat, lon, lang());
+    let name = null;
+    try { name = _placeLabels?.nearestName?.(lat, lon) || null; } catch { name = null; }
+    const token = ++_gramToken;
+    _meteogram.setActiveTime(_catalog?.steps[_index] || null);
+    _meteogram.showLoading(name || coords);
+    try {
+      const response = await doFetch(`${METEOGRAM_URL}?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`);
+      if (token !== _gramToken) return;
+      if (!response?.ok) throw new Error(`HTTP ${response?.status}`);
+      const series = await response.json();
+      if (token !== _gramToken) return;
+      const columns = meteogramColumns(series, { nowMs: now() });
+      if (!columns.length) throw new Error('empty forecast');
+      _meteogram.showModel({ series, columns, name, coords });
+    } catch (error) {
+      if (token !== _gramToken) return;
+      console.warn('[Data:Meteo] meteogram failed:', error?.message || error);
+      _meteogram.showError(name || coords);
+    }
+  }
+
+  function pressCanvas(e) {
+    _pressAt = (e.button === 0 || e.button === undefined) ? { x: e.clientX, y: e.clientY, at: now() } : null;
+  }
+
+  /** Klik bez ťahania do prázdneho miesta mapy (nie na lietadlo, loď…) otvorí meteogram. */
+  function releaseCanvas(e) {
+    const press = _pressAt;
+    _pressAt = null;
+    if (!press || !_enabled || !_viewer?.scene) return;
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6 || now() - press.at > 600) return;
+    const scene = _viewer.scene;
+    const bounds = scene.canvas.getBoundingClientRect();
+    const pos = new Cesium.Cartesian2(e.clientX - bounds.left, e.clientY - bounds.top);
+    let picked = null;
+    // Okolie 9 × 9 px: lietadlá sa vyberajú v okolí 6 × 6 (flights.js) — klik vedľa lietadla
+    // nesmie otvoriť naraz jeho kartu aj meteogram.
+    try { picked = scene.pick?.(pos, METEOGRAM_PICK_PX, METEOGRAM_PICK_PX); } catch { picked = null; }
+    const pickedId = resolvePickId(picked);
+    // Lietadlo, loď… má vlastnú kartu; bodka mesta (place:N) je naša — tá meteogram otvára.
+    if (pickedId && !pickedId.startsWith(PLACE_ID_PREFIX)) return;
+    const world = scene.camera?.pickEllipsoid?.(pos, scene.globe?.ellipsoid || Cesium.Ellipsoid.WGS84);
+    if (!world) return;
+    const carto = Cesium.Cartographic.fromCartesian(world);
+    if (!carto) return;
+    void openMeteogram(Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude));
+  }
+
   function attachHover() {
     const canvas = _viewer?.scene?.canvas;
     if (!canvas?.addEventListener || _canvasListeners) return;
@@ -581,6 +695,8 @@ export function createMeteoLayer({
     canvas.addEventListener('pointermove', moveHover);
     canvas.addEventListener('pointerleave', leaveHover);
     canvas.addEventListener('pointerdown', clearHover);
+    canvas.addEventListener('pointerdown', pressCanvas);
+    canvas.addEventListener('pointerup', releaseCanvas);
     const removeMove = _viewer.camera?.moveStart?.addEventListener?.(clearHover) || null;
     _canvasListeners = { canvas, removeMove };
   }
@@ -592,6 +708,8 @@ export function createMeteoLayer({
     canvas.removeEventListener('pointermove', moveHover);
     canvas.removeEventListener('pointerleave', leaveHover);
     canvas.removeEventListener('pointerdown', clearHover);
+    canvas.removeEventListener('pointerdown', pressCanvas);
+    canvas.removeEventListener('pointerup', releaseCanvas);
     removeMove?.();
     _canvasListeners = null;
   }
@@ -705,6 +823,7 @@ export function createMeteoLayer({
       _particles.start();
     }
     _timeline?.setStatus(_catalog.stale ? t('meteo.stale') : t('meteo.forecast'));
+    _meteogram?.setActiveTime(iso);
     governorRequestRender('meteo');
     prefetch();
   }
@@ -866,6 +985,7 @@ export function createMeteoLayer({
       clearIsolines();
       clearPlaces();
       detachHover();
+      closeMeteogram();
       _grid = null;
       _fieldGrids = {};
       _windGrid = null;
@@ -960,7 +1080,7 @@ export function createMeteoLayer({
 
     /** Test seam. */
     _getStateForTest() {
-      return { enabled: _enabled, index: _index, field: _field, particlesOn: _particlesOn, catalog: _catalog, drape: Boolean(_drape), previousStack: _previousStack, fraction: _fraction, places: _places?.length ?? null, points: Boolean(_placePoints), hover: _hoverPlace?.name ?? null, grid: Boolean(_grid) };
+      return { enabled: _enabled, index: _index, field: _field, particlesOn: _particlesOn, catalog: _catalog, drape: Boolean(_drape), previousStack: _previousStack, fraction: _fraction, places: _places?.length ?? null, points: Boolean(_placePoints), hover: _hoverPlace?.name ?? null, grid: Boolean(_grid), meteogram: _meteogram?.isOpen?.() ? _gramPoint : null, marker: Boolean(_marker) };
     },
 
     destroy(viewer) {
@@ -970,6 +1090,8 @@ export function createMeteoLayer({
       clearPlaces();
       detachHover();
       _hover?.destroy(); _hover = null;
+      closeMeteogram();
+      _meteogram?.destroy(); _meteogram = null;
       _particles?.destroy(); _particles = null;
       _timeline?.destroy(); _timeline = null;
       _unsubStack?.(); _unsubStack = null;
