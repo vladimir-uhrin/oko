@@ -2,7 +2,7 @@ import * as Cesium from 'cesium';
 import { governorRequestRender } from '../renderGovernor.js';
 import { radarLegendStops } from './shmuRadarGrid.js';
 import { awaitImageDecode } from './imageDecode.js';
-import { setRadarActive } from './radarPresence.js';
+import { notifyRadarFrame, registerRadarController, setRadarActive } from './radarPresence.js';
 
 /**
  * SHMÚ precipitation radar overlay — Slovak 5-minute zmax composite (OKO).
@@ -197,6 +197,21 @@ export function createShmuRadarLayer({
     _currentIso = iso;
     // Discrete scene mutation under the render governor contract — one frame.
     governorRequestRender(id);
+    notifyRadarFrame(id);
+  };
+
+  /**
+   * Ovládanie pre časovú os meteo vrstvy (radarPresence.js, 2026-10-08): os pri zapnutom radare ukazuje
+   * jeho snímky (meranie), posúvanie zastaví slučku na zvolenej snímke, prehrávanie ju pustí znova.
+   */
+  const controller = {
+    label: name,
+    frames: () => [..._frameIsos],
+    current: () => _currentIso,
+    showIndex(i) { animator.stop(); showFrame(Math.max(0, Math.min(_frameIsos.length - 1, Number(i) || 0))); },
+    play() { animator.start(); },
+    pause() { animator.stop(); },
+    playing: () => animator.running(),
   };
 
   const animator = createRadarFrameAnimator({
@@ -235,6 +250,7 @@ export function createShmuRadarLayer({
     enable() {
       _enabled = true;
       setRadarActive(id, true);
+      registerRadarController(id, controller);
       // The loop starts at the oldest frame right away — the last ~30 min
       // replay is the whole point of enabling a radar.
       _currentIso = null;
@@ -244,6 +260,7 @@ export function createShmuRadarLayer({
     disable() {
       _enabled = false;
       setRadarActive(id, false);
+      registerRadarController(id, null);
       animator.stop();
       setFrameVisible(_currentIso, false);
       governorRequestRender(id);
@@ -304,6 +321,7 @@ export function createShmuRadarLayer({
             }
           }
           _frameIsos = ready;
+          notifyRadarFrame(id);
           // …and the visible frame stays valid even after pruning.
           if (_enabled && !_currentIso) showFrame(_frameIsos.length - 1);
           governorRequestRender(id);
@@ -334,6 +352,7 @@ export function createShmuRadarLayer({
     destroy(viewer) {
       _enabled = false;
       setRadarActive(id, false);
+      registerRadarController(id, null);
       animator.stop();
       for (const primitive of _primitives.values()) {
         (viewer || _viewer)?.scene?.primitives?.remove?.(primitive);

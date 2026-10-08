@@ -11522,9 +11522,9 @@ function operaRadarProxy() {
       if (req.method !== 'GET') return sendJson(405, { ok: false, error: 'Method Not Allowed' });
       if (!_operaRadarRateLimiter(clientKey(req))) return sendJson(429, { ok: false, error: 'Rate limit exceeded' });
       try {
-        // Bez snímky čakáme na prvú (studený štart); inak obnova beží na pozadí a odpoveď ide hneď.
-        const pending = service.ensureFresh();
-        if (!service.hasFrames()) await pending;
+        // Studený štart čaká len na PRVÚ snímku (~4 s), zvyšok hodiny sa doplní na pozadí; inak odpoveď ide hneď.
+        service.ensureFresh();
+        if (!service.hasFrames()) await service.whenAnyFrame();
         const subPath = String(req.url || '').split('?')[0];
         if (subPath.startsWith('/frame/') && subPath.endsWith('.png')) {
           const frame = service.frame(decodeURIComponent(subPath.slice('/frame/'.length, -'.png'.length)));

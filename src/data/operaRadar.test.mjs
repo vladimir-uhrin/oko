@@ -122,3 +122,25 @@ test('vrstva Európy je druhá inštancia radaru: vlastné id, adresa a zdroj', 
   assert.deepEqual(urls, ['/api/opera/radar']);
   assert.match(layer.getStats().error, /503/);
 });
+
+test('studený štart: odpoveď stačí po PRVEJ snímke, zvyšok kruhu sa doplní na pozadí; bez snímok sa nečaká naveky', async () => {
+  const now = { t: Date.parse('2026-10-08T19:44:00Z') };
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let decodes = 0;
+  const svc = createOperaRadarService({
+    fetchBuffer: async () => ({ status: 200, buffer: new ArrayBuffer(8) }),
+    decode: async () => { decodes += 1; if (decodes > 1) await gate; return { png: Buffer.from('p'), bounds: {}, echoPixels: 1 }; },
+    now: () => now.t,
+    ringSize: 3,
+  });
+  const ok = await svc.whenAnyFrame();
+  assert.equal(ok, true);
+  assert.equal(svc.meta().frames.length, 1, 'prvá snímka je hneď k dispozícii');
+  release();
+  await svc.ensureFresh();
+  const empty = createOperaRadarService({ fetchBuffer: async () => ({ status: 404 }), decode: async () => ({}), now: () => now.t });
+  assert.equal(await empty.whenAnyFrame(), true);
+  assert.equal(empty.meta(), null);
+  assert.equal(await Promise.race([empty.whenAnyFrame(), new Promise((r) => setTimeout(() => r('visí'), 200))]), true, 'po nedávnom neúspechu sa nečaká naveky');
+});

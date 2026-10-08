@@ -31,6 +31,8 @@ export function createOperaRadarService({ fetchBuffer, decode, store = null, now
   const misses = new Map(); // iso → kedy 404
   let upstreamRequests = 0;
   let lastError = null;
+  let frameWaiters = []; // čakajú na prvú snímku (studený štart odpovie hneď po nej, zvyšok kruhu sa doplní)
+  const wakeWaiters = () => { const w = frameWaiters; frameWaiters = []; for (const fn of w) fn(true); };
 
   async function loadStore() {
     if (loaded || !store) { loaded = true; return; }
@@ -60,6 +62,7 @@ export function createOperaRadarService({ fetchBuffer, decode, store = null, now
       const entry = { iso: c.iso, png: frame.png, bounds: frame.bounds, echoPixels: frame.echoPixels };
       frames = [...frames.filter((f) => f.iso !== c.iso), entry].sort((a, b) => a.iso.localeCompare(b.iso)).slice(-ringSize);
       have.add(c.iso);
+      wakeWaiters();
       try { await store?.save(entry, frames); } catch { /* disk je bonus */ }
       if (frames.length >= ringSize) break;
     }
@@ -69,7 +72,7 @@ export function createOperaRadarService({ fetchBuffer, decode, store = null, now
   async function ensureFresh() {
     if (inflight) return inflight;
     if (loaded && now() - lastCheck < OPERA_CHECK_EVERY_MS) return undefined;
-    inflight = refresh().then(() => { lastError = null; }, (error) => { lastError = String(error?.message || error); }).finally(() => { inflight = null; });
+    inflight = refresh().finally(wakeWaiters).then(() => { lastError = null; }, (error) => { lastError = String(error?.message || error); }).finally(() => { inflight = null; });
     return inflight;
   }
 
@@ -78,6 +81,15 @@ export function createOperaRadarService({ fetchBuffer, decode, store = null, now
   return {
     ensureFresh,
     hasFrames: () => frames.length > 0,
+    /** Studený štart: vyrieši sa hneď po prvej snímke (alebo po skončení obnovy, ak žiadna nepríde). */
+    whenAnyFrame() {
+      if (frames.length) return Promise.resolve(true);
+      const pending = new Promise((resolve) => frameWaiters.push(resolve));
+      // Čakanie sa skončí najneskôr s obnovou, na ktorú sa naviazalo — aj keď práve dobieha alebo sa
+      // nespustila (nedávno sa pýtalo a nič nebolo); inak by požiadavka visela naveky (odhalil test).
+      Promise.resolve(ensureFresh()).finally(wakeWaiters);
+      return pending;
+    },
     /** Meta v tvare radaru SHMÚ; null, keď nie je ani jedna snímka. */
     meta() {
       const latest = frames.at(-1);

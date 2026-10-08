@@ -42,6 +42,8 @@ function harness({ isolineFactory = null, gridReader = null, catalog = { model: 
     setSteps(list, run) { this.steps = list; this.run = run; }, setIndex(i) { this.index = i; }, getIndex() { return this.index; },
     setPlaying() {}, isPlaying: () => false, setStatus(s) { this.status = s; }, show() { this.shown = true; }, hide() { this.shown = false; }, destroy() {} };
   const layer = createMeteoLayer({
+    // Pevné „teraz“ = prvý krok katalógu (os začína krokom najbližším k teraz, 2026-10-08).
+    now: () => Date.parse(catalog.steps?.[0] || '2026-09-08T18:00:00Z'),
     fetchImpl: async (url) => { calls.fetch.push(url); return { ok: true, json: async () => catalog }; },
     imageLoader: async (url) => { calls.images.push(url); return imageOk ? { src: url } : null; },
     primitiveFactory: ({ image, field }) => { const p = { primitive: { show: false }, material: { uniforms: { image, channel: field.channel } } }; calls.primitives.push(p); return p; },
@@ -190,6 +192,7 @@ test('plynulé prehrávanie (Windy): mixT a častice idú spojito 0→1 medzi kr
   let onPlay = null;
   const timeline = { index: 0, setSteps() {}, setIndex(i) { this.index = i; }, getIndex() { return this.index; }, setPlaying() {}, isPlaying: () => false, setStatus() {}, show() {}, hide() {}, destroy() {} };
   const layer = createMeteoLayer({
+    now: () => Date.parse('2026-09-08T18:00:00Z'),
     fetchImpl: async () => ({ ok: true, json: async () => ({ model: 'GFS', run: '2026-09-08T12:00:00Z', steps: ['2026-09-08T18:00:00Z', '2026-09-08T21:00:00Z', '2026-09-09T00:00:00Z'], attribution: '', stale: false }) }),
     imageLoader: async (url) => ({ src: url }),
     primitiveFactory: ({ image, imageNext, field }) => { const p = { primitive: { show: false }, material: { uniforms: { image, imageNext, mixT: 0, channel: field.channel } } }; calls.primitives.push(p); return p; },

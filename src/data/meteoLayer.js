@@ -35,7 +35,7 @@ import { createPlaceLabelManager } from './meteoPlaceLabels.js';
 import { METEOGRAM_URL, coordinateLabel, meteogramColumns } from './meteogram.js';
 import { createMeteogramPanel } from '../meteogramPanel.js';
 import { resolvePickId } from './pickRegistry.js';
-import { anyRadarActive, onRadarPresenceChange } from './radarPresence.js';
+import { anyRadarActive, onRadarPresenceChange, primaryRadar } from './radarPresence.js';
 
 export { METEO_LAYER_ID };
 export const METEO_CATALOG_URL = '/api/meteo/catalog';
@@ -303,6 +303,28 @@ export function isolineLabelIndices(length, stride = ISOLINE_LABEL_STRIDE_POINTS
   return out;
 }
 
+/** Index kroku predpovede najbližšieho k času nowMs (pri zhode skorší). Pure. */
+export function nearestStepIndex(steps, nowMs) {
+  let best = 0;
+  let bestDiff = Infinity;
+  (steps || []).forEach((iso, i) => {
+    const d = Math.abs(Date.parse(iso) - nowMs);
+    if (d < bestDiff) { bestDiff = d; best = i; }
+  });
+  return best;
+}
+
+/** Snímky radaru → kroky časovej osi: popis „Št 8. 10. 19:50 UTC“, značka času pri každej druhej. Pure. */
+export function radarTimelineSteps(frames, lang = 'sk') {
+  const days = lang === 'en' ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['Ne', 'Po', 'Ut', 'St', 'Št', 'Pi', 'So'];
+  return (frames || []).map((iso, i) => {
+    const d = new Date(iso);
+    const hm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    const date = lang === 'en' ? `${d.getUTCDate()}/${d.getUTCMonth() + 1}` : `${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
+    return { label: `${days[d.getUTCDay()]} ${date} ${hm} UTC`, day: i % 2 === 0 || i === frames.length - 1 ? hm : '' };
+  });
+}
+
 /** Okolie zásahu pri kliknutí (px), v ktorom objekt inej vrstvy prednostne berie klik. */
 export const METEOGRAM_PICK_PX = 9;
 
@@ -397,6 +419,9 @@ export function createMeteoLayer({
   let _gramPoint = null; // { lat, lon } otvoreného meteogramu
   let _pressAt = null; // pointerdown na plátne — klik bez ťahania otvorí meteogram
   let _unsubRadar = null;
+  let _indexChosen = false; // používateľ si krok vybral sám — nový katalóg ho už neprepíše na „teraz“
+  let _radarTimeline = null; // id radaru, ktorého snímky práve ukazuje časová os (null = predpoveď)
+  let _radarFramesKey = ''; // snímky na osi — os sa prestavia len pri zmene, nie pri každej snímke slučky
 
   const lang = () => (currentLanguage?.() === 'en' ? 'en' : 'sk');
 
@@ -628,8 +653,9 @@ export function createMeteoLayer({
     const i = _catalog.steps.findIndex((iso) => Date.parse(iso) === ms);
     if (i < 0) return;
     stopPlay();
+    _indexChosen = true;
     _index = i;
-    _timeline?.setIndex(i);
+    if (!_radarTimeline) _timeline?.setIndex(i);
     void applyStep();
   }
 
@@ -777,7 +803,7 @@ export function createMeteoLayer({
     if (!iso) return;
     const token = ++_loadToken;
     const nextIso = _catalog.steps[_index + 1] || null;
-    _timeline?.setStatus(t('meteo.loading'));
+    if (!_radarTimeline) _timeline?.setStatus(t('meteo.loading'));
     // Častice musia animovať TÚ hladinu, ktorú pole kreslí — inak by na 250 hPa
     // svietil jantárový jet, ale body by sa hýbali prízemným vetrom. Nad
     // nevetrovým poľom (teplota, tlak…) ostáva prízemný vietor, ako na Windy.
@@ -797,7 +823,7 @@ export function createMeteoLayer({
     _gridLoads = new Set();
     if (!windImg || !fieldImg) {
       _lastError = t('meteo.slice-failed');
-      _timeline?.setStatus(_lastError);
+      if (!_radarTimeline) _timeline?.setStatus(_lastError);
       return;
     }
     _lastError = null;
@@ -830,7 +856,7 @@ export function createMeteoLayer({
       _particles.setWind(windImg, { uRange: wRange, vRange: wRange, next: windNext, clear: _playFrame === null });
       _particles.start();
     }
-    _timeline?.setStatus(_catalog.stale ? t('meteo.stale') : t('meteo.forecast'));
+    if (!_radarTimeline) _timeline?.setStatus(_catalog.stale ? t('meteo.stale') : t('meteo.forecast'));
     _meteogram?.setActiveTime(iso);
     governorRequestRender('meteo');
     prefetch();
@@ -868,6 +894,41 @@ export function createMeteoLayer({
   }
 
   /** Alfa poľa pre aktuálne pole × útlm podľa výšky kamery. */
+  /**
+   * Časová os pri zapnutom radare (2026-10-08, ako na Windy): ukazuje snímky radaru (posledná hodina MERANIA),
+   * posúvanie a prehrávanie ovládajú radar; po vypnutí radaru sa vráti predpoveď na zvolený krok.
+   */
+  function syncRadarTimeline() {
+    if (!_timeline) return;
+    const radar = _enabled ? primaryRadar() : null;
+    const frames = radar?.frames?.() || [];
+    if (radar && frames.length) {
+      if (_radarTimeline !== radar.id) stopPlay();
+      const key = `${radar.id}|${frames.join('|')}`;
+      if (_radarTimeline !== radar.id || key !== _radarFramesKey) {
+        _timeline.setSteps(radarTimelineSteps(frames, lang()), `${radar.label} · ${t('meteo.radar-observed')}`);
+        _timeline.setStatus(t('meteo.radar-status'));
+      }
+      const entering = _radarTimeline !== radar.id;
+      _radarTimeline = radar.id;
+      // Tlačidlo prehrávania podľa skutočného stavu slučky radaru (tá beží sama od zapnutia).
+      if (entering && radar.playing?.() && !_timeline.isPlaying?.()) _timeline.setPlaying(true);
+      _radarFramesKey = key;
+      const cur = frames.indexOf(radar.current?.());
+      _timeline.setIndex(cur >= 0 ? cur : frames.length - 1);
+      return;
+    }
+    if (!_radarTimeline) return;
+    _radarTimeline = null;
+    _radarFramesKey = '';
+    if (_timeline.isPlaying?.()) _timeline.setPlaying(false);
+    if (_catalog) {
+      _timeline.setSteps(stepsForTimeline(), runLabel(_catalog.run, lang()));
+      _timeline.setIndex(_index);
+      _timeline.setStatus(_catalog.stale ? t('meteo.stale') : t('meteo.forecast'));
+    }
+  }
+
   /**
    * Farebné pole len keď je vrstva zapnutá, kamera nad ním a NIE JE zapnutý radar — radar pole nahrádza
    * ako na Windy (radarPresence.js); inak by ho drapéria bez hĺbkového testu prekryla.
@@ -962,13 +1023,27 @@ export function createMeteoLayer({
       if (!_timeline && doc?.body) {
         _timeline = timelineFactory(doc, {
           t,
-          onIndex: (i) => { _index = i; void applyStep(); },
-          onPlay: (playing) => (playing ? startPlay() : stopPlay()),
+          onIndex: (i) => {
+            if (_radarTimeline) {
+              primaryRadar()?.showIndex(i);
+              if (_timeline?.isPlaying?.()) _timeline.setPlaying(false); // posúvanie zastaví slučku radaru
+              return;
+            }
+            _indexChosen = true;
+            _index = i;
+            void applyStep();
+          },
+          onPlay: (playing) => {
+            if (_radarTimeline) { const r = primaryRadar(); if (playing) r?.play(); else r?.pause(); return; }
+            if (playing) startPlay(); else stopPlay();
+          },
         });
       }
       _unsubStack = onActiveMapStackChange?.(() => { /* podklad sa mení mimo nás — nič */ }) || null;
       if (!_unsubRadar) {
-        _unsubRadar = onRadarPresenceChange(() => {
+        _unsubRadar = onRadarPresenceChange((_any, kind) => {
+          syncRadarTimeline();
+          if (kind === 'frame') return;
           if (_drape) _drape.primitive.show = fieldShouldShow();
           _rowListener?.();
           governorRequestRender('meteo');
@@ -986,6 +1061,7 @@ export function createMeteoLayer({
       requestBasemap();
       _timeline?.show();
       attachHover();
+      syncRadarTimeline();
       if (!_particles && _viewer?.container && _particlesOn) {
         try {
           _particles = particlesFactory(_viewer.container, _viewer);
@@ -1004,6 +1080,8 @@ export function createMeteoLayer({
       _loadToken += 1;
       stopPlay();
       _timeline?.hide();
+      _radarTimeline = null;
+      _radarFramesKey = '';
       if (_drape) _drape.primitive.show = false;
       clearIsolines();
       clearPlaces();
@@ -1030,9 +1108,12 @@ export function createMeteoLayer({
         _lastUpdate = new Date();
         _lastError = null;
         if (runChanged) _images.clear();
-        _timeline?.setSteps(stepsForTimeline(), runLabel(catalog.run, lang()));
-        if (_index >= catalog.steps.length) _index = 0;
-        _timeline?.setIndex(_index);
+        // Ako na Windy: os začína krokom najbližším k „teraz“, kým si používateľ nevyberie sám.
+        if (!_indexChosen || _index >= catalog.steps.length) _index = nearestStepIndex(catalog.steps, now());
+        if (!_radarTimeline) {
+          _timeline?.setSteps(stepsForTimeline(), runLabel(catalog.run, lang()));
+          _timeline?.setIndex(_index);
+        }
         _rowListener?.();
         if (_enabled) void applyStep();
         return true;
