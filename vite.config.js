@@ -76,6 +76,7 @@ import { parseNetcdf3 } from './src/data/netcdf3.js';
 import { METEO_FIELDS, forecastSteps } from './src/data/meteoField.js';
 import { rasterizeMeteoField, runIsoOf } from './src/data/meteoRasterize.js';
 import { createMeteoPointService } from './src/data/meteoPointService.js';
+import { createWeatherWarningsService } from './src/data/weatherWarningsService.js';
 import {
   GFW_API_BASE as GFW_PRESENCE_API_BASE,
   GFW_DAY_STEP_BACK_MAX,
@@ -11460,6 +11461,34 @@ function regionalBriefProxy() {
   };
 }
 
+/**
+ * Výstrahy SHMÚ po okresoch (2026-10-08): GET /api/weather-warnings → { warnings[], fetchedAt, stale? }.
+ * MeteoAlarm feeds-slovakia (SHMÚ CAP), cache 5 min a spojené dopyty v src/data/weatherWarningsService.js,
+ * per-IP strop ako ostatné verejné proxy.
+ */
+const _weatherWarningsService = createWeatherWarningsService();
+const _weatherWarningsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 240 });
+function weatherWarningsProxy() {
+  function install(middlewares) {
+    middlewares.use('/api/weather-warnings', async (req, res) => {
+      const send = (status, obj, headers = {}) => {
+        res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+        res.end(JSON.stringify(obj));
+      };
+      if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
+      if (!_weatherWarningsRateLimiter(clientKey(req))) return send(429, { error: 'Rate limit exceeded' }, { 'Retry-After': '10' });
+      const result = await _weatherWarningsService.get();
+      if (result.status !== 200) return send(result.status, { error: result.error }, { 'Cache-Control': 'no-store' });
+      return send(200, result.payload, { 'Cache-Control': 'public, max-age=120', 'X-Weather-Warnings': result.cache || '' });
+    });
+  }
+  return {
+    name: 'weather-warnings-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function weatherEffectsProxy() {
   async function refresh(point, key) {
     const weather = await fetchRegionalWeather(point);
@@ -11859,6 +11888,7 @@ export default defineConfig(({ mode }) => {
       militaryInstallationsProxy(),
       regionalBriefProxy(),
       weatherEffectsProxy(),
+      weatherWarningsProxy(),
       cctvProxy(),
       radioBrowserProxy(),
       gbfsProxy(),

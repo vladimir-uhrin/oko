@@ -680,7 +680,8 @@ export function createMeteoLayer({
     try { picked = scene.pick?.(pos, METEOGRAM_PICK_PX, METEOGRAM_PICK_PX); } catch { picked = null; }
     const pickedId = resolvePickId(picked);
     // Lietadlo, loď… má vlastnú kartu; bodka mesta (place:N) je naša — tá meteogram otvára.
-    if (pickedId && !pickedId.startsWith(PLACE_ID_PREFIX)) return;
+    // Okres s výstrahou SHMÚ (shmu-warn:) tiež — jeho karta a predpoveď pre miesto idú spolu.
+    if (pickedId && !pickedId.startsWith(PLACE_ID_PREFIX) && !pickedId.startsWith('shmu-warn:')) return;
     const world = scene.camera?.pickEllipsoid?.(pos, scene.globe?.ellipsoid || Cesium.Ellipsoid.WGS84);
     if (!world) return;
     const carto = Cesium.Cartographic.fromCartesian(world);

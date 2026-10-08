@@ -339,6 +339,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'rocket-launches', token: 'x', disposition: 'enabled-only' }),
   Object.freeze({ id: 'satellites', token: 's', disposition: 'enabled+options', optionOwner: 'satellites' }),
   Object.freeze({ id: 'shmu-radar', token: 'h', disposition: 'enabled-only' }),
+  // Výstrahy SHMÚ (2026-10-08): malé písmená sú obsadené, „W" = warnings.
+  Object.freeze({ id: 'shmu-warnings', token: 'W', disposition: 'enabled-only' }),
   Object.freeze({ id: 'telegeography-submarine-cables', token: 'u', disposition: 'enabled-only' }),
   Object.freeze({ id: 'traffic', token: 't', disposition: 'enabled-only' }),
   Object.freeze({ id: 'volcanoes', token: 'v', disposition: 'enabled-only' }),

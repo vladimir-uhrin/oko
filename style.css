@@ -3499,6 +3499,18 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .meteo-timeline-label { color: #fff; font-weight: 700; }
 .meteo-timeline-run { color: rgba(224, 247, 255, 0.7); font-size: 8px; }
 .meteo-timeline-status { color: #ffb347; font-size: 8px; letter-spacing: 0.12em; }
+/* Karta výstrah SHMÚ (2026-10-08; shmuWarningsLayer.js) — vzor meteo-place-card. */
+.weather-warn-card { max-width: 340px; max-height: min(70vh, 560px); overflow-y: auto; }
+.weather-warn-item { margin: 0 0 8px; padding: 6px 0 4px 8px; border-left: 3px solid var(--warn, #ffd200); }
+.weather-warn-head { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 3px; }
+.weather-warn-chip { padding: 1px 6px; border-radius: 3px; background: var(--warn, #ffd200); color: #111; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.weather-warn-state { color: rgba(224, 247, 255, 0.6); font-size: 9px; letter-spacing: 0.1em; }
+.weather-warn-state.active { color: var(--warn, #ffd200); font-weight: 700; }
+.weather-warn-event { margin: 0; color: #fff; font-weight: 700; }
+.weather-warn-when { margin: 0 0 3px; color: rgba(224, 247, 255, 0.75); }
+.weather-warn-headline { margin: 0 0 3px; color: #fff; }
+.weather-warn-text { margin: 4px 0 0; color: rgba(224, 247, 255, 0.85); white-space: pre-line; font-size: 10px; line-height: 1.45; }
+.weather-warn-text.instruction { color: #ffd98a; }
 /* Meteogram — predpoveď pre miesto po kliknutí (2026-10-08, „ako Windy"; meteogramPanel.js). */
 .meteogram {
   position: fixed;

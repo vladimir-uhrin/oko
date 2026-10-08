@@ -37,6 +37,7 @@ export const LAYER_CATEGORY = Object.freeze({
   'natural-events': 'earth',
   'local-firms': 'earth',
   'shmu-radar': 'earth',
+  'shmu-warnings': 'earth',
   'meteo-gfs': 'earth',
   // Energia a siete
   'gas-flows': 'energy',
@@ -84,6 +85,7 @@ export const LAYER_KEYWORDS = Object.freeze({
   'natural-events': ['katastrofy', 'udalosti', 'disasters', 'hazards', 'eonet'],
   'local-firms': ['požiar', 'požiare', 'oheň', 'fire', 'fires', 'firms'],
   'shmu-radar': ['dážď', 'zrážky', 'počasie', 'rain', 'weather', 'radar'],
+  'shmu-warnings': ['výstrahy', 'výstraha', 'vietor', 'búrka', 'počasie', 'warnings', 'alerts', 'shmú', 'meteoalarm'],
   'meteo-gfs': ['počasie', 'vietor', 'teplota', 'weather', 'wind', 'meteo'],
   'gas-flows': ['plyn', 'toky plynu', 'gas', 'flows', 'entsog'],
   'gas-pipelines': ['plyn', 'plynovod', 'gas', 'pipeline'],

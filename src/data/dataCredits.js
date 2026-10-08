@@ -244,6 +244,15 @@ export const DATA_CREDITS = [
       '<a href="https://opendata.shmu.sk" target="_blank" rel="noopener">SHMÚ — opendata.shmu.sk</a> ' +
       '(CC BY 4.0)',
   },
+  {
+    key: 'shmu-warnings',
+    html:
+      'Výstrahy: ' +
+      '<a href="https://www.shmu.sk/sk/?page=987" target="_blank" rel="noopener">SHMÚ</a> (CC BY 4.0) cez ' +
+      '<a href="https://meteoalarm.org" target="_blank" rel="noopener">MeteoAlarm</a> · okresy ' +
+      '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> ' +
+      '(ODbL 1.0) cez geoBoundaries',
+  },
   // ── Bundled snapshots ───────────────────────────────────────────
   {
     key: 'datacenters',
