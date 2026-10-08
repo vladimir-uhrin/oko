@@ -417,7 +417,12 @@ export function createMeteoLayer({
   }
 
   function clearMapOverlay() {
-    if (_mapOverlay && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_mapOverlay);
+    // Upratanie prekrytia nesmie zhodiť zvyšok disable() — inak správca vrstvu nechá zapnutú.
+    try {
+      if (_mapOverlay && _viewer?.scene?.primitives) _viewer.scene.primitives.remove(_mapOverlay);
+    } catch (error) {
+      console.warn('[Data:Meteo] map overlay cleanup failed:', error?.message || error);
+    }
     _mapOverlay = null;
     try { _placeLabels?.destroy(); } catch { /* scéna už zanikla */ }
     _placeLabels = null;

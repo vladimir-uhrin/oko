@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { METEO_OVERLAY_HEIGHT_M, cityLabelPlan, loadMeteoMapData, ringToFlat, BORDERS_URL, COAST_URL } from './meteoMapOverlay.js';
+import { METEO_OVERLAY_HEIGHT_M, cityLabelPlan, createMeteoMapOverlay, loadMeteoMapData, ringToFlat, BORDERS_URL, COAST_URL } from './meteoMapOverlay.js';
 import { METEO_DRAPE_HEIGHT_M, ISOLINE_HEIGHT_M } from './meteoLayer.js';
 import { placeVisibleUntilM } from './meteoPlaces.js';
 
@@ -56,4 +56,17 @@ test('vrstva: mapa nad poľom sa stavia s miestami, zhasína s poľom a odchádz
   assert.match(src, /_mapOverlay = mapOverlayFactory\(\{ coast: _mapData\.coast, borders: _mapData\.borders, places: _places \|\| \[\] \}\);/);
   assert.match(src, /if \(_mapOverlay\) _mapOverlay\.show = fade > 0\.02;/, 'pri nízkej kamere zhasne s poľom');
   assert.match(src, /function clearPlaces\(\) \{[\s\S]*?clearMapOverlay\(\);/, 'vypnutie a zničenie vrstvy mapu odstráni');
+});
+
+test('prekrytie s viacerými čiarami sa dá zničiť — inak padne vypnutie meteo vrstvy', (t) => {
+  // Material.fromType v Node siaha na DOM triedy; stačia prázdne, plátno tu nie je.
+  for (const name of ['HTMLCanvasElement', 'HTMLImageElement', 'HTMLVideoElement', 'ImageBitmap', 'OffscreenCanvas']) {
+    if (name in globalThis) continue;
+    globalThis[name] = class {};
+    t.after(() => { delete globalThis[name]; });
+  }
+  const ring = [[17, 48], [17.5, 48], [17.5, 48.5], [17, 48]];
+  const overlay = createMeteoMapOverlay({ coast: [ring, ring], borders: [ring, ring] });
+  assert.doesNotThrow(() => overlay.destroy());
+  assert.equal(overlay.isDestroyed(), true);
 });

@@ -67,15 +67,17 @@ export async function loadMeteoMapData(doFetch) {
 export function createMeteoMapOverlay({ coast = [], borders = [], places = [] } = {}) {
   const root = new Cesium.PrimitiveCollection();
   const lines = new Cesium.PolylineCollection();
-  const coastMaterial = Cesium.Material.fromType('Color', { color: Cesium.Color.fromCssColorString(COAST_STYLE.color) });
-  const borderMaterial = Cesium.Material.fromType('Color', { color: Cesium.Color.fromCssColorString(BORDER_STYLE.color) });
+  // Každá čiara VLASTNÝ materiál: Polyline pri destroy() ničí aj svoj materiál, takže zdieľaný
+  // materiál zhodil druhú čiaru („This object was destroyed“) a s ňou celé vypnutie vrstvy (2026-10-08).
+  const coastColor = Cesium.Color.fromCssColorString(COAST_STYLE.color);
+  const borderColor = Cesium.Color.fromCssColorString(BORDER_STYLE.color);
   for (const ring of coast) {
     const flat = ringToFlat(ring);
-    if (flat.length >= 6) lines.add({ positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat), width: COAST_STYLE.width, material: coastMaterial });
+    if (flat.length >= 6) lines.add({ positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat), width: COAST_STYLE.width, material: Cesium.Material.fromType('Color', { color: coastColor }) });
   }
   for (const line of borders) {
     const flat = ringToFlat(line, METEO_OVERLAY_HEIGHT_M, false);
-    if (flat.length >= 6) lines.add({ positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat), width: BORDER_STYLE.width, material: borderMaterial });
+    if (flat.length >= 6) lines.add({ positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat), width: BORDER_STYLE.width, material: Cesium.Material.fromType('Color', { color: borderColor }) });
   }
   root.add(lines);
   root.show = true;

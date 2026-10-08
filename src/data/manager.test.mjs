@@ -3116,3 +3116,69 @@ test('natural hazards share one card and preserve each independent layer row and
     await mgr.setEnabled('volcanoes', false);
   } finally { if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument; }
 });
+
+// 2026-10-08 meteo-gfs: vypnutie krátko po zapnutí, kým prvé update() ešte ťahá
+// katalóg a rezy (modul signál neposlúcha), musí po dobehnutí nechať vrstvu
+// VYPNUTÚ — posledný zámer používateľa vyhráva.
+test('vypnutie počas pomalého prvého update() skončí vypnuté a bez intervalu', async () => {
+  const mgr = new DataLayerManager({});
+  let releaseUpdate;
+  const updateGate = new Promise((resolve) => { releaseUpdate = resolve; });
+  const calls = { enable: 0, disable: 0, update: 0 };
+  let active = false;
+  mgr.register({
+    id: 'meteo-gfs', name: 'meteo', icon: '', source: 'test', updateInterval: 30 * 60 * 1000,
+    async init() {},
+    enable() { calls.enable++; active = true; },
+    disable() { calls.disable++; active = false; },
+    async update() { calls.update++; await updateGate; return true; },
+    getStats() { return { count: 0, lastUpdate: null }; },
+  });
+
+  const on = mgr.setEnabled('meteo-gfs', true, { origin: 'user' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls.update, 1, 'prvé update() beží');
+  const off = mgr.setEnabled('meteo-gfs', false, { origin: 'user' });
+  assert.equal(mgr.isEffectivelyEnabled('meteo-gfs'), false, 'zámer OFF platí hneď');
+  releaseUpdate();
+  await on;
+  const offResult = await off;
+
+  const entry = mgr.layers.get('meteo-gfs');
+  assert.equal(offResult, true, 'vypnutie hlási úspech');
+  assert.equal(mgr.isEnabled('meteo-gfs'), false);
+  assert.equal(entry.lifecycleState, 'disabled');
+  assert.equal(entry.lifecycleUncertain, false);
+  assert.equal(entry.intervalId, null, 'žiadny interval po vypnutí');
+  assert.equal(active, false, 'modul je naozaj vypnutý');
+});
+
+// Ten istý prípad v prehliadači padal inak: disable() meteo vrstvy hodil (zdieľaný
+// Cesium Material v prekrytí). Správca vtedy zámerne ostane fail-closed ZAPNUTÝ,
+// ale chybu musí dať volajúcemu a ďalšie vypnutie musí prejsť.
+test('hádzajúci disable() nechá vrstvu zapnutú s chybou a ďalšie vypnutie prejde', async () => {
+  const mgr = new DataLayerManager({});
+  let throwOnce = true;
+  mgr.register({
+    id: 'meteo-gfs', name: 'meteo', icon: '', source: 'test', updateInterval: 30 * 60 * 1000,
+    async init() {},
+    enable() {},
+    disable() {
+      if (throwOnce) { throwOnce = false; throw new Error('This object was destroyed'); }
+    },
+    async update() { return true; },
+    getStats() { return { count: 0, lastUpdate: null }; },
+  });
+  await mgr.setEnabled('meteo-gfs', true, { origin: 'user' });
+  const failed = mgr._setEnabledWithIntent('meteo-gfs', false, { origin: 'user' });
+  assert.equal(await failed.promise, false);
+  const record = await mgr._waitForVisibilityIntent('meteo-gfs', failed.intentEpoch);
+  assert.equal(record.succeeded, false);
+  assert.equal(record.phase, 'disable');
+  assert.match(String(record.error?.message), /destroyed/);
+  assert.equal(mgr.isEnabled('meteo-gfs'), true, 'fail-closed: modul môže stále kresliť');
+
+  assert.equal(await mgr.setEnabled('meteo-gfs', false, { origin: 'user' }), true);
+  assert.equal(mgr.isEnabled('meteo-gfs'), false);
+  assert.equal(mgr.layers.get('meteo-gfs').intervalId, null);
+});
