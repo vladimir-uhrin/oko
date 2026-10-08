@@ -141,6 +141,9 @@ function layerHarness(warnings) {
 }
 
 test('vrstva: zapnutie načíta okresy a výstrahy, okres s výstrahou sa nakreslí; vypnutie upratuje', async () => {
+  const presence = await import('./radarPresence.js');
+  presence._resetRadarPresenceForTest();
+  presence.setMeteoFieldVisible(true); // nad farebným poľom vetra sa z výšky kreslí vysoko
   const warnings = normalizeMeteoalarm(feed([info()], [info({ emma: 'SK100', area: 'Bratislava' })]), NOW);
   const h = layerHarness(warnings);
   h.layer.init(h.viewer);
@@ -161,6 +164,13 @@ test('vrstva: zapnutie načíta okresy a výstrahy, okres s výstrahou sa nakres
   h.viewer.scene.camera.positionCartographic.height = 20_000;
   h.frame();
   assert.equal(ground.show, true, 'pod 30 km na teréne');
+  assert.equal(elevated.show, false);
+  h.viewer.scene.camera.positionCartographic.height = 600_000;
+  h.frame();
+  assert.equal(elevated.show, true);
+  presence.setMeteoFieldVisible(false);
+  h.frame();
+  assert.equal(ground.show, true, 'bez farebného poľa aj z výšky na teréne (3D bez posunu)');
   assert.equal(elevated.show, false);
   h.layer.disable();
   assert.equal(h.added.length, 0);

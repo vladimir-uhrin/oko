@@ -49,5 +49,13 @@ export function onRadarPresenceChange(fn) {
   return () => listeners.delete(fn);
 }
 
+let fieldVisible = false;
+/**
+ * Je farebné pole meteo vrstvy práve nakreslené? Výstrahy a stanice sa nad ním musia kresliť vysoko (nad
+ * drapériou 10 km); bez neho idú k zemi, inak by sa v sklopenom 3D pohľade posunuli od svojho miesta.
+ */
+export function setMeteoFieldVisible(on) { fieldVisible = Boolean(on); }
+export function isMeteoFieldVisible() { return fieldVisible; }
+
 /** Len pre testy. */
-export function _resetRadarPresenceForTest() { active.clear(); controllers.clear(); listeners.clear(); }
+export function _resetRadarPresenceForTest() { active.clear(); controllers.clear(); listeners.clear(); fieldVisible = false; }

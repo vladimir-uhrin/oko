@@ -35,7 +35,7 @@ import { createPlaceLabelManager } from './meteoPlaceLabels.js';
 import { METEOGRAM_URL, coordinateLabel, meteogramColumns } from './meteogram.js';
 import { createMeteogramPanel } from '../meteogramPanel.js';
 import { resolvePickId } from './pickRegistry.js';
-import { anyRadarActive, onRadarPresenceChange, primaryRadar } from './radarPresence.js';
+import { anyRadarActive, onRadarPresenceChange, primaryRadar, setMeteoFieldVisible } from './radarPresence.js';
 
 export { METEO_LAYER_ID };
 export const METEO_CATALOG_URL = '/api/meteo/catalog';
@@ -843,7 +843,7 @@ export function createMeteoLayer({
       _drape.material.uniforms.rampMax = field.rampRange[1];
     }
     _drape.material.uniforms.alpha = fieldAlphaNow();
-    _drape.primitive.show = fieldShouldShow();
+    _drape.primitive.show = fieldShouldShow(); setMeteoFieldVisible(_drape.primitive.show);
     _fraction = 0;
     if (_hoverPlace) _hover?.update(placeValues(_hoverPlace));
     updateIsolines(field, fieldImg);
@@ -953,7 +953,7 @@ export function createMeteoLayer({
     const fade = Math.max(0, Math.min(1, (h - METEO_FADE_OUT_HEIGHT_M) / (METEO_FADE_IN_HEIGHT_M - METEO_FADE_OUT_HEIGHT_M)));
     if (Math.abs(fade - _heightFade) < 0.01) return;
     _heightFade = fade;
-    if (_drape) { _drape.material.uniforms.alpha = fieldAlphaNow(); _drape.primitive.show = fieldShouldShow(); }
+    if (_drape) { _drape.material.uniforms.alpha = fieldAlphaNow(); _drape.primitive.show = fieldShouldShow(); setMeteoFieldVisible(_drape.primitive.show); }
     if (_isolines) _isolines.show = fade > 0.02;
     if (_mapOverlay) _mapOverlay.show = fade > 0.02;
     _placeLabels?.setVisible(fade > 0.02);
@@ -1044,7 +1044,7 @@ export function createMeteoLayer({
         _unsubRadar = onRadarPresenceChange((_any, kind) => {
           syncRadarTimeline();
           if (kind === 'frame') return;
-          if (_drape) _drape.primitive.show = fieldShouldShow();
+          if (_drape) { _drape.primitive.show = fieldShouldShow(); setMeteoFieldVisible(_drape.primitive.show); }
           _rowListener?.();
           governorRequestRender('meteo');
         });
@@ -1083,6 +1083,7 @@ export function createMeteoLayer({
       _radarTimeline = null;
       _radarFramesKey = '';
       if (_drape) _drape.primitive.show = false;
+      setMeteoFieldVisible(false);
       clearIsolines();
       clearPlaces();
       detachHover();

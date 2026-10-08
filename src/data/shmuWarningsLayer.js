@@ -15,6 +15,7 @@ import * as Cesium from 'cesium';
 import { t, currentLanguage } from '../i18n.js';
 import { governorRequestRender } from '../renderGovernor.js';
 import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import { isMeteoFieldVisible } from './radarPresence.js';
 import { WARNINGS_URL, WARNING_LEVELS, districtStates, isActiveAt, warningTimeLabel } from './weatherWarnings.js';
 
 export const SHMU_WARNINGS_LAYER_ID = 'shmu-warnings';
@@ -266,7 +267,9 @@ export function createShmuWarningsLayer({
 
   function syncMode() {
     const h = _viewer?.scene?.camera?.positionCartographic?.height;
-    const ground = Number.isFinite(h) && h < WARN_GROUND_BELOW_M;
+    // Vysoko len nad farebným poľom meteo vrstvy; inak pri zemi (v sklopenom 3D pohľade by sa výplň vo výške
+    // 11,5 km posunula od svojho okresu).
+    const ground = (Number.isFinite(h) && h < WARN_GROUND_BELOW_M) || !isMeteoFieldVisible();
     if (ground === _groundMode) return;
     _groundMode = ground;
     if (_elevated) _elevated.show = _enabled && !ground;

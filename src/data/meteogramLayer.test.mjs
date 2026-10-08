@@ -160,7 +160,7 @@ test('chyba servera ukáže v páse „nedostupné", nie prázdnu tabuľku', asy
 });
 
 test('zapnutý radar nahradí farebné pole (ako Windy), po vypnutí sa pole vráti; radar sa hlási sám', async () => {
-  const { anyRadarActive, _resetRadarPresenceForTest } = await import('./radarPresence.js');
+  const { anyRadarActive, isMeteoFieldVisible, _resetRadarPresenceForTest } = await import('./radarPresence.js');
   const { createShmuRadarLayer } = await import('./shmuRadar.js');
   _resetRadarPresenceForTest(); // pred init meteo vrstvy — tá sa v init prihlási za poslucháča
   const h = await enabled();
@@ -172,9 +172,11 @@ test('zapnutý radar nahradí farebné pole (ako Windy), po vypnutí sa pole vr�
   radar.enable();
   assert.equal(anyRadarActive(), true);
   assert.equal(drape.primitive.show, false, 'radar pole skryl');
+  assert.equal(isMeteoFieldVisible(), false, 'výstrahy a stanice vedia, že pole nie je — idú k zemi');
   radar.disable();
   assert.equal(anyRadarActive(), false);
   assert.equal(drape.primitive.show, true, 'po vypnutí radaru sa pole vráti');
+  assert.equal(isMeteoFieldVisible(), true);
   radar.destroy();
   h.layer.disable();
 });

@@ -12,6 +12,7 @@ import * as Cesium from 'cesium';
 import { t, currentLanguage } from '../i18n.js';
 import { governorRequestRender } from '../renderGovernor.js';
 import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import { isMeteoFieldVisible } from './radarPresence.js';
 import { STATIONS_URL, declutterStationLabels } from './shmuStations.js';
 import { rampCssColor } from './meteogram.js';
 import { windDirectionText } from './meteoPlaces.js';
@@ -153,7 +154,8 @@ export function createShmuStationsLayer({
     _lastRefresh = ms;
     const scene = _viewer.scene;
     const h = scene.camera?.positionCartographic?.height;
-    const ground = Number.isFinite(h) && h < STATION_GROUND_BELOW_M;
+    // Vysoko len nad farebným poľom meteo vrstvy; inak pri stanici (3D pohľad bez posunu).
+    const ground = (Number.isFinite(h) && h < STATION_GROUND_BELOW_M) || !isMeteoFieldVisible();
     const modeChanged = ground !== _ground;
     _ground = ground;
     const occluder = scene.globe?.ellipsoid ? new Cesium.EllipsoidalOccluder(scene.globe.ellipsoid, scene.camera.positionWC) : null;
