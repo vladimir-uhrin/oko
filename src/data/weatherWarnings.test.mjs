@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { SK_DISTRICTS, districtCodesForArea } from './skDistricts.js';
 import { awarenessNumber, districtStates, isActiveAt, normalizeMeteoalarm, warningTimeLabel } from './weatherWarnings.js';
 import { createWeatherWarningsService, WARNINGS_FRESH_MS } from './weatherWarningsService.js';
-import { cardBox, createShmuWarningsLayer, warningCardModel } from './shmuWarningsLayer.js';
+import { bottomLimitFrom, cardBox, createShmuWarningsLayer, warningCardModel } from './shmuWarningsLayer.js';
 
 const NOW = Date.parse('2026-10-08T15:00:00Z');
 
@@ -110,6 +110,10 @@ test('karta: najvyšší stupeň hore, „platí" podľa času; poloha karty nad
   const box = cardBox({ at: { x: 600, y: 500 }, width: 300, height: 400, viewW: 1440, viewH: 900, bottomLimit: 450 });
   assert.ok(box.y + Math.min(400, box.maxHeight) <= 442, 'spodok karty nad meteogramom');
   assert.equal(box.maxHeight, 434);
+  // Mobil bez meteogramu: karta nesmie zájsť pod spodnú lištu (#oko-appbar).
+  assert.equal(bottomLimitFrom([null, { top: 802, height: 58 }]), 802);
+  assert.equal(bottomLimitFrom([{ top: 448, height: 250 }, { top: 802, height: 58 }]), 448);
+  assert.equal(bottomLimitFrom([{ top: 0, height: 0 }]), null);
 });
 
 function layerHarness(warnings) {

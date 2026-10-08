@@ -63,6 +63,12 @@ export function cardBox({ at, width, height, viewW, viewH, bottomLimit = null, g
   return { x: Math.round(x), y: Math.round(y), maxHeight: Math.round(maxHeight) };
 }
 
+/** Najvyšší vrch z viditeľných prekážok pod kartou (meteogram, spodná lišta); null ak žiadna. Pure. */
+export function bottomLimitFrom(rects) {
+  const tops = (rects || []).filter((r) => r && r.height > 0 && Number.isFinite(r.top)).map((r) => r.top);
+  return tops.length ? Math.min(...tops) : null;
+}
+
 function rgba(hex, alpha) {
   return Cesium.Color.fromCssColorString(hex).withAlpha(alpha);
 }
@@ -112,7 +118,9 @@ function createWarningCard(doc) {
         // Nad pásom predpovede (meteogram), ak je otvorený — klik otvorí oboje a nesmú sa prekryť.
         // Meteogram sa môže otvoriť až po nás (poradie poslucháčov), preto ešte raz o chvíľu.
         const gram = doc.getElementById?.('meteogram');
-        const gramTop = gram && !gram.hidden ? gram.getBoundingClientRect().top : null;
+        // Na mobile aj spodná lišta (#oko-appbar) — päta karty pod ňou bola odrezaná.
+        const appbar = doc.getElementById?.('oko-appbar');
+        const gramTop = bottomLimitFrom([gram && !gram.hidden ? gram.getBoundingClientRect() : null, appbar && appbar.offsetHeight ? appbar.getBoundingClientRect() : null]);
         root.style.maxHeight = '';
         const box = cardBox({ at, width: root.offsetWidth || 300, height: root.scrollHeight || root.offsetHeight || 200, viewW: view?.innerWidth ?? 1200, viewH: view?.innerHeight ?? 800, bottomLimit: gramTop });
         root.style.left = `${box.x}px`;
