@@ -153,7 +153,21 @@ function preloadFrameImage(url) {
   });
 }
 
-export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = createRadarFramePrimitive } = {}) {
+/**
+ * @param {object} [options] — id / name / metaUrl / zdroj umožňujú druhú inštanciu pre radar Európy OPERA
+ *   (2026-10-08, operaRadarLayer.js): ten istý tvar odpovede servera, tá istá slučka a paleta.
+ */
+export function createShmuRadarLayer({
+  fetchImpl = null,
+  primitiveFactory = createRadarFramePrimitive,
+  id = SHMU_RADAR_LAYER_ID,
+  name = 'Zrážkový radar (SHMÚ)',
+  icon = '▧',
+  metaUrl = META_URL,
+  sourceIdle = 'SHMÚ — opendata.shmu.sk (CC BY 4.0)',
+  sourceAt = (product, iso) => `SHMÚ ${product || 'radar'} · ${iso.slice(11, 16)} UTC (CC BY 4.0)`,
+  logTag = 'ShmuRadar',
+} = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   let _viewer = null;
   let _enabled = false;
@@ -181,7 +195,7 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
     setFrameVisible(iso, _enabled);
     _currentIso = iso;
     // Discrete scene mutation under the render governor contract — one frame.
-    governorRequestRender('shmu-radar');
+    governorRequestRender(id);
   };
 
   const animator = createRadarFrameAnimator({
@@ -190,17 +204,15 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
   });
 
   const layer = {
-    id: SHMU_RADAR_LAYER_ID,
-    name: 'Zrážkový radar (SHMÚ)',
+    id,
+    name,
     // Monochromatický glyf v štýle ostatných vrstiev (▣/▰/▲) — žiadne emoji,
     // nech panel drží jednotný HUD vzhľad.
-    icon: '▧',
+    icon,
     // Live label: once a frame lands, the row says WHICH product and WHEN —
     // a radar image without its valid time is not an observation.
     get source() {
-      return _iso
-        ? `SHMÚ ${_product || 'radar'} · ${_iso.slice(11, 16)} UTC (CC BY 4.0)`
-        : 'SHMÚ — opendata.shmu.sk (CC BY 4.0)';
+      return _iso ? sourceAt(_product, _iso) : sourceIdle;
     },
     updateInterval: 5 * 60 * 1000, // matches the upstream product cadence
 
@@ -216,7 +228,7 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
       _frameIsos = [];
       _primitives = new Map();
       _currentIso = null;
-      console.log('[Data:ShmuRadar] Initialized');
+      console.log(`[Data:${logTag}] Initialized`);
     },
 
     enable() {
@@ -231,12 +243,12 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
       _enabled = false;
       animator.stop();
       setFrameVisible(_currentIso, false);
-      governorRequestRender('shmu-radar');
+      governorRequestRender(id);
     },
 
     async update() {
       try {
-        const response = await doFetch(META_URL);
+        const response = await doFetch(metaUrl);
         if (!response.ok) {
           _lastError = `SHMÚ proxy HTTP ${response.status}`;
           return false;
@@ -285,13 +297,13 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
               _viewer?.scene?.primitives?.add?.(primitive);
               ready.push(frame.iso);
             } else {
-              console.warn(`[Data:ShmuRadar] frame ${frame.iso} failed to preload — skipped this round`);
+              console.warn(`[Data:${logTag}] frame ${frame.iso} failed to preload — skipped this round`);
             }
           }
           _frameIsos = ready;
           // …and the visible frame stays valid even after pruning.
           if (_enabled && !_currentIso) showFrame(_frameIsos.length - 1);
-          governorRequestRender('shmu-radar');
+          governorRequestRender(id);
         }
         _iso = meta.iso;
 
@@ -307,10 +319,10 @@ export function createShmuRadarLayer({ fetchImpl = null, primitiveFactory = crea
         // keep their own channel.
         _stale = meta.stale === true;
         _lastError = null;
-        console.log(`[Data:ShmuRadar] Updated: ${meta.iso}, ${_echoPixels} echo px${_stale ? ' (STALE)' : ''}`);
+        console.log(`[Data:${logTag}] Updated: ${meta.iso}, ${_echoPixels} echo px${_stale ? ' (STALE)' : ''}`);
         return true;
       } catch (e) {
-        console.warn('[Data:ShmuRadar] Fetch error:', e);
+        console.warn(`[Data:${logTag}] Fetch error:`, e);
         _lastError = 'SHMÚ radar network error';
         return false;
       }

@@ -18,6 +18,7 @@ import naturalEventsLayer from './data/naturalEvents.js';
 import shmuRadarLayer from './data/shmuRadar.js';
 import shmuWarningsLayer from './data/shmuWarningsLayer.js';
 import shmuStationsLayer from './data/shmuStationsLayer.js';
+import operaRadarLayer from './data/operaRadarLayer.js';
 // Lenivý zástupca: skutočný meteoLayer.js sa dotiahne až pri otvorení vrstvy
 // (obmedzenie zadania — news stránky nesmú ťahať weather kód). Viď meteoLazy.js.
 import meteoLayer from './data/meteoLazy.js';
@@ -504,6 +505,8 @@ async function init() {
     dataManager.register(shmuWarningsLayer);
     // Merania automatických staníc SHMÚ (2026-10-08, sekcia POČASIE).
     dataManager.register(shmuStationsLayer);
+    // Zrážkový radar celej Európy — EUMETNET OPERA (2026-10-08, sekcia POČASIE).
+    dataManager.register(operaRadarLayer);
     // Meteorológia sveta (2026-09-08, prototyp GFS: pole + GPU častice + os).
     dataManager.register(meteoLayer);
     dataManager.register(satellitesLayer);

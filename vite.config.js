@@ -78,6 +78,8 @@ import { rasterizeMeteoField, runIsoOf } from './src/data/meteoRasterize.js';
 import { createMeteoPointService } from './src/data/meteoPointService.js';
 import { createWeatherWarningsService } from './src/data/weatherWarningsService.js';
 import { createShmuStationsService } from './src/data/shmuStationsService.js';
+import { createOperaRadarService } from './src/data/operaRadarService.js';
+import { decodeOperaInWorker } from './src/data/operaRadarWorker.js';
 import {
   GFW_API_BASE as GFW_PRESENCE_API_BASE,
   GFW_DAY_STEP_BACK_MAX,
@@ -11475,6 +11477,77 @@ const _weatherWarningsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30,
  * a spojené dopyty v src/data/shmuStationsService.js, per-IP strop.
  */
 const _shmuStationsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 240 });
+/**
+ * Zrážkový radar Európy — kompozit EUMETNET OPERA (2026-10-08): GET /api/opera/radar → meta v tvare radaru SHMÚ,
+ * GET /api/opera/radar/frame/<iso>.png → snímka (immutable). Verejné úložisko MeteoGate Open Radar Data bez kľúča
+ * (CC BY 4.0); dekódovanie ODIM + prepočet LAEA vo vlákne (src/data/operaRadarWorker.js), kruh 6 snímok
+ * (1 h) v pamäti aj na disku .gev-cache/opera-radar, nová snímka najviac raz za 10 min (src/data/operaRadarService.js).
+ */
+const _operaRadarRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 60, globalMax: 600 });
+function operaRadarProxy() {
+  const MAX_BYTES = 12 * 1024 * 1024;
+  const dir = path.join(process.cwd(), '.gev-cache', 'opera-radar');
+  const fetchBuffer = (url) => new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'user-agent': 'OKO opera-radar (okolive.sk; 1 file / 10 min)' } }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); resolve({ status: res.statusCode }); return; }
+      const chunks = [];
+      let n = 0;
+      res.on('data', (c) => { n += c.length; if (n > MAX_BYTES) { req.destroy(new Error('OPERA: oversized')); return; } chunks.push(c); });
+      res.on('end', () => { const b = Buffer.concat(chunks); resolve({ status: 200, buffer: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) }); });
+      res.on('error', reject);
+    });
+    req.setTimeout(60_000, () => req.destroy(new Error('OPERA: timeout')));
+    req.on('error', reject);
+  });
+  const fileOf = (iso) => path.join(dir, `${String(iso).replace(/[:]/g, '')}.png`);
+  const store = {
+    async load() {
+      const meta = JSON.parse(await fsp.readFile(path.join(dir, 'ring.json'), 'utf8'));
+      const out = [];
+      for (const m of meta) { try { out.push({ ...m, png: await fsp.readFile(fileOf(m.iso)) }); } catch { /* chýba */ } }
+      return out;
+    },
+    async save(frame, ring) {
+      await fsp.mkdir(dir, { recursive: true });
+      await fsp.writeFile(fileOf(frame.iso), frame.png);
+      await fsp.writeFile(path.join(dir, 'ring.json'), JSON.stringify(ring.map(({ iso, bounds, echoPixels }) => ({ iso, bounds, echoPixels }))));
+      const keep = new Set(ring.map((f) => path.basename(fileOf(f.iso))));
+      for (const name of await fsp.readdir(dir)) if (name.endsWith('.png') && !keep.has(name)) await fsp.unlink(path.join(dir, name)).catch(() => {});
+    },
+  };
+  const service = createOperaRadarService({ fetchBuffer, decode: (buf) => decodeOperaInWorker(buf), store });
+  function install(middlewares) {
+    middlewares.use('/api/opera/radar', async (req, res) => {
+      const sendJson = (status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+      if (req.method !== 'GET') return sendJson(405, { ok: false, error: 'Method Not Allowed' });
+      if (!_operaRadarRateLimiter(clientKey(req))) return sendJson(429, { ok: false, error: 'Rate limit exceeded' });
+      try {
+        // Bez snímky čakáme na prvú (studený štart); inak obnova beží na pozadí a odpoveď ide hneď.
+        const pending = service.ensureFresh();
+        if (!service.hasFrames()) await pending;
+        const subPath = String(req.url || '').split('?')[0];
+        if (subPath.startsWith('/frame/') && subPath.endsWith('.png')) {
+          const frame = service.frame(decodeURIComponent(subPath.slice('/frame/'.length, -'.png'.length)));
+          if (!frame) return sendJson(404, { ok: false, error: 'frame_gone' });
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400, immutable' });
+          return res.end(frame.png);
+        }
+        const meta = service.meta();
+        if (!meta) return sendJson(503, { ok: false, error: 'radar_unavailable', detail: service.stats().lastError });
+        return sendJson(200, meta);
+      } catch (error) {
+        console.warn('[opera-radar] request failed:', error?.message || error);
+        return sendJson(500, { ok: false, error: 'radar_proxy_error' });
+      }
+    });
+  }
+  return {
+    name: 'opera-radar-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
 function shmuStationsProxy() {
   let extraCa = null;
   try { extraCa = fs.readFileSync(path.join(__dirname, 'config', 'ca', 'sectigo-public-server-authentication-ca-dv-r36.pem'), 'utf8'); } catch { /* len systémové korene */ }
@@ -11940,6 +12013,7 @@ export default defineConfig(({ mode }) => {
       weatherEffectsProxy(),
       weatherWarningsProxy(),
       shmuStationsProxy(),
+      operaRadarProxy(),
       cctvProxy(),
       radioBrowserProxy(),
       gbfsProxy(),

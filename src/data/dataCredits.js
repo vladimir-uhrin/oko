@@ -245,6 +245,13 @@ export const DATA_CREDITS = [
       '(CC BY 4.0)',
   },
   {
+    key: 'opera-radar',
+    html:
+      'Radar Európa: ' +
+      '<a href="https://www.eumetnet.eu/observations/weather-radar-network/" target="_blank" rel="noopener">EUMETNET OPERA</a> ' +
+      '(CC BY 4.0) cez <a href="https://meteogate.eu" target="_blank" rel="noopener">MeteoGate</a> Open Radar Data',
+  },
+  {
     key: 'shmu-stations',
     html:
       'Merania staníc: ' +

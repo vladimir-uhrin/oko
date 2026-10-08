@@ -182,9 +182,10 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   // statický snímok tranzitných plynovodov s dátumom; nie živé).
   // 36 → 37: nočné svetlá VIIRS NOAA-20 (GIBS, token 'N', 2026-09-21 — pre modul
   // UKRAJINA; PRVÝ token mimo a–z0–9, lebo tá abeceda bola do posledného znaku plná).
-  // 37 → 38: výstrahy SHMÚ po okresoch (token 'W', 2026-10-08); 38 → 39: stanice SHMÚ (token 'S').
-  assert.equal(REGISTERED_LAYER_IDS.length, 39);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 39);
+  // 37 → 38: výstrahy SHMÚ po okresoch (token 'W', 2026-10-08); 38 → 39: stanice SHMÚ (token 'S');
+  // 39 → 40: radar Európy OPERA (token 'E').
+  assert.equal(REGISTERED_LAYER_IDS.length, 40);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 40);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),
