@@ -38,7 +38,7 @@ export const METEO_FIELDS = Object.freeze({
     /** Kanál PNG s hodnotou pre farebnú drapériu (B = rýchlosť). */
     channel: 2,
     decode: [WIND_SPEED_RANGE[0], WIND_SPEED_RANGE[1]],
-    alpha: 0.82,
+    alpha: 0.95,
   }),
   temp: Object.freeze({
     id: 'temp',
@@ -49,7 +49,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [-55, 47],
     channel: 0,
     decode: [TEMP_RANGE[0], TEMP_RANGE[1]],
-    alpha: 0.82,
+    alpha: 0.95,
   }),
   pressure: Object.freeze({
     id: 'pressure',
@@ -59,7 +59,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [960, 1050],
     channel: 0,
     decode: [940, 1060],
-    alpha: 0.78,
+    alpha: 0.95,
     /** Izobary každé 4 hPa, 1013 zvýraznená. */
     isolines: { step: 4, emphasis: 1013 },
   }),
@@ -100,7 +100,7 @@ export const METEO_FIELDS = Object.freeze({
     rampRange: [0, 45],
     channel: 0,
     decode: [0, 60],
-    alpha: 0.82,
+    alpha: 0.95,
   }),
 });
 
@@ -177,7 +177,7 @@ function isobaricWind(id, levelPa, speedMax) {
     channel: 2,
     decode: [0, speedMax],
     componentRange: [-speedMax, speedMax],
-    alpha: 0.82,
+    alpha: 0.95,
     bake: false,
   });
 }
@@ -190,6 +190,9 @@ function isobaricWind(id, levelPa, speedMax) {
  * Zastávky [hodnota, hex, alfa?]; alfa default 1 (zrážky a oblačnosť sú bez javu priehľadné).
  * Vietor v m/s, teplota v °C, tlak v hPa, zrážky v mm/h, oblačnosť v %.
  */
+// Pole je takmer nepriehľadné (alfa 0,95 pri vetre, teplote, tlaku a nárazoch, 2026-10-08) — ako Windy:
+// zapečené sivé názvy podkladu Stadia pod ním nepresvitajú (tmavý variant bez názvov nemá),
+// mapu dávajú len naše čiary a mená nad poľom.
 export const METEO_RAMPS = Object.freeze({
   wind: Object.freeze([
     [0, '#6271b7'], [1, '#39619f'], [3, '#4a94a9'], [5, '#4d8d7b'],

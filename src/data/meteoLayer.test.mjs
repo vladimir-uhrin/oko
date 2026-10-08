@@ -173,7 +173,7 @@ test('fáza polia: TLAK → izobary (mriežka z obrázka → marching squares �
   assert.equal(isoCalls.length, 1);
   assert.ok(isoCalls[0][0] > 3, 'niekoľko izobar');
   assert.equal(isoCalls[0][1], 'pressure');
-  assert.equal(calls.primitives[0].material.uniforms.alpha, 0.78, 'alfa podľa poľa');
+  assert.equal(calls.primitives[0].material.uniforms.alpha, 0.95, 'alfa podľa poľa (2026-10-08 takmer nepriehľadné ako Windy)');
   layer.setParams({ field: 'precip' });
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(removed.length, 1, 'izobary odstránené pri zmene poľa');

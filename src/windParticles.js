@@ -35,7 +35,9 @@ export const WIND_DROP_RATE_BUMP = 0.01;
  * m/px ≈ výška × 1,15 / výška_plátna, teda dt ≈ výška × 1,2e-4 s.
  */
 export const WIND_SIM_SECONDS_PER_METRE_HEIGHT = 1.2e-4;
-export const WIND_SIM_SECONDS_MIN = 30;
+// 2026-10-08 (ako Windy, krátke ťahy aj zblízka): 30 s pri 55 km kamere = ~4 px/snímok → dlhé
+// zvislé čiary ako dážď; dolná hranica 5 s drží ~1 px/snímok až k najbližšiemu pohľadu s poľom.
+export const WIND_SIM_SECONDS_MIN = 5;
 export const WIND_SIM_SECONDS_MAX = 1500;
 /** Po výraznej zmene výrezu sa častice rýchlo presťahujú do nového výrezu (snímky, drop rate). */
 export const WIND_RESPAWN_BOOST_FRAMES = 40;
@@ -49,7 +51,8 @@ export const DENSITY_FAR_M = 3_000_000;
 export const DENSITY_NEAR_M = 120_000;
 export const DENSITY_MIN = 0.15;
 /** Dĺžka stopy podľa výšky: zblízka kratšia, inak z čiar vznikne statický hrebeň. */
-export const TRAIL_FADE_NEAR = 0.93;
+// 2026-10-08: pri ~1 px/snímok (WIND_SIM_SECONDS_MIN 5) chvost ~20 snímok = krátky ťah ako Windy.
+export const TRAIL_FADE_NEAR = 0.95;
 /** Rozsah prízemného vetra — referencia pre spomalenie vyšších hladín. */
 export const WIND_BASE_RANGE_TOP = 60;
 /**
@@ -251,6 +254,40 @@ function program(gl, vs, fs) {
   return { p, uniforms, attribs };
 }
 
+/**
+ * Stav častíc v plnej presnosti (2026-10-08, „prúdnice ako Windy"). RGBA8 kódovanie (dva kanály
+ * na súradnicu) dáva krok 1/65 025 obvodu: ~370 m po dĺžke, ~300 m po šírke. Pri kamere 150 km
+ * je to 2–3 px — pomalá častica sa nepohla (posun pod krokom sa zaokrúhlil preč) a keď áno,
+ * skočila a nechala dlhú zvislú čiaru. Kde grafika vie kresliť do RGBA32F (EXT_color_buffer_float,
+ * WebGL2 na počítačoch takmer vždy), poloha sa ukladá priamo ako float v .rg. Pure.
+ * @param {boolean} floatState
+ * @returns {{ update: string, draw: string }}
+ */
+export function particleStateShaders(floatState) {
+  if (!floatState) return { update: UPDATE_FS, draw: DRAW_VS };
+  const highp = (src) => src.replace('precision highp float;', 'precision highp float;\nprecision highp sampler2D;');
+  const update = highp(UPDATE_FS)
+    .replace('vec2 pos = vec2(color.r / 255.0 + color.b, color.g / 255.0 + color.a); // 0..1', 'vec2 pos = color.rg; // 0..1 (float stav)')
+    .replace('o = vec4(fract(pos * 255.0), floor(pos * 255.0) / 255.0);', 'o = vec4(pos, 0.0, 1.0);');
+  const draw = highp(DRAW_VS)
+    .replace('vec2 decode(vec4 color) { return vec2(color.r / 255.0 + color.b, color.g / 255.0 + color.a); }', 'vec2 decode(vec4 color) { return color.rg; }');
+  return { update, draw };
+}
+
+/** Textúra stavu častíc: RGBA32F (náhodné polohy 0..1) alebo RGBA8 (náhodné bajty). */
+function stateTexture(gl, floatState, res, seedFloat, seedBytes) {
+  if (!floatState) return texture(gl, gl.NEAREST, seedBytes, res, res);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, res, res, 0, gl.RGBA, gl.FLOAT, seedFloat);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return tex;
+}
+
 function texture(gl, filter, data, width, height) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -410,8 +447,11 @@ export function createWindParticles(container, viewer, {
 
   const res = particleTextureSize(count);
   const total = res * res;
-  const progUpdate = program(gl, QUAD_VS, UPDATE_FS);
-  const progDraw = program(gl, DRAW_VS, DRAW_FS);
+  const floatState = Boolean(gl.getExtension?.('EXT_color_buffer_float'));
+  state.floatState = floatState;
+  const shaders = particleStateShaders(floatState);
+  const progUpdate = program(gl, QUAD_VS, shaders.update);
+  const progDraw = program(gl, shaders.draw, DRAW_FS);
   const progScreen = program(gl, QUAD_VS, SCREEN_FS);
 
   const quad = gl.createBuffer();
@@ -426,8 +466,10 @@ export function createWindParticles(container, viewer, {
 
   const seed = new Uint8Array(total * 4);
   for (let i = 0; i < seed.length; i += 1) seed[i] = Math.floor(Math.random() * 256);
-  let stateA = texture(gl, gl.NEAREST, seed, res, res);
-  let stateB = texture(gl, gl.NEAREST, seed, res, res);
+  const seedFloat = floatState ? new Float32Array(total * 4) : null;
+  if (seedFloat) for (let i = 0; i < total; i += 1) { seedFloat[i * 4] = Math.random(); seedFloat[i * 4 + 1] = 0.002 + Math.random() * 0.996; seedFloat[i * 4 + 3] = 1; }
+  let stateA = stateTexture(gl, floatState, res, seedFloat, seed);
+  let stateB = stateTexture(gl, floatState, res, seedFloat, seed);
   let windTex = null;
   let windNextTex = null; // ďalší krok (interpolácia); bez neho = windTex
   let windMix = 0;

@@ -87,7 +87,8 @@ test('zrod vo výreze: okraj 15 %, celá guľa pri > polovici sveta alebo bez ob
 test('rýchlosť podľa výšky (~1 px/snímok pri 10 m/s) a počet aktívnych častíc podľa výrezu', () => {
   assert.equal(simSecondsPerFrame(8_000_000), 960);
   assert.equal(simSecondsPerFrame(400_000), 48);
-  assert.equal(simSecondsPerFrame(50_000), 30, 'spodná hranica');
+  assert.equal(simSecondsPerFrame(50_000), 6, 'zblízka ~1 px/snímok (2026-10-08: krátke ťahy ako Windy)');
+  assert.equal(simSecondsPerFrame(20_000), 5, 'spodná hranica');
   assert.equal(simSecondsPerFrame(25_000_000), 1500, 'horná hranica');
   assert.equal(simSecondsPerFrame(NaN), 1500);
   assert.equal(activeParticleCount(49152, 1), 49152);
@@ -149,4 +150,19 @@ test('dĺžka stopy podľa výšky: dlhá pri planéte, krátka zblízka', () =>
   assert.ok(trailFadeForHeight(250_000) >= TRAIL_FADE_NEAR);
   assert.ok(trailFadeForHeight(400_000) > trailFadeForHeight(250_000), 'monotónne');
   assert.equal(trailFadeForHeight(NaN), WIND_TRAIL_FADE, 'neznáma výška nič nemení');
+});
+
+test('stav častíc v plnej presnosti (2026-10-08): float textúra číta a píše polohu priamo, inak RGBA8 kódovanie', async () => {
+  const { particleStateShaders } = await import('./windParticles.js');
+  const f = particleStateShaders(true);
+  assert.match(f.update, /vec2 pos = color\.rg;/, 'poloha priamo z .rg — žiadne zaokrúhlenie na ~300 m');
+  assert.match(f.update, /o = vec4\(pos, 0\.0, 1\.0\);/);
+  assert.doesNotMatch(f.update, /floor\(pos \* 255\.0\)/, 'bez 8-bitového kódovania');
+  assert.match(f.draw, /vec2 decode\(vec4 color\) \{ return color\.rg; \}/);
+  assert.match(f.update, /precision highp sampler2D;/, 'vzorkovanie stavu v plnej presnosti');
+  const b = particleStateShaders(false);
+  assert.match(b.update, /floor\(pos \* 255\.0\) \/ 255\.0/, 'záloha bez EXT_color_buffer_float ostáva');
+  const src = (await import('node:fs')).readFileSync(new URL('./windParticles.js', import.meta.url), 'utf8');
+  assert.match(src, /gl\.getExtension\?\.\('EXT_color_buffer_float'\)/);
+  assert.match(src, /gl\.texImage2D\(gl\.TEXTURE_2D, 0, gl\.RGBA32F, res, res, 0, gl\.RGBA, gl\.FLOAT, seedFloat\);/);
 });
