@@ -12,8 +12,12 @@ import { ZMAX_DBZ_PALETTE, ZMAX_MIN_DISPLAY_DBZ, softenRgba } from './shmuRadarG
 
 export const OPERA_BASE = 'https://s3.waw3-1.cloudferro.com/openradar-24h';
 export const OPERA_STEP_MIN = 10;
-/** Výstupná zemepisná mriežka (stupne/px): ~2,5 km — prehľad Európy; detail SR dáva radar SHMÚ. */
-export const OPERA_OUT_DEG = 0.025;
+/**
+ * Výstupná zemepisná mriežka (stupne/px): ~3,5 km — prehľad Európy; detail SR dáva radar SHMÚ. 2026-10-09: z 0,025°
+ * na 0,035°, lebo snímka je v grafickej karte RGBA textúra (3920 × 1720 = 27 MB) a 2 h histórie (12 snímok) by
+ * mobil nezniesol; 2800 × 1230 = 14 MB. Vyhladenie rozdiel v ostrosti zakryje.
+ */
+export const OPERA_OUT_DEG = 0.035;
 
 /** Adresa súboru kompozitu pre čas (UTC, zaokrúhlený nadol na 10 min). Pure. */
 export function operaFileUrl(ms, quantity = 'DBZH') {
@@ -120,7 +124,7 @@ export function smoothDbzColor(dbz, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ) {
  * ozveny sú priehľadné. Pure.
  * @param {Float64Array|number[]} values riadky zhora (ODIM), stĺpce zľava
  */
-export function reprojectOpera(values, where, dataWhat, { deg = OPERA_OUT_DEG, radius = 1, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ, soften = true } = {}) {
+export function reprojectOpera(values, where, dataWhat, { deg = OPERA_OUT_DEG, radius = 2, minDisplayDbz = ZMAX_MIN_DISPLAY_DBZ, soften = true } = {}) {
   const g = operaGrid(where);
   if (!g) throw new Error('OPERA: neznáma projekcia');
   const bounds = operaBounds(where);

@@ -95,3 +95,21 @@ test('pás predpovede: na mobile nad vodorovným dockom, inak nad časovou osou'
   assert.equal(meteogramAnchor(docWith({ width: 136, height: 500 })), timeline);
   assert.equal(meteogramAnchor(docWith({ width: 374, height: 44 }, true)), timeline);
 });
+
+test('zbalenie na ikony: uložená voľba má prednosť, inak zbalený na nízkej obrazovke; klik prepne a zapamätá', async () => {
+  const { initialCollapsed, DOCK_COLLAPSE_KEY } = await import('./weatherDock.js');
+  assert.equal(initialCollapsed(null, 700), true);
+  assert.equal(initialCollapsed(null, 900), false);
+  assert.equal(initialCollapsed('0', 700), false);
+  assert.equal(initialCollapsed('1', 900), true);
+  const doc = fakeDoc();
+  const store = new Map();
+  doc.defaultView = { innerHeight: 900, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) } };
+  const dock = createWeatherDock(doc, { dataManager: fakeManager(), t: tr });
+  const toggle = find(dock.element, (n) => n.className === 'weather-dock-toggle');
+  assert.equal(dock.element.classList.contains('collapsed'), false);
+  toggle.click();
+  assert.equal(dock.element.classList.contains('collapsed'), true);
+  assert.equal(store.get(DOCK_COLLAPSE_KEY), '1');
+  assert.equal(toggle.attrs['aria-expanded'], 'false');
+});

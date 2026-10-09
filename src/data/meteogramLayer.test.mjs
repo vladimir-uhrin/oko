@@ -199,7 +199,7 @@ test('pri zapnutom radare os ukazuje jeho snímky (meranie) a posúvanie ovláda
   const frames = ['2026-10-08T19:30:00.000Z', '2026-10-08T19:40:00.000Z', '2026-10-08T19:50:00.000Z'];
   const shown = [];
   const radar = createShmuRadarLayer({
-    id: 'opera-radar', name: 'Radar EÚ',
+    id: 'opera-radar', name: 'Radar EÚ', fadeMs: 0, // prelínanie overuje shmuRadarFade.test.mjs
     fetchImpl: async () => ({ ok: true, json: async () => ({ ok: true, iso: frames[2], png: '/p.png', bounds: { west: -40, south: 31, east: 58, north: 74 }, frames: frames.map((iso) => ({ iso, png: '/' + iso })) }) }),
     primitiveFactory: () => { const p = { show: false }; shown.push(p); return p; },
   });
@@ -219,4 +219,15 @@ test('pri zapnutom radare os ukazuje jeho snímky (meranie) a posúvanie ovláda
   assert.doesNotMatch(h.timeline.status, /RADAR/);
   radar.destroy();
   h.layer.disable();
+});
+
+test('os radaru: rozpätie podľa snímok a značky času sa neprekrývajú (padne aj posledná)', async () => {
+  const { radarSpanLabel, radarTimelineSteps } = await import('./meteoLayer.js');
+  const frames = Array.from({ length: 12 }, (_, i) => new Date(Date.parse('2026-10-09T09:00:00Z') + i * 600_000).toISOString());
+  assert.equal(radarSpanLabel(frames), '2\u00a0h');
+  assert.equal(radarSpanLabel(frames.slice(0, 5)), '50\u00a0min');
+  const ticks = radarTimelineSteps(frames, 'sk').map((s) => s.day);
+  assert.equal(ticks.at(-1), '10:50');
+  assert.equal(ticks.at(-2), '', 'predposledná bez značky — inak „10:5011:00“');
+  assert.equal(ticks.filter(Boolean).length, 6);
 });

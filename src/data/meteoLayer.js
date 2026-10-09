@@ -314,6 +314,15 @@ export function nearestStepIndex(steps, nowMs) {
   return best;
 }
 
+/** Rozpätie snímok radaru ako text („2 h“, „50 min“) — popis osi sa nesmie rozísť s počtom snímok. Pure. */
+export function radarSpanLabel(frames) {
+  if (!frames?.length) return '';
+  const min = Math.round((Date.parse(frames.at(-1)) - Date.parse(frames[0])) / 60_000) + 10;
+  // Nezalomiteľná medzera — v úzkom popise osi sa „h“ zalomila na ďalší riadok.
+  const nb = ' ';
+  return min >= 60 && min % 60 === 0 ? `${min / 60}${nb}h` : (min >= 60 ? `${Math.round(min / 6) / 10}${nb}h` : `${min}${nb}min`);
+}
+
 /** Snímky radaru → kroky časovej osi: popis „Št 8. 10. 19:50 UTC“, značka času pri každej druhej. Pure. */
 export function radarTimelineSteps(frames, lang = 'sk') {
   const days = lang === 'en' ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] : ['Ne', 'Po', 'Ut', 'St', 'Št', 'Pi', 'So'];
@@ -321,7 +330,8 @@ export function radarTimelineSteps(frames, lang = 'sk') {
     const d = new Date(iso);
     const hm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
     const date = lang === 'en' ? `${d.getUTCDate()}/${d.getUTCMonth() + 1}` : `${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
-    return { label: `${days[d.getUTCDay()]} ${date} ${hm} UTC`, day: i % 2 === 0 || i === frames.length - 1 ? hm : '' };
+    // Značka pri každej druhej snímke tak, aby padla aj na poslednú (inak sa posledné dve prekrývali: „10:5011:00“).
+    return { label: `${days[d.getUTCDay()]} ${date} ${hm} UTC`, day: (frames.length - 1 - i) % 2 === 0 ? hm : '' };
   });
 }
 
@@ -906,7 +916,7 @@ export function createMeteoLayer({
       if (_radarTimeline !== radar.id) stopPlay();
       const key = `${radar.id}|${frames.join('|')}`;
       if (_radarTimeline !== radar.id || key !== _radarFramesKey) {
-        _timeline.setSteps(radarTimelineSteps(frames, lang()), `${radar.label} · ${t('meteo.radar-observed')}`);
+        _timeline.setSteps(radarTimelineSteps(frames, lang()), `${radar.label} · ${t('meteo.radar-observed', { span: radarSpanLabel(frames) })}`);
         _timeline.setStatus(t('meteo.radar-status'));
       }
       const entering = _radarTimeline !== radar.id;

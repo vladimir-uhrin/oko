@@ -9,7 +9,8 @@
 
 import { operaCandidateTimes, operaFileUrl } from './operaRadar.js';
 
-export const OPERA_RING_SIZE = 6;
+/** 2 h histórie po 10 min (2026-10-09, dlhšia história — pohyb frontu je lepšie vidieť). */
+export const OPERA_RING_SIZE = 12;
 export const OPERA_CHECK_EVERY_MS = 2 * 60_000;
 export const OPERA_MISS_TTL_MS = 5 * 60_000;
 export const OPERA_STALE_AFTER_MS = 45 * 60_000;

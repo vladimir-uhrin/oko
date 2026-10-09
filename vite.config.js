@@ -11480,14 +11480,14 @@ const _shmuStationsRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 30, gl
 /**
  * Zrážkový radar Európy — kompozit EUMETNET OPERA (2026-10-08): GET /api/opera/radar → meta v tvare radaru SHMÚ,
  * GET /api/opera/radar/frame/<iso>.png → snímka (immutable). Verejné úložisko MeteoGate Open Radar Data bez kľúča
- * (CC BY 4.0); dekódovanie ODIM + prepočet LAEA vo vlákne (src/data/operaRadarWorker.js), kruh 6 snímok
- * (1 h) v pamäti aj na disku .gev-cache/opera-radar, nová snímka najviac raz za 10 min (src/data/operaRadarService.js).
+ * (CC BY 4.0); dekódovanie ODIM + prepočet LAEA vo vlákne (src/data/operaRadarWorker.js), kruh 12 snímok
+ * (2 h) v pamäti aj na disku .gev-cache/opera-radar-v3, nová snímka najviac raz za 10 min (src/data/operaRadarService.js).
  */
 const _operaRadarRateLimiter = makeRateLimiter({ windowMs: 60_000, max: 60, globalMax: 600 });
 function operaRadarProxy() {
   const MAX_BYTES = 12 * 1024 * 1024;
-  // v2 (2026-10-08): vyhladené snímky vo WebP — staré nevyhladené PNG sa po štarte nenačítajú.
-  const dir = path.join(process.cwd(), '.gev-cache', 'opera-radar-v2');
+  // v2 (2026-10-08): vyhladené snímky vo WebP; v3 (2026-10-09): mriežka 0,035° a 2 h — staršie sa nenačítajú.
+  const dir = path.join(process.cwd(), '.gev-cache', 'opera-radar-v3');
   const fetchBuffer = (url) => new Promise((resolve, reject) => {
     const req = https.get(url, { headers: { 'user-agent': 'OKO opera-radar (okolive.sk; 1 file / 10 min)' } }, (res) => {
       if (res.statusCode !== 200) { res.resume(); resolve({ status: res.statusCode }); return; }

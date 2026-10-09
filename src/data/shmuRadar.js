@@ -42,6 +42,8 @@ export const SHMU_RADAR_LAYER_ID = 'shmu-radar';
 /** Animation cadence: per-frame step, and how long the newest frame holds. */
 export const SHMU_RADAR_FRAME_STEP_MS = 750;
 export const SHMU_RADAR_LATEST_HOLD_MS = 2500;
+/** Prelínanie dvoch snímok (ms) — kratšie než krok slučky, aby snímka chvíľu aj stála. */
+export const SHMU_RADAR_FADE_MS = 450;
 
 /**
  * Frame-loop driver, timers injected so tests run it synchronously. Plays
@@ -168,6 +170,8 @@ export function createShmuRadarLayer({
   sourceIdle = 'SHMÚ — opendata.shmu.sk (CC BY 4.0)',
   sourceAt = (product, iso) => `SHMÚ ${product || 'radar'} · ${iso.slice(11, 16)} UTC (CC BY 4.0)`,
   logTag = 'ShmuRadar',
+  fadeMs = SHMU_RADAR_FADE_MS,
+  schedule = { later: (fn, ms) => setTimeout(fn, ms), cancel: (h) => clearTimeout(h), now: () => Date.now() },
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
   let _viewer = null;
@@ -189,11 +193,47 @@ export function createShmuRadarLayer({
     if (primitive) primitive.show = visible;
   };
 
+  /** Priehľadnosť snímky cez farbu materiálu Image (texture.a × color.a); dvojník v testoch ju nemá. */
+  const setFrameAlpha = (iso, alpha) => {
+    const uniforms = iso ? _primitives.get(iso)?.appearance?.material?.uniforms : null;
+    if (uniforms) uniforms.color = Cesium.Color.WHITE.withAlpha(alpha);
+  };
+
+  // Prelínanie snímok (2026-10-09, „ako Windy" — zrážky plávajú, neskáču): nová snímka sa za fadeMs objaví,
+  // stará zmizne. Ďalšia zmena počas prelínania ho najprv dokončí.
+  let _fade = null; // { from, to, start, timer }
+  const finishFade = () => {
+    if (!_fade) return;
+    schedule.cancel(_fade.timer);
+    setFrameVisible(_fade.from, false);
+    setFrameAlpha(_fade.from, 1);
+    setFrameAlpha(_fade.to, 1);
+    _fade = null;
+  };
+  const fadeStep = () => {
+    if (!_fade) return;
+    const f = Math.min(1, (schedule.now() - _fade.start) / fadeMs);
+    setFrameAlpha(_fade.to, f);
+    setFrameAlpha(_fade.from, 1 - f);
+    governorRequestRender(id);
+    if (f >= 1) { finishFade(); return; }
+    _fade.timer = schedule.later(fadeStep, 40);
+  };
+
   const showFrame = (index) => {
     const iso = _frameIsos[index];
     if (!iso || iso === _currentIso) return;
-    setFrameVisible(_currentIso, false);
+    finishFade();
+    const from = _currentIso;
     setFrameVisible(iso, _enabled);
+    if (from && _enabled && fadeMs > 0) {
+      setFrameAlpha(iso, 0);
+      _fade = { from, to: iso, start: schedule.now(), timer: null };
+      fadeStep();
+    } else {
+      setFrameVisible(from, false);
+      setFrameAlpha(iso, 1);
+    }
     _currentIso = iso;
     // Discrete scene mutation under the render governor contract — one frame.
     governorRequestRender(id);
@@ -262,6 +302,7 @@ export function createShmuRadarLayer({
       setRadarActive(id, false);
       registerRadarController(id, null);
       animator.stop();
+      finishFade();
       setFrameVisible(_currentIso, false);
       governorRequestRender(id);
     },
@@ -294,6 +335,7 @@ export function createShmuRadarLayer({
         if (nextIsos.join('|') !== _frameIsos.join('|')) {
           const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north);
           const next = new Set(nextIsos);
+          finishFade(); // prelínanie nesmie siahať na snímku, ktorá práve vypadne z kruhu
           // Slots that fell out of the ring: destroy primitive + texture.
           for (const [iso, primitive] of _primitives) {
             if (next.has(iso)) continue;
@@ -354,6 +396,7 @@ export function createShmuRadarLayer({
       setRadarActive(id, false);
       registerRadarController(id, null);
       animator.stop();
+      finishFade();
       for (const primitive of _primitives.values()) {
         (viewer || _viewer)?.scene?.primitives?.remove?.(primitive);
       }

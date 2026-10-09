@@ -30,6 +30,18 @@ export function dockFieldOrder(order = METEO_FIELD_ORDER) {
   return [...(order.includes('wind') ? ['wind'] : []), ...(order.includes('gust') ? ['gust'] : []), ...rest];
 }
 
+export const DOCK_COLLAPSE_KEY = 'oko.weatherDock.collapsed';
+
+/**
+ * Zbalený (len ikony) na začiatku? Uložená voľba používateľa má prednosť; bez nej zbalený na nízkej obrazovke
+ * počítača (výber by sa nezmestil a zakrýval mapu, 2026-10-09). Pure.
+ */
+export function initialCollapsed(stored, viewportHeight) {
+  if (stored === '1') return true;
+  if (stored === '0') return false;
+  return Number.isFinite(viewportHeight) && viewportHeight < 820;
+}
+
 /** Ktoré pole je v dock aktívne (výšková hladina vetra = „vietor"). Pure. */
 export function activeDockField(field) {
   return isWindField(field) ? 'wind' : field;
@@ -103,7 +115,31 @@ export function createWeatherDock(doc, { dataManager, t, parent = doc.body } = {
   const legendBar = el('div', 'weather-dock-legend-bar');
   const legendLabels = el('div', 'weather-dock-legend-labels');
   legend.append(legendBar, legendLabels);
-  root.append(fields, levels, overlays, legend);
+  // Zbaliť / rozbaliť na samotné ikony (2026-10-09) — voľba sa pamätá v prehliadači (len pohodlie, nič dôležité).
+  const view = doc.defaultView;
+  let stored = null;
+  try { stored = view?.localStorage?.getItem(DOCK_COLLAPSE_KEY) ?? null; } catch { stored = null; }
+  let collapsed = initialCollapsed(stored, view?.innerHeight);
+  const toggle = el('button', 'weather-dock-toggle');
+  toggle.type = 'button';
+  const toggleIcon = el('span', 'material-symbols-outlined', '');
+  toggle.append(toggleIcon);
+  const applyCollapsed = () => {
+    root.classList.toggle('collapsed', collapsed);
+    toggleIcon.textContent = collapsed ? 'left_panel_open' : 'right_panel_close';
+    const label = t(collapsed ? 'dock.expand' : 'dock.collapse');
+    toggle.title = label;
+    toggle.setAttribute('aria-label', label);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+  };
+  toggle.addEventListener('click', () => {
+    collapsed = !collapsed;
+    try { view?.localStorage?.setItem(DOCK_COLLAPSE_KEY, collapsed ? '1' : '0'); } catch { /* bez úložiska platí do obnovenia */ }
+    applyCollapsed();
+    refresh();
+  });
+  applyCollapsed();
+  root.append(toggle, fields, levels, overlays, legend);
 
   function refresh() {
     const on = Boolean(dataManager.isEnabled?.(METEO_ID));
@@ -114,7 +150,7 @@ export function createWeatherDock(doc, { dataManager, t, parent = doc.body } = {
     const radar = radarOn();
     const active = radar ? null : activeDockField(field);
     for (const [id, b] of fieldButtons) { b.classList.toggle('active', id === active); b.setAttribute('aria-pressed', String(id === active)); }
-    levels.hidden = radar || !isWindField(field);
+    levels.hidden = radar || !isWindField(field) || collapsed;
     for (const [id, b] of levelButtons) b.classList.toggle('active', id === field);
     for (const o of DOCK_OVERLAYS) {
       const state = o.param ? p.particles !== false : Boolean(dataManager.isEnabled?.(o.id));

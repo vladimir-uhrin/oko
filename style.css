@@ -3558,6 +3558,12 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .weather-dock-legend[hidden] { display: none; }
 .weather-dock-legend-bar { height: 8px; border-radius: 2px; }
 .weather-dock-legend-labels { display: flex; justify-content: space-between; margin-top: 2px; color: rgba(224, 247, 255, 0.75); font: 9px var(--font-mono); }
+.weather-dock-toggle { align-self: flex-end; width: 30px; height: 26px; padding: 0; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 5px; background: rgba(3, 12, 18, 0.78); color: var(--accent); cursor: var(--cursor-pointer); }
+.weather-dock-toggle .material-symbols-outlined { font-size: 18px; line-height: 24px; }
+.weather-dock.collapsed { width: 48px; }
+.weather-dock.collapsed .weather-dock-label, .weather-dock.collapsed .weather-dock-levels, .weather-dock.collapsed .weather-dock-legend { display: none; }
+.weather-dock.collapsed .weather-dock-btn { justify-content: center; padding: 3px 0; }
+.weather-dock.collapsed .weather-dock-toggle { align-self: center; }
 @media (max-width: 620px) {
   .weather-dock {
     top: auto;
@@ -3573,7 +3579,9 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   .weather-dock-group { flex-direction: row; flex: none; }
   .weather-dock-btn { width: auto; flex-direction: column; gap: 1px; min-height: 0; padding: 3px 6px; font-size: 8px; }
   .weather-dock-btn.active { box-shadow: inset 0 -2px 0 var(--accent); }
-  .weather-dock-levels, .weather-dock-legend { display: none; }
+  .weather-dock-levels, .weather-dock-legend, .weather-dock-toggle { display: none; }
+  .weather-dock.collapsed { width: auto; }
+  .weather-dock.collapsed .weather-dock-label { display: block; }
 }
 /* Meteogram — predpoveď pre miesto po kliknutí (2026-10-08, „ako Windy"; meteogramPanel.js). */
 .meteogram {
