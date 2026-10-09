@@ -13,10 +13,14 @@
 // takže PNG sú bitovo zhodné s tými z proxy.
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { METEO_FIELDS, forecastSteps } from '../src/data/meteoField.js';
+import { METEO_FIELDS, WIND_LEVELS, forecastSteps } from '../src/data/meteoField.js';
 import { parseNetcdf3 } from '../src/data/netcdf3.js';
 import { rasterizeMeteoField, runIsoOf } from '../src/data/meteoRasterize.js';
 import { retryFailedOnce } from './lib/meteoBakeRetry.mjs';
+import { needsRebake } from './lib/meteoBakeFreshness.mjs';
+
+/** Výškové hladiny vetra (bez 10 m) — prepečú sa až pri zaostávaní > 12 h (meteoBakeFreshness.mjs). */
+const LEVEL_IDS = new Set(WIND_LEVELS.map((l) => l.id).filter((id) => id !== 'wind'));
 
 const NCSS = 'https://thredds.ucar.edu/thredds/ncss/grid/grib/NCEP/GFS/Global_0p25deg/Best';
 const TIMEOUT_MS = 90_000;
@@ -51,15 +55,27 @@ function paths(fieldId, iso) {
   return { dir, png: path.join(dir, `${stem}.png`), meta: path.join(dir, `${stem}.json`) };
 }
 
+let lastRun = null; // beh posledného upečeného rezu
+
 async function exists(p) {
   try { await fsp.access(p); return true; } catch { return false; }
 }
 
-/** Pečie jeden rez; vracia 'baked' | 'skipped' | 'failed'. */
-async function bakeOne(sharp, fieldId, iso, { force = false } = {}) {
+async function readMeta(p) {
+  try { return JSON.parse(await fsp.readFile(p.meta, 'utf8')); } catch { return null; }
+}
+
+/**
+ * Pečie jeden rez; vracia 'baked' | 'skipped'. Uložený rez sa preskočí len vtedy, keď je z najnovšieho behu
+ * (2026-10-09: predtým sa preskočil vždy a predpoveď sa novým behom nikdy neobnovila).
+ */
+async function bakeOne(sharp, fieldId, iso, { force = false, newestRun = null } = {}) {
   const field = METEO_FIELDS[fieldId];
   const p = paths(fieldId, iso);
-  if (!force && (await exists(p.png)) && (await exists(p.meta))) return 'skipped';
+  if (!force && (await exists(p.png))) {
+    const meta = await readMeta(p);
+    if (meta && !needsRebake(meta, newestRun, { isLevel: LEVEL_IDS.has(fieldId) })) return 'skipped';
+  }
   const res = await fetch(ncssUrl(field, iso), {
     signal: AbortSignal.timeout(TIMEOUT_MS),
     headers: { 'User-Agent': USER_AGENT },
@@ -76,6 +92,7 @@ async function bakeOne(sharp, fieldId, iso, { force = false } = {}) {
   await fsp.mkdir(p.dir, { recursive: true });
   await fsp.writeFile(p.png, png);
   await fsp.writeFile(p.meta, JSON.stringify({ run, fetchedAt: new Date().toISOString(), iso, field: fieldId, baked: true }));
+  lastRun = run || lastRun;
   return 'baked';
 }
 
@@ -89,10 +106,22 @@ async function main() {
   const stats = { baked: 0, skipped: 0, failed: 0 };
   const failedSlices = [];
   console.log(`meteo-bake: ${fields.length} polí × ${steps.length} krokov → ${cacheDir()}`);
+  // Najnovší beh: jeden rez sa stiahne vždy (teplota v prvom kroku) — podľa neho sa rozhodne, čo je zastarané.
+  let newestRun = null;
+  try {
+    await bakeOne(sharp, 'temp', steps[0], { force: true });
+    newestRun = lastRun;
+    stats.baked += 1;
+    console.log(`najnovší beh GFS: ${newestRun || 'neznámy'}`);
+    await sleep(PAUSE_MS);
+  } catch (err) {
+    console.log(`najnovší beh sa nepodarilo zistiť (${err?.message || err}) — uložené rezy sa nechajú`);
+  }
   for (const fieldId of fields) {
     for (const iso of steps) {
+      if (fieldId === 'temp' && iso === steps[0] && newestRun) continue; // už upečený vyššie
       try {
-        const r = await bakeOne(sharp, fieldId, iso);
+        const r = await bakeOne(sharp, fieldId, iso, { newestRun });
         stats[r === 'baked' ? 'baked' : 'skipped'] += 1;
         if (r === 'baked') { process.stdout.write(`${fieldId} ${iso} upečený\n`); await sleep(PAUSE_MS); }
       } catch (err) {
@@ -104,13 +133,13 @@ async function main() {
     }
   }
   // Druhý pokus (2026-10-08): THREDDS občas vráti HTTP 500 — po pauze ešte raz, až potom zlyhanie.
-  const retry = await retryFailedOnce(failedSlices, ({ fieldId, iso }) => bakeOne(sharp, fieldId, iso), {
+  const retry = await retryFailedOnce(failedSlices, ({ fieldId, iso }) => bakeOne(sharp, fieldId, iso, { newestRun }), {
     onResult: ({ fieldId, iso }, ok, err) => process.stdout.write(`${fieldId} ${iso} ${ok ? 'upečený na druhý pokus' : `ZLYHAL aj na druhý pokus: ${err?.message || err}`}\n`),
   });
   stats.failed -= retry.recovered.length;
   stats.baked += retry.recovered.length;
   const min = ((Date.now() - started) / 60000).toFixed(1);
-  console.log(`meteo-bake hotový za ${min} min: ${stats.baked} upečených, ${stats.skipped} preskočených (cache), ${stats.failed} zlyhaní`);
+  console.log(`meteo-bake hotový za ${min} min: ${stats.baked} upečených, ${stats.skipped} preskočených (z najnovšieho behu), ${stats.failed} zlyhaní`);
   // Zlyhania nie sú fatálne (dobehne ďalší beh alebo proxy), ale hlásiť ich máme.
   if (stats.failed) process.exitCode = 2;
 }

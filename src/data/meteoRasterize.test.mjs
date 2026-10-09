@@ -109,6 +109,20 @@ test('beh modelu: reftime „Hour since …" → ISO; bez reftime → null', () 
   assert.equal(runIsoOf(bez), null);
 });
 
+test('beh modelu: THREDDS volá premennú reftime1 (blízke kroky) — beh sa nájde; čas platnosti nie je beh', () => {
+  // Skutočné hodnoty zo 2026-10-09: reftime1 = 174 h od 2. 10. = beh 9. 10. 06Z, time1 = 183 h = platnosť 15Z.
+  const nc = mockNc({ lats: [0], lons: [-180], vars: { Temperature_height_above_ground: [273.15] } });
+  nc.vars.time1 = { name: 'time1', dims: ['time1'], attrs: { units: 'Hour since 2026-10-02T00:00:00Z', standard_name: 'time' }, data: Float64Array.from([183]) };
+  nc.vars.reftime1 = { name: 'reftime1', dims: ['time1'], attrs: { units: 'Hour since 2026-10-02T00:00:00Z', standard_name: 'forecast_reference_time' }, data: Float64Array.from([174]) };
+  const read0 = nc.read;
+  nc.read = (name) => (nc.vars[name]?.data && !read0 ? nc.vars[name].data : (nc.vars[name]?.data || read0(name)));
+  assert.equal(runIsoOf(nc), '2026-10-09T06:00:00.000Z');
+  delete nc.vars.reftime1;
+  assert.equal(runIsoOf(nc), null, 'samotná platnosť (time1) sa za beh nevydáva');
+  nc.vars.reftime2 = { name: 'reftime2', dims: ['time1'], attrs: { units: 'Hour since 2026-10-02T00:00:00Z' }, data: Float64Array.from([168]) };
+  assert.equal(runIsoOf(nc), '2026-10-09T00:00:00.000Z', 'aj reftime2 bez standard_name');
+});
+
 test('neznáme pole a neznáma premenná: výnimka, nie tichá nula', () => {
   const nc = mockNc({ lats: [0], lons: [-180], vars: {} });
   assert.throws(() => rasterizeMeteoField('neexistuje', nc), /neznáme pole/);

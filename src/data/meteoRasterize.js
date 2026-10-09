@@ -13,11 +13,16 @@ import { gridOf } from './netcdf3.js';
 
 /**
  * Beh modelu z reftime („Hour since 2026-09-01T00:00:00Z"). Pure.
+ * 2026-10-09: THREDDS „Best" premennú často volá reftime1 / reftime2 (pri blízkych krokoch vždy) — predtým sa
+ * nenašla a beh bol null; záložne sa navyše brala premenná time = PLATNOSŤ predpovede, nie beh (zlý údaj).
+ * Teraz: premenná so standard_name forecast_reference_time alebo menom reftime / reftimeN; inak null.
  * @param {ReturnType<import('./netcdf3.js').parseNetcdf3>} nc
  * @returns {string|null} ISO čas behu (UTC)
  */
 export function runIsoOf(nc) {
-  const v = nc.vars.reftime || nc.vars.time;
+  const vars = Object.values(nc.vars || {});
+  const v = vars.find((x) => x?.attrs?.standard_name === 'forecast_reference_time')
+    || vars.find((x) => /^reftime\d*$/.test(String(x?.name || '')));
   if (!v) return null;
   const m = String(v.attrs?.units || '').match(/since\s+(\S+)/i);
   const base = m ? Date.parse(m[1]) : NaN;
