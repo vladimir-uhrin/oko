@@ -3606,7 +3606,8 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 }
 .meteogram[hidden] { display: none; }
 .meteogram-head { display: flex; align-items: baseline; gap: 10px; margin: 0 26px 6px 0; min-width: 0; }
-.meteogram-title { margin: 0; color: #fff; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Meno miesta má prednosť pred súradnicami: v úzkom okne sa krátia súradnice, nie „Pezinok" → „P…". */
+.meteogram-title { flex: 0 0 auto; max-width: 60%; margin: 0; color: #fff; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meteogram-sub { margin: 0; color: rgba(224, 247, 255, 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meteogram-close {
   position: absolute;
