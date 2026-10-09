@@ -330,8 +330,10 @@ export function radarTimelineSteps(frames, lang = 'sk') {
     const d = new Date(iso);
     const hm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
     const date = lang === 'en' ? `${d.getUTCDate()}/${d.getUTCMonth() + 1}` : `${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
-    // Značka pri každej druhej snímke tak, aby padla aj na poslednú (inak sa posledné dve prekrývali: „10:5011:00“).
-    return { label: `${days[d.getUTCDay()]} ${date} ${hm} UTC`, day: (frames.length - 1 - i) % 2 === 0 ? hm : '' };
+    // Značka pri každej druhej snímke (pri viac než 8 snímkach pri každej tretej — v užšom okne sa orezávali na „09:!“)
+    // tak, aby padla aj na poslednú (inak sa posledné dve prekrývali: „10:5011:00“).
+    const every = frames.length > 8 ? 3 : 2;
+    return { label: `${days[d.getUTCDay()]} ${date} ${hm} UTC`, day: (frames.length - 1 - i) % every === 0 ? hm : '' };
   });
 }
 

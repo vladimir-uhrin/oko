@@ -229,5 +229,6 @@ test('os radaru: rozpätie podľa snímok a značky času sa neprekrývajú (pad
   const ticks = radarTimelineSteps(frames, 'sk').map((s) => s.day);
   assert.equal(ticks.at(-1), '10:50');
   assert.equal(ticks.at(-2), '', 'predposledná bez značky — inak „10:5011:00“');
-  assert.equal(ticks.filter(Boolean).length, 6);
+  assert.equal(ticks.filter(Boolean).length, 4, '12 snímok → značka pri každej tretej');
+  assert.equal(radarTimelineSteps(frames.slice(0, 6), 'sk').filter((s) => s.day).length, 3, 'málo snímok → pri každej druhej');
 });

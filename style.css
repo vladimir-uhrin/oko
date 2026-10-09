@@ -3493,7 +3493,8 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
   font-size: 8px;
   letter-spacing: 0.06em;
 }
-.meteo-timeline-tick { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; }
+/* overflow: visible — značka smie presahovať do susedných prázdnych buniek (pri 12 snímkach radaru sa inak orezala na „09:!“). */
+.meteo-timeline-tick { flex: 1 1 0; min-width: 0; overflow: visible; white-space: nowrap; }
 .meteo-timeline-tick.active { color: var(--accent); }
 .meteo-timeline-text { display: grid; gap: 1px; min-width: 150px; text-align: right; }
 .meteo-timeline-label { color: #fff; font-weight: 700; }
