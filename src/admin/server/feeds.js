@@ -26,8 +26,12 @@ export const FEEDS = Object.freeze([
   { id: 'satellites', label: 'Satelity (CelesTrak)', prefixes: ['/api/celestrak'], toggle: true },
   { id: 'launches', label: 'Štarty rakiet', prefixes: ['/api/launches'], toggle: true },
   { id: 'earthquakes', label: 'Zemetrasenia', prefixes: ['/api/earthquakes'], toggle: true },
-  { id: 'meteo', label: 'Meteo, METAR, počasie', prefixes: ['/api/meteo', '/api/metar', '/api/weather-effects'], status: '/api/meteo/status', sample: true, toggle: true },
+  // Počasie (2026-10-09): stavové adresy /health vracajú 503 pri starých dátach — upozornenie po feedDownMinutes.
+  { id: 'meteo', label: 'Meteo GFS (predpoveď)', prefixes: ['/api/meteo', '/api/metar', '/api/weather-effects'], status: '/api/meteo/health', sample: true, toggle: true },
   { id: 'shmu', label: 'SHMÚ radar', prefixes: ['/api/shmu'], toggle: true },
+  { id: 'opera', label: 'Radar Európa (OPERA)', prefixes: ['/api/opera'], status: '/api/opera/radar/health', sample: true, toggle: true },
+  { id: 'shmu-stations', label: 'Stanice SHMÚ (merania)', prefixes: ['/api/shmu-stations'], status: '/api/shmu-stations/health', sample: true, toggle: true },
+  { id: 'warnings', label: 'Výstrahy SHMÚ (MeteoAlarm)', prefixes: ['/api/weather-warnings'], status: '/api/weather-warnings/health', sample: true, toggle: true },
   { id: 'terrain', label: 'Terén a reliéf', prefixes: ['/api/sk-terrain', '/api/terrain', '/api/relief'], status: '/api/sk-terrain/status', sample: true, toggle: true },
   { id: 'cctv', label: 'CCTV kamery', prefixes: ['/api/cctv'], status: '/api/cctv/health', sample: true, toggle: true },
   { id: 'gas', label: 'Plyn (ACER / GIE)', prefixes: ['/api/gas'], status: '/api/gas/status', toggle: true },

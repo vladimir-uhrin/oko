@@ -17,7 +17,7 @@ import { METEO_FIELDS, WIND_LEVELS, forecastSteps } from '../src/data/meteoField
 import { parseNetcdf3 } from '../src/data/netcdf3.js';
 import { rasterizeMeteoField, runIsoOf } from '../src/data/meteoRasterize.js';
 import { retryFailedOnce } from './lib/meteoBakeRetry.mjs';
-import { needsRebake } from './lib/meteoBakeFreshness.mjs';
+import { needsRebake, slicesToPrune } from './lib/meteoBakeFreshness.mjs';
 
 /** Výškové hladiny vetra (bez 10 m) — prepečú sa až pri zaostávaní > 12 h (meteoBakeFreshness.mjs). */
 const LEVEL_IDS = new Set(WIND_LEVELS.map((l) => l.id).filter((id) => id !== 'wind'));
@@ -138,6 +138,18 @@ async function main() {
   });
   stats.failed -= retry.recovered.length;
   stats.baked += retry.recovered.length;
+  // Upratovanie (2026-10-09): rezy krokov starších než 48 h — cache inak rástla bez konca (2,4 GB za mesiac).
+  let pruned = 0;
+  try {
+    for (const entry of await fsp.readdir(cacheDir(), { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const dir = path.join(cacheDir(), entry.name);
+      for (const name of slicesToPrune(await fsp.readdir(dir), Date.now())) {
+        await fsp.unlink(path.join(dir, name)).then(() => { pruned += 1; }, () => {});
+      }
+    }
+  } catch (err) { console.log(`upratovanie cache zlyhalo: ${err?.message || err}`); }
+  if (pruned) console.log(`upratané: ${pruned} súborov starších krokov`);
   const min = ((Date.now() - started) / 60000).toFixed(1);
   console.log(`meteo-bake hotový za ${min} min: ${stats.baked} upečených, ${stats.skipped} preskočených (z najnovšieho behu), ${stats.failed} zlyhaní`);
   // Zlyhania nie sú fatálne (dobehne ďalší beh alebo proxy), ale hlásiť ich máme.

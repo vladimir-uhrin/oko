@@ -21,3 +21,21 @@ export function needsRebake(meta, newestRunIso, { isLevel = false, levelLagH = L
   const lagH = (newest - run) / 3_600_000;
   return isLevel ? lagH > levelLagH : lagH > 0;
 }
+
+/** Koľko hodín dozadu sa uložené kroky nechávajú (os aj meteogram ukazujú len od „teraz“ dopredu). */
+export const KEEP_PAST_H = 48;
+
+/**
+ * Súbory rezov na zmazanie (2026-10-09: cache od 8. 9. narástla na 2,4 GB, ~80 MB denne, nič sa nemazalo):
+ * `2026-10-07T150000Z.png` / `.json` s časom kroku starším než keepH hodín. Iné súbory nechá. Pure.
+ * @param {string[]} names mená súborov v priečinku poľa
+ */
+export function slicesToPrune(names, nowMs, keepH = KEEP_PAST_H) {
+  const limit = nowMs - keepH * 3_600_000;
+  return (names || []).filter((name) => {
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})Z\.(png|json)$/.exec(name);
+    if (!m) return false;
+    const t = Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`);
+    return Number.isFinite(t) && t < limit;
+  });
+}

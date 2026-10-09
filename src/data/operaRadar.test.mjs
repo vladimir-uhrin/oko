@@ -167,3 +167,22 @@ test('studený štart: odpoveď stačí po PRVEJ snímke, zvyšok kruhu sa dopln
   assert.equal(empty.meta(), null);
   assert.equal(await Promise.race([empty.whenAnyFrame(), new Promise((r) => setTimeout(() => r('visí'), 200))]), true, 'po nedávnom neúspechu sa nečaká naveky');
 });
+
+test('mobil / slabšie zariadenie: len posledných 6 snímok radaru Európy', async () => {
+  const { operaFrameBudget, createOperaRadarLayer } = await import('./operaRadarLayer.js');
+  assert.equal(operaFrameBudget({ width: 390 }), 6);
+  assert.equal(operaFrameBudget({ width: 1440, deviceMemory: 4 }), 6);
+  assert.equal(operaFrameBudget({ width: 1440, deviceMemory: 8 }), null);
+  assert.equal(operaFrameBudget({ width: 1440 }), null, 'bez údaja o pamäti (Firefox, Safari) všetky');
+  const frames = Array.from({ length: 12 }, (_, i) => ({ iso: new Date(Date.parse('2026-10-09T09:00:00Z') + i * 600_000).toISOString(), png: `/f${i}` }));
+  const made = [];
+  const layer = createOperaRadarLayer({
+    maxFrames: () => 6,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ ok: true, iso: frames[11].iso, png: '/p', bounds: { west: -40, south: 31, east: 58, north: 74 }, frames }) }),
+    primitiveFactory: () => { const p = { show: false }; made.push(p); return p; },
+  });
+  layer.init({ scene: { primitives: { add() {}, remove() {} } } });
+  assert.equal(await layer.update(), true);
+  assert.equal(made.length, 6, 'načítaných len 6 snímok');
+  layer.destroy();
+});

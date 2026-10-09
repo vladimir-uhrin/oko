@@ -171,6 +171,7 @@ export function createShmuRadarLayer({
   sourceAt = (product, iso) => `SHMÚ ${product || 'radar'} · ${iso.slice(11, 16)} UTC (CC BY 4.0)`,
   logTag = 'ShmuRadar',
   fadeMs = SHMU_RADAR_FADE_MS,
+  maxFrames = null,
   schedule = { later: (fn, ms) => setTimeout(fn, ms), cancel: (h) => clearTimeout(h), now: () => Date.now() },
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
@@ -328,9 +329,12 @@ export function createShmuRadarLayer({
 
         // Animation ring from the proxy; a ring-less meta (older server)
         // degrades to a single-frame "loop".
-        const metaFrames = Array.isArray(meta.frames) && meta.frames.length
+        const allFrames = Array.isArray(meta.frames) && meta.frames.length
           ? meta.frames.filter((f) => f?.iso && f?.png)
           : [{ iso: meta.iso, png: meta.png }];
+        // Na slabšom zariadení len posledné snímky — každá je v grafickej karte textúra (OPERA ~14 MB).
+        const limit = Number(maxFrames?.()) || 0;
+        const metaFrames = limit > 0 ? allFrames.slice(-limit) : allFrames;
         const nextIsos = metaFrames.map((f) => f.iso);
         if (nextIsos.join('|') !== _frameIsos.join('|')) {
           const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north);

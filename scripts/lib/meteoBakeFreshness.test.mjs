@@ -24,3 +24,10 @@ test('výšková hladina vetra: až keď zaostáva o viac než 12 h', () => {
 test('bez známeho najnovšieho behu sa existujúce rezy nenútia', () => {
   assert.equal(needsRebake({ run: '2026-10-01T00:00:00.000Z' }, null), false);
 });
+
+test('upratovanie: zmažú sa len rezy krokov staršie než 48 h, iné súbory nie', async () => {
+  const { slicesToPrune } = await import('./meteoBakeFreshness.mjs');
+  const now = Date.parse('2026-10-09T17:00:00Z');
+  const names = ['2026-10-07T150000Z.png', '2026-10-07T150000Z.json', '2026-10-07T180000Z.png', '2026-10-09T180000Z.png', 'README.txt', 'ring.json'];
+  assert.deepEqual(slicesToPrune(names, now), ['2026-10-07T150000Z.png', '2026-10-07T150000Z.json']);
+});

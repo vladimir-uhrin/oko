@@ -7,6 +7,18 @@
 import { createShmuRadarLayer } from './shmuRadar.js';
 
 export const OPERA_RADAR_LAYER_ID = 'opera-radar';
+/** Snímok na mobile / slabšom zariadení: 1 h namiesto 2 h (12 × ~14 MB textúr by mobil nemusel zvládnuť). */
+export const OPERA_MOBILE_FRAMES = 6;
+
+/**
+ * Koľko snímok načítať (null = všetky): úzka obrazovka (≤ 620 px) alebo prehliadač hlási ≤ 4 GB pamäte. Pure.
+ * @param {{width?: number, deviceMemory?: number}} env
+ */
+export function operaFrameBudget({ width, deviceMemory } = {}) {
+  if (Number.isFinite(width) && width <= 620) return OPERA_MOBILE_FRAMES;
+  if (Number.isFinite(deviceMemory) && deviceMemory <= 4) return OPERA_MOBILE_FRAMES;
+  return null;
+}
 
 export function createOperaRadarLayer(options = {}) {
   return createShmuRadarLayer({
@@ -17,6 +29,7 @@ export function createOperaRadarLayer(options = {}) {
     sourceIdle: 'EUMETNET OPERA — MeteoGate Open Radar Data (CC BY 4.0)',
     sourceAt: (_product, iso) => `EUMETNET OPERA · ${iso.slice(11, 16)} UTC (CC BY 4.0)`,
     logTag: 'OperaRadar',
+    maxFrames: () => operaFrameBudget({ width: globalThis.innerWidth, deviceMemory: globalThis.navigator?.deviceMemory }),
     ...options,
   });
 }

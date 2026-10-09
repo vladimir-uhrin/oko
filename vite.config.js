@@ -80,6 +80,7 @@ import { createWeatherWarningsService } from './src/data/weatherWarningsService.
 import { createShmuStationsService } from './src/data/shmuStationsService.js';
 import { createOperaRadarService } from './src/data/operaRadarService.js';
 import { decodeOperaInWorker } from './src/data/operaRadarWorker.js';
+import { METEO_MAX_RUN_AGE_H, meteoRunHealth, radarHealth, stationsHealth, warningsHealth } from './src/data/weatherHealth.js';
 import {
   GFW_API_BASE as GFW_PRESENCE_API_BASE,
   GFW_DAY_STEP_BACK_MAX,
@@ -4264,6 +4265,20 @@ function meteoProxy() {
     } catch { return null; }
   }
 
+  /**
+   * Najnovší beh: maximum z uložených rezov a posledného obslúženého (2026-10-09). Predtým katalóg hlásil beh
+   * POSLEDNÉHO OBSLÚŽENÉHO rezu (lastRun) — po obnovení dát mohol ďalej ukazovať starý beh. Prepočet najviac
+   * raz za minútu (číta .json všetkých rezov).
+   */
+  let runCache = { at: 0, value: null };
+  async function newestKnownRun() {
+    if (Date.now() - runCache.at < 60_000) return runCache.value;
+    const cached = await latestCachedRun();
+    const value = [cached?.run, lastRun].filter(Boolean).sort().at(-1) || null;
+    runCache = { at: Date.now(), value };
+    return value;
+  }
+
   /** Či je krok (všetky polia) upečený — bake píše meta.baked = true. */
   async function stepBaked(iso) {
     const stem = iso.replace(/[:]/g, '');
@@ -4325,13 +4340,18 @@ function meteoProxy() {
             // najnovší beh v cache. Katalóg pomenuje zdroj údajov.
             const bakedFlags = await Promise.all(steps.map((s) => stepBaked(s)));
             const bakedCount = bakedFlags.filter(Boolean).length;
-            const cached = lastRun ? null : await latestCachedRun();
-            const run = lastRun || cached?.run || null;
-            const stale = !run || (Date.now() - Date.parse(run)) > 12 * 3600_000;
+            const run = await newestKnownRun();
+            // Rovnaká hranica ako stráženie v admine (weatherHealth.METEO_MAX_RUN_AGE_H = 14 h, zdôvodnenie tam).
+            const stale = !run || (Date.now() - Date.parse(run)) > METEO_MAX_RUN_AGE_H * 3600_000;
             return send(200, {
               model: 'GFS 0.25°', run, steps, attribution: ATTRIBUTION, stale,
               baked: bakedCount, bakedTotal: steps.length,
             });
+          }
+          if (url.pathname === '/health') {
+            // Stráženie (admin, 2026-10-09): 503, keď je beh GFS starší než 14 h — predpoveď sa neobnovuje.
+            const h = meteoRunHealth(await newestKnownRun());
+            return send(h.ok ? 200 : 503, h);
           }
           if (url.pathname === '/status') {
             const cached = lastRun ? null : await latestCachedRun();
@@ -11527,6 +11547,11 @@ function operaRadarProxy() {
         service.ensureFresh();
         if (!service.hasFrames()) await service.whenAnyFrame();
         const subPath = String(req.url || '').split('?')[0];
+        if (subPath === '/health') {
+          // Stráženie (admin): vzorka každých 10 min zároveň drží radar čerstvý aj bez návštevníkov.
+          const h = radarHealth(service.meta()?.iso || null);
+          return sendJson(h.ok ? 200 : 503, h);
+        }
         if (subPath.startsWith('/frame/') && subPath.endsWith('.png')) {
           const frame = service.frame(decodeURIComponent(subPath.slice('/frame/'.length, -'.png'.length)));
           if (!frame) return sendJson(404, { ok: false, error: 'frame_gone' });
@@ -11581,6 +11606,10 @@ function shmuStationsProxy() {
       if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
       if (!_shmuStationsRateLimiter(clientKey(req))) return send(429, { error: 'Rate limit exceeded' }, { 'Retry-After': '10' });
       const result = await service.get();
+      if (String(req.url || '').split('?')[0] === '/health') {
+        const h = result.status === 200 ? stationsHealth(result.payload?.observedAt) : { ok: false, reason: result.error };
+        return send(h.ok ? 200 : 503, h, { 'Cache-Control': 'no-store' });
+      }
       if (result.status !== 200) return send(result.status, { error: result.error }, { 'Cache-Control': 'no-store' });
       return send(200, result.payload, { 'Cache-Control': 'public, max-age=120', 'X-Shmu-Stations': result.cache || '' });
     });
@@ -11602,6 +11631,10 @@ function weatherWarningsProxy() {
       if (req.method !== 'GET') return send(405, { error: 'Method Not Allowed' });
       if (!_weatherWarningsRateLimiter(clientKey(req))) return send(429, { error: 'Rate limit exceeded' }, { 'Retry-After': '10' });
       const result = await _weatherWarningsService.get();
+      if (String(req.url || '').split('?')[0] === '/health') {
+        const h = warningsHealth(result);
+        return send(h.ok ? 200 : 503, h, { 'Cache-Control': 'no-store' });
+      }
       if (result.status !== 200) return send(result.status, { error: result.error }, { 'Cache-Control': 'no-store' });
       return send(200, result.payload, { 'Cache-Control': 'public, max-age=120', 'X-Weather-Warnings': result.cache || '' });
     });
