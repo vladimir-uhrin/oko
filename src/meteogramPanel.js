@@ -6,7 +6,7 @@
 // Model a výpočty: src/data/meteogram.js. Žiadne Cesium.
 
 import {
-  columnIndexForTime, meteogramDays, meteogramHour, rampCssColor, utcOffsetLabel, windArrowRotation,
+  columnIndexForTime, maxTemperatureSpread, meteogramDays, meteogramHour, rampCssColor, utcOffsetLabel, windArrowRotation,
 } from './data/meteogram.js';
 import { columnWarningLevels, createPointWarningsLookup, isActiveAt } from './data/meteogramWarnings.js';
 import { WARNING_LEVELS, warningTimeLabel } from './data/weatherWarnings.js';
@@ -17,11 +17,12 @@ export const METEOGRAM_COL_PX = 42;
 const CURVE_H = 34;
 
 /** Body krivky teploty v SVG (x = stred stĺpca); prázdne hodnoty preskočí. Pure. */
-export function temperaturePath(values, colPx = METEOGRAM_COL_PX, height = CURVE_H) {
+export function temperaturePath(values, colPx = METEOGRAM_COL_PX, height = CURVE_H, range = null) {
   const finite = values.filter((v) => v !== null && Number.isFinite(v));
   if (finite.length < 2) return '';
-  const lo = Math.min(...finite);
-  const hi = Math.max(...finite);
+  // Spoločná mierka pre krivky dvoch modelov (range), inak vlastné minimum a maximum.
+  const lo = range ? range.lo : Math.min(...finite);
+  const hi = range ? range.hi : Math.max(...finite);
   const span = Math.max(1, hi - lo);
   let d = '';
   values.forEach((v, i) => {
@@ -32,6 +33,24 @@ export function temperaturePath(values, colPx = METEOGRAM_COL_PX, height = CURVE
   });
   return d;
 }
+
+/**
+ * Teploty druhého modelu zarovnané na stĺpce prvého (podľa času) — kreslia sa prerušovanou krivkou.
+ * Chýbajúci čas = null. Pure.
+ */
+export function alignedTemps(columns, otherColumns) {
+  const byT = new Map((otherColumns || []).map((c) => [c.t, c.temp]));
+  return (columns || []).map((c) => (byT.has(c.t) ? byT.get(c.t) : null));
+}
+
+/** Spoločný rozsah teplôt viacerých radov; null, ak hodnôt nie je aspoň 2. Pure. */
+export function sharedRange(...lists) {
+  const all = lists.flat().filter((v) => v !== null && v !== undefined && Number.isFinite(v));
+  if (all.length < 2) return null;
+  return { lo: Math.min(...all), hi: Math.max(...all) };
+}
+
+const MODEL_PREF_KEY = 'oko.meteogram.model';
 
 /** Text hodnoty v bunke; prázdna bunka „–", po slovensky desatinná čiarka. Pure. */
 export function cellText(value, digits = 0, lang = 'sk') {
@@ -89,7 +108,13 @@ export function createMeteogramPanel(doc, {
   close.title = t('meteo.gram.close');
   close.setAttribute('aria-label', t('meteo.gram.close'));
   close.addEventListener('click', () => { hide(); onClose(); });
-  head.append(title, sub, close);
+  // Prepínač modelu (2026-10-09): GFS (ako mapa) / ECMWF; voľba ostane aj pre ďalšie miesta.
+  const switcher = doc.createElement('div');
+  switcher.className = 'meteogram-models';
+  switcher.setAttribute('role', 'group');
+  switcher.setAttribute('aria-label', t('meteo.gram.model'));
+  switcher.hidden = true;
+  head.append(title, sub, switcher, close);
 
   const body = doc.createElement('div');
   body.className = 'meteogram-body';
@@ -120,6 +145,10 @@ export function createMeteogramPanel(doc, {
 
   let columns = [];
   let activeIso = null;
+  let current = null; // posledný model z vrstvy (miesto + všetky modely)
+  let lastWarnings = null;
+  let modelId = null;
+  try { modelId = doc.defaultView?.localStorage?.getItem(MODEL_PREF_KEY) || null; } catch { modelId = null; }
 
   function onKey(e) {
     if (e.key !== 'Escape' || root.hidden || e.defaultPrevented) return;
@@ -147,6 +176,7 @@ export function createMeteogramPanel(doc, {
 
   /** Pásik výstrah + farebný okraj hodín, keď výstraha platí. Prázdny zoznam pásik skryje. */
   function renderWarnings(result) {
+    lastWarnings = result;
     const list = result?.warnings || [];
     warn.hidden = !list.length;
     if (!list.length) { warn.replaceChildren(); return; }
@@ -181,8 +211,37 @@ export function createMeteogramPanel(doc, {
     if (doc.defaultView) place();
   }
 
+  /** Vybraný model a ten druhý na porovnanie z model.models; bez nich (starý tvar) len rady z modelu. */
+  function pickViews(model) {
+    const list = Array.isArray(model.models) && model.models.length ? model.models : [{ id: 'gfs', label: 'GFS', series: model.series, columns: model.columns }];
+    const view = list.find((m) => m.id === modelId) || list[0];
+    return { list, view, other: list.find((m) => m !== view) || null };
+  }
+
+  function renderSwitcher(list, view) {
+    switcher.hidden = list.length < 2;
+    switcher.replaceChildren(...(list.length < 2 ? [] : list.map((m) => {
+      const b = el('button', `meteogram-model${m === view ? ' active' : ''}`, m.label);
+      b.type = 'button';
+      b.dataset.model = m.id;
+      b.title = m.name || m.label;
+      b.setAttribute('aria-pressed', String(m === view));
+      return b;
+    })));
+  }
+
+  switcher.addEventListener('click', (e) => {
+    const id = e.target?.closest?.('[data-model]')?.dataset?.model;
+    if (!id || id === modelId || !current) return;
+    modelId = id;
+    try { doc.defaultView?.localStorage?.setItem(MODEL_PREF_KEY, id); } catch { /* súkromné okno */ }
+    const left = scroller.scrollLeft;
+    draw(current);
+    scroller.scrollLeft = left;
+  });
+
   function render(model) {
-    const { series, columns: cols, name, coords } = model;
+    current = model;
     const token = ++warnToken;
     renderWarnings(null);
     renderObserved(null);
@@ -190,12 +249,26 @@ export function createMeteogramPanel(doc, {
       Promise.resolve(warningsFor(model.lat, model.lon)).then((r) => { if (token === warnToken && !root.hidden) renderWarnings(r); }).catch(() => {});
       Promise.resolve(stationFor(model.lat, model.lon)).then((r) => { if (token === warnToken && !root.hidden) renderObserved(r); }).catch(() => {});
     }
+    draw(model);
+    const i = columnIndexForTime(columns, activeIso);
+    scroller.scrollLeft = i > 2 ? (i - 2) * METEOGRAM_COL_PX : 0;
+  }
+
+  function draw(model) {
+    const { name, coords } = model;
+    const { list, view, other } = pickViews(model);
+    const { series, columns: cols } = view;
+    renderSwitcher(list, view);
     columns = cols;
     const offset = series.utcOffsetSec || 0;
     title.textContent = name || coords;
     const elev = Number.isFinite(series.elevation) ? ` · ${t('meteo.gram.elevation').replace('{m}', String(Math.round(series.elevation)))}` : '';
     sub.textContent = `${name ? coords : ''}${name ? elev : elev.replace(/^ · /, '')}`;
-    status.textContent = `${t('meteo.gram.source').replace('{tz}', utcOffsetLabel(offset))} · ${t('meteo.forecast')}${series.stale ? ` · ${t('meteo.stale')}` : ''} · ${t('meteo.gram.hint')}`;
+    const spread = other ? maxTemperatureSpread(cols, other.columns) : null;
+    const spreadText = spread !== null && spread >= 1
+      ? ` · ${t('meteo.gram.spread', { a: view.label, b: other.label, d: cellText(spread, spread % 1 ? 1 : 0, lang()) })}`
+      : '';
+    status.textContent = `${t('meteo.gram.source').replace('{model}', view.name || view.label).replace('{tz}', utcOffsetLabel(offset))} · ${t('meteo.forecast')}${series.stale ? ` · ${t('meteo.stale')}` : ''}${spreadText} · ${t('meteo.gram.hint')}`;
     status.classList.remove('error');
 
     labels.replaceChildren(
@@ -224,8 +297,18 @@ export function createMeteogramPanel(doc, {
     svg.setAttribute('width', String(cols.length * METEOGRAM_COL_PX));
     svg.setAttribute('height', String(CURVE_H));
     svg.setAttribute('aria-hidden', 'true');
+    // Krivka vybraného modelu plná, druhého prerušovaná na spoločnej mierke — kde sa rozchádzajú, je predpoveď neistá.
+    const temps = cols.map((c) => c.temp);
+    const otherTemps = other ? alignedTemps(cols, other.columns) : [];
+    const range = sharedRange(temps, otherTemps);
+    if (other) {
+      const alt = doc.createElementNS(SVG_NS, 'path');
+      alt.setAttribute('d', temperaturePath(otherTemps, METEOGRAM_COL_PX, CURVE_H, range));
+      alt.setAttribute('class', 'meteogram-curve alt');
+      svg.append(alt);
+    }
     const path = doc.createElementNS(SVG_NS, 'path');
-    path.setAttribute('d', temperaturePath(cols.map((c) => c.temp)));
+    path.setAttribute('d', temperaturePath(temps, METEOGRAM_COL_PX, CURVE_H, range));
     path.setAttribute('class', 'meteogram-curve');
     svg.append(path);
     curve.append(svg);
@@ -270,8 +353,7 @@ export function createMeteogramPanel(doc, {
     });
     grid.replaceChildren(days, hours, curve, temp, precip, clouds, wind, gust, dir);
     markActive();
-    const i = columnIndexForTime(columns, activeIso);
-    scroller.scrollLeft = i > 2 ? (i - 2) * METEOGRAM_COL_PX : 0;
+    if (lastWarnings) renderWarnings(lastWarnings); // prepnutie modelu prekreslí hodiny — farba výstrahy ostane
   }
 
   grid.addEventListener('click', (e) => {
@@ -302,6 +384,8 @@ export function createMeteogramPanel(doc, {
       renderObserved(null);
       title.textContent = name;
       sub.textContent = '';
+      current = null;
+      switcher.hidden = true;
       labels.replaceChildren();
       grid.replaceChildren();
       columns = [];

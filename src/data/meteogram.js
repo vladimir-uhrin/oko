@@ -24,6 +24,15 @@ export const METEOGRAM_VARS = Object.freeze({
   wind_gusts_10m: 'gust',
   pressure_msl: 'pressure',
 });
+/**
+ * Modely v meteograme (2026-10-09, bod 3 „ECMWF v meteograme"): GFS = ten istý model ako mapa, ECMWF IFS
+ * (9 km, otvorené dáta ECMWF CC BY 4.0) na porovnanie. Jeden dopyt na Open-Meteo vráti oba — premenné
+ * majú príponu modelu (temperature_2m_ecmwf_ifs). Prvý je predvolený.
+ */
+export const METEOGRAM_MODELS = Object.freeze([
+  Object.freeze({ id: 'gfs', openMeteo: 'gfs_global', label: 'GFS', name: 'GFS 0.25°' }),
+  Object.freeze({ id: 'ecmwf', openMeteo: 'ecmwf_ifs', label: 'ECMWF', name: 'ECMWF IFS 9 km' }),
+]);
 /** Bunka cache na serveri: 0,1° (~11 km) — GFS má 0,25°, jemnejšie by len míňalo dopyty. */
 export const METEOGRAM_CELL_DEG = 0.1;
 
@@ -42,7 +51,7 @@ export function openMeteoPointUrl(cell, days = METEOGRAM_DAYS) {
     latitude: String(cell.lat),
     longitude: String(cell.lon),
     hourly: Object.keys(METEOGRAM_VARS).join(','),
-    models: 'gfs_global',
+    models: METEOGRAM_MODELS.map((m) => m.openMeteo).join(','),
     forecast_days: String(days),
     wind_speed_unit: 'ms',
     timeformat: 'unixtime',
@@ -57,7 +66,7 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
  * Odpoveď Open-Meteo → { lat, lon, elevation, utcOffsetSec, timezone, times[ms], temp[], … }.
  * Chýbajúce hodnoty sú null. Null, ak odpoveď nemá časy. Pure.
  */
-export function normalizeOpenMeteoPoint(json) {
+export function normalizeOpenMeteoPoint(json, modelSuffix = null) {
   const hourly = json?.hourly;
   if (!hourly || !Array.isArray(hourly.time) || !hourly.time.length) return null;
   const times = hourly.time.map((s) => (Number.isFinite(Number(s)) ? Number(s) * 1000 : NaN));
@@ -71,10 +80,32 @@ export function normalizeOpenMeteoPoint(json) {
     times,
   };
   for (const [src, key] of Object.entries(METEOGRAM_VARS)) {
-    const arr = Array.isArray(hourly[src]) ? hourly[src] : [];
+    const key0 = modelSuffix && Array.isArray(hourly[`${src}_${modelSuffix}`]) ? `${src}_${modelSuffix}` : src;
+    const arr = Array.isArray(hourly[key0]) ? hourly[key0] : [];
     out[key] = times.map((_, i) => num(arr[i]));
   }
   return out;
+}
+
+/**
+ * Odpoveď Open-Meteo s viacerými modelmi → { gfs: rady, ecmwf: rady } (METEOGRAM_MODELS). Model, ktorý
+ * pre bod nemá žiadnu teplotu (mimo pokrytia, výpadok), sa vynechá. Null, ak nie je žiadny. Pure.
+ */
+export function normalizeOpenMeteoModels(json) {
+  const out = {};
+  const keys = Object.keys(json?.hourly || {});
+  // Jeden model v odpovedi = premenné bez prípony (Open-Meteo ich tak vracia) → patria prvému modelu.
+  const suffixed = METEOGRAM_MODELS.some((m) => keys.some((k) => k.endsWith(`_${m.openMeteo}`)));
+  if (!suffixed) {
+    const series = normalizeOpenMeteoPoint(json);
+    return series ? { [METEOGRAM_MODELS[0].id]: { ...series, model: METEOGRAM_MODELS[0].name } } : null;
+  }
+  for (const m of METEOGRAM_MODELS) {
+    if (!keys.some((k) => k.endsWith(`_${m.openMeteo}`))) continue;
+    const series = normalizeOpenMeteoPoint(json, m.openMeteo);
+    if (series && series.temp.some((v) => v !== null)) out[m.id] = { ...series, model: m.name };
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 const HOUR_MS = 3600_000;
@@ -227,4 +258,36 @@ export function coordinateLabel(lat, lon, lang = 'sk') {
   const ns = lat >= 0 ? (lang === 'en' ? 'N' : 'S') : (lang === 'en' ? 'S' : 'J');
   const ew = lon >= 0 ? (lang === 'en' ? 'E' : 'V') : (lang === 'en' ? 'W' : 'Z');
   return `${f(lat)}° ${ns} · ${f(lon)}° ${ew}`;
+}
+
+/**
+ * Odpoveď /api/meteo/point → modely pre pás: [{ id, label, name, series, columns }] v poradí METEOGRAM_MODELS.
+ * Starší tvar odpovede (len rady GFS bez `models`) = jeden model GFS. Model bez stĺpcov sa vynechá. Pure.
+ */
+export function meteogramModelViews(payload, { nowMs = Date.now() } = {}) {
+  if (!payload) return [];
+  const byId = payload.models && typeof payload.models === 'object' ? payload.models : { [METEOGRAM_MODELS[0].id]: payload };
+  const views = [];
+  for (const m of METEOGRAM_MODELS) {
+    const series = byId[m.id];
+    if (!series) continue;
+    const columns = meteogramColumns({ ...series, stale: payload.stale }, { nowMs });
+    if (columns.length) views.push({ id: m.id, label: m.label, name: m.name, series: { ...series, stale: payload.stale }, columns });
+  }
+  return views;
+}
+
+/**
+ * Najväčší rozdiel teploty medzi dvoma modelmi v spoločných stĺpcoch (°C, zaokrúhlené na 0,5) — miera
+ * neistoty predpovede pre popis. Null bez spoločných hodnôt. Pure.
+ */
+export function maxTemperatureSpread(colsA, colsB) {
+  const b = new Map((colsB || []).map((c) => [c.t, c.temp]));
+  let max = null;
+  for (const c of colsA || []) {
+    const other = b.get(c.t);
+    if (c.temp === null || other === null || other === undefined || !Number.isFinite(c.temp) || !Number.isFinite(other)) continue;
+    max = Math.max(max ?? 0, Math.abs(c.temp - other));
+  }
+  return max === null ? null : Math.round(max * 2) / 2;
 }

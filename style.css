@@ -3628,6 +3628,14 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .meteogram-day { padding-left: 4px; border-left: 1px solid rgba(57, 208, 255, 0.35); color: #fff; font-weight: 700; white-space: nowrap; overflow: hidden; line-height: 16px; }
 .meteogram-row.curve svg { display: block; }
 .meteogram-curve { fill: none; stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; }
+/* Druhý model (2026-10-09): prerušovaná krivka a prepínač GFS / ECMWF v hlavičke. */
+.meteogram-curve.alt { stroke: var(--accent); stroke-width: 1.6; stroke-dasharray: 4 3; }
+.meteogram-models { display: flex; flex: none; margin-left: auto; border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); border-radius: 4px; overflow: hidden; }
+.meteogram-models[hidden] { display: none; }
+.meteogram-model { padding: 2px 8px; border: 0; background: transparent; color: rgba(224, 247, 255, 0.7); font: 700 9px/1.4 var(--font-mono); letter-spacing: 0.08em; cursor: var(--cursor-pointer); }
+.meteogram-model + .meteogram-model { border-left: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); }
+.meteogram-model:hover { color: #fff; }
+.meteogram-model.active { background: color-mix(in srgb, var(--accent) 28%, transparent); color: #fff; }
 .meteogram-cell {
   position: relative;
   display: flex;

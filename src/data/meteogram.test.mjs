@@ -7,8 +7,9 @@ import {
   columnIndexForTime, coordinateLabel, meteogramCell, meteogramColumns, meteogramDays, meteogramHour,
   nearestPlaceName, normalizeOpenMeteoPoint, openMeteoPointUrl, rampCssColor, utcOffsetLabel, windArrowRotation,
 } from './meteogram.js';
+import { maxTemperatureSpread, meteogramModelViews, normalizeOpenMeteoModels } from './meteogram.js';
 import { createMeteoPointService, METEO_POINT_FRESH_MS } from './meteoPointService.js';
-import { bottomAboveAnchor, cellText, temperaturePath } from '../meteogramPanel.js';
+import { alignedTemps, bottomAboveAnchor, cellText, sharedRange, temperaturePath } from '../meteogramPanel.js';
 
 const H = 3600_000;
 const T0 = Date.parse('2026-10-08T00:00:00Z');
@@ -37,9 +38,9 @@ test('bod sa zaokrúhli na bunku 0,1° a neplatné súradnice sa odmietnu', () =
   assert.equal(meteogramCell('x', 0), null);
 });
 
-test('adresa Open-Meteo pýta model GFS, vietor v m/s a miestny čas', () => {
+test('adresa Open-Meteo pýta modely GFS a ECMWF v jednom dopyte, vietor v m/s a miestny čas', () => {
   const url = new URL(openMeteoPointUrl({ lat: 48.1, lon: 17.1 }));
-  assert.equal(url.searchParams.get('models'), 'gfs_global');
+  assert.equal(url.searchParams.get('models'), 'gfs_global,ecmwf_ifs');
   assert.equal(url.searchParams.get('wind_speed_unit'), 'ms');
   assert.equal(url.searchParams.get('timezone'), 'auto');
   assert.ok(url.searchParams.get('hourly').includes('wind_gusts_10m'));
@@ -161,4 +162,60 @@ test('pás: krivka teploty, desatinná čiarka, poloha nad časovou osou', () =>
   assert.equal(cellText(null), '–');
   assert.equal(bottomAboveAnchor({ top: 650, height: 77 }, 860), 218);
   assert.equal(bottomAboveAnchor({ top: 0, height: 0 }, 860), null);
+});
+
+/** Odpoveď Open-Meteo s dvoma modelmi: premenné s príponou modelu (tvar overený 2026-10-09 na api.open-meteo.com). */
+function twoModelJson(hours = 24, { ecmwfTemp = (i) => 12 + i, ecmwfMissing = false } = {}) {
+  const one = openMeteoJson(hours);
+  const hourly = { time: one.hourly.time };
+  for (const [k, v] of Object.entries(one.hourly)) {
+    if (k === 'time') continue;
+    hourly[`${k}_gfs_global`] = v;
+    hourly[`${k}_ecmwf_ifs`] = k === 'temperature_2m' ? v.map((_, i) => (ecmwfMissing ? null : ecmwfTemp(i))) : v;
+  }
+  return { ...one, hourly };
+}
+
+test('dva modely: rady podľa prípony, model bez teplôt sa vynechá, odpoveď s jedným modelom = GFS', () => {
+  const m = normalizeOpenMeteoModels(twoModelJson(6));
+  assert.deepEqual(Object.keys(m), ['gfs', 'ecmwf']);
+  assert.equal(m.gfs.temp[1], 11);
+  assert.equal(m.ecmwf.temp[1], 13);
+  assert.equal(m.ecmwf.model, 'ECMWF IFS 9 km');
+  assert.deepEqual(Object.keys(normalizeOpenMeteoModels(twoModelJson(6, { ecmwfMissing: true }))), ['gfs']);
+  assert.deepEqual(Object.keys(normalizeOpenMeteoModels(openMeteoJson(6))), ['gfs']);
+  assert.equal(normalizeOpenMeteoModels({ hourly: { time: [] } }), null);
+});
+
+test('služba vráti oba modely a navrchu GFS (starší klient funguje ďalej)', async () => {
+  const f = fakeFetch(twoModelJson(24));
+  const svc = createMeteoPointService({ fetchImpl: f.impl, now: () => T0 });
+  const r = await svc.get(48.1, 17.1);
+  assert.equal(f.calls.length, 1, 'jeden dopyt na oba modely');
+  assert.equal(r.payload.model, 'GFS 0.25°');
+  assert.equal(r.payload.temp[0], 10);
+  assert.equal(r.payload.models.ecmwf.temp[0], 12);
+  assert.match(r.payload.attribution, /ECMWF/);
+});
+
+test('pohľady modelov pre pás: poradie GFS, ECMWF; starý tvar = len GFS; podržané dáta sa označia', () => {
+  const svcPayload = { ...normalizeOpenMeteoModels(twoModelJson(24)).gfs, models: normalizeOpenMeteoModels(twoModelJson(24)), stale: true };
+  const views = meteogramModelViews(svcPayload, { nowMs: T0 });
+  assert.deepEqual(views.map((v) => v.label), ['GFS', 'ECMWF']);
+  assert.equal(views[1].columns[1].temp, 15); // 03Z
+  assert.equal(views[1].series.stale, true);
+  const old = meteogramModelViews(normalizeOpenMeteoPoint(openMeteoJson(24)), { nowMs: T0 });
+  assert.deepEqual(old.map((v) => v.id), ['gfs']);
+  assert.deepEqual(meteogramModelViews(null), []);
+});
+
+test('rozdiel modelov a druhá krivka na spoločnej mierke', () => {
+  const a = [{ t: 1, temp: 10 }, { t: 2, temp: 12 }, { t: 3, temp: null }];
+  const b = [{ t: 2, temp: 15.2 }, { t: 3, temp: 9 }];
+  assert.equal(maxTemperatureSpread(a, b), 3); // |12 − 15,2| = 3,2 → 3
+  assert.equal(maxTemperatureSpread(a, []), null);
+  assert.deepEqual(alignedTemps(a, b), [null, 15.2, 9]);
+  assert.deepEqual(sharedRange([10, 12], [15.2, null]), { lo: 10, hi: 15.2 });
+  // rovnaká mierka: hodnota 10 je na spodku pri oboch krivkách
+  assert.equal(temperaturePath([10, 20], 40, 34, { lo: 10, hi: 30 }), 'M20.0,30.0L60.0,17.0');
 });

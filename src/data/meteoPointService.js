@@ -1,5 +1,5 @@
 // src/data/meteoPointService.js
-// Server: predpoveď pre bod z Open-Meteo (model GFS) pre /api/meteo/point (2026-10-08, meteogram
+// Server: predpoveď pre bod z Open-Meteo (modely GFS a od 2026-10-09 aj ECMWF IFS v tom istom dopyte) pre /api/meteo/point (2026-10-08, meteogram
 // „ako Windy"). Bez kľúča a zadarmo; aj tak cache, spájanie súbežných dopytov a strop:
 //   - bunka 0,1° (meteogram.js), čerstvé 30 min (GFS beží každých 6 h), staré podržané do 6 h,
 //   - najviac UPSTREAM_PER_HOUR dopytov na Open-Meteo za hodinu z celej aplikácie
@@ -7,7 +7,7 @@
 //   - timeout 10 s, strop odpovede 1 MB.
 // Žiadny DOM; fetch a hodiny sa dajú podvrhnúť v testoch.
 
-import { meteogramCell, normalizeOpenMeteoPoint, openMeteoPointUrl } from './meteogram.js';
+import { meteogramCell, normalizeOpenMeteoModels, openMeteoPointUrl } from './meteogram.js';
 
 export const METEO_POINT_FRESH_MS = 30 * 60_000;
 export const METEO_POINT_STALE_MS = 6 * 3600_000;
@@ -49,14 +49,16 @@ export function createMeteoPointService({
     if (!res?.ok) throw new Error(`Open-Meteo HTTP ${res?.status}`);
     const text = await res.text();
     if (text.length > METEO_POINT_MAX_BYTES) throw new Error('Open-Meteo: oversized');
-    const series = normalizeOpenMeteoPoint(JSON.parse(text));
-    if (!series) throw new Error('Open-Meteo: no hourly data');
+    const models = normalizeOpenMeteoModels(JSON.parse(text));
+    if (!models) throw new Error('Open-Meteo: no hourly data');
+    // Vrch odpovede = prvý dostupný model (GFS) ako doteraz — starší klient číta rady priamo; nový berie `models`.
+    const first = models.gfs || Object.values(models)[0];
     return {
-      model: 'GFS 0.25°',
       source: 'Open-Meteo',
-      attribution: 'Weather data by Open-Meteo.com (CC BY 4.0) · NOAA/NCEP GFS',
+      attribution: 'Weather data by Open-Meteo.com (CC BY 4.0) · NOAA/NCEP GFS · ECMWF IFS open data (CC BY 4.0)',
       retrievedAt: new Date(now()).toISOString(),
-      ...series,
+      ...first,
+      models,
     };
   }
 

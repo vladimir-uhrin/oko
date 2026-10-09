@@ -32,7 +32,7 @@ import { createWindParticles } from '../windParticles.js';
 import { createMeteoTimeline } from '../meteoTimeline.js';
 import { createMeteoMapOverlay, loadMeteoMapData } from './meteoMapOverlay.js';
 import { createPlaceLabelManager } from './meteoPlaceLabels.js';
-import { METEOGRAM_URL, coordinateLabel, meteogramColumns } from './meteogram.js';
+import { METEOGRAM_URL, coordinateLabel, meteogramModelViews } from './meteogram.js';
 import { createMeteogramPanel } from '../meteogramPanel.js';
 import { resolvePickId } from './pickRegistry.js';
 import { anyRadarActive, onRadarPresenceChange, primaryRadar, setMeteoFieldVisible } from './radarPresence.js';
@@ -694,11 +694,12 @@ export function createMeteoLayer({
       const response = await doFetch(`${METEOGRAM_URL}?lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`);
       if (token !== _gramToken) return;
       if (!response?.ok) throw new Error(`HTTP ${response?.status}`);
-      const series = await response.json();
+      const payload = await response.json();
       if (token !== _gramToken) return;
-      const columns = meteogramColumns(series, { nowMs: now() });
-      if (!columns.length) throw new Error('empty forecast');
-      _meteogram.showModel({ series, columns, name, coords, lat, lon });
+      // GFS + ECMWF (2026-10-09): pás prepína medzi modelmi, prvý (GFS) je ten istý ako mapa.
+      const models = meteogramModelViews(payload, { nowMs: now() });
+      if (!models.length) throw new Error('empty forecast');
+      _meteogram.showModel({ series: models[0].series, columns: models[0].columns, models, name, coords, lat, lon });
     } catch (error) {
       if (token !== _gramToken) return;
       console.warn('[Data:Meteo] meteogram failed:', error?.message || error);
