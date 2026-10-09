@@ -274,16 +274,19 @@ async function init() {
       console.error('[RenderError] rendering stopped:', error?.stack || error);
     });
 
-    // Bez Cesium ion tokenu odstráň default „Cesium ion" logo z kreditov:
-    // CesiumJS je Apache-2.0 a logo je len zdvorilostný default — POVINNÉ je
-    // až pri používaní ion služieb (Bing stacky / ion terén), ktoré bez
-    // tokenu nikdy nebežia. S tokenom logo ostáva (ion ToS vyžaduje
-    // atribúciu). Google logo sa NIKDY neodstraňuje — Maps Platform ToS ho
-    // vyžaduje viditeľné, kým sa renderuje Google obsah (viď komentár pri
-    // creditContainer vyššie).
-    if (!cesiumToken) {
-      Cesium.CreditDisplay.cesiumCredit = undefined;
-    }
+    // Statické „Cesium ion" logo z kreditov preč VŽDY (2026-10-09, predtým len
+    // bez tokenu): CesiumJS je Apache-2.0 a toto logo je len zdvorilostný
+    // default, ktorý CreditDisplay kreslí v každej snímke bez ohľadu na to, či
+    // sa ion obsah používa. POVINNÁ atribúcia ion ostáva zachovaná sama od
+    // seba: ion server posiela ku každému svojmu assetu (Google 3D cez ion,
+    // záložný World Terrain) kredit s `ion-credit.png`, ktorý CreditDisplay
+    // (isIon → _defaultCredit) zobrazí presne v snímkach, kde sa ion obsah
+    // kreslí, a po ňom zmizne. Vlastník: logo + „Upgrade for commercial use"
+    // na glóbusových mapách „toto mi vadí" — tam sa od dnes ion nekreslí
+    // (terén je bezkľúčový, mapStackController._prefersWorldTerrain). Google
+    // logo sa NIKDY neodstraňuje — Maps Platform ToS ho vyžaduje viditeľné,
+    // kým sa renderuje Google obsah (viď komentár pri creditContainer vyššie).
+    Cesium.CreditDisplay.cesiumCredit = undefined;
 
     // Register per-layer data attribution into the "Data attribution" popover.
     // Required by each source's license (ODbL, CC BY-NC-SA, NASA FIRMS, etc.);
@@ -356,9 +359,11 @@ async function init() {
 
     loaderStatus.textContent = t('loader.init-systems');
 
-    // `?terrain=sk` vynúti merge terén (DMR 3.5 nad SR + Re:Earth vo svete)
-    // aj keď je ion token prítomný — bez toho ho s tokenom nie je ako vidieť,
-    // lebo Cesium World Terrain má prednosť. `?terrain=world` je opak.
+    // Terén glóbusových máp: predvolene merge terén (DMR 3.5 nad SR + Re:Earth vo
+    // svete) aj s ion tokenom (2026-10-09 — ion World Terrain nosí kredit „Upgrade
+    // for commercial use", vlastník ho nechcel; bez ion obsahu v zábere kredit
+    // zmizne sám). `?terrain=world` vynúti ion terén, `?terrain=sk` ho zakáže aj
+    // ako zálohu pri zlyhaní bezkľúčového terénu.
     const terrainPreference = new URLSearchParams(window.location.search).get('terrain') || 'auto';
 
     const mapStackController = new MapStackController(viewer, {

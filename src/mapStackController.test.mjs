@@ -64,20 +64,23 @@ test('provider je WMS s 512 px dlaždicami, orezaný na SR a cachovaný', async 
 // Bez tokenu bol merge terén (/api/sk-terrain — DMR 3.5 nad SR + Re:Earth vo
 // svete) jediná možnosť; s ion tokenom ho Cesium World Terrain vždy prebil,
 // takže SK terén nebolo ako vidieť. `terrainPreference` je ten prepínač.
+// 2026-10-09: ion terén nosí kredit „Upgrade for commercial use" (vlastník ho na
+// glóbusových mapách nechcel) → `auto` berie bezkľúčový terén aj s tokenom, ion
+// terén je len výslovný `world` alebo záloha pri úplnom zlyhaní bezkľúčového.
 
-test('terrainPreference: auto rešpektuje token, sk ho prebije, world ostáva ion', () => {
+test('terrainPreference: auto aj sk = bezkľúčový terén aj s tokenom, world = ion (len s tokenom)', () => {
   const withToken = (pref) => new MapStackController({}, { cesiumToken: 'ion-token', terrainPreference: pref });
   const noToken = (pref) => new MapStackController({}, { terrainPreference: pref });
 
-  // auto = pôvodné správanie: rozhoduje prítomnosť tokenu.
-  assert.equal(withToken('auto')._prefersWorldTerrain(), true);
+  // auto = bezkľúčový terén bez ohľadu na token (predtým rozhodoval token → ion kredit vľavo dole).
+  assert.equal(withToken('auto')._prefersWorldTerrain(), false);
   assert.equal(noToken('auto')._prefersWorldTerrain(), false);
 
-  // sk = merge terén VŽDY, aj s tokenom (to je celý zmysel prepínača).
+  // sk = merge terén VŽDY, aj s tokenom (a bez zálohy na ion).
   assert.equal(withToken('sk')._prefersWorldTerrain(), false);
   assert.equal(noToken('sk')._prefersWorldTerrain(), false);
 
-  // world = ion terén, ale bez tokenu sa nemá čím zapnúť → keyless.
+  // world = ion terén na výslovné želanie, ale bez tokenu sa nemá čím zapnúť → keyless.
   assert.equal(withToken('world')._prefersWorldTerrain(), true);
   assert.equal(noToken('world')._prefersWorldTerrain(), false);
 
@@ -85,7 +88,47 @@ test('terrainPreference: auto rešpektuje token, sk ho prebije, world ostáva io
   for (const junk of ['SK', 'ion', '', null, undefined, 42, {}]) {
     const c = new MapStackController({}, { cesiumToken: 'ion-token', terrainPreference: junk });
     assert.equal(c.terrainPreference, 'auto', `'${String(junk)}' má spadnúť na auto`);
-    assert.equal(c._prefersWorldTerrain(), true);
+    assert.equal(c._prefersWorldTerrain(), false);
+  }
+});
+
+test('bezkľúčový terén zlyhá → s tokenom ion World Terrain namiesto plochého glóbusu; pri sk a bez tokenu ostáva plochý', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalFromUrl = Cesium.CesiumTerrainProvider.fromUrl;
+  const originalWorld = Cesium.Terrain.fromWorldTerrain;
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    globalThis.fetch = async () => ({ ok: false });
+    Cesium.CesiumTerrainProvider.fromUrl = async () => { throw new Error('layer.json 500'); };
+    Cesium.Terrain.fromWorldTerrain = (opts) => ({ _world: true, opts });
+    const viewerOf = () => { const calls = []; return { calls, scene: { setTerrain(terrain) { calls.push(terrain); } }, terrainProvider: null }; };
+
+    const auto = viewerOf();
+    const c1 = new MapStackController(auto, { cesiumToken: 'ion-token' });
+    await c1._setWorldTerrainEnabled(false);
+    assert.equal(c1.getState().terrainSource, 'cesium-world', 'záloha na ion sa musí priznať v zdroji');
+    assert.equal(c1.getState().terrainMode, 'keyless', 'požiadavka ostáva keyless');
+    assert.equal(auto.calls.length, 1);
+    assert.equal(auto.calls[0].opts.requestVertexNormals, false);
+
+    const sk = viewerOf();
+    const c2 = new MapStackController(sk, { cesiumToken: 'ion-token', terrainPreference: 'sk' });
+    await c2._setWorldTerrainEnabled(false);
+    assert.equal(c2.getState().terrainSource, 'flat');
+    assert.equal(sk.calls.length, 0, 'pri ?terrain=sk sa ion nesmie zapnúť ani ako záloha');
+    assert.ok(sk.terrainProvider instanceof Cesium.EllipsoidTerrainProvider);
+
+    const noToken = viewerOf();
+    const c3 = new MapStackController(noToken, {});
+    await c3._setWorldTerrainEnabled(false);
+    assert.equal(c3.getState().terrainSource, 'flat');
+    assert.equal(noToken.calls.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    Cesium.CesiumTerrainProvider.fromUrl = originalFromUrl;
+    Cesium.Terrain.fromWorldTerrain = originalWorld;
+    console.warn = warn;
   }
 });
 

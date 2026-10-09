@@ -708,8 +708,15 @@ export class MapStackController {
    * merge (/api/sk-terrain → DMR 3.5 nad SR + Re:Earth vo svete)?
    * @returns {boolean}
    */
+  /**
+   * Ion World Terrain len na výslovné želanie (`?terrain=world`, 2026-10-09). Predtým `auto` s tokenom
+   * bralo ion terén — jeho dlaždice nesú kredit ion s odkazom „Upgrade for commercial use", ktorý na
+   * glóbusových mapách (stadia-dark, reliéf…) svietil vľavo dole (vlastník: „toto mi vadí"). Bezkľúčový
+   * terén (DMR 3.5 nad SR + Re:Earth vo svete) je rovnako elipsoidný a bez ion obsahu v zábere kredit
+   * poctivo zmizne; skryť ho pri kreslenom ion obsahu by porušilo podmienky ion, tak sa ion obsah nekreslí.
+   */
   _prefersWorldTerrain() {
-    if (this.terrainPreference === 'sk') return false;
+    if (this.terrainPreference !== 'world') return false;
     return !!this.cesiumToken;
   }
 
@@ -783,11 +790,12 @@ export class MapStackController {
   /**
    * Sets the scene's terrain provider for the current globe stack.
    *
-   * `enabled` selects Cesium World Terrain (ion token present — regime B,
-   * unchanged). Disabled/keyless (regime C: OSM or any globe stack without an
-   * ion token) now tries the keyless Re:Earth ellipsoidal terrain instead of
-   * the flat `EllipsoidTerrainProvider`, falling back to the flat provider
-   * (today's behavior) if construction fails — no worse than before this fix.
+   * `enabled` selects Cesium World Terrain from ion (only `?terrain=world` with a
+   * token since 2026-10-09 — see `_prefersWorldTerrain`). Disabled/keyless (the
+   * default for every globe stack) tries the keyless merged / Re:Earth
+   * ellipsoidal terrain; if that fails completely it falls back to ion World
+   * Terrain when a token is present (preference ≠ 'sk'), else to the flat
+   * `EllipsoidTerrainProvider`.
    *
    * `CesiumTerrainProvider.fromUrl()` is async (fetches `layer.json`), so this
    * method is async-safe: `gen` is the caller's switch generation (from
@@ -803,25 +811,36 @@ export class MapStackController {
     const targetMode = enabled ? 'world' : 'keyless';
     if (targetMode === this._terrainMode) return;
     if (enabled) {
-      // BEZ vertex normál — a nie je to úspora. Shader glóbusu definuje
-      // ENABLE_DAYNIGHT_SHADING len keď terén normály NEMÁ (s nimi berie
-      // ENABLE_VERTEX_LIGHTING) a jedine pod tým prvým sa mieša
-      // dayAlpha/nightAlpha imagery vrstiev: s normálami by nočné svetlá
-      // (nightLights.js) potichu prekryli aj dennú stranu — presne to sa stalo
-      // 2026-09-06. Hillshade z normál by aj tak nebolo vidieť: osvetlenie je
-      // pod 1 500 km vypnuté (globeLighting.js) a nad tým je reliéf sub-pixel.
-      this.viewer.scene.setTerrain(Cesium.Terrain.fromWorldTerrain({
-        requestVertexNormals: false,
-      }));
-      this._terrainSource = 'cesium-world';
+      this._installWorldTerrain();
     } else {
       const provider = await this._getKeylessTerrainProvider();
       // A newer switch started while the Re:Earth layer.json fetch was in
       // flight — that call owns terrain now; don't stomp it (M7 pattern).
       if (gen != null && gen !== this._switchGen) return;
-      this.viewer.terrainProvider = provider;
+      if (this._terrainSource === 'flat' && this.cesiumToken && this.terrainPreference !== 'sk') {
+        // Bezkľúčový terén zlyhal úplne — radšej ion terén (aj s jeho kreditom) než plochý glóbus.
+        // `_terrainMode` ostáva 'keyless' (to bola požiadavka), `_terrainSource` hovorí pravdu.
+        this._installWorldTerrain();
+      } else {
+        this.viewer.terrainProvider = provider;
+      }
     }
     this._terrainMode = targetMode;
+  }
+
+  /** Cesium World Terrain z ion. */
+  _installWorldTerrain() {
+    // BEZ vertex normál — a nie je to úspora. Shader glóbusu definuje
+    // ENABLE_DAYNIGHT_SHADING len keď terén normály NEMÁ (s nimi berie
+    // ENABLE_VERTEX_LIGHTING) a jedine pod tým prvým sa mieša
+    // dayAlpha/nightAlpha imagery vrstiev: s normálami by nočné svetlá
+    // (nightLights.js) potichu prekryli aj dennú stranu — presne to sa stalo
+    // 2026-09-06. Hillshade z normál by aj tak nebolo vidieť: osvetlenie je
+    // pod 1 500 km vypnuté (globeLighting.js) a nad tým je reliéf sub-pixel.
+    this.viewer.scene.setTerrain(Cesium.Terrain.fromWorldTerrain({
+      requestVertexNormals: false,
+    }));
+    this._terrainSource = 'cesium-world';
   }
 
   /**

@@ -232,7 +232,8 @@ Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
   Re:Earth — nodata útes na 0 m nemôže vzniknúť. Klient
   (`_getKeylessTerrainProvider`) si merge endpoint vyberá probe-om;
   produkčný build bez middleware padá na priamy Re:Earth. Ion „world"
-  režim (Cesium World Terrain) sa nemení.
+  režim (Cesium World Terrain) ostáva v kóde, od 2026-10-09 len na výslovné
+  `?terrain=world` alebo ako záloha pri úplnom zlyhaní bezkľúčového terénu.
 - **Výškový kontrakt §1a platí**: mergované dlaždice sú elipsoidné ako
   Re:Earth, `groundPriorM`/geoid logika sa nemení.
 - **Ako SK terén VIDIEŤ** (2026-09-01): terén je viditeľný len na globe stacku
@@ -241,8 +242,13 @@ Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
   terén by sa nezobrazil nikdy. Preto `terrainPreference` v
   `MapStackController` a URL parameter:
   `http://localhost:4173/?terrain=sk` — vynúti merge (DMR 3.5 10 m nad SR,
-  Re:Earth vo svete), `?terrain=world` vynúti ion CWT, bez parametra platí
-  `auto` (= pôvodné správanie: rozhoduje prítomnosť tokenu).
+  Re:Earth vo svete) bez zálohy na ion, `?terrain=world` vynúti ion CWT, bez
+  parametra platí `auto`. **2026-10-09: `auto` = merge terén aj s tokenom** —
+  dlaždice CWT nesú kredit ion s odkazom „Upgrade for commercial use", ktorý
+  na glóbusových mapách svietil vľavo dole (vlastník: „toto mi vadí"); bez ion
+  obsahu v zábere kredit zmizne sám (skryť ho pri kreslenom ion obsahu by
+  porušilo podmienky ion). Ak merge aj priamy Re:Earth zlyhajú, `auto`
+  s tokenom spadne na CWT (s kreditom), `getState().terrainSource` to prizná.
   `getState().terrainMode` hlási, čo je NAOZAJ nainštalované ('keyless' =
   merge, 'world' = CWT) — názov triedy providera obe vetvy nerozlíši.
 - LEKCIA: vite watcher sledoval `.gev-cache/` — download so zamknutým súborom
