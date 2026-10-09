@@ -181,6 +181,7 @@ import {
 } from './src/data/aisIngest.js';
 import { parseSilenceTimeoutEnv } from './src/data/aisWatchdog.js';
 import { mergeTerrainAvailability, parseTerrainTilePath, SK_TERRAIN_UPSTREAM_URL } from './src/data/skTerrain.js';
+import { formatMb, pruneUpstreamCache, upstreamCacheLimits } from './scripts/lib/skTerrainUpstreamCache.mjs';
 import {
   fetchTerrainChunkWithRetry,
   parseTerrainPoints,
@@ -11780,6 +11781,10 @@ function normalizeAisTimestamp(value) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
+/** Časovače upratovania cache upstream terénu — na úrovni modulu, aby reštart Vite servera nezdvojil beh. */
+let _skTerrainPruneStartTimer = null;
+let _skTerrainPruneTimer = null;
+
 /**
  * SK terén — merge proxy (OKO Fáza 1b, `/api/sk-terrain`).
  *
@@ -11809,14 +11814,38 @@ function skTerrainProxy() {
   const LAYER_TTL_MS = 24 * 3_600_000;
   const FETCH_TIMEOUT_MS = 20_000;
   const QUANTIZED_MESH_TYPE = 'application/vnd.quantized-mesh';
+  // Strop write-through cache (2026-10-09): od 79da7cb tadiaľ tečie Re:Earth pre celý svet, dovtedy len
+  // dev/keyless režimy — bez stropu by priečinok na D: rástol donekonečna.
+  const PRUNE_INTERVAL_MS = 3_600_000;
+  const PRUNE_STARTUP_DELAY_MS = 15_000;
   /** @type {?{at: number, body: Buffer}} */
   let layerCache = null;
   /** @type {?Promise<Buffer>} single-flight upstream layer.json fetch */
   let layerInflight = null;
+  /** @type {?Promise<void>} single-flight upratovanie cache */
+  let pruneInflight = null;
 
   const upstreamTileUrl = ({ z, x, y }) => `${SK_TERRAIN_UPSTREAM_URL}/${z}/${x}/${y}.terrain`;
   const localTilePath = ({ z, x, y }) => path.join(TILE_DIR, String(z), String(x), `${y}.terrain`);
   const upstreamCachePath = ({ z, x, y }) => path.join(UPSTREAM_CACHE_DIR, `${z}-${x}-${y}.terrain`);
+
+  /**
+   * Upratanie cache (scripts/lib/skTerrainUpstreamCache.mjs): 2 GB / 30 dní, LRU podľa mtime (zásah
+   * dlaždicu „dotkne“). Beží mimo požiadaviek — pri štarte a raz za hodinu — a nikdy neblokuje odpoveď.
+   * Limity sa čítajú pri každom behu (loadEnv ich kopíruje do process.env až v config hooku).
+   */
+  function pruneUpstreamCacheSoon(reason) {
+    if (pruneInflight) return pruneInflight;
+    pruneInflight = pruneUpstreamCache(UPSTREAM_CACHE_DIR, { limits: upstreamCacheLimits(process.env) })
+      .then((r) => {
+        if (r.deleted || reason === 'štart') {
+          console.log(`[skTerrain] cache upstream (${reason}): zmazaných ${r.deleted} dlaždíc (${formatMb(r.deletedBytes)}), ostáva ${r.kept} dlaždíc (${formatMb(r.keptBytes)})`);
+        }
+      })
+      .catch((error) => console.warn('[skTerrain] upratovanie cache upstream zlyhalo:', error?.message || error))
+      .finally(() => { pruneInflight = null; });
+    return pruneInflight;
+  }
 
   async function fetchUpstreamLayerJson() {
     const response = await fetch(`${SK_TERRAIN_UPSTREAM_URL}/layer.json`, {
@@ -11851,6 +11880,12 @@ function skTerrainProxy() {
   }
 
   function install(server) {
+    if (_skTerrainPruneStartTimer) clearTimeout(_skTerrainPruneStartTimer);
+    if (_skTerrainPruneTimer) clearInterval(_skTerrainPruneTimer);
+    _skTerrainPruneStartTimer = setTimeout(() => pruneUpstreamCacheSoon('štart'), PRUNE_STARTUP_DELAY_MS);
+    _skTerrainPruneStartTimer.unref?.();
+    _skTerrainPruneTimer = setInterval(() => pruneUpstreamCacheSoon('hodina'), PRUNE_INTERVAL_MS);
+    _skTerrainPruneTimer.unref?.();
     server.middlewares.use('/api/sk-terrain', async (req, res) => {
       const send = (status, headers, body) => {
         if (res.headersSent) return;
@@ -11905,6 +11940,9 @@ function skTerrainProxy() {
         //    gzip sám, takže cache aj odpoveď sú surový quantized-mesh).
         const cached = await fsp.readFile(upstreamCachePath(tile)).catch(() => null);
         if (cached) {
+          // LRU: dotyk mtime = posledné použitie (strop cache maže najdlhšie nepoužité); bez čakania.
+          const touchedAt = new Date();
+          fsp.utimes(upstreamCachePath(tile), touchedAt, touchedAt).catch(() => {});
           send(200, {
             'Content-Type': QUANTIZED_MESH_TYPE,
             'Cache-Control': 'public, max-age=86400',

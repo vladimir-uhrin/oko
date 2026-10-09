@@ -228,7 +228,13 @@ Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
   terrainProvider a keyless stacky už majú celosvetový Re:Earth (elipsoidný).
   `/api/sk-terrain` (vite proxy) servíruje Re:Earth layer.json (plná
   availability do z14), lokálnu DMR dlaždicu keď existuje, inak passthrough
-  s write-through cache. Prune garantuje, že hraničné dlaždice ostávajú
+  s write-through cache. **Strop cache (2026-10-09, po 79da7cb tadiaľ tečie
+  celý svet):** `scripts/lib/skTerrainUpstreamCache.mjs` maže pri štarte a raz
+  za hodinu najdlhšie nepoužité dlaždice (mtime = posledný zásah) nad 2 GB
+  alebo staršie než 30 dní (`SK_TERRAIN_UPSTREAM_CACHE_MAX_MB` / `_MAX_DAYS`
+  v `.env`), asynchrónne mimo požiadaviek; ručne
+  `node scripts/sk-terrain-cache-prune.mjs --dry-run`; pri zavedení mal
+  priečinok 1138 dlaždíc / 45 MB. Prune buildu garantuje, že hraničné dlaždice ostávajú
   Re:Earth — nodata útes na 0 m nemôže vzniknúť. Klient
   (`_getKeylessTerrainProvider`) si merge endpoint vyberá probe-om;
   produkčný build bez middleware padá na priamy Re:Earth. Ion „world"
