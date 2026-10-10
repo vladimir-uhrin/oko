@@ -286,6 +286,8 @@ export function createGfwPresenceLayer({
   const _scratchObjects = new Map();
   // Výber lode (2026-10-10): karta, história prístavov, trasa 24 h a novšia poloha z registra.
   let _selectedKey = null;
+  /** Riadok vybranej lode — výber prežije oddialenie aj nový výrez bez nej. */
+  let _selectedRow = null;
   let _clickHandler = null;
   let _historyLine = null;
   let _trackLine = null;
@@ -343,7 +345,7 @@ export function createGfwPresenceLayer({
 
   /** Popisky: len lode na obrazovke, zoradené podľa priority, strop GFW_PRESENCE_MAX_LABELS. */
   function publishLabels() {
-    if (!_enabled || !_byId.size) {
+    if (!_enabled || (!_byId.size && !_selectedRow)) {
       _labelCount = 0;
       overlayHost.clearSource(GFW_PRESENCE_OVERLAY_SOURCE_ID);
       return;
@@ -363,6 +365,9 @@ export function createGfwPresenceLayer({
         if (!win || win.x < 0 || win.y < 0 || win.x > width || win.y > height) continue;
       }
       cards.push(gfwLabelCard(row, billboard.position, _meta));
+    }
+    if (_selectedRow && _selectedKey && !_byId.has(_selectedKey)) {
+      cards.push(gfwSelectedCard(_selectedRow, Cesium.Cartesian3.fromDegrees(_selectedRow.lon, _selectedRow.lat, GFW_PRESENCE_POINT_HEIGHT_M), _meta));
     }
     cards.sort((a, b) => b.priority - a.priority);
     const entries = cards.slice(0, GFW_PRESENCE_MAX_LABELS).map((card) => applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M));
@@ -420,6 +425,7 @@ export function createGfwPresenceLayer({
   function selectVessel(key) {
     const next = key && _byId.has(String(key)) ? String(key) : null;
     _selectedKey = next;
+    _selectedRow = next ? _byId.get(next).row : null;
     _selectToken += 1;
     clearSelectionGraphics();
     publishLabels();
@@ -514,6 +520,11 @@ export function createGfwPresenceLayer({
     syncTier();
     const bbox = gfwViewBbox(_viewer);
     if (!bbox) {
+      // Oddialenie nad strop: rozbehnutý dopyt na veľký výrez už nikto nečaká —
+      // zrušiť ho, nech jeho neskorá chyba nehlási „Načítanie zlyhalo" (2026-10-10).
+      _requestToken += 1;
+      _loading = false;
+      _error = null;
       _status = 'zoom-in';
       publishLabels();
       return;
@@ -565,6 +576,7 @@ export function createGfwPresenceLayer({
       _clickHandler?.destroy?.();
       _clickHandler = null;
       _selectedKey = null;
+      _selectedRow = null;
       clearSelectionGraphics();
       _enabled = false;
       clearTimeout(_moveTimer);
@@ -617,8 +629,7 @@ export function createGfwPresenceLayer({
 
     /** MMSI vybranej lode (fotka pod kartou), inak null. */
     getSelectedMmsi() {
-      const entry = _selectedKey ? _byId.get(_selectedKey) : null;
-      return entry?.row?.mmsi ? String(entry.row.mmsi) : null;
+      return _selectedRow?.mmsi ? String(_selectedRow.mmsi) : null;
     },
 
     /** Vyber loď z kódu (hľadanie, test); null zruší výber. */
