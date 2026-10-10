@@ -34,7 +34,7 @@ import {
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
 import { SILHOUETTE_MAX_CAMERA_M, convoyBarges, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, topSilhouetteDataUrl, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
 import { loadRiverIndex, onRiverIndexReady, riverUpstreamBearing } from './riverDirection.js';
-import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, newerPositionLine, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedPortIndex } from './vesselPortIndex.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
@@ -184,6 +184,7 @@ export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
   // AISHub cieľ neposiela — berie sa z registra; bez trasy s vlajkami ako riadok „→ cieľ · ETA".
   const dest = vesselDestinationWithFallback(row, info);
   const extraLines = [
+    newerPositionLine(info, Number.isFinite(row.observedAt) ? row.observedAt : null, translate, lang, nowMs),
     !voyage?.destination && dest.destination ? `→ ${dest.destination}${dest.eta ? ` · ETA ${dest.eta}` : ''}` : '',
     voyageDepartureLine(voyage, translate, lang, nowMs, { withOrigin: !voyage?.destination }),
     portHistoryLine(info, cachedPortIndex(), translate),

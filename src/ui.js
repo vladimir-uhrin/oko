@@ -3146,7 +3146,10 @@ export class StyleManager {
         const live = aisLiveVesselsLayer.getSelectedMmsi?.();
         if (live) return { mmsi: live, sourceId: 'ais-live-vessels', entryId: `vessel:${live}` };
         const delayed = this._dataManager?.layers?.get('aishub-vessels')?.module?.getSelectedMmsi?.();
-        return delayed ? { mmsi: delayed, sourceId: 'aishub-vessels', entryId: `aishub:${delayed}` } : null;
+        if (delayed) return { mmsi: delayed, sourceId: 'aishub-vessels', entryId: `aishub:${delayed}` };
+        // Loď z GFW (satelitné AIS, oneskorené) — 2026-10-10 sledovanie lodí na mori.
+        const satellite = this._dataManager?.layers?.get('gfw-presence')?.module?.getSelectedMmsi?.();
+        return satellite ? { mmsi: satellite, sourceId: 'gfw-presence', entryId: `gfw:${satellite}` } : null;
       },
     });
     // Štátne lietadlá SR (2026-09-30, stateFlightsStrip.js): nad kartou sledovaného štátneho stroja

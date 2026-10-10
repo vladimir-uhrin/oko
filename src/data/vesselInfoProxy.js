@@ -21,6 +21,34 @@
  */
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
+import { MT_BASE, VF_TRACK, BROWSER_UA as TRACK_UA, curlGet, decodeVfTrack, parseMtPort, parseMtPosition, parseMtSearch, parseMtTrack, parseMtVoyage } from './vesselTrackSources.js';
+
+/** Posledná poloha a plavba z MarineTraffic — mení sa rýchlo. */
+export const MT_LIVE_TTL_MS = 10 * 60 * 1000;
+export const MT_ID_TTL_MS = 30 * 24 * 3600 * 1000;
+export const MT_PORT_TTL_MS = 30 * 24 * 3600 * 1000;
+export const TRACK_TTL_MS = 10 * 60 * 1000;
+export const MT_HOURLY_MAX = 900;
+
+/**
+ * Posledný prístav z plavby MT v tvare info.voyage (registra). Odchod (ATD)
+ * má prednosť; loď, ktorá do prístavu práve prišla (ATA bez ATD), ho má ako
+ * „kde je" — vtedy departedAt null a arrivedAt nastavené. Pure.
+ */
+export function mtVoyageAsRegistry(voyage, depPort, arrPort) {
+  // Príchod po odchode = loď je v cieľovom prístave (TURIEC: Freudenau 4. 7. → Bratislava 4. 7.).
+  const arrivedLater = Number.isFinite(voyage?.arrivedAt) && (!Number.isFinite(voyage?.departedAt) || voyage.arrivedAt > voyage.departedAt);
+  if (arrivedLater && arrPort?.name) {
+    return { lastPort: arrPort.name, lastPortCountry: arrPort.country, departedAt: null, arrivedAt: voyage.arrivedAt, locode: arrPort.locode, source: 'mt' };
+  }
+  if (depPort?.name && Number.isFinite(voyage?.departedAt)) {
+    return { lastPort: depPort.name, lastPortCountry: depPort.country, departedAt: voyage.departedAt, locode: depPort.locode, source: 'mt' };
+  }
+  if (arrPort?.name && Number.isFinite(voyage?.arrivedAt)) {
+    return { lastPort: arrPort.name, lastPortCountry: arrPort.country, departedAt: null, arrivedAt: voyage.arrivedAt, locode: arrPort.locode, source: 'mt' };
+  }
+  return null;
+}
 
 export const VESSEL_INFO_UPSTREAM = 'https://www.vesselfinder.com/api/pub/click/';
 export const VESSEL_PHOTO_UPSTREAM = 'https://static.vesselfinder.net/ship-photo/';
@@ -247,7 +275,7 @@ function windowLimiter({ windowMs, max, now }) {
  * @param {Function} [o.now]
  * @param {Function} [o.log]
  */
-export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fetch(...a), now = Date.now, log = (m) => console.log(m), gfwToken = () => process.env.GFW_API_TOKEN } = {}) {
+export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fetch(...a), now = Date.now, log = (m) => console.log(m), gfwToken = () => process.env.GFW_API_TOKEN, mtGet = curlGet } = {}) {
   const dir = path.join(root, '.gev-cache', 'vessel-info');
   const gfwDaily = windowLimiter({ windowMs: 24 * 3600_000, max: PORT_CALLS_DAILY_MAX, now });
   const perClient = windowLimiter({ windowMs: 60_000, max: 90, now });
@@ -373,6 +401,101 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
     return run;
   }
 
+  const mtHourly = windowLimiter({ windowMs: 3600_000, max: MT_HOURLY_MAX, now });
+  const mtDir = path.join(dir, 'mt');
+  async function readFresh(file, ttl) {
+    try {
+      const entry = JSON.parse(await fsp.readFile(file, 'utf8'));
+      return Number.isFinite(entry?.at) && now() - entry.at < ttl ? entry : null;
+    } catch { return null; }
+  }
+  async function mtJson(pathPart) {
+    if (!mtHourly('mt')) throw new Error('mt budget');
+    return JSON.parse(await mtGet(MT_BASE + pathPart));
+  }
+  function dedupe(keyName, fn) {
+    const job = inflight.get(keyName);
+    if (job) return job;
+    const run = fn().finally(() => inflight.delete(keyName));
+    inflight.set(keyName, run);
+    return run;
+  }
+  async function mtShipId(mmsi) {
+    const file = path.join(mtDir, mmsi + '.id.json');
+    const cached = await readFresh(file, MT_ID_TTL_MS);
+    if (cached && (cached.shipId || now() - cached.at < 24 * 3600_000)) return cached.shipId;
+    const shipId = parseMtSearch(await mtJson('/en/search/searchAsset?what=vessel&term=' + mmsi), mmsi);
+    await writeAtomic(file, JSON.stringify({ at: now(), shipId }));
+    return shipId;
+  }
+  async function mtPort(portId) {
+    if (!portId) return null;
+    const file = path.join(mtDir, 'port-' + String(portId).replace(/\D/g, '') + '.json');
+    const cached = await readFresh(file, MT_PORT_TTL_MS);
+    if (cached) return cached.port;
+    const port = parseMtPort(await mtJson('/en/ports/' + encodeURIComponent(portId) + '/general'));
+    await writeAtomic(file, JSON.stringify({ at: now(), port }));
+    return port;
+  }
+  /**
+   * Posledná poloha (aj „Roaming" na otvorenom oceáne) a plavba z MT. Nikdy
+   * nezhodí odpoveď — pri chybe null a ostatné zdroje idú ďalej.
+   */
+  function loadMtLive(mmsi) {
+    return dedupe('mt:' + mmsi, async () => {
+      const file = path.join(mtDir, mmsi + '.live.json');
+      const cached = await readFresh(file, MT_LIVE_TTL_MS);
+      if (cached) return cached.live;
+      try {
+        const shipId = await mtShipId(mmsi);
+        let live = null;
+        if (shipId) {
+          const [position, voyage] = await Promise.all([
+            mtJson('/en/vessels/' + shipId + '/position').then(parseMtPosition).catch(() => null),
+            mtJson('/en/vessels/' + shipId + '/voyage').then(parseMtVoyage).catch(() => null),
+          ]);
+          const [depPort, arrPort] = await Promise.all([
+            mtPort(voyage?.departurePortId).catch(() => null),
+            mtPort(voyage?.arrivalPortId).catch(() => null),
+          ]);
+          live = { shipId, position, voyage: mtVoyageAsRegistry(voyage, depPort, arrPort), destination: voyage?.destination || null, etaMs: voyage?.etaMs || null };
+        }
+        await writeAtomic(file, JSON.stringify({ at: now(), live }));
+        return live;
+      } catch (error) {
+        log('[vessel-info] mt ' + mmsi + ' failed: ' + (error?.message || error));
+        return null;
+      }
+    });
+  }
+  /** Trasa ~24 h: MT (aj „Roaming" body), záloha VF (pozemné). */
+  function loadTrack(mmsi) {
+    return dedupe('tr:' + mmsi, async () => {
+      const file = path.join(mtDir, mmsi + '.track.json');
+      const cached = await readFresh(file, TRACK_TTL_MS);
+      if (cached) return cached.track;
+      let track = { points: [], source: null };
+      try {
+        const live = await loadMtLive(mmsi);
+        if (live?.shipId) {
+          const pts = parseMtTrack(await mtJson('/map/gettrackjson/shipid:' + live.shipId));
+          if (pts.length >= 2) track = { points: pts, source: 'mt' };
+        }
+      } catch (error) { log('[vessel-info] mt track ' + mmsi + ' failed: ' + (error?.message || error)); }
+      if (!track.points.length && upstreamBudget('all')) {
+        try {
+          const res = await fetchImpl(VF_TRACK + mmsi, { headers: { 'User-Agent': TRACK_UA }, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+          if (res.ok) {
+            const pts = decodeVfTrack(Buffer.from(await res.arrayBuffer()));
+            if (pts.length >= 2) track = { points: pts, source: 'vf' };
+          }
+        } catch (error) { log('[vessel-info] vf track ' + mmsi + ' failed: ' + (error?.message || error)); }
+      }
+      await writeAtomic(file, JSON.stringify({ at: now(), track }));
+      return track;
+    });
+  }
+
   async function loadPhoto(mmsi, size, key) {
     const file = photoFile(mmsi, size);
     try {
@@ -430,11 +553,21 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
         sendJson(res, out.status || 502, { error: out.error || 'upstream' }, out.status === 404 ? { 'Cache-Control': 'public, max-age=86400' } : {});
         return;
       }
+      if (url.pathname === '/track') {
+        if (!perClient(key)) { sendJson(res, 429, { error: 'rate_limited' }, { 'Retry-After': '30' }); return; }
+        const track = await loadTrack(mmsi);
+        sendJson(res, 200, { mmsi, points: track.points, source: track.source ? 'register' : null }, { 'Cache-Control': 'public, max-age=300' });
+        return;
+      }
       if (url.pathname !== '/' && url.pathname !== '') { sendJson(res, 404, { error: 'not_found' }); return; }
       const out = await loadInfo(mmsi, key);
       if (!out.info) { sendJson(res, out.status || 502, { error: out.error || 'upstream' }, out.status === 429 ? { 'Retry-After': '30' } : {}); return; }
-      const [voyage, portCalls] = await Promise.all([loadVoyage(out.info), loadPortCalls(mmsi)]);
-      sendJson(res, 200, publicVesselInfo(out.info, voyage, portCalls), { 'Cache-Control': 'public, max-age=3600', 'X-OKO-Source': out.source });
+      const [voyage, portCalls, mt] = await Promise.all([loadVoyage(out.info), loadPortCalls(mmsi), loadMtLive(mmsi)]);
+      const body = publicVesselInfo(out.info, voyage || mt?.voyage || null, portCalls);
+      // Posledná poloha (aj z prijímača na inej lodi na otvorenom mori) a cieľ, keď ho register nemá.
+      body.lastPosition = mt?.position || null;
+      if (!body.destination && mt?.destination) { body.destination = mt.destination; body.etaMs = body.etaMs || mt.etaMs || null; }
+      sendJson(res, 200, body, { 'Cache-Control': 'public, max-age=300', 'X-OKO-Source': out.source });
     } catch (error) {
       log(`[vessel-info] ${mmsi} failed: ${error?.message || error}`);
       sendJson(res, 502, { error: 'upstream_failed' });

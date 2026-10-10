@@ -6,7 +6,7 @@ import {
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
 import { currentLanguage, t } from '../i18n.js';
-import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, newerPositionLine, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
 import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
@@ -183,7 +183,7 @@ const VESSEL_SURFACE_WARM_ALT_M = 150_000;
 /** Najviac lodí v zábere, ktorým sa na jedno načítanie dotiahne povrch (bunky ~111 m sa zlúčia). */
 const VESSEL_SURFACE_WARM_MAX = 800;
 /** Combined cap on trail vertices (server backfill + live accumulation). */
-const TRAIL_MAX_POINTS = 400;
+const TRAIL_MAX_POINTS = 800;
 /** Minimum movement (m) before a reconcile refresh appends a new trail point. */
 const TRAIL_MIN_MOVE_M = 25;
 
@@ -658,6 +658,7 @@ const aisLiveVesselsLayer = {
     const extraLines = [
       voyageDepartureLine(voyage, t, lang, Date.now(), { withOrigin: !voyage?.destination }),
       portHistoryLine(info, cachedPortIndex(), t),
+      newerPositionLine(info, Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null, t, lang),
       vesselRegistryParts(info, t, lang).join(' · '),
       vesselHullParts(record, info, t, lang).join(' · '),
       (() => { const local = vesselLocalTimeLabel(record.lon, Date.now(), vesselTimeZone(record.lat, record.lon)); return local ? t('vessel.local-time', { time: local }) : ''; })(),
@@ -2684,18 +2685,17 @@ function startSelectedVesselTrail(record) {
  * @returns {Promise<void>}
  */
 async function backfillVesselTrail(mmsi, token) {
-  let samples = null;
-  try {
-    const response = await fetch('/api/ais-live/track?mmsi=' + encodeURIComponent(mmsi), {
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) return;
-    const payload = await response.json();
-    samples = Array.isArray(payload?.samples) ? payload.samples : null;
-  } catch {
-    return; // silent — keep the live-accumulated trail
-  }
-  if (!samples || token !== state.trailBackfillToken) return;
+  // 2026-10-10 („nenačíta let lodí"): vlastný ring servera (~8 h) + trasa 24 h
+  // z registra lodí (/api/vessel-info/track) — staršie body registra idú pred naše.
+  const fetchJson = (url) => fetch(url, { signal: AbortSignal.timeout(20000) })
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+  const [own, register] = await Promise.all([
+    fetchJson('/api/ais-live/track?mmsi=' + encodeURIComponent(mmsi)),
+    fetchJson('/api/vessel-info/track?mmsi=' + encodeURIComponent(mmsi)),
+  ]);
+  const samples = mergeVesselTrackSamples(own?.samples, register?.points);
+  if (!samples.length || token !== state.trailBackfillToken) return;
   if (state.trailMmsi !== mmsi) return;
 
   const older = [];
@@ -2715,6 +2715,22 @@ async function backfillVesselTrail(mmsi, token) {
     state.trailPositions = state.trailPositions.slice(state.trailPositions.length - TRAIL_MAX_POINTS);
   }
   if (state.trail) state.trail.setPositions(state.trailPositions);
+}
+
+/**
+ * Zlúči vlastné vzorky (t v sekundách) a trasu registra (t v ms): body registra
+ * staršie ako náš prvý bod idú pred naše, novšie naše majú prednosť. Pure.
+ * @param {Array<{lat:number,lon:number,t:number}>|null} own
+ * @param {Array<{lat:number,lon:number,t:number}>|null} register
+ * @returns {Array<{lat:number,lon:number}>}
+ */
+export function mergeVesselTrackSamples(own, register) {
+  const ours = (Array.isArray(own) ? own : []).filter((p) => Number.isFinite(Number(p?.lat)) && Number.isFinite(Number(p?.lon)));
+  const firstOursMs = ours.length && Number.isFinite(Number(ours[0].t)) ? Number(ours[0].t) * 1000 : Infinity;
+  const older = (Array.isArray(register) ? register : [])
+    .filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon) && Number.isFinite(p?.t) && p.t < firstOursMs)
+    .sort((a, b) => a.t - b.t);
+  return [...older, ...ours].map((p) => ({ lat: Number(p.lat), lon: Number(p.lon) }));
 }
 
 /**
@@ -3006,6 +3022,8 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
   // Predchádzajúce prístavy z GFW (2026-10-10, „nenačíta let lodí").
   const history = portHistoryLine(info, state.portIndex || cachedPortIndex(), t);
   if (history) details.push(history);
+  const newer = newerPositionLine(info, Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null, t, lang, nowMs);
+  if (newer) details.push(newer);
   if (destination) details.push(`→ ${trimHudValue(destination, 24)}${eta ? ` · ETA ${eta}` : ''}`);
   // Rozpoznaný prístav (World Port Index) pridá vzdialenosť po veľkokružnici
   // a ETA z rýchlosti nad zemou. Bez zhody sa NIČ nedopĺňa — surový text

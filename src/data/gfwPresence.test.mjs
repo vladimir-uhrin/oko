@@ -125,7 +125,7 @@ test('gfwLabelCard: popiska v tvare karty živých lodí — meno, vlajka, typ �
   assert.equal(card.titleFlag, 'NL');
   assert.deepEqual(card.details, ['CARGO · DELAYED · 8 Sep']);
   assert.deepEqual(gfwLabelCard(ROWS[0], { x: 1, y: 2, z: 3 }, META, tEn, 'sk').details, ['CARGO · DELAYED · 8. 9.'], 'deň po slovensky (reťazec tu EN, lebo tEn)');
-  assert.equal(card.actionable, false);
+  assert.equal(card.actionable, true, 'klik na štítok vyberie loď (2026-10-10, sledovanie lodí na mori)');
   assert.equal(card.selected, false);
   assert.ok(card.priority > gfwLabelCard(ROWS[1], { x: 0, y: 0, z: 0 }, META, tEn, 'en').priority, 'pomenovaná loď pred nepomenovanou');
   const long = gfwLabelCard({ ...ROWS[0], name: 'A'.repeat(40) }, { x: 0, y: 0, z: 0 }, META, tEn, 'en');

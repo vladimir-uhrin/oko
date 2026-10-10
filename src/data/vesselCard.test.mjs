@@ -126,7 +126,7 @@ test('proxy: register a fotka sa kešujú na disku, upstream ide raz', async () 
     if (url.includes('/vessels/details/')) return { ok: true, status: 200, text: async () => '<div>Last Port</div><div>Saint Petersburg, Russia</div><div>ATD: Sep 22, 20:32 UTC</div>' };
     return { ok: true, status: 200, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => jpeg };
   };
-  const plugin = vesselInfoProxy({ root, fetchImpl, log: () => {} });
+  const plugin = vesselInfoProxy({ root, fetchImpl, log: () => {}, gfwToken: () => '', mtGet: async () => { throw new Error('offline'); } });
   const req = (url) => ({ method: 'GET', url, headers: {}, socket: { remoteAddress: '127.0.0.1' } });
   try {
     let res = fakeRes();
@@ -165,6 +165,8 @@ test('proxy: loď bez fotky = 404, chyba upstream = 502 bez pádu', async () => 
   const plugin = vesselInfoProxy({
     root,
     log: () => {},
+    gfwToken: () => '',
+    mtGet: async () => { throw new Error('offline'); },
     fetchImpl: async (url) => (url.endsWith('999999999')
       ? { ok: false, status: 500 }
       : { ok: true, status: 200, json: async () => ({ imo: 1234567, pic: '', type: 'Tug', name: 'X' }) }),
@@ -452,4 +454,102 @@ test('prístavy z GFW: zlúčenie susedných návštev, meno z kotviska, posledn
   assert.equal(path.length, 6);
   assert.deepEqual(path.at(-1), [-50.43, 38.46, 0], 'čiara končí pri lodi');
   assert.equal(historyLinePositionsDeg([], null), null);
+});
+
+test('GFW výber: karta vybranej lode s novšou polohou, odkiaľ, históriou; trasa registra ako čiara', async () => {
+  const { gfwSelectedCard, gfwTrackPositionsDeg } = await import('./gfwPresence.js');
+  _resetVesselInfoForTest();
+  _setVesselInfoFetchForTest(async () => ({ ok: true, json: async () => ({
+    ...publicVesselInfo(normalizeVesselInfo('241190000', REGISTRY_JSON)),
+    voyage: { lastPort: 'Saint Petersburg', lastPortCountry: 'Russia', departedAt: Date.parse('2026-09-22T20:32:00Z') },
+    lastPosition: { lat: 34.130165, lon: -68.883499, t: Date.parse('2026-10-10T02:57:38Z'), speedKn: 13.1, station: 'Roaming' },
+  }) }));
+  await lookupVesselInfo('241190000');
+  const row = { mmsi: '241190000', name: 'MINERVA ZEN', type: 'OTHER', imo: '9410909', lat: 38.46, lon: -50.43, lastSeen: Date.parse('2026-10-06T23:00:00Z') };
+  const card = gfwSelectedCard(row, { x: 0, y: 0, z: 0 }, { day: '2026-10-06', cellDeg: 0.01, mode: 'hourly' }, sk, 'sk');
+  assert.equal(card.selected, true);
+  assert.equal(card.actionable, true);
+  assert.equal(card.id, 'gfw:241190000');
+  assert.match(card.details[0], /^Tanker na chemikálie a ropné produkty · ONESKORENÉ/);
+  assert.ok(card.details.some((l) => /^Novšia poloha 10\. 10\. 02:57 UTC · pred \d+ (h|d) · 34,13° S 68,88° Z · 13,1 kn · prijímač na inej lodi$/.test(l)), card.details.join('\n'));
+  assert.ok(card.details.some((l) => /^vyplávala 22\. 9\. 20:32 UTC/.test(l)));
+  assert.deepEqual(gfwTrackPositionsDeg([{ lat: 34, lon: -68 }, { lat: 34.1, lon: -68.9 }]), [[-68, 34, 0], [-68.9, 34.1, 0]]);
+  assert.equal(gfwTrackPositionsDeg([{ lat: 1, lon: 1 }]), null);
+  _resetVesselInfoForTest();
+});
+
+test('novšia poloha sa neukáže, keď je naša poloha rovnako čerstvá; v prístave od', async () => {
+  const { newerPositionLine, voyageDepartureLine } = await import('./vesselCardDetails.js');
+  const info = { lastPosition: { lat: 48.137, lon: 17.139, t: Date.parse('2026-10-10T20:50:00Z'), speedKn: 0.1, station: 'Terrestrial' } };
+  assert.equal(newerPositionLine(info, Date.parse('2026-10-10T20:45:00Z'), sk, 'sk'), '', 'našich 5 min staršia poloha stačí');
+  assert.match(newerPositionLine(info, Date.parse('2026-10-10T18:00:00Z'), sk, 'sk', Date.parse('2026-10-10T21:00:00Z')), /^Novšia poloha 10\. 10\. 20:50 UTC · pred 10 min · 48,14° S 17,14° V · 0,1 kn · pozemný prijímač$/);
+  const { mtVoyageAsRegistry } = await import('./vesselInfoProxy.js');
+  // TURIEC: odchod Freudenau 4. 7. 03:12, príchod Bratislava 4. 7. 05:41 → je v Bratislave.
+  const v = mtVoyageAsRegistry({ departedAt: Date.parse('2026-07-04T03:12:00Z'), arrivedAt: Date.parse('2026-07-04T05:41:00Z') }, { name: 'Freudenau', country: 'Austria', locode: 'ATFNA' }, { name: 'Bratislava', country: 'Slovakia', locode: 'SKBTS' });
+  assert.equal(v.lastPort, 'Bratislava');
+  assert.equal(v.departedAt, null);
+  const model = { origin: { name: 'Bratislava', locode: 'SKBTS' }, departedAt: null, arrivedAt: v.arrivedAt };
+  assert.equal(voyageDepartureLine(model, sk, 'sk', Date.parse('2026-10-10T05:41:00Z')), 'v prístave Bratislava (SKBTS) od 4. 7. 05:41 UTC · 98 d');
+});
+
+test('MT a VF parsovanie: vyhľadanie, poloha, plavba, prístav, trasa, binárna trasa', async () => {
+  const m = await import('./vesselTrackSources.js');
+  assert.equal(m.parseMtSearch([{ id: '214707', type: 'Vessel', value: '241190000', desc: 'MINERVA ZEN [GR]' }], '241190000'), '214707');
+  assert.equal(m.parseMtSearch([{ id: '1', type: 'Port', value: '241190000' }], '241190000'), null);
+  const pos = m.parseMtPosition({ lat: 34.130165, lon: -68.883499, speed: 13.1, course: 253, heading: 252, timestamp: 1791601058, stationType: 'Roaming', navigationalStatus: 'Underway using Engine', hasNewerSatellitePosition: true });
+  assert.equal(pos.t, 1791601058000);
+  assert.equal(pos.station, 'Roaming');
+  assert.equal(m.parseMtPosition({ lat: 91, lon: 0, timestamp: 1 }), null);
+  const voy = m.parseMtVoyage({ departurePortId: 403, departureTimestamp: 1790097360, reportedDestination: 'FOR ORDERS', eta: 1789828200 });
+  assert.deepEqual([voy.departurePortId, voy.departedAt, voy.destination], ['403', 1790097360000, 'FOR ORDERS']);
+  assert.deepEqual(m.parseMtPort({ name: 'ST PETERSBURG', unlocode: 'RULED', lat: 59.9, lon: 30.3, country: { code: 'RU', name: 'RUSSIA' } }), { name: 'St Petersburg', locode: 'RULED', lat: 59.9, lon: 30.3, countryIso2: 'ru', country: 'Russia' });
+  const tr = m.parseMtTrack([['17.13913', '48.137321', '1', '185', '185', '2026-10-10 20:50:48', 1791665448, 'Terrestrial'], ['17.1', '48.1', '10', '90', '90', '2026-10-10 20:40:00', 1791664800, 'Terrestrial']]);
+  assert.deepEqual(tr.map((p) => p.t), [1791664800000, 1791665448000], 'chronologicky');
+  assert.equal(tr[0].speedKn, 1);
+  const buf = Buffer.alloc(16);
+  buf.writeUInt32BE(1791665448, 0);
+  buf.writeUInt32BE((Math.round(17.139 * 6e5) ^ 0x55555555) >>> 0, 4);
+  buf.writeUInt32BE((Math.round(48.137 * 6e5) ^ 0x55555555) >>> 0, 8);
+  buf.writeUInt16BE((1850 ^ 0x5555) & 0xffff, 12);
+  buf.writeUInt16BE((12 ^ 0x5555) & 0xffff, 14);
+  assert.deepEqual(m.decodeVfTrack(buf), [{ lat: 48.137, lon: 17.139, t: 1791665448000, speedKn: 1.2, course: 185, station: null }]);
+});
+
+test('proxy: posledná poloha, plavba a trasa z MT (podproces) — riečna loď bez registra dostane odkiaľ', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'oko-vessel-info-'));
+  const mtCalls = [];
+  const mtGet = async (url) => {
+    mtCalls.push(url.replace('https://www.marinetraffic.com', ''));
+    if (url.includes('searchAsset')) return JSON.stringify([{ id: '328023', type: 'Vessel', value: '267168000' }]);
+    if (url.endsWith('/position')) return JSON.stringify({ lat: 48.137306, lon: 17.139172, speed: 0.1, course: 188, timestamp: 1791665628, stationType: 'Terrestrial' });
+    if (url.endsWith('/voyage')) return JSON.stringify({ departurePortId: 5011, departureTimestamp: 1783134720, arrivalPortId: 2499, arrivalTimestamp: 1783143660, reportedDestination: 'BRATISLAVA LINZ' });
+    if (url.includes('/ports/5011/')) return JSON.stringify({ name: 'FREUDENAU', unlocode: 'ATFNA', country: { code: 'AT', name: 'AUSTRIA' } });
+    if (url.includes('/ports/2499/')) return JSON.stringify({ name: 'BRATISLAVA', unlocode: 'SKBTS', country: { code: 'SK', name: 'SLOVAKIA' } });
+    if (url.includes('gettrackjson')) return JSON.stringify([['17.1', '48.1', '10', '90', '90', '', 1791664800, 'Terrestrial'], ['17.139', '48.137', '1', '185', '185', '', 1791665448, 'Terrestrial']]);
+    throw new Error('unexpected ' + url);
+  };
+  // Register TURIEC nepozná (prázdny záznam) a nemá IMO → plavba len z MT.
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ imo: 0, pic: '', type: 'Cargo ship', name: 'TURIEC', al: 36 }) });
+  const plugin = vesselInfoProxy({ root, fetchImpl, mtGet, gfwToken: () => '', log: () => {} });
+  const req = (url) => ({ method: 'GET', url, headers: {}, socket: {} });
+  try {
+    let res = fakeRes();
+    await plugin._handler(req('/?mmsi=267168000'), res);
+    const body = JSON.parse(res.body);
+    assert.equal(body.voyage.lastPort, 'Bratislava', 'príchod po odchode = v prístave');
+    assert.equal(body.voyage.locode, 'SKBTS');
+    assert.equal(body.lastPosition.station, 'Terrestrial');
+    assert.equal(body.destination, 'BRATISLAVA LINZ');
+    res = fakeRes();
+    await plugin._handler(req('/track?mmsi=267168000'), res);
+    const track = JSON.parse(res.body);
+    assert.equal(track.points.length, 2);
+    assert.equal(track.source, 'register', 'zdroj sa von nemenuje');
+    const before = mtCalls.length;
+    res = fakeRes();
+    await plugin._handler(req('/?mmsi=267168000'), res);
+    assert.equal(mtCalls.length, before, 'druhý dopyt z cache');
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
 });

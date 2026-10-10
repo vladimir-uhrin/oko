@@ -9,6 +9,8 @@
 
 /** Po zlyhaní (sieť, 429, 5xx) sa to isté MMSI neskúša skôr než po tomto čase. */
 export const VESSEL_INFO_RETRY_MS = 5 * 60 * 1000;
+/** Poloha a plavba z registra starnú — po tomto čase sa info vypýta znova (stará ostáva, kým nepríde nová). */
+export const VESSEL_INFO_REFRESH_MS = 10 * 60 * 1000;
 
 const state = {
   /** @type {Map<string, object|null>} MMSI → info (null = v registri nie je) */
@@ -17,6 +19,8 @@ const state = {
   inflight: new Map(),
   /** @type {Map<string, number>} */
   failedAt: new Map(),
+  /** @type {Map<string, number>} MMSI → kedy prišlo info */
+  fetchedAt: new Map(),
   fetchImpl: null,
   now: () => Date.now(),
 };
@@ -44,7 +48,9 @@ export function cachedVesselInfo(mmsi) {
 export function lookupVesselInfo(mmsi) {
   const key = normalizeMmsi(mmsi);
   if (!key) return Promise.resolve(null);
-  if (state.known.has(key)) return Promise.resolve(state.known.get(key));
+  const fetched = state.fetchedAt.get(key);
+  const fresh = Number.isFinite(fetched) && state.now() - fetched < VESSEL_INFO_REFRESH_MS;
+  if (state.known.has(key) && fresh) return Promise.resolve(state.known.get(key));
   if (state.inflight.has(key)) return state.inflight.get(key);
   const failedAt = state.failedAt.get(key);
   if (Number.isFinite(failedAt) && state.now() - failedAt < VESSEL_INFO_RETRY_MS) return Promise.resolve(null);
@@ -55,8 +61,9 @@ export function lookupVesselInfo(mmsi) {
       const res = await fetchImpl(`/api/vessel-info?mmsi=${key}`);
       if (!res?.ok) { state.failedAt.set(key, state.now()); return null; }
       const info = await res.json();
-      const usable = info && (info.imo || info.typeDetail || info.photo || info.yearBuilt) ? info : null;
+      const usable = info && (info.imo || info.typeDetail || info.photo || info.yearBuilt || info.voyage || info.lastPosition || info.destination || info.portCalls) ? info : null;
       state.known.set(key, usable);
+      state.fetchedAt.set(key, state.now());
       return usable;
     } catch {
       state.failedAt.set(key, state.now());
@@ -87,6 +94,7 @@ export function _resetVesselInfoForTest() {
   state.known.clear();
   state.inflight.clear();
   state.failedAt.clear();
+  state.fetchedAt.clear();
   state.fetchImpl = null;
   state.now = () => Date.now();
 }

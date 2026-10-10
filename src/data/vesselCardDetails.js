@@ -241,9 +241,10 @@ export function vesselVoyageModel(vessel, info, index) {
   const destinationPort = destinationMatch?.port || null;
   const progress = originPort && destinationPort ? voyageProgress(originPort, vessel, destinationPort) : null;
   return {
+    arrivedAt: Number.isFinite(voyage.arrivedAt) ? voyage.arrivedAt : null,
     origin: {
       name: voyage.lastPort,
-      locode: originPort?.locode || null,
+      locode: voyage.locode || originPort?.locode || null,
       iso2: resolveFlagIso2(null, null, voyage.lastPortCountry) || null,
       country: voyage.lastPortCountry || null,
     },
@@ -269,7 +270,48 @@ export function voyageRouteLine(model) {
 }
 
 /** „vyplávala 22. 9. 20:32 UTC · pred 18 d". Pure. */
+/** „22. 9. 20:32 UTC" / „Sep 22 20:32 UTC" a vek „18 d" / „5 h". Pure. */
+function whenAndAgo(ms, lang, nowMs) {
+  const d = new Date(ms);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const when = lang === 'sk'
+    ? `${d.getUTCDate()}. ${d.getUTCMonth() + 1}. ${hh}:${mm} UTC`
+    : `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]} ${d.getUTCDate()} ${hh}:${mm} UTC`;
+  const hours = (nowMs - ms) / 3_600_000;
+  const ago = hours < 0 ? '' : hours < 1 ? `${Math.max(1, Math.round(hours * 60))} min` : hours < 48 ? `${Math.round(hours)} h` : `${Math.round(hours / 24)} d`;
+  return { when, ago };
+}
+
+/**
+ * Novšia poloha z registra, keď je naša stará alebo žiadna (MINERVA mimo
+ * dosahu AIS: „Novšia poloha 10. 10. 02:57 UTC · pred 18 h · 34,13° S 68,88° Z
+ * · 13,1 kn · prijímač na inej lodi"). Pure.
+ * @param {object|null} info výstup /api/vessel-info (lastPosition)
+ * @param {number|null} ownFixMs čas našej polohy (ms) alebo null
+ */
+export function newerPositionLine(info, ownFixMs, t = identity, lang = 'sk', nowMs = Date.now()) {
+  const p = info?.lastPosition;
+  if (!p || !Number.isFinite(p.t) || !Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return '';
+  if (Number.isFinite(ownFixMs) && p.t <= ownFixMs + 10 * 60_000) return '';
+  const { when, ago } = whenAndAgo(p.t, lang, nowMs);
+  const fmt = (v, pos, neg) => `${decimal(Math.abs(v), 2, lang)}° ${v >= 0 ? pos : neg}`;
+  const coords = lang === 'sk' ? `${fmt(p.lat, 'S', 'J')} ${fmt(p.lon, 'V', 'Z')}` : `${fmt(p.lat, 'N', 'S')} ${fmt(p.lon, 'E', 'W')}`;
+  const station = p.station === 'Roaming' ? t('vessel.station-roaming') : p.station === 'Satellite' ? t('vessel.station-satellite') : p.station === 'Terrestrial' ? t('vessel.station-terrestrial') : '';
+  return [
+    t('vessel.newer-position', { when, ago }),
+    coords,
+    Number.isFinite(p.speedKn) ? `${decimal(p.speedKn, 1, lang)} kn` : '',
+    station,
+  ].filter(Boolean).join(' · ');
+}
+
 export function voyageDepartureLine(model, t = identity, lang = 'sk', nowMs = Date.now(), { withOrigin = false } = {}) {
+  // Loď v prístave (príchod bez novšieho odchodu): „v prístave Bratislava od 4. 7. · pred 98 d".
+  if (!Number.isFinite(model?.departedAt) && Number.isFinite(model?.arrivedAt) && model?.origin?.name) {
+    const { when, ago } = whenAndAgo(model.arrivedAt, lang, nowMs);
+    return t('vessel.in-port', { port: sideLabel(model.origin), when, ago });
+  }
   if (!Number.isFinite(model?.departedAt)) return withOrigin && model?.origin?.name ? sideLabel(model.origin) : '';
   const prefix = withOrigin && model?.origin?.name ? `${sideLabel(model.origin)} · ` : '';
   const d = new Date(model.departedAt);
