@@ -72,7 +72,7 @@ export function placeHitLabels(items, { minX = 0, maxX = 1080, h = 44, gap = 30 
 export function hitSummary(p) {
   const parts = [];
   if (p?.killed) parts.push(`${group(p.killed)} ${plural(p.killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}${p.children ? `, z toho ${group(p.children)} ${plural(p.children, 'dieťa', 'deti', 'detí')}` : ''}`);
-  if (p?.injured) parts.push(`${group(p.injured)} zranených`);
+  if (p?.injured) parts.push(`${group(p.injured)} ${plural(p.injured, 'zranený', 'zranení', 'zranených')}`);
   return parts.join(' · ');
 }
 
@@ -118,18 +118,20 @@ function accentLine(text, accent, color = '#ff6b78') {
  * @param {{logoMarkup?: object|null, hook?: {tag, lines, accent, sub}|null, story?: string, mapDay?: string|null,
  *   anchors?: Record<string, {x: number, y: number}>|null}} [opts]
  */
-export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null, story = 'clashes', mapDay = null, anchors = null } = {}) {
+export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null, story = 'clashes', mapDay = null, anchors = null, minimal = false } = {}) {
+  // `minimal` (video v2, 2026-10-10): len značky viazané na mapu (zmena územia, miesta, body hrozby) — háčik,
+  // čísla, titulky a záver kreslí grafická vrstva frontDayMotion nad hotovým obrazom.
   const logo = logoAt(logoMarkup);
   const { w: W, h: H } = FRONT_DAY_FORMAT;
   const { layers } = fs;
   const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${SANS}">`];
   out.push('<defs><linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0.78"/><stop offset="1" stop-color="#000" stop-opacity="0"/></linearGradient>'
     + '<linearGradient id="bot" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.7"/></linearGradient></defs>');
-  out.push(`<rect width="${W}" height="640" fill="url(#top)"/><rect y="${H - 520}" width="${W}" height="520" fill="url(#bot)"/>`);
+  if (!minimal) out.push(`<rect width="${W}" height="640" fill="url(#top)"/><rect y="${H - 520}" width="${W}" height="520" fill="url(#bot)"/>`);
   const dateText = daySk(model.day);
 
   // ── úvodná karta: háčik od prvej snímky, logo len malé ──
-  if (layers.opening > 0 && hook) {
+  if (!minimal && layers.opening > 0 && hook) {
     out.push(`<g opacity="${f1(layers.opening)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.42"/>`);
     out.push(logo(W / 2 - 128, DAY_SAFE.top + 8, 56));
     out.push(wordmark(W / 2 - 58, DAY_SAFE.top + 52, 40));
@@ -153,6 +155,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     out.push(`<g opacity="${f1(layers.main)}">`);
     // Malá hlavička: značka vľavo, DEŇ NA FRONTE · dátum vpravo.
     const hy = DAY_SAFE.top + 8;
+    if (!minimal) {
     out.push(`<rect x="24" y="${hy}" width="${W - 48}" height="104" rx="16" fill="rgba(5,14,22,0.66)"/>`);
     out.push(logo(40, hy + 14, 76));
     out.push(wordmark(128, hy + 62, 44));
@@ -160,11 +163,13 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     out.push(`<text x="${W - 46}" y="${hy + 42}" text-anchor="end" font-family="${MONO}" font-size="22" font-weight="700" letter-spacing="4" fill="${ACCENT}" ${shadow}>${esc(model.header || 'DEŇ NA FRONTE')}</text>`);
     out.push(`<text x="${W - 46}" y="${hy + 80}" text-anchor="end" font-size="34" font-weight="700" fill="#f2fbff" ${shadow}>${esc(dateText)}</text>`);
     if (mapDay) out.push(`<text x="${W - 46}" y="${hy + 100}" text-anchor="end" font-family="${MONO}" font-size="14" letter-spacing="1" fill="${DIM}">mapa: stav k ${esc(daySk(mapDay))}</text>`);
+    }
 
     // Karta pod hlavičkou podľa záberu.
-    const y0 = hy + 122;
+    // v2: veľké číslo hore zaberá y 330–760 → značky na mape až pod ním.
+    const y0 = minimal ? 580 : hy + 122;
     const kind = fs.shot.kind;
-    const card = (h, body) => { out.push(`<g opacity="${f1(fs.cardAlpha)}"><rect x="24" y="${y0}" width="${W - 48}" height="${h}" rx="16" fill="rgba(5,14,22,0.88)" stroke="rgba(0,212,255,0.38)"/>${body}</g>`); };
+    const card = (h, body) => { if (minimal) return; out.push(`<g opacity="${f1(fs.cardAlpha)}"><rect x="24" y="${y0}" width="${W - 48}" height="${h}" rx="16" fill="rgba(5,14,22,0.88)" stroke="rgba(0,212,255,0.38)"/>${body}</g>`); };
     const c = model.change;
     if (kind === 'overview') {
       const avg = Number.isFinite(model.avg7) ? model.avg7 : null;
@@ -220,7 +225,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
       let body = `<text x="52" y="${y0 + 40}" font-family="${MONO}" font-size="19" font-weight="700" letter-spacing="3" fill="#ff8a8a">RUSKÝ ÚTOK · OBETE</text>`;
       if (killed) {
         body += `<text x="52" y="${y0 + 112}" font-family="${MONO}" font-size="68" font-weight="700" fill="#ff6b78">${group(killed)}</text>`
-          + `<text x="${52 + String(group(killed)).length * 42 + 18}" y="${y0 + 102}" font-size="28" font-weight="700" fill="#f2fbff">${plural(killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}${cas.total.injured ? ` · ${group(cas.total.injured)} zranených` : ''}</text>`
+          + `<text x="${52 + String(group(killed)).length * 42 + 18}" y="${y0 + 102}" font-size="28" font-weight="700" fill="#f2fbff">${plural(killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}${cas.total.injured ? ` · ${group(cas.total.injured)} ${plural(cas.total.injured, 'zranený', 'zranení', 'zranených')}` : ''}</text>`
           + `<text x="${52 + String(group(killed)).length * 42 + 18}" y="${y0 + 134}" font-size="21" fill="${DIM}">najmenej · čísla potvrdené aspoň dvoma médiami</text>`;
       }
       const rows = (cas?.places || []).slice(0, HIT_MAX);
@@ -309,7 +314,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
   }
 
   // ── koncová karta ──
-  if (layers.endCard > 0) {
+  if (!minimal && layers.endCard > 0) {
     out.push(`<g opacity="${f1(layers.endCard)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.6"/>`);
     out.push(logo(W / 2 - 90, 420, 180));
     out.push(wordmark(W / 2 + 9, 730, 124, 'middle'));
@@ -321,8 +326,10 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
   }
 
   // Zdroje na každej snímke (na tmavom páse — inak sa bijú s popismi miest na mape).
-  out.push(sourcesBand());
-  (model.sources || FRONT_DAY_SOURCES).forEach((line, i) => out.push(`<text x="${W / 2}" y="${1606 + i * 22}" text-anchor="middle" font-size="15" fill="rgba(223,243,251,0.82)" ${shadow}>${esc(line)}</text>`));
+  if (!minimal) {
+    out.push(sourcesBand());
+    (model.sources || FRONT_DAY_SOURCES).forEach((line, i) => out.push(`<text x="${W / 2}" y="${1606 + i * 22}" text-anchor="middle" font-size="15" fill="rgba(223,243,251,0.82)" ${shadow}>${esc(line)}</text>`));
+  }
   out.push('</svg>');
   return out.join('');
 }

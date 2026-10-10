@@ -130,7 +130,8 @@ async function shoot(frame) {
   shootStep = 'popisy';
   const anchors = hasAnchors && ['dir', 'overview', 'air', 'strike', 'spot'].includes(st.shot.kind)
     ? await page.evaluate((pts) => window.__okoFrontDay.project(pts), anchorPoints) : null;
-  const svg = buildFrontDayHudSvg(job.model, st, { logoMarkup, hook: job.hook, story: job.story, mapDay: job.mapDay || info?.day || null, anchors });
+  // v2: na mape len značky viazané na miesta; háčik, čísla a titulky pridá grafická vrstva (frontDayMotion).
+  const svg = buildFrontDayHudSvg(job.model, st, { logoMarkup, hook: job.hook, story: job.story, mapDay: job.mapDay || info?.day || null, anchors, minimal: job.style === 'v2' });
   await page.evaluate((s) => { document.getElementById('oko-video-hud').innerHTML = s; }, svg);
   await page.evaluate(() => window.__okoFrontDay.render());
   shootStep = 'fotka';

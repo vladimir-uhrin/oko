@@ -79,6 +79,8 @@ export function flightLabel(event) {
 /** Čo sa stalo: typ podľa zhody médií, inak podľa dát (núdzový kód / strmhlavé klesanie). Pure. */
 export function eventWhat(event, lang = 'sk') {
   const en = lang === 'en';
+  // Vlastný názov udalosti bez spúšťača (udalosť zo súboru, napr. „krúženie pri Moskve", 2026-10-09).
+  if (typeof event.what === 'string' && event.what) return cap(en ? event.whatEn || event.what : event.what);
   const type = event.news?.type && (en ? NEWS_TYPE_EN : NEWS_TYPE_SK)[event.news.type];
   if (type) return cap(type);
   const code = (event.triggers || []).find((t) => t.kind === 'squawk' && t.status !== 'contradicted');

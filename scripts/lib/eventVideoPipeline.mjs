@@ -27,6 +27,8 @@ import { videoPlan } from '../../src/data/eventVideo.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(path.join(ROOT, 'package.json'));
+/** Najdlhšie čakanie na prepis, keď je GPU služby obsadené inými úlohami (potom veta ide na vypočutie). */
+export const ASR_BUSY_WAIT_MS = 90_000;
 export const PIPELINE_DEFAULTS = Object.freeze({ voice: 'own', lang: 'sk', asrRetries: 2, captureTimeoutMs: 60 * 60_000 });
 
 const sha1 = (s) => createHash('sha1').update(s).digest('hex');
@@ -106,6 +108,20 @@ export async function prepareVoice({ lines, voice = null, cache, measure, fetchI
   const bounds = {};
   const voiceFiles = {};
   const review = [];
+  // Prepis vypršal raz → služba je preťažená (iné úlohy na GPU): ďalšie vety kontrolu preskočia, inak by každá
+  // čakala ďalších 10 min (2026-10-10).
+  let asrDown = false;
+  // Pred prvou kontrolou sa služby opýtame, či je GPU voľné; pri obsadenom čakáme na prepis najviac 90 s.
+  let asrWaitMs;
+  let asrChecked = false;
+  const asrOptions = async () => {
+    if (!asrChecked) {
+      asrChecked = true;
+      const h = typeof voice?.health === 'function' ? await voice.health().catch(() => null) : null;
+      if (h?.gpu_busy) { asrWaitMs = ASR_BUSY_WAIT_MS; onProgress('asr-busy', { waitS: ASR_BUSY_WAIT_MS / 1000 }); }
+    }
+    return asrWaitMs ? { lang: o.lang, maxWaitMs: asrWaitMs } : { lang: o.lang };
+  };
   const record = async (line, attempt) => {
     if (!voice) throw Object.assign(new Error(`chýba nahrávka vety „${line.spoken}" a hlas nie je nastavený (AI_TRANSLATORS_MCP_KEY)`), { code: 'NO_VOICE', line: line.id });
     onProgress('voice', { line: line.id, attempt });
@@ -140,8 +156,20 @@ export async function prepareVoice({ lines, voice = null, cache, measure, fetchI
         swaps += 1;
         hit = await record(line, swaps + 1);
       }
+      if (asrDown) {
+        review.push({ line: line.id, spoken: line.spoken, heard: null, error: 'kontrola výslovnosti preskočená (služba prepisu je preťažená)' });
+        break;
+      }
       onProgress('asr', { line: line.id, attempt: swaps + 1 });
-      const heard = await voice.transcribe(hit.meta.url, { lang: o.lang });
+      // Kontrola výslovnosti nesmie zhodiť celé video (2026-10-10: „prepis trvá pridlho" pri ranom behu) —
+      // nahrávka sa použije a veta ide na vypočutie s dôvodom.
+      let heard;
+      try { heard = await voice.transcribe(hit.meta.url, await asrOptions()); } catch (error) {
+        asrDown = true;
+        onProgress('asr-skip', { line: line.id, error: String(error?.message || error).slice(0, 120) });
+        review.push({ line: line.id, spoken: line.spoken, heard: null, error: `kontrola výslovnosti zlyhala: ${String(error?.message || error).slice(0, 80)}` });
+        break;
+      }
       const check = narrationHeardMatches(line.caption, heard, { names: line.names === true });
       hit.meta = cache.update(o.voice, line.spoken, { heard, heardOk: check.ok, checkedAt: new Date(now()).toISOString() });
       if (check.ok) break;
@@ -196,7 +224,8 @@ export async function prepareEventVideo({ event, script = null, voice = null, ca
   fs.writeFileSync(planFile, JSON.stringify(fit.planOpts));
   const eventFile = path.join(workDir, 'event.json');
   fs.writeFileSync(eventFile, JSON.stringify(event));
-  const hook = hookCard(script);
+  // Karta háčika zo scenára, inak z udalosti zo súboru (údaje OKO, napr. krúženie pri Moskve, 2026-10-09).
+  const hook = hookCard(script) || (event.hook?.lines?.length ? event.hook : null);
   const hookFile = path.join(workDir, 'hook.json');
   if (hook) fs.writeFileSync(hookFile, JSON.stringify(hook));
   const plan = videoPlan(event, fit.planOpts);

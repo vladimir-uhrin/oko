@@ -102,3 +102,12 @@ test('text príspevku pre Facebook: háčik v prvom riadku, hlásenie za 24 h, z
   assert.ok(!/zdieľaj|označ|lajkni|komentuj/i.test(text), 'bez vyzývania na reakcie (FB ho trestá)');
   assert.ok(!/DeepState/i.test(text), 'zdroj mapy = okolive.sk');
 });
+
+test('zranení po slovensky: 1 / 2–4 / 5+ (2026-10-10: bolo „zranených je štyri")', () => {
+  const at = (injured) => frontDayLines({ ...base(), casualties: { total: { killed: 5, sources: [] }, places: [{ en: 'Zaporizhzhia', sk: 'Záporožie', killed: 5, injured, sources: [] }] } })
+    .find((l) => l.id === 'strike');
+  assert.equal(at(4).spoken, 'V meste Záporožie zahynulo najmenej päť ľudí, štyria sú zranení.');
+  assert.match(at(4).caption, /, 4 sú zranení\.$/);
+  assert.equal(at(1).spoken, 'V meste Záporožie zahynulo najmenej päť ľudí, jeden je zranený.');
+  assert.match(at(20).spoken, /, zranených je dvadsať\.$/);
+});

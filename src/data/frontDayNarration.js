@@ -34,6 +34,14 @@ function diedPhrase(n) {
   if (v >= 2 && v <= 4) return { spoken: `zahynuli ${words[v]} ľudia`, caption: `zahynuli ${v} ľudia` };
   return { spoken: `zahynulo ${spokenNumber(v)} ľudí`, caption: `zahynulo ${group(v)}${NBSP}ľudí` };
 }
+/** „jeden je zranený" / „štyria sú zranení" / „zranených je dvadsať" (2026-10-10: bolo „zranených je štyri"). Pure. */
+function injuredPhrase(n) {
+  const v = Math.round(n);
+  const words = { 2: 'dvaja', 3: 'traja', 4: 'štyria' };
+  if (v === 1) return { spoken: 'jeden je zranený', caption: '1 je zranený' };
+  if (v >= 2 && v <= 4) return { spoken: `${words[v]} sú zranení`, caption: `${v} sú zranení` };
+  return { spoken: `zranených je ${spokenNumber(v)}`, caption: `zranených je ${group(v)}` };
+}
 /** „päť detí" / „dve deti" / „jedno dieťa". Pure. */
 function childrenPhrase(n) {
   const v = Math.round(n);
@@ -58,7 +66,7 @@ function strikePlacesLine(cas) {
     for (const k of ['spoken', 'caption']) {
       const died = p.killed ? diedPhrase(p.killed)[k].replace(/^(zahynul\w*) /, '$1 najmenej ') : null;
       const kids = p.killed && p.children ? `, z toho ${childrenPhrase(p.children)[k]}` : '';
-      const hurt = p.injured ? `${died ? ', ' : ' '}zranených je ${k === 'spoken' ? spokenNumber(p.injured) : group(p.injured)}` : '';
+      const hurt = p.injured ? `${died ? ', ' : ' '}${injuredPhrase(p.injured)[k]}` : '';
       parts[k].push(`V meste ${p.sk}${died ? ` ${died}` : ''}${kids}${hurt}.`);
     }
   }
@@ -275,9 +283,9 @@ export function frontDayPostText(model) {
     // Obete po miestach a zdroje (čísla potvrdené aspoň dvoma médiami; počas dňa môžu rásť).
     const cas = model.casualties;
     const rows = (cas.places || []).slice(0, 4).map(p => `${p.sk}: ${[p.killed ? `najmenej ${group(p.killed)} ${plural(p.killed, 'mŕtvy', 'mŕtvi', 'mŕtvych')}${p.children ? `, z toho ${childrenPhrase(p.children).caption}` : ''}` : null,
-      p.injured ? `${group(p.injured)} zranených` : null].filter(Boolean).join(', ')}.`);
+      p.injured ? `${group(p.injured)} ${plural(p.injured, 'zranený', 'zranení', 'zranených')}` : null].filter(Boolean).join(', ')}.`);
     const names = [...new Set([...(cas.total?.sources || []), ...(cas.places || []).flatMap(p => p.sources)].map(s => s.name))].slice(0, 5);
-    out.push(...rows, `Celkovo podľa médií najmenej ${group(cas.total.killed)} mŕtvych${cas.total.injured ? ` a ${group(cas.total.injured)} zranených` : ''}. Čísla uvádzame, len ak ich potvrdili aspoň dve médiá; počas dňa sa môžu zvýšiť. Zdroje: ${names.join(', ')}.`, '');
+    out.push(...rows, `Celkovo podľa médií najmenej ${group(cas.total.killed)} mŕtvych${cas.total.injured ? ` a ${group(cas.total.injured)} ${plural(cas.total.injured, 'zranený', 'zranení', 'zranených')}` : ''}. Čísla uvádzame, len ak ich potvrdili aspoň dve médiá; počas dňa sa môžu zvýšiť. Zdroje: ${names.join(', ')}.`, '');
   }
   const avg = Number.isFinite(model.avg7) ? ` (7-dňový priemer: ${group(model.avg7)})` : '';
   const top = (model.directions || []).filter(d => d.attacks > 0).slice(0, 3);

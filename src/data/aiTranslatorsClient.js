@@ -137,13 +137,14 @@ export function createAiTranslatorsClient({ url = AI_TRANSLATORS_URL, token, med
      * allowed") — ten istý podpísaný odkaz ide preto cez verejnú doménu (`mediaOrigin`); keby odmietla
      * aj tú, skúsi sa pôvodný odkaz.
      */
-    async transcribe(wavUrl, { lang = 'sk' } = {}) {
+    async transcribe(wavUrl, { lang = 'sk', maxWaitMs = jobTimeoutMs } = {}) {
+      // `maxWaitMs`: kratšie čakanie, keď je GPU obsadené cudzími úlohami (linka videa to zistí cez health()).
       const run = async (url) => {
         const job = await call('ai_translators_subtitle_video', { params: { url, source: lang, target: lang } });
         const started = now();
         let status = job;
         while (status && !['completed', 'error', 'cancelled', 'failed'].includes(status.status)) {
-          if (now() - started > jobTimeoutMs) throw Object.assign(new Error('ai-translators: prepis trvá pridlho'), { code: 'TIMEOUT' });
+          if (now() - started > maxWaitMs) throw Object.assign(new Error('ai-translators: prepis trvá pridlho'), { code: 'TIMEOUT' });
           await sleep(pollMs);
           status = await call('ai_translators_job_status', { job_id: job.job_id });
         }

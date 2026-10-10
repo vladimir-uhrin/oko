@@ -62,6 +62,18 @@ test('rám fotky zo scenára: vlastný štítok, hlavička a zdroje, bez mapky U
   assert.ok(buildClipOverlaySvg({ captionSk: 'Ukrajinské sily zničili ruský tank' }).includes('ArmyInform'), 'záber ArmyInform ostáva ako bol');
 });
 
+test('v2 (minimal): mapa bez karty, hlavičky, päty a úvodnej karty; značky na mape ostanú', () => {
+  const plan = frontDayPlan({ story: 'ru' }, [{ id: 'hook', shot: 'opening' }, { id: 'top', shot: 'dir:pokrovsk' }, { id: 'portal', shot: 'closing' }],
+    { hook: { lead: 0.1, speechEnd: 3 }, top: { lead: 0.1, speechEnd: 4 }, portal: { lead: 0.1, speechEnd: 3 } });
+  const opening = plan.at(30); const dir = plan.at(Math.round((plan.shots[1].start + 2) * 30));
+  const hook = { tag: 'DEŇ NA FRONTE', lines: ['RUSKÝ AGRESOR OBSADIL'], accent: '' };
+  assert.ok(buildFrontDayHudSvg(model, opening, { hook }).includes('RUSKÝ AGRESOR OBSADIL'), 'v1 má úvodnú kartu');
+  const min = buildFrontDayHudSvg(model, opening, { hook, minimal: true });
+  assert.ok(!min.includes('RUSKÝ AGRESOR OBSADIL') && !min.includes('mapa frontu a výpočet'), 'v2 úvod bez karty a bez päty');
+  const minDir = buildFrontDayHudSvg(model, dir, { minimal: true, anchors: { 'chg:huliaipole:ru': { x: 500, y: 1000 } } });
+  assert.ok(!minDir.includes('DEŇ NA FRONTE') && !minDir.includes('rx="16"'), 'bez hlavičky a karty');
+});
+
 test('štítky miest útoku sa neprekrývajú ani nezakryjú značku (Kyjev a Pryluky pri celej Ukrajine, 7. 10.)', () => {
   const items = [{ x: 290, y: 415, w: 230 }, { x: 260, y: 420, w: 160 }, { x: 325, y: 478, w: 210 }]; // Pryluky, Kyjev, Kremenčuk
   const boxes = placeHitLabels(items, { minX: 24, maxX: 1056 });

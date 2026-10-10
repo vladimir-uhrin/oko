@@ -342,7 +342,9 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     out.push(`<g opacity="${f1(layers.card)}">`);
     out.push(`<rect x="24" y="${y0}" width="${W - 48}" height="${H - y0 - 52}" rx="16" fill="rgba(5,14,22,0.84)" stroke="rgba(0,212,255,0.38)"/>`);
     out.push(`<text x="52" y="${y0 + 40}" font-family="${MONO}" font-size="19" font-weight="700" letter-spacing="3" fill="${ACCENT}">${esc(eventWhat(event).toUpperCase())}</text>`);
-    out.push(verified
+    out.push(event.badge
+      ? `<text x="${W - 52}" y="${y0 + 40}" text-anchor="end" font-family="${MONO}" font-size="15" font-weight="700" letter-spacing="1.5" fill="#4ade80">${esc(event.badge)}</text>`
+      : verified
       ? `<text x="${W - 52}" y="${y0 + 40}" text-anchor="end" font-family="${MONO}" font-size="15" font-weight="700" letter-spacing="1.5" fill="#4ade80">✓ OVERENÉ: 2 SIETE + ${media.length} ${media.length >= 5 ? 'MÉDIÍ' : 'MÉDIÁ'}</text>`
       : `<text x="${W - 52}" y="${y0 + 40}" text-anchor="end" font-family="${MONO}" font-size="15" font-weight="700" letter-spacing="1.5" fill="${AMBER}">NÁHĽAD — EŠTE NEOVERENÉ</text>`);
     out.push(`<text x="52" y="${y0 + 80}" font-size="30" font-weight="700" fill="#f2fbff">${esc(flightLine(event))}</text>`);

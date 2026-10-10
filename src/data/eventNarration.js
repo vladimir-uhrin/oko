@@ -46,6 +46,8 @@ export function fixedLines() {
 
 /** Veta k momentu z dát: `{spoken, caption}` alebo null (štart, cestovná výška, pristátie bez letiska…). Pure. */
 export function momentSentence(m, { nextSquawks = [] } = {}) {
+  // Vlastná veta momentu z udalosti zo súboru (napr. začiatok krúženia, 2026-10-09).
+  if (typeof m.spoken === 'string' && m.spoken) return { spoken: m.spoken, caption: m.caption || m.spoken };
   switch (m.kind) {
     case 'dive': {
       const fpm = Math.abs(m.fpm || 0);
@@ -185,6 +187,9 @@ export function narrationLines(event, script = null) {
   if (hook) {
     // Prvá veta na úvodnej karte, druhá už nad celkovým záberom (úvod) — karta nestojí zbytočne dlho.
     hook.spoken.forEach((spoken, i) => out.push({ id: `hook${i + 1}`, kind: 'hook', spoken, caption: hook.captions[i] || spoken, anchor: i === 0 ? { at: 'opening', offset: 0.3 } : (i === 1 ? { at: 'intro' } : null), source: hook.source }));
+  } else if (event.intro?.spoken) {
+    // Udalosť zo súboru s vlastnou úvodnou vetou z údajov OKO (bez výroku médií).
+    out.push({ id: 'flight', kind: 'flight', spoken: event.intro.spoken, caption: event.intro.caption || event.intro.spoken, anchor: { at: 'opening', offset: 0.3 } });
   } else {
     const flight = event.route?.flightIata || event.callsign || null;
     if (flight) {

@@ -63,3 +63,14 @@ test('úvodná karta nad miestom príbehu: zmena mapy → smer, hrozba → celá
   assert.equal(plan.at(0).layers.opening, 1);
   assert.equal(plan.at(plan.totalFrames - 1).layers.endCard, 1);
 });
+
+test('záber útoku: kamera nad miestom s obeťami, pri dvoch miestach výška podľa rozostupu', async () => {
+  const { strikeCamera } = await import('./frontDayVideo.js');
+  const one = strikeCamera({ places: [{ lat: 47.84, lon: 35.14 }] });
+  assert.deepEqual([one.lat, one.lon, one.heightM], [47.84, 35.14, 380_000]);
+  const two = strikeCamera({ places: [{ lat: 50.6, lon: 32.39 }, { lat: 49.07, lon: 33.4 }] }); // Pryluky, Kremenčuk
+  assert.ok(two.heightM > 380_000 && two.heightM < 2_250_000, `výška ${two.heightM}`);
+  assert.equal(strikeCamera({ places: [] }), null);
+  const plan = frontDayPlan({ story: 'strike', cameras: { strike: one } }, [{ id: 'hook', shot: 'opening' }, { id: 'strike', shot: 'strike' }], { hook: dur(3), strike: dur(4) });
+  assert.equal(plan.shots[1].to.heightM, 380_000, 'záber útoku nad Záporožím, nie celá Ukrajina');
+});

@@ -177,3 +177,29 @@ test('zhrnutie zlyhania nahrávania: prvý riadok s chybou (Chrome v systémovom
   assert.doesNotMatch(s, /at async/);
   assert.equal(captureFailureSummary(''), 'bez výpisu');
 });
+
+test('kontrola výslovnosti zlyhá (služba neodpovie): nahrávka sa použije, veta ide na vypočutie, video nepadne (2026-10-10)', async (t) => {
+  const { run, progress } = setup(t);
+  const voice = { ...fakeVoice({}), async transcribe() { throw Object.assign(new Error('ai-translators: prepis trvá pridlho'), { code: 'ASR_TIMEOUT' }); } };
+  let asked = 0;
+  const slow = { ...voice, async transcribe(...a) { asked += 1; return voice.transcribe(...a); } };
+  const r = await run([line('hook', 'V noci platila hrozba.'), line('top', 'Najťažšie boje sú pri Pokrovsku.')], slow);
+  assert.ok(r.voiceFiles.hook && r.voiceFiles.top, 'nahrávky sú');
+  assert.deepEqual(r.review.map((x) => x.line), ['hook', 'top']);
+  assert.match(r.review[0].error, /kontrola výslovnosti zlyhala: ai-translators: prepis trvá pridlho/);
+  assert.match(r.review[1].error, /preskočená \(služba prepisu je preťažená\)/);
+  assert.equal(asked, 1, 'po prvom vypršaní sa na ďalšiu vetu nečaká');
+  assert.ok(progress.some((p) => p.s === 'asr-skip'));
+});
+
+test('GPU služby obsadené: prepis čaká najviac 90 s (nie 10 min); voľné GPU = predvolené čakanie', async (t) => {
+  const { run, progress } = setup(t);
+  const seen = [];
+  const mk = (busy) => ({ ...fakeVoice({}), async health() { return { ok: true, gpu_busy: busy }; }, async transcribe(url, opts) { seen.push(opts); return 'Veta.'; } });
+  await run([line('a', 'Veta.')], mk(true));
+  assert.equal(seen[0].maxWaitMs, 90_000);
+  assert.ok(progress.some((p) => p.s === 'asr-busy'));
+  const { run: run2 } = setup(t);
+  await run2([line('b', 'Iná veta.', 'Veta.')], mk(false));
+  assert.equal(seen[1].maxWaitMs, undefined, 'pri voľnom GPU bez skrátenia');
+});

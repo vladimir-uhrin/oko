@@ -129,6 +129,8 @@ function gapNotes(m, lang) {
  * @param {{notes?: boolean}} [opts] notes = poznámky zo správ k diere (vo videu má diera vlastný nápis)
  */
 export function momentPhrase(m, lang = 'sk', { notes = true } = {}) {
+  // Vlastný popis momentu (udalosť zo súboru, napr. „začiatok krúženia", 2026-10-09).
+  if (typeof m.label === 'string' && m.label) return m.label;
   const dict = TEXT[lang] || TEXT.sk;
   return (dict[m.kind] || (() => m.kind))(m, notes);
 }

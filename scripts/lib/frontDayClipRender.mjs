@@ -151,13 +151,25 @@ export async function probeClip(file, { ffmpeg = 'ffmpeg', fps = 5 } = {}) {
  * Snímka záberu do videa: `dur` s z najdynamickejšieho okna, 1080×1920, 30 fps, bez zvuku.
  * @returns {Promise<{file: string, start: number, dur: number, cuts: number}>}
  */
-export async function renderClipSegment({ src, out, dur, clip, day, ffmpeg = 'ffmpeg', fps = 30, probe = null }) {
+export async function renderClipSegment({ src, out, dur, clip, day, ffmpeg = 'ffmpeg', fps = 30, probe = null, layout = 'box' }) {
   const sharp = require('sharp');
   const { total, frames } = probe || await probeClip(src, { ffmpeg });
   if (!total) throw Object.assign(new Error('záber: nedá sa zistiť dĺžka videa'), { code: 'CLIP_PROBE' });
   // Fotka s priblížením zo scenára: vlastné video presne na dĺžku záberu, od začiatku.
   const win = Number.isFinite(clip?.fixedStart) ? { start: clip.fixedStart, dur } : bestWindow(frames, total, dur);
   const cuts = frames.filter(([, v]) => v > CUT_SCORE);
+  if (layout === 'full') {
+    // v2 (2026-10-10): záber na celú obrazovku (stred, orez na 9:16) s pomalým priblížením, bez rámu — popis a zdroj
+    // pridá grafická vrstva. Okienko 1080×640 nad rozmazaným pozadím pôsobilo slabo aj pri výbuchu.
+    const { w: W, h: H } = FRONT_DAY_FORMAT;
+    const n = Math.max(1, Math.round(dur * fps));
+    const filter = `[0:v]fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},`
+      + `scale=w='trunc(${W}*(1+0.08*n/${n})/2)*2':h=-2:eval=frame,crop=${W}:${H},eq=contrast=1.06:saturation=1.1,format=yuv420p[v]`;
+    const r = await runCapture(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(win.start), '-t', String(dur), '-i', src,
+      '-filter_complex', filter, '-map', '[v]', '-an', '-t', String(dur), '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', out], 10 * 60_000);
+    if (r.code !== 0 || !fs.existsSync(out)) throw Object.assign(new Error(`záber: ffmpeg ${r.err.trim().slice(-300)}`), { code: 'CLIP_RENDER' });
+    return { file: out, start: win.start, dur, cuts: cuts.length };
+  }
   const logoSvg = fs.readFileSync(path.join(ROOT, 'public', 'logo.svg'), 'utf8');
   const { inlineLogoMarkup } = await import('../../src/data/eventVideoHud.js');
   const overlay = `${out}.ram.png`;

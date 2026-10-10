@@ -77,6 +77,8 @@ let result;
 try {
   result = await prepareFrontDayVideo({
     baseUrl, apiUrl, voice, cache, workDir, music, sampleFrames, scenario,
+    // `--style v2` (2026-10-10): nový strih a grafika (frontDayMotion); predvolene v1, kým ho vlastník neschváli.
+    style: flag('--style', env.FRONT_DAY_STYLE || 'v1'),
     capture: { node: process.execPath, baseUrl },
     tools: { ffmpeg: env.FFMPEG_PATH || 'ffmpeg' },
     onProgress: (stage, detail) => console.log(`[front-day] ${((Date.now() - started) / 1000).toFixed(0).padStart(4)} s  ${stage} ${Object.keys(detail || {}).length ? JSON.stringify(detail) : ''}`),
@@ -87,5 +89,5 @@ try {
   process.exit(error.code === 'NO_DATA' ? 3 : 1);
 }
 console.log(`[front-day] hotovo: ${(result.plan.durationS ?? 0).toFixed(1)} s, ${result.lines.length} viet, na vypočutie: ${result.review.length}`);
-for (const r of result.review) console.log(`  !! ${r.line}: „${r.spoken}" — počuť: „${r.heard}"`);
+for (const r of result.review) console.log(`  !! ${r.line}: „${r.spoken}" — ${r.error ? r.error : `počuť: „${r.heard}"`}`);
 for (const [k, f] of Object.entries(result.files)) console.log(`  ${k.padEnd(6)} ${f} (${fs.existsSync(f) ? fs.statSync(f).size : 0} B)`);

@@ -15,11 +15,18 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { captionCues, srt } from '../../src/data/eventCaptions.js';
 import { dayStory, frontDayHook, frontDayLines, frontDayPostText } from '../../src/data/frontDayNarration.js';
-import { frontDayPlan, FRONT_DAY_FORMAT } from '../../src/data/frontDayVideo.js';
+import { frontDayPlan, strikeCamera, FRONT_DAY_FORMAT, FRONT_DAY_VIDEO_V2 } from '../../src/data/frontDayVideo.js';
 import { DAY_CAPTION_STYLE } from '../../src/data/frontDayHud.js';
 import { burnCaptions, captureFailureSummary, measureSpeech, mixAudio, prepareVoice } from './eventVideoPipeline.mjs';
 import { loadFrontDay } from './frontDayData.mjs';
 import { pickTrack } from '../../src/data/eventVideoAudio.js';
+import { buildMotionSvg, motionEvents, wordCues } from '../../src/data/frontDayMotion.js';
+import { MAP_SOURCE } from '../../src/data/frontWeekNarration.js';
+import { inlineLogoMarkup } from '../../src/data/eventVideoHud.js';
+import { composeV2, ensureSfx, mixSfx, renderMotionTrack, speedVoice } from './frontDayMotionRender.mjs';
+
+/** Tempo hlasu vo videu v2. */
+export const V2_VOICE_TEMPO = 1.1;
 import { clipUsable, downloadClip, overlayClips, photoZoomVideo, probeClip, renderClipSegment } from './frontDayClipRender.mjs';
 
 /** Akčné zábery vo videu (vlastník: „max 2–3 krátke"); kandidátov z dát je viac, nepoužiteľné vypadnú. */
@@ -64,6 +71,24 @@ export function captureFrontDay({ jobFile, out, capture = {}, ffmpeg, timeoutMs 
   });
 }
 
+/**
+ * Dni snímok mapy, ktoré už použili predošlé denné videá: úlohy (`uloha.json`) v súrodeneckých priečinkoch
+ * `<YYYY-MM-DD>` starších než tento beh (Štúdio píše do front-day/<deň>). Bez priečinkov = prázdne.
+ */
+export function usedChangeDays(parentDir, currentName = '') {
+  const out = new Set();
+  let names = [];
+  try { names = fs.readdirSync(parentDir); } catch { return []; }
+  for (const name of names) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(name) || (currentName && name >= currentName)) continue;
+    try {
+      const job = JSON.parse(fs.readFileSync(path.join(parentDir, name, 'uloha.json'), 'utf8'));
+      if (job?.model?.change?.toDay) out.add(job.model.change.toDay);
+    } catch { /* bez úlohy */ }
+  }
+  return [...out];
+}
+
 /** Smer príbehu dňa pre úvodnú kartu (kde sa mapa pohla). Pure. */
 export function focusSceneOf(model) {
   const story = dayStory(model);
@@ -80,7 +105,10 @@ export function focusSceneOf(model) {
  * @param {object|null} [p.music]
  * @param {number[]|null} [p.sampleFrames] len vzorové snímky (kontrola rozloženia), bez videa
  */
-export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = null, cache, workDir, music = null, capture = {}, tools = {}, onProgress = () => {}, options = {}, now = Date.now(), sampleFrames = null, scenario = null }) {
+export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = null, cache, workDir, music = null, capture = {}, tools = {}, onProgress = () => {}, options = {}, now = Date.now(), sampleFrames = null, scenario = null, style = 'v1' }) {
+  // `style: 'v2'` (2026-10-10): akčný záber hneď po háčiku, zrýchlený hlas, strih každé 2–3 s, záber na celú
+  // obrazovku, grafika ako vrstva (frontDayMotion: háčik, veľké čísla, titulky po slovách) a zvukové efekty.
+  const v2 = style === 'v2';
   const ffmpeg = tools.ffmpeg || process.env.FFMPEG_PATH || 'ffmpeg';
   const ffprobe = tools.ffprobe || process.env.FFPROBE_PATH || ffmpeg.replace(/ffmpeg(\.exe)?$/i, (m, ext) => `ffprobe${ext || ''}`);
   fs.mkdirSync(workDir, { recursive: true });
@@ -89,7 +117,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   // { model, lines, hook, story, cameras, post, name } — rovnaký rám OKO, hlas, titulky a mapa.
   let model; let reason = null;
   if (scenario) model = { clips: [], ...scenario.model };
-  else ({ model, reason } = await loadFrontDay({ baseUrl: apiUrl, now, fetchImpl: tools.fetchImpl }));
+  else ({ model, reason } = await loadFrontDay({ baseUrl: apiUrl, now, fetchImpl: tools.fetchImpl, usedToDays: usedChangeDays(path.dirname(workDir), path.basename(workDir)) }));
   if (!model) throw Object.assign(new Error(`denné video sa dnes nerobí: ${reason}`), { code: 'NO_DATA', reason });
   onProgress('model', { day: model.day, story: scenario ? scenario.story : dayStory(model), clashes: model.report?.total ?? null, clips: model.clips.length });
 
@@ -118,24 +146,37 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
 
   // 2. vety a háčik
   const lines = scenario ? scenario.lines : frontDayLines(model);
+  // v2: prvý akčný záber hneď po háčiku — vizuálny vrchol v prvých sekundách, nie až v polovici.
+  if (v2 && !scenario) {
+    const ci = lines.findIndex((l) => l.id === 'clip0');
+    if (ci > 1) { const [c] = lines.splice(ci, 1); lines.splice(1, 0, c); }
+    // Krátky záver (koncová karta 2 s): „údaje jednej strany" a zdroje nesie karta, nie hlas.
+    const portal = lines.find((l) => l.id === 'portal');
+    if (portal) Object.assign(portal, { spoken: `Mapa frontu denne na ${MAP_SOURCE.spokenSite}.`, caption: `Mapa frontu denne na ${MAP_SOURCE.site}.` });
+  }
   const hook = scenario ? scenario.hook : frontDayHook(model);
   const story = scenario ? scenario.story || 'spot' : dayStory(model);
   const focusSceneId = scenario ? null : focusSceneOf(model);
-  const cameras = scenario?.cameras || null;
+  // Záber útoku letí na miesto s obeťami (strikeCamera), nie na celú Ukrajinu.
+  const strikeCam = scenario ? null : strikeCamera(model.casualties);
+  const cameras = scenario?.cameras || (strikeCam ? { strike: strikeCam } : null);
   onProgress('lines', { count: lines.length });
 
   // 3. hlas
-  const { durations, bounds, voiceFiles, review } = await prepareVoice({
-    lines, voice, cache, fetchImpl: tools.fetchImpl, options, onProgress,
-    measure: (wav) => measureSpeech(wav, { ffmpeg, ffprobe }),
+  const measure = (wav) => measureSpeech(wav, { ffmpeg, ffprobe });
+  let { durations, bounds, voiceFiles, review } = await prepareVoice({
+    lines, voice, cache, fetchImpl: tools.fetchImpl, options, onProgress, measure,
   });
+  // v2: hlas o desatinu rýchlejší (energia, dopozeranie); časy reči sa zmerajú znova.
+  if (v2) ({ durations, bounds, voiceFiles } = speedVoice({ voiceFiles, factor: V2_VOICE_TEMPO, workDir: path.join(workDir, 'hlas'), measure, ffmpeg }));
 
   // 4. plán
-  const plan = frontDayPlan({ story, focusSceneId, cameras }, lines, durations);
+  const planOpts = v2 ? FRONT_DAY_VIDEO_V2 : undefined;
+  const plan = frontDayPlan({ story, focusSceneId, cameras }, lines, durations, planOpts || {});
   if (!plan) throw Object.assign(new Error('deň nemá vety na video'), { code: 'NO_LINES' });
   onProgress('fit', { durationS: Math.round(plan.durationS * 10) / 10, shots: plan.shots.map((s) => ({ id: s.id, dur: Math.round(s.dur * 10) / 10 })) });
   const jobFile = path.join(workDir, 'uloha.json');
-  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, cameras, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1 }));
+  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, cameras, style, planOpts, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1 }));
 
   if (sampleFrames) {
     await captureFrontDay({ jobFile, out: path.join(workDir, 'vzorky.mp4'), capture, ffmpeg, onProgress, frames: sampleFrames, framesDir: workDir });
@@ -151,7 +192,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
       source.src = await photoZoomVideo({ ...source.photo, image: path.resolve(source.photo.image) }, { out: path.join(workDir, `fotka-${shot.clipIndex}.mp4`), dur: shot.dur + 0.2, ffmpeg });
       source.probe = { total: shot.dur + 0.2, frames: [] };
     }
-    const seg = await renderClipSegment({ src: source.src, out: path.join(workDir, `zaber-${shot.clipIndex}.mp4`), dur: shot.dur, clip: source.clip, day: model.day, ffmpeg, probe: source.probe });
+    const seg = await renderClipSegment({ src: source.src, out: path.join(workDir, `zaber-${shot.clipIndex}.mp4`), dur: shot.dur, clip: source.clip, day: model.day, ffmpeg, probe: source.probe, layout: v2 && !source.photo ? 'full' : 'box' });
     segments.push({ file: seg.file, start: shot.start, dur: shot.dur });
     onProgress('clip', { i: shot.clipIndex, window: seg.start, cuts: seg.cuts });
   }
@@ -185,7 +226,20 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   const cleanFile = path.join(workDir, `${name}.mp4`);
   await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', rawVideo, '-i', audioFile, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-shortest', '-movflags', '+faststart', cleanFile]);
   const burnedFile = path.join(workDir, `${name}-titulky.mp4`);
-  await burnCaptions({ cues, outroWindow: null, rawVideo, audioFile, out: burnedFile, workDir, ffmpeg, format: FRONT_DAY_FORMAT, style: DAY_CAPTION_STYLE });
+  if (v2) {
+    // Grafika ako priehľadná vrstva + zvukové efekty pri strihoch, potom zloženie.
+    const logoMarkup = inlineLogoMarkup(fs.readFileSync(path.join(ROOT, 'public', 'logo.svg'), 'utf8'));
+    const wcues = wordCues(lines, plan.placement);
+    const motionFile = path.join(workDir, 'grafika.mov');
+    await renderMotionTrack({ svgAt: (t) => buildMotionSvg({ t, shots: plan.shots, lines, placement: plan.placement, cues: wcues, model, hook, logoMarkup }),
+      totalFrames: plan.totalFrames, fps: plan.fps, out: motionFile, ffmpeg, onProgress });
+    const sfx = ensureSfx(path.join(ROOT, '.gev-cache', 'event-video-capture', 'sfx'), ffmpeg);
+    const audioSfx = path.join(workDir, 'zvuk-efekty.wav');
+    mixSfx({ audioIn: audioFile, events: motionEvents(plan.shots, plan.placement), sfx, out: audioSfx, ffmpeg });
+    composeV2({ rawVideo, motion: motionFile, audio: audioSfx, out: burnedFile, ffmpeg });
+  } else {
+    await burnCaptions({ cues, outroWindow: null, rawVideo, audioFile, out: burnedFile, workDir, ffmpeg, format: FRONT_DAY_FORMAT, style: DAY_CAPTION_STYLE });
+  }
   const postFile = path.join(workDir, `${name}.txt`);
   fs.writeFileSync(postFile, scenario ? scenario.post : frontDayPostText(model), 'utf8');
   onProgress('done');

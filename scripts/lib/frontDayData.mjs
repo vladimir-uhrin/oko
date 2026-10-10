@@ -39,11 +39,30 @@ export function weekAverage(days, reportDay) {
   return past.length >= 4 ? Math.round(past.reduce((a, b) => a + b, 0) / past.length) : null;
 }
 
+/** Najstaršia snímka mapy, ktorú denné video ešte smie vydať za zmenu „za uplynulý deň" (dni pred dňom hlásenia). */
+export const CHANGE_MAX_AGE_DAYS = 1;
+
 /**
- * @param {{ baseUrl: string, now?: number, fetchImpl?: typeof fetch }} p
+ * Zmena mapy smie do denného videa, len ak je čerstvá a nová. 2026-10-09/10: zrkadlo mapy sa od 8. 10. nehýbalo,
+ * dotaz na nový deň vrátil zas snímku z 8. 10. a dve videá po sebe vydali tú istú zmenu 7. → 8. 10. za
+ * „uplynulý deň". Pravidlá: (1) novšia snímka najviac CHANGE_MAX_AGE_DAYS pred dňom hlásenia, (2) jej deň ešte
+ * nepoužilo žiadne predošlé denné video (`usedToDays`). Pure.
+ * @returns {{change: object|null, reason: string|null}}
+ */
+export function freshChange(change, { day, usedToDays = [] } = {}) {
+  if (!change) return { change: null, reason: null };
+  const age = Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${change.toDay}T00:00:00Z`)) / DAY_MS);
+  if (!Number.isFinite(age) || age > CHANGE_MAX_AGE_DAYS) return { change: null, reason: `map_stale:${change.toDay}` };
+  if (usedToDays.includes(change.toDay)) return { change: null, reason: `map_already_used:${change.toDay}` };
+  return { change, reason: null };
+}
+
+/**
+ * @param {{ baseUrl: string, now?: number, fetchImpl?: typeof fetch, usedToDays?: string[] }} p `usedToDays`:
+ *   dni novších snímok mapy, ktoré už použili predošlé denné videá (linka ich prečíta z ich úloh)
  * @returns {Promise<{ model?: object, reason?: string }>}
  */
-export async function loadFrontDay({ baseUrl, now = Date.now(), fetchImpl = globalThis.fetch }) {
+export async function loadFrontDay({ baseUrl, now = Date.now(), fetchImpl = globalThis.fetch, usedToDays = [] }) {
   const get = async (path) => {
     try {
       const res = await fetchImpl(`${baseUrl}${path}`, { headers: { Accept: 'application/json' } });
@@ -61,12 +80,13 @@ export async function loadFrontDay({ baseUrl, now = Date.now(), fetchImpl = glob
   const day = utcDay(publishedAt);
 
   let change = null;
+  let changeReason = null;
   const front = await loadFront({ get, now });
   if (front.data) {
     const c = frontChange(front.data.now, front.data.before);
     if (c) {
       const spanDays = Math.max(1, Math.round((Date.parse(`${front.data.now.day}T00:00:00Z`) - Date.parse(`${front.data.before.day}T00:00:00Z`)) / DAY_MS));
-      change = { ...c, fromDay: front.data.before.day, toDay: front.data.now.day, spanDays, mapDay: front.data.now.day };
+      ({ change, reason: changeReason } = freshChange({ ...c, fromDay: front.data.before.day, toDay: front.data.now.day, spanDays, mapDay: front.data.now.day }, { day, usedToDays }));
     }
   }
 
@@ -95,7 +115,7 @@ export async function loadFrontDay({ baseUrl, now = Date.now(), fetchImpl = glob
       casualties,
       // Kandidáti: linka nechá najviac 2 použiteľné (záber na výšku alebo nestiahnuteľný vypadne).
       clips: pickActionClips(media, { now, max: 4, focusDirections: focus }),
-      frontStale: front.reason || null,
+      frontStale: front.reason || changeReason || null,
     },
   };
 }

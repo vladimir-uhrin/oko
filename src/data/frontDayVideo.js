@@ -24,12 +24,51 @@ export const FRONT_DAY_VIDEO = Object.freeze({
   fadeS: 0.35,
   /** Zvislý záber: výrez smeru je užší → kamera o toľko vyššie než rámovanie KARTY. */
   dirHeightScale: 1.38,
+  /** Dolet kamery v zábere (podiel výšky): úvod, smer/miesto, ostatné. */
+  openingPush: 0.16,
+  shotPush: Object.freeze({ dir: 0.14, spot: 0.14, other: 0.1 }),
+});
+
+/**
+ * Tempo videa v2 (2026-10-10, „videá sú slabučké"): reč skoro hneď po strihu, kratšie minimá záberov (strih každé
+ * 2–3 s), krátka koncová karta a výrazný dolet kamery v úvode (háčik v pohybe, nie stojaca karta).
+ */
+export const FRONT_DAY_VIDEO_V2 = Object.freeze({
+  ...FRONT_DAY_VIDEO,
+  gapS: 0.15,
+  leadS: Object.freeze({ opening: 0.08, overview: 0.2, dir: 0.45, clip: 0.12, air: 0.25, strike: 0.25, spot: 0.3, closing: 0.15 }),
+  tailS: 0.18,
+  minS: Object.freeze({ opening: 2.2, overview: 2.0, dir: 2.4, clip: 2.6, air: 2.2, strike: 2.6, spot: 2.4, closing: 2.4 }),
+  flyS: 0.8,
+  endMarginS: 0.3,
+  openingPush: 0.42,
+  shotPush: Object.freeze({ dir: 0.2, spot: 0.2, other: 0.14 }),
 });
 
 /** Celý front na výšku (Sumy → Cherson, Luhansk): stred mierne na sever, nech front leží pod hlavičkou. */
 export const DAY_OVERVIEW_CAMERA = Object.freeze({ lon: 36.2, lat: 48.35, heightM: 1_060_000, pitchDeg: -88, headingDeg: 0 });
 /** Celá Ukrajina (nočná hrozba z neba): Zakarpatsko → Luhansk na šírku. */
 export const DAY_UKRAINE_CAMERA = Object.freeze({ lon: 31.4, lat: 48.7, heightM: 2_250_000, pitchDeg: -89, headingDeg: 0 });
+
+/**
+ * Kamera záberu útoku: miesto s obeťami zblízka, pri dvoch miestach stred a výška podľa ich rozostupu
+ * (2026-10-10: celá Ukrajina → štítok „Záporožie · 5 mŕtvych" bol drobný). Null bez miest. Pure.
+ */
+export function strikeCamera(casualties) {
+  const pts = (casualties?.places || []).filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon)).slice(0, 2);
+  if (!pts.length) return null;
+  const lat = pts.reduce((a, p) => a + p.lat, 0) / pts.length;
+  const lon = pts.reduce((a, p) => a + p.lon, 0) / pts.length;
+  let spanKm = 0;
+  if (pts.length === 2) {
+    const dx = (pts[1].lon - pts[0].lon) * 111.32 * Math.cos((lat * Math.PI) / 180);
+    const dy = (pts[1].lat - pts[0].lat) * 110.57;
+    spanKm = Math.hypot(dx, dy);
+  }
+  // Na výšku je vodorovný výrez ≈ 0,65 × výška kamery; miesta majú zabrať najviac ~60 % šírky.
+  const heightM = Math.round(Math.min(DAY_UKRAINE_CAMERA.heightM, Math.max(380_000, (spanKm * 1000) / 0.39)));
+  return { lon, lat, heightM, pitchDeg: -89, headingDeg: 0 };
+}
 
 /** Kamera smeru na výšku (rámovanie KARTY, vyššie). Pure. */
 export function dayDirectionCamera(sceneId, opts = FRONT_DAY_VIDEO) {
@@ -69,7 +108,8 @@ export function frontDayPlan(ctx, lines, durations, opts = {}) {
     const sceneId = kind === 'dir' ? id.slice(4) : kind === 'spot' ? id.slice(5) : null;
     const clipIndex = kind === 'clip' ? Number(id.slice(5)) : null;
     const cam = kind === 'dir' ? (dayDirectionCamera(sceneId, o) || DAY_OVERVIEW_CAMERA)
-      : kind === 'air' || kind === 'strike' ? DAY_UKRAINE_CAMERA
+      : kind === 'air' ? DAY_UKRAINE_CAMERA
+      : kind === 'strike' ? (ctx?.cameras?.strike || DAY_UKRAINE_CAMERA)
       : kind === 'spot' ? (ctx?.cameras?.[sceneId] || DAY_UKRAINE_CAMERA)
         : kind === 'opening' ? (ctx?.cameras?.opening || openingCamera(ctx?.story, ctx?.focusSceneId, o))
           : kind === 'clip' ? prevCam
@@ -110,10 +150,10 @@ export function frontDayPlan(ctx, lines, durations, opts = {}) {
       const differs = shot.from.lon !== shot.to.lon || shot.from.lat !== shot.to.lat || shot.from.heightM !== shot.to.heightM;
       const flying = moves && differs && localS < o.flyS;
       let camera;
-      if (shot.kind === 'opening') camera = push(shot.to, local, 0.16);
+      if (shot.kind === 'opening') camera = push(shot.to, local, o.openingPush ?? 0.16);
       else if (shot.kind === 'clip') camera = shot.to;
       else if (flying) camera = flyCamera(shot.from, shot.to, localS / o.flyS);
-      else camera = push(shot.to, (localS - (differs ? o.flyS : 0)) / Math.max(1e-9, shot.dur - (differs ? o.flyS : 0)), shot.kind === 'dir' || shot.kind === 'spot' ? 0.14 : 0.1);
+      else camera = push(shot.to, (localS - (differs ? o.flyS : 0)) / Math.max(1e-9, shot.dur - (differs ? o.flyS : 0)), (o.shotPush || FRONT_DAY_VIDEO.shotPush)[shot.kind === 'dir' || shot.kind === 'spot' ? shot.kind : 'other']);
       const opening = shot.kind === 'opening' ? 1 - fade(localS - (shot.dur - o.fadeS)) : 0;
       const endCard = shot.kind === 'closing' ? fade(localS - 0.2) : 0;
       const main = shot.kind === 'opening' ? fade(localS - (shot.dur - o.fadeS)) : shot.kind === 'closing' ? 1 - fade(localS) : 1;
