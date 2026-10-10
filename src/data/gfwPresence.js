@@ -32,6 +32,9 @@ import {
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
 import { airIconTier } from './airIconLod.js';
+import { localizedTypeDetail, vesselHullParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo } from './vesselCardDetails.js';
+import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
+import { cachedPortIndex } from './vesselPortIndex.js';
 import { clearOverlaySource, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
 
 export const GFW_PRESENCE_LAYER_ID = 'gfw-presence';
@@ -147,6 +150,18 @@ export function gfwContactSummary(row, meta, translate = t, lang = currentLangua
   if (!row) return null;
   const mmsi = String(row.mmsi || '').trim();
   const flag = mmsiFlag(mmsi);
+  // 2026-10-10 (vlastník: „prečo keď na ňu prejdem myšou ukazuje len tak málo informácií?"):
+  // register lodí ako pri živých lodiach — podrobný typ, rok, GT/DWT, IMO, rozmery,
+  // posledný prístav a odchod, fotka. Priebeh plavby ani miestny čas NIE: poloha je
+  // stará ~3 dni, percento by klamalo o dnešku.
+  const info = /^\d{9}$/.test(mmsi) ? cachedVesselInfo(mmsi) || null : null;
+  const voyage = info ? vesselVoyageModel(row, info, cachedPortIndex()) : null;
+  const registryType = info?.typeDetail ? localizedTypeDetail(info.typeDetail, lang) : null;
+  const extraLines = [
+    voyageDepartureLine(voyage, translate, lang, Date.now(), { withOrigin: !voyage?.destination }),
+    vesselRegistryParts(info, translate, lang).slice(registryType ? 1 : 0).join(' · '),
+    vesselHullParts({ imo: row.imo }, info, translate, lang).join(' · '),
+  ].filter(Boolean);
   return {
     layerId: GFW_PRESENCE_LAYER_ID,
     id: mmsi || String(row.vesselId || row.name || ''),
@@ -154,7 +169,7 @@ export function gfwContactSummary(row, meta, translate = t, lang = currentLangua
     registration: String(row.callsign || '').trim() || null,
     operator: meta?.day ? translate('gfw.delayed-long', { day: gfwDayLabel(meta.day, lang) }) : translate('gfw.window-pending'),
     // Typ nikdy prázdny: bez neho by karta siahla po t('aircraft.category.…').
-    type: normalizeVesselType(row.type) || 'VESSEL',
+    type: (registryType ? registryType.charAt(0).toUpperCase() + registryType.slice(1) : null) || normalizeVesselType(row.type) || 'VESSEL',
     category: null,
     military: false,
     onGround: false,
@@ -162,7 +177,9 @@ export function gfwContactSummary(row, meta, translate = t, lang = currentLangua
     speedMps: null,
     verticalRateMps: null,
     trackDeg: null,
-    routeInfo: null,
+    routeInfo: voyageRouteInfo(voyage),
+    extraLines,
+    photoKey: /^\d{9}$/.test(mmsi) ? `vessel:${mmsi}` : null,
     progress: null,
     route: gfwCellNote(row, meta, translate, lang),
     flightIata: null,
@@ -470,6 +487,14 @@ export function createGfwPresenceLayer({
       const key = String(id ?? '').trim();
       const entry = _byId.get(key) || [..._byId.values()].find((e) => String(e.row.mmsi) === key);
       return entry ? gfwContactSummary(entry.row, _meta) : null;
+    },
+
+    /** Zotrvanie myši nad loďou: register lodí a fotka (contactHoverCard onDwell). */
+    prefetchContactDetails(id) {
+      const key = String(id ?? '').trim();
+      const entry = _byId.get(key) || [..._byId.values()].find((e) => String(e.row.mmsi) === key);
+      const mmsi = String(entry?.row?.mmsi || key);
+      if (/^\d{9}$/.test(mmsi)) lookupVesselInfo(mmsi);
     },
 
     /**

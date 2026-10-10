@@ -231,6 +231,8 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
   async function readInfoCache(mmsi) {
     try {
       const entry = JSON.parse(await fsp.readFile(infoFile(mmsi), 'utf8'));
+      // Záznam starší než pole cieľa (2026-10-10) sa načíta znova.
+      if (entry?.info && !('destination' in entry.info)) return null;
       const ttl = entry?.info?.empty ? VESSEL_INFO_EMPTY_TTL_MS : VESSEL_INFO_TTL_MS;
       return Number.isFinite(entry?.at) && now() - entry.at < ttl ? entry.info : null;
     } catch { return null; }

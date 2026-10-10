@@ -267,8 +267,9 @@ export function voyageRouteLine(model) {
 }
 
 /** „vyplávala 22. 9. 20:32 UTC · pred 18 d". Pure. */
-export function voyageDepartureLine(model, t = identity, lang = 'sk', nowMs = Date.now()) {
-  if (!Number.isFinite(model?.departedAt)) return '';
+export function voyageDepartureLine(model, t = identity, lang = 'sk', nowMs = Date.now(), { withOrigin = false } = {}) {
+  if (!Number.isFinite(model?.departedAt)) return withOrigin && model?.origin?.name ? sideLabel(model.origin) : '';
+  const prefix = withOrigin && model?.origin?.name ? `${sideLabel(model.origin)} · ` : '';
   const d = new Date(model.departedAt);
   const hh = String(d.getUTCHours()).padStart(2, '0');
   const mm = String(d.getUTCMinutes()).padStart(2, '0');
@@ -277,5 +278,16 @@ export function voyageDepartureLine(model, t = identity, lang = 'sk', nowMs = Da
     : `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]} ${d.getUTCDate()} ${hh}:${mm} UTC`;
   const hours = (nowMs - model.departedAt) / 3_600_000;
   const ago = hours < 0 ? '' : hours < 48 ? `${Math.max(1, Math.round(hours))} h` : `${Math.round(hours / 24)} d`;
-  return ago ? t('vessel.departed-ago', { when, ago }) : t('vessel.departed', { when });
+  return prefix + (ago ? t('vessel.departed-ago', { when, ago }) : t('vessel.departed', { when }));
+}
+
+/**
+ * Trasa pre kartičku pod kurzorom (riadok s vlajkami). Len keď je známy aj
+ * cieľ — inak by ostala prázdna šípka „→"; odkiaľ potom nesie riadok odchodu
+ * (voyageDepartureLine s withOrigin). Pure.
+ */
+export function voyageRouteInfo(model) {
+  if (!model?.origin?.name || !model.destination?.name) return null;
+  const side = (s) => ({ code: s.locode, name: s.name, country: s.iso2 || s.country });
+  return { origin: side(model.origin), destination: side(model.destination) };
 }

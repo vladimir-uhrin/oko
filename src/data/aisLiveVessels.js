@@ -6,7 +6,7 @@ import {
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
 import { currentLanguage, t } from '../i18n.js';
-import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteLine } from './vesselCardDetails.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
 import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
@@ -656,7 +656,7 @@ const aisLiveVesselsLayer = {
     // Súčasná plavba: posledný prístav a odchod z registra + priebeh (2026-10-10).
     const voyage = vesselVoyageModel(record, info, cachedPortIndex());
     const extraLines = [
-      voyageDepartureLine(voyage, t, lang),
+      voyageDepartureLine(voyage, t, lang, Date.now(), { withOrigin: !voyage?.destination }),
       vesselRegistryParts(info, t, lang).join(' · '),
       vesselHullParts(record, info, t, lang).join(' · '),
       (() => { const local = vesselLocalTimeLabel(record.lon, Date.now(), vesselTimeZone(record.lat, record.lon)); return local ? t('vessel.local-time', { time: local }) : ''; })(),
@@ -675,10 +675,7 @@ const aisLiveVesselsLayer = {
       speedMps: Number.isFinite(record.speed) && record.speed >= 0 ? record.speed * KN_TO_MPS : null,
       verticalRateMps: null,
       trackDeg: heading ?? course,
-      routeInfo: voyage ? {
-        origin: { code: voyage.origin.locode, name: voyage.origin.name, country: voyage.origin.iso2 || voyage.origin.country },
-        destination: voyage.destination ? { code: voyage.destination.locode, name: voyage.destination.name, country: voyage.destination.iso2 || voyage.destination.country } : null,
-      } : null,
+      routeInfo: voyageRouteInfo(voyage),
       progress: voyage?.progress ? { fractionDone: voyage.progress.fractionDone, remainingKm: Math.round(voyage.progress.remainingKm) } : null,
       route: destination ? `→ ${destination}` : null,
       flightIata: null,

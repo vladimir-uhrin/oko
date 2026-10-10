@@ -379,3 +379,24 @@ test('súčasná plavba: prístav podľa mena A štátu, priebeh, riadky karty',
   assert.equal(voyageRouteLine(noIndex), 'Saint Petersburg → WILMINGTON.NC.USA');
   assert.equal(vesselVoyageModel({}, { voyage: null }, index), null);
 });
+
+test('GFW: kartička oneskorenej lode dostane register, posledný prístav a fotku — bez priebehu a miestneho času', async () => {
+  const { gfwContactSummary } = await import('./gfwPresence.js');
+  _resetVesselInfoForTest();
+  // Skutočný riadok GFW pre MINERVA ZEN (6. 10. 2026) — typ OTHER, bez rozmerov.
+  const row = { mmsi: '241190000', name: 'MINERVA ZEN', type: 'OTHER', flag: 'GRC', callsign: 'SVBN3', imo: '9410909', lat: 38.46, lon: -50.43, hours: 21, lastSeen: Date.parse('2026-10-06T23:00:00Z'), vesselId: 'ceae20fb3' };
+  const meta = { day: '2026-10-06', cellDeg: 0.01, mode: 'hourly' };
+  const before = gfwContactSummary(row, meta, sk, 'sk');
+  assert.equal(before.photoKey, 'vessel:241190000');
+  assert.deepEqual(before.extraLines, ['IMO 9410909'], 'bez registra aspoň IMO z GFW');
+  _setVesselInfoFetchForTest(async () => ({ ok: true, json: async () => ({ ...publicVesselInfo(normalizeVesselInfo('241190000', REGISTRY_JSON)), voyage: { lastPort: 'Saint Petersburg', lastPortCountry: 'Russia', departedAt: Date.parse('2026-09-22T20:32:00Z') } }) }));
+  await lookupVesselInfo('241190000');
+  const after = gfwContactSummary(row, meta, sk, 'sk');
+  assert.equal(after.type, 'Tanker na chemikálie a ropné produkty', 'podrobný typ z registra namiesto OTHER');
+  assert.match(after.extraLines[0], /^vyplávala 22\. 9\. 20:32 UTC/);
+  assert.deepEqual(after.extraLines.slice(1), ['postavená 2009 · GT 29 442 · DWT 52 941 t', 'IMO 9410909 · 183 × 32 m']);
+  assert.equal(after.routeInfo.origin.name, 'Saint Petersburg');
+  assert.equal(after.progress, null, 'poloha je ~3 dni stará — žiadne percento o dnešku');
+  assert.equal(after.extraLines.some((l) => /Miestny čas/.test(l)), false);
+  _resetVesselInfoForTest();
+});
