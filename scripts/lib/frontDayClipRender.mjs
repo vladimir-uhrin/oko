@@ -269,3 +269,41 @@ export async function overlayClips({ rawVideo, segments, out, ffmpeg = 'ffmpeg' 
   if (r.code !== 0) throw Object.assign(new Error(`vloženie záberov: ${r.err.trim().slice(-300)}`), { code: 'CLIP_OVERLAY' });
   return out;
 }
+
+/** Strop fotky z CDN náhľadu Telegramu. */
+export const IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+
+/** Stiahne fotku z povoleného zdroja (len obrázok, strop veľkosti). */
+export async function downloadImage(url, file, { fetchImpl = globalThis.fetch, maxBytes = IMAGE_MAX_BYTES } = {}) {
+  if (!mediaHostAllowed(url)) throw Object.assign(new Error(`nepovolený zdroj fotky: ${url}`), { code: 'IMAGE_HOST' });
+  const res = await fetchImpl(url, { redirect: 'manual', signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw Object.assign(new Error(`fotka: HTTP ${res.status}`), { code: 'IMAGE_HTTP' });
+  const type = res.headers.get('content-type') || '';
+  if (!/^image\/(jpeg|png|webp)/.test(type)) throw Object.assign(new Error(`fotka: nie je obrázok (${type || 'bez typu'})`), { code: 'IMAGE_TYPE' });
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > maxBytes) throw Object.assign(new Error('fotka: príliš veľká'), { code: 'IMAGE_SIZE' });
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, buf);
+  return file;
+}
+
+/**
+ * Fotky (napr. záchranári ДСНС, ~800 px) → video 9:16: každá fotka na celú šírku nad svojou rozmazanou kópiou
+ * s pomalým priblížením, rovnaký diel času, ostrý strih. Orez malej fotky na celú výšku by ju zväčšil ~3× (rozmazané).
+ * @param {{images: string[], out: string, dur: number}} p
+ */
+export async function photoMontageVideo({ images, out, dur, ffmpeg = 'ffmpeg', fps = 30 }) {
+  if (!images?.length) throw Object.assign(new Error('fotky: žiadna fotka'), { code: 'PHOTO_NONE' });
+  const { w: W, h: H } = FRONT_DAY_FORMAT;
+  const d = dur / images.length; const n = Math.max(2, Math.round(d * fps));
+  const inputs = images.flatMap((img) => ['-loop', '1', '-framerate', String(fps), '-t', d.toFixed(3), '-i', img]);
+  const chains = images.map((_, k) => `[${k}:v]split=2[a${k}][b${k}];`
+    + `[a${k}]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},gblur=sigma=30,eq=brightness=-0.28[bg${k}];`
+    + `[b${k}]scale=w='trunc(${W}*(1+0.07*n/${n})/2)*2':h=-2:eval=frame[fg${k}];`
+    + `[bg${k}][fg${k}]overlay=x=(W-w)/2:y=(H-h)/2-60,setsar=1,format=yuv420p[p${k}]`);
+  const filter = `${chains.join(';')};${images.map((_, k) => `[p${k}]`).join('')}concat=n=${images.length}:v=1:a=0[v]`;
+  const r = await runCapture(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', ...inputs, '-filter_complex', filter, '-map', '[v]', '-an',
+    '-t', String(dur), '-r', String(fps), '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', out], 10 * 60_000);
+  if (r.code !== 0 || !fs.existsSync(out)) throw Object.assign(new Error(`fotky: ffmpeg ${r.err.trim().slice(-300)}`), { code: 'PHOTO_RENDER' });
+  return out;
+}

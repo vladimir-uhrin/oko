@@ -164,7 +164,7 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
     out.push(`<text x="${W / 2}" y="850" text-anchor="middle" font-size="44" font-weight="800" fill="#ffffff" letter-spacing="2">${esc(model?.endLine ? model.endLine.toUpperCase() : 'MAPA FRONTU NAŽIVO')}</text>`);
     out.push(`<text x="${W / 2}" y="975" text-anchor="middle" font-family="${MONO}" font-size="96" font-weight="700" fill="${ACCENT}">${esc(VIDEO_BRAND.domain)}</text>`);
     out.push(creditLine(W / 2, 1060, 20, 'middle'));
-    const src = model?.sources || [`Strety a údery: Generálny štáb Ukrajiny (údaje jednej strany)`, `Mapa a výpočet zmeny: ${MAP_SOURCE.site} · © OpenStreetMap`, 'Zábery: ArmyInform, Ministerstvo obrany Ukrajiny (CC BY 4.0)'];
+    const src = model?.sources || [`Strety a údery: Generálny štáb Ukrajiny (údaje jednej strany)`, `Mapa a výpočet zmeny: ${MAP_SOURCE.site} · © OpenStreetMap`, model?.clips?.find((c) => c?.aftermath)?.sources?.[0] || 'Zábery: ArmyInform, Ministerstvo obrany Ukrajiny (CC BY 4.0)'];
     // Hudba s licenciou CC BY musí mať autora aj vo videu (model.musicCredit z knižnice skladieb).
     [...src.slice(0, 3), ...(model?.musicCredit ? [model.musicCredit] : [])].forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));
     out.push('</g></svg>');
@@ -198,8 +198,12 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
       out.push(`<text x="${W / 2}" y="${f1(y + 20)}" text-anchor="middle" font-size="40" font-weight="700" fill="#f2fbff" opacity="${f1(e)}" ${outline(8)}>${esc(hook.sub)}</text>`);
     }
   } else if (shot.kind === 'clip') {
-    out.push(`<text x="48" y="${MOTION.statTop + 30}" font-family="${MONO}" font-size="26" font-weight="700" letter-spacing="4" fill="${MOTION.yellow}" ${outline(6)}>ZÁBERY · ARMYINFORM</text>`);
-    out.push(`<text x="48" y="${MOTION.creditY}" font-size="22" fill="rgba(240,248,255,0.85)" ${outline(5)}>Ministerstvo obrany Ukrajiny · CC BY 4.0</text>`);
+    // Štítok a podpis podľa zdroja záberu (fotky záchranárov ДСНС, satelit zo scenára); predvolene ArmyInform.
+    const clip = model?.clips?.[shot.clipIndex] || {};
+    const kicker = clip.kicker || 'ZÁBERY · ARMYINFORM';
+    const credit = clip.credit ?? (clip.kicker ? '' : 'Ministerstvo obrany Ukrajiny · CC BY 4.0');
+    out.push(`<text x="48" y="${MOTION.statTop + 30}" font-family="${MONO}" font-size="26" font-weight="700" letter-spacing="4" fill="${MOTION.yellow}" ${outline(6)}>${esc(kicker)}</text>`);
+    if (credit) out.push(`<text x="48" y="${MOTION.creditY}" font-size="22" fill="rgba(240,248,255,0.85)" ${outline(5)}>${esc(credit)}</text>`);
   } else {
     // ── veľké číslo záberu ──
     const active = [...(placement || [])].filter((p) => p.shot === shot.id && p.start <= t + 1e-6).pop() || (placement || []).find((p) => p.shot === shot.id);

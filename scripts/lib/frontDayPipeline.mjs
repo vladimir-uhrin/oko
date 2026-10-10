@@ -27,10 +27,13 @@ import { composeV2, ensureSfx, mixSfx, renderMotionTrack, speedVoice } from './f
 
 /** Tempo hlasu vo videu v2. */
 export const V2_VOICE_TEMPO = 1.1;
-import { clipUsable, downloadClip, overlayClips, photoZoomVideo, probeClip, renderClipSegment } from './frontDayClipRender.mjs';
+import { clipUsable, downloadClip, downloadImage, overlayClips, photoMontageVideo, photoZoomVideo, probeClip, renderClipSegment } from './frontDayClipRender.mjs';
+import { aftermathClip, aftermathPreviewUrl, postPhotos } from '../../src/data/frontDayAftermath.js';
 
 /** Akčné zábery vo videu (vlastník: „max 2–3 krátke"); kandidátov z dát je viac, nepoužiteľné vypadnú. */
-export const FRONT_DAY_CLIPS = 2;
+export /** Fotky záchranárov v jednom zábere (strih ~1,2 s). */
+const AFTERMATH_PHOTOS = 3;
+const FRONT_DAY_CLIPS = 2;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const run = (cmd, args) => new Promise((resolve, reject) => {
@@ -144,6 +147,27 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
     model.clips.push(clip);
   }
 
+  // Ruský útok s obeťami (príbeh útoku aj veta v bežnom dni): fotky záchranárov z toho mesta (ДСНС). Odkazy z archívu po čase vypršia → čerstvé
+  // z náhľadu príspevku; najviac AFTERMATH_PHOTOS fotiek. Nič sa nestiahne → video bez nich.
+  if (!scenario && model.aftermath && model.casualties?.places?.length) {
+    try {
+      const fetchImpl = tools.fetchImpl || globalThis.fetch;
+      const res = await fetchImpl(aftermathPreviewUrl(model.aftermath), { headers: { 'user-agent': 'Mozilla/5.0 (OKO)' }, signal: AbortSignal.timeout(30_000) });
+      const urls = res.ok ? postPhotos(await res.text(), model.aftermath) : [];
+      const images = [];
+      for (const [k, url] of urls.entries()) {
+        if (images.length >= AFTERMATH_PHOTOS) break;
+        try { images.push(await downloadImage(url, path.join(workDir, `zachranari-${k}.jpg`), { fetchImpl })); } catch (e) { onProgress('aftermath-skip', { k, error: e.message }); }
+      }
+      if (images.length) {
+        const clip = aftermathClip(model.aftermath);
+        clipSources[model.clips.length] = { clip, images };
+        model.clips.push(clip);
+        onProgress('aftermath', { url: model.aftermath.url, photos: images.length });
+      } else onProgress('aftermath-skip', { url: model.aftermath.url, error: res.ok ? 'príspevok bez fotiek' : `HTTP ${res.status}` });
+    } catch (e) { onProgress('aftermath-skip', { url: model.aftermath.url, error: e.message }); }
+  }
+
   // 2. vety a háčik
   const lines = scenario ? scenario.lines : frontDayLines(model);
   // v2: prvý akčný záber hneď po háčiku — vizuálny vrchol v prvých sekundách, nie až v polovici.
@@ -188,11 +212,15 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   for (const shot of plan.shots.filter((s) => s.kind === 'clip')) {
     const source = clipSources[shot.clipIndex];
     if (!source) continue;
+    if (source.images) {
+      source.src = await photoMontageVideo({ images: source.images, out: path.join(workDir, `fotky-${shot.clipIndex}.mp4`), dur: shot.dur + 0.2, ffmpeg });
+      source.probe = { total: shot.dur + 0.2, frames: [] };
+    }
     if (source.photo) {
       source.src = await photoZoomVideo({ ...source.photo, image: path.resolve(source.photo.image) }, { out: path.join(workDir, `fotka-${shot.clipIndex}.mp4`), dur: shot.dur + 0.2, ffmpeg });
       source.probe = { total: shot.dur + 0.2, frames: [] };
     }
-    const seg = await renderClipSegment({ src: source.src, out: path.join(workDir, `zaber-${shot.clipIndex}.mp4`), dur: shot.dur, clip: source.clip, day: model.day, ffmpeg, probe: source.probe, layout: v2 && !source.photo ? 'full' : 'box' });
+    const seg = await renderClipSegment({ src: source.src, out: path.join(workDir, `zaber-${shot.clipIndex}.mp4`), dur: shot.dur, clip: source.clip, day: model.day, ffmpeg, probe: source.probe, layout: source.images || (v2 && !source.photo) ? 'full' : 'box' });
     segments.push({ file: seg.file, start: shot.start, dur: shot.dur });
     onProgress('clip', { i: shot.clipIndex, window: seg.start, cuts: seg.cuts });
   }
