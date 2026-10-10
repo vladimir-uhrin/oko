@@ -10846,6 +10846,34 @@ body.scene-playback-mode #first-run-launcher {
   color: var(--text-primary);
 }
 
+/* Fotka vybranej lode (2026-10-10, vesselPhoto.js): na celú šírku karty, kredit pod ňou. */
+.vessel-photo {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+
+.vessel-photo .tracked-photo-image {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  max-height: 190px;
+}
+
+/* Kartička pod kurzorom: fotka lode tiež na celú šírku. */
+.contact-hover-card-photo--vessel {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.contact-hover-card-photo--vessel img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
 /* Krížik v rohu kartičky na glóbuse (2026-09-30, cardCloseButtons.js): sledovaný objekt a vybraná
    loď sa dajú zavrieť priamo, nie len klikom vedľa. Karta je v plátne — krížik je DOM nad ňou. */
 .card-close {

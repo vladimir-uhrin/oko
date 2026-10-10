@@ -70,6 +70,30 @@ export function aisHeadingDeg(value) {
   return heading;
 }
 
+/** Marker for ROT ±127: turning > 10°/min, exact value unknown. */
+export const AIS_ROT_FAST_DEG_PER_MIN = 720;
+
+/**
+ * Rate of turn in °/min from the raw AIS ROT_AIS indicator (−127…127), or null.
+ * ITU-R M.1371: ROT = sign · (raw / 4.733)²; −128 = not available; ±127 =
+ * turning faster than 5°/30 s with no turn indicator (no number, only a side) —
+ * returned as ±AIS_ROT_FAST_DEG_PER_MIN (JSON-safe marker, not a measurement),
+ * so the card says „> 10°/min" instead of inventing a number.
+ * AISStream sometimes forwards the raw byte as unsigned (128…255) — folded back.
+ * @param {*} value Raw RateOfTurn from the feed.
+ * @returns {number|null}
+ */
+export function aisRateOfTurnDegPerMin(value) {
+  let raw = finite(value);
+  if (raw === null || !Number.isInteger(raw)) return null;
+  if (raw > 127 && raw <= 255) raw -= 256;
+  if (raw === -128 || raw < -128 || raw > 127) return null;
+  if (raw === 127) return AIS_ROT_FAST_DEG_PER_MIN;
+  if (raw === -127) return -AIS_ROT_FAST_DEG_PER_MIN;
+  const rot = Math.sign(raw) * (raw / 4.733) ** 2;
+  return Math.round(rot * 10) / 10;
+}
+
 /**
  * Whether a decoded lat/lon pair is a real fix. AIS sends latitude 91 /
  * longitude 181 for "position not available", and both are finite numbers, so

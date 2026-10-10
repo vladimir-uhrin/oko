@@ -1,0 +1,220 @@
+// src/data/vesselCardDetails.js
+/**
+ * @module vesselCardDetails
+ * @description Riadky karty lode, ktoré pribudli 2026-10-10 (vlastník poslal
+ * kartu cudzieho prehliadača lodí: „máme toto?" → „áno doplň aj fotky"):
+ * kurz a smer prídy zvlášť, rýchlosť otáčania, IMO, trieda AIS, rozmery
+ * a ponor, miestny čas lode a údaje z registra (podrobný typ, rok stavby,
+ * GT, DWT). Čisté funkcie bez Cesia — zdieľa ich karta po kliknutí aj
+ * kartička pod kurzorom.
+ */
+import { AIS_ROT_FAST_DEG_PER_MIN } from './aisIngest.js';
+
+const identity = (key) => key;
+
+function valid(deg, max) {
+  return Number.isFinite(deg) && deg >= 0 && deg < max ? Math.round(deg) % 360 : null;
+}
+
+/** Desatinné číslo s čiarkou v slovenčine. Pure. */
+function decimal(value, digits, lang) {
+  const text = Number(value).toFixed(digits);
+  return lang === 'sk' ? text.replace('.', ',') : text;
+}
+
+/** Celé číslo s medzerou ako oddeľovačom tisícov (29 442). Pure. */
+export function groupThousands(value) {
+  return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+/**
+ * Rýchlosť otáčania: „0°/min", „4,5°/min vpravo", „> 10°/min vľavo". Null
+ * = AIS ju nehlási (trieda B, nedostupná). Pure.
+ * @param {number|null} rot °/min (+ vpravo, − vľavo)
+ * @param {(key: string, vars?: object) => string} [t]
+ * @param {string} [lang]
+ */
+export function formatRateOfTurn(rot, t = identity, lang = 'sk') {
+  if (!Number.isFinite(rot)) return null;
+  if (Math.abs(rot) < 0.05) return '0°/min';
+  const side = rot > 0 ? t('vessel.rot-right') : t('vessel.rot-left');
+  const value = Math.abs(rot) >= AIS_ROT_FAST_DEG_PER_MIN ? '> 10' : decimal(Math.abs(rot), Math.abs(rot) < 10 ? 1 : 0, lang);
+  return `${value}°/min ${side}`;
+}
+
+/**
+ * Časové pásmo lode na mori: námorné pásmo z dĺžky (každých 15°, ±12 h) —
+ * presne tak ho lode na otvorenom mori aj vedú. Pure.
+ * @param {number} lon
+ * @returns {number|null}
+ */
+export function nauticalZoneOffsetH(lon) {
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) return null;
+  return Math.max(-12, Math.min(12, Math.round(lon / 15)));
+}
+
+/** „UTC", „UTC+2", „UTC−5", „UTC+5:30" z posunu v minútach. Pure. */
+function zoneLabel(offsetMin) {
+  if (!offsetMin) return 'UTC';
+  const sign = offsetMin > 0 ? '+' : '−';
+  const abs = Math.abs(offsetMin);
+  const minutes = abs % 60;
+  return `UTC${sign}${Math.floor(abs / 60)}${minutes ? `:${String(minutes).padStart(2, '0')}` : ''}`;
+}
+
+/**
+ * Posun časového pásma IANA v minútach v danom okamihu (letný čas
+ * zahrnutý), alebo null pre neznáme pásmo. Pure (Intl).
+ * @param {string} timeZone napr. „Europe/Amsterdam"
+ * @param {number} nowMs
+ */
+export function timeZoneOffsetMin(timeZone, nowMs) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric',
+    }).formatToParts(new Date(nowMs));
+    const get = (type) => Number(parts.find((p) => p.type === type)?.value);
+    const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+    return Math.round((asUtc - Math.floor(nowMs / 60000) * 60000) / 60000);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Miestny čas lode „21:57 (UTC−5)". So zadaným pásmom IANA (z polohy,
+ * vesselTimeZone.js) platí aj v prístave vrátane letného času; bez neho
+ * námorné pásmo z dĺžky, ako ho vedú lode na otvorenom mori. Pure.
+ * @param {number} lon
+ * @param {number} [nowMs]
+ * @param {string|null} [timeZone]
+ * @returns {string|null}
+ */
+export function vesselLocalTimeLabel(lon, nowMs = Date.now(), timeZone = null) {
+  if (timeZone && Number.isFinite(nowMs)) {
+    const offsetMin = timeZoneOffsetMin(timeZone, nowMs);
+    if (offsetMin !== null) {
+      const d = new Date(nowMs + offsetMin * 60000);
+      return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} (${zoneLabel(offsetMin)})`;
+    }
+  }
+  const offset = nauticalZoneOffsetH(lon);
+  if (offset === null || !Number.isFinite(nowMs)) return null;
+  const d = new Date(nowMs + offset * 3600_000);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const zone = offset === 0 ? 'UTC' : `UTC${offset > 0 ? '+' : '−'}${Math.abs(offset)}`;
+  return `${hh}:${mm} (${zone})`;
+}
+
+/**
+ * Riadok pohybu: kurz nad dnom, smer prídy, otáčanie — každá časť len keď je
+ * známa (sentinely 360/511 sú už preč, ale tu sa overujú znova). Pure.
+ * @param {{course?:number|null, heading?:number|null, rateOfTurn?:number|null}} record
+ */
+export function vesselMotionParts(record, t = identity, lang = 'sk') {
+  const course = valid(record?.course, 360);
+  const heading = valid(record?.heading, 360);
+  const rot = formatRateOfTurn(record?.rateOfTurn, t, lang);
+  return [
+    course !== null ? t('vessel.course', { deg: course }) : null,
+    heading !== null ? t('vessel.heading', { deg: heading }) : null,
+    rot ? t('vessel.turn', { rot }) : null,
+  ].filter(Boolean);
+}
+
+/**
+ * Riadok trupu: IMO · trieda AIS · rozmery · ponor. IMO a rozmery dopĺňa
+ * register, keď ich AIS ešte nedoniesol (statická správa chodí raz za 6 min).
+ * @param {object} record AIS záznam
+ * @param {object|null} info výstup /api/vessel-info
+ */
+export function vesselHullParts(record, info, t = identity, lang = 'sk') {
+  const imo = String(record?.imo || '').trim().replace(/^0+$/, '') || info?.imo || '';
+  const length = Number.isFinite(record?.lengthM) && record.lengthM > 0 ? record.lengthM : info?.lengthM;
+  const beam = Number.isFinite(record?.beamM) && record.beamM > 0 ? record.beamM : info?.beamM;
+  const aisClass = String(record?.aisClass || '').trim().toUpperCase();
+  const draught = Number.isFinite(record?.draughtM) && record.draughtM > 0 ? record.draughtM : null;
+  return [
+    imo ? `IMO ${imo}` : null,
+    aisClass === 'A' || aisClass === 'B' ? t('vessel.ais-class', { cls: aisClass }) : null,
+    Number.isFinite(length) && length > 0
+      ? (Number.isFinite(beam) && beam > 0 ? `${Math.round(length)} × ${Math.round(beam)} m` : `${Math.round(length)} m`)
+      : null,
+    draught ? t('vessel.draught', { m: decimal(draught, 1, lang) }) : null,
+  ].filter(Boolean);
+}
+
+/** Bežné typy z registra po slovensky; neznámy ostáva v originále. */
+const TYPE_SK = new Map([
+  ['chemical/oil products tanker', 'tanker na chemikálie a ropné produkty'],
+  ['oil products tanker', 'tanker na ropné produkty'],
+  ['crude oil tanker', 'tanker na surovú ropu'],
+  ['chemical tanker', 'chemický tanker'],
+  ['lng tanker', 'tanker LNG'],
+  ['lpg tanker', 'tanker LPG'],
+  ['container ship', 'kontajnerová loď'],
+  ['bulk carrier', 'loď na sypký náklad'],
+  ['general cargo ship', 'loď na kusový náklad'],
+  ['vehicles carrier', 'loď na prepravu áut'],
+  ['ro-ro cargo ship', 'ro-ro nákladná loď'],
+  ['passenger ship', 'osobná loď'],
+  ['passenger (cruise) ship', 'výletná loď'],
+  ['passenger/ro-ro cargo ship', 'trajekt'],
+  ['tug', 'remorkér'],
+  ['pusher tug', 'tlačný remorkér'],
+  ['fishing vessel', 'rybárska loď'],
+  ['pleasure craft', 'rekreačné plavidlo'],
+  ['sailing vessel', 'plachetnica'],
+  ['inland, motor freighter', 'riečna motorová nákladná loď'],
+  ['inland, motor tanker', 'riečny motorový tanker'],
+  ['inland, passenger ship', 'riečna osobná loď'],
+  ['offshore supply ship', 'zásobovacia loď offshore'],
+  ['research/survey vessel', 'výskumná loď'],
+  ['dredger', 'bagrovacia loď'],
+  ['cargo ship', 'nákladná loď'],
+  ['cargo', 'nákladná loď'],
+  ['tanker', 'tanker'],
+  ['passenger', 'osobná loď'],
+  ['high speed craft', 'rýchla loď'],
+  ['pilot vessel', 'pilotná loď'],
+  ['search & rescue vessel', 'záchranná loď'],
+  ['law enforcement', 'plavidlo polície'],
+  ['military ops', 'vojenské plavidlo'],
+  ['towing vessel', 'vlečný remorkér'],
+  ['port tender', 'prístavný čln'],
+  ['yacht', 'jachta'],
+  ['hopper dredger', 'násypková bagrovacia loď'],
+  ['ro-ro/passenger ship', 'trajekt'],
+  ['reefer', 'chladiarenská loď'],
+  ['refrigerated cargo ship', 'chladiarenská loď'],
+  ['cement carrier', 'loď na cement'],
+  ['heavy load carrier', 'loď na ťažké náklady'],
+  ['asphalt/bitumen tanker', 'tanker na asfalt'],
+  ['bunkering tanker', 'bunkrovací tanker'],
+  ['crew boat', 'loď pre posádky'],
+  ['anchor handling vessel', 'loď na manipuláciu s kotvami'],
+]);
+
+/** Podrobný typ z registra v jazyku rozhrania. Pure. */
+export function localizedTypeDetail(typeDetail, lang = 'sk') {
+  const text = String(typeDetail || '').trim();
+  if (!text) return null;
+  if (lang !== 'sk') return text;
+  return TYPE_SK.get(text.toLowerCase()) || text;
+}
+
+/**
+ * Riadok registra: podrobný typ · rok stavby · GT · DWT. Pure.
+ * @param {object|null} info výstup /api/vessel-info
+ */
+export function vesselRegistryParts(info, t = identity, lang = 'sk') {
+  if (!info) return [];
+  const type = localizedTypeDetail(info.typeDetail, lang);
+  return [
+    type ? type.charAt(0).toUpperCase() + type.slice(1) : null,
+    Number.isFinite(info.yearBuilt) ? t('vessel.built', { year: info.yearBuilt }) : null,
+    Number.isFinite(info.grossTonnage) ? `GT ${groupThousands(info.grossTonnage)}` : null,
+    Number.isFinite(info.deadweight) ? `DWT ${groupThousands(info.deadweight)} t` : null,
+  ].filter(Boolean);
+}

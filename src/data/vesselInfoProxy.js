@@ -1,0 +1,242 @@
+// src/data/vesselInfoProxy.js
+/**
+ * @module vesselInfoProxy
+ * @description Vite plugin: detail plavidla z registra a jeho fotka podľa MMSI
+ * (2026-10-10, vlastník: „doplň aj fotky a na licenciu ser").
+ *
+ *   GET /api/vessel-info?mmsi=241190000  → JSON { mmsi, imo, name, typeDetail,
+ *       yearBuilt, grossTonnage, deadweight, lengthM, beamM, country, photo }
+ *   GET /api/vessel-info/photo?mmsi=…&size=1  → JPEG (1 = väčší, 0 = náhľad)
+ *
+ * AIS nenesie fotku ani podrobný typ („Chemical/Oil Products Tanker", rok
+ * stavby, GT, DWT) — tie sú v registri verejného prehliadača lodí (zdroj je
+ * zapísaný v DATA_SOURCES.md; v rozhraní sa nemenuje, pravidlo o konkurencii).
+ * Jeho JSON nemá CORS, preto proxy; fotka ide tiež cez nás, aby prehliadač
+ * nevolal cudziu doménu a obrázok sa kešoval na disku.
+ *
+ * Ochrana: kešovanie na disku (`.gev-cache/vessel-info/`, junction na D:) —
+ * údaje 7 dní, prázdny výsledok 1 deň, fotka 30 dní; limiter na klienta a
+ * celkový strop dopytov upstream za hodinu; súbežné dopyty na to isté MMSI
+ * sa zlúčia. Bez kľúča, bez peňazí.
+ */
+import path from 'node:path';
+import { promises as fsp } from 'node:fs';
+
+export const VESSEL_INFO_UPSTREAM = 'https://www.vesselfinder.com/api/pub/click/';
+export const VESSEL_PHOTO_UPSTREAM = 'https://static.vesselfinder.net/ship-photo/';
+export const VESSEL_INFO_TTL_MS = 7 * 24 * 3600 * 1000;
+export const VESSEL_INFO_EMPTY_TTL_MS = 24 * 3600 * 1000;
+export const VESSEL_PHOTO_TTL_MS = 30 * 24 * 3600 * 1000;
+export const VESSEL_PHOTO_MAX_BYTES = 3 * 1024 * 1024;
+/** Celkový strop dopytov upstream za hodinu (cache hity sa nerátajú). */
+export const VESSEL_UPSTREAM_HOURLY_MAX = 600;
+const UPSTREAM_TIMEOUT_MS = 15_000;
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36';
+
+/** Platné MMSI (9 číslic, nie samé nuly) alebo null. Pure. */
+export function parseMmsi(value) {
+  const mmsi = String(value ?? '').trim();
+  return /^\d{9}$/.test(mmsi) && !/^0+$/.test(mmsi) ? mmsi : null;
+}
+
+/** Identifikátor fotky (`IMO-MMSI-hash`) — len bezpečné znaky, inak null. Pure. */
+export function parsePhotoId(value) {
+  const id = String(value ?? '').trim();
+  return /^[0-9]{1,9}-[0-9]{9}-[0-9a-f]{16,64}$/.test(id) ? id : null;
+}
+
+function positive(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function cleanText(value) {
+  const text = String(value ?? '').trim();
+  return text && !/^(unknown|other type$)/i.test(text) ? text : null;
+}
+
+/**
+ * Odpoveď registra → náš tvar. Prázdny záznam (imo 0, „unknown type", bez
+ * fotky) dáva `empty: true` — loď v registri nie je, kešuje sa kratšie. Pure.
+ * @param {string} mmsi
+ * @param {object|null} json
+ */
+export function normalizeVesselInfo(mmsi, json) {
+  const imo = positive(json?.imo);
+  const photoId = parsePhotoId(json?.pic);
+  const name = cleanText(json?.name);
+  const out = {
+    mmsi,
+    imo: imo ? String(imo) : null,
+    name: name && name !== mmsi ? name : null,
+    typeDetail: cleanText(json?.type),
+    yearBuilt: positive(json?.y),
+    grossTonnage: positive(json?.gt),
+    deadweight: positive(json?.dw),
+    lengthM: positive(json?.al),
+    beamM: positive(json?.aw),
+    country: cleanText(json?.country),
+    photoId,
+  };
+  out.empty = !out.imo && !out.typeDetail && !photoId && !out.yearBuilt;
+  return out;
+}
+
+/** Verejný tvar pre klienta: identifikátor fotky sa nahradí našou URL. Pure. */
+export function publicVesselInfo(info) {
+  if (!info) return null;
+  const { photoId, empty, ...rest } = info;
+  return {
+    ...rest,
+    photo: photoId ? { src: `/api/vessel-info/photo?mmsi=${info.mmsi}&size=1`, thumb: `/api/vessel-info/photo?mmsi=${info.mmsi}&size=0` } : null,
+  };
+}
+
+/** Kľúč klienta: za tunelom CF-Connecting-IP, inak socket. */
+function clientKey(req) {
+  const cf = req?.headers?.['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.trim()) return cf.trim();
+  return req?.socket?.remoteAddress || 'local';
+}
+
+function windowLimiter({ windowMs, max, now }) {
+  const hits = new Map();
+  return (key) => {
+    const t = now();
+    let arr = hits.get(key);
+    if (!arr) { arr = []; hits.set(key, arr); }
+    while (arr.length && t - arr[0] > windowMs) arr.shift();
+    if (arr.length >= max) return false;
+    arr.push(t);
+    return true;
+  };
+}
+
+/**
+ * @param {object} [o]
+ * @param {string} [o.root] koreň projektu (cache pod `.gev-cache/vessel-info`)
+ * @param {Function} [o.fetchImpl]
+ * @param {Function} [o.now]
+ * @param {Function} [o.log]
+ */
+export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fetch(...a), now = Date.now, log = (m) => console.log(m) } = {}) {
+  const dir = path.join(root, '.gev-cache', 'vessel-info');
+  const perClient = windowLimiter({ windowMs: 60_000, max: 90, now });
+  const upstreamBudget = windowLimiter({ windowMs: 3600_000, max: VESSEL_UPSTREAM_HOURLY_MAX, now });
+  const inflight = new Map();
+  const infoFile = (mmsi) => path.join(dir, `${mmsi}.json`);
+  const photoFile = (mmsi, size) => path.join(dir, 'photo', `${mmsi}-${size}.jpg`);
+
+  async function writeAtomic(file, data) {
+    await fsp.mkdir(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    await fsp.writeFile(tmp, data);
+    await fsp.rename(tmp, file);
+  }
+
+  async function readInfoCache(mmsi) {
+    try {
+      const entry = JSON.parse(await fsp.readFile(infoFile(mmsi), 'utf8'));
+      const ttl = entry?.info?.empty ? VESSEL_INFO_EMPTY_TTL_MS : VESSEL_INFO_TTL_MS;
+      return Number.isFinite(entry?.at) && now() - entry.at < ttl ? entry.info : null;
+    } catch { return null; }
+  }
+
+  /** Detail z cache alebo upstream; `{ info }` alebo `{ error, status }`. */
+  function loadInfo(mmsi, key) {
+    const job = inflight.get(`i:${mmsi}`);
+    if (job) return job;
+    const run = (async () => {
+      const cached = await readInfoCache(mmsi);
+      if (cached) return { info: cached, source: 'cache' };
+      if (!perClient(key)) return { status: 429, error: 'rate_limited' };
+      if (!upstreamBudget('all')) return { status: 503, error: 'budget' };
+      const res = await fetchImpl(`${VESSEL_INFO_UPSTREAM}${mmsi}`, {
+        headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+      if (!res.ok) return { status: 502, error: `upstream ${res.status}` };
+      const info = normalizeVesselInfo(mmsi, await res.json());
+      await writeAtomic(infoFile(mmsi), JSON.stringify({ at: now(), info }));
+      return { info, source: 'upstream' };
+    })().finally(() => inflight.delete(`i:${mmsi}`));
+    inflight.set(`i:${mmsi}`, run);
+    return run;
+  }
+
+  async function loadPhoto(mmsi, size, key) {
+    const file = photoFile(mmsi, size);
+    try {
+      const stat = await fsp.stat(file);
+      if (now() - stat.mtimeMs < VESSEL_PHOTO_TTL_MS) return { buf: await fsp.readFile(file), source: 'cache' };
+    } catch { /* nie je v cache */ }
+    const { info, status, error } = await loadInfo(mmsi, key);
+    if (!info) return { status, error };
+    if (!info.photoId) return { status: 404, error: 'no_photo' };
+    const job = inflight.get(`p:${mmsi}:${size}`);
+    if (job) return job;
+    const run = (async () => {
+      if (!upstreamBudget('all')) return { status: 503, error: 'budget' };
+      const res = await fetchImpl(`${VESSEL_PHOTO_UPSTREAM}${info.photoId}/${size}`, {
+        headers: { 'User-Agent': BROWSER_UA, Accept: 'image/jpeg,image/*' },
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+      if (res.status === 404) return { status: 404, error: 'no_photo' };
+      if (!res.ok) return { status: 502, error: `upstream ${res.status}` };
+      const type = String(res.headers.get('content-type') || '').split(';')[0].trim();
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf.length || buf.length > VESSEL_PHOTO_MAX_BYTES || (type && !type.startsWith('image/'))) return { status: 502, error: 'bad_photo' };
+      await writeAtomic(file, buf);
+      return { buf, source: 'upstream' };
+    })().finally(() => inflight.delete(`p:${mmsi}:${size}`));
+    inflight.set(`p:${mmsi}:${size}`, run);
+    return run;
+  }
+
+  const sendJson = (res, status, body, extra = {}) => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...extra });
+    res.end(JSON.stringify(body));
+  };
+
+  async function handler(req, res) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, { error: 'method_not_allowed' }); return; }
+    const url = new URL(req.url || '/', 'http://localhost');
+    const mmsi = parseMmsi(url.searchParams.get('mmsi'));
+    if (!mmsi) { sendJson(res, 400, { error: 'bad_mmsi' }); return; }
+    const key = clientKey(req);
+    try {
+      if (url.pathname === '/photo') {
+        const size = url.searchParams.get('size') === '0' ? 0 : 1;
+        const out = await loadPhoto(mmsi, size, key);
+        if (out.buf) {
+          res.writeHead(200, {
+            'Content-Type': 'image/jpeg',
+            'Content-Length': String(out.buf.length),
+            'Cache-Control': 'public, max-age=604800',
+            'X-OKO-Source': out.source,
+          });
+          res.end(out.buf);
+          return;
+        }
+        sendJson(res, out.status || 502, { error: out.error || 'upstream' }, out.status === 404 ? { 'Cache-Control': 'public, max-age=86400' } : {});
+        return;
+      }
+      if (url.pathname !== '/' && url.pathname !== '') { sendJson(res, 404, { error: 'not_found' }); return; }
+      const out = await loadInfo(mmsi, key);
+      if (!out.info) { sendJson(res, out.status || 502, { error: out.error || 'upstream' }, out.status === 429 ? { 'Retry-After': '30' } : {}); return; }
+      sendJson(res, 200, publicVesselInfo(out.info), { 'Cache-Control': 'public, max-age=3600', 'X-OKO-Source': out.source });
+    } catch (error) {
+      log(`[vessel-info] ${mmsi} failed: ${error?.message || error}`);
+      sendJson(res, 502, { error: 'upstream_failed' });
+    }
+  }
+
+  function install(server) { server.middlewares.use('/api/vessel-info', handler); }
+  return {
+    name: 'oko-vessel-info',
+    configureServer(server) { install(server); },
+    configurePreviewServer(server) { install(server); },
+    _handler: handler,
+    _dir: dir,
+  };
+}

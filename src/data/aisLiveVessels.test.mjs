@@ -1311,7 +1311,7 @@ test('buildVesselCard: posledná známa poloha ostáva priznaná aj na okolitej 
   assert.equal(stale.accent, '146, 156, 165');
   // plné údaje ostávajú na vybranej karte (klik) — kurz padá na course
   const selected = buildSelectedVesselCard(makeRecord({ heading: null }));
-  assert.match(selected.details[0], /231°/);
+  assert.equal(selected.details[1], 'COG 231°', 'bez smeru prídy ostáva kurz nad dnom');
 });
 
 test('buildVesselCard: unnamed vessels title as MMSI; long names truncate', () => {
@@ -1335,7 +1335,7 @@ test('buildVesselCard: tanker types carry the amber accent', () => {
 test('buildVesselCard: numeric AIS type codes read as family names, not digits', () => {
   const card = buildVesselCard(makeRecord({ type: '84' }));
   assert.equal(card.accent, '255, 179, 71');
-  assert.match(buildSelectedVesselCard(makeRecord({ type: '84' })).details[0], /^TANKER · 14.5KT · 231°/);
+  assert.equal(buildSelectedVesselCard(makeRecord({ type: '84' })).details[0], 'TANKER · 14.5KT');
 });
 
 test('cardScreenSeparated: rejects candidates inside the min separation radius', () => {
@@ -1355,7 +1355,9 @@ test('buildSelectedVesselCard: full detail card with MMSI + position time', () =
   assert.equal(card.priority, 100000);
   assert.equal(card.title, 'EVER GIVEN');
   assert.deepEqual(card.details, [
-    'CONTAINER SHIP · 14.5KT · 231°',
+    // Zámerná zmena pinu (2026-10-10): kurz nad dnom a smer prídy zvlášť.
+    'CONTAINER SHIP · 14.5KT',
+    'COG 231° · HDG 231°',
     // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI
     // (353 = Panama) — identitný riadok sa objaví, aj keď loď zatiaľ
     // neposlala statickú správu s rozmermi/stavom.
@@ -1380,9 +1382,12 @@ test('buildSelectedVesselCard: identitný riadok, ETA pri destinácii a POS≈ p
     posEstimated: true,
     lastPositionUtc: '2026-09-02T11:22:33Z',
   }));
+  // Zámerná zmena pinu (2026-10-10): dĺžka a ponor v riadku trupu.
   assert.deepEqual(card.details, [
-    'CARGO · 14.5KT · 231°',
-    'SK · UNDER WAY · L110M · T2.7M',
+    'CARGO · 14.5KT',
+    'COG 231° · HDG 231°',
+    'SK · UNDER WAY',
+    '110 m · draught 2.7 m',
     '→ KOMARNO · ETA 09-02 14:30',
     'MMSI 267940000 · POS≈ 11:22:33Z',
   ]);
@@ -1496,7 +1501,8 @@ test('buildSelectedVesselCard: destination line + STALE marker; placeholders for
     missedRefreshes: 2,
   }));
   assert.deepEqual(card.details, [
-    'TANKER · --KT · --°',
+    // Zámerná zmena pinu (2026-10-10): neznámy kurz/smer = žiadny riadok pohybu.
+    'TANKER · --KT',
     // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI.
     'PA',
     '→ ROTTERDAM',
@@ -1737,8 +1743,9 @@ test('buildSelectedVesselCard: starý fix priznáva vek a od 10 min nesie STALE'
     lastPositionEpoch: Date.parse('2026-07-27T11:22:33Z') / 1000,
   }), nowMs);
   assert.deepEqual(old.details, [
-    'CONTAINER SHIP · 14.5KT · 231°',
+    'CONTAINER SHIP · 14.5KT',
     'AISStream · LAST KNOWN POSITION',
+    'COG 231° · HDG 231°',
     // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI.
     'PA',
     'MMSI 353136000 · POS: 11:22:33Z (12 min) · STALE',
@@ -2125,4 +2132,30 @@ test('lode zblízka = klasické ikony trupu, 3D modely ship.glb predvolene vypnu
     _setVesselOverlayHostForTest(null);
     _setVesselStateForTest({ enabled: false });
   }
+});
+
+test('buildSelectedVesselCard: otáčanie, IMO, trieda, rozmery, register a miestny čas (2026-10-10)', async () => {
+  const { _resetVesselInfoForTest, _setVesselInfoFetchForTest, lookupVesselInfo } = await import('./vesselInfo.js');
+  _resetVesselInfoForTest();
+  _setVesselInfoFetchForTest(async () => ({ ok: true, json: async () => ({
+    mmsi: '241190000', imo: '9410909', typeDetail: 'Chemical/Oil Products Tanker', yearBuilt: 2009,
+    grossTonnage: 29442, deadweight: 52941, lengthM: 183, beamM: 32, photo: { src: '/api/vessel-info/photo?mmsi=241190000&size=1' },
+  }) }));
+  await lookupVesselInfo('241190000');
+  const nowMs = Date.parse('2026-10-10T02:57:00Z');
+  const card = buildSelectedVesselCard(makeRecord({
+    mmsi: '241190000', name: 'MINERVA ZEN', type: 'Tanker', speed: 13.1, course: 253, heading: 252,
+    rateOfTurn: 0, aisClass: 'A', imo: '', draughtM: 11, lon: -74.2, lat: 34,
+    lastPositionUtc: '2026-10-10T02:57:00Z', lastPositionEpoch: nowMs / 1000,
+  }), nowMs);
+  assert.deepEqual(card.details, [
+    'TANKER · 13.1KT',
+    'COG 253° · HDG 252° · ROT 0°/MIN',
+    'GR',
+    'Chemical/Oil Products Tanker · built 2009 · GT 29 442 · DWT 52 941 t',
+    'IMO 9410909 · AIS class A · 183 × 32 m · draught 11.0 m',
+    'MMSI 241190000 · POS: 02:57:00Z',
+    'Local time 21:57 (UTC−5)',
+  ]);
+  _resetVesselInfoForTest();
 });

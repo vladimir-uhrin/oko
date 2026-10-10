@@ -5,7 +5,10 @@ import {
   clearSelectedEntityContextForLayer,
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
-import { t } from '../i18n.js';
+import { currentLanguage, t } from '../i18n.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts } from './vesselCardDetails.js';
+import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
+import { vesselTimeZone } from './vesselTimeZone.js';
 // `new URL(...)` a NIE `?url` import: príponu `?url` pozná len Vite, takže
 // unit testy v čistom Node (a všetko, čo túto vrstvu importuje) by na nej
 // spadli už pri načítaní modulu.
@@ -642,6 +645,18 @@ const aisLiveVesselsLayer = {
     // AIS sentinely: heading 511 a course 360 = „nedostupné".
     const heading = Number.isFinite(record.heading) && record.heading >= 0 && record.heading < 360 ? record.heading : null;
     const course = Number.isFinite(record.course) && record.course >= 0 && record.course < 360 ? record.course : null;
+    // 2026-10-10: kurz a smer prídy zvlášť, otáčanie, IMO/trieda/rozmery, register a miestny čas.
+    const lang = currentLanguage();
+    const info = cachedVesselInfo(record.mmsi) || null;
+    const speedText = !(Number.isFinite(record.speed) && record.speed >= 0) ? ''
+      : isMetric() ? `${Math.round(record.speed * 1.852)} km/h`
+        : `${lang === 'sk' ? record.speed.toFixed(1).replace('.', ',') : record.speed.toFixed(1)} kn`;
+    const motion = [speedText, ...vesselMotionParts({ ...record, course, heading }, t, lang)].filter(Boolean).join(' · ');
+    const extraLines = [
+      vesselRegistryParts(info, t, lang).join(' · '),
+      vesselHullParts(record, info, t, lang).join(' · '),
+      (() => { const local = vesselLocalTimeLabel(record.lon, Date.now(), vesselTimeZone(record.lat, record.lon)); return local ? t('vessel.local-time', { time: local }) : ''; })(),
+    ].filter(Boolean);
     return {
       layerId: VESSEL_OVERLAY_SOURCE_ID,
       id: record.mmsi,
@@ -660,6 +675,9 @@ const aisLiveVesselsLayer = {
       progress: null,
       route: destination ? `→ ${destination}` : null,
       flightIata: null,
+      flightLines: motion ? [motion] : null,
+      extraLines,
+      photoKey: `vessel:${record.mmsi}`,
       source: 'AISStream',
       lastContactEpochMs: Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null,
       stale: isLastKnownVessel(record),
@@ -676,6 +694,19 @@ const aisLiveVesselsLayer = {
    * @param {number} [maxCount=25] Maximum entries to return.
    * @returns {Array<{ mmsi: string, name: string, position: Cesium.Cartesian3, distanceM: number }>}
    */
+  /**
+   * Zotrvanie myši nad loďou: vypýtaj register a fotku (contactHoverCard onDwell).
+   * @param {string} id MMSI
+   */
+  prefetchContactDetails(id) {
+    lookupVesselInfo(id);
+  },
+
+  /** MMSI práve vybranej lode (fotka pod kartou), inak null. */
+  getSelectedMmsi() {
+    return state.selectedRecord?.mmsi || null;
+  },
+
   getNearby(centerCartesian, rangeM, maxCount = 25) {
     const records = state.vesselRecords;
     if (!centerCartesian || !Array.isArray(records) || !records.length) return [];
@@ -1541,6 +1572,7 @@ function updateRecordInPlace(record, next) {
   record.eta = next.eta;
   record.navStatus = next.navStatus;
   record.aisClass = next.aisClass;
+  record.rateOfTurn = next.rateOfTurn;
   record.posEstimated = next.posEstimated;
   record.lastPositionUtc = next.lastPositionUtc;
   record.lastPositionEpoch = next.lastPositionEpoch;
@@ -1617,6 +1649,7 @@ function normalizeVessel(row) {
     eta: String(row.eta || ''),
     navStatus: finiteNumber(row.nav_status),
     aisClass: String(row.ais_class || ''),
+    rateOfTurn: finiteNumber(row.rate_of_turn),
     posEstimated: row.pos_estimated === true,
     lastPositionUtc: String(row.last_position_UTC || ''),
     lastPositionEpoch: finiteNumber(row.last_position_epoch),
@@ -2562,6 +2595,12 @@ function selectVessel(record) {
   updateSelectedVesselHud(record);
   // Cieľ plavby z AIS textu → prístav z bundlu, čiara a ETA na karte.
   resolveSelectedDestination(record);
+  // Register (IMO, podrobný typ, rok, GT/DWT) a fotka — karta sa doplní, keď príde.
+  if (cachedVesselInfo(record.mmsi) === undefined) {
+    lookupVesselInfo(record.mmsi).then((info) => {
+      if (info && state.selectedRecord === record) updateVisibility(true);
+    });
+  }
   if (registerSelectedContext(record)) {
     selectEntityContext(record);
   }
@@ -2900,23 +2939,25 @@ export function buildVesselCard(record) {
  * @returns {Object} vesselLabels entry.
  */
 export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationMatch = null) {
-  const direction = record.heading ?? record.course;
-  const details = [[
-    vesselTypeShort(record) || 'VESSEL',
-    formatSpeed(record.speed),
-    Number.isFinite(direction) ? `${Math.round(direction)}°` : '--°',
-  ].join(' · ')];
+  const lang = currentLanguage();
+  const info = cachedVesselInfo(record.mmsi) || null;
+  const details = [[vesselTypeShort(record) || 'VESSEL', formatSpeed(record.speed)].join(' · ')];
+  // 2026-10-10: kurz nad dnom a smer prídy zvlášť + rýchlosť otáčania.
   if (isLastKnownVessel(record, nowMs)) details.push('AISStream · LAST KNOWN POSITION');
-  // Identity line (balík 2): flag state from the MMSI MID, navigational
-  // status, hull length, draught — every part optional, the line renders
-  // only when at least one is known. All of it was already on the wire.
+  const motion = vesselMotionParts(record, t, lang);
+  if (motion.length) details.push(motion.join(' · ').toUpperCase());
+  // Identity line (balík 2): flag state from the MMSI MID and navigational
+  // status — every part optional, the line renders only when one is known.
+  // Dĺžka a ponor sa 2026-10-10 presunuli do riadku trupu (s IMO, triedou, šírkou).
   const identity = [
     mmsiFlag(record.mmsi)?.iso2,
     navStatusLabel(record.navStatus),
-    Number.isFinite(record.lengthM) ? `L${Math.round(record.lengthM)}M` : null,
-    Number.isFinite(record.draughtM) ? `T${record.draughtM.toFixed(1)}M` : null,
   ].filter(Boolean);
   if (identity.length) details.push(identity.join(' · '));
+  const registry = vesselRegistryParts(info, t, lang);
+  if (registry.length) details.push(registry.join(' · '));
+  const hull = vesselHullParts(record, info, t, lang);
+  if (hull.length) details.push(hull.join(' · '));
   const destination = String(record.destination || '').trim();
   // ETA belongs to the voyage line — without a destination it is noise.
   const eta = String(record.eta || '').trim();
@@ -2940,6 +2981,8 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
   const stale = (record.missedRefreshes || 0) > 0 || age.stale;
   const ageSuffix = age.label ? ` (${age.label})` : '';
   details.push(`MMSI ${record.mmsi || '--'} · ${formatPositionTime(record)}${ageSuffix}${stale ? ' · STALE' : ''}`);
+  const local = vesselLocalTimeLabel(record.lon, nowMs, vesselTimeZone(record.lat, record.lon));
+  if (local) details.push(t('vessel.local-time', { time: local }));
   return {
     id: vesselOverlayEntryId(record),
     actionable: Boolean(record?.mmsi),

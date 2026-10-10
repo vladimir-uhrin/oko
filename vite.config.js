@@ -116,6 +116,7 @@ import { ARMYINFORM_OPS_FEED, extractReportParagraphs, parseGeneralStaffReport }
 import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
 import { mideastEventsProxy } from './src/data/mideastEventsProxy.js';
 import { reliefTilesProxy } from './src/data/reliefTilesProxy.js';
+import { vesselInfoProxy } from './src/data/vesselInfoProxy.js';
 import { DEEPSTATE_MIRRORS, createDeepStateMirror } from './src/data/deepstateMirror.js';
 import { createDeepStateFullMirror } from './src/data/deepstateFullMirror.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
@@ -175,6 +176,7 @@ import {
   aisEtaLabel,
   aisNavStatusCode,
   aisPositionUsable,
+  aisRateOfTurnDegPerMin,
   aisTrackSampleDecision,
   mergeAisKinematics,
   mergeAisStaticFields,
@@ -10693,6 +10695,10 @@ function ingestAisStreamEnvelope(envelope) {
     draught_m: staticData.draughtM ?? null,
     eta: stringValue(staticData.eta),
     nav_status: navStatus,
+    // Rýchlosť otáčania (°/min) nesie len správa triedy A; B a ostatné držia poslednú.
+    rate_of_turn: isClassAPosition
+      ? aisRateOfTurnDegPerMin(message.RateOfTurn)
+      : (previous?.rate_of_turn ?? null),
     ais_class: isClassAPosition ? 'A' : (isClassBPosition ? 'B' : (previous?.ais_class ?? null)),
     pos_estimated: posEstimated,
     speed,
@@ -12167,6 +12173,8 @@ export default defineConfig(({ mode }) => {
       geocodePlugin(),
       aisLiveProxy(),
       aiscastVesselsProxy(),
+      // Detail lode z registra (IMO, podrobný typ, rok, GT/DWT) + fotka podľa MMSI (2026-10-10).
+      vesselInfoProxy(),
       gfwPresenceProxy(),
       logoProxy(),
       gasProxy(),

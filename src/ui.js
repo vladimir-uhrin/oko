@@ -56,6 +56,7 @@ import { installCardActionBar, trackedCardRect } from './cardActionBar.js';
 import { installCardSwipeClose } from './cardSwipeClose.js';
 import { createScrollKeeper } from './scrollKeeper.js';
 import { destroyTrackedPhoto, installTrackedPhoto } from './data/trackedPhoto.js';
+import { destroyVesselPhoto, installVesselPhoto } from './data/vesselPhoto.js';
 import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFlightsStrip.js';
 import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
@@ -3138,6 +3139,16 @@ export class StyleManager {
     // Fotka sledovaného lietadla pod kartou (Planespotters Photo API, len
     // klientsky — podmienky zdroja, viď trackedPhoto.js).
     installTrackedPhoto(viewer, { container: document.body });
+    // Fotka vybranej lode pod jej kartou (register lodí cez /api/vessel-info, 2026-10-10).
+    installVesselPhoto(viewer, {
+      container: document.body,
+      getSelected: () => {
+        const live = aisLiveVesselsLayer.getSelectedMmsi?.();
+        if (live) return { mmsi: live, sourceId: 'ais-live-vessels', entryId: `vessel:${live}` };
+        const delayed = this._dataManager?.layers?.get('aishub-vessels')?.module?.getSelectedMmsi?.();
+        return delayed ? { mmsi: delayed, sourceId: 'aishub-vessels', entryId: `aishub:${delayed}` } : null;
+      },
+    });
     // Štátne lietadlá SR (2026-09-30, stateFlightsStrip.js): nad kartou sledovaného štátneho stroja
     // odznak a prepínač PREDCHÁDZAJÚCE LETY; let sa otvorí a prehrá v paneli História letov.
     const revealHistoryPanel = () => {
@@ -11711,6 +11722,7 @@ export class StyleManager {
     destroyVolcanoCard();
     destroyNaturalEventCard();
     destroyTrackedPhoto();
+    destroyVesselPhoto();
     destroyStateFlightsStrip();
     this._cardCloseButtons?.destroy();
     this._cardActionBar?.destroy();

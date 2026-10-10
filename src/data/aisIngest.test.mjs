@@ -15,6 +15,8 @@ import {
   aisHeadingDeg,
   aisNavStatusCode,
   aisPositionUsable,
+  AIS_ROT_FAST_DEG_PER_MIN,
+  aisRateOfTurnDegPerMin,
   aisSpeedKnots,
   aisTrackSampleDecision,
   mergeAisKinematics,
@@ -201,4 +203,18 @@ test('track ring: regresný čas vzorku nezasekne stopu navždy', () => {
   // stopy namiesto večného čakania.
   assert.equal(aisTrackSampleDecision(870, 900, GAP), 'reset');
   assert.equal(aisTrackSampleDecision(100, 900, GAP), 'reset');
+});
+
+test('rýchlosť otáčania: ROT_AIS → °/min, -128 nedostupné, ±127 = rýchlo bez čísla', () => {
+  assert.equal(aisRateOfTurnDegPerMin(0), 0);
+  assert.equal(aisRateOfTurnDegPerMin(-128), null, 'nedostupné');
+  assert.equal(aisRateOfTurnDegPerMin(128), null, 'nedostupné ako bajt bez znamienka');
+  assert.equal(aisRateOfTurnDegPerMin(null), null);
+  assert.equal(aisRateOfTurnDegPerMin(1.5), null, 'surová hodnota je celé číslo');
+  assert.equal(aisRateOfTurnDegPerMin(10), 4.5, '(10/4,733)² ≈ 4,46 → 4,5');
+  assert.equal(aisRateOfTurnDegPerMin(-10), -4.5, 'doľava záporné');
+  assert.equal(aisRateOfTurnDegPerMin(246), -4.5, 'bajt bez znamienka 246 = -10');
+  assert.equal(aisRateOfTurnDegPerMin(127), AIS_ROT_FAST_DEG_PER_MIN);
+  assert.equal(aisRateOfTurnDegPerMin(-127), -AIS_ROT_FAST_DEG_PER_MIN);
+  assert.ok(Number.isFinite(aisRateOfTurnDegPerMin(127)), 'musí prejsť cez JSON');
 });

@@ -35,6 +35,7 @@ import {
   routeRowFromRoute,
 } from './trackedCardModel.js';
 import { lookupPlanespottersPhoto } from './trackedPhoto.js';
+import { lookupVesselPhoto } from './vesselInfo.js';
 import { formatSpeedDual } from '../units.js';
 
 /** Odsadenie kartičky od kurzora (px) — nesmie sedieť pod hrotom myši. */
@@ -179,6 +180,8 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
     summary.registration && summary.registration !== headline ? summary.registration : null,
   ].filter(Boolean).join(' · ');
   details.push(machine || t(`aircraft.category.${summary.category}`));
+  // Vrstvy s ďalšími riadkami (lode 2026-10-10: register, trup, miestny čas).
+  if (Array.isArray(summary.extraLines)) details.push(...summary.extraLines.filter(Boolean));
 
   // 3. Trasa s vlajkami letísk (objekt), inak textový riadok, inak nič.
   const route = routeRowFromRoute(summary.routeInfo);
@@ -216,6 +219,10 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
     alert: alert ? `SQUAWK ${alert.code} · ${alert.label}` : null,
     military: summary.military === true,
     hex: summary.layerId === 'flights' && /^[0-9a-f]{6}$/.test(hex) ? hex : null,
+    // Kľúč fotky: hex lietadla (Planespotters) alebo „vessel:<MMSI>" (register lodí).
+    photoKey: summary.layerId === 'flights' && /^[0-9a-f]{6}$/.test(hex)
+      ? hex
+      : (/^vessel:\d{9}$/.test(String(summary.photoKey || '')) ? summary.photoKey : null),
     logos: summary.logos && (summary.logos.airline?.url || summary.logos.manufacturer?.url) ? summary.logos : null,
     // grafy výšky (s odhadom) a rýchlosti ako na karte po kliknutí (2026-09-27, vlastník: „mala tam
     // byť aj rýchlosť, stúpanie, grafy atď.")
@@ -287,6 +294,7 @@ let _pointerOnPhoto = false;
 let _onDwell = null;
 let _lastCandidate = null;
 let _lookupPhoto = lookupPlanespottersPhoto;
+let _lookupVesselPhoto = lookupVesselPhoto;
 let _setTimeoutImpl = (fn, ms) => setTimeout(fn, ms);
 let _clearTimeoutImpl = (id) => clearTimeout(id);
 
@@ -316,22 +324,27 @@ function appendRouteSide(doc, parent, side) {
 }
 
 function renderPhoto(doc, model, t) {
-  if (!model.hex || !_photoByHex.has(model.hex)) return null;
-  const photo = _photoByHex.get(model.hex);
+  const key = model.photoKey || model.hex;
+  if (!key || !_photoByHex.has(key)) return null;
+  const photo = _photoByHex.get(key);
   if (!photo) return null;
   const link = doc.createElement('a');
   link.className = 'contact-hover-card-photo';
   link.href = photo.link;
   link.target = '_blank';
   link.rel = 'noopener'; // ZÁMERNE bez nofollow — podmienka Planespotters
-  link.title = t('photo.open');
+  const vessel = photo.kind === 'vessel';
+  if (vessel) link.classList.add('contact-hover-card-photo--vessel');
+  link.title = vessel ? t('vessel.photo-open') : t('photo.open');
   const img = doc.createElement('img');
   img.src = photo.src;
-  img.alt = t('photo.alt');
+  img.alt = vessel ? t('vessel.photo-alt') : t('photo.alt');
   img.decoding = 'async';
   const credit = doc.createElement('span');
   credit.className = 'contact-hover-card-photo-credit';
-  credit.textContent = photo.photographer ? t('photo.credit', { name: photo.photographer }) : t('photo.credit-anonymous');
+  credit.textContent = vessel
+    ? t('vessel.photo-credit')
+    : (photo.photographer ? t('photo.credit', { name: photo.photographer }) : t('photo.credit-anonymous'));
   link.appendChild(img);
   link.appendChild(credit);
   link.addEventListener('mouseenter', () => { _pointerOnPhoto = true; });
@@ -528,21 +541,24 @@ function cancelPhotoTimer() {
  */
 function scheduleDwell(model, t) {
   cancelPhotoTimer();
-  const hex = model.hex;
+  const photoKey = model.photoKey || model.hex;
   const key = _currentKey;
   const candidate = _lastCandidate;
-  const needPhoto = Boolean(hex) && !_photoByHex.has(hex);
+  const needPhoto = Boolean(photoKey) && !_photoByHex.has(photoKey);
   if (!needPhoto && !_onDwell) return;
   _photoTimer = _setTimeoutImpl(() => {
     _photoTimer = null;
     if (_currentKey !== key) return; // myš medzitým odišla inam
     if (candidate) { try { _onDwell?.(candidate); } catch { /* enrichment nikdy nezhodí kartičku */ } }
     if (!needPhoto) return;
-    Promise.resolve(_lookupPhoto(hex)).then((photo) => {
-      _photoByHex.set(hex, photo || null);
+    const lookup = photoKey.startsWith('vessel:')
+      ? _lookupVesselPhoto(photoKey.slice('vessel:'.length))
+      : _lookupPhoto(photoKey);
+    Promise.resolve(lookup).then((photo) => {
+      _photoByHex.set(photoKey, photo || null);
       // Stále nad tým istým strojom → dokresliť fotku bez blikania textu.
       if (_card && !_card.hidden && _currentKey === key && _lastModel && _lastT) renderModel(_lastModel, _lastAt, _lastT);
-    }).catch(() => { _photoByHex.set(hex, null); });
+    }).catch(() => { _photoByHex.set(photoKey, null); });
   }, HOVER_PHOTO_DEBOUNCE_MS);
 }
 
@@ -566,15 +582,17 @@ function hideCard() {
  *   Zavolá sa raz po zotrvaní kurzora nad kontaktom (debounce) — vrstva si
  *   vypýta enrichment (typ, trasa), aby kartička mala čo ukázať.
  * @param {Function} [options.lookupPhoto] test seam (default Planespotters cez trackedPhoto.js)
+ * @param {Function} [options.lookupVesselPhoto] test seam (default register lodí cez vesselInfo.js)
  * @param {Function} [options.setTimeoutImpl] test seam
  * @param {Function} [options.clearTimeoutImpl] test seam
  * @returns {void}
  */
-export function installContactHoverCard({ container, resolveSummary, onDwell, lookupPhoto, setTimeoutImpl, clearTimeoutImpl }) {
+export function installContactHoverCard({ container, resolveSummary, onDwell, lookupPhoto, lookupVesselPhoto: vesselPhoto, setTimeoutImpl, clearTimeoutImpl }) {
   if (_card || !container) return;
   _resolveSummary = resolveSummary;
   _onDwell = typeof onDwell === 'function' ? onDwell : null;
   if (typeof lookupPhoto === 'function') _lookupPhoto = lookupPhoto;
+  if (typeof vesselPhoto === 'function') _lookupVesselPhoto = vesselPhoto;
   if (typeof setTimeoutImpl === 'function') _setTimeoutImpl = setTimeoutImpl;
   if (typeof clearTimeoutImpl === 'function') _clearTimeoutImpl = clearTimeoutImpl;
   _card = container.ownerDocument.createElement('div');
@@ -636,6 +654,7 @@ export function _resetContactHoverCardForTest() {
   destroyContactHoverCard();
   _photoByHex.clear();
   _lookupPhoto = lookupPlanespottersPhoto;
+  _lookupVesselPhoto = lookupVesselPhoto;
   _setTimeoutImpl = (fn, ms) => setTimeout(fn, ms);
   _clearTimeoutImpl = (id) => clearTimeout(id);
 }

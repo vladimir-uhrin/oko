@@ -34,6 +34,9 @@ import {
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
 import { SILHOUETTE_MAX_CAMERA_M, convoyBarges, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, topSilhouetteDataUrl, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
 import { loadRiverIndex, onRiverIndexReady, riverUpstreamBearing } from './riverDirection.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts } from './vesselCardDetails.js';
+import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
+import { vesselTimeZone } from './vesselTimeZone.js';
 
 /** Smer trupu na zobrazenie: heading → v pohybe cog → stojaca pri rieke proti prúdu → cog (vesselSilhouettes). */
 function aishubDisplayCourseDeg(row) {
@@ -169,6 +172,18 @@ export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
   // nav status ako operator, typ, rýchlosť, kurz, vlajka. Poctivosť nesie
   // riadok „route" (oneskorené + vek údaja) a zdroj — nikdy LIVE.
   const age = aishubAgeLabel(row.observedAt, nowMs);
+  // 2026-10-10: kurz/smer zvlášť, register lodí (IMO, typ, rok, GT/DWT, rozmery) a miestny čas.
+  const lang = currentLanguage();
+  const info = cachedVesselInfo(mmsi) || null;
+  const speedText = sog === null ? ''
+    : `${lang === 'sk' ? sog.toFixed(1).replace('.', ',') : sog.toFixed(1)} kn`;
+  const motion = [speedText, ...vesselMotionParts({ course: row.cog, heading: row.heading }, translate, lang)].filter(Boolean).join(' · ');
+  const local = vesselLocalTimeLabel(row.lon, nowMs, vesselTimeZone(row.lat, row.lon));
+  const extraLines = [
+    vesselRegistryParts(info, translate, lang).join(' · '),
+    vesselHullParts({}, info, translate, lang).join(' · '),
+    local ? translate('vessel.local-time', { time: local }) : '',
+  ].filter(Boolean);
   return {
     layerId: AISHUB_LAYER_ID,
     id: mmsi || aishubDisplayName(row),
@@ -187,6 +202,9 @@ export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
     progress: null,
     route: age ? `${translate('aishub.delayed')} · ${age}` : translate('aishub.delayed'),
     flightIata: null,
+    flightLines: motion ? [motion] : null,
+    extraLines,
+    photoKey: /^\d{9}$/.test(mmsi) ? `vessel:${mmsi}` : null,
     // Zdroj poctivo: aishub, alebo skutočný pod-zdroj (barentswatch, digitraffic…).
     source: row.source && row.source !== 'aishub' ? `AISHub · ${row.source}` : 'AISHub',
     lastContactEpochMs: Number.isFinite(row.observedAt) ? row.observedAt : null,
@@ -244,10 +262,25 @@ export function aishubLabelCard(row, position, translate = t, nowMs = Date.now()
     accent: accentForVesselType(row.type),
     title: name.length > 26 ? `${name.slice(0, 25)}…` : name,
     titleFlag: mmsiFlag(row.mmsi)?.iso2 || null,
-    details: [parts.join(' · ')],
+    details: [parts.join(' · '), ...aishubSelectedExtraLines(row, translate, nowMs)],
     selected,
     priority: (selected ? 100000 : 0) + (row.name ? 1000 : 0) + (row.type ? 40 : 0) + (Number.isFinite(row.sog) && row.sog > 0.5 ? 30 : 0),
   };
+}
+
+/**
+ * Riadky vybranej karty z registra lodí a miestny čas (2026-10-10). AIS z AISHub
+ * nenesie IMO ani rozmery — doplní ich register, keď loď pozná. Pure.
+ */
+export function aishubSelectedExtraLines(row, translate = t, nowMs = Date.now()) {
+  const lang = currentLanguage();
+  const info = cachedVesselInfo(row?.mmsi) || null;
+  const local = vesselLocalTimeLabel(row?.lon, nowMs, vesselTimeZone(row?.lat, row?.lon));
+  return [
+    vesselRegistryParts(info, translate, lang).join(' · '),
+    vesselHullParts({}, info, translate, lang).join(' · '),
+    local ? translate('vessel.local-time', { time: local }) : '',
+  ].filter(Boolean);
 }
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
@@ -479,6 +512,12 @@ export function createAishubVesselsLayer({
     applySelectedVisual();
     publishLabels();
     _viewer?.scene?.requestRender?.();
+    // Register a fotka — karta sa doplní, keď príde (fotku kreslí vesselPhoto.js).
+    if (next && cachedVesselInfo(next) === undefined) {
+      lookupVesselInfo(next).then((info) => {
+        if (info && _selectedKey === next) { publishLabels(); _viewer?.scene?.requestRender?.(); }
+      });
+    }
   }
 
   function onLeftClick(click) {
@@ -715,6 +754,16 @@ export function createAishubVesselsLayer({
       const key = String(id ?? '').trim();
       if (!key) return false;
       return _byId.has(key) || _rows.some((r) => String(r.mmsi) === key);
+    },
+
+    /** Zotrvanie myši nad loďou: vypýtaj register a fotku. */
+    prefetchContactDetails(id) {
+      lookupVesselInfo(id);
+    },
+
+    /** MMSI práve vybranej lode (fotka pod kartou), inak null. */
+    getSelectedMmsi() {
+      return _selectedKey;
     },
 
     getContactSummary(id) {
