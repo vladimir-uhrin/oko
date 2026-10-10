@@ -3548,6 +3548,11 @@ export function firmsProxy() {
 
   /** Spustí obnovu na pozadí (single-flight; po zlyhaní 5 min pauza). @returns {?Promise} */
   function startRefresh(key) {
+  // Stav pre admin („čo horí“, src/admin/server/api.js attention): jeden proces = jeden firmsProxy s API.
+  if (!String(process.env.OKO_API_UPSTREAM || '').trim()) {
+    globalThis.__okoFirmsStatus = () => ({ hasKey: Boolean(mapKey()), lastFetch: mem?.at ?? null, sources: mem?.sources ?? [], sentinel3: sentinel3.status() });
+  }
+
     if (!inflight && Date.now() - lastRefreshFailAt >= REFRESH_RETRY_MS) {
       const prevAt = mem?.at ?? null;
       inflight = refreshUpstream(key)

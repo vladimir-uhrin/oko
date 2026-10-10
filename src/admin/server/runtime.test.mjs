@@ -395,3 +395,15 @@ test('zdravie kariet lietadiel: vzorky z prehliadača po hodinách; bez trasy po
   store.prune(clock.time + 31 * 86400_000);
   assert.equal(store.cardHealth(0).length, 0, 'po 30 dňoch preč');
 });
+
+test('čo horí: požiare sa neobnovujú, chýba skupina družíc, Sentinel-3 chyba; bez kľúča a čerstvé = pokoj', async t => {
+  const { runtime, clock } = setup(t);
+  const { attention } = await import('./api.js');
+  const ok = { hasKey: true, lastFetch: clock.time - 10 * 60_000, sources: [{ source: 'VIIRS_SNPP_NRT', ok: true }, { source: 'MODIS_NRT', ok: true }], sentinel3: { enabled: true, error: null } };
+  assert.deepEqual(attention(runtime, clock.time, { fires: ok }), [], 'čerstvé a všetko beží = pokoj');
+  assert.deepEqual(attention(runtime, clock.time, { fires: { ...ok, hasKey: false, lastFetch: 0 } }), [], 'bez kľúča sa nič nehlási');
+  const stale = attention(runtime, clock.time, { fires: { ...ok, lastFetch: clock.time - 3 * 3600_000 } });
+  assert.deepEqual(stale, [{ level: 'bad', tab: 'feeds', text: 'Požiare sa neobnovujú 3 h' }]);
+  const down = attention(runtime, clock.time, { fires: { ...ok, sources: [{ source: 'VIIRS_SNPP_NRT', ok: false, reused: true }, { source: 'MODIS_NRT', ok: true }], sentinel3: { enabled: true, error: 'CDSE token HTTP 401' } } });
+  assert.deepEqual(down.map((i) => i.text), ['Požiare bez: VIIRS (staršie)', 'Sentinel-3: CDSE token HTTP 401']);
+});

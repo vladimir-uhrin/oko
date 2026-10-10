@@ -2,6 +2,7 @@
 // Volá ho src/auth/server/admin.js AŽ po kontrole roly owner; tu sa rola nerieši.
 import { FEEDS, feedById } from './feeds.js';
 import { localDay } from './runtime.js';
+import { downSourceGroups } from '../../data/firmsLabels.js';
 
 const HOUR = 3600_000;
 const DAY = 86400_000;
@@ -153,8 +154,17 @@ export function feedHistory(runtime, now, hours) {
  * @param {object} studioCounts store.studioCounts() alebo null
  * @returns {{level: 'bad'|'warn'|'info', tab: string, text: string}[]}
  */
-export function attention(runtime, now, { studioCounts = null, upstream = [] } = {}) {
+export function attention(runtime, now, { studioCounts = null, upstream = [], fires = null } = {}) {
   const items = [];
+  // Požiare (2026-10-10): od 7. 10. sa 3 dni neobnovovali a nikto to nevidel. Obnova beží každých
+  // 30 min — nad 75 min bez obnovy je to chyba; chýbajúce družice a Sentinel-3 ako upozornenie.
+  if (fires?.hasKey) {
+    const ageMin = fires.lastFetch ? Math.round((now - fires.lastFetch) / 60_000) : null;
+    if (ageMin === null || ageMin > 75) items.push({ level: 'bad', tab: 'feeds', text: ageMin === null ? 'Požiare sa ešte neobnovili' : `Požiare sa neobnovujú ${ageMin >= 120 ? `${Math.round(ageMin / 60)} h` : `${ageMin} min`}` });
+    const down = downSourceGroups(fires.sources);
+    if (down.length) items.push({ level: 'warn', tab: 'feeds', text: `Požiare bez: ${down.map((d) => d.group + (d.reused ? ' (staršie)' : '')).join(', ')}` });
+    if (fires.sentinel3?.enabled && fires.sentinel3.error) items.push({ level: 'warn', tab: 'feeds', text: `Sentinel-3: ${String(fires.sentinel3.error).slice(0, 80)}` });
+  }
   // Karty lietadiel (2026-10-05): z kontrol prehliadačov za 2 h. Dopravca/trasa chýba aj normálne
   // (charter, presun bez čísla letu), preto až pod 30 % a pri aspoň 3 kontrolách.
   runtime.flush();

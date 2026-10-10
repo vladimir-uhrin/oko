@@ -68,7 +68,7 @@ export function createAdminRoutes({ store, now, idleMs, sources = {}, isOwnerSes
       if (route === '/api/admin/live') return json(res, 200, needRuntime().liveSnapshot());
       if (route === '/api/admin/attention') {
         const r = needRuntime();
-        return json(res, 200, { items: attention(r, now(), { studioCounts: r.store.studioCounts(), upstream: upstreamRegistry.snapshot() }), liveNow: r.liveVisitors() });
+        return json(res, 200, { items: attention(r, now(), { studioCounts: r.store.studioCounts(), upstream: upstreamRegistry.snapshot(), fires: globalThis.__okoFirmsStatus?.() ?? null }), liveNow: r.liveVisitors() });
       }
       if (route === '/api/admin/health') {
         // Externé zdroje (spoločný register) a zdravie kariet lietadiel za 24 h (2026-10-05).

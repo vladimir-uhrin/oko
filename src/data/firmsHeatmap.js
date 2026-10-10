@@ -312,10 +312,10 @@ export function createFirmsHeatmapLayer({
      */
     getStats() {
       const now = Date.now();
-      const staleText = _lastUpdate ? `STALE · cached ${formatAge(now - _lastUpdate) || '<1h'}` : 'STALE';
+      const staleText = _lastUpdate ? t('firms.status.stale', { age: formatAge(now - _lastUpdate) || '<1h' }) : t('firms.status.stale-bare');
       let loadingLabel = '';
       if (_loading) {
-        loadingLabel = _fires.length ? 'refreshing...' : 'loading...';
+        loadingLabel = t(_fires.length ? 'firms.status.refreshing' : 'firms.status.loading');
       } else if (_keyRequired) {
         loadingLabel = t('firms.key-required');
       } else if (_stale) {
@@ -323,7 +323,7 @@ export function createFirmsHeatmapLayer({
       } else if (_error) {
         loadingLabel = _error;
       } else if (_lastUpdate) {
-        loadingLabel = `LIVE · updated ${formatAgoMinutes(now - _lastUpdate)}`;
+        loadingLabel = t('firms.status.live', { ago: formatAgoMinutes(now - _lastUpdate) });
       }
       // Poctivo, čo chýba (2026-10-07: NASA výpadok — Sentinel-3 ide ďalej): „· bez VIIRS (staršie)“.
       if (_down.length && !_loading && !_keyRequired) {
@@ -1551,10 +1551,10 @@ function screenSeparated(accepted, screen) {
  * @returns {Object} firmsLabels entry.
  */
 export function buildSelectedFireCard(fire, nowMs) {
-  const meta = [`${confidenceBucket(fire.confidence)} conf`];
+  const meta = [t('firms.card.conf', { level: confidenceLabel(fire.confidence) })];
   if (fire.acqMs > 0) {
     const age = formatAge(nowMs - fire.acqMs);
-    if (age) meta.push(`${age} ago`);
+    if (age) meta.push(t('firms.card.ago', { age }));
   }
   const sat = satelliteShortName(fire.satellite);
   meta.push(sat ? `${fire.sensor || (fire.geo ? 'GEO' : 'VIIRS')} ${sat}` : (fire.sensor || 'sensor n/a'));
@@ -1563,7 +1563,7 @@ export function buildSelectedFireCard(fire, nowMs) {
   const seen = [];
   if (fire.acqMs > 0) seen.push(`${satelliteFullName(fire.satellite) || fire.sensor || '?'} ${formatAgoMinutes(nowMs - fire.acqMs)}`);
   if (fire.geoSeenMs > 0) seen.push(`+ ${satelliteFullName(fire.geoSat)} ${formatAgoMinutes(nowMs - fire.geoSeenMs)}`);
-  else if (fire.geo && fire.repeats > 1) seen.push(`${fire.repeats}× in 3h`);
+  else if (fire.geo && fire.repeats > 1) seen.push(t('firms.card.repeats', { n: fire.repeats }));
   if (fire.scanKm > 0 && fire.trackKm > 0 && fire.scanKm < 10) seen.push(`pixel ${fire.scanKm.toFixed(1)}×${fire.trackKm.toFixed(1)} km`);
   else if (fire.geo) seen.push('pixel ~2–4 km');
   return {
@@ -1574,10 +1574,10 @@ export function buildSelectedFireCard(fire, nowMs) {
     cullPosition: fireCullPosition(fire),
     gapPx: frpPixelSize(fire.frp),
     accent: accentForSeverity(detectionColorStop(fire).name),
-    title: `FIRE · ${formatFrp(fire.frp)} MW`,
+    title: t('firms.card.fire', { mw: formatFrp(fire.frp) }),
     details: [
       meta.join(' · '),
-      formatLatLon(fire.lat, fire.lon) + (fire.night ? ' · NIGHT' : ' · DAY'),
+      formatLatLon(fire.lat, fire.lon) + ` · ${t(fire.night ? 'firms.card.night' : 'firms.card.day')}`,
       ...(seen.length ? [seen.join(' · ')] : []),
     ],
     selected: true,
@@ -1596,7 +1596,7 @@ export function buildSelectedFireCard(fire, nowMs) {
  */
 export function buildFireCard(candidate, nowMs) {
   const fire = candidate.fire;
-  const meta = [confidenceBucket(fire.confidence)];
+  const meta = [confidenceLabel(fire.confidence)];
   if (fire.acqMs > 0) {
     const age = formatAge(nowMs - fire.acqMs);
     if (age) meta.push(age);
@@ -1628,11 +1628,11 @@ export function buildFireCard(candidate, nowMs) {
  */
 export function buildCellCard(candidate, nowMs) {
   const cell = candidate.cell;
-  const noun = cell.count === 1 ? 'FIRE' : 'FIRES';
+  const noun = t(cell.count === 1 ? 'firms.card.fire-one' : (cell.count < 5 ? 'firms.card.fire-few' : 'firms.card.fire-many'));
   const parts = [`max ${formatFrp(cell.maxFrp)} MW`];
   if (cell.newestAcqMs > 0) {
     const age = formatAge(nowMs - cell.newestAcqMs);
-    if (age) parts.push(`new ${age}`);
+    if (age) parts.push(t('firms.card.newest', { age }));
   }
   return {
     id: `cell:${cell.latCell ?? 'x'}:${cell.lonCell ?? 'x'}`,
@@ -1713,11 +1713,16 @@ function formatAge(deltaMs) {
 
 /** Millisecond delta → "<1m ago" / "Xm ago" / "Xh ago" (fresh-feed readout). */
 function formatAgoMinutes(deltaMs) {
-  if (!Number.isFinite(deltaMs) || deltaMs < 0) return 'just now';
+  if (!Number.isFinite(deltaMs) || deltaMs < 0) return t('firms.ago.now');
   const minutes = Math.floor(deltaMs / 60000);
-  if (minutes < 1) return '<1m ago';
-  if (minutes < 90) return `${minutes}m ago`;
-  return `${Math.round(minutes / 60)}h ago`;
+  if (minutes < 1) return t('firms.ago.lt1m');
+  if (minutes < 90) return t('firms.ago.m', { n: minutes });
+  return t('firms.ago.h', { n: Math.round(minutes / 60) });
+}
+
+/** Spoľahlivosť pre kartu v jazyku UI (2026-10-10: karty boli len po anglicky). */
+function confidenceLabel(confidence) {
+  return t(`firms.conf.${confidenceBucket(confidence)}`);
 }
 
 /** Normalized 0..1 confidence → low/nominal/high display bucket. */
