@@ -226,3 +226,33 @@ test('čip DEEPSTATE sa skryje spolu s riadkom osi, keď server odmietne (451)',
   for (const fn of tlListeners) fn();
   assert.equal(chip.hidden, false, 'keď súhlas príde, čip sa vráti sám');
 });
+
+test('VYPNÚŤ UKRAJINU: skryté, kým nič nebeží; po podklade alebo smere viditeľné a klik zavolá onExit', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  const layer = fakeLayer();
+  const timelineListeners = new Set();
+  let timelineShown = false;
+  const timeline = { isShown: () => timelineShown, onChange(fn) { timelineListeners.add(fn); return () => timelineListeners.delete(fn); }, isDeepStateAvailable: () => true };
+  let exits = 0;
+  const panel = createUkrainePanel({ mountTarget: mount, layer, timeline, onExit: () => { exits += 1; }, translate: tKey, lang: 'sk', documentRef: doc });
+  const exit = byClass(mount, 'ukraine-exit')[0];
+  assert.ok(exit, 'tlačidlo existuje');
+  assert.equal(exit.textContent, 'ukraine.exit');
+  assert.equal(exit.hidden, true, 'nič nebeží → nezavadzia');
+  layer.emit({ shown: true });
+  assert.equal(exit.hidden, false, 'podklad zapnutý → dá sa vypnúť');
+  layer.emit({ shown: false });
+  assert.equal(exit.hidden, true);
+  timelineShown = true; for (const fn of timelineListeners) fn();
+  assert.equal(exit.hidden, false, 'aj samotná časová os (udalosti) sa počíta');
+  timelineShown = false; for (const fn of timelineListeners) fn();
+  panel.setActiveScene('lyman');
+  assert.equal(exit.hidden, false, 'aktívny smer');
+  exit.click();
+  assert.equal(exits, 1);
+  panel.setActiveScene(null);
+  assert.equal(exit.hidden, true);
+  const without = createUkrainePanel({ mountTarget: doc.createElement('div'), layer: fakeLayer(), translate: tKey, documentRef: doc });
+  assert.equal(byClass(without.element, 'ukraine-exit').length, 0, 'bez onExit žiadne tlačidlo');
+});

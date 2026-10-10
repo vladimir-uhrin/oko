@@ -1252,9 +1252,51 @@ async function init() {
     onActiveMapStackChange((stack) => { if (stack?.id !== 'karta') autoKartaPrev = null; });
     // Zatvorená časová os = odchod zo smeru.
     ukraineTimeline.onChange((st) => { if (!st?.shown && autoKartaPrev) restoreAutoKarta(); });
+    // Návrat z UKRAJINY (2026-10-10, vlastník: „keď zapnem Ukrajinu neviem ako ju vypnúť"):
+    // pred prvým smerom si zapamätáme kameru a vrstvy, ktoré scéna vypne.
+    let frontReturnPose = null;
+    let frontDisabledLayerIds = [];
+    const captureFrontReturnPose = () => {
+      const camera = viewer?.camera;
+      const c = camera?.positionCartographic;
+      if (!c || !Number.isFinite(c.latitude)) return null;
+      return { lon: Cesium.Math.toDegrees(c.longitude), lat: Cesium.Math.toDegrees(c.latitude), height: c.height, heading: camera.heading, pitch: camera.pitch };
+    };
+    /**
+     * Vypne celý modul UKRAJINA: smer, podklad (s ním hlásenie a plochy), kontrolu
+     * sídiel, DeepState, udalosti s časovou osou, škody a poplachy; vráti podklad
+     * mapy spred KARTY, vrstvy, ktoré smer vypol, a kameru spred prvého smeru.
+     */
+    const exitUkraine = () => {
+      const hadScene = Boolean(activeFrontScene);
+      activeFrontScene = null;
+      kartaOverlay?.setScene?.(null);
+      ukrainePanel?.setActiveScene?.(null);
+      ukraineTimeline.setActiveScene(null);
+      try { ukraineTimeline.hide(); } catch { /* */ }
+      for (const part of [ukraineControl, ukraineDeepState, ukraineDamage, ukraineAlerts, ukraineEvents, ukraineBase]) {
+        try { part?.hide?.(); } catch { /* ďalšia časť */ }
+      }
+      restoreAutoKarta();
+      if (!activeChokepoint && !activeTheatre) revealGate.deactivate();
+      syncMapFocus();
+      for (const layerId of frontDisabledLayerIds) { try { dataManager.setEnabled(layerId, true); } catch { /* */ } }
+      frontDisabledLayerIds = [];
+      const pose = frontReturnPose;
+      frontReturnPose = null;
+      if (hadScene && pose && viewer?.camera?.flyTo) {
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.height),
+          orientation: { heading: pose.heading, pitch: pose.pitch, roll: 0 },
+          duration: 2.5,
+        });
+      }
+      trackEvent('scene_close', { scene_type: 'front' });
+    };
     const runFrontScene = (id) => {
       const scene = frontSceneById(id);
       if (scene) trackEvent('scene_open', { scene_type: 'front', scene_id: String(id) });
+      if (scene && !activeFrontScene) frontReturnPose = captureFrontReturnPose();
       if (scene && mapStackController.getActiveId() !== 'karta') {
         autoKartaPrev = mapStackController.getActiveId();
         try { void Promise.resolve(styleManager._setMapStack('karta')).catch(() => {}); } catch { /* */ }
@@ -1279,7 +1321,10 @@ async function init() {
         void ukraineTimeline.showDeepState();
       }
       syncMapFocus();
-      return applyFrontScene(id, frontSceneDeps);
+      return applyFrontScene(id, frontSceneDeps).then((result) => {
+        for (const layerId of result?.disabledLayerIds || []) if (!frontDisabledLayerIds.includes(layerId)) frontDisabledLayerIds.push(layerId);
+        return result;
+      });
     };
     // Karta smeru (B5): trend útokov z archívu hlásení GŠ + najčastejšie sídla;
     // klik na sídlo = kamera nad neho (z juhu, ako front scéna).
@@ -1308,8 +1353,10 @@ async function init() {
       alerts: ukraineAlerts,
       directionCard: ukraineDirectionCard,
       applyScene: (id) => runFrontScene(id),
+      onExit: () => exitUkraine(),
     });
     window.__godsEyeView.ukrainePanel = ukrainePanel;
+    window.__godsEyeView.exitUkraine = exitUkraine;
     // Správy z otvorených zdrojov pre región `ukraine` (etapa 2): ten istý
     // bulletin ako ZÁLIV, jediný región (bez čipov), lenivo pri rozbalení panela.
     if (ukrainePanel.newsMount) {

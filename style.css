@@ -11842,6 +11842,10 @@ body.recording-mode .state-strip {
 .ukraine-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ukraine-toggle { flex: 0 0 auto; }
 .ukraine-toggle.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+/* VYPNÚŤ UKRAJINU (2026-10-10): jediný východ z modulu — musí byť vidno hneď vedľa podkladu. */
+.ukraine-exit { flex: 0 0 auto; color: #ff8a80; border-color: rgba(255, 106, 94, 0.55); }
+.ukraine-exit:hover, .ukraine-exit:focus-visible { color: #ffd2cd; border-color: #ff6a5e; background: rgba(255, 106, 94, 0.14); }
+.ukraine-exit[hidden] { display: none; }
 .ukraine-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .ukraine-counts {
   font-family: var(--font-mono);

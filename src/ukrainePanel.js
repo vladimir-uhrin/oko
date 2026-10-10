@@ -24,6 +24,7 @@ const INERT = { element: null, newsMount: null, update() {}, updateReport() {}, 
  * @param {object} o.layer prekryv podkladu (createUkraineBaseLayer)
  * @param {ReadonlyArray<object>} [o.scenes] presety smerov
  * @param {(id: string) => any} [o.applyScene] spustí preset (main.js)
+ * @param {() => any} [o.onExit] vypne celý modul UKRAJINA a vráti mapu (main.js exitUkraine)
  * @param {object} [o.directionCard] karta smeru (createUkraineDirectionCard) — vkladá sa pod aktívny smer
  * @param {Function} [o.translate]
  * @param {string} [o.lang]
@@ -42,6 +43,7 @@ export function createUkrainePanel({
   directionCard = null,
   scenes = listFrontScenes(),
   applyScene = null,
+  onExit = null,
   translate = t,
   lang = currentLanguage(),
   documentRef = globalThis.document,
@@ -71,6 +73,16 @@ export function createUkrainePanel({
   const toggle = button('panel-layer-toggle ukraine-toggle', translate('ukraine.base.show'), () => { void layer.toggle(); });
   toggle.setAttribute('aria-pressed', 'false');
   row.appendChild(toggle);
+  // VYPNÚŤ UKRAJINU (2026-10-10, vlastník: „keď zapnem Ukrajinu neviem ako ju vypnúť"):
+  // „Skryť podklad" zhasol len podklad — KARTA, kontrola, DeepState, os a legenda ostali.
+  // Toto tlačidlo vypne všetko naraz a vráti mapu, vrstvy aj kameru spred zapnutia.
+  let exitButton = null;
+  if (typeof onExit === 'function') {
+    exitButton = button('panel-layer-toggle ukraine-exit', translate('ukraine.exit'), () => { void onExit(); });
+    exitButton.title = translate('ukraine.exit.hint');
+    exitButton.hidden = true;
+    row.appendChild(exitButton);
+  }
   const chips = el('div', 'ukraine-chips');
   chips.setAttribute('role', 'group');
   chips.setAttribute('aria-label', translate('ukraine.base.title'));
@@ -243,6 +255,17 @@ export function createUkrainePanel({
     return translate('ukraine.base.counts', { places: numberFormat.format(places), roads: numberFormat.format(roads), oblasts: numberFormat.format(oblasts) });
   }
 
+  /** Tlačidlo VYPNÚŤ UKRAJINU je vidno, kým je zapnutá aspoň jedna časť modulu. */
+  function updateExitButton() {
+    if (!exitButton) return;
+    let baseOn = false;
+    try { baseOn = Boolean(layer.getState?.()?.shown); } catch { baseOn = false; }
+    const on = baseOn || [timeline, control, deepstate, damage, alerts].some((part) => {
+      try { return Boolean(part?.isShown?.()); } catch { return false; }
+    }) || Boolean(activeScene);
+    exitButton.hidden = !on;
+  }
+
   function update(state = layer.getState()) {
     const s = statusFor(state);
     status.textContent = s.text;
@@ -259,6 +282,7 @@ export function createUkrainePanel({
     const text = countsFor(state.meta);
     counts.textContent = text || '';
     counts.hidden = !text;
+    updateExitButton();
   }
 
   let activeScene = null;
@@ -275,6 +299,7 @@ export function createUkrainePanel({
     const anchor = activeScene ? dirByScene.get(activeScene) : null;
     if (card && anchor && typeof dirs.insertBefore === 'function') dirs.insertBefore(card, anchor.nextSibling || null);
     directionCard?.setScene?.(activeScene);
+    updateExitButton();
   }
 
   /** Hlásenie GŠ do karty a počty na tlačidlá smerov (etapa 2). */
@@ -325,6 +350,7 @@ export function createUkrainePanel({
     const on = Boolean(timeline?.isShown?.());
     eventsChip.classList?.toggle?.('active', on);
     eventsChip.setAttribute('aria-pressed', String(on));
+    updateExitButton();
   };
   const unsubscribeTimeline = timeline?.onChange?.(() => { updateEventsChip(); updateDeepStateChip(); }) || null;
   updateEventsChip();
@@ -333,6 +359,7 @@ export function createUkrainePanel({
     const on = Boolean(control?.isShown?.());
     controlChip.classList?.toggle?.('active', on);
     controlChip.setAttribute('aria-pressed', String(on));
+    updateExitButton();
   };
   const unsubscribeControl = control?.onChange?.(() => updateControlChip()) || null;
   updateControlChip();
@@ -355,6 +382,7 @@ export function createUkrainePanel({
     const on = Boolean(deepstate?.isShown?.());
     deepstateChip.classList?.toggle?.('active', on);
     deepstateChip.setAttribute('aria-pressed', String(on));
+    updateExitButton();
   };
   const unsubscribeDeepState = deepstate?.onChange?.(() => updateDeepStateChip()) || null;
   updateDeepStateChip();
@@ -363,6 +391,7 @@ export function createUkrainePanel({
     const on = Boolean(damage?.isShown?.());
     damageChip.classList?.toggle?.('active', on);
     damageChip.setAttribute('aria-pressed', String(on));
+    updateExitButton();
   };
   const unsubscribeDamage = damage?.onChange?.(() => updateDamageChip()) || null;
   updateDamageChip();
@@ -371,6 +400,7 @@ export function createUkrainePanel({
     const on = Boolean(alerts?.isShown?.());
     alertsChip.classList?.toggle?.('active', on);
     alertsChip.setAttribute('aria-pressed', String(on));
+    updateExitButton();
   };
   const unsubscribeAlerts = alerts?.onChange?.(() => updateAlertsChip()) || null;
   updateAlertsChip();
