@@ -22,6 +22,7 @@ import { currentLanguage, t } from '../i18n.js';
 import { GFW_CELL_DEG, GFW_HIGH_CELL_DEG, quantizeGfwBbox } from './gfwPresenceCore.js';
 import { isOwnedByOtherLayer, registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
 import { HISTORY_LINE_STYLE, createVesselVoyageLine, historyLinePositionsDeg } from './vesselVoyageLine.js';
+import { buildVesselTrackedEntry } from './vesselTrackedCard.js';
 import {
   VESSEL_CARD_FADE_DISTANCE_M,
   accentForVesselType,
@@ -222,20 +223,32 @@ export function gfwLabelCard(row, position, meta, translate = t, lang = currentL
  * ako kartička pod kurzorom — oneskorenie, novšia poloha z registra, odkiaľ,
  * predchádzajúce prístavy, register, trup. Pure.
  */
-export function gfwSelectedCard(row, position, meta, translate = t, lang = currentLanguage()) {
-  const base = gfwLabelCard(row, position, meta, translate, lang);
-  const summary = gfwContactSummary(row, meta, translate, lang);
-  const head = [summary?.type, gfwDelayedLabel(meta, translate, lang)].filter(Boolean).join(' · ');
-  const route = summary?.routeInfo
-    ? `${summary.routeInfo.origin.code || summary.routeInfo.origin.name} → ${summary.routeInfo.destination.code || summary.routeInfo.destination.name}`
-    : '';
-  return {
-    ...base,
-    actionable: true,
-    details: [head, route, ...(summary?.extraLines || [])].filter(Boolean),
-    selected: true,
-    priority: 100000,
-  };
+export function gfwSelectedCard(row, position, meta, translate = t, lang = currentLanguage(), chartPoints = []) {
+  // 2026-10-10 („sprav karty minimálne také kvalitné ako pri lietadlách"): dokovaná karta
+  // ako pri lietadle; poloha je ~3 dni stará → bez priebehu a miestneho času (delayed).
+  const mmsi = String(row?.mmsi || '').trim();
+  const info = /^\d{9}$/.test(mmsi) ? cachedVesselInfo(mmsi) || null : null;
+  return buildVesselTrackedEntry({
+    id: `gfw:${row.mmsi || row.vesselId || `${row.lat},${row.lon}`}`,
+    position,
+    name: gfwDisplayName(row),
+    flagIso: mmsiFlag(mmsi)?.iso2 || null,
+    accent: accentForVesselType(row.type),
+    vessel: {
+      mmsi,
+      lat: row.lat,
+      lon: row.lon,
+      typeText: normalizeVesselType(row.type) === 'OTHER' ? '' : normalizeVesselType(row.type),
+      callSign: String(row.callsign || '').trim(),
+      imo: row.imo,
+      fixMs: Number.isFinite(row.lastSeen) ? row.lastSeen : null,
+    },
+    info,
+    portIndex: cachedPortIndex(),
+    chartPoints,
+    sourceLine: ['Global Fishing Watch', gfwDelayedLabel(meta, translate, lang)].filter(Boolean).join(' · '),
+    delayed: true,
+  }, translate, lang);
 }
 
 /** Body trasy z registra → `[[lon, lat, 0], …]` (aspoň 2). Pure. */
@@ -288,6 +301,8 @@ export function createGfwPresenceLayer({
   let _selectedKey = null;
   /** Riadok vybranej lode — výber prežije oddialenie aj nový výrez bez nej. */
   let _selectedRow = null;
+  /** Trasa vybranej lode z registra (grafy karty). */
+  let _selectedTrack = [];
   let _clickHandler = null;
   let _historyLine = null;
   let _trackLine = null;
@@ -359,7 +374,7 @@ export function createGfwPresenceLayer({
       : null;
     const cards = [];
     for (const [key, { row, billboard }] of _byId.entries()) {
-      if (key === _selectedKey) { cards.push(gfwSelectedCard(row, billboard.position, _meta)); continue; }
+      if (key === _selectedKey) { cards.push(gfwSelectedCard(row, billboard.position, _meta, t, currentLanguage(), _selectedTrack)); continue; }
       if (project && width && height) {
         const win = project(billboard.position);
         if (!win || win.x < 0 || win.y < 0 || win.x > width || win.y > height) continue;
@@ -367,10 +382,10 @@ export function createGfwPresenceLayer({
       cards.push(gfwLabelCard(row, billboard.position, _meta));
     }
     if (_selectedRow && _selectedKey && !_byId.has(_selectedKey)) {
-      cards.push(gfwSelectedCard(_selectedRow, Cesium.Cartesian3.fromDegrees(_selectedRow.lon, _selectedRow.lat, GFW_PRESENCE_POINT_HEIGHT_M), _meta));
+      cards.push(gfwSelectedCard(_selectedRow, Cesium.Cartesian3.fromDegrees(_selectedRow.lon, _selectedRow.lat, GFW_PRESENCE_POINT_HEIGHT_M), _meta, t, currentLanguage(), _selectedTrack));
     }
     cards.sort((a, b) => b.priority - a.priority);
-    const entries = cards.slice(0, GFW_PRESENCE_MAX_LABELS).map((card) => applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M));
+    const entries = cards.slice(0, GFW_PRESENCE_MAX_LABELS).map((card) => (card.variant === 'tracked' ? card : applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M)));
     _labelCount = entries.length;
     const ambientLimit = vesselOverlayCohortLimit(width, height, GFW_PRESENCE_MAX_LABELS);
     overlayHost.setEntries(GFW_PRESENCE_OVERLAY_SOURCE_ID, entries, {
@@ -452,6 +467,7 @@ export function createGfwPresenceLayer({
     const next = key && _byId.has(String(key)) ? String(key) : null;
     _selectedKey = next;
     _selectedRow = next ? _byId.get(next).row : null;
+    _selectedTrack = [];
     _selectToken += 1;
     clearSelectionGraphics();
     publishLabels();
@@ -466,6 +482,7 @@ export function createGfwPresenceLayer({
       doFetch(`/api/vessel-info/track?mmsi=${mmsi}`).then((r) => (r?.ok ? r.json() : null)).catch(() => null),
     ]).then(([info, track]) => {
       if (token !== _selectToken || _selectedKey !== next) return;
+      _selectedTrack = Array.isArray(track?.points) ? track.points : [];
       syncSelectionGraphics(row, info, track?.points);
       publishLabels();
       if (frame) frameSelection(row, info, track?.points);

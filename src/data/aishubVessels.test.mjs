@@ -193,7 +193,7 @@ test('vek údaja: pod 90 s v sekundách, inak v minútach; SK/EN; bez času prá
   assert.equal(aishubAgeLabel(null, t0), '');
 });
 
-test('klik na loď: výber pripne kartu (variant selected) a zvýrazní zameriavač; opäť prázdny výber zruší', async () => {
+test('klik na loď: výber pripne dokovanú kartu (ako pri lietadle) a zvýrazní zameriavač; opäť prázdny výber zruší', async () => {
   const overlay = fakeOverlay();
   const layer = createAishubVesselsLayer({ fetchImpl: async () => jsonResponse(PAYLOAD), collectionFactory: fakeCollection, overlayHost: overlay });
   layer.init(fakeViewer());
@@ -207,9 +207,10 @@ test('klik na loď: výber pripne kartu (variant selected) a zvýrazní zameriav
   const set = overlay.calls.filter((c) => c.op === 'set').at(-1);
   const sel = set.e.find((entry) => String(entry.id) === 'aishub:470000001');
   assert.ok(sel, 'vybraná loď má kartu');
-  assert.equal(sel.variant, 'selected', 'pripnutá karta = variant selected');
+  // Zámerná zmena (2026-10-10): vybraná loď = dokovaná karta ako pri lietadle.
+  assert.equal(sel.variant, 'tracked', 'pripnutá karta = dokovaná ako pri lietadle');
+  assert.equal(sel.dock, 'right');
   assert.equal(sel.protected, true);
-  assert.equal(sel.maxDistance, Infinity, 'vybraná karta sa nestráca so vzdialenosťou');
   // zameriavač: vybraná loď je vynútená v detekcii aj mimo vzorky
   const det = layer.getDetectableObjects({ maxCount: 1 });
   assert.ok(det.some((o) => String(o.sourceId) === '470000001'), 'vybraná loď má vždy zameriavač');
@@ -217,7 +218,7 @@ test('klik na loď: výber pripne kartu (variant selected) a zvýrazní zameriav
   layer._selectForTest(null);
   assert.equal(layer._getStateForTest().selected, null);
   const set2 = overlay.calls.filter((c) => c.op === 'set').at(-1);
-  assert.ok(!set2.e.some((entry) => entry.variant === 'selected'), 'po zrušení žiadna pripnutá karta');
+  assert.ok(!set2.e.some((entry) => entry.variant === 'tracked'), 'po zrušení žiadna pripnutá karta');
 });
 
 test('okolitá loď AISHub: len vlajka a meno; stará poloha (≥ 10 min) sivý okraj + ONESKORENÉ · vek', () => {

@@ -9,6 +9,7 @@ import { currentLanguage, t } from '../i18n.js';
 import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, newerPositionLine, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
+import { buildVesselTrackedEntry } from './vesselTrackedCard.js';
 import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
 // `new URL(...)` a NIE `?url` import: príponu `?url` pozná len Vite, takže
 // unit testy v čistom Node (a všetko, čo túto vrstvu importuje) by na nej
@@ -1079,6 +1080,8 @@ const state = {
   trailMmsi: null,
   /** @type {number} Monotonic token — invalidates in-flight backfill responses */
   trailBackfillToken: 0,
+  /** Body grafov karty (čas, poloha, rýchlosť) — trasa registra + živé fixy vybranej lode. */
+  chartPoints: [],
   /** @type {object|null} Index prístavov (World Port Index) pre cieľ plavby. */
   portIndex: null,
   /** @type {Promise|null} Prebiehajúce načítanie indexu prístavov. */
@@ -2409,6 +2412,8 @@ function publishVesselOverlayEntries(entries) {
   _vesselOverlayHost.setEntries(
     VESSEL_OVERLAY_SOURCE_ID,
     entries.map((entry) => {
+      // Vybraná loď = dokovaná karta ako pri lietadle (2026-10-10) — bez ambientnej politiky.
+      if (entry.variant === 'tracked') return entry;
       const card = applyVesselOverlayPolicy(entry, VESSEL_CARD_FADE_DISTANCE_M);
       if (!card.interactive) return card;
       const mmsi = String(card.id || '').startsWith('vessel:')
@@ -2484,7 +2489,9 @@ function bindVesselInteraction(viewer, handler, keyTarget) {
   state.clickHandler = handler;
   handler.setInputAction((click) => {
     if (!state.enabled) return;
-    const picked = viewer.scene.pick(click.position);
+    // Okolie 12 × 12 px (2026-10-10): tenký trup zboku trafíš presne len ťažko — klik
+    // na priehľadný pixel ikony padol na terén a loď sa nevybrala (AISHub/GFW majú 10 × 10).
+    const picked = viewer.scene.pick(click.position, 12, 12);
     const pickedId = resolvePickId(picked);
     let record = pickedId ? state.vesselMap.get(pickedId) : null;
     const rawId = picked?.id ?? picked?.primitive?.id;
@@ -2499,7 +2506,10 @@ function bindVesselInteraction(viewer, handler, keyTarget) {
 
     // A sibling layer already owns this click. Preserve the current vessel
     // selection and do not compete with its camera command.
-    if (pickedId && isOwnedByOtherLayer('ais-live-vessels', pickedId)) return;
+    // Výnimka (2026-10-10): trafili sme NAŠU ikonu (id billboardu je samotný záznam) —
+    // to, že tú istú loď (MMSI) pozná aj AISHub/GFW, klik nesmie zahodiť.
+    const ownBillboard = Boolean(record) && rawId === record;
+    if (pickedId && !ownBillboard && isOwnedByOtherLayer('ais-live-vessels', pickedId)) return;
 
     // Cards are painted on a pointer-events:none canvas, so the scene pick is
     // usually terrain behind the card. Resolve against the host's current
@@ -2665,6 +2675,8 @@ function startSelectedVesselTrail(record) {
   state.trailBackfillToken += 1;
   state.trailMmsi = record.mmsi;
   state.trailPositions = [];
+  state.chartPoints = [];
+  appendSelectedChartPoint(record);
   const current = vesselTrailPosition(record);
   if (current) state.trailPositions.push(current);
   if (!state.trail && state.viewer) {
@@ -2695,6 +2707,11 @@ async function backfillVesselTrail(mmsi, token) {
     fetchJson('/api/vessel-info/track?mmsi=' + encodeURIComponent(mmsi)),
   ]);
   const samples = mergeVesselTrackSamples(own?.samples, register?.points);
+  if (token === state.trailBackfillToken && state.trailMmsi === mmsi) {
+    const reg = (Array.isArray(register?.points) ? register.points : []).filter((p) => Number.isFinite(p?.t));
+    const firstLive = state.chartPoints[0]?.t ?? Infinity;
+    state.chartPoints = [...reg.filter((p) => p.t < firstLive), ...state.chartPoints];
+  }
   if (!samples.length || token !== state.trailBackfillToken) return;
   if (state.trailMmsi !== mmsi) return;
 
@@ -2739,6 +2756,7 @@ export function mergeVesselTrackSamples(own, register) {
  * @param {Object} record - Selected vessel record after an in-place update.
  */
 function appendSelectedVesselTrailFix(record) {
+  appendSelectedChartPoint(record);
   if (!state.trail) return;
   const next = vesselTrailPosition(record);
   if (!next) return;
@@ -2747,6 +2765,16 @@ function appendSelectedVesselTrailFix(record) {
   state.trailPositions.push(next);
   if (state.trailPositions.length > TRAIL_MAX_POINTS) state.trailPositions.shift();
   state.trail.setPositions(state.trailPositions);
+}
+
+/** Živý fix vybranej lode do grafov karty (rýchlosť, vzdialenosť do cieľa). */
+function appendSelectedChartPoint(record) {
+  if (!record || !Number.isFinite(record.lat) || !Number.isFinite(record.lon)) return;
+  const tMs = Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : Date.now();
+  const last = state.chartPoints[state.chartPoints.length - 1];
+  if (last && tMs <= last.t) return;
+  state.chartPoints.push({ t: tMs, lat: record.lat, lon: record.lon, speedKn: Number.isFinite(record.speed) ? record.speed : null });
+  if (state.chartPoints.length > 2000) state.chartPoints.splice(0, state.chartPoints.length - 2000);
 }
 
 /**
@@ -2990,74 +3018,57 @@ export function buildVesselCard(record) {
  * @param {Object} record - Selected vessel record.
  * @returns {Object} vesselLabels entry.
  */
-export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationMatch = null) {
+export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationMatch = null, chartPoints = state.chartPoints) {
+  // 2026-10-10 (vlastník: „sprav karty minimálne také kvalitné ako pri lietadlách"):
+  // dokovaná karta s vlajkami trasy, lištou priebehu, grafmi a pätou — vesselTrackedCard.js.
   const lang = currentLanguage();
   const info = cachedVesselInfo(record.mmsi) || null;
-  const details = [[vesselTypeShort(record) || 'VESSEL', formatSpeed(record.speed)].join(' · ')];
-  // 2026-10-10: kurz nad dnom a smer prídy zvlášť + rýchlosť otáčania.
-  if (isLastKnownVessel(record, nowMs)) details.push('AISStream · LAST KNOWN POSITION');
-  const motion = vesselMotionParts(record, t, lang);
-  if (motion.length) details.push(motion.join(' · ').toUpperCase());
-  // Identity line (balík 2): flag state from the MMSI MID and navigational
-  // status — every part optional, the line renders only when one is known.
-  // Dĺžka a ponor sa 2026-10-10 presunuli do riadku trupu (s IMO, triedou, šírkou).
-  const identity = [
-    mmsiFlag(record.mmsi)?.iso2,
-    navStatusLabel(record.navStatus),
-  ].filter(Boolean);
-  if (identity.length) details.push(identity.join(' · '));
-  const registry = vesselRegistryParts(info, t, lang);
-  if (registry.length) details.push(registry.join(' · '));
-  const hull = vesselHullParts(record, info, t, lang);
-  if (hull.length) details.push(hull.join(' · '));
-  // ETA belongs to the voyage line — without a destination it is noise.
-  // Cieľ a ETA z registra, keď ich AIS ešte nedoniesol (2026-10-10).
   const { destination, eta } = vesselDestinationWithFallback(record, info);
-  // Súčasná plavba z registra (posledný prístav → cieľ · priebeh, odchod) — 2026-10-10.
-  const voyage = vesselVoyageModel(record, info, state.portIndex || cachedPortIndex());
-  const voyageLine = voyageRouteLine(voyage);
-  if (voyageLine) details.push(voyageLine);
-  const departed = voyageDepartureLine(voyage, t, lang, nowMs);
-  if (departed) details.push(departed);
-  // Predchádzajúce prístavy z GFW (2026-10-10, „nenačíta let lodí").
-  const history = portHistoryLine(info, state.portIndex || cachedPortIndex(), t);
-  if (history) details.push(history);
-  const newer = newerPositionLine(info, Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null, t, lang, nowMs);
-  if (newer) details.push(newer);
-  if (destination) details.push(`→ ${trimHudValue(destination, 24)}${eta ? ` · ETA ${eta}` : ''}`);
-  // Rozpoznaný prístav (World Port Index) pridá vzdialenosť po veľkokružnici
-  // a ETA z rýchlosti nad zemou. Bez zhody sa NIČ nedopĺňa — surový text
-  // posádky ostáva jediným tvrdením o cieli.
-  if (destinationMatch?.port) {
-    const voyage = voyageToPort(
-      { lat: record.lat, lon: record.lon, speedKt: record.speed },
-      destinationMatch.port,
-      nowMs,
-    );
-    const line = destinationCardLine(destinationMatch, voyage, t);
-    if (line) details.push(line);
-  }
   // Per-vessel honesty: the feed can be perfectly live while THIS vessel went
   // silent — the server retains rows for 30 min, so without the fix-age check
   // an unreporting vessel looked fresh the whole time (pravidlo 2).
   const age = vesselPositionAge(record.lastPositionEpoch, nowMs);
   const stale = (record.missedRefreshes || 0) > 0 || age.stale;
-  const ageSuffix = age.label ? ` (${age.label})` : '';
-  details.push(`MMSI ${record.mmsi || '--'} · ${formatPositionTime(record)}${ageSuffix}${stale ? ' · STALE' : ''}`);
-  const local = vesselLocalTimeLabel(record.lon, nowMs, vesselTimeZone(record.lat, record.lon));
-  if (local) details.push(t('vessel.local-time', { time: local }));
-  return {
+  const lastKnown = isLastKnownVessel(record, nowMs);
+  const sourceLine = [
+    'AISStream',
+    lastKnown ? 'LAST KNOWN POSITION' : '',
+    `${formatPositionTime(record)}${age.label ? ` (${age.label})` : ''}`,
+  ].filter(Boolean).join(' · ');
+  return buildVesselTrackedEntry({
     id: vesselOverlayEntryId(record),
-    actionable: Boolean(record?.mmsi),
     position: record.billboard?.position || record.position,
-    gapPx: 12,
+    name: trimHudValue(displayVesselName(record), 32),
+    flagIso: mmsiFlag(record?.mmsi)?.iso2 || null,
     accent: accentForVesselType(record.type),
-    title: trimHudValue(displayVesselName(record), 32),
-    titleFlag: mmsiFlag(record?.mmsi)?.iso2 || null,
-    details,
-    selected: true,
-    priority: 100000,
-  };
+    vessel: {
+      mmsi: record.mmsi,
+      lat: record.lat,
+      lon: record.lon,
+      speedKn: Number.isFinite(record.speed) ? record.speed : null,
+      course: record.course,
+      heading: record.heading,
+      rateOfTurn: record.rateOfTurn,
+      navStatus: record.navStatus,
+      typeText: normalizeVesselType(record.type),
+      callSign: String(record.callSign || '').trim(),
+      imo: record.imo,
+      aisClass: record.aisClass,
+      lengthM: record.lengthM,
+      beamM: record.beamM,
+      draughtM: record.draughtM,
+      destination,
+      eta,
+      fixMs: Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null,
+    },
+    info,
+    portIndex: state.portIndex || cachedPortIndex(),
+    destinationPort: destinationMatch?.port || null,
+    chartPoints,
+    sourceLine,
+    stale,
+    timeZone: vesselTimeZone(record.lat, record.lon),
+  }, t, lang, nowMs);
 }
 
 /** Stable overlay identity for MMSI-keyed and source-retained unkeyed rows. */

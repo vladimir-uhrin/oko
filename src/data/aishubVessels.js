@@ -38,6 +38,7 @@ import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistr
 import { cachedPortIndex } from './vesselPortIndex.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
+import { buildVesselTrackedEntry } from './vesselTrackedCard.js';
 
 /** Smer trupu na zobrazenie: heading → v pohybe cog → stojaca pri rieke proti prúdu → cog (vesselSilhouettes). */
 function aishubDisplayCourseDeg(row) {
@@ -277,6 +278,44 @@ export function aishubLabelCard(row, position, translate = t, nowMs = Date.now()
 }
 
 /**
+ * Karta VYBRANEJ lode AISHub v kvalite karty lietadla (2026-10-10): dokovaná,
+ * vlajky trasy, priebeh, grafy, päta so zdrojom a vekom údaja. Pure.
+ */
+export function aishubTrackedCard(row, position, translate = t, nowMs = Date.now(), chartPoints = []) {
+  const lang = currentLanguage();
+  const mmsi = String(row?.mmsi || '').trim();
+  const info = cachedVesselInfo(mmsi) || null;
+  const age = aishubAgeLabel(row.observedAt, nowMs);
+  const source = row.source && row.source !== 'aishub' ? `AISHub · ${row.source}` : 'AISHub';
+  const stale = Number.isFinite(row.observedAt) && nowMs - row.observedAt >= VESSEL_POSITION_STALE_SEC * 1000;
+  return buildVesselTrackedEntry({
+    id: `aishub:${mmsi}`,
+    position,
+    name: aishubDisplayName(row),
+    flagIso: mmsiFlag(mmsi)?.iso2 || null,
+    accent: accentForVesselType(row.type),
+    vessel: {
+      mmsi,
+      lat: row.lat,
+      lon: row.lon,
+      speedKn: Number.isFinite(row.sog) ? row.sog : null,
+      course: row.cog,
+      heading: row.heading,
+      navStatus: row.navStatus,
+      typeText: normalizeVesselType(row.type),
+      callSign: String(row.callsign || '').trim(),
+      fixMs: Number.isFinite(row.observedAt) ? row.observedAt : null,
+    },
+    info,
+    portIndex: cachedPortIndex(),
+    chartPoints,
+    sourceLine: [source, translate('aishub.badge'), age].filter(Boolean).join(' · '),
+    stale,
+    timeZone: vesselTimeZone(row.lat, row.lon),
+  }, translate, lang, nowMs);
+}
+
+/**
  * Riadky vybranej karty z registra lodí a miestny čas (2026-10-10). AIS z AISHub
  * nenesie IMO ani rozmery — doplní ich register, keď loď pozná. Pure.
  */
@@ -338,6 +377,9 @@ export function createAishubVesselsLayer({
   let _requestToken = 0;
   let _labelCount = 0;
   let _selectedKey = null;
+  /** Trasa vybranej lode z registra (grafy karty). */
+  let _chartPoints = [];
+  let _chartToken = 0;
   let _riverReadyOff = null;
   // siluety podľa uhla pohľadu (vesselSilhouettes.js; `?lode=klasik` = len ikony zhora)
   const _silhouettes = shipSilhouettesEnabled();
@@ -526,10 +568,18 @@ export function createAishubVesselsLayer({
     publishLabels();
     _viewer?.scene?.requestRender?.();
     // Register a fotka — karta sa doplní, keď príde (fotku kreslí vesselPhoto.js).
-    if (next && cachedVesselInfo(next) === undefined) {
-      lookupVesselInfo(next).then((info) => {
-        if (info && _selectedKey === next) { publishLabels(); _viewer?.scene?.requestRender?.(); }
-      });
+    _chartPoints = [];
+    if (next) {
+      const token = ++_chartToken;
+      Promise.all([
+        lookupVesselInfo(next),
+        fetch(`/api/vessel-info/track?mmsi=${next}`).then((r) => (r?.ok ? r.json() : null)).catch(() => null),
+      ]).then(([, track]) => {
+        if (token !== _chartToken || _selectedKey !== next) return;
+        _chartPoints = Array.isArray(track?.points) ? track.points : [];
+        publishLabels();
+        _viewer?.scene?.requestRender?.();
+      }).catch(() => {});
     }
   }
 
@@ -588,10 +638,11 @@ export function createAishubVesselsLayer({
         // Vybraná karta ostáva aj mimo stredu; ambientné len na obrazovke.
         if (!win || win.x < 0 || win.y < 0 || win.x > width || win.y > height) continue;
       }
-      cards.push(aishubLabelCard(row, billboard.position, t, nowMs, selected));
+      cards.push(selected ? aishubTrackedCard(row, billboard.position, t, nowMs, _chartPoints) : aishubLabelCard(row, billboard.position, t, nowMs, false));
     }
     cards.sort((a, b) => b.priority - a.priority);
-    const entries = cards.slice(0, AISHUB_MAX_LABELS).map((card) => applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M));
+    // Vybraná = dokovaná karta ako pri lietadle (bez ambientnej politiky).
+    const entries = cards.slice(0, AISHUB_MAX_LABELS).map((card) => (card.variant === 'tracked' ? card : applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M)));
     _labelCount = entries.length;
     const ambientLimit = vesselOverlayCohortLimit(width, height, AISHUB_MAX_LABELS);
     overlayHost.setEntries(AISHUB_OVERLAY_SOURCE_ID, entries, {

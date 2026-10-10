@@ -64,7 +64,8 @@ test('retained position stays fixed and is explicitly last-known in ambient, sel
   const card = buildVesselCard(record);
   assert.equal(card.position, record.position);
   assert.match(card.details.join(' '), /LAST KNOWN/);
-  assert.match(buildSelectedVesselCard(record, now).details.join(' '), /LAST KNOWN POSITION/);
+  // Dokovaná karta (2026-10-10): stav dát je v päte so zdrojom, nie medzi riadkami pohybu.
+  assert.match(buildSelectedVesselCard(record, now).footer.join(' '), /LAST KNOWN POSITION/);
   assert.equal(mapAnalystRecord(record).positionState, 'last-known');
   assert.equal(mapAnalystRecord(record).lastPositionEpoch, record.lastPositionEpoch);
 });

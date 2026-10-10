@@ -3116,6 +3116,8 @@ export class StyleManager {
         // Vybraný (kliknutý) stroj má vlastnú kartu — kartička pod kurzorom ho preskočí (09-28).
         for (const candidate of withoutTrackedCandidate(candidates, viewer.trackedEntity?.gevTrackedId)) {
           const module = this._dataManager?.layers?.get(candidate.layerId)?.module;
+          // Vybraná loď má dokovanú kartu (2026-10-10) — kartička pod kurzorom by ju zdvojila.
+          if (module?.getSelectedMmsi && String(module.getSelectedMmsi() || '') === String(candidate.sourceId)) continue;
           const summary = module?.getContactSummary?.(candidate.sourceId);
           if (summary) return summary;
         }

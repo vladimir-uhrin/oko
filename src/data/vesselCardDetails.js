@@ -249,7 +249,7 @@ export function vesselVoyageModel(vessel, info, index) {
       country: voyage.lastPortCountry || null,
     },
     destination: destinationPort
-      ? { name: destinationPort.name, locode: destinationPort.locode, iso2: resolveFlagIso2(null, null, destinationPort.country) || null, country: destinationPort.country }
+      ? { name: destinationPort.name, locode: destinationPort.locode, iso2: resolveFlagIso2(null, null, destinationPort.country) || null, country: destinationPort.country, lat: destinationPort.lat, lon: destinationPort.lon }
       : (destinationText ? { name: destinationText, locode: null, iso2: null, country: null } : null),
     progress,
     departedAt: Number.isFinite(voyage.departedAt) ? voyage.departedAt : null,

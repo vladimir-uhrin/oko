@@ -1310,8 +1310,8 @@ test('buildVesselCard: posledná známa poloha ostáva priznaná aj na okolitej 
   assert.match(stale.details[0], /^LAST KNOWN · /);
   assert.equal(stale.accent, '146, 156, 165');
   // plné údaje ostávajú na vybranej karte (klik) — kurz padá na course
-  const selected = buildSelectedVesselCard(makeRecord({ heading: null }));
-  assert.equal(selected.details[1], 'COG 231°', 'bez smeru prídy ostáva kurz nad dnom');
+  const selected = buildSelectedVesselCard(makeRecord({ heading: null }), Date.now(), null, []);
+  assert.match(selected.details[0], /COG 231° \(SW\)/);
 });
 
 test('buildVesselCard: unnamed vessels title as MMSI; long names truncate', () => {
@@ -1335,7 +1335,7 @@ test('buildVesselCard: tanker types carry the amber accent', () => {
 test('buildVesselCard: numeric AIS type codes read as family names, not digits', () => {
   const card = buildVesselCard(makeRecord({ type: '84' }));
   assert.equal(card.accent, '255, 179, 71');
-  assert.equal(buildSelectedVesselCard(makeRecord({ type: '84' })).details[0], 'TANKER · 14.5KT');
+  assert.equal(buildSelectedVesselCard(makeRecord({ type: '84' }), Date.now(), null, []).details[1], 'TANKER');
 });
 
 test('cardScreenSeparated: rejects candidates inside the min separation radius', () => {
@@ -1346,30 +1346,25 @@ test('cardScreenSeparated: rejects candidates inside the min separation radius',
   assert.equal(cardScreenSeparated([], { x: 0, y: 0 }, 150), true);
 });
 
-test('buildSelectedVesselCard: full detail card with MMSI + position time', () => {
+test('buildSelectedVesselCard: dokovaná karta ako pri lietadle — titul, pohyb, typ, päta so zdrojom a MMSI (2026-10-10)', () => {
+  // Zámerná zmena pinu (2026-10-10, „sprav karty minimálne také kvalitné ako pri lietadlách"):
+  // vybraná loď = variant 'tracked' dokovaný vpravo, zdroj a MMSI v päte.
   const card = buildSelectedVesselCard(makeRecord({
     lastPositionUtc: '2026-07-27T11:22:33Z',
-  }));
-  assert.equal(card.selected, true);
+  }), Date.now(), null, []);
+  assert.equal(card.variant, 'tracked');
+  assert.equal(card.dock, 'right');
+  assert.equal(card.protected, true);
   assert.equal(card.id, 'vessel:353136000');
-  assert.equal(card.priority, 100000);
   assert.equal(card.title, 'EVER GIVEN');
-  assert.deepEqual(card.details, [
-    // Zámerná zmena pinu (2026-10-10): kurz nad dnom a smer prídy zvlášť.
-    'CONTAINER SHIP · 14.5KT',
-    'COG 231° · HDG 231°',
-    // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI
-    // (353 = Panama) — identitný riadok sa objaví, aj keď loď zatiaľ
-    // neposlala statickú správu s rozmermi/stavom.
-    'PA',
-    'MMSI 353136000 · POS: 11:22:33Z',
-  ]);
+  assert.equal(card.titleFlag, 'PA', 'vlajka z MID prefixu MMSI pri titule');
+  assert.deepEqual(card.details, ['14.5 kn (27 km/h) · COG 231° (SW) · HDG 231°', 'Container Ship']);
+  assert.deepEqual(card.footer, ['AISStream · POS: 11:22:33Z', 'MMSI 353136000']);
 });
 
 test('buildSelectedVesselCard: identitný riadok, ETA pri destinácii a POS≈ pre odhadovaný fix', () => {
-  // Balík 2: navStatus/dĺžka/ponor/ETA feed vždy posielal a karta ich
-  // zahadzovala. POS≈ = AIS Timestamp 62/63 (poloha dead-reckoned alebo
-  // pokazený EPFS) — odhad sa nesmie tváriť ako meranie (pravidlo 2).
+  // Balík 2 (navStatus, dĺžka, ponor, ETA) v novej karte; POS≈ = AIS Timestamp 62/63
+  // (poloha dead-reckoned) — odhad sa nesmie tváriť ako meranie (pravidlo 2).
   const card = buildSelectedVesselCard(makeRecord({
     mmsi: '267940000',
     name: 'PREŠOV',
@@ -1381,16 +1376,15 @@ test('buildSelectedVesselCard: identitný riadok, ETA pri destinácii a POS≈ p
     draughtM: 2.7,
     posEstimated: true,
     lastPositionUtc: '2026-09-02T11:22:33Z',
-  }));
-  // Zámerná zmena pinu (2026-10-10): dĺžka a ponor v riadku trupu.
+  }), Date.now(), null, []);
   assert.deepEqual(card.details, [
-    'CARGO · 14.5KT',
-    'COG 231° · HDG 231°',
-    'SK · UNDER WAY',
+    '14.5 kn (27 km/h) · COG 231° (SW) · HDG 231°',
+    'CARGO · under way using engine',
     '110 m · draught 2.7 m',
     '→ KOMARNO · ETA 09-02 14:30',
-    'MMSI 267940000 · POS≈ 11:22:33Z',
   ]);
+  assert.equal(card.titleFlag, 'SK');
+  assert.equal(card.footer[0], 'AISStream · POS≈ 11:22:33Z');
 });
 
 test('vessel host publication preserves the shipped grid winner and separation selector', () => {
@@ -1464,13 +1458,13 @@ test('vessel real layer lifecycle publishes protected selection and leaves no st
     assert.equal(publication.options.cohortLimit, 112);
     assert.equal(publication.options.collisionCapacity, 112);
     assert.equal(publication.entries.length, 1);
-    assert.equal(publication.entries[0].variant, 'selected');
+    // Zámerná zmena (2026-10-10): vybraná loď = dokovaná karta ako pri lietadle.
+    assert.equal(publication.entries[0].variant, 'tracked');
+    assert.equal(publication.entries[0].dock, 'right');
     assert.equal(publication.entries[0].protected, true);
     assert.equal(publication.entries[0].collisionGroup, 'ambient-card');
-    assert.match(publication.entries[0].accessibilityLabel, /Focus vessel EVER GIVEN, MMSI 353136000/);
-    assert.equal(publication.entries[0].activate(), true);
-    assert.equal(focusRequests.length, 1);
-    assert.equal(focusRequests[0].id, '353136000');
+    // Dokovaná karta je len na čítanie (ako pri lietadle) — klik na ňu loď neprepína.
+    assert.equal(publication.entries[0].interactive, false);
 
     aisLiveVesselsLayer.disable();
     assert.ok(calls.some((call) => call.op === 'clear'), 'disable clears host cards');
@@ -1491,7 +1485,7 @@ test('vessel real layer lifecycle publishes protected selection and leaves no st
   }
 });
 
-test('buildSelectedVesselCard: destination line + STALE marker; placeholders for missing data', () => {
+test('buildSelectedVesselCard: destination line + STALE marker; chýbajúce údaje sa nevypisujú', () => {
   const card = buildSelectedVesselCard(makeRecord({
     type: 'Tanker',
     speed: null,
@@ -1499,15 +1493,10 @@ test('buildSelectedVesselCard: destination line + STALE marker; placeholders for
     course: null,
     destination: 'ROTTERDAM',
     missedRefreshes: 2,
-  }));
-  assert.deepEqual(card.details, [
-    // Zámerná zmena pinu (2026-10-10): neznámy kurz/smer = žiadny riadok pohybu.
-    'TANKER · --KT',
-    // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI.
-    'PA',
-    '→ ROTTERDAM',
-    'MMSI 353136000 · POS: LIVE · STALE',
-  ]);
+  }), Date.now(), null, []);
+  assert.equal(card.title, 'EVER GIVEN · STALE');
+  assert.deepEqual(card.details, ['Tanker', '→ ROTTERDAM']);
+  assert.deepEqual(card.footer, ['AISStream · POS: LIVE', 'MMSI 353136000']);
 });
 
 // --- Vertical datum (h = N + lift) ------------------------------------------
@@ -1736,35 +1725,25 @@ test('coverage snapshots keep last-known selection but exclude it from live coun
 
 test('buildSelectedVesselCard: starý fix priznáva vek a od 10 min nesie STALE', () => {
   const nowMs = Date.parse('2026-07-27T11:34:33Z');
-  // 12 minút po fixe → vek na karte + STALE, aj keď feed beží a
-  // missedRefreshes je 0 (presne tento prípad bol doteraz neviditeľný).
+  // 12 minút po fixe → vek v päte + STALE v titule, aj keď feed beží.
   const old = buildSelectedVesselCard(makeRecord({
     lastPositionUtc: '2026-07-27T11:22:33Z',
     lastPositionEpoch: Date.parse('2026-07-27T11:22:33Z') / 1000,
-  }), nowMs);
-  assert.deepEqual(old.details, [
-    'CONTAINER SHIP · 14.5KT',
-    'AISStream · LAST KNOWN POSITION',
-    'COG 231° · HDG 231°',
-    // Zámerná zmena pinu (balík 2, 2026-09-02): vlajka z MID prefixu MMSI.
-    'PA',
-    'MMSI 353136000 · POS: 11:22:33Z (12 min) · STALE',
-  ]);
-
-  // 3 minúty: vek sa prizná, ale STALE ešte nie (kotviace lode hlásia
-  // každé 3 min — to je normálna prevádzka, nie výpadok).
+  }), nowMs, null, []);
+  assert.equal(old.title, 'EVER GIVEN · STALE');
+  assert.equal(old.footer[0], 'AISStream · LAST KNOWN POSITION · POS: 11:22:33Z (12 min)');
+  // 3 minúty: vek sa prizná, ale STALE ešte nie.
   const aging = buildSelectedVesselCard(makeRecord({
     lastPositionUtc: '2026-07-27T11:31:33Z',
     lastPositionEpoch: Date.parse('2026-07-27T11:31:33Z') / 1000,
-  }), nowMs);
-  assert.equal(aging.details.at(-1), 'MMSI 353136000 · POS: 11:31:33Z (3 min)');
-
-  // Čerstvý fix: nezmenený formát (pin vyššie v súbore zostáva v platnosti).
+  }), nowMs, null, []);
+  assert.equal(aging.title, 'EVER GIVEN');
+  assert.equal(aging.footer[0], 'AISStream · POS: 11:31:33Z (3 min)');
   const fresh = buildSelectedVesselCard(makeRecord({
     lastPositionUtc: '2026-07-27T11:34:03Z',
     lastPositionEpoch: Date.parse('2026-07-27T11:34:03Z') / 1000,
-  }), nowMs);
-  assert.equal(fresh.details.at(-1), 'MMSI 353136000 · POS: 11:34:03Z');
+  }), nowMs, null, []);
+  assert.equal(fresh.footer[0], 'AISStream · POS: 11:34:03Z');
 });
 
 test('detection callout číta normalizovaný typ lode — nie surový AIS kód', () => {
@@ -2145,17 +2124,15 @@ test('buildSelectedVesselCard: otáčanie, IMO, trieda, rozmery, register a mies
   const nowMs = Date.parse('2026-10-10T02:57:00Z');
   const card = buildSelectedVesselCard(makeRecord({
     mmsi: '241190000', name: 'MINERVA ZEN', type: 'Tanker', speed: 13.1, course: 253, heading: 252,
-    rateOfTurn: 0, aisClass: 'A', imo: '', draughtM: 11, lon: -74.2, lat: 34,
+    rateOfTurn: 0, aisClass: 'A', imo: '', draughtM: 11, lon: -74.2, lat: 34, navStatus: 0,
     lastPositionUtc: '2026-10-10T02:57:00Z', lastPositionEpoch: nowMs / 1000,
-  }), nowMs);
+  }), nowMs, null, []);
   assert.deepEqual(card.details, [
-    'TANKER · 13.1KT',
-    'COG 253° · HDG 252° · ROT 0°/MIN',
-    'GR',
-    'Chemical/Oil Products Tanker · built 2009 · GT 29 442 · DWT 52 941 t',
+    '13.1 kn (24 km/h) · COG 253° (W) · HDG 252° · ROT 0°/min',
+    'Chemical/Oil Products Tanker · under way using engine',
     'IMO 9410909 · AIS class A · 183 × 32 m · draught 11.0 m',
-    'MMSI 241190000 · POS: 02:57:00Z',
-    'Local time 21:57 (UTC−5)',
+    'built 2009 · GT \u202f29\u202f442 · DWT 52\u202f941 t'.replace('GT \u202f', 'GT '),
   ]);
+  assert.deepEqual(card.footer, ['AISStream · POS: 02:57:00Z', 'MMSI 241190000 · Local time 21:57 (UTC\u22125)']);
   _resetVesselInfoForTest();
 });

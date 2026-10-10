@@ -467,11 +467,15 @@ test('GFW výber: karta vybranej lode s novšou polohou, odkiaľ, históriou; tr
   await lookupVesselInfo('241190000');
   const row = { mmsi: '241190000', name: 'MINERVA ZEN', type: 'OTHER', imo: '9410909', lat: 38.46, lon: -50.43, lastSeen: Date.parse('2026-10-06T23:00:00Z') };
   const card = gfwSelectedCard(row, { x: 0, y: 0, z: 0 }, { day: '2026-10-06', cellDeg: 0.01, mode: 'hourly' }, sk, 'sk');
-  assert.equal(card.selected, true);
-  assert.equal(card.actionable, true);
+  // 2026-10-10: dokovaná karta ako pri lietadle (variant tracked); oneskorenie v päte.
+  assert.equal(card.variant, 'tracked');
+  assert.equal(card.dock, 'right');
   assert.equal(card.id, 'gfw:241190000');
-  assert.match(card.details[0], /^Tanker na chemikálie a ropné produkty · ONESKORENÉ/);
-  assert.ok(card.details.some((l) => /^Novšia poloha 10\. 10\. 02:57 UTC · pred \d+ (h|d) · 34,13° S 68,88° Z · 13,1 kn · prijímač na inej lodi$/.test(l)), card.details.join('\n'));
+  assert.equal(card.details[0], 'Tanker na chemikálie a ropné produkty');
+  assert.match(card.footer[0], /^Global Fishing Watch · ONESKORENÉ/);
+  assert.equal(card.progress, null, 'stará poloha — bez priebehu');
+  assert.ok(card.details.some((l) => /^Novšia poloha 10\. 10\. 02:57 UTC · pred \d+ (h|d) · 34,13° S 68,88° Z$/.test(l)), card.details.join('\n'));
+  assert.ok(card.details.includes('13,1 kn · prijímač na inej lodi'), 'druhá polovica novšej polohy na vlastnom riadku');
   assert.ok(card.details.some((l) => /^vyplávala 22\. 9\. 20:32 UTC/.test(l)));
   assert.deepEqual(gfwTrackPositionsDeg([{ lat: 34, lon: -68 }, { lat: 34.1, lon: -68.9 }]), [[-68, 34, 0], [-68.9, 34.1, 0]]);
   assert.equal(gfwTrackPositionsDeg([{ lat: 1, lon: 1 }]), null);
