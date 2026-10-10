@@ -8,6 +8,7 @@ import {
   COARSE_PICK_BOX_PX,
   MOBILE_SECTIONS,
   createMobileShell,
+  creditsBottomClear,
   installCoarsePickBox,
   pickBoxFor,
   resolveShellMode,
@@ -145,6 +146,36 @@ test('resolveShellMode: telefón na výšku aj naležato, tablet s dotykom = mob
   assert.deepEqual(resolveShellMode({ width: 1366, height: 768, coarse: true }), { mobile: false, landscape: false }, 'veľký dotykový displej = desktop');
   assert.deepEqual(resolveShellMode({ width: 800, height: 600, coarse: false }), { mobile: true, landscape: false }, 'úzke okno s myšou dostane plášť');
   assert.deepEqual(resolveShellMode({}), { mobile: false, landscape: false });
+});
+
+test('creditsBottomClear: kredity pod osou počasia idú nad os aj nad výber vrstiev nad ňou; bez prekrytia ostávajú', () => {
+  // Rozmery naživo z 375 × 812 (2026-10-10): kredity 12–108 px, 13 px vysoké, spodok 152 px;
+  // os 600–677, vodorovný výber vrstiev 547–591 (obe cez celú šírku).
+  const timeline = { left: 16, right: 359, top: 600, bottom: 677 };
+  const dock = { left: 8, right: 367, top: 547, bottom: 591 };
+  const at = { base: 152, height: 13, left: 12, right: 108, viewportHeight: 812 };
+  assert.equal(creditsBottomClear({ ...at, obstacles: [timeline] }), 812 - (600 - 4), 'nad os');
+  assert.equal(creditsBottomClear({ ...at, obstacles: [timeline, dock] }), 812 - (547 - 4), 'nad os aj nad výber vrstiev (medzera 9 px nestačí)');
+  assert.equal(creditsBottomClear({ ...at, obstacles: [{ left: 480, right: 616, top: 190, bottom: 654 }] }), 152, 'zvislý výber vpravo kredity netrafí');
+  assert.equal(creditsBottomClear({ ...at, obstacles: [] }), 152);
+  assert.equal(creditsBottomClear({ ...at, height: 0, obstacles: [timeline] }), 152, 'nezmerané kredity sa nehýbu');
+});
+
+test('plášť na mobile: os počasia v páse kreditov → kredity nad ňou; skrytie osi ich vráti', () => {
+  const { doc, byId } = buildDom();
+  const timeline = makeNode('div', { id: 'meteo-timeline' });
+  doc.body.appendChild(timeline);
+  byId.set('meteo-timeline', timeline);
+  timeline.getBoundingClientRect = () => ({ left: 16, right: 359, top: 600, bottom: 677, width: 343, height: 77 });
+  const credits = byId.get('cesium-credits');
+  credits.getBoundingClientRect = () => ({ left: 12, right: 108, top: 647, bottom: 660, width: 96, height: 13 });
+  const win = makeWindow({ width: 375, height: 812, coarse: true });
+  const shell = createMobileShell({ document: doc, window: win, styleManager: makeStyleManager(doc) });
+  shell.sync();
+  assert.equal(credits.style.bottom, '216px', '812 − (600 − 4)');
+  timeline.hidden = true;
+  shell.sync();
+  assert.equal(credits.style.bottom, '152px', 'bez osi späť nad dok');
 });
 
 test('swipeShouldClose: dlhé potiahnutie alebo krátke a rýchle; nahor nikdy', () => {

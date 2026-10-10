@@ -23,7 +23,14 @@ export const METEOGRAM_VARS = Object.freeze({
   wind_direction_10m: 'windDir',
   wind_gusts_10m: 'gust',
   pressure_msl: 'pressure',
+  // 2026-10-10: riadok počasia (WMO kód + deň/noc), vlhkosť a sneh — v tom istom dopyte, oba modely ich majú.
+  relative_humidity_2m: 'humidity',
+  snowfall: 'snow',
+  weather_code: 'code',
+  is_day: 'isDay',
 });
+/** Nárazy od tejto rýchlosti (m/s) sú v páse zvýraznené (~54 km/h, silný vietor). */
+export const STRONG_GUST_MS = 15;
 /**
  * Modely v meteograme (2026-10-09, bod 3 „ECMWF v meteograme"): GFS = ten istý model ako mapa, ECMWF IFS
  * (9 km, otvorené dáta ECMWF CC BY 4.0) na porovnanie. Jeden dopyt na Open-Meteo vráti oba — premenné
@@ -127,6 +134,8 @@ export function meteogramColumns(series, { nowMs = Date.now(), stepHours = METEO
     if (i === undefined) continue;
     let precip = null;
     let gust = null;
+    let snow = null;
+    let code = null;
     for (let h = 0; h < stepHours; h += 1) {
       const j = index.get(t + h * HOUR_MS);
       if (j === undefined) continue;
@@ -134,6 +143,12 @@ export function meteogramColumns(series, { nowMs = Date.now(), stepHours = METEO
       if (p !== null && p !== undefined) precip = (precip ?? 0) + p;
       const g = series.gust?.[j];
       if (g !== null && g !== undefined) gust = Math.max(gust ?? 0, g);
+      const s = series.snow?.[j];
+      if (s !== null && s !== undefined) snow = (snow ?? 0) + s;
+      // Počasie za 3 h = najvýznamnejší WMO kód (kódy rastú s významom: jasno < oblačno < hmla < mrholenie
+      // < dážď < sneh < prehánky < búrka), ako Windy ukazuje ikonu za interval.
+      const k = series.code?.[j];
+      if (k !== null && k !== undefined) code = Math.max(code ?? 0, k);
     }
     cols.push({
       t,
@@ -144,6 +159,11 @@ export function meteogramColumns(series, { nowMs = Date.now(), stepHours = METEO
       pressure: series.pressure?.[i] ?? null,
       precip: precip === null ? null : Math.round(precip * 10) / 10,
       gust,
+      humidity: series.humidity?.[i] ?? null,
+      snow: snow === null ? null : Math.round(snow * 10) / 10,
+      code,
+      // Deň/noc v strede intervalu (ikona slnka či mesiaca) — 1. hodina môže byť ešte pred východom.
+      isDay: series.isDay?.[index.get(t + HOUR_MS) ?? i] ?? series.isDay?.[i] ?? null,
     });
   }
   return cols;
@@ -216,6 +236,27 @@ export function rampCssColor(fieldId, value) {
 export function windArrowRotation(dirFromDeg) {
   if (dirFromDeg === null || dirFromDeg === undefined || !Number.isFinite(dirFromDeg)) return null;
   return ((dirFromDeg + 180) % 360 + 360) % 360;
+}
+
+/**
+ * Druh ikony počasia z WMO kódu (Open-Meteo `weather_code`, tabuľka WMO 4677 v ich dokumentácii) a dňa/noci.
+ * Null bez kódu. Pure.
+ * @returns {'clear-day'|'clear-night'|'partly-day'|'partly-night'|'cloudy'|'fog'|'drizzle'|'rain'|'sleet'|'snow'|'showers'|'thunder'|null}
+ */
+export function weatherIconKind(code, isDay = 1) {
+  if (code === null || code === undefined || !Number.isFinite(code)) return null;
+  const day = isDay !== 0;
+  if (code <= 1) return day ? 'clear-day' : 'clear-night';
+  if (code === 2) return day ? 'partly-day' : 'partly-night';
+  if (code === 3) return 'cloudy';
+  if (code === 45 || code === 48) return 'fog';
+  if (code === 56 || code === 57 || code === 66 || code === 67) return 'sleet';
+  if (code >= 51 && code <= 55) return 'drizzle';
+  if (code >= 61 && code <= 65) return 'rain';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  if (code >= 80 && code <= 82) return 'showers';
+  if (code >= 95) return 'thunder';
+  return 'cloudy';
 }
 
 /** Index stĺpca, ktorý zodpovedá času mapy (ISO kroku); −1 ak nie je. Pure. */

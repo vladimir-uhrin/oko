@@ -219,3 +219,46 @@ test('rozdiel modelov a druhá krivka na spoločnej mierke', () => {
   // rovnaká mierka: hodnota 10 je na spodku pri oboch krivkách
   assert.equal(temperaturePath([10, 20], 40, 34, { lo: 10, hi: 30 }), 'M20.0,30.0L60.0,17.0');
 });
+
+test('riadok počasia: WMO kód → druh ikony, deň/noc; každý druh má ikonu a text v oboch jazykoch', async () => {
+  const { weatherIconKind } = await import('./meteogram.js');
+  const { WEATHER_ICON_PATHS } = await import('../meteogramPanel.js');
+  const { EN_STRINGS, SK_STRINGS } = await import('../i18nStrings.js');
+  assert.equal(weatherIconKind(0, 1), 'clear-day');
+  assert.equal(weatherIconKind(1, 0), 'clear-night');
+  assert.equal(weatherIconKind(2, 0), 'partly-night');
+  assert.equal(weatherIconKind(3, 1), 'cloudy');
+  assert.equal(weatherIconKind(45, 1), 'fog');
+  assert.equal(weatherIconKind(53, 1), 'drizzle');
+  assert.equal(weatherIconKind(56, 1), 'sleet', 'mrznúce mrholenie');
+  assert.equal(weatherIconKind(63, 1), 'rain');
+  assert.equal(weatherIconKind(67, 1), 'sleet');
+  assert.equal(weatherIconKind(75, 1), 'snow');
+  assert.equal(weatherIconKind(86, 1), 'snow', 'snehové prehánky');
+  assert.equal(weatherIconKind(81, 1), 'showers');
+  assert.equal(weatherIconKind(95, 1), 'thunder');
+  assert.equal(weatherIconKind(null, 1), null);
+  const kinds = ['clear-day', 'clear-night', 'partly-day', 'partly-night', 'cloudy', 'fog', 'drizzle', 'rain', 'sleet', 'snow', 'showers', 'thunder'];
+  for (const k of kinds) assert.ok(WEATHER_ICON_PATHS[k]?.length, `ikona ${k}`);
+  for (const k of kinds) for (const [lang, dict] of [['en', EN_STRINGS], ['sk', SK_STRINGS]]) assert.ok(dict[`meteo.wx.${k}`], `${lang} meteo.wx.${k}`);
+});
+
+test('3-hodinový stĺpec: sneh súčet, počasie najvýznamnejší kód, vlhkosť v čase stĺpca, deň/noc zo stredu intervalu', () => {
+  const times = Array.from({ length: 6 }, (_, i) => T0 + i * H);
+  const series = {
+    times, temp: [1, 1, 1, 1, 1, 1], precip: [0, 0, 0, 0, 0, 0], gust: [5, 5, 5, 5, 5, 5],
+    snow: [0.2, 0.5, 0, 0, 0, 0], code: [3, 73, 71, 2, 2, 2], humidity: [90, 80, 70, 60, 50, 40], isDay: [0, 1, 1, 1, 1, 1],
+  };
+  const [first, second] = meteogramColumns(series, { nowMs: T0 });
+  assert.equal(first.snow, 0.7);
+  assert.equal(first.code, 73);
+  assert.equal(first.humidity, 90);
+  assert.equal(first.isDay, 1, 'stred intervalu (01 h) je už deň');
+  assert.equal(second.snow, 0);
+  assert.equal(second.code, 2);
+});
+
+test('adresa Open-Meteo pýta aj vlhkosť, sneh, WMO kód a deň/noc', () => {
+  const hourly = new URL(openMeteoPointUrl({ lat: 48.1, lon: 17.1 })).searchParams.get('hourly').split(',');
+  for (const v of ['relative_humidity_2m', 'snowfall', 'weather_code', 'is_day', 'pressure_msl']) assert.ok(hourly.includes(v), v);
+});

@@ -36,6 +36,31 @@ export const DEFAULT_DOCK_HEIGHT_PX = 62;
 export const VOICE_OVERHANG_PX = 16;
 
 /**
+ * Prvky, cez ktoré sa kredity na mobile nesmú ukryť (2026-10-10): os počasia a vodorovný výber vrstiev
+ * počasia ležia v páse nad dokom — na 375 px bol odkaz „Data attribution" celý pod osou (klik trafil os).
+ */
+export const CREDIT_OBSTACLE_IDS = Object.freeze(['meteo-timeline', 'weather-dock']);
+/** Medzera medzi kreditmi a prekážkou. */
+export const CREDIT_OBSTACLE_GAP_PX = 4;
+
+/**
+ * Spodok kreditov (px od spodku okna) nad prekážkami: začne na `base` a kým sa riadok kreditov
+ * (vodorovne `left`–`right`, výška `height`) prekrýva s niektorou prekážkou, posunie ho nad ňu.
+ * Prekážky sú obdĺžniky v súradniciach okna ({left, top, right, bottom}). Pure.
+ */
+export function creditsBottomClear({ base, height, left, right, viewportHeight, obstacles = [], gap = CREDIT_OBSTACLE_GAP_PX }) {
+  if (!Number.isFinite(base) || !Number.isFinite(viewportHeight) || !(height > 0)) return base;
+  let bottomEdge = viewportHeight - base;
+  for (let step = 0; step <= obstacles.length; step += 1) {
+    const top = bottomEdge - height;
+    const hits = obstacles.filter((o) => o && o.right > left && o.left < right && o.bottom > top - gap && o.top < bottomEdge + gap);
+    if (!hits.length) break;
+    bottomEdge = Math.min(...hits.map((o) => o.top)) - gap;
+  }
+  return Math.max(base, Math.round(viewportHeight - bottomEdge));
+}
+
+/**
  * Sekcie spodnej lišty. `panelIds` sa presunú do výsuvu v tomto poradí,
  * `expand` sa rozbalí, ostatné ostanú zbalené ako hlavičky (ťuknutie ich
  * rozbalí — hlavička panela je prepínač). `action: 'location'` neotvára výsuv,
@@ -290,7 +315,22 @@ export function createMobileShell({
     const credits = doc.getElementById?.('cesium-credits');
     if (credits?.style && !embed) {
       const dockHeight = Number(dock?.offsetHeight) || DEFAULT_DOCK_HEIGHT_PX;
-      credits.style.bottom = lift > 0 ? `${lift + dockHeight + VOICE_OVERHANG_PX + DOCK_LIFT_GAP_PX}px` : '';
+      const base = lift + dockHeight + VOICE_OVERHANG_PX + DOCK_LIFT_GAP_PX;
+      credits.style.bottom = lift > 0 ? `${base}px` : '';
+      // Os počasia a vodorovný výber vrstiev sú v páse nad dokom — kredity nad ne (len na mobile;
+      // na počítači je os v strede a kredity v rohu pod ňou).
+      if (lift > 0) {
+        const own = credits.getBoundingClientRect?.();
+        const obstacles = CREDIT_OBSTACLE_IDS
+          .map((id) => doc.getElementById?.(id))
+          .filter((el) => el && !el.hidden)
+          .map((el) => el.getBoundingClientRect?.())
+          .filter((r) => r && r.width > 0 && r.height > 0);
+        if (own && own.height > 0 && obstacles.length) {
+          const clear = creditsBottomClear({ base, height: own.height, left: own.left, right: own.right, viewportHeight: win?.innerHeight, obstacles });
+          if (clear !== base) credits.style.bottom = `${clear}px`;
+        }
+      }
     }
     if (!mode.mobile && active) close();
     try { suppressLane?.('ambient-card', mode.mobile); } catch { /* overlay host nie je pripravený */ }
@@ -325,6 +365,19 @@ export function createMobileShell({
   win?.addEventListener?.('orientationchange', onResize);
   const coarseQuery = (() => { try { return win?.matchMedia?.('(pointer: coarse)') || null; } catch { return null; } })();
   coarseQuery?.addEventListener?.('change', onResize);
+  // Os počasia / výber vrstiev sa zjavia, skryjú alebo zbalia bez zmeny okna — kredity sa prepočítajú
+  // (rAF-zlúčené). Sleduje sa len hidden/class a reaguje len na prekážky, nie na celé telo.
+  const obstacleIds = new Set(CREDIT_OBSTACLE_IDS);
+  let obstacleObserver = null;
+  try {
+    const Observer = win?.MutationObserver;
+    if (typeof Observer === 'function' && body) {
+      obstacleObserver = new Observer((records) => {
+        if (records.some((r) => obstacleIds.has(r.target?.id))) onResize();
+      });
+      obstacleObserver.observe(body, { subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+    }
+  } catch { obstacleObserver = null; }
 
   return {
     inert: false,
@@ -341,6 +394,7 @@ export function createMobileShell({
       win?.removeEventListener?.('resize', onResize);
       win?.removeEventListener?.('orientationchange', onResize);
       coarseQuery?.removeEventListener?.('change', onResize);
+      obstacleObserver?.disconnect?.();
       body.classList?.remove?.('oko-mobile', 'oko-mobile-landscape');
       appbar.hidden = true;
     },

@@ -6,7 +6,8 @@
 // Model a výpočty: src/data/meteogram.js. Žiadne Cesium.
 
 import {
-  columnIndexForTime, maxTemperatureSpread, meteogramDays, meteogramHour, rampCssColor, utcOffsetLabel, windArrowRotation,
+  STRONG_GUST_MS, columnIndexForTime, maxTemperatureSpread, meteogramDays, meteogramHour, rampCssColor, utcOffsetLabel,
+  weatherIconKind, windArrowRotation,
 } from './data/meteogram.js';
 import { columnWarningLevels, createPointWarningsLookup, isActiveAt } from './data/meteogramWarnings.js';
 import { WARNING_LEVELS, warningTimeLabel } from './data/weatherWarnings.js';
@@ -52,6 +53,46 @@ export function sharedRange(...lists) {
 
 const MODEL_PREF_KEY = 'oko.meteogram.model';
 
+// Ikony počasia (2026-10-10): monochromatické čiary 24 × 24 vo farbe textu (OKO: ikony nie emoji).
+const SUN = 'M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8zM12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4';
+const MOON = 'M15.5 3.5a8.5 8.5 0 1 0 5 14.5a7 7 0 0 1-5-14.5z';
+const CLOUD = 'M7 19h10.5a4.5 4.5 0 0 0 .3-9a6 6 0 0 0-11.5 1.8A3.6 3.6 0 0 0 7 19z';
+const CLOUD_HIGH = 'M7 14h10.5a4 4 0 0 0 .3-8a5.5 5.5 0 0 0-10.6 1.6A3.2 3.2 0 0 0 7 14z';
+const CLOUD_LOW = 'M9.5 20.5h8.5a3.8 3.8 0 0 0 .3-7.6a4.8 4.8 0 0 0-9.2 1.4a3.1 3.1 0 0 0 .4 6.2z';
+const SMALL_SUN = 'M8 5a3 3 0 1 0 0 6a3 3 0 1 0 0-6zM8 1.3v1.4M1.3 8h1.4M3.3 3.3l1 1M12.7 3.3l-1 1';
+const SMALL_MOON = 'M9.5 2.5a5.5 5.5 0 1 0 4 9a4.5 4.5 0 0 1-4-9z';
+/** Ťahy ikony podľa druhu z weatherIconKind. */
+export const WEATHER_ICON_PATHS = Object.freeze({
+  'clear-day': [SUN],
+  'clear-night': [MOON],
+  'partly-day': [SMALL_SUN, CLOUD_LOW],
+  'partly-night': [SMALL_MOON, CLOUD_LOW],
+  cloudy: [CLOUD],
+  fog: ['M4 8.5h16M3 12.5h18M5 16.5h14'],
+  drizzle: [CLOUD_HIGH, 'M9 17.5v.4M13 18.5v.4M17 17.5v.4M11 21v.4M15 21v.4'],
+  rain: [CLOUD_HIGH, 'M9 16.5l-1 4M13 16.5l-1 4M17 16.5l-1 4'],
+  sleet: [CLOUD_HIGH, 'M9 16.5l-1 4M14 17.8v.4M16 20.6v.4'],
+  snow: [CLOUD_HIGH, 'M9 16.5v3.4M7.5 17.4l3 1.6M7.5 19l3-1.6M15 16.5v3.4M13.5 17.4l3 1.6M13.5 19l3-1.6'],
+  showers: [CLOUD_HIGH, 'M8.5 16.5l-1 3M12.5 16.5l-1.6 5.5M16.5 16.5l-1 3'],
+  thunder: [CLOUD_HIGH, 'M13.5 14.5l-3 4h3.2l-2.2 4.5'],
+});
+
+/** SVG ikona počasia (dekorácia — význam nesie title bunky). */
+export function weatherIcon(doc, kind) {
+  const svg = doc.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '18');
+  svg.setAttribute('height', '18');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', `meteogram-wx meteogram-wx-${kind}`);
+  for (const d of WEATHER_ICON_PATHS[kind] || []) {
+    const path = doc.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 /** Text hodnoty v bunke; prázdna bunka „–", po slovensky desatinná čiarka. Pure. */
 export function cellText(value, digits = 0, lang = 'sk') {
   if (value === null || value === undefined || !Number.isFinite(value)) return '–';
@@ -75,11 +116,21 @@ export function bottomAboveAnchor(anchorRect, viewportHeight, gap = 8) {
  */
 export function meteogramAnchor(doc) {
   const dock = doc.getElementById?.('weather-dock');
+  let anchor = null;
   if (dock && !dock.hidden) {
     const r = dock.getBoundingClientRect();
-    if (r.width > r.height * 2) return dock;
+    if (r.width > r.height * 2) anchor = dock;
   }
-  return doc.getElementById?.('meteo-timeline');
+  anchor ||= doc.getElementById?.('meteo-timeline');
+  // Na mobile plášť dvíha kredity nad os a výber vrstiev (mobileShell.creditsBottomClear) — pás predpovede
+  // sa postaví nad ne, inak by odkaz „Data attribution" ostal pod ním (2026-10-10).
+  const credits = doc.getElementById?.('cesium-credits');
+  if (anchor && credits && credits !== anchor && !credits.hidden && typeof credits.getBoundingClientRect === 'function' && typeof anchor.getBoundingClientRect === 'function') {
+    const c = credits.getBoundingClientRect();
+    const a = anchor.getBoundingClientRect();
+    if (c.height > 0 && c.top < a.top && c.bottom <= a.top + 1 && a.top - c.bottom < 24) return credits;
+  }
+  return anchor;
 }
 
 export function createMeteogramPanel(doc, {
@@ -268,19 +319,29 @@ export function createMeteogramPanel(doc, {
     const spreadText = spread !== null && spread >= 1
       ? ` · ${t('meteo.gram.spread', { a: view.label, b: other.label, d: cellText(spread, spread % 1 ? 1 : 0, lang()) })}`
       : '';
-    status.textContent = `${t('meteo.gram.source').replace('{model}', view.name || view.label).replace('{tz}', utcOffsetLabel(offset))} · ${t('meteo.forecast')}${series.stale ? ` · ${t('meteo.stale')}` : ''}${spreadText} · ${t('meteo.gram.hint')}`;
+    // Nápoveda „klikni na stĺpec…" je samostatný úsek — na úzkom displeji ju CSS skryje (popis sa lámal na 4 riadky).
+    status.replaceChildren(
+      `${t('meteo.gram.source').replace('{model}', view.name || view.label).replace('{tz}', utcOffsetLabel(offset))} · ${t('meteo.forecast')}${series.stale ? ` · ${t('meteo.stale')}` : ''}${spreadText}`,
+      el('span', 'meteogram-hint', ` · ${t('meteo.gram.hint')}`),
+    );
     status.classList.remove('error');
 
+    // Sneh len keď v zobrazených 5 dňoch nejaký padá; vlhkosť a tlak sú „doplnkové" — nízke okno ich skryje.
+    const hasSnow = cols.some((c) => c.snow > 0);
     labels.replaceChildren(
       el('span', 'meteogram-label day', ''),
       el('span', 'meteogram-label hour', ''),
       el('span', 'meteogram-label curve', ''),
+      el('span', 'meteogram-label', t('meteo.gram.row-wx')),
       el('span', 'meteogram-label', t('meteo.gram.row-temp')),
       el('span', 'meteogram-label', t('meteo.gram.row-precip')),
+      ...(hasSnow ? [el('span', 'meteogram-label', t('meteo.gram.row-snow'))] : []),
       el('span', 'meteogram-label', t('meteo.gram.row-clouds')),
+      el('span', 'meteogram-label extra', t('meteo.gram.row-humidity')),
       el('span', 'meteogram-label', t('meteo.gram.row-wind')),
       el('span', 'meteogram-label', t('meteo.gram.row-gust')),
       el('span', 'meteogram-label', t('meteo.gram.row-dir')),
+      el('span', 'meteogram-label extra', t('meteo.gram.row-pressure')),
     );
 
     const days = row('days');
@@ -312,12 +373,16 @@ export function createMeteogramPanel(doc, {
     path.setAttribute('class', 'meteogram-curve');
     svg.append(path);
     curve.append(svg);
+    const wx = row('wx');
     const temp = row('temp');
     const precip = row('precip');
+    const snow = row('snow');
     const clouds = row('clouds');
+    const humidity = row('humidity extra');
     const wind = row('wind');
     const gust = row('gust');
     const dir = row('dir');
+    const pressure = row('pressure extra');
 
     cols.forEach((c, i) => {
       const cell = (r, text, cls = '') => {
@@ -329,19 +394,28 @@ export function createMeteogramPanel(doc, {
         return n;
       };
       cell(hours, meteogramHour(c.t, offset), 'hour');
+      const kind = weatherIconKind(c.code, c.isDay);
+      const wc0 = cell(wx, '', 'wx');
+      if (kind) {
+        wc0.append(weatherIcon(doc, kind));
+        wc0.title = t(`meteo.wx.${kind}`);
+      }
       const tc = cell(temp, cellText(c.temp), 'value');
       const tColor = rampCssColor('temp', c.temp);
       if (tColor) tc.style.background = tColor;
       const pc = cell(precip, c.precip ? cellText(c.precip, c.precip < 10 ? 1 : 0, lang()) : '', 'precip');
       if (c.precip) pc.style.setProperty('--bar', `${Math.min(100, Math.round(Math.sqrt(c.precip / 10) * 100))}%`);
+      if (hasSnow) cell(snow, c.snow ? cellText(c.snow, c.snow < 10 ? 1 : 0, lang()) : '', c.snow ? 'snow has' : 'snow');
       const cc = cell(clouds, cellText(c.clouds), 'clouds');
       if (c.clouds !== null) cc.style.setProperty('--cover', String(Math.min(1, Math.max(0, c.clouds / 100))));
+      cell(humidity, cellText(c.humidity), 'plain');
       const wc = cell(wind, cellText(c.wind), 'value');
       const wColor = rampCssColor('wind', c.wind);
       if (wColor) wc.style.background = wColor;
-      const gc = cell(gust, cellText(c.gust), 'value');
+      const gc = cell(gust, cellText(c.gust), `value${c.gust >= STRONG_GUST_MS ? ' strong' : ''}`);
       const gColor = rampCssColor('wind', c.gust);
       if (gColor) gc.style.background = gColor;
+      if (c.gust >= STRONG_GUST_MS) gc.title = t('meteo.gram.strong-gust', { kmh: Math.round(c.gust * 3.6) });
       const dc = cell(dir, '', 'dir');
       const rot = windArrowRotation(c.windDir);
       if (rot !== null) {
@@ -350,8 +424,9 @@ export function createMeteogramPanel(doc, {
         dc.append(arrow);
         dc.title = `${Math.round(c.windDir)}°`;
       }
+      cell(pressure, cellText(c.pressure), 'plain');
     });
-    grid.replaceChildren(days, hours, curve, temp, precip, clouds, wind, gust, dir);
+    grid.replaceChildren(days, hours, curve, wx, temp, precip, ...(hasSnow ? [snow] : []), clouds, humidity, wind, gust, dir, pressure);
     markActive();
     if (lastWarnings) renderWarnings(lastWarnings); // prepnutie modelu prekreslí hodiny — farba výstrahy ostane
   }

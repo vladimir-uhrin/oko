@@ -3666,6 +3666,20 @@ body.cockpit-mode:has(#left-panel-stack > .panel-collapsible:not(.collapsed)) .c
 .meteogram-cell.precip { color: #cfe9ff; z-index: 0; }
 .meteogram-cell.clouds { background: rgba(200, 210, 220, calc(var(--cover, 0) * 0.45)); color: rgba(255, 255, 255, 0.85); }
 .meteogram-arrow { display: inline-block; color: #fff; font-size: 13px; line-height: 1; }
+/* Riadok počasia, vlhkosť, tlak, sneh, silné nárazy (2026-10-10). Ikony monochromatické vo farbe textu. */
+.meteogram-cell.wx { color: rgba(236, 248, 255, 0.92); }
+.meteogram-wx { display: block; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.meteogram-cell.plain { color: rgba(224, 247, 255, 0.78); }
+.meteogram-cell.snow.has { color: #fff; font-weight: 700; background: rgba(220, 235, 255, 0.16); }
+.meteogram-cell.value.strong { outline: 1px solid #ffb347; outline-offset: -2px; text-decoration: underline; text-decoration-color: #ffb347; text-underline-offset: 2px; }
+/* Nízke okno (telefón, malý notebook): doplnkové riadky preč, nech pás neprekryje pol mapy. */
+@media (max-height: 760px) {
+  .meteogram-label.extra, .meteogram-row.extra { display: none; }
+}
+/* Úzky displej: nápoveda ku klikaniu na stĺpec sa nezmestí — popis bol na 4 riadky. */
+@media (max-width: 700px) {
+  .meteogram-hint { display: none; }
+}
 .meteogram-cell.active { box-shadow: inset 0 0 0 1px var(--accent); }
 .meteogram-cell.hour.active { color: var(--accent); font-weight: 700; }
 .meteogram-cell:hover { outline: 1px solid rgba(255, 255, 255, 0.35); outline-offset: -1px; }

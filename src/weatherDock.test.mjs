@@ -96,6 +96,22 @@ test('pás predpovede: na mobile nad vodorovným dockom, inak nad časovou osou'
   assert.equal(meteogramAnchor(docWith({ width: 374, height: 44 }, true)), timeline);
 });
 
+test('pás predpovede: kredity zdvihnuté tesne nad kotvu (mobil) → pás nad kreditmi; kredity v rohu pod osou nie', () => {
+  const rect = (top, bottom, w = 300) => ({ top, bottom, height: bottom - top, width: w, left: 0, right: w });
+  const docWith = (creditsRect) => {
+    const dock = { id: 'weather-dock', hidden: false, getBoundingClientRect: () => rect(547, 591, 359) };
+    const timeline = { id: 'meteo-timeline', hidden: false, getBoundingClientRect: () => rect(600, 677, 343) };
+    const credits = { id: 'cesium-credits', hidden: false, getBoundingClientRect: () => creditsRect };
+    return { els: { dock, timeline, credits }, getElementById: (id) => ({ 'weather-dock': dock, 'meteo-timeline': timeline, 'cesium-credits': credits })[id] };
+  };
+  const mobile = docWith(rect(530, 543, 96));
+  assert.equal(meteogramAnchor(mobile), mobile.els.credits, 'kredity 4 px nad vodorovným dockom');
+  const desktop = docWith(rect(844, 856, 96));
+  assert.equal(meteogramAnchor(desktop), desktop.els.dock, 'kredity dole v rohu: kotva ostáva');
+  const far = docWith(rect(400, 413, 96));
+  assert.equal(meteogramAnchor(far), far.els.dock, 'kredity ďaleko nad kotvou nie sú kotva');
+});
+
 test('zbalenie na ikony: uložená voľba má prednosť, inak zbalený na nízkej obrazovke; klik prepne a zapamätá', async () => {
   const { initialCollapsed, DOCK_COLLAPSE_KEY } = await import('./weatherDock.js');
   assert.equal(initialCollapsed(null, 700), true);
