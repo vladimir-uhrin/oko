@@ -150,3 +150,25 @@ test('obnova aj bez návštevníkov: časovač na serveri s API spustí obnovu b
     process.env.FIRMS_NO_TIMER = '1';
   }
 });
+
+test('časovač štartuje až keď server počúva a zastaví sa pri zatvorení (ako strážca Histórie letov)', async () => {
+  const { EventEmitter } = await import('node:events');
+  const realSI = globalThis.setInterval; const realST = globalThis.setTimeout; const realCI = globalThis.clearInterval;
+  const timers = []; let cleared = 0;
+  globalThis.setInterval = (fn, ms) => { const t = { fn, ms, unref() {} }; timers.push(t); return t; };
+  globalThis.setTimeout = (fn, ms, ...rest) => (ms === 30_000 ? (timers.push({ fn, ms }), { unref() {} }) : realST(fn, ms, ...rest));
+  globalThis.clearInterval = (t) => { if (t) cleared += 1; };
+  process.env.FIRMS_MAP_KEY = 'k'; delete process.env.FIRMS_NO_TIMER;
+  try {
+    const http = new EventEmitter(); http.listening = false;
+    firmsProxy().configureServer({ httpServer: http, middlewares: { use() {} } });
+    assert.equal(timers.length, 0, 'kým server nepočúva, nič');
+    http.emit('listening');
+    assert.equal(timers.length, 2);
+    http.emit('close');
+    assert.equal(cleared, 1, 'pri zatvorení sa časovač zruší');
+  } finally {
+    globalThis.setInterval = realSI; globalThis.setTimeout = realST; globalThis.clearInterval = realCI;
+    delete process.env.FIRMS_MAP_KEY; process.env.FIRMS_NO_TIMER = '1';
+  }
+});

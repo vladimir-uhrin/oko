@@ -3583,11 +3583,31 @@ export function firmsProxy() {
       // nikto vrstvu neotvoril, dáta ostali 3 dni staré (návštevník dostal 0 ohnísk, staršie než 24 h
       // sa vyraďujú) a História požiarov a Sentinel-3 sa nedopĺňali. Ako záznam Histórie letov: každých
       // TTL_MS na serveri s API (nie v proxy role vývojového servera — tá /api len preposiela).
+      // 2026-10-10 po vydaní: časovač nastavený priamo v configureServer v službe NEbežal (13 min bez
+      // obnovy, bez stopy v logu). Ako strážca Histórie letov (flightHistoryKeeper.attach): štart až po
+      // „listening“, stop pri „close“, a riadok do logu pri štarte aj pri každej obnove z časovača.
       if (mapKey() && !String(process.env.OKO_API_UPSTREAM || '').trim() && !process.env.FIRMS_NO_TIMER) {
-        const tick = () => { void readDiskOnce().then(() => { if (!mem || Date.now() - mem.at >= TTL_MS) startRefresh(mapKey()); }); };
-        const first = setTimeout(tick, 30_000); first.unref?.();
-        const timer = setInterval(tick, TTL_MS); timer.unref?.();
-        server.httpServer?.once?.('close', () => { clearTimeout(first); clearInterval(timer); });
+        let first = null; let timer = null;
+        const tick = () => {
+          readDiskOnce().then(() => {
+            if (mem && Date.now() - mem.at < TTL_MS) return;
+            console.log('[firms-proxy] obnova z časovača (bez návštevníkov)');
+            startRefresh(mapKey());
+          }).catch((err) => console.warn('[firms-proxy] časovač:', err?.message || err));
+        };
+        const start = () => {
+          if (timer) return;
+          first = setTimeout(tick, 30_000); first.unref?.();
+          timer = setInterval(tick, TTL_MS); timer.unref?.();
+          console.log(`[firms-proxy] obnova aj bez návštevníkov: každých ${Math.round(TTL_MS / 60_000)} min`);
+        };
+        const stop = () => { if (timer) console.log('[firms-proxy] časovač obnovy zastavený (server sa zatvára)'); clearTimeout(first); clearInterval(timer); first = null; timer = null; };
+        const http = server.httpServer;
+        if (!http) start();
+        else {
+          if (http.listening) start(); else http.once('listening', start);
+          http.once('close', stop);
+        }
       }
       server.middlewares.use('/api/firms', async (req, res) => {
         const sendJson = (status, obj) => {
