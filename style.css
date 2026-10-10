@@ -10857,7 +10857,8 @@ body.scene-playback-mode #first-run-launcher {
   width: 100%;
   height: auto;
   aspect-ratio: 16 / 10;
-  max-height: 190px;
+  /* 2026-10-10 „nevidím trasu ani loď": nižšia fotka, nech karta nezakryje mapu. */
+  max-height: 120px;
 }
 
 /* Kartička pod kurzorom: fotka lode tiež na celú šírku. */

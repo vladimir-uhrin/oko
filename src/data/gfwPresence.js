@@ -422,7 +422,33 @@ export function createGfwPresenceLayer({
     _viewer.scene?.requestRender?.();
   }
 
-  function selectVessel(key) {
+  /**
+   * Po výbere zarámuj loď, novšiu polohu a trasu (2026-10-10, vlastník: „nevidím
+   * trasu ani loď") — karta inak sedela priamo na lodi. Cieľ je Cartesian3,
+   * nie Rectangle (pri streamujúcich 3D dlaždiciach Rectangle ticho nič neurobí).
+   */
+  function frameSelection(row, info, track) {
+    const camera = _viewer?.camera;
+    if (!camera?.flyTo) return;
+    const pts = [{ lat: row.lat, lon: row.lon }];
+    if (info?.lastPosition && Number.isFinite(info.lastPosition.lat)) pts.push(info.lastPosition);
+    for (const p of Array.isArray(track) ? track : []) if (Number.isFinite(p?.lat) && Number.isFinite(p?.lon)) pts.push(p);
+    const lats = pts.map((p) => p.lat);
+    const lons = pts.map((p) => p.lon);
+    const south = Math.min(...lats); const north = Math.max(...lats);
+    const west = Math.min(...lons); const east = Math.max(...lons);
+    const spanKm = Math.max((north - south) * 111, (east - west) * 111 * Math.cos(((north + south) / 2) * Math.PI / 180));
+    const heightM = Math.min(9_000_000, Math.max(600_000, spanKm * 1000 * 2.6));
+    // Stred trochu na sever od bodov: karta sa kreslí nad loďou, body ostanú voľné pod ňou.
+    const lat = (south + north) / 2 + (heightM / 111_000) * 0.18;
+    camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees((west + east) / 2, Math.min(80, lat), heightM),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+      duration: 1.6,
+    });
+  }
+
+  function selectVessel(key, { frame = true } = {}) {
     const next = key && _byId.has(String(key)) ? String(key) : null;
     _selectedKey = next;
     _selectedRow = next ? _byId.get(next).row : null;
@@ -442,6 +468,7 @@ export function createGfwPresenceLayer({
       if (token !== _selectToken || _selectedKey !== next) return;
       syncSelectionGraphics(row, info, track?.points);
       publishLabels();
+      if (frame) frameSelection(row, info, track?.points);
     });
   }
 
@@ -626,6 +653,9 @@ export function createGfwPresenceLayer({
       else if (_status === 'empty' && !_loading) stats.loadingLabel = t('gfw.empty');
       return stats;
     },
+
+    /** Zruší výber (krížik na karte, 2026-10-10). */
+    clearSelection() { selectVessel(null); },
 
     /** MMSI vybranej lode (fotka pod kartou), inak null. */
     getSelectedMmsi() {

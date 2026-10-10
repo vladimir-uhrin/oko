@@ -3203,6 +3203,23 @@ export class StyleManager {
           },
           close: () => vesselsModule()?.clearSelection?.(),
         },
+        // Krížik aj pre oneskorené lode (AISHub) a satelitné AIS (GFW) — 2026-10-10.
+        {
+          id: 'vessel-aishub',
+          active: () => {
+            const mmsi = this._dataManager?.layers?.get('aishub-vessels')?.module?.getSelectedMmsi?.();
+            return mmsi ? { sourceId: 'aishub-vessels', entryId: `aishub:${mmsi}` } : null;
+          },
+          close: () => this._dataManager?.layers?.get('aishub-vessels')?.module?.clearSelection?.(),
+        },
+        {
+          id: 'vessel-gfw',
+          active: () => {
+            const mmsi = this._dataManager?.layers?.get('gfw-presence')?.module?.getSelectedMmsi?.();
+            return mmsi ? { sourceId: 'gfw-presence', entryId: `gfw:${mmsi}` } : null;
+          },
+          close: () => this._dataManager?.layers?.get('gfw-presence')?.module?.clearSelection?.(),
+        },
       ],
     });
     // SLEDOVAŤ a KOKPIT na mobile pod kartou lietadla (2026-10-04, cardActionBar.js).

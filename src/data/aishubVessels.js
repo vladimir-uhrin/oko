@@ -775,6 +775,9 @@ export function createAishubVesselsLayer({
     },
 
     /** MMSI práve vybranej lode (fotka pod kartou), inak null. */
+    /** Zruší výber (krížik na karte, 2026-10-10). */
+    clearSelection() { selectVessel(null); },
+
     getSelectedMmsi() {
       return _selectedKey;
     },
