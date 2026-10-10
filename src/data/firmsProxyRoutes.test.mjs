@@ -172,3 +172,27 @@ test('časovač štartuje až keď server počúva a zastaví sa pri zatvorení 
     delete process.env.FIRMS_MAP_KEY; process.env.FIRMS_NO_TIMER = '1';
   }
 });
+
+test('/api/firms?view=cells a ?bbox=: zhrnutie a výrez z tej istej cache; bez parametrov všetky ohniská', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oko-firms-view-'));
+  const now = Date.now();
+  const d = new Date(now - 3600_000).toISOString().slice(0, 10); const hh = new Date(now - 3600_000).toISOString().slice(11, 13);
+  const r = (lat, lon, frp) => ({ lat, lon, frp, confidence: 'n', brightness: 300, daynight: 'D', acqDate: d, acqTime: `${hh}00`, satellite: 'N' });
+  fs.writeFileSync(path.join(cacheDir, 'firms.json'), JSON.stringify({ at: now - 60_000, sources: [{ source: 'VIIRS_SNPP_NRT', count: 3, ok: true }], fires: [r(47.59, 36.97, 253), r(47.58, 36.98, 33), r(10, 10, 5)] }));
+  process.env.FIRMS_CACHE_DIR = cacheDir; process.env.FIRMS_MAP_KEY = 'k';
+  try {
+    const h = handlerOf(firmsProxy());
+    const all = JSON.parse((await call(h, '/')).body);
+    assert.equal(all.fires.length, 3); assert.equal(all.count, 3);
+    const cells = JSON.parse((await call(h, '/?view=cells')).body);
+    assert.equal(cells.count, 3, 'počet = všetky ohniská');
+    assert.equal(cells.cells.length, 2); assert.equal(cells.cells[0].n, 2); assert.equal(cells.grid, 0.25);
+    assert.equal(cells.fires, undefined);
+    const box = JSON.parse((await call(h, '/?bbox=36,47,38,48.5')).body);
+    assert.deepEqual(box.fires.map((f) => f.frp), [253, 33]);
+    const bad = JSON.parse((await call(h, '/?bbox=0,0,50,50')).body);
+    assert.equal(bad.error, 'bad_bbox'); assert.deepEqual(bad.fires, []);
+  } finally {
+    delete process.env.FIRMS_CACHE_DIR; delete process.env.FIRMS_MAP_KEY;
+  }
+});

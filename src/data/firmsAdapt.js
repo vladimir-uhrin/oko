@@ -38,6 +38,11 @@ export function adaptFirmsRecords(records) {
       geoSeenMs: finiteNumber(record.geoSeenMs),
       geoSat: typeof record.geoSat === 'string' ? record.geoSat : '',
       repeats: finiteNumber(record.repeats),
+      // Zhrnutie po štvorcoch (?view=cells, 2026-10-10): záznam = najsilnejšie ohnisko štvorca + počty.
+      clusterCount: Number.isFinite(Number(record.n)) && Number(record.n) > 0 ? Number(record.n) : 1,
+      nightCount: Number.isFinite(Number(record.nn)) ? Number(record.nn) : (record.daynight === 'N' ? 1 : 0),
+      newestMs: finiteNumber(record.nw),
+      sumFrp: Number.isFinite(Number(record.sf)) ? Number(record.sf) : finiteNumber(record.frp),
       scanKm: finiteNumber(record.scan),
       trackKm: finiteNumber(record.track),
       contextEntity: null,

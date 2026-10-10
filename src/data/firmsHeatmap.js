@@ -58,8 +58,9 @@ const LOD_LEVELS = [
   { id: 'regional', minHeight: 3000000, mode: 'cells', gridDegrees: 1.0, maxCells: 3600, labelDistance: 8500000 },
   // 2026-10-07 („vyzerá to ako hviezdna obloha“): zhluky s počtom — 750–3000 km mriežka 0,6°, 250–750 km
   // 0,2°; jednotlivé ohniská až pod 250 km. Predtým jednotlivé už od 750 km — stovky svietiacich bodov.
-  { id: 'local', minHeight: 750000, mode: 'detections', cluster: 0.6, maxDetections: 1500, labelDistance: 4500000 },
-  { id: 'near', minHeight: 250000, mode: 'detections', cluster: 0.2, maxDetections: 2500, labelDistance: 2500000 },
+  // Mriežky sú násobky štvorca zhrnutia servera (0,25°, firmsView.js) — počty sa sčítajú presne.
+  { id: 'local', minHeight: 750000, mode: 'detections', cluster: 0.5, maxDetections: 1500, labelDistance: 4500000 },
+  { id: 'near', minHeight: 250000, mode: 'detections', cluster: 0.25, maxDetections: 2500, labelDistance: 2500000 },
   { id: 'close', minHeight: 0, mode: 'detections', maxDetections: 3000, labelDistance: 1800000 },
 ];
 const LOD_CHECK_MS = 650;
@@ -158,6 +159,10 @@ export function createFirmsHeatmapLayer({
   let _error = null;
   let _fires = [];
   let _firesByFrp = [];
+  /** _fires sú štvorce zhrnutia (najsilnejšie ohnisko + počty), nie jednotlivé ohniská. */
+  let _cellsMode = false;
+  /** Jednotlivé ohniská výrezu pri priblížení (?bbox=…), kľúč = zaokrúhlený výrez. */
+  let _close = { key: '', fires: [], loading: false };
   let _count = 0;
   let _cellCount = 0;
   let _lastUpdate = null;
@@ -438,7 +443,7 @@ export function createFirmsHeatmapLayer({
     _loading = true;
 
     try {
-      const response = await fetch(FIRMS_API_URL, { cache: 'no-store' });
+      const response = await fetch(`${FIRMS_API_URL}?view=cells`, { cache: 'no-store' });
       if (!response.ok) {
         let payload = null;
         try {
@@ -460,10 +465,13 @@ export function createFirmsHeatmapLayer({
       _down = downSourceGroups(payload?.sources);
       const previousSelection = _selectedFire;
       _selectedFire = null;
-      _fires = adaptFirmsRecords(payload?.fires);
+      // Zhrnutie po štvorcoch (bod 7, 2026-10-10); starý server bez neho pošle všetky ohniská.
+      _cellsMode = Array.isArray(payload?.cells);
+      _fires = adaptFirmsRecords(_cellsMode ? payload.cells : payload?.fires);
+      _close = { key: '', fires: [], loading: false };
       _cellCacheByGrid.clear(); // aggregation is per-dataset — new fires, new cells
       _firesByFrp = [..._fires].sort((a, b) => b.frp - a.frp);
-      _count = _fires.length;
+      _count = Number.isFinite(payload?.count) ? payload.count : _fires.length;
       // Data age, not response age: a stale proxy payload truthfully reads old.
       _lastUpdate = Number.isFinite(payload?.fetchedAt) ? payload.fetchedAt : Date.now();
       // Settle the previous selection BEFORE the LOD rebuild. renderCurrentLod
@@ -560,11 +568,12 @@ export function createFirmsHeatmapLayer({
           night: 0,
           newestAcqMs: 0,
         };
-        existing.count += 1;
-        existing.intensity += intensity;
+        const weight = fire.clusterCount || 1; // štvorec zhrnutia = viac ohnísk
+        existing.count += weight;
+        existing.intensity += intensity + (weight - 1);
         existing.maxFrp = Math.max(existing.maxFrp, fire.frp);
-        existing.newestAcqMs = Math.max(existing.newestAcqMs, fire.acqMs);
-        if (fire.night) existing.night += 1;
+        existing.newestAcqMs = Math.max(existing.newestAcqMs, fire.acqMs, fire.newestMs || 0);
+        existing.night += Number.isFinite(fire.nightCount) ? fire.nightCount : (fire.night ? 1 : 0);
         cells.set(key, existing);
       }
       // Heat-sorted once; per-render clipping below preserves the order.
@@ -661,6 +670,32 @@ export function createFirmsHeatmapLayer({
    * @param {Object} lod - Active LOD descriptor.
    * @param {?Object} bounds - Padded view bounds in degrees, or null.
    */
+  /**
+   * Jednotlivé ohniská pre výrez (zaokrúhlený na 0,5° s okrajom): z pamäti, inak spustí dopyt
+   * ?bbox= a vráti null (prekreslí sa po príchode). Pure voči kreslenia — len dáta.
+   */
+  function closeFiresFor(bounds) {
+    const r = (v, f) => Math.round(f(v * 2) / 2 * 100) / 100;
+    const w = r(bounds.west - 0.5, Math.floor); const e = r(bounds.east + 0.5, Math.ceil);
+    const s = Math.max(-90, r(bounds.south - 0.5, Math.floor)); const n = Math.min(90, r(bounds.north + 0.5, Math.ceil));
+    const key = `${w},${s},${e},${n}`;
+    if (_close.key === key && !_close.loading) return _close.fires;
+    if (_close.key === key) return null;
+    const ticket = { key, fires: [], loading: true };
+    _close = ticket;
+    fetch(`${FIRMS_API_URL}?bbox=${key}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload) => {
+        if (_close !== ticket) return;
+        const fires = adaptFirmsRecords(payload?.fires || []);
+        fires.sort((a, b) => b.frp - a.frp);
+        _close = { key, fires, loading: false };
+        if (_enabled && !payload?.error) renderCurrentLod(true);
+      })
+      .catch(() => { if (_close === ticket) _close = { key: '', fires: [], loading: false }; });
+    return null;
+  }
+
   function renderDetections(lod, bounds) {
     ensureDetectionCollections();
     _dataSource.entities.removeAll();
@@ -720,6 +755,19 @@ export function createFirmsHeatmapLayer({
       return;
     }
 
+    // Pri priblížení jednotlivé ohniská výrezu zo servera (v režime zhrnutia); kým neprídu, kreslia sa
+    // najsilnejšie ohniská štvorcov.
+    if (_cellsMode && bounds) {
+      const closeFires = closeFiresFor(bounds);
+      if (closeFires) {
+        candidates = [];
+        for (const fire of closeFires) {
+          if (!boundsContainPoint(bounds, fire.lat, fire.lon)) continue;
+          candidates.push(fire);
+          if (candidates.length >= lod.maxDetections) break;
+        }
+      }
+    }
     _cellCount = candidates.length;
     for (const fire of candidates) {
       const coreSize = frpPixelSize(fire.frp);

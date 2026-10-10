@@ -143,6 +143,7 @@ import { fireNewsQuery, fireNewsCellKey, fireNewsVerdict, nearestPlace, parseBin
 import { createFireHistoryStore, slimFire, FIRE_HISTORY_MAX_DAYS } from './src/data/fireHistoryStore.js';
 import { createSentinel3FrpService } from './src/data/sentinel3FrpService.js';
 import { parseTrustedList } from './src/data/eventNews.js';
+import { FIRE_CELL_DEG, buildFireCells, firesInBbox, parseFireBbox } from './src/data/firmsView.js';
 import {
   isLoopbackAddress,
   resolveClientIp,
@@ -3502,18 +3503,35 @@ export function firmsProxy() {
    * Cache entry → response payload. Fires are RE-filtered to the trailing
    * 24 h at serve time so a stale cache never serves >24h-old detections.
    */
-  function buildPayload(entry, stale) {
-    // Štíhly riadok (2026-10-06): klient číta len tieto polia (firmsAdapt.js); druhý jas, instrument
-    // a verzia nie. Súradnice na 4 desatinné (≈ 11 m, pixel VIIRS má 375 m) — ~20 % menej bytov.
-    const fires = filterTrailing24h(entry.fires, Date.now()).map(slimFire);
-    return {
-      fetchedAt: entry.at,
-      stale,
-      ttlMs: TTL_MS,
-      sources: entry.sources,
-      count: fires.length,
-      fires,
-    };
+  /** Štíhle ohniská za 24 h a zhrnutie po štvorcoch — prepočet raz za snímok (a 24 h okno raz za 5 min). */
+  let viewCache = { entry: null, builtAt: 0, fires: [], cells: null };
+  function viewOf(entry) {
+    const now = Date.now();
+    if (viewCache.entry !== entry || now - viewCache.builtAt > 5 * 60_000) {
+      // Štíhly riadok (2026-10-06): klient číta len tieto polia (firmsAdapt.js); druhý jas, instrument
+      // a verzia nie. Súradnice na 4 desatinné (≈ 11 m, pixel VIIRS má 375 m) — ~20 % menej bytov.
+      viewCache = { entry, builtAt: now, fires: filterTrailing24h(entry.fires, now).map(slimFire), cells: null };
+    }
+    return viewCache;
+  }
+
+  /**
+   * Odpoveď podľa dopytu (bod 7, 2026-10-10): `?view=cells` zhrnutie po štvorcoch 0,25° (34 → 3,8 MB,
+   * 196 000 → 17 700 záznamov), `?bbox=w,s,e,n` jednotlivé ohniská výrezu (pri priblížení), bez
+   * parametrov ako doteraz všetky ohniská (staršie klienty v cache prehliadača).
+   */
+  function buildPayload(entry, stale, query = null) {
+    const view = viewOf(entry);
+    const base = { fetchedAt: entry.at, stale, ttlMs: TTL_MS, sources: entry.sources, count: view.fires.length };
+    if (query?.get('view') === 'cells') {
+      if (!view.cells) view.cells = buildFireCells(view.fires);
+      return { ...base, grid: FIRE_CELL_DEG, cells: view.cells };
+    }
+    if (query?.has('bbox')) {
+      const bbox = parseFireBbox(query.get('bbox'));
+      return bbox ? { ...base, bbox, fires: firesInBbox(view.fires, bbox) } : { ...base, error: 'bad_bbox', fires: [] };
+    }
+    return { ...base, fires: view.fires };
   }
 
   /** mapkey_status transactions, cached 5 min, best-effort (null on failure). */
@@ -3546,8 +3564,6 @@ export function firmsProxy() {
     return statusInflight;
   }
 
-  /** Spustí obnovu na pozadí (single-flight; po zlyhaní 5 min pauza). @returns {?Promise} */
-  function startRefresh(key) {
   // Stav pre admin („čo horí“, src/admin/server/api.js attention): jeden proces = jeden firmsProxy s API.
   if (!String(process.env.OKO_API_UPSTREAM || '').trim()) {
     globalThis.__okoFirmsStatus = () => ({ hasKey: Boolean(mapKey()), lastFetch: mem?.at ?? null, sources: mem?.sources ?? [], sentinel3: sentinel3.status() });
@@ -3555,6 +3571,8 @@ export function firmsProxy() {
 
     if (!inflight && Date.now() - lastRefreshFailAt >= REFRESH_RETRY_MS) {
       const prevAt = mem?.at ?? null;
+  /** Spustí obnovu na pozadí (single-flight; po zlyhaní 5 min pauza). @returns {?Promise} */
+  function startRefresh(key) {
       inflight = refreshUpstream(key)
         .then(async (fresh) => {
           mem = fresh;
@@ -3668,7 +3686,8 @@ export function firmsProxy() {
 
           const entry = mem;
           if (entry && Date.now() - entry.at < TTL_MS) {
-            sendJson(200, buildPayload(entry, false));
+          const firmsQuery = new URL(req.url || '/', 'http://localhost').searchParams;
+            sendJson(200, buildPayload(entry, false, firmsQuery));
             return;
           }
           // Stale or missing → refresh, single-flight (concurrent requests
@@ -3681,7 +3700,7 @@ export function firmsProxy() {
           // na pozadí a klient ju dostane pri ďalšom dopyte (10 min). Naživo: NASA 90 s na jeden zdroj,
           // odkaz so zapnutými požiarmi držal preloader minúty (štart čaká na vrstvy z odkazu).
           if (entry) {
-            sendJson(200, buildPayload(entry, true));
+            sendJson(200, buildPayload(entry, true, firmsQuery));
             return;
           }
           if (!inflight) {
@@ -3691,9 +3710,9 @@ export function firmsProxy() {
           const pending = inflight;
           const fresh = await pending;
           if (fresh) {
-            sendJson(200, buildPayload(fresh, false));
+            sendJson(200, buildPayload(fresh, false, firmsQuery));
           } else if (entry) {
-            sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
+            sendJson(200, buildPayload(entry, true, firmsQuery)); // upstream down — stale beats empty
           } else {
             sendJson(502, { error: 'firms fetch failed and no cache available' });
           }

@@ -27,10 +27,12 @@ export function clusterFires(firesByFrp, gridDeg, maxClusters = Infinity) {
       cells.set(key, c);
       out.push(c);
     }
-    c.count += 1;
-    c.sumFrp += f.frp || 0;
-    if (seen > c.newestMs) c.newestMs = seen;
-    if (f.night) c.night += 1;
+    // Záznam môže byť celý štvorec zhrnutia (clusterCount, sumFrp, nightCount, newestMs — firmsView.js).
+    c.count += f.clusterCount || 1;
+    c.sumFrp += Number.isFinite(f.sumFrp) ? f.sumFrp : (f.frp || 0);
+    const newest = Math.max(seen, f.newestMs || 0);
+    if (newest > c.newestMs) c.newestMs = newest;
+    c.night += Number.isFinite(f.nightCount) ? f.nightCount : (f.night ? 1 : 0);
   }
   return out;
 }
