@@ -2,7 +2,7 @@
 // Denné video „Deň na fronte" jedným príkazom (2026-10-05, vlastník: „denné akčné spravodajstvo z UA … systém,
 // nie ty", „v štýle OKO a text kvalitnejší", „riaď sa FB", akčné zábery). Linka: scripts/lib/frontDayPipeline.mjs.
 //
-//   node scripts/make-front-day-video.mjs [--dry] [--frames 0,90,200] [--out-dir <dir>] [--url http://localhost:4173] [--no-music]
+//   node scripts/make-front-day-video.mjs [--dry] [--frames 0,90,200] [--out-dir <dir>] [--url http://localhost:4173] [--no-music] [--style v2|v1]
 // `--dry`: model, háčik, komentár a text príspevku zo živých dát, nič sa nenahráva.
 // `--frames`: hlas + plán + len vzorové snímky obrazu (kontrola rozloženia), bez videa.
 // Výstup: den-na-fronte-<deň>-titulky.mp4 (9:16), bez titulkov, SRT, text príspevku.
@@ -77,8 +77,9 @@ let result;
 try {
   result = await prepareFrontDayVideo({
     baseUrl, apiUrl, voice, cache, workDir, music, sampleFrames, scenario,
-    // `--style v2` (2026-10-10): nový strih a grafika (frontDayMotion); predvolene v1, kým ho vlastník neschváli.
-    style: flag('--style', env.FRONT_DAY_STYLE || 'v1'),
+    // Štýl v2 (2026-10-10: nový strih a grafika, frontDayMotion) je predvolený — vlastník: „prepni". Späť na v1:
+    // `--style v1` alebo FRONT_DAY_STYLE=v1 v .env služby.
+    style: flag('--style', env.FRONT_DAY_STYLE || 'v2'),
     capture: { node: process.execPath, baseUrl },
     tools: { ffmpeg: env.FFMPEG_PATH || 'ffmpeg' },
     onProgress: (stage, detail) => console.log(`[front-day] ${((Date.now() - started) / 1000).toFixed(0).padStart(4)} s  ${stage} ${Object.keys(detail || {}).length ? JSON.stringify(detail) : ''}`),
