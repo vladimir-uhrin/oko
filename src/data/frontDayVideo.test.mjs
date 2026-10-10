@@ -74,3 +74,12 @@ test('záber útoku: kamera nad miestom s obeťami, pri dvoch miestach výška p
   const plan = frontDayPlan({ story: 'strike', cameras: { strike: one } }, [{ id: 'hook', shot: 'opening' }, { id: 'strike', shot: 'strike' }], { hook: dur(3), strike: dur(4) });
   assert.equal(plan.shots[1].to.heightM, 380_000, 'záber útoku nad Záporožím, nie celá Ukrajina');
 });
+
+test('v2: koncová karta ostane po hlase aspoň 1,8 s (hudba stíchne), nie odseknutá', async () => {
+  const { frontDayPlan, FRONT_DAY_VIDEO_V2 } = await import('./frontDayVideo.js');
+  const lines = [{ id: 'hook', shot: 'opening' }, { id: 'portal', shot: 'closing' }];
+  const plan = frontDayPlan({ story: 'clashes' }, lines, { hook: { lead: 0.1, speechEnd: 3 }, portal: { lead: 0.1, speechEnd: 2 } }, FRONT_DAY_VIDEO_V2);
+  const portal = plan.placement.find((p) => p.id === 'portal');
+  const speechEnd = portal.start + 2;
+  assert.ok(plan.durationS - speechEnd >= 1.8, `po hlase ${(plan.durationS - speechEnd).toFixed(2)} s`);
+});

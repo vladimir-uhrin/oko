@@ -7,7 +7,8 @@
 export const AUDIO_DEFAULTS = Object.freeze({
   targetLufs: -16, truePeak: -1.5, lra: 11,
   musicGain: 0.4, duck: { threshold: 0.025, ratio: 6, attackMs: 15, releaseMs: 450 },
-  fadeInS: 0.15, crossfadeS: 0.03, tempoMin: 0.94, tempoMax: 1.06,
+  // fadeOutS (2026-10-10, vlastník: koniec, aby nebol seknutý): hudba na konci plynulo stíchne.
+  fadeInS: 0.15, fadeOutS: 1.8, crossfadeS: 0.03, tempoMin: 0.94, tempoMax: 1.06,
 });
 
 /**
@@ -54,7 +55,7 @@ export function audioGraph({ placement, totalS, music, tail = '' }, o = AUDIO_DE
   let xf = '[mg0]';
   for (let k = 1; k < segs.length; k += 1) xf += `[mg${k}]acrossfade=d=${o.crossfadeS}:c1=tri:c2=tri${k < segs.length - 1 ? `[mx${k}];[mx${k}]` : ''}`;
   const musicChain = `[${n}:a]aresample=48000,asplit=${segs.length}${segs.map((_, k) => `[ms${k}]`).join('')};${segChain};`
-    + `${xf},atempo=${music.tempo.toFixed(5)},apad=whole_dur=${T},atrim=0:${T},afade=t=in:st=0:d=${o.fadeInS},volume=${o.musicGain}[mus]`;
+    + `${xf},atempo=${music.tempo.toFixed(5)},apad=whole_dur=${T},atrim=0:${T},afade=t=in:st=0:d=${o.fadeInS},afade=t=out:st=${Math.max(0, totalS - o.fadeOutS).toFixed(3)}:d=${o.fadeOutS},volume=${o.musicGain}[mus]`;
   const duck = `[mus][vsc]sidechaincompress=threshold=${o.duck.threshold}:ratio=${o.duck.ratio}:attack=${o.duck.attackMs}:release=${o.duck.releaseMs}:makeup=1[duck]`;
   const mix = `[vo][duck]amix=inputs=2:normalize=0:duration=first[mix]${tail}`;
   return [...parts, voiceMix, musicChain, duck, mix].join(';');

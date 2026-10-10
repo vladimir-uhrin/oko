@@ -129,3 +129,12 @@ test('hudba podľa nálady príbehu, striedanie po dňoch, bez zhody ktorákoľv
   assert.equal(pickTrack([{ id: 'x' }], { story: 'strike' }).id, 'x');
   assert.equal(pickTrack([], {}), null);
 });
+
+test('hudba na konci plynulo stíchne (2026-10-10: koniec pôsobil odseknuto), nie pri krátkom videu pred začiatkom', async () => {
+  const { audioGraph, musicPlan, AUDIO_DEFAULTS } = await import('./eventVideoAudio.js');
+  const plan = musicPlan({ durationS: 45, loop: { from: 8, to: 30 } }, 24);
+  const g = audioGraph({ placement: [{ start: 0.2 }], totalS: 24, music: plan });
+  assert.ok(g.includes(`afade=t=out:st=${(24 - AUDIO_DEFAULTS.fadeOutS).toFixed(3)}:d=${AUDIO_DEFAULTS.fadeOutS}`), g);
+  assert.ok(AUDIO_DEFAULTS.fadeOutS >= 1.2 && AUDIO_DEFAULTS.fadeOutS <= 2.5);
+  assert.ok(audioGraph({ placement: [{ start: 0 }], totalS: 1, music: musicPlan({ durationS: 45, loop: { from: 8, to: 30 } }, 1) }).includes('afade=t=out:st=0.000'));
+});

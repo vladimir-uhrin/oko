@@ -40,7 +40,8 @@ export const FRONT_DAY_VIDEO_V2 = Object.freeze({
   tailS: 0.18,
   minS: Object.freeze({ opening: 2.2, overview: 2.0, dir: 2.4, clip: 2.6, air: 2.2, strike: 2.6, spot: 2.4, closing: 2.4 }),
   flyS: 0.8,
-  endMarginS: 0.3,
+  // Koncová karta ostane po hlase ~2 s, kým hudba stíchne (0,3 s pôsobilo odseknuto, 10. 10.).
+  endMarginS: 2.1,
   openingPush: 0.42,
   shotPush: Object.freeze({ dir: 0.2, spot: 0.2, other: 0.14 }),
 });
