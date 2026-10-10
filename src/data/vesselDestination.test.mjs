@@ -118,3 +118,20 @@ test('cieľ: tripwire — vrstva lodí index načíta, kreslí čiaru a čistí 
   assert.match(line, /registerPickOwner\('voyage-lines'/, 'klik na čiaru nesmie zrušiť výber');
   assert.match(line, /ArcType\.GEODESIC/);
 });
+
+test('cieľ: rovnomenné prístavy rozlíši dovetok — WILMINGTON.NC.USA je Severná Karolína, nie Delaware', () => {
+  const feature = (id, name, locode, country, lon, lat) => ({ id, geometry: { coordinates: [lon, lat] }, properties: { name, locode, country } });
+  const index = buildPortIndex([
+    feature('de', 'Wilmington', 'USILG', 'United States', -75.55, 39.73),
+    feature('nc', 'Wilmington', 'USILM', 'United States', -77.95, 34.23),
+    feature('pme', 'Portland', 'USPWM', 'United States', -70.25, 43.65),
+    feature('por', 'Portland', 'USPDX', 'United States', -122.68, 45.52),
+    feature('pau', 'Portland', 'AUPTJ', 'Australia', 141.6, -38.35),
+  ]);
+  assert.equal(matchDestinationPort('WILMINGTON.NC.USA', index).port.locode, 'USILM');
+  assert.equal(matchDestinationPort('WILMINGTON DE', index).port.locode, 'USILG');
+  assert.equal(matchDestinationPort('WILMINGTON', index).port.locode, 'USILG', 'bez dovetku ostáva prvý, ako doteraz');
+  assert.equal(matchDestinationPort('PORTLAND OR', index).port.locode, 'USPDX');
+  assert.equal(matchDestinationPort('PORTLAND AUSTRALIA', index).port.locode, 'AUPTJ');
+  assert.equal(matchDestinationPort('PORTLAND USA', index).port.locode, 'USPWM', 'dva v USA bez štátu → nejednoznačné, prvý');
+});
