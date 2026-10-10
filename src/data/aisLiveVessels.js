@@ -6,9 +6,10 @@ import {
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
 import { currentLanguage, t } from '../i18n.js';
-import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts } from './vesselCardDetails.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
+import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
 // `new URL(...)` a NIE `?url` import: príponu `?url` pozná len Vite, takže
 // unit testy v čistom Node (a všetko, čo túto vrstvu importuje) by na nej
 // spadli už pri načítaní modulu.
@@ -652,7 +653,10 @@ const aisLiveVesselsLayer = {
       : isMetric() ? `${Math.round(record.speed * 1.852)} km/h`
         : `${lang === 'sk' ? record.speed.toFixed(1).replace('.', ',') : record.speed.toFixed(1)} kn`;
     const motion = [speedText, ...vesselMotionParts({ ...record, course, heading }, t, lang)].filter(Boolean).join(' · ');
+    // Súčasná plavba: posledný prístav a odchod z registra + priebeh (2026-10-10).
+    const voyage = vesselVoyageModel(record, info, cachedPortIndex());
     const extraLines = [
+      voyageDepartureLine(voyage, t, lang),
       vesselRegistryParts(info, t, lang).join(' · '),
       vesselHullParts(record, info, t, lang).join(' · '),
       (() => { const local = vesselLocalTimeLabel(record.lon, Date.now(), vesselTimeZone(record.lat, record.lon)); return local ? t('vessel.local-time', { time: local }) : ''; })(),
@@ -671,8 +675,11 @@ const aisLiveVesselsLayer = {
       speedMps: Number.isFinite(record.speed) && record.speed >= 0 ? record.speed * KN_TO_MPS : null,
       verticalRateMps: null,
       trackDeg: heading ?? course,
-      routeInfo: null,
-      progress: null,
+      routeInfo: voyage ? {
+        origin: { code: voyage.origin.locode, name: voyage.origin.name, country: voyage.origin.iso2 || voyage.origin.country },
+        destination: voyage.destination ? { code: voyage.destination.locode, name: voyage.destination.name, country: voyage.destination.iso2 || voyage.destination.country } : null,
+      } : null,
+      progress: voyage?.progress ? { fractionDone: voyage.progress.fractionDone, remainingKm: Math.round(voyage.progress.remainingKm) } : null,
       route: destination ? `→ ${destination}` : null,
       flightIata: null,
       flightLines: motion ? [motion] : null,
@@ -2789,6 +2796,14 @@ function registerSelectedContext(record) {
  */
 function loadPortIndex() {
   if (state.portIndex) return Promise.resolve(state.portIndex);
+  // 2026-10-10: zdieľaný index (vesselPortIndex.js) — posledný prístav z registra ho číta tiež.
+  if (!state.portIndexPromise && typeof loadSharedPortIndex === 'function') {
+    state.portIndexPromise = loadSharedPortIndex().then((index) => {
+      if (!index) { state.portIndexPromise = null; return null; }
+      state.portIndex = index;
+      return index;
+    });
+  }
   if (!state.portIndexPromise) {
     state.portIndexPromise = fetch(portsUrl)
       .then((res) => (res.ok ? res.text() : ''))
@@ -2961,6 +2976,12 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
   const destination = String(record.destination || '').trim();
   // ETA belongs to the voyage line — without a destination it is noise.
   const eta = String(record.eta || '').trim();
+  // Súčasná plavba z registra (posledný prístav → cieľ · priebeh, odchod) — 2026-10-10.
+  const voyage = vesselVoyageModel(record, info, state.portIndex || cachedPortIndex());
+  const voyageLine = voyageRouteLine(voyage);
+  if (voyageLine) details.push(voyageLine);
+  const departed = voyageDepartureLine(voyage, t, lang, nowMs);
+  if (departed) details.push(departed);
   if (destination) details.push(`→ ${trimHudValue(destination, 24)}${eta ? ` · ETA ${eta}` : ''}`);
   // Rozpoznaný prístav (World Port Index) pridá vzdialenosť po veľkokružnici
   // a ETA z rýchlosti nad zemou. Bez zhody sa NIČ nedopĺňa — surový text

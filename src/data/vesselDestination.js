@@ -67,11 +67,12 @@ export function nameKey(value) {
 /**
  * Index prístavov pre vyhľadanie. Pure.
  * @param {Array<{id: string, geometry: {coordinates: number[]}, properties: object}>} features
- * @returns {{byLocode: Map<string, object>, byName: Map<string, object>, size: number}}
+ * @returns {{byLocode: Map<string, object>, byName: Map<string, object>, byNameCountry: Map<string, object>, size: number}}
  */
 export function buildPortIndex(features) {
   const byLocode = new Map();
   const byName = new Map();
+  const byNameCountry = new Map();
   for (const feature of Array.isArray(features) ? features : []) {
     const [lon, lat] = feature?.geometry?.coordinates || [];
     const props = feature?.properties || {};
@@ -89,8 +90,68 @@ export function buildPortIndex(features) {
     // Prvý zápis vyhráva: bundel je zoradený tak, že väčšie prístavy sú skôr,
     // a duplicitný názov („Victoria") sa nemá prepisovať náhodným posledným.
     if (key && !byName.has(key)) byName.set(key, port);
+    // Názov + štát (posledný prístav z registra, 2026-10-10): „St Petersburg" je aj v USA.
+    const nameCountry = key && port.country ? `${key}|${countryKey(port.country)}` : '';
+    if (nameCountry && !byNameCountry.has(nameCountry)) byNameCountry.set(nameCountry, port);
   }
-  return { byLocode, byName, size: byLocode.size + byName.size };
+  return { byLocode, byName, byNameCountry, size: byLocode.size + byName.size };
+}
+
+/** Rôzne zápisy štátu v registroch lodí → názov vo World Port Index. */
+const COUNTRY_ALIASES = new Map([
+  ['USA', 'UNITED STATES'], ['US', 'UNITED STATES'], ['UNITED STATES OF AMERICA', 'UNITED STATES'],
+  ['UK', 'UNITED KINGDOM'], ['GREAT BRITAIN', 'UNITED KINGDOM'], ['RUSSIAN FEDERATION', 'RUSSIA'],
+  ['KOREA', 'SOUTH KOREA'], ['REPUBLIC OF KOREA', 'SOUTH KOREA'], ['UAE', 'UNITED ARAB EMIRATES'],
+  ['TURKIYE', 'TURKEY'], ['NETHERLANDS THE', 'NETHERLANDS'], ['THE NETHERLANDS', 'NETHERLANDS'],
+]);
+
+/** Kľúč štátu (bez diakritiky, aliasy). Pure. */
+export function countryKey(country) {
+  const key = nameKey(country);
+  return COUNTRY_ALIASES.get(key) || key;
+}
+
+/** Varianty názvu: SAINT ↔ ST ↔ SANKT, PETERSBURG ↔ PETERBURG, bez prípony PORT. Pure. */
+export function portNameVariants(name) {
+  const key = nameKey(name);
+  if (!key) return [];
+  const out = new Set([key]);
+  const swaps = [[/^SAINT /, 'ST '], [/^ST /, 'SAINT '], [/^SAINT /, 'SANKT '], [/^ST /, 'SANKT '], [/^SANKT /, 'SAINT ']];
+  for (const [re, to] of swaps) if (re.test(key)) out.add(key.replace(re, to));
+  for (const v of [...out]) if (/PETERSBURG/.test(v)) out.add(v.replace('PETERSBURG', 'PETERBURG'));
+  for (const v of [...out]) if (/ PORT$/.test(v)) out.add(v.replace(/ PORT$/, ''));
+  return [...out];
+}
+
+/**
+ * Prístav podľa názvu A štátu (posledný prístav z registra). Bez štátu alebo
+ * bez zhody null — nikdy nehádať prístav s rovnakým menom inde. Pure.
+ * @param {string} name napr. „Saint Petersburg"
+ * @param {string} country napr. „Russia"
+ * @param {{byNameCountry?: Map}} index
+ */
+export function matchPortByNameCountry(name, country, index) {
+  if (!index?.byNameCountry || !country) return null;
+  const c = countryKey(country);
+  for (const variant of portNameVariants(name)) {
+    const port = index.byNameCountry.get(`${variant}|${c}`);
+    if (port) return port;
+  }
+  return null;
+}
+
+/**
+ * Priebeh plavby z posledného prístavu cez polohu lode do cieľa (po
+ * veľkokružnici — nie plavebná trasa, preto len orientačne). Pure.
+ * @returns {?{fractionDone: number, sailedKm: number, remainingKm: number}}
+ */
+export function voyageProgress(origin, vessel, destination) {
+  const sailedKm = greatCircleKm(origin?.lat, origin?.lon, vessel?.lat, vessel?.lon);
+  const remainingKm = greatCircleKm(vessel?.lat, vessel?.lon, destination?.lat, destination?.lon);
+  if (sailedKm === null || remainingKm === null) return null;
+  const total = sailedKm + remainingKm;
+  if (total < 1 || total > MAX_DESTINATION_DISTANCE_KM * 1.5) return null;
+  return { fractionDone: sailedKm / total, sailedKm, remainingKm };
 }
 
 /**

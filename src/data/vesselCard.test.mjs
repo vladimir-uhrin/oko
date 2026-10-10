@@ -123,6 +123,7 @@ test('proxy: register a fotka sa kešujú na disku, upstream ide raz', async () 
   const fetchImpl = async (url) => {
     calls.push(url);
     if (url.includes('/click/')) return { ok: true, status: 200, json: async () => REGISTRY_JSON };
+    if (url.includes('/vessels/details/')) return { ok: true, status: 200, text: async () => '<div>Last Port</div><div>Saint Petersburg, Russia</div><div>ATD: Sep 22, 20:32 UTC</div>' };
     return { ok: true, status: 200, headers: { get: () => 'image/jpeg' }, arrayBuffer: async () => jpeg };
   };
   const plugin = vesselInfoProxy({ root, fetchImpl, log: () => {} });
@@ -135,6 +136,8 @@ test('proxy: register a fotka sa kešujú na disku, upstream ide raz', async () 
     assert.equal(body.imo, '9410909');
     assert.equal(body.yearBuilt, 2009);
     assert.equal(body.photo.src, '/api/vessel-info/photo?mmsi=241190000&size=1');
+    assert.equal(body.voyage.lastPort, 'Saint Petersburg');
+    assert.equal(body.destination, 'WILMINGTON.NC.USA');
     res = fakeRes();
     await plugin._handler(req('/?mmsi=241190000'), res);
     assert.equal(res.headers['X-OKO-Source'], 'cache');
@@ -146,8 +149,9 @@ test('proxy: register a fotka sa kešujú na disku, upstream ide raz', async () 
     res = fakeRes();
     await plugin._handler(req('/photo?mmsi=241190000&size=1'), res);
     assert.equal(res.headers['X-OKO-Source'], 'cache');
-    assert.equal(calls.length, 2, 'jeden dopyt na register, jeden na fotku');
-    assert.match(calls[1], /9410909-241190000-7c65852ce751b8fe58a25836c460e4cd\/1$/);
+    assert.equal(calls.length, 3, 'register, stránka plavby, fotka — každé raz');
+    assert.match(calls[1], /vessels\/details\/9410909$/);
+    assert.match(calls[2], /9410909-241190000-7c65852ce751b8fe58a25836c460e4cd\/1$/);
     res = fakeRes();
     await plugin._handler(req('/?mmsi=abc'), res);
     assert.equal(res.status, 400);
@@ -333,4 +337,45 @@ test('fotka pod kartou: vybraná loď → fotka z registra, bez karty na plátne
   assert.equal(st.currentMmsi, null);
   assert.equal(st.hidden, true);
   destroyVesselPhoto();
+});
+
+test('súčasná plavba: parser stránky registra (posledný prístav, ATD bez roka)', async () => {
+  const { parseVesselVoyageHtml, parseDepartureUtc } = await import('./vesselInfoProxy.js');
+  // Úryvok skutočnej stránky MINERVA ZEN (2026-10-10), skrátený.
+  const html = '<div class="vi__r1 vi__stp"><div class="_3-Yih">Last Port</div><div class="_3-Yih"><a href="/ports/RULED001">Saint Petersburg, Russia</a></div><div class="_value">ATD: Sep 22, 20:32 UTC <span>(18 days ago)</span></div></div>';
+  const now = Date.parse('2026-10-10T18:00:00Z');
+  assert.deepEqual(parseVesselVoyageHtml(html, now), { lastPort: 'Saint Petersburg', lastPortCountry: 'Russia', departedAt: Date.parse('2026-09-22T20:32:00Z') });
+  assert.equal(parseDepartureUtc('Dec 30, 10:00', Date.parse('2027-01-03T00:00:00Z')), Date.parse('2026-12-30T10:00:00Z'), 'prelom roka → minulý rok');
+  assert.equal(parseDepartureUtc('Sep 22, 2025 20:32', now), Date.parse('2025-09-22T20:32:00Z'));
+  assert.equal(parseDepartureUtc('', now), null);
+  assert.equal(parseVesselVoyageHtml('<div>Last Port</div><div>-</div>', now), null);
+  assert.equal(parseVesselVoyageHtml('<p>nič</p>', now), null);
+});
+
+test('súčasná plavba: prístav podľa mena A štátu, priebeh, riadky karty', async () => {
+  const { buildPortIndex, matchPortByNameCountry } = await import('./vesselDestination.js');
+  const { vesselVoyageModel, voyageRouteLine, voyageDepartureLine } = await import('./vesselCardDetails.js');
+  const feature = (id, name, locode, country, lon, lat) => ({ id, geometry: { coordinates: [lon, lat] }, properties: { name, locode, country } });
+  const index = buildPortIndex([
+    feature('a', 'St Petersburg', 'RULED', 'United States', -82.6, 27.8),
+    feature('b', 'Sankt-Peterburg', 'RULED', 'Russia', 30.3, 59.93),
+    feature('c', 'Wilmington', 'USILM', 'United States', -77.95, 34.23),
+  ]);
+  assert.equal(matchPortByNameCountry('Saint Petersburg', 'Russia', index).id, 'b', 'nie St Petersburg na Floride');
+  assert.equal(matchPortByNameCountry('Saint Petersburg', 'Greece', index), null, 'bez zhody štátu nehádať');
+  assert.equal(matchPortByNameCountry('Wilmington', 'USA', index).id, 'c', 'alias štátu');
+  const info = { voyage: { lastPort: 'Saint Petersburg', lastPortCountry: 'Russia', departedAt: Date.parse('2026-09-22T20:32:00Z') }, destination: 'WILMINGTON.NC.USA' };
+  const model = vesselVoyageModel({ lat: 34, lon: -74.2, destination: '' }, info, index);
+  assert.equal(model.origin.locode, 'RULED');
+  assert.equal(model.origin.iso2, 'ru');
+  assert.equal(model.destination.locode, 'USILM', 'cieľ z registra, keď AIS nič nehlási');
+  assert.ok(model.progress.fractionDone > 0.9 && model.progress.fractionDone < 1);
+  assert.match(voyageRouteLine(model), /^Saint Petersburg \(RULED\) → Wilmington \(USILM\) · 9\d %$/);
+  const now = Date.parse('2026-10-10T20:32:00Z');
+  assert.equal(voyageDepartureLine(model, sk, 'sk', now), 'vyplávala 22. 9. 20:32 UTC · pred 18 d');
+  assert.equal(voyageDepartureLine(model, en, 'en', now), 'departed Sep 22 20:32 UTC · 18 d ago');
+  const noIndex = vesselVoyageModel({ lat: 34, lon: -74.2 }, info, null);
+  assert.equal(noIndex.progress, null, 'bez indexu prístavov bez priebehu, text ostáva');
+  assert.equal(voyageRouteLine(noIndex), 'Saint Petersburg → WILMINGTON.NC.USA');
+  assert.equal(vesselVoyageModel({}, { voyage: null }, index), null);
 });

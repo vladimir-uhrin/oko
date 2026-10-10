@@ -24,6 +24,10 @@ import { promises as fsp } from 'node:fs';
 
 export const VESSEL_INFO_UPSTREAM = 'https://www.vesselfinder.com/api/pub/click/';
 export const VESSEL_PHOTO_UPSTREAM = 'https://static.vesselfinder.net/ship-photo/';
+export const VESSEL_DETAILS_UPSTREAM = 'https://www.vesselfinder.com/vessels/details/';
+/** Posledný prístav a odchod sa menia s plavbou — kratšia cache než register. */
+export const VESSEL_VOYAGE_TTL_MS = 6 * 3600 * 1000;
+export const VESSEL_DETAILS_MAX_BYTES = 2 * 1024 * 1024;
 export const VESSEL_INFO_TTL_MS = 7 * 24 * 3600 * 1000;
 export const VESSEL_INFO_EMPTY_TTL_MS = 24 * 3600 * 1000;
 export const VESSEL_PHOTO_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -76,18 +80,73 @@ export function normalizeVesselInfo(mmsi, json) {
     lengthM: positive(json?.al),
     beamM: positive(json?.aw),
     country: cleanText(json?.country),
+    // Cieľ a ETA z registra — AISHub ich nenesie (2026-10-10, súčasná plavba).
+    destination: cleanText(json?.dest),
+    etaMs: positive(json?.etaTS) ? positive(json.etaTS) * 1000 : null,
     photoId,
   };
   out.empty = !out.imo && !out.typeDetail && !photoId && !out.yearBuilt;
   return out;
 }
 
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+/**
+ * „Sep 22, 20:32" (UTC, bez roka) → epoch ms. Rok sa doplní tak, aby čas
+ * nebol v budúcnosti (odchod je minulosť; na prelome roka „Dec 30" v januári
+ * patrí do minulého roka). Pure.
+ * @param {string} text
+ * @param {number} nowMs
+ * @returns {number|null}
+ */
+export function parseDepartureUtc(text, nowMs) {
+  const m = /([A-Z][a-z]{2})\s+(\d{1,2}),?\s+(?:(\d{4})\s+)?(\d{1,2}):(\d{2})/.exec(String(text || ''));
+  if (!m) return null;
+  const month = MONTHS[m[1].toLowerCase()];
+  if (month === undefined) return null;
+  const now = new Date(nowMs);
+  let year = m[3] ? Number(m[3]) : now.getUTCFullYear();
+  let ms = Date.UTC(year, month, Number(m[2]), Number(m[4]), Number(m[5]));
+  if (!m[3] && ms > nowMs + 24 * 3600 * 1000) { year -= 1; ms = Date.UTC(year, month, Number(m[2]), Number(m[4]), Number(m[5])); }
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function htmlText(html) {
+  return String(html || '')
+    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, '|')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .replace(/(\| ?)+/g, '|');
+}
+
+/**
+ * Posledný prístav a čas odchodu zo stránky lode v registri:
+ * `Last Port|Saint Petersburg, Russia|ATD: Sep 22, 20:32 UTC`. Pure.
+ * @param {string} html
+ * @param {number} nowMs
+ * @returns {{lastPort: string, lastPortCountry: string|null, departedAt: number|null}|null}
+ */
+export function parseVesselVoyageHtml(html, nowMs) {
+  const text = htmlText(html);
+  const m = /\|\s*Last Port\s*\|\s*([^|]{2,80}?)\s*\|\s*(?:ATD:\s*([^|]{4,40}))?/.exec(text);
+  if (!m) return null;
+  const raw = m[1].trim();
+  if (!raw || raw === '-' || /^n\/?a$/i.test(raw)) return null;
+  const comma = raw.lastIndexOf(',');
+  const lastPort = (comma > 0 ? raw.slice(0, comma) : raw).trim();
+  const lastPortCountry = comma > 0 ? raw.slice(comma + 1).trim() || null : null;
+  return { lastPort, lastPortCountry, departedAt: parseDepartureUtc(m[2], nowMs) };
+}
+
 /** Verejný tvar pre klienta: identifikátor fotky sa nahradí našou URL. Pure. */
-export function publicVesselInfo(info) {
+export function publicVesselInfo(info, voyage = null) {
   if (!info) return null;
   const { photoId, empty, ...rest } = info;
   return {
     ...rest,
+    voyage: voyage && voyage.lastPort ? voyage : null,
     photo: photoId ? { src: `/api/vessel-info/photo?mmsi=${info.mmsi}&size=1`, thumb: `/api/vessel-info/photo?mmsi=${info.mmsi}&size=0` } : null,
   };
 }
@@ -126,6 +185,41 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
   const inflight = new Map();
   const infoFile = (mmsi) => path.join(dir, `${mmsi}.json`);
   const photoFile = (mmsi, size) => path.join(dir, 'photo', `${mmsi}-${size}.jpg`);
+  const voyageFile = (mmsi) => path.join(dir, 'voyage', `${mmsi}.json`);
+
+  /**
+   * Posledný prístav + čas odchodu (stránka lode podľa IMO). Nikdy nezhodí
+   * odpoveď — bez plavby ide register ďalej. Prázdny výsledok sa kešuje tiež.
+   */
+  async function loadVoyage(info) {
+    if (!info?.imo) return null;
+    const file = voyageFile(info.mmsi);
+    try {
+      const entry = JSON.parse(await fsp.readFile(file, 'utf8'));
+      if (Number.isFinite(entry?.at) && now() - entry.at < VESSEL_VOYAGE_TTL_MS) return entry.voyage;
+    } catch { /* nie je v cache */ }
+    const job = inflight.get(`v:${info.mmsi}`);
+    if (job) return job;
+    const run = (async () => {
+      try {
+        if (!upstreamBudget('all')) return null;
+        const res = await fetchImpl(`${VESSEL_DETAILS_UPSTREAM}${info.imo}`, {
+          headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html' },
+          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        });
+        if (!res.ok) return null;
+        const html = await res.text();
+        const voyage = html.length <= VESSEL_DETAILS_MAX_BYTES ? parseVesselVoyageHtml(html, now()) : null;
+        await writeAtomic(file, JSON.stringify({ at: now(), voyage }));
+        return voyage;
+      } catch (error) {
+        log(`[vessel-info] voyage ${info.mmsi} failed: ${error?.message || error}`);
+        return null;
+      }
+    })().finally(() => inflight.delete(`v:${info.mmsi}`));
+    inflight.set(`v:${info.mmsi}`, run);
+    return run;
+  }
 
   async function writeAtomic(file, data) {
     await fsp.mkdir(path.dirname(file), { recursive: true });
@@ -224,7 +318,8 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
       if (url.pathname !== '/' && url.pathname !== '') { sendJson(res, 404, { error: 'not_found' }); return; }
       const out = await loadInfo(mmsi, key);
       if (!out.info) { sendJson(res, out.status || 502, { error: out.error || 'upstream' }, out.status === 429 ? { 'Retry-After': '30' } : {}); return; }
-      sendJson(res, 200, publicVesselInfo(out.info), { 'Cache-Control': 'public, max-age=3600', 'X-OKO-Source': out.source });
+      const voyage = await loadVoyage(out.info);
+      sendJson(res, 200, publicVesselInfo(out.info, voyage), { 'Cache-Control': 'public, max-age=3600', 'X-OKO-Source': out.source });
     } catch (error) {
       log(`[vessel-info] ${mmsi} failed: ${error?.message || error}`);
       sendJson(res, 502, { error: 'upstream_failed' });

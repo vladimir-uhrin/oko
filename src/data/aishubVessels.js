@@ -34,7 +34,8 @@ import {
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
 import { SILHOUETTE_MAX_CAMERA_M, convoyBarges, overlappedSilhouettes, shipSilhouettesEnabled, silhouetteDataUrl, silhouetteImageSize, topSilhouetteDataUrl, vesselDisplayCourseDeg, vesselFamily, vesselRealScale, vesselViewFor } from './vesselSilhouettes.js';
 import { loadRiverIndex, onRiverIndexReady, riverUpstreamBearing } from './riverDirection.js';
-import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts } from './vesselCardDetails.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteLine } from './vesselCardDetails.js';
+import { cachedPortIndex } from './vesselPortIndex.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
 
@@ -179,7 +180,9 @@ export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
     : `${lang === 'sk' ? sog.toFixed(1).replace('.', ',') : sog.toFixed(1)} kn`;
   const motion = [speedText, ...vesselMotionParts({ course: row.cog, heading: row.heading }, translate, lang)].filter(Boolean).join(' · ');
   const local = vesselLocalTimeLabel(row.lon, nowMs, vesselTimeZone(row.lat, row.lon));
+  const voyage = vesselVoyageModel(row, info, cachedPortIndex());
   const extraLines = [
+    voyageDepartureLine(voyage, translate, lang, nowMs),
     vesselRegistryParts(info, translate, lang).join(' · '),
     vesselHullParts({}, info, translate, lang).join(' · '),
     local ? translate('vessel.local-time', { time: local }) : '',
@@ -198,8 +201,11 @@ export function aishubContactSummary(row, translate = t, nowMs = Date.now()) {
     speedMps: sog === null ? null : sog * KN_TO_MPS,
     verticalRateMps: null,
     trackDeg: aishubCourseDeg(row),
-    routeInfo: null,
-    progress: null,
+    routeInfo: voyage ? {
+      origin: { code: voyage.origin.locode, name: voyage.origin.name, country: voyage.origin.iso2 || voyage.origin.country },
+      destination: voyage.destination ? { code: voyage.destination.locode, name: voyage.destination.name, country: voyage.destination.iso2 || voyage.destination.country } : null,
+    } : null,
+    progress: voyage?.progress ? { fractionDone: voyage.progress.fractionDone, remainingKm: Math.round(voyage.progress.remainingKm) } : null,
     route: age ? `${translate('aishub.delayed')} · ${age}` : translate('aishub.delayed'),
     flightIata: null,
     flightLines: motion ? [motion] : null,
@@ -276,7 +282,10 @@ export function aishubSelectedExtraLines(row, translate = t, nowMs = Date.now())
   const lang = currentLanguage();
   const info = cachedVesselInfo(row?.mmsi) || null;
   const local = vesselLocalTimeLabel(row?.lon, nowMs, vesselTimeZone(row?.lat, row?.lon));
+  const voyage = vesselVoyageModel(row, info, cachedPortIndex());
   return [
+    voyageRouteLine(voyage),
+    voyageDepartureLine(voyage, translate, lang, nowMs),
     vesselRegistryParts(info, translate, lang).join(' · '),
     vesselHullParts({}, info, translate, lang).join(' · '),
     local ? translate('vessel.local-time', { time: local }) : '',

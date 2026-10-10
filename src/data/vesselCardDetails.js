@@ -9,6 +9,8 @@
  * kartička pod kurzorom.
  */
 import { AIS_ROT_FAST_DEG_PER_MIN } from './aisIngest.js';
+import { matchDestinationPort, matchPortByNameCountry, voyageProgress } from './vesselDestination.js';
+import { resolveFlagIso2 } from './countryFlags.js';
 
 const identity = (key) => key;
 
@@ -217,4 +219,63 @@ export function vesselRegistryParts(info, t = identity, lang = 'sk') {
     Number.isFinite(info.grossTonnage) ? `GT ${groupThousands(info.grossTonnage)}` : null,
     Number.isFinite(info.deadweight) ? `DWT ${groupThousands(info.deadweight)} t` : null,
   ].filter(Boolean);
+}
+
+/**
+ * Súčasná plavba (2026-10-10, predloha z prehliadača lodí: „Polazak iz Sankt
+ * Peterburga · RU LED · skutočný čas odchodu" + čiara priebehu): posledný
+ * prístav a odchod z registra, cieľ z AIS textu (alebo z registra), priebeh
+ * po veľkokružnici. Bez posledného prístavu null. Pure.
+ * @param {{lat?: number, lon?: number, destination?: string}} vessel
+ * @param {object|null} info výstup /api/vessel-info (info.voyage, info.destination)
+ * @param {object|null} index index prístavov (vesselPortIndex) — bez neho bez priebehu
+ */
+export function vesselVoyageModel(vessel, info, index) {
+  const voyage = info?.voyage;
+  if (!voyage?.lastPort) return null;
+  const originPort = index ? matchPortByNameCountry(voyage.lastPort, voyage.lastPortCountry, index) : null;
+  const destinationText = String(vessel?.destination || info?.destination || '').trim();
+  const destinationMatch = index && destinationText ? matchDestinationPort(destinationText, index) : null;
+  const destinationPort = destinationMatch?.port || null;
+  const progress = originPort && destinationPort ? voyageProgress(originPort, vessel, destinationPort) : null;
+  return {
+    origin: {
+      name: voyage.lastPort,
+      locode: originPort?.locode || null,
+      iso2: resolveFlagIso2(null, null, voyage.lastPortCountry) || null,
+      country: voyage.lastPortCountry || null,
+    },
+    destination: destinationPort
+      ? { name: destinationPort.name, locode: destinationPort.locode, iso2: resolveFlagIso2(null, null, destinationPort.country) || null, country: destinationPort.country }
+      : (destinationText ? { name: destinationText, locode: null, iso2: null, country: null } : null),
+    progress,
+    departedAt: Number.isFinite(voyage.departedAt) ? voyage.departedAt : null,
+  };
+}
+
+function sideLabel(side) {
+  if (!side?.name) return '?';
+  return side.locode ? `${side.name} (${side.locode})` : side.name;
+}
+
+/** „Saint Petersburg (RULED) → Wilmington (USILG) · 92 %". Pure. */
+export function voyageRouteLine(model) {
+  if (!model) return '';
+  const parts = [`${sideLabel(model.origin)} → ${model.destination ? sideLabel(model.destination) : '?'}`];
+  if (model.progress) parts.push(`${Math.round(model.progress.fractionDone * 100)} %`);
+  return parts.join(' · ');
+}
+
+/** „vyplávala 22. 9. 20:32 UTC · pred 18 d". Pure. */
+export function voyageDepartureLine(model, t = identity, lang = 'sk', nowMs = Date.now()) {
+  if (!Number.isFinite(model?.departedAt)) return '';
+  const d = new Date(model.departedAt);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const when = lang === 'sk'
+    ? `${d.getUTCDate()}. ${d.getUTCMonth() + 1}. ${hh}:${mm} UTC`
+    : `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]} ${d.getUTCDate()} ${hh}:${mm} UTC`;
+  const hours = (nowMs - model.departedAt) / 3_600_000;
+  const ago = hours < 0 ? '' : hours < 48 ? `${Math.max(1, Math.round(hours))} h` : `${Math.round(hours / 24)} d`;
+  return ago ? t('vessel.departed-ago', { when, ago }) : t('vessel.departed', { when });
 }
