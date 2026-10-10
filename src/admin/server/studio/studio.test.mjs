@@ -557,3 +557,57 @@ test('najlepší čas: priemerný dosah podľa dňa a hodiny, návrh najbližši
   assert.deepEqual([best.slots[0].weekday, best.slots[0].hour, best.slots[0].n, best.slots[0].score], [5, 18, 2, 1000]);
   assert.equal(best.suggestion, Date.UTC(2026, 9, 9, 16), 'najbližší piatok 18:00 (Bratislava)');
 });
+
+// ── 2026-10-10: zemetrasenia (Panama M 7,7) ─────────────────────────────────
+test('Zemetrasenie: silný otras z USGS → video do Štúdia raz; dotrasy ani slabé otrasy nie; vypnuté v admine nie', async t => {
+  const { mkdtempSync, rmSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-quake-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const main = Date.UTC(2026, 9, 9, 17, 56);
+  const clock = { time: main + 20 * 60_000 };
+  const q = (id, mag, at, lon, lat, alert = null) => ({ id, properties: { mag, time: at, place: 'near X, Panama', alert, tsunami: 0 }, geometry: { coordinates: [lon, lat, 10] } });
+  const feed = [q('us6000u18k', 7.7, main, -80.769, 7.587, 'red'), q('us6000u19w', 6.6, main + 2.5 * 3600_000, -81.47, 7.72, 'yellow'), q('weak', 5.9, main, 140, 35, 'green')];
+  const runs = [];
+  const store = openAdminStore(':memory:');
+  t.after(() => store.close());
+  const studio = createStudio({ store, env: {}, port: () => 1, now: () => clock.time, timers: false, mediaDir: dir, log: () => {},
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [], results: [] } }),
+    renderCard: async () => Buffer.from('card'), checkFfmpeg: async () => true,
+    padToReel: async (input, output) => { writeFileSync(output, Buffer.alloc(10)); return {}; },
+    posterFrame: async () => Buffer.from('poster'),
+    quakeFeed: async () => feed,
+    quakeRunner: async ({ eventId, outDir }) => {
+      runs.push(eventId);
+      mkdirSync(outDir, { recursive: true });
+      const video = path.join(outDir, 'zemetrasenie-panama-2026-10-09-titulky.mp4'); const post = path.join(outDir, 'zemetrasenie-panama-2026-10-09.txt');
+      writeFileSync(video, Buffer.alloc(500)); writeFileSync(post, 'Zemetrasenie s magnitúdou 7,7 zasiahlo Panamu (9. 10. 17:56 UTC).\nUSGS: https://earthquake.usgs.gov');
+      return { video, post, srt: null, title: '12 km WSW of Pitaloza Arriba, Panama' };
+    },
+    publisher: { status: () => ({ facebook: false, instagram: false }) } });
+  const wait = async (n) => { for (let i = 0; i < 200 && (studio.quakeStatus().running || runs.length < n); i++) await new Promise(resolve => setTimeout(resolve, 10)); };
+  assert.equal(studio.settings().quake.enabled, true, 'predvolene zapnuté');
+  await studio.tick();
+  assert.equal(runs.length, 0, 'prvých 45 min čaká na PAGER a správy');
+  clock.time = main + 50 * 60_000;
+  await studio.tick(); await wait(1);
+  assert.deepEqual(runs, ['us6000u18k']);
+  const draft = studio.list(10).find(d => d.template === 'quake-video');
+  assert.equal(draft.eventKey, 'quake:us6000u18k');
+  assert.equal(draft.title, 'Zemetrasenie · 12 km WSW of Pitaloza Arriba, Panama');
+  assert.equal(draft.card.vertical, true);
+  clock.time = main + 4 * 3600_000; // dotras M 6,6 je už starší ako 45 min
+  await studio.tick(); await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(runs, ['us6000u18k'], 'dotras otrasu, ktorý video má, ani slabý otras (M 5,9, zelený) nové video nespustí');
+  assert.throws(() => studio.setSettings({ quake: { minMag: 4 } }), /invalid_input/);
+  studio.setSettings({ quake: { enabled: false } });
+  feed.push(q('us7000jp01', 7.1, clock.time - 60 * 60_000, 142, 38, 'orange'));
+  clock.time += 11 * 60_000;
+  await studio.tick(); await new Promise(resolve => setTimeout(resolve, 30));
+  assert.deepEqual(runs, ['us6000u18k'], 'vypnuté → nič');
+  studio.setSettings({ quake: { enabled: true } });
+  clock.time += 11 * 60_000;
+  await studio.tick(); await wait(2);
+  assert.deepEqual(runs, ['us6000u18k', 'us7000jp01'], 'nové silné zemetrasenie inde → nové video');
+});

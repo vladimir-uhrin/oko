@@ -28,6 +28,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import { ffmpegAvailable, padToReel as defaultPadToReel, posterFrame as defaultPosterFrame, renderReel as defaultRenderReel } from './reel.js';
 import { LOOPBACK_HOST } from '../loopback.js';
+import { QUAKE_VIDEO, quakeVideoCandidate } from '../../../data/quakeVideo.js';
 
 /** Všetky šablóny: svetové udalosti (templates.js) + Ukrajina (ukraine.js, 2026-10-04). */
 export const TEMPLATES = Object.freeze([...BASE_TEMPLATES, ...UA_TEMPLATES]);
@@ -66,6 +67,9 @@ export const DEFAULT_SETTINGS = Object.freeze({ autoDraft: true, autoReel: true,
   // Deň na fronte (2026-10-05): každé ráno po rannom hlásení GŠ (~7:00) spustí scripts/make-front-day-video.mjs;
   // beh trvá ~20–30 min, návrh je v Štúdiu pred 9:30. Predvolene zapnuté (vlastník 2026-10-06).
   frontDay: { enabled: true, hour: 8 },
+  // Zemetrasenia (2026-10-10, vlastník: automatiku aj s fotkami prípadne videami): pri silnom otrase
+  // (USGS, magnitúda od minMag alebo oranžový/červený PAGER) spustí scripts/make-quake-video.mjs a video dá do Štúdia.
+  quake: { enabled: true, minMag: QUAKE_VIDEO.minMag },
   // Ukrajina (2026-10-04): prah vzdušného útoku (počet oblastí), fotky/videá oficiálnych kanálov a ich denný strop.
   ua: { airMinOblasts: AIR_MIN_OBLASTS_DEFAULT, media: true, mediaPerDay: MEDIA_PER_DAY_DEFAULT } });
 const weekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Bratislava', weekday: 'short' });
@@ -123,7 +127,7 @@ export function publicUrlFrom(env = process.env) {
 export function createStudio({ store, env = process.env, port = () => null, now = Date.now, fetchJson = loopbackJson,
   renderCard = defaultRenderCard, renderPhotoCard = defaultRenderPhotoCard, fetchMedia = fetchRemoteMedia, renderReel = defaultRenderReel, padToReel = defaultPadToReel, posterFrame = defaultPosterFrame, checkFfmpeg = () => ffmpegAvailable(env.FFMPEG_PATH || 'ffmpeg'),
   mediaDir = null, publisher = createMetaPublisher({ env }), timers = true, log = message => console.warn(message),
-  voiceProvider = null, frontWeekRunner = null, frontDayRunner = null, root = process.cwd(), onAlert = null } = {}) {
+  voiceProvider = null, frontWeekRunner = null, frontDayRunner = null, quakeRunner = null, quakeFeed = null, root = process.cwd(), onAlert = null } = {}) {
   const alert = (kind, detail) => { try { onAlert?.({ kind, ...detail }); } catch { /* upozornenie nesmie zhodiť Štúdio */ } };
   const publicUrl = publicUrlFrom(env);
   const site = new URL(publicUrl).host;
@@ -150,6 +154,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     const stored = store.getSetting('studio:settings')?.value || {};
     return { ...DEFAULT_SETTINGS, ...stored, autoPublish: { ...(stored.autoPublish || {}) }, frontWeek: { ...DEFAULT_SETTINGS.frontWeek, ...(stored.frontWeek || {}) },
       frontDay: { ...DEFAULT_SETTINGS.frontDay, ...(stored.frontDay || {}) },
+      quake: { ...DEFAULT_SETTINGS.quake, ...(stored.quake || {}) },
       ua: { ...DEFAULT_SETTINGS.ua, ...(stored.ua || {}) } };
   }
 
@@ -560,6 +565,56 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     return true;
   }
 
+  // ── Zemetrasenia ──────────────────────────────────────────────────────
+  const quake = { running: false, startedAt: null, finishedAt: null, error: null, log: '', lastKey: null, eventId: null, checkedAt: null };
+  /** Feed USGS za týždeň (hlavný otras ostane v ňom, aby jeho dotrasy nespúšťali ďalšie videá). */
+  const QUAKE_FEED_URL = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson';
+  const QUAKE_CHECK_MS = 10 * 60_000;
+  async function loadQuakeFeed() {
+    if (quakeFeed) return quakeFeed();
+    const res = await fetch(QUAKE_FEED_URL, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`USGS: HTTP ${res.status}`);
+    return (await res.json()).features || [];
+  }
+  /** Rám reelu pre video o zemetrasení (9:16, vlastný háčik). Pure. */
+  function quakeReelMeta(text, at) {
+    const first = String(text || '').split('\n').map(line => line.trim()).find(Boolean) || '';
+    return { vertical: true, kicker: 'ZEMETRASENIE', hook: { text: 'ZEMETRASENIE', accent: '' }, headline: first.replace(/\.$/, '').replace(/ \(.*\)$/, ''), ...(Number.isFinite(at) ? { at } : {}) };
+  }
+  async function runQuake(eventId, { trigger = 'manual' } = {}) {
+    if (quake.running) throw fail('quake_running', 409);
+    if (frontDay.running || frontWeek.running) throw fail('front_day_running', 409);
+    if (!mediaDir) throw fail('studio_unavailable', 503);
+    if (!/^[a-z0-9]{4,20}$/i.test(String(eventId || ''))) throw fail('invalid_input');
+    quake.running = true; quake.startedAt = now(); quake.finishedAt = null; quake.error = null; quake.log = ''; quake.eventId = eventId;
+    const outDir = path.join(mediaDir, 'quake', eventId);
+    try {
+      const run = quakeRunner || defaultQuakeRunner;
+      const result = await run({ root, env, eventId, outDir, onLog: line => { quake.log = (quake.log + line).slice(-4000); } });
+      const text = await fsp.readFile(result.post, 'utf8');
+      const imported = await api.importDraft({ template: 'quake-video', eventKey: `quake:${eventId}`, title: `Zemetrasenie · ${result.title || eventId}`,
+        text, image: null, videoFile: result.video, origin: trigger === 'auto' ? 'auto' : 'manual',
+        meta: { source: 'USGS · okolive.sk', eventId, srt: result.srt || null, ...quakeReelMeta(text, now()) } });
+      quake.lastKey = `quake:${eventId}`;
+      return imported;
+    } catch (error) {
+      quake.error = String(error?.message || error).slice(0, 400);
+      log(`[studio] quake ${eventId}: ${quake.error}`);
+      throw error;
+    } finally { quake.running = false; quake.finishedAt = now(); }
+  }
+  /** Kandidát na video (feed najviac raz za QUAKE_CHECK_MS; po chybe ten istý otras znova až o 2 h). */
+  async function quakeDue() {
+    const cfg = settings().quake;
+    if (!quakeRunner && !timers) return null;
+    if (!cfg?.enabled || quake.running || frontDay.running || frontWeek.running) return null;
+    if (quake.checkedAt && now() - quake.checkedAt < QUAKE_CHECK_MS) return null;
+    quake.checkedAt = now();
+    const features = await loadQuakeFeed();
+    const failedRecently = id => Boolean(quake.error) && quake.eventId === id && quake.finishedAt && now() - quake.finishedAt < 2 * 3600_000;
+    return quakeVideoCandidate(features, { now: now(), minMag: cfg.minMag, done: id => store.studioHasKey(`quake:${id}`) || quake.lastKey === `quake:${id}` || failedRecently(id) });
+  }
+
   async function tick() {
     if (running) return { skipped: 'running' };
     running = true;
@@ -572,6 +627,10 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       refreshInsights().catch(error => log(`[studio] insights: ${error?.message || error}`));
       if (frontWeekDue()) runFrontWeek({ trigger: 'auto' }).catch(() => {});
       else if (frontDayDue()) runFrontDay({ trigger: 'auto' }).catch(() => {});
+      else {
+        const q = await quakeDue().catch(error => { log(`[studio] quake feed: ${error?.message || error}`); return null; });
+        if (q) runQuake(q.id, { trigger: 'auto' }).catch(() => {});
+      }
       if (!settings().autoDraft) return { skipped: 'auto_draft_off' };
       for (const template of TEMPLATES.filter(t => t.auto)) {
         if (template.auto === 'daily' && localHour(now()) < DIGEST_HOUR) continue;
@@ -669,6 +728,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     frontWeekStatus: () => ({ ...frontWeek, due: frontWeekDue() }),
     runFrontDay,
     frontDayStatus: () => ({ ...frontDay, due: frontDayDue() }),
+    runQuake,
+    quakeStatus: () => ({ ...quake }),
     settings,
     templateStats,
     generate,
@@ -822,6 +883,14 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         if ('hour' in fd) { if (!Number.isInteger(fd.hour) || fd.hour < 5 || fd.hour > 12) throw fail('invalid_input'); nextFd.hour = fd.hour; }
         next.frontDay = nextFd;
       }
+      if ('quake' in patch) {
+        const qk = patch.quake;
+        if (!qk || typeof qk !== 'object' || Object.keys(qk).some(key => !['enabled', 'minMag'].includes(key))) throw fail('invalid_input');
+        const nextQ = { ...current.quake };
+        if ('enabled' in qk) nextQ.enabled = Boolean(qk.enabled);
+        if ('minMag' in qk) { if (typeof qk.minMag !== 'number' || !(qk.minMag >= 5.5 && qk.minMag <= 8.5)) throw fail('invalid_input'); nextQ.minMag = Math.round(qk.minMag * 10) / 10; }
+        next.quake = nextQ;
+      }
       if ('ua' in patch) {
         const ua = patch.ua;
         if (!ua || typeof ua !== 'object') throw fail('invalid_input');
@@ -945,6 +1014,34 @@ export function defaultFrontDayRunner({ root, env, outDir, onLog = () => {} }) {
         const srt = names.find(n => /\.srt$/.test(n));
         if (!burned || !post) return reject(new Error('výstup videa alebo textu chýba'));
         resolve({ video: path.join(outDir, burned), post: path.join(outDir, post), srt: srt ? path.join(outDir, srt) : null });
+      } catch (error) { reject(error); }
+    });
+  });
+}
+
+/** Video o zemetrasení: scripts/make-quake-video.mjs (vlastný proces, ~15 min) → { video, post, srt, title }. */
+export function defaultQuakeRunner({ root, env, eventId, outDir, onLog = () => {} }) {
+  return new Promise((resolve, reject) => {
+    const args = [path.join(root, 'scripts', 'make-quake-video.mjs'), '--event', eventId, '--out-dir', outDir, '--url', env.EVENT_VIDEO_PAGE_URL || 'http://localhost:4173'];
+    const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    try { os.setPriority(child.pid, 10); } catch { /* bez priority */ }
+    let out = '';
+    const take = chunk => { const text = String(chunk); out = (out + text).slice(-8000); onLog(text); };
+    child.stdout.on('data', take); child.stderr.on('data', take);
+    const timer = setTimeout(() => child.kill('SIGKILL'), 60 * 60_000);
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('close', async code => {
+      clearTimeout(timer);
+      const tail = out.trim().split('\n').slice(-3).join(' | ');
+      if (code !== 0) return reject(new Error(`make-quake-video skončil s kódom ${code}: ${tail}`));
+      try {
+        const names = await fsp.readdir(outDir);
+        const burned = names.find(n => /-titulky\.mp4$/.test(n));
+        const post = names.find(n => /^zemetrasenie-.*\.txt$/.test(n));
+        const srt = names.find(n => /\.srt$/.test(n));
+        if (!burned || !post) return reject(new Error('výstup videa alebo textu chýba'));
+        const title = /\] (.+?) M [0-9.]+,/.exec(out)?.[1] || null;
+        resolve({ video: path.join(outDir, burned), post: path.join(outDir, post), srt: srt ? path.join(outDir, srt) : null, title });
       } catch (error) { reject(error); }
     });
   });

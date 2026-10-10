@@ -85,7 +85,7 @@ export function speechBounds(silenceLog, durationS, { minLeadS = 0.05 } = {}) {
 }
 
 /** Nálada hudby podľa príbehu videa (2026-10-07, vlastník: „hudba musí byť dobrá"). */
-export const STORY_MOOD = Object.freeze({ strike: 'somber', ru: 'tense', ua: 'tense', air: 'tense', spot: 'tense', clashes: 'news' });
+export const STORY_MOOD = Object.freeze({ quake: 'somber', strike: 'somber', ru: 'tense', ua: 'tense', air: 'tense', spot: 'tense', clashes: 'news' });
 
 /**
  * Výber skladby: zhodná nálada (`moods` v tracks.json), medzi nimi striedanie podľa dňa (nie stále tá istá);

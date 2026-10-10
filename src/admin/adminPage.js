@@ -729,6 +729,7 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
   if (draft.template === 'event') head.append(badge('z Udalostí', 'muted'));
   if (draft.template === 'front-week') head.append(badge('Týždeň na fronte', 'muted'));
   if (draft.template === 'front-day') head.append(badge('Deň na fronte', 'muted'));
+  if (draft.template === 'quake-video') head.append(badge('Zemetrasenie', 'muted'));
   if (draft.slides > 1) head.append(badge(`karusel · ${draft.slides} ${draft.slides < 5 ? 'snímky' : 'snímok'}`, 'info'));
   if (draft.retryAt) head.append(badge(`ďalší pokus ${when(draft.retryAt)} (${draft.retryN}/3)`, 'info'));
   const text = el('textarea', 'admin-studio-text'); text.value = draft.text; text.rows = 9; text.maxLength = 2200;

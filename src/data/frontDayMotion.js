@@ -121,7 +121,9 @@ export function shotStat(model, lineId, shot = {}) {
     return { kicker: 'RUSKÝ ÚTOK · OBETE', value: k, unit: plural(k, 'MŔTVY', 'MŔTVI', 'MŔTVYCH'), sub: ['najmenej · čísla od dvoch médií', ...rows], color: MOTION.red };
   }
   const spot = shot.kind === 'spot' ? m.spots?.[shot.sceneId] : null;
-  if (spot) return { kicker: String(spot.tag || '').toUpperCase(), title: spot.title || '', sub: (spot.rows || []).slice(0, 3), color: '#ffffff' };
+  // Záber scenára môže niesť aj veľké číslo (zemetrasenie: magnitúda 7,7 s desatinou, počet dotrasov).
+  if (spot) return { kicker: String(spot.tag || '').toUpperCase(), title: spot.title || '', sub: (spot.rows || []).slice(0, 3), color: spot.color || '#ffffff',
+    ...(Number.isFinite(spot.value) ? { value: spot.value, decimals: spot.decimals || 0, unit: spot.unit || '', prefix: spot.prefix || '', suffix: spot.suffix || '' } : {}) };
   return null;
 }
 
@@ -166,7 +168,7 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
     out.push(creditLine(W / 2, 1060, 20, 'middle'));
     const src = model?.sources || [`Strety a údery: Generálny štáb Ukrajiny (údaje jednej strany)`, `Mapa a výpočet zmeny: ${MAP_SOURCE.site} · © OpenStreetMap`, model?.clips?.find((c) => c?.aftermath)?.sources?.[0] || 'Zábery: ArmyInform, Ministerstvo obrany Ukrajiny (CC BY 4.0)'];
     // Hudba s licenciou CC BY musí mať autora aj vo videu (model.musicCredit z knižnice skladieb).
-    [...src.slice(0, 3), ...(model?.musicCredit ? [model.musicCredit] : [])].forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));
+    [...src.slice(0, 4), ...(model?.musicCredit ? [model.musicCredit] : [])].forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));
     out.push('</g></svg>');
     return out.join('');
   }
@@ -217,9 +219,10 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
       out.push(`<text x="48" y="${y0 + 30}" font-family="${MONO}" font-size="28" font-weight="700" letter-spacing="4" fill="${ACCENT}" ${outline(6)}>${esc(stat.kicker)}</text>`);
       let y = y0 + 40;
       if (Number.isFinite(stat.value)) {
-        const v = Math.round(stat.value * easeOut(since / MOTION.countS));
+        const raw = stat.value * easeOut(since / MOTION.countS);
+        const shown = stat.decimals ? raw.toFixed(stat.decimals).replace('.', ',') : group(Math.round(raw));
         y += 190;
-        out.push(`<text x="40" y="${y}" font-size="200" font-weight="900" fill="${stat.color || '#ffffff'}" ${outline(16)}>${esc(`${stat.prefix || ''}${group(v)}${stat.suffix || ''}`)}</text>`);
+        out.push(`<text x="40" y="${y}" font-size="200" font-weight="900" fill="${stat.color || '#ffffff'}" ${outline(16)}>${esc(`${stat.prefix || ''}${shown}${stat.suffix || ''}`)}</text>`);
       } else if (stat.title) {
         y += 96;
         out.push(`<text x="48" y="${y}" font-size="${stat.title.length > 22 ? 64 : 82}" font-weight="900" fill="#ffffff" ${outline(12)}>${esc(stat.title)}</text>`);

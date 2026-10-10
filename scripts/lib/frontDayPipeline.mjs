@@ -142,6 +142,19 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   model.clips = clipSources.map((c) => c.clip);
   // Fotky zo scenára (napr. satelit Copernicus nad Soči) sú zábery `clip:<i>` s priblížením k bodu;
   // video sa vyrobí až s dĺžkou záberu (5b).
+  // Zábery scenára (zemetrasenie: mapa otrasov USGS, fotky/video z Commons) — `clip:<i>` v poradí scenario.media;
+  // fotky na celú šírku nad rozmazaným pozadím (photoMontageVideo), video oknom pohybu.
+  for (const m of scenario?.media || []) {
+    const clip = { captionSk: m.captionSk, kicker: m.kicker, credit: m.credit, sources: m.sources, placeName: m.placeName || '', sourceLines: [], inset: false, keepCaptions: true,
+      ...(Number.isFinite(m.fixedStart) ? { fixedStart: m.fixedStart } : {}) };
+    try {
+      if (m.kind === 'video') {
+        const probe = await probeClip(m.file, { ffmpeg });
+        clipSources.push({ clip, src: m.file, probe, aftermathVideo: true });
+      } else clipSources.push({ clip, images: m.files });
+      model.clips.push(clip);
+    } catch (e) { onProgress('clip-skip', { media: m.kind, error: e.message }); clipSources.push({ clip, images: [] }); model.clips.push(clip); }
+  }
   for (const photo of scenario?.photos || []) {
     const clip = { captionSk: photo.caption, kicker: photo.kicker, header: scenario.model?.header, placeName: photo.placeName || '',
       sourceLines: photo.sourceLines || [], sources: scenario.model?.sources, inset: false, fixedStart: 0, keepCaptions: true };
@@ -219,7 +232,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   if (!plan) throw Object.assign(new Error('deň nemá vety na video'), { code: 'NO_LINES' });
   onProgress('fit', { durationS: Math.round(plan.durationS * 10) / 10, shots: plan.shots.map((s) => ({ id: s.id, dur: Math.round(s.dur * 10) / 10 })) });
   const jobFile = path.join(workDir, 'uloha.json');
-  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, cameras, style, planOpts, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1 }));
+  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, cameras, style, planOpts, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1, map: scenario?.map || null }));
 
   if (sampleFrames) {
     await captureFrontDay({ jobFile, out: path.join(workDir, 'vzorky.mp4'), capture, ffmpeg, onProgress, frames: sampleFrames, framesDir: workDir });

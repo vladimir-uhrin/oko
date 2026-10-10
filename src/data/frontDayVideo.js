@@ -114,7 +114,7 @@ export function frontDayPlan(ctx, lines, durations, opts = {}) {
       : kind === 'spot' ? (ctx?.cameras?.[sceneId] || DAY_UKRAINE_CAMERA)
         : kind === 'opening' ? (ctx?.cameras?.opening || openingCamera(ctx?.story, ctx?.focusSceneId, o))
           : kind === 'clip' ? prevCam
-            : DAY_OVERVIEW_CAMERA;
+            : kind === 'closing' ? (ctx?.cameras?.closing || DAY_OVERVIEW_CAMERA) : DAY_OVERVIEW_CAMERA;
     const lead = o.leadS[kind] ?? 0.5;
     let cursor = t + lead;
     let first = true;
