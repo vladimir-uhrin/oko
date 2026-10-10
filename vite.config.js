@@ -3569,10 +3569,10 @@ export function firmsProxy() {
     globalThis.__okoFirmsStatus = () => ({ hasKey: Boolean(mapKey()), lastFetch: mem?.at ?? null, sources: mem?.sources ?? [], sentinel3: sentinel3.status() });
   }
 
-    if (!inflight && Date.now() - lastRefreshFailAt >= REFRESH_RETRY_MS) {
-      const prevAt = mem?.at ?? null;
   /** Spustí obnovu na pozadí (single-flight; po zlyhaní 5 min pauza). @returns {?Promise} */
   function startRefresh(key) {
+    if (!inflight && Date.now() - lastRefreshFailAt >= REFRESH_RETRY_MS) {
+      const prevAt = mem?.at ?? null;
       inflight = refreshUpstream(key)
         .then(async (fresh) => {
           mem = fresh;
@@ -3684,9 +3684,9 @@ export function firmsProxy() {
             return;
           }
 
+          const firmsQuery = new URL(req.url || '/', 'http://localhost').searchParams;
           const entry = mem;
           if (entry && Date.now() - entry.at < TTL_MS) {
-          const firmsQuery = new URL(req.url || '/', 'http://localhost').searchParams;
             sendJson(200, buildPayload(entry, false, firmsQuery));
             return;
           }
