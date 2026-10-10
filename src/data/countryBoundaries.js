@@ -23,17 +23,10 @@ export const COUNTRY_BOUNDARIES_ID = 'country-boundaries';
 const LINE_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.6);
 const LINE_WIDTH = 1.4;
 
-/** Political border as a "fence" (Cesium wall): a red curtain standing on the
- *  border line (user „aby pri bočnom pohľade … bol akoby plot"). The fence shows
- *  ONLY in a middle band of camera distance (distanceDisplayCondition): from far /
- *  the whole planet only the flat line remains, and once you dive in very close
- *  the tall wall would swamp the ships/layers, so it collapses back to the line
- *  (user „pri určitej výške už iba čiara aby sa neprekrývali s loďami"). */
-const WALL_HEIGHT_M = 18667; // top of the fence above the ellipsoid (2/3 of the former 28 km)
-const WALL_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.3); // translucent red curtain
-const WALL_TOP_COLOR = Cesium.Color.fromCssColorString('#ff6a5e').withAlpha(0.85); // brighter top edge
-const FENCE_MIN_DISTANCE_M = 300_000; // closer than this → fence off (line only), don't cover ships
-const FENCE_MAX_DISTANCE_M = 1_300_000; // farther than this → fence off (line only)
+// Stena hraníc („plot", Cesium wall 18,7 km) ZRUŠENÁ 2026-10-10 (vlastník: „tú stenu
+// hraníc vypni všade"): distanceDisplayCondition sa meria k celej hranici, takže aj
+// nad Bratislavou trčala na obzore červená stena vzdialenej hranice. Ostáva len
+// plochá čiara.
 
 /**
  * Parse the bundled .geojsonl payload into LineString features. Malformed lines
@@ -76,8 +69,6 @@ export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImp
     const features = parseBoundariesGeojsonl(await response.text());
     if (!features.length) throw new Error('empty dataset');
     const lineMaterial = new Cesium.ColorMaterialProperty(LINE_COLOR);
-    const wallMaterial = new Cesium.ColorMaterialProperty(WALL_COLOR);
-    const fenceCondition = new Cesium.DistanceDisplayCondition(FENCE_MIN_DISTANCE_M, FENCE_MAX_DISTANCE_M);
     for (const feature of features) {
       const coords = feature.geometry.coordinates;
       const flat = [];
@@ -87,20 +78,6 @@ export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImp
       ds.entities.add({
         id: `${COUNTRY_BOUNDARIES_ID}:line:${feature.id}`,
         polyline: { positions, width: LINE_WIDTH, material: lineMaterial, clampToGround: true },
-      });
-      // Fence — pops up only when the camera is close enough.
-      ds.entities.add({
-        id: `${COUNTRY_BOUNDARIES_ID}:wall:${feature.id}`,
-        wall: {
-          positions,
-          maximumHeights: new Array(coords.length).fill(WALL_HEIGHT_M),
-          minimumHeights: new Array(coords.length).fill(0),
-          material: wallMaterial,
-          outline: true,
-          outlineColor: WALL_TOP_COLOR,
-          outlineWidth: 1,
-          distanceDisplayCondition: fenceCondition,
-        },
       });
     }
     count = features.length;

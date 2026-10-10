@@ -68,3 +68,17 @@ test('the bundled boundaries dataset exists and parses to real border lines', ()
   assert.ok(feats.length > 100, 'bundled world borders present');
   assert.ok(feats.every((f) => f.geometry.coordinates.every(([lon, lat]) => Math.abs(lon) <= 180 && Math.abs(lat) <= 90)));
 });
+
+test('hranice = len plochá čiara, žiadna stena (2026-10-10: „tú stenu hraníc vypni všade")', async () => {
+  const added = [];
+  const viewer = { dataSources: { add: (ds) => added.push(ds), remove: () => true }, scene: { requestRender() {} } };
+  const geojsonl = [
+    JSON.stringify({ type: 'Feature', id: 1, geometry: { type: 'LineString', coordinates: [[17, 48], [18, 48.5]] } }),
+    JSON.stringify({ type: 'Feature', id: 2, geometry: { type: 'LineString', coordinates: [[16, 47], [17, 47.5], [18, 47.7]] } }),
+  ].join('\n');
+  const layer = createCountryBoundaries({ viewer, fetch: async () => ({ ok: true, text: async () => geojsonl }) });
+  assert.equal(await layer.retain('gas-pipelines'), 2);
+  const entities = added[0].entities.values;
+  assert.equal(entities.length, 2, 'jedna entita na hranicu');
+  assert.equal(entities.every((e) => e.polyline && !e.wall), true, 'čiara áno, stena nie');
+});
