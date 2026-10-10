@@ -6,7 +6,7 @@ import {
 } from './contextStore.js';
 import { createTrail } from './trailRenderer.js';
 import { currentLanguage, t } from '../i18n.js';
-import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
+import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
 import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
@@ -20,7 +20,7 @@ import {
   matchDestinationPort,
   voyageToPort,
 } from './vesselDestination.js';
-import { createVesselVoyageLine } from './vesselVoyageLine.js';
+import { HISTORY_LINE_STYLE, createVesselVoyageLine, historyLinePositionsDeg } from './vesselVoyageLine.js';
 import { screenProjectedRotation, cameraPoseSignature, horizonOccluder } from './iconOrientation.js';
 import { AIS_FRESH_MS, AIS_RETAIN_MS, aisRegionKey } from './aisCoverage.js';
 import { airIconTier } from './airIconLod.js';
@@ -642,7 +642,7 @@ const aisLiveVesselsLayer = {
     const lengthText = Number.isFinite(record.lengthM) && record.lengthM > 0 ? `${Math.round(record.lengthM)} m` : '';
     // Typ nikdy prázdny: bez neho by karta siahla po t('aircraft.category.…').
     const type = [normalizeVesselType(record.type), lengthText].filter(Boolean).join(' · ') || 'VESSEL';
-    const destination = String(record.destination || '').trim();
+    const destination = vesselDestinationWithFallback(record, cachedVesselInfo(record.mmsi) || null).destination;
     // AIS sentinely: heading 511 a course 360 = „nedostupné".
     const heading = Number.isFinite(record.heading) && record.heading >= 0 && record.heading < 360 ? record.heading : null;
     const course = Number.isFinite(record.course) && record.course >= 0 && record.course < 360 ? record.course : null;
@@ -657,6 +657,7 @@ const aisLiveVesselsLayer = {
     const voyage = vesselVoyageModel(record, info, cachedPortIndex());
     const extraLines = [
       voyageDepartureLine(voyage, t, lang, Date.now(), { withOrigin: !voyage?.destination }),
+      portHistoryLine(info, cachedPortIndex(), t),
       vesselRegistryParts(info, t, lang).join(' · '),
       vesselHullParts(record, info, t, lang).join(' · '),
       (() => { const local = vesselLocalTimeLabel(record.lon, Date.now(), vesselTimeZone(record.lat, record.lon)); return local ? t('vessel.local-time', { time: local }) : ''; })(),
@@ -1085,6 +1086,8 @@ const state = {
   destinationMatch: null,
   /** @type {object|null} Čiara plavby do cieľového prístavu. */
   voyageLine: null,
+  /** Čiara histórie plavby (predchádzajúce prístavy → loď). */
+  historyLine: null,
 };
 
 /** Replace live AIS rows through the production reconciliation path (DEV only). */
@@ -2602,7 +2605,11 @@ function selectVessel(record) {
   // Register (IMO, podrobný typ, rok, GT/DWT) a fotka — karta sa doplní, keď príde.
   if (cachedVesselInfo(record.mmsi) === undefined) {
     lookupVesselInfo(record.mmsi).then((info) => {
-      if (info && state.selectedRecord === record) updateVisibility(true);
+      if (info && state.selectedRecord === record) {
+        if (!state.destinationMatch) resolveSelectedDestination(record);
+        syncHistoryLine();
+        updateVisibility(true);
+      }
     });
   }
   if (registerSelectedContext(record)) {
@@ -2749,6 +2756,10 @@ function destroySelectedVesselTrail() {
     state.voyageLine.destroy();
     state.voyageLine = null;
   }
+  if (state.historyLine) {
+    state.historyLine.destroy();
+    state.historyLine = null;
+  }
 }
 
 /**
@@ -2827,18 +2838,30 @@ function loadPortIndex() {
  */
 function resolveSelectedDestination(record) {
   state.destinationMatch = null;
-  const destination = String(record?.destination || '').trim();
+  // Cieľ z registra, keď AIS ešte nič nehlási (2026-10-10).
+  const destination = vesselDestinationWithFallback(record, cachedVesselInfo(record?.mmsi) || null).destination;
   if (!destination) { state.voyageLine?.clear(); return; }
   loadPortIndex().then((index) => {
     if (!index || state.selectedRecord !== record) return;
-    state.destinationMatch = matchDestinationPort(record.destination, index);
+    state.destinationMatch = matchDestinationPort(destination, index);
     if (state.enabled) updateVisibility(true);
     syncVoyageLine();
   });
 }
 
 /** Prekreslí čiaru z vybranej lode do jej cieľového prístavu (alebo ju zhasne). */
+/** História plavby vybranej lode: predchádzajúce prístavy (GFW) → loď, jantárovou čiarou. */
+function syncHistoryLine() {
+  const record = state.selectedRecord;
+  const calls = record ? cachedVesselInfo(record.mmsi)?.portCalls : null;
+  const path = historyLinePositionsDeg(calls, record ? { lat: record.lat, lon: record.lon } : null);
+  if (!path) { state.historyLine?.clear(); return; }
+  if (!state.historyLine && state.viewer) state.historyLine = createVesselVoyageLine(state.viewer, HISTORY_LINE_STYLE);
+  state.historyLine?.setPath(path);
+}
+
 function syncVoyageLine() {
+  syncHistoryLine();
   const record = state.selectedRecord;
   const port = state.destinationMatch?.port;
   if (!record || !port) { state.voyageLine?.clear(); return; }
@@ -2853,6 +2876,7 @@ function clearSelection({ preserveTrail = false, evicted = false } = {}) {
   const record = state.selectedRecord;
   state.destinationMatch = null;
   state.voyageLine?.clear();
+  state.historyLine?.clear();
   if (record?.billboard) {
     record.billboard.image = shipIcon(record, false);
     record.billboard.scale = shipScale(record);
@@ -2970,15 +2994,18 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
   if (registry.length) details.push(registry.join(' · '));
   const hull = vesselHullParts(record, info, t, lang);
   if (hull.length) details.push(hull.join(' · '));
-  const destination = String(record.destination || '').trim();
   // ETA belongs to the voyage line — without a destination it is noise.
-  const eta = String(record.eta || '').trim();
+  // Cieľ a ETA z registra, keď ich AIS ešte nedoniesol (2026-10-10).
+  const { destination, eta } = vesselDestinationWithFallback(record, info);
   // Súčasná plavba z registra (posledný prístav → cieľ · priebeh, odchod) — 2026-10-10.
   const voyage = vesselVoyageModel(record, info, state.portIndex || cachedPortIndex());
   const voyageLine = voyageRouteLine(voyage);
   if (voyageLine) details.push(voyageLine);
   const departed = voyageDepartureLine(voyage, t, lang, nowMs);
   if (departed) details.push(departed);
+  // Predchádzajúce prístavy z GFW (2026-10-10, „nenačíta let lodí").
+  const history = portHistoryLine(info, state.portIndex || cachedPortIndex(), t);
+  if (history) details.push(history);
   if (destination) details.push(`→ ${trimHudValue(destination, 24)}${eta ? ` · ETA ${eta}` : ''}`);
   // Rozpoznaný prístav (World Port Index) pridá vzdialenosť po veľkokružnici
   // a ETA z rýchlosti nad zemou. Bez zhody sa NIČ nedopĺňa — surový text
@@ -3148,6 +3175,7 @@ function resetState() {
   state.trailBackfillToken = 0;
   state.destinationMatch = null;
   state.voyageLine = null;
+  state.historyLine = null;
 }
 
 /**

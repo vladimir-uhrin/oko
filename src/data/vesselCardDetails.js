@@ -9,7 +9,7 @@
  * kartička pod kurzorom.
  */
 import { AIS_ROT_FAST_DEG_PER_MIN } from './aisIngest.js';
-import { matchDestinationPort, matchPortByNameCountry, voyageProgress } from './vesselDestination.js';
+import { greatCircleKm, matchDestinationPort, matchPortByNameCountry, voyageProgress } from './vesselDestination.js';
 import { resolveFlagIso2 } from './countryFlags.js';
 
 const identity = (key) => key;
@@ -231,7 +231,9 @@ export function vesselRegistryParts(info, t = identity, lang = 'sk') {
  * @param {object|null} index index prístavov (vesselPortIndex) — bez neho bez priebehu
  */
 export function vesselVoyageModel(vessel, info, index) {
-  const voyage = info?.voyage;
+  // Register (stránka lode) je čerstvejší; GFW návštevy prístavov sú záloha
+  // pre lode, ktoré register nepozná (oneskorenie ~3 dni).
+  const voyage = info?.voyage?.lastPort ? info.voyage : voyageFromPortCalls(portCallsLabelled(info, index));
   if (!voyage?.lastPort) return null;
   const originPort = index ? matchPortByNameCountry(voyage.lastPort, voyage.lastPortCountry, index) : null;
   const destinationText = String(vessel?.destination || info?.destination || '').trim();
@@ -290,4 +292,82 @@ export function voyageRouteInfo(model) {
   if (!model?.origin?.name || !model.destination?.name) return null;
   const side = (s) => ({ code: s.locode, name: s.name, country: s.iso2 || s.country });
   return { origin: side(model.origin), destination: side(model.destination) };
+}
+
+/**
+ * Cieľ a ETA: AIS má prednosť (posádka ho práve zadala), register je záloha —
+ * AIS statika chodí raz za ~6 min a AISHub cieľ neposiela vôbec. Pure.
+ * @returns {{destination: string, eta: string, fromRegistry: boolean}}
+ */
+export function vesselDestinationWithFallback(record, info) {
+  const aisDest = String(record?.destination || '').trim();
+  if (aisDest) return { destination: aisDest, eta: String(record?.eta || '').trim(), fromRegistry: false };
+  const regDest = String(info?.destination || '').trim();
+  if (!regDest) return { destination: '', eta: '', fromRegistry: false };
+  let eta = '';
+  if (Number.isFinite(info?.etaMs)) {
+    const d = new Date(info.etaMs);
+    eta = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  }
+  return { destination: regDest, eta, fromRegistry: true };
+}
+
+/** ISO3 vlajky kotviska GFW → ISO2 (námorné štáty; ostatné bez vlajky). */
+const ISO3_TO_ISO2 = Object.freeze({
+  RUS: 'ru', USA: 'us', GBR: 'gb', NLD: 'nl', DEU: 'de', BEL: 'be', FRA: 'fr', ESP: 'es', ITA: 'it', GRC: 'gr', TUR: 'tr',
+  CHN: 'cn', JPN: 'jp', KOR: 'kr', SGP: 'sg', NOR: 'no', DNK: 'dk', SWE: 'se', FIN: 'fi', EST: 'ee', LVA: 'lv', LTU: 'lt',
+  POL: 'pl', PRT: 'pt', IRL: 'ie', EGY: 'eg', ARE: 'ae', SAU: 'sa', IND: 'in', BRA: 'br', MEX: 'mx', CAN: 'ca', AUS: 'au',
+  ROU: 'ro', BGR: 'bg', UKR: 'ua', HRV: 'hr', MLT: 'mt', CYP: 'cy', MAR: 'ma', ISR: 'il', IRN: 'ir', IRQ: 'iq', KWT: 'kw',
+  QAT: 'qa', OMN: 'om', PAK: 'pk', MYS: 'my', IDN: 'id', THA: 'th', VNM: 'vn', PHL: 'ph', TWN: 'tw', HKG: 'hk', ZAF: 'za',
+  NGA: 'ng', ARG: 'ar', CHL: 'cl', PER: 'pe', COL: 'co', PAN: 'pa', VEN: 've', GEO: 'ge', SVN: 'si', MNE: 'me', ALB: 'al', ISL: 'is',
+});
+
+/** Najbližší prístav World Port Index do `maxKm` (pre návštevy GFW bez mena). Pure. */
+export function nearestPort(index, lat, lon, maxKm = 60) {
+  if (!index?.byLocode || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  let best = null;
+  let bestKm = maxKm;
+  const seen = new Set();
+  for (const map of [index.byLocode, index.byName]) {
+    for (const port of map?.values?.() || []) {
+      if (seen.has(port)) continue;
+      seen.add(port);
+      if (Math.abs(port.lat - lat) > 1 || Math.abs(port.lon - lon) > 1.5) continue;
+      const km = greatCircleKm(lat, lon, port.lat, port.lon);
+      if (km !== null && km <= bestKm) { best = port; bestKm = km; }
+    }
+  }
+  return best;
+}
+
+/**
+ * Návštevy prístavov z GFW (info.portCalls) s menom a štátom: meno z GFW,
+ * inak najbližší prístav WPI; štát z WPI. Pure.
+ */
+export function portCallsLabelled(info, index) {
+  const calls = Array.isArray(info?.portCalls) ? info.portCalls : [];
+  return calls.map((c) => {
+    const port = index ? nearestPort(index, c.lat, c.lon) : null;
+    const name = c.name || port?.name || null;
+    const iso2 = ISO3_TO_ISO2[String(c.flag || '').toUpperCase()] || (port?.country ? resolveFlagIso2(null, null, port.country) : null) || null;
+    return { ...c, name, locode: port?.locode || null, country: port?.country || null, iso2 };
+  });
+}
+
+/** Posledná návšteva prístavu ako „posledný prístav + odchod" (tvar info.voyage). Pure. */
+export function voyageFromPortCalls(calls) {
+  const last = Array.isArray(calls) ? [...calls].reverse().find((c) => c?.name) : null;
+  if (!last) return null;
+  return { lastPort: last.name, lastPortCountry: last.country || null, departedAt: Number.isFinite(last.departure) ? last.departure : null, fromPortCalls: true };
+}
+
+/** „Predtým: Liverpool · Amsterdam · IJmuiden · Tallinn" — posledné prístavy z GFW. Pure. */
+export function portHistoryLine(info, index, t = identity, max = 5) {
+  const names = [];
+  for (const c of portCallsLabelled(info, index)) {
+    if (!c.name || names[names.length - 1] === c.name) continue;
+    names.push(c.name);
+  }
+  if (names.length < 2) return '';
+  return t('vessel.port-history', { ports: names.slice(-max).join(' · ') });
 }

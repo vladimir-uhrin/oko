@@ -32,7 +32,7 @@ import {
 } from './vesselLabels.js';
 import { shipIconDataUrl, vesselTierScale } from './aisLiveVessels.js';
 import { airIconTier } from './airIconLod.js';
-import { localizedTypeDetail, vesselHullParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo } from './vesselCardDetails.js';
+import { localizedTypeDetail, portHistoryLine, vesselHullParts, vesselRegistryParts, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { cachedPortIndex } from './vesselPortIndex.js';
 import { clearOverlaySource, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
@@ -159,6 +159,7 @@ export function gfwContactSummary(row, meta, translate = t, lang = currentLangua
   const registryType = info?.typeDetail ? localizedTypeDetail(info.typeDetail, lang) : null;
   const extraLines = [
     voyageDepartureLine(voyage, translate, lang, Date.now(), { withOrigin: !voyage?.destination }),
+    portHistoryLine(info, cachedPortIndex(), translate),
     vesselRegistryParts(info, translate, lang).slice(registryType ? 1 : 0).join(' · '),
     vesselHullParts({ imo: row.imo }, info, translate, lang).join(' · '),
   ].filter(Boolean);

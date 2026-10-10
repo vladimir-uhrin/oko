@@ -301,6 +301,7 @@ test('AISHub: kartička aj vybraná karta dostanú register a miestny čas, fotk
   await lookupVesselInfo('241190000');
   const after = aishubContactSummary(row, en, nowMs);
   assert.deepEqual(after.extraLines, [
+    '→ WILMINGTON.NC.USA', // cieľ z registra — AISHub ho neposiela (2026-10-10)
     'Chemical/Oil Products Tanker · built 2009 · GT 29 442 · DWT 52 941 t',
     'IMO 9410909 · 183 × 32 m',
     'Local time 21:57 (UTC−5)',
@@ -399,4 +400,56 @@ test('GFW: kartička oneskorenej lode dostane register, posledný prístav a fot
   assert.equal(after.progress, null, 'poloha je ~3 dni stará — žiadne percento o dnešku');
   assert.equal(after.extraLines.some((l) => /Miestny čas/.test(l)), false);
   _resetVesselInfoForTest();
+});
+
+test('cieľ: AIS má prednosť, inak register s ETA; AISHub ho ukáže aj bez posledného prístavu (riečne lode)', async () => {
+  const { vesselDestinationWithFallback } = await import('./vesselCardDetails.js');
+  const info = { destination: 'BRATISLAVA LINZ', etaMs: Date.parse('2026-12-08T18:00:00Z') };
+  assert.deepEqual(vesselDestinationWithFallback({ destination: 'NLRTM', eta: '10-11 06:00' }, info), { destination: 'NLRTM', eta: '10-11 06:00', fromRegistry: false });
+  assert.deepEqual(vesselDestinationWithFallback({ destination: '' }, info), { destination: 'BRATISLAVA LINZ', eta: '12-08 18:00', fromRegistry: true });
+  assert.deepEqual(vesselDestinationWithFallback({}, null), { destination: '', eta: '', fromRegistry: false });
+  const { aishubContactSummary, aishubSelectedExtraLines } = await import('./aishubVessels.js');
+  _resetVesselInfoForTest();
+  // Skutočný register TURIEC (riečna loď, bez IMO a bez posledného prístavu).
+  _setVesselInfoFetchForTest(async () => ({ ok: true, json: async () => ({ mmsi: '267168000', name: 'TURIEC', typeDetail: 'Cargo ship', lengthM: 36, destination: 'BRATISLAVA LINZ', etaMs: Date.parse('2026-12-08T18:00:00Z'), voyage: null, photo: null }) }));
+  await lookupVesselInfo('267168000');
+  const row = { mmsi: '267168000', name: 'TURIEC', sog: 0, lat: 48.14, lon: 17.11, observedAt: Date.now() };
+  assert.equal(aishubContactSummary(row, sk).extraLines[0], '→ BRATISLAVA LINZ · ETA 12-08 18:00');
+  assert.equal(aishubSelectedExtraLines(row, sk)[0], '→ BRATISLAVA LINZ · ETA 12-08 18:00');
+  _resetVesselInfoForTest();
+});
+
+test('prístavy z GFW: zlúčenie susedných návštev, meno z kotviska, posledný prístav a riadok „Predtým"', async () => {
+  const { normalizePortCalls, gfwVesselIdsForMmsi } = await import('./vesselInfoProxy.js');
+  const { buildPortIndex } = await import('./vesselDestination.js');
+  const { portCallsLabelled, portHistoryLine, vesselVoyageModel, voyageFromPortCalls } = await import('./vesselCardDetails.js');
+  const { historyLinePositionsDeg } = await import('./vesselVoyageLine.js');
+  // Skutočný tvar /v3/vessels/search (MINERVA ZEN má v GFW dve identity).
+  assert.deepEqual(gfwVesselIdsForMmsi({ entries: [{ selfReportedInfo: [{ id: 'a', ssvid: '241190000' }, { id: 'b', ssvid: '241190000' }, { id: 'x', ssvid: '999' }] }] }, '241190000'), ['a', 'b']);
+  const ev = (start, end, lat, lon, names) => ({ start, end, position: { lat, lon }, port_visit: { startAnchorage: { name: names[0], flag: 'X' }, endAnchorage: { name: names[1], flag: 'X' } } });
+  const calls = normalizePortCalls({ entries: [
+    { ...ev('2026-09-19T14:04:36Z', '2026-09-23T04:15:32Z', 60.09, 29.33, ['SAINT PETERSBURG', 'SAINT PETERSBURG']), port_visit: { startAnchorage: { name: 'SAINT PETERSBURG', flag: 'RUS' }, endAnchorage: { name: 'SAINT PETERSBURG', flag: 'RUS' } } },
+    ev('2026-09-05T16:20:41Z', '2026-09-05T21:19:20Z', 52.50, 4.33, ['AMSTERDAM', 'AMSTERDAM']),
+    ev('2026-09-05T22:40:53Z', '2026-09-14T13:52:59Z', 52.46, 4.55, ['IJMUIDEN', 'IJMUIDEN']),
+    ev('2026-09-14T15:30:29Z', '2026-09-15T01:39:37Z', 52.45, 4.05, ['AMSTERDAM', 'AMSTERDAM']),
+    ev('2026-07-31T17:01:44Z', '2026-08-04T21:24:21Z', 30.03, -93.33, ['USA-1152', 'USA-1152']),
+  ] });
+  assert.deepEqual(calls.map((c) => c.name), [null, 'Amsterdam', 'Ijmuiden', 'Amsterdam', 'Saint Petersburg'], 'chronologicky; kód kotviska nie je meno');
+  const feature = (id, name, locode, country, lon, lat) => ({ id, geometry: { coordinates: [lon, lat] }, properties: { name, locode, country } });
+  const index = buildPortIndex([feature('lc', 'Lake Charles', 'USLCH', 'United States', -93.22, 30.22), feature('sp', 'Sankt-Peterburg', 'RULED', 'Russia', 30.3, 59.93)]);
+  const labelled = portCallsLabelled({ portCalls: calls }, index);
+  assert.equal(labelled[0].name, 'Lake Charles', 'návšteva bez mena dostane najbližší prístav WPI');
+  assert.equal(labelled[4].iso2, 'ru');
+  const voyage = voyageFromPortCalls(labelled);
+  assert.equal(voyage.lastPort, 'Saint Petersburg');
+  assert.equal(voyage.departedAt, Date.parse('2026-09-23T04:15:32Z'));
+  // Register bez plavby (riečne lode, lode mimo registra) → odkiaľ z GFW.
+  const model = vesselVoyageModel({ lat: 38.46, lon: -50.43 }, { voyage: null, portCalls: calls }, index);
+  assert.equal(model.origin.name, 'Saint Petersburg');
+  assert.equal(portHistoryLine({ portCalls: calls }, index, sk), 'Predtým: Lake Charles · Amsterdam · Ijmuiden · Amsterdam · Saint Petersburg');
+  assert.equal(portHistoryLine({ portCalls: calls.slice(0, 1) }, index, sk), '', 'jeden prístav nie je história');
+  const path = historyLinePositionsDeg(calls, { lat: 38.46, lon: -50.43 });
+  assert.equal(path.length, 6);
+  assert.deepEqual(path.at(-1), [-50.43, 38.46, 0], 'čiara končí pri lodi');
+  assert.equal(historyLinePositionsDeg([], null), null);
 });

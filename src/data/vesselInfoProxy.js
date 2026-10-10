@@ -140,12 +140,81 @@ export function parseVesselVoyageHtml(html, nowMs) {
   return { lastPort, lastPortCountry, departedAt: parseDepartureUtc(m[2], nowMs) };
 }
 
+export const GFW_API = 'https://gateway.api.globalfishingwatch.org/v3';
+/** História prístavov sa mení s plavbou, GFW ju dopĺňa s ~3-dňovým oneskorením. */
+export const PORT_CALLS_TTL_MS = 12 * 3600 * 1000;
+export const PORT_CALLS_LOOKBACK_DAYS = 120;
+/** Strop dopytov na GFW za deň (2 na loď); GFW dovoľuje 50 000. */
+export const PORT_CALLS_DAILY_MAX = 600;
+
+/**
+ * Identity lode v GFW pre MMSI (jedna loď = viac záznamov podľa obdobia). Pure.
+ * @param {object} json odpoveď /v3/vessels/search
+ * @param {string} mmsi
+ * @returns {string[]}
+ */
+export function gfwVesselIdsForMmsi(json, mmsi) {
+  const ids = new Set();
+  for (const entry of Array.isArray(json?.entries) ? json.entries : []) {
+    for (const info of Array.isArray(entry?.selfReportedInfo) ? entry.selfReportedInfo : []) {
+      if (String(info?.ssvid) === String(mmsi) && info.id) ids.add(String(info.id));
+    }
+  }
+  return [...ids].slice(0, 5);
+}
+
+function titleCase(text) {
+  return String(text || '').toLowerCase().replace(/(^|[\s-])([a-zà-ž])/g, (m, a, b) => a + b.toUpperCase());
+}
+
+/**
+ * Návštevy prístavov z GFW → chronologický zoznam, susedné návštevy toho istého
+ * prístavu (kotvisko → prístav) zlúčené. Pure.
+ * @param {object} json odpoveď /v3/events (public-global-port-visits-events)
+ * @returns {Array<{name: string|null, flag: string|null, lat: number, lon: number, arrival: number|null, departure: number|null}>}
+ */
+export function normalizePortCalls(json) {
+  const calls = [];
+  for (const e of Array.isArray(json?.entries) ? json.entries : []) {
+    const anchor = e?.port_visit?.endAnchorage || e?.port_visit?.startAnchorage || null;
+    const lat = Number(e?.position?.lat ?? anchor?.lat);
+    const lon = Number(e?.position?.lon ?? anchor?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    // Kotvisko býva bez mena („USA-1152") — vezmi prvé skutočné meno z konca, začiatku alebo stredu návštevy.
+    const pv = e?.port_visit || {};
+    const rawName = [pv.endAnchorage, pv.startAnchorage, pv.intermediateAnchorage]
+      .map((a) => a?.name).find((n) => n && !/^[A-Z]{3}-\d+$/.test(n)) || null;
+    calls.push({
+      name: rawName ? titleCase(rawName) : null,
+      flag: anchor?.flag ? String(anchor.flag) : null,
+      lat: Math.round(lat * 1e4) / 1e4,
+      lon: Math.round(lon * 1e4) / 1e4,
+      arrival: Date.parse(e.start) || null,
+      departure: Date.parse(e.end) || null,
+    });
+  }
+  calls.sort((a, b) => (a.arrival || 0) - (b.arrival || 0));
+  const merged = [];
+  for (const c of calls) {
+    const prev = merged[merged.length - 1];
+    const samePlace = prev && ((prev.name && prev.name === c.name) || (!c.name && Math.abs(prev.lat - c.lat) < 0.5 && Math.abs(prev.lon - c.lon) < 0.5));
+    if (samePlace && Number.isFinite(c.arrival) && Number.isFinite(prev.departure) && c.arrival - prev.departure < 3 * 86400_000) {
+      prev.departure = c.departure ?? prev.departure;
+      if (!prev.name && c.name) prev.name = c.name;
+      continue;
+    }
+    merged.push({ ...c });
+  }
+  return merged.slice(-15);
+}
+
 /** Verejný tvar pre klienta: identifikátor fotky sa nahradí našou URL. Pure. */
-export function publicVesselInfo(info, voyage = null) {
+export function publicVesselInfo(info, voyage = null, portCalls = null) {
   if (!info) return null;
   const { photoId, empty, ...rest } = info;
   return {
     ...rest,
+    portCalls: Array.isArray(portCalls) && portCalls.length ? portCalls : null,
     voyage: voyage && voyage.lastPort ? voyage : null,
     photo: photoId ? { src: `/api/vessel-info/photo?mmsi=${info.mmsi}&size=1`, thumb: `/api/vessel-info/photo?mmsi=${info.mmsi}&size=0` } : null,
   };
@@ -178,8 +247,9 @@ function windowLimiter({ windowMs, max, now }) {
  * @param {Function} [o.now]
  * @param {Function} [o.log]
  */
-export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fetch(...a), now = Date.now, log = (m) => console.log(m) } = {}) {
+export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fetch(...a), now = Date.now, log = (m) => console.log(m), gfwToken = () => process.env.GFW_API_TOKEN } = {}) {
   const dir = path.join(root, '.gev-cache', 'vessel-info');
+  const gfwDaily = windowLimiter({ windowMs: 24 * 3600_000, max: PORT_CALLS_DAILY_MAX, now });
   const perClient = windowLimiter({ windowMs: 60_000, max: 90, now });
   const upstreamBudget = windowLimiter({ windowMs: 3600_000, max: VESSEL_UPSTREAM_HOURLY_MAX, now });
   const inflight = new Map();
@@ -260,6 +330,49 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
     return run;
   }
 
+  /**
+   * Prístavy za posledné mesiace z Global Fishing Watch (návštevy prístavov):
+   * odkiaľ loď ide aj pre lode, ktoré register nepozná, a história plavby.
+   * Bez tokenu alebo pri chybe null — register ide ďalej.
+   */
+  async function loadPortCalls(mmsi) {
+    const token = String(gfwToken?.() || '').trim();
+    if (!token) return null;
+    const file = path.join(dir, 'ports', `${mmsi}.json`);
+    try {
+      const entry = JSON.parse(await fsp.readFile(file, 'utf8'));
+      if (Number.isFinite(entry?.at) && now() - entry.at < PORT_CALLS_TTL_MS) return entry.calls;
+    } catch { /* nie je v cache */ }
+    const job = inflight.get(`g:${mmsi}`);
+    if (job) return job;
+    const run = (async () => {
+      try {
+        if (!gfwDaily('all')) return null;
+        const headers = { Authorization: `Bearer ${token}` };
+        const search = await fetchImpl(`${GFW_API}/vessels/search?query=${mmsi}&datasets[0]=public-global-vessel-identity:latest&limit=5`, { headers, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+        if (!search.ok) return null;
+        const ids = gfwVesselIdsForMmsi(await search.json(), mmsi);
+        let calls = [];
+        if (ids.length && gfwDaily('all')) {
+          const end = new Date(now() + 86400_000).toISOString().slice(0, 10);
+          const start = new Date(now() - PORT_CALLS_LOOKBACK_DAYS * 86400_000).toISOString().slice(0, 10);
+          const q = new URLSearchParams({ 'datasets[0]': 'public-global-port-visits-events:latest', 'start-date': start, 'end-date': end, limit: '40', offset: '0' });
+          ids.forEach((id, i) => q.set(`vessels[${i}]`, id));
+          const events = await fetchImpl(`${GFW_API}/events?${q}`, { headers, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+          if (!events.ok) return null;
+          calls = normalizePortCalls(await events.json());
+        }
+        await writeAtomic(file, JSON.stringify({ at: now(), calls }));
+        return calls;
+      } catch (error) {
+        log(`[vessel-info] port calls ${mmsi} failed: ${error?.message || error}`);
+        return null;
+      }
+    })().finally(() => inflight.delete(`g:${mmsi}`));
+    inflight.set(`g:${mmsi}`, run);
+    return run;
+  }
+
   async function loadPhoto(mmsi, size, key) {
     const file = photoFile(mmsi, size);
     try {
@@ -320,8 +433,8 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
       if (url.pathname !== '/' && url.pathname !== '') { sendJson(res, 404, { error: 'not_found' }); return; }
       const out = await loadInfo(mmsi, key);
       if (!out.info) { sendJson(res, out.status || 502, { error: out.error || 'upstream' }, out.status === 429 ? { 'Retry-After': '30' } : {}); return; }
-      const voyage = await loadVoyage(out.info);
-      sendJson(res, 200, publicVesselInfo(out.info, voyage), { 'Cache-Control': 'public, max-age=3600', 'X-OKO-Source': out.source });
+      const [voyage, portCalls] = await Promise.all([loadVoyage(out.info), loadPortCalls(mmsi)]);
+      sendJson(res, 200, publicVesselInfo(out.info, voyage, portCalls), { 'Cache-Control': 'public, max-age=3600', 'X-OKO-Source': out.source });
     } catch (error) {
       log(`[vessel-info] ${mmsi} failed: ${error?.message || error}`);
       sendJson(res, 502, { error: 'upstream_failed' });

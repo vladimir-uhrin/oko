@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.argv[2]) || 4181;
-const env = { ...process.env, FLIGHT_HISTORY: 'off' };
+// AIS_STATE_PERSIST=off: skúšobná inštancia nesmie prepísať uložený stav AIS služby oko-api.
+const env = { ...process.env, FLIGHT_HISTORY: 'off', AIS_STATE_PERSIST: 'off' };
 delete env.OKO_ROLE;
 delete env.OKO_API_UPSTREAM;
 const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');

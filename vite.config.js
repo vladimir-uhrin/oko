@@ -123,6 +123,7 @@ import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from '
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
+import { readAisStateFile, restoreAisState, serializeAisState, writeAisStateFile } from './src/data/aisStatePersist.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1645,11 +1646,19 @@ let _aisStreamLastPruneAt = 0;
 let _aisCompressionWarned = false;
 // Per-MMSI recent-path ring buffers (PRD WS-F F3). Float32 lat/lon (~1m
 // precision, fine for 25m thinning) + Uint32 epoch seconds ≈ 12B/sample;
-// 64 samples × 50k MMSIs worst case ≈ 38MB. Tracks exist only while the dev
-// server runs — this is "recent path", not voyage history.
-const AIS_TRACK_SAMPLES = 64;
-const AIS_TRACK_MIN_GAP_SEC = 30;
-const AIS_TRACK_MIN_MOVE_M = 25;
+// 2026-10-10 („nenačíta let lodí"): 64 vzoriek po 30 s bolo ~30 min stopy; teraz
+// 240 vzoriek po ≥ 2 min a ≥ 100 m = ~8 h plávajúcej lode. Ring sa alokuje len
+// pre lode v pohybe (~15k × 240 × 12 B ≈ 43 MB) a prežije reštart (aisStatePersist).
+const AIS_TRACK_SAMPLES = 240;
+const AIS_TRACK_MIN_GAP_SEC = 120;
+const AIS_TRACK_MIN_MOVE_M = 100;
+/** Stav AIS na disku (ciele, rozmery, polohy, stopy) — prežije reštart/vydanie oko-api. */
+const AIS_STATE_FILE = path.join(__dirname, '.gev-cache', 'ais-state', 'state.json.gz');
+const AIS_STATE_SAVE_MS = 3 * 60_000;
+/** Skúšobné inštancie (dev-qa-instance.mjs) majú AIS_STATE_PERSIST=off — neprepíšu stav služby. */
+const aisStatePersistEnabled = () => String(process.env.AIS_STATE_PERSIST || '').toLowerCase() !== 'off';
+let _aisStateRestored = false;
+let _aisStateSaveTimer = null;
 // Watchdog budgets (policy lives in src/data/aisWatchdog.js). Silence is
 // REPORTED quickly and ACTED ON slowly: a dead feed must read as dead within
 // ~2 min, but recycling the socket is throttled so recovery can never become a
@@ -10493,7 +10502,29 @@ function aisKeyFingerprint() {
  * Drive the watchdog once. Called on every /api/ais-live request and on the
  * background interval, so recovery does not depend on browser traffic.
  */
+/** Obnova stavu AIS z disku (raz) + periodický zápis. Chyby len do logu — AIS ide ďalej. */
+function ensureAisStatePersistence() {
+  if (_aisStateRestored || !aisStatePersistEnabled()) return;
+  _aisStateRestored = true;
+  void readAisStateFile(AIS_STATE_FILE).then((snapshot) => {
+    const restored = restoreAisState(snapshot, { vesselMaxAgeMs: AISSTREAM_STALE_MS });
+    for (const [mmsi, data] of restored.statics) if (!_aisStreamStatic.has(mmsi)) _aisStreamStatic.set(mmsi, data);
+    for (const row of restored.vessels) if (!_aisStreamVessels.has(row.mmsi)) _aisStreamVessels.set(row.mmsi, row);
+    for (const [mmsi, pts] of restored.tracks) {
+      if (_aisStreamTracks.has(mmsi)) continue;
+      for (const p of pts) appendAisTrackSample(mmsi, p.lat, p.lon, p.t);
+    }
+    if (snapshot) console.log(`[AISStream] stav obnovený z disku: ${restored.vessels.length} polôh, ${restored.statics.length} statických, ${restored.tracks.length} stôp`);
+  }).catch((error) => console.warn('[AISStream] obnova stavu zlyhala:', error?.message || error));
+  _aisStateSaveTimer = setInterval(() => {
+    const snapshot = serializeAisState({ vessels: _aisStreamVessels, statics: _aisStreamStatic, tracks: _aisStreamTracks });
+    writeAisStateFile(AIS_STATE_FILE, snapshot).catch((error) => console.warn('[AISStream] zápis stavu zlyhal:', error?.message || error));
+  }, AIS_STATE_SAVE_MS);
+  _aisStateSaveTimer.unref?.();
+}
+
 function ensureAisStreamConnection() {
+  ensureAisStatePersistence();
   const adapter = aisAdapter();
   if (_aisNeedsRearm) {
     // Post-dispose re-arm, now that the restarted server's .env is loaded. The
@@ -10634,6 +10665,7 @@ function ingestAisStreamEnvelope(envelope) {
       draughtM: aisDraughtMeters(message.MaximumStaticDraught),
       eta: aisEtaLabel(message.Eta),
     }, _aisStreamStatic.get(mmsi));
+    staticData._savedAt = Date.now();
     _aisStreamStatic.set(mmsi, staticData);
     if (_aisStreamStatic.size > AISSTREAM_CACHE_MAX) {
       _aisStreamStatic.delete(_aisStreamStatic.keys().next().value);
