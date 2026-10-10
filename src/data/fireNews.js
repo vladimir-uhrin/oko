@@ -105,7 +105,11 @@ export function fireNewsVerdict(articles, trusted, nowMs = Date.now(), placeName
 
 /** Identita detekcie pre históriu (poloha na 4 desatinné, čas, družica). Pure. */
 export function fireHistoryKey(f) {
-  return `${Number(f.lat).toFixed(4)}:${Number(f.lon).toFixed(4)}:${f.acqDate}:${f.acqTime}:${f.satellite || ''}`;
+  // Zaokrúhlenie ROVNAKO ako slimFire (Math.round × 1e4): toFixed(4) priamo na surovej hodnote dá pri
+  // binárnych zlomkoch inú 4. číslicu („44.73555“ → 44.7355 vs. uložené 44.7356) — 2026-10-10 to
+  // zapísalo ~8 % detekcií dvakrát.
+  const r4 = (v) => (Math.round(Number(v) * 1e4) / 1e4).toFixed(4);
+  return `${r4(f.lat)}:${r4(f.lon)}:${f.acqDate}:${f.acqTime}:${f.satellite || ''}`;
 }
 
 /** Deň (UTC) detekcie pre názov denného súboru. */

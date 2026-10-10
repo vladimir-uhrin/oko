@@ -47,3 +47,13 @@ test('štíhly riadok: geo potvrdenie a samostatné geo; nezmyselná veľkosť p
   assert.deepEqual(slimFire(fire({ scan: 377, track: 1240, geo: true, repeats: 4, geoSeenMs: 5, geoSat: 'Met12' })),
     { lat: 44.7356, lon: 37.8093, frp: 2.76, confidence: 'n', brightness: 331, daynight: 'N', acqDate: '2026-10-06', acqTime: '3', satellite: 'N21', geo: true, repeats: 4, geoSeenMs: 5, geoSat: 'Met12' });
 });
+
+test('kľúč duplicít: surový riadok z NASA a uložený štíhly riadok sú tá istá detekcia (zaokrúhlenie ako slimFire)', async () => {
+  const { fireHistoryKey } = await import('./fireNews.js');
+  const raw = fire({ lat: 44.73555, lon: 37.80925 });
+  assert.equal(fireHistoryKey(raw), fireHistoryKey(slimFire(raw)));
+  const dir = tmp();
+  const store = createFireHistoryStore({ dir });
+  await store.append([raw]);
+  assert.equal(await createFireHistoryStore({ dir }).append([raw]), 0, 'po reštarte (kľúče zo súboru) sa surový riadok nezapíše znova');
+});

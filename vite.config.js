@@ -3234,6 +3234,8 @@ export function firmsProxy() {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
   const REFRESH_RETRY_MS = 5 * 60_000;
+  /** Prestávka v obnove, po ktorej sa história doplní z API (5 dní späť). */
+  const HISTORY_GAP_MS = 20 * 3600_000;
   let lastRefreshFailAt = 0;
   /** Limit jedného zdroja NASA (zdroje idú naraz, takže celá obnova trvá najviac toľko). */
   const SOURCE_TIMEOUT_MS = 120_000;
@@ -3277,13 +3279,22 @@ export function firmsProxy() {
   let placesCache = null;
 
   /** Prvý štart s prázdnym adresárom: naplní posledných 5 dní z API (3 dopyty, DAY_RANGE 5). */
-  async function backfillHistory(key) {
+  /**
+   * Naplnenie histórie z API (DAY_RANGE 5): pri prázdnom adresári a po prestávke dlhšej než
+   * HISTORY_GAP_MS (2026-10-10: od 7. 10. sa neobnovovalo — chýbali dni). Duplicity zápis vynechá.
+   */
+  async function backfillHistory(key, { force = false } = {}) {
     try {
-      if (!(await history.isEmpty())) return;
+      if (!force && !(await history.isEmpty())) return;
       let total = 0;
+      // Každý zdroj najviac 3 pokusy (2026-10-10: prvé naplnenie pri pomalej NASA uložilo len NOAA-20,
+      // dni 8.–9. 10. bez Suomi NPP, NOAA-21, MODIS a Landsatu — doplnené ručne).
       for (const source of SOURCES) {
-        try { total += await history.append(await fetchSource(key, source, 5)); }
-        catch (err) { console.warn(`[firms-history] backfill ${source} failed:`, err?.message || err); }
+        let done = false;
+        for (let attempt = 1; attempt <= 3 && !done; attempt += 1) {
+          try { total += await history.append(await fetchSource(key, source, 5)); done = true; }
+          catch (err) { console.warn(`[firms-history] backfill ${source} attempt ${attempt} failed:`, err?.message || err); }
+        }
       }
       console.log(`[firms-history] backfill: ${total} detections (5 days) → ${HISTORY_DIR}`);
     } catch (err) {
@@ -3535,9 +3546,49 @@ export function firmsProxy() {
     return statusInflight;
   }
 
+  /** Spustí obnovu na pozadí (single-flight; po zlyhaní 5 min pauza). @returns {?Promise} */
+  function startRefresh(key) {
+    if (!inflight && Date.now() - lastRefreshFailAt >= REFRESH_RETRY_MS) {
+      const prevAt = mem?.at ?? null;
+      inflight = refreshUpstream(key)
+        .then(async (fresh) => {
+          mem = fresh;
+          await writeDisk(fresh);
+          // História na disk (nové detekcie; geo samostatné tiež — nesú geo: true).
+          // Prvý štart: najprv naplnenie 5 dní (kým je adresár prázdny), potom bežný zápis.
+          const first = !historyReady;
+          historyReady = true;
+          const gap = !prevAt || fresh.at - prevAt > HISTORY_GAP_MS;
+          void (async () => {
+            if (first || gap) await backfillHistory(key, { force: gap });
+            const n = await history.append(fresh.fires);
+            if (n) console.log(`[firms-history] +${n} detections → ${HISTORY_DIR}`);
+          })().catch((err) => console.warn('[firms-history] write failed:', err?.message || err));
+          return fresh;
+        })
+        .catch((err) => {
+          lastRefreshFailAt = Date.now();
+          console.warn(`[firms-proxy] refresh failed (${err?.message || err}) — serving cache if any`);
+          return null;
+        })
+        .finally(() => { inflight = null; });
+    }
+    return inflight;
+  }
+
   return {
     name: 'firms-proxy',
     configureServer(server) {
+      // Obnova aj bez návštevníkov (2026-10-10): obnovovalo sa len pri dopyte /api/firms — od 7. 10.
+      // nikto vrstvu neotvoril, dáta ostali 3 dni staré (návštevník dostal 0 ohnísk, staršie než 24 h
+      // sa vyraďujú) a História požiarov a Sentinel-3 sa nedopĺňali. Ako záznam Histórie letov: každých
+      // TTL_MS na serveri s API (nie v proxy role vývojového servera — tá /api len preposiela).
+      if (mapKey() && !String(process.env.OKO_API_UPSTREAM || '').trim() && !process.env.FIRMS_NO_TIMER) {
+        const tick = () => { void readDiskOnce().then(() => { if (!mem || Date.now() - mem.at >= TTL_MS) startRefresh(mapKey()); }); };
+        const first = setTimeout(tick, 30_000); first.unref?.();
+        const timer = setInterval(tick, TTL_MS); timer.unref?.();
+        server.httpServer?.once?.('close', () => { clearTimeout(first); clearInterval(timer); });
+      }
       server.middlewares.use('/api/firms', async (req, res) => {
         const sendJson = (status, obj) => {
           if (res.headersSent) return;
@@ -3600,29 +3651,7 @@ export function firmsProxy() {
           // awaiting: the .finally() nulls `inflight` the moment it settles.
           // Po zlyhaní 5 min pauza (2026-10-07: NASA odpovedala 90 s na dopyt, každý klient by spúšťal
           // nový 3–6-minútový pokus).
-          if (!inflight && Date.now() - lastRefreshFailAt >= REFRESH_RETRY_MS) {
-            inflight = refreshUpstream(key)
-              .then(async (fresh) => {
-                mem = fresh;
-                await writeDisk(fresh);
-                // História na disk (nové detekcie; geo samostatné tiež — nesú geo: true).
-                // Prvý štart: najprv naplnenie 5 dní (kým je adresár prázdny), potom bežný zápis.
-                const first = !historyReady;
-                historyReady = true;
-                void (async () => {
-                  if (first) await backfillHistory(key);
-                  const n = await history.append(fresh.fires);
-                  if (n) console.log(`[firms-history] +${n} detections → ${HISTORY_DIR}`);
-                })().catch((err) => console.warn('[firms-history] write failed:', err?.message || err));
-                return fresh;
-              })
-              .catch((err) => {
-                lastRefreshFailAt = Date.now();
-                console.warn(`[firms-proxy] refresh failed (${err?.message || err}) — serving cache if any`);
-                return null;
-              })
-              .finally(() => { inflight = null; });
-          }
+          startRefresh(key);
           // Stale-while-revalidate (2026-10-07): keď je čo ukázať, odpoveď NEčaká na NASA — obnova beží
           // na pozadí a klient ju dostane pri ďalšom dopyte (10 min). Naživo: NASA 90 s na jeden zdroj,
           // odkaz so zapnutými požiarmi držal preloader minúty (štart čaká na vrstvy z odkazu).

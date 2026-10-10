@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oko-fires-route-'));
 process.env.FIRE_HISTORY_DIR = dir;
+process.env.FIRMS_NO_TIMER = '1'; // obnovu na pozadí testuje samostatný test s podvrhnutými časovačmi
 const { firmsProxy } = await import('../../vite.config.js');
 const { createFireHistoryStore } = await import('./fireHistoryStore.js');
 
@@ -90,7 +91,8 @@ test('obnova: zdroje NASA naraz; zlyhaný zdroj dostane posledné úspešné ohn
     const h = handlerOf(firmsProxy());
     let j = JSON.parse((await call(h, '/')).body);
     assert.equal(j.count, 1, 'prvá obnova: VIIRS SNPP prišiel');
-    assert.ok(Math.max(...starts) - Math.min(...starts) < 50, 'všetky zdroje sa pýtali naraz, nie za sebou');
+    const first6 = starts.slice(0, 6); // 5 zdrojov + GOES; potom ide naplnenie histórie (prvý štart)
+    assert.ok(Math.max(...first6) - Math.min(...first6) < 50, 'všetky zdroje sa pýtali naraz, nie za sebou');
     const snpp = j.sources.find((s) => s.source === 'VIIRS_SNPP_NRT');
     assert.equal(snpp.ok, true);
     // o 31 min: cache zastaraná → vráti sa hneď, obnova na pozadí; NASA celá dole
@@ -118,4 +120,33 @@ test('stav vrstvy: chýbajúce skupiny družíc (skupina chýba až keď zlyhaj�
   ]), [{ group: 'VIIRS', reused: true }, { group: 'MODIS', reused: false }, { group: 'Meteosat/GOES', reused: false }]);
   assert.deepEqual(downSourceGroups([{ source: 'VIIRS_NOAA20_NRT', ok: false }, { source: 'VIIRS_SNPP_NRT', ok: true }]), []);
   assert.deepEqual(downSourceGroups(null), []);
+});
+
+test('obnova aj bez návštevníkov: časovač na serveri s API spustí obnovu bez dopytu; proxy rola a bez kľúča nie', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oko-firms-timer-'));
+  const realFetch = globalThis.fetch; const realSI = globalThis.setInterval; const realST = globalThis.setTimeout;
+  const timers = [];
+  globalThis.setInterval = (fn, ms) => { timers.push({ fn, ms, kind: 'interval' }); return { unref() {} }; };
+  globalThis.setTimeout = (fn, ms, ...rest) => { if (ms === 30_000) { timers.push({ fn, ms, kind: 'timeout' }); return { unref() {} }; } return realST(fn, ms, ...rest); };
+  let calls = 0;
+  globalThis.fetch = () => { calls += 1; return Promise.resolve(new Response('Invalid', { status: 500 })); };
+  process.env.FIRMS_CACHE_DIR = cacheDir; process.env.FIRMS_MAP_KEY = 'k'; delete process.env.FIRMS_NO_TIMER;
+  try {
+    handlerOf(firmsProxy());
+    assert.deepEqual(timers.map((t) => [t.kind, t.ms]), [['timeout', 30_000], ['interval', 30 * 60_000]]);
+    timers[0].fn();
+    await new Promise((r) => realST(r, 50));
+    assert.ok(calls >= 5, `obnova bez dopytu sa pýtala NASA (${calls})`);
+    timers.length = 0;
+    process.env.OKO_API_UPSTREAM = 'http://localhost:4175';
+    handlerOf(firmsProxy());
+    assert.equal(timers.length, 0, 'vývojový server v proxy role nepýta NASA');
+    delete process.env.OKO_API_UPSTREAM; delete process.env.FIRMS_MAP_KEY;
+    handlerOf(firmsProxy());
+    assert.equal(timers.length, 0, 'bez kľúča nič');
+  } finally {
+    globalThis.fetch = realFetch; globalThis.setInterval = realSI; globalThis.setTimeout = realST;
+    delete process.env.FIRMS_CACHE_DIR; delete process.env.FIRMS_MAP_KEY; delete process.env.OKO_API_UPSTREAM;
+    process.env.FIRMS_NO_TIMER = '1';
+  }
 });
