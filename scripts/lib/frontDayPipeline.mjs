@@ -28,11 +28,13 @@ import { composeV2, ensureSfx, mixSfx, renderMotionTrack, speedVoice } from './f
 /** Tempo hlasu vo videu v2. */
 export const V2_VOICE_TEMPO = 1.1;
 import { clipUsable, downloadClip, downloadImage, overlayClips, photoMontageVideo, photoZoomVideo, probeClip, renderClipSegment } from './frontDayClipRender.mjs';
-import { aftermathClip, aftermathPreviewUrl, postPhotos } from '../../src/data/frontDayAftermath.js';
+import { aftermathClip, aftermathPreviewUrl, postPhotos, postVideos } from '../../src/data/frontDayAftermath.js';
 
 /** Akčné zábery vo videu (vlastník: „max 2–3 krátke"); kandidátov z dát je viac, nepoužiteľné vypadnú. */
 export /** Fotky záchranárov v jednom zábere (strih ~1,2 s). */
 const AFTERMATH_PHOTOS = 3;
+/** Kratšie video záchranárov nestačí na záber (strih ~3 s). */
+const AFTERMATH_VIDEO_MIN_S = 2.5;
 const FRONT_DAY_CLIPS = 2;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -153,13 +155,30 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
     try {
       const fetchImpl = tools.fetchImpl || globalThis.fetch;
       const res = await fetchImpl(aftermathPreviewUrl(model.aftermath), { headers: { 'user-agent': 'Mozilla/5.0 (OKO)' }, signal: AbortSignal.timeout(30_000) });
-      const urls = res.ok ? postPhotos(await res.text(), model.aftermath) : [];
+      const html = res.ok ? await res.text() : '';
+      // Video má prednosť (vlastník 10. 10.: „povoľ aj videá"); na výšku je pre Reels v poriadku (záchranári,
+      // nie rozhovor) — záber sa oreže na 9:16. Nestiahne sa → fotky.
+      let video = null;
+      for (const [k, url] of postVideos(html, model.aftermath).entries()) {
+        const src = path.join(workDir, `zachranari-video-${k}.mp4`);
+        try {
+          await downloadClip(url, src, { fetchImpl });
+          const probe = await probeClip(src, { ffmpeg });
+          if (probe.total >= AFTERMATH_VIDEO_MIN_S) { video = { src, probe }; break; }
+          onProgress('aftermath-skip', { k, error: `video ${probe.total} s` });
+        } catch (e) { onProgress('aftermath-skip', { k, error: e.message }); }
+      }
       const images = [];
-      for (const [k, url] of urls.entries()) {
+      for (const [k, url] of (video ? [] : postPhotos(html, model.aftermath)).entries()) {
         if (images.length >= AFTERMATH_PHOTOS) break;
         try { images.push(await downloadImage(url, path.join(workDir, `zachranari-${k}.jpg`), { fetchImpl })); } catch (e) { onProgress('aftermath-skip', { k, error: e.message }); }
       }
-      if (images.length) {
+      if (video) {
+        const clip = aftermathClip(model.aftermath, { kind: 'video' });
+        clipSources[model.clips.length] = { clip, ...video, aftermathVideo: true };
+        model.clips.push(clip);
+        onProgress('aftermath', { url: model.aftermath.url, video: Math.round(video.probe.total) });
+      } else if (images.length) {
         const clip = aftermathClip(model.aftermath);
         clipSources[model.clips.length] = { clip, images };
         model.clips.push(clip);
@@ -220,7 +239,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
       source.src = await photoZoomVideo({ ...source.photo, image: path.resolve(source.photo.image) }, { out: path.join(workDir, `fotka-${shot.clipIndex}.mp4`), dur: shot.dur + 0.2, ffmpeg });
       source.probe = { total: shot.dur + 0.2, frames: [] };
     }
-    const seg = await renderClipSegment({ src: source.src, out: path.join(workDir, `zaber-${shot.clipIndex}.mp4`), dur: shot.dur, clip: source.clip, day: model.day, ffmpeg, probe: source.probe, layout: source.images || (v2 && !source.photo) ? 'full' : 'box' });
+    const seg = await renderClipSegment({ src: source.src, out: path.join(workDir, `zaber-${shot.clipIndex}.mp4`), dur: shot.dur, clip: source.clip, day: model.day, ffmpeg, probe: source.probe, layout: source.images || source.aftermathVideo || (v2 && !source.photo) ? 'full' : 'box' });
     segments.push({ file: seg.file, start: shot.start, dur: shot.dur });
     onProgress('clip', { i: shot.clipIndex, window: seg.start, cuts: seg.cuts });
   }

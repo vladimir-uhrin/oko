@@ -16,6 +16,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const require = createRequire(path.join(ROOT, 'package.json'));
 /** Strop sťahovania videa (B) — ako Štúdio pri záberoch. */
 export const CLIP_MAX_BYTES = 150 * 1024 * 1024;
+/** Video na šírku užšie ako toto ide vo v2 na celú šírku nad rozmazaným pozadím, nie orezom na 9:16. */
+export const FIT_BELOW_W = 960;
+/** Malé video na šírku → na celú šírku nad rozmazaným pozadím (inak orez na 9:16). Pure. */
+export const fitWide = (probe) => probe?.width > probe?.height && probe.width < FIT_BELOW_W;
 /** Úvod videí ArmyInform býva titulková karta / logo — okno začína najskôr tu (s). */
 export const CLIP_SKIP_START_S = 2.5;
 
@@ -180,8 +184,16 @@ export async function renderClipSegment({ src, out, dur, clip, day, ffmpeg = 'ff
     // = dva najdynamickejšie úseky za sebou s ostrým strihom (Reels: strih každé ~1,5 s).
     const { w: W, h: H } = FRONT_DAY_FORMAT;
     const parts = Number.isFinite(clip?.fixedStart) ? [{ start: win.start, dur }] : clipCuts(frames, total, dur);
+    // Malé video na šírku (záchranári ДСНС z Telegramu, 640×352): orez na 9:16 by ho zväčšil ~5× → na celú
+    // šírku nad vlastnou rozmazanou kópiou, ako fotky (photoMontageVideo).
+    const fit = fitWide(probe);
     const chain = (k, d) => {
       const n = Math.max(1, Math.round(d * fps));
+      if (fit) {
+        return `[${k}:v]fps=${fps},split=2[a${k}][b${k}];[a${k}]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},gblur=sigma=30,eq=brightness=-0.28[bg${k}];`
+          + `[b${k}]scale=w='trunc(${W}*(1+0.07*n/${n})/2)*2':h=-2:eval=frame,eq=contrast=1.06:saturation=1.1[fg${k}];`
+          + `[bg${k}][fg${k}]overlay=x=(W-w)/2:y=(H-h)/2-60,setsar=1,format=yuv420p[p${k}]`;
+      }
       return `[${k}:v]fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},`
         + `scale=w='trunc(${W}*(1+0.08*n/${n})/2)*2':h=-2:eval=frame,crop=${W}:${H},eq=contrast=1.06:saturation=1.1,setsar=1,format=yuv420p[p${k}]`;
     };

@@ -106,3 +106,23 @@ test('grafika záberu: štítok mesta a podpis ДСНС namiesto ArmyInform; boj
   const army = at({ ...strikeModel([{ captionSk: 'tank' }]) });
   assert.ok(army.includes('ZÁBERY · ARMYINFORM') && army.includes('Ministerstvo obrany Ukrajiny · CC BY 4.0'));
 });
+
+test('videá (vlastník 10. 10.: „povoľ aj videá"): čerstvý odkaz s tokenom z náhľadu, podpis „Video", okno pohybu; príspevok len s videom prejde', async () => {
+  const { postVideos } = await import('./frontDayAftermath.js');
+  const block = (id, videos) => `<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message" data-post="dsns_telegram/${id}">`
+    + videos.map((v) => `<a class="tgme_widget_message_video_player"><video src="${v}" class="tgme_widget_message_video js-message_video" width="100%"></video></a>`).join('')
+    + '</div></div>';
+  const html = block(77029, ['https://cdn4.telesco.pe/file/other.mp4?token=x']) + block(77030, ['https://cdn4.telesco.pe/file/f609.mp4?token=YR-m&amp;b=1']);
+  assert.deepEqual(postVideos(html, { channel: 'dsns_telegram', postId: 77030 }), ['https://cdn4.telesco.pe/file/f609.mp4?token=YR-m&b=1']);
+  assert.deepEqual(postVideos(html, { channel: 'dsns_telegram', postId: 5 }), []);
+  const a = { url: 'https://t.me/dsns_telegram/77030', label: 'ДСНС України', place: { sk: 'Ivano-Frankivsk' } };
+  const v = aftermathClip(a, { kind: 'video' });
+  assert.equal(v.credit, 'Video: ДСНС України · Telegram');
+  assert.equal(v.sources[0], 'Video: ДСНС України (Telegram)');
+  assert.ok(!('fixedStart' in v), 'video vyberá okno pohybu');
+  assert.equal(aftermathClip(a).fixedStart, 0, 'fotky od začiatku');
+  const onlyVideo = { ...post(77030, '#Запоріжжя: внаслідок удару загинули люди', { photos: 0 }), videos: 1 };
+  const picked = pickAftermath([onlyVideo], { now, places: [zap] });
+  assert.deepEqual([picked?.postId, picked?.videos, picked?.photos], [77030, 1, 0]);
+  assert.equal(pickAftermath([{ ...onlyVideo, videos: 0 }], { now, places: [zap] }), null, 'bez fotiek aj videa nič');
+});

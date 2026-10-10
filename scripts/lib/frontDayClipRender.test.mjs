@@ -90,3 +90,11 @@ test('dlhší akčný záber = dva najdynamickejšie úseky v čase za sebou; kr
   assert.ok(parts.some((p) => p.start >= 7 && p.start <= 9) && parts.some((p) => p.start >= 29 && p.start <= 31), JSON.stringify(parts));
   assert.equal(clipCuts(frames, 40, 2).length, 1, 'krátky záber jeden úsek');
 });
+
+test('malé video na šírku (ДСНС z Telegramu 640×352) ide na celú šírku nad rozmazaným pozadím; HD a na výšku orezom', async () => {
+  const { fitWide } = await import('./frontDayClipRender.mjs');
+  assert.equal(fitWide({ width: 640, height: 352 }), true);
+  assert.equal(fitWide({ width: 1280, height: 720 }), false, 'ArmyInform HD orezom na celú obrazovku');
+  assert.equal(fitWide({ width: 480, height: 854 }), false, 'na výšku sa 9:16 oreže bez zväčšenia');
+  assert.equal(fitWide(null), false);
+});

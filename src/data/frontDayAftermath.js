@@ -1,9 +1,10 @@
 // Fotky záchranárov z miesta ruského útoku pre denné video (2026-10-10, vlastník: „viac videí a obrázkov,
 // nielen z mojej web stránky"). Zdroj: oficiálny kanál Štátnej služby pre mimoriadne situácie Ukrajiny
 // (t.me/s/dsns_telegram) — príspevok zo dňa útoku, ktorý menuje to isté mesto ako správy o obetiach.
-// Licenciu si nenárokujeme (DATA_SOURCES.md): vždy meno kanála a odkaz na príspevok. Len fotky — videá
-// z Telegramu sa znova nenahrávajú. Odkazy na fotky z CDN po čase vypršia (404), preto sa čerstvé berú
-// z náhľadu príspevku až pri výrobe videa (postPhotos).
+// Licenciu si nenárokujeme (DATA_SOURCES.md): vždy meno kanála a odkaz na príspevok. Video príspevku
+// má prednosť pred fotkami (vlastník 10. 10.: „povoľ aj videá"). Odkazy na fotky z CDN po čase vypršia (404)
+// a videá majú krátko platný token, preto sa čerstvé berú z náhľadu príspevku až pri výrobe videa
+// (postPhotos, postVideos) a nikam sa neukladajú.
 import { locateUkText, parseTelegramPreview } from './ukraineMedia.js';
 
 export const AFTERMATH_CHANNELS = Object.freeze({ dsns_telegram: 'ДСНС України' });
@@ -36,7 +37,7 @@ export function pickAftermath(media, { now = Date.now(), places = [], windowMs =
   const posts = [];
   for (const item of media || []) {
     const post = aftermathPost(item?.url);
-    if (!post || (item.photos?.length || 0) < AFTERMATH_MIN_PHOTOS) continue;
+    if (!post || ((item.photos?.length || 0) < AFTERMATH_MIN_PHOTOS && !(item.videos > 0))) continue;
     if (!Number.isFinite(item.publishedAt) || item.publishedAt > now + 60_000 || now - item.publishedAt > windowMs) continue;
     if (!ATTACK_UK.test(item.text || '')) continue;
     const loc = locateUkText(item.text);
@@ -50,7 +51,7 @@ export function pickAftermath(media, { now = Date.now(), places = [], windowMs =
     if (!near.length) continue;
     const { item, post } = near[0];
     return { url: item.url, channel: post.channel, label: AFTERMATH_CHANNELS[post.channel], postId: post.postId,
-      place: { en: place.en, sk: place.sk }, photos: item.photos.length, publishedAt: item.publishedAt };
+      place: { en: place.en, sk: place.sk }, photos: item.photos?.length || 0, videos: item.videos || 0, publishedAt: item.publishedAt };
   }
   return null;
 }
@@ -61,16 +62,32 @@ export function postPhotos(html, { channel, postId }) {
   return post ? post.photos : [];
 }
 
+/**
+ * Čerstvé odkazy na videá príspevku (`<video src>` s krátko platným tokenom) — len na stiahnutie pri výrobe,
+ * nikdy do archívu. Veľké video náhľad nedá („Media is too big"), takých je časť. Pure.
+ */
+export function postVideos(html, { channel, postId }) {
+  const blocks = String(html ?? '').split(/<div class="tgme_widget_message_wrap/).slice(1);
+  const block = blocks.find((b) => /data-post="([^"]+)"/.exec(b)?.[1] === `${channel}/${postId}`);
+  if (!block) return [];
+  return [...block.matchAll(/<video[^>]*\ssrc="(https:\/\/[^"]+)"/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+}
+
 export const aftermathPreviewUrl = ({ channel, postId }) => `https://t.me/s/${encodeURIComponent(channel)}/${postId}`;
 
-/** Záber do videa: štítok s mestom, podpis kanála (bez nároku na licenciu), odkaz do príspevku. Pure. */
-export function aftermathClip(a) {
+/**
+ * Záber do videa: štítok s mestom, podpis kanála (bez nároku na licenciu), odkaz do príspevku. Video
+ * (`kind: 'video'`, vlastník 10. 10.: „povoľ aj videá") vyberá okno pohybu; fotky idú od začiatku. Pure.
+ */
+export function aftermathClip(a, { kind = 'photo' } = {}) {
   const place = a.place?.sk || '';
+  const what = kind === 'video' ? 'Video' : 'Foto';
   return {
     aftermath: true, url: a.url, placeName: place,
     captionSk: 'Záchranári na mieste ruského útoku',
     kicker: `${place ? `${place.toUpperCase()} · ` : ''}ZÁCHRANÁRI`,
-    credit: `Foto: ${a.label} · Telegram`,
-    sourceLines: [], sources: [`Foto: ${a.label} (Telegram)`], inset: false, fixedStart: 0, keepCaptions: true,
+    credit: `${what}: ${a.label} · Telegram`,
+    sourceLines: [], sources: [`${what}: ${a.label} (Telegram)`], inset: false, keepCaptions: true,
+    ...(kind === 'video' ? {} : { fixedStart: 0 }),
   };
 }
