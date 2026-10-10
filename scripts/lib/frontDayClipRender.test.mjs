@@ -78,3 +78,15 @@ test('záber na výšku (rozhovor, 464×824) vypadne, na šírku ostane', () => 
   assert.equal(clipUsable({ width: 1280, height: 720 }), true);
   assert.equal(clipUsable({ width: 0, height: 0 }), false, 'neznámy rozmer');
 });
+
+test('dlhší akčný záber = dva najdynamickejšie úseky v čase za sebou; krátky = jeden', async () => {
+  const { clipCuts } = await import('./frontDayClipRender.mjs');
+  const fr = (total, spans) => { const out = []; for (let t = 0; t < total; t += 0.2) { const s = spans.find(([a, b]) => t >= a && t < b); out.push([Math.round(t * 10) / 10, s ? s[2] : 0.01, 2, 90]); } return out; };
+  const frames = fr(40, [[8, 10, 0.05], [30, 32, 0.045]]);
+  const parts = clipCuts(frames, 40, 3.6);
+  assert.equal(parts.length, 2);
+  assert.ok(parts[0].start < parts[1].start, 'v čase za sebou');
+  assert.ok(parts.every((p) => Math.abs(p.dur - 1.8) < 1e-9));
+  assert.ok(parts.some((p) => p.start >= 7 && p.start <= 9) && parts.some((p) => p.start >= 29 && p.start <= 31), JSON.stringify(parts));
+  assert.equal(clipCuts(frames, 40, 2).length, 1, 'krátky záber jeden úsek');
+});

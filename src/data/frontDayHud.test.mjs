@@ -92,3 +92,14 @@ test('háčik a bublina zmeny sa zmestia: dlhý riadok menším písmom, bublina
   assert.ok(calloutWidth(sub) >= sub.length * 9.4 + 32, 'popis sa zmestí do bubliny');
   assert.equal(calloutWidth('krátke'), 250);
 });
+
+test('v2: vlna okolo miesta zmeny a útoku; SVG je vyvážené (rovnako <g> ako </g>)', () => {
+  const plan = frontDayPlan({ story: 'ru' }, [{ id: 'hook', shot: 'opening' }, { id: 'top', shot: 'dir:huliaipole' }, { id: 'portal', shot: 'closing' }],
+    { hook: { lead: 0.1, speechEnd: 3 }, top: { lead: 0.1, speechEnd: 4 }, portal: { lead: 0.1, speechEnd: 3 } });
+  const st = plan.at(Math.round((plan.shots[1].start + 2.5) * 30));
+  const svg = buildFrontDayHudSvg(model, st, { minimal: true, anchors: { 'chg:huliaipole:ru': { x: 500, y: 1000 } } });
+  assert.ok((svg.match(/<circle/g) || []).length >= 4, 'vlna = ďalšie kruhy');
+  assert.equal((svg.match(/<g[ >]/g) || []).length, (svg.match(/<\/g>/g) || []).length, 'vyvážené skupiny');
+  const v1 = buildFrontDayHudSvg(model, st, { anchors: { 'chg:huliaipole:ru': { x: 500, y: 1000 } } });
+  assert.equal((v1.match(/<g[ >]/g) || []).length, (v1.match(/<\/g>/g) || []).length);
+});

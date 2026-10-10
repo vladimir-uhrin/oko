@@ -165,7 +165,8 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
     out.push(`<text x="${W / 2}" y="975" text-anchor="middle" font-family="${MONO}" font-size="96" font-weight="700" fill="${ACCENT}">${esc(VIDEO_BRAND.domain)}</text>`);
     out.push(creditLine(W / 2, 1060, 20, 'middle'));
     const src = model?.sources || [`Strety a údery: Generálny štáb Ukrajiny (údaje jednej strany)`, `Mapa a výpočet zmeny: ${MAP_SOURCE.site} · © OpenStreetMap`, 'Zábery: ArmyInform, Ministerstvo obrany Ukrajiny (CC BY 4.0)'];
-    src.slice(0, 3).forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));
+    // Hudba s licenciou CC BY musí mať autora aj vo videu (model.musicCredit z knižnice skladieb).
+    [...src.slice(0, 3), ...(model?.musicCredit ? [model.musicCredit] : [])].forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));
     out.push('</g></svg>');
     return out.join('');
   }

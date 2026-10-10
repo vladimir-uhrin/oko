@@ -43,6 +43,17 @@ const STRIKE_LABEL = {
   missileStrikes: ['raketový úder', 'raketové údery', 'raketových úderov'],
 };
 
+/**
+ * Rozbiehajúca sa vlna okolo miesta (v2: oko vie, kam sa pozrieť): dva kruhy každých 1,2 s z polomeru r0 na r0+90 px,
+ * miznú. Pure.
+ */
+export function shockwave(x, y, color, t, r0 = 24) {
+  return [0, 0.6].map((off) => {
+    const ph = (((t + off) % 1.2) + 1.2) % 1.2 / 1.2;
+    return `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r0 + 90 * ph)}" fill="none" stroke="${color}" stroke-width="${f1(5 * (1 - ph) + 1)}" opacity="${f1(0.85 * (1 - ph))}"/>`;
+  }).join('');
+}
+
 /** Najviac toľko miest útoku na karte aj na mape. */
 export const HIT_MAX = 3;
 
@@ -251,7 +262,9 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
         const right = it.p.x + 46 + bw <= W - DAY_SAFE.right / 2;
         const bx = right ? it.p.x + 46 : it.p.x - 46 - bw;
         const by = Math.min(DAY_LABEL_FLOOR_Y - bh, Math.max(y0 + 200, it.p.y - bh / 2));
-        out.push(`<g opacity="${f1(appear)}"><circle cx="${f1(it.p.x)}" cy="${f1(it.p.y)}" r="${f1(r)}" fill="none" stroke="#000" stroke-opacity="0.5" stroke-width="7"/><circle cx="${f1(it.p.x)}" cy="${f1(it.p.y)}" r="${f1(r)}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="3.4"/>`);
+        if (minimal) out.push(`<g opacity="${f1(appear)}">${shockwave(it.p.x, it.p.y, color, fs.localS, 30)}</g>`);
+        out.push(`<g opacity="${f1(appear)}"><circle cx="${f1(it.p.x)}" cy="${f1(it.p.y)}" r="${f1(r)}" fill="none" stroke="#000" stroke-opacity="0.5" stroke-width="7"/>`);
+        out.push(`<circle cx="${f1(it.p.x)}" cy="${f1(it.p.y)}" r="${f1(r)}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="3.4"/>`);
         out.push(`<rect x="${f1(bx)}" y="${f1(by)}" width="${bw}" height="${bh}" rx="12" fill="rgba(5,14,22,0.93)" stroke="${color}" stroke-width="2"/>`);
         out.push(`<text x="${f1(bx + 16)}" y="${f1(by + 34)}" font-family="${MONO}" font-size="31" font-weight="700" fill="${color}">+${group(it.km2)}${NBSP}km²</text>`);
         out.push(`<text x="${f1(bx + 16)}" y="${f1(by + 58)}" font-size="17" fill="rgba(232,234,237,0.9)">${esc(sub)}</text></g>`);
@@ -270,7 +283,7 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
         const a = fade01((fs.localS - 0.4 - i * 0.25) / 0.3);
         if (a <= 0) return;
         const r = 16 + 5 * wave(i * 0.9); const b = boxes[k];
-        out.push(`<g opacity="${f1(a)}"><circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(r + 12)}" fill="#ff3b3b" fill-opacity="0.2"/>`
+        out.push(`<g opacity="${f1(a)}">${minimal ? shockwave(p.x, p.y, '#ff3b3b', fs.localS + i * 0.3, 20) : ''}<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(r + 12)}" fill="#ff3b3b" fill-opacity="0.2"/>`
           + `<circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="${f1(r)}" fill="none" stroke="#ffffff" stroke-width="3"/><circle cx="${f1(p.x)}" cy="${f1(p.y)}" r="6" fill="#ff3b3b" stroke="#ffffff" stroke-width="2"/>`
           + (Math.abs(b.y + 22 - p.y) > 4 ? `<line x1="${f1(p.x)}" y1="${f1(p.y)}" x2="${f1(b.x < p.x ? b.x + b.w : b.x)}" y2="${f1(b.y + 22)}" stroke="#ff6b78" stroke-width="2"/>` : '')
           + `<rect x="${f1(b.x)}" y="${f1(b.y)}" width="${b.w}" height="44" rx="10" fill="rgba(5,14,22,0.92)" stroke="#ff6b78" stroke-width="2"/>`

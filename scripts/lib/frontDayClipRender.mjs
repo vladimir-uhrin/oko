@@ -116,6 +116,22 @@ export function contentEndOf(frames, total) {
   return total;
 }
 
+/**
+ * Úseky akčného záberu: od 2,8 s dva najdynamickejšie neprekrývajúce sa úseky (polovica dĺžky každý, aspoň 1 s
+ * od seba), zoradené v čase; kratší záber = jeden úsek. Pure.
+ * @returns {Array<{start: number, dur: number}>}
+ */
+export function clipCuts(frames, total, dur, { minSplitS = 2.8 } = {}) {
+  if (dur < minSplitS) { const w = bestWindow(frames, total, dur); return [{ start: w.start, dur: w.dur }]; }
+  const half = dur / 2;
+  const a = bestWindow(frames, total, half);
+  const rest = frames.map(([t, ...v]) => (t > a.start - half - 1 && t < a.start + half + 1 ? [t, 0, ...v.slice(1)] : [t, ...v]));
+  const b = bestWindow(rest, total, half);
+  const far = Math.abs(b.start - a.start) >= half + 1;
+  if (!far) return [{ start: a.start, dur }].map((p) => ({ ...p, dur: Math.min(dur, Math.max(0.5, total - p.start)) }));
+  return [a, b].sort((x, y) => x.start - y.start).map((p) => ({ start: p.start, dur: half }));
+}
+
 /** Záber na výšku (rozhovor, sociálny formát) do akčného okna na šírku nepatrí — vypadne. Pure. */
 export const clipUsable = ({ width, height }) => Number(width) > 0 && Number(height) > 0 && width >= height;
 
@@ -160,15 +176,21 @@ export async function renderClipSegment({ src, out, dur, clip, day, ffmpeg = 'ff
   const cuts = frames.filter(([, v]) => v > CUT_SCORE);
   if (layout === 'full') {
     // v2 (2026-10-10): záber na celú obrazovku (stred, orez na 9:16) s pomalým priblížením, bez rámu — popis a zdroj
-    // pridá grafická vrstva. Okienko 1080×640 nad rozmazaným pozadím pôsobilo slabo aj pri výbuchu.
+    // pridá grafická vrstva. Okienko 1080×640 nad rozmazaným pozadím pôsobilo slabo aj pri výbuchu. Dlhší záber
+    // = dva najdynamickejšie úseky za sebou s ostrým strihom (Reels: strih každé ~1,5 s).
     const { w: W, h: H } = FRONT_DAY_FORMAT;
-    const n = Math.max(1, Math.round(dur * fps));
-    const filter = `[0:v]fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},`
-      + `scale=w='trunc(${W}*(1+0.08*n/${n})/2)*2':h=-2:eval=frame,crop=${W}:${H},eq=contrast=1.06:saturation=1.1,format=yuv420p[v]`;
-    const r = await runCapture(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(win.start), '-t', String(dur), '-i', src,
+    const parts = Number.isFinite(clip?.fixedStart) ? [{ start: win.start, dur }] : clipCuts(frames, total, dur);
+    const chain = (k, d) => {
+      const n = Math.max(1, Math.round(d * fps));
+      return `[${k}:v]fps=${fps},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},`
+        + `scale=w='trunc(${W}*(1+0.08*n/${n})/2)*2':h=-2:eval=frame,crop=${W}:${H},eq=contrast=1.06:saturation=1.1,setsar=1,format=yuv420p[p${k}]`;
+    };
+    const inputs = parts.flatMap((p) => ['-ss', String(p.start), '-t', String(p.dur), '-i', src]);
+    const filter = `${parts.map((p, k) => chain(k, p.dur)).join(';')};${parts.map((_, k) => `[p${k}]`).join('')}concat=n=${parts.length}:v=1:a=0[v]`;
+    const r = await runCapture(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', ...inputs,
       '-filter_complex', filter, '-map', '[v]', '-an', '-t', String(dur), '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', out], 10 * 60_000);
     if (r.code !== 0 || !fs.existsSync(out)) throw Object.assign(new Error(`záber: ffmpeg ${r.err.trim().slice(-300)}`), { code: 'CLIP_RENDER' });
-    return { file: out, start: win.start, dur, cuts: cuts.length };
+    return { file: out, start: parts[0].start, dur, cuts: cuts.length, parts };
   }
   const logoSvg = fs.readFileSync(path.join(ROOT, 'public', 'logo.svg'), 'utf8');
   const { inlineLogoMarkup } = await import('../../src/data/eventVideoHud.js');

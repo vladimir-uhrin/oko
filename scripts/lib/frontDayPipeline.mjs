@@ -211,6 +211,9 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   const audioFile = path.join(workDir, 'zvuk.wav');
   // Knižnica skladieb → jedna podľa nálady príbehu, striedanie po dňoch.
   const track = music?.library ? pickTrack(music.library, { story, day: model.day }) : music;
+  // Skladba s licenciou CC BY: autor na koncovej karte (grafika v2) aj v texte príspevku.
+  const musicCredit = track && /CC BY/i.test(String(track.license || '')) ? track.credit || `Hudba: ${track.author}, ${track.license}` : null;
+  if (musicCredit) model.musicCredit = musicCredit;
   if (track) onProgress('music', { id: track.id || null });
   mixAudio({ placement: plan.placement, voiceFiles, totalS: plan.durationS, music: track, out: audioFile, ffmpeg });
 
@@ -241,7 +244,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
     await burnCaptions({ cues, outroWindow: null, rawVideo, audioFile, out: burnedFile, workDir, ffmpeg, format: FRONT_DAY_FORMAT, style: DAY_CAPTION_STYLE });
   }
   const postFile = path.join(workDir, `${name}.txt`);
-  fs.writeFileSync(postFile, scenario ? scenario.post : frontDayPostText(model), 'utf8');
+  fs.writeFileSync(postFile, `${scenario ? scenario.post : frontDayPostText(model)}${musicCredit ? `\n\n${musicCredit}` : ''}`, 'utf8');
   onProgress('done');
   return { model, lines, hook, plan: { durationS: plan.durationS, shots: plan.shots, placement: plan.placement }, review, cues, files: { burned: burnedFile, clean: cleanFile, srt: srtFile, post: postFile, audio: audioFile, raw: rawVideo } };
 }
