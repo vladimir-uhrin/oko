@@ -25,6 +25,8 @@ import {
 } from './vesselDestination.js';
 import { HISTORY_LINE_STYLE, createVesselVoyageLine, historyLinePositionsDeg } from './vesselVoyageLine.js';
 import { seaRoutePositionsDeg, seaRouteSync } from './seaRoute.js';
+import { splitShipRuns } from './shipHistory.js';
+import { greatCircleKm } from './vesselDestination.js';
 import { screenProjectedRotation, cameraPoseSignature, horizonOccluder } from './iconOrientation.js';
 import { AIS_FRESH_MS, AIS_RETAIN_MS, aisRegionKey } from './aisCoverage.js';
 import { airIconTier } from './airIconLod.js';
@@ -187,7 +189,12 @@ const VESSEL_SURFACE_WARM_ALT_M = 150_000;
 /** Najviac lodí v zábere, ktorým sa na jedno načítanie dotiahne povrch (bunky ~111 m sa zlúčia). */
 const VESSEL_SURFACE_WARM_MAX = 800;
 /** Combined cap on trail vertices (server backfill + live accumulation). */
-const TRAIL_MAX_POINTS = 800;
+// 2026-10-11 (bod 1): stopa nesie aj históriu z disku (30 dní, ~144 bodov/deň zriedene) — 3 000 bodov.
+const TRAIL_MAX_POINTS = 3000;
+/** Medzera v stope dlhšia než toto (s) = mimo dosahu prijímačov; kreslí sa prerušovane. */
+const TRAIL_GAP_SEC = 2 * 3600;
+/** Graf rýchlosti dostane z histórie najviac toľko hodín dozadu. */
+const CHART_BACKFILL_MS = 48 * 3600_000;
 /** Minimum movement (m) before a reconcile refresh appends a new trail point. */
 const TRAIL_MIN_MOVE_M = 25;
 
@@ -1123,6 +1130,8 @@ const state = {
   trailMmsi: null,
   /** @type {number} Monotonic token — invalidates in-flight backfill responses */
   trailBackfillToken: 0,
+  trailSamples: [],
+  trailGapLines: [],
   /** Body grafov karty (čas, poloha, rýchlosť) — trasa registra + živé fixy vybranej lode. */
   chartPoints: [],
   /** @type {object|null} Index prístavov (World Port Index) pre cieľ plavby. */
@@ -2805,29 +2814,37 @@ async function backfillVesselTrail(mmsi, token) {
   const fetchJson = (url) => fetch(url, { signal: AbortSignal.timeout(20000) })
     .then((response) => (response.ok ? response.json() : null))
     .catch(() => null);
-  const [own, register] = await Promise.all([
+  // 2026-10-11 (bod 1, vlastník: „trasa lode od prístavu k prístavu v jednom kuse"): + história
+  // z disku za 30 dní (vlastný záznam, zdroje navyše, DMA) — jedna stopa; medzery mimo dosahu
+  // prerušovane (pravidlo 2: priamka cez medzeru nie je meraná poloha).
+  const [own, register, disk] = await Promise.all([
     fetchJson('/api/ais-live/track?mmsi=' + encodeURIComponent(mmsi)),
     fetchJson('/api/vessel-info/track?mmsi=' + encodeURIComponent(mmsi)),
+    fetchJson('/api/ais-live/history?mmsi=' + encodeURIComponent(mmsi) + '&days=30'),
   ]);
-  const samples = mergeVesselTrackSamples(own?.samples, register?.points);
+  const olderPts = olderTrackPoints(register?.points, disk?.samples);
+  const timed = mergeVesselTrackTimed(own?.samples, olderPts);
   if (token === state.trailBackfillToken && state.trailMmsi === mmsi) {
-    const reg = (Array.isArray(register?.points) ? register.points : []).filter((p) => Number.isFinite(p?.t));
     const firstLive = state.chartPoints[0]?.t ?? Infinity;
-    state.chartPoints = [...reg.filter((p) => p.t < firstLive), ...state.chartPoints];
+    const since = Date.now() - CHART_BACKFILL_MS;
+    state.chartPoints = [...olderPts.filter((p) => p.t < firstLive && p.t >= since).map((p) => ({ t: p.t, lat: p.lat, lon: p.lon, speedKn: Number.isFinite(p.speedKn) ? p.speedKn : null })), ...state.chartPoints];
   }
-  if (!samples.length || token !== state.trailBackfillToken) return;
+  if (!timed.length || token !== state.trailBackfillToken) return;
   if (state.trailMmsi !== mmsi) return;
 
+  const { runs, gaps } = splitShipRuns(timed, TRAIL_GAP_SEC);
+  state.trailSamples = timed;
   const older = [];
-  for (const sample of samples) {
-    const lat = Number(sample?.lat);
-    const lon = Number(sample?.lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    // Per-sample N (≤ TRAIL_MAX_POINTS lookups) — same sea-surface datum as
-    // the live vertices so the spliced trail is height-continuous.
-    const heightM = vesselRenderHeightM(lat, lon, TRAIL_HEIGHT_M);
-    older.push(Cesium.Cartesian3.fromDegrees(lon, lat, heightM));
+  for (const run of runs) {
+    for (const sample of run) {
+      // Per-sample N (≤ TRAIL_MAX_POINTS lookups) — same sea-surface datum as
+      // the live vertices so the spliced trail is height-continuous.
+      const heightM = vesselRenderHeightM(sample.lat, sample.lon, TRAIL_HEIGHT_M);
+      older.push(Cesium.Cartesian3.fromDegrees(sample.lon, sample.lat, heightM));
+    }
   }
+  syncTrailGapLines(gaps);
+  syncHistoryLine();
   if (!older.length) return;
 
   state.trailPositions = older.concat(state.trailPositions);
@@ -2851,6 +2868,62 @@ export function mergeVesselTrackSamples(own, register) {
     .filter((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lon) && Number.isFinite(p?.t) && p.t < firstOursMs)
     .sort((a, b) => a.t - b.t);
   return [...older, ...ours].map((p) => ({ lat: Number(p.lat), lon: Number(p.lon) }));
+}
+
+/**
+ * Staršie body pred vlastným ringom: trasa z registra (t v ms) + história z disku (t v s, sog).
+ * Bez duplicít (rovnaký čas na minútu), zoradené. Pure.
+ */
+export function olderTrackPoints(registerPoints, diskSamples) {
+  const out = new Map();
+  for (const p of Array.isArray(diskSamples) ? diskSamples : []) {
+    if (!Number.isFinite(p?.t) || !Number.isFinite(p?.lat) || !Number.isFinite(p?.lon)) continue;
+    out.set(Math.round(p.t / 60), { lat: p.lat, lon: p.lon, t: p.t * 1000, speedKn: Number.isFinite(p.sog) ? p.sog : null });
+  }
+  for (const p of Array.isArray(registerPoints) ? registerPoints : []) {
+    if (!Number.isFinite(p?.t) || !Number.isFinite(p?.lat) || !Number.isFinite(p?.lon)) continue;
+    const k = Math.round(p.t / 60_000);
+    if (!out.has(k)) out.set(k, { lat: p.lat, lon: p.lon, t: p.t, speedKn: Number.isFinite(p.speedKn) ? p.speedKn : null });
+  }
+  return [...out.values()].sort((a, b) => a.t - b.t);
+}
+
+/**
+ * Stopa s časom: staršie body (t v ms) pred vlastným ringom (t v s); najviac TRAIL_MAX_POINTS
+ * (rovnomerne zriedené, najnovšie ostanú presné). Vracia {lat, lon, t (s)}. Pure.
+ */
+export function mergeVesselTrackTimed(own, older, max = TRAIL_MAX_POINTS) {
+  const ours = (Array.isArray(own) ? own : []).filter((p) => Number.isFinite(Number(p?.lat)) && Number.isFinite(Number(p?.lon)) && Number.isFinite(Number(p?.t)))
+    .map((p) => ({ lat: Number(p.lat), lon: Number(p.lon), t: Number(p.t) }));
+  const firstOursS = ours.length ? ours[0].t : Infinity;
+  const before = (Array.isArray(older) ? older : []).filter((p) => p.t / 1000 < firstOursS).map((p) => ({ lat: p.lat, lon: p.lon, t: Math.round(p.t / 1000) }));
+  let all = [...before, ...ours];
+  if (all.length > max) {
+    const keepTail = Math.min(ours.length, Math.floor(max / 2));
+    const head = all.slice(0, all.length - keepTail);
+    const budget = max - keepTail;
+    const step = (head.length - 1) / Math.max(1, budget - 1);
+    const thinned = [];
+    for (let i = 0; i < budget; i += 1) thinned.push(head[Math.round(i * step)]);
+    all = [...thinned, ...all.slice(all.length - keepTail)];
+  }
+  return all;
+}
+
+/** Prerušované čiary cez medzery v stope (po mori, keď trasa príde). */
+function syncTrailGapLines(gaps) {
+  for (const line of state.trailGapLines || []) { try { line.destroy(); } catch { /* */ } }
+  state.trailGapLines = [];
+  if (!state.viewer || !Array.isArray(gaps)) return;
+  for (const [a, b] of gaps.slice(-12)) {
+    const line = createVesselVoyageLine(state.viewer, HISTORY_LINE_STYLE);
+    const draw = () => {
+      const bySea = seaRoutePositionsDeg(seaRouteSync([{ lat: a.lat, lon: a.lon }, { lat: b.lat, lon: b.lon }], draw));
+      line.setPath(bySea || [[a.lon, a.lat, 0], [b.lon, b.lat, 0]]);
+    };
+    draw();
+    state.trailGapLines.push(line);
+  }
 }
 
 /**
@@ -2888,6 +2961,9 @@ function clearSelectedVesselTrail() {
   state.trailBackfillToken += 1;
   state.trailMmsi = null;
   state.trailPositions = [];
+  state.trailSamples = [];
+  for (const line of state.trailGapLines || []) { try { line.destroy(); } catch { /* */ } }
+  state.trailGapLines = [];
   if (state.trail) state.trail.clear();
 }
 
@@ -2999,10 +3075,26 @@ function resolveSelectedDestination(record) {
 
 /** Prekreslí čiaru z vybranej lode do jej cieľového prístavu (alebo ju zhasne). */
 /** História plavby vybranej lode: predchádzajúce prístavy (GFW) → loď, jantárovou čiarou. */
+/**
+ * Kde má čiara prístavov skončiť: pri dlhej stope (≥ 24 h) v bode stopy najbližšom k poslednému
+ * prístavu (do 30 km), aby trasa od prístavu bola jedna čiara; inak na lodi. Pure.
+ */
+export function historyLineEndpoint(calls, samples, vessel) {
+  const last = Array.isArray(calls) ? [...calls].reverse().find((c) => Number.isFinite(c?.lat) && Number.isFinite(c?.lon)) : null;
+  if (!last || !Array.isArray(samples) || samples.length < 2 || samples.at(-1).t - samples[0].t < 24 * 3600) return vessel;
+  let best = null;
+  let bestKm = 30;
+  for (const s of samples) {
+    const km = greatCircleKm(last.lat, last.lon, s.lat, s.lon);
+    if (km !== null && km < bestKm) { bestKm = km; best = s; }
+  }
+  return best ? { lat: best.lat, lon: best.lon } : vessel;
+}
+
 function syncHistoryLine() {
   const record = state.selectedRecord;
   const calls = record ? cachedVesselInfo(record.mmsi)?.portCalls : null;
-  let path = historyLinePositionsDeg(calls, record ? { lat: record.lat, lon: record.lon } : null);
+  let path = historyLinePositionsDeg(calls, record ? historyLineEndpoint(calls, state.trailSamples, { lat: record.lat, lon: record.lon }) : null);
   if (!path) { state.historyLine?.clear(); return; }
   // Po mori medzi prístavmi (bod 5): kým trasa príde, priamky.
   const bySea = seaRoutePositionsDeg(seaRouteSync(path.map(([lon, lat]) => ({ lat, lon })), () => syncHistoryLine()));

@@ -1273,6 +1273,8 @@ async function init() {
         installVesselFollowButtons(viewer, {
           container: document.body,
           followed: followedVessels,
+          // Zdieľanie lode (2026-10-11, bod 6): panel zdieľania; odkaz nesie vybranú loď (shareSubject).
+          onShare: () => { void styleManager._openSharePanel?.(); },
           // História lode (bod 7): tlačidlo vedľa zvončeka otvorí kartu LODE v paneli História.
           onHistory: ({ mmsi, name }) => {
             for (const id of ['ais-live-vessels', 'aishub-vessels', 'gfw-presence']) {

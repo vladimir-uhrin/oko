@@ -12,6 +12,7 @@
 import { SHIP_HISTORY_MAX_DAYS, thinShipSamples } from '../shipHistoryStore.js';
 import { createShipHistoryService } from './history.js';
 import { createAisSupplements } from './supplements.js';
+import { inboundToPort } from './portInbound.js';
 
 /** Hranice ticha zdrojov (ms): keď od posledných dát uplynie viac, zdroj je „stale". */
 export const AIS_HEALTH_LIMITS = Object.freeze({ aisstream: 10 * 60_000, openseafeed: 15 * 60_000, aiscast: 5 * 60_000, ocean: 15 * 60_000, dma: 5 * 86_400_000 });
@@ -112,6 +113,17 @@ export function createShipServer({ rootDir, env = process.env, vessels, tracks, 
     if (p === '/health') {
       const h = health();
       json(res, h.ok ? 200 : 503, h);
+      return true;
+    }
+    // Lode na ceste do prístavu (2026-10-11): /inbound?locode=&name=&lat=&lon= — cieľ z AIS vs. prístav.
+    if (p === '/inbound') {
+      const lat = Number(incoming.searchParams.get('lat'));
+      const lon = Number(incoming.searchParams.get('lon'));
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) { json(res, 400, { error: 'bad_port' }); return true; }
+      const port = { lat, lon, locode: String(incoming.searchParams.get('locode') || '').slice(0, 8), name: String(incoming.searchParams.get('name') || '').slice(0, 80) };
+      const out = inboundToPort(vessels.values(), port, { nowMs: now(), staleMs });
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      json(res, 200, { port: { locode: port.locode || null, name: port.name || null }, ...out, source: 'AIS destination text (crew-entered) · ETA from current speed (estimate)' });
       return true;
     }
     if (p === '/history') {

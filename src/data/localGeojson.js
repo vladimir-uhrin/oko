@@ -18,6 +18,8 @@ import {
 import { isAirportCardOpen } from './airportCard.js';
 import { LOCAL_MARKER_BASE_PX } from './localMarkerIcons.js';
 import { PORTS_LAYER_ID, portImportance, portOverlayCopy, portTitleFlag } from './portsData.js';
+import { portInboundLines, portInboundSync } from './portInbound.js';
+import { t as translate } from '../i18n.js';
 import { createLocalHoverCard } from './localHoverCard.js';
 import { t as translateDefault } from '../i18n.js';
 
@@ -151,9 +153,21 @@ export function localInfrastructureOverlayCopy(properties, layerId, tier = 'full
     // Vlajka štátu aj prístavom (2026-09-19) — WPI nesie meno štátu, nie kód.
     titleFlag = portTitleFlag(props);
     for (const line of portOverlayCopy(props)) details.push(clampCardLine(line));
+    // Lode na ceste sem (2026-10-11): zo synchrónnej cache — plní ju klik (onFeatureSelected →
+    // portInboundSync → refreshEntry), ambient karty bez kliku nič nevyvolajú.
+    const inbound = cachedPortInbound(props);
+    if (inbound) for (const line of portInboundLines(inbound, translate)) details.push(clampCardLine(line));
   }
 
   return { title, details, titleFlag };
+}
+
+/** Lode do prístavu, len ak už sú v cache (bez dopytu). */
+function cachedPortInbound(props) {
+  const lat = Number(props?.lat ?? props?.latitude);
+  const lon = Number(props?.lon ?? props?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return portInboundSync({ locode: props?.locode, name: props?.name, lat, lon }, null, { fetchImpl: null });
 }
 
 /**

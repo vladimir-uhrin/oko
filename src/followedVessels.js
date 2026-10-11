@@ -294,7 +294,7 @@ export function followBellPlacement(rect, viewport = null) {
  * @param {Function} o.paintRect getOverlayPaintRect
  * @param {(card: {mmsi: string, name?: string}) => void} [o.onHistory] tlačidlo História lode (bod 7)
  */
-export function installVesselFollowButtons(viewer, { container, followed, providers, translate: t, paintRect, onHistory = null }) {
+export function installVesselFollowButtons(viewer, { container, followed, providers, translate: t, paintRect, onHistory = null, onShare = null }) {
   const doc = container.ownerDocument;
   const button = doc.createElement('button');
   button.type = 'button';
@@ -306,6 +306,21 @@ export function installVesselFollowButtons(viewer, { container, followed, provid
   button.appendChild(icon);
   container.appendChild(button);
   // História lode vľavo od zvončeka (2026-10-11, bod 7).
+  // Zdieľanie lode (2026-10-11, bod 6): odkaz nesie vybranú loď (subj=ais-live-vessels.s.<MMSI>).
+  const share = onShare ? doc.createElement('button') : null;
+  if (share) {
+    share.type = 'button';
+    share.className = 'card-close card-share';
+    share.hidden = true;
+    share.title = t('vessel.share');
+    share.setAttribute('aria-label', t('vessel.share'));
+    const sIcon = doc.createElement('span');
+    sIcon.className = 'material-symbols-outlined';
+    sIcon.setAttribute('aria-hidden', 'true');
+    sIcon.textContent = 'share';
+    share.appendChild(sIcon);
+    container.appendChild(share);
+  }
   const history = onHistory ? doc.createElement('button') : null;
   if (history) {
     history.type = 'button';
@@ -339,6 +354,7 @@ export function installVesselFollowButtons(viewer, { container, followed, provid
     if (!visible) {
       if (!button.hidden) button.hidden = true;
       if (history && !history.hidden) history.hidden = true;
+      if (share && !share.hidden) share.hidden = true;
       return;
     }
     const view = doc.defaultView;
@@ -350,6 +366,11 @@ export function installVesselFollowButtons(viewer, { container, followed, provid
       if (history.hidden) history.hidden = false;
       history.style.opacity = String(visible.opacity);
       history.style.transform = `translate(${Math.max(CARD_CLOSE_INSET_PX, x - CARD_CLOSE_SIZE_PX - 6)}px, ${y}px)`;
+    }
+    if (share) {
+      if (share.hidden) share.hidden = false;
+      share.style.opacity = String(visible.opacity);
+      share.style.transform = `translate(${Math.max(CARD_CLOSE_INSET_PX, x - 2 * (CARD_CLOSE_SIZE_PX + 6))}px, ${y}px)`;
     }
     const on = Boolean(followed.entryFor(card.mmsi));
     const signedIn = followed.isSignedIn();
@@ -376,6 +397,8 @@ export function installVesselFollowButtons(viewer, { container, followed, provid
     if (current) { const card = { mmsi: current.mmsi, name: current.name }; history.hidden = true; onHistory(card); }
   };
   history?.addEventListener('click', onHistoryClick);
+  const onShareClick = (event) => { event?.stopPropagation?.(); if (current) { try { onShare({ mmsi: current.mmsi, name: current.name }); } catch { /* */ } } };
+  share?.addEventListener('click', onShareClick);
   const unsubscribe = followed.subscribe(() => { signature = ''; sync(); });
   const postRender = viewer?.scene?.postRender;
   postRender?.addEventListener?.(sync);
@@ -389,6 +412,7 @@ export function installVesselFollowButtons(viewer, { container, followed, provid
       button.removeEventListener('click', onClick);
       button.remove();
       history?.remove();
+      share?.remove();
     },
   };
 }

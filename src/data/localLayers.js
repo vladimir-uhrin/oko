@@ -14,6 +14,7 @@ import airportsUrl from './local_data/airports/airports.geojsonl?url';
 import portsUrl from './local_data/ports/ports.geojsonl?url';
 import { AIRPORTS_LAYER_ID } from './airportsData.js';
 import { PORTS_LAYER_ID } from './portsData.js';
+import { portInboundSync } from './portInbound.js';
 import { metarStationId, requestAirportMetar } from './airportWeather.js';
 
 /**
@@ -93,6 +94,14 @@ const ports = createLocalGeoJsonLayer({
   labelLod: true,
   // Na mape kotva v kruhu.
   markerImage: portMarkerImage,
+  // Klik na prístav (2026-10-11) → lode, ktoré doň smerujú (/api/ais-live/inbound), a prebuild karty.
+  onFeatureSelected: (props, { refreshEntry }) => {
+    const lat = Number(props?.lat ?? props?.latitude);
+    const lon = Number(props?.lon ?? props?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    portInboundSync({ locode: props?.locode, name: props?.name, lat, lon }, refreshEntry);
+    refreshEntry();
+  },
 });
 
 const dams = createLocalGeoJsonLayer({

@@ -12248,7 +12248,7 @@ export default defineConfig(({ mode }) => {
       // Detail lode z registra (IMO, podrobný typ, rok, GT/DWT) + fotka podľa MMSI (2026-10-10).
       vesselInfoProxy(),
       // Plavebná trasa po mori namiesto priamky (2026-10-11, searoute-js, lokálny výpočet).
-      seaRouteProxy(),
+      seaRouteProxy({ cacheDir: path.join(__dirname, '.gev-cache', 'searoute') }),
       gfwPresenceProxy(),
       logoProxy(),
       gasProxy(),

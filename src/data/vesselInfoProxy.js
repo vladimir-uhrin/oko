@@ -532,7 +532,7 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
   }
 
   /** Fotka z Wikimedia Commons podľa IMO, keď register fotku nemá (2026-10-11). Cache 30 d / 7 d bez fotky. */
-  function loadCommons(imo) {
+  function loadCommons(imo, name = '') {
     const code = String(imo || '').replace(/\D/g, '');
     if (!/^\d{7}$/.test(code)) return Promise.resolve(null);
     const k = `c:${code}`;
@@ -545,7 +545,7 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
         const ttl = entry?.photo ? VESSEL_PHOTO_TTL_MS : 7 * 24 * 3600 * 1000;
         if (Number.isFinite(entry?.at) && now() - entry.at < ttl) return entry.photo || null;
       } catch { /* bez cache */ }
-      const photo = await findCommonsShipPhoto(code, fetchImpl);
+      const photo = await findCommonsShipPhoto(code, fetchImpl, { name });
       await writeAtomic(file, JSON.stringify({ at: now(), photo }));
       return photo;
     })().catch(() => null).finally(() => inflight.delete(k));
@@ -563,7 +563,7 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
     if (!info) return { status, error };
     let commons = null;
     if (!info.photoId) {
-      commons = await loadCommons(info.imo);
+      commons = await loadCommons(info.imo, info.name);
       if (!commons) return { status: 404, error: 'no_photo' };
     }
     const job = inflight.get(`p:${mmsi}:${size}`);
@@ -684,7 +684,7 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
       if (!body.destination && mt?.destination) { body.destination = mt.destination; body.etaMs = body.etaMs || mt.etaMs || null; }
       // Register fotku nemá → Wikimedia Commons podľa IMO, s autorom a licenciou (2026-10-11).
       if (!body.photo && out.info.imo) {
-        const commons = await loadCommons(out.info.imo);
+        const commons = await loadCommons(out.info.imo, out.info.name);
         if (commons) body.photo = { src: `/api/vessel-info/photo?mmsi=${mmsi}&size=1`, thumb: `/api/vessel-info/photo?mmsi=${mmsi}&size=0`, credit: commons.credit, page: commons.page };
       }
       sendJson(res, 200, body, { 'Cache-Control': 'public, max-age=300', 'X-OKO-Source': out.source });

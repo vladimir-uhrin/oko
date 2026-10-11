@@ -22,20 +22,24 @@ test('Mumbaj → Rotterdam ide cez Suez, nie cez pevninu (dlhšia ako priamka, k
   assert.ok(route.coordinates.some(([lon, lat]) => lon > 32 && lon < 33 && lat > 29.5 && lat < 31.5), 'cez Suez');
 });
 
-test('úsek bez trasy ostane priamkou, celé nezlyhá; endpoint vracia JSON a kešuje', async () => {
+test('úsek bez trasy ostane priamkou, celé nezlyhá; endpoint vracia JSON a kešuje (bez vlákna v teste)', async () => {
   const route = computeSeaRoute([[0, 0], [1, 1], [2, 2]], (o, d) => (o.geometry.coordinates[0] === 0 ? null : { geometry: { coordinates: [[1, 1], [1.5, 1.5], [2, 2]] }, properties: { length: 157 } }));
   assert.deepEqual(route.legs, [null, 157]);
   assert.equal(route.lengthKm, null, 'bez dĺžky všetkých úsekov celková dĺžka nie je');
   assert.deepEqual(route.coordinates, [[0, 0], [1, 1], [1.5, 1.5], [2, 2]]);
-  const plugin = seaRouteProxy();
+  const plugin = seaRouteProxy({ useWorker: false });
   const res = { writeHead(s) { this.s = s; }, end(b) { this.b = b; } };
-  plugin._handler({ method: 'GET', url: '/?points=-76.43,36.98;8.15,53.52' }, res);
+  await plugin._handler({ method: 'GET', url: '/?points=-76.43,36.98;8.15,53.52' }, res);
   assert.equal(res.s, 200);
   const body = JSON.parse(res.b);
   assert.ok(body.lengthKm > 6000 && body.lengthKm < 7500, `Newport News → Wilhelmshaven ${body.lengthKm} km`);
   const bad = { writeHead(s) { this.s = s; }, end() {} };
-  plugin._handler({ method: 'GET', url: '/?points=1,2' }, bad);
+  await plugin._handler({ method: 'GET', url: '/?points=1,2' }, bad);
   assert.equal(bad.s, 400);
+  // Druhý dopyt na tie isté body ide z pamäte (status endpoint).
+  const st = { writeHead(s) { this.s = s; }, end(b) { this.b = b; } };
+  await plugin._handler({ method: 'GET', url: '/status' }, st);
+  assert.equal(JSON.parse(st.b).memory, 1);
 });
 
 test('karta: priebeh a zostávajúce km po mori, keď je trasa známa', async () => {
