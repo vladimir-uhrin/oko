@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { feedLabel } from './aisSupplementFeeds.js';
 import {
   registerEntityContext,
   selectEntityContext,
@@ -717,7 +718,7 @@ const aisLiveVesselsLayer = {
       flightLines: motion ? [motion] : null,
       extraLines,
       photoKey: `vessel:${record.mmsi}`,
-      source: 'AISStream',
+      source: feedLabel(record.feed),
       lastContactEpochMs: Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null,
       stale: isLastKnownVessel(record),
       squawk: null,
@@ -1627,6 +1628,7 @@ function updateRecordInPlace(record, next) {
   record.posEstimated = next.posEstimated;
   record.lastPositionUtc = next.lastPositionUtc;
   record.lastPositionEpoch = next.lastPositionEpoch;
+  record.feed = next.feed;
   record.positionState = next.positionState;
   record.position = next.position;
   record.surfacePosition = next.surfacePosition;
@@ -1704,6 +1706,8 @@ function normalizeVessel(row) {
     posEstimated: row.pos_estimated === true,
     lastPositionUtc: String(row.last_position_UTC || ''),
     lastPositionEpoch: finiteNumber(row.last_position_epoch),
+    // Pôvod polohy (2026-10-11): AISStream, OpenSeaFeed, Open Waters AIS alebo oceán (oneskorené).
+    feed: String(row.feed || ''),
     positionState: row.position_state || null,
     position,
     // Ellipsoid-surface point (height 0) — feeds ONLY the horizon occluder,
@@ -3080,7 +3084,7 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
   const stale = (record.missedRefreshes || 0) > 0 || age.stale;
   const lastKnown = isLastKnownVessel(record, nowMs);
   const sourceLine = [
-    'AISStream',
+    feedLabel(record.feed),
     lastKnown ? 'LAST KNOWN POSITION' : '',
     `${formatPositionTime(record)}${age.label ? ` (${age.label})` : ''}`,
   ].filter(Boolean).join(' · ');

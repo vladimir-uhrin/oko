@@ -126,6 +126,9 @@ import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.j
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
 import { readAisStateFile, restoreAisState, serializeAisState, writeAisStateFile } from './src/data/aisStatePersist.js';
 import { SHIP_HISTORY_DEFAULT_MONTHS, SHIP_HISTORY_MAX_DAYS, createShipHistoryStore, thinShipSamples } from './src/data/shipHistoryStore.js';
+import { AISCAST_WINDOWS, createShipIdResolver, mergeSupplementRow, mtTileRowToVessel, oceanTiles, parseAiscastVessels, parseMtTileRows, parseOpenSeaFeedSnapshot } from './src/data/aisSupplementFeeds.js';
+import { curlGet, parseMtGeneral } from './src/data/vesselTrackSources.js';
+import { createDmaBackfill } from './src/data/dmaHistoryBackfill.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1634,7 +1637,8 @@ const AISSTREAM_DEFAULT_MESSAGE_TYPES = [
   'ShipStaticData',
   'StaticDataReport',
 ];
-const AISSTREAM_CACHE_MAX = 50000;
+// 2026-10-11: 50 000 → 120 000 — k AISStream (~42 000) pribudli OpenSeaFeed, Open Waters AIS a oceán.
+const AISSTREAM_CACHE_MAX = 120000;
 const AISSTREAM_STALE_MS = AIS_RETAIN_MS;
 /** Minimum gap between full retention sweeps (see shouldPruneAisCache). The
  *  sweep is O(cache); running it per message under the worldwide bounding box
@@ -1681,6 +1685,119 @@ function shipHistory() {
     _shipHistory = createShipHistoryStore({ dir, months, diskOk: () => guard.ok(), log: (m) => console.warn(m) });
   }
   return _shipHistory;
+}
+// Doplnkové zdroje polôh (2026-10-11, aisSupplementFeeds.js): OpenSeaFeed, Open Waters AIS a oceán
+// z dlaždíc registra — zlúčené do _aisStreamVessels podľa MMSI. Bežia len v službe (ako história);
+// AIS_SUPPLEMENTS=off ich vypne celé, AIS_SUPPLEMENT_OCEAN=off len oceán.
+const OSF_SNAPSHOT_MS = 3 * 60_000;
+const AISCAST_WINDOW_MS = 20_000;
+const OCEAN_TILE_MS = 20_000;
+const OCEAN_RESOLVE_MS = 15_000;
+const _aisSupplementStats = { openseafeed: { at: 0, rows: 0, merged: 0, error: null }, aiscast: { at: 0, rows: 0, merged: 0, error: null }, ocean: { at: 0, rows: 0, merged: 0, unresolved: 0, error: null } };
+let _aisSupplementTimers = null;
+/** Zlúči riadky zo zdrojov navyše do úložiska; vráti počet prijatých. */
+function applyAisSupplementRows(rows) {
+  const now = Date.now();
+  let merged = 0;
+  for (const row of rows) {
+    const existing = _aisStreamVessels.get(row.mmsi);
+    if (!existing && _aisStreamVessels.size >= AISSTREAM_CACHE_MAX) continue;
+    const next = mergeSupplementRow(existing, row, now);
+    if (!next) continue;
+    _aisStreamVessels.set(row.mmsi, next);
+    appendAisTrackSample(row.mmsi, next.lat, next.lon, next.last_position_epoch);
+    if (_shipHistoryTimer) shipHistory().record(row.mmsi, next.lat, next.lon, next.last_position_epoch, next.speed, next.course);
+    merged += 1;
+  }
+  return merged;
+}
+function ensureAisSupplements() {
+  if (_aisSupplementTimers || !shipHistoryRecording() || String(process.env.AIS_SUPPLEMENTS || '').toLowerCase() === 'off') return;
+  _aisSupplementTimers = [];
+  const every = (ms, fn) => { const id = setInterval(() => { void fn(); }, ms); id.unref?.(); _aisSupplementTimers.push(id); setTimeout(() => { void fn(); }, 5_000).unref?.(); };
+  // OpenSeaFeed: celosvetová snímka (~4,7 MB gzip), CC BY 4.0.
+  every(OSF_SNAPSHOT_MS, async () => {
+    const st = _aisSupplementStats.openseafeed;
+    try {
+      const res = await fetch('https://api.openseafeed.com/v1/snapshot', { headers: { Accept: 'application/json', 'User-Agent': 'OKO (okolive.sk)' }, signal: AbortSignal.timeout(60_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const rows = parseOpenSeaFeedSnapshot(await res.json());
+      Object.assign(st, { at: Date.now(), rows: rows.length, merged: applyAisSupplementRows(rows), error: null });
+    } catch (error) { st.error = String(error?.message || error); }
+  });
+  // Open Waters AIS: jedno okno naraz dookola (anonymne 2 spojenia na IP).
+  let windowIdx = 0;
+  every(AISCAST_WINDOW_MS, async () => {
+    const st = _aisSupplementStats.aiscast;
+    const [s, w, n, e] = AISCAST_WINDOWS[windowIdx % AISCAST_WINDOWS.length];
+    windowIdx += 1;
+    try {
+      const res = await fetch(`https://ais.openwaters.io/v1/vessels?bbox=${s},${w},${n},${e}`, { headers: { Accept: 'application/json', 'User-Agent': 'OKO (okolive.sk)' }, signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const rows = parseAiscastVessels(await res.json());
+      Object.assign(st, { at: Date.now(), rows: rows.length, merged: st.merged + applyAisSupplementRows(rows), error: null });
+    } catch (error) { st.error = String(error?.message || error); }
+  });
+  if (String(process.env.AIS_SUPPLEMENT_OCEAN || '').toLowerCase() === 'off') return;
+  // Oceán: dlaždice registra pri malom priblížení + preklad ID → MMSI (cache 30 dní na disku).
+  const mtDir = path.join(__dirname, '.gev-cache', 'vessel-info', 'mt');
+  const resolver = createShipIdResolver({
+    resolveOne: async (shipId) => {
+      const file = path.join(mtDir, `ship-${shipId}.json`);
+      try {
+        const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (Date.now() - cached.at < 30 * 86400_000) return cached;
+      } catch { /* bez cache */ }
+      const info = parseMtGeneral(JSON.parse(await curlGet(`https://www.marinetraffic.com/en/vessels/${shipId}/general`)));
+      const entry = { at: Date.now(), mmsi: info.mmsi, name: info.name };
+      fs.mkdirSync(mtDir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(entry));
+      // To isté ID poslúži karte lode (vesselInfoProxy si ušetrí hľadanie).
+      if (info.mmsi) fs.writeFileSync(path.join(mtDir, `${info.mmsi}.id.json`), JSON.stringify({ at: Date.now(), shipId }));
+      return entry;
+    },
+  });
+  // Pri štarte načítaj už preložené ID z disku (bez siete).
+  try {
+    for (const name of fs.readdirSync(mtDir)) {
+      const m = /^ship-(\d+)\.json$/.exec(name);
+      if (!m) continue;
+      try { const c = JSON.parse(fs.readFileSync(path.join(mtDir, name), 'utf8')); resolver.known.set(m[1], c.mmsi || null); } catch { /* */ }
+    }
+  } catch { /* priečinok ešte nie je */ }
+  const tiles = oceanTiles();
+  let tileIdx = 0;
+  every(OCEAN_TILE_MS, async () => {
+    const st = _aisSupplementStats.ocean;
+    const { x, y } = tiles[tileIdx % tiles.length];
+    tileIdx += 1;
+    try {
+      const parsed = parseMtTileRows(JSON.parse(await curlGet(`https://www.marinetraffic.com/getData/get_data_json_4/z:4/X:${x}/Y:${y}/station:0`)));
+      const rows = [];
+      for (const t of parsed) {
+        const mmsi = resolver.get(t.shipId);
+        if (mmsi) rows.push(mtTileRowToVessel(t, mmsi));
+        else if (mmsi === undefined) resolver.want(t.shipId);
+      }
+      Object.assign(st, { at: Date.now(), rows: parsed.length, merged: st.merged + applyAisSupplementRows(rows), unresolved: resolver.pending(), error: null });
+    } catch (error) { st.error = String(error?.message || error); }
+  });
+  every(OCEAN_RESOLVE_MS, () => resolver.step());
+}
+// Spätná história z otvorených dát Dánskej námornej správy (dmaHistoryBackfill.js): jeden deň za
+// hodinu, prúdom bez dočasného súboru, posledných DMA_BACKFILL_DAYS dní (predvolene 60). DMA_BACKFILL=off vypne.
+let _dmaBackfillTimer = null;
+let _dmaBackfill = null;
+function ensureDmaBackfill() {
+  if (_dmaBackfillTimer || !shipHistoryRecording() || String(process.env.DMA_BACKFILL || '').toLowerCase() === 'off') return;
+  const dir = shipHistoryDir();
+  const guard = createDiskGuard({ dir: fs.existsSync(dir) ? dir : path.dirname(dir) });
+  const days = Math.max(1, Math.min(365, Math.floor(Number(process.env.DMA_BACKFILL_DAYS)) || 60));
+  _dmaBackfill = createDmaBackfill({ dir, days, diskOk: () => guard.ok(), log: (m) => console.log(m) });
+  const run = () => { void _dmaBackfill.runOnce().catch((error) => console.warn('[dma-backfill] zlyhalo:', error?.message || error)); };
+  _dmaBackfillTimer = setInterval(run, 60 * 60_000);
+  _dmaBackfillTimer.unref?.();
+  setTimeout(run, 2 * 60_000).unref?.();
 }
 /** Zapisovať históriu lodí? (služba áno, skúšobná inštancia nie) */
 const shipHistoryRecording = () => aisStatePersistEnabled() && String(process.env.SHIP_HISTORY || '').toLowerCase() !== 'off';
@@ -8995,6 +9112,8 @@ function aisLiveProxy() {
           nextAttemptAt: feed.nextAttemptAt,
           staleAfterMs: feed.staleAfterMs,
           watchdog: feed.watchdog,
+          // Zdroje navyše (2026-10-11): kedy naposledy, koľko riadkov, koľko prijatých, chyba.
+          supplements: _aisSupplementTimers ? _aisSupplementStats : null,
         }));
       } catch (error) {
         res.statusCode = 502;
@@ -10565,6 +10684,8 @@ function ensureAisStatePersistence() {
     writeAisStateFile(AIS_STATE_FILE, snapshot).catch((error) => console.warn('[AISStream] zápis stavu zlyhal:', error?.message || error));
   }, AIS_STATE_SAVE_MS);
   _aisStateSaveTimer.unref?.();
+  ensureAisSupplements();
+  ensureDmaBackfill();
   if (shipHistoryRecording() && !_shipHistoryTimer) {
     let lastPrune = 0;
     _shipHistoryTimer = setInterval(() => {
