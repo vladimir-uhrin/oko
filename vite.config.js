@@ -126,7 +126,7 @@ import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.j
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
 import { readAisStateFile, restoreAisState, serializeAisState, writeAisStateFile } from './src/data/aisStatePersist.js';
 import { SHIP_HISTORY_DEFAULT_MONTHS, SHIP_HISTORY_MAX_DAYS, createShipHistoryStore, thinShipSamples } from './src/data/shipHistoryStore.js';
-import { AISCAST_WINDOWS, createShipIdResolver, mergeSupplementRow, mtTileRowToVessel, oceanTiles, parseAiscastVessels, parseMtTileRows, parseOpenSeaFeedSnapshot } from './src/data/aisSupplementFeeds.js';
+import { AISCAST_WINDOWS, buildNameIndex, matchTileRowByName, createShipIdResolver, mergeSupplementRow, mtTileRowToVessel, oceanTiles, parseAiscastVessels, parseMtTileRows, parseOpenSeaFeedSnapshot } from './src/data/aisSupplementFeeds.js';
 import { curlGet, parseMtGeneral } from './src/data/vesselTrackSources.js';
 import { createDmaBackfill } from './src/data/dmaHistoryBackfill.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
@@ -1692,7 +1692,8 @@ function shipHistory() {
 const OSF_SNAPSHOT_MS = 3 * 60_000;
 const AISCAST_WINDOW_MS = 20_000;
 const OCEAN_TILE_MS = 20_000;
-const OCEAN_RESOLVE_MS = 15_000;
+// Preklad cez sieť len pre lode, ktoré iný zdroj nepozná (zvyšok sa spáruje menom a polohou).
+const OCEAN_RESOLVE_MS = 10_000;
 const _aisSupplementStats = { openseafeed: { at: 0, rows: 0, merged: 0, error: null }, aiscast: { at: 0, rows: 0, merged: 0, error: null }, ocean: { at: 0, rows: 0, merged: 0, unresolved: 0, error: null } };
 let _aisSupplementTimers = null;
 /** Zlúči riadky zo zdrojov navyše do úložiska; vráti počet prijatých. */
@@ -1774,10 +1775,17 @@ function ensureAisSupplements() {
     try {
       const parsed = parseMtTileRows(JSON.parse(await curlGet(`https://www.marinetraffic.com/getData/get_data_json_4/z:4/X:${x}/Y:${y}/station:0`)));
       const rows = [];
+      let index = null;
+      const nowS = Date.now() / 1000;
       for (const t of parsed) {
-        const mmsi = resolver.get(t.shipId);
+        let mmsi = resolver.get(t.shipId);
+        if (mmsi === undefined) {
+          index = index || buildNameIndex(_aisStreamVessels.values());
+          const byName = matchTileRowByName(t, index);
+          if (byName) { resolver.learn(t.shipId, byName); mmsi = byName; }
+          else resolver.want(t.shipId, { urgent: nowS - t.epochSec < 3600 });
+        }
         if (mmsi) rows.push(mtTileRowToVessel(t, mmsi));
-        else if (mmsi === undefined) resolver.want(t.shipId);
       }
       Object.assign(st, { at: Date.now(), rows: parsed.length, merged: st.merged + applyAisSupplementRows(rows), unresolved: resolver.pending(), error: null });
     } catch (error) { st.error = String(error?.message || error); }

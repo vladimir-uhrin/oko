@@ -94,3 +94,26 @@ test('pôvod do karty', () => {
   assert.equal(feedLabel('openseafeed'), 'OpenSeaFeed (CC BY 4.0)');
   assert.equal(feedLabel('ocean'), 'oceán · oneskorené');
 });
+
+test('oceán bez siete: MMSI podľa mena a polohy; nejednoznačné a ďaleké nie; čerstvé idú prvé', async () => {
+  const { buildNameIndex, matchTileRowByName, createShipIdResolver: make } = await import('./aisSupplementFeeds.js');
+  const index = buildNameIndex([
+    { mmsi: '477269900', name: 'ORE NINGBO', lat: -2.5, lon: 84.0 },
+    { mmsi: '111111111', name: 'SEA', lat: 0, lon: 0 },
+    { mmsi: '222222222', name: 'EVER GIVEN', lat: 10, lon: 60 },
+    { mmsi: '333333333', name: 'EVER GIVEN', lat: 10.1, lon: 60.1 },
+    { mmsi: '444444444', name: 'MMSI 444444444', lat: 1, lon: 1 },
+  ]);
+  assert.equal(matchTileRowByName({ name: 'Ore Ningbo', lat: -2.3, lon: 84.26 }, index), '477269900');
+  assert.equal(matchTileRowByName({ name: 'ORE NINGBO', lat: 10, lon: 84.26 }, index), null, 'ďaleko');
+  assert.equal(matchTileRowByName({ name: 'EVER GIVEN', lat: 10, lon: 60 }, index), null, 'dve lode s tým istým menom');
+  assert.equal(matchTileRowByName({ name: 'SEA', lat: 0, lon: 0 }, index), null, 'krátke meno');
+  const calls = [];
+  const r = make({ resolveOne: async (id) => { calls.push(id); return { mmsi: null }; } });
+  r.want('old'); r.want('fresh', { urgent: true });
+  r.learn('x', '477269900');
+  await r.step();
+  assert.deepEqual(calls, ['fresh']);
+  assert.equal(r.get('x'), '477269900');
+  assert.equal(r.pending(), 1);
+});

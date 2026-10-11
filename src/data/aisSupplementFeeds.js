@@ -201,28 +201,67 @@ export const AISCAST_WINDOWS = Object.freeze([
  */
 export function createShipIdResolver({ resolveOne, maxQueue = 6000 }) {
   const known = new Map(); // shipId → mmsi|null
+  const urgent = new Set(); // čerstvé polohy (do 1 h) idú prvé
   const queue = new Set();
+  const size = () => urgent.size + queue.size;
   return {
     known,
     get(shipId) { return known.get(shipId); },
-    want(shipId) {
-      if (known.has(shipId) || queue.has(shipId) || queue.size >= maxQueue) return;
+    /** Zaradí ID; `urgent` (čerstvá poloha) predbehne zvyšok fronty. */
+    want(shipId, { urgent: isUrgent = false } = {}) {
+      if (known.has(shipId) || urgent.has(shipId)) return;
+      if (isUrgent) { queue.delete(shipId); if (size() < maxQueue) urgent.add(shipId); return; }
+      if (queue.has(shipId) || size() >= maxQueue) return;
       queue.add(shipId);
     },
+    /** MMSI zistené bez siete (zhoda mena a polohy s inou loďou v úložisku). */
+    learn(shipId, mmsi) { known.set(shipId, mmsi); urgent.delete(shipId); queue.delete(shipId); },
     /** Spracuj jedno ID z fronty. @returns {Promise<boolean>} niečo spracované */
     async step() {
-      const next = queue.values().next();
+      const from = urgent.size ? urgent : queue;
+      const next = from.values().next();
       if (next.done) return false;
       const shipId = next.value;
-      queue.delete(shipId);
+      from.delete(shipId);
       try {
         const r = await resolveOne(shipId);
         known.set(shipId, r?.mmsi && MMSI_RE.test(r.mmsi) ? r.mmsi : null);
       } catch { /* sieť: skúsi sa pri ďalšej dlaždici */ }
       return true;
     },
-    pending: () => queue.size,
+    pending: size,
   };
+}
+
+const normName = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Index mien lodí v úložisku (meno → riadky). Mená kratšie ako 4 znaky a „MMSI …" sa vynechajú. Pure. */
+export function buildNameIndex(rows) {
+  const index = new Map();
+  for (const r of rows) {
+    const key = normName(r?.name);
+    if (key.length < 4 || key.startsWith('MMSI')) continue;
+    const list = index.get(key);
+    if (list) list.push(r); else index.set(key, [r]);
+  }
+  return index;
+}
+
+/**
+ * MMSI pre riadok z dlaždice bez siete: rovnaké meno a poloha do `maxKm` (loď sa za hodinu
+ * posunie najviac ~40 km). Viac kandidátov s rôznym MMSI = nejednoznačné → null. Pure.
+ */
+export function matchTileRowByName(t, index, maxKm = 60) {
+  const list = index.get(normName(t?.name));
+  if (!list) return null;
+  const toRad = Math.PI / 180;
+  const found = new Set();
+  for (const r of list) {
+    const dLat = (r.lat - t.lat) * toRad;
+    const dLon = (r.lon - t.lon) * toRad * Math.cos(((r.lat + t.lat) / 2) * toRad);
+    if (Math.hypot(dLat, dLon) * 6371 <= maxKm && MMSI_RE.test(String(r.mmsi))) found.add(String(r.mmsi));
+  }
+  return found.size === 1 ? [...found][0] : null;
 }
 
 /** Čitateľný pôvod polohy do karty. Pure. */
