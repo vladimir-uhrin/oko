@@ -1247,7 +1247,14 @@ async function init() {
     try {
       const ship = new URLSearchParams(window.location?.search || '').get('ship');
       if (/^\d{9}$/.test(ship || '')) {
-        void Promise.resolve(styleManager.initialRestorePromise).catch(() => {}).then(() => { setTimeout(() => { void vesselSearch.openByMmsi(ship); }, 8_000); });
+        void Promise.resolve(styleManager.initialRestorePromise).catch(() => {}).then(() => {
+          setTimeout(() => {
+            void vesselSearch.openByMmsi(ship).then((found) => {
+              // Loď mimo pôvodného výrezu: po dolete sa živá vrstva načíta — skús vybrať živý záznam (karta, zvonček).
+              if (!found) setTimeout(() => { try { aisLiveVesselsLayer.selectByMmsi?.(ship); } catch { /* ostane značka z registra */ } }, 12_000);
+            });
+          }, 8_000);
+        });
       }
     } catch { /* bez odkazu */ }
     // Sledované lode (2026-10-11, bod 6): zvonček vedľa krížika na karte lode, zoznam k účtu
