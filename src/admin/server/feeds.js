@@ -22,7 +22,8 @@ export const FEEDS = Object.freeze([
   { id: 'adsb', label: 'ADS-B (adsb.lol, adsbdb)', prefixes: ['/api/adsblol', '/api/adsbdb'], toggle: true },
   { id: 'history', label: 'Archív letov', prefixes: ['/api/history'], status: '/api/history/status', sample: true, toggle: true },
   { id: 'acars', label: 'ACARS', prefixes: ['/api/acars'], status: '/api/acars/status', sample: true, toggle: true },
-  { id: 'ais', label: 'Lode (AIS)', prefixes: ['/api/ais-live', '/api/aiscast'], toggle: true },
+  // 2026-10-11: /health stráži AISStream aj zdroje navyše (OpenSeaFeed, Open Waters, oceán, DMA) — 503 = stíchol.
+  { id: 'ais', label: 'Lode (AIS + zdroje navyše)', prefixes: ['/api/ais-live', '/api/aiscast'], status: '/api/ais-live/health', sample: true, toggle: true },
   { id: 'satellites', label: 'Satelity (CelesTrak)', prefixes: ['/api/celestrak'], toggle: true },
   { id: 'launches', label: 'Štarty rakiet', prefixes: ['/api/launches'], toggle: true },
   { id: 'earthquakes', label: 'Zemetrasenia', prefixes: ['/api/earthquakes'], toggle: true },

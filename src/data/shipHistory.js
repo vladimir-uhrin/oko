@@ -158,3 +158,74 @@ export function shipSpeedSeries(samples, n = 160) {
   }
   return { values, maxSog: s.maxSog, startT: s.startT, endT: s.endT };
 }
+
+/** Zastávka: body do `radiusKm` od prvého bodu zastávky aspoň `minSec`. */
+export const SHIP_STOP_MIN_SEC = 2 * 3600;
+export const SHIP_STOP_RADIUS_KM = 2;
+
+/**
+ * Zastávky na trase (prístav, kotvisko): súvislý úsek, kde loď ostala do 2 km od miesta aspoň
+ * 2 h. Bod zastávky = priemer. Pure.
+ * @returns {Array<{startT:number, endT:number, lat:number, lon:number, points:number}>}
+ */
+export function detectShipStops(samples, { minSec = SHIP_STOP_MIN_SEC, radiusKm = SHIP_STOP_RADIUS_KM } = {}) {
+  const stops = [];
+  const list = Array.isArray(samples) ? samples : [];
+  let i = 0;
+  while (i < list.length) {
+    const a = list[i];
+    let j = i;
+    let sumLat = 0;
+    let sumLon = 0;
+    while (j < list.length && greatCircleKm(a.lat, a.lon, list[j].lat, list[j].lon) <= radiusKm) { sumLat += list[j].lat; sumLon += list[j].lon; j += 1; }
+    const n = j - i;
+    if (n >= 2 && list[j - 1].t - a.t >= minSec) {
+      stops.push({ startT: a.t, endT: list[j - 1].t, lat: sumLat / n, lon: sumLon / n, points: n });
+      i = j;
+    } else {
+      i += 1;
+    }
+  }
+  return stops;
+}
+
+/** „2 d 5 h", „7 h", „45 min". Pure. */
+export function shipDurationLabel(sec, lang = 'sk') {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const dayUnit = lang === 'sk' ? 'd' : 'd';
+  if (d > 0) return h ? `${d} ${dayUnit} ${h} h` : `${d} ${dayUnit}`;
+  if (h > 0) return m ? `${h} h ${m} min` : `${h} h`;
+  return `${m} min`;
+}
+
+const xmlEscape = (s) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+const isoOf = (tS) => new Date(tS * 1000).toISOString();
+
+/** Trasa ako GPX 1.1 (trk s bodmi, čas a rýchlosť v extensions). Pure. */
+export function shipHistoryGpx(samples, { name = '', mmsi = '' } = {}) {
+  const pts = (samples || []).map((s) => `    <trkpt lat="${s.lat.toFixed(5)}" lon="${s.lon.toFixed(5)}"><time>${isoOf(s.t)}</time>${Number.isFinite(s.sog) ? `<extensions><sog>${s.sog}</sog>${Number.isFinite(s.cog) ? `<cog>${s.cog}</cog>` : ''}</extensions>` : ''}</trkpt>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="OKO okolive.sk" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>${xmlEscape(name || mmsi)}</name>${mmsi ? `<desc>MMSI ${xmlEscape(mmsi)} · AIS positions recorded by OKO (okolive.sk)</desc>` : ''}</metadata>
+  <trk><name>${xmlEscape(name || mmsi)}</name><trkseg>
+${pts}
+  </trkseg></trk>
+</gpx>
+`;
+}
+
+/** Trasa ako KML (LineString + zastávky ako body). Pure. */
+export function shipHistoryKml(samples, { name = '', mmsi = '', stops = [] } = {}) {
+  const coords = (samples || []).map((s) => `${s.lon.toFixed(5)},${s.lat.toFixed(5)},0`).join(' ');
+  const marks = (stops || []).map((st) => `    <Placemark><name>${xmlEscape(st.label || 'stop')}</name><TimeSpan><begin>${isoOf(st.startT)}</begin><end>${isoOf(st.endT)}</end></TimeSpan><Point><coordinates>${st.lon.toFixed(5)},${st.lat.toFixed(5)},0</coordinates></Point></Placemark>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+  <name>${xmlEscape(name || mmsi)}</name>
+  <Placemark><name>${xmlEscape(name || mmsi)}</name><Style><LineStyle><color>ffe6d05f</color><width>3</width></LineStyle></Style><LineString><tessellate>1</tessellate><coordinates>${coords}</coordinates></LineString></Placemark>
+${marks}
+</Document></kml>
+`;
+}

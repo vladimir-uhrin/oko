@@ -49,6 +49,8 @@ export const GFW_SAR_MAX_LABELS = 200;
 export const GFW_SAR_POINT_HEIGHT_M = 20;
 /** Farba detekcie bez zhody s AIS: neutrálna biela, nie výstražná — nevieme, čo to je. */
 export const GFW_SAR_DARK_CSS = '#f2f6ff';
+/** V režime „len bez AIS" je detekcia bez zhody jantárová — to je to, čo sa hľadá. */
+export const GFW_SAR_DARK_ONLY_CSS = '#ffb020';
 /** Základná mierka terča (ikona 32 px → 16 px) pri plnom stupni. */
 const ICON_BASE_SCALE = 0.5;
 const DAY_MS = 86_400_000;
@@ -228,6 +230,9 @@ export function createGfwSarLayer({
   let _requestToken = 0;
   let _labelCount = 0;
   let _counts = { matched: 0, dark: 0 };
+  // Režim „len bez AIS" (2026-10-11, vlastník: lode bez AIS do kontrastu s AIS): detekcie so
+  // zhodou sa nekreslia, detekcie bez zhody sú väčšie a jantárové.
+  let _darkOnly = false;
   const _scratchObjects = new Map();
 
   function iconScale() {
@@ -256,11 +261,12 @@ export function createGfwSarLayer({
       if (_byId.has(key)) continue;
       const isMatched = Boolean(row.matched);
       if (isMatched) matched += 1; else dark += 1;
-      const css = isMatched ? vesselTypeCss(row.type) : GFW_SAR_DARK_CSS;
+      if (_darkOnly && isMatched) continue;
+      const css = isMatched ? vesselTypeCss(row.type) : (_darkOnly ? GFW_SAR_DARK_ONLY_CSS : GFW_SAR_DARK_CSS);
       const billboard = _collection.add({
         position: Cesium.Cartesian3.fromDegrees(row.lon, row.lat, GFW_SAR_POINT_HEIGHT_M),
         image: sarIconDataUrl(css, isMatched),
-        scale,
+        scale: _darkOnly ? scale * 1.4 : scale,
         rotation: 0,
         alignedAxis: Cesium.Cartesian3.ZERO,
         color: Cesium.Color.WHITE.withAlpha(sarAgeAlpha(Number.isFinite(row.lastSeen) ? nowMs - row.lastSeen : Infinity)),
@@ -280,7 +286,7 @@ export function createGfwSarLayer({
     if (next === _iconTier) return;
     _iconTier = next;
     const scale = iconScale();
-    for (const { billboard } of _byId.values()) billboard.scale = scale;
+    for (const { billboard } of _byId.values()) billboard.scale = _darkOnly ? scale * 1.4 : scale;
     _viewer?.scene?.requestRender?.();
   }
 
@@ -445,13 +451,41 @@ export function createGfwSarLayer({
       _viewer = null;
     },
 
+    /** Režim „len bez AIS": prekreslí tie isté riadky. */
+    setDarkOnly(on) {
+      const next = Boolean(on);
+      if (next === _darkOnly) return;
+      _darkOnly = next;
+      renderRows(_rows);
+      publishLabels();
+      _viewer?.scene?.requestRender?.();
+    },
+    isDarkOnly() { return _darkOnly; },
+
+    /**
+     * Počet detekcií v obdĺžniku [W,S,E,N] (scéna úžiny): bez AIS vs. so zhodou, za okno vrstvy.
+     * @returns {{dark:number, matched:number, days:number|null, lastUpdate:number|null}}
+     */
+    countInRect(rect) {
+      const [w, s, e, n] = Array.isArray(rect) ? rect : [];
+      let dark = 0;
+      let matched = 0;
+      if (Number.isFinite(w) && Number.isFinite(e)) {
+        for (const row of _rows) {
+          if (!(row.lon >= w && row.lon <= e && row.lat >= s && row.lat <= n)) continue;
+          if (row.matched) matched += 1; else dark += 1;
+        }
+      }
+      return { dark, matched, days: daysOf(_meta), lastUpdate: _lastUpdate };
+    },
+
     getStats() {
       const stats = {
         count: _rows.length,
         lastUpdate: _lastUpdate,
         loading: _loading,
         error: _error,
-        source: sarSourceLabel(_meta, _rows.length ? _counts : null),
+        source: [sarSourceLabel(_meta, _rows.length ? _counts : null), _darkOnly ? t('sar.dark-only-on') : ''].filter(Boolean).join(' · '),
         status: _status === 'zoom-in' ? 'zoom-in' : (_status === 'empty' ? 'empty' : undefined),
       };
       if (_status === 'zoom-in') stats.loadingLabel = t('gfw.zoom-in');

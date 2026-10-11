@@ -9,6 +9,7 @@ import { createTrail } from './trailRenderer.js';
 import { currentLanguage, t } from '../i18n.js';
 import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, newerPositionLine, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo, realMmsiFor } from './vesselInfo.js';
+import { destinationPoint } from './vesselEstimate.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
 import { buildVesselTrackedEntry, clearVesselEstimateFor, syncVesselEstimate } from './vesselTrackedCard.js';
 import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
@@ -693,6 +694,7 @@ const aisLiveVesselsLayer = {
       voyageDepartureLine(voyage, t, lang, Date.now(), { withOrigin: !voyage?.destination }),
       portHistoryLine(info, cachedPortIndex(), t),
       newerPositionLine(info, Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : null, t, lang),
+      record.estimated ? t('vessel.dead-reckoned', { km: lang === 'sk' ? String(record.estimated.km).replace('.', ',') : String(record.estimated.km), min: record.estimated.ageMin }) : '',
       vesselRegistryParts(info, t, lang).join(' · '),
       vesselHullParts(record, info, t, lang).join(' · '),
       (() => { const local = vesselLocalTimeLabel(record.lon, Date.now(), vesselTimeZone(record.lat, record.lon)); return local ? t('vessel.local-time', { time: local }) : ''; })(),
@@ -1372,6 +1374,7 @@ function applyAisFeedSnapshot(viewer, payload) {
 
   settleFirstConnectPhase('ready');
   reconcileVessels(viewer, snapshot.acceptedRows);
+  applyDeadReckoning(state.vesselRecords, _aisRuntime.now());
   state.count = state.vesselRecords.length;
   state.stale = Boolean(payload?.refreshing) || state.vesselRecords.every(record => isLastKnownVessel(record));
   state.newestPositionAt = payload?.newestPositionAt || null;
@@ -1610,6 +1613,9 @@ function updateRecordInPlace(record, next) {
 
   record.lat = next.lat;
   record.lon = next.lon;
+  record.fixLat = next.fixLat;
+  record.fixLon = next.fixLon;
+  record.estimated = null;
   record.name = next.name;
   record.imo = next.imo;
   record.type = next.type;
@@ -1708,6 +1714,10 @@ function normalizeVessel(row) {
     lastPositionEpoch: finiteNumber(row.last_position_epoch),
     // Pôvod polohy (2026-10-11): AISStream, OpenSeaFeed, Open Waters AIS alebo oceán (oneskorené).
     feed: String(row.feed || ''),
+    // Nameraná poloha (odhad polohy lodí z oceánu ju neprepíše — deadReckonVessel, 2026-10-11).
+    fixLat: lat,
+    fixLon: lon,
+    estimated: null,
     positionState: row.position_state || null,
     position,
     // Ellipsoid-surface point (height 0) — feeds ONLY the horizon occluder,
@@ -2694,6 +2704,53 @@ function vesselTrailPosition(record) {
   return Cesium.Cartesian3.fromDegrees(record.lon, record.lat, heightM);
 }
 
+/** Odhad polohy lodí z oceánu: od 5 min do 3 h po poslednej polohe, aspoň 1 kn, najviac 120 km. */
+export const DEAD_RECKON_MIN_AGE_MS = 5 * 60_000;
+export const DEAD_RECKON_MAX_AGE_MS = 3 * 3600_000;
+export const DEAD_RECKON_MAX_KM = 120;
+
+/**
+ * Odhad súčasnej polohy lode z oceánu (2026-10-11, vlastník: „lode na oceáne by sa hýbali, nie
+ * len stáli ako sivé body"). Polohy z dlaždíc registra sú 20–60 min staré; loď sa posunie po
+ * kurze rýchlosťou z poslednej polohy. Len pre feed 'ocean' (pobrežné lode by „doplávali" na
+ * pevninu), vždy označené ako odhad (pravidlo 2). Pure.
+ * @returns {?{lat:number, lon:number, km:number, ageMin:number}}
+ */
+export function deadReckonVessel(record, nowMs = Date.now()) {
+  if (record?.feed !== 'ocean') return null;
+  const lat = Number.isFinite(record.fixLat) ? record.fixLat : record.lat;
+  const lon = Number.isFinite(record.fixLon) ? record.fixLon : record.lon;
+  const speed = Number(record.speed);
+  // Number(null) = 0 by bol platný kurz na sever — bez kurzu nie je odhad.
+  const course = record.course === null || record.course === undefined ? NaN : Number(record.course);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(record.lastPositionEpoch)) return null;
+  if (!Number.isFinite(speed) || speed < 1 || !Number.isFinite(course) || course < 0 || course >= 360) return null;
+  const ageMs = nowMs - record.lastPositionEpoch * 1000;
+  if (ageMs < DEAD_RECKON_MIN_AGE_MS || ageMs > DEAD_RECKON_MAX_AGE_MS) return null;
+  const km = Math.min(DEAD_RECKON_MAX_KM, speed * 1.852 * (ageMs / 3600_000));
+  const p = destinationPoint(lat, lon, course, km);
+  return { lat: p.lat, lon: p.lon, km: Math.round(km * 10) / 10, ageMin: Math.round(ageMs / 60_000) };
+}
+
+/** Posunie záznamy lodí z oceánu na odhadnutú polohu (po každej obnove; východisko je vždy nameraná poloha). */
+function applyDeadReckoning(records, nowMs) {
+  for (const record of records) {
+    if (record.feed !== 'ocean') continue;
+    const est = deadReckonVessel(record, nowMs);
+    const lat = est ? est.lat : record.fixLat;
+    const lon = est ? est.lon : record.fixLon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    record.estimated = est ? { km: est.km, ageMin: est.ageMin } : null;
+    if (lat === record.lat && lon === record.lon) continue;
+    record.lat = lat;
+    record.lon = lon;
+    record.position = Cesium.Cartesian3.fromDegrees(lon, lat, vesselRenderHeightM(lat, lon, VESSEL_LIFT_M));
+    record.surfacePosition = Cesium.Cartesian3.fromDegrees(lon, lat, 0);
+    record.normal = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(record.position, new Cesium.Cartesian3());
+    if (record.billboard) record.billboard.position = record.position;
+  }
+}
+
 /**
  * One-shot datum re-lift when the geoid grid warms mid-session: the first
  * refresh can land before ensureGeoidReady() resolves (anchors at N = 0) and
@@ -2816,6 +2873,7 @@ function appendSelectedVesselTrailFix(record) {
 /** Živý fix vybranej lode do grafov karty (rýchlosť, vzdialenosť do cieľa). */
 function appendSelectedChartPoint(record) {
   if (!record || !Number.isFinite(record.lat) || !Number.isFinite(record.lon)) return;
+  if (record.estimated) return; // odhad nie je meranie — do grafu a stopy nejde
   const tMs = Number.isFinite(record.lastPositionEpoch) ? record.lastPositionEpoch * 1000 : Date.now();
   const last = state.chartPoints[state.chartPoints.length - 1];
   if (last && tMs <= last.t) return;
@@ -3085,6 +3143,7 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
   const lastKnown = isLastKnownVessel(record, nowMs);
   const sourceLine = [
     feedLabel(record.feed),
+    record.estimated ? t('vessel.dead-reckoned', { km: lang === 'sk' ? String(record.estimated.km).replace('.', ',') : String(record.estimated.km), min: record.estimated.ageMin }) : '',
     lastKnown ? 'LAST KNOWN POSITION' : '',
     `${formatPositionTime(record)}${age.label ? ` (${age.label})` : ''}`,
   ].filter(Boolean).join(' · ');
@@ -3096,8 +3155,9 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
     accent: accentForVesselType(record.type),
     vessel: {
       mmsi: record.mmsi,
-      lat: record.lat,
-      lon: record.lon,
+      // Nameraná poloha (odhad kreslí vesselEstimate z nej; ikona lode je už na odhade).
+      lat: Number.isFinite(record.fixLat) ? record.fixLat : record.lat,
+      lon: Number.isFinite(record.fixLon) ? record.fixLon : record.lon,
       speedKn: Number.isFinite(record.speed) ? record.speed : null,
       course: record.course,
       heading: record.heading,

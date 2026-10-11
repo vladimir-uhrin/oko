@@ -718,6 +718,11 @@ async function init() {
       getLivePositions: () => aisLiveVesselsLayer.getAllPositions(5000),
       getDelayedPositions: () => aishubVesselsLayer.getAllPositions(5000),
       getDarkPositions: () => gfwSarDetectionsLayer.getAllPositions(),
+      // Klik na „bez AIS: N" v čipe → na mape ostanú len radarové detekcie bez AIS (2026-10-11).
+      onDarkClick: () => {
+        if (!dataManager.isEnabled('gfw-sar')) void dataManager.setEnabled('gfw-sar', true, { origin: 'user' });
+        gfwSarDetectionsLayer.setDarkOnly?.(true);
+      },
     });
     window.__godsEyeView.straitTrafficChip = straitTrafficChip;
     // Reveal-on-approach gate (user: „nech sa všetko objavuje iba pri priblížení
@@ -1164,6 +1169,24 @@ async function init() {
       const cmds = [];
       try { cmds.push(...(followedFlights?.commands() || [])); } catch { /* sledované lety sú voliteľné */ }
       try { cmds.push(...(followedVessels?.commands() || [])); } catch { /* sledované lode sú voliteľné */ }
+      // Radar: len lode bez AIS (2026-10-11) — zapne radarovú vrstvu a nechá len detekcie bez zhody.
+      try {
+        const sar = dataManager.layers.get('gfw-sar')?.module;
+        if (sar?.setDarkOnly) {
+          const on = sar.isDarkOnly();
+          cmds.push({
+            id: 'sar:dark-only',
+            label: t('cmd.sar.dark-only'),
+            hint: t(on ? 'cmd.sar.dark-only.off' : 'cmd.sar.dark-only.on'),
+            group: 'maritime',
+            keywords: ['radar', 'sar', 'ais', 'dark', 'tmav', 'bez ais'],
+            run: () => {
+              if (!on && !dataManager.isEnabled('gfw-sar')) void dataManager.setEnabled('gfw-sar', true, { origin: 'user' });
+              sar.setDarkOnly(!on);
+            },
+          });
+        }
+      } catch { /* radar je voliteľný */ }
       for (const c of listConflicts()) {
         cmds.push({ id: `scene:${c.id}`, label: conflictTitle(c, t), group: CONFLICT_GROUP[c.region] || 'ukraine', keywords: [c.region, c.name, c.sceneId || ''], run: () => { void frameConflict(c); } });
       }

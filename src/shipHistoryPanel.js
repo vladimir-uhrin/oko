@@ -15,11 +15,17 @@ import { ReplayClock } from './flightReplay.js';
 import { currentLanguage } from './i18n.js';
 import { governorRequestRender } from './renderGovernor.js';
 import { lookupVesselInfo } from './data/vesselInfo.js';
+import { loadPortIndex } from './data/vesselPortIndex.js';
+import { nearestPort } from './data/vesselCardDetails.js';
 import {
   SHIP_HISTORY_RANGES,
   SHIP_REPLAY_SPEEDS,
+  detectShipStops,
   fetchShipHistory,
   interpolateShipSample,
+  shipDurationLabel,
+  shipHistoryGpx,
+  shipHistoryKml,
   shipHistorySummary,
   shipSampleLine,
   shipSpeedSeries,
@@ -160,9 +166,22 @@ export function installShipHistoryPanel({ viewer, host, t, setCollapsed = null, 
   const followBtn = el(doc, 'button', 'scene-btn history-follow', t('history.follow'));
   followBtn.type = 'button';
   followBtn.setAttribute('aria-pressed', 'false');
-  controls.append(playBtn, speedWrap, followBtn);
+  // Export trasy (2026-10-11): GPX a KML zo vzoriek v paneli, bez servera.
+  const exportWrap = el(doc, 'div', 'history-speeds');
+  const exportBtns = ['gpx', 'kml'].map((kind) => {
+    const b = el(doc, 'button', 'history-speed', kind.toUpperCase());
+    b.type = 'button';
+    b.title = t('shiphistory.export-title');
+    b.addEventListener('click', () => exportRoute(kind));
+    exportWrap.appendChild(b);
+    return b;
+  });
+  controls.append(playBtn, speedWrap, followBtn, exportWrap);
+  // Zastávky (prístavy, kotviská) na trase (2026-10-11).
+  const stopsRow = el(doc, 'div', 'history-stats', '');
+  stopsRow.hidden = true;
   const note = el(doc, 'div', 'history-stats', t('shiphistory.note'));
-  detail.append(head, stats, sampleRow, slider, controls, canvas, note);
+  detail.append(head, stats, stopsRow, sampleRow, slider, controls, canvas, note);
   section.append(searchRow, status, list, detail);
   host.prepend(tabs);
   host.appendChild(section);
@@ -177,8 +196,52 @@ export function installShipHistoryPanel({ viewer, host, t, setCollapsed = null, 
   let lastFrame = 0;
   let token = 0;
   let current = null; // {mmsi, name}
+  let stops = [];
   const entities = [];
   let marker = null;
+
+  function exportRoute(kind) {
+    if (!samples.length || !current) return;
+    const text = kind === 'kml' ? shipHistoryKml(samples, { name: current.name, mmsi: current.mmsi, stops }) : shipHistoryGpx(samples, { name: current.name, mmsi: current.mmsi });
+    try {
+      const blob = new Blob([text], { type: kind === 'kml' ? 'application/vnd.google-earth.kml+xml' : 'application/gpx+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = doc.createElement('a');
+      a.href = url;
+      a.download = `${(current.name || current.mmsi).replace(/[^\w.-]+/g, '_')}-${new Date(samples[0].t * 1000).toISOString().slice(0, 10)}.${kind}`;
+      doc.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch { /* sťahovanie je voliteľné */ }
+  }
+
+  /** Zastávky s menom prístavu (index prístavov sa načíta lenivo) → riadok v paneli a značky. */
+  async function syncStops(my) {
+    const lang = currentLanguage();
+    const index = await loadPortIndex().catch(() => null);
+    if (my !== token) return;
+    for (const st of stops) {
+      const port = index ? nearestPort(index, st.lat, st.lon, 15) : null;
+      st.label = port?.name || t('shiphistory.stop-unknown');
+    }
+    stopsRow.hidden = !stops.length;
+    stopsRow.textContent = stops.length
+      ? t('shiphistory.stops', { list: stops.map((st) => `${st.label} ${shipDurationLabel(st.endT - st.startT, lang)}`).join(' · ') })
+      : '';
+    if (!viewer?.entities) return;
+    const color = Cesium.Color.fromCssColorString('#ffb020');
+    for (const st of stops) {
+      entities.push(viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(st.lon, st.lat, 0),
+        point: { pixelSize: 8, color, outlineColor: Cesium.Color.fromCssColorString('#06121a'), outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        label: { text: `${st.label} · ${shipDurationLabel(st.endT - st.startT, lang)}`, font: '11px "JetBrains Mono", monospace', fillColor: Cesium.Color.fromCssColorString('#ffd37a'),
+          showBackground: true, backgroundColor: Cesium.Color.fromCssColorString('#06121a').withAlpha(0.8), pixelOffset: new Cesium.Cartesian2(0, 16),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY, scaleByDistance: new Cesium.NearFarScalar(200_000, 1, 4_000_000, 0.6) },
+      }));
+    }
+    governorRequestRender('ship-history');
+  }
 
   function setMode(next) {
     mode = next;
@@ -298,6 +361,8 @@ export function installShipHistoryPanel({ viewer, host, t, setCollapsed = null, 
     searchRow.hidden = false;
     status.hidden = false;
     samples = [];
+    stops = [];
+    stopsRow.hidden = true;
     clock = null;
     current = null;
   }
@@ -325,6 +390,7 @@ export function installShipHistoryPanel({ viewer, host, t, setCollapsed = null, 
     if (!data) { status.dataset.state = 'error'; status.textContent = t('shiphistory.failed'); return; }
     if (!data.samples.length) { status.textContent = t('shiphistory.empty', { name: current.name, d: range.value }); return; }
     samples = data.samples;
+    stops = detectShipStops(samples);
     series = shipSpeedSeries(samples);
     const summary = shipHistorySummary(samples);
     clock = new ReplayClock(summary.startT, Math.max(summary.endT, summary.startT + 1));
@@ -338,6 +404,7 @@ export function installShipHistoryPanel({ viewer, host, t, setCollapsed = null, 
     detail.hidden = false;
     drawRoute();
     renderAt();
+    void syncStops(my);
   }
 
   async function runSearch() {
@@ -392,6 +459,6 @@ export function installShipHistoryPanel({ viewer, host, t, setCollapsed = null, 
     setMode,
     getMode: () => mode,
     close: closeDetail,
-    _state: () => ({ samples, clock, current }),
+    _state: () => ({ samples, clock, current, stops }),
   };
 }

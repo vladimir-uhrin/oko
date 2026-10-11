@@ -7,6 +7,7 @@ import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  GFW_SAR_DARK_ONLY_CSS,
   GFW_SAR_DARK_CSS, GFW_SAR_LAYER_ID, GFW_SAR_OVERLAY_SOURCE_ID,
   createGfwSarLayer, sarAgeAlpha, sarContactSummary, sarDisplayName, sarIconDataUrl, sarLabelCard, sarPassLabel, sarSourceLabel,
 } from './gfwSarDetections.js';
@@ -284,4 +285,30 @@ test('vrstva: 429 = dočasné odmietnutie (nie rozpočet) a tichý pokus o 30 s 
   } finally {
     mock.timers.reset();
   }
+});
+
+test('režim „len bez AIS" (2026-10-11): zhody zmiznú, bez zhody jantárové a väčšie; počet v obdĺžniku úžiny', async () => {
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ rows: ROWS, meta: META }) });
+  const collection = fakeCollection();
+  const layer = createGfwSarLayer({ fetchImpl, collectionFactory: () => collection, overlayHost: fakeOverlay(), now: () => NOW });
+  layer.init(fakeViewer());
+  await layer.enable();
+  await new Promise((r) => setTimeout(r, 0));
+  const all = collection.length;
+  const darkRows = ROWS.filter((r) => !r.matched).length;
+  assert.ok(darkRows > 0 && darkRows < all, 'vzorka má zhody aj bez zhody');
+  const baseScale = collection.items[0].scale;
+  layer.setDarkOnly(true);
+  assert.equal(layer.isDarkOnly(), true);
+  assert.equal(collection.length, darkRows, 'ostanú len detekcie bez zhody');
+  assert.ok(collection.items.every((b) => b.id.matched === false));
+  assert.ok(collection.items.every((b) => b.image === sarIconDataUrl(GFW_SAR_DARK_ONLY_CSS, false)), 'jantárová');
+  assert.ok(collection.items[0].scale > baseScale, 'väčšie');
+  assert.match(layer.getStats().source, /only without AIS|len bez AIS/);
+  const counts = layer.countInRect([47, 23, 60, 31]);
+  assert.equal(counts.dark + counts.matched, ROWS.length);
+  assert.equal(counts.dark, darkRows);
+  assert.deepEqual(layer.countInRect([0, 0, 1, 1]), { dark: 0, matched: 0, days: counts.days, lastUpdate: counts.lastUpdate });
+  layer.setDarkOnly(false);
+  assert.equal(collection.length, all, 'späť všetky');
 });

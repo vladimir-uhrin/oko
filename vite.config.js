@@ -1696,6 +1696,8 @@ const OCEAN_TILE_MS = 20_000;
 const OCEAN_RESOLVE_MS = 10_000;
 const _aisSupplementStats = { openseafeed: { at: 0, rows: 0, merged: 0, error: null }, aiscast: { at: 0, rows: 0, merged: 0, error: null }, ocean: { at: 0, rows: 0, merged: 0, unresolved: 0, error: null } };
 let _aisSupplementTimers = null;
+/** Prekladač ID registra → MMSI (lode z oceánu); handler /api/ais-live ním uprednostní lode vo výreze. */
+let _oceanResolver = null;
 /** Zlúči riadky zo zdrojov navyše do úložiska; vráti počet prijatých. */
 function applyAisSupplementRows(rows) {
   const now = Date.now();
@@ -1758,6 +1760,7 @@ function ensureAisSupplements() {
       return entry;
     },
   });
+  _oceanResolver = resolver;
   // Pri štarte načítaj už preložené ID z disku (bez siete).
   try {
     for (const name of fs.readdirSync(mtDir)) {
@@ -1782,7 +1785,12 @@ function ensureAisSupplements() {
         if (mmsi === undefined) {
           index = index || buildNameIndex(_aisStreamVessels.values());
           const byName = matchTileRowByName(t, index);
-          if (byName) { resolver.learn(t.shipId, byName); mmsi = byName; }
+          if (byName) {
+            resolver.learn(t.shipId, byName);
+            mmsi = byName;
+            // Zhoda podľa mena a polohy na disk (2026-10-11): po reštarte sa nehľadá znova.
+            try { fs.mkdirSync(mtDir, { recursive: true }); fs.writeFileSync(path.join(mtDir, `ship-${t.shipId}.json`), JSON.stringify({ at: Date.now(), mmsi: byName, name: t.name, via: 'name' })); } catch { /* */ }
+          }
           else resolver.want(t.shipId, { urgent: nowS - t.epochSec < 3600 });
         }
         if (mmsi) {
@@ -9051,6 +9059,44 @@ function metarProxy() {
   };
 }
 
+/** Hranice ticha zdrojov (ms): keď od posledných dát uplynie viac, zdroj je „stale". */
+const AIS_HEALTH_LIMITS = Object.freeze({ aisstream: 10 * 60_000, openseafeed: 15 * 60_000, aiscast: 5 * 60_000, ocean: 15 * 60_000, dma: 5 * 86_400_000 });
+/** Po štarte služby dostanú zdroje navyše čas na prvé dáta. */
+const AIS_HEALTH_GRACE_MS = 10 * 60_000;
+/**
+ * Stav zdrojov lodí pre admin (čistá funkcia nad stavom modulu). Pure vzhľadom na čas.
+ * @returns {{ok:boolean, status:'live'|'stale', checks:Object, retained:number}}
+ */
+function aisLiveHealth(nowMs) {
+  const feed = aisStreamStatusSnapshot();
+  const sinceStart = process.uptime() * 1000;
+  const checks = {};
+  const check = (id, at, limit, extra = {}) => {
+    const age = Number.isFinite(at) && at > 0 ? nowMs - at : null;
+    const grace = age === null && sinceStart < AIS_HEALTH_GRACE_MS;
+    checks[id] = { ok: grace || (age !== null && age <= limit), ageMinutes: age === null ? null : Math.round(age / 60_000), limitMinutes: Math.round(limit / 60_000), ...extra };
+  };
+  check('aisstream', feed.lastMessageAt, AIS_HEALTH_LIMITS.aisstream, { status: feed.status, error: feed.error || null });
+  if (_aisSupplementTimers) {
+    for (const id of ['openseafeed', 'aiscast', 'ocean']) {
+      const st = _aisSupplementStats[id];
+      if (id === 'ocean' && String(process.env.AIS_SUPPLEMENT_OCEAN || '').toLowerCase() === 'off') continue;
+      check(id, st.at, AIS_HEALTH_LIMITS[id], { rows: st.rows, merged: st.merged, error: st.error || null, ...(id === 'ocean' ? { unresolved: st.unresolved } : {}) });
+    }
+  }
+  if (_dmaBackfill) {
+    let lastDone = null;
+    try {
+      const state = JSON.parse(fs.readFileSync(path.join(shipHistoryDir(), 'dma-backfill.json'), 'utf8'));
+      for (const v of Object.values(state?.done || {})) if (Number.isFinite(v?.at)) lastDone = Math.max(lastDone ?? 0, v.at);
+    } catch { /* ešte nič */ }
+    check('dma', lastDone, AIS_HEALTH_LIMITS.dma);
+  }
+  if (_shipHistory) checks.shipHistory = { ok: true, ..._shipHistory.stats() };
+  const ok = Object.values(checks).every((c) => c.ok !== false);
+  return { ok, status: ok ? 'live' : 'stale', checks, retained: _aisStreamVessels.size, checkedAt: nowMs };
+}
+
 function aisLiveProxy() {
   function install(middlewares) {
     middlewares.use('/api/ais-live', async (req, res) => {
@@ -9061,6 +9107,16 @@ function aisLiveProxy() {
         // Track sub-route MUST be handled before the rows snapshot — this
         // mount prefix-matches every subpath, so without this branch
         // /api/ais-live/track would be silently answered with vessel rows.
+        // Strážca zdrojov lodí (2026-10-11): /api/ais-live/health — 503, keď stíchol AISStream alebo
+        // niektorý zdroj navyše (admin ho vzorkuje a po feedDownMinutes upozorní; feeds.js).
+        if (incoming.pathname === '/health') {
+          const health = aisLiveHealth(Date.now());
+          res.statusCode = health.ok ? 200 : 503;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(JSON.stringify(health));
+          return;
+        }
         // História lode z disku (2026-10-11, bod 7): /api/ais-live/history?mmsi=&days=7 (1–366).
         if (incoming.pathname === '/history') {
           const mmsi = String(incoming.searchParams.get('mmsi') || '').trim();
@@ -9099,11 +9155,21 @@ function aisLiveProxy() {
         }
 
         const maxRows = clampInt(incoming.searchParams.get('maxRows'), 1, AISSTREAM_CACHE_MAX, AISSTREAM_CACHE_MAX);
+        const bounds = parseAisBounds(incoming.searchParams.get('bbox'));
         const { rows, coverage } = selectAisCoverage(_aisStreamVessels.values(), {
           limit: maxRows,
-          bounds: parseAisBounds(incoming.searchParams.get('bbox')),
+          bounds,
           selected: incoming.searchParams.get('selected'),
         });
+        // Lode z oceánu bez MMSI vo výreze, na ktorý sa niekto pozerá, idú v prekladе prvé (2026-10-11).
+        if (bounds && _oceanResolver) {
+          let n = 0;
+          for (const row of rows) {
+            if (typeof row.mmsi !== 'string' || !row.mmsi.startsWith('mt-')) continue;
+            _oceanResolver.want(row.mmsi.slice(3), { urgent: true });
+            if (++n >= 300) break;
+          }
+        }
 
         const feed = aisStreamStatusSnapshot();
 

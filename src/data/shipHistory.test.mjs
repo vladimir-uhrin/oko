@@ -73,3 +73,26 @@ test('dopyt na server: zlé body vyhodí, zoradí; chyba servera = výnimka', as
   assert.equal(out.first, T0);
   await assert.rejects(fetchShipHistory('241190000', 7, async () => ({ ok: false, status: 503 })));
 });
+
+test('zastávky: 2 h do 2 km = zastávka, prechod nie; GPX a KML (2026-10-11)', async () => {
+  const { detectShipStops, shipDurationLabel, shipHistoryGpx, shipHistoryKml } = await import('./shipHistory.js');
+  const base = Date.parse('2026-10-08T00:00:00Z') / 1000;
+  const s = [];
+  for (let i = 0; i < 30; i += 1) s.push({ t: base + i * 600, lat: 51.95 + (i % 2) * 0.004, lon: 4.1, sog: 0, cog: null }); // 5 h v Rotterdame
+  for (let i = 1; i <= 20; i += 1) s.push({ t: base + 30 * 600 + i * 600, lat: 51.95, lon: 4.1 - i * 0.05, sog: 12, cog: 270 }); // plavba
+  s.push({ t: s.at(-1).t + 600, lat: s.at(-1).lat, lon: s.at(-1).lon, sog: 0, cog: null }); // 10 min státie = nie zastávka
+  const stops = detectShipStops(s);
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].startT, base);
+  assert.equal(stops[0].endT, base + 29 * 600);
+  assert.ok(Math.abs(stops[0].lon - 4.1) < 1e-9);
+  assert.equal(shipDurationLabel(stops[0].endT - stops[0].startT, 'sk'), '4 h 50 min');
+  assert.equal(shipDurationLabel(2 * 86400 + 5 * 3600, 'sk'), '2 d 5 h');
+  assert.equal(shipDurationLabel(45 * 60, 'sk'), '45 min');
+  const gpx = shipHistoryGpx(s.slice(0, 2), { name: 'OSLEEN & co', mmsi: '268238202' });
+  assert.match(gpx, /<name>OSLEEN &amp; co<\/name>/);
+  assert.match(gpx, /<trkpt lat="51.95000" lon="4.10000"><time>2026-10-08T00:00:00.000Z<\/time><extensions><sog>0<\/sog><\/extensions><\/trkpt>/);
+  const kml = shipHistoryKml(s.slice(0, 2), { name: 'OSLEEN', mmsi: '268238202', stops: [{ ...stops[0], label: 'Rotterdam' }] });
+  assert.match(kml, /<Placemark><name>Rotterdam<\/name><TimeSpan>/);
+  assert.match(kml, /<coordinates>4.10000,51.95000,0 4.10000,51.95400,0<\/coordinates>/);
+});

@@ -20,6 +20,7 @@ import { t } from './i18n.js';
 const DEFAULT_INTERVAL_MS = 4000;
 
 export function createStraitTrafficChip({
+  onDarkClick = null,
   documentRef = globalThis.document,
   getLivePositions = () => [],
   getDelayedPositions = () => [],
@@ -102,7 +103,18 @@ export function createStraitTrafficChip({
     if (model.hasMovement && model.movingPct !== null) {
       nodes.push(div('oko-strait-move', translate('strait-traffic.moving', { pct: model.movingPct, kts: model.avgSpeedKts ?? '—' })));
     }
-    if (model.dark > 0) nodes.push(div('oko-strait-dark', translate('strait-traffic.dark', { n: model.dark })));
+    if (model.dark > 0) {
+      const dark = div('oko-strait-dark', translate('strait-traffic.dark', { n: model.dark }));
+      // 2026-10-11: klik ukáže na mape len radarové detekcie bez AIS (kontrast s AIS).
+      if (typeof onDarkClick === 'function') {
+        dark.classList.add('oko-strait-dark--btn');
+        dark.title = translate('cmd.sar.dark-only.on');
+        dark.setAttribute('role', 'button');
+        dark.tabIndex = 0;
+        dark.addEventListener('click', () => { try { onDarkClick(); } catch { /* */ } });
+      }
+      nodes.push(dark);
+    }
     nodes.push(div('oko-strait-note', translate('strait-traffic.tracked')));
     return nodes;
   }
@@ -164,6 +176,8 @@ function ensureStyle(doc) {
 .oko-strait-types{font-size:10px;color:#c8d6e6;font-variant-numeric:tabular-nums;margin-top:3px;line-height:1.3;}
 .oko-strait-move{font-size:10px;color:#aebfd2;font-variant-numeric:tabular-nums;margin-top:2px;}
 .oko-strait-dark{font-size:10px;color:#ffb547;font-variant-numeric:tabular-nums;margin-top:2px;}
+.oko-strait-dark--btn{cursor:pointer;text-decoration:underline dotted;}
+.oko-strait-dark--btn:hover{color:#ffd37a;}
 .oko-strait-note{font-size:9px;color:#6f8398;letter-spacing:.03em;margin-top:4px;text-transform:uppercase;}
 `;
   (doc.head || doc.documentElement).appendChild(style);
