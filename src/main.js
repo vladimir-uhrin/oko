@@ -82,6 +82,7 @@ import { createCommandPalette } from './commandPalette.js';
 import { LAYER_GROUP_ORDER, isCatalogLayer, layerGroup, layerKeywords } from './layerCategories.js';
 import { flyToGlobeView, searchAndFlyTo } from './locations.js';
 import { createAircraftSearchCommands } from './aircraftSearchCommands.js';
+import { createVesselSearchCommands } from './vesselSearchCommands.js';
 import { buildConflictDigest } from './conflictSummary.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
@@ -1188,17 +1189,32 @@ async function init() {
       flights: flightsLayer, military: militaryFlightsLayer, dataManager, viewer, Cesium, translate: t,
       notify: (text) => styleManager._showToast(text, { durationMs: 4500 }),
     });
+    // Lode v jednotnom hľadaní (2026-10-11): živé z pamäte + kdekoľvek zo servera.
+    const vesselSearch = createVesselSearchCommands({
+      live: aisLiveVesselsLayer,
+      delayed: [dataManager.layers.get('aishub-vessels')?.module, dataManager.layers.get('gfw-presence')?.module].filter(Boolean),
+      dataManager, viewer, Cesium, translate: t,
+      notify: (text) => styleManager._showToast(text, { durationMs: 5000 }),
+      onRemoteShip: (ship) => window.__godsEyeView.vesselEstimate?.showRemote?.(ship),
+    });
+    window.__godsEyeView.vesselSearch = vesselSearch;
     const commandPalette = createCommandPalette({
       translate: t,
       getCommands: buildCommands,
-      getQueryCommands: (q) => aircraftSearch.queryCommands(q),
-      getAsyncResults: (q) => aircraftSearch.asyncResults(q),
+      getQueryCommands: (q) => [...aircraftSearch.queryCommands(q), ...vesselSearch.queryCommands(q)],
+      getAsyncResults: async (q) => {
+        const [aircraft, vessels] = await Promise.all([
+          aircraftSearch.asyncResults(q).catch(() => []),
+          vesselSearch.asyncResults(q).catch(() => []),
+        ]);
+        return [...aircraft, ...vessels];
+      },
       asyncGroup: 'aircraft-world',
       // Poradie (2026-09-27, vlastník o lupe: „toto tlačidlo patrí Ukrajine" — prázdne hľadanie
       // začínalo 12 smermi frontu): zobrazenie → vrstvy (podľa témy) → konflikty (podľa regiónu).
       // Sledované lety prihláseného (09-27) úplne navrchu — sú to jeho vlastné položky.
       // Lietadlá (živé, potom celý svet) idú hneď za sledované lety — to je to, čo človek píše najčastejšie.
-      groupOrder: ['follows', 'aircraft', 'aircraft-world', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
+      groupOrder: ['follows', 'aircraft', 'aircraft-world', 'vessels', 'vessels-world', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
       onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
     });
     window.__godsEyeView.commandPalette = commandPalette;

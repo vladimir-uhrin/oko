@@ -913,6 +913,13 @@ export function createAishubVesselsLayer({
 
     /** Test seam: vyber loď (bez potreby klikať v Cesiu). */
     _selectForTest(key) { selectVessel(key); },
+    /** Vyber loď (jednotné hľadanie); false = loď vo výreze nie je. */
+    selectContact(id) {
+      const key = String(id ?? '').trim();
+      if (!_byId.has(key)) return false;
+      selectVessel(key);
+      return true;
+    },
 
     _getStateForTest() {
       return { enabled: _enabled, loading: _loading, error: _error, status: _status, rows: _rows.length, bbox: _bbox, meta: _meta, points: _byId.size, labels: _labelCount, selected: _selectedKey };

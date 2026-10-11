@@ -21,7 +21,7 @@
  */
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
-import { MT_BASE, VF_TRACK, BROWSER_UA as TRACK_UA, curlGet, decodeVfTrack, parseMtPort, parseMtPosition, parseMtSearch, parseMtTrack, parseMtVoyage } from './vesselTrackSources.js';
+import { MT_BASE, VF_TRACK, BROWSER_UA as TRACK_UA, curlGet, decodeVfTrack, parseMtGeneral, parseMtPort, parseMtPosition, parseMtSearch, parseMtSearchResults, parseMtTrack, parseMtVoyage } from './vesselTrackSources.js';
 
 /** Posledná poloha a plavba z MarineTraffic — mení sa rýchlo. */
 export const MT_LIVE_TTL_MS = 10 * 60 * 1000;
@@ -564,9 +564,56 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
     res.end(JSON.stringify(body));
   };
 
+  /** Hľadanie lode podľa mena / IMO / MMSI kdekoľvek (2026-10-11, bod 3). */
+  function searchShips(q) {
+    const term = String(q || '').trim().slice(0, 40);
+    return dedupe('s:' + term.toLowerCase(), async () => {
+      const file = path.join(mtDir, 'search', encodeURIComponent(term.toLowerCase()).slice(0, 80) + '.json');
+      const cached = await readFresh(file, 3600_000);
+      if (cached) return cached.results;
+      const results = parseMtSearchResults(await mtJson('/en/search/searchAsset?what=vessel&term=' + encodeURIComponent(term)));
+      await writeAtomic(file, JSON.stringify({ at: now(), results }));
+      return results;
+    });
+  }
+  /** Loď z výsledku hľadania: MMSI, meno a posledná poloha (aj „Roaming"). */
+  function shipById(shipId) {
+    return dedupe('ship:' + shipId, async () => {
+      const file = path.join(mtDir, 'ship-' + shipId + '.json');
+      const cached = await readFresh(file, MT_LIVE_TTL_MS);
+      if (cached) return cached.ship;
+      const [general, position] = await Promise.all([
+        mtJson('/en/vessels/' + shipId + '/general').then(parseMtGeneral).catch(() => null),
+        mtJson('/en/vessels/' + shipId + '/position').then(parseMtPosition).catch(() => null),
+      ]);
+      const ship = { shipId, ...(general || {}), position };
+      await writeAtomic(file, JSON.stringify({ at: now(), ship }));
+      return ship;
+    });
+  }
+
   async function handler(req, res) {
     if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, { error: 'method_not_allowed' }); return; }
     const url = new URL(req.url || '/', 'http://localhost');
+    if (url.pathname === '/search' || url.pathname === '/ship') {
+      const key = clientKey(req);
+      if (!perClient(key)) { sendJson(res, 429, { error: 'rate_limited' }, { 'Retry-After': '30' }); return; }
+      try {
+        if (url.pathname === '/search') {
+          const q = String(url.searchParams.get('q') || '').trim();
+          if (q.length < 3) { sendJson(res, 400, { error: 'short_query' }); return; }
+          sendJson(res, 200, { query: q, results: await searchShips(q) }, { 'Cache-Control': 'public, max-age=600' });
+          return;
+        }
+        const shipId = String(url.searchParams.get('shipId') || '');
+        if (!/^\d{1,10}$/.test(shipId)) { sendJson(res, 400, { error: 'bad_ship' }); return; }
+        sendJson(res, 200, await shipById(shipId), { 'Cache-Control': 'public, max-age=300' });
+      } catch (error) {
+        log('[vessel-info] search failed: ' + (error?.message || error));
+        sendJson(res, 502, { error: 'upstream_failed' });
+      }
+      return;
+    }
     const mmsi = parseMmsi(url.searchParams.get('mmsi'));
     if (!mmsi) { sendJson(res, 400, { error: 'bad_mmsi' }); return; }
     const key = clientKey(req);

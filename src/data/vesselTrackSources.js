@@ -38,6 +38,43 @@ export function parseMtSearch(json, mmsi) {
   return hit?.id ? String(hit.id) : null;
 }
 
+/**
+ * Výsledky hľadania lodí podľa mena / IMO / MMSI (2026-10-11, bod 3): pri mene
+ * je `value` meno a `desc` „Typ [GR]", pri čísle `value` číslo a `desc`
+ * „MENO [GR]". Pure.
+ * @returns {Array<{shipId: string, name: string, typeText: string|null, flagIso2: string|null}>}
+ */
+export function parseMtSearchResults(json, limit = 10) {
+  const out = [];
+  for (const x of Array.isArray(json) ? json : []) {
+    if (String(x?.type) !== 'Vessel' || !x.id) continue;
+    const desc = String(x.desc || '');
+    const flag = /\[([A-Z]{2})\]\s*$/.exec(desc)?.[1] || null;
+    const descText = desc.replace(/\s*\[[A-Z]{2}\]\s*$/, '').trim();
+    const numeric = /^\d+$/.test(String(x.value || ''));
+    out.push({
+      shipId: String(x.id),
+      name: numeric ? descText : String(x.value || '').trim(),
+      typeText: numeric ? null : (descText || null),
+      flagIso2: flag ? flag.toLowerCase() : null,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Identita lode z /en/vessels/<id>/general (MMSI, IMO, meno, typ). Pure. */
+export function parseMtGeneral(json) {
+  const mmsi = json?.mmsi != null ? String(json.mmsi) : null;
+  return {
+    mmsi: mmsi && /^\d{9}$/.test(mmsi) ? mmsi : null,
+    imo: json?.imo ? String(json.imo) : null,
+    name: json?.name ? String(json.name) : null,
+    typeText: json?.subtype || json?.type || null,
+    flagIso2: json?.countryCode ? String(json.countryCode).toLowerCase() : null,
+  };
+}
+
 /** Posledná poloha. Pure. */
 export function parseMtPosition(json) {
   const lat = finite(json?.lat);

@@ -594,6 +594,37 @@ const aisLiveVesselsLayer = {
    * @param {string|number} query MMSI or partial vessel name.
    * @returns {{ mmsi: string, name: string, position: Cesium.Cartesian3, latitude: number, longitude: number, speedKt: number|null, course: number|null, type: string }|null}
    */
+  /**
+   * Lode v pamäti podľa mena / MMSI / IMO / volacieho znaku (jednotné hľadanie, 2026-10-11).
+   * @param {string} query
+   * @param {{limit?: number}} [o]
+   * @returns {Array<{mmsi: string, name: string, score: number}>}
+   */
+  searchVessels(query, { limit = 8 } = {}) {
+    const q = String(query ?? '').trim().toUpperCase();
+    if (q.length < 3) return [];
+    const out = [];
+    for (const record of state.vesselRecords || []) {
+      const name = String(record.name || '').toUpperCase();
+      let score = 0;
+      if (record.mmsi === q || String(record.imo || '') === q) score = 100;
+      else if (name === q) score = 90;
+      else if (name.startsWith(q)) score = 70;
+      else if (name.includes(q)) score = 50;
+      else if (String(record.callSign || '').toUpperCase() === q) score = 60;
+      if (score) out.push({ mmsi: record.mmsi, name: record.name, score });
+    }
+    return out.sort((x, y) => y.score - x.score).slice(0, limit);
+  },
+
+  /** Vyber loď a preleť k nej (jednotné hľadanie). @returns {boolean} */
+  selectByMmsi(mmsi) {
+    const record = state.vesselMap.get(String(mmsi ?? '').trim());
+    if (!record) return false;
+    selectAndFocusVessel(record);
+    return true;
+  },
+
   findByQuery(query) {
     if (query === null || query === undefined) return null;
     const records = state.vesselRecords;
