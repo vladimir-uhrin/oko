@@ -278,6 +278,12 @@ export function matchTileRowByName(t, index, maxKm = 60) {
   return found.size === 1 ? [...found][0] : null;
 }
 
+/** Adresa z tohto počítača (127.0.0.1, ::1, aj v IPv4-mapped tvare). Pure. */
+export function isLoopbackAddress(address) {
+  const a = String(address || '').trim().toLowerCase();
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1' || a.startsWith('127.');
+}
+
 /** Čitateľný pôvod polohy do karty. Pure. */
 export function feedLabel(feed) {
   if (feed === 'openseafeed') return 'OpenSeaFeed (CC BY 4.0)';

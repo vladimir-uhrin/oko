@@ -83,6 +83,15 @@ export function openAuthStore(filename) {
         label TEXT NOT NULL DEFAULT '' CHECK (length(label) <= 80), created_at INTEGER NOT NULL,
         PRIMARY KEY (user_id, key)
       );
+      -- Web Push (2026-10-11): predplatné prehliadača k účtu (adresa push služby + 2 kľúče), nič o polohe.
+      -- Aditívne, bez zvýšenia user_version; maže sa s účtom.
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        endpoint TEXT PRIMARY KEY CHECK (length(endpoint) <= 2048),
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        p256dh TEXT NOT NULL CHECK (length(p256dh) <= 200), auth TEXT NOT NULL CHECK (length(auth) <= 200),
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions(user_id);
       -- Prihlásenie cez Google/GitHub (2026-09-27): identita poskytovateľa → účet. Aditívne,
       -- bez zvýšenia user_version. E-mail je len pre prehľad v účte a export.
       CREATE TABLE IF NOT EXISTS oauth_identities (
@@ -267,6 +276,23 @@ export function openAuthStore(filename) {
       });
     },
     removeFollow: (userId, key) => db.prepare('DELETE FROM followed_flights WHERE user_id = ? AND key = ?').run(userId, key).changes,
+    /** Sledované lode všetkých účtov (strážca na serveri, 2026-10-11). */
+    followedVessels: () => db.prepare(`SELECT user_id AS userId, key, label FROM followed_flights WHERE key LIKE 'mmsi:%' ORDER BY key`).all(),
+    pushSubscriptions: userId => db.prepare('SELECT endpoint, p256dh, auth, created_at AS createdAt FROM push_subscriptions WHERE user_id = ? ORDER BY created_at').all(userId),
+    /** Pridá predplatné; známa adresa sa len obnoví (aj pod iný účet — jeden prehliadač, iné prihlásenie). false = plný zoznam. */
+    addPush(userId, sub, now, max) {
+      return transaction(() => {
+        const exists = db.prepare('SELECT 1 FROM push_subscriptions WHERE user_id = ? AND endpoint = ?').get(userId, sub.endpoint);
+        if (!exists && db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?').get(userId).n >= max) return false;
+        db.prepare(`INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`)
+          .run(sub.endpoint, userId, sub.p256dh, sub.auth, now);
+        return true;
+      });
+    },
+    removePush: (userId, endpoint) => (userId
+      ? db.prepare('DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?').run(userId, endpoint).changes
+      : db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint).changes),
     identity: (provider, subject) => db.prepare('SELECT * FROM oauth_identities WHERE provider = ? AND subject = ?').get(provider, subject),
     identities: userId => db.prepare(`SELECT provider, email, created_at AS createdAt FROM oauth_identities
       WHERE user_id = ? ORDER BY created_at, provider`).all(userId),

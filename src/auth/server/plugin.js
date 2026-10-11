@@ -4,6 +4,7 @@ import { createAuthService, parseOrigins, parseOwnerEmails } from './http.js';
 import { createWebhookMailer } from './mail.js';
 import { oauthProvidersFromEnv } from './oauth.js';
 import { createAdminSources } from './adminSources.js';
+import { createFollowWatch } from './pushWatch.js';
 import { getAdminRuntime } from '../../admin/server/plugin.js';
 
 export const AUTH_FILE_DENY = ['**/.auth-data/**', '**/*.sqlite*', '**/*.db', '**/*.db-*'];
@@ -22,13 +23,19 @@ export function authPlugin(env = process.env) {
   const ownerEmails = parseOwnerEmails(env.OKO_OWNER_EMAILS);
   let store;
   let auth;
+  let watch;
   const ensure = () => {
     if (!auth) {
       store = openAuthStore(filename);
+      // Strážca sledovaných lodí + Web Push (2026-10-11): beží len v službe (nie v skúšobnej inštancii,
+      // AIS_STATE_PERSIST=off) a len s VAPID kľúčmi v .env; bez nich UI ponuku neukáže.
+      watch = createFollowWatch({ store, env, port: () => currentServer?.httpServer?.address()?.port ?? null,
+        log: message => console.warn(message), stateFile: path.join(root, '.gev-cache', 'follow-watch.json') });
+      if (String(env.AIS_STATE_PERSIST || '').toLowerCase() !== 'off') watch.start();
       // Admin panel (2026-10-03): stav feedov sa číta z /status endpointov tohto istého servera.
       const adminSources = createAdminSources({ root, dbFile: filename, port: () => currentServer?.httpServer?.address()?.port ?? null,
         runtime: getAdminRuntime });
-      auth = createAuthService({ store, origins, mailer, oauthProviders, adminSources, ownerEmails, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true' });
+      auth = createAuthService({ store, origins, mailer, oauthProviders, adminSources, ownerEmails, trustProxy: env.AUTH_TRUST_CLOUDFLARE_PROXY === 'true', push: watch });
     }
     return auth;
   };
@@ -74,7 +81,10 @@ export function authPlugin(env = process.env) {
         res.end(JSON.stringify({ error: 'auth_unavailable' }));
       }
     });
+    // Strážca má bežať aj bez prvej požiadavky na účty — naštartuj službu účtov po spustení servera.
+    server.httpServer?.once('listening', () => { try { ensure(); } catch { /* prvá požiadavka to skúsi znova */ } });
     server.httpServer?.once('close', () => {
+      watch?.stop();
       if (auth) void auth.close().finally(() => store?.close());
       else store?.close();
     });

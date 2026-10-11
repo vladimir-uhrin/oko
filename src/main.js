@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { initAuthPanel } from './auth/panel.js';
 import { createFollowedFlights, installFollowButton } from './followedFlights.js';
 import { createFollowedVessels, installVesselFollowButtons } from './followedVessels.js';
+import { createPushNotifications } from './pushNotifications.js';
 import './auth/panel.css';
 // Admin (2026-10-03): anonymná štatistika návštev a oznam prevádzkovateľa.
 import { initSiteTelemetry } from './siteTelemetry.js';
@@ -1145,6 +1146,7 @@ async function init() {
     // navrchu v hľadaní, toast pri vzlete/pristátí. Bez účtu (panel nenaštartoval) sa nič nepridá.
     let followedFlights = null;
     let followedVessels = null;
+    let pushNotifications = null;
     try {
       if (accountCenter) {
         followedFlights = createFollowedFlights({
@@ -1169,6 +1171,7 @@ async function init() {
       const cmds = [];
       try { cmds.push(...(followedFlights?.commands() || [])); } catch { /* sledované lety sú voliteľné */ }
       try { cmds.push(...(followedVessels?.commands() || [])); } catch { /* sledované lode sú voliteľné */ }
+      try { const pc = pushNotifications?.command(); if (pc) cmds.push(pc); } catch { /* push je voliteľný */ }
       // Radar: len lode bez AIS (2026-10-11) — zapne radarovú vrstvu a nechá len detekcie bez zhody.
       try {
         const sar = dataManager.layers.get('gfw-sar')?.module;
@@ -1240,6 +1243,13 @@ async function init() {
       onRemoteShip: (ship) => window.__godsEyeView.vesselEstimate?.showRemote?.(ship),
     });
     window.__godsEyeView.vesselSearch = vesselSearch;
+    // Hlboký odkaz na loď (2026-10-11): /?ship=<MMSI> — z push upozornenia; po obnove pohľadu a načítaní vrstiev.
+    try {
+      const ship = new URLSearchParams(window.location?.search || '').get('ship');
+      if (/^\d{9}$/.test(ship || '')) {
+        void Promise.resolve(styleManager.initialRestorePromise).catch(() => {}).then(() => { setTimeout(() => { void vesselSearch.openByMmsi(ship); }, 8_000); });
+      }
+    } catch { /* bez odkazu */ }
     // Sledované lode (2026-10-11, bod 6): zvonček vedľa krížika na karte lode, zoznam k účtu
     // (ten istý ako lety), navrchu v hľadaní, toast pri vyplávaní/priplávaní.
     try {
@@ -1284,6 +1294,9 @@ async function init() {
           ],
         });
         window.__godsEyeView.followedVessels = followedVessels;
+        // Upozornenia aj so zatvorenou stránkou (2026-10-11): Web Push k účtu, prepínač v hľadaní.
+        pushNotifications = createPushNotifications({ client: accountCenter.client, translate: t, notify: (text) => styleManager._showToast(text, { durationMs: 6000 }) });
+        window.__godsEyeView.pushNotifications = pushNotifications;
       }
     } catch (error) { console.warn('[follow] followed vessels unavailable:', error?.message || error); }
     const commandPalette = createCommandPalette({

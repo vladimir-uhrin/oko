@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from './passwords.js';
 import { unavailableMailer, accountMail } from './mail.js';
 import { receivePhoto } from './photos.js';
 import { FOLLOW_MAX, sanitizeFollow, validFollowKey } from '../follows.js';
+import { PUSH_MAX, sanitizePushSubscription } from '../push.js';
 import {
   OAUTH_STATE_TTL_MS, authorizeUrl, createOAuthStateStore, fetchOAuthIdentity, safeReturnPath, withQueryParam,
 } from './oauth.js';
@@ -109,7 +110,7 @@ async function readJson(req) {
 /** Framework-free controllers plus reusable authentication / CSRF middleware. */
 export function createAuthService({ store, origins = [], trustProxy = false, now = Date.now,
   passwords = { hash: hashPassword, verify: verifyPassword }, mailer = unavailableMailer,
-  oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args), adminSources = {}, ownerEmails = [] }) {
+  oauthProviders = {}, oauthFetch = (...args) => globalThis.fetch(...args), adminSources = {}, ownerEmails = [], push = null }) {
   let lastPrune = 0;
   // Jedno vlastníctvo (2026-10-03): admin pustí rolu `owner` z DB AJ účty z OKO_OWNER_EMAILS (udalosti).
   // 2026-10-04: e-mail z OKO_OWNER_EMAILS platí len pre OVERENÝ účet — registrácia e-mail neoveruje, takže
@@ -120,7 +121,7 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
   const pendingRecovery = new Set();
   const oauthStates = createOAuthStateStore({ now });
   const mailConfigured = mailer.configured === true && typeof mailer.send === 'function' && Boolean(mailer.publicUrl);
-  const capabilities = Object.freeze({ mailConfigured, emailVerification: mailConfigured,
+  const capabilities = Object.freeze({ mailConfigured, emailVerification: mailConfigured, push: Boolean(push?.enabled?.()),
     passwordReset: mailConfigured, emailChange: mailConfigured, passwordChange: true, sessionManagement: true, accountExport: true,
     // Prihlásenie cez Google/GitHub (2026-09-27): len poskytovatelia s ID aj tajomstvom v .env.
     oauth: Object.freeze({ google: Boolean(oauthProviders.google), github: Boolean(oauthProviders.github) }) });
@@ -367,7 +368,7 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
       const routes = { '/api/auth/session': ['GET'], '/api/auth/csrf': ['GET'], '/api/auth/register': ['POST'],
         '/api/auth/login': ['POST'], '/api/auth/logout': ['POST'], '/api/account': ['GET', 'PATCH', 'DELETE'],
         '/api/account/password': ['POST'], '/api/account/security': ['GET'], '/api/account/export': ['GET'],
-        '/api/account/photo': ['GET', 'PUT', 'DELETE'], '/api/account/follows': ['GET', 'POST', 'DELETE'],
+        '/api/account/photo': ['GET', 'PUT', 'DELETE'], '/api/account/follows': ['GET', 'POST', 'DELETE'], '/api/account/push': ['GET', 'POST', 'DELETE'],
         '/api/account/sessions/revoke-others': ['POST'], '/api/account/sessions/revoke': ['POST'], '/api/account/email/verification': ['POST'],
         '/api/account/email/change': ['POST'], '/api/auth/email/verify': ['POST'],
         '/api/auth/password/forgot': ['POST'], '/api/auth/password/reset': ['POST'],
@@ -414,6 +415,26 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
           return store.follows(ctx.session.user_id);
         });
         return json(res, 200, { follows, max: FOLLOW_MAX });
+      }
+      // Web Push (2026-10-11): predplatné prehliadača k účtu; verejný VAPID kľúč; bez kľúčov na serveri 503.
+      if (pathname === '/api/account/push') {
+        const enabled = Boolean(push?.enabled?.());
+        if (req.method === 'GET') return json(res, 200, { enabled, publicKey: enabled ? push.publicKey() : null, subscriptions: store.pushSubscriptions(ctx.session.user_id).length, max: PUSH_MAX });
+        if (!enabled) throw fail('push_unavailable', 503);
+        rate(ctx, 'push', ctx.session.user_id, 60);
+        const body = await readJson(req);
+        if (req.method === 'POST') {
+          fields(body, ['subscription']);
+          const sub = sanitizePushSubscription(body.subscription);
+          if (!sub) throw fail('invalid_subscription');
+          const ok = store.transaction(() => { active(ctx); return store.addPush(ctx.session.user_id, sub, now(), PUSH_MAX); });
+          if (!ok) throw fail('push_limit', 409);
+        } else {
+          fields(body, ['endpoint']);
+          if (typeof body.endpoint !== 'string' || body.endpoint.length > 2048) throw fail('invalid_subscription');
+          store.removePush(ctx.session.user_id, body.endpoint);
+        }
+        return json(res, 200, { enabled, subscriptions: store.pushSubscriptions(ctx.session.user_id).length, max: PUSH_MAX });
       }
       if (pathname === '/api/account/photo') {
         if (req.method === 'GET') {

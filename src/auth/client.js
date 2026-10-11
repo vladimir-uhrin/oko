@@ -140,6 +140,10 @@ export function createAuthClient({ fetchImpl = (...args) => fetch(...args) } = {
     follows: () => request('/api/account/follows'),
     follow: data => write('/api/account/follows', 'POST', data),
     unfollow: key => write('/api/account/follows', 'DELETE', { key }),
+    // Web Push (2026-10-11): stav + verejný kľúč, predplatné prehliadača k účtu, odhlásenie zariadenia.
+    push: () => request('/api/account/push'),
+    pushSubscribe: subscription => write('/api/account/push', 'POST', { subscription }),
+    pushUnsubscribe: endpoint => write('/api/account/push', 'DELETE', { endpoint }),
     /** Zápis inej služby pod účtom (udalosti vlastníka, 2026-10-03): CSRF, JSON, bez globálneho busy. */
     send: (path, method, body) => write(path, method, body ?? {}),
   };
