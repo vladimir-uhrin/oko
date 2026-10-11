@@ -90,6 +90,20 @@ test('názvy panelov hovoria, čo panel robí (vlastník: „aby to každý poch
   }
 });
 
+test('drobnosti z QA 2026-10-11: STOP počas scény, Články namiesto Témy, toast po zatvorení osi, klik počas ZAPÍNAM ruší', () => {
+  assert.match(html, /<button id="scene-playback-stop" type="button" data-i18n="scene\.playback-stop">/);
+  assert.match(css, /body\.scene-playback-mode #scene-playback-stop \{ display: block; \}/);
+  const director = readFileSync(new URL('./scenes/director.js', import.meta.url), 'utf8');
+  assert.match(director, /getElementById\('scene-playback-stop'\)\?\.addEventListener\('click', \(\) => \{\s*this\.stopScene\('Stopped'\);/);
+  assert.equal(SK_STRINGS['topics.link'], 'Články');
+  assert.equal(EN_STRINGS['topics.link'], 'Articles');
+  assert.ok(SK_STRINGS['ukraine.karta.restored'] && EN_STRINGS['ukraine.karta.restored']);
+  assert.match(main, /restoreAutoKarta\(\{ notify: true \}\)/, 'zatvorená os ohlási návrat podkladu');
+  const manager = readFileSync(new URL('./data/manager.js', import.meta.url), 'utf8');
+  assert.match(manager, /entry\?\.lifecycleState === 'enabling'\s*\? false/, 'klik počas ZAPÍNAM = vypnúť');
+  assert.doesNotMatch(manager, /button\.disabled = transitioning;/, 'prechod tlačidlo nezamyká');
+});
+
 test('VZHĽAD: Štýl a podklad mapy je panel pruhu pred Zobrazením; main.js doň presunie štýly a podklad z dolnej lišty', () => {
   assert.match(html, /<div id="look-panel" class="panel-collapsible collapsed" data-panel-id="look-panel">[\s\S]*?data-i18n="panel\.look"[\s\S]*?<div class="look-body" data-look-body><\/div>/);
   assert.ok(html.indexOf('id="look-panel"') < html.indexOf('data-lane-zone="settings"'), 'v markupe pruhu pred nadpisom zóny (poradie dáva CSS)');

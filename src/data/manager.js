@@ -2100,13 +2100,16 @@ export class DataLayerManager {
       toggle.className = `data-toggle-btn${layer.enabled ? ' active' : ''}`;
       this._syncToggleButton(toggle, layer);
       toggle.addEventListener('click', async () => {
-        toggle.disabled = true;
+        // Klik počas ZAPÍNAM/VYPÍNAM (QA 2026-10-11: „klik počas ZAPÍNAM sa ignoruje") = opačný zámer:
+        // setEnabled nový zámer prevezme a predošlý preruší (activeVisibilityIntent.controller).
+        const entry = this.layers.get(layer.id);
+        const desired = entry?.lifecycleState === 'enabling'
+          ? false
+          : entry?.lifecycleState === 'disabling' ? true : !this.isEnabled(layer.id);
         try {
-          await this.setEnabled(layer.id, !this.isEnabled(layer.id), { origin: 'user' });
+          await this.setEnabled(layer.id, desired, { origin: 'user' });
         } catch (error) {
           console.warn(`[Data] ${layer.id} toggle error:`, error);
-        } finally {
-          toggle.disabled = false;
         }
       });
 
@@ -2373,7 +2376,8 @@ export class DataLayerManager {
     button.dataset.feedState = transitioning
       ? layer.lifecycleState
       : (uncertain ? 'uncertain' : feedState);
-    button.disabled = transitioning;
+    // Prechod tlačidlo nezamyká (2026-10-11): klik počas ZAPÍNAM načítanie zruší.
+    button.disabled = false;
     button.textContent = transitioning
       ? (layer.lifecycleState === 'enabling' ? t('manager.state.enabling') : t('manager.state.disabling'))
       : (uncertain ? t('manager.state.uncertain') : (layer.enabled ? FEED_STATE_LABELS[feedState] : t('manager.state.off')));

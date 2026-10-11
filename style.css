@@ -13265,6 +13265,10 @@ body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
 /* Dolná lišta bez Štýlu: dok nesie Polohu a mikrofón, #control-panel ostáva v DOM pre StyleManager. */
 body.oko-look-in-lane #command-dock > #control-panel { display: none !important; }
 body.cockpit-mode #left-panel-stack > #look-panel { display: none !important; }
+/* STOP počas prehrávania scény (2026-10-11): jediné viditeľné ovládanie, keď je chróm skrytý. */
+#scene-playback-stop { display: none; position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 400; padding: 8px 16px; font: 600 11px/1 var(--font-mono, monospace); letter-spacing: 2px; color: #fff; background: rgba(160, 32, 32, 0.85); border: 1px solid rgba(255, 90, 90, 0.7); border-radius: 6px; cursor: var(--cursor-pointer, pointer); }
+#scene-playback-stop:hover { background: rgba(200, 40, 40, 0.95); }
+body.scene-playback-mode #scene-playback-stop { display: block; }
 #left-panel-stack.oko-lane-with-rail { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; pointer-events: auto; }
 /* Stĺpec len taký široký ako jeho najširší panel (09-27, vlastník: „nesmie byť prekrytý glóbus"):
    pri pevných 360 px ležal posuvník aj prázdny pás vpravo od pilúl (pointer-events: auto) cez okraj

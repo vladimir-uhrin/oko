@@ -185,9 +185,11 @@ Cieľ vlastníka: „logické, prehľadné, mobile friendly". Jedna logika pre p
   názvu ~70 px), opacity 0,9 a text 0,78 (bolo 0,72 / 0,3), hover = 1,0 + jas 1,25 + biely text;
   „Réžia scén" sa v zbalených Preletoch neukazuje. Pravidlo `#left-panel-stack > [data-panel-id].collapsed`.
   PASCA: prehliadač drží `style.css` v cache aj po reload — overovať s `?v=`.
-- Ďalšie kroky (drobné): prelety úžin aj do panela Blízky východ; STOP viditeľné počas scény
-  (dnes len Esc); zrušenie načítania klikom počas „ZAPÍNAM"; TÉMY vpravo hore premenovať na
-  „Články" (sú to obsahové stránky, nie témy vzhľadu).
+- **Drobnosti (vlastník: „sprav aj drobnosti", v pracovnom strome po 47577ce):** plávajúce
+  **STOP (Esc)** počas prehrávania scény (`#scene-playback-stop`, director.js); klik počas
+  **ZAPÍNAM/VYPÍNAM** pošle opačný zámer a načítanie zruší (manager.js — tlačidlo sa už nezamyká);
+  **toast „Os zatvorená — podklad mapy vrátený"** pri × na osi Ukrajiny; **TÉMY → Články**.
+  Nerobené: prelety úžin v paneli Blízky východ (duplikovalo by Prelety kamerou).
 
 ## 8. Ručný funkčný test (2026-10-11, okolive.sk v paneli prehliadača, 935×860)
 Každé tlačidlo klikané naozaj (myšou cez odkaz prvku), účinok overený v DOM, v hashi adresy

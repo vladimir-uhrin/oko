@@ -422,6 +422,10 @@ export class SceneDirector {
     this._sceneStopBtn?.addEventListener('click', () => {
       this.stopScene('Stopped');
     });
+    // Plávajúce STOP v režime prehrávania (panel Prelety je vtedy skrytý; Escape ostáva).
+    document.getElementById('scene-playback-stop')?.addEventListener('click', () => {
+      this.stopScene('Stopped');
+    });
 
     this._sceneNextBtn?.addEventListener('click', () => {
       this.runNextScene();

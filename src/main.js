@@ -1388,13 +1388,17 @@ async function init() {
     // a vráti sa pri odchode zo smeru (úžina, iný konflikt, zatvorená os) — ak si
     // medzitým používateľ podklad nezmenil sám.
     let autoKartaPrev = null;
-    const restoreAutoKarta = () => {
+    const restoreAutoKarta = ({ notify = false } = {}) => {
       const prev = autoKartaPrev; autoKartaPrev = null;
-      if (prev && mapStackController.getActiveId() === 'karta') { try { void Promise.resolve(styleManager._setMapStack(prev)).catch(() => {}); } catch { /* */ } }
+      if (prev && mapStackController.getActiveId() === 'karta') {
+        try { void Promise.resolve(styleManager._setMapStack(prev)).catch(() => {}); } catch { /* */ }
+        // QA 2026-10-11: × na osi vrátilo podklad bez slova — používateľ nevedel, prečo sa mapa zmenila.
+        if (notify) { try { styleManager._showToast?.(t('ukraine.karta.restored'), { durationMs: 4000 }); } catch { /* */ } }
+      }
     };
     onActiveMapStackChange((stack) => { if (stack?.id !== 'karta') autoKartaPrev = null; });
     // Zatvorená časová os = odchod zo smeru.
-    ukraineTimeline.onChange((st) => { if (!st?.shown && autoKartaPrev) restoreAutoKarta(); });
+    ukraineTimeline.onChange((st) => { if (!st?.shown && autoKartaPrev) restoreAutoKarta({ notify: true }); });
     // Návrat z UKRAJINY (2026-10-10, vlastník: „keď zapnem Ukrajinu neviem ako ju vypnúť"):
     // pred prvým smerom si zapamätáme kameru a vrstvy, ktoré scéna vypne.
     let frontReturnPose = null;
