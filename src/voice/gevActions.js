@@ -270,6 +270,8 @@ const reverseGeocodeCache = new Map();
 const reverseGeocodeInFlight = new Map();
 const nearbyPlacesCache = new Map();
 const nearbyPlacesInFlight = new Map();
+/** Google Places vypnuté v admine (403): v tejto relácii sa už nepýtame (2026-10-11, šum v konzole pri každom načítaní). */
+let nearbyPlacesDisabled = false;
 const VISIBLE_ENTITY_SHORTLIST = 64;
 const BASEMAP_CONTEXT_WAIT_MS = 1500;
 const viewTargetCache = new WeakMap();
@@ -3119,6 +3121,7 @@ async function fetchNearbyPlaces(latitude, longitude, cameraHeightM) {
 
   const request = (async () => {
     try {
+      if (nearbyPlacesDisabled) { nearbyPlacesCache.set(cacheKey, []); return []; }
       const params = new URLSearchParams({
         lat: String(latitude),
         lon: String(longitude),
@@ -3126,6 +3129,7 @@ async function fetchNearbyPlaces(latitude, longitude, cameraHeightM) {
       });
       const response = await fetchWithTimeout(`/api/google/nearby-places?${params}`, {}, 5000);
       const data = await response.json().catch(() => null);
+      if (response.status === 403) nearbyPlacesDisabled = true;
       const places = response.ok && Array.isArray(data?.places)
       ? data.places.filter((place) => place?.name).slice(0, 12)
         : [];
