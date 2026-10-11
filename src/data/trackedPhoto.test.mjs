@@ -35,7 +35,8 @@ test('foto: URL dopytu len pre platný 24-bitový hex', () => {
   assert.equal(planespottersUrlForHex('3c64'), null);
   assert.equal(planespottersUrlForHex('zz6444'), null);
   assert.equal(planespottersUrlForHex(''), null);
-  assert.match(PLANESPOTTERS_PHOTO_API, /^https:\/\/api\.planespotters\.net\/pub\/photos\/hex\/$/);
+  // Zámerná zmena pinu (2026-10-11): fotky idú cez vlastný proxy (planespottersProxy.js), nie priamo na planespotters.
+  assert.equal(PLANESPOTTERS_PHOTO_API, '/api/planespotters/hex/');
 });
 
 test('foto: parser berie prvú použiteľnú fotku — náhľad, odkaz z odpovede nezmenený, fotograf', () => {

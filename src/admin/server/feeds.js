@@ -43,7 +43,7 @@ export const FEEDS = Object.freeze([
   { id: 'youtube', label: 'YouTube live', prefixes: ['/api/youtube-live'], toggle: true },
   { id: 'bikeshare', label: 'Zdieľané bicykle', prefixes: ['/api/gbfs'], toggle: true },
   { id: 'translate', label: 'Preklad', prefixes: ['/api/translate'], toggle: true },
-  { id: 'media', label: 'Obrázky a logá', prefixes: ['/api/img', '/api/link-image', '/api/logo'], toggle: true },
+  { id: 'media', label: 'Obrázky a logá', prefixes: ['/api/img', '/api/link-image', '/api/logo', '/api/planespotters'], toggle: true },
   // Systémové cesty: len štatistika, vypnúť ich z panelu nejde.
   { id: 'share', label: 'Zdieľanie', prefixes: ['/api/share', '/s'] },
   { id: 'accounts', label: 'Účty', prefixes: ['/api/auth', '/api/account'] },

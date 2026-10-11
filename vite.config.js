@@ -126,6 +126,7 @@ import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.j
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
 import { readAisStateFile, restoreAisState, serializeAisState, writeAisStateFile } from './src/data/aisStatePersist.js';
 import { createShipServer } from './src/data/shipServer/index.js';
+import { planespottersProxy } from './src/data/planespottersProxy.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -11287,6 +11288,8 @@ function militaryInstallationsProxy() {
           res.end(JSON.stringify({ ...stale.payload, status: 'stale' }));
           return;
         }
+        // Príčina do logu (2026-10-11): 503 bez stopy sa nedal diagnostikovať.
+        console.warn('[military-installations] Overpass zlyhal a cache je prázdna:', error?.message || error);
         res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify({ error: 'Mapped installation context is temporarily unavailable' }));
       }
@@ -12258,6 +12261,7 @@ export default defineConfig(({ mode }) => {
       vesselInfoProxy(),
       // Plavebná trasa po mori namiesto priamky (2026-10-11, searoute-js, lokálny výpočet).
       seaRouteProxy({ cacheDir: path.join(__dirname, '.gev-cache', 'searoute') }),
+      planespottersProxy(),
       gfwPresenceProxy(),
       logoProxy(),
       gasProxy(),

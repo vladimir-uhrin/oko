@@ -24,7 +24,9 @@ import { governorRequestRender } from '../renderGovernor.js';
 import { getActiveTrackedReadoutId } from './trackedReadout.js';
 import { t } from '../i18n.js';
 
-export const PLANESPOTTERS_PHOTO_API = 'https://api.planespotters.net/pub/photos/hex/';
+// 2026-10-11: cez vlastný proxy (planespottersProxy.js) — priamy dopyt dával pri neznámom hexe odpoveď bez CORS
+// hlavičky (chyba v konzole) a žiadnu cache; proxy drží fotku 24 h a „bez fotky" 6 h.
+export const PLANESPOTTERS_PHOTO_API = '/api/planespotters/hex/';
 /** Horný limit z podmienok API pre cache JSON odpovede. */
 export const PHOTO_CACHE_TTL_MS = 24 * 3600 * 1000;
 export const PHOTO_STORAGE_PREFIX = 'oko-planespotters:';
