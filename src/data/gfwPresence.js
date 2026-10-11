@@ -65,6 +65,34 @@ const HULL_ALPHA = 0.88;
  * @param {object} viewer
  * @returns {{west:number,south:number,east:number,north:number}|null}
  */
+/** Proxy odmietne výrez nad 40° na stranu — šikmý pohľad na úžinu dal 53° (2026-10-11, Hormuz: radar prázdny s HTTP 400). */
+export const GFW_MAX_BBOX_DEG = 38;
+
+/**
+ * Obdĺžnik najviac GFW_MAX_BBOX_DEG na stranu, zúžený okolo stredu (bod pod kamerou, inak stred
+ * obdĺžnika). Menší výrez sa nemení. Pure.
+ */
+export function clampGfwBbox(bbox, center = null, maxDeg = GFW_MAX_BBOX_DEG) {
+  if (!bbox) return bbox;
+  let { west, south, east, north } = bbox;
+  const cx = Number.isFinite(center?.lon) ? Math.min(east, Math.max(west, center.lon)) : (west + east) / 2;
+  const cy = Number.isFinite(center?.lat) ? Math.min(north, Math.max(south, center.lat)) : (south + north) / 2;
+  if (east - west > maxDeg) { west = Math.max(west, cx - maxDeg / 2); east = Math.min(east, west + maxDeg); west = Math.max(bbox.west, east - maxDeg); }
+  if (north - south > maxDeg) { south = Math.max(south, cy - maxDeg / 2); north = Math.min(north, south + maxDeg); south = Math.max(bbox.south, north - maxDeg); }
+  return { west, south, east, north };
+}
+
+/** Bod na elipsoide pod stredom obrazovky (kam sa kamera pozerá), alebo null. */
+function cameraGroundCenter(viewer) {
+  try {
+    const canvas = viewer.scene?.canvas;
+    const cart = viewer.camera.pickEllipsoid(new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2), Cesium.Ellipsoid.WGS84);
+    if (!cart) return null;
+    const c = Cesium.Cartographic.fromCartesian(cart);
+    return { lon: Cesium.Math.toDegrees(c.longitude), lat: Cesium.Math.toDegrees(c.latitude) };
+  } catch { return null; }
+}
+
 export function gfwViewBbox(viewer, maxCameraM = GFW_PRESENCE_MAX_CAMERA_M) {
   const camera = viewer?.camera;
   if (!camera || !(camera.positionCartographic?.height <= maxCameraM)) return null;
@@ -75,7 +103,7 @@ export function gfwViewBbox(viewer, maxCameraM = GFW_PRESENCE_MAX_CAMERA_M) {
   const south = Cesium.Math.toDegrees(rect.south);
   const north = Cesium.Math.toDegrees(rect.north);
   if (![west, east, south, north].every(Number.isFinite) || !(west < east) || !(south < north)) return null;
-  return quantizeGfwBbox({ west, south, east, north });
+  return quantizeGfwBbox(clampGfwBbox({ west, south, east, north }, cameraGroundCenter(viewer)));
 }
 
 /** Rovnaký výrez = rovnaký dopyt. Pure. */
