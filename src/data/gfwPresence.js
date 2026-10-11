@@ -22,7 +22,7 @@ import { currentLanguage, t } from '../i18n.js';
 import { GFW_CELL_DEG, GFW_HIGH_CELL_DEG, quantizeGfwBbox } from './gfwPresenceCore.js';
 import { isOwnedByOtherLayer, registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
 import { HISTORY_LINE_STYLE, createVesselVoyageLine, historyLinePositionsDeg } from './vesselVoyageLine.js';
-import { buildVesselTrackedEntry } from './vesselTrackedCard.js';
+import { buildVesselTrackedEntry, clearVesselEstimateFor, syncVesselEstimate } from './vesselTrackedCard.js';
 import {
   VESSEL_CARD_FADE_DISTANCE_M,
   accentForVesselType,
@@ -384,6 +384,8 @@ export function createGfwPresenceLayer({
     if (_selectedRow && _selectedKey && !_byId.has(_selectedKey)) {
       cards.push(gfwSelectedCard(_selectedRow, Cesium.Cartesian3.fromDegrees(_selectedRow.lon, _selectedRow.lat, GFW_PRESENCE_POINT_HEIGHT_M), _meta, t, currentLanguage(), _selectedTrack));
     }
+    const trackedCard = cards.find((c) => c.variant === 'tracked');
+    if (trackedCard) syncVesselEstimate('gfw', trackedCard); else clearVesselEstimateFor('gfw');
     cards.sort((a, b) => b.priority - a.priority);
     const entries = cards.slice(0, GFW_PRESENCE_MAX_LABELS).map((card) => (card.variant === 'tracked' ? card : applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M)));
     _labelCount = entries.length;
@@ -397,6 +399,7 @@ export function createGfwPresenceLayer({
   }
 
   function clearSelectionGraphics() {
+    clearVesselEstimateFor('gfw');
     _historyLine?.clear();
     _trackLine?.clear();
     if (_newerEntity && _viewer?.entities) { try { _viewer.entities.remove(_newerEntity); } catch { /* */ } }

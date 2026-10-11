@@ -28,6 +28,7 @@ import {
   localizedTypeDetail,
 } from './vesselCardDetails.js';
 import { greatCircleKm } from './vesselDestination.js';
+import { clearVesselEstimate, estimateLine, estimateVesselPosition, showVesselEstimate } from './vesselEstimate.js';
 
 const identity = (key) => key;
 export const VESSEL_CHART_SAMPLES = 48;
@@ -228,6 +229,15 @@ export function buildVesselTrackedEntry(v, t = identity, lang = 'sk', nowMs = Da
     : null;
   const progress = !v.delayed && voyage?.progress ? vesselProgressRow(voyage.progress, vessel.speedKn, t, lang, nowMs) : null;
   const destPort = Number.isFinite(voyage?.destination?.lat) ? voyage.destination : (v.destinationPort || null);
+  // Odhad súčasnej polohy (bod 4, 2026-10-11): z najnovšej známej polohy (naša alebo z registra).
+  const ownBase = Number.isFinite(vessel.fixMs) && Number.isFinite(vessel.lat)
+    ? { lat: vessel.lat, lon: vessel.lon, t: vessel.fixMs, speedKn: vessel.speedKn, course: vessel.course } : null;
+  const reg = info?.lastPosition;
+  const regBase = reg && Number.isFinite(reg.t) ? { lat: reg.lat, lon: reg.lon, t: reg.t, speedKn: reg.speedKn, course: reg.course } : null;
+  const base = regBase && (!ownBase || regBase.t > ownBase.t) ? regBase : ownBase;
+  const estimate = base ? estimateVesselPosition(base, { destination: destPort, nowMs }) : null;
+  const estLine = estimateLine(estimate, destPort?.name || '', t, lang);
+  if (estLine) details.push(estLine);
   const charts = buildVesselCharts(v.chartPoints, { nowMs, speedKn: v.delayed ? null : vessel.speedKn, destination: destPort }, t, lang);
 
   const footer = [];
@@ -250,7 +260,23 @@ export function buildVesselTrackedEntry(v, t = identity, lang = 'sk', nowMs = Da
     profile: null,
     logos: null,
     alert: null,
+    estimate: estimate ? { base, estimate, label: `${t('vessel.estimate-label')} · ±${estimate.radiusKm} km` } : null,
   };
+}
+
+/** Odhad z karty na mapu (kreslí sa len pri zmene, nie pri každom publikovaní). */
+const _estimateSig = new Map();
+export function syncVesselEstimate(key, entry) {
+  const e = entry?.estimate;
+  if (!e) { if (_estimateSig.has(key)) { _estimateSig.delete(key); clearVesselEstimate(key); } return; }
+  const sig = `${e.estimate.lat.toFixed(3)},${e.estimate.lon.toFixed(3)},${e.estimate.radiusKm}`;
+  if (_estimateSig.get(key) === sig) return;
+  _estimateSig.set(key, sig);
+  showVesselEstimate(key, e.base, e.estimate, e.label);
+}
+export function clearVesselEstimateFor(key) {
+  _estimateSig.delete(key);
+  clearVesselEstimate(key);
 }
 
 export { greatCircleKm };

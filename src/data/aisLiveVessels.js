@@ -9,7 +9,7 @@ import { currentLanguage, t } from '../i18n.js';
 import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, newerPositionLine, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
-import { buildVesselTrackedEntry } from './vesselTrackedCard.js';
+import { buildVesselTrackedEntry, clearVesselEstimateFor, syncVesselEstimate } from './vesselTrackedCard.js';
 import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
 // `new URL(...)` a NIE `?url` import: príponu `?url` pozná len Vite, takže
 // unit testy v čistom Node (a všetko, čo túto vrstvu importuje) by na nej
@@ -2356,6 +2356,8 @@ function updateClusteredLabels(records) {
   const selected = retainedSelected && !(Number.isFinite(retainedSelected.lastPositionEpoch)
     && Date.now() - retainedSelected.lastPositionEpoch * 1000 >= AIS_RETAIN_MS) ? retainedSelected : null;
   const entries = selected ? [buildSelectedVesselCard(selected, Date.now(), state.destinationMatch)] : [];
+  // Odhad polohy vybranej lode, ak je jej poloha stará (bod 4, 2026-10-11).
+  if (entries[0]) syncVesselEstimate('live', entries[0]); else clearVesselEstimateFor('live');
   // Loď sa hýbe — čiara plavby musí ísť s ňou.
   if (selected && state.destinationMatch) syncVoyageLine();
   const maxLabels = labelRowLimit();
@@ -2952,6 +2954,7 @@ function clearSelection({ preserveTrail = false, evicted = false } = {}) {
   state.destinationMatch = null;
   state.voyageLine?.clear();
   state.historyLine?.clear();
+  clearVesselEstimateFor('live');
   if (record?.billboard) {
     record.billboard.image = shipIcon(record, false);
     record.billboard.scale = shipScale(record);

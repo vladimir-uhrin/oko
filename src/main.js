@@ -83,6 +83,8 @@ import { LAYER_GROUP_ORDER, isCatalogLayer, layerGroup, layerKeywords } from './
 import { flyToGlobeView, searchAndFlyTo } from './locations.js';
 import { createAircraftSearchCommands } from './aircraftSearchCommands.js';
 import { createVesselSearchCommands } from './vesselSearchCommands.js';
+import { attachVesselEstimateViewer, showRemoteVessel } from './data/vesselEstimate.js';
+import { lookupVesselInfo } from './data/vesselInfo.js';
 import { buildConflictDigest } from './conflictSummary.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
@@ -1189,6 +1191,14 @@ async function init() {
       flights: flightsLayer, military: militaryFlightsLayer, dataManager, viewer, Cesium, translate: t,
       notify: (text) => styleManager._showToast(text, { durationMs: 4500 }),
     });
+    // Odhad polohy lodí mimo dosahu (2026-10-11, bod 4): zdieľaný kresliaci modul.
+    attachVesselEstimateViewer(viewer);
+    window.__godsEyeView.vesselEstimate = {
+      showRemote: async (ship) => {
+        const info = ship?.mmsi ? await lookupVesselInfo(ship.mmsi).catch(() => null) : null;
+        return showRemoteVessel(ship, info, { translate: t, lang: currentLanguage() });
+      },
+    };
     // Lode v jednotnom hľadaní (2026-10-11): živé z pamäte + kdekoľvek zo servera.
     const vesselSearch = createVesselSearchCommands({
       live: aisLiveVesselsLayer,

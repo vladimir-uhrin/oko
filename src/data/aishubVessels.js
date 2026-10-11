@@ -38,7 +38,7 @@ import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistr
 import { cachedPortIndex } from './vesselPortIndex.js';
 import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
-import { buildVesselTrackedEntry } from './vesselTrackedCard.js';
+import { buildVesselTrackedEntry, clearVesselEstimateFor, syncVesselEstimate } from './vesselTrackedCard.js';
 
 /** Smer trupu na zobrazenie: heading → v pohybe cog → stojaca pri rieke proti prúdu → cog (vesselSilhouettes). */
 function aishubDisplayCourseDeg(row) {
@@ -640,6 +640,8 @@ export function createAishubVesselsLayer({
       }
       cards.push(selected ? aishubTrackedCard(row, billboard.position, t, nowMs, _chartPoints) : aishubLabelCard(row, billboard.position, t, nowMs, false));
     }
+    const trackedCard = cards.find((c) => c.variant === 'tracked');
+    if (trackedCard) syncVesselEstimate('aishub', trackedCard); else clearVesselEstimateFor('aishub');
     cards.sort((a, b) => b.priority - a.priority);
     // Vybraná = dokovaná karta ako pri lietadle (bez ambientnej politiky).
     const entries = cards.slice(0, AISHUB_MAX_LABELS).map((card) => (card.variant === 'tracked' ? card : applyVesselOverlayPolicy(card, VESSEL_CARD_FADE_DISTANCE_M)));
