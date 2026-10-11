@@ -153,6 +153,7 @@ test('scéna frontu sa otvára v KARTE a pri odchode vráti pôvodný podklad (v
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
   assert.match(main, /if \(scene && mapStackController\.getActiveId\(\) !== 'karta'\) \{\n\s+autoKartaPrev = mapStackController\.getActiveId\(\);\n\s+try \{ void Promise\.resolve\(styleManager\._setMapStack\('karta'\)\)/);
   assert.match(main, /const runChokepointScene = \(id\) => \{\n\s+restoreAutoKarta\(\);/, 'úžina vráti podklad');
-  assert.match(main, /ukraineTimeline\.onChange\(\(st\) => \{ if \(!st\?\.shown && autoKartaPrev\) restoreAutoKarta\(\); \}\);/, 'zatvorená os vráti podklad');
+  // 2026-10-11: zatvorená os vráti podklad A ohlási to toastom (notify) — úžina a dejisko bez toastu.
+  assert.match(main, /ukraineTimeline\.onChange\(\(st\) => \{ if \(!st\?\.shown && autoKartaPrev\) restoreAutoKarta\(\{ notify: true \}\); \}\);/, 'zatvorená os vráti podklad');
   assert.match(main, /onActiveMapStackChange\(\(stack\) => \{ if \(stack\?\.id !== 'karta'\) autoKartaPrev = null; \}\);/, 'ručná zmena podkladu sa nevracia');
 });

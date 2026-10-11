@@ -35,6 +35,7 @@ import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
+import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
 import { createWindGridCache } from './src/data/windAloft.js';
 import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
@@ -260,6 +261,7 @@ async function seedEstimatesFromHistory() {
     }
     st.done = true;
     console.log(`[estimates] seeded ${seeded} of ${found} airborne flight ends from history (attempt ${st.attempts})`);
+    applyHfdlBuffer('po naplnení z Histórie');
   } catch (error) {
     console.warn(`[estimates] seed failed (attempt ${st.attempts}):`, error?.message || error);
   } finally {
@@ -328,6 +330,8 @@ function recordAccuracy(sample) {
   loadAccuracyOnce();
   _accuracySamples.push(sample);
   if (_accuracySamples.length > 20_000) _accuracySamples.splice(0, _accuracySamples.length - 20_000);
+  // QA inštancia zdieľa .gev-cache so službou oko-api (2026-10-11) — na disk zapisuje len služba.
+  if (String(process.env.ESTIMATES_ACCURACY_WRITE || 'on').toLowerCase() === 'off') return;
   fsp.mkdir(ESTIMATES_DIR, { recursive: true }).then(() => fsp.appendFile(ACCURACY_FILE, JSON.stringify(sample) + '\n')).catch(() => {});
 }
 /** Posledných 7 dní meraní → pásma (kalibrácia kruhu neistoty pre klienta), obnova raz za 5 min. */
@@ -345,6 +349,57 @@ const _estimateTracker = createEstimateTracker({
   windSamplerFor: (altitudeM) => _windGrids.samplerFor(altitudeM),
   onAccuracy: recordAccuracy,
 });
+/** HFDL polohy (2026-10-11, src/data/hfdlPositions.js) — sťahovač, posledná dávka, posledné preukotvené polohy. */
+let _hfdlFeed = null;
+let _hfdlLastBatch = null;
+const _hfdlRecent = [];
+/**
+ * Zásobník HFDL polôh za posledných 6 h (2026-10-11, QA: prvý prieskum stiahol 12 dávok skôr, než
+ * existoval jediný odhad — všetko by prepadlo). Prikladá sa znova pri každej dávke a po naplnení odhadov.
+ */
+let _hfdlBuffer = [];
+const HFDL_BUFFER_MS = 6 * 3600_000;
+/** Zápis do Histórie (nastaví flightHistoryProxy); bez neho len preukotvenie odhadov. */
+let _hfdlRecordHistory = async () => 0;
+function bufferHfdlFixes(fixes) {
+  const cutoff = Date.now() - HFDL_BUFFER_MS;
+  _hfdlBuffer = _hfdlBuffer.concat(fixes).filter((f) => f.tMs >= cutoff);
+}
+function noteHfdlApplied(applied) {
+  for (const a of applied) _hfdlRecent.push({ hex: a.hex, cs: a.cs, tMs: a.fix.tMs, lat: a.fix.lat, lon: a.fix.lon, via: a.fix.via });
+  if (_hfdlRecent.length > 500) _hfdlRecent.splice(0, _hfdlRecent.length - 500);
+}
+/** Po naplnení odhadov (História / ESTIMATES_SEED_URL) prilož polohy, ktoré už sú v zásobníku. */
+function applyHfdlBuffer(reason) {
+  if (!_hfdlBuffer.length) return 0;
+  const r = _estimateTracker.applyExternalFixes(_hfdlBuffer);
+  noteHfdlApplied(r.applied);
+  void _hfdlRecordHistory(r.applied).then((n) => {
+    if (r.applied.length) console.log(`[hfdl] ${reason}: preukotvených ${r.applied.length} zo zásobníka ${_hfdlBuffer.length}, do histórie ${n}`);
+  });
+  return r.applied.length;
+}
+/**
+ * QA/skúšobná inštancia bez Histórie (2026-10-11): odhady sa dajú naplniť zo zoznamu iného servera
+ * (ESTIMATES_SEED_URL, napr. https://okolive.sk/api/flights/estimated) — aj s cieľmi letov, bez dopytov
+ * na adsbdb. Raz po štarte; na produkcii nenastavené (tam plní História, seedEstimatesFromHistory).
+ */
+let _estimatesUrlSeeded = false;
+async function seedEstimatesFromUrl() {
+  const url = String(process.env.ESTIMATES_SEED_URL || '').trim();
+  if (!url || _estimatesUrlSeeded) return;
+  _estimatesUrlSeeded = true;
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'OKO QA (estimates seed)' }, signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const added = _estimateTracker.seed(Array.isArray(data?.flights) ? data.flights : []);
+    console.log(`[estimates] seeded ${added} from ${url}`);
+    applyHfdlBuffer('po naplnení z URL');
+  } catch (error) {
+    console.warn('[estimates] seed from URL failed:', error?.message || error);
+  }
+}
 /** @type {string|null} Cached upstream response body (JSON text). */
 let _openskyCacheBody = null;
 /** @type {number} HTTP status of the cached response. */
@@ -6523,6 +6578,63 @@ function flightHistoryProxy() {
         });
         keeper.attach(server.httpServer);
       }
+      // Skutočné polohy nad oceánom z HFDL/ADS-C (2026-10-11, vlastník: „áno postav to a implementuj"):
+      // otvorené dáta adsb.lol (CC0, hodinové dávky na GitHube, src/data/hfdlPositions.js) preukotvia
+      // odhady bez signálu a — s Históriou letov — doplnia skutočné body do letu (zdroj adsb.lol/hfdl,
+      // pos_src HFDL). HFDL_POSITIONS=off vypne. Bez Histórie (QA inštancia) sa stav sťahovania drží
+      // len v pamäti, aby neprepísal stav služby oko-api.
+      // Zápis preukotvených HFDL polôh do Histórie letov (ten istý let — importFlight ho predĺži a spojí dieru).
+      _hfdlRecordHistory = async (applied) => {
+        const store = applied.length && cfg.enabled && diskOk() ? getStore() : null;
+        if (!store) return 0;
+        const byHex = new Map();
+        for (const a of applied) {
+          if (!byHex.has(a.hex)) byHex.set(a.hex, []);
+          byHex.get(a.hex).push({
+            t: Math.round(a.fix.tMs / 1000), lat: a.fix.lat, lon: a.fix.lon,
+            alt: a.fix.via === 'adsc' ? a.fix.altM : null, posSrc: HFDL_POS_SRC, callsign: a.cs || '',
+          });
+        }
+        let inserted = 0;
+        for (const [hex, points] of byHex) {
+          try { inserted += (await store.importFlight({ icao24: hex, points }, HFDL_SOURCE))?.inserted || 0; } catch { /* História je doplnok */ }
+        }
+        return inserted;
+      };
+      if (String(process.env.HFDL_POSITIONS || 'on').toLowerCase() !== 'off' && server.httpServer) {
+        _hfdlFeed = createHfdlFeed({
+          stateFile: cfg.enabled ? path.join(path.dirname(cfg.dbPath), 'hfdl-state.json') : null,
+          log: (msg) => console.warn(msg),
+          onFixes: async (fixes, meta) => {
+            bufferHfdlFixes(fixes);
+            // Celý zásobník (6 h), nie len nová dávka: lietadlá, ktoré medzitým pribudli medzi odhady
+            // (strata signálu, naplnenie po štarte), dostanú aj staršie polohy. Už použité sa preskočia
+            // (applyExternalFixes berie len novšie než súčasné ukotvenie).
+            const r = _estimateTracker.applyExternalFixes(_hfdlBuffer);
+            const history = await _hfdlRecordHistory(r.applied);
+            _hfdlLastBatch = { file: meta.file, at: Date.now(), fixes: fixes.length, applied: r.applied.length, history };
+            noteHfdlApplied(r.applied);
+            console.log(`[hfdl] ${meta.file}: ${fixes.length} polôh, preukotvení ${r.applied.length}, do histórie ${history}`);
+          },
+        });
+        // QA: plnenie odhadov zo zoznamu iného servera aj bez snímku OpenSky (nikto nemusí mať lety zapnuté).
+        if (process.env.ESTIMATES_SEED_URL) setTimeout(() => { void seedEstimatesFromUrl(); }, 5000).unref?.();
+        const feed = _hfdlFeed;
+        // Priamo, nie až na 'listening' (QA 2026-10-11: udalosť prišla skôr, než sa poslucháč zapísal,
+        // a sťahovač nebežal) — prvý prieskum aj tak čaká 30 s, časovače sú unref.
+        feed.start();
+        server.httpServer.once('close', () => feed.stop());
+      }
+      // Stav HFDL (2026-10-11): sťahovanie, posledná dávka, posledné preukotvené polohy (CC0 dáta).
+      server.middlewares.use('/api/flights/hfdl', (req, res) => {
+        const body = JSON.stringify({
+          now: Date.now(), attribution: HFDL_ATTRIBUTION,
+          feed: _hfdlFeed ? _hfdlFeed.status() : null, lastBatch: _hfdlLastBatch,
+          estimator: _estimateTracker.status(), recent: _hfdlRecent.slice(-200),
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60' });
+        res.end(body);
+      });
       // Odhadované lietadlá bez signálu (2026-10-04): posledný fix + overený cieľ, polohu počíta
       // klient (src/data/flightEstimate.js estimatePosition). Krátka cache — zoznam sa mení s každým snímkom.
       // Presnosť odhadov (2026-10-05): pásma času bez signálu, medián/80. percentil chyby, porovnanie
@@ -6898,6 +7010,7 @@ function openSkyProxy() {
               // lietadlá, ktoré zmizli od reštartu (Atlantik prázdny ešte hodiny). Živé v snímku
               // sledovač preskočí (pozná ich z ingest).
               void seedEstimatesFromHistory();
+              void seedEstimatesFromUrl();
             });
             _openskyCacheMeta = {
               requestedMode,

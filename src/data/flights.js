@@ -4358,9 +4358,13 @@ function _trackedLabelParts(icao24) {
   // Odhad (2026-10-04): poctivo hneď na začiatku riadku — odhadovaná poloha a jej neistota;
   // „poloha pred X" za ním ukazuje, ako dlho lietadlo nemá signál.
   const estimate = estimated ? _estimates.get(icao24)?.est : null;
+  // Ukotvenie na skutočnej polohe z HFDL/ADS-C (2026-10-11, hfdlPositions.js): odhad nevychádza
+  // z poslednej polohy ADS-B pred oceánom, ale z novšej prijatej cez krátke vlny.
+  const anchorVia = estimate ? _estimates.get(icao24)?.fix?.via : null;
   const metaLine = estimate
     ? [
       t('card.estimated', { km: Math.max(5, Math.round(estimate.uncertaintyKm / 5) * 5) }),
+      anchorVia ? t(anchorVia === 'adsc' ? 'card.estimated-adsc' : 'card.estimated-hfdl') : '',
       // Z čoho odhad vychádza (2026-10-05): trať NAT a vietor na trase (model GFS).
       estimate.nat ? t('card.estimated-nat', { id: estimate.nat }) : '',
       estimate.wind && Number.isFinite(_estimates.get(icao24)?.model?.windAheadMps)

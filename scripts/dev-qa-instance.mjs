@@ -11,7 +11,10 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.argv[2]) || 4181;
 // AIS_STATE_PERSIST=off: skúšobná inštancia nesmie prepísať uložený stav AIS služby oko-api.
-const env = { ...process.env, FLIGHT_HISTORY: 'off', AIS_STATE_PERSIST: 'off' };
+// ESTIMATES_SEED_URL (2026-10-11): bez Histórie by QA poznala len lietadlá stratené od svojho štartu — odhady
+// (aj s cieľmi) si naplní zo zoznamu verejnej služby, nech sa dá hneď skúšať napr. preukotvenie z HFDL.
+// ESTIMATES_ACCURACY_WRITE=off: merania presnosti odhadov nepísať do zdieľaného .gev-cache služby.
+const env = { ...process.env, FLIGHT_HISTORY: 'off', AIS_STATE_PERSIST: 'off', ESTIMATES_ACCURACY_WRITE: 'off', ESTIMATES_SEED_URL: process.env.ESTIMATES_SEED_URL ?? 'https://okolive.sk/api/flights/estimated' };
 delete env.OKO_ROLE;
 delete env.OKO_API_UPSTREAM;
 const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');

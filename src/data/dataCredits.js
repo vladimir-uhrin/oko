@@ -67,6 +67,13 @@ export const DATA_CREDITS = [
       '(ODbL 1.0)',
   },
   {
+    key: 'adsblol-hfdl',
+    html:
+      'Real positions over the oceans (HFDL / ADS-C, 0–60 min old) that re-anchor estimated aircraft: ' +
+      '<a href="https://www.adsb.lol/docs/open-data/aircraft-data-links/" target="_blank" rel="noopener">adsb.lol Aircraft Data Links</a> ' +
+      '(CC0)',
+  },
+  {
     key: 'ourairports',
     html:
       'Airports: ' +

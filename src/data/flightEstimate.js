@@ -234,6 +234,61 @@ export function nearDestination(fix, route) {
 export const ROUTE_CALLSIGN_RE = /^[A-Z]{3}\d[A-Z0-9]{0,4}$/;
 
 /**
+ * Skutočná poloha z iného zdroja (HFDL/ADS-C, src/data/hfdlPositions.js, 2026-10-11) smie preukotviť
+ * odhad, len ak ju lietadlo mohlo stihnúť: priemerná rýchlosť od posledného fixu najviac toľko (m/s,
+ * ≈ 1 300 km/h — prúdové lietadlo s chvostovým vetrom) + rezerva na nepresnosť polohy.
+ */
+export const EXTERNAL_FIX_MAX_MPS = 360;
+export const EXTERNAL_FIX_SLACK_KM = 30;
+/** Kurz a rýchlosť z dvoch polôh len pri dosť dlhom úseku (kratší úsek = šum polohy). */
+export const EXTERNAL_FIX_DERIVE_MIN_S = 4 * 60;
+export const EXTERNAL_FIX_DERIVE_MIN_KM = 40;
+
+/** Počiatočný kurz z bodu 1 do bodu 2 (°, pure). */
+export function bearingDegrees(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180;
+  const y = Math.sin((lon2 - lon1) * r) * Math.cos(lat2 * r);
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon2 - lon1) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+
+/**
+ * Nový ukotvený fix z predošlého fixu a skutočnej polohy z iného zdroja (pure). Výška ostáva (HFDL ju
+ * nenesie; ADS-C áno), kurz a rýchlosť sa odvodia z úseku medzi polohami, ak je dosť dlhý a rýchlosť
+ * je prúdová; inak ostanú posledné namerané. Vráti null, ak poloha nie je fyzikálne možná.
+ * @param {object} prev fix (formát fixFromState)
+ * @param {{tMs:number, lat:number, lon:number, altM?:number|null, kind?:string}} ext
+ */
+export function anchorFromExternalFix(prev, ext) {
+  const dtS = (ext.tMs - prev.tMs) / 1000;
+  if (!(dtS > 0)) return null;
+  const km = greatCircleKm(prev.lat, prev.lon, ext.lat, ext.lon);
+  if (km > (EXTERNAL_FIX_MAX_MPS * dtS) / 1000 + EXTERNAL_FIX_SLACK_KM) return null;
+  let trkDeg = prev.trkDeg;
+  let gsMps = prev.gsMps;
+  if (dtS >= EXTERNAL_FIX_DERIVE_MIN_S && km >= EXTERNAL_FIX_DERIVE_MIN_KM) {
+    const derived = (km * 1000) / dtS;
+    if (derived >= ESTIMATE_MIN_SPEED_MPS && derived <= EXTERNAL_FIX_MAX_MPS) {
+      // Kurz v CIELI úseku (veľká kružnica sa stáča): smer z novej polohy späť, otočený o 180°.
+      trkDeg = (bearingDegrees(ext.lat, ext.lon, prev.lat, prev.lon) + 180) % 360;
+      gsMps = derived;
+    }
+  }
+  return {
+    ...prev,
+    tMs: ext.tMs,
+    lat: ext.lat,
+    lon: ext.lon,
+    altM: Number.isFinite(ext.altM) ? ext.altM : prev.altM,
+    trkDeg,
+    gsMps,
+    // Klesanie z ADS-B pred stratou signálu po hodine nad oceánom už neplatí.
+    vrMps: 0,
+    via: ext.kind === 'adsc' ? 'adsc' : 'hfdl',
+  };
+}
+
+/**
  * Sledovač pre server: z každého svetového snímku OpenSky si pamätá posledný fix každého lietadla;
  * kto zmizne vo vzduchu, ide do zoznamu odhadov (kým sa nevráti alebo odhad neskončí).
  * Trasa sa dohľadá cez lookupRoute(callsign) (adsbdb cache servera), radom, šetrne.
@@ -248,6 +303,7 @@ export function createEstimateTracker({
   let lastSnapshotSec = 0;
   let lastCount = 0;
   let skipped = 0;
+  let externalApplied = 0;
   const queue = [];
   let pumping = false;
 
@@ -357,6 +413,13 @@ export function createEstimateTracker({
       for (const fix of Array.isArray(fixes) ? fixes : []) {
         if (!fix?.hex || estimates.has(fix.hex) || last.has(fix.hex) || estimates.size >= maxEntries) continue;
         if (!qualifiesForEstimate(fix)) continue;
+        // Plnenie zo zoznamu iného servera (QA, ESTIMATES_SEED_URL) nesie aj cieľ — netreba ho dohľadávať.
+        if (fix.route?.destination) {
+          const { route, model: _m, ...rest } = fix;
+          estimates.set(fix.hex, { fix: rest, route, routeState: 'done' });
+          added += 1;
+          continue;
+        }
         // Bez cieľa by aj tak skončil: neplniť, čo je staršie než strop letu bez cieľa a nedá sa dohľadať.
         const wantsRoute = Boolean(lookupRoute) && ROUTE_CALLSIGN_RE.test(fix.cs) && queue.length < maxQueue;
         if (!wantsRoute && nowMs - fix.tMs > ESTIMATE_NO_ROUTE_MAX_S * 1000) continue;
@@ -366,6 +429,54 @@ export function createEstimateTracker({
       }
       if (queue.length) void pump();
       return added;
+    },
+
+    /**
+     * Skutočné polohy z HFDL/ADS-C (hfdlPositions.js, 2026-10-11) → preukotvenie odhadov. Lietadlo sa
+     * hľadá podľa hexu, inak podľa volacieho znaku (2/3 záznamov HFDL hex nemá). Novší fix než posledný
+     * a fyzikálne možný (anchorFromExternalFix) nahradí ukotvenie; meranie presnosti zapíše, kde sme
+     * lietadlo v tom čase odhadovali (via: 'hfdl'). Živé lietadlá (ADS-B v snímku) sa nemenia.
+     * @param {{hex:string, cs:string, tMs:number, lat:number, lon:number, altM?:number|null, kind?:string}[]} fixes
+     * @returns {{applied: object[], stale: number, rejected: number, unmatched: number}}
+     *   applied = { hex, cs, fix } pre zápis do Histórie
+     */
+    applyExternalFixes(fixes, nowMs = now()) {
+      const byCs = new Map();
+      for (const [hex, entry] of estimates) if (entry.fix.cs) byCs.set(entry.fix.cs, hex);
+      const result = { applied: [], stale: 0, rejected: 0, unmatched: 0 };
+      const sorted = [...(Array.isArray(fixes) ? fixes : [])].sort((a, b) => a.tMs - b.tMs);
+      for (const ext of sorted) {
+        if (!ext || !Number.isFinite(ext.tMs) || ext.tMs > nowMs + 120_000) continue;
+        const hex = (ext.hex && estimates.has(ext.hex)) ? ext.hex : (ext.cs ? byCs.get(ext.cs) : null);
+        const entry = hex ? estimates.get(hex) : null;
+        if (!entry) { result.unmatched += 1; continue; }
+        // Iné lietadlo s rovnakým volacím znakom (hex v správe nesedí) — nepárovať.
+        if (ext.hex && ext.hex !== hex) { result.unmatched += 1; continue; }
+        if (ext.tMs <= entry.fix.tMs + 30_000) { result.stale += 1; continue; }
+        const anchored = anchorFromExternalFix(entry.fix, ext);
+        if (!anchored) { result.rejected += 1; continue; }
+        if (onAccuracy) {
+          try {
+            const est = estimatePosition(entry.fix, entry.route, ext.tMs, entry.model);
+            const base = estimatePosition(entry.fix, entry.route, ext.tMs, null);
+            onAccuracy({
+              t: Math.round(ext.tMs / 1000),
+              hex,
+              elapsedMin: Math.round((ext.tMs - entry.fix.tMs) / 6000) / 10,
+              errorKm: Math.round(greatCircleKm(est.lat, est.lon, ext.lat, ext.lon) * 10) / 10,
+              baselineKm: Math.round(greatCircleKm(base.lat, base.lon, ext.lat, ext.lon) * 10) / 10,
+              method: est.method,
+              wind: est.wind,
+              via: anchored.via,
+            });
+          } catch { /* meranie je doplnok */ }
+        }
+        entry.fix = anchored;
+        entry.model = null; // trasa a vietor z novej polohy
+        externalApplied += 1;
+        result.applied.push({ hex, cs: entry.fix.cs, fix: anchored });
+      }
+      return result;
     },
 
     /** Aktuálne odhady (skončené vyradí). Pre API: posledný fix + cieľ, polohu počíta klient. */
@@ -401,7 +512,9 @@ export function createEstimateTracker({
     },
 
     status() {
-      return { tracked: last.size, estimated: estimates.size, queue: queue.length, lastSnapshotSec, skippedPartial: skipped };
+      let anchoredExternal = 0;
+      for (const entry of estimates.values()) if (entry.fix.via) anchoredExternal += 1;
+      return { tracked: last.size, estimated: estimates.size, queue: queue.length, lastSnapshotSec, skippedPartial: skipped, externalApplied, anchoredExternal };
     },
   };
 }

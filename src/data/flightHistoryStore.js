@@ -82,7 +82,11 @@ export function continuesInAir(a, b) {
   const distanceM = greatCircleM(a.lat, a.lon, b.lat, b.lon);
   // Polnoc medzi dvoma dennými stopami: stačí, že stroj letí a za tú chvíľu sa nepresunul ďalej, než vie.
   if (gap <= AIR_GAP_ADJACENT_S) return distanceM <= 350 * gap + 1000;
-  if (!(a.alt >= AIR_GAP_MIN_ALT_M && b.alt >= AIR_GAP_MIN_ALT_M)) return false;
+  // Poloha z HFDL (2026-10-11) výšku nenesie — vysiela ju lietadlo nad oceánom, teda vo vzduchu;
+  // chýbajúca výška sa jej neráta, rýchlosť cez dieru sa overí ako pri ostatných.
+  const cruising = (p, other) => p.alt >= AIR_GAP_MIN_ALT_M
+    || (p.posSrc === POS_SRC.HFDL && (p.alt === null || p.alt === undefined) && other.alt >= AIR_GAP_MIN_ALT_M);
+  if (!(cruising(a, b) && cruising(b, a)) && !(a.posSrc === POS_SRC.HFDL && b.posSrc === POS_SRC.HFDL)) return false;
   const implied = distanceM / gap;
   const speeds = [a.gs, b.gs].filter((v) => Number.isFinite(v) && v > 50);
   const low = speeds.length ? 0.7 * Math.min(...speeds) : 150;
@@ -122,7 +126,7 @@ export function schemaAction(version, current = SCHEMA_VERSION) {
 export const ADDITIVE_COLUMNS = Object.freeze({
   fixes: Object.freeze([
     ['geo_alt', 'INTEGER'], // m, geometrická (GNSS) výška
-    ['pos_src', 'INTEGER'], // POS_SRC: 0 ADS-B, 1 ASTERIX, 2 MLAT, 3 FLARM, 4 TIS-B, 5 ADS-R, 6 ADS-C
+    ['pos_src', 'INTEGER'], // POS_SRC: 0 ADS-B, 1 ASTERIX, 2 MLAT, 3 FLARM, 4 TIS-B, 5 ADS-R, 6 ADS-C, 7 HFDL
     ['spi', 'INTEGER'],     // 1 = IDENT (special position indicator)
     ['x', 'TEXT'],          // JSON surových doplnkov readsb (READSB_EXTRA_FIELDS, jednotky readsb)
   ]),
@@ -137,7 +141,8 @@ export const ADDITIVE_COLUMNS = Object.freeze({
  * Zdroj polohy: 0–3 presne podľa OpenSky `position_source`, 4–6 rozšírenie
  * pre readsb `type` (adsb.lol). Bez polohy z daného typu = null.
  */
-export const POS_SRC = Object.freeze({ ADSB: 0, ASTERIX: 1, MLAT: 2, FLARM: 3, TISB: 4, ADSR: 5, ADSC: 6 });
+// HFDL 7 (2026-10-11): poloha z otvorených dát HFDL adsb.lol (src/data/hfdlPositions.js HFDL_POS_SRC).
+export const POS_SRC = Object.freeze({ ADSB: 0, ASTERIX: 1, MLAT: 2, FLARM: 3, TISB: 4, ADSR: 5, ADSC: 6, HFDL: 7 });
 /**
  * Doplnky readsb, ktoré sa ukladajú ako JSON do `fixes.x` (hodnoty bez
  * prevodu, v jednotkách readsb: kt, ft, ft/min, °C, hPa). Zámerne CHÝBA
@@ -439,12 +444,12 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   const insertLegCounted = db.prepare(`INSERT INTO legs (icao24, callsign, country, first_t, last_t, fixes, max_alt, max_gs, squawks, src, cat, reg, ac_type, ac_desc)
     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const fixAt = db.prepare('SELECT t, lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t = ?');
-  const fixAtFull = db.prepare('SELECT t, lat, lon, alt, gs, gnd FROM fixes WHERE icao24 = ? AND t = ?');
+  const fixAtFull = db.prepare('SELECT t, lat, lon, alt, gs, gnd, pos_src FROM fixes WHERE icao24 = ? AND t = ?');
   const fixAtEnd = db.prepare('SELECT t, lat, lon, alt, gs, trk, vr, gnd FROM fixes WHERE icao24 = ? AND t = ?');
   /** Poloha stroja v čase t pre continuesInAir (stupne, m, m/s), inak null. */
   const fixPoint = (icao24, t) => {
     const r = fixAtFull.get(icao24, t);
-    return r ? { t: r.t, lat: r.lat / SCALE_DEG, lon: r.lon / SCALE_DEG, alt: r.alt, gs: r.gs === null ? null : r.gs / SCALE_TENTH, gnd: r.gnd === 1 } : null;
+    return r ? { t: r.t, lat: r.lat / SCALE_DEG, lon: r.lon / SCALE_DEG, alt: r.alt, gs: r.gs === null ? null : r.gs / SCALE_TENTH, gnd: r.gnd === 1, posSrc: r.pos_src ?? null } : null;
   };
   const legsInWindow = db.prepare(`SELECT id, callsign, first_t, last_t, fixes, max_alt, max_gs, squawks, cat, reg, ac_type, ac_desc
     FROM legs WHERE icao24 = ? AND last_t >= ? AND first_t <= ? ORDER BY first_t ASC`);
