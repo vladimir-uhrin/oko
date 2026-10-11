@@ -34,6 +34,17 @@ const PENDING_TTL_MS = 10 * 60_000;
 const NAV_ANCHORED = 1;
 const NAV_MOORED = 5;
 
+/**
+ * Cieľ z textu AIS na čítanie: „WILMINGTON.NC.USA" → „Wilmington NC USA", „NLRTM" ostáva. Pure.
+ * Kódy (do 3 písmen alebo LOCODE) zostávajú veľkými písmenami.
+ */
+export function prettyAisDestination(text) {
+  const words = String(text || '').replace(/[._>]+/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!words.length) return null;
+  if (words.length === 1 && /^[A-Z]{2}[A-Z0-9]{3}$/.test(words[0])) return words[0];
+  return words.map((w) => (w.length <= 3 || /\d/.test(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase())).join(' ');
+}
+
 /** Popis do zoznamu: meno lode, inak MMSI. Pure. */
 export function vesselFollowLabel(info = {}) {
   const name = String(info.name || '').replace(/\s+/g, ' ').trim();
@@ -48,7 +59,7 @@ export function vesselFollowLabel(info = {}) {
  */
 export function vesselFollowStatus(live, info) {
   const voyage = info?.voyage || null;
-  const to = info?.destinationPort?.name || (typeof info?.destination === 'string' ? info.destination.trim() : '') || null;
+  const to = info?.destinationPort?.name || (typeof info?.destination === 'string' ? prettyAisDestination(info.destination) : null) || null;
   // Register: príchod po odchode = v prístave, odchod = na ceste.
   const regInPort = Boolean(voyage?.lastPort && Number.isFinite(voyage.arrivedAt) && !Number.isFinite(voyage.departedAt));
   const regUnderway = Boolean(voyage?.lastPort && Number.isFinite(voyage.departedAt));
@@ -139,6 +150,7 @@ export function createFollowedVessels({
     } catch { /* */ }
   };
   const infos = new Map(); // mmsi → {info, at}
+  const inflight = new Map(); // mmsi → prebiehajúci dopyt do registra
   const lastStatus = new Map(); // key → status
   let prevStatus = null;
   const lastNotified = new Map();
@@ -164,14 +176,21 @@ export function createFollowedVessels({
     const time = now();
     const due = follows.slice(0, VESSEL_FOLLOW_REMOTE_MAX)
       .map((f) => f.key.slice(5))
-      .filter((mmsi) => time - (infos.get(mmsi)?.at ?? -Infinity) >= VESSEL_FOLLOW_REMOTE_MS);
-    await Promise.all(due.map(async (mmsi) => {
-      try {
-        const info = await fetchInfo(mmsi);
-        if (info) infos.set(mmsi, { info, at: time });
-        else if (!infos.has(mmsi)) infos.set(mmsi, { info: null, at: time });
-      } catch { /* ďalší pokus o 15 min */ }
-    }));
+      .filter((mmsi) => !inflight.has(mmsi) && time - (infos.get(mmsi)?.at ?? -Infinity) >= VESSEL_FOLLOW_REMOTE_MS);
+    // Dve vyhodnotenia naraz (pridanie + základ) sa nepýtajú registra dvakrát — druhé počká na prvé.
+    const waiting = follows.slice(0, VESSEL_FOLLOW_REMOTE_MAX).map((f) => inflight.get(f.key.slice(5))).filter(Boolean);
+    const jobs = due.map((mmsi) => {
+      const job = (async () => {
+        try {
+          const info = await fetchInfo(mmsi);
+          if (info) infos.set(mmsi, { info, at: time });
+          else if (!infos.has(mmsi)) infos.set(mmsi, { info: null, at: time });
+        } catch { /* ďalší pokus o 15 min */ } finally { inflight.delete(mmsi); }
+      })();
+      inflight.set(mmsi, job);
+      return job;
+    });
+    await Promise.all([...waiting, ...jobs]);
   }
 
   /** Porovná zoznam so živými dátami a registrom, ohlási vyplávanie/priplávanie. */
@@ -223,6 +242,8 @@ export function createFollowedVessels({
     try {
       const data = await client.follow({ mmsi: item.mmsi, label: item.label });
       setFollows(data?.follows);
+      // Stav novej lode hneď (nie až o 30 s „poloha neznáma"); nová loď nemá predošlý stav → bez toastu.
+      void evaluate();
       notify(t('follow.vessel.added', { label: item.label }));
       return true;
     } catch (error) {

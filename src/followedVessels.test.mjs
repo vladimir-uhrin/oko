@@ -132,3 +132,22 @@ test('controller: host → prihlásenie a loď sa pridá sama; toast pri vypláv
   assert.deepEqual(acc.calls.at(-1), ['unfollow', 'mmsi:241190000']);
   assert.equal(followed.getFollows().length, 0);
 });
+
+test('cieľ z AIS na čítanie; nová loď má stav hneď po pridaní (2026-10-11, snímka z okolive.sk)', async () => {
+  const { prettyAisDestination } = await import('./followedVessels.js');
+  assert.equal(prettyAisDestination('WILMINGTON.NC.USA'), 'Wilmington NC USA');
+  assert.equal(prettyAisDestination('NLRTM'), 'NLRTM');
+  assert.equal(prettyAisDestination('US ILM>NL RTM'), 'US ILM NL RTM');
+  assert.equal(prettyAisDestination(''), null);
+  assert.equal(vesselFollowStatus(null, { voyage: { lastPort: 'X', departedAt: 1 }, destination: 'WILMINGTON.NC.USA' }).to, 'Wilmington NC USA');
+  const acc = fakeAccount();
+  const followed = createFollowedVessels({
+    account: acc.account, translate: (k) => k, findLive: () => ({ sog: 9.5, navStatus: 0 }),
+    setIntervalImpl: () => 1, clearIntervalImpl: () => {}, storage: null,
+  });
+  acc.signIn();
+  for (let i = 0; i < 4; i += 1) await tick();
+  await followed.toggle({ mmsi: '232063671', name: 'CMA CGM JANE' });
+  for (let i = 0; i < 4; i += 1) await tick();
+  assert.equal(followed.statusFor('232063671')?.status, 'underway');
+});
