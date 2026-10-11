@@ -730,6 +730,14 @@ body.oko-karta-frame #title-bar .title-credit { display: none; }
   z-index: 100;
   user-select: none;
   text-align: right;
+  /* 2026-10-11: popis a prázdne miesto prepúšťajú klik (ako #style-indicator) — karta lietadla vysoko
+     na obrazovke má pod nimi tlačidlá Zdieľať / História / krížik a klik by inak zachytil nápis „Jazyk". */
+  pointer-events: none;
+}
+
+#lang-switch button,
+#lang-switch a {
+  pointer-events: auto;
 }
 
 #lang-switch .indicator-label {
