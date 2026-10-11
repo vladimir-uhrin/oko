@@ -69,8 +69,42 @@ export function restoreAisState(snapshot, { nowMs = Date.now(), vesselMaxAgeMs }
 }
 
 /** Zapíše snímku (gzip JSON) atomicky. */
+/** Koľko položiek poľa sa serializuje v jednom tiku (potom sa pustí event loop). */
+export const AIS_STATE_CHUNK = 8000;
+const nextTick = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * JSON snímky po častiach (každá časť vlastný tik event loopu). Snímka má ~70 MB JSON
+ * (73 000 lodí, 44 000 statických, 33 000 stôp); jedno JSON.stringify blokovalo vlákno
+ * 1–1,6 s a gzipSync ďalšie 3,3 s — každé 3 minúty (log služby 2026-10-11: „vlákno
+ * blokované 4 738 ms"). Výsledok je rovnaký JSON ako JSON.stringify(snapshot).
+ */
+export async function stringifyAisStateChunked(snapshot, { chunk = AIS_STATE_CHUNK, yieldFn = nextTick } = {}) {
+  const parts = ['{'];
+  let first = true;
+  for (const [key, value] of Object.entries(snapshot)) {
+    parts.push(`${first ? '' : ','}${JSON.stringify(key)}:`);
+    first = false;
+    if (Array.isArray(value) && value.length > chunk) {
+      parts.push('[');
+      for (let i = 0; i < value.length; i += chunk) {
+        parts.push((i ? ',' : '') + value.slice(i, i + chunk).map((item) => JSON.stringify(item)).join(','));
+        await yieldFn();
+      }
+      parts.push(']');
+    } else {
+      parts.push(JSON.stringify(value));
+      await yieldFn();
+    }
+  }
+  parts.push('}');
+  return parts.join('');
+}
+
 export async function writeAisStateFile(file, snapshot) {
-  const buf = zlib.gzipSync(Buffer.from(JSON.stringify(snapshot)), { level: 6 });
+  const json = await stringifyAisStateChunked(snapshot);
+  // gzip asynchrónne (vlákno knižnice), nie gzipSync na hlavnom vlákne.
+  const buf = await new Promise((resolve, reject) => zlib.gzip(Buffer.from(json), { level: 6 }, (error, out) => (error ? reject(error) : resolve(out))));
   await fsp.mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   await fsp.writeFile(tmp, buf);

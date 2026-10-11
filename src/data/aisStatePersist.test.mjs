@@ -55,3 +55,12 @@ test('obnova: chýbajúci alebo cudzí súbor = prázdny stav, stopa staršia ak
   const old = restoreAisState({ version: 1, vessels: [], statics: [], tracks: [['1', [50, 1, now / 1000 - 25 * 3600, 50, 1, now / 1000 - 60]]] }, { nowMs: now, vesselMaxAgeMs: 1 });
   assert.equal(old.tracks[0][1].length, 1, 'len bod z posledných 24 h');
 });
+
+test('JSON po častiach = JSON.stringify (zápis stavu neblokuje vlákno, 2026-10-11)', async () => {
+  const { stringifyAisStateChunked } = await import('./aisStatePersist.js');
+  const snapshot = { version: 1, savedAt: 5, vessels: Array.from({ length: 25 }, (_, i) => ({ mmsi: String(i), lat: i / 3, name: 'A"B' })), statics: [], tracks: [['1', [1, 2, 3]]] };
+  let yields = 0;
+  const out = await stringifyAisStateChunked(snapshot, { chunk: 10, yieldFn: async () => { yields += 1; } });
+  assert.equal(out, JSON.stringify(snapshot));
+  assert.equal(yields, 3 + 4, '3 kusy poľa lodí + 4 ostatné kľúče');
+});
