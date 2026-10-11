@@ -192,7 +192,7 @@ export function createOilPriceChip({
   return { refreshAndShow, hide, element: el };
 }
 
-/** The oil panel in the DATA tab (#oil-panel), independent of any scene, with a range selector. */
+/** Ceny ropy v paneli Ropa a plyn (#gas-panel, časť [data-oil-body]; do 2026-10-11 vlastný #oil-panel), nezávislé od scén, s výberom rozsahu. */
 export function createOilPricePanel({
   documentRef = globalThis.document,
   fetch: fetchImpl = fetchOilPrices,
@@ -201,8 +201,8 @@ export function createOilPricePanel({
   now = () => Date.now(),
 } = {}) {
   const doc = documentRef;
-  const panel = doc?.getElementById?.('oil-panel');
-  const body = panel?.querySelector?.('[data-oil-body]');
+  const body = doc?.querySelector?.('[data-oil-body]') || null;
+  const panel = body?.closest?.('.panel-collapsible') || body;
   if (!panel || !body) return { refresh: async () => {}, element: null };
 
   ensureStyle(doc);

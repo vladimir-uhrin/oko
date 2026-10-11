@@ -219,8 +219,8 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, ui.js, s
   assert.match(sharelink, /\n  \{ id: 'mideast-panel', token: 'f', pinnable: false \},/);
   assert.doesNotMatch(sharelink, /\{ id: 'gulf-panel'/);
 
-  // mobileShell.js: bez záznamu v sekcii DÁTA je panel na telefóne nedostupný.
-  assert.match(mobile, /id: 'data',[^\n]*panelIds: Object\.freeze\(\[[^\]]*'mideast-panel'[^\]]*\]\)/);
+  // mobileShell.js: bez záznamu v sekcii KONFLIKTY (2026-10-11, predtým DÁTA) je panel na telefóne nedostupný.
+  assert.match(mobile, /id: 'conflicts',[^\n]*panelIds: Object\.freeze\(\[[^\]]*'mideast-panel'[^\]]*\]\)/);
   assert.doesNotMatch(mobile, /gulf-panel/);
 
   // i18n: kľúče panela v oboch slovníkoch; poctivá poznámka menuje líniu frontu.
@@ -228,8 +228,9 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, ui.js, s
     assert.ok(EN_STRINGS[key], `EN ${key}`);
     assert.ok(SK_STRINGS[key], `SK ${key}`);
   }
-  assert.equal(EN_STRINGS['panel.mideast'], 'MIDDLE EAST');
-  assert.equal(SK_STRINGS['panel.mideast'], 'BLÍZKY VÝCHOD');
+  // 2026-10-11: názov hovorí, čo panel robí (dejiská), nie len kde
+  assert.equal(EN_STRINGS['panel.mideast'], 'MIDDLE EAST — THEATRES');
+  assert.equal(SK_STRINGS['panel.mideast'], 'BLÍZKY VÝCHOD — DEJISKÁ');
   assert.match(SK_STRINGS['mideast.note'], /línia frontu/);
   assert.match(SK_STRINGS['mideast.note'], /zdroj a vek/);
   assert.match(EN_STRINGS['mideast.note'], /front line/);

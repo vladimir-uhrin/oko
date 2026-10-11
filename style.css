@@ -33,7 +33,8 @@
   --right-rail-x: 52px;
   --left-stack-top: 26vh;
   --left-stack-gap: 72px;
-  --left-collapsed-width: 176px;
+  /* 240 px (2026-10-11): aby sa do pilulky zmestil aj „ROPA A PLYN — CENY A TOKY" pri 9 px / 1,3 px bez skrátenia. */
+  --left-collapsed-width: 240px;
   --display-panel-expanded-width: 272px;
   --cockpit-radio-collapsed-width: 148px;
   --cockpit-radio-expanded-width: 232px;
@@ -1700,6 +1701,7 @@ body.ui-clean-view #radio-panel,
 body.ui-clean-view #global-context-panel,
 body.ui-clean-view #history-panel,
 body.ui-clean-view #gas-panel,
+body.ui-clean-view #look-panel,
 body.ui-clean-view #scene-panel {
   opacity: 0 !important;
   visibility: hidden !important;
@@ -7346,9 +7348,19 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 #left-panel-stack > #ukraine-panel { order: 21; }
 #left-panel-stack > #mideast-panel { order: 22; }
 #left-panel-stack > #gas-panel { order: 31; }
-#left-panel-stack > #oil-panel { order: 32; }
-#left-panel-stack > #scene-panel { order: 41; }
+/* #oil-panel (order 32) zanikol 2026-10-11 — ceny ropy sú časťou #gas-panel (Ropa a plyn). */
+.energy-subhead { margin: 8px 0 4px; font: 9px/14px var(--font-mono, monospace); letter-spacing: 3px; text-transform: uppercase; color: var(--text-dim); opacity: 0.8; }
+.energy-subhead + .oil-body { margin-bottom: 6px; }
+/* Prelety/Scény (2026-10-11, preusporiadanie): tri výbery preletov (úžiny, smery frontu, dejiská)
+   patria ku KONFLIKTOM; réžia scén v tom istom paneli je .oko-owner-only. */
+#left-panel-stack > #scene-panel { order: 23; }
 #left-panel-stack > #history-panel { order: 42; }
+
+/* Nástroje vlastníka (2026-10-11): réžia scén, kalibrácia kamier, kartičky konfliktov, udalosti na
+   kontrolu. body.oko-owner nastavuje main.js z relácie účtu (rola owner) alebo na localhoste. */
+body:not(.oko-owner) .oko-owner-only,
+body:not(.oko-owner) .oko-conflicts-launch { display: none !important; }
+.scene-director-head { margin: 10px 0 4px; font: 9px/14px var(--font-mono, monospace); letter-spacing: 3px; text-transform: uppercase; color: var(--text-dim); opacity: 0.8; }
 
 /*
  * Zone heading: a flat sibling of the panels, not a wrapper. Wrapping would
@@ -7400,6 +7412,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
  * not hidden in cockpit.
  */
 body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { display: none !important; }
+/* ENERGIA má od 2026-10-11 jediný panel (#gas-panel), v kokpite skrytý — nadpis by visel nad prázdnom. */
+body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="energy"] { display: none !important; }
 
 /*
  * Runtime focus mode: the layout engine applies this only when the expanded
@@ -7450,6 +7464,45 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
   min-width: var(--left-collapsed-width);
 }
 
+/* Zbalené pilulky pruhu (2026-10-11, vlastník: „sú pretečené, nie rovnako veľké, slabo viditeľné,
+   mohli by sa pri mouse over zosvetliť"): JEDNA šírka pre všetky (dovtedy mali pevnú šírku len
+   štyri panely, ostatné rástli podľa názvu — 176 až 277 px), jedno písmo (bolo 8 px/1,8 px aj
+   9 px/3 px), dlhý názov sa skráti „…" namiesto pretečenia, celok svetlejší a hover rozsvieti. */
+#left-panel-stack > [data-panel-id].collapsed {
+  width: var(--left-collapsed-width);
+  max-width: var(--left-collapsed-width);
+  box-sizing: border-box;
+  opacity: 0.9;
+  cursor: var(--cursor-pointer, pointer);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+#left-panel-stack > [data-panel-id].collapsed:hover,
+#left-panel-stack > [data-panel-id].collapsed:focus-within {
+  opacity: 1;
+  filter: brightness(1.25);
+}
+#left-panel-stack > [data-panel-id].collapsed .panel-header,
+#left-panel-stack > [data-panel-id].collapsed .pp-header-row { width: 100%; box-sizing: border-box; }
+#left-panel-stack > [data-panel-id].collapsed .panel-title,
+#left-panel-stack > [data-panel-id].collapsed .pp-header-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 9px;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+  color: rgba(232, 234, 237, 0.78);
+}
+#left-panel-stack > [data-panel-id].collapsed:hover .panel-title,
+#left-panel-stack > [data-panel-id].collapsed:hover .pp-header-label { color: #ffffff; }
+/* V zbalenej pilulke je deliaca čiara len ozdoba, ktorá uberala názvu ~70 px — celý názov má prednosť. */
+#left-panel-stack > [data-panel-id].collapsed .panel-header .panel-divider,
+#left-panel-stack > [data-panel-id].collapsed .pp-header-row .panel-divider { display: none; }
+/* Réžia scén (nástroj vlastníka) sa v zbalených Preletoch neukazuje. */
+#scene-panel.collapsed .scene-director-head { display: none; }
+
 #left-panel-stack > [data-panel-id]:not(.collapsed) {
   box-sizing: border-box;
   flex: 0 1 var(--left-panel-allocated-height, auto);
@@ -7473,7 +7526,6 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
 #left-panel-stack > #history-panel:not(.collapsed) .history-panel-inner,
 #left-panel-stack > #gas-panel:not(.collapsed) .gas-panel-inner,
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
-#left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
 #left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
 #left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner,
 #left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner {
@@ -7487,7 +7539,6 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
 
 #left-panel-stack > #cctv-panel:not(.collapsed) .cctv-panel-inner,
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
-#left-panel-stack > #oil-panel:not(.collapsed) .oil-panel-inner,
 #left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
 #left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner,
 #left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner {
@@ -11840,7 +11891,7 @@ body.recording-mode .state-strip {
  * expandable, ROPA kept its whole price chart painted while "collapsed",
  * measured 423px instead of ~50px, and pushed ZÁLIV off the bottom of the lane.
  */
-#oil-panel.collapsed .oil-body { display: none; }
+#gas-panel.collapsed .oil-body, #gas-panel.collapsed .energy-subhead { display: none; }
 /* BLÍZKY VÝCHOD (2026-09-26) zdedil riadok po ZÁLIV-e (#gulf-panel zanikol). */
 #mideast-panel.collapsed .mideast-body { display: none; }
 #ukraine-panel.collapsed .ukraine-body { display: none; }
@@ -13201,7 +13252,19 @@ body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
    pointer-events: none (medzi panelmi sa chytá mapa) a jeho posuvník aj koliesko išli na mapu. */
 #left-panel-stack > #global-context-panel { order: 44; }
 #left-panel-stack > .lane-zone[data-lane-zone="settings"] { order: 50; }
-#left-panel-stack > #pp-toggles { order: 51; }
+/* VZHĽAD (2026-10-11): Štýl a podklad mapy (z dolnej lišty) pred Zobrazením a efektmi. */
+#left-panel-stack > #look-panel { order: 51; }
+#left-panel-stack > #pp-toggles { order: 52; }
+#left-panel-stack > #look-panel.collapsed { width: auto; }
+#left-panel-stack > #look-panel:not(.collapsed) { width: 330px; }
+#look-panel.collapsed .look-body { display: none; }
+#look-panel:not(.collapsed) .look-panel-inner { height: 100%; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.look-body .button-grid { flex-wrap: wrap; overflow: visible; margin-bottom: 10px; }
+.look-body .style-btn { flex: 1 1 64px; }
+.look-body .map-source-section { margin-top: 4px; }
+/* Dolná lišta bez Štýlu: dok nesie Polohu a mikrofón, #control-panel ostáva v DOM pre StyleManager. */
+body.oko-look-in-lane #command-dock > #control-panel { display: none !important; }
+body.cockpit-mode #left-panel-stack > #look-panel { display: none !important; }
 #left-panel-stack.oko-lane-with-rail { max-height: calc(100vh - var(--left-stack-safe-top, var(--left-stack-top)) - var(--left-stack-safe-bottom, 4vh)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; pointer-events: auto; }
 /* Stĺpec len taký široký ako jeho najširší panel (09-27, vlastník: „nesmie byť prekrytý glóbus"):
    pri pevných 360 px ležal posuvník aj prázdny pás vpravo od pilúl (pointer-events: auto) cez okraj
@@ -13865,7 +13928,6 @@ body.embed-mode .lane-zone,
 body.embed-mode #ukraine-panel,
 body.embed-mode #mideast-panel,
 body.embed-mode #gas-panel,
-body.embed-mode #oil-panel,
 body.embed-mode #history-panel,
 body.embed-mode #right-context-rail,
 body.embed-mode #first-run-launcher,

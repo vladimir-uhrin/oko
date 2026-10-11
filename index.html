@@ -756,9 +756,11 @@
       <span class="material-symbols-outlined" aria-hidden="true">layers</span>
       <span class="oko-appbar-label" data-i18n="mobile.layers">Layers</span>
     </button>
-    <button type="button" data-oko-section="scenes" aria-pressed="false">
-      <span class="material-symbols-outlined" aria-hidden="true">movie</span>
-      <span class="oko-appbar-label" data-i18n="mobile.scenes">Scenes</span>
+    <!-- KONFLIKTY (2026-10-11): Ukrajina, Blízky východ a prelety majú na mobile vlastnú sekciu —
+         predtým boli zahrabané v DÁTACH a sekcia SCÉNY nosila len réžiu vlastníka. -->
+    <button type="button" data-oko-section="conflicts" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">crisis_alert</span>
+      <span class="oko-appbar-label" data-i18n="mobile.conflicts">Conflicts</span>
     </button>
     <button type="button" data-oko-section="data" aria-pressed="false">
       <span class="material-symbols-outlined" aria-hidden="true">monitoring</span>
@@ -831,7 +833,8 @@
         <button data-i18n="cctv.projection-on" id="cctv-projection-btn" class="scene-btn">PROJECTION ON</button>
         <span id="cctv-quality-chip">CAL · --</span>
       </div>
-      <div class="cctv-calibration-block">
+      <!-- Kalibrácia kamier = nástroj vlastníka (2026-10-11): návštevníkovi sa neukazuje. -->
+      <div class="cctv-calibration-block oko-owner-only">
         <div class="cctv-calibration-header">
           <div data-i18n="cctv.calibration" class="cctv-summary-label">CALIBRATION</div>
           <button data-i18n="cctv.adjust" id="cctv-adjust-btn" class="scene-btn" data-i18n-title="cctv.adjust-title" title="Drag the camera in the world: rings rotate, arrows move, handles set range/FOV">ADJUST</button>
@@ -927,31 +930,22 @@
   <!-- Plyn (2026-09-13): ceny ACER + IMF/FRED (denne/mesačne, bez kľúča),
        ďalšie karty (zásobníky GIE, toky ENTSOG) pribúdajú po etapách.
        Obsah skladá gasPanel.js do [data-gas-body]. -->
+  <!-- Ropa a plyn v jednom paneli (2026-10-11, preusporiadanie): bývalý #oil-panel (ceny ropy
+       Brent/WTI z Yahoo Finance, oilPriceChip.js createOilPricePanel do [data-oil-body]) je
+       prvá, krátka časť; plyn (ceny ACER, zásobníky, toky, LNG) druhá. Zóna ENERGIA má tak
+       jediný panel — rovnako ako VRSTVY. -->
   <div id="gas-panel" class="panel-collapsible collapsed" data-panel-id="gas-panel">
     <div class="panel-glow"></div>
     <div class="gas-panel-inner scene-panel-inner">
       <div class="panel-header">
-        <span data-i18n="panel.gas" class="panel-title">GAS</span>
+        <span data-i18n="panel.energy" class="panel-title">OIL &amp; GAS</span>
         <span class="panel-divider"></span>
         <button class="panel-collapse-btn" data-collapse-target="gas-panel" title="Collapse panel">+</button>
       </div>
-      <div class="gas-body" data-gas-body></div>
-    </div>
-  </div>
-
-  <!-- Ceny ropy (2026-09-17): Brent/WTI ≈ spot z Yahoo Finance (front-month),
-       USD + EUR, graf 6 mes., deň/52-týž, spread Brent–WTI. Nezávislé od scén
-       (cena ropy je globálna). Obsah skladá oilPriceChip.js (createOilPricePanel)
-       do [data-oil-body]. -->
-  <div id="oil-panel" class="panel-collapsible collapsed" data-panel-id="oil-panel">
-    <div class="panel-glow"></div>
-    <div class="oil-panel-inner scene-panel-inner">
-      <div class="panel-header">
-        <span data-i18n="panel.oil" class="panel-title">CRUDE OIL</span>
-        <span class="panel-divider"></span>
-        <button class="panel-collapse-btn" data-collapse-target="oil-panel" title="Collapse panel">+</button>
-      </div>
+      <div class="energy-subhead" data-i18n="panel.oil">CRUDE OIL</div>
       <div class="oil-body" data-oil-body></div>
+      <div class="energy-subhead" data-i18n="panel.gas">GAS</div>
+      <div class="gas-body" data-gas-body></div>
     </div>
   </div>
 
@@ -992,31 +986,34 @@
           <option value="" data-i18n="mideast.pick">Fly to a Middle East theatre…</option>
         </select>
       </div>
-      <div class="scene-controls">
+      <!-- Réžia scén (nástroj vlastníka, 2026-10-11): návštevník vidí v paneli len tri prelety vyššie;
+           body.oko-owner (prihlásený vlastník alebo localhost) odkryje .oko-owner-only. -->
+      <div class="scene-director-head oko-owner-only" data-i18n="scene.director">SCENE DIRECTOR</div>
+      <div class="scene-controls oko-owner-only">
         <select id="scene-select" aria-label="Scene recipe" data-i18n-aria="scene.select-aria"></select>
         <button data-i18n="scene.new" id="scene-new-btn" class="scene-btn">NEW</button>
         <button data-i18n="scene.del" id="scene-delete-btn" class="scene-btn scene-btn-danger">DEL</button>
       </div>
-      <div class="scene-controls">
+      <div class="scene-controls oko-owner-only">
         <button data-i18n="scene.capture" id="scene-capture-btn" class="scene-btn">CAPTURE SHOT</button>
         <button data-i18n="scene.update" id="scene-update-shot-btn" class="scene-btn">UPDATE SHOT</button>
       </div>
-      <div id="scene-shot-list" class="scene-shot-list"></div>
-      <div class="scene-controls">
+      <div id="scene-shot-list" class="scene-shot-list oko-owner-only"></div>
+      <div class="scene-controls oko-owner-only">
         <button data-i18n="scene.start" id="scene-start-btn" class="scene-btn">START</button>
         <button data-i18n="scene.stop" id="scene-stop-btn" class="scene-btn scene-btn-danger">STOP</button>
         <button data-i18n="scene.next" id="scene-next-btn" class="scene-btn">NEXT</button>
       </div>
-      <div class="scene-controls">
+      <div class="scene-controls oko-owner-only">
         <button data-i18n="scene.export" id="scene-export-btn" class="scene-btn">EXPORT PRESETS</button>
         <button data-i18n="scene.import" id="scene-import-btn" class="scene-btn">IMPORT</button>
         <button data-i18n="scene.run-log" id="scene-download-btn" class="scene-btn">RUN LOG</button>
         <input type="file" id="scene-import-file" accept="application/json,.json" hidden />
       </div>
-      <div class="scene-progress">
+      <div class="scene-progress oko-owner-only">
         <div id="scene-progress-fill">0%</div>
       </div>
-      <div data-i18n="scene.ready" id="scene-status">Ready</div>
+      <div data-i18n="scene.ready" id="scene-status" class="oko-owner-only">Ready</div>
     </div>
   </div>
 
@@ -1035,8 +1032,23 @@
     </div>
   </div>
 
-  <!-- Nastavenia (2026-09-27): sem src/leftLane.js presunie panel Zobrazenie (#pp-toggles);
-       Kamery a Kontext idú do zóny Nástroje. Poradie dáva CSS order. -->
+  <!-- Vzhľad (2026-10-11): štýly a podklad mapy z dolnej lišty (#control-panel) presunie main.js
+       do tohto panela — vizuálne voľby boli na troch miestach (Zobrazenie, Štýl, Témy).
+       Ovládače (#style-buttons, .map-source-section) si nechajú id a poslucháče StyleManagera. -->
+  <div id="look-panel" class="panel-collapsible collapsed" data-panel-id="look-panel">
+    <div class="panel-glow"></div>
+    <div class="look-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.look" class="panel-title">STYLE &amp; BASEMAP</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="look-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="look-body" data-look-body></div>
+    </div>
+  </div>
+
+  <!-- Vzhľad (2026-09-27 Nastavenia, od 2026-10-11 Vzhľad): sem src/leftLane.js presunie panel
+       Zobrazenie (#pp-toggles); Kamery a Kontext idú do zóny Prehliadať. Poradie dáva CSS order. -->
   <div class="lane-zone" data-lane-zone="settings">
     <span class="lane-zone-text" data-i18n="lane.zone.settings">SETTINGS</span>
     <span class="panel-divider" aria-hidden="true"></span>

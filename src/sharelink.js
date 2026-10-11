@@ -50,13 +50,17 @@ const SHARE_PANEL_STATE_REGISTRY = Object.freeze([
   // Tokens avoid the taken c/l/d/v/r/s/g/p/m; 'g' was gone, hence 'a' and 'f'.
   { id: 'gas-panel', token: 'a', pinnable: false },
   { id: 'history-panel', token: 'h', pinnable: false },
-  { id: 'oil-panel', token: 'o', pinnable: false },
+  // ROPA (token 'o') zanikla 2026-10-11 — ceny ropy sú v paneli Ropa a plyn (#gas-panel, token 'a');
+  // starý token 'o' v odkazoch sa ticho ignoruje, 'o' ostáva rezervované.
   // BLÍZKY VÝCHOD (2026-09-26): panel pohltil bývalý ZÁLIV (#gulf-panel zanikol)
   // a zdedil jeho token 'f', aby staré zdieľané odkazy ďalej prepínali tú istú
   // líniu panela, namiesto toho, aby ich stav ticho vypadol.
   { id: 'mideast-panel', token: 'f', pinnable: false },
   // UKRAJINA (2026-09-19): ďalšie voľné písmeno — 'u' ako Ukrajina.
   { id: 'ukraine-panel', token: 'u', pinnable: false },
+  // VZHĽAD (2026-10-11): Štýl a podklad mapy v ľavom stĺpci — 'n' (nastavenia vzhľadu); 'k' je
+  // vyradený slovník (sharelink.celestial.test), 'o' bývalá ROPA.
+  { id: 'look-panel', token: 'n', pinnable: false },
   // POČASIE (2026-10-07): 'w' ako weather (písmeno 'w' v posuvníkoch je iný register).
   { id: 'weather-panel', token: 'w', pinnable: false },
 ]);

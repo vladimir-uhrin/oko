@@ -69,9 +69,13 @@ export function creditsBottomClear({ base, height, left, right, viewportHeight, 
 export const MOBILE_SECTIONS = Object.freeze([
   // POČASIE (2026-10-07) má riadky vrstiev (glóbus GFS, radar SHMÚ) — patrí k Vrstvám.
   Object.freeze({ id: 'layers', labelKey: 'mobile.layers', panelIds: Object.freeze(['data-panel', 'weather-panel']), expand: 'data-panel' }),
-  Object.freeze({ id: 'scenes', labelKey: 'mobile.scenes', panelIds: Object.freeze(['scene-panel']), expand: 'scene-panel' }),
-  Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'oil-panel', 'mideast-panel', 'ukraine-panel', 'history-panel']), expand: 'gas-panel' }),
-  Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['pp-toggles', 'cctv-panel', 'global-context-panel']), expand: 'pp-toggles' }),
+  // KONFLIKTY (2026-10-11, preusporiadanie): Ukrajina, Blízky východ a prelety pokope ako v ľavom
+  // stĺpci; sekcia SCÉNY zanikla (réžia scén je .oko-owner-only v paneli Prelety).
+  Object.freeze({ id: 'conflicts', labelKey: 'mobile.conflicts', panelIds: Object.freeze(['ukraine-panel', 'mideast-panel', 'scene-panel']), expand: 'ukraine-panel' }),
+  // DÁTA = Energia + Prehliadať (história, kamery, kontext) — rovnaké zóny ako na počítači.
+  Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']), expand: 'gas-panel' }),
+  // VZHĽAD (2026-10-11): Štýl a podklad mapy (z dolnej lišty) + Zobrazenie a efekty.
+  Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['look-panel', 'pp-toggles']), expand: 'look-panel' }),
   Object.freeze({ id: 'search', labelKey: 'mobile.search', panelIds: Object.freeze([]), action: 'location' }),
 ]);
 

@@ -143,7 +143,7 @@ test('akordeón: otvorenie panela v ľavom pruhu zbalí ostatné otvorené (ui.j
   assert.ok(!ui.includes('oko-rail-docked'), 'stará ukotvená lišta je preč');
 });
 
-test('poradie v zónach: Vrstvy · Konflikty · Energia · Nástroje (… Kamery, Kontext) · Nastavenia (Zobrazenie)', () => {
+test('poradie v zónach: Vrstvy · Konflikty (… Prelety) · Energia · Prehliadať (História, Kamery, Kontext) · Nastavenia (Zobrazenie)', () => {
   const order = (sel) => {
     const m = new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{\\s*order: (\\d+);`).exec(css);
     assert.ok(m, `${sel} nemá order`);
@@ -152,11 +152,11 @@ test('poradie v zónach: Vrstvy · Konflikty · Energia · Nástroje (… Kamery
   const seq = [
     '#left-panel-stack > #data-panel',
     '#left-panel-stack > .lane-zone[data-lane-zone="weather"]', '#left-panel-stack > #weather-panel',
-    '#left-panel-stack > #ukraine-panel', '#left-panel-stack > #mideast-panel',
-    '#left-panel-stack > #gas-panel', '#left-panel-stack > #oil-panel',
-    '#left-panel-stack > #scene-panel', '#left-panel-stack > #history-panel',
+    '#left-panel-stack > #ukraine-panel', '#left-panel-stack > #mideast-panel', '#left-panel-stack > #scene-panel',
+    '#left-panel-stack > #gas-panel',
+    '#left-panel-stack > #history-panel',
     '#left-panel-stack > #cctv-panel', '#left-panel-stack > #global-context-panel',
-    '#left-panel-stack > .lane-zone[data-lane-zone="settings"]', '#left-panel-stack > #pp-toggles',
+    '#left-panel-stack > .lane-zone[data-lane-zone="settings"]', '#left-panel-stack > #look-panel', '#left-panel-stack > #pp-toggles',
   ].map(order);
   for (let i = 1; i < seq.length; i++) assert.ok(seq[i] > seq[i - 1], `poradie ${seq.join(' < ')}`);
   assert.match(html, /<div class="lane-zone" data-lane-zone="settings">\s*<span class="lane-zone-text" data-i18n="lane\.zone\.settings">SETTINGS<\/span>/);

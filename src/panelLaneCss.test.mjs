@@ -61,7 +61,7 @@ test('every left-lane panel has an explicit order, so none silently falls to 0',
   // The reported regression, pinned by name. Zone bands (2026-09-20): ROPA sits
   // in the ENERGIA decade, ZÁLIV in the KONFLIKTY one — since 2026-09-26 the
   // BLÍZKY VÝCHOD panel inherits ZÁLIV's slot (#gulf-panel is gone).
-  assert.equal(ordered.get('oil-panel'), 32);
+  assert.equal(ordered.has('oil-panel'), false, '#oil-panel zanikol 2026-10-11 (ceny ropy sú v #gas-panel)');
   assert.equal(ordered.get('mideast-panel'), 22);
 
   // Orders must stay distinct, or the flex sort falls back to DOM order.
@@ -121,9 +121,12 @@ const LANE_ZONES = [
   { zone: null, panels: ['data-panel'] },
   // POČASIE (2026-10-07): glóbus GFS + radar SHMÚ hneď pod Vrstvami.
   { zone: 'weather', panels: ['weather-panel'] },
-  { zone: 'conflicts', panels: ['ukraine-panel', 'mideast-panel'] },
-  { zone: 'energy', panels: ['gas-panel', 'oil-panel'] },
-  { zone: 'tools', panels: ['scene-panel', 'history-panel', 'cctv-panel'] },
+  // 2026-10-11 (preusporiadanie): Prelety/Scény ku KONFLIKTOM (tri výbery preletov), PREHLIADAŤ = História + Kamery.
+  { zone: 'conflicts', panels: ['ukraine-panel', 'mideast-panel', 'scene-panel'] },
+  { zone: 'energy', panels: ['gas-panel'] },
+  { zone: 'tools', panels: ['history-panel', 'cctv-panel'] },
+  // VZHĽAD (2026-10-11): Štýl a podklad mapy v markupe pruhu; Zobrazenie (pp-toggles) prichádza z pravej lišty.
+  { zone: 'settings', panels: ['look-panel'] },
 ];
 
 const laneOrders = () => new Map(

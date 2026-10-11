@@ -434,6 +434,19 @@ async function init() {
     syncLeftLane();
     leftLane.installHeaderToggle();
     leftLane.installRevealOnOpen();
+    // VZHĽAD (2026-10-11, vlastník: „sprav vzhľad"): štýly 1–7 a podklad mapy z dolnej lišty
+    // (#control-panel) do panela „Štýl a podklad mapy" v zóne VZHĽAD vedľa „Zobrazenie a efekty" —
+    // vizuálne voľby boli na troch miestach. Prvky si nechávajú id aj poslucháče StyleManagera;
+    // dolná lišta nesie už len Polohu a mikrofón (CSS body.oko-look-in-lane).
+    try {
+      const lookBody = document.querySelector('[data-look-body]');
+      const styleGrid = document.getElementById('style-buttons');
+      const mapSource = document.querySelector('#control-panel .map-source-section');
+      if (lookBody && styleGrid && mapSource) {
+        lookBody.append(styleGrid, mapSource);
+        document.body.classList.add('oko-look-in-lane');
+      }
+    } catch { /* dolná lišta ostane ako doteraz */ }
     new MutationObserver(syncLeftLane).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     // Obnova odkazu môže otvoriť viac panelov naraz — po nej zase jeden.
     window.addEventListener('gev:initial-share-restore-settled', () => { leftLane.enforceSingleOpen(); leftLane.fitOpen(); });
@@ -1036,7 +1049,10 @@ async function init() {
         const creditsText = document.querySelector('#cesium-credits')?.textContent || '';
         const snap = await captureConflictCard({ viewer, model, ratio, lang: currentLanguage(), creditsText });
         if (!snap) return null;
-        downloadCardSnapshot(snap, conflictCardFilename(c, ratio, new Date().toISOString()));
+        const fileName = conflictCardFilename(c, ratio, new Date().toISOString());
+        downloadCardSnapshot(snap, fileName);
+        // Spätná väzba (QA 2026-10-11): Snímka/Kartička sťahovali PNG bez akéhokoľvek znamenia v rozhraní.
+        try { styleManager._showToast?.(t('conflicts.exported', { file: fileName }), { durationMs: 4500 }); } catch { /* */ }
         return snap;
       } catch (error) { console.warn('[conflict] export failed:', error?.message || error); return null; }
     }
@@ -1215,7 +1231,8 @@ async function init() {
       cmds.push({ id: 'view:osm', label: t('cmd.action.osm'), group: 'view', keywords: ['osm', 'mapa', 'plain'], run: () => { void styleManager._setMapStack('osm'); } });
       cmds.push({ id: 'view:photoreal', label: t('cmd.action.photoreal'), group: 'view', keywords: ['3d', 'foto', 'google', 'photoreal'], run: () => { void styleManager._setMapStack('photoreal'); } });
       cmds.push({ id: 'view:clean', label: t('cmd.action.clean'), group: 'view', keywords: ['čistá', 'clean', 'screenshot'], run: () => { kartaOverlay?.setClean(!kartaOverlay.isClean()); } });
-      cmds.push({ id: 'view:conflicts', label: t('cmd.action.conflicts'), group: 'view', keywords: ['kartičky', 'export', 'cards'], run: () => { conflictsPanel?.open(); } });
+      // Kartičky konfliktov sú nástroj vlastníka (2026-10-11) — v palete len s body.oko-owner, ako ich spúšťač v pruhu.
+      if (document.body.classList.contains('oko-owner')) cmds.push({ id: 'view:conflicts', label: t('cmd.action.conflicts'), group: 'view', keywords: ['kartičky', 'export', 'cards'], run: () => { conflictsPanel?.open(); } });
       return cmds;
     };
     // Jednotné hľadanie lietadla (2026-10-04): živé lietadlá z pamäte + celý svet zo servera.
@@ -1710,6 +1727,14 @@ async function init() {
 // Inštancia ide aj sledovaným letom (init → createFollowedFlights): prihlásenie, zoznam k účtu.
 let accountCenter = null;
 try { accountCenter = initAuthPanel(); } catch { console.warn('[Account] Account panel could not initialize.'); }
+// Nástroje vlastníka (2026-10-11, preusporiadanie rozhrania): réžia scén, kalibrácia kamier, kartičky
+// konfliktov a udalosti na kontrolu majú triedu .oko-owner-only a vidí ich len prihlásený vlastník
+// (rola owner) — alebo tento počítač (localhost), kde vlastník pracuje bez prihlásenia.
+try {
+  const localDev = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  const syncOwner = (state) => document.body.classList.toggle('oko-owner', localDev || state?.user?.role === 'owner');
+  if (accountCenter?.client?.subscribe) accountCenter.client.subscribe(syncOwner); else syncOwner(null);
+} catch { /* bez účtov ostanú nástroje vlastníka skryté */ }
 // Hlas len pre prihlásených (2026-10-05): neprihlásenému mikrofón otvorí prihlásenie s dôvodom (ako SLEDOVAŤ).
 // Bez panela účtu rozhoduje server (token → 401).
 setVoiceAccessGate((info) => {

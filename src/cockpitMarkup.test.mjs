@@ -219,15 +219,16 @@ test('share startup isolates panel defaults from recipient-local collapse prefer
 });
 
 test('Cockpit hides a zone heading whose every panel it hides', () => {
-  // NÁSTROJE = #scene-panel + #history-panel, oba sú v kokpite skryté, takže
-  // nadpis by ostal visieť nad prázdnom. ENERGIA ostáva — #oil-panel skrytý nie je.
+  // PREHLIADAŤ (tools) = #history-panel (+ Kamery a Kontext, skryté samostatným pravidlom), v kokpite
+  // skryté, takže nadpis by ostal visieť nad prázdnom. ENERGIA ostáva — #oil-panel skrytý nie je;
+  // KONFLIKTY ostávajú — Ukrajina a Blízky východ sú viditeľné (2026-10-11: Prelety sú v Konfliktoch).
   const hiddenInCockpit = new Set(
     [...css.matchAll(/body\.cockpit-mode #left-panel-stack > #([a-z-]+)\s*\{\s*display:\s*none/g)].map((m) => m[1]),
   );
   const zones = {
-    conflicts: ['ukraine-panel', 'mideast-panel'],
-    energy: ['gas-panel', 'oil-panel'],
-    tools: ['scene-panel', 'history-panel'],
+    conflicts: ['ukraine-panel', 'mideast-panel', 'scene-panel'],
+    energy: ['gas-panel'],
+    tools: ['history-panel'],
   };
   for (const [zone, panels] of Object.entries(zones)) {
     const allHidden = panels.every((id) => hiddenInCockpit.has(id));

@@ -151,6 +151,44 @@ energia), **Miesta a dejiská** (Ukrajina, Blízky východ, úžiny — jeden pa
 úžiny"), **Prehľadávať** (história letov/lodí, udalosti, kamery, rádio), **Zobrazenie** (štýl,
 podklad, HUD, detekcia, témy, jazyk) + **Nástroje vlastníka** skryté za prihlásením.
 
+## 9. Preusporiadanie — krok 1 (2026-10-11 večer, v pracovnom strome, NEKOMITNUTÉ)
+Cieľ vlastníka: „logické, prehľadné, mobile friendly". Jedna logika pre počítač aj mobil:
+- **Stĺpec (desktop):** VRSTVY (Dátové vrstvy, Počasie) · KONFLIKTY (Ukrajina, Blízky východ,
+  **Prelety** — bývalé Scény, poradie 23) · ENERGIA (Plyn, Ropa) · **PREHLIADAŤ** (bývalé Nástroje:
+  **História** — už nie „História letov", Kamery, Kontext) · NASTAVENIA (Zobrazenie).
+- **Mobil:** VRSTVY · **KONFLIKTY** (Ukrajina, Blízky východ, Prelety; nová sekcia namiesto SCÉN)
+  · DÁTA (Plyn, Ropa, História, Kamery, Kontext) · ZOBRAZENIE (len Zobrazenie) · HĽADAŤ.
+- **Nástroje vlastníka** (`.oko-owner-only`, `body.oko-owner` z roly účtu alebo na localhoste —
+  `main.js` za `initAuthPanel`): réžia scén (recept, zábery, ŠTART/STOP, export, log), kalibrácia
+  kamier, spúšťač Kartičiek konfliktov. Návštevník ich nevidí; Udalosti ostávajú verejné (ich
+  kontrola vlastníka bola skrytá už predtým).
+- Testy: `ownerTools.test.mjs` (nový), upravené `panelLaneCss`, `leftLane`, `mobileShell`,
+  `cockpitMarkup`, `mideastPanel`. Overené na localhost:4181 (počítač ako hosť, mobil 375 px).
+- **Krok 2 (ten istý večer):** Plyn + Ropa → jeden panel **„Ropa a plyn"** (`#gas-panel`; ceny ropy
+  ako krátka prvá časť `[data-oil-body]`, plyn pod nimi; `#oil-panel` zanikol, token odkazu `o`
+  sa ignoruje, zóna ENERGIA má jediný panel a v kokpite sa skrýva aj jej nadpis). Toast po
+  exporte kartičky („Kartička uložená: …"). Príkaz „Kartičky konfliktov" v palete len pre vlastníka.
+  Test `ukraineFrontZone.test.mjs` dorovnaný na náhľad KARTY 224 px (súvisí s opravou b3e2518).
+- **Krok 3 (vlastník: „áno, sprav vzhľad aj a názvy daj zmysluplné"):** zóna NASTAVENIA →
+  **VZHĽAD** s dvoma panelmi: **„Štýl a podklad mapy"** (nový `#look-panel`, order 51 — main.js doň
+  po štarte presunie `#style-buttons` a `.map-source-section` z dolnej lišty; `#control-panel`
+  ostáva v DOM pre StyleManager, ale skrytý: `body.oko-look-in-lane`) a **„Zobrazenie a efekty"**
+  (`#pp-toggles`, order 52). Dolná lišta = Poloha + mikrofón. Mobil: sekcia VZHĽAD = oba panely.
+  Token odkazu `n` (`k` je vyradený slovník). Klávesy 1–7 a podklady fungujú ako predtým.
+- **Názvy panelov (aby to každý pochopil):** Vrstvy na mape · POČASIE A RADAR · UKRAJINA — FRONT ·
+  BLÍZKY VÝCHOD — DEJISKÁ · Prelety kamerou · Ropa a plyn — ceny a toky · História letov a lodí ·
+  Dopravné kamery · Rádio a kontakty · Štýl a podklad mapy · Zobrazenie a efekty; zóny Počasie ·
+  Konflikty · Energia · Prehliadať · Vzhľad (EN ekvivalenty v i18nStrings, test ownerTools).
+- **Zbalené pilulky (vlastník zo snímky: „pretečené, nie rovnako veľké, slabo viditeľné, hover"):**
+  jedna šírka 240 px (`--left-collapsed-width`, predtým 176 + štyri panely pevné, ostatné podľa
+  názvu), jedno písmo 9 px / 1,3 px veľkými písmenami, deliaca čiara v pilulke skrytá (brala
+  názvu ~70 px), opacity 0,9 a text 0,78 (bolo 0,72 / 0,3), hover = 1,0 + jas 1,25 + biely text;
+  „Réžia scén" sa v zbalených Preletoch neukazuje. Pravidlo `#left-panel-stack > [data-panel-id].collapsed`.
+  PASCA: prehliadač drží `style.css` v cache aj po reload — overovať s `?v=`.
+- Ďalšie kroky (drobné): prelety úžin aj do panela Blízky východ; STOP viditeľné počas scény
+  (dnes len Esc); zrušenie načítania klikom počas „ZAPÍNAM"; TÉMY vpravo hore premenovať na
+  „Články" (sú to obsahové stránky, nie témy vzhľadu).
+
 ## 8. Ručný funkčný test (2026-10-11, okolive.sk v paneli prehliadača, 935×860)
 Každé tlačidlo klikané naozaj (myšou cez odkaz prvku), účinok overený v DOM, v hashi adresy
 alebo na snímke. **Prešlo:** horná lišta (vrstvy preč, odkaz, úvodný pohľad, účet, paleta, SK/EN,

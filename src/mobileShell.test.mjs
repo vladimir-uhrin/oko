@@ -274,18 +274,25 @@ test('plášť: jedna sekcia naraz, viac panelov v sekcii (rozbalený len prvý)
   const shell = createMobileShell({ document: doc, window: win, styleManager });
   shell.sync();
   const sheetBody = sheet.querySelector('.oko-sheet-body');
-  assert.equal(shell.open('display'), true);
-  assert.deepEqual(sheetBody.children.map((c) => c.id), ['pp-toggles', 'cctv-panel', 'global-context-panel']);
-  assert.equal(byId.get('pp-toggles').classList.contains('collapsed'), false);
+  // 2026-10-11 (preusporiadanie): DÁTA = energia + história + kamery + kontext; ZOBRAZENIE len Zobrazenie.
+  assert.equal(shell.open('data'), true);
+  assert.deepEqual(sheetBody.children.map((c) => c.id), ['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']);
+  assert.equal(byId.get('gas-panel').classList.contains('collapsed'), false);
   assert.equal(byId.get('cctv-panel').classList.contains('collapsed'), true, 'ostatné ostávajú zbalené ako hlavičky');
-  assert.deepEqual(shell._getStateForTest().moved, ['pp-toggles', 'cctv-panel', 'global-context-panel']);
+  assert.deepEqual(shell._getStateForTest().moved, ['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']);
 
-  assert.equal(shell.open('data'), true, 'prepnutie sekcie');
-  assert.deepEqual(sheetBody.children.map((c) => c.id), ['gas-panel', 'history-panel']);
-  assert.equal(byId.get('pp-toggles').parentNode, rail, 'DISPLAY späť v pravej lište');
-  assert.equal(rail.children[0], byId.get('pp-toggles'));
+  assert.equal(shell.open('display'), true, 'prepnutie sekcie');
+  assert.deepEqual(sheetBody.children.map((c) => c.id), ['pp-toggles']);
+  assert.equal(byId.get('global-context-panel').parentNode, rail, 'Kontext späť v pravej lište');
   assert.equal(byId.get('cctv-panel').parentNode, leftStack);
   assert.equal(leftStack.children[1], byId.get('cctv-panel'), 'CCTV späť na svoju pozíciu v ľavom stĺpci');
+  assert.equal(shell.activeSection(), 'display');
+
+  assert.equal(shell.toggle('display'), true, 'toggle otvorenej sekcie zatvára');
+  assert.equal(shell.activeSection(), null);
+  assert.equal(byId.get('pp-toggles').parentNode, rail, 'DISPLAY späť v pravej lište');
+  assert.equal(rail.children[0], byId.get('pp-toggles'));
+  assert.equal(shell.open('data'), true);
   assert.equal(shell.activeSection(), 'data');
 
   assert.equal(shell.toggle('data'), true, 'toggle otvorenej sekcie zatvára');
@@ -305,9 +312,10 @@ test('plášť: naležato = zásuvka; návrat na desktop otvorený výsuv zatvor
   const shell = createMobileShell({ document: doc, window: win, styleManager: null });
   shell.sync();
   assert.equal(body.classList.contains('oko-mobile-landscape'), true);
+  // druhá sekcia = KONFLIKTY (2026-10-11); v kostre je z nej len scene-panel
   const scenesButton = appbar.querySelectorAll('[data-oko-section]')[1];
   scenesButton.click();
-  assert.equal(shell.activeSection(), 'scenes');
+  assert.equal(shell.activeSection(), 'conflicts');
   assert.equal(byId.get('scene-panel').parentNode, sheet.querySelector('.oko-sheet-body'));
   doc.dispatch('keydown', { key: 'Escape' });
   assert.equal(shell.activeSection(), null, 'Escape zatvára');
@@ -320,7 +328,7 @@ test('plášť: naležato = zásuvka; návrat na desktop otvorený výsuv zatvor
   assert.equal(shell.activeSection(), null, 'potiahnutie nadol zatvára');
 
   scenesButton.click();
-  assert.equal(shell.activeSection(), 'scenes');
+  assert.equal(shell.activeSection(), 'conflicts');
   win.coarse = false;
   win.resize(1440, 900);
   assert.equal(body.classList.contains('oko-mobile'), false);
