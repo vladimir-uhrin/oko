@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium';
 import { initAuthPanel } from './auth/panel.js';
 import { createFollowedFlights, installFollowButton } from './followedFlights.js';
+import { createFollowedVessels, installVesselFollowButtons } from './followedVessels.js';
 import './auth/panel.css';
 // Admin (2026-10-03): anonymná štatistika návštev a oznam prevádzkovateľa.
 import { initSiteTelemetry } from './siteTelemetry.js';
@@ -116,7 +117,8 @@ import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { installEmbedMode, isEmbedMode } from './embedMode.js';
 import { initMobileShell } from './mobileShell.js';
-import { setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
+import { getOverlayPaintRect, setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
+import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 
 initLogoGaze();
 
@@ -1137,6 +1139,7 @@ async function init() {
     // neprihlásených ich presmeruj na prihlásenie"): tlačidlo SLEDOVAŤ nad KOKPIT, zoznam k účtu,
     // navrchu v hľadaní, toast pri vzlete/pristátí. Bez účtu (panel nenaštartoval) sa nič nepridá.
     let followedFlights = null;
+    let followedVessels = null;
     try {
       if (accountCenter) {
         followedFlights = createFollowedFlights({
@@ -1160,6 +1163,7 @@ async function init() {
     const buildCommands = () => {
       const cmds = [];
       try { cmds.push(...(followedFlights?.commands() || [])); } catch { /* sledované lety sú voliteľné */ }
+      try { cmds.push(...(followedVessels?.commands() || [])); } catch { /* sledované lode sú voliteľné */ }
       for (const c of listConflicts()) {
         cmds.push({ id: `scene:${c.id}`, label: conflictTitle(c, t), group: CONFLICT_GROUP[c.region] || 'ukraine', keywords: [c.region, c.name, c.sceneId || ''], run: () => { void frameConflict(c); } });
       }
@@ -1213,6 +1217,51 @@ async function init() {
       onRemoteShip: (ship) => window.__godsEyeView.vesselEstimate?.showRemote?.(ship),
     });
     window.__godsEyeView.vesselSearch = vesselSearch;
+    // Sledované lode (2026-10-11, bod 6): zvonček vedľa krížika na karte lode, zoznam k účtu
+    // (ten istý ako lety), navrchu v hľadaní, toast pri vyplávaní/priplávaní.
+    try {
+      if (accountCenter) {
+        const layerModule = (id) => dataManager.layers.get(id)?.module;
+        followedVessels = createFollowedVessels({
+          account: accountCenter,
+          translate: t,
+          notify: (text) => styleManager._showToast(text, { durationMs: 6000 }),
+          findLive: (mmsi) => aisLiveVesselsLayer.getLiveContact?.(mmsi) || null,
+          fetchInfo: (mmsi) => lookupVesselInfo(mmsi),
+          openVessel: (mmsi, label) => { void vesselSearch.openByMmsi(mmsi, label); },
+        });
+        installVesselFollowButtons(viewer, {
+          container: document.body,
+          followed: followedVessels,
+          // História lode (bod 7): tlačidlo vedľa zvončeka otvorí kartu LODE v paneli História.
+          onHistory: ({ mmsi, name }) => {
+            for (const id of ['ais-live-vessels', 'aishub-vessels', 'gfw-presence']) {
+              try { dataManager.layers.get(id)?.module?.clearSelection?.(); } catch { /* */ }
+            }
+            void styleManager._shipHistoryPanel?.open(mmsi, name);
+          },
+          translate: t,
+          paintRect: getOverlayPaintRect,
+          providers: [
+            { id: 'live', active: () => {
+              const info = aisLiveVesselsLayer.getSelectedInfo?.();
+              return info?.mmsi ? { sourceId: VESSEL_OVERLAY_SOURCE_ID, entryId: `vessel:${info.mmsi}`, mmsi: String(info.mmsi), name: info.name } : null;
+            } },
+            { id: 'aishub', active: () => {
+              const m = layerModule('aishub-vessels');
+              const mmsi = m?.getSelectedMmsi?.();
+              return mmsi ? { sourceId: 'aishub-vessels', entryId: `aishub:${mmsi}`, mmsi: String(mmsi), name: m.getSelectedName?.() } : null;
+            } },
+            { id: 'gfw', active: () => {
+              const m = layerModule('gfw-presence');
+              const mmsi = m?.getSelectedMmsi?.();
+              return mmsi ? { sourceId: 'gfw-presence', entryId: `gfw:${mmsi}`, mmsi: String(mmsi), name: m.getSelectedName?.() } : null;
+            } },
+          ],
+        });
+        window.__godsEyeView.followedVessels = followedVessels;
+      }
+    } catch (error) { console.warn('[follow] followed vessels unavailable:', error?.message || error); }
     const commandPalette = createCommandPalette({
       translate: t,
       getCommands: buildCommands,

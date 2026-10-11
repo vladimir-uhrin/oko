@@ -835,6 +835,14 @@ export function createAishubVesselsLayer({
       return _selectedKey;
     },
 
+    /** Meno vybranej lode (zvonček sledovania, 2026-10-11). */
+    getSelectedName() {
+      const key = String(_selectedKey ?? '');
+      if (!key) return null;
+      const entry = _byId.get(key) || [..._byId.values()].find((e) => String(e.row.mmsi) === key);
+      return entry?.row?.name || null;
+    },
+
     getContactSummary(id) {
       const key = String(id ?? '').trim();
       const entry = _byId.get(key) || [..._byId.values()].find((e) => String(e.row.mmsi) === key);

@@ -62,6 +62,7 @@ import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
 import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
 import { installHistoryPanel } from './historyPanel.js';
+import { installShipHistoryPanel } from './shipHistoryPanel.js';
 import { eventIdFromHash, installEventsPanel } from './eventsPanel.js';
 import { createEventMarkers } from './eventMarkers.js';
 import { whenStartupReady } from './startupGate.js';
@@ -3255,6 +3256,14 @@ export class StyleManager {
           this._dataManager?.layers?.get('military')?.module?.trackById?.(icao24, { origin: 'user' });
         }
       },
+      setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
+    });
+    // História lodí (2026-10-11, shipHistoryPanel.js): karta LODE v tom istom paneli.
+    this._shipHistoryPanel = installShipHistoryPanel({
+      viewer,
+      host: document.querySelector('#history-panel [data-history-body]'),
+      t,
+      reveal: () => revealHistoryPanel(),
       setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
     });
     // Udalosti (2026-09-30, etapa 2b, eventsPanel.js): odkaz z príspevku (`event=<id>` v adrese)

@@ -688,6 +688,11 @@ export function createGfwPresenceLayer({
       return _selectedRow?.mmsi ? String(_selectedRow.mmsi) : null;
     },
 
+    /** Meno vybranej lode (zvonček sledovania, 2026-10-11). */
+    getSelectedName() {
+      return _selectedRow?.name || null;
+    },
+
     /** Vyber loď z kódu (hľadanie, test); null zruší výber. */
     selectContact(id) {
       const key = String(id ?? '').trim();

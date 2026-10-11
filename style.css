@@ -10920,6 +10920,12 @@ body.ui-clean-view .card-close,
 body.recording-mode .card-close {
   display: none !important;
 }
+/* Zvonček sledovanej lode vedľa krížika (2026-10-11, followedVessels.js). */
+.card-follow .material-symbols-outlined { color: #00dcff; }
+.card-follow[data-guest="true"] .material-symbols-outlined { color: rgba(220, 238, 255, 0.7); }
+.card-follow[aria-pressed="true"] { border-color: #00dcff; background: rgba(0, 72, 92, 0.92); }
+.card-follow[aria-pressed="true"] .material-symbols-outlined { color: #fff; }
+.card-follow[aria-busy="true"] { opacity: 0.6; cursor: progress; }
 
 /* Štátne lietadlo pri karte (2026-09-30, stateFlightsStrip.js): odznak, prevádzkovateľ, značka
    a prepínač PREDCHÁDZAJÚCE LETY. Sadá pod kartu (a pod fotku) — nad kartou ho na úzkej
@@ -11610,6 +11616,25 @@ body.recording-mode .state-strip {
 .history-leg-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-secondary); letter-spacing: 0.04em; }
 .history-leg-alert { font-family: var(--font-mono); font-size: 9px; color: #ff6b6b; font-weight: 700; }
 .history-detail { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+/* Karty LIETADLÁ / LODE (2026-10-11, shipHistoryPanel.js): LODE skryje obsah panelu letov. */
+.history-tabs { display: flex; gap: 4px; }
+.history-tab {
+  flex: 1 1 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  padding: 5px 6px;
+  cursor: var(--cursor-pointer);
+}
+.history-tab[aria-selected="true"] { border-color: rgba(57, 208, 255, 0.7); color: #d6f3fa; background: rgba(57, 208, 255, 0.12); }
+.history-body[data-mode="ships"] > :not(.history-tabs):not(.ship-history) { display: none !important; }
+.ship-history { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.ship-history .history-chart { height: 84px; }
+.ship-history[hidden], .ship-history [hidden] { display: none !important; }
 .history-detail[hidden] { display: none; }
 .history-detail-head { display: flex; align-items: center; gap: 8px; }
 .history-back-btn { flex: 0 0 auto; min-width: 0; }

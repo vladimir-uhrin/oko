@@ -149,3 +149,19 @@ test('tabuľka sledovaných letov nezvyšuje verziu schémy (staršia verzia ser
     assert.match(text, /if \(version > 5\) throw/);
   });
 });
+
+test('sledované lode (2026-10-11): kľúč mmsi:, ten istý zoznam, zlé MMSI 400', async t => {
+  const { client } = await fixture(t);
+  const a = client();
+  await a.signUp('ship@example.com');
+  let r = await a.request('/api/account/follows', { method: 'POST', body: { mmsi: '241190000', label: 'MINERVA ZEN' } });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.follows.map(f => [f.key, f.hex, f.callsign, f.label]), [['mmsi:241190000', null, null, 'MINERVA ZEN']]);
+  r = await a.request('/api/account/follows', { method: 'POST', body: { hex: '4b1815', label: 'HB-JCA' } });
+  assert.deepEqual(r.data.follows.map(f => f.key).sort(), ['hex:4b1815', 'mmsi:241190000'], 'lety aj lode v jednom zozname');
+  for (const body of [{ mmsi: '24119' }, { mmsi: '24119000a' }, { mmsi: '241190000', extra: 1 }]) {
+    assert.equal((await a.request('/api/account/follows', { method: 'POST', body })).status, 400, JSON.stringify(body));
+  }
+  r = await a.request('/api/account/follows', { method: 'DELETE', body: { key: 'mmsi:241190000' } });
+  assert.deepEqual(r.data.follows.map(f => f.key), ['hex:4b1815']);
+});

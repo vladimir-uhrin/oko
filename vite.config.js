@@ -125,6 +125,7 @@ import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
 import { readAisStateFile, restoreAisState, serializeAisState, writeAisStateFile } from './src/data/aisStatePersist.js';
+import { SHIP_HISTORY_DEFAULT_MONTHS, SHIP_HISTORY_MAX_DAYS, createShipHistoryStore, thinShipSamples } from './src/data/shipHistoryStore.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1660,6 +1661,29 @@ const AIS_STATE_SAVE_MS = 3 * 60_000;
 const aisStatePersistEnabled = () => String(process.env.AIS_STATE_PERSIST || '').toLowerCase() !== 'off';
 let _aisStateRestored = false;
 let _aisStateSaveTimer = null;
+// História lodí na disku (2026-10-11, bod 7, shipHistoryStore.js): zriedené polohy z AISStream
+// do mesačných súborov vedľa Histórie letov (D:\oko-history\ships), predvolene 24 mesiacov.
+// Zapisuje len služba (AIS_STATE_PERSIST ≠ off); skúšobná inštancia z toho istého priečinka len číta.
+const SHIP_HISTORY_FLUSH_MS = 5 * 60_000;
+let _shipHistory = null;
+let _shipHistoryTimer = null;
+function shipHistoryDir() {
+  const explicit = String(process.env.SHIP_HISTORY_DIR || '').trim();
+  if (explicit) return explicit;
+  const flightDb = String(process.env.FLIGHT_HISTORY_DB || '').trim();
+  return flightDb ? path.join(path.dirname(flightDb), 'ships') : path.join(__dirname, '.gev-cache', 'ship-history');
+}
+function shipHistory() {
+  if (!_shipHistory) {
+    const dir = shipHistoryDir();
+    const guard = createDiskGuard({ dir: fs.existsSync(dir) ? dir : path.dirname(dir) });
+    const months = Math.max(1, Math.min(120, Math.floor(Number(process.env.SHIP_HISTORY_MONTHS)) || SHIP_HISTORY_DEFAULT_MONTHS));
+    _shipHistory = createShipHistoryStore({ dir, months, diskOk: () => guard.ok(), log: (m) => console.warn(m) });
+  }
+  return _shipHistory;
+}
+/** Zapisovať históriu lodí? (služba áno, skúšobná inštancia nie) */
+const shipHistoryRecording = () => aisStatePersistEnabled() && String(process.env.SHIP_HISTORY || '').toLowerCase() !== 'off';
 // Watchdog budgets (policy lives in src/data/aisWatchdog.js). Silence is
 // REPORTED quickly and ACTED ON slowly: a dead feed must read as dead within
 // ~2 min, but recycling the socket is throttled so recovery can never become a
@@ -8905,6 +8929,25 @@ function aisLiveProxy() {
         // Track sub-route MUST be handled before the rows snapshot — this
         // mount prefix-matches every subpath, so without this branch
         // /api/ais-live/track would be silently answered with vessel rows.
+        // História lode z disku (2026-10-11, bod 7): /api/ais-live/history?mmsi=&days=7 (1–366).
+        if (incoming.pathname === '/history') {
+          const mmsi = String(incoming.searchParams.get('mmsi') || '').trim();
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          if (!/^\d{9}$/.test(mmsi)) { res.statusCode = 400; res.end(JSON.stringify({ error: 'bad_mmsi', samples: [] })); return; }
+          const days = Math.max(1, Math.min(SHIP_HISTORY_MAX_DAYS, Math.floor(Number(incoming.searchParams.get('days'))) || 7));
+          const to = Math.floor(Date.now() / 1000);
+          const from = to - days * 86400;
+          const all = await shipHistory().read(mmsi, from, to);
+          res.statusCode = 200;
+          res.end(JSON.stringify({
+            mmsi, days, from, to, total: all.length,
+            first: all[0]?.t ?? null,
+            samples: thinShipSamples(all, 3000),
+            source: 'OKO ship history (AISStream, stored on disk)',
+          }));
+          return;
+        }
         if (incoming.pathname === '/track' || incoming.pathname.startsWith('/track/')) {
           const mmsi = String(incoming.searchParams.get('mmsi') || '').trim();
           res.statusCode = /^\d{5,10}$/.test(mmsi) ? 200 : 400;
@@ -10522,6 +10565,15 @@ function ensureAisStatePersistence() {
     writeAisStateFile(AIS_STATE_FILE, snapshot).catch((error) => console.warn('[AISStream] zápis stavu zlyhal:', error?.message || error));
   }, AIS_STATE_SAVE_MS);
   _aisStateSaveTimer.unref?.();
+  if (shipHistoryRecording() && !_shipHistoryTimer) {
+    let lastPrune = 0;
+    _shipHistoryTimer = setInterval(() => {
+      const store = shipHistory();
+      void store.flush().catch((error) => console.warn('[ship-history] zápis zlyhal:', error?.message || error));
+      if (Date.now() - lastPrune > 24 * 3600_000) { lastPrune = Date.now(); void store.prune().catch(() => {}); }
+    }, SHIP_HISTORY_FLUSH_MS);
+    _shipHistoryTimer.unref?.();
+  }
 }
 
 function ensureAisStreamConnection() {
@@ -10745,6 +10797,7 @@ function ingestAisStreamEnvelope(envelope) {
   });
 
   appendAisTrackSample(mmsi, lat, lon, aisEpochSeconds(metadata.time_utc ?? metadata.TimeUtc));
+  if (_shipHistoryTimer) shipHistory().record(mmsi, lat, lon, aisEpochSeconds(metadata.time_utc ?? metadata.TimeUtc), speed, course);
 
   // Throttled: the sweep walks the entire cache, and this handler runs tens to
   // hundreds of times per second under the worldwide bounding box.

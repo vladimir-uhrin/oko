@@ -95,6 +95,21 @@ export function createVesselSearchCommands({ live, delayed = [], dataManager = n
     showRemote({ ...ship, name: ship.name || hit.name });
   }
 
+  /** Loď podľa MMSI (sledované lode, 2026-10-11): vrstva, inak posledná poloha z registra. */
+  async function openByMmsi(mmsi, name = '') {
+    const m = String(mmsi ?? '').trim();
+    if (!/^\d{9}$/.test(m)) return false;
+    if (selectKnown(m)) return true;
+    let info = null;
+    try {
+      const res = await fetchImpl(`/api/vessel-info?mmsi=${encodeURIComponent(m)}`);
+      info = res?.ok ? await res.json() : null;
+    } catch { info = null; }
+    const p = info?.lastPosition;
+    showRemote({ mmsi: m, name: name || info?.name || m, position: p && Number.isFinite(p.lat) ? p : null });
+    return false;
+  }
+
   /** Lode v pamäti — synchrónne pri každom písmene. */
   function queryCommands(query) {
     let hits = [];
@@ -129,5 +144,5 @@ export function createVesselSearchCommands({ live, delayed = [], dataManager = n
     }));
   }
 
-  return { queryCommands, asyncResults, clearMarker, _runRemoteForTest: runRemote };
+  return { queryCommands, asyncResults, clearMarker, openByMmsi, _runRemoteForTest: runRemote };
 }

@@ -400,7 +400,7 @@ export function createAuthService({ store, origins = [], trustProxy = false, now
         const body = await readJson(req);
         let item = null;
         if (req.method === 'POST') {
-          fields(body, ['hex', 'callsign', 'label']);
+          fields(body, ['hex', 'callsign', 'label', 'mmsi']);
           item = sanitizeFollow(body);
           if (!item) throw fail('invalid_flight');
         } else {

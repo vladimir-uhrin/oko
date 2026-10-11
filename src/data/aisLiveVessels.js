@@ -789,6 +789,14 @@ const aisLiveVesselsLayer = {
     return Boolean(record && !isLastKnownVessel(record));
   },
 
+  /** Loď v dosahu živého AIS pre sledované lode (2026-10-11); stará posledná poloha = null. */
+  getLiveContact(mmsi) {
+    const record = state.vesselMap?.get(String(mmsi ?? '').trim());
+    if (!state.enabled || !record || isLastKnownVessel(record)) return null;
+    return { mmsi: record.mmsi, name: record.name || null, lat: record.lat, lon: record.lon,
+      sog: Number.isFinite(record.speed) ? record.speed : null, navStatus: record.navStatus ?? null };
+  },
+
   getAllPositions(maxCount = 800) {
     const result = [];
     const records = state.vesselRecords;
