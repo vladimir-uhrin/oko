@@ -117,6 +117,7 @@ import { ukraineEventsProxy } from './src/data/ukraineEventsProxy.js';
 import { mideastEventsProxy } from './src/data/mideastEventsProxy.js';
 import { reliefTilesProxy } from './src/data/reliefTilesProxy.js';
 import { vesselInfoProxy } from './src/data/vesselInfoProxy.js';
+import { seaRouteProxy } from './src/data/seaRouteProxy.js';
 import { DEEPSTATE_MIRRORS, createDeepStateMirror } from './src/data/deepstateMirror.js';
 import { createDeepStateFullMirror } from './src/data/deepstateFullMirror.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
@@ -12207,6 +12208,8 @@ export default defineConfig(({ mode }) => {
       aiscastVesselsProxy(),
       // Detail lode z registra (IMO, podrobný typ, rok, GT/DWT) + fotka podľa MMSI (2026-10-10).
       vesselInfoProxy(),
+      // Plavebná trasa po mori namiesto priamky (2026-10-11, searoute-js, lokálny výpočet).
+      seaRouteProxy(),
       gfwPresenceProxy(),
       logoProxy(),
       gasProxy(),

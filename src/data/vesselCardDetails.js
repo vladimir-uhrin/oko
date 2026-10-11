@@ -10,6 +10,7 @@
  */
 import { AIS_ROT_FAST_DEG_PER_MIN } from './aisIngest.js';
 import { greatCircleKm, matchDestinationPort, matchPortByNameCountry, voyageProgress } from './vesselDestination.js';
+import { seaRouteSync } from './seaRoute.js';
 import { resolveFlagIso2 } from './countryFlags.js';
 
 const identity = (key) => key;
@@ -247,6 +248,15 @@ export function vesselVoyageModel(vessel, info, index) {
   const regDest = info?.destinationPort && Number.isFinite(info.destinationPort.lat) ? info.destinationPort : null;
   const destinationPort = destinationMatch?.port || regDest || null;
   let progress = originPort && destinationPort ? voyageProgress(originPort, vessel, destinationPort) : null;
+  // Plavebná trasa po mori (bod 5, 2026-10-11): prejdené a zostávajúce km po námornej sieti,
+  // keď sú už vypočítané (prvé prekreslenie ide po priamke, ďalšie po mori).
+  if (progress && Number.isFinite(vessel?.lat)) {
+    const sailed = seaRouteSync([originPort, { lat: vessel.lat, lon: vessel.lon }]);
+    const toGo = seaRouteSync([{ lat: vessel.lat, lon: vessel.lon }, destinationPort]);
+    if (Number.isFinite(sailed?.lengthKm) && Number.isFinite(toGo?.lengthKm) && sailed.lengthKm + toGo.lengthKm > 0) {
+      progress = { fractionDone: sailed.lengthKm / (sailed.lengthKm + toGo.lengthKm), sailedKm: sailed.lengthKm, remainingKm: toGo.lengthKm, bySea: true };
+    }
+  }
   // Priebeh po skutočnej námornej trase z registra má prednosť pred veľkokružnicou.
   if (progress && Number.isFinite(info?.routeProgress)) progress = { ...progress, fractionDone: info.routeProgress, alongRoute: true };
   return {

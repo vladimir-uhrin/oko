@@ -23,6 +23,7 @@ import { GFW_CELL_DEG, GFW_HIGH_CELL_DEG, quantizeGfwBbox } from './gfwPresenceC
 import { isOwnedByOtherLayer, registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
 import { HISTORY_LINE_STYLE, createVesselVoyageLine, historyLinePositionsDeg } from './vesselVoyageLine.js';
 import { buildVesselTrackedEntry, clearVesselEstimateFor, syncVesselEstimate } from './vesselTrackedCard.js';
+import { seaRoutePositionsDeg, seaRouteSync } from './seaRoute.js';
 import {
   VESSEL_CARD_FADE_DISTANCE_M,
   accentForVesselType,
@@ -412,7 +413,12 @@ export function createGfwPresenceLayer({
     const newer = info?.lastPosition && Number.isFinite(info.lastPosition.t) && (!Number.isFinite(row.lastSeen) || info.lastPosition.t > row.lastSeen)
       ? info.lastPosition : null;
     const ports = [...(info?.portCalls || []), { lat: row.lat, lon: row.lon }];
-    const history = historyLinePositionsDeg(ports, newer ? { lat: newer.lat, lon: newer.lon } : null, 9);
+    let history = historyLinePositionsDeg(ports, newer ? { lat: newer.lat, lon: newer.lon } : null, 9);
+    // Po mori (bod 5): keď trasa príde, prekresli tú istú voľbu.
+    const bySea = history ? seaRoutePositionsDeg(seaRouteSync(history.map(([lon, lat]) => ({ lat, lon })), () => {
+      if (_selectedRow === row) syncSelectionGraphics(row, info, track);
+    })) : null;
+    if (bySea) history = bySea;
     if (history) {
       if (!_historyLine) _historyLine = createVesselVoyageLine(_viewer, HISTORY_LINE_STYLE);
       _historyLine.setPath(history);

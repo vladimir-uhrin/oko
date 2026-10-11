@@ -22,6 +22,7 @@ import {
   voyageToPort,
 } from './vesselDestination.js';
 import { HISTORY_LINE_STYLE, createVesselVoyageLine, historyLinePositionsDeg } from './vesselVoyageLine.js';
+import { seaRoutePositionsDeg, seaRouteSync } from './seaRoute.js';
 import { screenProjectedRotation, cameraPoseSignature, horizonOccluder } from './iconOrientation.js';
 import { AIS_FRESH_MS, AIS_RETAIN_MS, aisRegionKey } from './aisCoverage.js';
 import { airIconTier } from './airIconLod.js';
@@ -2931,8 +2932,11 @@ function resolveSelectedDestination(record) {
 function syncHistoryLine() {
   const record = state.selectedRecord;
   const calls = record ? cachedVesselInfo(record.mmsi)?.portCalls : null;
-  const path = historyLinePositionsDeg(calls, record ? { lat: record.lat, lon: record.lon } : null);
+  let path = historyLinePositionsDeg(calls, record ? { lat: record.lat, lon: record.lon } : null);
   if (!path) { state.historyLine?.clear(); return; }
+  // Po mori medzi prístavmi (bod 5): kým trasa príde, priamky.
+  const bySea = seaRoutePositionsDeg(seaRouteSync(path.map(([lon, lat]) => ({ lat, lon })), () => syncHistoryLine()));
+  if (bySea) path = bySea;
   if (!state.historyLine && state.viewer) state.historyLine = createVesselVoyageLine(state.viewer, HISTORY_LINE_STYLE);
   state.historyLine?.setPath(path);
 }
@@ -2943,6 +2947,9 @@ function syncVoyageLine() {
   const port = state.destinationMatch?.port;
   if (!record || !port) { state.voyageLine?.clear(); return; }
   if (!state.voyageLine && state.viewer) state.voyageLine = createVesselVoyageLine(state.viewer);
+  // Do cieľa po mori (bod 5, 2026-10-11) — cez prielivy, nie cez pevninu.
+  const bySea = seaRoutePositionsDeg(seaRouteSync([{ lat: record.lat, lon: record.lon }, { lat: port.lat, lon: port.lon }], () => syncVoyageLine()));
+  if (bySea) { state.voyageLine?.setPath(bySea); return; }
   state.voyageLine?.setVoyage(
     { lat: record.lat, lon: record.lon },
     { lat: port.lat, lon: port.lon },

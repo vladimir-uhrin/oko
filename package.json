@@ -49,7 +49,8 @@
     "egm96-universal": "^1.1.1",
     "mgrs": "^2.1.0",
     "pbf": "^5.1.2",
-    "satellite.js": "^6.0.2"
+    "satellite.js": "^6.0.2",
+    "searoute-js": "0.1.0"
   },
   "devDependencies": {
     "jsfive": "^0.4.0",
