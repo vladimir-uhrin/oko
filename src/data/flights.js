@@ -6676,6 +6676,43 @@ const flightsLayer = {
    * @returns {{layerId: string, id: string, label: string, position: Cesium.Cartesian3}|null}
    *   Detached subject descriptor, or null when no aircraft is tracked.
    */
+  /**
+   * Fakty karty sledovaného letu pre zdieľanie (2026-10-11, vlastník: „kvalitné zdieľanie"):
+   * rovnaké časti ako karta (_trackedLabelParts), len ako obyčajný text — titulok a popis
+   * príspevku a pás na obrázku/videu (flightShare.js). Odhad ostáva poctivo označený (pravidlo 2).
+   * @returns {?{icao24: string, callsign: string, flightIata: string, identLine: string, routeLine: string,
+   *   progress: ?{fractionDone: number, etaMinutes: number|null}, flightLines: string[], estimated: boolean,
+   *   estimateLine: string, alertLine: string, countryIso: string}}
+   */
+  getTrackedShareCard() {
+    if (!_trackedIcao) return null;
+    const parts = _trackedLabelParts(_trackedIcao);
+    if (!parts) return null;
+    const entry = parts.estimated ? _estimates.get(_trackedIcao) : null;
+    const est = entry?.est || null;
+    const via = est ? entry?.fix?.via : null;
+    const estimateLine = est
+      ? [
+        t('card.estimated', { km: Math.max(5, Math.round(est.uncertaintyKm / 5) * 5) }),
+        via ? t(via === 'adsc' ? 'card.estimated-adsc' : 'card.estimated-hfdl') : '',
+        est.nat ? t('card.estimated-nat', { id: est.nat }) : '',
+      ].filter(Boolean).join(' · ')
+      : '';
+    return {
+      icao24: _trackedIcao,
+      callsign: parts.callsign || _trackedIcao,
+      flightIata: parts.flightIata || '',
+      identLine: parts.identLine || '',
+      routeLine: parts.route ? (formatRouteLine(parts.route) || `${parts.route.origin.code} → ${parts.route.destination.code}`) : '',
+      progress: parts.progress ? { fractionDone: parts.progress.fractionDone, etaMinutes: parts.progress.etaMinutes ?? null } : null,
+      flightLines: (parts.flightLines || []).slice(0, 3),
+      estimated: Boolean(parts.estimated),
+      estimateLine,
+      alertLine: parts.alertLine || '',
+      countryIso: parts.info?.countryIso || '',
+    };
+  },
+
   getTrackedSubject() {
     if (!_trackedIcao) return null;
     const described = _describeFlight(_trackedIcao);

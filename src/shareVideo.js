@@ -60,6 +60,7 @@ export async function recordShareVideo({
   stamp = '',
   attribution = '',
   decorate = null,
+  overlays = true,
   durationMs = SHARE_VIDEO_DURATION_MS,
   fps = SHARE_VIDEO_FPS,
   bitsPerSecond = SHARE_VIDEO_BITS_PER_SECOND,
@@ -71,7 +72,7 @@ export async function recordShareVideo({
 } = {}) {
   const Recorder = win?.MediaRecorder;
   if (typeof Recorder !== 'function' || !doc?.createElement) return null;
-  const sources = collectShareSources({ viewer, document: doc });
+  const sources = collectShareSources({ viewer, document: doc, overlays });
   if (!sources.length) return null;
   const type = mimeType || pickRecorderMimeType((candidate) => Recorder.isTypeSupported?.(candidate));
   if (!type) return null;

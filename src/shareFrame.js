@@ -13,10 +13,12 @@ export const SHARE_STRIP_HEIGHT_PX = 36;
  * @param {{ viewer?: object, document?: Document }} input
  * @returns {HTMLCanvasElement[]}
  */
-export function collectShareSources({ viewer, document: doc = globalThis.document } = {}) {
+export function collectShareSources({ viewer, document: doc = globalThis.document, overlays = true } = {}) {
   const sources = [];
   const cesiumCanvas = viewer?.canvas || viewer?.scene?.canvas || null;
   if (cesiumCanvas) sources.push(cesiumCanvas);
+  // Bez prekryvov (2026-10-11, zdieľanie letu): kartu v plátne nahrádza pás letu (flightShare.js).
+  if (!overlays) return sources;
   for (const overlay of doc?.querySelectorAll?.('#world-overlay-root canvas') || []) sources.push(overlay);
   return sources;
 }

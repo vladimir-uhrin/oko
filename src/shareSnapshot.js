@@ -36,9 +36,10 @@ export async function captureShareSnapshot({
   stamp = '',
   attribution = '',
   decorate = null,
+  overlays = true,
 } = {}) {
   if (!doc?.createElement) return null;
-  const sources = collectShareSources({ viewer, document: doc });
+  const sources = collectShareSources({ viewer, document: doc, overlays });
   if (viewer?.canvas || viewer?.scene?.canvas) {
     try { await renderFreshCesiumFrame(viewer); } catch { /* starší snímok je stále obrázok */ }
   }
