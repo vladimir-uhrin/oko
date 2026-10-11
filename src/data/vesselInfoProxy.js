@@ -36,18 +36,44 @@ export const MT_HOURLY_MAX = 900;
  * „kde je" — vtedy departedAt null a arrivedAt nastavené. Pure.
  */
 export function mtVoyageAsRegistry(voyage, depPort, arrPort) {
+  const coords = (p) => (Number.isFinite(p?.lat) && Number.isFinite(p?.lon) ? { lat: p.lat, lon: p.lon } : {});
   // Príchod po odchode = loď je v cieľovom prístave (TURIEC: Freudenau 4. 7. → Bratislava 4. 7.).
   const arrivedLater = Number.isFinite(voyage?.arrivedAt) && (!Number.isFinite(voyage?.departedAt) || voyage.arrivedAt > voyage.departedAt);
   if (arrivedLater && arrPort?.name) {
-    return { lastPort: arrPort.name, lastPortCountry: arrPort.country, departedAt: null, arrivedAt: voyage.arrivedAt, locode: arrPort.locode, source: 'mt' };
+    return { lastPort: arrPort.name, lastPortCountry: arrPort.country, departedAt: null, arrivedAt: voyage.arrivedAt, locode: arrPort.locode, ...coords(arrPort), source: 'mt' };
   }
   if (depPort?.name && Number.isFinite(voyage?.departedAt)) {
-    return { lastPort: depPort.name, lastPortCountry: depPort.country, departedAt: voyage.departedAt, locode: depPort.locode, source: 'mt' };
+    return { lastPort: depPort.name, lastPortCountry: depPort.country, departedAt: voyage.departedAt, locode: depPort.locode, ...coords(depPort), source: 'mt' };
   }
   if (arrPort?.name && Number.isFinite(voyage?.arrivedAt)) {
-    return { lastPort: arrPort.name, lastPortCountry: arrPort.country, departedAt: null, arrivedAt: voyage.arrivedAt, locode: arrPort.locode, source: 'mt' };
+    return { lastPort: arrPort.name, lastPortCountry: arrPort.country, departedAt: null, arrivedAt: voyage.arrivedAt, locode: arrPort.locode, ...coords(arrPort), source: 'mt' };
   }
   return null;
+}
+
+/** Cieľový prístav z plavby MT (keď je to ETA, nie príchod) — meno, LOCODE, poloha. Pure. */
+export function mtDestinationPort(voyage, arrPort) {
+  if (!Number.isFinite(voyage?.arrivalEtaMs) || !arrPort?.name || !Number.isFinite(arrPort.lat)) return null;
+  return { name: arrPort.name, locode: arrPort.locode, country: arrPort.country, lat: arrPort.lat, lon: arrPort.lon, etaMs: voyage.arrivalEtaMs };
+}
+
+/** Rovnaký prístav? (register „Newport News" vs MT „NEWPORT NEWS"). Pure. */
+function samePortName(a, b) {
+  const k = (v) => String(v || '').toUpperCase().replace(/[^A-Z]/g, '');
+  const x = k(a); const y = k(b);
+  return Boolean(x && y && (x === y || x.includes(y) || y.includes(x)));
+}
+
+/**
+ * Plavba pre klienta: register (čerstvejší text) doplnený o súradnice a LOCODE
+ * z MT, keď ide o ten istý prístav; bez registra plavba MT. Pure.
+ */
+export function mergeVoyage(registry, mt) {
+  if (!registry?.lastPort) return mt || null;
+  if (mt?.lastPort && samePortName(registry.lastPort, mt.lastPort) && Number.isFinite(mt.lat)) {
+    return { ...registry, locode: registry.locode || mt.locode || null, lat: mt.lat, lon: mt.lon };
+  }
+  return registry;
 }
 
 export const VESSEL_INFO_UPSTREAM = 'https://www.vesselfinder.com/api/pub/click/';
@@ -458,7 +484,15 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
             mtPort(voyage?.departurePortId).catch(() => null),
             mtPort(voyage?.arrivalPortId).catch(() => null),
           ]);
-          live = { shipId, position, voyage: mtVoyageAsRegistry(voyage, depPort, arrPort), destination: voyage?.destination || null, etaMs: voyage?.etaMs || null };
+          live = {
+            shipId,
+            position,
+            voyage: mtVoyageAsRegistry(voyage, depPort, arrPort),
+            destinationPort: mtDestinationPort(voyage, arrPort),
+            routeProgress: voyage?.routeProgress ?? null,
+            destination: voyage?.destination || null,
+            etaMs: voyage?.etaMs || null,
+          };
         }
         await writeAtomic(file, JSON.stringify({ at: now(), live }));
         return live;
@@ -563,7 +597,11 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
       const out = await loadInfo(mmsi, key);
       if (!out.info) { sendJson(res, out.status || 502, { error: out.error || 'upstream' }, out.status === 429 ? { 'Retry-After': '30' } : {}); return; }
       const [voyage, portCalls, mt] = await Promise.all([loadVoyage(out.info), loadPortCalls(mmsi), loadMtLive(mmsi)]);
-      const body = publicVesselInfo(out.info, voyage || mt?.voyage || null, portCalls);
+      const body = publicVesselInfo(out.info, mergeVoyage(voyage, mt?.voyage || null), portCalls);
+      // Cieľ s polohou a priebeh po námornej trase z MT (2026-10-11) — lišta priebehu aj tam,
+      // kde náš zoznam prístavov text cieľa nepozná.
+      body.destinationPort = mt?.destinationPort || null;
+      body.routeProgress = Number.isFinite(mt?.routeProgress) ? mt.routeProgress : null;
       // Posledná poloha (aj z prijímača na inej lodi na otvorenom mori) a cieľ, keď ho register nemá.
       body.lastPosition = mt?.position || null;
       if (!body.destination && mt?.destination) { body.destination = mt.destination; body.etaMs = body.etaMs || mt.etaMs || null; }

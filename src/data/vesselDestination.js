@@ -110,7 +110,8 @@ const COUNTRY_ALIASES = new Map([
 
 /** Kľúč štátu (bez diakritiky, aliasy). Pure. */
 export function countryKey(country) {
-  const key = nameKey(country);
+  // „United States (USA)" → „United States" (2026-10-11, zátvorka kazila zhodu).
+  const key = nameKey(String(country ?? '').replace(/\s*\(.*\)\s*/g, ' '));
   return COUNTRY_ALIASES.get(key) || key;
 }
 

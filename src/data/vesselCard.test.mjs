@@ -557,3 +557,32 @@ test('proxy: posledná poloha, plavba a trasa z MT (podproces) — riečna loď 
     await fsp.rm(root, { recursive: true, force: true });
   }
 });
+
+test('bod 1 (2026-10-11): lišta priebehu aj bez nášho prístavu — súradnice z registra, ETA nie je príchod, priebeh po námornej trase', async () => {
+  const { parseMtVoyage } = await import('./vesselTrackSources.js');
+  const { mtVoyageAsRegistry, mtDestinationPort, mergeVoyage } = await import('./vesselInfoProxy.js');
+  const { vesselVoyageModel } = await import('./vesselCardDetails.js');
+  const { buildPortIndex, countryKey } = await import('./vesselDestination.js');
+  // Skutočná odpoveď MT pre GCL GREECE (10. 10. 2026): plávajúca loď, pri cieli ETA.
+  const voy = parseMtVoyage({ eta: 1791784800, reportedDestination: 'USNNS>DEWVN', progress: 93.68, departurePortId: 136, departureTimestamp: 1790211360, departureLabel: 'ATD', arrivalPortId: 389, arrivalTimestamp: 1791784800, arrivalLabel: 'ETA', estimatedRouteFound: true });
+  assert.equal(voy.arrivedAt, null, 'ETA nie je príchod');
+  assert.equal(voy.arrivalEtaMs, 1791784800000);
+  assert.ok(Math.abs(voy.routeProgress - 0.9368) < 1e-9);
+  const dep = { name: 'Newport News', locode: 'USNNS', country: 'United States', lat: 36.98, lon: -76.43 };
+  const arr = { name: 'Wilhelmshaven', locode: 'DEWVN', country: 'Germany', lat: 53.52, lon: 8.15 };
+  const mt = mtVoyageAsRegistry(voy, dep, arr);
+  assert.equal(mt.lastPort, 'Newport News', 'odchod, nie „v prístave Wilhelmshaven"');
+  assert.equal(mt.lat, 36.98);
+  assert.deepEqual(mtDestinationPort(voy, arr), { ...arr, etaMs: 1791784800000 });
+  const merged = mergeVoyage({ lastPort: 'Newport News', lastPortCountry: 'United States (USA)', departedAt: 1790206920000 }, mt);
+  assert.equal(merged.locode, 'USNNS');
+  assert.equal(merged.lat, 36.98);
+  assert.equal(countryKey('United States (USA)'), 'UNITED STATES', 'zátvorka v názve štátu nekazí zhodu');
+  // Prázdny zoznam prístavov → poloha z registra stačí na lištu.
+  const index = buildPortIndex([]);
+  const model = vesselVoyageModel({ lat: 52.0, lon: 2.68, destination: 'USNNS>DEWVN' }, { voyage: merged, destinationPort: mtDestinationPort(voy, arr), routeProgress: voy.routeProgress }, index);
+  assert.equal(model.origin.locode, 'USNNS');
+  assert.equal(model.destination.locode, 'DEWVN');
+  assert.ok(Math.abs(model.progress.fractionDone - 0.9368) < 1e-9, 'priebeh po námornej trase z registra');
+  assert.ok(model.progress.remainingKm > 300 && model.progress.remainingKm < 600);
+});

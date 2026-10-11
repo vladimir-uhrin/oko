@@ -235,11 +235,20 @@ export function vesselVoyageModel(vessel, info, index) {
   // pre lode, ktoré register nepozná (oneskorenie ~3 dni).
   const voyage = info?.voyage?.lastPort ? info.voyage : voyageFromPortCalls(portCallsLabelled(info, index));
   if (!voyage?.lastPort) return null;
-  const originPort = index ? matchPortByNameCountry(voyage.lastPort, voyage.lastPortCountry, index) : null;
+  // Prístav odchodu: náš zoznam (meno + štát), inak súradnice a LOCODE z registra (2026-10-11 —
+  // Newport News chýbal, lišta priebehu sa neukázala).
+  const originPort = (index ? matchPortByNameCountry(voyage.lastPort, voyage.lastPortCountry, index) : null)
+    || (Number.isFinite(voyage.lat) && Number.isFinite(voyage.lon)
+      ? { name: voyage.lastPort, locode: voyage.locode || null, country: voyage.lastPortCountry || null, lat: voyage.lat, lon: voyage.lon }
+      : null);
   const destinationText = String(vessel?.destination || info?.destination || '').trim();
   const destinationMatch = index && destinationText ? matchDestinationPort(destinationText, index) : null;
-  const destinationPort = destinationMatch?.port || null;
-  const progress = originPort && destinationPort ? voyageProgress(originPort, vessel, destinationPort) : null;
+  // Cieľ: náš zoznam z AIS textu, inak prístav s ETA z registra (má polohu aj LOCODE).
+  const regDest = info?.destinationPort && Number.isFinite(info.destinationPort.lat) ? info.destinationPort : null;
+  const destinationPort = destinationMatch?.port || regDest || null;
+  let progress = originPort && destinationPort ? voyageProgress(originPort, vessel, destinationPort) : null;
+  // Priebeh po skutočnej námornej trase z registra má prednosť pred veľkokružnicou.
+  if (progress && Number.isFinite(info?.routeProgress)) progress = { ...progress, fractionDone: info.routeProgress, alongRoute: true };
   return {
     arrivedAt: Number.isFinite(voyage.arrivedAt) ? voyage.arrivedAt : null,
     origin: {

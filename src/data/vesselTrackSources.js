@@ -64,7 +64,12 @@ export function parseMtVoyage(json) {
     departurePortId: json.departurePortId != null ? String(json.departurePortId) : null,
     departedAt: finite(json.departureTimestamp) ? json.departureTimestamp * 1000 : null,
     arrivalPortId: json.arrivalPortId != null ? String(json.arrivalPortId) : null,
-    arrivedAt: finite(json.arrivalTimestamp) ? json.arrivalTimestamp * 1000 : null,
+    // arrivalLabel „ETA" = plánovaný príchod do cieľa, „ATA" = skutočný príchod (2026-10-11:
+    // ETA sa bral ako príchod a plávajúca loď písala „v prístave … od" budúceho času).
+    arrivedAt: finite(json.arrivalTimestamp) && String(json.arrivalLabel || 'ATA').toUpperCase() !== 'ETA' ? json.arrivalTimestamp * 1000 : null,
+    arrivalEtaMs: finite(json.arrivalTimestamp) && String(json.arrivalLabel || '').toUpperCase() === 'ETA' ? json.arrivalTimestamp * 1000 : null,
+    // Priebeh po ICH odhadovanej námornej trase (0–100), len keď trasu našli.
+    routeProgress: json.estimatedRouteFound === true && finite(json.progress) !== null ? Math.max(0, Math.min(1, json.progress / 100)) : null,
     destination: json.reportedDestination ? String(json.reportedDestination).trim() || null : null,
     etaMs: finite(json.eta) ? json.eta * 1000 : null,
   };
