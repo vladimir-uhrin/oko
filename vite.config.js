@@ -7814,7 +7814,11 @@ async function loadAustinSourcesFromOpenData() {
  *
  * @returns {Promise<Array<object>>} Normalized camera source objects.
  */
+/** Caltrans nedostupný (2026-10-11: 2 128× „fetch failed" v logu) — po úplnom zlyhaní 6 h pauza, jeden riadok v logu. */
+let _caltransBackoffUntil = 0;
+const CALTRANS_BACKOFF_MS = 6 * 3_600_000;
 async function loadCaltransSourcesFromOpenData() {
+  if (Date.now() < _caltransBackoffUntil) return [];
   const districtsRaw = process.env.CCTV_CALTRANS_DISTRICTS ?? DEFAULT_CALTRANS_DISTRICTS;
   const districts = String(districtsRaw)
     .split(',')
@@ -7833,6 +7837,11 @@ async function loadCaltransSourcesFromOpenData() {
   );
 
   const cameras = [];
+  if (settled.length && settled.every((r) => r.status !== 'fulfilled')) {
+    _caltransBackoffUntil = Date.now() + CALTRANS_BACKOFF_MS;
+    console.warn('[CCTV] Caltrans nedostupný (' + (settled[0].reason?.message || settled[0].reason) + ') — ďalší pokus o 6 h');
+    return [];
+  }
   for (const result of settled) {
     if (result.status !== 'fulfilled') {
       console.warn('[CCTV] Caltrans district fetch failed:', result.reason?.message || result.reason);
