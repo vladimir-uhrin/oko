@@ -117,3 +117,17 @@ test('oceán bez siete: MMSI podľa mena a polohy; nejednoznačné a ďaleké ni
   assert.equal(r.get('x'), '477269900');
   assert.equal(r.pending(), 1);
 });
+
+test('loď z oceánu bez MMSI: dočasný nečíselný kľúč; karta MMSI nevypíše', async () => {
+  const { oceanPseudoId, isOceanPseudoId, mtTileRowToVessel: toRow } = await import('./aisSupplementFeeds.js');
+  const id = oceanPseudoId('5810894');
+  assert.equal(id, 'mt-5810894');
+  assert.equal(isOceanPseudoId(id), true);
+  assert.equal(isOceanPseudoId('477269900'), false);
+  const row = toRow({ shipId: '5810894', lat: -2.3, lon: 84.2, epochSec: NOW / 1000 - 600, speed: 11.6, course: 231, heading: 233, name: 'ORE NINGBO' }, id);
+  assert.equal(row.mmsi, 'mt-5810894');
+  assert.equal(row.name, 'ORE NINGBO');
+  const { buildVesselTrackedEntry } = await import('./vesselTrackedCard.js');
+  const entry = buildVesselTrackedEntry({ id: 'vessel:mt-5810894', name: 'ORE NINGBO', vessel: { mmsi: id, lat: -2.3, lon: 84.2 }, sourceLine: 'oceán · oneskorené' }, (k) => k, 'sk', NOW);
+  assert.ok(!JSON.stringify(entry).includes('MMSI mt-'), 'MMSI s dočasným kľúčom sa nevypíše');
+});

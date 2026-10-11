@@ -141,7 +141,21 @@ export function parseMtTileRows(json, nowMs = Date.now()) {
   return out;
 }
 
-/** Riadok z dlaždice + známe MMSI → riadok úložiska. Pure. */
+/**
+ * Kľúč lode z oceánu, kým nepoznáme MMSI (2026-10-11: v Indickom oceáne čakalo na MMSI 1 500
+ * lodí, na mape bolo prázdno). Nečíselný, aby si ho nič nepomýlilo s MMSI (register, vlajka,
+ * sledovanie, história ho preskočia). Pure.
+ */
+export function oceanPseudoId(shipId) {
+  return `mt-${shipId}`;
+}
+
+/** Je to dočasný kľúč lode z oceánu (bez MMSI)? Pure. */
+export function isOceanPseudoId(id) {
+  return typeof id === 'string' && id.startsWith('mt-');
+}
+
+/** Riadok z dlaždice + známe MMSI (alebo dočasný kľúč) → riadok úložiska. Pure. */
 export function mtTileRowToVessel(t, mmsi) {
   return makeRow({
     mmsi, lat: t.lat, lon: t.lon, epochSec: t.epochSec, feed: 'ocean',

@@ -126,7 +126,7 @@ import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.j
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
 import { readAisStateFile, restoreAisState, serializeAisState, writeAisStateFile } from './src/data/aisStatePersist.js';
 import { SHIP_HISTORY_DEFAULT_MONTHS, SHIP_HISTORY_MAX_DAYS, createShipHistoryStore, thinShipSamples } from './src/data/shipHistoryStore.js';
-import { AISCAST_WINDOWS, buildNameIndex, matchTileRowByName, createShipIdResolver, mergeSupplementRow, mtTileRowToVessel, oceanTiles, parseAiscastVessels, parseMtTileRows, parseOpenSeaFeedSnapshot } from './src/data/aisSupplementFeeds.js';
+import { AISCAST_WINDOWS, buildNameIndex, matchTileRowByName, oceanPseudoId, createShipIdResolver, mergeSupplementRow, mtTileRowToVessel, oceanTiles, parseAiscastVessels, parseMtTileRows, parseOpenSeaFeedSnapshot } from './src/data/aisSupplementFeeds.js';
 import { curlGet, parseMtGeneral } from './src/data/vesselTrackSources.js';
 import { createDmaBackfill } from './src/data/dmaHistoryBackfill.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
@@ -1785,7 +1785,14 @@ function ensureAisSupplements() {
           if (byName) { resolver.learn(t.shipId, byName); mmsi = byName; }
           else resolver.want(t.shipId, { urgent: nowS - t.epochSec < 3600 });
         }
-        if (mmsi) rows.push(mtTileRowToVessel(t, mmsi));
+        if (mmsi) {
+          rows.push(mtTileRowToVessel(t, mmsi));
+          // MMSI už známe — dočasný záznam bez neho preč (aj jeho stopa).
+          if (_aisStreamVessels.delete(oceanPseudoId(t.shipId))) _aisStreamTracks.delete(oceanPseudoId(t.shipId));
+        } else if (mmsi === undefined) {
+          // Kým čaká na MMSI, ukáže sa s dočasným kľúčom (meno, kurz, rýchlosť, cieľ, rozmery).
+          rows.push(mtTileRowToVessel(t, oceanPseudoId(t.shipId)));
+        }
       }
       Object.assign(st, { at: Date.now(), rows: parsed.length, merged: st.merged + applyAisSupplementRows(rows), unresolved: resolver.pending(), error: null });
     } catch (error) { st.error = String(error?.message || error); }
