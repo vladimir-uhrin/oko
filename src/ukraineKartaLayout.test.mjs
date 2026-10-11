@@ -36,9 +36,11 @@ test('KARTA: titulok vľavo hore POD logom, zarovnaný s ním (36 px), nie cez �
 });
 
 test('KARTA: nástroje a náhľad vpravo hore POD prepínačom jazyka, pravý okraj 36 px', () => {
-  assert.equal(prop('.oko-karta-tools', 'top'), '130px', '#lang-switch (top 84 + ~37) končí pri 121 px');
+  // #lang-switch (top 84) = AKTÍVNY ŠTÝL + JAZYK + TÉMY + SÚKROMIE ≈ 83 px → končí pri ~167 px;
+  // pri 130 px ležalo SÚKROMIE cez Snímku (klik otváral dialóg súkromia, QA 2026-10-11)
+  assert.equal(prop('.oko-karta-tools', 'top'), '176px', 'pod celým #lang-switch vrátane TÉMY a SÚKROMIE');
   assert.equal(prop('.oko-karta-tools', 'right'), '36px');
-  assert.equal(prop('.oko-karta-inset', 'top'), '178px', 'pod nástrojmi (130 + 40 + medzera)');
+  assert.equal(prop('.oko-karta-inset', 'top'), '224px', 'pod nástrojmi (176 + 40 + medzera)');
   assert.equal(prop('.oko-karta-inset', 'right'), '36px');
 });
 
