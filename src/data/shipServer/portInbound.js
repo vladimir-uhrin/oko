@@ -10,6 +10,8 @@
 const R_KM = 6371.0088;
 export const PORT_INBOUND_MAX = 15;
 export const PORT_INBOUND_MIN_SPEED_KN = 1;
+/** Stojaca loď bližšie než toto (km) je v prístave, nie na ceste. */
+export const PORT_INBOUND_IN_PORT_KM = 25;
 /** Cieľ „A>B": berie sa B (posledný). */
 const SPLIT_RE = /[>→]/;
 
@@ -65,9 +67,10 @@ export function inboundToPort(rows, port, { nowMs = Date.now(), staleMs = 6 * 36
     if (!Number.isFinite(row.last_position_epoch) || nowMs - row.last_position_epoch * 1000 > staleMs) continue;
     if (!destinationMatchesPort(row.destination, port)) continue;
     const distanceKm = greatCircleKm(row.lat, row.lon, port.lat, port.lon);
-    if (distanceKm < 3) continue; // už v prístave
     const speed = Number(row.speed);
     const moving = Number.isFinite(speed) && speed >= PORT_INBOUND_MIN_SPEED_KN;
+    // Už v prístave: blízko a stojí (Rotterdam má 40 km; 741 lodí „na ceste" boli väčšinou pri móle, 2026-10-11).
+    if (distanceKm < 3 || (!moving && distanceKm < PORT_INBOUND_IN_PORT_KM)) continue;
     const etaMs = moving ? nowMs + (distanceKm / (speed * 1.852)) * 3600_000 : null;
     ships.push({ mmsi: row.mmsi, name: row.name || null, type: row.type ?? null, lat: row.lat, lon: row.lon, speed: Number.isFinite(speed) ? speed : null,
       distanceKm: Math.round(distanceKm), etaMs: etaMs ? Math.round(etaMs) : null, feed: row.feed || 'aisstream', lastPositionEpoch: row.last_position_epoch });

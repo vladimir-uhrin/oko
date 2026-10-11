@@ -29,6 +29,7 @@ test('lode do prístavu: zoradené podľa ETA, stojace bez ETA, v prístave a st
     { mmsi: '222222222', name: 'B', lat: 50.0, lon: 0.0, speed: 20, destination: 'ROTTERDAM', last_position_epoch: NOW / 1000 - 60 },
     { mmsi: '333333333', name: 'C', lat: 51.5, lon: 3.5, speed: 0.2, destination: 'NL RTM', last_position_epoch: NOW / 1000 - 60 },
     { mmsi: '444444444', name: 'D', lat: 51.9, lon: 4.4, speed: 0, destination: 'NLRTM', last_position_epoch: NOW / 1000 - 60 },
+    { mmsi: '777777777', name: 'H', lat: 51.95, lon: 4.2, speed: 0.1, destination: 'NLRTM', last_position_epoch: NOW / 1000 - 60 }, // stojí 14 km od stredu = pri móle
     { mmsi: '555555555', name: 'E', lat: 40, lon: 0, speed: 10, destination: 'NLRTM', last_position_epoch: NOW / 1000 - 8 * 3600 },
     { mmsi: '666666666', name: 'F', lat: 40, lon: 0, speed: 10, destination: 'DEHAM', last_position_epoch: NOW / 1000 - 60 },
     { mmsi: 'mt-1', name: 'G', lat: 40, lon: 0, speed: 10, destination: 'NLRTM', last_position_epoch: NOW / 1000 - 60 },
