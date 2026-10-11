@@ -581,13 +581,15 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
     return dedupe('ship:' + shipId, async () => {
       const file = path.join(mtDir, 'ship-' + shipId + '.json');
       const cached = await readFresh(file, MT_LIVE_TTL_MS);
-      if (cached) return cached.ship;
+      // Ten istý súbor zapisuje aj preklad lodí z oceánu ({mmsi, name} bez polohy) — ten tu nestačí.
+      if (cached?.ship) return cached.ship;
       const [general, position] = await Promise.all([
         mtJson('/en/vessels/' + shipId + '/general').then(parseMtGeneral).catch(() => null),
         mtJson('/en/vessels/' + shipId + '/position').then(parseMtPosition).catch(() => null),
       ]);
       const ship = { shipId, ...(general || {}), position };
-      await writeAtomic(file, JSON.stringify({ at: now(), ship }));
+      // mmsi navrchu: preklad lodí z oceánu (vite.config.js) číta `mmsi` z toho istého súboru.
+      await writeAtomic(file, JSON.stringify({ at: now(), mmsi: ship.mmsi || null, name: ship.name || null, ship }));
       return ship;
     });
   }

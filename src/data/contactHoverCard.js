@@ -222,7 +222,7 @@ export function hoverCardModel(summary, t, nowMs = Date.now()) {
     // Kľúč fotky: hex lietadla (Planespotters) alebo „vessel:<MMSI>" (register lodí).
     photoKey: summary.layerId === 'flights' && /^[0-9a-f]{6}$/.test(hex)
       ? hex
-      : (/^vessel:\d{9}$/.test(String(summary.photoKey || '')) ? summary.photoKey : null),
+      : (/^vessel:(\d{9}|mt-\d{1,10})$/.test(String(summary.photoKey || '')) ? summary.photoKey : null),
     logos: summary.logos && (summary.logos.airline?.url || summary.logos.manufacturer?.url) ? summary.logos : null,
     // grafy výšky (s odhadom) a rýchlosti ako na karte po kliknutí (2026-09-27, vlastník: „mala tam
     // byť aj rýchlosť, stúpanie, grafy atď.")

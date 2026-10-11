@@ -8,7 +8,7 @@ import {
 import { createTrail } from './trailRenderer.js';
 import { currentLanguage, t } from '../i18n.js';
 import { vesselHullParts, vesselLocalTimeLabel, vesselMotionParts, vesselRegistryParts, newerPositionLine, portHistoryLine, vesselDestinationWithFallback, vesselVoyageModel, voyageDepartureLine, voyageRouteInfo, voyageRouteLine } from './vesselCardDetails.js';
-import { cachedVesselInfo, lookupVesselInfo } from './vesselInfo.js';
+import { cachedVesselInfo, lookupVesselInfo, realMmsiFor } from './vesselInfo.js';
 import { vesselTimeZone } from './vesselTimeZone.js';
 import { buildVesselTrackedEntry, clearVesselEstimateFor, syncVesselEstimate } from './vesselTrackedCard.js';
 import { cachedPortIndex, loadPortIndex as loadSharedPortIndex } from './vesselPortIndex.js';
@@ -365,7 +365,7 @@ export function mapAnalystRecord(record) {
     // Balík 2 (2026-09-02): /api/ais-live už NavigationalStatus surfacuje —
     // analytik dostáva hotový štítok ('AT ANCHOR'…), nie surový kód.
     navStatus: text(navStatusLabel(record?.navStatus)),
-    flag: mmsiFlag(record?.mmsi)?.iso2 ?? null,
+    flag: mmsiFlag(realMmsiFor(record?.mmsi))?.iso2 ?? null,
     callSign: text(record?.callSign),
     lengthM: num(record?.lengthM),
     draughtM: num(record?.draughtM),
@@ -672,7 +672,7 @@ const aisLiveVesselsLayer = {
     const mmsi = String(id ?? '').trim();
     const record = mmsi ? state.vesselMap.get(mmsi) : null;
     if (!record) return null;
-    const flag = mmsiFlag(record.mmsi);
+    const flag = mmsiFlag(realMmsiFor(record.mmsi));
     const lengthText = Number.isFinite(record.lengthM) && record.lengthM > 0 ? `${Math.round(record.lengthM)} m` : '';
     // Typ nikdy prázdny: bez neho by karta siahla po t('aircraft.category.…').
     const type = [normalizeVesselType(record.type), lengthText].filter(Boolean).join(' · ') || 'VESSEL';
@@ -3011,7 +3011,7 @@ function updateSelectedVesselHud(record) {
   const stale = (record.missedRefreshes || 0) > 0 || age.stale;
   const ageSuffix = age.label ? ` (${age.label})` : '';
   el.classList.add('active');
-  const flag = mmsiFlag(record.mmsi);
+  const flag = mmsiFlag(realMmsiFor(record.mmsi));
   const callSign = String(record.callSign || '').trim();
   el.textContent = [
     `AIS: ${trimHudValue(record.name, 32)}${flag?.iso2 ? ` (${flag.iso2})` : ''}`,
@@ -3056,7 +3056,7 @@ export function buildVesselCard(record) {
     gapPx: 10,
     accent: isLastKnownVessel(record) ? '146, 156, 165' : accentForVesselType(record.type),
     title: trimHudValue(displayVesselName(record), 26),
-    titleFlag: mmsiFlag(record?.mmsi)?.iso2 || null,
+    titleFlag: mmsiFlag(realMmsiFor(record?.mmsi))?.iso2 || null,
     details: parts.length ? [parts.join(' · ')] : [],
     selected: false,
     priority: labelPriority(record, null),
@@ -3092,7 +3092,7 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
     id: vesselOverlayEntryId(record),
     position: record.billboard?.position || record.position,
     name: trimHudValue(displayVesselName(record), 32),
-    flagIso: mmsiFlag(record?.mmsi)?.iso2 || null,
+    flagIso: mmsiFlag(realMmsiFor(record?.mmsi))?.iso2 || null,
     accent: accentForVesselType(record.type),
     vessel: {
       mmsi: record.mmsi,

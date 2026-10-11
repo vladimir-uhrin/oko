@@ -1747,7 +1747,7 @@ function ensureAisSupplements() {
       const file = path.join(mtDir, `ship-${shipId}.json`);
       try {
         const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
-        if (Date.now() - cached.at < 30 * 86400_000) return cached;
+        if (Date.now() - cached.at < 30 * 86400_000) return { mmsi: cached.mmsi || cached.ship?.mmsi || null, name: cached.name || cached.ship?.name || null };
       } catch { /* bez cache */ }
       const info = parseMtGeneral(JSON.parse(await curlGet(`https://www.marinetraffic.com/en/vessels/${shipId}/general`)));
       const entry = { at: Date.now(), mmsi: info.mmsi, name: info.name };
@@ -1763,7 +1763,7 @@ function ensureAisSupplements() {
     for (const name of fs.readdirSync(mtDir)) {
       const m = /^ship-(\d+)\.json$/.exec(name);
       if (!m) continue;
-      try { const c = JSON.parse(fs.readFileSync(path.join(mtDir, name), 'utf8')); resolver.known.set(m[1], c.mmsi || null); } catch { /* */ }
+      try { const c = JSON.parse(fs.readFileSync(path.join(mtDir, name), 'utf8')); resolver.known.set(m[1], c.mmsi || c.ship?.mmsi || null); } catch { /* */ }
     }
   } catch { /* priečinok ešte nie je */ }
   const tiles = oceanTiles();

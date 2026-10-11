@@ -586,3 +586,27 @@ test('bod 1 (2026-10-11): lišta priebehu aj bez nášho prístavu — súradnic
   assert.ok(Math.abs(model.progress.fractionDone - 0.9368) < 1e-9, 'priebeh po námornej trase z registra');
   assert.ok(model.progress.remainingKm > 300 && model.progress.remainingKm < 600);
 });
+
+test('loď z oceánu bez MMSI: pri prejdení myšou sa MMSI zistí a karta dostane register aj fotku (2026-10-11)', async () => {
+  const { _setVesselInfoFetchForTest, _resetVesselInfoForTest, lookupVesselInfo, cachedVesselInfo, lookupVesselPhoto, realMmsiFor } = await import('./vesselInfo.js');
+  const { hoverCardModel } = await import('./contactHoverCard.js');
+  _resetVesselInfoForTest();
+  const urls = [];
+  _setVesselInfoFetchForTest(async (url) => {
+    urls.push(url);
+    if (url.startsWith('/api/vessel-info/ship?shipId=5810894')) return { ok: true, json: async () => ({ shipId: '5810894', mmsi: '477269900', name: 'ORE NINGBO' }) };
+    if (url === '/api/vessel-info?mmsi=477269900') return { ok: true, json: async () => ({ mmsi: '477269900', imo: '9815226', typeDetail: 'Ore Carrier', photo: { src: '/api/vessel-info/photo?mmsi=477269900&size=1' } }) };
+    return { ok: false };
+  });
+  assert.equal(cachedVesselInfo('mt-5810894'), undefined);
+  const info = await lookupVesselInfo('mt-5810894');
+  assert.equal(info.imo, '9815226');
+  assert.equal(cachedVesselInfo('mt-5810894').imo, '9815226', 'synchrónne pre kartičku');
+  assert.equal(realMmsiFor('mt-5810894'), '477269900');
+  assert.equal((await lookupVesselPhoto('mt-5810894')).src, '/api/vessel-info/photo?mmsi=477269900&size=1');
+  await lookupVesselInfo('mt-5810894');
+  assert.equal(urls.filter((u) => u.includes('/ship?')).length, 1, 'ID registra sa preloží raz');
+  const model = hoverCardModel({ layerId: 'ais-live-vessels', id: 'mt-5810894', callsign: 'ORE NINGBO', type: 'VESSEL', photoKey: 'vessel:mt-5810894' }, (k) => k);
+  assert.equal(model?.photoKey, 'vessel:mt-5810894', 'kartička si fotku vypýta aj pre dočasný kľúč');
+  _resetVesselInfoForTest();
+});

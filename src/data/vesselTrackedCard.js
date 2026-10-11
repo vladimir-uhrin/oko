@@ -244,7 +244,8 @@ export function buildVesselTrackedEntry(v, t = identity, lang = 'sk', nowMs = Da
   if (v.sourceLine) footer.push(v.sourceLine);
   const local = !v.delayed ? vesselLocalTimeLabel(vessel.lon, nowMs, v.timeZone || null) : null;
   // Loď z oceánu bez MMSI (dočasný kľúč „mt-…") — MMSI sa nevypisuje, kým ho nepoznáme.
-  footer.push([/^\d{9}$/.test(String(vessel.mmsi || '')) ? `MMSI ${vessel.mmsi}` : '', local ? t('vessel.local-time', { time: local }) : ''].filter(Boolean).join(' · '));
+  const shownMmsi = /^\d{9}$/.test(String(vessel.mmsi || '')) ? vessel.mmsi : (/^\d{9}$/.test(String(info?.mmsi || '')) ? info.mmsi : '');
+  footer.push([shownMmsi ? `MMSI ${shownMmsi}` : '', local ? t('vessel.local-time', { time: local }) : ''].filter(Boolean).join(' · '));
 
   return {
     ...VESSEL_TRACKED_STYLE,
