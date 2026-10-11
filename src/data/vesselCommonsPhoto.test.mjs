@@ -8,10 +8,10 @@ test('kategória IMO: súbory a podkategórie; len obrázky', () => {
     { files: ['File:Finnwave.jpg'], subcats: ['Category:Finnwave (ship, 2012)'] });
 });
 
-test('imageinfo: náhľad 320 px, autor bez HTML a licencia v kredite', () => {
+test('imageinfo: náhľad 330 px (Wikimedia berie len štandardné šírky; 320 = chyba 400), autor bez HTML a licencia v kredite', () => {
   const p = parseCommonsImageInfo({ query: { pages: { 1: { imageinfo: [{ thumburl: 'https://upload.wikimedia.org/x/1280px-F.jpg', url: 'https://upload.wikimedia.org/F.jpg', descriptionurl: 'https://commons.wikimedia.org/wiki/File:F.jpg',
     extmetadata: { Artist: { value: '<a href="//x">kallerna</a>' }, LicenseShortName: { value: 'CC BY-SA 4.0' } } }] } } } });
-  assert.equal(p.thumb, 'https://upload.wikimedia.org/x/320px-F.jpg');
+  assert.equal(p.thumb, 'https://upload.wikimedia.org/x/330px-F.jpg');
   assert.equal(p.credit, 'Wikimedia Commons · kallerna · CC BY-SA 4.0');
   assert.equal(p.page, 'https://commons.wikimedia.org/wiki/File:F.jpg');
 });

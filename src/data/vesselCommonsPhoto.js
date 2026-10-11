@@ -35,7 +35,7 @@ export function parseCommonsImageInfo(json) {
     const license = stripHtml(meta.LicenseShortName?.value).slice(0, 40);
     return {
       full: ii.thumburl || ii.url,
-      thumb: ii.thumburl ? ii.thumburl.replace(/\/\d+px-/, '/320px-') : ii.url,
+      thumb: ii.thumburl ? ii.thumburl.replace(/\/\d+px-/, '/330px-') : ii.url,
       page: ii.descriptionurl || '',
       credit: ['Wikimedia Commons', artist, license].filter(Boolean).join(' · '),
     };
