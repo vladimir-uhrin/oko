@@ -343,7 +343,7 @@ function renderPhoto(doc, model, t) {
   const credit = doc.createElement('span');
   credit.className = 'contact-hover-card-photo-credit';
   credit.textContent = vessel
-    ? t('vessel.photo-credit')
+    ? (photo.credit || t('vessel.photo-credit'))
     : (photo.photographer ? t('photo.credit', { name: photo.photographer }) : t('photo.credit-anonymous'));
   link.appendChild(img);
   link.appendChild(credit);

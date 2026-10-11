@@ -49,7 +49,8 @@ function sync() {
       state.root.title = t('vessel.photo-open');
       state.img.src = src;
       state.img.alt = t('vessel.photo-alt');
-      state.credit.textContent = [info.name, t('vessel.photo-credit')].filter(Boolean).join(' · ');
+      // Commons: autor a licencia povinne (CC BY-SA), inak „Foto lode · register plavidiel".
+      state.credit.textContent = [info.name, info.photo?.credit || t('vessel.photo-credit')].filter(Boolean).join(' · ');
       governorRequestRender('vessel-photo');
     }).catch(() => {});
   }

@@ -85,7 +85,7 @@ import { flyToGlobeView, searchAndFlyTo } from './locations.js';
 import { createAircraftSearchCommands } from './aircraftSearchCommands.js';
 import { createVesselSearchCommands } from './vesselSearchCommands.js';
 import { attachVesselEstimateViewer, showRemoteVessel } from './data/vesselEstimate.js';
-import { lookupVesselInfo } from './data/vesselInfo.js';
+import { lookupVesselInfo, realMmsiFor } from './data/vesselInfo.js';
 import { loadPortIndex as loadVesselPortIndex } from './data/vesselPortIndex.js';
 import { matchDestinationPort } from './data/vesselDestination.js';
 import { buildConflictDigest } from './conflictSummary.js';
@@ -1245,7 +1245,8 @@ async function init() {
           providers: [
             { id: 'live', active: () => {
               const info = aisLiveVesselsLayer.getSelectedInfo?.();
-              return info?.mmsi ? { sourceId: VESSEL_OVERLAY_SOURCE_ID, entryId: `vessel:${info.mmsi}`, mmsi: String(info.mmsi), name: info.name } : null;
+              // Loď z oceánu („mt-…"): zvonček a história až so zisteným MMSI.
+              return info?.mmsi ? { sourceId: VESSEL_OVERLAY_SOURCE_ID, entryId: `vessel:${info.mmsi}`, mmsi: realMmsiFor(info.mmsi) || String(info.mmsi), name: info.name } : null;
             } },
             { id: 'aishub', active: () => {
               const m = layerModule('aishub-vessels');

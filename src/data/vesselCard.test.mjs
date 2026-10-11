@@ -206,7 +206,8 @@ test('klient: jeden dopyt na loď, súbežné sa zlúčia, po zlyhaní pauza', a
   assert.equal(a.imo, '9410909');
   assert.equal(cachedVesselInfo('241190000').imo, '9410909');
   const photo = await lookupVesselPhoto('241190000');
-  assert.deepEqual(photo, { kind: 'vessel', src: '/api/vessel-info/photo?mmsi=241190000&size=1', link: '/api/vessel-info/photo?mmsi=241190000&size=1' });
+  // Zámerná zmena pinu (2026-10-11): fotka nesie aj kredit (Commons: autor + licencia), register = null.
+  assert.deepEqual(photo, { kind: 'vessel', src: '/api/vessel-info/photo?mmsi=241190000&size=1', link: '/api/vessel-info/photo?mmsi=241190000&size=1', credit: null });
   assert.equal(urls.length, 2);
   assert.equal(await lookupVesselInfo('nie-mmsi'), null);
   _resetVesselInfoForTest();

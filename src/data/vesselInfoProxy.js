@@ -20,6 +20,7 @@
  * sa zlúčia. Bez kľúča, bez peňazí.
  */
 import path from 'node:path';
+import { findCommonsShipPhoto } from './vesselCommonsPhoto.js';
 import { promises as fsp } from 'node:fs';
 import { MT_BASE, VF_TRACK, BROWSER_UA as TRACK_UA, curlGet, decodeVfTrack, parseMtGeneral, parseMtPort, parseMtPosition, parseMtSearch, parseMtSearchResults, parseMtTrack, parseMtVoyage } from './vesselTrackSources.js';
 
@@ -530,6 +531,28 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
     });
   }
 
+  /** Fotka z Wikimedia Commons podľa IMO, keď register fotku nemá (2026-10-11). Cache 30 d / 7 d bez fotky. */
+  function loadCommons(imo) {
+    const code = String(imo || '').replace(/\D/g, '');
+    if (!/^\d{7}$/.test(code)) return Promise.resolve(null);
+    const k = `c:${code}`;
+    const job = inflight.get(k);
+    if (job) return job;
+    const run = (async () => {
+      const file = path.join(dir, 'commons', `${code}.json`);
+      try {
+        const entry = JSON.parse(await fsp.readFile(file, 'utf8'));
+        const ttl = entry?.photo ? VESSEL_PHOTO_TTL_MS : 7 * 24 * 3600 * 1000;
+        if (Number.isFinite(entry?.at) && now() - entry.at < ttl) return entry.photo || null;
+      } catch { /* bez cache */ }
+      const photo = await findCommonsShipPhoto(code, fetchImpl);
+      await writeAtomic(file, JSON.stringify({ at: now(), photo }));
+      return photo;
+    })().catch(() => null).finally(() => inflight.delete(k));
+    inflight.set(k, run);
+    return run;
+  }
+
   async function loadPhoto(mmsi, size, key) {
     const file = photoFile(mmsi, size);
     try {
@@ -538,13 +561,18 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
     } catch { /* nie je v cache */ }
     const { info, status, error } = await loadInfo(mmsi, key);
     if (!info) return { status, error };
-    if (!info.photoId) return { status: 404, error: 'no_photo' };
+    let commons = null;
+    if (!info.photoId) {
+      commons = await loadCommons(info.imo);
+      if (!commons) return { status: 404, error: 'no_photo' };
+    }
     const job = inflight.get(`p:${mmsi}:${size}`);
     if (job) return job;
     const run = (async () => {
       if (!upstreamBudget('all')) return { status: 503, error: 'budget' };
-      const res = await fetchImpl(`${VESSEL_PHOTO_UPSTREAM}${info.photoId}/${size}`, {
-        headers: { 'User-Agent': BROWSER_UA, Accept: 'image/jpeg,image/*' },
+      const photoUrl = commons ? (size ? commons.full : commons.thumb) : `${VESSEL_PHOTO_UPSTREAM}${info.photoId}/${size}`;
+      const res = await fetchImpl(photoUrl, {
+        headers: { 'User-Agent': commons ? 'OKO/1.0 (https://okolive.sk)' : BROWSER_UA, Accept: 'image/jpeg,image/*' },
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
       if (res.status === 404) return { status: 404, error: 'no_photo' };
@@ -654,6 +682,11 @@ export function vesselInfoProxy({ root = process.cwd(), fetchImpl = (...a) => fe
       // Posledná poloha (aj z prijímača na inej lodi na otvorenom mori) a cieľ, keď ho register nemá.
       body.lastPosition = mt?.position || null;
       if (!body.destination && mt?.destination) { body.destination = mt.destination; body.etaMs = body.etaMs || mt.etaMs || null; }
+      // Register fotku nemá → Wikimedia Commons podľa IMO, s autorom a licenciou (2026-10-11).
+      if (!body.photo && out.info.imo) {
+        const commons = await loadCommons(out.info.imo);
+        if (commons) body.photo = { src: `/api/vessel-info/photo?mmsi=${mmsi}&size=1`, thumb: `/api/vessel-info/photo?mmsi=${mmsi}&size=0`, credit: commons.credit, page: commons.page };
+      }
       sendJson(res, 200, body, { 'Cache-Control': 'public, max-age=300', 'X-OKO-Source': out.source });
     } catch (error) {
       log(`[vessel-info] ${mmsi} failed: ${error?.message || error}`);

@@ -136,7 +136,7 @@ export function realMmsiFor(id) {
 export async function lookupVesselPhoto(mmsi) {
   const info = await lookupVesselInfo(mmsi);
   if (!info?.photo?.src) return null;
-  return { kind: 'vessel', src: info.photo.src, link: info.photo.src };
+  return { kind: 'vessel', src: info.photo.src, link: info.photo.page || info.photo.src, credit: info.photo.credit || null };
 }
 
 /** Test seam. */
