@@ -118,7 +118,11 @@ export function createVesselSearchCommands({ live, delayed = [], dataManager = n
     return (body.results || []).slice(0, 8).map((hit) => ({
       id: `vessel-world:${hit.shipId}`,
       label: hit.name,
-      hint: [hit.typeText, hit.flagIso2 ? hit.flagIso2.toUpperCase() : ''].filter(Boolean).join(' · '),
+      hint: [
+        hit.currentName ? translate('cmd.vessel.now-named', { name: hit.currentName }) : hit.typeText,
+        hit.dead ? translate('cmd.vessel.scrapped') : '',
+        hit.flagIso2 ? hit.flagIso2.toUpperCase() : '',
+      ].filter(Boolean).join(' · '),
       group: SHIP_WORLD_GROUP,
       keywords: [],
       run: () => { void runRemote(hit); },

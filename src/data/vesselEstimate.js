@@ -168,13 +168,13 @@ export function showVesselEstimate(key, base, estimate, label = '') {
  * @param {{translate?: Function, lang?: string, nowMs?: number}} [o]
  * @returns {object|null} odhad alebo null
  */
-export function showRemoteVessel(ship, info, { translate = (k) => k, lang = 'sk', nowMs = Date.now() } = {}) {
+export function showRemoteVessel(ship, info, { translate = (k) => k, lang = 'sk', nowMs = Date.now(), destination: destOverride = null } = {}) {
   const p = ship?.position;
   if (!_viewer?.entities || !p || !Number.isFinite(p.lat)) return null;
   clearVesselEstimate('remote');
   const d = new Date(p.t);
   const when = `${d.getUTCDate()}. ${d.getUTCMonth() + 1}. ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
-  const destination = info?.destinationPort && Number.isFinite(info.destinationPort.lat) ? info.destinationPort : null;
+  const destination = info?.destinationPort && Number.isFinite(info.destinationPort.lat) ? info.destinationPort : destOverride;
   const estimate = estimateVesselPosition(p, { destination, nowMs });
   if (estimate) showVesselEstimate('remote', p, estimate, `${translate('vessel.estimate-label')} · ±${estimate.radiusKm} km`);
   const list = _graphics.get('remote') || [];

@@ -17,9 +17,12 @@ test('parsovanie hľadania: meno vs číslo, typ a vlajka z popisu; identita z g
   assert.deepEqual(parseMtSearchResults([
     { id: '328023', type: 'Vessel', value: 'TURIEC', desc: 'Inland, Pushtow, two cargo barges [SK]' },
     { id: '1', type: 'Port', value: 'X', desc: 'Y' },
-  ]), [{ shipId: '328023', name: 'TURIEC', typeText: 'Inland, Pushtow, two cargo barges', flagIso2: 'sk' }]);
+  ]), [{ shipId: '328023', name: 'TURIEC', typeText: 'Inland, Pushtow, two cargo barges', flagIso2: 'sk', currentName: null, dead: false }]);
   assert.deepEqual(parseMtSearchResults([{ id: '214707', type: 'Vessel', value: '9410909', desc: 'MINERVA ZEN [GR]' }]),
-    [{ shipId: '214707', name: 'MINERVA ZEN', typeText: null, flagIso2: 'gr' }]);
+    [{ shipId: '214707', name: 'MINERVA ZEN', typeText: null, flagIso2: 'gr', currentName: null, dead: false }]);
+  // Bývalé meno inej lode (skutočný výsledok „minerva zen").
+  assert.deepEqual(parseMtSearchResults([{ id: '285427', type: 'Vessel', value: 'MINERVA ZEN', desc: 'OCEAN JEWEL [PA] (Current Name)' }]),
+    [{ shipId: '285427', name: 'MINERVA ZEN', typeText: null, flagIso2: 'pa', currentName: 'OCEAN JEWEL', dead: false }]);
   assert.deepEqual(parseMtGeneral({ mmsi: 267168000, imo: null, name: 'TURIEC', subtype: 'Inland, Pushtow', countryCode: 'SK' }),
     { mmsi: '267168000', imo: null, name: 'TURIEC', typeText: 'Inland, Pushtow', flagIso2: 'sk' });
 });

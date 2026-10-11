@@ -85,6 +85,8 @@ import { createAircraftSearchCommands } from './aircraftSearchCommands.js';
 import { createVesselSearchCommands } from './vesselSearchCommands.js';
 import { attachVesselEstimateViewer, showRemoteVessel } from './data/vesselEstimate.js';
 import { lookupVesselInfo } from './data/vesselInfo.js';
+import { loadPortIndex as loadVesselPortIndex } from './data/vesselPortIndex.js';
+import { matchDestinationPort } from './data/vesselDestination.js';
 import { buildConflictDigest } from './conflictSummary.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
@@ -1196,7 +1198,10 @@ async function init() {
     window.__godsEyeView.vesselEstimate = {
       showRemote: async (ship) => {
         const info = ship?.mmsi ? await lookupVesselInfo(ship.mmsi).catch(() => null) : null;
-        return showRemoteVessel(ship, info, { translate: t, lang: currentLanguage() });
+        // Cieľ z textu (WILMINGTON.NC.USA → USILM), keď ho register nedal s polohou.
+        const index = info?.destination ? await loadVesselPortIndex().catch(() => null) : null;
+        const destination = index ? matchDestinationPort(info.destination, index)?.port || null : null;
+        return showRemoteVessel(ship, info, { translate: t, lang: currentLanguage(), destination });
       },
     };
     // Lode v jednotnom hľadaní (2026-10-11): živé z pamäte + kdekoľvek zo servera.

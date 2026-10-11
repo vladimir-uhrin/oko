@@ -52,11 +52,16 @@ export function parseMtSearchResults(json, limit = 10) {
     const flag = /\[([A-Z]{2})\]\s*$/.exec(desc)?.[1] || null;
     const descText = desc.replace(/\s*\[[A-Z]{2}\]\s*$/, '').trim();
     const numeric = /^\d+$/.test(String(x.value || ''));
+    // Bývalé meno: „OCEAN JEWEL [PA] (Current Name)" = loď sa dnes volá inak; „(Dead - Last Name)" = vyradená.
+    const current = /^(.*?)\s*\[([A-Z]{2})\]\s*\(Current Name\)\s*$/i.exec(desc);
+    const dead = /\(Dead/i.test(desc);
     out.push({
       shipId: String(x.id),
       name: numeric ? descText : String(x.value || '').trim(),
-      typeText: numeric ? null : (descText || null),
-      flagIso2: flag ? flag.toLowerCase() : null,
+      typeText: current || dead ? null : (numeric ? null : (descText || null)),
+      flagIso2: current ? current[2].toLowerCase() : (flag ? flag.toLowerCase() : null),
+      currentName: current ? current[1].trim() : null,
+      dead,
     });
     if (out.length >= limit) break;
   }
