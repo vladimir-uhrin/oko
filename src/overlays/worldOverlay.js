@@ -1082,6 +1082,29 @@ export function overlayEntryPaintedRecently(sourceId, entryId, frames = 2) {
   return Boolean(rect && rect.key === key && _frameStamp - rect.stamp <= frames);
 }
 
+/**
+ * Text karty, ako ju návštevník vidí (2026-10-12, zdieľanie lode/objektu s pásom údajov —
+ * src/cardShare.js): titulok, riadky, trasa, priebeh a päta ako obyčajné reťazce. Kópia, nie odkaz.
+ * @returns {{title: string, details: string[], route: string, progress: number|null, footer: string[], alert: string}|null}
+ */
+export function getOverlayEntryText(sourceId, entryId) {
+  if (_destroyed) return null;
+  const source = _sources.get(String(sourceId));
+  const entry = source?.entries?.get(String(entryId));
+  if (!entry) return null;
+  const route = entry.route
+    ? [entry.route.origin?.label, entry.route.destination?.label].filter(Boolean).join(' → ')
+    : '';
+  return {
+    title: String(entry.title || ''),
+    details: [...(entry.details || [])],
+    route,
+    progress: entry.progress ? entry.progress.fraction : null,
+    footer: [...(entry.footer || [])],
+    alert: entry.alert || '',
+  };
+}
+
 export function getOverlayPaintRect(sourceId, entryId) {
   if (_destroyed) return null;
   const key = entryKey(String(sourceId), String(entryId));

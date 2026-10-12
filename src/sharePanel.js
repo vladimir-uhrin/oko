@@ -147,6 +147,12 @@ function ensurePanel(doc, win, nav, translate, toast) {
       status.textContent = text;
     },
     /** Náhľad hneď po snímke — nahrávanie videa trvá sekundy a človek nech vidí, čo zdieľa. */
+    /** Nadpis podľa obsahu (2026-10-12): „Zdieľať let SIA611"; bez neho všeobecný. */
+    setHeading(text) {
+      const value = String(text || '').trim() || translate('share.title');
+      title.textContent = value;
+      root.setAttribute('aria-label', value);
+    },
     showPreview(snapshot) {
       if (!snapshot?.jpegDataUrl) return;
       preview.setAttribute('src', snapshot.jpegDataUrl);
@@ -209,6 +215,7 @@ function ensurePanel(doc, win, nav, translate, toast) {
  *   krátke živé video do náhľadu (shareVideo.js); null = prehliadač nenahráva, odkaz ostáva s obrázkom
  * @param {typeof uploadShareVideo} [options.uploadVideo]
  * @param {{ title: string, description: string, text: string }} [options.copy]
+ * @param {string} [options.heading] nadpis okna (napr. „Zdieľať let SIA611"); prázdny = všeobecný
  * @param {(message: string) => void} [options.toast]
  * @returns {Promise<{ url: string, longUrl: string, shortLink: object|null, snapshot: object|null, copy: object, video: object|null, videoTried: boolean }|null>}
  */
@@ -222,6 +229,7 @@ export async function openSharePanel({
   recordVideo = null,
   uploadVideo = uploadShareVideo,
   copy = { title: 'OKO', description: '', text: 'OKO' },
+  heading = '',
   toast = () => {},
   translate = t,
 } = {}) {
@@ -231,8 +239,9 @@ export async function openSharePanel({
     return null;
   }
   const ui = ensurePanel(doc, win, nav, translate, toast);
-  ui.lastOptions = { document: doc, window: win, navigator: nav, buildLink, captureSnapshot, publish, recordVideo, uploadVideo, copy, toast, translate };
+  ui.lastOptions = { document: doc, window: win, navigator: nav, buildLink, captureSnapshot, publish, recordVideo, uploadVideo, copy, heading, toast, translate };
   ui.reset();
+  ui.setHeading?.(heading);
   ui.show();
   let snapshot = null;
   try { snapshot = captureSnapshot ? await captureSnapshot() : null; } catch (error) {

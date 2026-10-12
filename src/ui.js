@@ -52,8 +52,10 @@ import {
 import { TRACKED_OVERLAY_SOURCE_ID, destroyTrackedReadout, getActiveTrackedReadoutId, initTrackedReadout } from './data/trackedReadout.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 import { installCardCloseButtons } from './cardCloseButtons.js';
-import { buildFlightShareCopy, drawFlightShareCard } from './flightShare.js';
+import { buildFlightShareCopy, drawFlightShareCard, flightShareHeadline } from './flightShare.js';
 import { installFlightCardActions } from './flightCardActions.js';
+import { installCardChromeFade } from './cardChromeFade.js';
+import { buildVesselShareCopy, vesselShareCard } from './cardShare.js';
 import { installCardActionBar, trackedCardRect } from './cardActionBar.js';
 import { installCardSwipeClose } from './cardSwipeClose.js';
 import { createScrollKeeper } from './scrollKeeper.js';
@@ -70,7 +72,7 @@ import { createEventMarkers } from './eventMarkers.js';
 import { whenStartupReady } from './startupGate.js';
 import { installGasPanel } from './gasPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
-import { destroyWorldOverlay, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
+import { destroyWorldOverlay, getOverlayEntryText, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
   destroyDetection,
   initDetection,
@@ -3260,6 +3262,8 @@ export class StyleManager {
       },
       setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
     });
+    // Ponuka štýlu a jazyka vpravo hore ustúpi karte, ktorá ju prekryje (2026-10-12, cardChromeFade.js).
+    installCardChromeFade(viewer);
     // Zdieľať a História letu v rohu karty lietadla (2026-10-11, flightCardActions.js): ako na karte lode.
     installFlightCardActions(viewer, {
       container: document.body,
@@ -3267,7 +3271,8 @@ export class StyleManager {
       onShare: () => { void this._openSharePanel(); },
       onHistory: (hex) => {
         revealHistoryPanel();
-        this._historyPanel?.open({ query: hex });
+        // Rovno prebiehajúci let (trasa, graf, body HFDL); bez neho zoznam letov stroja.
+        void this._historyPanel?.openLatest({ query: hex });
       },
     });
     // História lodí (2026-10-11, shipHistoryPanel.js): karta LODE v tom istom paneli.
@@ -10858,6 +10863,17 @@ export class StyleManager {
    * Bez servera ostane dlhý odkaz a obrázok v schránke.
    * @returns {Promise<void>}
    */
+  /** Vybraná loď a jej karta v prekrytí (živé AIS, AISHub, GFW) alebo null — ako krížik karty lode. */
+  _selectedVesselRef() {
+    const layer = (id) => this._dataManager?.layers?.get(id)?.module;
+    const live = layer('ais-live-vessels')?.getSelectedMmsi?.();
+    if (live) return { mmsi: live, sourceId: 'ais-live-vessels', entryId: `vessel:${live}` };
+    const delayed = layer('aishub-vessels')?.getSelectedMmsi?.();
+    if (delayed) return { mmsi: delayed, sourceId: 'aishub-vessels', entryId: `aishub:${delayed}` };
+    const satellite = layer('gfw-presence')?.getSelectedMmsi?.();
+    return satellite ? { mmsi: satellite, sourceId: 'gfw-presence', entryId: `gfw:${satellite}` } : null;
+  }
+
   async _openSharePanel() {
     const lang = currentLanguage();
     const whenMs = Date.now();
@@ -10877,9 +10893,19 @@ export class StyleManager {
         flightCard = this._dataManager?.layers?.get('flights')?.module?.getTrackedShareCard?.() || null;
       }
     } catch { flightCard = null; }
+    // Zdieľanie lode (2026-10-12, cardShare.js): bez sledovaného lietadla vybraná loď — text jej karty
+    // (ako ju návštevník vidí) dá pás na obrázok/video aj titulok a popis príspevku.
+    let vesselCard = null;
+    if (!flightCard) {
+      try {
+        const sel = this._selectedVesselRef();
+        if (sel) vesselCard = vesselShareCard(getOverlayEntryText(sel.sourceId, sel.entryId), { delayed: sel.sourceId !== 'ais-live-vessels', lang });
+      } catch { vesselCard = null; }
+    }
+    const shareCard = flightCard || vesselCard;
     const copy = flightCard
       ? buildFlightShareCopy(flightCard, { whenMs, lang })
-      : buildShareCopy({
+      : vesselCard ? buildVesselShareCopy(vesselCard, { whenMs, lang }) : buildShareCopy({
         subjectLabel,
         placeLabel: placeLabel && placeLabel !== '--' ? placeLabel : null,
         layerNames,
@@ -10888,8 +10914,8 @@ export class StyleManager {
       });
     const stamp = snapshotStamp(whenMs, lang);
     const attribution = buildAttributionLine(document.getElementById('cesium-credits')?.textContent);
-    const frame = flightCard
-      ? { overlays: false, decorate: (ctx, w, h) => drawFlightShareCard(ctx, flightCard, w, h, { lang }) }
+    const frame = shareCard
+      ? { overlays: false, decorate: (ctx, w, h) => drawFlightShareCard(ctx, shareCard, w, h, { lang }) }
       : {};
     await openSharePanel({
       buildLink: () => this.shareLinkManager.buildShareUrl({ nowMs: whenMs }),
@@ -10898,6 +10924,11 @@ export class StyleManager {
       // plátno (MediaRecorder + captureStream); inak ostáva obrázok.
       recordVideo: canRecordShareVideo() ? () => recordShareVideo({ viewer: this.viewer, stamp, attribution, ...frame }) : null,
       copy,
+      // Nadpis podľa obsahu (2026-10-12): let, loď, stanica… inak všeobecný „Zdieľať tento pohľad".
+      heading: flightCard
+        ? t('share.title-flight', { label: flightShareHeadline(flightCard) })
+        : vesselCard ? t('share.title-vessel', { label: vesselCard.callsign })
+          : (subjectLabel ? t('share.title-subject', { label: subjectLabel }) : ''),
       toast: (message) => this._showToast(message),
     });
   }

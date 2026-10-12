@@ -26,3 +26,14 @@ test('na úzkej karte neutečú z obrazovky doľava', () => {
   const spots = flightActionPlacements({ x: 0, y: 10, w: 40, h: 100 }, 2, { w: 360, h: 700 });
   for (const spot of spots) assert.ok(spot.x >= 6);
 });
+
+test('mobil: tlačidlá nad hornou hranou karty, vpravo; bez miesta ostanú vnútri', () => {
+  const rect = { x: 24, y: 472, w: 327, h: 100 };
+  const close = closeButtonPlacement(rect);
+  const [share, history] = flightActionPlacements(rect, 2, { w: 375, h: 812 }, { outsideTopSafe: 100 });
+  assert.ok(share.y + 26 <= rect.y, 'nad kartou');
+  assert.equal(share.x, close.x, 'prvé nad krížikom');
+  assert.ok(history.x < share.x);
+  const inside = flightActionPlacements({ ...rect, y: 110 }, 2, { w: 375, h: 812 }, { outsideTopSafe: 100 });
+  assert.equal(inside[0].y, closeButtonPlacement({ ...rect, y: 110 }).y, 'pod hornou lištou nie je miesto');
+});

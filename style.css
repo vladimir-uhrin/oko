@@ -740,6 +740,22 @@ body.oko-karta-frame #title-bar .title-credit { display: none; }
   pointer-events: auto;
 }
 
+/* 2026-10-12 (cardChromeFade.js): kým karta sledovaného objektu leží pod ponukou vpravo hore, ponuka
+   ustúpi — žiadny text cez text. Nie opacity 0: prekrytie (worldOverlay) by ju prestalo brať ako
+   prekážku, karta by sa posunula a ponuka vrátila (kmitanie). */
+#lang-switch,
+#style-indicator {
+  transition: opacity 0.18s ease;
+}
+#lang-switch.oko-under-card,
+#style-indicator.oko-under-card {
+  opacity: 0.12;
+}
+#lang-switch.oko-under-card button,
+#lang-switch.oko-under-card a {
+  pointer-events: none;
+}
+
 #lang-switch .indicator-label {
   display: block;
   font-family: var(--font-mono);

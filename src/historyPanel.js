@@ -48,6 +48,19 @@ function el(doc, tag, className, text) {
  * @param {object} leg
  * @param {(k: string, v?: object) => string} t
  */
+/** Let, ktorý ešte prebieha alebo práve skončil, smie sa z karty otvoriť rovno. */
+export const LATEST_LEG_MAX_AGE_S = 3 * 3600;
+
+/** Najnovší let stroja, ak skončil najviac pred LATEST_LEG_MAX_AGE_S; inak null. Pure. */
+export function pickLatestLeg(legs, nowS) {
+  let best = null;
+  for (const leg of Array.isArray(legs) ? legs : []) {
+    if (!Number.isFinite(leg?.lastT)) continue;
+    if (!best || leg.lastT > best.lastT) best = leg;
+  }
+  return best && nowS - best.lastT <= LATEST_LEG_MAX_AGE_S ? best : null;
+}
+
 export function legRowModel(leg, t) {
   const title = legTitle(leg);
   const sub = [
@@ -438,6 +451,21 @@ export function installHistoryPanel({
   if (typeof api.stateList === 'function') void renderStateRow().catch(() => { stateRow.hidden = true; });
 
   return {
+    /**
+     * História letu z karty lietadla (2026-10-12): vyhľadá stroj a rovno otvorí jeho posledný let
+     * (prebiehajúci — skončil najviac pred LATEST_LEG_MAX_AGE_S), inak nechá zoznam letov.
+     * Kameru neberie: otvorený let len nakreslí trasu a graf, živé sledovanie beží ďalej.
+     * @returns {Promise<object|null>} otvorený let alebo null
+     */
+    async openLatest({ query = '' } = {}) {
+      setCollapsed?.(false);
+      closeLeg();
+      input.value = String(query || '');
+      await runSearch();
+      const latest = pickLatestLeg(legs, Date.now() / 1000);
+      if (latest) await openLeg(latest);
+      return latest;
+    },
     /** Otvor panel s dopytom (kontextové menu: „História tohto stroja"). */
     open({ query = '' } = {}) {
       setCollapsed?.(false);

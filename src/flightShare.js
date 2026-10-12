@@ -161,8 +161,9 @@ export function drawFlightShareCard(ctx, card, width, height, { lang = 'sk' } = 
   // Hlavička + štítok stavu.
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
-  const chipText = card.estimated ? (en ? 'ESTIMATE' : 'ODHAD') : (en ? 'LIVE' : 'NAŽIVO');
-  const chipColor = card.estimated ? ESTIMATE : LIVE;
+  // chipText/chipTone: iný stav než NAŽIVO/ODHAD (loď z oneskoreného zdroja — cardShare.js).
+  const chipText = card.chipText || (card.estimated ? (en ? 'ESTIMATE' : 'ODHAD') : (en ? 'LIVE' : 'NAŽIVO'));
+  const chipColor = card.chipTone === 'estimate' || (!card.chipTone && card.estimated) ? ESTIMATE : LIVE;
   ctx.font = `700 15px ${MONO}`;
   const chipW = Math.ceil(ctx.measureText(chipText).width) + 22;
   ctx.font = `700 32px ${MONO}`;

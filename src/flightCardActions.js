@@ -27,8 +27,18 @@ export function flightCardHex(entryId) {
  * Polohy tlačidiel vľavo od krížika: [0] hneď vedľa, [1] ďalej. Pure.
  * @returns {Array<{x: number, y: number}>}
  */
-export function flightActionPlacements(rect, count, viewport = null) {
+export function flightActionPlacements(rect, count, viewport = null, { outsideTopSafe = null } = {}) {
   const close = closeButtonPlacement(rect, CARD_CLOSE_SIZE_PX, CARD_CLOSE_INSET_PX, viewport);
+  // Mobil (2026-10-12): karta je zmenšená a tlačidlá v jej rohu zakrývali koniec riadkov — idú
+  // nad hornú hranu karty, zarovnané vpravo (prvé nad krížikom). Bez miesta pod hornou lištou ostanú vnútri.
+  const outsideY = Math.round(rect.y - CARD_CLOSE_SIZE_PX - GAP_PX);
+  if (Number.isFinite(outsideTopSafe) && outsideY >= outsideTopSafe) {
+    const out = [];
+    for (let i = 0; i < count; i += 1) {
+      out.push({ x: Math.max(CARD_CLOSE_INSET_PX, close.x - i * (CARD_CLOSE_SIZE_PX + GAP_PX)), y: outsideY });
+    }
+    return out;
+  }
   const out = [];
   for (let i = 1; i <= count; i += 1) {
     out.push({ x: Math.max(CARD_CLOSE_INSET_PX, close.x - i * (CARD_CLOSE_SIZE_PX + GAP_PX)), y: close.y });
@@ -88,7 +98,13 @@ export function installFlightCardActions(viewer, {
     if (!visible) { hide(); return; }
     currentHex = hex;
     const view = doc.defaultView;
-    const spots = flightActionPlacements(visible, buttons.length, { w: view?.innerWidth || 0, h: view?.innerHeight || 0 });
+    const mobile = doc.body?.classList?.contains?.('oko-mobile') === true;
+    let outsideTopSafe = null;
+    if (mobile) {
+      const bar = doc.getElementById?.('oko-topbar')?.getBoundingClientRect?.();
+      outsideTopSafe = bar && bar.height > 0 ? Math.round(bar.bottom) + GAP_PX : 64;
+    }
+    const spots = flightActionPlacements(visible, buttons.length, { w: view?.innerWidth || 0, h: view?.innerHeight || 0 }, { outsideTopSafe });
     buttons.forEach((button, i) => {
       if (button.hidden) button.hidden = false;
       const opacity = String(visible.opacity);
