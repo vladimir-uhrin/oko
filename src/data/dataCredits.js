@@ -74,6 +74,13 @@ export const DATA_CREDITS = [
       '(CC0)',
   },
   {
+    key: 'vrs-routes',
+    html:
+      'Flight routes by callsign for estimated aircraft: ' +
+      '<a href="https://github.com/vradarserver/standing-data" target="_blank" rel="noopener">Virtual Radar Server standing-data</a> ' +
+      '(CC0)',
+  },
+  {
     key: 'ourairports',
     html:
       'Airports: ' +

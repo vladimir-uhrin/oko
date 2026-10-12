@@ -8,7 +8,7 @@
 //    a ESTIMATE_MIN_SPEED_MPS, a nie pri cieli (pristávanie zmizne ako doteraz);
 //  - so známym a overeným cieľom (routePlausible) letí po veľkej kružnici k cieľu poslednou
 //    rýchlosťou; pri cieli odhad končí („pravdepodobne pristálo"), strop ESTIMATE_ROUTE_MAX_S;
-//  - bez cieľa letí v poslednom smere najviac ESTIMATE_NO_ROUTE_MAX_S (2 h, rozhodnutie vlastníka);
+//  - bez cieľa letí v poslednom smere najviac ESTIMATE_NO_ROUTE_MAX_S (1 h; pôvodne 2 h, skrátené 2026-10-12);
 //  - neistota rastie so vzdialenosťou od posledného fixu (kruh na mape, text na karte);
 //  - odhad sa NIKDY neukladá do histórie letov (zapisuje sa len skutočný snímok OpenSky).
 //
@@ -20,7 +20,13 @@ import { effectiveGroundSpeed } from './windAloft.js';
 
 export const ESTIMATE_MIN_ALT_M = 3000;
 export const ESTIMATE_MIN_SPEED_MPS = 90;
-export const ESTIMATE_NO_ROUTE_MAX_S = 2 * 3600;
+/**
+ * Strop odhadu bez cieľa. 2026-10-12 z 2 h na 1 h (vlastník: „začni čo považuješ za zmysluplné" po návrhu):
+ * merania návratov signálu (20 000 za 7 dní) — len v poslednom smere 30–60 min medián 59 km, 80 % do 155 km;
+ * 60–120 min medián 202 km, 80 % do 655 km. Taký odhad už o polohe nič nehovorí. S cieľom (VRS, adsbdb)
+ * alebo s ukotvením z HFDL lietadlo letí ďalej — HFDL čas bez signálu nuluje.
+ */
+export const ESTIMATE_NO_ROUTE_MAX_S = 1 * 3600;
 /**
  * Bez cieľa a pri strate signálu klesalo (2026-10-05, vlastník: lietadlá nad pevninou mimo dosahu):
  * pravdepodobne pristáva na letisku bez pokrytia — odhad najviac 20 min, nie 2 h (žiadne duchy).
@@ -109,11 +115,15 @@ export const CALIBRATION_MIN_SAMPLES = 20;
  * vzdialenosti (5 km).
  * @param {{maxMin:number, n:number, p80Km:number}[]|null} calibration
  */
-export function calibratedUncertaintyKm(elapsedS, distanceKm, calibration = null) {
+export function calibratedUncertaintyKm(elapsedS, distanceKm, calibration = null, method = null) {
   const model = uncertaintyKm(distanceKm);
   if (!Array.isArray(calibration)) return model;
   const min = elapsedS / 60;
   const bucket = calibration.find((c) => min < (c.maxMin ?? Infinity));
+  // Podľa spôsobu odhadu (2026-10-12): s cieľom/traťou je chyba 2× menšia než len v poslednom smere —
+  // spoločný 80. percentil (takmer celý z odhadov bez cieľa) dával odhadom s cieľom zbytočne veľký kruh.
+  const own = method && bucket?.byMethod?.[method];
+  if (own && own.n >= CALIBRATION_MIN_SAMPLES && Number.isFinite(own.p80Km)) return Math.max(5, own.p80Km);
   if (!bucket || !(bucket.n >= CALIBRATION_MIN_SAMPLES) || !Number.isFinite(bucket.p80Km)) return model;
   return Math.max(5, bucket.p80Km);
 }
@@ -149,7 +159,8 @@ export function estimatePosition(fix, route, nowMs, model = null, calibration = 
     const w = Math.max(0, (elapsedS - ROUTE_BLEND_START_S) / (ROUTE_BLEND_END_S - ROUTE_BLEND_START_S));
     at = { ...at, lat: straight.lat + (at.lat - straight.lat) * w, lon: straight.lon + (at.lon - straight.lon) * w, trackDeg: w < 0.5 ? fix.trkDeg : at.trackDeg };
   }
-  const unc = calibratedUncertaintyKm(elapsedS, flownKm, calibration);
+  const method = path.toDestination && dest ? (path.nat ? 'nat' : 'route') : (path.nat ? 'nat' : 'track');
+  const unc = calibratedUncertaintyKm(elapsedS, flownKm, calibration, method);
   if (path.toDestination && dest) {
     const remainingKm = at.remainingKm;
     const ended = remainingKm <= 0 || elapsedS > ESTIMATE_ROUTE_MAX_S;
@@ -215,7 +226,7 @@ export function accuracyStats(samples) {
       baselineMedianKm: q(inBucket.map((x) => x.baselineKm), 0.5),
       byMethod: Object.fromEntries(['nat', 'route', 'track'].map((m) => {
         const xs = inBucket.filter((x) => x.method === m).map((x) => x.errorKm);
-        return [m, { n: xs.length, medianKm: q(xs, 0.5) }];
+        return [m, { n: xs.length, medianKm: q(xs, 0.5), p80Km: q(xs, 0.8) }];
       })),
     };
     lo = maxMin;
@@ -295,7 +306,7 @@ export function anchorFromExternalFix(prev, ext) {
  * @param {{lookupRoute?: (cs: string) => Promise<object|null>, now?: () => number, maxEntries?: number}} [options]
  */
 export function createEstimateTracker({
-  lookupRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 250, limitedWaitMs = 30_000, maxQueue = 3000,
+  lookupRoute = null, localRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 250, limitedWaitMs = 30_000, maxQueue = 3000,
   natTracks = () => [], windSamplerFor = null, onAccuracy = null, modelMaxAgeMs = 30 * 60_000,
 } = {}) {
   const last = new Map(); // hex → fix (videné v poslednom snímku)
@@ -306,6 +317,29 @@ export function createEstimateTracker({
   let externalApplied = 0;
   const queue = [];
   let pumping = false;
+
+  /**
+   * Trasa z lokálnej databázy (2026-10-12, vrsRoutes.js — VRS standing-data, bez dopytu navonok):
+   * nový odhad dostane cieľ hneď a do rady pre adsbdb ide len to, čo lokálna databáza nepozná.
+   */
+  function localRouteFor(fix) {
+    if (!localRoute || !fix?.cs) return null;
+    try { return localRoute(fix.cs, fix) || null; } catch { return null; }
+  }
+
+  /** Vlož nový odhad: lokálna trasa, inak rada pre adsbdb (ak je miesto), inak bez cieľa. */
+  function admit(hex, fix) {
+    const local = localRouteFor(fix);
+    if (local?.destination) {
+      if (nearDestination(fix, local)) return false; // pristáva
+      estimates.set(hex, { fix, route: local, routeState: 'done' });
+      return true;
+    }
+    const wantsRoute = Boolean(lookupRoute) && ROUTE_CALLSIGN_RE.test(fix.cs) && queue.length < maxQueue;
+    estimates.set(hex, { fix, route: null, routeState: wantsRoute ? 'queued' : 'none' });
+    if (wantsRoute) queue.push(hex);
+    return true;
+  }
 
   async function pump() {
     if (pumping || !lookupRoute) return;
@@ -395,10 +429,7 @@ export function createEstimateTracker({
         last.delete(hex);
         if (!qualifiesForEstimate(fix) || estimates.size >= maxEntries) continue;
         // Šetrne k adsbdb (bezplatné API): najviac maxQueue čakajúcich; ostatné letia podľa smeru.
-        const wantsRoute = Boolean(lookupRoute) && ROUTE_CALLSIGN_RE.test(fix.cs) && queue.length < maxQueue;
-        estimates.set(hex, { fix, route: null, routeState: wantsRoute ? 'queued' : 'none' });
-        if (wantsRoute) queue.push(hex);
-        added += 1;
+        if (admit(hex, fix)) added += 1;
       }
       if (queue.length) void pump();
       return added;
@@ -421,14 +452,32 @@ export function createEstimateTracker({
           continue;
         }
         // Bez cieľa by aj tak skončil: neplniť, čo je staršie než strop letu bez cieľa a nedá sa dohľadať.
+        const hasLocal = Boolean(localRouteFor(fix)?.destination);
         const wantsRoute = Boolean(lookupRoute) && ROUTE_CALLSIGN_RE.test(fix.cs) && queue.length < maxQueue;
-        if (!wantsRoute && nowMs - fix.tMs > ESTIMATE_NO_ROUTE_MAX_S * 1000) continue;
-        estimates.set(fix.hex, { fix, route: null, routeState: wantsRoute ? 'queued' : 'none' });
-        if (wantsRoute) queue.push(fix.hex);
-        added += 1;
+        if (!hasLocal && !wantsRoute && nowMs - fix.tMs > ESTIMATE_NO_ROUTE_MAX_S * 1000) continue;
+        if (admit(fix.hex, fix)) added += 1;
       }
       if (queue.length) void pump();
       return added;
+    },
+
+    /**
+     * Lokálna databáza trás sa práve načítala (po štarte servera ju sťahuje až po prvom plnení):
+     * doplň cieľ odhadom, ktoré ho nemajú. Vráti počet doplnených.
+     */
+    applyLocalRoutes() {
+      let applied = 0;
+      for (const [hex, entry] of estimates) {
+        if (entry.route?.destination) continue;
+        const local = localRouteFor(entry.fix);
+        if (!local?.destination) continue;
+        if (nearDestination(entry.fix, local)) { estimates.delete(hex); continue; }
+        entry.route = local;
+        entry.routeState = 'done';
+        entry.model = null; // model (trasa, vietor) sa prepočíta s cieľom
+        applied += 1;
+      }
+      return applied;
     },
 
     /**

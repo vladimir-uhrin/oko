@@ -19,6 +19,7 @@
  * is released IN PLACE (no flyTo), so the user keeps the context they were
  * looking at (product rule 2026-07-02).
  */
+import { clearOverlaySource, setOverlayEntries, setOverlaySourceVisible } from '../overlays/worldOverlay.js';
 import * as Cesium from 'cesium';
 import { aircraftIncludedInNearby } from './aircraftNearbyPolicy.js';
 import { registerPickOwner, unregisterPickOwner, isOwnedByOtherLayer, resolvePickId } from './pickRegistry.js';
@@ -3229,6 +3230,7 @@ function _fleetTick() {
     ? Math.min(COURSE_SLEW_DT_MAX_SEC, (nowMs - _lastFleetTickMs) / 1000)
     : 0.08;
   _lastFleetTickMs = nowMs;
+  _syncAnchorFixOverlay();
 
   _drainIrReloadQueue(); // bounded per-tick slice of any pending boost-flip reload
   if (_cockpitContactMode) _refreshCockpitNearContacts();
@@ -3795,6 +3797,76 @@ function _syncEstimateRing() {
       material: new Cesium.Color(0.86, 0.93, 1.0, 0.07),
       outline: true,
       outlineColor: new Cesium.Color(0.86, 0.93, 1.0, 0.55),
+    },
+  });
+  _syncAnchorFixMarker();
+}
+
+/**
+ * Bod skutočnej polohy, z ktorej odhad vychádza (2026-10-12, vlastník: „začni čo považuješ za
+ * zmysluplné" — návrh „mapa ukáže skutočnú polohu z HFDL"): pri sledovanom lietadle ukotvenom
+ * na HFDL/ADS-C (hfdlPositions.js) jantárový bod s časom — čo je fakt a čo dopočet, vidno hneď.
+ * Entita sa vytvorí raz, zobrazenie riadi CallbackProperty (bez alokácie v snímke).
+ */
+/**
+ * Popis bodu skutočnej polohy v prekrytí: mení sa len pri inom lietadle alebo novej polohe HFDL
+ * (porovnanie čísla a referencie — tik flotily nealokuje).
+ */
+function _syncAnchorFixOverlay() {
+  const fix = _estimatesVisible && _estimates.get(_trackedIcao)?.est ? _trackedAnchorFix() : null;
+  const hex = fix ? _trackedIcao : null;
+  const tMs = fix ? fix.tMs : 0;
+  if (hex === _anchorFixOverlayHex && tMs === _anchorFixOverlayT) return;
+  _anchorFixOverlayHex = hex;
+  _anchorFixOverlayT = tMs;
+  if (!fix) {
+    clearOverlaySource(ANCHOR_FIX_OVERLAY_SOURCE_ID);
+    setOverlaySourceVisible(ANCHOR_FIX_OVERLAY_SOURCE_ID, false);
+    return;
+  }
+  let clock = '';
+  try { clock = new Date(fix.tMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); } catch { clock = ''; }
+  setOverlayEntries(ANCHOR_FIX_OVERLAY_SOURCE_ID, [{
+    id: `anchor:${hex}`,
+    position: Cesium.Cartesian3.fromDegrees(fix.lon, fix.lat, Number.isFinite(fix.altM) ? fix.altM : 10000),
+    variant: 'label',
+    title: t(fix.via === 'adsc' ? 'map.anchor-fix-adsc' : 'map.anchor-fix-hfdl', { time: clock }),
+    accent: '#fbbf24',
+    interactive: false,
+    protected: true,
+    placement: 'above',
+    gapPx: 8,
+    anchorRadiusPx: 6,
+  }], { cohortLimit: 1, collisionCapacity: 4, moving: false });
+  setOverlaySourceVisible(ANCHOR_FIX_OVERLAY_SOURCE_ID, true);
+}
+let _anchorFixEntity = null;
+const _anchorFixScratch = new Cesium.Cartesian3();
+/** Popis bodu ide cez spoločné prekrytie (worldOverlay) — natívne popisy Cesia projekt nepoužíva. */
+const ANCHOR_FIX_OVERLAY_SOURCE_ID = 'flights-anchor-fix';
+let _anchorFixOverlayHex = null;
+let _anchorFixOverlayT = 0;
+function _trackedAnchorFix() {
+  const fix = _trackedIcao ? _estimates.get(_trackedIcao)?.fix : null;
+  return fix && (fix.via === 'hfdl' || fix.via === 'adsc') && Number.isFinite(fix.lat) && Number.isFinite(fix.lon) ? fix : null;
+}
+function _syncAnchorFixMarker() {
+  if (_anchorFixEntity || !_viewer) return;
+  const active = () => Boolean(_estimatesVisible && _trackedAnchorFix() && _estimates.get(_trackedIcao)?.est);
+  _anchorFixEntity = _viewer.entities.add({
+    id: `gev-trail:anchor-fix-${++_trailHeadSeq}`,
+    position: new Cesium.CallbackProperty(() => {
+      const fix = active() ? _trackedAnchorFix() : null;
+      if (!fix) return undefined;
+      return Cesium.Cartesian3.fromDegrees(fix.lon, fix.lat, Number.isFinite(fix.altM) ? fix.altM : 10000, Cesium.Ellipsoid.WGS84, _anchorFixScratch);
+    }, false),
+    point: {
+      show: new Cesium.CallbackProperty(active, false),
+      pixelSize: 9,
+      color: Cesium.Color.fromCssColorString('#fbbf24'),
+      outlineColor: Cesium.Color.fromCssColorString('#06101a'),
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
   });
 }

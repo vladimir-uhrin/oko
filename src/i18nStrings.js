@@ -118,6 +118,8 @@ export const EN_STRINGS = Object.freeze({
   'card.estimated-nat': 'NAT track {id}',
   'card.estimated-hfdl': 'from a real HFDL position',
   'card.estimated-adsc': 'from a real ADS-C position',
+  'map.anchor-fix-hfdl': 'real position (HFDL) {time}',
+  'map.anchor-fix-adsc': 'real position (ADS-C) {time}',
   'card.estimated-wind': 'wind {kmh} km/h',
   'hover.estimated': 'estimated position — aircraft out of coverage',
   // Mapa podľa vrstvy (2026-10-05, layerBasemap.js).
@@ -2719,6 +2721,8 @@ export const SK_STRINGS = Object.freeze({
   'card.estimated-nat': 'trať NAT {id}',
   'card.estimated-hfdl': 'zo skutočnej polohy HFDL',
   'card.estimated-adsc': 'zo skutočnej polohy ADS-C',
+  'map.anchor-fix-hfdl': 'skutočná poloha (HFDL) {time}',
+  'map.anchor-fix-adsc': 'skutočná poloha (ADS-C) {time}',
   'card.estimated-wind': 'vietor {kmh} km/h',
   'hover.estimated': 'odhadovaná poloha — lietadlo je mimo pokrytia',
   // Mapa podľa vrstvy (2026-10-05, layerBasemap.js).

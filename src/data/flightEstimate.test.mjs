@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  ESTIMATE_MISSING_AFTER_S, ESTIMATE_NO_ROUTE_MAX_S, createEstimateTracker, estimatePosition, fixFromState,
+  ESTIMATE_MISSING_AFTER_S, ESTIMATE_NO_ROUTE_MAX_S, calibratedUncertaintyKm, createEstimateTracker, estimatePosition, fixFromState,
   qualifiesForEstimate, uncertaintyKm,
 } from './flightEstimate.js';
 import { greatCircleKm } from './routePlausible.js';
@@ -49,7 +49,7 @@ test('so známym cieľom letí po veľkej kružnici k cieľu poslednou rýchlos�
   assert.ok(near.altM < fix.altM, 'posledných 200 km klesá');
 });
 
-test('bez cieľa (alebo s nezmyselnou trasou) letí v poslednom smere najviac 2 hodiny', () => {
+test('bez cieľa (alebo s nezmyselnou trasou) letí v poslednom smere najviac 1 hodinu (2026-10-12)', () => {
   const fix = fixFromState(state('3c6444', -10, 53), T0);
   const est = estimatePosition(fix, null, (T0 + 1800) * 1000);
   assert.equal(est.method, 'track');
@@ -194,4 +194,57 @@ test('vietor nabieha postupne: po 10 min takmer bez vplyvu, po 3 h naplno', () =
   const plain = (min) => estimatePosition(fix, null, (T0 + min * 60) * 1000).distanceKm;
   assert.ok(at(10) - plain(10) < 3, 'po 10 min rozdiel pár km');
   assert.ok(at(180) - plain(180) > 300, 'po 3 h +40 m/s takmer naplno');
+});
+
+test('strop bez cieľa je 1 h: po 59 min letí, po 61 min skončí', () => {
+  assert.equal(ESTIMATE_NO_ROUTE_MAX_S, 3600);
+  const fix = fixFromState(state('3c6444', -10, 53), T0);
+  assert.equal(estimatePosition(fix, null, (T0 + 59 * 60) * 1000).ended, false);
+  assert.equal(estimatePosition(fix, null, (T0 + 61 * 60) * 1000).ended, true);
+  // S cieľom letí ďalej.
+  assert.equal(estimatePosition(fix, ROUTE, (T0 + 3 * 3600) * 1000).ended, false);
+});
+
+test('lokálna trasa (VRS): cieľ hneď pri vzniku odhadu, adsbdb sa nevolá', () => {
+  const lookups = [];
+  const local = [];
+  const tracker = createEstimateTracker({
+    lookupGapMs: 0,
+    lookupRoute: async (cs) => { lookups.push(cs); return null; },
+    localRoute: (cs, fix) => { local.push([cs, Math.round(fix.lat)]); return cs === 'DLH400' ? ROUTE : null; },
+  });
+  const world = (extra = [], t = T0) => ({ time: t, states: [...Array.from({ length: 200 }, (_, i) => state(`f${String(i).padStart(5, '0')}`, 10 + i * 0.01, 48, { t, cs: 'XXX1' })), ...extra] });
+  tracker.ingest(world([state('3c6444', -10, 53), state('4ca1b2', -12, 54, { cs: 'EIN105' })]));
+  tracker.ingest(world([], T0 + ESTIMATE_MISSING_AFTER_S + 10));
+  const list = tracker.list((T0 + 300) * 1000);
+  const dlh = list.find((e) => e.hex === '3c6444');
+  assert.equal(dlh.route.destination.code, 'JFK', 'cieľ z lokálnej databázy');
+  assert.deepEqual(local.map((x) => x[0]).sort(), ['DLH400', 'EIN105']);
+  assert.ok(local.every(([, lat]) => lat >= 53), 'lokálna databáza dostane aj polohu (výber úseku)');
+  assert.equal(tracker.status().queue + lookups.length >= 1, true, 'neznámy znak ide do rady pre adsbdb');
+  assert.ok(!lookups.includes('DLH400'), 'pre známy znak sa adsbdb nevolá');
+});
+
+test('lokálna databáza načítaná neskôr: applyLocalRoutes doplní cieľ čakajúcim odhadom', () => {
+  let ready = false;
+  const tracker = createEstimateTracker({ localRoute: (cs) => (ready && cs === 'DLH400' ? ROUTE : null) });
+  tracker.seed([fixFromState(state('3c6444', -10, 53), T0)], (T0 + 60) * 1000);
+  assert.equal(tracker.applyLocalRoutes(), 0);
+  ready = true;
+  assert.equal(tracker.applyLocalRoutes(), 1);
+  assert.equal(tracker.list((T0 + 120) * 1000)[0].route.destination.code, 'JFK');
+  assert.equal(tracker.applyLocalRoutes(), 0, 'kto cieľ má, nemení sa');
+});
+
+test('kruh neistoty podľa spôsobu odhadu: s cieľom vlastný 80. percentil, inak spoločný', () => {
+  const calibration = [
+    { maxMin: 60, n: 500, p80Km: 150 },
+    { maxMin: 120, n: 4800, p80Km: 655, byMethod: { route: { n: 55, p80Km: 240 }, nat: { n: 3, p80Km: 90 }, track: { n: 4700, p80Km: 660 } } },
+  ];
+  assert.equal(calibratedUncertaintyKm(90 * 60, 1000, calibration, 'route'), 240);
+  assert.equal(calibratedUncertaintyKm(90 * 60, 1000, calibration, 'nat'), 655, 'málo meraní NAT = spoločný');
+  assert.equal(calibratedUncertaintyKm(90 * 60, 1000, calibration, 'track'), 660);
+  assert.equal(calibratedUncertaintyKm(90 * 60, 1000, calibration), 655);
+  const fix = fixFromState(state('3c6444', -10, 53), T0);
+  assert.equal(estimatePosition(fix, ROUTE, (T0 + 90 * 60) * 1000, null, calibration).uncertaintyKm, 240);
 });

@@ -35,6 +35,7 @@ import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
+import { createVrsRouteDb } from './src/data/vrsRoutes.js';
 import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
 import { createWindGridCache } from './src/data/windAloft.js';
@@ -340,11 +341,24 @@ function estimateCalibration() {
   if (Date.now() - _calibrationCache.at < 5 * 60_000 && _calibrationCache.value) return _calibrationCache.value;
   const since = Date.now() / 1000 - 7 * 86400;
   const stats = accuracyStats(_accuracySamples.filter((x) => x.t >= since));
-  _calibrationCache = { at: Date.now(), value: stats.map((b) => ({ maxMin: Number.isFinite(b.maxMin) ? b.maxMin : null, n: b.n, p80Km: b.p80Km })) };
+  _calibrationCache = {
+    at: Date.now(),
+    value: stats.map((b) => ({
+      maxMin: Number.isFinite(b.maxMin) ? b.maxMin : null, n: b.n, p80Km: b.p80Km,
+      // Kruh podľa spôsobu odhadu (2026-10-12, calibratedUncertaintyKm).
+      byMethod: Object.fromEntries(Object.entries(b.byMethod || {}).map(([m, v]) => [m, { n: v.n, p80Km: v.p80Km }])),
+    })),
+  };
   return _calibrationCache.value;
 }
+/**
+ * Trasy podľa volacieho znaku z VRS standing-data (2026-10-12, src/data/vrsRoutes.js, CC0): stiahne sa raz
+ * denne (~6 MB), cieľ odhadu sa nájde lokálne — adsbdb (2 dopyty/min na pozadí) ostáva záloha.
+ */
+let _vrsRoutes = null;
 const _estimateTracker = createEstimateTracker({
   lookupRoute: (cs) => (_adsbdbRouteLookup ? _adsbdbRouteLookup(cs) : Promise.resolve(null)),
+  localRoute: (cs, fix) => (_vrsRoutes ? _vrsRoutes.lookup(cs, fix) : null),
   natTracks: () => { void refreshNatTracks(); return _natTracks; },
   windSamplerFor: (altitudeM) => _windGrids.samplerFor(altitudeM),
   onAccuracy: recordAccuracy,
@@ -6625,11 +6639,25 @@ function flightHistoryProxy() {
         feed.start();
         server.httpServer.once('close', () => feed.stop());
       }
+      if (String(process.env.VRS_ROUTES || 'on').toLowerCase() !== 'off' && server.httpServer && !_vrsRoutes) {
+        _vrsRoutes = createVrsRouteDb({
+          cacheFile: path.join(__dirname, '.gev-cache', 'vrs-routes', 'standing-data.tar.gz'),
+          log: (msg) => console.warn(msg),
+          onLoaded: () => {
+            const n = _estimateTracker.applyLocalRoutes();
+            if (n) console.log(`[vrs-routes] doplnený cieľ ${n} odhadom`);
+          },
+        });
+        _vrsRoutes.start();
+        const vrs = _vrsRoutes;
+        server.httpServer.once('close', () => vrs.stop());
+      }
       // Stav HFDL (2026-10-11): sťahovanie, posledná dávka, posledné preukotvené polohy (CC0 dáta).
       server.middlewares.use('/api/flights/hfdl', (req, res) => {
         const body = JSON.stringify({
           now: Date.now(), attribution: HFDL_ATTRIBUTION,
           feed: _hfdlFeed ? _hfdlFeed.status() : null, lastBatch: _hfdlLastBatch,
+          vrsRoutes: _vrsRoutes ? _vrsRoutes.status() : null,
           estimator: _estimateTracker.status(), recent: _hfdlRecent.slice(-200),
         });
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'public, max-age=60' });
