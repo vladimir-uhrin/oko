@@ -11,10 +11,22 @@ import { fileURLToPath } from 'node:url';
 import { aftershocksOf, quakeOf, quakeScenario } from '../src/data/quakeVideo.js';
 import { quakeFactsLine, quakeNewsFacts, quakeNewsQuery } from '../src/data/quakeNews.js';
 import { commonsSearchUrl, pickCommonsMedia, shakemapImageUrl } from '../src/data/quakeMedia.js';
+import { createRequire } from 'node:module';
+import { shakemapOverlay } from './lib/quakeAssets.mjs';
 import { newsUrl, parseTrustedList } from '../src/data/eventNews.js';
 import { bingNewsUrl, parseBingNewsRss } from '../src/data/fireNews.js';
+import { SAT, SAT_CATALOG_URL, SAT_PROCESS_URL, SAT_TOKEN_URL, catalogBody, clearestScene, processBody, satDay, satelliteBbox, satelliteTown } from '../src/data/quakeSatellite.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sharp = createRequire(path.join(root, 'package.json'))('sharp');
+// Kľúče z .env (CDSE pre satelit) — rovnako ako make-event-video.mjs; premenné prostredia (služba) majú prednosť.
+const env = { ...process.env };
+try {
+  for (const line of fs.readFileSync(path.join(root, '.env'), 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+    if (m && env[m[1]] === undefined) env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  }
+} catch { /* bez .env */ }
 const args = process.argv.slice(2);
 const flag = (name, fallback = null) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] ? args[i + 1] : fallback; };
 const id = flag('--event');
@@ -51,11 +63,12 @@ let facts = flag('--facts') ? JSON.parse(fs.readFileSync(path.resolve(flag('--fa
 if (!facts && !args.includes('--no-news')) {
   try {
     const trusted = parseTrustedList(JSON.parse(fs.readFileSync(path.join(root, 'src', 'data', 'local_data', 'events', 'trusted-news.json'), 'utf8')));
-    // GDELT púšťa jeden dopyt za ~5 s (429 pri súbehu s inou službou) — skúsi znova po chvíli.
+    // GDELT púšťa jeden dopyt za ~5 s (429 pri súbehu s inou službou) — skúsi znova po chvíli; keď nevyjde,
+    // ostane Bing (2026-10-10: 429 od GDELT predtým zahodilo aj články z Bingu).
     let res = null;
     for (let attempt = 0; attempt < 4 && !res; attempt += 1) {
       try { res = await getJson(newsUrl(quakeNewsQuery(countryEn), { fromMs: main.time, toMs: Date.now() })); } catch (e) {
-        if (!/HTTP 429/.test(e.message) || attempt === 3) throw e;
+        if (!/HTTP 429/.test(e.message) || attempt === 3) { console.log(`[quake] GDELT nedostupný: ${e.message.slice(-40)}`); break; }
         await new Promise((r) => setTimeout(r, 8000 * (attempt + 1)));
       }
     }
@@ -70,7 +83,7 @@ if (!facts && !args.includes('--no-news')) {
     const found = quakeNewsFacts([...(res?.articles || []), ...bing], trusted, { afterMs: main.time });
     console.log(`[quake] Bing News: ${bing.length} článkov`);
     facts = quakeFactsLine(found);
-    console.log(`[quake] správy: ${(res.articles || []).length} článkov, overené: ${found ? JSON.stringify({ killed: found.killed, injured: found.injured, noDeaths: found.noDeaths, sources: found.sources.map((s) => s.name) }) : 'nič'}`);
+    console.log(`[quake] správy: GDELT ${(res?.articles || []).length} článkov, overené: ${found ? JSON.stringify({ killed: found.killed, injured: found.injured, noDeaths: found.noDeaths, sources: found.sources.map((s) => s.name) }) : 'nič'}`);
   } catch (e) { console.log(`[quake] správy nedostupné: ${e.message}`); }
 }
 
@@ -83,6 +96,11 @@ const media = { shakemap: null, photos: [], video: null };
 if (!args.includes('--no-media')) {
   const sm = shakemapImageUrl(detail);
   if (sm) { try { media.shakemap = { file: await download(sm, path.join(outDir, 'shakemap.jpg'), /^image\//) }; } catch (e) { console.log(`[quake] ShakeMap: ${e.message}`); } }
+  // Vrstva na glóbus: PNG intenzity + world file → súradnice; slabé otrasy (I–III) priehľadné, ostatné polopriehľadné.
+  try {
+    media.overlay = await shakemapOverlay(detail, outDir);
+    console.log(`[quake] vrstva otrasov: ${media.overlay ? media.overlay.bbox.map((v) => v.toFixed(2)).join(', ') : 'nie je'}`);
+  } catch (e) { console.log(`[quake] vrstva otrasov: ${e.message}`); }
   try {
     const picked = pickCommonsMedia(await getJson(commonsSearchUrl(countryEn, new Date(main.time).getUTCFullYear())), { countryEn, afterMs: main.time });
     for (const [k, p] of picked.entries()) {
@@ -98,6 +116,36 @@ if (!args.includes('--no-media')) {
     }
     console.log(`[quake] Commons: ${picked.length} vhodných, fotky ${media.photos.length}, video ${media.video ? 'áno' : 'nie'}`);
   } catch (e) { console.log(`[quake] Commons nedostupné: ${e.message}`); }
+}
+
+// Satelit pred a po (Sentinel-2, CDSE): len keď po otrase už existuje dosť jasná snímka.
+const town = satelliteTown(pager?.cities);
+if (!args.includes('--no-media') && town && env.CDSE_CLIENT_ID && env.CDSE_CLIENT_SECRET) {
+  try {
+    const tokenRes = await fetch(SAT_TOKEN_URL, { method: 'POST', body: new URLSearchParams({ grant_type: 'client_credentials', client_id: env.CDSE_CLIENT_ID, client_secret: env.CDSE_CLIENT_SECRET }), signal: AbortSignal.timeout(30_000) });
+    if (!tokenRes.ok) throw new Error(`token HTTP ${tokenRes.status}`);
+    const auth = { authorization: `Bearer ${(await tokenRes.json()).access_token}`, 'content-type': 'application/json' };
+    const bbox = satelliteBbox(town);
+    const scene = async (from, to) => clearestScene(await (await fetch(SAT_CATALOG_URL, { method: 'POST', headers: auth, body: JSON.stringify(catalogBody(bbox, from, to)), signal: AbortSignal.timeout(60_000) })).json());
+    const quakeIso = new Date(main.time).toISOString();
+    const after = await scene(quakeIso, new Date().toISOString());
+    const before = after ? await scene(new Date(main.time - SAT.beforeDays * 86_400_000).toISOString(), quakeIso) : null;
+    if (after && before) {
+      const files = [];
+      for (const [label, s] of [['PRED', before], ['PO', after]]) {
+        const r = await fetch(SAT_PROCESS_URL, { method: 'POST', headers: { ...auth, accept: 'image/png' }, body: JSON.stringify(processBody(bbox, s.at)), signal: AbortSignal.timeout(120_000) });
+        if (!r.ok) throw new Error(`snímka ${label}: HTTP ${r.status}`);
+        const png = Buffer.from(await r.arrayBuffer());
+        const tag = `<svg xmlns="http://www.w3.org/2000/svg" width="${SAT.size}" height="${SAT.size}"><rect x="28" y="28" width="${label === 'PRED' ? 330 : 280}" height="76" rx="12" fill="rgba(5,14,22,0.86)"/>`
+          + `<text x="50" y="80" font-family="Inter, Arial, sans-serif" font-size="44" font-weight="800" fill="${label === 'PRED' ? '#ffffff' : '#ffb020'}">${label} · ${satDay(s.at)}</text></svg>`;
+        const file = path.join(outDir, `satelit-${label.toLowerCase()}.jpg`);
+        await sharp(png).flatten({ background: '#0b1620' }).composite([{ input: Buffer.from(tag) }]).jpeg({ quality: 90 }).toFile(file);
+        files.push(file);
+      }
+      media.satellite = { files, town: town.name, year: new Date(after.at).getUTCFullYear() };
+    }
+    console.log(`[quake] satelit ${town.name}: ${after ? `po ${after.at.slice(0, 10)} (${Math.round(after.cloud)} % mrakov)` : 'po otrase ešte žiadna snímka'}${before ? `, pred ${before.at.slice(0, 10)}` : ''}`);
+  } catch (e) { console.log(`[quake] satelit: ${e.message}`); }
 }
 
 const scenario = quakeScenario({ main, aftershocks, pager, facts, media });

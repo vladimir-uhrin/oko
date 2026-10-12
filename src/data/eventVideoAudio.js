@@ -49,7 +49,7 @@ export function audioGraph({ placement, totalS, music, tail = '' }, o = AUDIO_DE
   const T = totalS.toFixed(3);
   const parts = placement.map((p, i) => `[${i}:a]aresample=48000,aformat=channel_layouts=mono,adelay=${Math.round(p.start * 1000)}:all=1[v${i}]`);
   const voiceMix = `${placement.map((_, i) => `[v${i}]`).join('')}amix=inputs=${n}:normalize=0:duration=longest,apad=whole_dur=${T},atrim=0:${T},aformat=channel_layouts=stereo,asplit=2[vo][vsc]`;
-  if (!music) return [...parts, voiceMix.replace('asplit=2[vo][vsc]', `[mix]${tail}`)].join(';');
+  if (!music) return [...parts, voiceMix.replace(',asplit=2[vo][vsc]', `[mix]${tail}`)].join(';');
   const segs = music.segments;
   const segChain = segs.map(([a, b], k) => `[ms${k}]atrim=${a}${b === null ? '' : `:${b}`},asetpts=PTS-STARTPTS[mg${k}]`).join(';');
   let xf = '[mg0]';

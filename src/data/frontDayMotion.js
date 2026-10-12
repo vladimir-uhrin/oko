@@ -12,6 +12,7 @@
 import { VIDEO_BRAND, VIDEO_SVG } from './eventVideoHud.js';
 import { MAP_SOURCE, directionSk } from './frontWeekNarration.js';
 import { FRONT_DAY_FORMAT } from './frontDayVideo.js';
+import { spanWords } from './frontDayHud.js';
 
 const { MONO, SANS, ACCENT, esc, f1, wordmark, logoAt, creditLine } = VIDEO_SVG;
 const NBSP = ' ';
@@ -102,7 +103,7 @@ export function shotStat(model, lineId, shot = {}) {
     const km = Math.round(ru ? m.change.ruKm2 : m.change.uaKm2);
     const d = (m.change.directions || []).find((x) => (ru ? x.ruKm2 : x.uaKm2) >= 1);
     return { kicker: d ? directionSk(d.id).title.toUpperCase() : 'MAPA FRONTU', value: km, prefix: '+', suffix: `${NBSP}km²`,
-      unit: ru ? 'OBSADIL RUSKÝ AGRESOR' : 'OSLOBODILA UKRAJINA', sub: [`${(m.change.spanDays ?? 1) > 1 ? `za ${m.change.spanDays} dni` : 'za deň'} · mapa ${MAP_SOURCE.site}`], color: ru ? MOTION.red : '#5fb3ff' };
+      unit: ru ? 'OBSADIL RUSKÝ AGRESOR' : 'OSLOBODILA UKRAJINA', sub: [`${spanWords(m.change.spanDays)} · mapa ${MAP_SOURCE.site}`], color: ru ? MOTION.red : '#5fb3ff' };
   }
   if (lineId === 'air' && m.air?.count) {
     const kinds = { drones: 'drony', missiles: 'rakety', bombs: 'riadené bomby' };
@@ -122,17 +123,23 @@ export function shotStat(model, lineId, shot = {}) {
   }
   const spot = shot.kind === 'spot' ? m.spots?.[shot.sceneId] : null;
   // Záber scenára môže niesť aj veľké číslo (zemetrasenie: magnitúda 7,7 s desatinou, počet dotrasov).
-  if (spot) return { kicker: String(spot.tag || '').toUpperCase(), title: spot.title || '', sub: (spot.rows || []).slice(0, 3), color: spot.color || '#ffffff',
+  if (spot) return { kicker: String(spot.tag || '').toUpperCase(), title: spot.title || '', sub: (spot.rows || []).slice(0, 3), color: spot.color || '#ffffff', ...(Array.isArray(spot.legend) ? { legend: spot.legend } : {}),
     ...(Number.isFinite(spot.value) ? { value: spot.value, decimals: spot.decimals || 0, unit: spot.unit || '', prefix: spot.prefix || '', suffix: spot.suffix || '' } : {}) };
   return null;
 }
 
 /** Zvukové efekty k obrazu: šum pri každom strihu, úder pri háčiku a pri nábehu čísla. Pure. */
-export function motionEvents(shots, placement) {
+export function motionEvents(shots, placement, spots = null) {
   const out = [{ t: 0.04, kind: 'impact' }];
   (shots || []).forEach((s, i) => {
     if (i > 0) out.push({ t: Math.max(0, s.start - 0.18), kind: 'whoosh' });
     if (s.kind === 'closing') out.push({ t: s.start + 0.05, kind: 'impact' });
+    // Číslo záberu scenára: desatinné (magnitúda 7,7) naskočí celé s úderom, celé číslo s pípnutím.
+    const spot = s.kind === 'spot' ? spots?.[s.sceneId] : null;
+    if (Number.isFinite(spot?.value)) {
+      const first = (placement || []).find((p) => p.shot === s.id);
+      out.push({ t: (first ? first.start : s.start) + 0.1, kind: spot.decimals ? 'impact' : 'pop' });
+    }
   });
   for (const p of placement || []) if (['clashes', 'top', 'change', 'air', 'strikes', 'strike'].includes(p.id)) out.push({ t: p.start + 0.1, kind: 'pop' });
   return out.sort((a, b) => a.t - b.t);
@@ -168,7 +175,7 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
     out.push(creditLine(W / 2, 1060, 20, 'middle'));
     const src = model?.sources || [`Strety a údery: Generálny štáb Ukrajiny (údaje jednej strany)`, `Mapa a výpočet zmeny: ${MAP_SOURCE.site} · © OpenStreetMap`, model?.clips?.find((c) => c?.aftermath)?.sources?.[0] || 'Zábery: ArmyInform, Ministerstvo obrany Ukrajiny (CC BY 4.0)'];
     // Hudba s licenciou CC BY musí mať autora aj vo videu (model.musicCredit z knižnice skladieb).
-    [...src.slice(0, 4), ...(model?.musicCredit ? [model.musicCredit] : [])].forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));
+    [...src.slice(0, 5), ...(model?.musicCredit ? [model.musicCredit] : [])].forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));
     out.push('</g></svg>');
     return out.join('');
   }
@@ -176,9 +183,17 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
   out.push(`<rect width="${W}" height="820" fill="url(#mt)"/><rect y="${H - 760}" width="${W}" height="760" fill="url(#mb)"/>`);
   // Malá značka vľavo hore (nie lišta).
   out.push(logo(36, MOTION.brandY, 50));
-  out.push(wordmark(96, MOTION.brandY + 38, 34));
+  // Názov webu je viditeľný na každej snímke (vlastník 2026-10-11: „názov webu musí byť vždy viditeľný"),
+  // nie len na koncovej karte — značka vľavo hore nesie adresu namiesto samotného „OKO".
+  out.push(`<text x="96" y="${MOTION.brandY + 37}" font-family="${MONO}" font-size="34" font-weight="700" letter-spacing="1" fill="#ffffff" ${outline(7)}>${esc(VIDEO_BRAND.domain.replace(/\.sk$/, ''))}<tspan fill="${ACCENT}">.sk</tspan></text>`);
 
-  if (shot.kind === 'opening' && hook) {
+  // Háčik nad prvým záberom (súhrn týždňa: fotka z miesta útoku na celú obrazovku, `model.hookOverClip`).
+  const hookOverClip = i === 0 && shot.kind === 'clip' && model?.hookOverClip;
+  if ((shot.kind === 'opening' || hookOverClip) && hook) {
+    if (hookOverClip) {
+      const clip = model?.clips?.[shot.clipIndex] || {};
+      if (clip.credit) out.push(`<text x="48" y="${MOTION.creditY}" font-size="22" fill="rgba(240,248,255,0.85)" ${outline(5)}>${esc(clip.credit)}</text>`);
+    }
     // ── háčik: riadky naskakujú od prvej snímky ──
     const tag = hook.tag || '';
     const rows = (hook.lines || []).slice(0, 3);
@@ -219,7 +234,8 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
       out.push(`<text x="48" y="${y0 + 30}" font-family="${MONO}" font-size="28" font-weight="700" letter-spacing="4" fill="${ACCENT}" ${outline(6)}>${esc(stat.kicker)}</text>`);
       let y = y0 + 40;
       if (Number.isFinite(stat.value)) {
-        const raw = stat.value * easeOut(since / MOTION.countS);
+        // Desatinné číslo (magnitúda) sa nepočíta od nuly — „7,6" na chvíľu by klamalo; naskočí celé (úder zvuku).
+        const raw = stat.decimals ? stat.value : stat.value * easeOut(since / MOTION.countS);
         const shown = stat.decimals ? raw.toFixed(stat.decimals).replace('.', ',') : group(Math.round(raw));
         y += 190;
         out.push(`<text x="40" y="${y}" font-size="200" font-weight="900" fill="${stat.color || '#ffffff'}" ${outline(16)}>${esc(`${stat.prefix || ''}${shown}${stat.suffix || ''}`)}</text>`);
@@ -229,6 +245,13 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
       }
       if (stat.unit) { y += 70; out.push(`<text x="48" y="${y}" font-size="56" font-weight="900" fill="#ffffff" ${outline(10)}>${esc(stat.unit)}</text>`); }
       (stat.sub || []).forEach((s, k) => { y += k ? 40 : 54; out.push(`<text x="48" y="${y}" font-size="${k ? 28 : 32}" font-weight="${k ? 500 : 700}" fill="${k ? 'rgba(232,240,246,0.9)' : '#f2fbff'}" ${outline(6)}>${esc(s)}</text>`); });
+      // Legenda stupnice (mapa otrasov MMI): farebné políčka s popisom pod textom záberu.
+      if (stat.legend?.length) {
+        y += 30; const cw = 104;
+        stat.legend.forEach((it, k) => { const x = 48 + k * (cw + 8);
+          out.push(`<rect x="${x}" y="${y}" width="${cw}" height="44" rx="8" fill="${it.color}" stroke="rgba(0,0,0,0.55)" stroke-width="2"/>`);
+          out.push(`<text x="${x + cw / 2}" y="${y + 31}" text-anchor="middle" font-size="24" font-weight="800" fill="#0b1620">${esc(it.label)}</text>`); });
+      }
       out.push('</g>');
     }
   }

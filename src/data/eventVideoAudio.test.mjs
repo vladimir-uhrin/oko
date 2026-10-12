@@ -138,3 +138,10 @@ test('hudba na konci plynulo stíchne (2026-10-10: koniec pôsobil odseknuto), n
   assert.ok(AUDIO_DEFAULTS.fadeOutS >= 1.2 && AUDIO_DEFAULTS.fadeOutS <= 2.5);
   assert.ok(audioGraph({ placement: [{ start: 0 }], totalS: 1, music: musicPlan({ durationS: 45, loop: { from: 8, to: 30 } }, 1) }).includes('afade=t=out:st=0.000'));
 });
+
+test('bez hudby: graf bez prázdneho filtra (2026-10-11: ffmpeg „No such filter" pri súhrne týždňa bez hudby)', async () => {
+  const { audioGraph } = await import('./eventVideoAudio.js');
+  const g = audioGraph({ placement: [{ start: 0 }, { start: 2 }], totalS: 5, music: null, tail: ';[mix]loudnorm[o]' });
+  assert.ok(!/,\[mix\]/.test(g) && !/,,/.test(g), g);
+  assert.ok(g.includes('aformat=channel_layouts=stereo[mix];[mix]loudnorm[o]'), g);
+});

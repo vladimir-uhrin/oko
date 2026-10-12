@@ -4,6 +4,7 @@
 // následkoch (len od aspoň dvoch médií, inak sa o obetiach nehovorí). Mapa: reliéf ASTER (bez kľúča). Pure.
 import { spokenNumber } from './eventSpeech.js';
 import { MAP_SOURCE } from './frontWeekNarration.js';
+import { MMI_LEGEND, mmiRoman } from './quakeMedia.js';
 
 const NBSP = ' ';
 /** Krajiny v názve miesta USGS („12 km WSW of Pitaloza Arriba, Panama") — slovensky: nom., akuz., lokál. */
@@ -56,7 +57,7 @@ export function quakeCountry(place) {
 export function quakeOf(feature) {
   const p = feature?.properties || {}; const c = feature?.geometry?.coordinates || [];
   return { id: feature?.id, mag: Number(p.mag), magType: p.magType || null, time: Number(p.time), lon: Number(c[0]), lat: Number(c[1]), depthKm: Number(c[2]),
-    place: p.place || '', url: p.url || null, alert: p.alert || null, tsunami: Boolean(p.tsunami), felt: Number(p.felt) || 0 };
+    place: p.place || '', url: p.url || null, mmi: Number.isFinite(Number(p.mmi)) && p.mmi !== null ? Number(p.mmi) : null, alert: p.alert || null, tsunami: Boolean(p.tsunami), felt: Number(p.felt) || 0 };
 }
 /** Dotrasy hlavného otrasu z výpisu USGS (feed): po ňom, blízko, od AFTERSHOCK.minMag. Pure. */
 export function aftershocksOf(main, features, o = AFTERSHOCK) {
@@ -118,7 +119,7 @@ export function quakeScenario({ main, aftershocks = [], pager = null, facts = nu
   lines.push({ id: 'epi', shot: 'spot:epi', spoken: epiText('spoken'), caption: epiText('caption') });
   spots.epi = { tag: 'ZEMETRASENIE · USGS', value: Math.round(main.mag * 10) / 10, decimals: 1, unit: 'MAGNITÚDA', color: '#ff6b78',
     rows: [`hĺbka ${depth}${NBSP}km · ${dayMonth(main.time)} ${utcTime(main.time)}`, main.tsunami ? 'USGS: možnosť cunami' : 'Geologická služba USA'] };
-  const epiPin = pin({ lon: epi.lon, lat: epi.lat, label: `EPICENTRUM · M${NBSP}${m.caption}`, color: '#ff3b3b', shots: ['epi', 'shake', 'after'] });
+  const epiPin = pin({ lon: epi.lon, lat: epi.lat, label: `EPICENTRUM · M${NBSP}${m.caption}`, color: '#ff3b3b', shots: ['epi', 'shakemap', 'shake', 'after'] });
   const epiPoints = [epi];
   if (capital && capKm >= 20) { pin({ lon: capital.lon, lat: capital.lat, label: capital.name, color: '#4fd1ff', shots: ['epi'] }); epiPoints.push(capital); }
   cameras.epi = cameraOver(epiPoints, { minM: 380_000, k: 3200 });
@@ -126,11 +127,28 @@ export function quakeScenario({ main, aftershocks = [], pager = null, facts = nu
   // Zábery (clip:<i> v poradí `clips`): mapa otrasov USGS, fotky alebo video z miesta (Commons, s autorom).
   const clips = [];
   const addClip = (c) => { clips.push({ inset: false, keepCaptions: true, sourceLines: [], placeName: '', ...c }); return clips.length - 1; };
-  if (media?.shakemap?.file) {
+  // Mapa otrasov: priamo na glóbuse (vrstva intenzity USGS so súradnicami) s legendou MMI; bez nej obrázok ShakeMap.
+  let overlay = null;
+  if (media?.overlay?.file && Array.isArray(media.overlay.bbox)) {
+    overlay = { file: media.overlay.file, bbox: media.overlay.bbox, shots: ['shakemap'] };
+    const top = Number.isFinite(main.mmi) ? mmiRoman(main.mmi) : null;
+    const text = 'Mapa USGS ukazuje, kde sa zem triasla najsilnejšie.';
+    lines.push({ id: 'shakemap', shot: 'spot:shakemap', spoken: text, caption: text });
+    spots.shakemap = { tag: 'MAPA OTRASOV · USGS SHAKEMAP', title: top ? `INTENZITA AŽ ${top}` : 'SILA OTRASOV', rows: ['stupnica MMI · odhad USGS'], legend: MMI_LEGEND };
+    cameras.shakemap = { lon: epi.lon, lat: epi.lat + 0.9, heightM: 900_000, pitchDeg: -88, headingDeg: 0 };
+  } else if (media?.shakemap?.file) {
     const k = addClip({ kind: 'images', files: [media.shakemap.file], captionSk: 'Mapa otrasov USGS', kicker: 'MAPA OTRASOV · USGS',
       credit: 'ShakeMap: USGS · verejná doména', sources: ['Mapa otrasov: USGS ShakeMap'], fixedStart: 0 });
     const text = 'Mapa USGS ukazuje, kde sa zem triasla najsilnejšie.';
     lines.push({ id: 'shakemap', shot: `clip:${k}`, spoken: text, caption: text });
+  }
+  // Satelit Sentinel-2 pred a po (len keď existuje snímka po otrase — make-quake-video.mjs).
+  if (media?.satellite?.files?.length === 2) {
+    const town = media.satellite.town;
+    const k = addClip({ kind: 'images', files: media.satellite.files, captionSk: `Satelit nad mestom ${town}`, kicker: `SATELIT · ${String(town).toUpperCase()}`,
+      credit: 'Copernicus Sentinel-2 · ESA', sources: [`Satelit: upravené údaje Copernicus Sentinel (${media.satellite.year})`], fixedStart: 0 });
+    const text = `Satelit Sentinel-2 ukazuje mesto ${town} pred zemetrasením a po ňom.`;
+    lines.push({ id: 'satellite', shot: `clip:${k}`, spoken: text, caption: text, names: true });
   }
   let sceneClip = null;
   if (media?.video?.file) sceneClip = addClip({ kind: 'video', file: media.video.file, captionSk: 'Záber z miesta', kicker: `${(country?.nom || '').toUpperCase()} · ZÁBERY Z MIESTA`.replace(/^ · /, ''),
@@ -186,11 +204,11 @@ export function quakeScenario({ main, aftershocks = [], pager = null, facts = nu
     spoken: `Zemetrasenia vo svete naživo na ${MAP_SOURCE.spokenSite}.`, caption: `Zemetrasenia vo svete naživo na ${MAP_SOURCE.site}.` });
 
   const newsNames = (facts?.sources || []).map((s) => s.name);
-  const sources = ['Údaje: USGS (verejná doména), model PAGER', newsNames.length ? `Správy: ${newsNames.slice(0, 3).join(', ')}` : null,
-    sceneClip !== null ? clips[sceneClip].sources[0] : null, 'Mapa: NASA GIBS · ASTER GDEM (METI/NASA)'].filter(Boolean);
+  const sources = [overlay ? 'Údaje a mapa otrasov: USGS (verejná doména), PAGER' : 'Údaje: USGS (verejná doména), model PAGER', newsNames.length ? `Správy: ${newsNames.slice(0, 3).join(', ')}` : null,
+    sceneClip !== null ? clips[sceneClip].sources[0] : null, clips.find((c) => /Copernicus/.test(c.credit))?.sources[0] || null, 'Mapa: NASA GIBS · ASTER GDEM (METI/NASA)'].filter(Boolean);
   const post = quakePostText({ main, country, m, depth, capital, capKm, people, aftershocks, pager, facts, clips });
   return { name: `zemetrasenie-${(country?.nom || 'svet').toLowerCase().replace(/\s+/g, '-')}-${day}`, story: 'quake', map: 'aster-relief',
-    model: { day, spots, pins, sources, endLine: 'Zemetrasenia naživo', epiPin }, media: clips, lines, hook, cameras, post };
+    model: { day, spots, pins, sources, endLine: 'Zemetrasenia naživo', epiPin }, media: clips, overlay, lines, hook, cameras, post };
 }
 
 /** Text príspevku: háčik, údaje USGS, odhad (označený ako odhad), správy so zdrojmi, odkazy. Pure. */
@@ -203,6 +221,8 @@ export function quakePostText({ main, country, m, depth, capital, capKm, people,
   if (pager?.economicLevel) out.push('', `Odhad USGS PAGER: ${pager.economicLevel === 'red' ? 'červený' : pager.economicLevel === 'orange' ? 'oranžový' : pager.economicLevel === 'yellow' ? 'žltý' : 'zelený'} stupeň pre ekonomické škody — ide o model, nie o hlásenie úradov.`);
   // Zábery z Commons: autor, licencia a odkaz na súbor (podmienka CC BY / CC BY-SA).
   const credits = clips.filter((c) => c.kind === 'video' || (c.pages && c.pages.length)).flatMap((c) => (c.kind === 'video' ? [`${c.credit}: ${c.page || ''}`.replace(/: $/, '')] : c.sources.map((src, i) => `${src}${c.pages[i] ? `: ${c.pages[i]}` : ''}`)));
+  const sat = clips.find((c) => /Copernicus/.test(c.credit));
+  if (sat) credits.push(`${sat.captionSk} pred a po zemetrasení: ${sat.sources[0]}`);
   if (credits.length) out.push('', ...credits);
   if (main.url) out.push('', `USGS: ${main.url}`);
   out.push('', `Zemetrasenia vo svete naživo: https://${MAP_SOURCE.site}`, '', `#zemetrasenie${country ? ` #${country.nom.replace(/\s+/g, '')}` : ''} #OKO`);

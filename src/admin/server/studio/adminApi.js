@@ -12,7 +12,7 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     '/drafts/:id/image': ['GET'], '/drafts/:id/video': ['GET'], '/drafts/:id/hook': ['GET'], '/drafts/:id/render': ['POST'], '/drafts/:id/approve': ['POST'], '/drafts/:id/discard': ['POST'], '/drafts/:id/restore': ['POST'],
     '/drafts/:id/publish': ['POST'], '/drafts/:id/shared': ['POST'], '/drafts/:id/schedule': ['POST'],
     '/drafts/:id/source': ['GET'], '/calendar': ['GET'], '/insights': ['GET'], '/insights/refresh': ['POST'],
-    '/front-week': ['GET', 'POST'], '/front-day': ['GET', 'POST'], '/quake': ['GET', 'POST'], '/best-times': ['GET'] }[route];
+    '/front-week': ['GET', 'POST'], '/front-day': ['GET', 'POST'], '/quake': ['GET', 'POST'], '/week-summary': ['GET', 'POST'], '/best-times': ['GET'] }[route];
   if (!methods) throw fail('not_found', 404);
   if (!methods.includes(req.method)) { res.setHeader('Allow', methods.join(', ')); throw fail('method_not_allowed', 405); }
   const id = draftRoute?.[1];
@@ -31,6 +31,7 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     if (route === '/front-week') return json(res, 200, { status: studio.frontWeekStatus(), settings: studio.settings().frontWeek });
     if (route === '/front-day') return json(res, 200, { status: studio.frontDayStatus(), settings: studio.settings().frontDay });
     if (route === '/quake') return json(res, 200, { status: studio.quakeStatus(), settings: studio.settings().quake });
+    if (route === '/week-summary') return json(res, 200, { status: studio.weekSummaryStatus(), settings: studio.settings().weekSummary });
     if (route === '/drafts/:id/source') {
       const file = studio.sourceVideoPath(id);
       if (!file) throw fail('video_not_ready', 404);
@@ -101,6 +102,14 @@ export async function handleStudioAdmin(pathname, req, res, ctx, { json, readJso
     if (status.running) throw fail('front_day_running', 409);
     studio.runFrontDay({ trigger: 'manual' }).catch(() => {});
     return json(res, 202, { status: studio.frontDayStatus() });
+  }
+  if (route === '/week-summary') {
+    // Ručne: súhrn týždňa hneď (beží na pozadí ~45–60 min), stav cez GET /week-summary.
+    if (Object.keys(body).length) throw fail('invalid_input');
+    if (studio.weekSummaryStatus().running) throw fail('week_summary_running', 409);
+    audit('studio_week_summary', 'týždeň');
+    studio.runWeekSummary({ trigger: 'manual' }).catch(() => {});
+    return json(res, 202, { status: studio.weekSummaryStatus() });
   }
   if (route === '/quake') {
     // Ručne: video k zemetraseniu podľa ID USGS (napr. us6000u18k); beží na pozadí ~15 min, stav cez GET /quake.

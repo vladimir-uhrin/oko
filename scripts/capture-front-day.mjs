@@ -50,6 +50,9 @@ console.log(`[front-day] ${job.model.day}: ${plan.durationS.toFixed(1)} s, ${pla
 
 const c0 = plan.at(0).camera;
 const hash = `v=2&l=&lat=${c0.lat.toFixed(3)}&lon=${c0.lon.toFixed(3)}&alt=${Math.round(c0.heightM)}&heading=0&pitch=${Math.round(c0.pitchDeg)}&roll=0&style=normal&bloom=0&sharpen=0&si=49&hud=tactical&hv=0&dm=OFF&sc=0&map=${job.map || 'karta'}`;
+// Vrstva scenára (mapa otrasov USGS) ako data URL — stránka z dev servera lokálny súbor nevidí.
+const overlayArg = job.overlay?.file && fs.existsSync(job.overlay.file)
+  ? { bbox: job.overlay.bbox, dataUrl: `data:image/png;base64,${fs.readFileSync(job.overlay.file).toString('base64')}` } : null;
 const launchBrowser = () => puppeteer.launch({
   headless: true, pipe: true, protocolTimeout: 300_000,
   args: ['--no-sandbox', `--window-size=${W},${H}`, '--enable-gpu', '--use-angle=d3d11', '--ignore-gpu-blocklist'],
@@ -81,13 +84,13 @@ async function openScene({ fresh = false, frame = 0 } = {}) {
   if (!ready) throw new Error('OKO sa nenačítalo (beží oko-dev na localhoste?)');
   await blockPageReloads(page, { onBlocked: reportBlockedReload });
   await sleep(1500);
-  info = await page.evaluate(async (changeDays, worldMap) => {
+  info = await page.evaluate(async (changeDays, worldMap, overlay) => {
     const gev = window.__godsEyeView;
     const viewer = gev.viewer;
     // Scenár mimo Ukrajiny (zemetrasenie, `job.map`): len podkladová mapa sveta, bez vrstiev frontu.
     if (worldMap) {
       const { installWorldScene } = await import('/src/worldVideoCapture.js');
-      window.__okoFrontDay = await installWorldScene(viewer, { map: worldMap });
+      window.__okoFrontDay = await installWorldScene(viewer, { map: worldMap, overlay });
     } else {
       const { installFrontWeekScene } = await import('/src/frontWeekCapture.js');
       window.__okoFrontDay = await installFrontWeekScene(viewer, { sceneId: 'front', changeDays });
@@ -109,7 +112,7 @@ async function openScene({ fresh = false, frame = 0 } = {}) {
     const missing = faces.filter((f) => !document.fonts.check(f));
     if (missing.length) throw new Error(`písma webu sa nenačítali: ${missing.join(', ')}`);
     return window.__okoFrontDay.info;
-  }, job.changeDays ?? 1, job.map && job.map !== 'karta' ? job.map : null);
+  }, job.changeDays ?? 1, job.map && job.map !== 'karta' ? job.map : null, overlayArg);
   console.log(`[front-day] scéna: mapa k ${info.day}, zmena ${info.change ? `${info.change.fromDay} → ${info.change.toDay}` : 'nie je'}, hlásenie ${info.reportedAtText || '?'}`);
   await page.evaluate((c) => window.__okoFrontDay.setView(c), plan.at(frame).camera);
   for (let i = 0; i < 120; i += 1) { await page.evaluate(() => window.__okoFrontDay.render()); await sleep(150); }
@@ -121,6 +124,7 @@ async function shoot(frame) {
   const st = plan.at(frame);
   if (st.clip !== null) return blackFrame;
   shootStep = 'kamera';
+  if (overlayArg) await page.evaluate((v) => window.__okoFrontDay.setOverlay?.(v), (job.overlay.shots || []).includes(st.shot.sceneId));
   await page.evaluate((c) => window.__okoFrontDay.setView(c), st.camera);
   const phase = `${st.shot.index}:${st.flying ? 'let' : 'záber'}`;
   const settle = st.flying ? frame % 6 === 0 : phase !== settledPhase;

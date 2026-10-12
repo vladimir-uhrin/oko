@@ -5,7 +5,7 @@
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function installWorldScene(viewer, { map = 'aster-relief', timeoutMs = 120_000 } = {}) {
+export async function installWorldScene(viewer, { map = 'aster-relief', timeoutMs = 120_000, overlay = null } = {}) {
   const gev = globalThis.__godsEyeView || {};
   viewer.scene.requestRenderMode = false;
   const ctrl = gev.mapStackController;
@@ -14,6 +14,17 @@ export async function installWorldScene(viewer, { map = 'aster-relief', timeoutM
   while (ctrl?.getActiveId?.() && ctrl.getActiveId() !== map) {
     if (Date.now() - started > timeoutMs) throw new Error(`mapa ${map} sa nezapla (aktívna ${ctrl.getActiveId()})`);
     await sleep(250);
+  }
+  // Mapa otrasov USGS (zemetrasenie): priehľadný obrázok intenzity presne na súradniciach z world file.
+  let overlayLayer = null;
+  if (overlay?.dataUrl && Array.isArray(overlay.bbox)) {
+    const rectangle = Cesium.Rectangle.fromDegrees(...overlay.bbox);
+    const provider = Cesium.SingleTileImageryProvider.fromUrl
+      ? await Cesium.SingleTileImageryProvider.fromUrl(overlay.dataUrl, { rectangle })
+      : new Cesium.SingleTileImageryProvider({ url: overlay.dataUrl, rectangle });
+    overlayLayer = viewer.imageryLayers.addImageryProvider(provider);
+    overlayLayer.alpha = 0.85;
+    overlayLayer.show = false;
   }
   // Vrstvy appky (lietadlá, lode…) do videa nepatria — nahrávanie ich skryje cez CSS a tu vypne entity.
   try { for (let i = 0; i < viewer.dataSources.length; i += 1) viewer.dataSources.get(i).show = false; } catch { /* */ }
@@ -29,6 +40,8 @@ export async function installWorldScene(viewer, { map = 'aster-relief', timeoutM
       });
     },
     settleLabels() {},
+    /** Mapa otrasov len v jej zábere (inak by žltá vrstva zakryla reliéf v každom zábere). */
+    setOverlay(visible) { if (overlayLayer) overlayLayer.show = Boolean(visible); },
     project(list) {
       const out = {};
       const fn = Cesium.SceneTransforms.worldToWindowCoordinates || Cesium.SceneTransforms.wgs84ToWindowCoordinates;

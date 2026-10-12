@@ -14,9 +14,46 @@ export function shakemapImageUrl(detail) {
   return c['download/intensity.jpg']?.url || null;
 }
 
+/** Vrstva ShakeMap na glóbus: priehľadný PNG intenzity a jeho súradnicový súbor (world file .pngw). Pure. */
+export function shakemapOverlayUrls(detail) {
+  const c = detail?.properties?.products?.shakemap?.[0]?.contents || {};
+  const png = c['download/intensity_overlay.png']?.url; const pngw = c['download/intensity_overlay.pngw']?.url;
+  return png && pngw ? { png, pngw } : null;
+}
+
+/**
+ * World file (6 riadkov: veľkosť pixla x, otočenie, otočenie, veľkosť pixla y (záporná), stred ľavého horného
+ * pixla x, y) + rozmer obrázka → [západ, juh, východ, sever] v stupňoch. Pure.
+ */
+export function worldFileBbox(text, width, height) {
+  const [a, , , e, c, f] = String(text || '').trim().split(/\s+/).map(Number);
+  if (![a, e, c, f, width, height].every(Number.isFinite) || !(a > 0) || !(e < 0)) return null;
+  const west = c - a / 2; const north = f - e / 2;
+  return [west, north + e * height, west + a * width, north];
+}
+
+/** Stupnica intenzity MMI (farby USGS ShakeMap) — legenda pod mapou otrasov. */
+export const MMI_LEGEND = Object.freeze([
+  { label: 'IV', color: '#83D0DA' }, { label: 'V', color: '#7BC87F' }, { label: 'VI', color: '#F9F518' },
+  { label: 'VII', color: '#FAC611' }, { label: 'VIII', color: '#FA8A11' }, { label: 'IX', color: '#F7100C' }, { label: 'X+', color: '#C80F0A' },
+]);
+
+/** Pixel vrstvy: slabé otrasy (I–III, biela a svetlomodrá) priehľadné, ostatné polopriehľadné. Pure. */
+export function overlayAlpha(r, g, b, { alpha = 170 } = {}) {
+  if (r > 200 && g > 200 && b > 200) return 0;
+  if (r < 200 && g > 200 && b > 220) return 0;
+  return alpha;
+}
+
+/** Rímska intenzita MMI z čísla (USGS `mmi` 9,14 → „IX"). Pure. */
+export function mmiRoman(mmi) {
+  const n = Math.max(1, Math.min(12, Math.round(Number(mmi))));
+  return ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'][n - 1];
+}
+
 /** Hľadanie súborov na Commons (menný priestor File) k zemetraseniu v krajine. Pure. */
 export function commonsSearchUrl(countryEn, year) {
-  const p = new URLSearchParams({ action: 'query', generator: 'search', gsrnamespace: '6', gsrsearch: `${countryEn} earthquake ${year}`, gsrlimit: '40',
+  const p = new URLSearchParams({ action: 'query', generator: 'search', gsrnamespace: '6', gsrsearch: `${countryEn} earthquake ${year}`, gsrlimit: '50', gsrsort: 'create_timestamp_desc',
     prop: 'imageinfo', iiprop: 'url|extmetadata|mime|size|timestamp', iiurlwidth: '1280', format: 'json', origin: '*' });
   return `https://commons.wikimedia.org/w/api.php?${p}`;
 }

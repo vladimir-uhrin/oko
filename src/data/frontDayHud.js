@@ -105,6 +105,12 @@ export function dayAnchorPoints(model) {
   return out;
 }
 
+/** „za deň" / „za týždeň" / „za 3 dni" / „za 10 dní". Pure. */
+export function spanWords(days) {
+  const n = Math.round(Number(days) || 1);
+  return n <= 1 ? 'za deň' : n === 7 ? 'za týždeň' : `za ${n} ${n <= 4 ? 'dni' : 'dní'}`;
+}
+
 /** Veta háčika so zvýraznením čísla (accent) — tspany po slovách. */
 /** Veľkosť písma riadku háčika, aby sa zmestil do karty (~920 px; Inter 800 ≈ 0,66 em na znak veľkými). Pure. */
 export function hookLineSize(text) {
@@ -184,9 +190,9 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     const c = model.change;
     if (kind === 'overview') {
       const avg = Number.isFinite(model.avg7) ? model.avg7 : null;
-      const down = avg !== null && model.report.total < avg;
+      const down = avg !== null && (model.report?.total ?? 0) < avg;
       let body = `<text x="52" y="${y0 + 40}" font-family="${MONO}" font-size="19" font-weight="700" letter-spacing="3" fill="${ACCENT}">CELÝ FRONT · ZA 24 HODÍN</text>`
-        + `<text x="52" y="${y0 + 112}" font-family="${MONO}" font-size="68" font-weight="700" fill="#f2fbff">${group(model.report.total)}</text>`
+        + `<text x="52" y="${y0 + 112}" font-family="${MONO}" font-size="68" font-weight="700" fill="#f2fbff">${group(model.report?.total ?? 0)}</text>`
         + `<text x="52" y="${y0 + 144}" font-family="${MONO}" font-size="15" font-weight="700" letter-spacing="2.5" fill="${DIM}">BOJOVÝCH STRETOV</text>`;
       if (avg !== null) body += `<text x="300" y="${y0 + 106}" font-size="24" font-weight="600" fill="${down ? '#7dd3fc' : '#ffb020'}">${down ? '▼' : '▲'} týždenný priemer ${group(avg)}</text>`;
       if (c && c.ruKm2 >= 1) {
@@ -257,7 +263,9 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
       if (appear > 0) for (const it of items) {
         const color = it.side === 'ru' ? FRONT_COLORS.gained : FRONT_COLORS.lost;
         const r = 30 + 4 * wave();
-        const sub = it.side === 'ru' ? `obsadené za deň · ${directionSk(it.sceneId).name}` : `oslobodené za deň · ${directionSk(it.sceneId).name}`;
+        // Obdobie podľa zmeny mapy: deň, týždeň (súhrn týždňa) alebo N dní.
+        const span = spanWords(c?.spanDays);
+        const sub = it.side === 'ru' ? `obsadené ${span} · ${directionSk(it.sceneId).name}` : `oslobodené ${span} · ${directionSk(it.sceneId).name}`;
         const bw = calloutWidth(sub); const bh = 70;
         const right = it.p.x + 46 + bw <= W - DAY_SAFE.right / 2;
         const bx = right ? it.p.x + 46 : it.p.x - 46 - bw;
@@ -293,8 +301,9 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     // Body scenára (`pin:<i>`) — len v záberoch, ktoré ich vymenujú (model.pins[i].shots).
     if (anchors && kind === 'spot') {
       const pins = model.pins || [];
+    // Záber môže povoliť body vyššie (`pinsMinY`), keď je jeho text krátky — súhrn týždňa: Petrohrad pri trase tankera.
       const vis = Object.entries(anchors).filter(([id]) => id.startsWith('pin:')).map(([id, p]) => ({ i: Number(id.slice(4)), p }))
-        .filter(({ i, p }) => p && pins[i] && (!pins[i].shots || pins[i].shots.includes(fs.shot.sceneId)) && p.y >= y0 + 300 && p.y <= DAY_LABEL_FLOOR_Y);
+        .filter(({ i, p }) => p && pins[i] && (!pins[i].shots || pins[i].shots.includes(fs.shot.sceneId)) && p.y >= (model.spots?.[fs.shot.sceneId]?.pinsMinY ?? y0 + 300) && p.y <= DAY_LABEL_FLOOR_Y);
       const boxes = placeHitLabels(vis.map(({ i, p }) => ({ x: p.x, y: p.y, w: Math.round(String(pins[i].label).length * 12.5) + 28 })), { minX: 24, maxX: W - 24 });
       vis.forEach(({ i, p }, k) => {
         const pin = pins[i]; const b = boxes[k];

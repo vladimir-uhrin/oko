@@ -587,6 +587,8 @@ test('Zemetrasenie: silný otras z USGS → video do Štúdia raz; dotrasy ani s
     },
     publisher: { status: () => ({ facebook: false, instagram: false }) } });
   const wait = async (n) => { for (let i = 0; i < 200 && (studio.quakeStatus().running || runs.length < n); i++) await new Promise(resolve => setTimeout(resolve, 10)); };
+  // Fotka šablóny zemetrasení k tomu istému otrasu (kľúč quake:<id>) video nesmie zablokovať (2026-10-10).
+  store.studioInsert({ id: '00000000-0000-0000-0000-0000000000aa', template: 'quake', eventKey: 'quake:us6000u18k', origin: 'auto', title: 'Zemetrasenie', text: 'text', card: {}, image: Buffer.from('j'), createdAt: clock.time });
   assert.equal(studio.settings().quake.enabled, true, 'predvolene zapnuté');
   await studio.tick();
   assert.equal(runs.length, 0, 'prvých 45 min čaká na PAGER a správy');
@@ -594,7 +596,7 @@ test('Zemetrasenie: silný otras z USGS → video do Štúdia raz; dotrasy ani s
   await studio.tick(); await wait(1);
   assert.deepEqual(runs, ['us6000u18k']);
   const draft = studio.list(10).find(d => d.template === 'quake-video');
-  assert.equal(draft.eventKey, 'quake:us6000u18k');
+  assert.equal(draft.eventKey, 'quake-video:us6000u18k');
   assert.equal(draft.title, 'Zemetrasenie · 12 km WSW of Pitaloza Arriba, Panama');
   assert.equal(draft.card.vertical, true);
   clock.time = main + 4 * 3600_000; // dotras M 6,6 je už starší ako 45 min
@@ -610,4 +612,55 @@ test('Zemetrasenie: silný otras z USGS → video do Štúdia raz; dotrasy ani s
   clock.time += 11 * 60_000;
   await studio.tick(); await wait(2);
   assert.deepEqual(runs, ['us6000u18k', 'us7000jp01'], 'nové silné zemetrasenie inde → nové video');
+});
+
+// ── 2026-10-12: Týždeň v OKU každú nedeľu 5:00 ─────────────────────────────────
+test('Týždeň v OKU: nedeľa od 5:00 raz, návrh na schválenie s upozornením na fotky; iný deň ani pred 5:00 nie; ranné video čaká', async t => {
+  const { mkdtempSync, rmSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-week-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const clock = { time: Date.UTC(2026, 9, 18, 2, 30) }; // nedeľa 18. 10. 2026, 4:30 v Bratislave (letný čas)
+  const runs = [];
+  let release = null;
+  const store = openAdminStore(':memory:');
+  t.after(() => store.close());
+  const studio = createStudio({ store, env: {}, port: () => 1, now: () => clock.time, timers: false, mediaDir: dir, log: () => {},
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [], results: [] } }),
+    renderCard: async () => Buffer.from('card'), checkFfmpeg: async () => true,
+    padToReel: async (input, output) => { writeFileSync(output, Buffer.alloc(10)); return {}; },
+    posterFrame: async () => Buffer.from('poster'),
+    frontDayRunner: async () => { throw new Error('ranné video nemá bežať súbežne'); },
+    weekSummaryRunner: async ({ outDir }) => {
+      runs.push(outDir);
+      await new Promise(resolve => { release = resolve; });
+      mkdirSync(outDir, { recursive: true });
+      const video = path.join(outDir, 'tyzden-v-oku-2026-10-17.mp4'); const post = path.join(outDir, 'tyzden-v-oku.txt');
+      writeFileSync(video, Buffer.alloc(500)); writeFileSync(post, 'Najmenej 50 mŕtvych civilistov za jediný týždeň.\nhttps://okolive.sk');
+      return { video, post };
+    },
+    publisher: { status: () => ({ facebook: false, instagram: false }) } });
+  assert.deepEqual(studio.settings().weekSummary, { enabled: true, weekday: 0, hour: 5 }, 'predvolene nedeľa 5:00');
+  assert.equal(studio.weekSummaryStatus().due, false, 'pred 5:00 nie');
+  clock.time += 40 * 60_000; // 5:10
+  assert.equal(studio.weekSummaryStatus().due, true);
+  await studio.tick();
+  for (let i = 0; i < 100 && !release; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(runs.length, 1);
+  clock.time += 3 * 3600_000; // 8:10 — súhrn ešte beží → ranné video počká
+  assert.equal(studio.frontDayStatus().due, false, 'Deň na fronte počká, kým beží súhrn');
+  release();
+  for (let i = 0; i < 100 && studio.weekSummaryStatus().running; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  const draft = studio.list(10).find(d => d.template === 'week-summary');
+  assert.equal(draft.eventKey, 'week-summary:2026-10-18');
+  assert.equal(draft.status, 'draft', 'len návrh, nič sa nezverejní samo');
+  assert.equal(draft.card.vertical, true);
+  assert.match(draft.card.review, /fotky ДСНС/);
+  assert.equal(studio.weekSummaryStatus().due, false, 'raz za nedeľu');
+  clock.time += 24 * 3600_000; // pondelok
+  assert.equal(studio.weekSummaryStatus().due, false, 'iný deň nie');
+  assert.throws(() => studio.setSettings({ weekSummary: { hour: 30 } }), /invalid_input/);
+  studio.setSettings({ weekSummary: { weekday: 1, hour: 5 } });
+  assert.equal(studio.weekSummaryStatus().due, true, 'deň a hodina sa dajú zmeniť v admine');
 });

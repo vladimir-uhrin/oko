@@ -145,7 +145,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   // Zábery scenára (zemetrasenie: mapa otrasov USGS, fotky/video z Commons) — `clip:<i>` v poradí scenario.media;
   // fotky na celú šírku nad rozmazaným pozadím (photoMontageVideo), video oknom pohybu.
   for (const m of scenario?.media || []) {
-    const clip = { captionSk: m.captionSk, kicker: m.kicker, credit: m.credit, sources: m.sources, placeName: m.placeName || '', sourceLines: [], inset: false, keepCaptions: true,
+    const clip = { captionSk: m.captionSk, kicker: m.kicker, credit: m.credit, sources: m.sources, placeName: m.placeName || '', sourceLines: [], inset: false, keepCaptions: m.keepCaptions !== false,
       ...(Number.isFinite(m.fixedStart) ? { fixedStart: m.fixedStart } : {}) };
     try {
       if (m.kind === 'video') {
@@ -232,7 +232,7 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   if (!plan) throw Object.assign(new Error('deň nemá vety na video'), { code: 'NO_LINES' });
   onProgress('fit', { durationS: Math.round(plan.durationS * 10) / 10, shots: plan.shots.map((s) => ({ id: s.id, dur: Math.round(s.dur * 10) / 10 })) });
   const jobFile = path.join(workDir, 'uloha.json');
-  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, cameras, style, planOpts, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1, map: scenario?.map || null }));
+  fs.writeFileSync(jobFile, JSON.stringify({ model, lines, durations, hook, story, focusSceneId, cameras, style, planOpts, mapDay: model.change?.mapDay || null, changeDays: model.change?.spanDays || 1, map: scenario?.map || null, overlay: scenario?.overlay || null }));
 
   if (sampleFrames) {
     await captureFrontDay({ jobFile, out: path.join(workDir, 'vzorky.mp4'), capture, ffmpeg, onProgress, frames: sampleFrames, framesDir: workDir });
@@ -292,13 +292,14 @@ export async function prepareFrontDayVideo({ baseUrl, apiUrl = baseUrl, voice = 
   if (v2) {
     // Grafika ako priehľadná vrstva + zvukové efekty pri strihoch, potom zloženie.
     const logoMarkup = inlineLogoMarkup(fs.readFileSync(path.join(ROOT, 'public', 'logo.svg'), 'utf8'));
-    const wcues = wordCues(lines, plan.placement);
+    // Háčik nad prvým záberom (súhrn týždňa) nesie veľký text — titulky po slovách by ho prekryli.
+    const wcues = wordCues(lines, plan.placement, model.hookOverClip ? { skipShots: ['opening', 'closing', lines[0]?.shot].filter(Boolean) } : undefined);
     const motionFile = path.join(workDir, 'grafika.mov');
     await renderMotionTrack({ svgAt: (t) => buildMotionSvg({ t, shots: plan.shots, lines, placement: plan.placement, cues: wcues, model, hook, logoMarkup }),
       totalFrames: plan.totalFrames, fps: plan.fps, out: motionFile, ffmpeg, onProgress });
     const sfx = ensureSfx(path.join(ROOT, '.gev-cache', 'event-video-capture', 'sfx'), ffmpeg);
     const audioSfx = path.join(workDir, 'zvuk-efekty.wav');
-    mixSfx({ audioIn: audioFile, events: motionEvents(plan.shots, plan.placement), sfx, out: audioSfx, ffmpeg });
+    mixSfx({ audioIn: audioFile, events: motionEvents(plan.shots, plan.placement, model.spots), sfx, out: audioSfx, ffmpeg });
     composeV2({ rawVideo, motion: motionFile, audio: audioSfx, out: burnedFile, ffmpeg });
   } else {
     await burnCaptions({ cues, outroWindow: null, rawVideo, audioFile, out: burnedFile, workDir, ffmpeg, format: FRONT_DAY_FORMAT, style: DAY_CAPTION_STYLE });

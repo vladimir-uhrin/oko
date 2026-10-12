@@ -71,3 +71,24 @@ test('veľké číslo záberu: magnitúda s desatinnou čiarkou, počet dotrasov
   const after = shotStat(s.model, 'after', { kind: 'spot', sceneId: 'after' });
   assert.deepEqual([after.value, after.decimals, after.unit], [3, 0, 'DOTRASY']);
 });
+
+test('mapa otrasov na glóbuse namiesto obrázka (záber spot s legendou MMI); satelit pred/po s kreditom Copernicus', () => {
+  const withMmi = { ...main, mmi: 9.14 };
+  const media = { overlay: { file: 'vrstva.png', bbox: [-84.5, 3.9, -76.7, 11.2] }, shakemap: { file: 'shakemap.jpg' },
+    satellite: { files: ['pred.jpg', 'po.jpg'], town: 'Las Tablas', year: 2026 } };
+  const s = quakeScenario({ main: withMmi, pager: { exposures, cities }, media });
+  const line = s.lines.find((l) => l.id === 'shakemap');
+  assert.equal(line.shot, 'spot:shakemap', 'na glóbuse, nie plochý obrázok');
+  assert.deepEqual(s.overlay, { ...media.overlay, shots: ['shakemap'] }, 'vrstva len v zábere mapy otrasov');
+  assert.equal(s.model.spots.shakemap.title, 'INTENZITA AŽ IX');
+  assert.ok(s.model.spots.shakemap.legend.length >= 5);
+  assert.ok(Number.isFinite(s.cameras.shakemap.heightM));
+  const sat = s.lines.find((l) => l.id === 'satellite');
+  assert.equal(sat.caption, 'Satelit Sentinel-2 ukazuje mesto Las Tablas pred zemetrasením a po ňom.');
+  const clip = s.media[Number(sat.shot.slice(5))];
+  assert.deepEqual(clip.files, ['pred.jpg', 'po.jpg']);
+  assert.ok(s.model.sources.some((x) => /Copernicus Sentinel \(2026\)/.test(x)) && s.post.includes('Copernicus Sentinel (2026)'));
+  const noOverlay = quakeScenario({ main: withMmi, pager: { exposures, cities }, media: { shakemap: { file: 'shakemap.jpg' } } });
+  assert.match(noOverlay.lines.find((l) => l.id === 'shakemap').shot, /^clip:/, 'bez vrstvy obrázok ShakeMap');
+  assert.ok(!noOverlay.lines.some((l) => l.id === 'satellite'), 'bez snímky po otrase bez satelitu');
+});

@@ -64,6 +64,9 @@ export const DEFAULT_SETTINGS = Object.freeze({ autoDraft: true, autoReel: true,
   autoPublishPerDay: 5, quietFrom: 22, quietTo: 7, targets: [...TARGETS],
   // Týždeň na fronte (2026-10-03): sobota 7:00 spustí scripts/make-front-week-video.mjs a výsledok dá do Štúdia.
   frontWeek: { enabled: false, weekday: 6, hour: 7 },
+  // Týždeň v OKU (2026-10-12, vlastník: „sprav automatiku súhrnu týždňa každú nedeľu ráno o 5-tej"): nedeľa 5:00
+  // spustí scripts/make-week-video.mjs --auto (~45–60 min) a súhrn dá do Štúdia na schválenie.
+  weekSummary: { enabled: true, weekday: 0, hour: 5 },
   // Deň na fronte (2026-10-05): každé ráno po rannom hlásení GŠ (~7:00) spustí scripts/make-front-day-video.mjs;
   // beh trvá ~20–30 min, návrh je v Štúdiu pred 9:30. Predvolene zapnuté (vlastník 2026-10-06).
   frontDay: { enabled: true, hour: 8 },
@@ -127,7 +130,7 @@ export function publicUrlFrom(env = process.env) {
 export function createStudio({ store, env = process.env, port = () => null, now = Date.now, fetchJson = loopbackJson,
   renderCard = defaultRenderCard, renderPhotoCard = defaultRenderPhotoCard, fetchMedia = fetchRemoteMedia, renderReel = defaultRenderReel, padToReel = defaultPadToReel, posterFrame = defaultPosterFrame, checkFfmpeg = () => ffmpegAvailable(env.FFMPEG_PATH || 'ffmpeg'),
   mediaDir = null, publisher = createMetaPublisher({ env }), timers = true, log = message => console.warn(message),
-  voiceProvider = null, frontWeekRunner = null, frontDayRunner = null, quakeRunner = null, quakeFeed = null, root = process.cwd(), onAlert = null } = {}) {
+  voiceProvider = null, frontWeekRunner = null, frontDayRunner = null, weekSummaryRunner = null, quakeRunner = null, quakeFeed = null, root = process.cwd(), onAlert = null } = {}) {
   const alert = (kind, detail) => { try { onAlert?.({ kind, ...detail }); } catch { /* upozornenie nesmie zhodiť Štúdio */ } };
   const publicUrl = publicUrlFrom(env);
   const site = new URL(publicUrl).host;
@@ -153,6 +156,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
   function settings() {
     const stored = store.getSetting('studio:settings')?.value || {};
     return { ...DEFAULT_SETTINGS, ...stored, autoPublish: { ...(stored.autoPublish || {}) }, frontWeek: { ...DEFAULT_SETTINGS.frontWeek, ...(stored.frontWeek || {}) },
+      weekSummary: { ...DEFAULT_SETTINGS.weekSummary, ...(stored.weekSummary || {}) },
       frontDay: { ...DEFAULT_SETTINGS.frontDay, ...(stored.frontDay || {}) },
       quake: { ...DEFAULT_SETTINGS.quake, ...(stored.quake || {}) },
       ua: { ...DEFAULT_SETTINGS.ua, ...(stored.ua || {}) } };
@@ -552,7 +556,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     // Predvolene zapnuté → skutočnú výrobu (Puppeteer, hlas) spúšťa sama len služba s časovačom; Štúdio bez
     // časovača (testy, nástroje) len s podstrčeným runnerom (2026-10-06: testy s tick() spúšťali ozajstné video).
     if (!frontDayRunner && !timers) return false;
-    if (!cfg?.enabled || frontDay.running || frontWeek.running) return false;
+    if (!cfg?.enabled || frontDay.running || frontWeek.running || weekSummary.running) return false;
     const at = now();
     if (localHour(at) < cfg.hour) return false;
     const key = `front-day:${localDayKey(at)}`;
@@ -592,10 +596,10 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       const run = quakeRunner || defaultQuakeRunner;
       const result = await run({ root, env, eventId, outDir, onLog: line => { quake.log = (quake.log + line).slice(-4000); } });
       const text = await fsp.readFile(result.post, 'utf8');
-      const imported = await api.importDraft({ template: 'quake-video', eventKey: `quake:${eventId}`, title: `Zemetrasenie · ${result.title || eventId}`,
+      const imported = await api.importDraft({ template: 'quake-video', eventKey: `quake-video:${eventId}`, title: `Zemetrasenie · ${result.title || eventId}`,
         text, image: null, videoFile: result.video, origin: trigger === 'auto' ? 'auto' : 'manual',
         meta: { source: 'USGS · okolive.sk', eventId, srt: result.srt || null, ...quakeReelMeta(text, now()) } });
-      quake.lastKey = `quake:${eventId}`;
+      quake.lastKey = `quake-video:${eventId}`;
       return imported;
     } catch (error) {
       quake.error = String(error?.message || error).slice(0, 400);
@@ -603,16 +607,63 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       throw error;
     } finally { quake.running = false; quake.finishedAt = now(); }
   }
-  /** Kandidát na video (feed najviac raz za QUAKE_CHECK_MS; po chybe ten istý otras znova až o 2 h). */
+  /**
+   * Kandidát na video (feed najviac raz za QUAKE_CHECK_MS; po chybe ten istý otras znova až o 2 h). Kľúč
+   * `quake-video:<id>` — `quake:<id>` má fotka šablóny zemetrasení (2026-10-10: kvôli nej strážca Panamu preskočil).
+   */
   async function quakeDue() {
     const cfg = settings().quake;
     if (!quakeRunner && !timers) return null;
-    if (!cfg?.enabled || quake.running || frontDay.running || frontWeek.running) return null;
+    if (!cfg?.enabled || quake.running || frontDay.running || frontWeek.running || weekSummary.running) return null;
     if (quake.checkedAt && now() - quake.checkedAt < QUAKE_CHECK_MS) return null;
     quake.checkedAt = now();
     const features = await loadQuakeFeed();
     const failedRecently = id => Boolean(quake.error) && quake.eventId === id && quake.finishedAt && now() - quake.finishedAt < 2 * 3600_000;
-    return quakeVideoCandidate(features, { now: now(), minMag: cfg.minMag, done: id => store.studioHasKey(`quake:${id}`) || quake.lastKey === `quake:${id}` || failedRecently(id) });
+    return quakeVideoCandidate(features, { now: now(), minMag: cfg.minMag, done: id => store.studioHasKey(`quake-video:${id}`) || quake.lastKey === `quake-video:${id}` || failedRecently(id) });
+  }
+
+  // ── Týždeň v OKU (súhrn týždňa) ───────────────────────────────────────
+  const weekSummary = { running: false, startedAt: null, finishedAt: null, error: null, log: '', lastKey: null };
+  /** Rám reelu: video 9:16 s vlastným háčikom. Pure. */
+  function weekSummaryReelMeta(text, day) {
+    const first = String(text || '').split('\n').map(line => line.trim()).find(Boolean) || '';
+    return { vertical: true, kicker: 'TÝŽDEŇ V OKU', hook: { text: 'TÝŽDEŇ V OKU', accent: '' }, headline: first.replace(/\.$/, ''),
+      ...(Number.isFinite(Date.parse(day)) ? { at: Date.parse(`${day}T12:00:00Z`) } : {}) };
+  }
+  async function runWeekSummary({ trigger = 'manual' } = {}) {
+    if (weekSummary.running) throw fail('week_summary_running', 409);
+    if (frontDay.running || frontWeek.running || quake.running) throw fail('front_day_running', 409);
+    if (!mediaDir) throw fail('studio_unavailable', 503);
+    weekSummary.running = true; weekSummary.startedAt = now(); weekSummary.finishedAt = null; weekSummary.error = null; weekSummary.log = '';
+    const day = localDayKey(now());
+    const outDir = path.join(mediaDir, 'week-summary', day);
+    try {
+      const run = weekSummaryRunner || defaultWeekSummaryRunner;
+      const result = await run({ root, env, outDir, onLog: line => { weekSummary.log = (weekSummary.log + line).slice(-4000); } });
+      const text = await fsp.readFile(result.post, 'utf8');
+      // Fotky ДСНС vyberá automatika — na drastické zábery sa nedá spoľahnúť, preto vždy len návrh na schválenie.
+      const imported = await api.importDraft({ template: 'week-summary', eventKey: `week-summary:${day}`, title: `Týždeň v OKU · ${day}`,
+        text, image: null, videoFile: result.video, origin: trigger === 'auto' ? 'auto' : 'manual',
+        meta: { source: 'okolive.sk · Generálny štáb Ukrajiny · ДСНС · ArmyInform · USGS', day, review: 'Skontroluj fotky ДСНС (drastické zábery) a čísla pred zverejnením.', ...weekSummaryReelMeta(text, day) } });
+      weekSummary.lastKey = `week-summary:${day}`;
+      return imported;
+    } catch (error) {
+      weekSummary.error = String(error?.message || error).slice(0, 400);
+      log(`[studio] week-summary: ${weekSummary.error}`);
+      throw error;
+    } finally { weekSummary.running = false; weekSummary.finishedAt = now(); }
+  }
+  /** Raz týždenne v nastavený deň od nastavenej hodiny (predvolene nedeľa 5:00); po chybe v ten deň už nie. */
+  function weekSummaryDue() {
+    const cfg = settings().weekSummary;
+    if (!weekSummaryRunner && !timers) return false;
+    if (!cfg?.enabled || weekSummary.running || frontDay.running || frontWeek.running || quake.running) return false;
+    const at = now();
+    if (localWeekday(at) !== cfg.weekday || localHour(at) < cfg.hour) return false;
+    const key = `week-summary:${localDayKey(at)}`;
+    if (store.studioHasKey(key) || weekSummary.lastKey === key) return false;
+    if (weekSummary.finishedAt && localDayKey(weekSummary.finishedAt) === localDayKey(at)) return false;
+    return true;
   }
 
   async function tick() {
@@ -625,7 +676,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
       await publishDue().catch(error => log(`[studio] due: ${error?.message || error}`));
       await publishRetryDue().catch(error => log(`[studio] retry: ${error?.message || error}`));
       refreshInsights().catch(error => log(`[studio] insights: ${error?.message || error}`));
-      if (frontWeekDue()) runFrontWeek({ trigger: 'auto' }).catch(() => {});
+      if (weekSummaryDue()) runWeekSummary({ trigger: 'auto' }).catch(() => {});
+      else if (frontWeekDue()) runFrontWeek({ trigger: 'auto' }).catch(() => {});
       else if (frontDayDue()) runFrontDay({ trigger: 'auto' }).catch(() => {});
       else {
         const q = await quakeDue().catch(error => { log(`[studio] quake feed: ${error?.message || error}`); return null; });
@@ -729,6 +781,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     runFrontDay,
     frontDayStatus: () => ({ ...frontDay, due: frontDayDue() }),
     runQuake,
+    runWeekSummary,
+    weekSummaryStatus: () => ({ ...weekSummary, due: weekSummaryDue() }),
     quakeStatus: () => ({ ...quake }),
     settings,
     templateStats,
@@ -883,6 +937,15 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         if ('hour' in fd) { if (!Number.isInteger(fd.hour) || fd.hour < 5 || fd.hour > 12) throw fail('invalid_input'); nextFd.hour = fd.hour; }
         next.frontDay = nextFd;
       }
+      if ('weekSummary' in patch) {
+        const ws = patch.weekSummary;
+        if (!ws || typeof ws !== 'object' || Object.keys(ws).some(key => !['enabled', 'weekday', 'hour'].includes(key))) throw fail('invalid_input');
+        const nextWs = { ...current.weekSummary };
+        if ('enabled' in ws) nextWs.enabled = Boolean(ws.enabled);
+        if ('weekday' in ws) { if (!Number.isInteger(ws.weekday) || ws.weekday < 0 || ws.weekday > 6) throw fail('invalid_input'); nextWs.weekday = ws.weekday; }
+        if ('hour' in ws) { if (!Number.isInteger(ws.hour) || ws.hour < 0 || ws.hour > 23) throw fail('invalid_input'); nextWs.hour = ws.hour; }
+        next.weekSummary = nextWs;
+      }
       if ('quake' in patch) {
         const qk = patch.quake;
         if (!qk || typeof qk !== 'object' || Object.keys(qk).some(key => !['enabled', 'minMag'].includes(key))) throw fail('invalid_input');
@@ -1020,6 +1083,32 @@ export function defaultFrontDayRunner({ root, env, outDir, onLog = () => {} }) {
 }
 
 /** Video o zemetrasení: scripts/make-quake-video.mjs (vlastný proces, ~15 min) → { video, post, srt, title }. */
+/** Súhrn týždňa: scripts/make-week-video.mjs --auto (vlastný proces, ~45–60 min) → { video, post }. */
+export function defaultWeekSummaryRunner({ root, env, outDir, onLog = () => {} }) {
+  return new Promise((resolve, reject) => {
+    const args = [path.join(root, 'scripts', 'make-week-video.mjs'), '--auto', '--out-dir', outDir];
+    if (env.FRONT_DAY_API_URL) args.push('--api', env.FRONT_DAY_API_URL);
+    const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    try { os.setPriority(child.pid, 10); } catch { /* bez priority */ }
+    let out = '';
+    const take = chunk => { const text = String(chunk); out = (out + text).slice(-8000); onLog(text); };
+    child.stdout.on('data', take); child.stderr.on('data', take);
+    const timer = setTimeout(() => child.kill('SIGKILL'), 150 * 60_000);
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('close', async code => {
+      clearTimeout(timer);
+      const tail = out.trim().split('\n').slice(-3).join(' | ');
+      if (code !== 0) return reject(new Error(`make-week-video skončil s kódom ${code}: ${tail}`));
+      try {
+        const names = await fsp.readdir(outDir);
+        const video = names.find(n => /^tyzden-v-oku-\d{4}-\d{2}-\d{2}\.mp4$/.test(n));
+        if (!video || !names.includes('tyzden-v-oku.txt')) return reject(new Error('výstup videa alebo textu chýba'));
+        resolve({ video: path.join(outDir, video), post: path.join(outDir, 'tyzden-v-oku.txt') });
+      } catch (error) { reject(error); }
+    });
+  });
+}
+
 export function defaultQuakeRunner({ root, env, eventId, outDir, onLog = () => {} }) {
   return new Promise((resolve, reject) => {
     const args = [path.join(root, 'scripts', 'make-quake-video.mjs'), '--event', eventId, '--out-dir', outDir, '--url', env.EVENT_VIDEO_PAGE_URL || 'http://localhost:4173'];

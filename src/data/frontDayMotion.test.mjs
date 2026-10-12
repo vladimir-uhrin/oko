@@ -66,3 +66,15 @@ test('zvukové efekty: úder na začiatku, šum pred strihom, pípnutie pri čí
   assert.ok(ev.some((e) => e.kind === 'whoosh' && Math.abs(e.t - 2.32) < 1e-9));
   assert.ok(ev.some((e) => e.kind === 'pop' && Math.abs(e.t - 2.6) < 1e-9));
 });
+
+test('názov webu okolive.sk je na každej snímke videa — háčik, mapa, záber aj koncová karta (vlastník 2026-10-11)', async () => {
+  const { buildMotionSvg } = await import('./frontDayMotion.js');
+  const { frontDayPlan, FRONT_DAY_VIDEO_V2 } = await import('./frontDayVideo.js');
+  const lines = [{ id: 'hook', shot: 'opening', caption: 'Háčik.' }, { id: 'clip0', shot: 'clip:0', caption: 'Záber.' }, { id: 'top', shot: 'dir:pokrovsk', caption: 'Smer.' }, { id: 'portal', shot: 'closing', caption: 'Záver.' }];
+  const plan = frontDayPlan({ story: 'ru' }, lines, Object.fromEntries(lines.map((l) => [l.id, { lead: 0.1, speechEnd: 3 }])), FRONT_DAY_VIDEO_V2);
+  const model = { day: '2026-10-11', clips: [{ captionSk: 'x' }], directions: [{ id: 'pokrovsk', attacks: 20 }] };
+  for (let t = 0; t < plan.durationS; t += 0.5) {
+    const svg = buildMotionSvg({ t, shots: plan.shots, lines, placement: plan.placement, cues: [], model, hook: { lines: ['HÁČIK'] }, logoMarkup: '' });
+    assert.ok(/okolive(<tspan[^>]*>)?\.sk/.test(svg), `snímka ${t.toFixed(1)} s bez okolive.sk`);
+  }
+});

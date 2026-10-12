@@ -730,6 +730,9 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
   if (draft.template === 'front-week') head.append(badge('Týždeň na fronte', 'muted'));
   if (draft.template === 'front-day') head.append(badge('Deň na fronte', 'muted'));
   if (draft.template === 'quake-video') head.append(badge('Zemetrasenie', 'muted'));
+  if (draft.template === 'week-summary') head.append(badge('Týždeň v OKU', 'muted'));
+  // Automatika, ktorá nevie všetko overiť sama (súhrn týždňa: drastické fotky), pripíše, čo skontrolovať.
+  if (draft.card?.review && typeof draft.card.review === 'string') head.append(badge(`skontroluj: ${draft.card.review}`, 'warn'));
   if (draft.slides > 1) head.append(badge(`karusel · ${draft.slides} ${draft.slides < 5 ? 'snímky' : 'snímok'}`, 'info'));
   if (draft.retryAt) head.append(badge(`ďalší pokus ${when(draft.retryAt)} (${draft.retryN}/3)`, 'info'));
   const text = el('textarea', 'admin-studio-text'); text.value = draft.text; text.rows = 9; text.maxLength = 2200;
