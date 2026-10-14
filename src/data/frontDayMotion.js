@@ -200,7 +200,10 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
     const accent = new Set(String(hook.accent || '').split(/ +/).filter(Boolean));
     const top = 820 - (rows.length - 1) * 70;
     const ta = easeOut(local / 0.2);
-    out.push(`<text x="${W / 2}" y="${top - 70}" text-anchor="middle" font-family="${MONO}" font-size="30" font-weight="700" letter-spacing="6" fill="${ACCENT}" opacity="${f1(ta)}" ${outline(6)}>${esc(tag)}</text>`);
+    // Štítok nad vrchom písmen prvého riadka (veľké písmo siaha ~0,78 × veľkosť nad základnú čiaru; pevných 70 px prekrylo
+    // štítok pri krátkom prvom riadku, 2026-10-14 reel Rostov).
+    const tagY = top - Math.max(70, Math.round(hookSize(rows[0] || '') * 0.78) + 22);
+    out.push(`<text x="${W / 2}" y="${tagY}" text-anchor="middle" font-family="${MONO}" font-size="30" font-weight="700" letter-spacing="6" fill="${ACCENT}" opacity="${f1(ta)}" ${outline(6)}>${esc(tag)}</text>`);
     let y = top;
     rows.forEach((r, k) => {
       const px = hookSize(r);

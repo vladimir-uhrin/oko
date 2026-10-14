@@ -78,3 +78,15 @@ test('názov webu okolive.sk je na každej snímke videa — háčik, mapa, záb
     assert.ok(/okolive(<tspan[^>]*>)?\.sk/.test(svg), `snímka ${t.toFixed(1)} s bez okolive.sk`);
   }
 });
+
+test('háčik: štítok je nad vrchom písmen prvého riadka, aj pri krátkom a veľkom nadpise (2026-10-14)', () => {
+  const shots = [{ id: 'opening', kind: 'opening', start: 0, dur: 3 }];
+  const placement = [{ id: 'hook', shot: 'opening', start: 0, speechStart: 0.1, speechEnd: 2.5 }];
+  for (const lines of [['ROSTOV NA DONE', 'HORÍ 5. DEŇ'], ['MAGNITÚDA 7,7', 'PANAMA'], ['23 OBLASTÍ', 'POD HROZBOU RUSKÉHO ÚTOKU']]) {
+    const svg = buildMotionSvg({ t: 1.5, shots, lines: [], placement, cues: [], model, hook: { tag: 'POŽIAR · 10.–14. 10.', lines } });
+    const tagY = Number(/<text x="540" y="([\d.]+)"[^>]*letter-spacing="6"/.exec(svg)[1]);
+    const rowY = Number(/translate\(540 ([\d.]+)\)/.exec(svg)[1]);
+    const capTop = rowY - hookSize(lines[0]) * 0.72;
+    assert.ok(tagY + 4 <= capTop, `${lines[0]}: štítok ${tagY} vs. vrch písmen ${capTop}`);
+  }
+});
