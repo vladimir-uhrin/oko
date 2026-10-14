@@ -4158,7 +4158,17 @@ function adsbdbProxy() {
           if (kind === 'route') {
             const cs = String(rawKey || '').toUpperCase();
             if (!/^[A-Z0-9]{2,8}$/.test(cs)) return send(400, { error: 'invalid callsign' });
+            // Trasa z VRS standing-data má prednosť (2026-10-14, 610 pristátych letov z Histórie: cieľ
+            // trafila VRS v 92 %, adsbdb v 80 %; pri nezhode VRS 89×, adsbdb 18×). Od adsbdb ostáva
+            // dopravca a IATA číslo letu. Poloha (?lat=&lon=) vyberie úsek letu s medzipristátím.
+            const q = new URL(req.url, 'http://x').searchParams;
+            const at = { lat: Number(q.get('lat')), lon: Number(q.get('lon')) };
+            const vrs = _vrsRoutes ? _vrsRoutes.lookup(cs, Number.isFinite(at.lat) && Number.isFinite(at.lon) ? at : null) : null;
             const data = await lookup('route', cs);
+            if (vrs) {
+              const extra = data && data !== ADSBDB_LIMITED ? data : {};
+              return send(200, { found: true, ...extra, origin: vrs.origin, destination: vrs.destination, routeSource: 'vrs' });
+            }
             if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
             return send(200, data ? { found: true, ...data } : { found: false });
           }

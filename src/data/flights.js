@@ -1359,7 +1359,9 @@ function _requestRouteEnrichment(icao24) {
     if (icao24 === _trackedIcao && _trackedEntity) _updateTrackedLabelModel(icao24);
     return;
   }
-  _enqueueEnrich(`r:${cs}`, `/api/adsbdb/route/${encodeURIComponent(cs)}`, (data) => {
+  // Poloha pre výber úseku letu s medzipristátím (server: trasa z VRS, 2026-10-14).
+  const at = Number.isFinite(known?.rawLat) && Number.isFinite(known?.rawLon) ? `?lat=${known.rawLat.toFixed(2)}&lon=${known.rawLon.toFixed(2)}` : '';
+  _enqueueEnrich(`r:${cs}`, `/api/adsbdb/route/${encodeURIComponent(cs)}${at}`, (data) => {
     _routeMemory.remember(cs, data);
     const meta = _flightData.get(icao24);
     if (!meta) return;
