@@ -34,7 +34,7 @@ import { authPlugin } from './src/auth/server/plugin.js';
 import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
-import { accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
+import { HISTORY_PATH_LOOKBACK_S, accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
 import { createVrsRouteDb } from './src/data/vrsRoutes.js';
 import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
@@ -359,6 +359,15 @@ let _vrsRoutes = null;
 const _estimateTracker = createEstimateTracker({
   lookupRoute: (cs) => (_adsbdbRouteLookup ? _adsbdbRouteLookup(cs) : Promise.resolve(null)),
   localRoute: (cs, fix) => (_vrsRoutes ? _vrsRoutes.lookup(cs, fix) : null),
+  // Trasa predchádzajúceho letu s rovnakým volacím znakom z vlastnej Histórie (2026-10-14): odhad letí
+  // po nej namiesto po kružnici (spätný test: +60 min medián 51 km namiesto 81 km). Bez Histórie nič.
+  historyRoute: async (cs, fix, dest) => {
+    const store = _historyStoreForEstimates ? _historyStoreForEstimates() : null;
+    if (!store || store.closed || !cs) return null;
+    await store.ready;
+    const beforeS = Math.floor(fix.tMs / 1000) - 3600;
+    return store.previousRoute(cs, { beforeS, sinceS: beforeS - HISTORY_PATH_LOOKBACK_S, endLat: dest.lat, endLon: dest.lon });
+  },
   natTracks: () => { void refreshNatTracks(); return _natTracks; },
   windSamplerFor: (altitudeM) => _windGrids.samplerFor(altitudeM),
   onAccuracy: recordAccuracy,

@@ -4439,6 +4439,8 @@ function _trackedLabelParts(icao24) {
       anchorVia ? t(anchorVia === 'adsc' ? 'card.estimated-adsc' : 'card.estimated-hfdl') : '',
       // Z čoho odhad vychádza (2026-10-05): trať NAT a vietor na trase (model GFS).
       estimate.nat ? t('card.estimated-nat', { id: estimate.nat }) : '',
+      // Trasa predchádzajúceho letu s rovnakým volacím znakom (2026-10-14).
+      estimate.historyRoute ? t('card.estimated-prev-route') : '',
       estimate.wind && Number.isFinite(_estimates.get(icao24)?.model?.windAheadMps)
         ? t('card.estimated-wind', { kmh: `${_estimates.get(icao24).model.windAheadMps >= 0 ? '+' : '−'}${Math.abs(Math.round(_estimates.get(icao24).model.windAheadMps * 3.6))}` })
         : '',
@@ -6768,6 +6770,7 @@ const flightsLayer = {
         t('card.estimated', { km: Math.max(5, Math.round(est.uncertaintyKm / 5) * 5) }),
         via ? t(via === 'adsc' ? 'card.estimated-adsc' : 'card.estimated-hfdl') : '',
         est.nat ? t('card.estimated-nat', { id: est.nat }) : '',
+        est.historyRoute ? t('card.estimated-prev-route') : '',
       ].filter(Boolean).join(' · ')
       : '';
     return {

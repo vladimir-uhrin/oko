@@ -95,6 +95,8 @@ export function openFlightHistoryWorker(dbPath, options = {}, {
     /** Fixy so spúšťačmi udalostí (núdzový kód, strmhlavé klesanie) v čase [fromS, toS) — flightEventsService.js. */
     triggersSince: (fromS, toS, opts) => call('triggersSince', [fromS, toS, opts]),
     lastAirborneFixes: (opts) => call('lastAirborneFixes', [opts]),
+    /** Trasa predchádzajúceho letu s rovnakým volacím znakom (odhady polôh, 2026-10-14). */
+    previousRoute: (callsign, opts) => call('previousRoute', [callsign, opts]),
     get closed() { return closed; },
     close() {
       closed = true;

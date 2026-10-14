@@ -446,6 +446,9 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   const fixAt = db.prepare('SELECT t, lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t = ?');
   const fixAtFull = db.prepare('SELECT t, lat, lon, alt, gs, gnd, pos_src FROM fixes WHERE icao24 = ? AND t = ?');
   const fixAtEnd = db.prepare('SELECT t, lat, lon, alt, gs, trk, vr, gnd FROM fixes WHERE icao24 = ? AND t = ?');
+  // Trasa predchádzajúceho letu (previousRoute): index legs_callsign + primárny kľúč fixov.
+  const prevRouteLegs = db.prepare('SELECT icao24, first_t, last_t FROM legs WHERE callsign = ? AND last_t BETWEEN ? AND ? AND fixes >= ? ORDER BY last_t DESC LIMIT 6');
+  const prevRouteFixes = db.prepare('SELECT lat, lon, gnd FROM fixes WHERE icao24 = ? AND t BETWEEN ? AND ? ORDER BY t');
   /** Poloha stroja v čase t pre continuesInAir (stupne, m, m/s), inak null. */
   const fixPoint = (icao24, t) => {
     const r = fixAtFull.get(icao24, t);
@@ -790,6 +793,38 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
         });
       }
       return out;
+    },
+
+/**
+     * Trasa predchádzajúceho letu s rovnakým volacím znakom (2026-10-14, odhady polôh — flightEstimate
+     * historyPathFrom): najnovší úsek, ktorý skončil v okne [sinceS, beforeS] najviac endMaxKm od
+     * zadaného cieľa (iný koniec = iný úsek letu s medzipristátím). Body len vo vzduchu, preriedené
+     * na stepKm, najviac maxPoints. Spätný test (output/qa-estimates/backtest-history.mjs, 1 488 letov):
+     * odhad po tejto trase má po 60 min medián chyby 51 km namiesto 81 km.
+     * @returns {{lat:number, lon:number}[]|null}
+     */
+    previousRoute(callsign, { beforeS, sinceS, endLat, endLon, endMaxKm = 150, minFixes = 40, stepKm = 20, maxPoints = 400 } = {}) {
+      const cs = String(callsign || '').trim().toUpperCase();
+      if (!/^[A-Z0-9]{3,8}$/.test(cs) || !Number.isFinite(endLat) || !Number.isFinite(endLon)) return null;
+      const legs = prevRouteLegs.all(cs, Math.floor(sinceS), Math.floor(beforeS), Math.max(1, Math.floor(minFixes)));
+      for (const leg of legs) {
+        const end = fixAt.get(leg.icao24, leg.last_t);
+        if (!end || greatCircleM(end.lat / SCALE_DEG, end.lon / SCALE_DEG, endLat, endLon) > endMaxKm * 1000) continue;
+        const rows = prevRouteFixes.all(leg.icao24, leg.first_t, leg.last_t);
+        const out = [];
+        let last = null;
+        for (const r of rows) {
+          if (r.gnd === 1) continue;
+          const lat = r.lat / SCALE_DEG;
+          const lon = r.lon / SCALE_DEG;
+          if (last && greatCircleM(last.lat, last.lon, lat, lon) < stepKm * 1000) continue;
+          last = { lat: Math.round(lat * 1000) / 1000, lon: Math.round(lon * 1000) / 1000 };
+          out.push(last);
+          if (out.length >= maxPoints) break;
+        }
+        if (out.length >= 5) return out;
+      }
+      return null;
     },
 
     flightsOf(icao24, { beforeS = Number.MAX_SAFE_INTEGER, limit = 50 } = {}) {

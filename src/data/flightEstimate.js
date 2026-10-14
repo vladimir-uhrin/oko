@@ -15,7 +15,7 @@
 // Čisté funkcie + sledovač pre server (createEstimateTracker), testy bez Cesia.
 
 import { greatCircleKm, routePlausible } from './routePlausible.js';
-import { buildEstimatePath, destinationPoint, natTrackFor, pointAlongPath } from './flightPath.js';
+import { buildEstimatePath, destinationPoint, natTrackFor, nearestOnTrack, pointAlongPath } from './flightPath.js';
 import { effectiveGroundSpeed } from './windAloft.js';
 
 export const ESTIMATE_MIN_ALT_M = 3000;
@@ -104,6 +104,37 @@ export const WIND_RAMP_S = 45 * 60;
 export const ROUTE_BLEND_START_S = 45 * 60;
 export const ROUTE_BLEND_END_S = 150 * 60;
 
+/**
+ * Trasa predchádzajúceho letu s rovnakým volacím znakom (2026-10-14, flightHistoryStore.previousRoute):
+ * spätný test na 1 488 letoch (output/qa-estimates/backtest-history.mjs) — medián chyby pri +60/+90/+180 min
+ * 51/71/116 km namiesto 81/115/158 km; najlepší prechod z posledného kurzu na túto trasu je 15.–45. minúta.
+ * Trasa platí, len keď lietadlo dnes letí pri nej (HISTORY_PATH_MAX_OFFSET_KM).
+ */
+export const HISTORY_BLEND_START_S = 15 * 60;
+export const HISTORY_BLEND_END_S = 45 * 60;
+export const HISTORY_PATH_MAX_OFFSET_KM = 120;
+/** Predchádzajúci let hľadáme najviac toľko dní dozadu. */
+export const HISTORY_PATH_LOOKBACK_S = 8 * 86400;
+
+/**
+ * Trasa odhadu z bodov predchádzajúceho letu (pure): od miesta najbližšieho k fixu ďalej, na konci cieľ.
+ * Null, keď lietadlo dnes letí inde (ďalej než HISTORY_PATH_MAX_OFFSET_KM) alebo zvyšok trasy chýba.
+ * @param {{lat:number, lon:number}} fix
+ * @param {{lat:number, lon:number}} dest
+ * @param {{lat:number, lon:number}[]} points
+ * @returns {{lat:number, lon:number}[]|null}
+ */
+export function historyPathFrom(fix, dest, points) {
+  if (!fix || !dest || !Array.isArray(points) || points.length < 2) return null;
+  const near = nearestOnTrack({ lat: fix.lat, lon: fix.lon }, points);
+  if (!near || !(near.distKm <= HISTORY_PATH_MAX_OFFSET_KM)) return null;
+  const rest = points.slice(near.index + 1).map((p) => ({ lat: p.lat, lon: p.lon }));
+  const out = [{ lat: fix.lat, lon: fix.lon }, ...rest];
+  const last = out[out.length - 1];
+  if (greatCircleKm(last.lat, last.lon, dest.lat, dest.lon) > 1) out.push({ lat: dest.lat, lon: dest.lon });
+  return out.length >= 2 ? out : null;
+}
+
 /** Pásma času bez signálu pre meranie presnosti (min). */
 export const ACCURACY_BUCKETS_MIN = Object.freeze([30, 60, 120, 240, Infinity]);
 /** Najmenej meraní v pásme, aby sa kalibrácia použila namiesto modelu. */
@@ -124,6 +155,9 @@ export function calibratedUncertaintyKm(elapsedS, distanceKm, calibration = null
   // spoločný 80. percentil (takmer celý z odhadov bez cieľa) dával odhadom s cieľom zbytočne veľký kruh.
   const own = method && bucket?.byMethod?.[method];
   if (own && own.n >= CALIBRATION_MIN_SAMPLES && Number.isFinite(own.p80Km)) return Math.max(5, own.p80Km);
+  // Trasa predchádzajúceho letu (2026-10-14): kým nemá vlastné merania, platí kruh odhadu s cieľom.
+  const routeOwn = method === 'history' ? bucket?.byMethod?.route : null;
+  if (routeOwn && routeOwn.n >= CALIBRATION_MIN_SAMPLES && Number.isFinite(routeOwn.p80Km)) return Math.max(5, routeOwn.p80Km);
   if (!bucket || !(bucket.n >= CALIBRATION_MIN_SAMPLES) || !Number.isFinite(bucket.p80Km)) return model;
   return Math.max(5, bucket.p80Km);
 }
@@ -151,15 +185,19 @@ export function estimatePosition(fix, route, nowMs, model = null, calibration = 
   const path = Array.isArray(model?.path) && model.path.length >= 2
     ? { points: model.path, toDestination: Boolean(dest) && model.toDestination !== false, nat: model.nat ?? null }
     : buildEstimatePath(fix, dest, null);
+  // Trasa predchádzajúceho letu (pathKind 'history') — kratší prechod, zrovná sa skôr.
+  const history = model?.pathKind === 'history' && path.toDestination && !path.nat;
+  const blendStart = history ? HISTORY_BLEND_START_S : ROUTE_BLEND_START_S;
+  const blendEnd = history ? HISTORY_BLEND_END_S : ROUTE_BLEND_END_S;
   let at = pointAlongPath(path.points, flownKm);
   // Smer k cieľu nabieha postupne (ROUTE_BLEND_*): lietadlo letí po letovej ceste, nie hneď
   // priamo na cieľ.
-  if ((path.toDestination || path.nat) && elapsedS < ROUTE_BLEND_END_S && Number.isFinite(fix.trkDeg)) {
+  if ((path.toDestination || path.nat) && elapsedS < blendEnd && Number.isFinite(fix.trkDeg)) {
     const straight = destinationPoint(fix.lat, fix.lon, fix.trkDeg, flownKm);
-    const w = Math.max(0, (elapsedS - ROUTE_BLEND_START_S) / (ROUTE_BLEND_END_S - ROUTE_BLEND_START_S));
+    const w = Math.max(0, (elapsedS - blendStart) / (blendEnd - blendStart));
     at = { ...at, lat: straight.lat + (at.lat - straight.lat) * w, lon: straight.lon + (at.lon - straight.lon) * w, trackDeg: w < 0.5 ? fix.trkDeg : at.trackDeg };
   }
-  const method = path.toDestination && dest ? (path.nat ? 'nat' : 'route') : (path.nat ? 'nat' : 'track');
+  const method = path.toDestination && dest ? (path.nat ? 'nat' : history ? 'history' : 'route') : (path.nat ? 'nat' : 'track');
   const unc = calibratedUncertaintyKm(elapsedS, flownKm, calibration, method);
   if (path.toDestination && dest) {
     const remainingKm = at.remainingKm;
@@ -167,8 +205,8 @@ export function estimatePosition(fix, route, nowMs, model = null, calibration = 
     const altM = remainingKm < ESTIMATE_DESCENT_KM ? fix.altM * (remainingKm / ESTIMATE_DESCENT_KM) : fix.altM;
     return {
       lat: at.lat, lon: at.lon, altM, trackDeg: at.trackDeg, gsMps: gs, elapsedS, distanceKm: flownKm,
-      uncertaintyKm: unc, method: path.nat ? 'nat' : 'route', ended, reason: ended ? 'arrived' : null,
-      destination: dest, remainingKm, nat: path.nat, wind,
+      uncertaintyKm: unc, method, ended, reason: ended ? 'arrived' : null,
+      destination: dest, remainingKm, nat: path.nat, wind, historyRoute: history,
     };
   }
   const descending = Number.isFinite(fix.vrMps) && fix.vrMps <= ESTIMATE_DESCENDING_VR_MPS;
@@ -176,7 +214,7 @@ export function estimatePosition(fix, route, nowMs, model = null, calibration = 
   return {
     lat: at.lat, lon: at.lon, altM: fix.altM, trackDeg: at.trackDeg, gsMps: gs, elapsedS, distanceKm: flownKm,
     uncertaintyKm: unc, method: path.nat ? 'nat' : 'track', ended, reason: ended ? 'expired' : null,
-    destination: null, remainingKm: null, nat: path.nat, wind,
+    destination: null, remainingKm: null, nat: path.nat, wind, historyRoute: false,
   };
 }
 
@@ -184,16 +222,19 @@ export function estimatePosition(fix, route, nowMs, model = null, calibration = 
  * Model odhadu pre lietadlo (pure, pre server): trať NAT, trasa, rýchlosť podľa vetra.
  * @param {(altitudeM:number) => ((lat:number, lon:number) => {u:number, v:number}|null)|null} [windSamplerFor]
  */
-export function buildEstimateModel(fix, route, { natTracks = [], windSamplerFor = null, nowMs = Date.now() } = {}) {
+export function buildEstimateModel(fix, route, { natTracks = [], windSamplerFor = null, nowMs = Date.now(), historyPoints = null } = {}) {
   const dest = usableDestination(fix, route);
   const nat = natTrackFor(fix, dest, natTracks, nowMs);
-  const path = buildEstimatePath(fix, dest, nat);
+  // Trať NAT má prednosť (platí v ten deň); inak trasa predchádzajúceho letu, ak lietadlo letí pri nej.
+  const histPath = !nat && dest ? historyPathFrom(fix, dest, historyPoints) : null;
+  const path = histPath ? { points: histPath, toDestination: true, nat: null } : buildEstimatePath(fix, dest, nat);
   const sampler = windSamplerFor ? windSamplerFor(fix.altM) : null;
   const w = sampler ? effectiveGroundSpeed(fix, path.points, sampler) : null;
   const round = (p) => ({ lat: Math.round(p.lat * 1000) / 1000, lon: Math.round(p.lon * 1000) / 1000 });
   return {
     // Trasu posielame len pri trati (inak si ju klient postaví sám z fixu a cieľa — menšia odpoveď).
-    path: nat ? path.points.map(round) : null,
+    path: nat || histPath ? path.points.map(round) : null,
+    pathKind: nat ? 'nat' : histPath ? 'history' : null,
     toDestination: path.toDestination,
     nat: path.nat,
     gsEffMps: w ? Math.round(w.gsEffMps * 10) / 10 : null,
@@ -224,7 +265,7 @@ export function accuracyStats(samples) {
       medianKm: q(inBucket.map((x) => x.errorKm), 0.5),
       p80Km: q(inBucket.map((x) => x.errorKm), 0.8),
       baselineMedianKm: q(inBucket.map((x) => x.baselineKm), 0.5),
-      byMethod: Object.fromEntries(['nat', 'route', 'track'].map((m) => {
+      byMethod: Object.fromEntries(['nat', 'route', 'history', 'track'].map((m) => {
         const xs = inBucket.filter((x) => x.method === m).map((x) => x.errorKm);
         return [m, { n: xs.length, medianKm: q(xs, 0.5), p80Km: q(xs, 0.8) }];
       })),
@@ -306,7 +347,7 @@ export function anchorFromExternalFix(prev, ext) {
  * @param {{lookupRoute?: (cs: string) => Promise<object|null>, now?: () => number, maxEntries?: number}} [options]
  */
 export function createEstimateTracker({
-  lookupRoute = null, localRoute = null, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 250, limitedWaitMs = 30_000, maxQueue = 3000,
+  lookupRoute = null, localRoute = null, historyRoute = null, historyGapMs = 20, now = () => Date.now(), maxEntries = 6000, lookupGapMs = 250, limitedWaitMs = 30_000, maxQueue = 3000,
   natTracks = () => [], windSamplerFor = null, onAccuracy = null, modelMaxAgeMs = 30 * 60_000,
 } = {}) {
   const last = new Map(); // hex → fix (videné v poslednom snímku)
@@ -317,6 +358,44 @@ export function createEstimateTracker({
   let externalApplied = 0;
   const queue = [];
   let pumping = false;
+
+  /**
+   * Trasa predchádzajúceho letu z Histórie (2026-10-14, historyRoute → flightHistoryStore.previousRoute):
+   * raz na odhad s cieľom, po jednom (dopyt ide do vlákna Histórie), výsledok platí aj po preukotvení z HFDL.
+   */
+  const histQueue = [];
+  let histPumping = false;
+  let histApplied = 0;
+  async function pumpHistory() {
+    if (histPumping || !historyRoute) return;
+    histPumping = true;
+    try {
+      while (histQueue.length) {
+        const hex = histQueue.shift();
+        const entry = estimates.get(hex);
+        const dest = entry?.route?.destination;
+        if (!entry || entry.histState !== 'queued' || !dest) continue;
+        let points = null;
+        try { points = await historyRoute(entry.fix.cs, entry.fix, dest); } catch { points = null; }
+        if (estimates.get(hex) !== entry) continue;
+        entry.histState = 'done';
+        if (Array.isArray(points) && points.length >= 2) {
+          entry.histPoints = points;
+          entry.model = null; // model sa postaví s trasou predchádzajúceho letu
+          histApplied += 1;
+        }
+        if (historyGapMs > 0) await new Promise((r) => setTimeout(r, historyGapMs));
+      }
+    } finally {
+      histPumping = false;
+    }
+  }
+  function wantHistory(hex, entry) {
+    if (!historyRoute || entry.histState || !entry.route?.destination || !entry.fix?.cs) return;
+    entry.histState = 'queued';
+    histQueue.push(hex);
+    void pumpHistory();
+  }
 
   /**
    * Trasa z lokálnej databázy (2026-10-12, vrsRoutes.js — VRS standing-data, bez dopytu navonok):
@@ -535,9 +614,10 @@ export function createEstimateTracker({
       for (const [hex, entry] of estimates) {
         // Model (trať, vietor) sa prepočíta, keď príde cieľ, vietor alebo po modelMaxAgeMs.
         const routeKey = entry.route?.destination?.code || '';
+        wantHistory(hex, entry);
         const m = entry.model;
         if (!m || m.routeKey !== routeKey || nowMs - m.builtAtMs > modelMaxAgeMs || (!m.hadWind && windSamplerFor)) {
-          entry.model = { ...buildEstimateModel(entry.fix, entry.route, { natTracks: tracks, windSamplerFor, nowMs }), routeKey };
+          entry.model = { ...buildEstimateModel(entry.fix, entry.route, { natTracks: tracks, windSamplerFor, nowMs, historyPoints: entry.histPoints }), routeKey };
         }
         const est = estimatePosition(entry.fix, entry.route, nowMs, entry.model);
         if (est.ended) {
@@ -563,7 +643,9 @@ export function createEstimateTracker({
     status() {
       let anchoredExternal = 0;
       for (const entry of estimates.values()) if (entry.fix.via) anchoredExternal += 1;
-      return { tracked: last.size, estimated: estimates.size, queue: queue.length, lastSnapshotSec, skippedPartial: skipped, externalApplied, anchoredExternal };
+      let historyRoutes = 0;
+      for (const e of estimates.values()) if (e.histPoints) historyRoutes += 1;
+      return { tracked: last.size, estimated: estimates.size, queue: queue.length, lastSnapshotSec, skippedPartial: skipped, externalApplied, anchoredExternal, historyQueue: histQueue.length, historyApplied: histApplied, historyRoutes };
     },
   };
 }
