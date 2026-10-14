@@ -52,7 +52,7 @@ const c0 = plan.at(0).camera;
 const hash = `v=2&l=&lat=${c0.lat.toFixed(3)}&lon=${c0.lon.toFixed(3)}&alt=${Math.round(c0.heightM)}&heading=0&pitch=${Math.round(c0.pitchDeg)}&roll=0&style=normal&bloom=0&sharpen=0&si=49&hud=tactical&hv=0&dm=OFF&sc=0&map=${job.map || 'karta'}`;
 // Vrstva scenára (mapa otrasov USGS) ako data URL — stránka z dev servera lokálny súbor nevidí.
 const overlayArg = job.overlay?.file && fs.existsSync(job.overlay.file)
-  ? { bbox: job.overlay.bbox, dataUrl: `data:image/png;base64,${fs.readFileSync(job.overlay.file).toString('base64')}` } : null;
+  ? { bbox: job.overlay.bbox, alpha: job.overlay.alpha, dataUrl: `data:image/png;base64,${fs.readFileSync(job.overlay.file).toString('base64')}` } : null;
 const launchBrowser = () => puppeteer.launch({
   headless: true, pipe: true, protocolTimeout: 300_000,
   args: ['--no-sandbox', `--window-size=${W},${H}`, '--enable-gpu', '--use-angle=d3d11', '--ignore-gpu-blocklist'],

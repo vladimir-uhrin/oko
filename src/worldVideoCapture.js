@@ -23,7 +23,8 @@ export async function installWorldScene(viewer, { map = 'aster-relief', timeoutM
       ? await Cesium.SingleTileImageryProvider.fromUrl(overlay.dataUrl, { rectangle })
       : new Cesium.SingleTileImageryProvider({ url: overlay.dataUrl, rectangle });
     overlayLayer = viewer.imageryLayers.addImageryProvider(provider);
-    overlayLayer.alpha = 0.85;
+    // Mapa otrasov priesvitná; satelitná snímka ako podklad (požiar, 2026-10-14) môže byť nepriehľadná.
+    overlayLayer.alpha = Number.isFinite(overlay.alpha) ? overlay.alpha : 0.85;
     overlayLayer.show = false;
   }
   // Vrstvy appky (lietadlá, lode…) do videa nepatria — nahrávanie ich skryje cez CSS a tu vypne entity.

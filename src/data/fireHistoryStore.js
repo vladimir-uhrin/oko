@@ -42,7 +42,6 @@ export function createFireHistoryStore({ dir, now = () => Date.now() }) {
       }
     } catch { /* súbor ešte nie je */ }
     keys.set(day, set);
-    for (const k of [...keys.keys()].sort().slice(0, -3)) keys.delete(k);
     return set;
   }
 
@@ -69,6 +68,10 @@ export function createFireHistoryStore({ dir, now = () => Date.now() }) {
         written += lines.length;
       }
       return written;
+    }).finally(() => {
+      // Pamäť len posledné 3 dni — až PO zápise dávky: vyradenie počas dávky stratilo kľúče ešte
+      // nezapísaných riadkov a dávka cez viac ako 3 dni zapísala duplicity (2026-10-14: 10-13 ~48 %).
+      for (const k of [...keys.keys()].sort().slice(0, -3)) keys.delete(k);
     });
     queue = run.catch(() => 0);
     return run;

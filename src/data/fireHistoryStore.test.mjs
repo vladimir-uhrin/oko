@@ -57,3 +57,15 @@ test('kľúč duplicít: surový riadok z NASA a uložený štíhly riadok sú t
   await store.append([raw]);
   assert.equal(await createFireHistoryStore({ dir }).append([raw]), 0, 'po reštarte (kľúče zo súboru) sa surový riadok nezapíše znova');
 });
+
+test('dávka cez viac ako 3 dni s opakovanými detekciami: každá sa zapíše raz (pamäť dní sa nevyraďuje počas dávky)', async () => {
+  const dir = tmp();
+  const store = createFireHistoryStore({ dir });
+  const days = ['2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14'];
+  const all = days.flatMap((acqDate) => Array.from({ length: 20 }, (_, i) => fire({ acqDate, lat: 10 + i / 100 })));
+  // prekladané dni a každá detekcia dvakrát (napr. zdroje sa prekrývajú)
+  const batch = [];
+  for (let i = 0; i < 20; i += 1) for (const d of days) batch.push(all.find((f) => f.acqDate === d && f.lat === 10 + i / 100));
+  assert.equal(await store.append([...batch, ...batch]), all.length);
+  assert.equal(await store.append(all), 0);
+});
