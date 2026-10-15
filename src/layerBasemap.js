@@ -20,7 +20,7 @@
  * Pravidlá vrstiev. `map` null = určí `resolveMap` (meteo podľa hostiteľa). `anyOrigin` = aj obnova
  * z odkazu; `keepNear` = pri priblížení mapu nevracať; `onlyFrom` = prepnúť len z týchto máp.
  */
-import { stadiaAuthorizedHost } from './stadiaHosts.js';
+import { stadiaUsableHost } from './stadiaHealth.js';
 
 export const LAYER_BASEMAP_RULES = Object.freeze({
   'natural-events': Object.freeze({ map: 'gibs-truecolor' }),
@@ -47,7 +47,8 @@ export const AUTO_BASEMAP_FAR_M = 220_000;
  */
 export function meteoBasemapForHost(hostname) {
   const h = String(hostname || '').trim().toLowerCase();
-  if (!h || stadiaAuthorizedHost(h)) return 'stadia-dark';
+  // Stadia „mimo" (limit bezplatného plánu — stadiaHealth.js) → rovno bezplatná Blue Marble.
+  if (!h || stadiaUsableHost(h)) return 'stadia-dark';
   return 'gibs-blue-marble';
 }
 

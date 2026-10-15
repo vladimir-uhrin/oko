@@ -9,6 +9,10 @@ import { IMAGERY_ROLE, tagImageryRole } from './imageryOrder.js';
 import { basemapContrastForStack } from './data/contactPalette.js';
 import { applyPhotorealNight, buildPhotorealNightShader } from './photorealNight.js';
 import { createHillshadeImageryProvider } from './hillshadeImagery.js';
+import { STADIA_FALLBACK_STACK, isStadiaUrl, stadiaHealth } from './stadiaHealth.js';
+
+/** Overenie stavu Stadia po chybe dlaždice najviac raz za toľko ms (obrázok kód odpovede nepovie). */
+const STADIA_PROBE_GAP_MS = 10_000;
 
 // Deň snímky žije v gibsTime.js (zdieľa ho aj data/gibsOverlays.js); tu sa
 // re-exportuje, lebo testy a staršie importy ho čítajú odtiaľto.
@@ -394,6 +398,7 @@ export class MapStackController {
    */
   _unavailableReason(stack) {
     if (stack?.requiresIon) return t('mapstack.ion-required-bing');
+    if (stack?.kind === 'xyz' && isStadiaUrl(stack.xyz?.url)) return t('mapstack.stadia-unavailable');
     // Fotoreál má konkrétny dôvod z bootu (EHP 403, sieť…) — bez neho by
     // tooltip hovoril len „nedostupný" a používateľ by hľadal chybu u seba.
     if (stack?.kind === 'photoreal' && this._photorealUnavailableReason) {
@@ -431,6 +436,8 @@ export class MapStackController {
   isStackAvailable(id) {
     const stack = this.getStack(id);
     if (!stack) return false;
+    // Stadia „mimo" (limit bezplatného plánu, autorizácia — stadiaHealth.js): štýly Stadia sa nedajú zvoliť.
+    if (stack.kind === 'xyz' && isStadiaUrl(stack.xyz?.url) && !stadiaHealth().usableHost(globalThis.location?.hostname || 'localhost')) return false;
     if (stack.kind === 'photoreal') return !!this.googleTileset;
     if (stack.requiresIon) return !!this.cesiumToken;
     return true;
@@ -769,12 +776,37 @@ export class MapStackController {
         maximumLevel: cfg.maximumLevel,
         credit: cfg.credit,
       });
+      if (isStadiaUrl(cfg.url)) this._watchStadiaErrors(provider, cfg.url);
     } else {
       throw new Error(`Unsupported map stack: ${stack.id}`);
     }
 
     this._imageryProviders.set(stack.id, provider);
     return provider;
+  }
+
+  /**
+   * Strážca Stadia (2026-10-15, stadiaHealth.js): chyba dlaždice → jedno overenie tej istej dlaždice
+   * (Cesium ju načítal ako obrázok, kód odpovede nevidno), 401/403/429 sa započíta. Keď je Stadia
+   * „mimo", aktívny štýl Stadia sa prepne na bezplatnú náhradu (STADIA_FALLBACK_STACK).
+   */
+  _watchStadiaErrors(provider, template) {
+    provider.errorEvent?.addEventListener?.((err) => {
+      const now = Date.now();
+      if (stadiaHealth().blocked() || now - (this._stadiaProbeAt || 0) < STADIA_PROBE_GAP_MS) return;
+      this._stadiaProbeAt = now;
+      const url = template.replace('{z}', String(err?.level ?? 0)).replace('{x}', String(err?.x ?? 0)).replace('{y}', String(err?.y ?? 0));
+      fetch(url, { mode: 'cors', cache: 'no-store' })
+        .then((res) => { if (stadiaHealth().noteTileError(res.status)) this._onStadiaBlocked(); })
+        .catch(() => { /* sieť — nie odmietnutie Stadia */ });
+    });
+  }
+
+  _onStadiaBlocked() {
+    const fallback = STADIA_FALLBACK_STACK[this._activeId];
+    console.warn('[map] Stadia odmieta dlaždice (limit alebo autorizácia) — podklad prepnutý na bezplatný');
+    if (fallback) void this.setStack(fallback);
+    else this._emitChange('ready');
   }
 
   _removeImageryLayer() {

@@ -66,7 +66,7 @@ export const METEO_BASEMAP_ID = 'stadia-dark';
  * (Stadia autorizuje Origin, nie api_key v URL).
  */
 export const METEO_BASEMAP_FALLBACK_ID = 'gibs-blue-marble';
-import { stadiaAuthorizedHost } from '../stadiaHosts.js';
+import { stadiaUsableHost } from '../stadiaHealth.js';
 export { STADIA_KEYLESS_HOSTS } from '../stadiaHosts.js';
 
 /**
@@ -78,7 +78,7 @@ export { STADIA_KEYLESS_HOSTS } from '../stadiaHosts.js';
 export function basemapForHost(hostname) {
   const h = String(hostname || '').trim().toLowerCase();
   if (!h) return METEO_BASEMAP_ID;
-  return stadiaAuthorizedHost(h) ? METEO_BASEMAP_ID : METEO_BASEMAP_FALLBACK_ID;
+  return stadiaUsableHost(h) ? METEO_BASEMAP_ID : METEO_BASEMAP_FALLBACK_ID;
 }
 /** Koľko krokov dopredu prednačítať. */
 export const METEO_PREFETCH_STEPS = 2;
