@@ -111,6 +111,9 @@ test('VZHĽAD: Štýl a podklad mapy je panel pruhu pred Zobrazením; main.js do
   assert.ok(order('#left-panel-stack > .lane-zone[data-lane-zone="settings"]') < order('#left-panel-stack > #look-panel')
     && order('#left-panel-stack > #look-panel') < order('#left-panel-stack > #pp-toggles'), 'nadpis VZHĽAD → Štýl a podklad → Zobrazenie a efekty');
   assert.match(main, /lookBody\.append\(styleGrid, mapSource\);\s*document\.body\.classList\.add\('oko-look-in-lane'\);/);
+  // 2026-10-15: na počítači štýly a druh mapy ostávajú v dolnej lište, prázdny panel vľavo sa skryje; presun len na mobile.
+  assert.match(main, /if \(!mobile\) document\.body\.classList\.add\('oko-look-in-dock'\);\s*else if \(lookBody && styleGrid && mapSource\)/);
+  assert.match(css, /body\.oko-look-in-dock #left-panel-stack > #look-panel \{ display: none !important; \}/);
   assert.match(css, /body\.oko-look-in-lane #command-dock > #control-panel \{ display: none !important; \}/, 'dolná lišta bez Štýlu');
   assert.match(css, /body\.cockpit-mode #left-panel-stack > #look-panel \{ display: none !important; \}/);
   assert.match(css, /body\.ui-clean-view #look-panel,/);
