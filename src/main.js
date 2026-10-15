@@ -10,7 +10,7 @@ import { initNoticeBanner } from './noticeBanner.js';
 import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { StyleManager } from './ui.js';
-import { flyToBratislava } from './camera.js';
+import { showStartView } from './camera.js';
 import { DataLayerManager, layerDisplayName } from './data/manager.js';
 import flightsLayer from './data/flights.js';
 import militaryFlightsLayer from './data/militaryFlights.js';
@@ -54,7 +54,7 @@ import { initAnalytics, trackEvent } from './analytics.js';
 import { AUTO_BASEMAP_STORAGE_KEY, createLayerBasemapPolicy, meteoBasemapForHost, parseAutoBasemapSetting } from './layerBasemap.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
-import { armStartupGate, releaseStartupGate } from './startupGate.js';
+import { armStartupGate, releaseStartupGate, whenStartupReady } from './startupGate.js';
 import { bindContactPaletteToMapStack } from './data/contactPalette.js';
 import { initAnnotations } from './annotations/index.js';
 import { applyChokepointScene, chokepointSceneById, chokepointSceneFacts, chokepointSceneLabel, listChokepointScenes } from './chokepointScenes.js';
@@ -476,10 +476,39 @@ async function init() {
     const weatherEffects = null;
     const cockpitCloudEffects = initCockpitCloudEffects(viewer);
 
-    // If no share link state, do default fly-to Austin
+    // Bez stavu z odkazu: úvodný pohľad na zemeguľu so Slovenskom (2026-10-15, camera.js START_VIEW);
+    // po skrytí úvodnej obrazovky sa kamera pomaly dorovná. Tlačidlo s glóbusom hore ostáva na Bratislave.
     if (!styleManager.hasShareState) {
-      loaderStatus.textContent = t('loader.fly-bratislava');
-      flyToBratislava(viewer);
+      loaderStatus.textContent = t('loader.start-globe');
+      // Prelet nad oblasť návštevníka podľa pripojenia (/api/whereami, hlavičky Cloudflare, nič sa
+      // neukladá). Roboty a vložený rámček ostávajú na zemeguli. Vývoj/QA: ?qaGeo=lat,lon[,city].
+      const qaGeo = import.meta.env.DEV ? new URLSearchParams(window.location.search).get('qaGeo') : null;
+      // Vývoj/QA: ?qaTime=2026-10-15T07:30Z — čas scény (osvetlenie) aj úvodného pohľadu k Slnku.
+      const qaTimeMs = import.meta.env.DEV ? Date.parse(new URLSearchParams(window.location.search).get('qaTime') || '') : NaN;
+      if (Number.isFinite(qaTimeMs)) {
+        viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(qaTimeMs));
+        viewer.clock.shouldAnimate = false;
+      }
+      const locate = crawlerVisit || embedView ? null : async () => {
+        if (qaGeo) {
+          const [lat, lon, ...city] = qaGeo.split(',');
+          return { precision: 'city', lat: Number(lat), lon: Number(lon), city: city.join(',') };
+        }
+        const res = await fetch('/api/whereami', { cache: 'no-store' });
+        return res.ok ? res.json() : null;
+      };
+      showStartView(viewer, {
+        whenReady: whenStartupReady(),
+        nowMs: Number.isFinite(qaTimeMs) ? qaTimeMs : Date.now(),
+        locate,
+        onArrive: (geo) => {
+          let place = geo?.city || '';
+          if (!place && geo?.country) {
+            try { place = new Intl.DisplayNames([currentLanguage()], { type: 'region' }).of(geo.country) || ''; } catch { place = ''; }
+          }
+          if (place) styleManager._showToast(t('start.your-area', { place }), { durationMs: 6000, tone: 'info' });
+        },
+      });
     } else {
       loaderStatus.textContent = t('loader.restore-shared');
     }

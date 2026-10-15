@@ -44,7 +44,7 @@ test('poistka: štart, ktorý bránu nikdy neuvoľní, ju neuzamkne navždy', as
 
 test('zapojenie: main.js bránu zapne na začiatku init a uvoľní pri skrytí preloadera; lode ju rešpektujú', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.match(main, /import \{ armStartupGate, releaseStartupGate \} from '\.\/startupGate\.js';/);
+  assert.match(main, /import \{ armStartupGate, releaseStartupGate(, whenStartupReady)? \} from '\.\/startupGate\.js';/);
   assert.match(main, /async function init\(\) \{[\s\S]{0,400}?armStartupGate\(\);/, 'zapnutie na začiatku init');
   assert.match(main, /loadingScreen\.classList\.add\('hidden'\);\s*releaseStartupGate\(\);/, 'uvoľnenie pri skrytí preloadera');
   const ais = readFileSync(new URL('./data/aisLiveVessels.js', import.meta.url), 'utf8');

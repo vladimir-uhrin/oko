@@ -186,6 +186,18 @@ const VESSEL_LIFT_M = 3;
  * ~130 m chyba neprejaví a 33 k lodí sa nedopytuje.
  */
 const VESSEL_SURFACE_WARM_ALT_M = 150_000;
+
+/**
+ * Telefón: lode z obežnej dráhy nekresliť (2026-10-15, vlastník po snímke úvodnej zemegule na mobile:
+ * „je tam veľa lodí"). Na 390 px širokej obrazovke 30 000 lodí z výšky tisícov km splynie do sivej
+ * kaše cez pobrežia; po priblížení pod túto výšku sa lode ukážu. Vrstva ostáva zapnutá, dáta sa ťahajú.
+ */
+export const MOBILE_SHIP_FAR_HIDE_M = 3_000_000;
+
+/** Skryť lode? (pure) Len na telefóne (plášť oko-mobile) a nad MOBILE_SHIP_FAR_HIDE_M. */
+export function mobileShipsHidden(mobile, cameraHeightM) {
+  return mobile === true && Number.isFinite(cameraHeightM) && cameraHeightM > MOBILE_SHIP_FAR_HIDE_M;
+}
 /** Najviac lodí v zábere, ktorým sa na jedno načítanie dotiahne povrch (bunky ~111 m sa zlúčia). */
 const VESSEL_SURFACE_WARM_MAX = 800;
 /** Combined cap on trail vertices (server backfill + live accumulation). */
@@ -1085,6 +1097,7 @@ const state = {
   /** Test-only key target paired with interactionHandlerFactory. */
   interactionKeyTarget: null,
   preRenderRemover: null,
+  farHidden: false, // telefón z obežnej dráhy (mobileShipsHidden)
   /** Poradie dotiahnutia povrchu lodí v zábere (neskoršie načítanie má prednosť). */
   surfaceWarmToken: 0,
   lastVisibilityUpdate: 0,
@@ -2100,6 +2113,8 @@ function installRuntime(viewer) {
     // konzistentný (rovnaké poradie ako vo fleet ticku lietadiel).
     refreshVesselLod();
     refreshVesselDensity(performance.now());
+    refreshMobileFarHide(viewer);
+    if (state.farHidden) return; // nič nekreslíme — viditeľnosť ani modely netreba počítať
     updateVisibility();
     // Modely BERÚ vizuál až po tom, čo updateVisibility rozhodol o `show`
     // ikony — vlastníkom nastaví billboard.show=false a to je stav, ktorý sa
@@ -2107,6 +2122,26 @@ function installRuntime(viewer) {
     // každý frame drží model na aktuálnej pozícii a kurze).
     refreshVesselModels(performance.now());
   });
+}
+
+/**
+ * Telefón z obežnej dráhy: lode schovať, po priblížení vrátiť (mobileShipsHidden). Načítanie dát
+ * zapína flotilu (show = enabled) — preto sa skrytie vynúti aj vtedy, keď sa stav nezmenil.
+ * Bez alokácie: výška z kešovaného positionCartographic, trieda plášťa z classList.
+ */
+function refreshMobileFarHide(viewer) {
+  if (!state.enabled) return;
+  const hide = mobileShipsHidden(
+    globalThis.document?.body?.classList?.contains('oko-mobile') === true,
+    viewer?.camera?.positionCartographic?.height,
+  );
+  if (hide) {
+    if (!state.farHidden || state.billboardCollection?.show) setVisible(false);
+    state.farHidden = true;
+  } else if (state.farHidden) {
+    state.farHidden = false;
+    setVisible(true);
+  }
 }
 
 /**

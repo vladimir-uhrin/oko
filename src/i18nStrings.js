@@ -190,6 +190,8 @@ export const EN_STRINGS = Object.freeze({
   'loader.google-tiles-fallback': 'Google 3D Tiles unavailable ({detail}). Continuing in fallback mode...',
   'loader.init-systems': 'Initializing systems...',
   'loader.fly-bratislava': 'Flying over Bratislava…',
+  'loader.start-globe': 'Turning the globe toward Europe…',
+  'start.your-area': 'Your area by connection: {place} — live air traffic around you',
   'loader.restore-shared': 'Restoring shared view...',
   'loader.error': 'Error: {detail}',
 
@@ -2801,6 +2803,8 @@ export const SK_STRINGS = Object.freeze({
   'loader.google-tiles-fallback': 'Google 3D dlaždice nedostupné ({detail}). Pokračujem v záložnom režime…',
   'loader.init-systems': 'Inicializujem systémy…',
   'loader.fly-bratislava': 'Letím nad Bratislavu…',
+  'loader.start-globe': 'Otáčam zemeguľu k Európe…',
+  'start.your-area': 'Vaša oblasť podľa pripojenia: {place} — letecká doprava okolo vás naživo',
   'loader.restore-shared': 'Obnovujem zdieľaný pohľad…',
   'loader.error': 'Chyba: {detail}',
 

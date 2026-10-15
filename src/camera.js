@@ -110,6 +110,158 @@ export function flyToHomeView(viewer, options = {}) {
 }
 
 /**
+ * Úvodný pohľad pre nového návštevníka (2026-10-15, vlastník: „potrebujem, aby to bolo pri načítaní
+ * hneď wow, aby neodišiel" — zo snímok vybral „Zemeguľa šikmo, SK"): šikmý pohľad na zemeguľu so
+ * Slovenskom blízko stredu — zakrivenie Zeme, hviezdy, Európa s tisíckami lietadiel a lodí naživo.
+ * Porovnanie output/qa-world/start/*.png: Bratislava a Tatry sú v noci tmavé, zemeguľa je silná
+ * cez deň aj v noci. Tlačidlo s glóbusom hore ostáva na Bratislave (HOME_VIEW).
+ */
+export const START_VIEW = Object.freeze({
+  longitude: 19.5,
+  latitude: 30,
+  heightM: 7_000_000,
+  headingDeg: 0,
+  pitchDeg: -72,
+});
+
+/** Stred Slovenska — kotva úvodného pohľadu na telefóne. */
+export const START_SK = Object.freeze({ lat: 48.7, lon: 19.5 });
+
+/**
+ * Telefón na výšku (2026-10-15, vlastník: „na mobile prerob prvotný náhľad … najradšej by som tam mal
+ * aj trocha slnka"): kamera za Slovenskom, natočená smerom k Slnku a sklonená k obzoru — cez deň
+ * slnkom zaliata Zem, v noci žiariaci okraj Zeme pri terminátore (tam Slnko práve vychádza/zapadá).
+ * Výška a sklon vybrané zo snímok output/qa-world/start/telefon-*.png.
+ */
+// Z 8 000 km je okraj Zeme ~64° pod vodorovnou rovinou: sklon −78° pri 60° zornom poli dá dole celú
+// Zem a hore (~¼ obrazu) okraj s terminátorom smerom k Slnku; stred záberu je ~16° (1 780 km) pred
+// kamerou — preto je kamera o toľko „za" Slovenskom. (Prvá voľba 5 200 km / −34° mala Zem len v páse dole.)
+export const START_PORTRAIT_SUN = Object.freeze({ heightM: 8_000_000, backKm: 1_780, pitchDeg: -78 });
+
+/**
+ * Bod, nad ktorým je Slnko v zenite (pure, presnosť ~1–2°): deklinácia z dňa v roku, dĺžka z UTC
+ * času (rovnica času zanedbaná — na rámovanie pohľadu stačí).
+ * @param {number} nowMs
+ * @returns {{lat: number, lon: number}}
+ */
+export function subsolarPoint(nowMs) {
+  const d = new Date(nowMs);
+  const dayOfYear = (nowMs - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86_400_000;
+  const lat = -23.44 * Math.cos(((2 * Math.PI) / 365) * (dayOfYear + 10));
+  const hours = d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
+  let lon = (12 - hours) * 15;
+  lon = ((lon + 540) % 360) - 180;
+  return { lat, lon };
+}
+
+const RAD = Math.PI / 180;
+/** Azimut z bodu A na bod B po veľkej kružnici (°, pure). */
+export function bearingDegrees(lat1, lon1, lat2, lon2) {
+  const y = Math.sin((lon2 - lon1) * RAD) * Math.cos(lat2 * RAD);
+  const x = Math.cos(lat1 * RAD) * Math.sin(lat2 * RAD) - Math.sin(lat1 * RAD) * Math.cos(lat2 * RAD) * Math.cos((lon2 - lon1) * RAD);
+  return (Math.atan2(y, x) / RAD + 360) % 360;
+}
+/** Bod vo vzdialenosti km v smere azimutu (pure). */
+export function offsetPoint(lat, lon, bearingDeg, km) {
+  const d = km / 6371;
+  const b = bearingDeg * RAD;
+  const la1 = lat * RAD;
+  const lo1 = lon * RAD;
+  const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(b));
+  const lo2 = lo1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la1), Math.cos(d) - Math.sin(la1) * Math.sin(la2));
+  return { lat: la2 / RAD, lon: ((lo2 / RAD + 540) % 360) - 180 };
+}
+
+/** Telefón: pohľad zo Slovenska smerom k Slnku v čase nowMs (pure). */
+export function portraitSunView(nowMs, { anchor = START_SK, cfg = START_PORTRAIT_SUN } = {}) {
+  const sun = subsolarPoint(nowMs);
+  const heading = bearingDegrees(anchor.lat, anchor.lon, sun.lat, sun.lon);
+  const back = offsetPoint(anchor.lat, anchor.lon, heading + 180, cfg.backKm);
+  return { longitude: back.lon, latitude: back.lat, heightM: cfg.heightM, headingDeg: heading, pitchDeg: cfg.pitchDeg };
+}
+
+/** Úvodný pohľad podľa tvaru plátna (pure): na výšku k Slnku, inak START_VIEW. */
+export function startViewFor(width, height, nowMs = Date.now()) {
+  const w = Number(width);
+  const h = Number(height);
+  return w > 0 && h > w ? portraitSunView(nowMs) : START_VIEW;
+}
+
+/** Ako dlho po skrytí úvodnej obrazovky ostane celá Zem, kým kamera poletí k návštevníkovi (ms). */
+export const START_GLOBE_DWELL_MS = 4500;
+/** Prelet zo zemegule nad oblasť návštevníka (s). */
+export const START_FLY_DURATION_S = 7;
+/** Nad oblasťou: výška a sklon podľa presnosti polohy z IP (mesto / len krajina). */
+export const START_AREA_VIEW = Object.freeze({
+  city: Object.freeze({ heightM: 260_000, pitchDeg: -42, backKm: 230 }),
+  country: Object.freeze({ heightM: 1_100_000, pitchDeg: -55, backKm: 650 }),
+});
+
+/**
+ * Pohľad nad oblasť návštevníka (pure): kamera južne od miesta, pohľad na sever, miesto v strede.
+ * @param {{lat:number, lon:number, precision:'city'|'country'}} geo
+ * @returns {{longitude:number, latitude:number, heightM:number, headingDeg:number, pitchDeg:number}|null}
+ */
+export function areaViewFor(geo) {
+  if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return null;
+  const cfg = START_AREA_VIEW[geo.precision];
+  if (!cfg) return null;
+  const at = offsetPoint(geo.lat, geo.lon, 180, cfg.backKm);
+  return { longitude: at.lon, latitude: at.lat, heightM: cfg.heightM, headingDeg: 0, pitchDeg: cfg.pitchDeg };
+}
+
+/**
+ * Úvod pre nového návštevníka (2026-10-15, vlastník: „na určitý čas sa zobrazí celá Zem ako teraz
+ * a podľa IP adresy priletí k miestu, odkiaľ sa užívateľ pripojil"): zemeguľa hneď pod úvodnou
+ * obrazovkou; po jej skrytí START_GLOBE_DWELL_MS celá Zem a potom prelet nad oblasť z polohy
+ * pripojenia (locate — server, hlavičky Cloudflare, nič sa neukladá). Bez polohy ostane zemeguľa.
+ * Dotyk, koliesko, klávesa či pohyb kamery návštevníkom úvod zastaví.
+ * @param {Cesium.Viewer} viewer
+ * @param {object} [o]
+ * @param {Promise<unknown>} [o.whenReady] skrytie úvodnej obrazovky
+ * @param {() => Promise<object|null>} [o.locate] približná poloha návštevníka
+ * @param {(geo: object) => void} [o.onArrive] po prelete (hláška „vaša oblasť podľa pripojenia")
+ * @param {number} [o.nowMs]
+ */
+export function showStartView(viewer, { whenReady = Promise.resolve(), locate = null, onArrive = null, nowMs = Date.now(), win = globalThis.window, dwellMs = START_GLOBE_DWELL_MS } = {}) {
+  const canvas = viewer?.canvas;
+  const view = startViewFor(canvas?.clientWidth, canvas?.clientHeight, nowMs);
+  const orient = (v) => ({ heading: Cesium.Math.toRadians(v.headingDeg), pitch: Cesium.Math.toRadians(v.pitchDeg), roll: 0 });
+  viewer.camera.setView({ destination: Cesium.Cartesian3.fromDegrees(view.longitude, view.latitude, view.heightM), orientation: orient(view) });
+  const placed = Cesium.Cartesian3.clone(viewer.camera.positionWC);
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    try { viewer.camera.cancelFlight(); } catch { /* bez preletu */ }
+    for (const type of INTERACTION_EVENTS) win?.removeEventListener?.(type, stop, true);
+  };
+  for (const type of INTERACTION_EVENTS) win?.addEventListener?.(type, stop, { capture: true, passive: true });
+  const geoPromise = typeof locate === 'function' ? Promise.resolve().then(locate).catch(() => null) : Promise.resolve(null);
+  void Promise.resolve(whenReady)
+    .then(() => new Promise((resolve) => setTimeout(resolve, dwellMs)))
+    .then(() => geoPromise)
+    .then((geo) => {
+      // Návštevník už sám hýbal kamerou alebo pohľad obnovil odkaz — nechať tak.
+      if (stopped || Cesium.Cartesian3.distance(placed, viewer.camera.positionWC) > 1000) { stop(); return; }
+      const area = areaViewFor(geo);
+      if (!area) { stop(); return; }
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(area.longitude, area.latitude, area.heightM),
+        orientation: orient(area),
+        duration: START_FLY_DURATION_S,
+        easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
+        complete: () => { if (!stopped) { stop(); try { onArrive?.(geo); } catch { /* hláška je doplnok */ } } },
+        cancel: () => stop(),
+      });
+    });
+  return view;
+}
+
+/** Vstupy návštevníka, ktoré úvodný prelet zastavia. */
+const INTERACTION_EVENTS = Object.freeze(['pointerdown', 'wheel', 'keydown', 'touchstart']);
+
+/**
  * OKO first-load view: Bratislava with the Danube leading toward Žitný
  * ostrov. Same two-step shape as flyToAustin — start high, then a cinematic
  * settle onto the old town at an oblique angle (the city has full

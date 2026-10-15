@@ -36,6 +36,7 @@ import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { HISTORY_PATH_LOOKBACK_S, accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
 import { createVrsRouteDb } from './src/data/vrsRoutes.js';
+import { whereAmIPlugin } from './src/whereAmIServer.js';
 import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
 import { createWindGridCache } from './src/data/windAloft.js';
@@ -12386,7 +12387,7 @@ export default defineConfig(({ mode }) => {
       // V role proxy (oko-dev s OKO_API_UPSTREAM) sa API pluginy nespúšťajú: záznam histórie, strážca,
       // udalosti a governor kreditov OpenSky bežia len v službe oko-api; /api a /s idú cez server.proxy.
       // adminPlugin (2026-10-03): admin, telemetria, Štúdio — len s API pluginmi; `enforce: 'pre'` = pred proxy.
-      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), sharePlugin(), flightHistoryProxy(), accountAuth, adminPlugin(env)] : []),
+      ...(apiPlugins ? [releaseHeaderPlugin(serverRole), whereAmIPlugin(), sharePlugin(), flightHistoryProxy(), accountAuth, adminPlugin(env)] : []),
       cesiumGlobe,
       ...(apiPlugins ? [
       openSkyProxy(),
