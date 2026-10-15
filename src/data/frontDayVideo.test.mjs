@@ -83,3 +83,11 @@ test('v2: koncová karta ostane po hlase aspoň 1,8 s (hudba stíchne), nie odse
   const speechEnd = portal.start + 2;
   assert.ok(plan.durationS - speechEnd >= 1.8, `po hlase ${(plan.durationS - speechEnd).toFixed(2)} s`);
 });
+
+test('vrstva scenára: úvod a záver podľa id záberu, spot podľa sceneId', async () => {
+  const { overlayInShot } = await import('./frontDayVideo.js');
+  assert.equal(overlayInShot(['opening', 'drift'], { id: 'opening', kind: 'opening', sceneId: null }), true);
+  assert.equal(overlayInShot(['drift'], { id: 'spot:drift', kind: 'spot', sceneId: 'drift' }), true);
+  assert.equal(overlayInShot(['drift'], { id: 'closing', kind: 'closing', sceneId: null }), false);
+  assert.equal(overlayInShot(null, { id: 'opening' }), false);
+});

@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { inlineLogoMarkup } from '../src/data/eventVideoHud.js';
 import { VIDEO_3D_ENCODE, ffmpegArgs } from '../src/data/eventVideoRender.js';
 import { buildFrontDayHudSvg, dayAnchorPoints } from '../src/data/frontDayHud.js';
-import { FRONT_DAY_FORMAT, frontDayPlan } from '../src/data/frontDayVideo.js';
+import { FRONT_DAY_FORMAT, frontDayPlan, overlayInShot } from '../src/data/frontDayVideo.js';
 import { blockPageReloads, shootWithRecovery } from './lib/captureGuards.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -124,7 +124,7 @@ async function shoot(frame) {
   const st = plan.at(frame);
   if (st.clip !== null) return blackFrame;
   shootStep = 'kamera';
-  if (overlayArg) await page.evaluate((v) => window.__okoFrontDay.setOverlay?.(v), (job.overlay.shots || []).includes(st.shot.sceneId));
+  if (overlayArg) await page.evaluate((v) => window.__okoFrontDay.setOverlay?.(v), overlayInShot(job.overlay.shots, st.shot));
   await page.evaluate((c) => window.__okoFrontDay.setView(c), st.camera);
   const phase = `${st.shot.index}:${st.flying ? 'let' : 'záber'}`;
   const settle = st.flying ? frame % 6 === 0 : phase !== settledPhase;

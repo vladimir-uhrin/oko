@@ -168,3 +168,12 @@ export function frontDayPlan(ctx, lines, durations, opts = {}) {
     },
   };
 }
+
+/**
+ * Je vrstva scenára (mapa otrasov, satelitný podklad, káble) v zábere viditeľná? Úvod a záver nemajú sceneId —
+ * porovnáva sa id záberu („opening", „closing"); 2026-10-15 reel HALO 6: káble chýbali práve v háčiku. Pure.
+ */
+export function overlayInShot(overlayShots, shot) {
+  const id = shot?.sceneId || shot?.id;
+  return Boolean(id) && Array.isArray(overlayShots) && overlayShots.includes(id);
+}
