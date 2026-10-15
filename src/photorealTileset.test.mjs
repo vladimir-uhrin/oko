@@ -111,7 +111,8 @@ test('bez Google kľúča ide rovno ion; zlyhanie oboch = jedna chyba s oboma d�
 
 test('tripwire: main.js používa createPhotorealTileset a controller dostáva dôvod aj zdroj', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.match(main, /import \{ createPhotorealTileset, isGoogleRegionBlocked \} from '\.\/photorealTileset\.js';/);
+  assert.match(main, /import \{ createPhotorealTileset, isGoogleRegionBlocked[^}]*\} from '\.\/photorealTileset\.js';/);
+  assert.match(main, /tilesetOptions: photorealTilesetOptions\(\{ lowMemory \}\)/, 'mobil dostane menšiu cache (2026-10-15)');
   assert.match(main, /await createPhotorealTileset\(\{/);
   assert.doesNotMatch(main, /Cesium\.createGooglePhotorealistic3DTileset\(/, 'priame volanie by ion fallback obišlo');
   assert.match(main, /photorealUnavailableReason/);

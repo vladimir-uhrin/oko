@@ -50,6 +50,34 @@ export const PHOTOREAL_TILESET_OPTIONS = Object.freeze({
 });
 
 /**
+ * Telefóny a tablety (2026-10-15, vlastník: „na mobiloch sa mi niekedy nevykreslia google dlaždice"):
+ * meranie na okolive.sk (Puppeteer, iPhone 375×812 @3x) — pamäť dlaždíc rástla s každým miestom
+ * 153 → 255 → 344 → 391 MB a strop cache 1,5 GB + 1 GB rezervy ju nechal rásť ďalej. Mobilné
+ * prehliadače (Safari na iPhone) pri takom zaťažení stratia grafický kontext → prázdny glóbus.
+ * Na zariadení s malou pamäťou drží cache 256 MB + 128 MB; Cesium nepotrebné dlaždice uvoľní.
+ */
+export const PHOTOREAL_LOW_MEMORY_OPTIONS = Object.freeze({
+  cacheBytes: 256 * 1024 * 1024,
+  maximumCacheOverflowBytes: 128 * 1024 * 1024,
+});
+
+/**
+ * Zariadenie s malou grafickou pamäťou (pure): primárne dotykové (telefón, tablet) alebo hlásená
+ * pamäť ≤ 4 GB (`navigator.deviceMemory`, Chrome/Android).
+ * @param {{ coarse?: boolean, deviceMemory?: number }} input
+ */
+export function isLowMemoryDevice({ coarse = false, deviceMemory } = {}) {
+  if (coarse === true) return true;
+  const gb = Number(deviceMemory);
+  return Number.isFinite(gb) && gb > 0 && gb <= 4;
+}
+
+/** Nastavenie fotoreálneho tilesetu pre zariadenie (pure). */
+export function photorealTilesetOptions({ lowMemory = false } = {}) {
+  return lowMemory ? { ...PHOTOREAL_TILESET_OPTIONS, ...PHOTOREAL_LOW_MEMORY_OPTIONS } : { ...PHOTOREAL_TILESET_OPTIONS };
+}
+
+/**
  * Je to EHP/regionálne odmietnutie Google (403 PERMISSION_DENIED s textom
  * o regióne)? Rozlišuje sa kvôli hláške pre používateľa — pri inej chybe
  * (sieť, 429 kvóta, zlý kľúč) sa NEmá tvrdiť, že ide o EHP.

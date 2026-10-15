@@ -14062,3 +14062,14 @@ body.embed-mode #toast { bottom: 24px !important; }
 @media (prefers-reduced-motion: reduce) {
   .oko-embed-dot { animation: none; }
 }
+
+/* 2026-10-15 (contextLossRecovery.js): hláška po strate grafického kontextu (mobil, málo pamäte). */
+#oko-context-lost {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 10070;
+  max-width: min(92vw, 420px); padding: 16px 18px; border: 1px solid rgba(0, 220, 255, 0.45); border-radius: 12px;
+  background: rgba(5, 14, 22, 0.94); color: #dff3fb; font: 500 14px/1.45 var(--font-mono, monospace); text-align: center;
+}
+#oko-context-lost button {
+  display: block; margin: 12px auto 0; padding: 8px 18px; border: 1px solid #00dcff; border-radius: 8px;
+  background: rgba(0, 72, 92, 0.9); color: #fff; font: 600 13px var(--font-mono, monospace); cursor: var(--cursor-pointer);
+}

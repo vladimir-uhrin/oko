@@ -47,7 +47,8 @@ import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands, setVoiceAccessGate } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
-import { createPhotorealTileset, isGoogleRegionBlocked } from './photorealTileset.js';
+import { createPhotorealTileset, isGoogleRegionBlocked, isLowMemoryDevice, photorealTilesetOptions } from './photorealTileset.js';
+import { installContextLossRecovery, showContextLossNotice } from './contextLossRecovery.js';
 import { isCrawlerUserAgent } from './crawlerDetect.js';
 import { initAnalytics, trackEvent } from './analytics.js';
 import { AUTO_BASEMAP_STORAGE_KEY, createLayerBasemapPolicy, meteoBasemapForHost, parseAutoBasemapSetting } from './layerBasemap.js';
@@ -237,6 +238,16 @@ async function init() {
       },
     });
 
+    // Strata grafického kontextu (2026-10-15, mobil — contextLossRecovery.js): Cesium ju neobnoví,
+    // stránka sa sama obnoví na tom istom pohľade (adresa), najviac 2× za 10 min.
+    let ctxStorage = null;
+    try { ctxStorage = window.sessionStorage; } catch { ctxStorage = null; }
+    installContextLossRecovery(viewer.canvas, {
+      storage: ctxStorage,
+      translate: t,
+      notify: (text, opts) => showContextLossNotice(document, text, opts),
+    });
+
     // Cap the default render loop at 60 fps. Cesium's loop otherwise runs at
     // the display's refresh rate — 120 Hz on ProMotion panels — doubling GPU
     // and CPU burn for zero visual benefit in a map app whose animation
@@ -339,9 +350,15 @@ async function init() {
       // 403 („not available for your account and region", od 2026-09-04) cez
       // Cesium ion asset 2275207 — tie isté dlaždice pod zmluvou Cesiumu
       // (photorealTileset.js; podmienky v DATA_SOURCES.md).
+      // Telefón/tablet: menšia cache dlaždíc (photorealTileset.js — meranie 2026-10-15).
+      const lowMemory = isLowMemoryDevice({
+        coarse: window.matchMedia?.('(pointer: coarse)')?.matches === true,
+        deviceMemory: navigator.deviceMemory,
+      });
       const photoreal = await createPhotorealTileset({
         hasGoogleKey: !!googleApiKey,
         hasIonToken: !!cesiumToken,
+        tilesetOptions: photorealTilesetOptions({ lowMemory }),
       });
       tileset = photoreal.tileset;
       photorealSource = photoreal.source;
