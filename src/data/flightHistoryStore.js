@@ -58,6 +58,68 @@ export const AIR_GAP_MAX_S = 12 * 3600;
 export const AIR_GAP_MIN_ALT_M = 6000;
 /** … okrem krátkej medzery (polnoc UTC medzi dvoma dennými stopami), kde stačí „nie na zemi". */
 export const AIR_GAP_ADJACENT_S = 120;
+
+/** Trasa predchádzajúceho letu (previousRoute, 2026-10-15): úseky toho istého letu delí menej než toľko s. */
+export const PREV_ROUTE_GROUP_GAP_S = 4 * 3600;
+/** Let končiaci vo vzduchu ďaleko od cieľa sa berie, len keď sa k cieľu priblížil aspoň o toľko km. */
+export const PREV_ROUTE_HEADING_GAIN_KM = 300;
+/** Koniec letu nižšie než toto (m) = pristál. */
+export const PREV_ROUTE_LANDED_ALT_M = 1500;
+
+/** Posledný kurz letu mieri k cieľu najviac o toľko stupňov vedľa. */
+export const PREV_ROUTE_HEADING_TOLERANCE_DEG = 35;
+
+function bearingDeg(aLat, aLon, bLat, bLon) {
+  const r = Math.PI / 180;
+  const y = Math.sin((bLon - aLon) * r) * Math.cos(bLat * r);
+  const x = Math.cos(aLat * r) * Math.sin(bLat * r) - Math.sin(aLat * r) * Math.cos(bLat * r) * Math.cos((bLon - aLon) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+
+/**
+ * Mieril let na konci k cieľu? (pure) Kurz z posledných bodov vzdialených aspoň 20 km vs. smer ku cieľu.
+ * @param {{lat:number, lon:number}[]} air body vo vzduchu (stupne × 1e5, ako v tabuľke fixes)
+ */
+export function headingToward(air, endLat, endLon, toleranceDeg = PREV_ROUTE_HEADING_TOLERANCE_DEG) {
+  if (!Array.isArray(air) || air.length < 2) return false;
+  const end = air[air.length - 1];
+  const eLat = end.lat / SCALE_DEG;
+  const eLon = end.lon / SCALE_DEG;
+  let prev = null;
+  for (let i = air.length - 2; i >= 0; i -= 1) {
+    const p = air[i];
+    if (greatCircleM(p.lat / SCALE_DEG, p.lon / SCALE_DEG, eLat, eLon) >= 20_000) { prev = p; break; }
+  }
+  if (!prev) return false;
+  const track = bearingDeg(prev.lat / SCALE_DEG, prev.lon / SCALE_DEG, eLat, eLon);
+  const toDest = bearingDeg(eLat, eLon, endLat, endLon);
+  const diff = Math.abs(((track - toDest + 540) % 360) - 180);
+  return diff <= toleranceDeg;
+}
+
+/**
+ * Úseky (vzostupne podľa first_t) → lety (pure): rovnaké lietadlo a medzera od konca predchádzajúceho
+ * úseku menšia než gapS. Výsledok zoradený od najnovšieho letu.
+ * @param {{icao24:string, first_t:number, last_t:number, fixes:number}[]} legs
+ * @returns {{icao24:string, first_t:number, last_t:number, fixes:number, legs:number}[]}
+ */
+export function groupLegsIntoFlights(legs, gapS = PREV_ROUTE_GROUP_GAP_S) {
+  const groups = [];
+  const open = new Map(); // icao24 → posledná skupina toho lietadla
+  for (const l of Array.isArray(legs) ? legs : []) {
+    const g = open.get(l.icao24);
+    if (g && l.first_t - g.last_t < gapS && l.first_t >= g.first_t) {
+      g.last_t = Math.max(g.last_t, l.last_t);
+      g.fixes += Number(l.fixes) || 0;
+      g.legs += 1;
+      continue;
+    }
+    const next = { icao24: l.icao24, first_t: l.first_t, last_t: l.last_t, fixes: Number(l.fixes) || 0, legs: 1 };
+    groups.push(next);
+    open.set(l.icao24, next);
+  }
+  return groups.sort((a, b) => b.last_t - a.last_t);
+}
 const EARTH_M = 6_371_000;
 
 function greatCircleM(aLat, aLon, bLat, bLon) {
@@ -447,8 +509,8 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   const fixAtFull = db.prepare('SELECT t, lat, lon, alt, gs, gnd, pos_src FROM fixes WHERE icao24 = ? AND t = ?');
   const fixAtEnd = db.prepare('SELECT t, lat, lon, alt, gs, trk, vr, gnd FROM fixes WHERE icao24 = ? AND t = ?');
   // Trasa predchádzajúceho letu (previousRoute): index legs_callsign + primárny kľúč fixov.
-  const prevRouteLegs = db.prepare('SELECT icao24, first_t, last_t FROM legs WHERE callsign = ? AND last_t BETWEEN ? AND ? AND fixes >= ? ORDER BY last_t DESC LIMIT 6');
-  const prevRouteFixes = db.prepare('SELECT lat, lon, gnd FROM fixes WHERE icao24 = ? AND t BETWEEN ? AND ? ORDER BY t');
+  const prevRouteLegsAll = db.prepare('SELECT icao24, first_t, last_t, fixes FROM legs WHERE callsign = ? AND last_t BETWEEN ? AND ? ORDER BY last_t DESC LIMIT 40');
+  const prevRouteFixes = db.prepare('SELECT lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t BETWEEN ? AND ? ORDER BY t');
   /** Poloha stroja v čase t pre continuesInAir (stupne, m, m/s), inak null. */
   const fixPoint = (icao24, t) => {
     const r = fixAtFull.get(icao24, t);
@@ -803,18 +865,41 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
      * odhad po tejto trase má po 60 min medián chyby 51 km namiesto 81 km.
      * @returns {{lat:number, lon:number}[]|null}
      */
-    previousRoute(callsign, { beforeS, sinceS, endLat, endLon, endMaxKm = 150, minFixes = 40, stepKm = 20, maxPoints = 400 } = {}) {
+    previousRoute(callsign, {
+      beforeS, sinceS, endLat, endLon, endMaxKm = 150, minFixes = 40, stepKm = 20, maxPoints = 400,
+      groupGapS = PREV_ROUTE_GROUP_GAP_S, headingGainKm = PREV_ROUTE_HEADING_GAIN_KM, maxGroups = 6,
+    } = {}) {
       const cs = String(callsign || '').trim().toUpperCase();
       if (!/^[A-Z0-9]{3,8}$/.test(cs) || !Number.isFinite(endLat) || !Number.isFinite(endLon)) return null;
-      const legs = prevRouteLegs.all(cs, Math.floor(sinceS), Math.floor(beforeS), Math.max(1, Math.floor(minFixes)));
-      for (const leg of legs) {
-        const end = fixAt.get(leg.icao24, leg.last_t);
-        if (!end || greatCircleM(end.lat / SCALE_DEG, end.lon / SCALE_DEG, endLat, endLon) > endMaxKm * 1000) continue;
-        const rows = prevRouteFixes.all(leg.icao24, leg.first_t, leg.last_t);
+      // Úseky jedného letu (2026-10-15): diera v pokrytí let rozseká na viac úsekov (Čína, oceán) —
+      // úseky toho istého lietadla s tým istým znakom, medzi ktorými je menej než groupGapS, sú jeden let.
+      // Spätný test output/qa-estimates/backtest-history2.mjs (2 478 letov s cieľom): trasu dostane
+      // 1 494 letov namiesto 1 334; medián chyby všetkých +120/+180 min 118/166 km namiesto 130/200.
+      const legs = prevRouteLegsAll.all(cs, Math.floor(sinceS), Math.floor(beforeS)).sort((a, b) => a.first_t - b.first_t);
+      const groups = groupLegsIntoFlights(legs, groupGapS);
+      let tried = 0;
+      for (const g of groups) {
+        if (g.fixes < minFixes) continue;
+        if (++tried > maxGroups) break;
+        const rows = prevRouteFixes.all(g.icao24, g.first_t, g.last_t);
+        const air = rows.filter((r) => r.gnd !== 1);
+        if (air.length < 20) continue;
+        const end = rows[rows.length - 1];
+        const dEndKm = greatCircleM(end.lat / SCALE_DEG, end.lon / SCALE_DEG, endLat, endLon) / 1000;
+        if (dEndKm > endMaxKm) {
+          // Pristál inde = iný úsek letu s medzipristátím. Koniec vo vzduchu ďaleko od cieľa sa berie, len
+          // keď let k cieľu smeroval (skončilo pokrytie) — trasa sa potom k cieľu dotiahne (historyPathFrom).
+          const landed = end.gnd === 1 || (end.alt != null && end.alt < PREV_ROUTE_LANDED_ALT_M);
+          if (landed) continue;
+          const start = air[0];
+          const dStartKm = greatCircleM(start.lat / SCALE_DEG, start.lon / SCALE_DEG, endLat, endLon) / 1000;
+          if (!(dEndKm < dStartKm - headingGainKm)) continue;
+          // …a naposledy mieril k cieľu (let Dauha → Londýn sa k Mníchovu tiež priblíži, ale tam neletel).
+          if (!headingToward(air, endLat, endLon)) continue;
+        }
         const out = [];
         let last = null;
-        for (const r of rows) {
-          if (r.gnd === 1) continue;
+        for (const r of air) {
           const lat = r.lat / SCALE_DEG;
           const lon = r.lon / SCALE_DEG;
           if (last && greatCircleM(last.lat, last.lon, lat, lon) < stepKm * 1000) continue;

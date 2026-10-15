@@ -98,3 +98,47 @@ test('História: predchádzajúci let s rovnakým znakom a cieľom, preriedený;
     store.close();
   }
 });
+
+test('úseky jedného letu sa spoja (medzera < 4 h, to isté lietadlo), iné lietadlo či ďalší deň nie', async () => {
+  const { groupLegsIntoFlights } = await import('./flightHistoryStore.js');
+  const g = groupLegsIntoFlights([
+    { icao24: 'aaa111', first_t: 1000, last_t: 2000, fixes: 25 },
+    { icao24: 'bbb222', first_t: 1500, last_t: 2500, fixes: 30 },
+    { icao24: 'aaa111', first_t: 3000, last_t: 6000, fixes: 25 },
+    { icao24: 'aaa111', first_t: 6000 + 86400, last_t: 9000 + 86400, fixes: 50 },
+  ]);
+  assert.equal(g.length, 3);
+  assert.deepEqual(g[0], { icao24: 'aaa111', first_t: 6000 + 86400, last_t: 9000 + 86400, fixes: 50, legs: 1 }, 'najnovší let prvý');
+  const joined = g.find((x) => x.icao24 === 'aaa111' && x.legs === 2);
+  assert.equal(joined.fixes, 50);
+  assert.equal(joined.first_t, 1000);
+  assert.equal(joined.last_t, 6000);
+});
+
+test('História: let rozsekaný dierou v pokrytí sa poskladá; koniec vo vzduchu smerom k cieľu sa berie, inam nie', () => {
+  const nowMs = T0 + 3 * 86400_000;
+  const store = openFlightHistory(':memory:', { now: () => nowMs });
+  try {
+    const t0 = Math.floor(T0 / 1000) - 86400;
+    const at = (f) => {
+      const k = Math.min(PREV.length - 2, Math.floor(f * (PREV.length - 1)));
+      const u = f * (PREV.length - 1) - k;
+      return { lat: PREV[k].lat + (PREV[k + 1].lat - PREV[k].lat) * u, lon: PREV[k].lon + (PREV[k + 1].lon - PREV[k].lon) * u };
+    };
+    // Dva úseky po 25 bodov (každý sám < 40), medzi nimi 40 min bez pokrytia.
+    const a = Array.from({ length: 25 }, (_, i) => ({ t: t0 + i * 120, ...at(i / 70), alt: 11000, gs: 240, callsign: 'QTR7' }));
+    const b = Array.from({ length: 25 }, (_, i) => ({ t: t0 + 25 * 120 + 2400 + i * 120, ...at((25 + 20 + i) / 70), alt: 11000, gs: 240, callsign: 'QTR7' }));
+    store.importFlight({ icao24: '06a1c3', points: a }, 'test');
+    store.importFlight({ icao24: '06a1c3', points: b }, 'test');
+    assert.ok(store.search('QTR7').length >= 2, 'v Histórii sú dva úseky');
+    const before = Math.floor(T0 / 1000) - 3600;
+    const opts = { beforeS: before, sinceS: before - 8 * 86400, endLat: LHR.lat, endLon: LHR.lon };
+    const route = store.previousRoute('QTR7', opts);
+    assert.ok(Array.isArray(route) && route.length >= 5, 'poskladaná trasa (spolu 50 bodov)');
+    // Koniec úseku b je pri Mníchove/Alpách vo vzduchu a mieri na Londýn → berie sa (dotiahne sa k cieľu).
+    // Pre cieľ Káhira (iný smer) nie.
+    assert.equal(store.previousRoute('QTR7', { ...opts, endLat: 30.12, endLon: 31.41 }), null, 'mieril inam');
+  } finally {
+    store.close();
+  }
+});
