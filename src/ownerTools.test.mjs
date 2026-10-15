@@ -59,8 +59,9 @@ test('zóny stĺpca a sekcie mobilu majú rovnakú logiku: Prelety v Konfliktoch
   assert.match(html, /data-i18n="panel\.energy" class="panel-title"[\s\S]*?class="energy-subhead" data-i18n="panel\.oil"[\s\S]*?data-oil-body[\s\S]*?class="energy-subhead" data-i18n="panel\.gas"[\s\S]*?data-gas-body/);
   assert.match(css, /#gas-panel\.collapsed \.oil-body, #gas-panel\.collapsed \.energy-subhead \{ display: none; \}/);
   assert.match(SK_STRINGS['panel.energy'], /^Ropa a plyn/);
-  assert.deepEqual([...byId.get('display').panelIds], ['look-panel', 'pp-toggles']);
-  assert.equal(byId.get('display').expand, 'look-panel');
+  // 2026-10-15: štýl a druh mapy späť v dolnej lište aj na mobile — VZHĽAD nesie Zobrazenie a efekty.
+  assert.deepEqual([...byId.get('display').panelIds], ['pp-toggles']);
+  assert.equal(byId.get('display').expand, 'pp-toggles');
   assert.match(html, /data-oko-section="conflicts"[\s\S]*?data-i18n="mobile\.conflicts"/);
   assert.doesNotMatch(html, /data-oko-section="scenes"/);
 });
@@ -104,17 +105,22 @@ test('drobnosti z QA 2026-10-11: STOP počas scény, Články namiesto Témy, to
   assert.doesNotMatch(manager, /button\.disabled = transitioning;/, 'prechod tlačidlo nezamyká');
 });
 
-test('VZHĽAD: Štýl a podklad mapy je panel pruhu pred Zobrazením; main.js doň presunie štýly a podklad z dolnej lišty', () => {
+test('Štýl a druh mapy ostávajú v dolnej lište na počítači aj na mobile; prázdny panel „Štýl a podklad mapy" je skrytý (2026-10-15)', () => {
+  // Vlastník: „kde zmizli mapy druhy? … daj to naspäť", „aj na mobiloch? … daj to naspäť".
+  assert.match(main, /document\.body\.classList\.add\('oko-look-in-dock'\);/);
+  assert.doesNotMatch(main, /lookBody\.append\(styleGrid, mapSource\)/, 'štýly ani druh mapy sa z dolnej lišty nepresúvajú');
+  assert.match(html, /<div id="control-panel"[\s\S]*?<div id="style-buttons"[\s\S]*?class="map-source-section"/, 'tlačidlo ŠTÝL v doku nesie štýly aj druh mapy');
+  assert.match(css, /body\.oko-look-in-dock #look-panel \{ display: none !important; \}/, 'aj vo výsuve mobilu');
+  assert.doesNotMatch(css, /body\.oko-look-in-lane #command-dock > #control-panel/, 'dok sa neskrýva');
+  assert.deepEqual([...MOBILE_SECTIONS.find((s) => s.id === 'display').panelIds], ['pp-toggles'], 'VZHĽAD na mobile = Zobrazenie a efekty');
+});
+
+test('VZHĽAD: panel Štýl a podklad mapy ostáva v markupe pruhu pred Zobrazením (dnes skrytý, odkazy ho poznajú)', () => {
   assert.match(html, /<div id="look-panel" class="panel-collapsible collapsed" data-panel-id="look-panel">[\s\S]*?data-i18n="panel\.look"[\s\S]*?<div class="look-body" data-look-body><\/div>/);
   assert.ok(html.indexOf('id="look-panel"') < html.indexOf('data-lane-zone="settings"'), 'v markupe pruhu pred nadpisom zóny (poradie dáva CSS)');
   const order = (sel) => Number(new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{\\s*order: (\\d+);`).exec(css)?.[1]);
   assert.ok(order('#left-panel-stack > .lane-zone[data-lane-zone="settings"]') < order('#left-panel-stack > #look-panel')
     && order('#left-panel-stack > #look-panel') < order('#left-panel-stack > #pp-toggles'), 'nadpis VZHĽAD → Štýl a podklad → Zobrazenie a efekty');
-  assert.match(main, /lookBody\.append\(styleGrid, mapSource\);\s*document\.body\.classList\.add\('oko-look-in-lane'\);/);
-  // 2026-10-15: na počítači štýly a druh mapy ostávajú v dolnej lište, prázdny panel vľavo sa skryje; presun len na mobile.
-  assert.match(main, /if \(!mobile\) document\.body\.classList\.add\('oko-look-in-dock'\);\s*else if \(lookBody && styleGrid && mapSource\)/);
-  assert.match(css, /body\.oko-look-in-dock #left-panel-stack > #look-panel \{ display: none !important; \}/);
-  assert.match(css, /body\.oko-look-in-lane #command-dock > #control-panel \{ display: none !important; \}/, 'dolná lišta bez Štýlu');
   assert.match(css, /body\.cockpit-mode #left-panel-stack > #look-panel \{ display: none !important; \}/);
   assert.match(css, /body\.ui-clean-view #look-panel,/);
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');

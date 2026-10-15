@@ -1141,6 +1141,17 @@ html.oko-preloader-demo #loading-screen.hidden {
   letter-spacing: 3px;
   color: var(--accent);
 }
+/* Telefón na výšku (2026-10-15, vlastník: „na mobile sprav krajšie … hlavne menšie"): oko a texty
+   v rovnakom pomere k obrazovke ako na počítači; jemnejší vír (8/9 px) a menší voľný stred nastaví
+   public/preloaderFlow.js pri rovnakej šírke (FLOW_COMPACT_MAX_W = 600). */
+@media (max-width: 600px) {
+  .loader-logo { width: 84px; margin-bottom: 14px; filter: drop-shadow(0 0 16px rgba(0, 246, 255, 0.42)); }
+  .loader-content h2 { font-size: 14px; letter-spacing: 5px; margin-bottom: 8px; }
+  .loader-status { font-size: 9px; letter-spacing: 1.5px; }
+  .loader-credit { margin-top: 9px; gap: 5px; font-size: 8px; letter-spacing: 2.5px; }
+  .loader-credit strong { letter-spacing: 2.5px; }
+  .loader-credit-rule { width: 40px; }
+}
 
 @keyframes pulse {
   0%, 100% { opacity: 0.4; }
@@ -9590,6 +9601,10 @@ body:not(.ui-clean-view):not(.recording-mode):has(#intel-hud[data-variant='minim
   height: 100%;
   padding: 0.45rem 0.3rem;
 }
+/* Telefón (2026-10-15, štýl a druh mapy späť v dolnej lište): 7 štýlov po 3,6 rem sa do panela
+   nezmestilo — Noir a Snow boli odrezané vpravo. Dva rady po štyroch, nič sa neposúva. */
+body.oko-mobile #command-dock .dock-popover-content .button-grid { flex-wrap: wrap; overflow: visible; gap: 6px; }
+body.oko-mobile #command-dock .dock-popover-content .style-btn { flex: 1 1 calc(25% - 6px); min-width: 0; min-height: 3.2rem; height: auto; }
 
 #command-dock .dock-popover-content .btn-icon {
   font-size: 1.15rem;
@@ -12468,18 +12483,27 @@ body.oko-mobile #oko-topbar {
 body.oko-mobile #title-bar .title-glow { display: none; }
 body.oko-mobile #top-center-actions { top: 52px; left: 12px; right: auto; transform: none; }
 body.oko-mobile #lang-switch { top: 10px; right: 12px; }
+/* Články a Súkromie pod sebou vpravo v druhom riadku lišty, ako na počítači pod SK·EN (2026-10-15,
+   vlastník: „to označené potom niekde uprac"): vedľa seba siahali až k piatim tlačidlám vľavo
+   a SÚKROMIE sa na 375 px orezávalo. Dva riadky po 18 px vyplnia pás 52–88 px; prst trafí širší
+   neviditeľný cieľ (padding vľavo), vzhľad ostáva. */
 body.oko-mobile #lang-switch #topics-link,
 body.oko-mobile #lang-switch #consent-open {
   position: fixed;
+  right: 12px;
   margin: 0;
   display: flex;
   align-items: center;
-  min-height: 36px;
-  top: 52px;
+  justify-content: flex-end;
+  min-height: 18px;
+  padding: 0 2px 0 24px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  line-height: 1;
   text-shadow: none;
 }
-body.oko-mobile #lang-switch #consent-open { right: 12px; padding: 0 2px; }
-body.oko-mobile #lang-switch #topics-link { right: 106px; }
+body.oko-mobile #lang-switch #topics-link { top: 52px; }
+body.oko-mobile #lang-switch #consent-open { top: 70px; }
 body.oko-mobile #global-loading-status { top: calc(var(--oko-topbar-h) + 8px); }
 /* Mobil na výšku (2026-10-04, vlastník: „prekontroluj mobil friendly"): atribúcia Cesium/Google
    má na jednom riadku ~440 px — na telefóne 360–390 px vytŕčala a „Data attribution" bol mimo
@@ -13286,10 +13310,9 @@ body.oko-karta-frame #intel-hud .hud-bottom-left { display: none; }
 .look-body .button-grid { flex-wrap: wrap; overflow: visible; margin-bottom: 10px; }
 .look-body .style-btn { flex: 1 1 64px; }
 .look-body .map-source-section { margin-top: 4px; }
-/* Dolná lišta bez Štýlu: dok nesie Polohu a mikrofón, #control-panel ostáva v DOM pre StyleManager. */
-body.oko-look-in-lane #command-dock > #control-panel { display: none !important; }
-/* Počítač (2026-10-15, vlastník: „daj to naspäť"): štýly a druh mapy ostávajú v dolnej lište — panel vľavo by bol prázdny. */
-body.oko-look-in-dock #left-panel-stack > #look-panel { display: none !important; }
+/* 2026-10-15 (vlastník: „daj to naspäť", aj na mobile): štýly a druh mapy ostávajú v dolnej lište —
+   panel „Štýl a podklad mapy" by bol prázdny v pruhu aj vo výsuve mobilu. */
+body.oko-look-in-dock #look-panel { display: none !important; }
 body.cockpit-mode #left-panel-stack > #look-panel { display: none !important; }
 /* STOP počas prehrávania scény (2026-10-11): jediné viditeľné ovládanie, keď je chróm skrytý. */
 #scene-playback-stop { display: none; position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 400; padding: 8px 16px; font: 600 11px/1 var(--font-mono, monospace); letter-spacing: 2px; color: #fff; background: rgba(160, 32, 32, 0.85); border: 1px solid rgba(255, 90, 90, 0.7); border-radius: 6px; cursor: var(--cursor-pointer, pointer); }

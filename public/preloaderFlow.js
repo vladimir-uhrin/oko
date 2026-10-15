@@ -54,6 +54,17 @@ export const FLOW_CLEAR_PAD = Object.freeze({ x: 14, y: 10, minA: 128, minB: 96 
 /** Plynulý okraj voľného stredu v jednotkách polomeru superelipsy (okraj = 1): pod inner nič,
  *  od inner po outer písmo nabieha (smoothstep), ďalej plné. */
 export const FLOW_CLEAR_FADE = Object.freeze({ inner: 1, outer: 1.4 });
+/** Telefón na výšku (2026-10-15, vlastník: „na mobile sprav krajšie … hlavne menšie"): písmo 11 px
+ *  dávalo na 375 px len ~34 stĺpcov — hrubé písmená a veľký voľný stred (min 256×192 px). Jemnejšia
+ *  mriežka a menší stred ako na počítači; oko a texty zmenší style.css v rovnakej šírke. */
+export const FLOW_COMPACT_MAX_W = 600;
+export const FLOW_COMPACT = Object.freeze({ font: 8, line: 9, pad: Object.freeze({ x: 10, y: 8, minA: 84, minB: 64 }) });
+/** Písmo, riadkovanie a okraj voľného stredu pre šírku okna (CSS px). Pure. */
+export function flowMetrics(width) {
+  return width > 0 && width <= FLOW_COMPACT_MAX_W
+    ? { font: FLOW_COMPACT.font, line: FLOW_COMPACT.line, pad: FLOW_COMPACT.pad }
+    : { font: FLOW_FONT_PX, line: FLOW_LINE_PX, pad: FLOW_CLEAR_PAD };
+}
 /** Vír: uhol = hodiny × rate / max(core, r) — hodnoty Midjourney. */
 export const FLOW_SWIRL = Object.freeze({ rate: 0.1, core: 0.1 });
 /** Rýchlosť hodín víru podľa stupňa načítania (každá zmena textu stavu = ďalší stupeň). */
@@ -569,7 +580,7 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
   const measure = () => {
     const r = content.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) return;
-    obs = obstacleFromRect(r);
+    obs = obstacleFromRect(r, flowMetrics(win.innerWidth).pad);
     const l = logo?.getBoundingClientRect?.();
     swirlC = l && l.width > 0 ? { x: l.left + l.width / 2, y: l.top + l.height / 2 } : { x: obs.cx, y: obs.cy };
     measuredOnce = true;
@@ -577,10 +588,11 @@ export function startPreloaderFlow({ doc = globalThis.document, win = globalThis
   };
   /** Mriežka, zdrojový blok a atlas písmen (JetBrains Mono) pre aktuálnu veľkosť — len tu je písmo. */
   const buildSource = () => {
-    const font = `400 ${Math.round(FLOW_FONT_PX * dpr)}px "JetBrains Mono", "SF Mono", "Fira Code", monospace`;
+    const m = flowMetrics(win.innerWidth);
+    const font = `400 ${Math.round(m.font * dpr)}px "JetBrains Mono", "SF Mono", "Fira Code", monospace`;
     const probe = doc.createElement('canvas').getContext('2d');
     probe.font = font;
-    cell = [Math.max(4, Math.round(probe.measureText('M').width)), Math.round(FLOW_LINE_PX * dpr)];
+    cell = [Math.max(4, Math.round(probe.measureText('M').width)), Math.round(m.line * dpr)];
     grid = [Math.ceil(size.width / cell[0]), Math.ceil(size.height / cell[1])];
     // zdrojový blok podľa mriežky (riadok obrazovky = riadok bloku, ako u Midjourney)
     const block = buildFlowBlock(grid[0], grid[1]);

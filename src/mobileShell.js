@@ -74,8 +74,9 @@ export const MOBILE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'conflicts', labelKey: 'mobile.conflicts', panelIds: Object.freeze(['ukraine-panel', 'mideast-panel', 'scene-panel']), expand: 'ukraine-panel' }),
   // DÁTA = Energia + Prehliadať (história, kamery, kontext) — rovnaké zóny ako na počítači.
   Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']), expand: 'gas-panel' }),
-  // VZHĽAD (2026-10-11): Štýl a podklad mapy (z dolnej lišty) + Zobrazenie a efekty.
-  Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['look-panel', 'pp-toggles']), expand: 'look-panel' }),
+  // VZHĽAD: Zobrazenie a efekty. Štýl a druh mapy sú od 2026-10-15 znova v dolnej lište (tlačidlo ŠTÝL),
+  // ako pred preusporiadaním 2026-10-11 (vlastník: „aj na mobiloch? … daj to naspäť").
+  Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['pp-toggles']), expand: 'pp-toggles' }),
   Object.freeze({ id: 'search', labelKey: 'mobile.search', panelIds: Object.freeze([]), action: 'location' }),
 ]);
 

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   FLOW_AMBER_WORDS, FLOW_CLEAR_FADE, FLOW_STAGE_SPEEDS, FLOW_SWIRL, buildFlowBlock, clearFade, clearRadius, flowStageSpeed,
-  obstacleFromRect, startPreloaderFlow, swirlSource,
+  obstacleFromRect, startPreloaderFlow, swirlSource, flowMetrics, FLOW_COMPACT, FLOW_COMPACT_MAX_W, FLOW_FONT_PX, FLOW_LINE_PX, FLOW_CLEAR_PAD,
 } from '../public/preloaderFlow.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
@@ -164,4 +164,23 @@ test('build pridá k odkazu na preloader odtlačok obsahu (?v=…) — Cloudflar
   assert.match(cfg, /function preloaderCacheBustPlugin\(\)/);
   assert.match(cfg, /\n {6}preloaderCacheBustPlugin\(\),\n {4}\],/, 'na konci zoznamu — poradie ostatných pluginov strážia iné testy');
   assert.ok(cfg.includes("html.replace('src=\"/preloaderFlow.js\"'"), 'prepisuje presne odkaz z index.html');
+});
+
+test('telefón na výšku (2026-10-15, vlastník: „na mobile krajšie, hlavne menšie"): jemnejší vír, menší stred aj oko a texty; počítač bez zmeny', () => {
+  const phone = flowMetrics(375);
+  assert.ok(phone.font < FLOW_FONT_PX && phone.line < FLOW_LINE_PX, 'jemnejšia mriežka písmen');
+  assert.ok(375 / (phone.font * 0.6) > 70, `na 375 px aspoň ~70 stĺpcov (bolo ~34) — ${Math.round(375 / (phone.font * 0.6))}`);
+  const content = { left: 120, top: 330, width: 140, height: 150 };
+  const small = obstacleFromRect(content, phone.pad); const big = obstacleFromRect(content);
+  assert.ok(small.a < big.a && small.b < big.b, 'voľný stred na telefóne menší');
+  assert.deepEqual(flowMetrics(1440), { font: FLOW_FONT_PX, line: FLOW_LINE_PX, pad: FLOW_CLEAR_PAD }, 'počítač bez zmeny');
+  assert.equal(flowMetrics(FLOW_COMPACT_MAX_W).font, FLOW_COMPACT.font);
+  assert.equal(flowMetrics(FLOW_COMPACT_MAX_W + 1).font, FLOW_FONT_PX);
+  const src = readFileSync(new URL('../public/preloaderFlow.js', import.meta.url), 'utf8');
+  assert.match(src, /obstacleFromRect\(r, flowMetrics\(win\.innerWidth\)\.pad\)/, 'stred podľa šírky okna');
+  assert.match(src, /const m = flowMetrics\(win\.innerWidth\);/, 'písmo atlasu podľa šírky okna');
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  const block = /@media \(max-width: 600px\) \{\s*\.loader-logo \{ width: (\d+)px;[\s\S]*?\.loader-content h2 \{ font-size: (\d+)px;[\s\S]*?\.loader-status \{ font-size: (\d+)px;/.exec(css);
+  assert.ok(block, 'oko a texty menšie v rovnakej šírke ako vír (600 px)');
+  assert.ok(Number(block[1]) < 128 && Number(block[2]) < 18 && Number(block[3]) < 11);
 });

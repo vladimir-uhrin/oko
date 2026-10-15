@@ -451,24 +451,11 @@ async function init() {
     syncLeftLane();
     leftLane.installHeaderToggle();
     leftLane.installRevealOnOpen();
-    // VZHĽAD (2026-10-11, vlastník: „sprav vzhľad"): štýly 1–7 a podklad mapy z dolnej lišty
-    // (#control-panel) do panela „Štýl a podklad mapy" v zóne VZHĽAD vedľa „Zobrazenie a efekty" —
-    // vizuálne voľby boli na troch miestach. Prvky si nechávajú id aj poslucháče StyleManagera;
-    // dolná lišta nesie už len Polohu a mikrofón (CSS body.oko-look-in-lane).
-    // 2026-10-15 (vlastník: „kde zmizli mapy druhy? … daj to naspäť"): na počítači ostávajú štýly aj druh
-    // mapy v dolnej lište (rozbaľovací ŠTÝL vedľa Polohy), panel vľavo sa skryje (body.oko-look-in-dock);
-    // presun do zóny VZHĽAD platí len na mobile, kde dolná lišta nie je.
-    try {
-      const mobile = window.matchMedia?.('(max-width: 720px)')?.matches;
-      const lookBody = document.querySelector('[data-look-body]');
-      const styleGrid = document.getElementById('style-buttons');
-      const mapSource = document.querySelector('#control-panel .map-source-section');
-      if (!mobile) document.body.classList.add('oko-look-in-dock');
-      else if (lookBody && styleGrid && mapSource) {
-        lookBody.append(styleGrid, mapSource);
-        document.body.classList.add('oko-look-in-lane');
-      }
-    } catch { /* dolná lišta ostane ako doteraz */ }
+    // Štýly 1–7 a druh mapy ostávajú v dolnej lište — rozbaľovací ŠTÝL / VIZUÁLNE PREDVOĽBY vedľa
+    // Polohy, na počítači aj na mobile (2026-10-15, vlastník: „kde zmizli mapy druhy? … daj to naspäť",
+    // „aj na mobiloch? … daj to naspäť"). Presun do panela „Štýl a podklad mapy" v zóne VZHĽAD
+    // (2026-10-11) je zrušený; prázdny panel skrýva CSS body.oko-look-in-dock.
+    document.body.classList.add('oko-look-in-dock');
     new MutationObserver(syncLeftLane).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     // Obnova odkazu môže otvoriť viac panelov naraz — po nej zase jeden.
     window.addEventListener('gev:initial-share-restore-settled', () => { leftLane.enforceSingleOpen(); leftLane.fitOpen(); });
