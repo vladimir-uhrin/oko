@@ -26,8 +26,12 @@ export const COUNTRY_BOUNDARIES_ID = 'country-boundaries';
 
 /** Flat political border line — draped on terrain and 3D Tiles. */
 export const LINE_COLOR_CSS = '#f0574d';
-export const LINE_ALPHA = 0.6;
-export const LINE_WIDTH = 1.4;
+// 2026-10-16 (vlastník: „tá čiara hraníc je pod uhlom trhaná"): pri plochom pohľade (551 km, sklon −31°,
+// Jadran → Balkán) sa 1,4 px čiara na teréne rozpadla na čiarky — šírka pod pixel pri šikmom priemete;
+// delenie segmentov, typ klasifikácie ani vypnuté zaostrenie nepomohli, od 2,0 px je súvislá. 2,2 px
+// s nižšou alfou 0,45 má podobnú váhu ako 1,4 px × 0,6 a ostáva jemná (porovnanie výrezov v scratchpade).
+export const LINE_ALPHA = 0.45;
+export const LINE_WIDTH = 2.2;
 /** Prelínanie zapnutia/vypnutia (ms) — bez skoku 393 čiar naraz. */
 export const FADE_MS = 500;
 
