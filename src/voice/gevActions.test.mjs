@@ -535,6 +535,51 @@ test('hlas: loď na telefóne nad 3 000 km sa nájde — vrstva lode najprv nač
   assert.ok(order.includes('select:123456789'));
 });
 
+test('hlas: „track ISS" na telefóne z diaľky nájde satelit hneď — na odložené lode nečaká (2026-10-16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  const vessels = {
+    whenLiveData: async () => { order.push('vessel-load'); return true; },
+    findByQuery: () => null,
+    selectById() { order.push('vessel-select'); return true; },
+  };
+  const satellites = {
+    findByQuery: (q) => (/iss/i.test(q) ? { noradId: 25544, name: 'ISS (ZARYA)', latitude: 10, longitude: 20, altitudeM: 420_000 } : null),
+    trackById(id) { order.push(`sat:${id}`); return true; },
+  };
+  const dataManager = {
+    layers: new Map([['ais-live-vessels', { module: vessels }], ['satellites', { module: satellites }]]),
+    isEnabled: (id) => id === 'ais-live-vessels' || id === 'satellites',
+    getAll: () => [],
+  };
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager });
+  const result = await runner('track_entity', { query: 'ISS' });
+  assert.equal(result.ok, true);
+  assert.equal(result.kind, 'satellite');
+  assert.ok(order.includes('sat:25544'));
+  assert.ok(!order.includes('vessel-load'), 'svet lodí (~22 MB, 25 s) sa kvôli satelitu nesťahuje');
+
+  // Nič nesadlo v pamäti ani medzi satelitmi: až potom lode načítať a hľadať znova.
+  const missing = await runner('track_entity', { query: 'NORDIC STAR' });
+  assert.equal(missing.ok, false);
+  assert.equal(order.filter((x) => x === 'vessel-load').length, 1, 'lode sa načítali raz, až na konci');
+});
+
+test('hlas: loď, ktorú vrstva má v pamäti, sa nájde bez čakania na načítanie', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  const module = {
+    whenLiveData: async () => { order.push('load'); return true; },
+    findByQuery: () => ({ mmsi: '123456789', name: 'Test vessel', latitude: 29.75, longitude: -95.35 }),
+    selectById(id) { order.push(`select:${id}`); return true; },
+  };
+  const dataManager = { layers: new Map([['ais-live-vessels', { module }]]), isEnabled: (id) => id === 'ais-live-vessels', getAll: () => [] };
+  const result = await createGevActionRunner({ viewer, styleManager, dataManager })('track_entity', { query: 'Test vessel' });
+  assert.equal(result.ok, true);
+  assert.ok(order.includes('select:123456789'));
+  assert.ok(!order.includes('load'));
+});
+
 test('move_camera and fly_route validate first, then use the shared camera authority seam', async () => {
   globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
   const { order, viewer, styleManager } = createVoiceNavigationHarness();

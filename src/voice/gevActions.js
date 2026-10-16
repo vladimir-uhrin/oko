@@ -1754,6 +1754,7 @@ async function trackEntity(viewer, dataManager, styleManager, args = {}) {
   const families = TRACKABLE_FAMILIES.filter((family) => !requested || family.layerId === requested);
   const skippedDisabled = [];
 
+  const searchable = [];
   for (const family of families) {
     if (!dataManager.isEnabled(family.layerId)) {
       skippedDisabled.push(family.layerId);
@@ -1761,55 +1762,68 @@ async function trackEntity(viewer, dataManager, styleManager, args = {}) {
     }
     const module = dataManager.layers.get(family.layerId)?.module;
     if (!module || typeof module.findByQuery !== 'function') continue;
-    // Telefón nad 3 000 km živé lode nesťahuje (aisLiveVessels.js aisLoadDeferred, 2026-10-16):
-    // hlas ich najprv načíta; inde whenLiveData hneď vráti false.
-    if (family.kind === 'vessel' && typeof module.whenLiveData === 'function') {
-      try { await module.whenLiveData(); } catch { /* hľadá v tom, čo vrstva má */ }
-    }
+    searchable.push({ family, module });
+  }
+
+  // 1. kolo: čo vrstvy majú v pamäti, bez čakania.
+  for (const { family, module } of searchable) {
     const found = module.findByQuery(query);
-    if (!found) continue;
-
-    if (family.kind === 'vessel'
-      && (!Number.isFinite(found.latitude) || !Number.isFinite(found.longitude))) {
-      return {
-        ok: false, action: 'track_entity', layerId: family.layerId, kind: family.kind,
-        error: 'The matched vessel has no usable position',
-      };
-    }
-
-    return runManagedVoiceNavigation(styleManager, family.kind, 'track_entity', () => {
-      let trackedOk = false;
-      if (family.kind === 'vessel') {
-        trackedOk = !!module.selectById?.(found.mmsi);
-        flyToLandmark(viewer, found.latitude, found.longitude, {
-          range: 6000, pitch: -45, heading: 0, buildingHeight: 0, duration: 2.0,
-        });
-      } else if (family.kind === 'satellite') {
-        trackedOk = !!module.trackById?.(found.noradId, { origin: 'voice' });
-      } else {
-        trackedOk = !!module.trackById?.(found.icao24, { origin: 'voice' });
-      }
-
-      return {
-        ok: trackedOk,
-        action: 'track_entity',
-        layerId: family.layerId,
-        kind: family.kind,
-        // Aircraft follow the flight layers' label convention (callsign →
-        // registration → icao24) so the spoken name matches what the UI shows;
-        // `registration` is absent on vessels/satellites and simply falls
-        // through to their own name/id links.
-        label: formatTrackedEntityLabel(found, query),
-        latitude: found.latitude ?? null,
-        longitude: found.longitude ?? null,
-        altitudeM: Number.isFinite(found.altitudeM) ? Math.round(found.altitudeM) : null,
-        error: trackedOk ? null : 'Match found but tracking failed',
-      };
-    });
+    if (found) return trackFoundEntity(viewer, styleManager, family, module, found, query);
+  }
+  // 2. kolo: telefón nad 3 000 km živé lode nesťahuje (aisLiveVessels.js aisLoadDeferred,
+  // 2026-10-16). Načítať ich (svet, na telefóne aj 25 s) až keď nič iné nesadlo — „track ISS"
+  // nájde satelit hneď. Inde whenLiveData hneď vráti false a druhé kolo nič nerobí.
+  for (const { family, module } of searchable) {
+    if (family.kind !== 'vessel' || typeof module.whenLiveData !== 'function') continue;
+    let loaded = false;
+    try { loaded = (await module.whenLiveData()) === true; } catch { loaded = false; }
+    const found = loaded ? module.findByQuery(query) : null;
+    if (found) return trackFoundEntity(viewer, styleManager, family, module, found, query);
   }
 
   const disabledNote = skippedDisabled.length ? ` (disabled layers skipped: ${skippedDisabled.join(', ')})` : '';
   return { ok: false, action: 'track_entity', query, error: `Nothing matched "${query}"${disabledNote}` };
+}
+
+/** Sleduj / vyber nájdený objekt (track_entity) a preleť k nemu. */
+function trackFoundEntity(viewer, styleManager, family, module, found, query) {
+  if (family.kind === 'vessel'
+    && (!Number.isFinite(found.latitude) || !Number.isFinite(found.longitude))) {
+    return {
+      ok: false, action: 'track_entity', layerId: family.layerId, kind: family.kind,
+      error: 'The matched vessel has no usable position',
+    };
+  }
+
+  return runManagedVoiceNavigation(styleManager, family.kind, 'track_entity', () => {
+    let trackedOk = false;
+    if (family.kind === 'vessel') {
+      trackedOk = !!module.selectById?.(found.mmsi);
+      flyToLandmark(viewer, found.latitude, found.longitude, {
+        range: 6000, pitch: -45, heading: 0, buildingHeight: 0, duration: 2.0,
+      });
+    } else if (family.kind === 'satellite') {
+      trackedOk = !!module.trackById?.(found.noradId, { origin: 'voice' });
+    } else {
+      trackedOk = !!module.trackById?.(found.icao24, { origin: 'voice' });
+    }
+
+    return {
+      ok: trackedOk,
+      action: 'track_entity',
+      layerId: family.layerId,
+      kind: family.kind,
+      // Aircraft follow the flight layers' label convention (callsign →
+      // registration → icao24) so the spoken name matches what the UI shows;
+      // `registration` is absent on vessels/satellites and simply falls
+      // through to their own name/id links.
+      label: formatTrackedEntityLabel(found, query),
+      latitude: found.latitude ?? null,
+      longitude: found.longitude ?? null,
+      altitudeM: Number.isFinite(found.altitudeM) ? Math.round(found.altitudeM) : null,
+      error: trackedOk ? null : 'Match found but tracking failed',
+    };
+  });
 }
 
 /** Releases tracking/selection on every entity layer family. */

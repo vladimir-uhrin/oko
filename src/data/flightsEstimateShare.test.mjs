@@ -94,9 +94,10 @@ test('zdieľanie letu: vynechaný poll (karta „· STALE") nie je NAŽIVO — �
     assert.equal(stale.stale, true, 'vynechaný poll = zastaraná poloha');
     assert.equal(stale.estimated, false);
     const sk = buildFlightShareCopy(stale, { lang: 'sk' });
-    assert.match(sk.description, /^ZASTARANÉ \(posledná známa poloha\) · /);
+    // 2026-10-16: poloha sa počas vynechaných pollov dopočítava (dead reckoning) — nie „posledná známa".
+    assert.match(sk.description, /^ZASTARANÉ \(poloha dopočítaná z posledného signálu\) · /);
     assert.doesNotMatch(sk.description, /NAŽIVO/);
-    assert.match(buildFlightShareCopy(stale, { lang: 'en' }).description, /^STALE \(last known position\) · /);
+    assert.match(buildFlightShareCopy(stale, { lang: 'en' }).description, /^STALE \(position extrapolated from the last signal\) · /);
 
     const { ctx, texts, strokes } = fakeCtx();
     drawFlightShareCard(ctx, stale, 1200, 594, { lang: 'sk' });

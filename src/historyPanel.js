@@ -156,6 +156,7 @@ export function installHistoryPanel({
   let currentFixes = [];
   let series = null;
   let searchToken = 0;
+  let liveRequests = 0; // kliky na Sledovať naživo (openLeg ich porovná pred zarámovaním)
 
   // ── vyhľadávanie ────────────────────────────────────────────────
   const searchRow = el(doc, 'div', 'history-row');
@@ -410,6 +411,10 @@ export function installHistoryPanel({
     detail.hidden = false;
     list.hidden = true;
     searchRow.hidden = true;
+    // Čo sledovalo kameru pri kliknutí (2026-10-16): sledovanie zapnuté počas načítania trasy
+    // (Sledovať naživo, iné lietadlo z mapy) je novší pokyn — zarámovanie ho nesmie zrušiť.
+    const trackedAtOpen = viewer?.trackedEntity;
+    const liveRequestsAtOpen = liveRequests;
     try {
       const fixes = await api.track(leg.icao24, { fromS: leg.firstT - 60, toS: leg.lastT + 60 });
       if (currentLeg !== leg) return;
@@ -431,7 +436,13 @@ export function installHistoryPanel({
       replay.load(fixes);
       // Časť letu bez pokrytia (oceán) je na glóbuse čiarkovaný odhad — povedať to aj v súhrne.
       if (replay.getState().estimatedGaps) stats.textContent += ` · ${t('history.gap-estimate')}`;
-      if (frame) {
+      // Sledovanie, ktoré návštevník zapol, kým sa trasa načítavala: trasa sa nakreslí, no kameru
+      // aj sledovanie nechať jemu (stopLiveTracking by ho zrušil hneď po zapnutí). Sledovať naživo
+      // lietadla, ktoré sa už sledovalo, entitu nemení — preto sa rátajú aj kliky.
+      const trackedNow = viewer?.trackedEntity;
+      const trackingStartedMeanwhile = liveRequests !== liveRequestsAtOpen
+        || (Boolean(trackedNow) && trackedNow !== trackedAtOpen);
+      if (frame && !trackingStartedMeanwhile) {
         // 2026-10-16: klik na let v zozname (aj po Späť z openLatest), pás štátneho stroja,
         // udalosť — prehrávač preberá kameru. Kým ju drží živé sledovanie (viewer.trackedEntity),
         // flyToBoundingSphere s ním bojuje a záber skončí mimo trasy aj lietadla. Pustiť až tu:
@@ -466,7 +477,7 @@ export function installHistoryPanel({
   backBtn.addEventListener('click', closeLeg);
   playBtn.addEventListener('click', () => replay.toggle());
   followBtn.addEventListener('click', () => replay.setFollow(followBtn.getAttribute('aria-pressed') !== 'true'));
-  liveBtn.addEventListener('click', () => { if (currentLeg && onTrackLive) onTrackLive(currentLeg.icao24); });
+  liveBtn.addEventListener('click', () => { if (currentLeg && onTrackLive) { liveRequests++; onTrackLive(currentLeg.icao24); } });
   slider.addEventListener('input', () => replay.seekFraction(Number(slider.value) / 1000));
   onUnitSystemChange(() => renderState(replay.getState()));
   void refreshStatus();

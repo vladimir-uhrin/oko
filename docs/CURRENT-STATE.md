@@ -2581,11 +2581,30 @@ Google 3D root tiles returned HTTP 403; live visual acceptance remains unverifie
   `zoom-in` guidance status (`ais.zoom-in-phone`) and the first-connect
   timer is paused; it restarts when the first request leaves. After zooming
   below 3,000 km the first load waits until the camera has been still for
-  1.2 s (the start fly-in crosses 3,000 km before it lands). Palette
-  search, the `?ship=` deep link, followed vessels
-  (`vesselSearchCommands` `openByMmsi`/server results) and voice
-  `track_entity` call `whenLiveData()`, which loads the deferred vessels at
-  once and waits for them, so they still open the live vessel.
+  1.2 s (the start fly-in crosses 3,000 km before it lands). Typing in the
+  palette does NOT load them (2026-10-16 — from orbit that was the ~22 MB
+  world on every aircraft or place search); the server results
+  (`/api/vessel-info/search`) find vessels anywhere, and choosing one, the
+  `?ship=` deep link, followed vessels (`vesselSearchCommands`
+  `openByMmsi`/`selectKnownLive`) and `selectByMmsi` call `whenLiveData()`,
+  which loads the deferred vessels at once and waits for them, so they still
+  open the live vessel. Voice `track_entity` first searches what every layer
+  already holds (so "track ISS" finds the satellite at once) and only then
+  waits on `whenLiveData()`. The single retry of an interrupted load re-checks
+  the deferral (zooming out during the 2 s wait no longer pulls the world);
+  the retry of an on-demand load is never deferred.
+- Phone bbox (`phoneVesselViewBounds`, `src/data/vesselViewFootprint.js`,
+  2026-10-16): Cesium `computeViewRectangle` takes the whole horizon quad
+  around the camera whenever a screen corner misses the globe — after the
+  start fly-in (260 km, −42°) that was −22.7..57.0 E / 45.1..60.2 N,
+  ~21,000 ships, 9.1 MB. Phones build the bbox from screen-edge samples on
+  the ellipsoid (a ray above the horizon is replaced by the horizon in the
+  same column), clip it at `PHONE_VIEW_CAP_FACTOR` (2) × camera-to-centre
+  distance from the screen centre (never under `PHONE_VIEW_CAP_MIN_M`,
+  300 km, so a low camera keeps vessels up to its horizon) and pad it as
+  before: 12.3..21.9 E / 45.5..57.3 N, ~1,760 ships, 0.77 MB (measured on
+  oko-api). Only the ~40 px band just below the horizon is cut. Desktop and
+  views with a pole on screen keep Cesium's rectangle.
 - Client render cap `VITE_AIS_LIVE_MAX_ROWS` (default 12,000); type-colored ship icons (tanker/cargo/passenger/fishing/tug); screen-space label clustering caps active labels at `VITE_AIS_LIVE_LABEL_MAX_ROWS` (default 900).
 - Click-to-inspect wired into the voice context store.
 

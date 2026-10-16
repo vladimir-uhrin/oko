@@ -284,6 +284,84 @@ test('openLatest z karty sledovaného lietadla nakreslí let, ale kameru nezará
   panel.destroy();
 });
 
+function findNode(node, pred) {
+  if (pred(node)) return node;
+  for (const child of node.children || []) {
+    const hit = findNode(child, pred);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+test('výber letu zo zoznamu: sledovanie zapnuté počas načítania trasy sa nezruší a kameru si nechá (2026-10-16)', async () => {
+  const doc = fakeDoc();
+  const nowS = Date.now() / 1000;
+  const pendingTracks = [];
+  const api = {
+    search: async (q) => [recentLeg(q, nowS)],
+    track: () => new Promise((resolve) => { pendingTracks.push(resolve); }),
+    status: async () => ({ fixes: 1, legs: 1, oldestT: nowS - 3600 }),
+  };
+  const abc = { id: 'flights:abc123' };
+  const viewer = { trackedEntity: abc };
+  const stops = [];
+  const live = [];
+  const replay = stubReplay();
+  const panel = installHistoryPanel({
+    viewer, doc, t, api, replayFactory: () => replay, setCollapsed: () => {},
+    // Sledovať naživo lietadla, ktoré sa už sleduje, entitu nemení (vrstva len prevezme kameru).
+    onTrackLive: (hex) => { live.push(hex); },
+    stopLiveTracking: () => { stops.push(viewer.trackedEntity?.id ?? null); viewer.trackedEntity = undefined; },
+  });
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  panel.open({ query: 'abc123' });
+  await tick();
+  const list = doc.root.body.children.find((c) => c.className === 'history-list');
+  const back = doc.root.body.children.find((c) => c.className === 'history-detail').children[0].children[0];
+  const liveBtn = findNode(doc.root.body, (n) => n.className === 'scene-btn history-live');
+  const clickLeg = () => list.children.at(-1).children[0].listeners.click[0]();
+
+  // 1) Kým sa trasa načítava, návštevník klikne na iné lietadlo na mape (sledovanie sa prepne).
+  clickLeg();
+  const def = { id: 'flights:def456' };
+  viewer.trackedEntity = def;
+  pendingTracks.shift()(recentFixes(nowS));
+  await tick();
+  assert.deepEqual(replay.loads, [2], 'trasa sa nakreslí');
+  assert.deepEqual(stops, [], 'sledovanie zapnuté počas načítania sa nezrušilo');
+  assert.equal(replay.frames, 0, 'zarámovanie by s ním bojovalo');
+  assert.equal(viewer.trackedEntity, def);
+
+  // 2) Sledovať naživo v paneli počas načítania (to isté lietadlo, entita sa nemení).
+  back.listeners.click[0]();
+  viewer.trackedEntity = abc;
+  clickLeg();
+  liveBtn.listeners.click[0]();
+  assert.deepEqual(live, ['abc123']);
+  pendingTracks.shift()(recentFixes(nowS));
+  await tick();
+  assert.deepEqual(stops, [], 'klik na Sledovať naživo je novší pokyn');
+  assert.equal(replay.frames, 0);
+  assert.equal(viewer.trackedEntity, abc);
+
+  // 3) Bez zásahu počas načítania: ako doteraz — sledovanie sa pustí a trasa zarámuje.
+  back.listeners.click[0]();
+  clickLeg();
+  pendingTracks.shift()(recentFixes(nowS));
+  await tick();
+  assert.deepEqual(stops, ['flights:abc123']);
+  assert.equal(replay.frames, 1);
+  // 4) Návštevník počas načítania sledovanie sám vypol: zarámovanie nikomu neprekáža.
+  viewer.trackedEntity = abc;
+  back.listeners.click[0]();
+  clickLeg();
+  viewer.trackedEntity = undefined;
+  pendingTracks.shift()(recentFixes(nowS));
+  await tick();
+  assert.equal(replay.frames, 2);
+  panel.destroy();
+});
+
 test('zapojenie v ui.js: História letov dostane stopLiveTracking, ktoré pustí lietadlo aj vojenský stroj', () => {
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
   const start = ui.indexOf('this._historyPanel = installHistoryPanel({');

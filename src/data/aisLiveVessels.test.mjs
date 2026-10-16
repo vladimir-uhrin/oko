@@ -58,7 +58,7 @@ import { registerEntityContext, selectEntityContext } from './contextStore.js';
 import { WORLD_FOCUS_REQUEST_EVENT } from '../worldFocus.js';
 import { ensureGeoidReady, geoidHeight } from './geoid.js';
 import { registerPickOwner, unregisterPickOwner } from './pickRegistry.js';
-import { applyVesselOverlayPolicy } from './vesselLabels.js';
+import { applyVesselOverlayPolicy, padVesselViewBounds } from './vesselLabels.js';
 import { layerFeedState } from './manager.js';
 import { t } from '../i18n.js';
 
@@ -908,6 +908,57 @@ test('lehota prvého pripojenia nevyprší ani počas čakania na opakovanie (li
   }
 });
 
+/** Skutočná kamera Cesia na telefóne na výšku (bez WebGL) — úvodný prelet nad Bratislavu. */
+function startTourViewer({ width = 390, height = 844, pitchDeg = -42 } = {}) {
+  const scene = {
+    canvas: { clientWidth: width, clientHeight: height },
+    drawingBufferWidth: width * 2, drawingBufferHeight: height * 2, pixelRatio: 2,
+    mapProjection: new Cesium.GeographicProjection(), mode: Cesium.SceneMode.SCENE3D,
+    frameState: { mode: Cesium.SceneMode.SCENE3D }, ellipsoid: Cesium.Ellipsoid.WGS84,
+    preRender: new Cesium.Event(), postRender: new Cesium.Event(), screenSpaceCameraController: { minimumZoomDistance: 1 },
+  };
+  const camera = new Cesium.Camera(scene);
+  camera.frustum.aspectRatio = width / height;
+  // camera.js START_AREA_VIEW.city: 230 km južne od miesta, 260 km, sklon −42°, pohľad na sever
+  camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(17.11, 46.0815, 260_000),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(pitchDeg), roll: 0 },
+  });
+  return { camera, scene };
+}
+
+const bboxOf = (url) => url.searchParams.get('bbox').split(',').map(Number);
+
+test('telefón po úvodnom prelete pýta výrez obrazovky (~10° šírky), nie celý obzor (~80°); počítač ako doteraz', async () => {
+  const ok = () => Promise.resolve(jsonResponse({ status: 'open', lastMessageAt: 1, rows: [] }));
+  const phone = installAisLoaderHarness({ mobile: true, responses: [ok] });
+  try {
+    const viewer = startTourViewer();
+    _setVesselStateForTest({ viewer, records: [], billboardCollection: fakeBillboards() });
+    await _loadLivePositionsForTest(viewer);
+    const [west, south, east, north] = bboxOf(phone.requests[0]);
+    // pred opravou: bbox=-22.7387,45.0974,56.9587,60.2071 (~20 900 lodí, 9 MB)
+    assert.ok(east - west < 11 && west > 11 && east < 23, `${west}..${east}`);
+    assert.ok(south < 45.6 && north > 55 && north < 58, `${south}..${north}`);
+    assert.ok(phone.timeouts[0] < AIS_VIEW_TIMEOUT_MS + 6000, 'užší výrez = kratší limit');
+  } finally {
+    phone.cleanup();
+  }
+  const desktop = installAisLoaderHarness({ responses: [ok] });
+  try {
+    // šikmo s obzorom na veľkej obrazovke: výrez Cesia (s rezervou) bez zmeny
+    const viewer = startTourViewer({ width: 1600, height: 900, pitchDeg: -25 });
+    _setVesselStateForTest({ viewer, records: [], billboardCollection: fakeBillboards() });
+    await _loadLivePositionsForTest(viewer);
+    const r = viewer.camera.computeViewRectangle(Cesium.Ellipsoid.WGS84);
+    const expected = padVesselViewBounds({ west: Cesium.Math.toDegrees(r.west), south: Cesium.Math.toDegrees(r.south), east: Cesium.Math.toDegrees(r.east), north: Cesium.Math.toDegrees(r.north) });
+    assert.deepEqual(bboxOf(desktop.requests[0]), [expected.west, expected.south, expected.east, expected.north].map((v) => Number(v.toFixed(4))));
+    assert.ok(expected.east - expected.west > 60, 'počítač ostáva pri výreze Cesia po obzor');
+  } finally {
+    desktop.cleanup();
+  }
+});
+
 test('aisLoadDeferred: len telefón nad 3 000 km, bez vybranej lode a bez potreby hľadania', () => {
   assert.equal(aisLoadDeferred({ mobile: true, cameraHeightM: 8_000_000 }), true);
   assert.equal(aisLoadDeferred({ mobile: true, cameraHeightM: MOBILE_SHIP_FAR_HIDE_M }), false);
@@ -1014,7 +1065,9 @@ test('telefón: lehota prvého pripojenia sa natiahne nanovo, keď odíde prvá 
   }
 });
 
-test('telefón nad 3 000 km: hľadanie a sledovaná loď lode načítajú hneď (svet) a nájdu živú loď', async () => {
+test('telefón nad 3 000 km: písanie v palete svet nesťahuje; výber lode (whenLiveData) áno a hľadanie ju potom nájde', async () => {
+  // 2026-10-16 (revízia): každé písmeno ≥ 3 znakov v palete (aj hľadanie lietadla či miesta) spustilo
+  // svet ~22 MB; po ďalšej odloženej obnove znova. Loď kdekoľvek nájde server, živé lode načíta až výber.
   const record = makeRecord({ name: 'NORDIC STAR' });
   const loaded = deferredFetchResponse();
   const harness = installAisLoaderHarness({ mobile: true, rowLimit: 50000, responses: [loaded.promise] });
@@ -1025,27 +1078,113 @@ test('telefón nad 3 000 km: hľadanie a sledovaná loď lode načítajú hneď 
     await _loadLivePositionsForTest(viewer);
     assert.equal(harness.requests.length, 0);
 
-    // písanie v palete: v pamäti nič, no hľadanie spustí načítanie
-    assert.deepEqual(aisLiveVesselsLayer.searchVessels('NORDIC'), []);
+    // písanie v palete (lietadlo, miesto, loď): v pamäti nič a nič sa nesťahuje
+    for (const q of ['RYR', 'RYR45', 'Košice', 'NORDIC', 'NORDIC ST']) {
+      assert.deepEqual(aisLiveVesselsLayer.searchVessels(q), []);
+    }
+    assert.equal(aisLiveVesselsLayer.findByQuery('NORDIC'), null);
+    assert.equal(harness.requests.length, 0, 'písanie ani hlasové hľadanie v pamäti svet nesťahuje');
+    assert.equal(_getVesselFeedStateForTest().status, 'zoom-in');
+
+    // výber výsledku zo servera / sledovaná loď (selectKnownLive → whenLiveData): načíta svet raz
+    const waiting = aisLiveVesselsLayer.whenLiveData();
+    const second = aisLiveVesselsLayer.whenLiveData();
     assert.equal(harness.requests.length, 1);
     assert.equal(harness.requests[0].searchParams.has('bbox'), false, 'kamera je nad 4 000 km → svet');
     assert.equal(harness.requests[0].searchParams.get('maxRows'), '50000');
     assert.equal(harness.timeouts[0], AIS_WORLD_TIMEOUT_MS);
     assert.equal(_getVesselFeedStateForTest().loading, true);
     assert.equal(_getVesselFeedStateForTest().status, undefined);
-
-    // sledovaná loď / klik vo výsledkoch servera čaká na to isté načítanie (druhá požiadavka nejde)
-    const waiting = aisLiveVesselsLayer.whenLiveData();
     loaded.resolve(jsonResponse({ status: 'open', lastMessageAt: 12, rows: [{ ...vesselRow(record), name: 'NORDIC STAR' }] }));
     assert.equal(await waiting, true);
+    assert.equal(await second, true, 'druhý výber čaká na to isté načítanie');
     assert.equal(harness.requests.length, 1);
     assert.deepEqual(aisLiveVesselsLayer.searchVessels('NORDIC').map((hit) => hit.mmsi), [record.mmsi]);
+    assert.equal(aisLiveVesselsLayer.findByQuery('NORDIC')?.mmsi, record.mmsi);
     assert.equal(_getVesselFeedStateForTest().firstConnectPhase, 'ready');
 
-    // ďalšia obnova zo zemegule sa opäť odloží (dáta ostávajú v pamäti)
+    // ďalšia obnova zo zemegule sa opäť odloží (dáta ostávajú v pamäti) — ani potom písanie nesťahuje
     await _loadLivePositionsForTest(viewer);
     assert.equal(harness.requests.length, 1);
     assert.equal(_getVesselFeedStateForTest().status, 'zoom-in');
+    assert.equal(_getVesselFeedStateForTest().count, 1);
+    assert.equal(aisLiveVesselsLayer.searchVessels('NORDIC').length, 1);
+    assert.equal(aisLiveVesselsLayer.searchVessels('LUFTHANSA').length, 0);
+    assert.equal(harness.requests.length, 1, 'po odloženej obnove písanie znova svet nesťahuje');
+  } finally {
+    harness.cleanup();
+  }
+});
+
+test('telefón: hlboký odkaz / výber lode, ktorú vrstva ešte nemá (selectByMmsi), lode načíta', async () => {
+  const harness = installAisLoaderHarness({ mobile: true, responses: [() => Promise.resolve(jsonResponse({ status: 'open', lastMessageAt: 12, rows: [] }))] });
+  try {
+    const viewer = movableViewer(8_000_000);
+    _setVesselStateForTest({ viewer, records: [], billboardCollection: fakeBillboards() });
+    _beginAisSessionForTest();
+    await _loadLivePositionsForTest(viewer);
+    assert.equal(aisLiveVesselsLayer.selectByMmsi('123456789'), false);
+    assert.equal(harness.requests.length, 1, 'výber je potvrdený zámer — načítanie ide');
+  } finally {
+    harness.cleanup();
+  }
+});
+
+for (const [label, farHeightM] of [['nad 3 000 km', 3_500_000], ['nad 4 000 km (svet)', 4_500_000], ['zemeguľa', 8_000_000]]) {
+  test(`telefón: opakovanie prerušeného načítania po oddialení ${label} nič nesťahuje; po priblížení výrez`, async () => {
+    const record = makeRecord();
+    const harness = installAisLoaderHarness({
+      mobile: true,
+      responses: [timeoutError, () => Promise.resolve(jsonResponse({ status: 'open', lastMessageAt: 12, rows: [vesselRow(record)] }))],
+    });
+    try {
+      const viewer = movableViewer(260_000);
+      _setVesselStateForTest({ viewer, records: [], billboardCollection: fakeBillboards() });
+      _beginAisSessionForTest();
+      await _loadLivePositionsForTest(viewer);
+      assert.equal(harness.requests.length, 1);
+      assert.ok(harness.requests[0].searchParams.has('bbox'));
+      // kým opakovanie čaká, návštevník oddiali
+      viewer.camera.positionCartographic.height = farHeightM;
+      harness.clock.advance(AIS_LOAD_RETRY_MS);
+      await flushAisLoad();
+      assert.equal(harness.requests.length, 1, 'opakovanie sa odložilo — žiadny svet ~22 MB');
+      let feed = _getVesselFeedStateForTest();
+      assert.equal(feed.status, 'zoom-in', 'výzva priblížiť, nie výpadok');
+      assert.equal(feed.error, null);
+      assert.equal(feed.loading, false);
+      assert.equal(harness.clock.activeCount(), 0, 'nič nečaká ani nevyprší');
+      assert.equal(_getAisDeferredStateForTest().deferred, true);
+
+      // priblíženie: bežné načítanie výrezu
+      viewer.camera.positionCartographic.height = 260_000;
+      await _loadLivePositionsForTest(viewer);
+      assert.equal(harness.requests.length, 2);
+      assert.ok(harness.requests[1].searchParams.has('bbox'));
+      feed = _getVesselFeedStateForTest();
+      assert.equal(feed.firstConnectPhase, 'ready');
+      assert.equal(feed.count, 1);
+    } finally {
+      harness.cleanup();
+    }
+  });
+}
+
+test('počítač: opakovanie prerušeného načítania ide aj po oddialení na svet (počítač lode zo sveta kreslí)', async () => {
+  const record = makeRecord();
+  const harness = installAisLoaderHarness({
+    responses: [timeoutError, () => Promise.resolve(jsonResponse({ status: 'open', lastMessageAt: 12, rows: [vesselRow(record)] }))],
+  });
+  try {
+    const viewer = movableViewer(260_000);
+    _setVesselStateForTest({ viewer, records: [], billboardCollection: fakeBillboards() });
+    _beginAisSessionForTest();
+    await _loadLivePositionsForTest(viewer);
+    viewer.camera.positionCartographic.height = 8_000_000;
+    harness.clock.advance(AIS_LOAD_RETRY_MS);
+    await flushAisLoad();
+    assert.equal(harness.requests.length, 2);
+    assert.equal(harness.requests[1].searchParams.has('bbox'), false);
     assert.equal(_getVesselFeedStateForTest().count, 1);
   } finally {
     harness.cleanup();

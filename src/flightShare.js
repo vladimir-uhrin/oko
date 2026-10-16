@@ -26,6 +26,15 @@ function formatWhen(whenMs, lang) {
   }
 }
 
+/**
+ * Čo znamená ZASTARANÉ pri lete (2026-10-16): stroj vynechal poll alebo feed čaká, poloha na mape
+ * je dopočítaná z posledného signálu (kurz a rýchlosť), nie nameraná ani zamrznutá. Pure.
+ * @param {'sk'|'en'} [lang]
+ */
+export function staleShareNote(lang = 'sk') {
+  return lang === 'en' ? 'position extrapolated from the last signal' : 'poloha dopočítaná z posledného signálu';
+}
+
 /** Percento priebehu letu alebo null. Pure. */
 export function flightShareProgressPercent(progress) {
   const fraction = Number(progress?.fractionDone);
@@ -58,10 +67,12 @@ export function buildFlightShareCopy(card, { whenMs = Date.now(), lang = 'sk' } 
   const route = clean(card?.routeLine);
   const title = [headline, airline, route].filter(Boolean).join(' · ').slice(0, 110) + ' | OKO';
   // Zastaraná poloha (2026-10-15, card.stale): vynechaný poll alebo čakanie feedu — karta ukazuje
-  // „· STALE" a poloha je dopočet z posledných hodnôt, príspevok ju nesmie volať NAŽIVO.
+  // „· STALE" a poloha je dopočet z posledných hodnôt, príspevok ju nesmie volať NAŽIVO. Ani
+  // „posledná známa poloha" (2026-10-16): lietadlo na mape sa posúva ďalej po poslednom kurze
+  // a rýchlosti (flights.js _deadReckon, najviac 5 min), text to musí povedať (staleShareNote).
   const status = card?.estimated
     ? (en ? 'ESTIMATED position' : 'ODHAD polohy') + (clean(card?.estimateLine) ? ` (${clean(card.estimateLine)})` : '')
-    : card?.stale ? (en ? 'STALE (last known position)' : 'ZASTARANÉ (posledná známa poloha)')
+    : card?.stale ? `${en ? 'STALE' : 'ZASTARANÉ'} (${staleShareNote(lang)})`
       : (en ? 'LIVE' : 'NAŽIVO');
   const facts = (card?.flightLines || []).slice(0, 2).map(clean).filter(Boolean);
   const percent = flightShareProgressPercent(card?.progress);
@@ -145,6 +156,9 @@ export function drawFlightShareCard(ctx, card, width, height, { lang = 'sk' } = 
   if (alert) lines.push({ text: alert, font: `700 17px ${MONO}`, color: '#f87171', h: 26 });
   const estimate = card.estimated ? clean(card.estimateLine) : '';
   if (estimate) lines.push({ text: estimate, font: `500 16px ${MONO}`, color: ESTIMATE, h: 24 });
+  // Zastaraný let: pod štítkom ZASTARANÉ aj prečo — poloha sa dopočítava (staleShareNote).
+  const staleNote = !card.estimated && card.stale ? staleShareNote(lang) : '';
+  if (staleNote) lines.push({ text: staleNote.charAt(0).toUpperCase() + staleNote.slice(1), font: `500 16px ${MONO}`, color: ESTIMATE, h: 24 });
 
   const headH = 44;
   const panelH = pad + headH + lines.reduce((sum, line) => sum + line.h, 0) + pad - 6;

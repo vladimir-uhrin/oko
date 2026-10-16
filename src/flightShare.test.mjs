@@ -94,9 +94,13 @@ test('pás na obrázku: značka okolive.sk, hlavička, štítok stavu, trasa, od
 test('zastaraný let (vynechaný poll, čakanie feedu) nie je NAŽIVO: ZASTARANÉ v texte aj jantárový štítok', () => {
   const stale = { ...LIVE_CARD, stale: true };
   const sk = buildFlightShareCopy(stale, { lang: 'sk' });
-  assert.match(sk.description, /^ZASTARANÉ \(posledná známa poloha\) · Letová hladina FL320/);
-  assert.doesNotMatch(sk.description, /NAŽIVO/);
-  assert.match(buildFlightShareCopy(stale, { lang: 'en' }).description, /^STALE \(last known position\) · /);
+  // 2026-10-16: lietadlo sa počas vynechaných pollov posúva po poslednom kurze (dead reckoning) —
+  // „posledná známa poloha" nebola pravda; text hovorí, že poloha je dopočítaná.
+  assert.match(sk.description, /^ZASTARANÉ \(poloha dopočítaná z posledného signálu\) · Letová hladina FL320/);
+  assert.doesNotMatch(sk.description, /NAŽIVO|posledná známa/);
+  const enCopy = buildFlightShareCopy(stale, { lang: 'en' });
+  assert.match(enCopy.description, /^STALE \(position extrapolated from the last signal\) · /);
+  assert.doesNotMatch(enCopy.description, /last known/);
   // Odhad má prednosť pred zastaraním (odhad je vždy aj „nie naživo", ale nesie zdroj).
   assert.match(buildFlightShareCopy({ ...ESTIMATED_CARD, stale: true }, { lang: 'sk' }).description, /^ODHAD polohy/);
 
@@ -106,9 +110,20 @@ test('zastaraný let (vynechaný poll, čakanie feedu) nie je NAŽIVO: ZASTARAN�
   assert.ok(chip, 'štítok ZASTARANÉ');
   assert.equal(chip.color, '#fbbf24', 'tón odhadu, nie zelené NAŽIVO');
   assert.ok(!texts.some((x) => x.text === 'NAŽIVO'));
+  const note = texts.find((x) => x.text === 'Poloha dopočítaná z posledného signálu');
+  assert.ok(note, 'aj na obrázku/videu: prečo ZASTARANÉ');
+  assert.equal(note.color, '#fbbf24');
   const en = fakeCtx();
   drawFlightShareCard(en.ctx, stale, 1200, 594, { lang: 'en' });
   assert.ok(en.texts.some((x) => x.text === 'STALE'));
+  assert.ok(en.texts.some((x) => x.text === 'Position extrapolated from the last signal'));
+  // Živý let ani odhad (má vlastný riadok zdroja) poznámku nemajú.
+  const live = fakeCtx();
+  drawFlightShareCard(live.ctx, LIVE_CARD, 1200, 594, { lang: 'sk' });
+  assert.ok(!live.texts.some((x) => /dopočítaná/.test(x.text)));
+  const est = fakeCtx();
+  drawFlightShareCard(est.ctx, { ...ESTIMATED_CARD, stale: true }, 1200, 594, { lang: 'sk' });
+  assert.ok(!est.texts.some((x) => /dopočítaná/.test(x.text)));
 });
 
 test('dlhý text sa skráti do šírky pásu', () => {

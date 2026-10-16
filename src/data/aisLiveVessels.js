@@ -59,6 +59,7 @@ import {
   padVesselViewBounds,
   vesselPositionAge,
 } from './vesselLabels.js';
+import { phoneVesselViewBounds } from './vesselViewFootprint.js';
 
 /** Uzly → m/s (kartička pod kurzorom formátuje rýchlosť z m/s ako lietadlá). */
 const KN_TO_MPS = 0.514444;
@@ -677,9 +678,10 @@ const aisLiveVesselsLayer = {
   searchVessels(query, { limit = 8 } = {}) {
     const q = String(query ?? '').trim().toUpperCase();
     if (q.length < 3) return [];
-    // Telefón nad 3 000 km lode nesťahuje (aisLoadDeferred): hľadanie ich načíta; paleta sa po
-    // výsledkoch servera prekreslí a živé lode už nájde (2026-10-16).
-    if (state.deferred) void whenLiveData();
+    // Telefón nad 3 000 km lode nesťahuje (aisLoadDeferred) a písanie v palete ich nenačíta
+    // (2026-10-16): z obežnej dráhy by to bol svet ~22 MB pri každom hľadaní lietadla či miesta.
+    // Loď kdekoľvek nájde server (vesselSearchCommands → /api/vessel-info/search); až výber
+    // (selectByMmsi, selectKnownLive → whenLiveData) načíta živé lode a otvorí živú kartu.
     const out = [];
     for (const record of state.vesselRecords || []) {
       const name = String(record.name || '').toUpperCase();
@@ -716,7 +718,8 @@ const aisLiveVesselsLayer = {
 
   findByQuery(query) {
     if (query === null || query === undefined) return null;
-    if (state.deferred) void whenLiveData();
+    // Bez načítania odložených lodí (2026-10-16): hlas (gevActions track_entity) najprv skúsi,
+    // čo je v pamäti, a ostatné vrstvy (satelity) — na lode čaká cez whenLiveData až potom.
     const records = state.vesselRecords;
     if (!Array.isArray(records) || !records.length) return null;
     const q = String(query).trim();
@@ -1394,14 +1397,16 @@ function isInterruptedTransport(error) {
 /**
  * Naplánuje JEDINÉ opakovanie prerušeného načítania (prvého aj obnovy, 2026-10-16). Zlyhané
  * opakovanie sa už neopakuje a hlási sa ako doteraz (markAisUnavailable).
+ * @param {number} sessionId
+ * @param {{demand?: boolean}} [o] demand = opakuje sa načítanie na požiadanie (neodkladá sa)
  * @returns {boolean} true = opakovanie naplánované, chybu zatiaľ nehlásiť.
  */
-function scheduleLoadRetry(sessionId) {
+function scheduleLoadRetry(sessionId, { demand = false } = {}) {
   clearLoadRetryTimer();
   state.loadRetryTimer = _aisRuntime.setTimeout(() => {
     state.loadRetryTimer = null;
     if (!state.enabled || state.sessionId !== sessionId) return;
-    void loadLivePositions(state.viewer, { retry: true });
+    void loadLivePositions(state.viewer, { retry: true, demandRetry: demand });
   }, AIS_LOAD_RETRY_MS);
   return true;
 }
@@ -1467,15 +1472,18 @@ function whenLiveData() {
   return load;
 }
 
-async function loadLivePositions(viewer, { retry = false } = {}) {
+async function loadLivePositions(viewer, { retry = false, demandRetry = false } = {}) {
   if (!viewer || state.loading) return;
   // Telefón nad 3 000 km lode nekreslí — ani ich nesťahuje (aisLoadDeferred, 2026-10-16).
-  // Opakovanie pokračuje načítanie, ktoré už bolo potrebné, preto sa neodkladá.
-  if (!retry && aisLoadDeferred({
+  // Opakovanie načítania na požiadanie (hľadanie, sledovaná loď, hlas) sa neodkladá. Opakovanie
+  // bežného načítania áno: kým čakalo, návštevník mohol oddialiť nad 3 000 km — nad 4 000 km by
+  // opakovanie bez výrezu stiahlo celý svet (~22 MB), ktorý telefón odtiaľ ani nekreslí.
+  const demand = state.liveDemand || demandRetry;
+  if (aisLoadDeferred({
     mobile: isMobileShell(),
     cameraHeightM: viewer.camera?.positionCartographic?.height,
     selected: Boolean(state.selectedRecord),
-    demand: state.liveDemand,
+    demand,
   })) {
     deferAisLoad();
     return;
@@ -1545,7 +1553,7 @@ async function loadLivePositions(viewer, { retry = false } = {}) {
   } catch (error) {
     if (!ownsAisRequest(requestController, requestSessionId)) {
       // zrušené samotnou vrstvou (vypnutie, nová relácia) — nič nehlásiť
-    } else if (inTransport && !retry && isInterruptedTransport(error) && scheduleLoadRetry(requestSessionId)) {
+    } else if (inTransport && !retry && isInterruptedTransport(error) && scheduleLoadRetry(requestSessionId, { demand })) {
       // Prenos vypršal / prerušil sa: vrstva sa ďalej načítava („awaiting first AIS position…",
       // pri obnove lode ostávajú) a o AIS_LOAD_RETRY_MS to skúsi znova (raz), bez červenej lišty.
       console.warn('[Data:ais-live-vessels] load interrupted, retrying once', error?.name || error);
@@ -1648,6 +1656,13 @@ function vesselViewBounds() {
   const camera = state.viewer?.camera;
   if (!camera || camera.positionCartographic?.height > 4_000_000) return '';
   try {
+    // Telefón: výrez podľa toho, čo obrazovka naozaj ukazuje, nie po celý obzor okolo kamery
+    // (vesselViewFootprint.js, 2026-10-16 — po úvodnom prelete 9 MB → 0,8 MB).
+    if (isMobileShell()) {
+      const canvas = state.viewer.scene?.canvas || state.viewer.canvas;
+      const phone = phoneVesselViewBounds(camera, canvas?.clientWidth, canvas?.clientHeight);
+      if (phone) return [phone.west, phone.south, phone.east, phone.north].map(v => v.toFixed(4)).join(',');
+    }
     const rect = camera.computeViewRectangle?.(Cesium.Ellipsoid.WGS84);
     if (!rect) return '';
     // rezerva: výrez z elipsoidu pri šikmom pohľade odreže spodok obrazovky (vesselLabels.js)
