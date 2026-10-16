@@ -659,12 +659,16 @@ const CCTV_CAL_FIELDS = {
  * dvoch pokusoch („ľadovce", potom „vyzerá to ako mraky — vypni to"). Odvtedy shader fotoreálu
  * svetlá zblízka tlmí (photorealNight.js: pod 400 km nula, plné od 1 500 km) a 2026-10-16
  * vlastník: „nočné svetlá nefungujú a daj ich implicitne on" → DEFAULT ZAPNUTÉ; uložená voľba
- * '0' (vypnuté ručne) ostáva rešpektovaná. Kľúč 'oko-city-lights' (nie 'oko-night-lights').
+ * '0' (vypnuté ručne) ostáva rešpektovaná. Kľúč v2: stará verzia zapisovala voľbu pri KAŽDOM
+ * štarte (aj predvolenú), takže všetci vracajúci sa návštevníci mali uložené '0' a nová predvoľba
+ * by sa ich netýkala — starý kľúč sa ignoruje a zmaže, do v2 sa píše len pri kliknutí.
  */
-const NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights';
+const NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights-v2';
+const NIGHT_LIGHTS_LEGACY_KEY = 'oko-city-lights';
 function readStoredNightLights() {
   try {
     if (typeof localStorage === 'undefined') return true;
+    localStorage.removeItem(NIGHT_LIGHTS_LEGACY_KEY);
     return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) !== '0';
   } catch {
     return true;
@@ -11173,16 +11177,19 @@ export class StyleManager {
    */
   _initNightLightsToggle() {
     this._nightLightsBtn?.addEventListener('click', () => {
-      this._setNightLightsEnabled(!this._nightLightsEnabled);
+      this._setNightLightsEnabled(!this._nightLightsEnabled, { persist: true });
     });
     this._setNightLightsEnabled(this._nightLightsEnabled);
   }
 
-  _setNightLightsEnabled(enabled) {
+  /** @param {boolean} enabled @param {{persist?: boolean}} [o] persist = voľba používateľa (klik), nie štart */
+  _setNightLightsEnabled(enabled, { persist = false } = {}) {
     this._nightLightsEnabled = enabled !== false;
-    try {
-      if (typeof localStorage !== 'undefined') localStorage.setItem(NIGHT_LIGHTS_STORAGE_KEY, this._nightLightsEnabled ? '1' : '0');
-    } catch { /* súkromný režim */ }
+    if (persist) {
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem(NIGHT_LIGHTS_STORAGE_KEY, this._nightLightsEnabled ? '1' : '0');
+      } catch { /* súkromný režim */ }
+    }
     this.mapStackController?.setCityLightsEnabled?.(this._nightLightsEnabled);
     this._syncNightLightsButtonState();
   }

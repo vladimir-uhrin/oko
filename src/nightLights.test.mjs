@@ -91,5 +91,10 @@ test('tripwire (2026-09-07, default 2026-10-16): svetlá miest majú vlastný vy
   assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY\) !== '0'/, 'zapnuté, kým používateľ výslovne nevypne (uložené 0)');
   assert.match(ui, /setCityLightsEnabled\?\.\(this\._nightLightsEnabled\)/, 'vypínač píše do controllera cez setCityLightsEnabled');
   assert.match(ui, /setNightLightsEnabled\?\.\(this\._dayNightEnabled\)/, 'Deň/noc ostáva hlavným prepínačom');
-  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights'/, 'voľba per zariadenie (nový kľúč, nech stará zapnutá voľba neprežije)');
+  // Stará verzia zapisovala voľbu pri každom štarte → všetci mali uložené '0'; nový kľúč, zápis len pri kliknutí.
+  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights-v2'/, 'kľúč v2 (starý niesol predvolené 0 z každého štartu)');
+  assert.match(ui, /localStorage\.removeItem\(NIGHT_LIGHTS_LEGACY_KEY\)/, 'starý kľúč sa zmaže');
+  assert.match(ui, /_setNightLightsEnabled\(!this\._nightLightsEnabled, \{ persist: true \}\)/, 'ukladá sa len klik používateľa');
+  assert.match(ui, /\n\s+this\._setNightLightsEnabled\(this\._nightLightsEnabled\);\n/, 'štart neukladá');
+  assert.match(ui, /if \(persist\) \{\n\s+try \{\n\s+if \(typeof localStorage !== 'undefined'\) localStorage\.setItem\(NIGHT_LIGHTS_STORAGE_KEY/, 'zápis len s persist');
 });
