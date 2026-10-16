@@ -24,15 +24,16 @@ import { IMAGERY_ROLE, tagImageryRole } from './imageryOrder.js';
 export const FAR_GLOBE_ENTER_M = 1_000_000;
 /** Deň: pod touto výškou (m) sa vráti fotoreál (hysteréza 300 km). */
 export const FAR_GLOBE_EXIT_M = 700_000;
-/** Noc (Slnko pod −6° nad cieľom): glóbus drží dlhšie — Black Marble je pri 450 km ešte ostrá a fotoreál
- *  v noci je len stlmený denný obraz; skok z „Zeme v noci" na tmavozelený terén má prísť čo najnižšie. */
-export const FAR_GLOBE_NIGHT_ENTER_M = 700_000;
-export const FAR_GLOBE_NIGHT_EXIT_M = 450_000;
+/** Noc (Slnko pod −6° nad cieľom): glóbus drží dlhšie, lebo fotoreál v noci je len stlmený denný obraz —
+ *  ale len kým je OSTRÝ (vlastník: „musí to byť ostré"): Black Marble má 500 m/px a pri 600 km výšky je to
+ *  ~1 texel na pixel (záber ≈ 1,15 × výška na 1 440 px); nižšie by sa dlaždice zväčšovali a mäkli. */
+export const FAR_GLOBE_NIGHT_ENTER_M = 850_000;
+export const FAR_GLOBE_NIGHT_EXIT_M = 600_000;
 export const NIGHT_SUN_ELEVATION_DEG = -6;
 /** Podklady, ktoré majú glóbus skrytý (len tam má diaľkový režim zmysel). */
 export const FAR_GLOBE_STACKS = Object.freeze(['photoreal']);
 /** Osvetlenie v diaľkovom režime (výšky nad povrchom): noc naplno už pod nočným prahom návratu. */
-export const FAR_GLOBE_LIGHTING_M = Object.freeze({ fadeOut: 330_000, fadeIn: 420_000 });
+export const FAR_GLOBE_LIGHTING_M = Object.freeze({ fadeOut: 450_000, fadeIn: 560_000 });
 /** Štart: preloader počká, kým má glóbus z výšky dlaždice (inak by sa ukázala čierna Zem), najviac toľko ms. */
 export const FAR_GLOBE_READY_CAP_MS = 3000;
 /**
@@ -103,6 +104,7 @@ const NOOP = Object.freeze({ far: false, whenReady: Promise.resolve(false), chec
  * @param {() => object} [o.createDayLayer] továreň dennej vrstvy (testy)
  * @param {() => object} [o.createNightLayer] továreň nočnej vrstvy (testy)
  * @param {(scene: object) => boolean} [o.isNight] noc nad cieľom (predvolene Slnko pod −6°, testy injektujú)
+ * @param {(far: boolean) => void} [o.onFarChange] volá sa pri vstupe (true) a odchode (false) — napr. jas lietadiel
  * @param {(fn: Function, ms: number) => unknown} [o.setTimer]
  * @returns {{far: boolean, whenReady: Promise<boolean>, check: (force?: boolean) => boolean, destroy: () => void}}
  *   `whenReady`: glóbus z výšky má dlaždice (alebo režim netreba / strop) — štart naň počká.
@@ -111,6 +113,7 @@ export function installFarGlobe({
   viewer, tileset, getStackId,
   createDayLayer = defaultCreateDayLayer, createNightLayer = defaultCreateNightLayer,
   isNight = (sc) => sunElevationDegAt(sc?.camera?.positionCartographic, viewer?.clock?.currentTime) < NIGHT_SUN_ELEVATION_DEG,
+  onFarChange = null,
   now = Date.now, minIntervalMs = 250, readyCapMs = FAR_GLOBE_READY_CAP_MS, setTimer = globalThis.setTimeout,
 } = {}) {
   const scene = viewer?.scene;
@@ -150,6 +153,7 @@ export function installFarGlobe({
     scene.globe.show = true;
     tightLighting();
     scene.requestRender?.();
+    try { onFarChange?.(true); } catch { /* doplnok (jas lietadiel) nesmie zhodiť režim */ }
   };
 
   /** @param {{hideGlobe: boolean}} o hideGlobe = podklad je stále fotoreál (radič glóbus nespravuje) */
@@ -167,6 +171,7 @@ export function installFarGlobe({
     }
     applyGlobeLighting(scene, isGlobeLightingEnabled(scene)); // štandardné vzdialenosti späť
     scene.requestRender?.();
+    try { onFarChange?.(false); } catch { /* doplnok */ }
   };
 
   const check = (force = false) => {

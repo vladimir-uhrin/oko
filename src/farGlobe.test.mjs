@@ -23,12 +23,12 @@ test('rozhodnutie cez deň: nad 1 000 km glóbus, pod 700 km fotoreál (hysteré
   assert.equal(farGlobeWanted({ heightM: NaN, stackId: 'photoreal', far: true }), true, 'bez výšky sa stav nemení');
 });
 
-test('rozhodnutie v noci: glóbus drží dlhšie (vstup 700 km, návrat 450 km) — Black Marble je ostrá, fotoreál v noci len stlmený', () => {
-  assert.equal(farGlobeWanted({ heightM: 800_000, stackId: 'photoreal', night: true }), true);
-  assert.equal(farGlobeWanted({ heightM: 800_000, stackId: 'photoreal', night: false }), false, 'cez deň 800 km ešte fotoreál');
-  assert.equal(farGlobeWanted({ heightM: 500_000, stackId: 'photoreal', night: true, far: true }), true, 'noc: 500 km stále glóbus');
-  assert.equal(farGlobeWanted({ heightM: 400_000, stackId: 'photoreal', night: true, far: true }), false);
-  assert.equal(FAR_GLOBE_NIGHT_ENTER_M, 700_000); assert.equal(FAR_GLOBE_NIGHT_EXIT_M, 450_000);
+test('rozhodnutie v noci: glóbus drží dlhšie (vstup 850 km, návrat 600 km) — len kým je Black Marble ostrá (~1 texel/px pri 600 km)', () => {
+  assert.equal(farGlobeWanted({ heightM: 900_000, stackId: 'photoreal', night: true }), true);
+  assert.equal(farGlobeWanted({ heightM: 900_000, stackId: 'photoreal', night: false }), false, 'cez deň 900 km ešte fotoreál');
+  assert.equal(farGlobeWanted({ heightM: 650_000, stackId: 'photoreal', night: true, far: true }), true, 'noc: 650 km stále glóbus');
+  assert.equal(farGlobeWanted({ heightM: 550_000, stackId: 'photoreal', night: true, far: true }), false, 'pod 600 km by sa dlaždice zväčšovali');
+  assert.equal(FAR_GLOBE_NIGHT_ENTER_M, 850_000); assert.equal(FAR_GLOBE_NIGHT_EXIT_M, 600_000);
   assert.ok(FAR_GLOBE_LIGHTING_M.fadeIn < FAR_GLOBE_NIGHT_EXIT_M, 'noc naplno skôr, než sa vráti fotoreál');
   assert.equal(NIGHT_SUN_ELEVATION_DEG, -6);
 });
@@ -71,10 +71,10 @@ function harness({ height = 7_000_000, lighting = true, night = false } = {}) {
   };
   const tileset = { show: true };
   let stack = 'photoreal'; let t = 1_000_000; let isNight = night;
-  const timers = [];
+  const timers = []; const farChanges = [];
   const mk = (name) => () => ({ name, show: true, dayAlpha: 1, nightAlpha: 1 });
-  const ctl = installFarGlobe({ viewer: { scene, imageryLayers }, tileset, getStackId: () => stack, createDayLayer: mk('day'), createNightLayer: mk('night'), isNight: () => isNight, now: () => t, setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; } });
-  return { scene, tileset, items, ctl, timers, render: () => { for (const fn of [...listeners]) fn(); }, tick: (ms) => { t += ms; }, setStack: (s) => { stack = s; }, setNight: (n) => { isNight = n; }, get listeners() { return listeners.size; } };
+  const ctl = installFarGlobe({ viewer: { scene, imageryLayers }, tileset, getStackId: () => stack, createDayLayer: mk('day'), createNightLayer: mk('night'), isNight: () => isNight, onFarChange: (f) => farChanges.push(f), now: () => t, setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; } });
+  return { scene, tileset, items, ctl, timers, farChanges, render: () => { for (const fn of [...listeners]) fn(); }, tick: (ms) => { t += ms; }, setStack: (s) => { stack = s; }, setNight: (n) => { isNight = n; }, get listeners() { return listeners.size; } };
 }
 
 test('vstup z výšky: tileset skrytý, glóbus s dennou vrstvou dole a nočnou navrchu (dayAlpha 0 / nightAlpha 1, zosilnená), prísne osvetlenie', () => {
@@ -105,22 +105,23 @@ test('návrat zblízka: vrstvy preč, glóbus skrytý, tileset späť, štandard
   assert.equal(h.ctl.far, true, 'do 250 ms sa nekontroluje');
   h.tick(300); h.render();
   assert.equal(h.ctl.far, false, 'deň: 600 km = fotoreál');
+  assert.deepEqual(h.farChanges, [true, false], 'onFarChange pri vstupe aj odchode (jas lietadiel)');
   assert.deepEqual(h.items, []);
   assert.equal(h.scene.globe.show, false);
   assert.equal(h.tileset.show, true);
   assert.equal(h.scene.globe.lightingFadeOutDistance, GLOBE_RADIUS_M + LIGHTING_FADE_OUT_M, 'štandard späť');
   assert.equal(h.scene.globe.lightingFadeInDistance, GLOBE_RADIUS_M + LIGHTING_FADE_IN_M);
-  // noc: pri 600 km zasa glóbus (vstup 700 km nočný prah neplatí… 600 < 700 → nie), pri 800 km áno
+  // noc: pri 600 km nič (pod nočným prahom vstupu 850 km), pri 900 km glóbus, drží do 600 km
   h.setNight(true);
   h.tick(300); h.render();
   assert.equal(h.ctl.far, false, 'noc, 600 km: pod nočným prahom vstupu');
-  h.scene.camera.positionCartographic.height = 800_000;
+  h.scene.camera.positionCartographic.height = 900_000;
   h.tick(300); h.render();
-  assert.equal(h.ctl.far, true, 'noc, 800 km: glóbus');
-  h.scene.camera.positionCartographic.height = 500_000;
+  assert.equal(h.ctl.far, true, 'noc, 900 km: glóbus');
+  h.scene.camera.positionCartographic.height = 650_000;
   h.tick(300); h.render();
-  assert.equal(h.ctl.far, true, 'noc, 500 km: glóbus stále (návrat až pod 450 km)');
-  h.scene.camera.positionCartographic.height = 400_000;
+  assert.equal(h.ctl.far, true, 'noc, 650 km: glóbus stále (návrat až pod 600 km)');
+  h.scene.camera.positionCartographic.height = 550_000;
   h.tick(300); h.render();
   assert.equal(h.ctl.far, false);
   // prelet z výšky: fotoreál, kým sa letí; po dolete podľa výšky
@@ -191,7 +192,8 @@ test('štart: whenReady sa splní, keď má glóbus z výšky dlaždice; zblízk
 test('zapojenie: main.js inštaluje Zem z výšky hneď po radiči, štart čaká na whenReady; stav „degradované" prekryvov NASA berie do úvahy viditeľný glóbus', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ installFarGlobe \} from '\.\/farGlobe\.js';/);
-  assert.match(main, /const farGlobe = installFarGlobe\(\{ viewer, tileset, getStackId: \(\) => mapStackController\.getActiveId\(\) \}\);/);
+  assert.match(main, /const farGlobe = installFarGlobe\(\{\n\s+viewer, tileset, getStackId: \(\) => mapStackController\.getActiveId\(\),\n\s+onFarChange: \(far\) => flightsLayer\.setFleetBrightness\?\.\(far \? FLEET_FAR_BRIGHTNESS : 1\),\n\s+\}\);/, 'jas lietadiel ide s režimom');
+  assert.match(main, /import flightsLayer, \{ FLEET_FAR_BRIGHTNESS \} from '\.\/data\/flights\.js';/);
   assert.ok(main.indexOf('const farGlobe = installFarGlobe(') < main.indexOf('void Promise.all(['), 'inštalácia pred štartovým čakaním');
   assert.match(main, /new Promise\(\(resolve\) => setTimeout\(resolve, 1000\)\),\n[^\n]*\n\s+farGlobe\.whenReady,\n\s+\]\)\.finally/);
   assert.match(main, /window\.__godsEyeView\.farGlobe = farGlobe;/);

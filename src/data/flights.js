@@ -176,10 +176,37 @@ const DENSITY_CIVIL_TINT = Cesium.Color.fromCssColorString('#a78bde');
 /** Ground billboards render slightly smaller so airport clutter stays visually minor. */
 const GROUND_SCALE = 0.8;
 
+/**
+ * Jas flotily (2026-10-16, vlastník: „treba aj spraviť svetlosť lietadiel ako kompromis medzi žiarou miest
+ * a lietadlami"): pri pohľade na Zem z výšky (farGlobe.js, NASA Black Marble v noci) prebíjali tisíce
+ * žltých ikon svetlá miest. Zem z výšky nastaví FLEET_FAR_BRIGHTNESS, zblízka sa vráti 1. Mení sa len
+ * tón (RGB), alfa ostáva — čerstvosť/stale fade a sledovaný stroj (vlastná farba) sa nemenia.
+ */
+export const FLEET_FAR_BRIGHTNESS = 0.6;
+let _fleetBrightness = 1;
+
+/** Tón × jas, alfa zachovaná. Pure. */
+export function fleetTint(color, brightness = 1) {
+  if (!color || !(brightness < 1)) return color;
+  const k = Math.max(0.2, brightness);
+  return new Cesium.Color(color.red * k, color.green * k, color.blue * k, color.alpha);
+}
+
 /** Fleet (untracked) billboard tint: amber for known-military, white otherwise.
  *  Ground traffic gets NO special tint (validated behavior 2026-07-03 field test). */
 function _fleetBillboardColor(icao24) {
-  return isMilitaryIcao(icao24) ? MIL_TINT : Cesium.Color.WHITE;
+  return fleetTint(isMilitaryIcao(icao24) ? MIL_TINT : Cesium.Color.WHITE, _fleetBrightness);
+}
+
+/** Prepíš tón všetkých ikon flotily podľa aktuálneho jasu (sledovaný stroj má vlastnú farbu — nechať);
+ *  škvrny hustoty sa prepočítajú pri najbližšom tiku (nesú tón v základe pre limbový taper). */
+function _restyleFleetBrightness() {
+  for (const [icao24, bb] of _billboards) {
+    if (!bb || icao24 === _trackedIcao) continue;
+    bb.color = _fleetBillboardColor(icao24).withAlpha(bb.color?.alpha ?? 1);
+  }
+  _densityRebuiltAtMs = -Infinity;
+  _viewer?.scene?.requestRender?.();
 }
 
 /** Fleet billboard scale: per-class scale, ×GROUND_SCALE while grounded. */
@@ -891,8 +918,9 @@ function _rebuildTrafficDensityCells(height) {
   _densityPoints.removeAll();
   for (const cell of cells) {
     // Monochromatická škvrna; amber len tam, kde bunka nesie vojenský
-    // kontakt — tá istá farebná reč ako pri jednotlivých ikonách.
-    const color = cell.military > 0 ? MIL_TINT : DENSITY_CIVIL_TINT;
+    // kontakt — tá istá farebná reč ako pri jednotlivých ikonách. Jas flotily
+    // (Zem z výšky) tlmí aj škvrny, inak by nad nočnou Zemou prebíjali mestá.
+    const color = fleetTint(cell.military > 0 ? MIL_TINT : DENSITY_CIVIL_TINT, _fleetBrightness);
     const alpha = densityMarkerAlpha(cell.count, maxCount);
     const px = densityGlowDiameterPx(densityMarkerPx(cell.count, maxCount));
     const sprite = densityGlowSprite();
@@ -5236,6 +5264,15 @@ function _focusEvidenceSnapshot() {
 const flightsLayer = {
   id: 'flights',
   name: 'Live Flights',
+  /** Jas ikon flotily 0,2–1 (Zem z výšky: FLEET_FAR_BRIGHTNESS); vracia výsledný jas. */
+  setFleetBrightness(factor) {
+    const next = Number.isFinite(factor) ? Math.min(1, Math.max(0.2, factor)) : 1;
+    if (next === _fleetBrightness) return next;
+    _fleetBrightness = next;
+    _restyleFleetBrightness();
+    return next;
+  },
+  get fleetBrightness() { return _fleetBrightness; },
   icon: '✈︎', // U+2708+FE0E — monochromatický textový glyf, žiadne emoji (štýl panelu)
   source: 'OpenSky Network',
   // Browser-harness seam: isolates synthetic display-floor scenarios without

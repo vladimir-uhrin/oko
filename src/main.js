@@ -13,7 +13,7 @@ import { StyleManager } from './ui.js';
 import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, showStartView } from './camera.js';
 import { coarsenTilesDuringStartFlight } from './startFlightDetail.js';
 import { DataLayerManager, layerDisplayName } from './data/manager.js';
-import flightsLayer from './data/flights.js';
+import flightsLayer, { FLEET_FAR_BRIGHTNESS } from './data/flights.js';
 import militaryFlightsLayer from './data/militaryFlights.js';
 import earthquakesLayer from './data/earthquakes.js';
 import volcanoesLayer from './data/volcanoes.js';
@@ -437,7 +437,11 @@ async function init() {
     // (prednačíta si cieľ). Z výšky sa nesťahujú Google dlaždice. Na fotoreál sa imagery položiť nedá
     // (draping v Cesiu 1.138 zamrzol stránku). Inštaluje sa hneď po radiči, aby dlaždice glóbusu prišli
     // ešte pod úvodnou obrazovkou (štart naň počká, strop 3 s).
-    const farGlobe = installFarGlobe({ viewer, tileset, getStackId: () => mapStackController.getActiveId() });
+    // Jas lietadiel (vlastník: „svetlosť lietadiel ako kompromis medzi žiarou miest a lietadlami"): z výšky 0,6.
+    const farGlobe = installFarGlobe({
+      viewer, tileset, getStackId: () => mapStackController.getActiveId(),
+      onFarChange: (far) => flightsLayer.setFleetBrightness?.(far ? FLEET_FAR_BRIGHTNESS : 1),
+    });
     await mapStackController.setStack(tileset ? 'photoreal' : 'osm', { silent: true });
     // Paleta ikon kontaktov podľa kontrastu podkladu (contactPalette.js):
     // prvý setStack je tichý, tak sa počiatočný stav berie priamo z podkladu.
@@ -572,7 +576,7 @@ async function init() {
     // Štatistika (2026-10-04): len prepnutie vrstvy používateľom (origin user) — obnova z odkazu
     // a lokálneho stavu má iný origin; pred štartom GA aj tak nič neodíde (trackEvent).
     // Len vývojový server: prepínanie vrstiev a máp pre kontrolné snímky (scripts/qa-*.mjs).
-    if (import.meta.env.DEV) window.__okoQa = { setLayer: (id, on, origin = 'user') => dataManager.setEnabled(id, on, { origin }), setMap: (id) => styleManager._setMapStack(id), map: () => mapStackController.getActiveId(), layers: () => [...dataManager.layers.keys()] };
+    if (import.meta.env.DEV) window.__okoQa = { setLayer: (id, on, origin = 'user') => dataManager.setEnabled(id, on, { origin }), setMap: (id) => styleManager._setMapStack(id), map: () => mapStackController.getActiveId(), layers: () => [...dataManager.layers.keys()], layer: (id) => dataManager.layers.get(id)?.module };
     // Mapa podľa vrstvy (2026-10-05, src/layerBasemap.js): pri kliknutí na vrstvu vhodnejší podklad
     // s hláškou a návratom; ručná voľba mapy má prednosť; vypínač v Zobrazení.
     const autoBasemapToggle = document.getElementById('map-auto-basemap');
