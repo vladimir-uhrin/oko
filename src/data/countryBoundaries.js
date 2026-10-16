@@ -7,21 +7,29 @@ import * as Cesium from 'cesium';
  *
  * A STANDALONE scene overlay (not a data-manager layer): the share-link token
  * space is full, and borders are ambient political context turned on with a
- * scene, not a persisted/shared toggle. It owns one CustomDataSource of amber
- * polylines draped on the terrain, loaded lazily on first show.
+ * scene (and since 2026-10-16 with zoom — zoomBorders.js), not a persisted/shared toggle.
  *
  * Static bundled data (Natural Earth 1:50m admin-0 boundary lines — PUBLIC
  * DOMAIN, provenance in local_data/boundaries/SOURCE.md).
+ *
+ * 2026-10-16 (hranice pri priblížení, vlastník: „nevidno, kde je napr. Slovensko"): z entít
+ * s clampToGround na JEDEN GroundPolylinePrimitive postavený VOPRED (prewarm) s priehľadným
+ * materiálom. Meranie na dev serveri: geometria čiar na teréne sa po prvom zapnutí stavala
+ * ~35 s — úlohy vo workeroch čakali za dekódovaním dlaždíc Google počas úvodného preletu, takže
+ * po pristátí nad Slovenskom hranice chýbali. Primitívum sa stavia hneď po vytvorení (pod úvodnou
+ * obrazovkou); zapnutie a vypnutie len prelína alfu materiálu (FADE_MS), geometria sa neprestavuje.
  */
 
 const dataUrl = new URL('./local_data/boundaries/boundaries.geojsonl', import.meta.url).href;
 
 export const COUNTRY_BOUNDARIES_ID = 'country-boundaries';
 
-/** Flat political border line — always visible (map context), draped on the
- *  terrain. */
-const LINE_COLOR = Cesium.Color.fromCssColorString('#f0574d').withAlpha(0.6);
-const LINE_WIDTH = 1.4;
+/** Flat political border line — draped on terrain and 3D Tiles. */
+export const LINE_COLOR_CSS = '#f0574d';
+export const LINE_ALPHA = 0.6;
+export const LINE_WIDTH = 1.4;
+/** Prelínanie zapnutia/vypnutia (ms) — bez skoku 393 čiar naraz. */
+export const FADE_MS = 500;
 
 // Stena hraníc („plot", Cesium wall 18,7 km) ZRUŠENÁ 2026-10-10 (vlastník: „tú stenu
 // hraníc vypni všade"): distanceDisplayCondition sa meria k celej hranici, takže aj
@@ -51,45 +59,109 @@ export function parseBoundariesGeojsonl(text) {
   return features;
 }
 
-export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImpl } = {}) {
+/**
+ * Krok prelínania alfy (pure): k cieľu rýchlosťou `span / fadeMs`, nikdy cez cieľ.
+ * @param {number} current
+ * @param {number} target
+ * @param {number} dtMs
+ */
+export function fadeStep(current, target, dtMs, { fadeMs = FADE_MS, span = LINE_ALPHA } = {}) {
+  if (!(dtMs > 0) || current === target) return current;
+  const step = (span * dtMs) / fadeMs;
+  return current < target ? Math.min(target, current + step) : Math.max(target, current - step);
+}
+
+/** Jedno primitívum pre všetky hranice; farba cez uniform materiálu (mení sa bez prestavby). */
+function defaultCreatePrimitive({ instances, color }) {
+  return new Cesium.GroundPolylinePrimitive({
+    geometryInstances: instances,
+    classificationType: Cesium.ClassificationType.BOTH,
+    appearance: new Cesium.PolylineMaterialAppearance({ material: Cesium.Material.fromType('Color', { color }) }),
+    asynchronous: true,
+  });
+}
+
+const NOOP = Object.freeze({
+  show: async () => 0, hide: () => {}, retain: async () => 0, release: () => {}, prewarm: async () => 0, destroy: () => {},
+  get count() { return 0; }, get holders() { return []; }, get alpha() { return 0; }, get visible() { return false; },
+});
+
+/**
+ * @param {object} o
+ * @param {object} o.viewer Cesium.Viewer (scene.groundPrimitives, scene.postRender)
+ * @param {string} [o.url]
+ * @param {Function} [o.fetch]
+ * @param {(o: {instances: object[], color: object}) => object} [o.createPrimitive] továreň (testy bez WebGL)
+ * @param {() => number} [o.now]
+ */
+export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImpl, createPrimitive = defaultCreatePrimitive, now = () => (globalThis.performance?.now?.() ?? Date.now()) } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
-  if (!viewer?.dataSources) {
-    return { show: async () => 0, hide: () => {}, retain: async () => 0, release: () => {}, destroy: () => {}, get count() { return 0; }, get holders() { return []; } };
-  }
-  const ds = new Cesium.CustomDataSource(COUNTRY_BOUNDARIES_ID);
-  ds.show = false;
-  try { viewer.dataSources.add(ds); } catch { /* headless */ }
+  const scene = viewer?.scene;
+  if (!scene?.groundPrimitives || !scene?.postRender) return NOOP;
+  const baseColor = Cesium.Color.fromCssColorString(LINE_COLOR_CSS);
+  let primitive = null;
   let loaded = false;
   let loading = null;
   let count = 0;
+  let alpha = 0;
+  let target = 0;
+  let fading = false;
+  let lastTick = 0;
+
+  const setAlpha = (value) => {
+    alpha = value;
+    const uniforms = primitive?.appearance?.material?.uniforms;
+    if (uniforms) uniforms.color = baseColor.withAlpha(value);
+  };
+  const onPostRender = () => {
+    const t = now();
+    const dt = t - lastTick; // prelínanie beží od okamihu požiadavky (fadeTo), nie od prvého snímku
+    lastTick = t;
+    const next = fadeStep(alpha, target, dt);
+    if (next !== alpha) setAlpha(next);
+    if (next === target) {
+      fading = false;
+      scene.postRender.removeEventListener(onPostRender);
+    }
+    scene.requestRender?.();
+  };
+  /** Cieľová alfa; prelínanie beží po snímkach, kým je čo meniť. */
+  const fadeTo = (value) => {
+    target = value;
+    if (!primitive || fading || alpha === target) return;
+    fading = true;
+    lastTick = now();
+    scene.postRender.addEventListener(onPostRender);
+    scene.requestRender?.();
+  };
 
   async function load() {
     const response = await doFetch(url, { cache: 'force-cache' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const features = parseBoundariesGeojsonl(await response.text());
     if (!features.length) throw new Error('empty dataset');
-    const lineMaterial = new Cesium.ColorMaterialProperty(LINE_COLOR);
-    for (const feature of features) {
-      const coords = feature.geometry.coordinates;
+    const instances = features.map((feature) => {
       const flat = [];
-      for (const [lon, lat] of coords) flat.push(lon, lat);
-      const positions = Cesium.Cartesian3.fromDegreesArray(flat);
-      // Flat border line — always on (map context, „hranice nechaj").
-      ds.entities.add({
+      for (const [lon, lat] of feature.geometry.coordinates) flat.push(lon, lat);
+      return new Cesium.GeometryInstance({
+        geometry: new Cesium.GroundPolylineGeometry({ positions: Cesium.Cartesian3.fromDegreesArray(flat), width: LINE_WIDTH }),
         id: `${COUNTRY_BOUNDARIES_ID}:line:${feature.id}`,
-        polyline: { positions, width: LINE_WIDTH, material: lineMaterial, clampToGround: true },
       });
-    }
+    });
+    // Priehľadné: geometria sa postaví hneď, farba príde až s držiteľom.
+    primitive = createPrimitive({ instances, color: baseColor.withAlpha(0) });
+    scene.groundPrimitives.add(primitive);
     count = features.length;
     loaded = true;
-    viewer.scene?.requestRender?.();
+    if (target > 0) fadeTo(target); // vyžiadané ešte počas načítania
+    scene.requestRender?.();
     console.log(`[CountryBoundaries] Loaded ${features.length} border lines`);
   }
 
   // Držitelia (2026-09-19): hranice si môže vyžiadať scéna úžiny AJ vrstva
   // potrubí („hranice si vyhodil" — rúry sú cezhraničná infraštruktúra a bez
-  // hraníc „kam tečie" nemá kontext). Kreslia sa, kým ich drží aspoň jeden;
-  // uvoľnenie jedného držiteľa druhému hranice nezoberie.
+  // hraníc „kam tečie" nemá kontext), od 2026-10-16 aj priblíženie ('zoom').
+  // Kreslia sa, kým ich drží aspoň jeden; uvoľnenie jedného držiteľa druhému hranice nezoberie.
   const holders = new Set();
   async function ensureLoaded() {
     if (!loaded && !loading) {
@@ -98,28 +170,41 @@ export function createCountryBoundaries({ viewer, url = dataUrl, fetch: fetchImp
     if (loading) await loading;
     return count;
   }
+  /** Postav geometriu vopred (pod úvodnou obrazovkou); hranice ostanú priehľadné, kým ich niekto nevyžiada. */
+  async function prewarm() { return ensureLoaded(); }
   async function retain(owner = 'scene') {
     holders.add(String(owner));
-    ds.show = true;
-    const n = await ensureLoaded();
-    viewer.scene?.requestRender?.();
-    return n;
+    fadeTo(LINE_ALPHA);
+    return ensureLoaded();
   }
   function release(owner = 'scene') {
     holders.delete(String(owner));
-    ds.show = holders.size > 0;
-    viewer.scene?.requestRender?.();
+    if (holders.size === 0) fadeTo(0);
   }
   /** Scéna: zapni (držiteľ 'scene'). */
   async function show() { return retain('scene'); }
-  /** Scéna: pusti — hranice ostanú, ak ich drží vrstva potrubí. */
+  /** Scéna: pusti — hranice ostanú, ak ich drží iný držiteľ. */
   function hide() { release('scene'); }
   function destroy() {
-    try { viewer.dataSources.remove(ds, true); } catch { /* */ }
+    if (fading) scene.postRender.removeEventListener(onPostRender);
+    fading = false;
+    try { if (primitive) scene.groundPrimitives.remove(primitive); } catch { /* */ }
+    primitive = null;
     holders.clear();
     loaded = false;
     loading = null;
+    count = 0;
+    alpha = 0;
+    target = 0;
   }
 
-  return { show, hide, retain, release, destroy, get count() { return count; }, get holders() { return [...holders]; } };
+  return {
+    show, hide, retain, release, prewarm, destroy,
+    get count() { return count; },
+    get holders() { return [...holders]; },
+    /** Aktuálna alfa čiar (0 = neviditeľné). */
+    get alpha() { return alpha; },
+    /** Chce ich niekto (cieľová alfa > 0)? */
+    get visible() { return target > 0; },
+  };
 }

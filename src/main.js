@@ -66,6 +66,7 @@ import { createIncidentCards } from './gulfIncidentCards.js';
 import { createSceneRevealGate } from './sceneRevealGate.js';
 import { createMapScaleBar } from './mapScaleBar.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
+import { installZoomBorders } from './data/zoomBorders.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
@@ -899,6 +900,13 @@ async function init() {
     // any scene, off outside one.
     const countryBoundaries = createCountryBoundaries({ viewer });
     window.__godsEyeView.countryBoundaries = countryBoundaries;
+    // Geometria hraníc sa postaví hneď (priehľadná), nie až pri prvom zapnutí: meranie 2026-10-16 —
+    // po pristátí preletu chýbali ~35 s, kým sa úlohy vo workeroch dostali za dekódovanie dlaždíc.
+    void countryBoundaries.prewarm();
+    // Hranice pri priblížení (2026-10-16, vlastník: „keď zapriblíži kamera ku miestu, aby sa objavili hranice
+    // štátu … nevidno, kde je napr. Slovensko"): držiteľ 'zoom' pod 5 000 km nad fotoreálom a Bing leteckým
+    // (src/data/zoomBorders.js); podklady s vlastnými hranicami (OSM, Stadia, KARTA) ho nepotrebujú.
+    window.__godsEyeView.zoomBorders = installZoomBorders({ scene: viewer.scene, boundaries: countryBoundaries, getStackId: () => mapStackController.getActiveId() });
     // Hranice s potrubiami (2026-09-19, používateľ: „hranice si vyhodil"):
     // rúry sú cezhraničná infraštruktúra a bez hraníc nemá „kam tečie" na
     // karte kontext. Vrstva si hranice drží, kým je zapnutá; scéna úžiny je
