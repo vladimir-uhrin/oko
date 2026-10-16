@@ -62,6 +62,28 @@ export function buildUnitTestPlan(files) {
   };
 }
 
+/**
+ * Per-test time limit for the parallel run, in milliseconds.
+ *
+ * Node's runner gives a test FILE no limit of its own (its FileTest sets
+ * `timeout = null`), so a test whose promise never settles holds `npm test`
+ * forever: 2026-10-09 the suite sat 29 minutes on
+ * `src/data/aisWatchdogTransport.test.mjs` after the built-in WebSocket failed
+ * to open. With `--test-timeout` the child cancels such a test with
+ * "test timed out after …ms", runs its after() hooks and exits, and the suite
+ * fails naming the file. The limit must stay far above the slowest legitimate
+ * test under full parallel load — the OPERA radar reprojection in
+ * `src/data/operaRadar.test.mjs` measured ~65 s on 2026-10-16 — so it is a
+ * backstop, never a budget. The GC-bracketed allocation probes run on their
+ * own and are left without it.
+ */
+export const PARALLEL_TEST_TIMEOUT_MS = 300_000;
+
+/** Build the Node invocation for the ordinary tests, which run in parallel. */
+export function parallelTestArgs(files) {
+  return ['--test', `--test-timeout=${PARALLEL_TEST_TIMEOUT_MS}`, ...files];
+}
+
 /** Build the isolated Node invocation for one GC-bracketed allocation probe. */
 export function allocationTestArgs(file) {
   if (!ALLOCATION_TEST_FILES.includes(file)) {
@@ -82,7 +104,7 @@ function runTests(args) {
 
 export function runUnitTests() {
   const plan = buildUnitTestPlan(discoverUnitTestFiles());
-  const parallelStatus = runTests(['--test', ...plan.parallel]);
+  const parallelStatus = runTests(parallelTestArgs(plan.parallel));
   if (parallelStatus !== 0) return parallelStatus;
 
   // The GC-bracketed budgets are calibrated on Node 24 and are meaningless on

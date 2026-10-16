@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   ALLOCATION_TEST_FILES,
+  PARALLEL_TEST_TIMEOUT_MS,
   allocationTestArgs,
   assertNode24AllocationRuntime,
   buildUnitTestPlan,
   isCalibratedAllocationRuntime,
+  parallelTestArgs,
 } from '../scripts/run-unit-tests.mjs';
 
 test('unit runner serializes only GC-bracketed allocation microbenchmarks', () => {
@@ -35,6 +37,25 @@ test('unit runner serializes only GC-bracketed allocation microbenchmarks', () =
     () => allocationTestArgs('src/data/radio.test.mjs'),
     /Not an allocation microbenchmark/,
   );
+});
+
+test('parallel tests get a per-test time limit that is a backstop, not a budget', () => {
+  // Node gives a test file no limit of its own, so a test whose promise never
+  // settles (2026-10-09: aisWatchdogTransport, built-in WebSocket) hangs the
+  // suite forever unless every test carries --test-timeout.
+  const files = ['src/data/radio.test.mjs', 'src/unitTestRunner.test.mjs'];
+  assert.deepEqual(parallelTestArgs(files), [
+    '--test', `--test-timeout=${PARALLEL_TEST_TIMEOUT_MS}`, ...files,
+  ]);
+  assert.ok(Number.isInteger(PARALLEL_TEST_TIMEOUT_MS) && PARALLEL_TEST_TIMEOUT_MS > 0);
+  // Slowest legitimate test under full parallel load: ~65 s (OPERA radar
+  // reprojection, 2026-10-16). Keep at least a 4× margin so a loaded machine
+  // never turns a slow pass into a spurious timeout.
+  assert.ok(PARALLEL_TEST_TIMEOUT_MS >= 4 * 65_000, `${PARALLEL_TEST_TIMEOUT_MS} ms is too tight`);
+  // The GC-bracketed probes are serialized and deliberately carry no limit.
+  for (const file of ALLOCATION_TEST_FILES) {
+    assert.equal(allocationTestArgs(file).some((arg) => arg.startsWith('--test-timeout')), false);
+  }
 });
 
 test('allocation runtime calibration is explicit and pinned to Node 24', () => {
