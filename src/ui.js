@@ -655,23 +655,23 @@ const CCTV_CAL_FIELDS = {
 };
 
 /**
- * localStorage kľúč vypínača svetiel miest (2026-09-07). Vtedy DEFAULT VYPNUTÉ: používateľ po
- * dvoch pokusoch („ľadovce", potom „vyzerá to ako mraky — vypni to"). Odvtedy shader fotoreálu
- * svetlá zblízka tlmí (photorealNight.js: pod 400 km nula, plné od 1 500 km) a 2026-10-16
- * vlastník: „nočné svetlá nefungujú a daj ich implicitne on" → DEFAULT ZAPNUTÉ; uložená voľba
- * '0' (vypnuté ručne) ostáva rešpektovaná. Kľúč v2: stará verzia zapisovala voľbu pri KAŽDOM
- * štarte (aj predvolenú), takže všetci vracajúci sa návštevníci mali uložené '0' a nová predvoľba
- * by sa ich netýkala — starý kľúč sa ignoruje a zmaže, do v2 sa píše len pri kliknutí.
+ * localStorage kľúč vypínača svetiel miest (2026-09-07). DEFAULT VYPNUTÉ: používateľ po dvoch
+ * pokusoch („ľadovce", potom „vyzerá to ako mraky — vypni to"). 2026-10-16 vlastník žiadal
+ * „daj ich implicitne on", po vydaní však videl Európu z 2 500 km s fľakmi Black Marble (textúra
+ * ~10 km/px) a vrátil to („to je katastrofálne") → zapnúť predvolene až s ostrými dlaždicami
+ * (500 m/px, candidate: Cesium3DTileset.imageryLayers). Kľúč v2: stará verzia zapisovala voľbu pri
+ * KAŽDOM štarte (aj predvolenú), takže uložená hodnota nebola voľbou používateľa — starý kľúč sa
+ * maže, do v2 sa píše len pri kliknutí ('1' = zapnuté ručne).
  */
 const NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights-v2';
 const NIGHT_LIGHTS_LEGACY_KEY = 'oko-city-lights';
 function readStoredNightLights() {
   try {
-    if (typeof localStorage === 'undefined') return true;
+    if (typeof localStorage === 'undefined') return false;
     localStorage.removeItem(NIGHT_LIGHTS_LEGACY_KEY);
-    return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) !== '0';
+    return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
