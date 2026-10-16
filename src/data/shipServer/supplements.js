@@ -17,6 +17,7 @@ import {
   mtTileRowToVessel, oceanPseudoId, oceanTiles, parseAiscastVessels, parseMtTileRows, parseOpenSeaFeedSnapshot,
 } from '../aisSupplementFeeds.js';
 import { curlGet, parseMtGeneral } from '../vesselTrackSources.js';
+import { createShipIdIndex } from './shipIdIndex.js';
 
 /** Takty: [s návštevníkom, bez návštevníka] (ms). */
 export const SUPPLEMENT_INTERVALS = Object.freeze({
@@ -46,11 +47,12 @@ export function isLoopbackRequest(req) {
  * @param {number} o.cacheMax strop úložiska
  */
 export function createAisSupplements({ rootDir, env = process.env, vessels, tracks, appendTrack, record = () => {}, cacheMax,
-  fetchImpl = (...a) => fetch(...a), curl = curlGet, now = Date.now, setIntervalImpl = setInterval }) {
+  fetchImpl = (...a) => fetch(...a), curl = curlGet, now = Date.now, setIntervalImpl = setInterval, fsp = fs.promises, log = console }) {
   const stats = { openseafeed: { at: 0, rows: 0, merged: 0, error: null }, aiscast: { at: 0, rows: 0, merged: 0, error: null }, ocean: { at: 0, rows: 0, merged: 0, unresolved: 0, error: null } };
   let timers = null;
   let lastVisitorAt = 0;
   let resolver = null;
+  let stopIndex = null;
   const visitorsRecent = () => now() - lastVisitorAt < AIS_VISITOR_RECENT_MS;
   const oceanOff = () => String(env.AIS_SUPPLEMENT_OCEAN || '').toLowerCase() === 'off';
 
@@ -111,32 +113,28 @@ export function createAisSupplements({ rootDir, env = process.env, vessels, trac
       } catch (error) { st.error = String(error?.message || error); }
     });
     if (oceanOff()) return;
-    // Oceán: dlaždice registra pri malom priblížení + preklad ID → MMSI (cache 30 dní na disku).
-    const mtDir = path.join(rootDir, '.gev-cache', 'vessel-info', 'mt');
-    const saveId = (shipId, entry) => { try { fs.mkdirSync(mtDir, { recursive: true }); fs.writeFileSync(path.join(mtDir, `ship-${shipId}.json`), JSON.stringify(entry)); } catch { /* */ } };
+    // Oceán: dlaždice registra pri malom priblížení + preklad ID → MMSI. Preklady sú v jednom
+    // indexe (shipIdIndex.js, 2026-10-16) — predtým jeden súbor na loď a pri štarte synchrónne
+    // čítanie všetkých (~35 000 súborov, 50–231 s zastavené hlavné vlákno oko-api).
+    const infoDir = path.join(rootDir, '.gev-cache', 'vessel-info');
+    const mtDir = path.join(infoDir, 'mt');
     resolver = createShipIdResolver({
       resolveOne: async (shipId) => {
-        const file = path.join(mtDir, `ship-${shipId}.json`);
-        try {
-          const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
-          if (now() - cached.at < 30 * 86400_000) return { mmsi: cached.mmsi || cached.ship?.mmsi || null, name: cached.name || cached.ship?.name || null };
-        } catch { /* bez cache */ }
         const info = parseMtGeneral(JSON.parse(await curl(`https://www.marinetraffic.com/en/vessels/${shipId}/general`)));
-        const entry = { at: now(), mmsi: info.mmsi, name: info.name };
-        saveId(shipId, entry);
-        // To isté ID poslúži karte lode (vesselInfoProxy si ušetrí hľadanie).
-        if (info.mmsi) { try { fs.writeFileSync(path.join(mtDir, `${info.mmsi}.id.json`), JSON.stringify({ at: now(), shipId })); } catch { /* */ } }
-        return entry;
+        idIndex.append(shipId, info.mmsi, now());
+        // To isté ID poslúži karte lode (vesselInfoProxy si ušetrí hľadanie) — jeden súbor podľa MMSI.
+        if (info.mmsi) {
+          void fsp.mkdir(mtDir, { recursive: true })
+            .then(() => fsp.writeFile(path.join(mtDir, `${info.mmsi}.id.json`), JSON.stringify({ at: now(), shipId })))
+            .catch(() => {});
+        }
+        return { mmsi: info.mmsi, name: info.name };
       },
     });
-    // Pri štarte načítaj už preložené ID z disku (bez siete).
-    try {
-      for (const name of fs.readdirSync(mtDir)) {
-        const m = /^ship-(\d+)\.json$/.exec(name);
-        if (!m) continue;
-        try { const c = JSON.parse(fs.readFileSync(path.join(mtDir, name), 'utf8')); resolver.known.set(m[1], c.mmsi || c.ship?.mmsi || null); } catch { /* */ }
-      }
-    } catch { /* priečinok ešte nie je */ }
+    const idIndex = createShipIdIndex({ dir: infoDir, known: resolver.known, fsp, now, log });
+    // Pri štarte načítaj už preložené ID (bez siete, asynchrónne — vlákno nestojí).
+    void idIndex.load().catch((error) => log.warn?.(`[ship-ids] index sa nenačítal: ${error?.message || error}`));
+    stopIndex = () => idIndex.stop();
     const tiles = oceanTiles();
     let tileIdx = 0;
     every('ocean', async () => {
@@ -156,8 +154,8 @@ export function createAisSupplements({ rootDir, env = process.env, vessels, trac
             if (byName) {
               resolver.learn(t.shipId, byName);
               mmsi = byName;
-              // Zhoda podľa mena a polohy na disk: po reštarte sa nehľadá znova.
-              saveId(t.shipId, { at: now(), mmsi: byName, name: t.name, via: 'name' });
+              // Zhoda podľa mena a polohy do indexu: po reštarte sa nehľadá znova.
+              idIndex.append(t.shipId, byName, now());
             } else resolver.want(t.shipId, { urgent: nowS - t.epochSec < 3600 });
           }
           if (mmsi) {
@@ -189,6 +187,6 @@ export function createAisSupplements({ rootDir, env = process.env, vessels, trac
       resolver.want(pseudoId.slice(3), { urgent: true });
     },
     applyRowsForTest: applyRows,
-    stop() { for (const id of timers || []) clearInterval(id); timers = null; },
+    stop() { for (const id of timers || []) clearInterval(id); timers = null; void stopIndex?.(); stopIndex = null; },
   };
 }
