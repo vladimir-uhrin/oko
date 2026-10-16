@@ -29,14 +29,22 @@ const MAX_LAYER_OPTIONS_CHARS = 512;
  * (aj vlastník s uloženými plynovodmi, prístavmi, koridormi…) raz začal od nich; ďalej sa voľby
  * znova ukladajú. Starý záznam v2 ostáva v úložisku nepoužitý.
  */
-export const LAYER_STATE_STORAGE_KEY = 'gev:layer-state:v3';
+export const LAYER_STATE_STORAGE_KEY = 'gev:layer-state:v4';
 /**
- * Vrstvy zapnuté pri čerstvom štarte — bez odkazu a bez uloženého stavu (vlastník 2026-09-27:
- * „lode a lietadlá nechaj implicitne zapnuté a ostatné vypnuté"). Zapína ich ui.js po štarte
+ * Predchádzajúci kľúč (v3, 2026-09-27 – 2026-10-16). Pri prvom štarte s v4 sa z neho prevezmú
+ * voľby návštevníka BEZ lodí (LAYER_STATE_DROPPED_ON_MIGRATION) — vlastník 2026-10-16: lode
+ * všade predvolene vypnuté; kto ich mal uložené zapnuté, raz začne bez nich, ostatné voľby ostanú.
+ */
+export const LAYER_STATE_PREVIOUS_STORAGE_KEY = 'gev:layer-state:v3';
+export const LAYER_STATE_DROPPED_ON_MIGRATION = Object.freeze(['ais-live-vessels', 'aishub-vessels']);
+/**
+ * Vrstvy zapnuté pri čerstvom štarte — bez odkazu a bez uloženého stavu. Vlastník 2026-09-27:
+ * „lode a lietadlá nechaj implicitne zapnuté"; 2026-10-16: „lode nedávaj vôbec" → lode všade
+ * predvolene vypnuté (zapnú sa vo VRSTVY, odkazom alebo otvorením lode). Zapína ich ui.js po štarte
  * koordinátora ako voľbu používateľa, takže sa uložia; obnova stavu sa tým nemení (čerstvý štart
  * stále nič neobnovuje — layerState.test).
  */
-export const STARTUP_DEFAULT_LAYER_IDS = Object.freeze(['ais-live-vessels', 'aishub-vessels', 'flights']);
+export const STARTUP_DEFAULT_LAYER_IDS = Object.freeze(['flights']);
 export const LAYER_RESTORE_ORIGINS = Object.freeze({
   share: 'share-restore',
   local: 'local-restore',
@@ -583,6 +591,17 @@ export function parseStoredLayerState(raw) {
   }
 }
 
+/**
+ * Uložený stav v3 → v4 bez lodí (pure, 2026-10-16). null bez platného záznamu v3.
+ * @param {string|null|undefined} raw
+ */
+export function migratePreviousLayerState(raw) {
+  const previous = parseStoredLayerState(raw);
+  if (!previous) return null;
+  const dropped = new Set(LAYER_STATE_DROPPED_ON_MIGRATION);
+  return normalizeLayerState({ ...previous, enabledLayerIds: previous.enabledLayerIds.filter((id) => !dropped.has(id)) });
+}
+
 /** Return sanitized options to apply to one registered module. */
 export function layerOptionsForRestore(state, layerId) {
   const entry = REGISTRY_BY_ID.get(layerId);
@@ -657,6 +676,13 @@ export class LayerStateCoordinator {
     } else if (allowLocalState) {
       let stored = null;
       try { stored = parseStoredLayerState(this.storage?.getItem?.(LAYER_STATE_STORAGE_KEY)); } catch { /* best effort */ }
+      if (!stored) {
+        // Prvý štart s v4: voľby z v3 bez lodí (migratePreviousLayerState) a hneď uložiť pod v4.
+        try {
+          stored = migratePreviousLayerState(this.storage?.getItem?.(LAYER_STATE_PREVIOUS_STORAGE_KEY));
+          if (stored) this.storage?.setItem?.(LAYER_STATE_STORAGE_KEY, serializeStoredLayerState(stored));
+        } catch { /* best effort */ }
+      }
       if (stored) {
         selected = stored;
         this._source = 'local';

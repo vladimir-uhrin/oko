@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import { DataLayerManager } from './manager.js';
 import {
   LAYER_STATE_REGISTRY,
+  LAYER_STATE_PREVIOUS_STORAGE_KEY,
   LAYER_STATE_STORAGE_KEY,
   LayerStateCoordinator,
+  migratePreviousLayerState,
   REGISTERED_LAYER_IDS,
   SESSION_ONLY_LAYER_IDS,
   SHARE_TRACKING_RESTORE_POLICIES,
@@ -1673,14 +1675,55 @@ test('potrubia (etapa 3): token 0 nesie voľby látok g/o; odkaz bez lo = plyn a
   assert.deepEqual(decodeLayerStateParams(new URLSearchParams('v=2&l=0&lo=0.o.x')).options['gas-pipelines'], { gas: true, oil: true });
 });
 
-test('predvolené vrstvy pri čerstvom štarte: lode a lietadlá, ostatné vypnuté (vlastník 2026-09-27)', async () => {
-  const { STARTUP_DEFAULT_LAYER_IDS, LAYER_STATE_REGISTRY, LAYER_STATE_STORAGE_KEY: key } = await import('./layerState.js');
-  assert.deepEqual([...STARTUP_DEFAULT_LAYER_IDS], ['ais-live-vessels', 'aishub-vessels', 'flights']);
+test('predvolené vrstvy pri čerstvom štarte: len lietadlá, lode vypnuté (vlastník 2026-09-27, 2026-10-16)', async () => {
+  const { STARTUP_DEFAULT_LAYER_IDS, LAYER_STATE_REGISTRY, LAYER_STATE_STORAGE_KEY: key, LAYER_STATE_PREVIOUS_STORAGE_KEY: prev } = await import('./layerState.js');
+  assert.deepEqual([...STARTUP_DEFAULT_LAYER_IDS], ['flights'], 'lode nedávaj vôbec — ani na počítači');
   const ids = new Set(LAYER_STATE_REGISTRY.map((e) => e.id));
   for (const id of STARTUP_DEFAULT_LAYER_IDS) assert.ok(ids.has(id), `${id} je registrovaná vrstva`);
-  assert.equal(key, 'gev:layer-state:v3', 'nový kľúč — každý raz začne od nových predvolieb');
+  assert.equal(key, 'gev:layer-state:v4', 'nový kľúč — uložené lode z v3 sa raz vypnú');
+  assert.equal(prev, 'gev:layer-state:v3');
   const { readFile } = await import('node:fs/promises');
   const ui = await readFile(new URL('../ui.js', import.meta.url), 'utf8');
   assert.match(ui, /if \(this\._layerStateCoordinator\.source === 'defaults'\) \{\n\s+for \(const id of STARTUP_DEFAULT_LAYER_IDS\) \{\n\s+try \{ this\._dataManager\.setEnabled\(id, true, \{ origin: 'user' \}\); \}/,
     'len pri čerstvom štarte, ako voľba používateľa (uloží sa)');
+});
+
+test('prechod v3 → v4 (2026-10-16, „lode nedávaj vôbec"): uložené lode sa raz vypnú, ostatné voľby ostanú', async () => {
+  const v3 = JSON.stringify({ v: 2, l: ['ais-live-vessels', 'aishub-vessels', 'flights', 'earthquakes'], o: {} });
+  const migrated = migratePreviousLayerState(v3);
+  assert.ok(migrated);
+  assert.equal(migrated.enabledLayerIds.includes('ais-live-vessels'), false);
+  assert.equal(migrated.enabledLayerIds.includes('aishub-vessels'), false);
+  assert.ok(migrated.enabledLayerIds.includes('flights'));
+  assert.ok(migrated.enabledLayerIds.includes('earthquakes'));
+  assert.equal(migratePreviousLayerState(null), null);
+  assert.equal(migratePreviousLayerState('{zlé'), null);
+
+  const values = new Map([[LAYER_STATE_PREVIOUS_STORAGE_KEY, v3]]);
+  const storage = { getItem: (k) => (values.has(k) ? values.get(k) : null), setItem: (k, v) => values.set(k, v) };
+  const manager = productionManager();
+  const coordinator = new LayerStateCoordinator(manager, shareSink(), { storage });
+  await coordinator.start();
+  assert.equal(coordinator.source, 'local', 'voľby z v3 sa prevezmú — žiadne predvolené vrstvy navrch');
+  const enabled = coordinator.getDurableState().enabledLayerIds;
+  assert.equal(enabled.includes('ais-live-vessels'), false);
+  assert.ok(enabled.includes('earthquakes'));
+  assert.equal(manager.isEnabled('ais-live-vessels'), false, 'lode sa neobnovia');
+  assert.ok(values.has(LAYER_STATE_STORAGE_KEY), 'prevzatý stav sa hneď uloží pod v4');
+  assert.equal(JSON.parse(values.get(LAYER_STATE_STORAGE_KEY)).l.includes('ais-live-vessels'), false);
+  coordinator.destroy();
+
+  // Kto si lode po prechode znova zapne, má ich: v4 má prednosť a v3 sa už nečíta.
+  values.set(LAYER_STATE_STORAGE_KEY, JSON.stringify({ v: 2, l: ['ais-live-vessels'], o: {} }));
+  const manager2 = productionManager();
+  const coordinator2 = new LayerStateCoordinator(manager2, shareSink(), { storage });
+  await coordinator2.start();
+  assert.deepEqual(coordinator2.getDurableState().enabledLayerIds, ['ais-live-vessels']);
+  coordinator2.destroy();
+
+  // Bez v3 aj v4 = čerstvý štart (predvolené vrstvy zapne ui.js).
+  const fresh = new LayerStateCoordinator(productionManager(), shareSink(), { storage: memoryStorage() });
+  await fresh.start();
+  assert.equal(fresh.source, 'defaults');
+  fresh.destroy();
 });
