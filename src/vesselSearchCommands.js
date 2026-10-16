@@ -61,9 +61,23 @@ export function createVesselSearchCommands({ live, delayed = [], dataManager = n
    * Ako selectKnown, no telefón nad 3 000 km živé lode nesťahuje (aisLiveVessels.js aisLoadDeferred,
    * 2026-10-16): vtedy ich najprv načíta a skúsi znova, nech sledovaná / nájdená loď otvorí živú
    * kartu, nie len polohu z registra. Inde whenLiveData hneď vráti false — bez čakania.
+   *
+   * Lode sú od 2026-10-16 všade predvolene vypnuté (layerState.js STARTUP_DEFAULT_LAYER_IDS, d421beb).
+   * Vypnutá vrstva má prázdnu pamäť a whenLiveData hneď vráti false, takže sledovaná loď, odkaz
+   * ?ship= / Web Push aj výsledok servera by skončili len pri polohe z registra a lode by ostali
+   * vypnuté. Kto otvára konkrétnu loď, chce ju živú: lode najprv zapneme (ako riadok z pamäte
+   * v queryCommands, origin 'user' — voľba sa uloží) a počkáme na zapnutie — setEnabled čaká na
+   * enable() aj prvé update(), teda na načítanie výrezu. Loď mimo výrezu ide ďalej na polohu
+   * z registra, no vrstva ostane zapnutá: po dolete kamery ju načíta bežné obnovenie výrezu
+   * (a odkaz ?ship= ju v main.js o 12 s vyberie). Telefón nad 3 000 km zapnutie odloží
+   * (state.deferred) a lode stiahne až whenLiveData nižšie.
    */
   async function selectKnownLive(mmsi) {
     if (selectKnown(mmsi)) return true;
+    if (dataManager && !dataManager.isEnabled?.('ais-live-vessels')) {
+      try { await dataManager.setEnabled?.('ais-live-vessels', true, { origin: 'user' }); } catch { /* ostane poloha z registra */ }
+      if (selectKnown(mmsi)) return true;
+    }
     let loaded = false;
     try { loaded = (await live?.whenLiveData?.()) === true; } catch { loaded = false; }
     return loaded && selectKnown(mmsi);

@@ -580,6 +580,184 @@ test('hlas: loď, ktorú vrstva má v pamäti, sa nájde bez čakania na načít
   assert.ok(!order.includes('load'));
 });
 
+/**
+ * Lode predvolene vypnuté (d421beb, 2026-10-16): skutočný DataLayerManager, vrstva lodí má
+ * záznamy až po enable() (ako aisLiveVessels → loadLivePositions), voliteľne odložené
+ * (telefón nad 3 000 km) až do whenLiveData.
+ */
+function shipsOffManager({ viewer, order, deferred = false, onWhenLiveData = null, extraLayers = [] }) {
+  const dataManager = new DataLayerManager(viewer);
+  const ships = [{ mmsi: '353136000', name: 'EVER GIVEN', latitude: 51.9, longitude: 4.1 }];
+  let records = [];
+  dataManager.register({
+    id: 'ais-live-vessels',
+    name: 'Live Vessels',
+    source: 'test',
+    updateInterval: -1,
+    async init() {},
+    async enable() {
+      order.push('ships:on');
+      if (!deferred) records = ships.slice();
+    },
+    async disable() { order.push('ships:off'); records = []; },
+    async update() {},
+    getStats() { return { count: records.length, lastUpdate: Date.now() }; },
+    findByQuery(query) {
+      order.push('ships:find');
+      return records.find((r) => r.name.toLowerCase().includes(String(query).toLowerCase())) || null;
+    },
+    async whenLiveData() {
+      order.push('ships:load');
+      await onWhenLiveData?.();
+      if (!deferred) return false;
+      records = ships.slice();
+      return true;
+    },
+    selectById(id) { order.push(`select:${id}`); return records.some((r) => r.mmsi === id); },
+  });
+  for (const layer of extraLayers) {
+    dataManager.register({
+      source: 'test', updateInterval: -1,
+      async init() {}, async enable() {}, async disable() {}, async update() {},
+      getStats() { return { count: 1, lastUpdate: Date.now() }; },
+      ...layer,
+    });
+  }
+  return dataManager;
+}
+
+test('hlas: pri vypnutých lodiach „sleduj loď EVER GIVEN" lode zapne (origin voice), nájde a vyberie loď (2026-10-16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  for (const args of [{ query: 'EVER GIVEN', layerId: 'ais-live-vessels' }]) {
+    const { order, viewer, styleManager } = createVoiceNavigationHarness();
+    const dataManager = shipsOffManager({ viewer, order });
+    const origins = [];
+    dataManager.subscribe((event) => {
+      if (event.type === 'visibility') origins.push(`${event.enabled ? 'on' : 'off'}:${event.origin}`);
+    });
+    assert.equal(dataManager.isEnabled('ais-live-vessels'), false, 'štart: lode vypnuté');
+    const result = await createGevActionRunner({ viewer, styleManager, dataManager })('track_entity', args);
+    assert.equal(result.ok, true, JSON.stringify(args));
+    assert.equal(result.kind, 'vessel');
+    assert.equal(result.label, 'EVER GIVEN');
+    assert.equal(result.enabledLayerId, 'ais-live-vessels', 'model vie, že lode zapol hlas');
+    assert.equal(dataManager.isEnabled('ais-live-vessels'), true, 'otvorená loď nechá lode zapnuté');
+    assert.deepEqual(origins, ['on:voice'], 'zapnutie je výslovná voľba (uloží sa), nie programové');
+    assert.ok(order.indexOf('ships:on') < order.indexOf('ships:find'), 'hľadá až po načítaní lodí');
+    assert.ok(order.includes('select:353136000'));
+  }
+});
+
+test('hlas: bez výslovnej lode (žiadne layerId) vypnuté lode nezapne — „track ISS" pri vypnutých satelitoch nesleduje MISSISSIPPI (2026-10-16, revízia)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  const dataManager = shipsOffManager({ viewer, order });
+  const result = await createGevActionRunner({ viewer, styleManager, dataManager })('track_entity', { query: 'EVER GIVEN' });
+  assert.equal(result.ok, false);
+  assert.equal(order.filter((x) => x.startsWith('ships:')).length, 0, 'lode sa nezapli ani neprehľadali');
+  assert.equal(dataManager.isEnabled('ais-live-vessels'), false);
+  assert.ok(result.skippedDisabled.includes('ais-live-vessels'), 'chyba priznáva vypnuté lode');
+});
+
+test('hlas: vypnuté lode na telefóne nad 3 000 km — po zapnutí počká na whenLiveData a loď nájde (2026-10-16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  const dataManager = shipsOffManager({ viewer, order, deferred: true });
+  const result = await createGevActionRunner({ viewer, styleManager, dataManager })('track_entity', { query: 'ever given', layerId: 'ais-live-vessels' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(order.filter((x) => x.startsWith('ships:')), ['ships:on', 'ships:find', 'ships:load', 'ships:find']);
+  assert.ok(order.includes('select:353136000'));
+});
+
+test('hlas: „track ISS" ani lietadlo pri vypnutých lodiach lode nezapne; layerId lietadiel lode nehľadá (2026-10-16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  const dataManager = shipsOffManager({
+    viewer,
+    order,
+    extraLayers: [
+      {
+        id: 'satellites', name: 'Satellites',
+        findByQuery: (q) => (/iss/i.test(q) ? { noradId: 25544, name: 'ISS (ZARYA)', latitude: 10, longitude: 20, altitudeM: 420_000 } : null),
+        trackById(id) { order.push(`sat:${id}`); return true; },
+      },
+      {
+        id: 'flights', name: 'Flights',
+        findByQuery: (q) => (q === 'UAL428' ? { icao24: 'a1b2c3', callsign: 'UAL428', latitude: 30, longitude: -97 } : null),
+        trackById(id) { order.push(`flight:${id}`); return true; },
+      },
+    ],
+  });
+  await dataManager.setEnabled('satellites', true, { origin: 'user' });
+  await dataManager.setEnabled('flights', true, { origin: 'user' });
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager });
+
+  const iss = await runner('track_entity', { query: 'ISS' });
+  assert.equal(iss.ok, true);
+  assert.equal(iss.kind, 'satellite');
+  const flight = await runner('track_entity', { query: 'UAL428' });
+  assert.equal(flight.ok, true);
+  assert.equal(flight.kind, 'aircraft');
+  const flightsOnly = await runner('track_entity', { query: 'NOPE123', layerId: 'flights' });
+  assert.equal(flightsOnly.ok, false);
+  assert.equal(order.filter((x) => x.startsWith('ships:')).length, 0, 'lode sa nezaplo ani neprehľadali');
+  assert.equal(dataManager.isEnabled('ais-live-vessels'), false);
+});
+
+test('hlas: nič nesadlo — lode sa po hľadaní znova vypnú a chyba netvrdí, že sa lode preskočili (2026-10-16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  const dataManager = shipsOffManager({ viewer, order });
+  const result = await createGevActionRunner({ viewer, styleManager, dataManager })('track_entity', { query: 'NORDIC STAR', layerId: 'ais-live-vessels' });
+  assert.equal(result.ok, false);
+  assert.ok(order.includes('ships:find'), 'lode sa naozaj prehľadali');
+  assert.equal(dataManager.isEnabled('ais-live-vessels'), false, 'neotvorená loď = lode späť vypnuté (predvoľba vlastníka)');
+  assert.ok(!/skipped:[^)]*ais-live-vessels/.test(result.error), result.error);
+  assert.match(result.error, /ships layer was switched on to search it, then switched back off/);
+  assert.ok(!result.skippedDisabled.includes('ais-live-vessels'));
+  assert.deepEqual(result.skippedDisabled, [], 'hľadali sa len lode a tie sa naozaj prehľadali');
+});
+
+test('hlas: návštevník počas hľadania lode zapne sám — neúspešné hľadanie ich nevypne (2026-10-16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  let dataManager = null;
+  dataManager = shipsOffManager({
+    viewer,
+    order,
+    // Kým hlas čaká na lode, návštevník otvorí loď z palety (vesselSearchCommands: setEnabled
+    // origin user) — novší zámer; ten hlas po neúspechu nesmie zrušiť.
+    onWhenLiveData: () => dataManager.setEnabled('ais-live-vessels', true, { origin: 'user' }),
+  });
+  const result = await createGevActionRunner({ viewer, styleManager, dataManager })('track_entity', { query: 'NORDIC STAR', layerId: 'ais-live-vessels' });
+  assert.equal(result.ok, false);
+  assert.equal(dataManager.isEnabled('ais-live-vessels'), true, 'voľba návštevníka platí');
+  assert.match(result.error, /ships layer was switched on to search it/);
+  assert.doesNotMatch(result.error, /switched back off/, 'chyba netvrdí vypnutie, ktoré sa nestalo');
+});
+
+test('bezplatný hlas: „sleduj loď EVER GIVEN" pri vypnutých lodiach povie „Sledujem EVER GIVEN", nie „nenašiel som" (2026-10-16)', async () => {
+  // Celá cesta návštevníka bez prihlásenia: freeVoice → track_entity (skutočný runner) → lode.
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { createFreeVoice } = await import('./freeVoice.js');
+  const translate = (key, params) => (params ? `${key}:${Object.values(params).join('|')}` : key);
+  for (const [heard, expected, shipsOnAfter] of [
+    ['sleduj loď EVER GIVEN', 'voice.free.tracking:EVER GIVEN', true],
+    ['sleduj loď NORDIC STAR', 'voice.free.not-found:NORDIC STAR', false],
+  ]) {
+    const { order, viewer, styleManager } = createVoiceNavigationHarness();
+    const dataManager = shipsOffManager({ viewer, order });
+    const run = createGevActionRunner({ viewer, styleManager, dataManager });
+    const voice = createFreeVoice({
+      ui: null, run, dataManager, translate, SpeechRecognitionImpl: null, synth: null, Utterance: null,
+    });
+    voice.setResolvers({ aircraft: () => [], aircraftWorld: async () => [] });
+    assert.equal(await voice.handleText(heard), expected, heard);
+    assert.ok(order.includes('ships:find'), `${heard}: lode sa prehľadali`);
+    assert.equal(dataManager.isEnabled('ais-live-vessels'), shipsOnAfter, heard);
+  }
+});
+
 test('move_camera and fly_route validate first, then use the shared camera authority seam', async () => {
   globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
   const { order, viewer, styleManager } = createVoiceNavigationHarness();
@@ -3103,4 +3281,47 @@ test('show_front bez presetov (skorý boot) hlási nedostupnosť, nespadne', asy
   const out = await runner('show_front', { action: 'list' });
   assert.equal(out.ok, false);
   assert.match(out.error, /unavailable/i);
+});
+
+// Na konci súboru: analyst engine je v gevActions jeden na modul (prvý runner), tento test ho
+// nesmie vytvoriť pre testy front5 vyššie.
+test('hlas: analyst_query pri vypnutých lodiach nehlási „0 lodí" ako fakt — coverage.disabledLayers (2026-10-16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const viewer = {
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    camera: {
+      moveEnd: { addEventListener() {} },
+      positionCartographic: { height: 300_000, latitude: 0.93, longitude: 0.17 },
+    },
+  };
+  const runner = createGevActionRunner({
+    viewer,
+    styleManager: {},
+    dataManager: {
+      layers: new Map([
+        ['flights', { module: { getAnalystRecords: () => [{ id: 'DLH1', icao24: 'aaa001', lat: 53.5, lon: 9.9 }] } }],
+        ['ais-live-vessels', { module: { getAnalystRecords: () => [{ id: 'EVER GIVEN', mmsi: '353136000', lat: 53.5, lon: 9.9 }] } }],
+      ]),
+      // Lode predvolene vypnuté (d421beb): vrstva nič nevráti a 0 nie je počet.
+      isEnabled: (id) => id === 'flights',
+      getAll: () => [],
+    },
+  });
+
+  const ships = await runner('analyst_query', { layers: ['ais-live-vessels'], scope: { kind: 'anywhere' } });
+  assert.equal(ships.ok, true);
+  assert.equal(ships.count, 0);
+  assert.deepEqual(ships.coverage.disabledLayers, ['ais-live-vessels']);
+  assert.match(ships.coverage.note, /ais-live-vessels is OFF: 0 is not a count/);
+
+  const followUp = await runner('analyst_query', { followUp: true });
+  assert.deepEqual(followUp.coverage.disabledLayers, ['ais-live-vessels'], 'nadväzujúca otázka bez layers tiež');
+
+  const mixed = await runner('analyst_query', { layers: ['flights', 'ais-live-vessels'], scope: { kind: 'anywhere' } });
+  assert.deepEqual(mixed.coverage.disabledLayers, ['ais-live-vessels'], 'zapnuté lietadlá sa neoznačia');
+
+  const flightsOnly = await runner('analyst_query', { scope: { kind: 'anywhere' } });
+  assert.equal(flightsOnly.coverage.disabledLayers, undefined, 'predvolené [flights] je zapnuté');
+  assert.doesNotMatch(flightsOnly.coverage.note, /OFF/);
 });

@@ -25,9 +25,12 @@ const TRACKING_ID_GRAMMAR = /^[0-9a-z~_-]{1,16}$/;
 const MAX_ENABLED_LAYERS_CHARS = 64;
 const MAX_LAYER_OPTIONS_CHARS = 512;
 /**
+ * v4 (2026-10-16, vlastník: „lode nedávaj vôbec"): lode všade predvolene vypnuté — zmena kľúča,
+ * aby sa uložené zapnuté lode z v3 raz vypli; ostatné voľby návštevníka sa z v3 prevezmú
+ * (migratePreviousLayerState, LAYER_STATE_DROPPED_ON_MIGRATION) a ďalej sa znova ukladajú.
  * v3 (2026-09-27): nové predvolené vrstvy (STARTUP_DEFAULT_LAYER_IDS) — zmena kľúča, aby každý
- * (aj vlastník s uloženými plynovodmi, prístavmi, koridormi…) raz začal od nich; ďalej sa voľby
- * znova ukladajú. Starý záznam v2 ostáva v úložisku nepoužitý.
+ * (aj vlastník s uloženými plynovodmi, prístavmi, koridormi…) raz začal od nich. Staré záznamy
+ * v2 a v3 ostávajú v úložisku nepoužité.
  */
 export const LAYER_STATE_STORAGE_KEY = 'gev:layer-state:v4';
 /**

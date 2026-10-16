@@ -1,7 +1,7 @@
 import * as Cesium from 'cesium';
 import { initAuthPanel } from './auth/panel.js';
 import { createFollowedFlights, installFollowButton } from './followedFlights.js';
-import { createFollowedVessels, installVesselFollowButtons } from './followedVessels.js';
+import { createFollowedVessels, fetchVesselLiveContact, installVesselFollowButtons } from './followedVessels.js';
 import { createPushNotifications } from './pushNotifications.js';
 import './auth/panel.css';
 // Admin (2026-10-03): anonymná štatistika návštev a oznam prevádzkovateľa.
@@ -1332,6 +1332,11 @@ async function init() {
           translate: t,
           notify: (text) => styleManager._showToast(text, { durationMs: 6000 }),
           findLive: (mmsi) => aisLiveVesselsLayer.getLiveContact?.(mmsi) || null,
+          // Lode sú predvolene vypnuté (2026-10-16, d421beb): bez vrstvy findLive nič nevie a toasty by
+          // čakali na register (15 min). Živý stav dá server (/api/ais-live/contact, zdroj Web Push),
+          // raz za 5 min na loď; vrstva lodí ostáva vypnutá.
+          fetchLive: (mmsi) => fetchVesselLiveContact(mmsi),
+          liveAllowed: () => document.visibilityState !== 'hidden',
           fetchInfo: (mmsi) => lookupVesselInfo(mmsi),
           openVessel: (mmsi, label) => { void vesselSearch.openByMmsi(mmsi, label); },
         });

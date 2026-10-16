@@ -38,6 +38,7 @@ import {
   getAwarenessNavigationTargets,
 } from './militaryAwarenessEngine.js';
 import { NAVIGATION_AUTHORITY_EVENT } from '../navigationPolicy.js';
+import { contextRestoreLayerIds, recordContextSessionUserChange } from '../contextModePolicy.js';
 
 const militaryAwarenessSource = fs.readFileSync(
   new URL('./militaryAwareness.js', import.meta.url),
@@ -65,6 +66,8 @@ function installAwarenessRuntime({
   // status its module never emits guards nothing. See the settled-but-fetching
   // tests below, which use militaryInstallations' genuine first-fetch readout.
   layerStats = {},
+  // DataLayerManager.adoptLayerVisibility; undefined = manažér ho nemá.
+  adoptLayerVisibility = undefined,
 } = {}) {
   const originalWindow = globalThis.window;
   const originalDocument = globalThis.document;
@@ -178,6 +181,7 @@ function installAwarenessRuntime({
     isEffectivelyEnabled,
     setEnabled,
     getLayerLifecycleState,
+    adoptLayerVisibility,
     layers,
   });
   militaryAwarenessLayer.setParams({ passive: true });
@@ -2259,6 +2263,144 @@ test('every Context camera flight without a tracked entity takes navigation auth
 
     militaryAwarenessLayer.focusTarget('military-installations', 'inst-1');
     assert.deepEqual(taken, ['context-vessel-focus', 'context-installation-focus']);
+  } finally {
+    restores.reverse().forEach((restore) => restore());
+    runtime.restore();
+    restoreCollections();
+  }
+});
+
+// 2026-10-16: lode sú predvolene vypnuté, takže ich Kontakty zapínajú ako vlastnú
+// závislosť. Loď, ktorú si používateľ v Kontaktoch otvorí, musí po odchode
+// z Kontaktov ostať — vrstva zapnutá a karta otvorená. Simulácia spája modul
+// s presne tým, čo s ohláseným prevzatím robí ui.js: zmena ide cez
+// recordContextSessionUserChange do snímky pred vstupom a obnova je
+// contextRestoreLayerIds(snímka).
+function installFreshStartContactsRuntime({ withAdoption = true } = {}) {
+  const enabled = new Set(['flights']); // čerstvý štart: len lietadlá
+  const calls = [];
+  const adoptions = [];
+  const snapshot = {
+    enabledLayerIds: new Set(enabled),
+    userAdded: new Set(),
+    userRemoved: new Set(),
+  };
+  const runtime = installAwarenessRuntime({
+    isEnabled: (layerId) => enabled.has(layerId),
+    setEnabled: async (layerId, on) => {
+      calls.push(`${layerId}:${on ? 'on' : 'off'}`);
+      if (on) enabled.add(layerId);
+      else enabled.delete(layerId);
+      return true;
+    },
+    adoptLayerVisibility: withAdoption
+      ? (layerId, on, options = {}) => {
+        // Ako DataLayerManager: prevziať sa dá len už zapnutá vrstva.
+        if (enabled.has(layerId) !== Boolean(on)) return false;
+        adoptions.push({ layerId, enabled: on, ...options });
+        recordContextSessionUserChange({
+          snapshot,
+          change: {
+            type: 'visibility',
+            layerId,
+            enabled: Boolean(on),
+            origin: options.origin,
+            adopted: true,
+            adoptedFromSelection: Boolean(options.adoptedFromSelection),
+          },
+          effectiveContextMode: 'flights',
+        });
+        return true;
+      }
+      : undefined,
+  });
+  return { runtime, enabled, calls, adoptions, snapshot };
+}
+
+test('Kontakty pri čerstvom štarte: loď otvorená používateľom ostane po odchode zapnutá a s kartou', async () => {
+  const position = Cesium.Cartesian3.fromDegrees(17.1, 48.1, 10);
+  const restoreCollections = stubAwarenessCollections({});
+  const { runtime, enabled, calls, adoptions, snapshot } = installFreshStartContactsRuntime();
+  const restores = [];
+
+  try {
+    replaceMethod(aisLiveVesselsLayer, 'selectById', () => true, restores);
+    replaceMethod(aisLiveVesselsLayer, 'getAllPositions', () => [{ id: '111', position }], restores);
+
+    militaryAwarenessLayer.setParams({ passive: false });
+    await nextTurn();
+    assert.ok(calls.includes('ais-live-vessels:on'), 'Kontakty si lode zapli samy');
+    assert.equal(adoptions.length, 0, 'samočinný výber (autofocus) lode nepreberá');
+
+    assert.equal(
+      militaryAwarenessLayer.focusTarget('ais-live-vessels', '111', { origin: 'user' }),
+      true,
+    );
+    assert.deepEqual(adoptions, [{
+      layerId: 'ais-live-vessels', enabled: true, origin: 'user', adoptedFromSelection: true,
+    }], 'otvorená loď prevezme vrstvu ako voľbu používateľa');
+
+    await militaryAwarenessLayer.disable();
+    assert.equal(
+      calls.includes('ais-live-vessels:off'),
+      false,
+      'odchod z Kontaktov lode nevypne — karta lode ostane otvorená',
+    );
+    assert.ok(calls.includes('military:off'), 'ostatné závislosti Kontaktov sa uvoľnia ako doteraz');
+    assert.ok(enabled.has('ais-live-vessels'));
+    const restored = contextRestoreLayerIds(snapshot);
+    assert.ok(restored.has('ais-live-vessels'), 'obnova stavu pred Kontaktmi lode ponechá');
+    assert.equal(restored.has('military'), false);
+  } finally {
+    restores.reverse().forEach((restore) => restore());
+    runtime.restore();
+    restoreCollections();
+  }
+});
+
+test('Kontakty pri čerstvom štarte: lode, ktoré si pustili len Kontakty, pri odchode zmiznú', async () => {
+  const position = Cesium.Cartesian3.fromDegrees(17.1, 48.1, 10);
+  const restoreCollections = stubAwarenessCollections({});
+  const { runtime, calls, adoptions, snapshot } = installFreshStartContactsRuntime();
+  const restores = [];
+
+  try {
+    replaceMethod(aisLiveVesselsLayer, 'selectById', () => true, restores);
+    replaceMethod(aisLiveVesselsLayer, 'getAllPositions', () => [{ id: '111', position }], restores);
+
+    militaryAwarenessLayer.setParams({ passive: false });
+    await nextTurn();
+    // Programový výber (nie klik používateľa) nič nepreberá.
+    militaryAwarenessLayer.focusTarget('ais-live-vessels', '111');
+    assert.equal(adoptions.length, 0);
+
+    await militaryAwarenessLayer.disable();
+    assert.ok(calls.includes('ais-live-vessels:off'), 'lode Kontaktov sa uvoľnia');
+    assert.equal(contextRestoreLayerIds(snapshot).has('ais-live-vessels'), false);
+  } finally {
+    restores.reverse().forEach((restore) => restore());
+    runtime.restore();
+    restoreCollections();
+  }
+});
+
+test('Kontakty: bez ohláseného prevzatia vlastníctvo lodí ostáva (žiadna polovičná oprava)', async () => {
+  const position = Cesium.Cartesian3.fromDegrees(17.1, 48.1, 10);
+  const restoreCollections = stubAwarenessCollections({});
+  // Manažér bez adoptLayerVisibility: obnova by lode aj tak vypla, takže ich
+  // nesmie pustiť ani modul — inak by ostali zapnuté bez záznamu v snímke.
+  const { runtime, calls } = installFreshStartContactsRuntime({ withAdoption: false });
+  const restores = [];
+
+  try {
+    replaceMethod(aisLiveVesselsLayer, 'selectById', () => true, restores);
+    replaceMethod(aisLiveVesselsLayer, 'getAllPositions', () => [{ id: '111', position }], restores);
+
+    militaryAwarenessLayer.setParams({ passive: false });
+    await nextTurn();
+    militaryAwarenessLayer.focusTarget('ais-live-vessels', '111', { origin: 'user' });
+    await militaryAwarenessLayer.disable();
+    assert.ok(calls.includes('ais-live-vessels:off'));
   } finally {
     restores.reverse().forEach((restore) => restore());
     runtime.restore();

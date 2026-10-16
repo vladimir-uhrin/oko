@@ -254,6 +254,8 @@ const TRACKABLE_FAMILIES = [
   { layerId: 'ais-live-vessels', kind: 'vessel' },
   { layerId: 'satellites', kind: 'satellite' },
 ];
+/** Vrstva živých lodí — jediná, ktorú track_entity zapína sám (2026-10-16, trackVesselAfterEnabling). */
+const VOICE_VESSEL_LAYER_ID = 'ais-live-vessels';
 
 const FRAME_TARGETS = new Map([
   ['flights', 'flights'],
@@ -1780,9 +1782,95 @@ async function trackEntity(viewer, dataManager, styleManager, args = {}) {
     const found = loaded ? module.findByQuery(query) : null;
     if (found) return trackFoundEntity(viewer, styleManager, family, module, found, query);
   }
+  // 3. kolo (2026-10-16): lode sú predvolene vypnuté (d421beb), takže vypnuté lode by sa vôbec
+  // nehľadali a „sleduj loď EVER GIVEN" by skončilo „nenašiel som". Až po 1. a 2. kole, aby
+  // „track ISS" ani lietadlo lode nezaplo.
+  let vesselSearch = null;
+  // Len výslovná požiadavka na loď (layerId = lode, napr. „sleduj loď X"): bez druhu by „track ISS"
+  // pri vypnutých satelitoch zaplo lode a sledovalo loď s „ISS" v mene (MISSISSIPPI), a každý
+  // neúspešný dopyt by lode zapol a vypol (2026-10-16, revízia).
+  if (requested === VOICE_VESSEL_LAYER_ID && skippedDisabled.includes(VOICE_VESSEL_LAYER_ID) && typeof dataManager.setEnabled === 'function') {
+    vesselSearch = await trackVesselAfterEnabling(viewer, dataManager, styleManager, query);
+    if (vesselSearch.result) return vesselSearch.result;
+  }
 
-  const disabledNote = skippedDisabled.length ? ` (disabled layers skipped: ${skippedDisabled.join(', ')})` : '';
-  return { ok: false, action: 'track_entity', query, error: `Nothing matched "${query}"${disabledNote}` };
+  // Prehľadané lode nie sú „preskočené": chyba (a free voice podľa nej) nesmie tvrdiť, že sa
+  // lode nehľadali, keď sa hľadali — ani naopak (2026-10-16).
+  const stillSkipped = vesselSearch?.searched
+    ? skippedDisabled.filter((id) => id !== VOICE_VESSEL_LAYER_ID)
+    : skippedDisabled;
+  const notes = [];
+  if (vesselSearch?.searched) {
+    notes.push(vesselSearch.restored
+      ? 'the ships layer was switched on to search it, then switched back off'
+      : 'the ships layer was switched on to search it');
+  }
+  if (stillSkipped.length) notes.push(`disabled layers skipped: ${stillSkipped.join(', ')}`);
+  const note = notes.length ? ` (${notes.join('; ')})` : '';
+  return {
+    ok: false,
+    action: 'track_entity',
+    query,
+    error: `Nothing matched "${query}"${note}`,
+    skippedDisabled: stillSkipped,
+  };
+}
+
+/**
+ * Vypnuté lode zapni, hľadaj medzi nimi a nájdenú loď sleduj (track_entity, 3. kolo, 2026-10-16).
+ *
+ * Prečo: vypnutá vrstva lodí nemá v pamäti ani jednu loď a vlastník chce lode predvolene vypnuté
+ * („lode nedávaj vôbec"), no otvorenie konkrétnej lode ich má zapnúť — ako zdieľanie, paleta či
+ * LNG flotila. `await setEnabled` počká na enable → loadLivePositions, takže lode vo výreze sú
+ * hneď v pamäti; telefón nad 3 000 km načítanie odloží a lode načíta až whenLiveData.
+ * Nič nesadlo → lode znova vypni: návštevník žiadnu loď neotvoril a predvoľba „bez lodí" platí.
+ * Ak lode medzitým prepol niekto iný (iná epocha zámeru), jeho voľbu nechaj.
+ * @returns {Promise<{result: object|null, searched: boolean, restored: boolean}>}
+ */
+async function trackVesselAfterEnabling(viewer, dataManager, styleManager, query) {
+  const layerId = VOICE_VESSEL_LAYER_ID;
+  const family = TRACKABLE_FAMILIES.find((candidate) => candidate.layerId === layerId);
+  const module = dataManager.layers.get(layerId)?.module;
+  if (!family || typeof module?.findByQuery !== 'function') return { result: null, searched: false, restored: false };
+
+  let enabled = false;
+  let intentEpoch;
+  try {
+    const pending = dataManager.setEnabled(layerId, true, { origin: 'voice' });
+    intentEpoch = dataManager.layers.get(layerId)?.visibilityIntentEpoch;
+    await pending;
+    enabled = dataManager.isEnabled(layerId) === true;
+  } catch {
+    enabled = false;
+  }
+  if (!enabled) return { result: null, searched: false, restored: false };
+
+  let found = module.findByQuery(query);
+  if (!found && typeof module.whenLiveData === 'function') {
+    let loaded = false;
+    try { loaded = (await module.whenLiveData()) === true; } catch { loaded = false; }
+    found = loaded ? module.findByQuery(query) : null;
+  }
+  if (found) {
+    const tracked = trackFoundEntity(viewer, styleManager, family, module, found, query);
+    // Platený hlas (model) má vedieť, že lode zapol tento nástroj — aby to návštevníkovi povedal.
+    return {
+      result: tracked && typeof tracked === 'object' ? { ...tracked, enabledLayerId: layerId } : tracked,
+      searched: true,
+      restored: false,
+    };
+  }
+
+  let restored = false;
+  if (dataManager.layers.get(layerId)?.visibilityIntentEpoch === intentEpoch) {
+    try {
+      await dataManager.setEnabled(layerId, false, { origin: 'voice' });
+      restored = dataManager.isEnabled(layerId) !== true;
+    } catch {
+      restored = false;
+    }
+  }
+  return { result: null, searched: true, restored };
 }
 
 /** Sleduj / vyber nájdený objekt (track_entity) a preleť k nemu. */
@@ -3448,6 +3536,26 @@ function analystProviders(viewer, dataManager, { recordLimitByLayer = null } = {
   };
 }
 
+/**
+ * Vypnuté vrstvy v odpovedi analyst_query (2026-10-16). Vypnutá vrstva vráti 0 záznamov a bez
+ * tejto značky model povie „pri Hamburgu je 0 lodí" — lode sú od d421beb predvolene vypnuté
+ * a inštrukcia „povedz, že vrstva je vypnutá" nemala v odpovedi nástroja z čoho vychádzať.
+ * Zoznam je z vrstiev, ktoré engine naozaj prehľadal (layersQueried), nie z args.layers:
+ * tak sedí aj predvolené ['flights'] aj nadväzujúca otázka (followUp bez layers).
+ * @param {object|undefined} coverage coverage z výsledku (mení sa na mieste)
+ * @param {object} dataManager
+ */
+function markDisabledAnalystLayers(coverage, dataManager) {
+  if (!coverage || typeof dataManager?.isEnabled !== 'function') return;
+  const queried = (coverage.layersQueried || []).map((layer) => layer?.layerKey).filter(Boolean);
+  const off = [...new Set(queried)].filter((layerId) => !dataManager.isEnabled(layerId));
+  if (!off.length) return;
+  coverage.disabledLayers = off;
+  const warning = `${off.join(', ')} ${off.length > 1 ? 'are' : 'is'} OFF: 0 is not a count. `
+    + 'Say the layer is off and offer to enable it (set_layer_visibility); never report the 0 as fact.';
+  coverage.note = coverage.note ? `${coverage.note} — ${warning}` : warning;
+}
+
 async function runAnalystQuery(viewer, dataManager, args = {}) {
   if (!_analystEngine) _analystEngine = createAnalystEngine(analystProviders(viewer, dataManager));
   const result = await _analystEngine.query({
@@ -3497,13 +3605,18 @@ async function runAnalystQuery(viewer, dataManager, args = {}) {
   if (viewportScoped && result.coverage) {
     result.coverage.note = `${result.coverage.note} — counts cover loaded data; the flights layer loads by viewport`;
   }
+  markDisabledAnalystLayers(result.coverage, dataManager);
   // ENTITY-CENTRED NEARBY: answered by the SAME engine that fills the Contacts
   // panel, so the spoken number and the panel readout for one centre cannot
   // differ. The generic record/scope engine still owns explicit regions and
   // arbitrary points — only "how many aircraft around <this contact>" is
   // unified, because that is the question the panel is already answering.
   const entityWindow = aircraftProximityWindowForQuery(args, result);
-  if (entityWindow) return entityWindow;
+  if (entityWindow) {
+    // Okno Kontaktov má vlastné coverage — vypnuté vojenské lietadlá tiež nie sú „0" (2026-10-16).
+    markDisabledAnalystLayers(entityWindow.coverage, dataManager);
+    return entityWindow;
+  }
 
   const contactsWindow = activeContactsWindow();
   const aircraftQueried = (result.coverage?.layersQueried || [])

@@ -10,6 +10,9 @@
  *   `mmsi:<MMSI>`); v „Hľadať čokoľvek" je navrchu so stavom („na ceste do Wilmington").
  * - Stav: živé AIS (rýchlosť, navigačný stav), keď je loď v dosahu; inak plavba z registra
  *   (/api/vessel-info — odchod z prístavu / príchod do prístavu, server ju drží 10 min).
+ * - Lode sú od 2026-10-16 predvolene vypnuté (d421beb), takže vrstva v prehliadači loď zvyčajne
+ *   nemá. Živý stav vtedy dá server (/api/ais-live/contact, ten istý zdroj ako Web Push),
+ *   najviac raz za 5 min na loď; vrstva lodí sa kvôli tomu nezapína.
  * - Upozornenie (toast) pri prechode „v prístave → na ceste" (vyplávala) a „na ceste →
  *   v prístave" (priplávala). Prvé vyhodnotenie po načítaní je len základ, nič nehlási.
  *
@@ -27,6 +30,14 @@ export const VESSEL_FOLLOW_POLL_MS = 30_000;
 export const VESSEL_FOLLOW_REMOTE_MS = 15 * 60_000;
 /** Najviac lodí, pre ktoré sa pýtame registra (zvyšok len zo živých dát). */
 export const VESSEL_FOLLOW_REMOTE_MAX = 20;
+/**
+ * Živý kontakt zo servera pre jednu loď najskôr po tomto čase (ms) — 2026-10-16: rovnaký takt ako
+ * serverový strážca Web Push (FOLLOW_WATCH_INTERVAL_MS v auth/server/pushWatch.js), nech okno
+ * s 20 sledovanými loďami nepýta server každých 30 s.
+ */
+export const VESSEL_FOLLOW_LIVE_REMOTE_MS = 5 * 60_000;
+/** Dopyt na živý kontakt najdlhšie takto (ms) — visiaci server nesmie zastaviť vyhodnotenie (2026-10-16). */
+export const VESSEL_FOLLOW_LIVE_TIMEOUT_MS = 10_000;
 /** To isté upozornenie pre tú istú loď najskôr po tomto čase (ms). */
 export const VESSEL_FOLLOW_NOTIFY_COOLDOWN_MS = 30 * 60_000;
 export const VESSEL_FOLLOW_PENDING_KEY = 'oko-follow-vessel-pending';
@@ -51,12 +62,45 @@ function defaultStorage() {
 }
 
 /**
+ * Živý kontakt lode z pamäte servera (2026-10-16): GET /api/ais-live/contact?mmsi= → {mmsi, contact|null}
+ * (data/shipServer/index.js; bez kľúča, server drží kontakt do zastarania). Lode sú predvolene
+ * vypnuté, takže vrstva v prehliadači sledovanú loď zvyčajne nepozná — toto je jej náhrada bez
+ * zapnutia vrstvy. null = server loď v dosahu nemá; výpadok, chyba alebo prekročený čas = výnimka
+ * (volajúci si nechá posledný známy kontakt, aby stav neskočil na register a neohlásil falošný príchod).
+ * @param {string} mmsi
+ * @param {{fetchImpl?: typeof fetch, timeoutMs?: number}} [o]
+ * @returns {Promise<{sog?: number|null, navStatus?: number|null}|null>}
+ */
+export async function fetchVesselLiveContact(mmsi, { fetchImpl = globalThis.fetch?.bind(globalThis), timeoutMs = VESSEL_FOLLOW_LIVE_TIMEOUT_MS } = {}) {
+  const m = normalizeMmsi(mmsi);
+  if (!m || typeof fetchImpl !== 'function') return null;
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  let timer = null;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => { try { ctrl?.abort(); } catch { /* */ } reject(new Error('ais_contact_timeout')); }, timeoutMs);
+  });
+  try {
+    return await Promise.race([expired, (async () => {
+      const res = await fetchImpl(`/api/ais-live/contact?mmsi=${m}`, { headers: { Accept: 'application/json' }, signal: ctrl?.signal });
+      if (!res?.ok) throw new Error(`ais_contact_${res?.status ?? 'error'}`);
+      const data = await res.json();
+      return data?.contact && typeof data.contact === 'object' ? data.contact : null;
+    })()]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Controller sledovaných lodí.
  * @param {object} o
  * @param {{client: object, open: Function, close?: Function}|null} o.account výstup initAuthPanel()
  * @param {(key: string, vars?: object) => string} o.translate
  * @param {(text: string) => void} [o.notify]
  * @param {(mmsi: string) => ({sog?: number, navStatus?: number}|null)} [o.findLive] loď v dosahu živého AIS
+ * @param {((mmsi: string) => Promise<{sog?: number, navStatus?: number}|null>)|null} [o.fetchLive] živý kontakt
+ * @param {() => boolean} [o.liveAllowed] smie sa teraz pýtať servera (viditeľná stránka)
+ *   zo servera, keď findLive loď nemá (2026-10-16, fetchVesselLiveContact); null = bez servera
  * @param {(mmsi: string) => Promise<object|null>} [o.fetchInfo] /api/vessel-info (plavba z registra)
  * @param {(mmsi: string, label: string) => void} [o.openVessel] klik v palete
  */
@@ -65,6 +109,8 @@ export function createFollowedVessels({
   translate: t,
   notify = () => {},
   findLive = () => null,
+  fetchLive = null,
+  liveAllowed = () => true,
   fetchInfo = async () => null,
   openVessel = () => {},
   setIntervalImpl = (fn, ms) => setInterval(fn, ms),
@@ -90,6 +136,12 @@ export function createFollowedVessels({
   };
   const infos = new Map(); // mmsi → {info, at}
   const inflight = new Map(); // mmsi → prebiehajúci dopyt do registra
+  const liveRemote = new Map(); // mmsi → {contact, at} živý kontakt zo servera (2026-10-16)
+  const liveInflight = new Map(); // mmsi → prebiehajúci dopyt na /api/ais-live/contact
+  // Vyhodnotenia sa uplatnia v poradí volania (2026-10-16): dopyty bežia hneď a súbežne, ale
+  // porovnanie so stavom a toasty idú za sebou — pomalší server pri skoršom vyhodnotení nesmie
+  // prehodiť poradie upozornení ani prepísať novší stav starším.
+  let applyTurn = Promise.resolve();
   const lastStatus = new Map(); // key → status
   let prevStatus = null;
   const lastNotified = new Map();
@@ -132,15 +184,62 @@ export function createFollowedVessels({
     await Promise.all([...waiting, ...jobs]);
   }
 
+  const readLive = (mmsi) => { try { return findLive(mmsi) || null; } catch { return null; } };
+
+  /**
+   * Živý kontakt zo servera pre lode, ktoré vrstva v prehliadači nemá (2026-10-16, lode predvolene
+   * vypnuté). Na loď najviac raz za VESSEL_FOLLOW_LIVE_REMOTE_MS a len pre prvých
+   * VESSEL_FOLLOW_REMOTE_MAX sledovaných — rovnaký strop ako register.
+   */
+  async function refreshLive(missing, capped) {
+    // Len pri viditeľnej stránke (2026-10-16): každý dopyt z prehliadača server berie ako návštevníka
+    // (supplements.markVisitor) — skrytá záložka by inak držala zdroje lodí navyše na plný takt
+    // nonstop; skrytá stránka toasty aj tak neukáže a sledovanie vtedy rieši Web Push.
+    if (typeof fetchLive !== 'function' || !liveAllowed()) return;
+    // Loď mimo stropu (alebo už nesledovaná) si starý kontakt nenechá — inak by ho používala navždy.
+    for (const mmsi of liveRemote.keys()) if (!capped.has(mmsi)) liveRemote.delete(mmsi);
+    const time = now();
+    const due = missing.filter((mmsi) => !liveInflight.has(mmsi) && time - (liveRemote.get(mmsi)?.at ?? -Infinity) >= VESSEL_FOLLOW_LIVE_REMOTE_MS);
+    const waiting = missing.map((mmsi) => liveInflight.get(mmsi)).filter(Boolean);
+    const jobs = due.map((mmsi) => {
+      const job = (async () => {
+        try {
+          const contact = await fetchLive(mmsi);
+          liveRemote.set(mmsi, { contact: contact || null, at: time });
+        } catch {
+          // Výpadok servera: posledný kontakt ostáva (stav neskočí na starý register → falošný toast),
+          // ďalší pokus až o 5 min — aj chyba sa ráta do taktu, nech nepadajú dopyty každých 30 s.
+          liveRemote.set(mmsi, { contact: liveRemote.get(mmsi)?.contact || null, at: time });
+        } finally { liveInflight.delete(mmsi); }
+      })();
+      liveInflight.set(mmsi, job);
+      return job;
+    });
+    await Promise.all([...waiting, ...jobs]);
+  }
+
   /** Porovná zoznam so živými dátami a registrom, ohlási vyplávanie/priplávanie. */
   async function evaluate({ baseline = false } = {}) {
     if (!follows.length) return;
-    await refreshRemote();
+    // 2026-10-16: lode sú predvolene vypnuté → findLive býva null. Ktoré lode treba doplniť zo
+    // servera, sa rozhodne pred dopytmi; loď, ktorú vrstva má, sa servera nepýta vôbec.
+    const capped = new Set(follows.slice(0, VESSEL_FOLLOW_REMOTE_MAX).map((f) => f.key.slice(5)));
+    const localBefore = new Map(follows.map((f) => [f.key.slice(5), readLive(f.key.slice(5))]));
+    const missing = [...capped].filter((mmsi) => !localBefore.get(mmsi));
+    // Register a server súbežne (nie loď po lodi); uplatnenie počká na predošlé vyhodnotenie.
+    const ready = Promise.all([refreshRemote(), refreshLive(missing, capped)]);
+    const turn = applyTurn.then(() => ready).then(() => apply(baseline, localBefore, capped));
+    applyTurn = turn.catch(() => {});
+    await turn;
+  }
+
+  function apply(baseline, localBefore, capped) {
     const next = new Map();
     for (const f of follows) {
       const mmsi = f.key.slice(5);
-      let live = null;
-      try { live = findLive(mmsi) || null; } catch { live = null; }
+      // Vrstva má prednosť (čerstvejšia), potom to, čo mala pred dopytmi (vypnutá medzitým), potom server.
+      const remote = capped.has(mmsi) ? liveRemote.get(mmsi)?.contact || null : null;
+      const live = readLive(mmsi) || localBefore.get(mmsi) || remote;
       const s = vesselFollowStatus(live, infos.get(mmsi)?.info || null);
       next.set(f.key, s);
       lastStatus.set(f.key, s);

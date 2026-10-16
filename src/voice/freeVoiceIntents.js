@@ -103,8 +103,12 @@ export function parseVoiceIntent(heard) {
   if (/^(prestan sledovat|zrus sledovanie|nesleduj|koniec sledovania|stop tracking|unfollow)\b/.test(t)) return { type: 'stop-tracking' };
   if (/^(co je to|co sledujem|co to je|ake je to lietadlo|aky je to let|kam leti|odkial leti|kto to je|what is (it|this|that))\b/.test(t)) return { type: 'describe' };
   if (TRACK.test(t)) {
-    const query = tailAfter(heard, /^(sleduj|sledovat|nasleduj|zacni sledovat|follow|track)\b(\s+(lietadlo|let|lod|satelit)\b)?/);
-    return query ? { type: 'track', query } : { type: 'describe' };
+    const query = tailAfter(heard, /^(sleduj|sledovat|nasleduj|zacni sledovat|follow|track)\b(\s+(lietadlo|let|lod|satelit|the ship|ship|vessel|plane|aircraft|flight|satellite)\b)?/);
+    // Druh z vety (2026-10-16): „sleduj loď X" hľadá len lode — a len vtedy ich track_entity smie
+    // zapnúť (lode sú predvolene vypnuté); „sleduj ISS" bez druhu lode nezapína.
+    const kind = /^(sleduj|sledovat|nasleduj|zacni sledovat|follow|track)\s+(lod|the ship|ship|vessel)\b/.test(t) ? 'vessel' : null;
+    if (!query) return { type: 'describe' };
+    return kind ? { type: 'track', query, kind } : { type: 'track', query };
   }
 
   // Kokpit

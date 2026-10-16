@@ -208,12 +208,20 @@ export function createFreeVoice({ ui, run, dataManager = null, translate = (k) =
     }
     return null;
   }
-  async function track(query) {
-    const aircraft = await findAircraft(query);
+  async function track(query, kind = null) {
+    // „sleduj loď X" (kind vessel): rovno lode — len vtedy ich track_entity smie zapnúť (2026-10-16).
+    const aircraft = kind === 'vessel' ? null : await findAircraft(query);
     if (aircraft) { aircraft.run(); return translate('voice.free.tracking', { name: aircraft.label }); }
     // Loď alebo satelit podľa mena — rovnaká akcia ako platený hlas.
-    const result = await runTool('track_entity', { query });
-    if (result.ok !== false && !result.error) return translate('voice.free.tracking', { name: query });
+    // Vypnuté lode (predvolené od 2026-10-16) track_entity zapne a prehľadá len pri „sleduj loď X"
+    // (gevActions, trackVesselAfterEnabling); odpoveď menuje to, čo naozaj sleduje (label).
+    const result = await runTool('track_entity', kind === 'vessel' ? { query, layerId: 'ais-live-vessels' } : { query });
+    if (result.ok !== false && !result.error) return translate('voice.free.tracking', { name: result.label || query });
+    // Lode ostali vypnuté a nehľadalo sa medzi nimi (zapnutie zlyhalo) — „nenašiel som" by bola
+    // nepravda; povedz, že sú vypnuté (2026-10-16).
+    if (Array.isArray(result.skippedDisabled) && result.skippedDisabled.includes('ais-live-vessels')) {
+      return translate('voice.free.ships-off', { q: query });
+    }
     return translate('voice.free.not-found', { q: query });
   }
 
@@ -241,7 +249,7 @@ export function createFreeVoice({ ui, run, dataManager = null, translate = (k) =
         reply = translate(intent.motion === 'stop' ? 'voice.free.camera-stop' : 'voice.free.orbit'); break;
       case 'stop-tracking': await runTool('stop_tracking'); reply = translate('voice.free.tracking-stopped'); break;
       case 'describe': reply = describeTrackedForSpeech(resolvers.trackedInfo?.() || null, translate); break;
-      case 'track': reply = await track(intent.query); break;
+      case 'track': reply = await track(intent.query, intent.kind || null); break;
       case 'cockpit': {
         const result = await runTool('control_cockpit', { action: intent.action });
         reply = result.ok === false ? translate('voice.free.cockpit-failed') : translate(`voice.free.cockpit-${intent.action}`); break;

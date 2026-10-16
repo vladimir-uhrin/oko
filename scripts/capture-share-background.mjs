@@ -27,7 +27,9 @@ const out = path.resolve(flag('--out', path.join(root, '.gev-cache', 'share-cove
 const W = 2400;
 const H = 1260;
 // Pohľad z ~1 750 km nad Stredomorím na sever: dole stredná Európa so živou premávkou, hore hviezdy
-// pre text. Vrstvy a.z.f = lode (AIS, AISHub) a lietadlá — predvolené vrstvy appky.
+// pre text. Vrstvy a.z.f = lode (AIS, AISHub) a lietadlá — zámerne aj lode, hoci appka od
+// 2026-10-16 štartuje len s lietadlami: titulok obálky lode spomína a sú stále o klik ďalej
+// (VRSTVY, odkaz, otvorenie lode). Obálku kvôli tomu nepregenerúvať (~400 dlaždíc ion).
 const VIEW = { lat: 29.5, lon: 16.5, alt: 1_750_000, heading: 0, pitch: -33 };
 const hash = `v=2&lat=${VIEW.lat}&lon=${VIEW.lon}&alt=${VIEW.alt}&heading=${VIEW.heading}&pitch=${VIEW.pitch}&roll=0`
   + '&style=normal&bloom=0&sharpen=1&si=49&hud=tactical&hv=0&dm=OFF&sc=0&map=photoreal&l=a.z.f&lo=f.e.1';

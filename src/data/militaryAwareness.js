@@ -528,6 +528,34 @@ function rowHtml(cohort) {
   </section>`;
 }
 
+/**
+ * Loď, ktorú používateľ v Kontaktoch sám otvoril, prevezme vrstvu lodí ako jeho
+ * voľbu (2026-10-16). Lode sú od 2026-10-16 predvolene vypnuté, takže ich
+ * Kontakty zvyčajne zapínajú samy ako vlastnú závislosť — a pri odchode ich
+ * vypnú spolu s otvorenou kartou lode. Lietadlá to riešia cez ui.js
+ * (_persistAwarenessSelection), lode tou cestou nejdú. Treba obe polovice:
+ * pustiť vlastníctvo (inak ich release vypne a kartu zavrie) A ohlásiť prevzatie
+ * s adoptedFromSelection (inak ich presná obnova stavu pred Kontaktmi vypne,
+ * lebo v ňom neboli). Samočinný výber (autofocus, programmatic) nič nepreberá —
+ * lode, ktoré si pustili len Kontakty, pri odchode zmiznú ako doteraz.
+ * @param {string} origin Pôvod výberu.
+ * @returns {boolean} Či sa vrstva lodí prevzala.
+ */
+function adoptFocusedVesselLayer(origin) {
+  if (origin !== 'user' && origin !== 'voice') return false;
+  if (!state.ownedDependencies.has('ais-live-vessels')) return false;
+  const adopted = state.dataManager?.adoptLayerVisibility?.(
+    'ais-live-vessels',
+    true,
+    { origin, adoptedFromSelection: true },
+  );
+  // Bez ohláseného prevzatia by obnova po odchode lode aj tak vypla, takže
+  // vlastníctvo ostáva a správanie sa nemení (napr. vrstva sa ešte zapína).
+  if (!adopted) return false;
+  state.ownedDependencies.delete('ais-live-vessels');
+  return true;
+}
+
 /** Focus a nearby example through the source layer that owns its selection. */
 function focusNearbyTarget(layerId, id, { origin = 'programmatic' } = {}) {
   if (!layerId || !id) return false;
@@ -545,6 +573,7 @@ function focusNearbyTarget(layerId, id, { origin = 'programmatic' } = {}) {
     return militaryInstallationsLayer.focusById(id);
   }
   if (layerId !== 'ais-live-vessels' || !aisLiveVesselsLayer.selectById(id)) return false;
+  adoptFocusedVesselLayer(origin);
 
   const vessel = aisLiveVesselsLayer.getAllPositions(12000).find((item) => String(item.id) === String(id));
   if (!contextTargetFlyToAllowed(layerId) || !vessel?.position || !state.viewer) return true;

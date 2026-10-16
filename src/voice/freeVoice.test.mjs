@@ -92,6 +92,27 @@ test('vykonanie: vrstva, kamera, sledovanie (aj po skloňovaní), scéna z palet
   assert.deepEqual(calls.at(-1), ['track_entity', { query: 'ISS' }]);
 });
 
+test('sledovanie lode: vypnuté a neprehľadané lode nie sú „nenašiel som"; odpoveď menuje nájdenú loď (2026-10-16)', async () => {
+  // Lode sú predvolene vypnuté (d421beb). track_entity ich samo zapne; keď sa to nepodarí a lode
+  // ostanú preskočené (skippedDisabled), „X som nenašiel" by bola nepravda.
+  let next = null;
+  const v = createFreeVoice({
+    ui: fakeUi(), translate: (k, p) => (p ? `${k}:${Object.values(p).join('|')}` : k),
+    run: async (name) => (name === 'track_entity' ? next : { ok: true }),
+    SpeechRecognitionImpl: null, synth: null, Utterance: null,
+  });
+  v.setResolvers({ aircraft: () => [], aircraftWorld: async () => [] });
+
+  next = { ok: false, action: 'track_entity', error: 'Nothing matched "EVER GIVEN" (disabled layers skipped: ais-live-vessels)', skippedDisabled: ['ais-live-vessels'] };
+  assert.equal(await v.handleText('sleduj loď EVER GIVEN'), 'voice.free.ships-off:EVER GIVEN');
+
+  next = { ok: false, action: 'track_entity', error: 'Nothing matched "EVER GIVEN" (the ships layer was switched on to search it, then switched back off)', skippedDisabled: [] };
+  assert.equal(await v.handleText('sleduj loď EVER GIVEN'), 'voice.free.not-found:EVER GIVEN', 'lode prehľadané → pravdivé „nenašiel som"');
+
+  next = { ok: true, action: 'track_entity', kind: 'vessel', label: 'EVER GIVEN', enabledLayerId: 'ais-live-vessels', error: null };
+  assert.equal(await v.handleText('sleduj loď ever'), 'voice.free.tracking:EVER GIVEN', 'meno sledovanej lode, nie tvar z vety');
+});
+
 test('bez Web Speech API: jasná chyba, nič sa nespustí; pilulka ukazuje ZADARMO bez voľby modelu', () => {
   const { v, ui } = setup();
   v.applyUi();
@@ -146,4 +167,13 @@ test('rozpoznávanie: klik počúva a reštartuje po pauze, medzerník je vysiel
   instances.at(-1).onerror({ error: 'not-allowed' });
   assert.equal(v.isActive(), false);
   assert.equal(ui.detail.textContent, 'voice.free.mic-denied');
+});
+
+test('sledovanie s druhom (2026-10-16): „sleduj loď X" / „track ship X" = len lode; bez druhu žiadny druh', () => {
+  assert.deepEqual(parseVoiceIntent('sleduj loď EVER GIVEN'), { type: 'track', query: 'EVER GIVEN', kind: 'vessel' });
+  assert.deepEqual(parseVoiceIntent('track ship EVER GIVEN'), { type: 'track', query: 'EVER GIVEN', kind: 'vessel' });
+  assert.deepEqual(parseVoiceIntent('follow the ship EVER GIVEN'), { type: 'track', query: 'EVER GIVEN', kind: 'vessel' });
+  assert.deepEqual(parseVoiceIntent('sleduj ISS'), { type: 'track', query: 'ISS' });
+  assert.deepEqual(parseVoiceIntent('sleduj lietadlo OKVOK'), { type: 'track', query: 'OKVOK' });
+  assert.deepEqual(parseVoiceIntent('track plane UAL428'), { type: 'track', query: 'UAL428' });
 });

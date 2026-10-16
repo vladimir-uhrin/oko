@@ -2567,6 +2567,45 @@ class CockpitViewController {
   }
 }
 
+/**
+ * Zapni živé lode a vyber loď podľa MMSI, hneď ako ju vrstva dotiahne (riadok
+ * LNG tankera v karte Plynu). 2026-10-16: lode sú predvolene vypnuté, takže
+ * vrstva štartuje studená — enable aj prvý update pošlú požiadavku na pohľad
+ * z polovice preletu a požiadavka na cieľ prejde až po 5 s bráne pohybu kamery.
+ * Jediný pokus po 6 s preto zvyčajne minul a karta lode sa neotvorila. Zapnutie
+ * sa preto počká a pokus sa opakuje ako pri obnove predmetu odkazu: každých
+ * 1,5 s najviac 30 s. Končí, keď sa loď vyberie, keď si používateľ medzitým
+ * vybral niečo iné — neskorý pokus nesmie prebiť jeho novší výber — alebo keď
+ * lode medzitým vypol (vrstva si staré záznamy drží aj vypnutá).
+ * @param {object} input
+ * @param {object|null} input.dataManager DataLayerManager.
+ * @param {string|number} input.mmsi MMSI lode.
+ * @param {() => boolean} [input.isDestroyed] Či už UI skončilo.
+ * @returns {Promise<boolean>} Či sa loď vybrala.
+ */
+async function selectVesselWhenLoaded({ dataManager, mmsi, isDestroyed = () => false }) {
+  const startedAt = Date.now();
+  try {
+    await dataManager?.setEnabled?.('ais-live-vessels', true, { origin: 'user' });
+  } catch { /* nezapnutá vrstva loď nevráti — pokusy nižšie skončia v termíne */ }
+  const layerOn = () => (
+    dataManager?.isEffectivelyEnabled?.('ais-live-vessels')
+    ?? dataManager?.isEnabled?.('ais-live-vessels')
+  ) !== false;
+  return new Promise((resolve) => {
+    const attempt = () => {
+      if (isDestroyed() || !layerOn()) return resolve(false);
+      const store = getContextStore();
+      if (store.selectedAt && store.selectedAt > startedAt + 250) return resolve(false); // používateľ už vybral niečo iné
+      if (dataManager?.layers?.get('ais-live-vessels')?.module?.selectById?.(mmsi)) return resolve(true);
+      if (Date.now() - startedAt >= SUBJECT_RESTORE_DEADLINE_MS) return resolve(false);
+      setTimeout(attempt, SUBJECT_RESTORE_RETRY_MS);
+      return undefined;
+    };
+    attempt();
+  });
+}
+
 export class StyleManager {
   /**
    * @param {Cesium.Viewer} viewer - The CesiumJS viewer instance.
@@ -3325,11 +3364,14 @@ export class StyleManager {
         });
       },
       // LNG tankery (etapa 8): riadok karty = zapni živé lode, vyber loď podľa
-      // MMSI (hneď aj po dotiahnutí polôh) a preleť 40 km nad ňu.
+      // MMSI (po dotiahnutí polôh, opakovane — selectVesselWhenLoaded, 2026-10-16)
+      // a preleť 40 km nad ňu.
       onFlyToVessel: ({ mmsi, lat, lon }) => {
-        void this._dataManager?.setEnabled?.('ais-live-vessels', true, { origin: 'user' });
-        const select = () => this._dataManager?.layers?.get('ais-live-vessels')?.module?.selectById?.(mmsi);
-        if (!select()) setTimeout(select, 6000);
+        void selectVesselWhenLoaded({
+          dataManager: this._dataManager,
+          mmsi,
+          isDestroyed: () => Boolean(this._destroyed),
+        });
         viewer.camera.flyTo({
           destination: Cesium.Cartesian3.fromDegrees(lon, lat, 40_000),
           orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
@@ -5332,8 +5374,10 @@ export class StyleManager {
         // including legacy and malformed-v2 layer payloads.
         allowLocalState: !this._initialShareState,
       });
-      // Čerstvý štart (žiadny odkaz ani uložený stav): lode a lietadlá zapnuté, ostatné vypnuté
-      // (vlastník 2026-09-27). Ako voľba používateľa → uloží sa a ďalší štart je už 'local'.
+      // Čerstvý štart (žiadny odkaz ani uložený stav): zapne STARTUP_DEFAULT_LAYER_IDS — len
+      // lietadlá; lode a ostatné vrstvy vypnuté (vlastník 2026-09-27; 2026-10-16: „lode nedávaj
+      // vôbec", layerState.js). Lode zapne až VRSTVY, odkaz alebo otvorenie konkrétnej lode.
+      // Ako voľba používateľa → uloží sa a ďalší štart je už 'local'.
       if (this._layerStateCoordinator.source === 'defaults') {
         for (const id of STARTUP_DEFAULT_LAYER_IDS) {
           try { this._dataManager.setEnabled(id, true, { origin: 'user' }); } catch { /* vrstva nemusí byť registrovaná */ }
