@@ -1761,6 +1761,11 @@ async function trackEntity(viewer, dataManager, styleManager, args = {}) {
     }
     const module = dataManager.layers.get(family.layerId)?.module;
     if (!module || typeof module.findByQuery !== 'function') continue;
+    // Telefón nad 3 000 km živé lode nesťahuje (aisLiveVessels.js aisLoadDeferred, 2026-10-16):
+    // hlas ich najprv načíta; inde whenLiveData hneď vráti false.
+    if (family.kind === 'vessel' && typeof module.whenLiveData === 'function') {
+      try { await module.whenLiveData(); } catch { /* hľadá v tom, čo vrstva má */ }
+    }
     const found = module.findByQuery(query);
     if (!found) continue;
 

@@ -149,3 +149,91 @@ test('prehrávač cez dieru v pokrytí (oceán): trasa sa rozdelí na meranie (p
   assert.ok(replay.getState().sample.lat > 51, 'po veľkej kružnici (na sever od priamky v stupňoch)');
   replay.destroy();
 });
+
+test('HFDL polohy bez výšky (2026-10-15): čiara aj značka vo výške susedov, nie na hladine mora; vzorka ostáva bez výšky', async () => {
+  const Cesium = await import('cesium');
+  const T = 1_790_000_000;
+  const hfdl = (t, lon) => ({ t, lat: 53, lon, alt: null, gs: null, trk: null, vr: null, squawk: null, gnd: false });
+  const leg = [
+    { t: T, lat: 53, lon: -15.0, alt: 11_000, gs: 250, trk: 270, vr: 0, squawk: null, gnd: false },
+    hfdl(T + 300, -16.1), hfdl(T + 540, -17.0), // menej než 10 min od seba = plná (meraná) čiara
+    { t: T + 900, lat: 53, lon: -18.4, alt: 11_600, gs: 250, trk: 270, vr: 0, squawk: null, gnd: false },
+  ];
+  const viewer = fakeViewer();
+  let received = null;
+  const replay = createFlightReplay(viewer, {
+    trackFactory: (fx) => { received = fx; return { kind: 'track' }; },
+    requestFrame: () => 1,
+    cancelFrame: () => {},
+    now: () => 0,
+  });
+  assert.equal(replay.load(leg), true);
+  assert.deepEqual(received.map((f) => Math.round(f.alt)), [11_000, 11_200, 11_360, 11_600], 'výška lineárne v čase medzi meraniami');
+  assert.equal(leg[1].alt, null, 'vstupné dáta sa nemenia');
+  replay.seek(T + 420); // medzi dvoma HFDL polohami
+  assert.equal(replay.getState().sample.alt, null, 'panel neukazuje vymyslenú výšku');
+  const height = Cesium.Cartographic.fromCartesian(viewer.ents[0].position.getValue()).height;
+  assert.ok(Math.abs(height - 11_280) < 5, `značka vo výške čiary, nie na mori: ${height}`);
+  replay.destroy();
+});
+
+test('HFDL poloha na jednom konci úseku (2026-10-16): značka ide po čiare, neskáče na výšku suseda', async () => {
+  const Cesium = await import('cesium');
+  const T = 1_790_000_000;
+  const leg = [
+    { t: T, lat: 53, lon: -15.0, alt: 11_000, gs: 250, trk: 270, vr: 0, squawk: null, gnd: false },
+    { t: T + 540, lat: 53, lon: -16.9, alt: null, gs: null, trk: null, vr: null, squawk: null, gnd: false },
+    { t: T + 1080, lat: 53, lon: -18.8, alt: 3_000, gs: 200, trk: 270, vr: -10, squawk: null, gnd: false },
+  ];
+  const viewer = fakeViewer();
+  let received = null;
+  const replay = createFlightReplay(viewer, {
+    trackFactory: (fx) => { received = fx; return { kind: 'track' }; },
+    requestFrame: () => 1,
+    cancelFrame: () => {},
+    now: () => 0,
+  });
+  assert.equal(replay.load(leg), true);
+  assert.deepEqual(received.map((f) => Math.round(f.alt)), [11_000, 7_000, 3_000]);
+  const lineAt = (dt) => (dt <= 540 ? 11_000 + (7_000 - 11_000) * (dt / 540) : 7_000 + (3_000 - 7_000) * ((dt - 540) / 540));
+  for (const dt of [270, 530, 545, 800]) {
+    replay.seek(T + dt);
+    const height = Cesium.Cartographic.fromCartesian(viewer.ents[0].position.getValue()).height;
+    assert.ok(Math.abs(height - lineAt(dt)) < 5, `+${dt} s: značka ${Math.round(height)} m, čiara ${Math.round(lineAt(dt))} m`);
+  }
+  replay.seek(T + 270);
+  assert.equal(replay.getState().sample.alt, 11_000, 'vzorka pre panel = posledné meranie, nie dopočet čiary');
+  replay.destroy();
+});
+
+test('HFDL poloha bez výšky medzi dvoma dierami ≥ 10 min (2026-10-16): premostená čiara aj značka klesajú lineárne, bez schodu 8 km na HFDL polohe', async () => {
+  const Cesium = await import('cesium');
+  const T = 1_790_000_000;
+  const leg = [
+    { t: T, lat: 53, lon: -15.0, alt: 11_000, gs: 250, trk: 270, vr: 0, squawk: null, gnd: false },
+    { t: T + 1800, lat: 53, lon: -22.0, alt: null, gs: null, trk: null, vr: null, squawk: null, gnd: false },
+    { t: T + 3600, lat: 53, lon: -29.0, alt: 3_000, gs: 200, trk: 270, vr: -10, squawk: null, gnd: false },
+  ];
+  const viewer = fakeViewer();
+  let received = null;
+  const replay = createFlightReplay(viewer, {
+    trackFactory: (fx) => { received = fx; return { kind: 'track' }; },
+    requestFrame: () => 1,
+    cancelFrame: () => {},
+    now: () => 0,
+  });
+  assert.equal(replay.load(leg), true);
+  assert.equal(replay.getState().estimatedGaps, 2);
+  assert.ok(received.length > 10, `premostené body odhadu: ${received.length}`);
+  const lineAt = (dt) => 11_000 + (3_000 - 11_000) * (dt / 3600); // HFDL bod dostane 7 000 m, obe diery lineárne
+  for (const f of received) {
+    assert.ok(Math.abs(f.alt - lineAt(f.t - T)) < 5, `čiara +${f.t - T} s: ${Math.round(f.alt)} m, čakané ${Math.round(lineAt(f.t - T))} m`);
+  }
+  for (const dt of [600, 1500, 2100, 3000]) {
+    replay.seek(T + dt);
+    const height = Cesium.Cartographic.fromCartesian(viewer.ents[0].position.getValue()).height;
+    assert.ok(Math.abs(height - lineAt(dt)) < 5, `značka +${dt} s: ${Math.round(height)} m, čiara ${Math.round(lineAt(dt))} m`);
+  }
+  assert.equal(leg[1].alt, null, 'vstupné dáta sa nemenia');
+  replay.destroy();
+});

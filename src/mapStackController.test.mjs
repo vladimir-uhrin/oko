@@ -612,3 +612,230 @@ test('fotoreál: deň/noc nasadí customShader na tileset, glóbusový stack ho 
   bare.setNightLightsEnabled(true);
   await bare._activatePhotoreal(null);
 });
+
+// ── Stadia „mimo" (2026-10-15): náhrada cestou UI, nie priamym setStack ─────
+// Priame setStack nechávalo čipy, štítok mapy aj zdieľaný odkaz na Stadii a mapa podľa vrstvy
+// brala náhradu za cudziu zmenu (meteo po vypnutí nevrátilo Google 3D).
+function quietWarn(fn) {
+  const warn = console.warn;
+  console.warn = () => {};
+  try { return fn(); } finally { console.warn = warn; }
+}
+
+test('Stadia mimo: s obsluhou UI kontrolér sám neprepína a obsluha dostane náhradu; bez obsluhy prepne sám', () => {
+  const controller = new MapStackController({}, {});
+  const direct = [];
+  controller.setStack = async (id) => { direct.push(id); };
+  const seen = [];
+  controller.setStadiaBlockedHandler((info) => seen.push(info));
+  controller._activeId = 'stadia-outdoors';
+  quietWarn(() => controller._onStadiaBlocked());
+  assert.deepEqual(seen, [{ from: 'stadia-outdoors', to: 'osm' }]);
+  controller._activeId = 'photoreal';
+  quietWarn(() => controller._onStadiaBlocked());
+  assert.deepEqual(seen.at(-1), { from: 'photoreal', to: null }, 'nie Stadia → bez náhrady, UI len prekreslí čipy');
+  assert.deepEqual(direct, [], 'kontrolér neobišiel UI');
+
+  controller.setStadiaBlockedHandler(null);
+  controller._activeId = 'stadia-dark';
+  quietWarn(() => controller._onStadiaBlocked());
+  assert.deepEqual(direct, ['gibs-blue-marble'], 'pred zapojením UI (štart, testy) prepne sám');
+});
+
+test('Stadia mimo: výnimka obsluhy UI → kontrolér prepne sám (glóbus neostane na odmietajúcej Stadii)', () => {
+  // 2026-10-16 (recenzia g4): obsluha beží v .then overenia — výnimku pohltil .catch a ďalšie overenie
+  // už nepríde (Stadia je „mimo").
+  const controller = new MapStackController({}, {});
+  const direct = [];
+  controller.setStack = async (id) => { direct.push(id); };
+  controller.setStadiaBlockedHandler(() => { throw new ReferenceError('applyStadiaFallback is not defined'); });
+  controller._activeId = 'stadia-dark';
+  quietWarn(() => controller._onStadiaBlocked());
+  assert.deepEqual(direct, ['gibs-blue-marble']);
+});
+
+test('Stadia mimo počas meteo (zapojenie installStadiaFallback ako main.js): prepína StyleManager, čipy sa prekreslia, vypnutie meteo vráti Google 3D', async () => {
+  const { createStadiaHealth, installStadiaFallback } = await import('./stadiaHealth.js');
+  const { createLayerBasemapPolicy } = await import('./layerBasemap.js');
+  const controller = new MapStackController({}, {});
+  controller._activeId = 'photoreal';
+  controller.setStack = async () => { throw new Error('kontrolér nesmie prepínať mimo UI'); };
+  // Dvojník StyleManager: jediná cesta prepínania v UI (čipy, štítok, zdieľaný odkaz).
+  const ui = {
+    switched: [],
+    refreshed: 0,
+    _initMapStackControl() { this.refreshed += 1; },
+    async _setMapStack(id) { this.switched.push(id); controller._activeId = id; policy.onMapChange(id); },
+  };
+  const policy = createLayerBasemapPolicy({
+    getActiveId: () => controller.getActiveId(),
+    hasStack: (id) => Boolean(controller.getStack(id)),
+    setStack: (id) => { void ui._setMapStack(id); },
+    resolveMap: () => 'stadia-dark',
+  });
+  // Tie isté argumenty ako main.js (stadiaHealth.test.mjs stráži zdroj main.js).
+  installStadiaFallback({
+    controller,
+    adopt: () => policy.onStadiaBlocked(),
+    refreshControls: () => ui._initMapStackControl(),
+    switchStack: (id) => ui._setMapStack(id),
+    health: createStadiaHealth(),
+    setTimeoutImpl: () => assert.fail('bez bloku strážcu žiadny časovač'),
+    clearTimeoutImpl: () => {},
+  });
+  policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'user' });
+  assert.equal(controller.getActiveId(), 'stadia-dark');
+  quietWarn(() => controller._onStadiaBlocked());
+  assert.deepEqual(ui.switched, ['stadia-dark', 'gibs-blue-marble']);
+  assert.equal(ui.refreshed, 1, 'čipy sa prekreslili (Stadia odteraz nedostupná)');
+  policy.onLayerChange({ layerId: 'meteo-gfs', enabled: false, origin: 'user' });
+  assert.equal(controller.getActiveId(), 'photoreal');
+  assert.deepEqual(ui.switched.at(-1), 'photoreal');
+});
+
+/** Najmenší DOM pre rad čipov (renderMapStackChips: create/append/attr/class/innerHTML). */
+function fakeChipElement() {
+  const el = {
+    className: '', title: '', textContent: '', dataset: {}, attributes: {}, children: [], listeners: {},
+    classList: {
+      toggle(name, force) {
+        const set = new Set(el.className.split(/\s+/).filter(Boolean));
+        if (force ?? !set.has(name)) set.add(name); else set.delete(name);
+        el.className = [...set].join(' ');
+      },
+    },
+    appendChild(child) { el.children.push(child); return child; },
+    setAttribute(name, value) { el.attributes[name] = String(value); },
+    addEventListener(type, fn) { (el.listeners[type] ||= []).push(fn); },
+  };
+  Object.defineProperty(el, 'innerHTML', { get: () => '', set: () => { el.children.length = 0; } });
+  return el;
+}
+
+// 2026-10-16 (recenzia g4): predošlý test len čítal isStackAvailable/mapStackChipModels (to platilo už
+// pred opravou) a nedokazoval, že sa rad čipov naozaj prekreslí — ani že po 6 h Stadia znova ožije.
+test('Stadia mimo na webe: skutočný rad čipov po bloku ukáže Stadiu nedostupnú a po uplynutí bloku znova dostupnú', async () => {
+  const { createStadiaHealth, installStadiaFallback, _setStadiaHealthForTest, STADIA_FAIL_THRESHOLD, STADIA_BLOCK_MS } = await import('./stadiaHealth.js');
+  const { renderMapStackChips } = await import('./mapStackChips.js');
+  let now = 70_000_000;
+  const health = createStadiaHealth({ now: () => now });
+  const previousHealth = _setStadiaHealthForTest(health);
+  const hadLocation = Object.prototype.hasOwnProperty.call(globalThis, 'location');
+  const previous = globalThis.location;
+  const timers = [];
+  try {
+    globalThis.location = { hostname: 'okolive.sk' };
+    const controller = new MapStackController({}, {});
+    controller._activeId = 'stadia-outdoors';
+    controller.setStack = async () => { throw new Error('kontrolér nesmie prepínať mimo UI'); };
+    const row = fakeChipElement();
+    const doc = { createElement: () => fakeChipElement() };
+    // Dvojník StyleManager: _initMapStackControl = celý rad z čerstvého getStacks() (zdroj ui.js stráži stadiaHealth.test.mjs).
+    const ui = {
+      _initMapStackControl() { renderMapStackChips(row, controller.getStacks(), { activeId: controller.getActiveId(), doc }); },
+      async _setMapStack(id) { controller._activeId = id; },
+    };
+    ui._initMapStackControl();
+    const stadiaChip = () => row.children.find((chip) => chip.dataset.family === 'stadia');
+    assert.equal(stadiaChip().attributes['aria-disabled'], 'false');
+    installStadiaFallback({
+      controller,
+      health,
+      refreshControls: () => ui._initMapStackControl(),
+      switchStack: (id) => ui._setMapStack(id),
+      setTimeoutImpl: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+      clearTimeoutImpl: () => {},
+    });
+    for (let i = 0; i < STADIA_FAIL_THRESHOLD; i += 1) {
+      if (health.noteTileError(429)) quietWarn(() => controller._onStadiaBlocked());
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(controller.getActiveId(), 'osm');
+    assert.equal(stadiaChip().attributes['aria-disabled'], 'true', 'po bloku je rodina Stadia sivá');
+    assert.match(stadiaChip().className, /\bunavailable\b/);
+
+    // Karta ostala otvorená 6 h — bez obnovenia stránky.
+    assert.equal(timers.length, 1);
+    assert.ok(timers[0].ms >= STADIA_BLOCK_MS);
+    now += timers[0].ms;
+    timers[0].fn();
+    assert.equal(stadiaChip().attributes['aria-disabled'], 'false', 'po skončení bloku je Stadia znova na výber');
+    assert.doesNotMatch(stadiaChip().className, /\bunavailable\b/);
+  } finally {
+    _setStadiaHealthForTest(previousHealth);
+    if (hadLocation) globalThis.location = previous; else delete globalThis.location;
+  }
+});
+
+// 2026-10-16 (recenzia g4): Cesium zlyhanú dlaždicu neopakuje — pri nehybnej kamere prišlo po záblesku
+// chýb len jedno overenie, tri odmietnutia sa do okna 5 min nezmestili a glóbus ostal bez podkladu.
+const STADIA_DARK_TEMPLATE = 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}@2x.png';
+
+async function withStadiaProbe(t, answers, run) {
+  const { createStadiaHealth, _setStadiaHealthForTest } = await import('./stadiaHealth.js');
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 90_000_000 });
+  const health = createStadiaHealth({ now: () => Date.now() });
+  const previousHealth = _setStadiaHealthForTest(health);
+  const realFetch = globalThis.fetch;
+  const fetched = [];
+  globalThis.fetch = async (url) => { fetched.push(url); return { status: answers.length > 1 ? answers.shift() : answers[0] }; };
+  const flush = () => new Promise((r) => setImmediate(r));
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const controller = new MapStackController({}, {});
+    controller._activeId = 'stadia-dark';
+    const fallbacks = [];
+    controller.setStadiaBlockedHandler((info) => fallbacks.push(info.to));
+    const listeners = [];
+    controller._watchStadiaErrors({ errorEvent: { addEventListener: (fn) => listeners.push(fn) } }, STADIA_DARK_TEMPLATE);
+    const tileErrors = (n = 25) => { for (let i = 0; i < n; i += 1) listeners[0]({ level: 3, x: 4, y: 2 }); };
+    await run({ controller, health, fetched, fallbacks, tileErrors, flush, tick: async (ms) => { t.mock.timers.tick(ms); await flush(); } });
+  } finally {
+    console.warn = warn;
+    globalThis.fetch = realFetch;
+    _setStadiaHealthForTest(previousHealth);
+    t.mock.timers.reset();
+  }
+}
+
+test('Stadia: vyčerpaný limit pri nehybnej kamere — kontrolér overí znova sám a do ~20 s prepne na náhradu', async (t) => {
+  await withStadiaProbe(t, [429], async ({ health, fetched, fallbacks, tileErrors, flush, tick }) => {
+    tileErrors(); // záblesk chýb pri načítaní, potom kamera stojí
+    await flush();
+    assert.equal(fetched.length, 1, 'záblesk chýb = jedno overenie');
+    assert.equal(fetched[0], 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/3/4/2@2x.png');
+    await tick(10_000);
+    await tick(10_000);
+    assert.equal(fetched.length, 3);
+    assert.equal(health.blocked(), true, 'tri odmietnutia po sebe = Stadia mimo');
+    assert.deepEqual(fallbacks, ['gibs-blue-marble']);
+    await tick(10 * 60_000);
+    tileErrors();
+    await flush();
+    assert.equal(fetched.length, 3, 'po bloku žiadne ďalšie overenie');
+  });
+});
+
+test('Stadia: prechodné odmietnutie — opakované overenie dostane 2xx, počítadlo sa vynuluje a overovanie prestane', async (t) => {
+  await withStadiaProbe(t, [429, 200], async ({ health, fetched, fallbacks, tileErrors, flush, tick }) => {
+    tileErrors();
+    await flush();
+    await tick(10_000);
+    assert.equal(fetched.length, 2);
+    await tick(60_000);
+    assert.equal(fetched.length, 2, 'po 2xx sa samo neoveruje');
+    assert.equal(health.blocked(), false);
+    assert.deepEqual(fallbacks, []);
+  });
+});
+
+test('Stadia: po odchode zo štýlu Stadia sa odmietnutie znova neoveruje', async (t) => {
+  await withStadiaProbe(t, [429], async ({ controller, fetched, tileErrors, flush, tick }) => {
+    tileErrors();
+    await flush();
+    controller._activeId = 'photoreal';
+    await tick(30_000);
+    assert.equal(fetched.length, 1);
+  });
+});

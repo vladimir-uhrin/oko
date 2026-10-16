@@ -9,7 +9,7 @@ import { IMAGERY_ROLE, tagImageryRole } from './imageryOrder.js';
 import { basemapContrastForStack } from './data/contactPalette.js';
 import { applyPhotorealNight, buildPhotorealNightShader } from './photorealNight.js';
 import { createHillshadeImageryProvider } from './hillshadeImagery.js';
-import { STADIA_FALLBACK_STACK, isStadiaUrl, stadiaHealth } from './stadiaHealth.js';
+import { STADIA_FAIL_STATUSES, STADIA_FALLBACK_STACK, isStadiaUrl, stadiaHealth } from './stadiaHealth.js';
 
 /** Overenie stavu Stadia po chybe dlaždice najviac raz za toľko ms (obrázok kód odpovede nepovie). */
 const STADIA_PROBE_GAP_MS = 10_000;
@@ -316,6 +316,8 @@ export class MapStackController {
       : 'auto';
     this._onChange = onChange;
     this._onError = onError;
+    /** Náhrada za Stadiu cez UI (setStadiaBlockedHandler); null = kontrolér prepne sám. */
+    this._stadiaBlockedHandler = null;
     this._activeId = googleTileset ? initialStack : 'osm';
     this._imageryLayer = null;
     /** Optional base under a coverage-limited stack (see `underlayStackId`). */
@@ -793,18 +795,57 @@ export class MapStackController {
   _watchStadiaErrors(provider, template) {
     provider.errorEvent?.addEventListener?.((err) => {
       const now = Date.now();
-      if (stadiaHealth().blocked() || now - (this._stadiaProbeAt || 0) < STADIA_PROBE_GAP_MS) return;
-      this._stadiaProbeAt = now;
+      if (stadiaHealth().blocked() || this._stadiaRecheckTimer || now - (this._stadiaProbeAt || 0) < STADIA_PROBE_GAP_MS) return;
       const url = template.replace('{z}', String(err?.level ?? 0)).replace('{x}', String(err?.x ?? 0)).replace('{y}', String(err?.y ?? 0));
-      fetch(url, { mode: 'cors', cache: 'no-store' })
-        .then((res) => { if (stadiaHealth().noteTileError(res.status)) this._onStadiaBlocked(); })
-        .catch(() => { /* sieť — nie odmietnutie Stadia */ });
+      this._probeStadiaTile(url);
     });
   }
 
+  /**
+   * Jedno overenie dlaždice Stadia. Odmietnutie pod prahom sa overí znova samo o STADIA_PROBE_GAP_MS
+   * (2026-10-16): Cesium zlyhanú dlaždicu neopakuje, takže pri nehybnej kamere (meteo na stadia-dark)
+   * ďalšia chyba — a s ňou overenie — nepríde, prah v okne STADIA_FAIL_WINDOW_MS by sa nenazbieral
+   * a glóbus by ostal bez podkladu. Prechodné odmietnutie opakované overenie vyrieši (2xx vynuluje).
+   * Najviac STADIA_FAIL_THRESHOLD−1 opakovaní za sebou, len kým je aktívny štýl Stadia.
+   * @param {string} url
+   */
+  _probeStadiaTile(url) {
+    this._stadiaProbeAt = Date.now();
+    fetch(url, { mode: 'cors', cache: 'no-store' })
+      .then((res) => {
+        const health = stadiaHealth();
+        if (health.noteTileError(res.status)) { this._onStadiaBlocked(); return; }
+        if (!STADIA_FAIL_STATUSES.includes(Number(res.status)) || health.blocked() || !STADIA_FALLBACK_STACK[this._activeId]) return;
+        this._stadiaRecheckTimer = setTimeout(() => {
+          this._stadiaRecheckTimer = null;
+          if (!stadiaHealth().blocked() && STADIA_FALLBACK_STACK[this._activeId]) this._probeStadiaTile(url);
+        }, STADIA_PROBE_GAP_MS);
+      })
+      .catch(() => { /* sieť — nie odmietnutie Stadia */ });
+  }
+
+  /**
+   * Kto prepína na náhradu, keď je Stadia „mimo" (2026-10-15). main.js sem dá cestu UI
+   * (stadiaHealth.applyStadiaFallback → StyleManager._setMapStack + mapa podľa vrstvy): priame
+   * setStack nechávalo čipy, štítok mapy aj zdieľaný odkaz na Stadii a meteo po vypnutí nevrátilo
+   * Google 3D. Bez obsluhy (testy, štart pred UI) prepne kontrolér sám.
+   * @param {((info: {from: string|null, to: string|null}) => void)|null} fn
+   */
+  setStadiaBlockedHandler(fn) {
+    this._stadiaBlockedHandler = typeof fn === 'function' ? fn : null;
+  }
+
   _onStadiaBlocked() {
-    const fallback = STADIA_FALLBACK_STACK[this._activeId];
+    const from = this._activeId || null;
+    const fallback = STADIA_FALLBACK_STACK[from] || null;
     console.warn('[map] Stadia odmieta dlaždice (limit alebo autorizácia) — podklad prepnutý na bezplatný');
+    if (this._stadiaBlockedHandler) {
+      // Obsluha beží v .then overenia (2026-10-16): jej výnimku by pohltil .catch a ďalšie overenie už
+      // nepríde (Stadia je „mimo") — glóbus by ostal na odmietajúcej Stadii. Vtedy prepne kontrolér sám.
+      try { this._stadiaBlockedHandler({ from, to: fallback }); return; } catch (error) {
+        console.warn('[map] Stadia: náhrada cez UI zlyhala — prepína kontrolér', error);
+      }
+    }
     if (fallback) void this.setStack(fallback);
     else this._emitChange('ready');
   }

@@ -53,9 +53,12 @@ test('zapojenie: main.js bránu zapne na začiatku init a uvoľní pri skrytí p
   assert.match(ais, /if \(!isStartupReady\(\)\) \{\s*const sessionId = state\.sessionId;\s*void whenStartupReady\(\)\.then\(\(\) => \{\s*if \(state\.enabled && state\.sessionId === sessionId\) void loadLivePositions\(state\.viewer \|\| activeViewer\);\s*\}\);\s*return undefined;\s*\}\s*return loadLivePositions\(activeViewer\);/);
   // periodická obnova aj obnova podľa výrezu počas štartu čakajú
   assert.match(ais, /if \(!state\.enabled \|\| !isStartupReady\(\)\) return Promise\.resolve\(\);/);
-  assert.match(ais, /&& !state\.loading && state\.enabled && isStartupReady\(\)\) \{/);
+  // (2026-10-16: podmienka obnovy podľa výrezu je vo funkcii shouldLoadForViewChange)
+  assert.match(ais, /if \(shouldLoadForViewChange\(now\)\) \{/);
+  assert.match(ais, /function shouldLoadForViewChange\(now\) \{\s*if \(!state\.enabled \|\| state\.loading \|\| !isStartupReady\(\)\) return false;/);
   // načítaný výrez sa zapíše, nech prvá kontrola výrezu nespustí druhé stiahnutie
-  assert.match(ais, /const url = liveApiUrl\(\);[\s\S]{0,300}?state\.viewKey = vesselViewBounds\(\);\s*state\.viewRequestedAt = performance\.now\(\);/);
+  // (2026-10-15: výrez sa číta raz — ten istý ide do URL aj do viewKey)
+  assert.match(ais, /const bbox = vesselViewBounds\(\);[\s\S]{0,300}?const url = liveApiUrl\(bbox, plan\.maxRows\);[\s\S]{0,300}?state\.viewKey = bbox;\s*state\.viewRequestedAt = performance\.now\(\);/);
 });
 
 test('lietadlá: tik flotily pod preloaderom nebeží (1,4 s hlavného vlákna pri štarte, nikto ich nevidí)', () => {

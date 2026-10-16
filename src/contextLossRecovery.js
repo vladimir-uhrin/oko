@@ -25,9 +25,24 @@ function readTimes(storage) {
 }
 
 /**
+ * Zapíš počítadlo a over, že sa dá prečítať späť (2026-10-15). Bez úložiska (zakázané údaje stránok,
+ * rámček s nepriehľadným pôvodom → main.js podá null) alebo pri zahodenom zápise by obnovenie stránky
+ * počítadlo stratilo, každé načítanie by videlo prázdny zoznam a na telefóne, ktorý kontext stráca
+ * stále, by sa stránka obnovovala dookola. Samostatne sa teda obnovuje len vtedy, keď počet prežije.
+ * @returns {boolean} zápis prežije obnovenie stránky
+ */
+function persistTimes(storage, times) {
+  try {
+    storage?.setItem?.(CONTEXT_LOSS_STORAGE_KEY, JSON.stringify(times));
+  } catch { return false; }
+  const back = readTimes(storage);
+  return back.length === times.length && back[back.length - 1] === times[times.length - 1];
+}
+
+/**
  * @param {HTMLCanvasElement} canvas plátno Cesia
  * @param {object} [o]
- * @param {Storage|null} [o.storage] sessionStorage (počítadlo strát v tejto karte)
+ * @param {Storage|null} [o.storage] sessionStorage (počítadlo strát v tejto karte); bez neho sa stránka sama neobnovuje
  * @param {() => void} [o.reload]
  * @param {(text: string, { action?: () => void, actionLabel?: string }) => void} [o.notify]
  * @param {(key: string) => string} [o.translate]
@@ -43,17 +58,23 @@ export function installContextLossRecovery(canvas, {
   setTimeoutImpl = (fn, ms) => setTimeout(fn, ms),
 } = {}) {
   if (!canvas?.addEventListener) return { destroy() {} };
+  /** Straty v tomto načítaní stránky — bez úložiska jediný údaj o predošlej strate. */
+  let lostHere = 0;
   const onLost = (event) => {
     event?.preventDefault?.();
     const t = now();
-    const times = readTimes(storage);
-    if (shouldAutoReload(times, t)) {
-      try { storage?.setItem?.(CONTEXT_LOSS_STORAGE_KEY, JSON.stringify([...times.filter((x) => t - x < AUTO_RELOAD_WINDOW_MS), t])); } catch { /* bez úložiska jedna obnova */ }
+    const recent = readTimes(storage).filter((x) => t - x < AUTO_RELOAD_WINDOW_MS);
+    // Bez trvalého počítadla len hláška s tlačidlom — strop AUTO_RELOAD_MAX by inak neplatil.
+    if (shouldAutoReload(recent, t) && persistTimes(storage, [...recent, t])) {
       notify(translate('context.lost-reloading'), {});
       setTimeoutImpl(() => reload(), AUTO_RELOAD_DELAY_MS);
     } else {
-      notify(translate('context.lost-manual'), { action: () => reload(), actionLabel: translate('context.reload') });
+      // „Opäť" len pri známej predošlej strate (2026-10-16): bez úložiska je aj prvá strata stránky
+      // vetvou s tlačidlom a text „opäť resetoval" by klamal.
+      const again = recent.length > 0 || lostHere > 0;
+      notify(translate(again ? 'context.lost-manual' : 'context.lost-manual-first'), { action: () => reload(), actionLabel: translate('context.reload') });
     }
+    lostHere += 1;
   };
   canvas.addEventListener('webglcontextlost', onLost, false);
   return { destroy() { canvas.removeEventListener('webglcontextlost', onLost, false); } };

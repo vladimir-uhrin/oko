@@ -52,6 +52,7 @@ import { installContextLossRecovery, showContextLossNotice } from './contextLoss
 import { isCrawlerUserAgent } from './crawlerDetect.js';
 import { initAnalytics, trackEvent } from './analytics.js';
 import { AUTO_BASEMAP_STORAGE_KEY, createLayerBasemapPolicy, meteoBasemapForHost, parseAutoBasemapSetting } from './layerBasemap.js';
+import { installStadiaFallback } from './stadiaHealth.js';
 import { installDayNightClock } from './globeLighting.js';
 import { installSharpStarfield } from './starfield.js';
 import { armStartupGate, releaseStartupGate, whenStartupReady } from './startupGate.js';
@@ -550,6 +551,15 @@ async function init() {
     layerBasemap.onCameraHeight(viewer.camera.positionCartographic?.height);
     onActiveMapStackChange((stack) => layerBasemap.onMapChange(stack?.id ?? null));
     window.addEventListener('gev:map-stack-manual', () => layerBasemap.onManualChoice());
+    // Stadia „mimo" (2026-10-15, stadiaHealth.js): náhrada ide cestou UI ako klik na čip — čipy, štítok
+    // mapy a zdieľaný odkaz nasledujú náhradu a meteo po vypnutí vráti pôvodnú mapu (Google 3D).
+    // Po skončení bloku sa čipy prekreslia znova (2026-10-16); test zapojenia: stadiaHealth.test.mjs.
+    installStadiaFallback({
+      controller: mapStackController,
+      adopt: () => layerBasemap.onStadiaBlocked(),
+      refreshControls: () => styleManager._initMapStackControl(),
+      switchStack: (id) => styleManager._setMapStack(id),
+    });
     autoBasemapToggle?.addEventListener('change', () => {
       try { localStorage.setItem(AUTO_BASEMAP_STORAGE_KEY, autoBasemapToggle.checked ? 'on' : 'off'); } catch { /* súkromné okno */ }
       layerBasemap.onSettingChange(autoBasemapToggle.checked);

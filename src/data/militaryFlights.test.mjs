@@ -266,6 +266,59 @@ test('military poll refreshes tracked callsign/altitude/kts and marks a missed p
   }
 });
 
+// 2026-10-15: tlačidlo Zdieľať na karte vojenského stroja sľubuje let — vrstva dá fakty karty
+// v tvare flights.getTrackedShareCard (flightShare.js), vynechaný poll ako `stale`, nie NAŽIVO.
+test('zdieľanie sledovaného vojenského stroja: fakty karty, squawk, zastaraná poloha po vynechanom polle', async () => {
+  const icao24 = 'ae01cf';
+  _setTrackedMilitaryRefreshStateForTest({
+    icao24,
+    entity: { gevLabelModel: { title: 'OLD', details: [] } },
+    billboard: { position: Cesium.Cartesian3.fromDegrees(-97.0, 31.0, 8_000), color: Cesium.Color.WHITE, show: false },
+    billboardCollection: { show: false, remove() {} },
+    viewer: { camera: { positionCartographic: null }, scene: {} },
+    meta: {
+      callsign: 'OLD2', type: 'C17', klass: 'widebody', registration: '05-8152', operator: 'USAF',
+      altitudeFt: 25_000, renderAltitudeM: 7_650, speedMps: 180, track: 80, onGround: false,
+      wasAirborne: true, turnRateDps: 0, rawLat: 31.0, rawLon: -97.0,
+    },
+  });
+  const realFetch = globalThis.fetch;
+  let poll = 0;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      ac: poll++ === 0 ? [{
+        hex: icao24, lon: -96.9, lat: 31.1, alt_baro: 28_000, alt_geom: 28_100, track: 95, gs: 400, seen: 0, seen_pos: 0,
+        flight: 'RCH451 ', t: 'C17', r: '05-8152', ownOp: 'United States Air Force', squawk: '7700',
+      }] : [],
+    }),
+  });
+  try {
+    await militaryFlightsLayer.update({ camera: { positionCartographic: null }, scene: {} });
+    const live = militaryFlightsLayer.getTrackedShareCard();
+    assert.equal(live.icao24, icao24);
+    assert.equal(live.callsign, 'RCH451');
+    assert.equal(live.identLine, 'United States Air Force · C17 · 05-8152', 'prevádzkovateľ, typ, registrácia — bez „unknown"');
+    assert.match(live.flightLines.join(' · '), /FL280/);
+    assert.equal(live.alertLine, 'SQUAWK 7700 · EMERGENCY');
+    assert.equal(live.routeLine, '');
+    assert.equal(live.estimated, false);
+    assert.equal(live.stale, false);
+
+    await militaryFlightsLayer.update({ camera: { positionCartographic: null }, scene: {} });
+    assert.equal(militaryFlightsLayer.getTrackedShareCard().stale, true, 'karta má „· STALE", zdieľanie nie NAŽIVO');
+
+    _setTrackedMilitaryRefreshStateForTest({
+      icao24, entity: null, billboard: { show: false }, billboardCollection: { show: false, remove() {} },
+      viewer: { camera: { positionCartographic: null }, scene: {} }, meta: { callsign: 'RCH451' }, tracked: false,
+    });
+    assert.equal(militaryFlightsLayer.getTrackedShareCard(), null, 'bez sledovaného stroja nič');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('real military track path creates no native label and publishes every cached host line', () => {
   const icao24 = 'ae01ce';
   const position = Cesium.Cartesian3.fromDegrees(-97.03, 31.05, 8_534.4);

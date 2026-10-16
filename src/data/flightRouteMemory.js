@@ -36,8 +36,10 @@ export function createRouteMemory({ max = 4000 } = {}) {
   return {
     /**
      * Ulož odpoveď adsbdb (/api/adsbdb/route/<volací znak>).
+     * `partial` (2026-10-15): trasa z VRS, kým bol adsbdb zablokovaný — dopravca a IATA číslo ešte
+     * nie sú známe. Taký záznam vrstva vráti stroju, ale o zvyšok sa smie spýtať znova (isPartial).
      * @param {string} callsign
-     * @param {{airline?: string, callsignIata?: string, origin?: object, destination?: object}} data
+     * @param {{airline?: string, callsignIata?: string, origin?: object, destination?: object, partial?: boolean}} data
      */
     remember(callsign, data) {
       const key = normalizeCallsign(callsign);
@@ -48,7 +50,12 @@ export function createRouteMemory({ max = 4000 } = {}) {
         airline: data.airline || null,
         flightIata: data.callsignIata || null,
         route: data.origin && data.destination ? { origin: data.origin, destination: data.destination } : null,
+        partial: data.partial === true,
       });
+    },
+    /** Je zapamätaná odpoveď neúplná (dopravcu a IATA číslo treba ešte dopýtať)? */
+    isPartial(callsign) {
+      return byCallsign.get(normalizeCallsign(callsign))?.partial === true;
     },
     /**
      * Doplň do záznamu stroja, čo mu chýba (nič neprepisuje). True = pamäť volací znak pozná.

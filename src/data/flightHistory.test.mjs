@@ -7,6 +7,7 @@ import {
   bearingDeg,
   chartSeries,
   fetchFlightTrack,
+  fillDisplayAltitudes,
   fixFromCompact,
   formatClockUtc,
   formatDuration,
@@ -123,4 +124,16 @@ test('resolveRegistrationHex: /api/adsbdb/reg/<značka> → hex; neznáme alebo 
   assert.equal(await resolveRegistrationHex('OM-XXX', { fetcher: async () => ({ ok: true, json: async () => ({ found: false }) }) }), null, 'bez hexu = null');
   assert.equal(await resolveRegistrationHex('OM-BYK', { fetcher: async () => ({ ok: false, status: 500 }) }), null, 'chyba = null');
   assert.equal(await resolveRegistrationHex('', { fetcher: okFetcher }), null);
+});
+
+test('výška na kreslenie (2026-10-15): bez výšky vo vzduchu = lineárne medzi susedmi, na kraji najbližší; zem a osamelý bod ostávajú null', () => {
+  const f = (t, alt, gnd = false) => ({ t, lat: 53, lon: -20, alt, gnd });
+  const fixes = [f(0, null), f(100, 9_000), f(200, null), f(400, 12_000), f(500, null, true), f(600, null)];
+  const out = fillDisplayAltitudes(fixes);
+  assert.deepEqual(out.map((x) => x.alt), [9_000, 9_000, 10_000, 12_000, null, 12_000]);
+  assert.equal(out[1], fixes[1], 'fix s výškou sa nekopíruje');
+  assert.notEqual(out[2], fixes[2]);
+  assert.equal(fixes[2].alt, null, 'vstup sa nemení');
+  assert.deepEqual(fillDisplayAltitudes([f(0, null)]).map((x) => x.alt), [null], 'bez suseda s výškou nič nevymýšľa');
+  assert.deepEqual(fillDisplayAltitudes(null), []);
 });

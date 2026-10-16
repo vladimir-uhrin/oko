@@ -2,6 +2,7 @@
 // Panel histórie letov — modely riadkov a DOM lifecycle na stube (2026-09-07).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { installHistoryPanel, legRowModel, sampleLine } from './historyPanel.js';
 import { drawFlightChart, CHART_PAD } from './flightHistoryChart.js';
 import { chartSeries } from './data/flightHistory.js';
@@ -214,5 +215,115 @@ test('lety štátneho stroja v paneli: STARŠIE načíta ďalšiu stránku od po
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(calls, [null, T0 - (STATE_PANEL_PAGE - 1) * 3600 + 1800], 'ďalšia stránka od konca posledného letu');
   assert.equal(list.children.length, STATE_PANEL_PAGE + 5, 'posledná stránka (5) — bez ďalšieho STARŠIE');
+  panel.destroy();
+});
+
+// História z karty sledovaného lietadla (2026-10-15): openLatest nesmie brať kameru (živé sledovanie
+// beží ďalej) a predbehnuté hľadanie nesmie otvoriť let zo zoznamu iného dopytu.
+function stubReplay() {
+  return {
+    loaded: null, frames: 0, loads: [],
+    load(fx) { this.loads.push(fx.length); this.loaded = fx.length >= 2 ? fx : null; return !!this.loaded; },
+    frame() { this.frames += 1; }, pause() {}, play() {}, toggle() {}, setSpeed() {}, setFollow() {}, seek() {}, seekFraction() {},
+    onChange() { return () => {}; },
+    getState() { return { loaded: !!this.loaded, playing: false, fraction: 0, speed: 10, follow: false, sample: null }; },
+    destroy() {},
+  };
+}
+
+function recentLeg(icao24, nowS) {
+  return { id: icao24, icao24, callsign: icao24.toUpperCase(), firstT: nowS - 1800, lastT: nowS - 30, fixes: 40, maxAltM: 10_000, squawks: [] };
+}
+
+function recentFixes(nowS) {
+  return [
+    { t: nowS - 1800, lat: 48, lon: 17, alt: 9000, gs: 220, trk: 90, vr: 0, squawk: null, gnd: false },
+    { t: nowS - 30, lat: 50, lon: 30, alt: 10_000, gs: 230, trk: 90, vr: 0, squawk: null, gnd: false },
+  ];
+}
+
+test('openLatest z karty sledovaného lietadla nakreslí let, ale kameru nezarámuje; klik v zozname pustí živé sledovanie a až potom zarámuje', async () => {
+  const doc = fakeDoc();
+  const nowS = Date.now() / 1000;
+  const api = { search: async (q) => [recentLeg(q, nowS)], track: async () => recentFixes(nowS), status: async () => ({ fixes: 1, legs: 1, oldestT: nowS - 3600 }) };
+  // Živé sledovanie drží kameru (Cesium trackedEntity); vrstva ho pustí cez stopTracking.
+  const liveEntity = { id: 'flights:abc123' };
+  const viewer = { trackedEntity: liveEntity };
+  const stops = [];
+  const replay = stubReplay();
+  const trackedAtFrame = [];
+  const frame = replay.frame.bind(replay);
+  replay.frame = () => { trackedAtFrame.push(viewer.trackedEntity); frame(); };
+  const panel = installHistoryPanel({
+    viewer, doc, t, api, replayFactory: () => replay, setCollapsed: () => {},
+    stopLiveTracking: () => { stops.push(viewer.trackedEntity?.id ?? null); viewer.trackedEntity = undefined; },
+  });
+  const opened = await panel.openLatest({ query: 'abc123' });
+  assert.equal(opened?.icao24, 'abc123');
+  assert.equal(panel._getStateForTest().detailOpen, true, 'detail a trasa letu sú otvorené');
+  assert.deepEqual(replay.loads, [2], 'prehrávač dostal trasu');
+  assert.equal(replay.frames, 0, 'kamera ostáva pri sledovanom lietadle (žiadny flyToBoundingSphere)');
+  assert.deepEqual(stops, [], 'z karty sa živé sledovanie nepúšťa');
+  assert.equal(viewer.trackedEntity, liveEntity, 'lietadlo sa sleduje ďalej');
+  // Späť na zoznam a ručný výber letu (2026-10-16): zarámovanie by bojovalo so sledovaním
+  // (flyToBoundingSphere proti trackedEntity) — prehrávač preberá kameru ako pri páse štátneho stroja.
+  const back = doc.root.body.children.find((c) => c.className === 'history-detail').children[0].children[0];
+  back.listeners.click[0]();
+  const list = doc.root.body.children.find((c) => c.className === 'history-list');
+  list.children.at(-1).children[0].listeners.click[0]();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(replay.frames, 1, 'výber zo zoznamu zarámuje trasu');
+  assert.deepEqual(stops, ['flights:abc123'], 'živé sledovanie sa pustilo raz');
+  assert.deepEqual(trackedAtFrame, [undefined], 'pri zarámovaní už kameru nedrží sledované lietadlo');
+  // Bez sledovania (nič nedrží kameru) sa zarámuje tiež; pustenie je neškodné.
+  back.listeners.click[0]();
+  list.children.at(-1).children[0].listeners.click[0]();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(replay.frames, 2);
+  assert.deepEqual(trackedAtFrame, [undefined, undefined]);
+  panel.destroy();
+});
+
+test('zapojenie v ui.js: História letov dostane stopLiveTracking, ktoré pustí lietadlo aj vojenský stroj', () => {
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  const start = ui.indexOf('this._historyPanel = installHistoryPanel({');
+  assert.ok(start > 0, 'panel je zapojený');
+  const rest = ui.slice(start);
+  const block = rest.slice(0, rest.search(/\r?\n {4}\}\);/));
+  assert.match(block, /stopLiveTracking: stopLiveAircraftTracking/);
+  const helper = ui.slice(ui.indexOf('const stopLiveAircraftTracking = '), ui.indexOf('const stopLiveAircraftTracking = ') + 400);
+  assert.match(helper, /get\('flights'\)\?\.module\?\.stopTracking\?\.\(\{ origin: 'user' \}\)/);
+  assert.match(helper, /get\('military'\)\?\.module\?\.stopTracking\?\.\(\{ origin: 'user' \}\)/);
+});
+
+test('openLatest predbehnutý novším hľadaním neotvorí let zo starého zoznamu', async () => {
+  const doc = fakeDoc();
+  const nowS = Date.now() / 1000;
+  const pending = [];
+  const tracks = [];
+  const api = {
+    search: (q) => new Promise((resolve) => { pending.push({ q, resolve }); }),
+    track: async (hex) => { tracks.push(hex); return recentFixes(nowS); },
+    status: async () => ({ fixes: 1, legs: 1, oldestT: nowS - 3600 }),
+  };
+  const replay = stubReplay();
+  const panel = installHistoryPanel({ viewer: {}, doc, t, api, replayFactory: () => replay, setCollapsed: () => {} });
+  // 1) Lietadlo C: jeho nedávny let sa otvorí (zoznam `legs` potom drží let C).
+  const c = panel.openLatest({ query: 'cccccc' });
+  await new Promise((r) => setTimeout(r, 0));
+  pending.shift().resolve([recentLeg('cccccc', nowS)]);
+  assert.equal((await c)?.icao24, 'cccccc');
+  // 2) História na A a kým jej hľadanie beží, História na B (bez letov) — A je predbehnuté.
+  const a = panel.openLatest({ query: 'aaaaaa' });
+  const b = panel.openLatest({ query: 'bbbbbb' });
+  await new Promise((r) => setTimeout(r, 0));
+  const [reqA, reqB] = pending.splice(0);
+  assert.deepEqual([reqA.q, reqB.q], ['aaaaaa', 'bbbbbb']);
+  reqA.resolve([recentLeg('aaaaaa', nowS)]);
+  assert.equal(await a, null, 'predbehnuté A neotvorí nič — ani starý let C');
+  reqB.resolve([]);
+  assert.equal(await b, null, 'B nemá nedávny let');
+  assert.deepEqual(tracks, ['cccccc'], 'trasa sa načítala len pre C, nie znova zo starého zoznamu');
+  assert.equal(panel._getStateForTest().detailOpen, false, 'ostáva zoznam B, nie detail cudzieho lietadla');
   panel.destroy();
 });

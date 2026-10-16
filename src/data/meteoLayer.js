@@ -66,7 +66,7 @@ export const METEO_BASEMAP_ID = 'stadia-dark';
  * (Stadia autorizuje Origin, nie api_key v URL).
  */
 export const METEO_BASEMAP_FALLBACK_ID = 'gibs-blue-marble';
-import { stadiaUsableHost } from '../stadiaHealth.js';
+import { STADIA_FALLBACK_STACK, stadiaUsableHost } from '../stadiaHealth.js';
 export { STADIA_KEYLESS_HOSTS } from '../stadiaHosts.js';
 
 /**
@@ -890,7 +890,9 @@ export function createMeteoLayer({
   function restoreBasemap() {
     if (!_previousStack) return;
     const active = getActiveMapStack();
-    if (active?.id === (_meteoStackId || METEO_BASEMAP_ID)) {
+    const ours = _meteoStackId || METEO_BASEMAP_ID;
+    // Strážca Stadia (2026-10-15) mohol podklad medzitým vymeniť za bezplatnú náhradu — stále je náš.
+    if (active?.id === ours || (active?.id && active.id === STADIA_FALLBACK_STACK[ours])) {
       win?.dispatchEvent?.(new CustomEvent('gev:request-map-stack', { detail: { id: _previousStack, reason: 'meteo-restore' } }));
     }
     _previousStack = null;

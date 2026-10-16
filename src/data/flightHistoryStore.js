@@ -58,6 +58,11 @@ export const AIR_GAP_MAX_S = 12 * 3600;
 export const AIR_GAP_MIN_ALT_M = 6000;
 /** … okrem krátkej medzery (polnoc UTC medzi dvoma dennými stopami), kde stačí „nie na zemi". */
 export const AIR_GAP_ADJACENT_S = 120;
+/**
+ * Koniec letu na polohe z HFDL (lastAirborneFixes, 2026-10-15): najviac toľko posledných HFDL polôh
+ * za posledným fixom s rýchlosťou a kurzom (HFDL ~1 bod / 10 min → aj 12 h nad oceánom sa zmestí).
+ */
+export const HFDL_SEED_SCAN_MAX = 200;
 
 /** Trasa predchádzajúceho letu (previousRoute, 2026-10-15): úseky toho istého letu delí menej než toľko s. */
 export const PREV_ROUTE_GROUP_GAP_S = 4 * 3600;
@@ -507,7 +512,13 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const fixAt = db.prepare('SELECT t, lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t = ?');
   const fixAtFull = db.prepare('SELECT t, lat, lon, alt, gs, gnd, pos_src FROM fixes WHERE icao24 = ? AND t = ?');
-  const fixAtEnd = db.prepare('SELECT t, lat, lon, alt, gs, trk, vr, gnd FROM fixes WHERE icao24 = ? AND t = ?');
+  const fixAtEnd = db.prepare('SELECT t, lat, lon, alt, gs, trk, vr, gnd, pos_src FROM fixes WHERE icao24 = ? AND t = ?');
+  // Let končiaci polohou z HFDL (2026-10-15, hfdlSeedBase): posledný fix stroja, ktorý nie je HFDL bez
+  // kinematiky (primárny kľúč dozadu, zastaví sa na prvom), HFDL polohy po ňom a volací znak jeho úseku.
+  const lastKinematicFix = db.prepare(`SELECT t, lat, lon, alt, gs, trk, vr, gnd FROM fixes WHERE icao24 = ? AND t BETWEEN ? AND ?
+    AND (pos_src IS NOT ${POS_SRC.HFDL} OR (gs IS NOT NULL AND trk IS NOT NULL)) ORDER BY t DESC LIMIT 1`);
+  const fixesAfterDesc = db.prepare('SELECT t, lat, lon, alt FROM fixes WHERE icao24 = ? AND t > ? AND t <= ? ORDER BY t DESC LIMIT ?');
+  const legAtT = db.prepare('SELECT callsign, country FROM legs WHERE icao24 = ? AND last_t >= ? AND first_t <= ? ORDER BY last_t ASC LIMIT 1');
   // Trasa predchádzajúceho letu (previousRoute): index legs_callsign + primárny kľúč fixov.
   const prevRouteLegsAll = db.prepare('SELECT icao24, first_t, last_t, fixes FROM legs WHERE callsign = ? AND last_t BETWEEN ? AND ? ORDER BY last_t DESC LIMIT 40');
   const prevRouteFixes = db.prepare('SELECT lat, lon, alt, gnd FROM fixes WHERE icao24 = ? AND t BETWEEN ? AND ? ORDER BY t');
@@ -519,6 +530,29 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
   const legsInWindow = db.prepare(`SELECT id, callsign, first_t, last_t, fixes, max_alt, max_gs, squawks, cat, reg, ac_type, ac_desc
     FROM legs WHERE icao24 = ? AND last_t >= ? AND first_t <= ? ORDER BY first_t ASC`);
   const deleteLeg = db.prepare('DELETE FROM legs WHERE id = ?');
+
+  /**
+   * Let končí polohou z HFDL/ADS-C (2026-10-15): tá má v Histórii len to, čo naozaj prišlo (HFDL ani
+   * výšku, ADS-C výšku) — rýchlosť a kurz sa do nej nedopočítavajú. Odhad po reštarte servera
+   * (flightEstimate seed) ich však potrebuje; inak by každé lietadlo preukotvené z HFDL po vydaní
+   * zmizlo z mapy, kým ho nezachytí ADS-B. Základom je preto najnovší fix stroja s plnou kinematikou
+   * a HFDL body po ňom idú ako `external` — seed ich preukotví tým istým anchorFromExternalFix ako za
+   * behu (kurz a rýchlosť z úsekov medzi polohami). Druh polohy podľa výšky: _hfdlRecordHistory ju
+   * zapisuje len pri ADS-C. Základ z iného úseku len so zlučiteľným volacím znakom; na zemi alebo bez
+   * kinematiky = nič (null). Základ najviac AIR_GAP_MAX_S dozadu, najviac HFDL_SEED_SCAN_MAX posledných polôh.
+   * Krajina a znak úseku základu (2026-10-16): samostatný HFDL úsek z importFlight má krajinu NULL
+   * (insertLegCounted) — odhad by prišiel ku klientovi bez krajiny pôvodu, ktorú má úsek ADS-B.
+   */
+  function hfdlSeedBase(icao24, lastT, callsign) {
+    const base = lastKinematicFix.get(icao24, lastT - AIR_GAP_MAX_S, lastT);
+    if (!base || base.gnd === 1 || base.alt === null || base.gs === null || base.trk === null) return null;
+    const leg = legAtT.get(icao24, base.t, base.t);
+    const legCs = String(leg?.callsign || '').trim().toUpperCase();
+    if (legCs && callsign && legCs !== callsign) return null;
+    const external = fixesAfterDesc.all(icao24, base.t, lastT, HFDL_SEED_SCAN_MAX).reverse()
+      .map((r) => ({ tMs: r.t * 1000, lat: r.lat / SCALE_DEG, lon: r.lon / SCALE_DEG, altM: r.alt, kind: r.alt === null ? 'hfdl' : 'adsc' }));
+    return { base, external, cs: legCs, country: leg?.country || '' };
+  }
 
   /**
    * Spoj susedné úseky stroja v okne, ktoré sú jedným letom cez dieru v pokrytí (continuesInAir) —
@@ -826,8 +860,11 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
      * signálu: server po štarte vie, kto je práve nad oceánom). Cez index legs_last + primárny kľúč
      * fixu — žiadny prechod tabuľky fixov. Aj lety končiace na zemi (onGround: true) — volajúci po
      * kúskoch tak vie, že lietadlo naposledy pristálo, a staršiu polohu vo vzduchu nepoužije.
+     * Let končiaci polohou z HFDL (2026-10-15, hfdlSeedBase): fix je posledný s rýchlosťou a kurzom
+     * a novšie HFDL/ADS-C polohy sú v `external` (preukotví ich flightEstimate seed).
      * @returns {{hex:string, cs:string, tMs:number, lat:number, lon:number, altM:number|null,
-     *   gsMps:number|null, trkDeg:number|null, vrMps:number|null, onGround:boolean, country:string}[]}
+     *   gsMps:number|null, trkDeg:number|null, vrMps:number|null, onGround:boolean, country:string,
+     *   external?: {tMs:number, lat:number, lon:number, altM:number|null, kind:'hfdl'|'adsc'}[]}[]}
      */
     lastAirborneFixes({ sinceS, untilS, limit = 120000 } = {}) {
       const rows = db.prepare('SELECT icao24, callsign, country, last_t FROM legs WHERE last_t BETWEEN ? AND ? ORDER BY last_t DESC LIMIT ?')
@@ -837,11 +874,15 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
       for (const row of rows) {
         if (seen.has(row.icao24)) continue; // len najnovší let lietadla
         seen.add(row.icao24);
-        const f = fixAtEnd.get(row.icao24, row.last_t);
-        if (!f) continue;
+        const end = fixAtEnd.get(row.icao24, row.last_t);
+        if (!end) continue;
+        const cs = String(row.callsign || '').trim().toUpperCase();
+        const hfdl = end.pos_src === POS_SRC.HFDL && (end.gs === null || end.trk === null)
+          ? hfdlSeedBase(row.icao24, row.last_t, cs) : null;
+        const f = hfdl ? hfdl.base : end;
         out.push({
           hex: row.icao24,
-          cs: String(row.callsign || '').trim().toUpperCase(),
+          cs: cs || hfdl?.cs || '',
           tMs: f.t * 1000,
           lat: f.lat / SCALE_DEG,
           lon: f.lon / SCALE_DEG,
@@ -850,8 +891,9 @@ export function openFlightHistory(dbPath, { retentionDays = FLIGHT_HISTORY_DEFAU
           trkDeg: f.trk == null ? null : f.trk / SCALE_TENTH,
           vrMps: f.vr == null ? null : f.vr / SCALE_TENTH,
           onGround: f.gnd === 1,
-          country: row.country || '',
+          country: row.country || hfdl?.country || '',
           category: null,
+          ...(hfdl ? { external: hfdl.external } : {}),
         });
       }
       return out;

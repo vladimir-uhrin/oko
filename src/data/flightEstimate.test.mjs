@@ -25,6 +25,23 @@ test('kto dostane odhad: len vo vzduchu, vysoko a rýchlo', () => {
   assert.equal(fix.altM, 11_350, 'geometrická výška má prednosť');
 });
 
+test('chýbajúce hodnoty OpenSky (null) nie sú nula: bez kurzu žiadny odhad, bez polohy žiadny fix (2026-10-16)', () => {
+  const noTrk = fixFromState(state('a', -10, 53, { trk: null }), T0);
+  assert.equal(noTrk.trkDeg, null, 'true_track null nie je sever');
+  assert.equal(qualifiesForEstimate(noTrk), false);
+  const noGeo = state('a', -10, 53);
+  noGeo[13] = null;
+  assert.equal(fixFromState(noGeo, T0).altM, 11_300, 'bez geometrickej výšky barometrická');
+  noGeo[7] = null;
+  assert.equal(fixFromState(noGeo, T0).altM, null, 'bez oboch výšok null, nie 0 m');
+  const noPos = state('a', -10, 53);
+  noPos[5] = null;
+  noPos[6] = null;
+  assert.equal(fixFromState(noPos, T0), null, 'poloha null nie je (0, 0)');
+  const noTime = state('a', -10, 53, { t: null });
+  assert.equal(fixFromState(noTime, T0).tMs, T0 * 1000, 'bez času polohy čas snímky');
+});
+
 test('so známym cieľom letí po veľkej kružnici k cieľu poslednou rýchlosťou a pri cieli skončí', () => {
   const fix = fixFromState(state('3c6444', -10, 53), T0);
   const totalKm = greatCircleKm(53, -10, JFK.lat, JFK.lon);

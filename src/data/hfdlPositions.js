@@ -14,7 +14,9 @@
 //    starú 17 min až hodiny → berie sa len poloha s časom do HFDL_MAX_REPORT_AGE_MS od príjmu;
 //  - ADS-C v ACARS (`acars.arinc622.adsc.tags[].basic_report`) má výšku v stopách a čas `ts_sec`
 //    = sekundy od začiatku hodiny;
-//  - ~2/3 záznamov nemá ICAO hex (`ac_info.icao`), len volací znak `flight_id` — párovanie aj cez neho.
+//  - ~2/3 záznamov nemá ICAO hex v `lpdu.ac_info.icao`, len volací znak `flight_id` — párovanie aj cez
+//    neho. Performance data a ADS-C ho však nesú v `lpdu.src.ac_info.icao` (2026-10-15): s ním je bez
+//    hexu 144 z 861 polôh, nie 264.
 //
 // Čisté funkcie (parse*) + sťahovač pre server (createHfdlFeed). Kľúč netreba, GitHub API bez
 // prihlásenia dovoľuje 60 dopytov/h — sťahovač robí najviac ~12/h.
@@ -31,6 +33,23 @@ export const HFDL_MAX_FUTURE_MS = 2 * 60_000;
 export const HFDL_MAX_BATCH_AGE_MS = 6 * 3600_000;
 /** Prieskum nových dávok (dávka pribudne raz za hodinu, dva zberače posunuté o ~6 min). */
 export const HFDL_POLL_MS = 10 * 60_000;
+/**
+ * Dávka, ktorá sa stiahne, ale nedá rozbaliť ani prečítať (poškodený zstd), sa skúsi pri najviac
+ * toľkých prieskumoch, potom sa vynechá (2026-10-15: jedna poškodená dávka inak zastavila všetky novšie
+ * až na HFDL_MAX_BATCH_AGE_MS). Chyba stiahnutia (HTTP 5xx/429, časový limit, prerušené spojenie) sa
+ * do pokusov nepočíta (2026-10-16): býva dočasná a vynechanie by natrvalo stratilo skutočné polohy
+ * tej hodiny — skúša sa pri každom prieskume, kým dávka nie je staršia než HFDL_MAX_BATCH_AGE_MS.
+ */
+export const HFDL_BATCH_MAX_ATTEMPTS = 3;
+/**
+ * Zlyhaná dávka (stiahnutie aj čítanie) podrží novšie dávky najviac toľko od svojho prvého zlyhania
+ * (2026-10-16): applyExternalFixes berie len polohy novšie než súčasné ukotvenie — staršia dávka
+ * doručená až po novšej by pre každé lietadlo, ktoré novšia dávka počula znova, prepadla ako zastaraná
+ * a jej polohy by sa nezapísali ani do Histórie (jedno HTTP 503 = stratená hodina polôh nad oceánom;
+ * dva zberače sa nepokrývajú — dávky 175425 a 180051 majú spoločné 1 hlásenie). Po tomto čase sa
+ * novšie spracujú (jedna zlá dávka nezastaví všetky až na HFDL_MAX_BATCH_AGE_MS) a zlyhaná sa skúša ďalej.
+ */
+export const HFDL_BATCH_HOLD_MS = 60 * 60_000;
 export const HFDL_REPO_OWNER = 'adsblol';
 export const HFDL_SOURCE = 'adsb.lol/hfdl';
 /** `fixes.pos_src` pre polohu z HFDL/ADS-C v Histórii letov (flightHistoryStore POS_SRC.HFDL). */
@@ -106,7 +125,10 @@ export function parseHfdlLine(line, { maxAgeMs = HFDL_MAX_REPORT_AGE_MS, maxFutu
   const npdu = lpdu?.hfnpdu;
   const recvMs = Number(h?.t?.sec) * 1000;
   if (!npdu || !Number.isFinite(recvMs) || lpdu.err || npdu.err) return [];
-  const hexRaw = String(lpdu.ac_info?.icao || '').trim().toLowerCase();
+  // Hex je pri Frequency data v `lpdu.ac_info`, pri Performance data a ADS-C (Enveloped data) od
+  // lietadla v `lpdu.src.ac_info` (2026-10-15, dávky z 2026-10-11: 120 z 861 polôh by hex stratilo —
+  // párovanie len podľa znaku zlyhá pri IATA tvare AS0506 a obíde stráž „iný stroj s rovnakým znakom").
+  const hexRaw = String(lpdu.ac_info?.icao || lpdu.src?.ac_info?.icao || '').trim().toLowerCase();
   const hex = HEX_RE.test(hexRaw) ? hexRaw : '';
   const ground = lpdu.dst?.type === 'Ground station' ? (lpdu.dst.name || null) : (npdu.gs?.name || null);
   const out = [];
@@ -143,17 +165,35 @@ export function parseHfdlLine(line, { maxAgeMs = HFDL_MAX_REPORT_AGE_MS, maxFutu
 /**
  * Celá dávka (text JSONL) → fixy zoradené podľa času, bez duplikátov (ten istý stroj a čas) (pure).
  * Duplikáty vznikajú, keď tú istú správu počujú dva prijímače.
+ * Kópia s hexom a kópia len so znakom (2026-10-16): hex zo `src.ac_info` dá len prijímač, ktorý má
+ * lietadlo vo vyrovnávacej pamäti — tá istá správa tak príde raz s hexom, raz bez. Párujú sa preto aj
+ * podľa znaku a času a ostáva kópia s hexom (dávka 2026-10-11 17:54: 6 takých dvojíc); inak by kópia
+ * bez hexu obišla v applyExternalFixes stráž „iný stroj s rovnakým znakom". Dva rôzne hexy s tým
+ * istým znakom a časom sú dva stroje — ostávajú oba.
  */
 export function parseHfdlBatch(text, options) {
-  const seen = new Set();
+  const byHex = new Map(); // `${hex}|${s}` → index v out
+  const byCs = new Map(); // `${cs}|${s}` → index v out
   const out = [];
   for (const line of String(text || '').split('\n')) {
     if (!line.trim()) continue;
     for (const fix of parseHfdlLine(line, options)) {
-      const key = `${fix.hex || fix.cs}|${Math.round(fix.tMs / 1000)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(fix);
+      const s = Math.round(fix.tMs / 1000);
+      const hexKey = fix.hex ? `${fix.hex}|${s}` : null;
+      const csKey = fix.cs ? `${fix.cs}|${s}` : null;
+      if (hexKey && byHex.has(hexKey)) continue;
+      const twin = csKey && byCs.has(csKey) ? byCs.get(csKey) : -1;
+      if (twin >= 0 && !(fix.hex && out[twin].hex)) {
+        // Tá istá správa: kópia bez hexu ustúpi kópii s hexom.
+        if (fix.hex) {
+          out[twin] = fix;
+          byHex.set(hexKey, twin);
+        }
+        continue;
+      }
+      const i = out.push(fix) - 1;
+      if (hexKey) byHex.set(hexKey, i);
+      if (csKey && twin < 0) byCs.set(csKey, i);
     }
   }
   return out.sort((a, b) => a.tMs - b.tMs);
@@ -170,13 +210,18 @@ export function createHfdlFeed({
   decompress = (buf) => zlib.zstdDecompressSync(buf), log = () => {}, userAgent = 'OKO okolive.sk (HFDL positions)',
 } = {}) {
   const seen = new Set();
+  /**
+   * Zlyhané dávky: názov → { sinceMs: prvé zlyhanie, reads: pokusy o prečítanie stiahnutej } (len
+   * v pamäti; po reštarte sa skúsia znova a podržanie HFDL_BATCH_HOLD_MS začne odznova).
+   */
+  const failures = new Map();
   let loaded = false;
   let timer = null;
   let running = false;
   const status = {
     enabled: typeof zlib.zstdDecompressSync === 'function',
     lastPollAt: null, lastFileAt: null, lastFile: null, lastError: null,
-    files: 0, fixes: 0, fixesHfdl: 0, fixesAdsc: 0, lastBatchFixes: 0, polls: 0,
+    files: 0, fixes: 0, fixesHfdl: 0, fixesAdsc: 0, lastBatchFixes: 0, polls: 0, fileErrors: 0, filesSkipped: 0,
   };
 
   async function loadState() {
@@ -217,6 +262,8 @@ export function createHfdlFeed({
     status.lastPollAt = now();
     let files = 0;
     let fixes = 0;
+    let skipped = 0;
+    let fileError = null;
     try {
       await loadState();
       const t = now();
@@ -230,10 +277,44 @@ export function createHfdlFeed({
         .filter(({ a, win }) => win && !seen.has(a.name) && t - win.toMs <= HFDL_MAX_BATCH_AGE_MS)
         .sort((x, y) => x.win.toMs - y.win.toMs);
       for (const { a, win } of fresh) {
-        const res = await fetchImpl(a.browser_download_url, { headers: { 'User-Agent': userAgent }, signal: AbortSignal.timeout(60_000) });
-        if (!res.ok) throw new Error(`HFDL ${a.name} HTTP ${res.status}`);
-        const text = decompress(Buffer.from(await res.arrayBuffer())).toString('utf8');
-        const batch = parseHfdlBatch(text);
+        // Chyba dávky (HTTP, časový limit, poškodený zstd) sa skúsi pri ďalšom prieskume. Novšie dávky
+        // počkajú (break), kým zlyhaná nie je doručená alebo kým od jej prvého zlyhania neuplynie
+        // HFDL_BATCH_HOLD_MS (2026-10-16) — poradie dávok drží polohy tej hodiny v ukotvení aj v Histórii.
+        // Potom sa novšie spracujú (2026-10-15: jedna zlá dávka nezastaví všetky). Vynechať natrvalo
+        // sa smie len dávka, ktorá sa stiahla a nedá sa prečítať (HFDL_BATCH_MAX_ATTEMPTS); chyba
+        // stiahnutia býva dočasná a skúša sa, kým dávka nie je staršia než HFDL_MAX_BATCH_AGE_MS.
+        let batch = null;
+        let failure = null;
+        let unreadable = false;
+        try {
+          const res = await fetchImpl(a.browser_download_url, { headers: { 'User-Agent': userAgent }, signal: AbortSignal.timeout(60_000) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const buf = Buffer.from(await res.arrayBuffer());
+          try { batch = parseHfdlBatch(decompress(buf).toString('utf8')); } catch (error) { unreadable = true; throw error; }
+        } catch (error) {
+          failure = error;
+        }
+        if (failure) {
+          const f = failures.get(a.name) || { sinceMs: t, reads: 0 };
+          if (unreadable) f.reads += 1;
+          status.fileErrors += 1;
+          fileError = `HFDL ${a.name}: ${failure?.message || failure}`;
+          if (f.reads >= HFDL_BATCH_MAX_ATTEMPTS) {
+            failures.delete(a.name);
+            seen.add(a.name);
+            skipped += 1;
+            status.filesSkipped += 1;
+            log(`[hfdl] ${fileError} — po ${f.reads} pokusoch vynechaná`);
+            continue;
+          }
+          failures.set(a.name, f);
+          const hold = t - f.sinceMs < HFDL_BATCH_HOLD_MS;
+          const what = unreadable ? `nečitateľná (pokus ${f.reads}/${HFDL_BATCH_MAX_ATTEMPTS})` : 'stiahnutie zlyhalo';
+          log(`[hfdl] ${fileError} — ${what}, skúsi sa pri ďalšom prieskume${hold ? '; novšie dávky počkajú' : ''}`);
+          if (hold) break;
+          continue;
+        }
+        failures.delete(a.name);
         seen.add(a.name);
         files += 1;
         fixes += batch.length;
@@ -248,8 +329,11 @@ export function createHfdlFeed({
           try { await onFixes(batch, { file: a.name, fromMs: win.fromMs, toMs: win.toMs }); } catch (error) { log(`[hfdl] onFixes failed: ${error?.message || error}`); }
         }
       }
-      if (files) await saveState();
-      status.lastError = null;
+      // Pokusy dávok, ktoré vypadli z okna HFDL_MAX_BATCH_AGE_MS, netreba držať v pamäti.
+      const freshNames = new Set(fresh.map(({ a }) => a.name));
+      for (const name of failures.keys()) if (!freshNames.has(name)) failures.delete(name);
+      if (files || skipped) await saveState();
+      status.lastError = fileError;
     } catch (error) {
       status.lastError = String(error?.message || error);
       log(`[hfdl] poll failed: ${status.lastError}`);

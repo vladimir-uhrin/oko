@@ -2555,7 +2555,37 @@ Google 3D root tiles returned HTTP 403; live visual acceptance remains unverifie
   definitive transport/credential failure reports `UNAVAILABLE`. Accepted
   warm vessels survive later zero-position refreshes as stale/degraded data,
   while disable/re-enable owns a new timer and superseded responses remain
-  inert.
+  inert. (2026-10-15, phones hit „NAČÍTANIE ZLYHALO" on okolive.sk) The timer
+  does not expire while a request — or its single retry — is still in flight
+  (the request's own timeout bounds it). A load whose transport times out or
+  fails in the network (first load or a later refresh, 2026-10-16) is retried
+  once after 2 s (`AIS_LOAD_RETRY_MS`); meanwhile the layer keeps reporting
+  loading and keeps its vessels, and only a failed retry reports
+  `UNAVAILABLE`. HTTP rejections and response-processing errors are never
+  retried and end it at once.
+- Request plan (`aisLiveRequestPlan`, 2026-10-15/16): every request asks for
+  the full row cap (a 15,000-row world cap for touch devices was tried and
+  dropped: ~18 % of vessels churned per refresh and ~58 % were missing from
+  in-memory search). A world request (camera above 4,000 km, no bbox; ~22 MB
+  JSON at 36k ships) gets a 25 s timeout; a bbox request starts at 10 s and
+  grows with the bbox side up to 25 s at `AIS_WIDE_VIEW_DEG2` (1,600 deg²; the
+  view just below 4,000 km over Europe is ~5 MB). The server keeps the
+  serialized world answer for 5 s per (`maxRows`, `selected`)
+  (`src/data/aisWorldResponseCache.js`, `answerAisLiveRequest`, header
+  `X-AIS-World-Cache: HIT|MISS`; expired bodies are dropped by an unref'd
+  timer); bbox answers are never cached and clients still receive
+  `Cache-Control: no-store`.
+- Phones (`body.oko-mobile`, 2026-10-16): above `MOBILE_SHIP_FAR_HIDE_M`
+  (3,000 km) vessels are hidden AND not fetched (`aisLoadDeferred`) unless a
+  vessel is selected or something needs live data. The layer then reports the
+  `zoom-in` guidance status (`ais.zoom-in-phone`) and the first-connect
+  timer is paused; it restarts when the first request leaves. After zooming
+  below 3,000 km the first load waits until the camera has been still for
+  1.2 s (the start fly-in crosses 3,000 km before it lands). Palette
+  search, the `?ship=` deep link, followed vessels
+  (`vesselSearchCommands` `openByMmsi`/server results) and voice
+  `track_entity` call `whenLiveData()`, which loads the deferred vessels at
+  once and waits for them, so they still open the live vessel.
 - Client render cap `VITE_AIS_LIVE_MAX_ROWS` (default 12,000); type-colored ship icons (tanker/cargo/passenger/fishing/tug); screen-space label clustering caps active labels at `VITE_AIS_LIVE_LABEL_MAX_ROWS` (default 900).
 - Click-to-inspect wired into the voice context store.
 

@@ -127,6 +127,8 @@ export function sampleLine(sample, t) {
  * @param {Function} [options.replayFactory]
  * @param {(icao24: string) => void} [options.onTrackLive] zapni živé sledovanie hexu
  * @param {(collapsed: boolean) => void} [options.setCollapsed] otvor panel z kontextového menu
+ * @param {() => void} [options.stopLiveTracking] pusti živé sledovanie lietadla pred zarámovaním
+ *   trasy (2026-10-16) — inak flyToBoundingSphere bojuje s trackedEntity sledovaného stroja
  */
 export function installHistoryPanel({
   viewer,
@@ -143,6 +145,7 @@ export function installHistoryPanel({
   replayFactory = createFlightReplay,
   onTrackLive = null,
   setCollapsed = null,
+  stopLiveTracking = null,
 } = {}) {
   const root = doc?.getElementById?.(HISTORY_PANEL_ID);
   const body = root?.querySelector?.('[data-history-body]');
@@ -351,6 +354,10 @@ export function installHistoryPanel({
     stateRow.hidden = !aircraft.length;
   }
 
+  /**
+   * @returns {Promise<boolean>} false, keď hľadanie predbehlo novšie (2026-10-15): `legs` potom
+   *   patria inému dopytu a openLatest z nich nesmie otvoriť let.
+   */
   async function runSearch() {
     const token = ++searchToken;
     listMode = 'search';
@@ -363,7 +370,7 @@ export function installHistoryPanel({
       let regHint = '';
       if (looksLikeRegistration(raw) && typeof api.resolveReg === 'function') {
         const resolved = await api.resolveReg(raw);
-        if (token !== searchToken) return;
+        if (token !== searchToken) return false;
         if (resolved?.hex) {
           query = resolved.hex;
           regHint = t('history.resolved-reg', { reg: resolved.registration || raw.toUpperCase(), hex: resolved.hex.toUpperCase() });
@@ -371,24 +378,32 @@ export function installHistoryPanel({
           legs = [];
           renderList();
           status.textContent = t('history.reg-not-found', { reg: raw.toUpperCase() });
-          return;
+          return true;
         }
       }
       const found = await api.search(query, { hours: Number(hours.value) || 24 });
-      if (token !== searchToken) return;
+      if (token !== searchToken) return false;
       legs = found;
       renderList();
       const results = t('history.results', { n: legs.length });
       status.textContent = regHint ? `${regHint} · ${results}` : results;
+      return true;
     } catch {
-      if (token !== searchToken) return;
+      if (token !== searchToken) return false;
       legs = [];
       renderList();
       status.textContent = t('history.unavailable');
+      return true;
     }
   }
 
-  async function openLeg(leg) {
+  /**
+   * @param {object} leg
+   * @param {{ frame?: boolean }} [options] frame=false: kameru nechaj tak (otvorenie z karty
+   *   sledovaného lietadla — živé sledovanie ostáva, viď openLatest); frame=true pred zarámovaním
+   *   pustí živé sledovanie (stopLiveTracking).
+   */
+  async function openLeg(leg, { frame = true } = {}) {
     currentLeg = leg;
     title.textContent = legTitle(leg);
     stats.textContent = t('history.loading');
@@ -416,7 +431,14 @@ export function installHistoryPanel({
       replay.load(fixes);
       // Časť letu bez pokrytia (oceán) je na glóbuse čiarkovaný odhad — povedať to aj v súhrne.
       if (replay.getState().estimatedGaps) stats.textContent += ` · ${t('history.gap-estimate')}`;
-      replay.frame();
+      if (frame) {
+        // 2026-10-16: klik na let v zozname (aj po Späť z openLatest), pás štátneho stroja,
+        // udalosť — prehrávač preberá kameru. Kým ju drží živé sledovanie (viewer.trackedEntity),
+        // flyToBoundingSphere s ním bojuje a záber skončí mimo trasy aj lietadla. Pustiť až tu:
+        // trasa je načítaná a let je stále ten otvorený, takže zlyhané načítanie sledovanie nechá.
+        stopLiveTracking?.();
+        replay.frame();
+      }
       renderState(replay.getState());
     } catch {
       if (currentLeg !== leg) return;
@@ -455,15 +477,20 @@ export function installHistoryPanel({
      * História letu z karty lietadla (2026-10-12): vyhľadá stroj a rovno otvorí jeho posledný let
      * (prebiehajúci — skončil najviac pred LATEST_LEG_MAX_AGE_S), inak nechá zoznam letov.
      * Kameru neberie: otvorený let len nakreslí trasu a graf, živé sledovanie beží ďalej.
+     * 2026-10-15: openLeg predtým vždy zarámoval trasu (replay.frame → flyToBoundingSphere) —
+     * kamera odletela tisíce km, kým ju sledovanie lietadla ešte držalo, a ostala mimo neho.
+     * Zarámovanie ostáva len pri otvorení letu zo zoznamu (to živé sledovanie najprv pustí —
+     * stopLiveTracking, 2026-10-16). Predbehnuté hľadanie (iná karta,
+     * Hľadať, zmena hodín) nič neotvorí — zoznam by patril inému dopytu.
      * @returns {Promise<object|null>} otvorený let alebo null
      */
     async openLatest({ query = '' } = {}) {
       setCollapsed?.(false);
       closeLeg();
       input.value = String(query || '');
-      await runSearch();
+      if (!(await runSearch())) return null;
       const latest = pickLatestLeg(legs, Date.now() / 1000);
-      if (latest) await openLeg(latest);
+      if (latest) await openLeg(latest, { frame: false });
       return latest;
     },
     /** Otvor panel s dopytom (kontextové menu: „História tohto stroja"). */

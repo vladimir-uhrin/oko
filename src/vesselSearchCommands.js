@@ -27,7 +27,7 @@ function whenUtc(ms) {
 
 /**
  * @param {object} o
- * @param {object} o.live vrstva živých lodí (searchVessels, selectByMmsi)
+ * @param {object} o.live vrstva živých lodí (searchVessels, selectByMmsi, whenLiveData)
  * @param {object} [o.delayed] vrstvy so selectContact (AISHub, GFW)
  * @param {object} [o.dataManager]
  * @param {object} [o.viewer]
@@ -55,6 +55,18 @@ export function createVesselSearchCommands({ live, delayed = [], dataManager = n
       try { if (layer?.selectContact?.(mmsi)) return true; } catch { /* */ }
     }
     return false;
+  }
+
+  /**
+   * Ako selectKnown, no telefón nad 3 000 km živé lode nesťahuje (aisLiveVessels.js aisLoadDeferred,
+   * 2026-10-16): vtedy ich najprv načíta a skúsi znova, nech sledovaná / nájdená loď otvorí živú
+   * kartu, nie len polohu z registra. Inde whenLiveData hneď vráti false — bez čakania.
+   */
+  async function selectKnownLive(mmsi) {
+    if (selectKnown(mmsi)) return true;
+    let loaded = false;
+    try { loaded = (await live?.whenLiveData?.()) === true; } catch { loaded = false; }
+    return loaded && selectKnown(mmsi);
   }
 
   /** Loď len z registra: let kamery a značka s časom poslednej polohy. */
@@ -91,7 +103,7 @@ export function createVesselSearchCommands({ live, delayed = [], dataManager = n
       ship = res?.ok ? await res.json() : null;
     } catch { ship = null; }
     if (!ship) { notify(translate('cmd.vessel.failed')); return; }
-    if (ship.mmsi && selectKnown(ship.mmsi)) return;
+    if (ship.mmsi && await selectKnownLive(ship.mmsi)) return;
     showRemote({ ...ship, name: ship.name || hit.name });
   }
 
@@ -99,7 +111,7 @@ export function createVesselSearchCommands({ live, delayed = [], dataManager = n
   async function openByMmsi(mmsi, name = '') {
     const m = String(mmsi ?? '').trim();
     if (!/^\d{9}$/.test(m)) return false;
-    if (selectKnown(m)) return true;
+    if (await selectKnownLive(m)) return true;
     let info = null;
     try {
       const res = await fetchImpl(`/api/vessel-info?mmsi=${encodeURIComponent(m)}`);

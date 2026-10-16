@@ -4369,6 +4369,44 @@ const militaryFlightsLayer = {
   },
 
   /**
+   * Fakty karty sledovaného vojenského stroja pre zdieľanie (2026-10-15): tlačidlo Zdieľať na jeho
+   * karte (flightCardActions — karty 'flights' aj 'military') sľubuje let, ale ui.js sa pýtal len
+   * civilnej vrstvy — vyšiel všeobecný pohľad bez faktov, alebo dokonca predtým vybraná loď. Tvar
+   * ako flights.getTrackedShareCard (flightShare.js). Vojenský feed trasu ani odhad nemá; vynechaný
+   * poll alebo čakanie feedu (karta „· STALE") ide ako `stale`, nie NAŽIVO.
+   * @returns {?object}
+   */
+  getTrackedShareCard() {
+    if (!_trackedIcao) return null;
+    const info = _flightData.get(_trackedIcao);
+    if (!info) return null;
+    const flightLines = formatFlightLinesPlain({
+      altitudeM: _altitudeMeters(info),
+      onGround: info.onGround === true,
+      verticalRateMps: info.verticalRateMps,
+      speedMps: info.speedMps,
+      trackDeg: info.track,
+    });
+    const type = tr3bTypeLabel(_trackedIcao, _toCleanText(info.type) || '');
+    const alert = squawkAlert(info.squawk);
+    return {
+      icao24: _trackedIcao,
+      callsign: _toCleanText(info.callsign) || _toCleanText(info.registration) || _trackedIcao,
+      flightIata: '',
+      // Prvá časť je „aerolinka" titulku príspevku (flightShare) — tu prevádzkovateľ.
+      identLine: [_toCleanText(info.operator), type, _toCleanText(info.registration)].filter(Boolean).join(' · '),
+      routeLine: '',
+      progress: null,
+      flightLines: flightLines.slice(0, 3),
+      estimated: false,
+      stale: Boolean(_missingPolls.get(_trackedIcao) || _backoff),
+      estimateLine: '',
+      alertLine: alert ? `SQUAWK ${alert.code} · ${alert.label}` : '',
+      countryIso: '',
+    };
+  },
+
+  /**
    * Return current layer health/status for the HUD status chip.
    * @returns {{count: number, lastUpdate: number|null, stale: boolean, error: string|null, status: number|null, retryInSec: number}}
    */

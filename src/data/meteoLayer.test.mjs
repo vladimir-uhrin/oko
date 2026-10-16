@@ -92,6 +92,24 @@ test('enable: katalóg → os so 3 krokmi, rez vetra načítaný, drapéria + č
   _resetActiveMapStackForTest();
 });
 
+// 2026-10-15: strážca Stadia vymení podklad meteo za bezplatnú náhradu — pri vypnutí je to stále náš podklad.
+test('podklad: náhrada za Stadiu (Blue Marble) sa pri vypnutí vráti na pôvodný; cudzí podklad nie', async () => {
+  for (const [active, restored] of [['gibs-blue-marble', true], ['osm', false]]) {
+    _resetActiveMapStackForTest();
+    setActiveMapStack({ id: 'photoreal' });
+    const { layer, viewer, calls } = harness();
+    layer.init(viewer);
+    layer.enable();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(calls.events[0], { id: METEO_BASEMAP_ID, reason: 'meteo' });
+    setActiveMapStack({ id: active });
+    layer.disable();
+    const restore = calls.events.filter((e) => e.reason === 'meteo-restore');
+    assert.deepEqual(restore, restored ? [{ id: 'photoreal', reason: 'meteo-restore' }] : [], active);
+  }
+  _resetActiveMapStackForTest();
+});
+
 test('čipy: TEPLOTA prepne pole (kanál R, rez temp), ČASTICE vypne častice; legenda je rampa; chyba rezu = poctivý stav', async () => {
   _resetActiveMapStackForTest();
   setActiveMapStack({ id: 'osm' });

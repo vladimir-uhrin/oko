@@ -57,9 +57,12 @@ export function buildFlightShareCopy(card, { whenMs = Date.now(), lang = 'sk' } 
   const airline = airlineOf(card);
   const route = clean(card?.routeLine);
   const title = [headline, airline, route].filter(Boolean).join(' · ').slice(0, 110) + ' | OKO';
+  // Zastaraná poloha (2026-10-15, card.stale): vynechaný poll alebo čakanie feedu — karta ukazuje
+  // „· STALE" a poloha je dopočet z posledných hodnôt, príspevok ju nesmie volať NAŽIVO.
   const status = card?.estimated
     ? (en ? 'ESTIMATED position' : 'ODHAD polohy') + (clean(card?.estimateLine) ? ` (${clean(card.estimateLine)})` : '')
-    : (en ? 'LIVE' : 'NAŽIVO');
+    : card?.stale ? (en ? 'STALE (last known position)' : 'ZASTARANÉ (posledná známa poloha)')
+      : (en ? 'LIVE' : 'NAŽIVO');
   const facts = (card?.flightLines || []).slice(0, 2).map(clean).filter(Boolean);
   const percent = flightShareProgressPercent(card?.progress);
   const progress = percent === null ? '' : (en ? `${percent} % of the route` : `${percent} % trasy`);
@@ -162,8 +165,10 @@ export function drawFlightShareCard(ctx, card, width, height, { lang = 'sk' } = 
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
   // chipText/chipTone: iný stav než NAŽIVO/ODHAD (loď z oneskoreného zdroja — cardShare.js).
-  const chipText = card.chipText || (card.estimated ? (en ? 'ESTIMATE' : 'ODHAD') : (en ? 'LIVE' : 'NAŽIVO'));
-  const chipColor = card.chipTone === 'estimate' || (!card.chipTone && card.estimated) ? ESTIMATE : LIVE;
+  // Zastaraný let (card.stale) dostane ZASTARANÉ v jantárovej, nie zelené NAŽIVO.
+  const chipText = card.chipText || (card.estimated ? (en ? 'ESTIMATE' : 'ODHAD')
+    : card.stale ? (en ? 'STALE' : 'ZASTARANÉ') : (en ? 'LIVE' : 'NAŽIVO'));
+  const chipColor = card.chipTone === 'estimate' || (!card.chipTone && (card.estimated || card.stale)) ? ESTIMATE : LIVE;
   ctx.font = `700 15px ${MONO}`;
   const chipW = Math.ceil(ctx.measureText(chipText).width) + 22;
   ctx.font = `700 32px ${MONO}`;

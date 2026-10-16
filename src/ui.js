@@ -55,7 +55,7 @@ import { installCardCloseButtons } from './cardCloseButtons.js';
 import { buildFlightShareCopy, drawFlightShareCard, flightShareHeadline } from './flightShare.js';
 import { installFlightCardActions } from './flightCardActions.js';
 import { installCardChromeFade } from './cardChromeFade.js';
-import { buildVesselShareCopy, vesselShareCard } from './cardShare.js';
+import { buildVesselShareCopy, pickShareCards, vesselShareCard } from './cardShare.js';
 import { installCardActionBar, trackedCardRect } from './cardActionBar.js';
 import { installCardSwipeClose } from './cardSwipeClose.js';
 import { createScrollKeeper } from './scrollKeeper.js';
@@ -3166,12 +3166,17 @@ export class StyleManager {
       const shell = window.__okoMobileShell;
       if (shell?.isMobile?.()) shell.open?.('data', { expand: 'history-panel' });
     };
+    // Prehrávanie letu preberá kameru: živé sledovanie (civilné aj vojenské) končí, inak by karta
+    // zakryla pohľad na trasu a zarámovanie by bojovalo s trackedEntity. Spoločné pre pás štátneho
+    // stroja a výber letu v Histórii letov (2026-10-16).
+    const stopLiveAircraftTracking = () => {
+      this._dataManager?.layers?.get('flights')?.module?.stopTracking?.({ origin: 'user' });
+      this._dataManager?.layers?.get('military')?.module?.stopTracking?.({ origin: 'user' });
+    };
     installStateFlightsStrip(viewer, {
       container: document.body,
       onOpenLeg: (flight) => {
-        // Prehrávanie preberá kameru: živé sledovanie končí, inak by karta zakryla pohľad na trasu.
-        this._dataManager?.layers?.get('flights')?.module?.stopTracking?.({ origin: 'user' });
-        this._dataManager?.layers?.get('military')?.module?.stopTracking?.({ origin: 'user' });
+        stopLiveAircraftTracking();
         revealHistoryPanel();
         this._historyPanel?.showLeg(flight);
       },
@@ -3261,6 +3266,8 @@ export class StyleManager {
         }
       },
       setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
+      // Výber letu v zozname zarámuje trasu — najprv pustiť sledované lietadlo (2026-10-16).
+      stopLiveTracking: stopLiveAircraftTracking,
     });
     // Ponuka štýlu a jazyka vpravo hore ustúpi karte, ktorá ju prekryje (2026-10-12, cardChromeFade.js).
     installCardChromeFade(viewer);
@@ -10863,15 +10870,24 @@ export class StyleManager {
    * Bez servera ostane dlhý odkaz a obrázok v schránke.
    * @returns {Promise<void>}
    */
-  /** Vybraná loď a jej karta v prekrytí (živé AIS, AISHub, GFW) alebo null — ako krížik karty lode. */
+  /**
+   * Vybraná loď a jej karta v prekrytí (živé AIS, AISHub, GFW) alebo null — ako krížik karty lode.
+   * `share` = stav polohy pre zdieľanie (2026-10-15): živé AIS ho vie z vrstvy (oceán = oneskorené,
+   * odhad z kurzu, zastaraná poloha), AISHub a GFW sú oneskorené vždy.
+   */
   _selectedVesselRef() {
     const layer = (id) => this._dataManager?.layers?.get(id)?.module;
     const live = layer('ais-live-vessels')?.getSelectedMmsi?.();
-    if (live) return { mmsi: live, sourceId: 'ais-live-vessels', entryId: `vessel:${live}` };
+    if (live) {
+      return {
+        mmsi: live, sourceId: 'ais-live-vessels', entryId: `vessel:${live}`,
+        share: layer('ais-live-vessels')?.getSelectedShareState?.() || {},
+      };
+    }
     const delayed = layer('aishub-vessels')?.getSelectedMmsi?.();
-    if (delayed) return { mmsi: delayed, sourceId: 'aishub-vessels', entryId: `aishub:${delayed}` };
+    if (delayed) return { mmsi: delayed, sourceId: 'aishub-vessels', entryId: `aishub:${delayed}`, share: { delayed: true } };
     const satellite = layer('gfw-presence')?.getSelectedMmsi?.();
-    return satellite ? { mmsi: satellite, sourceId: 'gfw-presence', entryId: `gfw:${satellite}` } : null;
+    return satellite ? { mmsi: satellite, sourceId: 'gfw-presence', entryId: `gfw:${satellite}`, share: { delayed: true } } : null;
   }
 
   async _openSharePanel() {
@@ -10887,21 +10903,20 @@ export class StyleManager {
       .filter(Boolean);
     // Zdieľanie letu (2026-10-11, „kvalitné zdieľanie"): sledované lietadlo dá titulok a popis
     // z faktov karty a pás letu na obrázok aj video (flightShare.js); kartu z plátna nahrádza pás.
-    let flightCard = null;
-    try {
-      if (this._dataManager?.isEnabled?.('flights') !== false) {
-        flightCard = this._dataManager?.layers?.get('flights')?.module?.getTrackedShareCard?.() || null;
-      }
-    } catch { flightCard = null; }
+    // 2026-10-15: aj vojenský stroj (jeho karta má to isté tlačidlo Zdieľať) a pri sledovanom
+    // lietadle nikdy predtým vybraná loď (pickShareCards).
     // Zdieľanie lode (2026-10-12, cardShare.js): bez sledovaného lietadla vybraná loď — text jej karty
     // (ako ju návštevník vidí) dá pás na obrázok/video aj titulok a popis príspevku.
-    let vesselCard = null;
-    if (!flightCard) {
-      try {
+    const shareLayer = (id) => (this._dataManager?.isEnabled?.(id) !== false ? this._dataManager?.layers?.get(id)?.module : null);
+    const { flightCard, vesselCard } = pickShareCards({
+      trackedId: getActiveTrackedReadoutId(),
+      flightCard: () => shareLayer('flights')?.getTrackedShareCard?.(),
+      militaryCard: () => shareLayer('military')?.getTrackedShareCard?.(),
+      vesselCard: () => {
         const sel = this._selectedVesselRef();
-        if (sel) vesselCard = vesselShareCard(getOverlayEntryText(sel.sourceId, sel.entryId), { delayed: sel.sourceId !== 'ais-live-vessels', lang });
-      } catch { vesselCard = null; }
-    }
+        return sel ? vesselShareCard(getOverlayEntryText(sel.sourceId, sel.entryId), { ...sel.share, lang }) : null;
+      },
+    });
     const shareCard = flightCard || vesselCard;
     const copy = flightCard
       ? buildFlightShareCopy(flightCard, { whenMs, lang })

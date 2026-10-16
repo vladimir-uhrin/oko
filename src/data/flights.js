@@ -1301,7 +1301,11 @@ function _drainEnrich() {
       })
       .then((data) => {
         // Odpoveď prišla (aj { found: false }) — kľúč je vybavený. Chyba v spracovaní ho nezhodí.
-        _enrichGate.succeed(job.key);
+        // Neúplná odpoveď (data.partial, 2026-10-15: trasa z VRS, adsbdb práve zablokovaný) sa ukáže,
+        // ale kľúč vybavený nie je — ďalší pokus po rovnakom odstupe ako po zlyhaní (1, 2, 3 … min,
+        // najviac ENRICH_MAX_ATTEMPTS), takže adsbdb nezahltí.
+        if (data && data.partial === true) _enrichGate.fail(job.key);
+        else _enrichGate.succeed(job.key);
         if (data && data.found) {
           try { job.onData(data); } catch (error) { console.warn('[flights] enrichment apply failed', error); }
         }
@@ -1357,11 +1361,15 @@ function _requestRouteEnrichment(icao24) {
   if (!/^[A-Z]{3}\d/.test(cs)) return; // airline-style callsigns only (LLL + digit); GA tails won't resolve
   if (_routeMemory.apply(known)) {
     if (icao24 === _trackedIcao && _trackedEntity) _updateTrackedLabelModel(icao24);
-    return;
+    // Neúplná odpoveď (trasa z VRS bez dopravcu a IATA čísla, 2026-10-15) dopyt nekončí — kedy smie
+    // ísť ďalší, určí _enrichGate (po neúplnej odpovedi ako po zlyhaní).
+    if (!_routeMemory.isPartial(cs)) return;
   }
-  // Poloha pre výber úseku letu s medzipristátím (server: trasa z VRS, 2026-10-14).
+  // Poloha pre výber úseku letu s medzipristátím (server: trasa z VRS, 2026-10-14) a kurz pre okružnú
+  // trasu A-B-A (2026-10-15). Kurz len vo vzduchu a nie 0 — 0 je náhradná hodnota, keď feed kurz nemá.
   const at = Number.isFinite(known?.rawLat) && Number.isFinite(known?.rawLon) ? `?lat=${known.rawLat.toFixed(2)}&lon=${known.rawLon.toFixed(2)}` : '';
-  _enqueueEnrich(`r:${cs}`, `/api/adsbdb/route/${encodeURIComponent(cs)}${at}`, (data) => {
+  const trk = at && !known.onGround && Number.isFinite(known.true_track) && known.true_track !== 0 ? `&trk=${Math.round(known.true_track)}` : '';
+  _enqueueEnrich(`r:${cs}`, `/api/adsbdb/route/${encodeURIComponent(cs)}${at}${trk}`, (data) => {
     _routeMemory.remember(cs, data);
     const meta = _flightData.get(icao24);
     if (!meta) return;
@@ -3746,7 +3754,10 @@ function _estimateRows(liveStates, nowMs) {
       continue;
     }
     entry.est = est;
-    const vr = est.method === 'route' && est.altM < entry.fix.altM ? -6 : 0;
+    // Klesanie z výšky odhadu, nie z metódy (2026-10-15): odhad po trase predchádzajúceho letu
+    // ('history', e163471) aj po trati NAT k cieľu klesá v posledných ESTIMATE_DESCENT_KM rovnako
+    // ako 'route' — s podmienkou na 'route' ukazovala karta pri klesajúcej výške vodorovný let.
+    const vr = est.altM < entry.fix.altM ? -6 : 0;
     rows.push([hex, entry.fix.cs, entry.fix.country || '', nowSec, entry.fix.tMs / 1000, est.lon, est.lat, est.altM, false,
       est.gsMps, est.trackDeg, vr, null, est.altM, null, false, 0, entry.fix.category ?? null]);
   }
@@ -3822,8 +3833,7 @@ function _syncAnchorFixOverlay() {
   _anchorFixOverlayHex = hex;
   _anchorFixOverlayT = tMs;
   if (!fix) {
-    clearOverlaySource(ANCHOR_FIX_OVERLAY_SOURCE_ID);
-    setOverlaySourceVisible(ANCHOR_FIX_OVERLAY_SOURCE_ID, false);
+    _clearAnchorFixOverlay();
     return;
   }
   let clock = '';
@@ -3848,6 +3858,17 @@ const _anchorFixScratch = new Cesium.Cartesian3();
 const ANCHOR_FIX_OVERLAY_SOURCE_ID = 'flights-anchor-fix';
 let _anchorFixOverlayHex = null;
 let _anchorFixOverlayT = 0;
+/**
+ * Zhasni popis bodu skutočnej polohy (2026-10-15): upratuje ho inak len tik flotily, ktorý po
+ * vypnutí vrstvy (disable/destroy) už nebeží — jantárový bod s časom HFDL ostával na glóbuse
+ * bez lietadla. Vynulovaná pamäť zaručí, že po zapnutí sa popis nakreslí znova.
+ */
+function _clearAnchorFixOverlay() {
+  _anchorFixOverlayHex = null;
+  _anchorFixOverlayT = 0;
+  clearOverlaySource(ANCHOR_FIX_OVERLAY_SOURCE_ID);
+  setOverlaySourceVisible(ANCHOR_FIX_OVERLAY_SOURCE_ID, false);
+}
 function _trackedAnchorFix() {
   const fix = _trackedIcao ? _estimates.get(_trackedIcao)?.fix : null;
   return fix && (fix.via === 'hfdl' || fix.via === 'adsc') && Number.isFinite(fix.lat) && Number.isFinite(fix.lon) ? fix : null;
@@ -4805,6 +4826,17 @@ export async function _ensureFleetModelForTest(icao24) {
   return _models.get(icao24) || null;
 }
 
+/** Testy: odhad polohy (tvar záznamu ako z _refreshServerEstimates) rovno do mapy odhadov; null ho zmaže. */
+export function _seedFlightEstimateForTest(hex, entry) {
+  if (entry) _estimates.set(hex, entry);
+  else _estimates.delete(hex);
+}
+
+/** Testy: jeden krok popisu bodu skutočnej polohy (v prevádzke ho volá len _fleetTick). */
+export function _syncAnchorFixOverlayForTest() {
+  _syncAnchorFixOverlay();
+}
+
 /** Plausibility check anchored to the plane's billboard position (coarse is
  *  fine here — this gates a LABEL, and it must not touch the tracked frame
  *  cache). Missing data → true (never hide what we can't judge). */
@@ -5357,6 +5389,7 @@ const flightsLayer = {
     if (_modelCollection) _modelCollection.show = false;
     _clearTracking();
     _destroyTrail();
+    _clearAnchorFixOverlay(); // tik flotily, ktorý ho inak zhasne, po vypnutí nebeží
     // Remove click handler + keydown listener while disabled to avoid
     // intercepting input when the layer is off
     if (_clickHandler) {
@@ -6036,6 +6069,7 @@ const flightsLayer = {
     releaseContinuousRender('flights'); // direct-destroy path (perf wave 2 fix)
     _clearTracking();
     _destroyTrail();
+    _clearAnchorFixOverlay();
     _cancelPendingTrackingRestore();
     if (_clickHandler) {
       _clickHandler.destroy();
@@ -6756,9 +6790,11 @@ const flightsLayer = {
    * Fakty karty sledovaného letu pre zdieľanie (2026-10-11, vlastník: „kvalitné zdieľanie"):
    * rovnaké časti ako karta (_trackedLabelParts), len ako obyčajný text — titulok a popis
    * príspevku a pás na obrázku/videu (flightShare.js). Odhad ostáva poctivo označený (pravidlo 2).
+   * `stale` (2026-10-15): stroj vynechal poll alebo feed čaká (backoff) — karta má „· STALE"
+   * a poloha je dopočet z posledných hodnôt; zdieľanie ho nesmie vydávať za NAŽIVO.
    * @returns {?{icao24: string, callsign: string, flightIata: string, identLine: string, routeLine: string,
    *   progress: ?{fractionDone: number, etaMinutes: number|null}, flightLines: string[], estimated: boolean,
-   *   estimateLine: string, alertLine: string, countryIso: string}}
+   *   stale: boolean, estimateLine: string, alertLine: string, countryIso: string}}
    */
   getTrackedShareCard() {
     if (!_trackedIcao) return null;
@@ -6784,6 +6820,7 @@ const flightsLayer = {
       progress: parts.progress ? { fractionDone: parts.progress.fractionDone, etaMinutes: parts.progress.etaMinutes ?? null } : null,
       flightLines: (parts.flightLines || []).slice(0, 3),
       estimated: Boolean(parts.estimated),
+      stale: Boolean(parts.stale),
       estimateLine,
       alertLine: parts.alertLine || '',
       countryIso: parts.info?.countryIso || '',

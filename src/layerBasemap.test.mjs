@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { LAYER_BASEMAPS, createLayerBasemapPolicy, meteoBasemapForHost, parseAutoBasemapSetting } from './layerBasemap.js';
+import { STADIA_FALLBACK_STACK } from './stadiaHealth.js';
 import { basemapForHost } from './data/meteoLayer.js';
 import { MAP_STACKS } from './mapStackController.js';
 
@@ -220,6 +221,91 @@ test('štítok AUTO: svieti, kým mapu drží vrstva; zhasne pri ručnej voľbe,
   const count = h.states.length;
   h.policy.onMapChange('osm');
   assert.equal(h.states.length, count, 'bez zmeny stavu sa nič neposiela');
+});
+
+// 2026-10-15: strážca Stadia vymení stadia-dark za Blue Marble — politika to brala za cudziu zmenu
+// (reset) a meteo po vypnutí ostalo na Blue Marble namiesto Google 3D.
+test('Stadia mimo počas meteo: náhradu politika prevezme ako mapu vrstvy, vypnutie vráti Google 3D', () => {
+  const h = meteoHarness({ host: 'localhost' });
+  h.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: true, origin: 'user' });
+  assert.equal(h.active, 'stadia-dark');
+  h.policy.onStadiaBlocked();
+  h.active = 'gibs-blue-marble';
+  h.policy.onMapChange('gibs-blue-marble');
+  assert.deepEqual(h.policy.state().owners, ['meteo-gfs'], 'nie cudzia zmena — meteo mapu drží ďalej');
+  assert.equal(h.policy.state().expected, 'gibs-blue-marble');
+  assert.equal(h.policy.state().baseId, 'photoreal');
+  assert.deepEqual(h.states.at(-1), { auto: true, layerId: 'meteo-gfs' }, 'štítok AUTO svieti ďalej');
+  h.policy.onLayerChange({ layerId: 'meteo-gfs', enabled: false, origin: 'user' });
+  assert.equal(h.active, 'photoreal');
+
+  // Mimo Stadie nič neprevezme: cudzia zmena ostáva cudzou.
+  const other = meteoHarness({ active: 'osm' });
+  other.policy.onLayerChange(user('earthquakes', true));
+  other.policy.onStadiaBlocked();
+  other.active = 'karta';
+  other.policy.onMapChange('karta');
+  assert.deepEqual(other.policy.state().owners, []);
+});
+
+// 2026-10-16 (recenzia g4): Stadia obnovená z odkazu (bez ručnej voľby) + zemetrasenia → pôvodná mapa
+// je Stadia. Po bloku ju priblíženie a vypnutie vrstvy vracali: kontrolér ju odmietol (hláška),
+// AUTO zhaslo a glóbus ostal na reliéfe.
+function stadiaBlockHarness(active) {
+  const h = { active, refused: [], states: [], notes: [], blocked: false };
+  h.policy = createLayerBasemapPolicy({
+    getActiveId: () => h.active,
+    hasStack: () => true,
+    // Ako MapStackController.setStack: Stadia „mimo" sa odmietne (StyleManager ukáže chybovú hlášku).
+    setStack: (id) => {
+      if (h.blocked && STADIA_FALLBACK_STACK[id]) { h.refused.push(id); return; }
+      h.active = id; h.policy.onMapChange(id);
+    },
+    notify: (info) => h.notes.push(info),
+    onState: (state) => h.states.push(state),
+  });
+  // Ako applyStadiaFallback: prevzatie PRED prepnutím, potom prepnutie cez UI.
+  h.block = () => {
+    h.blocked = true;
+    h.policy.onStadiaBlocked();
+    const to = STADIA_FALLBACK_STACK[h.active];
+    if (to) { h.active = to; h.policy.onMapChange(to); }
+  };
+  return h;
+}
+
+test('Stadia mimo, keď je pôvodnou mapou: priblíženie ani vypnutie vrstvy ju nevrátia', () => {
+  // Blok zblízka (na Stadii): náhrada OSM, oddialenie → reliéf, priblíženie → OSM, nie Stadia.
+  const h = stadiaBlockHarness('stadia-outdoors');
+  h.policy.onCameraHeight(1_000_000);
+  h.policy.onLayerChange(user('earthquakes', true));
+  assert.equal(h.active, 'aster-relief');
+  h.policy.onCameraHeight(100_000);
+  assert.equal(h.active, 'stadia-outdoors', 'zblízka pôvodná mapa');
+  h.block();
+  assert.equal(h.active, 'osm');
+  assert.equal(h.policy.state().baseId, 'osm', 'pôvodná mapa = náhrada');
+  h.policy.onCameraHeight(1_000_000);
+  assert.equal(h.active, 'aster-relief');
+  h.policy.onCameraHeight(100_000);
+  assert.equal(h.active, 'osm', 'priblíženie vráti náhradu, nie odmietnutú Stadiu');
+  assert.deepEqual(h.refused, [], 'žiadna žiadosť o Stadiu = žiadna chybová hláška');
+  assert.deepEqual(h.policy.state().owners, ['earthquakes'], 'vrstva mapu drží ďalej');
+  h.policy.onCameraHeight(1_000_000);
+  assert.deepEqual(h.states.at(-1), { auto: true, layerId: 'earthquakes' }, 'AUTO svieti');
+  h.policy.onLayerChange(user('earthquakes', false));
+  assert.equal(h.active, 'osm', 'vypnutie vrstvy → náhrada, nie Stadia');
+  assert.deepEqual(h.refused, []);
+
+  // Blok zďaleka (na reliéfe, náhrada sa nemení): vypnutie vrstvy ide na OSM, nie na Stadiu.
+  const far = stadiaBlockHarness('stadia-outdoors');
+  far.policy.onCameraHeight(1_000_000);
+  far.policy.onLayerChange(user('volcanoes', true));
+  far.block();
+  assert.equal(far.active, 'aster-relief');
+  far.policy.onLayerChange(user('volcanoes', false));
+  assert.equal(far.active, 'osm');
+  assert.deepEqual(far.refused, []);
 });
 
 test('main.js: žiadosti meteo o mapu rieši politika, nie priamy prepínač', () => {

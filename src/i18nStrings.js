@@ -1265,6 +1265,8 @@ export const EN_STRINGS = Object.freeze({
   'aishub.badge': 'DELAYED',
   'aishub.delayed-source': '{source} · delayed (via AISHub/aiscast)',
   'aishub.zoom-in': 'zoom in below ~2 600 km to load delayed vessels',
+  // Telefón nad 3 000 km lode nekreslí ani nesťahuje (aisLiveVessels.js aisLoadDeferred, 2026-10-16).
+  'ais.zoom-in-phone': 'zoom in below 3 000 km to load and show vessels',
   'aishub.empty': 'no delayed vessels reported in this area',
   'aishub.throttled': 'aiscast is throttling requests (429) — try again shortly',
   // Maritime chokepoint scenes (2026-09-17) — see src/chokepointScenes.js.
@@ -2311,6 +2313,8 @@ export const EN_STRINGS = Object.freeze({
   'mapstack.stadia-unavailable': 'Stadia is not serving tiles right now (free plan limit) — a free basemap is used instead',
   'context.lost-reloading': 'The browser reset the map graphics — reloading the same view…',
   'context.lost-manual': 'The browser reset the map graphics again (low device memory).',
+  // 2026-10-16: prvá strata bez trvalého počítadla (súkromné okno, zakázané úložisko) — bez „again".
+  'context.lost-manual-first': 'The browser reset the map graphics.',
   'context.reload': 'Reload',
   'mapstack.family.nasa-title': 'NASA basemaps — pick the variant below',
   'mapstack.variant.gibs-truecolor': 'Today (VIIRS)',
@@ -3878,6 +3882,7 @@ export const SK_STRINGS = Object.freeze({
   'aishub.badge': 'ONESKORENÉ',
   'aishub.delayed-source': '{source} · oneskorené (cez AISHub/aiscast)',
   'aishub.zoom-in': 'priblíž pod ~2 600 km, načíta sa oneskorený výrez',
+  'ais.zoom-in-phone': 'priblíž pod 3 000 km, lode sa načítajú a ukážu',
   'aishub.empty': 'v tomto výreze nie sú hlásené oneskorené lode',
   'aishub.throttled': 'aiscast obmedzuje dopyty (429) — skús o chvíľu',
   // Námorné úžiny — chokepoint scény (2026-09-17), pozri src/chokepointScenes.js.
@@ -4924,6 +4929,8 @@ export const SK_STRINGS = Object.freeze({
   'mapstack.stadia-unavailable': 'Stadia teraz neposiela dlaždice (limit bezplatného plánu) — použitý je bezplatný podklad',
   'context.lost-reloading': 'Prehliadač resetoval grafiku mapy — obnovujem ten istý pohľad…',
   'context.lost-manual': 'Prehliadač opäť resetoval grafiku mapy (málo pamäte zariadenia).',
+  // 2026-10-16: prvá strata bez trvalého počítadla (súkromné okno, zakázané úložisko) — bez „opäť".
+  'context.lost-manual-first': 'Prehliadač resetoval grafiku mapy.',
   'context.reload': 'Obnoviť',
   'mapstack.family.nasa-title': 'Podklady NASA — variant vyber nižšie',
   'mapstack.variant.gibs-truecolor': 'Dnes (VIIRS)',

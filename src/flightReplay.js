@@ -11,7 +11,7 @@
  * (čas, rýchlosť, koniec, follow) testuje v Node bez WebGL.
  */
 import * as Cesium from 'cesium';
-import { bridgeCoverageGaps, interpolateFix } from './data/flightHistory.js';
+import { bridgeCoverageGaps, fillDisplayAltitudes, interpolateFix } from './data/flightHistory.js';
 import { aircraftIcon } from './data/aircraftIcons.js';
 import { screenProjectedRotation, stabilizeScreenRotation } from './data/iconOrientation.js';
 import { trailAltitudeRgb } from './data/trailStyle.js';
@@ -150,6 +150,8 @@ export function createFlightReplay(viewer, {
   now = () => performance.now(),
 } = {}) {
   let fixes = [];
+  // Tie isté fixy s výškou na kreslenie (fillDisplayAltitudes): HFDL poloha bez výšky nepadne na hladinu mora.
+  let drawFixes = [];
   let estimatedGaps = 0;
   let clock = null;
   let trackPrimitive = null;
@@ -162,10 +164,21 @@ export function createFlightReplay(viewer, {
   const scratchPos = new Cesium.Cartesian3();
   let currentPos = null;
 
+  /** Vzorka pre panel a kurz značky — bez vymyslenej výšky. */
+  const sampleAt = (tS) => interpolateFix(fixes, tS);
+
+  /**
+   * Výška značky = výška čiary (2026-10-16), vždy z drawFixes — majú tie isté body a časy ako `fixes`,
+   * líšia sa len doplnenou výškou. Úsek s koncom bez výšky (HFDL) interpolateFix(fixes) doplní výškou
+   * druhého konca ako schod, kým čiara ide lineárne — značka by od čiary odskočila (11 km → 3 km).
+   */
+  const markerAltM = (p, tS) => interpolateFix(drawFixes, tS)?.alt ?? p.alt ?? 0;
+
   function positionAt(tS) {
-    const p = interpolateFix(fixes, tS);
+    const p = sampleAt(tS);
     if (!p) return null;
-    return { p, cartesian: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, Math.max(0, p.alt ?? 0), Cesium.Ellipsoid.WGS84, scratchPos) };
+    // Vzorka pre panel ostáva bez vymyslenej výšky; značka sa kreslí vo výške čiary.
+    return { p, cartesian: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, Math.max(0, markerAltM(p, tS)), Cesium.Ellipsoid.WGS84, scratchPos) };
   }
 
   function emit() {
@@ -200,6 +213,7 @@ export function createFlightReplay(viewer, {
       marker = null;
     }
     fixes = [];
+    drawFixes = [];
     estimatedGaps = 0;
     clock = null;
     currentPos = null;
@@ -219,9 +233,14 @@ export function createFlightReplay(viewer, {
       // nej, nie priamkou cez Zem; odhad sa kreslí čiarkovane a vzorka nesie `estimated`.
       const bridged = bridgeCoverageGaps(nextFixes);
       fixes = bridged.fixes;
+      // Výška na kreslenie sa dopĺňa PRED premostením dier (2026-10-16): premostenie z konca bez výšky
+      // (HFDL) dá odhadnutým bodom výšku druhého konca ako rovný schod a dopočet by potom šiel len
+      // medzi susednými bodmi premostenia — čiara by na HFDL polohe spadla o 8 km za 10 min.
+      // Premostenie výšku nečíta, body a časy sú tie isté ako vo `fixes`.
+      drawFixes = bridgeCoverageGaps(fillDisplayAltitudes(nextFixes)).fixes;
       estimatedGaps = bridged.gaps;
       clock = new ReplayClock(fixes[0].t, fixes[fixes.length - 1].t);
-      trackPrimitive = trackFactory(fixes);
+      trackPrimitive = trackFactory(drawFixes);
       if (trackPrimitive) viewer?.scene?.primitives?.add?.(trackPrimitive);
       const image = aircraftIcon(kind, 64, false, 'cyan');
       marker = viewer?.entities?.add?.({
@@ -233,7 +252,7 @@ export function createFlightReplay(viewer, {
           height: 30,
           alignedAxis: Cesium.Cartesian3.ZERO,
           rotation: new Cesium.CallbackProperty(() => {
-            const p = currentPos && positionAt(clock.t)?.p;
+            const p = currentPos && sampleAt(clock.t);
             if (!p || !viewer?.scene) return lastRotation ?? 0;
             const next = screenProjectedRotation(viewer.scene, currentPos, p.trk ?? 0, lastRotation);
             lastRotation = stabilizeScreenRotation(lastRotation, next);
@@ -294,7 +313,7 @@ export function createFlightReplay(viewer, {
     /** Zarámuj celú trasu. */
     frame(duration = 1.2) {
       if (!fixes.length || !viewer?.camera) return;
-      const points = fixes.map((f) => Cesium.Cartesian3.fromDegrees(f.lon, f.lat, Math.max(0, f.alt ?? 0)));
+      const points = drawFixes.map((f) => Cesium.Cartesian3.fromDegrees(f.lon, f.lat, Math.max(0, f.alt ?? 0)));
       const sphere = Cesium.BoundingSphere.fromPoints(points);
       viewer.camera.flyToBoundingSphere(sphere, {
         duration,
@@ -311,7 +330,7 @@ export function createFlightReplay(viewer, {
     /** Stav pre UI. */
     getState() {
       if (!clock) return { loaded: false, playing: false, t: null, fraction: 0, speed: REPLAY_SPEEDS[1], follow, sample: null };
-      const at = positionAt(clock.t);
+      const sample = sampleAt(clock.t);
       return {
         loaded: true,
         playing: clock.playing,
@@ -321,7 +340,7 @@ export function createFlightReplay(viewer, {
         fraction: clock.fraction,
         speed: clock.speed,
         follow,
-        sample: at?.p ?? null,
+        sample: sample ?? null,
         fixes: fixes.filter((f) => !f.estimated).length,
         estimatedGaps,
       };

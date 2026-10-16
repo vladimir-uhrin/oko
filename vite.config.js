@@ -35,7 +35,7 @@ import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
 import { earthquakeFeedProxy } from './src/data/earthquakeFeedProxy.js';
 import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { HISTORY_PATH_LOOKBACK_S, accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
-import { createVrsRouteDb } from './src/data/vrsRoutes.js';
+import { adsbdbRouteAnswer, createVrsRouteDb, routeHintFromQuery, vrsRouteAnswer } from './src/data/vrsRoutes.js';
 import { whereAmIPlugin } from './src/whereAmIServer.js';
 import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
@@ -131,6 +131,7 @@ import { readAisStateFile, restoreAisState, serializeAisState, writeAisStateFile
 import { createShipServer } from './src/data/shipServer/index.js';
 import { planespottersProxy } from './src/data/planespottersProxy.js';
 import { AIS_RETAIN_MS, aisFixTime, aisMeasuredTime, acceptsAisFix, isAisPositionMessage, parseAisBounds, selectAisCoverage } from './src/data/aisCoverage.js';
+import { answerAisLiveRequest, createAisWorldResponseCache } from './src/data/aisWorldResponseCache.js';
 import { promises as fsp } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -239,6 +240,9 @@ async function seedEstimatesFromHistory() {
   if (st.done || st.running || st.attempts >= 5 || !_historyStoreForEstimates) return;
   st.snapshots += 1;
   if (st.snapshots < 2) return;
+  // Trasy VRS sa po štarte načítavajú vo vlákne (2026-10-16) — plnenie počká na ďalší snímok, aby odhady
+  // dostali cieľ hneď (bez neho idú do radu na adsbdb a pri plnom rade by sa staršie zahodili).
+  if (_vrsRoutes?.pending()) return;
   const store = _historyStoreForEstimates();
   if (!store || store.closed) return;
   st.running = true;
@@ -1811,6 +1815,8 @@ let _aisNeedsRearm = false;
 let _aisWebSocketImpl;
 /** @type {Map<string,object>} */
 const _aisStreamVessels = new Map();
+/** Hotové odpovede /api/ais-live bez výrezu, pár sekúnd (aisWorldResponseCache.js, 2026-10-15). */
+const _aisWorldResponseCache = createAisWorldResponseCache();
 /** @type {Map<string,object>} */
 const _aisStreamStatic = new Map();
 /** @type {Map<string,{lats:Float32Array,lons:Float32Array,times:Uint32Array,head:number,len:number}>} mmsi -> track ring buffer */
@@ -4161,17 +4167,19 @@ function adsbdbProxy() {
             if (!/^[A-Z0-9]{2,8}$/.test(cs)) return send(400, { error: 'invalid callsign' });
             // Trasa z VRS standing-data má prednosť (2026-10-14, 610 pristátych letov z Histórie: cieľ
             // trafila VRS v 92 %, adsbdb v 80 %; pri nezhode VRS 89×, adsbdb 18×). Od adsbdb ostáva
-            // dopravca a IATA číslo letu. Poloha (?lat=&lon=) vyberie úsek letu s medzipristátím.
-            const q = new URL(req.url, 'http://x').searchParams;
-            const at = { lat: Number(q.get('lat')), lon: Number(q.get('lon')) };
-            const vrs = _vrsRoutes ? _vrsRoutes.lookup(cs, Number.isFinite(at.lat) && Number.isFinite(at.lon) ? at : null) : null;
+            // dopravca a IATA číslo letu. Poloha (?lat=&lon=) vyberie úsek letu s medzipristátím, kurz (&trk=)
+            // úsek okružnej trasy A-B-A (2026-10-15, routeHintFromQuery: chýbajúca poloha už nie je 0,0).
+            const hint = routeHintFromQuery(new URL(req.url, 'http://x').searchParams);
+            const vrs = _vrsRoutes ? _vrsRoutes.lookup(cs, hint) : null;
+            const vrsPending = Boolean(_vrsRoutes?.pending()); // zistené spolu s lookup, nie až po await
             const data = await lookup('route', cs);
-            if (vrs) {
-              const extra = data && data !== ADSBDB_LIMITED ? data : {};
-              return send(200, { found: true, ...extra, origin: vrs.origin, destination: vrs.destination, routeSource: 'vrs' });
-            }
+            // adsbdb zablokovaný → trasa z VRS hneď, ale ako neúplná odpoveď: karta sa o dopravcu
+            // a IATA číslo spýta znova neskôr (2026-10-15, vrsRouteAnswer), nie až po obnovení stránky.
+            if (vrs) return send(200, vrsRouteAnswer(vrs, data, { limited: data === ADSBDB_LIMITED }));
             if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
-            return send(200, data ? { found: true, ...data } : { found: false });
+            // VRS sa po štarte ešte načítava (vo vlákne, 2026-10-16) → odpoveď len z adsbdb je neúplná,
+            // karta sa po odstupe spýta znova a dostane trasu z VRS (adsbdbRouteAnswer).
+            return send(200, adsbdbRouteAnswer(data, { vrsPending }));
           }
           if (kind === 'type') {
             const hex = String(rawKey || '').toLowerCase();
@@ -6618,6 +6626,8 @@ function flightHistoryProxy() {
       // pos_src HFDL). HFDL_POSITIONS=off vypne. Bez Histórie (QA inštancia) sa stav sťahovania drží
       // len v pamäti, aby neprepísal stav služby oko-api.
       // Zápis preukotvených HFDL polôh do Histórie letov (ten istý let — importFlight ho predĺži a spojí dieru).
+      // Len prijaté hodnoty (výška len z ADS-C), odvodený kurz a rýchlosť nie (2026-10-15): po reštarte ich
+      // seed odhadov odvodí znova z bodov za posledným fixom ADS-B (lastAirborneFixes `external`).
       _hfdlRecordHistory = async (applied) => {
         const store = applied.length && cfg.enabled && diskOk() ? getStore() : null;
         if (!store) return 0;
@@ -9120,46 +9130,17 @@ function aisLiveProxy() {
 
         const maxRows = clampInt(incoming.searchParams.get('maxRows'), 1, AISSTREAM_CACHE_MAX, AISSTREAM_CACHE_MAX);
         const bounds = parseAisBounds(incoming.searchParams.get('bbox'));
-        const { rows, coverage } = selectAisCoverage(_aisStreamVessels.values(), {
-          limit: maxRows,
-          bounds,
-          selected: incoming.searchParams.get('selected'),
+        const selected = incoming.searchParams.get('selected');
+        // Svet bez výrezu (~22 MB) sa skladá raz za pár sekúnd pre všetkých návštevníkov
+        // (aisWorldResponseCache.js, 2026-10-15); výrez ide vždy naživo. Klient no-store.
+        const answer = answerAisLiveRequest({
+          bounds, maxRows, selected,
+          cache: _aisWorldResponseCache,
+          build: () => buildAisLiveResponse({ maxRows, bounds, selected }),
         });
-        // Lode z oceánu bez MMSI vo výreze, na ktorý sa niekto pozerá, idú v prekladе prvé (2026-10-11).
-        if (bounds) {
-          let n = 0;
-          for (const row of rows) {
-            if (typeof row.mmsi !== 'string' || !row.mmsi.startsWith('mt-')) continue;
-            shipServer().wantResolve(row.mmsi);
-            if (++n >= 300) break;
-          }
-        }
-
-        const feed = aisStreamStatusSnapshot();
-
-        res.statusCode = process.env.AISSTREAM_API_KEY ? 200 : 503;
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.setHeader('Cache-Control', 'no-store');
-        res.end(JSON.stringify({
-          rows,
-          coverage: { ...coverage, cacheCapacity: AISSTREAM_CACHE_MAX, cacheAtCapacity: _aisStreamVessels.size >= AISSTREAM_CACHE_MAX,
-            subscriptionBounds: parseJsonEnv('AISSTREAM_BOUNDING_BOXES', AISSTREAM_DEFAULT_BBOXES) },
-          source: 'AISStream',
-          status: feed.status,
-          error: feed.error,
-          refreshing: feed.status !== 'live',
-          newestPositionAt: newestAisPositionAt(rows),
-          lastMessageAt: feed.lastMessageAt,
-          // Honest-failure metadata: how long the feed has been quiet, which
-          // recovery attempt we are on, and when the next one lands.
-          silentForMs: feed.silentForMs,
-          reconnectAttempt: feed.reconnectAttempt,
-          nextAttemptAt: feed.nextAttemptAt,
-          staleAfterMs: feed.staleAfterMs,
-          watchdog: feed.watchdog,
-          // Zdroje navyše (2026-10-11): kedy naposledy, koľko riadkov, koľko prijatých, chyba.
-          supplements: shipServer().supplementStats(),
-        }));
+        res.statusCode = answer.statusCode;
+        for (const [name, value] of Object.entries(answer.headers)) res.setHeader(name, value);
+        res.end(answer.body);
       } catch (error) {
         res.statusCode = 502;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -9167,6 +9148,50 @@ function aisLiveProxy() {
         res.end(JSON.stringify({ error: error?.message || 'AIS live stream error', rows: [] }));
       }
     });
+  }
+
+  /** Telo odpovede /api/ais-live (riadky + pokrytie + stav zdroja) zo živej cache lodí. */
+  function buildAisLiveResponse({ maxRows, bounds, selected }) {
+    const { rows, coverage } = selectAisCoverage(_aisStreamVessels.values(), {
+      limit: maxRows,
+      bounds,
+      selected,
+    });
+    // Lode z oceánu bez MMSI vo výreze, na ktorý sa niekto pozerá, idú v prekladе prvé (2026-10-11).
+    if (bounds) {
+      let n = 0;
+      for (const row of rows) {
+        if (typeof row.mmsi !== 'string' || !row.mmsi.startsWith('mt-')) continue;
+        shipServer().wantResolve(row.mmsi);
+        if (++n >= 300) break;
+      }
+    }
+
+    const feed = aisStreamStatusSnapshot();
+
+    return {
+      statusCode: process.env.AISSTREAM_API_KEY ? 200 : 503,
+      body: JSON.stringify({
+        rows,
+        coverage: { ...coverage, cacheCapacity: AISSTREAM_CACHE_MAX, cacheAtCapacity: _aisStreamVessels.size >= AISSTREAM_CACHE_MAX,
+          subscriptionBounds: parseJsonEnv('AISSTREAM_BOUNDING_BOXES', AISSTREAM_DEFAULT_BBOXES) },
+        source: 'AISStream',
+        status: feed.status,
+        error: feed.error,
+        refreshing: feed.status !== 'live',
+        newestPositionAt: newestAisPositionAt(rows),
+        lastMessageAt: feed.lastMessageAt,
+        // Honest-failure metadata: how long the feed has been quiet, which
+        // recovery attempt we are on, and when the next one lands.
+        silentForMs: feed.silentForMs,
+        reconnectAttempt: feed.reconnectAttempt,
+        nextAttemptAt: feed.nextAttemptAt,
+        staleAfterMs: feed.staleAfterMs,
+        watchdog: feed.watchdog,
+        // Zdroje navyše (2026-10-11): kedy naposledy, koľko riadkov, koľko prijatých, chyba.
+        supplements: shipServer().supplementStats(),
+      }),
+    };
   }
 
   return {
@@ -10800,6 +10825,7 @@ function disposeAisStream() {
     _aisStreamTickTimer = null;
   }
   if (_aisAdapter) _aisAdapter.dispose();
+  _aisWorldResponseCache.clear(); // až 4 × ~22 MB textu — po zatvorení servera ich nedržať
   // Drop the cached policy and re-arm LAZILY. Re-deriving budgets here would
   // read process.env before the restarted server's loadEnv() has repopulated
   // it, caching the outgoing configuration; the next ensure() runs after that.

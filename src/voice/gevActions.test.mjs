@@ -513,6 +513,28 @@ test('tracked aircraft yields to strongest-fire and vessel voice flights before 
   }
 });
 
+test('hlas: loď na telefóne nad 3 000 km sa nájde — vrstva lode najprv načíta (whenLiveData), potom hľadá', async () => {
+  // aisLiveVessels.js aisLoadDeferred (2026-10-16): telefón zo zemegule lode nesťahuje, kým ich niekto nepotrebuje.
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const { order, viewer, styleManager } = createVoiceNavigationHarness();
+  let loaded = false;
+  const module = {
+    whenLiveData: async () => { order.push('load'); loaded = true; return true; },
+    findByQuery: () => (loaded ? { mmsi: '123456789', name: 'Test vessel', latitude: 29.75, longitude: -95.35 } : null),
+    selectById(id) { order.push(`select:${id}`); return true; },
+  };
+  const dataManager = {
+    layers: new Map([['ais-live-vessels', { module }]]),
+    isEnabled: (id) => id === 'ais-live-vessels',
+    getAll: () => [],
+  };
+  const runner = createGevActionRunner({ viewer, styleManager, dataManager });
+  const result = await runner('track_entity', { query: 'Test vessel', layerId: 'ais-live-vessels' });
+  assert.equal(result.ok, true);
+  assert.equal(order[0], 'load', 'najprv načítanie odložených lodí');
+  assert.ok(order.includes('select:123456789'));
+});
+
 test('move_camera and fly_route validate first, then use the shared camera authority seam', async () => {
   globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
   const { order, viewer, styleManager } = createVoiceNavigationHarness();

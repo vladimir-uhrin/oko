@@ -196,6 +196,37 @@ export function bridgeCoverageGaps(fixes, { minGapS = GAP_BRIDGE_MIN_S, stepKm =
 }
 
 /**
+ * Výška len na KRESLENIE (2026-10-15): poloha vo vzduchu bez výšky — HFDL ju nenesie (pos_src 7) —
+ * by sa kreslila na hladine mora (čiara padne na 0 m a zafarbí sa ako zem). Dostane výšku lineárne
+ * v čase medzi susednými fixmi s výškou, na kraji výšku najbližšieho. Vracia nové pole; zmenené fixy
+ * sú kópie, ostatné tie isté objekty — dáta (vzorka, graf, počty) ostávajú bez vymyslenej výšky.
+ * Na zemi alebo bez suseda s výškou ostáva null. Pure.
+ * @param {Array<object>} fixes chronologické
+ * @returns {Array<object>}
+ */
+export function fillDisplayAltitudes(fixes) {
+  if (!Array.isArray(fixes)) return [];
+  const known = (f) => Number.isFinite(f?.alt);
+  const prev = new Array(fixes.length);
+  let p = -1;
+  for (let i = 0; i < fixes.length; i += 1) { prev[i] = p; if (known(fixes[i])) p = i; }
+  const out = fixes.slice();
+  let next = -1;
+  for (let i = fixes.length - 1; i >= 0; i -= 1) {
+    const f = fixes[i];
+    if (known(f)) { next = i; continue; }
+    if (!f || f.gnd) continue;
+    const a = prev[i] >= 0 ? fixes[prev[i]] : null;
+    const b = next >= 0 ? fixes[next] : null;
+    if (!a && !b) continue;
+    const span = a && b ? b.t - a.t : 0;
+    const alt = !a ? b.alt : !b ? a.alt : (span > 0 ? a.alt + (b.alt - a.alt) * ((f.t - a.t) / span) : a.alt);
+    out[i] = { ...f, alt };
+  }
+  return out;
+}
+
+/**
  * Rady pre graf: `samples` bodov rovnomerne v čase, výška a rýchlosť
  * normalizované 0..1 (min 0 pre výšku, nech graf ukazuje aj pristátie).
  * Pure; null pod 2 fixy.

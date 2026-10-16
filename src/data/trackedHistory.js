@@ -8,7 +8,7 @@
  * netočila sa. Keď proxy históriu nemá (503 history_disabled/unavailable),
  * ďalšie dopyty sa nerobia. Injektovateľný fetcher — testovateľné v Node.
  */
-import { fetchFlightTrack } from './flightHistory.js';
+import { fetchFlightTrack, fillDisplayAltitudes } from './flightHistory.js';
 import { currentLegFixes } from './flightCharts.js';
 
 /** Čerstvé fixy sa nepýtajú znova skôr než po minúte (poll beží každých pár sekúnd). */
@@ -83,12 +83,15 @@ export const TRAIL_HISTORY_MAX_POINTS = 300;
  * pri limite nič — archív má posledných 24 h bez kvóty. Len AKTUÁLNY úsek letu (medzera
  * > 30 min = iný let), len body staršie než prvý živý fix, rovnomerne preriedené so
  * zachovaným začiatkom a koncom. Tvar ako OpenSky waypointy: baro výška v m, na zemi null. Pure.
+ * Poloha vo vzduchu bez výšky (HFDL, 2026-10-15) dostane na kreslenie výšku susedov (fillDisplayAltitudes)
+ * — null by ju trasa položila na zem.
  * @param {Array<{t:number, lat:number, lon:number, alt:number|null, gnd?:boolean}>} fixes
  * @param {{nowS: number, beforeS?: number, max?: number}} options
  * @returns {Array<{lat:number, lon:number, baroAlt:number|null}>}
  */
 export function trailWaypointsFromHistory(fixes, { nowS, beforeS = Infinity, max = TRAIL_HISTORY_MAX_POINTS } = {}) {
-  const leg = currentLegFixes(fixes, nowS)
+  // Výška na kreslenie ešte pred orezaním na beforeS — sused s výškou môže byť aj novší bod letu.
+  const leg = fillDisplayAltitudes(currentLegFixes(fixes, nowS))
     .filter((f) => f.t < beforeS && Number.isFinite(f.lat) && Number.isFinite(f.lon));
   const pick = (f) => ({ lat: f.lat, lon: f.lon, baroAlt: f.gnd ? null : (Number.isFinite(f.alt) ? f.alt : null) });
   if (leg.length <= max) return leg.map(pick);

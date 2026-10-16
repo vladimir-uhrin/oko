@@ -58,3 +58,42 @@ test('výsledky: loď v pamäti sa vyberie; zo servera — známa vo vrstve sa v
   assert.match(notes.at(-1), /cmd\.vessel\.flying/);
   assert.deepEqual(await cmds.asyncResults('ab'), [], 'krátky dopyt server nezaťaží');
 });
+
+test('telefón nad 3 000 km (živé lode odložené): sledovaná a nájdená loď najprv počká na načítanie, potom otvorí živú kartu', async () => {
+  // aisLiveVessels.js aisLoadDeferred (2026-10-16): vrstva lode zo zemegule nesťahuje, kým ich niekto nepotrebuje.
+  let loaded = false;
+  let loads = 0;
+  const selected = [];
+  const live = {
+    selectByMmsi: (m) => { selected.push(m); return loaded && m === '241190000'; },
+    whenLiveData: async () => { loads += 1; loaded = true; return true; },
+  };
+  const fetched = [];
+  const remote = [];
+  const fetchImpl = async (url) => {
+    fetched.push(url);
+    if (url.startsWith('/api/vessel-info/ship')) return { ok: true, json: async () => ({ shipId: '214707', mmsi: '241190000', name: 'MINERVA ZEN', position: { lat: 34.13, lon: -68.88, t: 1 } }) };
+    return { ok: true, json: async () => ({ name: 'X', lastPosition: { lat: 1, lon: 2, t: 3 } }) };
+  };
+  const cmds = createVesselSearchCommands({ live, fetchImpl, onRemoteShip: (s) => remote.push(s) });
+  assert.equal(await cmds.openByMmsi('241190000'), true, 'sledovaná loď otvorí živý záznam');
+  assert.equal(loads, 1);
+  assert.deepEqual(fetched, [], 'žiadna poloha z registra');
+  assert.equal(remote.length, 0);
+
+  loaded = false;
+  await cmds._runRemoteForTest({ shipId: '214707', name: 'MINERVA ZEN' });
+  assert.equal(loads, 2);
+  assert.equal(remote.length, 0, 'klik vo výsledkoch servera vyberie živú loď, nie značku z registra');
+  assert.deepEqual(selected.slice(-2), ['241190000', '241190000']);
+});
+
+test('bez odložených lodí (počítač) sa nečaká: neznáma loď ide hneď na polohu z registra', async () => {
+  const live = { selectByMmsi: () => false, whenLiveData: async () => false };
+  const remote = [];
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ name: 'X', lastPosition: { lat: 1, lon: 2, t: 3 } }) });
+  const cmds = createVesselSearchCommands({ live, fetchImpl, onRemoteShip: (s) => remote.push(s) });
+  assert.equal(await cmds.openByMmsi('241190000'), false);
+  assert.equal(remote.length, 1);
+  assert.equal(remote[0].position.lat, 1);
+});

@@ -106,6 +106,39 @@ const DEFAULT_ACTIVE_LABELS = 900;
 const REFRESH_MS = 60000;
 /** Bounded wait for the first accepted vessel position in one enabled session. */
 export const AIS_FIRST_CONNECT_GRACE_MS = 30000;
+/**
+ * Pevný limit jednej požiadavky /api/ais-live (2026-10-15). Malý výrez (kamera pod 4 000 km) má
+ * 10 s, širší viac (AIS_WIDE_VIEW_DEG2). Pohľad na svet ide BEZ výrezu — na okolive.sk ~22 MB JSON (3,5 MB komprimované), server
+ * ho skladá 1,1–1,5 s; na telefóne pri štarte (súbežné dlaždice, pomalšia sieť a CPU) 10 s
+ * nestačilo: požiadavka sa zrušila (net::ERR_ABORTED), prvé pripojenie skončilo „unavailable"
+ * a lišta ukázala NAČÍTANIE ZLYHALO, hoci o chvíľu neskôr to isté prešlo (36 418 lodí za 3,6 s).
+ */
+export const AIS_VIEW_TIMEOUT_MS = 10000;
+export const AIS_WORLD_TIMEOUT_MS = 25000;
+/**
+ * Široký výrez dostane limit sveta (2026-10-16). Kamera tesne pod 4 000 km má výrez cez pol
+ * Európy: v snímke z 10. 10. mal box 0–35° v. d. / 25–72° s. š. (1 645 štv. stupňov) 13 119 lodí,
+ * ~5,4 MB JSON — ako štvrtina sveta, a s 10 s by na telefóne vypršal tak ako svet. Limit rastie
+ * so stranou výrezu (odmocnina plochy) od AIS_VIEW_TIMEOUT_MS po AIS_WORLD_TIMEOUT_MS pri tejto ploche.
+ */
+export const AIS_WIDE_VIEW_DEG2 = 1600;
+/**
+ * Načítanie, ktorého prenos vypršal alebo sa prerušil v sieti, sa RAZ zopakuje o tento čas
+ * namiesto vyhlásenia zdroja za nedostupný (2026-10-15 prvé načítanie na telefóne pri štarte;
+ * 2026-10-16 aj obnova — jeden vypršaný široký výrez nemá prepnúť vrstvu na NAČÍTANIE ZLYHALO).
+ */
+export const AIS_LOAD_RETRY_MS = 2000;
+/** Ako často sa po uplynutí lehoty prvého pripojenia znova pozrie, či požiadavka ešte beží. */
+const AIS_FIRST_CONNECT_RECHECK_MS = 1000;
+/**
+ * Telefón, ktorý lode nesťahuje (odložené, MOBILE_SHIP_FAR_HIDE_M): prvé načítanie po priblížení
+ * počká, kým kamera stojí aspoň takto dlho (2026-10-16). Úvodný prelet zo 8 000 na 260 km (camera.js
+ * showStartView, 7 s) prechádza 3 000 km ešte v pohybe — s bežnými 500 ms by išla požiadavka
+ * uprostred letu so širokým výrezom (aj MB dát) a výrez cieľa až o ďalších 5 s (strop jednej
+ * požiadavky na výrez). Kontrola výrezu beží raz za 800 ms, takže 1 200 ms bez zmeny = jedna celá
+ * kontrola bez pohybu.
+ */
+const AIS_DEFERRED_SETTLE_MS = 1200;
 const AIS_FIRST_CONNECT_LABEL = 'awaiting first AIS position…';
 const VISIBILITY_UPDATE_MS = 800;
 /**
@@ -190,13 +223,32 @@ const VESSEL_SURFACE_WARM_ALT_M = 150_000;
 /**
  * Telefón: lode z obežnej dráhy nekresliť (2026-10-15, vlastník po snímke úvodnej zemegule na mobile:
  * „je tam veľa lodí"). Na 390 px širokej obrazovke 30 000 lodí z výšky tisícov km splynie do sivej
- * kaše cez pobrežia; po priblížení pod túto výšku sa lode ukážu. Vrstva ostáva zapnutá, dáta sa ťahajú.
+ * kaše cez pobrežia; po priblížení pod túto výšku sa lode ukážu. Vrstva ostáva zapnutá.
+ * 2026-10-16: skryté lode sa ani nesťahujú (aisLoadDeferred) — pozri tam.
  */
 export const MOBILE_SHIP_FAR_HIDE_M = 3_000_000;
 
 /** Skryť lode? (pure) Len na telefóne (plášť oko-mobile) a nad MOBILE_SHIP_FAR_HIDE_M. */
 export function mobileShipsHidden(mobile, cameraHeightM) {
   return mobile === true && Number.isFinite(cameraHeightM) && cameraHeightM > MOBILE_SHIP_FAR_HIDE_M;
+}
+
+/**
+ * Odložiť načítanie lodí? (pure, 2026-10-16). Telefón nad MOBILE_SHIP_FAR_HIDE_M lode nekreslí, a pri
+ * prvej návšteve tam stojí úvodná zemeguľa: požiadavka bez výrezu = celý svet, ~22 MB JSON (3,5 MB
+ * komprimované), 25 s limit, rozbor a 36 000 záznamov na hlavnom vlákne počas úvodného preletu —
+ * a o pár sekúnd ich výrez cieľa aj tak zahodí. Načíta sa až po priblížení, alebo hneď, keď lode
+ * niekto potrebuje: vybraná loď (karta sa obnovuje) alebo hľadanie / sledovaná loď (`demand`).
+ * @param {{mobile?: boolean, cameraHeightM?: number, selected?: boolean, demand?: boolean}} input
+ * @returns {boolean}
+ */
+export function aisLoadDeferred({ mobile = false, cameraHeightM, selected = false, demand = false } = {}) {
+  return !selected && !demand && mobileShipsHidden(mobile, cameraHeightM);
+}
+
+/** Telefónny plášť (mobileShell.js)? Bez alokácie, bezpečné aj mimo prehliadača. */
+function isMobileShell() {
+  return globalThis.document?.body?.classList?.contains('oko-mobile') === true;
 }
 /** Najviac lodí v zábere, ktorým sa na jedno načítanie dotiahne povrch (bunky ~111 m sa zlúčia). */
 const VESSEL_SURFACE_WARM_MAX = 800;
@@ -625,6 +677,9 @@ const aisLiveVesselsLayer = {
   searchVessels(query, { limit = 8 } = {}) {
     const q = String(query ?? '').trim().toUpperCase();
     if (q.length < 3) return [];
+    // Telefón nad 3 000 km lode nesťahuje (aisLoadDeferred): hľadanie ich načíta; paleta sa po
+    // výsledkoch servera prekreslí a živé lode už nájde (2026-10-16).
+    if (state.deferred) void whenLiveData();
     const out = [];
     for (const record of state.vesselRecords || []) {
       const name = String(record.name || '').toUpperCase();
@@ -642,13 +697,26 @@ const aisLiveVesselsLayer = {
   /** Vyber loď a preleť k nej (jednotné hľadanie). @returns {boolean} */
   selectByMmsi(mmsi) {
     const record = state.vesselMap.get(String(mmsi ?? '').trim());
-    if (!record) return false;
+    if (!record) {
+      if (state.deferred) void whenLiveData(); // neskorší pokus (hlboký odkaz ?ship=) ju už nájde
+      return false;
+    }
     selectAndFocusVessel(record);
     return true;
   },
 
+  /**
+   * Lode, ktoré telefón nad 3 000 km nesťahuje (aisLoadDeferred), načítaj hneď a počkaj na ne —
+   * pre hľadanie, sledované lode a hlas (2026-10-16). Inak nič nesťahuje a hneď vráti false.
+   * @returns {Promise<boolean>} true = načítanie prebehlo, oplatí sa hľadať znova.
+   */
+  whenLiveData() {
+    return whenLiveData();
+  },
+
   findByQuery(query) {
     if (query === null || query === undefined) return null;
+    if (state.deferred) void whenLiveData();
     const records = state.vesselRecords;
     if (!Array.isArray(records) || !records.length) return null;
     const q = String(query).trim();
@@ -908,6 +976,11 @@ const aisLiveVesselsLayer = {
     };
   },
 
+  /** Stav polohy vybranej lode pre zdieľanie (vesselShareState) alebo null bez výberu. */
+  getSelectedShareState() {
+    return state.selectedRecord ? vesselShareState(state.selectedRecord) : null;
+  },
+
   /**
    * Return a subset of vessels for the universal detection overlay.
    * Deterministic stride sampling distributes selections evenly across the
@@ -1014,7 +1087,12 @@ const aisLiveVesselsLayer = {
   } : {}),
 
   getStats() {
-    const waitingForFirstPosition = state.firstConnectPhase === 'loading';
+    // Odložené (telefón nad 3 000 km, aisLoadDeferred): nič sa nesťahuje, nič nevypršalo —
+    // vrstva to hovorí ako výzvu „priblíž" (zoom-in), nie ako večné načítavanie či chybu.
+    const deferred = state.deferred && !state.loading && state.firstConnectPhase !== 'unavailable';
+    const waitingForFirstPosition = state.firstConnectPhase === 'loading' && !deferred;
+    // Čaká jediné opakovanie prerušeného načítania (AIS_LOAD_RETRY_MS): stále sa načítava.
+    const retryPending = state.loadRetryTimer !== null && !deferred;
     const nowEpochMs = Date.now(); // jeden čas pre 27 000 lodí
     const fresh = state.vesselRecords.filter(record => !isLastKnownVessel(record, nowEpochMs)).length;
     const lastKnown = state.vesselRecords.length - fresh;
@@ -1028,13 +1106,14 @@ const aisLiveVesselsLayer = {
       activeLabelCount: state.activeLabelCount,
       source: state.coverage ? `AISStream · ${fresh} recent · ${lastKnown} last known · ${state.coverage.omittedByLimit} omitted · partial coverage` : 'AISStream',
       lastUpdate: state.lastUpdate,
-      loading: state.loading || waitingForFirstPosition,
-      loadingLabel: waitingForFirstPosition
-        ? AIS_FIRST_CONNECT_LABEL
-        : state.loadingLabel,
+      loading: state.loading || waitingForFirstPosition || retryPending,
+      loadingLabel: deferred ? t('ais.zoom-in-phone')
+        : waitingForFirstPosition ? AIS_FIRST_CONNECT_LABEL
+          : retryPending && !state.loading ? (state.loaded ? 'refreshing...' : 'loading...')
+            : state.loadingLabel,
       error: state.error,
       stale: state.stale || (lastKnown > 0 && fresh === 0),
-      status: state.firstConnectPhase === 'unavailable' ? 'unavailable' : undefined,
+      status: state.firstConnectPhase === 'unavailable' ? 'unavailable' : (deferred ? 'zoom-in' : undefined),
       transportStatus: state.transportStatus,
       lastMessageAt: state.lastMessageAt,
       rawRowCount: state.rawRowCount,
@@ -1077,6 +1156,14 @@ const state = {
   firstConnectStartedAt: null,
   firstConnectDeadline: null,
   firstConnectTimer: null,
+  /** Naplánované opakovanie prerušeného načítania (AIS_LOAD_RETRY_MS); počas neho lehota prvého pripojenia nevyprší. */
+  loadRetryTimer: null,
+  /** Posledné načítanie sa odložilo (telefón nad 3 000 km, aisLoadDeferred) — nič sa nesťahuje. */
+  deferred: false,
+  /** Najbližšie načítanie sa neodloží (hľadanie / sledovaná loď ich potrebuje, whenLiveData). */
+  liveDemand: false,
+  /** @type {Promise<boolean>|null} Načítanie na požiadanie, na ktoré čaká whenLiveData. */
+  demandLoad: null,
   abort: null,
   billboardCollection: null,
   /** @type {Array<Object>} Flat render list: keyed records + unkeyed records */
@@ -1204,8 +1291,17 @@ function clearFirstConnectTimer() {
   state.firstConnectTimer = null;
 }
 
+function clearLoadRetryTimer() {
+  if (state.loadRetryTimer === null) return;
+  _aisRuntime.clearTimeout(state.loadRetryTimer);
+  state.loadRetryTimer = null;
+}
+
 function invalidateAisSession() {
   clearFirstConnectTimer();
+  clearLoadRetryTimer();
+  state.deferred = false;
+  state.liveDemand = false;
   state.sessionId = ++_aisSessionSequence;
   state.firstConnectPhase = 'idle';
   state.firstConnectStartedAt = null;
@@ -1214,6 +1310,9 @@ function invalidateAisSession() {
 
 function beginAisSession() {
   clearFirstConnectTimer();
+  clearLoadRetryTimer();
+  state.deferred = false;
+  state.liveDemand = false;
   const sessionId = ++_aisSessionSequence;
   const startedAt = _aisRuntime.now();
   state.sessionId = sessionId;
@@ -1232,9 +1331,24 @@ function scheduleFirstConnectExpiry(sessionId, delayMs) {
       || state.sessionId !== sessionId
       || state.firstConnectPhase !== 'loading'
     ) return;
+    // Odložené načítanie (telefón nad 3 000 km): nič sa nepýta, lehota neplynie — natiahne ju
+    // znova resumeDeferredAisLoad, keď odíde prvá požiadavka (2026-10-16).
+    if (state.deferred) {
+      state.firstConnectTimer = null;
+      return;
+    }
     const remainingMs = state.firstConnectDeadline - _aisRuntime.now();
     if (remainingMs > 0) {
       scheduleFirstConnectExpiry(sessionId, remainingMs);
+      return;
+    }
+    // 2026-10-15: lehota plynie od zapnutia vrstvy, no prvá požiadavka čaká na koniec štartu
+    // (startupGate.js, až 20 s) — na telefóne tak lehota vypršala uprostred bežiacej požiadavky
+    // a vrstva hlásila „awaiting first AIS message…" (NAČÍTANIE ZLYHALO), hoci lode už išli.
+    // Kým požiadavka beží alebo čaká jej jediné opakovanie, nevyprší; ohraničuje ich vlastný
+    // limit (aisLiveRequestPlan) a opakovanie je len jedno.
+    if (state.loading || state.loadRetryTimer !== null) {
+      scheduleFirstConnectExpiry(sessionId, AIS_FIRST_CONNECT_RECHECK_MS);
       return;
     }
     state.firstConnectTimer = null;
@@ -1249,6 +1363,7 @@ function scheduleFirstConnectExpiry(sessionId, delayMs) {
 
 function settleFirstConnectPhase(phase) {
   clearFirstConnectTimer();
+  clearLoadRetryTimer();
   state.firstConnectPhase = phase;
   state.loadingLabel = '';
 }
@@ -1267,39 +1382,144 @@ function markAisUnavailable(reason) {
   state.stale = state.count > 0;
 }
 
-async function loadLivePositions(viewer) {
+/**
+ * Prenos sa prerušil, nie odmietol (2026-10-15): vypršaný limit (`TimeoutError`, pri ručnej
+ * kompozícii `AbortError` z vlastného časovača) alebo sieťová chyba fetch (`TypeError` —
+ * „Failed to fetch" / „Load failed"). HTTP odmietnutie (503 bez kľúča) sem nepatrí.
+ */
+function isInterruptedTransport(error) {
+  return error?.name === 'TimeoutError' || error?.name === 'AbortError' || error instanceof TypeError;
+}
+
+/**
+ * Naplánuje JEDINÉ opakovanie prerušeného načítania (prvého aj obnovy, 2026-10-16). Zlyhané
+ * opakovanie sa už neopakuje a hlási sa ako doteraz (markAisUnavailable).
+ * @returns {boolean} true = opakovanie naplánované, chybu zatiaľ nehlásiť.
+ */
+function scheduleLoadRetry(sessionId) {
+  clearLoadRetryTimer();
+  state.loadRetryTimer = _aisRuntime.setTimeout(() => {
+    state.loadRetryTimer = null;
+    if (!state.enabled || state.sessionId !== sessionId) return;
+    void loadLivePositions(state.viewer, { retry: true });
+  }, AIS_LOAD_RETRY_MS);
+  return true;
+}
+
+/** Plocha výrezu „západ,juh,východ,sever" v štvorcových stupňoch (cez 180° poludník tiež). */
+function aisBboxAreaDeg2(bbox) {
+  const [west, south, east, north] = String(bbox).split(',').map(Number);
+  if (![west, south, east, north].every(Number.isFinite) || north <= south) return 0;
+  const lonSpan = east >= west ? east - west : east + 360 - west;
+  return lonSpan * (north - south);
+}
+
+/**
+ * Riadky a limit jednej požiadavky /api/ais-live (pure, 2026-10-15/16). Riadkov vždy plný strop
+ * (telefón tiež — 15 000 pri pohľade na svet menilo ~18 % lodí pri každej obnove a ~58 % lodí
+ * chýbalo hľadaniu). Pohľad na svet (bez výrezu) má AIS_WORLD_TIMEOUT_MS; výrez od
+ * AIS_VIEW_TIMEOUT_MS rastie so stranou výrezu až po limit sveta pri AIS_WIDE_VIEW_DEG2.
+ * @param {{bbox?: string, rowLimit?: number}} input
+ * @returns {{maxRows: number, timeoutMs: number}}
+ */
+export function aisLiveRequestPlan({ bbox = '', rowLimit = DEFAULT_RENDER_ROWS } = {}) {
+  if (!bbox) return { maxRows: rowLimit, timeoutMs: AIS_WORLD_TIMEOUT_MS };
+  const share = Math.min(1, Math.sqrt(aisBboxAreaDeg2(bbox) / AIS_WIDE_VIEW_DEG2));
+  return {
+    maxRows: rowLimit,
+    timeoutMs: Math.round(AIS_VIEW_TIMEOUT_MS + (AIS_WORLD_TIMEOUT_MS - AIS_VIEW_TIMEOUT_MS) * share),
+  };
+}
+
+/** Telefón nad 3 000 km: načítanie odložiť (aisLoadDeferred); nič sa nesťahuje ani nevyprší. */
+function deferAisLoad() {
+  clearLoadRetryTimer();
+  if (state.deferred) return;
+  state.deferred = true;
+  // Lehota prvého pripojenia meria čakanie na server; kým sa nič nepýta, neplynie — inak by
+  // telefón, ktorý ostane na zemeguli 30 s, hlásil NAČÍTANIE ZLYHALO bez jedinej požiadavky.
+  clearFirstConnectTimer();
+  state.loadingLabel = '';
+}
+
+/** Odložené načítanie práve odchádza: lehota prvého pripojenia začne plynúť nanovo. */
+function resumeDeferredAisLoad() {
+  state.deferred = false;
+  if (state.firstConnectPhase !== 'loading' || state.firstConnectTimer !== null) return;
+  state.firstConnectDeadline = _aisRuntime.now() + AIS_FIRST_CONNECT_GRACE_MS;
+  scheduleFirstConnectExpiry(state.sessionId, AIS_FIRST_CONNECT_GRACE_MS);
+}
+
+/**
+ * Odložené lode načítaj hneď (hľadanie, sledovaná loď, hlas — 2026-10-16) a počkaj na ne.
+ * Bez odloženia nič nesťahuje: počítač a priblížený telefón majú lode z bežného načítania.
+ * @returns {Promise<boolean>} true = načítanie na požiadanie prebehlo.
+ */
+function whenLiveData() {
+  if (state.demandLoad) return state.demandLoad;
+  if (!state.enabled || !state.viewer || !state.deferred || state.loading) return Promise.resolve(false);
+  state.liveDemand = true;
+  const load = loadLivePositions(state.viewer).then(() => true, () => true).then((done) => {
+    if (state.demandLoad === load) state.demandLoad = null;
+    return done;
+  });
+  state.demandLoad = load;
+  return load;
+}
+
+async function loadLivePositions(viewer, { retry = false } = {}) {
   if (!viewer || state.loading) return;
+  // Telefón nad 3 000 km lode nekreslí — ani ich nesťahuje (aisLoadDeferred, 2026-10-16).
+  // Opakovanie pokračuje načítanie, ktoré už bolo potrebné, preto sa neodkladá.
+  if (!retry && aisLoadDeferred({
+    mobile: isMobileShell(),
+    cameraHeightM: viewer.camera?.positionCartographic?.height,
+    selected: Boolean(state.selectedRecord),
+    demand: state.liveDemand,
+  })) {
+    deferAisLoad();
+    return;
+  }
+  state.liveDemand = false;
+  if (state.deferred) resumeDeferredAisLoad();
+  // Načítanie, ktoré práve začína (obnova, zmena výrezu), nahrádza čakajúce opakovanie.
+  clearLoadRetryTimer();
   state.loading = true;
   state.loadingLabel = state.loaded ? 'refreshing...' : 'loading...';
   const requestController = new AbortController();
   const requestSessionId = state.sessionId;
   state.abort = requestController;
+  // Opakovať sa smie len prerušený prenos (fetch + telo), nie chyba spracovania odpovede.
+  let inTransport = false;
 
   try {
-    const url = liveApiUrl();
+    const bbox = vesselViewBounds();
+    const plan = aisLiveRequestPlan({ bbox, rowLimit: renderRowLimit() });
+    const url = liveApiUrl(bbox, plan.maxRows);
     // Tento výrez je práve načítaný: prvá kontrola výrezu v preRender (prázdny →
     // aktuálny) ho inak brala ako pohyb kamery a o 500 ms stiahla všetko znova
     // (2026-09-29, dve rovnaké požiadavky pri každom štarte).
-    state.viewKey = vesselViewBounds();
+    state.viewKey = bbox;
     state.viewRequestedAt = performance.now();
     // Combine the layer's teardown-abort with a hard timeout so a hung upstream
     // can't wedge the poll indefinitely (parity with the track fetch + flights).
     // Audit #12: bez AbortSignal.any pôvodne NEBOL žiadny timeout — visiaci
     // upstream na staršom prehliadači nechal `state.loading` zaseknuté navždy
     // (loadLivePositions sa pri loading=true vracia hneď). Ručná kompozícia
-    // drží hard timeout na každom runtime.
+    // drží hard timeout na každom runtime. Limit podľa výrezu (aisLiveRequestPlan).
     let signal;
     if (typeof AbortSignal.any === 'function' && typeof AbortSignal.timeout === 'function') {
-      signal = AbortSignal.any([requestController.signal, AbortSignal.timeout(10000)]);
+      signal = AbortSignal.any([requestController.signal, AbortSignal.timeout(plan.timeoutMs)]);
     } else {
       const composed = new AbortController();
       const abortComposed = () => composed.abort();
       if (requestController.signal.aborted) abortComposed();
       else requestController.signal.addEventListener('abort', abortComposed, { once: true });
-      const timer = setTimeout(abortComposed, 10000);
+      const timer = setTimeout(abortComposed, plan.timeoutMs);
       composed.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
       signal = composed.signal;
     }
+    inTransport = true;
     const response = await fetch(url, {
       signal,
       cache: 'no-store',
@@ -1319,10 +1539,17 @@ async function loadLivePositions(viewer) {
     }
 
     const payload = await response.json();
+    inTransport = false;
     if (!ownsAisRequest(requestController, requestSessionId)) return;
     applyAisFeedSnapshot(viewer, payload);
   } catch (error) {
-    if (ownsAisRequest(requestController, requestSessionId) && error?.name !== 'AbortError') {
+    if (!ownsAisRequest(requestController, requestSessionId)) {
+      // zrušené samotnou vrstvou (vypnutie, nová relácia) — nič nehlásiť
+    } else if (inTransport && !retry && isInterruptedTransport(error) && scheduleLoadRetry(requestSessionId)) {
+      // Prenos vypršal / prerušil sa: vrstva sa ďalej načítava („awaiting first AIS position…",
+      // pri obnove lode ostávajú) a o AIS_LOAD_RETRY_MS to skúsi znova (raz), bez červenej lišty.
+      console.warn('[Data:ais-live-vessels] load interrupted, retrying once', error?.name || error);
+    } else if (error?.name !== 'AbortError') {
       markAisUnavailable(error?.message || 'AIS live load failed');
       console.warn('[Data:ais-live-vessels]', state.error, error);
     }
@@ -1408,11 +1635,10 @@ function applyAisFeedSnapshot(viewer, payload) {
   return { reconciled: true, ...snapshot };
 }
 
-function liveApiUrl() {
+function liveApiUrl(bbox, maxRows) {
   const base = import.meta.env?.VITE_AIS_LIVE_API_URL || DEFAULT_API_URL;
   const url = new URL(base, window.location.origin);
-  url.searchParams.set('maxRows', String(renderRowLimit()));
-  const bbox = vesselViewBounds();
+  url.searchParams.set('maxRows', String(maxRows));
   if (bbox) url.searchParams.set('bbox', bbox);
   if (state.selectedRecord?.mmsi) url.searchParams.set('selected', state.selectedRecord.mmsi);
   return url.toString();
@@ -1440,7 +1666,11 @@ export function isLastKnownVessel(record, now = Date.now()) {
     || (Number.isFinite(record.lastPositionEpoch) && now - record.lastPositionEpoch * 1000 >= AIS_FRESH_MS);
 }
 
+/** Test-only: strop riadkov namiesto VITE_AIS_LIVE_MAX_ROWS (v Node import.meta.env nie je). */
+let _renderRowLimitOverride = null;
+
 function renderRowLimit() {
+  if (_renderRowLimitOverride !== null) return _renderRowLimitOverride;
   const configured = Number(import.meta.env?.VITE_AIS_LIVE_MAX_ROWS);
   if (Number.isFinite(configured) && configured > 0) {
     return Math.max(500, Math.min(50000, Math.round(configured)));
@@ -2104,8 +2334,7 @@ function installRuntime(viewer) {
       const viewKey = vesselViewBounds();
       if (viewKey !== state.viewKey) { state.viewKey = viewKey; state.viewChangedAt = now; }
     }
-    if (state.viewChangedAt > state.viewRequestedAt && now - state.viewChangedAt > 500
-      && now - state.viewRequestedAt > 5000 && !state.loading && state.enabled && isStartupReady()) {
+    if (shouldLoadForViewChange(now)) {
       state.viewRequestedAt = now;
       void loadLivePositions(viewer);
     }
@@ -2113,7 +2342,7 @@ function installRuntime(viewer) {
     // konzistentný (rovnaké poradie ako vo fleet ticku lietadiel).
     refreshVesselLod();
     refreshVesselDensity(performance.now());
-    refreshMobileFarHide(viewer);
+    refreshMobileFarHide(viewer, now);
     if (state.farHidden) return; // nič nekreslíme — viditeľnosť ani modely netreba počítať
     updateVisibility();
     // Modely BERÚ vizuál až po tom, čo updateVisibility rozhodol o `show`
@@ -2129,19 +2358,34 @@ function installRuntime(viewer) {
  * zapína flotilu (show = enabled) — preto sa skrytie vynúti aj vtedy, keď sa stav nezmenil.
  * Bez alokácie: výška z kešovaného positionCartographic, trieda plášťa z classList.
  */
-function refreshMobileFarHide(viewer) {
+function refreshMobileFarHide(viewer, nowMs = performance.now()) {
   if (!state.enabled) return;
-  const hide = mobileShipsHidden(
-    globalThis.document?.body?.classList?.contains('oko-mobile') === true,
-    viewer?.camera?.positionCartographic?.height,
-  );
+  const hide = mobileShipsHidden(isMobileShell(), viewer?.camera?.positionCartographic?.height);
   if (hide) {
     if (!state.farHidden || state.billboardCollection?.show) setVisible(false);
     state.farHidden = true;
   } else if (state.farHidden) {
     state.farHidden = false;
     setVisible(true);
+    // Odložené lode (aisLoadDeferred): načítať, len čo kamera dosadne — cez kontrolu výrezu, aj
+    // keď sa výrez nezmenil (napr. otočenie telefónu na šírku pri pohľade na svet).
+    if (state.deferred) state.viewChangedAt = nowMs;
   }
+}
+
+/**
+ * Načítať lode pre nový výrez? Kamera stojí > 500 ms (pri odloženom načítaní na telefóne
+ * AIS_DEFERRED_SETTLE_MS, nech prvá požiadavka nejde uprostred úvodného preletu), od poslednej
+ * požiadavky ubehlo > 5 s a štart je hotový. Telefón nad 3 000 km sa ani nepýta (2026-10-16).
+ * @param {number} now performance.now()
+ * @returns {boolean}
+ */
+function shouldLoadForViewChange(now) {
+  if (!state.enabled || state.loading || !isStartupReady()) return false;
+  if (state.deferred && state.farHidden) return false;
+  const settleMs = state.deferred ? AIS_DEFERRED_SETTLE_MS : 500;
+  return state.viewChangedAt > state.viewRequestedAt && now - state.viewChangedAt > settleMs
+    && now - state.viewRequestedAt > 5000;
 }
 
 /**
@@ -3248,6 +3492,30 @@ export function buildVesselCard(record) {
   };
 }
 
+/** Riadok odhadu polohy lode z oceánu (dead reckoning) alebo '' — karta aj zdieľanie ho píšu rovnako. */
+function deadReckonedLine(record, lang = currentLanguage()) {
+  if (!record?.estimated) return '';
+  const km = String(record.estimated.km);
+  return t('vessel.dead-reckoned', { km: lang === 'sk' ? km.replace('.', ',') : km, min: record.estimated.ageMin });
+}
+
+/**
+ * Stav polohy lode pre zdieľanie (2026-10-15): tie isté pravidlá ako karta (buildSelectedVesselCard).
+ * Text karty stav nenesie spoľahlivo — odhad je v päte uprostred riadku zdroja a zastaranosť len
+ * „· STALE" v titulku —, takže zdieľanie lode z oceánu (oneskorené, ikona na odhade) aj zastaranej
+ * lode hlásilo NAŽIVO (pravidlo 2). Pure.
+ * @returns {{ estimateLine: string, delayed: boolean, stale: boolean }}
+ */
+export function vesselShareState(record, nowMs = Date.now()) {
+  const age = vesselPositionAge(record?.lastPositionEpoch, nowMs);
+  return {
+    estimateLine: deadReckonedLine(record),
+    // Feed 'ocean' je z dlaždíc registra, polohy 20–60 min staré („oceán · oneskorené").
+    delayed: record?.feed === 'ocean',
+    stale: (record?.missedRefreshes || 0) > 0 || age.stale || Boolean(record && isLastKnownVessel(record, nowMs)),
+  };
+}
+
 /**
  * Card model for the click-selected vessel — the full-detail card, drawn last
  * (on top) and never distance-faded by the overlay. Pinned-but-vanished
@@ -3270,7 +3538,7 @@ export function buildSelectedVesselCard(record, nowMs = Date.now(), destinationM
   const lastKnown = isLastKnownVessel(record, nowMs);
   const sourceLine = [
     feedLabel(record.feed),
-    record.estimated ? t('vessel.dead-reckoned', { km: lang === 'sk' ? String(record.estimated.km).replace('.', ',') : String(record.estimated.km), min: record.estimated.ageMin }) : '',
+    deadReckonedLine(record, lang),
     lastKnown ? 'LAST KNOWN POSITION' : '',
     `${formatPositionTime(record)}${age.label ? ` (${age.label})` : ''}`,
   ].filter(Boolean).join(' · ');
@@ -3392,6 +3660,11 @@ function resetState() {
   state.viewRequestedAt = 0;
   state.viewCheckedAt = 0;
   clearFirstConnectTimer();
+  clearLoadRetryTimer();
+  state.deferred = false;
+  state.liveDemand = false;
+  state.demandLoad = null;
+  state.farHidden = false;
   state.viewer = null;
   state.enabled = false;
   state.loading = false;
@@ -3534,14 +3807,31 @@ export function _loadLivePositionsForTest(viewer) {
   return loadLivePositions(viewer);
 }
 
+/** Jeden krok telefónneho skrytia z výšky + rozhodnutie o načítaní pre výrez (preRender). Test-only. */
+export function _viewChangeTickForTest(viewer, now = performance.now()) {
+  refreshMobileFarHide(viewer, now);
+  return shouldLoadForViewChange(now);
+}
+
+/** Stav odloženého načítania (telefón nad 3 000 km). Test-only. */
+export function _getAisDeferredStateForTest() {
+  return { deferred: state.deferred, farHidden: state.farHidden, liveDemand: state.liveDemand, viewChangedAt: state.viewChangedAt, viewRequestedAt: state.viewRequestedAt };
+}
+
 /** Start the production first-connect grace state without installing UI. */
 export function _beginAisSessionForTest() {
   beginAisSession();
 }
 
+/** Nastaví strop riadkov ako produkčné VITE_AIS_LIVE_MAX_ROWS; null = predvolené. Test-only. */
+export function _setAisRenderRowLimitForTest(limit = null) {
+  _renderRowLimitOverride = Number.isFinite(limit) && limit > 0 ? limit : null;
+}
+
 /** Inject a deterministic clock/scheduler; null restores production runtime. */
 export function _setAisRuntimeForTest(runtime = null) {
   clearFirstConnectTimer();
+  clearLoadRetryTimer();
   _aisRuntime = runtime
     ? {
       now: runtime.now,

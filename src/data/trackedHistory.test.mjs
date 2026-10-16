@@ -81,6 +81,20 @@ test('trasa z archívu (vlastník 09-27: „trasa sa niekedy objaví a niekedy n
   assert.equal(thin.at(-1).lat, long.at(-1).lat);
 });
 
+test('trasa z archívu: HFDL poloha bez výšky (2026-10-15) dostane výšku susedov, nie zem; na zemi ostáva null', () => {
+  const nowS = 1_800_000_000;
+  const fix = (t, lat, alt, gnd = false) => ({ t, lat, lon: -20, alt, gnd });
+  const fixes = [
+    fix(nowS - 3_000, 50, 150, true), fix(nowS - 2_400, 51, 10_000),
+    fix(nowS - 1_800, 52, null), fix(nowS - 1_200, 53, null), // HFDL nad oceánom
+    fix(nowS - 600, 54, 11_000), fix(nowS - 60, 55, 11_000), // živé fixy
+  ];
+  const way = trailWaypointsFromHistory(fixes, { nowS, beforeS: nowS - 900 });
+  assert.deepEqual(way.map((w) => w.baroAlt === null ? null : Math.round(w.baroAlt)), [null, 10_000, 10_333, 10_667],
+    'medzi meraniami lineárne — aj s novším bodom za hranicou beforeS');
+  assert.equal(fixes[2].alt, null, 'archív sa nemení');
+});
+
 test('loadTrackedHistory počká na rozpracovaný dopyt grafov — trasa a karta nerobia dva dopyty', async () => {
   _resetTrackedHistoryForTest();
   let calls = 0;

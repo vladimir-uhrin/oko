@@ -20,7 +20,7 @@
  * Pravidlá vrstiev. `map` null = určí `resolveMap` (meteo podľa hostiteľa). `anyOrigin` = aj obnova
  * z odkazu; `keepNear` = pri priblížení mapu nevracať; `onlyFrom` = prepnúť len z týchto máp.
  */
-import { stadiaUsableHost } from './stadiaHealth.js';
+import { STADIA_FALLBACK_STACK, stadiaUsableHost } from './stadiaHealth.js';
 
 export const LAYER_BASEMAP_RULES = Object.freeze({
   'natural-events': Object.freeze({ map: 'gibs-truecolor' }),
@@ -185,6 +185,22 @@ export function createLayerBasemapPolicy({ getActiveId, hasStack, setStack, noti
     onMapChange(activeId) {
       if (expected && activeId !== expected) reset();
       emit();
+    },
+
+    /**
+     * Stadia je „mimo" (2026-10-15, stadiaHealth.js) a jej štýl sa práve mení na bezplatnú náhradu.
+     * Pre vrstvu je náhrada stále JEJ mapa: bez prevzatia by onMapChange náhradu bral za cudziu zmenu
+     * (reset) a meteo by po vypnutí nevrátilo pôvodnú mapu (Google 3D) a zhasol by štítok AUTO.
+     * Volá sa PRED prepnutím (applyStadiaFallback).
+     */
+    onStadiaBlocked() {
+      const swap = (id) => STADIA_FALLBACK_STACK[id] || id;
+      owners = owners.map((o) => (STADIA_FALLBACK_STACK[o.mapId] ? { ...o, mapId: swap(o.mapId) } : o));
+      if (expected) expected = swap(expected);
+      // Aj pôvodná mapa (2026-10-16): Stadia z odkazu (bez ručnej voľby) + zemetrasenia → baseId je
+      // Stadia. Priblíženie aj vypnutie vrstvy by ju vracali — kontrolér ju odmietne, hláška „Stadia
+      // teraz neposiela dlaždice", zhasne AUTO a glóbus ostane na reliéfe.
+      if (baseId) baseId = swap(baseId);
     },
 
     /** Používateľ si mapu vybral sám — do konca návštevy ju neprepisujeme. */

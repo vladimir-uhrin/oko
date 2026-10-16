@@ -343,8 +343,11 @@ export function renderMapStackChips(container, stacks, { activeId = null, onSele
 }
 
 /**
- * Re-points the active chip at controller state. Availability never changes at
- * runtime (it tracks the ion token), so only the active/pressed pair is synced.
+ * Re-points the active chip at controller state. Availability tracks the ion
+ * token, so only the active/pressed pair is synced. Výnimka (2026-10-15): keď je
+ * Stadia „mimo" (stadiaHealth.applyStadiaFallback), rad sa prekreslí celý
+ * (StyleManager._initMapStackControl), aby čipy Stadia boli nedostupné — a po
+ * skončení bloku znova (stadiaHealth.onStadiaBlockExpired, 2026-10-16).
  * @param {HTMLElement} container - Row element.
  * @param {string|null} activeId - Currently active stack id.
  * @returns {void}

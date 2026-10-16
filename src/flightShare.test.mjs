@@ -91,6 +91,26 @@ test('pás na obrázku: značka okolive.sk, hlavička, štítok stavu, trasa, od
   assert.ok(!estText.includes('NAŽIVO'));
 });
 
+test('zastaraný let (vynechaný poll, čakanie feedu) nie je NAŽIVO: ZASTARANÉ v texte aj jantárový štítok', () => {
+  const stale = { ...LIVE_CARD, stale: true };
+  const sk = buildFlightShareCopy(stale, { lang: 'sk' });
+  assert.match(sk.description, /^ZASTARANÉ \(posledná známa poloha\) · Letová hladina FL320/);
+  assert.doesNotMatch(sk.description, /NAŽIVO/);
+  assert.match(buildFlightShareCopy(stale, { lang: 'en' }).description, /^STALE \(last known position\) · /);
+  // Odhad má prednosť pred zastaraním (odhad je vždy aj „nie naživo", ale nesie zdroj).
+  assert.match(buildFlightShareCopy({ ...ESTIMATED_CARD, stale: true }, { lang: 'sk' }).description, /^ODHAD polohy/);
+
+  const { ctx, texts } = fakeCtx();
+  drawFlightShareCard(ctx, stale, 1200, 594, { lang: 'sk' });
+  const chip = texts.find((x) => x.text === 'ZASTARANÉ');
+  assert.ok(chip, 'štítok ZASTARANÉ');
+  assert.equal(chip.color, '#fbbf24', 'tón odhadu, nie zelené NAŽIVO');
+  assert.ok(!texts.some((x) => x.text === 'NAŽIVO'));
+  const en = fakeCtx();
+  drawFlightShareCard(en.ctx, stale, 1200, 594, { lang: 'en' });
+  assert.ok(en.texts.some((x) => x.text === 'STALE'));
+});
+
 test('dlhý text sa skráti do šírky pásu', () => {
   const { ctx, texts } = fakeCtx();
   drawFlightShareCard(ctx, { ...LIVE_CARD, identLine: 'X'.repeat(400) }, 1200, 594);

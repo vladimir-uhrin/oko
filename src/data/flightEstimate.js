@@ -42,14 +42,25 @@ export const ESTIMATE_DESCENT_KM = 200;
 /** Lietadlo musí v snímkoch chýbať aspoň toľko, aby bolo „bez signálu". */
 export const ESTIMATE_MISSING_AFTER_S = 120;
 
+/**
+ * Číslo z poľa stavu OpenSky alebo null (2026-10-16): Number(null) je 0, takže chýbajúci kurz
+ * (true_track null) dával kurz 0° — odhad by letel na sever a trasa VRS sa vyberala podľa severu;
+ * chýbajúca poloha by bola (0, 0).
+ */
+function stateNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Posledný fix z riadku OpenSky (pure); null bez polohy. */
 export function fixFromState(state, snapshotSec) {
   if (!Array.isArray(state)) return null;
-  const lon = Number(state[5]);
-  const lat = Number(state[6]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  const tSec = Number.isFinite(Number(state[3])) && Number(state[3]) > 0 ? Number(state[3]) : Number(snapshotSec);
-  const alt = Number.isFinite(Number(state[13])) ? Number(state[13]) : (Number.isFinite(Number(state[7])) ? Number(state[7]) : null);
+  const lon = stateNum(state[5]);
+  const lat = stateNum(state[6]);
+  if (lat === null || lon === null) return null;
+  const tSec = stateNum(state[3]) > 0 ? stateNum(state[3]) : Number(snapshotSec);
+  const alt = stateNum(state[13]) ?? stateNum(state[7]);
   return {
     hex: String(state[0] || '').trim().toLowerCase(),
     cs: typeof state[1] === 'string' ? state[1].trim().toUpperCase() : '',
@@ -57,11 +68,11 @@ export function fixFromState(state, snapshotSec) {
     lat,
     lon,
     altM: alt,
-    gsMps: Number.isFinite(Number(state[9])) ? Number(state[9]) : null,
-    trkDeg: Number.isFinite(Number(state[10])) ? Number(state[10]) : null,
-    vrMps: Number.isFinite(Number(state[11])) ? Number(state[11]) : null,
+    gsMps: stateNum(state[9]),
+    trkDeg: stateNum(state[10]),
+    vrMps: stateNum(state[11]),
     onGround: state[8] === true,
-    category: Number.isFinite(Number(state[17])) ? Number(state[17]) : null,
+    category: stateNum(state[17]),
     country: typeof state[2] === 'string' ? state[2] : '',
   };
 }
@@ -340,6 +351,26 @@ export function anchorFromExternalFix(prev, ext) {
   };
 }
 
+/** Poloha z iného zdroja preukotví odhad, len keď je novšia než ukotvenie aspoň o toľko (ms). */
+export const EXTERNAL_FIX_MIN_NEWER_MS = 30_000;
+
+/**
+ * Fix z konca letu v Histórii + novšie polohy z HFDL/ADS-C (2026-10-15, flightHistoryStore
+ * lastAirborneFixes `external`) → ukotvenie, aké mal odhad pred reštartom servera (pure). Tie isté
+ * pravidlá ako applyExternalFixes (po čase, len novšie, anchorFromExternalFix), ale bez merania
+ * presnosti a bez zápisu do Histórie — tie polohy už boli raz použité a zapísané. Vráti kópiu bez `external`.
+ */
+export function anchorThroughExternalFixes(fix) {
+  const { external, ...base } = fix;
+  let cur = base;
+  const sorted = (Array.isArray(external) ? external : []).filter((e) => e && Number.isFinite(e.tMs)).sort((a, b) => a.tMs - b.tMs);
+  for (const ext of sorted) {
+    if (ext.tMs <= cur.tMs + EXTERNAL_FIX_MIN_NEWER_MS) continue;
+    cur = anchorFromExternalFix(cur, ext) || cur;
+  }
+  return cur;
+}
+
 /**
  * Sledovač pre server: z každého svetového snímku OpenSky si pamätá posledný fix každého lietadla;
  * kto zmizne vo vzduchu, ide do zoznamu odhadov (kým sa nevráti alebo odhad neskončí).
@@ -520,7 +551,10 @@ export function createEstimateTracker({
      */
     seed(fixes, nowMs = now()) {
       let added = 0;
-      for (const fix of Array.isArray(fixes) ? fixes : []) {
+      for (const raw of Array.isArray(fixes) ? fixes : []) {
+        // Let v Histórii končí polohami z HFDL bez kurzu a rýchlosti (2026-10-15): odhad sa ukotví
+        // v poslednej z nich ako pred reštartom (anchorThroughExternalFixes), nie v staršom fixe ADS-B.
+        const fix = Array.isArray(raw?.external) ? anchorThroughExternalFixes(raw) : raw;
         if (!fix?.hex || estimates.has(fix.hex) || last.has(fix.hex) || estimates.size >= maxEntries) continue;
         if (!qualifiesForEstimate(fix)) continue;
         // Plnenie zo zoznamu iného servera (QA, ESTIMATES_SEED_URL) nesie aj cieľ — netreba ho dohľadávať.
@@ -580,7 +614,7 @@ export function createEstimateTracker({
         if (!entry) { result.unmatched += 1; continue; }
         // Iné lietadlo s rovnakým volacím znakom (hex v správe nesedí) — nepárovať.
         if (ext.hex && ext.hex !== hex) { result.unmatched += 1; continue; }
-        if (ext.tMs <= entry.fix.tMs + 30_000) { result.stale += 1; continue; }
+        if (ext.tMs <= entry.fix.tMs + EXTERNAL_FIX_MIN_NEWER_MS) { result.stale += 1; continue; }
         const anchored = anchorFromExternalFix(entry.fix, ext);
         if (!anchored) { result.rejected += 1; continue; }
         if (onAccuracy) {
