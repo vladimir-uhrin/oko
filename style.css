@@ -13754,6 +13754,25 @@ body.oko-map-focus #command-dock:not(:hover):not(:focus-within) { opacity: 0.42;
   outline-offset: 2px;
 }
 
+/* Telefón (2026-10-16, meranie okolive.sk 390×844: lišta prekryla polovicu obrazovky): kompaktná lišta
+   nad spodnou lištou, bez dlaždíc kategórií, odkaz na zásady pod tlačidlami; odmietnuť a prijať ostávajú
+   rovnako veľké (EDPB). Nastavenia (#oko-consent-dialog) sa nemenia. */
+body.oko-mobile #oko-consent {
+  /* zvislá poloha: jediné pravidlo nižšie pri @media (prefers-reduced-motion) — rovno na spodnej lište */
+  width: calc(100vw - 16px);
+  font-size: 12px;
+  border-radius: 0.55rem;
+}
+body.oko-mobile #oko-consent .oko-consent-strip { padding: 7px 12px; gap: 8px; }
+body.oko-mobile #oko-consent .oko-consent-tiles { display: none; }
+body.oko-mobile #oko-consent .oko-consent-body { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 10px 12px 6px; }
+body.oko-mobile #oko-consent .oko-consent-title { margin-bottom: 4px; font-size: 14px; }
+body.oko-mobile #oko-consent .oko-consent-text { font-size: 11.5px; line-height: 1.4; }
+body.oko-mobile #oko-consent .oko-consent-foot { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 12px 10px; }
+body.oko-mobile #oko-consent .oko-consent-policy { order: 2; text-align: center; font-size: 9px; }
+body.oko-mobile #oko-consent .oko-consent-actions { flex-wrap: nowrap; }
+body.oko-mobile #oko-consent .oko-consent-btn { flex: 1 1 0; min-width: 0; min-height: 36px; padding: 0 8px; font-size: 10px; letter-spacing: 0.08em; }
+
 /* Druhá vrstva: nastavenia (modálny dialóg). */
 #oko-consent-dialog {
   position: fixed;
@@ -13960,7 +13979,9 @@ body.oko-map-focus #command-dock:not(:hover):not(:focus-within) { opacity: 0.42;
   .oko-consent-panel { max-height: 90vh; border-radius: 0.8rem 0.8rem 0 0; }
   .oko-consent-foot.is-dialog { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
 }
-body.oko-mobile #oko-consent { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+/* 2026-10-16: rovno na spodnej lište ako výsuvy (--oko-dock-lift nesie výšku lišty aj safe-area; mobileShell.js);
+   predtým 70 px + safe-area nechávalo medzi lištou a spodnou lištou 12 px, cez ktoré vykúkal dok. */
+body.oko-mobile #oko-consent { bottom: calc(var(--oko-dock-lift) - 8px); }
 @media (prefers-reduced-motion: reduce) {
   #oko-consent, .oko-consent-panel, .oko-consent-backdrop, .oko-consent-status.is-pending i { animation: none; }
 }

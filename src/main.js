@@ -10,7 +10,8 @@ import { initNoticeBanner } from './noticeBanner.js';
 import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { StyleManager } from './ui.js';
-import { showStartView } from './camera.js';
+import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, showStartView } from './camera.js';
+import { coarsenTilesDuringStartFlight } from './startFlightDetail.js';
 import { DataLayerManager, layerDisplayName } from './data/manager.js';
 import flightsLayer from './data/flights.js';
 import militaryFlightsLayer from './data/militaryFlights.js';
@@ -119,7 +120,7 @@ import {
 import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { installEmbedMode, isEmbedMode } from './embedMode.js';
-import { initMobileShell } from './mobileShell.js';
+import { initMobileShell, isCoarsePointer, resolveShellMode } from './mobileShell.js';
 import { getOverlayPaintRect, setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 
@@ -158,6 +159,19 @@ function describeError(error) {
  */
 /** Najdlhšie, čo preloader čaká na obnovu odkazu (vrstvy, kamera), kým uvoľní glóbus. */
 const STARTUP_RESTORE_CAP_MS = 12_000;
+
+/**
+ * Počká, kým prehliadač vykreslí snímok (rAF + úloha po ňom). V karte na pozadí rAF nebeží —
+ * poistka po 100 ms, nech štart nezamrzne.
+ */
+function nextPaint() {
+  return new Promise((resolve) => {
+    let done = false;
+    const go = () => { if (!done) { done = true; resolve(); } };
+    try { requestAnimationFrame(() => setTimeout(go, 0)); } catch { /* bez rAF */ }
+    setTimeout(go, 100);
+  });
+}
 
 async function init() {
   const loadingScreen = document.getElementById('loading-screen');
@@ -198,6 +212,11 @@ async function init() {
 
     // Expose API key globally for geocoding in locations.js
     window.__GOOGLE_MAPS_API_KEY__ = googleApiKey;
+
+    // Úvodná obrazovka sa vykreslí PRED vytvorením glóbusu (2026-10-16, meranie okolive.sk: new Viewer —
+    // WebGL kontext a scéna — držal hlavné vlákno 1,2–1,9 s v jednom kuse a prvý obraz prišiel až
+    // po 2,5–3,4 s, na mobile 5 s; dovtedy čierna obrazovka). Jeden snímok počkania = oko s vírom hneď.
+    await nextPaint();
 
     // Create the Cesium viewer with minimal chrome
     const viewer = new Cesium.Viewer('cesiumContainer', {
@@ -477,6 +496,14 @@ async function init() {
     const weatherEffects = null;
     const cockpitCloudEffects = initCockpitCloudEffects(viewer);
 
+    // Lišta súhlasu na telefóne až po úvodnom prelete (2026-10-16, meranie okolive.sk 390×844: lišta
+    // prekryla polovicu obrazovky hneď po úvodnej obrazovke, kým sa glóbus ešte točil). Rozhodnutie
+    // o GA (bez cookies do súhlasu) sa nemení — čaká len zobrazenie; poistka v initAnalytics nižšie.
+    let settleStart = () => {};
+    const startSettled = new Promise((resolve) => { settleStart = resolve; });
+    const phoneStart = !styleManager.hasShareState
+      && resolveShellMode({ width: window.innerWidth, height: window.innerHeight, coarse: isCoarsePointer(window) }).mobile;
+
     // Bez stavu z odkazu: úvodný pohľad na zemeguľu so Slovenskom (2026-10-15, camera.js START_VIEW);
     // po skrytí úvodnej obrazovky sa kamera pomaly dorovná. Tlačidlo s glóbusom hore ostáva na Bratislave.
     if (!styleManager.hasShareState) {
@@ -503,6 +530,7 @@ async function init() {
         nowMs: Number.isFinite(qaTimeMs) ? qaTimeMs : Date.now(),
         locate,
         onArrive: (geo) => {
+          settleStart();
           let place = geo?.city || '';
           if (!place && geo?.country) {
             try { place = new Intl.DisplayNames([currentLanguage()], { type: 'region' }).of(geo.country) || ''; } catch { place = ''; }
@@ -510,6 +538,9 @@ async function init() {
           if (place) styleManager._showToast(t('start.your-area', { place }), { durationMs: 6000, tone: 'info' });
         },
       });
+      // Hrubšie dlaždice Google 3D počas preletu, plný detail späť pred pristátím (src/startFlightDetail.js;
+      // meranie 2026-10-16: 554 → 452 požiadaviek a 15,0 → 12,2 MB pri štarte, po pristátí nič navyše).
+      coarsenTilesDuringStartFlight({ tileset, camera: viewer.camera, whenReady: whenStartupReady() });
     } else {
       loaderStatus.textContent = t('loader.restore-shared');
     }
@@ -655,7 +686,12 @@ async function init() {
       releaseStartupGate();
       startSharpStarfield();
       // Súhlas s cookies + GA4 až po štarte (src/analytics.js; bez súhlasu GA bez cookies); v živom rámčeku nič nezbierame a na súhlas sa nepýtame (lišta by rámček zakryla).
-      try { if (!embedView) initAnalytics({ t, crawler: crawlerVisit }); } catch (error) { console.warn('[analytics]', error); }
+      // Telefón: lišta až po prelete nad oblasť návštevníka; prelet, ktorý nepríde (robot, bez polohy,
+      // dotyk ho zastaví), ju nezdrží dlhšie než pauza na zemeguli + prelet + 1 s.
+      const consentBannerWhen = phoneStart
+        ? Promise.race([startSettled, new Promise((resolve) => setTimeout(resolve, START_GLOBE_DWELL_MS + START_FLY_DURATION_S * 1000 + 1000))])
+        : null;
+      try { if (!embedView) initAnalytics({ t, crawler: crawlerVisit, showBannerWhen: consentBannerWhen }); } catch (error) { console.warn('[analytics]', error); }
       // Reveal only after the loading cover has yielded. transitionend can be
       // absent under reduced motion, so a bounded fallback makes this reliable.
       let firstRunRevealed = false;

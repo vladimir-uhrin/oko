@@ -504,8 +504,23 @@ function bindReopen(doc, manager) {
   });
 }
 
-/** Štart: podľa rozhodnutia načíta GA4, ukáže lištu alebo nerobí nič. */
-export function initAnalytics({ win = window, doc = document, t, crawler = false } = {}) {
+/**
+ * Kedy sa lišta ukáže (2026-10-16): bez `when` hneď; inak až po `when` (telefón: po úvodnom prelete,
+ * main.js), a len kým voľba ešte stojí — medzitým ju návštevník mohol spraviť cez SÚKROMIE.
+ * @param {{when?: Promise<unknown>|null, show: () => void, pending?: () => boolean}} o
+ * @returns {Promise<'now'|'later'|'skipped'>}
+ */
+export function scheduleConsentBanner({ when = null, show, pending = () => true } = {}) {
+  if (!when || typeof when.then !== 'function') { show(); return Promise.resolve('now'); }
+  return Promise.resolve(when).catch(() => null).then(() => {
+    if (!pending()) return 'skipped';
+    show();
+    return 'later';
+  });
+}
+
+/** Štart: podľa rozhodnutia načíta GA4, ukáže lištu alebo nerobí nič. `showBannerWhen` lištu odloží. */
+export function initAnalytics({ win = window, doc = document, t, crawler = false, showBannerWhen = null } = {}) {
   const gpc = win.navigator?.globalPrivacyControl === true;
   const host = win.location?.hostname;
   const decision = analyticsDecision({ host, consent: readConsent(win)?.analytics ?? null, crawler, gpc });
@@ -526,6 +541,12 @@ export function initAnalytics({ win = window, doc = document, t, crawler = false
   });
   win.okoConsent = { open: () => manager.openSettings(), get choice() { return manager.choice; } };
   bindReopen(doc, manager);
-  if (decision === 'ask' || preview) manager.showBanner();
+  if (decision === 'ask' || preview) {
+    void scheduleConsentBanner({
+      when: showBannerWhen,
+      show: () => manager.showBanner(),
+      pending: () => preview || (manager.choice === null && !doc.getElementById?.('oko-consent-dialog')),
+    });
+  }
   return decision;
 }

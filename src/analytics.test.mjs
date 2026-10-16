@@ -8,6 +8,7 @@ import {
   ANALYTICS_ENABLED, CONSENT_CATEGORIES, CONSENT_MAX_AGE_DAYS, CONSENT_POLICY_VERSION, CONSENT_STORAGE_KEY,
   GA4_MEASUREMENT_ID, LEGACY_CONSENT_STORAGE_KEY, analyticsDecision, consentDefaults, cookieDeletionStrings,
   gaCookieNames, gtagCommands, gtagLoads, TRACKED_EVENTS, eventPayload, trackEvent, isConsentPreview, parseConsentRecord, readConsent, serializeConsent,
+  scheduleConsentBanner,
 } from './analytics.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 
@@ -138,7 +139,11 @@ test('zapojenie: main.js spúšťa súhlas až po skrytí preloadera, v HUD je o
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ initAnalytics, trackEvent \} from '\.\/analytics\.js';/);
   // Živý rámček (2026-10-06, src/embedMode.js): v rámčeku sa súhlas ani GA nespúšťa (lišta by ho zakryla, nič nezbierame).
-  assert.match(main, /startSharpStarfield\(\);\n[^\n]*\n\s+try \{ if \(!embedView\) initAnalytics\(\{ t, crawler: crawlerVisit \}\); \}/);
+  assert.match(main, /startSharpStarfield\(\);\n[\s\S]{0,900}?try \{ if \(!embedView\) initAnalytics\(\{ t, crawler: crawlerVisit, showBannerWhen: consentBannerWhen \}\); \}/);
+  // Telefón (2026-10-16): lišta až po úvodnom prelete (onArrive), najneskôr pauza + prelet + 1 s; počítač hneď.
+  assert.match(main, /const phoneStart = !styleManager\.hasShareState\n\s+&& resolveShellMode\(/);
+  assert.match(main, /onArrive: \(geo\) => \{\n\s+settleStart\(\);/);
+  assert.match(main, /phoneStart\n\s+\? Promise\.race\(\[startSettled, new Promise\(\(resolve\) => setTimeout\(resolve, START_GLOBE_DWELL_MS \+ START_FLY_DURATION_S \* 1000 \+ 1000\)\)\]\)\n\s+: null;/);
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /<button id="consent-open" type="button" data-i18n="consent\.open" hidden>/);
 });
@@ -159,6 +164,34 @@ test('ochrana súkromia: kontakt, cookies GA4 len so súhlasom, tlačidlá menia
   assert.match(page, /__Host-oko_session/);
   assert.match(page, /dataprotection\.gov\.sk/);
   assert.doesNotMatch(page, /účet zmazať v Centre účtu/, 'samoobslužné zmazanie účtu zatiaľ neexistuje');
+});
+
+test('lišta na telefóne (2026-10-16): bez čakania hneď, inak po prelete a len kým voľba stojí; kompaktná nad dolnou lištou', async () => {
+  let shown = 0;
+  assert.equal(await scheduleConsentBanner({ show: () => { shown += 1; } }), 'now');
+  assert.equal(shown, 1, 'počítač: hneď');
+  let land = () => {};
+  const landed = new Promise((resolve) => { land = resolve; });
+  const later = scheduleConsentBanner({ when: landed, show: () => { shown += 1; } });
+  await Promise.resolve();
+  assert.equal(shown, 1, 'telefón: pred pristátím nič');
+  land();
+  assert.equal(await later, 'later');
+  assert.equal(shown, 2);
+  // voľba medzitým cez SÚKROMIE (alebo otvorené nastavenia) — lišta už nepríde
+  assert.equal(await scheduleConsentBanner({ when: Promise.resolve(), show: () => { shown += 1; }, pending: () => false }), 'skipped');
+  assert.equal(shown, 2);
+  // zlyhanie čakania lištu nezhltne
+  assert.equal(await scheduleConsentBanner({ when: Promise.reject(new Error('x')), show: () => { shown += 1; } }), 'later');
+  assert.equal(shown, 3);
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.oko-mobile #oko-consent \{\n[^\n]*\n {2}width: calc\(100vw - 16px\);/, 'na šírku');
+  // zvislá poloha má JEDNO pravidlo (staré 70 px + safe-area prebíjalo nové, lebo bolo v súbore neskôr)
+  assert.equal((css.match(/body\.oko-mobile #oko-consent \{[^}]*\bbottom:/g) || []).length, 1, 'jediné bottom pre lištu na telefóne');
+  assert.match(css, /body\.oko-mobile #oko-consent \{ bottom: calc\(var\(--oko-dock-lift\) - 8px\); \}/, 'rovno na spodnej lište ako výsuvy');
+  assert.match(css, /body\.oko-mobile #oko-consent \.oko-consent-tiles \{ display: none; \}/, 'bez dlaždíc kategórií');
+  assert.match(css, /body\.oko-mobile #oko-consent \.oko-consent-btn \{ flex: 1 1 0; min-width: 0;/, 'odmietnuť a prijať rovnako veľké');
+  assert.ok(!/body\.oko-mobile #oko-consent-dialog/.test(css), 'nastavenia sa nemenia');
 });
 
 test('udalosti (2026-10-04): len známe názvy a povolené parametre, nič pred načítaním GA', () => {

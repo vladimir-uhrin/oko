@@ -94,6 +94,11 @@ test('zapojenie: malý vstup PRED main.js, oko a texty preloadera bez zmeny, pl�
   assert.ok(flow > 0 && main > flow, 'preloaderFlow.js sa načíta pred main.js');
   // async: Vite presunie balík appky do <head>; bez async by sa preloader spustil až po ňom
   assert.ok(html.includes('<script type="module" async src="/preloaderFlow.js"></script>'));
+  // 2026-10-16: preloader je PRVÝ prvok <body> — prvý vykreslený obraz je oko. Na konci 88 KB stránky
+  // sa naživo 0,2–0,3 s mihol titulok a lišta, kým k nemu parser došiel (snímky okolive.sk, mobil).
+  const screen = html.indexOf('<div id="loading-screen">');
+  const bodyStart = html.indexOf('<body>');
+  assert.ok(bodyStart > 0 && screen > bodyStart && screen < html.indexOf('<div id="cesiumContainer">'), 'preloader pred glóbusom a rozhraním');
   for (const line of [
     '<span class="loader-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /><span class="brand-eye" aria-hidden="true"></span></span>',
     // 2026-09-27 vlastník: „aj preloader treba doplniť" — odznak BETA pri názve (zámerná zmena)
