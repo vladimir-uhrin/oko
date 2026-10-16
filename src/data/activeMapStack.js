@@ -30,7 +30,8 @@ export function getActiveMapStack() {
  * @param {object|null} [stack]
  * @returns {boolean}
  */
-export function isGlobeHiddenForStack(stack = _stack) {
+export function isGlobeHiddenForStack(stack = _stack, scene = null) {
+  if (scene?.globe?.show === true) return false; // Zem z výšky (farGlobe.js): fotoreál, ale glóbus je vidieť
   return stack?.kind === 'photoreal';
 }
 

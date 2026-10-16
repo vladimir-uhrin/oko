@@ -68,6 +68,7 @@ import { createMapScaleBar } from './mapScaleBar.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { installZoomBorders } from './data/zoomBorders.js';
 import { createCountryLabels } from './data/countryLabels.js';
+import { installFarGlobe } from './farGlobe.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
@@ -430,6 +431,13 @@ async function init() {
       },
       onError: (message) => console.warn('[MapStack]', message),
     });
+    // Zem z výšky (src/farGlobe.js, 2026-10-16, vlastník ukázal NASA „Zem v noci": „toto je nádherné"): nad
+    // 1 000 km (v noci nad 700 km) skutočný glóbus — NASA Blue Marble cez deň, Black Marble naplno v noci,
+    // terminátor od Cesia; pod 700 km (v noci 450 km) Google 3D ako doteraz. Počas preletu kamery fotoreál
+    // (prednačíta si cieľ). Z výšky sa nesťahujú Google dlaždice. Na fotoreál sa imagery položiť nedá
+    // (draping v Cesiu 1.138 zamrzol stránku). Inštaluje sa hneď po radiči, aby dlaždice glóbusu prišli
+    // ešte pod úvodnou obrazovkou (štart naň počká, strop 3 s).
+    const farGlobe = installFarGlobe({ viewer, tileset, getStackId: () => mapStackController.getActiveId() });
     await mapStackController.setStack(tileset ? 'photoreal' : 'osm', { silent: true });
     // Paleta ikon kontaktov podľa kontrastu podkladu (contactPalette.js):
     // prvý setStack je tichý, tak sa počiatočný stav berie priamo z podkladu.
@@ -692,6 +700,8 @@ async function init() {
     void Promise.all([
       Promise.race([styleManager.initialRestorePromise, new Promise((resolve) => setTimeout(resolve, STARTUP_RESTORE_CAP_MS))]),
       new Promise((resolve) => setTimeout(resolve, 1000)),
+      // Zem z výšky: nech sa pod okom nemihne čierny glóbus bez dlaždíc NASA (strop 3 s vo farGlobe.js).
+      farGlobe.whenReady,
     ]).finally(() => {
       loadingScreen.classList.add('hidden');
       releaseStartupGate();
@@ -929,6 +939,7 @@ async function init() {
     // štátu … nevidno, kde je napr. Slovensko"): držiteľ 'zoom' pod 5 000 km nad fotoreálom a Bing leteckým
     // (src/data/zoomBorders.js); podklady s vlastnými hranicami (OSM, Stadia, KARTA) ho nepotrebujú.
     window.__godsEyeView.zoomBorders = installZoomBorders({ scene: viewer.scene, boundaries: countryBoundaries, labels: countryLabels, getStackId: () => mapStackController.getActiveId() });
+    window.__godsEyeView.farGlobe = farGlobe; // Zem z výšky — inštalovaná hneď po radiči (viď vyššie)
     // Hranice s potrubiami (2026-09-19, používateľ: „hranice si vyhodil"):
     // rúry sú cezhraničná infraštruktúra a bez hraníc nemá „kam tečie" na
     // karte kontext. Vrstva si hranice drží, kým je zapnutá; scéna úžiny je

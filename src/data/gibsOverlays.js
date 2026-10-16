@@ -272,7 +272,7 @@ export function createGibsOverlayLayer(def, {
   let _fadeRemover = null;
   const fade = gibsOverlayFade(def.level);
 
-  const globeHidden = () => isGlobeHiddenForStack(getActiveMapStack());
+  const globeHidden = () => isGlobeHiddenForStack(getActiveMapStack(), _viewer?.scene);
 
   /** Jediný zapisovač alfy: krytie × zoom-faktor podľa výšky kamery. */
   const applyAlpha = () => {
