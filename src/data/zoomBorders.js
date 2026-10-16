@@ -37,7 +37,7 @@ export function zoomBordersWanted({
  * @param {{scene: object, boundaries: {retain: Function, release: Function}, getStackId: () => string|null, now?: () => number, minIntervalMs?: number}} o
  * @returns {{shown: boolean, check: (force?: boolean) => boolean, destroy: () => void}}
  */
-export function installZoomBorders({ scene, boundaries, getStackId, now = Date.now, minIntervalMs = 250 } = {}) {
+export function installZoomBorders({ scene, boundaries, labels = null, getStackId, now = Date.now, minIntervalMs = 250 } = {}) {
   if (typeof scene?.postRender?.addEventListener !== 'function' || !boundaries || typeof getStackId !== 'function') {
     return { shown: false, check() { return false; }, destroy() {} };
   }
@@ -53,6 +53,7 @@ export function installZoomBorders({ scene, boundaries, getStackId, now = Date.n
     shown = wanted;
     if (wanted) void boundaries.retain(ZOOM_BORDERS_HOLDER);
     else boundaries.release(ZOOM_BORDERS_HOLDER);
+    labels?.setVisible?.(wanted); // názvy štátov idú s hranicami (countryLabels.js)
     return shown;
   };
   const onPostRender = () => { check(false); };
@@ -62,7 +63,7 @@ export function installZoomBorders({ scene, boundaries, getStackId, now = Date.n
     check,
     destroy() {
       scene.postRender.removeEventListener?.(onPostRender);
-      if (shown) { shown = false; boundaries.release(ZOOM_BORDERS_HOLDER); }
+      if (shown) { shown = false; boundaries.release(ZOOM_BORDERS_HOLDER); labels?.setVisible?.(false); }
     },
   };
 }

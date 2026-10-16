@@ -38,8 +38,9 @@ function harness() {
   };
   const calls = [];
   const boundaries = { retain: async (who) => { calls.push(`retain:${who}`); return 1; }, release: (who) => { calls.push(`release:${who}`); } };
+  const labels = { setVisible: (on) => { calls.push(`labels:${on}`); } };
   let stack = 'photoreal'; let t = 1_000_000;
-  const ctl = installZoomBorders({ scene, boundaries, getStackId: () => stack, now: () => t });
+  const ctl = installZoomBorders({ scene, boundaries, labels, getStackId: () => stack, now: () => t });
   const render = () => { for (const fn of listeners) fn(); };
   return { scene, calls, ctl, render, setStack: (s) => { stack = s; }, tick: (ms) => { t += ms; }, get listeners() { return listeners.size; } };
 }
@@ -53,16 +54,16 @@ test('zapojenie: po vykreslení číta výšku a podklad, mení držiteľa „zo
   h.render();
   assert.deepEqual(h.calls, [], 'do 250 ms sa znova nekontroluje');
   h.tick(300); h.render();
-  assert.deepEqual(h.calls, ['retain:zoom']);
+  assert.deepEqual(h.calls, ['retain:zoom', 'labels:true'], 'hranice aj názvy štátov');
   assert.equal(h.ctl.shown, true);
   h.tick(300); h.render();
-  assert.deepEqual(h.calls, ['retain:zoom'], 'bez zmeny žiadne ďalšie volanie');
+  assert.deepEqual(h.calls, ['retain:zoom', 'labels:true'], 'bez zmeny žiadne ďalšie volanie');
   h.scene.camera.positionCartographic.height = 5_800_000;
   h.tick(300); h.render();
   assert.equal(h.ctl.shown, true, 'hysteréza: 5 800 km ešte drží');
   h.scene.camera.positionCartographic.height = 6_500_000;
   h.tick(300); h.render();
-  assert.deepEqual(h.calls, ['retain:zoom', 'release:zoom']);
+  assert.deepEqual(h.calls, ['retain:zoom', 'labels:true', 'release:zoom', 'labels:false']);
   assert.equal(h.ctl.shown, false);
 });
 
@@ -74,10 +75,10 @@ test('zapojenie: prepnutie na podklad s vlastnými hranicami hranice pustí a n�
   assert.equal(h.ctl.check(true), false);
   h.setStack('photoreal');
   assert.equal(h.ctl.check(true), true);
-  assert.deepEqual(h.calls, ['retain:zoom', 'release:zoom', 'retain:zoom']);
+  assert.deepEqual(h.calls.filter((c) => !c.startsWith('labels')), ['retain:zoom', 'release:zoom', 'retain:zoom']);
   h.ctl.destroy();
   assert.equal(h.listeners, 0);
-  assert.deepEqual(h.calls.at(-1), 'release:zoom');
+  assert.deepEqual(h.calls.slice(-2), ['release:zoom', 'labels:false']);
   assert.equal(h.ctl.shown, false);
   // bez scény / hraníc bezpečný no-op
   const none = installZoomBorders({ scene: null, boundaries: null, getStackId: () => 'photoreal' });
@@ -88,6 +89,6 @@ test('zapojenie: prepnutie na podklad s vlastnými hranicami hranice pustí a n�
 test('zapojenie v main.js: držiteľ zoom nad countryBoundaries s aktívnym podkladom z MapStackController', () => {
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ installZoomBorders \} from '\.\/data\/zoomBorders\.js';/);
-  assert.match(main, /installZoomBorders\(\{ scene: viewer\.scene, boundaries: countryBoundaries, getStackId: \(\) => mapStackController\.getActiveId\(\) \}\)/);
+  assert.match(main, /installZoomBorders\(\{ scene: viewer\.scene, boundaries: countryBoundaries, labels: countryLabels, getStackId: \(\) => mapStackController\.getActiveId\(\) \}\)/);
   assert.equal(ZOOM_BORDERS_HOLDER, 'zoom');
 });

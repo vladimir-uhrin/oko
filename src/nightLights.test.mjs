@@ -84,11 +84,11 @@ test('styleNightLightsLayer je bezpečný bez vrstvy', () => {
   assert.equal(styleNightLightsLayer(undefined), null);
 });
 
-test('tripwire (2026-09-07): svetlá miest majú vlastný vypínač v paneli Zobrazenie, oddelený od Deň/noc', () => {
+test('tripwire (2026-09-07, default 2026-10-16): svetlá miest majú vlastný vypínač v paneli Zobrazenie, oddelený od Deň/noc, predvolene ZAPNUTÝ', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /id="night-lights-toggle"[^>]*aria-pressed="false"/, 'tlačidlo existuje a default je VYPNUTÉ (používateľ 2026-09-07: „vyzerá to ako mraky")');
+  assert.match(html, /id="night-lights-toggle"[^>]*aria-pressed="true"/, 'tlačidlo existuje a default je ZAPNUTÉ (vlastník 2026-10-16: „daj ich implicitne on"; 09-07 „vyzerá to ako mraky" rieši tlmenie zblízka v photorealNight.js)');
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
-  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY\) === '1'/, 'zapnuté len po výslovnej voľbe');
+  assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY\) !== '0'/, 'zapnuté, kým používateľ výslovne nevypne (uložené 0)');
   assert.match(ui, /setCityLightsEnabled\?\.\(this\._nightLightsEnabled\)/, 'vypínač píše do controllera cez setCityLightsEnabled');
   assert.match(ui, /setNightLightsEnabled\?\.\(this\._dayNightEnabled\)/, 'Deň/noc ostáva hlavným prepínačom');
   assert.match(ui, /NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights'/, 'voľba per zariadenie (nový kľúč, nech stará zapnutá voľba neprežije)');

@@ -482,7 +482,11 @@ const GLOBAL_POST_DEFAULTS = {
   bloom: { enabled: false, intensity: BLOOM_INTENSITY_DEFAULT },
   sharpen: { enabled: true, intensity: 49 },
   hudVariant: 'tactical',
-  hudVisible: true,
+  // HUD („satelitné" metadáta NORMAL/SÚHRN, MGRS, GSD/NIIRS, BAND/BITS) predvolene VYPNUTÝ
+  // (vlastník 2026-10-16: „čo je označené, by som vypol alebo odstránil, ak je to len efekt").
+  // Tlačidlo HUD (klávesa H) v paneli VZHĽAD ostáva; vojenské štýly si ho zapínajú samy
+  // (STYLE_PRESET_DEFAULTS) a odkaz s `hv=1` ho obnoví — HUD skrytý = ani volanie AI súhrnu.
+  hudVisible: false,
   // Detection is ON for EVERY style on a first run, Normal included (owner
   // directive 2026-08-22: "detect should also be on by default"). It is the
   // same preset object the military styles and Contacts already apply, so there
@@ -651,18 +655,19 @@ const CCTV_CAL_FIELDS = {
 };
 
 /**
- * localStorage kľúč vypínača svetiel miest (2026-09-07). DEFAULT VYPNUTÉ:
- * používateľ po dvoch pokusoch („ľadovce", potom „vyzerá to ako mraky —
- * vypni to") — Black Marble ostáva len ako voľba pre toho, kto ju chce.
- * Nový kľúč (nie 'oko-night-lights'), nech neprežije stará zapnutá voľba.
+ * localStorage kľúč vypínača svetiel miest (2026-09-07). Vtedy DEFAULT VYPNUTÉ: používateľ po
+ * dvoch pokusoch („ľadovce", potom „vyzerá to ako mraky — vypni to"). Odvtedy shader fotoreálu
+ * svetlá zblízka tlmí (photorealNight.js: pod 400 km nula, plné od 1 500 km) a 2026-10-16
+ * vlastník: „nočné svetlá nefungujú a daj ich implicitne on" → DEFAULT ZAPNUTÉ; uložená voľba
+ * '0' (vypnuté ručne) ostáva rešpektovaná. Kľúč 'oko-city-lights' (nie 'oko-night-lights').
  */
 const NIGHT_LIGHTS_STORAGE_KEY = 'oko-city-lights';
 function readStoredNightLights() {
   try {
-    if (typeof localStorage === 'undefined') return false;
-    return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) === '1';
+    if (typeof localStorage === 'undefined') return true;
+    return localStorage.getItem(NIGHT_LIGHTS_STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 

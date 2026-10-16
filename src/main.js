@@ -67,6 +67,7 @@ import { createSceneRevealGate } from './sceneRevealGate.js';
 import { createMapScaleBar } from './mapScaleBar.js';
 import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { installZoomBorders } from './data/zoomBorders.js';
+import { createCountryLabels } from './data/countryLabels.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
@@ -505,27 +506,36 @@ async function init() {
     const phoneStart = !styleManager.hasShareState
       && resolveShellMode({ width: window.innerWidth, height: window.innerHeight, coarse: isCoarsePointer(window) }).mobile;
 
+    // Poloha podľa pripojenia RAZ pre všetkých (prelet, zvýraznenie hraníc domovskej krajiny, popisky):
+    // /api/whereami (hlavičky Cloudflare, nič sa neukladá). Roboty a vložený rámček bez polohy.
+    // Vývoj/QA: ?qaGeo=lat,lon[,mesto][,KÓD] (KÓD = ISO2 krajiny, napr. SK).
+    const qaGeo = import.meta.env.DEV ? new URLSearchParams(window.location.search).get('qaGeo') : null;
+    const geoPromise = crawlerVisit || embedView ? Promise.resolve(null) : (async () => {
+      try {
+        if (qaGeo) {
+          const parts = qaGeo.split(',');
+          const country = /^[A-Z]{2}$/.test(parts.at(-1) || '') ? parts.pop() : undefined;
+          const [lat, lon, ...city] = parts;
+          return { precision: 'city', lat: Number(lat), lon: Number(lon), city: city.join(','), country };
+        }
+        const res = await fetch('/api/whereami', { cache: 'no-store' });
+        return res.ok ? res.json() : null;
+      } catch { return null; }
+    })();
+
     // Bez stavu z odkazu: úvodný pohľad na zemeguľu so Slovenskom (2026-10-15, camera.js START_VIEW);
     // po skrytí úvodnej obrazovky sa kamera pomaly dorovná. Tlačidlo s glóbusom hore ostáva na Bratislave.
     if (!styleManager.hasShareState) {
       loaderStatus.textContent = t('loader.start-globe');
-      // Prelet nad oblasť návštevníka podľa pripojenia (/api/whereami, hlavičky Cloudflare, nič sa
-      // neukladá). Roboty a vložený rámček ostávajú na zemeguli. Vývoj/QA: ?qaGeo=lat,lon[,city].
-      const qaGeo = import.meta.env.DEV ? new URLSearchParams(window.location.search).get('qaGeo') : null;
+      // Prelet nad oblasť návštevníka podľa pripojenia (geoPromise vyššie). Roboty a vložený rámček
+      // ostávajú na zemeguli.
       // Vývoj/QA: ?qaTime=2026-10-15T07:30Z — čas scény (osvetlenie) aj úvodného pohľadu k Slnku.
       const qaTimeMs = import.meta.env.DEV ? Date.parse(new URLSearchParams(window.location.search).get('qaTime') || '') : NaN;
       if (Number.isFinite(qaTimeMs)) {
         viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(qaTimeMs));
         viewer.clock.shouldAnimate = false;
       }
-      const locate = crawlerVisit || embedView ? null : async () => {
-        if (qaGeo) {
-          const [lat, lon, ...city] = qaGeo.split(',');
-          return { precision: 'city', lat: Number(lat), lon: Number(lon), city: city.join(',') };
-        }
-        const res = await fetch('/api/whereami', { cache: 'no-store' });
-        return res.ok ? res.json() : null;
-      };
+      const locate = crawlerVisit || embedView ? null : () => geoPromise;
       showStartView(viewer, {
         whenReady: whenStartupReady(),
         nowMs: Number.isFinite(qaTimeMs) ? qaTimeMs : Date.now(),
@@ -903,10 +913,22 @@ async function init() {
     // Geometria hraníc sa postaví hneď (priehľadná), nie až pri prvom zapnutí: meranie 2026-10-16 —
     // po pristátí preletu chýbali ~35 s, kým sa úlohy vo workeroch dostali za dekódovanie dlaždíc.
     void countryBoundaries.prewarm();
+    // Názvy štátov (src/data/countryLabels.js, Natural Earth + Intl.DisplayNames) idú spolu s hranicami.
+    const countryLabels = createCountryLabels({ scene: viewer.scene, lang: currentLanguage() });
+    window.__godsEyeView.countryLabels = countryLabels;
+    void countryLabels.load();
+    // Domovská krajina podľa pripojenia (vlastník: „ak je IP napr. SK, treba trocha hranice zvýrazniť"):
+    // jej hranice hrubšie a sýtejšie, jej názov svetlejší. Len ISO2 z /api/whereami, nič sa neukladá.
+    void geoPromise.then((geo) => {
+      const home = /^[A-Z]{2}$/.test(geo?.country || '') ? geo.country : null;
+      if (!home) return;
+      countryBoundaries.highlight(home);
+      countryLabels.setHome(home);
+    });
     // Hranice pri priblížení (2026-10-16, vlastník: „keď zapriblíži kamera ku miestu, aby sa objavili hranice
     // štátu … nevidno, kde je napr. Slovensko"): držiteľ 'zoom' pod 5 000 km nad fotoreálom a Bing leteckým
     // (src/data/zoomBorders.js); podklady s vlastnými hranicami (OSM, Stadia, KARTA) ho nepotrebujú.
-    window.__godsEyeView.zoomBorders = installZoomBorders({ scene: viewer.scene, boundaries: countryBoundaries, getStackId: () => mapStackController.getActiveId() });
+    window.__godsEyeView.zoomBorders = installZoomBorders({ scene: viewer.scene, boundaries: countryBoundaries, labels: countryLabels, getStackId: () => mapStackController.getActiveId() });
     // Hranice s potrubiami (2026-09-19, používateľ: „hranice si vyhodil"):
     // rúry sú cezhraničná infraštruktúra a bez hraníc nemá „kam tečie" na
     // karte kontext. Vrstva si hranice drží, kým je zapnutá; scéna úžiny je

@@ -10,6 +10,7 @@ range geometry with no network dependency.
 | `land.json` | `ne_50m_land` (outer rings, DP 0.02°, 2 dp) — map on OKO Studio images; `scripts/build-land.mjs` | 553 rings |
 | `borders.json` | `ne_50m_admin_0_boundary_lines_land` (DP 0.02°, 2 dp) — mapa Naživo v admine; `scripts/build-borders.mjs` | 393 lines |
 | `marine.json` | `ne_10m_geography_marine_polys` (seas, gulfs, straits, bays, …) | 292 named |
+| `country-labels.json` | `ne_50m_admin_0_countries` (`LABEL_X/Y`, `LABELRANK`, `MIN_LABEL/MAX_LABEL`, `POP_EST`, `ISO_A2_EH`, `ADM0_A3`) — názvy štátov pri priblížení na glóbuse (`src/data/countryLabels.js`; mená dáva prehliadač cez `Intl.DisplayNames`, `nameEn` záloha); `scripts/build-boundaries.mjs` | 239 štátov s platným ISO2 |
 
 **Source:** Natural Earth 10m physical vectors, via the canonical
 [nvkelso/natural-earth-vector](https://github.com/nvkelso/natural-earth-vector)
