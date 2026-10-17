@@ -4314,6 +4314,22 @@ export class StyleManager {
   }
 
   /**
+   * Dostupnosť podkladov sa zmenila po štarte (Google 3D prišiel neskôr alebo sa zmenil dôvod jeho
+   * nedostupnosti — photorealRetry.js, 2026-10-17): čipy sa kreslia raz, tak ich treba prekresliť.
+   * Bez `_renderMapStackState` — post-process podkladu sa nemení a znova by vypol ručne zapnuté zostrenie.
+   * @returns {void}
+   */
+  refreshMapStackChips() {
+    if (!this._mapStackChips || !this.mapStackController) return;
+    const stacks = this.mapStackController.getStacks();
+    const activeId = this.mapStackController.getActiveId();
+    const onSelect = (stackId) => { this._setMapStack(stackId); };
+    renderMapStackChips(this._mapStackChips, stacks, { activeId, onSelect });
+    syncMapStackChips(this._mapStackChips, activeId);
+    renderMapStackVariants(this._mapStackVariants, stacks, activeId, { onSelect });
+  }
+
+  /**
    * Switches the active map/globe source stack.
    * @param {string} stackId - Map stack id.
    * @param {object} [options]

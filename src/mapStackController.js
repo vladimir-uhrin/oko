@@ -445,6 +445,33 @@ export class MapStackController {
     return true;
   }
 
+  /**
+   * Fotoreál prišiel neskôr (opakovanie po minútovom limite Google, photorealRetry.js, 2026-10-17): kontrolér
+   * ho prijme a čip „Google 3D" je odteraz dostupný. Podklad NEprepína — o tom rozhoduje volajúci (voľba
+   * používateľa má prednosť). Kým beží glóbusový podklad, tileset ostáva skrytý; deň/noc shader dostane pri
+   * aktivácii fotoreálu (_activatePhotoreal). Druhý tileset sa neprijíma.
+   * @param {object} tileset Cesium3DTileset (už v scéne)
+   * @param {{ source?: 'google'|'ion'|null }} [options]
+   * @returns {boolean} prijatý?
+   */
+  setPhotorealTileset(tileset, { source = null } = {}) {
+    if (!tileset || this.googleTileset) return false;
+    this.googleTileset = tileset;
+    this._photorealSource = source === 'ion' || source === 'google' ? source : null;
+    this._photorealUnavailableReason = null;
+    if (this.getActiveStack()?.kind !== 'photoreal') tileset.show = false;
+    return true;
+  }
+
+  /**
+   * Dôvod nedostupnosti fotoreálu sa môže zmeniť aj po boote (čaká sa na ďalší pokus, pokusy sa minuli) —
+   * len text do tooltipu čipu, nič nerozhoduje.
+   * @param {string|null} reason
+   */
+  setPhotorealUnavailableReason(reason) {
+    this._photorealUnavailableReason = typeof reason === 'string' && reason.trim() ? reason.trim() : null;
+  }
+
   async setStack(id, { silent = false } = {}) {
     const stack = this.getStack(id) || this.getStack('photoreal');
     if (!stack) return null;

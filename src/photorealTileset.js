@@ -90,6 +90,35 @@ export function isGoogleRegionBlocked(error) {
 }
 
 /**
+ * Je to minútový limit koreňa Google 3D (2026-10-16)? Google vracia 429 RESOURCE_EXHAUSTED „Quota exceeded
+ * for quota metric '3D Tiles root requests' and limit '3D Tiles root requests per minute'". Kľúč, ktorý
+ * vydáva Cesium ion, je zdieľaný, takže limit sa minie aj bez nás a o minútu je preč — oplatí sa skúsiť
+ * znova (photorealRetry.js). Denný limit („per day") nie: ten sa do polnoci neuvoľní.
+ * Cesium chybu koreňa hlási ako RequestErrorEvent { statusCode, response } (fetchJson); Google pri chybách
+ * posiela Access-Control-Allow-Origin, takže prehliadač stav aj telo prečíta (overené 2026-10-17 na 403).
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isMinuteRateLimited(error) {
+  if (!error) return false;
+  const text = describe(error);
+  if (/per\s+day/i.test(text)) return false;
+  return Number(error?.statusCode) === 429 || /RESOURCE_EXHAUSTED|per\s+minute/i.test(text);
+}
+
+/**
+ * Ktoré cesty má zmysel skúsiť znova po zlyhaní oboch (pure): len tie, ktoré padli na minútový limit.
+ * EHP 403, zlý kľúč či token, sieť ani denný limit sa neopakujú — žiadne ďalšie požiadavky na koreň.
+ * @param {unknown} failure chyba z createPhotorealTileset (nesie googleError a ionError)
+ * @returns {{ google: boolean, ion: boolean }|null} null = neopakovať
+ */
+export function photorealRetryPaths(failure) {
+  const google = isMinuteRateLimited(failure?.googleError);
+  const ion = isMinuteRateLimited(failure?.ionError);
+  return google || ion ? { google, ion } : null;
+}
+
+/**
  * Text chyby pre hlášky; nikdy nevracia kľúč (Cesium do RequestErrorEvent
  * dáva URL s `key=` — orezať).
  * @param {unknown} error
@@ -116,6 +145,8 @@ export function describe(error) {
  * @param {(apiOptions: object, tilesetOptions: object) => Promise<object>} [options.createGoogle]
  * @param {(assetId: number, tilesetOptions: object) => Promise<object>} [options.fromIonAssetId]
  * @param {object} [options.tilesetOptions]
+ * @param {unknown} [options.priorGoogleError] opakovanie po minútovom limite (photorealRetry.js): Google
+ *   padol natrvalo (EHP 403) — neskúšať ho znova, jeho pôvodná chyba stojí za neho (hláška nepovie „kľúč chýba")
  * @returns {Promise<{tileset: object, source: 'google'|'ion', googleError: unknown|null, regionBlocked: boolean}>}
  *   Pri zlyhaní OBOCH ciest hádže chybu s `googleError`, `ionError` a `regionBlocked`.
  */
@@ -125,10 +156,13 @@ export async function createPhotorealTileset({
   createGoogle = (apiOptions, tilesetOptions) => Cesium.createGooglePhotorealistic3DTileset(apiOptions, tilesetOptions),
   fromIonAssetId = (assetId, tilesetOptions) => Cesium.Cesium3DTileset.fromIonAssetId(assetId, tilesetOptions),
   tilesetOptions = {},
+  priorGoogleError = null,
 } = {}) {
   const opts = { ...PHOTOREAL_TILESET_OPTIONS, ...tilesetOptions };
   let googleError = null;
-  if (hasGoogleKey) {
+  if (priorGoogleError) {
+    googleError = priorGoogleError;
+  } else if (hasGoogleKey) {
     try {
       const tileset = await createGoogle({ onlyUsingWithGoogleGeocoder: true }, { ...opts });
       return { tileset, source: 'google', googleError: null, regionBlocked: false };

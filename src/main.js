@@ -48,7 +48,8 @@ import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands, setVoiceAccessGate } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
-import { createPhotorealTileset, isGoogleRegionBlocked, isLowMemoryDevice, photorealTilesetOptions } from './photorealTileset.js';
+import { createPhotorealTileset, isGoogleRegionBlocked, isLowMemoryDevice, photorealRetryPaths, photorealTilesetOptions } from './photorealTileset.js';
+import { PHOTOREAL_FALLBACK_STACK, PHOTOREAL_RETRY_DELAYS_MS, retryClockLabel, schedulePhotorealRetry, shouldReturnToPhotoreal } from './photorealRetry.js';
 import { installContextLossRecovery, showContextLossNotice } from './contextLossRecovery.js';
 import { isCrawlerUserAgent } from './crawlerDetect.js';
 import { initAnalytics, trackEvent } from './analytics.js';
@@ -356,6 +357,18 @@ async function init() {
     let photorealSource = null;
     /** Prečo je fotoreál nedostupný — do tooltipu čipu, nech používateľ nehľadá chybu u seba. */
     let photorealUnavailableReason = null;
+    /** Chyba boot-u, ak to bol minútový limit Google (429) — po ~minúte sa skúsi znova (photorealRetry.js). */
+    let photorealRetryFailure = null;
+    /** Dôvod nedostupnosti pre tooltip: EHP odmietnutie ľudskou vetou, ostatné chyby svojím textom. */
+    const photorealReason = (error) => {
+      const detail = describeError(error);
+      return (error?.regionBlocked || isGoogleRegionBlocked(error)) ? t('mapstack.photoreal-eea', { detail }) : detail;
+    };
+    // Telefón/tablet: menšia cache dlaždíc (photorealTileset.js — meranie 2026-10-15); platí aj pre neskorý pokus.
+    const lowMemory = isLowMemoryDevice({
+      coarse: window.matchMedia?.('(pointer: coarse)')?.matches === true,
+      deviceMemory: navigator.deviceMemory,
+    });
     // QA/headless ochrana kvóty (2026-09-01): každý boot appky stojí Google
     // root tile request a denná kvóta je zámerne tesná (CLAUDE.md — billing
     // ochrana). Testovacie skripty bootujú s ?qaBasemap=osm a Google tileset
@@ -373,11 +386,6 @@ async function init() {
       // 403 („not available for your account and region", od 2026-09-04) cez
       // Cesium ion asset 2275207 — tie isté dlaždice pod zmluvou Cesiumu
       // (photorealTileset.js; podmienky v DATA_SOURCES.md).
-      // Telefón/tablet: menšia cache dlaždíc (photorealTileset.js — meranie 2026-10-15).
-      const lowMemory = isLowMemoryDevice({
-        coarse: window.matchMedia?.('(pointer: coarse)')?.matches === true,
-        deviceMemory: navigator.deviceMemory,
-      });
       const photoreal = await createPhotorealTileset({
         hasGoogleKey: !!googleApiKey,
         hasIonToken: !!cesiumToken,
@@ -395,12 +403,17 @@ async function init() {
     } catch (tileError) {
       console.warn('[Init] Google 3D Tiles unavailable, falling back to Cesium globe:', tileError);
       const tileErrorDetail = describeError(tileError);
+      // Minútový limit Google (429 „3D Tiles root requests per minute", photorealRetry.js): záložná mapa
+      // je len dočasná — pokus sa zopakuje, keď sa okno uvoľní (naplánuje sa nižšie, keď už je UI).
+      photorealRetryFailure = photorealRetryPaths(tileError) ? tileError : null;
       // EHP odmietnutie dostane ľudskú vetu (nie je to chyba používateľa);
       // ostatné chyby nesú svoj text.
-      photorealUnavailableReason = (tileError?.regionBlocked || isGoogleRegionBlocked(tileError))
-        ? t('mapstack.photoreal-eea', { detail: tileErrorDetail })
-        : tileErrorDetail;
-      loaderStatus.textContent = t('loader.google-tiles-fallback', { detail: tileErrorDetail });
+      photorealUnavailableReason = photorealRetryFailure
+        ? t('mapstack.photoreal-busy', { time: retryClockLabel(Date.now(), PHOTOREAL_RETRY_DELAYS_MS[0]) })
+        : photorealReason(tileError);
+      loaderStatus.textContent = photorealRetryFailure
+        ? t('loader.google-tiles-busy')
+        : t('loader.google-tiles-fallback', { detail: tileErrorDetail });
       // Keep Cesium globe visible as fallback instead of aborting the app.
       viewer.scene.globe.show = true;
     }
@@ -438,11 +451,15 @@ async function init() {
     // (draping v Cesiu 1.138 zamrzol stránku). Inštaluje sa hneď po radiči, aby dlaždice glóbusu prišli
     // ešte pod úvodnou obrazovkou (štart naň počká, strop 3 s).
     // Jas lietadiel (vlastník: „svetlosť lietadiel ako kompromis medzi žiarou miest a lietadlami"): z výšky 0,6.
-    const farGlobe = installFarGlobe({
-      viewer, tileset, getStackId: () => mapStackController.getActiveId(),
+    // Ten istý inštalátor použije aj Google 3D, ktorý príde neskôr (photorealRetry.js).
+    const installFar = (ts) => installFarGlobe({
+      viewer, tileset: ts, getStackId: () => mapStackController.getActiveId(),
       onFarChange: (far) => flightsLayer.setFleetBrightness?.(far ? FLEET_FAR_BRIGHTNESS : 1),
     });
+    let farGlobe = installFar(tileset);
     await mapStackController.setStack(tileset ? 'photoreal' : 'osm', { silent: true });
+    /** Generácia prepnutia po štarte: neskorý Google 3D sa vráti len ak odvtedy nikto podklad nezmenil. */
+    const fallbackSwitchGeneration = mapStackController.getSwitchGeneration();
     // Paleta ikon kontaktov podľa kontrastu podkladu (contactPalette.js):
     // prvý setStack je tichý, tak sa počiatočný stav berie priamo z podkladu.
     bindContactPaletteToMapStack(window, mapStackController.getActiveStack());
@@ -788,6 +805,70 @@ async function init() {
       requestRender: governorRequestRender,
     };
     window.__godsEyeView.voiceCommands = initGevVoiceCommands({ viewer, styleManager, dataManager, sceneDirector, annotations });
+
+    // Google 3D po minútovom limite (src/photorealRetry.js, 2026-10-17, vlastník: „Google 3D: po 429 opakovať
+    // pokus, nie OSM na celú reláciu"). Kľúč, ktorý vydáva ion, občas narazí na „3D Tiles root requests per
+    // minute" — o minútu je preč. Tri pokusy (~65/130/260 s), každý len cestou, ktorá padla na limit (EHP 403
+    // sa neopakuje). Po úspechu tileset do scény a radiča, Zem z výšky znova; Google 3D sa zapne, len ak od
+    // záložného štartu nikto podklad neprepol (klik, vrstva, scéna, odkaz) — inak sa len sprístupní čip.
+    if (photorealRetryFailure) {
+      const retryToast = (key, params, durationMs) => {
+        try { styleManager._showToast(t(key, params), { durationMs, tone: 'info' }); } catch { /* UI bez toastu */ }
+      };
+      const setRetryReason = (reason) => {
+        mapStackController.setPhotorealUnavailableReason(reason);
+        styleManager.refreshMapStackChips?.();
+      };
+      void whenStartupReady().then(() => {
+        if (!mapStackController.googleTileset && mapStackController.getActiveId() === PHOTOREAL_FALLBACK_STACK) {
+          retryToast('mapstack.photoreal-busy-toast', {}, 7000);
+        }
+      });
+      window.__godsEyeView.photorealRetry = schedulePhotorealRetry({
+        failure: photorealRetryFailure,
+        load: (paths, last) => createPhotorealTileset({
+          hasGoogleKey: !!googleApiKey,
+          hasIonToken: !!cesiumToken && paths.ion,
+          priorGoogleError: paths.google ? null : (last?.googleError ?? null),
+          tilesetOptions: photorealTilesetOptions({ lowMemory }),
+        }),
+        onWait: ({ delayMs }) => setRetryReason(t('mapstack.photoreal-busy', { time: retryClockLabel(Date.now(), delayMs) })),
+        onSuccess: ({ tileset: late, source }, attempts) => {
+          try {
+            tileset = late;
+            photorealSource = source;
+            photorealUnavailableReason = null;
+            late.show = false; // ukáže ho radič pri prepnutí na fotoreál
+            viewer.scene.primitives.add(late, 0); // pod ostatné primitíva, ako pri štarte
+            mapStackController.setPhotorealTileset(late, { source });
+            farGlobe.destroy?.();
+            farGlobe = installFar(late);
+            window.__godsEyeView.tileset = late;
+            window.__godsEyeView.farGlobe = farGlobe;
+            styleManager.refreshMapStackChips?.();
+            console.info(`[Init] Google 3D Tiles loaded on retry ${attempts} via ${source}`);
+            const back = shouldReturnToPhotoreal({
+              activeId: mapStackController.getActiveId(),
+              switchGeneration: mapStackController.getSwitchGeneration(),
+              fallbackGeneration: fallbackSwitchGeneration,
+            });
+            if (back) {
+              void Promise.resolve(styleManager._setMapStack('photoreal')).catch(() => {});
+              retryToast('mapstack.photoreal-back', {}, 4000);
+            } else {
+              retryToast('mapstack.photoreal-available', {}, 6000);
+            }
+          } catch (error) {
+            console.warn('[Init] Google 3D Tiles retry: could not adopt the tileset', error);
+          }
+        },
+        onGiveUp: (error, attempts) => {
+          console.warn('[Init] Google 3D Tiles: retries over, staying on the fallback map', error);
+          setRetryReason(photorealRetryPaths(error) ? t('mapstack.photoreal-busy-gave-up', { attempts }) : photorealReason(error));
+          retryToast('mapstack.photoreal-gave-up-toast', {}, 6000);
+        },
+      });
+    }
 
     // Maritime chokepoint scenes: enable the vessel / SAR / pipeline layers,
     // frame a strait and mark it — the upstream "chokehold on oil" reveal built

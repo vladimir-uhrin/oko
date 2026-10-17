@@ -550,6 +550,35 @@ test('fotoreál: dôvod nedostupnosti a zdroj (ion) idú do prezentácie, nič n
   assert.equal(new MapStackController({}, { photorealSource: 'x' }).getState().photorealSource, null);
 });
 
+test('neskorý Google 3D (photorealRetry, 2026-10-17): prijatie sprístupní čip, na OSM ostane skrytý, druhý sa neprijme', async () => {
+  const { viewer } = layeredViewer();
+  const controller = new MapStackController(viewer, { photorealUnavailableReason: 'minútový limit požiadaviek Google je vyčerpaný' });
+  assert.equal(controller.getActiveId(), 'osm');
+  assert.equal(controller.isStackAvailable('photoreal'), false);
+  controller.setPhotorealUnavailableReason('minútový limit požiadaviek Google je vyčerpaný, ďalší pokus o 21:43');
+  assert.match(controller.getStacks().find((s) => s.id === 'photoreal').unavailableReason, /21:43/, 'tooltip sleduje čakanie');
+
+  const late = { show: true };
+  assert.equal(controller.setPhotorealTileset(late, { source: 'ion' }), true);
+  assert.equal(late.show, false, 'kým beží OSM, fotoreál je skrytý');
+  const pr = controller.getStacks().find((s) => s.id === 'photoreal');
+  assert.equal(pr.available, true);
+  assert.equal(pr.unavailableReason, null);
+  assert.match(pr.sourceNote, /Cesium ion/);
+  assert.equal(controller.getState().photorealSource, 'ion');
+  assert.equal(controller.getActiveId(), 'osm', 'prijatie podklad neprepína');
+  assert.equal(controller.setPhotorealTileset({ show: true }, { source: 'google' }), false, 'druhý tileset nie');
+  assert.equal(controller.googleTileset, late);
+
+  const gen = controller.getSwitchGeneration();
+  await controller.setStack('photoreal');
+  assert.equal(controller.getActiveId(), 'photoreal');
+  assert.equal(late.show, true);
+  assert.equal(viewer.scene.globe.show, false);
+  assert.equal(controller.getSwitchGeneration(), gen + 1);
+  assert.equal(controller.setPhotorealTileset(null), false);
+});
+
 test('nočné svetlá: zosilnenie sleduje kontrast podkladu pri každom prepnutí', async () => {
   const { viewer } = layeredViewer();
   const controller = new MapStackController(viewer, {});

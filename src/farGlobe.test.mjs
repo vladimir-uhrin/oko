@@ -192,9 +192,10 @@ test('štart: whenReady sa splní, keď má glóbus z výšky dlaždice; zblízk
 test('zapojenie: main.js inštaluje Zem z výšky hneď po radiči, štart čaká na whenReady; stav „degradované" prekryvov NASA berie do úvahy viditeľný glóbus', () => {
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ installFarGlobe \} from '\.\/farGlobe\.js';/);
-  assert.match(main, /const farGlobe = installFarGlobe\(\{\n\s+viewer, tileset, getStackId: \(\) => mapStackController\.getActiveId\(\),\n\s+onFarChange: \(far\) => flightsLayer\.setFleetBrightness\?\.\(far \? FLEET_FAR_BRIGHTNESS : 1\),\n\s+\}\);/, 'jas lietadiel ide s režimom');
+  // Inštalátor je funkcia: ten istý použije aj Google 3D, ktorý príde neskôr (photorealRetry.js, 2026-10-17).
+  assert.match(main, /const installFar = \(ts\) => installFarGlobe\(\{\n\s+viewer, tileset: ts, getStackId: \(\) => mapStackController\.getActiveId\(\),\n\s+onFarChange: \(far\) => flightsLayer\.setFleetBrightness\?\.\(far \? FLEET_FAR_BRIGHTNESS : 1\),\n\s+\}\);\n\s+let farGlobe = installFar\(tileset\);/, 'jas lietadiel ide s režimom');
   assert.match(main, /import flightsLayer, \{ FLEET_FAR_BRIGHTNESS \} from '\.\/data\/flights\.js';/);
-  assert.ok(main.indexOf('const farGlobe = installFarGlobe(') < main.indexOf('void Promise.all(['), 'inštalácia pred štartovým čakaním');
+  assert.ok(main.indexOf('let farGlobe = installFar(tileset);') < main.indexOf('void Promise.all(['), 'inštalácia pred štartovým čakaním');
   assert.match(main, /new Promise\(\(resolve\) => setTimeout\(resolve, 1000\)\),\n[^\n]*\n\s+farGlobe\.whenReady,\n\s+\]\)\.finally/);
   assert.match(main, /window\.__godsEyeView\.farGlobe = farGlobe;/);
   const active = readFileSync(new URL('./data/activeMapStack.js', import.meta.url), 'utf8');

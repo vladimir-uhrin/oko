@@ -9,6 +9,8 @@ import {
   createPhotorealTileset,
   describe,
   isGoogleRegionBlocked,
+  isMinuteRateLimited,
+  photorealRetryPaths,
 } from './photorealTileset.js';
 
 const EEA_MESSAGE = 'Your request cannot be served because satellite tiles and 3D tiles are not available for your account and region. Learn more here: https://developers.google.com/maps/comms/eea/map-tiles.';
@@ -107,6 +109,37 @@ test('bez Google kľúča ide rovno ion; zlyhanie oboch = jedna chyba s oboma d�
     }),
     (error) => /Google: .*referer.*Cesium ion: HTTP 401/.test(error.message) && error.regionBlocked === false,
   );
+});
+
+test('minútový limit (429 RESOURCE_EXHAUSTED „per minute") sa rozpozná; denný limit, EHP 403 ani sieť nie', () => {
+  const body = JSON.stringify({ error: { code: 429, message: "Quota exceeded for quota metric '3D Tiles root requests' and limit '3D Tiles root requests per minute' of service 'tile.googleapis.com'", status: 'RESOURCE_EXHAUSTED' } });
+  assert.equal(isMinuteRateLimited({ statusCode: 429, response: body }), true);
+  assert.equal(isMinuteRateLimited({ statusCode: 429 }), true, 'stav stačí aj bez tela');
+  assert.equal(isMinuteRateLimited(new Error(body)), true, 'text bez stavu');
+  assert.equal(isMinuteRateLimited({ statusCode: 429, response: body.replace('per minute', 'per day') }), false);
+  assert.equal(isMinuteRateLimited({ statusCode: 403, response: EEA_MESSAGE }), false);
+  assert.equal(isMinuteRateLimited({ statusCode: 0 }), false);
+  assert.equal(isMinuteRateLimited(null), false);
+  assert.deepEqual(photorealRetryPaths({ googleError: { statusCode: 403, response: EEA_MESSAGE }, ionError: { statusCode: 429 } }), { google: false, ion: true });
+  assert.deepEqual(photorealRetryPaths({ googleError: { statusCode: 429 }, ionError: { statusCode: 401 } }), { google: true, ion: false });
+  assert.equal(photorealRetryPaths({ googleError: new Error(EEA_MESSAGE), ionError: { statusCode: 401 } }), null);
+  assert.equal(photorealRetryPaths(new Error('crawler')), null);
+});
+
+test('priorGoogleError: Google sa nevolá, jeho chyba stojí za neho (aj regionBlocked), ion ide', async () => {
+  let googleCalled = false;
+  const prior = new Error(EEA_MESSAGE);
+  const result = await createPhotorealTileset({
+    hasGoogleKey: true,
+    hasIonToken: true,
+    priorGoogleError: prior,
+    createGoogle: async () => { googleCalled = true; return {}; },
+    fromIonAssetId: async () => ({ id: 'i' }),
+  });
+  assert.equal(googleCalled, false);
+  assert.equal(result.source, 'ion');
+  assert.equal(result.googleError, prior);
+  assert.equal(result.regionBlocked, true);
 });
 
 test('tripwire: main.js používa createPhotorealTileset a controller dostáva dôvod aj zdroj', () => {
