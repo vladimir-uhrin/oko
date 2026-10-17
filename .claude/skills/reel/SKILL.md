@@ -73,6 +73,18 @@ a hneď 2. veta na `spot:*` bez podkladu (strih so zábleskom robí v2 sám).
   typ/registrácia `api.adsbdb.com`. Nad Ruskom riedke pokrytie — porovnávať s inými nocami.
 - Lode: `/api/vessel-info?mmsi=`, `/api/ais-live/history?mmsi=&days=`; káble `src/data/local_data/telegeography_submarine_cables`.
 
+## Štýl v3 (návrh 17. 10. — vlastník k v2: „slabá grafika, obsah aj hudba")
+
+- Obraz kreslí `scripts/lib/reelV3` (plátno 1080×1920 v Chrome cez Puppeteer, bez servera, bez Cesia): nočná mapa
+  z OSM (Overpass → zjednodušený podklad), animované trasy lietadiel z histórie OKO (timelapse s hodinami), kruh
+  okolia, piny s pečiatkou, veľké čísla s odpočtom, stĺpcový graf z vlastných dát, fotky Ken Burns, video ako snímky,
+  záverečná karta. Titulky po skupinách (`src/data/reelCaptions.js`). Vzor: `output/reel-moskva-2noc/v3/build.mjs`
+  (`--until 14` ukážka, `--stills 1,5,9`, `--skip id`).
+- Hudba: nie Kevin MacLeod; voľné CC BY skladby s napätím (Scott Buckley — scottbuckley.com.au), začiatok výrezu na
+  silný úder (analýza nástupov), hudba v pauzách hlasnejšia, pod hlasom stlmená; efekty tik-tak / šum / úder.
+- Obsah: každé číslo z vlastných dát porovnať s bežným stavom (graf), výpadky príjmu dát vylúčiť (konzervatívne);
+  údaj z jedného zdroja, ktorý iné zdroje nepotvrdzujú, vypustiť.
+
 ## Render (technika)
 
 - Vzory: `output/reel-*/build-scenario.mjs` (Rostov, HALO 6, Borisoglebsk, Moskva, Penza) → `scenar.json`.
