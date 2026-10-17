@@ -34,6 +34,12 @@ export const NIGHT_SUN_ELEVATION_DEG = -6;
 export const FAR_GLOBE_STACKS = Object.freeze(['photoreal']);
 /** Osvetlenie v diaľkovom režime (výšky nad povrchom): noc naplno už pod nočným prahom návratu. */
 export const FAR_GLOBE_LIGHTING_M = Object.freeze({ fadeOut: 450_000, fadeIn: 560_000 });
+/**
+ * Nočný okraj atmosféry z výšky (2026-10-17, vlastník bod 5): rovnomerne osvetlená, stlmená atmosféra
+ * (jas −0,4, sýtosť +0,15) a slabý modrý závoj nad nočnou zemou (3; Cesium má 10). Ladené na snímkach
+ * zo 7 000 km a šikmo z 2 500 km (scratchpad limb/l-*.png); mestá ostávajú výrazné.
+ */
+export const FAR_GLOBE_NIGHT_LIMB = Object.freeze({ skyBrightness: -0.4, skySaturation: 0.15, groundIntensity: 3 });
 /** Štart: preloader počká, kým má glóbus z výšky dlaždice (inak by sa ukázala čierna Zem), najviac toľko ms. */
 export const FAR_GLOBE_READY_CAP_MS = 3000;
 /**
@@ -127,7 +133,36 @@ export function installFarGlobe({
   const whenReady = new Promise((resolve) => { resolveReady = (value) => { if (!readySettled) { readySettled = true; resolve(value); } }; });
   setTimer(() => resolveReady(false), readyCapMs);
 
-  const tightLighting = () => {
+  /** Pôvodné hodnoty atmosféry pred nočným okrajom (null = okraj nie je nasadený). */
+  let limbSaved = null;
+  /**
+   * Nočný okraj atmosféry (2026-10-17, vlastník bod 5): Cesium s osvetlením podľa Slnka atmosféru na nočnej
+   * strane úplne zhasne, fotky NASA majú jemný modrý okraj a závoj. V noci (z výšky, s Deň/noc) sa atmosféra
+   * osvetlí rovnomerne a stlmí (FAR_GLOBE_NIGHT_LIMB); inak a pri odchode späť pôvodné hodnoty.
+   */
+  const syncNightLimb = (on) => {
+    const globe = scene.globe;
+    const sky = scene.skyAtmosphere;
+    if (on && !limbSaved) {
+      limbSaved = { ground: globe.atmosphereLightIntensity, brightness: sky?.brightnessShift, saturation: sky?.saturationShift };
+      if ('dynamicAtmosphereLighting' in globe) globe.dynamicAtmosphereLighting = false;
+      if ('atmosphereLightIntensity' in globe) globe.atmosphereLightIntensity = FAR_GLOBE_NIGHT_LIMB.groundIntensity;
+      if (sky) { sky.brightnessShift = FAR_GLOBE_NIGHT_LIMB.skyBrightness; sky.saturationShift = FAR_GLOBE_NIGHT_LIMB.skySaturation; }
+      scene.requestRender?.();
+    } else if (!on && limbSaved) {
+      const s = limbSaved;
+      limbSaved = null;
+      // Dynamika atmosféry ide s Deň/noc (applyGlobeLighting) — prepínač sa mohol medzitým zmeniť.
+      const lit = isGlobeLightingEnabled(scene);
+      if ('dynamicAtmosphereLighting' in globe) globe.dynamicAtmosphereLighting = lit;
+      if ('dynamicAtmosphereLightingFromSun' in globe) globe.dynamicAtmosphereLightingFromSun = lit;
+      if ('atmosphereLightIntensity' in globe) globe.atmosphereLightIntensity = s.ground;
+      if (sky) { sky.brightnessShift = s.brightness; sky.saturationShift = s.saturation; }
+      scene.requestRender?.();
+    }
+  };
+
+  const tightLighting = (night = false) => {
     const globe = scene.globe;
     const fadeOut = GLOBE_RADIUS_M + FAR_GLOBE_LIGHTING_M.fadeOut;
     const fadeIn = GLOBE_RADIUS_M + FAR_GLOBE_LIGHTING_M.fadeIn;
@@ -136,9 +171,10 @@ export function installFarGlobe({
     // Bez Deň/noc by Cesium nočnú vrstvu kreslilo všade (dayAlpha platí len s osvetlením) — skryť.
     const lit = isGlobeLightingEnabled(scene);
     if (nightLayer && nightLayer.show !== lit) { nightLayer.show = lit; scene.requestRender?.(); }
+    syncNightLimb(lit && night);
   };
 
-  const enter = () => {
+  const enter = (night = false) => {
     far = true;
     tileset.show = false;
     dayLayer = tagImageryRole(createDayLayer(), IMAGERY_ROLE.base);
@@ -151,7 +187,7 @@ export function installFarGlobe({
     nightLayer.gamma = FAR_GLOBE_NIGHT_STYLE.gamma;
     viewer.imageryLayers.add(nightLayer); // navrch — nad prípadné prekryvy NASA
     scene.globe.show = true;
-    tightLighting();
+    tightLighting(night);
     scene.requestRender?.();
     try { onFarChange?.(true); } catch { /* doplnok (jas lietadiel) nesmie zhodiť režim */ }
   };
@@ -165,6 +201,7 @@ export function installFarGlobe({
     }
     dayLayer = null;
     nightLayer = null;
+    syncNightLimb(false);
     if (hideGlobe) {
       scene.globe.show = false;
       tileset.show = true;
@@ -184,9 +221,9 @@ export function installFarGlobe({
     let night = false;
     try { night = isNight(scene) === true; } catch { night = false; }
     const wanted = farGlobeWanted({ heightM, stackId, far, flying, night });
-    if (wanted && !far) enter();
+    if (wanted && !far) enter(night);
     else if (!wanted && far) exit({ hideGlobe: FAR_GLOBE_STACKS.includes(stackId) });
-    else if (far) tightLighting();
+    else if (far) tightLighting(night);
     // Štart: Zem z výšky je „pripravená", keď má glóbus dlaždice; bez režimu niet na čo čakať.
     if (!readySettled) {
       if (!far && !flying) resolveReady(false);

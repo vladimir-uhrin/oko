@@ -35,7 +35,14 @@ export const PHOTOREAL_NIGHT_TEXTURE_URL =
  * podľa používateľa „slabé" (2026-09-06 večer), noc má byť noc. Ulice drží
  * čitateľné žiara svetiel, nie podlaha.
  */
-export const PHOTOREAL_NIGHT_FLOOR = 0.12;
+export const PHOTOREAL_NIGHT_FLOOR = 0.16;
+/**
+ * Mesačné svetlo (2026-10-17, vlastník bod 3 „nočný Google 3D pod 600 km"): obyčajné stmavenie farebnej fotky
+ * dávalo tmavozelenú kašu — po nočnej Zemi z výšky skok do bahna. V noci sa farba fotky z časti odfarbí
+ * (desat), tiene sa mierne zdvihnú (gamma < 1) a tón je chladný; jas ostáva nočný (podlaha 0,16 — porovnanie
+ * variantov na snímkach nad SR, scratchpad night/t-v*.png; 0,22 už pôsobilo ako súmrak).
+ */
+export const PHOTOREAL_NIGHT_MOON = Object.freeze({ desat: 0.45, gamma: 0.9 });
 /**
  * Zosilnenie pripočítaných svetiel PODĹA VZDIALENOSTI kamery od fragmentu.
  * Textúra Black Marble (WMS 4096 px) má ~10 km na pixel: z výšky glóbusu je
@@ -51,7 +58,7 @@ export const PHOTOREAL_NIGHT_FLOOR = 0.12;
 export const PHOTOREAL_NIGHT_LIGHTS_GAIN = Object.freeze({ near: 0.0, far: 1.1 });
 export const PHOTOREAL_NIGHT_LIGHTS_RANGE_M = Object.freeze({ near: 400_000, far: 1_500_000 });
 /** Chladný nádych nočnej strany (mesačné svetlo) — pri plnom dni 1. */
-export const PHOTOREAL_NIGHT_TINT = Object.freeze([0.55, 0.68, 1.0]);
+export const PHOTOREAL_NIGHT_TINT = Object.freeze([0.6, 0.72, 1.0]);
 /**
  * Prah, pod ktorým sa jas Black Marble berie ako ambientná kresba pevniny,
  * nie svetlo — ten istý dôvod ako `colorToAlpha` 0,39 v nightLights.js
@@ -71,8 +78,8 @@ void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
   vec3 p = fsInput.attributes.positionWC;
   vec3 n = normalize(p);
   float lambert = max(dot(n, czm_sunDirectionWC), 0.0);
-  float daylight = clamp(lambert * 5.0 + u_nightFloor, 0.0, 1.0);
-  float nightBlend = 1.0 - clamp(lambert * 5.0, 0.0, 1.0);
+  float day = clamp(lambert * 5.0, 0.0, 1.0);
+  float nightBlend = 1.0 - day;
   float lon = atan(p.y, p.x);
   float lat = asin(clamp(n.z, -1.0, 1.0));
   vec2 uv = vec2(lon / (2.0 * czm_pi) + 0.5, lat / czm_pi + 0.5);
@@ -81,10 +88,13 @@ void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
   lights *= smoothstep(u_lightsCutoff.x, u_lightsCutoff.y, lum);
   float dist = length(czm_viewerPositionWC - p);
   float gain = mix(u_lightsGain.x, u_lightsGain.y, smoothstep(u_lightsRange.x, u_lightsRange.y, dist));
-  vec3 tint = mix(u_nightTint, vec3(1.0), daylight);
+  // Mesačné svetlo: odfarbiť, zdvihnúť tiene, chladný tón, nočný jas (PHOTOREAL_NIGHT_MOON).
+  vec3 base = material.diffuse;
+  float luma = dot(base, vec3(0.299, 0.587, 0.114));
+  vec3 moon = pow(max(mix(base, vec3(luma), u_moonDesat), vec3(0.0)), vec3(u_moonGamma)) * u_nightTint * u_nightFloor;
   // Sodíkové/LED mestá sú z výšky teplé; Black Marble po JPEG je skôr sivá.
   const vec3 warm = vec3(1.0, 0.88, 0.68);
-  material.diffuse = material.diffuse * daylight * tint + lights * warm * gain * nightBlend;
+  material.diffuse = mix(moon, base, day) + lights * warm * gain * nightBlend;
 }
 `;
 
@@ -110,6 +120,8 @@ export function buildPhotorealNightShader({
         value: textureFactory(lightsUrl),
       },
       u_nightFloor: { type: Cesium.UniformType.FLOAT, value: PHOTOREAL_NIGHT_FLOOR },
+      u_moonDesat: { type: Cesium.UniformType.FLOAT, value: PHOTOREAL_NIGHT_MOON.desat },
+      u_moonGamma: { type: Cesium.UniformType.FLOAT, value: PHOTOREAL_NIGHT_MOON.gamma },
       u_lightsGain: {
         type: Cesium.UniformType.VEC2,
         value: new Cesium.Cartesian2(PHOTOREAL_NIGHT_LIGHTS_GAIN.near, PHOTOREAL_NIGHT_LIGHTS_GAIN.far),

@@ -90,6 +90,47 @@ export function isGoogleRegionBlocked(error) {
 }
 
 /**
+ * EHP odmietnutie si pamätať deň (2026-10-17, vlastník: „1"): priama cesta Google pre účet s EHP fakturáciou
+ * vracia vždy 403, takže každé načítanie zbytočne minulo jednu požiadavku na koreň z dennej kvóty a kus štartu.
+ * Príznak = čas zistenia v localStorage; 24 h ide boot rovno cez ion, potom skúsi Google znova (ak Google
+ * obmedzenie zruší, appka sa do dňa vráti sama). Zapisuje ho LEN skutočne zistené EHP 403 — nie 429, sieť,
+ * ani zapamätaná chyba (tá by príznak predlžovala donekonečna).
+ */
+export const EEA_BLOCK_STORAGE_KEY = 'oko-google3d-eea-block-v1';
+export const EEA_BLOCK_TTL_MS = 24 * 60 * 60 * 1000;
+/** Text zapamätaného odmietnutia — isGoogleRegionBlocked ho rozpozná, hláška ostáva pravdivá. */
+export const EEA_BLOCK_REMEMBERED_MESSAGE = 'Google 3D Tiles: satellite tiles and 3D tiles are not available for your account and region (developers.google.com/maps/comms/eea/map-tiles; remembered for 24 h)';
+
+/** Platí zapamätané EHP odmietnutie? (pure; úložisko môže hádzať — súkromné okno) */
+export function readEeaBlock(storage, nowMs = Date.now()) {
+  try {
+    const at = Number(storage?.getItem?.(EEA_BLOCK_STORAGE_KEY));
+    return Number.isFinite(at) && at > 0 && nowMs >= at && nowMs - at < EEA_BLOCK_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Zapamätaj EHP odmietnutie (čas zistenia). Chyba úložiska = nič. */
+export function writeEeaBlock(storage, nowMs = Date.now()) {
+  try { storage?.setItem?.(EEA_BLOCK_STORAGE_KEY, String(Math.round(nowMs))); return true; } catch { return false; }
+}
+
+/** Chyba, ktorá pri platnom príznaku stojí za priamu cestu Google (priorGoogleError). */
+export function rememberedEeaError() {
+  return Object.assign(new Error(EEA_BLOCK_REMEMBERED_MESSAGE), { rememberedEea: true });
+}
+
+/**
+ * Zapísať príznak po načítaní? Len keď Google naozaj skúšal a odmietol pre EHP (nie zapamätaná chyba).
+ * @param {{ regionBlocked?: boolean, googleError?: unknown }|null} outcome výsledok alebo chyba createPhotorealTileset
+ */
+export function shouldRememberEea(outcome) {
+  if (!outcome?.regionBlocked) return false;
+  return outcome.googleError?.rememberedEea !== true && isGoogleRegionBlocked(outcome.googleError);
+}
+
+/**
  * Je to minútový limit koreňa Google 3D (2026-10-16)? Google vracia 429 RESOURCE_EXHAUSTED „Quota exceeded
  * for quota metric '3D Tiles root requests' and limit '3D Tiles root requests per minute'". Kľúč, ktorý
  * vydáva Cesium ion, je zdieľaný, takže limit sa minie aj bez nás a o minútu je preč — oplatí sa skúsiť

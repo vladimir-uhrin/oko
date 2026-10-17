@@ -7,6 +7,7 @@ import * as Cesium from 'cesium';
 import {
   PHOTOREAL_NIGHT_FLOOR,
   PHOTOREAL_NIGHT_FRAGMENT,
+  PHOTOREAL_NIGHT_MOON,
   PHOTOREAL_NIGHT_LIGHTS_CUTOFF,
   PHOTOREAL_NIGHT_LIGHTS_GAIN,
   PHOTOREAL_NIGHT_LIGHTS_RANGE_M,
@@ -19,12 +20,17 @@ import {
 test('fragment shader: normála zo svetovej polohy, Slnko cez czm_sunDirectionWC, ten istý vzorec ako glóbus', () => {
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /fsInput\.attributes\.positionWC/, 'Cesium dodá positionWC len keď ho shader menuje');
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /czm_sunDirectionWC/);
-  assert.match(PHOTOREAL_NIGHT_FRAGMENT, /lambert \* 5\.0 \+ u_nightFloor/, 'rovnaká krivka ako GlobeFS (lambert*5+floor)');
+  assert.match(PHOTOREAL_NIGHT_FRAGMENT, /float day = clamp\(lambert \* 5\.0, 0\.0, 1\.0\);/, 'rovnaká krivka ako GlobeFS (lambert*5)');
+  // Mesačné svetlo (2026-10-17): odfarbenie, zdvihnuté tiene, chladný tón, nočný jas — nie tmavozelená kaša.
+  assert.match(PHOTOREAL_NIGHT_FRAGMENT, /mix\(base, vec3\(luma\), u_moonDesat\)/);
+  assert.match(PHOTOREAL_NIGHT_FRAGMENT, /vec3\(u_moonGamma\)\) \* u_nightTint \* u_nightFloor;/);
+  assert.ok(PHOTOREAL_NIGHT_MOON.desat > 0.3 && PHOTOREAL_NIGHT_MOON.desat < 0.6, 'ladené na snímkach');
+  assert.ok(PHOTOREAL_NIGHT_MOON.gamma >= 0.8 && PHOTOREAL_NIGHT_MOON.gamma <= 1);
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /texture\(u_nightLights, uv\)/);
   // Rovnobežková textúra: u z dĺžky (atan), v zo šírky (asin), obe do 0..1.
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /atan\(p\.y, p\.x\)/);
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /lon \/ \(2\.0 \* czm_pi\) \+ 0\.5, lat \/ czm_pi \+ 0\.5/);
-  assert.match(PHOTOREAL_NIGHT_FRAGMENT, /material\.diffuse \* daylight \* tint \+ lights \* warm \* gain \* nightBlend/, 'svetlá sa pripočítavajú len na nočnej strane');
+  assert.match(PHOTOREAL_NIGHT_FRAGMENT, /material\.diffuse = mix\(moon, base, day\) \+ lights \* warm \* gain \* nightBlend;/, 'svetlá len na nočnej strane, cez deň pôvodná fotka');
   assert.ok(PHOTOREAL_NIGHT_FLOOR >= 0.08 && PHOTOREAL_NIGHT_FLOOR <= 0.2, 'noc má byť noc (0,28 bolo „slabé"); čitateľnosť dávajú svetlá');
   assert.ok(PHOTOREAL_NIGHT_LIGHTS_CUTOFF.from >= 0.3 && PHOTOREAL_NIGHT_LIGHTS_CUTOFF.from < 0.39, 'rez začína NAD púštnym leskom (≤ 0,27) a pod svetlami (0,39) — 2026-09-07');
   assert.ok(PHOTOREAL_NIGHT_LIGHTS_CUTOFF.to > PHOTOREAL_NIGHT_LIGHTS_CUTOFF.from && PHOTOREAL_NIGHT_LIGHTS_CUTOFF.to <= 0.55);
@@ -62,7 +68,7 @@ test('buildPhotorealNightShader: options pre Cesium CustomShader — textúra sv
   assert.equal(options.fragmentShaderText, PHOTOREAL_NIGHT_FRAGMENT);
   // Každý uniform z fragmentu je deklarovaný.
   assert.match(PHOTOREAL_NIGHT_FRAGMENT, /czm_viewerPositionWC - p/, 'zosilnenie svetiel podľa vzdialenosti kamery (zblízka len žiara)');
-  for (const name of ['u_nightLights', 'u_nightFloor', 'u_lightsGain', 'u_lightsRange', 'u_nightTint', 'u_lightsCutoff']) {
+  for (const name of ['u_nightLights', 'u_nightFloor', 'u_moonDesat', 'u_moonGamma', 'u_lightsGain', 'u_lightsRange', 'u_nightTint', 'u_lightsCutoff']) {
     assert.match(PHOTOREAL_NIGHT_FRAGMENT, new RegExp(name));
     assert.ok(options.uniforms[name], `${name} chýba v uniforms`);
   }

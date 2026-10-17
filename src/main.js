@@ -48,7 +48,7 @@ import { registerDataCredits } from './data/dataCredits.js';
 import { SceneDirector } from './scenes/director.js';
 import { initGevVoiceCommands, setVoiceAccessGate } from './voice/gevRealtime.js';
 import { MapStackController } from './mapStackController.js';
-import { createPhotorealTileset, isGoogleRegionBlocked, isLowMemoryDevice, photorealRetryPaths, photorealTilesetOptions } from './photorealTileset.js';
+import { createPhotorealTileset, isGoogleRegionBlocked, isLowMemoryDevice, photorealRetryPaths, photorealTilesetOptions, readEeaBlock, rememberedEeaError, shouldRememberEea, writeEeaBlock } from './photorealTileset.js';
 import { PHOTOREAL_FALLBACK_STACK, PHOTOREAL_RETRY_DELAYS_MS, retryClockLabel, schedulePhotorealRetry, shouldReturnToPhotoreal } from './photorealRetry.js';
 import { installContextLossRecovery, showContextLossNotice } from './contextLossRecovery.js';
 import { isCrawlerUserAgent } from './crawlerDetect.js';
@@ -364,6 +364,8 @@ async function init() {
       const detail = describeError(error);
       return (error?.regionBlocked || isGoogleRegionBlocked(error)) ? t('mapstack.photoreal-eea', { detail }) : detail;
     };
+    /** localStorage pre zapamätané EHP 403; prístup môže hádzať (súkromné okno) — vtedy bez pamäte. */
+    const eeaStorage = () => { try { return window.localStorage; } catch { return null; } };
     // Telefón/tablet: menšia cache dlaždíc (photorealTileset.js — meranie 2026-10-15); platí aj pre neskorý pokus.
     const lowMemory = isLowMemoryDevice({
       coarse: window.matchMedia?.('(pointer: coarse)')?.matches === true,
@@ -386,11 +388,15 @@ async function init() {
       // 403 („not available for your account and region", od 2026-09-04) cez
       // Cesium ion asset 2275207 — tie isté dlaždice pod zmluvou Cesiumu
       // (photorealTileset.js; podmienky v DATA_SOURCES.md).
+      // EHP 403 zapamätané na 24 h (photorealTileset.js, 2026-10-17): rovno cez ion, bez požiadavky na koreň s naším kľúčom.
+      const eeaRemembered = readEeaBlock(eeaStorage());
       const photoreal = await createPhotorealTileset({
         hasGoogleKey: !!googleApiKey,
         hasIonToken: !!cesiumToken,
         tilesetOptions: photorealTilesetOptions({ lowMemory }),
+        priorGoogleError: eeaRemembered ? rememberedEeaError() : null,
       });
+      if (shouldRememberEea(photoreal)) writeEeaBlock(eeaStorage());
       tileset = photoreal.tileset;
       photorealSource = photoreal.source;
       if (photoreal.source === 'ion') {
@@ -405,6 +411,7 @@ async function init() {
       const tileErrorDetail = describeError(tileError);
       // Minútový limit Google (429 „3D Tiles root requests per minute", photorealRetry.js): záložná mapa
       // je len dočasná — pokus sa zopakuje, keď sa okno uvoľní (naplánuje sa nižšie, keď už je UI).
+      if (shouldRememberEea(tileError)) writeEeaBlock(eeaStorage());
       photorealRetryFailure = photorealRetryPaths(tileError) ? tileError : null;
       // EHP odmietnutie dostane ľudskú vetu (nie je to chyba používateľa);
       // ostatné chyby nesú svoj text.

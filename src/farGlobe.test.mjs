@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  FAR_GLOBE_ENTER_M, FAR_GLOBE_EXIT_M, FAR_GLOBE_LIGHTING_M, FAR_GLOBE_NIGHT_ENTER_M, FAR_GLOBE_NIGHT_EXIT_M, FAR_GLOBE_NIGHT_STYLE,
+  FAR_GLOBE_ENTER_M, FAR_GLOBE_EXIT_M, FAR_GLOBE_LIGHTING_M, FAR_GLOBE_NIGHT_LIMB, FAR_GLOBE_NIGHT_ENTER_M, FAR_GLOBE_NIGHT_EXIT_M, FAR_GLOBE_NIGHT_STYLE,
   FAR_GLOBE_NIGHT_URL, FAR_GLOBE_DAY_URL, FAR_GLOBE_READY_CAP_MS, NIGHT_SUN_ELEVATION_DEG, farGlobeWanted, installFarGlobe, sunElevationDegAt,
 } from './farGlobe.js';
 import { GLOBE_RADIUS_M, LIGHTING_FADE_IN_M, LIGHTING_FADE_OUT_M } from './globeLighting.js';
@@ -76,6 +76,36 @@ function harness({ height = 7_000_000, lighting = true, night = false } = {}) {
   const ctl = installFarGlobe({ viewer: { scene, imageryLayers }, tileset, getStackId: () => stack, createDayLayer: mk('day'), createNightLayer: mk('night'), isNight: () => isNight, onFarChange: (f) => farChanges.push(f), now: () => t, setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; } });
   return { scene, tileset, items, ctl, timers, farChanges, render: () => { for (const fn of [...listeners]) fn(); }, tick: (ms) => { t += ms; }, setStack: (s) => { stack = s; }, setNight: (n) => { isNight = n; }, get listeners() { return listeners.size; } };
 }
+
+test('nočný okraj atmosféry (2026-10-17): z výšky v noci rovnomerne osvetlená stlmená atmosféra, cez deň a pri odchode pôvodné hodnoty', () => {
+  const h = harness({ height: 7_000_000, night: true });
+  Object.assign(h.scene.globe, { dynamicAtmosphereLighting: true, dynamicAtmosphereLightingFromSun: true, atmosphereLightIntensity: 10 });
+  h.scene.skyAtmosphere = { brightnessShift: -0.08, saturationShift: -0.12 };
+  h.ctl.check(true);
+  assert.equal(h.ctl.far, true);
+  assert.equal(h.scene.globe.dynamicAtmosphereLighting, false, 'nočná strana nezhasne celá');
+  assert.equal(h.scene.globe.atmosphereLightIntensity, FAR_GLOBE_NIGHT_LIMB.groundIntensity);
+  assert.equal(h.scene.skyAtmosphere.brightnessShift, FAR_GLOBE_NIGHT_LIMB.skyBrightness);
+  assert.equal(h.scene.skyAtmosphere.saturationShift, FAR_GLOBE_NIGHT_LIMB.skySaturation);
+  assert.ok(FAR_GLOBE_NIGHT_LIMB.skyBrightness < 0 && FAR_GLOBE_NIGHT_LIMB.groundIntensity < 10, 'stlmené, mestá ostávajú výrazné');
+  // Deň nad cieľom: pôvodné hodnoty, dynamika podľa Deň/noc.
+  h.setNight(false); h.tick(300); h.render();
+  assert.equal(h.scene.globe.dynamicAtmosphereLighting, true);
+  assert.equal(h.scene.globe.atmosphereLightIntensity, 10);
+  assert.deepEqual([h.scene.skyAtmosphere.brightnessShift, h.scene.skyAtmosphere.saturationShift], [-0.08, -0.12]);
+  // Znova noc, potom vypnutý Deň/noc: okraj preč a dynamika vypnutá (nie stará hodnota).
+  h.setNight(true); h.tick(300); h.render();
+  assert.equal(h.scene.globe.dynamicAtmosphereLighting, false);
+  h.scene.globe.enableLighting = false; h.tick(300); h.render();
+  assert.equal(h.scene.globe.dynamicAtmosphereLighting, false);
+  assert.equal(h.scene.skyAtmosphere.brightnessShift, -0.08);
+  // Odchod z výšky vráti pôvodné hodnoty.
+  h.scene.globe.enableLighting = true; h.tick(300); h.render();
+  h.scene.camera.positionCartographic.height = 300_000; h.tick(300); h.render();
+  assert.equal(h.ctl.far, false);
+  assert.equal(h.scene.globe.atmosphereLightIntensity, 10);
+  assert.equal(h.scene.skyAtmosphere.brightnessShift, -0.08);
+});
 
 test('vstup z výšky: tileset skrytý, glóbus s dennou vrstvou dole a nočnou navrchu (dayAlpha 0 / nightAlpha 1, zosilnená), prísne osvetlenie', () => {
   const h = harness({ height: 7_000_000 });

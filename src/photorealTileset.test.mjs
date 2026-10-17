@@ -11,6 +11,12 @@ import {
   isGoogleRegionBlocked,
   isMinuteRateLimited,
   photorealRetryPaths,
+  EEA_BLOCK_STORAGE_KEY,
+  EEA_BLOCK_TTL_MS,
+  readEeaBlock,
+  writeEeaBlock,
+  rememberedEeaError,
+  shouldRememberEea,
 } from './photorealTileset.js';
 
 const EEA_MESSAGE = 'Your request cannot be served because satellite tiles and 3D tiles are not available for your account and region. Learn more here: https://developers.google.com/maps/comms/eea/map-tiles.';
@@ -140,6 +146,58 @@ test('priorGoogleError: Google sa nevolá, jeho chyba stojí za neho (aj regionB
   assert.equal(result.source, 'ion');
   assert.equal(result.googleError, prior);
   assert.equal(result.regionBlocked, true);
+});
+
+test('EHP 403 zapamätané na 24 h: platnosť, poškodená hodnota, výnimka úložiska', () => {
+  const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), m }; };
+  const s = mem();
+  const t = 1_800_000_000_000;
+  assert.equal(readEeaBlock(s, t), false, 'bez záznamu');
+  assert.equal(writeEeaBlock(s, t), true);
+  assert.equal(s.m.get(EEA_BLOCK_STORAGE_KEY), String(t));
+  assert.equal(readEeaBlock(s, t + 60_000), true);
+  assert.equal(readEeaBlock(s, t + EEA_BLOCK_TTL_MS - 1), true);
+  assert.equal(readEeaBlock(s, t + EEA_BLOCK_TTL_MS), false, 'po 24 h znova skúsiť Google');
+  assert.equal(readEeaBlock(s, t - 1000), false, 'čas z budúcnosti (posunuté hodiny) neplatí');
+  assert.equal(EEA_BLOCK_TTL_MS, 24 * 3600 * 1000);
+  s.setItem(EEA_BLOCK_STORAGE_KEY, 'nezmysel');
+  assert.equal(readEeaBlock(s, t), false);
+  const broken = { getItem: () => { throw new Error('SecurityError'); }, setItem: () => { throw new Error('QuotaExceeded'); } };
+  assert.equal(readEeaBlock(broken, t), false);
+  assert.equal(writeEeaBlock(broken, t), false);
+  assert.equal(readEeaBlock(null, t), false);
+});
+
+test('príznak zapisuje len skutočne zistené EHP 403 — nie zapamätaná chyba, 429 ani iné', () => {
+  assert.equal(isGoogleRegionBlocked(rememberedEeaError()), true, 'zapamätaná chyba hovorí pravdu o EHP');
+  assert.equal(shouldRememberEea({ regionBlocked: true, googleError: new Error(EEA_MESSAGE) }), true);
+  assert.equal(shouldRememberEea({ regionBlocked: true, googleError: { statusCode: 403, response: EEA_MESSAGE } }), true);
+  assert.equal(shouldRememberEea({ regionBlocked: true, googleError: rememberedEeaError() }), false, 'inak by sa príznak predlžoval donekonečna');
+  assert.equal(shouldRememberEea({ regionBlocked: false, googleError: { statusCode: 429 } }), false);
+  assert.equal(shouldRememberEea(null), false);
+});
+
+test('s platným príznakom sa Google kľúč nevolá, ion ide a regionBlocked ostáva pravdivé', async () => {
+  let googleCalls = 0;
+  const result = await createPhotorealTileset({
+    hasGoogleKey: true,
+    hasIonToken: true,
+    priorGoogleError: rememberedEeaError(),
+    createGoogle: async () => { googleCalls += 1; return {}; },
+    fromIonAssetId: async () => ({ id: 'i' }),
+  });
+  assert.equal(googleCalls, 0);
+  assert.equal(result.source, 'ion');
+  assert.equal(result.regionBlocked, true);
+  assert.equal(shouldRememberEea(result), false);
+});
+
+test('zapojenie: main.js číta príznak pred načítaním a zapisuje ho po skutočnom EHP 403 (úspech aj zlyhanie)', () => {
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /const eeaRemembered = readEeaBlock\(eeaStorage\(\)\);\n\s+const photoreal = await createPhotorealTileset\(\{/);
+  assert.match(main, /priorGoogleError: eeaRemembered \? rememberedEeaError\(\) : null,\n\s+\}\);\n\s+if \(shouldRememberEea\(photoreal\)\) writeEeaBlock\(eeaStorage\(\)\);/);
+  assert.match(main, /if \(shouldRememberEea\(tileError\)\) writeEeaBlock\(eeaStorage\(\)\);/);
+  assert.match(main, /const eeaStorage = \(\) => \{ try \{ return window\.localStorage; \} catch \{ return null; \} \};/);
 });
 
 test('tripwire: main.js používa createPhotorealTileset a controller dostáva dôvod aj zdroj', () => {
