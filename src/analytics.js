@@ -313,6 +313,22 @@ const BANNER_TILES = Object.freeze([
  * Správca súhlasu: lišta + nastavenia. Vráti { showBanner, openSettings, close, choice }.
  * `onChange(choice)` dostane 'granted' | 'denied' po každom uložení.
  */
+/**
+ * Toasty nad lištou súhlasu (2026-10-18, vlastník: „1"): toast (#toast, z-index 200) aj lišta (#oko-consent,
+ * 10050) sú dole v strede a lišta pri prvej návšteve prekryla každú hlášku („Google 3D je späť.", oblasť po
+ * prelete). Kým je lišta viditeľná, body nesie triedu `oko-consent-open` a premennú `--oko-consent-top` =
+ * vzdialenosť horného okraja lišty od spodku okna; CSS posunie toast nad ňu. Meria sa spodný odstup + výška
+ * (offsetHeight), nie getBoundingClientRect — vstupná animácia lištu posúva transformom.
+ */
+export const CONSENT_OPEN_CLASS = 'oko-consent-open';
+/** Horný okraj lišty od spodku okna (px, pure). */
+export function consentLiftPx(bottomPx, heightPx) {
+  const b = Number.parseFloat(bottomPx);
+  const h = Number(heightPx);
+  if (!Number.isFinite(h) || h <= 0) return 0;
+  return Math.max(0, Math.round((Number.isFinite(b) ? b : 0) + h));
+}
+
 export function createConsentManager({ win = window, doc = document, t, gpc = false, onChange } = {}) {
   let banner = null;
   let dialog = null;
@@ -338,9 +354,27 @@ export function createConsentManager({ win = window, doc = document, t, gpc = fa
     button('accept', t('consent.accept-all'), () => save('granted')),
   ]);
 
+  let liftObserver = null;
+  /** Lišta viditeľná → trieda a výška na body (toasty nad ňou); inak preč. */
+  function syncLift() {
+    const body = doc.body;
+    if (!body?.classList) return;
+    const open = !!banner && banner.isConnected !== false && !banner.hidden;
+    body.classList.toggle(CONSENT_OPEN_CLASS, open);
+    if (!open) { body.style?.removeProperty?.('--oko-consent-top'); return; }
+    let bottom = 0;
+    try { bottom = win.getComputedStyle?.(banner)?.bottom; } catch { /* */ }
+    const lift = consentLiftPx(bottom, banner.offsetHeight);
+    if (lift > 0) body.style?.setProperty?.('--oko-consent-top', `${lift}px`);
+  }
+
   function closeBanner() {
     banner?.remove();
     banner = null;
+    try { liftObserver?.disconnect(); } catch { /* */ }
+    liftObserver = null;
+    win.removeEventListener?.('resize', syncLift);
+    syncLift();
   }
 
   function closeDialog({ restoreFocus = true } = {}) {
@@ -350,6 +384,7 @@ export function createConsentManager({ win = window, doc = document, t, gpc = fa
     doc.removeEventListener('keydown', onDialogKey, true);
     if (restoreFocus && lastFocus?.isConnected) lastFocus.focus?.();
     if (banner) banner.hidden = false;
+    syncLift();
   }
 
   function closeAll() {
@@ -380,6 +415,11 @@ export function createConsentManager({ win = window, doc = document, t, gpc = fa
       ]),
     ]);
     doc.body.appendChild(banner);
+    syncLift();
+    try {
+      if (typeof win.ResizeObserver === 'function') { liftObserver = new win.ResizeObserver(syncLift); liftObserver.observe(banner); }
+    } catch { liftObserver = null; }
+    win.addEventListener?.('resize', syncLift);
     return banner;
   }
 
@@ -428,6 +468,7 @@ export function createConsentManager({ win = window, doc = document, t, gpc = fa
     if (dialog) return dialog;
     lastFocus = doc.activeElement;
     if (banner) banner.hidden = true;
+    syncLift();
     const analyticsInput = el(doc, 'input', {
       type: 'checkbox', role: 'switch', id: 'oko-consent-analytics', 'aria-labelledby': 'oko-consent-cat-analytics',
     });

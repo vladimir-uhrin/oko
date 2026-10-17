@@ -14117,3 +14117,11 @@ body.embed-mode #toast { bottom: 24px !important; }
   display: block; margin: 12px auto 0; padding: 8px 18px; border: 1px solid #00dcff; border-radius: 8px;
   background: rgba(0, 72, 92, 0.9); color: #fff; font: 600 13px var(--font-mono, monospace); cursor: var(--cursor-pointer);
 }
+
+/* Toasty nad lištou súhlasu (2026-10-18, src/analytics.js consentLiftPx): kým je lišta viditeľná, hláška ide nad jej
+   horný okraj a nad jej vrstvu — pri prvej návšteve ju inak prekryla („Google 3D je späť."). Za pravidlami
+   #toast pre mobil (body.oko-mobile) a časovú os, aby vyhrali. */
+body.oko-consent-open #toast {
+  bottom: calc(var(--oko-consent-top, 220px) + 12px);
+  z-index: 10060;
+}

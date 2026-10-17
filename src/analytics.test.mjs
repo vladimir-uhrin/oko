@@ -8,7 +8,7 @@ import {
   ANALYTICS_ENABLED, CONSENT_CATEGORIES, CONSENT_MAX_AGE_DAYS, CONSENT_POLICY_VERSION, CONSENT_STORAGE_KEY,
   GA4_MEASUREMENT_ID, LEGACY_CONSENT_STORAGE_KEY, analyticsDecision, consentDefaults, cookieDeletionStrings,
   gaCookieNames, gtagCommands, gtagLoads, TRACKED_EVENTS, eventPayload, trackEvent, isConsentPreview, parseConsentRecord, readConsent, serializeConsent,
-  scheduleConsentBanner,
+  scheduleConsentBanner, CONSENT_OPEN_CLASS, consentLiftPx,
 } from './analytics.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 
@@ -211,4 +211,28 @@ test('udalosti (2026-10-04): len známe názvy a povolené parametre, nič pred 
   const page = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
   assert.match(page, /ktoré funkcie OKA sa používajú/, 'zásady opisujú meranie funkcií');
   assert.match(page, /which OKO features are used/);
+});
+
+test('toasty nad lištou súhlasu (2026-10-18): horný okraj lišty = spodný odstup + výška, bez animačného transformu', () => {
+  assert.equal(consentLiftPx('24px', 230), 254);
+  assert.equal(consentLiftPx('52.4px', 160.2), 213);
+  assert.equal(consentLiftPx('auto', 200), 200, 'nečitateľný odstup = 0');
+  assert.equal(consentLiftPx('24px', 0), 0, 'skrytá lišta nemá výšku');
+  assert.equal(consentLiftPx('24px', undefined), 0);
+  assert.equal(CONSENT_OPEN_CLASS, 'oko-consent-open');
+});
+
+test('zapojenie: lišta pri zobrazení, nastaveniach a zatvorení prepína triedu; CSS dvíha toast nad lištu a jej vrstvu', () => {
+  const src = readFileSync(new URL('./analytics.js', import.meta.url), 'utf8');
+  assert.match(src, /body\.classList\.toggle\(CONSENT_OPEN_CLASS, open\);/);
+  assert.match(src, /consentLiftPx\(bottom, banner\.offsetHeight\)/, 'offsetHeight, nie getBoundingClientRect (vstupná animácia)');
+  assert.match(src, /doc\.body\.appendChild\(banner\);\n\s+syncLift\(\);/);
+  assert.match(src, /banner = null;\n[\s\S]{0,200}syncLift\(\);\n\s+\}/, 'zatvorenie triedu zruší');
+  assert.match(src, /if \(banner\) banner\.hidden = true;\n\s+syncLift\(\);/, 'nastavenia skryjú lištu');
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  const rule = css.lastIndexOf('body.oko-consent-open #toast {');
+  assert.ok(rule > css.lastIndexOf('body.oko-mobile #toast') && rule > css.lastIndexOf('body.oko-ukr-tl-open #toast'), 'pravidlo je za mobilom aj časovou osou');
+  const block = css.slice(rule, css.indexOf('}', rule));
+  assert.match(block, /bottom: calc\(var\(--oko-consent-top, 220px\) \+ 12px\);/);
+  assert.match(block, /z-index: 10060;/, 'nad vrstvou lišty (10050)');
 });
