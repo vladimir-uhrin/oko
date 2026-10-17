@@ -27,6 +27,9 @@ export async function installWorldScene(viewer, { map = 'aster-relief', timeoutM
     overlayLayer.alpha = Number.isFinite(overlay.alpha) ? overlay.alpha : 0.85;
     overlayLayer.show = false;
   }
+  // Glóbus výslovne zapnúť: od Zeme z výšky (farGlobe.js, 10-16) ostáva po štarte s mapou z odkazu skrytý
+  // (stránku kreslí fotoreál) — video fotoreál skrýva nižšie, bez toho by ostali len hviezdy (reel 17. 10.).
+  viewer.scene.globe.show = true;
   // Vrstvy appky (lietadlá, lode…) do videa nepatria — nahrávanie ich skryje cez CSS a tu vypne entity.
   try { for (let i = 0; i < viewer.dataSources.length; i += 1) viewer.dataSources.get(i).show = false; } catch { /* */ }
   try { viewer.entities.show = false; } catch { /* */ }
