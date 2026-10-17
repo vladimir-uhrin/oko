@@ -80,8 +80,12 @@ a hneď 2. veta na `spot:*` bez podkladu (strih so zábleskom robí v2 sám).
   okolia, piny s pečiatkou, veľké čísla s odpočtom, stĺpcový graf z vlastných dát, fotky Ken Burns, video ako snímky,
   záverečná karta. Titulky po skupinách (`src/data/reelCaptions.js`). Vzor: `output/reel-moskva-2noc/v3/build.mjs`
   (`--until 14` ukážka, `--stills 1,5,9`, `--skip id`).
-- Hudba: nie Kevin MacLeod; voľné CC BY skladby s napätím (Scott Buckley — scottbuckley.com.au), začiatok výrezu na
-  silný úder (analýza nástupov), hudba v pauzách hlasnejšia, pod hlasom stlmená; efekty tik-tak / šum / úder.
+- Hudba: napätý dokumentárny pulz — vlastník 17. 10. vybral JayStacksBeats „Tension / Crime Documentary /
+  Investigative 001" (Pixabay, `.gev-cache/event-video-capture/music/jaystacksbeats-…-448748.mp3`). Nie Kevin MacLeod
+  ani Scott Buckley „Eyes In The Void" (oboje odmietnuté). Len Pixabay bez „Content ID Registered" (na stránke skladby)
+  alebo CC BY s autorom na záverečnej karte. Keď si nie som istý, 2–3 verzie toho istého videa (`build.mjs --music X`,
+  mení sa len zvuk) a vyberie vlastník. Začiatok výrezu tak, aby silný nástup padol na zlom vo videu; hudba v pauzách
+  hlasnejšia, pod hlasom stlmená; efekty tik-tak / šum / úder.
 - Obsah: každé číslo z vlastných dát porovnať s bežným stavom (graf), výpadky príjmu dát vylúčiť (konzervatívne);
   údaj z jedného zdroja, ktorý iné zdroje nepotvrdzujú, vypustiť.
 
