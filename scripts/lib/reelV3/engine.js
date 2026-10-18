@@ -515,14 +515,14 @@ async function drawSatScene(c, scene, t) {
     c.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
     c.restore();
   };
-  let wipeX = null;
+  let wipeX = null; let wipeY = null;
   for (const [i, L] of scene.layers.entries()) {
     if (i === 0) { await drawLayer(L); continue; }
     if (L.wipeAt != null) {
       const k = easeInOut((t - L.wipeAt) / (L.wipeDur || 0.9));
       if (k <= 0) continue;
-      wipeX = W * k;
-      await drawLayer(L, [0, 0, wipeX, H]);
+      // opona zľava doprava, alebo „sken" zhora nadol (infračervené odhalenie)
+      if (L.wipeDir === 'down') { wipeY = H * k; await drawLayer(L, [0, 0, W, wipeY]); } else { wipeX = W * k; await drawLayer(L, [0, 0, wipeX, H]); }
     } else if (L.fadeAt != null) {
       const a = clamp((t - L.fadeAt) / (L.fadeDur || 0.5));
       const out = L.fadeOutAt != null ? clamp((t - L.fadeOutAt) / (L.fadeDur || 0.5)) : 0;
@@ -531,6 +531,11 @@ async function drawSatScene(c, scene, t) {
   }
   if (wipeX != null && wipeX < W - 1) {
     c.save(); c.fillStyle = '#fff'; c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 20; c.fillRect(wipeX - 3, 0, 6, H); c.restore();
+  }
+  if (wipeY != null && wipeY < H - 1) {
+    c.save(); c.fillStyle = '#ffb33c'; c.shadowColor = 'rgba(255,140,30,0.95)'; c.shadowBlur = 40; c.fillRect(0, wipeY - 3, W, 6);
+    const g = c.createLinearGradient(0, wipeY - 140, 0, wipeY); g.addColorStop(0, 'rgba(255,150,40,0)'); g.addColorStop(1, 'rgba(255,150,40,0.28)');
+    c.shadowBlur = 0; c.fillStyle = g; c.fillRect(0, wipeY - 140, W, 140); c.restore();
   }
   if (scene.dim) { c.fillStyle = `rgba(0,0,0,${scene.dim})`; c.fillRect(0, 0, W, H); }
   if (scene.hotspots) drawHotspots(c, scene, t, toScreen, pxPerKm);

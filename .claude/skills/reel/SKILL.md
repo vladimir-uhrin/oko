@@ -54,9 +54,12 @@ Vzor: `output/reel-samara/build.mjs` (štýl v3). Pravidlá, ktoré musí splni�
    mapa infraštruktúry (trasa, ropovody z OSM), záber zo zeme, vlastné dáta (FIRMS ohniská deň po dni s počítadlom),
    satelit pred/po (opona), rozsah (dym zo satelitu), záver.
 6. **Vlastné dáta do 20. sekundy** — to je to, čím sa líšime (NASA FIRMS v histórii OKO, Sentinel-2).
-7. **Satelit, ktorý pôsobí:** Sentinel-2 SWIR (B12, B11, B04) ukáže aktívny oheň oranžovo cez dym; pravé farby
-   pred/po s oponou; široký záber pre dĺžku dymu (zmerať, uviesť opatrne „vyše 15 km"). Kontrola preletov a mrakov
-   priamo nad miestom: `output/reel-samara/s2.mjs`, snímky na výšku `s2-portrait.mjs` (najviac 2 500 px na stranu).
+7. **Satelit, ktorý pôsobí — infračervené svetlo** (vlastník: „myslel som v infračervenom svetle"): Sentinel-2 SWIR
+   (B12, B11, B04) ukáže aktívny oheň oranžovo aj pod dymom; na obraze vždy štítok „INFRAČERVENÉ SVETLO", ideálne
+   „sken" bežné svetlo → infračervené (`wipeDir: 'down'`) a pred/po tiež v infračervenom (opona). Široký záber pre
+   dĺžku dymu (zmerať, uviesť opatrne „vyše 15 km"). Kontrola preletov a mrakov priamo nad miestom:
+   `output/reel-samara/s2.mjs`, snímky na výšku `s2-portrait.mjs` (najviac 2 500 px na stranu). Termálne Landsat
+   (`landsat.mjs`, landsat-ot-l1 B10) len ak nie je zamračené; Sentinel-3 SLSTR má len 1 km.
 8. **Výslovnosť háčika:** ak ju prepis hlasu skomolí („uzol ropovodu" → „úzor o povodu"), vetu preformulovať,
    nie nechať — háčik musí byť zrozumiteľný na prvé počutie.
 9. **Žiadny superlatív s jedným zdrojom** ani s rozporom („najväčší sklad ropy v Európe" vypadol — zdroje sa líšia).
