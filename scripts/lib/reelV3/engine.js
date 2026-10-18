@@ -613,7 +613,9 @@ function drawSatCounter(c, scene, t) {
   c.strokeText(date, W / 2, ct.y ?? 420); c.fillStyle = '#ffd27a'; c.fillText(date, W / 2, ct.y ?? 420);
   c.shadowBlur = 0;
   c.font = `800 ${ct.subSize || 42}px ${FONT.sans}`; c.letterSpacing = '3px'; c.lineWidth = 8;
-  const sub = `${n} ${ct.unit || 'ZÁZNAMOV OHŇA'}`;
+  // tvar podľa čísla: [1, 2–4, 5+] (slovenčina)
+  const u = Array.isArray(ct.unit) ? (n === 1 ? ct.unit[0] : n >= 2 && n <= 4 ? ct.unit[1] : ct.unit[2]) : (ct.unit || 'ZÁZNAMOV OHŇA');
+  const sub = `${n} ${u}`;
   c.strokeText(sub, W / 2, (ct.y ?? 420) + 70); c.fillStyle = '#fff'; c.fillText(sub, W / 2, (ct.y ?? 420) + 70);
   if (ct.label) { c.font = `700 34px ${FONT.sans}`; c.letterSpacing = '6px'; c.fillStyle = ct.labelColor || COLORS.accent; c.fillText(ct.label, W / 2, (ct.y ?? 420) - (ct.size || 150) * 0.86); }
   c.restore();
@@ -758,14 +760,16 @@ async function drawPhotoScene(c, scene, t) {
   // krátke biele zablysnutie pri výmene fotky
   if (i > 0 && local < 0.12) { c.fillStyle = `rgba(255,255,255,${0.35 * (1 - local / 0.12)})`; c.fillRect(0, 0, W, H); }
   vignette(c, 0.35);
+  drawChips(c, scene.chips, t);
 }
 
 async function drawVideoScene(c, scene, t) {
   const f = Math.min(scene.count - 1, Math.max(0, Math.floor((t - scene.start) * scene.fps)));
   const img = await loadImage(`${scene.frames}/${String(f + 1).padStart(5, '0')}.jpg`);
   c.drawImage(img, 0, 0, W, H);
-  if (IMG.size > 400) for (const k of [...IMG.keys()].slice(0, 200)) if (k.includes('/clip')) IMG.delete(k);
+  if (IMG.size > 400) for (const k of [...IMG.keys()].slice(0, 200)) if (k.includes('/clip') || /\/\d{5}\.jpg$/.test(k)) IMG.delete(k);
   vignette(c, 0.3);
+  drawChips(c, scene.chips, t);
 }
 
 async function drawEnd(c, scene, t) {
