@@ -39,6 +39,28 @@ Technika: najsilnejší záber je video/fotka → `lines[0].shot = 'clip:0'` a `
 záberom); inak `opening` s podkladom (`overlay`). Rýchly kontrast = krátka 1. veta na `opening` (podklad zapnutý)
 a hneď 2. veta na `spot:*` bez podkladu (strih so zábleskom robí v2 sám).
 
+### Prvé sekundy WOW (vlastník 18. 10.: „prvé sekundy wow, aby sme nestratili pozeranosť")
+
+Vzor: `output/reel-samara/build.mjs` (štýl v3). Pravidlá, ktoré musí splniť snímka 0 až 3 s:
+1. **Snímka 0 (prvá, aj náhľad na FB) je už vrchol:** oheň, výbuch, dym, satelit s horiacim miestom — plná
+   obrazovka, žiadna mapa navyše, logo ani úvodná karta. Titulok je na snímke 0 **už celý** (štart `titles` pred 0,
+   nie nábeh), obrovský (≥ 200 px), najviac 2 riadky, jedno číslo farebne („6 DNÍ / V PLAMEŇOCH").
+2. **Pohyb od prvej snímky:** rýchle priblíženie k ohňu (`camEase: 'out'` — rýchlo na začiatku), nič statické.
+3. **Zvuk od 0,0 s:** úder (`impact`) + prostredie (praskanie ohňa), hudba výrezom tak, aby silný úder taktu padol
+   na prvý strih (~2,5 s).
+4. **Prvá veta ≤ 2,8 s** s číslom a menom, ktoré Slováka zaujíma („Šesť dní horel ropný uzol **Družby**."),
+   **druhá veta do 6 s = prečo sa ho to týka** („Tým istým ropovodom tečie ruská ropa aj na Slovensko.").
+5. **Strih najneskôr v 3. sekunde** na druhý silný obraz (záblesk/„punch") — potom každé 2–4 s nový dôkaz:
+   mapa infraštruktúry (trasa, ropovody z OSM), záber zo zeme, vlastné dáta (FIRMS ohniská deň po dni s počítadlom),
+   satelit pred/po (opona), rozsah (dym zo satelitu), záver.
+6. **Vlastné dáta do 20. sekundy** — to je to, čím sa líšime (NASA FIRMS v histórii OKO, Sentinel-2).
+7. **Satelit, ktorý pôsobí:** Sentinel-2 SWIR (B12, B11, B04) ukáže aktívny oheň oranžovo cez dym; pravé farby
+   pred/po s oponou; široký záber pre dĺžku dymu (zmerať, uviesť opatrne „vyše 15 km"). Kontrola preletov a mrakov
+   priamo nad miestom: `output/reel-samara/s2.mjs`, snímky na výšku `s2-portrait.mjs` (najviac 2 500 px na stranu).
+8. **Výslovnosť háčika:** ak ju prepis hlasu skomolí („uzol ropovodu" → „úzor o povodu"), vetu preformulovať,
+   nie nechať — háčik musí byť zrozumiteľný na prvé počutie.
+9. **Žiadny superlatív s jedným zdrojom** ani s rozporom („najväčší sklad ropy v Európe" vypadol — zdroje sa líšia).
+
 ## Scenár — formát pre vlastníka
 
 | čas | záber (čo je na obraze) | hlas (presne, ako sa vysloví) | karta / titulok | zdroj |

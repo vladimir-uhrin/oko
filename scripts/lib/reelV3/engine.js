@@ -423,6 +423,54 @@ function drawBigNumber(c, scene, t) {
   c.restore();
 }
 
+/** Trasa, ktorá sa kreslí postupne (napr. ropovod): žiara + jadro, svetielko na čele. */
+function drawRoutes(c, scene, P, t) {
+  for (const r of scene.routes || []) {
+    const k = easeInOut((t - (r.from ?? scene.start)) / (r.dur || 1.5));
+    if (k <= 0) continue;
+    const pts = r.pts.map(([lon, lat]) => P(lon, lat));
+    const seg = []; let total = 0;
+    for (let i = 1; i < pts.length; i += 1) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(d); total += d; }
+    let left = total * k; const path = [pts[0]]; let head = pts[0];
+    for (let i = 1; i < pts.length && left > 0; i += 1) {
+      const d = seg[i - 1];
+      if (d <= left) { path.push(pts[i]); head = pts[i]; left -= d; } else { const f = left / d; head = [lerp(pts[i - 1][0], pts[i][0], f), lerp(pts[i - 1][1], pts[i][1], f)]; path.push(head); left = 0; }
+    }
+    const col = r.color || COLORS.amber;
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round';
+    for (const [w, a] of [[r.width ? r.width * 4 : 22, 0.18], [r.width ? r.width * 2 : 10, 0.35], [r.width || 5, 1]]) {
+      c.strokeStyle = hexA(col, a); c.lineWidth = w;
+      c.beginPath(); c.moveTo(path[0][0], path[0][1]); for (const p of path.slice(1)) c.lineTo(p[0], p[1]); c.stroke();
+    }
+    if (k < 1) { const g = c.createRadialGradient(head[0], head[1], 0, head[0], head[1], 30); g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(1, hexA(col, 0)); c.fillStyle = g; c.beginPath(); c.arc(head[0], head[1], 30, 0, Math.PI * 2); c.fill(); }
+    if (r.label && k > 0.3) {
+      const mid = pts[Math.floor(pts.length * (r.labelAt ?? 0.5))];
+      c.globalAlpha = clamp((k - 0.3) / 0.3);
+      c.font = `700 ${r.labelSize || 34}px ${FONT.sans}`; c.letterSpacing = '3px'; c.textAlign = 'center';
+      c.lineWidth = 7; c.strokeStyle = 'rgba(0,0,0,0.85)'; c.strokeText(r.label, mid[0] + (r.labelDx || 0), mid[1] + (r.labelDy || -24));
+      c.fillStyle = col; c.fillText(r.label, mid[0] + (r.labelDx || 0), mid[1] + (r.labelDy || -24));
+    }
+    c.restore();
+  }
+}
+
+/** Statické čiary z dát (napr. ropovody z OSM) — tenká sieť, ktorá sa objaví prelínaním. */
+function drawDataLines(c, scene, P, t) {
+  for (const L of scene.lines || []) {
+    const a = clamp((t - (L.from ?? scene.start)) / (L.fadeDur || 0.6));
+    if (a <= 0) continue;
+    const list = DATA[L.data] || [];
+    c.save(); c.lineCap = 'round'; c.lineJoin = 'round'; c.globalAlpha = a;
+    for (const [w, al] of [[(L.width || 2.5) * 3, 0.18], [L.width || 2.5, 0.85]]) {
+      c.strokeStyle = hexA(L.color || '#ffb33c', al); c.lineWidth = w;
+      c.beginPath();
+      for (const ln of list) { const pts = ln.pts || ln; if (pts.length < 2) continue; const [x0, y0] = P(pts[0][0], pts[0][1]); c.moveTo(x0, y0); for (const p of pts.slice(1)) { const [x, y] = P(p[0], p[1]); c.lineTo(x, y); } }
+      c.stroke();
+    }
+    c.restore();
+  }
+}
+
 function drawMapScene(c, scene, t) {
   const cam = camAt(scene, t);
   const P = projector(cam);
@@ -431,11 +479,165 @@ function drawMapScene(c, scene, t) {
   drawPlaceLabels(c, scene, P, t);
   drawCircle(c, scene, P, t);
   drawRings(c, scene, P, t);
+  drawDataLines(c, scene, P, t);
+  drawRoutes(c, scene, P, t);
   if (scene.flights) drawFlights(c, scene, P, t);
   drawPins(c, scene, P, t);
   vignette(c, scene.vignette ?? 0.55);
   drawClock(c, scene, t);
   drawBigNumber(c, scene, t);
+}
+
+// ---------- satelitná snímka (Sentinel-2) ----------
+// Snímky s bbox [z, j, v, s] v CRS84 (lineárne), kamera {lon, lat, km} = šírka záberu; vrstvy cez seba
+// (fadeAt = prelínanie, wipeAt = opona zľava doprava s deliacou čiarou), ohniská FIRMS podľa simulovaného času.
+function satCamAt(scene, t) {
+  const a = scene.cam; const b = scene.camTo;
+  if (!b) return a;
+  const k = (EASE[scene.camEase || 'inOut'])((t - (scene.camFrom ?? scene.start)) / ((scene.camUntil ?? scene.end) - (scene.camFrom ?? scene.start)));
+  return { lon: lerp(a.lon, b.lon, k), lat: lerp(a.lat, b.lat, k), km: Math.exp(lerp(Math.log(a.km), Math.log(b.km), k)) };
+}
+async function drawSatScene(c, scene, t) {
+  const cam = satCamAt(scene, t);
+  const dLon = cam.km / 2 / (111.32 * Math.cos(cam.lat * D2R)); const dLat = ((cam.km * H) / W) / 2 / 110.57;
+  const vis = [cam.lon - dLon, cam.lat - dLat, cam.lon + dLon, cam.lat + dLat];
+  const toScreen = (lon, lat) => [((lon - vis[0]) / (2 * dLon)) * W, ((vis[3] - lat) / (2 * dLat)) * H];
+  const pxPerKm = W / cam.km;
+  c.fillStyle = '#000'; c.fillRect(0, 0, W, H);
+  const drawLayer = async (L, clip = null, alpha = 1) => {
+    const img = await loadImage(L.src); const [w, s, e, n] = L.bbox || scene.bbox;
+    const sx = ((vis[0] - w) / (e - w)) * img.width; const sw = ((vis[2] - vis[0]) / (e - w)) * img.width;
+    const sy = ((n - vis[3]) / (n - s)) * img.height; const sh = ((vis[3] - vis[1]) / (n - s)) * img.height;
+    c.save();
+    if (clip) { c.beginPath(); c.rect(...clip); c.clip(); }
+    c.globalAlpha = alpha; c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    if (L.filter) c.filter = L.filter;
+    c.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+    c.restore();
+  };
+  let wipeX = null;
+  for (const [i, L] of scene.layers.entries()) {
+    if (i === 0) { await drawLayer(L); continue; }
+    if (L.wipeAt != null) {
+      const k = easeInOut((t - L.wipeAt) / (L.wipeDur || 0.9));
+      if (k <= 0) continue;
+      wipeX = W * k;
+      await drawLayer(L, [0, 0, wipeX, H]);
+    } else if (L.fadeAt != null) {
+      const a = clamp((t - L.fadeAt) / (L.fadeDur || 0.5));
+      const out = L.fadeOutAt != null ? clamp((t - L.fadeOutAt) / (L.fadeDur || 0.5)) : 0;
+      if (a > 0 && out < 1) await drawLayer(L, null, a * (1 - out));
+    } else await drawLayer(L);
+  }
+  if (wipeX != null && wipeX < W - 1) {
+    c.save(); c.fillStyle = '#fff'; c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 20; c.fillRect(wipeX - 3, 0, 6, H); c.restore();
+  }
+  if (scene.dim) { c.fillStyle = `rgba(0,0,0,${scene.dim})`; c.fillRect(0, 0, W, H); }
+  if (scene.hotspots) drawHotspots(c, scene, t, toScreen, pxPerKm);
+  drawSatPins(c, scene, t, toScreen);
+  vignette(c, scene.vignette ?? 0.4);
+  drawChips(c, scene.chips, t);
+  drawSatCounter(c, scene, t);
+}
+function hsSim(scene, t) {
+  const h = scene.hotspots;
+  const k = (EASE[h.ease || 'linear'])((t - (h.from ?? scene.start)) / ((h.until ?? scene.end) - (h.from ?? scene.start)));
+  return lerp(h.simFrom, h.simTo, k);
+}
+function drawHotspots(c, scene, t, toScreen, pxPerKm) {
+  const h = scene.hotspots; const s = hsSim(scene, t);
+  const pts = (DATA[h.data] || []).filter((p) => p.t <= s);
+  c.save(); c.globalCompositeOperation = 'lighter';
+  for (const p of pts) {
+    const [x, y] = toScreen(p.lon, p.lat);
+    const age = (s - p.t) / 3600; // hodiny
+    const fresh = clamp(1 - age / (h.freshH || 10));
+    const r = Math.max(14, 0.19 * pxPerKm) * (0.8 + Math.log10(1 + (p.frp || 0)) / 2.2);
+    const a = (h.alpha ?? 0.5) * (0.35 + 0.65 * fresh);
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(255,${Math.round(190 + 50 * fresh)},${Math.round(90 + 80 * fresh)},${a})`); g.addColorStop(0.45, `rgba(255,110,20,${a * 0.6})`); g.addColorStop(1, 'rgba(255,60,0,0)');
+    c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+  }
+  c.restore();
+}
+function drawSatPins(c, scene, t, toScreen) {
+  for (const p of scene.pins || []) {
+    const k = easeOutBack((t - (p.appear ?? scene.start)) / 0.35);
+    if (k <= 0) continue;
+    const [x, y] = toScreen(p.lon, p.lat);
+    c.save(); c.globalAlpha = clamp(k);
+    c.strokeStyle = p.color || '#fff'; c.lineWidth = 4; c.setLineDash([12, 9]);
+    if (p.ring) { c.beginPath(); c.arc(x, y, p.ring * k, 0, Math.PI * 2); c.stroke(); }
+    c.setLineDash([]);
+    if (p.label) {
+      c.font = `800 ${p.size || 40}px ${FONT.sans}`; c.textAlign = 'center'; c.lineWidth = 9; c.strokeStyle = 'rgba(0,0,0,0.85)'; c.lineJoin = 'round';
+      const ly = y - (p.ring || 0) - 22;
+      c.strokeText(p.label, x, ly); c.fillStyle = '#fff'; c.fillText(p.label, x, ly);
+    }
+    c.restore();
+  }
+}
+/** Čipy (štítky) na obraze, napr. „PRED · 27. 9." vľavo a „11. 10." vpravo pri opone. */
+function drawChips(c, chips, t) {
+  for (const ch of chips || []) {
+    if (t < (ch.at ?? 0) || (ch.until != null && t > ch.until)) continue;
+    const k = easeOut((t - (ch.at ?? 0)) / 0.3);
+    c.save(); c.globalAlpha = k;
+    c.font = `800 ${ch.size || 40}px ${FONT.sans}`; c.letterSpacing = '3px';
+    const tw = c.measureText(ch.text).width; const pad = 26; const hgt = (ch.size || 40) + 30;
+    const x = ch.side === 'right' ? W - 50 - tw - pad * 2 : ch.side === 'center' ? W / 2 - tw / 2 - pad : 50;
+    const y = ch.y ?? 250;
+    c.fillStyle = hexA(ch.bg || '#05070c', 0.82); roundRect(c, x, y, tw + pad * 2, hgt, 14); c.fill();
+    c.strokeStyle = ch.color || '#fff'; c.lineWidth = 3; roundRect(c, x, y, tw + pad * 2, hgt, 14); c.stroke();
+    c.fillStyle = ch.color || '#fff'; c.fillText(ch.text, x + pad, y + hgt / 2 + (ch.size || 40) * 0.36);
+    c.restore();
+  }
+}
+/** Počítadlo k ohniskám: dátum (miestny čas) a počet záznamov ohňa. */
+function drawSatCounter(c, scene, t) {
+  const h = scene.hotspots; const ct = scene.counter;
+  if (!h || !ct || t < (ct.at ?? scene.start)) return;
+  const s = hsSim(scene, t);
+  const d = new Date((s + (ct.tz ?? 4) * 3600) * 1000);
+  const n = (DATA[h.data] || []).filter((p) => p.t <= s && (p.frp || 0) >= (ct.minFrp ?? 0)).length;
+  const k = easeOut((t - (ct.at ?? scene.start)) / 0.3);
+  c.save(); c.globalAlpha = k; c.textAlign = 'center';
+  c.font = `700 ${ct.size || 150}px ${FONT.disp}`; c.fontStretch = 'condensed';
+  c.shadowColor = 'rgba(255,120,30,0.8)'; c.shadowBlur = 40; c.lineWidth = 12; c.strokeStyle = 'rgba(0,0,0,0.85)'; c.lineJoin = 'round';
+  const date = `${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
+  c.strokeText(date, W / 2, ct.y ?? 420); c.fillStyle = '#ffd27a'; c.fillText(date, W / 2, ct.y ?? 420);
+  c.shadowBlur = 0;
+  c.font = `800 ${ct.subSize || 42}px ${FONT.sans}`; c.letterSpacing = '3px'; c.lineWidth = 8;
+  const sub = `${n} ${ct.unit || 'ZÁZNAMOV OHŇA'}`;
+  c.strokeText(sub, W / 2, (ct.y ?? 420) + 70); c.fillStyle = '#fff'; c.fillText(sub, W / 2, (ct.y ?? 420) + 70);
+  if (ct.label) { c.font = `700 34px ${FONT.sans}`; c.letterSpacing = '6px'; c.fillStyle = ct.labelColor || COLORS.accent; c.fillText(ct.label, W / 2, (ct.y ?? 420) - (ct.size || 150) * 0.86); }
+  c.restore();
+}
+
+/** Veľký titulok cez celý obraz (háčik): riadky pod sebou, odskok pri nástupe. */
+function drawTitles(c, t) {
+  for (const ti of SPEC.titles || []) {
+    if (t < ti.start || t > ti.end) continue;
+    const out = clamp((ti.end - t) / 0.2);
+    c.save();
+    let y = ti.y ?? 760;
+    for (const [i, ln] of ti.lines.entries()) {
+      const at = ti.start + i * (ti.stagger ?? 0.12);
+      const k = easeOutBack((t - at) / 0.28);
+      if (k <= 0) { y += (ln.size || 170) * 1.0; continue; }
+      c.save();
+      c.globalAlpha = Math.min(clamp(k), out);
+      c.translate(W / 2, y); c.scale(lerp(0.7, 1, clamp(k)), lerp(0.7, 1, clamp(k)));
+      c.font = `${ln.weight || 700} ${ln.size || 170}px ${ln.font === 'sans' ? FONT.sans : FONT.disp}`; c.fontStretch = 'condensed'; c.textAlign = 'center';
+      c.shadowColor = hexA(ln.glow || '#000000', ln.glow ? 0.8 : 0.6); c.shadowBlur = ln.glow ? 45 : 25;
+      c.lineWidth = ln.stroke ?? 14; c.strokeStyle = 'rgba(0,0,0,0.9)'; c.lineJoin = 'round';
+      c.strokeText(ln.text, 0, 0);
+      c.shadowBlur = 0; c.fillStyle = ln.color || '#fff'; c.fillText(ln.text, 0, 0);
+      c.restore();
+      y += (ln.size || 170) * (ln.gap ?? 1.0);
+    }
+    c.restore();
+  }
 }
 
 // ---------- grafy ----------
@@ -576,8 +778,15 @@ async function drawEnd(c, scene, t) {
   c.fillText(a, W / 2 - (wa + wb) / 2, 850); c.fillStyle = COLORS.accent; c.fillText(b, W / 2 - (wa + wb) / 2 + wa, 850);
   c.textAlign = 'center';
   c.font = `700 50px ${FONT.sans}`; c.fillStyle = '#fff'; c.fillText(scene.line1 || 'Lety nad Európou naživo', W / 2, 950);
-  c.font = `500 30px ${FONT.sans}`; c.fillStyle = 'rgba(200,215,235,0.7)';
-  (scene.credits || []).forEach((ln, i) => c.fillText(ln, W / 2, 1240 + i * 44));
+  c.font = `500 27px ${FONT.sans}`; c.fillStyle = 'rgba(200,215,235,0.72)';
+  // zdroje zalomené na šírku obrazovky (dlhý riadok by sa orezal)
+  const wrapped = [];
+  for (const ln of scene.credits || []) {
+    let cur = '';
+    for (const wd of ln.split(' ')) { const test = cur ? `${cur} ${wd}` : wd; if (c.measureText(test).width > 960 && cur) { wrapped.push(cur); cur = wd; } else cur = test; }
+    if (cur) wrapped.push(cur);
+  }
+  wrapped.forEach((ln, i) => c.fillText(ln, W / 2, 1220 + i * 38));
   if (scene.author) { c.font = `700 30px ${FONT.sans}`; c.letterSpacing = '5px'; c.fillStyle = 'rgba(0,212,255,0.85)'; c.fillText(scene.author, W / 2, 1120); }
   c.restore();
 }
@@ -684,7 +893,7 @@ function drawCaptions(c, t) {
 }
 
 // ---------- snímka ----------
-const RENDER = { map: drawMapScene, bars: drawBars, compare: drawCompare, photo: drawPhotoScene, video: drawVideoScene, end: drawEnd };
+const RENDER = { map: drawMapScene, sat: drawSatScene, bars: drawBars, compare: drawCompare, photo: drawPhotoScene, video: drawVideoScene, end: drawEnd };
 
 async function drawScene(c, scene, t) {
   c.save();
@@ -723,6 +932,7 @@ async function frame(t) {
     if (t >= fl.at && t < fl.at + (fl.dur || 0.3)) { ctx.fillStyle = hexA(fl.color || '#ffffff', (fl.a ?? 0.8) * (1 - (t - fl.at) / (fl.dur || 0.3))); ctx.fillRect(0, 0, W, H); }
   }
   if (sc.type !== 'end') { await drawBrand(ctx); drawKicker(ctx, t); }
+  drawTitles(ctx, t);
   drawCaptions(ctx, t);
   drawCredit(ctx, t);
   if (SPEC.progress !== false) drawProgress(ctx, t);
