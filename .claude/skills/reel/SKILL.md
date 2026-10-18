@@ -21,6 +21,14 @@ Render trvá 30–40 minút — zlý scenár sa nedá opraviť strihom. Preto **
    Výnimka: vlastník výslovne povie „rob“ / „sprav rovno video“.
 5. **Kontrolné snímky** (`--frames`) — skontroluj háčik a 2–3 zábery, až potom celý render.
 6. **Odovzdanie:** video + text príspevku (post.txt) cez SendUserFile; nič nezverejňuj (FB robí vlastník).
+7. **Text a koncept FB — KAŽDÝ reel** (vlastník 18. 10.: „ku všetkým reelom aj text … daj do konceptov FB, titulok musí byť lepkavý"):
+   - `post-fb.txt`: 1. riadok = **lepkavý titulok**, prázdny riadok, potom text príspevku (zdroje, odkaz okolive.sk, hashtagy).
+   - Lepkavý titulok: najviac ~70 znakov, konkrétne číslo alebo obraz, ktorý zastaví palec („9 hodín nad Moskvou neletelo nič.",
+     „Ropa, ktorá tečie aj na Slovensko, horela šesť dní."); väzba na čitateľa/Slovensko, keď existuje. Len overený fakt z textu
+     (≥2 zdroje alebo vlastné dáta OKO), žiadne „šokujúce", klikačky ani otázka bez odpovede, bez emoji, bez superlatívu z jedného zdroja.
+   - Koncept do Štúdia (nič sa nezverejní, stav draft):
+     `node scripts/studio-import-reel.mjs --key reel:<téma>-<dátum> --video <mp4> --text <post-fb.txt>`
+     (zapisuje do `.auth-data/admin.sqlite` — rovnaká DB, akú používa služba oko-api; rovnaký `--key` druhýkrát nič nepridá).
 
 ## Háčik 0–3 s — pravidlá
 
