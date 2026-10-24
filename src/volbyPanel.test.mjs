@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  KRAJ_VIEW_HEIGHT_M, VOLBY_PANEL_ID, VOLBY_REFRESH_MS, VOLBY_SEARCH_DEBOUNCE_MS, candidateLabel, installVolbyPanel,
+  KRAJ_VIEW_HEIGHT_M, VOLBY_PANEL_ID, VOLBY_REFRESH_MS, VOLBY_SEARCH_DEBOUNCE_MS, candidateLabel, installVolbyPanel, mergeResults,
   obecViewHeightM, parseVolbyParam, volbyLink,
 } from './volbyPanel.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
@@ -52,7 +52,7 @@ const BA = { ...OBEC, code: '582000', name: 'Bratislava', okres: 'Bratislava', c
 function fakeDoc() {
   const make = (tag) => {
     const node = {
-      tag, children: [], dataset: {}, attributes: {}, listeners: {}, hidden: false, _text: '', className: '', value: '',
+      tag, children: [], dataset: {}, attributes: {}, listeners: {}, hidden: false, _text: '', className: '', value: '', style: {},
       get textContent() { return node._text; },
       set textContent(v) { node._text = String(v); if (node._text === '') node.children.length = 0; },
       appendChild(c) { node.children.push(c); return c; },
@@ -293,15 +293,93 @@ test('i18n: kľúče panela v oboch slovníkoch, slovenské znenie bez emoji', (
     'volby.region-council', 'volby.obvod', 'volby.kraj-sub', 'volby.municipal', 'volby.cities', 'volby.search-placeholder', 'volby.search-hint', 'volby.no-match',
     'volby.mayor', 'volby.mayor-city', 'volby.council', 'volby.ward', 'volby.independent', 'volby.age', 'volby.okres', 'volby.region-ward', 'volby.approx',
     'volby.unmatched', 'volby.typ', 'volby.none-registered', 'volby.row-counts', 'volby.chip-kraj-title', 'volby.chip-obec-title', 'volby.show-more', 'volby.fly',
-    'volby.copy-link', 'volby.copied', 'volby.source-prefix', 'volby.source-minv', 'volby.source-susr', 'volby.source-geonames', 'volby.source-note'];
+    'volby.copy-link', 'volby.copied', 'volby.source-prefix', 'volby.source-minv', 'volby.source-susr', 'volby.source-geonames', 'volby.source-note',
+    'volby.phase-results', 'volby.map', 'volby.map-chip', 'volby.map-hint', 'volby.legend-none', 'volby.legend-partial', 'volby.legend-final', 'volby.progress',
+    'volby.turnout', 'volby.final', 'volby.elected', 'volby.leads', 'volby.withdrawn', 'volby.votes', 'volby.no-votes-yet', 'volby.results-live',
+    'volby.unknown-candidate', 'volby.lead-chip', 'layer.volby-obce.name'];
   for (const key of keys) {
     assert.equal(typeof EN_STRINGS[key], 'string', `EN ${key}`);
     assert.equal(typeof SK_STRINGS[key], 'string', `SK ${key}`);
     assert.ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(SK_STRINGS[key]), `bez emoji: ${key}`);
   }
   assert.equal(SK_STRINGS['panel.volby'], 'VOĽBY 2026');
-  assert.match(SK_STRINGS['volby.phase-before'], /20:00/);
+  assert.match(SK_STRINGS['volby.phase-before'], /od 7:00 do 20:00/, 'kedy sa volí');
   assert.match(SK_STRINGS['volby.source-note'], /vzda/i, 'poznámka o vzdaní kandidatúry');
+});
+
+test('mergeResults: kandidáti dostanú hlasy podľa čísla, zoradenie podľa hlasov, neznámy výsledok ostáva s číslom', () => {
+  const cands = [{ n: 1, meno: 'A', priezvisko: 'Aa' }, { n: 2, meno: 'B', priezvisko: 'Bb' }, { n: 3, meno: 'C', priezvisko: 'Cc' }];
+  assert.deepEqual(mergeResults(cands, null).map((c) => [c.n, c.result]), [[1, null], [2, null], [3, null]]);
+  const merged = mergeResults(cands, [{ n: 2, votes: 50, pct: 62.5, rank: 1, leads: true, known: true }, { n: 1, votes: 30, pct: 37.5, rank: 2, known: true }, { n: 9, votes: 1, pct: 0, rank: 3, known: false }]);
+  assert.deepEqual(merged.map((c) => [c.n, c.result?.votes ?? null, Boolean(c.unknown)]), [[2, 50, false], [1, 30, false], [9, 1, true], [3, null, false]]);
+});
+
+test('výsledky: stav so spracovaním a účasťou, pás, kraj s hlasmi a značkami, obec s výsledkami, mapa obcí (čip, legenda, výber bez preletu)', async () => {
+  const VY = { generatedAt: '2026-10-24T19:40:00.000Z', tables: { starosta: 'OSO2026_SK_tab05f' }, summary: { okrskyDone: 1206, okrskyTotal: 6027, pct: 20, obceWithResults: 700, obceFinal: 300, registered: 1000000, voted: 420000, turnoutPct: 42 },
+    kraje: [{ code: '1', okrskyDone: 10, okrskyTotal: 100, final: false, lead: { n: 1, meno: 'Juraj', priezvisko: 'Droba', strany: 'SaS', nezavisly: false, votes: 5000, pct: 48.2, elected: false } }] };
+  const KRAJ_VY = { ...KRAJ1, vysledky: { okrskyDone: 10, okrskyTotal: 100, final: false, predseda: [{ n: 2, votes: 5200, pct: 52, rank: 1, elected: false, leads: true, withdrawn: false, known: true, meno: 'Ján', priezvisko: 'Chalabala' }, { n: 1, votes: 4800, pct: 48, rank: 2, elected: false, leads: false, withdrawn: false, known: true, meno: 'Juraj', priezvisko: 'Droba' }], obvody: [{ code: '101', name: 'Volebný obvod č. 1', seats: 4, kandidati: [{ n: 1, votes: 300, pct: 100, rank: 1, elected: true, leads: false, withdrawn: false, known: true }] }] } };
+  const OBEC_VY = { ...OBEC, vysledky: { okrskyDone: 2, okrskyTotal: 2, final: true, ucast: { registered: 1000, voted: 500, pct: 50 }, starosta: [{ n: 1, votes: 300, pct: 75, rank: 1, elected: true, leads: false, withdrawn: false, known: true }], poslanci: [{ obvod: '1', seats: 9, kandidati: [{ n: 3, votes: 90, pct: 60, rank: 1, elected: true, leads: false, withdrawn: false, known: true }, { n: 1, votes: 60, pct: 40, rank: 2, elected: false, leads: false, withdrawn: false, known: true }] }] } };
+  const doc = fakeDoc();
+  let mapOn = false;
+  const highlighted = [];
+  const { panel, flown } = install(doc, { api: {
+    overview: async () => ({ ...OVERVIEW, phase: 'counting', vysledky: VY }),
+    kraj: async () => KRAJ_VY,
+    search: async () => ({ results: [] }),
+    obec: async () => OBEC_VY,
+  } });
+  panel.attachMap({ isOn: () => mapOn, setOn: (on) => { mapOn = on; }, highlight: (code) => highlighted.push(code) });
+  await flush();
+  const st = panel._getStateForTest();
+  assert.equal(st.hasResults, true);
+  assert.equal(st.progress, '20%');
+  const status = byClass(doc.root.body, 'volby-status')[0];
+  assert.match(status.textContent, /volby\.status-counting · volby\.progress \{"done":"1\u00a0206","total":"6\u00a0027","pct":"20,0"\} · volby\.turnout \{"pct":"42,0"\} · volby\.as-of \{"time":"21:40"\}/);
+  assert.equal(byClass(doc.root.body, 'volby-phase')[0].textContent, 'volby.phase-results');
+  assert.equal(byClass(doc.root.body, 'volby-results')[0].textContent, 'volby.results-live');
+  assert.equal(byClass(doc.root.body, 'volby-progress')[0].hidden, false);
+  const baChip = byClass(doc.root.body, 'volby-chip-kraj')[0];
+  assert.match(baChip.title, /volby\.lead-chip \{"name":"Juraj Droba","pct":"48,2"\}/);
+  assert.equal(baChip.dataset.lead, 'Droba');
+  // Mapa: čip zapne vrstvu, legenda sa ukáže len so zapnutou mapou a výsledkami.
+  const mapChip = byClass(doc.root.body, 'volby-chip-map')[0];
+  assert.equal(mapChip.getAttribute('aria-pressed'), 'false');
+  assert.equal(byClass(doc.root.body, 'volby-legend')[0].hidden, true);
+  click(mapChip);
+  await flush();
+  assert.equal(mapOn, true);
+  assert.equal(mapChip.getAttribute('aria-pressed'), 'true');
+  assert.equal(byClass(doc.root.body, 'volby-legend')[0].hidden, false);
+  // Kraj s výsledkami: poradie podľa hlasov, značka VEDIE, pás, obvod so ZVOLENÝM.
+  click(baChip);
+  await flush();
+  const box = byClass(doc.root.body, 'volby-kraj')[0];
+  assert.match(byClass(box, 'volby-note-progress')[0].textContent, /"done":"10","total":"100","pct":"10,0"/);
+  const rows = byClass(box, 'volby-res');
+  assert.equal(byClass(rows[0], 'volby-cand-name')[0].textContent, 'Ján Chalabala');
+  assert.equal(byClass(rows[0], 'volby-tag')[0].textContent, 'volby.leads');
+  assert.equal(byClass(rows[0], 'volby-res-votes')[0].textContent, 'volby.votes {"votes":"5\u00a0200","pct":"52,0"}');
+  assert.equal(byClass(rows[0], 'volby-res-fill')[0].style.width, '52%');
+  assert.equal(byClass(rows[1], 'volby-cand-name')[0].textContent, 'Mgr. Juraj Droba, MBA, MA');
+  const groups = byClass(box, 'volby-group');
+  click(byClass(groups[0], 'volby-group-toggle')[0]);
+  assert.equal(byClass(groups[0], 'volby-tag-elected')[0].textContent, 'volby.elected');
+  // Obec z mapy: bez preletu, zvýraznenie; konečné výsledky s účasťou, ZVOLENÝ starosta, poslanci podľa hlasov.
+  const flownBefore = flown.length;
+  await panel.selectObec('501891', { fly: false });
+  assert.equal(flown.length, flownBefore, 'z mapy sa neletí');
+  assert.deepEqual(highlighted.at(-1), '501891');
+  const obox = byClass(doc.root.body, 'volby-obec')[0];
+  assert.match(byClass(obox, 'volby-note-progress')[0].textContent, /volby\.final/);
+  assert.match(byClass(obox, 'volby-note-progress')[0].textContent, /volby\.turnout \{"pct":"50,0"\}/);
+  const ores = byClass(obox, 'volby-res');
+  assert.equal(byClass(ores[0], 'volby-tag')[0].textContent, 'volby.elected');
+  assert.equal(byClass(ores[0], 'volby-cand-name')[0].textContent, 'Mgr. Anna Nagyová');
+  const council = ores.slice(1);
+  assert.equal(byClass(council[0], 'volby-cand-name')[0].textContent, 'P2 M2'.replace('P2 M2', 'M2 P2'), 'poslanec č. 3 s najviac hlasmi prvý');
+  assert.equal(byClass(council.at(-1), 'volby-res-votes')[0].textContent, 'volby.no-votes-yet', 'kandidát bez sčítaných hlasov na konci');
+  assert.equal(panel._getStateForTest().obecCode, '501891');
+  assert.equal(panel._getStateForTest().krajCode, null);
 });
 
 test('zapojenie: ui.js panel v registri pruhu a kokpite + installVolbyPanel s preletom; sharelink token; mobil sekcia; main.js deep link ?volby', () => {
@@ -316,4 +394,9 @@ test('zapojenie: ui.js panel v registri pruhu a kokpite + installVolbyPanel s pr
   assert.equal(MOBILE_SECTIONS.findIndex((s) => s.id === 'volby'), 1, 'hneď za Vrstvami');
   assert.match(main, /import \{ parseVolbyParam \} from '\.\/volbyPanel\.js';/);
   assert.match(main, /parseVolbyParam\(window\.location\?\.search \|\| ''\)/);
+  assert.match(main, /volbyObceLayer\.onSelect = \(code\) => \{/, 'klik na mape otvorí obec');
+  assert.match(main, /_volbyPanel\?\.attachMap\?\.\(\{/, 'panel ovláda mapu obcí');
+  assert.match(main, /const volbyLocate = volbyStart\?\.obec \|\| volbyStart\?\.kraj/, 'úvodný prelet mieri na obec z odkazu');
+  assert.match(main, /Promise\.race\(\[startSettled, /, 'výber z odkazu až po prelete alebo strope');
+  assert.match(main, /dataManager\.setEnabled\('volby-obce', true, \{ origin: 'link' \}\)/);
 });

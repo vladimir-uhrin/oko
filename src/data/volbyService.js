@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { readZipEntries } from './zipEntries.js';
 import { readXlsxRows, readXlsxSheets, tableByHeader } from './xlsxSheet.js';
 import { POLLS_CLOSE_MS, buildModel, krajDetail, obecDetail, overview, searchObce } from './volbyCandidates.js';
+import { buildResults, obecMapState, resultsOverview } from './volbyResults.js';
 import { upstream } from './upstreamStatus.js';
 
 export const VOLBY_PATH = '/api/volby';
@@ -118,7 +119,7 @@ export function createVolbyService({
   log = console,
   timeoutMs = FETCH_TIMEOUT_MS,
 } = {}) {
-  const state = { model: null, tables: new Map(), sources: {}, refreshing: null, lastRefreshAt: 0, fetches: 0 };
+  const state = { model: null, tables: new Map(), sources: {}, refreshing: null, lastRefreshAt: 0, fetches: 0, results: null };
   let geo = null;
 
   function loadGeo() {
@@ -226,7 +227,9 @@ export function createVolbyService({
     state.tables = susrTables;
     state.sources = sources;
     state.lastRefreshAt = now();
-    log.info?.(`[volby] model: ${state.model.obce.length} obcí, ${susrTables.size} tabuliek ŠÚ SR, ${now() - started} ms`
+    // Výsledky (po 20:00): z tých istých ZIPov, nad modelom kandidátov; bez tabuliek ostáva available=false.
+    try { state.results = buildResults(susrTables, state.model, { generatedAt: now() }); } catch (error) { log.warn?.(`[volby] výsledky: ${error?.message}`); state.results = null; }
+    log.info?.(`[volby] model: ${state.model.obce.length} obcí, ${susrTables.size} tabuliek ŠÚ SR, výsledky ${state.results?.available ? Object.keys(state.results.tables).join('+') : 'nie'}, ${now() - started} ms`
       + (sources.minv.errors.length || sources.susr.errors.length ? ` · chyby: ${[...sources.minv.errors, ...sources.susr.errors].join('; ')}` : ''));
   }
 
@@ -265,11 +268,13 @@ export function createVolbyService({
     if (!model) return send(res, 503, { error: 'unavailable', sources: state.sources });
     let m;
     if (route === '/' || route === '/prehlad') {
-      return send(res, 200, { ...overview(model, { nowMs: now() }), results: resultsSummary(state.tables) }, 60);
+      return send(res, 200, { ...overview(model, { nowMs: now() }), results: resultsSummary(state.tables), vysledky: resultsOverview(state.results) }, 60);
     }
     if ((m = /^\/kraj\/(\d)$/.exec(route))) {
       const kraj = krajDetail(model, m[1]);
-      return kraj ? send(res, 200, kraj, 300) : send(res, 404, { error: 'not_found' });
+      if (!kraj) return send(res, 404, { error: 'not_found' });
+      const vysledky = state.results?.kraje?.get(kraj.code) || null;
+      return send(res, 200, { ...kraj, vysledky }, vysledky ? 60 : 300);
     }
     if (route === '/obce') {
       const q = String(url.searchParams.get('q') || '').slice(0, 80);
@@ -279,7 +284,20 @@ export function createVolbyService({
     }
     if ((m = /^\/obec\/([a-z0-9-]{1,80})$/i.exec(route))) {
       const obec = obecDetail(model, m[1]);
-      return obec ? send(res, 200, obec, 300) : send(res, 404, { error: 'not_found' });
+      if (!obec) return send(res, 404, { error: 'not_found' });
+      const vysledky = state.results?.obce?.get(obec.code) || null;
+      return send(res, 200, { ...obec, vysledky }, vysledky ? 60 : 300);
+    }
+    if (route === '/obce-body') {
+      // Mapa obcí (volbyObceLayer.js): všetky obce s polohou, stav výsledkov (0 nič, 1 čiastočné, 2 úplné) a vedúci kandidát na starostu.
+      const rows = [];
+      for (const o of model.obce) {
+        if (!Number.isFinite(o.lat) || !Number.isFinite(o.lon)) continue;
+        const r = state.results?.obce?.get(o.code) || null;
+        const lead = r?.starosta?.[0];
+        rows.push([o.code, o.name, o.lat, o.lon, o.seats || 0, obecMapState(state.results, o.code), lead ? `${lead.meno} ${lead.priezvisko}`.trim() : '', lead ? lead.pct : null]);
+      }
+      return send(res, 200, { generatedAt: new Date(state.results?.generatedAt || model.generatedAt).toISOString(), columns: ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct'], rows }, 60);
     }
     if (route === '/tabulky') {
       const list = [...state.tables.values()].map((t) => ({ name: t.name, title: t.title, results: isResultsTable(t.name), sheets: t.sheets.map((s) => ({ name: s.name, rows: s.rows.length, header: s.rows[1] || s.rows[0] || [] })) }));
@@ -305,6 +323,7 @@ export function createVolbyService({
       obce: state.model?.obce.length ?? 0,
       tables: [...state.tables.keys()],
       results: resultsSummary(state.tables),
+      vysledky: state.results?.available ? { tables: state.results.tables, summary: state.results.summary } : null,
       sources: state.sources,
     };
   }

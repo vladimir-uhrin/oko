@@ -40,6 +40,26 @@ be published only afterwards (moratorium).
   result tables exist.
 - Tests: `src/data/xlsxSheet.test.mjs`, `src/data/volbyCandidates.test.mjs`, `src/data/volbyService.test.mjs`,
   `src/volbyPanel.test.mjs` (tripwires on markup, CSS, i18n, lane, mobile, share link, deep link).
+- **Results and the municipality map (same afternoon; owner: „kandidátov, kde, kedy a potom ako to dopadlo,
+  interaktívne … klikateľnú mapu aj tej najmenšej obce … aj mená"):** `src/data/volbyResults.js` (pure) reads the
+  Statistical Office result tables by header meaning — both the 2022 CSV codes (OBEC, VOOBEC, OKRSOK, PC_HL, P_HL,
+  P_HL_PCT, KANDIDAT) and the 2026 descriptive XLSX headers („Kód obce", „Počet platných hlasov", …; structure
+  learned from the archived OSO 2022 tab_info on the Wayback Machine: tab05f mayors per precinct, tab08f councillors
+  per precinct, tab02bf voters and turnout, KANDIDAT „1" elected / „X" withdrew) — table kind from the tab_info
+  title, then the table number; votes summed over precincts, share = votes ÷ valid votes of the group, progress =
+  distinct precincts seen vs. precincts in the code list, „elected" only from the ŠÚ SR flag, otherwise the first
+  candidate „leads". Service: `state.results` rebuilt on every refresh; `/prehlad` carries `vysledky` (summary +
+  leading governor per region), `/obec` and `/kraj` carry `vysledky` (60 s cache once present), `/obce-body`
+  lists every municipality with position, seats, result state (0/1/2) and the leading mayoral candidate.
+  Layer `src/data/volbyObceLayer.js` (id `volby-obce`, token V, category city): PointPrimitiveCollection +
+  LabelCollection with distance display conditions (cities from 900 km, villages from 70 km), depth test off,
+  click → `onSelect` → panel `selectObec(code, { fly: false })`; colour by result state, label gets the leader
+  and share once results exist; refresh every 3 min. Panel: MAPA OBCÍ chip (toggles the layer, legend only with
+  results), progress bar + turnout in the status line, result rows (rank, votes, share, bar, ZVOLENÝ / VEDIE /
+  VZDAL SA), open detail reloads when the results stamp changes; own `[hidden]` rule because the flex displays
+  would override the attribute. Deep links: the start flyover aims at the linked municipality/region
+  (`volbyLocate` in main.js) and the selection waits for it (`startSettled` with a cap). Tests:
+  `src/data/volbyResults.test.mjs`, `src/data/volbyObceLayer.test.mjs`, extended service and panel tests.
 
 ### OKO Štúdio: Ukrajina — päť šablón zo živých dát (2026-10-04)
 

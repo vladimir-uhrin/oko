@@ -53,6 +53,7 @@ export const LAYER_CATEGORY = Object.freeze({
   cctv: 'city',
   radio: 'city',
   bikeshare: 'city',
+  'volby-obce': 'city',
   // Obrana
   military: 'defense',
   'military-installations': 'defense',
@@ -101,6 +102,7 @@ export const LAYER_KEYWORDS = Object.freeze({
   cctv: ['kamera', 'kamery', 'camera', 'cameras', 'cctv'],
   radio: ['rádio', 'radio', 'stanice'],
   bikeshare: ['bicykle', 'kolo', 'bike', 'bikes'],
+  'volby-obce': ['voľby', 'volby', 'obce', 'obec', 'kandidáti', 'starosta', 'výsledky', 'elections', 'municipalities', 'candidates'],
   'military-installations': ['vojenské', 'základne', 'armáda', 'military', 'bases', 'installations'],
 });
 

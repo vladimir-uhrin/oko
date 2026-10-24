@@ -42,6 +42,7 @@ import militaryInstallationsLayer from './data/militaryInstallations.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import localDataLayers from './data/localLayers.js';
 import gibsOverlayLayers from './data/gibsOverlays.js';
+import volbyObceLayer from './data/volbyObceLayer.js';
 import { bindActiveMapStackToEvents, getActiveMapStack, onActiveMapStackChange } from './data/activeMapStack.js';
 import { LAYER_STATE_REGISTRY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
@@ -572,11 +573,24 @@ async function init() {
         viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date(qaTimeMs));
         viewer.clock.shouldAnimate = false;
       }
+      // VOĽBY 2026 (2026-10-24): odkaz ?volby=<kód obce> alebo ?volby=k<kraj> — úvodný prelet mieri rovno na obec
+      // či kraj (bez hlášky o oblasti), panel potom doletí nižšie. Pri chybe ostáva poloha podľa pripojenia.
+      const volbyStart = parseVolbyParam(window.location?.search || '');
+      const volbyLocate = volbyStart?.obec || volbyStart?.kraj ? async () => {
+        try {
+          const path = volbyStart.obec ? `/api/volby/obec/${encodeURIComponent(volbyStart.obec)}` : `/api/volby/kraj/${encodeURIComponent(volbyStart.kraj)}`;
+          const res = await fetch(path, { cache: 'no-store' });
+          const j = res.ok ? await res.json() : null;
+          const lat = Number(j?.lat ?? j?.center?.lat);
+          const lon = Number(j?.lon ?? j?.center?.lon);
+          return Number.isFinite(lat) && Number.isFinite(lon) ? { precision: 'city', lat, lon } : geoPromise;
+        } catch { return geoPromise; }
+      } : null;
       const locate = crawlerVisit || embedView ? null : () => geoPromise;
       showStartView(viewer, {
         whenReady: whenStartupReady(),
         nowMs: Number.isFinite(qaTimeMs) ? qaTimeMs : Date.now(),
-        locate,
+        locate: locate && volbyLocate ? volbyLocate : locate,
         onArrive: (geo) => {
           settleStart();
           let place = geo?.city || '';
@@ -689,6 +703,8 @@ async function init() {
     dataManager.register(militaryInstallationsLayer);
     dataManager.register(militaryAwarenessLayer);
     militaryAwarenessLayer.attachDataManager(dataManager);
+    // VOĽBY 2026 (2026-10-24): klikateľná mapa všetkých obcí; klik otvorí obec v paneli VOĽBY (prepojenie nižšie).
+    dataManager.register(volbyObceLayer);
     for (const layer of localDataLayers) {
       dataManager.register(layer);
     }
@@ -1820,19 +1836,35 @@ async function init() {
       }
     } catch { /* URL parsing is best-effort — a bad param never breaks boot */ }
 
-    // VOĽBY 2026 (2026-10-24): `?volby` otvorí panel, `?volby=<kód obce>` obec, `?volby=k<kraj>` kraj — odkazy
-    // na zdieľanie z panela (okolive.sk/?volby=582000). Po obnove stavu ako úžiny; na mobile cez sekciu lišty.
+    // VOĽBY 2026 (2026-10-24): mapa obcí → panel (klik na bod otvorí obec bez ďalšieho preletu) a odkazy
+    // `?volby`, `?volby=<kód obce>`, `?volby=k<kraj>` (okolive.sk/?volby=582000): panel a mapa hneď po obnove
+    // stavu, výber obce/kraja až po úvodnom prelete (ten už mieri na miesto — locate vyššie), najneskôr po strope.
+    volbyObceLayer.onSelect = (code) => {
+      if (!code) return;
+      if (!window.__okoMobileShell?.open?.('volby')) styleManager.setPanelCollapsed('volby-panel', false, { explicit: true, persist: false, syncShare: false });
+      void styleManager._volbyPanel?.selectObec?.(code, { fly: false });
+    };
+    styleManager._volbyPanel?.attachMap?.({
+      isOn: () => Boolean(dataManager.layers.get('volby-obce')?.enabled),
+      setOn: (on) => dataManager.setEnabled('volby-obce', on, { origin: 'user' }),
+      highlight: (code) => volbyObceLayer.select(code),
+    });
     try {
       const requestedVolby = parseVolbyParam(window.location?.search || '');
       if (requestedVolby) {
+        const startDone = styleManager.hasShareState
+          ? Promise.resolve()
+          : Promise.race([startSettled, new Promise((resolve) => setTimeout(resolve, START_GLOBE_DWELL_MS + START_FLY_DURATION_S * 1000 + 8000))]);
         void Promise.resolve(styleManager.initialRestorePromise)
           .catch(() => {})
           .then(() => {
             if (!window.__okoMobileShell?.open?.('volby')) {
               styleManager.setPanelCollapsed('volby-panel', false, { explicit: true, persist: false, syncShare: false });
             }
-            return styleManager._volbyPanel?.open?.(requestedVolby);
-          });
+            void dataManager.setEnabled('volby-obce', true, { origin: 'link' });
+            return startDone;
+          })
+          .then(() => styleManager._volbyPanel?.open?.(requestedVolby));
       }
     } catch { /* zlý parameter nikdy nezhodí štart */ }
 

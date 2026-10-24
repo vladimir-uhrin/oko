@@ -358,6 +358,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'shmu-warnings', token: 'W', disposition: 'enabled-only' }),
   Object.freeze({ id: 'telegeography-submarine-cables', token: 'u', disposition: 'enabled-only' }),
   Object.freeze({ id: 'traffic', token: 't', disposition: 'enabled-only' }),
+  // VOĽBY 2026 (2026-10-24): mapa obcí — voľné veľké písmeno.
+  Object.freeze({ id: 'volby-obce', token: 'V', disposition: 'enabled-only' }),
   Object.freeze({ id: 'volcanoes', token: 'v', disposition: 'enabled-only' }),
 ]);
 

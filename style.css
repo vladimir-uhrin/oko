@@ -11987,6 +11987,30 @@ body.recording-mode .state-strip {
 .volby-cand-party.is-independent { color: #ffd166; }
 .volby-source a, .volby-link { color: #39d0ff; text-decoration: none; }
 .volby-source a:hover { text-decoration: underline; }
+/* Výsledky a mapa obcí (2026-10-24 popoludní): pás spracovania, riadky s hlasmi, značky, legenda. */
+/* Vlastné display: flex by prebilo atribút hidden (prázdny rámček detailu, legenda pred výsledkami). */
+.volby-legend[hidden], .volby-list[hidden], .volby-detail[hidden], .volby-cands[hidden], .volby-progress[hidden], .volby-results[hidden] { display: none !important; }
+.volby-progress { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.volby-progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, #ffd166, #4ade80); transition: width 0.6s ease; }
+.volby-map-row { align-items: center; }
+.volby-chip-map[aria-pressed="true"] { color: #4ade80; border-color: rgba(74, 222, 128, 0.6); background: rgba(74, 222, 128, 0.12); }
+.volby-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 10px; color: var(--text-secondary, #9ec6d8); }
+.volby-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.volby-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.volby-res { align-items: stretch; }
+.volby-res-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.volby-tag { font: 700 8.5px/12px var(--font-mono, monospace); letter-spacing: 0.08em; padding: 1px 5px; border-radius: 3px; border: 1px solid currentColor; }
+.volby-tag-elected { color: #4ade80; }
+.volby-tag-leads { color: #ffd166; }
+.volby-tag-withdrawn { color: #ff8a80; }
+.volby-res-votes { font: 600 11px/16px var(--font-mono, monospace); color: var(--text-primary, #e9f6ff); }
+.volby-res-bar { height: 4px; margin-top: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.volby-res-fill { height: 100%; width: 0; background: #39d0ff; transition: width 0.5s ease; }
+.volby-res.is-elected .volby-res-fill { background: #4ade80; }
+.volby-res.is-leading .volby-res-fill { background: #ffd166; }
+.volby-res.is-withdrawn { opacity: 0.55; }
+.volby-note-progress { color: #ffd166; }
+.volby-note-progress.is-final { color: #4ade80; }
 .weather-intro p { margin: 0 0 4px; font-size: 11px; line-height: 1.45; }
 .weather-intro .weather-summary { color: var(--text-primary); letter-spacing: 0.04em; }
 .weather-intro .weather-note { color: var(--text-dim); }

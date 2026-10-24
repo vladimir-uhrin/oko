@@ -228,6 +228,41 @@ test('po 20:00: fáza sčítavanie, TTL 3 min, výsledkové tabuľky ŠÚ SR v p
   assert.equal(tabulky.json.tables.find((t) => t.name === 'OSO2026_SK_tab03').results, true);
   const tab = await call(service, '/tabulka/OSO2026_SK_tab03');
   assert.deepEqual(tab.json.sheets[0].rows[2], ['501891', 'Topoľníky', 'Anna', 'Nagyová', '412']);
+  assert.equal(after.json.vysledky, null, 'tab03 bez stĺpcov hlasov nie je výsledková tabuľka modelu');
+});
+
+const STAROSTA_RESULTS = ['OSO2026_SK_tab05f.xlsx', xlsxBuffer([{ name: 'OSO2026_SK_tab05f', rows: [['Počet a podiel platných hlasov pre kandidátov na starostu obce za okrsky', null],
+  ['Kód obce', 'Volebný obvod v obci', 'Okrsok', 'Poradie na hlasovacom lístku', 'Počet platných hlasov', 'Podiel platných hlasov v %', 'Kandidát'],
+  ['501891', '1', '1', '1', '200', '66,67', ''], ['501891', '1', '1', '2', '100', '33,33', ''], ['501891', '1', '2', '1', '50', '50,00', ''], ['501891', '1', '2', '2', '50', '50,00', '']] }])];
+const UCAST_RESULTS = ['OSO2026_SK_tab02bf.xlsx', xlsxBuffer([{ name: 'OSO2026_SK_tab02bf', rows: [['Súhrnné výsledky hlasovania za okrsky - Počet voličov a účasť', null],
+  ['Kód obce', 'Volebný obvod v obci', 'Okrsok', 'Počet voličov zapísaných v zoznamoch voličov', 'Počet voličov, ktorí sa zúčastnili na hlasovaní', 'Účasť v %'],
+  ['501891', '1', '1', '600', '310', '51,67'], ['501891', '1', '2', '400', '190', '47,50']] }])];
+
+test('výsledky v odpovediach: prehľad nesie súhrn a vedúcich, obec hlasy a účasť, /obce-body stav a vedúceho pre mapu', async () => {
+  const { fetchImpl } = makeFetch((url) => (url === SUSR_SOURCES.oso ? osoTables([STAROSTA_RESULTS, UCAST_RESULTS]) : allBodies(url)));
+  const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet });
+  const prehlad = await call(service, '/prehlad');
+  assert.equal(prehlad.json.phase, 'counting');
+  // tab0dd fixture: Topoľníky 3 okrsky + Bratislava 388 → 391; spracované 2 z Topoľníkov (čiastočné).
+  assert.deepEqual(prehlad.json.vysledky.summary, { okrskyDone: 2, okrskyTotal: 391, pct: 0.5, obceWithResults: 1, obceFinal: 0, registered: 1000, voted: 500, turnoutPct: 50 });
+  assert.deepEqual(prehlad.json.vysledky.tables, { starosta: 'OSO2026_SK_tab05f', ucast: 'OSO2026_SK_tab02bf' });
+  const obec = await call(service, '/obec/501891');
+  assert.match(obec.headers['Cache-Control'], /max-age=60/, 's výsledkami kratšia cache');
+  assert.equal(obec.json.vysledky.final, false, '2 z 3 okrskov');
+  assert.equal(obec.json.vysledky.okrskyDone, 2);
+  assert.deepEqual(obec.json.vysledky.ucast, { registered: 1000, voted: 500, pct: 50 });
+  assert.deepEqual(obec.json.vysledky.starosta.map((c) => [c.n, c.priezvisko, c.votes, c.pct, c.leads]), [[1, 'Nagyová', 250, 62.5, true], [2, '', 150, 37.5, false]], 'kandidát č. 2 nie je v tomto registri — ostáva s číslom');
+  const ba = await call(service, '/obec/582000');
+  assert.equal(ba.json.vysledky, null, 'obec bez riadkov výsledkov');
+  const body = await call(service, '/obce-body');
+  assert.deepEqual(body.json.columns, ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct']);
+  const topolniky = body.json.rows.find((r) => r[0] === '501891');
+  assert.deepEqual(topolniky, ['501891', 'Topoľníky', 47.9, 17.78, 9, 1, 'Anna Nagyová', 62.5]);
+  const bratislava = body.json.rows.find((r) => r[0] === '582000');
+  assert.deepEqual(bratislava.slice(4), [45, 0, '', null]);
+  assert.equal((await call(service, '/status')).json.vysledky.summary.okrskyDone, 2);
+  const kraj = await call(service, '/kraj/1');
+  assert.equal(kraj.json.vysledky, null);
 });
 
 test('plugin: mount na /api/volby a predhriatie; vite.config.js ho registruje len s API pluginmi', async () => {
