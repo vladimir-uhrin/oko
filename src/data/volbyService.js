@@ -23,6 +23,7 @@ import { readZipEntries } from './zipEntries.js';
 import { readXlsxRows, readXlsxSheets, tableByHeader } from './xlsxSheet.js';
 import { POLLS_CLOSE_MS, buildModel, krajDetail, obecDetail, overview, searchObce } from './volbyCandidates.js';
 import { buildResults, obecMapState, resultsOverview } from './volbyResults.js';
+import { createVolbyLive } from './volbyLive.js';
 import { upstream } from './upstreamStatus.js';
 
 export const VOLBY_PATH = '/api/volby';
@@ -169,8 +170,40 @@ export function createVolbyService({
   log = console,
   timeoutMs = FETCH_TIMEOUT_MS,
   useWorker = false,
+  live = null,
 } = {}) {
   const state = { model: null, tables: new Map(), sources: {}, refreshing: null, lastRefreshAt: 0, fetches: 0, results: null, forceRebuild: false };
+  // Priebežné výsledky z JSON stránky ŠÚ SR (volbyLive.js) — po 20:00, kým ZIP s tabuľkami výsledky nemá.
+  let liveInst = null;
+  const liveNow = () => { if (live) return live; if (!liveInst && now() >= POLLS_CLOSE_MS) liveInst = createVolbyLive({ fetchImpl, now, registry }); return liveInst; };
+  async function liveOverview(model) {
+    const L = liveNow(); if (!L) return null;
+    const sum = await L.summary();
+    // osk tab01 počíta okrsky (6 029), oso tab01 obce (2 921) — „spracovaných X z Y okrskov" teda z OSK.
+    const s = sum.osk || sum.oso;
+    if (!s || !s.okrskyDone) return null;
+    const kraje = await Promise.all(model.kraje.map(async (k) => {
+      const pred = await L.predseda(k.code);
+      const lead = pred?.[0] || null;
+      return { code: k.code, okrskyDone: null, okrskyTotal: null, final: false, lead: lead ? { n: lead.n, meno: lead.meno, priezvisko: lead.priezvisko, strany: lead.strany, nezavisly: lead.nezavisly, votes: lead.votes, pct: lead.pct, elected: lead.elected } : null };
+    }));
+    return { generatedAt: new Date(now()).toISOString(), tables: { live: 'volbysr.sk/json' }, live: true,
+      summary: { okrskyDone: s.okrskyDone, okrskyTotal: s.okrskyTotal, pct: s.pct, obceWithResults: null, obceFinal: null, registered: null, voted: null, turnoutPct: null, osk: sum.osk, oso: sum.oso },
+      kraje };
+  }
+  async function liveKraj(kraj) {
+    const L = liveNow(); if (!L) return null;
+    const predseda = await L.predseda(kraj.code);
+    const obvody = (await Promise.all(kraj.obvody.map(async (o) => ({ code: o.code, name: o.name, seats: o.seats || 1, kandidati: await L.zupniObvod(o.code, o.seats || 1) })))).filter((o) => o.kandidati);
+    if (!predseda && !obvody.length) return null;
+    return { live: true, okrskyDone: null, okrskyTotal: null, final: false, predseda: predseda || [], obvody };
+  }
+  async function liveObec(obec) {
+    const L = liveNow(); if (!L) return null;
+    const starosta = await L.starosta(obec.code);
+    if (!starosta) return null;
+    return { live: true, okrskyDone: null, okrskyTotal: null, final: starosta.some((c) => c.elected), ucast: null, starosta, poslanci: [] };
+  }
   const build = (input) => (useWorker ? processInWorker(input) : Promise.resolve(processSources(input)));
   let geo = null;
 
@@ -320,13 +353,14 @@ export function createVolbyService({
     if (!model) return send(res, 503, { error: 'unavailable', sources: state.sources });
     let m;
     if (route === '/' || route === '/prehlad') {
-      return send(res, 200, { ...overview(model, { nowMs: now() }), results: resultsSummary(state.tables), vysledky: resultsOverview(state.results) }, 60);
+      const vysledky = resultsOverview(state.results) || await liveOverview(model).catch(() => null);
+      return send(res, 200, { ...overview(model, { nowMs: now() }), results: resultsSummary(state.tables), vysledky }, 60);
     }
     if ((m = /^\/kraj\/(\d)$/.exec(route))) {
       const kraj = krajDetail(model, m[1]);
       if (!kraj) return send(res, 404, { error: 'not_found' });
-      const vysledky = state.results?.kraje?.get(kraj.code) || null;
-      return send(res, 200, { ...kraj, vysledky }, vysledky ? 60 : 300);
+      const vysledky = state.results?.kraje?.get(kraj.code) || await liveKraj(kraj).catch(() => null);
+      return send(res, 200, { ...kraj, vysledky }, vysledky ? 60 : (now() >= POLLS_CLOSE_MS ? 60 : 300));
     }
     if (route === '/obce') {
       const q = String(url.searchParams.get('q') || '').slice(0, 80);
@@ -337,8 +371,8 @@ export function createVolbyService({
     if ((m = /^\/obec\/([a-z0-9-]{1,80})$/i.exec(route))) {
       const obec = obecDetail(model, m[1]);
       if (!obec) return send(res, 404, { error: 'not_found' });
-      const vysledky = state.results?.obce?.get(obec.code) || null;
-      return send(res, 200, { ...obec, vysledky }, vysledky ? 60 : 300);
+      const vysledky = state.results?.obce?.get(obec.code) || await liveObec(obec).catch(() => null);
+      return send(res, 200, { ...obec, vysledky }, vysledky ? 60 : (now() >= POLLS_CLOSE_MS ? 60 : 300));
     }
     if (route === '/obce-body') {
       // Mapa obcí (volbyObceLayer.js): všetky obce s polohou, stav výsledkov (0 nič, 1 čiastočné, 2 úplné) a vedúci kandidát na starostu.

@@ -413,7 +413,10 @@ export function installVolbyPanel({
 
   function progressNote(vy) {
     if (!vy) return null;
-    const parts = [t('volby.progress', { done: number(vy.okrskyDone), total: number(vy.okrskyTotal), pct: pctText(vy.okrskyTotal ? (vy.okrskyDone / vy.okrskyTotal) * 100 : 0) })];
+    // Priebežné výsledky zo stránky ŠÚ SR (live) nemajú spracovanie za obec/kraj — len „priebežné" alebo „konečné".
+    const parts = vy.okrskyDone == null
+      ? [t('volby.results-live')]
+      : [t('volby.progress', { done: number(vy.okrskyDone), total: number(vy.okrskyTotal), pct: pctText(vy.okrskyTotal ? (vy.okrskyDone / vy.okrskyTotal) * 100 : 0) })];
     if (vy.final) parts.push(t('volby.final'));
     if (vy.ucast?.pct != null) parts.push(t('volby.turnout', { pct: pctText(vy.ucast.pct) }));
     return el(doc, 'div', `volby-note volby-note-progress${vy.final ? ' is-final' : ''}`, parts.join(' · '));

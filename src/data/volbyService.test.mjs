@@ -221,7 +221,7 @@ test('po 20:00: fáza sčítavanie, TTL 3 min, výsledkové tabuľky ŠÚ SR v p
   clock += SUSR_TTL_COUNTING_MS + 1;
   await call(service, '/prehlad');
   await service._state.refreshing;
-  assert.equal(calls.length, 8, 'po 3 min sa dotiahli len ZIPy ŠÚ SR');
+  assert.equal(calls.filter((c) => /.(zip|xlsx)$/.test(c.url)).length, 8, 'po 3 min sa dotiahli len ZIPy ŠÚ SR (živé JSON sa počítajú zvlášť)');
   const after = await call(service, '/prehlad');
   assert.deepEqual(after.json.results, { tables: [{ name: 'OSO2026_SK_tab03', title: 'Výsledky volieb starostov', rows: 1 }] });
   const tabulky = await call(service, '/tabulky');
@@ -280,4 +280,27 @@ test('plugin: mount na /api/volby a predhriatie; vite.config.js ho registruje le
   const src = fs.readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
   assert.match(src, /import \{ volbyPlugin \} from '\.\/src\/data\/volbyService\.js';/);
   assert.match(src, /\.\.\.\(apiPlugins \? \[[^\]]*volbyPlugin\(\)[^\]]*\] : \[\]\)/);
+});
+
+test('živé výsledky ŠÚ SR (JSON stránky) v prehľade, kraji a obci, kým ZIP výsledky nemá', async () => {
+  const { fetchImpl } = makeFetch(allBodies);
+  const cand = (n, priezvisko, votes, pct, extra = {}) => ({ n, meno: 'X', priezvisko, strany: 'S', known: true, nezavisly: false, votes, pct, rank: 1, elected: false, withdrawn: false, leads: false, ...extra });
+  const live = {
+    summary: async () => ({ osk: { okrskyTotal: 6029, okrskyDone: 1200, pct: 19.9 }, oso: { okrskyTotal: 2921, okrskyDone: 600, pct: 20.5 } }),
+    predseda: async (k) => (k === '1' ? [cand(2, 'Gajarský', 5000, 52, { leads: true }), cand(1, 'Droba', 4600, 48, { rank: 2 })] : null),
+    zupniObvod: async () => null,
+    starosta: async (c) => (c === '501891' ? [cand(1, 'Nagyová', 300, 75, { elected: true })] : null),
+  };
+  const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet, live });
+  const p = (await call(service, '/prehlad')).json.vysledky;
+  assert.equal(p.live, true);
+  assert.deepEqual([p.summary.okrskyDone, p.summary.okrskyTotal, p.summary.pct], [1200, 6029, 19.9]);
+  assert.equal(p.kraje.find((k) => k.code === '1').lead.priezvisko, 'Gajarský');
+  const k = (await call(service, '/kraj/1')).json.vysledky;
+  assert.deepEqual(k.predseda.map((c) => c.priezvisko), ['Gajarský', 'Droba']);
+  assert.equal(k.okrskyDone, null);
+  const o = (await call(service, '/obec/501891')).json.vysledky;
+  assert.equal(o.starosta[0].elected, true);
+  assert.equal(o.final, true);
+  assert.equal((await call(service, '/obec/582000')).json.vysledky, null, 'obec bez súboru ŠÚ SR');
 });
