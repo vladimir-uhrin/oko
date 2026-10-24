@@ -407,3 +407,13 @@ test('zapojenie: ui.js panel v registri pruhu a kokpite + installVolbyPanel s pr
   assert.match(main, /Promise\.race\(\[startSettled, /, 'výber z odkazu až po prelete alebo strope');
   assert.match(main, /dataManager\.setEnabled\('volby-obce', true, \{ origin: 'link' \}\)/);
 });
+
+test('priebežné výsledky zo stránky ŠÚ SR (live): legenda farieb mapy ostáva skrytá', async () => {
+  const doc = fakeDoc();
+  let mapOn = true;
+  const { panel } = install(doc, { api: { overview: async () => ({ ...OVERVIEW, phase: 'counting', vysledky: { live: true, generatedAt: '2026-10-24T19:24:00Z', summary: { okrskyDone: 623, okrskyTotal: 6029, pct: 10.33, turnoutPct: 42.31 }, kraje: [] } }) } });
+  panel.attachMap({ isOn: () => mapOn, setOn: (v) => { mapOn = v; }, highlight() {} });
+  await flush();
+  assert.equal(panel._getStateForTest().hasResults, true);
+  assert.equal(byClass(doc.root.body, 'volby-legend')[0].hidden, true);
+});

@@ -252,7 +252,8 @@ export function installVolbyPanel({
     const on = Boolean(map?.isOn?.());
     mapChip.setAttribute('aria-pressed', on ? 'true' : 'false');
     mapChip.disabled = !map;
-    mapLegend.hidden = !(on && hasResults());
+    // Priebežné výsledky zo stránky ŠÚ SR nemajú stav sčítania za obce — mapa sa neprefarbuje, legenda by mýlila.
+    mapLegend.hidden = !(on && hasResults() && !state.overview?.vysledky?.live);
   }
 
   function renderSource() {
