@@ -242,6 +242,12 @@ test('obec: hľadanie s odkladom, výber z výsledkov, detail so starostom, posl
   assert.equal(byClass(doc.root.body, 'volby-chip-mesto')[0].getAttribute('aria-pressed'), 'true');
   assert.equal(panel._getStateForTest().krajCode, null, 'výber obce zruší kraj');
 
+  // Enter otvorí prvú nájdenú obec.
+  input.value = 'topo';
+  for (const fn of input.listeners.keydown) fn({ key: 'Enter', preventDefault() {} });
+  await flush();
+  assert.equal(panel._getStateForTest().obecCode, '501891', 'Enter = prvý výsledok');
+
   // Prázdny výsledok a otvorenie z odkazu.
   input.value = 'xyz';
   for (const fn of input.listeners.input) fn();
@@ -284,6 +290,7 @@ test('štýly: poradie zóny a panela (14/15), zbalené telo skryté, rozbalený
   assert.match(css, /body\.cockpit-mode #left-panel-stack > \.lane-zone\[data-lane-zone="volby"\] \{ display: none !important; \}/);
   assert.match(css, /body\.oko-mobile #oko-appbar \{[^}]*grid-template-columns: repeat\(6, 1fr\);/, 'šesť sekcií v spodnej lište');
   assert.match(css, /\.volby-search-input \{/);
+  assert.match(css, /\.volby-body > \* \{ flex: 0 0 auto; \}/, 'zoznam výsledkov sa v pruhu nezmrští na 0 px');
   assert.match(css, /\.volby-cand-name \{/);
 });
 

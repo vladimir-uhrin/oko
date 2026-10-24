@@ -11952,6 +11952,9 @@ body.recording-mode .state-strip {
 /* Panel VOĽBY 2026 (2026-10-24, src/volbyPanel.js): kandidáti MV SR, hľadanie obcí, po 20:00 výsledky ŠÚ SR. */
 #volby-panel { --panel-expanded-width: 360px; }
 .volby-body { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+/* 2026-10-24 (vlastník: „zadal som topoľníky a nič"): v pruhu má panel pevnú výšku a flex zmrštil zoznam výsledkov
+   hľadania na 0 px — nájdené obce boli v DOM, ale neviditeľné. Deti tela sa nezmršťujú, posúva sa vnútro panela. */
+.volby-body > * { flex: 0 0 auto; }
 .volby-phase, .volby-counts, .volby-results, .volby-hint, .volby-note, .volby-source { font-size: 11px; line-height: 1.45; color: var(--text-secondary, rgba(200, 220, 235, 0.82)); }
 .volby-results { color: #ffd166; }
 .volby-section-title { margin: 8px 0 2px; }

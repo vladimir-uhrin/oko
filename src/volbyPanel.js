@@ -569,6 +569,19 @@ export function installVolbyPanel({
     renderList();
   }
 
+  // Enter: hneď prvá nájdená obec (dohľadá, ak ešte beží odklad).
+  input.addEventListener('keydown', (event) => {
+    if (event?.key !== 'Enter') return;
+    event.preventDefault?.();
+    const query = String(input.value || '').trim();
+    if (query.length < VOLBY_SEARCH_MIN_CHARS) return;
+    if (searchTimer != null) { clearTimeoutImpl(searchTimer); searchTimer = null; }
+    void (async () => {
+      if (state.query !== query || !state.results.length) await runSearch(query);
+      if (state.results[0]) await selectObec(state.results[0].code);
+    })();
+  });
+
   input.addEventListener('input', () => {
     const query = String(input.value || '').trim();
     if (searchTimer != null) clearTimeoutImpl(searchTimer);
