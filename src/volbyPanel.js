@@ -186,7 +186,7 @@ export function installVolbyPanel({
   const mapChip = el(doc, 'button', 'data-toggle-chip volby-chip volby-chip-map', t('volby.map-chip'));
   mapChip.type = 'button';
   mapChip.setAttribute('aria-pressed', 'false');
-  mapChip.addEventListener('click', () => { if (map) { void map.setOn?.(!map.isOn?.()); setTimeoutImpl(syncMapChip, 50); } });
+  mapChip.addEventListener('click', () => { if (map) { void map.setOn?.(!map.isOn?.()); syncMapChipSoon(); } });
   const mapLegend = el(doc, 'div', 'volby-legend');
   mapLegend.hidden = true;
   for (const [code, key] of [['0', 'volby.legend-none'], ['1', 'volby.legend-partial'], ['2', 'volby.legend-final']]) {
@@ -242,6 +242,11 @@ export function installVolbyPanel({
   };
   const clear = (node) => { node.textContent = ''; };
   const hasResults = () => Boolean(state.overview?.vysledky);
+
+  /** Vrstva sa zapína asynchrónne (správca čaká na enable) — čip dorovnať niekoľkokrát po sebe. */
+  function syncMapChipSoon() {
+    for (const ms of [50, 400, 1500, 4000]) setTimeoutImpl(syncMapChip, ms);
+  }
 
   function syncMapChip() {
     const on = Boolean(map?.isOn?.());
@@ -474,6 +479,7 @@ export function installVolbyPanel({
     }
     state.kraj = krajCache.get(state.krajCode) || null;
     renderKraj();
+    syncMapChip();
     if (state.kraj && fly) flyToKraj(state.kraj);
     if (!quiet) setCollapsed?.(false);
   }
@@ -521,6 +527,7 @@ export function installVolbyPanel({
     }
     state.obec = obecCache.get(state.obecCode) || null;
     renderObec();
+    syncMapChip();
     if (state.obec) {
       map?.highlight?.(state.obec.code);
       if (fly) flyToObec(state.obec);
@@ -577,7 +584,8 @@ export function installVolbyPanel({
   /** Otvorenie z odkazu (`?volby=…`): panel, mapa obcí, výber. */
   async function open({ obec = null, kraj = null } = {}) {
     setCollapsed?.(false);
-    if (map && !map.isOn?.()) { void map.setOn?.(true); setTimeoutImpl(syncMapChip, 50); }
+    if (map && !map.isOn?.()) void map.setOn?.(true);
+    syncMapChipSoon();
     if (obec) return selectObec(obec);
     if (kraj) return selectKraj(kraj);
     return null;
