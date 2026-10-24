@@ -28,9 +28,9 @@ test('pure: viditeľnosť a štýl podľa mandátov, farby stavu, popis s vedúc
   assert.equal(pointVisibleUntilM(13), 3_000_000);
   assert.equal(pointVisibleUntilM(7), 1_800_000);
   assert.ok(labelVisibleUntilM(45, true) > labelVisibleUntilM(13) && labelVisibleUntilM(13) > labelVisibleUntilM(9) && labelVisibleUntilM(9) > labelVisibleUntilM(5));
-  assert.deepEqual(pointStyle({ seats: 45, city: true, state: 0 }), { pixelSize: 8, color: OBEC_STATE_COLORS[0] });
-  assert.deepEqual(pointStyle({ seats: 9, state: 1 }), { pixelSize: 4.5, color: '#ffd166' });
-  assert.deepEqual(pointStyle({ seats: 5, state: 2 }), { pixelSize: 3.5, color: '#4ade80' });
+  assert.deepEqual(pointStyle({ seats: 45, city: true, state: 0 }), { pixelSize: 5.5, color: OBEC_STATE_COLORS[0] });
+  assert.deepEqual(pointStyle({ seats: 9, state: 1 }), { pixelSize: 3.2, color: '#ffd166' });
+  assert.deepEqual(pointStyle({ seats: 5, state: 2 }), { pixelSize: 2.6, color: '#4ade80' });
   assert.equal(pointStyle({ seats: 5, state: 9 }).color, OBEC_STATE_COLORS[0], 'neznámy stav = bez výsledkov');
   assert.equal(labelText({ name: 'Nitra', state: 0, lead: 'X Y', leadPct: 40 }), 'Nitra', 'pred výsledkami len meno');
   assert.equal(labelText({ name: 'Nitra', state: 1, lead: 'Marek Hattas', leadPct: 51.4 }), 'Nitra\nMarek Hattas 51 %');

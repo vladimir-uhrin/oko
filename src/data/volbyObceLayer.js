@@ -17,7 +17,9 @@ export const OBCE_BODY_URL = '/api/volby/obce-body';
 export const OBCE_REFRESH_MS = 3 * 60 * 1000;
 export const OBEC_PICK_PREFIX = 'obec:';
 /** Farby stavu výsledkov (CSS text; aj pre legendu v paneli). */
-export const OBEC_STATE_COLORS = Object.freeze({ 0: '#39d0ff', 1: '#ffd166', 2: '#4ade80' });
+export const OBEC_STATE_COLORS = Object.freeze({ 0: '#7fdcff', 1: '#ffd166', 2: '#4ade80' });
+/** Krytie bodu (jemný, nie plný disk). */
+export const OBEC_POINT_ALPHA = 0.85;
 
 /** Dokedy (m od kamery) vidno bod obce podľa počtu poslancov (veľkosti). Pure. */
 export function pointVisibleUntilM(seats = 0, city = false) {
@@ -36,7 +38,8 @@ export function labelVisibleUntilM(seats = 0, city = false) {
 
 /** Štýl bodu: veľkosť podľa mandátov, farba podľa stavu výsledkov. Pure. */
 export function pointStyle({ seats = 0, city = false, state = 0 } = {}) {
-  const pixelSize = city || seats >= 25 ? 8 : seats >= 13 ? 6 : seats >= 9 ? 4.5 : 3.5;
+  // 2026-10-24 (vlastník: body „jemnejšie, krajšie UI"): menšie body, mestá o chlp výraznejšie.
+  const pixelSize = city || seats >= 25 ? 5.5 : seats >= 13 ? 4 : seats >= 9 ? 3.2 : 2.6;
   return { pixelSize, color: OBEC_STATE_COLORS[state] || OBEC_STATE_COLORS[0] };
 }
 
@@ -121,9 +124,9 @@ export function createVolbyObceLayer({
         id: OBEC_PICK_PREFIX + r.code,
         position,
         pixelSize: style.pixelSize,
-        color: color(style.color),
-        outlineColor: Cesium.Color.fromBytes(6, 14, 22, 200),
-        outlineWidth: 1,
+        color: color(style.color).withAlpha(OBEC_POINT_ALPHA),
+        outlineColor: Cesium.Color.fromBytes(6, 14, 22, 140),
+        outlineWidth: 0.5,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, pointVisibleUntilM(r.seats, r.city)),
       });
@@ -131,10 +134,10 @@ export function createVolbyObceLayer({
         id: OBEC_PICK_PREFIX + r.code,
         position,
         text: labelText(r),
-        font: `${r.city || r.seats >= 25 ? 13 : 11}px "Segoe UI", sans-serif`,
-        fillColor: Cesium.Color.fromCssColorString('#e9f6ff'),
+        font: `${r.city || r.seats >= 25 ? 600 : 500} ${r.city || r.seats >= 25 ? 13 : 11}px Inter, "Segoe UI", sans-serif`,
+        fillColor: Cesium.Color.fromCssColorString('#e9f6ff').withAlpha(0.92),
         outlineColor: Cesium.Color.fromBytes(6, 14, 22, 230),
-        outlineWidth: 3,
+        outlineWidth: 2.5,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         pixelOffset: new Cesium.Cartesian2(0, -9),
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
@@ -157,7 +160,7 @@ export function createVolbyObceLayer({
       if (!e) continue;
       e.row = r;
       const style = pointStyle(r);
-      e.point.color = color(style.color);
+      e.point.color = color(style.color).withAlpha(OBEC_POINT_ALPHA);
       e.point.pixelSize = style.pixelSize;
       e.label.text = labelText(r);
     }
@@ -168,9 +171,9 @@ export function createVolbyObceLayer({
     for (const [code, e] of byCode) {
       const sel = code === selectedCode;
       const style = pointStyle(e.row);
-      e.point.pixelSize = sel ? style.pixelSize + 4 : style.pixelSize;
-      e.point.outlineWidth = sel ? 2 : 1;
-      e.point.outlineColor = sel ? Cesium.Color.WHITE : Cesium.Color.fromBytes(6, 14, 22, 200);
+      e.point.pixelSize = sel ? style.pixelSize + 3 : style.pixelSize;
+      e.point.outlineWidth = sel ? 2 : 0.5;
+      e.point.outlineColor = sel ? Cesium.Color.WHITE : Cesium.Color.fromBytes(6, 14, 22, 140);
     }
   }
 

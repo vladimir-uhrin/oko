@@ -20,7 +20,7 @@ export const VOLBY_HIDDEN_LAYERS = Object.freeze(['flights', 'military', 'ais-li
 export const VOLBY_OBCE_LAYER = 'volby-obce';
 export const BORDER_URLS = Object.freeze({ kraje: '/volby/hranice-kraje.json', obce: '/volby/hranice-obce.json' });
 export const BORDER_STYLE = Object.freeze({
-  kraje: Object.freeze({ color: '#ffb33c', alpha: 0.85, width: 3.0, maxDistanceM: 3_000_000 }),
+  kraje: Object.freeze({ color: '#ffb33c', alpha: 0.7, width: 2.2, maxDistanceM: 3_000_000 }),
   obce: Object.freeze({ color: '#cfe8ff', alpha: 0.35, width: 1.2, maxDistanceM: 260_000 }),
 });
 
