@@ -188,7 +188,7 @@ export function createVolbyService({
       return { code: k.code, okrskyDone: null, okrskyTotal: null, final: false, lead: lead ? { n: lead.n, meno: lead.meno, priezvisko: lead.priezvisko, strany: lead.strany, nezavisly: lead.nezavisly, votes: lead.votes, pct: lead.pct, elected: lead.elected } : null };
     }));
     return { generatedAt: new Date(now()).toISOString(), tables: { live: 'volbysr.sk/json' }, live: true,
-      summary: { okrskyDone: s.okrskyDone, okrskyTotal: s.okrskyTotal, pct: s.pct, obceWithResults: null, obceFinal: null, registered: null, voted: null, turnoutPct: null, osk: sum.osk, oso: sum.oso },
+      summary: { okrskyDone: s.okrskyDone, okrskyTotal: s.okrskyTotal, pct: s.pct, obceWithResults: null, obceFinal: null, registered: s.registered ?? null, voted: s.voted ?? null, turnoutPct: s.turnoutPct ?? null, osk: sum.osk, oso: sum.oso },
       kraje };
   }
   async function liveKraj(kraj) {

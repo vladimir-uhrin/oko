@@ -21,7 +21,9 @@ test('liveFlag, liveCandidates (poradie podľa hlasov, súčtový riadok preč, 
   const e = liveCandidates([{ ...ROWS[0], C07: 'zvolený' }, ROWS[1]]);
   assert.equal(e.find((x) => x.n === 1).elected, true);
   assert.ok(e.every((x) => !x.leads), 'so zvoleným nikto „nevedie"');
-  assert.deepEqual(liveSummary([{ C01: '24.10.2026 21:10', C03: '6 029', C04: '1 207', C05: '20,02 %' }]), { okrskyTotal: 6029, okrskyDone: 1207, pct: 20.02, updated: '24.10.2026 21:10' });
+  assert.deepEqual(liveSummary([{ C01: '24.10.2026 21:10', C03: '6 029', C04: '1 207', C05: '20,02 %' }]), { okrskyTotal: 6029, okrskyDone: 1207, pct: 20.02, updated: '24.10.2026 21:10', registered: null, voted: null, turnoutPct: null });
+  // skutočný riadok ŠÚ SR o 21:00
+  assert.deepEqual(liveSummary([{ C01: '24.10.2026 21:00:00 SELČ', C03: '6 029', C04: '623', C05: '10,33 %', C06: '127 851', C07: '54 100', C08: '42,31 %' }]), { okrskyTotal: 6029, okrskyDone: 623, pct: 10.33, updated: '24.10.2026 21:00:00 SELČ', registered: 127851, voted: 54100, turnoutPct: 42.31 });
   assert.equal(liveSummary([]), null);
 });
 

@@ -7,6 +7,7 @@
  *  - súhrn spracovania: `<osk|oso>/json/tab01.json` → [{ C03: počet okrskov, C04: spracované, C05: „12,34 %" }],
  *  - predseda kraja: `osk/json/tab06b/<kód kraja>.json`, poslanci kraja: `osk/json/tab09c/<kód obvodu>.json`,
  *  - starosta obce: `oso/json/tab05/<kód obce>.json`.
+ * Súhrn tab01 (overené 21:00): C03 okrsky/obce spolu, C04 spracované, C05 % spracovania, C06 zapísaní, C07 zúčastnení, C08 účasť %.
  * Riadky kandidátov (hlavičky zo stránky): C01 poradie na lístku, C02 meno, C03 priezvisko, C04 politický subjekt,
  * C05 počet platných hlasov („1 234"), C06 podiel v % („12,34"), C07 kandidát/poznámka (zvolený, vzdal sa).
  * Kým súbor nie je, server vracia HTML 404 → null. Cache 2 min (ŠÚ SR obnovuje po dávkach okrskov).
@@ -57,7 +58,9 @@ export function liveSummary(rows) {
   if (!r) return null;
   const total = num(r.C03); const done = num(r.C04); const pct = num(r.C05);
   if (total === null) return null;
-  return { okrskyTotal: total, okrskyDone: done ?? 0, pct: pct ?? (total ? +(((done ?? 0) / total) * 100).toFixed(2) : 0), updated: text(r.C01) || null };
+  // C06 zapísaní voliči, C07 zúčastnení, C08 účasť v % (v spracovaných okrskoch) — overené 24. 10. 21:00.
+  return { okrskyTotal: total, okrskyDone: done ?? 0, pct: pct ?? (total ? +(((done ?? 0) / total) * 100).toFixed(2) : 0), updated: text(r.C01) || null,
+    registered: num(r.C06), voted: num(r.C07), turnoutPct: num(r.C08) };
 }
 
 /** @param {{ fetchImpl?: Function, now?: () => number, ttlMs?: number, registry?: { record: Function } }} [o] */
