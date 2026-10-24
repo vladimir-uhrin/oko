@@ -151,8 +151,8 @@ import { collapseGeoDetections, mergeGeoIntoFires } from './src/data/firmsGeo.js
 import { fireNewsQuery, fireNewsCellKey, fireNewsVerdict, nearestPlace, parseBingNewsRss, bingNewsUrl, fireHistoryStats } from './src/data/fireNews.js';
 import { createFireHistoryStore, slimFire, FIRE_HISTORY_MAX_DAYS } from './src/data/fireHistoryStore.js';
 import { createSentinel3FrpService } from './src/data/sentinel3FrpService.js';
-import { parseTrustedList } from './src/data/eventNews.js';
 import { FIRE_CELL_DEG, buildFireCells, firesInBbox, parseFireBbox } from './src/data/firmsView.js';
+import { parseTrustedList } from './src/data/eventNews.js';
 import {
   isLoopbackAddress,
   resolveClientIp,
