@@ -28,6 +28,13 @@ test('pure: viditeľnosť a štýl podľa mandátov, farby stavu, popis s vedúc
   assert.equal(pointVisibleUntilM(13), 3_000_000);
   assert.equal(pointVisibleUntilM(7), 1_800_000);
   assert.ok(labelVisibleUntilM(45, true) > labelVisibleUntilM(13) && labelVisibleUntilM(13) > labelVisibleUntilM(9) && labelVisibleUntilM(9) > labelVisibleUntilM(5));
+  // Mestské časti (Bratislava, Košice): meno a bod až pri meste, bez „Bratislava - " (prekrývali sa z 900 km).
+  assert.equal(labelVisibleUntilM(25, false, true), 38_000);
+  assert.ok(labelVisibleUntilM(45, true) > 1_000_000, 'mesto Bratislava zďaleka');
+  assert.equal(pointVisibleUntilM(25, false, true), 160_000);
+  assert.equal(labelText({ name: 'Bratislava - Petržalka' }), 'Petržalka');
+  assert.equal(labelText({ name: 'Košice - Staré Mesto', state: 2, lead: 'A B', leadPct: 40 }), 'Staré Mesto\nA B 40 %');
+  assert.equal(labelText({ name: 'Bratislava' }), 'Bratislava');
   assert.deepEqual(pointStyle({ seats: 45, city: true, state: 0 }), { pixelSize: 5.5, color: OBEC_STATE_COLORS[0] });
   assert.deepEqual(pointStyle({ seats: 9, state: 1 }), { pixelSize: 3.2, color: '#ffd166' });
   assert.deepEqual(pointStyle({ seats: 5, state: 2 }), { pixelSize: 2.6, color: '#4ade80' });

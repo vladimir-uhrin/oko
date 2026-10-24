@@ -243,8 +243,8 @@ test('výsledky v odpovediach: prehľad nesie súhrn a vedúcich, obec hlasy a �
   const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet });
   const prehlad = await call(service, '/prehlad');
   assert.equal(prehlad.json.phase, 'counting');
-  // tab0dd fixture: Topoľníky 3 okrsky + Bratislava 388 → 391; spracované 2 z Topoľníkov (čiastočné).
-  assert.deepEqual(prehlad.json.vysledky.summary, { okrskyDone: 2, okrskyTotal: 391, pct: 0.5, obceWithResults: 1, obceFinal: 0, registered: 1000, voted: 500, turnoutPct: 50 });
+  // tab0dd fixture: Topoľníky 3 okrsky; mesto Bratislava (388) sa do súčtu SR nepočíta (tie isté okrsky ako mestské časti).
+  assert.deepEqual(prehlad.json.vysledky.summary, { okrskyDone: 2, okrskyTotal: 3, pct: 66.7, obceWithResults: 1, obceFinal: 0, registered: 1000, voted: 500, turnoutPct: 50 });
   assert.deepEqual(prehlad.json.vysledky.tables, { starosta: 'OSO2026_SK_tab05f', ucast: 'OSO2026_SK_tab02bf' });
   const obec = await call(service, '/obec/501891');
   assert.match(obec.headers['Cache-Control'], /max-age=60/, 's výsledkami kratšia cache');

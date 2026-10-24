@@ -60,6 +60,15 @@ be published only afterwards (moratorium).
   would override the attribute. Deep links: the start flyover aims at the linked municipality/region
   (`volbyLocate` in main.js) and the selection waits for it (`startSettled` with a cap). Tests:
   `src/data/volbyResults.test.mjs`, `src/data/volbyObceLayer.test.mjs`, extended service and panel tests.
+- **Evening hardening (17:00–18:00):** election map mode `src/volbyMapMode.js` (panel open = Stadia Dark, OSM region and
+  municipality borders from `public/volby/hranice-*.json`, flights/ships hidden and re-hidden if a link restore turns them on
+  later, everything restored on close). Search list and municipality detail were squashed to 0 px in the desktop lane
+  (fixed: `.volby-body > * { flex: 0 0 auto }`; Enter opens the first hit). Finer dots; Bratislava/Košice districts
+  labelled without the city prefix and only from 38 km; the 144 municipalities without a GeoNames match now sit at the
+  centre of their OSM boundary (OSM `ref` = municipality code). Dress rehearsal with the archived OSO 2022 results
+  converted to 2026-style XLSX (121 661 precinct rows): precincts keyed obec|obvod|okrsok (Bratislava 388/388), whole-city
+  rows excluded from the national total (6 027), refresh skipped when no source file changed, parsing + model + results
+  run in `src/data/volbyWorker.js` (13 s in the background, main-thread stall 89 ms instead of 8.5 s).
 
 ### OKO Štúdio: Ukrajina — päť šablón zo živých dát (2026-10-04)
 

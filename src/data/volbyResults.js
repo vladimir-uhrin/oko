@@ -18,7 +18,9 @@
  * počet odlišných okrskov vo výsledkoch oproti počtu okrskov z územného členenia. „Zvolený" len podľa
  * značky ŠÚ SR; inak kandidát na prvom mieste „vedie". Pure.
  */
-import { foldText } from './volbyCandidates.js';
+import { CITY_DISTRICT_CODES, foldText } from './volbyCandidates.js';
+/** Celomestské výsledky Bratislavy a Košíc majú tie isté okrsky ako mestské časti — do súčtu SR nevstupujú (ŠÚ SR rovnako). */
+const CITY_CODES = new Set(Object.values(CITY_DISTRICT_CODES));
 
 /** Pravidlá stĺpcov: kľúč → presné (bez diakritiky) alebo čiastočné zhody hlavičky; prvé pravidlo vyhráva. */
 export const COLUMN_RULES = Object.freeze([
@@ -134,7 +136,7 @@ export function aggregateCandidates(records, columns, groupKey) {
     if (flag && (c.flag !== 'elected')) c.flag = flag;
     if (columns.okrsok !== undefined) {
       const okrsok = text(row[columns.okrsok]);
-      if (okrsok) g.okrsky.add(`${text(row[columns.obec])}|${okrsok}`);
+      if (okrsok) g.okrsky.add(`${text(row[columns.obec])}|${columns.obvod !== undefined ? text(row[columns.obvod]) : ''}|${okrsok}`);
     }
   }
   return groups;
@@ -168,7 +170,7 @@ export function aggregateTurnout(records, columns, groupKey) {
     g.voted += int(row[columns.voted]) || 0;
     g.rows += 1;
     const okrsok = columns.okrsok !== undefined ? text(row[columns.okrsok]) : '';
-    if (okrsok) g.okrsky.add(`${text(row[columns.obec])}|${okrsok}`);
+    if (okrsok) g.okrsky.add(`${text(row[columns.obec])}|${columns.obvod !== undefined ? text(row[columns.obvod]) : ''}|${okrsok}`);
   }
   return groups;
 }
@@ -278,9 +280,9 @@ export function buildResults(tables, model, { generatedAt = Date.now() } = {}) {
   };
   const obceOut = new Map([...obce].map(([code, e]) => [code, finish(e)]));
   const krajeOut = new Map([...kraje].map(([code, e]) => [code, finish(e)]));
-  const okrskyTotal = (model?.obce || []).reduce((s, o) => s + (o.okrsky || 0), 0) || null;
+  const okrskyTotal = (model?.obce || []).filter((o) => !CITY_CODES.has(o.code)).reduce((s, o) => s + (o.okrsky || 0), 0) || null;
   let okrskyDone = 0; let registered = 0; let voted = 0; let obceFinal = 0;
-  for (const e of obceOut.values()) { okrskyDone += e.okrskyDone; if (e.final) obceFinal += 1; if (e.ucast) { registered += e.ucast.registered; voted += e.ucast.voted; } }
+  for (const e of obceOut.values()) { if (CITY_CODES.has(e.code)) continue; okrskyDone += e.okrskyDone; if (e.final) obceFinal += 1; if (e.ucast) { registered += e.ucast.registered; voted += e.ucast.voted; } }
   return {
     generatedAt,
     tables: used,

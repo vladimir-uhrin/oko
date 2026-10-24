@@ -92,6 +92,56 @@ export function parseSusrZip(buffer) {
   return tables;
 }
 
+/**
+ * Celé spracovanie stiahnutých súborov: XLSX MV SR → kandidáti, ZIPy ŠÚ SR → tabuľky a číselníky, model, výsledky.
+ * Beží v hlavnom vlákne (testy) alebo vo workeri (src/data/volbyWorker.js). Pure: vstup = buffre, výstup = dáta.
+ * @param {{ minv: Record<string, Uint8Array|null>, susr: Record<string, Uint8Array|null>, geo: Array, nowMs: number }} input
+ * @returns {{ model: object|null, tables: Map, results: object|null, parseErrors: Record<string, string> }}
+ */
+export function processSources({ minv = {}, susr = {}, geo = [], nowMs = Date.now() } = {}) {
+  const parseErrors = {};
+  const tables = {};
+  for (const [key, src] of Object.entries(MINV_SOURCES)) {
+    const buf = minv[key];
+    if (!buf) continue;
+    try { tables[key] = tableByHeader(readXlsxRows(Buffer.from(buf)), src.headers)?.records || []; } catch (error) { parseErrors[`minv.${key}`] = `parse: ${error?.message}`; }
+  }
+  const susrTables = new Map();
+  for (const key of Object.keys(SUSR_SOURCES)) {
+    const buf = susr[key];
+    if (!buf) continue;
+    try { for (const [name, t] of parseSusrZip(Buffer.from(buf))) susrTables.set(name, t); } catch (error) { parseErrors[`susr.${key}`] = `parse: ${error?.message}`; }
+  }
+  for (const [key, spec] of Object.entries(SUSR_CODE_TABLES)) {
+    const t = susrTables.get(spec.table);
+    tables[key] = t ? (tableByHeader(t.sheets[0]?.rows || [], spec.headers)?.records || []) : [];
+  }
+  tables.geo = geo;
+  const hasCandidates = Object.keys(MINV_SOURCES).some((k) => tables[k]?.length);
+  const model = hasCandidates ? buildModel(tables, { generatedAt: nowMs, sources: {} }) : null;
+  let results = null;
+  if (model) {
+    try { results = buildResults(susrTables, model, { generatedAt: nowMs }); } catch (error) { parseErrors.results = `výsledky: ${error?.message}`; }
+  }
+  return { model, tables: susrTables, results, parseErrors };
+}
+
+/** Spracovanie vo workeri (node:worker_threads) — hlavné vlákno API ostáva voľné. */
+export async function processInWorker(input, { workerUrl = new URL('./volbyWorker.js', import.meta.url) } = {}) {
+  const { Worker } = await import('node:worker_threads');
+  const worker = new Worker(workerUrl);
+  try {
+    return await new Promise((resolve, reject) => {
+      worker.once('message', (msg) => (msg?.ok ? resolve(msg.out) : reject(new Error(msg?.error || 'worker'))));
+      worker.once('error', reject);
+      worker.once('exit', (code) => { if (code !== 0) reject(new Error(`worker skončil ${code}`)); });
+      worker.postMessage(input);
+    });
+  } finally {
+    void worker.terminate();
+  }
+}
+
 /** Prehľad výsledkových tabuliek ŠÚ SR pre odpoveď (bez riadkov). Pure. */
 export function resultsSummary(tables) {
   const list = [...(tables?.values?.() || [])].filter((t) => isResultsTable(t.name))
@@ -118,8 +168,10 @@ export function createVolbyService({
   registry = upstream,
   log = console,
   timeoutMs = FETCH_TIMEOUT_MS,
+  useWorker = false,
 } = {}) {
-  const state = { model: null, tables: new Map(), sources: {}, refreshing: null, lastRefreshAt: 0, fetches: 0, results: null };
+  const state = { model: null, tables: new Map(), sources: {}, refreshing: null, lastRefreshAt: 0, fetches: 0, results: null, forceRebuild: false };
+  const build = (input) => (useWorker ? processInWorker(input) : Promise.resolve(processSources(input)));
   let geo = null;
 
   function loadGeo() {
@@ -194,42 +246,42 @@ export function createVolbyService({
 
   async function refreshNow() {
     const started = now();
-    const results = {};
-    const tables = {};
+    const fetched = {};
     await Promise.all([
-      ...Object.entries(MINV_SOURCES).map(async ([key, src]) => {
-        const r = await fetchCached(`minv-${key}.xlsx`, src.url, MINV_TTL_MS);
-        results[`minv.${key}`] = r;
-        if (!r.buffer) return;
-        try { tables[key] = tableByHeader(readXlsxRows(r.buffer), src.headers)?.records || []; } catch (error) { r.error = `parse: ${error?.message}`; r.buffer = null; }
-      }),
-      ...Object.entries(SUSR_SOURCES).map(async ([key, url]) => {
-        const r = await fetchCached(`susr-${key}.zip`, url, susrTtlMs(now()));
-        results[`susr.${key}`] = r;
-        if (!r.buffer) return;
-        try { r.tables = parseSusrZip(r.buffer); } catch (error) { r.error = `parse: ${error?.message}`; r.buffer = null; }
-      }),
+      ...Object.entries(MINV_SOURCES).map(async ([key, src]) => { fetched[`minv.${key}`] = await fetchCached(`minv-${key}.xlsx`, src.url, MINV_TTL_MS); }),
+      ...Object.entries(SUSR_SOURCES).map(async ([key, url]) => { fetched[`susr.${key}`] = await fetchCached(`susr-${key}.zip`, url, susrTtlMs(now())); }),
     ]);
-    const susrTables = new Map();
-    for (const key of Object.keys(SUSR_SOURCES)) for (const [name, t] of results[`susr.${key}`]?.tables || []) susrTables.set(name, t);
-    for (const [key, spec] of Object.entries(SUSR_CODE_TABLES)) {
-      const t = susrTables.get(spec.table);
-      tables[key] = t ? (tableByHeader(t.sheets[0]?.rows || [], spec.headers)?.records || []) : [];
+    // Bez zmeny súborov (304 alebo čerstvá cache) a s hotovým modelom sa nič neprestavuje — len stav zdrojov.
+    const anyChanged = Object.values(fetched).some((r) => r.changed);
+    const sourcesOf = () => ({
+      minv: sourceStatus(Object.keys(MINV_SOURCES).map((k) => fetched[`minv.${k}`]), 'Ministerstvo vnútra SR – register kandidátov', MINV_PAGE_URL),
+      susr: sourceStatus(Object.keys(SUSR_SOURCES).map((k) => fetched[`susr.${k}`]), 'Štatistický úrad SR – volbysr.sk', SUSR_PAGE_URL),
+    });
+    if (state.model && !anyChanged && !state.forceRebuild) {
+      state.sources = sourcesOf();
+      state.model = { ...state.model, sources: state.sources };
+      state.lastRefreshAt = now();
+      return;
     }
-    tables.geo = loadGeo();
-    const sources = {
-      minv: sourceStatus(Object.keys(MINV_SOURCES).map((k) => results[`minv.${k}`]), 'Ministerstvo vnútra SR – register kandidátov', MINV_PAGE_URL),
-      susr: sourceStatus(Object.keys(SUSR_SOURCES).map((k) => results[`susr.${k}`]), 'Štatistický úrad SR – volbysr.sk', SUSR_PAGE_URL),
+    state.forceRebuild = false;
+    const input = {
+      minv: Object.fromEntries(Object.keys(MINV_SOURCES).map((k) => [k, fetched[`minv.${k}`]?.buffer || null])),
+      susr: Object.fromEntries(Object.keys(SUSR_SOURCES).map((k) => [k, fetched[`susr.${k}`]?.buffer || null])),
+      geo: loadGeo(),
+      nowMs: now(),
     };
-    const hasCandidates = Object.keys(MINV_SOURCES).some((k) => tables[k]?.length);
-    if (hasCandidates || !state.model) state.model = buildModel(tables, { generatedAt: now(), sources });
-    else state.model = { ...state.model, sources };
-    state.tables = susrTables;
+    // Spracovanie (XLSX + model + výsledky, sekundy CPU pri výsledkoch) mimo hlavného vlákna, ak je worker zapnutý.
+    const out = await build(input);
+    for (const [key, msg] of Object.entries(out.parseErrors || {})) if (fetched[key]) { fetched[key].error = msg; fetched[key].buffer = null; }
+    const sources = sourcesOf();
+    if (out.model) state.model = { ...out.model, sources };
+    else if (state.model) state.model = { ...state.model, sources };
+    else throw new Error('register kandidátov nie je k dispozícii');
+    state.tables = out.tables;
     state.sources = sources;
     state.lastRefreshAt = now();
-    // Výsledky (po 20:00): z tých istých ZIPov, nad modelom kandidátov; bez tabuliek ostáva available=false.
-    try { state.results = buildResults(susrTables, state.model, { generatedAt: now() }); } catch (error) { log.warn?.(`[volby] výsledky: ${error?.message}`); state.results = null; }
-    log.info?.(`[volby] model: ${state.model.obce.length} obcí, ${susrTables.size} tabuliek ŠÚ SR, výsledky ${state.results?.available ? Object.keys(state.results.tables).join('+') : 'nie'}, ${now() - started} ms`
+    state.results = out.results && state.model ? out.results : null;
+    log.info?.(`[volby] model: ${state.model.obce.length} obcí, ${state.tables.size} tabuliek ŠÚ SR, výsledky ${state.results?.available ? Object.keys(state.results.tables).join('+') : 'nie'}, ${now() - started} ms`
       + (sources.minv.errors.length || sources.susr.errors.length ? ` · chyby: ${[...sources.minv.errors, ...sources.susr.errors].join('; ')}` : ''));
   }
 
@@ -333,7 +385,7 @@ export function createVolbyService({
 
 /** Vite plugin (služba oko-api aj QA inštancia v role full). Model sa predhreje krátko po štarte. */
 export function volbyPlugin(options = {}) {
-  const service = createVolbyService(options);
+  const service = createVolbyService({ useWorker: true, ...options });
   return {
     name: 'oko-volby',
     configureServer(server) {

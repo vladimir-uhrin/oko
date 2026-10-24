@@ -21,19 +21,31 @@ export const OBEC_STATE_COLORS = Object.freeze({ 0: '#7fdcff', 1: '#ffd166', 2: 
 /** Krytie bodu (jemný, nie plný disk). */
 export const OBEC_POINT_ALPHA = 0.85;
 
-/** Dokedy (m od kamery) vidno bod obce podľa počtu poslancov (veľkosti). Pure. */
-export function pointVisibleUntilM(seats = 0, city = false) {
+/** Mestská časť Bratislavy alebo Košíc („Bratislava - Petržalka"). Pure. */
+export const DISTRICT_RE = /^(Bratislava|Košice) - /;
+export const isDistrict = (name) => DISTRICT_RE.test(String(name || ''));
+/** Meno na mape: mestská časť bez mena mesta („Petržalka"). Pure. */
+export const shortName = (name) => String(name || '').replace(DISTRICT_RE, '');
+
+/** Dokedy (m od kamery) vidno bod obce podľa počtu poslancov (veľkosti); mestské časti až pri meste. Pure. */
+export function pointVisibleUntilM(seats = 0, city = false, district = false) {
+  if (district) return 160_000;
   if (city || seats >= 25) return 6_000_000;
   if (seats >= 13) return 3_000_000;
   return 1_800_000;
 }
 
-/** Dokedy (m) vidno meno obce: mestá zďaleka, dediny zblízka. Pure. */
-export function labelVisibleUntilM(seats = 0, city = false) {
-  if (city || seats >= 25) return 900_000;
-  if (seats >= 13) return 320_000;
-  if (seats >= 9) return 140_000;
-  return 70_000;
+/**
+ * Dokedy (m) vidno meno obce: mestá zďaleka, dediny zblízka. Mestské časti (vlastník 24. 10.: mená v Bratislave sa
+ * prekrývali — 17 častí s 15–25 poslancami sa ukazovalo z 900 km) až pri priblížení na mesto. Pure.
+ */
+export function labelVisibleUntilM(seats = 0, city = false, district = false) {
+  if (district) return 38_000;
+  if (city) return 1_400_000;
+  if (seats >= 25) return 700_000;
+  if (seats >= 13) return 260_000;
+  if (seats >= 9) return 120_000;
+  return 60_000;
 }
 
 /** Štýl bodu: veľkosť podľa mandátov, farba podľa stavu výsledkov. Pure. */
@@ -45,9 +57,10 @@ export function pointStyle({ seats = 0, city = false, state = 0 } = {}) {
 
 /** Text popisku: meno, pri výsledkoch pod ním vedúci kandidát s podielom. Pure. */
 export function labelText({ name = '', state = 0, lead = '', leadPct = null } = {}) {
-  if (!state || !lead) return String(name);
+  const label = shortName(name);
+  if (!state || !lead) return label;
   const pct = leadPct != null && leadPct !== '' && Number.isFinite(Number(leadPct)) ? ` ${Number(leadPct).toFixed(0)} %` : '';
-  return `${name}\n${lead}${pct}`;
+  return `${label}\n${lead}${pct}`;
 }
 
 /** Polomer (px), v ktorom klik vedľa bodu ešte vyberie najbližšiu obec. */
@@ -82,7 +95,7 @@ export function parseObceBody(json) {
     const lat = o.lat == null || o.lat === '' ? NaN : Number(o.lat);
     const lon = o.lon == null || o.lon === '' ? NaN : Number(o.lon);
     if (!o.code || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    out.push({ code: String(o.code), name: String(o.name || ''), lat, lon, seats: Number(o.seats) || 0, city: Number(o.seats) >= 45, state: Number(o.state) || 0, lead: String(o.lead || ''), leadPct: o.leadPct == null ? null : Number(o.leadPct) });
+    out.push({ code: String(o.code), name: String(o.name || ''), lat, lon, seats: Number(o.seats) || 0, city: Number(o.seats) >= 45 || o.code === '582000' || o.code === '599981', state: Number(o.state) || 0, lead: String(o.lead || ''), leadPct: o.leadPct == null ? null : Number(o.leadPct) });
   }
   return out;
 }
@@ -128,7 +141,7 @@ export function createVolbyObceLayer({
         outlineColor: Cesium.Color.fromBytes(6, 14, 22, 140),
         outlineWidth: 0.5,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, pointVisibleUntilM(r.seats, r.city)),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, pointVisibleUntilM(r.seats, r.city, isDistrict(r.name))),
       });
       const label = labels.add({
         id: OBEC_PICK_PREFIX + r.code,
@@ -143,7 +156,7 @@ export function createVolbyObceLayer({
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, labelVisibleUntilM(r.seats, r.city)),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, labelVisibleUntilM(r.seats, r.city, isDistrict(r.name))),
       });
       byCode.set(r.code, { point, label, row: r });
     }
@@ -266,7 +279,7 @@ export function createVolbyObceLayer({
       const cameraPos = scene.camera?.positionWC;
       const out = [];
       for (const [code, e] of byCode) {
-        if (cameraPos && Cesium.Cartesian3.distance(cameraPos, e.point.position) > pointVisibleUntilM(e.row.seats, e.row.city)) continue;
+        if (cameraPos && Cesium.Cartesian3.distance(cameraPos, e.point.position) > pointVisibleUntilM(e.row.seats, e.row.city, isDistrict(e.row.name))) continue;
         const w = toWindow(scene, e.point.position);
         if (w) out.push({ code, x: w.x, y: w.y });
       }

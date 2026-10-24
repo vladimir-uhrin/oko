@@ -115,13 +115,33 @@ for (const m of mesta.records) {
   const list = (byName.get(fold(m['Názov mesta'])) || []).sort((a, b) => b.pop - a.pop);
   if (list[0]) { rows.push([String(m['Kód mesta']).trim(), +list[0].lat.toFixed(4), +list[0].lon.toFixed(4), 'obec']); counts.obec += 1; }
 }
+// 2026-10-24 (vlastník: mená Ružinova, Vrakune a Biskupíc sa prekrývali): obce bez presnej polohy (stred okresu,
+// jednoznačné meno) dostanú stred svojej hranice z OSM — relácie admin_level 8 a 9 nesú `ref` = kód obce ŠÚ SR.
+// Vstup: .gev-cache/volby-build/osm-obce-center.json (Overpass „out center tags"); bez neho ostáva stav ako predtým.
+{
+  const centerFile = path.join(cacheDir, 'osm-obce-center.json');
+  if (fs.existsSync(centerFile)) {
+    const osm = JSON.parse(fs.readFileSync(centerFile, 'utf8'));
+    const byRef = new Map();
+    for (const e of osm.elements || []) if (e.tags?.ref && e.center) byRef.set(String(e.tags.ref), e.center);
+    counts.hranica = 0;
+    for (const row of rows) {
+      if (row[3] === 'obec') continue;
+      const c = byRef.get(row[0]);
+      if (!c) continue;
+      counts[row[3]] -= 1;
+      row[1] = +c.lat.toFixed(4); row[2] = +c.lon.toFixed(4); row[3] = 'hranica';
+      counts.hranica += 1;
+    }
+  }
+}
 rows.sort((a, b) => a[0].localeCompare(b[0]));
 
 const outDir = path.join(root, 'src', 'data', 'local_data', 'volby');
 fs.mkdirSync(outDir, { recursive: true });
 const out = {
   meta: {
-    description: 'Polohy obcí SR pre sekciu VOĹBY: kód obce ŠÚ SR → zemepisná šírka a dĺžka (4 des. miesta) a presnosť (obec = sídlo v tom istom okrese, name = jednoznačné meno v SR, okres = stred nájdených obcí okresu).',
+    description: 'Polohy obcí SR pre sekciu VOĹBY: kód obce ŠÚ SR → zemepisná šírka a dĺžka (4 des. miesta) a presnosť (obec = sídlo v tom istom okrese, name = jednoznačné meno v SR, okres = stred nájdených obcí okresu, hranica = stred hranice obce z OSM podľa kódu obce).',
     sources: [
       { name: 'GeoNames SK.txt', url: GEONAMES_URL, licence: 'CC BY 4.0', newestRecord: newest, populatedPlaces: places },
       { name: 'ŠÚ SR — Územné členenie (OSO 2026, tab0dd a tab0dx)', url: 'https://volbysr.sk/oso/sk/uzemne_clenenie.html' },

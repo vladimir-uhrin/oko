@@ -498,7 +498,7 @@ export function installVolbyPanel({
     }));
     const note = progressNote(vy);
     if (note) obecBox.appendChild(note);
-    if (o.precision && o.precision !== 'obec') obecBox.appendChild(el(doc, 'div', 'volby-note', t('volby.approx')));
+    if (o.precision === 'okres') obecBox.appendChild(el(doc, 'div', 'volby-note', t('volby.approx')));
     if (o.unmatched) obecBox.appendChild(el(doc, 'div', 'volby-note', t('volby.unmatched')));
     // ŠÚ SR: 3 obce volia len zastupiteľstvo a v 3 sa voľby nekonajú — povedať, nie mlčať.
     if (o.typ && !/starosta/i.test(o.typ)) obecBox.appendChild(el(doc, 'div', 'volby-note volby-note-typ', t('volby.typ', { typ: o.typ })));
