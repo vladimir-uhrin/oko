@@ -127,6 +127,7 @@ import { initFirstRunExperience } from './firstRunExperience.js';
 import { installEmbedMode, isEmbedMode } from './embedMode.js';
 import { initMobileShell, isCoarsePointer, resolveShellMode } from './mobileShell.js';
 import { parseVolbyParam } from './volbyPanel.js';
+import { createVolbyMapMode } from './volbyMapMode.js';
 import { getOverlayPaintRect, setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 
@@ -1844,6 +1845,18 @@ async function init() {
       if (!window.__okoMobileShell?.open?.('volby')) styleManager.setPanelCollapsed('volby-panel', false, { explicit: true, persist: false, syncShare: false });
       void styleManager._volbyPanel?.selectObec?.(code, { fly: false });
     };
+    // Volebný režim mapy (2026-10-24): kým je panel VOĽBY otvorený, tmavý podklad, hranice krajov a obcí, bez
+    // lietadiel a lodí; po zatvorení sa vráti pôvodná mapa a vrstvy (src/volbyMapMode.js).
+    const volbyMapMode = createVolbyMapMode({
+      viewer,
+      getStack: () => mapStackController.getActiveId(),
+      setStack: (id) => styleManager._setMapStack(id, { syncShare: false }),
+      // „zapína sa" = zapnutá: obnova odkazu práve vrstvu zapína a po nej by ostala viditeľná
+      isLayerOn: (id) => { const e = dataManager.layers.get(id); return Boolean(e?.enabled || e?.lifecycleState === 'enabling'); },
+      setLayer: (id, on) => dataManager.setEnabled(id, on, { origin: 'user' }),
+    });
+    volbyMapMode.observe(document.getElementById('volby-panel'));
+    window.__godsEyeView.volbyMapMode = volbyMapMode;
     styleManager._volbyPanel?.attachMap?.({
       isOn: () => Boolean(dataManager.layers.get('volby-obce')?.enabled),
       setOn: (on) => dataManager.setEnabled('volby-obce', on, { origin: 'user' }),

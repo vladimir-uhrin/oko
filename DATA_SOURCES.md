@@ -19,6 +19,10 @@ covers the joint municipal and regional elections of 24 October 2026.
   results are public information published by law; the portal states no restrictive terms (checked
   2026-10-24; cookie notice only). Conditional downloads every 2 h before the close and every 3 min while
   counting; the panel shows the publication time and labels the phase (embargo / counting).
+- **OpenStreetMap — administrative boundaries** (ODbL 1.0, © OpenStreetMap contributors): region (admin_level 4)
+  and municipality/city-district (admin_level 8 and 9) boundary lines for the election map mode
+  (`src/volbyMapMode.js`), built by `scripts/build-volby-hranice.mjs` into `public/volby/hranice-*.json`
+  (simplified to ~30–45 m). Drawn only while the VOĽBY panel is open, on the Stadia Dark basemap.
 - **GeoNames** (https://www.geonames.org/, CC BY 4.0): municipality coordinates for the camera flight,
   bundled as `src/data/local_data/volby/obce-geo.json` (built by `scripts/build-volby-obce-geo.mjs`,
   provenance in the folder README; 2 782 exact matches, 13 by unique name, 131 district centroids marked
