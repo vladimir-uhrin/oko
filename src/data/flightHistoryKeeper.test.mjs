@@ -109,7 +109,8 @@ test('deň bez návštevníkov: súvislá história (stovky snímkov, žiadna me
   const firstHour = calls.filter((c) => c.at < calls[0].at + 3600_000).length;
   assert.ok(firstHour >= 38 && firstHour <= 41, `pri plných kreditoch ~40 snímkov/h, bolo ${firstHour}`);
   const mil = sim.calls.filter((c) => c.url.endsWith('/api/adsblol/mil')).length;
-  assert.ok(mil >= 1400 && mil <= 1441, `vojenské lietadlá ~raz za minútu: ${mil}`);
+  // 2026-10-23: raz za 5 min (adsb.lol má 500 dopytov denne na IP; vojenské lety obsluhuje adsb.fi s 60 s cache).
+  assert.ok(mil >= 280 && mil <= 289, `vojenské lietadlá ~raz za 5 min: ${mil}`);
   assert.ok(sim.calls.every((c) => c.keeperHeader === '1'), 'každý dopyt strážcu je označený (návštevník to nie je)');
   assert.ok(sim.calls.every((c) => c.url.startsWith('http://127.0.0.1:4173/api/')), 'len lokálny server, žiadny externý zdroj');
 });

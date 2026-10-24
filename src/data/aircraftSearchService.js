@@ -8,10 +8,12 @@
  *
  * Ohľaduplnosť k adsb.lol (zdieľa ho aj vrstva vojenských lietadiel): jedna požiadavka naraz,
  * ≥ 1,1 s odstup, výsledok cesty 20 s v cache, po 429 pauza 60 s; najviac 4 cesty na dopyt
- * a 20 dopytov za minútu z jednej IP.
+ * a 20 dopytov za minútu z jednej IP. Denný strop adsb.lol (500/IP, adsbLolBudget.js, 2026-10-23): hľadanie smie
+ * míňať až do nuly (prednosť pred hromadnými dopytmi), ale každý dopyt hlási hlavičky limitu do rozpočtu.
  */
 import { aircraftTypeName, operatorFromCallsign, parseAircraftQuery, scoreAircraft } from './aircraftSearch.js';
 import { upstream } from './upstreamStatus.js';
+import { adsbLolBudget, createAdsbLolBudget } from './adsbLolBudget.js';
 
 export const AIRCRAFT_SEARCH_PATH = '/api/aircraft-search';
 const UPSTREAM = 'https://api.adsb.lol';
@@ -59,7 +61,8 @@ export function normalizeReadsb(ac, nowMs) {
  * @param {(ms: number) => Promise<void>} [options.sleep]
  */
 export function createAircraftSearchService({ fetchImpl = globalThis.fetch, now = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)),
-  minGapMs = 1100, cacheMs = 20_000, backoffMs = 60_000, perIpPerMin = 20, registry = upstream } = {}) {
+  minGapMs = 1100, cacheMs = 20_000, backoffMs = 60_000, perIpPerMin = 20, registry = upstream,
+  budget = (registry === upstream && now === Date.now) ? adsbLolBudget : createAdsbLolBudget({ now, registry }) } = {}) {
   const cache = new Map(); // path → { at, list }
   const limiter = new Map(); // ip → { minute, n }
   let chain = Promise.resolve();
@@ -72,16 +75,17 @@ export function createAircraftSearchService({ fetchImpl = globalThis.fetch, now 
     if (hit && now() - hit.at < cacheMs) return Promise.resolve({ list: hit.list, cached: true });
     const run = async () => {
       // Pauza vlastná aj spoločná (adsb.lol zablokovaný inou časťou OKO — vrstva vojenských lietadiel má prednosť).
-      if (now() < pausedUntil || registry.paused('adsb.lol')) return { list: null, limited: true };
+      if (now() < pausedUntil || registry.paused('adsb.lol') || !budget.allow('search')) return { list: null, limited: true };
       const wait = lastAt + minGapMs - now();
       if (wait > 0) await sleep(wait);
       lastAt = now();
       let res;
+      budget.spend('search');
       try {
         res = await fetchImpl(UPSTREAM + path, { headers: { 'User-Agent': 'OKO-okolive.sk/1.0 (aircraft search)', Accept: 'application/json' },
           signal: AbortSignal.timeout(12_000) });
-      } catch { registry.record('adsb.lol', { error: true }); return { list: null, failed: true }; }
-      registry.record('adsb.lol', { status: res.status, pauseMs: res.status === 429 ? backoffMs : 0 });
+      } catch { budget.record('search', { error: true }); return { list: null, failed: true }; }
+      budget.record('search', { status: res.status, headers: res.headers });
       if (res.status === 429) { pausedUntil = now() + backoffMs; return { list: null, limited: true }; }
       if (!res.ok) return { list: null, failed: true };
       let body;

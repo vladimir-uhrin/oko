@@ -77,7 +77,7 @@ test('zoznam: len overené stroje so zdrojmi; úprava súboru sa prejaví bez re
   }
 });
 
-test('živé polohy: jeden dopyt na adsb.lol pre všetky stroje, cache 15 s, pri výpadku posledná známa odpoveď', async () => {
+test('živé polohy: jeden dopyt na adsb.lol pre všetky stroje, cache 60 s (rozpočet 500/deň), pri výpadku posledná známa odpoveď so STALE', async () => {
   const s = setup();
   try {
     const a = await s.call('/live');

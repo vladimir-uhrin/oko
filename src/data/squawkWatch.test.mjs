@@ -139,6 +139,7 @@ test('vojenská vrstva (2026-09-30): hlási núdzové kódy rovnako ako civilná
     assert.ok(src.includes(`_emitAwarenessEvent('gev:squawk-alert', { layerId: '${layerId}', alerts })`), `${name}: udalosť`);
     assert.match(src, /_squawkWatch\.reset\(\)/, `${name}: vypnutie vrstvy vráti „prvé načítanie mlčí"`);
   }
-  assert.match(military, /_lastUpdate = Date\.now\(\);\n\s*_publishSquawkAlerts\(\);/, 'po každom prijatom polle');
+  // 2026-10-23: zastaraná odpoveď proxy (STALE) nastaví čas posledného skutočného stavu, nie teraz.
+  assert.match(military, /_lastUpdate = _feedStale \? Date\.now\(\) - _feedAgeS \* 1000 : Date\.now\(\);\n\s*_publishSquawkAlerts\(\);/, 'po každom prijatom polle');
   assert.match(ui, /detail\?\.layerId === 'military' \? 'military' : 'flights'/, 'toast skočí na správnu vrstvu');
 });

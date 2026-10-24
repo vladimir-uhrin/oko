@@ -40,13 +40,15 @@ import { whereAmIPlugin } from './src/whereAmIServer.js';
 import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
 import { createWindGridCache } from './src/data/windAloft.js';
-import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
+import { KEEPER_HEADER, KEEPER_MIL_INTERVAL_MS, KEEPER_STATE_INTERVAL_MS, createDiskGuard, createHistoryKeeper, keeperOpenSkyIntervalMs } from './src/data/flightHistoryKeeper.js';
 import { createStateAircraftService } from './src/data/stateAircraftService.js';
 import { createAircraftSearchService } from './src/data/aircraftSearchService.js';
 import { createGeocodeService } from './src/data/geocodeService.js';
 import { LIMITED as ADSBDB_LIMITED, createAdsbdbGuard } from './src/data/adsbdbGuard.js';
 import { createAdsbLolTypeFallback } from './src/data/adsbLolTypeFallback.js';
 import { upstream as upstreamRegistry } from './src/data/upstreamStatus.js';
+import { adsbLolBudget } from './src/data/adsbLolBudget.js';
+import { createMilitaryFeedService } from './src/data/militaryFeedService.js';
 import { createFlightEventsService } from './src/data/flightEventsService.js';
 import { createEventCardRenderer } from './src/data/eventCardRender.js';
 import { createEventVideoCache, createEventVideoRenderer, createEventVideoStore, videoCodeVersion } from './src/data/eventVideoRender.js';
@@ -5016,9 +5018,15 @@ async function fetchAdsbLolPointFallback(req) {
     // honest about where the data actually came from.
     let lastError = null;
     for (const provider of REGIONAL_FALLBACK_PROVIDERS) {
+      // adsb.lol má 500 dopytov denne na IP (adsbLolBudget.js, 2026-10-23): hromadný druh `regional` ide len
+      // z rozpočtu, inak rovno adsb.fi.
+      const budgeted = provider.name === 'adsb.lol';
+      if (budgeted && !adsbLolBudget.allow('regional')) continue;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
+      let answered = false;
       try {
+        if (budgeted) adsbLolBudget.spend('regional');
         const upstream = await fetch(
           provider.url(roundedLat, roundedLon, ADSBLOL_POINT_RADIUS_NM),
           {
@@ -5029,6 +5037,8 @@ async function fetchAdsbLolPointFallback(req) {
             signal: controller.signal,
           },
         );
+        answered = true;
+        if (budgeted) adsbLolBudget.record('regional', { status: upstream.status, headers: upstream.headers });
         if (!upstream.ok) throw new Error(`upstream HTTP ${upstream.status}`);
         const payload = await readResponseJsonCapped(upstream, ADSBLOL_POINT_MAX_RESPONSE_BYTES);
         const normalized = normalizeAdsbLolPointResponse(payload);
@@ -5046,6 +5056,7 @@ async function fetchAdsbLolPointFallback(req) {
         return record;
       } catch (error) {
         lastError = error;
+        if (budgeted && !answered) adsbLolBudget.record('regional', { error: true });
         if (error?.name !== 'AbortError') {
           console.warn(`[${provider.name} Flights Fallback]`, error?.message || error);
         }
@@ -6613,7 +6624,7 @@ function flightHistoryProxy() {
           streams: [
             { id: 'opensky', path: '/api/opensky', intervalMs: () => keeperOpenSkyIntervalMs(_openskyRemainingCredits), blockedUntilMs: () => Math.max(_openskyCooldownUntil, _openskyConstrainedUntil) },
             { id: 'mil', path: '/api/adsblol/mil', intervalMs: () => KEEPER_MIL_INTERVAL_MS },
-            { id: 'state', path: '/api/state-aircraft/live', intervalMs: () => KEEPER_MIL_INTERVAL_MS },
+            { id: 'state', path: '/api/state-aircraft/live', intervalMs: () => KEEPER_STATE_INTERVAL_MS },
           ],
           openSkyCredits: () => _openskyRemainingCredits,
           canRecord: () => Boolean(getStore()) && diskOk(),
@@ -6729,7 +6740,8 @@ function flightHistoryProxy() {
       });
       server.middlewares.use('/api/adsblol/mil', (req, res, next) => {
         if (!isKeeperRequest(req)) keeper?.noteClient('mil');
-        if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, 'adsb.lol/mil'));
+        // Zdroj z hlavičky proxy (adsb.fi hlavný, adsb.lol záloha — militaryFeedService.js); STALE sa nezapisuje (okoHistoryRecord=false).
+        if (enabled) tapResponse(res, (s, body) => s.recordAdsbLolBody(body, `${res.getHeader('X-Flight-Source') || 'adsb.lol'}/mil`));
         next();
       });
       server.middlewares.use('/api/state-aircraft/live', (req, res, next) => {
@@ -6748,7 +6760,7 @@ function flightHistoryProxy() {
             // Cesta k databáze na disku verejnosti nepatrí (2026-09-30, okolive.sk).
             const { path: dbFile, ...publicStatus } = await s.status();
             json(res, 200, isDirectLocalRequest(req)
-              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null, events: flightEvents?.status() ?? null, opensky: openSkyUpstreamStatus() }
+              ? { ...publicStatus, path: dbFile, keeper: keeper?.status() ?? null, disk: diskGuard?.status() ?? null, stateAircraft: stateAircraft?.status() ?? null, events: flightEvents?.status() ?? null, opensky: openSkyUpstreamStatus(), adsbLol: adsbLolBudget.status(), milFeed: _milFeedStatus() }
               : publicStatus);
             return;
           }
@@ -8832,46 +8844,21 @@ function aircraftSearchPlugin() {
   };
 }
 
+/** Stav feedu vojenských letov pre /api/history/status (nastaví plugin). */
+let _milFeedStatus = () => null;
+
+/**
+ * Vojenské lety (2026-10-23): adsb.fi hlavný zdroj v minútovom takte, adsb.lol záloha z denného rozpočtu
+ * (500/IP, src/data/adsbLolBudget.js); cache 60 s, pri výpadku posledný známy stav s X-ADS-B-Cache: STALE
+ * a vekom namiesto prázdneho 429 (src/data/militaryFeedService.js).
+ */
 function adsbLolProxy() {
-  /** @type {string|null} Cached upstream JSON body. */
-  let _cache = null;
-  /** @type {number} Epoch-ms when the cache was populated. */
-  let _cacheAt = 0;
-  /** Response cache TTL (ms). */
-  const CACHE_MS = 12000;
+  const feed = createMilitaryFeedService();
+  _milFeedStatus = () => feed.status();
   return {
     name: 'adsblol-proxy',
     configureServer(server) {
-      server.middlewares.use('/api/adsblol/mil', async (req, res) => {
-        try {
-          const now = Date.now();
-          if (_cache && now - _cacheAt < CACHE_MS) {
-            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-ADS-B-Cache': 'HIT' });
-            res.end(_cache);
-            return;
-          }
-          const upstream = await fetch('https://api.adsb.lol/v2/mil', {
-            headers: { 'User-Agent': 'gods-eye-view-adsblol-proxy/1.0' },
-          });
-          upstreamRegistry.record('adsb.lol', { status: upstream.status, pauseMs: upstream.status === 429 ? 60_000 : 0 });
-          const body = await upstream.text();
-          if (upstream.ok) {
-            _cache = body;
-            _cacheAt = now;
-          }
-          res.writeHead(upstream.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-ADS-B-Cache': 'MISS' });
-          res.end(body);
-        } catch (e) {
-          console.error('[adsb.lol Proxy]', e.message);
-          if (_cache) {
-            res.writeHead(200, { 'Content-Type': 'application/json', 'X-ADS-B-Cache': 'STALE' });
-            res.end(_cache);
-            return;
-          }
-          res.writeHead(502, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'ADS-B proxy error' }));
-        }
-      });
+      server.middlewares.use('/api/adsblol/mil', (req, res) => { void feed.middleware(req, res); });
     },
   };
 }

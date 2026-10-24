@@ -291,6 +291,14 @@ function _abortActiveUpdates() {
 }
 /** @type {number|null} HTTP status code from the last API response */
 let _lastStatus = null;
+/**
+ * Zdroj a čerstvosť feedu z hlavičiek proxy (2026-10-23, militaryFeedService.js): X-Flight-Source = kto dal dáta
+ * (adsb.fi hlavný, adsb.lol záloha), X-ADS-B-Cache STALE + X-ADS-B-Age-S = posledný známy stav, žiadne nové.
+ * Panel potom ukáže ZASTARANÉ · zdroj · pred N min (manager.js _buildMetaText), nie prázdno ani „nikdy“.
+ */
+let _feedSource = 'adsb.lol';
+let _feedStale = false;
+let _feedAgeS = 0;
 /** @type {boolean} True once ensureGeoidReady() has resolved (awaited once at enable()). Mirror of flights.js. */
 let _geoidReady = false;
 /** @type {Map<string, number>} icao24 -> geoid undulation N (m), cached (negligible drift per-aircraft). */
@@ -306,7 +314,7 @@ let _lastTrackingRefreshOutcome = {
   epoch: 0,
   status: 'unavailable',
   ids: new Set(),
-  source: 'adsb.lol',
+  source: _feedSource,
 };
 /** @type {Cesium.Entity|null} Entity created for the tracked aircraft (camera follows this) */
 let _trackedEntity = null;
@@ -439,7 +447,7 @@ function _contextSubjectMetadata(icao24) {
     id: icao24,
     layerId: 'military',
     layerName: 'Military Flights',
-    source: 'adsb.lol',
+    source: _feedSource,
     label,
     latitude: described.latitude,
     longitude: described.longitude,
@@ -3267,7 +3275,7 @@ const militaryFlightsLayer = {
       epoch: trackingRefreshEpoch,
       status: 'source-unavailable',
       ids: new Set(),
-      source: 'adsb.lol',
+      source: _feedSource,
     };
     if (_retryAt && nowMs < _retryAt) {
       _backoff = true;
@@ -3283,6 +3291,11 @@ const militaryFlightsLayer = {
       updateSignal.throwIfAborted();
       const response = await fetch(API_URL, { signal: updateSignal });
       _lastStatus = response.status;
+      const feedSource = response.headers?.get?.('x-flight-source');
+      if (feedSource) _feedSource = String(feedSource);
+      _feedStale = String(response.headers?.get?.('x-ads-b-cache') || '').toUpperCase() === 'STALE';
+      const feedAgeS = Number(response.headers?.get?.('x-ads-b-age-s'));
+      _feedAgeS = _feedStale && Number.isFinite(feedAgeS) ? feedAgeS : 0;
 
       if (!response.ok) {
         _backoff = true;
@@ -3291,7 +3304,7 @@ const militaryFlightsLayer = {
         // hammer the upstream and the UI reads honestly.
         if (response.status === 429) {
           _retryAt = nowMs + BACKOFF_INTERVAL;
-          _lastError = 'adsb.lol rate limited';
+          _lastError = `${_feedSource} rate limited`;
           return;
         }
         _retryAt = nowMs + ERROR_BACKOFF_INTERVAL;
@@ -3303,7 +3316,7 @@ const militaryFlightsLayer = {
         } catch {
           detail = '';
         }
-        _lastError = detail || `adsb.lol HTTP ${response.status}`;
+        _lastError = detail || `${_feedSource} HTTP ${response.status}`;
         return;
       }
 
@@ -3721,13 +3734,14 @@ const militaryFlightsLayer = {
       registerMilitaryIcaos(currentIcaos);
 
       _count = _billboards.size;
-      _lastUpdate = Date.now();
+      // Zastaraná odpoveď proxy: čas posledného skutočného stavu, nie teraz — riadok panelu povie „pred N min“.
+      _lastUpdate = _feedStale ? Date.now() - _feedAgeS * 1000 : Date.now();
       _publishSquawkAlerts();
       _lastTrackingRefreshOutcome = {
         epoch: trackingRefreshEpoch,
         status: 'accepted',
         ids: currentIcaos,
-        source: 'adsb.lol',
+        source: _feedSource,
       };
       console.log(`[Data:Military] Updated: ${_count} aircraft`);
       _applyPendingTrackingRestore();
@@ -3822,7 +3836,7 @@ const militaryFlightsLayer = {
       epoch: _trackingRefreshEpoch,
       status: 'destroyed',
       ids: new Set(),
-      source: 'adsb.lol',
+      source: _feedSource,
     };
     _resetTrackedSelectionState(); // next lifecycle re-evaluates against the ENTER ceiling
     _viewer = null;
@@ -4415,11 +4429,11 @@ const militaryFlightsLayer = {
     return {
       count: _count,
       lastUpdate: _lastUpdate,
-      stale: _backoff,
+      stale: _backoff || _feedStale,
       error: _lastError,
       status: _lastStatus,
       retryInSec,
-      source: 'adsb.lol',
+      source: _feedSource,
       fallback: false,
     };
   },

@@ -22,8 +22,16 @@ export const KEEPER_CLIENT_IDLE_MS = 2 * 60_000;
 export const KEEPER_RESERVE_CREDITS = 1200;
 /** Pod rezervou už len sonda: zistí obnovu kreditov a drží aspoň hrubú stopu. */
 export const KEEPER_PROBE_MS = 30 * 60_000;
-/** adsb.lol /v2/mil nemá kredity; jeden dopyt za minútu (proxy aj tak drží 12 s cache). */
-export const KEEPER_MIL_INTERVAL_MS = 60_000;
+/**
+ * Vojenské lety a štátne lietadlá idú cez adsb.lol, ktorý má 500 dopytov DENNE na IP (adsbLolBudget.js,
+ * 2026-10-23; „nemá kredity" už neplatí). Strážca sa pýta lokálneho /api raz za 5 min: vojenské lety
+ * obsluhuje adsb.fi s 60 s cache (adsb.lol len ako záloha z rozpočtu), štátne lietadlá rozpočet `state`
+ * (najmenej 2 min odstup, rezerva 30). Denný rozpočet adsb.lol: strážca štátnych lietadiel bez návštevníkov
+ * ≤ 288, s návštevníkmi najviac 720 teoreticky, ale rozpočet ich zastaví pri rezerve; záloha vojenských
+ * letov ≤ 288 (len keď adsb.fi padne); hľadanie smie dobrať zvyšok až do nuly.
+ */
+export const KEEPER_MIL_INTERVAL_MS = 5 * 60_000;
+export const KEEPER_STATE_INTERVAL_MS = 5 * 60_000;
 export const KEEPER_REQUEST_TIMEOUT_MS = 60_000;
 /** Najdlhší odstup pri opakovaných chybách (zdvojovanie intervalu). */
 export const KEEPER_MAX_BACKOFF_MS = 30 * 60_000;

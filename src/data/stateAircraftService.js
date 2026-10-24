@@ -13,9 +13,11 @@ import { TRACE_SRC } from './adsblolTrace.js';
 import { airportsFromIndex, nearestAirport } from './airportNearest.js';
 import { parseAirportIndex } from './airportLookup.js';
 import { parseStateAircraftList, stateAircraftFor } from './stateAircraft.js';
+import { adsbLolBudget, createAdsbLolBudget } from './adsbLolBudget.js';
 import { STATE_BACKFILL_UA, createStateBackfill, fetchGlobeTrace, fileCursorStore } from './stateAircraftBackfill.js';
 
-export const STATE_LIVE_CACHE_MS = 15_000;
+/** 60 s (2026-10-23; 15 s bolo pri 500 dopytoch adsb.lol denne neudržateľných — adsbLolBudget.js). */
+export const STATE_LIVE_CACHE_MS = 60_000;
 export const STATE_LIVE_URL = 'https://api.adsb.lol/v2/hex/';
 /** Koniec stopy pod touto výškou (alebo na zemi) sa smie priradiť letisku. */
 export const AIRPORT_END_MAX_ALT_M = 1500;
@@ -65,6 +67,8 @@ export function createStateAircraftService({
   now = Date.now,
   log = (msg) => console.log(msg),
   backfillIntervalMs,
+  // Rozpočet adsb.lol: spoločná inštancia procesu; s vlastným časom (testy) vlastná.
+  budget = now === Date.now ? adsbLolBudget : createAdsbLolBudget({ now }),
 }) {
   let list = null;
   let listMtime = -1;
@@ -102,12 +106,22 @@ export function createStateAircraftService({
     const hexes = currentList().aircraft.map((a) => a.hex);
     if (!hexes.length) return JSON.stringify({ ac: [], now: now(), total: 0 });
     if (live && now() - live.at < STATE_LIVE_CACHE_MS) return live.body;
+    // Denný rozpočet adsb.lol (druh `state`): v pauze alebo pod rezervou posledná známa odpoveď, nie dopyt.
+    if (!budget.allow('state')) throw new Error('adsb.lol budget: state paused');
     if (!liveInFlight) {
       liveInFlight = (async () => {
-        const res = await fetchImpl(`${STATE_LIVE_URL}${hexes.join(',')}`, {
-          headers: { 'User-Agent': STATE_BACKFILL_UA, Accept: 'application/json' },
-          signal: AbortSignal.timeout(15_000),
-        });
+        budget.spend('state');
+        let res;
+        try {
+          res = await fetchImpl(`${STATE_LIVE_URL}${hexes.join(',')}`, {
+            headers: { 'User-Agent': STATE_BACKFILL_UA, Accept: 'application/json' },
+            signal: AbortSignal.timeout(15_000),
+          });
+        } catch (error) {
+          budget.record('state', { error: true });
+          throw error;
+        }
+        budget.record('state', { status: res.status, headers: res.headers });
         if (!res.ok) throw new Error(`adsb.lol HTTP ${res.status}`);
         const body = await res.text();
         JSON.parse(body); // len platný JSON do cache
@@ -145,8 +159,12 @@ export function createStateAircraftService({
         try {
           send(res, 200, await liveBody());
         } catch (error) {
-          if (live) send(res, 200, live.body);
-          else send(res, 502, { error: 'state_live_unavailable', detail: String(error?.message || error) });
+          if (live) {
+            // Zastarané: vek v hlavičke, do histórie sa znova nezapisuje (vite.config.js tapResponse).
+            res.okoHistoryRecord = false;
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-ADS-B-Cache': 'STALE', 'X-ADS-B-Age-S': String(Math.max(0, Math.round((now() - live.at) / 1000))) });
+            res.end(live.body);
+          } else send(res, 502, { error: 'state_live_unavailable', detail: String(error?.message || error) });
         }
         return;
       }
@@ -191,6 +209,6 @@ export function createStateAircraftService({
     startBackfill: () => { void repairAirGaps(); backfill.start(); },
     stopBackfill: () => backfill.stop(),
     backfillTick: () => backfill.tick(),
-    status: () => ({ aircraft: currentList().aircraft.length, backfill: backfill.status() }),
+    status: () => ({ aircraft: currentList().aircraft.length, backfill: backfill.status(), liveAt: live?.at ?? null, adsbLol: budget.status() }),
   };
 }
