@@ -37,6 +37,7 @@ import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { HISTORY_PATH_LOOKBACK_S, accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
 import { adsbdbRouteAnswer, createVrsRouteDb, routeHintFromQuery, vrsRouteAnswer } from './src/data/vrsRoutes.js';
 import { whereAmIPlugin } from './src/whereAmIServer.js';
+import { volbyPlugin } from './src/data/volbyService.js';
 import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
 import { createWindGridCache } from './src/data/windAloft.js';
@@ -12403,6 +12404,8 @@ export default defineConfig(({ mode }) => {
       ...(apiPlugins ? [releaseHeaderPlugin(serverRole), whereAmIPlugin(), sharePlugin(), flightHistoryProxy(), accountAuth, adminPlugin(env)] : []),
       cesiumGlobe,
       ...(apiPlugins ? [
+      // VOĽBY 2026 (2026-10-24): /api/volby — kandidáti MV SR, číselníky a výsledky ŠÚ SR (src/data/volbyService.js).
+      volbyPlugin(),
       openSkyProxy(),
       celestrakProxy(),
       tomtomProxy(),

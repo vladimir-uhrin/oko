@@ -50,7 +50,7 @@ test('zóny stĺpca a sekcie mobilu majú rovnakú logiku: Prelety v Konfliktoch
   assert.ok(scene > order('#left-panel-stack > .lane-zone') && scene < order('#left-panel-stack > .lane-zone[data-lane-zone="energy"]'), `Prelety (${scene}) medzi nadpismi KONFLIKTY a ENERGIA`);
   assert.ok(scene > order('#left-panel-stack > #mideast-panel'), 'Prelety až za Blízkym východom');
   const byId = new Map(MOBILE_SECTIONS.map((s) => [s.id, s]));
-  assert.deepEqual([...byId.keys()], ['layers', 'conflicts', 'data', 'display', 'search'], 'päť sekcií, bez samostatných SCÉN');
+  assert.deepEqual([...byId.keys()], ['layers', 'volby', 'conflicts', 'data', 'display', 'search'], 'šesť sekcií (VOĽBY 2026 od 2026-10-24 hneď za Vrstvami), bez samostatných SCÉN');
   assert.deepEqual([...byId.get('conflicts').panelIds], ['ukraine-panel', 'mideast-panel', 'scene-panel']);
   assert.equal(byId.get('conflicts').expand, 'ukraine-panel');
   assert.deepEqual([...byId.get('data').panelIds], ['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']);

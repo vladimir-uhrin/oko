@@ -69,6 +69,8 @@ export function creditsBottomClear({ base, height, left, right, viewportHeight, 
 export const MOBILE_SECTIONS = Object.freeze([
   // POČASIE (2026-10-07) má riadky vrstiev (glóbus GFS, radar SHMÚ) — patrí k Vrstvám.
   Object.freeze({ id: 'layers', labelKey: 'mobile.layers', panelIds: Object.freeze(['data-panel', 'weather-panel']), expand: 'data-panel' }),
+  // VOĽBY 2026 (2026-10-24): kandidáti a výsledky majú vlastnú sekciu hneď za Vrstvami — dnes najhľadanejšia vec.
+  Object.freeze({ id: 'volby', labelKey: 'mobile.volby', panelIds: Object.freeze(['volby-panel']), expand: 'volby-panel' }),
   // KONFLIKTY (2026-10-11, preusporiadanie): Ukrajina, Blízky východ a prelety pokope ako v ľavom
   // stĺpci; sekcia SCÉNY zanikla (réžia scén je .oko-owner-only v paneli Prelety).
   Object.freeze({ id: 'conflicts', labelKey: 'mobile.conflicts', panelIds: Object.freeze(['ukraine-panel', 'mideast-panel', 'scene-panel']), expand: 'ukraine-panel' }),

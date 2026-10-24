@@ -71,6 +71,7 @@ import { eventIdFromHash, installEventsPanel } from './eventsPanel.js';
 import { createEventMarkers } from './eventMarkers.js';
 import { whenStartupReady } from './startupGate.js';
 import { installGasPanel } from './gasPanel.js';
+import { installVolbyPanel } from './volbyPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, getOverlayEntryText, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
@@ -284,6 +285,7 @@ const SHARE_PANEL_STATE_SPECS = Object.freeze([
   { id: 'mideast-panel' },
   { id: 'ukraine-panel' },
   { id: 'weather-panel' },
+  { id: 'volby-panel' },
   { id: 'global-context-panel' },
   { id: 'look-panel' },
   { id: 'pp-toggles' },
@@ -299,6 +301,7 @@ const COCKPIT_ENTRY_COLLAPSE_PANEL_IDS = Object.freeze([
   'mideast-panel',
   'ukraine-panel',
   'weather-panel',
+  'volby-panel',
   'look-panel',
   'pp-toggles',
   'global-context-panel',
@@ -3355,6 +3358,27 @@ export class StyleManager {
     // Po štarte (mapa zobrazená, záber z odkazu obnovený) — inak by ho obnova panelov prekryla.
     const sharedEventId = eventIdFromHash(window.location.hash);
     if (sharedEventId) void whenStartupReady().then(() => this._eventsPanel?.open(sharedEventId));
+    // VOĽBY 2026 (2026-10-24, volbyPanel.js): kandidáti z registra MV SR a po 20:00 výsledky ŠÚ SR
+    // z /api/volby; klik na kraj alebo obec preletí kamerou kolmo nad miesto (kraj 260 km, mesto 20 km,
+    // dedina 5 km). Odkazy na zdieľanie (?volby=…) kopíruje do schránky.
+    this._volbyPanel = installVolbyPanel({
+      t,
+      origin: window.location?.origin || '',
+      setCollapsed: (collapsed) => this.setPanelCollapsed('volby-panel', collapsed, { persist: false, syncShare: false }),
+      onFlyTo: ({ lat, lon, heightM }) => {
+        // Úvodný prelet aj karta lietadla držia kameru (sledovanie) — bez uvoľnenia by let nad obec nikam nešiel.
+        // Volanie bez literálu objektu: cameraHandoff.test číta telo metódy regexom od prvého výskytu jej mena
+        // s otvorenou zloženou zátvorkou — literál tu by mu podstrčil cudzie telo.
+        const releaseOptions = { trackingOrigin: 'user' };
+        this._releaseFollowCamera(releaseOptions);
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(lon, lat, heightM),
+          orientation: { heading: 0, pitch: -Cesium.Math.PI_OVER_TWO, roll: 0 },
+          duration: 2,
+        });
+      },
+      copyText: (text) => navigator.clipboard?.writeText?.(text),
+    });
     // Plyn (2026-09-13, gasPanel.js): karta CENY z /api/gas/prices (ACER +
     // IMF/FRED, bez kľúča); zásobníky (GIE) a toky (ENTSOG) pribudnú po etapách.
     this._gasPanel = installGasPanel({

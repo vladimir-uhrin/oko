@@ -125,6 +125,7 @@ import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { installEmbedMode, isEmbedMode } from './embedMode.js';
 import { initMobileShell, isCoarsePointer, resolveShellMode } from './mobileShell.js';
+import { parseVolbyParam } from './volbyPanel.js';
 import { getOverlayPaintRect, setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 
@@ -1818,6 +1819,22 @@ async function init() {
           .then(() => runChokepointScene(requested));
       }
     } catch { /* URL parsing is best-effort — a bad param never breaks boot */ }
+
+    // VOĽBY 2026 (2026-10-24): `?volby` otvorí panel, `?volby=<kód obce>` obec, `?volby=k<kraj>` kraj — odkazy
+    // na zdieľanie z panela (okolive.sk/?volby=582000). Po obnove stavu ako úžiny; na mobile cez sekciu lišty.
+    try {
+      const requestedVolby = parseVolbyParam(window.location?.search || '');
+      if (requestedVolby) {
+        void Promise.resolve(styleManager.initialRestorePromise)
+          .catch(() => {})
+          .then(() => {
+            if (!window.__okoMobileShell?.open?.('volby')) {
+              styleManager.setPanelCollapsed('volby-panel', false, { explicit: true, persist: false, syncShare: false });
+            }
+            return styleManager._volbyPanel?.open?.(requestedVolby);
+          });
+      }
+    } catch { /* zlý parameter nikdy nezhodí štart */ }
 
     // In-app trigger: the SCENES panel (bottom-bar "SCENES" tab on touch) carries
     // a chokepoint dropdown. Options are built here so their labels follow i18n;

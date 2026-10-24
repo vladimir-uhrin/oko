@@ -237,7 +237,7 @@ test('plášť: desktop nič nemení; na telefóne skryje stĺpce a otvorí sekc
   assert.equal(byId.get('oko-sheet-title').textContent, 'LAYERS');
   assert.deepEqual(styleManager.calls.at(-1), ['data-panel', false, { persist: false, syncShare: false }], 'zbaľovanie cez StyleManager bez ukladania');
   const pressed = appbar.querySelectorAll('[data-oko-section]').map((b) => b.getAttribute('aria-pressed'));
-  assert.deepEqual(pressed, ['true', 'false', 'false', 'false', 'false']);
+  assert.deepEqual(pressed, ['true', 'false', 'false', 'false', 'false', 'false'], 'šesť sekcií od 2026-10-24 (VOĽBY za Vrstvami)');
 
   assert.equal(shell.close(), true);
   assert.equal(dataPanel.parentNode, leftStack);
@@ -312,8 +312,8 @@ test('plášť: naležato = zásuvka; návrat na desktop otvorený výsuv zatvor
   const shell = createMobileShell({ document: doc, window: win, styleManager: null });
   shell.sync();
   assert.equal(body.classList.contains('oko-mobile-landscape'), true);
-  // druhá sekcia = KONFLIKTY (2026-10-11); v kostre je z nej len scene-panel
-  const scenesButton = appbar.querySelectorAll('[data-oko-section]')[1];
+  // tretia sekcia = KONFLIKTY (2026-10-11; od 2026-10-24 za VOĽBAMI); v kostre je z nej len scene-panel
+  const scenesButton = appbar.querySelectorAll('[data-oko-section]')[2];
   scenesButton.click();
   assert.equal(shell.activeSection(), 'conflicts');
   assert.equal(byId.get('scene-panel').parentNode, sheet.querySelector('.oko-sheet-body'));

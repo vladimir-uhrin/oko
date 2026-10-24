@@ -770,6 +770,11 @@
       <span class="material-symbols-outlined" aria-hidden="true">layers</span>
       <span class="oko-appbar-label" data-i18n="mobile.layers">Layers</span>
     </button>
+    <!-- VOĽBY 2026 (2026-10-24): kandidáti a výsledky majú na mobile vlastnú sekciu hneď za Vrstvami. -->
+    <button type="button" data-oko-section="volby" aria-pressed="false">
+      <span class="material-symbols-outlined" aria-hidden="true">how_to_vote</span>
+      <span class="oko-appbar-label" data-i18n="mobile.volby">Elections</span>
+    </button>
     <!-- KONFLIKTY (2026-10-11): Ukrajina, Blízky východ a prelety majú na mobile vlastnú sekciu —
          predtým boli zahrabané v DÁTACH a sekcia SCÉNY nosila len réžiu vlastníka. -->
     <button type="button" data-oko-section="conflicts" aria-pressed="false">
@@ -888,6 +893,25 @@
         <button class="panel-collapse-btn" data-collapse-target="weather-panel" title="Collapse panel">+</button>
       </div>
       <div class="weather-body" data-weather-body></div>
+    </div>
+  </div>
+
+  <!-- VOĽBY 2026 (2026-10-24): spojené komunálne a župné voľby — kandidáti z registra MV SR,
+       po 20:00 priebežné výsledky ŠÚ SR. Obsah skladá src/volbyPanel.js do [data-volby-body];
+       dáta dáva /api/volby (src/data/volbyService.js). Zóna hneď pod POČASÍM (style.css order 14/15). -->
+  <div class="lane-zone" data-lane-zone="volby">
+    <span class="lane-zone-text" data-i18n="lane.zone.volby">ELECTIONS</span>
+    <span class="panel-divider" aria-hidden="true"></span>
+  </div>
+  <div id="volby-panel" class="panel-collapsible collapsed" data-panel-id="volby-panel">
+    <div class="panel-glow"></div>
+    <div class="volby-panel-inner scene-panel-inner">
+      <div class="panel-header">
+        <span data-i18n="panel.volby" class="panel-title">ELECTIONS 2026</span>
+        <span class="panel-divider"></span>
+        <button class="panel-collapse-btn" data-collapse-target="volby-panel" title="Collapse panel">+</button>
+      </div>
+      <div class="volby-body" data-volby-body></div>
     </div>
   </div>
 

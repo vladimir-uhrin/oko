@@ -1,5 +1,29 @@
 # Data Sources & Attribution
 
+## Elections 2026 — candidate register, results, municipality positions (2026-10-24)
+
+The `VOĽBY 2026` panel (`src/volbyPanel.js`; server `src/data/volbyService.js`, `GET /api/volby/*`)
+covers the joint municipal and regional elections of 24 October 2026.
+
+- **Ministry of the Interior of the Slovak Republic — register of registered candidates**
+  (https://www.minv.sk/?samosprava26-info10, published 29 Sep 2026): four XLSX files — mayors (6 560),
+  municipal councillors (40 184), regional governors (56), regional councillors (2 472). Official lists
+  published for voters under Act No. 180/2014 Coll.; the files carry no licence text, so OKO relies on the
+  re-use of public-sector information (Act No. 211/2000 Coll.) and shows the register unaltered — name and
+  titles, age, occupation, party/coalition or independent, and for regional candidates the municipality of
+  residence — with the ministry named as the source and the caveat that withdrawals after the deadline stay
+  on the ballot. Conditional downloads (ETag / Last-Modified), at most every 12 h, raw files cached on disk.
+- **Statistical Office of the Slovak Republic — volbysr.sk** (https://volbysr.sk/): the XLSX tables inside
+  `oso/files/OSO2026_SK_xlsx.zip` and `osk/files/OSK2026_SK_xlsx.zip` — code lists before the polls close
+  (parties, territorial division, electoral districts) and the official result tables afterwards. Election
+  results are public information published by law; the portal states no restrictive terms (checked
+  2026-10-24; cookie notice only). Conditional downloads every 2 h before the close and every 3 min while
+  counting; the panel shows the publication time and labels the phase (embargo / counting).
+- **GeoNames** (https://www.geonames.org/, CC BY 4.0): municipality coordinates for the camera flight,
+  bundled as `src/data/local_data/volby/obce-geo.json` (built by `scripts/build-volby-obce-geo.mjs`,
+  provenance in the folder README; 2 782 exact matches, 13 by unique name, 131 district centroids marked
+  "approximate" in the UI). Attribution appears in the panel's source line.
+
 ## Airport audio source investigation (2026-09-06)
 
 Expanded worker-assisted research on2026-09-08 found100 airports with HTTP

@@ -300,3 +300,17 @@ Oficiálny Cesium terrain (quantized-mesh) od GKÚ neexistuje, preto self-host:
   priebežne pridáva); východ vrátane Tatier a Košíc vracia 404. Keď ÚGKK
   zverejní ďalšie LOT-y, stačí ich pridať do `LOTS` v build-sk-terrain-hires
   a spustiť plánovanú úlohu.
+
+### Voľby 2026 — zdroje (2026-10-24)
+
+- **MV SR, register kandidátov** (https://www.minv.sk/?samosprava26-info10): 4 XLSX (starostovia, poslanci obcí,
+  predsedovia a poslanci krajov), zverejnené 29. 9. 2026 ako novinka — prvý centrálny zoznam. Rovnaké kódy
+  okresov ako ŠÚ SR; mesto Bratislava = kód okresu 100, Košice = 800. Bez výslovnej licencie — úradný zoznam
+  zverejnený pre voličov (zákon č. 180/2014 Z. z.), ďalšie použitie informácií verejného sektora podľa zákona
+  č. 211/2000 Z. z.; ukazujeme ho nezmenený s uvedením zdroja. Pozor: obce majú jeden stĺpec „Titul", kraje
+  „Titul pred menom" a „Titul za menom"; hlavičky nesú viacnásobné medzery (čítať bez diakritiky a medzier).
+- **ŠÚ SR, volbysr.sk**: `oso/files/OSO2026_SK_xlsx.zip`, `osk/files/OSK2026_SK_xlsx.zip` — pred 20:00 len
+  číselníky (tab0c strany, tab0dd/tab0dx územné členenie obcí a miest, tab0db/tab0dc obvody krajov); výsledkové
+  tabuľky (tabNN) pribudnú po 20:00. Archív 2022 na volby.statistics.sk už nie je (404) — štruktúru výsledkov
+  2026 treba prečítať až naživo (`/api/volby/tabulky`). Podmienené sťahovanie (Last-Modified 20. 10. 2026).
+- **GeoNames SK.txt** (CC BY 4.0): polohy obcí; admin2 = kód okresu ŠÚ SR, 95 % obcí presne, zvyšok stred okresu.

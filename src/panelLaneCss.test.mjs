@@ -121,6 +121,8 @@ const LANE_ZONES = [
   { zone: null, panels: ['data-panel'] },
   // POČASIE (2026-10-07): glóbus GFS + radar SHMÚ hneď pod Vrstvami.
   { zone: 'weather', panels: ['weather-panel'] },
+  // VOĽBY 2026 (2026-10-24): kandidáti a výsledky hneď pod Počasím.
+  { zone: 'volby', panels: ['volby-panel'] },
   // 2026-10-11 (preusporiadanie): Prelety/Scény ku KONFLIKTOM (tri výbery preletov), PREHLIADAŤ = História + Kamery.
   { zone: 'conflicts', panels: ['ukraine-panel', 'mideast-panel', 'scene-panel'] },
   { zone: 'energy', panels: ['gas-panel'] },

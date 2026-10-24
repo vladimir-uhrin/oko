@@ -1,5 +1,46 @@
 # God's Eye View Current State
 
+### OKO VOĽBY 2026 — kandidáti dnes, výsledky po 20:00 (2026-10-24)
+
+Owner (election day, 11:56): „potreboval by som dnes narýchlo spraviť sekciu voľby aj s aktuálnymi
+výsledkami … zatiaľ priebežne kandidátov a do večera by pribudli výsledky, aby som to vedel už propagovať".
+Joint municipal and regional elections, Saturday 24 Oct 2026; polls close 20:00 (18:00 UTC) and results may
+be published only afterwards (moratorium).
+
+- **Server** `src/data/volbyService.js` (`volbyPlugin()` in vite.config.js next to whereAmI — API role only,
+  the dev proxy forwards it): `GET /api/volby/prehlad` (phase, counts, 8 regions with centres, largest cities,
+  result-table summary, source freshness), `/kraj/<1-8>` (governor candidates, electoral districts with
+  councillor candidates and member municipalities), `/obce?q=` (search by name or 6-digit code; prefix beats
+  substring, whole city beats its districts, bigger councils first), `/obec/<code>` (mayor and councillor
+  candidates by ward, regional district of the municipality), `/tabulky` + `/tabulka/<name>` (every XLSX table
+  of the Statistical Office ZIPs, generic, so result tables are inspectable the moment they appear), `/status`.
+  Sources: Ministry of the Interior candidate register (4 XLSX, 29 Sep 2026; TTL 12 h, ETag/Last-Modified) and
+  volbysr.sk ZIPs (code lists now, result tables after 20:00; TTL 2 h before, 3 min from 30 min before the
+  close). Raw files cached in `.gev-cache/volby/`; a failed source serves the last copy marked `stale`; without
+  the Statistical Office code list the municipalities keep working under substitute codes `x<okres>-<name>`.
+  XLSX is read without a library (`src/data/xlsxSheet.js` on `zipEntries.js`: shared strings, inline strings,
+  numbers, booleans; header row found by folded text — the ministry's headers carry runs of spaces).
+- **Model** `src/data/volbyCandidates.js` (pure): ministry rows joined to Statistical Office municipality codes
+  by district code + folded name (the ministry uses the same district codes; whole-city elections carry district
+  codes 100 Bratislava / 800 Košice → city codes 582000 / 599981 from tab0dx); regions from tab0db/tab0dc;
+  positions from `src/data/local_data/volby/obce-geo.json` (GeoNames CC BY 4.0, built by
+  `scripts/build-volby-obce-geo.mjs`; 2 782 exact, 13 by unique name, 131 district centroids marked
+  approximate). Live numbers on 2026-10-24: 2 926 municipalities (0 unmatched), 6 560 mayoral, 40 184 council,
+  56 governor and 2 472 regional-council candidates.
+- **Panel** `src/volbyPanel.js` (`#volby-panel`, own lane zone VOĽBY right under POČASIE, order 14/15; mobile
+  section „Voľby" second in the app bar, now six buttons): status line (phase · as-of time in
+  Europe/Bratislava), counts, region chips → governor candidates and collapsible districts, largest-city chips
+  and a debounced search → mayor and councillors by ward plus the regional district the municipality votes in,
+  honest notes (approximate position, election type „Len zastupiteľstvo"/„Nekonajú sa", unmatched), source
+  line with links and the withdrawal caveat. Clicking a region/municipality releases any followed contact
+  (`_releaseFollowCamera`) and flies straight down (region 260 km, city 20 km, larger village 10 km, village
+  5 km). Deep links `?volby`, `?volby=<code>`, `?volby=k<region>` open the panel (mobile: its section) after
+  the state restore; „Kopírovať odkaz" copies them. Share token `y`. Results rendering (per-municipality
+  votes) is added once the 2026 table structure is visible after 20:00 — until then the panel says how many
+  result tables exist.
+- Tests: `src/data/xlsxSheet.test.mjs`, `src/data/volbyCandidates.test.mjs`, `src/data/volbyService.test.mjs`,
+  `src/volbyPanel.test.mjs` (tripwires on markup, CSS, i18n, lane, mobile, share link, deep link).
+
 ### OKO Štúdio: Ukrajina — päť šablón zo živých dát (2026-10-04)
 
 Owner: „Ukrajina" + "I also have YT, Telegram and other feeds, videos and photos — process those too so it is

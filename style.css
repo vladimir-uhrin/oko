@@ -1736,6 +1736,7 @@ body.ui-clean-view #radio-panel,
 body.ui-clean-view #global-context-panel,
 body.ui-clean-view #history-panel,
 body.ui-clean-view #gas-panel,
+body.ui-clean-view #volby-panel,
 body.ui-clean-view #look-panel,
 body.ui-clean-view #scene-panel {
   opacity: 0 !important;
@@ -4839,6 +4840,7 @@ body.cockpit-mode #left-panel-stack {
 body.cockpit-mode #left-panel-stack > #scene-panel { display: none !important; }
 body.cockpit-mode #left-panel-stack > #history-panel { display: none !important; }
 body.cockpit-mode #left-panel-stack > #gas-panel { display: none !important; }
+body.cockpit-mode #left-panel-stack > #volby-panel { display: none !important; }
 body.cockpit-mode #right-context-rail {
   display: none !important;
 }
@@ -7380,6 +7382,9 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 /* POČASIE (2026-10-07) hneď pod Dátovými vrstvami — glóbus GFS a radar SHMÚ. */
 #left-panel-stack > .lane-zone[data-lane-zone="weather"] { order: 12; }
 #left-panel-stack > #weather-panel { order: 13; }
+/* VOĽBY 2026 (2026-10-24, volbyPanel.js) hneď pod POČASÍM: kandidáti z registra MV SR, po 20:00 výsledky ŠÚ SR. */
+#left-panel-stack > .lane-zone[data-lane-zone="volby"] { order: 14; }
+#left-panel-stack > #volby-panel { order: 15; }
 #left-panel-stack > #ukraine-panel { order: 21; }
 #left-panel-stack > #mideast-panel { order: 22; }
 #left-panel-stack > #gas-panel { order: 31; }
@@ -7449,6 +7454,8 @@ body:not(.oko-owner) .oko-conflicts-launch { display: none !important; }
 body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { display: none !important; }
 /* ENERGIA má od 2026-10-11 jediný panel (#gas-panel), v kokpite skrytý — nadpis by visel nad prázdnom. */
 body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="energy"] { display: none !important; }
+/* VOĽBY 2026: v kokpite skrytý panel aj nadpis zóny. */
+body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="volby"] { display: none !important; }
 
 /*
  * Runtime focus mode: the layout engine applies this only when the expanded
@@ -7563,7 +7570,8 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="energy"] { disp
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
 #left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner,
-#left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner {
+#left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner,
+#left-panel-stack > #volby-panel:not(.collapsed) .volby-panel-inner {
   height: 100%;
   max-height: 100%;
 }
@@ -7576,7 +7584,8 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="energy"] { disp
 #left-panel-stack > #scene-panel:not(.collapsed) .scene-panel-inner,
 #left-panel-stack > #mideast-panel:not(.collapsed) .mideast-panel-inner,
 #left-panel-stack > #ukraine-panel:not(.collapsed) .ukraine-panel-inner,
-#left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner {
+#left-panel-stack > #weather-panel:not(.collapsed) .weather-panel-inner,
+#left-panel-stack > #volby-panel:not(.collapsed) .volby-panel-inner {
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -11935,9 +11944,49 @@ body.recording-mode .state-strip {
 #mideast-panel.collapsed .mideast-body { display: none; }
 #ukraine-panel.collapsed .ukraine-body { display: none; }
 #weather-panel.collapsed .weather-body { display: none; }
+#volby-panel.collapsed .volby-body { display: none; }
 
 /* POČASIE (2026-10-07, src/data/weatherSection.js): súhrn a veta o zdrojoch nad riadkami vrstiev. */
 .weather-intro { margin: 2px 0 8px; }
+
+/* Panel VOĽBY 2026 (2026-10-24, src/volbyPanel.js): kandidáti MV SR, hľadanie obcí, po 20:00 výsledky ŠÚ SR. */
+#volby-panel { --panel-expanded-width: 360px; }
+.volby-body { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.volby-phase, .volby-counts, .volby-results, .volby-hint, .volby-note, .volby-source { font-size: 11px; line-height: 1.45; color: var(--text-secondary, rgba(200, 220, 235, 0.82)); }
+.volby-results { color: #ffd166; }
+.volby-section-title { margin: 8px 0 2px; }
+.volby-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.volby-chip { font: 600 10px/16px var(--font-mono, monospace); letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.04); color: var(--text-secondary, #bfe1f0); cursor: var(--cursor-pointer, pointer); }
+.volby-chip:hover { border-color: rgba(57, 208, 255, 0.45); }
+.volby-chip[aria-pressed="true"] { color: #39d0ff; border-color: rgba(57, 208, 255, 0.6); background: rgba(57, 208, 255, 0.12); }
+.volby-chip-mesto { text-transform: none; letter-spacing: 0.02em; font-family: inherit; font-size: 11px; }
+.volby-search-input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(57, 208, 255, 0.35); background: rgba(6, 14, 22, 0.7); color: var(--text-primary, #e9f6ff); font: inherit; font-size: 13px; }
+.volby-search-input:focus { outline: none; border-color: #39d0ff; }
+.volby-list { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; }
+.volby-row { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; width: 100%; text-align: left; padding: 4px 6px; border: 0; border-radius: 4px; background: rgba(255, 255, 255, 0.03); color: var(--text-primary, #e9f6ff); font: inherit; cursor: var(--cursor-pointer, pointer); }
+.volby-row:hover { background: rgba(57, 208, 255, 0.1); }
+.volby-row-name { font-size: 12px; font-weight: 600; }
+.volby-row-meta { font-size: 10px; color: var(--text-secondary, #9ec6d8); white-space: nowrap; }
+.volby-detail { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: rgba(8, 18, 28, 0.55); border: 1px solid rgba(57, 208, 255, 0.18); }
+.volby-detail-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.volby-detail-title { font-size: 14px; font-weight: 700; color: var(--text-primary, #e9f6ff); }
+.volby-detail-sub { font-size: 11px; color: var(--text-secondary, #9ec6d8); }
+.volby-detail-actions { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; flex: 0 0 auto; }
+.volby-action, .volby-more, .volby-group-toggle { font: 600 10px/16px var(--font-mono, monospace); letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(57, 208, 255, 0.35); background: rgba(57, 208, 255, 0.06); color: #39d0ff; cursor: var(--cursor-pointer, pointer); }
+.volby-group-toggle { width: 100%; text-align: left; text-transform: none; letter-spacing: 0.02em; font-family: inherit; font-size: 11px; color: var(--text-primary, #e9f6ff); background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.12); }
+.volby-group-toggle[aria-expanded="true"] { border-color: rgba(57, 208, 255, 0.5); }
+.volby-group { display: flex; flex-direction: column; gap: 4px; }
+.volby-subhead { margin-top: 4px; font: 9px/14px var(--font-mono, monospace); letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim, #7fa6b8); }
+.volby-cands { display: flex; flex-direction: column; gap: 4px; }
+.volby-cand { display: flex; gap: 6px; align-items: flex-start; padding: 3px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.025); }
+.volby-cand-n { flex: 0 0 22px; font: 600 11px/16px var(--font-mono, monospace); color: var(--text-dim, #7fa6b8); text-align: right; }
+.volby-cand-main { display: flex; flex-direction: column; min-width: 0; }
+.volby-cand-name { font-size: 12px; font-weight: 600; color: var(--text-primary, #e9f6ff); }
+.volby-cand-meta { font-size: 10px; color: var(--text-secondary, #9ec6d8); }
+.volby-cand-party { font-size: 10px; color: #bfe1f0; opacity: 0.9; }
+.volby-cand-party.is-independent { color: #ffd166; }
+.volby-source a, .volby-link { color: #39d0ff; text-decoration: none; }
+.volby-source a:hover { text-decoration: underline; }
 .weather-intro p { margin: 0 0 4px; font-size: 11px; line-height: 1.45; }
 .weather-intro .weather-summary { color: var(--text-primary); letter-spacing: 0.04em; }
 .weather-intro .weather-note { color: var(--text-dim); }
@@ -12584,7 +12633,8 @@ body.oko-mobile #cockpit-entry { bottom: calc(var(--oko-dock-lift) + 76px); }
 /* --- spodná lišta -------------------------------------------------------- */
 body.oko-mobile #oko-appbar {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* Šesť sekcií od 2026-10-24 (VOĽBY 2026 hneď za Vrstvami). */
+  grid-template-columns: repeat(6, 1fr);
   position: fixed;
   left: 0;
   right: 0;
@@ -12619,6 +12669,8 @@ body.oko-mobile #oko-appbar[hidden] { display: none; }
   -webkit-tap-highlight-color: transparent;
 }
 #oko-appbar button .material-symbols-outlined { font-size: 22px; line-height: 1; }
+/* Šesť sekcií (VOĽBY 2026, 2026-10-24): popisky o chlp menšie, aby sa KONFLIKTY zmestili na úzky telefón. */
+#oko-appbar .oko-appbar-label { font-size: 9px; letter-spacing: 0.04em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #oko-appbar button[aria-pressed="true"] { color: #39d0ff; background: rgba(57, 208, 255, 0.10); }
 
 /* --- výsuv --------------------------------------------------------------- */
@@ -14002,6 +14054,7 @@ body.embed-mode .lane-zone,
 body.embed-mode #ukraine-panel,
 body.embed-mode #mideast-panel,
 body.embed-mode #gas-panel,
+body.embed-mode #volby-panel,
 body.embed-mode #history-panel,
 body.embed-mode #right-context-rail,
 body.embed-mode #first-run-launcher,

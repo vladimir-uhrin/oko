@@ -63,6 +63,8 @@ const SHARE_PANEL_STATE_REGISTRY = Object.freeze([
   { id: 'look-panel', token: 'n', pinnable: false },
   // POČASIE (2026-10-07): 'w' ako weather (písmeno 'w' v posuvníkoch je iný register).
   { id: 'weather-panel', token: 'w', pinnable: false },
+  // VOĽBY 2026 (2026-10-24): 'y' — voľné písmeno mimo tokenov posuvníkov (b, e, i) aj vrstiev.
+  { id: 'volby-panel', token: 'y', pinnable: false },
 ]);
 
 const SHARE_PANEL_STATE_BY_TOKEN = Object.freeze(new Map(
