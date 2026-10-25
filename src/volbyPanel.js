@@ -281,7 +281,10 @@ export function installVolbyPanel({
     if (vy) {
       const s = vy.summary || {};
       const progressText = t('volby.progress', { done: number(s.okrskyDone), total: number(s.okrskyTotal), pct: pctText(s.pct) });
-      const parts = [t('volby.status-counting'), progressText];
+      // Sčítanie skončené = ŠÚ SR spracoval všetky okrsky (alebo výsledky označil za konečné).
+      const done = Boolean(vy.final) || (Number(s.okrskyTotal) > 0 && Number(s.okrskyDone) >= Number(s.okrskyTotal));
+      status.dataset.counting = done ? 'done' : 'running';
+      const parts = [t(done ? 'volby.status-done' : 'volby.status-counting'), progressText];
       if (s.turnoutPct != null) parts.push(t('volby.turnout', { pct: pctText(s.turnoutPct) }));
       parts.push(t('volby.as-of', { time: clock(vy.generatedAt || ov.generatedAt) }));
       status.textContent = parts.join(' · ');
@@ -289,16 +292,19 @@ export function installVolbyPanel({
       progressBar.style.width = `${Math.max(0, Math.min(100, Number(s.pct) || 0))}%`;
       progress.setAttribute('aria-label', progressText);
     } else {
+      delete status.dataset.counting;
       status.textContent = `${t(ov.phase === 'before' ? 'volby.status-before' : 'volby.status-counting')} · ${t('volby.as-of', { time: clock(ov.generatedAt) })}`;
       progress.hidden = true;
     }
-    phase.textContent = t(ov.phase === 'before' ? 'volby.phase-before' : (vy ? 'volby.phase-results' : 'volby.phase-counting'));
+    const countingDone = status.dataset.counting === 'done' && Boolean(vy);
+    phase.textContent = t(ov.phase === 'before' ? 'volby.phase-before' : (vy ? (countingDone ? 'volby.phase-done' : 'volby.phase-results') : 'volby.phase-counting'));
+    mapHint.textContent = t(vy ? 'volby.map-hint-results' : 'volby.map-hint');
     const c = ov.counts || {};
     counts.textContent = t('volby.counts', {
       starosta: number(c.starosta), poslanci: number(c.poslanci), predseda: number(c.predseda), zupni: number(c.zupni), obce: number(c.obce),
     });
     results.hidden = ov.phase === 'before' && !resultTables && !vy;
-    results.textContent = vy ? t('volby.results-live') : (resultTables ? t('volby.results-tables', { n: number(resultTables) }) : t('volby.results-none'));
+    results.textContent = vy ? t(countingDone ? 'volby.results-counted' : 'volby.results-live') : (resultTables ? t('volby.results-tables', { n: number(resultTables) }) : t('volby.results-none'));
     clear(krajeChips);
     const leadByKraj = new Map((vy?.kraje || []).map((k) => [k.code, k]));
     for (const k of ov.kraje || []) {
@@ -416,7 +422,7 @@ export function installVolbyPanel({
     if (!vy) return null;
     // Priebežné výsledky zo stránky ŠÚ SR (live) nemajú spracovanie za obec/kraj — len „priebežné" alebo „konečné".
     const parts = vy.okrskyDone == null
-      ? [t('volby.results-live')]
+      ? [t(status.dataset.counting === 'done' ? 'volby.results-counted' : 'volby.results-live')]
       : [t('volby.progress', { done: number(vy.okrskyDone), total: number(vy.okrskyTotal), pct: pctText(vy.okrskyTotal ? (vy.okrskyDone / vy.okrskyTotal) * 100 : 0) })];
     if (vy.final) parts.push(t('volby.final'));
     if (vy.ucast?.pct != null) parts.push(t('volby.turnout', { pct: pctText(vy.ucast.pct) }));

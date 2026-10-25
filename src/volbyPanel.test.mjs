@@ -295,7 +295,7 @@ test('štýly: poradie zóny a panela (14/15), zbalené telo skryté, rozbalený
 });
 
 test('i18n: kľúče panela v oboch slovníkoch, slovenské znenie bez emoji', () => {
-  const keys = ['panel.volby', 'lane.zone.volby', 'mobile.volby', 'volby.loading', 'volby.error', 'volby.status-before', 'volby.status-counting', 'volby.as-of',
+  const keys = ['panel.volby', 'lane.zone.volby', 'mobile.volby', 'volby.loading', 'volby.error', 'volby.status-before', 'volby.status-counting', 'volby.status-done', 'volby.phase-done', 'volby.results-counted', 'volby.map-hint-results', 'volby.as-of',
     'volby.phase-before', 'volby.phase-counting', 'volby.results-none', 'volby.results-tables', 'volby.counts', 'volby.regions', 'volby.region-heads',
     'volby.region-council', 'volby.obvod', 'volby.kraj-sub', 'volby.municipal', 'volby.cities', 'volby.search-placeholder', 'volby.search-hint', 'volby.no-match',
     'volby.mayor', 'volby.mayor-city', 'volby.council', 'volby.ward', 'volby.independent', 'volby.age', 'volby.okres', 'volby.region-ward', 'volby.approx',
@@ -343,6 +343,7 @@ test('výsledky: stav so spracovaním a účasťou, pás, kraj s hlasmi a značk
   const status = byClass(doc.root.body, 'volby-status')[0];
   assert.match(status.textContent, /volby\.status-counting · volby\.progress \{"done":"1\u00a0206","total":"6\u00a0027","pct":"20,0"\} · volby\.turnout \{"pct":"42,0"\} · volby\.as-of \{"time":"21:40"\}/);
   assert.equal(byClass(doc.root.body, 'volby-phase')[0].textContent, 'volby.phase-results');
+  assert.equal(byClass(doc.root.body, 'volby-hint').find((h) => /map-hint/.test(h.textContent)).textContent, 'volby.map-hint-results', 'po 20:00 bez vety „Po 20:00 farba…"');
   assert.equal(byClass(doc.root.body, 'volby-results')[0].textContent, 'volby.results-live');
   assert.equal(byClass(doc.root.body, 'volby-progress')[0].hidden, false);
   const baChip = byClass(doc.root.body, 'volby-chip-kraj')[0];
@@ -416,4 +417,19 @@ test('priebežné výsledky zo stránky ŠÚ SR (live): legenda farieb mapy ost�
   await flush();
   assert.equal(panel._getStateForTest().hasResults, true);
   assert.equal(byClass(doc.root.body, 'volby-legend')[0].hidden, true);
+});
+
+test('po sčítaní všetkých okrskov: „Sčítanie skončené", text fázy bez „priebežné", pri 99 % ešte sčítavanie', async () => {
+  for (const [done, expectStatus, expectPhase] of [[6029, 'volby.status-done', 'volby.phase-done'], [5990, 'volby.status-counting', 'volby.phase-results']]) {
+    const VY = { generatedAt: '2026-10-25T04:48:00.000Z', live: true, summary: { okrskyDone: done, okrskyTotal: 6029, pct: (done / 6029) * 100, turnoutPct: 46.56 } };
+    const doc = fakeDoc();
+    install(doc, { api: { overview: async () => ({ ...OVERVIEW, phase: 'counting', vysledky: VY }), kraj: async () => KRAJ1, search: async () => ({ results: [] }), obec: async () => OBEC } });
+    await flush();
+    const status = byClass(doc.root.body, 'volby-status')[0];
+    assert.ok(status.textContent.startsWith(`${expectStatus} · volby.progress`), status.textContent);
+    assert.equal(byClass(doc.root.body, 'volby-phase')[0].textContent, expectPhase);
+    assert.equal(byClass(doc.root.body, 'volby-results')[0].textContent, done === 6029 ? 'volby.results-counted' : 'volby.results-live');
+  }
+  assert.match(SK_STRINGS['volby.status-done'], /^Sčítanie skončené$/);
+  assert.doesNotMatch(SK_STRINGS['volby.map-hint-results'], /20:00/);
 });
