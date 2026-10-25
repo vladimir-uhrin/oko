@@ -282,7 +282,8 @@ export function installVolbyPanel({
       link('https://www.minv.sk/?samosprava26-info10', t('volby.source-minv')), ' · ',
       link('https://volbysr.sk/', t('volby.source-susr')), ' · ',
       link('https://www.geonames.org/', t('volby.source-geonames')), '. ',
-      t('volby.source-note'),
+      t('volby.source-note'), ' ',
+      link('/volby-2026/', t('volby.pages-link')),
     );
   }
 

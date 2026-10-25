@@ -22,7 +22,7 @@ export const HUB = Object.freeze({
     title: 'Témy OKO — lietadlá, lode, Ukrajina, Blízky východ, plyn',
     description: 'Čo všetko ukazuje OKO na živom 3D glóbuse: lietadlá a lode naživo, front na Ukrajine, Blízky východ, úžiny, plyn, satelity, počasie a kamery.',
     h1: 'Čo ukazuje OKO',
-    lead: 'OKO je živý 3D glóbus, ktorý na jednom mieste spája otvorené dáta o doprave, energetike a konfliktoch. Každá téma nižšie vysvetľuje, čo presne uvidíte, odkiaľ dáta pochádzajú a ako často sa obnovujú — a vedie priamo do živej mapy.',
+    lead: 'OKO je živý 3D glóbus, ktorý na jednom mieste spája otvorené dáta o doprave, energetike a konfliktoch. Každá téma nižšie vysvetľuje, čo presne uvidíte, odkiaľ dáta pochádzajú a ako často sa obnovujú — a vedie priamo do živej mapy. Novinka: [výsledky volieb 2026 pre každú obec](/volby-2026/).',
     cta: 'Otvoriť živý 3D glóbus',
   },
   en: {
@@ -36,6 +36,8 @@ export const HUB = Object.freeze({
 
 export const SITEMAP_EXTRA = Object.freeze([
   { loc: '/privacy.html', lastmod: '2026-09-30', changefreq: 'yearly', priority: '0.2' },
+  // Výsledky volieb 2026 (scripts/build-volby-pages.mjs): prehľad tu, obce a okresy v /sitemap-volby.xml.
+  { loc: '/volby-2026/', lastmod: '2026-10-25', changefreq: 'weekly', priority: '0.8' },
 ]);
 
 // Hlboké odkazy do appky (tokeny vrstiev: src/data/layerState.js — f lietadlá, a + z lode AIS + AISHub,

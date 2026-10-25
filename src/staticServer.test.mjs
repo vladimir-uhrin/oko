@@ -104,7 +104,7 @@ test('oko-static-server: index no-cache a indexovateľný, účet noindex, asset
     assert.equal(glb.headers.get('cache-control'), 'public, max-age=604800', 'modely lietadiel 7 dní');
     assert.equal((await fetch(base + '/index.html?v=9')).headers.get('cache-control'), 'no-cache', 'HTML sa overuje vždy, aj s query');
     const robots = await fetch(base + '/robots.txt');
-    assert.equal(await robots.text(), 'User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https://okolive.sk/sitemap.xml\n', 'crawlery smú čítať stránky, nie /api/; od 2026-09-30 robots ukazuje na sitemap');
+    assert.equal(await robots.text(), 'User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https://okolive.sk/sitemap.xml\nSitemap: https://okolive.sk/sitemap-volby.xml\n', 'crawlery smú čítať stránky, nie /api/; od 2026-09-30 robots ukazuje na sitemap');
     assert.match(robots.headers.get('x-robots-tag'), /noindex/, 'sonda publikovania (oko-publish.ps1) čaká noindex na robots.txt');
     assert.equal((await fetch(base + '/nope.js')).status, 404);
     assert.equal((await fetch(base + '/assets/..%2F..%2Fpackage.json')).status, 403, 'zakódovaný traversal nevedie von z dist (Forbidden)');

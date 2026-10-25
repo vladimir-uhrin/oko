@@ -67,3 +67,17 @@ section li { margin: 4px 0; }
   body { font-size: 16px; }
   .c-facts dl > div { grid-template-columns: 1fr; gap: 2px; }
 }
+/* Výsledky volieb 2026 (scripts/lib/volbyPages.mjs, 2026-10-25): tabuľky kandidátov a obcí. */
+.v-scroll { overflow-x: auto; margin: 10px 0 6px; }
+.v-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.v-table th, .v-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.v-table th { color: var(--muted); font-weight: 600; font-size: 13px; letter-spacing: 0.04em; }
+.v-table .v-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.v-table tr.v-win td { background: rgba(74, 222, 128, 0.08); }
+.v-tag { color: #4ade80; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; margin-left: 6px; }
+.v-inc { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.v-cls { font-size: 13px; white-space: nowrap; }
+.v-held { color: #4ade80; } .v-lost { color: #ff8a3d; } .v-open { color: #ffd166; } .v-none { color: #ff4d6d; }
+.v-links { line-height: 1.9; }
+.v-source { margin-top: 28px; }
+h3 { font-size: 17px; margin: 18px 0 4px; color: var(--accent-soft); }

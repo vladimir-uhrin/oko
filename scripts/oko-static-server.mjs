@@ -97,7 +97,7 @@ const REDIRECTS = parseRedirects(args);
 // 2026-09-30 (vlastník: „podmienka noindex už neplatí"): koreň sa indexuje, robots.txt
 // ukazuje na sitemap; noindex ostáva len na stránkach, ktoré do výsledkov nepatria
 // (robotsTagFor), a na /s/<id> v <meta> (renderSharePage).
-const ROBOTS_TXT = 'User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https://okolive.sk/sitemap.xml\n';
+const ROBOTS_TXT = 'User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https://okolive.sk/sitemap.xml\nSitemap: https://okolive.sk/sitemap-volby.xml\n';
 
 /**
  * X-Robots-Tag pre súbor z buildu, alebo null (pure): účet a overovací súbor Search
