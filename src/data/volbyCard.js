@@ -68,12 +68,17 @@ export async function renderCardJpeg(obec, r) {
 }
 
 /** HTML stránky /s/v<kód>: Open Graph + presmerovanie do aplikácie. Pure. */
-export function cardPage(obec, r, origin) {
+/**
+ * 2026-10-25 (vlastník: odkaz z Facebooku sa na mobile „nenačíta normálne"): návštevník z karty ide na ľahkú
+ * stránku výsledkov /volby-2026/… (scripts/lib/volbyPages.mjs, načíta sa hneď, tlačidlo do mapy), nie rovno do
+ * 3D aplikácie. `targetPath` = cesta tej stránky; bez nej (stránka neexistuje) do mapy `/?volby=<kód>`.
+ */
+export function cardPage(obec, r, origin, targetPath = null) {
   const t = cardText(obec, r);
   const base = String(origin || 'https://okolive.sk').replace(/\/+$/, '');
   const id = `v${obec.code}`;
   const title = `${obec.name} – ${t.line}${t.pct ? ` (${t.pct})` : ''} | Voľby 2026`;
-  const target = `${base}/?volby=${encodeURIComponent(obec.code)}`;
+  const target = targetPath ? `${base}${targetPath}` : `${base}/?volby=${encodeURIComponent(obec.code)}`;
   return `<!doctype html><html lang="sk"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
@@ -133,9 +138,9 @@ export async function renderOverviewJpeg(points, counts) {
 }
 
 /** HTML /s/volby2026. Pure. */
-export function overviewPage(counts = {}, origin) {
+export function overviewPage(counts = {}, origin, targetPath = '/volby-2026/') {
   const base = String(origin || 'https://okolive.sk').replace(/\/+$/, '');
-  const target = `${base}/?volby`;
+  const target = targetPath ? `${base}${targetPath}` : `${base}/?volby`;
   const title = 'Voľby 2026: výsledky každej obce na mape | okolive.sk';
   const n = (v) => new Intl.NumberFormat('sk-SK').format(v || 0).replace(/ /g, ' ');
   const desc = counts.done ? `Starosta obhájil v ${n(counts.held)} obciach, prehral v ${n(counts.lost)}, v ${n(counts.none)} obciach nezvolený. Klikni na svoju obec: víťaz, percentá, účasť.` : 'Výsledky komunálnych a župných volieb 2026 na mape — každá obec, kandidáti a výsledky.';

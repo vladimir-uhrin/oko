@@ -57,6 +57,20 @@ export function buildShareCopy({ subjectLabel = null, placeLabel = null, layerNa
 }
 
 /**
+ * Titulok a popis zdieľania z otvoreného panela VOĽBY 2026 (2026-10-25, vlastník: odkaz vo FB mal titulok „OKO"
+ * a popis z anglického mena vrstvy „Elections 2026 — municipalities"). Pure.
+ */
+export function buildVolbyShareCopy({ lang = 'sk' } = {}) {
+  const title = lang === 'en'
+    ? 'Election results 2026 – every Slovak municipality on the map | okolive.sk'
+    : 'Výsledky volieb 2026 – každá obec na mape | okolive.sk';
+  const description = lang === 'en'
+    ? 'Mayors of all municipalities: winner, share of votes, turnout, winning party. Source: Statistical Office of the SR.'
+    : 'Starostovia a primátori všetkých obcí: víťaz, percentá, účasť, strana víťaza. Zdroj ŠÚ SR.';
+  return { title, description, text: `${title} — ${description}` };
+}
+
+/**
  * Odkazy na zdieľanie do sietí (verejné intenty). Poradie = poradie tlačidiel.
  * Mastodon nemá univerzálny intent (inštancia), Instagram a TikTok berú len
  * obrázok (natívne zdieľanie). Pure.

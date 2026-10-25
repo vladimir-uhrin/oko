@@ -101,7 +101,7 @@ import {
 import { openSharePanel } from './sharePanel.js';
 import { captureShareSnapshot, snapshotStamp } from './shareSnapshot.js';
 import { canRecordShareVideo, recordShareVideo } from './shareVideo.js';
-import { buildAttributionLine, buildShareCopy } from './shareTargets.js';
+import { buildAttributionLine, buildShareCopy, buildVolbyShareCopy } from './shareTargets.js';
 import { currentLanguage } from './i18n.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
 import {
@@ -11013,7 +11013,10 @@ export class StyleManager {
     const shareCard = flightCard || vesselCard;
     const copy = flightCard
       ? buildFlightShareCopy(flightCard, { whenMs, lang })
-      : vesselCard ? buildVesselShareCopy(vesselCard, { whenMs, lang }) : buildShareCopy({
+      : vesselCard ? buildVesselShareCopy(vesselCard, { whenMs, lang })
+      // Otvorený panel VOĽBY 2026: slovenský titulok a popis výsledkov namiesto „OKO" a mien vrstiev.
+      : document.getElementById('volby-panel')?.classList.contains('collapsed') === false ? buildVolbyShareCopy({ lang })
+      : buildShareCopy({
         subjectLabel,
         placeLabel: placeLabel && placeLabel !== '--' ? placeLabel : null,
         layerNames,

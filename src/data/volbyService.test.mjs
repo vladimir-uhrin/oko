@@ -327,12 +327,15 @@ test('výsledky všetkých obcí (zber): /obce-body farba víťaza, /zaujimavost
   const page = await call(service, '/karta/501891');
   assert.match(page.text, /og:image" content="[^"]*\/s\/v501891\.jpg"/);
   assert.match(page.text, /Tünde Várady/);
-  assert.match(page.text, /\/\?volby=501891/);
+  // hotový výsledok → návštevník ide na ľahkú stránku výsledkov obce, nie do 3D aplikácie (mobil vo Facebooku)
+  assert.match(page.text, /location\.replace\("https:\/\/okolive\.sk\/volby-2026\/[a-z0-9-]+\/topolniky\/"\)/);
+  assert.doesNotMatch(page.text, /\/\?volby=501891/);
   const jpg = await call(service, '/karta/501891.jpg');
   assert.equal(jpg.headers['Content-Type'], 'image/jpeg');
   assert.ok(jpg.buffer.length > 5000 && jpg.buffer[0] === 0xff && jpg.buffer[1] === 0xd8, 'JPEG');
   const ov = await call(service, '/karta-volby');
   assert.match(ov.text, /og:image" content="[^"]*\/s\/volby2026\.jpg"/);
+  assert.match(ov.text, /location\.replace\("https:\/\/okolive\.sk\/volby-2026\/"\)/, 'súhrnná karta vedie na prehľad výsledkov');
   const ovJpg = await call(service, '/karta-volby.jpg');
   assert.equal(ovJpg.headers['Content-Type'], 'image/jpeg');
   assert.equal((await call(service, '/karta/123456')).status, 404);

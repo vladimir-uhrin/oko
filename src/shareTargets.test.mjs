@@ -5,7 +5,7 @@ import {
   SHARE_IMAGE_HEIGHT,
   SHARE_IMAGE_WIDTH,
   buildAttributionLine,
-  buildShareCopy,
+  buildShareCopy, buildVolbyShareCopy,
   buildShareTargets,
   dataUrlByteLength,
   fitCover,
@@ -63,4 +63,15 @@ test('shortShareUrl: pôvod bez lomky na konci, id bez cudzích znakov', () => {
   assert.equal(shortShareUrl('http://localhost:4173', 'x/../y'), 'http://localhost:4173/s/xy');
   assert.equal(shortShareUrl('', 'abc'), null);
   assert.equal(shortShareUrl('https://x', ''), null);
+});
+
+test('buildVolbyShareCopy: panel VOĽBY 2026 → slovenský titulok výsledkov, nie „OKO" a anglické meno vrstvy', async () => {
+  const sk = buildVolbyShareCopy({ lang: 'sk' });
+  assert.equal(sk.title, 'Výsledky volieb 2026 – každá obec na mape | okolive.sk');
+  assert.match(sk.description, /Starostovia a primátori všetkých obcí/);
+  assert.doesNotMatch(`${sk.title} ${sk.description}`, /Elections|municipalities/);
+  assert.match(buildVolbyShareCopy({ lang: 'en' }).title, /^Election results 2026/);
+  const { readFileSync } = await import('node:fs');
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /getElementById\('volby-panel'\)\?\.classList\.contains\('collapsed'\) === false \? buildVolbyShareCopy\(\{ lang \}\)/);
 });

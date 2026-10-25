@@ -26,6 +26,7 @@ import { buildResults, obecMapState, resultsOverview } from './volbyResults.js';
 import { createVolbyLive } from './volbyLive.js';
 import { createVolbyObceSweep, volbyRecords } from './volbyObceSweep.js';
 import { cardPage, overviewPage, renderCardJpeg, renderOverviewJpeg } from './volbyCard.js';
+import { buildPaths } from '../../scripts/lib/volbyPages.mjs';
 import { upstream } from './upstreamStatus.js';
 
 export const VOLBY_PATH = '/api/volby';
@@ -213,6 +214,7 @@ export function createVolbyService({
   let sweepInst = null;
   const sweepNow = () => { if (sweep === false) return null; if (sweep) return sweep; if (!sweepInst && now() >= POLLS_CLOSE_MS) sweepInst = createVolbyObceSweep({ fetchImpl, now, log, registry, cacheFile: path.join(cacheDir, 'obce-sweep.json') }); return sweepInst; };
   let recordsMemo = { key: '', value: null };
+  let pagePaths = { model: null, paths: new Map() };
   function records(model) {
     const S = sweepNow(); if (!S) return null;
     const st = S.status();
@@ -437,7 +439,9 @@ export function createVolbyService({
       if (!obec) return send(res, 404, { error: 'not_found' });
       const r = sweepNow()?.result(obec) || null;
       if (m[2]) return sendJpeg(res, await renderCardJpeg(obec, r), r?.done ? 3600 : 300);
-      return sendHtml(res, cardPage(obec, r, originOf(req)), 300);
+      // Návštevník z karty na ľahkú stránku výsledkov obce (tá istá adresa, akú vyrobil scripts/build-volby-pages.mjs).
+      if (pagePaths.model !== model) pagePaths = { model, paths: buildPaths(model.obce) };
+      return sendHtml(res, cardPage(obec, r, originOf(req), r?.done ? pagePaths.paths.get(obec.code)?.path || null : null), 300);
     }
     if ((m = /^\/karta-volby(\.jpg)?$/.exec(route))) {
       const rec = records(model);
