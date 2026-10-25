@@ -74,7 +74,7 @@ function head({ title, description, canonical, image, jsonLd }) {
   <meta name="twitter:image" content="${SITE}${image}" />
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <meta name="theme-color" content="#040a10" />
-  <link rel="stylesheet" href="/content.css" />
+  <link rel="stylesheet" href="/content.css?v=volby-2026-10-25" />
   <script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, '\\u003c')}</script>
 </head>
 <body>
