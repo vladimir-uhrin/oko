@@ -7,6 +7,13 @@ výsledkami … zatiaľ priebežne kandidátov a do večera by pribudli výsledk
 Joint municipal and regional elections, Saturday 24 Oct 2026; polls close 20:00 (18:00 UTC) and results may
 be published only afterwards (moratorium).
 
+- **After the count (2026-10-25)**: `src/data/volbyObceSweep.js` collects every municipality's result from the
+  volbysr.sk JSON files in the background (cache on disk); `/api/volby/obce-body` gains a `win` column
+  (`held` / `lost` / `open` / `none`) that colours the map points, `/api/volby/zaujimavosti` returns counts and
+  records (closest wins, turnout extremes, largest towns where the mayor lost), and the share cards
+  `/s/v<code>` and `/s/volby2026` (Open Graph page + 1200×630 JPEG drawn with sharp, `src/data/volbyCard.js`)
+  are served by the share middleware through `volbyShareService()`. Election map mode shows a
+  "VOĽBY 2026 · okolive.sk" watermark; from 28 Oct the panel switches to an archive heading.
 - **Server** `src/data/volbyService.js` (`volbyPlugin()` in vite.config.js next to whereAmI — API role only,
   the dev proxy forwards it): `GET /api/volby/prehlad` (phase, counts, 8 regions with centres, largest cities,
   result-table summary, source freshness), `/kraj/<1-8>` (governor candidates, electoral districts with

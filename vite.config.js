@@ -37,7 +37,7 @@ import { openFlightHistoryWorker } from './src/data/flightHistoryClient.js';
 import { HISTORY_PATH_LOOKBACK_S, accuracyStats, createEstimateTracker } from './src/data/flightEstimate.js';
 import { adsbdbRouteAnswer, createVrsRouteDb, routeHintFromQuery, vrsRouteAnswer } from './src/data/vrsRoutes.js';
 import { whereAmIPlugin } from './src/whereAmIServer.js';
-import { volbyPlugin } from './src/data/volbyService.js';
+import { safeMiddleware, volbyPlugin, volbyShareService } from './src/data/volbyService.js';
 import { createHfdlFeed, HFDL_ATTRIBUTION, HFDL_POS_SRC, HFDL_SOURCE } from './src/data/hfdlPositions.js';
 import { parseNatTracks } from './src/data/flightPath.js';
 import { createWindGridCache } from './src/data/windAloft.js';
@@ -6348,6 +6348,14 @@ function sharePlugin() {
         const videoRecord = getStore().read(videoMatch[1]);
         if (!videoRecord?.video) { send(res, 404, 'text/plain; charset=utf-8', 'Not Found', { 'Cache-Control': 'no-store' }); return; }
         sendVideoFile({ req, res, filePath: getStore().videoPath(videoMatch[1]) });
+        return;
+      }
+      // Voľby 2026 (2026-10-25): /s/v<kód obce> a /s/volby2026 — karta s náhľadom pre siete, kreslí ju služba volieb
+      // (src/data/volbyCard.js). Cesta /s/ ide tunelom na server ako /api, iná nová cesta by potrebovala zmenu tunela.
+      const volbyMatch = /^\/(v\d{6}|volby2026)(\.jpg)?$/.exec(pathname);
+      if (volbyMatch && volbyShareService()) {
+        req.url = `${volbyMatch[1] === 'volby2026' ? '/karta-volby' : `/karta/${volbyMatch[1].slice(1)}`}${volbyMatch[2] || ''}`;
+        void safeMiddleware(volbyShareService(), req, res, next);
         return;
       }
       const match = /^\/([A-Za-z0-9]{6,32})(\.jpg)?$/.exec(pathname);

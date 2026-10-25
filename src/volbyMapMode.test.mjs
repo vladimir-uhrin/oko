@@ -96,3 +96,28 @@ test('zapojenie v main.js a hranice v public/volby', () => {
     assert.match(j.meta.licence, /ODbL/);
   }
 });
+
+test('vodoznak VOĽBY 2026: pri vstupe do režimu sa ukáže, pri odchode skryje, pri destroy zmizne', async () => {
+  const appended = [];
+  const mk = (tag) => ({ tag, id: '', className: '', textContent: '', hidden: false, children: [], attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, append(...c) { this.children.push(...c); }, remove() { this.removed = true; } });
+  const doc = { createElement: mk, body: { appendChild: (n) => appended.push(n) } };
+  let stack = 'photoreal'; const on = new Set();
+  const mode = createVolbyMapMode({
+    viewer: { scene: { groundPrimitives: { add: (p) => p, remove() {} }, requestRender() {} } },
+    getStack: () => stack, setStack: (id) => { stack = id; }, isLayerOn: (id) => on.has(id), setLayer: (id, v) => { if (v) on.add(id); else on.delete(id); },
+    fetchImpl: async () => ({ ok: false, status: 404 }), createPrimitive: () => ({ show: false }), setTimeoutImpl: () => 0, doc,
+  });
+  await mode.enter();
+  assert.equal(appended.length, 1);
+  const wm = mode.watermark;
+  assert.equal(wm.id, 'volby-watermark');
+  assert.equal(wm.attrs['aria-hidden'], 'true');
+  assert.deepEqual(wm.children.map((c) => c.textContent), ['VOĽBY 2026', 'okolive.sk · výsledky každej obce']);
+  assert.equal(wm.hidden, false);
+  await mode.exit();
+  assert.equal(wm.hidden, true);
+  await mode.enter();
+  assert.equal(appended.length, 1, 'jeden prvok, opakovane použitý');
+  mode.destroy();
+  assert.equal(wm.removed, true);
+});

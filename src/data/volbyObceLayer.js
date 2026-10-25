@@ -18,6 +18,11 @@ export const OBCE_REFRESH_MS = 3 * 60 * 1000;
 export const OBEC_PICK_PREFIX = 'obec:';
 /** Farby stavu výsledkov (CSS text; aj pre legendu v paneli). */
 export const OBEC_STATE_COLORS = Object.freeze({ 0: '#7fdcff', 1: '#ffd166', 2: '#4ade80' });
+/**
+ * Farby víťaza po sčítaní (2026-10-25, zber všetkých obcí — volbyObceSweep.js): doterajší starosta obhájil / prehral,
+ * nová tvár (doterajší starosta nekandidoval), starosta nezvolený. Rovnaké farby má karta /s/volby2026.
+ */
+export const OBEC_WIN_COLORS = Object.freeze({ held: '#4ade80', lost: '#ff8a3d', open: '#ffd166', none: '#ff4d6d' });
 /** Krytie bodu (jemný, nie plný disk). */
 export const OBEC_POINT_ALPHA = 0.85;
 
@@ -49,10 +54,10 @@ export function labelVisibleUntilM(seats = 0, city = false, district = false) {
 }
 
 /** Štýl bodu: veľkosť podľa mandátov, farba podľa stavu výsledkov. Pure. */
-export function pointStyle({ seats = 0, city = false, state = 0 } = {}) {
+export function pointStyle({ seats = 0, city = false, state = 0, win = null } = {}) {
   // 2026-10-24 (vlastník: body „jemnejšie, krajšie UI"): menšie body, mestá o chlp výraznejšie.
   const pixelSize = city || seats >= 25 ? 5.5 : seats >= 13 ? 4 : seats >= 9 ? 3.2 : 2.6;
-  return { pixelSize, color: OBEC_STATE_COLORS[state] || OBEC_STATE_COLORS[0] };
+  return { pixelSize, color: (win && OBEC_WIN_COLORS[win]) || OBEC_STATE_COLORS[state] || OBEC_STATE_COLORS[0] };
 }
 
 /** Text popisku: meno, pri výsledkoch pod ním vedúci kandidát s podielom. Pure. */
@@ -95,7 +100,7 @@ export function parseObceBody(json) {
     const lat = o.lat == null || o.lat === '' ? NaN : Number(o.lat);
     const lon = o.lon == null || o.lon === '' ? NaN : Number(o.lon);
     if (!o.code || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    out.push({ code: String(o.code), name: String(o.name || ''), lat, lon, seats: Number(o.seats) || 0, city: Number(o.seats) >= 45 || o.code === '582000' || o.code === '599981', state: Number(o.state) || 0, lead: String(o.lead || ''), leadPct: o.leadPct == null ? null : Number(o.leadPct) });
+    out.push({ code: String(o.code), name: String(o.name || ''), lat, lon, seats: Number(o.seats) || 0, city: Number(o.seats) >= 45 || o.code === '582000' || o.code === '599981', state: Number(o.state) || 0, lead: String(o.lead || ''), leadPct: o.leadPct == null ? null : Number(o.leadPct), win: OBEC_WIN_COLORS[o.win] ? o.win : null });
   }
   return out;
 }
@@ -261,7 +266,9 @@ export function createVolbyObceLayer({
     getStats() {
       const done = rows.filter((r) => r.state === 2).length;
       const partial = rows.filter((r) => r.state === 1).length;
-      return { count: rows.length, lastUpdate, error, loading, stale: Boolean(error && rows.length), source: layer.source, resultsFinal: done, resultsPartial: partial };
+      const wins = { held: 0, lost: 0, open: 0, none: 0 };
+      for (const r of rows) if (r.win) wins[r.win] += 1;
+      return { count: rows.length, lastUpdate, error, loading, stale: Boolean(error && rows.length), source: layer.source, resultsFinal: done, resultsPartial: partial, wins, hasWins: rows.some((r) => r.win) };
     },
     destroy() {
       if (enabled) layer.disable();

@@ -39,12 +39,20 @@ test('pure: viditeľnosť a štýl podľa mandátov, farby stavu, popis s vedúc
   assert.deepEqual(pointStyle({ seats: 9, state: 1 }), { pixelSize: 3.2, color: '#ffd166' });
   assert.deepEqual(pointStyle({ seats: 5, state: 2 }), { pixelSize: 2.6, color: '#4ade80' });
   assert.equal(pointStyle({ seats: 5, state: 9 }).color, OBEC_STATE_COLORS[0], 'neznámy stav = bez výsledkov');
+  // po sčítaní farba víťaza (obhájil / prehral / nová tvár / nezvolený); neznáma trieda = farba stavu
+  assert.equal(pointStyle({ seats: 5, state: 2, win: 'held' }).color, '#4ade80');
+  assert.equal(pointStyle({ seats: 5, state: 2, win: 'lost' }).color, '#ff8a3d');
+  assert.equal(pointStyle({ seats: 5, state: 2, win: 'open' }).color, '#ffd166');
+  assert.equal(pointStyle({ seats: 5, state: 2, win: 'none' }).color, '#ff4d6d');
+  assert.equal(pointStyle({ seats: 5, state: 2, win: 'xyz' }).color, '#4ade80');
+  const rows = parseObceBody({ columns: ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct', 'win'], rows: [['501921', 'Topoľníky', 47.9, 17.78, 9, 2, 'Tünde Várady', 67.01, 'lost'], ['1', 'X', 48, 18, 5, 0, '', null, 'bogus']] });
+  assert.deepEqual(rows.map((r) => r.win), ['lost', null]);
   assert.equal(labelText({ name: 'Nitra', state: 0, lead: 'X Y', leadPct: 40 }), 'Nitra', 'pred výsledkami len meno');
   assert.equal(labelText({ name: 'Nitra', state: 1, lead: 'Marek Hattas', leadPct: 51.4 }), 'Nitra\nMarek Hattas 51 %');
   assert.equal(labelText({ name: 'Nitra', state: 2, lead: 'Marek Hattas', leadPct: null }), 'Nitra\nMarek Hattas');
   const parsed = parseObceBody(BODY);
   assert.equal(parsed.length, 3, 'riadok bez polohy vypadne');
-  assert.deepEqual(parsed[0], { code: '582000', name: 'Bratislava', lat: 48.1486, lon: 17.1077, seats: 45, city: true, state: 0, lead: '', leadPct: null });
+  assert.deepEqual(parsed[0], { code: '582000', name: 'Bratislava', lat: 48.1486, lon: 17.1077, seats: 45, city: true, state: 0, lead: '', leadPct: null, win: null });
   assert.equal(parsed[1].city, false);
   assert.deepEqual(parseObceBody(null), []);
   const pts = [{ code: 'a', x: 100, y: 100 }, { code: 'b', x: 110, y: 100 }, { code: 'c', x: 300, y: 300 }];

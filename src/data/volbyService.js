@@ -24,6 +24,8 @@ import { readXlsxRows, readXlsxSheets, tableByHeader } from './xlsxSheet.js';
 import { POLLS_CLOSE_MS, buildModel, krajDetail, obecDetail, overview, searchObce } from './volbyCandidates.js';
 import { buildResults, obecMapState, resultsOverview } from './volbyResults.js';
 import { createVolbyLive } from './volbyLive.js';
+import { createVolbyObceSweep, volbyRecords } from './volbyObceSweep.js';
+import { cardPage, overviewPage, renderCardJpeg, renderOverviewJpeg } from './volbyCard.js';
 import { upstream } from './upstreamStatus.js';
 
 export const VOLBY_PATH = '/api/volby';
@@ -171,6 +173,7 @@ export function createVolbyService({
   timeoutMs = FETCH_TIMEOUT_MS,
   useWorker = false,
   live = null,
+  sweep = null,
 } = {}) {
   const state = { model: null, tables: new Map(), sources: {}, refreshing: null, lastRefreshAt: 0, fetches: 0, results: null, forceRebuild: false };
   // Priebežné výsledky z JSON stránky ŠÚ SR (volbyLive.js) — po 20:00, kým ZIP s tabuľkami výsledky nemá.
@@ -200,9 +203,22 @@ export function createVolbyService({
   }
   async function liveObec(obec) {
     const L = liveNow(); if (!L) return null;
+    const prehlad = sweepNow()?.result(obec) || null;
     const starosta = await L.starosta(obec.code);
     if (!starosta) return null;
-    return { live: true, okrskyDone: null, okrskyTotal: null, final: starosta.some((c) => c.elected), ucast: null, starosta, poslanci: [] };
+    const ucast = prehlad?.turnoutPct != null ? { registered: prehlad.registered, voted: prehlad.voted, pct: prehlad.turnoutPct } : null;
+    return { live: true, okrskyDone: null, okrskyTotal: null, final: starosta.some((c) => c.elected), ucast, starosta, poslanci: [], prehlad };
+  }
+  // Výsledky všetkých obcí (volbyObceSweep.js) — zber na pozadí po zatvorení miestností; sweep: false ho vypne (testy).
+  let sweepInst = null;
+  const sweepNow = () => { if (sweep === false) return null; if (sweep) return sweep; if (!sweepInst && now() >= POLLS_CLOSE_MS) sweepInst = createVolbyObceSweep({ fetchImpl, now, log, registry, cacheFile: path.join(cacheDir, 'obce-sweep.json') }); return sweepInst; };
+  let recordsMemo = { key: '', value: null };
+  function records(model) {
+    const S = sweepNow(); if (!S) return null;
+    const st = S.status();
+    const key = `${st.cached}|${st.lastRoundAt}`;
+    if (recordsMemo.key !== key) recordsMemo = { key, value: volbyRecords(S.results(model.obce), { excludeCodes: new Set(['582000', '599981']) }) };
+    return recordsMemo.value;
   }
   const build = (input) => (useWorker ? processInWorker(input) : Promise.resolve(processSources(input)));
   let geo = null;
@@ -344,6 +360,21 @@ export function createVolbyService({
     res.end(JSON.stringify(body));
   }
 
+  function sendJpeg(res, buffer, maxAge) {
+    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': String(buffer.length), 'Cache-Control': `public, max-age=${maxAge}` });
+    res.end(buffer);
+  }
+  function sendHtml(res, html, maxAge) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': `public, max-age=${maxAge}` });
+    res.end(html);
+  }
+  const originOf = (req) => {
+    const host = String(req?.headers?.host || '').trim();
+    if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) return 'https://okolive.sk';
+    const proto = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim() || (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? 'http' : 'https');
+    return `${proto === 'http' ? 'http' : 'https'}://${host}`;
+  };
+
   /** Connect middleware pre `/api/volby` (req.url už bez predpony). */
   async function middleware(req, res, next) {
     const url = new URL(req.url || '/', 'http://localhost');
@@ -351,6 +382,7 @@ export function createVolbyService({
     if (req.method !== 'GET') return send(res, 405, { error: 'method_not_allowed' });
     const model = await ensure();
     if (!model) return send(res, 503, { error: 'unavailable', sources: state.sources });
+    sweepNow()?.maybeRound(model.obce);
     let m;
     if (route === '/' || route === '/prehlad') {
       const vysledky = resultsOverview(state.results) || await liveOverview(model).catch(() => null);
@@ -377,13 +409,15 @@ export function createVolbyService({
     if (route === '/obce-body') {
       // Mapa obcí (volbyObceLayer.js): všetky obce s polohou, stav výsledkov (0 nič, 1 čiastočné, 2 úplné) a vedúci kandidát na starostu.
       const rows = [];
+      const S = sweepNow();
       for (const o of model.obce) {
         if (!Number.isFinite(o.lat) || !Number.isFinite(o.lon)) continue;
         const r = state.results?.obce?.get(o.code) || null;
-        const lead = r?.starosta?.[0];
-        rows.push([o.code, o.name, o.lat, o.lon, o.seats || 0, obecMapState(state.results, o.code), lead ? `${lead.meno} ${lead.priezvisko}`.trim() : '', lead ? lead.pct : null]);
+        const sw = S?.result(o) || null;
+        const lead = r?.starosta?.[0] || sw?.winner;
+        rows.push([o.code, o.name, o.lat, o.lon, o.seats || 0, sw?.done ? 2 : obecMapState(state.results, o.code), lead ? `${lead.meno} ${lead.priezvisko}`.trim() : '', lead ? lead.pct : null, sw && sw.cls !== 'pending' ? sw.cls : null]);
       }
-      return send(res, 200, { generatedAt: new Date(state.results?.generatedAt || model.generatedAt).toISOString(), columns: ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct'], rows }, 60);
+      return send(res, 200, { generatedAt: new Date(state.results?.generatedAt || model.generatedAt).toISOString(), columns: ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct', 'win'], rows }, 60);
     }
     if (route === '/tabulky') {
       const list = [...state.tables.values()].map((t) => ({ name: t.name, title: t.title, results: isResultsTable(t.name), sheets: t.sheets.map((s) => ({ name: s.name, rows: s.rows.length, header: s.rows[1] || s.rows[0] || [] })) }));
@@ -393,6 +427,26 @@ export function createVolbyService({
       const t = state.tables.get(m[1]);
       if (!t) return send(res, 404, { error: 'not_found' });
       return send(res, 200, { name: t.name, title: t.title, sheets: t.sheets.map((s) => ({ name: s.name, rows: s.rows.slice(0, TABLE_ROW_LIMIT), truncated: s.rows.length > TABLE_ROW_LIMIT })) }, 60);
+    }
+    if (route === '/zaujimavosti') {
+      const rec = records(model);
+      return send(res, 200, { generatedAt: new Date(now()).toISOString(), available: Boolean(rec?.counts?.done), ...(rec || {}) }, 120);
+    }
+    if ((m = /^\/karta\/(\d{6})(\.jpg)?$/.exec(route))) {
+      const obec = obecDetail(model, m[1]);
+      if (!obec) return send(res, 404, { error: 'not_found' });
+      const r = sweepNow()?.result(obec) || null;
+      if (m[2]) return sendJpeg(res, await renderCardJpeg(obec, r), r?.done ? 3600 : 300);
+      return sendHtml(res, cardPage(obec, r, originOf(req)), 300);
+    }
+    if ((m = /^\/karta-volby(\.jpg)?$/.exec(route))) {
+      const rec = records(model);
+      if (m[1]) {
+        const S = sweepNow();
+        const points = model.obce.filter((o) => Number.isFinite(o.lat) && Number.isFinite(o.lon) && !['582000', '599981'].includes(o.code)).map((o) => [o.lat, o.lon, S?.result(o)?.cls || 'pending']);
+        return sendJpeg(res, await renderOverviewJpeg(points, rec?.counts || {}), 600);
+      }
+      return sendHtml(res, overviewPage(rec?.counts || {}, originOf(req)), 300);
     }
     if (route === '/status') return send(res, 200, status());
     return next ? next() : send(res, 404, { error: 'not_found' });
@@ -414,16 +468,29 @@ export function createVolbyService({
     };
   }
 
-  return { middleware, refresh, ensure, status, isStale, _state: state };
+  return { middleware, refresh, ensure, status, isStale, records, _state: state, _sweep: () => sweepNow() };
 }
 
 /** Vite plugin (služba oko-api aj QA inštancia v role full). Model sa predhreje krátko po štarte. */
+let sharedService = null;
+/** Obsluha s odchytením chyby: 500 namiesto pádu procesu. */
+export function safeMiddleware(service, req, res, next) {
+  return Promise.resolve().then(() => service.middleware(req, res, next)).catch((error) => {
+    console.warn('[volby] chyba obsluhy:', error?.message || error);
+    try { if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); } res.end(JSON.stringify({ error: 'internal' })); } catch { /* spojenie už zavreté */ }
+  });
+}
+/** Služba volieb pre zdieľacie adresy /s/v<kód> a /s/volby2026 (vite.config.js, plugin zdieľania). */
+export function volbyShareService() { return sharedService; }
+
 export function volbyPlugin(options = {}) {
   const service = createVolbyService({ useWorker: true, ...options });
+  sharedService = service;
   return {
     name: 'oko-volby',
     configureServer(server) {
-      server.middlewares.use(VOLBY_PATH, (req, res, next) => { void service.middleware(req, res, next); });
+      // Chyba v obsluhe nesmie zhodiť proces (async výnimka bez catch = unhandled rejection → koniec služby oko-api).
+      server.middlewares.use(VOLBY_PATH, (req, res, next) => { safeMiddleware(service, req, res, next); });
       const timer = setTimeout(() => { void service.refresh(); }, 3000);
       timer.unref?.();
     },

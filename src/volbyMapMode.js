@@ -79,13 +79,36 @@ function defaultCreatePrimitive({ lines, style }) {
  */
 export function createVolbyMapMode({
   viewer = null, getStack, setStack, isLayerOn, setLayer, fetchImpl = (...a) => globalThis.fetch(...a), createPrimitive = defaultCreatePrimitive,
-  setTimeoutImpl = globalThis.setTimeout, reassertDelays = [1500, 5000, 12000],
+  setTimeoutImpl = globalThis.setTimeout, reassertDelays = [1500, 5000, 12000], doc = globalThis.document,
 } = {}) {
   let active = false;
   let saved = null;
   const prims = {}; // kraje, obce
   let loading = null;
   let observer = null;
+  let watermark = null;
+
+  /**
+   * Vodoznak „VOĽBY 2026 · okolive.sk" nad mapou (2026-10-25, vlastník: „nejaký vodoznak na mapu VOĽBY 2026"):
+   * každá snímka obrazovky z volebného režimu nesie značku. Nezachytáva klik (pointer-events: none).
+   */
+  function showWatermark(on) {
+    if (!doc?.createElement || !doc.body) return;
+    if (!watermark) {
+      watermark = doc.createElement('div');
+      watermark.id = 'volby-watermark';
+      watermark.setAttribute('aria-hidden', 'true');
+      const title = doc.createElement('div');
+      title.className = 'volby-watermark-title';
+      title.textContent = 'VOĽBY 2026';
+      const sub = doc.createElement('div');
+      sub.className = 'volby-watermark-sub';
+      sub.textContent = 'okolive.sk · výsledky každej obce';
+      watermark.append(title, sub);
+      doc.body.appendChild(watermark);
+    }
+    watermark.hidden = !on;
+  }
 
   async function loadBorders() {
     if (loading) return loading;
@@ -123,6 +146,7 @@ export function createVolbyMapMode({
     for (const id of plan.hide) await setLayer(id, false);
     if (!saved.obceWasOn) await setLayer(VOLBY_OBCE_LAYER, true);
     showBorders(true);
+    showWatermark(true);
     void loadBorders().then(() => showBorders(active));
     // Obnova stavu z odkazu či úložiska môže lietadlá a lode zapnúť až po vstupe — opakovane dorovnať.
     for (const ms of reassertDelays) setTimeoutImpl(() => { void reassert(); }, ms);
@@ -149,6 +173,7 @@ export function createVolbyMapMode({
     const plan = planExit(saved, { stack: getStack() });
     saved = null;
     showBorders(false);
+    showWatermark(false);
     if (plan.hideObce) await setLayer(VOLBY_OBCE_LAYER, false);
     for (const id of plan.show) await setLayer(id, true);
     if (plan.setStack) await setStack(plan.setStack);
@@ -167,8 +192,10 @@ export function createVolbyMapMode({
 
   function destroy() {
     observer?.disconnect?.();
+    watermark?.remove?.();
+    watermark = null;
     for (const p of Object.values(prims)) viewer?.scene?.groundPrimitives?.remove?.(p);
   }
 
-  return { enter, exit, observe, destroy, reassert, get active() { return active; }, get saved() { return saved; }, _prims: prims };
+  return { enter, exit, observe, destroy, reassert, get active() { return active; }, get saved() { return saved; }, get watermark() { return watermark; }, _prims: prims };
 }

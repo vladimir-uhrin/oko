@@ -82,7 +82,8 @@ async function call(service, url) {
   const res = { writeHead: (s, h) => { status = s; headers = h; }, end: (b) => { body = b; } };
   let nexted = false;
   await service.middleware({ url, method: 'GET', headers: {} }, res, () => { nexted = true; });
-  return { status, headers, json: body ? JSON.parse(body) : null, nexted };
+  const isJson = String(headers['Content-Type'] || '').startsWith('application/json');
+  return { status, headers, json: body && isJson ? JSON.parse(body) : null, text: typeof body === 'string' ? body : '', buffer: Buffer.isBuffer(body) ? body : null, nexted };
 }
 
 test('TTL ŠÚ SR podľa fázy, rozpoznanie výsledkových tabuliek, parseSusrZip s titulkami', () => {
@@ -240,7 +241,7 @@ const UCAST_RESULTS = ['OSO2026_SK_tab02bf.xlsx', xlsxBuffer([{ name: 'OSO2026_S
 
 test('výsledky v odpovediach: prehľad nesie súhrn a vedúcich, obec hlasy a účasť, /obce-body stav a vedúceho pre mapu', async () => {
   const { fetchImpl } = makeFetch((url) => (url === SUSR_SOURCES.oso ? osoTables([STAROSTA_RESULTS, UCAST_RESULTS]) : allBodies(url)));
-  const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet });
+  const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet, sweep: false });
   const prehlad = await call(service, '/prehlad');
   assert.equal(prehlad.json.phase, 'counting');
   // tab0dd fixture: Topoľníky 3 okrsky; mesto Bratislava (388) sa do súčtu SR nepočíta (tie isté okrsky ako mestské časti).
@@ -255,11 +256,11 @@ test('výsledky v odpovediach: prehľad nesie súhrn a vedúcich, obec hlasy a �
   const ba = await call(service, '/obec/582000');
   assert.equal(ba.json.vysledky, null, 'obec bez riadkov výsledkov');
   const body = await call(service, '/obce-body');
-  assert.deepEqual(body.json.columns, ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct']);
+  assert.deepEqual(body.json.columns, ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct', 'win']);
   const topolniky = body.json.rows.find((r) => r[0] === '501891');
-  assert.deepEqual(topolniky, ['501891', 'Topoľníky', 47.9, 17.78, 9, 1, 'Anna Nagyová', 62.5]);
+  assert.deepEqual(topolniky, ['501891', 'Topoľníky', 47.9, 17.78, 9, 1, 'Anna Nagyová', 62.5, null]);
   const bratislava = body.json.rows.find((r) => r[0] === '582000');
-  assert.deepEqual(bratislava.slice(4), [45, 0, '', null]);
+  assert.deepEqual(bratislava.slice(4), [45, 0, '', null, null]);
   assert.equal((await call(service, '/status')).json.vysledky.summary.okrskyDone, 2);
   const kraj = await call(service, '/kraj/1');
   assert.equal(kraj.json.vysledky, null);
@@ -278,7 +279,10 @@ test('plugin: mount na /api/volby a predhriatie; vite.config.js ho registruje le
   assert.equal(status, 200);
   assert.equal(JSON.parse(body).kraje.length, 8);
   const src = fs.readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
-  assert.match(src, /import \{ volbyPlugin \} from '\.\/src\/data\/volbyService\.js';/);
+  assert.match(src, /import \{ safeMiddleware, volbyPlugin, volbyShareService \} from '\.\/src\/data\/volbyService\.js';/);
+  // /s/v<kód> a /s/volby2026 idú cez službu volieb s odchytením chyby
+  assert.ok(src.includes('(v\\d{6}|volby2026)'), 'zdieľacie adresy volieb');
+  assert.ok(src.includes('safeMiddleware(volbyShareService(), req, res, next)'));
   assert.match(src, /\.\.\.\(apiPlugins \? \[[^\]]*volbyPlugin\(\)[^\]]*\] : \[\]\)/);
 });
 
@@ -291,7 +295,7 @@ test('živé výsledky ŠÚ SR (JSON stránky) v prehľade, kraji a obci, kým Z
     zupniObvod: async () => null,
     starosta: async (c) => (c === '501891' ? [cand(1, 'Nagyová', 300, 75, { elected: true })] : null),
   };
-  const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet, live });
+  const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet, live, sweep: false });
   const p = (await call(service, '/prehlad')).json.vysledky;
   assert.equal(p.live, true);
   assert.deepEqual([p.summary.okrskyDone, p.summary.okrskyTotal, p.summary.pct], [1200, 6029, 19.9]);
@@ -303,4 +307,42 @@ test('živé výsledky ŠÚ SR (JSON stránky) v prehľade, kraji a obci, kým Z
   assert.equal(o.starosta[0].elected, true);
   assert.equal(o.final, true);
   assert.equal((await call(service, '/obec/582000')).json.vysledky, null, 'obec bez súboru ŠÚ SR');
+});
+
+test('výsledky všetkých obcí (zber): /obce-body farba víťaza, /zaujimavosti, karta obce a súhrnná karta (HTML + JPEG)', async () => {
+  const { fetchImpl } = makeFetch(allBodies);
+  const R = { code: '501891', name: 'Topoľníky', okres: 'Dunajská Streda', done: true, cls: 'lost', elected: true, turnoutPct: 67.07, registered: 2639, voted: 1770,
+    winner: { n: 2, meno: 'Tünde', priezvisko: 'Várady', strany: 'NEKA', nezavisly: true, votes: 1160, pct: 67.01 }, second: { n: 1, meno: 'László', priezvisko: 'Bacsó', strany: 'MA', votes: 571, pct: 32.98 },
+    margin: 589, marginPct: 34.03, single: false, candidates: 2, incumbent: { n: 1, meno: 'László', priezvisko: 'Bacsó', zamestnanie: 'starosta obce' }, seats: 9, typ: 1 };
+  let rounds = 0;
+  const sweep = { maybeRound: () => { rounds += 1; }, status: () => ({ cached: 1, lastRoundAt: 1 }), result: (o) => (o.code === '501891' ? R : null), results: (obce) => obce.map((o) => (o.code === '501891' ? R : null)).filter(Boolean) };
+  const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet, sweep, live: { summary: async () => ({}), predseda: async () => null, zupniObvod: async () => null, starosta: async () => null } });
+  const body = await call(service, '/obce-body');
+  assert.deepEqual(body.json.rows.find((r) => r[0] === '501891').slice(5), [2, 'Tünde Várady', 67.01, 'lost']);
+  assert.ok(rounds >= 1, 'zber sa spustí pri požiadavke');
+  const z = (await call(service, '/zaujimavosti')).json;
+  assert.equal(z.available, true);
+  assert.deepEqual([z.counts.done, z.counts.lost], [1, 1]);
+  assert.equal(z.lostBig[0].name, 'Topoľníky');
+  const page = await call(service, '/karta/501891');
+  assert.match(page.text, /og:image" content="[^"]*\/s\/v501891\.jpg"/);
+  assert.match(page.text, /Tünde Várady/);
+  assert.match(page.text, /\/\?volby=501891/);
+  const jpg = await call(service, '/karta/501891.jpg');
+  assert.equal(jpg.headers['Content-Type'], 'image/jpeg');
+  assert.ok(jpg.buffer.length > 5000 && jpg.buffer[0] === 0xff && jpg.buffer[1] === 0xd8, 'JPEG');
+  const ov = await call(service, '/karta-volby');
+  assert.match(ov.text, /og:image" content="[^"]*\/s\/volby2026\.jpg"/);
+  const ovJpg = await call(service, '/karta-volby.jpg');
+  assert.equal(ovJpg.headers['Content-Type'], 'image/jpeg');
+  assert.equal((await call(service, '/karta/123456')).status, 404);
+});
+
+test('safeMiddleware: výnimka v obsluhe = 500, proces nepadne', async () => {
+  const { safeMiddleware } = await import('./volbyService.js');
+  let status = 0; let body = '';
+  const res = { headersSent: false, writeHead: (s) => { status = s; }, end: (b) => { body = b; } };
+  await safeMiddleware({ middleware: async () => { throw new TypeError('x.filter is not a function'); } }, { url: '/karta/1' }, res, () => {});
+  assert.equal(status, 500);
+  assert.match(body, /internal/);
 });

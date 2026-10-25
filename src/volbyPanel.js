@@ -28,6 +28,10 @@ export const VOLBY_LIST_PREVIEW = 12;
 export const KRAJ_VIEW_HEIGHT_M = 260_000;
 /** Farby stavu výsledkov na mape (rovnaké ako v src/data/volbyObceLayer.js — bez importu Cesia do panela). */
 export const VOLBY_STATE_COLORS = Object.freeze({ 0: '#39d0ff', 1: '#ffd166', 2: '#4ade80' });
+/** Farby víťaza po sčítaní (rovnaké ako body mapy, volbyObceLayer.OBEC_WIN_COLORS, a karta /s/volby2026). */
+export const VOLBY_WIN_COLORS = Object.freeze({ held: '#4ade80', lost: '#ff8a3d', open: '#ffd166', none: '#ff4d6d' });
+/** Po tomto čase (3 dni po voľbách) panel ukazuje archív „Výsledky volieb 2026" bez stavu sčítania. */
+export const VOLBY_ARCHIVE_MS = Date.UTC(2026, 9, 27, 23, 0, 0);
 
 /** Načítanie JSON z /api/volby (chyba = Error so status). */
 export async function fetchVolbyJson(path, { fetcher = (...a) => fetch(...a) } = {}) {
@@ -46,7 +50,14 @@ export const volbyApi = Object.freeze({
   kraj: (code, o) => fetchVolbyJson(`/kraj/${encodeURIComponent(code)}`, o),
   search: (q, o) => fetchVolbyJson(`/obce?q=${encodeURIComponent(q)}`, o),
   obec: (code, o) => fetchVolbyJson(`/obec/${encodeURIComponent(code)}`, o),
+  records: (o) => fetchVolbyJson('/zaujimavosti', o),
 });
+
+/** Odkaz na kartu obce s náhľadom pre siete (`/s/v<kód>`, server volbyCard.js) alebo súhrnnú kartu volieb. Pure. */
+export function volbyCardLink(origin, code = null) {
+  const base = String(origin || '').replace(/\/+$/, '');
+  return code && /^\d{6}$/.test(String(code)) ? `${base}/s/v${code}` : `${base}/s/volby2026`;
+}
 
 /**
  * Odkaz na zdieľanie: `?volby` otvorí panel, `?volby=<kód obce>` obec, `?volby=k<kraj>` kraj. Pure.
@@ -159,7 +170,7 @@ export function installVolbyPanel({
 
   const state = {
     overview: null, overviewError: null, kraj: null, krajCode: null, obec: null, obecCode: null,
-    results: [], query: '', searchError: null, resultsStamp: null,
+    results: [], query: '', searchError: null, resultsStamp: null, records: null,
   };
   const krajCache = new Map();
   const obecCache = new Map();
@@ -181,6 +192,10 @@ export function installVolbyPanel({
   const results = el(doc, 'div', 'volby-results');
   results.hidden = true;
 
+  const recordsTitle = el(doc, 'h3', 'volby-section-title gas-card-title', t('volby.records'));
+  recordsTitle.hidden = true;
+  const recordsBox = el(doc, 'div', 'volby-records');
+  recordsBox.hidden = true;
   const mapTitle = el(doc, 'h3', 'volby-section-title gas-card-title', t('volby.map'));
   const mapRow = el(doc, 'div', 'volby-chips volby-map-row');
   const mapChip = el(doc, 'button', 'data-toggle-chip volby-chip volby-chip-map', t('volby.map-chip'));
@@ -196,6 +211,8 @@ export function installVolbyPanel({
     item.append(dot, t(key));
     mapLegend.appendChild(item);
   }
+  const winLegend = el(doc, 'div', 'volby-legend volby-legend-win');
+  winLegend.hidden = true;
   mapRow.appendChild(mapChip);
   const mapHint = el(doc, 'div', 'volby-hint', t('volby.map-hint'));
 
@@ -225,7 +242,7 @@ export function installVolbyPanel({
 
   const source = el(doc, 'div', 'volby-source gas-source');
   // Najväčšie mestá nad hľadaním: jeden ťuk bez písania (desktop má panel v koridore s posuvníkom).
-  body.append(status, progress, phase, counts, results, mapTitle, mapRow, mapLegend, mapHint, krajeTitle, krajeChips, krajBox, obceTitle, mestaChips, searchWrap, hint, list, obecBox, source);
+  body.append(status, progress, phase, counts, results, recordsTitle, recordsBox, mapTitle, mapRow, mapLegend, winLegend, mapHint, krajeTitle, krajeChips, krajBox, obceTitle, mestaChips, searchWrap, hint, list, obecBox, source);
 
   const button = (className, text, onClick) => {
     const b = el(doc, 'button', className, text);
@@ -253,7 +270,9 @@ export function installVolbyPanel({
     mapChip.setAttribute('aria-pressed', on ? 'true' : 'false');
     mapChip.disabled = !map;
     // Priebežné výsledky zo stránky ŠÚ SR nemajú stav sčítania za obce — mapa sa neprefarbuje, legenda by mýlila.
-    mapLegend.hidden = !(on && hasResults() && !state.overview?.vysledky?.live);
+    const wins = Boolean(state.records?.available);
+    mapLegend.hidden = wins || !(on && hasResults() && !state.overview?.vysledky?.live);
+    winLegend.hidden = !(on && wins);
   }
 
   function renderSource() {
@@ -284,7 +303,9 @@ export function installVolbyPanel({
       // Sčítanie skončené = ŠÚ SR spracoval všetky okrsky (alebo výsledky označil za konečné).
       const done = Boolean(vy.final) || (Number(s.okrskyTotal) > 0 && Number(s.okrskyDone) >= Number(s.okrskyTotal));
       status.dataset.counting = done ? 'done' : 'running';
-      const parts = [t(done ? 'volby.status-done' : 'volby.status-counting'), progressText];
+      const archive = done && nowMs() >= VOLBY_ARCHIVE_MS;
+      status.dataset.archive = archive ? 'true' : 'false';
+      const parts = [t(archive ? 'volby.status-archive' : (done ? 'volby.status-done' : 'volby.status-counting')), progressText];
       if (s.turnoutPct != null) parts.push(t('volby.turnout', { pct: pctText(s.turnoutPct) }));
       parts.push(t('volby.as-of', { time: clock(vy.generatedAt || ov.generatedAt) }));
       status.textContent = parts.join(' · ');
@@ -297,7 +318,7 @@ export function installVolbyPanel({
       progress.hidden = true;
     }
     const countingDone = status.dataset.counting === 'done' && Boolean(vy);
-    phase.textContent = t(ov.phase === 'before' ? 'volby.phase-before' : (vy ? (countingDone ? 'volby.phase-done' : 'volby.phase-results') : 'volby.phase-counting'));
+    phase.textContent = t(ov.phase === 'before' ? 'volby.phase-before' : (vy ? (countingDone ? (status.dataset.archive === 'true' ? 'volby.phase-archive' : 'volby.phase-done') : 'volby.phase-results') : 'volby.phase-counting'));
     mapHint.textContent = t(vy ? 'volby.map-hint-results' : 'volby.map-hint');
     const c = ov.counts || {};
     counts.textContent = t('volby.counts', {
@@ -328,6 +349,63 @@ export function installVolbyPanel({
     syncMapChip();
   }
 
+  /** „1 hlas", „3 hlasy", „589 hlasov". */
+  const votesText = (n) => t(n === 1 ? 'volby.votes-1' : n >= 2 && n <= 4 ? 'volby.votes-2' : 'volby.votes-5', { n: number(n) });
+
+  async function loadRecords() {
+    try {
+      const rec = await api.records();
+      state.records = rec?.available ? rec : null;
+    } catch { state.records = null; }
+    renderRecords();
+    syncMapChip();
+  }
+
+  /** Riadok zaujímavosti s klikateľnými obcami. */
+  function recordRow(label, items, fmt) {
+    const row = el(doc, 'div', 'volby-record');
+    row.appendChild(el(doc, 'span', 'volby-record-label', `${label} `));
+    items.forEach((r, i) => {
+      if (i) row.appendChild(el(doc, 'span', 'volby-record-sep', ' · '));
+      const b = button('volby-record-obec', r.name, () => { void selectObec(r.code); });
+      b.dataset.obec = r.code;
+      row.appendChild(b);
+      const extra = fmt?.(r);
+      if (extra) row.appendChild(el(doc, 'span', 'volby-record-extra', ` ${extra}`));
+    });
+    return row;
+  }
+
+  function renderRecords() {
+    const rec = state.records;
+    clear(recordsBox);
+    clear(winLegend);
+    recordsTitle.hidden = !rec;
+    recordsBox.hidden = !rec;
+    if (!rec) return;
+    const c = rec.counts || {};
+    for (const [cls, key] of [['held', 'volby.win-held'], ['lost', 'volby.win-lost'], ['open', 'volby.win-open'], ['none', 'volby.win-none']]) {
+      const item = el(doc, 'span', 'volby-legend-item');
+      const dot = el(doc, 'span', 'volby-legend-dot');
+      dot.style.background = VOLBY_WIN_COLORS[cls];
+      item.append(dot, t(key, { n: number(c[cls]) }));
+      winLegend.appendChild(item);
+    }
+    winLegend.appendChild(el(doc, 'span', 'volby-legend-note', t('volby.win-note')));
+    recordsBox.appendChild(el(doc, 'div', 'volby-record volby-record-counts', t('volby.rec-counts', { held: number(c.held), lost: number(c.lost), open: number(c.open), none: number(c.none), single: number(c.single), independent: number(c.independent), done: number(c.done) })));
+    if (rec.closest?.length) recordsBox.appendChild(recordRow(t('volby.rec-closest'), rec.closest, (r) => `(${votesText(r.margin)})`));
+    if (rec.highest?.length) recordsBox.appendChild(recordRow(t('volby.rec-highest'), rec.highest, (r) => `${pctText(r.turnoutPct)} %`));
+    if (rec.lowest?.length) recordsBox.appendChild(recordRow(t('volby.rec-lowest'), rec.lowest, (r) => `${pctText(r.turnoutPct)} %`));
+    if (rec.lostBig?.length) recordsBox.appendChild(recordRow(t('volby.rec-lost-big'), rec.lostBig, (r) => (r.incumbent ? `(${r.incumbent})` : '')));
+    if (rec.noMayor?.length) recordsBox.appendChild(recordRow(t('volby.rec-no-mayor'), rec.noMayor, null));
+    const share = volbyCardLink(origin);
+    const copy = button('volby-action volby-records-share', t('volby.copy-card'), async () => {
+      try { await copyText?.(share); copy.textContent = t('volby.copied'); } catch { copy.textContent = share; }
+    });
+    copy.title = share;
+    recordsBox.appendChild(copy);
+  }
+
   async function loadOverview() {
     const token = ++overviewToken;
     try {
@@ -335,6 +413,7 @@ export function installVolbyPanel({
       if (token !== overviewToken) return;
       state.overview = ov;
       state.overviewError = null;
+      if (ov?.vysledky && api.records) void loadRecords();
       // Nové (alebo obnovené) výsledky: otvorený detail načítať znova — čísla v ňom by zostarli.
       const stamp = ov?.vysledky?.generatedAt || null;
       if (stamp && stamp !== state.resultsStamp) {
@@ -504,10 +583,19 @@ export function installVolbyPanel({
     const sub = [o.okres && o.okres !== o.name ? t('volby.okres', { okres: o.okres }) : '', o.kraj].filter(Boolean).join(' · ');
     obecBox.appendChild(detailHead(o.name, sub, {
       onFly: Number.isFinite(o.lat) ? () => flyToObec(o) : null,
-      share: volbyLink(origin, { obec: o.code }),
+      share: vy?.prehlad?.done ? volbyCardLink(origin, o.code) : volbyLink(origin, { obec: o.code }),
     }));
     const note = progressNote(vy);
     if (note) obecBox.appendChild(note);
+    const pr = vy?.prehlad || null;
+    if (pr?.done) {
+      const bits = [];
+      if (pr.turnoutPct != null) bits.push(t('volby.obec-turnout', { pct: pctText(pr.turnoutPct), voted: number(pr.voted), registered: number(pr.registered) }));
+      if (pr.cls && pr.cls !== 'pending') bits.push(t(`volby.obec-${pr.cls}`, { name: pr.incumbent ? `${pr.incumbent.meno} ${pr.incumbent.priezvisko}` : '' }));
+      if (pr.single) bits.push(t('volby.obec-single'));
+      if (pr.margin != null && pr.margin <= 10) bits.push(t('volby.obec-margin', { votes: votesText(pr.margin) }));
+      obecBox.appendChild(el(doc, 'div', `volby-note volby-obec-prehlad is-${pr.cls}`, bits.join(' · ')));
+    }
     if (o.precision === 'okres') obecBox.appendChild(el(doc, 'div', 'volby-note', t('volby.approx')));
     if (o.unmatched) obecBox.appendChild(el(doc, 'div', 'volby-note', t('volby.unmatched')));
     // ŠÚ SR: 3 obce volia len zastupiteľstvo a v 3 sa voľby nekonajú — povedať, nie mlčať.
@@ -519,6 +607,7 @@ export function installVolbyPanel({
     const total = wards.reduce((s, w) => s + (w.kandidati?.length || 0), 0);
     obecBox.appendChild(el(doc, 'div', 'volby-subhead', t('volby.council', { n: number(total), seats: number(o.seats), obvody: number(wards.length) })));
     const resByWard = new Map((vy?.poslanci || []).map((w) => [String(w.obvod), w.kandidati]));
+    if (vy?.live && !(vy?.poslanci || []).length && total) obecBox.appendChild(el(doc, 'div', 'volby-note volby-council-pending', t('volby.council-pending', { seats: number(vy?.prehlad?.seats ?? o.seats) })));
     if (wards.length === 1) obecBox.appendChild(candidateList(wards[0].kandidati || [], { results: resByWard.get(String(wards[0].obvod)) || null }));
     else for (const w of wards) obecBox.appendChild(group(t('volby.ward', { n: w.obvod, count: number(w.kandidati?.length || 0) }), w.kandidati || [], { open: false, results: resByWard.get(String(w.obvod)) || null }));
     if (o.krajObvod) {

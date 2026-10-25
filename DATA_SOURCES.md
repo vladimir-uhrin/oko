@@ -19,6 +19,12 @@ covers the joint municipal and regional elections of 24 October 2026.
   results are public information published by law; the portal states no restrictive terms (checked
   2026-10-24; cookie notice only). Conditional downloads every 2 h before the close and every 3 min while
   counting; the panel shows the publication time and labels the phase (embargo / counting).
+  Results of every municipality (2026-10-25, `src/data/volbyObceSweep.js`): the portal's own JSON files
+  `oso/json/graph01/<code>.json` (turnout, elected mayor, seats) and `oso/json/tab05/<code>.json` (mayoral
+  candidates with votes) — fetched once per municipality with at most 4 requests in flight, cached in
+  `.gev-cache/volby/obce-sweep.json`, never re-fetched after 100 % processing. "Sitting mayor" is derived
+  from the occupation the candidate stated in the ministry register ("starosta/primátor"), labelled as such in
+  the UI and on the share cards (`/s/v<code>`, `/s/volby2026`, `src/data/volbyCard.js`).
 - **OpenStreetMap — administrative boundaries** (ODbL 1.0, © OpenStreetMap contributors): region (admin_level 4)
   and municipality/city-district (admin_level 8 and 9) boundary lines for the election map mode
   (`src/volbyMapMode.js`), built by `scripts/build-volby-hranice.mjs` into `public/volby/hranice-*.json`

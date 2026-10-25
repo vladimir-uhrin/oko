@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   KRAJ_VIEW_HEIGHT_M, VOLBY_PANEL_ID, VOLBY_REFRESH_MS, VOLBY_SEARCH_DEBOUNCE_MS, candidateLabel, installVolbyPanel, mergeResults,
-  obecViewHeightM, parseVolbyParam, volbyLink,
+  obecViewHeightM, parseVolbyParam, volbyCardLink, volbyLink,
 } from './volbyPanel.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 import { MOBILE_SECTIONS } from './mobileShell.js';
@@ -432,4 +432,55 @@ test('po sčítaní všetkých okrskov: „Sčítanie skončené", text fázy be
   }
   assert.match(SK_STRINGS['volby.status-done'], /^Sčítanie skončené$/);
   assert.doesNotMatch(SK_STRINGS['volby.map-hint-results'], /20:00/);
+});
+
+test('po sčítaní: zaujímavosti s klikateľnými obcami, legenda víťazov s počtami, prehľad obce, odkaz na kartu, archív', async () => {
+  const REC = { available: true, counts: { done: 2921, held: 2075, lost: 315, open: 522, none: 9, single: 1026, independent: 1593 },
+    closest: [{ code: '543853', name: 'Veľké Kapušany', margin: 1 }], highest: [{ code: '526240', name: 'Silická Jablonica', turnoutPct: 88.35 }],
+    lowest: [{ code: '1', name: 'Nízka', turnoutPct: 12.5 }], lostBig: [{ code: '599981', name: 'Košice', incumbent: 'Jaroslav Polaček' }], noMayor: [{ code: '2', name: 'Bez' }] };
+  const VY = { generatedAt: '2026-10-25T05:00:00.000Z', live: true, summary: { okrskyDone: 6029, okrskyTotal: 6029, pct: 100, turnoutPct: 46.56 } };
+  const OBEC_PR = { ...OBEC, vysledky: { live: true, final: true, ucast: null, starosta: [], poslanci: [],
+    prehlad: { done: true, cls: 'lost', turnoutPct: 67.07, voted: 1770, registered: 2639, incumbent: { meno: 'László', priezvisko: 'Bacsó' }, single: false, margin: 589, seats: 9 } } };
+  const deep = (n) => (n._text || '') + (n.children || []).map(deep).join('');
+  for (const [clock, archived] of [[Date.UTC(2026, 9, 25, 7), false], [Date.UTC(2026, 9, 28, 9), true]]) {
+    const doc = fakeDoc();
+    let mapOn = true;
+    const selected = [];
+    const { panel } = install(doc, { nowMs: () => clock, origin: 'https://okolive.sk', api: {
+      overview: async () => ({ ...OVERVIEW, phase: 'counting', vysledky: VY }), records: async () => REC,
+      kraj: async () => KRAJ1, search: async () => ({ results: [] }), obec: async (code) => { selected.push(code); return OBEC_PR; },
+    } });
+    panel.attachMap({ isOn: () => mapOn, setOn: (on) => { mapOn = on; }, highlight() {} });
+    await flush();
+    const title = byClass(doc.root.body, 'volby-section-title').find((h) => h.textContent === 'volby.records');
+    assert.ok(title && !title.hidden, 'sekcia zaujímavostí');
+    const rows = byClass(doc.root.body, 'volby-record');
+    assert.match(rows[0].textContent, /volby\.rec-counts \{"held":"2 075","lost":"315","open":"522","none":"9","single":"1 026","independent":"1 593","done":"2 921"\}/);
+    const kapusany = byClass(doc.root.body, 'volby-record-obec').find((b) => b.dataset.obec === '543853');
+    assert.equal(kapusany.textContent, 'Veľké Kapušany');
+    assert.match(deep(rows.find((r) => /rec-closest/.test(deep(r)))), /volby\.votes-1 \{"n":"1"\}/);
+    // legenda víťazov namiesto legendy stavu sčítania
+    assert.equal(byClass(doc.root.body, 'volby-legend-win')[0].hidden, false);
+    assert.match(deep(byClass(doc.root.body, 'volby-legend-win')[0]), /volby\.win-lost \{"n":"315"\}/);
+    assert.equal(byClass(doc.root.body, 'volby-legend').find((l) => !/volby-legend-win/.test(l.className)).hidden, true);
+    const share = byClass(doc.root.body, 'volby-records-share')[0];
+    assert.equal(share.title, 'https://okolive.sk/s/volby2026');
+    // klik na obec v zaujímavostiach otvorí jej detail: účasť, doterajší starosta, karta /s/v<kód>, poznámka o poslancoch
+    click(kapusany);
+    await flush();
+    assert.deepEqual(selected, ['543853']);
+    const prehlad = byClass(doc.root.body, 'volby-obec-prehlad')[0];
+    assert.match(prehlad.textContent, /volby\.obec-turnout \{"pct":"67,1","voted":"1 770","registered":"2 639"\} · volby\.obec-lost \{"name":"László Bacsó"\}/);
+    assert.match(prehlad.className, /is-lost/);
+    const copy = byClass(byClass(doc.root.body, 'volby-obec')[0], 'volby-action').find((b) => b.textContent === 'volby.copy-link');
+    assert.equal(copy.title, `https://okolive.sk/s/v${OBEC.code}`);
+    const status = byClass(doc.root.body, 'volby-status')[0];
+    assert.ok(status.textContent.startsWith(archived ? 'volby.status-archive' : 'volby.status-done'), status.textContent);
+    assert.equal(byClass(doc.root.body, 'volby-phase')[0].textContent, archived ? 'volby.phase-archive' : 'volby.phase-done');
+  }
+  assert.equal(volbyCardLink('https://okolive.sk/', '501921'), 'https://okolive.sk/s/v501921');
+  assert.equal(volbyCardLink('https://okolive.sk', 'x'), 'https://okolive.sk/s/volby2026');
+  for (const key of ['volby.records', 'volby.rec-counts', 'volby.win-note', 'volby.obec-lost', 'volby.council-pending', 'volby.status-archive', 'volby.phase-archive', 'volby.copy-card']) {
+    assert.ok(SK_STRINGS[key] && EN_STRINGS[key], key);
+  }
 });
