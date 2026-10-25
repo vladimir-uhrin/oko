@@ -32,6 +32,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { applyVolbyHead, volbyHead } from './lib/volbyHead.mjs';
 
 const args = process.argv.slice(2);
 const flag = (name, fallback) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] ? args[i + 1] : fallback; };
@@ -187,6 +188,17 @@ const server = http.createServer((req, res) => {
         'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'",
       } : {}),
     };
+    // Odkaz okolive.sk/?volby… (2026-10-25): náhľad volieb na sieťach namiesto všeobecného OKO (scripts/lib/volbyHead.mjs).
+    const volby = pathname === '/index.html' ? volbyHead(search) : null;
+    if (volby) {
+      fs.readFile(target, 'utf8', (readError, html) => {
+        if (readError) { send(res, 404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }, 'Not Found'); return; }
+        const body = Buffer.from(applyVolbyHead(html, volby));
+        res.writeHead(200, { 'Content-Type': type, 'Content-Length': String(body.length), 'Cache-Control': 'no-cache' });
+        res.end(method === 'HEAD' ? undefined : body);
+      });
+      return;
+    }
     if (req.headers['if-none-match'] === etag) { send(res, 304, { ETag: etag, 'Cache-Control': headers['Cache-Control'] }, ''); return; }
     const robotsTag = robotsTagFor(pathname, search);
     res.writeHead(200, { ...(robotsTag ? { 'X-Robots-Tag': robotsTag } : {}), ...headers });
