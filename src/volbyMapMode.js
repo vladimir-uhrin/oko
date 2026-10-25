@@ -18,10 +18,11 @@ export const VOLBY_MAP_STACK = 'stadia-dark';
 /** Vrstvy, ktoré volebný režim skryje (a potom vráti, ak boli zapnuté). */
 export const VOLBY_HIDDEN_LAYERS = Object.freeze(['flights', 'military', 'ais-live-vessels', 'aishub-vessels', 'gfw-presence', 'gfw-sar']);
 export const VOLBY_OBCE_LAYER = 'volby-obce';
-export const BORDER_URLS = Object.freeze({ kraje: '/volby/hranice-kraje.json', obce: '/volby/hranice-obce.json' });
+// 2026-10-25 (vlastník: „odstráň hranice iba obcí, lebo nevidno dobre názvy"): len hranice krajov; súbor
+// public/volby/hranice-obce.json ostáva pre prípadný návrat, nenačítava sa.
+export const BORDER_URLS = Object.freeze({ kraje: '/volby/hranice-kraje.json' });
 export const BORDER_STYLE = Object.freeze({
   kraje: Object.freeze({ color: '#ffb33c', alpha: 0.7, width: 2.2, maxDistanceM: 3_000_000 }),
-  obce: Object.freeze({ color: '#cfe8ff', alpha: 0.35, width: 1.2, maxDistanceM: 260_000 }),
 });
 
 /** Plán vstupu: čo vypnúť a čo si zapamätať. Pure. */

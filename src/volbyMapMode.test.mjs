@@ -44,10 +44,10 @@ test('enter/exit: tmavý podklad, lietadlá preč, obce zapnuté, hranice; návr
   assert.equal(await h.mode.enter(), false, 'druhý vstup nič nerobí');
   assert.deepEqual(h.calls, ['stack:stadia-dark', 'flights:false', 'military:false', 'volby-obce:true']);
   for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
-  assert.deepEqual(h.added.map((p) => [p.key, p.show]), [['kraje', true], ['obce', true]]);
+  assert.deepEqual(h.added.map((p) => [p.key, p.show]), [['kraje', true]], 'len hranice krajov — hranice obcí zakrývali názvy');
   assert.equal(await h.mode.exit(), true);
   assert.deepEqual(h.calls.slice(4), ['volby-obce:false', 'flights:true', 'military:true', 'stack:photoreal']);
-  assert.deepEqual(h.added.map((p) => p.show), [false, false]);
+  assert.deepEqual(h.added.map((p) => p.show), [false]);
   assert.deepEqual([...h.on].sort(), ['flights', 'military']);
   assert.equal(await h.mode.exit(), false);
   // Návštevník počas režimu prepne mapu → po zatvorení ju nechať.
