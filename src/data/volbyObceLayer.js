@@ -23,6 +23,11 @@ export const OBEC_STATE_COLORS = Object.freeze({ 0: '#7fdcff', 1: '#ffd166', 2: 
  * nová tvár (doterajší starosta nekandidoval), starosta nezvolený. Rovnaké farby má karta /s/volby2026.
  */
 export const OBEC_WIN_COLORS = Object.freeze({ held: '#4ade80', lost: '#ff8a3d', open: '#ffd166', none: '#ff4d6d' });
+/** Farby strany víťaza (prepínač „strana" v paneli; kľúče z volbyObceSweep.partyKey). */
+export const OBEC_PARTY_COLORS = Object.freeze({
+  neka: '#cfd8e3', smer: '#e5323b', hlas: '#a970ff', kdh: '#2f80ed', ma: '#21b573',
+  sns: '#ffd166', ps: '#39d0ff', sas: '#b7e04a', rep: '#ff8a3d', other: '#8a8f9c',
+});
 /** Krytie bodu (jemný, nie plný disk). */
 export const OBEC_POINT_ALPHA = 0.85;
 
@@ -54,9 +59,10 @@ export function labelVisibleUntilM(seats = 0, city = false, district = false) {
 }
 
 /** Štýl bodu: veľkosť podľa mandátov, farba podľa stavu výsledkov. Pure. */
-export function pointStyle({ seats = 0, city = false, state = 0, win = null } = {}) {
+export function pointStyle({ seats = 0, city = false, state = 0, win = null, party = null } = {}, mode = 'win') {
   // 2026-10-24 (vlastník: body „jemnejšie, krajšie UI"): menšie body, mestá o chlp výraznejšie.
   const pixelSize = city || seats >= 25 ? 5.5 : seats >= 13 ? 4 : seats >= 9 ? 3.2 : 2.6;
+  if (mode === 'party' && party && OBEC_PARTY_COLORS[party]) return { pixelSize, color: OBEC_PARTY_COLORS[party] };
   return { pixelSize, color: (win && OBEC_WIN_COLORS[win]) || OBEC_STATE_COLORS[state] || OBEC_STATE_COLORS[0] };
 }
 
@@ -100,7 +106,7 @@ export function parseObceBody(json) {
     const lat = o.lat == null || o.lat === '' ? NaN : Number(o.lat);
     const lon = o.lon == null || o.lon === '' ? NaN : Number(o.lon);
     if (!o.code || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    out.push({ code: String(o.code), name: String(o.name || ''), lat, lon, seats: Number(o.seats) || 0, city: Number(o.seats) >= 45 || o.code === '582000' || o.code === '599981', state: Number(o.state) || 0, lead: String(o.lead || ''), leadPct: o.leadPct == null ? null : Number(o.leadPct), win: OBEC_WIN_COLORS[o.win] ? o.win : null });
+    out.push({ code: String(o.code), name: String(o.name || ''), lat, lon, seats: Number(o.seats) || 0, city: Number(o.seats) >= 45 || o.code === '582000' || o.code === '599981', state: Number(o.state) || 0, lead: String(o.lead || ''), leadPct: o.leadPct == null ? null : Number(o.leadPct), win: OBEC_WIN_COLORS[o.win] ? o.win : null, party: OBEC_PARTY_COLORS[o.party] ? o.party : null });
   }
   return out;
 }
@@ -127,6 +133,7 @@ export function createVolbyObceLayer({
   let rows = [];
   const byCode = new Map(); // code → { point, label, row }
   let selectedCode = null;
+  let colorMode = 'win'; // 'win' (výsledok) | 'party' (strana víťaza)
 
   const color = (css) => Cesium.Color.fromCssColorString(css);
 
@@ -137,7 +144,7 @@ export function createVolbyObceLayer({
     byCode.clear();
     for (const r of rows) {
       const position = Cesium.Cartesian3.fromDegrees(r.lon, r.lat, 0);
-      const style = pointStyle(r);
+      const style = pointStyle(r, colorMode);
       const point = points.add({
         id: OBEC_PICK_PREFIX + r.code,
         position,
@@ -177,7 +184,7 @@ export function createVolbyObceLayer({
       const e = byCode.get(r.code);
       if (!e) continue;
       e.row = r;
-      const style = pointStyle(r);
+      const style = pointStyle(r, colorMode);
       e.point.color = color(style.color).withAlpha(OBEC_POINT_ALPHA);
       e.point.pixelSize = style.pixelSize;
       e.label.text = labelText(r);
@@ -188,7 +195,7 @@ export function createVolbyObceLayer({
   function applySelection() {
     for (const [code, e] of byCode) {
       const sel = code === selectedCode;
-      const style = pointStyle(e.row);
+      const style = pointStyle(e.row, colorMode);
       e.point.pixelSize = sel ? style.pixelSize + 3 : style.pixelSize;
       e.point.outlineWidth = sel ? 2 : 0.5;
       e.point.outlineColor = sel ? Cesium.Color.WHITE : Cesium.Color.fromBytes(6, 14, 22, 140);
@@ -257,6 +264,13 @@ export function createVolbyObceLayer({
       } finally { loading = false; }
     },
     /** Zvýrazní obec na mape a (pri kliknutí) ohlási výber. */
+    /** Farba bodov: 'win' = výsledok (obhájil / prehral…), 'party' = strana víťaza. */
+    setColorMode(mode) {
+      colorMode = mode === 'party' ? 'party' : 'win';
+      if (rows.length) restyle(rows.slice());
+      return colorMode;
+    },
+    getColorMode() { return colorMode; },
     select(code, { origin = 'panel' } = {}) {
       selectedCode = code ? String(code) : null;
       applySelection();

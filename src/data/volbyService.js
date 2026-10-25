@@ -415,9 +415,9 @@ export function createVolbyService({
         const r = state.results?.obce?.get(o.code) || null;
         const sw = S?.result(o) || null;
         const lead = r?.starosta?.[0] || sw?.winner;
-        rows.push([o.code, o.name, o.lat, o.lon, o.seats || 0, sw?.done ? 2 : obecMapState(state.results, o.code), lead ? `${lead.meno} ${lead.priezvisko}`.trim() : '', lead ? lead.pct : null, sw && sw.cls !== 'pending' ? sw.cls : null]);
+        rows.push([o.code, o.name, o.lat, o.lon, o.seats || 0, sw?.done ? 2 : obecMapState(state.results, o.code), lead ? `${lead.meno} ${lead.priezvisko}`.trim() : '', lead ? lead.pct : null, sw && sw.cls !== 'pending' ? sw.cls : null, sw?.party || null]);
       }
-      return send(res, 200, { generatedAt: new Date(state.results?.generatedAt || model.generatedAt).toISOString(), columns: ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct', 'win'], rows }, 60);
+      return send(res, 200, { generatedAt: new Date(state.results?.generatedAt || model.generatedAt).toISOString(), columns: ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct', 'win', 'party'], rows }, 60);
     }
     if (route === '/tabulky') {
       const list = [...state.tables.values()].map((t) => ({ name: t.name, title: t.title, results: isResultsTable(t.name), sheets: t.sheets.map((s) => ({ name: s.name, rows: s.rows.length, header: s.rows[1] || s.rows[0] || [] })) }));

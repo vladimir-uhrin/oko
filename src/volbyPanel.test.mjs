@@ -484,3 +484,36 @@ test('po sčítaní: zaujímavosti s klikateľnými obcami, legenda víťazov s 
     assert.ok(SK_STRINGS[key] && EN_STRINGS[key], key);
   }
 });
+
+test('farba mapy po sčítaní: prepínač výsledok / strana víťaza, legenda strán s počtami a poznámkou o koalíciách', async () => {
+  const REC = { available: true, counts: { done: 2921, held: 2075, lost: 316, open: 521, none: 9, single: 1026, independent: 1593, parties: { neka: 1560, smer: 390, hlas: 358 }, coalitions: 106 }, closest: [], highest: [], lowest: [], lostBig: [], noMayor: [] };
+  const VY = { generatedAt: '2026-10-25T05:00:00.000Z', live: true, summary: { okrskyDone: 6029, okrskyTotal: 6029, pct: 100 } };
+  const doc = fakeDoc();
+  const deep = (n) => (n._text || '') + (n.children || []).map(deep).join('');
+  let mapOn = true;
+  const modes = [];
+  const { panel } = install(doc, { api: { overview: async () => ({ ...OVERVIEW, phase: 'counting', vysledky: VY }), records: async () => REC, kraj: async () => KRAJ1, search: async () => ({ results: [] }), obec: async () => OBEC } });
+  panel.attachMap({ isOn: () => mapOn, setOn: (on) => { mapOn = on; }, highlight() {}, setColorMode: (m) => modes.push(m) });
+  await flush();
+  const row = byClass(doc.root.body, 'volby-color-row')[0];
+  assert.equal(row.hidden, false);
+  const party = byClass(row, 'volby-chip-color').find((c) => c.dataset.mode === 'party');
+  const win = byClass(row, 'volby-chip-color').find((c) => c.dataset.mode === 'win');
+  assert.equal(win.getAttribute('aria-pressed'), 'true');
+  assert.equal(byClass(doc.root.body, 'volby-legend-party')[0].hidden, true);
+  click(party);
+  await flush();
+  assert.deepEqual(modes, ['party']);
+  assert.equal(party.getAttribute('aria-pressed'), 'true');
+  assert.equal(byClass(doc.root.body, 'volby-legend-win')[0].hidden, true);
+  const legend = byClass(doc.root.body, 'volby-legend-party')[0];
+  assert.equal(legend.hidden, false);
+  assert.match(deep(legend), /volby\.party-smer \{"n":"390"\}/);
+  assert.match(deep(legend), /volby\.party-ps \{"n":"0"\}/);
+  assert.match(deep(legend), /volby\.party-note \{"n":"106"\}/);
+  click(win);
+  await flush();
+  assert.deepEqual(modes, ['party', 'win']);
+  assert.equal(byClass(doc.root.body, 'volby-legend-party')[0].hidden, true);
+  for (const key of ['volby.color-party', 'volby.party-smer', 'volby.party-other', 'volby.party-note']) assert.ok(SK_STRINGS[key] && EN_STRINGS[key], key);
+});

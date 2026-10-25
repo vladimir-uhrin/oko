@@ -30,6 +30,11 @@ export const KRAJ_VIEW_HEIGHT_M = 260_000;
 export const VOLBY_STATE_COLORS = Object.freeze({ 0: '#39d0ff', 1: '#ffd166', 2: '#4ade80' });
 /** Farby víťaza po sčítaní (rovnaké ako body mapy, volbyObceLayer.OBEC_WIN_COLORS, a karta /s/volby2026). */
 export const VOLBY_WIN_COLORS = Object.freeze({ held: '#4ade80', lost: '#ff8a3d', open: '#ffd166', none: '#ff4d6d' });
+/** Farby strany víťaza (rovnaké ako volbyObceLayer.OBEC_PARTY_COLORS). Poradie = poradie v legende. */
+export const VOLBY_PARTY_COLORS = Object.freeze({
+  neka: '#cfd8e3', smer: '#e5323b', hlas: '#a970ff', kdh: '#2f80ed', ma: '#21b573',
+  sns: '#ffd166', ps: '#39d0ff', sas: '#b7e04a', rep: '#ff8a3d', other: '#8a8f9c',
+});
 /** Po tomto čase (3 dni po voľbách) panel ukazuje archív „Výsledky volieb 2026" bez stavu sčítania. */
 export const VOLBY_ARCHIVE_MS = Date.UTC(2026, 9, 27, 23, 0, 0);
 
@@ -213,6 +218,24 @@ export function installVolbyPanel({
   }
   const winLegend = el(doc, 'div', 'volby-legend volby-legend-win');
   winLegend.hidden = true;
+  const partyLegend = el(doc, 'div', 'volby-legend volby-legend-party');
+  partyLegend.hidden = true;
+  // Prepínač farby mapy po sčítaní: výsledok (obhájil / prehral…) alebo strana víťaza.
+  const colorRow = el(doc, 'div', 'volby-chips volby-color-row');
+  colorRow.hidden = true;
+  colorRow.setAttribute('role', 'group');
+  colorRow.setAttribute('aria-label', t('volby.color-by'));
+  let colorMode = 'win';
+  const colorChips = {};
+  for (const mode of ['win', 'party']) {
+    const chip = el(doc, 'button', 'data-toggle-chip volby-chip volby-chip-color', t(`volby.color-${mode}`));
+    chip.type = 'button';
+    chip.dataset.mode = mode;
+    chip.setAttribute('aria-pressed', mode === colorMode ? 'true' : 'false');
+    chip.addEventListener('click', () => setColorMode(mode));
+    colorChips[mode] = chip;
+    colorRow.appendChild(chip);
+  }
   mapRow.appendChild(mapChip);
   const mapHint = el(doc, 'div', 'volby-hint', t('volby.map-hint'));
 
@@ -242,7 +265,7 @@ export function installVolbyPanel({
 
   const source = el(doc, 'div', 'volby-source gas-source');
   // Najväčšie mestá nad hľadaním: jeden ťuk bez písania (desktop má panel v koridore s posuvníkom).
-  body.append(status, progress, phase, counts, results, recordsTitle, recordsBox, mapTitle, mapRow, mapLegend, winLegend, mapHint, krajeTitle, krajeChips, krajBox, obceTitle, mestaChips, searchWrap, hint, list, obecBox, source);
+  body.append(status, progress, phase, counts, results, recordsTitle, recordsBox, mapTitle, mapRow, colorRow, mapLegend, winLegend, partyLegend, mapHint, krajeTitle, krajeChips, krajBox, obceTitle, mestaChips, searchWrap, hint, list, obecBox, source);
 
   const button = (className, text, onClick) => {
     const b = el(doc, 'button', className, text);
@@ -272,7 +295,9 @@ export function installVolbyPanel({
     // Priebežné výsledky zo stránky ŠÚ SR nemajú stav sčítania za obce — mapa sa neprefarbuje, legenda by mýlila.
     const wins = Boolean(state.records?.available);
     mapLegend.hidden = wins || !(on && hasResults() && !state.overview?.vysledky?.live);
-    winLegend.hidden = !(on && wins);
+    colorRow.hidden = !(on && wins);
+    winLegend.hidden = !(on && wins && colorMode === 'win');
+    partyLegend.hidden = !(on && wins && colorMode === 'party');
   }
 
   function renderSource() {
@@ -353,6 +378,14 @@ export function installVolbyPanel({
   /** „1 hlas", „3 hlasy", „589 hlasov". */
   const votesText = (n) => t(n === 1 ? 'volby.votes-1' : n >= 2 && n <= 4 ? 'volby.votes-2' : 'volby.votes-5', { n: number(n) });
 
+  function setColorMode(mode) {
+    colorMode = mode === 'party' ? 'party' : 'win';
+    for (const [m, chip] of Object.entries(colorChips)) chip.setAttribute('aria-pressed', m === colorMode ? 'true' : 'false');
+    map?.setColorMode?.(colorMode);
+    if (map && !map.isOn?.()) { void map.setOn?.(true); syncMapChipSoon(); }
+    syncMapChip();
+  }
+
   async function loadRecords() {
     try {
       const rec = await api.records();
@@ -393,6 +426,17 @@ export function installVolbyPanel({
       winLegend.appendChild(item);
     }
     winLegend.appendChild(el(doc, 'span', 'volby-legend-note', t('volby.win-note')));
+    clear(partyLegend);
+    const parties = c.parties || {};
+    for (const key of Object.keys(VOLBY_PARTY_COLORS)) {
+      const item = el(doc, 'span', 'volby-legend-item');
+      item.dataset.party = key;
+      const dot = el(doc, 'span', 'volby-legend-dot');
+      dot.style.background = VOLBY_PARTY_COLORS[key];
+      item.append(dot, t(`volby.party-${key}`, { n: number(parties[key] || 0) }));
+      partyLegend.appendChild(item);
+    }
+    partyLegend.appendChild(el(doc, 'span', 'volby-legend-note', t('volby.party-note', { n: number(c.coalitions || 0) })));
     recordsBox.appendChild(el(doc, 'div', 'volby-record volby-record-counts', t('volby.rec-counts', { held: number(c.held), lost: number(c.lost), open: number(c.open), none: number(c.none), single: number(c.single), independent: number(c.independent), done: number(c.done) })));
     if (rec.closest?.length) recordsBox.appendChild(recordRow(t('volby.rec-closest'), rec.closest, (r) => `(${votesText(r.margin)})`));
     if (rec.highest?.length) recordsBox.appendChild(recordRow(t('volby.rec-highest'), rec.highest, (r) => `${pctText(r.turnoutPct)} %`));

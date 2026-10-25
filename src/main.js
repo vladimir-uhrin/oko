@@ -1861,6 +1861,7 @@ async function init() {
       isOn: () => Boolean(dataManager.layers.get('volby-obce')?.enabled),
       setOn: (on) => dataManager.setEnabled('volby-obce', on, { origin: 'user' }),
       highlight: (code) => volbyObceLayer.select(code),
+      setColorMode: (mode) => volbyObceLayer.setColorMode?.(mode),
     });
     try {
       const requestedVolby = parseVolbyParam(window.location?.search || '');

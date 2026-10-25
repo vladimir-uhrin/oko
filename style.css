@@ -14254,3 +14254,7 @@ body.oko-consent-open #toast {
 .volby-obec-prehlad.is-lost { border-left-color: #ff8a3d; }
 .volby-obec-prehlad.is-open { border-left-color: #ffd166; }
 .volby-obec-prehlad.is-none { border-left-color: #ff4d6d; }
+/* VOĽBY 2026 — prepínač farby mapy (výsledok / strana víťaza) a legenda strán (2026-10-25). */
+.volby-color-row[hidden], .volby-legend-party[hidden] { display: none !important; }
+.volby-chip-color[aria-pressed="true"] { color: #e9f6ff; border-color: rgba(57, 208, 255, 0.7); background: rgba(57, 208, 255, 0.16); }
+.volby-legend-party .volby-legend-note { flex-basis: 100%; font-size: 9.5px; opacity: 0.75; }

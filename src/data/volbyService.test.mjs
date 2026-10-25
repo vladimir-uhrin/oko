@@ -256,11 +256,11 @@ test('výsledky v odpovediach: prehľad nesie súhrn a vedúcich, obec hlasy a �
   const ba = await call(service, '/obec/582000');
   assert.equal(ba.json.vysledky, null, 'obec bez riadkov výsledkov');
   const body = await call(service, '/obce-body');
-  assert.deepEqual(body.json.columns, ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct', 'win']);
+  assert.deepEqual(body.json.columns, ['code', 'name', 'lat', 'lon', 'seats', 'state', 'lead', 'leadPct', 'win', 'party']);
   const topolniky = body.json.rows.find((r) => r[0] === '501891');
-  assert.deepEqual(topolniky, ['501891', 'Topoľníky', 47.9, 17.78, 9, 1, 'Anna Nagyová', 62.5, null]);
+  assert.deepEqual(topolniky, ['501891', 'Topoľníky', 47.9, 17.78, 9, 1, 'Anna Nagyová', 62.5, null, null]);
   const bratislava = body.json.rows.find((r) => r[0] === '582000');
-  assert.deepEqual(bratislava.slice(4), [45, 0, '', null, null]);
+  assert.deepEqual(bratislava.slice(4), [45, 0, '', null, null, null]);
   assert.equal((await call(service, '/status')).json.vysledky.summary.okrskyDone, 2);
   const kraj = await call(service, '/kraj/1');
   assert.equal(kraj.json.vysledky, null);
@@ -313,12 +313,12 @@ test('výsledky všetkých obcí (zber): /obce-body farba víťaza, /zaujimavost
   const { fetchImpl } = makeFetch(allBodies);
   const R = { code: '501891', name: 'Topoľníky', okres: 'Dunajská Streda', done: true, cls: 'lost', elected: true, turnoutPct: 67.07, registered: 2639, voted: 1770,
     winner: { n: 2, meno: 'Tünde', priezvisko: 'Várady', strany: 'NEKA', nezavisly: true, votes: 1160, pct: 67.01 }, second: { n: 1, meno: 'László', priezvisko: 'Bacsó', strany: 'MA', votes: 571, pct: 32.98 },
-    margin: 589, marginPct: 34.03, single: false, candidates: 2, incumbent: { n: 1, meno: 'László', priezvisko: 'Bacsó', zamestnanie: 'starosta obce' }, seats: 9, typ: 1 };
+    margin: 589, marginPct: 34.03, party: 'neka', coalition: false, single: false, candidates: 2, incumbent: { n: 1, meno: 'László', priezvisko: 'Bacsó', zamestnanie: 'starosta obce' }, seats: 9, typ: 1 };
   let rounds = 0;
   const sweep = { maybeRound: () => { rounds += 1; }, status: () => ({ cached: 1, lastRoundAt: 1 }), result: (o) => (o.code === '501891' ? R : null), results: (obce) => obce.map((o) => (o.code === '501891' ? R : null)).filter(Boolean) };
   const service = createVolbyService({ cacheDir: tmpDir(), fetchImpl, now: () => POLLS_CLOSE_MS + 3600_000, geoPath: GEO, registry, log: quiet, sweep, live: { summary: async () => ({}), predseda: async () => null, zupniObvod: async () => null, starosta: async () => null } });
   const body = await call(service, '/obce-body');
-  assert.deepEqual(body.json.rows.find((r) => r[0] === '501891').slice(5), [2, 'Tünde Várady', 67.01, 'lost']);
+  assert.deepEqual(body.json.rows.find((r) => r[0] === '501891').slice(5), [2, 'Tünde Várady', 67.01, 'lost', 'neka']);
   assert.ok(rounds >= 1, 'zber sa spustí pri požiadavke');
   const z = (await call(service, '/zaujimavosti')).json;
   assert.equal(z.available, true);

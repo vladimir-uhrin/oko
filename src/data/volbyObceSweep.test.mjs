@@ -110,3 +110,24 @@ test('incumbentScore: v meste primátor pred starostami mestských častí (Koš
   assert.equal(r.cls, 'lost');
   assert.equal(r.incumbent.priezvisko, 'Polaček');
 });
+
+test('partyKey: strana víťaza podľa prvej strany na kandidátke; „STAROSTOVIA A NEZÁVISLÍ" nie je nezávislý kandidát', async () => {
+  const { partyKey } = await import('./volbyObceSweep.js');
+  assert.equal(partyKey('NEKA'), 'neka');
+  assert.equal(partyKey('SMER - SD'), 'smer');
+  assert.equal(partyKey('SMER - SD, HLAS - sociálna demokracia, SNS'), 'smer');
+  assert.equal(partyKey('HLAS - sociálna demokracia, SMER - SD'), 'hlas');
+  assert.equal(partyKey('Magyar Szövetség - Maďarská aliancia'), 'ma');
+  assert.equal(partyKey('KDH'), 'kdh');
+  assert.equal(partyKey('Progresívne Slovensko, SaS'), 'ps');
+  assert.equal(partyKey('SaS'), 'sas');
+  assert.equal(partyKey('REPUBLIKA'), 'rep');
+  assert.equal(partyKey('SNS'), 'sns');
+  assert.equal(partyKey('STAROSTOVIA A NEZÁVISLÍ KANDIDÁTI'), 'other');
+  assert.equal(partyKey(''), null);
+  const r = obecResult(OBEC, parseObecSummary(GRAPH), liveCandidates(TAB05));
+  assert.deepEqual([r.party, r.coalition], ['neka', false]);
+  const rec = volbyRecords([r, { ...r, code: 'x', party: 'smer', coalition: true }]);
+  assert.deepEqual(rec.counts.parties, { neka: 1, smer: 1 });
+  assert.equal(rec.counts.coalitions, 1);
+});

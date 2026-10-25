@@ -51,6 +51,30 @@ export function incumbentScore(job, { district = false } = {}) {
 }
 const DISTRICT_NAME_RE = /^(Bratislava|Košice) - /;
 
+/**
+ * Strana víťaza pre farebnú mapu (2026-10-25, vlastník: „farebne vyznačiť, ktorá strana vyhrala"). Koalícia sa
+ * počíta podľa prvej strany na kandidátke (ŠÚ SR ich vypisuje v poradí z kandidátnej listiny); legenda to hovorí.
+ * Poradie = najčastejší víťazi 2026 (nezávislí 1 560, SMER 390, HLAS 358, KDH 181, Maďarská aliancia 174, SNS 62…).
+ */
+export const PARTY_CLASSES = Object.freeze([
+  ['neka', /^neka$|^nezavisly kandidat/],
+  ['smer', /^smer/],
+  ['hlas', /^hlas/],
+  ['kdh', /^kdh$/],
+  ['ma', /madarska aliancia|^magyar szovetseg/],
+  ['sns', /^sns$/],
+  ['ps', /^progresivne slovensko/],
+  ['sas', /^sas$/],
+  ['rep', /^republika/],
+]);
+/** Kľúč strany víťaza: neka, smer, hlas, kdh, ma, sns, ps, sas, rep, other (null = bez víťaza). Pure. */
+export function partyKey(strany) {
+  const first = foldText(String(strany ?? '').split(',')[0]);
+  if (!first) return null;
+  for (const [key, re] of PARTY_CLASSES) if (re.test(first)) return key;
+  return 'other';
+}
+
 /** Súhrn obce z graph01. Pure. */
 export function parseObecSummary(rows) {
   const r = Array.isArray(rows) ? rows[0] : null;
@@ -101,6 +125,7 @@ export function obecResult(obec, summary, kandidati) {
     margin: winner && list.length > 1 ? winner.votes - (list.find((c) => c !== winner)?.votes ?? 0) : null,
     marginPct: winner && list.length > 1 ? +(winner.pct - (list.find((c) => c !== winner)?.pct ?? 0)).toFixed(2) : null,
     single: list.length === 1, candidates: list.length,
+    party: winner ? partyKey(winner.strany) : null, coalition: Boolean(winner && String(winner.strany).includes(',')),
     incumbent: incReg ? { n: incReg.n, meno: incReg.meno, priezvisko: incReg.priezvisko, zamestnanie: incReg.zamestnanie } : null,
     seats: summary?.seats ?? null, typ: summary?.typ ?? null,
   };
@@ -114,11 +139,16 @@ export function obecResult(obec, summary, kandidati) {
  */
 export function volbyRecords(results, { excludeCodes = new Set(), minVoters = 100, top = 3 } = {}) {
   const done = results.filter((r) => r.done);
-  const counts = { obce: results.length, done: done.length, held: 0, lost: 0, open: 0, none: 0, single: 0, independent: 0, elected: 0 };
+  const counts = { obce: results.length, done: done.length, held: 0, lost: 0, open: 0, none: 0, single: 0, independent: 0, elected: 0, parties: {}, coalitions: 0 };
   for (const r of done) {
     if (r.cls in counts) counts[r.cls] += 1;
     if (r.single && r.elected) counts.single += 1;
-    if (r.elected) { counts.elected += 1; if (r.winner?.nezavisly) counts.independent += 1; }
+    if (r.elected) {
+      counts.elected += 1;
+      if (r.winner?.nezavisly) counts.independent += 1;
+      if (r.party) counts.parties[r.party] = (counts.parties[r.party] || 0) + 1;
+      if (r.coalition) counts.coalitions += 1;
+    }
   }
   const brief = (r, extra = {}) => ({ code: r.code, name: r.name, okres: r.okres, winner: r.winner ? `${r.winner.meno} ${r.winner.priezvisko}` : null, ...extra });
   const contested = done.filter((r) => r.elected && r.margin != null && r.candidates > 1);
