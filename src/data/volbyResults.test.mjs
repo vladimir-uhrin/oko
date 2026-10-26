@@ -58,7 +58,12 @@ test('tableKind: titulok vyhráva, potom číslo tabuľky; účasť a mandáty p
   assert.equal(tableKind({ name: 'OSK2026_SK_tab08f', title: 'Kandidáti na poslancov zastupiteľstva', columns: cols, scope: 'osk' }), 'zupni');
   assert.equal(tableKind({ name: 'OSO2026_SK_tab05f', title: '', columns: cols }), 'starosta', 'bez titulku podľa čísla');
   assert.equal(tableKind({ name: 'OSO2026_SK_tab08f', title: '', columns: cols }), 'poslanci');
-  assert.equal(tableKind({ name: 'OSO2026_SK_tab02bf', title: 'x', columns: { registered: 3, voted: 4 } }), 'ucast');
+  assert.equal(tableKind({ name: 'OSO2026_SK_tab02bf', title: 'x', columns: { obec: 0, registered: 3, voted: 4 } }), 'ucast');
+  // definitívne 2026: súhrn za SR (bez obce aj kraja), súhrn za kraje (OSK), zoznamy zvolených nie sú hlasy
+  assert.equal(tableKind({ name: 'OSK2026_SK_tab01', title: 'Súhrnné výsledky hlasovania za SR', columns: { registered: 6, voted: 7 }, scope: 'osk' }), 'suhrnOsk');
+  assert.equal(tableKind({ name: 'OSK2026_SK_tab02a', title: 'Súhrnné výsledky hlasovania za kraje', columns: { kraj: 0, registered: 7, voted: 8 }, scope: 'osk' }), 'ucastKraj');
+  assert.equal(tableKind({ name: 'OSO2026_SK_tab06d', title: 'Zoznam zvolených poslancov za obce', columns: cols }), 'zoznam');
+  assert.equal(tableKind({ name: 'OSK2026_SK_tab04b', title: 'Zvolení poslanci zastupiteľstva a náhradníci za volebné obvody', columns: cols, scope: 'osk' }), 'zoznam');
   assert.equal(tableKind({ name: 'OSO2026_SK_tab02ad', title: 'x', columns: { seats: 2, seatsElected: 3 } }), 'mandaty');
   assert.equal(tableKind({ name: 'OSO2026_SK_tab0c', title: 'Zoznam politických strán', columns: {} }), 'unknown');
   assert.equal(classifyTable(sheet('OSO2026_SK_tab0c', 'strany', [['Kód', 'Názov'], ['1', 'x']])), null, 'číselník bez známych stĺpcov');
@@ -153,4 +158,61 @@ test('štýl 2022 (kódy stĺpcov, bez titulkov): starosta/poslanci podľa čís
   assert.equal(obec.poslanci[0].kandidati[0].priezvisko, 'Nagy');
   assert.equal(obec.final, false, '1 z 2 okrskov');
   assert.equal(obec.okrskyDone, 1);
+});
+
+test('definitívne tabuľky 2026 (25. 10.): súhrn za SR, obce bez okrskov, „Poznámka: zvolený", hlasy všetkých poslancov, mestá BA/KE, kraje', () => {
+  const T = (name, title, rows) => [name, { name, title, sheets: [{ name: 'Sheet1', rows: [[title], ...rows] }] }];
+  const tables = new Map([
+    T('OSO2026_SK_tab01', 'Súhrnné výsledky hlasovania za SR', [
+      ['Počet obcí,\r\nv ktorých sa konali voľby', 'Počet potvrdených miestnych zápisníc', 'Podiel potvrdených miestnych zápisníc v %', 'Počet zapísaných voličov', 'Počet zúčastnených voličov', 'Účasť voličov\r\nv %'],
+      ['2921', '2921', '100', '4478646', '2171581', '48.48']]),
+    T('OSO2026_SK_tab02d', 'Súhrnné výsledky hlasovania za obce', [
+      ['Kód kraja', 'Kód okresu', 'Kód obce', 'Názov obce', 'Počet okrskov', 'Zvolený starosta', 'Počet volených poslancov', 'Počet zvolených poslancov', 'Počet zapísaných voličov', 'Počet zúčastnených voličov', 'Účasť voličov\r\nv %'],
+      ['2', '201', '501891', 'Topoľníky', '3', 'Anna Nagyová', '9', '9', '1000', '500', '50']]),
+    T('OSO2026_SK_tab05d', 'Počet a podiel platných hlasov pre kandidátov na starostu obce', [
+      ['Kód kraja', 'Kód obce', 'Názov obce', 'Poradie na hlasovacom lístku', 'Meno', 'Priezvisko', 'Politický subjekt', 'Počet platných hlasov', 'Podiel platných hlasov v %', 'Poznámka'],
+      ['2', '501891', 'Topoľníky', '1', 'Anna', 'Nagyová', 'NEKA', '300', '75', 'zvolený'],
+      ['2', '501891', 'Topoľníky', '2', 'B', 'Bb', 'KDH', '100', '25', '']]),
+    T('OSO2026_SK_tab05f', 'Počet a podiel platných hlasov pre kandidátov na starostu obce za okrsky', [
+      ['Kód obce', 'Volebný obvod v obci', 'Okrsok', 'Poradie na hlasovacom lístku', 'Počet platných hlasov', 'Podiel platných hlasov v %'],
+      ['501891', '1', '1', '1', '100', '50']]),
+    T('OSO2026_SK_tab06d', 'Zoznam zvolených poslancov za obce', [
+      ['Kód obce', 'Volebný obvod\r\nv obci', 'Poradie na hlasovacom lístku', 'Meno', 'Priezvisko', 'Počet platných hlasov'],
+      ['501891', '1', '3', 'C', 'Cc', '90']]),
+    T('OSO2026_SK_tab08e', 'Počet a podiel platných hlasov pre kandidátov na poslancov za volebné obvody v obci', [
+      ['Kód obce', 'Volebný obvod\r\nv obci', 'Poradie na hlasovacom lístku', 'Meno', 'Priezvisko', 'Politický subjekt', 'Počet platných hlasov', 'Podiel platných hlasov v %', 'Kandidát'],
+      ['501891', '1', '3', 'C', 'Cc', 'NEKA', '90', '60', 'zvolený'],
+      ['501891', '1', '1', 'D', 'Dd', 'KDH', '60', '40', 'náhradník']]),
+    T('OSK2026_SK_tab01', 'Súhrnné výsledky hlasovania za SR', [
+      ['Počet volebných okrskov', 'Počet potvrdených okrskových zápisníc', 'Podiel potvrdených okrskových zápisníc v %', 'Počet zapísaných voličov', 'Počet zúčastnených voličov', 'Účasť voličov\r\nv %'],
+      ['6029', '6029', '100', '4477457', '2085145', '46.56']]),
+    T('OSK2026_SK_tab02a', 'Súhrnné výsledky hlasovania za kraje', [
+      ['Kód kraja', 'Názov kraja', 'Počet volebných okrskov', 'Počet potvrdených okrskových zápisníc', 'Zvolený predseda', 'Počet zapísaných voličov', 'Počet zúčastnených voličov'],
+      ['7', 'Prešovský kraj', '1017', '1017', 'Milan Majerský', '650000', '300000']]),
+    T('OSK2026_SK_tab06a', 'Počet a podiel platných hlasov odovzdaných pre kandidátov na predsedov za kraje', [
+      ['Kód kraja', 'Názov kraja', 'Poradie na hlasovacom lístku', 'Meno', 'Priezvisko', 'Politický subjekt', 'Počet platných hlasov', 'Podiel platných hlasov v %', 'Kandidát'],
+      ['7', 'Prešovský kraj', '8', 'Milan', 'Majerský', 'KDH', '100000', '48.77', 'zvolený'],
+      ['7', 'Prešovský kraj', '9', 'Milan', 'Mazurek', 'Republika', '90000', '43.9', '']]),
+  ]);
+  const r = buildResults(tables, MODEL);
+  assert.equal(r.tables.starosta, 'OSO2026_SK_tab05d', 'súhrn za obec má prednosť pred okrskami');
+  assert.equal(r.tables.poslanci, 'OSO2026_SK_tab08e', 'hlasy všetkých kandidátov, nie zoznam zvolených');
+  assert.deepEqual([r.summary.okrskyDone, r.summary.okrskyTotal, r.summary.pct, r.summary.final, r.summary.turnoutPct], [6029, 6029, 100, true, 46.56]);
+  const o = r.obce.get('501891');
+  assert.deepEqual([o.final, o.okrskyDone], [true, o.okrskyTotal], 'všetky okrsky obce');
+  assert.deepEqual(o.ucast, { registered: 1000, voted: 500, pct: 50 });
+  assert.deepEqual(o.starosta.map((c) => [c.n, c.elected, c.leads]), [[1, true, false], [2, false, false]]);
+  assert.deepEqual(o.poslanci[0].kandidati.map((c) => [c.n, c.votes, c.elected]), [[3, 90, true], [1, 60, false]]);
+  const k = r.kraje.get('7');
+  assert.deepEqual([k.final, k.okrskyDone], [true, k.okrskyTotal], 'všetky okrsky kraja');
+  assert.equal(k.predseda[0].elected, true);
+  assert.equal(resultsOverview(r).kraje.find((x) => x.code === '7').lead.elected, true);
+});
+
+test('podiel z ŠÚ SR pri súhrnnej tabuľke (poslanci: z hlasovacích lístkov), inak výpočet z okrskov', () => {
+  const cols = { obec: 0, n: 1, votes: 2, pct: 3 };
+  const one = aggregateCandidates([['501891', '17', '1136', '14.6'], ['501891', '1', '1066', '13.7']], cols, (r) => r[0]);
+  assert.deepEqual(rankCandidates(one.get('501891').cands, { seats: 9 }).map((c) => [c.n, c.pct]), [[17, 14.6], [1, 13.7]]);
+  const many = aggregateCandidates([['501891', '17', '100', '50', '1'], ['501891', '17', '100', '40', '2'], ['501891', '1', '200', '60', '1']], { ...cols, okrsok: 4 }, (r) => r[0]);
+  assert.deepEqual(rankCandidates(many.get('501891').cands).map((c) => [c.n, c.pct]), [[1, 50], [17, 50]], 'viac okrskov → podiel sa prepočíta');
 });

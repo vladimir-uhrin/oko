@@ -24,15 +24,22 @@ const CITY_CODES = new Set(Object.values(CITY_DISTRICT_CODES));
 
 /** Pravidlá stĺpcov: kľúč → presné (bez diakritiky) alebo čiastočné zhody hlavičky; prvé pravidlo vyhráva. */
 export const COLUMN_RULES = Object.freeze([
+  // Definitívne výsledky 2026 (2026-10-26): súhrnné tabuľky za obce/kraje/SR majú počty okrskov a potvrdených
+  // zápisníc — tieto pravidlá musia ísť PRED „okrsok", inak by „Počet okrskov" vyzeral ako stĺpec okrsku.
+  { key: 'okrskyCount', exact: ['pocet okrskov', 'pocet volebnych okrskov'], any: [] },
+  { key: 'okrskyConfirmed', exact: ['pocet potvrdenych okrskovych zapisnic', 'pocet potvrdenych miestnych zapisnic'], any: [] },
+  { key: 'confirmedPct', exact: ['podiel potvrdenych okrskovych zapisnic v', 'podiel potvrdenych miestnych zapisnic v'], any: ['podiel potvrdenych'] },
   { key: 'okrsok', exact: ['okrsok', 'kod okrsku', 'cislo okrsku', 'volebny okrsok'], any: ['okrsok', 'okrsk'] },
   { key: 'obvodKraj', exact: ['obvod', 'kod volebneho obvodu'], any: ['kod volebneho obvodu'], scope: 'osk' },
   { key: 'obvod', exact: ['voobec', 'volebny obvod', 'volebny obvod v obci', 'cislo volebneho obvodu v obci', 'kod volebneho obvodu'], any: ['volebny obvod', 'volebneho obvodu'] },
-  { key: 'obec', exact: ['obec', 'kod obce'], any: ['kod obce'] },
+  { key: 'obec', exact: ['obec', 'kod obce', 'kod mesta'], any: ['kod obce'] },
   { key: 'kraj', exact: ['kraj', 'kod kraja'], any: ['kod kraja'] },
   { key: 'n', exact: ['pc hl', 'poradove cislo kandidata', 'poradie na hlasovacom listku', 'poradove cislo', 'poradove cislo kandidata na hlasovacom listku'], any: ['poradie na hlasovacom', 'poradove cislo'] },
   { key: 'pct', exact: ['p hl pct', 'podiel platnych hlasov v', 'podiel platnych hlasov'], any: ['podiel platnych hlasov', 'podiel hlasov'] },
   { key: 'votes', exact: ['p hl', 'pocet platnych hlasov'], any: ['pocet platnych hlasov'], not: ['listk', 'listok', 'obalk'] },
-  { key: 'elected', exact: ['kandidat', 'zvoleny', 'zvoleny kandidat'], any: ['zvolen'] },
+  // „Poznámka" (starosta 2026: „zvolený"), „Kandidát" (predseda, poslanci: „zvolený" / „náhradník"); nie „Zvolený
+  // starosta" (meno v súhrne obce) ani „Počet zvolených…".
+  { key: 'elected', exact: ['kandidat', 'zvoleny', 'zvoleny kandidat', 'poznamka'], any: [], not: ['pocet'] },
   { key: 'registered', exact: ['p zap'], any: ['zapisanych v zozname', 'zapisanych v zoznamoch', 'zapisanych volicov'] },
   { key: 'voted', exact: ['p zuc'], any: ['zucastnili', 'zucastnenych'] },
   { key: 'turnout', exact: ['ucast', 'ucast v'], any: ['ucast'] },
@@ -80,8 +87,15 @@ export function findHeaderRow(rows, scope = 'oso') {
 export function tableKind({ name = '', title = '', columns = {}, scope = 'oso' } = {}) {
   const t = foldText(title);
   const number = /_tab(\d{2})/i.exec(name)?.[1] || '';
-  if (columns.registered !== undefined || columns.voted !== undefined || columns.turnout !== undefined) return 'ucast';
+  if (columns.registered !== undefined || columns.voted !== undefined || columns.turnout !== undefined) {
+    // 2026 definitívne: súhrn za SR (bez kódu obce a kraja), za kraje (OSK) a za obce (OSO).
+    if (columns.obec === undefined && columns.kraj === undefined) return scope === 'osk' ? 'suhrnOsk' : 'suhrnOso';
+    if (scope === 'osk') return columns.obec === undefined && columns.obvodKraj === undefined ? 'ucastKraj' : 'unknown';
+    return columns.obec !== undefined ? 'ucast' : 'unknown';
+  }
   if (columns.seats !== undefined && columns.seatsElected !== undefined) return 'mandaty';
+  // „Zoznam zvolených poslancov" / „Zvolení poslanci a náhradníci" nie sú hlasy všetkých kandidátov.
+  if (/zoznam zvolen|zvoleni poslanci/.test(t)) return 'zoznam';
   if (columns.votes !== undefined && columns.n !== undefined) {
     if (/predsed|zupan/.test(t)) return 'predseda';
     if (/starost|primator/.test(t)) return 'starosta';
@@ -127,11 +141,14 @@ export function aggregateCandidates(records, columns, groupKey) {
     if (!key || n === null) continue;
     if (!groups.has(key)) groups.set(key, { cands: new Map(), okrsky: new Set() });
     const g = groups.get(key);
-    if (!g.cands.has(n)) g.cands.set(n, { n, votes: 0, flag: null, rows: 0 });
+    if (!g.cands.has(n)) g.cands.set(n, { n, votes: 0, flag: null, rows: 0, pctSrc: null });
     const c = g.cands.get(n);
     const votes = int(row[columns.votes]);
     if (votes !== null) c.votes += votes;
     c.rows += 1;
+    // Súhrnná tabuľka (jeden riadok na kandidáta): podiel priamo od ŠÚ SR — pri poslancoch je to podiel
+    // z platných hlasovacích lístkov (14,6 %), nie zo súčtu hlasov všetkých kandidátov (8,8 %).
+    if (columns.pct !== undefined && columns.okrsok === undefined) { const p = num(row[columns.pct]); c.pctSrc = c.rows === 1 && p !== null ? +p.toFixed(2) : null; }
     const flag = columns.elected !== undefined ? electedFlag(row[columns.elected]) : null;
     if (flag && (c.flag !== 'elected')) c.flag = flag;
     if (columns.okrsok !== undefined) {
@@ -150,7 +167,7 @@ export function rankCandidates(cands, { seats = 1 } = {}) {
   return list.map((c, i) => ({
     n: c.n,
     votes: c.votes,
-    pct: total > 0 ? +((c.votes / total) * 100).toFixed(2) : 0,
+    pct: c.pctSrc != null ? c.pctSrc : total > 0 ? +((c.votes / total) * 100).toFixed(2) : 0,
     rank: i + 1,
     elected: c.flag === 'elected',
     withdrawn: c.flag === 'withdrawn',
@@ -169,6 +186,7 @@ export function aggregateTurnout(records, columns, groupKey) {
     g.registered += int(row[columns.registered]) || 0;
     g.voted += int(row[columns.voted]) || 0;
     g.rows += 1;
+    if (columns.okrskyCount !== undefined) g.okrskyCount = (g.okrskyCount || 0) + (int(row[columns.okrskyCount]) || 0);
     const okrsok = columns.okrsok !== undefined ? text(row[columns.okrsok]) : '';
     if (okrsok) g.okrsky.add(`${text(row[columns.obec])}|${columns.obvod !== undefined ? text(row[columns.obvod]) : ''}|${okrsok}`);
   }
@@ -189,9 +207,28 @@ const joinCandidate = (result, candidate) => ({
  */
 export function buildResults(tables, model, { generatedAt = Date.now() } = {}) {
   const classified = [...(tables?.values?.() || [])].map(classifyTable).filter(Boolean);
-  const byKind = {};
-  for (const c of classified) if (c.kind !== 'unknown' && !byKind[c.kind]) byKind[c.kind] = c;
-  const used = Object.fromEntries(Object.entries(byKind).map(([k, v]) => [k, v.name]));
+  // Výber tabuliek (2026-10-26): definitívne výsledky majú ten istý obsah za okrsky, obvody aj celé obce. Prednosť
+  // má súhrnná úroveň danej veci (starosta za obec, poslanci za obvod v obci, predseda za kraj, účasť za obec),
+  // okrskové tabuľky sú záloha (priebežné 2022). Tabuľky s rovnakým skóre sa spoja (tab05d obce + tab05x mestá).
+  const score = (c) => {
+    const noOkrsok = c.columns.okrsok === undefined ? 10 : 0;
+    if (c.kind === 'starosta' || c.kind === 'ucast') return noOkrsok + (c.columns.obvod === undefined ? 5 : 0);
+    if (c.kind === 'poslanci') return noOkrsok + (c.columns.obvod !== undefined ? 5 : 0);
+    if (c.kind === 'predseda') return noOkrsok + ((c.columns.obvodKraj ?? c.columns.obvod) === undefined && c.columns.obec === undefined ? 5 : 0);
+    if (c.kind === 'zupni') return noOkrsok + (c.columns.obec === undefined ? 5 : 0);
+    return noOkrsok;
+  };
+  const byKindAll = {};
+  for (const c of classified) {
+    if (c.kind === 'unknown' || c.kind === 'zoznam') continue;
+    const s = score(c);
+    const cur = byKindAll[c.kind];
+    if (!cur || s > cur.score) byKindAll[c.kind] = { score: s, list: [c] };
+    else if (s === cur.score) cur.list.push(c);
+  }
+  const byKind = Object.fromEntries(Object.entries(byKindAll).map(([k, v]) => [k, v.list[0]]));
+  const listOf = (kind) => byKindAll[kind]?.list || [];
+  const used = Object.fromEntries(Object.entries(byKindAll).map(([k, v]) => [k, v.list.map((c) => c.name).join('+')]));
   const obce = new Map();
   const kraje = new Map();
   const obecEntry = (code) => {
@@ -211,20 +248,21 @@ export function buildResults(tables, model, { generatedAt = Date.now() } = {}) {
   };
   const obecKey = (cols) => (row) => text(row[cols.obec]) || null;
 
-  if (byKind.starosta) {
-    const { records, columns } = byKind.starosta;
+  for (const { records, columns } of listOf('starosta')) {
     for (const [code, g] of aggregateCandidates(records, columns, obecKey(columns))) {
+      if (obce.get(code)?.starosta?.length) continue; // obec už má výsledok z prvej tabuľky
       const entry = obecEntry(code);
       const o = model?.obecByCode?.get(code);
       entry.starosta = rankCandidates(g.cands, { seats: 1 }).map((r) => joinCandidate(r, o?.starosta?.find((c) => c.n === r.n)));
       for (const k of g.okrsky) entry.okrsky.add(k);
     }
   }
-  if (byKind.poslanci) {
-    const { records, columns } = byKind.poslanci;
+  // Poslanci: obce (tab08e) aj mestá Bratislava a Košice (tab08ex) — každý obvod obce raz.
+  for (const { records, columns } of listOf('poslanci')) {
     const key = (row) => { const obec = text(row[columns.obec]); const obvod = columns.obvod !== undefined ? text(row[columns.obvod]) || '1' : '1'; return obec ? `${obec}|${obvod}` : null; };
     for (const [k, g] of aggregateCandidates(records, columns, key)) {
       const [code, obvod] = k.split('|');
+      if (obce.get(code)?.poslanci?.some((w) => w.obvod === obvod)) continue;
       const entry = obecEntry(code);
       const o = model?.obecByCode?.get(code);
       const ward = o?.poslanci?.find((w) => w.obvod === obvod);
@@ -232,14 +270,26 @@ export function buildResults(tables, model, { generatedAt = Date.now() } = {}) {
       entry.poslanci.push({ obvod, seats, kandidati: rankCandidates(g.cands, { seats }).map((r) => joinCandidate(r, ward?.kandidati?.find((c) => c.n === r.n))) });
       for (const x of g.okrsky) entry.okrsky.add(x);
     }
-    for (const entry of obce.values()) entry.poslanci.sort((a, b) => (int(a.obvod) ?? 0) - (int(b.obvod) ?? 0));
   }
-  if (byKind.ucast) {
-    const { records, columns } = byKind.ucast;
+  for (const entry of obce.values()) entry.poslanci.sort((a, b) => (int(a.obvod) ?? 0) - (int(b.obvod) ?? 0));
+  for (const { records, columns } of listOf('ucast')) {
     for (const [code, g] of aggregateTurnout(records, columns, obecKey(columns))) {
+      if (obce.get(code)?.ucast) continue;
       const entry = obecEntry(code);
       entry.ucast = { registered: g.registered, voted: g.voted, pct: g.registered > 0 ? +((g.voted / g.registered) * 100).toFixed(2) : null };
       for (const k of g.okrsky) entry.okrsky.add(k);
+      // Súhrn za obec (definitívne výsledky): „Počet okrskov" = spracované okrsky obce.
+      if (g.okrskyCount) entry.okrskyCount = Math.max(entry.okrskyCount || 0, g.okrskyCount);
+    }
+  }
+  // Kraje: „Počet potvrdených okrskových zápisníc" zo súhrnu za kraje (OSK tab02a).
+  for (const { records, columns } of listOf('ucastKraj')) {
+    for (const row of records) {
+      const code = text(row[columns.kraj]);
+      if (!/^[1-8]$/.test(code)) continue;
+      const entry = krajEntry(code);
+      const confirmed = int(row[columns.okrskyConfirmed ?? columns.okrskyCount]);
+      if (confirmed) entry.okrskyCount = confirmed;
     }
   }
   if (byKind.predseda) {
@@ -274,23 +324,39 @@ export function buildResults(tables, model, { generatedAt = Date.now() } = {}) {
   }
 
   const finish = (entry) => {
-    const done = entry.okrsky.size;
-    const total = entry.okrskyTotal;
-    return { ...entry, okrsky: undefined, okrskyDone: total ? Math.min(done, total) : done, final: Boolean(total) && done >= total };
+    const done = Math.max(entry.okrsky.size, entry.okrskyCount || 0);
+    const total = entry.okrskyTotal || entry.okrskyCount || null;
+    const out = { ...entry, okrsky: undefined, okrskyDone: total ? Math.min(done, total) : done, final: Boolean(total) && done >= total };
+    delete out.okrskyCount;
+    return out;
   };
   const obceOut = new Map([...obce].map(([code, e]) => [code, finish(e)]));
   const krajeOut = new Map([...kraje].map(([code, e]) => [code, finish(e)]));
   const okrskyTotal = (model?.obce || []).filter((o) => !CITY_CODES.has(o.code)).reduce((s, o) => s + (o.okrsky || 0), 0) || null;
   let okrskyDone = 0; let registered = 0; let voted = 0; let obceFinal = 0;
   for (const e of obceOut.values()) { if (CITY_CODES.has(e.code)) continue; okrskyDone += e.okrskyDone; if (e.final) obceFinal += 1; if (e.ucast) { registered += e.ucast.registered; voted += e.ucast.voted; } }
+  let summary = {
+    okrskyDone, okrskyTotal, pct: okrskyTotal ? +((Math.min(okrskyDone, okrskyTotal) / okrskyTotal) * 100).toFixed(1) : null,
+    obceWithResults: obceOut.size, obceFinal, registered, voted, turnoutPct: registered > 0 ? +((voted / registered) * 100).toFixed(1) : null,
+  };
+  // Súhrn za SR z definitívnych tabuliek (OSK tab01: okrsky a potvrdené okrskové zápisnice; ako priebežné JSON).
+  const srRow = (kind) => { const c = byKind[kind]; return c ? { row: c.records.find((r) => r.some((v) => text(v))), columns: c.columns } : null; };
+  const osk = srRow('suhrnOsk');
+  if (osk?.row) {
+    const total = int(osk.row[osk.columns.okrskyCount]);
+    const done = int(osk.row[osk.columns.okrskyConfirmed]);
+    if (total && done !== null) {
+      const reg = int(osk.row[osk.columns.registered]) ?? summary.registered;
+      const vot = int(osk.row[osk.columns.voted]) ?? summary.voted;
+      summary = { ...summary, okrskyTotal: total, okrskyDone: Math.min(done, total), pct: +((Math.min(done, total) / total) * 100).toFixed(1),
+        registered: reg, voted: vot, turnoutPct: num(osk.row[osk.columns.turnout]) ?? (reg > 0 ? +((vot / reg) * 100).toFixed(1) : null), final: done >= total };
+    }
+  }
   return {
     generatedAt,
     tables: used,
-    available: Object.keys(used).length > 0,
-    summary: {
-      okrskyDone, okrskyTotal, pct: okrskyTotal ? +((Math.min(okrskyDone, okrskyTotal) / okrskyTotal) * 100).toFixed(1) : null,
-      obceWithResults: obceOut.size, obceFinal, registered, voted, turnoutPct: registered > 0 ? +((voted / registered) * 100).toFixed(1) : null,
-    },
+    available: Object.keys(used).some((k) => !/^suhrn/.test(k)),
+    summary,
     obce: obceOut,
     kraje: krajeOut,
   };

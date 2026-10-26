@@ -405,7 +405,9 @@ export function createVolbyService({
     if ((m = /^\/obec\/([a-z0-9-]{1,80})$/i.exec(route))) {
       const obec = obecDetail(model, m[1]);
       if (!obec) return send(res, 404, { error: 'not_found' });
-      const vysledky = state.results?.obce?.get(obec.code) || await liveObec(obec).catch(() => null);
+      const zip = state.results?.obce?.get(obec.code) || null;
+      // Definitívne tabuľky (2026-10-26): k výsledku obce aj prehľad zo zberu (doterajší starosta, trieda pre mapu).
+      const vysledky = zip ? { ...zip, prehlad: sweepNow()?.result(obec) || null } : await liveObec(obec).catch(() => null);
       return send(res, 200, { ...obec, vysledky }, vysledky ? 60 : (now() >= POLLS_CLOSE_MS ? 60 : 300));
     }
     if (route === '/obce-body') {
