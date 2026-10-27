@@ -407,3 +407,13 @@ test('čo horí: požiare sa neobnovujú, chýba skupina družíc, Sentinel-3 ch
   const down = attention(runtime, clock.time, { fires: { ...ok, sources: [{ source: 'VIIRS_SNPP_NRT', ok: false, reused: true }, { source: 'MODIS_NRT', ok: true }], sentinel3: { enabled: true, error: 'CDSE token HTTP 401' } } });
   assert.deepEqual(down.map((i) => i.text), ['Požiare bez: VIIRS (staršie)', 'Sentinel-3: CDSE token HTTP 401']);
 });
+
+test('dayRange: kalendárne dni aj cez koniec letného času (25. 10. 2026 má 25 hodín)', () => {
+  // 27. 10. 23:30 v Bratislave = 22:30 UTC: krok 24 h späť pred zmenu času padol o hodinu ďalej
+  // (21. 10. 22:30 UTC = 22. 10. 00:30 SELČ), 21. 10. vypadol a graf mal 6 dní namiesto 7
+  assert.deepEqual(dayRange(Date.UTC(2026, 9, 27, 22, 30), 7), ['2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27']);
+  assert.deepEqual(dayRange(Date.UTC(2026, 9, 25, 22, 30), 7), ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25']);
+  // začiatok letného času (29. 3. 2026 má 23 hodín) a prelom mesiaca
+  assert.deepEqual(dayRange(Date.UTC(2026, 2, 30, 21, 59), 3), ['2026-03-28', '2026-03-29', '2026-03-30']);
+  assert.deepEqual(dayRange(Date.UTC(2026, 2, 1, 12), 2), ['2026-02-28', '2026-03-01']);
+});

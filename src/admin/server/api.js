@@ -12,13 +12,11 @@ const clampInt = (value, min, max, fallback) => {
 };
 /** Posledných `days` miestnych dní vrátane dneška, od najstaršieho. */
 export function dayRange(now, days) {
+  // Kalendárne dni od dnešného miestneho dátumu (2026-10-27): krok 24 h od `now` pri 25-hodinovom dni
+  // (koniec letného času) trafil ten istý deň dvakrát a graf mal o deň menej.
+  const [y, m, d] = localDay(now).split('-').map(Number);
   const out = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const day = localDay(now - i * DAY);
-    if (out[out.length - 1] !== day) out.push(day);
-  }
-  // Prechod času môže dať rovnaký deň dvakrát / preskočiť — doplniť dnešok.
-  if (out[out.length - 1] !== localDay(now)) out.push(localDay(now));
+  for (let i = days - 1; i >= 0; i--) out.push(new Date(Date.UTC(y, m - 1, d - i)).toISOString().slice(0, 10));
   return out;
 }
 
