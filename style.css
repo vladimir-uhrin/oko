@@ -7456,6 +7456,11 @@ body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="tools"] { displ
 body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="energy"] { display: none !important; }
 /* VOĽBY 2026: v kokpite skrytý panel aj nadpis zóny. */
 body.cockpit-mode #left-panel-stack > .lane-zone[data-lane-zone="volby"] { display: none !important; }
+/* VOĽBY v archíve (2026-10-27): bez tlačidla v mobilnej lište a bez zbalenej zóny v ľavom stĺpci —
+   panel otvorí paleta alebo odkaz ?volby (vtedy nie je .collapsed a ukáže sa aj s nadpisom). */
+body.oko-volby-archived #oko-appbar [data-oko-section="volby"],
+body.oko-volby-archived #left-panel-stack > #volby-panel.collapsed,
+body.oko-volby-archived #left-panel-stack > .lane-zone[data-lane-zone="volby"]:has(+ #volby-panel.collapsed) { display: none !important; }
 
 /*
  * Runtime focus mode: the layout engine applies this only when the expanded

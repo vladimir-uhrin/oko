@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   KRAJ_VIEW_HEIGHT_M, VOLBY_PANEL_ID, VOLBY_REFRESH_MS, VOLBY_SEARCH_DEBOUNCE_MS, candidateLabel, installVolbyPanel, mergeResults,
-  obecViewHeightM, parseVolbyParam, volbyCardLink, volbyLink,
+  isVolbyArchived, obecViewHeightM, parseVolbyParam, volbyCardLink, volbyLink, VOLBY_ARCHIVE_MS,
 } from './volbyPanel.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 import { MOBILE_SECTIONS } from './mobileShell.js';
@@ -400,7 +400,7 @@ test('zapojenie: ui.js panel v registri pruhu a kokpite + installVolbyPanel s pr
   const section = MOBILE_SECTIONS.find((s) => s.id === 'volby');
   assert.deepEqual({ ...section, panelIds: [...section.panelIds] }, { id: 'volby', labelKey: 'mobile.volby', panelIds: ['volby-panel'], expand: 'volby-panel' });
   assert.equal(MOBILE_SECTIONS.findIndex((s) => s.id === 'volby'), 1, 'hneď za Vrstvami');
-  assert.match(main, /import \{ parseVolbyParam \} from '\.\/volbyPanel\.js';/);
+  assert.match(main, /import \{[^}]*\bparseVolbyParam\b[^}]*\} from '\.\/volbyPanel\.js';/);
   assert.match(main, /parseVolbyParam\(window\.location\?\.search \|\| ''\)/);
   assert.match(main, /volbyObceLayer\.onSelect = \(code\) => \{/, 'klik na mape otvorí obec');
   assert.match(main, /_volbyPanel\?\.attachMap\?\.\(\{/, 'panel ovláda mapu obcí');
@@ -516,4 +516,22 @@ test('farba mapy po sčítaní: prepínač výsledok / strana víťaza, legenda 
   assert.deepEqual(modes, ['party', 'win']);
   assert.equal(byClass(doc.root.body, 'volby-legend-party')[0].hidden, true);
   for (const key of ['volby.color-party', 'volby.party-smer', 'volby.party-other', 'volby.party-note']) assert.ok(SK_STRINGS[key] && EN_STRINGS[key], key);
+});
+
+test('archív volieb (2026-10-27): tlačidlo v mobilnej lište a zbalená zóna zmiznú, paleta panel otvorí', () => {
+  assert.equal(isVolbyArchived(Date.UTC(2026, 9, 27, 22, 59)), false);
+  assert.equal(isVolbyArchived(VOLBY_ARCHIVE_MS), true);
+  assert.equal(isVolbyArchived(Date.UTC(2026, 10, 5)), true);
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  for (const rule of [
+    'body.oko-volby-archived #oko-appbar [data-oko-section="volby"]',
+    'body.oko-volby-archived #left-panel-stack > #volby-panel.collapsed',
+    'body.oko-volby-archived #left-panel-stack > .lane-zone[data-lane-zone="volby"]:has(+ #volby-panel.collapsed)',
+  ]) assert.ok(css.includes(rule), rule);
+  // sekcia mobilu ostáva — ?volby a paleta ju otvárajú cez __okoMobileShell.open('volby')
+  assert.ok(MOBILE_SECTIONS.some((s) => s.id === 'volby'));
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /id: 'view:volby'/);
+  assert.ok(main.includes("classList.toggle('oko-volby-archived'"));
+  for (const key of ['cmd.action.volby', 'cmd.action.volby.hint']) assert.ok(SK_STRINGS[key] && EN_STRINGS[key], key);
 });

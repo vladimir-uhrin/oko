@@ -126,7 +126,7 @@ import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { installEmbedMode, isEmbedMode } from './embedMode.js';
 import { initMobileShell, isCoarsePointer, resolveShellMode } from './mobileShell.js';
-import { parseVolbyParam } from './volbyPanel.js';
+import { isVolbyArchived, parseVolbyParam, VOLBY_ARCHIVE_MS } from './volbyPanel.js';
 import { createVolbyMapMode } from './volbyMapMode.js';
 import { getOverlayPaintRect, setWorldOverlayLaneSuppressed } from './overlays/worldOverlay.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
@@ -1418,6 +1418,8 @@ async function init() {
         window.__godsEyeView.followedFlights = followedFlights;
       }
     } catch (error) { console.warn('[follow] followed flights unavailable:', error?.message || error); }
+    // Otvorenie panela VOĽBY (nastaví sa nižšie pri mape obcí) — paleta ho volá až po štarte.
+    let openVolbyPanelRef = null;
     const buildCommands = () => {
       const cmds = [];
       try { cmds.push(...(followedFlights?.commands() || [])); } catch { /* sledované lety sú voliteľné */ }
@@ -1466,6 +1468,8 @@ async function init() {
       cmds.push({ id: 'view:osm', label: t('cmd.action.osm'), group: 'view', keywords: ['osm', 'mapa', 'plain'], run: () => { void styleManager._setMapStack('osm'); } });
       cmds.push({ id: 'view:photoreal', label: t('cmd.action.photoreal'), group: 'view', keywords: ['3d', 'foto', 'google', 'photoreal'], run: () => { void styleManager._setMapStack('photoreal'); } });
       cmds.push({ id: 'view:clean', label: t('cmd.action.clean'), group: 'view', keywords: ['čistá', 'clean', 'screenshot'], run: () => { kartaOverlay?.setClean(!kartaOverlay.isClean()); } });
+      // VOĽBY 2026 v archíve (2026-10-27): bez tlačidla v lište — panel otvára paleta (mobil cez výsuv).
+      cmds.push({ id: 'view:volby', label: t('cmd.action.volby'), hint: t('cmd.action.volby.hint'), group: 'view', keywords: ['voľby', 'volby', 'výsledky', 'starosta', 'primátor', 'župa', 'elections', 'results'], run: () => { openVolbyPanelRef?.(); } });
       // Kartičky konfliktov sú nástroj vlastníka (2026-10-11) — v palete len s body.oko-owner, ako ich spúšťač v pruhu.
       if (document.body.classList.contains('oko-owner')) cmds.push({ id: 'view:conflicts', label: t('cmd.action.conflicts'), group: 'view', keywords: ['kartičky', 'export', 'cards'], run: () => { conflictsPanel?.open(); } });
       return cmds;
@@ -1840,6 +1844,17 @@ async function init() {
     // VOĽBY 2026 (2026-10-24): mapa obcí → panel (klik na bod otvorí obec bez ďalšieho preletu) a odkazy
     // `?volby`, `?volby=<kód obce>`, `?volby=k<kraj>` (okolive.sk/?volby=582000): panel a mapa hneď po obnove
     // stavu, výber obce/kraja až po úvodnom prelete (ten už mieri na miesto — locate vyššie), najneskôr po strope.
+    const openVolbyPanel = () => {
+      if (!window.__okoMobileShell?.open?.('volby')) styleManager.setPanelCollapsed('volby-panel', false, { explicit: true, persist: false, syncShare: false });
+      void dataManager.setEnabled('volby-obce', true, { origin: 'user' });
+    };
+    openVolbyPanelRef = openVolbyPanel;
+    // Archív (2026-10-27): skryje tlačidlo VOĽBY v mobilnej lište a nadpis zóny (style.css body.oko-volby-archived);
+    // stránka otvorená cez polnoc sa prepne sama.
+    const syncVolbyArchive = () => document.body.classList.toggle('oko-volby-archived', isVolbyArchived(Date.now()));
+    syncVolbyArchive();
+    const untilArchive = VOLBY_ARCHIVE_MS - Date.now();
+    if (untilArchive > 0 && untilArchive < 7 * 86_400_000) setTimeout(syncVolbyArchive, untilArchive + 1000);
     volbyObceLayer.onSelect = (code) => {
       if (!code) return;
       if (!window.__okoMobileShell?.open?.('volby')) styleManager.setPanelCollapsed('volby-panel', false, { explicit: true, persist: false, syncShare: false });

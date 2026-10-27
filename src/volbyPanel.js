@@ -37,6 +37,14 @@ export const VOLBY_PARTY_COLORS = Object.freeze({
 });
 /** Po tomto čase (3 dni po voľbách) panel ukazuje archív „Výsledky volieb 2026" bez stavu sčítania. */
 export const VOLBY_ARCHIVE_MS = Date.UTC(2026, 9, 27, 23, 0, 0);
+/**
+ * Voľby v archíve (2026-10-27, vlastník: „presuň tlačidlo VOĽBY z dolnej lišty do archívu"): tlačidlo
+ * v mobilnej lište a nadpis zóny v ľavom stĺpci zmiznú (body.oko-volby-archived); panel ostáva dostupný
+ * z palety (príkaz „Voľby 2026 — výsledky"), z odkazov ?volby a zo stránok /volby-2026/. Pure.
+ */
+export function isVolbyArchived(nowMs = Date.now()) {
+  return Number(nowMs) >= VOLBY_ARCHIVE_MS;
+}
 
 /** Načítanie JSON z /api/volby (chyba = Error so status). */
 export async function fetchVolbyJson(path, { fetcher = (...a) => fetch(...a) } = {}) {
