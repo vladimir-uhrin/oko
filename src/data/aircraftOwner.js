@@ -4,9 +4,10 @@
  * @description Vlastník lietadla na karte (2026-10-29, vlastník: „firmy menom, súkromné osoby len ako
  * súkromný vlastník"). adsbdb posiela `registered_owner` z registrov — pri dopravcoch „Ryanair",
  * pri firmách „Nike Inc", pri malých strojoch „Private", v USA však aj celé meno človeka
- * („SMITH JOHN A"). Etická čiara OKO: nesledujeme jednotlivcov, takže meno ukážeme len vtedy,
- * keď je zjavne organizácia; všetko ostatné je len „súkromný vlastník" bez mena.
- * Pochybnosť = súkromný (radšej skryť firmu, než ukázať človeka).
+ * („SMITH JOHN A"). Firma = organizácia podľa kódu dopravcu alebo právnej formy, inak súkromný.
+ * Meno súkromného vlastníka z registra sa ukazuje tiež (2026-10-29, vlastník výslovne: „pri súkromných
+ * lietadlách ukáž aj meno vlastníka, beriem to na seba") — výnimka z etickej čiary OKO na jeho
+ * zodpovednosť. Zástupné „Private" z európskych registrov meno nie je.
  */
 
 // Právne formy a slová, ktoré nesie len organizácia. Celé slová, bez ohľadu na veľkosť písmen.
@@ -36,7 +37,8 @@ const PRIVATE_RE = /^(private|privat|privately owned|individual|owner|unknown|n\
  * @param {string|null} [opts.flagCode] `registered_owner_operator_flag_code` — trojpísmenový kód ICAO
  *   prevádzkovateľa znamená dopravcu; adsbdb tam pri súkromných strojoch dáva typ (SB91, G650)
  * @param {string|null} [opts.typeCode] ICAO typ stroja, aby sa typ v poli kódu nebral ako dopravca
- * @returns {{kind: 'company', name: string}|{kind: 'private'}|null} null = register vlastníka neuvádza
+ * @returns {{kind: 'company'|'private', name?: string}|null} null = register vlastníka neuvádza;
+ *   súkromný bez `name`, keď register uvádza len „Private"
  */
 export function classifyAircraftOwner(owner, { flagCode = null, typeCode = null } = {}) {
   const name = typeof owner === 'string' ? owner.replace(/\s+/g, ' ').trim() : '';
@@ -46,7 +48,7 @@ export function classifyAircraftOwner(owner, { flagCode = null, typeCode = null 
   const type = typeof typeCode === 'string' ? typeCode.trim().toUpperCase() : '';
   const airlineFlag = /^[A-Z]{3}$/.test(flag) && flag !== type;
   if (airlineFlag || ORG_RE.test(name) || ORG_SUFFIX_RE.test(name)) return { kind: 'company', name: name.slice(0, 80) };
-  return { kind: 'private' };
+  return { kind: 'private', name: name.slice(0, 80) };
 }
 
 /**
@@ -57,7 +59,7 @@ export function classifyAircraftOwner(owner, { flagCode = null, typeCode = null 
  * @param {(key: string, vars?: object) => string} translate
  */
 export function aircraftOwnerLabel(owner, shownAirline, translate) {
-  if (owner?.kind === 'private') return translate('card.owner-private');
+  if (owner?.kind === 'private') return owner.name ? translate('card.owner-private-named', { name: owner.name }) : translate('card.owner-private');
   if (owner?.kind !== 'company' || !owner.name) return '';
   const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   const shown = norm(shownAirline);

@@ -4087,8 +4087,8 @@ function adsbdbProxy() {
       // (`/api/adsbdb/reg/<značka>` → hex → /api/history/search), 2026-09-15.
       modeS: typeof a.mode_s === 'string' ? a.mode_s.toLowerCase() : null,
       countryIso: typeof a.registered_owner_country_iso_name === 'string' ? a.registered_owner_country_iso_name : null, // štát registrácie → vlajka
-      // Vlastník (2026-10-29): firma menom, súkromná osoba len {kind:'private'} — meno človeka
-      // z registra (USA) sa triedi už tu, takže do prehliadača ani do cache odpovede nejde.
+      // Vlastník (2026-10-29): {kind:'company'|'private', name} — meno aj pri súkromnom (výslovný pokyn
+      // vlastníka OKO, aircraftOwner.js); „Private" z európskych registrov ostáva bez mena.
       owner: classifyAircraftOwner(a.registered_owner, { flagCode: a.registered_owner_operator_flag_code, typeCode: a.icao_type }),
     };
   }
