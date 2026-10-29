@@ -45,6 +45,7 @@ import {
 } from './iconOrientation.js';
 import { stickyText, stickyNumber } from './aircraftMeta.js';
 import { classifyAircraft, CLASS_SCALE_2D, CLASS_SCALE_3D, CLASS_MODEL_URL, CLASS_MODEL_REAL } from './aircraftClass.js';
+import { aircraftOwnerLabel } from './aircraftOwner.js';
 import {
   AIRCRAFT_CATEGORY_IDS, categoryForClass, normalizeHiddenCategories, tallyByCategory,
 } from './aircraftCategories.js';
@@ -1355,6 +1356,8 @@ function _requestTypeEnrichment(icao24, priority = false) {
     // Štát registrácie (ISO2) — vlajka pri titulku karty; OpenSky
     // origin_country ostáva ako fallback pre stroje, ktoré adsbdb nepozná.
     meta.countryIso = data.countryIso || meta.countryIso;
+    // Vlastník z registra (2026-10-29) — server už posiela len firmu menom alebo {kind:'private'}.
+    meta.owner = data.owner || meta.owner || null;
     if (meta.typeCode) {
       const klass = classifyAircraft({ typeCode: meta.typeCode, category: meta.category });
       if (klass !== meta.klass) {
@@ -4450,7 +4453,8 @@ function _trackedLabelParts(icao24) {
   const reg = info.registration && info.registration !== cs ? info.registration : null;
   const ident = isTr3b(icao24)
     ? tr3bTypeLabel(icao24)
-    : [info.airline || info.operator, info.typeName || info.typeCode, reg ? t('card.reg', { reg }) : null].filter(Boolean).join(' · ');
+    : [info.airline || info.operator, info.typeName || info.typeCode, reg ? t('card.reg', { reg }) : null,
+      aircraftOwnerLabel(info.owner, info.airline || info.operator, t)].filter(Boolean).join(' · ');
   // Trasa s mestami (adsbdb municipality) + progres s ETA. Všetko odvodené
   // z dát, ktoré už tečú; keď chýba súradnica alebo letová rýchlosť, riadok/
   // segment sa jednoducho nevykreslí. Gate _routeIsPlausible je ZDIEĹANÝ

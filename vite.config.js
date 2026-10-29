@@ -47,6 +47,7 @@ import { createAircraftSearchService } from './src/data/aircraftSearchService.js
 import { createGeocodeService } from './src/data/geocodeService.js';
 import { LIMITED as ADSBDB_LIMITED, createAdsbdbGuard } from './src/data/adsbdbGuard.js';
 import { createAdsbLolTypeFallback } from './src/data/adsbLolTypeFallback.js';
+import { classifyAircraftOwner } from './src/data/aircraftOwner.js';
 import { upstream as upstreamRegistry } from './src/data/upstreamStatus.js';
 import { adsbLolBudget } from './src/data/adsbLolBudget.js';
 import { createMilitaryFeedService } from './src/data/militaryFeedService.js';
@@ -4086,6 +4087,9 @@ function adsbdbProxy() {
       // (`/api/adsbdb/reg/<značka>` → hex → /api/history/search), 2026-09-15.
       modeS: typeof a.mode_s === 'string' ? a.mode_s.toLowerCase() : null,
       countryIso: typeof a.registered_owner_country_iso_name === 'string' ? a.registered_owner_country_iso_name : null, // štát registrácie → vlajka
+      // Vlastník (2026-10-29): firma menom, súkromná osoba len {kind:'private'} — meno človeka
+      // z registra (USA) sa triedi už tu, takže do prehliadača ani do cache odpovede nejde.
+      owner: classifyAircraftOwner(a.registered_owner, { flagCode: a.registered_owner_operator_flag_code, typeCode: a.icao_type }),
     };
   }
 
