@@ -123,6 +123,7 @@ import {
   holdContinuousRender,
   releaseContinuousRender,
 } from './renderGovernor.js';
+import { applySoftwareRendererBudget } from './softwareRenderer.js';
 import { installScopeMask } from './scopeMask.js';
 import { initFirstRunExperience } from './firstRunExperience.js';
 import { installEmbedMode, isEmbedMode } from './embedMode.js';
@@ -284,6 +285,8 @@ async function init() {
     // 2026-08-05 perf investigation as a strict halving of idle burn on
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
     viewer.targetFrameRate = 60;
+    // Bez grafickej karty (PageSpeed, počítač bez ovládača): 1 snímka/s, bez MSAA — inak stránka zamrzne.
+    if (applySoftwareRendererBudget(viewer)) console.info('[OKO] softvérové kreslenie WebGL — úsporný režim');
 
     // skyBox: false vynechá aj Slnko a Mesiac (CesiumWidget ich vytvára spolu
     // s oblohou) — doplniť, nech sa nič okrem načasovania oblohy nemení.
