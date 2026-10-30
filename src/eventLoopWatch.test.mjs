@@ -9,6 +9,8 @@ import {
   eventLoopLagMs,
   eventLoopWatchPlugin,
   formatEventLoopWarning,
+  gcInWindow,
+  observeGc,
 } from '../scripts/lib/eventLoopWatch.mjs';
 
 test('oneskorenie ticku: len kladné a konečné', () => {
@@ -40,6 +42,9 @@ test('plugin hlási len nad prahom a pri zatvorení servera časovač zastaví',
     clock: () => new Date(2026, 8, 30, 12, 0, 0),
     setIntervalFn: (fn) => { tick = fn; return { id: 7, unref() {} }; },
     clearIntervalFn: (timer) => { cleared = timer; },
+    gc: () => null,
+    heapMb: () => null,
+    defer: (fn) => fn(),
   });
   plugin.configureServer({ httpServer: { once: (event, fn) => { if (event === 'close') onClose = fn; } } });
   t = 500; tick();
@@ -56,4 +61,62 @@ test('vite.config.js merač zapája', () => {
   const vite = readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8');
   assert.match(vite, /import \{ eventLoopWatchPlugin \} from '\.\/scripts\/lib\/eventLoopWatch\.mjs';/);
   assert.match(vite, /eventLoopWatchPlugin\(\),/);
+});
+
+// 2026-10-30: bloky oko-api mali opakovane ~2,2 s pri halde ~1,3 GB — riadok musí rozlíšiť GC od kódu.
+test('GC v okne bloku: len prekrytá časť, veľký GC zvlášť', () => {
+  const entries = [
+    { startTime: 100, duration: 50, major: false },   // pred oknom
+    { startTime: 950, duration: 100, major: false },  // 50 ms v okne
+    { startTime: 1200, duration: 900, major: true },  // celý v okne
+    { startTime: 2900, duration: 400, major: true },  // 100 ms v okne
+    { startTime: NaN, duration: 10 },
+  ];
+  assert.deepEqual(gcInWindow(entries, 1000, 3000), { ms: 1050, majorMs: 1000, count: 3 });
+  assert.deepEqual(gcInWindow(null, 0, 1), { ms: 0, majorMs: 0, count: 0 });
+});
+
+test('riadok s GC a haldou; bez údajov ostáva pôvodný tvar', () => {
+  const at = new Date(2026, 9, 30, 22, 24, 14);
+  const line = formatEventLoopWarning({ lagMs: 2202, uptimeS: 1871, at, gcMs: 1463.4, gcMajorMs: 1112.2, heapMb: 1290.6 });
+  assert.match(line, /2202 ms \(1871 s od štartu procesu\) · GC 1463 ms \(veľký 1112 ms\) · halda 1291 MB$/);
+  assert.match(formatEventLoopWarning({ lagMs: 1200, uptimeS: 3, at, gcMs: 40, gcMajorMs: 0 }), /· GC 40 ms$/);
+  assert.match(formatEventLoopWarning({ lagMs: 1200, uptimeS: 3, at }), /od štartu procesu\)$/);
+});
+
+test('plugin: hlásenie počká na záznamy GC a pri zatvorení odber zastaví', () => {
+  const logs = [];
+  let tick = null;
+  let t = 0;
+  let onClose = null;
+  let deferred = null;
+  let stopped = false;
+  const gcList = [];
+  const plugin = eventLoopWatchPlugin({
+    log: (line) => logs.push(line),
+    now: () => t,
+    uptime: () => 1871,
+    clock: () => new Date(2026, 9, 30, 22, 24, 14),
+    setIntervalFn: (fn) => { tick = fn; return { unref() {} }; },
+    clearIntervalFn: () => {},
+    gc: () => ({ entries: () => gcList, stop: () => { stopped = true; } }),
+    heapMb: () => 1290,
+    defer: (fn) => { deferred = fn; },
+  });
+  plugin.configureServer({ httpServer: { once: (event, fn) => { if (event === 'close') onClose = fn; } } });
+  t = 3202; tick();
+  assert.equal(logs.length, 0, 'hlásenie je odložené');
+  gcList.push({ startTime: 1500, duration: 1400, major: true }); // záznam GC prišiel až po bloku
+  deferred();
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /2702 ms .* GC 1400 ms \(veľký 1400 ms\) · halda 1290 MB/);
+  onClose();
+  assert.equal(stopped, true);
+});
+
+test('skutočný odber GC z perf_hooks sa dá zapnúť a vypnúť', () => {
+  const watch = observeGc();
+  assert.ok(watch, 'Node 24 podporuje záznamy gc');
+  assert.ok(Array.isArray(watch.entries()));
+  watch.stop();
 });
