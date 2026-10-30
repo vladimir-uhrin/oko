@@ -756,7 +756,7 @@ test('etapa 5d — legenda rušenia GPS: počty buniek podľa stupňa vo farbác
   assert.equal(byClass(legend, 'mideast-legend-items')[0].attrs['aria-label'], 'bunky 0,5°');
   const src = byClass(legend, 'mideast-legend-source')[0];
   assert.equal(byClass(src, 'mideast-legend-since')[0].textContent, `2. 10. 2026 – 3. 10. 2026 · snímky: 137 · lietadlá: ${new Intl.NumberFormat('sk-SK').format(1240)}`);
-  assert.deepEqual(byClass(src, 'mideast-legend-age').map((n) => n.textContent), ['· dnešok sa ešte zbiera', '· adsb.lol (ODbL) · výpočet OKO']);
+  assert.deepEqual(byClass(src, 'mideast-legend-age').map((n) => n.textContent), ['· dnešok sa ešte zbiera', '· adsb.fi, adsb.lol (ODbL) · výpočet OKO']);
   assert.match(src.title, /adsb\.lol/);
   assert.match(byClass(legend, 'mideast-legend-note')[0].textContent, /nie meranie rušičiek/);
   // okno bez bunky s dosť lietadlami + výpadok servera

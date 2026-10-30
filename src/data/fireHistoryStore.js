@@ -11,6 +11,8 @@ import { fastKm, fireHistoryDay, fireHistoryDays, fireHistoryKey } from './fireN
 
 /** Najviac dní, ktoré sa pri dopyte čítajú späť. */
 export const FIRE_HISTORY_MAX_DAYS = 60;
+/** Po toľkých ohniskách v jednej dávke sa slučka uvoľní (zápis do histórie nesmie blokovať verejné /api). */
+export const APPEND_YIELD_EVERY = 20_000;
 
 /** Štíhly riadok detekcie (polia, ktoré číta klient). Pure. */
 export function slimFire(f) {
@@ -49,7 +51,10 @@ export function createFireHistoryStore({ dir, now = () => Date.now() }) {
   function append(fires) {
     const run = queue.then(async () => {
       const byDay = new Map();
+      let seen = 0;
       for (const f of Array.isArray(fires) ? fires : []) {
+        // Po 20 tis. ohniskách uvoľniť slučku (2026-10-30: ~150 tis. ohnísk v jednom kuse blokovalo verejné /api).
+        if (++seen % APPEND_YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve));
         const day = fireHistoryDay(f);
         if (!day || !Number.isFinite(f?.lat) || !Number.isFinite(f?.lon)) continue;
         const set = await keysFor(day);

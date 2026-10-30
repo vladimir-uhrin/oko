@@ -843,3 +843,43 @@ test('DO ŠTÚDIA (2026-10-03): udalosť → návrh v Štúdiu s obrázkom feed,
     assert.equal((await call(none, `/${id}/studio`, true, OWN_POST)).status, 503);
   } finally { h.cleanup(); }
 });
+
+test('správy (2026-10-30): GDELT cez bránu jedným pokusom; overenie, ktoré zdroje 7 dní po okne nedovolia, sa uzavrie', async () => {
+  const { NEWS_GIVE_UP_AFTER_MS } = await import('./flightEventsService.js');
+  const { createGdeltGate } = await import('./gdeltGate.js');
+  assert.equal(NEWS_GIVE_UP_AFTER_MS, 7 * 24 * 3600_000);
+  const { oko } = fz1073();
+  const calls = [];
+  const h = harness({
+    startMs: Date.parse('2026-09-30T05:26:00Z'),
+    tracks: { '8965d1': oko.map((p) => row(p)) },
+    triggers: triggersOf('8965d1', oko),
+    legs: { '8965d1': [{ callsign: 'FDB1073', firstT: T('2026-09-30T03:05:00Z'), lastT: T('2026-09-30T05:53:33Z') }] },
+    traces: { [LIVE_FZ]: fixtureText('adsblol-trace-8965d1-20260930.json') },
+    routes: { FDB1073: FDB1073_ROUTE },
+    trusted: ['jta.org', 'jpost.com'],
+    news: (url) => { calls.push(url); return { status: 429, body: 'Please limit requests to one every 5 seconds' }; },
+  });
+  try {
+    const service = h.make();
+    await service.tick();
+    const [e] = service.store.list();
+    assert.equal(calls.length, 1, 'jeden pokus, bez druhého po 15 s');
+    assert.notEqual(service.store.get(e.id).news?.final, true);
+    // O týždeň po konci okna: zdroje stále 429 → overenie uzavreté, ďalej sa nehľadá.
+    h.at('2026-10-10T12:00:00Z');
+    await service.tick();
+    const full = service.store.get(e.id);
+    assert.equal(full.news.final, true);
+    assert.equal(full.news.reason, 'unavailable');
+    const n = calls.length;
+    h.at('2026-10-10T13:00:00Z');
+    await service.tick();
+    assert.equal(calls.length, n, 'uzavreté overenie sa už neskúša');
+  } finally {
+    h.cleanup();
+  }
+  void createGdeltGate;
+  const cfg = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
+  assert.match(cfg, /createFlightEventsService\(\{\n\s+getStore,\n[^\n]*\n\s+gdeltGate: sharedGdeltGate\(\),/, 'server podáva spoločnú bránu');
+});

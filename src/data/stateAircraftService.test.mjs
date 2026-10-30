@@ -3,7 +3,7 @@
 // lety len pre stroje zo zoznamu, letiská odvodené len z koncov na zemi / nízko pri letisku.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { traceToFlight } from './adsblolTrace.js';
@@ -165,4 +165,33 @@ test('štart spätného importu opraví lety štátnych strojov rozdelené diero
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('oprava letov: pri každom stroji čerstvé úložisko, zavretá história = koniec bez chyby pre každý stroj (2026-10-30)', async () => {
+  const { mkdtempSync, writeFileSync: wf, rmSync: rm } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'oko-state-repair-'));
+  try {
+    const listFile = join(dir, 'sk.json');
+    wf(listFile, LIST([{ hex: '505abd', reg: 'OM-TSU', role: 'government', sources: ['https://example.gov.sk/b'] }]));
+    const logs = [];
+    const merged = [];
+    let calls = 0;
+    const live = { closed: false, mergeAirGaps: async (hex) => { merged.push(hex); live.closed = true; return 1; } };
+    const service = createStateAircraftService({
+      listFile, airportsFile: join(dir, 'none.geojsonl'), cursorFile: join(dir, 'cursor.json'),
+      getStore: () => { calls += 1; return live; }, log: (m) => logs.push(m), fetchImpl: async () => { throw new Error('no network'); },
+    });
+    const n = await service.repairAirGaps();
+    assert.equal(n, 1);
+    assert.deepEqual(merged, ['505abc'], 'druhý stroj sa nespracuje cez zavreté vlákno');
+    assert.ok(logs.some((m) => /oprava letov prerušená/.test(m)));
+    assert.ok(!logs.some((m) => /history worker is closed/.test(m)));
+    assert.ok(calls >= 3, 'úložisko sa pýta pri každom stroji');
+  } finally {
+    rm(dir, { recursive: true, force: true });
+  }
+  const cfg = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
+  assert.match(cfg, /\.catch\(\(error\) => console\.warn\(`\[flight-history\] SQLite \$\{cfg\.dbPath\} otvorená, úvodný prehľad nedobehol/, 'pomalý úvodný prehľad vlákno nezatvorí');
 });

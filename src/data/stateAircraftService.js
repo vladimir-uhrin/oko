@@ -192,10 +192,13 @@ export function createStateAircraftService({
    * (lety cez Atlantik importované pred 2026-09-30 ostali rozdelené na „… → neznáme" a „neznáme → …").
    */
   async function repairAirGaps() {
-    const store = getStore();
-    if (!store?.mergeAirGaps) return 0;
+    if (!getStore()?.mergeAirGaps) return 0;
     let merged = 0;
     for (const a of currentList().aircraft) {
+      // Úložisko sa pýta pri každom stroji (2026-10-30): keď vlákno histórie medzitým spadne, getStore() ho otvorí
+      // znova; zavreté vlákno = koniec opravy (nie chybový riadok pre každý zvyšný stroj).
+      const store = getStore();
+      if (!store?.mergeAirGaps || store.closed) { log('[state-aircraft] oprava letov prerušená: história nie je dostupná'); break; }
       try { merged += await store.mergeAirGaps(a.hex); } catch (error) { log(`[state-aircraft] oprava letov ${a.hex}: ${error?.message || error}`); }
     }
     if (merged) log(`[state-aircraft] spojené lety cez diery v pokrytí: ${merged}`);

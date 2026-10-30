@@ -359,3 +359,51 @@ test('história po týždňoch: jeden dopyt naraz s pauzou, existujúce dni pres
   await assert.rejects(() => controlBackfill(root, 'nope', { fetchImpl, now: NOW, sleep }), /unknown module 'nope'/);
   await assert.rejects(() => controlBackfill(root, 'lebanon', { from: 'zle', fetchImpl, now: NOW, sleep }), /bad from day/);
 });
+
+// ── RUŠENIE GPS: zdroje zberu (2026-10-30) ──────────────────────────────────────────────────────────
+// Zber bol 6 kruhov adsb.lol každých 15 min = 576 dopytov denne, sám nad denným stropom 500 na IP.
+// Teraz adsb.fi hlavný, adsb.lol len záloha z rozpočtu (druh `gps`, rezerva 100), po 429 sa neopakuje.
+test('gps zber: adsb.fi hlavný, adsb.lol len záloha z rozpočtu, bez opakovania po 429', async () => {
+  const { gpsCollect } = await import('./mideastArchive.mjs');
+  const { createAdsbLolBudget } = await import('../../src/data/adsbLolBudget.js');
+  const { createUpstreamRegistry } = await import('../../src/data/upstreamStatus.js');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'oko-gps-'));
+  try {
+    const plane = (hex) => ({ hex, type: 'adsb_icao', version: 2, lat: 33.1, lon: 35.6, alt_baro: 30000, seen_pos: 1, nac_p: 9, nic: 8 });
+    const circles = [{ id: 'a', lat: 33, lon: 35.5, nm: 250 }, { id: 'b', lat: 28.5, lon: 49.5, nm: 250 }, { id: 'c', lat: 25.5, lon: 55.5, nm: 250 }];
+    const calls = [];
+    let t = Date.UTC(2026, 9, 30, 12);
+    const budget = createAdsbLolBudget({ now: () => t, registry: createUpstreamRegistry({ now: () => t }) });
+    const dayHdr = (rem) => new Headers({ 'x-ratelimit-limit': '500, 4;w=1, 60;w=60, 500;w=86400', 'x-ratelimit-remaining': String(rem), 'x-ratelimit-reset': '30000' });
+    const json = (body, headers = new Headers()) => ({ ok: true, status: 200, headers, arrayBuffer: async () => Buffer.from(JSON.stringify(body)) });
+    const status = (code, headers = new Headers()) => ({ ok: false, status: code, headers, arrayBuffer: async () => Buffer.from('') });
+    const fetchImpl = async (url) => {
+      calls.push(url);
+      if (url.includes('adsb.fi') && url.includes('/lat/28.5/')) return status(503); // kruh b: adsb.fi padne
+      if (url.includes('adsb.fi') && url.includes('/lat/25.5/')) return status(429); // kruh c: adsb.fi 429
+      if (url.includes('adsb.fi')) return json({ ac: [plane('aaa001')] });
+      if (url.includes('/lat/28.5/')) return json({ ac: [plane('bbb001')] }, dayHdr(300));
+      return status(429, dayHdr(0)); // adsb.lol pre kruh c: denný strop
+    };
+    const r = await gpsCollect(root, { fetchImpl, now: t, sleep: async () => {}, circles, budget });
+    assert.equal(r.status, 'partial');
+    assert.deepEqual(r.sources, { 'adsb.fi': 1, 'adsb.lol': 1 });
+    assert.equal(r.circles, 2);
+    assert.equal(r.failed.length, 1);
+    assert.match(r.failed[0], /^c: adsb\.fi: HTTP 429, adsb\.lol: HTTP 429$/);
+    assert.equal(calls.length, 5, 'každý zdroj najviac raz na kruh, žiadne opakovanie po 429');
+    assert.equal(calls.filter((u) => u.includes('adsb.fi')).length, 3);
+    assert.equal(budget.paused(), true, '429 adsb.lol s denným resetom = pauza');
+    // Ďalšie kolo: adsb.lol v pauze → záloha sa nevolá vôbec.
+    calls.length = 0;
+    const r2 = await gpsCollect(root, { fetchImpl, now: t + 15 * 60_000, sleep: async () => {}, circles, budget });
+    assert.deepEqual(r2.sources, { 'adsb.fi': 1 });
+    assert.equal(calls.filter((u) => u.includes('adsb.lol')).length, 0);
+    assert.match(r2.failed.join(' | '), /adsb\.lol: budget/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

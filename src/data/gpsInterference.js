@@ -6,7 +6,7 @@
  *
  * Princíp (rovnaký ako gpsjam.org, ale z vlastného zberu): lietadlo vysiela v ADS-B správach,
  * ako presne pozná svoju polohu — NACp (presnosť) a NIC (integrita). Keď GPS ruší rušička,
- * hodnoty padnú. Zberač na serveri sa pýta adsb.lol na lietadlá v šiestich kruhoch nad regiónom
+ * hodnoty padnú. Zberač na serveri sa pýta adsb.fi (záloha adsb.lol) na lietadlá v šiestich kruhoch nad regiónom
  * a po bunkách 0,5° a dňoch (UTC) ráta, koľko RÔZNYCH lietadiel bunkou prešlo a koľko z nich
  * v nej hlásilo zhoršenú presnosť. Podiel = (zhoršené − 1) / všetky za deň — jedno lietadlo sa
  * odpočíta proti falošným poplachom (porucha jedného stroja nie je rušenie).
@@ -35,8 +35,8 @@ export const GPS_MAX_SEEN_POS_S = 60;
 export const GPS_COLORS = Object.freeze({ high: '#ff5a5f', medium: '#ffb547', none: '#52d68a' });
 export const GPS_API = '/api/mideast/events/gps';
 export const GPS_DAYS_DEFAULT = 2;
-export const GPS_ATTRIBUTION = 'Aircraft data: adsb.lol contributors (ODbL 1.0) · share of aircraft reporting degraded position accuracy computed by OKO — a derived indicator, not a measurement of jammers';
-export const GPS_LICENSE = 'ODbL 1.0';
+export const GPS_ATTRIBUTION = 'Aircraft data: adsb.fi open data (adsb.fi) and adsb.lol contributors (ODbL 1.0) · share of aircraft reporting degraded position accuracy computed by OKO — a derived indicator, not a measurement of jammers';
+export const GPS_LICENSE = 'adsb.fi fair use (non-commercial) · ODbL 1.0 (adsb.lol)';
 
 /**
  * Kruhy zberu (stred, polomer v námorných míľach — rozhranie adsb.lol berie najviac 250).
@@ -52,11 +52,20 @@ export const GPS_CIRCLES = Object.freeze([
   Object.freeze({ id: 'bab-el-mandeb', lat: 14.5, lon: 43.5, nm: 250 }),
 ]);
 
-/** Adresa bodového rozhrania adsb.lol pre kruh. Pure. */
-export function gpsCircleUrl(circle) {
+/**
+ * Zdroje zberu (2026-10-30): adsb.fi hlavný (bodové rozhranie v3, rovnaké polia NACp/NIC/version ako readsb;
+ * fair use, 1 dopyt/s, chyby sa počítajú), adsb.lol len záloha z denného rozpočtu (500 dopytov na IP —
+ * 6 kruhov každých 15 min bolo samo 576 dopytov denne).
+ */
+export const GPS_PROVIDERS = Object.freeze(['adsb.fi', 'adsb.lol']);
+
+/** Adresa bodového rozhrania pre kruh a zdroj. Pure. */
+export function gpsCircleUrl(circle, provider = 'adsb.fi') {
   const lat = Number(circle?.lat); const lon = Number(circle?.lon); const nm = Number(circle?.nm);
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(nm) || Math.abs(lat) > 90 || Math.abs(lon) > 180 || nm <= 0 || nm > 250) throw new Error('bad circle');
-  return `https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${nm}`;
+  if (provider === 'adsb.lol') return `https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${nm}`;
+  if (provider !== 'adsb.fi') throw new Error(`bad provider ${provider}`);
+  return `https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${nm}`;
 }
 
 /** Je záznam lietadla použiteľná vzorka (priame ADS-B v2, vo vzduchu, čerstvá poloha, hlási presnosť)? Pure. */

@@ -31,6 +31,7 @@ import https from 'node:https';
 import path from 'node:path';
 
 import { dayKey, dayToMs, isDay, readJson, wikiRevisionUrl, writeJsonAtomic } from './ukraineArchive.mjs';
+import { adsbLolBudget } from '../../src/data/adsbLolBudget.js';
 import { MIDEAST_CONTROL_MODULE_IDS, wikiControlModuleById, wikiControlPoints, wikiControlSummary } from '../../src/data/wikiControl.js';
 import {
   PORTWATCH_ATTRIBUTION, PORTWATCH_DATASET_URL, PORTWATCH_FIRST_DAY, PORTWATCH_KEYS, PORTWATCH_LICENSE, PORTWATCH_PAGE_SIZE, PW,
@@ -42,7 +43,7 @@ import {
 } from '../../src/data/czib.js';
 import { UKMTO_API_URL, UKMTO_ATTRIBUTION, UKMTO_LICENSE, UKMTO_LICENSE_URL, UKMTO_SITE_URL, mergeUkmtoIncidents, parseUkmtoIncidents } from '../../src/data/ukmto.js';
 import {
-  GPS_ATTRIBUTION, GPS_CELL_DEG, GPS_CIRCLES, GPS_HIGH, GPS_LICENSE, GPS_LOW, GPS_MIN_AIRCRAFT,
+  GPS_ATTRIBUTION, GPS_CELL_DEG, GPS_CIRCLES, GPS_HIGH, GPS_LICENSE, GPS_LOW, GPS_MIN_AIRCRAFT, GPS_PROVIDERS,
   gpsAddSnapshot, gpsCircleUrl, gpsEmptyDay, gpsFinalizeDay, gpsMergeDays,
 } from '../../src/data/gpsInterference.js';
 
@@ -617,6 +618,7 @@ export async function ukmtoPayload(root, { days = 90, nowMs = Date.now() } = {})
 /** Pauza medzi kruhmi: adsb.lol vracia 429 pri dávke a tú istú adresu používajú aj vojenské lety OKO. */
 export const GPS_CIRCLE_PAUSE_MS = 5_000;
 /** Po 429 jeden nový pokus o ten istý kruh po tomto čase; potom sa kruh v tomto kole vynechá. */
+/** Už sa nepoužíva (2026-10-30: po 429 sa neopakuje — adsb.fi chyby počíta, adsb.lol drží pauzu dňa). */
 export const GPS_RETRY_AFTER_429_MS = 12_000;
 export const GPS_MAX_BYTES = 6 * 1024 * 1024;
 /** Najviac toľko dní dozadu vracia trasa (okno mapy). */
@@ -647,36 +649,53 @@ async function gpsCloseOldDays(root, today, log) {
 }
 
 /**
- * Jedno kolo zberu: šesť kruhov adsb.lol postupne s pauzou, lietadlá sa pridajú do rozpracovaného
- * dňa (UTC). Kruh, ktorý zlyhá (429 aj po jednom opakovaní, iná chyba, zlý JSON), sa v tomto kole
- * vynechá — kolo sa zapíše, keď prešiel aspoň jeden. Staršie rozpracované dni sa uzavrú. Nikdy nehádže.
+ * Jedno kolo zberu: šesť kruhov postupne s pauzou, lietadlá sa pridajú do rozpracovaného dňa (UTC).
+ * Zdroj kruhu (2026-10-30): adsb.fi hlavný; keď zlyhá, adsb.lol len ak to dovolí denný rozpočet (druh `gps`,
+ * adsbLolBudget.js — 500 dopytov na IP, zber bol predtým 576 denne sám). Žiadne opakovanie po 429 (chyby sa
+ * adsb.fi počítajú, adsb.lol po 429 drží pauzu do resetu dňa). Kruh bez odpovede sa v kole vynechá — kolo sa
+ * zapíše, keď prešiel aspoň jeden. Staršie rozpracované dni sa uzavrú. Nikdy nehádže.
  * @returns {Promise<{status:'updated'|'partial'|'error', day:string, circles:number, failed:string[], samples:number, degraded:number, snapshots:number}>}
  */
-export async function gpsCollect(root, { fetchImpl = fetch, now = Date.now(), log = () => {}, sleep = defaultSleepMs, circles = GPS_CIRCLES } = {}) {
+export async function gpsCollect(root, { fetchImpl = fetch, now = Date.now(), log = () => {}, sleep = defaultSleepMs, circles = GPS_CIRCLES, budget = adsbLolBudget } = {}) {
   const nowMs = nowToMs(now);
   if (!Number.isFinite(nowMs)) return { status: 'error', day: null, circles: 0, failed: ['bad now'], samples: 0, degraded: 0, snapshots: 0 };
   const day = dayKey(nowMs);
   const aircraft = [];
   const failed = [];
   let ok = 0;
+  /** Koľko kruhov dal ktorý zdroj (log, výsledok). */
+  const sources = {};
   for (const [i, circle] of circles.entries()) {
     if (i) await sleep(GPS_CIRCLE_PAUSE_MS);
-    try {
-      const request = { timeoutMs: 30_000, maxBytes: GPS_MAX_BYTES, headers: { Accept: 'application/json' } };
-      let { res, body } = await fetchCapped(fetchImpl, gpsCircleUrl(circle), request);
-      if (res.status === 429) {
-        await sleep(GPS_RETRY_AFTER_429_MS);
-        ({ res, body } = await fetchCapped(fetchImpl, gpsCircleUrl(circle), request));
+    const request = { timeoutMs: 30_000, maxBytes: GPS_MAX_BYTES, headers: { Accept: 'application/json' } };
+    const errors = [];
+    const okBefore = ok;
+    for (const provider of GPS_PROVIDERS) {
+      const budgeted = provider === 'adsb.lol';
+      if (budgeted && !budget?.allow?.('gps')) { errors.push('adsb.lol: budget'); continue; }
+      try {
+        if (budgeted) budget.spend('gps');
+        let res; let body;
+        try {
+          ({ res, body } = await fetchCapped(fetchImpl, gpsCircleUrl(circle, provider), request));
+        } catch (error) {
+          if (budgeted) budget.record('gps', { error: true });
+          throw error;
+        }
+        if (budgeted) budget.record('gps', { status: res.status, headers: res.headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        let json;
+        try { json = JSON.parse(body); } catch { throw new Error('invalid JSON'); }
+        if (!Array.isArray(json?.ac)) throw new Error('no ac array');
+        aircraft.push(...json.ac);
+        sources[provider] = (sources[provider] || 0) + 1;
+        ok += 1;
+        break;
+      } catch (error) {
+        errors.push(`${provider}: ${String(error?.message || error)}`);
       }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      let json;
-      try { json = JSON.parse(body); } catch { throw new Error('invalid JSON'); }
-      if (!Array.isArray(json?.ac)) throw new Error('no ac array');
-      aircraft.push(...json.ac);
-      ok += 1;
-    } catch (error) {
-      failed.push(`${circle.id}: ${String(error?.message || error)}`);
     }
+    if (ok === okBefore) failed.push(`${circle.id}: ${errors.join(', ')}`);
   }
   try { await gpsCloseOldDays(root, day, log); } catch (error) { log(`[mideast-events] gps close failed: ${error?.message || error}`); }
   if (!ok) {
@@ -687,8 +706,9 @@ export async function gpsCollect(root, { fetchImpl = fetch, now = Date.now(), lo
   const work = prev && prev.day === day && prev.cells && typeof prev.cells === 'object' ? prev : gpsEmptyDay(day);
   const { samples, degraded } = gpsAddSnapshot(work, aircraft);
   await writeJsonAtomic(gpsWorkFile(root, day), work);
-  log(`[mideast-events] gps ${day}: snapshot ${work.snapshots} · ${samples} aircraft, ${degraded} with degraded accuracy${failed.length ? ` · failed ${failed.length}/${circles.length}` : ''}`);
-  return { status: failed.length ? 'partial' : 'updated', day, circles: ok, failed, samples, degraded, snapshots: work.snapshots };
+  const via = Object.entries(sources).map(([name, n]) => `${name} ${n}`).join(', ');
+  log(`[mideast-events] gps ${day}: snapshot ${work.snapshots} · ${samples} aircraft, ${degraded} with degraded accuracy · ${via}${failed.length ? ` · failed ${failed.length}/${circles.length}` : ''}`);
+  return { status: failed.length ? 'partial' : 'updated', day, circles: ok, failed, samples, degraded, snapshots: work.snapshots, sources };
 }
 
 /**

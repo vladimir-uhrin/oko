@@ -90,7 +90,7 @@ test('hover: čo to je, bunka, počty, podiel po odpočte, obdobie a zdroj — p
   const layer = createGpsInterference({ viewer, documentRef: doc, translate: tSk, lang: 'sk', fetchImpl: async () => payload() });
   await layer.setEnabled(true);
   const { tipText } = layer._getStateForTest();
-  assert.equal(tipText('63:71'), 'Rušenie GPS (odvodené) · šírka 31,5–32°, dĺžka 35,5–36° · lietadlá: 4, so zhoršenou presnosťou: 4 · podiel po odpočte jedného lietadla za deň: 75 % · 2. 10. 2026 – 3. 10. 2026 · zdroj: adsb.lol (ODbL) · výpočet OKO, odvodené');
+  assert.equal(tipText('63:71'), 'Rušenie GPS (odvodené) · šírka 31,5–32°, dĺžka 35,5–36° · lietadlá: 4, so zhoršenou presnosťou: 4 · podiel po odpočte jedného lietadla za deň: 75 % · 2. 10. 2026 – 3. 10. 2026 · zdroj: adsb.fi, adsb.lol (ODbL) · výpočet OKO, odvodené');
   assert.match(tipText('52:112'), /lietadlá: 50, so zhoršenou presnosťou: 4 · podiel po odpočte jedného lietadla za deň: 6 %/);
   assert.equal(tipText('0:0'), '');
 });

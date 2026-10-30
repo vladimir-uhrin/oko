@@ -41,7 +41,8 @@ test('prednosti: hľadanie míňa do nuly, štátne lietadlá nechajú 30, hroma
   b.record('search', { status: 200, headers: dayHeaders(0) });
   assert.equal(b.allow('search'), false);
   assert.equal(b.paused(), true, 'zostatok 0 = pauza do resetu dňa');
-  assert.deepEqual(Object.keys(ADSBLOL_KINDS), ['search', 'state', 'regional', 'mil']);
+  assert.deepEqual(Object.keys(ADSBLOL_KINDS), ['search', 'type', 'state', 'regional', 'mil', 'gps']);
+  assert.equal(ADSBLOL_KINDS.gps.reserve, 100, 'záloha zberača GPS končí najskôr');
   // Po resete dňa zostatok neplatí, prvý dopyt ho prinesie znova.
   t += 40_001_000;
   assert.equal(b.paused(), false);

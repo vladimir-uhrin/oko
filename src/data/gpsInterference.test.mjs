@@ -102,10 +102,16 @@ test('stupne: pod 4 lietadlá sa nehodnotí, 2 % a 10 %; viac dní = odpočet je
   assert.deepEqual(gpsMergeDays(null).cells, []);
 });
 
-test('kruhy zberu a klient: adresa adsb.lol, najviac 250 NM, atribúcia ODbL', async () => {
+test('kruhy zberu a klient: adresa adsb.fi (hlavný) aj adsb.lol (záloha), najviac 250 NM, atribúcia oboch', async () => {
   assert.equal(GPS_CIRCLES.length, 6);
   assert.equal(new Set(GPS_CIRCLES.map((c) => c.id)).size, 6);
-  for (const c of GPS_CIRCLES) assert.match(gpsCircleUrl(c), /^https:\/\/api\.adsb\.lol\/v2\/lat\/[\d.]+\/lon\/[\d.]+\/dist\/250$/);
+  // 2026-10-30: adsb.fi hlavný zdroj zberu, adsb.lol len záloha z denného rozpočtu.
+  for (const c of GPS_CIRCLES) {
+    assert.match(gpsCircleUrl(c), /^https:\/\/opendata\.adsb\.fi\/api\/v3\/lat\/[\d.]+\/lon\/[\d.]+\/dist\/250$/);
+    assert.match(gpsCircleUrl(c, 'adsb.lol'), /^https:\/\/api\.adsb\.lol\/v2\/lat\/[\d.]+\/lon\/[\d.]+\/dist\/250$/);
+  }
+  assert.throws(() => gpsCircleUrl(GPS_CIRCLES[0], 'x'), /bad provider/);
+  assert.match(GPS_ATTRIBUTION, /adsb\.fi/);
   assert.throws(() => gpsCircleUrl({ lat: 30, lon: 40, nm: 400 }), /bad circle/);
   assert.throws(() => gpsCircleUrl({ lat: 'x', lon: 40, nm: 100 }), /bad circle/);
   assert.match(GPS_ATTRIBUTION, /adsb\.lol.*ODbL.*derived indicator/);

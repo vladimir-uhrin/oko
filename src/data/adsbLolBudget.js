@@ -27,9 +27,14 @@ export const ADSBLOL_DAY_WINDOW_MIN_S = 120;
  */
 export const ADSBLOL_KINDS = Object.freeze({
   search: Object.freeze({ reserve: 0, minGapMs: 0 }),
+  // Typ a registrácia na karte lietadla (adsbLolTypeFallback.js) — vlastná fronta 1,1 s, len malá rezerva.
+  type: Object.freeze({ reserve: 10, minGapMs: 0 }),
   state: Object.freeze({ reserve: 30, minGapMs: 60_000 }),
   regional: Object.freeze({ reserve: 60, minGapMs: 30_000 }),
   mil: Object.freeze({ reserve: 60, minGapMs: 300_000 }),
+  // Záloha zberača rušenia GPS (mideastArchive.mjs gpsCollect) — hlavný zdroj je adsb.fi; 6 kruhov naraz, preto bez
+  // odstupu, ale s najväčšou rezervou (2026-10-30: zber bol 576 dopytov denne, sám nad denným stropom).
+  gps: Object.freeze({ reserve: 100, minGapMs: 0 }),
 });
 
 const DAY_MS = 86_400_000;

@@ -47,7 +47,7 @@ import { createAircraftSearchService } from './src/data/aircraftSearchService.js
 import { createGeocodeService } from './src/data/geocodeService.js';
 import { LIMITED as ADSBDB_LIMITED, createAdsbdbGuard } from './src/data/adsbdbGuard.js';
 import { createAdsbLolTypeFallback } from './src/data/adsbLolTypeFallback.js';
-import { classifyAircraftOwner } from './src/data/aircraftOwner.js';
+import { classifyAircraftOwner, sanitizeAircraftOwner } from './src/data/aircraftOwner.js';
 import { upstream as upstreamRegistry } from './src/data/upstreamStatus.js';
 import { adsbLolBudget } from './src/data/adsbLolBudget.js';
 import { createMilitaryFeedService } from './src/data/militaryFeedService.js';
@@ -3355,6 +3355,9 @@ function shmuRadarProxy() {
   };
 }
 
+/** Uvoľnenie slučky medzi ťažkými krokmi FIRMS (I/O a dopyty návštevníkov prejdú medzi nimi). */
+const yieldFirmsLoop = () => new Promise((resolve) => setImmediate(resolve));
+
 export function firmsProxy() {
   const TTL_MS = 30 * 60_000;
   const STATUS_TTL_MS = 5 * 60_000;
@@ -3560,7 +3563,9 @@ export function firmsProxy() {
     const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${encodeURIComponent(key)}/${source}/world/${days}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const records = parseFirmsCsv(await res.text());
+    const csv = await res.text();
+    await yieldFirmsLoop(); // zdroje dobiehajú takmer naraz — nech sa parsovanie neskladá do jedného bloku
+    const records = parseFirmsCsv(csv);
     if (records === null) throw new Error('non-CSV upstream response');
     return records;
   }
@@ -3580,6 +3585,8 @@ export function firmsProxy() {
   async function refreshUpstream(key) {
     const now = Date.now();
     const sources = [];
+    // Medzi ťažkými krokmi (200–300 ms každý pri ~150 tis. ohniskách) sa slučka uvoľní (2026-10-30: merač
+    // [event-loop] hlásil bloky 1–1,7 s presne po „obnova z časovača" a zápise 34 MB firms.json).
     const fires = [];
     const geoDays = new Date(now).getUTCHours() < 3 ? 2 : 1; // deň 1 = „dnešný deň UTC“
     if (sentinel3.enabled()) void sentinel3.sync(); // na pozadí; tento snímok dostane už stiahnuté granuly
@@ -3587,21 +3594,22 @@ export function firmsProxy() {
       Promise.allSettled(SOURCES.map((source) => fetchSource(key, source))),
       fetchSource(key, GEO_SOURCE, geoDays).then((r) => ({ ok: true, r }), (err) => ({ ok: false, err })),
     ]);
-    SOURCES.forEach((source, i) => {
+    for (const [i, source] of SOURCES.entries()) {
+      await yieldFirmsLoop();
       const res = results[i];
       if (res.status === 'fulfilled') {
         const records = filterTrailing24h(res.value, now);
         lastGood.set(source, { at: now, records });
         sources.push({ source, count: records.length, ok: true });
-        fires.push(...records);
-        return;
+        for (const r of records) fires.push(r);
+        continue;
       }
       console.warn(`[firms-proxy] ${source} fetch failed:`, res.reason?.message || res.reason);
       const prev = lastGood.get(source);
       const reused = prev ? filterTrailing24h(prev.records, now) : [];
       sources.push({ source, count: reused.length, ok: false, ...(reused.length ? { reused: true, reusedAt: prev.at } : {}) });
-      fires.push(...reused);
-    });
+      for (const r of reused) fires.push(r);
+    }
     let s3Count = 0;
     if (sentinel3.enabled()) {
       await sentinel3.loadDisk();
@@ -3613,7 +3621,9 @@ export function firmsProxy() {
     const nasaOk = sources.some((s) => s.ok && s.source !== 'SENTINEL3_SLSTR_FRP') || geoResult.ok;
     if (!nasaOk && !s3Count && !fires.length) throw new Error('all FIRMS sources failed');
     if (geoResult.ok) {
+      await yieldFirmsLoop();
       const geo = collapseGeoDetections(geoResult.r, now);
+      await yieldFirmsLoop();
       const merged = mergeGeoIntoFires(fires, geo);
       sources.push({ source: GEO_SOURCE, count: geo.length, attached: merged.attached, standalone: merged.standalone, ok: true });
       return { at: now, sources, fires: merged.fires };
@@ -3700,6 +3710,7 @@ export function firmsProxy() {
       inflight = refreshUpstream(key)
         .then(async (fresh) => {
           mem = fresh;
+          await yieldFirmsLoop();
           await writeDisk(fresh);
           // História na disk (nové detekcie; geo samostatné tiež — nesú geo: true).
           // Prvý štart: najprv naplnenie 5 dní (kým je adresár prázdny), potom bežný zápis.
@@ -3708,6 +3719,7 @@ export function firmsProxy() {
           const gap = !prevAt || fresh.at - prevAt > HISTORY_GAP_MS;
           void (async () => {
             if (first || gap) await backfillHistory(key, { force: gap });
+            await yieldFirmsLoop();
             const n = await history.append(fresh.fires);
             if (n) console.log(`[firms-history] +${n} detections → ${HISTORY_DIR}`);
           })().catch((err) => console.warn('[firms-history] write failed:', err?.message || err));
@@ -4089,7 +4101,7 @@ function adsbdbProxy() {
       countryIso: typeof a.registered_owner_country_iso_name === 'string' ? a.registered_owner_country_iso_name : null, // štát registrácie → vlajka
       // Vlastník (2026-10-29): {kind:'company'|'private', name} — meno aj pri súkromnom (výslovný pokyn
       // vlastníka OKO, aircraftOwner.js); „Private" z európskych registrov ostáva bez mena.
-      owner: classifyAircraftOwner(a.registered_owner, { flagCode: a.registered_owner_operator_flag_code, typeCode: a.icao_type }),
+      owner: classifyAircraftOwner(a.registered_owner, { flagCode: a.registered_owner_operator_flag_code, typeCode: a.icao_type, countryIso: a.registered_owner_country_iso_name }),
     };
   }
 
@@ -4197,7 +4209,7 @@ function adsbdbProxy() {
               if (fallback) data = fallback;
             }
             if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
-            return send(200, data ? { found: true, ...data } : { found: false });
+            return send(200, data ? { found: true, ...sanitizeAircraftOwner(data) } : { found: false });
           }
           if (kind === 'reg') {
             // Značka (OM-BYK, N123AB…) → aircraft (vrátane hex mode_s) cez ten
@@ -4208,7 +4220,7 @@ function adsbdbProxy() {
             if (!/^[A-Z0-9-]{2,10}$/.test(reg) || !/[A-Z]/.test(reg)) return send(400, { error: 'invalid registration' });
             const data = await lookup('aircraft', reg);
             if (data === ADSBDB_LIMITED) return send(503, ADSBDB_LIMITED);
-            return send(200, data ? { found: true, ...data } : { found: false });
+            return send(200, data ? { found: true, ...sanitizeAircraftOwner(data) } : { found: false });
           }
           return send(404, { error: 'unknown endpoint' });
         } catch (err) {
@@ -6513,14 +6525,20 @@ function flightHistoryProxy() {
       // synchrónne — hlavné vlákno aj verejné /api vtedy stáli (CPU profil + merač [event-loop]).
       store = openFlightHistoryWorker(cfg.dbPath, { retentionDays: cfg.retentionDays, rawHours: cfg.rawHours });
       const opened = store;
+      // Zavrieť len pri zlyhanom OTVORENÍ (2026-10-30): úvodný `status()` je len riadok do logu — na 21 GB
+      // databáze vypršal (vlákno zapisovalo snímok) a kód vtedy zavrel funkčné vlákno; záznamy sa potom
+      // zahadzovali s „history worker is closed", kým niekto nezavolal getStore() znova.
       opened.ready
-        .then(() => opened.status())
-        .then((st) => console.log(`[flight-history] SQLite ${cfg.dbPath} (vlákno): ${st.fixes} fixes, ${st.legs} legs, retention ${cfg.retentionDays} d, raw ${cfg.rawHours} h`))
-        .catch((error) => {
-          console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
-          if (store === opened) store = null;
-          void opened.close();
-        });
+        .then(
+          () => opened.status()
+            .then((st) => console.log(`[flight-history] SQLite ${cfg.dbPath} (vlákno): ${st.fixes} fixes, ${st.legs} legs, retention ${cfg.retentionDays} d, raw ${cfg.rawHours} h`))
+            .catch((error) => console.warn(`[flight-history] SQLite ${cfg.dbPath} otvorená, úvodný prehľad nedobehol: ${error?.message || error}`)),
+          (error) => {
+            console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
+            if (store === opened) store = null;
+            void opened.close();
+          },
+        );
     } catch (error) {
       console.warn('[flight-history] disabled — cannot open SQLite:', error?.message || error);
       store = null;
@@ -6593,6 +6611,8 @@ function flightHistoryProxy() {
       // FLIGHT_EVENTS=off vypne. Udalosti ako JSON vedľa databázy (<adresár DB>/events).
       flightEvents = createFlightEventsService({
         getStore,
+        // Spoločná brána GDELT procesu (2026-10-30): správy k udalostiam sa už nezrážajú so situačnými správami.
+        gdeltGate: sharedGdeltGate(),
         eventsDir: path.join(path.dirname(cfg.dbPath), 'events'),
         // Etapa 2: overenie správami — zoznam dôveryhodných médií (vlastník ho môže upraviť).
         trustedFile: path.join(__dirname, 'src', 'data', 'local_data', 'events', 'trusted-news.json'),

@@ -33,6 +33,7 @@ import { normalizeVideoScript, quoteFoundIn, scriptSources } from './eventVideoS
 import { createEventVideoJobs } from './eventVideoJobs.js';
 import { eventHeadline, eventShareHash, eventShareMeta, eventWhat, facebookShareUrl, flightLine, isPublishable, keyMoments, postText, publicEventView } from './eventPost.js';
 import { parseGdeltArticles } from './situationNews.js';
+import { createGdeltGate } from './gdeltGate.js';
 import { STATE_BACKFILL_BLOCK_PAUSE_MS, STATE_BACKFILL_UA, fetchTraceFromUrl, latestCompleteDay } from './stateAircraftBackfill.js';
 import { validateSharePayload } from '../shareStore.js';
 
@@ -44,6 +45,11 @@ export const NEWS_GAP_MS = 10_000;
 export const NEWS_PAUSE_MS = 10 * 60_000;
 /** Najviac toľko overení správ za jeden tik. */
 export const NEWS_PER_TICK = 3;
+/**
+ * Overenie, ktoré GDELT ani adsbdb nikdy nedovolili (stále 429), sa vzdá toľko po konci okna správ (2026-10-30:
+ * udalosť zo 6. 10. sa skúšala každých 10 min ešte 30. 10. — 534 riadkov v logu).
+ */
+export const NEWS_GIVE_UP_AFTER_MS = 7 * 24 * 3600_000;
 
 export const EVENTS_TICK_MS = 60_000;
 /** Kandidát sa spracuje 3 min po prvom spúšťači (epizóda sa rozvinie, druhá sieť ju má). */
@@ -305,7 +311,11 @@ export function createFlightEventsService({
   // Štúdio sociálnych sietí (2026-10-03): udalosť → návrh v admine (obrázok feed, text, hotové 3D video).
   studioImport = null,
   videoDailyMax = 3,
+  // GDELT dovolí 1 dopyt za 5 s z IP: server podáva SPOLOČNÚ bránu procesu (gdeltGate.js, 2026-10-30 — predtým
+  // sa udalosti pýtali mimo nej a zrážali sa so situačnými správami); bez nej vlastná s časom služby (testy).
+  gdeltGate = null,
 } = {}) {
+  const newsGate = gdeltGate || createGdeltGate({ now, sleep, minGapMs: NEWS_GAP_MS });
   const store = fileEventStore(eventsDir);
   store.load();
   const trustedNews = trustedFile ? trustedNewsLoader(trustedFile) : () => [];
@@ -317,7 +327,6 @@ export function createFlightEventsService({
     }
     return airportIndex;
   };
-  let lastNewsMs = 0;
   let newsBlockedUntil = 0;
   /** @type {Map<string, {icao24:string, firstT:number, lastT:number, count:number, processedAt:number|null, finalAt:number|null}>} */
   const candidates = new Map();
@@ -827,21 +836,22 @@ export function createFlightEventsService({
     const toMs = Math.min(nowMs, endMs);
     const query = newsQuery(identity);
     let json = null;
-    // GDELT pri obmedzení (jeden dopyt za 5 s z tej istej adresy — pýta sa aj modul Blízky východ)
-    // vracia 429 alebo text namiesto JSON: jeden nový pokus po 15 s, potom pauza.
-    for (let attempt = 0; attempt < 2 && !json && !stopped; attempt += 1) {
-      const wait = lastNewsMs + (attempt ? 15_000 : NEWS_GAP_MS) - now();
-      if (wait > 0) await sleep(wait);
-      lastNewsMs = now();
-      try {
+    // GDELT cez spoločnú bránu (odstup, po 429 pauza pre všetkých v procese); jeden pokus — pri obmedzení
+    // vracia 429 alebo text namiesto JSON, vtedy pauza celého overovania (checkNews).
+    try {
+      const gated = await newsGate.run(async () => {
         const res = await fetchImpl(newsUrl(query, { fromMs, toMs }), {
           headers: { 'User-Agent': STATE_BACKFILL_UA, Accept: 'application/json' },
           signal: AbortSignal.timeout(30_000),
         });
         const text = await res.text();
-        if (res.ok && text.trim().startsWith('{')) json = JSON.parse(text);
-      } catch { /* sieť — ďalší pokus alebo pauza */ }
-    }
+        if (res.ok && text.trim().startsWith('{')) return JSON.parse(text);
+        const error = new Error(`GDELT HTTP ${res.status}${/limit requests/i.test(text) ? ' (limit requests)' : ''}`);
+        if (res.status === 429 || /limit requests/i.test(text)) error.upstreamStatus = 429;
+        throw error;
+      });
+      if (gated && 'value' in gated) json = gated.value;
+    } catch { /* 429, sieť, zlý JSON — pauza */ }
     if (!json) return { blocked: true };
     const verdict = newsVerdict(parseGdeltArticles(json), identity, trustedNews(), { fromMs, toMs });
     return { route: identity, news: { ...verdict, query, checkedT, final: verdict.status === 'verified' || nowMs >= endMs } };
@@ -860,6 +870,13 @@ export function createFlightEventsService({
       if (!full || now() - (full.news?.checkedT ?? 0) * 1000 < NEWS_RECHECK_MS) continue;
       done += 1;
       const result = await newsFor(full);
+      if (result.blocked && now() >= (full.firstT + NEWS_WINDOW_AFTER_S) * 1000 + NEWS_GIVE_UP_AFTER_MS) {
+        // Okno správ je dávno za nami a zdroje stále neodpovedajú — overenie sa uzavrie, aby sa neskúšalo donekonečna.
+        const latest = store.get(e.id) || full;
+        store.save({ ...latest, news: { ...(latest.news || {}), status: latest.news?.status || 'none', reason: 'unavailable', trusted: latest.news?.trusted || [], otherCount: latest.news?.otherCount ?? 0, type: latest.news?.type ?? null, typeDomains: latest.news?.typeDomains || [], checkedT: Math.floor(now() / 1000), final: true } });
+        log(`[events] ${e.id} správy: zdroje neodpovedali ani ${NEWS_GIVE_UP_AFTER_MS / 86_400_000} dní po okne — overenie uzavreté`);
+        continue;
+      }
       if (result.blocked) {
         newsBlockedUntil = now() + NEWS_PAUSE_MS;
         if (!stopped) log(`[events] ${e.id} správy: GDELT alebo adsbdb teraz neodpovedá — znova o ${NEWS_PAUSE_MS / 60_000} min`);

@@ -457,7 +457,7 @@ test('/ukmto (etapa 5c): 404 pred stiahnutím, úloha stiahne incidenty UKMTO, o
   assert.equal(decode(await call(plugin, '/status')).last.ukmto.ok, true);
 });
 
-test('/gps (etapa 5d): 404 pred zberom, úloha zozbiera šesť kruhov adsb.lol, bunky so stupňom, orez dní, cache, stav', async () => {
+test('/gps (etapa 5d): 404 pred zberom, úloha zozbiera šesť kruhov (adsb.fi, 2026-10-30), bunky so stupňom, orez dní, cache, stav', async () => {
   const root = await tmpRoot();
   const circles = JSON.parse(await fixtureText('adsblol-gps-circles-20261003.json'));
   const idByUrl = { 'lat/33/lon/35.5': 'levant', 'lat/28.5/lon/49.5': 'gulf-north', 'lat/25.5/lon/55.5': 'hormuz' };
@@ -478,7 +478,8 @@ test('/gps (etapa 5d): 404 pred zberom, úloha zozbiera šesť kruhov adsb.lol, 
   assert.deepEqual(decode(before), { error: 'no_gps_snapshot' });
   await plugin._tick('gps');
   assert.equal(calls.length, 6);
-  assert.ok(calls.every((u) => u.startsWith('https://api.adsb.lol/v2/lat/')));
+  // 2026-10-30: hlavný zdroj adsb.fi (rovnaký readsb tvar), adsb.lol len záloha z denného rozpočtu.
+  assert.ok(calls.every((u) => u.startsWith('https://opendata.adsb.fi/api/v3/lat/')));
   assert.deepEqual(slept, [5000, 5000, 5000, 5000, 5000]);
   assert.equal(plugin._state.last.gps.result.status, 'updated');
   assert.equal(plugin._state.last.gps.result.count, 103);

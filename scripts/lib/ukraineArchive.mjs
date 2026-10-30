@@ -272,7 +272,19 @@ export async function collectMedia({ fetchImpl = fetch, log = () => {}, youtube 
   for (const ch of youtube) await grab(`youtube:${ch.label}`, youtubeFeedUrl(ch.id), (xml) => parseYoutubeFeed(xml, ch));
   for (const ch of telegram) await grab(`telegram:${ch.name}`, telegramPreviewUrl(ch.name), (html) => parseTelegramPreview(html, ch), { headers: { Accept: 'text/html' } });
   if (armyinform) await grab('armyinform', armyinform, (xml) => parseRssVideoEnclosures(xml));
-  if (failures.length) log(`[ukraine-events] media: ${failures.length} feed(s) failed — ${failures.map((f) => `${f.label} (${f.error})`).join('; ')}`);
+  // Rovnaká chyba viacerých kanálov = jeden údaj (2026-10-30: YouTube občas vráti 404 všetkým kanálom naraz — 9 položiek
+  // v každom kole zahlcovalo log; archív dňa si staré videá drží, len nové neprídu).
+  if (failures.length) {
+    const byError = new Map();
+    for (const f of failures) {
+      const source = f.label.split(':')[0];
+      const key = `${source}|${f.error}`;
+      if (!byError.has(key)) byError.set(key, { source, error: f.error, labels: [] });
+      byError.get(key).labels.push(f.label);
+    }
+    const parts = [...byError.values()].map((g) => (g.labels.length > 2 ? `${g.source} ×${g.labels.length} (${g.error})` : g.labels.map((l) => `${l} (${g.error})`).join('; ')));
+    log(`[ukraine-events] media: ${failures.length} feed(s) failed — ${parts.join('; ')}`);
+  }
   return { items, failures };
 }
 

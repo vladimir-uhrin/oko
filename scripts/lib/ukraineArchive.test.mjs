@@ -260,3 +260,13 @@ test('požiare: riadok CSV → položka, po dňoch, obnova s ETag a zápis len z
   const summary = await summaryPayload(root, '2026-09-18', '2026-09-19', { now: NOW });
   assert.equal(summary.days['2026-09-18'].fires, 1);
 });
+
+test('médiá: rovnaká chyba viacerých kanálov = jeden údaj v logu (YouTube 404 všetkým naraz, 2026-10-30)', async () => {
+  const logs = [];
+  const fetchImpl = async () => ({ ok: false, status: 404, headers: new Headers(), arrayBuffer: async () => Buffer.from('') });
+  const youtube = ['A', 'B', 'C', 'D'].map((x) => ({ id: `UC${x}`, label: x }));
+  const { failures } = await collectMedia({ fetchImpl, log: (m) => logs.push(m), youtube, telegram: [{ name: 'kpszsu' }], armyinform: null });
+  assert.equal(failures.length, 5);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /^\[ukraine-events\] media: 5 feed\(s\) failed — youtube ×4 \(HTTP 404\); telegram:kpszsu \(HTTP 404\)$/);
+});

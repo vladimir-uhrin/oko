@@ -7,9 +7,11 @@
  * živom lietadle posiela v poliach `t`, `r`, `desc`, `ownOp`: /v2/hex/<hex>.
  * Šetrne: po jednom s odstupom ≥ 1,1 s (adsb.lol dáva 429 pri dávkach), cache 24 h (nenájdené 2 h),
  * po 429 pauza 60 s. Len pre kartu (prehliadač pýta typ sledovaného a viditeľných lietadiel).
+ * Denný rozpočet adsb.lol (500/IP, adsbLolBudget.js, 2026-10-30): druh `type` s malou rezervou.
  */
 import { aircraftTypeName } from './aircraftSearch.js';
 import { upstream } from './upstreamStatus.js';
+import { adsbLolBudget, createAdsbLolBudget } from './adsbLolBudget.js';
 
 const UPSTREAM = 'https://api.adsb.lol/v2/hex/';
 
@@ -36,7 +38,8 @@ export function typeFromReadsb(ac, hex) {
  * @param {(ms: number) => Promise<void>} [o.sleep]
  */
 export function createAdsbLolTypeFallback({ fetchImpl = globalThis.fetch, now = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)),
-  gapMs = 1100, hitMs = 24 * 3600_000, missMs = 2 * 3600_000, pauseMs = 60_000, maxPending = 30, registry = upstream } = {}) {
+  gapMs = 1100, hitMs = 24 * 3600_000, missMs = 2 * 3600_000, pauseMs = 60_000, maxPending = 30, registry = upstream,
+  budget = (registry === upstream && now === Date.now) ? adsbLolBudget : createAdsbLolBudget({ now, registry }) } = {}) {
   const cache = new Map(); // hex → { at, data }
   let chain = Promise.resolve();
   let lastAt = 0;
@@ -51,14 +54,15 @@ export function createAdsbLolTypeFallback({ fetchImpl = globalThis.fetch, now = 
     const run = async () => {
       const again = cache.get(key);
       if (again && now() - again.at < (again.data ? hitMs : missMs)) return again.data;
-      if (now() < pausedUntil || registry.paused('adsb.lol')) return null;
+      if (now() < pausedUntil || registry.paused('adsb.lol') || !budget.allow('type')) return null;
       const wait = lastAt + gapMs - now();
       if (wait > 0) await sleep(wait);
       lastAt = now();
+      budget.spend('type');
       try {
         const res = await fetchImpl(UPSTREAM + key, { headers: { 'User-Agent': 'OKO-okolive.sk/1.0 (aircraft type)', Accept: 'application/json' },
           signal: AbortSignal.timeout(8000) });
-        registry.record('adsb.lol', { status: res.status, pauseMs: res.status === 429 ? pauseMs : 0 });
+        budget.record('type', { status: res.status, headers: res.headers });
         if (res.status === 429) { pausedUntil = now() + pauseMs; return null; }
         if (!res.ok) return null;
         const body = await res.json();
@@ -66,9 +70,9 @@ export function createAdsbLolTypeFallback({ fetchImpl = globalThis.fetch, now = 
         cache.set(key, { at: now(), data });
         if (cache.size > 20_000) cache.delete(cache.keys().next().value);
         return data;
-      } catch { registry.record('adsb.lol', { error: true }); return null; }
+      } catch { budget.record('type', { error: true }); return null; }
     };
-    if (pending >= maxPending || now() < pausedUntil || registry.paused('adsb.lol')) return Promise.resolve(null);
+    if (pending >= maxPending || now() < pausedUntil || registry.paused('adsb.lol') || !budget.allow('type')) return Promise.resolve(null);
     pending++;
     const result = chain.then(run, run).finally(() => { pending--; });
     chain = result.then(() => {}, () => {});

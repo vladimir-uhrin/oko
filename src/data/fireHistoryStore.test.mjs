@@ -69,3 +69,35 @@ test('dávka cez viac ako 3 dni s opakovanými detekciami: každá sa zapíše r
   assert.equal(await store.append([...batch, ...batch]), all.length);
   assert.equal(await store.append(all), 0);
 });
+
+test('zápis veľkej dávky uvoľňuje slučku (2026-10-30: ~150 tis. ohnísk naraz blokovalo verejné /api)', async () => {
+  const { createFireHistoryStore: create, APPEND_YIELD_EVERY } = await import('./fireHistoryStore.js');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  assert.equal(APPEND_YIELD_EVERY, 20_000);
+  const dir = mkdtempSync(join(tmpdir(), 'oko-fires-yield-'));
+  try {
+    const store = create({ dir });
+    const fires = Array.from({ length: 45_000 }, (_, i) => ({ lat: 10 + (i % 900) / 100, lon: 20 + Math.floor(i / 900) / 100, acqDate: '2026-10-30', acqTime: String(1000 + (i % 59)).padStart(4, '0'), satellite: 'N', instrument: 'VIIRS', frp: 1 }));
+    let ticks = 0;
+    const timer = setInterval(() => { ticks += 1; }, 0);
+    const n = await store.append(fires);
+    clearInterval(timer);
+    assert.ok(n > 0);
+    assert.ok(ticks >= 2, `počas zápisu prebehli časovače (${ticks}×) — slučka nestála`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('zapojenie: obnova FIRMS uvoľňuje slučku medzi parsovaním zdrojov, zlúčením, zápisom disku a históriou', async () => {
+  const { readFileSync } = await import('node:fs');
+  const cfg = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
+  assert.match(cfg, /const yieldFirmsLoop = \(\) => new Promise\(\(resolve\) => setImmediate\(resolve\)\);/);
+  assert.match(cfg, /const csv = await res\.text\(\);\n\s+await yieldFirmsLoop\(\);[^\n]*\n\s+const records = parseFirmsCsv\(csv\);/);
+  assert.match(cfg, /for \(const \[i, source\] of SOURCES\.entries\(\)\) \{\n\s+await yieldFirmsLoop\(\);/);
+  assert.match(cfg, /await yieldFirmsLoop\(\);\n\s+const merged = mergeGeoIntoFires\(fires, geo\);/);
+  assert.match(cfg, /mem = fresh;\n\s+await yieldFirmsLoop\(\);\n\s+await writeDisk\(fresh\);/);
+  assert.match(cfg, /await yieldFirmsLoop\(\);\n\s+const n = await history\.append\(fresh\.fires\);/);
+});
