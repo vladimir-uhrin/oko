@@ -95,7 +95,9 @@ test('zapojenie: obnova FIRMS uvoľňuje slučku medzi parsovaním zdrojov, zlú
   const { readFileSync } = await import('node:fs');
   const cfg = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
   assert.match(cfg, /const yieldFirmsLoop = \(\) => new Promise\(\(resolve\) => setImmediate\(resolve\)\);/);
-  assert.match(cfg, /const csv = await res\.text\(\);\n\s+await yieldFirmsLoop\(\);[^\n]*\n\s+const records = parseFirmsCsv\(csv\);/);
+  // 2026-10-30: parsovanie po častiach (GOES_NRT v jednom kuse držal vlákno 1,4 s).
+  assert.match(cfg, /const csv = await res\.text\(\);\n(?:\s*\/\/[^\n]*\n)*\s+const records = await parseFirmsCsvAsync\(csv\);/);
+  assert.doesNotMatch(cfg, /parseFirmsCsv\(csv\)/, 'synchrónne parsovanie zdroja sa na serveri nepoužíva');
   assert.match(cfg, /for \(const \[i, source\] of SOURCES\.entries\(\)\) \{\n\s+await yieldFirmsLoop\(\);/);
   assert.match(cfg, /await yieldFirmsLoop\(\);\n\s+const merged = mergeGeoIntoFires\(fires, geo\);/);
   assert.match(cfg, /mem = fresh;\n\s+await yieldFirmsLoop\(\);\n\s+await writeDisk\(fresh\);/);

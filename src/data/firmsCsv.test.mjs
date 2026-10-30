@@ -9,6 +9,8 @@ import {
   filterTrailing24h,
   isLikelyCsv,
   parseFirmsCsv,
+  parseFirmsCsvAsync,
+  FIRMS_PARSE_YIELD_EVERY,
 } from './firmsCsv.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,4 +130,35 @@ test('filterTrailing24h on the fixture keeps everything for a same-night now', (
   // 2026-07-17 02:00Z every detection is 4.5–16 h old — all inside 24 h.
   const kept = filterTrailing24h(records, Date.UTC(2026, 6, 17, 2, 0));
   assert.equal(kept.length, records.length);
+});
+
+// 2026-10-30: GOES_NRT (~230 tis. riadkov, 19 MB) v jednom kuse držal vlákno oko-api 1,4 s.
+test('parseFirmsCsvAsync: rovnaký výsledok ako synchrónne parsovanie (fixtúra, CRLF, zlé riadky, nie-CSV)', async () => {
+  const noYield = { yieldFn: async () => {} };
+  assert.deepEqual(await parseFirmsCsvAsync(FIXTURE, noYield), parseFirmsCsv(FIXTURE));
+  const messy = `\n${HEADER}\r\nnot,enough\r\n38.99488,-121.67046,303.6,0.39,0.36,2026-07-16,1006,N20,VIIRS,n,2.0NRT,290.73,0.53,N\r\n\r\n`;
+  assert.deepEqual(await parseFirmsCsvAsync(messy, noYield), parseFirmsCsv(messy));
+  assert.equal(await parseFirmsCsvAsync('<html>Invalid MAP_KEY</html>', noYield), null);
+  assert.deepEqual(await parseFirmsCsvAsync(HEADER, noYield), []);
+});
+
+test('parseFirmsCsvAsync: uvoľní vlákno pred začiatkom a potom po každých N riadkoch', async () => {
+  const row = '38.99488,-121.67046,303.6,0.39,0.36,2026-07-16,1006,N20,VIIRS,n,2.0NRT,290.73,0.53,N';
+  const text = [HEADER, ...Array.from({ length: 1000 }, () => row)].join('\n');
+  let yields = 0;
+  const records = await parseFirmsCsvAsync(text, { yieldEvery: 100, yieldFn: async () => { yields += 1; } });
+  assert.equal(records.length, 1000);
+  assert.equal(yields, 1 + 10, 'raz pred začiatkom + po 100., 200., … 1000. riadku');
+  assert.ok(FIRMS_PARSE_YIELD_EVERY >= 10_000 && FIRMS_PARSE_YIELD_EVERY <= 50_000);
+});
+
+test('parseFirmsCsvAsync: časovače bežia aj počas parsovania veľkého zdroja (predvolené uvoľňovanie)', async () => {
+  const row = '38.99488,-121.67046,303.6,0.39,0.36,2026-07-16,1006,N20,VIIRS,n,2.0NRT,290.73,0.53,N';
+  const text = [HEADER, ...Array.from({ length: 3 * FIRMS_PARSE_YIELD_EVERY }, () => row)].join('\n');
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, 0);
+  const records = await parseFirmsCsvAsync(text);
+  clearInterval(timer);
+  assert.equal(records.length, 3 * FIRMS_PARSE_YIELD_EVERY);
+  assert.ok(ticks >= 2, `počas parsovania prebehli časovače (${ticks}×) — slučka nestála`);
 });

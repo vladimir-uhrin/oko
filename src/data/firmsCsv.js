@@ -59,57 +59,104 @@ export function isLikelyCsv(text) {
 export function parseFirmsCsv(text) {
   if (!isLikelyCsv(text)) return null;
   const lines = text.split('\n');
+  const layout = csvLayout(lines);
+  const records = [];
+  for (let i = layout.headerIndex + 1; i < lines.length; i += 1) {
+    const record = parseFirmsRow(lines[i], layout);
+    if (record) records.push(record);
+  }
+  return records;
+}
 
-  // Locate the header (first non-empty line) and build a column index so the
-  // parser survives column reordering across FIRMS product versions.
+/**
+ * Po koľkých riadkoch {@link parseFirmsCsvAsync} uvoľní vlákno. GOES_NRT má ~230 tis. riadkov (19 MB)
+ * a jeho parsovanie v jednom kuse trvalo 717 ms v čistom procese a ~1,4 s v službe oko-api
+ * (2026-10-30, merač [event-loop]: blok 1 435 ms pri obnove FIRMS, z toho GC len 101 ms).
+ */
+export const FIRMS_PARSE_YIELD_EVERY = 25_000;
+
+/**
+ * To isté ako {@link parseFirmsCsv} (rovnaký výsledok), ale na serveri po {@link FIRMS_PARSE_YIELD_EVERY}
+ * riadkoch uvoľní vlákno, aby veľký zdroj nezablokoval ostatné dopyty. Uvoľní aj raz pred začiatkom —
+ * zdroje sa sťahujú súbežne a dobiehajú takmer naraz.
+ * @param {string} text - Raw CSV payload.
+ * @param {{yieldEvery?: number, yieldFn?: () => Promise<void>}} [options]
+ * @returns {Promise<?Array<object>>} Records, or null for non-CSV.
+ */
+export async function parseFirmsCsvAsync(text, {
+  yieldEvery = FIRMS_PARSE_YIELD_EVERY,
+  yieldFn = () => new Promise((resolve) => setImmediate(resolve)),
+} = {}) {
+  if (!isLikelyCsv(text)) return null;
+  await yieldFn();
+  const lines = text.split('\n');
+  const layout = csvLayout(lines);
+  const every = Math.max(1, Math.floor(Number(yieldEvery)) || FIRMS_PARSE_YIELD_EVERY);
+  const records = [];
+  for (let i = layout.headerIndex + 1, n = 1; i < lines.length; i += 1, n += 1) {
+    if (n % every === 0) await yieldFn();
+    const record = parseFirmsRow(lines[i], layout);
+    if (record) records.push(record);
+  }
+  return records;
+}
+
+/**
+ * Locate the header (first non-empty line) and build a column index so the
+ * parser survives column reordering across FIRMS product versions.
+ * @param {string[]} lines
+ */
+function csvLayout(lines) {
   let headerIndex = 0;
   while (headerIndex < lines.length && !lines[headerIndex].trim()) headerIndex += 1;
   const header = lines[headerIndex].trim().toLowerCase().split(',').map((f) => f.trim());
   const col = new Map(header.map((name, i) => [name, i]));
-  const iLat = col.get('latitude');
-  const iLon = col.get('longitude');
-  const iFrp = col.get('frp');
-  const iConfidence = col.get('confidence');
-  const iBrightness = col.get('bright_ti4') ?? col.get('brightness');
-  const iBrightnessTi5 = col.get('bright_ti5') ?? col.get('bright_t31');
-  const iDaynight = col.get('daynight');
-  const iAcqDate = col.get('acq_date');
-  const iAcqTime = col.get('acq_time');
-  const iSatellite = col.get('satellite');
-  const iInstrument = col.get('instrument');
-  const iScan = col.get('scan');
-  const iTrack = col.get('track');
+  return {
+    headerIndex,
+    width: header.length,
+    iLat: col.get('latitude'),
+    iLon: col.get('longitude'),
+    iFrp: col.get('frp'),
+    iConfidence: col.get('confidence'),
+    iBrightness: col.get('bright_ti4') ?? col.get('brightness'),
+    iBrightnessTi5: col.get('bright_ti5') ?? col.get('bright_t31'),
+    iDaynight: col.get('daynight'),
+    iAcqDate: col.get('acq_date'),
+    iAcqTime: col.get('acq_time'),
+    iSatellite: col.get('satellite'),
+    iInstrument: col.get('instrument'),
+    iScan: col.get('scan'),
+    iTrack: col.get('track'),
+  };
+}
 
-  const records = [];
-  for (let i = headerIndex + 1; i < lines.length; i += 1) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const parts = line.split(',');
-    if (parts.length < header.length) continue; // malformed row — skip
-    const lat = Number(parts[iLat]);
-    const lon = Number(parts[iLon]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-
-    records.push({
-      lat,
-      lon,
-      frp: finiteOrZero(parts[iFrp]),
-      // Categorical (l/n/h) or numeric — passed through raw; display
-      // normalization happens client-side (normalizeConfidence).
-      confidence: cell(parts, iConfidence),
-      brightness: finiteOrZero(parts[iBrightness]),
-      brightnessTi5: finiteOrZero(parts[iBrightnessTi5]),
-      daynight: cell(parts, iDaynight),
-      acqDate: cell(parts, iAcqDate),
-      acqTime: cell(parts, iAcqTime), // NOT zero-padded — kept verbatim
-      satellite: cell(parts, iSatellite),
-      instrument: cell(parts, iInstrument),
-      // Veľkosť pixla (km) — na karte „pixel ~0,4 × 0,5 km“; GOES/Met12 hlásia 0 alebo nezmysly.
-      scan: finiteOrZero(parts[iScan]),
-      track: finiteOrZero(parts[iTrack]),
-    });
-  }
-  return records;
+/** One data row → record, or null for an empty/malformed row. */
+function parseFirmsRow(rawLine, c) {
+  const line = rawLine.trim();
+  if (!line) return null;
+  const parts = line.split(',');
+  if (parts.length < c.width) return null; // malformed row — skip
+  const lat = Number(parts[c.iLat]);
+  const lon = Number(parts[c.iLon]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return {
+    lat,
+    lon,
+    frp: finiteOrZero(parts[c.iFrp]),
+    // Categorical (l/n/h) or numeric — passed through raw; display
+    // normalization happens client-side (normalizeConfidence).
+    confidence: cell(parts, c.iConfidence),
+    brightness: finiteOrZero(parts[c.iBrightness]),
+    brightnessTi5: finiteOrZero(parts[c.iBrightnessTi5]),
+    daynight: cell(parts, c.iDaynight),
+    acqDate: cell(parts, c.iAcqDate),
+    acqTime: cell(parts, c.iAcqTime), // NOT zero-padded — kept verbatim
+    satellite: cell(parts, c.iSatellite),
+    instrument: cell(parts, c.iInstrument),
+    // Veľkosť pixla (km) — na karte „pixel ~0,4 × 0,5 km“; GOES/Met12 hlásia 0 alebo nezmysly.
+    scan: finiteOrZero(parts[c.iScan]),
+    track: finiteOrZero(parts[c.iTrack]),
+  };
 }
 
 /**

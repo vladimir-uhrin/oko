@@ -150,7 +150,7 @@ import {
   normalizeBudget as normalizeTomTomBudget,
   isOverBudget as isTomTomOverBudget,
 } from './src/data/tomtomTiles.js';
-import { filterTrailing24h, parseFirmsCsv } from './src/data/firmsCsv.js';
+import { filterTrailing24h, parseFirmsCsvAsync } from './src/data/firmsCsv.js';
 import { collapseGeoDetections, mergeGeoIntoFires } from './src/data/firmsGeo.js';
 import { fireNewsQuery, fireNewsCellKey, fireNewsVerdict, nearestPlace, parseBingNewsRss, bingNewsUrl, fireHistoryStats } from './src/data/fireNews.js';
 import { createFireHistoryStore, slimFire, FIRE_HISTORY_MAX_DAYS } from './src/data/fireHistoryStore.js';
@@ -3564,8 +3564,8 @@ export function firmsProxy() {
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const csv = await res.text();
-    await yieldFirmsLoop(); // zdroje dobiehajú takmer naraz — nech sa parsovanie neskladá do jedného bloku
-    const records = parseFirmsCsv(csv);
+    // Po častiach (2026-10-30): GOES_NRT má ~230 tis. riadkov a v jednom kuse držal vlákno 1,4 s.
+    const records = await parseFirmsCsvAsync(csv);
     if (records === null) throw new Error('non-CSV upstream response');
     return records;
   }
