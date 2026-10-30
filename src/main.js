@@ -71,6 +71,7 @@ import { createCountryBoundaries } from './data/countryBoundaries.js';
 import { installZoomBorders } from './data/zoomBorders.js';
 import { createCountryLabels } from './data/countryLabels.js';
 import { installFarGlobe } from './farGlobe.js';
+import { applyWheelZoom } from './wheelZoom.js';
 import { createConflictBulletin } from './conflictBulletin.js';
 import { applyFrontScene, frontSceneById, frontSceneFraming, frontSceneLabel, listFrontScenes } from './ukraineFrontScenes.js';
 import { MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel } from './data/mideastTheatres.js';
@@ -353,6 +354,9 @@ async function init() {
     viewer.scene.skyAtmosphere.atmosphereLightIntensity = 18;
     viewer.scene.skyAtmosphere.saturationShift = -0.12;
     viewer.scene.skyAtmosphere.brightnessShift = -0.08;
+
+    // Pokojnejší zoom kolieskom na počítači (src/wheelZoom.js, 2026-10-30: zemeguľa sa pri skrolovaní približovala príliš rýchlo).
+    applyWheelZoom(viewer.scene.screenSpaceCameraController, { coarsePointer: window.matchMedia?.('(pointer: coarse)')?.matches === true });
 
     loaderStatus.textContent = t('loader.google-tiles');
     let tileset = null;
