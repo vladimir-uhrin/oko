@@ -77,6 +77,9 @@ než sa pustíš do zmien v `src/`.
 6. **Etická čiara upstreamu platí aj tu.** Projekt modeluje objekty, infraštruktúru
    a systémy — nie ľudí. Žiadne vyhľadávanie osôb, rozpoznávanie tvárí ani sledovanie
    jednotlivcov. Ak ťa niečo tlačí týmto smerom, zastav sa a povedz mi to.
+   **Výnimka (vlastník 2026-10-31): verejní činitelia.** Lety a cesty verejných činiteľov
+   (premiér, ministri, štátne a vládne lietadlá aj charterové stroje, ktorými letia) sa
+   dohľadávať smú z verejných dát (ADS-B, správy). Pre súkromné osoby čiara platí ďalej.
 7. **Licencie dát.** Každý nový zdroj zapíš do `DATA_SOURCES.md` aj s podmienkami
    použitia. Slovenské kamerové zdroje väčšinou **nie sú** deklarované otvorené dáta —
    pred integráciou overíme ToS. Pozri skill `sk-data-source`.
