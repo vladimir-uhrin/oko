@@ -23,8 +23,11 @@
   --text-primary: #e8eaed;
   --text-secondary: rgba(232, 234, 237, 0.5);
   --text-dim: rgba(232, 234, 237, 0.3);
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Náhradné písma so zladenými metrikami (2026-10-31, PageSpeed CLS): kým JetBrains Mono / Inter
+     z Google Fonts nedôjdu, kreslí sa Courier New / Arial roztiahnuté na rovnakú výšku riadku a šírku
+     znaku (@font-face pred sekciou ikon na konci súboru), takže doskočenie písma nič neposunie. */
+  --font-mono: 'JetBrains Mono', 'JetBrains Mono Fallback', 'SF Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter', 'Inter Fallback', -apple-system, BlinkMacSystemFont, sans-serif;
   --panel-radius: 16px;
   --btn-radius: 10px;
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -512,6 +515,7 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   font-family: var(--font-mono);
   font-size: 26px;
   font-weight: 600;
+  line-height: 1.32; /* = JetBrains Mono „normal"; pevná výška riadku, nech náhradné písmo neposunie nadpis */
   letter-spacing: 8px;
   color: var(--text-primary);
   text-shadow: 0 0 30px var(--accent-glow);
@@ -1103,6 +1107,7 @@ html.oko-preloader-demo #loading-screen.hidden {
   font-family: var(--font-mono);
   font-size: 18px;
   font-weight: 600;
+  line-height: 1.32; /* = JetBrains Mono „normal" (CLS 2026-10-31): text preloadera stojí, kým písmo doskočí */
   letter-spacing: 6px;
   color: var(--text-primary);
   margin-bottom: 12px;
@@ -1111,6 +1116,7 @@ html.oko-preloader-demo #loading-screen.hidden {
 .loader-status {
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.32;
   letter-spacing: 2px;
   color: var(--text-dim);
   animation: pulse 2s ease-in-out infinite;
@@ -1126,6 +1132,7 @@ html.oko-preloader-demo #loading-screen.hidden {
   margin-top: 12px;
   font-family: var(--font-mono);
   font-size: 10px;
+  line-height: 1.32;
   letter-spacing: 3px;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -14288,6 +14295,29 @@ body.oko-consent-open #toast {
 .volby-color-row[hidden], .volby-legend-party[hidden] { display: none !important; }
 .volby-chip-color[aria-pressed="true"] { color: #e9f6ff; border-color: rgba(57, 208, 255, 0.7); background: rgba(57, 208, 255, 0.16); }
 .volby-legend-party .volby-legend-note { flex-basis: 100%; font-size: 9.5px; opacity: 0.75; }
+
+/* Náhradné písma so zladenými metrikami (2026-10-31, PageSpeed: posun rozloženia 0,07–0,10 pri doskočení
+   písma z Google Fonts). Local písmo s rovnakou šírkou znaku dostane výšku nad/pod linkou webového písma:
+   JetBrains Mono = 0,60 em šírka, 1,02 + 0,30 em výška (Courier New a jeho metrické dvojčatá Liberation Mono,
+   Cousine majú 0,60 em; DejaVu Sans Mono 0,602); Inter = Arial × 107,12 % (xAvgCharWidth), 0,9044 + 0,2252 em
+   (Next.js font-fallbacks). Keď sa local nenájde, platí ďalšia rodina v --font-mono / --font-sans ako doteraz. */
+@font-face {
+  font-family: 'JetBrains Mono Fallback';
+  src: local('Courier New'), local('CourierNewPSMT'), local('Liberation Mono'), local('LiberationMono'), local('Cousine'), local('DejaVu Sans Mono'), local('DejaVuSansMono'), local('Nimbus Mono PS');
+  size-adjust: 100%;
+  ascent-override: 102%;
+  descent-override: 30%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Inter Fallback';
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans'), local('LiberationSans'), local('Arimo'), local('Helvetica'), local('Nimbus Sans');
+  size-adjust: 107.12%;
+  ascent-override: 90.44%;
+  descent-override: 22.52%;
+  line-gap-override: 0%;
+}
+
 
 /* ═══ Ikony Material Symbols Outlined — vlastný výrez (2026-10-31) ═══
    Namiesto celého písma z Google Fonts (PageSpeed: 324 KB, najväčší súbor po Cesiu a balíku) sa načíta

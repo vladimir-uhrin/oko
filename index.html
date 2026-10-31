@@ -97,6 +97,22 @@
     </div>
   </div>
 
+  <!-- Rozloženie telefónu hneď (2026-10-31, PageSpeed CLS 0,07): triedu oko-mobile dával až mobilný plášť
+       (src/mobileShell.js) po štarte Cesia, takže nadpis, dok a navigácia sa v 30. sekunde preskladali so
+       skokom. Tu to isté pravidlo ako resolveShellMode (≤ 900 px, alebo dotyk ≤ 1180 px; naležato ≤ 520 px
+       výšky) ešte pred nadpisom; plášť ho neskôr len potvrdí. oko-look-in-dock dáva main.js vždy — tiež hneď.
+       Čísla stráži src/startupLayoutStability.test.mjs. -->
+  <script>
+    (function (body, win) {
+      var w = win.innerWidth || 0, h = win.innerHeight || 0, coarse = false;
+      try { coarse = win.matchMedia('(pointer: coarse)').matches === true; } catch (e) {}
+      var mobile = w > 0 && (w <= 900 || (coarse && w <= 1180));
+      body.classList.toggle('oko-mobile', mobile);
+      body.classList.toggle('oko-mobile-landscape', mobile && h > 0 && h <= 520 && w > h);
+      body.classList.add('oko-look-in-dock');
+    })(document.body, window);
+  </script>
+
   <div id="cesiumContainer"></div>
   <div id="world-overlay-root" aria-hidden="true">
     <canvas id="world-overlay-canvas"></canvas>
