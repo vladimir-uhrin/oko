@@ -291,8 +291,11 @@ async function init() {
 
     // skyBox: false vynechá aj Slnko a Mesiac (CesiumWidget ich vytvára spolu
     // s oblohou) — doplniť, nech sa nič okrem načasovania oblohy nemení.
-    viewer.scene.sun = new Cesium.Sun();
-    viewer.scene.moon = new Cesium.Moon();
+    // Bez GPU ani Slnko a Mesiac (softwareRenderer.js, 2026-10-31): ďalšie shadery a priechody procesorom.
+    if (!softwareRender) {
+      viewer.scene.sun = new Cesium.Sun();
+      viewer.scene.moon = new Cesium.Moon();
+    }
 
     // Hodiny scény v reálnom čase + minútový tik pre terminátor (globeLighting.js):
     // Viewer inak zmrazí clock.currentTime na čase načítania a Slnko s ním.
@@ -309,7 +312,8 @@ async function init() {
     const sharpStars = new URLSearchParams(window.location.search).get('stars') !== 'cesium';
     if (!sharpStars) viewer.scene.skyBox = Cesium.SkyBox.createEarthSkyBox();
     const startSharpStarfield = () => {
-      if (!sharpStars) return;
+      // Bez GPU bez hviezd (2026-10-31): maľovanie oblohy a šesť stien Tycho by kreslil procesor.
+      if (!sharpStars || softwareRender) return;
       const run = () => {
         try { installSharpStarfield(viewer); } catch (error) { console.warn('[Init] sharp starfield unavailable:', error); }
       };
@@ -345,6 +349,9 @@ async function init() {
     // expandable bottom-left credit lightbox (showOnScreen=false), so they never
     // clutter the on-globe attribution line.
     registerDataCredits(viewer);
+    // Odkazy kreditov Cesia („Data attribution", krížik okna) sú tlačidlá bez href — rola tlačidla
+    // (Lighthouse SEO „crawlable anchors", 2026-10-31; čítačke obrazovky sedí tlačidlo viac než odkaz bez cieľa).
+    for (const link of document.querySelectorAll('.cesium-credit-expand-link, .cesium-credit-lightbox-close')) link.setAttribute('role', 'button');
 
     // Hide Cesium's default globe — Google Photorealistic 3D Tiles provide their own
     // globe at all LODs (street level → orbital). The default globe's 2D imagery
@@ -354,7 +361,8 @@ async function init() {
     // Keep a sky behind Google 3D Tiles, but soften Cesium's high-intensity
     // default atmosphere. With the globe hidden its bright limb otherwise
     // reads as a hard cyan seam where distant photoreal tiles meet the sky.
-    viewer.scene.skyAtmosphere.show = true;
+    // Bez GPU atmosféra vypnutá (softwareRenderer.js, 2026-10-31).
+    viewer.scene.skyAtmosphere.show = !softwareRender;
     viewer.scene.skyAtmosphere.atmosphereLightIntensity = 18;
     viewer.scene.skyAtmosphere.saturationShift = -0.12;
     viewer.scene.skyAtmosphere.brightnessShift = -0.08;

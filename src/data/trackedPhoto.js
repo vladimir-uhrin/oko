@@ -274,6 +274,7 @@ export function installTrackedPhoto(viewer, { container, fetchImpl, storage, now
   if (typeof now === 'function') state.now = now;
   const root = doc.createElement('a');
   root.className = 'tracked-photo';
+  root.id = 'tracked-photo'; // skrytý pás bez href je kotva s id, nie nefunkčný odkaz (Lighthouse SEO, 2026-10-31)
   root.target = '_blank';
   root.rel = 'noopener'; // ZÁMERNE bez nofollow — podmienka Planespotters
   root.hidden = true;

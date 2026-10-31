@@ -104,6 +104,7 @@ import {
 import { createGroundSnap } from './groundSnap.js';
 import { fleetContactSkipsTick, metersPerPixelPerMeter, pinBillboardBufferUsage, positionWriteThresholdM } from './fleetTickGate.js';
 import { isStartupReady } from '../startupGate.js';
+import { isSoftwareRenderActive } from '../softwareRenderer.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { geoidSurfaceLastResortM, pickRenderAltitudeM } from './renderAltitude.js';
 import { allocateCorridorCells, cachedGroundFloor, cachedMeshFloor, coarseFloorCoord, corridorFloorCells, displayFloorHeightM, floorAltitudeM, neighborFloorM, stickyFloorCell, warmGroundFloor, resolveGroundFloorCellsBounded, GROUND_FLOOR_LIFT_M } from './groundFloor.js';
@@ -2083,6 +2084,9 @@ const MODEL_TINTS = Object.freeze({
  *  (`_trackedModelRegimeActive`). */
 function _modelRegimeActive() {
   if (!_models3dEnabled) return false;
+  // Bez GPU (softwareRenderer.js, 2026-10-31): modely flotily nie — ich podlaha (scene.sampleHeight,
+  // čítanie hĺbky procesorom) a kreslenie GLB držali hlavné vlákno; lietadlá ostávajú ako ikony.
+  if (isSoftwareRenderActive()) return false;
   const h = _viewer?.camera?.positionCartographic?.height ?? Infinity;
   return h < MODEL_ALT_CEIL_M;
 }

@@ -17,6 +17,7 @@ import militaryAwarenessLayer, {
 import { initCameraVerbs, moveCamera, flyRoute, interruptCameraMotion, adjustOrbitRange } from '../cameraVerbs.js';
 import { cachedGroundFloor, warmGroundFloor } from '../data/groundFloor.js';
 import { isPickedWorldPosition } from '../data/scenePick.js';
+import { isSoftwareRenderActive } from '../softwareRenderer.js';
 import { frontSceneChoices, frontSceneLabel, resolveFrontScene } from '../ukraineFrontScenes.js';
 import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
@@ -3006,7 +3007,9 @@ function getViewTargetCartesian(viewer) {
   const center = new Cesium.Cartesian2(width / 2, height / 2);
   let position = null;
 
-  if (scene.pickPositionSupported && typeof scene.pickPosition === 'function') {
+  // Bez GPU (softwareRenderer.js, 2026-10-31) hĺbku nečítať — pickPosition procesorom stál stovky ms
+  // a predohrev beží po každom pohybe kamery, nie len pri hlase; elipsoid nižšie stačí.
+  if (scene.pickPositionSupported && typeof scene.pickPosition === 'function' && !isSoftwareRenderActive()) {
     try {
       position = scene.pickPosition(center);
     } catch {

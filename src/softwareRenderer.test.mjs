@@ -39,3 +39,30 @@ test('úsporný režim len pri softvérovom kreslení', () => {
   assert.equal(applySoftwareRendererBudget(gpu, 'Apple GPU'), false);
   assert.deepEqual(gpu, mk());
 });
+
+test('úsporný režim bez GPU (2026-10-31): príznak pre vrstvy, atmosféra, hmla, HDR a FXAA vypnuté', async () => {
+  const { isSoftwareRenderActive, _setSoftwareRenderActiveForTest } = await import('./softwareRenderer.js');
+  _setSoftwareRenderActiveForTest(false);
+  assert.equal(isSoftwareRenderActive(), false);
+  const scene = { msaaSamples: 4, skyAtmosphere: { show: true }, fog: { enabled: true }, globe: { showGroundAtmosphere: true }, highDynamicRange: true, postProcessStages: { fxaa: { enabled: true } } };
+  assert.equal(applySoftwareRendererBudget({ targetFrameRate: 60, resolutionScale: 1, useBrowserRecommendedResolution: false, scene }, 'llvmpipe'), true);
+  assert.equal(isSoftwareRenderActive(), true);
+  assert.deepEqual(scene, { msaaSamples: 1, skyAtmosphere: { show: false }, fog: { enabled: false }, globe: { showGroundAtmosphere: false }, highDynamicRange: false, postProcessStages: { fxaa: { enabled: false } } });
+  _setSoftwareRenderActiveForTest(false);
+  assert.equal(applySoftwareRendererBudget({ targetFrameRate: 60, scene: {} }, 'Apple GPU'), false, 'GPU: nič sa nemení');
+  assert.equal(isSoftwareRenderActive(), false);
+});
+
+test('bez GPU: modely flotily, cieľ kamery, Slnko/Mesiac, hviezdy a atmosféra vypnuté (pripnutie zdrojov)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  for (const f of ['./data/flights.js', './data/militaryFlights.js']) {
+    assert.match(read(f), /function _modelRegimeActive\(\) \{\n  if \(!_models3dEnabled\) return false;\n(?:  \/\/[^\n]*\n)*  if \(isSoftwareRenderActive\(\)\) return false;/, f);
+    assert.match(read(f), /import \{ isSoftwareRenderActive \} from '\.\.\/softwareRenderer\.js';/, f);
+  }
+  assert.match(read('./voice/gevActions.js'), /pickPositionSupported && typeof scene\.pickPosition === 'function' && !isSoftwareRenderActive\(\)/);
+  const main = read('./main.js');
+  assert.match(main, /if \(!softwareRender\) \{\n\s*viewer\.scene\.sun = new Cesium\.Sun\(\);\n\s*viewer\.scene\.moon = new Cesium\.Moon\(\);/);
+  assert.match(main, /if \(!sharpStars \|\| softwareRender\) return;/);
+  assert.match(main, /viewer\.scene\.skyAtmosphere\.show = !softwareRender;/);
+});

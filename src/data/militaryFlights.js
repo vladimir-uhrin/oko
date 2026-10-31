@@ -47,6 +47,7 @@ import { parseSquawk, squawkAlert, verticalTrendGlyph } from './flightProgress.j
 import { createGroundSnap } from './groundSnap.js';
 import { fleetContactSkipsTick, metersPerPixelPerMeter, pinBillboardBufferUsage, positionWriteThresholdM } from './fleetTickGate.js';
 import { isStartupReady } from '../startupGate.js';
+import { isSoftwareRenderActive } from '../softwareRenderer.js';
 import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { pickRenderAltitudeM } from './renderAltitude.js';
 import { cachedGroundFloor, floorAltitudeM, warmGroundFloor, resolveGroundFloorCellsBounded, GROUND_FLOOR_LIFT_M } from './groundFloor.js';
@@ -1590,6 +1591,9 @@ function _modelColor(icao24) {
  *  (`_trackedModelRegimeActive`). Mirror of flights.js. */
 function _modelRegimeActive() {
   if (!_models3dEnabled) return false;
+  // Bez GPU (softwareRenderer.js, 2026-10-31): modely flotily nie — ich podlaha (scene.sampleHeight,
+  // čítanie hĺbky procesorom) a kreslenie GLB držali hlavné vlákno; lietadlá ostávajú ako ikony.
+  if (isSoftwareRenderActive()) return false;
   const h = _viewer?.camera?.positionCartographic?.height ?? Infinity;
   return h < MODEL_ALT_CEIL_M;
 }

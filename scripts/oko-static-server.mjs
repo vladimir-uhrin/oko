@@ -126,7 +126,8 @@ const TYPES = {
 
 /**
  * Cache-Control podľa cesty (pure): hashované assety a URL s `?v=` nemenné rok; HTML
- * vždy overiť; /cesium/ a /models/ 7 dní (ETag → 304); ostatné hodina.
+ * vždy overiť; /cesium/, /models/ a obrázky (logo, piny, náhľad zdieľania — menia sa
+ * zriedka; PageSpeed 2026-10-31) 7 dní (ETag → 304); ostatné hodina.
  * @param {string} pathname dekódovaná cesta bez query
  * @param {string} ext prípona malými písmenami
  * @param {string} url surové req.url (kvôli query)
@@ -135,6 +136,7 @@ export function cacheControlFor(pathname, ext, url) {
   if (ext === '.html') return 'no-cache';
   if (pathname.startsWith('/assets/') || /[?&]v=[^&]+/.test(url)) return 'public, max-age=31536000, immutable';
   if (pathname.startsWith('/cesium/') || pathname.startsWith('/models/')) return 'public, max-age=604800';
+  if (/^\.(svg|png|jpe?g|webp|gif|ico)$/.test(ext)) return 'public, max-age=604800';
   return 'public, max-age=3600';
 }
 

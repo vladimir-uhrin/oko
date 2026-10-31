@@ -82,6 +82,7 @@ export function installVesselPhoto(viewer, { container, getSelected, lookup } = 
   if (typeof lookup === 'function') state.lookup = lookup;
   const root = doc.createElement('a');
   root.className = 'tracked-photo vessel-photo';
+  root.id = 'vessel-photo'; // ako trackedPhoto.js: skrytý pás bez href je kotva s id (Lighthouse SEO, 2026-10-31)
   root.target = '_blank';
   root.rel = 'noopener';
   root.hidden = true;

@@ -93,7 +93,8 @@ test('oko-static-server: index no-cache a indexovateľný, účet noindex, asset
     assert.equal(notModified.status, 304);
     const svg = await fetch(base + '/logo.svg');
     assert.equal(svg.headers.get('content-type'), 'image/svg+xml');
-    assert.equal(svg.headers.get('cache-control'), 'public, max-age=3600');
+    assert.equal(svg.headers.get('cache-control'), 'public, max-age=604800', 'obrázky v koreni 7 dní (PageSpeed 2026-10-31)');
+    assert.equal((await fetch(base + '/sitemap.xml')).headers.get('cache-control'), 'public, max-age=3600', 'ostatné súbory hodina');
     // 2026-09-28 (štart): Cesium a modely sa sťahovali každú návštevu (Cloudflare 4 h).
     const cesiumVersioned = await fetch(base + '/cesium/Cesium.js?v=1.138.0');
     assert.equal(cesiumVersioned.status, 200);

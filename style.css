@@ -12566,7 +12566,8 @@ body.oko-mobile #top-center-actions { top: 52px; left: 12px; right: auto; transf
 body.oko-mobile #lang-switch { top: 10px; right: 12px; }
 /* Články a Súkromie pod sebou vpravo v druhom riadku lišty, ako na počítači pod SK·EN (2026-10-15,
    vlastník: „to označené potom niekde uprac"): vedľa seba siahali až k piatim tlačidlám vľavo
-   a SÚKROMIE sa na 375 px orezávalo. Dva riadky po 18 px vyplnia pás 52–88 px; prst trafí širší
+   a SÚKROMIE sa na 375 px orezávalo. Dva riadky po 24 px vyplnia pás 52–100 px (2026-10-31 Lighthouse
+   „target size": riadky po 18 px sa prstom ťažko trafia, 24 px je minimum); prst trafí širší
    neviditeľný cieľ (padding vľavo), vzhľad ostáva. */
 body.oko-mobile #lang-switch #topics-link,
 body.oko-mobile #lang-switch #consent-open {
@@ -12576,7 +12577,7 @@ body.oko-mobile #lang-switch #consent-open {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  min-height: 18px;
+  min-height: 24px;
   padding: 0 2px 0 24px;
   font-size: 9px;
   letter-spacing: 2px;
@@ -12584,7 +12585,7 @@ body.oko-mobile #lang-switch #consent-open {
   text-shadow: none;
 }
 body.oko-mobile #lang-switch #topics-link { top: 52px; }
-body.oko-mobile #lang-switch #consent-open { top: 70px; }
+body.oko-mobile #lang-switch #consent-open { top: 76px; }
 body.oko-mobile #global-loading-status { top: calc(var(--oko-topbar-h) + 8px); }
 /* Mobil na výšku (2026-10-04, vlastník: „prekontroluj mobil friendly"): atribúcia Cesium/Google
    má na jednom riadku ~440 px — na telefóne 360–390 px vytŕčala a „Data attribution" bol mimo
@@ -13851,7 +13852,8 @@ body.oko-mobile #oko-consent .oko-consent-strip { padding: 7px 12px; gap: 8px; }
 body.oko-mobile #oko-consent .oko-consent-tiles { display: none; }
 body.oko-mobile #oko-consent .oko-consent-body { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 10px 12px 6px; }
 body.oko-mobile #oko-consent .oko-consent-title { margin-bottom: 4px; font-size: 14px; }
-body.oko-mobile #oko-consent .oko-consent-text { font-size: 11.5px; line-height: 1.4; }
+/* 12 px, nie 11,5 (2026-10-31 Lighthouse „legible font sizes": lišta súhlasu je pri prvej návšteve 57 % textu na obrazovke). */
+body.oko-mobile #oko-consent .oko-consent-text { font-size: 12px; line-height: 1.4; }
 body.oko-mobile #oko-consent .oko-consent-foot { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 12px 10px; }
 body.oko-mobile #oko-consent .oko-consent-policy { order: 2; text-align: center; font-size: 9px; }
 body.oko-mobile #oko-consent .oko-consent-actions { flex-wrap: nowrap; }

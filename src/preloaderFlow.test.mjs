@@ -100,7 +100,8 @@ test('zapojenie: malý vstup PRED main.js, oko a texty preloadera bez zmeny, pl�
   const bodyStart = html.indexOf('<body>');
   assert.ok(bodyStart > 0 && screen > bodyStart && screen < html.indexOf('<div id="cesiumContainer">'), 'preloader pred glóbusom a rozhraním');
   for (const line of [
-    '<span class="loader-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" /><span class="brand-eye" aria-hidden="true"></span></span>',
+    // 2026-10-31 PageSpeed: logo je najväčší prvok prvého obrazu (LCP) — sťahuje sa prednostne (fetchpriority).
+    '<span class="loader-logo brand-logo" data-logo-gaze data-logo-src="/logo.svg" aria-hidden="true"><img src="/logo.svg" alt="" fetchpriority="high" /><span class="brand-eye" aria-hidden="true"></span></span>',
     // 2026-09-27 vlastník: „aj preloader treba doplniť" — odznak BETA pri názve (zámerná zmena)
     '<h2>OK<span class="title-accent">O</span><span class="beta-badge">BETA</span></h2>',
     '<p class="loader-status" data-i18n="loader.start">Štartujem fotorealistický svet…</p>',

@@ -198,6 +198,7 @@ export function createUkrainePanel({
   const reportClaim = el('p', 'ukraine-note ukraine-dim', translate('ukraine.report.claim'));
   const reportLink = el('a', 'ukraine-report-link', `${translate('ukraine.report.linkout')} ↗`);
   reportLink.hidden = true;
+  reportLink.id = 'ukraine-report-link'; // skrytý bez href, kým hlásenie nemá adresu: kotva s id (Lighthouse SEO, 2026-10-31)
   const reportSource = el('span', 'ukraine-report-source', translate('ukraine.report.source'));
   const reportFoot = el('div', 'ukraine-report-foot');
   reportFoot.appendChild(reportLink);
