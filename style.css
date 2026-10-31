@@ -667,6 +667,19 @@ body.cockpit-mode #cockpit-cloud-effects.active {
 }
 /* Titulok je pointer-events: none (klik ide na glóbus) — odznak si ho vezme kvôli bubline. */
 #title-bar .beta-badge { align-self: center; pointer-events: auto; cursor: help; }
+/* Logo + názov = odkaz na začiatok (2026-10-31): rovnaký riadok ako doteraz (flex a medzera po h1), klikateľný
+   aj keď #title-bar udalosti neprijíma; bez podčiarknutia, na fokus tenký rám. */
+#title-bar h1 #title-home {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  color: inherit;
+  text-decoration: none;
+  pointer-events: auto;
+  cursor: pointer;
+}
+#title-bar h1 #title-home:hover { filter: brightness(1.12); }
+#title-bar h1 #title-home:focus-visible { outline: 1px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 /* V preloaderi menší (09-27, vlastník: „beta menšie") — len značka pri názve, nie nadpis. */
 .loader-content h2 .beta-badge { margin-left: 2px; position: relative; top: -2px; font-size: 7px; letter-spacing: 1.5px; padding: 2px 2px 2px 3px; border-radius: 2px; }
 

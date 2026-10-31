@@ -20,7 +20,8 @@ test('logo: červená zrenica (skutočný span) pulzuje jemne (dych + zriedkavý
 
 test('BETA červeným pri názve v titulku aj v preloaderi; pod heslom podpis autora ako v preloaderi', () => {
   // vlastník 2026-09-27: „napísať, že je app vo vývoji, napr. BETA červeným a pod tým moje meno"
-  assert.match(html, /<span>OK<span class="title-accent">O<\/span><\/span><span class="beta-badge" data-i18n-title="title\.beta-hint" title="[^"]+">BETA<\/span><\/h1>/);
+  // 2026-10-31: celý nadpis je odkaz na začiatok (#title-home, titleHomeLink.test.mjs) — BETA ostáva vnútri.
+  assert.match(html, /<span>OK<span class="title-accent">O<\/span><\/span><span class="beta-badge" data-i18n-title="title\.beta-hint" title="[^"]+">BETA<\/span><\/a><\/h1>/);
   assert.match(html, /<h2>OK<span class="title-accent">O<\/span><span class="beta-badge">BETA<\/span><\/h2>/);
   assert.match(css, /\.beta-badge \{[\s\S]*?color: #ff2e2e;/, 'červená zrenice loga');
   assert.match(css, /#title-bar \.beta-badge \{[^}]*pointer-events: auto;/, 'bublina v titulku, ktorý je pointer-events: none');

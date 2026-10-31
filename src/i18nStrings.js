@@ -76,6 +76,7 @@ export const EN_STRINGS = Object.freeze({
 
   'title.subtitle': 'NO PLACE LEFT BEHIND',
   'title.beta-hint': 'In development — things may change or break',
+  'title.home': 'Back to the start: globe, flyover and default layout',
   'style.active-label': 'Active style',
 
   'actions.clear-layers': 'Turn off all selected data layers',
@@ -2818,6 +2819,7 @@ export const SK_STRINGS = Object.freeze({
 
   'title.subtitle': 'ŽIADNE MIESTO NEOSTANE BOKOM',
   'title.beta-hint': 'Aplikácia vo vývoji — veci sa môžu meniť alebo nefungovať',
+  'title.home': 'Späť na začiatok: glóbus, prelet a základné rozloženie',
   'style.active-label': 'Aktívny štýl',
 
   'actions.clear-layers': 'Vypnúť všetky zvolené dátové vrstvy',
