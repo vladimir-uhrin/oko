@@ -12612,20 +12612,40 @@ body.oko-mobile #lang-switch #consent-open {
 body.oko-mobile #lang-switch #topics-link { top: 52px; }
 body.oko-mobile #lang-switch #consent-open { top: 76px; }
 body.oko-mobile #global-loading-status { top: calc(var(--oko-topbar-h) + 8px); }
-/* Mobil na výšku (2026-10-04, vlastník: „prekontroluj mobil friendly"): atribúcia Cesium/Google
-   má na jednom riadku ~440 px — na telefóne 360–390 px vytŕčala a „Data attribution" bol mimo
-   obrazovky. Zalamovať nesmie (rozloženie doku počíta s 18 px), tak sa drží v šírke okna
-   a posúva prstom; nič sa neskrýva (podmienky Cesium ion a Google). Posúva sa vnútorný blok
-   Cesia (inak absolútny — v orezanom kontajneri by zmizol); šírku vonkajšieho #cesium-credits
-   riadia pravidlá rozloženia (width: auto !important). */
+/* Mobil (2026-10-31, vlastník: „toto skry alebo to ozaj daj niekam dolu"): atribúcia Cesium ion + Google
+   mala jeden riadok ~440 px a sedela nad dokom uprostred obrazovky. Teraz je to úzky stĺpec v ľavom dolnom
+   rohu hneď nad lištou, vedľa doku (84 px — aj na 360 px širokom telefóne je vľavo od doku 93 px): logá
+   13 px pod sebou, texty 7 px zalomené; plášť (mobileShell.js) dáva
+   bottom = zdvih doku a nad dok kredity zdvihne, len keď sa s ním vodorovne prekrývajú (úzke telefóny).
+   Nič sa neskrýva — logo Cesium ion, odkaz na cenník, logo Google aj „Data attribution" ostávajú (podmienky
+   Cesium ion a Google; logo Google sa nikdy neodstraňuje); len ozdobný oddeľovač „•" má nulovú veľkosť
+   (display: none pri #cesium-credits stráži creditAttribution.test).
+   Cesium každú snímku píše inline display: inline, preto !important. Selektor s :not() prebíja pravidlá
+   rozloženia doku (left, max-width) rovnakej váhy. */
+body.oko-mobile:not(.ui-clean-view):not(.recording-mode) #cesium-credits {
+  left: 8px;
+  max-width: 84px;
+  width: auto !important;
+  white-space: normal;
+  font-size: 7px;
+  line-height: 1.15;
+  text-align: left;
+}
 body.oko-mobile #cesium-credits .cesium-widget-credits {
   position: static;
   display: block;
-  max-width: calc(100vw - 24px);
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  max-width: 84px;
 }
+body.oko-mobile #cesium-credits .cesium-credit-logoContainer,
+body.oko-mobile #cesium-credits .cesium-credit-textContainer,
+body.oko-mobile #cesium-credits .cesium-credit-wrapper,
+body.oko-mobile #cesium-credits .cesium-credit-expand-link {
+  display: block !important;
+  margin: 0;
+}
+body.oko-mobile #cesium-credits .cesium-credit-delimiter { font-size: 0; line-height: 0; }
+body.oko-mobile #cesium-credits img[src*="ion-credit"] { height: 13px; width: auto; vertical-align: 0 !important; display: block; }
+body.oko-mobile #cesium-credits img[alt="Google"] { height: 13px; width: auto; vertical-align: 0 !important; display: block; margin-top: 3px; }
 /* Dotyk: drobné prepínače a čipy (ZAP/VYP vrstiev 43×20, filtre 16 px, tlačidlá scén 26 px,
    rozsahy plynu 18 px, režim 3D modelov 22 px, STD hlasu 12 px) dostanú neviditeľný väčší
    cieľ — vzhľad ostáva, prst sa trafí (rovnako ako krížik karty). */

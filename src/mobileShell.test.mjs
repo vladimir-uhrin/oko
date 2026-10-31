@@ -161,21 +161,33 @@ test('creditsBottomClear: kredity pod osou počasia idú nad os aj nad výber vr
   assert.equal(creditsBottomClear({ ...at, height: 0, obstacles: [timeline] }), 152, 'nezmerané kredity sa nehýbu');
 });
 
-test('plášť na mobile: os počasia v páse kreditov → kredity nad ňou; skrytie osi ich vráti', () => {
+test('plášť na mobile (2026-10-31): kredity sedia na lište vedľa doku; nad dok či os počasia idú, len keď sa prekrývajú', () => {
   const { doc, byId } = buildDom();
-  const timeline = makeNode('div', { id: 'meteo-timeline' });
-  doc.body.appendChild(timeline);
-  byId.set('meteo-timeline', timeline);
-  timeline.getBoundingClientRect = () => ({ left: 16, right: 359, top: 600, bottom: 677, width: 343, height: 77 });
   const credits = byId.get('cesium-credits');
-  credits.getBoundingClientRect = () => ({ left: 12, right: 108, top: 647, bottom: 660, width: 96, height: 13 });
+  // Úzky stĺpec v ľavom rohu (style.css: max-width 84 px), telefón 375 × 812, lišta 58 + 8 = zdvih 66.
+  credits.getBoundingClientRect = () => ({ left: 8, right: 92, top: 690, bottom: 746, width: 84, height: 56 });
+  const dock = byId.get('command-dock');
+  dock.getBoundingClientRect = () => ({ left: 100, right: 274, top: 684, bottom: 746, width: 174, height: 62 });
   const win = makeWindow({ width: 375, height: 812, coarse: true });
   const shell = createMobileShell({ document: doc, window: win, styleManager: makeStyleManager(doc) });
   shell.sync();
-  assert.equal(credits.style.bottom, '216px', '812 − (600 − 4)');
+  assert.equal(dock.style.bottom, '66px');
+  assert.equal(credits.style.bottom, '66px', 'vedľa doku (8–92 < 100) ostávajú na lište');
+  // Úzky telefón: dok siaha až k ľavému okraju → kredity nad dok aj nad presah hlasovej pilulky (16 px).
+  dock.getBoundingClientRect = () => ({ left: 80, right: 254, top: 684, bottom: 746, width: 174, height: 62 });
+  shell.sync();
+  assert.equal(credits.style.bottom, '148px', '812 − (684 − 16 − 4)');
+  dock.getBoundingClientRect = () => ({ left: 100, right: 274, top: 684, bottom: 746, width: 174, height: 62 });
+  // Os počasia v páse nad lištou → kredity nad ňu; skrytie osi ich vráti na lištu.
+  const timeline = makeNode('div', { id: 'meteo-timeline' });
+  doc.body.appendChild(timeline);
+  byId.set('meteo-timeline', timeline);
+  timeline.getBoundingClientRect = () => ({ left: 16, right: 359, top: 700, bottom: 760, width: 343, height: 60 });
+  shell.sync();
+  assert.equal(credits.style.bottom, '116px', '812 − (700 − 4)');
   timeline.hidden = true;
   shell.sync();
-  assert.equal(credits.style.bottom, '152px', 'bez osi späť nad dok');
+  assert.equal(credits.style.bottom, '66px', 'bez osi späť na lištu');
 });
 
 test('swipeShouldClose: dlhé potiahnutie alebo krátke a rýchle; nahor nikdy', () => {
@@ -222,7 +234,7 @@ test('plášť: desktop nič nemení; na telefóne skryje stĺpce a otvorí sekc
   assert.equal(appbar.hidden, false);
   assert.deepEqual(suppressed.at(-1), ['ambient-card', true], 'ambientné karty na mobile vypnuté');
   assert.equal(byId.get('command-dock').style.bottom, '66px', 'dok zdvihnutý inline nad lištu (58 + 8, bez zmeranej výšky)');
-  assert.equal(byId.get('cesium-credits').style.bottom, '152px', 'kredity nad dokom aj nad presahom hlasovej pilulky (66 + 62 + 16 + 8), nie v ich páse');
+  assert.equal(byId.get('cesium-credits').style.bottom, '66px', 'kredity sedia na lište vedľa doku (2026-10-31); nad dok idú, len keď sa s ním prekrývajú');
   assert.equal(doc.documentElement.style.props['--oko-dock-lift'], '66px', 'výsuv/toast dvíha premenná');
 
   const dataPanel = byId.get('data-panel');

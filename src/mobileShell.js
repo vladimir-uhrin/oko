@@ -316,23 +316,27 @@ export function createMobileShell({
     }
     const dock = doc.getElementById?.('command-dock');
     if (dock?.style) dock.style.bottom = lift > 0 && !embed ? `${lift}px` : '';
-    // Kredity Cesium/Google (vľavo dole) nad dok, nie cez neho: na 827 px
-    // ležali v jednom páse s dokom a text „Upgrade for commercial…" mizol
-    // pod lištou Poloha (používateľ: „toto sa prekrýva").
+    // Kredity Cesium/Google (vľavo dole): do 2026-10-31 sedeli nad dokom (zdvih + dok + presah pilulky),
+    // na telefóne teda uprostred obrazovky („toto skry alebo to ozaj daj niekam dolu"). Teraz sedia na
+    // lište vedľa doku ako úzky stĺpec (style.css body.oko-mobile #cesium-credits) — bottom = zdvih doku.
+    // Dok (s presahom hlasovej pilulky), os počasia a vodorovný výber vrstiev sú prekážky: nad ne idú
+    // kredity, len keď sa s nimi naozaj prekrývajú (úzke telefóny, kde je dok pri ľavom okraji).
     const credits = doc.getElementById?.('cesium-credits');
     if (credits?.style && !embed) {
-      const dockHeight = Number(dock?.offsetHeight) || DEFAULT_DOCK_HEIGHT_PX;
-      const base = lift + dockHeight + VOICE_OVERHANG_PX + DOCK_LIFT_GAP_PX;
+      const base = lift;
       credits.style.bottom = lift > 0 ? `${base}px` : '';
-      // Os počasia a vodorovný výber vrstiev sú v páse nad dokom — kredity nad ne (len na mobile;
-      // na počítači je os v strede a kredity v rohu pod ňou).
       if (lift > 0) {
         const own = credits.getBoundingClientRect?.();
-        const obstacles = CREDIT_OBSTACLE_IDS
-          .map((id) => doc.getElementById?.(id))
-          .filter((el) => el && !el.hidden)
-          .map((el) => el.getBoundingClientRect?.())
-          .filter((r) => r && r.width > 0 && r.height > 0);
+        const dockRect = dock?.getBoundingClientRect?.();
+        const obstacles = [
+          ...(dockRect && dockRect.width > 0 && dockRect.height > 0
+            ? [{ left: dockRect.left, right: dockRect.right, top: dockRect.top - VOICE_OVERHANG_PX, bottom: dockRect.bottom }]
+            : []),
+          ...CREDIT_OBSTACLE_IDS
+            .map((id) => doc.getElementById?.(id))
+            .filter((el) => el && !el.hidden)
+            .map((el) => el.getBoundingClientRect?.()),
+        ].filter((r) => r && r.right > r.left && r.bottom > r.top);
         if (own && own.height > 0 && obstacles.length) {
           const clear = creditsBottomClear({ base, height: own.height, left: own.left, right: own.right, viewportHeight: win?.innerHeight, obstacles });
           if (clear !== base) credits.style.bottom = `${clear}px`;
