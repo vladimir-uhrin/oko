@@ -189,6 +189,9 @@ test('lišta na telefóne (2026-10-16): bez čakania hneď, inak po prelete a le
   // zvislá poloha má JEDNO pravidlo (staré 70 px + safe-area prebíjalo nové, lebo bolo v súbore neskôr)
   assert.equal((css.match(/body\.oko-mobile #oko-consent \{[^}]*\bbottom:/g) || []).length, 1, 'jediné bottom pre lištu na telefóne');
   assert.match(css, /body\.oko-mobile #oko-consent \{ bottom: calc\(var\(--oko-dock-lift\) - 8px\); \}/, 'rovno na spodnej lište ako výsuvy');
+  // 2026-10-31 (vlastník: „na mobile nesmie prekrývať otvorený výsuv"): kým je výsuv otvorený, lišta je skrytá
+  // a bez dotyku; po zavretí sa vráti (visibility, nie display — ostáva v DOM, animácia sa neopakuje).
+  assert.match(css, /body\.oko-mobile\.oko-sheet-open #oko-consent \{ visibility: hidden; pointer-events: none; \}/, 'výsuv má prednosť pred lištou');
   assert.match(css, /body\.oko-mobile #oko-consent \.oko-consent-tiles \{ display: none; \}/, 'bez dlaždíc kategórií');
   assert.match(css, /body\.oko-mobile #oko-consent \.oko-consent-btn \{ flex: 1 1 0; min-width: 0;/, 'odmietnuť a prijať rovnako veľké');
   assert.ok(!/body\.oko-mobile #oko-consent-dialog/.test(css), 'nastavenia sa nemenia');

@@ -13936,6 +13936,12 @@ body.oko-mobile #oko-consent .oko-consent-title { margin-bottom: 4px; font-size:
 body.oko-mobile #oko-consent .oko-consent-text { font-size: 12px; line-height: 1.4; }
 body.oko-mobile #oko-consent .oko-consent-foot { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 12px 10px; }
 body.oko-mobile #oko-consent .oko-consent-policy { order: 2; text-align: center; font-size: 9px; }
+/* Otvorený výsuv má prednosť (2026-10-31, vlastník: „lišta súhlasu nesmie prekrývať otvorený výsuv"): lišta
+   (z-index 10050) sedí na spodnej lište ako výsuvy a pri prvej návšteve po prelete sa položila cez otvorený
+   výsuv (napr. DÁTA — čipy Brent/WTI pod ňou). Kým je výsuv otvorený (body.oko-sheet-open, mobileShell.js),
+   lišta je neviditeľná a neprijíma dotyk; po zavretí výsuvu sa vráti — voľba ďalej stojí, body.oko-consent-open
+   ostáva (toast nad ňou). visibility, nie display: prvok ostáva v DOM a vstupná animácia sa neopakuje. */
+body.oko-mobile.oko-sheet-open #oko-consent { visibility: hidden; pointer-events: none; }
 body.oko-mobile #oko-consent .oko-consent-actions { flex-wrap: nowrap; }
 body.oko-mobile #oko-consent .oko-consent-btn { flex: 1 1 0; min-width: 0; min-height: 36px; padding: 0 8px; font-size: 10px; letter-spacing: 0.08em; }
 
