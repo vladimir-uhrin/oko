@@ -286,7 +286,8 @@ async function init() {
     // 120 Hz hardware; a no-op on 60 Hz displays. (perf item 2)
     viewer.targetFrameRate = 60;
     // Bez grafickej karty (PageSpeed, počítač bez ovládača): 1 snímka/s, bez MSAA — inak stránka zamrzne.
-    if (applySoftwareRendererBudget(viewer)) console.info('[OKO] softvérové kreslenie WebGL — úsporný režim');
+    const softwareRender = applySoftwareRendererBudget(viewer);
+    if (softwareRender) console.info('[OKO] softvérové kreslenie WebGL — úsporný režim');
 
     // skyBox: false vynechá aj Slnko a Mesiac (CesiumWidget ich vytvára spolu
     // s oblohou) — doplniť, nech sa nič okrem načasovania oblohy nemení.
@@ -394,6 +395,8 @@ async function init() {
     try {
       if (qaBasemapOsm) throw new Error('qaBasemap=osm — Google tileset skipped to protect the daily root-request quota');
       if (crawlerVisit) throw new Error('crawler — photorealistic tiles skipped to protect the quota');
+      // Bez GPU (PageSpeed, 2026-10-31): 3D dlaždice Google procesorom zamrazili stránku aj pri 1 snímke/s — OSM ako pri robotoch.
+      if (softwareRender) throw new Error('software WebGL — photorealistic tiles skipped (no GPU)');
       // Google Photorealistic 3D Tiles: najprv priamo Google kľúčom, pri EHP
       // 403 („not available for your account and region", od 2026-09-04) cez
       // Cesium ion asset 2275207 — tie isté dlaždice pod zmluvou Cesiumu
