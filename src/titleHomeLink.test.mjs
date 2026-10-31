@@ -22,7 +22,7 @@ test('style.css: odkaz je klikateľný napriek pointer-events: none na #title-ba
   assert.match(css, /#title-bar \{[^}]*pointer-events: none;/);
   const rule = css.match(/\n#title-bar h1 #title-home \{([^}]*)\}/);
   assert.ok(rule, 'pravidlo #title-bar h1 #title-home');
-  for (const decl of ['display: inline-flex;', 'align-items: center;', 'gap: inherit;', 'color: inherit;', 'text-decoration: none;', 'pointer-events: auto;', 'cursor: pointer;']) {
+  for (const decl of ['display: inline-flex;', 'align-items: center;', 'gap: inherit;', 'color: inherit;', 'text-decoration: none;', 'pointer-events: auto;', 'cursor: var(--cursor-pointer);']) {
     assert.ok(rule[1].includes(decl), decl);
   }
   assert.match(css, /#title-bar h1 #title-home:focus-visible \{ outline: 1px solid var\(--accent\);/);
