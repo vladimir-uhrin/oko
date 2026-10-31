@@ -243,7 +243,9 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, ui.js, s
 // a rámovanie cez Cartesian3. Nástražné drôty nad textom zdroja — rovnaký vzor
 // ako ukraineAlertAreasLayer.test.mjs a gasPanel.test.mjs.
 test('tripwires main.js: panel + bulletin v ňom, window API dejísk, ?mideast=, #mideast-select, výlučnosť scén, bez #gulf-panel', () => {
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
+  const mainJs = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
 
   // Importy z katalógu dejísk a panela.
   assert.match(main, /import \{ MIDEAST_BULLETIN_REGIONS, applyMideastTheatre, listMideastTheatres, theatreById, theatreFraming, theatreLabel \} from '\.\/data\/mideastTheatres\.js';/);
@@ -264,8 +266,10 @@ test('tripwires main.js: panel + bulletin v ňom, window API dejísk, ?mideast=,
   assert.match(main, /\.get\('mideast'\)/);
   assert.match(main, /theatreById\(requestedTheatre\)/, 'id sa overí pred čakaním na obnovu stavu');
   assert.match(main, /frontSceneById\(params\.get\('front'\) \|\| ''\) \|\| chokepointSceneById\(params\.get\('chokepoint'\) \|\| ''\)/, 'dejisko ustúpi len PLATNÉMU ?front=/?chokepoint=');
-  assert.match(main, /getElementById\('mideast-select'\)/);
-  assert.match(main, /theatrePicker\.value = '';/, 'po výbere reset na placeholder');
+  // Výber v paneli Prelety kamerou ostal v main.js (popisky pri štarte); výber dotiahne modul scén.
+  assert.match(mainJs, /bindScenePicker\('mideast-select', listMideastTheatres\(\), theatreLabel, 'mideast'\);/);
+  assert.match(mainJs, /picker\.value = '';/, 'po výbere reset na placeholder');
+  assert.match(mainJs, /if \(id\) void conflictScenes\.run\(kind, id\);/, 'výber dotiahne modul scén a scénu spustí');
 
   // Tri premenné scény sú vzájomne výlučné a režim mapy ich pozná všetky.
   assert.match(main, /let activeTheatre = null;/);
@@ -581,7 +585,8 @@ test('etapa 5b — legenda bulletinov: Blízky východ po riadkoch (krajiny SK, 
 });
 
 test('etapa 5b — main.js: vrstva vzniká pred panelom a ide do neho; CSS legendy', () => {
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ createAirspaceAdvisory \} from '\.\/airspaceAdvisoryLayer\.js';/);
   // Vrstva musí existovať skôr, než ju panel dostane (poradie v súbore, nie presný tvar riadkov).
   const created = main.indexOf('const airspaceAdvisory = createAirspaceAdvisory({ viewer });');

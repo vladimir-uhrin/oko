@@ -113,6 +113,7 @@ test('vrstva DeepState: zmena sa načíta po snímke, kreslí sa ako obdĺžnik 
   const tl = readFileSync(new URL('../ukraineTimeline.js', import.meta.url), 'utf8');
   assert.match(tl, /sw\('is-ds-gained', translate\('ukraine\.ds\.gained'\)\)/);
   assert.match(tl, /'ukraine\.ds\.change-line'/);
-  const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('../conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /pickPlaceSide\(\{ wiki: ukraineControl\.sideAt\(lon, lat\), deepstate: ukraineDeepState\.sideAt\(lon, lat\), wikiStale: Boolean\(ukraineControl\.getState\?\.\(\)\?\.stale\) \}\)/);
 });

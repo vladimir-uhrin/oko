@@ -459,6 +459,16 @@ body.cockpit-mode #cockpit-cloud-effects.active {
   color: #ffdc78;
 }
 
+/* Hlasový modul sa sťahuje (src/voice/voiceLazy.js, 2026-10-31): stav NAČÍTAVAM pulzuje ako pri pripájaní. */
+#gev-voice-control[data-status='loading'] #gev-voice-status {
+  color: #39d0ff;
+  animation: gev-voice-loading-pulse 1.2s ease-in-out infinite;
+}
+@keyframes gev-voice-loading-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  #gev-voice-control[data-status='loading'] #gev-voice-status { animation: none; }
+}
+
 #gev-voice-control[data-status='error'] {
   align-items: flex-start;
   width: min(440px, calc(100vw - 72px));
@@ -12374,8 +12384,20 @@ body.recording-mode .state-strip {
   text-transform: uppercase;
 }
 .gas-status[data-state="error"], .gas-status[data-state="stale"] { color: #ffb14d; }
+/* Lenivé moduly (2026-10-31, conflictScenesLazy.js): kým sa kód scén sťahuje, telo panela UKRAJINA / BLÍZKY
+   VÝCHOD nesie tento riadok — rovnaký vzhľad a krúžok ako .gas-status pri načítavaní. */
+.oko-lazy-status {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+.oko-lazy-status[data-state="error"] { color: #ffb14d; text-transform: none; letter-spacing: 0.02em; }
 /* Načítavanie vidieť (vlastník 2026-10-31: „aby užívateľ vedel, že to nezamrzlo"): krúžok pred stavom
    načítavania — platí pre všetky panely na štýle .gas-status (plyn, Ukrajina, Blízky východ). */
+.oko-lazy-status[data-state="loading"]::before,
 .gas-status[data-state="loading"]::before {
   content: '';
   display: inline-block;

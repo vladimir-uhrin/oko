@@ -332,7 +332,8 @@ test('neskoro vytvorená prekážka (os UKRAJINA) sa dá ľavému stĺpcu zaregi
   // Os UKRAJINA vzniká neskôr a štartuje skrytá — bez dodatočnej registrácie
   // layout na jej výšku nereagoval a rozbalená os prekrývala panely o 132 px.
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   const method = ui.slice(ui.indexOf('  observeLeftStackObstacle(element) {'));
   assert.ok(method.length > 0, 'StyleManager.observeLeftStackObstacle existuje');
   const body = method.slice(0, method.indexOf('\n  }\n'));

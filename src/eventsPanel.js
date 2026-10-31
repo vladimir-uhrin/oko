@@ -20,8 +20,11 @@ import { spokenDigits } from './data/eventSpeech.js';
 import { formatClockUtc } from './data/flightHistory.js';
 import { flightDateUtc } from './data/stateAircraftClient.js';
 import { currentLanguage } from './i18n.js';
+// Id udalosti z hashu odkazu žije v eventShareHash.js (2026-10-31): ui.js ho číta pri štarte, tento panel
+// príde lenivo až pri prvom otvorení Histórie. Tu sa znova exportuje pre doterajšie importy.
+import { EVENT_ID_RE, eventIdFromHash } from './eventShareHash.js';
 
-export const EVENT_ID_RE = /^[0-9a-f]{6}-\d{8}T\d{4}$/;
+export { EVENT_ID_RE, eventIdFromHash };
 /** Najviac toľko udalostí v zozname na kontrolu. */
 export const EVENTS_REVIEW_LIMIT = 50;
 /** Druhý klik na ZVEREJNIŤ / STIAHNUŤ platí 5 s. */
@@ -44,16 +47,6 @@ function button(doc, className, text) {
   const b = el(doc, 'button', className, text);
   b.type = 'button';
   return b;
-}
-
-/** Id udalosti z hashu odkazu (`event=<id>`), inak null. Pure. */
-export function eventIdFromHash(hash) {
-  try {
-    const id = new URLSearchParams(String(hash || '').replace(/^#/, '')).get('event');
-    return id && EVENT_ID_RE.test(id) ? id : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Úsek na prehratie v Histórii letov: celá zjednodušená stopa udalosti (inak okno). Pure. */

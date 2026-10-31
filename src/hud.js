@@ -19,7 +19,8 @@ import { t } from './i18n.js';
 import { CITY_POIS } from './locations.js';
 import { composeLocalityTag } from './hudLocality.js';
 import { ellipsoidalToMslDisplayM, ensureGeoidReadyWhenLow, geoidHeight } from './data/geoid.js';
-import { getBasemapLabelContext } from './voice/gevActions.js';
+// Popisky podkladu pre súhrn scény žijú v hlasových akciách (voice/gevActions.js, ~70 KB) — ten modul
+// sa od 2026-10-31 sťahuje až pri prvom použití (súhrn je asynchrónny, viď _summaryContext).
 import { classifySummaryFailure } from './hudSummaryPolicy.js';
 
 /** Color palettes keyed by shader mode; applied as CSS custom properties. */
@@ -590,6 +591,11 @@ export class IntelHUD {
       return;
     }
     if (!force && !this._summaryDirty) return;
+    // Lenivý štart (2026-10-31): kontext súhrnu si dotiahne hlasové akcie (~70 KB, voice/gevActions.js). Štart
+    // HUD na okamih zapne (_initHUDToggle) a obnova stavu ho hneď vypne — ak teda HUD do ďalšieho tiku zhasol,
+    // nič sa nesťahuje; ďalšie show() súhrn vyžiada znova (force).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (!this._visible) return;
 
     const revision = this._summaryRevision;
     // Every caller invokes this as `void this._updateSummary(...)`, so nothing
@@ -675,6 +681,7 @@ export class IntelHUD {
   }
 
   async _summaryContext() {
+    const { getBasemapLabelContext } = await import('./voice/gevActions.js');
     const labels = await getBasemapLabelContext(this.viewer);
     const enabledLayers = this._dataManager?.getAll?.()
       ?.filter((layer) => layer.enabled)

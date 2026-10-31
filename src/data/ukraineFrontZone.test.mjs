@@ -150,7 +150,8 @@ test('KARTA ako vzorka Rybar: oranžovo šrafovaný pás cez obe strany línie, 
 });
 
 test('scéna frontu sa otvára v KARTE a pri odchode vráti pôvodný podklad (vlastník: „Áno, front vždy v KARTE")', () => {
-  const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('../conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /if \(scene && mapStackController\.getActiveId\(\) !== 'karta'\) \{\n\s+autoKartaPrev = mapStackController\.getActiveId\(\);\n\s+try \{ void Promise\.resolve\(styleManager\._setMapStack\('karta'\)\)/);
   assert.match(main, /const runChokepointScene = \(id\) => \{\n\s+restoreAutoKarta\(\);/, 'úžina vráti podklad');
   // 2026-10-11: zatvorená os vráti podklad A ohlási to toastom (notify) — úžina a dejisko bez toastu.

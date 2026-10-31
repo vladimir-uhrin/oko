@@ -761,6 +761,10 @@ export const EN_STRINGS = Object.freeze({
   'voice.status.listening': 'LISTENING',
   'voice.status.executing': 'EXECUTING',
   'voice.status.error': 'ERROR',
+  'voice.status.loading': 'LOADING',
+  // Lenivé moduly (2026-10-31): stav v tele panela, kým sa kód sťahuje.
+  'lazy.loading': 'Loading…',
+  'lazy.error': 'Could not load this section. Check the connection and try again.',
   'voice.tier-title': 'Voice model tier — applies next session',
   'voice.cost-title': 'Estimated session cost',
   'voice.button-aria': 'Voice control — hold Space to speak; click to toggle voice',
@@ -3504,6 +3508,10 @@ export const SK_STRINGS = Object.freeze({
   'voice.status.listening': 'POČÚVAM',
   'voice.status.executing': 'VYKONÁVAM',
   'voice.status.error': 'CHYBA',
+  'voice.status.loading': 'NAČÍTAVAM',
+  // Lenivé moduly (2026-10-31): stav v tele panela, kým sa kód sťahuje.
+  'lazy.loading': 'Načítavam…',
+  'lazy.error': 'Túto časť sa nepodarilo načítať. Skontrolujte pripojenie a skúste znova.',
   'voice.tier-title': 'Úroveň hlasového modelu — platí od ďalšej relácie',
   'voice.cost-title': 'Odhadovaná cena relácie',
   'voice.button-aria': 'Hlasové ovládanie — drž medzerník a hovor; klik prepína hlas',

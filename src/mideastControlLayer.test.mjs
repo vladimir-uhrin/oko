@@ -319,7 +319,8 @@ test('setDay kým je vrstva skrytá: správca si pamätá deň každej vrstvy a 
 // ukraineBase.setSideResolver. Nástražné drôty nad textom zdroja — rovnaký vzor ako
 // mideastPanel.test.mjs a ukraineAlertAreasLayer.test.mjs.
 test('tripwires main.js: správca pred panelom a v ňom, window API, setTheatre v 4 miestach, štýl podkladu, brána priblíženia, mimo resolvera strán UKRAJINY', () => {
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
 
   // Brána priblíženia: pri pohľade na planétu sa body aj raster schovajú, čip ostáva (show/hide, nikdy setEnabled).
   assert.match(main, /const revealGate = createSceneRevealGate\(\{[\s\S]*?onChange: \(visible\) => \{[\s\S]*?if \(visible\) void mideastControl\.show\(\); else mideastControl\.hide\(\);[\s\S]*?\},\s*\}\);/, 'brána priblíženia schová/ukáže kontrolu sídiel');

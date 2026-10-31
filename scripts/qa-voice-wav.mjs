@@ -61,6 +61,8 @@ try {
     window.__godsEyeView?.voiceCommands
     && document.getElementById('gev-voice-button')
   ), { timeout: 30_000 });
+  // Hlas sa od 2026-10-31 sťahuje až pri prvom použití (voiceLazy.js) — tu ho dotiahneme vopred.
+  await page.evaluate(() => window.__godsEyeView.voiceCommands.load?.());
 
   const readState = () => page.evaluate(() => {
     const voice = window.__godsEyeView?.voiceCommands;

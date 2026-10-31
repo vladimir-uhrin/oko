@@ -11,6 +11,7 @@
 import { foldText, scoreCommand } from '../commandPalette.js';
 import { looksLikeAircraftQuery } from '../data/aircraftSearch.js';
 import { foldSpeech, parseVoiceIntent } from './freeVoiceIntents.js';
+import { applyFreeVoiceUi } from './voiceControl.js';
 
 const IDLE_STOP_MS = 90_000;
 const RESTART_GAP_MS = 250;
@@ -72,12 +73,7 @@ export function createFreeVoice({ ui, run, dataManager = null, translate = (k) =
     if (ui.errorDetail) ui.errorDetail.textContent = status === 'error' ? detail : '';
   }
   /** Pilulka v bezplatnom režime: namiesto ceny „ZADARMO", bez voľby modelu. */
-  function applyUi() {
-    if (ui?.costValue) { ui.costValue.textContent = translate('voice.free.cost'); ui.costValue.dataset.level = 'ok'; ui.costValue.title = translate('voice.free.cost-title'); }
-    if (ui?.tierButton) ui.tierButton.hidden = true;
-    if (ui?.helpDetail) ui.helpDetail.textContent = translate('voice.free.hint');
-    if (ui?.root) ui.root.dataset.engine = 'free';
-  }
+  function applyUi() { applyFreeVoiceUi(ui, translate); }
   function speak(text) {
     if (!text || !synth || !Utterance) return;
     try {

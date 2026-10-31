@@ -30,7 +30,8 @@ test('výrez smeru v KARTE: zhora a o polovicu bližšie, os pohľadu mieri do s
   assert.equal(frontSceneFraming([0, 0, 0.1, 0.1], { karta: true }).heightM, FRONT_KARTA_MIN_HEIGHT_M, 'spodný strop');
   const ov = frontSceneFraming(frontSceneById('front').rectDegrees, { overview: true, karta: true });
   assert.deepEqual(ov, frontSceneFraming(frontSceneById('front').rectDegrees, { overview: true }), 'prehľad celého frontu sa nemení');
-  const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('../conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /frontSceneFraming\(scene\.rectDegrees, \{ overview: Boolean\(scene\.overview\), karta: !scene\.overview \}\)/);
 });
 

@@ -96,7 +96,7 @@ test('zber v repozitári: každá ligatúra z index.html a známe dynamické ná
   assert.ok(collected.names.length >= 60, `našlo sa len ${collected.names.length} ikon`);
   for (const name of iconNamesFromMarkup(html)) assert.ok(collected.names.includes(name), name);
   const tripwires = {
-    ios_share: 'src/main.js', // launchIcon: v možnostiach panela konfliktov
+    ios_share: 'src/conflictScenes.js', // launchIcon: v možnostiach panela konfliktov (od 2026-10-31 lenivý modul scén)
     search: 'src/main.js', // innerHTML
     notifications_active: 'src/followedFlights.js', // ternár v textContent
     left_panel_open: 'src/weatherDock.js', // el('span', …, '') + textContent

@@ -136,7 +136,9 @@ test('registrácia: token v registri stavu vrstiev, kategória a kľúčové slo
   assert.equal(LAYER_CATEGORY[VOLBY_OBCE_LAYER_ID], 'city');
   assert.ok(LAYER_KEYWORDS[VOLBY_OBCE_LAYER_ID].includes('voľby'));
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
-  assert.match(main, /import volbyObceLayer from '\.\/data\/volbyObceLayer\.js';/);
+  // Lenivý zástupca (2026-10-31, data/lazyLayers.js): kód vrstvy príde až pri prvom zapnutí; onSelect/select/setColorMode nesie zástupca.
+  assert.match(main, /volbyObceLazy as volbyObceLayer,[\s\S]*?\} from '\.\/data\/lazyLayers\.js';/);
+  assert.doesNotMatch(main, /from '\.\/data\/volbyObceLayer\.js'/);
   assert.match(main, /dataManager\.register\(volbyObceLayer\);/);
   assert.match(main, /volbyObceLayer\.onSelect = /);
   assert.ok(Cesium.DistanceDisplayCondition, 'Cesium dostupné v Node (ako ostatné vrstvy)');

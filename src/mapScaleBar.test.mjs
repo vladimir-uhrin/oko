@@ -50,7 +50,8 @@ test('brána priblíženia platí aj v 2D (PLÁTNO): vzdialenosť z kartografick
 });
 
 test('režim mapy sa zosúladí pri každej zmene scény (aj bez preklopenia brány)', () => {
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   // 2026-09-26: tretia rodina scén (dejiská BLÍZKEHO VÝCHODU) rozšírila výraz o activeTheatre.
   assert.match(main, /const syncMapFocus = \(\) => setMapFocus\(revealGate\.isRevealed\(\) && Boolean\(activeFrontScene \|\| activeChokepoint \|\| activeTheatre\)\);/);
   assert.ok((main.match(/syncMapFocus\(\);/g) || []).length >= 3, 'front, úžina a situácia bez scény');
@@ -68,7 +69,7 @@ test('CSS režimu mapy: len opacity/visibility (geometria doku bez zmeny), súra
 
 test('časová os: voľbu legendy nikto neprepisuje; riadok hlásenia GŠ vysvetľuje meče, farby aj „neuvedené" a ukáže sa len s vrstvou', async () => {
   const src = readFileSync(new URL('./ukraineTimeline.js', import.meta.url), 'utf8');
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8') + readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.doesNotMatch(main, /setLegendCollapsed/, 'scéna legendu automaticky nezbaľuje (predvolene je zbalená, voľba patrí používateľovi)');
   for (const cls of ['is-rp-marker', 'is-rp-0', 'is-rp-low', 'is-rp-mid', 'is-rp-high', 'is-rp-na']) assert.ok(src.includes(`'${cls}'`), cls);
   assert.match(src, /rpBox\.hidden = !report\.isShown\?\.\(\);/, 'len keď vrstva hlásenia kreslí');

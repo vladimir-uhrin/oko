@@ -187,7 +187,8 @@ test('texty v oboch jazykoch: čip, legenda, druhy, plavidlá, oblasti', () => {
 });
 
 test('main.js: vrstva pozná bránu priblíženia, ide do panela a prepína sa pri každej scéne', () => {
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ createUkmtoIncidents \} from '\.\/ukmtoIncidentsLayer\.js';/);
   assert.match(main, /let ukmtoIncidents = null;[^\n]*\n[\s\S]*?const revealGate = createSceneRevealGate\(/, 'premenná vzniká PRED bránou (žiadna TDZ v spätnom volaní)');
   assert.match(main, /if \(visible\) void ukmtoIncidents\?\.show\(\); else void ukmtoIncidents\?\.hide\(\);/);

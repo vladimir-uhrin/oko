@@ -52,10 +52,8 @@ import {
 import { TRACKED_OVERLAY_SOURCE_ID, destroyTrackedReadout, getActiveTrackedReadoutId, initTrackedReadout } from './data/trackedReadout.js';
 import { VESSEL_OVERLAY_SOURCE_ID } from './data/vesselLabels.js';
 import { installCardCloseButtons } from './cardCloseButtons.js';
-import { buildFlightShareCopy, drawFlightShareCard, flightShareHeadline } from './flightShare.js';
 import { installFlightCardActions } from './flightCardActions.js';
 import { installCardChromeFade } from './cardChromeFade.js';
-import { buildVesselShareCopy, pickShareCards, vesselShareCard } from './cardShare.js';
 import { installCardActionBar, trackedCardRect } from './cardActionBar.js';
 import { installCardSwipeClose } from './cardSwipeClose.js';
 import { createScrollKeeper } from './scrollKeeper.js';
@@ -65,13 +63,12 @@ import { destroyStateFlightsStrip, installStateFlightsStrip } from './stateFligh
 import { destroyAirportCard, installAirportCard } from './data/airportCard.js';
 import { destroyVolcanoCard, installVolcanoCard } from './data/volcanoCard.js';
 import { destroyNaturalEventCard, installNaturalEventCard } from './data/naturalEventCard.js';
-import { installHistoryPanel } from './historyPanel.js';
-import { installShipHistoryPanel } from './shipHistoryPanel.js';
-import { eventIdFromHash, installEventsPanel } from './eventsPanel.js';
-import { createEventMarkers } from './eventMarkers.js';
+// História letov, história lodí, udalosti, PLYN a VOĽBY prídu až pri prvom rozbalení panela (lazyPanel.js,
+// 2026-10-31, lenivý štart) — tu ostáva len to, čo treba pri štarte (id udalosti z odkazu, archív volieb).
+import { createLazyPanel, lazyMethod } from './lazyPanel.js';
+import { eventIdFromHash } from './eventShareHash.js';
 import { whenStartupReady } from './startupGate.js';
-import { installGasPanel } from './gasPanel.js';
-import { installVolbyPanel, isVolbyArchived } from './volbyPanel.js';
+import { isVolbyArchived } from './volbyShared.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, getOverlayEntryText, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
@@ -98,10 +95,7 @@ import {
   readShareSubject,
   readShareSubjectLabel,
 } from './shareSubject.js';
-import { openSharePanel } from './sharePanel.js';
-import { captureShareSnapshot, snapshotStamp } from './shareSnapshot.js';
-import { canRecordShareVideo, recordShareVideo } from './shareVideo.js';
-import { buildAttributionLine, buildShareCopy, buildVolbyShareCopy } from './shareTargets.js';
+// Zdieľanie (panel, snímka, video, texty) sa sťahuje až pri prvom kliku na Zdieľať — _openSharePanel (2026-10-31).
 import { currentLanguage } from './i18n.js';
 import { presentSquawkAlerts } from './data/squawkWatch.js';
 import {
@@ -128,11 +122,11 @@ import {
   normalizeProfile,
   profileForDensity,
 } from './data/detectionPolicy.js';
-import trafficLayer from './data/traffic.js';
+// Doprava, satelity, bikeshare a misie: lenivé zástupcovia (data/lazyLayers.js, 2026-10-31) — tie isté objekty registruje main.js.
+import { trafficLazy as trafficLayer, satellitesLazy as satellitesLayer, bikeshareLazy as bikeshareLayer, rocketLaunchesLazy as rocketLaunchesLayer } from './data/lazyLayers.js';
 import flightsLayer from './data/flights.js';
 import militaryFlightsLayer from './data/militaryFlights.js';
 import { isTr3b, toggleTr3b } from './data/tr3bRegistry.js';
-import satellitesLayer from './data/satellites.js';
 import cctvLayer from './data/cctv.js';
 import radioLayer, {
   buildRadioTunerTicks,
@@ -140,11 +134,9 @@ import radioLayer, {
   radioTunerPointerPosition,
   radioTunerSlot,
 } from './data/radio.js';
-import bikeshareLayer from './data/bikeshare.js';
 import aisLiveVesselsLayer from './data/aisLiveVessels.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
 import militaryInstallationsLayer from './data/militaryInstallations.js';
-import rocketLaunchesLayer from './data/rocketLaunches.js';
 import {
   aggregateLayerLoading,
   canPresentDeferredStatusNotice,
@@ -3305,21 +3297,67 @@ export class StyleManager {
       container: document.body,
       onClosed: () => this._dataManager?.layers?.get('natural-events')?.module?.clearSelection?.(),
     });
-    // História letov (2026-09-07, historyPanel.js): vyhľadanie a prehratie
-    // úseku zo záznamu proxy; „TERAZ ŽIVO" prepne na živé sledovanie hexu.
-    this._historyPanel = installHistoryPanel({
-      viewer,
-      t,
-      onTrackLive: (icao24) => {
-        const flights = this._dataManager?.layers?.get('flights')?.module;
-        if (!flights?.trackById?.(icao24, { origin: 'user' })) {
-          this._dataManager?.layers?.get('military')?.module?.trackById?.(icao24, { origin: 'user' });
-        }
+    // História letov, história lodí a udalosti (historyPanel.js, shipHistoryPanel.js, eventsPanel.js) prídu až pri
+    // prvom otvorení panela História (2026-10-31, lenivý štart; lazyPanel.js): klik, výsuv na mobile, odkaz
+    // `event=`, tlačidlá na kartách lietadla a lode. Ich API tu zastupujú fasády, ktoré modul dotiahnu a volanie
+    // odovzdajú; samotná inštalácia je nižšie nezmenená.
+    this._historyPanels = createLazyPanel({
+      panelId: 'history-panel',
+      bodySelector: '[data-history-body]',
+      install: async () => {
+        const [{ installHistoryPanel }, { installShipHistoryPanel }, { installEventsPanel }, { createEventMarkers }] = await Promise.all([
+          import('./historyPanel.js'), import('./shipHistoryPanel.js'), import('./eventsPanel.js'), import('./eventMarkers.js'),
+        ]);
+        // História letov (2026-09-07, historyPanel.js): vyhľadanie a prehratie
+        // úseku zo záznamu proxy; „TERAZ ŽIVO" prepne na živé sledovanie hexu.
+        const history = installHistoryPanel({
+          viewer,
+          t,
+          onTrackLive: (icao24) => {
+            const flights = this._dataManager?.layers?.get('flights')?.module;
+            if (!flights?.trackById?.(icao24, { origin: 'user' })) {
+              this._dataManager?.layers?.get('military')?.module?.trackById?.(icao24, { origin: 'user' });
+            }
+          },
+          setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
+          // Výber letu v zozname zarámuje trasu — najprv pustiť sledované lietadlo (2026-10-16).
+          stopLiveTracking: stopLiveAircraftTracking,
+        });
+        // História lodí (2026-10-11, shipHistoryPanel.js): karta LODE v tom istom paneli.
+        const ship = installShipHistoryPanel({
+          viewer,
+          host: document.querySelector('#history-panel [data-history-body]'),
+          t,
+          reveal: () => revealHistoryPanel(),
+          setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
+        });
+        // Udalosti (2026-09-30, etapa 2b, eventsPanel.js): odkaz z príspevku (`event=<id>` v adrese)
+        // otvorí kartu udalosti navrchu Histórie letov — momenty, médiá, značky na glóbuse, prehratie.
+        // Na počítači vlastníka aj zoznam na kontrolu a zverejnenie (na FB zdieľa vlastník sám).
+        const events = installEventsPanel({
+          host: document.querySelector('#history-panel [data-history-body]'),
+          t,
+          account: this._account?.client || null,
+          history,
+          reveal: () => {
+            revealHistoryPanel();
+            this.setPanelCollapsed('history-panel', false, { persist: false, syncShare: false });
+          },
+          markers: createEventMarkers(viewer),
+        });
+        return { history, ship, events };
       },
-      setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
-      // Výber letu v zozname zarámuje trasu — najprv pustiť sledované lietadlo (2026-10-16).
-      stopLiveTracking: stopLiveAircraftTracking,
     });
+    const historyApi = (p) => p?.history;
+    this._historyPanel = {
+      open: lazyMethod(this._historyPanels, 'open', historyApi),
+      openLatest: lazyMethod(this._historyPanels, 'openLatest', historyApi),
+      showLeg: lazyMethod(this._historyPanels, 'showLeg', historyApi),
+      showStateAircraft: lazyMethod(this._historyPanels, 'showStateAircraft', historyApi),
+    };
+    this._shipHistoryPanel = { open: lazyMethod(this._historyPanels, 'open', (p) => p?.ship) };
+    this._eventsPanel = { open: lazyMethod(this._historyPanels, 'open', (p) => p?.events) };
+    this._historyPanels.install();
     // Ponuka štýlu a jazyka vpravo hore ustúpi karte, ktorá ju prekryje (2026-10-12, cardChromeFade.js).
     installCardChromeFade(viewer);
     // Zdieľať a História letu v rohu karty lietadla (2026-10-11, flightCardActions.js): ako na karte lode.
@@ -3333,35 +3371,21 @@ export class StyleManager {
         void this._historyPanel?.openLatest({ query: hex });
       },
     });
-    // História lodí (2026-10-11, shipHistoryPanel.js): karta LODE v tom istom paneli.
-    this._shipHistoryPanel = installShipHistoryPanel({
-      viewer,
-      host: document.querySelector('#history-panel [data-history-body]'),
-      t,
-      reveal: () => revealHistoryPanel(),
-      setCollapsed: (collapsed) => this.setPanelCollapsed('history-panel', collapsed, { persist: false, syncShare: false }),
-    });
-    // Udalosti (2026-09-30, etapa 2b, eventsPanel.js): odkaz z príspevku (`event=<id>` v adrese)
-    // otvorí kartu udalosti navrchu Histórie letov — momenty, médiá, značky na glóbuse, prehratie.
-    // Na počítači vlastníka aj zoznam na kontrolu a zverejnenie (na FB zdieľa vlastník sám).
-    this._eventsPanel = installEventsPanel({
-      host: document.querySelector('#history-panel [data-history-body]'),
-      t,
-      account: this._account?.client || null,
-      history: this._historyPanel,
-      reveal: () => {
-        revealHistoryPanel();
-        this.setPanelCollapsed('history-panel', false, { persist: false, syncShare: false });
-      },
-      markers: createEventMarkers(viewer),
-    });
     // Po štarte (mapa zobrazená, záber z odkazu obnovený) — inak by ho obnova panelov prekryla.
     const sharedEventId = eventIdFromHash(window.location.hash);
     if (sharedEventId) void whenStartupReady().then(() => this._eventsPanel?.open(sharedEventId));
     // VOĽBY 2026 (2026-10-24, volbyPanel.js): kandidáti z registra MV SR a po 20:00 výsledky ŠÚ SR
     // z /api/volby; klik na kraj alebo obec preletí kamerou kolmo nad miesto (kraj 260 km, mesto 20 km,
     // dedina 5 km). Odkazy na zdieľanie (?volby=…) kopíruje do schránky.
-    this._volbyPanel = installVolbyPanel({
+    // Panel príde až pri prvom rozbalení (lazyPanel.js, 2026-10-31); mapu obcí (attachMap z main.js) si fasáda
+    // podrží a odovzdá po inštalácii, ostatné volania (open, selectObec…) modul dotiahnu.
+    let volbyMap = null;
+    this._volbyPanelLazy = createLazyPanel({
+      panelId: 'volby-panel',
+      bodySelector: '[data-volby-body]',
+      install: async () => {
+        const { installVolbyPanel } = await import('./volbyPanel.js');
+        const panel = installVolbyPanel({
       t,
       origin: window.location?.origin || '',
       setCollapsed: (collapsed) => this.setPanelCollapsed('volby-panel', collapsed, { persist: false, syncShare: false }),
@@ -3379,9 +3403,28 @@ export class StyleManager {
       },
       copyText: (text) => navigator.clipboard?.writeText?.(text),
     });
+        if (volbyMap) panel?.attachMap?.(volbyMap);
+        return panel;
+      },
+    });
+    this._volbyPanel = {
+      attachMap: (map) => { volbyMap = map; if (this._volbyPanelLazy.loaded) this._volbyPanelLazy.value?.attachMap?.(map); },
+      open: lazyMethod(this._volbyPanelLazy, 'open'),
+      selectObec: lazyMethod(this._volbyPanelLazy, 'selectObec'),
+      selectKraj: lazyMethod(this._volbyPanelLazy, 'selectKraj'),
+      refresh: lazyMethod(this._volbyPanelLazy, 'refresh'),
+      syncMapChip: lazyMethod(this._volbyPanelLazy, 'syncMapChip'),
+    };
+    this._volbyPanelLazy.install();
     // Plyn (2026-09-13, gasPanel.js): karta CENY z /api/gas/prices (ACER +
     // IMF/FRED, bez kľúča); zásobníky (GIE) a toky (ENTSOG) pribudnú po etapách.
-    this._gasPanel = installGasPanel({
+    // Panel príde až pri prvom rozbalení (lazyPanel.js, 2026-10-31); sám sťahuje dáta, až keď ho vidno.
+    this._gasPanelLazy = createLazyPanel({
+      panelId: 'gas-panel',
+      bodySelector: '[data-gas-body]',
+      install: async () => {
+        const { installGasPanel } = await import('./gasPanel.js');
+        this._gasPanel = installGasPanel({
       t,
       setCollapsed: (collapsed) => this.setPanelCollapsed('gas-panel', collapsed, { persist: false, syncShare: false }),
       // Klik na riadok toku: zapni vrstvu staníc a preleť k nej (120 km nad
@@ -3413,6 +3456,10 @@ export class StyleManager {
       },
       onEnableAis: () => { void this._dataManager?.setEnabled?.('ais-live-vessels', true, { origin: 'user' }); },
     });
+        return this._gasPanel;
+      },
+    });
+    this._gasPanelLazy.install();
     // Vlajky na kartách sa ťahajú lenivo — dotiahnutá vlajka si vyžiada
     // snímok, nech sa objaví aj na nehybnej kamere (render governor).
     setFlagReadyListener(() => governorRequestRender());
@@ -10991,6 +11038,15 @@ export class StyleManager {
   }
 
   async _openSharePanel() {
+    // Zdieľanie (panel, snímka, video, texty) príde až pri prvom kliku na Zdieľať (2026-10-31, lenivý štart).
+    const [
+      { openSharePanel }, { captureShareSnapshot, snapshotStamp }, { canRecordShareVideo, recordShareVideo },
+      { buildAttributionLine, buildShareCopy, buildVolbyShareCopy }, { buildFlightShareCopy, drawFlightShareCard, flightShareHeadline },
+      { buildVesselShareCopy, pickShareCards, vesselShareCard },
+    ] = await Promise.all([
+      import('./sharePanel.js'), import('./shareSnapshot.js'), import('./shareVideo.js'),
+      import('./shareTargets.js'), import('./flightShare.js'), import('./cardShare.js'),
+    ]);
     const lang = currentLanguage();
     const whenMs = Date.now();
     const selectedContext = getSelectedEntityContext({ dataManager: this._dataManager });

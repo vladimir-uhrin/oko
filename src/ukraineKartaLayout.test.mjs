@@ -15,7 +15,8 @@ import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 
 const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
-const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+// Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
 const scaleBar = readFileSync(new URL('./mapScaleBar.js', import.meta.url), 'utf8');
 
 /** Hodnota vlastnosti v prvom pravidle so selektorom (jednoriadkové pravidlá KARTY). */

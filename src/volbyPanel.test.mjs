@@ -393,14 +393,18 @@ test('výsledky: stav so spracovaním a účasťou, pás, kraj s hlasmi a značk
 test('zapojenie: ui.js panel v registri pruhu a kokpite + installVolbyPanel s preletom; sharelink token; mobil sekcia; main.js deep link ?volby', () => {
   assert.match(ui, /\{ id: 'volby-panel' \},/);
   assert.match(ui, /^  'volby-panel',$/m, 'kokpit panel zbalí pri vstupe');
-  assert.match(ui, /import \{ installVolbyPanel, isVolbyArchived \} from '\.\/volbyPanel\.js';/);
-  assert.match(ui, /this\._volbyPanel = installVolbyPanel\(\{/);
+  // Panel príde lenivo (lazyPanel.js, 2026-10-31): ui.js staticky berie len archív z volbyShared.js, inštalácia je v install().
+  assert.match(ui, /import \{ isVolbyArchived \} from '\.\/volbyShared\.js';/);
+  assert.doesNotMatch(ui, /^import .* from '\.\/volbyPanel\.js';/m);
+  assert.match(ui, /const \{ installVolbyPanel \} = await import\('\.\/volbyPanel\.js'\);\n\s+const panel = installVolbyPanel\(\{/);
+  assert.match(ui, /panelId: 'volby-panel',/);
+  assert.match(ui, /attachMap: \(map\) => \{ volbyMap = map;/, 'mapa obcí z main.js sa podrží do inštalácie');
   assert.match(ui, /setPanelCollapsed\('volby-panel', collapsed/);
   assert.match(sharelink, /\{ id: 'volby-panel', token: 'y', pinnable: false \},/);
   const section = MOBILE_SECTIONS.find((s) => s.id === 'volby');
   assert.deepEqual({ ...section, panelIds: [...section.panelIds] }, { id: 'volby', labelKey: 'mobile.volby', panelIds: ['volby-panel'], expand: 'volby-panel' });
   assert.equal(MOBILE_SECTIONS.findIndex((s) => s.id === 'volby'), 1, 'hneď za Vrstvami');
-  assert.match(main, /import \{[^}]*\bparseVolbyParam\b[^}]*\} from '\.\/volbyPanel\.js';/);
+  assert.match(main, /import \{[^}]*\bparseVolbyParam\b[^}]*\} from '\.\/volbyShared\.js';/, 'čisté pomocníky volieb bez panela (lenivý štart)');
   assert.match(main, /parseVolbyParam\(window\.location\?\.search \|\| ''\)/);
   assert.match(main, /volbyObceLayer\.onSelect = \(code\) => \{/, 'klik na mape otvorí obec');
   assert.match(main, /_volbyPanel\?\.attachMap\?\.\(\{/, 'panel ovláda mapu obcí');
@@ -539,7 +543,7 @@ test('archív volieb (2026-10-27): tlačidlo v mobilnej lište a zbalená zóna 
   // panela (ui=…y.c.0) — otvorený panel by prepol mapu do volebného režimu bez lietadiel. Otvára ho len paleta,
   // ?volby a mobil open('volby').
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
-  assert.match(ui, /import \{ installVolbyPanel, isVolbyArchived \} from '\.\/volbyPanel\.js';/);
+  assert.match(ui, /import \{ isVolbyArchived \} from '\.\/volbyShared\.js';/);
   assert.match(ui, /_restorePanelCollapsedState\(panelId[\s\S]{0,1500}if \(panelId === 'volby-panel' && isVolbyArchived\(\)\) collapsed = true;\n\s+panelEl\.classList\.toggle\('collapsed', collapsed\);/);
   assert.match(ui, /_restorePanelState\(panelState\) \{[\s\S]{0,900}if \(spec\.id === 'volby-panel' && !nextCollapsed && isVolbyArchived\(\)\) continue;/);
 });

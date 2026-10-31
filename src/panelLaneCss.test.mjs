@@ -197,7 +197,8 @@ test('nepanelové deti pruhu majú order a klikateľné si pýtajú pointer-even
   assert.ok(launch, 'spúšťač Kartičiek v nadpise zóny potrebuje vlastné pravidlo');
   assert.match(launch[1], /pointer-events:\s*auto/, 'inak sa naň nedá kliknúť');
   assert.match(launch[1], /position:\s*static/, 'musí prestať byť position: fixed');
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   assert.ok(main.includes(`launchTarget: document.querySelector('#left-panel-stack > .lane-zone[data-lane-zone="conflicts"]')`), 'domov = nadpis KONFLIKTY');
 });
 

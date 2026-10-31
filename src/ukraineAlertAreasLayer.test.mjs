@@ -88,7 +88,8 @@ test('os podáva hlásenia s časom kurzora; čipy POPLACHY v osi a paneli; nič
   for (const cls of ['is-al-now', 'is-al-fading']) assert.ok(tl.includes(`'${cls}'`), cls);
   const panel = readFileSync(new URL('./ukrainePanel.js', import.meta.url), 'utf8');
   assert.match(panel, /ukraine-chip-alerts/);
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /createUkraineAlertAreasLayer\(\{ viewer \}\)/);
   assert.doesNotMatch(main, /ukraineAlerts\.show\(\)/, 'predvolene vypnuté (opt-in ako ŠKODY)');
   const client = readFileSync(new URL('./data/ukraineEventsClient.js', import.meta.url), 'utf8');

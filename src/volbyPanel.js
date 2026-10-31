@@ -35,16 +35,10 @@ export const VOLBY_PARTY_COLORS = Object.freeze({
   neka: '#cfd8e3', smer: '#e5323b', hlas: '#a970ff', kdh: '#2f80ed', ma: '#21b573',
   sns: '#ffd166', ps: '#39d0ff', sas: '#b7e04a', rep: '#ff8a3d', other: '#8a8f9c',
 });
-/** Po tomto čase (3 dni po voľbách) panel ukazuje archív „Výsledky volieb 2026" bez stavu sčítania. */
-export const VOLBY_ARCHIVE_MS = Date.UTC(2026, 9, 27, 23, 0, 0);
-/**
- * Voľby v archíve (2026-10-27, vlastník: „presuň tlačidlo VOĽBY z dolnej lišty do archívu"): tlačidlo
- * v mobilnej lište a nadpis zóny v ľavom stĺpci zmiznú (body.oko-volby-archived); panel ostáva dostupný
- * z palety (príkaz „Voľby 2026 — výsledky"), z odkazov ?volby a zo stránok /volby-2026/. Pure.
- */
-export function isVolbyArchived(nowMs = Date.now()) {
-  return Number(nowMs) >= VOLBY_ARCHIVE_MS;
-}
+// Archív, odkaz ?volby= (volbyShared.js, 2026-10-31): main.js a ui.js ich potrebujú pri štarte, panel sám
+// príde lenivo pri prvom rozbalení — tu sa znova exportujú pre doterajšie importy.
+export { VOLBY_ARCHIVE_MS, isVolbyArchived, parseVolbyParam } from './volbyShared.js';
+import { VOLBY_ARCHIVE_MS, parseVolbyParam } from './volbyShared.js';
 
 /** Načítanie JSON z /api/volby (chyba = Error so status). */
 export async function fetchVolbyJson(path, { fetcher = (...a) => fetch(...a) } = {}) {
@@ -70,19 +64,6 @@ export const volbyApi = Object.freeze({
 export function volbyCardLink(origin, code = null) {
   const base = String(origin || '').replace(/\/+$/, '');
   return code && /^\d{6}$/.test(String(code)) ? `${base}/s/v${code}` : `${base}/s/volby2026`;
-}
-
-/**
- * Odkaz na zdieľanie: `?volby` otvorí panel, `?volby=<kód obce>` obec, `?volby=k<kraj>` kraj. Pure.
- * @returns {{ obec: string|null, kraj: string|null }|null} null = parameter chýba
- */
-export function parseVolbyParam(search) {
-  const params = new URLSearchParams(String(search || '').replace(/^\?/, ''));
-  if (!params.has('volby')) return null;
-  const value = String(params.get('volby') || '').trim();
-  if (/^k[1-8]$/i.test(value)) return { obec: null, kraj: value.slice(1) };
-  if (/^[a-z0-9][a-z0-9-]{0,79}$/i.test(value)) return { obec: value, kraj: null };
-  return { obec: null, kraj: null };
 }
 
 /** Odkaz na panel, obec alebo kraj. Pure. */

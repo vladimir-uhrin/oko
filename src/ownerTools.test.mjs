@@ -99,7 +99,8 @@ test('drobnosti z QA 2026-10-11: STOP počas scény, Články namiesto Témy, to
   assert.equal(SK_STRINGS['topics.link'], 'Články');
   assert.equal(EN_STRINGS['topics.link'], 'Articles');
   assert.ok(SK_STRINGS['ukraine.karta.restored'] && EN_STRINGS['ukraine.karta.restored']);
-  assert.match(main, /restoreAutoKarta\(\{ notify: true \}\)/, 'zatvorená os ohlási návrat podkladu');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart).
+  assert.match(readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8'), /restoreAutoKarta\(\{ notify: true \}\)/, 'zatvorená os ohlási návrat podkladu');
   const manager = readFileSync(new URL('./data/manager.js', import.meta.url), 'utf8');
   assert.match(manager, /entry\?\.lifecycleState === 'enabling'\s*\? false/, 'klik počas ZAPÍNAM = vypnúť');
   assert.doesNotMatch(manager, /button\.disabled = transitioning;/, 'prechod tlačidlo nezamyká');

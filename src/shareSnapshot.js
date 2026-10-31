@@ -5,8 +5,9 @@
 // s pečiatkou OKO · dátum a atribúciou Google / Cesium ion (podmienky Map
 // Tiles vyžadujú atribúciu aj na zdieľanom obrázku). DOM prvky (HUD, panely)
 // v snímke nie sú — nesú sa v odkaze. Viewer má preserveDrawingBuffer,
-// renderFreshCesiumFrame si vypýta čerstvý snímok pod idle governorom.
-import { renderFreshCesiumFrame } from './voice/gevRealtime.js';
+// renderFreshCesiumFrame si vypýta čerstvý snímok pod idle governorom (cesiumFrame.js — bez
+// hlasového modulu, ktorý sa od 2026-10-31 sťahuje až pri prvom stlačení mikrofónu).
+import { renderFreshCesiumFrame } from './cesiumFrame.js';
 import {
   SHARE_IMAGE_HEIGHT,
   SHARE_IMAGE_MAX_BYTES,

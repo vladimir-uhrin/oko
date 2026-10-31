@@ -206,7 +206,8 @@ test('drôty: sekcia v paneli pred správami, karta v main.js, zvýraznenie z de
   // Prechody stoja za čipmi a legendami vrstiev (ich počet tento drôt nezaujíma) a PRED správami.
   assert.match(panel, /mountTarget\.replaceChildren\(status, dirsTitle, dirs, [^;]*\.filter\(Boolean\), transitsTitle, transits, newsTitle, news, note\);/);
   assert.match(panel, /transitsMount: transits,/);
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /createPortwatchCard\(\{ mountTarget: mideastPanel\.transitsMount \}\)/);
   assert.match(main, /window\.__godsEyeView\.portwatchCard = portwatchCard;/);
   assert.match(main, /portwatchCard\?\.setActive\?\.\(portwatchKeyForTheatre\(scene\?\.id\)\)/);

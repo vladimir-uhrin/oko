@@ -628,7 +628,9 @@ test('register, token a kredit: gas-pipelines má token 0, i18n mená a texty SK
 
 test('tripwires: registrácia v main.js, proxy trasy (meta pred súborom, gzip, 404 no_snapshot), skript buildu bez kľúča', () => {
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
-  assert.match(main, /import gasPipelinesLayer from '\.\/data\/gasPipelinesLayer\.js'/);
+  // Lenivý zástupca (2026-10-31, data/lazyLayers.js): kód vrstvy príde až pri prvom zapnutí.
+  assert.match(main, /gasPipelinesLazy as gasPipelinesLayer,[\s\S]*?\} from '\.\/data\/lazyLayers\.js';/);
+  assert.doesNotMatch(main, /from '\.\/data\/gasPipelinesLayer\.js'/);
   assert.match(main, /dataManager\.register\(gasPipelinesLayer\)/);
   // Hranice s potrubiami (2026-09-19): vrstva ich drží cez retain/release,
   // scéna úžiny je druhý držiteľ; bez tohto by mimo scény žiadne hranice neboli.

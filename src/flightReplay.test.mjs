@@ -110,7 +110,9 @@ test('tripwire: značka používa siluetu a orientáciu flotily; panel je zapoje
   assert.match(src, /screenProjectedRotation\(viewer\.scene, currentPos/);
   assert.match(src, /alignedAxis: Cesium\.Cartesian3\.ZERO/);
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
-  assert.match(ui, /this\._historyPanel = installHistoryPanel\(\{/);
+  // História príde lenivo (lazyPanel.js, 2026-10-31): inštalácia je v install() panela, fasáda drží API.
+  assert.match(ui, /const history = installHistoryPanel\(\{/);
+  assert.match(ui, /this\._historyPanel = \{\n\s+open: lazyMethod\(this\._historyPanels, 'open', historyApi\),/);
   assert.match(ui, /case 'history':/);
   assert.match(ui, /\{ id: 'history-panel' \}/, 'panel v registri zdieľaného stavu');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');

@@ -126,7 +126,8 @@ test('texty v oboch jazykoch a zapojenie v main.js', () => {
   assert.match(SK_STRINGS['mideast.gps.note'], /nie meranie rušičiek/);
   assert.match(SK_STRINGS['mideast.gps.note'], /spoofing sa takto neodhalí/);
   assert.match(SK_STRINGS['mideast.part.gps'], /odvodené/, 'slovo „odvodené" priamo na čipe');
-  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /import \{ createGpsInterference \} from '\.\/gpsInterferenceLayer\.js';/);
   const created = main.indexOf('const gpsInterference = createGpsInterference({ viewer });');
   assert.ok(created > 0 && main.indexOf('const mideastPanel = createMideastPanel({') > created, 'vrstva vzniká pred panelom');

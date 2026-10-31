@@ -415,14 +415,18 @@ test('tripwires: markup v index.html, poradie a skrývanie v style.css, inštal�
   assert.match(css, /#left-panel-stack > #gas-panel:not\(\.collapsed\) \.gas-panel-inner/);
   assert.match(css, /\.gas-chart \{/);
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
-  assert.match(ui, /import \{ installGasPanel \} from '\.\/gasPanel\.js';/);
+  // Panel príde lenivo (lazyPanel.js, 2026-10-31): dynamický import v install() panela.
+  assert.match(ui, /const \{ installGasPanel \} = await import\('\.\/gasPanel\.js'\);/);
+  assert.doesNotMatch(ui, /^import .* from '\.\/gasPanel\.js';/m);
+  assert.match(ui, /panelId: 'gas-panel',/);
   assert.match(ui, /\{ id: 'gas-panel' \},/);
   assert.match(ui, /this\._gasPanel = installGasPanel\(\{/);
   assert.match(ui, /onFlyTo: \(\{ id, lat, lon \}\) => \{/, 'klik na riadok toku preletí kameru');
   assert.match(ui, /selectStationByRowId\?\.\(id\)/, 'a otvorí rozšírenú kartu stanice');
   assert.match(ui, /setEnabled\?\.\('gas-flows', true, \{ origin: 'user' \}\)/, 'a zapne vrstvu staníc');
   const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
-  assert.match(main, /import gasFlowsLayer from '\.\/data\/gasFlowsLayer\.js';/);
+  // Lenivý zástupca (2026-10-31, data/lazyLayers.js): kód vrstvy príde až pri prvom zapnutí.
+  assert.match(main, /gasFlowsLazy as gasFlowsLayer,[\s\S]*?\} from '\.\/data\/lazyLayers\.js';/);
   assert.match(main, /dataManager\.register\(gasFlowsLayer\);/, 'vrstva tokov je zaregistrovaná');
   for (const key of ['panel.gas', 'gas.prices', 'gas.ttf-derived', 'gas.ttf-derived-note', 'gas.eu-lng', 'gas.nwe', 'gas.south', 'gas.range-1m', 'gas.range-1y', 'gas.range-max', 'gas.per-kwh', 'gas.source-acer', 'gas.source-monthly', 'gas.monthly-label', 'gas.max-label', 'gas.last-label', 'gas.loading', 'gas.unavailable', 'gas.updated', 'gas.stale']) {
     assert.ok(EN_STRINGS[key], `EN ${key}`);

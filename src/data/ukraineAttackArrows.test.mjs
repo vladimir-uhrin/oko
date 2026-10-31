@@ -147,7 +147,8 @@ test('vrstva hlásenia GŠ: šípky len s líniou, nie do okupovaného, len v KA
   assert.match(src, /arrows: \[\.\.\._placeRecords\.values\(\)\]\.filter\(\(r\) => r\.arrow\)\.length/);
   assert.match(src, /if \(record\.arrow\) details\.push\(translate\('ukraine\.report\.arrow-note'\)\);/);
   assert.match(src, /const moved = placeAnchors\(\);\s*\/\/[^\n]*\n\s*drawArrows\(\);/, 'nová línia = nové šípky');
-  const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
+  // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
+  const main = readFileSync(new URL('../conflictScenes.js', import.meta.url), 'utf8');
   assert.match(main, /contactPoint: \(lon, lat, opts\) => window\.__godsEyeView\.ukraineDeepState\?\.nearestContactPoint\?\.\(lon, lat, opts\) \?\? null,/);
   assert.match(main, /sideAt: \(lon, lat\) => window\.__godsEyeView\.ukraineDeepState\?\.sideAt\?\.\(lon, lat\) \?\? null,/);
   const tl = readFileSync(new URL('../ukraineTimeline.js', import.meta.url), 'utf8');

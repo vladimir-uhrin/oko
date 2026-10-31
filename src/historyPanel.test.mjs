@@ -364,7 +364,8 @@ test('výber letu zo zoznamu: sledovanie zapnuté počas načítania trasy sa ne
 
 test('zapojenie v ui.js: História letov dostane stopLiveTracking, ktoré pustí lietadlo aj vojenský stroj', () => {
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
-  const start = ui.indexOf('this._historyPanel = installHistoryPanel({');
+  // História príde lenivo (lazyPanel.js, 2026-10-31): inštalácia je v install() panela.
+  const start = ui.indexOf('const history = installHistoryPanel({');
   assert.ok(start > 0, 'panel je zapojený');
   const rest = ui.slice(start);
   const block = rest.slice(0, rest.search(/\r?\n {4}\}\);/));
