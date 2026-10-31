@@ -40,14 +40,14 @@ test('úsporný režim len pri softvérovom kreslení', () => {
   assert.deepEqual(gpu, mk());
 });
 
-test('úsporný režim bez GPU (2026-10-31): príznak pre vrstvy, atmosféra, hmla, HDR a FXAA vypnuté', async () => {
+test('úsporný režim bez GPU (2026-10-31): príznak pre vrstvy, atmosféra, HDR a FXAA vypnuté; hmla ostáva (vyraďuje dlaždice)', async () => {
   const { isSoftwareRenderActive, _setSoftwareRenderActiveForTest } = await import('./softwareRenderer.js');
   _setSoftwareRenderActiveForTest(false);
   assert.equal(isSoftwareRenderActive(), false);
   const scene = { msaaSamples: 4, skyAtmosphere: { show: true }, fog: { enabled: true }, globe: { showGroundAtmosphere: true }, highDynamicRange: true, postProcessStages: { fxaa: { enabled: true } } };
   assert.equal(applySoftwareRendererBudget({ targetFrameRate: 60, resolutionScale: 1, useBrowserRecommendedResolution: false, scene }, 'llvmpipe'), true);
   assert.equal(isSoftwareRenderActive(), true);
-  assert.deepEqual(scene, { msaaSamples: 1, skyAtmosphere: { show: false }, fog: { enabled: false }, globe: { showGroundAtmosphere: false }, highDynamicRange: false, postProcessStages: { fxaa: { enabled: false } } });
+  assert.deepEqual(scene, { msaaSamples: 1, skyAtmosphere: { show: false }, fog: { enabled: true }, globe: { showGroundAtmosphere: false }, highDynamicRange: false, postProcessStages: { fxaa: { enabled: false } } });
   _setSoftwareRenderActiveForTest(false);
   assert.equal(applySoftwareRendererBudget({ targetFrameRate: 60, scene: {} }, 'Apple GPU'), false, 'GPU: nič sa nemení');
   assert.equal(isSoftwareRenderActive(), false);

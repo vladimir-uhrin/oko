@@ -14017,11 +14017,16 @@ body.oko-mobile #oko-consent .oko-consent-btn { flex: 1 1 0; min-width: 0; min-h
 .oko-consent-foot.is-dialog .oko-consent-btn { flex: 1; }
 .oko-consent-meta { margin: 0; font: 9.5px/1.6 var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--cc-faint); }
 
-/* Odkaz SÚKROMIE pod prepínačom jazyka. */
+/* Odkaz SÚKROMIE pod prepínačom jazyka. Riadky po 24 px bez medzery (2026-10-31 Lighthouse „target size"
+   aj na počítači: 17 px riadky s 6 px medzerou sú na dotyk malé); písmo ostáva 10 px, #lang-switch končí
+   pri 175 px — nástroje KARTY začínajú na 176 px (.oko-karta-tools). */
 #lang-switch #consent-open,
 #lang-switch #topics-link {
-  display: block;
-  margin: 6px 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 24px;
+  margin: 0 0 0 auto;
   font-size: 10px;
 }
 /* Témy vyzerajú ako tlačidlá prepínača (mono, rozostupy, tlmené). */
