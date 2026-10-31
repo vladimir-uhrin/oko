@@ -29,6 +29,7 @@
 import fs from 'node:fs';
 import { versionedDeferredCesiumTags } from './scripts/lib/cesiumHtmlTags.mjs';
 import { eventLoopWatchPlugin } from './scripts/lib/eventLoopWatch.mjs';
+import { iconFontCacheBustPlugin } from './scripts/lib/iconFont.mjs';
 import { startupProfilePlugin } from './scripts/lib/startupProfile.mjs';
 import { authPlugin } from './src/auth/server/plugin.js';
 import { adminPlugin, getAdminRuntime } from './src/admin/server/plugin.js';
@@ -12498,6 +12499,8 @@ export default defineConfig(({ mode }) => {
       eventLoopWatchPlugin(),
       // Jednorazový CPU profil prvej minúty po štarte — len keď existuje .gev-cache/profile-next-start.
       startupProfilePlugin({ root: __dirname }),
+      // Výrez písma ikon (2026-10-31): ?v=<odtlačok> do preloadu v index.html a do @font-face v style.css.
+      iconFontCacheBustPlugin({ root: __dirname }),
       // Odkaz na preloader víru s odtlačkom obsahu (Cloudflare cache) — na konci, poradie iných nemení.
       preloaderCacheBustPlugin(),
     ],

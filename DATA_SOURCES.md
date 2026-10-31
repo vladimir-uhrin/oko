@@ -376,6 +376,16 @@ Douglas-Peucker simplification, 6-decimal rounding).
 
 ---
 
+## Bundled fonts (`public/fonts/`)
+
+Self-hosted font files; details and the rebuild step are in [`public/fonts/README.md`](public/fonts/README.md).
+
+| Font | Files | Used for | License / terms | Attribution |
+|---|---|---|---|---|
+| **JetBrains Mono** (JetBrains) | `jetbrains-mono-latin*.woff2` | Monospace UI text on `admin.html` (CSP `default-src 'self'`); the main page loads it from Google Fonts | [SIL Open Font License 1.1](https://openfontlicense.org/) | JetBrains Mono, © The JetBrains Mono Project Authors |
+| **Inter** (Rasmus Andersson) | `inter-latin*.woff2` | Sans-serif UI text on `admin.html`; the main page loads it from Google Fonts | [SIL Open Font License 1.1](https://openfontlicense.org/) | Inter, © The Inter Project Authors |
+| **Material Symbols Outlined** (Google) | `material-symbols-subset.woff2`, `material-symbols-subset.json` | Every UI icon of the main page (`.material-symbols-outlined` ligatures) — a subset with only the icons the code uses (2026-10-31: 67 icons, 7.9 KB) instead of the full 324 KB font from Google Fonts | [Apache License 2.0](https://github.com/google/material-design-icons/blob/master/LICENSE) — self-hosting and subsetting permitted; no attribution requirement in the UI | Material Symbols, © Google — [github.com/google/material-design-icons](https://github.com/google/material-design-icons); subset fetched from Google Fonts (`css2` with `icon_names=`) by `scripts/build-icon-font.mjs` |
+
 ## In-app attribution
 
 The required Google Maps / Cesium credit renders on the on-globe credit line (`#cesium-credits`, bottom-left) and must stay visible — including in clean-view and recording modes (the whole line, logo + "Google Maps" + the "Data attribution" link, stays on screen; only the GEV panels/HUD fade). The layer-specific credits (adsb.lol, TeleGeography, OSM datacenters/dams/roads, NASA FIRMS, CelesTrak, USGS, City of Austin, GBFS, Radio Browser, OpenSky, AISStream) are registered into the expandable **"Data attribution"** popover on that credit line via `viewer.creditDisplay.addStaticCredit(new Cesium.Credit(html, /* showOnScreen */ false))` — see `src/data/dataCredits.js`. When you add a new data source, add its license and attribution to this file **and** append an entry to `DATA_CREDITS` in `src/data/dataCredits.js` so it surfaces in the app.
