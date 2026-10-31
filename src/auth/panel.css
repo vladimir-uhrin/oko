@@ -108,11 +108,13 @@ body > #account-actions { position: fixed; top: 32px; left: calc(50% + 98px); z-
 .account-standalone .auth-launcher-copy { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; display: flex; flex-direction: column; gap: 2px; text-align: left; }
 .account-standalone .auth-launcher-copy strong { font-size: 12px; font-weight: 600; }
 .account-standalone .auth-launcher-copy small { font-size: 9px; color: #9baeba; }
-/* Mobile: tighter group so five circles fit beside SK · EN at 375 px; narrower phones
-   get the launcher under the language switch instead. */
+/* Mobile: tighter group so five circles fit beside SK · EN at 375 px (5 × 36 + 4 × 4 = 196 px, 12–208 px).
+   Do 2026-10-31 išiel spúšťač na telefónoch ≤ 374 px napevno vpravo pod SK · EN (top 52, right 12) — odkedy sú
+   tam ČLÁNKY a SÚKROMIE pod sebou (2026-10-15), ležal presne cez ne (vlastník: „prekrytie ČLÁNKY ikonou účtu na
+   360 px"). Rad piatich kruhov sa pri 360 px končí na 208 px a ČLÁNKY začínajú na 278 px, tak spúšťač ostáva
+   v rade na každej šírke; pravidlo s @media (max-width: 374px) je preč (ux.test to stráži). */
 body.oko-mobile #top-center-actions:has(#account-actions) { gap: 4px; }
 body.oko-mobile #top-center-actions #account-actions { margin-left: 0; }
-@media (max-width: 374px) { body.oko-mobile #top-center-actions #account-actions { position: fixed; top: 52px; right: 12px; margin: 0; } }
 body.ui-clean-view #account-actions,
 body.cockpit-mode #account-actions,
 body.scene-playback-mode #account-actions,

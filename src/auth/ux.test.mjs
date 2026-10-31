@@ -33,13 +33,16 @@ test('iniciály a Caps Lock', () => {
   assert.equal(FIELD_FOR_ERROR.password_mismatch, 'confirm');
 });
 
-test('tlačidlo účtu: štvrtá ikona pri akciách glóbusu, nikdy pruh nad mapou; mobil pri prepínači jazyka', () => {
+test('tlačidlo účtu: štvrtá ikona pri akciách glóbusu, nikdy pruh nad mapou; na mobile v rade na každej šírke', () => {
   const css = readFileSync(new URL('./panel.css', import.meta.url), 'utf8');
   assert.match(css, /#top-center-actions #account-actions \{ position: relative; display: flex; margin-left: 6px; \}/, 'piata ikona v skupine akcií glóbusu');
   assert.match(css, /body > #account-actions \{ position: fixed; top: 32px; left: calc\(50% \+ 98px\);/, 'záloha bez skupiny');
   assert.doesNotMatch(css, /top: 79px; left: 50%; transform: translateX\(-50%\)/, 'stredný pruh 701–1100 px (zavadzal nad mapou) je preč');
   assert.match(css, /body\.oko-mobile #top-center-actions:has\(#account-actions\) \{ gap: 4px; \}/, '5 × 36 + 4 × 4 = 196 px: pri 375 px sa zmestí medzi logo a SK · EN');
-  assert.match(css, /@media \(max-width: 374px\) \{ body\.oko-mobile #top-center-actions #account-actions \{ position: fixed; top: 52px; right: 12px;/, 'úzke telefóny: pod prepínačom jazyka');
+  // 2026-10-31 (vlastník: „prekrytie ČLÁNKY ikonou účtu na 360 px"): spúšťač pripnutý vpravo pod SK · EN na ≤ 374 px ležal
+  // cez ČLÁNKY a SÚKROMIE (od 2026-10-15 sú tam pod sebou); rad 12–208 px sa zmestí aj na 360 px (ČLÁNKY od 278 px).
+  assert.doesNotMatch(css, /@media \(max-width: 374px\) \{ body\.oko-mobile #top-center-actions #account-actions \{ position: fixed/, 'úzke telefóny: spúšťač ostáva v rade, nie napevno vpravo cez ČLÁNKY');
+  assert.doesNotMatch(css, /#account-actions \{[^}]*position: fixed;[^}]*right: 12px/, 'žiadne pripnutie spúšťača vpravo');
   const panel = readFileSync(new URL('./panel.js', import.meta.url), 'utf8');
   assert.match(panel, /\(document\.getElementById\('top-center-actions'\) \|\| document\.body\)\.append\(mount\)/, 'launcher sa pripája do skupiny akcií');
   assert.match(css, /\.auth-launcher \{[^}]*width: 36px; height: 36px;[^}]*border-radius: 50%/, 'kruh ako susedné ikony');
