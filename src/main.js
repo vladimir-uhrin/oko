@@ -1048,9 +1048,12 @@ async function init() {
     // any scene, off outside one.
     const countryBoundaries = createCountryBoundaries({ viewer });
     window.__godsEyeView.countryBoundaries = countryBoundaries;
-    // Geometria hraníc sa postaví hneď (priehľadná), nie až pri prvom zapnutí: meranie 2026-10-16 —
+    // Geometria hraníc sa postaví vopred (priehľadná), nie až pri prvom zapnutí: meranie 2026-10-16 —
     // po pristátí preletu chýbali ~35 s, kým sa úlohy vo workeroch dostali za dekódovanie dlaždíc.
-    void countryBoundaries.prewarm();
+    // Na telefóne hneď (prelet pristane pod 5 000 km), na počítači až po skrytí preloadera (2026-10-31,
+    // odľahčený štart: 0,4 MB hraníc súperilo s Cesiom; zo 7 000 km ich nevidno, kým sa nepriblíži).
+    if (phoneStart) void countryBoundaries.prewarm();
+    else void whenStartupReady().then(() => countryBoundaries.prewarm());
     // Názvy štátov (src/data/countryLabels.js, Natural Earth + Intl.DisplayNames) idú spolu s hranicami.
     const countryLabels = createCountryLabels({ scene: viewer.scene, lang: currentLanguage() });
     window.__godsEyeView.countryLabels = countryLabels;

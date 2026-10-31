@@ -98,9 +98,9 @@ test('hud.js corrects the camera height to MSL through the geoid module', () => 
     'hud.js must take the datum correction from ./data/geoid.js, not re-derive one',
   );
   assert.equal(
-    has(/ensureGeoidReady\(\)\s*\n\s*\.then\(/),
+    has(/ensureGeoidReadyWhenLow\(this\.viewer\?\.scene\)\s*\n\s*\.then\(/),
     true,
-    'the geoid grid must be loaded opportunistically, never awaited on a readout tick',
+    'the geoid grid must be loaded opportunistically (2026-10-31: only once the camera is low), never awaited on a readout tick',
   );
   assert.equal(
     has(/this\._geoidRequested = true;/),

@@ -12354,6 +12354,24 @@ body.recording-mode .state-strip {
   text-transform: uppercase;
 }
 .gas-status[data-state="error"], .gas-status[data-state="stale"] { color: #ffb14d; }
+/* Načítavanie vidieť (vlastník 2026-10-31: „aby užívateľ vedel, že to nezamrzlo"): krúžok pred stavom
+   načítavania — platí pre všetky panely na štýle .gas-status (plyn, Ukrajina, Blízky východ). */
+.gas-status[data-state="loading"]::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(171, 210, 220, 0.25);
+  border-top-color: var(--accent);
+  animation: oko-loading-spin 0.9s linear infinite;
+}
+@keyframes oko-loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .gas-status[data-state="loading"]::before { animation-duration: 2.4s; }
+}
 .gas-card {
   display: flex;
   flex-direction: column;

@@ -716,17 +716,39 @@ export function installGasPanel({
   }
 
   function load() {
+    ensureStarted({ load: false });
     return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng(), loadImports(), loadFleet()]);
   }
 
-  const timer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void load(); }, refreshMs) : null;
-  // Lode sa hýbu: LNG tankery sa obnovujú z úložiska servera každých 10 min.
-  const fleetTimer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void loadFleet(); }, LNG_FLEET_REFRESH_MS) : null;
-  void load();
+  // Prvé sťahovanie a periodická obnova až keď panel vidno (2026-10-31, odľahčený štart: šesť zdrojov vrátane
+  // 0,6 MB zásobníkov sa sťahovalo aj do zbaleného panelu). Zbalený panel čaká na IntersectionObserver tela
+  // (rozbalenie na počítači aj sekcia DÁTA na telefóne); bez pozorovateľa, alebo keď panel nie je zbalený, hneď.
+  // Dovtedy stavové riadky kariet hlásia načítavanie (krúžok v style.css), takže panel nevyzerá zamrznutý.
+  let started = false;
+  let timer = null;
+  let fleetTimer = null;
+  let visibilityWatch = null;
+  function ensureStarted({ load: loadNow = true } = {}) {
+    if (started) return;
+    started = true;
+    if (visibilityWatch) { visibilityWatch(); visibilityWatch = null; }
+    timer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void load(); }, refreshMs) : null;
+    // Lode sa hýbu: LNG tankery sa obnovujú z úložiska servera každých 10 min.
+    fleetTimer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void loadFleet(); }, LNG_FLEET_REFRESH_MS) : null;
+    if (loadNow) void load();
+  }
+  const Observer = doc?.defaultView?.IntersectionObserver ?? globalThis.IntersectionObserver;
+  if (root.classList?.contains?.('collapsed') === true && typeof Observer === 'function') {
+    const observer = new Observer((entries) => { if (entries.some((entry) => entry.isIntersecting)) ensureStarted(); });
+    observer.observe(body);
+    visibilityWatch = () => observer.disconnect();
+  } else {
+    ensureStarted();
+  }
 
   return {
     /** Otvor panel (hlasový alias, kontextové menu). */
-    open() { setCollapsed?.(false); },
+    open() { ensureStarted(); setCollapsed?.(false); },
     refresh: load,
     refreshFleet: loadFleet,
     setRange(next) { if (GAS_PRICE_RANGES.includes(next)) { range = next; render(); } },
@@ -765,6 +787,7 @@ export function installGasPanel({
       };
     },
     destroy() {
+      if (visibilityWatch) { visibilityWatch(); visibilityWatch = null; }
       if (typeof clearIntervalImpl !== 'function') return;
       if (timer !== null) clearIntervalImpl(timer);
       if (fleetTimer !== null) clearIntervalImpl(fleetTimer);

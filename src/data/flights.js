@@ -109,7 +109,7 @@ import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { geoidSurfaceLastResortM, pickRenderAltitudeM } from './renderAltitude.js';
 import { allocateCorridorCells, cachedGroundFloor, cachedMeshFloor, coarseFloorCoord, corridorFloorCells, displayFloorHeightM, floorAltitudeM, neighborFloorM, stickyFloorCell, warmGroundFloor, resolveGroundFloorCellsBounded, GROUND_FLOOR_LIFT_M } from './groundFloor.js';
 import { sampleMeshFloorCells } from './meshFloorSampler.js';
-import { ensureGeoidReady, geoidHeight } from './geoid.js';
+import { ensureGeoidReady, ensureGeoidReadyWhenLow, geoidHeight } from './geoid.js';
 import {
   advanceFocusEvidenceNowMs,
   advanceProjectedSpriteFocus,
@@ -1107,7 +1107,9 @@ const _estimateEnded = new Set();
 /** Počítadlá pre kontrolu (vývojový server, __okoEstimates.stats). */
 const _estimateStats = { evicted: 0, noFix: 0, notQualified: 0, local: 0 };
 const SERVER_ESTIMATES_URL = '/api/flights/estimated';
-const SERVER_ESTIMATES_INTERVAL_MS = 60_000;
+// 2 min (2026-10-31, odľahčený štart): odpoveď má ~330 KB zbalených (model trasy pre ~2 000 strojov) — každú minútu
+// to bolo 20 MB/h pre každého návštevníka; nový odhad sa ukáže najneskôr o 2 min, poloha sa dopočítava lokálne.
+const SERVER_ESTIMATES_INTERVAL_MS = 120_000;
 let _serverEstimatesAt = 0;
 let _serverEstimatesInflight = false;
 /** Kalibrácia kruhu neistoty z nameraných chýb servera (2026-10-05). */
@@ -3801,6 +3803,8 @@ function _estimateRows(liveStates, nowMs) {
 
 /** Zoznam odhadov zo servera (lietadlá, ktoré zmizli skôr, než sa stránka otvorila). Bez servera ticho nič. */
 async function _refreshServerEstimates() {
+  // Až po skrytí preloadera a len keď sú odhady zapnuté (2026-10-31): pri štarte súperili s Cesiom a živým snímkom.
+  if (!_estimatesVisible || !isStartupReady()) return;
   const nowMs = Date.now();
   if (_serverEstimatesInflight || nowMs - _serverEstimatesAt < SERVER_ESTIMATES_INTERVAL_MS) return;
   _serverEstimatesInflight = true;
@@ -5385,8 +5389,10 @@ const flightsLayer = {
     // Height-datum fix: warm the geoid grid once per layer-enable. The poll loop
     // only reads geoidHeight() synchronously after this resolves (guarded by
     // _geoidReady) — never awaited per-aircraft, never blocking a poll tick.
+    // Odľahčený štart (2026-10-31): mriežka 0,7 MB až keď kamera klesne pod GEOID_NEEDED_BELOW_M
+    // (zo 7 000 km je zvlnenie ±100 m pod pixel); dovtedy baro výška bez opravy, ako pri zlyhaní.
     if (!_geoidReady) {
-      ensureGeoidReady()
+      ensureGeoidReadyWhenLow(viewer?.scene)
         .then(() => { _geoidReady = true; })
         .catch(() => { /* geoid grid failed to load — baro path stays un-geoid-corrected until retried */ });
     }

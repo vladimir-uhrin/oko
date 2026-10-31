@@ -34,6 +34,31 @@ export async function ensureGeoidReady() {
   return readyPromise;
 }
 
+/** Výška kamery (m), pod ktorou už geoid treba: zvlnenie ±100 m je nad ňou pod pixel. */
+export const GEOID_NEEDED_BELOW_M = 500_000;
+
+/**
+ * Mriežku načíta až keď kamera klesne pod `belowM` — alebo hneď, keď už je nízko, scéna nemá udalosť
+ * kamery, alebo mriežka už beží. Odľahčený štart (2026-10-31): lety ju sťahovali pri zapnutí vrstvy,
+ * 0,7 MB, ktoré zo 7 000 km nikto nevidí. Cesium `camera.changed` vracia odhlásenie poslucháča.
+ * @param {{camera?: {positionCartographic?: {height?: number}, changed?: {addEventListener: Function}}}} scene
+ * @param {{belowM?: number}} [opts]
+ * @returns {Promise<void>} pripravenosť mriežky
+ */
+export function ensureGeoidReadyWhenLow(scene, { belowM = GEOID_NEEDED_BELOW_M } = {}) {
+  if (readyPromise) return readyPromise;
+  const camera = scene?.camera;
+  const height = () => camera?.positionCartographic?.height;
+  if (typeof camera?.changed?.addEventListener !== 'function' || !(height() > belowM)) return ensureGeoidReady();
+  return new Promise((resolve, reject) => {
+    const remove = camera.changed.addEventListener(() => {
+      if (height() > belowM) return;
+      if (typeof remove === 'function') remove();
+      ensureGeoidReady().then(resolve, reject);
+    });
+  });
+}
+
 /**
  * Dekóduje zbalenú mriežku (base64, decimetre, rozdiely v riadku, nízke
  * a vysoké bajty v dvoch blokoch — scripts/lib/geoidGrid.mjs). Pure.

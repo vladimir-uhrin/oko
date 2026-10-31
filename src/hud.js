@@ -18,7 +18,7 @@ import { forward as toMGRS } from 'mgrs';
 import { t } from './i18n.js';
 import { CITY_POIS } from './locations.js';
 import { composeLocalityTag } from './hudLocality.js';
-import { ellipsoidalToMslDisplayM, ensureGeoidReady, geoidHeight } from './data/geoid.js';
+import { ellipsoidalToMslDisplayM, ensureGeoidReadyWhenLow, geoidHeight } from './data/geoid.js';
 import { getBasemapLabelContext } from './voice/gevActions.js';
 import { classifySummaryFailure } from './hudSummaryPolicy.js';
 
@@ -222,7 +222,9 @@ export class IntelHUD {
     if (!this._geoidReady) {
       if (!this._geoidRequested) {
         this._geoidRequested = true;
-        ensureGeoidReady()
+        // Odľahčený štart (2026-10-31): HUD beží aj so skrytými rohmi a žiadal mriežku 0,7 MB hneď pri
+        // štarte; zo 7 000 km je zvlnenie ±100 m pod rozlíšením údaja — načíta sa až pri nízkej kamere.
+        ensureGeoidReadyWhenLow(this.viewer?.scene)
           .then(() => { this._geoidReady = true; })
           .catch(() => { /* readout falls back to the uncorrected height */ });
       }

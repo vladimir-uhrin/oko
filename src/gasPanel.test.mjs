@@ -116,6 +116,53 @@ function fakeDoc() {
 
 const find = (node, pred, out = []) => { if (pred(node)) out.push(node); for (const c of node.children || []) find(c, pred, out); return out; };
 
+test('zbalený panel nič nesťahuje, kým ho nevidno (2026-10-31): IntersectionObserver spustí prvé načítanie aj obnovu', async () => {
+  const doc = fakeDoc();
+  doc.root.classList.contains = (name) => name === 'collapsed';
+  let observerCb = null;
+  const observed = [];
+  let disconnected = false;
+  doc.defaultView = { IntersectionObserver: class { constructor(cb) { observerCb = cb; } observe(el) { observed.push(el); } disconnect() { disconnected = true; } } };
+  const calls = [];
+  const intervals = [];
+  const api = {
+    prices: async () => { calls.push('prices'); return PAYLOAD; },
+    flows: async () => { calls.push('flows'); return FLOWS; },
+    storage: async () => { calls.push('storage'); return STORAGE; },
+    lng: async () => { calls.push('lng'); return LNG; },
+    imports: async () => { calls.push('imports'); return IMPORTS; },
+    fleet: async () => { calls.push('fleet'); return FLEET; },
+  };
+  const panel = installGasPanel({ doc, t, lang: 'sk', nowMs: () => NOW, api, setIntervalImpl: (fn, ms) => { intervals.push(ms); return 42; }, clearIntervalImpl: () => {} });
+  await flush();
+  assert.deepEqual(calls, [], 'zbalený panel: žiadny dopyt');
+  assert.deepEqual(intervals, [], 'ani periodická obnova');
+  assert.deepEqual(observed, [doc.root.body], 'sleduje telo panelu');
+  assert.equal(panel._getStateForTest().status, 'loading', 'stavový riadok hlási načítavanie');
+  observerCb([{ isIntersecting: false }]);
+  await flush();
+  assert.deepEqual(calls, [], 'mimo obrazovky stále nič');
+  observerCb([{ isIntersecting: true }]);
+  await flush();
+  assert.deepEqual([...calls].sort(), ['fleet', 'flows', 'imports', 'lng', 'prices', 'storage'], 'po zobrazení všetkých šesť zdrojov');
+  assert.deepEqual(intervals, [GAS_PANEL_REFRESH_MS, LNG_FLEET_REFRESH_MS], 'obnova beží až od zobrazenia');
+  assert.equal(disconnected, true, 'pozorovateľ po štarte končí');
+  assert.equal(panel._getStateForTest().status, 'ok');
+  // Hlas/paleta: open() spustí sťahovanie aj bez pozorovateľa.
+  const doc2 = fakeDoc();
+  doc2.root.classList.contains = (name) => name === 'collapsed';
+  doc2.defaultView = { IntersectionObserver: class { observe() {} disconnect() {} } };
+  const calls2 = [];
+  const panel2 = installGasPanel({ doc: doc2, t, lang: 'sk', nowMs: () => NOW, refreshMs: 0, api: { ...api, prices: async () => { calls2.push('prices'); return PAYLOAD; } } });
+  await flush();
+  assert.deepEqual(calls2, []);
+  panel2.open();
+  await flush();
+  assert.deepEqual(calls2, ['prices'], 'open() = prvé načítanie');
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.gas-status\[data-state="loading"\]::before \{[\s\S]*?animation: oko-loading-spin/, 'načítavanie má viditeľný krúžok (vlastník 2026-10-31)');
+});
+
 test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky LNG, prepne rozsah, obnovuje periodicky, zruší timer', async () => {
   const doc = fakeDoc();
   const calls = [];

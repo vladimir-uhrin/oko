@@ -52,7 +52,7 @@ import { trackedModelZoomActive } from './trackedModelRegime.js';
 import { pickRenderAltitudeM } from './renderAltitude.js';
 import { cachedGroundFloor, floorAltitudeM, warmGroundFloor, resolveGroundFloorCellsBounded, GROUND_FLOOR_LIFT_M } from './groundFloor.js';
 import { sampleMeshFloorCells } from './meshFloorSampler.js';
-import { ensureGeoidReady, geoidHeight } from './geoid.js';
+import { ensureGeoidReady, ensureGeoidReadyWhenLow, geoidHeight } from './geoid.js';
 import {
   advanceProjectedSpriteFocus,
   clearFocusTarget,
@@ -3176,8 +3176,10 @@ const militaryFlightsLayer = {
     // Height-datum fix: warm the geoid grid once per layer-enable. The poll loop
     // only reads geoidHeight() synchronously after this resolves (guarded by
     // _geoidReady) — never awaited per-aircraft, never blocking a poll tick.
+    // Odľahčený štart (2026-10-31): mriežka 0,7 MB až keď kamera klesne pod GEOID_NEEDED_BELOW_M
+    // (zo 7 000 km je zvlnenie ±100 m pod pixel); dovtedy baro výška bez opravy, ako pri zlyhaní.
     if (!_geoidReady) {
-      ensureGeoidReady()
+      ensureGeoidReadyWhenLow(viewer?.scene)
         .then(() => { _geoidReady = true; })
         .catch(() => { /* geoid grid failed to load — baro path stays un-geoid-corrected until retried */ });
     }
