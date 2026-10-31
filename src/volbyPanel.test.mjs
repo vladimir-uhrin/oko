@@ -393,7 +393,7 @@ test('výsledky: stav so spracovaním a účasťou, pás, kraj s hlasmi a značk
 test('zapojenie: ui.js panel v registri pruhu a kokpite + installVolbyPanel s preletom; sharelink token; mobil sekcia; main.js deep link ?volby', () => {
   assert.match(ui, /\{ id: 'volby-panel' \},/);
   assert.match(ui, /^  'volby-panel',$/m, 'kokpit panel zbalí pri vstupe');
-  assert.match(ui, /import \{ installVolbyPanel \} from '\.\/volbyPanel\.js';/);
+  assert.match(ui, /import \{ installVolbyPanel, isVolbyArchived \} from '\.\/volbyPanel\.js';/);
   assert.match(ui, /this\._volbyPanel = installVolbyPanel\(\{/);
   assert.match(ui, /setPanelCollapsed\('volby-panel', collapsed/);
   assert.match(sharelink, /\{ id: 'volby-panel', token: 'y', pinnable: false \},/);
@@ -534,4 +534,12 @@ test('archív volieb (2026-10-27): tlačidlo v mobilnej lište a zbalená zóna 
   assert.match(main, /id: 'view:volby'/);
   assert.ok(main.includes("classList.toggle('oko-volby-archived'"));
   for (const key of ['cmd.action.volby', 'cmd.action.volby.hint']) assert.ok(SK_STRINGS[key] && EN_STRINGS[key], key);
+  // 2026-10-31 (vlastník: „voľby skončili … schovať a nech sa zobrazí hlavná obrazovka"): po archíve sa panel
+  // neotvorí sám z uloženého stavu prehliadača (panelCollapsed.volby-panel=0 z čias volieb) ani z odkazu so stavom
+  // panela (ui=…y.c.0) — otvorený panel by prepol mapu do volebného režimu bez lietadiel. Otvára ho len paleta,
+  // ?volby a mobil open('volby').
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /import \{ installVolbyPanel, isVolbyArchived \} from '\.\/volbyPanel\.js';/);
+  assert.match(ui, /_restorePanelCollapsedState\(panelId[\s\S]{0,1500}if \(panelId === 'volby-panel' && isVolbyArchived\(\)\) collapsed = true;\n\s+panelEl\.classList\.toggle\('collapsed', collapsed\);/);
+  assert.match(ui, /_restorePanelState\(panelState\) \{[\s\S]{0,900}if \(spec\.id === 'volby-panel' && !nextCollapsed && isVolbyArchived\(\)\) continue;/);
 });

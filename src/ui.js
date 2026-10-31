@@ -71,7 +71,7 @@ import { eventIdFromHash, installEventsPanel } from './eventsPanel.js';
 import { createEventMarkers } from './eventMarkers.js';
 import { whenStartupReady } from './startupGate.js';
 import { installGasPanel } from './gasPanel.js';
-import { installVolbyPanel } from './volbyPanel.js';
+import { installVolbyPanel, isVolbyArchived } from './volbyPanel.js';
 import { setFlagReadyListener } from './data/countryFlags.js';
 import { destroyWorldOverlay, getOverlayEntryText, hitTestWorldOverlay, initWorldOverlay } from './overlays/worldOverlay.js';
 import {
@@ -7649,6 +7649,11 @@ export class StyleManager {
     // first-run mission card for the one first impression there is. A stored
     // choice still wins in both directions, so anyone who opens it keeps it.
     if (panelId === 'pp-toggles' && stored === null) collapsed = true;
+    // VOĽBY 2026 v archíve (2026-10-31, vlastník: „voľby skončili … schovať a nech sa zobrazí hlavná obrazovka"):
+    // rozbalenie uložené z čias volieb panel už neotvorí — otvorený panel prepína mapu do volebného režimu
+    // (tmavý podklad, body obcí, bez lietadiel). Otvára ho len paleta, ?volby a mobil open('volby')
+    // cez setPanelCollapsed({ explicit: true }).
+    if (panelId === 'volby-panel' && isVolbyArchived()) collapsed = true;
     panelEl.classList.toggle('collapsed', collapsed);
     this._syncPanelCollapseButton(panelEl);
   }
@@ -8661,6 +8666,8 @@ export class StyleManager {
         });
       }
       const nextCollapsed = state.pinned && spec.pinnable ? false : state.collapsed;
+      // Archív volieb (2026-10-31): odkaz so stavom panela (ui=…y.c.0) panel VOĽBY už neotvorí — len ?volby.
+      if (spec.id === 'volby-panel' && !nextCollapsed && isVolbyArchived()) continue;
       this.setPanelCollapsed(spec.id, nextCollapsed, {
         restore: true,
         persist: false,
