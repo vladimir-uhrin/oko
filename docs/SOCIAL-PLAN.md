@@ -330,3 +330,12 @@ Poistky a rozhodnutia:
 - **Hlas vlastníka v reeloch.** Čaká na `AI_TRANSLATORS_MCP_URL` a `AI_TRANSLATORS_MCP_KEY`
   v `.env` servera.
 - **Najlepší čas** začne radiť až po 5 príspevkoch zverejnených cez Meta API.
+
+## Napojenie stránky a koncepty na FB (2026-11-03)
+
+- `node scripts/meta-connect.mjs` — vlastník vloží do `.env` `META_APP_ID`, `META_APP_SECRET` a krátkodobý
+  `META_SETUP_USER_TOKEN` z Graph API Explorera; skript ho vymení za trvalý token stránky, zapíše `META_PAGE_ID`,
+  `META_PAGE_TOKEN`, `META_IG_USER_ID` a tajný kľúč s dočasným tokenom z `.env` zmaže. `--page <ID>` pri viacerých
+  stránkach, `--check` overí uložený token. Potom `Restart-Service oko-api`.
+- Tlačidlo **Do konceptov FB** (cieľ `facebook-reel-draft`, len ručne): reel sa nahrá na stránku s `video_state=DRAFT`,
+  nič sa nezverejní a návrh v Štúdiu ostane neuverejnený. Koncept je v Meta Business Suite.

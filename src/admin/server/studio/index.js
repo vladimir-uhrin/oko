@@ -58,8 +58,10 @@ const localHour = at => Number(hourFmt.format(new Date(at)));
 const fail = (code, status = 400) => Object.assign(new Error(code), { status });
 
 export const TARGETS = Object.freeze(['facebook', 'instagram', 'facebook-reel', 'instagram-reel']);
-const REEL_TARGETS = new Set(['facebook-reel', 'instagram-reel']);
-const baseTarget = target => target.replace(/-reel$/, '');
+// Koncept reelu na FB stránke (2026-11-03): len ručne, mimo TARGETS (auto, plán, opakovanie, štatistiky ho nepoznajú).
+export const FB_REEL_DRAFT = 'facebook-reel-draft';
+const REEL_TARGETS = new Set(['facebook-reel', 'instagram-reel', FB_REEL_DRAFT]);
+const baseTarget = target => target.replace(/-reel(-draft)?$/, '');
 export const DEFAULT_SETTINGS = Object.freeze({ autoDraft: true, autoReel: true, audio: 'ambient', voice: false, autoPublish: {},
   autoPublishPerDay: 5, quietFrom: 22, quietTo: 7, targets: [...TARGETS],
   // Týždeň na fronte (2026-10-03): sobota 7:00 spustí scripts/make-front-week-video.mjs a výsledok dá do Štúdia.
@@ -714,7 +716,7 @@ export function createStudio({ store, env = process.env, port = () => null, now 
     const draft = requireDraft(id);
     if (inFlight.has(id)) throw fail('publish_in_progress', 409);
     if (draft.status === 'discarded') throw fail('draft_not_publishable', 409);
-    const wanted = [...new Set(targets)].filter(target => TARGETS.includes(target));
+    const wanted = [...new Set(targets)].filter(target => TARGETS.includes(target) || (target === FB_REEL_DRAFT && origin === 'manual'));
     if (!wanted.length) throw fail('no_target');
     const status = publisher.status();
     if (wanted.some(target => !status[baseTarget(target)])) throw fail('meta_not_configured', 409);
@@ -746,7 +748,9 @@ export function createStudio({ store, env = process.env, port = () => null, now 
             result = carousel && typeof publisher.instagramCarousel === 'function'
               ? await publisher.instagramCarousel({ imageUrls: images.map((_, i) => mediaUrl(id, 30 * 60_000, 'jpg', i)), text: draft.text })
               : await publisher.instagramImage({ imageUrl: mediaUrl(id, 30 * 60_000), text: draft.text });
-          } else if (target === 'facebook-reel') result = await publisher.facebookReel({ video: await fsp.readFile(videoFile(draft)), text: draft.text });
+          } else if (target === 'facebook-reel' || target === FB_REEL_DRAFT) {
+            result = await publisher.facebookReel({ video: await fsp.readFile(videoFile(draft)), text: draft.text, draft: target === FB_REEL_DRAFT });
+          }
           else result = await publisher.instagramReel({ videoUrl: mediaUrl(id, 60 * 60_000, 'mp4'), text: draft.text });
           results[target] = { ...result, at: now() };
         } catch (error) {
@@ -756,6 +760,8 @@ export function createStudio({ store, env = process.env, port = () => null, now 
         }
         store.studioUpdate(id, { results }, now());
       }
+      // Len koncept na FB = nič zverejnené: návrh ostáva v pôvodnom stave, chyba sa iba zapíše.
+      if (todo.every(target => target === FB_REEL_DRAFT)) return { draft: store.studioGet(id), origin, retry: false };
       const ok = todo.every(target => results[target]?.id);
       const wasPublished = draft.status === 'published';
       // Dočasná chyba → ďalší pokus o 10 / 30 / 90 min; trvalá alebo 4. zlyhanie → failed + upozornenie.

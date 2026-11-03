@@ -218,6 +218,30 @@ test('Štúdio: reel na FB aj IG na pozadí; fotka a reel sa dajú zverejniť po
   assert.equal(reels.draft.results['facebook-reel'].url, 'https://www.facebook.com/reel/r1');
 });
 
+test('Štúdio: koncept reelu na FB nezverejní návrh, len ručne, potom sa dá reel zverejniť', async t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'oko-studio-fbdraft-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const calls = [];
+  const publisher = {
+    status: () => ({ facebook: true, instagram: false }),
+    facebookReel: async ({ draft }) => { calls.push(draft); return draft ? { id: 'd1', url: null, draft: true } : { id: 'r1', url: 'https://www.facebook.com/reel/r1' }; },
+  };
+  const studio = createStudio({ store: fakeStore(t), env: { AUTH_ORIGINS: 'https://okolive.sk' }, port: () => 1, now: () => NOW, timers: false, mediaDir: dir, log: () => {},
+    fetchJson: async () => ({ status: 200, headers: {}, body: { records: [{ id: 'q', sourceId: 'q', mag: 6.4, time: NOW - 60e3, lat: 37.6, lon: 23.1 }], fetchedAt: NOW } }),
+    renderCard: async () => Buffer.from('jpg'), checkFfmpeg: async () => true, publisher,
+    renderReel: async (item, file) => { writeFileSync(file, Buffer.alloc(2048)); return {}; } });
+  const { draft } = await studio.generate('quake');
+  await studio.videosIdle();
+  await assert.rejects(studio.publish(draft.id, ['facebook-reel-draft'], 'auto'), /no_target/);
+  const saved = await (await studio.publish(draft.id, ['facebook-reel-draft'])).done;
+  assert.notEqual(saved.draft.status, 'published');
+  assert.equal(saved.draft.publishedAt ?? null, null);
+  assert.deepEqual([saved.draft.results['facebook-reel-draft'].id, saved.draft.results['facebook-reel-draft'].draft], ['d1', true]);
+  const live = await (await studio.publish(draft.id, ['facebook-reel'])).done;
+  assert.equal(live.draft.status, 'published');
+  assert.deepEqual(calls, [true, false]);
+});
+
 test('Meta: FB reel (start → rupload → finish) a IG reel s čakaním na spracovanie', async () => {
   const requests = [];
   const env = { META_PAGE_ID: '111111', META_PAGE_TOKEN: 'T'.repeat(40), META_IG_USER_ID: '222222' };
@@ -250,6 +274,10 @@ test('Meta: FB reel (start → rupload → finish) a IG reel s čakaním na spra
   assert.equal(waits.length, 2);
   const container = requests.find(r => r.path.endsWith('/media')).body;
   assert.deepEqual([container.get('media_type'), container.get('share_to_feed')], ['REELS', 'true']);
+  // koncept na stránke: video_state DRAFT, bez verejného odkazu
+  const fbDraft = await meta.facebookReel({ video: Buffer.alloc(10), text: 'Koncept', draft: true });
+  assert.deepEqual(fbDraft, { id: 'v9', url: null, draft: true });
+  assert.equal(requests.filter(r => r.path.endsWith('/video_reels')).at(-1).body.get('video_state'), 'DRAFT');
   const bad = createMetaPublisher({ env, fetchImpl: async () => Response.json({ video_id: 'v1', upload_url: 'https://evil.example/upload' }) });
   await assert.rejects(bad.facebookReel({ video: Buffer.alloc(1), text: 't' }), /Neočakávaná adresa/);
 });

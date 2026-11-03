@@ -143,8 +143,12 @@ export function createMetaPublisher({ env = process.env, fetchImpl = (...args) =
       try { url = (await call(published.id, { method: 'GET', params: { fields: 'permalink' } })).permalink || null; } catch { /* odkaz nie je nutný */ }
       return { id: published.id, url, slides: children.length };
     },
-    /** Reel na Facebook stránku: start → upload na rupload.facebook.com → finish (zverejniť). Limit Mety: 30 reels / 24 h. */
-    async facebookReel({ video, text }) {
+    /**
+     * Reel na Facebook stránku: start → upload na rupload.facebook.com → finish. Limit Mety: 30 reels / 24 h.
+     * draft (2026-11-03, vlastník: „daj aj na fb do konceptov"): video_state DRAFT — reel ostane v konceptoch
+     * stránky (Meta Business Suite → Obsah), nič sa nezverejní.
+     */
+    async facebookReel({ video, text, draft = false }) {
       const c = config();
       if (!c.facebook) throw new Error('Facebook nie je nastavený (META_PAGE_ID, META_PAGE_TOKEN).');
       const start = await call(`${c.pageId}/video_reels`, { params: { upload_phase: 'start' } });
@@ -155,7 +159,8 @@ export function createMetaPublisher({ env = process.env, fetchImpl = (...args) =
       let uploaded = null;
       try { uploaded = await upload.json(); } catch { uploaded = null; }
       if (!upload.ok || uploaded?.error || uploaded?.success === false) throw graphError(uploaded, upload.status);
-      await call(`${c.pageId}/video_reels`, { params: { video_id: start.video_id, upload_phase: 'finish', video_state: 'PUBLISHED', description: text } });
+      await call(`${c.pageId}/video_reels`, { params: { video_id: start.video_id, upload_phase: 'finish', video_state: draft ? 'DRAFT' : 'PUBLISHED', description: text } });
+      if (draft) return { id: start.video_id, url: null, draft: true };
       return { id: start.video_id, url: `https://www.facebook.com/reel/${start.video_id}` };
     },
     /** Reel na Instagram: kontajner REELS z verejnej URL videa → čakanie na spracovanie (až ~5 min) → zverejnenie. */

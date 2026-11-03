@@ -762,6 +762,14 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
     const short = list => list.map(t => (t.startsWith('facebook') ? 'FB' : 'IG')).join(' + ');
     if (photoTargets.length && (editable || draft.status === 'published')) actions.append(publishButton(`Zverejniť fotku (${short(photoTargets)})`, photoTargets));
     if (reelTargets.length && videoReady) actions.append(publishButton(`Zverejniť reel (${short(reelTargets)})`, reelTargets));
+    // Koncept na FB stránke: reel sa nahrá, ale nezverejní (Meta Business Suite → Koncepty).
+    if (meta.facebook && videoReady && !draft.results?.['facebook-reel-draft']?.id && !draft.results?.['facebook-reel']?.id) {
+      actions.append(act('Do konceptov FB', async () => {
+        if (editable && text.value !== draft.text) await api(`/api/admin/studio/drafts/${draft.id}`, { method: 'POST', body: { text: text.value } });
+        await api(`/api/admin/studio/drafts/${draft.id}/publish`, { method: 'POST', body: { targets: ['facebook-reel-draft'] } });
+        return 'Reel sa nahráva do konceptov stránky — nič sa nezverejní.';
+      }));
+    }
     // Naplánovať: dátum a čas (miestny), ciele = všetko ešte nezverejnené, čo je pripojené.
     const scheduleTargets = [...photoTargets, ...reelTargets];
     if (scheduleTargets.length) {
@@ -827,11 +835,11 @@ function studioCard(draft, meta, bestTimes = null, limits = null) {
   const results = el('div', 'admin-studio-results');
   for (const [target, result] of Object.entries(draft.results || {})) {
     const line = el('div');
-    const name = { facebook: 'Facebook', instagram: 'Instagram', 'facebook-reel': 'Facebook reel', 'instagram-reel': 'Instagram reel', manual: 'Ručne' }[target] || target;
+    const name = { facebook: 'Facebook', instagram: 'Instagram', 'facebook-reel': 'Facebook reel', 'facebook-reel-draft': 'FB koncept', 'instagram-reel': 'Instagram reel', manual: 'Ručne' }[target] || target;
     if (target === 'scheduled') { line.append(badge('plán: chyba', 'bad'), document.createTextNode(` ${result.error}`)); results.append(line); continue; }
     if (result.pending) line.append(badge(`${name}: zverejňuje sa…`, 'info'));
     else if (result.error) line.append(badge(`${name}: chyba`, 'bad'), document.createTextNode(` ${result.error}`));
-    else if (result.url) { const a = el('a', '', `${name}: otvoriť príspevok`); a.href = result.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; line.append(a); }
+    else if (result.url) { const a = el('a', '', result.draft ? `${name}: otvoriť koncepty` : `${name}: otvoriť príspevok`); a.href = result.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; line.append(a); }
     else line.append(document.createTextNode(`${name}: ${when(result.at)}`));
     results.append(line);
   }
