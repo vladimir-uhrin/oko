@@ -92,4 +92,4 @@ const set = { META_PAGE_ID: page.id, META_PAGE_TOKEN: page.access_token };
 if (page.instagram_business_account?.id) set.META_IG_USER_ID = page.instagram_business_account.id;
 writeEnv(set, ['META_APP_SECRET', 'META_SETUP_USER_TOKEN']);
 console.log(`Zapísané do .env: stránka ${page.name} (${page.id})${set.META_IG_USER_ID ? ` + Instagram ${set.META_IG_USER_ID}` : ''}. META_APP_SECRET a META_SETUP_USER_TOKEN zmazané.`);
-console.log('Ďalej: Restart-Service oko-api (zmena .env).');
+console.log('Ďalej: nové vydanie oko-api (scripts/oko-api-release.ps1) — .env sa kopíruje do vydania.');
