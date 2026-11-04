@@ -34,7 +34,6 @@ const CYAN = '#39d0ff';
 const HEADLINE = 'Lietadlá, lode a konflikty naživo v 3D';
 const TOPICS = 'Ukrajina · Blízky východ · plyn · satelity · kamery';
 const DOMAIN = 'okolive.sk';
-const AUTHOR = 'UHRIN VLADIMÍR';
 const ATTRIBUTION = '© Google · Cesium ion';
 
 // Výrez 1800×945 zo záberu 2400×1260 je stále zmenšenie 1,5× (ostré): Zem väčšia, horizont
@@ -64,8 +63,6 @@ const overlay = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${WI
   <circle cx="${pillX + 18}" cy="${pillY - 5}" r="5.5" fill="#ff3b3b"/>
   <text x="${pillX + 32}" y="${pillY + 1}" font-family="${FONT}" font-size="15" font-weight="700" letter-spacing="2.5" fill="#ffd9d9">NAŽIVO</text>
   <text x="${WIDTH / 2 - 16}" y="${pillY + 1}" font-family="${FONT}" font-size="30" font-weight="600" letter-spacing="3" fill="${CYAN}">${DOMAIN}</text>
-  <line x1="${WIDTH / 2 - 150}" y1="294" x2="${WIDTH / 2 - 112}" y2="294" stroke="rgba(57,208,255,0.55)" stroke-width="1"/>
-  <text x="${WIDTH / 2 - 100}" y="299" font-family="${FONT}" font-size="14" letter-spacing="2.2" fill="rgba(223,243,251,0.72)">VYTVORIL <tspan fill="${CYAN}" font-weight="600">${AUTHOR}</tspan></text>
   <text x="${WIDTH - 22}" y="${HEIGHT - 20}" text-anchor="end" font-family="${FONT}" font-size="15" fill="rgba(223,243,251,0.82)" stroke="rgba(0,0,0,0.55)" stroke-width="3" paint-order="stroke">${ATTRIBUTION}</text>
 </svg>`);
 

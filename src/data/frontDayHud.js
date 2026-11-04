@@ -17,7 +17,7 @@ import { FRONT_DAY_FORMAT, FRONT_DAY_VIDEO } from './frontDayVideo.js';
 import { UKRAINE_OUTLINE_BBOX, UKRAINE_OUTLINE_RINGS } from './ukraineOutline.js';
 import { FRONT_SCENES } from '../ukraineFrontScenes.js';
 
-const { MONO, SANS, ACCENT, DIM, shadow, esc, f1, wordmark, logoAt, creditLine, liveDomain } = VIDEO_SVG;
+const { MONO, SANS, ACCENT, DIM, shadow, esc, f1, wordmark, logoAt, liveDomain } = VIDEO_SVG;
 const NBSP = ' ';
 const group = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
 const fade01 = (x) => Math.min(1, Math.max(0, x));
@@ -152,7 +152,6 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     out.push(`<g opacity="${f1(layers.opening)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.42"/>`);
     out.push(logo(W / 2 - 128, DAY_SAFE.top + 8, 56));
     out.push(wordmark(W / 2 - 58, DAY_SAFE.top + 52, 40));
-    out.push(creditLine(W / 2, DAY_SAFE.top + 92, 15, 'middle'));
     const lineH = 92;
     const top = 600;
     const panelH = 104 + hook.lines.length * lineH + (hook.sub ? 64 : 0) + 20;
@@ -343,7 +342,6 @@ export function buildFrontDayHudSvg(model, fs, { logoMarkup = null, hook = null,
     out.push(`<text x="${W / 2}" y="806" text-anchor="middle" font-size="40" font-weight="700" fill="#f2fbff" ${shadow}>${esc(model.endLine || 'Denný prehľad frontu každé ráno')}</text>`);
     out.push(`<text x="${W / 2}" y="856" text-anchor="middle" font-family="${MONO}" font-size="19" letter-spacing="6" fill="rgba(232,234,237,0.8)" ${shadow}>${VIDEO_BRAND.tagline}</text>`);
     out.push(liveDomain(W / 2, 990, 56));
-    out.push(creditLine(W / 2, 1070, 20, 'middle'));
     out.push('</g>');
   }
 

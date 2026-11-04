@@ -2,7 +2,7 @@
 // moje logo", „v OKO style", „potrebujem propagovať doménu aj moje meno ako na webe"). Vrstva SVG nad
 // záberom z OKO; kreslí ju prehliadač na stránke OKO (scripts/capture-event-video.mjs), takže písma sú
 // tie isté ako na webe (JetBrains Mono, Inter) a logo je public/logo.svg. Reč webu: nápis OK + azúrové
-// O, okolive.sk, podpis „— VYTVORIL UHRIN VLADIMÍR" s tenkou azúrovou linkou, heslo webu.
+// O, okolive.sk, heslo webu (meno autora od 2026-11-04 nikde — vlastník).
 //   otvorenie     Zem z obežnej dráhy: logo, OKO, heslo, podpis, čo sa stalo a ktorý let, NAŽIVO okolive.sk,
 //   počas videa   vľavo hore značka ako hlavička webu (logo, OKO, okolive.sk, podpis), vpravo hore hodiny
 //                 UTC a dátum a stavové štítky (BEZ ÚDAJOV / KONIEC ÚDAJOV / SPOMALENÉ), dole karta letu
@@ -24,8 +24,6 @@ export const VIDEO_3D_FORMAT = Object.freeze({ w: 1080, h: 1350 });
 /** Značka a autor — rovnaké ako na webe (index.html: podpis, heslo) a na obrázku okolive.sk. */
 export const VIDEO_BRAND = Object.freeze({
   domain: 'okolive.sk',
-  author: 'UHRIN VLADIMÍR',
-  credit: 'VYTVORIL',
   tagline: 'ŽIADNE MIESTO NEOSTANE BOKOM',
   claim: 'Lietadlá, lode a konflikty naživo v 3D',
   logoHref: '/logo.svg',
@@ -164,17 +162,6 @@ export function inlineLogoMarkup(svgText) {
   return { viewBox, body };
 }
 
-/** Podpis ako na webe: tenká azúrová linka, „VYTVORIL" tlmene, meno azúrovo (mono, preriedené). */
-function creditLine(x, y, size, anchor = 'start') {
-  const words = `${VIDEO_BRAND.credit} ${VIDEO_BRAND.author}`;
-  const textW = words.length * size * 0.6 + (words.length - 1) * 3;
-  const ruleW = size * 2.2;
-  const start = anchor === 'middle' ? x - (ruleW + 12 + textW) / 2 : x;
-  const id = `rule${Math.round(x)}${Math.round(y)}`;
-  return `<defs><linearGradient id="${id}" x1="0" x2="1"><stop offset="0" stop-color="${ACCENT}" stop-opacity="0"/><stop offset="1" stop-color="${ACCENT}" stop-opacity="0.75"/></linearGradient></defs>`
-    + `<rect x="${f1(start)}" y="${f1(y - size * 0.38)}" width="${f1(ruleW)}" height="1.5" fill="url(#${id})"/>`
-    + `<text x="${f1(start + ruleW + 12)}" y="${f1(y)}" font-family="${MONO}" font-size="${size}" letter-spacing="3" fill="${DIM}" ${shadow}>${VIDEO_BRAND.credit} <tspan fill="${ACCENT}" font-weight="500">${esc(VIDEO_BRAND.author)}</tspan></text>`;
-}
 /** Nápis OKO ako na webe (OK + tenké azúrové O). */
 const wordmark = (x, y, size, anchor = 'start') => `<text x="${f1(x)}" y="${f1(y)}" text-anchor="${anchor}" font-family="${MONO}" font-size="${size}" font-weight="600" letter-spacing="${f1(size * 0.14)}" fill="${TEXT}" ${shadow}>OK<tspan fill="${ACCENT}" font-weight="300">O</tspan></text>`;
 /** Logo: vložené SVG (inlineLogoMarkup), inak odkaz na public/logo.svg. */
@@ -193,7 +180,7 @@ function liveDomain(cx, y, size) {
 }
 
 /** Stavebné prvky značky a písma pre ďalšie videá v štýle OKO (frontWeekHud.js) — tá istá reč ako tu. */
-export const VIDEO_SVG = Object.freeze({ MONO, SANS, ACCENT, TEXT, DIM, AMBER, shadow, esc, f1, wrap, wordmark, logoAt, creditLine, liveDomain });
+export const VIDEO_SVG = Object.freeze({ MONO, SANS, ACCENT, TEXT, DIM, AMBER, shadow, esc, f1, wrap, wordmark, logoAt, liveDomain });
 
 /**
  * SVG popisov jednej snímky.
@@ -223,7 +210,6 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     out.push(`<g opacity="${f1(layers.opening)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.42"/><rect width="${W}" height="${H * 0.82}" fill="url(#card)"/>`);
     out.push(logo(W / 2 - 52, 58, 104));
     out.push(wordmark(W / 2 + 6, 232, 72, 'middle'));
-    out.push(creditLine(W / 2, 276, 15, 'middle'));
     const top = 326;
     const lineH = 66;
     const panelH = 92 + hook.lines.length * lineH + (hook.sub ? 54 : 0) + 46;
@@ -245,7 +231,6 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     out.push(logo(W / 2 - 75, 92, 150));
     out.push(wordmark(W / 2 + 8, 368, 112, 'middle'));
     out.push(`<text x="${W / 2}" y="${416}" text-anchor="middle" font-family="${MONO}" font-size="19" letter-spacing="6" fill="rgba(232,234,237,0.8)" ${shadow}>${VIDEO_BRAND.tagline}</text>`);
-    out.push(creditLine(W / 2, 462, 17, 'middle'));
     const lines = wrap(flightLine(event), 46).slice(0, 2);
     const panelH = 172 + lines.length * 46;
     out.push(`<rect x="70" y="512" width="${W - 140}" height="${panelH}" rx="16" fill="rgba(5,14,22,0.8)" stroke="rgba(0,212,255,0.38)"/>`);
@@ -265,7 +250,6 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     out.push(logo(28, 24, 92));
     out.push(wordmark(132, 82, 56));
     out.push(`<text x="134" y="114" font-family="${MONO}" font-size="21" font-weight="500" letter-spacing="3" fill="${ACCENT}" ${shadow}>${VIDEO_BRAND.domain}</text>`);
-    out.push(creditLine(34, 148, 14));
     // Čas zo správy má presnosť na minúty — hodiny bez sekúnd.
     const newsTime = moments.some((m) => m.reported && Math.abs(m.t - s.t) < 1e-6);
     out.push(`<text x="${W - 36}" y="76" text-anchor="end" font-family="${MONO}" font-size="46" font-weight="700" fill="#f2fbff" ${shadow}>${newsTime ? clockUtc(s.t).slice(0, 5) : clockUtc(s.t)} UTC</text>`);
@@ -425,7 +409,6 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
       out.push(`<text x="52" y="${f1(y + 52)}" font-size="21" fill="rgba(223,243,251,0.85)">Médiá: ${esc(media.join(', '))}</text>`);
     }
     out.push(`<text x="52" y="${H - 110}" font-family="${MONO}" font-size="23" font-weight="600" letter-spacing="2" fill="${ACCENT}">Celá rekonštrukcia: ${VIDEO_BRAND.domain}</text>`);
-    out.push(creditLine(52, H - 76, 15));
     out.push('</g>');
   }
 
@@ -437,7 +420,6 @@ export function buildEventVideoHudSvg(event, scene, fs, anchors = {}, { logoMark
     out.push(`<text x="${W / 2}" y="${500}" text-anchor="middle" font-size="36" font-weight="600" fill="#f2fbff" ${shadow}>${esc(VIDEO_BRAND.claim)}</text>`);
     out.push(`<text x="${W / 2}" y="${548}" text-anchor="middle" font-family="${MONO}" font-size="18" letter-spacing="6" fill="rgba(232,234,237,0.8)" ${shadow}>${VIDEO_BRAND.tagline}</text>`);
     out.push(liveDomain(W / 2, 668, 52));
-    out.push(creditLine(W / 2, 748, 20, 'middle'));
     out.push('</g>');
   }
 

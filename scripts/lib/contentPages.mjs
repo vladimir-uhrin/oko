@@ -12,13 +12,13 @@ const UI = Object.freeze({
   sk: {
     home: 'OKO', topics: 'Témy', facts: 'V skratke', faq: 'Časté otázky', sources: 'Zdroje a licencie',
     sourcesNote: 'Uvádzame hlavné zdroje témy; ďalšie zdroje a licencie uvádza priamo mapa.',
-    related: 'Ďalšie témy', crumbs: 'Navigácia', madeBy: 'vytvoril', privacy: 'Ochrana súkromia',
+    related: 'Ďalšie témy', crumbs: 'Navigácia', privacy: 'Ochrana súkromia',
     live: 'Živý 3D glóbus', langNav: 'Jazyk', open: 'Otvoriť',
   },
   en: {
     home: 'OKO', topics: 'Topics', facts: 'At a glance', faq: 'FAQ', sources: 'Sources and licences',
     sourcesNote: 'These are the main sources for this topic; further sources and licences are shown right in the map.',
-    related: 'More topics', crumbs: 'Breadcrumbs', madeBy: 'made by', privacy: 'Privacy',
+    related: 'More topics', crumbs: 'Breadcrumbs', privacy: 'Privacy',
     live: 'Live 3D globe', langNav: 'Language', open: 'Open',
   },
 });
@@ -118,15 +118,14 @@ function topBar(lang, alternates, ui) {
 function footer(site, lang, ui) {
   return `<footer class="c-foot">
   <p><a href="/">OKO — ${ui.live}</a> · <a href="${pagePath(lang)}">${ui.topics}</a> · <a href="/privacy.html">${ui.privacy}</a></p>
-  <p>${ui.madeBy} ${escapeHtml(site.author)} · okolive.sk</p>
 </footer>
 </body>
 </html>
 `;
 }
 
-function person(site) {
-  return { '@type': 'Person', '@id': `${site.origin}/#author`, name: site.author };
+function organization(site) {
+  return { '@type': 'Organization', '@id': `${site.origin}/#organization`, name: site.name, url: `${site.origin}/` };
 }
 
 /** Obsahová stránka jednej témy v jednom jazyku (pure). */
@@ -148,7 +147,7 @@ export function renderPage(page, lang, { pages, site }) {
         inLanguage: lang,
         dateModified: page.updated,
         isPartOf: { '@id': `${site.origin}/#website` },
-        author: { '@id': `${site.origin}/#author` },
+        publisher: { '@id': `${site.origin}/#organization` },
         primaryImageOfPage: `${site.origin}${(page.image || { src: site.defaultImage }).src}`,
       },
       {
@@ -163,7 +162,7 @@ export function renderPage(page, lang, { pages, site }) {
         '@type': 'FAQPage',
         mainEntity: entry.faq.map((item) => ({ '@type': 'Question', name: item.q, acceptedAnswer: { '@type': 'Answer', text: item.a.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') } })),
       }] : []),
-      person(site),
+      organization(site),
     ],
   };
   const sections = (entry.sections || []).map((section) => `  <section>
@@ -239,7 +238,7 @@ export function renderHub(lang, { pages, site, hub }) {
         isPartOf: { '@id': `${site.origin}/#website` },
         hasPart: pages.map((p) => ({ '@type': 'WebPage', url: `${site.origin}${pagePath(lang, p[lang].slug)}`, name: p[lang].title })),
       },
-      person(site),
+      organization(site),
     ],
   };
   return `${head({ site, lang, title: entry.title, description: entry.description, canonical, alternates, ogType: 'website', image: null, imageAlt: null, jsonLd })}

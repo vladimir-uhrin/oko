@@ -19,17 +19,18 @@ test('hlavička koreňa: jazyk, titulok, popis, kanonická adresa, indexovanie',
   assert.match(html, /<meta name="robots" content="index, follow, max-image-preview:large" \/>/);
 });
 
-test('štruktúrované dáta: WebSite, WebApplication zadarmo a autor sa dajú načítať', () => {
+test('štruktúrované dáta: WebSite, WebApplication zadarmo a vydavateľ OKO (bez mena osoby) sa dajú načítať', () => {
   const block = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
   assert.ok(block, 'JSON-LD v hlavičke');
   const data = JSON.parse(block[1]);
   const types = data['@graph'].map((node) => node['@type']);
-  assert.deepEqual(types, ['WebSite', 'WebApplication', 'Person']);
+  assert.deepEqual(types, ['WebSite', 'WebApplication', 'Organization']);
   const app = data['@graph'][1];
   assert.equal(app.url, 'https://okolive.sk/');
   assert.equal(app.isAccessibleForFree, true);
   assert.equal(app.offers.price, '0');
-  assert.equal(data['@graph'][2].name, 'Vladimír Uhrin');
+  assert.equal(data['@graph'][2].name, 'OKO');
+  assert.equal(app.publisher['@id'], data['@graph'][2]['@id']);
 });
 
 test('sitemap.xml: koreň a ochrana súkromia; robots.txt statického servera na ňu ukazuje', () => {

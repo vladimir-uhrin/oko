@@ -44,12 +44,12 @@ test('index.html: titulok, popis s témami, popis obrázka a jazyk pre Open Grap
   assert.match(html, /<meta name="robots" content="index, follow, max-image-preview:large" \/>/, 'od 2026-09-30 sa koreň indexuje (vlastník: „podmienka noindex už neplatí")');
 });
 
-test('skladanie obrázka: krátky titulok, témy, doména, autor a atribúcia Google · Cesium ion', () => {
+test('skladanie obrázka: krátky titulok, témy, doména, bez mena autora, atribúcia Google · Cesium ion', () => {
   const src = read('../scripts/build-share-default-image.mjs');
   assert.match(src, /const HEADLINE = 'Lietadlá, lode a konflikty naživo v 3D';/);
   assert.match(src, /const TOPICS = 'Ukrajina · Blízky východ · plyn · satelity · kamery';/);
   assert.match(src, /const DOMAIN = 'okolive\.sk';/);
-  assert.match(src, /const AUTHOR = 'UHRIN VLADIMÍR';/);
+  assert.doesNotMatch(src, /AUTHOR|UHRIN|VYTVORIL/, 'meno autora nikde (vlastník 2026-11-04)');
   assert.match(src, /const ATTRIBUTION = '© Google · Cesium ion';/, 'podmienky Map Tiles: atribúcia aj na zdieľanom obrázku');
   assert.match(src, /\$\{ATTRIBUTION\}<\/text>/, 'atribúcia sa naozaj kreslí');
   assert.doesNotMatch(src, /ČOSKORO|čoskoro'/, 'nehotová služba nie je na obrázku');

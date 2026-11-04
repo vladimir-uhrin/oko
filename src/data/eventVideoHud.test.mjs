@@ -39,7 +39,7 @@ test('značka ako na webe na celom videu: otvorenie (logo, OKO, heslo, podpis, �
     assert.match(svg, new RegExp(`^<svg[^>]+width="${VIDEO_3D_FORMAT.w}" height="${VIDEO_3D_FORMAT.h}"`));
     assert.ok(t.includes('© Google · Cesium ion · údaje OpenSky Network, adsb.lol (ODbL) · plán letu adsbdb'), `snímka ${f}: zdroje`);
     assert.ok(svg.includes('OK<tspan fill="#00d4ff" font-weight="300">O</tspan>'), `snímka ${f}: nápis OKO ako na webe`);
-    assert.ok(t.includes('VYTVORIL UHRIN VLADIMÍR'), `snímka ${f}: podpis`);
+    assert.ok(!svg.includes('UHRIN') && !svg.includes('VYTVORIL'), `snímka ${f}: bez mena autora (vlastník 2026-11-04)`);
     assert.ok(t.some((x) => x.includes('okolive.sk')), `snímka ${f}: doména`);
     assert.ok(svg.includes(`viewBox="${logoMarkup.viewBox}"`) && !svg.includes('<image'), `snímka ${f}: logo vložené`);
   }

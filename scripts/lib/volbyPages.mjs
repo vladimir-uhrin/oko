@@ -10,7 +10,6 @@
 
 export const VOLBY_BASE = '/volby-2026/';
 const SITE = 'https://okolive.sk';
-const AUTHOR = 'Uhrin Vladimír';
 
 /** HTML escape. Pure. */
 export function esc(value) {
@@ -90,7 +89,6 @@ function foot(updated) {
 </main>
 <footer class="c-foot">
   <p><a href="/">OKO — živý 3D glóbus</a> · <a href="${VOLBY_BASE}">Výsledky volieb 2026</a> · <a href="/privacy.html">Ochrana súkromia</a></p>
-  <p>vytvoril ${AUTHOR} · okolive.sk</p>
 </footer>
 </body>
 </html>

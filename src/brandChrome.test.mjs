@@ -18,8 +18,8 @@ test('logo: červená zrenica (skutočný span) pulzuje jemne (dych + zriedkavý
   assert.match(gaze, /const eye = state\.element\.querySelector\('\.brand-eye'\);\s*state\.element\.replaceChildren\(svg\);\s*if \(eye\) state\.element\.appendChild\(eye\);/, 'inline SVG výmena zrenicu zachová');
 });
 
-test('BETA červeným pri názve v titulku aj v preloaderi; pod heslom podpis autora ako v preloaderi', () => {
-  // vlastník 2026-09-27: „napísať, že je app vo vývoji, napr. BETA červeným a pod tým moje meno"
+test('BETA červeným pri názve v titulku aj v preloaderi; meno autora nikde (vlastník 2026-11-04)', () => {
+  // vlastník 2026-09-27: „napísať, že je app vo vývoji, napr. BETA červeným"
   // 2026-10-31: celý nadpis je odkaz na začiatok (#title-home, titleHomeLink.test.mjs) — BETA ostáva vnútri.
   assert.match(html, /<span>OK<span class="title-accent">O<\/span><\/span><span class="beta-badge" data-i18n-title="title\.beta-hint" title="[^"]+">BETA<\/span><\/a><\/h1>/);
   assert.match(html, /<h2>OK<span class="title-accent">O<\/span><span class="beta-badge">BETA<\/span><\/h2>/);
@@ -27,20 +27,6 @@ test('BETA červeným pri názve v titulku aj v preloaderi; pod heslom podpis au
   assert.match(css, /#title-bar \.beta-badge \{[^}]*pointer-events: auto;/, 'bublina v titulku, ktorý je pointer-events: none');
   assert.match(i18n, /'title\.beta-hint': 'In development/);
   assert.match(i18n, /'title\.beta-hint': 'Aplikácia vo vývoji/);
-  const sub = html.indexOf('data-i18n="title.subtitle"');
-  const credit = html.indexOf('<p class="title-credit"><span class="title-credit-rule" aria-hidden="true"></span><span data-i18n="loader.made-by">made by</span> <strong>Uhrin Vladimír</strong></p>');
-  assert.ok(sub > 0 && credit > sub, 'podpis pod heslom');
-  assert.match(css, /#title-bar \.title-credit strong \{[^}]*color: var\(--accent\);/);
-  assert.match(css, /body\.oko-karta-frame #title-bar \.title-credit \{ display: none; \}/, 'v ráme KARTA by ležal cez titulok (top 98 px)');
-  // vlastník 09-27: „aj na mobilných zariadeniach musí byť vidno moje meno" — heslo skryté, podpis nie
-  assert.doesNotMatch(css, /body\.oko-mobile #title-bar \.title-credit,/, 'podpis sa na mobile neskrýva');
-  assert.match(css, /body\.oko-mobile #title-bar \.title-credit \{[^}]*font-size: 7\.5px;/, 'na mobile drobne pod OKO BETA');
-});
-
-test('preloader: podpis „made by Uhrin Vladimír" v štýle mono + azúrová linka, text lokalizovaný EN/SK', () => {
-  assert.match(html, /<p class="loader-credit"><span class="loader-credit-rule" aria-hidden="true"><\/span><span><span data-i18n="loader.made-by">made by<\/span> <strong>Uhrin Vladimír<\/strong><\/span><\/p>/);
-  assert.match(css, /\.loader-credit \{[\s\S]*?font-family: var\(--font-mono\);[\s\S]*?text-transform: uppercase;/);
-  assert.match(css, /\.loader-credit strong \{[\s\S]*?color: var\(--accent\);/);
-  assert.match(i18n, /'loader\.made-by': 'made by',/);
-  assert.match(i18n, /'loader\.made-by': 'vytvoril',/);
+  // vlastník 2026-11-04: „odstráň moje meno z webu … všade" — ani v titulku, ani v preloaderi, ani v meta
+  assert.doesNotMatch(html, /Uhrin|Vladimír|class="(title|loader)-credit"|name="author"/i);
 });

@@ -18,7 +18,7 @@ import { CHANGE_MIN_KM2, MAP_SOURCE, directionSk, rangeLabel } from './frontWeek
 import { FRONT_WEEK_VIDEO } from './frontWeekVideo.js';
 import { CONTACT_RU_KINDS } from './ukraineContactLine.js';
 
-const { MONO, SANS, ACCENT, DIM, shadow, esc, f1, wordmark, logoAt, creditLine, liveDomain } = VIDEO_SVG;
+const { MONO, SANS, ACCENT, DIM, shadow, esc, f1, wordmark, logoAt, liveDomain } = VIDEO_SVG;
 const NBSP = ' ';
 const group = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
 /** Riadok zdrojov v päte každej snímky. */
@@ -137,7 +137,6 @@ export function buildFrontWeekHudSvg(model, fs, { logoMarkup = null, hook = null
     out.push(`<g opacity="${f1(layers.opening)}"><rect width="${W}" height="${H}" fill="#000" fill-opacity="0.5"/><rect width="${W}" height="${H * 0.82}" fill="url(#card)"/>`);
     out.push(logo(W / 2 - 52, 58, 104));
     out.push(wordmark(W / 2 + 6, 232, 72, 'middle'));
-    out.push(creditLine(W / 2, 276, 15, 'middle'));
     const top = 326;
     const lineH = 70;
     const panelH = 92 + hook.lines.length * lineH + (hook.sub ? 54 : 0) + 46;
@@ -162,7 +161,6 @@ export function buildFrontWeekHudSvg(model, fs, { logoMarkup = null, hook = null
     out.push(logo(28, 24, 92));
     out.push(wordmark(132, 82, 56));
     out.push(`<text x="134" y="114" font-family="${MONO}" font-size="21" font-weight="500" letter-spacing="3" fill="${ACCENT}" ${shadow}>${VIDEO_BRAND.domain}</text>`);
-    out.push(creditLine(34, 148, 14));
     // Titulok mapy vpravo hore (u Rybara vľavo hore — tam je značka).
     const tw = Math.max(330, range.length * 19 + 44);
     out.push(`<rect x="${W - 22 - tw}" y="12" width="${tw}" height="${mapDay ? 132 : 104}" rx="14" fill="rgba(5,14,22,0.62)"/>`);
@@ -350,7 +348,6 @@ export function buildFrontWeekHudSvg(model, fs, { logoMarkup = null, hook = null
     out.push(`<text x="${W / 2}" y="500" text-anchor="middle" font-size="36" font-weight="600" fill="#f2fbff" ${shadow}>${esc(VIDEO_BRAND.claim)}</text>`);
     out.push(`<text x="${W / 2}" y="548" text-anchor="middle" font-family="${MONO}" font-size="18" letter-spacing="6" fill="rgba(232,234,237,0.8)" ${shadow}>${VIDEO_BRAND.tagline}</text>`);
     out.push(liveDomain(W / 2, 668, 52));
-    out.push(creditLine(W / 2, 748, 20, 'middle'));
     out.push('</g>');
   }
 

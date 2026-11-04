@@ -14,7 +14,7 @@ import { MAP_SOURCE, directionSk } from './frontWeekNarration.js';
 import { FRONT_DAY_FORMAT } from './frontDayVideo.js';
 import { spanWords } from './frontDayHud.js';
 
-const { MONO, SANS, ACCENT, esc, f1, wordmark, logoAt, creditLine } = VIDEO_SVG;
+const { MONO, SANS, ACCENT, esc, f1, wordmark, logoAt } = VIDEO_SVG;
 const NBSP = ' ';
 const group = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
 const plural = (n, one, few, many) => (n === 1 ? one : n >= 2 && n <= 4 ? few : many);
@@ -172,7 +172,6 @@ export function buildMotionSvg({ t, shots, lines, placement, cues, model, hook, 
     out.push(wordmark(W / 2 + 8, 740, 104, 'middle'));
     out.push(`<text x="${W / 2}" y="850" text-anchor="middle" font-size="44" font-weight="800" fill="#ffffff" letter-spacing="2">${esc(model?.endLine ? model.endLine.toUpperCase() : 'MAPA FRONTU NAŽIVO')}</text>`);
     out.push(`<text x="${W / 2}" y="975" text-anchor="middle" font-family="${MONO}" font-size="96" font-weight="700" fill="${ACCENT}">${esc(VIDEO_BRAND.domain)}</text>`);
-    out.push(creditLine(W / 2, 1060, 20, 'middle'));
     const src = model?.sources || [`Strety a údery: Generálny štáb Ukrajiny (údaje jednej strany)`, `Mapa a výpočet zmeny: ${MAP_SOURCE.site} · © OpenStreetMap`, model?.clips?.find((c) => c?.aftermath)?.sources?.[0] || 'Zábery: ArmyInform, Ministerstvo obrany Ukrajiny (CC BY 4.0)'];
     // Hudba s licenciou CC BY musí mať autora aj vo videu (model.musicCredit z knižnice skladieb).
     [...src.slice(0, 5), ...(model?.musicCredit ? [model.musicCredit] : [])].forEach((s, k) => out.push(`<text x="${W / 2}" y="${1380 + k * 34}" text-anchor="middle" font-size="22" fill="rgba(223,243,251,0.8)">${esc(s)}</text>`));

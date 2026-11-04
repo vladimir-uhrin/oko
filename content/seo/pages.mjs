@@ -8,7 +8,6 @@
 export const SITE = Object.freeze({
   origin: 'https://okolive.sk',
   name: 'OKO',
-  author: 'Vladimír Uhrin',
   defaultImage: '/share-default.jpg',
   defaultImageAlt: {
     sk: 'OKO: Európa z obežnej dráhy so živými lietadlami a loďami',
@@ -1055,7 +1054,7 @@ export const PAGES = [
       title: 'O projekte OKO — živý 3D glóbus z otvorených dát',
       description: 'OKO je bezplatný živý 3D glóbus z otvorených dát: lietadlá, lode, konflikty, plyn a satelity. Kto ho robí, z akých zdrojov a podľa akých pravidiel.',
       h1: 'O projekte OKO',
-      lead: 'OKO je bezplatný živý 3D glóbus, ktorý na jednom mieste spája otvorené dáta o doprave, energetike, počasí a konfliktoch. Vytvára ho Vladimír Uhrin na Slovensku s dôrazom na stredoeurópske zdroje — pritom celý svet zostáva plne živý.',
+      lead: 'OKO je bezplatný živý 3D glóbus, ktorý na jednom mieste spája otvorené dáta o doprave, energetike, počasí a konfliktoch. Vzniká na Slovensku s dôrazom na stredoeurópske zdroje — pritom celý svet zostáva plne živý.',
       cta: { label: 'Otvoriť živý 3D glóbus', href: '/' },
       sections: [
         {
@@ -1108,7 +1107,7 @@ export const PAGES = [
       title: 'About OKO — a live 3D globe built on open data',
       description: 'OKO is a free live 3D globe built on open data: aircraft, ships, conflicts, gas and satellites. Who makes it, which sources it uses and the rules it follows.',
       h1: 'About OKO',
-      lead: 'OKO is a free live 3D globe that brings open data on transport, energy, weather and conflicts together in one place. It is made by Vladimír Uhrin in Slovakia with a focus on Central European sources — while the whole world stays fully live.',
+      lead: 'OKO is a free live 3D globe that brings open data on transport, energy, weather and conflicts together in one place. It is made in Slovakia with a focus on Central European sources — while the whole world stays fully live.',
       cta: { label: 'Open the live 3D globe', href: '/' },
       sections: [
         {

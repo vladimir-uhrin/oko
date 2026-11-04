@@ -87,7 +87,8 @@ test('vykreslenie: canonical, hreflang páry, index, Open Graph, JSON-LD (WebPag
       assert.ok(html.includes('<meta name="robots" content="index, follow, max-image-preview:large" />'));
       assert.ok(html.includes(`<meta property="og:url" content="${own}" />`));
       const json = JSON.parse(html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
-      assert.deepEqual(json['@graph'].map((n) => n['@type']), ['WebPage', 'BreadcrumbList', 'FAQPage', 'Person']);
+      assert.deepEqual(json['@graph'].map((n) => n['@type']), ['WebPage', 'BreadcrumbList', 'FAQPage', 'Organization']);
+      assert.doesNotMatch(html, /Uhrin|Vladimír/, 'meno autora nikde (vlastník 2026-11-04)');
       assert.equal((html.match(/<h1>/g) || []).length, 1, 'jedno H1');
       assert.ok(html.includes('href="/content.css"'));
       assert.doesNotMatch(html, /<script[^>]+src=/, 'obsahová stránka nenačítava žiadny skript (ani Cesium) — rýchla pre ľudí aj roboty');
