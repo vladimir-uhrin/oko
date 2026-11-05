@@ -150,8 +150,8 @@ test('zapojenie: main.js spúšťa súhlas až po skrytí preloadera, v HUD je o
 
 test('ochrana súkromia: kontakt, cookies GA4 len so súhlasom, tlačidlá menia tú istú voľbu, úrad na ochranu údajov', () => {
   const page = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
-  assert.match(page, /Vladimír Uhrin/);
-  assert.match(page, /mailto:vladimir_uhrin@yahoo\.com/, 'kontakt podľa vlastníka 2026-10-04');
+  assert.doesNotMatch(page, /Uhrin|Vladimír|vladimir_/i, 'meno vlastníka nikde (2026-11-05)');
+  assert.match(page, /Centre účtu \(Zabezpečenie\)/);
   assert.doesNotMatch(page, /info@okolive\.sk/);
   assert.match(page, /Bez súhlasu Google Analytics neukladá žiadne cookies/);
   assert.match(page, /Without consent Google Analytics stores no cookies/);

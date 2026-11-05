@@ -21,7 +21,7 @@
 //  - prístupnosť: lišta neberie fokus (región), nastavenia sú modálny dialóg s pascou fokusu a Esc.
 //
 // ANALYTICS_ENABLED: zapnuté 2026-10-04, keď vlastník potvrdil funkčný kontakt v zásadách ochrany
-// súkromia (bez neho by to nebolo v súlade s GDPR); kontakt je vladimir_uhrin@yahoo.com.
+// súkromia (bez neho by to nebolo v súlade s GDPR); od 2026-11-05 bez mena a e-mailu prevádzkovateľa (vlastník: „odstráň moje meno … všade").
 // Na kontrolu vzhľadu: `?consent=preview` ukáže lištu na akomkoľvek hostiteľovi (GA sa nenačíta,
 // tam rozhoduje analyticsDecision).
 export const GA4_MEASUREMENT_ID = 'G-DH65MSBSDY';
