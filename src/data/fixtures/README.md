@@ -117,3 +117,16 @@
   by `src/data/gpsInterference.test.mjs`, `scripts/lib/mideastGps.test.mjs`,
   `src/data/mideastEventsProxy.test.mjs` and `src/gpsInterferenceLayer.test.mjs`,
   never served to the app. © adsb.lol contributors, ODbL 1.0.
+- `geoconfirmed-iran-20261105.csv`, `geoconfirmed-israel-20261105.csv` — 19 and
+  9 raw rows (BOM, `;`, CRLF, quoting exactly as received) of the GeoConfirmed
+  CSV exports `geoconfirmed.org/api/Map/export/<Iran|israel>/csv?start=2026-02-28&end=2026-11-05`
+  downloaded 2026-11-05, picked so that every branch of the Middle East events
+  model is hit: a static marker without a date, camera positions („Point of
+  view", „Rough point of view"), unit positions and movements (a column of
+  vehicles, „fortifications", „IDF position"), rows with `Units`, rows about
+  persons, non-kinetic rows (barracks / base markers) and kept strikes of every
+  kind (missile, air strike, drone, ATGM, ship, interception, damage). Used ONLY
+  by `src/data/mideastIncidents.test.mjs`, `scripts/lib/mideastIncidents.test.mjs`,
+  `src/data/mideastEventsProxy.test.mjs` and `src/mideastIncidentsLayer.test.mjs`,
+  never served to the app. GeoConfirmed public export (non-commercial use with
+  attribution, see DATA_SOURCES.md).

@@ -20,8 +20,9 @@
 //                                zhoršenou presnosťou polohy (adsb.lol, ODbL; etapa 5d,
 //                                2026-10-03; src/data/gpsInterference.js), bez adries lietadiel
 //   gps/<deň>.work.json          rozpracovaný deň (adresy kvôli jedinečnosti; po uzavretí sa maže)
-// Ďalšie druhy (GeoConfirmed × 4 konflikty, UCDP, UKMTO, správy) prídu v ďalších
-// etapách plánu vedľa tohto súboru v tom istom koreni.
+//   geoconfirmed/<konflikt>/<deň>.json  overené udalosti GeoConfirmed po dňoch (iran, israel, yemen,
+//                                syria; etapa 4, 2026-11-05; src/data/mideastIncidents.js) + _meta.json
+//   ucdp/<YYYY-MM>.json          UCDP Candidate Events, len krajiny regiónu (CC BY 4.0) + _meta.json
 //
 // Z ukraineArchive.mjs sa berú LEN exportované primitívy (dni, disk, URL revízie).
 // Sieťový obal s User-Agentom je vlastný: Wikimedia etiketa chce popisný UA
@@ -46,6 +47,10 @@ import {
   GPS_ATTRIBUTION, GPS_CELL_DEG, GPS_CIRCLES, GPS_HIGH, GPS_LICENSE, GPS_LOW, GPS_MIN_AIRCRAFT, GPS_PROVIDERS,
   gpsAddSnapshot, gpsCircleUrl, gpsEmptyDay, gpsFinalizeDay, gpsMergeDays,
 } from '../../src/data/gpsInterference.js';
+import {
+  GEOCONFIRMED_LICENSE, GEOCONFIRMED_MIDEAST_ATTRIBUTION, GEOCONFIRMED_SITE, GEOCONFIRMED_SLUGS, MIDEAST_INCIDENTS_FIRST_DAY, MIDEAST_INCIDENTS_ROLLING_DAYS,
+  UCDP_ATTRIBUTION, UCDP_LICENSE, UCDP_PAGE, dedupIncidents, geoconfirmedExportUrl, inRect, parseGeoconfirmedIncidents, parseUcdpIncidents, ucdpCandidateUrl,
+} from '../../src/data/mideastIncidents.js';
 
 export { MIDEAST_CONTROL_MODULE_IDS };
 export const USER_AGENT = 'OKO-mideast/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
@@ -741,6 +746,255 @@ export async function gpsPayload(root, { days = 2, nowMs = Date.now() } = {}) {
     counts: merged.counts,
     cells: merged.cells.map((c) => [c.latIdx, c.lonIdx, c.total, c.bad, c.badAdjusted, c.level]),
   };
+}
+
+// ── geoconfirmed/ + ucdp/ — overené udalosti (etapa 4, 2026-11-05) ─────────────
+// GeoConfirmed po konfliktoch (Iran, israel, Yemen, Syria) a po dňoch; UCDP Candidate po
+// mesiacoch. Model, etický filter a dedup: src/data/mideastIncidents.js. Žiadne oneskorovanie
+// zverejnenia (rozhodnutie vlastníka 2026-10-03 a 2026-11-05) — deň sa ukáže hneď, ako ho zdroj má.
+/** Obnova najviac raz za ~6 h (tik úlohy 6 h; o 5 min kratšia, aby každý tik naozaj stiahol). */
+export const GEOCONFIRMED_FRESH_MS = 6 * 3_600_000 - 5 * 60_000;
+/** Strop tela exportu jedného konfliktu (Irán od 28. 2. ≈ 1,4 MB). */
+export const GEOCONFIRMED_MAX_BYTES = 40 * 1024 * 1024;
+/** Pauza medzi konfliktmi v jednom tiku (zdvorilosť k verejnému API). */
+export const GEOCONFIRMED_PAUSE_MS = 2_000;
+/** UCDP Candidate: kontrola nového mesačného súboru raz za deň. */
+export const UCDP_FRESH_MS = 24 * 3_600_000 - 5 * 60_000;
+/** Strop jedného mesačného súboru UCDP (celý svet ≈ 1,6 MB). */
+export const UCDP_MAX_BYTES = 30 * 1024 * 1024;
+export const UCDP_PAUSE_MS = 2_000;
+export const geoconfirmedDir = (root, slug) => path.join(archiveDir(root), 'geoconfirmed', String(slug));
+export const geoconfirmedDayFile = (root, slug, day) => path.join(geoconfirmedDir(root, slug), `${day}.json`);
+/** Stav konfliktu: posledná obnova, okno, počty riadkov a zahodených podľa dôvodu, prvé naplnenie. */
+export const geoconfirmedMetaFile = (root, slug) => path.join(geoconfirmedDir(root, slug), '_meta.json');
+export const ucdpDir = (root) => path.join(archiveDir(root), 'ucdp');
+export const ucdpMonthFile = (root, month) => path.join(ucdpDir(root), `${month}.json`);
+export const ucdpMetaFile = (root) => path.join(ucdpDir(root), '_meta.json');
+export const isGeoconfirmedSlug = (slug) => typeof slug === 'string' && GEOCONFIRMED_SLUGS.includes(slug);
+
+/**
+ * Obnoví archív konfliktu GeoConfirmed: bez prvého naplnenia (meta `backfilledFrom`) JEDEN dopyt
+ * od 28. 2. 2026 po dnešok, potom rolujúce okno posledných 30 dní. Každý deň okna sa zapíše
+ * (aj prázdny), aby bolo pokrytie známe; staršie dni ostávajú, ako boli. Odpoveď, ktorá nie je
+ * CSV exportu (chýba hlavička s `Date;`), je chyba — archív ostáva (`stale`). Nikdy nehádže.
+ * @param {string} root
+ * @param {string} slug 'iran' | 'israel' | 'yemen' | 'syria'
+ * @returns {Promise<{status:'updated'|'fresh'|'stale'|'error', conflict:string, from?:string, to?:string, days?:number, count:number, rows?:number, dropped?:Record<string,number>, backfill?:boolean, error?:string}>}
+ */
+export async function geoconfirmedRefresh(root, slug, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  if (!isGeoconfirmedSlug(slug)) return { status: 'error', conflict: String(slug), count: 0, error: `unknown conflict '${slug}' (${GEOCONFIRMED_SLUGS.join(', ')})` };
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', conflict: slug, count: 0, error: `bad now '${String(now)}'` };
+  const meta = await readJson(geoconfirmedMetaFile(root, slug));
+  if (!force && meta && nowMs - (Number(meta.fetchedAt) || 0) < GEOCONFIRMED_FRESH_MS) {
+    return { status: 'fresh', conflict: slug, count: Number(meta.count) || 0, from: meta.window?.[0], to: meta.window?.[1] };
+  }
+  const to = dayKey(nowMs);
+  const backfill = !meta?.backfilledFrom;
+  const from = backfill
+    ? MIDEAST_INCIDENTS_FIRST_DAY
+    : dayKey(Math.max(dayToMs(MIDEAST_INCIDENTS_FIRST_DAY), dayToMs(to) - (MIDEAST_INCIDENTS_ROLLING_DAYS - 1) * DAY_MS));
+  const url = geoconfirmedExportUrl(slug, from, to);
+  try {
+    const { res, body } = await fetchCapped(fetchImpl, url, { timeoutMs: 120_000, maxBytes: GEOCONFIRMED_MAX_BYTES, headers: { Accept: 'text/csv' } });
+    if (!res.ok) throw new Error(`GeoConfirmed HTTP ${res.status}`);
+    if (!/^﻿?\s*Date;/.test(body)) throw new Error('GeoConfirmed: not a CSV export');
+    const parsed = parseGeoconfirmedIncidents(body, { conflict: slug });
+    const byDay = new Map();
+    for (let t = dayToMs(from); t <= dayToMs(to); t += DAY_MS) byDay.set(dayKey(t), []);
+    for (const it of parsed.incidents) if (byDay.has(it.day)) byDay.get(it.day).push(it);
+    for (const [day, items] of byDay) {
+      await writeJsonAtomic(geoconfirmedDayFile(root, slug, day), { day, kind: 'geoconfirmed', conflict: slug, fetchedAt: nowMs, window: [from, to], items });
+    }
+    const count = parsed.incidents.length;
+    const stats = { rows: parsed.rows, kept: count, dropped: parsed.dropped };
+    await writeJsonAtomic(geoconfirmedMetaFile(root, slug), {
+      kind: 'geoconfirmed-meta', conflict: slug, fetchedAt: nowMs, window: [from, to], count, ...stats,
+      backfilledFrom: meta?.backfilledFrom || from,
+      backfill: backfill ? { at: nowMs, ...stats } : (meta?.backfill || null),
+      source: geoconfirmedExportUrl(slug, '…', '…').replace(/\?.*$/, ''), attribution: GEOCONFIRMED_MIDEAST_ATTRIBUTION, license: GEOCONFIRMED_LICENSE,
+    });
+    const dropText = Object.entries(parsed.dropped).map(([k, v]) => `${k} ${v}`).join(', ');
+    log(`[mideast-events] geoconfirmed ${slug} ${from}..${to}: ${count} incidents of ${parsed.rows} rows${dropText ? ` (dropped: ${dropText})` : ''}${backfill ? ' — first fill' : ''}`);
+    return { status: 'updated', conflict: slug, from, to, days: byDay.size, count, rows: parsed.rows, dropped: parsed.dropped, backfill };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] geoconfirmed ${slug} failed: ${message}`);
+    return { status: meta ? 'stale' : 'error', conflict: slug, count: Number(meta?.count) || 0, error: message };
+  }
+}
+
+/** Mesiace od `fromMonth` po `toMonth` vrátane ('YYYY-MM'). Pure. */
+export function monthList(fromMonth, toMonth) {
+  const out = [];
+  let [y, m] = String(fromMonth).split('-').map(Number);
+  const [ty, tm] = String(toMonth).split('-').map(Number);
+  if (![y, m, ty, tm].every(Number.isFinite)) return out;
+  while (y < ty || (y === ty && m <= tm)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1; if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+/**
+ * UCDP Candidate po mesiacoch od februára 2026 (mesiac 28. 2.) po minulý mesiac: chýbajúci
+ * mesiac sa stiahne (jeden súbor celého sveta, uložia sa len krajiny regiónu), 404 znamená
+ * „ešte nevyšiel" a ďalšie mesiace sa v tomto behu nepýtajú. Uložený mesiac sa nesťahuje znova.
+ * Kontrola raz za deň (meta `checkedAt`). Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'fresh'|'partial'|'error', months:string[], fetched:string[], missing:string|null, count:number, errors?:string[]}>}
+ */
+export async function ucdpRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {}, sleep = defaultSleepMs } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', months: [], fetched: [], missing: null, count: 0, errors: [`bad now '${String(now)}'`] };
+  const meta = await readJson(ucdpMetaFile(root));
+  const have = async () => {
+    let names = [];
+    try { names = await fsp.readdir(ucdpDir(root)); } catch { /* prázdny archív */ }
+    return names.filter((n) => /^\d{4}-\d{2}\.json$/.test(n)).map((n) => n.slice(0, 7)).sort();
+  };
+  if (!force && meta && nowMs - (Number(meta.checkedAt) || 0) < UCDP_FRESH_MS) {
+    return { status: 'fresh', months: await have(), fetched: [], missing: meta.missing || null, count: Number(meta.count) || 0 };
+  }
+  const today = new Date(nowMs);
+  const lastMonthMs = Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1);
+  const wanted = monthList(MIDEAST_INCIDENTS_FIRST_DAY.slice(0, 7), dayKey(lastMonthMs).slice(0, 7));
+  const stored = new Set(await have());
+  const fetched = [];
+  const errors = [];
+  let missing = null;
+  for (const month of wanted) {
+    if (stored.has(month) && !force) continue;
+    if (fetched.length || errors.length) await sleep(UCDP_PAUSE_MS);
+    const [year, mon] = month.split('-').map(Number);
+    const url = ucdpCandidateUrl(year, mon);
+    try {
+      const { res, body } = await fetchCapped(fetchImpl, url, { timeoutMs: 120_000, maxBytes: UCDP_MAX_BYTES, headers: { Accept: 'text/csv' } });
+      if (res.status === 404) { missing = month; break; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!/^﻿?"?id"?,/.test(body)) throw new Error('not a UCDP CSV');
+      const parsed = parseUcdpIncidents(body);
+      await writeJsonAtomic(ucdpMonthFile(root, month), {
+        month, kind: 'ucdp', fetchedAt: nowMs, url, rows: parsed.rows, count: parsed.incidents.length, dropped: parsed.dropped,
+        attribution: UCDP_ATTRIBUTION, license: UCDP_LICENSE, items: parsed.incidents,
+      });
+      fetched.push(month);
+      log(`[mideast-events] ucdp ${month}: ${parsed.incidents.length} region events of ${parsed.rows} rows`);
+    } catch (error) {
+      errors.push(`${month}: ${String(error?.message || error)}`);
+      log(`[mideast-events] ucdp ${month} failed: ${error?.message || error}`);
+    }
+  }
+  const months = await have();
+  let count = 0;
+  for (const month of months) count += Number((await readJson(ucdpMonthFile(root, month)))?.count) || 0;
+  await writeJsonAtomic(ucdpMetaFile(root), { kind: 'ucdp-meta', checkedAt: nowMs, months, missing, count, source: UCDP_PAGE, attribution: UCDP_ATTRIBUTION, license: UCDP_LICENSE });
+  const status = errors.length ? (fetched.length || months.length ? 'partial' : 'error') : (fetched.length ? 'updated' : 'fresh');
+  return { status, months, fetched, missing, count, errors };
+}
+
+/**
+ * Udalosti okna dní (GeoConfirmed všetkých konfliktov + UCDP), po dedupe, voliteľne len
+ * v obdĺžniku dejiska (+0,5°). `coverage` = koľko dní okna má súbor po konfliktoch a ktoré
+ * mesiace UCDP sú v archíve. Pure voči sieti (len disk).
+ */
+async function incidentsInRange(root, from, to, { rect = null, ucdpCache = null } = {}) {
+  const items = [];
+  const coverage = { geoconfirmed: {}, ucdp: [] };
+  for (const slug of GEOCONFIRMED_SLUGS) {
+    let days = 0;
+    for (let t = dayToMs(from); t <= dayToMs(to); t += DAY_MS) {
+      const json = await readJson(geoconfirmedDayFile(root, slug, dayKey(t)));
+      if (!json || !Array.isArray(json.items)) continue;
+      days += 1;
+      items.push(...json.items);
+    }
+    coverage.geoconfirmed[slug] = days;
+  }
+  for (const month of monthList(from.slice(0, 7), to.slice(0, 7))) {
+    let json = ucdpCache?.get(month);
+    if (json === undefined) { json = await readJson(ucdpMonthFile(root, month)); ucdpCache?.set(month, json); }
+    if (!json || !Array.isArray(json.items)) continue;
+    coverage.ucdp.push(month);
+    for (const it of json.items) if (it.day >= from && it.day <= to) items.push(it);
+  }
+  const { incidents, duplicates } = dedupIncidents(items);
+  const inside = rect ? incidents.filter((it) => inRect(it, rect)) : incidents;
+  inside.sort((a, b) => b.t - a.t || (a.id < b.id ? -1 : 1));
+  return { incidents: inside, duplicates, coverage };
+}
+
+const sourcesBlock = async (root) => {
+  const metas = {};
+  for (const slug of GEOCONFIRMED_SLUGS) {
+    const m = await readJson(geoconfirmedMetaFile(root, slug));
+    metas[slug] = m ? { fetchedAt: m.fetchedAt ?? null, window: m.window || null, count: m.count ?? null } : null;
+  }
+  const u = await readJson(ucdpMetaFile(root));
+  return {
+    geoconfirmed: { attribution: GEOCONFIRMED_MIDEAST_ATTRIBUTION, license: GEOCONFIRMED_LICENSE, site: GEOCONFIRMED_SITE, conflicts: metas },
+    ucdp: { attribution: UCDP_ATTRIBUTION, license: UCDP_LICENSE, page: UCDP_PAGE, checkedAt: u?.checkedAt ?? null, months: u?.months || [] },
+  };
+};
+const hasAnyArchive = (sources) => Object.values(sources.geoconfirmed.conflicts).some(Boolean) || sources.ucdp.months.length > 0;
+
+/**
+ * Telo `/api/mideast/events/incidents?from&to[&theatre]`: udalosti okna (≤ 31 dní, volajúci
+ * stráži), najnovšie prvé, s pokrytím, počtom duplicít GC × UCDP a blokom zdrojov. Bez akéhokoľvek
+ * archívu null (volajúci vráti 404).
+ */
+export async function incidentsPayload(root, { from, to, rect = null, theatre = null, nowMs = Date.now() } = {}) {
+  const sources = await sourcesBlock(root);
+  if (!hasAnyArchive(sources)) return null;
+  const { incidents, duplicates, coverage } = await incidentsInRange(root, from, to, { rect });
+  return {
+    generatedAt: nowMs, from, to, theatre: theatre || null, sources, coverage, duplicates,
+    counts: { total: incidents.length, geoconfirmed: incidents.filter((x) => x.src === 'geoconfirmed').length, ucdp: incidents.filter((x) => x.src === 'ucdp').length },
+    incidents,
+  };
+}
+
+/**
+ * Telo `/api/mideast/events/incidents/summary?from&to[&theatre]`: počty po dňoch (len dni
+ * s udalosťou: spolu, podľa zdroja, podľa druhu) pre jednoduchú os; okno ≤ 400 dní (volajúci
+ * stráži). Bez archívu null.
+ */
+export async function incidentsSummaryPayload(root, { from, to, rect = null, theatre = null, nowMs = Date.now() } = {}) {
+  const sources = await sourcesBlock(root);
+  if (!hasAnyArchive(sources)) return null;
+  const days = {};
+  let total = 0;
+  const byType = {};
+  const ucdpCache = new Map();
+  const coverage = { geoconfirmed: Object.fromEntries(GEOCONFIRMED_SLUGS.map((s) => [s, 0])), ucdp: new Set() };
+  // Po kusoch 31 dní (dedup je v rámci dňa, kusy ho nerozbijú) — pamäť drží len jeden kus.
+  for (let start = dayToMs(from); start <= dayToMs(to); start += 31 * DAY_MS) {
+    const end = Math.min(dayToMs(to), start + 30 * DAY_MS);
+    const part = await incidentsInRange(root, dayKey(start), dayKey(end), { rect, ucdpCache });
+    for (const [slug, n] of Object.entries(part.coverage.geoconfirmed)) coverage.geoconfirmed[slug] += n;
+    for (const m of part.coverage.ucdp) coverage.ucdp.add(m);
+    for (const it of part.incidents) {
+      const d = days[it.day] || (days[it.day] = { total: 0, geoconfirmed: 0, ucdp: 0, byType: {} });
+      d.total += 1;
+      d[it.src] = (d[it.src] || 0) + 1;
+      d.byType[it.type] = (d.byType[it.type] || 0) + 1;
+      byType[it.type] = (byType[it.type] || 0) + 1;
+      total += 1;
+    }
+  }
+  return { generatedAt: nowMs, from, to, theatre: theatre || null, sources, coverage: { geoconfirmed: coverage.geoconfirmed, ucdp: [...coverage.ucdp].sort() }, total, byType, days };
+}
+
+/** Lacný prehľad archívu udalostí pre /status (len meta súbory). */
+export async function incidentsIndex(root) {
+  const out = { geoconfirmed: {}, ucdp: null };
+  for (const slug of GEOCONFIRMED_SLUGS) {
+    const m = await readJson(geoconfirmedMetaFile(root, slug));
+    out.geoconfirmed[slug] = m ? { fetchedAt: m.fetchedAt ?? null, count: m.count ?? 0, window: m.window || null, backfilledFrom: m.backfilledFrom || null } : null;
+  }
+  const u = await readJson(ucdpMetaFile(root));
+  out.ucdp = u ? { checkedAt: u.checkedAt ?? null, months: u.months || [], count: u.count ?? 0, missing: u.missing || null } : null;
+  return out;
 }
 
 export { dayKey, dayToMs, isDay } from './ukraineArchive.mjs';

@@ -9,14 +9,18 @@
 //   .gev-cache/mideast/events/airspace/{czib,fir-boundaries}.json   bulletiny EASA o konfliktných
 //       zónach + hranice FIR z VATSpy (CC BY-SA 4.0)
 //   .gev-cache/mideast/events/ukmto/incidents.json         incidenty lodí z rozhrania UKMTO (OGL v3.0)
+//   .gev-cache/mideast/events/geoconfirmed/<konflikt>/<deň>.json   overené udalosti GeoConfirmed (etapa 4)
+//   .gev-cache/mideast/events/ucdp/<YYYY-MM>.json          UCDP Candidate Events, región (CC BY 4.0)
 //
 // Usage:
-//   node scripts/build-mideast-events.mjs --all                       (= --control + --portwatch + --airspace + --ukmto)
+//   node scripts/build-mideast-events.mjs --all                       (= --control + --portwatch + --airspace + --ukmto + --geoconfirmed + --ucdp)
 //   node scripts/build-mideast-events.mjs --control [--module <id>] [--force]
 //   node scripts/build-mideast-events.mjs --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N]
 //   node scripts/build-mideast-events.mjs --portwatch [--force]
 //   node scripts/build-mideast-events.mjs --airspace [--force]
 //   node scripts/build-mideast-events.mjs --ukmto [--force]
+//   node scripts/build-mideast-events.mjs --geoconfirmed [--force]    (4 konflikty, pauza 2 s; prvý beh = od 28. 2.)
+//   node scripts/build-mideast-events.mjs --ucdp [--force]            (chýbajúce mesiace UCDP Candidate)
 //   node scripts/build-mideast-events.mjs --gps                       (jedno kolo zberu rušenia GPS z adsb.lol; nie je v --all)
 //
 // Etiketa Wikimedia: jeden dopyt naraz, pauza 1,2 s medzi dopytmi, popisný User-Agent
@@ -25,8 +29,9 @@
 // úžiny postupne s pauzou 1,5 s; prvé stiahnutie = celá séria (3 strany na úžinu).
 import {
   MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, czibRefresh, firBoundariesRefresh, gpsCollect, isDay, portwatchRefresh,
-  ukmtoRefresh, wikiControlSnapshot,
+  GEOCONFIRMED_PAUSE_MS, geoconfirmedRefresh, ucdpRefresh, ukmtoRefresh, wikiControlSnapshot,
 } from './lib/mideastArchive.mjs';
+import { GEOCONFIRMED_SLUGS } from '../src/data/mideastIncidents.js';
 import { PORTWATCH_KEYS } from '../src/data/portwatch.js';
 
 const args = process.argv.slice(2);
@@ -38,9 +43,9 @@ const now = Date.now();
 const log = (m) => console.log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PAUSE_MS = 1200;
-const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force] | --airspace [--force] | --ukmto [--force] | --gps\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
+const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force] | --airspace [--force] | --ukmto [--force] | --geoconfirmed [--force] | --ucdp [--force] | --gps\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
 
-if (!all && !has('--control') && !has('--control-history') && !has('--portwatch') && !has('--airspace') && !has('--ukmto') && !has('--gps')) {
+if (!all && !has('--control') && !has('--control-history') && !has('--portwatch') && !has('--airspace') && !has('--ukmto') && !has('--geoconfirmed') && !has('--ucdp') && !has('--gps')) {
   console.log(usage);
   process.exit(2);
 }
@@ -103,6 +108,20 @@ if (all || has('--airspace')) {
 if (all || has('--ukmto')) {
   const r = await ukmtoRefresh(root, { now, force: has('--force'), log });
   log(`UKMTO: ${r.status} · ${r.count} incidentov v archíve${r.added !== undefined ? ` · nových ${r.added}` : ''} · posledný ${r.day || '—'}${r.error ? ' — ' + r.error : ''}`);
+}
+
+// Overené udalosti (etapa 4): GeoConfirmed po konfliktoch s pauzou 2 s, potom chýbajúce mesiace UCDP.
+if (all || has('--geoconfirmed')) {
+  for (const [i, slug] of GEOCONFIRMED_SLUGS.entries()) {
+    if (i > 0) await sleep(GEOCONFIRMED_PAUSE_MS);
+    const r = await geoconfirmedRefresh(root, slug, { now, force: has('--force'), log });
+    const dropped = Object.entries(r.dropped || {}).map(([k, v]) => `${k} ${v}`).join(', ');
+    log(`GeoConfirmed ${slug}: ${r.status} · ${r.count} udalostí${r.rows !== undefined ? ` z ${r.rows} riadkov` : ''}${dropped ? ` · zahodené: ${dropped}` : ''}${r.error ? ' — ' + r.error : ''}`);
+  }
+}
+if (all || has('--ucdp')) {
+  const r = await ucdpRefresh(root, { now, force: has('--force'), log, sleep });
+  log(`UCDP Candidate: ${r.status} · mesiace ${r.months.join(', ') || '—'} · udalostí v regióne ${r.count}${r.missing ? ` · ${r.missing} ešte nevyšiel` : ''}${r.errors?.length ? ` — ${r.errors.join('; ')}` : ''}`);
 }
 
 // Rušenie GPS (adsb.lol, ODbL): JEDNO kolo zberu — šesť kruhov s pauzou 5 s. Mapu robí až súvislý

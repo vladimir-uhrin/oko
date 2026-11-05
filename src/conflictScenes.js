@@ -26,6 +26,7 @@ import { createMideastPanel } from './mideastPanel.js';
 import { createMideastControl } from './mideastControlLayer.js';
 import { createAirspaceAdvisory } from './airspaceAdvisoryLayer.js';
 import { createUkmtoIncidents } from './ukmtoIncidentsLayer.js';
+import { createMideastIncidents } from './mideastIncidentsLayer.js';
 import { createGpsInterference } from './gpsInterferenceLayer.js';
 import { UKMTO_CHOKEPOINT_SCENES } from './data/ukmto.js';
 import { createPortwatchCard } from './portwatchCard.js';
@@ -164,6 +165,7 @@ export function initConflictScenes(deps) {
   };
   let ukraineEvents = null; // vrstva udalostí UKRAJINA (etapa 3) — vzniká nižšie, brána ju už pozná
   let ukmtoIncidents = null; // INCIDENTY LODÍ · UKMTO (BLÍZKY VÝCHOD etapa 5c) — vzniká nižšie, brána ju už pozná
+  let mideastIncidents = null; // OVERENÉ UDALOSTI (BLÍZKY VÝCHOD etapa 4) — vzniká nižšie, brána ju už pozná
   let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
   let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
   let activeChokepoint = null; // aktívna úžina (pre export kartičky konfliktu)
@@ -185,6 +187,8 @@ export function initConflictScenes(deps) {
       if (visible) void mideastControl.show(); else mideastControl.hide();
       // INCIDENTY LODÍ (UKMTO): body len pri pohľade na scénu, čip ostáva.
       if (visible) void ukmtoIncidents?.show(); else void ukmtoIncidents?.hide();
+      // OVERENÉ UDALOSTI (GeoConfirmed + UCDP): body len pri pohľade na dejisko, čip ostáva.
+      if (visible) void mideastIncidents?.show(); else void mideastIncidents?.hide();
       scenePinDs.show = visible;
       viewer.scene?.requestRender?.();
     },
@@ -229,6 +233,11 @@ export function initConflictScenes(deps) {
   // vypnuté, sťahuje až po zapnutí čipu; bez väzby na dejisko (regionálna mapa ako EASA).
   const gpsInterference = createGpsInterference({ viewer });
   window.__godsEyeView.gpsInterference = gpsInterference;
+  // OVERENÉ UDALOSTI (2026-11-05, etapa 4; src/mideastIncidentsLayer.js): údery, zásahy a poškodenia
+  // z GeoConfirmed a UCDP Candidate. Čip predvolene zapnutý; sťahuje a kreslí až pri dejisku BLÍZKEHO
+  // VÝCHODU (setActive nižšie dostane celé dejisko — počty v legende sa rátajú v ňom) a schováva sa s bránou.
+  mideastIncidents = createMideastIncidents({ viewer });
+  window.__godsEyeView.mideastIncidents = mideastIncidents;
   const mideastPanel = createMideastPanel({
     mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
     theatres: listMideastTheatres(),
@@ -237,6 +246,7 @@ export function initConflictScenes(deps) {
     airspace: airspaceAdvisory,
     ukmto: ukmtoIncidents,
     gps: gpsInterference,
+    incidents: mideastIncidents,
   });
   window.__godsEyeView.mideastPanel = mideastPanel;
   // Situation from open sources: the merged bulletin (2026-09-18) now fills the
@@ -442,6 +452,7 @@ export function initConflictScenes(deps) {
       mideastPanel?.setActiveTheatre?.(null);
       void mideastControl.setTheatre(null);
       void ukmtoIncidents?.setActive(false);
+      void mideastIncidents?.setActive(false);
       portwatchCard?.setActive?.(null);
       restoreAutoKarta();
       syncMapFocus();
@@ -607,6 +618,7 @@ export function initConflictScenes(deps) {
     mideastPanel?.setActiveTheatre?.(null);
     void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
     void ukmtoIncidents?.setActive(false);
+    void mideastIncidents?.setActive(false);
     portwatchCard?.setActive?.(null);
     kartaOverlay?.setScene(scene || null);
     ukrainePanel?.setActiveScene(scene?.id || null);
@@ -698,6 +710,7 @@ export function initConflictScenes(deps) {
     portwatchCard?.setActive?.(PORTWATCH_KEYS.includes(scene?.id) ? scene.id : null);
     // Varovania UKMTO pri úžinách v jeho oblasti hlásení (Hormuz, Báb al-Mandab, Suez); inde nie.
     void ukmtoIncidents?.setActive(UKMTO_CHOKEPOINT_SCENES.includes(scene?.id));
+    void mideastIncidents?.setActive(false); // overené udalosti patria dejiskám, nie úžinám
     const result = applyChokepointScene(id, chokepointSceneDeps);
     syncMapFocus();
     void oilPriceChip.refreshAndShow();
@@ -778,6 +791,8 @@ export function initConflictScenes(deps) {
     void mideastControl.setTheatre(scene || null);
     // INCIDENTY LODÍ (etapa 5c): pri každom dejisku — body mimo záberu nič nestoja.
     void ukmtoIncidents?.setActive(Boolean(scene));
+    // OVERENÉ UDALOSTI (etapa 4): pri každom dejisku; legenda počíta v rámci dejiska.
+    void mideastIncidents?.setActive(scene || false);
     // Čip „premávka v úžine" patrí poslednej úžine a ďalej by pollval jej rámec;
     // brána presunutá na dejisko by ho po prílete znova odkryla (nález 2026-09-26).
     straitTrafficChip.hide();

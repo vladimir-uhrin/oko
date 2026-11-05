@@ -39,13 +39,23 @@
  *    (adsb.lol, ODbL) po bunkách 0,5° za posledných `days` dní (1–7); 404 no_gps_snapshot;
  *    cache 5 min. Úloha `gps` (tik 15 min, prvá 620 s): šesť kruhov s pauzou 5 s; vypnutie
  *    samotného zberu `MIDEAST_GPS=off` (trasa ďalej číta, čo je na disku).
+ *  - `/incidents?from&to[&theatre]` (etapa 4, 2026-11-05): overené udalosti GeoConfirmed (4 konflikty)
+ *    + UCDP Candidate po dedupe za okno ≤ 31 dní, voliteľne len v obdĺžniku dejiska (+0,5°);
+ *    400 bad_day / bad_range / range_too_long / bad_theatre, 404 no_incidents_snapshot; cache 10 min.
+ *    `/incidents/summary?from&to[&theatre]`: počty po dňoch pre os (okno ≤ 400 dní).
+ *    Úloha `geoconfirmed` (tik 6 h, prvá 680 s): štyri konflikty postupne s pauzou 2 s — prvé
+ *    naplnenie od 28. 2. jedným dopytom na konflikt, potom rolujúce okno 30 dní. Úloha `ucdp`
+ *    (tik 24 h, prvá 740 s): chýbajúce mesačné súbory UCDP Candidate, 404 = mesiac ešte nevyšiel.
  * Bezpečnosť handlera: každý `await` aj `new URL` v try/catch — odmietnutý Promise
  * z async connect middleware zhodí dev server.
  */
 import zlib from 'node:zlib';
 
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
+import { GEOCONFIRMED_SLUGS, MIDEAST_INCIDENTS_MAX_DAYS, MIDEAST_INCIDENTS_SUMMARY_MAX_DAYS } from './mideastIncidents.js';
+import { theatreById } from './mideastTheatres.js';
 import { PORTWATCH_KEYS } from './portwatch.js';
+import { GEOCONFIRMED_PAUSE_MS, geoconfirmedRefresh, incidentsIndex, incidentsPayload, incidentsSummaryPayload, ucdpRefresh } from '../../scripts/lib/mideastArchive.mjs';
 import { airspacePayload, controlDays, controlFor, controlIndex, czibRefresh, dayKey, firBoundariesRefresh, gpsCollect, gpsPayload, isDay, portwatchPayload, portwatchRefresh, ukmtoPayload, ukmtoRefresh, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
 
 const MIN = 60_000;
@@ -75,6 +85,21 @@ export const GPS_TICK_MS = 15 * MIN;
 export const GPS_FIRST_DELAY_MS = 620_000;
 export const GPS_DAYS_DEFAULT = 2;
 export const GPS_CACHE_TTL_MS = 5 * MIN;
+/** Úloha OVERENÉ UDALOSTI · GeoConfirmed: tik 6 h, prvý beh po GPS. */
+export const GEOCONFIRMED_TICK_MS = 6 * 60 * MIN;
+export const GEOCONFIRMED_FIRST_DELAY_MS = 680_000;
+/** Úloha UCDP Candidate: raz za deň (nový súbor vychádza raz za mesiac). */
+export const UCDP_TICK_MS = 24 * 60 * MIN;
+export const UCDP_FIRST_DELAY_MS = 740_000;
+/** Strop kľúčov cache trás udalostí (okno × dejisko). */
+export const INCIDENTS_CACHE_MAX = 64;
+/** Dejisko → obdĺžnik pre filter trasy; `overview` = celý región (bez filtra). Pure. */
+export function incidentsTheatreRect(id) {
+  if (!id) return { ok: true, rect: null };
+  const scene = theatreById(id);
+  if (!scene) return { ok: false, rect: null };
+  return { ok: true, rect: scene.overview ? null : [...scene.rectDegrees] };
+}
 
 function simpleLimiter({ windowMs, max }) {
   const hits = new Map();
@@ -128,6 +153,7 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   const airspaceCache = new Map(); // 'all' -> { at, json }
   const ukmtoCache = new Map(); // days -> { at, json }
   const gpsCache = new Map(); // days -> { at, json }
+  const incidentsCache = new Map(); // `${druh}:${from}:${to}:${theatre}` -> { at, json }
   const timers = new Map();
   const state = { enabled, base: null, running: {}, last: {}, errors: [] };
   const note = (name, error) => { const msg = `${name}: ${error?.message || error}`; state.errors = [{ at: now(), msg }, ...state.errors].slice(0, 20); log(`[mideast-events] ${msg}`); };
@@ -195,6 +221,29 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
     firstDelayMs.gps = GPS_FIRST_DELAY_MS;
   }
 
+  // OVERENÉ UDALOSTI (etapa 4): GeoConfirmed po konfliktoch postupne s pauzou; čerstvosť drží knižnica.
+  jobs.geoconfirmed = async () => {
+    const results = [];
+    for (const [i, slug] of GEOCONFIRMED_SLUGS.entries()) {
+      if (i) await sleep(GEOCONFIRMED_PAUSE_MS);
+      results.push(await geoconfirmedRefresh(root, slug, { fetchImpl, now: now(), log }));
+    }
+    if (results.some((r) => r.status === 'updated')) incidentsCache.clear();
+    const failed = results.filter((r) => r.status === 'error' || r.status === 'stale');
+    const to = results.map((r) => r.to).filter(Boolean).sort().at(-1) || null;
+    return { status: failed.length ? (failed.length === results.length ? 'error' : 'partial') : (results.some((r) => r.status === 'updated') ? 'updated' : 'fresh'), day: to, count: results.reduce((sum, r) => sum + (r.count || 0), 0) };
+  };
+  tickMs.geoconfirmed = GEOCONFIRMED_TICK_MS;
+  firstDelayMs.geoconfirmed = GEOCONFIRMED_FIRST_DELAY_MS;
+  // UCDP Candidate (etapa 4): chýbajúce mesačné súbory, raz za deň.
+  jobs.ucdp = async () => {
+    const r = await ucdpRefresh(root, { fetchImpl, now: now(), log, sleep });
+    if (r.fetched?.length) incidentsCache.clear();
+    return { status: r.status, day: r.months?.at(-1) || null, count: r.count };
+  };
+  tickMs.ucdp = UCDP_TICK_MS;
+  firstDelayMs.ucdp = UCDP_FIRST_DELAY_MS;
+
   async function tick(name) {
     if (!jobs[name] || state.running[name]) return;
     state.running[name] = true;
@@ -244,13 +293,13 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   }
 
   /** Verejný stav: žiadne texty chýb (tunel ich pustí von), len počty, časy a stav úloh. */
-  function publicStatus(index) {
+  function publicStatus(index, incidentsIdx = null) {
     const last = {};
     for (const [name, v] of Object.entries(state.last)) {
       const r = v.result || null;
       last[name] = { at: v.at, ms: v.ms, ok: !v.error && r?.status !== 'error', status: v.error ? 'error' : (r?.status ?? null), day: r?.day ?? null, count: r?.count ?? null, revisionAt: r?.revisionAt ?? null };
     }
-    return { enabled, now: now(), running: { ...state.running }, last, errors: state.errors.length, lastErrorAt: state.errors[0]?.at ?? null, control: index };
+    return { enabled, now: now(), running: { ...state.running }, last, errors: state.errors.length, lastErrorAt: state.errors[0]?.at ?? null, control: index, incidents: incidentsIdx };
   }
 
   async function route(req, res) {
@@ -258,9 +307,9 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
     let url; try { url = new URL(req.url || '/', 'http://localhost'); } catch { send(res, 400, { error: 'bad_url' }, req); return; }
     const sub = url.pathname.replace(/\/+$/, '');
     if (sub === '/status') {
-      let index = null;
-      try { index = await controlIndex(root); } catch (error) { note('status', error); }
-      send(res, 200, publicStatus(index), req);
+      let index = null; let incidentsIdx = null;
+      try { index = await controlIndex(root); incidentsIdx = await incidentsIndex(root); } catch (error) { note('status', error); }
+      send(res, 200, publicStatus(index, incidentsIdx), req);
       return;
     }
     if (!limiter(clientKey(req))) { send(res, 429, { error: 'rate_limited' }, req); return; }
@@ -349,8 +398,33 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
       } catch (error) { note('gps', error); send(res, 500, { error: 'archive_read_failed' }, req); }
       return;
     }
-    // Udalosti (`/?from&to`) prídu v ďalších etapách plánu; kým nie sú, poctivé 404.
-    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
+    if (sub === '/incidents' || sub === '/incidents/summary') {
+      // OVERENÉ UDALOSTI (etapa 4): okno dní (≤ 31, súhrn ≤ 400), voliteľne len dejisko.
+      const summary = sub === '/incidents/summary';
+      const from = url.searchParams.get('from') || '';
+      const to = url.searchParams.get('to') || '';
+      if (!isDay(from) || !isDay(to)) { send(res, 400, { error: 'bad_day' }, req); return; }
+      if (to < from) { send(res, 400, { error: 'bad_range' }, req); return; }
+      const span = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+      const maxDays = summary ? MIDEAST_INCIDENTS_SUMMARY_MAX_DAYS : MIDEAST_INCIDENTS_MAX_DAYS;
+      if (span > maxDays) { send(res, 400, { error: 'range_too_long', maxDays }, req); return; }
+      const theatre = url.searchParams.get('theatre') || null;
+      const area = incidentsTheatreRect(theatre);
+      if (!area.ok) { send(res, 400, { error: 'bad_theatre' }, req); return; }
+      const key = `${summary ? 's' : 'i'}:${from}:${to}:${theatre || ''}`;
+      const hit = incidentsCache.get(key);
+      if (hit && now() - hit.at < CONTROL_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const opts = { from, to, rect: area.rect, theatre, nowMs: now() };
+        const json = summary ? await incidentsSummaryPayload(root, opts) : await incidentsPayload(root, opts);
+        if (!json) { send(res, 404, { error: 'no_incidents_snapshot' }, req); return; }
+        incidentsCache.set(key, { at: now(), json });
+        if (incidentsCache.size > INCIDENTS_CACHE_MAX) incidentsCache.delete(incidentsCache.keys().next().value);
+        send(res, 200, json, req);
+      } catch (error) { note('incidents', error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
+    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N', '/incidents?from&to[&theatre]', '/incidents/summary?from&to[&theatre]'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
   }
   async function handler(req, res) {
     try { await route(req, res); } catch (error) {

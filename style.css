@@ -12343,6 +12343,45 @@ body.recording-mode .state-strip {
 .mideast-ukmto-type { color: #cfe3f5; }
 .mideast-ukmto-place { color: var(--text-dim); }
 /*
+ * BLÍZKY VÝCHOD etapa 4 (OVERENÉ UDALOSTI · GeoConfirmed + UCDP, 2026-11-05): legenda
+ * (src/mideastPanel.js renderIncidents) — os = tri tlačidlá obdobia s počtom, riadky najnovších
+ * udalostí sú tlačidlá (otvoria kartu); karta po kliknutí na bod (src/mideastIncidentsLayer.js)
+ * leží v pravom hornom rohu mapy, akcent = farba druhu.
+ */
+.mideast-inc-periods { display: flex; flex-wrap: wrap; gap: 4px; }
+.mideast-inc-period {
+  font: inherit; font-size: 8.5px; letter-spacing: 0.04em; color: #8aa0b6; cursor: var(--cursor-pointer);
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 3px; padding: 1px 6px;
+}
+.mideast-inc-period:hover, .mideast-inc-period:focus-visible { color: #cfe3f5; border-color: rgba(255, 255, 255, 0.3); }
+.mideast-inc-period.is-active { color: #cfe3f5; border-color: var(--accent); background: rgba(255, 255, 255, 0.06); }
+.mideast-inc-row { font: inherit; color: inherit; text-align: left; background: transparent; border: 0; padding: 0; cursor: var(--cursor-pointer); }
+.mideast-inc-row:hover .mideast-ukmto-type, .mideast-inc-row:focus-visible .mideast-ukmto-type { text-decoration: underline; }
+.oko-mideast-inc-card {
+  position: absolute; top: 72px; right: 16px; z-index: 61; width: min(320px, calc(100% - 32px));
+  display: flex; flex-direction: column; gap: 4px; padding: 7px 10px 8px;
+  background: rgba(11, 22, 34, 0.95); border: 1px solid rgba(255, 255, 255, 0.14); border-left: 3px solid var(--inc-accent, #8aa0b6); border-radius: 6px;
+  color: #dbeafe; font: 500 10px/1.45 'IBM Plex Mono', ui-monospace, monospace;
+}
+.oko-mideast-inc-card[hidden] { display: none; }
+.oko-mideast-inc-head { display: flex; align-items: center; gap: 6px; }
+.oko-mideast-inc-swatch { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.oko-mideast-inc-type { color: #cfe3f5; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 9px; }
+.oko-mideast-inc-when { color: #8aa0b6; font-variant-numeric: tabular-nums; }
+.oko-mideast-inc-close { margin-left: auto; background: transparent; border: 0; color: #8aa0b6; font-size: 14px; line-height: 1; cursor: var(--cursor-pointer); padding: 0 2px; }
+.oko-mideast-inc-close:hover, .oko-mideast-inc-close:focus-visible { color: #fff; }
+.oko-mideast-inc-place { color: #cfe3f5; }
+.oko-mideast-inc-actor { color: #8aa0b6; }
+.oko-mideast-inc-text { margin: 0; color: #dbeafe; overflow-wrap: anywhere; }
+.oko-mideast-inc-deaths { color: #ffb547; }
+.oko-mideast-inc-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 8.5px; color: var(--text-dim); }
+.oko-mideast-inc-level { color: #8aa0b6; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 3px; padding: 0 4px; }
+.oko-mideast-inc-link { color: var(--accent); text-decoration: none; }
+.oko-mideast-inc-link:hover, .oko-mideast-inc-link:focus-visible { text-decoration: underline; }
+@media (max-width: 640px) {
+  .oko-mideast-inc-card { top: auto; bottom: 96px; right: 8px; left: 8px; width: auto; }
+}
+/*
  * BLÍZKY VÝCHOD etapa 5a (PRECHODY ÚŽINAMI, 2026-09-26): karta IMF PortWatch
  * (src/portwatchCard.js) — riadok na úžinu: meno, Ø 7 dní, zmena voči obdobiu pred
  * krízou (pokles červeno, nárast jantárovo — obchádzka okolo Afriky nie je „dobrá
