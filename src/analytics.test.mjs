@@ -152,6 +152,7 @@ test('ochrana súkromia: kontakt, cookies GA4 len so súhlasom, tlačidlá menia
   const page = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
   assert.doesNotMatch(page, /Uhrin|Vladimír|vladimir_/i, 'meno vlastníka nikde (2026-11-05)');
   assert.match(page, /Centre účtu \(Zabezpečenie\)/);
+  assert.match(page, /mailto:viriar\.com@gmail\.com/, 'kontakt bez mena (vlastník 2026-11-05)');
   assert.doesNotMatch(page, /info@okolive\.sk/);
   assert.match(page, /Bez súhlasu Google Analytics neukladá žiadne cookies/);
   assert.match(page, /Without consent Google Analytics stores no cookies/);
