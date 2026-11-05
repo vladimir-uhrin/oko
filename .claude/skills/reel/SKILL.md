@@ -85,7 +85,9 @@ Vzor: `output/reel-samara/build.mjs` (štýl v3). Pravidlá, ktoré musí splni�
 
 ## Pravidlá obsahu (vždy)
 
-- Po slovensky, bez emoji, tón agentúry; meno vlastníka v komentári nehovoriť; okolive.sk na každej snímke.
+- Po slovensky, bez emoji, tón agentúry; okolive.sk na každej snímke.
+- **Meno vlastníka NIKDE** (vlastník 2026-11-05): ani v hlase, ani na záverečnej karte („VYTVORIL …"), ani v post-fb.txt.
+  Staré `output/*/build.mjs` ho na karte majú — pri kopírovaní ako vzor ho vždy odstrániť; hotové reely nechať tak.
 - **Sankcie:** obsah médií z `src/data/sanctionedMedia.js` (RIA, Izvestija, Lenta, EADaily, RT, Sputnik…)
   NIKDY — ani ako zdroj faktu. Telegram len nesankcionované kanály (ASTRA, Ostorožno novosti, SOTA, Mash…), vždy
   s menom kanála. Videá z Telegramu: `t.me/<kanál>/<id>?embed=1&mode=tme` → `<video src>` (token, sťahovať hneď).
