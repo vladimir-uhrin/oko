@@ -27,6 +27,8 @@ import { createMideastControl } from './mideastControlLayer.js';
 import { createAirspaceAdvisory } from './airspaceAdvisoryLayer.js';
 import { createUkmtoIncidents } from './ukmtoIncidentsLayer.js';
 import { createMideastIncidents } from './mideastIncidentsLayer.js';
+import { createMideastAlerts } from './mideastAlertsLayer.js';
+import { createMideastHumanitarian, createMideastInternet } from './mideastIndicators.js';
 import { createGpsInterference } from './gpsInterferenceLayer.js';
 import { UKMTO_CHOKEPOINT_SCENES } from './data/ukmto.js';
 import { createPortwatchCard } from './portwatchCard.js';
@@ -166,6 +168,9 @@ export function initConflictScenes(deps) {
   let ukraineEvents = null; // vrstva udalostí UKRAJINA (etapa 3) — vzniká nižšie, brána ju už pozná
   let ukmtoIncidents = null; // INCIDENTY LODÍ · UKMTO (BLÍZKY VÝCHOD etapa 5c) — vzniká nižšie, brána ju už pozná
   let mideastIncidents = null; // OVERENÉ UDALOSTI (BLÍZKY VÝCHOD etapa 4) — vzniká nižšie, brána ju už pozná
+  let mideastAlerts = null; // POPLACHY · Izrael (BLÍZKY VÝCHOD etapa 6) — vzniká nižšie, brána ju už pozná
+  let mideastHumanitarian = null; // HUMANITÁRNE SÚČTY (etapa 6, bez mapy)
+  let mideastInternet = null; // INTERNET · OONI (etapa 6, bez mapy)
   let kartaOverlay = null; // rám KARTA (K5) — vzniká nižšie; brána mu prepína viditeľnosť
   let activeFrontScene = null; // aktívny smer frontu (pre prehľadovú mapku a názov snímky)
   let activeChokepoint = null; // aktívna úžina (pre export kartičky konfliktu)
@@ -189,6 +194,8 @@ export function initConflictScenes(deps) {
       if (visible) void ukmtoIncidents?.show(); else void ukmtoIncidents?.hide();
       // OVERENÉ UDALOSTI (GeoConfirmed + UCDP): body len pri pohľade na dejisko, čip ostáva.
       if (visible) void mideastIncidents?.show(); else void mideastIncidents?.hide();
+      // POPLACHY · Izrael (etapa 6): polygóny len pri pohľade na dejisko, čip ostáva.
+      if (visible) void mideastAlerts?.show(); else void mideastAlerts?.hide();
       scenePinDs.show = visible;
       viewer.scene?.requestRender?.();
     },
@@ -238,6 +245,16 @@ export function initConflictScenes(deps) {
   // VÝCHODU (setActive nižšie dostane celé dejisko — počty v legende sa rátajú v ňom) a schováva sa s bránou.
   mideastIncidents = createMideastIncidents({ viewer });
   window.__godsEyeView.mideastIncidents = mideastIncidents;
+  // Etapa 6 (2026-11-06): POPLACHY · Izrael (src/mideastAlertsLayer.js) — polygóny oblastí HFC
+  // z verejného mirroru histórie, nikdy „živý alarm"; aktívne len pri dejiskách Izraela, Gazy,
+  // Západného brehu a južného Libanonu (ALERT_THEATRES), schováva sa s bránou. HUMANITÁRNE SÚČTY
+  // a INTERNET · OONI (src/mideastIndicators.js) nemajú mapu — kreslí ich len panel.
+  mideastAlerts = createMideastAlerts({ viewer });
+  window.__godsEyeView.mideastAlerts = mideastAlerts;
+  mideastHumanitarian = createMideastHumanitarian();
+  window.__godsEyeView.mideastHumanitarian = mideastHumanitarian;
+  mideastInternet = createMideastInternet();
+  window.__godsEyeView.mideastInternet = mideastInternet;
   const mideastPanel = createMideastPanel({
     mountTarget: document.querySelector('#mideast-panel [data-mideast-body]'),
     theatres: listMideastTheatres(),
@@ -247,6 +264,9 @@ export function initConflictScenes(deps) {
     ukmto: ukmtoIncidents,
     gps: gpsInterference,
     incidents: mideastIncidents,
+    alerts: mideastAlerts,
+    humanitarian: mideastHumanitarian,
+    internet: mideastInternet,
   });
   window.__godsEyeView.mideastPanel = mideastPanel;
   // Situation from open sources: the merged bulletin (2026-09-18) now fills the
@@ -453,6 +473,7 @@ export function initConflictScenes(deps) {
       void mideastControl.setTheatre(null);
       void ukmtoIncidents?.setActive(false);
       void mideastIncidents?.setActive(false);
+      void mideastAlerts?.setActive(false); void mideastHumanitarian?.setActive(null); void mideastInternet?.setActive(null);
       portwatchCard?.setActive?.(null);
       restoreAutoKarta();
       syncMapFocus();
@@ -619,6 +640,7 @@ export function initConflictScenes(deps) {
     void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
     void ukmtoIncidents?.setActive(false);
     void mideastIncidents?.setActive(false);
+    void mideastAlerts?.setActive(false); void mideastHumanitarian?.setActive(null); void mideastInternet?.setActive(null);
     portwatchCard?.setActive?.(null);
     kartaOverlay?.setScene(scene || null);
     ukrainePanel?.setActiveScene(scene?.id || null);
@@ -711,6 +733,7 @@ export function initConflictScenes(deps) {
     // Varovania UKMTO pri úžinách v jeho oblasti hlásení (Hormuz, Báb al-Mandab, Suez); inde nie.
     void ukmtoIncidents?.setActive(UKMTO_CHOKEPOINT_SCENES.includes(scene?.id));
     void mideastIncidents?.setActive(false); // overené udalosti patria dejiskám, nie úžinám
+    void mideastAlerts?.setActive(false); void mideastHumanitarian?.setActive(null); void mideastInternet?.setActive(null);
     const result = applyChokepointScene(id, chokepointSceneDeps);
     syncMapFocus();
     void oilPriceChip.refreshAndShow();
@@ -793,6 +816,11 @@ export function initConflictScenes(deps) {
     void ukmtoIncidents?.setActive(Boolean(scene));
     // OVERENÉ UDALOSTI (etapa 4): pri každom dejisku; legenda počíta v rámci dejiska.
     void mideastIncidents?.setActive(scene || false);
+    // Etapa 6: poplachy len pri dejiskách Izraela a okolia (vrstva si to stráži sama), súčty a
+    // internet podľa dejiska (ukazovatele si tiež strážia, či dejisko má krajinu/súhrn).
+    void mideastAlerts?.setActive(scene || false);
+    void mideastHumanitarian?.setActive(scene || null);
+    void mideastInternet?.setActive(scene || null);
     // Čip „premávka v úžine" patrí poslednej úžine a ďalej by pollval jej rámec;
     // brána presunutá na dejisko by ho po prílete znova odkryla (nález 2026-09-26).
     straitTrafficChip.hide();

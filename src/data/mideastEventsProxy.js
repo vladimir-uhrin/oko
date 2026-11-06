@@ -46,6 +46,14 @@
  *    Úloha `geoconfirmed` (tik 6 h, prvá 680 s): štyri konflikty postupne s pauzou 2 s — prvé
  *    naplnenie od 28. 2. jedným dopytom na konflikt, potom rolujúce okno 30 dní. Úloha `ucdp`
  *    (tik 24 h, prvá 740 s): chýbajúce mesačné súbory UCDP Candidate, 404 = mesiac ešte nevyšiel.
+ *  - `/alerts?from&to` (etapa 6, 2026-11-06): poplachy HFC po dňoch a oblastiach za okno ≤ 400 dní
+ *    (mirror oref-alerts.github.io; nikdy „živý alarm"); `/alerts/areas`: oblasti s okresom a obrysom
+ *    (amitfin/oref_alert, MIT); 400 bad_day / bad_range / range_too_long, 404 no_alerts_snapshot /
+ *    no_alert_areas; cache 10 min. Úloha `alerts` (tik 6 h, prvá 800 s): events.js + polygóny raz za 7 d.
+ *  - `/humanitarian` (etapa 6): súčty Tech for Palestine (Gaza, Západný breh, Libanon; len čísla, nikdy
+ *    mená); 404 no_humanitarian_snapshot. Úloha `humanitarian` (tik 24 h, prvá 860 s).
+ *  - `/internet` (etapa 6): ukazovateľ OONI po krajinách (7 d proti 30 d; CC BY-NC-SA); 404
+ *    no_internet_snapshot. Úloha `internet` (tik 24 h, prvá 920 s): šesť krajín s pauzou 1,5 s.
  * Bezpečnosť handlera: každý `await` aj `new URL` v try/catch — odmietnutý Promise
  * z async connect middleware zhodí dev server.
  */
@@ -56,6 +64,8 @@ import { GEOCONFIRMED_SLUGS, MIDEAST_INCIDENTS_MAX_DAYS, MIDEAST_INCIDENTS_SUMMA
 import { theatreById } from './mideastTheatres.js';
 import { PORTWATCH_KEYS } from './portwatch.js';
 import { GEOCONFIRMED_PAUSE_MS, geoconfirmedRefresh, incidentsIndex, incidentsPayload, incidentsSummaryPayload, ucdpRefresh } from '../../scripts/lib/mideastArchive.mjs';
+import { alertAreasPayload, alertAreasRefresh, alertsPayload, alertsRefresh, humanitarianPayload, humanitarianRefresh, internetPayload, internetRefresh, stage6Index } from '../../scripts/lib/mideastArchive.mjs';
+import { MIDEAST_ALERTS_MAX_DAYS } from './mideastAlerts.js';
 import { airspacePayload, controlDays, controlFor, controlIndex, czibRefresh, dayKey, firBoundariesRefresh, gpsCollect, gpsPayload, isDay, portwatchPayload, portwatchRefresh, ukmtoPayload, ukmtoRefresh, wikiControlSnapshot } from '../../scripts/lib/mideastArchive.mjs';
 
 const MIN = 60_000;
@@ -93,6 +103,15 @@ export const UCDP_TICK_MS = 24 * 60 * MIN;
 export const UCDP_FIRST_DELAY_MS = 740_000;
 /** Strop kľúčov cache trás udalostí (okno × dejisko). */
 export const INCIDENTS_CACHE_MAX = 64;
+/** Úloha POPLACHY V IZRAELI (etapa 6): mirror events.js raz za 6 h (+ polygóny raz za 7 dní), prvý beh po UCDP. */
+export const ALERTS_TICK_MS = 6 * 60 * MIN;
+export const ALERTS_FIRST_DELAY_MS = 800_000;
+/** Úloha HUMANITÁRNE SÚČTY (Tech for Palestine): raz za deň. */
+export const HUMANITARIAN_TICK_MS = 24 * 60 * MIN;
+export const HUMANITARIAN_FIRST_DELAY_MS = 860_000;
+/** Úloha INTERNET (OONI): raz za deň, krajiny postupne s pauzou 1,5 s. */
+export const INTERNET_TICK_MS = 24 * 60 * MIN;
+export const INTERNET_FIRST_DELAY_MS = 920_000;
 /** Dejisko → obdĺžnik pre filter trasy; `overview` = celý región (bez filtra). Pure. */
 export function incidentsTheatreRect(id) {
   if (!id) return { ok: true, rect: null };
@@ -154,6 +173,8 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   const ukmtoCache = new Map(); // days -> { at, json }
   const gpsCache = new Map(); // days -> { at, json }
   const incidentsCache = new Map(); // `${druh}:${from}:${to}:${theatre}` -> { at, json }
+  const alertsCache = new Map(); // `${from}:${to}` | 'areas' -> { at, json }
+  const stage6Cache = new Map(); // 'humanitarian' | 'internet' -> { at, json }
   const timers = new Map();
   const state = { enabled, base: null, running: {}, last: {}, errors: [] };
   const note = (name, error) => { const msg = `${name}: ${error?.message || error}`; state.errors = [{ at: now(), msg }, ...state.errors].slice(0, 20); log(`[mideast-events] ${msg}`); };
@@ -243,6 +264,32 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   };
   tickMs.ucdp = UCDP_TICK_MS;
   firstDelayMs.ucdp = UCDP_FIRST_DELAY_MS;
+  // POPLACHY V IZRAELI (etapa 6): mirror histórie + polygóny oblastí; čerstvosť drží knižnica.
+  jobs.alerts = async () => {
+    const r = await alertsRefresh(root, { fetchImpl, now: now(), log });
+    const areas = await alertAreasRefresh(root, { fetchImpl, now: now(), log });
+    if (r.status === 'updated' || areas.status === 'updated') alertsCache.clear();
+    const status = r.status === 'error' ? 'error' : (r.status === 'stale' || areas.status === 'error' || areas.status === 'stale' ? 'partial' : (r.status === 'updated' || areas.status === 'updated' ? 'updated' : 'fresh'));
+    return { status, day: r.day || null, count: r.count };
+  };
+  tickMs.alerts = ALERTS_TICK_MS;
+  firstDelayMs.alerts = ALERTS_FIRST_DELAY_MS;
+  // HUMANITÁRNE SÚČTY (etapa 6): Tech for Palestine, len súčty.
+  jobs.humanitarian = async () => {
+    const r = await humanitarianRefresh(root, { fetchImpl, now: now(), log });
+    if (r.status === 'updated') stage6Cache.delete('humanitarian');
+    return { status: r.status === 'stale' ? 'partial' : r.status, day: r.day || null, count: r.count };
+  };
+  tickMs.humanitarian = HUMANITARIAN_TICK_MS;
+  firstDelayMs.humanitarian = HUMANITARIAN_FIRST_DELAY_MS;
+  // INTERNET (etapa 6): OONI po krajinách.
+  jobs.internet = async () => {
+    const r = await internetRefresh(root, { fetchImpl, now: now(), log, sleep });
+    if (r.status === 'updated' || r.status === 'partial') stage6Cache.delete('internet');
+    return { status: r.status, day: r.day || null, count: r.count };
+  };
+  tickMs.internet = INTERNET_TICK_MS;
+  firstDelayMs.internet = INTERNET_FIRST_DELAY_MS;
 
   async function tick(name) {
     if (!jobs[name] || state.running[name]) return;
@@ -293,13 +340,13 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
   }
 
   /** Verejný stav: žiadne texty chýb (tunel ich pustí von), len počty, časy a stav úloh. */
-  function publicStatus(index, incidentsIdx = null) {
+  function publicStatus(index, incidentsIdx = null, stage6 = null) {
     const last = {};
     for (const [name, v] of Object.entries(state.last)) {
       const r = v.result || null;
       last[name] = { at: v.at, ms: v.ms, ok: !v.error && r?.status !== 'error', status: v.error ? 'error' : (r?.status ?? null), day: r?.day ?? null, count: r?.count ?? null, revisionAt: r?.revisionAt ?? null };
     }
-    return { enabled, now: now(), running: { ...state.running }, last, errors: state.errors.length, lastErrorAt: state.errors[0]?.at ?? null, control: index, incidents: incidentsIdx };
+    return { enabled, now: now(), running: { ...state.running }, last, errors: state.errors.length, lastErrorAt: state.errors[0]?.at ?? null, control: index, incidents: incidentsIdx, ...(stage6 || {}) };
   }
 
   async function route(req, res) {
@@ -307,9 +354,9 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
     let url; try { url = new URL(req.url || '/', 'http://localhost'); } catch { send(res, 400, { error: 'bad_url' }, req); return; }
     const sub = url.pathname.replace(/\/+$/, '');
     if (sub === '/status') {
-      let index = null; let incidentsIdx = null;
-      try { index = await controlIndex(root); incidentsIdx = await incidentsIndex(root); } catch (error) { note('status', error); }
-      send(res, 200, publicStatus(index, incidentsIdx), req);
+      let index = null; let incidentsIdx = null; let stage6 = null;
+      try { index = await controlIndex(root); incidentsIdx = await incidentsIndex(root); stage6 = await stage6Index(root); } catch (error) { note('status', error); }
+      send(res, 200, publicStatus(index, incidentsIdx, stage6), req);
       return;
     }
     if (!limiter(clientKey(req))) { send(res, 429, { error: 'rate_limited' }, req); return; }
@@ -424,7 +471,43 @@ export function mideastEventsProxy({ root = process.cwd(), env = process.env, fe
       } catch (error) { note('incidents', error); send(res, 500, { error: 'archive_read_failed' }, req); }
       return;
     }
-    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N', '/incidents?from&to[&theatre]', '/incidents/summary?from&to[&theatre]'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
+    if (sub === '/alerts' || sub === '/alerts/areas') {
+      // POPLACHY V IZRAELI (etapa 6): počty po dňoch a oblastiach za okno (≤ 400 dní) / katalóg oblastí s obrysmi.
+      const areasRoute = sub === '/alerts/areas';
+      let key = 'areas'; let from = null; let to = null;
+      if (!areasRoute) {
+        from = url.searchParams.get('from') || ''; to = url.searchParams.get('to') || '';
+        if (!isDay(from) || !isDay(to)) { send(res, 400, { error: 'bad_day' }, req); return; }
+        if (to < from) { send(res, 400, { error: 'bad_range' }, req); return; }
+        const span = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
+        if (span > MIDEAST_ALERTS_MAX_DAYS) { send(res, 400, { error: 'range_too_long', maxDays: MIDEAST_ALERTS_MAX_DAYS }, req); return; }
+        key = `${from}:${to}`;
+      }
+      const hit = alertsCache.get(key);
+      if (hit && now() - hit.at < CONTROL_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = areasRoute ? await alertAreasPayload(root, { nowMs: now() }) : await alertsPayload(root, { from, to, nowMs: now() });
+        if (!json) { send(res, 404, { error: areasRoute ? 'no_alert_areas' : 'no_alerts_snapshot' }, req); return; }
+        alertsCache.set(key, { at: now(), json });
+        if (alertsCache.size > INCIDENTS_CACHE_MAX) alertsCache.delete(alertsCache.keys().next().value);
+        send(res, 200, json, req);
+      } catch (error) { note('alerts', error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
+    if (sub === '/humanitarian' || sub === '/internet') {
+      // HUMANITÁRNE SÚČTY (Tech for Palestine) / INTERNET (OONI) — jedna odpoveď pre všetkých.
+      const key = sub.slice(1);
+      const hit = stage6Cache.get(key);
+      if (hit && now() - hit.at < CONTROL_CACHE_TTL_MS) { send(res, 200, hit.json, req); return; }
+      try {
+        const json = key === 'humanitarian' ? await humanitarianPayload(root, { nowMs: now() }) : await internetPayload(root, { nowMs: now() });
+        if (!json) { send(res, 404, { error: `no_${key}_snapshot` }, req); return; }
+        stage6Cache.set(key, { at: now(), json });
+        send(res, 200, json, req);
+      } catch (error) { note(key, error); send(res, 500, { error: 'archive_read_failed' }, req); }
+      return;
+    }
+    send(res, 404, { error: 'not_found', routes: ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N', '/incidents?from&to[&theatre]', '/incidents/summary?from&to[&theatre]', '/alerts?from&to', '/alerts/areas', '/humanitarian', '/internet'], modules: [...MIDEAST_CONTROL_MODULE_IDS] }, req);
   }
   async function handler(req, res) {
     try { await route(req, res); } catch (error) {

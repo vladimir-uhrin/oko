@@ -23,6 +23,11 @@
 //   geoconfirmed/<konflikt>/<deň>.json  overené udalosti GeoConfirmed po dňoch (iran, israel, yemen,
 //                                syria; etapa 4, 2026-11-05; src/data/mideastIncidents.js) + _meta.json
 //   ucdp/<YYYY-MM>.json          UCDP Candidate Events, len krajiny regiónu (CC BY 4.0) + _meta.json
+//   alerts/<deň>.json            poplachy HFC po oblastiach a druhoch za deň (mirror oref-alerts.github.io;
+//                                etapa 6, 2026-11-06; src/data/mideastAlerts.js) + _meta.json + catalog.json
+//   alerts/areas.json            oblasti HFC s okresom a zjednodušeným obrysom (amitfin/oref_alert, MIT)
+//   humanitarian/<deň>.json      súčty Tech for Palestine (Gaza, Západný breh, Libanon; public domain) + latest.json
+//   internet/<CC>.json           denné súčty meraní OONI po krajinách (CC BY-NC-SA 4.0 — nekomerčná)
 //
 // Z ukraineArchive.mjs sa berú LEN exportované primitívy (dni, disk, URL revízie).
 // Sieťový obal s User-Agentom je vlastný: Wikimedia etiketa chce popisný UA
@@ -30,6 +35,7 @@
 import { promises as fsp } from 'node:fs';
 import https from 'node:https';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 import { dayKey, dayToMs, isDay, readJson, wikiRevisionUrl, writeJsonAtomic } from './ukraineArchive.mjs';
 import { adsbLolBudget } from '../../src/data/adsbLolBudget.js';
@@ -51,6 +57,14 @@ import {
   GEOCONFIRMED_LICENSE, GEOCONFIRMED_MIDEAST_ATTRIBUTION, GEOCONFIRMED_SITE, GEOCONFIRMED_SLUGS, MIDEAST_INCIDENTS_FIRST_DAY, MIDEAST_INCIDENTS_ROLLING_DAYS,
   UCDP_ATTRIBUTION, UCDP_LICENSE, UCDP_PAGE, dedupIncidents, geoconfirmedExportUrl, inRect, parseGeoconfirmedIncidents, parseUcdpIncidents, ucdpCandidateUrl,
 } from '../../src/data/mideastIncidents.js';
+import {
+  ALERTS_ATTRIBUTION, ALERTS_DISTRICT_URL, ALERTS_LICENSE, ALERTS_MIRROR_SITE, ALERTS_MIRROR_URL, ALERTS_POLYGON_ZIP_URL, MIDEAST_ALERTS_FIRST_DAY,
+  buildAlertAreas, parseAlertsMirror, parsePythonStringDict,
+} from '../../src/data/mideastAlerts.js';
+import { T4P_ATTRIBUTION, T4P_LICENSE, T4P_SITE, T4P_SUMMARY_URL, parseT4pSummary } from '../../src/data/mideastHumanitarian.js';
+import {
+  OONI_AGGREGATION_URL, OONI_ATTRIBUTION, OONI_COUNTRIES, OONI_EXPLORER, OONI_LICENSE, OONI_QUERY_DAYS, OONI_SITE, internetIndicator, mergeOoniDays, ooniAggregationUrl, parseOoniAggregation,
+} from '../../src/data/mideastInternet.js';
 
 export { MIDEAST_CONTROL_MODULE_IDS };
 export const USER_AGENT = 'OKO-mideast/0.1 (https://github.com/vladouh76; vladouh76@gmail.com)';
@@ -99,17 +113,19 @@ export const nowToMs = (now) => { const v = typeof now === 'function' ? now() : 
  * API s gzipom). Odpoveď bez streamu (`res.body` chýba — testovacie mocky) padá na
  * `arrayBuffer()` s kontrolou dĺžky. Chyba je jedna veta bez dumpu tela.
  */
-async function fetchCapped(fetchImpl, url, { timeoutMs = 60_000, maxBytes = WIKI_REVISION_MAX_BYTES, headers = {} } = {}) {
+async function fetchCapped(fetchImpl, url, { timeoutMs = 60_000, maxBytes = WIKI_REVISION_MAX_BYTES, headers = {}, binary = false } = {}) {
+  const out = (buf) => ({ res, body: binary ? buf : buf.toString('utf8') });
+  let res;
   const host = (() => { try { return new URL(url).host; } catch { return '?'; } })();
   const controller = new AbortController();
   const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
-  const res = await fetchImpl(url, { signal, headers: { 'User-Agent': USER_AGENT, ...headers } });
+  res = await fetchImpl(url, { signal, headers: { 'User-Agent': USER_AGENT, ...headers } });
   const declared = Number(res?.headers?.get?.('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) { controller.abort(); throw new Error(`too large (Content-Length ${declared} B > ${maxBytes} B) ${host}`); }
   if (typeof res?.body?.getReader !== 'function') {
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > maxBytes) throw new Error(`too large (${buf.length} B > ${maxBytes} B) ${host}`);
-    return { res, body: buf.toString('utf8') };
+    return out(buf);
   }
   const reader = res.body.getReader();
   const chunks = [];
@@ -128,7 +144,7 @@ async function fetchCapped(fetchImpl, url, { timeoutMs = 60_000, maxBytes = WIKI
       chunks.push(chunk);
     }
   } finally { try { reader.releaseLock(); } catch { /* čítač už zrušený */ } }
-  return { res, body: Buffer.concat(chunks, total).toString('utf8') };
+  return out(Buffer.concat(chunks, total));
 }
 
 /**
@@ -995,6 +1011,275 @@ export async function incidentsIndex(root) {
   const u = await readJson(ucdpMetaFile(root));
   out.ucdp = u ? { checkedAt: u.checkedAt ?? null, months: u.months || [], count: u.count ?? 0, missing: u.missing || null } : null;
   return out;
+}
+
+// ── POPLACHY V IZRAELI (etapa 6, 2026-11-06) ──────────────────────────────────
+/** Mirror sa obnovuje po hodinách; 6 h stačí (nikdy „živý alarm"). */
+export const ALERTS_FRESH_MS = 6 * 3_600_000 - 5 * 60_000;
+/** Strop tela events.js (5. 11. 2026: 21 MB). */
+export const ALERTS_MAX_BYTES = 80 * 1024 * 1024;
+/** Polygóny a okresy raz za 7 dní (generované súbory sa menia zriedka). */
+export const ALERT_AREAS_FRESH_MS = 7 * DAY_MS;
+export const ALERT_AREAS_MAX_BYTES = 8 * 1024 * 1024;
+export const alertsDir = (root) => path.join(archiveDir(root), 'alerts');
+export const alertsDayFile = (root, day) => path.join(alertsDir(root), `${day}.json`);
+export const alertsMetaFile = (root) => path.join(alertsDir(root), '_meta.json');
+export const alertsCatalogFile = (root) => path.join(alertsDir(root), 'catalog.json');
+export const alertAreasFile = (root) => path.join(alertsDir(root), 'areas.json');
+
+/**
+ * Jediný záznam ZIP archívu → rozbalené bajty (metóda 0 store alebo 8 deflate). Číta centrálny
+ * adresár (veľkosti sú tam aj pri príznaku dátového popisovača), nič nespúšťa. Pure.
+ * @param {Buffer} buf
+ * @returns {Buffer}
+ */
+export function unzipSingleEntry(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 22) throw new Error('zip: too short');
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65_557); i -= 1) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('zip: no end of central directory');
+  const entries = buf.readUInt16LE(eocd + 10);
+  if (entries < 1) throw new Error('zip: empty');
+  const cd = buf.readUInt32LE(eocd + 16);
+  if (buf.readUInt32LE(cd) !== 0x02014b50) throw new Error('zip: bad central directory');
+  const method = buf.readUInt16LE(cd + 10);
+  const csize = buf.readUInt32LE(cd + 20);
+  const usize = buf.readUInt32LE(cd + 24);
+  const local = buf.readUInt32LE(cd + 42);
+  if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error('zip: bad local header');
+  const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+  const data = buf.subarray(start, start + csize);
+  if (method === 0) return data;
+  if (method !== 8) throw new Error(`zip: unsupported method ${method}`);
+  return zlib.inflateRawSync(data, { maxOutputLength: Math.max(usize, 1) });
+}
+
+/**
+ * Obnoví archív poplachov: stiahne events.js mirroru (ako dáta), spočíta poplachy po dňoch
+ * a oblastiach a zapíše každý deň od 28. 2. po posledný deň s dátami (aj prázdne — pokrytie je
+ * známe); katalóg slug → meno do catalog.json. Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'fresh'|'stale'|'error', day?:string|null, count:number, days?:number, areas?:number, dataUpdated?:string|null, error?:string}>}
+ */
+export async function alertsRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const meta = await readJson(alertsMetaFile(root));
+  if (!force && meta && nowMs - (Number(meta.fetchedAt) || 0) < ALERTS_FRESH_MS) {
+    return { status: 'fresh', day: meta.last || null, count: Number(meta.events) || 0, days: Number(meta.days) || 0, areas: Number(meta.areas) || 0, dataUpdated: meta.dataUpdated || null };
+  }
+  try {
+    const { res, body } = await fetchCapped(fetchImpl, ALERTS_MIRROR_URL, { timeoutMs: 180_000, maxBytes: ALERTS_MAX_BYTES, headers: { Accept: 'application/javascript, text/plain' } });
+    if (!res.ok) throw new Error(`alerts mirror HTTP ${res.status}`);
+    const parsed = parseAlertsMirror(body);
+    const dayKeys = Object.keys(parsed.days).sort();
+    const last = dayKeys.at(-1) || null;
+    const to = last && last > dayKey(nowMs) ? last : dayKey(nowMs);
+    let days = 0;
+    for (let t = dayToMs(MIDEAST_ALERTS_FIRST_DAY); t <= dayToMs(to); t += DAY_MS) {
+      const day = dayKey(t);
+      const v = parsed.days[day] || { r: 0, w: 0, d: 0, areas: {} };
+      await writeJsonAtomic(alertsDayFile(root, day), { day, kind: 'alerts', fetchedAt: nowMs, dataUpdated: parsed.dataUpdated, r: v.r, w: v.w, d: v.d, areas: v.areas });
+      days += 1;
+    }
+    await writeJsonAtomic(alertsCatalogFile(root), { kind: 'alerts-catalog', fetchedAt: nowMs, catalog: parsed.catalog });
+    const areas = Object.keys(parsed.catalog).length;
+    await writeJsonAtomic(alertsMetaFile(root), {
+      kind: 'alerts-meta', fetchedAt: nowMs, dataUpdated: parsed.dataUpdated, first: MIDEAST_ALERTS_FIRST_DAY, last, days, events: parsed.events, skipped: parsed.skipped, areas,
+      source: ALERTS_MIRROR_URL, site: ALERTS_MIRROR_SITE, attribution: ALERTS_ATTRIBUTION, license: ALERTS_LICENSE,
+    });
+    log(`[mideast-events] alerts ${MIDEAST_ALERTS_FIRST_DAY}..${last || '—'}: ${parsed.events} alerts in ${areas} areas, ${days} day files (mirror data ${parsed.dataUpdated || '?'})`);
+    return { status: 'updated', day: last, count: parsed.events, days, areas, dataUpdated: parsed.dataUpdated };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] alerts failed: ${message}`);
+    return { status: meta ? 'stale' : 'error', day: meta?.last || null, count: Number(meta?.events) || 0, error: message };
+  }
+}
+
+/**
+ * Oblasti HFC: polygóny (zip, MIT) + okresy (Python slovník) spojené s katalógom mirroru cez
+ * hebrejské meno → areas.json so zjednodušenými obrysmi. Bez katalógu (alertsRefresh ešte
+ * nebežal) sa nič nerobí. Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'fresh'|'stale'|'error'|'skipped', count:number, missing?:number, error?:string}>}
+ */
+export async function alertAreasRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const have = await readJson(alertAreasFile(root));
+  const catalog = (await readJson(alertsCatalogFile(root)))?.catalog;
+  if (!catalog) return { status: 'skipped', count: Number(have?.count) || 0, error: 'no catalog yet' };
+  if (!force && have && nowMs - (Number(have.fetchedAt) || 0) < ALERT_AREAS_FRESH_MS && Object.keys(catalog).length === Number(have.catalogSize)) {
+    return { status: 'fresh', count: Number(have.count) || 0, missing: Number(have.missing) || 0 };
+  }
+  try {
+    const zip = await fetchCapped(fetchImpl, ALERTS_POLYGON_ZIP_URL, { timeoutMs: 120_000, maxBytes: ALERT_AREAS_MAX_BYTES, binary: true });
+    if (!zip.res.ok) throw new Error(`polygons HTTP ${zip.res.status}`);
+    const polygons = JSON.parse(unzipSingleEntry(zip.body).toString('utf8'));
+    let districts = {};
+    try {
+      const d = await fetchCapped(fetchImpl, ALERTS_DISTRICT_URL, { timeoutMs: 60_000, maxBytes: ALERT_AREAS_MAX_BYTES });
+      if (d.res.ok) districts = parsePythonStringDict(d.body);
+      else log(`[mideast-events] alert districts HTTP ${d.res.status} — areas without district`);
+    } catch (error) { log(`[mideast-events] alert districts failed: ${error?.message || error} — areas without district`); }
+    const built = buildAlertAreas({ catalog, polygons, districts });
+    const count = Object.keys(built.areas).length;
+    if (!count) throw new Error('no area matched the catalog');
+    await writeJsonAtomic(alertAreasFile(root), {
+      kind: 'alert-areas', fetchedAt: nowMs, count, missing: built.missing.length, catalogSize: Object.keys(catalog).length,
+      source: ALERTS_POLYGON_ZIP_URL, attribution: ALERTS_ATTRIBUTION, license: ALERTS_LICENSE, areas: built.areas,
+    });
+    log(`[mideast-events] alert areas: ${count} polygons (${built.missing.length} catalog areas without polygon)`);
+    return { status: 'updated', count, missing: built.missing.length };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] alert areas failed: ${message}`);
+    return { status: have ? 'stale' : 'error', count: Number(have?.count) || 0, error: message };
+  }
+}
+
+/**
+ * Telo `/api/mideast/events/alerts?from&to`: počty po dňoch (len dni so súborom) a po oblastiach
+ * za okno (≤ 400 dní, volajúci stráži) + pokrytie a zdroj. Bez archívu null.
+ */
+export async function alertsPayload(root, { from, to, nowMs = Date.now() } = {}) {
+  const meta = await readJson(alertsMetaFile(root));
+  if (!meta) return null;
+  const days = {};
+  const areas = {};
+  const totals = { r: 0, w: 0, d: 0 };
+  let covered = 0;
+  for (let t = dayToMs(from); t <= dayToMs(to); t += DAY_MS) {
+    const day = dayKey(t);
+    const json = await readJson(alertsDayFile(root, day));
+    if (!json) continue;
+    covered += 1;
+    const r = Number(json.r) || 0; const w = Number(json.w) || 0; const d = Number(json.d) || 0;
+    if (r || w || d) days[day] = { r, w, d };
+    totals.r += r; totals.w += w; totals.d += d;
+    for (const [slug, c] of Object.entries(json.areas || {})) {
+      const a = areas[slug] || (areas[slug] = { r: 0, w: 0, d: 0 });
+      a.r += Number(c?.r) || 0; a.w += Number(c?.w) || 0; a.d += Number(c?.d) || 0;
+    }
+  }
+  return {
+    generatedAt: nowMs, from, to, coverage: { days: covered, first: meta.first || MIDEAST_ALERTS_FIRST_DAY, last: meta.last || null },
+    fetchedAt: meta.fetchedAt ?? null, dataUpdated: meta.dataUpdated ?? null,
+    source: { attribution: ALERTS_ATTRIBUTION, license: ALERTS_LICENSE, site: ALERTS_MIRROR_SITE },
+    totals, days, areas,
+  };
+}
+/** Telo `/api/mideast/events/alerts/areas`: katalóg oblastí s obrysmi. Bez súboru null. */
+export async function alertAreasPayload(root, { nowMs = Date.now() } = {}) {
+  const json = await readJson(alertAreasFile(root));
+  if (!json?.areas) return null;
+  return { generatedAt: nowMs, fetchedAt: json.fetchedAt ?? null, count: json.count ?? Object.keys(json.areas).length, source: { attribution: json.attribution || ALERTS_ATTRIBUTION, license: json.license || ALERTS_LICENSE }, areas: json.areas };
+}
+
+// ── HUMANITÁRNE SÚČTY · Tech for Palestine (etapa 6) ────────────────────────
+export const HUMANITARIAN_FRESH_MS = 24 * 3_600_000 - 5 * 60_000;
+export const HUMANITARIAN_MAX_BYTES = 256 * 1024;
+export const humanitarianDir = (root) => path.join(archiveDir(root), 'humanitarian');
+export const humanitarianDayFile = (root, day) => path.join(humanitarianDir(root), `${day}.json`);
+export const humanitarianLatestFile = (root) => path.join(humanitarianDir(root), 'latest.json');
+
+/** Raz za deň: súhrn v3 (len súčty) → latest.json + denná snímka (história súčtov). Nikdy nehádže. */
+export async function humanitarianRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {} } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', count: 0, error: `bad now '${String(now)}'` };
+  const have = await readJson(humanitarianLatestFile(root));
+  if (!force && have && nowMs - (Number(have.fetchedAt) || 0) < HUMANITARIAN_FRESH_MS) return { status: 'fresh', day: have.summary?.gaza?.lastUpdate || null, count: Number(have.summary?.gaza?.killed) || 0 };
+  try {
+    const { res, body } = await fetchCapped(fetchImpl, T4P_SUMMARY_URL, { timeoutMs: 60_000, maxBytes: HUMANITARIAN_MAX_BYTES, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`T4P HTTP ${res.status}`);
+    const summary = parseT4pSummary(JSON.parse(body));
+    const snapshot = { kind: 'humanitarian', fetchedAt: nowMs, source: T4P_SUMMARY_URL, site: T4P_SITE, attribution: T4P_ATTRIBUTION, license: T4P_LICENSE, summary };
+    await writeJsonAtomic(humanitarianLatestFile(root), snapshot);
+    await writeJsonAtomic(humanitarianDayFile(root, dayKey(nowMs)), snapshot);
+    log(`[mideast-events] humanitarian: Gaza ${summary.gaza?.killed ?? '—'} killed (report ${summary.gaza?.lastUpdate || '?'}), West Bank ${summary.west_bank?.killed ?? '—'}, Lebanon ${summary.lebanon?.killed ?? '—'}`);
+    return { status: 'updated', day: summary.gaza?.lastUpdate || null, count: Number(summary.gaza?.killed) || 0 };
+  } catch (error) {
+    const message = String(error?.message || error);
+    log(`[mideast-events] humanitarian failed: ${message}`);
+    return { status: have ? 'stale' : 'error', day: have?.summary?.gaza?.lastUpdate || null, count: Number(have?.summary?.gaza?.killed) || 0, error: message };
+  }
+}
+/** Telo `/api/mideast/events/humanitarian`: posledný súhrn. Bez súboru null. */
+export async function humanitarianPayload(root, { nowMs = Date.now() } = {}) {
+  const json = await readJson(humanitarianLatestFile(root));
+  if (!json?.summary) return null;
+  return { generatedAt: nowMs, fetchedAt: json.fetchedAt ?? null, source: { attribution: json.attribution || T4P_ATTRIBUTION, license: json.license || T4P_LICENSE, site: json.site || T4P_SITE }, summary: json.summary };
+}
+
+// ── INTERNET · OONI (etapa 6) ─────────────────────────────────────────────────
+export const INTERNET_FRESH_MS = 24 * 3_600_000 - 5 * 60_000;
+export const INTERNET_MAX_BYTES = 2 * 1024 * 1024;
+export const INTERNET_PAUSE_MS = 1_500;
+export const internetDir = (root) => path.join(archiveDir(root), 'internet');
+export const internetCountryFile = (root, cc) => path.join(internetDir(root), `${cc}.json`);
+export const internetMetaFile = (root) => path.join(internetDir(root), '_meta.json');
+
+/**
+ * Raz za deň, krajiny postupne s pauzou: agregácia OONI za posledných `OONI_QUERY_DAYS` dní,
+ * zlúčená s archívom krajiny (nové dni vyhrávajú — OONI dopĺňa posledné dni spätne). Nikdy nehádže.
+ * @returns {Promise<{status:'updated'|'fresh'|'partial'|'error', day:string|null, count:number, errors?:string[]}>}
+ */
+export async function internetRefresh(root, { fetchImpl = fetch, now = Date.now(), force = false, log = () => {}, sleep = defaultSleepMs, countries = OONI_COUNTRIES } = {}) {
+  const nowMs = nowToMs(now);
+  if (!Number.isFinite(nowMs)) return { status: 'error', day: null, count: 0, errors: [`bad now '${String(now)}'`] };
+  const meta = await readJson(internetMetaFile(root));
+  if (!force && meta && nowMs - (Number(meta.fetchedAt) || 0) < INTERNET_FRESH_MS) return { status: 'fresh', day: meta.last || null, count: Number(meta.count) || 0 };
+  const until = dayKey(nowMs + DAY_MS); // OONI: until je výlučné → dnešok vrátane
+  const since = dayKey(nowMs - OONI_QUERY_DAYS * DAY_MS);
+  const errors = [];
+  let updated = 0; let count = 0; let last = null;
+  for (const [i, cc] of countries.entries()) {
+    if (i) await sleep(INTERNET_PAUSE_MS);
+    const file = internetCountryFile(root, cc);
+    const have = await readJson(file);
+    try {
+      const { res, body } = await fetchCapped(fetchImpl, ooniAggregationUrl(cc, since, until), { timeoutMs: 60_000, maxBytes: INTERNET_MAX_BYTES, headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const rows = mergeOoniDays(have?.rows, parseOoniAggregation(JSON.parse(body)));
+      await writeJsonAtomic(file, { kind: 'internet', cc, fetchedAt: nowMs, source: OONI_AGGREGATION_URL, attribution: OONI_ATTRIBUTION, license: OONI_LICENSE, rows });
+      updated += 1; count += rows.length;
+      if (rows.length && (!last || rows.at(-1).day > last)) last = rows.at(-1).day;
+    } catch (error) {
+      errors.push(`${cc}: ${String(error?.message || error)}`);
+      log(`[mideast-events] internet ${cc} failed: ${error?.message || error}`);
+      count += Array.isArray(have?.rows) ? have.rows.length : 0;
+    }
+  }
+  if (updated) await writeJsonAtomic(internetMetaFile(root), { kind: 'internet-meta', fetchedAt: nowMs, last, count, countries: [...countries], attribution: OONI_ATTRIBUTION, license: OONI_LICENSE });
+  if (updated) log(`[mideast-events] internet: ${updated}/${countries.length} countries, last day ${last || '—'}${errors.length ? ` (failed: ${errors.join('; ')})` : ''}`);
+  const status = errors.length ? (updated ? 'partial' : 'error') : 'updated';
+  return { status, day: last, count, errors };
+}
+/** Telo `/api/mideast/events/internet`: ukazovateľ po krajinách (7 d proti 30 d) + krivka. Bez archívu null. */
+export async function internetPayload(root, { nowMs = Date.now(), countries = OONI_COUNTRIES } = {}) {
+  const out = {};
+  let any = false; let fetchedAt = null;
+  for (const cc of countries) {
+    const json = await readJson(internetCountryFile(root, cc));
+    if (!json?.rows) continue;
+    any = true;
+    fetchedAt = Math.max(fetchedAt || 0, Number(json.fetchedAt) || 0) || fetchedAt;
+    out[cc] = internetIndicator(json.rows, nowMs);
+  }
+  if (!any) return null;
+  return { generatedAt: nowMs, fetchedAt, source: { attribution: OONI_ATTRIBUTION, license: OONI_LICENSE, site: OONI_SITE, explorer: OONI_EXPLORER }, countries: out };
+}
+
+/** Lacný prehľad etapy 6 pre /status (len meta súbory). */
+export async function stage6Index(root) {
+  const a = await readJson(alertsMetaFile(root));
+  const areas = await readJson(alertAreasFile(root));
+  const h = await readJson(humanitarianLatestFile(root));
+  const i = await readJson(internetMetaFile(root));
+  return {
+    alerts: a ? { fetchedAt: a.fetchedAt ?? null, dataUpdated: a.dataUpdated ?? null, first: a.first || null, last: a.last || null, days: a.days ?? 0, events: a.events ?? 0, areas: areas ? { fetchedAt: areas.fetchedAt ?? null, count: areas.count ?? 0 } : null } : null,
+    humanitarian: h ? { fetchedAt: h.fetchedAt ?? null, lastReport: h.summary?.gaza?.lastUpdate || null } : null,
+    internet: i ? { fetchedAt: i.fetchedAt ?? null, last: i.last || null, countries: i.countries || [] } : null,
+  };
 }
 
 export { dayKey, dayToMs, isDay } from './ukraineArchive.mjs';

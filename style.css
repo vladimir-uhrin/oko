@@ -12378,6 +12378,30 @@ body.recording-mode .state-strip {
 .oko-mideast-inc-level { color: #8aa0b6; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 3px; padding: 0 4px; }
 .oko-mideast-inc-link { color: var(--accent); text-decoration: none; }
 .oko-mideast-inc-link:hover, .oko-mideast-inc-link:focus-visible { text-decoration: underline; }
+/*
+ * BLÍZKY VÝCHOD etapa 6 (2026-11-06): legenda POPLACHOV (riadky oblastí sú tlačidlá — hebrejské
+ * mená rtl), karta oblasti (rovnaká kostra ako karta udalosti), riadky INTERNET · OONI po krajinách
+ * so stupňom a karta HUMANITÁRNYCH SÚČTOV (bez čipu, len čísla).
+ */
+.mideast-alerts-name, .oko-mideast-alerts-name { unicode-bidi: isolate; }
+.oko-mideast-alerts-rows { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.oko-mideast-alerts-row { display: inline-flex; align-items: baseline; gap: 4px; }
+.oko-mideast-alerts-row-label { color: #8aa0b6; }
+.oko-mideast-alerts-row-value { color: #cfe3f5; font-variant-numeric: tabular-nums; }
+.mideast-net-rows { display: flex; flex-direction: column; gap: 3px; }
+.mideast-net-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; cursor: help; }
+.mideast-net-country { color: #cfe3f5; }
+.mideast-net-level { font-size: 8px; letter-spacing: 0.04em; text-transform: uppercase; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 3px; padding: 0 4px; color: #8aa0b6; }
+.mideast-net-level.is-worse { color: #ff8585; border-color: rgba(255, 133, 133, 0.55); }
+.mideast-net-level.is-better { color: #7be0a5; border-color: rgba(123, 224, 165, 0.55); }
+.mideast-net-level.is-quiet { color: #ffb547; border-color: rgba(255, 181, 71, 0.55); }
+.mideast-net-nums { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.mideast-net-link { color: var(--accent); text-decoration: none; }
+.mideast-net-link:hover, .mideast-net-link:focus-visible { text-decoration: underline; }
+.mideast-hum-rows { display: grid; grid-template-columns: auto auto; gap: 2px 10px; justify-content: start; }
+.mideast-hum-label { color: #8aa0b6; }
+.mideast-hum-row.is-killed .mideast-hum-label, .mideast-hum-row.is-injured .mideast-hum-label, .mideast-hum-row.is-settlerAttacks .mideast-hum-label { color: #cfe3f5; }
+.mideast-hum-value { color: #cfe3f5; font-variant-numeric: tabular-nums; text-align: right; }
 @media (max-width: 640px) {
   .oko-mideast-inc-card { top: auto; bottom: 96px; right: 8px; left: 8px; width: auto; }
 }

@@ -263,7 +263,13 @@ KLIENT
    história z mirroru po otázke 5) ako denná/týždenná mapa, nikdy „živý alarm"; UNOSAT Gaza
    CDA statická; Tech for Palestine súčty v karte Gazy a Západného brehu; OONI (a IODA po
    odpovedi) ako čip „internet" pri Iráne, Iraku, Jemene; preset nočných svetiel; FIRMS po
-   kľúči. Test: agregácie, vylúčenie mien, disclaimer.
+   kľúči. Test: agregácie, vylúčenie mien, disclaimer. **JADRO HOTOVÉ 2026-11-06:** POPLACHY ·
+   Izrael (mirror `oref-alerts.github.io` čítaný ako dáta, polygóny amitfin MIT, obdobie posledný
+   deň / 7 d / 30 d / od 28. 2., 270 503 poplachov v 1 446 oblastiach, nikdy „živý alarm"),
+   karta Obete · Gaza / Západný breh / Libanon (Tech for Palestine v3, len čísla) a čip INTERNET ·
+   OONI (6 krajín, 7 d proti 30 d, CC BY-NC-SA vyčlenené). Nechané: UNOSAT Gaza CDA (statická
+   snímka z 10/2025 — pridá sa pri KARTE v etape 7), preset nočných svetiel, FIRMS (kľúč chýba),
+   IODA (bez odpovede).
 7. **KARTA, export, hlas** — 1–2 d. KARTA štýl pre Libanon/Gazu/Jemen (reliéf, plochy — ak
    treba OSM podklad, tak len pre tieto tri dejiská), kartičky dejísk pre FB (export z K5),
    denný sumár Blízkeho východu (rozšírenie `buildUkraineDigest`-vzoru), hlas `show_theatre`

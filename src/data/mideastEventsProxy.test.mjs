@@ -10,7 +10,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promises as fsp } from 'node:fs';
 
-import { GEOCONFIRMED_FIRST_DELAY_MS, GEOCONFIRMED_TICK_MS, UCDP_FIRST_DELAY_MS, UCDP_TICK_MS, AIRSPACE_FIRST_DELAY_MS, AIRSPACE_TICK_MS, GPS_FIRST_DELAY_MS, GPS_TICK_MS, UKMTO_FIRST_DELAY_MS, UKMTO_TICK_MS, CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, PORTWATCH_FIRST_DELAY_MS, PORTWATCH_TICK_MS, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
+import { ALERTS_FIRST_DELAY_MS, ALERTS_TICK_MS, HUMANITARIAN_TICK_MS, INTERNET_TICK_MS, GEOCONFIRMED_FIRST_DELAY_MS, GEOCONFIRMED_TICK_MS, UCDP_FIRST_DELAY_MS, UCDP_TICK_MS, AIRSPACE_FIRST_DELAY_MS, AIRSPACE_TICK_MS, GPS_FIRST_DELAY_MS, GPS_TICK_MS, UKMTO_FIRST_DELAY_MS, UKMTO_TICK_MS, CONTROL_FIRST_DELAY_MS, CONTROL_STAGGER_MS, CONTROL_TICK_MS, MIDEAST_EVENTS_MOUNT, PORTWATCH_FIRST_DELAY_MS, PORTWATCH_TICK_MS, acceptsGzip, controlJobName, mideastEventsProxy } from './mideastEventsProxy.js';
 import { MIDEAST_CONTROL_MODULE_IDS } from './wikiControl.js';
 import { controlFile } from '../../scripts/lib/mideastArchive.mjs';
 
@@ -141,7 +141,7 @@ test('validácia: bad_module so zoznamom modulov, bad_day, 405 pre iné metódy,
   assert.equal((await call(plugin, '/status', { method: 'DELETE' })).out.status, 405);
   const other = await call(plugin, '/?from=2026-09-24');
   assert.equal(other.out.status, 404, 'udalosti prídu v ďalších etapách — kým nie, poctivé 404');
-  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N', '/incidents?from&to[&theatre]', '/incidents/summary?from&to[&theatre]']);
+  assert.deepEqual(decode(other).routes, ['/status', '/control?module=<id>&at=YYYY-MM-DD', '/portwatch?keys=<k,…>&days=N', '/airspace', '/ukmto?days=N', '/gps?days=N', '/incidents?from&to[&theatre]', '/incidents/summary?from&to[&theatre]', '/alerts?from&to', '/alerts/areas', '/humanitarian', '/internet']);
   const server = mount(plugin);
   const res = fakeRes();
   await server.handler({ method: 'GET', url: 'http://[zle', headers: {}, socket: {} }, res);
@@ -161,8 +161,12 @@ test('časovače: štyri úlohy rozostúpené po minúte od 200 s, vypnutý arch
   assert.equal((await call(off, '/control?module=lebanon&at=2026-09-24')).out.status, 404, 'trasa funguje aj s vypnutým archivárom');
   const on = mideastEventsProxy({ root, env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   on._start('http://127.0.0.1:4173');
-  assert.equal(timers.length, 10, 'jedna úloha na modul + PortWatch (etapa 5a) + vzdušný priestor (5b) + UKMTO (5c) + rušenie GPS (5d) + GeoConfirmed a UCDP (etapa 4)');
-  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000, 560_000, 620_000, 680_000, 740_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz), PortWatch, EASA, UKMTO, zber GPS, GeoConfirmed a UCDP po nich');
+  assert.equal(timers.length, 13, 'jedna úloha na modul + PortWatch (etapa 5a) + vzdušný priestor (5b) + UKMTO (5c) + rušenie GPS (5d) + GeoConfirmed a UCDP (etapa 4) + poplachy, súčty a internet (etapa 6)');
+  assert.deepEqual(timers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000, 560_000, 620_000, 680_000, 740_000, 800_000, 860_000, 920_000], 'prvé spustenia rozostúpené o minútu (Wikipedia: jeden dopyt naraz), PortWatch, EASA, UKMTO, zber GPS, GeoConfirmed, UCDP, poplachy, súčty a OONI po nich');
+  assert.equal(ALERTS_FIRST_DELAY_MS, 800_000);
+  assert.equal(ALERTS_TICK_MS, 6 * 60 * 60_000, 'mirror poplachov raz za 6 h — nikdy „živý alarm"');
+  assert.equal(HUMANITARIAN_TICK_MS, 24 * 60 * 60_000);
+  assert.equal(INTERNET_TICK_MS, 24 * 60 * 60_000);
   assert.equal(GEOCONFIRMED_FIRST_DELAY_MS, 680_000);
   assert.equal(GEOCONFIRMED_TICK_MS, 6 * 60 * 60_000, 'udalosti GeoConfirmed raz za 6 h');
   assert.equal(UCDP_FIRST_DELAY_MS, 740_000);
@@ -182,11 +186,11 @@ test('časovače: štyri úlohy rozostúpené po minúte od 200 s, vypnutý arch
   const gpsOffTimers = [];
   const gpsOff = mideastEventsProxy({ root, env: { MIDEAST_GPS: 'off' }, fetchImpl: wikiFetch, now: () => NOW, setTimer: (fn, ms) => { gpsOffTimers.push(ms); return gpsOffTimers.length; }, clearTimer, log: () => {} });
   gpsOff._start('http://127.0.0.1:4173');
-  assert.deepEqual(gpsOffTimers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000, 560_000, 680_000, 740_000]);
+  assert.deepEqual(gpsOffTimers, [200_000, 260_000, 320_000, 380_000, 440_000, 500_000, 560_000, 680_000, 740_000, 800_000, 860_000, 920_000]);
   gpsOff._stop();
   assert.equal(on._state.base, 'http://127.0.0.1:4173');
   on._stop();
-  assert.ok(cleared.length >= 10, 'stop zruší všetky časovače');
+  assert.ok(cleared.length >= 13, 'stop zruší všetky časovače');
 });
 
 test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zatvorený server = žiadny zombie archivár); bez stopu sa preplánuje na 6 h; reštart nezdvojí', async () => {
@@ -199,7 +203,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const slowFetch = async (url) => { await gate; return wikiFetch(url); };
   const plugin = mideastEventsProxy({ root, env: {}, fetchImpl: slowFetch, now: () => NOW, setTimer, clearTimer, log: () => {} });
   plugin._start('http://127.0.0.1:4173');
-  assert.equal(armed.length, 10, '4 moduly + PortWatch + vzdušný priestor + UKMTO + GPS + GeoConfirmed + UCDP');
+  assert.equal(armed.length, 13, '4 moduly + PortWatch + vzdušný priestor + UKMTO + GPS + GeoConfirmed + UCDP + poplachy + súčty + OONI');
   assert.equal(armed[0].ms, CONTROL_FIRST_DELAY_MS);
   const inflight = armed[0].fn(); // časovač control:israel-palestine vystrelil, tik čaká na Wikipédiu
   await new Promise((r) => setImmediate(r));
@@ -207,7 +211,7 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   plugin._stop(); // server zavrel (reštart Vite) uprostred dopytu
   release();
   await inflight;
-  assert.equal(armed.length, 10, 'po stop() sa rozbehnutý tik NEpreplánuje');
+  assert.equal(armed.length, 13, 'po stop() sa rozbehnutý tik NEpreplánuje');
   assert.equal(plugin._state.running['control:israel-palestine'], false);
   assert.equal(plugin._state.last['control:israel-palestine'].result.status, 'updated', 'rozbehnutý tik poctivo dobehne a snímku uloží');
   // bez stopu: spätné volanie sa po tiku preplánuje presne na tik 6 h
@@ -215,9 +219,9 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   const live = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: wikiFetch, now: () => NOW, setTimer: (fn, ms) => { armed2.push({ fn, ms }); return armed2.length; }, clearTimer, log: () => {} });
   live._start('http://127.0.0.1:4173');
   await armed2[3].fn(); // control:lebanon
-  assert.equal(armed2.length, 11, 'jeden nový časovač');
-  assert.equal(armed2[10].ms, CONTROL_TICK_MS);
-  // reštart (stop + start) počas tiku: nová generácia si naplánuje svojich 10, starý tik nepridá ďalší
+  assert.equal(armed2.length, 14, 'jeden nový časovač');
+  assert.equal(armed2[13].ms, CONTROL_TICK_MS);
+  // reštart (stop + start) počas tiku: nová generácia si naplánuje svojich 13, starý tik nepridá ďalší
   const armed3 = [];
   let release3; const gate3 = new Promise((r) => { release3 = r; });
   const restart = mideastEventsProxy({ root: await tmpRoot(), env: {}, fetchImpl: async (url) => { await gate3; return wikiFetch(url); }, now: () => NOW, setTimer: (fn, ms) => { armed3.push({ fn, ms }); return armed3.length; }, clearTimer, log: () => {} });
@@ -226,10 +230,10 @@ test('stop počas rozbehnutého tiku: po await sa úloha znova nenaplánuje (zat
   await new Promise((r) => setImmediate(r));
   restart._stop();
   restart._start('http://127.0.0.1:4173');
-  assert.equal(armed3.length, 20, 'nový štart naplánoval svojich 10');
+  assert.equal(armed3.length, 26, 'nový štart naplánoval svojich 13');
   release3();
   await old;
-  assert.equal(armed3.length, 20, 'starý tik z predošlej generácie nič nepridal');
+  assert.equal(armed3.length, 26, 'starý tik z predošlej generácie nič nepridal');
 });
 
 test('gzip len pri výslovnom tokene s q > 0, Vary: Accept-Encoding na každej stlačiteľnej 200, nie na malých ani chybových', async () => {

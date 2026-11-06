@@ -13,7 +13,7 @@
 //   .gev-cache/mideast/events/ucdp/<YYYY-MM>.json          UCDP Candidate Events, región (CC BY 4.0)
 //
 // Usage:
-//   node scripts/build-mideast-events.mjs --all                       (= --control + --portwatch + --airspace + --ukmto + --geoconfirmed + --ucdp)
+//   node scripts/build-mideast-events.mjs --all                       (= --control + --portwatch + --airspace + --ukmto + --geoconfirmed + --ucdp + --alerts + --humanitarian + --internet)
 //   node scripts/build-mideast-events.mjs --control [--module <id>] [--force]
 //   node scripts/build-mideast-events.mjs --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N]
 //   node scripts/build-mideast-events.mjs --portwatch [--force]
@@ -22,6 +22,9 @@
 //   node scripts/build-mideast-events.mjs --geoconfirmed [--force]    (4 konflikty, pauza 2 s; prvý beh = od 28. 2.)
 //   node scripts/build-mideast-events.mjs --ucdp [--force]            (chýbajúce mesiace UCDP Candidate)
 //   node scripts/build-mideast-events.mjs --gps                       (jedno kolo zberu rušenia GPS z adsb.lol; nie je v --all)
+//   node scripts/build-mideast-events.mjs --alerts [--force]          (etapa 6: mirror poplachov HFC + polygóny oblastí)
+//   node scripts/build-mideast-events.mjs --humanitarian [--force]    (etapa 6: súčty Tech for Palestine)
+//   node scripts/build-mideast-events.mjs --internet [--force]        (etapa 6: OONI po krajinách, pauza 1,5 s)
 //
 // Etiketa Wikimedia: jeden dopyt naraz, pauza 1,2 s medzi dopytmi, popisný User-Agent
 // s kontaktom (scripts/lib/mideastArchive.mjs). Históriu (jeden dopyt na týždeň a
@@ -30,6 +33,7 @@
 import {
   MIDEAST_CONTROL_FIRST_DAY, MIDEAST_CONTROL_MODULE_IDS, controlBackfill, czibRefresh, firBoundariesRefresh, gpsCollect, isDay, portwatchRefresh,
   GEOCONFIRMED_PAUSE_MS, geoconfirmedRefresh, ucdpRefresh, ukmtoRefresh, wikiControlSnapshot,
+  alertAreasRefresh, alertsRefresh, humanitarianRefresh, internetRefresh,
 } from './lib/mideastArchive.mjs';
 import { GEOCONFIRMED_SLUGS } from '../src/data/mideastIncidents.js';
 import { PORTWATCH_KEYS } from '../src/data/portwatch.js';
@@ -43,9 +47,9 @@ const now = Date.now();
 const log = (m) => console.log(m);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PAUSE_MS = 1200;
-const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force] | --airspace [--force] | --ukmto [--force] | --geoconfirmed [--force] | --ucdp [--force] | --gps\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
+const usage = `usage: node scripts/build-mideast-events.mjs --all | --control [--module <id>] [--force] | --control-history [--module <id>] [--from YYYY-MM-DD] [--step 7] [--limit N] | --portwatch [--force] | --airspace [--force] | --ukmto [--force] | --geoconfirmed [--force] | --ucdp [--force] | --gps | --alerts [--force] | --humanitarian [--force] | --internet [--force]\n  moduly: ${MIDEAST_CONTROL_MODULE_IDS.join(', ')}\n  úžiny PortWatch: ${PORTWATCH_KEYS.join(', ')}`;
 
-if (!all && !has('--control') && !has('--control-history') && !has('--portwatch') && !has('--airspace') && !has('--ukmto') && !has('--geoconfirmed') && !has('--ucdp') && !has('--gps')) {
+if (!all && !has('--control') && !has('--control-history') && !has('--portwatch') && !has('--airspace') && !has('--ukmto') && !has('--geoconfirmed') && !has('--ucdp') && !has('--gps') && !has('--alerts') && !has('--humanitarian') && !has('--internet')) {
   console.log(usage);
   process.exit(2);
 }
@@ -122,6 +126,22 @@ if (all || has('--geoconfirmed')) {
 if (all || has('--ucdp')) {
   const r = await ucdpRefresh(root, { now, force: has('--force'), log, sleep });
   log(`UCDP Candidate: ${r.status} · mesiace ${r.months.join(', ') || '—'} · udalostí v regióne ${r.count}${r.missing ? ` · ${r.missing} ešte nevyšiel` : ''}${r.errors?.length ? ` — ${r.errors.join('; ')}` : ''}`);
+}
+
+// Etapa 6: poplachy HFC (mirror + polygóny), súčty Tech for Palestine, OONI po krajinách.
+if (all || has('--alerts')) {
+  const r = await alertsRefresh(root, { now, force: has('--force'), log });
+  log(`Poplachy HFC: ${r.status} · ${r.count} poplachov · dní ${r.days ?? '—'} · oblastí ${r.areas ?? '—'} · posledný deň ${r.day || '—'}${r.dataUpdated ? ` · mirror ${r.dataUpdated}` : ''}${r.error ? ' — ' + r.error : ''}`);
+  const a = await alertAreasRefresh(root, { now, force: has('--force'), log });
+  log(`Oblasti HFC: ${a.status} · ${a.count} polygónov${a.missing !== undefined ? ` · bez polygónu ${a.missing}` : ''}${a.error ? ' — ' + a.error : ''}`);
+}
+if (all || has('--humanitarian')) {
+  const r = await humanitarianRefresh(root, { now, force: has('--force'), log });
+  log(`Tech for Palestine: ${r.status} · Gaza zabití ${r.count} · hlásenie ${r.day || '—'}${r.error ? ' — ' + r.error : ''}`);
+}
+if (all || has('--internet')) {
+  const r = await internetRefresh(root, { now, force: has('--force'), log, sleep });
+  log(`OONI: ${r.status} · riadkov dní ${r.count} · posledný deň ${r.day || '—'}${r.errors?.length ? ` — ${r.errors.join('; ')}` : ''}`);
 }
 
 // Rušenie GPS (adsb.lol, ODbL): JEDNO kolo zberu — šesť kruhov s pauzou 5 s. Mapu robí až súvislý
