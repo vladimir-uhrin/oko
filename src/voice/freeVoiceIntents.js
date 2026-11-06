@@ -134,6 +134,12 @@ export function parseVoiceIntent(heard) {
   if (/\b(obycajn\w* mapa|osm|open street map|mapa ulic|plain map)\b/.test(t)) return { type: 'command', id: 'view:osm' };
   if (/\b(mapa frontu|karta|karta frontu)\b/.test(t)) return { type: 'command', id: 'view:karta' };
 
+  // Dejiská BLÍZKEHO VÝCHODU (etapa 7, 2026-11-06): „dejisko Gaza", „ukáž dejisko Jemen",
+  // „blízky východ" = prehľad regiónu; meno rieši resolveTheatre (nejednoznačné = nikam).
+  if (/^(ukaz |otvor )?(blizky vychod|stredny vychod|middle east)$/.test(t)) return { type: 'theatre', name: 'overview' };
+  const theatre = /^(?:ukaz |otvor )?dejisko (.+)$/.exec(t);
+  if (theatre) return { type: 'theatre', name: theatre[1].trim() };
+
   // Front na Ukrajine
   if (/^(front|ukaz front|cely front|mapa frontu)$/.test(t)) return { type: 'front', name: 'cely front' };
   const front = /\b([a-z\-]+(?: [a-z\-]+)?) smer\b|\bsmer ([a-z\-]+)/.exec(t);

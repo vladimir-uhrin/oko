@@ -29,6 +29,9 @@ import { SITUATION_REGIONS } from './situationNews.js';
  * @property {ReadonlyArray<string>} layerIds vrstvy správcu, ktoré dejisko zapne (id z `REGISTERED_LAYER_IDS`)
  * @property {ReadonlyArray<string>} control kľúče modulov Wikipédie pre etapu 2 (len dáta, zatiaľ bez správania)
  * @property {boolean} [overview] prehľad celého regiónu (práve jeden, prvý v katalógu)
+ * @property {boolean} [karta] dejisko sa otvára v kartografickom podklade KARTA (etapa 7, 2026-11-06): plochy
+ *   kontroly sídiel a polygóny poplachov čítajú lepšie na reliéfe než na fotoreáli; predchádzajúci podklad
+ *   sa pamätá a vráti pri odchode (rovnako ako smer frontu). Len pozemné dejiská so sídlami — nie more.
  */
 
 /** Námorná sada pre úžiny: lode (živé + oneskorené), radar SAR, trasy, prístavy. */
@@ -83,6 +86,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     newsRegion: 'lebanon',
     layerIds: Object.freeze([]),
     control: Object.freeze(['israel-palestine', 'lebanon']),
+    karta: true,
   }),
   Object.freeze({
     id: 'gaza',
@@ -92,6 +96,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     newsRegion: 'palestine',
     layerIds: Object.freeze([]),
     control: Object.freeze(['israel-palestine']),
+    karta: true,
   }),
   Object.freeze({
     id: 'israel',
@@ -112,6 +117,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     newsRegion: 'palestine',
     layerIds: Object.freeze([]),
     control: Object.freeze(['israel-palestine']),
+    karta: true,
   }),
   Object.freeze({
     id: 'red-sea',
@@ -130,6 +136,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     newsRegion: 'redsea',
     layerIds: Object.freeze([]),
     control: Object.freeze(['yemen']),
+    karta: true,
   }),
   Object.freeze({
     id: 'south-syria',
@@ -139,6 +146,7 @@ export const MIDEAST_THEATRES = Object.freeze([
     newsRegion: 'syria',
     layerIds: Object.freeze([]),
     control: Object.freeze(['syria']),
+    karta: true,
   }),
   Object.freeze({
     id: 'iraq',
@@ -190,6 +198,8 @@ export function validateMideastTheatres(theatres = MIDEAST_THEATRES) {
       overviews += 1;
       if (index !== 0) throw new Error(`Theatre overview must be first: ${scene.id}`);
     }
+    if (scene.karta !== undefined && typeof scene.karta !== 'boolean') throw new Error(`Theatre karta not boolean: ${scene.id}`);
+    if (scene.karta && scene.overview) throw new Error(`Theatre overview cannot force KARTA: ${scene.id}`);
   });
   if (overviews !== 1) throw new Error(`Theatre catalog needs exactly one overview, got ${overviews}`);
   return true;

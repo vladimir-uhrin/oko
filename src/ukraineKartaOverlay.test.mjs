@@ -171,3 +171,18 @@ test('A2: vzorka ruskej kontroly na KARTE sa stlmí spolu s mapou', async () => 
   // Špendlíky sídiel nie sú zo snímky Wikipédie — nestlmujú sa.
   assert.equal(staleItems.find((i) => i.key === 'pin-ua').dim, undefined);
 });
+
+test('pozastavenie pre dejisko Blízkeho východu (etapa 7, 2026-11-06): v KARTE nad Gazou rám Ukrajiny nevisí; uvoľnenie ho vráti', () => {
+  const doc = fakeDocument();
+  const overlay = createUkraineKartaOverlay({ documentRef: doc, translate: (k) => k, control: fakeLayer(false), deepstate: fakeLayer(true), report: fakeLayer(true), getViewRect: () => [34, 31, 35, 32] });
+  overlay.setStack({ kind: 'hillshade' });
+  assert.equal(overlay.isVisible(), true);
+  overlay.setSuspended(true);
+  assert.equal(overlay.isVisible(), false, 'dejisko Blízkeho východu v KARTE');
+  assert.equal(doc.body.classList.contains('oko-karta-frame'), false, 'ani trieda rámu na <body>');
+  overlay.setRevealed(false); overlay.setRevealed(true);
+  assert.equal(overlay.isVisible(), false, 'brána pozastavenie nezruší');
+  overlay.setSuspended(false);
+  assert.equal(overlay.isVisible(), true, 'smer frontu rám vráti');
+  overlay.destroy();
+});

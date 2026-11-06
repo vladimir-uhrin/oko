@@ -290,6 +290,7 @@ export function createUkraineKartaOverlay({
   let _scene = null;
   let _isKarta = false;
   let _revealed = true;
+  let _suspended = false;
   let _clean = false;
   let _destroyed = false;
 
@@ -399,7 +400,10 @@ export function createUkraineKartaOverlay({
   }
 
   function applyVisibility() {
-    const visible = _isKarta && _revealed;
+    // Rám je UKRAJINSKÝ (mapka Ukrajiny, legenda strán): pri dejisku BLÍZKEHO VÝCHODU v KARTE
+    // (etapa 7, 2026-11-06 — Gaza, Libanon…) ho conflictScenes pozastaví, inak by nad Gazou
+    // visela mapka Ukrajiny s „ukrajinskou stranou" (nález zo snímky).
+    const visible = _isKarta && _revealed && !_suspended;
     root.classList.toggle('is-visible', visible);
     // Rám karty na <body>: style.css podľa neho schová súradnicový roh HUD-u
     // (jeho miesto vľavo dole má legenda) — 2026-09-26, upratanie prekryvov.
@@ -410,6 +414,8 @@ export function createUkraineKartaOverlay({
   function setStack(stack) { _isKarta = stack?.kind === 'hillshade'; if (!_isKarta && _clean) setClean(false); applyVisibility(); }
   function setScene(scene) { _scene = scene || null; applyVisibility(); }
   function setRevealed(on) { _revealed = Boolean(on); applyVisibility(); }
+  /** Pozastavenie pre cudzí región v KARTE (dejisko Blízkeho východu): rám sa neukáže, kým sa neuvoľní. */
+  function setSuspended(on) { _suspended = Boolean(on); applyVisibility(); }
   function setClean(on) {
     _clean = Boolean(on);
     try { doc.body.classList.toggle('oko-karta-clean', _clean); } catch { /* */ }
@@ -436,7 +442,7 @@ export function createUkraineKartaOverlay({
 
   return {
     id: KARTA_OVERLAY_ID,
-    setStack, setScene, setRevealed, update,
+    setStack, setScene, setRevealed, setSuspended, update,
     setClean, isClean: () => _clean, isVisible: () => root.classList.contains('is-visible'),
     /** Ostrovy rámu — main.js ich hlási pruhom panelov ako prekážky (ui.js observe*StackObstacle). */
     elements: { title: titleIsland, legend: legendIsland, inset: insetIsland, tools },

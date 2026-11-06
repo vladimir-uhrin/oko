@@ -19,6 +19,7 @@ import { cachedGroundFloor, warmGroundFloor } from '../data/groundFloor.js';
 import { isPickedWorldPosition } from '../data/scenePick.js';
 import { isSoftwareRenderActive } from '../softwareRenderer.js';
 import { frontSceneChoices, frontSceneLabel, resolveFrontScene } from '../ukraineFrontScenes.js';
+import { resolveTheatre, theatreChoices, theatreLabel } from '../data/mideastTheatres.js';
 import { resolveRegionRingForQuery } from '../annotations/annotationResolver.js';
 import { normalizeRadioCountryInput } from '../data/radioCountry.js';
 import { TR3B_CLASS } from '../data/tr3bRegistry.js';
@@ -324,6 +325,8 @@ export function createGevActionRunner({
   // Presety smerov frontu vznikajú až neskoro v boote main.js (po paneli UKRAJINA),
   // kým hlas sa inicializuje skôr — preto lenivý čítač, nie hodnota.
   getFrontScenes = () => globalThis.__godsEyeView?.frontScenes || null,
+  // Dejiská BLÍZKEHO VÝCHODU (etapa 7, 2026-11-06) — rovnako lenivo (vznikajú v conflictScenes.js).
+  getTheatres = () => globalThis.__godsEyeView?.mideastTheatres || null,
 }) {
   installViewTargetPrewarm(viewer);
   initCameraVerbs(viewer, getViewTargetCartesian);
@@ -935,6 +938,10 @@ export function createGevActionRunner({
       return showFront(getFrontScenes(), args);
     }
 
+    if (name === 'show_theatre') {
+      return showTheatre(getTheatres(), args);
+    }
+
     if (name === 'control_cctv') {
       return controlCctv(dataManager, args, styleManager);
     }
@@ -1158,6 +1165,36 @@ function showFront(frontScenes, args = {}) {
     return { ok: true, action: 'show_front', frontId: scene.id, front: frontSceneLabel(scene) };
   }
   throw new Error(`Unknown front action: ${args.action || 'missing'}`);
+}
+
+/**
+ * Hlasové dejiská BLÍZKEHO VÝCHODU (etapa 7, 2026-11-06) — rovnaký tvar ako `show_front`:
+ * `list` vráti dejiská, `show` nájde dejisko podľa id, anglického alebo preloženého mena
+ * (`resolveTheatre`: presná zhoda pred čiastočnou, „Jemen" je celá krajina, nie Báb al-Mandab)
+ * a spustí jeho preset (vrstvy, kontrola sídiel, rámovanie posledné). **Nejednoznačné meno
+ * nikam neodletí** a vráti zoznam — ako pri fronte.
+ */
+function showTheatre(theatres, args = {}) {
+  if (!theatres || typeof theatres.apply !== 'function') {
+    return { ok: false, action: 'show_theatre', error: 'Middle East theatre presets unavailable' };
+  }
+  const action = String(args.action || '').toLowerCase();
+  const choices = theatreChoices();
+  if (action === 'list') {
+    return { ok: true, action: 'show_theatre', theatres: choices };
+  }
+  if (action === 'show') {
+    const query = String(args.theatreId || '').trim();
+    if (!query) return { ok: false, action: 'show_theatre', error: 'Which theatre?', theatres: choices };
+    const scene = resolveTheatre(query);
+    if (!scene) {
+      return { ok: false, action: 'show_theatre', error: `No Middle East theatre matched "${query}"`, theatres: choices };
+    }
+    // Rámovanie je let — nečakáme naň, aby sa realtime slučka nezasekla.
+    void Promise.resolve(theatres.apply(scene.id)).catch(() => {});
+    return { ok: true, action: 'show_theatre', theatreId: scene.id, theatre: theatreLabel(scene) };
+  }
+  throw new Error(`Unknown theatre action: ${args.action || 'missing'}`);
 }
 
 /** Voice CCTV control over the cctv layer module's public surface. */

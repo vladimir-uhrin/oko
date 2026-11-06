@@ -3325,3 +3325,30 @@ test('hlas: analyst_query pri vypnutých lodiach nehlási „0 lodí" ako fakt �
   assert.equal(flightsOnly.coverage.disabledLayers, undefined, 'predvolené [flights] je zapnuté');
   assert.doesNotMatch(flightsOnly.coverage.note, /OFF/);
 });
+
+test('show_theatre (BLÍZKY VÝCHOD etapa 7): zoznam dejísk, rámovanie podľa id, EN aj SK mena; nejednoznačné nikam', async () => {
+  const applied = [];
+  const runner = createGevActionRunner({
+    ...createVoiceNavigationHarness(), dataManager: { layers: new Map() },
+    getTheatres: () => ({ apply: (id) => { applied.push(id); return Promise.resolve({ ok: true, id }); } }),
+  });
+  const list = await runner('show_theatre', { action: 'list' });
+  assert.equal(list.ok, true);
+  assert.equal(list.theatres.length, 12, 'dvanásť dejísk z plánu');
+  assert.ok(list.theatres.every((x) => x.id && x.label));
+  const gaza = await runner('show_theatre', { action: 'show', theatreId: 'gaza' });
+  assert.equal(gaza.ok, true);
+  assert.equal(gaza.theatreId, 'gaza');
+  await runner('show_theatre', { action: 'show', theatreId: 'South Lebanon' });
+  await runner('show_theatre', { action: 'show', theatreId: 'Yemen' });
+  assert.deepEqual(applied, ['gaza', 'south-lebanon', 'yemen'], '„Yemen" je celá krajina, nie Báb al-Mandab (presná zhoda pred predponou)');
+  for (const theatreId of ['', 'xyz', 'juh']) {
+    const out = await runner('show_theatre', { action: 'show', theatreId });
+    assert.equal(out.ok, false, theatreId);
+    assert.ok(out.theatres.length > 0, 'vráti, z čoho sa dá vybrať');
+  }
+  assert.deepEqual(applied, ['gaza', 'south-lebanon', 'yemen'], 'kamera sa pri nejednoznačnom mene nepohla');
+  const none = createGevActionRunner({ ...createVoiceNavigationHarness(), dataManager: { layers: new Map() }, getTheatres: () => null });
+  assert.equal((await none('show_theatre', { action: 'list' })).ok, false, 'bez presetov poctivá chyba');
+  await assert.rejects(runner('show_theatre', { action: 'fly' }), /Unknown theatre action/);
+});

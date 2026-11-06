@@ -23,6 +23,9 @@ test('vety → zámery: miesto s diakritikou, vrstvy, sledovanie, kamera, rádio
     ['hlasitosť 30', { type: 'radio', action: 'volume', volumePct: 30 }],
     ['opusti kokpit', { type: 'cockpit', action: 'exit' }],
     ['Pokrovský smer', { type: 'front', name: 'pokrovsky' }],
+    ['dejisko Gaza', { type: 'theatre', name: 'gaza' }],
+    ['ukáž dejisko Južný Libanon', { type: 'theatre', name: 'juzny libanon' }],
+    ['Blízky východ', { type: 'theatre', name: 'overview' }],
     ['obyčajná mapa', { type: 'command', id: 'view:osm' }],
     ['stop', { type: 'stop-voice' }],
     ['Hormuz', { type: 'go', query: 'Hormuz' }],
@@ -176,4 +179,18 @@ test('sledovanie s druhom (2026-10-16): „sleduj loď X" / „track ship X" = l
   assert.deepEqual(parseVoiceIntent('sleduj ISS'), { type: 'track', query: 'ISS' });
   assert.deepEqual(parseVoiceIntent('sleduj lietadlo OKVOK'), { type: 'track', query: 'OKVOK' });
   assert.deepEqual(parseVoiceIntent('track plane UAL428'), { type: 'track', query: 'UAL428' });
+});
+
+test('dejisko (etapa 7): „dejisko Gaza" spustí show_theatre a odpoveď menuje dejisko; nenájdené poctivo', async () => {
+  const calls = [];
+  const v = createFreeVoice({
+    ui: fakeUi(), translate: (k, p) => (p ? `${k}:${Object.values(p).join('|')}` : k),
+    run: async (name, args) => { calls.push([name, args]); return args.theatreId === 'gaza' ? { ok: true, theatre: 'Gaza' } : { ok: false }; },
+    dataManager: { setEnabled() {} }, SpeechRecognitionImpl: null,
+    synth: { cancel() {}, getVoices: () => [], speak() {} }, Utterance: function Utterance(text) { this.text = text; },
+  });
+  v.setResolvers({});
+  assert.equal(await v.handleText('dejisko Gaza'), 'voice.free.theatre:Gaza');
+  assert.deepEqual(calls.at(-1), ['show_theatre', { action: 'show', theatreId: 'gaza' }]);
+  assert.equal(await v.handleText('dejisko Atlantída'), 'voice.free.not-found:atlantida');
 });

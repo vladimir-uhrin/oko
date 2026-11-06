@@ -272,3 +272,20 @@ test('čipy spravodaja: celý región, Záliv a každý región dejísk práve r
   }
   assert.ok(Object.isFrozen(MIDEAST_BULLETIN_REGIONS));
 });
+
+test('KARTA (etapa 7, 2026-11-06): pozemné dejiská so sídlami sa otvárajú v KARTE, more a prehľad nie; validátor stráži tvar; zapojenie v conflictScenes.js', async () => {
+  const { readFileSync } = await import('node:fs');
+  assert.deepEqual(MIDEAST_THEATRES.filter((s) => s.karta).map((s) => s.id), ['south-lebanon', 'gaza', 'west-bank', 'yemen', 'south-syria']);
+  for (const s of MIDEAST_THEATRES.filter((x) => x.karta)) assert.ok(s.control.length > 0, `${s.id}: KARTA len s kontrolou sídiel`);
+  for (const id of ['overview', 'hormuz', 'red-sea', 'iran', 'israel']) assert.ok(!theatreById(id).karta, id);
+  const base = (over) => [{ ...MIDEAST_THEATRES[0] }, { ...theatreById('gaza'), ...over }];
+  assert.throws(() => validateMideastTheatres(base({ karta: 'yes' })), /karta not boolean/);
+  assert.throws(() => validateMideastTheatres([{ ...MIDEAST_THEATRES[0], karta: true }]), /overview cannot force KARTA/);
+  assert.equal(validateMideastTheatres(base({ karta: false })), true);
+  const scenes = readFileSync(new URL('../conflictScenes.js', import.meta.url), 'utf8');
+  assert.match(scenes, /if \(scene\?\.karta\) \{\n\s+if \(mapStackController\.getActiveId\(\) !== 'karta'\) \{\n\s+autoKartaPrev = mapStackController\.getActiveId\(\);/, 'dejisko KARTY si pamätá predchádzajúci podklad');
+  assert.match(scenes, /\} else \{\n\s+restoreAutoKarta\(\); \/\/ odchod z KARTY frontu alebo dejiska/, 'dejisko bez KARTY podklad vráti');
+  assert.match(scenes, /kartaOverlay\?\.setSuspended\?\.\(Boolean\(scene\)\);/, 'dejisko pozastaví ukrajinský rám KARTY');
+  assert.equal((scenes.match(/kartaOverlay\?\.setSuspended\?\.\(false\);/g) || []).length, 3, 'front, úžina a všeobecný rám ho uvoľnia');
+  assert.match(scenes, /buildMideastDigest\(\{ incidents: value\(meInc\), alerts: value\(meAl\), humanitarian: value\(meHum\), internet: value\(meNet\)/, 'denný sumár Blízkeho východu v prehľade konfliktov');
+});

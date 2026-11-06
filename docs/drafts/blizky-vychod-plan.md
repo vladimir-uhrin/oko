@@ -273,7 +273,10 @@ KLIENT
 7. **KARTA, export, hlas** — 1–2 d. KARTA štýl pre Libanon/Gazu/Jemen (reliéf, plochy — ak
    treba OSM podklad, tak len pre tieto tri dejiská), kartičky dejísk pre FB (export z K5),
    denný sumár Blízkeho východu (rozšírenie `buildUkraineDigest`-vzoru), hlas `show_theatre`
-   (resolver ako `show_front`, nejednoznačné = nikam).
+   (resolver ako `show_front`, nejednoznačné = nikam). **HOTOVÉ 2026-11-06 bez kartičiek pre FB**
+   (vlastník: „fb nerob"): `karta: true` pre južný Libanon, Gazu, Západný breh, Jemen a južnú Sýriu
+   (podklad KARTA s návratom ako pri fronte), `buildMideastDigest` v prehľade konfliktov (udalosti,
+   poplachy, súčty, internet), hlas `show_theatre` + voľné zámery „dejisko X" / „Blízky východ".
 
 **Odporúčané poradie:** 0 → 1 → 2 → 5a (PortWatch, rýchla výhra) → 4 → 3 → 5 → 6 → 7.
 Kontrola z Wikipédie ide skoro, lebo parser už existuje a moduly Jemenu a Gazy/Libanonu sú

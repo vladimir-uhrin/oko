@@ -264,6 +264,10 @@ export function createFreeVoice({ ui, run, dataManager = null, translate = (k) =
         const result = await runTool('show_front', { action: 'show', frontId: intent.name });
         reply = result.ok === false ? translate('voice.free.not-found', { q: intent.name }) : translate('voice.free.front'); break;
       }
+      case 'theatre': {
+        const result = await runTool('show_theatre', { action: 'show', theatreId: intent.name });
+        reply = result.ok === false ? translate('voice.free.not-found', { q: intent.name }) : translate('voice.free.theatre', { name: result.theatre || intent.name }); break;
+      }
       case 'layer': {
         let layerId = intent.layerId;
         let label = intent.name;

@@ -37,7 +37,11 @@ import { createUkraineKartaOverlay } from './ukraineKartaOverlay.js';
 import { CARD_RATIO_IDS, captureConflictCard, conflictCardFilename, conflictCardModel, defaultConflictFacts, downloadCardSnapshot } from './conflictExport.js';
 import { conflictById, conflictTitle, listConflicts } from './data/conflictsCatalog.js';
 import { createConflictsPanel } from './conflictsPanel.js';
-import { buildConflictDigest } from './conflictSummary.js';
+import { buildConflictDigest, buildMideastDigest } from './conflictSummary.js';
+import { fetchMideastIncidentSummary, incidentPeriodRange } from './data/mideastIncidents.js';
+import { alertPeriodRange, fetchMideastAlerts } from './data/mideastAlerts.js';
+import { fetchMideastHumanitarian } from './data/mideastHumanitarian.js';
+import { fetchMideastInternet } from './data/mideastInternet.js';
 import { fetchUkraineReport } from './data/ukraineReport.js';
 import { buildOilModel, fetchOilPrices } from './data/oilPrices.js';
 import { buildSituationModel, fetchSituationNews } from './data/situationNews.js';
@@ -469,6 +473,7 @@ export function initConflictScenes(deps) {
       try { await runMideastTheatre(conflict.sceneId); } catch { /* */ }
     } else {
       activeChokepoint = null; activeFrontScene = null; activeTheatre = null;
+      kartaOverlay?.setSuspended?.(false);
       mideastPanel?.setActiveTheatre?.(null);
       void mideastControl.setTheatre(null);
       void ukmtoIncidents?.setActive(false);
@@ -541,11 +546,22 @@ export function initConflictScenes(deps) {
         let today;
         try { today = new Intl.DateTimeFormat(lang === 'en' ? 'en-GB' : 'sk-SK', { day: 'numeric', month: 'numeric', year: 'numeric' }).format(new Date()); }
         catch { today = new Date().toISOString().slice(0, 10); }
-        const [rep, oil, gulf] = await Promise.allSettled([fetchUkraineReport(), fetchOilPrices(), fetchSituationNews('gulf')]);
+        // Etapa 7 (2026-11-06): denný sumár Blízkeho východu z archívu modulu — udalosti za 7 dní (celý
+        // región), poplachy za 30 dní (posledný deň s poplachom), súčty obetí, internet. Každý zdroj zvlášť,
+        // výpadok jedného riadok len vynechá.
+        const now = Date.now();
+        const inc = incidentPeriodRange('7d', now);
+        const al = alertPeriodRange('30d', now);
+        const [rep, oil, gulf, meInc, meAl, meHum, meNet] = await Promise.allSettled([
+          fetchUkraineReport(), fetchOilPrices(), fetchSituationNews('gulf'),
+          fetchMideastIncidentSummary({ from: inc.from, to: inc.to }), fetchMideastAlerts({ from: al.from, to: al.to }), fetchMideastHumanitarian(), fetchMideastInternet(),
+        ]);
         const report = rep.status === 'fulfilled' ? rep.value : null;
         const oilModel = oil.status === 'fulfilled' ? buildOilModel(oil.value, { lang, translate: t }) : null;
         const gulfCount = gulf.status === 'fulfilled' ? buildSituationModel(gulf.value, { translate: t, limit: 200 }).count : null;
-        return buildConflictDigest({ report, oilModel, gulfCount, translate: t, dateText: report?.reportedAtText || today }).text;
+        const value = (r) => (r.status === 'fulfilled' ? r.value : null);
+        const mideast = buildMideastDigest({ incidents: value(meInc), alerts: value(meAl), humanitarian: value(meHum), internet: value(meNet), translate: t, nowMs: now, lang });
+        return buildConflictDigest({ report, oilModel, gulfCount, mideast, translate: t, dateText: report?.reportedAtText || today }).text;
       } catch (error) { console.warn('[conflict] digest failed:', error?.message || error); return null; }
     },
   });
@@ -643,6 +659,7 @@ export function initConflictScenes(deps) {
     void mideastAlerts?.setActive(false); void mideastHumanitarian?.setActive(null); void mideastInternet?.setActive(null);
     portwatchCard?.setActive?.(null);
     kartaOverlay?.setScene(scene || null);
+    kartaOverlay?.setSuspended?.(false); // smer frontu = rám KARTY Ukrajiny patrí sem
     ukrainePanel?.setActiveScene(scene?.id || null);
     ukraineTimeline.setActiveScene(scene?.id || null);
     if (scene) {
@@ -726,6 +743,7 @@ export function initConflictScenes(deps) {
     activeChokepoint = scene || null;
     activeFrontScene = null;
     activeTheatre = null;
+    kartaOverlay?.setSuspended?.(false);
     mideastPanel?.setActiveTheatre?.(null);
     void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
     // Scéna úžiny s údajmi PortWatch (hormuz, bab-el-mandeb, suez) zvýrazní svoj riadok karty.
@@ -797,13 +815,27 @@ export function initConflictScenes(deps) {
     },
   };
   const runMideastTheatre = (id) => {
-    restoreAutoKarta(); // odchod z KARTY frontu, rovnako ako pri úžinách
     const scene = theatreById(id);
+    // Etapa 7 (2026-11-06): pozemné dejiská so sídlami (`scene.karta` — južný Libanon, Gaza, Západný breh,
+    // Jemen, južná Sýria) sa otvárajú v KARTE ako smer frontu: plochy kontroly sídiel a polygóny poplachov
+    // čítajú na reliéfe; predchádzajúci podklad sa pamätá a vráti pri odchode (iné dejisko bez KARTY, úžina,
+    // front, všeobecný rám). Medzi dvoma dejiskami KARTY sa podklad neprepína tam a späť.
+    if (scene?.karta) {
+      if (mapStackController.getActiveId() !== 'karta') {
+        autoKartaPrev = mapStackController.getActiveId();
+        try { void Promise.resolve(styleManager._setMapStack('karta')).catch(() => {}); } catch { /* */ }
+      }
+    } else {
+      restoreAutoKarta(); // odchod z KARTY frontu alebo dejiska, rovnako ako pri úžinách
+    }
     if (scene) trackEvent('scene_open', { scene_type: 'mideast', scene_id: String(id) });
     activeTheatre = scene || null;
     activeFrontScene = null;
     activeChokepoint = null;
     kartaOverlay?.setScene?.(null);
+    // Rám KARTY je ukrajinský (mapka Ukrajiny, legenda strán) — pri dejisku Blízkeho východu v KARTE
+    // sa pozastaví (etapa 7, nález zo snímky: nad Gazou visela mapka Ukrajiny).
+    kartaOverlay?.setSuspended?.(Boolean(scene));
     ukrainePanel?.setActiveScene?.(null);
     ukraineTimeline.setActiveScene(null);
     mideastPanel?.setActiveTheatre?.(scene?.id || null);
