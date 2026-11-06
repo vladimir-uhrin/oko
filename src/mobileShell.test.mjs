@@ -427,3 +427,41 @@ test('spodok telefónu 2026-11-06: popisky podľa obsahu, dok bez POLOHA/ŠTÝL,
   assert.deepEqual([...search.panelIds], ['location-bar']);
   assert.equal(search.focus, 'location-search');
 });
+
+test('VOJNA pri dejisku Blízkeho východu (2026-11-06): výsuv rozbalí panel BLÍZKY VÝCHOD, nie Ukrajinu; front a bez scény = Ukrajina', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { doc, byId, leftStack } = buildDom();
+  // kostra testu má z KONFLIKTOV len scene-panel — doplniť panely Ukrajiny a Blízkeho východu
+  for (const id of ['ukraine-panel', 'mideast-panel']) {
+    const node = makeNode('div', { id, className: 'panel-collapsible collapsed' });
+    leftStack.appendChild(node);
+    byId.set(id, node);
+  }
+  const win = makeWindow({ width: 375, height: 812, coarse: true });
+  const shell = createMobileShell({ document: doc, window: win, styleManager: makeStyleManager(doc) });
+  shell.sync();
+  doc.body.dataset.okoActiveConflict = 'mideast';
+  assert.equal(shell.open('conflicts'), true);
+  assert.equal(byId.get('mideast-panel').classList.contains('collapsed'), false, 'dejisko = panel Blízkeho východu');
+  assert.equal(byId.get('ukraine-panel').classList.contains('collapsed'), true);
+  shell.close();
+  doc.body.dataset.okoActiveConflict = 'ukraine';
+  shell.open('conflicts');
+  assert.equal(byId.get('ukraine-panel').classList.contains('collapsed'), false);
+  assert.equal(byId.get('mideast-panel').classList.contains('collapsed'), true);
+  shell.close();
+  doc.body.dataset.okoActiveConflict = '';
+  shell.open('conflicts');
+  assert.equal(byId.get('ukraine-panel').classList.contains('collapsed'), false, 'bez scény predvolene Ukrajina');
+  shell.close();
+  doc.body.dataset.okoActiveConflict = 'mideast';
+  shell.open('conflicts', { expand: 'scene-panel' });
+  assert.equal(byId.get('scene-panel').classList.contains('collapsed'), false, 'výslovný expand má prednosť');
+  shell.close();
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.oko-mobile \.mideast-dirs \{ display: grid; grid-template-columns: 1fr 1fr;/, 'dejiská v telefóne ako dlaždice v dvoch stĺpcoch');
+  assert.match(css, /body\.oko-mobile \.mideast-dir \{ min-height: 36px;/, 'dlaždica pohodlná na prst');
+  const scenes = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
+  assert.match(scenes, /document\.body\.dataset\.okoActiveConflict = activeTheatre \? 'mideast' : \(activeFrontScene \? 'ukraine' : ''\);/);
+  assert.match(scenes, /horizontalOrigin: Cesium\.HorizontalOrigin\.CENTER,\n\s+verticalOrigin: Cesium\.VerticalOrigin\.TOP,/, 'štítok pinu pod bodom — nie za okrajom ani pod kartou správ');
+});

@@ -12280,6 +12280,15 @@ body.recording-mode .state-strip {
 .mideast-dir:hover, .mideast-dir:focus-visible { border-color: var(--glass-border-hover); background: rgba(255, 255, 255, 0.06); color: var(--text-primary); outline: none; }
 .mideast-dir.is-overview { color: var(--text-primary); border-style: dashed; }
 .mideast-dir.is-active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+/*
+ * Telefón (2026-11-06, vlastník „oprav aj UI … aby to bolo prívetivé"): 12 dejísk pod sebou zaberalo celú
+ * výšku výsuvu a dáta aktívneho dejiska (čipy, legendy) boli až pod ním. Vo výsuve sú dejiská dlaždice
+ * v dvoch stĺpcoch s prstom pohodlnou výškou (≥ 36 px), prehľad regiónu cez celú šírku.
+ */
+body.oko-mobile .mideast-dirs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+body.oko-mobile .mideast-dir { min-height: 36px; padding: 6px 8px; font-size: 10px; line-height: 1.25; }
+body.oko-mobile .mideast-dir.is-overview { grid-column: 1 / -1; }
+body.oko-mobile .mideast-chips .mideast-chip { min-height: 32px; }
 .mideast-dir-name { flex: 1 1 auto; min-width: 0; }
 .mideast-note {
   margin: 0;

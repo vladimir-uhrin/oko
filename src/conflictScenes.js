@@ -147,6 +147,8 @@ export function initConflictScenes(deps) {
   // `chokepoint.<id>.name`, nenašiel a ukázal EN meno namiesto prekladu.
   const setScenePin = (scene, labelText = scene ? chokepointSceneLabel(scene) : '') => {
     scenePinDs.entities.removeAll();
+    // Karty správ sa pinu a jeho štítku vyhnú (2026-11-06: na telefóne ich karta „Izrael (približne)" zakryla).
+    incidentCards.setAvoid?.(scene?.center ? [{ lon: scene.center.lon, lat: scene.center.lat }] : []);
     if (!scene?.center) return;
     scenePinDs.entities.add({
       position: Cesium.Cartesian3.fromDegrees(scene.center.lon, scene.center.lat),
@@ -163,8 +165,12 @@ export function initConflictScenes(deps) {
         fillColor: Cesium.Color.fromCssColorString('#ffb547'),
         showBackground: true,
         backgroundColor: Cesium.Color.fromCssColorString('#0b1622').withAlpha(0.82),
-        pixelOffset: new Cesium.Cartesian2(12, 0),
-        horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+        // Nad bodom a na stred (2026-11-06, telefón 375 px): štítok vpravo od bodu pretekal za okraj
+        // obrazovky („Izrael — poplachy a zásah…"); nad bodom sa zmestí aj dlhé meno dejiska.
+        // …a pod bodom, lebo karty správ sa kladú NAD svoj bod a štítok nad pinom zakrývali.
+        pixelOffset: new Cesium.Cartesian2(0, 12),
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        verticalOrigin: Cesium.VerticalOrigin.TOP,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
@@ -184,7 +190,12 @@ export function initConflictScenes(deps) {
   // `body.oko-map-focus`); pri pohľade na planétu sa všetko vráti.
   const setMapFocus = (on) => { try { document.body.classList.toggle('oko-map-focus', Boolean(on)); } catch { /* */ } };
   // Pri každej zmene scény (aj keď brána neprepne — napr. úžina → situácia „Perzský záliv").
-  const syncMapFocus = () => setMapFocus(revealGate.isRevealed() && Boolean(activeFrontScene || activeChokepoint || activeTheatre));
+  const syncMapFocus = () => {
+    setMapFocus(revealGate.isRevealed() && Boolean(activeFrontScene || activeChokepoint || activeTheatre));
+    // Aktívny konflikt pre mobilný výsuv VOJNA (mobileShell.js expandByConflict): pri dejisku Blízkeho
+    // východu sa otvorí jeho panel, nie Ukrajina (2026-11-06).
+    try { document.body.dataset.okoActiveConflict = activeTheatre ? 'mideast' : (activeFrontScene ? 'ukraine' : ''); } catch { /* */ }
+  };
   const revealGate = createSceneRevealGate({
     viewer,
     onChange: (visible) => {
@@ -839,7 +850,8 @@ export function initConflictScenes(deps) {
     kartaOverlay?.setSuspended?.(Boolean(scene));
     // Karty správ pri dejisku kompaktné (najviac 3, bez náhľadu) — polygóny poplachov a plochy kontroly
     // sídiel musia ostať čitateľné (2026-11-06); úžiny ich vracajú na plný režim.
-    incidentCards.setMode?.(scene ? 'compact' : 'full');
+    const onPhone = (() => { try { return document.body.classList.contains('oko-mobile'); } catch { return false; } })();
+    incidentCards.setMode?.(scene ? (onPhone ? 'minimal' : 'compact') : 'full');
     ukrainePanel?.setActiveScene?.(null);
     ukraineTimeline.setActiveScene(null);
     mideastPanel?.setActiveTheatre?.(scene?.id || null);

@@ -53,7 +53,8 @@ test('režim mapy sa zosúladí pri každej zmene scény (aj bez preklopenia br�
   // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
   const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
   // 2026-09-26: tretia rodina scén (dejiská BLÍZKEHO VÝCHODU) rozšírila výraz o activeTheatre.
-  assert.match(main, /const syncMapFocus = \(\) => setMapFocus\(revealGate\.isRevealed\(\) && Boolean\(activeFrontScene \|\| activeChokepoint \|\| activeTheatre\)\);/);
+  // 2026-11-06: telo funkcie nesie aj aktívny konflikt pre mobilný výsuv VOJNA (body.dataset.okoActiveConflict).
+  assert.match(main, /const syncMapFocus = \(\) => \{\n\s+setMapFocus\(revealGate\.isRevealed\(\) && Boolean\(activeFrontScene \|\| activeChokepoint \|\| activeTheatre\)\);/);
   assert.ok((main.match(/syncMapFocus\(\);/g) || []).length >= 3, 'front, úžina a situácia bez scény');
 });
 

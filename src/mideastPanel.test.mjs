@@ -821,7 +821,7 @@ test('riadok čerstvosti v paneli: skrytý bez dejiska, po zmene vrstvy sa napln
   panel.destroy();
   for (const k of ['mideast.fresh.title', 'mideast.fresh.stale', ...['incidents', 'alerts', 'ukmto', 'control'].flatMap((id) => [`mideast.fresh.${id}`, `mideast.fresh.${id}.hint`])]) assert.ok(EN_STRINGS[k] && SK_STRINGS[k], k);
   const scenes = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
-  assert.match(scenes, /incidentCards\.setMode\?\.\(scene \? 'compact' : 'full'\);/, 'dejisko = kompaktné karty správ');
+  assert.match(scenes, /incidentCards\.setMode\?\.\(scene \? \(onPhone \? 'minimal' : 'compact'\) : 'full'\);/, 'dejisko = kompaktné karty správ, na telefóne jedna');
   assert.match(scenes, /incidentCards\.setMode\?\.\('full'\);/, 'úžina = plné karty');
   const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
   for (const cls of ['.mideast-freshness', '.mideast-fresh-item.is-stale']) assert.ok(css.includes(cls), cls);

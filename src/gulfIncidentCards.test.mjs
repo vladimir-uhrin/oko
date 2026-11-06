@@ -230,6 +230,10 @@ test('režim compact (dejisko Blízkeho východu, 2026-11-06): najviac 3 karty, 
   assert.equal(cards.count, 0);
   cards.setMode('full');
   assert.equal(cards.count, 0, 'po clear() zmena režimu nekreslí nič');
-  assert.deepEqual(HOTCARD_MODE_LIMIT, { full: 6, compact: 3 });
+  assert.deepEqual(HOTCARD_MODE_LIMIT, { full: 6, compact: 3, minimal: 1 });
+  await cards.showFor('gaza');
+  cards.setMode('minimal');
+  assert.equal(cards.getMode(), 'minimal');
+  assert.equal(cards.count, 1, 'telefón pri dejisku: jedna karta');
   cards.destroy();
 });

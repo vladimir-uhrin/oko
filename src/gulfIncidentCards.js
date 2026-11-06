@@ -35,7 +35,9 @@ const EDGE_MARGIN_PX = 8;
 const REFETCH_TTL_MS = 15 * 60_000;
 const MAX_CARDS = 6;
 /** Strop kariet podľa režimu: úžiny 6, dejisko Blízkeho východu 3 (mapa pod nimi musí ostať čitateľná). */
-export const HOTCARD_MODE_LIMIT = Object.freeze({ full: MAX_CARDS, compact: 3 });
+// 'minimal' = dejisko na telefóne (2026-11-06, „aby to bolo prívetivé"): tri karty na 375 px zakrývali stred
+// mapy aj pin dejiska — ostane jedna najdôležitejšia, ostatné správy sú vo výsuve VOJNA.
+export const HOTCARD_MODE_LIMIT = Object.freeze({ full: MAX_CARDS, compact: 3, minimal: 1 });
 /** Ako často sa nanovo merajú panely a lišty, ktorým sa karty vyhýbajú (ms). */
 const OBSTACLE_TTL_MS = 400;
 
@@ -181,7 +183,7 @@ export function createIncidentCards({
 } = {}) {
   const doc = viewer?.container?.ownerDocument;
   if (!viewer?.scene || !doc?.createElement) {
-    return { showFor: async () => 0, setRevealed: () => {}, clear: () => {}, destroy: () => {}, get count() { return 0; } };
+    return { showFor: async () => 0, setRevealed: () => {}, setMode: () => {}, getMode: () => 'full', setAvoid: () => {}, clear: () => {}, destroy: () => {}, get count() { return 0; } };
   }
   ensureStyle(doc);
   const layer = doc.createElement('div');
@@ -219,10 +221,10 @@ export function createIncidentCards({
   }
   /** 'full' | 'compact' — zmena prekreslí už nakreslené karty z toho istého zoznamu. */
   function setMode(next) {
-    const m = next === 'compact' ? 'compact' : 'full';
+    const m = next === 'compact' || next === 'minimal' ? next : 'full';
     if (m === mode) return;
     mode = m;
-    try { layer.classList.toggle('is-compact', m === 'compact'); } catch { /* */ }
+    try { layer.classList.toggle('is-compact', m !== 'full'); } catch { /* */ }
     if (lastDrawn && cards.length) draw(lastDrawn.items, lastDrawn.region);
   }
 
@@ -369,7 +371,7 @@ export function createIncidentCards({
     // inside the free map area — clear of the logo, the panel columns, the top bar,
     // the dock and the attribution line (placeHotCards).
     const viewport = { w: vw, h: vh };
-    const obstacles = currentObstacles(viewport);
+    const obstacles = [...currentObstacles(viewport), ...avoidBoxes()];
     placeHotCards(visible, viewport, obstacles);
     for (const p of visible) {
       p.c.el.style.transform = `translate(${Math.round(p.cx)}px, ${Math.round(p.cy)}px)`;
@@ -391,6 +393,28 @@ export function createIncidentCards({
       p.c.line.style.width = `${Math.round(Math.hypot(dxl, dyl))}px`;
       p.c.line.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) rotate(${(Math.atan2(dyl, dxl) * 180 / Math.PI).toFixed(1)}deg)`;
     }
+  }
+
+  // Body na mape, ktoré karty nesmú zakryť (2026-11-06, telefón: karta „Izrael (približne)" ležala
+  // presne na pine dejiska aj s jeho štítkom). Každý bod = obdĺžnik `w × h` so stredom `dy` pod bodom.
+  let avoid = []; // { cartesian, w, h, dy }
+  function avoidBoxes() {
+    const out = [];
+    for (const a of avoid) {
+      let p = null;
+      try { p = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, a.cartesian, new Cesium.Cartesian2()); } catch { p = null; }
+      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+      out.push({ x: p.x - a.w / 2, y: p.y - 10, w: a.w, h: a.h, obstacle: true });
+    }
+    return out;
+  }
+  /**
+   * Body, ktorým sa karty vyhnú (pin dejiska so štítkom pod ním). `points` = [{ lon, lat, w?, h? }]; prázdne = nič.
+   */
+  function setAvoid(points = []) {
+    avoid = (Array.isArray(points) ? points : []).filter((p) => Number.isFinite(p?.lon) && Number.isFinite(p?.lat))
+      .map((p) => ({ cartesian: Cesium.Cartesian3.fromDegrees(p.lon, p.lat), w: Number(p.w) || 220, h: Number(p.h) || 40 }));
+    place();
   }
 
   // Panely a lišty, ktorým sa karty vyhýbajú, v súradniciach okna mapy. Meria sa najviac raz za
@@ -473,7 +497,7 @@ export function createIncidentCards({
     try { layer.remove(); } catch { /* */ }
   }
 
-  return { showFor, setRevealed, setMode, getMode: () => mode, clear, destroy, get count() { return cards.length; } };
+  return { showFor, setRevealed, setMode, getMode: () => mode, setAvoid, clear, destroy, get count() { return cards.length; } };
 }
 
 function ensureStyle(doc) {

@@ -72,7 +72,10 @@ export const MOBILE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'volby', labelKey: 'mobile.volby', panelIds: Object.freeze(['volby-panel']), expand: 'volby-panel' }),
   // KONFLIKTY (2026-10-11, preusporiadanie): Ukrajina, Blízky východ a prelety pokope ako v ľavom
   // stĺpci; sekcia SCÉNY zanikla (réžia scén je .oko-owner-only v paneli Prelety).
-  Object.freeze({ id: 'conflicts', labelKey: 'mobile.conflicts', panelIds: Object.freeze(['ukraine-panel', 'mideast-panel', 'scene-panel']), expand: 'ukraine-panel' }),
+  // `expandByConflict` (2026-11-06, telefón: pri dejisku Izrael sa výsuv otváral na Ukrajine): aktívny
+  // konflikt hlási conflictScenes.js v `body.dataset.okoActiveConflict`; pri Blízkom východe sa rozbalí
+  // jeho panel a výsuv sa naň posunie.
+  Object.freeze({ id: 'conflicts', labelKey: 'mobile.conflicts', panelIds: Object.freeze(['ukraine-panel', 'mideast-panel', 'scene-panel']), expand: 'ukraine-panel', expandByConflict: Object.freeze({ mideast: 'mideast-panel' }) }),
   // DÁTA = Energia + Prehliadať (história, kamery, kontext) — rovnaké zóny ako na počítači.
   Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']), expand: 'gas-panel' }),
   // MAPA (2026-11-06, vlastník k plávajúcim POLOHA/ŠTÝL nad lištou: „aj toto musíme nejako logicky vymeniť"):
@@ -260,8 +263,14 @@ export function createMobileShell({
       el.classList?.add?.('oko-in-sheet');
     }
     if (!moved.length) return false;
-    const expandId = expand && section.panelIds.includes(expand) ? expand : section.expand;
+    const byConflict = section.expandByConflict?.[body.dataset?.okoActiveConflict || ''] || null;
+    const expandId = expand && section.panelIds.includes(expand) ? expand : (byConflict && section.panelIds.includes(byConflict) ? byConflict : section.expand);
     for (const { el } of moved) setCollapsed(el.id, el.id !== expandId);
+    // Rozbalený panel, ktorý nie je prvý, posunúť na vrch výsuvu (hlavičky zbalených nad ním ostanú dostupné).
+    if (expandId !== section.panelIds[0]) {
+      const target = doc.getElementById?.(expandId);
+      try { if (target && typeof sheetBody.scrollTo === 'function') sheetBody.scrollTo({ top: Math.max(0, target.offsetTop - sheetBody.offsetTop - 4) }); } catch { /* */ }
+    }
     active = sectionId;
     if (sheetTitle) sheetTitle.textContent = buttonLabel(sectionId) || sectionId;
     sheet.hidden = false;
