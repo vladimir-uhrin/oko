@@ -3,6 +3,8 @@ import { initAuthPanel } from './auth/panel.js';
 import { createFollowedFlights, installFollowButton } from './followedFlights.js';
 import { createFollowedVessels, fetchVesselLiveContact, installVesselFollowButtons } from './followedVessels.js';
 import { createPushNotifications } from './pushNotifications.js';
+import { createQuakeAlerts } from './quakeAlerts.js';
+import { openQuakeLink, parseQuakeLink } from './quakeDeepLink.js';
 import './auth/panel.css';
 // Admin (2026-10-03): anonymná štatistika návštev a oznam prevádzkovateľa.
 import { initSiteTelemetry } from './siteTelemetry.js';
@@ -572,11 +574,22 @@ async function init() {
           return Number.isFinite(lat) && Number.isFinite(lon) ? { precision: 'city', lat, lon } : geoPromise;
         } catch { return geoPromise; }
       } : null;
+      // Zemetrasenie z push upozornenia (2026-11-06): ?quake=<USGS:…|EMSC:…> — úvodný prelet mieri na ohnisko
+      // (poloha z vlastného katalógu /api/earthquakes, ten istý ako vrstva); inak by ho prebil prelet podľa pripojenia.
+      const quakeStart = parseQuakeLink(window.location?.search || '');
+      const quakeLocate = quakeStart ? async () => {
+        try {
+          const res = await fetch(`/api/earthquakes/${quakeStart.split(':')[0].toLowerCase()}`, { cache: 'no-store' });
+          const j = res.ok ? await res.json() : null;
+          const r = Array.isArray(j?.records) ? j.records.find((x) => x?.id === quakeStart) : null;
+          return r && Number.isFinite(r.lat) && Number.isFinite(r.lon) ? { precision: 'city', lat: r.lat, lon: r.lon } : geoPromise;
+        } catch { return geoPromise; }
+      } : null;
       const locate = crawlerVisit || embedView ? null : () => geoPromise;
       showStartView(viewer, {
         whenReady: whenStartupReady(),
         nowMs: Number.isFinite(qaTimeMs) ? qaTimeMs : Date.now(),
-        locate: locate && volbyLocate ? volbyLocate : locate,
+        locate: locate && (volbyLocate || quakeLocate) ? (volbyLocate || quakeLocate) : locate,
         onArrive: (geo) => {
           settleStart();
           let place = geo?.city || '';
@@ -1085,6 +1098,20 @@ async function init() {
       onRemoteShip: (ship) => window.__godsEyeView.vesselEstimate?.showRemote?.(ship),
     });
     window.__godsEyeView.vesselSearch = vesselSearch;
+    // Hlboký odkaz na zemetrasenie (2026-11-06): /?quake=<USGS:…|EMSC:…> — z push upozornenia na otras
+    // citeľný na Slovensku; zapne vrstvu, vyberie otras a priblíži kameru nad ohnisko.
+    try {
+      const quakeId = parseQuakeLink(window.location?.search || '');
+      if (quakeId) {
+        void Promise.resolve(styleManager.initialRestorePromise).catch(() => {}).then(() => {
+          setTimeout(() => {
+            // Bez stavu v odkaze letí na ohnisko už úvodný prelet (quakeLocate vyššie); so stavom ho treba dorovnať.
+            void openQuakeLink({ id: quakeId, dataManager, layer: earthquakesLayer,
+              flyTo: ({ lat, lon }) => { if (styleManager.hasShareState) viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, 1_400_000), duration: 2.5 }); } });
+          }, 4_000);
+        });
+      }
+    } catch { /* bez odkazu */ }
     // Hlboký odkaz na loď (2026-10-11): /?ship=<MMSI> — z push upozornenia; po obnove pohľadu a načítaní vrstiev.
     try {
       const ship = new URLSearchParams(window.location?.search || '').get('ship');
@@ -1153,6 +1180,12 @@ async function init() {
         // Upozornenia aj so zatvorenou stránkou (2026-10-11): Web Push k účtu, prepínač v hľadaní.
         pushNotifications = createPushNotifications({ client: accountCenter.client, translate: t, notify: (text) => styleManager._showToast(text, { durationMs: 6000 }) });
         window.__godsEyeView.pushNotifications = pushNotifications;
+        // Upozornenia na zemetrasenia citeľné na Slovensku (2026-11-06): čip „Upozorniť (SK)" vo vrstve
+        // Zemetrasenia; odber `quake:sk` v zozname sledovaní, posiela src/auth/server/quakeWatch.js.
+        const quakeAlerts = createQuakeAlerts({ account: accountCenter, push: pushNotifications, translate: t,
+          notify: (text) => styleManager._showToast(text, { durationMs: 6000 }) });
+        earthquakesLayer.setAlertControl?.(quakeAlerts);
+        window.__godsEyeView.quakeAlerts = quakeAlerts;
       }
     } catch (error) { console.warn('[follow] followed vessels unavailable:', error?.message || error); }
     const commandPalette = createCommandPalette({

@@ -1919,6 +1919,20 @@ its criteria cannot be silently ignored.
 > cap 600 km; pure, labelled „odhad OKO"). Picking goes through `scene.drillPick`: the felt
 > ring (`feltSource`) sits above the epicentre discs, so a plain `pick` returned the ring and
 > clicking an epicentre selected nothing (seen on M6.1 Hasaki).
+>
+> **Earthquake layer 2026-11-06 (second round).** Chips: period 24 h / 7 dní / 30 dní (`?period=week|month`
+> on `/api/earthquakes/<source>`, separate server cache per source × period; magnitude chips below the
+> period floor are disabled), „Významné" (`isSignificantEarthquake`), „Platne" (PB2002 lines, lazy module
+> `local_data/plates/pb2002Boundaries.js`, GroundPolylinePrimitive like country borders) and „Upozorniť (SK)"
+> (`src/quakeAlerts.js` → follow `quake:sk` + Web Push; server `quakeWatch.js`, every 2 min, baseline on
+> first pass). Selecting a quake in a sequence shows only that sequence (discs/rings via `entity.show`,
+> labels „M4.8 · +2 h 14 min", other pulsars dimmed). Selecting a quake with ShakeMap draws the USGS
+> intensity map (`earthquakeShakemap.js`, rectangle at 3 km, MMI legend) and hides its estimated ring.
+> The selected card is compact and wrapped at 46 characters; the full per-source detail stays in the
+> hover card. Felt rings only for quakes younger than 24 h; older discs are fainter. Deep link
+> `/?quake=<USGS:…|EMSC:…>` (`src/quakeDeepLink.js`) opens the layer, selects and flies to the quake.
+> The SAV national network list (seismology.sk) is NOT used: robots.txt disallows `/Local_Earthquakes`
+> and no terms are published (sk-data-source skill table).
 | Satellites | CelesTrak | `src/data/satellites.js` | `/api/celestrak` | 120s |
 | Space Missions (30d) | Launch Library 2 + CelesTrak | `src/data/rocketLaunches.js` | `/api/launches` + `/api/celestrak/active` | 5 min |
 | Traffic | OSM Overpass (+ optional TomTom live flow) | `src/data/traffic.js` | `/api/overpass` + `/api/tomtom` | viewport-driven |

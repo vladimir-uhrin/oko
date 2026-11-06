@@ -1,8 +1,11 @@
 import * as Cesium from 'cesium';
 import { horizonOccluder } from './iconOrientation.js';
+import { EARTHQUAKE_FELT_MIN_MAG, earthquakeFeltRadiusM } from './earthquakeCatalog.js';
 
 export const EARTHQUAKE_PULSE_LIMIT = 24;
 export const EARTHQUAKE_PULSE_CANDIDATES = 96;
+/** Krytie pulzarov mimo zvýraznenej sekvencie. */
+export const EARTHQUAKE_PULSE_DIM_OPACITY = 0.14;
 
 // Prstenec pulzu (2026-09-06, „sprav pulzar … aby kopíroval guľu"): prstenec
 // sa kreslí vo VETVE dotykovej roviny sopky/ohniska — jeho polomer je v METROCH
@@ -76,19 +79,9 @@ export function earthquakeRippleMaxRadius(mag) {
   return Math.max(6000, Math.min(500000, 4000 * Math.pow(2, m - 3)));
 }
 
-/** Od tejto magnitúdy sa kreslí prstenec citeľného dosahu (menšie sa cítia len lokálne). */
-export const EARTHQUAKE_FELT_MIN_MAG = 4.5;
-
-/**
- * ODHAD polomeru citeľných otrasov (m) z magnitúdy — vzor Sentinel (povrchová
- * vlna). Empiricky ~MMI III: M4,5≈105 km, M5≈150, M6≈300, M7≈600, M8≈1200 km.
- * Je to ODHAD z magnitúdy, nie ShakeMap; hĺbku ani lokálne pomery nezohľadňuje.
- * Pure. @param {number} mag @returns {number}
- */
-export function earthquakeFeltRadiusM(mag) {
-  const m = Number.isFinite(mag) ? mag : 0;
-  return Math.max(30000, Math.min(2000000, 105000 * Math.pow(2, m - 4.5)));
-}
+// Odhad citeľného dosahu je od 2026-11-06 v earthquakeCatalog.js (čistý modul bez Cesia — číta ho
+// aj strážca upozornení na serveri); tu sa len znova vyváža kvôli starším importom.
+export { EARTHQUAKE_FELT_MIN_MAG, earthquakeFeltRadiusM } from './earthquakeCatalog.js';
 
 export function earthquakePulseStyle(event, now) {
   let hash = 0;
@@ -142,7 +135,7 @@ export function createEarthquakePulse(viewer, { document: doc = globalThis.docum
   const scene = viewer?.scene;
   const parent = scene?.canvas?.parentElement;
   if (!doc?.createElement || !parent || !scene?.postRender?.addEventListener) {
-    return { setEvents() {}, setVisible() {}, setSelected() {}, hitTest() { return null; }, destroy() {} };
+    return { setEvents() {}, setVisible() {}, setSelected() {}, setFocus() {}, hitTest() { return null; }, destroy() {} };
   }
   const root = doc.createElement('div'); root.className = 'quake-pulsars';
   root.setAttribute('aria-hidden', 'true'); root.hidden = true;
@@ -151,6 +144,8 @@ export function createEarthquakePulse(viewer, { document: doc = globalThis.docum
   const nodes = new Map(); const scratch0 = new Cesium.Cartesian2(); const scratchE = new Cesium.Cartesian2(); const scratchN = new Cesium.Cartesian2();
   const up = new Cesium.Cartesian3(); const east = new Cesium.Cartesian3(); const north = new Cesium.Cartesian3(); const tmp = new Cesium.Cartesian3();
   let records = []; let selectedId = null; let visible = false; let destroyed = false; let hitPoints = [];
+  // Zvýraznená sekvencia (2026-11-06): členovia idú prví, ostatné pulzary stlmené.
+  let focus = null;
 
   // Premietni bod posunutý o `radius` metrov lokálnym smerom (východ/sever).
   function projectOffset(position, dir, radius, out) {
@@ -181,7 +176,9 @@ export function createEarthquakePulse(viewer, { document: doc = globalThis.docum
     const accepted = []; const keep = new Set();
     const selected = records.find(r => r.event.id === selectedId);
     const cohort = records.slice(0, EARTHQUAKE_PULSE_CANDIDATES);
-    const candidates = selected ? [selected, ...cohort.filter(r => r !== selected)] : cohort;
+    const focused = focus ? records.filter(r => focus.has(r.event.id)) : [];
+    const ordered = focus ? [...focused, ...cohort.filter(r => !focus.has(r.event.id))] : cohort;
+    const candidates = selected ? [selected, ...ordered.filter(r => r !== selected)] : ordered;
     for (const { event, position } of candidates) {
       if (!horizon.isPointVisible(position)) continue;
       const point = project(scene, position, scratch0);
@@ -212,7 +209,7 @@ export function createEarthquakePulse(viewer, { document: doc = globalThis.docum
       const m = tangentScreenMatrix(p0, tangent?.pe, tangent?.pn);
       node.style.setProperty('--quake-color', look.color);
       node.style.setProperty('--quake-delay', look.delay + 's');
-      node.style.opacity = String(look.opacity);
+      node.style.opacity = String(focus && !focus.has(event.id) ? Math.min(look.opacity, EARTHQUAKE_PULSE_DIM_OPACITY) : look.opacity);
       node.style.transform = `translate(${p0.x.toFixed(2)}px,${p0.y.toFixed(2)}px)`;
       (node._plane || node).style.transform = `matrix(${m.a.toFixed(4)},${m.b.toFixed(4)},${m.c.toFixed(4)},${m.d.toFixed(4)},0,0)`;
       node.dataset.selected = String(event.id === selectedId);
@@ -233,6 +230,8 @@ export function createEarthquakePulse(viewer, { document: doc = globalThis.docum
       refresh();
     },
     setSelected(id) { selectedId = id; refresh(); },
+    /** Zvýrazni sekvenciu (Set id) alebo zruš zvýraznenie (null). */
+    setFocus(ids) { focus = ids instanceof Set && ids.size ? ids : null; refresh(); },
     setVisible(value) { visible = Boolean(value); refresh(); },
     destroy() {
       if (destroyed) return;

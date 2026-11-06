@@ -278,6 +278,8 @@ export function openAuthStore(filename) {
     removeFollow: (userId, key) => db.prepare('DELETE FROM followed_flights WHERE user_id = ? AND key = ?').run(userId, key).changes,
     /** Sledované lode všetkých účtov (strážca na serveri, 2026-10-11). */
     followedVessels: () => db.prepare(`SELECT user_id AS userId, key, label FROM followed_flights WHERE key LIKE 'mmsi:%' ORDER BY key`).all(),
+    // Upozornenie na otrasy citeľné na Slovensku (2026-11-06): kľúč `quake:sk` v tom istom zozname.
+    quakeFollowers: () => db.prepare(`SELECT DISTINCT user_id AS userId FROM followed_flights WHERE key = 'quake:sk' ORDER BY user_id`).all().map(r => r.userId),
     pushSubscriptions: userId => db.prepare('SELECT endpoint, p256dh, auth, created_at AS createdAt FROM push_subscriptions WHERE user_id = ? ORDER BY created_at').all(userId),
     /** Pridá predplatné; známa adresa sa len obnoví (aj pod iný účet — jeden prehliadač, iné prihlásenie). false = plný zoznam. */
     addPush(userId, sub, now, max) {

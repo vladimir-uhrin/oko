@@ -105,6 +105,22 @@ test('pulz: DOM — uzol má rovinu s dvoma prstencami + jadro, matica v rovine,
   assert.equal(h.removed, 1);
 });
 
+test('pulz: zvýraznená sekvencia — členovia plné, ostatné stlmené, po zrušení späť (2026-11-06)', () => {
+  const h = harness();
+  h.pulse.setVisible(true);
+  h.pulse.setEvents([record('main', 200, 200, 6), record('after', 300, 300, 4.8), record('other', 900, 600, 5)]);
+  h.pulse.setFocus(new Set(['main', 'after']));
+  h.tick();
+  const byColor = (id) => h.nodes.find((n) => n.style.opacity && n === h.nodes[['main', 'after', 'other'].indexOf(id)]);
+  const opacities = h.nodes.map((n) => Number(n.style.opacity));
+  assert.equal(opacities.length, 3);
+  assert.ok(opacities.filter((o) => o <= 0.14).length === 1, String(opacities));
+  h.pulse.setFocus(null); h.tick();
+  assert.ok(h.nodes.every((n) => Number(n.style.opacity) > 0.14), 'all restored');
+  assert.equal(typeof byColor, 'function');
+  h.pulse.destroy();
+});
+
 test('pulz: hitTest vráti ohnisko pod kurzorom, vrstva doňho posiela pripravené záznamy', () => {
   const h = harness();
   h.pulse.setVisible(true);
@@ -132,6 +148,6 @@ test('pulz: dosah otrasov — polomer rastie s magnitúdou, prah M4.5, odhad nie
   const src = readFileSync(new URL('./earthquakes.js', import.meta.url), 'utf8');
   assert.match(src, /new Cesium\.CustomDataSource\('earthquake-felt'\)/);
   assert.match(src, /event\.mag < EARTHQUAKE_FELT_MIN_MAG/, 'len významné otrasy');
-  assert.match(src, /t\('quake\.felt'/, 'detail nesie odhad dosahu');
+  assert.match(src, /t\('quake\.feltShort'/, 'detail nesie odhad dosahu (2026-11-06 kratší riadok karty)');
   assert.doesNotMatch(src.slice(src.indexOf('earthquake-felt')), /CallbackProperty/, 'felt kruh je statický (výkonový pin)');
 });

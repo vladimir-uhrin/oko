@@ -68,3 +68,19 @@ export function formatElapsed(ms) {
   const d = Math.floor(h / 24);
   return `${d} d ${h % 24} h`;
 }
+
+/**
+ * Členovia sekvencie k vybranému otrasu (hlavný otras + všetky jeho dotrasy), alebo null, keď
+ * otras do žiadnej sekvencie nepatrí. Výber dotrasu ukáže celú sekvenciu jeho hlavného otrasu. Pure.
+ * @param {Map<string, object>} links výsledok linkEarthquakeSequences
+ * @param {string|null} id vybraný otras
+ * @returns {{mainshockId: string, members: Set<string>}|null}
+ */
+export function sequenceMembers(links, id) {
+  const link = id ? links?.get?.(id) : null;
+  if (!link) return null;
+  const mainshockId = link.role === 'mainshock' ? id : link.mainshockId;
+  const members = new Set([mainshockId]);
+  for (const [other, entry] of links) if (entry.role === 'aftershock' && entry.mainshockId === mainshockId) members.add(other);
+  return members.size > 1 ? { mainshockId, members } : null;
+}

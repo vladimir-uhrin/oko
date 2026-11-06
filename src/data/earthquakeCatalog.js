@@ -4,6 +4,36 @@ export const EARTHQUAKE_MATCH_MS = 20_000;
 export const EARTHQUAKE_MATCH_KM = 30;
 export const EARTHQUAKE_RENDER_LIMIT = 2000;
 
+/**
+ * Obdobia katalógu (2026-11-06, vlastník: „sprav" — silné otrasy nemajú z mapy zmiznúť po dni).
+ * `floor` = najnižšia magnitúda, ktorú zdroj v tom období pošle (USGS 2.5_week / 4.5_month,
+ * EMSC minmagnitude), takže čipy pod ňou nemajú čo ukázať.
+ */
+export const EARTHQUAKE_PERIODS = Object.freeze({
+  day: Object.freeze({ id: 'day', ms: EARTHQUAKE_DAY_MS, floor: -3, usgsFeed: 'all_day' }),
+  week: Object.freeze({ id: 'week', ms: 7 * EARTHQUAKE_DAY_MS, floor: 2.5, usgsFeed: '2.5_week' }),
+  month: Object.freeze({ id: 'month', ms: 30 * EARTHQUAKE_DAY_MS, floor: 4.5, usgsFeed: '4.5_month' }),
+});
+
+/** Od tejto magnitúdy sa kreslí prstenec citeľného dosahu (menšie sa cítia len lokálne). */
+export const EARTHQUAKE_FELT_MIN_MAG = 4.5;
+
+/**
+ * ODHAD polomeru citeľných otrasov (m) z magnitúdy — vzor Sentinel (povrchová
+ * vlna). Empiricky ~MMI III: M4,5≈105 km, M5≈150, M6≈300, M7≈600, M8≈1200 km.
+ * Je to ODHAD z magnitúdy, nie ShakeMap; hĺbku ani lokálne pomery nezohľadňuje.
+ * Pure. @param {number} mag @returns {number}
+ */
+export function earthquakeFeltRadiusM(mag) {
+  const m = Number.isFinite(mag) ? mag : 0;
+  return Math.max(30000, Math.min(2000000, 105000 * Math.pow(2, m - 4.5)));
+}
+
+/** Obdobie podľa id; neznáme → 24 h. Pure. */
+export function earthquakePeriod(id) {
+  return EARTHQUAKE_PERIODS[id] || EARTHQUAKE_PERIODS.day;
+}
+
 const finite = value => value !== null && value !== undefined && !(typeof value === 'string' && !value.trim()) && Number.isFinite(Number(value)) ? Number(value) : null;
 const text = value => typeof value === 'string' ? value.trim() : '';
 const epoch = value => typeof value === 'number' ? (Number.isFinite(value) ? value : null) : (typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null);
@@ -22,7 +52,26 @@ export function usgsImpact(p) {
     cdi: cdi !== null && cdi > 0 ? cdi : null,
     mmi: mmi !== null && mmi > 0 ? mmi : null,
     hasShakemap: /(^|,)shakemap(,|$)/.test(types),
+    sig: finite(p?.sig),
   };
+}
+
+/** Polia dopadov, ktoré dáva len USGS (pri spojení s EMSC sa berú z riešenia USGS). */
+const IMPACT_KEYS = Object.freeze(['alert', 'tsunami', 'felt', 'cdi', 'mmi', 'hasShakemap', 'sig']);
+
+/** Hranica „významnosti" USGS (feed significant_* používa sig >= 600). */
+export const USGS_SIGNIFICANT_SIG = 600;
+
+/**
+ * Významný otras pre filter „Významné": M6+, PAGER žltý a vyšší, príznak oceánskeho otrasu
+ * (tsunami) alebo významnosť USGS >= 600 (magnitúda + hlásenia ľudí + PAGER). Pure.
+ */
+export function isSignificantEarthquake(event) {
+  if (!event) return false;
+  return (Number.isFinite(event.mag) && event.mag >= 6)
+    || ['yellow', 'orange', 'red'].includes(event.alert)
+    || event.tsunami === true
+    || (Number.isFinite(event.sig) && event.sig >= USGS_SIGNIFICANT_SIG);
 }
 
 export function normalizeEarthquakeFeed(payload, source) {
@@ -50,7 +99,7 @@ export function normalizeEarthquakeFeed(payload, source) {
         : `https://www.seismicportal.eu/fdsnws/event/1/query?format=json&eventid=${encodeURIComponent(id)}`,
       // Dopady podľa USGS (2026-11-06): PAGER stupeň, príznak tsunami, hlásenia
       // „Did You Feel It?" a najvyššia intenzita ShakeMap. EMSC ich nedáva → null.
-      ...(source === 'USGS' ? usgsImpact(p) : { alert: null, tsunami: false, felt: null, cdi: null, mmi: null, hasShakemap: false }),
+      ...(source === 'USGS' ? usgsImpact(p) : { alert: null, tsunami: false, felt: null, cdi: null, mmi: null, hasShakemap: false, sig: null }),
     };
     if (!records.has(record.id) || records.get(record.id).updated < record.updated) records.set(record.id, record);
   }
@@ -109,6 +158,9 @@ export function mergeEarthquakeCatalogs(records, previous = []) {
     const oldId = solutions.map(r => aliases.get(r.id)).find(id => id && !used.has(id));
     const id = oldId || solutions[0].id;
     used.add(id);
-    return { ...preferred, id, solutions, association: solutions.length > 1 ? 'probable' : 'single' };
+    // Dopady (PAGER, DYFI, ShakeMap…) má len USGS — ostanú, aj keď sa zobrazuje riešenie EMSC.
+    const usgs = solutions.find(r => r.source === 'USGS');
+    const impact = usgs ? Object.fromEntries(IMPACT_KEYS.map(key => [key, usgs[key] ?? (key === 'tsunami' || key === 'hasShakemap' ? false : null)])) : {};
+    return { ...preferred, ...impact, id, solutions, association: solutions.length > 1 ? 'probable' : 'single' };
   });
 }

@@ -1,34 +1,54 @@
 import { t } from '../i18n.js';
 import { createAreaPhotoLookup } from './earthquakeAreaPhoto.js';
 import { formatElapsed } from './earthquakeSequence.js';
+import { mmiRoman } from './quakeMedia.js';
 
 const date = value => Number.isFinite(value) ? new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—';
 
+/** Slovenské množné číslo: 1 → .one, 2–4 → .few, inak .many (angličtina má .few = .many). Pure. */
+export function pluralKey(base, n) {
+  const k = Math.abs(Math.round(Number(n) || 0));
+  return base + (k === 1 ? '.one' : k >= 2 && k <= 4 ? '.few' : '.many');
+}
+
+/** Oficiálne varovania pred tsunami (NOAA) — odkaz pri príznaku oceánskeho otrasu. */
+export const TSUNAMI_INFO_URL = 'https://www.tsunami.gov/';
+
 /**
- * Riadky dopadov podľa USGS (2026-11-06): PAGER, tsunami, hlásenia „Did You Feel It?",
- * najvyššia intenzita ShakeMap. Len to, čo zdroj naozaj poslal — nič sa nedopočítava.
- * Pure. @returns {Array<{key:string, text:string, level?:string}>}
+ * Riadky dopadov podľa USGS (2026-11-06): PAGER, príznak oceánskeho otrasu (tsunami), hlásenia
+ * „Did You Feel It?", najvyššia intenzita ShakeMap. Len to, čo zdroj naozaj poslal — nič sa
+ * nedopočítava. `short` = kratšie znenie pre kartu na plátne. Pure.
+ * @returns {Array<{key:string, text:string, level?:string, url?:string}>}
  */
-export function earthquakeImpactLines(event) {
+export function earthquakeImpactLines(event, { short = false } = {}) {
   const lines = [];
   if (!event) return lines;
-  if (event.alert) lines.push({ key: 'alert', level: event.alert, text: t('quake.pager', { level: t('quake.pager.' + event.alert) }) });
-  if (event.tsunami) lines.push({ key: 'tsunami', level: 'tsunami', text: t('quake.tsunami') });
-  if (Number.isFinite(event.felt)) lines.push({ key: 'felt', text: t('quake.dyfi', { n: event.felt.toLocaleString('sk-SK') })
-    + (Number.isFinite(event.cdi) ? ' · ' + t('quake.cdi', { cdi: event.cdi.toFixed(1) }) : '') });
-  if (Number.isFinite(event.mmi)) lines.push({ key: 'mmi', text: t('quake.mmi', { mmi: romanMmi(event.mmi) }) });
+  if (event.alert) {
+    lines.push({ key: 'alert', level: event.alert, text: short
+      ? t('quake.pagerShort', { level: t('quake.pagerLevel.' + event.alert) })
+      : t('quake.pager', { level: t('quake.pager.' + event.alert) }) });
+  }
+  // USGS: príznak 1 = silný otras v oceánskej oblasti; NIE je to varovanie pred tsunami.
+  if (event.tsunami) lines.push({ key: 'tsunami', level: 'tsunami', url: TSUNAMI_INFO_URL, text: t(short ? 'quake.tsunamiShort' : 'quake.tsunami') });
+  if (Number.isFinite(event.felt)) {
+    const n = event.felt.toLocaleString('sk-SK');
+    lines.push({ key: 'felt', text: t(pluralKey(short ? 'quake.dyfiShort' : 'quake.dyfi', event.felt), { n })
+      + (Number.isFinite(event.cdi) ? ' · ' + t('quake.cdi', { cdi: event.cdi.toFixed(1) }) : '') });
+  }
+  if (Number.isFinite(event.mmi)) lines.push({ key: 'mmi', text: t(short ? 'quake.mmiShort' : 'quake.mmi', { mmi: mmiRoman(event.mmi) }) });
   return lines;
 }
 
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
-export function romanMmi(mmi) { const i = Math.min(12, Math.max(1, Math.round(mmi))); return ROMAN[i - 1]; }
-
 /** Veta o sekvencii: dotras po hlavnom otrase, alebo počet dotrasov hlavného otrasu. Pure. */
-export function earthquakeSequenceLine(link) {
+export function earthquakeSequenceLine(link, { short = false } = {}) {
   if (!link) return null;
-  if (link.role === 'aftershock') return t('quake.aftershockOf', { mag: link.mainshockMag.toFixed(1),
-    place: link.mainshockPlace || t('quake.event'), elapsed: formatElapsed(link.deltaMs), km: Math.round(link.distanceKm) });
-  if (link.role === 'mainshock') return t('quake.aftershocks', { n: link.aftershocks, mag: link.strongest.mag.toFixed(1) });
+  if (link.role === 'aftershock') {
+    return t(short ? 'quake.aftershockOfShort' : 'quake.aftershockOf', { mag: link.mainshockMag.toFixed(1),
+      place: link.mainshockPlace || t('quake.event'), elapsed: formatElapsed(link.deltaMs), km: Math.round(link.distanceKm) });
+  }
+  if (link.role === 'mainshock') {
+    return t(pluralKey(short ? 'quake.aftershocksShort' : 'quake.aftershocks', link.aftershocks), { n: link.aftershocks, mag: link.strongest.mag.toFixed(1) });
+  }
   return null;
 }
 
@@ -91,7 +111,10 @@ export function createEarthquakeHoverCard({ document: doc = globalThis.document,
       el('h3', model.title);
       if (model.impact.length) {
         const impact = el('ul'); impact.className = 'earthquake-hover-impact';
-        for (const line of model.impact) { const li = el('li', line.text, impact); if (line.level) li.dataset.level = line.level; }
+        for (const line of model.impact) {
+          const li = el('li', line.text, impact); if (line.level) li.dataset.level = line.level;
+          if (line.url) { el('span', ' · ', li); link(t('quake.tsunamiLink'), line.url, li); }
+        }
       }
       if (model.sequence) el('p', model.sequence).className = 'earthquake-hover-sequence';
       el('p', model.association).className = 'earthquake-hover-note';

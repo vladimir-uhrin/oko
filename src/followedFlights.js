@@ -15,7 +15,7 @@
  * Skladanie stavov a prechodov sú čisté funkcie (testované bez prehliadača); controller drží
  * zoznam, čaká na prihlásenie a raz za FOLLOW_POLL_MS porovná zoznam so živými kontaktmi.
  */
-import { FOLLOW_MAX, followKey, followMatches, isVesselFollowKey, normalizeCallsign, normalizeHex, sanitizeFollow } from './auth/follows.js';
+import { FOLLOW_MAX, followKey, followMatches, isFlightFollowKey, normalizeCallsign, normalizeHex, sanitizeFollow } from './auth/follows.js';
 
 /** Ako často sa sledované lety porovnajú so živými dátami (ms). */
 export const FOLLOW_POLL_MS = 15_000;
@@ -138,7 +138,7 @@ export function createFollowedFlights({
 
   function setFollows(list) {
     // Lode (mmsi:) sú v tom istom zozname k účtu — tie má followedVessels.js.
-    follows = Array.isArray(list) ? list.filter((f) => f && typeof f.key === 'string' && !isVesselFollowKey(f.key)) : [];
+    follows = Array.isArray(list) ? list.filter((f) => f && isFlightFollowKey(f.key)) : [];
     syncPoll();
     emit();
   }

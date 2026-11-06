@@ -12,6 +12,9 @@
  *
  * LODE (2026-10-11, bod 6 „sledované lode ako lety"): loď má kľúč `mmsi:<9 číslic>`. Ten istý
  * zoznam a tabuľka (hex/znak ostanú prázdne), ten istý strop FOLLOW_MAX pre lety aj lode.
+ *
+ * ZEMETRASENIA (2026-11-06): odber upozornení na otrasy citeľné na Slovensku má kľúč `quake:sk`
+ * (vstup `{ topic: 'quake-sk' }`); posiela ich strážca src/auth/server/quakeWatch.js.
  */
 
 /** Najviac sledovaných letov na účet. */
@@ -29,6 +32,20 @@ const MMSI_RE = /^\d{9}$/;
 export function normalizeMmsi(value) {
   const mmsi = typeof value === 'number' || typeof value === 'string' ? String(value).trim() : '';
   return MMSI_RE.test(mmsi) ? mmsi : null;
+}
+
+/** Kľúč odberu upozornení na otrasy citeľné na Slovensku. */
+export const QUAKE_FOLLOW_KEY = 'quake:sk';
+export const QUAKE_FOLLOW_LABEL = 'Zemetrasenia citeľné na Slovensku';
+
+/** Je to odber upozornení na zemetrasenia? */
+export function isQuakeFollowKey(key) {
+  return key === QUAKE_FOLLOW_KEY;
+}
+
+/** Je to sledovaný let (dopravca podľa znaku alebo stroj podľa hexu)? */
+export function isFlightFollowKey(key) {
+  return typeof key === 'string' && (key.startsWith('cs:') || key.startsWith('hex:'));
 }
 
 /** Je to kľúč sledovanej lode? */
@@ -53,7 +70,8 @@ export function normalizeCallsign(value) {
  * @param {{hex?: unknown, callsign?: unknown}} flight
  * @returns {string|null}
  */
-export function followKey({ hex, callsign, mmsi } = {}) {
+export function followKey({ hex, callsign, mmsi, topic } = {}) {
+  if (topic === 'quake-sk') return QUAKE_FOLLOW_KEY;
   const ship = normalizeMmsi(mmsi);
   if (ship) return `mmsi:${ship}`;
   const cs = normalizeCallsign(callsign);
@@ -68,7 +86,7 @@ export function validFollowKey(key) {
   if (key.startsWith('cs:')) return AIRLINE_CALLSIGN_RE.test(key.slice(3));
   if (key.startsWith('hex:')) return HEX_RE.test(key.slice(4));
   if (key.startsWith('mmsi:')) return MMSI_RE.test(key.slice(5));
-  return false;
+  return key === QUAKE_FOLLOW_KEY;
 }
 
 /** Popis bez riadiacich znakov, orezaný (zobrazuje sa cez textContent, aj tak ho čistíme). */
@@ -86,6 +104,7 @@ export function sanitizeFollow(input) {
   if (!input || typeof input !== 'object') return null;
   const key = followKey(input);
   if (!key) return null;
+  if (key === QUAKE_FOLLOW_KEY) return { key, hex: null, callsign: null, label: QUAKE_FOLLOW_LABEL };
   const hex = normalizeHex(input.hex);
   if (isVesselFollowKey(key)) {
     const mmsi = key.slice(5);
@@ -102,7 +121,7 @@ export function sanitizeFollow(input) {
  * @param {{hex?: unknown, callsign?: unknown}} contact
  */
 export function followMatches(entry, contact) {
-  if (!entry || !contact) return false;
+  if (!entry || !contact || !isFlightFollowKey(entry.key) && !isVesselFollowKey(entry.key)) return false;
   if (entry.key.startsWith('cs:')) return normalizeCallsign(contact.callsign) === entry.key.slice(3);
   if (isVesselFollowKey(entry.key)) return normalizeMmsi(contact.mmsi) === entry.key.slice(5);
   return normalizeHex(contact.hex) === entry.key.slice(4);

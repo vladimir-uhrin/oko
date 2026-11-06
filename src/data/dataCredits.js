@@ -147,7 +147,14 @@ export const DATA_CREDITS = [
   },
   {
     key: 'usgs',
-    html: 'Earthquakes: Data courtesy of the U.S. Geological Survey',
+    html: 'Earthquakes: Data courtesy of the U.S. Geological Survey (catalog, PAGER, Did You Feel It?, ShakeMap)',
+  },
+  {
+    key: 'pb2002-plates',
+    html: 'Tectonic plate boundaries: Peter Bird (2003), PB2002, '
+      + '<a href="https://doi.org/10.1029/2001GC000252" target="_blank" rel="noopener">doi:10.1029/2001GC000252</a> · GeoJSON by Hugo Ahlenius, Nordpil '
+      + '(<a href="https://github.com/fraxen/tectonicplates" target="_blank" rel="noopener">fraxen/tectonicplates</a>, '
+      + '<a href="https://opendatacommons.org/licenses/by/1-0/" target="_blank" rel="noopener">ODC-By 1.0</a>)',
   },
   {
     key: 'emsc',

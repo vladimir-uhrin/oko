@@ -5,6 +5,7 @@ import { createWebhookMailer } from './mail.js';
 import { oauthProvidersFromEnv } from './oauth.js';
 import { createAdminSources } from './adminSources.js';
 import { createFollowWatch } from './pushWatch.js';
+import { createQuakeWatch } from './quakeWatch.js';
 import { getAdminRuntime } from '../../admin/server/plugin.js';
 
 export const AUTH_FILE_DENY = ['**/.auth-data/**', '**/*.sqlite*', '**/*.db', '**/*.db-*'];
@@ -31,7 +32,11 @@ export function authPlugin(env = process.env) {
       // AIS_STATE_PERSIST=off) a len s VAPID kľúčmi v .env; bez nich UI ponuku neukáže.
       watch = createFollowWatch({ store, env, port: () => currentServer?.httpServer?.address()?.port ?? null,
         log: message => console.warn(message), stateFile: path.join(root, '.gev-cache', 'follow-watch.json') });
-      if (String(env.AIS_STATE_PERSIST || '').toLowerCase() !== 'off') watch.start();
+      // Otrasy citeľné na Slovensku (2026-11-06): ten istý push, odber `quake:sk` v zozname sledovaní.
+      const quakeWatch = createQuakeWatch({ store, send: (userId, payload) => watch.send(userId, payload), enabled: () => watch.enabled(),
+        port: () => currentServer?.httpServer?.address()?.port ?? null, log: message => console.warn(message),
+        stateFile: path.join(root, '.gev-cache', 'quake-watch.json'), obceFile: path.join(root, 'src', 'data', 'local_data', 'volby', 'obce-geo.json') });
+      if (String(env.AIS_STATE_PERSIST || '').toLowerCase() !== 'off') { watch.start(); quakeWatch.start(); }
       // Admin panel (2026-10-03): stav feedov sa číta z /status endpointov tohto istého servera.
       const adminSources = createAdminSources({ root, dbFile: filename, port: () => currentServer?.httpServer?.address()?.port ?? null,
         runtime: getAdminRuntime });
