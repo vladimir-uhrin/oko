@@ -34,6 +34,8 @@ const CARD_GAP_PX = 6;
 const EDGE_MARGIN_PX = 8;
 const REFETCH_TTL_MS = 15 * 60_000;
 const MAX_CARDS = 6;
+/** Strop kariet podľa režimu: úžiny 6, dejisko Blízkeho východu 3 (mapa pod nimi musí ostať čitateľná). */
+export const HOTCARD_MODE_LIMIT = Object.freeze({ full: MAX_CARDS, compact: 3 });
 /** Ako často sa nanovo merajú panely a lišty, ktorým sa karty vyhýbajú (ms). */
 const OBSTACLE_TTL_MS = 400;
 
@@ -189,6 +191,11 @@ export function createIncidentCards({
 
   let cards = []; // { model, el, dot, cartesian }
   let revealed = false;
+  // Režim (2026-11-06, vlastník „čo by si vylepšil": karty správ zakrývali polygóny a KARTU dejiska):
+  // 'full' = úžiny ako doteraz (6 kariet s náhľadom), 'compact' = dejisko BLÍZKEHO VÝCHODU — najviac
+  // 3 karty, užšie, bez náhľadu, aby mapa pod nimi ostala čitateľná. Prepína conflictScenes.js.
+  let mode = 'full';
+  let lastDrawn = null; // { items, region } — pre prekreslenie po zmene režimu
   // Dopyt na región zvlášť a „lístok" poslednej požiadavky (BLÍZKY VÝCHOD etapa 3,
   // 2026-09-26): pri deviatich regiónoch prepnutie dejiska počas načítania už
   // nesmie nakresliť karty predošlého regiónu (dovtedy jeden spoločný inFlight
@@ -207,7 +214,16 @@ export function createIncidentCards({
   /** Zmaže karty a zruší platnosť ešte bežiaceho načítania (neskorá odpoveď už nekreslí). */
   function clear() {
     ticket += 1;
+    lastDrawn = null;
     clearCards();
+  }
+  /** 'full' | 'compact' — zmena prekreslí už nakreslené karty z toho istého zoznamu. */
+  function setMode(next) {
+    const m = next === 'compact' ? 'compact' : 'full';
+    if (m === mode) return;
+    mode = m;
+    try { layer.classList.toggle('is-compact', m === 'compact'); } catch { /* */ }
+    if (lastDrawn && cards.length) draw(lastDrawn.items, lastDrawn.region);
   }
 
   // Resolve an article's preview image (og:image) via the server-side unfurl proxy.
@@ -295,7 +311,8 @@ export function createIncidentCards({
 
   function draw(items, region) {
     clearCards();
-    const models = buildIncidentCards(items, { region, limit: MAX_CARDS });
+    lastDrawn = { items, region };
+    const models = buildIncidentCards(items, { region, limit: HOTCARD_MODE_LIMIT[mode] });
     for (const model of models) {
       const el = makeCard(model);
       const accent = SEV_COLOR[model.severity] || SEV_COLOR.minor;
@@ -456,7 +473,7 @@ export function createIncidentCards({
     try { layer.remove(); } catch { /* */ }
   }
 
-  return { showFor, setRevealed, clear, destroy, get count() { return cards.length; } };
+  return { showFor, setRevealed, setMode, getMode: () => mode, clear, destroy, get count() { return cards.length; } };
 }
 
 function ensureStyle(doc) {
@@ -466,6 +483,9 @@ function ensureStyle(doc) {
   style.textContent = `
 .oko-hotcards{position:absolute;inset:0;z-index:59;pointer-events:none;overflow:hidden;}
 .oko-hotcards[hidden]{display:none;}
+.oko-hotcards.is-compact .oko-hotcard{width:196px;padding:6px 8px 5px;}
+.oko-hotcards.is-compact .oko-hc-thumb{display:none;}
+.oko-hotcards.is-compact .oko-hc-title{font-size:10px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .oko-hc-pin{position:absolute;top:0;left:0;width:12px;height:12px;border-radius:50%;
   background:var(--hc-accent,#39d0ff);box-shadow:0 0 0 2px rgba(11,22,34,.85),0 0 12px var(--hc-accent,#39d0ff);
   pointer-events:none;will-change:transform;z-index:1;}

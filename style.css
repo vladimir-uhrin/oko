@@ -12383,6 +12383,14 @@ body.recording-mode .state-strip {
  * mená rtl), karta oblasti (rovnaká kostra ako karta udalosti), riadky INTERNET · OONI po krajinách
  * so stupňom a karta HUMANITÁRNYCH SÚČTOV (bez čipu, len čísla).
  */
+/* Riadok čerstvosti (2026-11-06): „Dáta k: udalosti 26. 10. · pred 11 dňami ZASTARANÉ · poplachy 10. 10. …" */
+.mideast-freshness { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 8px; letter-spacing: 0.04em; color: var(--text-dim); }
+.mideast-freshness[hidden] { display: none; }
+.mideast-fresh-title { color: #8aa0b6; text-transform: uppercase; letter-spacing: 0.08em; }
+.mideast-fresh-item { display: inline-flex; align-items: baseline; gap: 3px; cursor: help; }
+.mideast-fresh-label { color: #cfe3f5; }
+.mideast-fresh-day { color: #cfe3f5; font-variant-numeric: tabular-nums; }
+.mideast-fresh-item.is-stale .mideast-fresh-label, .mideast-fresh-item.is-stale .mideast-fresh-day { color: #ffb547; }
 .mideast-alerts-name, .oko-mideast-alerts-name { unicode-bidi: isolate; }
 .oko-mideast-alerts-rows { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .oko-mideast-alerts-row { display: inline-flex; align-items: baseline; gap: 4px; }

@@ -204,7 +204,7 @@ test('mini graf: plocha + čiara + prerušovaná čiara priemeru pred krízou; m
 test('drôty: sekcia v paneli pred správami, karta v main.js, zvýraznenie z dejísk a scén úžin, CSS, i18n EN/SK', () => {
   const panel = readFileSync(new URL('./mideastPanel.js', import.meta.url), 'utf8');
   // Prechody stoja za čipmi a legendami vrstiev (ich počet tento drôt nezaujíma) a PRED správami.
-  assert.match(panel, /mountTarget\.replaceChildren\(status, dirsTitle, dirs, [^;]*\.filter\(Boolean\), transitsTitle, transits, newsTitle, news, note\);/);
+  assert.match(panel, /mountTarget\.replaceChildren\(status, fresh, dirsTitle, dirs, [^;]*\.filter\(Boolean\), transitsTitle, transits, newsTitle, news, note\);/);
   assert.match(panel, /transitsMount: transits,/);
   // Scény konfliktov žijú od 2026-10-31 v conflictScenes.js (lenivý štart) — main.js ich nenesie.
   const main = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');

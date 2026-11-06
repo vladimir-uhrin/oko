@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HOTCARD_CLIP_SELECTOR, HOTCARD_OBSTACLE_SELECTOR, HOTCARD_STATUS_ZONE, clipObstacleRect, createIncidentCards, hotCardAnchorShown, placeHotCards } from './gulfIncidentCards.js';
+import { HOTCARD_CLIP_SELECTOR, HOTCARD_MODE_LIMIT, HOTCARD_OBSTACLE_SELECTOR, HOTCARD_STATUS_ZONE, clipObstacleRect, createIncidentCards, hotCardAnchorShown, placeHotCards } from './gulfIncidentCards.js';
 
 function makeNode(tag) {
   const node = {
@@ -210,4 +210,26 @@ test('miesto stavového riadka pod hornou lištou je vyhradené stále — karta
   assert.equal(boxHit(cardBox(hidden[0]), zone), false);
   assert.deepEqual([shown[0].cx, shown[0].cy], [hidden[0].cx, hidden[0].cy], 'objavenie riadka kartou nepohne');
   assert.ok(HOTCARD_OBSTACLE_SELECTOR.split(',').map((s) => s.trim()).includes('#global-loading-status'));
+});
+
+test('režim compact (dejisko Blízkeho východu, 2026-11-06): najviac 3 karty, zmena režimu prekreslí z cache, full vráti všetky', async () => {
+  const { viewer, container } = makeViewer();
+  const many = { items: ['Isfahan', 'Tehran', 'Shiraz', 'Tabriz', 'Mashhad'].map((p, n) => item(`Drone strike reported near ${p} airport`, 10 + n)) };
+  const cards = createIncidentCards({ viewer, fetch: async () => many, translate: (k) => k, lang: 'en', now: () => 1000 });
+  assert.equal(cards.getMode(), 'full');
+  assert.equal(await cards.showFor('gaza'), 5, 'plný režim: do šiestich kariet');
+  cards.setMode('compact');
+  assert.equal(cards.getMode(), 'compact');
+  assert.equal(cards.count, 3, 'kompaktný režim prekreslí z toho istého zoznamu na 3');
+  assert.equal(places(container).length, 3);
+  cards.setMode('nonsense');
+  assert.equal(cards.getMode(), 'full', 'neznámy režim = full');
+  assert.equal(cards.count, 5);
+  cards.setMode('compact');
+  cards.clear();
+  assert.equal(cards.count, 0);
+  cards.setMode('full');
+  assert.equal(cards.count, 0, 'po clear() zmena režimu nekreslí nič');
+  assert.deepEqual(HOTCARD_MODE_LIMIT, { full: 6, compact: 3 });
+  cards.destroy();
 });

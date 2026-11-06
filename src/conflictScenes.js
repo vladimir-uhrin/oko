@@ -744,6 +744,7 @@ export function initConflictScenes(deps) {
     activeFrontScene = null;
     activeTheatre = null;
     kartaOverlay?.setSuspended?.(false);
+    incidentCards.setMode?.('full');
     mideastPanel?.setActiveTheatre?.(null);
     void mideastControl.setTheatre(null); // odchod z dejiska schová jeho kontrolu sídiel
     // Scéna úžiny s údajmi PortWatch (hormuz, bab-el-mandeb, suez) zvýrazní svoj riadok karty.
@@ -836,6 +837,9 @@ export function initConflictScenes(deps) {
     // Rám KARTY je ukrajinský (mapka Ukrajiny, legenda strán) — pri dejisku Blízkeho východu v KARTE
     // sa pozastaví (etapa 7, nález zo snímky: nad Gazou visela mapka Ukrajiny).
     kartaOverlay?.setSuspended?.(Boolean(scene));
+    // Karty správ pri dejisku kompaktné (najviac 3, bez náhľadu) — polygóny poplachov a plochy kontroly
+    // sídiel musia ostať čitateľné (2026-11-06); úžiny ich vracajú na plný režim.
+    incidentCards.setMode?.(scene ? 'compact' : 'full');
     ukrainePanel?.setActiveScene?.(null);
     ukraineTimeline.setActiveScene(null);
     mideastPanel?.setActiveTheatre?.(scene?.id || null);

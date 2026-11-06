@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { createMideastPanel, swatchColour } from './mideastPanel.js';
+import { MIDEAST_FRESH_STALE_DAYS, createMideastPanel, freshnessRows, swatchColour } from './mideastPanel.js';
 import { listMideastTheatres } from './data/mideastTheatres.js';
 import { MIDEAST_CONTROL_MODULES } from './data/wikiControl.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
@@ -105,7 +105,7 @@ test('kostra: stav, 12 dejísk (prehľad prvý a čiarkovaný), miesto pre sprá
   assert.equal(panel.transitsMount, transits);
   assert.equal(transits.dataset.mideastTransits, '');
   // Poradie v tele: stav → titulok → dejiská → titulok → prechody → titulok → správy → poznámka.
-  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
+  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-freshness', 'mideast-section-title', 'mideast-dirs', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
 });
 
 test('skutočný katalóg: predvolený popisok je theatreLabel (EN meno bez prekladu, SK s prekladom), prehľad prvý', () => {
@@ -339,7 +339,7 @@ test('etapa 2 — čip KONTROLA SÍDIEL: rad čipov za dejiskami, prepína sprá
   const mount = doc.createElement('div');
   const control = fakeControl();
   const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control, translate: tKey, lang: 'sk', documentRef: doc });
-  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-section-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
+  assert.deepEqual(mount.children.map((c) => c.className.split(' ')[0]), ['mideast-status', 'mideast-freshness', 'mideast-section-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-section-title', 'mideast-transits', 'mideast-section-title', 'mideast-news', 'mideast-note']);
   const chips = byClass(mount, 'mideast-chips')[0];
   assert.equal(chips.attrs.role, 'group');
   assert.equal(chips.attrs['aria-label'], 'mideast.part.layers', 'skupina čipov má neutrálny názov (od etapy 5b nesie aj VZDUŠNÝ PRIESTOR)');
@@ -519,7 +519,7 @@ test('etapa 5b — čip VZDUŠNÝ PRIESTOR vedľa KONTROLY SÍDIEL, legenda za �
   const mount = doc.createElement('div');
   const airspace = fakeAirspace();
   const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace, translate: tKey, lang: 'sk', documentRef: doc });
-  assert.deepEqual(mount.children.map((c) => c.className), ['mideast-status gas-status', 'mideast-section-title gas-card-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-section-title gas-card-title', 'mideast-transits', 'mideast-section-title gas-card-title', 'mideast-news', 'mideast-note']);
+  assert.deepEqual(mount.children.map((c) => c.className), ['mideast-status gas-status', 'mideast-freshness', 'mideast-section-title gas-card-title', 'mideast-dirs', 'mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-section-title gas-card-title', 'mideast-transits', 'mideast-section-title gas-card-title', 'mideast-news', 'mideast-note']);
   const chips = byClass(mount, 'mideast-chips')[0];
   assert.deepEqual(chips.children.map((c) => c.dataset.part), ['control', 'airspace']);
   const chip = byClass(mount, 'mideast-chip-airspace')[0];
@@ -631,8 +631,8 @@ test('etapa 5c — čip INCIDENTY LODÍ: tretí v rade, predvolene zapnutý, bez
   const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace: fakeAirspace(), ukmto, translate: tKey, lang: 'sk', documentRef: doc });
   assert.deepEqual(byClass(mount, 'mideast-chips')[0].children.map((c) => c.dataset.part), ['control', 'airspace', 'ukmto']);
   const classes = mount.children.map((c) => c.className);
-  assert.deepEqual(classes.slice(3, 7), ['mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-legend mideast-ukmto-legend']);
-  assert.equal(classes[7], 'mideast-section-title gas-card-title', 'legendy vrstiev stoja pred prechodmi úžinami');
+  assert.deepEqual(classes.slice(4, 8), ['mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-legend mideast-ukmto-legend']);
+  assert.equal(classes[8], 'mideast-section-title gas-card-title', 'legendy vrstiev stoja pred prechodmi úžinami');
   const chip = byClass(mount, 'mideast-chip-ukmto')[0];
   assert.equal(chip.textContent, 'mideast.part.ukmto');
   assert.equal(chip.attrs['aria-pressed'], 'true', 'čip je predvolene zapnutý');
@@ -722,7 +722,7 @@ test('etapa 5d — čip RUŠENIE GPS: štvrtý v rade, predvolene vypnutý, lege
   const gps = fakeGps();
   const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, labelFor, control: fakeControl(), airspace: fakeAirspace(), ukmto: fakeUkmto(), gps, translate: tKey, lang: 'sk', documentRef: doc });
   assert.deepEqual(byClass(mount, 'mideast-chips')[0].children.map((c) => c.dataset.part), ['control', 'airspace', 'ukmto', 'gps']);
-  assert.deepEqual(mount.children.map((c) => c.className).slice(3, 8), ['mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-legend mideast-ukmto-legend', 'mideast-legend mideast-gps-legend']);
+  assert.deepEqual(mount.children.map((c) => c.className).slice(4, 9), ['mideast-chips', 'mideast-legend', 'mideast-legend mideast-air-legend', 'mideast-legend mideast-ukmto-legend', 'mideast-legend mideast-gps-legend']);
   const chip = byClass(mount, 'mideast-chip-gps')[0];
   assert.equal(chip.textContent, 'mideast.part.gps');
   assert.equal(chip.attrs['aria-pressed'], 'false', 'predvolene vypnuté — odvodená vrstva sa nezapína sama');
@@ -768,4 +768,61 @@ test('etapa 5d — legenda rušenia GPS: počty buniek podľa stupňa vo farbác
   gps.emit({ counts: { high: 0, medium: 0, none: 0, thin: 12 }, todayPartial: false, error: 'HTTP 502' });
   assert.equal(byClass(legend, 'mideast-legend-state')[0].textContent, 'v tomto období nie je bunka s dosť lietadlami');
   assert.equal(byClass(byClass(legend, 'mideast-legend-source')[0], 'is-stale')[0].textContent, 'mapa rušenia GPS je nedostupná (chyba servera)');
+});
+
+// ── Riadok čerstvosti (2026-11-06, „dáta k") ─────────────────────────────────
+const NOW_FRESH = Date.parse('2026-11-06T12:00:00Z');
+
+test('freshnessRows: len zapnuté a aktívne vrstvy s dátami; vek v dňoch, nad 7 dní ZASTARANÉ; kontrola = najstaršia revízia', () => {
+  const rows = freshnessRows({
+    incidents: { enabled: true, active: true, lastDay: '2026-10-26' },
+    alerts: { enabled: true, active: true, lastDay: '2026-10-10' },
+    ukmto: { enabled: true, active: true, incidents: [{ t: Date.parse('2026-11-05T08:00:00Z') }, { t: Date.parse('2026-11-01T08:00:00Z') }] },
+    control: { enabled: true, modules: [{ revisionAt: '2026-11-04T10:00:00Z' }, { revisionAt: '2026-10-20T10:00:00Z' }] },
+  }, NOW_FRESH);
+  assert.deepEqual(rows, [
+    { id: 'incidents', day: '2026-10-26', ageDays: 11, stale: true },
+    { id: 'alerts', day: '2026-10-10', ageDays: 27, stale: true },
+    { id: 'ukmto', day: '2026-11-05', ageDays: 1, stale: false },
+    { id: 'control', day: '2026-10-20', ageDays: 17, stale: true },
+  ]);
+  assert.deepEqual(freshnessRows({ incidents: { enabled: false, active: true, lastDay: '2026-11-06' }, alerts: { enabled: true, active: false, lastDay: '2026-11-06' }, ukmto: { enabled: true, active: true, incidents: [] }, control: { enabled: true, modules: [] } }, NOW_FRESH), [], 'vypnuté, neaktívne a prázdne vrstvy nič');
+  assert.deepEqual(freshnessRows({}, NOW_FRESH), []);
+  assert.equal(freshnessRows({ incidents: { enabled: true, active: true, lastDay: '2026-11-06' } }, NOW_FRESH)[0].ageDays, 0);
+  assert.equal(MIDEAST_FRESH_STALE_DAYS, 7);
+});
+
+test('riadok čerstvosti v paneli: skrytý bez dejiska, po zmene vrstvy sa naplní, zastarané zvýraznené; texty SK/EN; kompaktné karty správ v conflictScenes.js', () => {
+  const doc = fakeDocument();
+  const mount = doc.createElement('div');
+  let incState = { enabled: true, active: false, loading: false, loaded: false, period: '30d', periods: ['7d', '30d', 'all'], periodCounts: {}, summary: { total: 0, byType: [], latest: [] }, lastDay: null };
+  const listeners = new Set();
+  const incidents = { getState: () => incState, onChange: (fn) => { listeners.add(fn); return () => listeners.delete(fn); }, isEnabled: () => true, setEnabled() {}, setPeriod() {}, labels: {} };
+  const tSk = (k, v) => { const s = SK_STRINGS[k] ?? k; return v ? s.replace(/\{(\w+)\}/g, (m, n) => (n in v ? String(v[n]) : m)) : s; };
+  const panel = createMideastPanel({ mountTarget: mount, theatres: THEATRES, incidents, translate: tSk, lang: 'sk', documentRef: doc });
+  const fresh = byClass(mount, 'mideast-freshness')[0];
+  assert.equal(mount.children[1], fresh, 'hneď pod stavovým riadkom');
+  assert.equal(fresh.hidden, true, 'bez dejiska skrytý');
+  incState = { ...incState, active: true, loaded: true, lastDay: '2026-10-26' };
+  for (const fn of listeners) fn(incState);
+  assert.equal(fresh.hidden, false);
+  assert.equal(byClass(fresh, 'mideast-fresh-title')[0].textContent, 'Dáta k:');
+  const item = byClass(fresh, 'mideast-fresh-item')[0];
+  assert.equal(item.dataset.source, 'incidents');
+  assert.equal(item.children[0].textContent, 'udalosti');
+  assert.equal(item.children[1].textContent, '26. 10. 2026');
+  assert.match(item.title, /GeoConfirmed/);
+  const old = (Date.now() - Date.parse('2026-10-26T00:00:00Z')) / 86_400_000 > 7;
+  assert.equal(item.classList.contains('is-stale'), old);
+  if (old) assert.equal(item.children[2].textContent, 'ZASTARANÉ');
+  incState = { ...incState, active: false };
+  for (const fn of listeners) fn(incState);
+  assert.equal(fresh.hidden, true, 'odchod z dejiska riadok schová');
+  panel.destroy();
+  for (const k of ['mideast.fresh.title', 'mideast.fresh.stale', ...['incidents', 'alerts', 'ukmto', 'control'].flatMap((id) => [`mideast.fresh.${id}`, `mideast.fresh.${id}.hint`])]) assert.ok(EN_STRINGS[k] && SK_STRINGS[k], k);
+  const scenes = readFileSync(new URL('./conflictScenes.js', import.meta.url), 'utf8');
+  assert.match(scenes, /incidentCards\.setMode\?\.\(scene \? 'compact' : 'full'\);/, 'dejisko = kompaktné karty správ');
+  assert.match(scenes, /incidentCards\.setMode\?\.\('full'\);/, 'úžina = plné karty');
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  for (const cls of ['.mideast-freshness', '.mideast-fresh-item.is-stale']) assert.ok(css.includes(cls), cls);
 });

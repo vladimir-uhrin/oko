@@ -70,6 +70,46 @@ export function swatchColour(css, alpha) {
   return `rgba(${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}, ${alpha})`;
 }
 
+/** Vek v dňoch, od ktorého je zdroj v riadku čerstvosti ZASTARANÝ. */
+export const MIDEAST_FRESH_STALE_DAYS = 7;
+const DAY_MS = 86_400_000;
+const dayOfMs = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * Riadky čerstvosti z aktuálnych stavov vrstiev: len vrstvy, ktoré sú zapnuté A aktívne pri dejisku
+ * a majú aspoň jeden deň s dátami. `day` = posledný deň s dátami (udalosti: súhrn dejiska; poplachy:
+ * posledný poplach; UKMTO: najnovšie varovanie; kontrola sídiel: najstaršia revízia zo zapnutých
+ * modulov — najslabší článok rozhoduje). Pure.
+ * @param {{incidents?: object|null, alerts?: object|null, ukmto?: object|null, control?: object|null}} states getState() vrstiev
+ * @param {number} nowMs
+ * @returns {Array<{id: string, day: string, ageDays: number, stale: boolean}>}
+ */
+export function freshnessRows(states, nowMs = Date.now()) {
+  const rows = [];
+  const push = (id, day) => {
+    if (!day) return;
+    const ageDays = Math.max(0, Math.floor((nowMs - Date.parse(`${day}T00:00:00Z`)) / DAY_MS));
+    if (!Number.isFinite(ageDays)) return;
+    rows.push({ id, day, ageDays, stale: ageDays > MIDEAST_FRESH_STALE_DAYS });
+  };
+  const on = (st) => Boolean(st?.enabled) && Boolean(st?.active ?? true);
+  const inc = states?.incidents;
+  if (on(inc) && inc.lastDay) push('incidents', inc.lastDay);
+  const al = states?.alerts;
+  if (on(al) && al.lastDay) push('alerts', al.lastDay);
+  const uk = states?.ukmto;
+  if (on(uk) && Array.isArray(uk.incidents) && uk.incidents.length) {
+    const t = Math.max(...uk.incidents.map((x) => Number(x?.t) || 0));
+    if (t > 0) push('ukmto', dayOfMs(t));
+  }
+  const ctl = states?.control;
+  if (ctl?.enabled && Array.isArray(ctl.modules) && ctl.modules.length) {
+    const days = ctl.modules.map((m) => (m?.revisionAt ? dayOfMs(Date.parse(m.revisionAt)) : null)).filter((d) => d && d !== 'Invalid Date');
+    if (days.length) push('control', days.sort()[0]);
+  }
+  return rows;
+}
+
 /**
  * @param {object} o
  * @param {Element|null} o.mountTarget prázdny prvok tela panela (`#mideast-panel [data-mideast-body]`)
@@ -127,6 +167,11 @@ export function createMideastPanel({
   const status = el('div', 'mideast-status gas-status', translate('mideast.status'));
   status.dataset.state = 'ready';
   status.lang = lang;
+  // Riadok čerstvosti (2026-11-06, vlastník „čo by si vylepšil": dejisko ako celok nehovorilo, že
+  // najnovšie dáta sú týždne staré): pri aktívnom dejisku posledný deň s dátami každej zapnutej
+  // vrstvy (udalosti, poplachy, UKMTO, kontrola sídiel) s vekom; nad 7 dní značka ZASTARANÉ.
+  const fresh = el('div', 'mideast-freshness');
+  fresh.hidden = true;
 
   const dirsTitle = el('div', 'mideast-section-title gas-card-title', translate('mideast.theatres'));
   const dirs = el('div', 'mideast-dirs');
@@ -258,7 +303,7 @@ export function createMideastPanel({
   const news = el('div', 'mideast-news');
   news.dataset.mideastNews = '';
   const note = el('p', 'mideast-note', translate('mideast.note'));
-  mountTarget.replaceChildren(status, dirsTitle, dirs, ...[chips, legend, incLegend, alertsLegend, airLegend, shipLegend, gpsLegend, netLegend, humCard].filter(Boolean), transitsTitle, transits, newsTitle, news, note);
+  mountTarget.replaceChildren(status, fresh, dirsTitle, dirs, ...[chips, legend, incLegend, alertsLegend, airLegend, shipLegend, gpsLegend, netLegend, humCard].filter(Boolean), transitsTitle, transits, newsTitle, news, note);
 
   // ── Legenda kontroly ──────────────────────────────────────────────────────
   // t() vracia pri chýbajúcom kľúči samotný kľúč → padá sa na anglický popis z konfigurácie
@@ -332,8 +377,26 @@ export function createMideastPanel({
     if (!visible) { legend.replaceChildren(); return; }
     legend.replaceChildren(...modules.map(renderModule), el('p', 'mideast-legend-note', translate('mideast.ctl.derived')));
   }
-  const unsubscribeControl = control?.onChange?.(() => renderControl()) || null;
+  const unsubscribeControl = control?.onChange?.(() => { renderControl(); renderFreshness(); }) || null;
   renderControl();
+
+  // ── Riadok čerstvosti ─────────────────────────────────────────────────────
+  function renderFreshness() {
+    const rows = freshnessRows({ incidents: incidents?.getState?.(), alerts: alerts?.getState?.(), ukmto: ukmto?.getState?.(), control: control?.getState?.() }, Date.now());
+    fresh.hidden = rows.length === 0;
+    if (!rows.length) { fresh.replaceChildren(); return; }
+    const parts = [el('span', 'mideast-fresh-title', translate('mideast.fresh.title'))];
+    for (const r of rows) {
+      const item = el('span', `mideast-fresh-item${r.stale ? ' is-stale' : ''}`);
+      item.dataset.source = r.id;
+      item.title = translate(`mideast.fresh.${r.id}.hint`);
+      item.appendChild(el('span', 'mideast-fresh-label', translate(`mideast.fresh.${r.id}`)));
+      item.appendChild(el('span', 'mideast-fresh-day', dateFormat.format(new Date(`${r.day}T00:00:00Z`))));
+      item.appendChild(el('span', `mideast-legend-age${r.stale ? ' is-stale' : ''}`, r.stale ? translate('mideast.fresh.stale') : ageText(r.ageDays, translate)));
+      parts.push(item);
+    }
+    fresh.replaceChildren(...parts);
+  }
 
   // ── Legenda VZDUŠNÉHO PRIESTORU (etapa 5b) ────────────────────────────────
   // Bulletiny Blízkeho východu po jednom riadku; ostatné vo svete jedným riadkom (vrstva
@@ -479,7 +542,7 @@ export function createMideastPanel({
     parts.push(el('p', 'mideast-legend-note', translate('mideast.ukmto.note')));
     shipLegend.replaceChildren(...parts);
   }
-  const unsubscribeUkmto = ukmto?.onChange?.(() => renderUkmto()) || null;
+  const unsubscribeUkmto = ukmto?.onChange?.(() => { renderUkmto(); renderFreshness(); }) || null;
   renderUkmto();
 
   // ── Legenda RUŠENIA GPS (etapa 5d) ────────────────────────────────────────
@@ -612,7 +675,7 @@ export function createMideastPanel({
     parts.push(el('p', 'mideast-legend-note', translate('mideast.inc.note')));
     incLegend.replaceChildren(...parts);
   }
-  const unsubscribeIncidents = incidents?.onChange?.(() => renderIncidents()) || null;
+  const unsubscribeIncidents = incidents?.onChange?.(() => { renderIncidents(); renderFreshness(); }) || null;
   renderIncidents();
 
   // ── Legenda POPLACHOV · Izrael (etapa 6) ──────────────────────────────────
@@ -697,8 +760,9 @@ export function createMideastPanel({
     parts.push(el('p', 'mideast-legend-note', translate('mideast.alerts.note')));
     alertsLegend.replaceChildren(...parts);
   }
-  const unsubscribeAlerts = alerts?.onChange?.(() => renderAlerts()) || null;
+  const unsubscribeAlerts = alerts?.onChange?.(() => { renderAlerts(); renderFreshness(); }) || null;
   renderAlerts();
+  renderFreshness();
 
   // ── Legenda INTERNET · OONI (etapa 6) ─────────────────────────────────────
   // Riadok na krajinu: meno, stupeň (zhoršenie / zlepšenie / bez zmeny / ticho), podiel 7 d proti

@@ -340,6 +340,8 @@ export function createMideastIncidents({
       periodCounts: periodCounts(),
       firstDay: MIDEAST_INCIDENTS_FIRST_DAY,
       theatre: _theatre?.id || null,
+      /** Posledný deň s udalosťou v súhrne dejiska (vek zdroja nahlas — riadok čerstvosti v paneli). */
+      lastDay: Object.entries(_summaries.get(summaryKey())?.json?.days || {}).filter(([, v]) => (Number(v?.total) || 0) > 0).map(([d]) => d).sort().at(-1) || null,
       sources: _sources,
       fetchedAt: Math.max(0, ...Object.values(_sources?.geoconfirmed?.conflicts || {}).map((c) => Number(c?.fetchedAt) || 0)) || null,
       incidents: _incidents,
