@@ -25,6 +25,18 @@ test('invalid individual features are skipped; missing magnitude is not zero; in
   assert.deepEqual(normalizeEarthquakeFeed({ features: [] }, 'EMSC').records, []);
 });
 
+test('USGS impact fields (PAGER, tsunami, DYFI, ShakeMap) are kept; zero sentinels and EMSC become null', () => {
+  const u = normalized('USGS', 'u', { alert: 'orange', tsunami: 1, felt: 31, cdi: 4.2, mmi: 6.4, types: ',dyfi,losspager,shakemap,' });
+  assert.equal(u.alert, 'orange'); assert.equal(u.tsunami, true); assert.equal(u.felt, 31); assert.equal(u.cdi, 4.2);
+  assert.equal(u.mmi, 6.4); assert.equal(u.hasShakemap, true);
+  const quiet = normalized('USGS', 'q', { alert: null, tsunami: 0, felt: 0, cdi: 0, mmi: 0, types: ',origin,' });
+  assert.equal(quiet.alert, null); assert.equal(quiet.tsunami, false); assert.equal(quiet.felt, null);
+  assert.equal(quiet.cdi, null); assert.equal(quiet.mmi, null); assert.equal(quiet.hasShakemap, false);
+  assert.equal(normalized('USGS', 'w', { alert: 'purple' }).alert, null, 'unknown PAGER level is not shown');
+  const e = normalized('EMSC', 'e', { alert: 'red', tsunami: 1, felt: 5 });
+  assert.equal(e.alert, null); assert.equal(e.tsunami, false); assert.equal(e.felt, null);
+});
+
 test('same-source revisions replace by id; magnitudes from different sources are never averaged', () => {
   const data = normalizeEarthquakeFeed({ features: [feature('a', { updated: time + 1 }), feature('a', { mag: 3.4, updated: time + 2 })] }, 'USGS');
   assert.equal(data.records.length, 1); assert.equal(data.records[0].mag, 3.4);

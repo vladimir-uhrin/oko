@@ -340,3 +340,58 @@ test('earthquake refresh reports failure and clears it only after a successful r
     layer.destroy(viewer);
   }
 });
+
+// 2026-11-06: prstenec citeľného dosahu (feltSource) leží nad diskom ohniska, takže
+// scene.pick vracal prstenec a klik/hover na epicentrum nič nenašiel (M6,1 Hasaki).
+// Vrstva musí prejsť drillPickom cez prstenec k disku ohniska.
+test('an epicentre under the felt ring is still found through the ring (drillPick)', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = globalThis.document;
+  // Cesium's ScreenSpaceEventHandler registers document-level pointer listeners.
+  globalThis.document = { addEventListener() {}, removeEventListener() {} };
+  const listeners = new Map();
+  const canvas = {
+    addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: () => {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    ownerDocument: globalThis.document, clientWidth: 800, clientHeight: 600,
+  };
+  const sources = [];
+  const ids = () => sources.flatMap(ds => ds.entities.values.map(e => ({ id: e.id })));
+  const felt = () => ids().find(e => e.id.startsWith('earthquake-felt:'));
+  const epi = () => ids().find(e => e.id.startsWith('earthquake:'));
+  const viewer = {
+    scene: { canvas, requestRender() {}, pick: () => felt(), drillPick: () => [felt(), epi()] },
+    camera: { moveStart: { addEventListener: () => () => {} } },
+    dataSources: { add(ds) { sources.push(ds); return ds; }, remove() { return true; } },
+  };
+  const shown = [];
+  const layer = createEarthquakesLayer({
+    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {} },
+    pulseFactory: () => ({ setEvents() {}, setVisible() {}, setSelected() {}, hitTest: () => null, destroy() {} }),
+    hoverFactory: () => ({ show: (event, at, context) => shown.push({ event, context }), hide() {}, destroy() {}, isHovered: () => false }),
+  });
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ features: [{
+    id: 'us-main', geometry: { coordinates: [142.12, 34.97, 29] },
+    properties: { mag: 6.1, place: 'Hasaki', time: 1_753_600_000_000, alert: 'green', felt: 31, cdi: 4.2 },
+  }, {
+    id: 'us-after', geometry: { coordinates: [142.0, 35.1, 20] },
+    // 2 min po hlavnom otrase — test „teraz" je o 200 s neskôr, neskoršie by boli „budúce" a vyradené.
+    properties: { mag: 4.8, place: 'Hasaki after', time: 1_753_600_000_000 + 2 * 60_000 },
+  }] }) });
+  try {
+    layer.init(viewer); layer.enable(); await layer.update();
+    assert.ok(felt(), 'the M6.1 draws a felt ring');
+    listeners.get('pointermove')({ clientX: 100, clientY: 100, buttons: 0, pointerType: 'mouse' });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(shown.length, 1, 'hover found the epicentre through the ring');
+    assert.equal(shown[0].event.mag, 6.1);
+    assert.deepEqual(shown[0].context.link, { role: 'mainshock', aftershocks: 1, strongest: { id: 'USGS:us-after', mag: 4.8 } });
+    assert.equal(shown[0].event.alert, 'green');
+    assert.equal(layer.selectById('USGS:us-main'), true);
+    assert.equal(layer.getSelectedInfo().felt, 31);
+  } finally {
+    globalThis.fetch = originalFetch;
+    layer.destroy(viewer);
+    globalThis.document = originalDocument;
+  }
+});

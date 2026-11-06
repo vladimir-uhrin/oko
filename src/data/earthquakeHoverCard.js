@@ -1,11 +1,45 @@
 import { t } from '../i18n.js';
 import { createAreaPhotoLookup } from './earthquakeAreaPhoto.js';
+import { formatElapsed } from './earthquakeSequence.js';
 
 const date = value => Number.isFinite(value) ? new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—';
-export function earthquakeHoverModel(event) {
+
+/**
+ * Riadky dopadov podľa USGS (2026-11-06): PAGER, tsunami, hlásenia „Did You Feel It?",
+ * najvyššia intenzita ShakeMap. Len to, čo zdroj naozaj poslal — nič sa nedopočítava.
+ * Pure. @returns {Array<{key:string, text:string, level?:string}>}
+ */
+export function earthquakeImpactLines(event) {
+  const lines = [];
+  if (!event) return lines;
+  if (event.alert) lines.push({ key: 'alert', level: event.alert, text: t('quake.pager', { level: t('quake.pager.' + event.alert) }) });
+  if (event.tsunami) lines.push({ key: 'tsunami', level: 'tsunami', text: t('quake.tsunami') });
+  if (Number.isFinite(event.felt)) lines.push({ key: 'felt', text: t('quake.dyfi', { n: event.felt.toLocaleString('sk-SK') })
+    + (Number.isFinite(event.cdi) ? ' · ' + t('quake.cdi', { cdi: event.cdi.toFixed(1) }) : '') });
+  if (Number.isFinite(event.mmi)) lines.push({ key: 'mmi', text: t('quake.mmi', { mmi: romanMmi(event.mmi) }) });
+  return lines;
+}
+
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+export function romanMmi(mmi) { const i = Math.min(12, Math.max(1, Math.round(mmi))); return ROMAN[i - 1]; }
+
+/** Veta o sekvencii: dotras po hlavnom otrase, alebo počet dotrasov hlavného otrasu. Pure. */
+export function earthquakeSequenceLine(link) {
+  if (!link) return null;
+  if (link.role === 'aftershock') return t('quake.aftershockOf', { mag: link.mainshockMag.toFixed(1),
+    place: link.mainshockPlace || t('quake.event'), elapsed: formatElapsed(link.deltaMs), km: Math.round(link.distanceKm) });
+  if (link.role === 'mainshock') return t('quake.aftershocks', { n: link.aftershocks, mag: link.strongest.mag.toFixed(1) });
+  return null;
+}
+
+export function earthquakeHoverModel(event, { now = Date.now(), link = null } = {}) {
   if (!event) return null;
   return {
     title: event.place || t('quake.event'), magnitude: `M${event.mag.toFixed(1)} ${event.magType || ''}`.trim(),
+    ago: Number.isFinite(event.time ?? event.solutions?.[0]?.time)
+      ? t('quake.ago', { elapsed: formatElapsed(now - (event.time ?? event.solutions[0].time)) }) : null,
+    impact: earthquakeImpactLines(event),
+    sequence: earthquakeSequenceLine(link),
     association: t(event.association === 'probable' ? 'quake.probable' : 'quake.single'),
     solutions: event.solutions.map(s => ({
       title: s.source + ' · ' + s.sourceId + (s.stale ? ' · ' + t('quake.stale') : ''), url: s.url,
@@ -46,14 +80,21 @@ export function createEarthquakeHoverCard({ document: doc = globalThis.document,
   doc.addEventListener('keydown', keydown);
   return {
     isHovered: () => hovered || root.contains(doc.activeElement), hide,
-    show(event, at) {
+    show(event, at, context = {}) {
       if (!event) { hide(); return; }
       if (current === event) return;
-      hide(); current = event; const token = generation; const model = earthquakeHoverModel(event);
+      hide(); current = event; const token = generation; const model = earthquakeHoverModel(event, context);
       root.replaceChildren(); root.hidden = false;
       const close = el('button', '×'); close.className = 'earthquake-hover-close'; close.setAttribute('aria-label', t('quake.close')); close.addEventListener('click', hide);
       el('strong', model.magnitude).className = 'earthquake-hover-mag';
-      el('h3', model.title); el('p', model.association).className = 'earthquake-hover-note';
+      if (model.ago) el('span', model.ago).className = 'earthquake-hover-ago';
+      el('h3', model.title);
+      if (model.impact.length) {
+        const impact = el('ul'); impact.className = 'earthquake-hover-impact';
+        for (const line of model.impact) { const li = el('li', line.text, impact); if (line.level) li.dataset.level = line.level; }
+      }
+      if (model.sequence) el('p', model.sequence).className = 'earthquake-hover-sequence';
+      el('p', model.association).className = 'earthquake-hover-note';
       for (const solution of model.solutions) {
         const section = el('div'); section.className = 'earthquake-hover-solution';
         link(solution.title, solution.url, section);

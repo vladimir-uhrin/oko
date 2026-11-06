@@ -25,6 +25,30 @@ test('hover exposes distinct source values, agency, timestamps, unknown depth an
   assert.equal(model.solutions[1].rows[1][1], '—');
 });
 
+test('hover shows elapsed time, USGS impact lines and the aftershock sequence; nothing is invented when fields are missing', () => {
+  const now = 1700000000000 + 134 * 60_000;
+  const plain = earthquakeHoverModel(event, { now });
+  assert.equal(plain.ago, '2 h 14 min ago'); assert.deepEqual(plain.impact, []); assert.equal(plain.sequence, null);
+  const impact = earthquakeHoverModel({ ...event, alert: 'orange', tsunami: true, felt: 1234, cdi: 5.1, mmi: 7.4 }, {
+    now, link: { role: 'mainshock', aftershocks: 3, strongest: { id: 'x', mag: 4.8 } } });
+  assert.deepEqual(impact.impact.map(l => l.key), ['alert', 'tsunami', 'felt', 'mmi']);
+  assert.equal(impact.impact[0].level, 'orange'); assert.match(impact.impact[0].text, /orange/);
+  assert.match(impact.impact[2].text, /1.234|1,234/); assert.match(impact.impact[2].text, /5\.1/);
+  assert.match(impact.impact[3].text, /VII/);
+  assert.match(impact.sequence, /3 .*aftershocks.*M4\.8/);
+  const after = earthquakeHoverModel(event, { now, link: { role: 'aftershock', mainshockId: 'm', mainshockMag: 6.1,
+    mainshockPlace: 'Hasaki', deltaMs: 20 * 60_000, distanceKm: 17.4 } });
+  assert.match(after.sequence, /M6\.1 Hasaki/); assert.match(after.sequence, /20 min/); assert.match(after.sequence, /17 km/);
+  const doc = dom();
+  const card = createEarthquakeHoverCard({ document: doc, setTimer: () => 1, clearTimer: () => {}, lookupPhoto: async () => null });
+  card.show({ ...event, alert: 'red' }, { x: 10, y: 10 }, { now, link: null });
+  const root = doc.body.children[0];
+  assert.match(allText(root), /2 h 14 min ago/); assert.match(allText(root), /red/);
+  const li = root.children.find(c => c.className === 'earthquake-hover-impact')?.children[0];
+  assert.equal(li?.dataset?.level, 'red');
+  card.destroy();
+});
+
 test('area search is bounded to 10 km; nearest image requires coordinates and Wikimedia thumbnail', () => {
   assert.equal(areaPhotoSearchUrl(91, 0), null);
   assert.equal(new URL(areaPhotoSearchUrl(48, 18)).searchParams.get('ggsradius'), '10000');
@@ -57,7 +81,7 @@ test('unlicensed pictures and failed/aborted lookups never supply a photo', asyn
 
 function dom() {
   class Element {
-    children = []; style = {}; listeners = new Map(); offsetWidth = 370; offsetHeight = 600;
+    children = []; style = {}; dataset = {}; listeners = new Map(); offsetWidth = 370; offsetHeight = 600;
     appendChild(node) { this.children.push(node); node.parent = this; }
     replaceChildren() { this.children = []; }
     setAttribute() {}

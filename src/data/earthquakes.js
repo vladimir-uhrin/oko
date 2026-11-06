@@ -1,7 +1,8 @@
 import * as Cesium from 'cesium';
 import { t } from '../i18n.js';
 import { createEarthquakePulse, EARTHQUAKE_FELT_MIN_MAG, earthquakeFeltRadiusM } from './earthquakePulse.js';
-import { createEarthquakeHoverCard } from './earthquakeHoverCard.js';
+import { createEarthquakeHoverCard, earthquakeImpactLines, earthquakeSequenceLine } from './earthquakeHoverCard.js';
+import { linkEarthquakeSequences, formatElapsed } from './earthquakeSequence.js';
 import { normalizeEarthquakeFeed, mergeEarthquakeCatalogs, EARTHQUAKE_DAY_MS, EARTHQUAKE_RENDER_LIMIT } from './earthquakeCatalog.js';
 import { registerPickOwner, unregisterPickOwner, resolvePickId, isOwnedByOtherLayer } from './pickRegistry.js';
 import {
@@ -125,8 +126,13 @@ export function mapAnalystRecord(raw, index = 0) {
 }
 
 
-export function createEarthquakeDetail(event, position) {
-  const details = [t(event.association === 'probable' ? 'quake.probable' : 'quake.single')];
+export function createEarthquakeDetail(event, position, { now = Date.now(), link = null } = {}) {
+  const details = [];
+  if (Number.isFinite(event.time)) details.push(t('quake.ago', { elapsed: formatElapsed(now - event.time) }));
+  for (const line of earthquakeImpactLines(event)) details.push(line.text);
+  const sequence = earthquakeSequenceLine(link);
+  if (sequence) details.push(sequence);
+  details.push(t(event.association === 'probable' ? 'quake.probable' : 'quake.single'));
   for (const solution of event.solutions) {
     details.push(solution.source + ' · ' + solution.sourceId + (solution.stale ? ' · ' + t('quake.stale') : ''));
     details.push('M' + solution.mag.toFixed(1) + (solution.magType ? ' ' + solution.magType : '')
@@ -166,6 +172,8 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST,
   let feltSource = null; let feltSignatures = new Map();
   let pulse = null; let pulsar = true;
   let hover = null; let hoverRecords = []; let hoverTimer; let leaveTimer; let pointer = null;
+  // Sekvencie hlavný otras → dotrasy (earthquakeSequence.js), prepočítané pri každom render().
+  let sequenceLinks = new Map();
   let removeCameraHover = null;
 
   function clearHover() { clearTimeout(hoverTimer); clearTimeout(leaveTimer); hoverTimer = null; pointer = null; hover?.hide(); }
@@ -186,11 +194,28 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST,
       if (pulseId) event = events.find(e => e.id === pulseId);
     }
     if (!event) {
-      const id = resolvePickId(viewer.scene.pick(new Cesium.Cartesian2(x, y)));
-      if (id && dataSource?.entities.getById(id)) event = events.find(e => 'earthquake:' + e.id === id);
+      const id = pickEpicentre(new Cesium.Cartesian2(x, y));
+      if (id) event = events.find(e => 'earthquake:' + e.id === id);
     }
-    if (event) { clearTimeout(leaveTimer); hover?.show(event, pointer); }
+    if (event) { clearTimeout(leaveTimer); hover?.show(event, pointer, { now: now(), link: sequenceLinks.get(event.id) || null }); }
     else leaveHover();
+  }
+  /**
+   * Nájdi disk ohniska pod kurzorom. Veľký prstenec citeľného dosahu (feltSource)
+   * leží NAD diskami ohnísk aj nad dotrasmi, takže obyčajný pick vracal prstenec a
+   * klik na epicentrum nič nevybral (2026-11-06, M6,1 Hasaki). drillPick prejde
+   * cez prstenec k prvému disku ohniska; prstenec sám sa nikdy nevyberá.
+   * @returns {string|null} id entity 'earthquake:…' alebo null
+   */
+  function pickEpicentre(windowPosition) {
+    const scene = viewer?.scene;
+    if (!scene || !dataSource) return null;
+    const picks = typeof scene.drillPick === 'function' ? scene.drillPick(windowPosition, 6) : [scene.pick(windowPosition)];
+    for (const picked of picks || []) {
+      const id = resolvePickId(picked);
+      if (id && dataSource.entities.getById(id)) return id;
+    }
+    return null;
   }
   function moveHover(e) {
     if (e.buttons || e.pointerType === 'touch') { clearHover(); return; }
@@ -209,8 +234,8 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST,
     if (!enabled || !entity) { selectedId = null; pulse?.setSelected(null); overlayHost.clearSource(DETAIL_SOURCE); return; }
     pulse?.setSelected(selectedId);
     overlayHost.setVisible(DETAIL_SOURCE, true);
-    overlayHost.setEntries(DETAIL_SOURCE, [createEarthquakeDetail(event, entity.position.getValue(Cesium.JulianDate.now()))],
-      { cohortLimit: 1, collisionCapacity: 0, moving: false });
+    overlayHost.setEntries(DETAIL_SOURCE, [createEarthquakeDetail(event, entity.position.getValue(Cesium.JulianDate.now()),
+      { now: now(), link: sequenceLinks.get(event.id) || null })], { cohortLimit: 1, collisionCapacity: 0, moving: false });
   }
   function render() {
     if (!dataSource) return;
@@ -219,6 +244,7 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST,
       .sort((a, b) => b.mag - a.mag || a.id.localeCompare(b.id));
     const shown = eligible.slice(0, EARTHQUAKE_RENDER_LIMIT);
     hoverRecords = shown.slice(0, EARTHQUAKE_OVERLAY_COHORT_LIMIT); clearHover();
+    sequenceLinks = linkEarthquakeSequences(shown);
     omitted = eligible.length - shown.length;
     // Prepare every replacement before touching the currently valid scene.
     const prepared = shown.map(event => {
@@ -307,9 +333,10 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST,
     clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
     clickHandler.setInputAction(click => {
       const picked = viewer.scene.pick(click.position);
-      const id = resolvePickId(picked);
-      if (id && isOwnedByOtherLayer('earthquakes', id)) return;
-      if (id && dataSource.entities.getById(id)) selectedId = id.slice('earthquake:'.length);
+      const topId = resolvePickId(picked);
+      if (topId && isOwnedByOtherLayer('earthquakes', topId)) return;
+      const id = pickEpicentre(click.position);
+      if (id) selectedId = id.slice('earthquake:'.length);
       else if (!picked) selectedId = null;
       publishDetail(); viewer.scene.requestRender?.();
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);

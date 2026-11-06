@@ -8,6 +8,23 @@ const finite = value => value !== null && value !== undefined && !(typeof value 
 const text = value => typeof value === 'string' ? value.trim() : '';
 const epoch = value => typeof value === 'number' ? (Number.isFinite(value) ? value : null) : (typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null);
 
+export const EARTHQUAKE_ALERT_LEVELS = Object.freeze(['green', 'yellow', 'orange', 'red']);
+
+/** USGS impact fields (PAGER, tsunami, DYFI, ShakeMap). USGS sends mmi/cdi 0 for „none". Pure. */
+export function usgsImpact(p) {
+  const alert = text(p?.alert).toLowerCase();
+  const felt = finite(p?.felt); const cdi = finite(p?.cdi); const mmi = finite(p?.mmi);
+  const types = text(p?.types);
+  return {
+    alert: EARTHQUAKE_ALERT_LEVELS.includes(alert) ? alert : null,
+    tsunami: Number(p?.tsunami) === 1,
+    felt: felt !== null && felt > 0 ? Math.round(felt) : null,
+    cdi: cdi !== null && cdi > 0 ? cdi : null,
+    mmi: mmi !== null && mmi > 0 ? mmi : null,
+    hasShakemap: /(^|,)shakemap(,|$)/.test(types),
+  };
+}
+
 export function normalizeEarthquakeFeed(payload, source) {
   if (!payload || !Array.isArray(payload.features)) throw new Error('Malformed catalog');
   if (!['USGS', 'EMSC'].includes(source)) throw new Error('Unknown catalog');
@@ -31,6 +48,9 @@ export function normalizeEarthquakeFeed(payload, source) {
       status: text(p.status) || null, author: text(p.auth ?? p.net) || null,
       url: source === 'USGS' ? `https://earthquake.usgs.gov/earthquakes/eventpage/${encodeURIComponent(id)}`
         : `https://www.seismicportal.eu/fdsnws/event/1/query?format=json&eventid=${encodeURIComponent(id)}`,
+      // Dopady podľa USGS (2026-11-06): PAGER stupeň, príznak tsunami, hlásenia
+      // „Did You Feel It?" a najvyššia intenzita ShakeMap. EMSC ich nedáva → null.
+      ...(source === 'USGS' ? usgsImpact(p) : { alert: null, tsunami: false, felt: null, cdi: null, mmi: null, hasShakemap: false }),
     };
     if (!records.has(record.id) || records.get(record.id).updated < record.updated) records.set(record.id, record);
   }
@@ -38,7 +58,7 @@ export function normalizeEarthquakeFeed(payload, source) {
   return { records: [...records.values()], rejected };
 }
 
-function distanceKm(a, b) {
+export function distanceKm(a, b) {
   const rad = Math.PI / 180;
   const h = Math.sin((a.lat - b.lat) * rad / 2) ** 2
     + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin((a.lon - b.lon) * rad / 2) ** 2;

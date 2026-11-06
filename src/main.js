@@ -601,7 +601,7 @@ async function init() {
     // Štatistika (2026-10-04): len prepnutie vrstvy používateľom (origin user) — obnova z odkazu
     // a lokálneho stavu má iný origin; pred štartom GA aj tak nič neodíde (trackEvent).
     // Len vývojový server: prepínanie vrstiev a máp pre kontrolné snímky (scripts/qa-*.mjs).
-    if (import.meta.env.DEV) window.__okoQa = { setLayer: (id, on, origin = 'user') => dataManager.setEnabled(id, on, { origin }), setMap: (id) => styleManager._setMapStack(id), map: () => mapStackController.getActiveId(), layers: () => [...dataManager.layers.keys()], layer: (id) => dataManager.layers.get(id)?.module };
+    if (import.meta.env.DEV) window.__okoQa = { viewer, setLayer: (id, on, origin = 'user') => dataManager.setEnabled(id, on, { origin }), setMap: (id) => styleManager._setMapStack(id), map: () => mapStackController.getActiveId(), layers: () => [...dataManager.layers.keys()], layer: (id) => dataManager.layers.get(id)?.module };
     // Mapa podľa vrstvy (2026-10-05, src/layerBasemap.js): pri kliknutí na vrstvu vhodnejší podklad
     // s hláškou a návratom; ručná voľba mapy má prednosť; vypínač v Zobrazení.
     const autoBasemapToggle = document.getElementById('map-auto-basemap');

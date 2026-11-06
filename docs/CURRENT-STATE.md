@@ -1909,6 +1909,16 @@ its criteria cannot be silently ignored.
 | Live AIS Vessels 🚢 | AISStream websocket | `src/data/aisLiveVessels.js` | `/api/ais-live` | 60s (+800ms visibility pass) |
 | Mapped Installations ⌖ | OpenStreetMap mapped context; on-demand Google Maps Places supplement | `src/data/militaryInstallations.js` | `/api/military-installations`, `/api/google/text-search` | viewport-driven + user search; while unavailable, auto-retry 30 s → 240 s backoff |
 | Earthquakes | USGS + EMSC/CSEM | `src/data/earthquakes.js` | `/api/earthquakes/usgs`, `/api/earthquakes/emsc` | 60s |
+
+> **Earthquake cards 2026-11-06.** USGS impact fields from the summary feed are kept by
+> `normalizeEarthquakeFeed` (`alert` = PAGER level, `tsunami`, `felt`/`cdi` = Did You Feel It?
+> reports, `mmi` = ShakeMap max intensity; zero sentinels → null, EMSC → null) and shown as
+> labelled lines on the hover card (`earthquakeImpactLines`) and the selected card, together
+> with „pred X h Y min". `src/data/earthquakeSequence.js` links the 24 h catalog into
+> mainshock → aftershock sequences (M ≥ 5 mainshock, later, weaker, within 50·2^(M−5) km,
+> cap 600 km; pure, labelled „odhad OKO"). Picking goes through `scene.drillPick`: the felt
+> ring (`feltSource`) sits above the epicentre discs, so a plain `pick` returned the ring and
+> clicking an epicentre selected nothing (seen on M6.1 Hasaki).
 | Satellites | CelesTrak | `src/data/satellites.js` | `/api/celestrak` | 120s |
 | Space Missions (30d) | Launch Library 2 + CelesTrak | `src/data/rocketLaunches.js` | `/api/launches` + `/api/celestrak/active` | 5 min |
 | Traffic | OSM Overpass (+ optional TomTom live flow) | `src/data/traffic.js` | `/api/overpass` + `/api/tomtom` | viewport-driven |
