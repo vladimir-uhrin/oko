@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  FAR_GLOBE_ENTER_M, FAR_GLOBE_EXIT_M, FAR_GLOBE_LIGHTING_M, FAR_GLOBE_NIGHT_LIMB, FAR_GLOBE_NIGHT_ENTER_M, FAR_GLOBE_NIGHT_EXIT_M, FAR_GLOBE_NIGHT_STYLE,
+  FAR_GLOBE_BASE_COLOR_CSS, FAR_GLOBE_ENTER_M, FAR_GLOBE_EXIT_M, FAR_GLOBE_LIGHTING_M, FAR_GLOBE_NIGHT_LIMB, FAR_GLOBE_NIGHT_ENTER_M, FAR_GLOBE_NIGHT_EXIT_M, FAR_GLOBE_NIGHT_STYLE,
   FAR_GLOBE_NIGHT_URL, FAR_GLOBE_DAY_URL, FAR_GLOBE_READY_CAP_MS, NIGHT_SUN_ELEVATION_DEG, farGlobeWanted, installFarGlobe, sunElevationDegAt,
 } from './farGlobe.js';
 import { GLOBE_RADIUS_M, LIGHTING_FADE_IN_M, LIGHTING_FADE_OUT_M } from './globeLighting.js';
@@ -122,6 +122,46 @@ test('vstup z výšky: tileset skrytý, glóbus s dennou vrstvou dole a nočnou 
   assert.ok(FAR_GLOBE_NIGHT_STYLE.brightness >= 3 && FAR_GLOBE_NIGHT_STYLE.gamma < 1);
   assert.equal(h.scene.globe.lightingFadeOutDistance, GLOBE_RADIUS_M + FAR_GLOBE_LIGHTING_M.fadeOut);
   assert.equal(h.scene.globe.lightingFadeInDistance, GLOBE_RADIUS_M + FAR_GLOBE_LIGHTING_M.fadeIn);
+});
+
+test('revízia UI 2026-11-06: radič podkladov skryje glóbus až po vstupe z výšky (štart telefónu) → diaľkový režim si ho vráti', () => {
+  const h = harness({ height: 8_000_000 });
+  h.ctl.check(true);
+  assert.equal(h.scene.globe.show, true);
+  // mapStackController.setStack('photoreal') prišiel neskôr: glóbus skrytý, tileset ukázaný.
+  h.scene.globe.show = false; h.tileset.show = true;
+  h.tick(300); h.render();
+  assert.equal(h.ctl.far, true);
+  assert.equal(h.scene.globe.show, true, 'glóbus späť');
+  assert.equal(h.tileset.show, false, 'Google z výšky nič nekreslí a nesťahuje');
+  // Mimo diaľkového režimu sa cudzí stav nechytá.
+  h.scene.camera.positionCartographic.height = 300_000; h.tick(300); h.render();
+  assert.equal(h.ctl.far, false);
+  h.scene.globe.show = false; h.tileset.show = true; h.tick(300); h.render();
+  assert.equal(h.scene.globe.show, false);
+});
+
+test('revízia UI 2026-11-06: kým dlaždice NASA neprídu, glóbus z výšky má farbu oceánu (nie čiernu); pri odchode pôvodná; cudziu farbu neprepíše', () => {
+  const h = harness({ height: 7_000_000 });
+  const original = { css: 'povodna' };
+  h.scene.globe.baseColor = original;
+  h.ctl.check(true);
+  assert.equal(h.ctl.far, true);
+  const mine = h.scene.globe.baseColor;
+  assert.notEqual(mine, original, 'z výšky vlastná farba');
+  assert.equal(mine.toCssHexString().toLowerCase(), FAR_GLOBE_BASE_COLOR_CSS, 'oceán Blue Marble');
+  // Odchod zblízka vráti pôvodnú.
+  h.scene.camera.positionCartographic.height = 300_000; h.tick(300); h.render();
+  assert.equal(h.ctl.far, false);
+  assert.equal(h.scene.globe.baseColor, original);
+  // Znova z výšky; radič podkladov medzitým nastaví vlastnú (prepnutie na KARTA) — odchod ju nechá.
+  h.scene.camera.positionCartographic.height = 7_000_000; h.tick(300); h.render();
+  assert.equal(h.ctl.far, true);
+  const foreign = { css: 'karta' };
+  h.scene.globe.baseColor = foreign;
+  h.setStack('karta'); h.tick(300); h.render();
+  assert.equal(h.ctl.far, false);
+  assert.equal(h.scene.globe.baseColor, foreign, 'cudzia farba ostáva');
 });
 
 test('návrat zblízka: vrstvy preč, glóbus skrytý, tileset späť, štandardné osvetlenie; hysteréza deň/noc; prelet drží fotoreál', () => {

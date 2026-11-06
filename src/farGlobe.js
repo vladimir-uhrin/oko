@@ -9,6 +9,10 @@
 // nech na hranici nebliká). Počas preletu kamery (scene.tweens) ostáva fotoreál, aby si tileset prednačítal cieľ
 // (preloadFlightDestinations) a pristátie bolo ostré. Vedľajší efekt: z výšky žiadne Google dlaždice.
 //
+// PASCA pri overovaní (2026-11-06): v paneli prehliadača aplikácie bez vykresľovania (requestAnimationFrame
+// stojí) nebeží render slučka → postRender nepríde → režim sa nezapne a guľa je čierna. Nie je to chyba
+// telefónu; overovať s viditeľným, kresliacim panelom (rAF > 0).
+//
 // Osvetlenie: štandardné prelínanie 1 500–4 000 km (globeLighting.js) je pre mapy ulíc; nočná Zem z výšky
 // potrebuje plnú noc už od ~1 000 km, preto diaľkový režim píše vlastné vzdialenosti a pri odchode ich
 // vráti cez applyGlobeLighting. Vypnuté Deň/noc = bez nočnej vrstvy (len Blue Marble).
@@ -42,6 +46,13 @@ export const FAR_GLOBE_LIGHTING_M = Object.freeze({ fadeOut: 450_000, fadeIn: 56
 export const FAR_GLOBE_NIGHT_LIMB = Object.freeze({ skyBrightness: -0.4, skySaturation: 0.15, groundIntensity: 3 });
 /** Štart: preloader počká, kým má glóbus z výšky dlaždice (inak by sa ukázala čierna Zem), najviac toľko ms. */
 export const FAR_GLOBE_READY_CAP_MS = 3000;
+/**
+ * Základná farba glóbusu, kým dlaždice NASA neprídu (revízia UI 2026-11-06): na telefóne so studenou cache
+ * trvali GIBS dlaždice viac než strop 3 s a po preloaderi bola ~10 s čierna guľa so žltými lietadlami vo
+ * vesmíre. Oceán Blue Marble zmeraný z dlaždice z=2: rgb(11, 43, 81) — s dlaždicami sa farba len doplní,
+ * neskočí. Pri odchode z výšky sa vráti pôvodná (radič podkladov má vlastnú pre KARTA a spol.).
+ */
+export const FAR_GLOBE_BASE_COLOR_CSS = '#0b2b51';
 /**
  * Štýl nočnej vrstvy (ladené na snímkach 2026-10-16, Európa z 2 500 a 7 000 km): Cesium tlmí nočnú stranu
  * na 0,3 (GlobeFS `lambert * 5 + 0.3`) a tlmí ňou aj Black Marble — bez zosilnenia boli svetlá sivé a Zem
@@ -135,6 +146,22 @@ export function installFarGlobe({
 
   /** Pôvodné hodnoty atmosféry pred nočným okrajom (null = okraj nie je nasadený). */
   let limbSaved = null;
+  /** Základná farba glóbusu pred vstupom z výšky (undefined = nič sa nemenilo). */
+  let baseColorSaved;
+  let baseColorMine = null;
+  const setBaseColor = (on) => {
+    const globe = scene.globe;
+    if (!globe || !('baseColor' in globe)) return;
+    if (on) {
+      baseColorSaved = globe.baseColor;
+      try { baseColorMine = Cesium.Color.fromCssColorString(FAR_GLOBE_BASE_COLOR_CSS); } catch { baseColorMine = null; }
+      if (baseColorMine) globe.baseColor = baseColorMine;
+      return;
+    }
+    // Vrátiť len ak ju medzitým neprepísal radič podkladov (prepnutie podkladu z výšky).
+    if (baseColorMine && globe.baseColor === baseColorMine) globe.baseColor = baseColorSaved;
+    baseColorMine = null;
+  };
   /**
    * Nočný okraj atmosféry (2026-10-17, vlastník bod 5): Cesium s osvetlením podľa Slnka atmosféru na nočnej
    * strane úplne zhasne, fotky NASA majú jemný modrý okraj a závoj. V noci (z výšky, s Deň/noc) sa atmosféra
@@ -186,6 +213,7 @@ export function installFarGlobe({
     nightLayer.contrast = FAR_GLOBE_NIGHT_STYLE.contrast;
     nightLayer.gamma = FAR_GLOBE_NIGHT_STYLE.gamma;
     viewer.imageryLayers.add(nightLayer); // navrch — nad prípadné prekryvy NASA
+    setBaseColor(true);
     scene.globe.show = true;
     tightLighting(night);
     scene.requestRender?.();
@@ -202,6 +230,7 @@ export function installFarGlobe({
     dayLayer = null;
     nightLayer = null;
     syncNightLimb(false);
+    setBaseColor(false);
     if (hideGlobe) {
       scene.globe.show = false;
       tileset.show = true;
@@ -223,7 +252,17 @@ export function installFarGlobe({
     const wanted = farGlobeWanted({ heightM, stackId, far, flying, night });
     if (wanted && !far) enter(night);
     else if (!wanted && far) exit({ hideGlobe: FAR_GLOBE_STACKS.includes(stackId) });
-    else if (far) tightLighting(night);
+    else if (far) {
+      tightLighting(night);
+      // Samooprava (revízia UI 2026-11-06, čierna guľa na telefóne po štarte): radič podkladov pri
+      // `setStack('photoreal')` glóbus skryje (mapStackController) — ak to stihol až PO vstupe z výšky,
+      // režim ostal aktívny s vrstvami NASA, ale glóbus bol skrytý a Google z 8 000 km nekreslí nič.
+      if (scene.globe.show !== true || tileset.show !== false) {
+        scene.globe.show = true;
+        tileset.show = false;
+        scene.requestRender?.();
+      }
+    }
     // Štart: Zem z výšky je „pripravená", keď má glóbus dlaždice; bez režimu niet na čo čakať.
     if (!readySettled) {
       if (!far && !flying) resolveReady(false);
