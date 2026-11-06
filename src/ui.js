@@ -5451,6 +5451,11 @@ export class StyleManager {
       this._squawkAlertHandler = (event) => this._announceSquawkAlert(event?.detail);
       window.addEventListener('gev:squawk-alert', this._squawkAlertHandler);
     }
+    if (!this._flightsFarClickHandler) {
+      // Klik do roja lietadiel z výšky planéty (flights.js, 2026-11-06): tip namiesto ticha.
+      this._flightsFarClickHandler = () => this._showToast(t('toast.flights-zoom-in'), { durationMs: 4000, tone: 'info' });
+      window.addEventListener('gev:flights-far-click', this._flightsFarClickHandler);
+    }
     this._layerStateCoordinator?.destroy();
     this._layerStateCoordinator = null;
     this._layerStateRestorePromise = null;

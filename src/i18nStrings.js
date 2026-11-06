@@ -2896,6 +2896,10 @@ export const EN_STRINGS = Object.freeze({
   'toast.cctv-cal-reset': 'CCTV calibration reset',
   'toast.cctv-unavailable': 'CCTV layer unavailable',
   'toast.zoom-in-installations': 'Zoom in to search mapped installations',
+  // Klik do roja lietadiel z výšky planéty (2026-11-06): bez hlášky vyzeral ako pokazený.
+  'toast.flights-zoom-in': 'No aircraft under the cursor — click a dot or zoom in',
+  // Odkaz kreditov Cesia vľavo dole (text si Cesium píše samo, prekladáme v main.js).
+  'credits.expand-link': 'Data attribution',
   'toast.installations-refreshed': 'Nearby installations refreshed',
   'toast.installations-refresh-failed': 'Nearby installations could not be refreshed; try again',
   'toast.layer-unavailable-in-context': 'That layer is unavailable in the current Context mode',
@@ -5787,6 +5791,8 @@ export const SK_STRINGS = Object.freeze({
   'toast.cctv-cal-reset': 'Kalibrácia kamery resetovaná',
   'toast.cctv-unavailable': 'Vrstva kamier nedostupná',
   'toast.zoom-in-installations': 'Priblíž mapu a vyhľadaj zmapované zariadenia',
+  'toast.flights-zoom-in': 'Pod kurzorom nie je lietadlo — klikni na bodku alebo priblíž mapu',
+  'credits.expand-link': 'Zdroje dát',
   'toast.installations-refreshed': 'Blízke zariadenia obnovené',
   'toast.installations-refresh-failed': 'Blízke zariadenia sa nepodarilo obnoviť; skús znova',
   'toast.layer-unavailable-in-context': 'Táto vrstva je v aktuálnom režime kontextu nedostupná',

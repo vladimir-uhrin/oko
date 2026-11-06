@@ -317,6 +317,8 @@ async function init() {
     // Odkazy kreditov Cesia („Data attribution", krížik okna) sú tlačidlá bez href — rola tlačidla
     // (Lighthouse SEO „crawlable anchors", 2026-10-31; čítačke obrazovky sedí tlačidlo viac než odkaz bez cieľa).
     for (const link of document.querySelectorAll('.cesium-credit-expand-link, .cesium-credit-lightbox-close')) link.setAttribute('role', 'button');
+    // Text odkazu si Cesium píše po anglicky; v SK rozhraní trčal „Data attribution" (revízia UI 2026-11-06).
+    for (const link of document.querySelectorAll('.cesium-credit-expand-link')) link.textContent = t('credits.expand-link');
 
     // Hide Cesium's default globe — Google Photorealistic 3D Tiles provide their own
     // globe at all LODs (street level → orbital). The default globe's 2D imagery

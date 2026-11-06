@@ -11,6 +11,17 @@ function finiteCount(value) {
   return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
+/**
+ * Meno vrstvy do stavového riadka: preklad `layer.<id>.name`, inak modulové `name`.
+ * Rovnaká logika ako manager.layerDisplayName — bez importu, aby manager → loadingFeedback
+ * neurobil kruh. Predtým SK riadok hlásil „OBNOVUJEM ŽIVÉ DÁTA · LIVE FLIGHTS" (2026-11-06).
+ */
+function localizedLayerLabel(layer = {}) {
+  const key = `layer.${layer.id}.name`;
+  const localized = layer.id ? t(key) : key;
+  return localized === key ? String(layer.name || layer.id || 'Layer') : localized;
+}
+
 /** Normalize one manager layer into a small loading-feedback record. */
 export function normalizeLayerLoading(layer = {}) {
   const stats = layer.stats || {};
@@ -28,7 +39,7 @@ export function normalizeLayerLoading(layer = {}) {
   const accepted = Boolean(stats.lastUpdate) || count > 0;
   return {
     id: String(layer.id || ''),
-    label: String(layer.name || layer.id || 'Layer'),
+    label: localizedLayerLabel(layer),
     loading,
     disabling,
     refresh: loading && layer.enabled && (stats.refreshing === true || accepted),

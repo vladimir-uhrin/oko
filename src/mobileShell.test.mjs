@@ -386,3 +386,20 @@ test('plášť: sekcia sa dá otvoriť s iným rozbaleným panelom (História le
   assert.equal(byId.get('gas-panel').classList.contains('collapsed'), false, 'neznámy panel = predvolené správanie');
   assert.equal(sheet.hidden, false);
 });
+
+test('revízia UI 2026-11-06: tlačidlá spodnej lišty majú výslovné meno (data-i18n-aria), kredit Cesia po slovensky, klik do roja z výšky dá tip', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  for (const [section, key] of [['layers', 'mobile.layers'], ['volby', 'mobile.volby'], ['conflicts', 'mobile.conflicts'], ['data', 'mobile.data'], ['display', 'mobile.display'], ['search', 'mobile.search']]) {
+    assert.ok(html.includes(`data-oko-section="${section}" aria-pressed="false" data-i18n-aria="${key}"`), `${section}: aria meno z prekladu`);
+  }
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /\.cesium-credit-expand-link'\)\) link\.textContent = t\('credits\.expand-link'\)/, 'odkaz kreditov preložený');
+  const i18n = readFileSync(new URL('./i18nStrings.js', import.meta.url), 'utf8');
+  assert.match(i18n, /'credits\.expand-link': 'Zdroje dát',/);
+  assert.match(i18n, /'toast\.flights-zoom-in': 'Pod kurzorom nie je lietadlo/);
+  const flights = readFileSync(new URL('./data/flights.js', import.meta.url), 'utf8');
+  assert.match(flights, /if \(!_trackedIcao && !picked\) \{[\s\S]*?heightM > FAR_CLICK_HINT_HEIGHT_M && nowMs - _farClickHintAt > FAR_CLICK_HINT_GAP_MS[\s\S]*?new CustomEvent\('gev:flights-far-click'/, 'tip len z výšky, bez sledovania a raz za minútu');
+  const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /window\.addEventListener\('gev:flights-far-click', this\._flightsFarClickHandler\)/);
+});

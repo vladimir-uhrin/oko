@@ -429,6 +429,11 @@ function _flightApiUrl(viewer) {
 
 /** @type {string|null} ICAO24 of the currently tracked aircraft */
 let _trackedIcao = null;
+/** Nad touto výškou kamery (m) klik do prázdna pri zapnutých letoch vyvolá tip „priblíž mapu". */
+export const FAR_CLICK_HINT_HEIGHT_M = 2_000_000;
+/** Najmenší odstup medzi dvoma tipmi (ms) — nech klikanie po glóbuse nespamuje toast. */
+export const FAR_CLICK_HINT_GAP_MS = 60_000;
+let _farClickHintAt = 0;
 let _pendingTrackingRestore = null;
 let _trackingIntentGeneration = 0;
 let _trackingRefreshEpoch = 0;
@@ -7048,6 +7053,17 @@ function _installClickHandler(viewer) {
     // Clicked empty space — deselect only for a clean, short click. A slow
     // stationary press may select above, but cannot release existing tracking.
     if (!isTrackingClickGesture(gesture)) return;
+    // Z výšky planéty je roj lietadiel len bodky; klik vedľa bodky nevyberie nič a
+    // bez hlášky to vyzeralo ako pokazené (revízia UI 2026-11-06). Jedna hláška
+    // za minútu, ui.js ju ukáže ako toast.
+    if (!_trackedIcao && !picked) {
+      const heightM = viewer.scene.camera.positionCartographic?.height;
+      const nowMs = Date.now();
+      if (Number.isFinite(heightM) && heightM > FAR_CLICK_HINT_HEIGHT_M && nowMs - _farClickHintAt > FAR_CLICK_HINT_GAP_MS) {
+        _farClickHintAt = nowMs;
+        window.dispatchEvent(new CustomEvent('gev:flights-far-click', { detail: { heightM } }));
+      }
+    }
     if (_trackedIcao) {
       _cancelPendingTrackingRestore();
       _clearTracking(false, { origin: 'user' });

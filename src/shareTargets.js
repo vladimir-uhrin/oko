@@ -107,7 +107,7 @@ export function buildAttributionLine(creditsText) {
   const parts = String(creditsText || '')
     .split(/[·•|\n\r]+/)
     .map((part) => part.replace(/\s+/g, ' ').trim())
-    .filter((part) => part && !/upgrade|attribution|^data$/i.test(part));
+    .filter((part) => part && !/upgrade|attribution|zdroje dát|^data$/i.test(part));
   const out = [];
   const seen = new Set();
   // DeepState ide dopredu: výrez má 6 miest a jeho licencia (§3) chce textový odkaz.

@@ -278,7 +278,7 @@ test('markup: zóna VOĽBY s panelom hneď pod POČASÍM, telo [data-volby-body]
   assert.match(html, /<span data-i18n="panel\.volby" class="panel-title">/);
   assert.match(html, /<div class="volby-body" data-volby-body><\/div>/);
   assert.ok(html.indexOf('id="weather-panel"') < html.indexOf('id="volby-panel"') && html.indexOf('id="volby-panel"') < html.indexOf('data-lane-zone="conflicts"'), 'medzi POČASÍM a KONFLIKTAMI');
-  assert.match(html, /<button type="button" data-oko-section="volby" aria-pressed="false">\s*<span class="material-symbols-outlined" aria-hidden="true">how_to_vote<\/span>\s*<span class="oko-appbar-label" data-i18n="mobile\.volby">/);
+  assert.match(html, /<button type="button" data-oko-section="volby" aria-pressed="false" data-i18n-aria="mobile\.volby">\s*<span class="material-symbols-outlined" aria-hidden="true">how_to_vote<\/span>\s*<span class="oko-appbar-label" data-i18n="mobile\.volby">/);
 });
 
 test('štýly: poradie zóny a panela (14/15), zbalené telo skryté, rozbalený panel vyplní koridor, kokpit a čistý pohľad ho skryjú', () => {

@@ -789,30 +789,32 @@
        Zobrazí ich src/mobileShell.js cez body.oko-mobile; panely sekcií sa do
        výsuvu presúvajú dočasne (ten istý DOM uzol) a späť. -->
   <nav id="oko-appbar" aria-label="Sections" data-i18n-aria="mobile.appbar-aria" hidden>
-    <button type="button" data-oko-section="layers" aria-pressed="false">
+    <!-- data-i18n-aria (2026-11-06): výslovné meno tlačidla — strom prístupnosti ho z 9 px popisku
+         nespoľahlivo odvodil (prehliadačová kontrola hlásila button bez mena). -->
+    <button type="button" data-oko-section="layers" aria-pressed="false" data-i18n-aria="mobile.layers">
       <span class="material-symbols-outlined" aria-hidden="true">layers</span>
       <span class="oko-appbar-label" data-i18n="mobile.layers">Layers</span>
     </button>
     <!-- VOĽBY 2026 (2026-10-24): kandidáti a výsledky majú na mobile vlastnú sekciu hneď za Vrstvami. -->
-    <button type="button" data-oko-section="volby" aria-pressed="false">
+    <button type="button" data-oko-section="volby" aria-pressed="false" data-i18n-aria="mobile.volby">
       <span class="material-symbols-outlined" aria-hidden="true">how_to_vote</span>
       <span class="oko-appbar-label" data-i18n="mobile.volby">Elections</span>
     </button>
     <!-- KONFLIKTY (2026-10-11): Ukrajina, Blízky východ a prelety majú na mobile vlastnú sekciu —
          predtým boli zahrabané v DÁTACH a sekcia SCÉNY nosila len réžiu vlastníka. -->
-    <button type="button" data-oko-section="conflicts" aria-pressed="false">
+    <button type="button" data-oko-section="conflicts" aria-pressed="false" data-i18n-aria="mobile.conflicts">
       <span class="material-symbols-outlined" aria-hidden="true">crisis_alert</span>
       <span class="oko-appbar-label" data-i18n="mobile.conflicts">Conflicts</span>
     </button>
-    <button type="button" data-oko-section="data" aria-pressed="false">
+    <button type="button" data-oko-section="data" aria-pressed="false" data-i18n-aria="mobile.data">
       <span class="material-symbols-outlined" aria-hidden="true">monitoring</span>
       <span class="oko-appbar-label" data-i18n="mobile.data">Data</span>
     </button>
-    <button type="button" data-oko-section="display" aria-pressed="false">
+    <button type="button" data-oko-section="display" aria-pressed="false" data-i18n-aria="mobile.display">
       <span class="material-symbols-outlined" aria-hidden="true">tune</span>
       <span class="oko-appbar-label" data-i18n="mobile.display">Display</span>
     </button>
-    <button type="button" data-oko-section="search" aria-pressed="false">
+    <button type="button" data-oko-section="search" aria-pressed="false" data-i18n-aria="mobile.search">
       <span class="material-symbols-outlined" aria-hidden="true">search</span>
       <span class="oko-appbar-label" data-i18n="mobile.search">Search</span>
     </button>

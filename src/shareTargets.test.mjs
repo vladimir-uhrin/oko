@@ -75,3 +75,7 @@ test('buildVolbyShareCopy: panel VOĽBY 2026 → slovenský titulok výsledkov, 
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
   assert.match(ui, /getElementById\('volby-panel'\)\?\.classList\.contains\('collapsed'\) === false \? buildVolbyShareCopy\(\{ lang \}\)/);
 });
+
+test('revízia UI 2026-11-06: slovenský odkaz kreditov „Zdroje dát" do riadka atribúcie nepatrí', () => {
+  assert.equal(buildAttributionLine('Cesium ion · Google Maps · Zdroje dát'), '© Google · Cesium ion');
+});

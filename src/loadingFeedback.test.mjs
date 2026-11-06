@@ -674,3 +674,16 @@ test('the loading ticker never runs hidden and stops after loading and notices s
     'the resample handler must be removed on teardown',
   );
 });
+
+test('revízia UI 2026-11-06: stavový riadok hlási vrstvu v jazyku rozhrania, nie modulovým „Live Flights"', async () => {
+  const { setLanguage, _resetLanguageForTest } = await import('./i18n.js');
+  try {
+    setLanguage('sk', { reload: false });
+    assert.equal(normalizeLayerLoading({ id: 'flights', name: 'Live Flights' }).label, 'Živé lety');
+    assert.equal(normalizeLayerLoading({ id: 'nie-je-taka', name: 'Modulové meno' }).label, 'Modulové meno', 'bez prekladu ostáva modulové meno');
+    setLanguage('en', { reload: false });
+    assert.equal(normalizeLayerLoading({ id: 'flights', name: 'Live Flights' }).label, 'Live Flights');
+  } finally {
+    _resetLanguageForTest();
+  }
+});
