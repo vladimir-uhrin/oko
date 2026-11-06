@@ -305,11 +305,19 @@ export const DATA_CREDITS = [
       '(ODbL 1.0, snapshot 2026-09-27)',
   },
   {
-    key: 'sk-energy',
+    key: 'power-grid',
     html:
-      'SK energy grid (400/220 kV + gas transmission): ' +
+      'Power grid ≥ 220 kV, Europe and Asia (static snapshot built from OpenStreetMap; snapshot date shown on the card — not live; ' +
+      'without a snapshot the bundled Slovak extract of 2026-08-30 is drawn and labelled): ' +
       '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> ' +
-      '(ODbL 1.0, snapshot 2026-08)',
+      '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a>, via the Overpass API)',
+  },
+  {
+    key: 'power-flows',
+    html:
+      'Cross-border physical electricity flows (15-minute values per border, not per line): ' +
+      '<a href="https://www.energy-charts.info/" target="_blank" rel="noopener">Energy-Charts.info</a> (Fraunhofer ISE), data ENTSO-E Transparency Platform ' +
+      '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>)',
   },
   {
     key: 'firms',

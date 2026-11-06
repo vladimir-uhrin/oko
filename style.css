@@ -11437,6 +11437,16 @@ body.recording-mode .state-strip {
 .earthquake-hover-card dd { margin: 0; font-variant-numeric: tabular-nums; }
 .earthquake-hover-photo { margin-top: 12px; font-size: 10px; color: #a9b5c3; }
 .earthquake-hover-photo img { display: block; width: 100%; height: 150px; object-fit: cover; border-radius: 8px; margin-bottom: 7px; }
+/* Hover karta elektrickej siete (ELEKTRINA, 2026-11-06): tá istá karta ako
+   potrubia, lem a hlavička vo farbe druhu — azúrová ≥ 380 kV, modrofialová
+   220–330 kV, limetková HVDC. */
+.pipeline-hover-card[data-kind="ehv"] { border-left-color: #3fd6ff; }
+.pipeline-hover-card[data-kind="ehv"] .pipeline-hover-kind { color: #3fd6ff; }
+.pipeline-hover-card[data-kind="hv"] { border-left-color: #7f9cff; }
+.pipeline-hover-card[data-kind="hv"] .pipeline-hover-kind { color: #7f9cff; }
+.pipeline-hover-card[data-kind="dc"] { border-left-color: #b9ff4f; }
+.pipeline-hover-card[data-kind="dc"] .pipeline-hover-kind { color: #b9ff4f; }
+.power-hover-card .pipeline-hover-flow-value strong { color: #7fe3ff; }
 /* Hover karta potrubí (etapa 3, 2026-09-19; 3b: „štýl OKO, s vlajkami"):
    tá istá reč ako karta kontaktu — mono písmo, sklo, tenký ľavý lem vo farbe
    látky (jantár plyn, orchidea ropa), vlajky 12×9, sparkline živého toku. Na

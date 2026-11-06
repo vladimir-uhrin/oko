@@ -119,6 +119,12 @@ export async function buildPipelineSnapshot({
   buildQuery, classify, queryDescription, overpassUrl, userAgent, refresh,
   simplifyEpsDeg = 0.002, roundDigits = 3, pauseMs = 20_000,
   countryIndex = null,
+  // Elektrina (2026-11-06): ten istý engine stavia aj snímok vedení ≥ 220 kV.
+  // Vedenie nemá priemer ani látku, má napätie, obvody a frekvenciu — preto
+  // volajúci môže vlastnosti prvku prepísať (`mapProperties(tags, base, el)`)
+  // a kľúče `basis` v meta pomenovať podľa pravidiel vlastného klasifikátora.
+  mapProperties = null,
+  basisKeys = ['transmission', 'relation', 'diameter', 'name', 'operator'],
 }) {
   const round = (n) => Number(n.toFixed(roundDigits));
 
@@ -130,7 +136,7 @@ export async function buildPipelineSnapshot({
     // Jazyk mena pre prepis cyriliky (etapa 3b): OSM ho nesie nepriamo —
     // keď `name:uk` (alebo :ru/:be/:kk) je doslovne rovné `name`.
     const nameLang = ['uk', 'ru', 'be', 'kk'].find((l) => tags[`name:${l}`] && tags[`name:${l}`] === tags.name) || null;
-    const properties = {
+    const baseProperties = {
       name: tags.name || tags['name:en'] || tags.ref || null,
       nameEn: tags['name:en'] || null,
       nameSk: tags['name:sk'] || null,
@@ -153,6 +159,7 @@ export async function buildPipelineSnapshot({
       osm: el.id,
       relation: relationId,
     };
+    const properties = typeof mapProperties === 'function' ? mapProperties(tags, baseProperties, el) : baseProperties;
     return clipToBbox(coords, tile, round)
       .map((part) => simplify(part, simplifyEpsDeg))
       .filter((part) => part.length >= 2)
@@ -180,12 +187,23 @@ export async function buildPipelineSnapshot({
     const query = buildQuery(tile);
     for (let attempt = 1; attempt <= 3; attempt++) {
       const started = Date.now();
-      const res = await fetch(overpassUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': userAgent },
-        body: 'data=' + encodeURIComponent(query),
-        signal: AbortSignal.timeout(360_000),
-      });
+      // Výpadok spojenia (ECONNRESET, timeout) je pokus ako HTTP chyba — 2026-11-06
+      // build elektriny spadol po 42 z 50 dlaždíc na „fetch failed: ECONNRESET".
+      let res;
+      try {
+        res = await fetch(overpassUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': userAgent },
+          body: 'data=' + encodeURIComponent(query),
+          signal: AbortSignal.timeout(360_000),
+        });
+      } catch (error) {
+        const reason = error?.cause?.code || error?.message || String(error);
+        console.error(`  tile ${tile.join(',')}: network error ${reason} (attempt ${attempt}/3)`);
+        if (attempt === 3) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 45_000));
+        continue;
+      }
       if (res.ok) {
         const text = await res.text();
         const json = JSON.parse(text);
@@ -209,7 +227,7 @@ export async function buildPipelineSnapshot({
   console.log(`${label} pipelines snapshot: ${tiles.length} tiles via ${overpassUrl}${refresh ? ' (refresh)' : ''}`);
   const features = [];
   const tileMeta = [];
-  const basis = { transmission: 0, relation: 0, diameter: 0, name: 0, operator: 0, excluded: 0 };
+  const basis = Object.fromEntries([...basisKeys, 'excluded'].map((k) => [k, 0]));
   for (let i = 0; i < tiles.length; i++) {
     const tile = tiles[i];
     const json = await fetchTile(tile);
@@ -231,7 +249,7 @@ export async function buildPipelineSnapshot({
       const relTags = rel ? rel.tags : null;
       const rule = classify({ ...(relTags || {}), ...(el.tags || {}) }, relTags !== null);
       if (!rule) { basis.excluded += 1; continue; }
-      basis[rule] += 1;
+      basis[rule] = (basis[rule] || 0) + 1;
       parts.push(...toFeatures(el, tile, relTags, rel ? rel.id : null));
     }
     features.push(...parts);

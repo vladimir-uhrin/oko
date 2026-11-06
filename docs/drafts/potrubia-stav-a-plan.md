@@ -160,10 +160,13 @@ Zdieľané súbory sa do commitu stagujú cez **HEAD-copy** (index blob z
 
 ## 8. Otvorené body (na neskôr)
 
-1. Viac bodov ENTSOG pre hover: Yamal–Európa → Mallnow / Kondratki, TAG →
-   Arnoldstein, Transitgas → Wallbach / Passo Gries, MEGAL, WAG — každý overiť
-   proti ENTSOG TP `operatorpointdirections`, nikdy hádať.
-2. Plynový `EXCLUDED_USAGE` nemá `flowline|flare_header|collection` (ropa má).
+1. ~~Viac bodov ENTSOG pre hover~~ **HOTOVÉ 2026-11-06**: skupina „central"
+   (Mallnow obojsmerne, Waidhaus, Medelsheim, Oberkappel obojsmerne, Tarvisio
+   obojsmerne, Passo Gries) — 52 smerov / 37 staníc, každý overený proti
+   `operatorpointdirections` aj živým `operationalData`. Wallbach v ENTSOG dáta
+   nemá pri žiadnom operátorovi; Kondratki v ENTSOG neexistuje.
+2. ~~Plynový `EXCLUDED_USAGE`~~ **HOTOVÉ 2026-11-06** (v surových dlaždiciach v2
+   takých ciest 0, snímok sa nezmenil).
 3. Duch vs. hrubý mesh: pri nízkom LOD fotoreálu mesh sedí nad DEM → duch
    čiarkuje aj viditeľné úseky; overiť na obrazovke používateľa, prípadne
    `PIPELINE_GHOST.liftM` alebo skryť pri hrubom tilesete.
@@ -178,6 +181,16 @@ Zdieľané súbory sa do commitu stagujú cez **HEAD-copy** (index blob z
 12. Snímky OSM starnú — občasná prestavba s `--refresh` (ručne, s rozvahou).
 13. Plot rúr, ak sa má vrátiť: bez obrysov, jedna stena na trasu (reláciu), nie na
     úsek; dnes vypnutý (`PIPELINE_FENCE.enabled`).
+
+## 8b. Elektrina (2026-11-06)
+
+Vrstva `local-energy` (token `y`) = sieť ≥ 220 kV Eurázie zo
+`scripts/build-power-lines.mjs`, kreslená TÝM ISTÝM telom ako potrubia
+(`createGasPipelinesLayer` s profilom, `src/data/powerGridLayer.js`). Snímok sa
+servíruje po bunkách 5° × 5° (`/api/power/cells`, `/api/power/cell/<id>`) —
+celý by bol ~3× plynovody. Toky cez hranice z Energy-Charts
+(`/api/power/flows`, CC BY 4.0). Bez snímku kreslí bundlovaný extrakt SR.
+Podrobnosti: `docs/CURRENT-STATE.md` (bullet „Power grid ≥ 220 kV…").
 
 ## 9. Commity (2026-09-19)
 

@@ -255,6 +255,15 @@ const OPTION_GROUPS = Object.freeze({
     booleanOption('gas', 'g', true),
     booleanOption('oil', 'o', true),
   ]),
+  // Elektrina (2026-11-06): vrstva `local-energy` (token `y`) je od teraz
+  // prenosová sieť Eurázie s tromi čipmi — ≥ 380 kV, 220–330 kV, HVDC. Všetky
+  // predvolene aj pri absencii zapnuté, takže starý odkaz `l=y` (Energetika
+  // SR) znamená „celá sieť", nie prázdnu vrstvu.
+  'local-energy': Object.freeze([
+    booleanOption('ehv', 'e', true),
+    booleanOption('hv', 'h', true),
+    booleanOption('dc', 'd', true),
+  ]),
   radio: Object.freeze([
     Object.freeze({
       key: 'filter',
@@ -332,7 +341,7 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'local-airports', token: 'p', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-dams', token: 'q', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-datacenters', token: 'd', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'local-energy', token: 'y', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'local-energy', token: 'y', disposition: 'enabled+options', optionOwner: 'local-energy' }),
   Object.freeze({ id: 'local-firms', token: 'w', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-ports', token: 'o', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-ship-density', token: 'n', disposition: 'enabled-only' }),

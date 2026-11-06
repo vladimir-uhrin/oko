@@ -194,10 +194,10 @@ test('panel: načíta ceny, ukáže odvodený TTF so zmenou a dátumom, riadky L
   assert.equal(st.status, 'ok');
   assert.equal(st.headline, '79,5 €/MWh');
   assert.deepEqual(st.series, ['ttf', 'eu']);
-  assert.deepEqual(st.flows, { loaded: true, ok: true, status: 'ok', lastError: null, rows: 43 }, 'karta TOKY má všetkých 43 smerov katalógu');
+  assert.deepEqual(st.flows, { loaded: true, ok: true, status: 'ok', lastError: null, rows: 52 }, 'karta TOKY má všetkých 52 smerov katalógu');
   const flowsCardEl = find(doc.root.body, (n) => n.dataset.card === 'flows')[0];
   const flowRows = find(flowsCardEl, (n) => n.className === 'gas-flow-row');
-  assert.equal(flowRows.length, 43);
+  assert.equal(flowRows.length, 52);
   assert.equal(flowRows[0].dataset.id, 'lanzhot-in');
   assert.equal(flowRows[0].dataset.level, 'flow');
   assert.equal(find(flowRows[0], (n) => n.className === 'gas-flow-value')[0].textContent, '24,6 GWh/d');

@@ -33,7 +33,7 @@ export const ENTSOG_TP_URL = 'https://transparency.entsog.eu/';
 export const KWH_PER_M3 = 10.55;
 /** Po tomto veku posledného plynárenského dňa je rad „zastaraný“ (bežné oneskorenie 1–2 dni). */
 export const GAS_FLOWS_STALE_DAYS = 4;
-export const GAS_FLOW_GROUPS = Object.freeze(['sk', 'west', 'east']);
+export const GAS_FLOW_GROUPS = Object.freeze(['sk', 'central', 'west', 'east']);
 
 const DAY_MS = 86_400_000;
 const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -101,6 +101,22 @@ export const GAS_FLOW_POINTS = Object.freeze([
   P('ungheni', 'east', 'RO-TSO-0001', 'ITP-00154', 'exit', 'RO', 'MD', 'Ungheni', 47.21, 27.80, 'gas.note-ungheni'),
   P('kipoi', 'east', 'AL-TSO-0001', 'ITP-00274', 'entry', 'TR', 'GR', 'Kipoi (TAP)', 40.95, 26.30, 'gas.note-tap', 'AZ'),
   P('kipi', 'east', 'GR-TSO-0001', 'ITP-00046', 'entry', 'TR', 'GR', 'Kipi (ITG)', 40.95, 26.32, 'gas.note-kipi', 'AZ'),
+  // Stredná Európa (2026-11-06, backlog potrubí: živý tok v hover karte Yamalu,
+  // MEGAL, WAG, TAG a Transitgasu). Každý smer overený proti ENTSOG
+  // `operatorpointdirections` a `operationalData` (D−1 hodnoty 28. 10.–5. 11.
+  // prišli): Passo Gries 224,9, Oberkappel DE→AT 123,1, Tarvisio AT→IT 28,9
+  // GWh/d; Mallnow, Waidhaus a Medelsheim poctivá nula. Wallbach (Transitgas
+  // DE→CH) v ENTSOG dáta nemá pri žiadnom operátorovi — preto chýba.
+  // Vnútro EÚ / tranzit → origin null (mimo mixu dodávok).
+  P('mallnow', 'central', 'DE-TSO-0001', 'ITP-00096', 'entry', 'PL', 'DE', 'Mallnow (Yamal–Európa)', 52.47, 14.55, 'gas.note-yamal'),
+  P('mallnow-rev', 'central', 'DE-TSO-0001', 'ITP-00096', 'exit', 'DE', 'PL', 'Mallnow (Yamal–Európa)', 52.47, 14.55),
+  P('waidhaus', 'central', 'DE-TSO-0004', 'ITP-00073', 'entry', 'CZ', 'DE', 'Waidhaus (MEGAL)', 49.64, 12.50, 'gas.note-megal'),
+  P('medelsheim', 'central', 'DE-TSO-0004', 'ITP-00083', 'exit', 'DE', 'FR', 'Medelsheim (MEGAL)', 49.12, 7.22),
+  P('oberkappel-in', 'central', 'AT-TSO-0001', 'ITP-00140', 'entry', 'DE', 'AT', 'Oberkappel (WAG / Penta West)', 48.55, 13.78),
+  P('oberkappel-out', 'central', 'AT-TSO-0001', 'ITP-00140', 'exit', 'AT', 'DE', 'Oberkappel (WAG / Penta West)', 48.55, 13.78),
+  P('tarvisio-in', 'central', 'IT-TSO-0001', 'ITP-00040', 'entry', 'AT', 'IT', 'Tarvisio / Arnoldstein (TAG)', 46.52, 13.58),
+  P('tarvisio-out', 'central', 'IT-TSO-0001', 'ITP-00040', 'exit', 'IT', 'AT', 'Tarvisio / Arnoldstein (TAG)', 46.52, 13.58),
+  P('passo-gries', 'central', 'IT-TSO-0001', 'ITP-00136', 'entry', 'CH', 'IT', 'Passo Gries (Transitgas)', 46.45, 8.37, 'gas.note-transitgas'),
 ]);
 
 /** Kľúč smeru tak, ako ho berie ENTSOG `pointDirection` (malé písmená, bez oddeľovačov). */

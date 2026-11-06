@@ -64,8 +64,9 @@ export const MIDEAST_THEATRES = Object.freeze([
     center: Object.freeze({ lat: 26.5, lon: 52.0 }),
     rectDegrees: Object.freeze([47, 23, 57, 30.5]),
     newsRegion: 'gulf',
-    // `local-energy` je snímok SLOVENSKEJ prenosovej siete (skEnergy.js) — na
-    // Zálive nemá čo robiť (nález oponentúry 2026-09-26); potrubia nesú aj ropu.
+    // `local-energy` bola do 2026-11-06 len SLOVENSKÁ sieť (skEnergy.js) — preto tu
+    // nie je (oponentúra 2026-09-26); od 11-06 je to sieť Eurázie (powerGridLayer.js),
+    // zaradenie do dejiska je samostatné rozhodnutie. Potrubia nesú aj ropu.
     layerIds: Object.freeze(['gas-pipelines', 'local-ports']),
     control: Object.freeze([]),
   }),

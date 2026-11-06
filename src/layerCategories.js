@@ -94,7 +94,7 @@ export const LAYER_KEYWORDS = Object.freeze({
   'meteo-gfs': ['počasie', 'vietor', 'teplota', 'weather', 'wind', 'meteo'],
   'gas-flows': ['plyn', 'toky plynu', 'gas', 'flows', 'entsog'],
   'gas-pipelines': ['plyn', 'plynovod', 'gas', 'pipeline'],
-  'local-energy': ['elektrina', 'sieť', 'power', 'grid', 'energy'],
+  'local-energy': ['elektrina', 'sieť', 'power', 'grid', 'energy', 'vedenie', 'vedenia', 'elektrické vedenie', 'hvdc', 'kv', 'prenosová sústava', 'transmission'],
   'local-dams': ['priehrada', 'priehrady', 'dam', 'dams', 'vodné'],
   'telegeography-submarine-cables': ['káble', 'internet', 'cable', 'cables'],
   'local-datacenters': ['servery', 'dáta', 'datacenter', 'servers'],

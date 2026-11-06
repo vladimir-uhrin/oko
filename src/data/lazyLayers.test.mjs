@@ -59,7 +59,7 @@ const REAL = [
   ['shippingLanesLazy', () => import('./shippingLanes.js').then((m) => m.default)],
   ['shipDensityLazy', () => import('./shipDensity.js').then((m) => m.default)],
   ['airDensityLazy', () => import('./airDensity.js').then((m) => m.default)],
-  ['skEnergyLazy', () => import('./skEnergy.js').then((m) => m.default)],
+  ['skEnergyLazy', () => import('./powerGridLayer.js').then((m) => m.default)],
   ['submarineCablesLazy', () => import('./telegeographySubmarineCables.js').then((m) => m.default)],
   ['airportsLazy', async () => createLocalGeoJsonLayer({ ...localGeoOpts('airports'), url: '/lazy', color: '#fff', labels: true })],
   ['portsLazy', async () => createLocalGeoJsonLayer({ ...localGeoOpts('ports'), url: '/lazy', color: '#fff', labels: true })],

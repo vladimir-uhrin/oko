@@ -129,6 +129,7 @@ import { seaRouteProxy } from './src/data/seaRouteProxy.js';
 import { DEEPSTATE_MIRRORS, createDeepStateMirror } from './src/data/deepstateMirror.js';
 import { createDeepStateFullMirror } from './src/data/deepstateFullMirror.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
+import { POWER_FLOW_COUNTRIES, POWER_FLOW_MAX_ATTEMPTS, POWER_FLOW_REQUEST_GAP_MS, buildPowerFlowsPayload, energyChartsCbpfUrl, retryAfterMs } from './src/data/powerFlows.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
@@ -5502,6 +5503,171 @@ function gasProxy() {
   }
   return {
     name: 'gas-proxy',
+    configureServer(server) { install(server.middlewares); },
+    configurePreviewServer(server) { install(server.middlewares); },
+  };
+}
+
+/**
+ * ELEKTRINA (2026-11-06): prenosová sieť ≥ 220 kV a toky cez hranice.
+ *  - `/api/power/lines` (+ `/meta` PRED ním — connect páruje prefixom):
+ *    statický OSM snímok zo `scripts/build-power-lines.mjs`
+ *    (.gev-cache/power/lines.geojsonl), streamovaný z disku s ETag, deň
+ *    v cache prehliadača, gzip; bez snímku 404 `no_snapshot` — vrstva potom
+ *    kreslí bundlovaný extrakt Slovenska a prizná to.
+ *  - `/api/power/flows`: cezhraničné fyzické toky z Energy-Charts (Fraunhofer
+ *    ISE, dáta ENTSO-E, CC BY 4.0, bez kľúča) pre všetky pokryté krajiny.
+ *    API pri ~10 rýchlych dopytoch vracia 429 (overené 2026-11-06), preto
+ *    krajiny idú za sebou s rozostupom 4 s, raz za hodinu, cache na disku,
+ *    pri chybe stale do 2 dní. Krajina, ktorá zlyhá, sa zapíše do `errors`
+ *    a ostatné prejdú — jedna hranica nepokazí celú odpoveď.
+ */
+function powerProxy() {
+  const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'power');
+  const LINES_PATH = path.join(CACHE_DIR, 'lines.geojsonl');
+  const LINES_META_PATH = path.join(CACHE_DIR, 'lines.meta.json');
+  const FLOWS_PATH = path.join(CACHE_DIR, 'flows.json');
+  const FLOWS_TTL_MS = 60 * 60_000;
+  const FLOWS_STALE_MAX_MS = 2 * 24 * 60 * 60_000;
+  const UPSTREAM_TIMEOUT_MS = 25_000;
+  const USER_AGENT = 'OKO-power/0.1 (https://github.com/vladouh76) node-fetch';
+  const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
+  const inFlight = new Map();
+  const state = { mem: null, lastError: null };
+
+  function send(res, status, body, cacheState) {
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Cache-Control': status === 200 ? 'public, max-age=600' : 'no-store',
+      'X-GEV-Cache': cacheState,
+    });
+    res.end(body);
+  }
+  const noSnapshot = (res) => send(res, 404, JSON.stringify({ error: 'no_snapshot', detail: 'run: node scripts/build-power-lines.mjs' }), 'NONE');
+  const linesFile = (filePath, contentType, cacheControl = 'public, max-age=86400') => async (req, res) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    let stat;
+    try { stat = await fsp.stat(filePath); } catch { noSnapshot(res); return; }
+    if (!stat.isFile() || stat.size === 0) { noSnapshot(res); return; }
+    const etag = '"' + stat.size.toString(16) + '-' + Math.floor(stat.mtimeMs).toString(16) + '"';
+    const headers = { 'Cache-Control': cacheControl, ETag: etag, Vary: 'Accept-Encoding', 'X-GEV-Cache': 'FILE' };
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); res.end(); return; }
+    const gzip = /\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''));
+    headers['Content-Type'] = contentType;
+    if (gzip) headers['Content-Encoding'] = 'gzip'; else headers['Content-Length'] = String(stat.size);
+    res.writeHead(200, headers);
+    if (req.method === 'HEAD') { res.end(); return; }
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', (error) => { console.warn('[power-proxy] lines read failed: ' + (error?.message || error)); try { res.destroy(); } catch { /* už zavreté */ } });
+    if (gzip) stream.pipe(zlib.createGzip({ level: 6 })).pipe(res); else stream.pipe(res);
+  };
+
+  async function buildFlows() {
+    const started = Date.now();
+    const results = [];
+    const entries = Object.entries(POWER_FLOW_COUNTRIES);
+    for (let i = 0; i < entries.length; i++) {
+      const [iso, code] = entries[i];
+      if (i) await new Promise((resolve) => setTimeout(resolve, POWER_FLOW_REQUEST_GAP_MS));
+      // 429 nesie Retry-After (1–30 s, overené 2026-11-06) — počkať a skúsiť znova.
+      let result = null;
+      for (let attempt = 1; attempt <= POWER_FLOW_MAX_ATTEMPTS && !result; attempt++) {
+        try {
+          const upstream = await fetch(energyChartsCbpfUrl(code, Date.now()), {
+            signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+            headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+          });
+          if (upstream.status === 429 && attempt < POWER_FLOW_MAX_ATTEMPTS) {
+            await new Promise((resolve) => setTimeout(resolve, retryAfterMs(upstream.headers.get('retry-after'))));
+            continue;
+          }
+          result = upstream.ok ? { iso, json: await upstream.json() } : { iso, json: null, error: 'HTTP ' + upstream.status };
+        } catch (error) {
+          result = { iso, json: null, error: String(error?.message || error) };
+        }
+      }
+      results.push(result || { iso, json: null, error: 'HTTP 429' });
+    }
+    const payload = buildPowerFlowsPayload(results, { fetchedAt: Date.now() });
+    const pairs = Object.keys(payload.pairs).length;
+    if (!pairs) throw new Error('Energy-Charts returned no border series (' + Object.keys(payload.errors).length + ' countries failed)');
+    console.log('[power-proxy] flows: ' + payload.countries.length + ' countries, ' + pairs + ' borders, ' + Object.keys(payload.errors).length + ' failed in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body: JSON.stringify(payload) };
+  }
+  async function currentFlows() {
+    if (!state.mem) {
+      try {
+        const parsed = JSON.parse(await fsp.readFile(FLOWS_PATH, 'utf8'));
+        if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') state.mem = parsed;
+      } catch { /* miss */ }
+    }
+    return state.mem;
+  }
+  async function flowsHandler(req, res) {
+    if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    const now = Date.now();
+    const mem = await currentFlows();
+    if (mem && now - mem.at < FLOWS_TTL_MS) { send(res, 200, mem.body, 'HIT'); return; }
+    if (!limiter(clientKey(req))) {
+      if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
+      send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+    }
+    const stale = mem && now - mem.at < FLOWS_STALE_MAX_MS ? mem : null;
+    // Obnova trvá ~4–6 min (36 krajín × 6 s + čakanie po 429). S cache na disku sa servíruje
+    // posledná odpoveď hneď a obnova beží na pozadí; čaká len úplne prvý dopyt.
+    const request = coalesceProxyRequest(inFlight, 'flows', buildFlows);
+    const commit = request.promise.then((fresh) => {
+      state.mem = fresh;
+      state.lastError = null;
+      fsp.mkdir(CACHE_DIR, { recursive: true }).then(() => fsp.writeFile(FLOWS_PATH, JSON.stringify(fresh), 'utf8')).catch((error) => console.warn('[power-proxy] flows cache write failed: ' + (error?.message || error)));
+      return fresh;
+    }, (error) => {
+      state.lastError = String(error?.message || error);
+      if (!request.shared) console.warn('[power-proxy] flows refresh failed (' + state.lastError + ')' + (stale ? ' — serving stale cache' : ''));
+      throw error;
+    });
+    if (stale) { commit.catch(() => {}); send(res, 200, stale.body, 'STALE-REVALIDATE'); return; }
+    try {
+      const fresh = await commit;
+      send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+    } catch {
+      send(res, 502, JSON.stringify({ error: 'upstream', detail: state.lastError }), 'NONE');
+    }
+  }
+  // Bunky 5° × 5° (2026-11-06): snímok Eurázie má 231 k úsekov / 119 MB — na jedno
+  // načítanie priveľký. Rozdelí ho už build (scripts/build-power-lines.mjs →
+  // .gev-cache/power/cells/<id>.geojsonl + index.json); server len streamuje súbory
+  // (žiadne parsovanie 119 MB v hlavnom vlákne oko-api).
+  const CELLS_DIR = path.join(CACHE_DIR, 'cells');
+  async function cellsIndexHandler(req, res) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    return linesFile(path.join(CELLS_DIR, 'index.json'), 'application/json; charset=utf-8', 'no-cache')(req, res);
+  }
+  async function cellHandler(req, res) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+    const id = decodeURIComponent(String(req.url || '').replace(/^\//, '').split('?')[0]);
+    if (!/^-?\d{1,2}_-?\d{1,3}$/.test(id)) { send(res, 400, JSON.stringify({ error: 'bad_cell' }), 'NONE'); return; }
+    // Bunka bez úsekov (oceán) súbor nemá — prázdna odpoveď, nie 404 snímku.
+    const file = path.join(CELLS_DIR, id + '.geojsonl');
+    const exists = await fsp.stat(file).then((st) => st.isFile()).catch(() => false);
+    if (!exists) {
+      const indexExists = await fsp.stat(path.join(CELLS_DIR, 'index.json')).then(() => true).catch(() => false);
+      if (!indexExists) { noSnapshot(res); return; }
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'public, max-age=86400', 'X-GEV-Cache': 'EMPTY' });
+      res.end('');
+      return;
+    }
+    return linesFile(file, 'application/x-ndjson; charset=utf-8')(req, res);
+  }
+  function install(middlewares) {
+    middlewares.use('/api/power/cells', cellsIndexHandler);
+    middlewares.use('/api/power/cell/', cellHandler);
+    middlewares.use('/api/power/lines/meta', linesFile(LINES_META_PATH, 'application/json; charset=utf-8'));
+    middlewares.use('/api/power/lines', linesFile(LINES_PATH, 'application/x-ndjson; charset=utf-8'));
+    middlewares.use('/api/power/flows', flowsHandler);
+  }
+  return {
+    name: 'power-proxy',
     configureServer(server) { install(server.middlewares); },
     configurePreviewServer(server) { install(server.middlewares); },
   };
@@ -12475,6 +12641,7 @@ export default defineConfig(({ mode }) => {
       gfwPresenceProxy(),
       logoProxy(),
       gasProxy(),
+      powerProxy(),
       oilPricesProxy(),
       ukraineBaseProxy(),
       ukraineReportProxy(),

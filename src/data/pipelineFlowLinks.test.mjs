@@ -39,9 +39,18 @@ test('mená zo snímku → body: NS1 = OPAL + NEL, NS2 nič, OPAL / EUGAL = OPAL
   assert.deepEqual(pipelineFlowPointIds({ ref: 'BBL' }), ['bacton-bbl']);
 });
 
-test('čo bod nemá, nedostane ho: Yamal, TAG, Langeled, bezmenné úseky; ropa nikdy', () => {
-  assert.deepEqual(pipelineFlowPointIds({ name: 'Yamal - Europe' }), [], 'Mallnow/Kondratki v katalógu nie sú');
-  assert.deepEqual(pipelineFlowPointIds({ name: 'Trans Austria Gasleitung (TAG)' }), []);
+test('stredná Európa (2026-11-06): Yamal → Mallnow, MEGAL → Waidhaus + Medelsheim, WAG → Oberkappel, TAG → Tarvisio, Transitgas → Passo Gries', () => {
+  assert.deepEqual(pipelineFlowPointIds({ name: 'Yamal - Europe' }), ['mallnow', 'mallnow-rev']);
+  assert.deepEqual(pipelineFlowPointIds({ name: 'Ямал — Европа' }), ['mallnow', 'mallnow-rev'], 'cyrilika');
+  assert.deepEqual(pipelineFlowPointIds({ name: 'Trans Austria Gasleitung (TAG)' }), ['tarvisio-in', 'tarvisio-out']);
+  assert.deepEqual(pipelineFlowPointIds({ operator: 'Trans Austria Gasleitung GmbH' }), ['tarvisio-in', 'tarvisio-out']);
+  assert.deepEqual(pipelineFlowPointIds({ name: 'MEGAL Nord' }), ['waidhaus', 'medelsheim']);
+  assert.deepEqual(pipelineFlowPointIds({ name: 'West-Austria-Gasleitung' }), ['oberkappel-in', 'oberkappel-out']);
+  assert.deepEqual(pipelineFlowPointIds({ name: 'Transitgas' }), ['passo-gries']);
+  assert.deepEqual(pipelineFlowPointIds({ name: 'Megalopolis gas spur' }), [], 'MEGAL len ako celé slovo');
+});
+
+test('čo bod nemá, nedostane ho: Langeled, Statpipe, bezmenné úseky; ropa nikdy', () => {
   assert.deepEqual(pipelineFlowPointIds({ name: 'Langeled' }), []);
   assert.deepEqual(pipelineFlowPointIds({ name: 'Statpipe', operator: 'Gassco' }), []);
   assert.deepEqual(pipelineFlowPointIds({}), []);

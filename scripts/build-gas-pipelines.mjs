@@ -73,7 +73,10 @@ const TILES = [
  * (DN ≥ 300, alebo meno/ref, alebo prevádzkovateľ = prepravca). Distribúcia,
  * areály a prípojky von; známy priemer < 150 mm von.
  */
-const EXCLUDED_USAGE = /^(distribution|household_distribution|facility|gathering|service|industrial|storage)$/;
+// flowline / flare_header / collection (zber na ťažobných poliach) doplnené
+// 2026-11-06 zo zoznamu ropy — v surových dlaždiciach v2 ich je 0, takže snímok
+// sa nemení; filter len uzatvára dieru pre budúcu prestavbu s --refresh.
+const EXCLUDED_USAGE = /^(distribution|household_distribution|facility|gathering|flowline|flare_header|collection|service|industrial|storage)$/;
 const TSO_RE = new RegExp([
   'eustream', 'transgas', 'net4gas', 'gaz[- ]?system', 'fgsz', 'transgaz', 'bulgartransgaz', 'desfa', 'snam', 'enag[aá]s', 'grtgaz', 'ter[eé]ga',
   'fluxys', 'gasunie', String.raw`\bgts\b`, 'open grid', String.raw`\boge\b`, 'thyssengas', 'gascade', 'bayernets', 'ontras', 'nowega', 'terranets',

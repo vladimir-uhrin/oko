@@ -28,7 +28,7 @@ import { clearOverlaySource, hitTestWorldOverlay, setOverlayEntries, setOverlayS
 import { applyVesselOverlayPolicy } from './vesselLabels.js';
 import {
   GAS_PIPELINE_ATTRIBUTION, GAS_PIPELINE_COLORS, OIL_PIPELINE_COLORS, OIL_PIPELINES_API, OIL_PIPELINES_META_API, PIPELINE_GHOST, PIPELINE_GROUP_MAX,
-  fetchGasPipelines, pipelineDetails, pipelineFenceSpec, pipelineGroupKey, pipelineGroupSummary, pipelineMidpoint, pipelineSelectedStyle, pipelineSourceLabel, pipelineStyle,
+  fetchGasPipelines, parsePipelinesGeojsonl, pipelineDetails, pipelineFenceSpec, pipelineGroupKey, pipelineGroupSummary, pipelineMidpoint, pipelineSelectedStyle, pipelineSourceLabel, pipelineStyle,
   pipelineTitle, selectGhostCohort,
 } from './gasPipelines.js';
 import { regionDisplayName } from './trackedCardModel.js';
@@ -88,6 +88,44 @@ const DEFAULT_OVERLAY_HOST = Object.freeze({
 });
 
 /**
+ * Profil vrstvy (ELEKTRINA, 2026-11-06): to isté telo — zdroje na druh, čipy,
+ * výber celej trasy, hover karta so živým tokom, duch cez terén, plot — kreslí
+ * aj vedenia ≥ 220 kV (`powerGridLayer.js`). Profil nesie všetko, čo je
+ * látkovo špecifické: id a mená, druhy a ich farby, snímky, štýl, texty
+ * karty, továreň hover karty a zdroj živých tokov. Plyn + ropa je predvolený.
+ * `sources[].fallback(doFetch)` = núdzový snímok, keď povinný zdroj chýba
+ * (elektrina: bundlovaný extrakt Slovenska).
+ */
+export const GAS_PIPELINES_PROFILE = Object.freeze({
+  id: GAS_PIPELINES_LAYER_ID,
+  nameKey: 'layer.gas-pipelines.name',
+  icon: '⌇',
+  logTag: 'GasPipelines',
+  kinds: PIPELINE_KINDS,
+  sources: Object.freeze([
+    Object.freeze({ key: 'gas', required: true }),
+    Object.freeze({ key: 'oil', url: OIL_PIPELINES_API, metaUrl: OIL_PIPELINES_META_API, required: false }),
+  ]),
+  styleFor: pipelineStyle,
+  selectedStyleFor: pipelineSelectedStyle,
+  fenceSpecFor: pipelineFenceSpec,
+  groupKeyFor: pipelineGroupKey,
+  groupMax: PIPELINE_GROUP_MAX,
+  titleFor: pipelineTitle,
+  detailsFor: pipelineDetails,
+  sourceLabel: pipelineSourceLabel,
+  kindColors: Object.freeze({ gas: GAS_PIPELINE_COLORS.operating, oil: OIL_PIPELINE_COLORS.operating }),
+  chipLabelKey: (kind) => `gas.pipeline-chip-${kind}`,
+  chipHintKey: (kind) => `gas.pipeline-chip-${kind}-hint`,
+  cardAccent: 'rgba(255, 177, 77, 0.95)',
+  attribution: GAS_PIPELINE_ATTRIBUTION,
+  noSnapshotKey: 'gas.pipeline-no-snapshot',
+  noGroundKey: 'gas.pipeline-no-ground',
+  hoverFactory: (o) => createPipelineHoverCard(o),
+  flowsFetcher: fetchGasFlows,
+});
+
+/**
  * Karta vybraného úseku (variant „selected“ cez politiku kariet lodí):
  * meno, prevádzkovateľ, priemer a dĺžka, stav, OSM id, zdroj v päte.
  * @param {object} feature
@@ -96,25 +134,25 @@ const DEFAULT_OVERLAY_HOST = Object.freeze({
  * @param {string} lang
  * @param {{activate?: Function, source?: string}} [o]
  */
-export function pipelineCard(feature, position, translate, lang, { activate = null, source = GAS_PIPELINE_ATTRIBUTION, group = null, regionName = undefined } = {}) {
+export function pipelineCard(feature, position, translate, lang, { activate = null, profile = GAS_PIPELINES_PROFILE, source = profile.attribution, group = null, regionName = undefined } = {}) {
   const props = feature?.properties || {};
-  const details = pipelineDetails(props, translate, lang, regionName ? { regionName } : {});
+  const details = profile.detailsFor(props, translate, lang, regionName ? { regionName } : {});
   // Celá trasa (etapa 6): úsek je fragment; karta povie, aká veľká je trasa.
   if (group && group.count > 1) {
     details.push(`${translate('gas.pipeline-group')}: ${translate('gas.pipeline-group-value', { n: group.count, km: new Intl.NumberFormat(lang === 'sk' ? 'sk-SK' : 'en-GB').format(group.lengthKm) })}`);
   }
   details.push(source);
   return applyVesselOverlayPolicy({
-    id: `${GAS_PIPELINES_LAYER_ID}:${feature.id}`,
+    id: `${profile.id}:${feature.id}`,
     actionable: true,
     position,
     gapPx: 12,
-    accent: 'rgba(255, 177, 77, 0.95)',
-    title: pipelineTitle(props, translate),
+    accent: profile.cardAccent,
+    title: profile.titleFor(props, translate),
     details,
     selected: true,
     priority: Number.MAX_SAFE_INTEGER,
-    accessibilityLabel: `${pipelineTitle(props, translate)} · ${translate('gas.card-close')}`,
+    accessibilityLabel: `${profile.titleFor(props, translate)} · ${translate('gas.card-close')}`,
     activate,
   });
 }
@@ -144,6 +182,7 @@ function normalizeFlag(value) {
  * @param {((points: number[][]) => Promise<Array<number|null>>)|null} [o.terrainSampler] výšky pre ducha (test: falošný; null = bez ducha)
  */
 export function createGasPipelinesLayer({
+  profile = GAS_PIPELINES_PROFILE,
   fetchImpl = null,
   dataSourceFactory = (id) => new Cesium.CustomDataSource(id),
   handlerFactory = (canvas) => new Cesium.ScreenSpaceEventHandler(canvas),
@@ -151,17 +190,20 @@ export function createGasPipelinesLayer({
   translate = translateDefault,
   lang = () => currentLanguage(),
   now = () => Date.now(),
-  hoverFactory = (o) => createPipelineHoverCard(o),
-  flowsFetcher = fetchGasFlows,
+  hoverFactory = profile.hoverFactory,
+  flowsFetcher = profile.flowsFetcher,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (id) => clearTimeout(id),
   groundSupport = defaultGroundSupport,
   terrainSampler = defaultTerrainSampler,
 } = {}) {
   const doFetch = fetchImpl || ((...args) => fetch(...args));
+  const LOG = `[Data:${profile.logTag}]`;
+  const emptyKinds = () => Object.fromEntries(profile.kinds.map((kind) => [kind, 0]));
+  const nullKinds = () => Object.fromEntries(profile.kinds.map((kind) => [kind, null]));
   let _viewer = null;
   /** Jeden CustomDataSource na látku: čip = jedno `show`, nie slučka cez entity. */
-  let _sources = { gas: null, oil: null };
+  let _sources = nullKinds();
   /** Zdroj s jedinou entitou zvýraznenia (etapa 4) — základná dávka sa pri kliku nemení. */
   let _selection = null;
   /** GPU vie pozemné čiary (hĺbková textúra); inak núdzovka nad elipsoidom. */
@@ -187,13 +229,20 @@ export function createGasPipelinesLayer({
   let _features = new Map();
   let _counts = { operating: 0, planned: 0, disused: 0 };
   /** Koľko úsekov je plyn a koľko ropa (etapa 2) — do stavu vrstvy a logu. */
-  let _kinds = { gas: 0, oil: 0 };
-  /** Meta ropného snímku; null, keď ropný build ešte nebežal. */
-  let _oilMeta = null;
+  let _kinds = emptyKinds();
+  /** Meta voliteľných snímkov (ropa); prázdne, keď ich build ešte nebežal. */
+  let _extraMetas = [];
   /** Voľby látok (etapa 3) — trvalý stav cez token `0`, viď layerState.js. */
-  let _params = { gas: true, oil: true };
+  let _params = Object.fromEntries(profile.kinds.map((kind) => [kind, true]));
   let _rowControlsListener = null;
   let _lengthKm = 0;
+  let _lengthKmRaw = 0;
+  /** Bunky (elektrina): index zo servera, bunky v pamäti (LRU poradie) → id úsekov. */
+  let _cellIndex = null;
+  let _cellIds = new Map();
+  let _cellTimer = null;
+  let _cellToken = 0;
+  let _removeCellMove = null;
   let _lastUpdate = null;
   let _error = null;
   let _selectedId = null;
@@ -231,8 +280,8 @@ export function createGasPipelinesLayer({
     return new Cesium.ColorMaterialProperty(color);
   };
 
-  const sourceFor = (kind) => _sources[kind === 'oil' ? 'oil' : 'gas'];
-  const eachSource = (fn) => { for (const kind of PIPELINE_KINDS) if (_sources[kind]) fn(_sources[kind], kind); };
+  const sourceFor = (kind) => _sources[kind] || _sources[profile.kinds[0]];
+  const eachSource = (fn) => { for (const kind of profile.kinds) if (_sources[kind]) fn(_sources[kind], kind); };
 
   /** Látka je viditeľná = vrstva zapnutá A jej čip zapnutý; výber ide s vrstvou. */
   function applySourceVisibility() {
@@ -287,9 +336,9 @@ export function createGasPipelinesLayer({
     for (const id of ids) {
       const member = _features.get(id);
       if (!member) continue;
-      const style = pipelineSelectedStyle(member.feature.properties);
+      const style = profile.selectedStyleFor(member.feature.properties);
       const entity = _selection.entities.add({
-        id: `${GAS_PIPELINES_LAYER_ID}:selected:${id}`,
+        id: `${profile.id}:selected:${id}`,
         polyline: polylineFor(member.feature.geometry.coordinates, style),
       });
       entity.__gasPipelineSelection = id;
@@ -307,14 +356,19 @@ export function createGasPipelinesLayer({
   function groupSummaryOf(id) {
     const ids = groupIdsOf(id);
     if (ids.length < 2) return null;
-    return pipelineGroupSummary(ids.map((member) => _features.get(member)?.feature).filter(Boolean));
+    const members = ids.map((member) => _features.get(member)?.feature).filter(Boolean);
+    const summary = pipelineGroupSummary(members);
+    // Elektrina: hranice, ktoré prekračuje ktorýkoľvek úsek trasy — úsek ležiaci
+    // celý v jednej krajine tak ukáže tok na hranici svojej trasy (Győr–Bős → HU-SK).
+    if (typeof profile.groupFlowIdsFor === 'function') summary.flowIds = profile.groupFlowIdsFor(members);
+    return summary;
   }
 
   function buildGroups() {
     _groups = new Map();
     _groupKeyById = new Map();
     for (const [id, { feature }] of _features) {
-      const key = pipelineGroupKey(feature.properties);
+      const key = profile.groupKeyFor(feature.properties);
       if (!key) continue;
       if (!_groups.has(key)) _groups.set(key, []);
       _groups.get(key).push(id);
@@ -322,7 +376,7 @@ export function createGasPipelinesLayer({
     // Samotár trasu netvorí; menná skupina nad stropom = meno je prakticky
     // všeobecné → nespája.
     for (const [key, ids] of _groups) {
-      if (ids.length < 2 || (key.startsWith('name:') && ids.length > PIPELINE_GROUP_MAX)) { _groups.delete(key); continue; }
+      if (ids.length < 2 || (key.startsWith('name:') && ids.length > profile.groupMax)) { _groups.delete(key); continue; }
       for (const id of ids) _groupKeyById.set(id, key);
     }
   }
@@ -358,7 +412,7 @@ export function createGasPipelinesLayer({
       const mid = pipelineMidpoint(feature.geometry.coordinates);
       if (!mid) continue;
       const c = Cesium.Cartesian3.fromDegrees(mid.lon, mid.lat);
-      _ghostRecords.push({ id, mid: { x: c.x, y: c.y, z: c.z }, points: feature.geometry.coordinates.length, widthClass: pipelineStyle(feature.properties).widthClass });
+      _ghostRecords.push({ id, mid: { x: c.x, y: c.y, z: c.z }, points: feature.geometry.coordinates.length, widthClass: profile.styleFor(feature.properties).widthClass });
     }
   }
 
@@ -391,7 +445,7 @@ export function createGasPipelinesLayer({
     const token = ++_ghostToken;
     const ids = Number.isFinite(height) && height > PIPELINE_GHOST.maxDistanceM
       ? []
-      : selectGhostCohort(_ghostRecords, cam).filter((id) => _params[pipelineStyle(_features.get(id).feature.properties).kind]);
+      : selectGhostCohort(_ghostRecords, cam).filter((id) => _params[profile.styleFor(_features.get(id).feature.properties).kind]);
     // Chýbajúce alebo neúspešné (po retryMs) výšky sa navzorkujú z terénu.
     const missing = ids.filter((id) => { const c = _ghostHeights.get(id); return !c || (!c.positions && now() - c.at > PIPELINE_GHOST.retryMs); });
     if (missing.length) {
@@ -401,7 +455,7 @@ export function createGasPipelinesLayer({
         for (const [lon, lat] of _features.get(id).feature.geometry.coordinates) { points.push([lon, lat]); owners.push(id); }
       }
       let heights = null;
-      try { heights = await terrainSampler(points); } catch (error) { heights = null; console.warn('[Data:GasPipelines] duch: výšky terénu zlyhali: ' + (error?.message || error)); }
+      try { heights = await terrainSampler(points); } catch (error) { heights = null; console.warn(LOG + ' duch: výšky terénu zlyhali: ' + (error?.message || error)); }
       if (token !== _ghostToken) return; // kamera sa medzitým pohla — platí novšia kohorta
       _ghostSamples += points.length;
       const byOwner = new Map();
@@ -422,9 +476,9 @@ export function createGasPipelinesLayer({
     for (const id of wanted) {
       if (present.has(id)) continue;
       const { feature } = _features.get(id);
-      const style = pipelineStyle(feature.properties);
+      const style = profile.styleFor(feature.properties);
       const entity = _ghost.entities.add({
-        id: `${GAS_PIPELINES_LAYER_ID}:ghost:${id}`,
+        id: `${profile.id}:ghost:${id}`,
         polyline: {
           positions: _ghostHeights.get(id).positions,
           width: Math.max(1, style.width - PIPELINE_GHOST.widthDelta),
@@ -459,15 +513,15 @@ export function createGasPipelinesLayer({
   function publishCard() {
     const record = _selectedId ? _features.get(_selectedId) : null;
     if (!_enabled || !record) {
-      overlayHost.clearSource(GAS_PIPELINES_OVERLAY_SOURCE_ID);
+      overlayHost.clearSource(profile.id);
       return;
     }
     const mid = pipelineMidpoint(record.feature.geometry.coordinates);
     const position = Cesium.Cartesian3.fromDegrees(mid.lon, mid.lat, 30);
-    overlayHost.setEntries(GAS_PIPELINES_OVERLAY_SOURCE_ID, [
-      pipelineCard(record.feature, position, translate, lang(), { activate: () => { selectPipeline(null); return true; }, source: pipelineSourceLabel(combinedMeta(), translate, lang()), group: groupSummaryOf(record.feature.id), regionName: (iso) => regionDisplayName(iso, lang()) }),
+    overlayHost.setEntries(profile.id, [
+      pipelineCard(record.feature, position, translate, lang(), { profile, activate: () => { selectPipeline(null); return true; }, source: profile.sourceLabel(combinedMeta(), translate, lang()), group: groupSummaryOf(record.feature.id), regionName: (iso) => regionDisplayName(iso, lang()) }),
     ], { cohortLimit: 1, collisionCapacity: 1, moving: false });
-    overlayHost.setVisible(GAS_PIPELINES_OVERLAY_SOURCE_ID, true);
+    overlayHost.setVisible(profile.id, true);
     _viewer?.scene?.requestRender?.();
   }
 
@@ -479,13 +533,13 @@ export function createGasPipelinesLayer({
       if (typeof window !== 'undefined') {
         const mid = pipelineMidpoint(next.feature.geometry.coordinates);
         registerEntityContext(next.entity, {
-          id: `${GAS_PIPELINES_LAYER_ID}:${featureId}`,
-          layerId: GAS_PIPELINES_LAYER_ID,
-          layerName: translate('layer.gas-pipelines.name'),
-          source: pipelineSourceLabel(combinedMeta(), translate, lang()),
-          dataSource: sourceFor(pipelineStyle(next.feature.properties).kind),
-          label: pipelineTitle(next.feature.properties, translate),
-          properties: Object.fromEntries(pipelineDetails(next.feature.properties, translate, lang()).map((line, i) => [`${i + 1}`, line])),
+          id: `${profile.id}:${featureId}`,
+          layerId: profile.id,
+          layerName: translate(profile.nameKey),
+          source: profile.sourceLabel(combinedMeta(), translate, lang()),
+          dataSource: sourceFor(profile.styleFor(next.feature.properties).kind),
+          label: profile.titleFor(next.feature.properties, translate),
+          properties: Object.fromEntries(profile.detailsFor(next.feature.properties, translate, lang()).map((line, i) => [`${i + 1}`, line])),
           latitude: mid ? Number(mid.lat.toFixed(6)) : null,
           longitude: mid ? Number(mid.lon.toFixed(6)) : null,
         });
@@ -496,73 +550,247 @@ export function createGasPipelinesLayer({
     _viewer?.scene?.requestRender?.();
   }
 
-  async function load() {
-    const { features: gasFeatures, meta } = await fetchGasPipelines({ fetcher: doFetch });
-    if (!gasFeatures.length) throw new Error('empty snapshot');
-    // Ropa (2026-09-19, etapa 2) je VOLITEĽNÁ: vlastný snímok, vlastná trasa,
-    // a keď chýba (404 no_snapshot, lebo build ešte nebežal), plyn sa musí
-    // nakresliť aj tak. Preto sa jej zlyhanie len zaloguje.
-    let oilFeatures = [];
+  /** Snímok jedného zdroja profilu; povinný zdroj smie mať núdzovku (`fallback`). */
+  async function loadSource(source) {
+    const opts = { fetcher: doFetch };
+    if (source.url) opts.url = source.url;
+    if (source.metaUrl) opts.metaUrl = source.metaUrl;
     try {
-      const oil = await fetchGasPipelines({ fetcher: doFetch, url: OIL_PIPELINES_API, metaUrl: OIL_PIPELINES_META_API });
-      oilFeatures = oil.features;
-      // Meta len k úsekom, ktoré sa naozaj nakreslia: prázdny ropný súbor s meta
-      // by inak pripočítal do chipu kilometre, ktoré na mape nie sú.
-      _oilMeta = oilFeatures.length ? oil.meta : null;
+      return await fetchGasPipelines(opts);
     } catch (error) {
-      _oilMeta = null;
-      console.warn('[Data:GasPipelines] ropný snímok nedostupný, kreslím len plyn: ' + (error?.message || error));
+      if (typeof source.fallback !== 'function') throw error;
+      console.warn(LOG + ' snímok ' + source.key + ' nedostupný (' + (error?.message || error) + ') — núdzový snímok');
+      return source.fallback(doFetch);
     }
-    // OSM way id sú jedinečné naprieč látkami, takže sa kľúče nezrazia.
-    const features = oilFeatures.length ? [...gasFeatures, ...oilFeatures] : gasFeatures;
-    _meta = meta;
-    _features = new Map();
-    // Po neúspešnom pokuse nesmú v zdroji ostať polovičné entity (Cesium by
-    // pri opakovanom add() s tým istým id vyhodilo výnimku).
-    eachSource((source) => source.entities.removeAll?.());
-    const counts = { operating: 0, planned: 0, disused: 0 };
-    const kinds = { gas: 0, oil: 0 };
-    let km = 0;
-    let fences = 0;
+  }
+
+  /**
+   * Vloží úseky ako entity (spoločné pre celý snímok aj pre bunku). Úsek cez
+   * hranicu dlaždice môže prísť dvakrát s tým istým OSM id — druhý výskyt
+   * dostane príponu, entity id musia byť jedinečné.
+   * @returns {string[]} id vložených úsekov
+   */
+  function insertFeatures(list, cellId = null) {
+    const ids = [];
     // ~21 000 úsekov: bez pozastavenia udalostí by každý add() prekresľoval.
     eachSource((source) => source.entities.suspendEvents?.());
-    for (const raw of features) {
-      // Úsek cez hranicu dlaždice môže prísť dvakrát s tým istým OSM id —
-      // druhý výskyt dostane príponu, entity id musia byť jedinečné.
+    for (const raw of list) {
       let id = String(raw.id);
       if (_features.has(id)) { let k = 2; while (_features.has(`${id}#${k}`)) k += 1; id = `${id}#${k}`; }
       const feature = id === raw.id ? raw : { ...raw, id };
-      const style = pipelineStyle(feature.properties);
-      const fence = _groundSupported ? pipelineFenceSpec(feature.properties) : null;
+      const style = profile.styleFor(feature.properties);
+      const fence = _groundSupported ? profile.fenceSpecFor(feature.properties) : null;
       const entity = sourceFor(style.kind).entities.add({
-        id: `${GAS_PIPELINES_LAYER_ID}:${id}`,
+        id: `${profile.id}:${id}`,
         polyline: polylineFor(feature.geometry.coordinates, style),
         // Plot (etapa 5) na tej istej entite: čip látky ho skryje spolu s čiarou.
         ...(fence ? { wall: wallFor(feature.geometry.coordinates, fence) } : {}),
         properties: { status: style.status, kind: style.kind, name: feature.properties?.name ?? null },
       });
-      if (fence) fences += 1;
+      if (fence) _fenceCount += 1;
       entity.__gasPipeline = id;
-      _features.set(id, { feature, entity });
-      counts[style.status] += 1;
-      kinds[style.kind] += 1;
-      km += Number(feature.properties?.lengthKm) || 0;
+      entity.__pipelineLayer = profile.id;
+      _features.set(id, { feature, entity, cellId, kind: style.kind, status: style.status });
+      _counts[style.status] += 1;
+      if (!_cellIndex) _kinds[style.kind] += 1;
+      _lengthKmRaw += Number(feature.properties?.lengthKm) || 0;
+      ids.push(id);
     }
     eachSource((source) => source.entities.resumeEvents?.());
-    _counts = counts;
-    _kinds = kinds;
-    _fenceCount = fences;
-    _lengthKm = Math.round(km);
-    _loaded = true;
-    _lastUpdate = now();
-    _error = null;
-    _ghostHeights = new Map();
+    _lengthKm = Math.round(_lengthKmRaw);
+    return ids;
+  }
+
+  /** Odstráni úseky (uvoľnenie bunky); vybraný úsek medzi nimi zbalí. */
+  function removeFeatures(ids) {
+    eachSource((source) => source.entities.suspendEvents?.());
+    for (const id of ids) {
+      const record = _features.get(id);
+      if (!record) continue;
+      if (id === _selectedId) selectPipeline(null);
+      sourceFor(record.kind).entities.remove?.(record.entity);
+      _counts[record.status] -= 1;
+      _lengthKmRaw -= Number(record.feature.properties?.lengthKm) || 0;
+      _features.delete(id);
+      _ghostHeights.delete(id);
+    }
+    eachSource((source) => source.entities.resumeEvents?.());
+    _lengthKm = Math.max(0, Math.round(_lengthKmRaw));
+  }
+
+  /** Po zmene množiny úsekov: duch, skupiny trás, prekreslenie. */
+  function afterFeaturesChanged() {
     buildGhostRecords();
     buildGroups();
     scheduleGhost();
-    console.log(`[Data:GasPipelines] Loaded ${features.length} segments (gas ${kinds.gas}, oil ${kinds.oil}; ${counts.operating} operating, ${counts.planned} planned, ${counts.disused} disused), ${_lengthKm} km`);
+    _viewer?.scene?.requestRender?.();
+  }
+
+  // ── Bunky (elektrina, 2026-11-06) ───────────────────────────────────────
+  /** Výhľad kamery v stupňoch pre výber buniek; null bez kamery. */
+  function currentView() {
+    const camera = _viewer?.scene?.camera || _viewer?.camera;
+    const carto = camera?.positionCartographic;
+    if (!carto) return null;
+    const view = { lon: Cesium.Math.toDegrees(carto.longitude), lat: Cesium.Math.toDegrees(carto.latitude) };
+    let rect = null;
+    try { rect = camera.computeViewRectangle?.(_viewer.scene.globe?.ellipsoid); } catch { rect = null; }
+    if (rect) {
+      Object.assign(view, { west: Cesium.Math.toDegrees(rect.west), south: Cesium.Math.toDegrees(rect.south), east: Cesium.Math.toDegrees(rect.east), north: Cesium.Math.toDegrees(rect.north) });
+    }
+    // Stred výhľadu = bod Zeme pod stredom obrazovky (pri šikmom pohľade sa pozeráme
+    // ďalej než pod kameru). NIE stred obdĺžnika: ten je na glóbuse nesúmerný —
+    // 2026-11-06 z 2 500 km nad 49° s. š. mal obdĺžnik 37,8–55,7° a „stred" 46,8°,
+    // takže sa načítal Balkán a husté Nemecko v strede obrazovky chýbalo.
+    try {
+      const canvas = _viewer.scene.canvas;
+      const hit = camera.pickEllipsoid?.(new Cesium.Cartesian2((canvas.clientWidth || canvas.width) / 2, (canvas.clientHeight || canvas.height) / 2), _viewer.scene.globe?.ellipsoid);
+      if (hit) {
+        const c = Cesium.Cartographic.fromCartesian(hit);
+        view.lon = Cesium.Math.toDegrees(c.longitude);
+        view.lat = Cesium.Math.toDegrees(c.latitude);
+      }
+    } catch { /* bez stredu = poloha kamery */ }
+    return view;
+  }
+
+  function scheduleCells() {
+    if (!_enabled || !_cellIndex) return;
+    if (_cellTimer) clearTimer(_cellTimer);
+    _cellTimer = setTimer(() => { _cellTimer = null; void refreshCells(); }, profile.cells.debounceMs ?? 400);
+  }
+
+  async function refreshCells() {
+    if (!_enabled || !_cellIndex) return;
+    const token = ++_cellToken;
+    const maxResident = profile.cells.maxResident?.() ?? 30_000;
+    const wanted = profile.cells.select(_cellIndex.cells, currentView(), { maxResident });
+    const wantedSet = new Set(wanted);
+    const residentCount = () => [..._cellIds.values()].reduce((n, ids) => n + ids.length, 0);
+    const sizeOf = new Map(_cellIndex.cells.map((c) => [c.id, c.count]));
+    // Uvoľni bunky mimo výhľadu, kým by sa nové nezmestili pod strop (najstaršie prvé).
+    const evictFor = (incoming) => {
+      for (const id of [..._cellIds.keys()]) {
+        if (residentCount() + incoming <= maxResident) return;
+        if (wantedSet.has(id)) continue;
+        removeFeatures(_cellIds.get(id));
+        _cellIds.delete(id);
+      }
+    };
+    let changed = false;
+    for (const cellId of wanted) {
+      if (_cellIds.has(cellId)) { const ids = _cellIds.get(cellId); _cellIds.delete(cellId); _cellIds.set(cellId, ids); continue; } // LRU: posuň dozadu
+      let list = null;
+      try {
+        const response = await doFetch(profile.cells.cellUrl(cellId, _meta?.snapshot));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        list = parsePipelinesGeojsonl(await response.text());
+      } catch (error) {
+        console.warn(`${LOG} bunka ${cellId} nedostupná: ${error?.message || error}`);
+        continue;
+      }
+      if (token !== _cellToken || !_enabled) { if (changed) afterFeaturesChanged(); return; } // novší pohyb kamery má prednosť
+      evictFor(sizeOf.get(cellId) ?? list.length);
+      _cellIds.set(cellId, insertFeatures(list, cellId));
+      changed = true;
+    }
+    if (changed) {
+      _lastUpdate = now();
+      afterFeaturesChanged();
+      _rowControlsListener?.();
+    }
+  }
+
+  function installCellMove() {
+    if (_removeCellMove || !_cellIndex) return;
+    _removeCellMove = _viewer?.scene?.camera?.moveEnd?.addEventListener?.(scheduleCells) || null;
+  }
+
+  function removeCellMove() {
+    if (_cellTimer) { clearTimer(_cellTimer); _cellTimer = null; }
+    _cellToken += 1;
+    _removeCellMove?.();
+    _removeCellMove = null;
+  }
+
+  /** Index buniek; null = profil bunky nemá alebo index chýba (núdzovka zdrojov). */
+  async function loadCellIndex() {
+    if (!profile.cells) return null;
+    try {
+      const response = await doFetch(profile.cells.indexUrl, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const index = await response.json();
+      return Array.isArray(index?.cells) && index.cells.length ? index : null;
+    } catch (error) {
+      console.warn(`${LOG} index buniek nedostupný (${error?.message || error}) — celý snímok / núdzovka`);
+      return null;
+    }
+  }
+
+  async function load() {
+    // Po neúspešnom pokuse nesmú v zdroji ostať polovičné entity (Cesium by
+    // pri opakovanom add() s tým istým id vyhodilo výnimku).
+    eachSource((source) => source.entities.removeAll?.());
+    _features = new Map();
+    _cellIds = new Map();
+    _counts = { operating: 0, planned: 0, disused: 0 };
+    _kinds = emptyKinds();
+    _lengthKmRaw = 0;
+    _lengthKm = 0;
+    _fenceCount = 0;
+    _ghostHeights = new Map();
+    const index = await loadCellIndex();
+    if (index) {
+      _cellIndex = index;
+      _meta = index.meta || null;
+      _extraMetas = [];
+      // Legenda hlási celý snímok (nie len bunky v pamäti).
+      for (const kind of profile.kinds) _kinds[kind] = Number(index.totals?.[kind]) || 0;
+      _loaded = true;
+      _lastUpdate = now();
+      _error = null;
+      console.log(`${LOG} Index: ${index.cells.length} buniek, ${index.features} úsekov (${profile.kinds.map((kind) => `${kind} ${_kinds[kind]}`).join(', ')})`);
+      _rowControlsListener?.();
+      installCellMove();
+      if (profile.prefetchFlows) void loadFlows();
+      await refreshCells();
+      return;
+    }
+    _cellIndex = null;
+    const [primary, ...optional] = profile.sources;
+    const { features: primaryFeatures, meta } = await loadSource(primary);
+    if (!primaryFeatures.length) throw new Error('empty snapshot');
+    // Ropa (2026-09-19, etapa 2) je VOLITEĽNÁ: vlastný snímok, vlastná trasa,
+    // a keď chýba (404 no_snapshot, lebo build ešte nebežal), plyn sa musí
+    // nakresliť aj tak. Preto sa jej zlyhanie len zaloguje.
+    let features = primaryFeatures;
+    const extraMetas = [];
+    for (const source of optional) {
+      try {
+        const extra = await loadSource(source);
+        // Meta len k úsekom, ktoré sa naozaj nakreslia: prázdny ropný súbor s meta
+        // by inak pripočítal do chipu kilometre, ktoré na mape nie sú.
+        if (extra.features.length) { features = [...features, ...extra.features]; extraMetas.push(extra.meta); }
+      } catch (error) {
+        console.warn(LOG + ' snímok ' + source.key + ' nedostupný, kreslím bez neho: ' + (error?.message || error));
+      }
+    }
+    // OSM way id sú jedinečné naprieč látkami, takže sa kľúče nezrazia.
+    _extraMetas = extraMetas;
+    _meta = meta;
+    insertFeatures(features);
+    _loaded = true;
+    _lastUpdate = now();
+    _error = null;
+    afterFeaturesChanged();
+    const counts = _counts;
+    const kinds = _kinds;
+    console.log(`${LOG} Loaded ${features.length} segments (${profile.kinds.map((kind) => `${kind} ${kinds[kind]}`).join(', ')}; ${counts.operating} operating, ${counts.planned} planned, ${counts.disused} disused), ${_lengthKm} km`);
     // Legenda v riadku vrstvy hlási počty na látku — až teraz sú známe.
     _rowControlsListener?.();
+    // Elektrina: obnova tokov v proxy trvá minúty — pýta sa hneď po načítaní,
+    // aby prvý hover nečakal.
+    if (profile.prefetchFlows) void loadFlows();
   }
 
   /**
@@ -573,11 +801,11 @@ export function createGasPipelinesLayer({
    * @returns {object|null}
    */
   function combinedMeta() {
-    if (!_oilMeta) return _meta;
-    if (!_meta) return _oilMeta;
-    const dates = [_meta.snapshot, _oilMeta.snapshot].filter(Boolean).map(String).sort();
-    const km = (Number(_meta.lengthKm) || 0) + (Number(_oilMeta.lengthKm) || 0);
-    return { ..._meta, snapshot: dates[0] ?? null, lengthKm: km || null };
+    const metas = [_meta, ..._extraMetas].filter(Boolean);
+    if (metas.length <= 1) return metas[0] ?? null;
+    const dates = metas.map((m) => m.snapshot).filter(Boolean).map(String).sort();
+    const km = metas.reduce((sum, m) => sum + (Number(m.lengthKm) || 0), 0);
+    return { ...metas[0], snapshot: dates[0] ?? null, lengthKm: km || null };
   }
 
   function installClick() {
@@ -585,11 +813,11 @@ export function createGasPipelinesLayer({
     _clickHandler = handlerFactory(_viewer.scene.canvas);
     _clickHandler.setInputAction((click) => {
       if (!_enabled) return;
-      const hit = overlayHost.hitTest?.(click.position?.x, click.position?.y, { sourceId: GAS_PIPELINES_OVERLAY_SOURCE_ID });
+      const hit = overlayHost.hitTest?.(click.position?.x, click.position?.y, { sourceId: profile.id });
       if (hit?.entryId) { selectPipeline(null); return; }
       const picked = _viewer.scene.pick(click.position);
       const entity = picked?.id;
-      if (entity?.__gasPipeline) {
+      if (entity?.__gasPipeline && entity.__pipelineLayer === profile.id) {
         _viewer.selectedEntity = entity;
         selectPipeline(entity.__gasPipeline === _selectedId ? null : entity.__gasPipeline);
         return;
@@ -610,12 +838,13 @@ export function createGasPipelinesLayer({
    * Vracia payload alebo null (chyba) — karta z null urobí „nedostupné".
    */
   function loadFlows() {
+    if (typeof flowsFetcher !== 'function') return Promise.resolve(null);
     if (_flows && now() - _flowsAt < PIPELINE_FLOWS_TTL_MS) return Promise.resolve(_flows);
     if (_flowsPromise) return _flowsPromise;
     _flowsPromise = Promise.resolve()
       .then(() => flowsFetcher({ fetcher: doFetch }))
       .then((payload) => { _flows = payload || null; _flowsAt = now(); _flowsPromise = null; return _flows; })
-      .catch((error) => { _flowsPromise = null; console.warn('[Data:GasPipelines] živé toky nedostupné: ' + (error?.message || error)); return null; });
+      .catch((error) => { _flowsPromise = null; console.warn(LOG + ' živé toky nedostupné: ' + (error?.message || error)); return null; });
     return _flowsPromise;
   }
 
@@ -630,7 +859,7 @@ export function createGasPipelinesLayer({
     if (!_enabled || !_hover || !_pointer || !_viewer?.scene?.pick) return;
     let picked = null;
     try { picked = _viewer.scene.pick(new Cesium.Cartesian2(_pointer.x, _pointer.y), PIPELINE_HOVER_PICK_PX, PIPELINE_HOVER_PICK_PX); } catch { picked = null; }
-    const id = picked?.id?.__gasPipeline;
+    const id = picked?.id?.__pipelineLayer === profile.id ? picked.id.__gasPipeline : null;
     const record = id ? _features.get(id) : null;
     if (!record) { if (!_hover.isHovered()) _hover.hide(); return; }
     const flowIds = _hover.show(record.feature, _pointer, { group: groupSummaryOf(record.feature.id) });
@@ -672,26 +901,24 @@ export function createGasPipelinesLayer({
   }
 
   const layer = {
-    id: GAS_PIPELINES_LAYER_ID,
-    get name() { return translate('layer.gas-pipelines.name'); },
+    id: profile.id,
+    get name() { return translate(profile.nameKey); },
     // Monochromatický glyf (žiadne emoji): rúra.
-    icon: '⌇',
-    get source() { return pipelineSourceLabel(combinedMeta(), translate, lang()); },
+    icon: profile.icon,
+    get source() { return profile.sourceLabel(combinedMeta(), translate, lang()); },
     updateInterval: GAS_PIPELINES_REFRESH_MS,
 
     init(viewer) {
       _viewer = viewer;
       _groundSupported = groundSupport(viewer?.scene);
-      if (!_groundSupported) console.warn('[Data:GasPipelines] GroundPolylinePrimitive unsupported — čiary 200 m nad elipsoidom');
-      _sources = {
-        gas: dataSourceFactory(GAS_PIPELINES_LAYER_ID),
-        oil: dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-oil`),
-      };
+      if (!_groundSupported) console.warn(LOG + ' GroundPolylinePrimitive unsupported — čiary 200 m nad elipsoidom');
+      // Prvý druh = zdroj s holým id vrstvy (kontextový panel ho pozná), ďalšie s príponou.
+      _sources = Object.fromEntries(profile.kinds.map((kind, i) => [kind, dataSourceFactory(i === 0 ? profile.id : `${profile.id}-${kind}`)]));
       eachSource((source) => { source.show = false; viewer?.dataSources?.add?.(source); });
-      _selection = dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-selected`);
+      _selection = dataSourceFactory(`${profile.id}-selected`);
       _selection.show = false;
       viewer?.dataSources?.add?.(_selection);
-      _ghost = dataSourceFactory(`${GAS_PIPELINES_LAYER_ID}-ghost`);
+      _ghost = dataSourceFactory(`${profile.id}-ghost`);
       _ghost.show = false;
       viewer?.dataSources?.add?.(_ghost);
       _loaded = false;
@@ -704,8 +931,9 @@ export function createGasPipelinesLayer({
       installClick();
       installHover();
       installGhostMove();
+      installCellMove();
       if (!_loaded && !_loading) void layer.update();
-      else { publishCard(); scheduleGhost(); }
+      else { publishCard(); scheduleGhost(); scheduleCells(); }
     },
 
     disable() {
@@ -714,10 +942,11 @@ export function createGasPipelinesLayer({
       removeClick();
       removeHover();
       removeGhostMove();
+      removeCellMove();
       if (_selectedId) selectPipeline(null);
-      overlayHost.clearSource(GAS_PIPELINES_OVERLAY_SOURCE_ID);
-      overlayHost.setVisible(GAS_PIPELINES_OVERLAY_SOURCE_ID, false);
-      if (_viewer?.selectedEntity?.__gasPipeline) _viewer.selectedEntity = undefined;
+      overlayHost.clearSource(profile.id);
+      overlayHost.setVisible(profile.id, false);
+      if (_viewer?.selectedEntity?.__gasPipeline && _viewer.selectedEntity.__pipelineLayer === profile.id) _viewer.selectedEntity = undefined;
       _viewer?.scene?.requestRender?.();
     },
 
@@ -730,8 +959,8 @@ export function createGasPipelinesLayer({
         await _loading;
         return true;
       } catch (error) {
-        _error = error?.code === 'no_snapshot' ? translate('gas.pipeline-no-snapshot') : (error?.message || String(error));
-        console.warn('[Data:GasPipelines]', _error);
+        _error = error?.code === 'no_snapshot' ? translate(profile.noSnapshotKey) : (error?.message || String(error));
+        console.warn(LOG, _error);
         return false;
       }
     },
@@ -740,7 +969,7 @@ export function createGasPipelinesLayer({
       layer.disable();
       _hover?.destroy?.();
       _hover = null;
-      if (typeof window !== 'undefined') removeEntityContextsForLayer(GAS_PIPELINES_LAYER_ID);
+      if (typeof window !== 'undefined') removeEntityContextsForLayer(profile.id);
       const host = viewer || _viewer;
       eachSource((source) => { if (host?.dataSources?.remove) host.dataSources.remove(source, true); });
       if (_selection && host?.dataSources?.remove) host.dataSources.remove(_selection, true);
@@ -752,14 +981,16 @@ export function createGasPipelinesLayer({
       _fenceCount = 0;
       _groups = new Map();
       _groupKeyById = new Map();
-      _sources = { gas: null, oil: null };
+      _sources = nullKinds();
       _viewer = null;
       _features = new Map();
+      _cellIndex = null;
+      _cellIds = new Map();
       _loaded = false;
       _loading = null;
       _meta = null;
-      _oilMeta = null;
-      _kinds = { gas: 0, oil: 0 };
+      _extraMetas = [];
+      _kinds = emptyKinds();
       _flows = null;
       _flowsAt = 0;
       _flowsPromise = null;
@@ -772,7 +1003,7 @@ export function createGasPipelinesLayer({
      */
     setParams(params = {}) {
       let changed = false;
-      for (const kind of PIPELINE_KINDS) {
+      for (const kind of profile.kinds) {
         if (!Object.hasOwn(params || {}, kind)) continue;
         const value = normalizeFlag(params[kind]);
         if (value === null || value === _params[kind]) continue;
@@ -782,7 +1013,7 @@ export function createGasPipelinesLayer({
       if (!changed) return true;
       applySourceVisibility();
       const selected = _selectedId ? _features.get(_selectedId) : null;
-      if (selected && !_params[pipelineStyle(selected.feature.properties).kind]) selectPipeline(null);
+      if (selected && !_params[profile.styleFor(selected.feature.properties).kind]) selectPipeline(null);
       clearHover();
       scheduleGhost();
       _rowControlsListener?.();
@@ -796,20 +1027,20 @@ export function createGasPipelinesLayer({
 
     /** Čipy PLYN / ROPA + legenda s počtami a farbami látok. */
     getRowControls() {
-      const colors = { gas: GAS_PIPELINE_COLORS.operating, oil: OIL_PIPELINE_COLORS.operating };
+      const colors = profile.kindColors;
       return {
-        chips: PIPELINE_KINDS.map((kind) => ({
+        chips: profile.kinds.map((kind) => ({
           id: `kind-${kind}`,
-          label: translate(`gas.pipeline-chip-${kind}`),
-          title: translate(`gas.pipeline-chip-${kind}-hint`),
+          label: translate(profile.chipLabelKey(kind)),
+          title: translate(profile.chipHintKey(kind)),
           active: Boolean(_params[kind]),
           params: { [kind]: !_params[kind] },
         })),
-        legend: PIPELINE_KINDS.map((kind) => ({
-          label: translate(`gas.pipeline-chip-${kind}`),
+        legend: profile.kinds.map((kind) => ({
+          label: translate(profile.chipLabelKey(kind)),
           count: _kinds[kind],
           color: colors[kind],
-          blurb: translate(`gas.pipeline-chip-${kind}-hint`),
+          blurb: translate(profile.chipHintKey(kind)),
         })),
       };
     },
@@ -825,27 +1056,28 @@ export function createGasPipelinesLayer({
         loading: Boolean(_loading) && !_loaded,
         error: _error,
         // Núdzovka bez pozemných čiar sa hlási v zdroji (pravidlo 2).
-        source: pipelineSourceLabel(combinedMeta(), translate, lang()) + (_groundSupported ? '' : ` · ${translate('gas.pipeline-no-ground')}`),
+        source: profile.sourceLabel(combinedMeta(), translate, lang()) + (_groundSupported ? '' : ` · ${translate(profile.noGroundKey)}`),
         kinds: { ..._kinds },
         status: undefined,
       };
     },
 
     hasContact(id) {
-      return _features.has(String(id).replace(`${GAS_PIPELINES_LAYER_ID}:`, ''));
+      return _features.has(String(id).replace(`${profile.id}:`, ''));
     },
 
     selectPipeline,
 
     _getStateForTest() {
-      const entities = PIPELINE_KINDS.reduce((n, kind) => n + (_sources[kind]?.entities?.values?.length ?? 0), 0);
+      const entities = profile.kinds.reduce((n, kind) => n + (_sources[kind]?.entities?.values?.length ?? 0), 0);
       return {
         enabled: _enabled, loaded: _loaded, error: _error, count: _features.size, counts: { ..._counts }, lengthKm: _lengthKm, selected: _selectedId,
-        entities: _sources.gas || _sources.oil ? entities : null, hasClick: Boolean(_clickHandler), meta: _meta,
-        kinds: { ..._kinds }, oilMeta: _oilMeta, params: { ..._params },
-        sources: { gas: _sources.gas?.show ?? null, oil: _sources.oil?.show ?? null, selected: _selection?.show ?? null, ghost: _ghost?.show ?? null },
+        entities: profile.kinds.some((kind) => _sources[kind]) ? entities : null, hasClick: Boolean(_clickHandler), meta: _meta,
+        kinds: { ..._kinds }, oilMeta: _extraMetas[0] ?? null, extraMetas: [..._extraMetas], params: { ..._params },
+        sources: { ...Object.fromEntries(profile.kinds.map((kind) => [kind, _sources[kind]?.show ?? null])), selected: _selection?.show ?? null, ghost: _ghost?.show ?? null },
         selectionEntities: _selection?.entities?.values?.length ?? null, groundSupported: _groundSupported,
         fences: _fenceCount, groups: _groups.size,
+        cells: _cellIndex ? { indexed: _cellIndex.cells.length, resident: [..._cellIds.keys()], listening: Boolean(_removeCellMove), timer: Boolean(_cellTimer) } : null,
         ghost: { supported: ghostSupported(), drawn: _ghost?.entities?.values?.length ?? null, cached: _ghostHeights.size, samples: _ghostSamples, listening: Boolean(_removeGhostMove), timer: Boolean(_ghostTimer) },
         hover: { installed: Boolean(_hoverListeners), timer: Boolean(_hoverTimer), flowsCached: Boolean(_flows) },
       };

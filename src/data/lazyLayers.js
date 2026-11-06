@@ -181,8 +181,10 @@ export const damsLazy = createLazyLayer({
 });
 
 export const skEnergyLazy = createLazyLayer({
-  meta: { id: 'local-energy', name: 'Energetika SR', icon: '↯', source: '© OpenStreetMap contributors · ODbL · snapshot 2026-08', updateInterval: 3600000 },
-  contract: ['destroy', 'disable', 'enable', 'getStats', 'init', 'update'],
+  meta: { id: 'local-energy', name: 'Power grid · ≥ 220 kV (OSM snapshot)', icon: '↯', source: '© OpenStreetMap contributors · ODbL', updateInterval: 3600000 },
+  contract: ['destroy', 'disable', 'enable', 'getParams', 'getRowControls', 'getStats', 'hasContact', 'init', 'selectPipeline', 'setParams', 'setRowControlsListener', 'update'],
+  params: { ehv: true, hv: true, dc: true },
+  rowControls: { chips: [{ id: 'kind-ehv', label: '≥ 380 kV', title: 'Extra-high-voltage AC backbone, 380 kV and more (OSM snapshot)', active: true, params: { ehv: false } }, { id: 'kind-hv', label: '220–330 kV', title: 'High-voltage AC lines, 220–330 kV (OSM snapshot)', active: true, params: { hv: false } }, { id: 'kind-dc', label: 'HVDC', title: 'Direct-current links (HVDC, frequency 0 in OSM)', active: true, params: { dc: false } }], legend: [{ label: '≥ 380 kV', count: 0, color: '#3fd6ff', blurb: 'Extra-high-voltage AC backbone, 380 kV and more (OSM snapshot)' }, { label: '220–330 kV', count: 0, color: '#7f9cff', blurb: 'High-voltage AC lines, 220–330 kV (OSM snapshot)' }, { label: 'HVDC', count: 0, color: '#b9ff4f', blurb: 'Direct-current links (HVDC, frequency 0 in OSM)' }] },
   load: fromLocalLayers('local-energy'),
 });
 

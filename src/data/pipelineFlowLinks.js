@@ -57,6 +57,20 @@ export const PIPELINE_FLOW_LINKS = Object.freeze([
   { name: /Prepojovací plynovod Poľsko – Slovensko|Poland.?Slovakia|Polska.?Słowacja/i, ids: ['vyrava-in', 'vyrava-out'] },
   { name: /Narva/i, ids: ['narva'] },
   { name: /Bereg/i, ids: ['bereg-in', 'bereg-out'] },
+  // Stredná Európa (2026-11-06): body overené proti ENTSOG (gasFlows.js).
+  // Yamal–Európa vstupuje do Nemecka v Mallnowe (dnes nula — poctivá odpoveď).
+  { name: /Yamal|Jamal|Ямал/i, ids: ['mallnow', 'mallnow-rev'] },
+  // MEGAL: Waidhaus (CZ→DE) až Medelsheim (DE→FR).
+  { name: /\bMEGAL\b|Mittel-?Europäische Gasleitung/i, ids: ['waidhaus', 'medelsheim'] },
+  // WAG (West-Austria-Gasleitung) a Penta West končia v Oberkappeli.
+  { name: /\bWAG\b|West.?Austria.?Gas|Penta.?West/i, ids: ['oberkappel-in', 'oberkappel-out'] },
+  { operator: /West Austria Gasleitung/i, ids: ['oberkappel-in', 'oberkappel-out'] },
+  // TAG (Trans Austria Gasleitung) prechádza do Talianska v Tarvisiu / Arnoldsteine.
+  { name: /\bTAG\b|Trans.?Austria.?Gas/i, ids: ['tarvisio-in', 'tarvisio-out'] },
+  { operator: /Trans Austria Gasleitung|^TAG\b/i, ids: ['tarvisio-in', 'tarvisio-out'] },
+  // Transitgas (Švajčiarsko) vstupuje do Talianska na Passo Gries.
+  { name: /Transitgas/i, ids: ['passo-gries'] },
+  { operator: /Transitgas/i, ids: ['passo-gries'] },
   // Prevádzkovateľ = rúra: sústava eustreamu vystupuje v Baumgartene a Lanžhote.
   { operator: /eustream/i, ids: ['baumgarten-out', 'lanzhot-out'] },
 ]);

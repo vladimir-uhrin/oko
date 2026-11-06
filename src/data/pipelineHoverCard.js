@@ -46,8 +46,21 @@ export function pipelineHoverModel(feature, { translate = (k) => k, lang = 'sk' 
     rows: pipelineDetailsRows(p, translate, lang).filter(([label]) => label !== translate('gas.pipeline-operator')),
     osmUrl: Number.isFinite(osm) && osm > 0 ? `https://www.openstreetmap.org/way/${osm}` : null,
     flowIds: pipelineFlowPointIds(p),
+    // Ropa: živé toky nie sú verejné — karta to povie slovom, nič nečaká.
+    flowNoneKey: kind === 'oil' ? 'gas.pipeline-flow-oil-none' : null,
   };
 }
+
+/** Texty sekcie toku pre plyn (ENTSOG); elektrina má vlastné (Energy-Charts). */
+export const PIPELINE_FLOW_TEXTS = Object.freeze({
+  title: 'gas.pipeline-flow-title',
+  none: 'gas.pipeline-flow-none',
+  note: 'gas.pipeline-flow-note',
+  loading: 'gas.pipeline-flow-loading',
+  unavailable: 'gas.pipeline-flow-unavailable',
+  spark: 'gas.pipeline-flow-spark',
+  hint: 'gas.pipeline-hover-hint',
+});
 
 /**
  * @param {{document?: Document, translate?: Function, lang?: () => string, regionName?: (iso: string, lang: string) => string, flagUrl?: (iso: string) => string|null, drawSpark?: Function, snapshotDate?: () => string|null}} [o]
@@ -60,16 +73,25 @@ export function createPipelineHoverCard({
   flagUrl = flagUrlDefault,
   drawSpark = drawSparkline,
   snapshotDate = () => null,
+  // ELEKTRINA (2026-11-06): tá istá karta kreslí aj vedenia — model, väzba na
+  // toky a texty sú vstrekované; predvolené hodnoty = plyn/ropa.
+  buildModel = pipelineHoverModel,
+  flowIdsFor = (feature) => pipelineFlowPointIds(feature.properties),
+  flowRowsFor = (payload, ids, o) => pipelineFlowRows(payload, ids, o),
+  flowTexts = PIPELINE_FLOW_TEXTS,
+  className = 'pipeline-hover-card',
 } = {}) {
   if (!doc?.body) return { show() {}, setFlows() {}, hide() {}, destroy() {}, isHovered: () => false, current: () => null };
   const root = doc.createElement('section');
-  root.className = 'pipeline-hover-card';
+  root.className = className;
   root.hidden = true;
   doc.body.appendChild(root);
   let current = null;
   let generation = 0;
   let hovered = false;
   let flowRoot = null;
+  /** Hranice / body toku, na ktoré karta práve čaká (úsek alebo jeho trasa). */
+  let currentFlowIds = [];
   const el = (tag, text, parent = root, className = '') => {
     const node = doc.createElement(tag);
     if (text) node.textContent = text;
@@ -95,7 +117,7 @@ export function createPipelineHoverCard({
     el('span', regionName(iso, lang()) || iso, span);
     return span;
   };
-  function hide() { generation += 1; current = null; hovered = false; flowRoot = null; root.hidden = true; }
+  function hide() { generation += 1; current = null; hovered = false; flowRoot = null; currentFlowIds = []; root.hidden = true; }
   function place(at) {
     const w = doc.documentElement?.clientWidth || 0;
     const h = doc.documentElement?.clientHeight || 0;
@@ -107,9 +129,10 @@ export function createPipelineHoverCard({
   function renderFlows(result) {
     if (!flowRoot) return;
     flowRoot.replaceChildren();
-    el('h4', translate('gas.pipeline-flow-title'), flowRoot);
-    if (result === undefined) { el('p', translate('gas.pipeline-flow-loading'), flowRoot, 'pipeline-hover-note'); return; }
-    if (result === null) { el('p', translate('gas.pipeline-flow-unavailable'), flowRoot, 'pipeline-hover-note'); return; }
+    el('h4', translate(flowTexts.title), flowRoot);
+    if (result === undefined) { el('p', translate(flowTexts.loading), flowRoot, 'pipeline-hover-note'); return; }
+    if (result === null) { el('p', translate(flowTexts.unavailable), flowRoot, 'pipeline-hover-note'); return; }
+    if (!result.rows.length) { el('p', translate(flowTexts.none), flowRoot, 'pipeline-hover-note'); return; }
     for (const row of result.rows) {
       const point = el('div', '', flowRoot, 'pipeline-hover-flow-point');
       const head = el('div', '', point, 'pipeline-hover-flow-head');
@@ -126,13 +149,13 @@ export function createPipelineHoverCard({
       if (validSpark.length >= 2 && typeof doc.createElement === 'function') {
         const canvas = el('canvas', '', point, 'pipeline-hover-spark');
         canvas.width = SPARK_W; canvas.height = SPARK_H;
-        canvas.title = translate('gas.pipeline-flow-spark');
+        canvas.title = translate(flowTexts.spark);
         const ctx = canvas.getContext?.('2d');
         if (ctx) { try { drawSpark(ctx, row.spark, { width: SPARK_W, height: SPARK_H }); } catch { /* bez sparkline */ } }
       }
       if (row.note) el('p', row.note, point, 'pipeline-hover-note');
     }
-    el('p', translate('gas.pipeline-flow-note'), flowRoot, 'pipeline-hover-note');
+    el('p', translate(flowTexts.note), flowRoot, 'pipeline-hover-note');
     if (result.citation) el('p', result.citation, flowRoot, 'pipeline-hover-note');
   }
   root.addEventListener('pointerenter', () => { hovered = true; });
@@ -149,8 +172,10 @@ export function createPipelineHoverCard({
      * @returns {string[]} id bodov ENTSOG, ktoré karta čaká cez setFlows (prázdne = nič nečaká)
      */
     show(feature, at, { group = null } = {}) {
-      const model = pipelineHoverModel(feature, { translate, lang: lang() });
+      const model = buildModel(feature, { translate, lang: lang() });
       if (!model) { hide(); return []; }
+      // Úsek bez vlastnej väzby na tok si ju môže požičať od trasy (elektrina).
+      if (!model.flowIds.length && Array.isArray(group?.flowIds) && group.flowIds.length) model.flowIds = [...group.flowIds];
       if (current === feature) { place(at); return []; }
       hide();
       current = feature;
@@ -180,12 +205,12 @@ export function createPipelineHoverCard({
         el('dd', translate('gas.pipeline-group-value', { n: group.count, km: new Intl.NumberFormat(lang() === 'sk' ? 'sk-SK' : 'en-GB').format(group.lengthKm) }), list);
       }
       flowRoot = el('div', '', root, 'pipeline-hover-flow');
-      if (model.kind === 'oil') {
-        el('h4', translate('gas.pipeline-flow-title'), flowRoot);
-        el('p', translate('gas.pipeline-flow-oil-none'), flowRoot, 'pipeline-hover-note');
+      if (model.flowNoneKey) {
+        el('h4', translate(flowTexts.title), flowRoot);
+        el('p', translate(model.flowNoneKey), flowRoot, 'pipeline-hover-note');
       } else if (!model.flowIds.length) {
-        el('h4', translate('gas.pipeline-flow-title'), flowRoot);
-        el('p', translate('gas.pipeline-flow-none'), flowRoot, 'pipeline-hover-note');
+        el('h4', translate(flowTexts.title), flowRoot);
+        el('p', translate(flowTexts.none), flowRoot, 'pipeline-hover-note');
       } else {
         renderFlows(undefined);
       }
@@ -194,9 +219,10 @@ export function createPipelineHoverCard({
       el('span', '© OpenStreetMap contributors · ODbL', foot);
       const snap = snapshotDate();
       if (snap) el('span', ` · ${translate('gas.pipeline-snapshot', { date: String(snap).slice(0, 10) })}`, foot);
-      el('span', ` · ${translate('gas.pipeline-hover-hint')}`, foot, 'pipeline-hover-dim');
+      el('span', ` · ${translate(flowTexts.hint || 'gas.pipeline-hover-hint')}`, foot, 'pipeline-hover-dim');
       place(at);
-      return model.kind === 'gas' ? model.flowIds : [];
+      currentFlowIds = model.flowNoneKey ? [] : model.flowIds;
+      return currentFlowIds;
     },
     /**
      * Doplň živý tok. `payload` je odpoveď proxy alebo null (chyba).
@@ -204,9 +230,9 @@ export function createPipelineHoverCard({
      */
     setFlows(feature, payload) {
       if (current !== feature || !flowRoot) return false;
-      const ids = pipelineFlowPointIds(feature.properties);
+      const ids = currentFlowIds.length ? currentFlowIds : flowIdsFor(feature);
       if (!ids.length) return false;
-      renderFlows(payload ? pipelineFlowRows(payload, ids, { lang: lang(), translate }) : null);
+      renderFlows(payload ? flowRowsFor(payload, ids, { lang: lang(), translate }) : null);
       return true;
     },
     destroy() { hide(); root.remove(); doc.removeEventListener?.('keydown', keydown); },

@@ -2,7 +2,7 @@ import { createLocalGeoJsonLayer } from './localGeojson.js';
 import { airportMarkerImage, portMarkerImage } from './localMarkerIcons.js';
 import { createFirmsHeatmapLayer } from './firmsHeatmap.js';
 import submarineCablesLayer from './telegeographySubmarineCables.js';
-import skEnergyLayer from './skEnergy.js';
+import skEnergyLayer from './powerGridLayer.js';
 import shippingLanesLayer from './shippingLanes.js';
 import shipDensityLayer from './shipDensity.js';
 import airDensityLayer from './airDensity.js';
