@@ -59,9 +59,10 @@ test('zóny stĺpca a sekcie mobilu majú rovnakú logiku: Prelety v Konfliktoch
   assert.match(html, /data-i18n="panel\.energy" class="panel-title"[\s\S]*?class="energy-subhead" data-i18n="panel\.oil"[\s\S]*?data-oil-body[\s\S]*?class="energy-subhead" data-i18n="panel\.gas"[\s\S]*?data-gas-body/);
   assert.match(css, /#gas-panel\.collapsed \.oil-body, #gas-panel\.collapsed \.energy-subhead \{ display: none; \}/);
   assert.match(SK_STRINGS['panel.energy'], /^Ropa a plyn/);
-  // 2026-10-15: štýl a druh mapy späť v dolnej lište aj na mobile — VZHĽAD nesie Zobrazenie a efekty.
-  assert.deepEqual([...byId.get('display').panelIds], ['pp-toggles']);
-  assert.equal(byId.get('display').expand, 'pp-toggles');
+  // 2026-10-15: štýl a druh mapy späť v dolnej lište aj na mobile; od 2026-11-06 ich na telefóne nesie
+  // sekcia MAPA spodnej lišty (vlastník: plávajúce POLOHA/ŠTÝL „logicky vymeniť") spolu so Zobrazením.
+  assert.deepEqual([...byId.get('display').panelIds], ['control-panel', 'pp-toggles']);
+  assert.equal(byId.get('display').expand, 'control-panel');
   assert.match(html, /data-oko-section="conflicts"[\s\S]*?data-i18n="mobile\.conflicts"/);
   assert.doesNotMatch(html, /data-oko-section="scenes"/);
 });
@@ -81,8 +82,9 @@ test('názvy panelov hovoria, čo panel robí (vlastník: „aby to každý poch
     'panel.display': ['Zobrazenie a efekty', 'Display & effects'],
     'lane.zone.tools': ['Prehliadať', 'Browse'],
     'lane.zone.settings': ['Vzhľad', 'Appearance'],
-    'mobile.conflicts': ['Konflikty', 'Conflicts'],
-    'mobile.display': ['Vzhľad', 'Appearance'],
+    // Spodná lišta telefónu podľa obsahu (2026-11-06); zóny stĺpca na počítači ostávajú.
+    'mobile.conflicts': ['Vojna', 'War'],
+    'mobile.display': ['Mapa', 'Map'],
     'scene.director': ['Réžia scén', 'Scene director'],
   };
   for (const [key, [sk, en]] of Object.entries(expect)) {
@@ -113,7 +115,8 @@ test('Štýl a druh mapy ostávajú v dolnej lište na počítači aj na mobile;
   assert.match(html, /<div id="control-panel"[\s\S]*?<div id="style-buttons"[\s\S]*?class="map-source-section"/, 'tlačidlo ŠTÝL v doku nesie štýly aj druh mapy');
   assert.match(css, /body\.oko-look-in-dock #look-panel \{ display: none !important; \}/, 'aj vo výsuve mobilu');
   assert.doesNotMatch(css, /body\.oko-look-in-lane #command-dock > #control-panel/, 'dok sa neskrýva');
-  assert.deepEqual([...MOBILE_SECTIONS.find((s) => s.id === 'display').panelIds], ['pp-toggles'], 'VZHĽAD na mobile = Zobrazenie a efekty');
+  // 2026-11-06: na telefóne štýl a druh mapy v sekcii MAPA spodnej lišty (prvý, rozbalený), potom Zobrazenie.
+  assert.deepEqual([...MOBILE_SECTIONS.find((s) => s.id === 'display').panelIds], ['control-panel', 'pp-toggles'], 'MAPA na mobile = štýl a druh mapy + Zobrazenie');
 });
 
 test('VZHĽAD: panel Štýl a podklad mapy ostáva v markupe pruhu pred Zobrazením (dnes skrytý, odkazy ho poznajú)', () => {

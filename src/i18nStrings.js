@@ -331,12 +331,13 @@ export const EN_STRINGS = Object.freeze({
   'lane.zone.settings': 'Appearance',
   // Mobile shell (2026-09-14): bottom app bar + sheet on touch / narrow screens.
   'mobile.appbar-aria': 'Sections',
-  'mobile.layers': 'Layers',
+  // 2026-11-06 (vlastník: „to zakrúžkované užívateľovi nič nepovie"): názvy podľa obsahu, nie interné.
+  'mobile.layers': 'Air & sea',
   'mobile.volby': 'Elections',
   'mobile.scenes': 'Scenes',
-  'mobile.conflicts': 'Conflicts',
-  'mobile.data': 'Data',
-  'mobile.display': 'Appearance',
+  'mobile.conflicts': 'War',
+  'mobile.data': 'Gas & prices',
+  'mobile.display': 'Map',
   'mobile.search': 'Search',
   'mobile.close': 'Close',
   // Sharing with a picture (2026-09-14): popover behind the share button.
@@ -3239,12 +3240,13 @@ export const SK_STRINGS = Object.freeze({
   'lane.zone.settings': 'Vzhľad',
   // Mobilný plášť (2026-09-14): spodná lišta + výsuv na dotyku / úzkej obrazovke.
   'mobile.appbar-aria': 'Sekcie',
-  'mobile.layers': 'Vrstvy',
+  // 2026-11-06 (vlastník: „to zakrúžkované užívateľovi nič nepovie"): názvy podľa obsahu, nie interné.
+  'mobile.layers': 'Lety a lode',
   'mobile.volby': 'Voľby',
   'mobile.scenes': 'Scény',
-  'mobile.conflicts': 'Konflikty',
-  'mobile.data': 'Dáta',
-  'mobile.display': 'Vzhľad',
+  'mobile.conflicts': 'Vojna',
+  'mobile.data': 'Plyn a ceny',
+  'mobile.display': 'Mapa',
   'mobile.search': 'Hľadať',
   'mobile.close': 'Zavrieť',
   // Zdieľanie s obrázkom (2026-09-14): okno za tlačidlom zdieľania.

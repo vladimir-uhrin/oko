@@ -76,8 +76,9 @@ function buildDom() {
   add(rail, 'div', 'pp-toggles', 'panel-collapsible collapsed');
   add(rail, 'div', 'global-context-panel', 'panel-collapsible collapsed');
   const dock = add(body, 'div', 'command-dock');
-  add(dock, 'div', 'location-bar', 'panel-collapsible collapsed');
-  add(dock, 'input', 'location-search');
+  add(dock, 'div', 'control-panel', 'panel-collapsible collapsed');
+  const locationBar = add(dock, 'div', 'location-bar', 'panel-collapsible collapsed');
+  add(locationBar, 'input', 'location-search');
   add(body, 'div', 'cesium-credits');
   const appbar = add(body, 'nav', 'oko-appbar');
   appbar.hidden = true;
@@ -294,7 +295,8 @@ test('plášť: jedna sekcia naraz, viac panelov v sekcii (rozbalený len prvý)
   assert.deepEqual(shell._getStateForTest().moved, ['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']);
 
   assert.equal(shell.open('display'), true, 'prepnutie sekcie');
-  assert.deepEqual(sheetBody.children.map((c) => c.id), ['pp-toggles']);
+  assert.deepEqual(sheetBody.children.map((c) => c.id), ['control-panel', 'pp-toggles'], 'MAPA = štýl a druh mapy z doku + Zobrazenie');
+  assert.equal(byId.get('control-panel').classList.contains('collapsed'), false, 'štýl rozbalený');
   assert.equal(byId.get('global-context-panel').parentNode, rail, 'Kontext späť v pravej lište');
   assert.equal(byId.get('cctv-panel').parentNode, leftStack);
   assert.equal(leftStack.children[1], byId.get('cctv-panel'), 'CCTV späť na svoju pozíciu v ľavom stĺpci');
@@ -311,11 +313,15 @@ test('plášť: jedna sekcia naraz, viac panelov v sekcii (rozbalený len prvý)
   assert.equal(shell.activeSection(), null);
   assert.deepEqual(leftStack.children.map((c) => c.id), ['data-panel', 'cctv-panel', 'scene-panel', 'history-panel', 'gas-panel'], 'pôvodné poradie ľavého stĺpca');
 
+  // 2026-11-06: POLOHA z doku je vo výsuve HĽADAŤ, pole dostane fokus; zavretie ju vráti do doku.
   assert.equal(shell.open('search'), true);
-  assert.equal(sheet.hidden, true, 'hľadanie nie je výsuv');
+  assert.equal(sheet.hidden, false, 'hľadanie je výsuv');
+  assert.deepEqual(sheetBody.children.map((c) => c.id), ['location-bar']);
   assert.equal(byId.get('location-bar').classList.contains('collapsed'), false);
   assert.equal(byId.get('location-search').focused, true);
-  assert.deepEqual(styleManager.calls.at(-1), ['location-bar', false, { explicit: true }]);
+  shell.close();
+  assert.equal(byId.get('location-bar').parentNode, byId.get('command-dock'), 'poloha späť v doku');
+  assert.equal(byId.get('control-panel').parentNode, byId.get('command-dock'), 'štýl späť v doku');
 });
 
 test('plášť: naležato = zásuvka; návrat na desktop otvorený výsuv zatvorí a vráti panely; Escape a lišta zatvárajú; potiahnutie nadol zatvorí', () => {
@@ -402,4 +408,22 @@ test('revízia UI 2026-11-06: tlačidlá spodnej lišty majú výslovné meno (d
   assert.match(flights, /if \(!_trackedIcao && !picked\) \{[\s\S]*?heightM > FAR_CLICK_HINT_HEIGHT_M && nowMs - _farClickHintAt > FAR_CLICK_HINT_GAP_MS[\s\S]*?new CustomEvent\('gev:flights-far-click'/, 'tip len z výšky, bez sledovania a raz za minútu');
   const ui = readFileSync(new URL('./ui.js', import.meta.url), 'utf8');
   assert.match(ui, /window\.addEventListener\('gev:flights-far-click', this\._flightsFarClickHandler\)/);
+});
+
+test('spodok telefónu 2026-11-06: popisky podľa obsahu, dok bez POLOHA/ŠTÝL, lišta bez prázdneho stĺpca', async () => {
+  const { readFileSync } = await import('node:fs');
+  const i18n = readFileSync(new URL('./i18nStrings.js', import.meta.url), 'utf8');
+  for (const [key, sk] of [['mobile.layers', 'Lety a lode'], ['mobile.conflicts', 'Vojna'], ['mobile.data', 'Plyn a ceny'], ['mobile.display', 'Mapa'], ['mobile.search', 'Hľadať']]) {
+    assert.ok(i18n.includes(`'${key}': '${sk}',`), `${key} = ${sk}`);
+    assert.ok(sk.length <= 11, `${sk}: zmestí sa do jedného riadka v stĺpci ~73 px`);
+  }
+  const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+  assert.match(css, /body\.oko-mobile #command-dock > #location-bar,\nbody\.oko-mobile #command-dock > #control-panel \{ display: none !important; \}/, 'v doku len mikrofón');
+  assert.match(css, /grid-auto-flow: column;\n\s*grid-auto-columns: minmax\(0, 1fr\);/, 'stĺpce podľa viditeľných sekcií');
+  assert.doesNotMatch(css, /grid-template-columns: repeat\(6, 1fr\);/);
+  const display = MOBILE_SECTIONS.find((s) => s.id === 'display');
+  const search = MOBILE_SECTIONS.find((s) => s.id === 'search');
+  assert.deepEqual([...display.panelIds], ['control-panel', 'pp-toggles']);
+  assert.deepEqual([...search.panelIds], ['location-bar']);
+  assert.equal(search.focus, 'location-search');
 });

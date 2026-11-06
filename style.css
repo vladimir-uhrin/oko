@@ -12794,6 +12794,38 @@ body.oko-mobile #command-dock .location-toolbar-label { gap: 0; }
    „Poloha" / „Štýl" sa do 68 px lišty zmestia, dlhý názov nie. Na počítači skrytý. */
 .dock-label-short { display: none; }
 body.oko-mobile #command-dock .panel-title,
+/* 2026-11-06 (vlastník k plávajúcim POLOHA a ŠTÝL: „aj toto musíme nejako logicky vymeniť"): na telefóne
+   ich nesú sekcie spodnej lišty — štýl a druh mapy MAPA, poloha HĽADAŤ (mobileShell.js ich presúva do
+   výsuvu). V doku ostáva len mikrofón; panely v doku sú skryté, vo výsuve (mimo #command-dock) nie. */
+body.oko-mobile #command-dock > #location-bar,
+body.oko-mobile #command-dock > #control-panel { display: none !important; }
+/* Dokové panely vo výsuve: štýly doku (#command-dock …) mimo doku neplatia. Prepínač zásuvky a špendlík
+   tu nemajú význam (nadpis výsuvu hovorí MAPA/HĽADAŤ), štýly sa zalomia do dvoch radov po štyroch
+   a pole hľadania je hneď celé na šírku (nie skryté za lupou). */
+.oko-sheet-body #control-panel-toggle,
+.oko-sheet-body .dock-pin-btn,
+.oko-sheet-body #location-bar .location-toolbar,
+.oko-sheet-body #location-mini-status,
+.oko-sheet-body #style-mini-status { display: none !important; }
+.oko-sheet-body #style-buttons { display: flex; flex-wrap: wrap; gap: 6px; overflow: visible; }
+.oko-sheet-body #style-buttons .style-btn { flex: 1 1 calc(25% - 6px); min-width: 0; min-height: 3.2rem; height: auto; }
+.oko-sheet-body #location-bar .dock-popover-content,
+.oko-sheet-body #control-panel .dock-popover-content { display: flex; flex-direction: column; gap: 10px; padding: 10px 4px 4px; }
+.oko-sheet-body .location-city-row { display: flex; flex-direction: column-reverse; align-items: stretch; gap: 8px; }
+.oko-sheet-body .location-search-wrap { display: flex; gap: 6px; }
+.oko-sheet-body #location-search,
+.oko-sheet-body #location-search.expanded {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 16px; /* pod 16 px iOS pri fokuse priblíži stránku */
+  border: 1px solid rgba(64, 200, 230, 0.32);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.oko-sheet-body #search-toggle { width: 44px; height: 44px; }
+.oko-sheet-body .location-pills { display: flex; flex-wrap: wrap; gap: 6px; overflow: visible; }
 body.oko-mobile #command-dock .location-toolbar-label { flex-direction: column; align-items: center; }
 /* „Poloha“ (38 px) sa v 28 px štítku orezávala na „OLOH/“ (scripts/qa-mobile.mjs, 2026-10-04) — krátky
    popis smie presahovať štítok, dlhé názvy sú na mobile skryté (display: none vyššie). */
@@ -12827,8 +12859,10 @@ body.oko-mobile #cockpit-entry { bottom: calc(var(--oko-dock-lift) + 76px); }
 /* --- spodná lišta -------------------------------------------------------- */
 body.oko-mobile #oko-appbar {
   display: grid;
-  /* Šesť sekcií od 2026-10-24 (VOĽBY 2026 hneď za Vrstvami). */
-  grid-template-columns: repeat(6, 1fr);
+  /* Stĺpce podľa počtu VIDITEĽNÝCH sekcií (2026-11-06): pevných 6 nechávalo po skrytí archivovaných
+     VOĽBIEB prázdny stĺpec vpravo. */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   position: fixed;
   left: 0;
   right: 0;

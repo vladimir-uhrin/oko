@@ -63,8 +63,7 @@ export function creditsBottomClear({ base, height, left, right, viewportHeight, 
 /**
  * Sekcie spodnej lišty. `panelIds` sa presunú do výsuvu v tomto poradí,
  * `expand` sa rozbalí, ostatné ostanú zbalené ako hlavičky (ťuknutie ich
- * rozbalí — hlavička panela je prepínač). `action: 'location'` neotvára výsuv,
- * otvorí lištu polohy v doku a dá jej fokus.
+ * rozbalí — hlavička panela je prepínač). `focus` = id poľa, ktoré po otvorení dostane fokus.
  */
 export const MOBILE_SECTIONS = Object.freeze([
   // POČASIE (2026-10-07) má riadky vrstiev (glóbus GFS, radar SHMÚ) — patrí k Vrstvám.
@@ -76,10 +75,11 @@ export const MOBILE_SECTIONS = Object.freeze([
   Object.freeze({ id: 'conflicts', labelKey: 'mobile.conflicts', panelIds: Object.freeze(['ukraine-panel', 'mideast-panel', 'scene-panel']), expand: 'ukraine-panel' }),
   // DÁTA = Energia + Prehliadať (história, kamery, kontext) — rovnaké zóny ako na počítači.
   Object.freeze({ id: 'data', labelKey: 'mobile.data', panelIds: Object.freeze(['gas-panel', 'history-panel', 'cctv-panel', 'global-context-panel']), expand: 'gas-panel' }),
-  // VZHĽAD: Zobrazenie a efekty. Štýl a druh mapy sú od 2026-10-15 znova v dolnej lište (tlačidlo ŠTÝL),
-  // ako pred preusporiadaním 2026-10-11 (vlastník: „aj na mobiloch? … daj to naspäť").
-  Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['pp-toggles']), expand: 'pp-toggles' }),
-  Object.freeze({ id: 'search', labelKey: 'mobile.search', panelIds: Object.freeze([]), action: 'location' }),
+  // MAPA (2026-11-06, vlastník k plávajúcim POLOHA/ŠTÝL nad lištou: „aj toto musíme nejako logicky vymeniť"):
+  // štýl a druh mapy (#control-panel z doku) + Zobrazenie a efekty v jednej sekcii; v doku ostal len mikrofón.
+  Object.freeze({ id: 'display', labelKey: 'mobile.display', panelIds: Object.freeze(['control-panel', 'pp-toggles']), expand: 'control-panel' }),
+  // HĽADAŤ: lišta polohy (#location-bar z doku — hľadanie miesta, mestá, záložky) vo výsuve, pole dostane fokus.
+  Object.freeze({ id: 'search', labelKey: 'mobile.search', panelIds: Object.freeze(['location-bar']), expand: 'location-bar', focus: 'location-search' }),
 ]);
 
 /**
@@ -247,20 +247,6 @@ export function createMobileShell({
     // V živom rámčeku výsuv nie je (lišta skrytá) — presun panela do neho by nič neukázal.
     if (!section || !mode.mobile || destroyed || embed) return false;
     if (active) close();
-    if (section.action === 'location') {
-      // Lišta polohy žije v doku (nie vo výsuve): otvor ju a daj fokus poľu.
-      if (typeof styleManager?.setPanelCollapsed === 'function') {
-        styleManager.setPanelCollapsed('location-bar', false, { explicit: true });
-      } else {
-        doc.getElementById?.('location-bar')?.classList?.remove?.('collapsed');
-      }
-      // StyleManager po rozbalení lišty presúva fokus na jej prepínač — pole
-      // dostane fokus až po ňom (ďalší tik), aby sa hneď dalo písať.
-      const input = doc.getElementById?.('location-search');
-      const later = typeof win?.setTimeout === 'function' ? win.setTimeout.bind(win) : (callback) => callback();
-      later(() => input?.focus?.(), 60);
-      return true;
-    }
     for (const panelId of section.panelIds) {
       const el = doc.getElementById?.(panelId);
       if (!el) continue;
@@ -283,6 +269,13 @@ export function createMobileShell({
     body.classList?.add?.('oko-sheet-open');
     if (body.dataset) body.dataset.okoSection = sectionId;
     syncButtons();
+    if (section.focus) {
+      // StyleManager po rozbalení panela presúva fokus na jeho prepínač — pole
+      // dostane fokus až po ňom (ďalší tik), aby sa hneď dalo písať.
+      const input = doc.getElementById?.(section.focus);
+      const later = typeof win?.setTimeout === 'function' ? win.setTimeout.bind(win) : (callback) => callback();
+      later(() => input?.focus?.(), 60);
+    }
     return true;
   }
 

@@ -288,7 +288,8 @@ test('štýly: poradie zóny a panela (14/15), zbalené telo skryté, rozbalený
   assert.match(css, /#left-panel-stack > #volby-panel:not\(\.collapsed\) \.volby-panel-inner/);
   assert.match(css, /body\.cockpit-mode #left-panel-stack > #volby-panel \{ display: none !important; \}/);
   assert.match(css, /body\.cockpit-mode #left-panel-stack > \.lane-zone\[data-lane-zone="volby"\] \{ display: none !important; \}/);
-  assert.match(css, /body\.oko-mobile #oko-appbar \{[^}]*grid-template-columns: repeat\(6, 1fr\);/, 'šesť sekcií v spodnej lište');
+  // 2026-11-06: stĺpce podľa viditeľných sekcií (archivované VOĽBY nechávali prázdny šiesty stĺpec).
+  assert.match(css, /body\.oko-mobile #oko-appbar \{[^}]*grid-auto-flow: column;\s*grid-auto-columns: minmax\(0, 1fr\);/, 'sekcie spodnej lišty bez prázdneho stĺpca');
   assert.match(css, /\.volby-search-input \{/);
   assert.match(css, /\.volby-body > \* \{ flex: 0 0 auto; \}/, 'zoznam výsledkov sa v pruhu nezmrští na 0 px');
   assert.match(css, /\.volby-cand-name \{/);
