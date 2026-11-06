@@ -499,6 +499,7 @@ export class MapStackController {
       if (gen !== this._switchGen) return this.getState();
       this._activeId = stack.id;
       this._applySceneFog(stack);
+      this._syncTilesetVisibility(stack);
       // Show/hide of tilesets + imagery swaps need a frame in idle mode;
       // subsequent tile loads self-request via Cesium. (perf wave 2)
       governorRequestRender('map-stack');
@@ -521,6 +522,18 @@ export class MapStackController {
     }
 
     return this.getState();
+  }
+
+  /**
+   * Google 3D je viditeľný len pri photoreal. Počas await v prepínaní (terén, provider) je _activeId ešte starý
+   * "photoreal", takže Zem z výšky (farGlobe.exit) pri zostupe kamery mohla tileset znova ukázať a skryť glóbus;
+   * po potvrdení podkladu preto stav jednoznačne dorovnáme (2026-11-06, štart s map=karta v hashi).
+   * @param {object} stack
+   */
+  _syncTilesetVisibility(stack) {
+    if (!this.googleTileset || stack?.kind === "photoreal") return;
+    this.googleTileset.show = false;
+    if (this.viewer?.scene?.globe) this.viewer.scene.globe.show = true;
   }
 
   getState(status = this._isSwitching ? 'switching' : 'ready') {
