@@ -12784,16 +12784,6 @@ body.oko-mobile #lang-switch button { min-width: 30px; min-height: 30px; }
    pozná len desktopové selektory; výsuv, toast a kokpit sa dvíhajú cez
    --oko-dock-lift nižšie. */
 body.oko-mobile.oko-sheet-open #command-dock { visibility: hidden; pointer-events: none; }
-/* Lišty doku na mobile len s ikonou: text „Poloha" / „Vizuálne predvoľby"
-   pretekal spod hlasovej pilulky (827 px: názov 160 px v 68 px lište). */
-body.oko-mobile #command-dock .panel-title > span:not(.dock-label-icon):not(.dock-label-short),
-body.oko-mobile #command-dock .location-toolbar-label > span:not(.dock-label-icon):not(.dock-label-short) { display: none !important; }
-body.oko-mobile #command-dock .panel-title,
-body.oko-mobile #command-dock .location-toolbar-label { gap: 0; }
-/* Pod ikonou krátky popis (vlastník 09-27: „na mobile je to nahovno, lebo človek nevie, čo to je") —
-   „Poloha" / „Štýl" sa do 68 px lišty zmestia, dlhý názov nie. Na počítači skrytý. */
-.dock-label-short { display: none; }
-body.oko-mobile #command-dock .panel-title,
 /* 2026-11-06 (vlastník k plávajúcim POLOHA a ŠTÝL: „aj toto musíme nejako logicky vymeniť"): na telefóne
    ich nesú sekcie spodnej lišty — štýl a druh mapy MAPA, poloha HĽADAŤ (mobileShell.js ich presúva do
    výsuvu). V doku ostáva len mikrofón; panely v doku sú skryté, vo výsuve (mimo #command-dock) nie. */
@@ -12826,6 +12816,16 @@ body.oko-mobile #command-dock > #control-panel { display: none !important; }
 }
 .oko-sheet-body #search-toggle { width: 44px; height: 44px; }
 .oko-sheet-body .location-pills { display: flex; flex-wrap: wrap; gap: 6px; overflow: visible; }
+/* Lišty doku na mobile len s ikonou: text „Poloha" / „Vizuálne predvoľby"
+   pretekal spod hlasovej pilulky (827 px: názov 160 px v 68 px lište). */
+body.oko-mobile #command-dock .panel-title > span:not(.dock-label-icon):not(.dock-label-short),
+body.oko-mobile #command-dock .location-toolbar-label > span:not(.dock-label-icon):not(.dock-label-short) { display: none !important; }
+body.oko-mobile #command-dock .panel-title,
+body.oko-mobile #command-dock .location-toolbar-label { gap: 0; }
+/* Pod ikonou krátky popis (vlastník 09-27: „na mobile je to nahovno, lebo človek nevie, čo to je") —
+   „Poloha" / „Štýl" sa do 68 px lišty zmestia, dlhý názov nie. Na počítači skrytý. */
+.dock-label-short { display: none; }
+body.oko-mobile #command-dock .panel-title,
 body.oko-mobile #command-dock .location-toolbar-label { flex-direction: column; align-items: center; }
 /* „Poloha“ (38 px) sa v 28 px štítku orezávala na „OLOH/“ (scripts/qa-mobile.mjs, 2026-10-04) — krátky
    popis smie presahovať štítok, dlhé názvy sú na mobile skryté (display: none vyššie). */
