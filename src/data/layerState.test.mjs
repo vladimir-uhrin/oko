@@ -187,8 +187,9 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   // 37 → 38: výstrahy SHMÚ po okresoch (token 'W', 2026-10-08); 38 → 39: stanice SHMÚ (token 'S');
   // 39 → 40: radar Európy OPERA (token 'E').
   // 40 → 41: VOĽBY 2026 — mapa obcí (token 'V', 2026-10-24).
-  assert.equal(REGISTERED_LAYER_IDS.length, 41);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 41);
+  // 41 → 42: elektrárne sveta ≥ 100 MW (WRI GPPD 2021, token 'P', 2026-11-07 — statický snímok).
+  assert.equal(REGISTERED_LAYER_IDS.length, 42);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 42);
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.throws(
     () => validateLayerStateRegistry([...LAYER_STATE_REGISTRY, LAYER_STATE_REGISTRY[0]]),

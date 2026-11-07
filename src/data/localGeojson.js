@@ -19,7 +19,8 @@ import { isAirportCardOpen } from './airportCard.js';
 import { LOCAL_MARKER_BASE_PX } from './localMarkerIcons.js';
 import { PORTS_LAYER_ID, portImportance, portOverlayCopy, portTitleFlag } from './portsData.js';
 import { portInboundLines, portInboundSync } from './portInbound.js';
-import { t as translate } from '../i18n.js';
+import { t as translate, currentLanguage } from '../i18n.js';
+import { POWER_PLANTS_LAYER_ID, plantImportance, plantOverlayCopy, plantTitleFlag } from './powerPlants.js';
 import { createLocalHoverCard } from './localHoverCard.js';
 import { t as translateDefault } from '../i18n.js';
 
@@ -106,7 +107,7 @@ export function localInfrastructureOverlayCopy(properties, layerId, tier = 'full
     return {
       title: (tier === 'code' && shortCode) ? shortCode : title,
       details: [],
-      titleFlag: null,
+      titleFlag: (layerId === POWER_PLANTS_LAYER_ID && tier === 'compact') ? plantTitleFlag(props) : null,
     };
   }
 
@@ -149,6 +150,10 @@ export function localInfrastructureOverlayCopy(properties, layerId, tier = 'full
     for (const line of cachedMetarCardLines(metarStationId(props))) {
       details.push(clampCardLine(line));
     }
+  } else if (layerId === POWER_PLANTS_LAYER_ID) {
+    // Elektrárne (2026-11-07): palivo · výkon, výroba, rok, prevádzkovateľ, rok databázy.
+    titleFlag = plantTitleFlag(props);
+    for (const line of plantOverlayCopy(props, translate, safeLanguage())) details.push(clampCardLine(line));
   } else if (layerId === PORTS_LAYER_ID) {
     // Vlajka štátu aj prístavom (2026-09-19) — WPI nesie meno štátu, nie kód.
     titleFlag = portTitleFlag(props);
@@ -371,6 +376,9 @@ export function createLocalGeoJsonLayer({
   // Piktogram značky na mape (localMarkerIcons.js): (farba) => data URI.
   // Bez neho ostáva holá bodka — pre vrstvy bez zaužívanej značky.
   markerImage = null,
+  // Farba podľa objektu (elektrárne: palivo). (properties) => CSS farba; bez
+  // neho má celá vrstva jednu farbu `color`.
+  colorFor = null,
   overlayHost = DEFAULT_OVERLAY_HOST,
   screenSpaceEventHandlerFactory = (canvas) => new Cesium.ScreenSpaceEventHandler(canvas),
   projectToWindow = (scene, position) => Cesium.SceneTransforms.worldToWindowCoordinates(scene, position),
@@ -648,6 +656,9 @@ export function createLocalGeoJsonLayer({
             const tip = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, tipHeight);
             const properties = propertyObject(feature);
             const recordId = String(feature.id ?? i);
+            const featureCss = typeof colorFor === 'function' ? (colorFor(properties) || color) : color;
+            const featureColor = featureCss === color ? baseColor : Cesium.Color.fromCssColorString(featureCss);
+            feature.__localAccent = featureCss;
 
             // Store references for bounded stem scaling and native picking.
             feature.__localBaseCarto = carto;
@@ -675,7 +686,7 @@ export function createLocalGeoJsonLayer({
             feature.polyline = new Cesium.PolylineGraphics({
               positions: stemPositionBuffers[0],
               width: 3.5,
-              material: new Cesium.ColorMaterialProperty(baseColor),
+              material: new Cesium.ColorMaterialProperty(featureColor),
             });
             if (markerImage) {
               // Piktogram namiesto bodky (2026-09-05): lietadlo/kotva v kruhu.
@@ -691,7 +702,7 @@ export function createLocalGeoJsonLayer({
             } else {
               feature.point = new Cesium.PointGraphics({
                 pixelSize: 10,
-                color: baseColor,
+                color: featureColor,
                 outlineColor: Cesium.Color.BLACK,
                 outlineWidth: 2,
                 // Never depth-cull the anchor against the photoreal mesh —
@@ -721,7 +732,7 @@ export function createLocalGeoJsonLayer({
                 position: tip,
                 properties,
                 priority,
-                accent: color,
+                accent: featureCss,
               }) : null,
             });
           }
@@ -767,7 +778,7 @@ export function createLocalGeoJsonLayer({
                     position: record.tip,
                     properties: propertyObject(entity),
                     priority: record.priority,
-                    accent: color,
+                    accent: entity.__localAccent || color,
                   });
                   // Vynúť republish kohorty aj na zaparkovanej kamere.
                   _lastVisibilityUpdate = Number.NEGATIVE_INFINITY;
@@ -915,7 +926,7 @@ export function createLocalGeoJsonLayer({
                   position: record.tip,
                   properties: propertyObject(record.entity),
                   priority: record.priority,
-                  accent: color,
+                  accent: record.entity.__localAccent || color,
                   tier: _labelTier,
                 });
                 record.entryTier = _labelTier;
@@ -1100,6 +1111,8 @@ function labelPriorityFromProperties(props, layerId) {
   // pohľade sa pomenuje Viedeň a Bratislava, nie poľné pásy.
   if (layerId === AIRPORTS_LAYER_ID) score += airportImportance(props);
   if (layerId === PORTS_LAYER_ID) score += portImportance(props);
+  // Elektrárne: väčší výkon vyhrá kolíziu kariet (Mochovce pred malou vodnou).
+  if (layerId === POWER_PLANTS_LAYER_ID) score += plantImportance(props) + Math.min(400, Number(props.mw) / 10 || 0);
   return score;
 }
 
@@ -1117,6 +1130,7 @@ function labelPriorityFromProperties(props, layerId) {
 function labelImportanceFromProperties(props, layerId) {
   if (layerId === AIRPORTS_LAYER_ID) return airportImportance(props);
   if (layerId === PORTS_LAYER_ID) return portImportance(props);
+  if (layerId === POWER_PLANTS_LAYER_ID) return plantImportance(props);
   return Number.POSITIVE_INFINITY;
 }
 
@@ -1165,5 +1179,10 @@ function layerTitle(layerId) {
   if (layerId === 'local-dams') return 'Dam';
   if (layerId === AIRPORTS_LAYER_ID) return 'Airport';
   if (layerId === PORTS_LAYER_ID) return 'Port';
+  if (layerId === POWER_PLANTS_LAYER_ID) return 'Power plant';
   return 'Feature';
+}
+
+function safeLanguage() {
+  try { return currentLanguage() === 'en' ? 'en' : 'sk'; } catch { return 'sk'; }
 }

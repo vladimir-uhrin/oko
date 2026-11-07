@@ -35,7 +35,7 @@ function localGeoOpts(varName) {
   const block = src.slice(start, src.indexOf('\n});', start));
   const pick = (key) => { const m = new RegExp(`\\n\\s*${key}: ('([^']*)'|([A-Z_]+)),`).exec(block); assert.ok(m, `${varName}.${key}`); return m[2] ?? m[3]; };
   const idRaw = pick('id');
-  const id = idRaw === 'AIRPORTS_LAYER_ID' ? 'local-airports' : idRaw === 'PORTS_LAYER_ID' ? 'local-ports' : idRaw;
+  const id = idRaw === 'AIRPORTS_LAYER_ID' ? 'local-airports' : idRaw === 'PORTS_LAYER_ID' ? 'local-ports' : idRaw === 'POWER_PLANTS_LAYER_ID' ? 'local-power-plants' : idRaw;
   return { id, name: pick('name'), icon: pick('icon'), source: pick('source') };
 }
 
@@ -65,6 +65,7 @@ const REAL = [
   ['portsLazy', async () => createLocalGeoJsonLayer({ ...localGeoOpts('ports'), url: '/lazy', color: '#fff', labels: true })],
   ['datacentersLazy', async () => createLocalGeoJsonLayer({ ...localGeoOpts('datacenters'), url: '/lazy', color: '#fff', labels: true })],
   ['damsLazy', async () => createLocalGeoJsonLayer({ ...localGeoOpts('dams'), url: '/lazy', color: '#fff', labels: true })],
+  ['powerPlantsLazy', async () => createLocalGeoJsonLayer({ ...localGeoOpts('powerPlants'), url: '/lazy', color: '#fff', labels: true })],
   ['firesLazy', async () => {
     const src = read('./localLayers.js');
     const start = src.indexOf('const fires = createFirmsHeatmapLayer({');
@@ -87,7 +88,7 @@ test('stráž: každý zástupca sa zhoduje so skutočným modulom (metadáta, z
   // poradie lokálnych vrstiev = poradie v localLayers.js
   const src = read('./localLayers.js');
   const order = src.slice(src.indexOf('export default [')).match(/\n\s+([a-zA-Z]+),/g).map((m) => m.trim().replace(',', ''));
-  const expected = { airports: 'local-airports', ports: 'local-ports', shippingLanesLayer: 'local-shipping-lanes', shipDensityLayer: 'local-ship-density', airDensityLayer: 'local-air-density', datacenters: 'local-datacenters', dams: 'local-dams', skEnergyLayer: 'local-energy', submarineCablesLayer: 'telegeography-submarine-cables', fires: 'local-firms' };
+  const expected = { airports: 'local-airports', ports: 'local-ports', shippingLanesLayer: 'local-shipping-lanes', shipDensityLayer: 'local-ship-density', airDensityLayer: 'local-air-density', datacenters: 'local-datacenters', dams: 'local-dams', skEnergyLayer: 'local-energy', powerPlants: 'local-power-plants', submarineCablesLayer: 'telegeography-submarine-cables', fires: 'local-firms' };
   assert.deepEqual(lazy.localDataLayersLazy.map((l) => l.id), order.map((v) => expected[v]));
 });
 

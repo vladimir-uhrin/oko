@@ -61,7 +61,9 @@ export const LAYER_WORDS = Object.freeze([
   [/\b(priehrad|dams?\b)\w*/, 'local-dams'],
   [/\b(datov\w* centr|datacent)\w*/, 'local-datacenters'],
   // Elektrina (2026-11-07): vrstva local-energy je prenosová sieť ≥ 220 kV Eurázie.
-  [/\b(energetik|elektrar|energy|elektrin|elektrick\w* (siet|vedeni)|vedeni|vysok\w* napat|power (grid|lines?))\w*/, 'local-energy'],
+  // Elektrárne (2026-11-07): vlastná vrstva, „elektrárne“ už nemieri na sieť.
+  [/\b(elektrar|atomk|power plants?|power stations?)\w*/, 'local-power-plants'],
+  [/\b(energetik|energy|elektrin|elektrick\w* (siet|vedeni)|vedeni|vysok\w* napat|power (grid|lines?))\w*/, 'local-energy'],
   [/\b(misi|raket|launch)\w*/, 'rocket-launches'],
 ]);
 

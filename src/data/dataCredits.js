@@ -320,6 +320,13 @@ export const DATA_CREDITS = [
       '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a>, via the Overpass API)',
   },
   {
+    key: 'power-plants',
+    html:
+      'Power plants ≥ 100 MW (static snapshot, as of 2021 — not a live register; verified later closures and upgrades are marked on the card): ' +
+      '<a href="https://datasets.wri.org/dataset/globalpowerplantdatabase" target="_blank" rel="noopener">WRI Global Power Plant Database 1.3.0</a> ' +
+      '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>)',
+  },
+  {
     key: 'power-market',
     html:
       'Electricity day-ahead prices (SK, CZ, HU, AT, PL, DE-LU) and Slovak generation by source: ' +

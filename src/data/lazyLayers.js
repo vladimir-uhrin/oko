@@ -190,6 +190,12 @@ export const skEnergyLazy = createLazyLayer({
   load: fromLocalLayers('local-energy'),
 });
 
+export const powerPlantsLazy = createLazyLayer({
+  meta: { id: 'local-power-plants', name: 'Power plants', icon: '⌁', source: 'WRI Global Power Plant Database', updateInterval: 0, statsRefreshInterval: 1000 },
+  contract: ['destroy', 'disable', 'enable', 'getStats', 'init', 'update'],
+  load: fromLocalLayers('local-power-plants'),
+});
+
 export const submarineCablesLazy = createLazyLayer({
   meta: { id: 'telegeography-submarine-cables', name: 'Submarine Cables', icon: '≋', source: 'TeleGeography', updateInterval: 0, statsRefreshInterval: 500 },
   contract: ['destroy', 'disable', 'enable', 'getStats', 'init', 'update'],
@@ -203,4 +209,4 @@ export const firesLazy = createLazyLayer({
 });
 
 /** Rovnaké poradie ako `export default` v localLayers.js (registrácia v main.js). */
-export const localDataLayersLazy = Object.freeze([airportsLazy, portsLazy, shippingLanesLazy, shipDensityLazy, airDensityLazy, datacentersLazy, damsLazy, skEnergyLazy, submarineCablesLazy, firesLazy]);
+export const localDataLayersLazy = Object.freeze([airportsLazy, portsLazy, shippingLanesLazy, shipDensityLazy, airDensityLazy, datacentersLazy, damsLazy, skEnergyLazy, powerPlantsLazy, submarineCablesLazy, firesLazy]);

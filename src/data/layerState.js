@@ -344,6 +344,7 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'local-energy', token: 'y', disposition: 'enabled+options', optionOwner: 'local-energy' }),
   Object.freeze({ id: 'local-firms', token: 'w', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-ports', token: 'o', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'local-power-plants', token: 'P', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-ship-density', token: 'n', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-shipping-lanes', token: 'k', disposition: 'enabled-only' }),
   // Meteorológia (2026-09-08): písmená sú obsadené, ďalšia voľná číslica.

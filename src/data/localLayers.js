@@ -16,6 +16,8 @@ import { AIRPORTS_LAYER_ID } from './airportsData.js';
 import { PORTS_LAYER_ID } from './portsData.js';
 import { portInboundSync } from './portInbound.js';
 import { metarStationId, requestAirportMetar } from './airportWeather.js';
+import powerPlantsUrl from './local_data/power_plants/power-plants.geojsonl?url';
+import { POWER_PLANTS_LAYER_ID, plantColor } from './powerPlants.js';
 
 /**
  * Registry of local GeoJSON datasets.
@@ -116,6 +118,24 @@ const dams = createLocalGeoJsonLayer({
   labelGridPx: 132,
 });
 
+// Elektrárne sveta ≥ 100 MW (2026-11-07): WRI Global Power Plant Database 1.3.0
+// (CC BY 4.0, stav 2021; provenance v local_data/power_plants/README.md).
+// Farba podľa paliva = tie isté farby ako mix výroby v paneli energie;
+// zatvorené (overené po vydaní databázy) sivé. Z kontinentu len ≥ 1 GW.
+const powerPlants = createLocalGeoJsonLayer({
+  id: POWER_PLANTS_LAYER_ID,
+  url: powerPlantsUrl,
+  name: 'Power plants',
+  color: '#ffd84d',
+  colorFor: plantColor,
+  icon: '⌁',
+  source: 'WRI Global Power Plant Database',
+  labels: true,
+  labelMax: 700,
+  labelGridPx: 140,
+  labelLod: true,
+});
+
 // Live NASA FIRMS fires (VIIRS ×3 NRT via the /api/firms proxy). The id keeps
 // the historical `local-` prefix for persistence + voice-tool-enum compat,
 // but the data is NOT bundled anymore — it needs FIRMS_MAP_KEY server-side.
@@ -142,6 +162,7 @@ export default [
   // used to matter — cables stay available, but a landlocked fork leads with
   // infrastructure that exists here.
   skEnergyLayer,
+  powerPlants,
   submarineCablesLayer,
   fires,
 ];

@@ -189,6 +189,8 @@ const LAYER_ALIASES = new Map([
   ['energy', 'local-energy'],
   ['energetika', 'local-energy'],
   ['power grid', 'local-energy'],
+  ['power plants', 'local-power-plants'],
+  ['power stations', 'local-power-plants'],
   // Plyn (2026-09-14): potrubia už majú vlastnú vrstvu EÚ + bývalý ZSSR,
   // „pipelines" preto mieri na ňu, nie na energetiku SR.
   ['pipelines', 'gas-pipelines'],
@@ -3491,6 +3493,7 @@ function cleanText(value) {
 function layerTitle(layerId) {
   if (layerId === 'local-datacenters') return 'Datacenter';
   if (layerId === 'local-dams') return 'Dam';
+  if (layerId === 'local-power-plants') return 'Power plant';
   if (layerId === 'telegeography-submarine-cables') return 'Submarine Cable';
   if (layerId === 'local-firms') return 'Active Fire';
   return layerId || 'Entity';
