@@ -15,6 +15,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { vesselFollowStatus, vesselFollowTransitions } from '../../data/vesselFollowStatus.js';
 import { vesselPushPayload } from '../push.js';
+import { LOOPBACK_HOST } from '../../admin/server/loopback.js';
 
 export const FOLLOW_WATCH_INTERVAL_MS = 5 * 60_000;
 export const FOLLOW_WATCH_FIRST_MS = 90_000;
@@ -47,6 +48,7 @@ export function createFollowWatch({ store, env = process.env, port = () => null,
   let first = null;
   let running = false;
   let memoryState = null; // mmsi → {status, port, to}
+  let unreachable = false; // vlastné API neodpovedalo na nič (jeden riadok do logu pri prechode)
   const stats = { lastTickAt: null, checked: 0, events: 0, sent: 0, failed: 0 };
 
   async function library() {
@@ -117,15 +119,28 @@ export function createFollowWatch({ store, env = process.env, port = () => null,
       const prevRaw = await readState();
       const prev = prevRaw ? new Map(Object.entries(prevRaw)) : null;
       const next = new Map();
-      let checked = 0;
+      let checked = 0; let answered = 0;
+      // `localhost`, nie 127.0.0.1: služba oko-api počúva na Windows len na IPv6 [::1] (admin/server/loopback.js).
+      // S 127.0.0.1 (do 2026-11-07) každý dopyt zlyhal a upozornenia na lode v produkcii nikdy neodišli.
+      const base = `http://${LOOPBACK_HOST}:${p}`;
       for (const [mmsi] of byMmsi) {
         if (checked >= FOLLOW_WATCH_MAX_VESSELS) break;
-        const base = `http://127.0.0.1:${p}`;
         const [live, info] = await Promise.all([getJson(`${base}/api/ais-live/contact?mmsi=${mmsi}`), getJson(`${base}/api/vessel-info?mmsi=${mmsi}`)]);
+        if (live || info) answered += 1;
         const s = vesselFollowStatus(live?.contact || null, info);
         next.set(mmsi, { status: s.status, port: s.port, to: s.to });
         checked += 1;
       }
+      // Žiadna odpoveď na nič = výpadok vlastného API, nie „loď v neznámom stave": stav sa neprepíše
+      // (inak by sa po návrate stratil prechod) a do logu ide jeden riadok pri prechode.
+      if (checked > 0 && answered === 0) {
+        if (!unreachable) log(`[follow-watch] stav lodí z ${base} nedostupný — upozornenia na lode stoja`);
+        unreachable = true;
+        Object.assign(stats, { lastTickAt: now(), checked, events: 0 });
+        return { checked, events: 0, sent: 0, unreachable: true };
+      }
+      if (unreachable && answered > 0) log('[follow-watch] stav lodí je späť');
+      unreachable = false;
       // Lode, ktoré už nikto nesleduje, zo stavu vypadnú; nové dostanú stav bez hlásenia.
       const events = vesselFollowTransitions(prev, next);
       let sent = 0;
