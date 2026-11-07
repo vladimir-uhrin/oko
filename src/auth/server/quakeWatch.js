@@ -11,6 +11,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { mergeEarthquakeCatalogs } from '../../data/earthquakeCatalog.js';
+import { LOOPBACK_HOST } from '../../admin/server/loopback.js';
 import { quakeAlertCandidates, quakePushPayload, slovakiaPointsFromObce, solutionIds } from '../../data/quakeAlert.js';
 
 export const QUAKE_WATCH_INTERVAL_MS = 2 * 60_000;
@@ -31,7 +32,7 @@ export const QUAKE_WATCH_MEMORY_MS = 3 * 86_400_000;
  */
 export function createQuakeWatch({ store, send, enabled = () => true, port = () => null, fetchImpl = globalThis.fetch,
   now = Date.now, log = () => {}, stateFile = null, obceFile = null, points = null } = {}) {
-  let timer = null; let first = null; let running = false; let memoryState = null; let skPoints = points;
+  let timer = null; let first = null; let running = false; let memoryState = null; let skPoints = points; let noData = false;
   const stats = { lastTickAt: null, events: 0, alerts: 0, sent: 0 };
 
   async function loadPoints() {
@@ -73,9 +74,18 @@ export function createQuakeWatch({ store, send, enabled = () => true, port = () 
     if (!p) return { skipped: true, reason: 'no_port' };
     running = true;
     try {
-      const base = `http://127.0.0.1:${p}`;
+      // `localhost`, nie 127.0.0.1: služba oko-api počúva na Windows len na IPv6 [::1] (admin/server/loopback.js;
+      // 2026-11-07 prvé vydanie strážcu dostalo s 127.0.0.1 prázdne katalógy a ticho nič nerobilo).
+      const base = `http://${LOOPBACK_HOST}:${p}`;
       const [usgs, emsc] = await Promise.all([catalog(base, 'usgs'), catalog(base, 'emsc')]);
-      if (!usgs.length && !emsc.length) return { skipped: true, reason: 'no_data' };
+      if (!usgs.length && !emsc.length) {
+        // Jeden riadok pri prechode na „bez dát" — tichý výpadok (napr. zlá spätná adresa) sa inak nedá odhaliť.
+        if (!noData) log(`[quake-watch] katalógy USGS ani EMSC na ${base} nič nevrátili — upozornenia stoja`);
+        noData = true;
+        return { skipped: true, reason: 'no_data' };
+      }
+      if (noData) log('[quake-watch] katalógy sú späť');
+      noData = false;
       const events = mergeEarthquakeCatalogs([...usgs, ...emsc]);
       const t = now();
       const prev = await readState();

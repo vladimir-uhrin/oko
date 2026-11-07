@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { createQuakeWatch } from './quakeWatch.js';
 
 const NOW = Date.parse('2026-11-06T12:00:00Z');
@@ -58,4 +59,34 @@ test('without followers the event is still marked, so a later subscriber is not 
   assert.equal((await watch.tick()).alerts, 0);
   const off = createQuakeWatch({ store: { quakeFollowers: () => [1] }, send: async () => 1, enabled: () => false, port: () => 1 });
   assert.deepEqual(await off.tick(), { skipped: true });
+});
+
+// 2026-11-07: služba oko-api počúva na Windows len na IPv6 [::1]; strážca sa pýtal 127.0.0.1 a dostal
+// ECONNREFUSED → prázdne katalógy, žiadny základ, žiadne upozornenia, žiadny log. Skutočné spojenie
+// (nie podvrh fetch) na server iba na ::1 a iba na 127.0.0.1.
+for (const host of ['::1', '127.0.0.1']) {
+  test(`real loopback: the watcher reaches a server listening only on ${host}`, async (t) => {
+    const server = http.createServer((req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ records: req.url.endsWith('/usgs') ? [record('USGS', 'base', 5, -20, -70, 30)] : [] }));
+    });
+    try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, host, resolve); }); }
+    catch (error) { t.skip(`${host} not available here: ${error.code}`); return; }
+    const logs = [];
+    try {
+      const watch = createQuakeWatch({ store: { quakeFollowers: () => [] }, send: async () => 0, port: () => server.address().port,
+        now: () => NOW, points: POINTS, log: (m) => logs.push(m) });
+      assert.deepEqual(await watch.tick(), { baseline: true, events: 1 });
+      assert.deepEqual(logs, []);
+    } finally { await new Promise((resolve) => server.close(resolve)); }
+  });
+}
+
+test('an unreachable catalog is logged once, not silently skipped every tick', async () => {
+  const logs = [];
+  const watch = createQuakeWatch({ store: { quakeFollowers: () => [] }, send: async () => 0, port: () => 1,
+    fetchImpl: async () => { throw new Error('ECONNREFUSED'); }, now: () => NOW, points: POINTS, log: (m) => logs.push(m) });
+  assert.equal((await watch.tick()).reason, 'no_data');
+  assert.equal((await watch.tick()).reason, 'no_data');
+  assert.equal(logs.length, 1); assert.match(logs[0], /nič nevrátili/);
 });
