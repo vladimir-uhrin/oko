@@ -78,6 +78,7 @@ import { LAYER_GROUP_ORDER, isCatalogLayer, layerGroup, layerKeywords } from './
 import { flyToGlobeView, searchAndFlyTo } from './locations.js';
 import { createAircraftSearchCommands } from './aircraftSearchCommands.js';
 import { createVesselSearchCommands } from './vesselSearchCommands.js';
+import powerPlantsSnapshotUrl from './data/local_data/power_plants/power-plants.geojsonl?url';
 import { attachVesselEstimateViewer, showRemoteVessel } from './data/vesselEstimate.js';
 import { lookupVesselInfo, realMmsiFor } from './data/vesselInfo.js';
 import { loadPortIndex as loadVesselPortIndex } from './data/vesselPortIndex.js';
@@ -1098,6 +1099,16 @@ async function init() {
       onRemoteShip: (ship) => window.__godsEyeView.vesselEstimate?.showRemote?.(ship),
     });
     window.__godsEyeView.vesselSearch = vesselSearch;
+    // Elektrárne v hľadaní (2026-11-07): modul a snímok WRI až pri prvom dopyte s ≥ 3 písmenami — štart neťaží.
+    let plantSearchPromise = null;
+    const plantSearchResults = async (q) => {
+      if (String(q).replace(/[^A-Za-zÀ-ž]/g, '').length < 3) return [];
+      plantSearchPromise ||= import('./plantSearchCommands.js').then((m) => m.createPlantSearchCommands({
+        url: powerPlantsSnapshotUrl, dataManager, viewer, Cesium, translate: t, lang: currentLanguage,
+        notify: (text) => styleManager._showToast(text, { durationMs: 5000 }),
+      })).catch((error) => { plantSearchPromise = null; throw error; });
+      return (await plantSearchPromise).asyncResults(q);
+    };
     // Hlboký odkaz na zemetrasenie (2026-11-06): /?quake=<USGS:…|EMSC:…> — z push upozornenia na otras
     // citeľný na Slovensku; zapne vrstvu, vyberie otras a priblíži kameru nad ohnisko.
     try {
@@ -1193,18 +1204,19 @@ async function init() {
       getCommands: buildCommands,
       getQueryCommands: (q) => [...aircraftSearch.queryCommands(q), ...vesselSearch.queryCommands(q)],
       getAsyncResults: async (q) => {
-        const [aircraft, vessels] = await Promise.all([
+        const [aircraft, vessels, plants] = await Promise.all([
           aircraftSearch.asyncResults(q).catch(() => []),
           vesselSearch.asyncResults(q).catch(() => []),
+          plantSearchResults(q).catch(() => []),
         ]);
-        return [...aircraft, ...vessels];
+        return [...aircraft, ...vessels, ...plants];
       },
       asyncGroup: 'aircraft-world',
       // Poradie (2026-09-27, vlastník o lupe: „toto tlačidlo patrí Ukrajine" — prázdne hľadanie
       // začínalo 12 smermi frontu): zobrazenie → vrstvy (podľa témy) → konflikty (podľa regiónu).
       // Sledované lety prihláseného (09-27) úplne navrchu — sú to jeho vlastné položky.
       // Lietadlá (živé, potom celý svet) idú hneď za sledované lety — to je to, čo človek píše najčastejšie.
-      groupOrder: ['follows', 'aircraft', 'aircraft-world', 'vessels', 'vessels-world', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
+      groupOrder: ['follows', 'aircraft', 'aircraft-world', 'vessels', 'vessels-world', 'plants', 'view', ...LAYER_GROUP_ORDER, 'ukraine', 'maritime', 'mideast'],
       onGeocode: (q) => { try { void searchAndFlyTo(viewer, q); } catch { /* */ } },
     });
     window.__godsEyeView.commandPalette = commandPalette;
