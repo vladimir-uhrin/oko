@@ -5476,6 +5476,15 @@ function gasProxy() {
     // prefixové párovanie connectu poslalo na /meta celý 1,2 MB ndjson.
     middlewares.use('/api/oil/pipelines/meta', pipelinesFile(OIL_PIPELINES_META_PATH, 'application/json; charset=utf-8', 'build-oil-pipelines.mjs'));
     middlewares.use('/api/oil/pipelines', pipelinesFile(OIL_PIPELINES_PATH, 'application/x-ndjson; charset=utf-8', 'build-oil-pipelines.mjs'));
+    // Celý svet po bunkách (2026-11-07): nový klient berie bunky vo výhľade; `pipelines.geojsonl`
+    // ostáva pôvodné okno pre starý klient, ktorý snímok načítava naraz. Plyn a ropa ostávajú
+    // dve samostatné databázy (ODbL §4.5(a)) — každá vlastný adresár buniek aj vlastná trasa.
+    const gasCells = snapshotCellRoutes(path.join(CACHE_DIR, 'cells'), { script: 'build-gas-pipelines.mjs', label: 'gas-proxy' });
+    const oilCells = snapshotCellRoutes(path.join(OIL_CACHE_DIR, 'cells'), { script: 'build-oil-pipelines.mjs', label: 'gas-proxy' });
+    middlewares.use('/api/gas/cells', gasCells.indexHandler);
+    middlewares.use('/api/gas/cell/', gasCells.cellHandler);
+    middlewares.use('/api/oil/cells', oilCells.indexHandler);
+    middlewares.use('/api/oil/cell/', oilCells.cellHandler);
     middlewares.use('/api/gas/imports', imports.handler);
     middlewares.use('/api/gas/status', async (req, res) => {
       const p = await prices.current();
@@ -5523,6 +5532,57 @@ function gasProxy() {
  *    pri chybe stale do 2 dní. Krajina, ktorá zlyhá, sa zapíše do `errors`
  *    a ostatné prejdú — jedna hranica nepokazí celú odpoveď.
  */
+/**
+ * Bunky snímku čiar (2026-11-07, spoločné pre elektrinu, plynovody a ropovody): index
+ * `<dir>/index.json` a súbory `<dir>/<id>.geojsonl`, ktoré zapisuje build (writeCells
+ * v scripts/lib/pipelineSnapshot.mjs). Server nič neparsuje — streamuje súbory s ETag
+ * (veľkosť + mtime) a gzipom. Bunka bez súboru (oceán) = prázdna odpoveď, bez indexu
+ * 404 `no_snapshot` (klient vtedy spadne na celý snímok alebo núdzovku).
+ */
+function snapshotCellRoutes(cellsDir, { script, label }) {
+  const sendJson = (res, status, body) => {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-GEV-Cache': 'NONE' });
+    res.end(body);
+  };
+  const noSnapshot = (res) => sendJson(res, 404, JSON.stringify({ error: 'no_snapshot', detail: 'run: node scripts/' + script }));
+  async function streamFile(req, res, filePath, contentType, cacheControl) {
+    let stat;
+    try { stat = await fsp.stat(filePath); } catch { noSnapshot(res); return; }
+    if (!stat.isFile() || stat.size === 0) { noSnapshot(res); return; }
+    const etag = '"' + stat.size.toString(16) + '-' + Math.floor(stat.mtimeMs).toString(16) + '"';
+    const headers = { 'Cache-Control': cacheControl, ETag: etag, Vary: 'Accept-Encoding', 'X-GEV-Cache': 'FILE' };
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); res.end(); return; }
+    const gzip = /\bgzip\b/i.test(String(req.headers['accept-encoding'] || ''));
+    headers['Content-Type'] = contentType;
+    if (gzip) headers['Content-Encoding'] = 'gzip'; else headers['Content-Length'] = String(stat.size);
+    res.writeHead(200, headers);
+    if (req.method === 'HEAD') { res.end(); return; }
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', (error) => { console.warn('[' + label + '] cell read failed: ' + (error?.message || error)); try { res.destroy(); } catch { /* už zavreté */ } });
+    if (gzip) stream.pipe(zlib.createGzip({ level: 6 })).pipe(res); else stream.pipe(res);
+  }
+  async function indexHandler(req, res) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, JSON.stringify({ error: 'Method Not Allowed' })); return; }
+    await streamFile(req, res, path.join(cellsDir, 'index.json'), 'application/json; charset=utf-8', 'no-cache');
+  }
+  async function cellHandler(req, res) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') { sendJson(res, 405, JSON.stringify({ error: 'Method Not Allowed' })); return; }
+    const id = decodeURIComponent(String(req.url || '').replace(/^\//, '').split('?')[0]);
+    if (!/^-?\d{1,2}_-?\d{1,3}$/.test(id)) { sendJson(res, 400, JSON.stringify({ error: 'bad_cell' })); return; }
+    const file = path.join(cellsDir, id + '.geojsonl');
+    const exists = await fsp.stat(file).then((st) => st.isFile()).catch(() => false);
+    if (!exists) {
+      const indexExists = await fsp.stat(path.join(cellsDir, 'index.json')).then(() => true).catch(() => false);
+      if (!indexExists) { noSnapshot(res); return; }
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'public, max-age=86400', 'X-GEV-Cache': 'EMPTY' });
+      res.end('');
+      return;
+    }
+    await streamFile(req, res, file, 'application/x-ndjson; charset=utf-8', 'public, max-age=86400');
+  }
+  return { indexHandler, cellHandler };
+}
+
 function powerProxy() {
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'power');
   const LINES_PATH = path.join(CACHE_DIR, 'lines.geojsonl');
@@ -5680,31 +5740,10 @@ function powerProxy() {
     return { at: Date.now(), body: JSON.stringify(payload) };
   }
   const marketRoute = swrRoute('market', { diskPath: MARKET_PATH, ttlMs: 60 * 60_000, staleMaxMs: 2 * 24 * 60 * 60_000, build: buildMarket });
-  // Bunky 5° × 5° (2026-11-06): snímok Eurázie má 231 k úsekov / 119 MB — na jedno
-  // načítanie priveľký. Rozdelí ho už build (scripts/build-power-lines.mjs →
-  // .gev-cache/power/cells/<id>.geojsonl + index.json); server len streamuje súbory
-  // (žiadne parsovanie 119 MB v hlavnom vlákne oko-api).
-  const CELLS_DIR = path.join(CACHE_DIR, 'cells');
-  async function cellsIndexHandler(req, res) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
-    return linesFile(path.join(CELLS_DIR, 'index.json'), 'application/json; charset=utf-8', 'no-cache')(req, res);
-  }
-  async function cellHandler(req, res) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
-    const id = decodeURIComponent(String(req.url || '').replace(/^\//, '').split('?')[0]);
-    if (!/^-?\d{1,2}_-?\d{1,3}$/.test(id)) { send(res, 400, JSON.stringify({ error: 'bad_cell' }), 'NONE'); return; }
-    // Bunka bez úsekov (oceán) súbor nemá — prázdna odpoveď, nie 404 snímku.
-    const file = path.join(CELLS_DIR, id + '.geojsonl');
-    const exists = await fsp.stat(file).then((st) => st.isFile()).catch(() => false);
-    if (!exists) {
-      const indexExists = await fsp.stat(path.join(CELLS_DIR, 'index.json')).then(() => true).catch(() => false);
-      if (!indexExists) { noSnapshot(res); return; }
-      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'public, max-age=86400', 'X-GEV-Cache': 'EMPTY' });
-      res.end('');
-      return;
-    }
-    return linesFile(file, 'application/x-ndjson; charset=utf-8')(req, res);
-  }
+  // Bunky 5° × 5° (2026-11-06): snímok má stovky tisíc úsekov — na jedno načítanie
+  // priveľký. Rozdelí ho už build (scripts/build-power-lines.mjs → .gev-cache/power/
+  // cells/<id>.geojsonl + index.json); server len streamuje súbory (snapshotCellRoutes).
+  const { indexHandler: cellsIndexHandler, cellHandler } = snapshotCellRoutes(path.join(CACHE_DIR, 'cells'), { script: 'build-power-lines.mjs', label: 'power-proxy' });
   function install(middlewares) {
     middlewares.use('/api/power/cells', cellsIndexHandler);
     middlewares.use('/api/power/cell/', cellHandler);

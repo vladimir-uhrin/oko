@@ -225,7 +225,7 @@ test('bunky: index → bunky vo výhľade, pohyb kamery načíta ďalšie a nad 
   layer.enable();
   await tick();
   let st = layer._getStateForTest();
-  assert.deepEqual(st.cells.resident, ['45_15', '45_20'], 'dve bunky vo výhľade, Španielsko nie');
+  assert.deepEqual(st.cells.resident, ['power:45_15', 'power:45_20'], 'dve bunky vo výhľade, Španielsko nie');
   assert.equal(st.count, 6);
   assert.equal(st.cells.listening, true);
   assert.deepEqual(layer.getRowControls().legend.map((l) => l.count), [9, 0, 0], 'legenda = celý snímok z indexu');
@@ -236,7 +236,7 @@ test('bunky: index → bunky vo výhľade, pohyb kamery načíta ďalšie a nad 
   timers.splice(0).filter(Boolean).forEach((fn) => fn());
   await tick();
   st = layer._getStateForTest();
-  assert.deepEqual(st.cells.resident, ['45_20', '40_-5'], 'najstaršia bunka 45_15 uvoľnená');
+  assert.deepEqual(st.cells.resident, ['power:45_20', 'power:40_-5'], 'najstaršia bunka 45_15 uvoľnená');
   assert.equal(st.count, 6);
   assert.equal(viewer.dataSources.added[0].entities.values.length, 6, 'entity uvoľnenej bunky zmizli zo zdroja');
   layer.disable();

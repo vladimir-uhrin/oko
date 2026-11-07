@@ -17,6 +17,7 @@ import {
   pipelineLocationText, pipelineMidpoint, pipelineOperator, pipelineRoute, pipelineStatus,
 } from './gasPipelines.js';
 import { powerFlowPairIds } from './powerFlows.js';
+import { buildCellIndex, cellBbox, cellId, selectCells } from './snapshotCells.js';
 
 export const POWER_LINES_API = '/api/power/lines';
 export const POWER_LINES_META_API = '/api/power/lines/meta';
@@ -308,87 +309,14 @@ export const POWER_CELL_DEG = 5;
 /** Strop úsekov v pamäti. Merané 2026-11-06 po GC: ~20 kB na vedenie (10 428 nad SR = +216 MB; plynovody 21 339 = +427 MB) → 16 000 ≈ 330 MB, dotyk 6 000. */
 export const POWER_MAX_RESIDENT = Object.freeze({ desktop: 16_000, touch: 6_000 });
 
-/** Id bunky z bodu: „45_15" = južný a západný okraj v stupňoch. */
-export function powerCellId(lon, lat, deg = POWER_CELL_DEG) {
-  const s = Math.floor(lat / deg) * deg;
-  const w = Math.floor(lon / deg) * deg;
-  return `${s}_${w}`;
-}
-
-/** Bbox bunky [S, W, N, E] z id. */
-export function powerCellBbox(id, deg = POWER_CELL_DEG) {
-  const [s, w] = String(id).split('_').map(Number);
-  return [s, w, s + deg, w + deg];
-}
-
-/**
- * Index buniek zo snímku: každý úsek patrí do práve jednej bunky (stred
- * úseku), takže id sa medzi bunkami nikdy nezdvoja. Vracia index pre klienta
- * a riadky geojsonl po bunkách pre server.
- * @param {Array<{feature: object, line: string}>} rows prvky s pôvodným riadkom súboru
- * @param {{deg?: number}} [o]
- */
+/** Bunky žijú v spoločnom module (snapshotCells.js, 2026-11-07 — aj plynovody a ropovody). */
+export const powerCellId = (lon, lat, deg = POWER_CELL_DEG) => cellId(lon, lat, deg);
+export const powerCellBbox = (id, deg = POWER_CELL_DEG) => cellBbox(id, deg);
+/** Index buniek elektrickej siete: súčty podľa druhu (≥ 380 kV / 220–330 kV / HVDC). */
 export function buildPowerCellIndex(rows, { deg = POWER_CELL_DEG } = {}) {
-  const cells = new Map();
-  for (const { feature, line } of rows) {
-    const mid = pipelineMidpoint(feature?.geometry?.coordinates);
-    if (!mid) continue;
-    const id = powerCellId(mid.lon, mid.lat, deg);
-    if (!cells.has(id)) cells.set(id, { id, bbox: powerCellBbox(id, deg), count: 0, lengthKm: 0, kinds: Object.fromEntries(POWER_KINDS.map((k) => [k, 0])), lines: [] });
-    const cell = cells.get(id);
-    cell.count += 1;
-    cell.lengthKm += Number(feature.properties?.lengthKm) || 0;
-    cell.kinds[powerKind(feature.properties)] += 1;
-    cell.lines.push(line);
-  }
-  const list = [...cells.values()].sort((a, b) => a.id.localeCompare(b.id));
-  const totals = Object.fromEntries(POWER_KINDS.map((k) => [k, list.reduce((n, c) => n + c.kinds[k], 0)]));
-  return {
-    index: { cellDeg: deg, totals, features: list.reduce((n, c) => n + c.count, 0), cells: list.map(({ lines, lengthKm, ...c }) => ({ ...c, lengthKm: Math.round(lengthKm) })) },
-    linesByCell: new Map(list.map((c) => [c.id, c.lines])),
-  };
+  return buildCellIndex(rows, { deg, kinds: POWER_KINDS, kindOf: powerKind });
 }
-
-/** Uhlová vzdialenosť stredu bunky od bodu (stupne, približne; na triedenie stačí). */
-function cellDistance(cell, lon, lat) {
-  const [s, w, n, e] = cell.bbox;
-  const clat = (s + n) / 2;
-  const clon = (w + e) / 2;
-  const dlon = Math.abs(((clon - lon + 540) % 360) - 180) * Math.cos(((clat + lat) / 2) * Math.PI / 180);
-  return Math.hypot(dlon, clat - lat);
-}
-
-/** Pretína bunka obdĺžnik výhľadu (stupne; výhľad cez 180° poludník = dva kusy)? */
-function cellInView(cell, view) {
-  const [s, w, n, e] = cell.bbox;
-  if (n < view.south || s > view.north) return false;
-  if (view.west <= view.east) return e >= view.west && w <= view.east;
-  return e >= view.west || w <= view.east;
-}
-
-/**
- * Ktoré bunky majú byť v pamäti: bunky vo výhľade (s okrajom), od stredu
- * obrazovky, kým súčet úsekov neprekročí strop. Prázdny výhľad (kamera
- * mimo Zeme) = bunky najbližšie k stredu.
- * @param {Array<{id: string, bbox: number[], count: number}>} cells
- * @param {{west: number, south: number, east: number, north: number, lon: number, lat: number}|null} view stupne
- * @param {{maxResident?: number, marginDeg?: number}} [o]
- * @returns {string[]}
- */
+/** Výber buniek vo výhľade (strop pre elektrinu). */
 export function selectPowerCells(cells, view, { maxResident = POWER_MAX_RESIDENT.desktop, marginDeg = 1 } = {}) {
-  if (!Array.isArray(cells) || !view || !Number.isFinite(view.lon) || !Number.isFinite(view.lat)) return [];
-  const box = Number.isFinite(view.west) ? { west: view.west - marginDeg, east: view.east + marginDeg, south: view.south - marginDeg, north: view.north + marginDeg } : null;
-  const candidates = cells.filter((c) => c.count > 0 && (!box || cellInView(c, box)));
-  candidates.sort((a, b) => cellDistance(a, view.lon, view.lat) - cellDistance(b, view.lon, view.lat));
-  const out = [];
-  let total = 0;
-  for (const c of candidates) {
-    // Súvislý kruh od stredu: prvá bunka, ktorá sa nezmestí, výber končí. Preskakovanie
-    // by strop zaplnilo menšími vzdialenými bunkami a husté jadro výhľadu by chýbalo
-    // (2026-11-06 na snímke z 2 500 km: Nemecko v strede prázdne, Balkán plný).
-    if (total + c.count > maxResident) { if (!out.length) out.push(c.id); break; }
-    out.push(c.id);
-    total += c.count;
-  }
-  return out;
+  return selectCells(cells, view, { maxResident, marginDeg });
 }

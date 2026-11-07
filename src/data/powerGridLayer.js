@@ -20,12 +20,13 @@
  */
 import { createGasPipelinesLayer, GAS_PIPELINES_PROFILE } from './gasPipelinesLayer.js';
 import {
-  POWER_CELLS_INDEX_API, POWER_CELL_API, POWER_COLORS, POWER_FALLBACK_URL, POWER_GRID_ATTRIBUTION, POWER_KINDS, POWER_GROUP_MAX, POWER_LINES_API, POWER_LINES_META_API, POWER_MAX_RESIDENT,
+  POWER_CELLS_INDEX_API, POWER_CELL_API, POWER_COLORS, POWER_FALLBACK_URL, POWER_GRID_ATTRIBUTION, POWER_KINDS, POWER_GROUP_MAX, POWER_LINES_API, POWER_LINES_META_API,
   parsePowerFallback, powerDetails, powerFallbackMeta, powerGroupKey, powerHoverModel, powerSelectedStyle, powerStyle, powerTitle, selectPowerCells,
 } from './powerGrid.js';
 import { pipelineSourceLabel } from './gasPipelines.js';
 import { fetchPowerFlows, powerFlowPairIds, powerFlowRows } from './powerFlows.js';
 import { createPipelineHoverCard } from './pipelineHoverCard.js';
+import { cellUrlFor, defaultMaxResident } from './snapshotCells.js';
 
 export const POWER_GRID_LAYER_ID = 'local-energy';
 
@@ -63,7 +64,11 @@ export const POWER_GRID_PROFILE = Object.freeze({
   logTag: 'PowerGrid',
   kinds: POWER_KINDS,
   sources: Object.freeze([
-    Object.freeze({ key: 'power', url: POWER_LINES_API, metaUrl: POWER_LINES_META_API, required: true, fallback: (doFetch) => loadPowerFallback(doFetch) }),
+    Object.freeze({
+      key: 'power', url: POWER_LINES_API, metaUrl: POWER_LINES_META_API, required: true, fallback: (doFetch) => loadPowerFallback(doFetch),
+      // Bunky 5° × 5° podľa výhľadu (viď snapshotCells.js).
+      cells: Object.freeze({ indexUrl: POWER_CELLS_INDEX_API, cellUrl: cellUrlFor(POWER_CELL_API) }),
+    }),
   ]),
   styleFor: powerStyle,
   selectedStyleFor: powerSelectedStyle,
@@ -94,11 +99,10 @@ export const POWER_GRID_PROFILE = Object.freeze({
   // Hranice celej trasy: zjednotenie dvojíc zo všetkých úsekov (v poradí výskytu).
   groupFlowIdsFor: (features) => [...new Set(features.flatMap((f) => powerFlowPairIds(f.properties)))],
   // Bunky 5° × 5° podľa výhľadu, strop úsekov v pamäti (viď powerGrid.js).
+  // Výber buniek a strop (spoločné pre všetky zdroje vrstvy); URL buniek nesie zdroj.
   cells: Object.freeze({
-    indexUrl: POWER_CELLS_INDEX_API,
-    cellUrl: (id, snapshot) => `${POWER_CELL_API}${encodeURIComponent(id)}${snapshot ? `?v=${encodeURIComponent(String(snapshot))}` : ''}`,
     select: selectPowerCells,
-    maxResident: () => (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches ? POWER_MAX_RESIDENT.touch : POWER_MAX_RESIDENT.desktop),
+    maxResident: defaultMaxResident,
     debounceMs: 400,
   }),
 });

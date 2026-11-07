@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { diameterMm } from './pipelineTags.mjs';
 import { countriesForCoords } from './pipelineCountries.mjs';
+import { buildCellIndex } from '../../src/data/snapshotCells.js';
 
 function pointSegDist(p, a, b) {
   const dx = b[0] - a[0];
@@ -125,7 +126,12 @@ export async function buildPipelineSnapshot({
   // a kľúče `basis` v meta pomenovať podľa pravidiel vlastného klasifikátora.
   mapProperties = null,
   basisKeys = ['transmission', 'relation', 'diameter', 'name', 'operator'],
+  // Bunky pre prehliadač (2026-11-07): { dir, kinds, kindOf } → writeCells po zápise snímku.
+  cells = null,
+  // Bez siete: len surové dlaždice z cache, chýbajúce sa preskočia a zapíšu do meta.
+  cachedOnly = false,
 }) {
+  const skippedTiles = [];
   const round = (n) => Number(n.toFixed(roundDigits));
 
   function toFeatures(el, tile, relTags = null, relationId = null) {
@@ -183,6 +189,13 @@ export async function buildPipelineSnapshot({
     if (!refresh && fs.existsSync(rawPath)) {
       console.log(`  tile ${tile.join(',')}: raw cache`);
       return JSON.parse(fs.readFileSync(rawPath, 'utf8'));
+    }
+    // --cached-only (2026-11-07, Overpass nedostupný): bez siete — chýbajúca dlaždica sa
+    // preskočí a meta ju vymenuje (`skippedTiles`), snímok netvrdí pokrytie, ktoré nemá.
+    if (cachedOnly) {
+      console.log(`  tile ${tile.join(',')}: SKIPPED (no raw cache, --cached-only)`);
+      skippedTiles.push(tile);
+      return { elements: [], skipped: true };
     }
     const query = buildQuery(tile);
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -289,11 +302,41 @@ export async function buildPipelineSnapshot({
     features: features.length,
     named,
     crossTileDuplicatesRenamed: renamed,
+    // Dlaždice preskočené v režime --cached-only (Overpass nedostupný) — pokrytie tam chýba.
+    skippedTiles,
     points,
     lengthKm: km,
     bytes: fs.statSync(outFile).size,
   };
   fs.writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf8');
   console.log(`${path.basename(outFile)}: ${features.length} features (${named} named), ${points} points, ${km} km, ${(meta.bytes / 1e6).toFixed(1)} MB in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+  if (cells?.dir) writeCells(features, meta, cells);
   return meta;
+}
+
+/**
+ * Bunky 5° × 5° vedľa snímku (2026-11-07): `<dir>/<id>.geojsonl` + `index.json`.
+ * Server ich len streamuje (žiadne parsovanie celého snímku v hlavnom vlákne
+ * oko-api), prehliadač berie bunky vo výhľade. Starý obsah adresára sa zmaže,
+ * aby nezostali bunky z predošlého snímku.
+ * @param {object[]} features prvky snímku
+ * @param {object} meta meta snímku (dátum, počty)
+ * @param {{dir: string, kinds?: string[], kindOf?: (p: object) => string}} cells
+ */
+export function writeCells(features, meta, { dir, kinds = [], kindOf = () => null }) {
+  const rows = features.map((feature) => ({ feature, line: JSON.stringify(feature) }));
+  const { index, linesByCell } = buildCellIndex(rows, { kinds, kindOf });
+  index.meta = { snapshot: meta.snapshot, features: meta.features, lengthKm: meta.lengthKm, source: meta.source, license: meta.license };
+  // Bunky číta ostrý server (.gev-cache je zdieľaná) — najprv celý nový adresár vedľa,
+  // potom výmena, aby počas zápisu nikto nedostal polovičný index.
+  const next = `${dir}.next`;
+  fs.rmSync(next, { recursive: true, force: true });
+  fs.mkdirSync(next, { recursive: true });
+  for (const [id, lines] of linesByCell) fs.writeFileSync(path.join(next, `${id}.geojsonl`), lines.join('\n') + '\n', 'utf8');
+  fs.writeFileSync(path.join(next, 'index.json'), JSON.stringify(index), 'utf8');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.renameSync(next, dir);
+  const biggest = [...index.cells].sort((a, b) => b.count - a.count).slice(0, 3).map((c) => `${c.id} ${c.count}`).join(', ');
+  console.log(`cells: ${index.cells.length} × ${index.cellDeg}° (najväčšie: ${biggest}) → ${dir}`);
+  return index;
 }

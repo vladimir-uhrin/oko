@@ -26,13 +26,13 @@
 // raw responses cached on disk so a re-run never re-downloads. NEVER run
 // --refresh casually: the inter-tile pause is skipped when the next tile is
 // already cached, so a refresh fires every query back to back.
-import fs from 'node:fs';
 import path from 'node:path';
 
 import { buildPipelineSnapshot } from './lib/pipelineSnapshot.mjs';
-import { buildPowerCellIndex } from '../src/data/powerGrid.js';
+import { POWER_KINDS, powerKind } from '../src/data/powerGrid.js';
 import { loadCountryIndex } from './lib/pipelineCountries.mjs';
 import { classifyPowerLine, powerLineProperties } from './lib/powerTags.mjs';
+import { WORLD_TILES_FINE } from './lib/worldTiles.mjs';
 
 // Hlavná inštancia: zrkadlo maps.mail.ru vracalo na husté dlaždice 504 / „server too busy".
 const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
@@ -55,6 +55,9 @@ for (const [S, N] of [[34, 42], [42, 50], [50, 58], [58, 66], [66, 75]]) {
 }
 TILES.push([34, 52, 75, 84], [34, 84, 75, 116], [34, 116, 75, 148], [34, 148, 75, 180]);
 TILES.push([0, -12, 34, 20], [0, 20, 34, 52], [0, 52, 34, 84], [0, 84, 34, 116], [0, 116, 34, 148], [0, 148, 34, 180]);
+// Celý svet (2026-11-07): Amerika (jadro USA po 8° × 16°), Island, juh Afriky, Indonézia,
+// Austrália — na KONCI, aby sa nezmenili prípony '#N' existujúcich úsekov.
+TILES.push(...WORLD_TILES_FINE);
 
 /**
  * ≥ 220 kV: hodnota `voltage` je jedno číslo alebo viac čísel cez bodkočiarku
@@ -76,7 +79,7 @@ out tags geom;
 // Krajiny úseku (vlajky v karte) z Natural Earth — len v builde, do snímku idú ISO2 kódy.
 const countryIndex = await loadCountryIndex({ cacheDir: path.join(process.cwd(), '.gev-cache', 'natural-earth') });
 
-const meta = await buildPipelineSnapshot({
+await buildPipelineSnapshot({
   countryIndex,
   label: 'power',
   tiles: TILES,
@@ -93,24 +96,9 @@ const meta = await buildPipelineSnapshot({
   overpassUrl: OVERPASS_URL,
   userAgent: USER_AGENT,
   refresh: REFRESH,
+  cachedOnly: process.argv.includes('--cached-only'),
+  // Bunky 5° × 5° (2026-11-06): snímok má stovky tisíc úsekov — server ho nesmie
+  // parsovať za behu (blokoval by hlavné vlákno oko-api), preto ho rozdelí build:
+  // `.gev-cache/power/cells/<id>.geojsonl` + `index.json` (writeCells v engine).
+  cells: { dir: path.join(CACHE_DIR, 'cells'), kinds: POWER_KINDS, kindOf: powerKind },
 });
-
-// Bunky 5° × 5° (2026-11-06): snímok má 231 k úsekov / 119 MB — server ho nesmie
-// parsovať za behu (blokoval by hlavné vlákno oko-api), preto ho rozdelí build:
-// `.gev-cache/power/cells/<id>.geojsonl` + `index.json`. Každý úsek je v práve
-// jednej bunke podľa stredu. Starý obsah adresára sa zmaže, aby nezostali bunky
-// z predošlého snímku.
-const CELLS_DIR = path.join(CACHE_DIR, 'cells');
-const rows = [];
-for (const line of fs.readFileSync(path.join(CACHE_DIR, 'lines.geojsonl'), 'utf8').split('\n')) {
-  const trimmed = line.trim();
-  if (trimmed) rows.push({ feature: JSON.parse(trimmed), line: trimmed });
-}
-const { index, linesByCell } = buildPowerCellIndex(rows);
-index.meta = { snapshot: meta.snapshot, features: meta.features, lengthKm: meta.lengthKm, source: meta.source, license: meta.license };
-fs.rmSync(CELLS_DIR, { recursive: true, force: true });
-fs.mkdirSync(CELLS_DIR, { recursive: true });
-for (const [id, lines] of linesByCell) fs.writeFileSync(path.join(CELLS_DIR, `${id}.geojsonl`), lines.join('\n') + '\n', 'utf8');
-fs.writeFileSync(path.join(CELLS_DIR, 'index.json'), JSON.stringify(index), 'utf8');
-const biggest = [...index.cells].sort((a, b) => b.count - a.count).slice(0, 3).map((c) => `${c.id} ${c.count}`).join(', ');
-console.log(`cells: ${index.cells.length} × 5° (najväčšie: ${biggest}) → ${CELLS_DIR}`);

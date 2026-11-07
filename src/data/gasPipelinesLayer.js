@@ -35,6 +35,13 @@ import { regionDisplayName } from './trackedCardModel.js';
 import { fetchGasFlows } from './gasFlows.js';
 import { createPipelineHoverCard } from './pipelineHoverCard.js';
 import { resolveEllipsoidalGround } from './terrainHeights.js';
+import { cellUrlFor, defaultMaxResident, selectCells } from './snapshotCells.js';
+
+/** Bunky celosvetových snímkov potrubí (2026-11-07) — plyn a ropa každý vlastná trasa. */
+export const GAS_CELLS_INDEX_API = '/api/gas/cells';
+export const GAS_CELL_API = '/api/gas/cell/';
+export const OIL_CELLS_INDEX_API = '/api/oil/cells';
+export const OIL_CELL_API = '/api/oil/cell/';
 
 export const GAS_PIPELINES_LAYER_ID = 'gas-pipelines';
 export const GAS_PIPELINES_OVERLAY_SOURCE_ID = 'gas-pipelines';
@@ -55,6 +62,8 @@ export const PIPELINE_FLOWS_TTL_MS = 30 * 60 * 1000;
 export const FALLBACK_HEIGHT_M = 200;
 /** Duch: pauza po pohybe kamery pred novou kohortou (moveEnd chodí v dávkach). */
 export const PIPELINE_GHOST_DEBOUNCE_MS = 250;
+/** Bunky: koľko sa sťahuje súbežne (proxy ich servíruje zo súborov, gzip). */
+export const CELL_FETCH_CONCURRENCY = 4;
 /** Výber celej trasy (etapa 6): najviac entít zvýraznenia naraz. */
 export const PIPELINE_SELECTION_MAX = 300;
 
@@ -105,8 +114,10 @@ export const GAS_PIPELINES_PROFILE = Object.freeze({
   logTag: 'GasPipelines',
   kinds: PIPELINE_KINDS,
   sources: Object.freeze([
-    Object.freeze({ key: 'gas', required: true }),
-    Object.freeze({ key: 'oil', url: OIL_PIPELINES_API, metaUrl: OIL_PIPELINES_META_API, required: false }),
+    // Celý svet po bunkách (2026-11-07): každá látka vlastný index aj trasa buniek —
+    // dve samostatné databázy (ODbL §4.5(a)). Bez indexu plynu = celý snímok ako predtým.
+    Object.freeze({ key: 'gas', required: true, cells: Object.freeze({ indexUrl: GAS_CELLS_INDEX_API, cellUrl: cellUrlFor(GAS_CELL_API) }) }),
+    Object.freeze({ key: 'oil', url: OIL_PIPELINES_API, metaUrl: OIL_PIPELINES_META_API, required: false, cells: Object.freeze({ indexUrl: OIL_CELLS_INDEX_API, cellUrl: cellUrlFor(OIL_CELL_API) }) }),
   ]),
   styleFor: pipelineStyle,
   selectedStyleFor: pipelineSelectedStyle,
@@ -125,6 +136,9 @@ export const GAS_PIPELINES_PROFILE = Object.freeze({
   noGroundKey: 'gas.pipeline-no-ground',
   hoverFactory: (o) => createPipelineHoverCard(o),
   flowsFetcher: fetchGasFlows,
+  // Výber buniek a strop spoločný pre plyn aj ropu (snapshotCells.js): na počítači
+  // 16 000 úsekov, na telefóne 6 000 — predtým celých 21 k naraz (~430 MB haldy).
+  cells: Object.freeze({ select: selectCells, maxResident: defaultMaxResident, debounceMs: 400 }),
 });
 
 /**
@@ -241,6 +255,8 @@ export function createGasPipelinesLayer({
   let _lengthKmRaw = 0;
   /** Bunky (elektrina): index zo servera, bunky v pamäti (LRU poradie) → id úsekov. */
   let _cellIndex = null;
+  /** Zdroje s bunkami: kľúč → zdroj profilu + dátum snímku (verzia URL bunky). */
+  let _cellSources = new Map();
   let _cellIds = new Map();
   let _cellTimer = null;
   let _cellToken = 0;
@@ -686,21 +702,44 @@ export function createGasPipelinesLayer({
       }
     };
     let changed = false;
-    for (const cellId of wanted) {
-      if (_cellIds.has(cellId)) { const ids = _cellIds.get(cellId); _cellIds.delete(cellId); _cellIds.set(cellId, ids); continue; } // LRU: posuň dozadu
-      let list = null;
-      try {
-        const response = await doFetch(profile.cells.cellUrl(cellId, _meta?.snapshot));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        list = parsePipelinesGeojsonl(await response.text());
-      } catch (error) {
-        console.warn(`${LOG} bunka ${cellId} nedostupná: ${error?.message || error}`);
-        continue;
+    const cellOf = new Map(_cellIndex.cells.map((c) => [c.id, c]));
+    // LRU: bunky, ktoré už sú v pamäti a sú vo výhľade, sa posunú dozadu (uvoľnia sa posledné).
+    for (const cellId of wanted) if (_cellIds.has(cellId)) { const ids = _cellIds.get(cellId); _cellIds.delete(cellId); _cellIds.set(cellId, ids); }
+    // Chýbajúce bunky: stiahnuť súbežne (najviac CELL_FETCH_CONCURRENCY naraz), vložiť NARAZ.
+    // 2026-11-07 na snímke: bunka po bunke = každé vloženie prestavilo celú dávku pozemných
+    // čiar (~15 k), pri ~30 bunkách Európy sa obraz ani po 45 s neukázal.
+    const missing = wanted.filter((cellId) => !_cellIds.has(cellId));
+    const fetched = new Map();
+    let next = 0;
+    const worker = async () => {
+      while (next < missing.length) {
+        const cellId = missing[next++];
+        // Virtuálne id „zdroj:bunka" (plyn a ropa majú každý vlastný index a vlastnú trasu).
+        const cell = cellOf.get(cellId);
+        const source = cell ? _cellSources.get(cell.src) : null;
+        if (!source) continue;
+        try {
+          const response = await doFetch(source.cells.cellUrl(cell.cellId, source.snapshot));
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          fetched.set(cellId, parsePipelinesGeojsonl(await response.text()));
+        } catch (error) {
+          console.warn(`${LOG} bunka ${cellId} nedostupná: ${error?.message || error}`);
+        }
       }
-      if (token !== _cellToken || !_enabled) { if (changed) afterFeaturesChanged(); return; } // novší pohyb kamery má prednosť
-      evictFor(sizeOf.get(cellId) ?? list.length);
-      _cellIds.set(cellId, insertFeatures(list, cellId));
-      changed = true;
+    };
+    await Promise.all(Array.from({ length: Math.min(CELL_FETCH_CONCURRENCY, missing.length) }, worker));
+    if (token !== _cellToken || !_enabled) return; // novší pohyb kamery má prednosť (bunky ostanú v cache prehliadača)
+    eachSource((source) => source.entities.suspendEvents?.());
+    try {
+      for (const cellId of missing) {
+        const list = fetched.get(cellId);
+        if (!list) continue;
+        evictFor(sizeOf.get(cellId) ?? list.length);
+        _cellIds.set(cellId, insertFeatures(list, cellId));
+        changed = true;
+      }
+    } finally {
+      eachSource((source) => source.entities.resumeEvents?.());
     }
     if (changed) {
       _lastUpdate = now();
@@ -721,18 +760,47 @@ export function createGasPipelinesLayer({
     _removeCellMove = null;
   }
 
-  /** Index buniek; null = profil bunky nemá alebo index chýba (núdzovka zdrojov). */
-  async function loadCellIndex() {
-    if (!profile.cells) return null;
+  /** Index buniek jedného zdroja; null = chýba (404 no_snapshot, chyba siete, prázdny). */
+  async function fetchSourceIndex(source) {
     try {
-      const response = await doFetch(profile.cells.indexUrl, { cache: 'no-store' });
+      const response = await doFetch(source.cells.indexUrl, { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const index = await response.json();
       return Array.isArray(index?.cells) && index.cells.length ? index : null;
     } catch (error) {
-      console.warn(`${LOG} index buniek nedostupný (${error?.message || error}) — celý snímok / núdzovka`);
+      console.warn(`${LOG} index buniek ${source.key} nedostupný (${error?.message || error})`);
       return null;
     }
+  }
+
+  /**
+   * Spojený index buniek všetkých zdrojov s bunkami (2026-11-07: elektrina jeden zdroj,
+   * potrubia plyn + ropa). Bunka dostane virtuálne id „zdroj:bunka". null = povinný
+   * (prvý) zdroj index nemá → celý snímok / núdzovka ako predtým. Voliteľný zdroj bez
+   * indexu sa načíta celý (`static`) a v pamäti ostáva stále.
+   */
+  async function loadCellIndex() {
+    if (!profile.cells) return null;
+    const [primary] = profile.sources;
+    if (!primary?.cells) return null;
+    const cells = [];
+    const totals = emptyKinds();
+    const metas = [];
+    const staticSources = [];
+    _cellSources = new Map();
+    for (const source of profile.sources) {
+      const index = source.cells ? await fetchSourceIndex(source) : null;
+      if (!index) {
+        if (source === primary) { console.warn(`${LOG} index buniek nedostupný — celý snímok / núdzovka`); _cellSources = new Map(); return null; }
+        staticSources.push(source);
+        continue;
+      }
+      _cellSources.set(source.key, { ...source, snapshot: index.meta?.snapshot ?? null });
+      for (const c of index.cells) cells.push({ ...c, id: `${source.key}:${c.id}`, cellId: c.id, src: source.key });
+      for (const kind of profile.kinds) totals[kind] += Number(index.totals?.[kind]) || 0;
+      if (index.meta) metas.push(index.meta);
+    }
+    return { cells, totals, features: cells.reduce((n, c) => n + (Number(c.count) || 0), 0), meta: metas[0] ?? null, extraMetas: metas.slice(1), staticSources };
   }
 
   async function load() {
@@ -751,9 +819,23 @@ export function createGasPipelinesLayer({
     if (index) {
       _cellIndex = index;
       _meta = index.meta || null;
-      _extraMetas = [];
+      _extraMetas = [...index.extraMetas];
       // Legenda hlási celý snímok (nie len bunky v pamäti).
       for (const kind of profile.kinds) _kinds[kind] = Number(index.totals?.[kind]) || 0;
+      // Voliteľný zdroj bez buniek (napr. ropa, keď jej build bunky ešte nezapísal): celý,
+      // stále v pamäti (bunka null sa nikdy neuvoľní) — rovnako ako pred bunkami.
+      for (const source of index.staticSources) {
+        try {
+          const extra = await loadSource(source);
+          if (extra.features.length) {
+            insertFeatures(extra.features, null);
+            if (extra.meta) _extraMetas.push(extra.meta);
+            for (const f of extra.features) { const kind = profile.styleFor(f.properties).kind; if (Object.hasOwn(_kinds, kind)) _kinds[kind] += 1; }
+          }
+        } catch (error) {
+          console.warn(LOG + ' snímok ' + source.key + ' nedostupný, kreslím bez neho: ' + (error?.message || error));
+        }
+      }
       _loaded = true;
       _lastUpdate = now();
       _error = null;
@@ -1023,6 +1105,7 @@ export function createGasPipelinesLayer({
       _features = new Map();
       _cellIndex = null;
       _cellIds = new Map();
+      _cellSources = new Map();
       _loaded = false;
       _loading = null;
       _meta = null;

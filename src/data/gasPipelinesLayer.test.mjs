@@ -176,7 +176,9 @@ test('ropa: vlastný snímok z /api/oil, počty na látku, zlúčený popis zdro
   layer.enable();
   assert.equal(await layer.update(), true);
   // Plyn sa ťahá PRVÝ a ropa až po ňom — zlyhanie ropy tak nikdy nezablokuje plyn.
-  assert.deepEqual(urls, ['/api/gas/pipelines/meta', '/api/gas/pipelines', '/api/oil/pipelines/meta', '/api/oil/pipelines']);
+  // Od 2026-11-07 sa vrstva najprv pýta na index buniek plynu; bez neho (tento stub ho nemá)
+  // ide celý snímok ako predtým.
+  assert.deepEqual(urls, ['/api/gas/cells', '/api/gas/pipelines/meta', '/api/gas/pipelines', '/api/oil/pipelines/meta', '/api/oil/pipelines']);
   const st = layer._getStateForTest();
   assert.equal(st.count, 5);
   assert.deepEqual(st.kinds, { gas: 3, oil: 2 });
@@ -562,6 +564,7 @@ test('duplicitné id (úsek cez hranicu dlaždice) dostane príponu namiesto vý
   let calls = 0;
   const fetcher = async (url) => {
     if (String(url).includes('/api/oil/')) return noOil;
+    if (String(url).includes('/cells')) return { ok: false, status: 404, json: async () => ({ error: 'no_snapshot' }) };
     if (url.endsWith('/meta')) return { ok: true, json: async () => META };
     calls += 1;
     if (calls === 1) return { ok: false, status: 502, json: async () => ({ error: 'upstream' }) };
@@ -648,6 +651,21 @@ test('tripwires: registrácia v main.js, proxy trasy (meta pred súborom, gzip, 
   const oilMetaAt = vite.indexOf("middlewares.use('/api/oil/pipelines/meta'");
   const oilFileAt = vite.indexOf("middlewares.use('/api/oil/pipelines',");
   assert.ok(oilMetaAt > 0 && oilFileAt > oilMetaAt, 'tá istá pasca prefixu platí aj pre ropu');
+  // Celý svet po bunkách (2026-11-07): plyn a ropa každý vlastný adresár buniek a vlastná
+  // trasa (dve databázy, ODbL §4.5(a)); spoločná funkcia trás buniek aj pre elektrinu.
+  assert.match(vite, /function snapshotCellRoutes\(cellsDir, \{ script, label \}\)/);
+  assert.ok(vite.includes("middlewares.use('/api/gas/cells', gasCells.indexHandler)"));
+  assert.ok(vite.includes("middlewares.use('/api/gas/cell/', gasCells.cellHandler)"));
+  assert.ok(vite.includes("middlewares.use('/api/oil/cells', oilCells.indexHandler)"));
+  assert.ok(vite.includes("middlewares.use('/api/oil/cell/', oilCells.cellHandler)"));
+  assert.match(vite, /snapshotCellRoutes\(path\.join\(OIL_CACHE_DIR, 'cells'\)/, 'ropa má vlastný adresár buniek');
+  // Starý klient načítava `pipelines.geojsonl` celý naraz — celosvetový snímok ide do vlastných súborov.
+  for (const name of ['build-gas-pipelines.mjs', 'build-oil-pipelines.mjs']) {
+    const build = readFileSync(new URL(`../../scripts/${name}`, import.meta.url), 'utf8');
+    assert.match(build, /'pipelines-world\.geojsonl'/, name);
+    assert.match(build, /cells: \{ dir: path\.join\(CACHE_DIR, 'cells'\)/, name);
+    assert.match(build, /\.\.\.WORLD_TILES_COARSE/, name);
+  }
   // Ropa MUSÍ mať vlastný súbor a vlastný adresár: zlúčená s plynom by podľa
   // ODbL bola Derivative Database, kým dve databázy vedľa seba sú Collective
   // Database vyňatá §4.5(a).
@@ -667,4 +685,60 @@ test('tripwires: registrácia v main.js, proxy trasy (meta pred súborom, gzip, 
   assert.match(script, /overpass/i);
   assert.ok(!/process\.env\.[A-Z_]*KEY/.test(script), 'OSM/Overpass nepotrebuje kľúč');
   assert.match(script, /ODbL/, 'licencia v meta snímku');
+});
+
+test('celý svet po bunkách (2026-11-07): plyn a ropa z vlastných indexov, spoločný strop a výber; ropa bez indexu sa načíta celá a ostáva', async () => {
+  const seg = (id, props, lon, lat) => feature(id, { lengthKm: 30, status: 'operating', diameterMm: 1000, ...props }, [[lon, lat], [lon + 0.5, lat + 0.2]]);
+  const cellText = { gas: { '45_15': [seg('osm-way-11', { name: 'Transgas', substance: 'gas' }, 17, 48), seg('osm-way-12', { substance: 'gas' }, 18, 48.2)].join('\n'), '25_-100': seg('osm-way-13', { name: 'Texas Eastern', substance: 'gas' }, -97, 29) }, oil: { '45_15': seg('osm-way-21', { name: 'Družba', substance: 'oil' }, 18.5, 48.4) } };
+  const index = (src, cells) => ({ cellDeg: 5, totals: { [src]: cells.reduce((n, c) => n + c.count, 0) }, meta: { snapshot: `2026-11-07T0${src === 'gas' ? 1 : 2}:00:00Z`, lengthKm: 1000 }, cells });
+  const urls = [];
+  const fetcher = (withOilIndex) => async (url) => {
+    urls.push(String(url));
+    const u = String(url).split('?')[0];
+    if (u === '/api/gas/cells') return { ok: true, json: async () => index('gas', [{ id: '45_15', bbox: [45, 15, 50, 20], count: 2 }, { id: '25_-100', bbox: [25, -100, 30, -95], count: 1 }]) };
+    if (u === '/api/oil/cells') return withOilIndex ? { ok: true, json: async () => index('oil', [{ id: '45_15', bbox: [45, 15, 50, 20], count: 1 }]) } : { ok: false, status: 404, json: async () => ({ error: 'no_snapshot' }) };
+    const m = /^\/api\/(gas|oil)\/cell\/(.+)$/.exec(u);
+    if (m) return { ok: true, text: async () => cellText[m[1]][decodeURIComponent(m[2])] || '' };
+    if (u === '/api/oil/pipelines/meta') return { ok: true, json: async () => ({ snapshot: '2026-09-19T06:00:00Z', lengthKm: 300 }) };
+    if (u === '/api/oil/pipelines') return { ok: true, text: async () => seg('osm-way-99', { name: 'CPC', substance: 'oil' }, 50, 45) };
+    return { ok: false, status: 404, json: async () => ({ error: 'no_snapshot' }) };
+  };
+  const view = { lon: 17, lat: 48, west: 14, south: 46, east: 21, north: 50 };
+  const camera = {
+    positionCartographic: { longitude: view.lon * Math.PI / 180, latitude: view.lat * Math.PI / 180, height: 500_000 },
+    computeViewRectangle: () => ({ west: view.west * Math.PI / 180, south: view.south * Math.PI / 180, east: view.east * Math.PI / 180, north: view.north * Math.PI / 180 }),
+    moveEnd: { addEventListener() { return () => {}; } },
+  };
+  const mkViewer = () => ({ dataSources: { added: [], add(ds) { this.added.push(ds); }, remove() {} }, scene: { canvas: {}, camera, globe: {}, pick: () => null, requestRender() {} }, camera, selectedEntity: undefined });
+  const run = async (withOilIndex) => {
+    urls.length = 0;
+    const layer = createGasPipelinesLayer({ fetchImpl: fetcher(withOilIndex), dataSourceFactory: fakeDataSource, handlerFactory: fakeHandler, overlayHost: fakeHost(), translate: tKey, lang: () => 'sk', now: () => NOW, terrainSampler: null });
+    const viewer = mkViewer();
+    layer.init(viewer);
+    layer.enable();
+    for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+    return { layer, viewer };
+  };
+  // Oba indexy: v pamäti len bunky vo výhľade (Európa), Texas nie; súčty legendy z indexov.
+  let { layer, viewer } = await run(true);
+  let st = layer._getStateForTest();
+  assert.deepEqual(st.cells.resident, ['gas:45_15', 'oil:45_15'], 'bunky plynu aj ropy vo výhľade');
+  assert.equal(st.count, 3);
+  assert.deepEqual(st.kinds, { gas: 3, oil: 1 }, 'legenda = celý snímok oboch látok');
+  assert.ok(urls.some((u) => u.startsWith('/api/oil/cell/45_15?v=2026-11-07T02')), 'bunka ropy verziovaná dátumom ropného snímku');
+  assert.ok(!urls.some((u) => u.includes('25_-100')), 'Texas mimo výhľadu sa nesťahuje');
+  assert.ok(!urls.includes('/api/gas/pipelines'), 'celý snímok plynu sa v bunkovom režime nesťahuje');
+  assert.equal(viewer.dataSources.added[0].entities.values.length, 2, 'plyn v zdroji plynu');
+  assert.equal(viewer.dataSources.added[1].entities.values.length, 1, 'ropa v zdroji ropy');
+  assert.match(layer.getStats().source, /2026-11-07/);
+  layer.destroy(viewer);
+  // Ropa bez indexu: celý ropný snímok, stále v pamäti; plyn ďalej po bunkách.
+  ({ layer, viewer } = await run(false));
+  st = layer._getStateForTest();
+  assert.deepEqual(st.cells.resident, ['gas:45_15']);
+  assert.ok(urls.some((u) => u.split('?')[0] === '/api/oil/pipelines'), 'ropa celá');
+  assert.equal(viewer.dataSources.added[1].entities.values.length, 1, 'CPC z celého ropného snímku');
+  assert.deepEqual(st.kinds, { gas: 3, oil: 1 });
+  assert.match(layer.getStats().source, /2026-09-19/, 'popis zdroja berie starší dátum (ropa)');
+  layer.destroy(viewer);
 });

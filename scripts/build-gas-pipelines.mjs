@@ -30,6 +30,7 @@ import path from 'node:path';
 import { buildPipelineSnapshot } from './lib/pipelineSnapshot.mjs';
 import { loadCountryIndex } from './lib/pipelineCountries.mjs';
 import { makeClassifier } from './lib/pipelineTags.mjs';
+import { WORLD_TILES_COARSE } from './lib/worldTiles.mjs';
 
 const OVERPASS_URL = process.env.OVERPASS_URL || 'https://maps.mail.ru/osm/tools/overpass/api/interpreter';
 const REFRESH = process.argv.includes('--refresh');
@@ -60,6 +61,9 @@ const TILES = [
   [0, 84, 34, 116],
   [0, 116, 34, 148],
   [0, 148, 34, 180],
+  // Celý svet (2026-11-07): Amerika, Island, juh Afriky, Indonézia, Austrália — na KONCI,
+  // aby sa nezmenili prípony '#N' existujúcich úsekov (viď scripts/lib/worldTiles.mjs).
+  ...WORLD_TILES_COARSE,
 ];
 
 /**
@@ -142,12 +146,18 @@ await buildPipelineSnapshot({
   queryVersion: QUERY_VERSION,
   cacheDir: CACHE_DIR,
   rawDir: RAW_DIR,
-  outFile: path.join(CACHE_DIR, 'pipelines.geojsonl'),
-  metaFile: path.join(CACHE_DIR, 'pipelines.meta.json'),
+  // Celosvetový snímok (2026-11-07) ide do vlastných súborov: `pipelines.geojsonl` (okno
+  // 0–75° × −12…180°) načítava starý klient CELÝ naraz — keby narástol o Ameriku, ostrým
+  // návštevníkom by naskočila pamäť. Nový klient berie celý svet z buniek (cells/).
+  outFile: path.join(CACHE_DIR, 'pipelines-world.geojsonl'),
+  metaFile: path.join(CACHE_DIR, 'pipelines-world.meta.json'),
   buildQuery,
   classify: classifyPipeline,
   queryDescription: `${QUERY_VERSION}: way[man_made=pipeline][substance~gas] with usage=transmission, or no usage + (diameter|name|operator), plus members of rel[route=pipeline][substance~gas]; kept by classifyPipeline`,
   overpassUrl: OVERPASS_URL,
   userAgent: USER_AGENT,
   refresh: REFRESH,
+  cachedOnly: process.argv.includes('--cached-only'),
+  // Bunky 5° × 5° pre prehliadač (2026-11-07, celý svet) — snímok sa už nenačítava naraz.
+  cells: { dir: path.join(CACHE_DIR, 'cells'), kinds: ['gas'], kindOf: () => 'gas' },
 });
