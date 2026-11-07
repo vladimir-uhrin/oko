@@ -22,6 +22,8 @@ import { GAS_IMPORT_RANGES, buildImportsModel, fetchGasImports, formatBcm } from
 import { buildSupplyModel } from './data/gasSupply.js';
 import { LNG_FLEET_REFRESH_MS, buildLngFleetModel, fetchLngFleet } from './data/lngFleet.js';
 import { mmsiFlag } from './data/vesselLabels.js';
+import { POWER_MARKET_TZ, buildPowerMarketModel, fetchPowerMarket, formatEurMwhPower, marketDay } from './data/powerMarket.js';
+import { regionDisplayName } from './data/trackedCardModel.js';
 import { GAS_CHART_HEIGHT_PX, drawGasChart, drawSparkline, drawStackedChart } from './gasChart.js';
 
 export const GAS_SPARK_W = 64;
@@ -30,6 +32,8 @@ export const GAS_SPARK_H = 18;
 export const GAS_PANEL_ID = 'gas-panel';
 /** Ceny sa menia raz denne; obnova každých 30 min stačí (proxy má TTL 6 h). */
 export const GAS_PANEL_REFRESH_MS = 30 * 60 * 1000;
+/** Karta ELEKTRINA: prekreslenie „teraz" (15-min interval) bez dopytu. */
+export const POWER_RERENDER_MS = 5 * 60 * 1000;
 
 function el(doc, tag, className, text) {
   const node = doc.createElement(tag);
@@ -55,7 +59,7 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 export function installGasPanel({
   doc = globalThis.document,
   t,
-  api = { prices: fetchGasPrices, flows: fetchGasFlows, storage: fetchGasStorage, lng: fetchGasLng, imports: fetchGasImports, fleet: fetchLngFleet },
+  api = { prices: fetchGasPrices, flows: fetchGasFlows, storage: fetchGasStorage, lng: fetchGasLng, imports: fetchGasImports, fleet: fetchLngFleet, power: fetchPowerMarket },
   lang = null,
   nowMs = () => Date.now(),
   refreshMs = GAS_PANEL_REFRESH_MS,
@@ -249,6 +253,47 @@ export function installGasPanel({
 
   body.append(status, card, flowsCard, supplyCard, storageCard, lngCard, fleetCard, importsCard);
 
+  // ── ELEKTRINA (2026-11-07): vlastná časť panelu [data-power-body] medzi ropou a plynom ──
+  // Karta CENA (deň vopred, SR + susedia, dnes a zajtra) a karta SÚSTAVA SR (výroba podľa
+  // zdroja, výmena so susedmi). Jedna odpoveď proxy /api/power/market (Energy-Charts).
+  const powerBody = root.querySelector?.('[data-power-body]') || null;
+  const powerCard = el(doc, 'section', 'gas-card');
+  powerCard.dataset.card = 'power-prices';
+  const powerTitle = el(doc, 'h3', 'gas-card-title', t('power.market-title'));
+  const powerStatus = el(doc, 'div', 'gas-status', t('power.market-loading'));
+  powerStatus.dataset.state = 'loading';
+  const powerHead = el(doc, 'div', 'gas-headline');
+  const powerValue = el(doc, 'span', 'gas-headline-value', '—');
+  const powerDelta = el(doc, 'span', 'gas-delta', '');
+  const powerLabel = el(doc, 'span', 'gas-headline-label', '');
+  const powerSub = el(doc, 'span', 'gas-headline-sub', '');
+  powerHead.append(powerValue, powerDelta, powerLabel, powerSub);
+  const powerZones = el(doc, 'div', 'gas-subrows');
+  const powerCanvas = el(doc, 'canvas', 'gas-chart');
+  powerCanvas.height = GAS_CHART_HEIGHT_PX;
+  const powerLaic = el(doc, 'div', 'gas-laic', '');
+  const powerNote = el(doc, 'div', 'gas-note', '');
+  const powerSource = el(doc, 'div', 'gas-source', '');
+  powerCard.append(powerTitle, powerStatus, powerHead, powerZones, powerCanvas, powerLaic, powerNote, powerSource);
+  const gridCard = el(doc, 'section', 'gas-card');
+  gridCard.dataset.card = 'power-grid';
+  const gridTitle = el(doc, 'h3', 'gas-card-title', t('power.grid-title'));
+  const gridStatus = el(doc, 'div', 'gas-status', t('power.market-loading'));
+  gridStatus.dataset.state = 'loading';
+  const gridHead = el(doc, 'div', 'gas-headline');
+  const gridValue = el(doc, 'span', 'gas-headline-value', '—');
+  const gridLabel = el(doc, 'span', 'gas-headline-label', '');
+  const gridSub = el(doc, 'span', 'gas-headline-sub', '');
+  gridHead.append(gridValue, gridLabel, gridSub);
+  const gridLegend = el(doc, 'div', 'gas-legend');
+  const exchangeTitle = el(doc, 'h4', 'gas-flow-group-title', t('power.exchange-title'));
+  const exchangeNet = el(doc, 'div', 'gas-laic', '');
+  const exchangeRows = el(doc, 'div', 'gas-flows');
+  const gridNote = el(doc, 'div', 'gas-note', t('power.grid-note'));
+  const gridSource = el(doc, 'div', 'gas-source', '');
+  gridCard.append(gridTitle, gridStatus, gridHead, gridLegend, exchangeTitle, exchangeNet, exchangeRows, gridNote, gridSource);
+  if (powerBody) powerBody.append(powerCard, gridCard);
+
   // ── render ──────────────────────────────────────────────────────
   /**
    * Spoločné kreslenie časového grafu do plátna karty (ceny, zásobníky, LNG).
@@ -269,20 +314,22 @@ export function installGasPanel({
     return { ctx, width };
   }
 
-  function paintSeries(target, series, { format = (v) => String(v), withYear = true } = {}) {
+  function paintSeries(target, series, { format = (v) => String(v), withYear = true, labels = null } = {}) {
     const sized = sizedContext(target);
     if (!sized) return;
     const { ctx, width } = sized;
     const lng = language();
     let t0 = Infinity; let t1 = -Infinity; let vMax = -Infinity; let last = null;
     for (const s of series || []) for (const p of s.points) { if (p.t < t0) t0 = p.t; if (p.t > t1) { t1 = p.t; last = p; } if (p.v > vMax) vMax = p.v; }
+    // `labels(t0, t1, last)` = vlastné popisy osi (graf v rámci dňa: miestny čas, nie UTC dátum).
+    const custom = typeof labels === 'function' && Number.isFinite(t0) ? labels(t0, t1, last) : null;
     drawGasChart(ctx, series || [], {
       width,
       height: GAS_CHART_HEIGHT_PX,
       maxLabel: Number.isFinite(vMax) ? t('gas.max-label', { v: format(vMax) }) : '',
-      lastLabel: last ? t('gas.last-label', { v: format(last.v) }) : '',
-      startLabel: Number.isFinite(t0) ? formatDateLabel(isoDay(t0), lng, { year: withYear }) : '',
-      endLabel: Number.isFinite(t1) ? formatDateLabel(isoDay(t1), lng, { year: withYear }) : '',
+      lastLabel: custom ? custom.last : (last ? t('gas.last-label', { v: format(last.v) }) : ''),
+      startLabel: custom ? custom.start : (Number.isFinite(t0) ? formatDateLabel(isoDay(t0), lng, { year: withYear }) : ''),
+      endLabel: custom ? custom.end : (Number.isFinite(t1) ? formatDateLabel(isoDay(t1), lng, { year: withYear }) : ''),
     });
   }
 
@@ -715,9 +762,105 @@ export function installGasPanel({
     }
   }
 
+  // ── elektrina ───────────────────────────────────────────────────
+  let powerPayload = null; let powerModel = null; let powerToken = 0; let powerError = null;
+
+  function renderPower() {
+    if (!powerPayload || !powerBody) return;
+    const lng = language();
+    powerModel = buildPowerMarketModel(powerPayload, { lang: lng, translate: t, nowMs: nowMs(), regionName: (iso) => regionDisplayName(iso, lng) });
+    if (!powerModel.ok) {
+      powerStatus.textContent = t('power.market-unavailable');
+      powerStatus.dataset.state = 'error';
+      gridStatus.textContent = t('power.market-unavailable');
+      gridStatus.dataset.state = 'error';
+      return;
+    }
+    const h = powerModel.headline;
+    powerValue.textContent = h.text;
+    powerDelta.textContent = h.dir === 'up' ? t('power.market-above-avg') : (h.dir === 'down' ? t('power.market-below-avg') : '');
+    powerDelta.dataset.dir = h.dir;
+    powerLabel.textContent = t('power.market-now-label', { interval: h.intervalText });
+    powerSub.textContent = [h.avgText, h.rangeText, h.tomorrowText].filter(Boolean).join(' · ');
+    powerZones.textContent = '';
+    for (const z of powerModel.zones) {
+      const cell = el(doc, 'span', 'gas-subrow');
+      cell.dataset.key = z.key;
+      cell.dataset.level = z.level;
+      cell.append(el(doc, 'span', 'gas-subrow-label', z.name), el(doc, 'span', 'gas-subrow-value', z.nowText));
+      const tip = [z.avgText, z.tomorrowText].filter(Boolean).join(' · ');
+      if (tip) cell.setAttribute('title', tip);
+      powerZones.appendChild(cell);
+    }
+    powerLaic.textContent = h.laicText;
+    powerNote.textContent = [powerModel.note, powerModel.licenseText].filter(Boolean).join(' ');
+    powerSource.textContent = powerModel.sourceLine;
+    const fetched = powerModel.freshness.fetchedAt ? new Date(powerModel.freshness.fetchedAt).toLocaleTimeString(lng === 'sk' ? 'sk-SK' : 'en-GB', { hour: '2-digit', minute: '2-digit' }) : '—';
+    powerStatus.textContent = powerModel.freshness.stale ? t('power.market-stale') : t('power.market-updated', { time: fetched });
+    powerStatus.dataset.state = powerModel.freshness.stale ? 'stale' : 'ok';
+    // Os v miestnom čase trhu („7. 11. 00:00" – „7. 11. 23:45"); popis vpravo hore = cena TERAZ,
+    // nie posledný bod radu (23:45 by sa čítalo ako aktuálna cena).
+    const stamp = (ms) => `${formatDateLabel(marketDay(ms), lng, { year: false })} ${new Intl.DateTimeFormat(lng === 'sk' ? 'sk-SK' : 'en-GB', { hour: '2-digit', minute: '2-digit', timeZone: POWER_MARKET_TZ }).format(new Date(ms))}`;
+    paintSeries(powerCanvas, powerModel.chart.series, {
+      format: (v) => formatEurMwhPower(v, lng),
+      labels: (t0, t1) => ({ start: stamp(t0), end: stamp(t1), last: h.value !== null ? t('power.market-chart-now', { v: h.text }) : '' }),
+    });
+
+    const mix = powerModel.mix;
+    if (mix) {
+      gridValue.textContent = mix.totalValueText;
+      gridLabel.textContent = t('power.grid-label', { time: mix.timeText });
+      gridSub.textContent = [mix.loadText, mix.renewText, mix.tradeText].filter(Boolean).join(' · ');
+      renderLegend(gridLegend, mix.rows);
+      gridStatus.textContent = mix.stale ? t('power.grid-stale', { time: mix.timeText }) : t('power.grid-updated', { time: mix.timeText });
+      gridStatus.dataset.state = mix.stale ? 'stale' : 'ok';
+    } else {
+      gridValue.textContent = '—';
+      gridLabel.textContent = '';
+      gridSub.textContent = '';
+      gridLegend.textContent = '';
+      gridStatus.textContent = t('power.grid-unavailable');
+      gridStatus.dataset.state = 'error';
+    }
+    const ex = powerModel.exchange;
+    exchangeRows.textContent = '';
+    exchangeNet.textContent = ex ? [ex.netText, ex.timeText].filter(Boolean).join(' · ') : t('power.exchange-unavailable');
+    for (const row of ex?.rows || []) {
+      const r = el(doc, 'div', 'gas-flow-row');
+      r.dataset.level = row.level;
+      r.dataset.id = row.iso;
+      const head = el(doc, 'div', 'gas-flow-head');
+      head.append(el(doc, 'span', 'gas-flow-route', `${row.routeText} · ${row.name}`), el(doc, 'span', 'gas-flow-value', row.text));
+      r.appendChild(head);
+      exchangeRows.appendChild(r);
+    }
+    gridSource.textContent = powerModel.sourceLine;
+  }
+
+  async function loadPower() {
+    if (!powerBody || typeof api.power !== 'function') return;
+    const token = ++powerToken;
+    try {
+      const fresh = await api.power();
+      if (token !== powerToken) return;
+      powerPayload = fresh;
+      powerError = null;
+      renderPower();
+    } catch (error) {
+      if (token !== powerToken) return;
+      powerError = error?.message || String(error);
+      if (!powerPayload) {
+        powerStatus.textContent = t('power.market-unavailable');
+        powerStatus.dataset.state = 'error';
+        gridStatus.textContent = t('power.market-unavailable');
+        gridStatus.dataset.state = 'error';
+      }
+    }
+  }
+
   function load() {
     ensureStarted({ load: false });
-    return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng(), loadImports(), loadFleet()]);
+    return Promise.all([loadPrices(), loadFlows(), loadStorage(), loadLng(), loadImports(), loadFleet(), loadPower()]);
   }
 
   // Prvé sťahovanie a periodická obnova až keď panel vidno (2026-10-31, odľahčený štart: šesť zdrojov vrátane
@@ -727,6 +870,7 @@ export function installGasPanel({
   let started = false;
   let timer = null;
   let fleetTimer = null;
+  let powerTimer = null;
   let visibilityWatch = null;
   function ensureStarted({ load: loadNow = true } = {}) {
     if (started) return;
@@ -735,6 +879,8 @@ export function installGasPanel({
     timer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void load(); }, refreshMs) : null;
     // Lode sa hýbu: LNG tankery sa obnovujú z úložiska servera každých 10 min.
     fleetTimer = refreshMs > 0 && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { void loadFleet(); }, LNG_FLEET_REFRESH_MS) : null;
+    // Cena elektriny sa mení každých 15 min, rad na celý deň už má — stačí prekresliť (bez dopytu).
+    powerTimer = refreshMs > 0 && powerBody && typeof setIntervalImpl === 'function' ? setIntervalImpl(() => { renderPower(); }, POWER_RERENDER_MS) : null;
     if (loadNow) void load();
   }
   const Observer = doc?.defaultView?.IntersectionObserver ?? globalThis.IntersectionObserver;
@@ -784,6 +930,11 @@ export function installGasPanel({
           loaded: Boolean(fleetPayload), ok: Boolean(fleetModel?.ok), state: fleetModel?.state ?? null, status: fleetStatus.dataset.state, lastError: fleetError,
           count: fleetModel?.rows?.length ?? 0, headline: fleetModel?.headline?.countText ?? null, enableVisible: !fleetEnable.hidden,
         },
+        power: {
+          mounted: Boolean(powerBody), loaded: Boolean(powerPayload), ok: Boolean(powerModel?.ok), status: powerStatus.dataset.state, gridStatus: gridStatus.dataset.state, lastError: powerError,
+          headline: powerModel?.headline?.text ?? null, zones: powerModel?.zones?.length ?? 0, mixRows: powerModel?.mix?.rows?.length ?? 0, exchangeRows: powerModel?.exchange?.rows?.length ?? 0,
+          series: powerModel?.chart?.series?.map((s) => s.key) ?? [],
+        },
       };
     },
     destroy() {
@@ -791,6 +942,7 @@ export function installGasPanel({
       if (typeof clearIntervalImpl !== 'function') return;
       if (timer !== null) clearIntervalImpl(timer);
       if (fleetTimer !== null) clearIntervalImpl(fleetTimer);
+      if (powerTimer !== null) clearIntervalImpl(powerTimer);
     },
   };
 }

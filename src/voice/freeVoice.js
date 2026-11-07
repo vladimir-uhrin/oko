@@ -282,6 +282,27 @@ export function createFreeVoice({ ui, run, dataManager = null, translate = (k) =
         try { dataManager.setEnabled(layerId, intent.on, { origin: 'user' }); } catch { /* */ }
         reply = translate(intent.on ? 'voice.free.layer-on' : 'voice.free.layer-off', { name: label }); break;
       }
+      case 'layer-option': {
+        // Čip vrstvy hlasom (2026-11-07): to isté ako klik na čip — setLayerParams. Ak by po
+        // vypnutí neostal zapnutý žiadny čip, vrstva sa vypne celá a čipy sa vrátia na „všetko",
+        // aby ďalšie zapnutie nekreslilo prázdnu mapu.
+        if (!dataManager) { reply = translate('voice.free.not-found', { q: intent.name }); break; }
+        const current = dataManager.layers?.get?.(intent.layerId)?.module?.getParams?.() || {};
+        const next = { ...current, ...intent.params };
+        const keys = Object.keys(next);
+        const allOff = keys.length > 0 && keys.every((k) => next[k] === false);
+        const what = translate(intent.labelKey);
+        try {
+          if (allOff) {
+            dataManager.setEnabled(intent.layerId, false, { origin: 'user' });
+            dataManager.setLayerParams(intent.layerId, Object.fromEntries(keys.map((k) => [k, true])), { origin: 'user' });
+          } else {
+            if (intent.on) dataManager.setEnabled(intent.layerId, true, { origin: 'user' });
+            dataManager.setLayerParams(intent.layerId, intent.params, { origin: 'user' });
+          }
+        } catch { /* */ }
+        reply = translate(allOff ? 'voice.free.layer-off' : `voice.free.layer-option-${intent.mode}`, { name: what }); break;
+      }
       case 'go':
       default: {
         const query = intent.query;

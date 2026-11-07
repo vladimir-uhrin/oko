@@ -320,6 +320,14 @@ export const DATA_CREDITS = [
       '(<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a>, via the Overpass API)',
   },
   {
+    key: 'power-market',
+    html:
+      'Electricity day-ahead prices (SK, CZ, HU, AT, PL, DE-LU) and Slovak generation by source: ' +
+      '<a href="https://www.energy-charts.info/" target="_blank" rel="noopener">Energy-Charts.info</a> (Fraunhofer ISE), data ENTSO-E and EPEX SPOT — ' +
+      'generation and the AT/CZ/HU/DE-LU prices <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a> ' +
+      '(prices via Bundesnetzagentur | SMARD.de); SK prices are offered by the source for private use only — the card says so',
+  },
+  {
     key: 'power-flows',
     html:
       'Cross-border physical electricity flows (15-minute values per border, not per line): ' +

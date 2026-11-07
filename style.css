@@ -7421,6 +7421,8 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 /* #oil-panel (order 32) zanikol 2026-10-11 — ceny ropy sú časťou #gas-panel (Ropa a plyn). */
 .energy-subhead { margin: 8px 0 4px; font: 9px/14px var(--font-mono, monospace); letter-spacing: 3px; text-transform: uppercase; color: var(--text-dim); opacity: 0.8; }
 .energy-subhead + .oil-body { margin-bottom: 6px; }
+.energy-subhead + .power-body { margin-bottom: 6px; }
+.power-body .gas-subrow[data-level="nodata"] .gas-subrow-value { color: var(--text-dim); }
 /* Prelety/Scény (2026-10-11, preusporiadanie): tri výbery preletov (úžiny, smery frontu, dejiská)
    patria ku KONFLIKTOM; réžia scén v tom istom paneli je .oko-owner-only. */
 #left-panel-stack > #scene-panel { order: 23; }
@@ -7624,6 +7626,17 @@ body.oko-volby-archived #left-panel-stack > .lane-zone[data-lane-zone="volby"]:h
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
+
+/* Energia (2026-11-07): ropa, ELEKTRINA a plyn sa v rozbalenom paneli rolujú spolu ako v ostatných
+   paneloch. Predtým rolovalo len .gas-body a nová časť [data-power-body] mimo neho pretiekla cez
+   okraj panelu na História/Kamery/Rádio (nájdené na snímke). Na telefóne panel vo výsuve rastie
+   do výšky a roluje výsuv — tam sa nič nemení. */
+#left-panel-stack > #gas-panel:not(.collapsed) .gas-panel-inner {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+#left-panel-stack > #gas-panel:not(.collapsed) .gas-body,
+#left-panel-stack > #gas-panel:not(.collapsed) .power-body { flex: 0 0 auto; overflow: visible; }
 
 #left-panel-stack > [data-panel-id]:not(.collapsed) .panel-header {
   position: sticky;
@@ -11995,6 +12008,8 @@ body.recording-mode .state-strip {
  * measured 423px instead of ~50px, and pushed ZÁLIV off the bottom of the lane.
  */
 #gas-panel.collapsed .oil-body, #gas-panel.collapsed .energy-subhead { display: none; }
+/* Elektrina (2026-11-07): časť [data-power-body] sa so zbaleným panelom skrýva rovnako ako ropa. */
+#gas-panel.collapsed .power-body { display: none; }
 /* BLÍZKY VÝCHOD (2026-09-26) zdedil riadok po ZÁLIV-e (#gulf-panel zanikol). */
 #mideast-panel.collapsed .mideast-body { display: none; }
 #ukraine-panel.collapsed .ukraine-body { display: none; }

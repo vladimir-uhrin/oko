@@ -46,6 +46,8 @@ export const PIPELINE_KINDS = Object.freeze(['gas', 'oil']);
 export const PIPELINE_HOVER_DELAY_MS = 80;
 /** Hover: pick obdĺžnik v px — 1,4 px čiara sa presným 3×3 pickom netrafí. */
 export const PIPELINE_HOVER_PICK_PX = 7;
+/** Ťuknutie prstom: väčší pick obdĺžnik (prst je menej presný než kurzor). */
+export const PIPELINE_TOUCH_PICK_PX = 21;
 /** Živé toky ENTSOG pre hover: proxy má cache 1 h, klient si drží 30 min. */
 export const PIPELINE_FLOWS_TTL_MS = 30 * 60 * 1000;
 
@@ -253,6 +255,10 @@ export function createGasPipelinesLayer({
   let _leaveTimer = null;
   let _pointer = null;
   let _hoverListeners = null;
+  /** Posledný typ ukazovateľa na plátne (pointerdown): 'touch' = telefón/tablet. */
+  let _lastPointerType = 'mouse';
+  /** Výber otvorený ťuknutím ukazuje plnú kartu namiesto malej v overlay. */
+  let _touchCard = false;
   let _removeCameraHover = null;
   // Živé toky ENTSOG pre hover karty — jedna odpoveď proxy pre všetky rúry.
   let _flows = null;
@@ -512,7 +518,8 @@ export function createGasPipelinesLayer({
 
   function publishCard() {
     const record = _selectedId ? _features.get(_selectedId) : null;
-    if (!_enabled || !record) {
+    // Ťuknutie na telefóne ukazuje plnú kartu (showTouchCard) — malá karta by ju duplikovala.
+    if (!_enabled || !record || _touchCard) {
       overlayHost.clearSource(profile.id);
       return;
     }
@@ -528,6 +535,7 @@ export function createGasPipelinesLayer({
   function selectPipeline(featureId) {
     const next = featureId ? _features.get(featureId) : null;
     _selectedId = next ? featureId : null;
+    if (!next && _touchCard) { _touchCard = false; clearHover(); }
     renderSelection(next);
     if (next) {
       if (typeof window !== 'undefined') {
@@ -808,6 +816,28 @@ export function createGasPipelinesLayer({
     return { ...metas[0], snapshot: dates[0] ?? null, lengthKm: km || null };
   }
 
+  /**
+   * Pick v obdĺžniku okolo bodu: tenká pozemná čiara sa presným 3×3 pickom netrafí
+   * (pasca etapy 3), prst je ešte menej presný než myš (2026-11-07, telefón).
+   */
+  function pickAt(position, sizePx) {
+    try { return _viewer.scene.pick(new Cesium.Cartesian2(position?.x ?? 0, position?.y ?? 0), sizePx, sizePx); } catch { return _viewer.scene.pick(position); }
+  }
+
+  /**
+   * Plná karta po ťuknutí (2026-11-07, telefón): hover na dotykovom displeji
+   * neexistuje, takže živý tok (ENTSOG / Energy-Charts) bol na telefóne
+   * nedostupný — malá karta v overlay ho nemá. Ťuknutie preto otvorí tú istú
+   * kartu ako prejdenie myšou, pri mieste ťuknutia; malá karta sa vtedy nekreslí.
+   */
+  function showTouchCard(record, position) {
+    if (!_hover || !record) return;
+    const rect = _viewer?.scene?.canvas?.getBoundingClientRect?.() || { left: 0, top: 0 };
+    const at = { x: (rect.left || 0) + (position?.x || 0), y: (rect.top || 0) + (position?.y || 0) };
+    const flowIds = _hover.show(record.feature, at, { group: groupSummaryOf(record.feature.id) });
+    if (flowIds.length) void loadFlows().then((payload) => { _hover?.setFlows(record.feature, payload); });
+  }
+
   function installClick() {
     if (_clickHandler || !_viewer?.scene?.canvas) return;
     _clickHandler = handlerFactory(_viewer.scene.canvas);
@@ -815,11 +845,15 @@ export function createGasPipelinesLayer({
       if (!_enabled) return;
       const hit = overlayHost.hitTest?.(click.position?.x, click.position?.y, { sourceId: profile.id });
       if (hit?.entryId) { selectPipeline(null); return; }
-      const picked = _viewer.scene.pick(click.position);
+      const touch = _lastPointerType === 'touch';
+      const picked = pickAt(click.position, touch ? PIPELINE_TOUCH_PICK_PX : PIPELINE_HOVER_PICK_PX);
       const entity = picked?.id;
       if (entity?.__gasPipeline && entity.__pipelineLayer === profile.id) {
         _viewer.selectedEntity = entity;
-        selectPipeline(entity.__gasPipeline === _selectedId ? null : entity.__gasPipeline);
+        const next = entity.__gasPipeline === _selectedId ? null : entity.__gasPipeline;
+        _touchCard = touch && Boolean(next) && Boolean(_hover);
+        selectPipeline(next);
+        if (_touchCard) showTouchCard(_features.get(next), click.position);
         return;
       }
       if (!picked && _selectedId) selectPipeline(null);
@@ -874,7 +908,9 @@ export function createGasPipelinesLayer({
     if (!_hoverTimer) _hoverTimer = setTimer(hoverAtPointer, PIPELINE_HOVER_DELAY_MS);
   }
 
-  function leaveHover() {
+  function leaveHover(e) {
+    // Dotyk: pointerleave chodí po každom zdvihnutí prsta — karta otvorená ťuknutím musí ostať.
+    if (e?.pointerType === 'touch') return;
     if (_leaveTimer) clearTimer(_leaveTimer);
     _leaveTimer = setTimer(() => { _leaveTimer = null; if (!_hover?.isHovered()) clearHover(); }, 220);
   }
@@ -884,7 +920,8 @@ export function createGasPipelinesLayer({
     if (_hoverListeners || !canvas?.addEventListener) return;
     // Dátum snímku do päty karty (pravidlo 2: statický snímok sa hlási dátumom).
     _hover = _hover || hoverFactory({ translate, lang, snapshotDate: () => combinedMeta()?.snapshot ?? null });
-    _hoverListeners = { pointermove: moveHover, pointerleave: leaveHover, pointerdown: clearHover };
+    // pointerdown si pamätá typ ukazovateľa: dotyk → ťuknutie otvorí plnú kartu (showTouchCard).
+    _hoverListeners = { pointermove: moveHover, pointerleave: leaveHover, pointerdown: (e) => { _lastPointerType = e?.pointerType || 'mouse'; clearHover(); } };
     for (const [type, fn] of Object.entries(_hoverListeners)) canvas.addEventListener(type, fn);
     _removeCameraHover = _viewer?.camera?.moveStart?.addEventListener?.(clearHover) || null;
   }

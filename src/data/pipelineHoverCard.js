@@ -159,7 +159,9 @@ export function createPipelineHoverCard({
     if (result.citation) el('p', result.citation, flowRoot, 'pipeline-hover-note');
   }
   root.addEventListener('pointerenter', () => { hovered = true; });
-  root.addEventListener('pointerleave', () => { hovered = false; hide(); });
+  // Dotyk (2026-11-07): pointerleave prichádza po každom ťuknutí do karty (rolovanie, odkaz) —
+  // kartu zavrie × alebo ťuknutie do mapy, nie zdvihnutie prsta.
+  root.addEventListener('pointerleave', (e) => { hovered = false; if (e?.pointerType === 'touch') return; hide(); });
   function keydown(e) { if (e.key === 'Escape') hide(); }
   doc.addEventListener?.('keydown', keydown);
   return {

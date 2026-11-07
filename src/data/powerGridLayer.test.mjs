@@ -259,3 +259,52 @@ test('úsek v jednej krajine si berie hranicu svojej trasy (Győr–Bős leží 
   assert.match(text(doc.body.children[0]), /1,6 GW/);
   assert.deepEqual(card.show({ ...seg, id: 'x' }, { x: 1, y: 1 }), [], 'bez trasy ostáva „bez toku"');
 });
+
+test('telefón: ťuknutie otvorí plnú kartu s tokom pri prste (bez malej karty), zdvihnutie prsta ju nezavrie, ťuknutie znova zbalí; myš po starom', async () => {
+  const pick = { value: null };
+  const handlers = [];
+  const listeners = {};
+  const canvas = { addEventListener(type, fn) { listeners[type] = fn; }, removeEventListener(type) { delete listeners[type]; }, getBoundingClientRect: () => ({ left: 10, top: 20 }) };
+  const viewer = { dataSources: { added: [], add(ds) { this.added.push(ds); }, remove() {} }, scene: { canvas, pick: () => pick.value, requestRender() {} }, camera: {}, selectedEntity: undefined };
+  const shown = [];
+  let hidden = 0;
+  const flowsSet = [];
+  const hover = { show(f, at) { shown.push([f.id, at]); return ['HU-SK']; }, setFlows(f, p) { flowsSet.push([f.id, Boolean(p)]); return true; }, hide() { hidden += 1; }, destroy() {}, isHovered: () => false };
+  const host = fakeHost();
+  const timers = [];
+  const fetcher = async (url) => (String(url).split('?')[0].endsWith('/meta') ? { ok: true, json: async () => META } : (String(url).includes('/api/power/cells') ? { ok: false, status: 404, json: async () => ({ error: 'no_snapshot' }) } : { ok: true, text: async () => TEXT }));
+  const layer = createPowerGridLayer({
+    fetchImpl: fetcher, dataSourceFactory: fakeDataSource, handlerFactory: () => { const h = fakeHandler(); handlers.push(h); return h; }, overlayHost: host,
+    translate: tKey, lang: () => 'sk', terrainSampler: null, hoverFactory: () => hover, flowsFetcher: async () => ({ pairs: {} }),
+    setTimer: (fn) => { timers.push(fn); return timers.length; }, clearTimer: () => {},
+  });
+  layer.init(viewer);
+  layer.enable();
+  await tick();
+  const ehv = viewer.dataSources.added[0].entities.values[0];
+  // Dotyk
+  listeners.pointerdown({ pointerType: 'touch' });
+  pick.value = { id: ehv };
+  handlers[0].fn({ position: { x: 100, y: 200 } });
+  await tick();
+  assert.equal(layer._getStateForTest().selected, 'osm-way-1');
+  assert.deepEqual(shown, [['osm-way-1', { x: 110, y: 220 }]], 'karta pri prste (súradnice plátna + jeho poloha na stránke)');
+  assert.equal(host.entries, null, 'malá karta sa pri ťuknutí nekreslí');
+  assert.deepEqual(flowsSet, [['osm-way-1', true]], 'tok cez hranicu sa doplní');
+  const hiddenBefore = hidden;
+  listeners.pointerleave({ pointerType: 'touch' });
+  timers.splice(0).filter(Boolean).forEach((fn) => fn());
+  assert.equal(hidden, hiddenBefore, 'zdvihnutie prsta kartu nezavrie');
+  // Ťuknutie znova na to isté vedenie = zbaliť výber aj kartu.
+  listeners.pointerdown({ pointerType: 'touch' });
+  handlers[0].fn({ position: { x: 100, y: 200 } });
+  assert.equal(layer._getStateForTest().selected, null);
+  assert.ok(hidden > hiddenBefore);
+  // Myš: klik = malá karta v overlay, plná karta sa neotvára klikom.
+  listeners.pointerdown({ pointerType: 'mouse' });
+  handlers[0].fn({ position: { x: 100, y: 200 } });
+  assert.equal(layer._getStateForTest().selected, 'osm-way-1');
+  assert.equal(host.entries?.[0]?.id, 'local-energy:osm-way-1', 'myš: malá karta');
+  assert.equal(shown.length, 1, 'klik myšou neotvára plnú kartu (tú dáva prejdenie myšou)');
+  layer.disable();
+});

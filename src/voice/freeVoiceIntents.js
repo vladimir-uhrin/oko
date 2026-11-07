@@ -7,7 +7,7 @@
  * scény, miesta). Slovensky aj základná angličtina; diakritika a veľké písmená sú jedno. Čisté funkcie.
  *
  * Zámer: { type, ... } — type ∈ stop-voice | help | zoom | globe | home | stop-tracking | track |
- * layer | command | front | radio | cockpit | camera | describe | go
+ * layer | layer-option | command | front | radio | cockpit | camera | describe | go
  */
 
 /** Zloží diakritiku, malé písmená, bez interpunkcie — „Priblíž, prosím!" → „pribliz prosim". */
@@ -60,9 +60,49 @@ export const LAYER_WORDS = Object.freeze([
   [/\b(kabl|cables?)\w*/, 'telegeography-submarine-cables'],
   [/\b(priehrad|dams?\b)\w*/, 'local-dams'],
   [/\b(datov\w* centr|datacent)\w*/, 'local-datacenters'],
-  [/\b(energetik|elektrar|energy)\w*/, 'local-energy'],
+  // Elektrina (2026-11-07): vrstva local-energy je prenosová sieť ≥ 220 kV Eurázie.
+  [/\b(energetik|elektrar|energy|elektrin|elektrick\w* (siet|vedeni)|vedeni|vysok\w* napat|power (grid|lines?))\w*/, 'local-energy'],
   [/\b(misi|raket|launch)\w*/, 'rocket-launches'],
 ]);
+
+/**
+ * Čipy vrstiev, ktoré človek povie ako samostatnú vec (2026-11-07, backlog potrubí „hlas
+ * neovláda čipy"): látky v potrubiach a napätia v elektrickej sieti. Schéma platených
+ * nástrojov je pinovaná na bajt — bezplatný hlas ide cez setLayerParams ako klik na čip.
+ * [regex, vrstva, voľba]; kľúče volieb musia sedieť s OPTION_GROUPS v layerState.js.
+ */
+export const CHIP_WORDS = Object.freeze([
+  [/\b(ropovod\w*|oil pipelines?)\b/, 'gas-pipelines', 'oil'],
+  [/\b(plynovod\w*|gas pipelines?)\b/, 'gas-pipelines', 'gas'],
+  [/\b(hvdc|jednosmern\w*)\b/, 'local-energy', 'dc'],
+  [/\b(380|400|500|750)\s*(kv|kilovolt\w*)?\b|\bvelmi vysok\w* napat\w*/, 'local-energy', 'ehv'],
+  [/\b(220|330)\s*(kv|kilovolt\w*)?\b/, 'local-energy', 'hv'],
+]);
+/** Všetky čipy vrstvy — „len X" vypne ostatné. */
+export const CHIP_KEYS = Object.freeze({ 'gas-pipelines': ['gas', 'oil'], 'local-energy': ['ehv', 'hv', 'dc'] });
+
+/**
+ * Zámer na čip: „len ropovody" (iba ropa), „vypni ropovody" (ropa preč, plyn ostáva),
+ * „zapni vedenia 400 kV" (vrstva + čip). null = veta čip nemenuje.
+ * @param {string} t zložená veta bez výplňových slov
+ */
+export function chipIntent(t) {
+  const off = OFF.test(t);
+  const rest = (off ? t.replace(OFF, '') : t.replace(ON, '')).trim();
+  const only = /^(len|iba|only|just)\b/.test(rest);
+  const body = rest.replace(/^(len|iba|only|just)\b\s*/, '');
+  for (const [re, layerId, key] of CHIP_WORDS) {
+    if (!re.test(body)) continue;
+    // Holé „plynovody" bez „len"/„vypni" = celá vrstva (ako doteraz) — čip len pri jasnom zámere.
+    if (!off && !only && layerId === 'gas-pipelines' && key === 'gas') return null;
+    const labelKey = layerId === 'gas-pipelines' ? `gas.pipeline-chip-${key}` : `power.chip-${key}`;
+    if (off) return { type: 'layer-option', mode: 'off', layerId, params: { [key]: false }, labelKey, name: body };
+    if (only) return { type: 'layer-option', mode: 'only', on: true, layerId, params: Object.fromEntries(CHIP_KEYS[layerId].map((k) => [k, k === key])), labelKey, name: body };
+    if (ON.test(t)) return { type: 'layer-option', mode: 'on', on: true, layerId, params: { [key]: true }, labelKey, name: body };
+    return null;
+  }
+  return null;
+}
 
 /** ID vrstvy z výrazu (null = treba hľadať inak, napr. v palete). */
 export function layerFromWords(text) {
@@ -144,6 +184,10 @@ export function parseVoiceIntent(heard) {
   if (/^(front|ukaz front|cely front|mapa frontu)$/.test(t)) return { type: 'front', name: 'cely front' };
   const front = /\b([a-z\-]+(?: [a-z\-]+)?) smer\b|\bsmer ([a-z\-]+)/.exec(t);
   if (front) return { type: 'front', name: (front[1] || front[2]).trim() };
+
+  // Čipy vrstiev: „len ropovody", „vypni ropovody", „zapni vedenia 400 kV", „len HVDC".
+  const chip = chipIntent(t);
+  if (chip) return chip;
 
   // Vrstvy
   if (OFF.test(t)) {

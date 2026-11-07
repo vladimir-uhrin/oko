@@ -194,3 +194,41 @@ test('dejisko (etapa 7): „dejisko Gaza" spustí show_theatre a odpoveď menuje
   assert.deepEqual(calls.at(-1), ['show_theatre', { action: 'show', theatreId: 'gaza' }]);
   assert.equal(await v.handleText('dejisko Atlantída'), 'voice.free.not-found:atlantida');
 });
+
+test('čipy hlasom (2026-11-07): „len ropovody", „vypni ropovody", „zapni vedenia 400 kV", „len HVDC"; holé „plynovody" ostáva celou vrstvou', () => {
+  assert.deepEqual(parseVoiceIntent('len ropovody'), { type: 'layer-option', mode: 'only', on: true, layerId: 'gas-pipelines', params: { gas: false, oil: true }, labelKey: 'gas.pipeline-chip-oil', name: 'ropovody' });
+  assert.deepEqual(parseVoiceIntent('Ukáž iba plynovody'), { type: 'layer-option', mode: 'only', on: true, layerId: 'gas-pipelines', params: { gas: true, oil: false }, labelKey: 'gas.pipeline-chip-gas', name: 'plynovody' });
+  assert.deepEqual(parseVoiceIntent('vypni ropovody'), { type: 'layer-option', mode: 'off', layerId: 'gas-pipelines', params: { oil: false }, labelKey: 'gas.pipeline-chip-oil', name: 'ropovody' });
+  assert.deepEqual(parseVoiceIntent('zapni ropovody'), { type: 'layer-option', mode: 'on', on: true, layerId: 'gas-pipelines', params: { oil: true }, labelKey: 'gas.pipeline-chip-oil', name: 'ropovody' });
+  assert.deepEqual(parseVoiceIntent('zapni vedenia 400 kV'), { type: 'layer-option', mode: 'on', on: true, layerId: 'local-energy', params: { ehv: true }, labelKey: 'power.chip-ehv', name: 'vedenia 400 kv' });
+  assert.deepEqual(parseVoiceIntent('len HVDC'), { type: 'layer-option', mode: 'only', on: true, layerId: 'local-energy', params: { ehv: false, hv: false, dc: true }, labelKey: 'power.chip-dc', name: 'hvdc' });
+  assert.deepEqual(parseVoiceIntent('vypni 220 kV'), { type: 'layer-option', mode: 'off', layerId: 'local-energy', params: { hv: false }, labelKey: 'power.chip-hv', name: '220 kv' });
+  assert.deepEqual(parseVoiceIntent('zapni plynovody'), { type: 'layer', on: true, layerId: 'gas-pipelines', name: 'plynovody' }, 'holé plynovody = vrstva ako doteraz');
+  assert.deepEqual(parseVoiceIntent('zapni elektrinu'), { type: 'layer', on: true, layerId: 'local-energy', name: 'elektrinu' });
+  assert.equal(layerFromWords('elektrické vedenia'), 'local-energy');
+  assert.equal(layerFromWords('sieť vysokého napätia'), 'local-energy');
+});
+
+test('vykonanie čipu: setLayerParams ako klik; posledný vypnutý čip vypne vrstvu a vráti čipy na všetko', async () => {
+  const enabled = new Map(); const params = []; let current = { gas: true, oil: true };
+  const v = createFreeVoice({
+    ui: fakeUi(), translate: (k, p) => (p ? `${k}:${Object.values(p).join('|')}` : k),
+    run: async () => ({ ok: true }),
+    dataManager: {
+      setEnabled: (id, on) => enabled.set(id, on),
+      setLayerParams: (id, p) => { params.push([id, p]); current = { ...current, ...p }; return true; },
+      layers: new Map([['gas-pipelines', { module: { getParams: () => ({ ...current }) } }]]),
+    },
+    SpeechRecognitionImpl: null,
+    synth: { cancel() {}, getVoices: () => [], speak() {} },
+    Utterance: function Utterance(text) { this.text = text; },
+  });
+  assert.equal(await v.handleText('len ropovody'), 'voice.free.layer-option-only:gas.pipeline-chip-oil');
+  assert.equal(enabled.get('gas-pipelines'), true);
+  assert.deepEqual(params.at(-1), ['gas-pipelines', { gas: false, oil: true }]);
+  assert.equal(await v.handleText('vypni ropovody'), 'voice.free.layer-off:gas.pipeline-chip-oil', 'po vypnutí ropy by nič neostalo → vrstva preč');
+  assert.equal(enabled.get('gas-pipelines'), false);
+  assert.deepEqual(params.at(-1), ['gas-pipelines', { gas: true, oil: true }], 'čipy späť na všetko pre ďalšie zapnutie');
+  assert.equal(await v.handleText('vypni ropovody'), 'voice.free.layer-option-off:gas.pipeline-chip-oil', 'plyn ostáva → len čip');
+  assert.deepEqual(params.at(-1), ['gas-pipelines', { oil: false }]);
+});

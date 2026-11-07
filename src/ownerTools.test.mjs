@@ -58,7 +58,9 @@ test('zóny stĺpca a sekcie mobilu majú rovnakú logiku: Prelety v Konfliktoch
   assert.doesNotMatch(html, /id="oil-panel"/);
   assert.match(html, /data-i18n="panel\.energy" class="panel-title"[\s\S]*?class="energy-subhead" data-i18n="panel\.oil"[\s\S]*?data-oil-body[\s\S]*?class="energy-subhead" data-i18n="panel\.gas"[\s\S]*?data-gas-body/);
   assert.match(css, /#gas-panel\.collapsed \.oil-body, #gas-panel\.collapsed \.energy-subhead \{ display: none; \}/);
-  assert.match(SK_STRINGS['panel.energy'], /^Ropa a plyn/);
+  // 2026-11-07: pribudla časť ELEKTRINA (cena dňa vopred, výroba SR, výmena so susedmi).
+  assert.match(SK_STRINGS['panel.energy'], /^Ropa, plyn a elektrina/);
+  assert.match(html, /data-oil-body[\s\S]*?data-i18n="panel\.power"[\s\S]*?data-power-body[\s\S]*?data-i18n="panel\.gas"/);
   // 2026-10-15: štýl a druh mapy späť v dolnej lište aj na mobile; od 2026-11-06 ich na telefóne nesie
   // sekcia MAPA spodnej lišty (vlastník: plávajúce POLOHA/ŠTÝL „logicky vymeniť") spolu so Zobrazením.
   assert.deepEqual([...byId.get('display').panelIds], ['control-panel', 'pp-toggles']);
@@ -74,7 +76,7 @@ test('názvy panelov hovoria, čo panel robí (vlastník: „aby to každý poch
     'panel.ukraine': ['UKRAJINA — FRONT', 'UKRAINE — FRONT LINE'],
     'panel.mideast': ['BLÍZKY VÝCHOD — DEJISKÁ', 'MIDDLE EAST — THEATRES'],
     'panel.scenes': ['Prelety kamerou', 'Camera flyovers'],
-    'panel.energy': ['Ropa a plyn — ceny a toky', 'Oil & gas — prices & flows'],
+    'panel.energy': ['Ropa, plyn a elektrina — ceny a toky', 'Oil, gas & power — prices & flows'],
     'panel.history': ['História letov a lodí', 'Flight & ship history'],
     'panel.cctv': ['Dopravné kamery', 'Traffic cameras'],
     'panel.context': ['Rádio a kontakty', 'Radio & contacts'],

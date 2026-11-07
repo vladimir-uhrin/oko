@@ -130,6 +130,7 @@ import { DEEPSTATE_MIRRORS, createDeepStateMirror } from './src/data/deepstateMi
 import { createDeepStateFullMirror } from './src/data/deepstateFullMirror.js';
 import { GAS_FLOW_POINTS, buildFlowsPayload, entsogFlowsUrl, flowWindow } from './src/data/gasFlows.js';
 import { POWER_FLOW_COUNTRIES, POWER_FLOW_MAX_ATTEMPTS, POWER_FLOW_REQUEST_GAP_MS, buildPowerFlowsPayload, energyChartsCbpfUrl, retryAfterMs } from './src/data/powerFlows.js';
+import { POWER_MARKET_ZONES, POWER_MIX_COUNTRY, buildPowerMarketPayload, energyChartsPriceUrl, energyChartsPublicPowerUrl } from './src/data/powerMarket.js';
 import { agsiPlan, alsiPlan, buildGiePayload } from './src/data/gasStorage.js';
 import { buildImportsPayload, eurostatImportsUrl } from './src/data/gasImports.js';
 import { buildLngFleetIndex, buildLngFleetPayload } from './src/data/lngFleet.js';
@@ -5533,7 +5534,6 @@ function powerProxy() {
   const USER_AGENT = 'OKO-power/0.1 (https://github.com/vladouh76) node-fetch';
   const limiter = makeRateLimiter({ windowMs: 60_000, max: 20, globalMax: 60 });
   const inFlight = new Map();
-  const state = { mem: null, lastError: null };
 
   function send(res, status, body, cacheState) {
     res.writeHead(status, {
@@ -5562,18 +5562,20 @@ function powerProxy() {
     if (gzip) stream.pipe(zlib.createGzip({ level: 6 })).pipe(res); else stream.pipe(res);
   };
 
-  async function buildFlows() {
-    const started = Date.now();
-    const results = [];
-    const entries = Object.entries(POWER_FLOW_COUNTRIES);
-    for (let i = 0; i < entries.length; i++) {
-      const [iso, code] = entries[i];
-      if (i) await new Promise((resolve) => setTimeout(resolve, POWER_FLOW_REQUEST_GAP_MS));
-      // 429 nesie Retry-After (1–30 s, overené 2026-11-06) — počkať a skúsiť znova.
-      let result = null;
-      for (let attempt = 1; attempt <= POWER_FLOW_MAX_ATTEMPTS && !result; attempt++) {
+  // Spoločný rad dopytov na Energy-Charts (2026-11-07): toky (36 krajín) aj trh
+  // (6 zón + výroba SR) idú za sebou s rozostupom POWER_FLOW_REQUEST_GAP_MS a po 429
+  // čakajú podľa Retry-After (1–30 s, overené 2026-11-06). Dva súbežné cykly by si
+  // navzájom zbierali 429 — preto jeden rad pre celú proxy.
+  let ecChain = Promise.resolve();
+  let ecLastAt = 0;
+  function ecFetchJson(url) {
+    const run = async () => {
+      const wait = ecLastAt + POWER_FLOW_REQUEST_GAP_MS - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      for (let attempt = 1; attempt <= POWER_FLOW_MAX_ATTEMPTS; attempt++) {
+        ecLastAt = Date.now();
         try {
-          const upstream = await fetch(energyChartsCbpfUrl(code, Date.now()), {
+          const upstream = await fetch(url, {
             signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
             headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
           });
@@ -5581,12 +5583,24 @@ function powerProxy() {
             await new Promise((resolve) => setTimeout(resolve, retryAfterMs(upstream.headers.get('retry-after'))));
             continue;
           }
-          result = upstream.ok ? { iso, json: await upstream.json() } : { iso, json: null, error: 'HTTP ' + upstream.status };
+          return upstream.ok ? { json: await upstream.json(), error: null } : { json: null, error: 'HTTP ' + upstream.status };
         } catch (error) {
-          result = { iso, json: null, error: String(error?.message || error) };
+          return { json: null, error: String(error?.message || error) };
         }
       }
-      results.push(result || { iso, json: null, error: 'HTTP 429' });
+      return { json: null, error: 'HTTP 429' };
+    };
+    const job = ecChain.then(run, run);
+    ecChain = job.catch(() => {});
+    return job;
+  }
+
+  async function buildFlows() {
+    const started = Date.now();
+    const results = [];
+    for (const [iso, code] of Object.entries(POWER_FLOW_COUNTRIES)) {
+      const r = await ecFetchJson(energyChartsCbpfUrl(code, Date.now()));
+      results.push({ iso, json: r.json, error: r.error });
     }
     const payload = buildPowerFlowsPayload(results, { fetchedAt: Date.now() });
     const pairs = Object.keys(payload.pairs).length;
@@ -5594,46 +5608,78 @@ function powerProxy() {
     console.log('[power-proxy] flows: ' + payload.countries.length + ' countries, ' + pairs + ' borders, ' + Object.keys(payload.errors).length + ' failed in ' + (Date.now() - started) + ' ms');
     return { at: Date.now(), body: JSON.stringify(payload) };
   }
-  async function currentFlows() {
-    if (!state.mem) {
+  /**
+   * Trasa s cache na disku a „stale-while-revalidate": do TTL z pamäte, potom
+   * posledná odpoveď hneď a obnova na pozadí (obnova tokov trvá minúty); čaká
+   * len úplne prvý dopyt. Pri chybe obnovy ostáva stará odpoveď do staleMaxMs.
+   */
+  function swrRoute(name, { diskPath, ttlMs, staleMaxMs, build }) {
+    const route = { mem: null, lastError: null };
+    async function current() {
+      if (!route.mem) {
+        try {
+          const parsed = JSON.parse(await fsp.readFile(diskPath, 'utf8'));
+          if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') route.mem = parsed;
+        } catch { /* miss */ }
+      }
+      return route.mem;
+    }
+    async function handler(req, res) {
+      if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
+      const now = Date.now();
+      const mem = await current();
+      if (mem && now - mem.at < ttlMs) { send(res, 200, mem.body, 'HIT'); return; }
+      if (!limiter(clientKey(req))) {
+        if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
+        send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+      }
+      const stale = mem && now - mem.at < staleMaxMs ? mem : null;
+      const request = coalesceProxyRequest(inFlight, name, build);
+      const commit = request.promise.then((fresh) => {
+        route.mem = fresh;
+        route.lastError = null;
+        fsp.mkdir(CACHE_DIR, { recursive: true }).then(() => fsp.writeFile(diskPath, JSON.stringify(fresh), 'utf8')).catch((error) => console.warn('[power-proxy] ' + name + ' cache write failed: ' + (error?.message || error)));
+        return fresh;
+      }, (error) => {
+        route.lastError = String(error?.message || error);
+        if (!request.shared) console.warn('[power-proxy] ' + name + ' refresh failed (' + route.lastError + ')' + (stale ? ' — serving stale cache' : ''));
+        throw error;
+      });
+      if (stale) { commit.catch(() => {}); send(res, 200, stale.body, 'STALE-REVALIDATE'); return; }
       try {
-        const parsed = JSON.parse(await fsp.readFile(FLOWS_PATH, 'utf8'));
-        if (Number.isFinite(parsed?.at) && typeof parsed?.body === 'string') state.mem = parsed;
-      } catch { /* miss */ }
+        const fresh = await commit;
+        send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
+      } catch {
+        send(res, 502, JSON.stringify({ error: 'upstream', detail: route.lastError }), 'NONE');
+      }
     }
-    return state.mem;
+    return { handler, current, route };
   }
-  async function flowsHandler(req, res) {
-    if (req.method !== 'GET') { send(res, 405, JSON.stringify({ error: 'Method Not Allowed' }), 'NONE'); return; }
-    const now = Date.now();
-    const mem = await currentFlows();
-    if (mem && now - mem.at < FLOWS_TTL_MS) { send(res, 200, mem.body, 'HIT'); return; }
-    if (!limiter(clientKey(req))) {
-      if (mem) { send(res, 200, mem.body, 'STALE-RATELIMIT'); return; }
-      send(res, 429, JSON.stringify({ error: 'rate_limited' }), 'NONE'); return;
+  // Toky cez hranice: obnova ~4–6 min (36 krajín × 6 s + čakanie po 429).
+  const flowsRoute = swrRoute('flows', { diskPath: FLOWS_PATH, ttlMs: FLOWS_TTL_MS, staleMaxMs: FLOWS_STALE_MAX_MS, build: buildFlows });
+  const flowsHandler = flowsRoute.handler;
+
+  // Trh s elektrinou (karta ELEKTRINA, 2026-11-07): ceny dňa vopred pre SK a susedov
+  // (dnes + zajtra po aukcii), výroba SR podľa zdroja a bilancia hraníc SR z cache
+  // tokov (bez ďalšieho dopytu). 7 dopytov za hodinu cez spoločný rad.
+  const MARKET_PATH = path.join(CACHE_DIR, 'market.json');
+  async function buildMarket() {
+    const started = Date.now();
+    const prices = [];
+    for (const { bzn } of POWER_MARKET_ZONES) {
+      const r = await ecFetchJson(energyChartsPriceUrl(bzn, Date.now()));
+      prices.push({ bzn, json: r.json, error: r.error });
     }
-    const stale = mem && now - mem.at < FLOWS_STALE_MAX_MS ? mem : null;
-    // Obnova trvá ~4–6 min (36 krajín × 6 s + čakanie po 429). S cache na disku sa servíruje
-    // posledná odpoveď hneď a obnova beží na pozadí; čaká len úplne prvý dopyt.
-    const request = coalesceProxyRequest(inFlight, 'flows', buildFlows);
-    const commit = request.promise.then((fresh) => {
-      state.mem = fresh;
-      state.lastError = null;
-      fsp.mkdir(CACHE_DIR, { recursive: true }).then(() => fsp.writeFile(FLOWS_PATH, JSON.stringify(fresh), 'utf8')).catch((error) => console.warn('[power-proxy] flows cache write failed: ' + (error?.message || error)));
-      return fresh;
-    }, (error) => {
-      state.lastError = String(error?.message || error);
-      if (!request.shared) console.warn('[power-proxy] flows refresh failed (' + state.lastError + ')' + (stale ? ' — serving stale cache' : ''));
-      throw error;
-    });
-    if (stale) { commit.catch(() => {}); send(res, 200, stale.body, 'STALE-REVALIDATE'); return; }
-    try {
-      const fresh = await commit;
-      send(res, 200, fresh.body, request.shared ? 'INFLIGHT' : 'MISS');
-    } catch {
-      send(res, 502, JSON.stringify({ error: 'upstream', detail: state.lastError }), 'NONE');
-    }
+    const mix = await ecFetchJson(energyChartsPublicPowerUrl(POWER_MIX_COUNTRY.code, Date.now()));
+    let flows = null;
+    try { const entry = await flowsRoute.current(); flows = entry ? JSON.parse(entry.body) : null; } catch { flows = null; }
+    const payload = buildPowerMarketPayload({ prices, mix, flows }, { fetchedAt: Date.now() });
+    const okZones = payload.zones.filter((z) => z.points.length).length;
+    if (!okZones) throw new Error('Energy-Charts returned no day-ahead prices (' + prices.map((p) => p.bzn + ':' + (p.error || 'empty')).join(', ') + ')');
+    console.log('[power-proxy] market: ' + okZones + '/' + payload.zones.length + ' zones, mix ' + payload.mix.rows.length + ' rows' + (payload.mix.error ? ' (' + payload.mix.error + ')' : '') + ', ' + payload.borders.length + ' SK borders in ' + (Date.now() - started) + ' ms');
+    return { at: Date.now(), body: JSON.stringify(payload) };
   }
+  const marketRoute = swrRoute('market', { diskPath: MARKET_PATH, ttlMs: 60 * 60_000, staleMaxMs: 2 * 24 * 60 * 60_000, build: buildMarket });
   // Bunky 5° × 5° (2026-11-06): snímok Eurázie má 231 k úsekov / 119 MB — na jedno
   // načítanie priveľký. Rozdelí ho už build (scripts/build-power-lines.mjs →
   // .gev-cache/power/cells/<id>.geojsonl + index.json); server len streamuje súbory
@@ -5665,6 +5711,7 @@ function powerProxy() {
     middlewares.use('/api/power/lines/meta', linesFile(LINES_META_PATH, 'application/json; charset=utf-8'));
     middlewares.use('/api/power/lines', linesFile(LINES_PATH, 'application/x-ndjson; charset=utf-8'));
     middlewares.use('/api/power/flows', flowsHandler);
+    middlewares.use('/api/power/market', marketRoute.handler);
   }
   return {
     name: 'power-proxy',
