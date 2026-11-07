@@ -175,6 +175,25 @@ export function rankCandidates(cands, { seats = 1 } = {}) {
   }));
 }
 
+/**
+ * Konečné výsledky bez označenia zvolených: prvých `seats` kandidátov podľa hlasov je zvolených (`elected`,
+ * `electedDerived: true`, `leads: false`). Nič nemení, keď už niekto je označený zvolený (ŠÚ SR), keď nikto nemá
+ * hlasy, alebo keď na hranici miest je zhoda hlasov (o tom rozhoduje žreb — neodhadujeme). Vzdaní sa preskočia. Pure.
+ * @param {Array<object>} list zoradené riadky z rankCandidates (+ joinCandidate)
+ * @param {number} seats
+ */
+export function markElectedByVotes(list, seats = 1) {
+  if (!Array.isArray(list) || !list.length) return list || [];
+  if (list.some((c) => c?.elected)) return list;
+  const eligible = list.filter((c) => !c?.withdrawn).sort((a, b) => (b.votes || 0) - (a.votes || 0));
+  const n = Math.max(1, Math.floor(Number(seats) || 1));
+  if (eligible.length <= n) {
+    if (!eligible.some((c) => (c.votes || 0) > 0)) return list;
+  } else if ((eligible[n - 1].votes || 0) === (eligible[n].votes || 0)) return list; // zhoda na hranici = žreb
+  const winners = new Set(eligible.slice(0, n).filter((c) => (c.votes || 0) > 0));
+  return list.map((c) => (winners.has(c) ? { ...c, elected: true, electedDerived: true, leads: false } : { ...c, leads: false }));
+}
+
 /** Účasť z okrskových riadkov: skupina → { registered, voted, okrsky }. Pure. */
 export function aggregateTurnout(records, columns, groupKey) {
   const groups = new Map();
@@ -331,7 +350,17 @@ export function buildResults(tables, model, { generatedAt = Date.now() } = {}) {
     return out;
   };
   const obceOut = new Map([...obce].map(([code, e]) => [code, finish(e)]));
-  const krajeOut = new Map([...kraje].map(([code, e]) => [code, finish(e)]));
+  // Kraj so všetkými okrskami: ŠÚ SR v JSON predsedov ani župných poslancov neoznačil ako zvolených (2026-10-31),
+  // takže panel ostal pri „VEDIE". Zákon č. 180/2014 Z. z.: predsedu aj poslancov VÚC volí jedno kolo, zvolení sú
+  // kandidáti s najväčším počtom platných hlasov → po konečných výsledkoch ich odvodíme (`electedDerived`).
+  const krajeOut = new Map([...kraje].map(([code, e]) => {
+    const out = finish(e);
+    if (out.final) {
+      out.predseda = markElectedByVotes(out.predseda, 1);
+      out.obvody = (out.obvody || []).map((o) => ({ ...o, kandidati: markElectedByVotes(o.kandidati, o.seats || 1) }));
+    }
+    return [code, out];
+  }));
   const okrskyTotal = (model?.obce || []).filter((o) => !CITY_CODES.has(o.code)).reduce((s, o) => s + (o.okrsky || 0), 0) || null;
   let okrskyDone = 0; let registered = 0; let voted = 0; let obceFinal = 0;
   for (const e of obceOut.values()) { if (CITY_CODES.has(e.code)) continue; okrskyDone += e.okrskyDone; if (e.final) obceFinal += 1; if (e.ucast) { registered += e.ucast.registered; voted += e.ucast.voted; } }

@@ -216,3 +216,33 @@ test('podiel z ŠÚ SR pri súhrnnej tabuľke (poslanci: z hlasovacích lístkov
   const many = aggregateCandidates([['501891', '17', '100', '50', '1'], ['501891', '17', '100', '40', '2'], ['501891', '1', '200', '60', '1']], { ...cols, okrsok: 4 }, (r) => r[0]);
   assert.deepEqual(rankCandidates(many.get('501891').cands).map((c) => [c.n, c.pct]), [[1, 50], [17, 50]], 'viac okrskov → podiel sa prepočíta');
 });
+
+test('markElectedByVotes (2026-11-07): konečné výsledky bez značky ŠÚ SR → zvolení podľa hlasov, odvodené; zhoda na hranici a hotová značka nič nemenia', async () => {
+  const { markElectedByVotes } = await import('./volbyResults.js');
+  const row = (n, votes, extra = {}) => ({ n, votes, rank: 0, elected: false, withdrawn: false, leads: false, ...extra });
+  const one = markElectedByVotes([row(9, 700, { leads: true }), row(8, 600)], 1);
+  assert.deepEqual(one.map((c) => [c.n, c.elected, c.electedDerived ?? false, c.leads]), [[9, true, true, false], [8, false, false, false]], 'predseda: víťaz ZVOLENÝ, nikto VEDIE');
+  const three = markElectedByVotes([row(1, 50), row(2, 40), row(3, 30), row(4, 20)], 3);
+  assert.deepEqual(three.filter((c) => c.elected).map((c) => c.n), [1, 2, 3], 'obvod s 3 mandátmi');
+  const tie = [row(1, 50), row(2, 40), row(3, 40)];
+  assert.equal(markElectedByVotes(tie, 2), tie, 'zhoda na hranici mandátov = žreb, neodhadujeme');
+  const marked = [row(1, 10), row(2, 90, { elected: true })];
+  assert.equal(markElectedByVotes(marked, 1), marked, 'značka ŠÚ SR vyhráva');
+  const quit = markElectedByVotes([row(1, 900, { withdrawn: true }), row(2, 100), row(3, 50)], 1);
+  assert.deepEqual(quit.filter((c) => c.elected).map((c) => c.n), [2], 'vzdaný sa preskočí');
+  const empty = [row(1, 0), row(2, 0)];
+  assert.equal(markElectedByVotes(empty, 1), empty, 'bez hlasov nikto');
+  assert.deepEqual(markElectedByVotes([], 1), []);
+  assert.deepEqual(markElectedByVotes(null, 1), []);
+});
+
+test('kraj so všetkými okrskami: predseda a župní poslanci ZVOLENÍ (odvodené), prehľad krajov nesie elected; neúplný kraj ostáva VEDIE', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./volbyResults.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(out\.final\) \{\n\s+out\.predseda = markElectedByVotes\(out\.predseda, 1\);\n\s+out\.obvody = \(out\.obvody \|\| \[\]\)\.map\(\(o\) => \(\{ \.\.\.o, kandidati: markElectedByVotes\(o\.kandidati, o\.seats \|\| 1\) \}\)\);/);
+  const panel = readFileSync(new URL('../volbyPanel.js', import.meta.url), 'utf8');
+  assert.match(panel, /if \(r\.electedDerived\) tag\.title = t\('volby\.elected-derived'\);/, 'odvodené ZVOLENÝ povie, odkiaľ to vieme');
+  const { EN_STRINGS, SK_STRINGS } = await import('../i18nStrings.js');
+  assert.match(SK_STRINGS['volby.elected-derived'], /180\/2014/);
+  assert.ok(EN_STRINGS['volby.elected-derived']);
+});

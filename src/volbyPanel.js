@@ -348,7 +348,8 @@ export function installVolbyPanel({
       chip.dataset.kraj = k.code;
       const lead = leadByKraj.get(k.code)?.lead;
       chip.title = `${k.name} · ${t('volby.chip-kraj-title', { predseda: number(k.counts?.predseda), poslanci: number(k.counts?.poslanci) })}`
-        + (lead ? ` · ${t('volby.lead-chip', { name: `${lead.meno} ${lead.priezvisko}`.trim(), pct: pctText(lead.pct) })}` : '');
+        // Konečný výsledok = „zvolený", nie „vedie" (2026-11-07, inventár 10-31: predsedovia krajov stále „VEDIE").
+        + (lead ? ` · ${t(lead.elected ? 'volby.elected-chip' : 'volby.lead-chip', { name: `${lead.meno} ${lead.priezvisko}`.trim(), pct: pctText(lead.pct) })}` : '');
       if (lead) chip.dataset.lead = lead.priezvisko;
       chip.setAttribute('aria-pressed', state.krajCode === k.code ? 'true' : 'false');
       krajeChips.appendChild(chip);
@@ -485,7 +486,12 @@ export function installVolbyPanel({
     const main = el(doc, 'div', 'volby-cand-main');
     const head = el(doc, 'div', 'volby-res-head');
     head.appendChild(el(doc, 'span', 'volby-cand-name', candidateLabel(c) || t('volby.unknown-candidate', { n: c.n })));
-    if (r?.elected) head.appendChild(el(doc, 'span', 'volby-tag volby-tag-elected', t('volby.elected')));
+    if (r?.elected) {
+      const tag = el(doc, 'span', 'volby-tag volby-tag-elected', t('volby.elected'));
+      // Odvodené z konečných výsledkov (ŠÚ SR zvolených v JSON neoznačil) — povedať, odkiaľ to vieme.
+      if (r.electedDerived) tag.title = t('volby.elected-derived');
+      head.appendChild(tag);
+    }
     else if (r?.withdrawn) head.appendChild(el(doc, 'span', 'volby-tag volby-tag-withdrawn', t('volby.withdrawn')));
     else if (r?.leads) head.appendChild(el(doc, 'span', 'volby-tag volby-tag-leads', t('volby.leads')));
     main.appendChild(head);

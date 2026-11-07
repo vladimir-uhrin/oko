@@ -304,7 +304,7 @@ test('i18n: kľúče panela v oboch slovníkoch, slovenské znenie bez emoji', (
     'volby.copy-link', 'volby.copied', 'volby.source-prefix', 'volby.source-minv', 'volby.source-susr', 'volby.source-geonames', 'volby.source-note',
     'volby.phase-results', 'volby.map', 'volby.map-chip', 'volby.map-hint', 'volby.legend-none', 'volby.legend-partial', 'volby.legend-final', 'volby.progress',
     'volby.turnout', 'volby.final', 'volby.elected', 'volby.leads', 'volby.withdrawn', 'volby.votes', 'volby.no-votes-yet', 'volby.results-live',
-    'volby.unknown-candidate', 'volby.lead-chip', 'layer.volby-obce.name'];
+    'volby.unknown-candidate', 'volby.lead-chip', 'volby.elected-chip', 'volby.elected-derived', 'layer.volby-obce.name'];
   for (const key of keys) {
     assert.equal(typeof EN_STRINGS[key], 'string', `EN ${key}`);
     assert.equal(typeof SK_STRINGS[key], 'string', `SK ${key}`);
@@ -547,4 +547,12 @@ test('archív volieb (2026-10-27): tlačidlo v mobilnej lište a zbalená zóna 
   assert.match(ui, /import \{ isVolbyArchived \} from '\.\/volbyShared\.js';/);
   assert.match(ui, /_restorePanelCollapsedState\(panelId[\s\S]{0,1500}if \(panelId === 'volby-panel' && isVolbyArchived\(\)\) collapsed = true;\n\s+panelEl\.classList\.toggle\('collapsed', collapsed\);/);
   assert.match(ui, /_restorePanelState\(panelState\) \{[\s\S]{0,900}if \(spec\.id === 'volby-panel' && !nextCollapsed && isVolbyArchived\(\)\) continue;/);
+});
+
+test('čip kraja po konečných výsledkoch (2026-11-07): „zvolený: …", nie „vedie: …"', async () => {
+  const { readFileSync } = await import('node:fs');
+  const panel = readFileSync(new URL('./volbyPanel.js', import.meta.url), 'utf8');
+  assert.match(panel, /t\(lead\.elected \? 'volby\.elected-chip' : 'volby\.lead-chip', \{ name:/);
+  assert.equal(SK_STRINGS['volby.elected-chip'], 'zvolený: {name} ({pct} %)');
+  assert.equal(EN_STRINGS['volby.elected-chip'], 'elected: {name} ({pct} %)');
 });
