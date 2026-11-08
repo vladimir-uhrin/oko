@@ -544,14 +544,16 @@ export function createEarthquakesLayer({ overlayHost = DEFAULT_OVERLAY_HOST,
         lastError = errors.join(' · ') || null;
         const healthy = [...sourceStates.values()].filter(s => !s.stale && !s.error);
         if (healthy.length) lastUpdate = Math.max(...healthy.map(s => s.fetchedAt));
-        render(); controlsListener?.();
+        render();
         return healthy.length > 0;
       } catch (error) {
         if (requestGeneration === generation && enabled) lastError = error?.message || t('quake.unavailable');
         return false;
       } finally {
         clearTimeout(timer);
-        if (requestGeneration === generation) { controller = null; loading = false; }
+        // Panel až po zhodení `loading` (2026-11-08): prepnutie obdobia sťahuje mimo správcu a riadok
+        // inak ukazoval NAČÍTAVA / „načítavam…" až do ďalšej obnovy o minútu.
+        if (requestGeneration === generation) { controller = null; loading = false; controlsListener?.(); }
       }
     },
     destroy(activeViewer = viewer) {

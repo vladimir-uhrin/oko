@@ -89,6 +89,22 @@ test('period switch during a running refresh is not a failed refresh: the same u
   } finally { release(); layer.destroy(); }
 });
 
+test('period switch: the row hears about the new period with loading already off (no NAČÍTAVA stuck for a minute)', async () => {
+  // 2026-11-08: prepnutie obdobia sťahuje mimo správcu; panel sa obnovil ešte s loading=true
+  // a riadok ukazoval NAČÍTAVA / „načítavam…" až do ďalšej obnovy správcom o 60 s.
+  const h = harness({ features: [feature('us1', 5, 18, 48, 3 * 24 * 60)] });
+  try {
+    await h.layer.update();
+    const seen = [];
+    h.layer.setRowControlsListener(() => seen.push(h.layer.getStats().loading));
+    assert.equal(h.layer.setParams({ period: 'week' }), true);
+    for (let i = 0; i < 5 && h.layer.getStats().loading; i++) await new Promise(r => setTimeout(r, 0));
+    assert.equal(h.layer.getStats().loading, false);
+    assert.equal(h.discs().length, 1, 'the 3-day-old quake arrived with the 7-day catalog');
+    assert.equal(seen.at(-1), false, 'the last panel refresh must see the finished download');
+  } finally { h.layer.destroy(); }
+});
+
 test('significant filter keeps only M6+/PAGER yellow+/ocean/sig 600+', async () => {
   const h = harness({ features: [feature('big', 6.2, 142, 35, 30), feature('yellow', 5.1, 20, 40, 40, { alert: 'yellow' }), feature('small', 4.4, 18, 48, 50)] });
   try {
