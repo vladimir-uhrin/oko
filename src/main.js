@@ -1281,7 +1281,11 @@ async function init() {
       // spolu zakryli ~80 % obrazovky). Na počítači sa zmestia obe — pás je hore, lišta dole.
       const consentOpen = () => { const bar = document.getElementById('oko-consent'); return Boolean(bar && !bar.hidden); };
       const showWelcome = () => welcomeStrip.autoShow({ hasShareState: styleManager.hasShareState, search: window.location.search, crawler: crawlerVisit, embed: embedView });
-      void Promise.race([startSettled, new Promise((resolve) => setTimeout(resolve, 20_000))]).then(() => {
+      // Lišta súhlasu sa na telefóne ukazuje na ten istý signál (koniec preletu) — pás jej dá 2 s náskok,
+      // inak by sa stihol ukázať skôr a lišta by ho hneď prekryla (overené na okolive.sk po prvom vydaní).
+      const afterStart = Promise.race([startSettled, new Promise((resolve) => setTimeout(resolve, 20_000))])
+        .then(() => (onPhone() ? new Promise((resolve) => setTimeout(resolve, 2000)) : undefined));
+      void afterStart.then(() => {
         if (!welcomeConsentWait({ onPhone: onPhone(), consentOpen: consentOpen() })) { showWelcome(); return; }
         let waited = 0;
         const timer = setInterval(() => {
