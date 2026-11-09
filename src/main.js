@@ -12,7 +12,7 @@ import { initNoticeBanner } from './noticeBanner.js';
 import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { initTopBarExtras } from './topBarExtras.js';
-import { createWelcomeStrip } from './welcomeStrip.js';
+import { createWelcomeStrip, welcomeConsentWait } from './welcomeStrip.js';
 import { StyleManager } from './ui.js';
 import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, showStartView } from './camera.js';
 import { coarsenTilesDuringStartFlight } from './startFlightDetail.js';
@@ -1277,8 +1277,20 @@ async function init() {
         },
       });
       window.__godsEyeView.welcomeStrip = welcomeStrip;
+      // Na telefóne pás počká, kým návštevník vybaví lištu súhlasu (overené na okolive.sk 390×844: pás a lišta
+      // spolu zakryli ~80 % obrazovky). Na počítači sa zmestia obe — pás je hore, lišta dole.
+      const consentOpen = () => { const bar = document.getElementById('oko-consent'); return Boolean(bar && !bar.hidden); };
+      const showWelcome = () => welcomeStrip.autoShow({ hasShareState: styleManager.hasShareState, search: window.location.search, crawler: crawlerVisit, embed: embedView });
       void Promise.race([startSettled, new Promise((resolve) => setTimeout(resolve, 20_000))]).then(() => {
-        welcomeStrip.autoShow({ hasShareState: styleManager.hasShareState, search: window.location.search, crawler: crawlerVisit, embed: embedView });
+        if (!welcomeConsentWait({ onPhone: onPhone(), consentOpen: consentOpen() })) { showWelcome(); return; }
+        let waited = 0;
+        const timer = setInterval(() => {
+          waited += 500;
+          if (consentOpen() && waited < 180_000) return;
+          clearInterval(timer);
+          // Po troch minútach bez voľby sa pás neukáže vôbec — návštevník lištu zjavne ignoruje a číta mapu.
+          if (!consentOpen()) showWelcome();
+        }, 500);
       });
     } catch { /* uvítanie je voliteľné */ }
     // VOĽBY 2026 (2026-10-24): mapa obcí → panel (klik na bod otvorí obec bez ďalšieho preletu) a odkazy

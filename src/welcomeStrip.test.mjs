@@ -1,7 +1,8 @@
 // Uvítací pás (2026-11-09): kedy sa ukáže sám a čo robia voľby.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldAutoShowWelcome, createWelcomeStrip, WELCOME_CHOICES, WELCOME_STORAGE_KEY } from './welcomeStrip.js';
+import fs from 'node:fs';
+import { shouldAutoShowWelcome, welcomeConsentWait, createWelcomeStrip, WELCOME_CHOICES, WELCOME_STORAGE_KEY } from './welcomeStrip.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 
 function fakeDoc() {
@@ -37,6 +38,15 @@ test('sám sa ukáže len pri čistom štarte', () => {
   assert.equal(shouldAutoShowWelcome({ crawler: true }), false, 'robot');
   assert.equal(shouldAutoShowWelcome({ embed: true }), false, 'vložený rámček');
   assert.equal(shouldAutoShowWelcome({ search: '?' }), true, 'prázdny otáznik nie je parameter');
+});
+
+test('na telefóne pás čaká na lištu súhlasu, na počítači nie', () => {
+  assert.equal(welcomeConsentWait({ onPhone: true, consentOpen: true }), true);
+  assert.equal(welcomeConsentWait({ onPhone: true, consentOpen: false }), false);
+  assert.equal(welcomeConsentWait({ onPhone: false, consentOpen: true }), false);
+  // zapojenie: main.js sa pýta tohto pravidla pred zobrazením
+  const main = fs.readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /if \(!welcomeConsentWait\(\{ onPhone: onPhone\(\), consentOpen: consentOpen\(\) \}\)\) \{ showWelcome\(\); return; \}/);
 });
 
 test('autoShow zapíše videné a druhýkrát sa už neukáže', () => {

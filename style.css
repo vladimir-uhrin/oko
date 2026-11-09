@@ -14634,7 +14634,8 @@ body:not(.oko-mobile) #cctv-sync-chip { top: 170px; }
 /* 6. Uvítací pás (welcomeStrip.js). */
 #oko-welcome {
   position: fixed;
-  top: 112px;
+  /* 130 px: pod riadkom načítavania (98–122 px), ktorý sa pri štarte ukazuje nad ním. */
+  top: 130px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 140;

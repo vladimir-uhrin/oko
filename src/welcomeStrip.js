@@ -31,6 +31,14 @@ export function shouldAutoShowWelcome({ hasShareState = false, search = '', craw
   return query.length === 0;
 }
 
+/**
+ * Má pás počkať na lištu súhlasu? Len na telefóne, kde by sa obe prekryli cez väčšinu obrazovky. Pure.
+ * @param {{ onPhone?: boolean, consentOpen?: boolean }} ctx
+ */
+export function welcomeConsentWait({ onPhone = false, consentOpen = false } = {}) {
+  return Boolean(onPhone && consentOpen);
+}
+
 function readSeen(storage) {
   try { return storage?.getItem(WELCOME_STORAGE_KEY) === '1'; } catch { return false; }
 }
