@@ -137,7 +137,8 @@ export class ShareLinkManager {
     // question and deliberately stays at 5.
     this._detectionOutsideOpacityPct = 1;
     this._celestialRingEnabled = false;
-    this._scopeEnabled = true;
+    // 2026-11-09: ďalekohľad predvolene vypnutý (scopeMask.js); odkaz so sc=1 ho zapne ako doteraz.
+    this._scopeEnabled = false;
     // Feather opens on a soft 11% scope-mask edge (final value 2026-08-24,
     // superseding the 08-22 hard-crop and 08-23 8% rulings) — mirrors
     // SCOPE_FEATHER_RATIO_DEFAULT in scopeMask.js and the slider's markup value.
@@ -228,7 +229,7 @@ export class ShareLinkManager {
       // celestialRing.js.
       detectionOutsideOpacityPct: Math.max(0, Math.min(100, Math.round(parseOr(params.get('ko'), 5)))),
       celestialRing: params.has('cr') ? params.get('cr') === '1' : false,
-      scopeEnabled: params.has('sc') ? params.get('sc') === '1' : true,
+      scopeEnabled: params.has('sc') ? params.get('sc') === '1' : false,
       // Deliberately still 35 through both later default moves (0 on
       // 2026-08-22, 8 on 2026-08-23). This is the PARSE fallback for a link that
       // predates `scf` entirely, and such a link was authored when 35 was what

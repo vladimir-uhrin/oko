@@ -77,9 +77,19 @@ test('inštalácia: pás s fotkou (position: fixed, offsetParent null) posunie l
   assert.equal(doc.els['follow-flight'].style.top, `${375 + CARD_ACTION_GAP_PX}px`, 'pod fotkou, nie cez ňu');
 });
 
-test('inštalácia: na počítači sa tlačidiel nedotkne', () => {
+// 2026-11-09 (audit UI): aj na počítači patria akcie ku karte — predtým viseli vpravo dole ~250 px pod ňou.
+test('inštalácia: na počítači sa tlačidlá pripnú pod kartu rovnako ako na mobile', () => {
   const doc = fakeDoc({ mobile: false });
   const bar = installCardActionBar({}, { doc, cardRect: () => ({ x: 24, y: 180, w: 342, h: 130 }) });
+  bar.sync();
+  assert.equal(doc.els['follow-flight'].classList.contains('oko-card-action'), true);
+  assert.equal(doc.els['cockpit-entry'].classList.contains('oko-card-action'), true);
+  assert.ok(Number.parseInt(doc.els['follow-flight'].style.top, 10) >= 310 + CARD_ACTION_GAP_PX, 'pod kartou');
+});
+
+test('inštalácia: bez karty ostávajú tlačidlá na mieste zo style.css', () => {
+  const doc = fakeDoc({ mobile: false });
+  const bar = installCardActionBar({}, { doc, cardRect: () => null });
   bar.sync();
   assert.equal(doc.els['follow-flight'].style.top, undefined);
   assert.equal(doc.els['cockpit-entry'].classList.contains('oko-card-action'), false);

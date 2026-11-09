@@ -8242,7 +8242,9 @@ export class StyleManager {
 
     const viewportHeight = Math.max(1, window.innerHeight);
     const stackRect = stack.getBoundingClientRect();
-    const baseTop = viewportHeight * 0.26;
+    // 2026-11-09 (audit UI): stĺpec začína hneď pod logom (14 % namiesto 26 %) — pri 26 % sa na 900 px
+    // zmestilo 6 z 12 pilúl a zvyšok bol odrezaný bez náznaku posunu.
+    const baseTop = viewportHeight * 0.14;
     const baseBottomInset = viewportHeight * 0.04;
     const safeGap = viewportHeight * 0.012;
     let obstacleSafeTop = viewportHeight * 0.04;

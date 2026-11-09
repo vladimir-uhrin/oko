@@ -1,10 +1,11 @@
-// src/cardActionBar.js — SLEDOVAŤ a KOKPIT ako lišta akcií pod kartou lietadla na mobile (2026-10-04).
+// src/cardActionBar.js — SLEDOVAŤ a KOKPIT ako lišta akcií pod kartou lietadla (mobil 2026-10-04, počítač 2026-11-09).
 //
 // Vlastník: „je tam také že sledovať a kokpit, čo s tým, navrhni" → zvolil „pod kartu". Na telefóne
 // na výšku viseli obe tlačidlá (~130×44 px) vpravo dole nad hlasovou pilulkou, ďaleko od karty, a
 // zakrývali mapu. Na mobile sa preto pripnú pod kartu (pod pás s fotkou / pás štátneho lietadla),
 // rovnakou šírkou ako karta, každé na podiel šírky. Keď pod kartou nie je miesto (dok, spodná
-// lišta), idú nad ňu. Na počítači ostáva umiestnenie zo style.css. Karta je v plátne (worldOverlay)
+// lišta), idú nad ňu. Od 2026-11-09 (audit UI) to isté platí na počítači — tlačidlá ležali vpravo dole
+// ~250 px pod kartou a opticky k nej nepatrili; style.css je už len záloha, keď karta nie je. Karta je v plátne (worldOverlay)
 // — lišta je DOM ukotvený k jej obdĺžniku, rovnako ako krížik (cardCloseButtons.js).
 
 import { getOverlayPaintRect } from './overlays/worldOverlay.js';
@@ -79,7 +80,7 @@ export function installCardActionBar(viewer, {
     const buttons = ids.map((id) => doc.getElementById(id)).filter(Boolean);
     const shown = buttons.filter((b) => !b.hidden);
     const view = doc.defaultView;
-    const card = isMobile() && shown.length ? cardRect() : null;
+    const card = shown.length ? cardRect() : null;
     const attached = card
       // Pásy sú position: fixed — offsetParent je null aj pri viditeľnom, preto rozmer a štýl.
       ? [...doc.querySelectorAll('.tracked-photo, .state-strip')]
@@ -88,7 +89,7 @@ export function installCardActionBar(viewer, {
         .filter((r) => r.height > 0 && r.width > 0)
       : [];
     // Nad kartu len pod hornú lištu (mobil, #oko-topbar), inak pod logo a ikony.
-    const topbar = card ? doc.getElementById('oko-topbar')?.getBoundingClientRect?.() : null;
+    const topbar = card && isMobile() ? doc.getElementById('oko-topbar')?.getBoundingClientRect?.() : null;
     const topSafe = topbar && topbar.height > 0 ? Math.max(CARD_ACTION_TOP_SAFE_PX, Math.round(topbar.bottom) + CARD_ACTION_GAP_PX) : CARD_ACTION_TOP_SAFE_PX;
     const placed = card ? cardActionBarPlacement(card, attached, { w: view?.innerWidth || 0, h: view?.innerHeight || 0 }, { topSafe }) : null;
     if (!placed) {

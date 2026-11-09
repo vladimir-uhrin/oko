@@ -72,6 +72,7 @@ function measurePage() {
     subj: location.hash.includes('subj='),
     swipe: box(document.querySelector('.card-swipe-zone')),
     topics: box(document.getElementById('topics-link')),
+    more: box(document.getElementById('oko-more-btn')),
     topicsHref: document.getElementById('topics-link')?.getAttribute('href') ?? null,
     topbar: box(document.getElementById('oko-topbar')),
     title: box(document.querySelector('#title-bar h1')),
@@ -127,11 +128,13 @@ for (const [W, H] of SIZES) {
   for (const key of ['voice', 'location', 'style', 'credit']) if (!inView(m[key], m)) fail(`${key} mimo okna ${JSON.stringify(m[key])}`);
   if (m.voiceStatus === 'idle' && m.voice && m.voice.r - m.voice.l > 90) fail(`vypnutý hlas zaberá ${m.voice.r - m.voice.l} px (čaká sa len mikrofón)`);
   if (overlap(m.credit, m.voice)) fail('atribúcia mapy sa prekrýva s hlasom');
-  if (!m.topics || !inView(m.topics, m)) fail(`odkaz Témy chýba alebo je mimo okna ${JSON.stringify(m.topics)}`);
+  // 2026-11-09: Články, Súkromie a jazyk sú v ponuke Viac (topBarExtras.js) — v lište ostáva logo, Hľadať, Účet, Viac.
+  if (!m.more || !inView(m.more, m)) fail(`tlačidlo Viac chýba alebo je mimo okna ${JSON.stringify(m.more)}`);
+  if (m.more && (m.more.r - m.more.l < 44 || m.more.b - m.more.t < 44)) fail(`tlačidlo Viac je menšie než 44 px ${JSON.stringify(m.more)}`);
   if (!['/sk/', '/en/'].includes(m.topicsHref)) fail(`odkaz Témy vedie na ${m.topicsHref}`);
   if (m.dockLabelsClipped.length) fail(`orezané popisy doku: ${m.dockLabelsClipped.join(', ')}`);
   // Horná lišta: všetko, čo predtým plávalo nad mapou, je celé v nej a nič sa neprekrýva.
-  const topItems = ['title', 'titleCredit', 'actions', 'langOptions', 'topics', 'consentOpen'];
+  const topItems = ['title', 'actions'];
   if (!m.topbar) fail('chýba horná lišta');
   else {
     for (const key of topItems) {

@@ -21,8 +21,9 @@
   --accent-dim: rgba(0, 212, 255, 0.15);
   --accent-glow: rgba(0, 212, 255, 0.4);
   --text-primary: #e8eaed;
-  --text-secondary: rgba(232, 234, 237, 0.5);
-  --text-dim: rgba(232, 234, 237, 0.3);
+  /* 2026-11-09 (audit UI): 0,5 → 0,72 a 0,3 → 0,56 — pôvodné dávali kontrast asi 4,5 : 1 a 2,3 : 1 pri písme do 10 px. */
+  --text-secondary: rgba(232, 234, 237, 0.72);
+  --text-dim: rgba(232, 234, 237, 0.56);
   /* Náhradné písma so zladenými metrikami (2026-10-31, PageSpeed CLS): kým JetBrains Mono / Inter
      z Google Fonts nedôjdu, kreslí sa Courier New / Arial roztiahnuté na rovnakú výšku riadku a šírku
      znaku (@font-face pred sekciou ikon na konci súboru), takže doskočenie písma nič neposunie. */
@@ -14528,6 +14529,202 @@ body.oko-consent-open #toast {
   line-gap-override: 0%;
 }
 
+
+/* ═══ Čitateľnosť a prvý dojem (2026-11-09, audit UI — krok 1) ═══
+   Jeden blok s dôvodmi, nie rozsypané prepisy: nálezy auditu docs/drafts/audit-ui-2026-11-09.md.
+   Musí ostať PRED sekciou ikon (tá je úmyselne posledná v súbore). */
+
+/* 1. Fokus klávesnice. Z prvých 25 zastávok tabulátora mali viditeľný obrys dve — 56× `outline: none`
+   bez náhrady. Jedno pravidlo pre všetko, čo sa dá ovládať; !important, lebo tie pravidlá majú id. */
+body :is(button, a[href], input, select, textarea, summary, [role="button"], [role="menuitem"], [role="menuitemradio"], [tabindex]:not([tabindex="-1"])):not(canvas):focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* 2. Bez ďalekohľadu (scopeMask.js, predvolene vypnutý) leží text lišty priamo na mape — jemný tieň
+   zhora a zľava mu vráti podklad, mapa ostáva viditeľná až po okraj. */
+body:not(.oko-mobile)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, rgba(4, 8, 12, 0.78) 0, rgba(4, 8, 12, 0.42) 70px, transparent 150px),
+    linear-gradient(to right, rgba(4, 8, 12, 0.62) 0, rgba(4, 8, 12, 0.28) 220px, transparent 400px);
+}
+body.ui-clean-view::before,
+body.cockpit-mode::before,
+body.scene-playback-mode::before,
+body.recording-mode::before,
+body.embed-mode::before { content: none; }
+
+/* 3. Horná lišta: „AKTÍVNY ŠTÝL NORMAL" bol najvýraznejší prvok vpravo hore a návštevníkovi nič nedával
+   (štýl ukazuje dok). Jazyk a odkazy sa posunuli na jeho miesto a sú čitateľné. */
+#style-indicator { display: none; }
+#lang-switch { top: 30px; }
+#lang-switch .indicator-label { display: none; }
+#lang-switch .lang-switch-options { margin-top: 0; }
+#lang-switch button { font-size: 13px; padding: 4px 4px; color: var(--text-secondary); }
+#lang-switch #topics-link,
+#lang-switch #consent-open { font-size: 12px; letter-spacing: 2px; color: var(--text-secondary); }
+#title-bar .subtitle { color: var(--text-secondary); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9); }
+
+/* Popisy pod ikonami (topBarExtras.js zapisuje data-caption). */
+#top-center-actions { gap: 22px; }
+#top-center-actions > button { position: relative; }
+#top-center-actions > button[data-caption]::after,
+#top-center-actions #account-btn[data-caption]::after {
+  content: attr(data-caption);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  font: 500 11px/1 var(--font-sans);
+  letter-spacing: 0.2px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+}
+#top-center-actions > button[data-caption]:hover::after,
+#top-center-actions #account-btn[data-caption]:hover::after { color: #fff; }
+#top-center-actions #account-actions { margin-left: 0; }
+#top-center-actions > #oko-more-btn { display: none; }
+#oko-more-menu[hidden] { display: none; }
+#global-loading-status { top: 98px; }
+
+/* 4. Ľavý stĺpec: začína pod logom (ui.js baseTop 14 %), nadpisy a názvy sa dajú prečítať. */
+#left-panel-stack { top: var(--left-stack-safe-top, 14vh); }
+.lane-zone-text { font-size: 11px; letter-spacing: 2px; color: var(--text-secondary); opacity: 1; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); }
+.panel-title { font-size: 11px; letter-spacing: 2px; color: var(--text-secondary); }
+#left-panel-stack > [data-panel-id].collapsed .panel-title,
+#left-panel-stack > [data-panel-id].collapsed .pp-header-label {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(232, 234, 237, 0.92);
+}
+.panel-collapse-btn { width: 26px; height: 26px; color: var(--text-secondary); }
+:root { --left-collapsed-width: 280px; }
+
+/* 5. Vrstvy: nadpisy tém (manager.js) a čitateľný stav. */
+.data-group-title {
+  margin: 14px 4px 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--glass-border);
+  font: 600 11px/1.2 var(--font-sans);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.data-group-title:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.data-toggle-meta { font-size: 10.5px; }
+.data-toggle-btn { font-size: 10px; padding: 4px 10px; color: var(--text-secondary); }
+
+/* 6. Uvítací pás (welcomeStrip.js). */
+#oko-welcome {
+  position: fixed;
+  top: 112px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 140;
+  /* Medzi ľavým stĺpcom (do ~330 px) a pravým okrajom; na užšom okne vedľa stĺpca, nie cez neho. */
+  width: min(820px, calc(100vw - 680px));
+  padding: 14px 16px 12px;
+  background: rgba(8, 14, 22, 0.93);
+  border: 1px solid rgba(64, 200, 230, 0.34);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  animation: oko-welcome-in 0.35s ease both;
+}
+@keyframes oko-welcome-in { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 1180px) {
+  #oko-welcome { left: 336px; right: 24px; width: auto; transform: none; }
+}
+.oko-welcome-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.oko-welcome-title { font: 600 17px/1.25 var(--font-sans); letter-spacing: 0.1px; color: #fff; }
+.oko-welcome-close {
+  display: grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px;
+  color: var(--text-secondary); background: none; border: 1px solid var(--glass-border); border-radius: 50%;
+  cursor: var(--cursor-pointer, pointer);
+}
+.oko-welcome-close:hover { color: #fff; border-color: var(--glass-border-hover); }
+.oko-welcome-close .material-symbols-outlined { font-size: 18px; }
+.oko-welcome-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.oko-welcome-choice {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px;
+  font: 500 14px/1 var(--font-sans); color: var(--text-primary);
+  background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.36); border-radius: 999px;
+  cursor: var(--cursor-pointer, pointer); transition: background var(--transition-fast), color var(--transition-fast);
+}
+.oko-welcome-choice:hover { background: rgba(0, 212, 255, 0.2); color: #fff; }
+.oko-welcome-choice .material-symbols-outlined { font-size: 18px; color: var(--accent); }
+.oko-welcome-hint { margin-top: 10px; font: 400 13px/1.45 var(--font-sans); color: var(--text-secondary); }
+body.cockpit-mode #oko-welcome,
+body.ui-clean-view #oko-welcome,
+body.scene-playback-mode #oko-welcome,
+body.recording-mode #oko-welcome,
+body.embed-mode #oko-welcome,
+body.oko-sheet-open #oko-welcome { display: none; }
+@media (prefers-reduced-motion: reduce) { #oko-welcome { animation: none; } }
+
+/* 7. Telefón: lišta v jednom riadku (56 px namiesto 96 px, predtým 22 % výšky s dvoma radmi). V lište
+   ostáva logo, Hľadať, Účet a Viac; odkaz, úvodný pohľad, vypnutie vrstiev, Články, Súkromie a jazyk
+   sú v ponuke Viac (topBarExtras.js). Ciele 44 px. */
+body.oko-mobile { --oko-topbar-h: 56px; }
+body.oko-mobile #title-bar { top: 14px; }
+body.oko-mobile #lang-switch { display: none !important; }
+body.oko-mobile #top-center-actions { top: 6px; right: 8px; left: auto; transform: none; gap: 2px; }
+body.oko-mobile #top-center-actions:has(#account-actions) { gap: 2px; }
+body.oko-mobile #top-center-actions > #clear-selected-layers,
+body.oko-mobile #top-center-actions > #share-btn,
+body.oko-mobile #top-center-actions > #reset-globe-view { display: none; }
+body.oko-mobile #top-center-actions > button,
+body.oko-mobile #top-center-actions #account-btn { width: 44px; height: 44px; }
+body.oko-mobile #top-center-actions > button[data-caption]::after,
+body.oko-mobile #top-center-actions #account-btn[data-caption]::after { content: none; }
+body.oko-mobile #top-center-actions > #cmd-launch { order: 1; }
+body.oko-mobile #top-center-actions > #account-actions { order: 2; }
+body.oko-mobile #top-center-actions > #oko-more-btn { order: 3; display: flex; }
+#oko-more-menu {
+  position: fixed;
+  top: calc(var(--oko-topbar-h, 56px) + env(safe-area-inset-top, 0px) + 6px);
+  right: 8px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  min-width: 250px;
+  max-width: calc(100vw - 16px);
+  padding: 6px;
+  background: rgba(8, 14, 22, 0.97);
+  border: 1px solid rgba(64, 200, 230, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+}
+.oko-more-item {
+  min-height: 44px; padding: 0 12px; text-align: left;
+  font: 500 14px/1.2 var(--font-sans); color: var(--text-primary);
+  background: none; border: 0; border-radius: 8px; cursor: var(--cursor-pointer, pointer);
+}
+.oko-more-item:hover { background: rgba(0, 212, 255, 0.12); color: #fff; }
+.oko-more-lang {
+  display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 8px 12px 6px;
+  border-top: 1px solid var(--glass-border); font: 500 13px/1 var(--font-sans); color: var(--text-secondary);
+}
+.oko-more-lang span { margin-right: auto; }
+.oko-more-lang-btn {
+  min-width: 48px; min-height: 40px; font: 600 13px/1 var(--font-mono); letter-spacing: 1px;
+  color: var(--text-primary); background: none; border: 1px solid var(--glass-border); border-radius: 8px;
+  cursor: var(--cursor-pointer, pointer);
+}
+.oko-more-lang-btn[aria-checked="true"] { color: var(--accent); border-color: var(--accent); }
+body.oko-mobile #oko-welcome { left: 8px; right: 8px; width: auto; transform: none; top: calc(var(--oko-topbar-h, 56px) + env(safe-area-inset-top, 0px) + 8px); padding: 12px 12px 10px; }
+body.oko-mobile .oko-welcome-choice { flex: 1 1 100%; justify-content: flex-start; }
+#oko-appbar .oko-appbar-label { font-size: 10px; }
 
 /* ═══ Ikony Material Symbols Outlined — vlastný výrez (2026-10-31) ═══
    Namiesto celého písma z Google Fonts (PageSpeed: 324 KB, najväčší súbor po Cesiu a balíku) sa načíta

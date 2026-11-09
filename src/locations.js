@@ -12,6 +12,29 @@ import { viewportBias, placesNearViewRecovery } from './annotations/annotationRe
  *   buildingHeight — estimated height of landmark center above ground (meters)
  */
 export const CITY_POIS = {
+  // 2026-11-09 (audit UI): slovenské mestá prvé — rýchle mestá boli len z upstreamu (Austin, SF, Tokyo…).
+  bratislava: {
+    name: 'Bratislava',
+    groundElevation: 185,
+    viewBounds: { southwest: { lat: 48.08, lng: 16.98 }, northeast: { lat: 48.22, lng: 17.24 } },
+    pois: [
+      { name: 'Bratislavský hrad', lat: 48.1420, lon: 17.1002, alt: 600, pitch: -25, heading: 330, buildingHeight: 45 },
+      { name: 'Most SNP', lat: 48.1380, lon: 17.1047, alt: 600, pitch: -22, heading: 20, buildingHeight: 85 },
+      { name: 'Dóm sv. Martina', lat: 48.1418, lon: 17.1050, alt: 500, pitch: -25, heading: 300, buildingHeight: 85 },
+      { name: 'Slavín', lat: 48.1539, lon: 17.0997, alt: 650, pitch: -25, heading: 160, buildingHeight: 40 },
+      { name: 'Eurovea', lat: 48.1403, lon: 17.1247, alt: 700, pitch: -22, heading: 300, buildingHeight: 168 },
+    ],
+  },
+  kosice: {
+    name: 'Košice',
+    groundElevation: 250,
+    viewBounds: { southwest: { lat: 48.66, lng: 21.18 }, northeast: { lat: 48.77, lng: 21.33 } },
+    pois: [
+      { name: 'Dóm sv. Alžbety', lat: 48.7201, lon: 21.2581, alt: 550, pitch: -25, heading: 0, buildingHeight: 59 },
+      { name: 'Štátne divadlo', lat: 48.7227, lon: 21.2575, alt: 500, pitch: -25, heading: 180, buildingHeight: 30 },
+      { name: 'Steel aréna', lat: 48.7165, lon: 21.2469, alt: 550, pitch: -25, heading: 60, buildingHeight: 25 },
+    ],
+  },
   austin: {
     name: 'Austin',
     groundElevation: 150, // meters above WGS84 ellipsoid

@@ -4,6 +4,7 @@ import { createNaturalHazardsPanel, hazardsSummary, isNaturalHazardLayer } from 
 import { WEATHER_LAYER_IDS, createWeatherIntro, isWeatherLayer, weatherSummary } from './weatherSection.js';
 import { createGibsOverlayPanel, gibsOverlaySummary, isGibsOverlayLayer } from './gibsOverlayPanel.js';
 import { t } from '../i18n.js';
+import { LAYER_GROUP_ORDER, layerGroup } from '../layerCategories.js';
 import { markDetectionSourcesChanged } from './detection.js';
 function cloneLayerParams(value) {
   if (Array.isArray(value)) return value.map(cloneLayerParams);
@@ -2067,6 +2068,10 @@ export class DataLayerManager {
       this._beforeDestroyListeners.add(cleanup);
     }
     this._toggleContainer.innerHTML = '';
+    // Skupiny podľa témy (2026-11-09, audit UI): zoznam bol jeden plochý stĺpec ~28 riadkov v poradí
+    // registrácie. Témy a ich poradie sú tie isté ako v palete (layerCategories.js).
+    const grouped = new Map();
+    const addToGroup = (group, node) => { if (!grouped.has(group)) grouped.set(group, []); grouped.get(group).push(node); };
     let hazardsPanel = null;
     let gibsPanel = null;
     const weather = this._weatherContainer || null;
@@ -2163,17 +2168,30 @@ export class DataLayerManager {
       } else if (isNaturalHazardLayer(layer.id)) {
         if (!hazardsPanel) {
           hazardsPanel = createNaturalHazardsPanel(document, this.getAll());
-          this._toggleContainer.appendChild(hazardsPanel);
+          addToGroup('earth', hazardsPanel);
         }
         hazardsPanel.appendChild(row);
       } else if (isGibsOverlayLayer(layer.id)) {
         // Skupina „Zem zo satelitu (NASA)" — rovnaký vzor ako hrozby.
         if (!gibsPanel) {
           gibsPanel = createGibsOverlayPanel(document, this.getAll());
-          this._toggleContainer.appendChild(gibsPanel);
+          addToGroup('earth', gibsPanel);
         }
         gibsPanel.appendChild(row);
-      } else this._toggleContainer.appendChild(row);
+      } else addToGroup(layerGroup(layer.id), row);
+    }
+    const groupOrder = [...LAYER_GROUP_ORDER, ...[...grouped.keys()].filter((g) => !LAYER_GROUP_ORDER.includes(g))];
+    for (const group of groupOrder) {
+      const nodes = grouped.get(group);
+      if (!nodes?.length) continue;
+      const title = document.createElement('div');
+      title.className = 'data-group-title';
+      title.dataset.layerGroup = group;
+      title.setAttribute('role', 'heading');
+      title.setAttribute('aria-level', '3');
+      title.textContent = t(`cmd.group.${group}`);
+      this._toggleContainer.appendChild(title);
+      for (const node of nodes) this._toggleContainer.appendChild(node);
     }
     // POČASIE: pevné poradie (predpoveď pre svet, potom meranie nad Slovenskom), nie poradie registrácie.
     weatherRows.sort((a, b) => WEATHER_LAYER_IDS.indexOf(a.dataset.layerId) - WEATHER_LAYER_IDS.indexOf(b.dataset.layerId));
@@ -2318,7 +2336,8 @@ export class DataLayerManager {
     const stats = layer.stats || {};
     const feedState = layerFeedState(stats);
     const stateLabel = FEED_STATE_LABELS[feedState];
-    const source = stats.source || layer.source;
+    // 2026-11-09: vrstva bez zdroja (lenivé GFW pred načítaním) písala do riadku „undefined · nikdy".
+    const source = stats.source || layer.source || '—';
     const lifecycleState = layer.lifecycleState || (layer.enabled ? 'enabled' : 'disabled');
     if (lifecycleState === 'enabling' || lifecycleState === 'disabling') {
       const lifecycleLabel = lifecycleState === 'enabling'

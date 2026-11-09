@@ -11,6 +11,8 @@ import { initSiteTelemetry } from './siteTelemetry.js';
 import { initNoticeBanner } from './noticeBanner.js';
 import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
+import { initTopBarExtras } from './topBarExtras.js';
+import { createWelcomeStrip } from './welcomeStrip.js';
 import { StyleManager } from './ui.js';
 import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, showStartView } from './camera.js';
 import { coarsenTilesDuringStartFlight } from './startFlightDetail.js';
@@ -93,7 +95,7 @@ import {
   releaseContinuousRender,
 } from './renderGovernor.js';
 import { applySoftwareRendererBudget } from './softwareRenderer.js';
-import { installScopeMask } from './scopeMask.js';
+import { installScopeMask, setScopeMaskEnabled } from './scopeMask.js';
 import { installEmbedMode, isEmbedMode } from './embedMode.js';
 import { initMobileShell, isCoarsePointer, resolveShellMode } from './mobileShell.js';
 import { isVolbyArchived, parseVolbyParam, VOLBY_ARCHIVE_MS } from './volbyShared.js';
@@ -170,6 +172,8 @@ async function init() {
       if (lang !== currentLanguage()) setLanguage(lang);
     });
   }
+  // Popisy pod ikonami hore a ponuka Viac na telefóne (2026-11-09, audit UI).
+  try { initTopBarExtras({ translate: t, currentLanguage }); } catch { /* lišta je voliteľná */ }
 
   try {
     loaderStatus.textContent = t('loader.configuring');
@@ -781,6 +785,9 @@ async function init() {
     // see src/scopeMask.js. Installed before the UI so the DISPLAY-rail
     // toggle finds it live.
     installScopeMask(viewer);
+    // 2026-11-09 (audit UI, vlastník schválil): ďalekohľad je v aplikácii predvolene vypnutý — mapa má celú
+    // obrazovku. Odkaz so sc=1 alebo tlačidlo v Zobrazení ho zapne (ui.js, sharelink.js).
+    if (!styleManager.hasShareState) setScopeMaskEnabled(false);
 
     // The follow camera recomputes the tracked target's dead-reckon position
     // every frame — tracking anything is a per-frame animation. (perf wave 2)
@@ -1241,6 +1248,34 @@ async function init() {
       cmdLaunch.addEventListener('click', () => commandPalette.toggle());
       document.getElementById('top-center-actions')?.appendChild(cmdLaunch);
     } catch { /* lišta akcií nemusí existovať */ }
+    // Uvítací pás (2026-11-09, audit UI): po úvodnom prelete päť volieb jedným ťuknutím — raz, len pri
+    // čistom štarte (welcomeStrip.js). Voľby robia to isté čo paleta a panely, nič vlastné.
+    try {
+      const onPhone = () => document.body.classList.contains('oko-mobile');
+      const openPanel = (panelId, section) => {
+        if (!window.__okoMobileShell?.open?.(section, { expand: panelId })) styleManager.setPanelCollapsed(panelId, false, { explicit: true, persist: false, syncShare: false });
+      };
+      const frameOverview = (region, panelId) => {
+        const conflict = listConflicts().find((c) => c.region === region && c.overview);
+        if (conflict) void conflictScenes.frame(conflict);
+        // Na telefóne by výsuv zakryl práve zarámovanú mapu — panel sa otvára len na počítači.
+        if (!onPhone()) styleManager.setPanelCollapsed(panelId, false, { explicit: true, persist: false, syncShare: false });
+      };
+      const welcomeStrip = createWelcomeStrip({
+        translate: t,
+        actions: {
+          flights: () => { void dataManager.setEnabled('flights', true, { origin: 'user' }); void styleManager.resetToGlobeView({ home: true }); },
+          ukraine: () => frameOverview('ukraine', 'ukraine-panel'),
+          mideast: () => frameOverview('middle-east', 'mideast-panel'),
+          weather: () => { void dataManager.setEnabled('shmu-radar', true, { origin: 'user' }); openPanel('weather-panel', 'layers'); },
+          energy: () => openPanel('gas-panel', 'data'),
+        },
+      });
+      window.__godsEyeView.welcomeStrip = welcomeStrip;
+      void Promise.race([startSettled, new Promise((resolve) => setTimeout(resolve, 20_000))]).then(() => {
+        welcomeStrip.autoShow({ hasShareState: styleManager.hasShareState, search: window.location.search, crawler: crawlerVisit, embed: embedView });
+      });
+    } catch { /* uvítanie je voliteľné */ }
     // VOĽBY 2026 (2026-10-24): mapa obcí → panel (klik na bod otvorí obec bez ďalšieho preletu) a odkazy
     // `?volby`, `?volby=<kód obce>`, `?volby=k<kraj>` (okolive.sk/?volby=582000): panel a mapa hneď po obnove
     // stavu, výber obce/kraja až po úvodnom prelete (ten už mieri na miesto — locate vyššie), najneskôr po strope.

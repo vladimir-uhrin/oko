@@ -3109,7 +3109,10 @@ test('natural hazards share one card and preserve each independent layer row and
     });
     const container = makeControlElement(); mgr.buildTogglePanel(container);
     const group = container.children.find(node => node.className === 'natural-hazards-card');
-    assert.ok(group); assert.equal(container.children.length, 2);
+    // 2026-11-09: zoznam má nadpisy tém — Vo vzduchu (lety) a Zem a počasie (karta hrozieb).
+    assert.ok(group); assert.equal(container.children.length, 4);
+    assert.deepEqual(container.children.filter(node => node.className === 'data-group-title').map(node => node.dataset.layerGroup), ['air', 'earth']);
+    assert.equal(container.children[container.children.indexOf(group) - 1].dataset.layerGroup, 'earth', 'karta hrozieb leží pod nadpisom svojej témy');
     assert.deepEqual(group.children.filter(node => node.dataset.layerId).map(node => node.dataset.layerId), ['earthquakes', 'local-firms', 'volcanoes']);
     await mgr.setEnabled('volcanoes', true);
     assert.equal(mgr.isEnabled('volcanoes'), true); assert.equal(mgr.isEnabled('earthquakes'), false); assert.equal(mgr.isEnabled('local-firms'), false);
