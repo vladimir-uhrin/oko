@@ -201,12 +201,12 @@ test('prekážky kariet: panely a lišty ako pri UKRAJINE + riadok atribúcie a 
 });
 
 test('miesto stavového riadka pod hornou lištou je vyhradené stále — karta pri obnove dát neposkočí', () => {
-  // riadok je vystredený, top 74 px; zmeraný pri „OBNOVUJEM ŽIVÉ DÁTA · LIVE AIS VESSELS" v okne 1366 px: x 558–806, y 76–96
+  // riadok je vystredený, top 98 px (od 2026-11-09, popisy pod ikonami; predtým 74); zmeraný pri „OBNOVUJEM ŽIVÉ DÁTA · LIVE AIS VESSELS" v okne 1366 px: x 558–806, výška 20 px → y 100–120
   const zone = { x: VIEW.w / 2 - HOTCARD_STATUS_ZONE.width / 2, y: HOTCARD_STATUS_ZONE.top, w: HOTCARD_STATUS_ZONE.width, h: HOTCARD_STATUS_ZONE.height };
-  assert.ok(zone.x <= 558 && zone.x + zone.w >= 806 && zone.y <= 76 && zone.y + zone.h >= 96, 'vyhradené miesto pokrýva zmeraný riadok');
+  assert.ok(zone.x <= 558 && zone.x + zone.w >= 806 && zone.y <= 100 && zone.y + zone.h >= 120, 'vyhradené miesto pokrýva zmeraný riadok');
   // karta miesta tesne pod lištou: s vyhradeným miestom leží mimo neho — a rovnako, keď je riadok práve vidieť
   const hidden = placeHotCards([card(540, 230)], VIEW, [...UI, zone]);
-  const shown = placeHotCards([card(540, 230)], VIEW, [...UI, zone, { x: 558, y: 76, w: 248, h: 20 }]);
+  const shown = placeHotCards([card(540, 230)], VIEW, [...UI, zone, { x: 558, y: 100, w: 248, h: 20 }]);
   assert.equal(boxHit(cardBox(hidden[0]), zone), false);
   assert.deepEqual([shown[0].cx, shown[0].cy], [hidden[0].cx, hidden[0].cy], 'objavenie riadka kartou nepohne');
   assert.ok(HOTCARD_OBSTACLE_SELECTOR.split(',').map((s) => s.trim()).includes('#global-loading-status'));

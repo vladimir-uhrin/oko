@@ -14536,7 +14536,7 @@ body.oko-consent-open #toast {
 
 /* 1. Fokus klávesnice. Z prvých 25 zastávok tabulátora mali viditeľný obrys dve — 56× `outline: none`
    bez náhrady. Jedno pravidlo pre všetko, čo sa dá ovládať; !important, lebo tie pravidlá majú id. */
-body :is(button, a[href], input, select, textarea, summary, [role="button"], [role="menuitem"], [role="menuitemradio"], [tabindex]:not([tabindex="-1"])):not(canvas):focus-visible {
+body :is(button, a[href], input, select, textarea, summary, [role="button"], [role="menuitem"], [role="menuitemradio"], [tabindex]:not([tabindex="-1"])):not(canvas):not(.oko-cmd-input):focus-visible {
   outline: 2px solid var(--accent) !important;
   outline-offset: 2px !important;
 }
@@ -14547,13 +14547,17 @@ body:not(.oko-mobile)::before {
   content: '';
   position: fixed;
   inset: 0;
-  z-index: 99;
+  /* z-index 1 = nad mapou, pod kartami objektov (6), pásmi kariet (59–60), atribúciou (90) aj rámom KARTA (92):
+     stmavuje sa len mapa, nie obsah nad ňou. */
+  z-index: 1;
   pointer-events: none;
   background:
     linear-gradient(to bottom, rgba(4, 8, 12, 0.78) 0, rgba(4, 8, 12, 0.42) 70px, transparent 150px),
     linear-gradient(to right, rgba(4, 8, 12, 0.62) 0, rgba(4, 8, 12, 0.28) 220px, transparent 400px);
 }
 body.ui-clean-view::before,
+body.oko-karta-clean::before,
+body:has(> #oko-video-hud)::before,
 body.cockpit-mode::before,
 body.scene-playback-mode::before,
 body.recording-mode::before,
@@ -14593,6 +14597,10 @@ body.embed-mode::before { content: none; }
 #top-center-actions > #oko-more-btn { display: none; }
 #oko-more-menu[hidden] { display: none; }
 #global-loading-status { top: 98px; }
+/* Čipy synchronizácie a ponuka účtu sa posúvajú s ním (popisy pod ikonami zabrali 24 px). */
+body:not(.oko-mobile) #traffic-sync-chip { top: 136px; }
+body:not(.oko-mobile) #cctv-sync-chip { top: 170px; }
+#top-center-actions .auth-menu { z-index: 2; }
 
 /* 4. Ľavý stĺpec: začína pod logom (ui.js baseTop 14 %), nadpisy a názvy sa dajú prečítať. */
 #left-panel-stack { top: var(--left-stack-safe-top, 14vh); }

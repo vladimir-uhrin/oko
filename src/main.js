@@ -787,7 +787,12 @@ async function init() {
     installScopeMask(viewer);
     // 2026-11-09 (audit UI, vlastník schválil): ďalekohľad je v aplikácii predvolene vypnutý — mapa má celú
     // obrazovku. Odkaz so sc=1 alebo tlačidlo v Zobrazení ho zapne (ui.js, sharelink.js).
-    if (!styleManager.hasShareState) setScopeMaskEnabled(false);
+    if (!styleManager.hasShareState) {
+      setScopeMaskEnabled(false);
+      // Stav zdieľania sa zachytil v konštruktore StyleManagera, keď bol ďalekohľad ešte zapnutý — bez
+      // dorovnania by odkaz niesol sc=1 a príjemca by ďalekohľad videl.
+      try { styleManager._syncShareState(); } catch { /* odkaz sa dorovná pri najbližšej zmene */ }
+    }
 
     // The follow camera recomputes the tracked target's dead-reckon position
     // every frame — tracking anything is a per-frame animation. (perf wave 2)

@@ -53,5 +53,5 @@ test('štýl: na telefóne sú v lište len Hľadať, Účet a Viac s cieľom 44
 
 test('štýl: jedno pravidlo viditeľného fokusu pre všetky ovládacie prvky', () => {
   const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-  assert.match(css, /body :is\(button, a\[href\], input, select, textarea[^{]*:not\(canvas\):focus-visible \{\n\s*outline: 2px solid var\(--accent\) !important;/);
+  assert.match(css, /body :is\(button, a\[href\], input, select, textarea[^{]*:not\(canvas\):not\(\.oko-cmd-input\):focus-visible \{\n\s*outline: 2px solid var\(--accent\) !important;/);
 });

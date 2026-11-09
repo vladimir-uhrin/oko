@@ -50,10 +50,10 @@ const OBSTACLE_TTL_MS = 400;
 export const HOTCARD_OBSTACLE_SELECTOR = `${CARD_OBSTACLE_SELECTOR}, #cesium-credits .cesium-widget-credits, .hud-top-right, .hud-bottom-left, #global-loading-status`;
 /**
  * Miesto stavového riadka pod hornou lištou („OBNOVUJEM ŽIVÉ DÁTA…", #global-loading-status:
- * top 74 px, vystredený, najviac ~400 px). Riadok sa objavuje len na chvíľu pri každej obnove
+ * top 98 px (do 2026-11-09 74 px), vystredený, najviac ~400 px). Riadok sa objavuje len na chvíľu pri každej obnove
  * dát; jeho miesto je preto vyhradené STÁLE, inak by karta pod lištou pri každej obnove poskočila.
  */
-export const HOTCARD_STATUS_ZONE = Object.freeze({ top: 74, width: 420, height: 28 });
+export const HOTCARD_STATUS_ZONE = Object.freeze({ top: 98, width: 420, height: 28 });
 /** Kontajnery, ktoré svoj obsah orezávajú a rolujú — z panela v nich je prekážkou len viditeľná časť. */
 export const HOTCARD_CLIP_SELECTOR = '#left-panel-stack, #right-context-rail';
 

@@ -8245,6 +8245,9 @@ export class StyleManager {
     // 2026-11-09 (audit UI): stĺpec začína hneď pod logom (14 % namiesto 26 %) — pri 26 % sa na 900 px
     // zmestilo 6 z 12 pilúl a zvyšok bol odrezaný bez náznaku posunu.
     const baseTop = viewportHeight * 0.14;
+    // Hranica „prekážka hore / dole" ostáva na pôvodných 26 %: s 14 % sa titulok rámu KARTA (top 98 px) na okne
+    // nižšom než 700 px stal SPODNOU prekážkou a stĺpec dostal nulovú výšku (kontrola pred vydaním 2026-11-09).
+    const topObstacleLimit = viewportHeight * 0.26;
     const baseBottomInset = viewportHeight * 0.04;
     const safeGap = viewportHeight * 0.012;
     let obstacleSafeTop = viewportHeight * 0.04;
@@ -8268,11 +8271,11 @@ export class StyleManager {
       const overlapsHorizontally = rect.right > stackRect.left && rect.left < stackRect.right;
       if (!overlapsHorizontally) continue;
 
-      if (rect.top < baseTop && rect.bottom <= viewportHeight * 0.5) {
+      if (rect.top < topObstacleLimit && rect.bottom <= viewportHeight * 0.5) {
         const obstacleBottom = rect.bottom + safeGap;
         obstacleSafeTop = Math.max(obstacleSafeTop, obstacleBottom);
         safeTop = Math.max(safeTop, obstacleBottom);
-      } else if (rect.top >= baseTop) {
+      } else if (rect.top >= topObstacleLimit) {
         bottomObstacles.push({ top: rect.top });
       }
     }
