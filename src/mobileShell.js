@@ -17,6 +17,7 @@
 // vybraná a sledovaná karta (jedna naraz), inak si karty staníc prekrývali mapu.
 
 import { trackEvent } from './analytics.js';
+import { restoreOpener } from './dialogFocus.js';
 
 export const MOBILE_MAX_WIDTH_PX = 900;
 export const COARSE_MAX_WIDTH_PX = 1180;
@@ -354,22 +355,32 @@ export function createMobileShell({
     if (frame !== null) return;
     frame = raf(() => { frame = null; sync(); });
   };
-  const onKeydown = (event) => { if (event?.key === 'Escape' && active) close(); };
+  // Zavretie používateľom (krížik, pozadie, Escape, potiahnutie): keď fokus ostal vo výsuve, vráti sa na
+  // tlačidlo jeho sekcie v spodnej lište. close() sa nemení — volá ho aj prepnutie sekcie a zmena okna.
+  function closeByUser() {
+    if (!active) return false;
+    const section = active;
+    const stranded = Boolean(sheet.contains?.(doc.activeElement));
+    const closed = close();
+    if (closed && stranded) restoreOpener(buttons.find((b) => b?.dataset?.okoSection === section) || null);
+    return closed;
+  }
+  const onKeydown = (event) => { if (event?.key === 'Escape' && active) closeByUser(); };
   const onTouchStart = (event) => {
     const touch = event?.touches?.[0];
     touchStart = touch ? { y: touch.clientY, t: now() } : null;
   };
   const onTouchEnd = (event) => {
     const touch = event?.changedTouches?.[0];
-    if (touchStart && touch && swipeShouldClose({ startY: touchStart.y, endY: touch.clientY, elapsedMs: now() - touchStart.t })) close();
+    if (touchStart && touch && swipeShouldClose({ startY: touchStart.y, endY: touch.clientY, elapsedMs: now() - touchStart.t })) closeByUser();
     touchStart = null;
   };
 
   for (const button of buttons) {
     button.addEventListener?.('click', () => toggle(button.dataset?.okoSection));
   }
-  closeButton?.addEventListener?.('click', () => close());
-  backdrop?.addEventListener?.('click', () => close());
+  closeButton?.addEventListener?.('click', () => closeByUser());
+  backdrop?.addEventListener?.('click', () => closeByUser());
   doc.addEventListener?.('keydown', onKeydown);
   const grip = sheet.querySelector?.('.oko-sheet-head') || sheet;
   grip.addEventListener?.('touchstart', onTouchStart, { passive: true });

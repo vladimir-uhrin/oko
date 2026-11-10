@@ -12,6 +12,7 @@
 // DOM sa stavia len cez createElement/appendChild (bez innerHTML), aby sa dal
 // pokryť testom s falošným dokumentom.
 import { t } from './i18n.js';
+import { claimEscape, rememberOpener, restoreOpener } from './dialogFocus.js';
 import { trackEvent } from './analytics.js';
 import { buildShareTargets } from './shareTargets.js';
 import { embedSnippet, embedUrlFromAppUrl } from './embedMode.js';
@@ -90,11 +91,13 @@ function ensurePanel(doc, win, nav, translate, toast) {
   host.appendChild(backdrop);
   host.appendChild(root);
 
-  const hide = () => { root.hidden = true; backdrop.hidden = true; };
-  const show = () => { root.hidden = false; backdrop.hidden = false; };
+  // Fokus: pri otvorení na krížik, po zavretí späť na tlačidlo, z ktorého sa okno otvorilo (dialogFocus.js).
+  const hide = () => { root.hidden = true; backdrop.hidden = true; restoreOpener(ui.opener); ui.opener = null; };
+  const show = () => { ui.opener = rememberOpener(doc); root.hidden = false; backdrop.hidden = false; closeButton.focus?.(); };
   closeButton.addEventListener('click', hide);
   backdrop.addEventListener('click', hide);
-  doc.addEventListener?.('keydown', (event) => { if (event?.key === 'Escape' && !root.hidden) hide(); });
+  // Zachytávacia fáza: okno zdieľania je nad výsuvom aj kartami — Escape zavrie len jeho.
+  doc.addEventListener?.('keydown', (event) => { if (event?.key === 'Escape' && !root.hidden) { claimEscape(event); hide(); } }, true);
 
   copyLink.addEventListener('click', async () => {
     const url = ui.session?.url;

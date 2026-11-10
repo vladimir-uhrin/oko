@@ -1,3 +1,4 @@
+import { claimEscape, rememberOpener, restoreOpener } from './dialogFocus.js';
 // src/commandPalette.js
 /**
  * @module commandPalette
@@ -83,6 +84,8 @@ export function createCommandPalette({
   if (!doc?.createElement || !doc.body) return inert;
 
   let _open = false;
+
+  let _opener = null;
   let _rows = []; // [{ node, run }]
   let _sel = -1;
   let _destroyed = false;
@@ -183,6 +186,8 @@ export function createCommandPalette({
 
   function open(initial = '') {
     if (_open) return;
+    // Odkiaľ sa paleta otvorila — po zavretí sa tam fokus vráti (dialogFocus.js).
+    _opener = rememberOpener(doc);
     _open = true; root.hidden = false;
     input.value = typeof initial === 'string' ? initial : '';
     render();
@@ -191,6 +196,8 @@ export function createCommandPalette({
   function close() {
     if (!_open) return;
     _open = false; root.hidden = true;
+    // Pred spustením príkazu: príkaz, ktorý si fokus presunie sám, tak vyhrá.
+    restoreOpener(_opener); _opener = null;
     _rows = []; _sel = -1;
     clearTimeout(_asyncTimer);
   }
@@ -201,8 +208,11 @@ export function createCommandPalette({
     if (e.key === 'ArrowDown') { e.preventDefault(); select(_sel + 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); select(_sel - 1); }
     else if (e.key === 'Enter') { e.preventDefault(); if (_sel >= 0 && _rows[_sel]) _rows[_sel].run(); }
-    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    // stopPropagation: Escape z palety nesmie zrušiť sledovanie letu ani zavrieť výsuv za ňou.
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation?.(); close(); }
   });
+  // Fokus na riadku výsledkov (tabulátor): Escape zavrie paletu aj odtiaľ.
+  root.addEventListener('keydown', (e) => { if (e.key === 'Escape' && e.target !== input) { claimEscape(e); close(); } });
   root.addEventListener('click', (e) => { if (e.target === root) close(); });
   // Klávesa „/" otvorí paletu, keď používateľ práve nepíše do iného poľa.
   const onDocKey = (e) => {

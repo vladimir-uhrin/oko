@@ -12574,6 +12574,22 @@ body.oko-mobile .mideast-chips .mideast-chip { min-height: 32px; }
 @media (prefers-reduced-motion: reduce) {
   .gas-status[data-state="loading"]::before { animation-duration: 2.4s; }
 }
+/* Stavové riadky (načítavam / prázdne / chyba / zastarané) — jedna veľkosť a riadkovanie (2026-11-10,
+   audit UI — krok 2). Farbu, písmo a rozostupy nechávajú pôvodné pravidlá; farby stavov ostávajú v pravidlách
+   [data-state]. Poznámky pod čiarou (*-note) sem nepatria — menia sa spolu so svojím panelom. */
+.gas-status,
+.oko-lazy-status,
+.history-status,
+.history-empty,
+.events-owner-msg,
+.events-review-empty,
+.ukraine-dircard-status,
+.state-strip-status,
+.bookmark-empty,
+.scene-shot-empty {
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+}
 .gas-card {
   display: flex;
   flex-direction: column;
@@ -14787,6 +14803,69 @@ body.oko-mobile #top-center-actions > #oko-more-btn { order: 3; display: flex; }
 body.oko-mobile #oko-welcome { left: 8px; right: 8px; width: auto; transform: none; top: calc(var(--oko-topbar-h, 56px) + env(safe-area-inset-top, 0px) + 8px); padding: 12px 12px 10px; }
 body.oko-mobile .oko-welcome-choice { flex: 1 1 100%; justify-content: flex-start; }
 #oko-appbar .oko-appbar-label { font-size: 10px; }
+
+/* ═══ Spoločné komponenty (2026-11-10, audit UI — krok 2) ═══
+   Krížik zavretia — jeden vzhľad pre 13 z 15 tried. Zámerne BEZ rozmerov, písma, okrajov a obrysu:
+   fokus kreslí spoločné pravidlo vyššie, veľkosti boxov vstupujú do rozmiestnenia kariet na mape.
+   Mimo ostávajú: .card-close (plávajúci kruh, 26 px zviazaných s JS), .oko-ukr-tl-close (tlačidlo lišty),
+   .oko-welcome-close a .oko-consent-close (vlastná paleta), .auth-close (panel.css). */
+/* A — farba, hover, kurzor (bez vplyvu na box) */
+.airport-card-close,
+.meteogram-close,
+.meteo-place-close,
+.pipeline-hover-close,
+.earthquake-hover-close,
+.fire-news-close,
+.events-close,
+.oko-conflicts-close,
+.oko-share-close,
+.oko-ukr-card-close,
+.oko-mideast-inc-close,
+.oko-ukr-lb-close,
+#oko-sheet-close {
+  color: var(--text-secondary);
+  cursor: var(--cursor-pointer);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.airport-card-close:hover, .airport-card-close:focus-visible,
+.meteogram-close:hover, .meteogram-close:focus-visible,
+.meteo-place-close:hover, .meteo-place-close:focus-visible,
+.pipeline-hover-close:hover, .pipeline-hover-close:focus-visible,
+.earthquake-hover-close:hover, .earthquake-hover-close:focus-visible,
+.fire-news-close:hover, .fire-news-close:focus-visible,
+.events-close:hover, .events-close:focus-visible,
+.oko-conflicts-close:hover, .oko-conflicts-close:focus-visible,
+.oko-share-close:hover, .oko-share-close:focus-visible,
+.oko-ukr-card-close:hover, .oko-ukr-card-close:focus-visible,
+.oko-mideast-inc-close:hover, .oko-mideast-inc-close:focus-visible,
+.oko-ukr-lb-close:hover, .oko-ukr-lb-close:focus-visible,
+#oko-sheet-close:hover, #oko-sheet-close:focus-visible {
+  color: var(--text-primary);
+}
+
+/* B — holé krížiky s dostatočným boxom: zaoblenie a podklad pri hoveri (bez vplyvu na box) */
+.airport-card-close,
+.meteogram-close,
+.meteo-place-close,
+.pipeline-hover-close,
+.earthquake-hover-close,
+.oko-conflicts-close,
+.oko-share-close,
+.oko-ukr-lb-close,
+#oko-sheet-close {
+  border-radius: var(--radius-sm);
+}
+.airport-card-close:hover,
+.meteogram-close:hover,
+.meteo-place-close:hover,
+.pipeline-hover-close:hover,
+.earthquake-hover-close:hover,
+.oko-conflicts-close:hover,
+.oko-share-close:hover,
+.oko-ukr-lb-close:hover,
+#oko-sheet-close:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
 
 /* ═══ Ikony Material Symbols Outlined — vlastný výrez (2026-10-31) ═══
    Namiesto celého písma z Google Fonts (PageSpeed: 324 KB, najväčší súbor po Cesiu a balíku) sa načíta
