@@ -193,7 +193,7 @@ test('UI: posuvníky celého rozhrania sú tenké a tlmené, skryté lišty ost�
   // a bez tohto vzhľadu kreslil Windows cez tmavé UI natívnu bielu lištu.
   const css = readFileSync(new URL('../../style.css', import.meta.url), 'utf8');
   assert.match(css, /\*\s*\{[^}]*scrollbar-width:\s*thin/, 'globálny tenký posuvník');
-  assert.match(css, /\*\s*\{[^}]*scrollbar-color:\s*rgba\(0,\s*212,\s*255/, 'farba drží akcent rozhrania');
+  assert.match(css, /\*\s*\{[^}]*scrollbar-color:\s*rgba\(var\(--accent-rgb\)/, 'farba drží akcent rozhrania');
   assert.match(css, /^::-webkit-scrollbar\s*\{[^}]*width:\s*8px/m);
   assert.match(css, /^::-webkit-scrollbar-track\s*\{[^}]*background:\s*transparent/m, 'dráha je priehľadná, nie biela');
   // Zámerne skryté posuvníky majú vyššiu špecificitu a musia prežiť.

@@ -192,7 +192,7 @@ export function renderSharePage({ record, origin }) {
 <meta name="twitter:description" content="${description}" />
 <meta name="twitter:image" content="${escapeHtml(imageUrl)}" />
 <link rel="canonical" href="${escapeHtml(pageUrl)}" />
-<style>html,body{height:100%}body{margin:0;background:#06101a;color:#dff3fb;font:14px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}a{color:#39d0ff}main{text-align:center;padding:24px}img{max-width:min(92vw,720px);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.5)}iframe.oko-live{position:fixed;inset:0;width:100%;height:100%;border:0;background:#06101a}</style>
+<style>html,body{height:100%}body{margin:0;background:#06101a;color:#dff3fb;font:14px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}a{color:#00d4ff}main{text-align:center;padding:24px}img{max-width:min(92vw,720px);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.5)}iframe.oko-live{position:fixed;inset:0;width:100%;height:100%;border:0;background:#06101a}</style>
 </head>
 <body>
 <main>
