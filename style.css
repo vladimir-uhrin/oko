@@ -14717,6 +14717,15 @@ body:not(.oko-mobile) #cctv-sync-chip { top: 170px; }
 .oko-welcome-choice:hover { background: rgba(var(--accent-rgb), 0.2); color: #fff; }
 .oko-welcome-choice .material-symbols-outlined { font-size: 18px; color: var(--accent); }
 .oko-welcome-hint { margin-top: 10px; font: 400 13px/1.45 var(--font-sans); color: var(--text-secondary); }
+/* Ponuka druhého jazyka (návštevník zo zahraničia so slovenským rozhraním a naopak). */
+.oko-welcome-lang {
+  display: inline-flex; align-items: center; min-height: 36px; margin-top: var(--sp-2); padding: 0 var(--sp-3);
+  font: 600 13px/1 var(--font-sans); color: var(--accent);
+  background: none; border: 1px solid rgba(var(--accent-rgb), 0.36); border-radius: var(--radius-pill);
+  cursor: var(--cursor-pointer, pointer);
+}
+.oko-welcome-lang:hover { background: rgba(var(--accent-rgb), 0.14); color: var(--text-primary); }
+body.oko-mobile .oko-welcome-lang { min-height: 44px; }
 body.cockpit-mode #oko-welcome,
 body.ui-clean-view #oko-welcome,
 body.scene-playback-mode #oko-welcome,

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { shouldAutoShowWelcome, welcomeConsentWait, createWelcomeStrip, WELCOME_CHOICES, WELCOME_STORAGE_KEY } from './welcomeStrip.js';
+import { shouldAutoShowWelcome, welcomeConsentWait, welcomeFlightsChoice, welcomeLanguageOffer, createWelcomeStrip, WELCOME_CHOICES, WELCOME_STORAGE_KEY } from './welcomeStrip.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 
 function fakeDoc() {
@@ -92,4 +92,68 @@ test('každá voľba má preklad v oboch jazykoch', () => {
     assert.ok(EN_STRINGS[key], `EN ${key}`);
     assert.ok(SK_STRINGS[key], `SK ${key}`);
   }
+});
+
+// 2026-11-10 (vlastník): „ak klikne Slovensko, prelet nad Slovenskom; ak príde z inej adresy ako SK, ponúkni
+// štát, z ktorého prišiel, a EN verziu".
+test('prvá voľba: zo Slovenska a bez polohy Slovensko, zo zahraničia štát návštevníka', () => {
+  const home = { lat: 48.7, lon: 19.5 };
+  const name = (code) => ({ CZ: 'Česko', DE: 'Nemecko' }[code] || '');
+  assert.deepEqual(welcomeFlightsChoice({ country: 'SK', lat: 48.2, lon: 17.7 }, { countryName: name, home }),
+    { home: true, labelKey: 'welcome.flights', place: '', lat: 48.7, lon: 19.5 }, 'Slovensko = stred krajiny, nie mesto návštevníka');
+  assert.deepEqual(welcomeFlightsChoice({ country: 'CZ', lat: 50.08, lon: 14.43 }, { countryName: name, home }),
+    { home: false, labelKey: 'welcome.flights-country', place: 'Česko', lat: 50.08, lon: 14.43 });
+  for (const geo of [null, {}, { country: 'DE' }, { country: 'XX', lat: 1, lon: 2 }]) {
+    assert.equal(welcomeFlightsChoice(geo, { countryName: name, home }).home, true, `bez krajiny, polohy alebo mena ostáva Slovensko: ${JSON.stringify(geo)}`);
+  }
+});
+
+test('ponuka jazyka: zahraničie so slovenčinou → angličtina, Slovensko s angličtinou → slovenčina, inak nič', () => {
+  assert.deepEqual(welcomeLanguageOffer({ country: 'CZ' }, 'sk'), { lang: 'en', labelKey: 'welcome.lang-en' });
+  assert.deepEqual(welcomeLanguageOffer({ country: 'SK' }, 'en'), { lang: 'sk', labelKey: 'welcome.lang-sk' });
+  assert.equal(welcomeLanguageOffer({ country: 'SK' }, 'sk'), null);
+  assert.equal(welcomeLanguageOffer({ country: 'DE' }, 'en'), null);
+  assert.equal(welcomeLanguageOffer(null, 'sk'), null, 'bez krajiny sa jazyk neponúka');
+});
+
+test('pás: popis prvej voľby nesie štát návštevníka a tlačidlo jazyka prepne jazyk', () => {
+  const doc = fakeDoc();
+  const switched = [];
+  const strip = createWelcomeStrip({
+    doc, storage: fakeStorage(),
+    translate: (key, vars) => (vars?.place ? `${key}|${vars.place}` : key),
+    actions: { flights: () => {} },
+    flightsChoice: () => ({ labelKey: 'welcome.flights-country', place: 'Česko' }),
+    languageOffer: () => ({ lang: 'en', labelKey: 'welcome.lang-en' }),
+    onLanguage: (lang) => switched.push(lang),
+  });
+  strip.open();
+  const root = doc.body.children[0];
+  const [flights] = collect(root, (n) => n.dataset?.welcomeChoice === 'flights');
+  assert.equal(flights.children[1].textContent, 'welcome.flights-country|Česko');
+  const [lang] = collect(root, (n) => n.dataset?.welcomeLang === 'en');
+  assert.equal(lang.textContent, 'welcome.lang-en');
+  lang.listeners.click();
+  assert.deepEqual(switched, ['en']);
+  assert.equal(strip.isOpen(), false);
+});
+
+test('pás bez ponuky jazyka tlačidlo jazyka nekreslí; nové texty sú v oboch jazykoch', () => {
+  const doc = fakeDoc();
+  const strip = createWelcomeStrip({ doc, storage: fakeStorage(), translate: (k) => k, actions: { flights: () => {} }, languageOffer: () => null, onLanguage: () => {} });
+  strip.open();
+  assert.equal(collect(doc.body.children[0], (n) => Boolean(n.dataset?.welcomeLang)).length, 0);
+  for (const key of ['welcome.flights-country', 'welcome.lang-en', 'welcome.lang-sk']) {
+    assert.ok(EN_STRINGS[key], `EN ${key}`);
+    assert.ok(SK_STRINGS[key], `SK ${key}`);
+  }
+  assert.match(EN_STRINGS['welcome.flights-country'], /\{place\}/);
+  assert.match(SK_STRINGS['welcome.flights-country'], /\{place\}/);
+});
+
+test('zapojenie: voľba Lietadlá letí nad krajinu (areaViewFor), nie nad Bratislavu', () => {
+  const main = fs.readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /flights: \(\) => \{ void dataManager\.setEnabled\('flights', true, \{ origin: 'user' \}\); flyOverCountry\(flightsChoice\(\)\); \}/);
+  assert.match(main, /areaViewFor\(\{ lat, lon, precision: 'country' \}\)/);
+  assert.match(main, /offsetPoint\(lat, lon, 180, WELCOME_HOME_VIEW\.backKm\)/, 'Slovensko má vlastný bližší záber');
 });

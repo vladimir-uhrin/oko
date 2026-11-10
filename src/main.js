@@ -12,9 +12,9 @@ import { initNoticeBanner } from './noticeBanner.js';
 import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { initTopBarExtras } from './topBarExtras.js';
-import { createWelcomeStrip, welcomeConsentWait } from './welcomeStrip.js';
+import { WELCOME_HOME_VIEW, createWelcomeStrip, welcomeConsentWait, welcomeFlightsChoice, welcomeLanguageOffer } from './welcomeStrip.js';
 import { StyleManager } from './ui.js';
-import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, showStartView } from './camera.js';
+import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, START_SK, areaViewFor, offsetPoint, showStartView } from './camera.js';
 import { coarsenTilesDuringStartFlight } from './startFlightDetail.js';
 import { DataLayerManager, layerDisplayName } from './data/manager.js';
 import flightsLayer, { FLEET_FAR_BRIGHTNESS } from './data/flights.js';
@@ -1266,10 +1266,32 @@ async function init() {
         // Na telefóne by výsuv zakryl práve zarámovanú mapu — panel sa otvára len na počítači.
         if (!onPhone()) styleManager.setPanelCollapsed(panelId, false, { explicit: true, persist: false, syncShare: false });
       };
+      // Prvá voľba podľa krajiny pripojenia (2026-11-10, vlastník): zo Slovenska prelet nad celé Slovensko
+      // (nie nad Bratislavu), odinakiaľ nad štát návštevníka; ten dostane aj ponuku anglickej verzie.
+      let visitorGeo = null;
+      void geoPromise.then((geo) => { visitorGeo = geo; }).catch(() => {});
+      const countryName = (code) => { try { return new Intl.DisplayNames([currentLanguage()], { type: 'region' }).of(code) || ''; } catch { return ''; } };
+      const flightsChoice = () => welcomeFlightsChoice(visitorGeo, { countryName, home: START_SK });
+      const flyOverCountry = ({ home, lat, lon }) => {
+        // Slovensko má vlastný bližší záber (celá krajina cez obrazovku); iný štát všeobecný pohľad „krajina".
+        const at = home && Number.isFinite(lat) && Number.isFinite(lon) ? offsetPoint(lat, lon, 180, WELCOME_HOME_VIEW.backKm) : null;
+        const view = at
+          ? { longitude: at.lon, latitude: at.lat, heightM: WELCOME_HOME_VIEW.heightM, headingDeg: 0, pitchDeg: WELCOME_HOME_VIEW.pitchDeg }
+          : areaViewFor({ lat, lon, precision: 'country' });
+        if (!view) return;
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(view.longitude, view.latitude, view.heightM),
+          orientation: { heading: Cesium.Math.toRadians(view.headingDeg), pitch: Cesium.Math.toRadians(view.pitchDeg), roll: 0 },
+          duration: 3,
+        });
+      };
       const welcomeStrip = createWelcomeStrip({
         translate: t,
+        flightsChoice,
+        languageOffer: () => welcomeLanguageOffer(visitorGeo, currentLanguage()),
+        onLanguage: (lang) => setLanguage(lang),
         actions: {
-          flights: () => { void dataManager.setEnabled('flights', true, { origin: 'user' }); void styleManager.resetToGlobeView({ home: true }); },
+          flights: () => { void dataManager.setEnabled('flights', true, { origin: 'user' }); flyOverCountry(flightsChoice()); },
           ukraine: () => frameOverview('ukraine', 'ukraine-panel'),
           mideast: () => frameOverview('middle-east', 'mideast-panel'),
           weather: () => { void dataManager.setEnabled('shmu-radar', true, { origin: 'user' }); openPanel('weather-panel', 'layers'); },
