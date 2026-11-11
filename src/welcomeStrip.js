@@ -22,6 +22,24 @@ export const WELCOME_HOME_COUNTRY = 'SK';
  * (~430 km na šírku) má vyplniť obrazovku.
  */
 export const WELCOME_HOME_VIEW = Object.freeze({ heightM: 430_000, pitchDeg: -52, backKm: 320 });
+/**
+ * To isté na telefóne na výšku: zorné pole 60° patrí dlhšej strane, na šírku 390 z 844 px ostáva asi 30°.
+ * Z 430 km bolo vidno len ~290 km — západ aj východ Slovenska mimo obrazovky (overené na okolive.sk 2026-11-11).
+ * Z 760 km je to ~510 km, celá krajina s okrajom.
+ */
+export const WELCOME_HOME_VIEW_PORTRAIT = Object.freeze({ heightM: 760_000, pitchDeg: -52, backKm: 590 });
+
+/**
+ * Záber na Slovensko podľa tvaru plátna. Pure.
+ * @param {number} width šírka plátna v px
+ * @param {number} height výška plátna v px
+ * @returns {{ heightM: number, pitchDeg: number, backKm: number }}
+ */
+export function welcomeHomeView(width, height) {
+  const w = Number(width);
+  const h = Number(height);
+  return w > 0 && h > w ? WELCOME_HOME_VIEW_PORTRAIT : WELCOME_HOME_VIEW;
+}
 
 /** Voľby pásu v poradí zobrazenia; `id` = kľúč akcie, ktorú dodá main.js. */
 export const WELCOME_CHOICES = Object.freeze([

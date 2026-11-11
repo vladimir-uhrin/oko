@@ -12,7 +12,7 @@ import { initNoticeBanner } from './noticeBanner.js';
 import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { initTopBarExtras } from './topBarExtras.js';
-import { WELCOME_HOME_VIEW, createWelcomeStrip, welcomeConsentWait, welcomeFlightsChoice, welcomeLanguageOffer } from './welcomeStrip.js';
+import { createWelcomeStrip, welcomeHomeView, welcomeConsentWait, welcomeFlightsChoice, welcomeLanguageOffer } from './welcomeStrip.js';
 import { StyleManager } from './ui.js';
 import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, START_SK, areaViewFor, offsetPoint, showStartView } from './camera.js';
 import { coarsenTilesDuringStartFlight } from './startFlightDetail.js';
@@ -1274,9 +1274,10 @@ async function init() {
       const flightsChoice = () => welcomeFlightsChoice(visitorGeo, { countryName, home: START_SK });
       const flyOverCountry = ({ home, lat, lon }) => {
         // Slovensko má vlastný bližší záber (celá krajina cez obrazovku); iný štát všeobecný pohľad „krajina".
-        const at = home && Number.isFinite(lat) && Number.isFinite(lon) ? offsetPoint(lat, lon, 180, WELCOME_HOME_VIEW.backKm) : null;
+        const homeView = welcomeHomeView(viewer.canvas?.clientWidth, viewer.canvas?.clientHeight);
+        const at = home && Number.isFinite(lat) && Number.isFinite(lon) ? offsetPoint(lat, lon, 180, homeView.backKm) : null;
         const view = at
-          ? { longitude: at.lon, latitude: at.lat, heightM: WELCOME_HOME_VIEW.heightM, headingDeg: 0, pitchDeg: WELCOME_HOME_VIEW.pitchDeg }
+          ? { longitude: at.lon, latitude: at.lat, heightM: homeView.heightM, headingDeg: 0, pitchDeg: homeView.pitchDeg }
           : areaViewFor({ lat, lon, precision: 'country' });
         if (!view) return;
         viewer.camera.flyTo({

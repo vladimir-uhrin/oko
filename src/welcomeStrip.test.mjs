@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { shouldAutoShowWelcome, welcomeConsentWait, welcomeFlightsChoice, welcomeLanguageOffer, createWelcomeStrip, WELCOME_CHOICES, WELCOME_STORAGE_KEY } from './welcomeStrip.js';
+import { welcomeHomeView, WELCOME_HOME_VIEW, WELCOME_HOME_VIEW_PORTRAIT, shouldAutoShowWelcome, welcomeConsentWait, welcomeFlightsChoice, welcomeLanguageOffer, createWelcomeStrip, WELCOME_CHOICES, WELCOME_STORAGE_KEY } from './welcomeStrip.js';
 import { EN_STRINGS, SK_STRINGS } from './i18nStrings.js';
 
 function fakeDoc() {
@@ -155,5 +155,21 @@ test('zapojenie: voľba Lietadlá letí nad krajinu (areaViewFor), nie nad Brati
   const main = fs.readFileSync(new URL('./main.js', import.meta.url), 'utf8');
   assert.match(main, /flights: \(\) => \{ void dataManager\.setEnabled\('flights', true, \{ origin: 'user' \}\); flyOverCountry\(flightsChoice\(\)\); \}/);
   assert.match(main, /areaViewFor\(\{ lat, lon, precision: 'country' \}\)/);
-  assert.match(main, /offsetPoint\(lat, lon, 180, WELCOME_HOME_VIEW\.backKm\)/, 'Slovensko má vlastný bližší záber');
+  assert.match(main, /offsetPoint\(lat, lon, 180, homeView\.backKm\)/, 'Slovensko má vlastný bližší záber');
+  assert.match(main, /welcomeHomeView\(viewer\.canvas\?\.clientWidth, viewer\.canvas\?\.clientHeight\)/, 'záber podľa tvaru plátna');
+});
+
+// 2026-11-11: na telefóne na výšku bol záber z 430 km orezaný zo západu aj východu (overené na okolive.sk).
+test('záber na Slovensko: na šírku 430 km, na výšku vyššie, aby sa krajina zmestila na úzku obrazovku', () => {
+  assert.equal(welcomeHomeView(1440, 900), WELCOME_HOME_VIEW);
+  assert.equal(welcomeHomeView(390, 844), WELCOME_HOME_VIEW_PORTRAIT);
+  assert.equal(welcomeHomeView(undefined, undefined), WELCOME_HOME_VIEW, 'neznáma veľkosť = záber na šírku');
+  // Šírka záberu v strede obrazovky: 2 · vzdialenosť · tan(vodorovné zorné pole / 2); zorné pole 60° patrí dlhšej strane.
+  const widthKm = (view, w, h) => {
+    const slant = view.heightM / 1000 / Math.sin((-view.pitchDeg * Math.PI) / 180);
+    const half = Math.atan(Math.tan(Math.PI / 6) * (w / h));
+    return 2 * slant * Math.tan(half);
+  };
+  assert.ok(widthKm(WELCOME_HOME_VIEW_PORTRAIT, 390, 844) >= 480, 'Slovensko (~430 km) sa na výšku zmestí s okrajom');
+  assert.ok(widthKm(WELCOME_HOME_VIEW, 390, 844) < 430, 'pôvodný záber by bol na výšku užší než krajina');
 });
