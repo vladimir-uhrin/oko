@@ -123,6 +123,7 @@ export const CARD_OBSTACLE_SELECTOR = [
   '#right-context-rail .panel-collapsible', '.oko-karta-island',
   '#oko-appbar', '#oko-sheet', // mobilný plášť
   '.oko-scale', // mierka v km (režim mapy)
+  '.oko-now-pill', '.oko-now-list', // pás „Čo sa deje teraz" — namaľované časti, nie celý (širší) obal
 ].join(', ');
 /** Obdĺžniky prekážok (okno) → súradnice kontajnera, orezané na výrez; mimo výrezu vypadnú. Pure. */
 export function obstacleBoxes(rects, origin = { left: 0, top: 0 }, viewport = { w: Infinity, h: Infinity }) {

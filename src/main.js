@@ -1300,6 +1300,41 @@ async function init() {
         },
       });
       window.__godsEyeView.welcomeStrip = welcomeStrip;
+      // Pás „Čo sa deje teraz" (2026-11-11, src/nowStrip.js): 8 s po štarte, lenivo; nie pri robotovi a vloženom
+      // rámčeku. Akcie sú tie isté funkcie, ktoré používa paleta, uvítanie a odkaz ?quake=.
+      if (!crawlerVisit && !embedView) {
+        void Promise.race([startSettled, new Promise((resolve) => setTimeout(resolve, 20_000))])
+          .then(() => new Promise((resolve) => setTimeout(resolve, 8000)))
+          .then(() => import('./nowStrip.js'))
+          .then(({ createNowStrip, quakeFilterRelax }) => {
+            const nowStrip = createNowStrip({
+              translate: t,
+              lang: currentLanguage,
+              actions: {
+                quake: (focus) => {
+                  // Vrstva môže mať zapnuté „len významné" alebo vyšší prah — otras z pásu by sa nevykreslil a výber
+                  // by ticho zlyhal. Uvoľní sa len to, čo by ho skrylo (nowStrip.js quakeFilterRelax), cez správcu vrstiev.
+                  try {
+                    const next = quakeFilterRelax(earthquakesLayer.getParams?.() || {}, focus.mag);
+                    if (next) dataManager.setLayerParams('earthquakes', next, { origin: 'user' });
+                  } catch { /* filtre sú doplnok */ }
+                  // Kamera letí hneď na polohu z pásu; výber v katalógu (karta otrasu) doletí, keď sa vrstva načíta.
+                  viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(focus.lon, focus.lat, 1_400_000), duration: 2.5 });
+                  void openQuakeLink({ id: focus.id, dataManager, layer: earthquakesLayer, flyTo: () => {} }).catch(() => {});
+                },
+                warnings: () => {
+                  void dataManager.setEnabled('shmu-warnings', true, { origin: 'user' });
+                  flyOverCountry({ home: true, lat: START_SK.lat, lon: START_SK.lon });
+                  if (!onPhone()) openPanel('weather-panel', 'layers');
+                },
+                ukraine: () => frameOverview('ukraine', 'ukraine-panel'),
+              },
+            });
+            window.__godsEyeView.nowStrip = nowStrip;
+            nowStrip.start();
+          })
+          .catch(() => { /* pás je voliteľný */ });
+      }
       // Na telefóne pás počká, kým návštevník vybaví lištu súhlasu (overené na okolive.sk 390×844: pás a lišta
       // spolu zakryli ~80 % obrazovky). Na počítači sa zmestia obe — pás je hore, lišta dole.
       const consentOpen = () => { const bar = document.getElementById('oko-consent'); return Boolean(bar && !bar.hidden); };
