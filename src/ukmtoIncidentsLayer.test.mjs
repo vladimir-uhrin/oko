@@ -194,7 +194,7 @@ test('main.js: vrstva pozná bránu priblíženia, ide do panela a prepína sa p
   assert.match(main, /if \(visible\) void ukmtoIncidents\?\.show\(\); else void ukmtoIncidents\?\.hide\(\);/);
   assert.match(main, /ukmtoIncidents = createUkmtoIncidents\(\{ viewer \}\);\n\s+window\.__godsEyeView\.ukmtoIncidents = ukmtoIncidents;/);
   assert.match(main, /ukmto: ukmtoIncidents,/);
-  assert.equal((main.match(/void ukmtoIncidents\?\.setActive\(false\);/g) || []).length, 2, 'scéna frontu a všeobecný rám vrstvu vypnú');
+  assert.equal((main.match(/void ukmtoIncidents\?\.setActive\(false\);/g) || []).length, 3, 'scéna frontu, všeobecný rám a odchod zo scény (leaveScene) vrstvu vypnú');
   assert.match(main, /void ukmtoIncidents\?\.setActive\(UKMTO_CHOKEPOINT_SCENES\.includes\(scene\?\.id\)\);/, 'úžiny len v oblasti UKMTO');
   assert.match(main, /void ukmtoIncidents\?\.setActive\(Boolean\(scene\)\);/, 'každé dejisko Blízkeho východu');
 });

@@ -172,9 +172,10 @@ export function createWelcomeStrip({
         ? translate(flights.labelKey, { place: flights.place })
         : translate(choice.labelKey);
       b.append(icon, label);
-      b.addEventListener('click', () => {
+      b.addEventListener('click', (event) => {
         close();
-        try { actions[choice.id](); } catch { /* voľba nikdy nezhodí stránku */ }
+        // Udalosť ide ďalej: režim tém z nej pozná vstup z klávesnice (detail 0) a dá fokus na Späť.
+        try { actions[choice.id](event); } catch { /* voľba nikdy nezhodí stránku */ }
       });
       list.append(b);
     }

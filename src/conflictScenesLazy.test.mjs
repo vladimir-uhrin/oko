@@ -135,7 +135,7 @@ test('zapojenie: main.js scény nenesie, brána dostane glóbus a hranice; výbe
     assert.doesNotMatch(main, new RegExp(`from '${f.replace(/[./]/g, '\\$&')}'`), `main.js staticky neimportuje ${f}`);
   }
   assert.match(main, /import \{ createConflictScenesGate \} from '\.\/conflictScenesLazy\.js';/);
-  assert.match(main, /const conflictScenes = createConflictScenesGate\(\{\n\s+getDeps: \(\) => \(\{ viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer \}\),/);
+  assert.match(main, /const conflictScenes = createConflictScenesGate\(\{\n\s+getDeps: \(\) => \(\{ viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer, onSceneState: \(kind\) => \{ lastSceneKind = String\(kind \|\| ''\); themeModeRef\?\.onSceneState\(kind\); \} \}\),/);
   assert.match(main, /conflictScenes\.install\(\{ search: window\.location\?\.search \|\| '' \}\);/);
   assert.match(main, /window\.__godsEyeView\.frontScenes = \{ list: listFrontScenes, apply: \(id\) => conflictScenes\.run\('front', id\) \};/);
   assert.match(main, /run: \(\) => \{ void conflictScenes\.frame\(c\); \}/, 'konflikt v hľadaní zarámuje cez bránu');
@@ -143,7 +143,7 @@ test('zapojenie: main.js scény nenesie, brána dostane glóbus a hranice; výbe
   for (const id of ['chokepoint-select', 'front-select', 'mideast-select']) assert.match(main, new RegExp(`bindScenePicker\\('${id}'`));
   assert.ok(main.indexOf('const countryBoundaries = createCountryBoundaries({ viewer });') < main.indexOf('const conflictScenes = createConflictScenesGate('), 'hranice vznikajú pred bránou (modul ich dostane)');
   const mod = read('./conflictScenes.js');
-  assert.match(mod, /^export function initConflictScenes\(deps\) \{\n  const \{ viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer \} = deps;/m);
+  assert.match(mod, /^export function initConflictScenes\(deps\) \{\n  const \{ viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer, onSceneState = null \} = deps;/m);
   assert.match(mod, /return \{\n\s+runFrontScene, runChokepointScene, runMideastTheatre, frameConflict, exportConflict, exitUkraine,/);
   assert.match(mod, /window\.__godsEyeView\.frontScenes = \{ list: listFrontScenes, apply: runFrontScene \};/, 'modul po inicializácii nahradí zástupné window API');
   const lazy = read('./conflictScenesLazy.js');

@@ -74,7 +74,7 @@ import { createUkraineTimeline, parseShareParams } from './ukraineTimeline.js';
  *   conflictsPanel: object, revealGate: object, ukraineTimeline: object}}
  */
 export function initConflictScenes(deps) {
-  const { viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer } = deps;
+  const { viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer, onSceneState = null } = deps;
   // Maritime chokepoint scenes: enable the vessel / SAR / pipeline layers,
   // frame a strait and mark it — the upstream "chokehold on oil" reveal built
   // from layers we already show honestly (see src/chokepointScenes.js). Layer
@@ -195,6 +195,8 @@ export function initConflictScenes(deps) {
     // Aktívny konflikt pre mobilný výsuv VOJNA (mobileShell.js expandByConflict): pri dejisku Blízkeho
     // východu sa otvorí jeho panel, nie Ukrajina (2026-11-06).
     try { document.body.dataset.okoActiveConflict = activeTheatre ? 'mideast' : (activeFrontScene ? 'ukraine' : ''); } catch { /* */ }
+    // Režim tém (src/themeMode.js) sa tu dozvie o každej zmene scény — aj o tej, ktorú spravil návštevník sám.
+    try { onSceneState?.(activeTheatre ? 'mideast' : activeFrontScene ? 'ukraine' : activeChokepoint ? 'chokepoint' : ''); } catch { /* */ }
   };
   const revealGate = createSceneRevealGate({
     viewer,
@@ -349,7 +351,8 @@ export function initConflictScenes(deps) {
     if (!state.shown && ukraineReport.isShown()) ukraineReport.hide();
   });
   const frontSceneDeps = {
-    showBase: () => ukraineBase.show(),
+    // Po odchode z Ukrajiny (exitUkraine) rozbehnutý vstup do smeru už nič neukáže ani neodletí.
+    showBase: () => (activeFrontScene ? ukraineBase.show() : null),
     // Front scéna upratuje mapu: ostatné vrstvy (po úžinách typicky lode,
     // prístavy, trasy a plynovody) vypne; vrstvy UKRAJINY nie sú v správcovi.
     listLayers: () => dataManager.getAll(),
@@ -358,7 +361,7 @@ export function initConflictScenes(deps) {
     // prehľad −70°); cieľ je Cartesian3 (Rectangle by pri streamujúcich 3D
     // dlaždiciach ticho neurobil nič — rovnaká pasca ako pri úžinách).
     flyToRegion: (scene) => {
-      if (!viewer?.camera?.flyTo || !scene?.rectDegrees) return null;
+      if (!viewer?.camera?.flyTo || !scene?.rectDegrees || !activeFrontScene) return null;
       viewer.trackedEntity = undefined;
       // Smer sa otvára v KARTE (runFrontScene) → výrez zhora a bližšie ako mapa Rybar.
       const framing = frontSceneFraming(scene.rectDegrees, { overview: Boolean(scene.overview), karta: !scene.overview });
@@ -626,7 +629,11 @@ export function initConflictScenes(deps) {
    * sídiel, DeepState, udalosti s časovou osou, škody a poplachy; vráti podklad
    * mapy spred KARTY, vrstvy, ktoré smer vypol, a kameru spred prvého smeru.
    */
-  const exitUkraine = () => {
+  // `keepView` (režim tém, src/themeMode.js): vrstvy, podklad a kameru vracia volajúci zo svojej snímky —
+  // tu sa len zloží scéna. Dvaja vlastníci návratu by leteli a prepínali proti sebe.
+  let frontExitSeq = 0;
+  const exitUkraine = ({ keepView = false } = {}) => {
+    frontExitSeq += 1; // dobiehajúci vstup do smeru už nesmie dopísať vypnuté vrstvy
     const hadScene = Boolean(activeFrontScene);
     activeFrontScene = null;
     kartaOverlay?.setScene?.(null);
@@ -636,14 +643,14 @@ export function initConflictScenes(deps) {
     for (const part of [ukraineControl, ukraineDeepState, ukraineDamage, ukraineAlerts, ukraineEvents, ukraineBase]) {
       try { part?.hide?.(); } catch { /* ďalšia časť */ }
     }
-    restoreAutoKarta();
+    if (!keepView) restoreAutoKarta();
     if (!activeChokepoint && !activeTheatre) revealGate.deactivate();
     syncMapFocus();
-    for (const layerId of frontDisabledLayerIds) { try { dataManager.setEnabled(layerId, true); } catch { /* */ } }
+    if (!keepView) for (const layerId of frontDisabledLayerIds) { try { dataManager.setEnabled(layerId, true); } catch { /* */ } }
     frontDisabledLayerIds = [];
     const pose = frontReturnPose;
     frontReturnPose = null;
-    if (hadScene && pose && viewer?.camera?.flyTo) {
+    if (!keepView && hadScene && pose && viewer?.camera?.flyTo) {
       viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.height),
         orientation: { heading: pose.heading, pitch: pose.pitch, roll: 0 },
@@ -683,8 +690,14 @@ export function initConflictScenes(deps) {
       void ukraineTimeline.showDeepState();
     }
     syncMapFocus();
+    // Poradie ODCHODOV, nie vstupov: dva rýchle smery za sebou musia do zoznamu dopísať oba.
+    const exitSeq = frontExitSeq;
     return applyFrontScene(id, frontSceneDeps).then((result) => {
-      for (const layerId of result?.disabledLayerIds || []) if (!frontDisabledLayerIds.includes(layerId)) frontDisabledLayerIds.push(layerId);
+      const disabled = result?.disabledLayerIds || [];
+      if (exitSeq === frontExitSeq) { for (const layerId of disabled) if (!frontDisabledLayerIds.includes(layerId)) frontDisabledLayerIds.push(layerId); }
+      // Medzitým sa z Ukrajiny odišlo: vrstvy, ktoré tento vstup ešte stihol vypnúť, sa vrátia hneď —
+      // do zoznamu už nepatria (ďalší odchod by zapínal vrstvy z dávnej scény) a nikto iný by ich nevrátil.
+      else for (const layerId of disabled) { try { dataManager.setEnabled(layerId, true); } catch { /* */ } }
       return result;
     });
   };
@@ -908,8 +921,44 @@ export function initConflictScenes(deps) {
     }
   } catch { /* zlý parameter nikdy nezhodí štart */ }
 
+  /**
+   * Odchod z akejkoľvek scény (smer frontu, úžina, dejisko) — úžina a dejisko dovtedy odchod nemali.
+   * `keepView`: podklad, vrstvy ani kameru nevracia (vráti ich režim tém zo svojej snímky); vráti podklad,
+   * ktorý scéna nahradila KARTOU (null, ak ho neprepla alebo ho návštevník medzitým zmenil sám).
+   * @param {{keepView?: boolean}} [o]
+   * @returns {{kartaPrev: string|null}}
+   */
+  const leaveScene = ({ keepView = false } = {}) => {
+    const kartaPrev = autoKartaPrev;
+    if (keepView) autoKartaPrev = null;
+    if (activeFrontScene) exitUkraine({ keepView });
+    if (activeTheatre || activeChokepoint) {
+      const kind = activeTheatre ? 'mideast' : 'chokepoint';
+      activeChokepoint = null; activeFrontScene = null; activeTheatre = null;
+      kartaOverlay?.setSuspended?.(false);
+      mideastPanel?.setActiveTheatre?.(null);
+      void mideastControl.setTheatre(null);
+      void ukmtoIncidents?.setActive(false);
+      void mideastIncidents?.setActive(false);
+      void mideastAlerts?.setActive(false); void mideastHumanitarian?.setActive(null); void mideastInternet?.setActive(null);
+      portwatchCard?.setActive?.(null);
+      incidentCards.setMode?.('full');
+      incidentCards.clear();
+      straitTrafficChip.hide();
+      oilPriceChip.hide();
+      setScenePin(null);
+      try { countryBoundaries.release('mideast-theatre'); } catch { /* držiteľ nemusel vzniknúť */ }
+      revealGate.deactivate();
+      trackEvent('scene_close', { scene_type: kind });
+    }
+    if (!keepView) restoreAutoKarta();
+    syncMapFocus();
+    return { kartaPrev: kartaPrev || null };
+  };
+  window.__godsEyeView.leaveScene = leaveScene;
+
   return {
-    runFrontScene, runChokepointScene, runMideastTheatre, frameConflict, exportConflict, exitUkraine,
+    runFrontScene, runChokepointScene, runMideastTheatre, frameConflict, exportConflict, exitUkraine, leaveScene,
     activeConflict, kartaOverlay, conflictsPanel, revealGate, ukraineTimeline, ukrainePanel, mideastPanel,
     listFrontScenes, listChokepointScenes, listMideastTheatres,
   };

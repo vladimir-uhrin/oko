@@ -348,7 +348,7 @@ test('tripwires main.js: správca pred panelom a v ňom, window API, setTheatre 
   for (const [name, body] of [['runFrontScene', runFront], ['runChokepointScene', runChoke], ['frameConflict else', frameElse]]) {
     assert.match(body, /void mideastControl\.setTheatre\(null\);/, `${name} schová kontrolu sídiel dejiska`);
   }
-  assert.equal([...main.matchAll(/mideastControl\.setTheatre\(/g)].length, 4, 'presne štyri volania setTheatre (dejisko + 3 odchody)');
+  assert.equal([...main.matchAll(/mideastControl\.setTheatre\(/g)].length, 5, 'presne päť volaní setTheatre (dejisko + 4 odchody vrátane leaveScene)');
 
   // Štýl podkladu ako pri vrstvách UKRAJINY (hillshade = karta), pri štarte aj pri zmene.
   assert.match(main, /const applyMideastControlStyle = \(stack\) => mideastControl\.setStyle\(stack\?\.kind === 'hillshade' \? 'karta' : 'default'\);/);

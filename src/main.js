@@ -13,6 +13,7 @@ import './noticeBanner.css';
 import { applyDomTranslations, currentLanguage, setLanguage, t } from './i18n.js';
 import { initTopBarExtras } from './topBarExtras.js';
 import { createWelcomeStrip, welcomeHomeView, welcomeConsentWait, welcomeFlightsChoice, welcomeLanguageOffer } from './welcomeStrip.js';
+import { createThemeMode, canEnterTheme, THEMES } from './themeMode.js';
 import { StyleManager } from './ui.js';
 import { START_FLY_DURATION_S, START_GLOBE_DWELL_MS, START_SK, areaViewFor, offsetPoint, showStartView } from './camera.js';
 import { coarsenTilesDuringStartFlight } from './startFlightDetail.js';
@@ -961,8 +962,11 @@ async function init() {
     // chce (src/conflictScenesLazy.js, 2026-10-31): otvorenie panela UKRAJINA / BLÍZKY VÝCHOD (aj z výsuvu
     // a z odkazu), výber v paneli Prelety kamerou, konflikt v hľadaní, odkaz ?front= / ?chokepoint= / ?mideast=,
     // nástroje vlastníka. Modul dostane hotový glóbus a hranice; window.__godsEyeView doplní sám.
+    // Režim tém (src/themeMode.js) vzniká nižšie pri uvítacom páse; scény mu hlásia každú zmenu.
+    let themeModeRef = null;
+    let lastSceneKind = ''; // posledné hlásenie scén: 'ukraine' | 'mideast' | 'chokepoint' | ''
     const conflictScenes = createConflictScenesGate({
-      getDeps: () => ({ viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer }),
+      getDeps: () => ({ viewer, styleManager, dataManager, mapStackController, countryBoundaries, aisLiveVesselsLayer, aishubVesselsLayer, gfwSarDetectionsLayer, onSceneState: (kind) => { lastSceneKind = String(kind || ''); themeModeRef?.onSceneState(kind); } }),
       translate: t,
       onLoaded: () => { try { leftLane.fitOpen(); } catch { /* ľavý stĺpec je voliteľný */ } },
     });
@@ -1072,6 +1076,11 @@ async function init() {
           keywords: [id, ...layerKeywords(id)],
           run: () => { try { dataManager.setEnabled(id, !dataManager.isEnabled(id), { origin: 'user' }); } catch { /* */ } },
         });
+      }
+      // Témy ako režimy (src/themeMode.js): vstup do témy a návrat aj z palety.
+      if (themeModeRef) {
+        if (themeModeRef.active && themeModeRef.canBack()) cmds.push({ id: 'theme:back', label: t('cmd.theme.back'), group: 'view', keywords: ['späť', 'spat', 'back', 'téma', 'tema', 'topic'], run: () => { void themeModeRef.back(); } });
+        for (const th of THEMES) cmds.push({ id: `theme:${th.id}`, label: t('cmd.theme', { name: t(th.nameKey) }), group: 'view', keywords: ['téma', 'tema', 'topic', th.id], run: () => { void themeModeRef.enter(th.id, { keyboard: true }); } });
       }
       // Úvodný pohľad ako tlačidlo s glóbusom hore (camera.js HOME_VIEW) — prvý riadok prázdneho hľadania.
       cmds.push({ id: 'view:home', label: t('cmd.action.home'), hint: t('cmd.action.home.hint'), group: 'view', keywords: ['domov', 'home', 'bratislava', 'úvod', 'start'], run: () => { void styleManager.resetToGlobeView({ home: true }); } });
@@ -1260,11 +1269,14 @@ async function init() {
       const openPanel = (panelId, section) => {
         if (!window.__okoMobileShell?.open?.(section, { expand: panelId })) styleManager.setPanelCollapsed(panelId, false, { explicit: true, persist: false, syncShare: false });
       };
-      const frameOverview = (region, panelId) => {
+      // Prehľad konfliktu: vracia sľub samotnej scény (nie rámovania s pevnou pauzou) — režim tém na ňom
+      // čaká, kým dovolí návrat (rozbehnutý vstup do smeru sa nedá zrušiť).
+      const runOverview = (region, kind, panelId, ctx) => {
         const conflict = listConflicts().find((c) => c.region === region && c.overview);
-        if (conflict) void conflictScenes.frame(conflict);
         // Na telefóne by výsuv zakryl práve zarámovanú mapu — panel sa otvára len na počítači.
         if (!onPhone()) styleManager.setPanelCollapsed(panelId, false, { explicit: true, persist: false, syncShare: false });
+        // Modul scén sa môže sťahovať dlhšie než strop čakania režimu — po Späť sa už scéna nespustí (ctx.isCurrent).
+        return conflict ? conflictScenes.load().then(() => (ctx?.isCurrent?.() === false ? null : conflictScenes.run(kind, conflict.sceneId))) : null;
       };
       // Prvá voľba podľa krajiny pripojenia (2026-11-10, vlastník): zo Slovenska prelet nad celé Slovensko
       // (nie nad Bratislavu), odinakiaľ nad štát návštevníka; ten dostane aj ponuku anglickej verzie.
@@ -1286,20 +1298,103 @@ async function init() {
           duration: 3,
         });
       };
+      // Témy ako režimy (2026-11-12, src/themeMode.js): akcie tém ostávajú tie isté; režim si pred nimi
+      // zapamätá vrstvy, podklad, panely a kameru a čipom „Téma: X · Späť" ich vráti.
+      const themeRuns = {
+        flights: () => { void dataManager.setEnabled('flights', true, { origin: 'user' }); flyOverCountry(flightsChoice()); },
+        ukraine: (ctx) => runOverview('ukraine', 'front', 'ukraine-panel', ctx),
+        mideast: (ctx) => runOverview('middle-east', 'mideast', 'mideast-panel', ctx),
+        weather: () => { void dataManager.setEnabled('shmu-radar', true, { origin: 'user' }); openPanel('weather-panel', 'layers'); },
+        energy: () => openPanel('gas-panel', 'data'),
+      };
+      const leftPanels = () => [...document.querySelectorAll('#left-panel-stack > [data-panel-id]')];
+      const themeMode = createThemeMode({
+        translate: t,
+        runs: themeRuns,
+        sceneKind: () => lastSceneKind,
+        getLayerIds: () => dataManager.getEnabledLayerIds(),
+        setLayer: (id, on, origin) => dataManager.setEnabled(id, on, origin ? { origin } : undefined),
+        isLayerOn: (id) => dataManager.isEffectivelyEnabled(id),
+        getStack: () => mapStackController.getActiveId(),
+        setStack: (id) => styleManager._setMapStack(id),
+        readPanels: () => Object.fromEntries(leftPanels().map((el) => [el.id, el.classList.contains('collapsed')])),
+        setPanel: (id, collapsed) => styleManager.setPanelCollapsed(id, collapsed, { restore: true, persist: false, syncShare: false }),
+        getPose: () => {
+          const camera = viewer.camera;
+          const c = camera?.positionCartographic;
+          if (!c || !Number.isFinite(c.latitude)) return null;
+          return { lon: Cesium.Math.toDegrees(c.longitude), lat: Cesium.Math.toDegrees(c.latitude), height: c.height, heading: camera.heading, pitch: camera.pitch, roll: camera.roll };
+        },
+        flyToPose: (pose) => {
+          viewer.trackedEntity = undefined;
+          viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.height),
+            orientation: { heading: pose.heading, pitch: pose.pitch, roll: pose.roll || 0 },
+            duration: 2.5,
+          });
+        },
+        sheet: { active: () => window.__okoMobileShell?.activeSection?.() ?? null, close: () => window.__okoMobileShell?.close?.() },
+        // Nedotiahnutý modul scén = žiadna scéna, z ktorej by bolo treba odísť.
+        leaveScene: () => window.__godsEyeView.leaveScene?.({ keepView: true }) || null,
+        waitReady: () => Promise.resolve(styleManager.initialRestorePromise),
+        canEnter: () => canEnterTheme({ bodyClasses: document.body.classList, volbyActive: Boolean(window.__godsEyeView.volbyMapMode?.active) }),
+        notify: (text) => styleManager._showToast(text, { durationMs: 4500 }),
+        onPhone,
+        focusFallback: () => document.getElementById(onPhone() ? 'oko-more-btn' : 'cmd-launch'),
+      });
+      themeModeRef = themeMode;
+      window.__godsEyeView.themeMode = themeMode;
+      // V ráme KARTA stojí čip pod jej titulkom; výška titulku závisí od textu a šírky okna, preto sa meria
+      // (pevná hodnota na 360 px a na šírku titulok prekrývala — nález kontroly).
+      try {
+        let placing = 0;
+        let watchedTitle = null;
+        const titleSize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => schedule()) : null;
+        const placeChip = () => {
+          placing = 0;
+          const title = document.querySelector('.oko-karta-title');
+          // Titulok dostane text (a výšku) až po načítaní smeru — sleduje sa jeho veľkosť, nie čas.
+          if (title && title !== watchedTitle && titleSize) { titleSize.disconnect(); titleSize.observe(title); watchedTitle = title; }
+          const r = title?.getBoundingClientRect();
+          if (r && r.height > 0) document.documentElement.style.setProperty('--oko-theme-karta-top', `${Math.round(r.bottom + 8)}px`);
+        };
+        function schedule() { if (!placing) placing = requestAnimationFrame(placeChip); }
+        new MutationObserver(schedule).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-oko-theme'] });
+        window.addEventListener('resize', schedule);
+        new MutationObserver(schedule).observe(themeMode.element, { attributes: true, attributeFilter: ['hidden'] });
+      } catch { /* poloha čipu je doplnok */ }
       const welcomeStrip = createWelcomeStrip({
         translate: t,
         flightsChoice,
         languageOffer: () => welcomeLanguageOffer(visitorGeo, currentLanguage()),
         onLanguage: (lang) => setLanguage(lang),
-        actions: {
-          flights: () => { void dataManager.setEnabled('flights', true, { origin: 'user' }); flyOverCountry(flightsChoice()); },
-          ukraine: () => frameOverview('ukraine', 'ukraine-panel'),
-          mideast: () => frameOverview('middle-east', 'mideast-panel'),
-          weather: () => { void dataManager.setEnabled('shmu-radar', true, { origin: 'user' }); openPanel('weather-panel', 'layers'); },
-          energy: () => openPanel('gas-panel', 'data'),
-        },
+        // Klik myšou má event.detail ≥ 1, Enter/medzerník 0 — z klávesnice ide fokus na Späť.
+        actions: Object.fromEntries(THEMES.map((th) => [th.id, (event) => { void themeMode.enter(th.id, { keyboard: event?.detail === 0 }); }])),
       });
       window.__godsEyeView.welcomeStrip = welcomeStrip;
+      // Tlačidlo „Témy" v hornej lište počítača: po zavretí uvítania sa k témam inak nedalo vrátiť
+      // (na telefóne je ten istý pás v ponuke Viac). Druhý klik pás zavrie.
+      try {
+        const themesBtn = document.createElement('button');
+        themesBtn.type = 'button';
+        themesBtn.id = 'oko-themes-btn';
+        themesBtn.setAttribute('aria-label', t('actions.themes'));
+        themesBtn.title = t('actions.themes');
+        themesBtn.innerHTML = '<span class="material-symbols-outlined" aria-hidden="true">track_changes</span>';
+        themesBtn.setAttribute('aria-expanded', 'false');
+        const syncExpanded = () => themesBtn.setAttribute('aria-expanded', welcomeStrip.isOpen() ? 'true' : 'false');
+        themesBtn.addEventListener('click', () => {
+          if (welcomeStrip.isOpen()) welcomeStrip.close();
+          else {
+            // Pás je na konci dokumentu — fokus ide na prvú voľbu, inak by sa k nemu klávesnicou nedalo dostať.
+            const strip = welcomeStrip.open();
+            try { strip?.querySelector?.('.oko-welcome-choice')?.focus({ preventScroll: true }); } catch { /* */ }
+          }
+          syncExpanded();
+        });
+        new MutationObserver(syncExpanded).observe(document.body, { childList: true });
+        document.getElementById('top-center-actions')?.appendChild(themesBtn);
+      } catch { /* lišta akcií nemusí existovať */ }
       // Pás „Čo sa deje teraz" (2026-11-11, src/nowStrip.js): 8 s po štarte, lenivo; nie pri robotovi a vloženom
       // rámčeku. Akcie sú tie isté funkcie, ktoré používa paleta, uvítanie a odkaz ?quake=.
       if (!crawlerVisit && !embedView) {
@@ -1327,7 +1422,7 @@ async function init() {
                   flyOverCountry({ home: true, lat: START_SK.lat, lon: START_SK.lon });
                   if (!onPhone()) openPanel('weather-panel', 'layers');
                 },
-                ukraine: () => frameOverview('ukraine', 'ukraine-panel'),
+                ukraine: () => { void themeMode.enter('ukraine'); },
               },
             });
             window.__godsEyeView.nowStrip = nowStrip;

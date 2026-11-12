@@ -1,5 +1,33 @@
 # God's Eye View Current State
 
+### OKO témy ako režimy — čip „Téma: X · Späť" (2026-11-12)
+
+Krok 3 auditu UI (`docs/drafts/audit-ui-2026-11-09.md`). Modul `src/themeMode.js`, zapojenie v `src/main.js`
+(blok uvítacieho pásu), odchod zo scén v `src/conflictScenes.js` (`leaveScene`).
+
+- **Témy** = päť volieb uvítacieho pásu (`THEMES` z `WELCOME_CHOICES`): Lietadlá, Front na Ukrajine, Blízky východ,
+  Počasie a radar, Plyn/ropa/elektrina. Akcie tém sú v `themeRuns` v `main.js`.
+- **Vstupné body**: uvítací pás, tlačidlo „Témy" v hornej lište počítača (`#oko-themes-btn`, otvára ten istý pás),
+  „Viac" na telefóne, paleta (`theme:<id>`, `theme:back`), riadok hlásenia GŠ v páse „Čo sa deje teraz".
+  Odkazy `?front=`, `?chokepoint=`, `?mideast=`, `?quake=`, `?volby` a výbery scén v paneli do režimu nevstupujú.
+- **Snímka pred vstupom**: zapnuté vrstvy (`dataManager.getEnabledLayerIds()`), podklad, zbalenie panelov ľavého
+  stĺpca (len počítač), presná póza kamery. Neukladá sa nič do `localStorage` ani do odkazu; parametre vrstiev,
+  sledovaný objekt a štýl obrazu sa nevracajú.
+- **Návrat (Späť)**, v tomto poradí: výsuv telefónu → `leaveScene({ keepView: true })` (scéna sa zloží, nič sama
+  nevracia) → vrstvy (navyše vypnúť s `origin: 'user'`, chýbajúce zapnúť bez pôvodu) → podklad (len keď ho scéna
+  prepla na KARTU a návštevník ho medzitým nezmenil: `kartaPrev`) → panely → kamera.
+- **Pravidlá**: z témy do témy sa drží snímka spred prvej témy; tá istá téma druhýkrát nič nerobí; keď pri vstupe
+  už beží scéna, ktorú téma nespustila, režim sa nezakladá (akcia beží holá, bez čipu); zmena scény návštevníkom
+  tému zahodí bez vracania (`onSceneState` zo `syncMapFocus`); počas vstupu je Späť vypnuté (strop 8 s);
+  v kokpite, čistom pohľade, nahrávaní, prehrávaní scén, vloženom rámčeku a pri otvorených voľbách sa režim
+  nezakladá ani nevracia (`canEnterTheme`).
+- **Čip** `#oko-theme`: počítač top 136 px v strede (≤ 1180 px pri ľavom stĺpci, v ráme KARTA vedľa titulku);
+  telefón pod lištou na mieste pilulky „Čo sa deje teraz" (tá je počas témy skrytá), v ráme KARTA pod titulkom
+  (spodok titulku meria `main.js` do `--oko-theme-karta-top`). Ustupuje výsuvu, uvítaniu, otvorenému zoznamu pásu,
+  ponuke účtu, voľbám a čistým režimom.
+- **Známe obmedzenia**: vrstva, ktorú návštevník počas témy sám vypol, sa po Späť zapne bez pôvodu (na mape je,
+  v uloženom stave nie); na telefóne je čip pri témach Počasie a Energie vidno až po zavretí výsuvu.
+
 ### OKO VOĽBY 2026 — kandidáti dnes, výsledky po 20:00 (2026-10-24)
 
 Owner (election day, 11:56): „potreboval by som dnes narýchlo spraviť sekciu voľby aj s aktuálnymi

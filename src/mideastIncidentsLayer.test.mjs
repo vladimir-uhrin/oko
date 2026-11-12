@@ -270,5 +270,5 @@ test('texty v oboch jazykoch: čip, legenda, obdobia, druhy, aktéri, štítky; 
   assert.match(scenes, /mideastIncidents = createMideastIncidents\(\{ viewer \}\);/);
   assert.match(scenes, /incidents: mideastIncidents,/);
   assert.match(scenes, /void mideastIncidents\?\.setActive\(scene \|\| false\);/, 'dejisko dostane celé (počty v rámci dejiska)');
-  assert.equal((scenes.match(/void mideastIncidents\?\.setActive\(false\)/g) || []).length, 3, 'front, všeobecný rám a úžina vrstvu vypnú');
+  assert.equal((scenes.match(/void mideastIncidents\?\.setActive\(false\)/g) || []).length, 4, 'front, všeobecný rám, úžina a odchod zo scény (leaveScene) vrstvu vypnú');
 });

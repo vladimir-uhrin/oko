@@ -341,5 +341,5 @@ test('texty v oboch jazykoch, bez emoji; CSS; zapojenie v conflictScenes.js', ()
   assert.match(scenes, /mideastAlerts = createMideastAlerts\(\{ viewer \}\);/);
   assert.match(scenes, /alerts: mideastAlerts,\n\s+humanitarian: mideastHumanitarian,\n\s+internet: mideastInternet,/);
   assert.match(scenes, /void mideastAlerts\?\.setActive\(scene \|\| false\);\n\s+void mideastHumanitarian\?\.setActive\(scene \|\| null\);\n\s+void mideastInternet\?\.setActive\(scene \|\| null\);/);
-  assert.equal((scenes.match(/void mideastAlerts\?\.setActive\(false\); void mideastHumanitarian\?\.setActive\(null\); void mideastInternet\?\.setActive\(null\);/g) || []).length, 3, 'front, všeobecný rám a úžina všetko vypnú');
+  assert.equal((scenes.match(/void mideastAlerts\?\.setActive\(false\); void mideastHumanitarian\?\.setActive\(null\); void mideastInternet\?\.setActive\(null\);/g) || []).length, 4, 'front, všeobecný rám, úžina a odchod zo scény (leaveScene) všetko vypnú');
 });

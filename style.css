@@ -14957,6 +14957,97 @@ body.oko-mobile .oko-now-src { display: inline-flex; align-items: center; min-he
 body.oko-mobile .oko-now-list { width: 100%; max-height: 50vh; }
 body.oko-mobile .oko-now-row { min-height: 44px; }
 
+/* ═══ Čip témy (2026-11-12, src/themeMode.js) ═══
+   Téma ako režim: malý čip „Téma: X · Späť" pod riadkom pilulky „Čo sa deje teraz" a stavového riadku
+   (98 px). Na telefóne berie miesto pilulky (ten istý slot pod lištou); pilulka sa vráti po Späť. */
+#oko-theme {
+  position: fixed;
+  top: 136px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-popover);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 34px;
+  max-width: calc(100vw - 32px);
+  padding: 0 var(--sp-1) 0 var(--sp-3);
+  font: 600 var(--fs-sm)/1.2 var(--font-sans);
+  color: var(--text-primary);
+  background: var(--glass-bg);
+  border: 1px solid rgba(var(--accent-rgb), 0.36);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-panel);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+#oko-theme[hidden] { display: none; }
+.oko-theme-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oko-theme-back {
+  flex: none;
+  min-width: 56px;
+  min-height: 26px;
+  padding: 0 var(--sp-3);
+  font: inherit;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: var(--cursor-pointer);
+}
+.oko-theme-back:hover { background: rgba(var(--accent-rgb), 0.24); }
+.oko-theme-back[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+#oko-theme-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Úzke okno: stred patrí titulu rámu KARTA a kartám — čip sa drží pri ľavom stĺpci. */
+@media (max-width: 1180px) {
+  body:not(.oko-mobile) #oko-theme { left: 356px; transform: none; max-width: calc(100vw - 372px); }
+  /* Titulok rámu KARTA siaha po 455 px — čip stojí vedľa neho, nie na ňom (snímka 1100 px). */
+  body:not(.oko-mobile).oko-karta-frame #oko-theme { left: 468px; max-width: calc(100vw - 484px); }
+}
+body.oko-mobile #oko-theme {
+  top: calc(var(--oko-topbar-h, 56px) + env(safe-area-inset-top, 0px) + 8px);
+  left: 8px;
+  transform: none;
+  min-height: 44px;
+  max-width: calc(100vw - 16px);
+}
+/* Dotykový cieľ 44 px: tlačidlo vypĺňa celú výšku čipu. */
+body.oko-mobile #oko-theme { padding-right: 0; }
+body.oko-mobile .oko-theme-back { min-height: 44px; }
+/* Pod titulkom rámu KARTA, vľavo od mapky. Spodok titulku meria main.js (--oko-theme-karta-top): jeho výška
+   závisí od textu a šírky (pevná hodnota na 360 px a na šírku titulok prekrývala). */
+body.oko-mobile.oko-karta-frame #oko-theme { top: var(--oko-theme-karta-top, 180px); max-width: calc(100vw - 156px); }
+/* Telefón na šírku: pod lištou nie je voľné miesto (titulok KARTY, mapka, časová os) — čip ide do
+   voľného stredu hornej lišty medzi logo a tlačidlá. */
+@media (orientation: landscape) and (max-height: 520px) {
+  body.oko-mobile #oko-theme,
+  body.oko-mobile.oko-karta-frame #oko-theme {
+    top: calc(env(safe-area-inset-top, 0px) + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100vw - 420px);
+  }
+}
+body.oko-mobile.oko-theme-active #oko-now { display: none; }
+body.oko-mobile.oko-theme-active #global-loading-status { top: calc(var(--oko-topbar-h, 56px) + env(safe-area-inset-top, 0px) + 60px); }
+body.oko-mobile #top-center-actions > #oko-themes-btn { display: none; }
+/* Čipy synchronizácie dopravy a kamier majú to isté miesto (136 a 170 px) — počas témy uhnú pod čip. */
+body.oko-theme-active:not(.oko-mobile) #traffic-sync-chip { top: 178px; }
+body.oko-theme-active:not(.oko-mobile) #cctv-sync-chip { top: 212px; }
+/* Ustupuje všetkému, čo má vlastnú vrstvu alebo čistú obrazovku; snímka ostáva, čip sa vráti. */
+body.oko-sheet-open #oko-theme,
+body:has(#oko-welcome) #oko-theme,
+body:has(.oko-now-list:not([hidden])) #oko-theme,
+body:has(#account-menu:not([hidden])) #oko-theme,
+body:has(#volby-panel:not(.collapsed)) #oko-theme,
+body.cockpit-mode #oko-theme,
+body.ui-clean-view #oko-theme,
+body.oko-karta-clean #oko-theme,
+body.scene-playback-mode #oko-theme,
+body.recording-mode #oko-theme,
+body.embed-mode #oko-theme,
+body:has(> #oko-video-hud) #oko-theme { display: none; }
+
 /* ═══ Ikony Material Symbols Outlined — vlastný výrez (2026-10-31) ═══
    Namiesto celého písma z Google Fonts (PageSpeed: 324 KB, najväčší súbor po Cesiu a balíku) sa načíta
    public/fonts/material-symbols-subset.woff2 len s ikonami, ktoré appka používa (jednotky KB; Apache 2.0,

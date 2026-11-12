@@ -286,6 +286,6 @@ test('KARTA (etapa 7, 2026-11-06): pozemné dejiská so sídlami sa otvárajú v
   assert.match(scenes, /if \(scene\?\.karta\) \{\n\s+if \(mapStackController\.getActiveId\(\) !== 'karta'\) \{\n\s+autoKartaPrev = mapStackController\.getActiveId\(\);/, 'dejisko KARTY si pamätá predchádzajúci podklad');
   assert.match(scenes, /\} else \{\n\s+restoreAutoKarta\(\); \/\/ odchod z KARTY frontu alebo dejiska/, 'dejisko bez KARTY podklad vráti');
   assert.match(scenes, /kartaOverlay\?\.setSuspended\?\.\(Boolean\(scene\)\);/, 'dejisko pozastaví ukrajinský rám KARTY');
-  assert.equal((scenes.match(/kartaOverlay\?\.setSuspended\?\.\(false\);/g) || []).length, 3, 'front, úžina a všeobecný rám ho uvoľnia');
+  assert.equal((scenes.match(/kartaOverlay\?\.setSuspended\?\.\(false\);/g) || []).length, 4, 'front, úžina, všeobecný rám a odchod zo scény (leaveScene) ho uvoľnia');
   assert.match(scenes, /buildMideastDigest\(\{ incidents: value\(meInc\), alerts: value\(meAl\), humanitarian: value\(meHum\), internet: value\(meNet\)/, 'denný sumár Blízkeho východu v prehľade konfliktov');
 });

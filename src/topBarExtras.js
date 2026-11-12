@@ -15,6 +15,7 @@ export const TOP_BAR_CAPTIONS = Object.freeze({
   'reset-globe-view': 'actions.caption.home',
   'account-btn': 'actions.caption.account',
   'cmd-launch': 'actions.caption.search',
+  'oko-themes-btn': 'actions.caption.themes',
 });
 
 /**
