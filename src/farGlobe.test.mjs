@@ -44,7 +44,7 @@ test('výška Slnka: nad Slovenskom o polnoci hlboko pod obzorom, na poludnie vy
   assert.ok(Number.isNaN(sunElevationDegAt(null, noon)));
 });
 
-test('úvod: zemeguľa pri štarte (7 000 km) je v diaľkovom režime; hranice (pod 5 000 km) sa ukážu ešte na glóbuse', () => {
+test('úvod: zemeguľa pri štarte (6 300 km) je v diaľkovom režime; hranice (pod 5 000 km) sa ukážu ešte na glóbuse', () => {
   const globe = startViewFor(1440, 900, Date.parse('2026-10-16T19:00:00Z'));
   assert.equal(farGlobeWanted({ heightM: globe.heightM, stackId: 'photoreal' }), true);
   assert.ok(FAR_GLOBE_ENTER_M < ZOOM_BORDERS_SHOW_BELOW_M);

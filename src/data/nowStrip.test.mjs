@@ -177,3 +177,53 @@ test('hlásenie GŠ: príznak stale z posledného dobrého stavu sa prejaví', (
   const [item] = pickUkraineReport({ ok: true, total: 125, reportedAt: new Date(NOW - 15 * H).toISOString(), reportedAtText: '08:00 11.11.', fetchedAt: NOW, stale: true }, NOW);
   assert.equal(item.state, 'stale');
 });
+
+// ── Náhľady v riadkoch (2026-11-12, vlastník: „nielen text, aj obrázok, video") ──
+test('mapka: dlaždice pokryjú celý náhľad a značka je presne na mieste', async () => {
+  const { mapThumbTiles, nowItemMap, NOW_THUMB } = await import('./nowStrip.js');
+  // stred Slovenska pri priblížení 5 leží na rohu štyroch dlaždíc
+  const sk = mapThumbTiles({ lat: 48.7, lon: 19.7, zoom: 5 });
+  assert.equal(sk.tiles.length, 4);
+  assert.deepEqual(sk.marker, { left: NOW_THUMB.width / 2, top: NOW_THUMB.height / 2 });
+  for (const corner of [[0, 0], [NOW_THUMB.width - 1, 0], [0, NOW_THUMB.height - 1], [NOW_THUMB.width - 1, NOW_THUMB.height - 1]]) {
+    assert.ok(sk.tiles.some((t) => corner[0] >= t.left && corner[0] < t.left + 256 && corner[1] >= t.top && corner[1] < t.top + 256), `roh ${corner} má dlaždicu`);
+  }
+  assert.ok(sk.tiles.every((t) => t.z === 5 && t.x >= 0 && t.x < 32 && t.y >= 0 && t.y < 32));
+  // dátumová hranica: x sa zabalí, žiadna záporná dlaždica
+  const fiji = mapThumbTiles({ lat: -17, lon: 179.9, zoom: 2 });
+  assert.ok(fiji.tiles.every((t) => t.x >= 0 && t.x < 4 && t.y >= 0 && t.y < 4));
+  assert.ok(fiji.tiles.some((t) => t.x === 0) && fiji.tiles.some((t) => t.x === 3));
+  // pri póle sa výrez drží vo svete a značka sa posunie zo stredu na správne miesto
+  const north = mapThumbTiles({ lat: 84, lon: 10, zoom: 2 });
+  assert.ok(north.tiles.every((t) => t.y >= 0));
+  assert.ok(north.marker.top < NOW_THUMB.height / 2);
+  // čo dostane ktorý druh položky
+  assert.deepEqual(nowItemMap({ kind: 'quake', focus: { lat: -56, lon: -27 } }), { lat: -56, lon: -27, zoom: 2, marker: true });
+  assert.equal(nowItemMap({ kind: 'warning' }).marker, false);
+  assert.equal(nowItemMap({ kind: 'ukraine' }).marker, false);
+  assert.equal(nowItemMap({ kind: 'quake', focus: {} }), null);
+  assert.equal(nowItemMap(null), null);
+});
+
+test('obrázok k hláseniu: len vlastný príspevok Generálneho štábu k tomu istému hláseniu', async () => {
+  const { pickReportMedia, reportMediaDay } = await import('./nowStrip.js');
+  const at = Date.parse('2026-11-12T06:00:00Z');
+  const post = (o) => ({ kind: 'photo', id: 'tg:GeneralStaffZSU/1', url: 'https://t.me/GeneralStaffZSU/1', thumb: 'https://cdn4.telesco.pe/file/a', text: 'Оперативна інформація станом на 08:00 12.11.2026', channel: 'Генштаб ЗСУ', publishedAt: at + 90_000, ...o });
+  assert.deepEqual(pickReportMedia([post({})], at), { kind: 'photo', thumb: 'https://cdn4.telesco.pe/file/a', url: 'https://t.me/GeneralStaffZSU/1', channel: 'Генштаб ЗСУ' });
+  assert.equal(pickReportMedia([post({ kind: 'video' })], at).kind, 'video');
+  // nič cudzie „pre ilustráciu"
+  assert.equal(pickReportMedia([post({ id: 'yt:abc', url: 'https://www.youtube.com/watch?v=abc' })], at), null, 'iný kanál');
+  assert.equal(pickReportMedia([post({ text: 'ЗБИТО/ПОДАВЛЕНО 94 ВОРОЖІ ЦІЛІ' })], at), null, 'iný príspevok toho istého kanála');
+  assert.equal(pickReportMedia([post({ publishedAt: at + 14 * 3_600_000 })], at), null, 'večerné hlásenie');
+  assert.equal(pickReportMedia([post({ publishedAt: at - 10 * 3_600_000 })], at), null, 'včerajšie večerné');
+  assert.equal(pickReportMedia([post({ thumb: null })], at), null, 'bez náhľadu');
+  assert.equal(pickReportMedia([post({ thumb: 'http://x/y.jpg' })], at), null, 'len https');
+  assert.equal(pickReportMedia([post({ sensitive: true })], at), null, 'drastický záber nie');
+  assert.equal(pickReportMedia([post({ kind: 'text' })], at), null);
+  // z dvoch vyhovujúcich ten bližší k času hlásenia
+  assert.equal(pickReportMedia([post({ url: 'https://t.me/GeneralStaffZSU/2', publishedAt: at + 50 * 60_000 }), post({})], at).url, 'https://t.me/GeneralStaffZSU/1');
+  assert.equal(pickReportMedia(null, at), null);
+  assert.equal(pickReportMedia([post({})], NaN), null);
+  assert.equal(reportMediaDay({ kind: 'ukraine', timeMs: at }), '2026-11-12');
+  assert.equal(reportMediaDay({ kind: 'quake', timeMs: at }), null);
+});

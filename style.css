@@ -14957,6 +14957,57 @@ body.oko-mobile .oko-now-src { display: inline-flex; align-items: center; min-he
 body.oko-mobile .oko-now-list { width: 100%; max-height: 50vh; }
 body.oko-mobile .oko-now-row { min-height: 44px; }
 
+/* Náhľad v riadku pásu „Čo sa deje teraz" (2026-11-12): mapka miesta alebo obrázok zo zdroja, vpravo. */
+.oko-now-item.has-media { position: relative; padding-right: calc(144px + var(--sp-4)); min-height: calc(96px + var(--sp-3)); }
+.oko-now-media {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-3);
+  width: 144px;
+  height: 96px;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+.oko-now-media.is-map { pointer-events: none; }
+.oko-now-map { position: absolute; top: 50%; left: 50%; width: 144px; height: 96px; transform: translate(-50%, -50%); }
+.oko-now-media.is-map img { position: absolute; width: 256px; height: 256px; max-width: none; filter: saturate(0.7) brightness(0.82); }
+a.oko-now-media { display: block; cursor: var(--cursor-pointer); }
+a.oko-now-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+a.oko-now-media:hover { border-color: rgba(var(--accent-rgb), 0.6); }
+.oko-now-media-pin {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  box-shadow: 0 0 0 3px rgba(var(--color-danger-rgb), 0.35);
+}
+.oko-now-media-play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+}
+.oko-now-media-play::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 54%;
+  transform: translate(-50%, -50%);
+  border-style: solid;
+  border-width: 7px 0 7px 11px;
+  border-color: transparent transparent transparent var(--text-primary);
+}
+.oko-now-credit { list-style: none; padding: var(--sp-1) var(--sp-3) var(--sp-2); font: 400 var(--fs-xs)/1.3 var(--font-sans); color: var(--text-dim); text-align: right; border-top: 1px solid var(--glass-border); }
+body.oko-mobile .oko-now-item.has-media { padding-right: calc(112px + var(--sp-3)); min-height: calc(76px + var(--sp-3)); }
+body.oko-mobile .oko-now-media { width: 112px; height: 76px; right: var(--sp-2); }
+
 /* ═══ Čip témy (2026-11-12, src/themeMode.js) ═══
    Téma ako režim: malý čip „Téma: X · Späť" pod riadkom pilulky „Čo sa deje teraz" a stavového riadku
    (98 px). Na telefóne berie miesto pilulky (ten istý slot pod lištou); pilulka sa vráti po Späť. */

@@ -208,3 +208,73 @@ test('obnova bez zmeny riadky nevymieňa; pri zmene ostáva fokus na tom istom r
   assert.equal(rows.length, 3);
   assert.equal(doc.activeElement.parent.dataset.nowKind, 'ukraine', 'fokus ostal na hlásení GŠ, hoci sa poradie zmenilo');
 });
+
+// ── Náhľady v riadkoch (2026-11-12, vlastník: „nielen text, aj obrázok, video") ──
+const REPORT_AT = NOW - 15 * H;
+const MEDIA_DAY = new Date(REPORT_AT).toISOString().slice(0, 10);
+const MEDIA_URL = `/api/ukraine/events?from=${MEDIA_DAY}&to=${MEDIA_DAY}`;
+const GS_POST = { kind: 'photo', id: 'tg:GeneralStaffZSU/7', url: 'https://t.me/GeneralStaffZSU/7', thumb: 'https://cdn4.telesco.pe/file/x', text: 'Оперативна інформація станом на 08:00', channel: 'Генштаб ЗСУ', publishedAt: REPORT_AT + 60_000 };
+const settle = async () => { for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setImmediate(resolve)); };
+
+test('každý riadok má náhľad: mapka je ozdoba (nie ovládací prvok), autorstvo máp je vidno', async () => {
+  const { s, list } = strip();
+  await s.load();
+  const items = list.children.filter((li) => li.className.includes('oko-now-item'));
+  assert.equal(items.length, 2);
+  for (const li of items) {
+    assert.ok(li.className.includes('has-media'));
+    const thumb = li.children.at(-1);
+    assert.equal(thumb.className, 'oko-now-media is-map');
+    assert.equal(thumb.tagName, 'DIV');
+    assert.equal(thumb.attrs['aria-hidden'], 'true');
+    const tiles = find(thumb, (n) => n.tagName === 'IMG');
+    assert.ok(tiles.length >= 1 && tiles.every((img) => /^https:\/\/tile\.openstreetmap\.org\/\d+\/\d+\/\d+\.png$/.test(img.src)));
+  }
+  const quake = items.find((li) => li.dataset.nowKind === 'quake');
+  assert.equal(find(quake, (n) => n.className === 'oko-now-media-pin').length, 1, 'ohnisko má značku');
+  const credit = list.children.at(-1);
+  assert.equal(credit.className, 'oko-now-credit');
+  assert.match(credit.textContent, /OpenStreetMap/);
+  for (const strings of [SK_STRINGS, EN_STRINGS]) for (const key of ['now.map-credit', 'now.media.photo', 'now.media.video']) assert.ok(strings[key], key);
+});
+
+test('obrázok k hláseniu sa dotiahne až pri rozbalení, raz; vedie na príspevok zdroja', async () => {
+  const calls = [];
+  const { s, list, pill } = strip({ fetchJson: async (url) => { calls.push(url); return url === MEDIA_URL ? { media: [GS_POST] } : FEEDS[url]; } });
+  await s.load();
+  assert.equal(calls.includes(MEDIA_URL), false, 'zbalený pás archív médií nesťahuje');
+  pill.listeners.click();
+  await settle();
+  assert.equal(calls.filter((u) => u === MEDIA_URL).length, 1);
+  const row = list.children.find((li) => li.dataset.nowKind === 'ukraine');
+  const thumb = row.children.at(-1);
+  assert.equal(thumb.tagName, 'A');
+  assert.equal(thumb.href, 'https://t.me/GeneralStaffZSU/7');
+  assert.equal(thumb.target, '_blank');
+  assert.equal(thumb.rel, 'noopener noreferrer');
+  assert.match(thumb.attrs['aria-label'], /Генштаб ЗСУ/);
+  assert.equal(thumb.children[0].src, `/api/img?url=${encodeURIComponent('https://cdn4.telesco.pe/file/x')}`);
+  pill.listeners.click(); pill.listeners.click(); // zbaliť a znova rozbaliť
+  await settle();
+  assert.equal(calls.filter((u) => u === MEDIA_URL).length, 1, 'druhé rozbalenie nič nesťahuje');
+  // náhľad sa nenačítal → riadok sa vráti k mapke
+  const fresh = list.children.find((li) => li.dataset.nowKind === 'ukraine').children.at(-1);
+  fresh.children[0].listeners.error();
+  assert.equal(list.children.find((li) => li.dataset.nowKind === 'ukraine').children.at(-1).className, 'oko-now-media is-map');
+});
+
+test('archív médií neodpovedal alebo nemá príspevok štábu: ostáva mapka a pás funguje ďalej', async () => {
+  let fail = true;
+  const calls = [];
+  const { s, list, pill } = strip({ fetchJson: async (url) => { if (url === MEDIA_URL) { calls.push(url); if (fail) throw new Error('503'); return { media: [{ ...GS_POST, id: 'yt:abc' }] }; } return FEEDS[url]; } });
+  await s.load();
+  pill.listeners.click();
+  await settle();
+  const thumbOf = () => list.children.find((li) => li.dataset.nowKind === 'ukraine').children.at(-1);
+  assert.equal(thumbOf().className, 'oko-now-media is-map');
+  fail = false;
+  pill.listeners.click(); pill.listeners.click();
+  await settle();
+  assert.equal(calls.length, 2, 'po zlyhaní sa skúsi znova pri ďalšom rozbalení');
+  assert.equal(thumbOf().className, 'oko-now-media is-map', 'cudzí záber sa nepriradí');
+});

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  START_VIEW, areaViewFor, bearingDegrees, offsetPoint, portraitSunView, showStartView, startViewFor, subsolarPoint,
+  START_VIEW, START_VIEW_PORTRAIT, areaViewFor, bearingDegrees, offsetPoint, portraitSunView, showStartView, startViewFor, subsolarPoint,
 } from './camera.js';
 import { mobileShipsHidden, MOBILE_SHIP_FAR_HIDE_M } from './data/aisLiveVessels.js';
 
@@ -23,7 +23,7 @@ test('azimut a posun po guli', () => {
   assert.ok(Math.abs(p.lat - (48.7 - 1000 / 111.2)) < 0.1 && Math.abs(p.lon - 19.5) < 0.01);
 });
 
-test('telefón na výšku: kamera za Slovenskom pozerá k Slnku; počítač má šikmú zemeguľu', () => {
+test('pohľad k Slnku (portraitSunView) ostáva ako výpočet: kamera za Slovenskom pozerá k Slnku', () => {
   const noonUtc = Date.UTC(2026, 9, 15, 11, 0);
   const v = portraitSunView(noonUtc);
   const sun = subsolarPoint(noonUtc);
@@ -31,8 +31,22 @@ test('telefón na výšku: kamera za Slovenskom pozerá k Slnku; počítač má 
   assert.ok(v.latitude > 48.7, 'na poludnie je Slnko na juhu → kamera severne od SK');
   const evening = portraitSunView(Date.UTC(2026, 9, 15, 17, 0));
   assert.ok(evening.headingDeg > 200 && evening.headingDeg < 300, `večer na západ (${evening.headingDeg})`);
-  assert.equal(startViewFor(390, 844, noonUtc).headingDeg, v.headingDeg);
-  assert.equal(startViewFor(1600, 900, noonUtc), START_VIEW);
+});
+
+// 2026-11-12 (vlastník): základný pohľad = Európa, Stredomorie a Blízky východ na každom tvare obrazovky.
+test('základný pohľad: Európa – Stredomorie – Blízky východ; na výšku z väčšej výšky, úzky telefón najvyššie', () => {
+  const noon = Date.UTC(2026, 10, 12, 11, 0);
+  assert.equal(startViewFor(1600, 900, noon), START_VIEW);
+  assert.equal(startViewFor(390, 844, noon), START_VIEW_PORTRAIT.narrow);
+  assert.equal(startViewFor(775, 892, noon), START_VIEW_PORTRAIT.wide);
+  assert.equal(startViewFor(390, 844, noon), startViewFor(390, 844, noon + 6 * 3600_000), 'od dennej doby nezávisí');
+  for (const v of [START_VIEW, START_VIEW_PORTRAIT.narrow, START_VIEW_PORTRAIT.wide]) {
+    assert.equal(v.headingDeg, 0, 'sever hore');
+    assert.ok(v.pitchDeg <= -78, 'strmý pohľad — oblasť v strede, nie pri obzore');
+    assert.ok(v.longitude >= 12 && v.longitude <= 30 && v.latitude >= 28 && v.latitude <= 36, 'kamera nad Stredomorím');
+    assert.ok(v.heightM > 6_000_000 && v.heightM <= 9_000_000, 'nad prahom hraníc štátov, bližšie než celá zemeguľa');
+  }
+  assert.ok(START_VIEW_PORTRAIT.narrow.heightM > START_VIEW_PORTRAIT.wide.heightM && START_VIEW_PORTRAIT.wide.heightM > START_VIEW.heightM);
 });
 
 test('pohľad nad oblasť: mesto zblízka, krajina zďaleka, bez polohy nič', () => {

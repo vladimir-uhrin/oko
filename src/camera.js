@@ -116,13 +116,29 @@ export function flyToHomeView(viewer, options = {}) {
  * Porovnanie output/qa-world/start/*.png: Bratislava a Tatry sú v noci tmavé, zemeguľa je silná
  * cez deň aj v noci. Tlačidlo s glóbusom hore ostáva na Bratislave (HOME_VIEW).
  */
+// 2026-11-12 (vlastník, snímka s obkrúženou oblasťou): základný pohľad je Európa, Stredomorie a Blízky
+// východ — tam je väčšina toho, čo OKO ukazuje (lietadlá, front, dejiská). Bližšie a strmšie než dovtedy
+// (7 000 km / −72°), kamera západnejšie, aby oblasť nebola pod ľavým stĺpcom. Výška ostáva nad prahom
+// hraníc štátov (6 000 km) — úvod je čistá zemeguľa bez čiar a názvov.
 export const START_VIEW = Object.freeze({
-  longitude: 19.5,
-  latitude: 30,
-  heightM: 7_000_000,
+  longitude: 15,
+  latitude: 31,
+  heightM: 6_300_000,
   headingDeg: 0,
-  pitchDeg: -72,
+  pitchDeg: -80,
 });
+
+/**
+ * Tá istá oblasť na výšku (2026-11-12): úzka obrazovka vidí menej do šírky, preto vyššie a východnejšie;
+ * širšie okno na výšku (tablet, zúžené okno počítača) stačí z nižšej výšky. Dovtedajší pohľad k Slnku
+ * (portraitSunView) nechával oblasť hore pri okraji a väčšinu obrazu prázdnej Afrike.
+ */
+export const START_VIEW_PORTRAIT = Object.freeze({
+  narrow: Object.freeze({ longitude: 27, latitude: 34, heightM: 8_500_000, headingDeg: 0, pitchDeg: -85 }),
+  wide: Object.freeze({ longitude: 23, latitude: 33, heightM: 6_600_000, headingDeg: 0, pitchDeg: -84 }),
+});
+/** Od tohto pomeru strán (šírka / výška) je okno na výšku „široké". */
+export const START_PORTRAIT_WIDE_ASPECT = 0.7;
 
 /** Stred Slovenska — kotva úvodného pohľadu na telefóne. */
 export const START_SK = Object.freeze({ lat: 48.7, lon: 19.5 });
@@ -180,11 +196,15 @@ export function portraitSunView(nowMs, { anchor = START_SK, cfg = START_PORTRAIT
   return { longitude: back.lon, latitude: back.lat, heightM: cfg.heightM, headingDeg: heading, pitchDeg: cfg.pitchDeg };
 }
 
-/** Úvodný pohľad podľa tvaru plátna (pure): na výšku k Slnku, inak START_VIEW. */
-export function startViewFor(width, height, nowMs = Date.now()) {
+/**
+ * Úvodný pohľad podľa tvaru plátna (pure): vždy Európa – Stredomorie – Blízky východ; na výšku z väčšej
+ * výšky (úzky telefón najvyššie). `nowMs` ostáva v podpise pre volajúcich; pohľad od času nezávisí.
+ */
+export function startViewFor(width, height, nowMs = Date.now()) { // eslint-disable-line no-unused-vars
   const w = Number(width);
   const h = Number(height);
-  return w > 0 && h > w ? portraitSunView(nowMs) : START_VIEW;
+  if (!(w > 0 && h > w)) return START_VIEW;
+  return w / h >= START_PORTRAIT_WIDE_ASPECT ? START_VIEW_PORTRAIT.wide : START_VIEW_PORTRAIT.narrow;
 }
 
 /** Ako dlho po skrytí úvodnej obrazovky ostane celá Zem, kým kamera poletí k návštevníkovi (ms). */

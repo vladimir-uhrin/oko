@@ -12,9 +12,11 @@
 //   • riadok = <li> s tlačidlom (udalosť) a samostatným odkazom na zdroj — žiadne vnorené ovládacie prvky;
 //   • obnova prekreslí zoznam len pri zmene a zachová fokus aj posun — riadok pod prstom sa nevymení;
 //   • texty zo zdrojov idú cez textContent; fokus sa po zbalení vracia na pilulku;
-//   • skrývanie v režimoch (kokpit, čistý pohľad, nahrávanie…) robí style.css, nie časovač.
+//   • skrývanie v režimoch (kokpit, čistý pohľad, nahrávanie…) robí style.css, nie časovač;
+//   • každý riadok má vpravo náhľad (2026-11-12): mapku miesta, pri rannom hlásení obrázok, ktorý k nemu
+//     zverejnil Generálny štáb — ten sa dotiahne až pri prvom rozbalení zoznamu (archív médií je veľký).
 
-import { buildNowItems, nowItemText } from './data/nowStrip.js';
+import { buildNowItems, nowItemText, nowItemMap, mapThumbTiles, pickReportMedia, reportMediaDay, NOW_TILE_URL } from './data/nowStrip.js';
 
 export const NOW_REFRESH_MS = 10 * 60_000;
 /** Strop na jedno načítanie vrátane čítania tela — zaseknutá požiadavka by inak držala všetky ďalšie obnovy. */
@@ -24,6 +26,9 @@ export const NOW_ENDPOINTS = Object.freeze({
   warnings: '/api/weather-warnings',
   ukraine: '/api/ukraine/report',
 });
+/** Archív médií frontu (len deň hlásenia) a proxy náhľadov — tie isté, čo používa časová os UKRAJINY. */
+export const NOW_MEDIA_ENDPOINT = '/api/ukraine/events';
+export const NOW_IMG_PROXY = '/api/img';
 
 /** Prahy magnitúdy, ktoré ponúka riadok vrstvy Zemetrasenia (jeden z čipov ostane aktívny). */
 const QUAKE_MIN_CHIPS = Object.freeze([4.5, 2.5, 1, -3]);
@@ -95,6 +100,8 @@ export function createNowStrip({
   let timer = null;
   let destroyed = false;
   let inFlight = null;
+  /** Obrázok k hláseniu podľa id položky: objekt, null (nenašiel sa) alebo chýba (ešte sa nehľadal). */
+  const reportMedia = {};
 
   const isOpen = () => !list.hidden;
   const collapse = ({ refocus = false } = {}) => {
@@ -108,13 +115,86 @@ export function createNowStrip({
     if (!items.length) return;
     list.hidden = false;
     pill.setAttribute('aria-expanded', 'true');
+    void loadMedia();
+  };
+
+  /** Náhľad vpravo v riadku: obrázok alebo video zo zdroja (odkaz na zdroj), inak mapka miesta. */
+  const buildThumb = (item) => {
+    const media = reportMedia[item.id];
+    if (media) {
+      const link = doc.createElement('a');
+      link.className = media.kind === 'video' ? 'oko-now-media is-video' : 'oko-now-media';
+      link.href = media.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.setAttribute('aria-label', translate(media.kind === 'video' ? 'now.media.video' : 'now.media.photo', { name: media.channel }));
+      const img = doc.createElement('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.referrerPolicy = 'no-referrer';
+      img.src = `${NOW_IMG_PROXY}?url=${encodeURIComponent(media.thumb)}`;
+      // Náhľad sa nenačítal: položka sa vráti k mapke (prázdny rámček by vyzeral ako chyba stránky).
+      img.addEventListener?.('error', () => { reportMedia[item.id] = null; render(); });
+      link.append(img);
+      if (media.kind === 'video') {
+        const play = doc.createElement('span');
+        play.className = 'oko-now-media-play';
+        play.setAttribute('aria-hidden', 'true');
+        link.append(play);
+      }
+      return link;
+    }
+    const map = nowItemMap(item);
+    if (!map) return null;
+    // Mapka je ozdoba riadku: ťuknutie cez ňu prejde na tlačidlo riadku (style.css pointer-events: none).
+    const box = doc.createElement('div');
+    box.className = 'oko-now-media is-map';
+    box.setAttribute('aria-hidden', 'true');
+    // Dlaždice sú rozložené pre plný rozmer náhľadu; vnútorná vrstva drží stred mapky v strede aj v menšom
+    // rámčeku na telefóne (inak by sa Slovensko orezalo sprava).
+    const layer = doc.createElement('div');
+    layer.className = 'oko-now-map';
+    box.append(layer);
+    const { tiles, marker } = mapThumbTiles(map);
+    for (const tile of tiles) {
+      const img = doc.createElement('img');
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.setAttribute('style', `left:${tile.left}px;top:${tile.top}px`);
+      img.src = NOW_TILE_URL.replace('{z}', () => String(tile.z)).replace('{x}', () => String(tile.x)).replace('{y}', () => String(tile.y));
+      layer.append(img);
+    }
+    if (map.marker) {
+      const pin = doc.createElement('span');
+      pin.className = 'oko-now-media-pin';
+      pin.setAttribute('style', `left:${marker.left}px;top:${marker.top}px`);
+      layer.append(pin);
+    }
+    return box;
+  };
+
+  /** Dotiahne obrázok k rannému hláseniu (raz na položku, len keď je zoznam otvorený). */
+  const loadMedia = async () => {
+    for (const item of items) {
+      const day = reportMediaDay(item);
+      if (!day || item.id in reportMedia) continue;
+      reportMedia[item.id] = null;
+      try {
+        const payload = await fetchJson(`${NOW_MEDIA_ENDPOINT}?from=${day}&to=${day}`);
+        if (!payload || typeof payload !== 'object') { delete reportMedia[item.id]; continue; } // skúsi sa pri ďalšom rozbalení
+        reportMedia[item.id] = pickReportMedia(payload.media, item.timeMs);
+      } catch { delete reportMedia[item.id]; continue; }
+      if (reportMedia[item.id] && !destroyed) render();
+    }
   };
 
   const render = () => {
     const nowMs = now();
     const texts = items.map((item) => nowItemText(item, translate, { lang: lang(), nowMs }));
     // Podpis z toho, čo sa naozaj kreslí (aj „pred 12 min") — bez zmeny sa riadky nevymieňajú.
-    const sig = JSON.stringify(items.map((item, i) => [item.id, item.state, item.sourceUrl, item.sourceLabel, texts[i]]));
+    const sig = JSON.stringify(items.map((item, i) => [item.id, item.state, item.sourceUrl, item.sourceLabel, texts[i], reportMedia[item.id]?.thumb || '']));
     if (sig === lastSig) return;
     lastSig = sig;
 
@@ -124,6 +204,7 @@ export function createNowStrip({
     const focusWasSrc = hadFocus && String(active.className || '').includes('oko-now-src');
     const scroll = list.scrollTop;
     let refocusTarget = null;
+    let usesMap = false;
 
     list.textContent = '';
     items.forEach((item, index) => {
@@ -168,9 +249,18 @@ export function createNowStrip({
         src.textContent = translate('now.source', { name: item.sourceLabel });
         li.append(src);
       }
+      const thumb = buildThumb(item);
+      if (thumb) { li.className = 'oko-now-item has-media'; li.append(thumb); usesMap = usesMap || String(thumb.className).includes('is-map'); }
       if (hadFocus && focusId === item.id) refocusTarget = focusWasSrc && src ? src : row;
       list.append(li);
     });
+    // Mapky sú z dlaždíc OpenStreetMap — autorstvo musí byť vidno pri nich, nielen v kreditoch glóbusu.
+    if (usesMap) {
+      const credit = doc.createElement('li');
+      credit.className = 'oko-now-credit';
+      credit.textContent = translate('now.map-credit');
+      list.append(credit);
+    }
     pillCount.textContent = String(items.length);
     root.hidden = items.length === 0;
     if (!items.length) { collapse(); return; }

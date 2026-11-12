@@ -229,3 +229,79 @@ export function nowItemText(item, t, { lang = 'sk', nowMs }) {
   chips.push(t('now.chip.claim'));
   return { title: t('now.ukraine.title', { total: item.total }), meta: `${item.sourceLabel} · ${t(ago.key, { n: ago.n })}`, chips };
 }
+
+// ── Náhľad v riadku (2026-11-12, vlastník: „nielen text, aj obrázok, video") ─────────────────────────
+// Každý riadok má vpravo náhľad, ktorý sa naozaj týka udalosti: otras a výstraha mapku miesta (dlaždice
+// OpenStreetMap, ten istý zdroj ako podklad OSM v appke), ranné hlásenie obrázok, ktorý k nemu zverejnil
+// sám Generálny štáb (archív /api/ukraine/events). Cudzí záber „pre ilustráciu" sa nepoužíva.
+
+/** Rozmer náhľadu v riadku (px). */
+export const NOW_THUMB = Object.freeze({ width: 144, height: 96 });
+export const NOW_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE = 256;
+
+/**
+ * Mapka miesta pre položku: stred, priblíženie a či sa kreslí značka. Pure.
+ * @param {{kind: string, focus?: {lat?: number, lon?: number}}} item
+ * @returns {{lat: number, lon: number, zoom: number, marker: boolean}|null}
+ */
+export function nowItemMap(item) {
+  if (item?.kind === 'quake' && Number.isFinite(item.focus?.lat) && Number.isFinite(item.focus?.lon)) {
+    return { lat: item.focus.lat, lon: item.focus.lon, zoom: 2, marker: true }; // ~50° šírky: aj ohnisko v oceáne má v zábere pevninu
+  }
+  if (item?.kind === 'warning') return { lat: 48.7, lon: 19.7, zoom: 5, marker: false }; // celé Slovensko
+  if (item?.kind === 'ukraine') return { lat: 48.6, lon: 32.5, zoom: 3, marker: false }; // celá Ukrajina
+  return null;
+}
+
+/**
+ * Dlaždice a poloha značky pre statickú mapku (Web Mercator). Pure.
+ * @param {{lat: number, lon: number, zoom: number, width?: number, height?: number}} o
+ * @returns {{tiles: Array<{z: number, x: number, y: number, left: number, top: number}>, marker: {left: number, top: number}}}
+ */
+export function mapThumbTiles({ lat, lon, zoom, width = NOW_THUMB.width, height = NOW_THUMB.height }) {
+  const n = 2 ** zoom;
+  const world = n * TILE;
+  const phi = (Math.max(-85.05, Math.min(85.05, lat)) * Math.PI) / 180;
+  const wx = ((lon + 180) / 360) * world;
+  const wy = ((1 - Math.log(Math.tan(phi) + 1 / Math.cos(phi)) / Math.PI) / 2) * world;
+  const left0 = Math.round(wx - width / 2);
+  // Pri póle sa výrez nesmie dostať mimo sveta — značka potom nie je v strede, ale na správnom mieste.
+  const top0 = Math.max(0, Math.min(world - height, Math.round(wy - height / 2)));
+  const tiles = [];
+  for (let ty = Math.floor(top0 / TILE); ty <= Math.floor((top0 + height - 1) / TILE); ty += 1) {
+    for (let tx = Math.floor(left0 / TILE); tx <= Math.floor((left0 + width - 1) / TILE); tx += 1) {
+      tiles.push({ z: zoom, x: ((tx % n) + n) % n, y: ty, left: tx * TILE - left0, top: ty * TILE - top0 });
+    }
+  }
+  return { tiles, marker: { left: Math.round(wx - left0), top: Math.round(wy - top0) } };
+}
+
+/** Deň (UTC) ranného hlásenia pre dopyt do archívu médií, alebo null. Pure. */
+export function reportMediaDay(item) {
+  if (item?.kind !== 'ukraine' || !Number.isFinite(item.timeMs)) return null;
+  return new Date(item.timeMs).toISOString().slice(0, 10);
+}
+
+/**
+ * Obrázok alebo video, ktoré k rannému hláseniu zverejnil Generálny štáb: jeho vlastný príspevok
+ * „Оперативна інформація станом на 08:00" z kanála GeneralStaffZSU, najbližší k času hlásenia
+ * (−15 min … +90 min). Nič iné sa k hláseniu nepriradí. Pure.
+ * @param {Array<object>} media `media` z /api/ukraine/events
+ * @param {number} reportedAtMs
+ * @returns {{kind: 'photo'|'video', thumb: string, url: string, channel: string}|null}
+ */
+export function pickReportMedia(media, reportedAtMs) {
+  if (!Array.isArray(media) || !Number.isFinite(reportedAtMs)) return null;
+  let best = null;
+  for (const m of media) {
+    if (!m || (m.kind !== 'photo' && m.kind !== 'video') || m.sensitive) continue;
+    if (!/^tg:GeneralStaffZSU\//.test(String(m.id || ''))) continue;
+    if (!/^Оперативна інформація/.test(String(m.text || m.title || '').trim())) continue;
+    if (typeof m.thumb !== 'string' || !/^https:\/\//.test(m.thumb) || typeof m.url !== 'string' || !/^https:\/\//.test(m.url)) continue;
+    const dt = Number(m.publishedAt) - reportedAtMs;
+    if (!Number.isFinite(dt) || dt < -15 * 60_000 || dt > 90 * 60_000) continue;
+    if (!best || Math.abs(dt) < Math.abs(best.dt)) best = { dt, kind: m.kind, thumb: m.thumb, url: m.url, channel: String(m.channel || '') };
+  }
+  return best ? { kind: best.kind, thumb: best.thumb, url: best.url, channel: best.channel } : null;
+}
