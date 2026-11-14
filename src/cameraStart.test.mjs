@@ -118,3 +118,13 @@ test('telefón: lode z obežnej dráhy skryté, zblízka a na počítači nie', 
   assert.equal(mobileShipsHidden(false, 9_000_000), false);
   assert.equal(mobileShipsHidden(true, undefined), false);
 });
+
+// 2026-11-14 (vlastník: „zruš prelet, nech zostane základný pohľad"): bez odkazu sa nikam neletí.
+test('zapojenie: úvod ostáva na základnom pohľade; prelet len na cieľ z odkazu (?volby=, ?quake=)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const main = readFileSync(new URL('./main.js', import.meta.url), 'utf8');
+  assert.match(main, /const targetLocate = crawlerVisit \|\| embedView \? null : \(volbyLocate \|\| quakeLocate\);/);
+  assert.match(main, /locate: targetLocate,/);
+  assert.doesNotMatch(main, /locate = crawlerVisit \|\| embedView \? null : \(\) => geoPromise/, 'poloha pripojenia už prelet nespúšťa');
+  assert.match(main, /if \(!targetLocate\) void Promise\.resolve\(whenStartupReady\(\)\)\.catch\(\(\) => \{\}\)\.then\(\(\) => settleStart\(\)\);/, 'bez preletu je štart ustálený hneď (súhlas, uvítanie, pás)');
+});

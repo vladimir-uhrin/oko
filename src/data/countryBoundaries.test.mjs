@@ -205,5 +205,6 @@ test('zapojenie: main.js postaví hranice vopred a zvýrazní domovskú krajinu 
   const main = readFileSync(new URL('../main.js', import.meta.url), 'utf8');
   assert.match(main, /const countryBoundaries = createCountryBoundaries\(\{ viewer \}\);\n[\s\S]{0,900}?if \(phoneStart\) void countryBoundaries\.prewarm\(\);\n\s+else void whenStartupReady\(\)\.then\(\(\) => countryBoundaries\.prewarm\(\)\);/, 'telefón hneď (prelet pristane nízko), počítač po skrytí preloadera (2026-10-31)');
   assert.match(main, /void geoPromise\.then\(\(geo\) => \{\n\s+const home = \/\^\[A-Z\]\{2\}\$\/\.test\(geo\?\.country \|\| ''\) \? geo\.country : null;\n\s+if \(!home\) return;\n\s+countryBoundaries\.highlight\(home\);\n\s+countryLabels\.setHome\(home\);/);
-  assert.match(main, /const locate = crawlerVisit \|\| embedView \? null : \(\) => geoPromise;/, 'prelet berie tú istú polohu');
+  // 2026-11-14: prelet nad oblasť návštevníka je zrušený — poloha pripojenia slúži už len hraniciam a uvítaniu.
+  assert.doesNotMatch(main, /const locate = crawlerVisit \|\| embedView \? null : \(\) => geoPromise;/, 'poloha pripojenia nespúšťa prelet');
 });

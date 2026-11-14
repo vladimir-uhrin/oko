@@ -538,7 +538,7 @@ async function init() {
     const phoneStart = !styleManager.hasShareState
       && resolveShellMode({ width: window.innerWidth, height: window.innerHeight, coarse: isCoarsePointer(window) }).mobile;
 
-    // Poloha podľa pripojenia RAZ pre všetkých (prelet, zvýraznenie hraníc domovskej krajiny, popisky):
+    // Poloha podľa pripojenia RAZ pre všetkých (zvýraznenie hraníc domovskej krajiny, uvítanie, popisky):
     // /api/whereami (hlavičky Cloudflare, nič sa neukladá). Roboty a vložený rámček bez polohy.
     // Vývoj/QA: ?qaGeo=lat,lon[,mesto][,KÓD] (KÓD = ISO2 krajiny, napr. SK).
     const qaGeo = import.meta.env.DEV ? new URLSearchParams(window.location.search).get('qaGeo') : null;
@@ -559,8 +559,10 @@ async function init() {
     // po skrytí úvodnej obrazovky sa kamera pomaly dorovná. Tlačidlo s glóbusom hore ostáva na Bratislave.
     if (!styleManager.hasShareState) {
       loaderStatus.textContent = t('loader.start-globe');
-      // Prelet nad oblasť návštevníka podľa pripojenia (geoPromise vyššie). Roboty a vložený rámček
-      // ostávajú na zemeguli.
+      // Bez preletu nad oblasť návštevníka (2026-11-14, vlastník: „zruš prelet, nech zostane základný pohľad"):
+      // úvod ostáva na Európe, Stredomorí a Blízkom východe (camera.js START_VIEW). Poloha podľa pripojenia sa
+      // používa už len na hranice domovskej krajiny a prvú voľbu uvítania. Preletí sa len na cieľ z odkazu
+      // (?volby=, ?quake=) — tam návštevník prišiel kvôli konkrétnemu miestu.
       // Vývoj/QA: ?qaTime=2026-10-15T07:30Z — čas scény (osvetlenie) aj úvodného pohľadu k Slnku.
       const qaTimeMs = import.meta.env.DEV ? Date.parse(new URLSearchParams(window.location.search).get('qaTime') || '') : NaN;
       if (Number.isFinite(qaTimeMs)) {
@@ -591,11 +593,11 @@ async function init() {
           return r && Number.isFinite(r.lat) && Number.isFinite(r.lon) ? { precision: 'city', lat: r.lat, lon: r.lon } : geoPromise;
         } catch { return geoPromise; }
       } : null;
-      const locate = crawlerVisit || embedView ? null : () => geoPromise;
+      const targetLocate = crawlerVisit || embedView ? null : (volbyLocate || quakeLocate);
       showStartView(viewer, {
         whenReady: whenStartupReady(),
         nowMs: Number.isFinite(qaTimeMs) ? qaTimeMs : Date.now(),
-        locate: locate && (volbyLocate || quakeLocate) ? (volbyLocate || quakeLocate) : locate,
+        locate: targetLocate,
         onArrive: (geo) => {
           settleStart();
           let place = geo?.city || '';
@@ -605,6 +607,9 @@ async function init() {
           if (place) styleManager._showToast(t('start.your-area', { place }), { durationMs: 6000, tone: 'info' });
         },
       });
+      // Bez cieľa z odkazu niet preletu — štart je ustálený hneď po skrytí úvodnej obrazovky (lišta súhlasu na
+      // telefóne, uvítanie a pás „Čo sa deje teraz" čakajú na tento signál).
+      if (!targetLocate) void Promise.resolve(whenStartupReady()).catch(() => {}).then(() => settleStart());
       // Hrubšie dlaždice Google 3D počas preletu, plný detail späť pred pristátím (src/startFlightDetail.js;
       // meranie 2026-10-16: 554 → 452 požiadaviek a 15,0 → 12,2 MB pri štarte, po pristátí nič navyše).
       coarsenTilesDuringStartFlight({ tileset, camera: viewer.camera, whenReady: whenStartupReady() });
